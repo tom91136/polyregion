@@ -81,11 +81,25 @@ object compileTime {
 // TermRef
 
 
-  def fullyQualifyCls()
+  def fullyQualifyCls(ref : TypeRepr) : String = {
+    ref match {
+      case NoPrefix => ""
+      case ThisType => ""
+      case AppliedType =>  "[???]"
+      case named : NamedType  =>  
+        println(named.qualifier)
+        fullyQualifyCls(named.qualifier) + "." + named.name
+        
+        
+      case x => s"${x.getClass}"
+        // println("CLS:" + x.qualifier + " " + x.name + " " +x.classSymbol)
+      // case TermRef(NoPrefix, string) => println("TermRef =:= "+repr + " " + string) // typerepr
+    }
+  }
 
 
-  this.scala.X
-  this.<root>.scala.X
+  // this.scala.X
+  // this.<root>.scala.X
   
 
     println(">>>>"+FloatArrayTpe.widenTermRefByName.simplified.dealias)
@@ -104,6 +118,10 @@ object compileTime {
                 case at@AppliedType(_,_) => 
                   println(s"\t--> ctor=${at.tycon.simplified}")
                   println(s"\t--> args=${at.args}")
+
+                  println(s"\t--> CTOR FQCN=${fullyQualifyCls(at.tycon.simplified)}")
+
+                  
 
                 case _ => 
               }
