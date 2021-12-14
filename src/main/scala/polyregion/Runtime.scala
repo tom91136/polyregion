@@ -348,7 +348,7 @@ object Runtime {
 
         mod.i32loop(builder, fn)(mod.constInt(mod.i32, range.start),mod.constInt(mod.i32, range.end), range.step, induction){
           n =>
-            tree.foldLeft(params) { case (context, s: polyregion.Runtime.PolyAst.Stmt) =>
+            tree.foldLeft(params + (induction -> n)) { case (context, s: polyregion.Runtime.PolyAst.Stmt) =>
               resolveOne(s, context)
             }
 

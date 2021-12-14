@@ -223,8 +223,9 @@ object compileTime {
 
             PolyAst.llirCodegen(
               out.map(_._2).resolve.right.get,
-              (captuerdVars.map(_.map((id, tpe) => PolyAst.Path(id.name, tpe))).resolve.right.get :+
-                indexArgument.map(PolyAst.Path(_, _)).resolve.right.get): _*
+              (captuerdVars.map(_.map((id, tpe) => PolyAst.Path(id.name, tpe))).resolve.right.get 
+                // indexArgument.map(PolyAst.Path(_, _)).resolve.right.get
+                ): _*
             )(0 to 10, indexArgument.map(_._1).resolve.right.get)
 
           case None =>
