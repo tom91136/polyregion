@@ -1,11 +1,15 @@
 package polyregion
 
 import cats.data.EitherT
+import polyregion.Runtime.LibFfi.Type
 
 import java.lang.reflect.Modifier
+import java.nio.ByteBuffer
+import java.nio.file.{Files, Paths, StandardOpenOption}
 import scala.annotation.tailrec
 import scala.reflect.ClassTag
 import scala.collection.mutable
+import scala.quoted.ToExpr
 
 object Runtime {
 
@@ -177,14 +181,14 @@ object Runtime {
     }
 
     object Intrinsics {
-      val DoubleBuffer = Type[Buffer[_]].args(Primitives.Double)
-      val FloatBuffer  = Type[Buffer[_]].args(Primitives.Float)
-      val LongBuffer   = Type[Buffer[_]].args(Primitives.Long)
-      val IntBuffer    = Type[Buffer[_]].args(Primitives.Int)
-      val ShortBuffer  = Type[Buffer[_]].args(Primitives.Short)
-      val ByteBuffer   = Type[Buffer[_]].args(Primitives.Byte)
-      val CharBuffer   = Type[Buffer[_]].args(Primitives.Char)
-      def Buffer       = Type[Buffer[_]]
+      val Buffer       = Type[Buffer[_]]
+      val DoubleBuffer = Buffer.args(Primitives.Double)
+      val FloatBuffer  = Buffer.args(Primitives.Float)
+      val LongBuffer   = Buffer.args(Primitives.Long)
+      val IntBuffer    = Buffer.args(Primitives.Int)
+      val ShortBuffer  = Buffer.args(Primitives.Short)
+      val ByteBuffer   = Buffer.args(Primitives.Byte)
+      val CharBuffer   = Buffer.args(Primitives.Char)
 
     }
 
@@ -237,7 +241,7 @@ object Runtime {
       def repr: String = show
     }
 
-    def llirCodegen(tree: Vector[Stmt], input: Path*)(range : Range, induction: String) = {
+    def llirCodegen(tree: Vector[Stmt], input: Path*)(range: Range, induction: String) = {
 
       val mod = new LLVM_.Module("a")
       import org.bytedeco.llvm.LLVM.{LLVMValueRef, LLVMTypeRef}
@@ -344,13 +348,15 @@ object Runtime {
           }
         }
 
-
-
-        mod.i32loop(builder, fn)(mod.constInt(mod.i32, range.start),mod.constInt(mod.i32, range.end), range.step, induction){
-          n =>
-            tree.foldLeft(params + (induction -> n)) { case (context, s: polyregion.Runtime.PolyAst.Stmt) =>
-              resolveOne(s, context)
-            }
+        mod.i32loop(builder, fn)(
+          mod.constInt(mod.i32, range.start),
+          mod.constInt(mod.i32, range.end),
+          range.step,
+          induction
+        ) { n =>
+          tree.foldLeft(params + (induction -> n)) { case (context, s: polyregion.Runtime.PolyAst.Stmt) =>
+            resolveOne(s, context)
+          }
 
         }
 
@@ -367,12 +373,41 @@ object Runtime {
       mod.optimise()
       mod.dump()
 
+      val buffer = LLVMWriteBitcodeToMemoryBuffer(mod.module)
+      val start  = LLVMGetBufferStart(buffer)
+      val end    = LLVMGetBufferSize(buffer)
+
+      val arr = Array.ofDim[Byte](end.toInt)
+      start.limit(end).get(arr)
+
+
+      val chan =
+        Files.newByteChannel(
+          Paths.get("./obj_raw.bc").toAbsolutePath.normalize(),
+          StandardOpenOption.WRITE,
+          StandardOpenOption.CREATE,
+          StandardOpenOption.TRUNCATE_EXISTING
+        )
+      chan.write(ByteBuffer.wrap(arr))
+      chan.close()
+
+      LLVMDisposeMemoryBuffer(buffer)
+
+      arr
     }
 
   }
 
-  def ingest(ast: PolyAst.Tree, captures: Map[String, Buffer[?]]) =
-    ???
+  def ingest(bitcode : Array[Byte], in: (Pointer, Type)*) = {
+    println(s"Ingesting ${bitcode.length} bytes...")
+    val mod = new LLVM_.Module("a")
+    mod.load(bitcode)
+    mod.optimise()
+    mod.dump()
+    println(s"ORC params: ${in.map { case (l,r) => l.toString + " = " + r }.toList} ")
+    new OrcJIT_(mod).invokeORC("lambda", NullPtr -> LibFfi.Type.Void, in:_* )
+
+  }
 
   private[polyregion] object LibFfi {
     import org.bytedeco.libffi.ffi_cif

@@ -69,9 +69,6 @@ object Stage {
     }
   }
 
-  val xs = polyregion.Buffer[Float](42.3)
-  val ys = polyregion.Buffer[Float](49.3)
-
   // val ys = Vector[Int]()
   // val zs = ArrayBuffer[Int]()
 
@@ -85,8 +82,7 @@ object Stage {
   //   xs(n + 2) = CONST.toFloat + 42f + bad(0)
   // }
 
-  val scalar = 42
-  val vv     = Vec2(2, 2)
+  val vv = Vec2(2, 2)
   foreach(0 to 10) { foo =>
     val lambda2 = foo
   }
@@ -95,12 +91,12 @@ object Stage {
   // engine.invoke(LLVMIR, xs)
   //
 
-  Runtime.LibFfi.invoke(
-    1,
-    polyregion.Runtime.NullPtr -> Runtime.LibFfi.Type.Void,
-    xs.pointer                 -> Runtime.LibFfi.Type.Float,
-    ys.pointer                 -> Runtime.LibFfi.Type.Float
-  )
+//  Runtime.LibFfi.invoke(
+//    1,
+//    polyregion.Runtime.NullPtr -> Runtime.LibFfi.Type.Void,
+//    xs.pointer                 -> Runtime.LibFfi.Type.Float,
+//    ys.pointer                 -> Runtime.LibFfi.Type.Float
+//  )
 
   // val V1 = refOut(n)
   // val V2 = V1 * scalar
@@ -110,28 +106,75 @@ object Stage {
   // val VO = V4 + V5
   // xs.update(n, VO)
 
-  foreach(0 to 10) { n =>
-    xs(n) += 2f
-    val scalarLambda = 321f
-    val scalarF      = scalarLambda + 123f
-    var refOut       = xs
-    xs(n) += ys(n) + refOut(n) * scalar + scalarLambda + scalarF
-  // val a            = (1, 2)
-  // val Vec2(v1, v2) = vv
-  // val (b1, b2)     = a
-  // {
-  // val bar    = Array[Float](1)
-  // val refOut = 42
-  // xs(n) += refOut
-  // }
+  val scalar = 42f
 
-  // n + 1
-  // val u                 = xs(422)
-  // val bad: Array[Float] = xs.map(_ * 2f)
+  def main(args: Array[String]): Unit = {
+    val xs = polyregion.Buffer.ofDim[Float](10)
+    val ys = polyregion.Buffer.ofDim[Float](10)
 
-  // ys
-  // zs
-  // xs(n + 2) = CONST.toFloat + 42f + bad(0)
+    def printAndreset() = {
+      println(s"xs = ${xs.toList}")
+      println(s"ys = ${ys.toList}")
+      println("---")
+      for (x <- xs.indices) {
+
+        xs(x) = x.toFloat
+        ys(x) = x.toFloat
+      }
+    }
+
+    printAndreset()
+
+    foreachJVM(0 until 10){ n =>
+      xs(n) += 2f
+      val scalarLambda = 321f
+      val scalarF      = scalarLambda + 123f
+      var refOut       = xs
+      xs(n) += ys(n) + refOut(n) * scalar + scalarLambda + scalarF
+    }
+    printAndreset()
+
+    foreach(0 until 10) { n =>
+      xs(n) += 2f
+      val scalarLambda = 321f
+      val scalarF      = scalarLambda + 123f
+      var refOut       = xs
+      xs(n) += ys(n) + refOut(n) * scalar + scalarLambda + scalarF
+    // val a            = (1, 2)
+    // val Vec2(v1, v2) = vv
+    // val (b1, b2)     = a
+    // {
+    // val bar    = Array[Float](1)
+    // val refOut = 42
+    // xs(n) += refOut
+    // }
+
+    // n + 1
+    // val u                 = xs(422)
+    // val bad: Array[Float] = xs.map(_ * 2f)
+
+    // ys
+    // zs
+    // xs(n + 2) = CONST.toFloat + 42f + bad(0)
+    }
+
+    printAndreset()
+    foreach(0 until 10) { n =>
+      xs(n) = ys(n)
+    }
+
+    printAndreset()
+
+    System.setProperty("a", "42")
+
+    val hidden = System.getProperty("a").toFloat
+    val x =
+    foreach(0 until 10) { n =>
+
+      xs(n) =   hidden * 2f
+    }
+
+    printAndreset()
   }
 
 }

@@ -56,6 +56,11 @@ object LLVM_ {
 
     def validate(): Unit = LLVMVerifyModule(module, LLVMPrintMessageAction, new BytePointer())
 
+    def load(array:Array[Byte]) = {
+      val data = LLVMCreateMemoryBufferWithMemoryRange(new BytePointer(array:_*),array.length, new BytePointer("a"), 1)
+      LLVMParseBitcodeInContext2( context, data, module)
+    }
+
     def dump(): Unit = LLVMDumpModule(module)
 
     def i32loop(

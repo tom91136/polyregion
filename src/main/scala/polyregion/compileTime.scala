@@ -39,8 +39,12 @@ object compileTime {
     def failE[A]: Result[A] = Left(e)
   }
 
-  inline def foreach(range: Range)(inline x: Int => Unit): Any =
-    ${ foreachImpl('x) }
+  inline def foreachJVM(inline range: Range)(inline x: Int => Unit): Any = {
+    range.foreach(x)
+  }
+
+  inline def foreach(inline range: Range)(inline x: Int => Unit): Any =
+    ${ foreachImpl('range)('x) }
 
   inline def showExpr(inline x: Any): Any =
     ${ showExprImpl('x) }
@@ -120,15 +124,15 @@ object compileTime {
     //   }
     // }
 
-    def lower(x: Expr[Any]) = {
+    def lower(range: Expr[Range])(x: Expr[Int => Unit]): (Array[Byte], List[(Ident, PolyAst.Type)]) = {
 
       val terms = x.asTerm
       println(s"foreach@${terms.pos}")
 
-      for {
+      (for {
         block   <- extractInlineBlock(terms)
         closure <- extractClosureBody(block)
-      } {
+      } yield {
 
         // println(s"${PolyAst.Primitives.All}")
 
@@ -221,50 +225,85 @@ object compileTime {
 
             println(out.map(x => x._2.mkString("\n")).resolve.fold(_.getMessage, identity))
 
-            PolyAst.llirCodegen(
-              out.map(_._2).resolve.right.get,
-              (captuerdVars.map(_.map((id, tpe) => PolyAst.Path(id.name, tpe))).resolve.right.get 
-                // indexArgument.map(PolyAst.Path(_, _)).resolve.right.get
-                ): _*
-            )(0 to 10, indexArgument.map(_._1).resolve.right.get)
+            val x = for {
+              stmts     <- out.map(_._2)
+              args      <- captuerdVars.map(_.map((id, tpe) => PolyAst.Path(id.name, tpe)))
+              identArgs <- captuerdVars.map(_.map((id, tpe) => (id, tpe)))
+              idx       <- indexArgument.map(_._1)
+            } yield (PolyAst.llirCodegen(stmts, args*)(0 to 10, idx), identArgs)
+            x.resolve match {
+              case Left(e)  => throw e
+              case Right(x) => x
 
-          case None =>
-        }
-
-        // Block(stats) => the statements this block end up with, Nil means flat block
-        class MyTraverser extends TreeTraverser {
-          override def traverseTree(tree: Tree)(owner: Symbol): Unit = {
-            tree match {
-              case i @ Ident(name) =>
-                // val owner = i.symbol.owner
-                if (owner.flags.is(Flags.Method) && owner.name == closureName) {}
-
-                println(
-                  s"\t-->${name} : ${i.symbol.owner.fullName} => ${resolveTpe(i.tpe).map(_.repr)} ${i.symbol}"
-                )
-              case _ =>
             }
 
-            traverseTreeChildren(tree)(owner)
-          }
+//            PolyAst.llirCodegen(
+//              out.map(_._2).resolve.right.get,
+//              (captuerdVars.map(_.map((id, tpe) => PolyAst.Path(id.name, tpe))).resolve.right.get
+//                // indexArgument.map(PolyAst.Path(_, _)).resolve.right.get
+//                ): _*
+//            )(0 to 10, indexArgument.map(_._1).resolve.right.get)
+
+          case None => ???
         }
-
-        // Va
-        MyTraverser().traverseTree(closure)(Symbol.noSymbol)
-
-        // println(s"$closure")
-        // pprint.pprintln(closure)
-        ()
-      }
+      }).right.get
 
     }
   }
 
-  def foreachImpl(x: Expr[Any])(using q: Quotes): Expr[Any] = {
+  def foreachImpl(range: Expr[Range])(x: Expr[Int => Unit])(using q: Quotes): Expr[Any] = {
     import quotes.reflect.*
-    val r = new Resolver(using q)
-    r.lower(x)
-    x
+    val r             = new Resolver(using q)
+    val (bytes, args) = r.lower(range)(x)
+
+    val bs = Expr(bytes)
+
+    val argExprs = args.map { (name, tpe) =>
+      val expr = name.asExpr
+      tpe match {
+        case PolyAst.Primitives.Byte => //
+          '{ Runtime.Buffer[Byte](${ expr.asExprOf[Byte] }).pointer -> Runtime.LibFfi.Type.SInt8 }
+        case PolyAst.Primitives.Short => //
+          '{ Runtime.Buffer[Short](${ expr.asExprOf[Short] }).pointer -> Runtime.LibFfi.Type.SInt16 }
+        case PolyAst.Primitives.Int => //
+          '{ Runtime.Buffer[Int](${ expr.asExprOf[Int] }).pointer -> Runtime.LibFfi.Type.SInt32 }
+        case PolyAst.Primitives.Long => //
+          '{ Runtime.Buffer[Long](${ expr.asExprOf[Long] }).pointer -> Runtime.LibFfi.Type.SInt64 }
+        case PolyAst.Primitives.Float => //
+          '{ Runtime.Buffer[Float](${ expr.asExprOf[Float] }).pointer -> Runtime.LibFfi.Type.Float }
+        case PolyAst.Primitives.Double => //
+          '{ Runtime.Buffer[Double](${ expr.asExprOf[Double] }).pointer -> Runtime.LibFfi.Type.Double }
+
+        case PolyAst.Intrinsics.ByteBuffer =>
+          '{ ${ expr.asExprOf[Runtime.Buffer[Byte]] }.pointer -> Runtime.LibFfi.Type.Ptr }
+        case PolyAst.Intrinsics.ShortBuffer =>
+          '{ ${ expr.asExprOf[Runtime.Buffer[Short]] }.pointer -> Runtime.LibFfi.Type.Ptr }
+        case PolyAst.Intrinsics.IntBuffer =>
+          '{ ${ expr.asExprOf[Runtime.Buffer[Int]] }.pointer -> Runtime.LibFfi.Type.Ptr }
+        case PolyAst.Intrinsics.LongBuffer =>
+          '{ ${ expr.asExprOf[Runtime.Buffer[Long]] }.pointer -> Runtime.LibFfi.Type.Ptr }
+        case PolyAst.Intrinsics.FloatBuffer =>
+          '{ ${ expr.asExprOf[Runtime.Buffer[Float]] }.pointer -> Runtime.LibFfi.Type.Ptr }
+        case PolyAst.Intrinsics.DoubleBuffer =>
+          '{ ${ expr.asExprOf[Runtime.Buffer[Double]] }.pointer -> Runtime.LibFfi.Type.Ptr }
+        case unknown =>
+          println(s"???= $unknown ")
+          ???
+      }
+
+    }
+
+    val argsParams = Varargs(argExprs)
+
+    '{
+      val data = $bs
+      println("LLVM bytes=" + data.size)
+//      for (n <- $range)
+//        $x(n)
+
+      Runtime.ingest(data, $argsParams: _*)
+
+    }
   }
 
   def showExprImpl(x: Expr[Any])(using q: Quotes): Expr[Any] = {
