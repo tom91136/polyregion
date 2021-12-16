@@ -1,51 +1,50 @@
-package polyregion
-
+package polyregion.examples
 import scala.collection.mutable.ArrayBuffer
 
-object Foo {
-
-  class U {
-    def x = b
-
-  }
-  def a = 3
-  def b = {
-    var x = 2
-    x *= 12345
-    x
-  }
-  def z = {
-    val xx = "FOOBARBAZ"
-  }
-  val c = "a"
-}
-
-case class Bar(to: Int) {
-  def go = {
-    var a = 0
-    for (i <- (0 to to))
-      a += i
-  }
-}
-
-object Bar {
-
-  def work(n: Int) = {
-    val xs = 0 to n
-    val ys = 0 to n
-
-  }
-
-}
-
-case class Vec2[T](x: T, y: T) {
-  inline def +(that: Vec2[T]): Vec2[T]     = Vec2(x, y)
-  def noInlinePlus(that: Vec2[T]): Vec2[T] = Vec2(x, y)
-}
-
-val CONST = 42
-
 object Stage {
+
+  object Foo {
+
+    class U {
+      def x = b
+
+    }
+    def a = 3
+    def b = {
+      var x = 2
+      x *= 12345
+      x
+    }
+    def z = {
+      val xx = "FOOBARBAZ"
+    }
+    val c = "a"
+  }
+
+  case class Bar(to: Int) {
+    def go = {
+      var a = 0
+      for (i <- (0 to to))
+        a += i
+    }
+  }
+
+  object Bar {
+
+    def work(n: Int) = {
+      val xs = 0 to n
+      val ys = 0 to n
+
+    }
+
+  }
+
+  case class Vec2[T](x: T, y: T) {
+    inline def +(that: Vec2[T]): Vec2[T]     = Vec2(x, y)
+    def noInlinePlus(that: Vec2[T]): Vec2[T] = Vec2(x, y)
+  }
+
+  val CONST = 42
 
   import polyregion.compileTime._
 
@@ -125,7 +124,7 @@ object Stage {
 
     printAndreset()
 
-    foreachJVM(0 until 10){ n =>
+    foreachJVM(0 until 10) { n =>
       xs(n) += 2f
       val scalarLambda = 321f
       val scalarF      = scalarLambda + 123f
@@ -133,6 +132,14 @@ object Stage {
       xs(n) += ys(n) + refOut(n) * scalar + scalarLambda + scalarF
     }
     printAndreset()
+
+    foreach(0 until 10) { n =>
+      xs(n) += 2f
+      val scalarLambda = 321f
+      val scalarF      = scalarLambda + 123f
+      var refOut       = xs
+      xs(n) += ys(n) + refOut(n) * scalar + scalarLambda + scalarF
+    }
 
     foreach(0 until 10) { n =>
       xs(n) += 2f
@@ -169,10 +176,9 @@ object Stage {
 
     val hidden = System.getProperty("a").toFloat
     val x =
-    foreach(0 until 10) { n =>
-
-      xs(n) =   hidden * 2f
-    }
+      foreach(0 until 10) { n =>
+        xs(n) = hidden * 2f
+      }
 
     printAndreset()
   }

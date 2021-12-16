@@ -1,6 +1,5 @@
 package polyregion
 
-import cats.data.EitherT
 import polyregion.Runtime.LibFfi.Type
 
 import java.lang.reflect.Modifier
@@ -199,14 +198,18 @@ object Runtime {
     enum Ref(show: => String, val tpe: Type) {
       case Select(head: Path, tail: List[Path] = Nil)
           extends Ref((head :: tail).map(_.repr).mkString("."), tail.lastOption.getOrElse(head).tpe)
-      case BoolConst(value: Boolean) extends Ref(s"Boolean(`$value)`", Primitives.Boolean)
-      case ByteConst(value: Byte) extends Ref(s"Byte(`$value)`", Primitives.Byte)
-      case ShortConst(value: Short) extends Ref(s"Short(`$value)`", Primitives.Short)
-      case IntConst(value: Int) extends Ref(s"Int(`$value)`", Primitives.Int)
-      case LongConst(value: Long) extends Ref(s"Long(`$value)`", Primitives.Long)
+
+      case ByteConst(value: Byte ) extends Ref(s"Byte(`$value)`", Primitives.Byte)
+      case CharConst(value: Char ) extends Ref(s"Char(`$value`)", Primitives.Char)
+      case ShortConst(value: Short ) extends Ref(s"Short(`$value)`", Primitives.Short)
+      case IntConst(value: Int ) extends Ref(s"Int(`$value)`", Primitives.Int)
+      case LongConst(value: Long ) extends Ref(s"Long(`$value)`", Primitives.Long)
+
       case FloatConst(value: Float) extends Ref(s"Float(`$value)`", Primitives.Float)
       case DoubleConst(value: Double) extends Ref(s"Double(`$value)`", Primitives.Double)
-      case CharConst(value: Char) extends Ref(s"Char(`$value`)", Primitives.Char)
+
+      case BoolConst(value: Boolean) extends Ref(s"Boolean(`$value)`", Primitives.Boolean)
+
       case StringConst(value: String) extends Ref(s"String(`$value`)", Primitives.String)
       case UnitConst() extends Ref("()", Primitives.Unit)
       case NullConst(resolved: Type)
@@ -392,6 +395,8 @@ object Runtime {
       chan.close()
 
       LLVMDisposeMemoryBuffer(buffer)
+
+
 
       arr
     }

@@ -1,10 +1,11 @@
-package polyregion
+package polyregion.examples
 
 import net.openhft.affinity.{AffinityLock, AffinityStrategies, AffinityStrategy, AffinityThreadFactory}
 import org.bytedeco.javacpp.*
 import org.openjdk.jol.info.GraphLayout
 import polyregion.Runtime.{Buffer, LibFfi}
-
+import polyregion.LLVM_
+import polyregion.OrcJIT_
 import java.nio.ByteBuffer
 import java.util.concurrent.{CountDownLatch, Executors}
 

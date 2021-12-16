@@ -10,7 +10,6 @@ import java.nio.file.Paths
 import cats.data.EitherT
 import cats.Eval
 import cats.data.NonEmptyList
-import io.github.iltotore.iron.string.constraint.Match
 
 object compileTime {
 
@@ -39,6 +38,13 @@ object compileTime {
     def failE[A]: Result[A] = Left(e)
   }
 
+
+  extension [A](xs : Array[A]){
+    inline def foreach(inline r : Range)(inline f : Int => Unit) = {
+
+      ${ foreachImpl('r)('f) }
+    }
+  }
   inline def foreachJVM(inline range: Range)(inline x: Int => Unit): Any = {
     range.foreach(x)
   }

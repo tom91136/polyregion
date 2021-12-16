@@ -196,3 +196,9 @@ typings/
 .metals
 .vscode
 .bloop
+
+*.bc
+*.ll
+*.so
+*.dll
+*.dylib

@@ -1,4 +1,4 @@
-package polyregion
+package polyregion.examples
 
 object BUDE {
 

@@ -4,3 +4,5 @@ addSbtPlugin("com.eed3si9n"              % "sbt-assembly" % "0.15.0")
 addSbtPlugin("ch.epfl.scala"             % "sbt-scalafix" % "0.9.27")
 addSbtPlugin("org.scalameta"             % "sbt-scalafmt" % "2.4.5")
 //addSbtPlugin("org.bytedeco"              % "sbt-javacpp"  % "1.17")
+
+addSbtPlugin("com.thesamet" % "sbt-protoc" % "1.0.5")

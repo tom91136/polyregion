@@ -1,4 +1,4 @@
-package hps
+package polyregion.examples
 
 import org.openjdk.jol.info.{ClassLayout, GraphLayout}
 
