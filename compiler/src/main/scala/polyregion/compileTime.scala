@@ -1,6 +1,6 @@
 package polyregion
 
-import polyregion.Runtime.PolyAst
+import polyregion.PolyAst
 import scala.quoted.{Expr, Quotes}
 import scala.quoted.*
 import scala.annotation.tailrec
@@ -11,32 +11,9 @@ import cats.data.EitherT
 import cats.Eval
 import cats.data.NonEmptyList
 
+import polyregion.internal._
+
 object compileTime {
-
-  private def VNil[A] = Vector.empty[A]
-
-  private type Result[A] = Either[Throwable, A]
-
-  private type Deferred[A] = EitherT[Eval, Throwable, A]
-
-  extension [A](a: Result[A]) {
-    def deferred: Deferred[A] = EitherT.fromEither[Eval](a)
-  }
-
-  extension [A](a: Deferred[A]) {
-    def resolve: Result[A]          = a.value.value
-    def withFilter(p: A => Boolean) = a.subflatMap(x => (if (p(x)) Right(x) else Left(new MatchError(x))))
-  }
-
-  extension [A](a: A) {
-    def success: Result[A] = Right(a)
-  }
-  extension (message: => String) {
-    def fail[A]: Result[A] = Left(new Exception(message))
-  }
-  extension (e: => Throwable) {
-    def failE[A]: Result[A] = Left(e)
-  }
 
 
   extension [A](xs : Array[A]){

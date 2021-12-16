@@ -26,8 +26,9 @@ lazy val compiler = project
       scalapb.gen() -> (Compile / sourceManaged).value / "scalapb"
     ),
     libraryDependencies ++= Seq(
-      "org.typelevel" %% "cats-core" % catsVersion,
-      "com.lihaoyi"   %% "pprint"    % "0.6.6"
+      "com.thesamet.scalapb" %% "scalapb-runtime" % scalapb.compiler.Version.scalapbVersion % "protobuf",
+      "org.typelevel"        %% "cats-core"       % catsVersion,
+      "com.lihaoyi"          %% "pprint"          % "0.6.6"
     )
   )
   .dependsOn(runtime)
