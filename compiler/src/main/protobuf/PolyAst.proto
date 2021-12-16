@@ -4,25 +4,26 @@ syntax = "proto3";
 package polyregion;
 
 message Sym{repeated string fqn = 1;}
-message Type{Sym sym = 1; repeated Sym args = 2;}
+message Type{Sym sym = 1; repeated Type args = 2;}
 message Path{string name = 1;Type tpe = 2;}
 
 message Ref {
-  oneof sealed_value {
-    BoolConst _bool = 1;
-    ByteConst _byte = 2;
-    CharConst _char = 3;
-    ShortConst _short = 4;
-    IntConst _int = 5;
-    LongConst _long = 6;
-    FloatConst _float = 7;
-    DoubleConst _double = 8;
-    StringConst _string = 9;
-    UnitConst _unit = 10;
+  oneof sealed_value_optional {
+    Select _select = 1;
+    BoolConst _bool = 2;
+    ByteConst _byte = 3;
+    CharConst _char = 4;
+    ShortConst _short = 5;
+    IntConst _int = 6;
+    LongConst _long = 7;
+    FloatConst _float = 8;
+    DoubleConst _double = 9;
+    StringConst _string = 10;
     NullConst _null = 11;
+    // empty here is Unit
   }
 }
-
+message Select {Path head = 1; repeated Path tail = 2;}
 message BoolConst {bool value = 1;}
 message ByteConst {sint32 value = 1;}
 message CharConst {sint32 value = 1;}
@@ -38,9 +39,10 @@ message UnitConst {}
 message NullConst {}
 
 message Expr {
-  oneof sealed_value {
+  oneof sealed_value_optional {
     Alias alias = 1;
     Invoke invoke = 2;
+    // empty here is no-op
   }
 }
 
@@ -48,17 +50,18 @@ message Alias{Ref ref = 1;}
 message Invoke{Ref lhs = 1; string name = 2; repeated Ref args = 3; Type tpe = 4;}
 
 message Stmt {
-  oneof sealed_value {
+  oneof sealed_value_optional {
     Comment comment = 1;
     Var var = 2;
     Effect effect = 3;
     Mut mut = 4;
     While while = 5;
+    // empty here is no-op
   }
 }
 
 message Comment{string value = 1;}
 message Var {string key = 1; Type tpe = 2;  Expr rhs = 3;}
 message Effect{Ref lhs = 1; string name = 2; repeated Ref args = 3;}
-message Mut{Ref lhs = 1;    Expr expr = 2;}
+message Mut{Ref lhs = 1; Expr expr = 2;}
 message While{Expr cond = 1; repeated Stmt body = 2;}

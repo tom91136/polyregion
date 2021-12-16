@@ -3,6 +3,7 @@ package polyregion
 import cats.Eval
 import cats.data.EitherT
 import polyregion.PolyAst
+import polyregion.PolyAst.{BoolConst, ByteConst, CharConst, DoubleConst, FloatConst, IntConst, LongConst, NullConst, Ref, Select, ShortConst, StringConst}
 
 package object internal {
 
@@ -38,5 +39,26 @@ package object internal {
       PolyAst.Sym(raw.split('.').toList)
     }
   }
+
+  extension (e:   PolyAst.Ref) {
+    def repr: String = {
+      e match {
+        case Select(head, tail) => ???
+        case BoolConst(value)   => s"Bool($value)"
+        case ByteConst(value)   => s"Byte($value)"
+        case CharConst(value)   => s"Char($value)"
+        case ShortConst(value)  => s"Short($value)"
+        case IntConst(value)    => s"Int($value)"
+        case LongConst(value)   => s"Long($value)"
+        case FloatConst(value)  => s"Float($value)"
+        case DoubleConst(value) => s"Double($value)"
+        case StringConst(value) => s"String($value)"
+        case NullConst()        =>  ???
+      }
+
+    }
+  }
+
+
 
 }

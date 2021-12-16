@@ -84,8 +84,8 @@ object compileTime {
           for {
             name <- resolveSym(ctor).deferred
             xs   <- args.traverse(resolveTpe(_))
-          } yield PolyAst.Type(name, xs)
-        case expr => resolveSym(expr).map(PolyAst.Type(_, Nil)).deferred
+          } yield PolyAst.Type(name, xs.toVector)
+        case expr => resolveSym(expr).map(PolyAst.Type(_, VNil)).deferred
       }
     }
 
@@ -158,14 +158,14 @@ object compileTime {
 
         def resolveTerm(term: Term, depth: Int = 0): Deferred[(Int, PolyAst.Ref, Vector[PolyAst.Stmt])] = term match {
           case i @ Ident(name) =>
-            resolveTpe(i.tpe).map(tpe => (depth, PolyAst.Ref.Select(PolyAst.Path(name, tpe)), VNil))
-          case c @ Literal(BooleanConstant(v)) => ((depth, PolyAst.Ref.BoolConst(v), VNil)).success.deferred
-          case c @ Literal(IntConstant(v))     => ((depth, PolyAst.Ref.IntConst(v), VNil)).success.deferred
-          case c @ Literal(FloatConstant(v))   => ((depth, PolyAst.Ref.FloatConst(v), VNil)).success.deferred
-          case c @ Literal(DoubleConstant(v))  => ((depth, PolyAst.Ref.DoubleConst(v), VNil)).success.deferred
-          case c @ Literal(LongConstant(v))    => ((depth, PolyAst.Ref.LongConst(v), VNil)).success.deferred
-          case c @ Literal(CharConstant(v))    => ((depth, PolyAst.Ref.CharConst(v), VNil)).success.deferred
-          case c @ Literal(UnitConstant())     => ((depth, PolyAst.Ref.UnitConst(), VNil)).success.deferred
+            resolveTpe(i.tpe).map(tpe => (depth, PolyAst.Select(PolyAst.Path(name, tpe), VNil), VNil))
+          case c @ Literal(BooleanConstant(v)) => ((depth, PolyAst.BoolConst(v), VNil)).success.deferred
+          case c @ Literal(IntConstant(v))     => ((depth, PolyAst.IntConst(v), VNil)).success.deferred
+          case c @ Literal(FloatConstant(v))   => ((depth, PolyAst.FloatConst(v), VNil)).success.deferred
+          case c @ Literal(DoubleConstant(v))  => ((depth, PolyAst.DoubleConst(v), VNil)).success.deferred
+          case c @ Literal(LongConstant(v))    => ((depth, PolyAst.LongConst(v), VNil)).success.deferred
+          case c @ Literal(CharConstant(v))    => ((depth, PolyAst.CharConst(v.toInt), VNil)).success.deferred
+          case c @ Literal(UnitConstant())     => ((depth, PolyAst.UnitConst(), VNil)).success.deferred
           case ap @ Apply(Select(qualifier, name), args) =>
             for {
               tpe <- resolveTpe(ap.tpe)
@@ -351,9 +351,9 @@ object compileTime {
             for {
               name   <- resolveSym(ctor)
               params <- xs.sequence
-            } yield PolyAst.Type(name, params)
+            } yield PolyAst.Type(name, params.toVector)
           }
-        case expr => Eval.now(resolveSym(expr).map(PolyAst.Type(_, Nil)))
+        case expr => Eval.now(resolveSym(expr).map(PolyAst.Type(_, VNil)))
       }
     }
 
