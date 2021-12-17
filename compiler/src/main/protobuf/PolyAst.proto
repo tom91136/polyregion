@@ -1,67 +1,120 @@
-syntax = "proto3";
+syntax = "proto2";
+// XXX we use proto2 because proto3 *requires* every field to be optional
+// which is too painful to deal with for now
 
 
 package polyregion;
 
 message Sym{repeated string fqn = 1;}
-message Type{Sym sym = 1; repeated Type args = 2;}
-message Path{string name = 1;Type tpe = 2;}
 
-message Ref {
-  oneof sealed_value_optional {
-    Select _select = 1;
-    BoolConst _bool = 2;
-    ByteConst _byte = 3;
-    CharConst _char = 4;
-    ShortConst _short = 5;
-    IntConst _int = 6;
-    LongConst _long = 7;
-    FloatConst _float = 8;
-    DoubleConst _double = 9;
-    StringConst _string = 10;
-    NullConst _null = 11;
-    // empty here is Unit
+message Types{
+  message Type{
+    oneof sealed_value {
+      RefTpe refTpe = 1;
+      ArrayTpe arrayTpe = 2;
+      BoolTpe boolTpe = 3;
+      ByteTpe byteTpe = 4;
+      CharTpe charTpe = 5;
+      ShortTpe shortTpe = 6;
+      IntTpe intTpe = 7;
+      LongTpe longTpe = 8;
+      FloatTpe floatTpe = 9;
+      DoubleTpe doubleTpe = 10;
+      StringTpe stringTpe = 11;
+      // empty is Unit
+    }
   }
-}
-message Select {Path head = 1; repeated Path tail = 2;}
-message BoolConst {bool value = 1;}
-message ByteConst {sint32 value = 1;}
-message CharConst {sint32 value = 1;}
-message ShortConst {sint32 value = 1;}
-message IntConst {sint32 value = 1;}
-message LongConst {sint64 value = 1;}
-
-message FloatConst {float value = 1;}
-message DoubleConst {double value = 1;}
-
-message StringConst {string value = 1;}
-message UnitConst {}
-message NullConst {}
-
-message Expr {
-  oneof sealed_value_optional {
-    Alias alias = 1;
-    Invoke invoke = 2;
-    // empty here is no-op
-  }
+  message RefTpe {required Sym name = 1; repeated Type args = 2;}
+  message ArrayTpe {required Type tpe = 1;}
+  message BoolTpe {}
+  message ByteTpe {}
+  message CharTpe {}
+  message ShortTpe {}
+  message IntTpe {}
+  message LongTpe {}
+  message FloatTpe {}
+  message DoubleTpe {}
+  message StringTpe {}
 }
 
-message Alias{Ref ref = 1;}
-message Invoke{Ref lhs = 1; string name = 2; repeated Ref args = 3; Type tpe = 4;}
 
-message Stmt {
-  oneof sealed_value_optional {
-    Comment comment = 1;
-    Var var = 2;
-    Effect effect = 3;
-    Mut mut = 4;
-    While while = 5;
-    // empty here is no-op
+message Path{required string name = 1; required Types.Type tpe = 2;}
+
+message Refs {
+  message Ref {
+    oneof sealed_value {
+      Select select = 1;
+      Index index = 2;
+      BoolConst boolConst = 3;
+      ByteConst byteConst = 4;
+      CharConst charConst = 5;
+      ShortConst shortConst = 6;
+      IntConst intConst = 7;
+      LongConst longConst = 8;
+      FloatConst floatConst = 9;
+      DoubleConst doubleConst = 10;
+      StringConst stringConst = 11;
+      NullConst nullConst = 12;
+      // empty is Unit
+    }
   }
+  message Select {required Path head = 1; repeated Path tail = 2;}
+  message Index {required int64 position = 1; required Types.Type tpe = 2;}
+  message BoolConst {required bool value = 1;}
+  message ByteConst {required sint32 value = 1;}
+  message CharConst {required sint32 value = 1;}
+  message ShortConst {required sint32 value = 1;}
+  message IntConst {required sint32 value = 1;}
+  message LongConst {required sint64 value = 1;}
+  message FloatConst {required float value = 1;}
+  message DoubleConst {required double value = 1;}
+  message StringConst {required string value = 1;}
+  message NullConst {}
 }
 
-message Comment{string value = 1;}
-message Var {string key = 1; Type tpe = 2;  Expr rhs = 3;}
-message Effect{Ref lhs = 1; string name = 2; repeated Ref args = 3;}
-message Mut{Ref lhs = 1; Expr expr = 2;}
-message While{Expr cond = 1; repeated Stmt body = 2;}
+message Tree{
+  message Expr {
+    oneof sealed_value {
+      Alias alias = 1;
+      Invoke invoke = 2;
+      // empty here is no-op
+    }
+  }
+
+  message Alias{required Refs.Ref ref = 1;}
+  message Invoke{
+    required Refs.Ref lhs = 1;
+    required string name = 2;
+    repeated Refs.Ref args = 3;
+    required Types.Type tpe = 4;}
+
+  message Stmt {
+    oneof sealed_value {
+      Comment comment = 1;
+      Var var = 2;
+      Effect effect = 3;
+      Mut mut = 4;
+      While while = 5;
+      // empty here is no-op
+    }
+  }
+
+  message Comment{
+    required string value = 1;
+  }
+  message Var {
+    required string key = 1;
+    required Types.Type tpe = 2;
+    required Expr rhs = 3;
+  }
+  message Effect{required Refs.Ref lhs = 1;
+    required string name = 2;
+    repeated Refs.Ref args = 3;
+  }
+  message Mut{required Refs.Ref lhs = 1;
+    required Expr expr = 2;
+  }
+  message While{required Expr cond = 1;
+    repeated Stmt body = 2;
+  }
+}

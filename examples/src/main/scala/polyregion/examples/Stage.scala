@@ -139,14 +139,6 @@ object Stage {
       val scalarF      = scalarLambda + 123f
       var refOut       = xs
       xs(n) += ys(n) + refOut(n) * scalar + scalarLambda + scalarF
-    }
-
-    foreach(0 until 10) { n =>
-      xs(n) += 2f
-      val scalarLambda = 321f
-      val scalarF      = scalarLambda + 123f
-      var refOut       = xs
-      xs(n) += ys(n) + refOut(n) * scalar + scalarLambda + scalarF
     // val a            = (1, 2)
     // val Vec2(v1, v2) = vv
     // val (b1, b2)     = a

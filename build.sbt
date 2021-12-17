@@ -28,7 +28,7 @@ lazy val compiler = project
     libraryDependencies ++= Seq(
       "com.thesamet.scalapb" %% "scalapb-runtime" % scalapb.compiler.Version.scalapbVersion % "protobuf",
       "org.typelevel"        %% "cats-core"       % catsVersion,
-      "com.lihaoyi"          %% "pprint"          % "0.6.6"
+      "com.lihaoyi"          %% "pprint"          % "0.7.1"
     )
   )
   .dependsOn(runtime)
@@ -43,7 +43,7 @@ lazy val examples = project
     assembly / mainClass := mainCls,
     scalacOptions ++= Seq("-Yretain-trees"),
     libraryDependencies ++= Seq(
-      "net.openhft"             % "affinity"                   % "3.21ea82",
+      "net.openhft"             % "affinity"                   % "3.20.0",
       "org.typelevel"          %% "cats-core"                  % catsVersion,
       "io.github.iltotore"     %% "iron"                       % "1.1.2",
       "io.github.iltotore"     %% "iron-numeric"               % "1.1-1.0.1",

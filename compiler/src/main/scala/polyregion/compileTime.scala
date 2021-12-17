@@ -1,30 +1,29 @@
 package polyregion
 
 import polyregion.PolyAst
+
 import scala.quoted.{Expr, Quotes}
 import scala.quoted.*
 import scala.annotation.tailrec
 import scala.reflect.ClassTag
 import fansi.ErrorMode.Throw
+
 import java.nio.file.Paths
 import cats.data.EitherT
 import cats.Eval
 import cats.data.NonEmptyList
+import polyregion.internal.*
 
-import polyregion.internal._
+import java.lang.reflect.Modifier
 
 object compileTime {
 
-
-  extension [A](xs : Array[A]){
-    inline def foreach(inline r : Range)(inline f : Int => Unit) = {
-
+  extension [A](xs: Array[A]) {
+    inline def foreach(inline r: Range)(inline f: Int => Unit) =
       ${ foreachImpl('r)('f) }
-    }
   }
-  inline def foreachJVM(inline range: Range)(inline x: Int => Unit): Any = {
+  inline def foreachJVM(inline range: Range)(inline x: Int => Unit): Any =
     range.foreach(x)
-  }
 
   inline def foreach(inline range: Range)(inline x: Int => Unit): Any =
     ${ foreachImpl('range)('x) }
@@ -42,8 +41,14 @@ object compileTime {
     println(TypeRepr.of[B].typeSymbol.tree.show)
     import pprint.*
     pprint.pprintln(TypeRepr.of[B].typeSymbol)
-
     '{}
+  }
+
+  def showExprImpl(x: Expr[Any])(using q: Quotes): Expr[Any] = {
+    import quotes.reflect.*
+    given Printer[Tree] = Printer.TreeStructure
+    pprint.pprintln(x.asTerm) // term => AST
+    x
   }
 
   class Resolver(using val q: Quotes) {
@@ -63,7 +68,9 @@ object compileTime {
       case x                             => s"Illegal top-level inline tree: ${x}".fail
     }
 
-    def resolveTpe(repr: TypeRepr): Deferred[PolyAst.Type] = {
+    val BufferTpe = PolyAst.Sym[Buffer[_]]
+
+    def resolveTpe(repr: TypeRepr): Deferred[PolyAst.Types.Type] = {
 
       @tailrec def resolveSym(ref: TypeRepr): Result[PolyAst.Sym] = ref match {
         case ThisType(tpe) => resolveSym(tpe)
@@ -72,8 +79,7 @@ object compileTime {
             case None => s"Named type is not a class: ${tpe}".fail
             case Some(sym) if sym.name == "<root>" => // discard root package
               resolveSym(tpe.qualifier)
-            case Some(sym) =>
-              PolyAst.Sym(sym.fullName).success
+            case Some(sym) => PolyAst.Sym(sym.fullName).success
           }
         // case NoPrefix()    => None.success
         case invalid => s"Invalid type ${invalid}".fail
@@ -84,8 +90,24 @@ object compileTime {
           for {
             name <- resolveSym(ctor).deferred
             xs   <- args.traverse(resolveTpe(_))
-          } yield PolyAst.Type(name, xs.toVector)
-        case expr => resolveSym(expr).map(PolyAst.Type(_, VNil)).deferred
+          } yield (name, xs.toVector) match {
+            case (BufferTpe, Vector(component)) => PolyAst.Types.ArrayTpe(component)
+            case (n, ys)                        => PolyAst.Types.RefTpe(n, ys)
+          }
+        case expr =>
+          resolveSym(expr).map {
+            case PolyAst.Sym(VNil("scala", "Unit"))          => PolyAst.Types.Type.Empty
+            case PolyAst.Sym(VNil("scala", "Boolean"))       => PolyAst.Types.BoolTpe()
+            case PolyAst.Sym(VNil("scala", "Byte"))          => PolyAst.Types.ByteTpe()
+            case PolyAst.Sym(VNil("scala", "Short"))         => PolyAst.Types.ShortTpe()
+            case PolyAst.Sym(VNil("scala", "Int"))           => PolyAst.Types.IntTpe()
+            case PolyAst.Sym(VNil("scala", "Long"))          => PolyAst.Types.LongTpe()
+            case PolyAst.Sym(VNil("scala", "Float"))         => PolyAst.Types.FloatTpe()
+            case PolyAst.Sym(VNil("scala", "Double"))        => PolyAst.Types.DoubleTpe()
+            case PolyAst.Sym(VNil("scala", "Char"))          => PolyAst.Types.CharTpe()
+            case PolyAst.Sym(VNil("java", "lang", "String")) => PolyAst.Types.StringTpe()
+            case sym                                         => PolyAst.Types.RefTpe(sym, VNil())
+          }.deferred
       }
     }
 
@@ -97,17 +119,7 @@ object compileTime {
       acc.foldOverTree(Nil, in)(Symbol.noSymbol)
     }
 
-    // class ClosureCaptureAccumulator(name: String) extends TreeAccumulator[List[Ident]] {
-    //   def foldTree(xs: List[Ident], tree: Tree)(owner: Symbol): List[Ident] = tree match {
-    //     case ident: Ident =>
-    //       val owner = ident.symbol.owner
-    //       if (owner.flags.is(Flags.Method) && owner.name == name) xs
-    //       else ident :: xs
-    //     case _ => foldOverTree(xs, tree)(owner)
-    //   }
-    // }
-
-    def lower(range: Expr[Range])(x: Expr[Int => Unit]): (Array[Byte], List[(Ident, PolyAst.Type)]) = {
+    def lower(range: Expr[Range])(x: Expr[Int => Unit]): (Array[Byte], List[(Ident, PolyAst.Types.Type)]) = {
 
       val terms = x.asTerm
       println(s"foreach@${terms.pos}")
@@ -116,8 +128,6 @@ object compileTime {
         block   <- extractInlineBlock(terms)
         closure <- extractClosureBody(block)
       } yield {
-
-        // println(s"${PolyAst.Primitives.All}")
 
         val closureName = closure.name
 
@@ -133,8 +143,8 @@ object compileTime {
         val indexArgument = closure.termParamss match {
           case TermParamClause(ValDef(name, tree, None) :: Nil) :: Nil =>
             resolveTpe(tree.tpe).subflatMap { tpe =>
-              if (tpe == PolyAst.Primitives.Int) (name -> tpe).success
-              else s"${tpe} != ${PolyAst.Primitives.Int}".fail
+              if (tpe == PolyAst.Types.IntTpe()) (name -> tpe).success
+              else s"${tpe} != ${PolyAst.Types.IntTpe()}".fail
             }
           case bad => s"Illegal index parameter pattern ${bad}".fail.deferred
         }
@@ -156,44 +166,45 @@ object compileTime {
         println(idents)
         // pprint.pprintln(closure)
 
-        def resolveTerm(term: Term, depth: Int = 0): Deferred[(Int, PolyAst.Ref, Vector[PolyAst.Stmt])] = term match {
-          case i @ Ident(name) =>
-            resolveTpe(i.tpe).map(tpe => (depth, PolyAst.Select(PolyAst.Path(name, tpe), VNil), VNil))
-          case c @ Literal(BooleanConstant(v)) => ((depth, PolyAst.BoolConst(v), VNil)).success.deferred
-          case c @ Literal(IntConstant(v))     => ((depth, PolyAst.IntConst(v), VNil)).success.deferred
-          case c @ Literal(FloatConstant(v))   => ((depth, PolyAst.FloatConst(v), VNil)).success.deferred
-          case c @ Literal(DoubleConstant(v))  => ((depth, PolyAst.DoubleConst(v), VNil)).success.deferred
-          case c @ Literal(LongConstant(v))    => ((depth, PolyAst.LongConst(v), VNil)).success.deferred
-          case c @ Literal(CharConstant(v))    => ((depth, PolyAst.CharConst(v.toInt), VNil)).success.deferred
-          case c @ Literal(UnitConstant())     => ((depth, PolyAst.UnitConst(), VNil)).success.deferred
-          case ap @ Apply(Select(qualifier, name), args) =>
-            for {
-              tpe <- resolveTpe(ap.tpe)
-              (lhsDepth, lhsRef, lhsTrees) <- resolveTerm(qualifier, depth + 1) // go down here
-              (maxDepth, argRefs, argTrees) <- args match {
-                case Nil => (0, VNil, VNil).success.deferred
-                case x :: xs =>
-                  resolveTerm(x, lhsDepth)
-                    .map((n, ref, xs) => (n, Vector(ref), xs))
-                    .flatMap(xs.foldLeftM(_) { case ((prev, rs, tss), term) =>
-                      resolveTerm(term, prev).map((curr, r, ts) => (curr, rs :+ r, ts ++ tss))
-                    })
-              }
+        def resolveTerm(term: Term, depth: Int = 0): Deferred[(Int, PolyAst.Refs.Ref, Vector[PolyAst.Tree.Stmt])] =
+          term match {
+            case i @ Ident(name) =>
+              resolveTpe(i.tpe).map(tpe => (depth, PolyAst.Refs.Select(PolyAst.Path(name, tpe), VNil()), VNil()))
+            case c @ Literal(BooleanConstant(v)) => ((depth, PolyAst.Refs.BoolConst(v), VNil())).success.deferred
+            case c @ Literal(IntConstant(v))     => ((depth, PolyAst.Refs.IntConst(v), VNil())).success.deferred
+            case c @ Literal(FloatConstant(v))   => ((depth, PolyAst.Refs.FloatConst(v), VNil())).success.deferred
+            case c @ Literal(DoubleConstant(v))  => ((depth, PolyAst.Refs.DoubleConst(v), VNil())).success.deferred
+            case c @ Literal(LongConstant(v))    => ((depth, PolyAst.Refs.LongConst(v), VNil())).success.deferred
+            case c @ Literal(CharConstant(v))    => ((depth, PolyAst.Refs.CharConst(v.toInt), VNil())).success.deferred
+            case c @ Literal(UnitConstant())     => ((depth, PolyAst.Refs.Ref.Empty, VNil())).success.deferred
+            case ap @ Apply(Select(qualifier, name), args) =>
+              for {
+                tpe <- resolveTpe(ap.tpe)
+                (lhsDepth, lhsRef, lhsTrees) <- resolveTerm(qualifier, depth + 1) // go down here
+                (maxDepth, argRefs, argTrees) <- args match {
+                  case Nil => (0, VNil(), VNil()).success.deferred
+                  case x :: xs =>
+                    resolveTerm(x, lhsDepth)
+                      .map((n, ref, xs) => (n, Vector(ref), xs))
+                      .flatMap(xs.foldLeftM(_) { case ((prev, rs, tss), term) =>
+                        resolveTerm(term, prev).map((curr, r, ts) => (curr, rs :+ r, ts ++ tss))
+                      })
+                }
 
-              path = PolyAst.Path(s"v${depth}", tpe)
-              tree = // don't save a ref for unit methods
-                if (tpe == PolyAst.Primitives.Unit) PolyAst.Stmt.Effect(lhsRef, name, argRefs)
-                else PolyAst.Stmt.Var(path.name, tpe, PolyAst.Expr.Invoke(lhsRef, name, argRefs, tpe))
-            } yield (maxDepth, PolyAst.Ref.Select(path), ((argTrees ++ lhsTrees) :+ tree))
-          case _ => s"[$depth] Unhandled: $term".fail.deferred
-        }
+                path = PolyAst.Path(s"v${depth}", tpe)
+                tree = // don't save a ref for unit methods
+                  if (tpe == PolyAst.Types.Type.Empty) PolyAst.Tree.Effect(lhsRef, name, argRefs)
+                  else PolyAst.Tree.Var(path.name, tpe, PolyAst.Tree.Invoke(lhsRef, name, argRefs, tpe))
+              } yield (maxDepth, PolyAst.Refs.Select(path, VNil()), ((argTrees ++ lhsTrees) :+ tree))
+            case _ => s"[$depth] Unhandled: $term".fail.deferred
+          }
 
-        def resolveTree(c: Tree, depth: Int = 0): Deferred[(Int, Vector[PolyAst.Stmt])] = c match {
+        def resolveTree(c: Tree, depth: Int = 0): Deferred[(Int, Vector[PolyAst.Tree.Stmt])] = c match {
           case ValDef(name, tpe, Some(rhs)) =>
             for {
               t                  <- resolveTpe(tpe.tpe)
               (depth, ref, tree) <- resolveTerm(rhs, depth)
-            } yield (depth, tree :+ PolyAst.Stmt.Var(name, t, PolyAst.Expr.Alias(ref)))
+            } yield (depth, tree :+ PolyAst.Tree.Var(name, t, PolyAst.Tree.Alias(ref)))
           case ValDef(name, tpe, None) => s"Unexpected variable $name:$tpe".fail.deferred
           case t: Term                 => resolveTerm(t, depth).map((depth, ref, tree) => (depth, tree)) // discard ref
         }
@@ -202,8 +213,8 @@ object compileTime {
           case Some(Block(stat, expr)) =>
             pprint.pprintln(stat :+ expr)
 
-            val out = (stat :+ expr).foldLeftM((0, VNil[PolyAst.Stmt])) { case ((prev, ts), stmt) =>
-              resolveTree(stmt, prev).map((curr, tss) => (curr, (ts :+ PolyAst.Stmt.Comment(stmt.show)) ++ tss))
+            val out = (stat :+ expr).foldLeftM((0, VNil.empty[PolyAst.Tree.Stmt])) { case ((prev, ts), stmt) =>
+              resolveTree(stmt, prev).map((curr, tss) => (curr, (ts :+ PolyAst.Tree.Comment(stmt.show)) ++ tss))
             }
 
             println(out.map(x => x._2.mkString("\n")).resolve.fold(_.getMessage, identity))
@@ -213,7 +224,7 @@ object compileTime {
               args      <- captuerdVars.map(_.map((id, tpe) => PolyAst.Path(id.name, tpe)))
               identArgs <- captuerdVars.map(_.map((id, tpe) => (id, tpe)))
               idx       <- indexArgument.map(_._1)
-            } yield (PolyAst.llirCodegen(stmts, args*)(0 to 10, idx), identArgs)
+            } yield (LLVMBackend.codegen(stmts, args*)(0 to 10, idx), identArgs)
             x.resolve match {
               case Left(e)  => throw e
               case Right(x) => x
@@ -244,30 +255,30 @@ object compileTime {
     val argExprs = args.map { (name, tpe) =>
       val expr = name.asExpr
       tpe match {
-        case PolyAst.Primitives.Byte => //
+        case PolyAst.Types.ByteTpe() => //
           '{ Runtime.Buffer[Byte](${ expr.asExprOf[Byte] }).pointer -> Runtime.LibFfi.Type.SInt8 }
-        case PolyAst.Primitives.Short => //
+        case PolyAst.Types.ShortTpe() => //
           '{ Runtime.Buffer[Short](${ expr.asExprOf[Short] }).pointer -> Runtime.LibFfi.Type.SInt16 }
-        case PolyAst.Primitives.Int => //
+        case PolyAst.Types.IntTpe() => //
           '{ Runtime.Buffer[Int](${ expr.asExprOf[Int] }).pointer -> Runtime.LibFfi.Type.SInt32 }
-        case PolyAst.Primitives.Long => //
+        case PolyAst.Types.LongTpe() => //
           '{ Runtime.Buffer[Long](${ expr.asExprOf[Long] }).pointer -> Runtime.LibFfi.Type.SInt64 }
-        case PolyAst.Primitives.Float => //
+        case PolyAst.Types.FloatTpe() => //
           '{ Runtime.Buffer[Float](${ expr.asExprOf[Float] }).pointer -> Runtime.LibFfi.Type.Float }
-        case PolyAst.Primitives.Double => //
+        case PolyAst.Types.DoubleTpe() => //
           '{ Runtime.Buffer[Double](${ expr.asExprOf[Double] }).pointer -> Runtime.LibFfi.Type.Double }
 
-        case PolyAst.Intrinsics.ByteBuffer =>
+        case PolyAst.Types.ArrayTpe(PolyAst.Types.ByteTpe()) =>
           '{ ${ expr.asExprOf[Runtime.Buffer[Byte]] }.pointer -> Runtime.LibFfi.Type.Ptr }
-        case PolyAst.Intrinsics.ShortBuffer =>
+        case PolyAst.Types.ArrayTpe(PolyAst.Types.ShortTpe()) =>
           '{ ${ expr.asExprOf[Runtime.Buffer[Short]] }.pointer -> Runtime.LibFfi.Type.Ptr }
-        case PolyAst.Intrinsics.IntBuffer =>
+        case PolyAst.Types.ArrayTpe(PolyAst.Types.IntTpe()) =>
           '{ ${ expr.asExprOf[Runtime.Buffer[Int]] }.pointer -> Runtime.LibFfi.Type.Ptr }
-        case PolyAst.Intrinsics.LongBuffer =>
+        case PolyAst.Types.ArrayTpe(PolyAst.Types.LongTpe()) =>
           '{ ${ expr.asExprOf[Runtime.Buffer[Long]] }.pointer -> Runtime.LibFfi.Type.Ptr }
-        case PolyAst.Intrinsics.FloatBuffer =>
+        case PolyAst.Types.ArrayTpe(PolyAst.Types.FloatTpe()) =>
           '{ ${ expr.asExprOf[Runtime.Buffer[Float]] }.pointer -> Runtime.LibFfi.Type.Ptr }
-        case PolyAst.Intrinsics.DoubleBuffer =>
+        case PolyAst.Types.ArrayTpe(PolyAst.Types.DoubleTpe()) =>
           '{ ${ expr.asExprOf[Runtime.Buffer[Double]] }.pointer -> Runtime.LibFfi.Type.Ptr }
         case unknown =>
           println(s"???= $unknown ")
@@ -287,118 +298,6 @@ object compileTime {
       Runtime.ingest(data, $argsParams: _*)
 
     }
-  }
-
-  def showExprImpl(x: Expr[Any])(using q: Quotes): Expr[Any] = {
-    import quotes.reflect.*
-    given Printer[Tree] = Printer.TreeStructure
-
-    println("CP:" + System.getProperty("java.class.path"))
-
-    println("[RAW TREE]: " + x.show) // tree => source
-    pprint.pprintln(x.asTerm)        // term => AST
-
-    // val resolver = new Resolver(using q)
-
-    // resolver.extractInlineBlock(x.asTerm)
-
-    // println(">>>!"+ x.asTerm ) // tree => source
-
-    val FloatTpe = TypeRepr.of[Float]
-    val IntTpe   = TypeRepr.of[Int]
-
-    val FloatArrayTpe = TypeRepr.of[Array[Float]]
-
-    // var sym = Symbol.spliceOwner
-
-    // pprint.pprintln("~~ "+sym.owner.fullName)
-    // pprint.pprintln("~~ "+sym.owner.owner.tree)
-
-    // MyTraverser().traverseTree(sym.tree)(Symbol.noSymbol)
-
-    // pprint.pprintln("s="+x.asTerm.pos.startLine + ":" +x.asTerm.pos.startColumn + " e="+ x.asTerm.pos.endLine + ":" +x.asTerm.pos.endColumn   )
-
-    // println(x.asTerm.pos.sourceFile)
-
-// AppliedType(TypeRef(TermRef(ThisType(TypeRef(NoPrefix,module class <root>)),object scala),Array),List(TypeRef(TermRef(ThisType(TypeRef(NoPrefix,module class <root>)),object scala),Float))) #MACRO DEf
-
-// AppliedType(TypeRef(ThisType(TypeRef(NoPrefix,module class scala)),class Array),List(TypeRef(ThisType(TypeRef(NoPrefix,module class scala)),class Float))) # inferred
-// AppliedType(TypeRef(ThisType(TypeRef(NoPrefix,module class scala)),class Array),List(TypeRef(TermRef(ThisType(TypeRef(NoPrefix,module class <root>)),object scala),class Float))) #annotated
-// AppliedType(TypeRef(ThisType(TypeRef(NoPrefix,module class scala)),class Array),List(TypeRef(TermRef(ThisType(TypeRef(NoPrefix,module class <root>)),object scala),class Float)))
-
-    import cats.syntax.all.*
-    import cats.Eval
-
-    def resolveTpe(repr: TypeRepr): Eval[Result[PolyAst.Type]] = {
-
-      @tailrec def resolveSym(ref: TypeRepr): Result[PolyAst.Sym] = ref match {
-        case ThisType(tpe) => resolveSym(tpe)
-        case tpe: NamedType =>
-          tpe.classSymbol match {
-            case None => s"Named type is not a class: ${tpe}".fail
-            case Some(sym) if sym.name == "<root>" => // discard root package
-              resolveSym(tpe.qualifier)
-            case Some(sym) =>
-              PolyAst.Sym(sym.fullName).success
-          }
-        // case NoPrefix()    => None.success
-        case invalid => s"Invalid type ${invalid}".fail
-      }
-
-      repr.dealias.widenTermRefByName.simplified match {
-        case tpe @ AppliedType(ctor, args) =>
-          args.traverse(resolveTpe(_)).map { xs =>
-            for {
-              name   <- resolveSym(ctor)
-              params <- xs.sequence
-            } yield PolyAst.Type(name, params.toVector)
-          }
-        case expr => Eval.now(resolveSym(expr).map(PolyAst.Type(_, VNil)))
-      }
-    }
-
-    // this.scala.X
-    // this.<root>.scala.X
-
-    println(">>>>" + FloatArrayTpe.widenTermRefByName.simplified.dealias)
-    println(">>>>" + IntTpe.widenTermRefByName.simplified.dealias)
-
-    class MyTraverser extends TreeTraverser {
-      override def traverseTree(tree: Tree)(owner: Symbol): Unit = {
-        println(s"Tree> ${tree.show} ${tree.symbol}")
-
-        tree match {
-          case i @ Ident(name) =>
-            println(s"\t-->${name} : ${i.symbol.owner}")
-            println(s"\t-->${i.tpe.widenTermRefByName.simplified.dealias}")
-            println(s"\t-->${resolveTpe(i.tpe).value.map(_.repr)}")
-
-          case _ =>
-        }
-
-        traverseTreeChildren(tree)(owner)
-      }
-    }
-
-    // xs.update(n, xs.apply(n).+(ys.apply(n).*(scalar))))
-    MyTraverser().traverseTree(x.asTerm)(Symbol.noSymbol)
-    // println(x.asTerm)
-
-    // pprint.pprintln(Symbol.classSymbol("hps.Stage$").tree)
-
-    // x.asTerm match{
-    //   case Inlined(_, _, Inlined(_, _, Block(_, Block(List(DefDef(_, _, _, Some(preRhs))), _)))) =>
-
-    //     preRhs match {
-    //       case Block(List(ValDef(_, _, Some(x))), _) => pprint.pprintln(""+x.symbol.tree)
-    //     }
-
-    //     pprint.pprintln(preRhs)
-    // }
-
-    x
-    //    given Printer[Tree] = Printer.TreeStructure
-    //    x.show
   }
 
 }
