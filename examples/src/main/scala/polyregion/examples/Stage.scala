@@ -82,9 +82,9 @@ object Stage {
   // }
 
   val vv = Vec2(2, 2)
-  foreach(0 to 10) { foo =>
-    val lambda2 = foo
-  }
+//  foreach(0 to 10) { foo =>
+//    val lambda2 = foo
+//  }
 
   // val xs : List[Pointers] =
   // engine.invoke(LLVMIR, xs)
@@ -134,11 +134,11 @@ object Stage {
     printAndreset()
 
     foreach(0 until 10) { n =>
-      xs(n) += 2f
-      val scalarLambda = 321f
-      val scalarF      = scalarLambda + 123f
-      var refOut       = xs
-      xs(n) += ys(n) + refOut(n) * scalar + scalarLambda + scalarF
+//      xs(n) += 2f
+//      val scalarLambda = 321f
+//      val scalarF      = scalarLambda + 123f
+//      var refOut       = xs
+//      xs(n) += ys(n) + refOut(n) * scalar + scalarLambda + scalarF
     // val a            = (1, 2)
     // val Vec2(v1, v2) = vv
     // val (b1, b2)     = a
@@ -157,22 +157,43 @@ object Stage {
     // xs(n + 2) = CONST.toFloat + 42f + bad(0)
     }
 
-    printAndreset()
+   printAndreset()
+    val range = 0 to 10
+
+    val bound =  if (range.isInclusive) range.end else range.end-1
+    val step = range.step
+
+//
+//    foreach(0 until 10) { n =>
+////      xs(n) = ys(n)
+//
+//      var i = 0
+//      while(i < bound){
+//
+//        i += step
+//      }
+//
+//    }
+//
     foreach(0 until 10) { n =>
-      xs(n) = ys(n)
+            xs(n) = ys(n)
+
+
+
     }
 
-    printAndreset()
-
-    System.setProperty("a", "42")
-
-    val hidden = System.getProperty("a").toFloat
-    val x =
-      foreach(0 until 10) { n =>
-        xs(n) = hidden * 2f
-      }
-
-    printAndreset()
+//
+//    printAndreset()
+//
+//    System.setProperty("a", "42")
+//
+//    val hidden = System.getProperty("a").toFloat
+//    val x =
+//      foreach(0 until 10) { n =>
+//        xs(n) = hidden * 2f
+//      }
+//
+//    printAndreset()
   }
 
 }

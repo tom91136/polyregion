@@ -8,25 +8,41 @@ import scala.annotation.tailrec
 import scala.reflect.ClassTag
 import fansi.ErrorMode.Throw
 
-import java.nio.file.Paths
+import java.nio.file.{Files, Paths, StandardOpenOption}
 import cats.data.EitherT
 import cats.Eval
 import cats.data.NonEmptyList
+import polyregion.PolyAst.Program
+import polyregion.PolyAst.Refs.Ref
 import polyregion.internal.*
 
 import java.lang.reflect.Modifier
+import polyregion.PolyAst.PolyAstProto
 
 object compileTime {
 
   extension [A](xs: Array[A]) {
     inline def foreach(inline r: Range)(inline f: Int => Unit) =
-      ${ foreachImpl('r)('f) }
+      ${ offloadImpl('f) }
   }
   inline def foreachJVM(inline range: Range)(inline x: Int => Unit): Any =
     range.foreach(x)
 
-  inline def foreach(inline range: Range)(inline x: Int => Unit): Any =
-    ${ foreachImpl('range)('x) }
+  inline def foreach(range: Range)(inline x: Int => Unit): Any = {
+    val start = range.start
+    val bound = if (range.isInclusive) range.end else range.end - 1
+    val step  = range.step
+    offload {
+      var i = start
+      while (i < bound) {
+        x(i)
+        i += step
+      }
+    }
+  }
+
+  inline def offload(inline x: Any): Any =
+    ${ offloadImpl('x) }
 
   inline def showExpr(inline x: Any): Any =
     ${ showExprImpl('x) }
@@ -60,12 +76,13 @@ object compileTime {
       case Block(List(defStmt: DefDef), Closure(Ident(name), _)) =>
         if (defStmt.name == name) defStmt.success
         else s"Closure name mismatch: def block was `${defStmt.name}` but closure is named `${name}`".fail
-      case bad => s"Illegal closure tree: ${bad}".fail
+
+      case bad => s"Illegal closure tree:\n${pprint(bad)}".fail
     }
 
     def extractInlineBlock(term: Term): Result[Term] = term match {
-      case Inlined(_, _, Block(_, term)) => term.success
-      case x                             => s"Illegal top-level inline tree: ${x}".fail
+      case Inlined(None, Nil, term) => term.success
+      case x                        => s"Illegal top-level inline tree: ${x}".fail
     }
 
     val BufferTpe = PolyAst.Sym[Buffer[_]]
@@ -119,57 +136,94 @@ object compileTime {
       acc.foldOverTree(Nil, in)(Symbol.noSymbol)
     }
 
-    def lower(range: Expr[Range])(x: Expr[Int => Unit]): (Array[Byte], List[(Ident, PolyAst.Types.Type)]) = {
+    def lower(x: Expr[Any]): (Array[Byte], Vector[(Ident, PolyAst.Types.Type)], PolyAst.Tree.Function) = {
 
       val terms = x.asTerm
       println(s"foreach@${terms.pos}")
 
       (for {
-        block   <- extractInlineBlock(terms)
-        closure <- extractClosureBody(block)
+        block <- extractInlineBlock(terms)
+//        _ = pprint.pprintln(terms)
+//        closure <- extractClosureBody(block)
       } yield {
 
-        val closureName = closure.name
+        val closureName = block.pos.toString
 
-        val captures = collectTree[Ident](closure) { case ident: Ident =>
+        val captures = collectTree[Ident](block) { case ident: Ident =>
           val owner = ident.symbol.owner
-          if (owner.flags.is(Flags.Method) && owner.name == closureName) Nil else ident :: Nil
+          //FIXME TODO make sure the owner is actually this macro, and not any other macro
+          if (owner.flags.is(Flags.Macro)) Nil else ident :: Nil
+
         }
 
         val capturedIdents = captures
           .distinctBy(_.symbol.pos)
-        val captuerdVars = capturedIdents.traverse(i => resolveTpe(i.tpe).map(i -> _))
+        val captuerdVars = capturedIdents.toVector.traverse(i => resolveTpe(i.tpe).map(i -> _))
 
-        val indexArgument = closure.termParamss match {
-          case TermParamClause(ValDef(name, tree, None) :: Nil) :: Nil =>
-            resolveTpe(tree.tpe).subflatMap { tpe =>
-              if (tpe == PolyAst.Types.IntTpe()) (name -> tpe).success
-              else s"${tpe} != ${PolyAst.Types.IntTpe()}".fail
-            }
-          case bad => s"Illegal index parameter pattern ${bad}".fail.deferred
-        }
+//        val indexArgument = closure.termParamss match {
+//          case TermParamClause(ValDef(name, tree, None) :: Nil) :: Nil =>
+//            resolveTpe(tree.tpe).subflatMap { tpe =>
+//              if (tpe == PolyAst.Types.IntTpe()) (name -> tpe).success
+//              else s"${tpe} != ${PolyAst.Types.IntTpe()}".fail
+//            }
+//          case bad => s"Illegal index parameter pattern ${bad}".fail.deferred
+//        }
+
         println(s"========${closureName}=========")
         println(Paths.get(".").toAbsolutePath)
         println(s"-> JVM args:" + java.lang.management.ManagementFactory.getRuntimeMXBean().getInputArguments)
         println(s"-> JVM name:" + java.lang.management.ManagementFactory.getRuntimeMXBean().getName)
         println(s" -> name:    ${closureName}")
-        println(s" -> arg:     ${indexArgument.map((l, r) => l -> r.repr).resolve}")
+//        println(s" -> arg:     ${indexArgument.map((l, r) => l -> r.repr).resolve}")
         println(s" -> captures (names):   ${capturedIdents.map(_.name)}")
         println(
           s"    ${captuerdVars.map(xs => xs.map((n, t) => s"${n.name}: ${t.repr}").mkString("\n    ")).resolve}"
         )
         println(Printer.TreeShortCode.getClass)
-        println(s" -> body(short):\n${closure.show(using Printer.TreeShortCode).indent(4)}")
-        println(s" -> body(long):\n${closure.show(using Printer.TreeAnsiCode).indent(4)}")
+        println(s" -> body(short):\n${block.show(using Printer.TreeShortCode).indent(4)}")
+        println(s" -> body(long):\n${block.show(using Printer.TreeAnsiCode).indent(4)}")
 
-        val idents = collectTree[Ident](closure) { case i @ Ident(name) => i :: Nil }
+        val idents = collectTree[Ident](block) { case i @ Ident(name) => i :: Nil }
         println(idents)
         // pprint.pprintln(closure)
+
+        def resolveTerms(depth: Int, args: List[Term]) = args match {
+          case Nil => (depth, VNil(), VNil()).success.deferred
+          case x :: xs =>
+            resolveTerm(x, depth)
+              .map((n, ref, xs) => (n, Vector(ref), xs))
+              .flatMap(xs.foldLeftM(_) { case ((prev, rs, tss), term) =>
+                resolveTerm(term, prev).map((curr, r, ts) => (curr, rs :+ r, ts ++ tss))
+              })
+        }
+
+        def resolveTrees(depth: Int, args: List[Tree]) = args match {
+          case Nil => (depth, VNil()).success.deferred
+          case x :: xs =>
+            resolveTree(x, depth).flatMap(xs.foldLeftM(_) { case ((prev, tss), term) =>
+              resolveTree(term, prev).map((curr, ts) => (curr, ts ++ tss))
+            })
+        }
 
         def resolveTerm(term: Term, depth: Int = 0): Deferred[(Int, PolyAst.Refs.Ref, Vector[PolyAst.Tree.Stmt])] =
           term match {
             case i @ Ident(name) =>
-              resolveTpe(i.tpe).map(tpe => (depth, PolyAst.Refs.Select(PolyAst.Path(name, tpe), VNil()), VNil()))
+              resolveTpe(i.tpe).map { tpe =>
+                val named = PolyAst.Named(i.symbol.name, tpe)
+
+                val tree = if (i.symbol.name != name) {
+                  println(s"Name aliased = Seen name `${name}` = ${i.symbol.name}")
+                  // return new name, create alias back to original:
+
+                  // Vector(
+                  //   PolyAst.Tree
+                  //     .Var(named, PolyAst.Tree.Alias(PolyAst.Refs.Select(PolyAst.Named(i.symbol.name, tpe), VNil())))
+                  // )
+                  VNil()
+                } else VNil()
+
+              (depth, PolyAst.Refs.Select(named, VNil()), tree)
+              }
             case c @ Literal(BooleanConstant(v)) => ((depth, PolyAst.Refs.BoolConst(v), VNil())).success.deferred
             case c @ Literal(IntConstant(v))     => ((depth, PolyAst.Refs.IntConst(v), VNil())).success.deferred
             case c @ Literal(FloatConstant(v))   => ((depth, PolyAst.Refs.FloatConst(v), VNil())).success.deferred
@@ -181,21 +235,45 @@ object compileTime {
               for {
                 tpe <- resolveTpe(ap.tpe)
                 (lhsDepth, lhsRef, lhsTrees) <- resolveTerm(qualifier, depth + 1) // go down here
-                (maxDepth, argRefs, argTrees) <- args match {
-                  case Nil => (0, VNil(), VNil()).success.deferred
-                  case x :: xs =>
-                    resolveTerm(x, lhsDepth)
-                      .map((n, ref, xs) => (n, Vector(ref), xs))
-                      .flatMap(xs.foldLeftM(_) { case ((prev, rs, tss), term) =>
-                        resolveTerm(term, prev).map((curr, r, ts) => (curr, rs :+ r, ts ++ tss))
-                      })
-                }
+                (maxDepth, argRefs, argTrees) <- resolveTerms(lhsDepth, args)
 
-                path = PolyAst.Path(s"v${depth}", tpe)
+                path = PolyAst.Named(s"v${depth}", tpe)
                 tree = // don't save a ref for unit methods
                   if (tpe == PolyAst.Types.Type.Empty) PolyAst.Tree.Effect(lhsRef, name, argRefs)
-                  else PolyAst.Tree.Var(path.name, tpe, PolyAst.Tree.Invoke(lhsRef, name, argRefs, tpe))
+                  else PolyAst.Tree.Var(path, PolyAst.Tree.Invoke(lhsRef, name, argRefs, tpe))
               } yield (maxDepth, PolyAst.Refs.Select(path, VNil()), ((argTrees ++ lhsTrees) :+ tree))
+            case Inlined(None, Nil, expansion) => resolveTerm(expansion, depth) // simple-inline
+            case Block(stat, expr) => // stat : List[Statement]
+              for {
+                (statDepth, statTrees) <- resolveTrees(depth, stat)
+                (exprDepth, ref, tree) <- resolveTerm(expr, statDepth)
+              } yield (exprDepth, ref, statTrees ++ tree)
+
+            case Assign(lhs, rhs) =>
+              for {
+                (lhsDepth, lhsRef, lhsTrees) <- resolveTerm(lhs, depth + 1) // go down here
+                (maxDepth, rhsRef, rhsTrees) <- resolveTerm(rhs, lhsDepth)
+                r <- lhsRef match {
+                  case PolyAst.Refs.Select(name, VNil()) =>
+                    (
+                      maxDepth,
+                      PolyAst.Refs.Ref.Empty,
+                      lhsTrees ++ rhsTrees :+ PolyAst.Tree.Mut(name, PolyAst.Tree.Alias(rhsRef))
+                    ).success.deferred
+                  case bad => s"Illegal assign LHS: ${bad}".fail.deferred
+                }
+              } yield r
+            case wd @ While(cond, body) =>
+              for {
+                (condDepth, condRef, condTrees) <- resolveTerm(cond, depth + 1)
+                (maxDepth, _, bodyTrees)        <- resolveTerm(body, condDepth)
+              } yield {
+                val block = condTrees match {
+                  case VNil() => ??? // this is illegal, while needs a bool predicate
+                  case xs     => PolyAst.Tree.Block(xs, PolyAst.Tree.Alias(condRef))
+                }
+                (maxDepth, PolyAst.Refs.Ref.Empty, Vector(PolyAst.Tree.While(block, bodyTrees)))
+              }
             case _ => s"[$depth] Unhandled: $term".fail.deferred
           }
 
@@ -204,27 +282,35 @@ object compileTime {
             for {
               t                  <- resolveTpe(tpe.tpe)
               (depth, ref, tree) <- resolveTerm(rhs, depth)
-            } yield (depth, tree :+ PolyAst.Tree.Var(name, t, PolyAst.Tree.Alias(ref)))
+            } yield (depth, tree :+ PolyAst.Tree.Var(PolyAst.Named(name, t), PolyAst.Tree.Alias(ref)))
           case ValDef(name, tpe, None) => s"Unexpected variable $name:$tpe".fail.deferred
           case t: Term                 => resolveTerm(t, depth).map((depth, ref, tree) => (depth, tree)) // discard ref
         }
 
-        closure.rhs match {
-          case Some(Block(stat, expr)) =>
+        block match {
+          case Block(stat, expr) =>
             pprint.pprintln(stat :+ expr)
 
             val out = (stat :+ expr).foldLeftM((0, VNil.empty[PolyAst.Tree.Stmt])) { case ((prev, ts), stmt) =>
-              resolveTree(stmt, prev).map((curr, tss) => (curr, (ts :+ PolyAst.Tree.Comment(stmt.show)) ++ tss))
+              resolveTree(stmt, prev).map((curr, tss) =>
+                (curr, (ts :+ PolyAst.Tree.Comment(stmt.show.replaceAll("\n", ""))) ++ tss)
+              )
             }
 
-            println(out.map(x => x._2.mkString("\n")).resolve.fold(_.getMessage, identity))
+            println(">>>")
+            println(out.map(x => (x._2.map(_.repr)).repr.mkString("\n")).resolve.fold(_.getMessage, identity))
+            println("<<<")
 
             val x = for {
               stmts     <- out.map(_._2)
-              args      <- captuerdVars.map(_.map((id, tpe) => PolyAst.Path(id.name, tpe)))
+              args      <- captuerdVars.map(_.map((id, tpe) => PolyAst.Named(id.name, tpe)))
               identArgs <- captuerdVars.map(_.map((id, tpe) => (id, tpe)))
-              idx       <- indexArgument.map(_._1)
-            } yield (LLVMBackend.codegen(stmts, args*)(0 to 10, idx), identArgs)
+//              idx       <- indexArgument.map(_._1)
+            } yield (
+              LLVMBackend.codegen(stmts, args*),
+              identArgs,
+              PolyAst.Tree.Function(closureName, args, PolyAst.Types.Type.Empty, stmts)
+            )
             x.resolve match {
               case Left(e)  => throw e
               case Right(x) => x
@@ -238,17 +324,32 @@ object compileTime {
 //                ): _*
 //            )(0 to 10, indexArgument.map(_._1).resolve.right.get)
 
-          case None => ???
+          case _ => ???
         }
-      }).right.get
+      }) match {
+        case Left(e) =>
+          throw e
+        case Right(x) => x
+      }
 
     }
   }
 
-  def foreachImpl(range: Expr[Range])(x: Expr[Int => Unit])(using q: Quotes): Expr[Any] = {
+  def offloadImpl(x: Expr[Any])(using q: Quotes): Expr[Any] = {
     import quotes.reflect.*
-    val r             = new Resolver(using q)
-    val (bytes, args) = r.lower(range)(x)
+    val r                   = new Resolver(using q)
+    val (bytes, args, prog) = r.lower(x)
+
+    Files.write(
+      Paths.get("./ast.bin").toAbsolutePath.normalize(),
+      prog.toByteArray,
+      StandardOpenOption.WRITE,
+      StandardOpenOption.CREATE,
+      StandardOpenOption.TRUNCATE_EXISTING
+    )
+
+//    println(prog.toByteArray.mkString(" "))
+//    println(Program.parseFrom(prog.toByteArray).toProtoString)
 
     val bs = Expr(bytes)
 
@@ -288,10 +389,13 @@ object compileTime {
     }
 
     val argsParams = Varargs(argExprs)
+    val astBytes   = Expr(prog.toByteArray)
 
     '{
       val data = $bs
       println("LLVM bytes=" + data.size)
+      println("PolyAst bytes=" + ${ astBytes }.size)
+
 //      for (n <- $range)
 //        $x(n)
 

@@ -5,6 +5,8 @@ syntax = "proto2";
 
 package polyregion;
 
+//option optimize_for = LITE_RUNTIME;
+
 message Sym{repeated string fqn = 1;}
 
 message Types{
@@ -38,28 +40,26 @@ message Types{
 }
 
 
-message Path{required string name = 1; required Types.Type tpe = 2;}
+message Named{required string name = 1; required Types.Type tpe = 2;}
 
 message Refs {
   message Ref {
     oneof sealed_value {
       Select select = 1;
-      Index index = 2;
-      BoolConst boolConst = 3;
-      ByteConst byteConst = 4;
-      CharConst charConst = 5;
-      ShortConst shortConst = 6;
-      IntConst intConst = 7;
-      LongConst longConst = 8;
-      FloatConst floatConst = 9;
-      DoubleConst doubleConst = 10;
-      StringConst stringConst = 11;
-      NullConst nullConst = 12;
+      BoolConst boolConst = 2;
+      ByteConst byteConst = 3;
+      CharConst charConst = 4;
+      ShortConst shortConst = 5;
+      IntConst intConst = 6;
+      LongConst longConst = 7;
+      FloatConst floatConst = 8;
+      DoubleConst doubleConst = 9;
+      StringConst stringConst = 10;
+      NullConst nullConst = 11;
       // empty is Unit
     }
   }
-  message Select {required Path head = 1; repeated Path tail = 2;}
-  message Index {required int64 position = 1; required Types.Type tpe = 2;}
+  message Select {required Named head = 1; repeated Named tail = 2;}
   message BoolConst {required bool value = 1;}
   message ByteConst {required sint32 value = 1;}
   message CharConst {required sint32 value = 1;}
@@ -72,11 +72,20 @@ message Refs {
   message NullConst {}
 }
 
+
 message Tree{
+
+  message Position{
+    required string file = 1;
+    required int64 line = 2;
+    required int64 col = 3;
+  }
+
   message Expr {
     oneof sealed_value {
-      Alias alias = 1;
-      Invoke invoke = 2;
+      Alias alias = 2;
+      Invoke invoke = 3;
+      Block block = 4;
       // empty here is no-op
     }
   }
@@ -86,15 +95,21 @@ message Tree{
     required Refs.Ref lhs = 1;
     required string name = 2;
     repeated Refs.Ref args = 3;
-    required Types.Type tpe = 4;}
+    required Types.Type tpe = 4;
+  }
+  message Block{
+    repeated Stmt statements = 1;
+    required Expr return = 2;
+  }
 
   message Stmt {
     oneof sealed_value {
-      Comment comment = 1;
-      Var var = 2;
-      Effect effect = 3;
-      Mut mut = 4;
-      While while = 5;
+      Comment comment = 2;
+      Var var = 3;
+      Effect effect = 4;
+      Mut mut = 5;
+      While while = 6;
+      Cond cond = 7;
       // empty here is no-op
     }
   }
@@ -103,18 +118,39 @@ message Tree{
     required string value = 1;
   }
   message Var {
-    required string key = 1;
-    required Types.Type tpe = 2;
+    required Named name = 1;
     required Expr rhs = 3;
   }
-  message Effect{required Refs.Ref lhs = 1;
+  message Mut{
+    required Named name = 1;
+    required Expr expr = 2;
+  }
+  message Effect{
+    required Refs.Ref lhs = 1;
     required string name = 2;
     repeated Refs.Ref args = 3;
   }
-  message Mut{required Refs.Ref lhs = 1;
-    required Expr expr = 2;
-  }
-  message While{required Expr cond = 1;
+  message While{
+    required Expr cond = 1;
     repeated Stmt body = 2;
   }
+
+  message Cond{
+    required Expr cond = 1;
+    repeated Stmt trueBr = 2;
+    repeated Stmt falseBr = 3;
+  }
+
+  message Function{
+    //    optional Position pos = 1;
+    required string name = 2;
+    repeated Named args = 3;
+    required Types.Type returnTpe = 4;
+    repeated Tree.Stmt statements = 5;
+  }
+
+}
+
+message Program{
+  repeated Tree.Function functions = 1;
 }

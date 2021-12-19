@@ -61,7 +61,7 @@ package object internal {
     def repr: String = e.fqn.mkString(".")
   }
 
-  extension (p: PolyAst.Path) {
+  extension (p: PolyAst.Named) {
     def repr: String = s"(${p.name}:${p.tpe.repr})"
   }
 
@@ -71,7 +71,6 @@ package object internal {
       import polyregion.PolyAst.Refs.*
       e match {
         case Select(head, tail) => tail.lastOption.getOrElse(head).tpe
-        case Index(_, tpe)      => tpe
         case BoolConst(value)   => PolyAst.Types.BoolTpe()
         case ByteConst(value)   => PolyAst.Types.ByteTpe()
         case CharConst(value)   => PolyAst.Types.CharTpe()
@@ -89,17 +88,16 @@ package object internal {
       import polyregion.PolyAst.Refs.*
       e match {
         case Select(head, tail) => (head +: tail).map(_.repr).mkString(".")
-        case Index(pos, tpe)    => s"[$pos]:${tpe.repr}"
-        case BoolConst(value)   => s"Bool(`$value`)"
-        case ByteConst(value)   => s"Byte(`$value`)"
-        case CharConst(value)   => s"Char(`$value`)"
-        case ShortConst(value)  => s"Short(`$value`)"
-        case IntConst(value)    => s"Int(`$value`)"
-        case LongConst(value)   => s"Long(`$value`)"
-        case FloatConst(value)  => s"Float(`$value`)"
-        case DoubleConst(value) => s"Double(`$value`)"
-        case StringConst(value) => s"String(`$value`)"
-        case Ref.Empty          => "(empty ref)"
+        case BoolConst(value)   => s"Bool($value)"
+        case ByteConst(value)   => s"Byte($value)"
+        case CharConst(value)   => s"Char($value)"
+        case ShortConst(value)  => s"Short($value)"
+        case IntConst(value)    => s"Int($value)"
+        case LongConst(value)   => s"Long($value)"
+        case FloatConst(value)  => s"Float($value)"
+        case DoubleConst(value) => s"Double($value)"
+        case StringConst(value) => s"String($value)"
+        case Ref.Empty          => "Unit()"
       }
 
     }
@@ -134,7 +132,8 @@ package object internal {
       import polyregion.PolyAst.Tree.*
       e match {
         case Alias(ref)                   => s"(~>${ref.repr})"
-        case Invoke(lhs, name, args, tpe) => s"${lhs.repr}<$name>(${args.map(_.repr).mkString(",")})"
+        case Invoke(lhs, name, args, tpe) => s"${lhs.repr}<$name>(${args.map(_.repr).mkString(",")}) : ${tpe.repr}"
+        case Block(xs, x)                 => s"{\n${xs.map(_.repr).mkString("\n")}\n${x.repr}\n}"
         case Expr.Empty                   => "(empty expr)"
       }
     }
@@ -145,10 +144,10 @@ package object internal {
       import polyregion.PolyAst.Tree.*
       e match {
         case Comment(value)          => s" // $value"
-        case Var(key, tpe, rhs)      => s"var $key : ${tpe.repr} = ${rhs.repr}"
+        case Var(name, rhs)          => s"var ${name.repr} = ${rhs.repr}"
+        case Mut(name, expr)         => s"${name.repr} := ${expr.repr}"
         case Effect(lhs, name, args) => s"${lhs.repr}<$name>(${args.map(_.repr).mkString(",")}) : Unit"
-        case Mut(lhs, expr)          => s"${lhs.repr} := ${expr.repr}"
-        case While(cond, body)       => s"while(${cond.repr}{\n${body.map(_.repr).mkString("\n")}\n}"
+        case While(cond, body)       => s"while(${cond.repr}){\n${body.map(_.repr).mkString("\n")}\n}"
         case Stmt.Empty              => "(empty stmt)"
       }
 
