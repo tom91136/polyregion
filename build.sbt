@@ -11,6 +11,8 @@ lazy val catsVersion = "2.7.0"
 lazy val runtime = project.settings(
   commonSettings,
   name := "runtime",
+  fork := true,
+  Compile / fork := true,
   libraryDependencies ++= Seq(
     "org.bytedeco"    % "llvm-platform"   % "12.0.1-1.5.6",
     "org.bytedeco"    % "libffi-platform" % "3.4.2-1.5.6",

@@ -26,26 +26,26 @@ object LLVM_ {
 
     def constInt(tpe: LLVMTypeRef, value: Long): LLVMValueRef = LLVMConstInt(tpe, value, 0)
 
-    def half               = LLVMHalfTypeInContext(context)
-    def bfloat             = LLVMBFloatTypeInContext(context)
-    def float: LLVMTypeRef = LLVMFloatTypeInContext(context)
-    def double             = LLVMDoubleTypeInContext(context)
+    def half                 = LLVMHalfTypeInContext(context)
+    def bfloat               = LLVMBFloatTypeInContext(context)
+    def float: LLVMTypeRef   = LLVMFloatTypeInContext(context)
+    def double               = LLVMDoubleTypeInContext(context)
     def x86FP80: LLVMTypeRef = LLVMX86FP80TypeInContext(context)
-    def fp128              = LLVMFP128TypeInContext(context)
-    def ppcfp128           = LLVMPPCFP128TypeInContext(context)
+    def fp128                = LLVMFP128TypeInContext(context)
+    def ppcfp128             = LLVMPPCFP128TypeInContext(context)
 
     def constReal(tpe: LLVMTypeRef, value: Double): LLVMValueRef = LLVMConstReal(tpe, value)
 
     def void: LLVMTypeRef = LLVMVoidTypeInContext(context)
-    def label    = LLVMLabelTypeInContext(context)
-    def x86MMX   = LLVMX86MMXTypeInContext(context)
-    def x86AMX   = LLVMX86AMXTypeInContext(context)
-    def token    = LLVMTokenTypeInContext(context)
-    def metadata = LLVMMetadataTypeInContext(context)
+    def label             = LLVMLabelTypeInContext(context)
+    def x86MMX            = LLVMX86MMXTypeInContext(context)
+    def x86AMX            = LLVMX86AMXTypeInContext(context)
+    def token             = LLVMTokenTypeInContext(context)
+    def metadata          = LLVMMetadataTypeInContext(context)
 
     def ptr(tpe: LLVMTypeRef) = LLVMPointerType(tpe, 0)
 
-    def gepInbound(builder: LLVMBuilderRef, name : String)(ref: LLVMValueRef, offsets: LLVMValueRef*) =
+    def gepInbound(builder: LLVMBuilderRef, name: String)(ref: LLVMValueRef, offsets: LLVMValueRef*) =
       LLVMBuildInBoundsGEP(
         builder,
         ref,
@@ -56,9 +56,10 @@ object LLVM_ {
 
     def validate(): Unit = LLVMVerifyModule(module, LLVMPrintMessageAction, new BytePointer())
 
-    def load(array:Array[Byte]) = {
-      val data = LLVMCreateMemoryBufferWithMemoryRange(new BytePointer(array:_*),array.length, new BytePointer("a"), 1)
-      LLVMParseBitcodeInContext2( context, data, module)
+    def load(array: Array[Byte]) = {
+      val data =
+        LLVMCreateMemoryBufferWithMemoryRange(new BytePointer(array: _*), array.length, new BytePointer("a"), 1)
+      LLVMParseBitcodeInContext2(context, data, module)
     }
 
     def dump(): Unit = LLVMDumpModule(module)
@@ -110,9 +111,10 @@ object LLVM_ {
       LLVMVerifyFunction(fn, LLVMPrintMessageAction) == 1
     }
 
-    def optimise() =
-                val pm = LLVMCreatePassManager()
-                LLVMAddAggressiveDCEPass(pm)
+    def optimise() = {
+      val pm = LLVMCreatePassManager()
+//      LLVMAddAggressiveDCEPass(pm)
+//      LLVMAddPromoteMemoryToRegisterPass(pm)
       //          LLVMAddDCEPass(pm)
       //          LLVMAddBitTrackingDCEPass(pm)
       //          LLVMAddAlignmentFromAssumptionsPass(pm)
@@ -123,7 +125,7 @@ object LLVM_ {
       //          LLVMAddGVNPass(pm)
       //          LLVMAddNewGVNPass(pm)
       //          LLVMAddIndVarSimplifyPass(pm)
-                LLVMAddInstructionSimplifyPass(pm)
+//      LLVMAddInstructionSimplifyPass(pm)
       //          LLVMAddJumpThreadingPass(pm)
       //          LLVMAddLICMPass(pm)
       //          LLVMAddLoopDeletionPass(pm)
@@ -153,10 +155,9 @@ object LLVM_ {
       //          LLVMAddScopedNoAliasAAPass(pm)
       //          LLVMAddBasicAliasAnalysisPass(pm)
       //          LLVMAddUnifyFunctionExitNodesPass(pm)
-                LLVMRunPassManager(pm, module)
-
+      LLVMRunPassManager(pm, module)
       optimizeModule(module, LLVMGetHostCPUName(), 3, 0)
-
+    }
   }
 
 }

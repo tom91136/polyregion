@@ -39,12 +39,19 @@ object LLVMBackend {
     val args = input.map { case Named(name, tpe) => name -> tpe2llir(tpe) }
 
     mod.function("lambda", mod.void, args: _*) { case (params, fn, builder) =>
+
+      def loadOne(key: String, context: Map[String, LLVMValueRef]) = {
+        LLVMBuildLoad(builder, context(key), s"${key}_value")
+      }
+
       def resolveRef(r: Refs.Ref, context: Map[String, LLVMValueRef]): LLVMValueRef = {
         println(">>>" + r.repr)
         r match {
           case r @ Refs.Select(Named(name, tpe), VNil()) =>
             context.get(name) match {
-              case Some(x) => x
+              case Some(x) =>
+                println(s"Load ref from stack:$name:$tpe")
+                loadOne(name, context)
               case None =>
                 println(s"var not found: ${name}")
                 ???
@@ -68,6 +75,10 @@ object LLVMBackend {
         }
       }
 
+
+
+
+
       def resolveExpr(e: Tree.Expr, key: String, context: Map[String, LLVMValueRef]): LLVMValueRef = {
         println(">" + e.repr)
         e match {
@@ -77,7 +88,7 @@ object LLVMBackend {
               ???
             }
             LLVMBuildFAdd(builder, resolveRef(lhs, context), resolveRef(rhs, context), s"${key}_+")
-          case Tree.Invoke(lhs, "+", Vector(rhs), tpe @ (Types.IntTpe()  )) =>
+          case Tree.Invoke(lhs, "+", Vector(rhs), tpe @ (Types.IntTpe())) =>
             if (lhs.tpe != tpe) {
               println(s"Cannot unify result ref ($tpe) with invoke($tpe)")
               ???
@@ -91,7 +102,7 @@ object LLVMBackend {
             }
             LLVMBuildFMul(builder, resolveRef(lhs, context), resolveRef(rhs, context), s"${key}_*")
           case Tree.Invoke(lhs, "<", Vector(rhs), tpe @ (Types.BoolTpe())) =>
-            if(lhs.tpe !=  rhs.tpe || rhs.tpe != Types.IntTpe()){
+            if (lhs.tpe != rhs.tpe || rhs.tpe != Types.IntTpe()) {
               println(s"Cannot unify result lhs (${lhs.tpe}) with rhs (${rhs.tpe}) for binary `<`")
               ???
             }
@@ -104,18 +115,19 @@ object LLVMBackend {
             // load
             resolveRef(ref, context)
           case Tree.Block(stmts, expr) =>
-
-
-            resolveExpr(expr,"block", stmts.foldLeft( context) { case (c, s: Tree.Stmt) =>
-              resolveOne(s, c)
-            })
-
+            resolveExpr(
+              expr,
+              "block",
+              stmts.foldLeft(context) { case (c, s: Tree.Stmt) =>
+                resolveOne(s, c)
+              }
+            )
 
           //              LLVMBuildLoad(builder, resolveRef(ref, context), s"${key}_alias")
         }
       }
 
-      def resolveOne(t: Tree.Stmt, context: Map[String, LLVMValueRef]): (  Map[String, LLVMValueRef]) = {
+      def resolveOne(t: Tree.Stmt, context: Map[String, LLVMValueRef]): (Map[String, LLVMValueRef]) = {
         println(">" + t.repr)
         t match {
           case Tree.Comment(_) => context // discard
@@ -126,58 +138,50 @@ object LLVMBackend {
               ) =>
             // getelementptr; store
 
+            // context(name) is ptr to array here, don't load
             val ptr = mod.gepInbound(builder, s"${name}_ptr")(context(name), resolveRef(offset, context))
             LLVMBuildStore(builder, resolveRef(value, context), ptr)
             context
           case Tree.Var(Named(key, tpe), rhs) =>
             // store <rhs>
 
-
-            val allocate = LLVMBuildAlloca(builder, tpe2llir(tpe), key)
-            LLVMBuildStore(builder, resolveExpr(rhs, s"${key}_var_rhs", context), allocate)
+            val allocate = LLVMBuildAlloca(builder, tpe2llir(tpe), s"${key}_stack_ptr")
+            val ref = LLVMBuildStore(builder, resolveExpr(rhs, s"${key}_var_rhs", context), allocate)
             Map(key -> allocate) ++ context
 
           case Tree.Mut(Named(key, tpe), ref) =>
-            LLVMBuildStore(builder, resolveExpr(ref, s"${key}_mut", context), context(key))
+
+
+            val loaded = loadOne(key, context)
+            LLVMBuildStore(builder, resolveExpr(ref, s"${key}_mut", context), loaded)
             context
 
           case Tree.While(cond, body) =>
-
-            val loopBB = LLVMAppendBasicBlock(fn, s"loop_body") // loop:
-            LLVMBuildBr(builder, loopBB) // goto loop:
-            LLVMPositionBuilderAtEnd(builder, loopBB)
-
-            println("# while")
+            val loopTest = LLVMAppendBasicBlock(fn, s"loop_test")
+            val loopBody = LLVMAppendBasicBlock(fn, s"loop_body")
+            val loopExit = LLVMAppendBasicBlock(fn, s"loop_exit")
 
 
-
+            LLVMBuildBr(builder, loopTest) // goto loop_test:
+            LLVMPositionBuilderAtEnd(builder, loopTest)
             val continue = resolveExpr(cond, "loop", context)
+            LLVMBuildCondBr(builder,continue, loopBody, loopExit) // goto loop_test:
+
+            //????
 
 
-            val phi = LLVMBuildPhi(builder, mod.void, "phi") // var i
-            LLVMAddIncoming(phi, mod.constInt(mod.i32, 0), LLVMGetPreviousBasicBlock(loopBB), 1) // i = from
-
-
-
-            val ctx = body.foldLeft( context) { case (c, s: Tree.Stmt) =>
+            LLVMPositionBuilderAtEnd(builder, loopBody)
+            val ctx = body.foldLeft(context) { case (c, s: Tree.Stmt) =>
               resolveOne(s, c)
             }
+            LLVMBuildBr(builder, loopTest)
 
 
 
-//            val endBB       = LLVMGetInsertBlock(builder)
-            val afterLoopBB = LLVMAppendBasicBlock(fn, "after_loop")
-            val endBB       = LLVMGetInsertBlock(builder)
-            LLVMBuildCondBr(builder, continue, loopBB, afterLoopBB)
-            LLVMPositionBuilderAtEnd(builder, afterLoopBB)
-//            LLVMAddIncoming(continue, [last value of body], endBB, 1)
-            LLVMAddIncoming(phi, mod.constInt(mod.i32, 0), endBB, 1)
+            LLVMPositionBuilderAtEnd(builder, loopExit)
+
+
             ctx
-
-
-
-
-
 
         }
       }
@@ -199,9 +203,19 @@ object LLVMBackend {
       //          case s: polyregion.Runtime.PolyAst.Stmt => resolveOne(s)
       //        }
 
-
       println(s"Input:$params")
-      tree.foldLeft(params  ) { case (context, s: Tree.Stmt) =>
+
+      val stackParams = input.foldLeft(params) { case (m,  Named(name, tpe)) =>
+        tpe match {
+          case Types.ArrayTpe(comp) => m
+          case _ =>
+            val stackVar = LLVMBuildAlloca(builder, tpe2llir(tpe), s"${name}_stack_ptr")
+            LLVMBuildStore(builder, m(name), stackVar)
+            m + (name -> stackVar)
+        }
+      }
+
+      tree.foldLeft(stackParams) { case (context, s: Tree.Stmt) =>
         resolveOne(s, context)
       }
       LLVMBuildRetVoid(builder)
