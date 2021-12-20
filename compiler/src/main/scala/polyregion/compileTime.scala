@@ -30,7 +30,7 @@ object compileTime {
 
   inline def foreach(range: Range)(inline x: Int => Unit): Any = {
     val start = range.start
-    val bound = if (range.isInclusive) range.end else range.end - 1
+    val bound = if (range.isInclusive) range.end - 1 else range.end
     val step  = range.step
     offload {
       var i = start
@@ -201,7 +201,7 @@ object compileTime {
           case Nil => (depth, VNil()).success.deferred
           case x :: xs =>
             resolveTree(x, depth).flatMap(xs.foldLeftM(_) { case ((prev, tss), term) =>
-              resolveTree(term, prev).map((curr, ts) => (curr, ts ++ tss))
+              resolveTree(term, prev).map((curr, ts) => (curr, tss ++ ts))
             })
         }
 
@@ -222,7 +222,7 @@ object compileTime {
                   VNil()
                 } else VNil()
 
-              (depth, PolyAst.Refs.Select(named, VNil()), tree)
+                (depth, PolyAst.Refs.Select(named, VNil()), tree)
               }
             case c @ Literal(BooleanConstant(v)) => ((depth, PolyAst.Refs.BoolConst(v), VNil())).success.deferred
             case c @ Literal(IntConstant(v))     => ((depth, PolyAst.Refs.IntConst(v), VNil())).success.deferred

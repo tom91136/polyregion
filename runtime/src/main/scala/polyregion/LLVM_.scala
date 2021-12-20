@@ -10,6 +10,8 @@ object LLVM_ {
   LLVMInitializeNativeAsmParser()
   LLVMInitializeNativeDisassembler()
   LLVMInitializeNativeTarget()
+  LLVMInitializeAllTargets();
+
 
   class Module(name: String) {
     val threadContext                   = LLVMOrcCreateNewThreadSafeContext()
@@ -112,9 +114,18 @@ object LLVM_ {
     }
 
     def optimise() = {
+      val builder = LLVMPassManagerBuilderCreate()
+      LLVMPassManagerBuilderSetOptLevel(builder, 5)
       val pm = LLVMCreatePassManager()
-//      LLVMAddAggressiveDCEPass(pm)
+      LLVMPassManagerBuilderPopulateModulePassManager(builder, pm)
+      LLVMAddLoopVectorizePass(pm)
+      LLVMAddSLPVectorizePass(pm)
+//
+//
+//
+////      LLVMAddAggressiveDCEPass(pm)
 //      LLVMAddPromoteMemoryToRegisterPass(pm)
+
       //          LLVMAddDCEPass(pm)
       //          LLVMAddBitTrackingDCEPass(pm)
       //          LLVMAddAlignmentFromAssumptionsPass(pm)
@@ -132,7 +143,7 @@ object LLVM_ {
       //          LLVMAddLoopIdiomPass(pm)
       //          LLVMAddLoopRotatePass(pm)
       //          LLVMAddLoopRerollPass(pm)
-      //          LLVMAddLoopUnrollPass(pm)
+//                LLVMAddLoopUnrollPass(pm)
       //          LLVMAddLoopUnrollAndJamPass(pm)
       //          LLVMAddLoopUnswitchPass(pm)
       //          LLVMAddLowerAtomicPass(pm)
@@ -144,7 +155,7 @@ object LLVM_ {
       //          LLVMAddScalarReplAggregatesPassSSA(pm)
       //          LLVMAddSimplifyLibCallsPass(pm)
       //          LLVMAddTailCallEliminationPass(pm)
-      ////          LLVMAddDemoteMemoryToRegisterPass(pm)
+//                LLVMAddDemoteMemoryToRegisterPass(pm)
       //          LLVMAddVerifierPass(pm)
       //          LLVMAddCorrelatedValuePropagationPass(pm)
       //          LLVMAddEarlyCSEPass(pm)
@@ -156,7 +167,15 @@ object LLVM_ {
       //          LLVMAddBasicAliasAnalysisPass(pm)
       //          LLVMAddUnifyFunctionExitNodesPass(pm)
       LLVMRunPassManager(pm, module)
-      optimizeModule(module, LLVMGetHostCPUName(), 3, 0)
+//    println(s"Optimising via triplet: ${LLVMGetHostCPUName().getString}")
+//      val error = optimizeModule(module, LLVMGetHostCPUName(), 1, 1)
+//      if(!error.isNull){
+//        Console.err.println(s"ERR: ${LLVMGetErrorMessage(error).getString}")
+//      }else{
+//        println("Optimisation complete")
+//      }
+//
+//
     }
   }
 
