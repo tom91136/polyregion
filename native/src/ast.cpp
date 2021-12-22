@@ -72,7 +72,7 @@ using std::string;
     return "// " + comment->value();
   }
   if (auto var = POLY_OPT(stmt, var); var) {
-    return "var " + var->key() + " : " + repr(var->tpe()) + " = " + repr(var->rhs());
+    return "var " + repr(var->name()) + " = " + repr(var->rhs());
   }
   if (auto effect = POLY_OPT(stmt, effect); effect) {
     return repr(effect->lhs()) + "<" + effect->name() + ">" +
@@ -81,7 +81,7 @@ using std::string;
            " : Unit";
   }
   if (auto mut = POLY_OPT(stmt, mut); mut) {
-    return repr(mut->lhs()) + " := " + repr(mut->expr());
+    return repr(mut->name()) + " := " + repr(mut->expr());
   }
   if (auto while_ = POLY_OPT(stmt, while_); while_) {
     return "while(" + repr(while_->cond()) + "){\n" +

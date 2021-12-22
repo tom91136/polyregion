@@ -89,7 +89,7 @@ void polyregion::codegen::LLVMCodeGen::mkStmt(const polyregion::Tree_Stmt &stmt,
     return; // discard comments
   }
   if (auto var = POLY_OPT(stmt, var); var) {
-    lut[var->key()] = mkExpr(var->rhs(), var->key(), builder, lut);
+    lut[var->name().name()] = mkExpr(var->rhs(), var->name().name(), builder, lut);
   }
 
   //
