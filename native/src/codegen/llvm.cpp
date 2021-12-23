@@ -27,7 +27,7 @@ llvm::Type *polyregion::codegen::LLVMCodeGen::mkTpe(const polyregion::Types_Type
     return undefined();
   }
   if (auto reftpe = POLY_OPT(tpe, reftpe); reftpe) {
-                return undefined();
+    return undefined();
   }
 
   return Type::getVoidTy(ctx);
@@ -80,6 +80,7 @@ llvm::Value *polyregion::codegen::LLVMCodeGen::mkExpr(const polyregion::Tree_Exp
         return builder.CreateFRem(lhs, rhs, key + "_%");
       }
     }
+    return undefined();
   }
   return undefined();
 }
@@ -121,9 +122,6 @@ void polyregion::codegen::LLVMCodeGen::run(const polyregion::Tree_Function &fnTr
 
   auto paramTpes = map_vec<Named, Type *>(fnTree.args(), [&](auto &&named) { return mkTpe(named.tpe()); });
   auto fnTpe = FunctionType::get(mkTpe(fnTree.returntpe()), {paramTpes}, false);
-
-
-
 
   auto *fn = Function::Create(fnTpe, Function::ExternalLinkage, fnTree.name(), module);
 

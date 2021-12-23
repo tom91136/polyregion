@@ -23,6 +23,8 @@
 #include "dis.h"
 #include "utils.hpp"
 #include "codegen/llvm.h"
+#include "codegen/opencl.h"
+
 
 using namespace llvm;
 using namespace llvm::orc;
@@ -282,6 +284,9 @@ int main(int argc, char *argv[]) {
 
   codegen::LLVMCodeGen gen("a");
   gen.run(p);
+
+  codegen::OpenCLCodeGen oclGen ;
+  oclGen.run(p);
 
 
   return 0;

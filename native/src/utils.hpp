@@ -4,6 +4,7 @@
 #include <functional>
 #include <iostream>
 #include <numeric>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -31,6 +32,15 @@ std::vector<U> map_vec(const Container<T> &xs, const std::function<U(const T &)>
   return ys;
 }
 
+static std::vector<std::string> split(const std::string &str, char delim) {
+  std::vector<std::string> xs;
+  std::stringstream stream(str);
+  std::string x;
+  while (std::getline(stream, x, delim))
+    xs.push_back(x);
+  return xs;
+}
+
 template <typename T> std::vector<T> readNStruct(const std::string &path) {
   std::fstream s(path, std::ios::binary | std::ios::in);
   if (!s.good()) {
@@ -46,13 +56,11 @@ template <typename T> std::vector<T> readNStruct(const std::string &path) {
   return xs;
 }
 
-template <typename T,  template <typename...> typename Container>
+template <typename T, template <typename...> typename Container>
 
-std::optional<T> get_opt(const Container<T> &xs, size_t i){
+std::optional<T> get_opt(const Container<T> &xs, size_t i) {
   return i > std::size(xs) ? std::nullopt : std::make_optional(xs[i]);
 }
-
-
 
 constexpr uint32_t hash(const char *data, size_t const size) noexcept {
   uint32_t hash = 5381;
