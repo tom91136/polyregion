@@ -1,123 +1,115 @@
 package polyregion
 
-import scala.deriving.*
-import scala.compiletime.{constValue, erasedValue, summonInline}
+import polyregion.Cpp.CppType
 
+import scala.deriving.*
+import scala.compiletime.{constValue, erasedValue, error, summonInline}
 import scala.reflect.ClassTag
 
-//class CppCodeGenTarget extends CodeGenTarget[String]
+object Cpp {
 
-trait CodeGenTarget[A] { self =>
-  def ingest[A]: this.type
-  def result: String
-}
+  case class CppType(name: String, movable: Boolean = false, include: List[String] = Nil)
+  case class Struct(
+      name: String,
+      sum : Boolean,
+      members: List[(CppType, String)],
+      parent: Option[Struct],
+      variants: List[Struct] = Nil
+  ) {
+    def declaredName: String = if(sum) s"${name}Base" else name
+    def emitSource: String = {
+      val ctorInit = members.map((tpe, n) => if (tpe.movable) s"$n(std::move($n))" else s"$n($n)")
+      val (baseCls, ctorArgs, ctorChain) = parent match {
+        case Some(s) =>
+          (Some(s.declaredName), members ::: s.members, s"${s.declaredName}(${s.members.map((_, n) => n).mkString(", ")})" :: ctorInit)
+        case None => (None, members, ctorInit)
+      }
+      val explicit = ctorArgs match {
+        case _ :: Nil => "explicit "
+        case _        => ""
+      }
+      val ctorChainExpr = ctorChain match {
+        case Nil => ""
+        case xs  => xs.mkString(" : ", ", ", "")
+      }
+      val ctorArgExpr = ctorArgs.map((t, n) => s"${t.name} $n").mkString(", ")
+      val variantExpr =  if(sum) s"using $name = std::variant<${variants.map(s => s.declaredName).mkString(", ")}>;" else ""
+      val str = s"""struct $declaredName${baseCls.fold("")(" : " + _)} {
+         |  ${members.map((t, n) => s"${t.name} $n;").mkString("\n  ")}
+         |  $explicit$declaredName($ctorArgExpr)$ctorChainExpr {}
+         |};""".stripMargin
 
-trait CodeGen[A, B] {
-  def gen(target: CodeGenTarget[B], a: A): target.type
-}
 
-trait Form[A] {
-  def show(a: A): String
-}
-object Form {
 
-  inline def deriveSum[N <: Tuple, T <: Tuple]: List[String] =
+
+
+      str + "\n" + variants.map(_.emitSource).mkString("\n")  +s"\n$variantExpr"
+    }
+  }
+
+  trait ToCppType[A] { def apply(): CppType }
+  object ToCppType {
+    given ToCppType[Int] with    { def apply(): CppType = CppType("int32_t", include = "cstdint" :: Nil)          }
+    given ToCppType[Short] with  { def apply(): CppType = CppType("int16_t", include = "cstdint" :: Nil)          }
+    given ToCppType[String] with { def apply(): CppType = CppType("std::string", movable = true, "string" :: Nil) }
+    given [A](using ev: ToCppType[A]): ToCppType[List[A]] with {
+      def apply(): CppType = CppType(s"std::vector<${ev().name}>", movable = true, "vector" :: Nil)
+    }
+
+    inline given derived[T](using m: Mirror.Of[T]): ToCppType[T] =
+      new ToCppType[T] {
+        override def apply() = inline m match
+          case s: Mirror.SumOf[T]     => CppType(s"${constValue[s.MirroredLabel]}Base", movable = true, Nil)
+          case p: Mirror.ProductOf[T] => CppType(s"${constValue[p.MirroredLabel]}", movable = true, Nil)
+          case x                      => error(s"Unhandled derive: $x")
+      }
+
+  }
+
+  inline def deriveSum[N <: Tuple, T <: Tuple](parent: Option[Struct] = None): List[Struct] =
     inline (erasedValue[N], erasedValue[T]) match
       case (_: EmptyTuple, _: EmptyTuple) => Nil
       case (_: (n *: ns), _: (t *: ts)) =>
-        val x = derived[t](using summonInline[Mirror.Of[t]])
+        deriveStruct[t](parent)(using summonInline[Mirror.Of[t]]) ::: deriveSum[ns, ts](parent)
 
-
-
-
-        val template = s"""
-		  |struct ${constValue[n]} {
-		  |
-		  |}
-		  |""".stripMargin
-
-
-        s"struct ${constValue[n]} (${summonInline[ClassTag[t]]}) = \n\t$x}" :: deriveSum[ns, ts]
-
-  inline def deriveProduct[L <: Tuple, T <: Tuple]: List[String] =
+  inline def deriveProduct[L <: Tuple, T <: Tuple]: List[(CppType, String)] =
     inline (erasedValue[L], erasedValue[T]) match
       case (_: EmptyTuple, _: EmptyTuple) => Nil
-      case (_: (l *: ls), _: (t *: ts))   => s"[${constValue[l]}:${summonInline[ClassTag[t]]}]" :: deriveProduct[ls, ts]
+      case (_: (l *: ls), _: (t *: ts)) => (summonInline[ToCppType[t]](), s"${constValue[l]}") :: deriveProduct[ls, ts]
 
-  inline def derived[T](using m: Mirror.Of[T]): String =
-    inline m match
-      case s: Mirror.SumOf[T] =>
-        lazy val elemInstances = deriveSum[s.MirroredElemLabels, s.MirroredElemTypes]
+  inline def deriveStruct[T](parent: Option[Struct] = None)(using m: Mirror.Of[T]): List[Struct] = inline m match
+    case s: Mirror.SumOf[T] =>
+      val sum = Struct(s"${constValue[s.MirroredLabel]}", true, Nil, parent)
 
+      sum.copy(variants = deriveSum[s.MirroredElemLabels, s.MirroredElemTypes](Some(sum))) :: Nil
 
-        s" Sum: ${constValue[s.MirroredLabel]}  \n${elemInstances.mkString("\n")}"
-      case p: Mirror.ProductOf[T] =>
-        val xs = deriveProduct[p.MirroredElemLabels, p.MirroredElemTypes]
-
-        s"$p ${xs}"
-
-}
-
-// tree.generate[CppCodeGen] : String
-// CodeGen.create[MyAst] : String
-// def create[A : CodeGen]
-
-// tree.serialise() : Array[Byte] // msgpack
-
-trait Eq[T] {
-  def eqv(x: T, y: T): Boolean
-}
-
-inline def summonAll[T <: Tuple]: List[Eq[_]] =
-  inline erasedValue[T] match
-    case _: EmptyTuple => Nil
-    case _: (t *: ts)  => summonInline[Eq[t]] :: summonAll[ts]
-
-object Eq {
-
-  given Eq[Int] with
-    def eqv(x: Int, y: Int) = x == y
-
-  def check(elem: Eq[_])(x: Any, y: Any): Boolean =
-    elem.asInstanceOf[Eq[Any]].eqv(x, y)
-
-  def iterator[T](p: T) = p.asInstanceOf[Product].productIterator
-
-  def eqSum[T](s: Mirror.SumOf[T], elems: => List[Eq[_]]): Eq[T] =
-    new Eq[T] {
-      def eqv(x: T, y: T): Boolean = {
-
-        val ordx = s.ordinal(x)
-        (s.ordinal(y) == ordx) && check(elems(ordx))(x, y)
-      }
-
-    }
-
-  def eqProduct[T](p: Mirror.ProductOf[T], elems: => List[Eq[_]]): Eq[T] =
-    new Eq[T] {
-      def eqv(x: T, y: T): Boolean =
-        iterator(x).zip(iterator(y)).zip(elems.iterator).forall { case ((x, y), elem) =>
-          check(elem)(x, y)
-        }
-    }
-
-  inline given derived[T](using m: Mirror.Of[T]): Eq[T] = {
-    lazy val elemInstances = summonAll[m.MirroredElemTypes]
-    inline m match
-      case s: Mirror.SumOf[T]     => eqSum(s, elemInstances)
-      case p: Mirror.ProductOf[T] => eqProduct(p, elemInstances)
-  }
+    case p: Mirror.ProductOf[T] =>
+      val members = deriveProduct[p.MirroredElemLabels, p.MirroredElemTypes]
+      Struct(constValue[p.MirroredLabel],false, members, parent) :: Nil
+    case x => error(s"Unhandled derive: $x")
 
 }
 
 object Foo {
 
-  enum Opt[+T] derives Eq {
+  case class Foo(s: String, xs: List[List[String]])
+
+  sealed abstract class First(val u: String) derives Cpp.ToCppType
+
+  enum T1 extends First("") {
+    case T1A(xs: List[Int], z: List[String], foo: Int, first: First)
+    case T1B(b: String)
+  }
+  enum T2 extends First("z") {
+    case T2A, T2B
+  }
+
+  enum Opt[+T] {
     case Sm(t: T, u: T)
     case Nn
   }
 
-  enum Base(val u : Int) {
+  enum Base(val u: Int) {
     case This(x: Int, s: String) extends Base(x)
     case That(a: String) extends Base(42)
   }
@@ -128,7 +120,8 @@ object Foo {
 //    import Form.*
 //    val x = summon[Form[Opt[Int]]]
 
-    println(Form.derived[Base])
+    println(Cpp.deriveStruct[First]().map(_.emitSource).mkString("\n"))
+    println(Cpp.deriveStruct[Foo]().map(_.emitSource).mkString("\n"))
     ()
   }
 }
