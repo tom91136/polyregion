@@ -62,7 +62,7 @@ package object internal {
   }
 
   extension (p: PolyAst.Named) {
-    def repr: String = s"(${p.name}:${p.tpe.repr})"
+    def repr: String = s"(${p.symbol}:${p.tpe.repr})"
   }
 
   extension (e: PolyAst.Refs.Ref) {
@@ -133,8 +133,9 @@ package object internal {
       e match {
         case Alias(ref)                   => s"(~>${ref.repr})"
         case Invoke(lhs, name, args, tpe) => s"${lhs.repr}<$name>(${args.map(_.repr).mkString(",")}) : ${tpe.repr}"
-        case Block(xs, x)                 => s"{\n${xs.map(_.repr).mkString("\n")}\n${x.repr}\n}"
-        case Expr.Empty                   => "(empty expr)"
+        case Index(lhs, idx, tpe)         => s"${lhs.repr}[${idx.repr}] : ${tpe.repr}"
+        // case Block(xs, x)                 => s"{\n${xs.map(_.repr).mkString("\n")}\n${x.repr}\n}"
+        case Expr.Empty => "(empty expr)"
       }
     }
   }
@@ -143,12 +144,15 @@ package object internal {
     def repr: String = {
       import polyregion.PolyAst.Tree.*
       e match {
-        case Comment(value)          => s" // $value"
-        case Var(name, rhs)          => s"var ${name.repr} = ${rhs.repr}"
-        case Mut(name, expr)         => s"${name.repr} := ${expr.repr}"
-        case Effect(lhs, name, args) => s"${lhs.repr}<$name>(${args.map(_.repr).mkString(",")}) : Unit"
-        case While(cond, body)       => s"while(${cond.repr}){\n${body.map(_.repr).mkString("\n")}\n}"
-        case Stmt.Empty              => "(empty stmt)"
+        case Comment(value)              => s" // $value"
+        case Var(name, rhs)              => s"var ${name.repr} = ${rhs.repr}"
+        case Mut(name, expr)             => s"${name.repr} := ${expr.repr}"
+        case Update(lhs, idx, value)     => s"${lhs.repr}[${idx.repr}] := ${value.repr}"
+        case Effect(lhs, name, args)     => s"${lhs.repr}<$name>(${args.map(_.repr).mkString(",")}) : Unit"
+        case While(cond, body)           => s"while(${cond.repr}){\n${body.map(_.repr).mkString("\n")}\n}"
+        case Break()                     => s"break;"
+        case Cond(cond, trueBr, falseBr) => s"if(${cond.repr}) {\n${trueBr.repr}\n} else {\n${falseBr}\n}"
+        case Stmt.Empty                  => "(empty stmt)"
       }
 
     }

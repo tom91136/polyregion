@@ -40,7 +40,7 @@ message Types{
 }
 
 
-message Named{required string name = 1; required Types.Type tpe = 2;}
+message Named{required string symbol = 1; required Types.Type tpe = 2;}
 
 message Refs {
   message Ref {
@@ -83,33 +83,42 @@ message Tree{
 
   message Expr {
     oneof sealed_value {
-      Alias alias = 2;
-      Invoke invoke = 3;
-      Block block = 4;
+      Alias alias = 1;
+      Invoke invoke = 2;
+      Index index = 3;
+      //      Block block = 4;
       // empty here is no-op
     }
   }
 
   message Alias{required Refs.Ref ref = 1;}
+  message Index{
+    required Refs.Select lhs = 1;
+    required Refs.Ref idx = 2;
+    required Types.Type tpe = 3;
+  }
+
   message Invoke{
     required Refs.Ref lhs = 1;
     required string name = 2;
     repeated Refs.Ref args = 3;
     required Types.Type tpe = 4;
   }
-  message Block{
-    repeated Stmt statements = 1;
-    required Expr return = 2;
-  }
+  //  message Block{
+  //    repeated Stmt statements = 1;
+  //    required Expr return = 2;
+  //  }
 
-  message Stmt {
+  message Stmt{
     oneof sealed_value {
-      Comment comment = 2;
-      Var var = 3;
-      Effect effect = 4;
-      Mut mut = 5;
+      Comment comment = 1;
+      Var var = 2;
+      Effect effect = 3;
+      Mut mut = 4;
+      Update update = 5;
       While while = 6;
-      Cond cond = 7;
+      Break break = 7;
+      Cond cond = 8;
       // empty here is no-op
     }
   }
@@ -117,16 +126,21 @@ message Tree{
   message Comment{
     required string value = 1;
   }
-  message Var {
+  message Var{
     required Named name = 1;
     required Expr rhs = 3;
   }
   message Mut{
-    required Named name = 1;
+    required Refs.Select name = 1;
     required Expr expr = 2;
   }
+  message Update{
+    required Refs.Select lhs = 1;
+    required Refs.Ref idx = 2;
+    required Refs.Ref value = 3;
+  }
   message Effect{
-    required Refs.Ref lhs = 1;
+    required Refs.Select lhs = 1;
     required string name = 2;
     repeated Refs.Ref args = 3;
   }
@@ -134,6 +148,8 @@ message Tree{
     required Expr cond = 1;
     repeated Stmt body = 2;
   }
+
+  message Break{}
 
   message Cond{
     required Expr cond = 1;

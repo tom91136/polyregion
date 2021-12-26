@@ -81,7 +81,7 @@ add_executable(polyregion_native
         src/codegen/opencl.cpp
         src/dis.cpp
         src/main.cpp
-        src/codegen/codegen.h)
+        src/codegen/codegen.h src/polyregion.cpp src/polyregion.h)
 
 message(STATUS "LLVM > ${LLVM_CONFIG_}")
 

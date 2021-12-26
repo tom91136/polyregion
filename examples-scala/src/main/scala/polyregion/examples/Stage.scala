@@ -1,4 +1,8 @@
 package polyregion.examples
+
+import com.kenai.jffi.HeapInvocationBuffer
+
+import java.nio.ByteBuffer
 import scala.collection.mutable.ArrayBuffer
 
 object Stage {
@@ -105,15 +109,16 @@ object Stage {
   // val VO = V4 + V5
   // xs.update(n, VO)
 
-  val scalar = 42f
+  val scalar = 42.69f
 
   def main(args: Array[String]): Unit = {
     val xs = polyregion.Buffer.ofDim[Float](10)
     val ys = polyregion.Buffer.ofDim[Float](10)
 
-    def printAndreset() = {
-      println(s"xs = ${xs.toList}")
-      println(s"ys = ${ys.toList}")
+    def printAndreset(name: String) = {
+      println(s"[$name]")
+      println(s" xs = ${xs.toList}")
+      println(s" ys = ${ys.toList}")
       println("---")
       for (x <- xs.indices) {
 
@@ -122,26 +127,24 @@ object Stage {
       }
     }
 
-    printAndreset()
+    printAndreset("none")
 
     foreachJVM(0 until 10) { n =>
       xs(n) += 2f
-      val scalarLambda = 321f
+      val scalarLambda = 321.1f
       val scalarF      = scalarLambda + 123f
       var refOut       = xs
-      xs(n) += ys(n) +refOut(n)  * scalar + scalarLambda + scalarF
+      xs(n) += ys(n) + refOut(n) * scalar + scalarLambda + scalarF
     }
-    printAndreset()
+    printAndreset("JVM")
+
 
     foreach(0 until 10) { n =>
       xs(n) += 2f
-      val scalarLambda = 321f
+      val scalarLambda = 321.1f
       val scalarF      = scalarLambda + 123f
       var refOut       = xs
-      var u = xs(n)
-      u += 3f
-      u *=2f + scalarLambda *3f
-      xs(n) += ys(n)  +refOut(n) * scalar + scalarLambda + scalarF + u
+      xs(n) += ys(n) + refOut(n) * scalar + scalarLambda + scalarF
     // val a            = (1, 2)
     // val Vec2(v1, v2) = vv
     // val (b1, b2)     = a
@@ -160,11 +163,7 @@ object Stage {
     // xs(n + 2) = CONST.toFloat + 42f + bad(0)
     }
 
-    printAndreset()
-    val range = 0 to 10
-
-    val bound = if (range.isInclusive) range.end else range.end - 1
-    val step  = range.step
+    printAndreset("Native")
 
 //
 //    foreach(0 until 10) { n =>
@@ -179,15 +178,11 @@ object Stage {
 //    }
 //
 
-
 //    foreach(0 until 10) { n =>
 //      xs(n) = 42f
 //      ys(n) = 42f
 //    }
 
-
-//
-    printAndreset()
 //
 //    System.setProperty("a", "42")
 //

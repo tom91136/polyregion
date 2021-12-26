@@ -4,11 +4,12 @@
 #include "utils.hpp"
 
 using namespace polyregion::ast;
+using namespace polyregion;
 using std::string;
 
-[[nodiscard]] string DebugPrinter::repr(const Sym &sym) { return mk_string<string>(sym.fqn(), std::identity(), "."); }
+[[nodiscard]] string ast::repr(const Sym &sym) { return mk_string<string>(sym.fqn(), std::identity(), "."); }
 
-[[nodiscard]] string DebugPrinter::repr(const Types_Type &type) {
+[[nodiscard]] string ast::repr(const Types_Type &type) {
   if (auto reftpe = POLY_OPT(type, reftpe); reftpe) {
     return reftpe->args().empty() //
                ? repr(reftpe->name())
@@ -33,15 +34,18 @@ using std::string;
   return "Unit";
 }
 
-[[nodiscard]] string DebugPrinter::repr(const Named &path) { return "(" + path.name() + ":" + repr(path.tpe()) + ")"; }
+[[nodiscard]] string ast::repr(const Named &path) { return "(" + path.symbol() + ":" + repr(path.tpe()) + ")"; }
 
-[[nodiscard]] string DebugPrinter::repr(const Refs_Ref &ref) {
-  if (auto select = POLY_OPT(ref, select); select) {
-    return select->tail().empty() ? repr(select->head())
-                                  : repr(select->head()) + "." +
-                                        mk_string<Named>(
-                                            select->tail(), [&](auto x) { return repr(x); }, ".");
-  }
+[[nodiscard]] string ast::repr(const Refs_Select &select) {
+  return select.tail().empty() //
+             ? repr(select.head())
+             : repr(select.head()) + "." +
+                   mk_string<Named>(
+                       select.tail(), [&](auto x) { return repr(x); }, ".");
+}
+
+[[nodiscard]] string ast::repr(const Refs_Ref &ref) {
+  if (auto c = POLY_OPT(ref, select); c) return repr(*c);
   if (auto c = POLY_OPT(ref, boolconst); c) return "Bool(" + std::to_string(c->value()) + ")";
   if (auto c = POLY_OPT(ref, byteconst); c) return "Byte(" + std::to_string(c->value()) + ")";
   if (auto c = POLY_OPT(ref, charconst); c) return "Char(" + std::to_string(c->value()) + ")";
@@ -54,20 +58,23 @@ using std::string;
   return "Unit()";
 }
 
-[[nodiscard]] string DebugPrinter::repr(const Tree_Expr &expr) {
+[[nodiscard]] string ast::repr(const Tree_Expr &expr) {
   if (auto alias = POLY_OPT(expr, alias); alias) {
     return "(~>" + repr(alias->ref()) + ")";
   }
   if (auto invoke = POLY_OPT(expr, invoke); invoke) {
-    return repr(invoke->lhs()) + "<" + invoke->name() + ">" +
+    return repr(invoke->lhs()) + "`" + invoke->name() + "`" +
            mk_string<Refs_Ref>(
                invoke->args(), [&](auto x) { return repr(x); }, ",") +
            ":" + repr(invoke->tpe());
   }
+  if (auto index = POLY_OPT(expr, index); index) {
+    return repr(index->lhs()) + "[" + repr(index->idx()) + "]";
+  }
   return "(unknown repr)";
 }
 
-[[nodiscard]] string DebugPrinter::repr(const Tree_Stmt &stmt) {
+[[nodiscard]] string ast::repr(const Tree_Stmt &stmt) {
   if (auto comment = POLY_OPT(stmt, comment); comment) {
     return "// " + comment->value();
   }
@@ -75,7 +82,7 @@ using std::string;
     return "var " + repr(var->name()) + " = " + repr(var->rhs());
   }
   if (auto effect = POLY_OPT(stmt, effect); effect) {
-    return repr(effect->lhs()) + "<" + effect->name() + ">" +
+    return repr(effect->lhs().head()) + "`" + effect->name() + "`" +
            mk_string<Refs_Ref>(
                effect->args(), [&](auto x) { return repr(x); }, ",") +
            " : Unit";
@@ -89,10 +96,14 @@ using std::string;
                while_->body(), [&](auto x) { return repr(x); }, "\n") +
            "}";
   }
+  if (auto update = POLY_OPT(stmt, update); update) {
+    return repr(update->lhs()) + "[" + repr(update->idx()) + "] = " + repr(update->value());
+  }
+
   return "(unknown stmt)";
 }
 
-[[nodiscard]] string DebugPrinter::repr(const Tree_Function &fn) {
+[[nodiscard]] string ast::repr(const Tree_Function &fn) {
   return "def " + fn.name() + "(" +
          mk_string<Named>(
              fn.args(), [&](auto x) { return repr(x); }, ",") +
@@ -102,7 +113,60 @@ using std::string;
          "\n}";
 }
 
-[[nodiscard]] string DebugPrinter::repr(const Program &program) {
+[[nodiscard]] string repr(const Program &program) {
   return mk_string<Tree_Function>(
       program.functions(), [&](auto x) { return repr(x); }, "\n");
+}
+
+Named ast::selectLast(const Refs_Select &select) {
+  return select.tail_size() != 0 ? *select.tail().rbegin() : select.head();
+}
+
+std::optional<ast::NumKind> ast::numKind(const Types_Type &tpe) {
+  if (tpe.has_booltpe()     //
+      || tpe.has_bytetpe()  //
+      || tpe.has_chartpe()  //
+      || tpe.has_shorttpe() //
+      || tpe.has_inttpe()   //
+      || tpe.has_longtpe()) //
+    return {ast::NumKind::Integral};
+  else if (tpe.has_doubletpe() || tpe.has_floattpe())
+    return {ast::NumKind::Fractional};
+  else
+    return {};
+}
+
+std::optional<ast::NumKind> ast::numKind(const Refs_Ref &ref) {
+  if (ref.has_boolconst()     //
+      || ref.has_byteconst()  //
+      || ref.has_charconst()  //
+      || ref.has_shortconst() //
+      || ref.has_intconst()   //
+      || ref.has_longconst()) //
+    return {ast::NumKind::Integral};
+  else if (ref.has_doubleconst() || ref.has_floatconst())
+    return {ast::NumKind::Fractional};
+  else if (ref.has_select())
+    return numKind(selectLast(ref.select()).tpe());
+  else
+    return {};
+}
+
+std::string ast::name(NumKind k) {
+  switch (k) {
+  case NumKind::Integral:
+    return "Integral";
+  case NumKind::Fractional:
+    return "Fractional";
+  default:
+    static_assert("unimplemented KindCase");
+  }
+}
+
+std::string ast::qualified(const Refs_Select &select) {
+  return select.tail_size() == 0 //
+             ? select.head().symbol()
+             : select.head().symbol() + "." +
+                   polyregion::mk_string<Named>(
+                       select.tail(), [](auto &n) { return n.symbol(); }, ".");
 }

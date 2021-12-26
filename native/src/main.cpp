@@ -24,6 +24,7 @@
 #include "utils.hpp"
 #include "codegen/llvm.h"
 #include "codegen/opencl.h"
+#include "polyregion.h"
 
 
 using namespace llvm;
@@ -146,7 +147,7 @@ void doIt(const Tree_Function &fnTree) {
   auto mkRef = [&](const Refs_Ref &ref, //
                    const std::unordered_map<std::string, Value *> &lut) -> Value * {
     if (auto select = POLY_OPT(ref, select); select) {
-      if (auto x = lut.find(select->head().name()); x != lut.end()) {
+      if (auto x = lut.find(select->head().symbol()); x != lut.end()) {
         return x->second;
       } else {
         return undefined("Unseen select: " + select->DebugString());
@@ -276,18 +277,18 @@ int main(int argc, char *argv[]) {
                    xs, [](auto x) { return std::to_string(x); }, " ")
             << "\n";
 
-  Tree_Function p;
-  std::cout << "s=" << xs.size() << "\n";
-  auto ok = p.ParseFromArray(xs.data(), xs.size());
-  ast::DebugPrinter printer;
-  std::cout << ">> " << ok << " " << xs.size() << "\n" << printer.repr(p) << std::endl;
+//  Tree_Function p;
+//  std::cout << "s=" << xs.size() << "\n";
+//  auto ok = p.ParseFromArray(xs.data(), xs.size());
+//  std::cout << ">> " << ok << " " << xs.size() << "\n" << ast::repr(p) << std::endl;
+//
+//  codegen::LLVMCodeGen gen("a");
+//  gen.run(p);
+//
+//  codegen::OpenCLCodeGen oclGen ;
+//  oclGen.run(p);
 
-  codegen::LLVMCodeGen gen("a");
-  gen.run(p);
-
-  codegen::OpenCLCodeGen oclGen ;
-  oclGen.run(p);
-
+  aaa::x();
 
   return 0;
 }

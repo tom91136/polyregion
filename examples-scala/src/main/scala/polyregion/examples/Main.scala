@@ -195,16 +195,16 @@ object Main:
 
 //    println(s"Before=${readF(a)}")
 
-      time("JIT warmup")(
-        jit.invokeORC(
-          "copy",
-          (new Pointer(), LibFfi.Type.Void),
-          (a.pointer, LibFfi.Type.Ptr),
-          (b.pointer, LibFfi.Type.Ptr),
-          (new IntPointer(1.toLong).put(0), LibFfi.Type.UInt32),
-          (new IntPointer(1.toLong).put(0), LibFfi.Type.UInt32)
-        )
-      )
+//      time("JIT warmup")(
+//        jit.invokeORC(
+//          "copy",
+//          (new Pointer(), LibFfi.Type.Void),
+//          (a.pointer, LibFfi.Type.Ptr),
+//          (b.pointer, LibFfi.Type.Ptr),
+//          (new IntPointer(1.toLong).put(0), LibFfi.Type.UInt32),
+//          (new IntPointer(1.toLong).put(0), LibFfi.Type.UInt32)
+//        )
+//      )
 
       val Core = 1
 
@@ -212,25 +212,25 @@ object Main:
 
       import scala.jdk.CollectionConverters.*
 
-      time("JIT all") {
-        ex.invokeAll(
-          (0 until Core).map { S =>
-            ({ () =>
-              time(s"  JIT[${S}]")(
-                jit.invokeORC(
-                  "copy",
-                  (new Pointer(), LibFfi.Type.Void),
-                  (a.pointer, LibFfi.Type.Ptr),
-                  (b.pointer, LibFfi.Type.Ptr),
-                  (new IntPointer(1.toLong).put(S * slice), LibFfi.Type.UInt32),
-                  (new IntPointer(1.toLong).put((S + 1) * slice), LibFfi.Type.UInt32)
-                )
-              )
-
-            }): java.util.concurrent.Callable[Unit]
-          }.asJavaCollection
-        )
-      }
+//      time("JIT all") {
+//        ex.invokeAll(
+//          (0 until Core).map { S =>
+//            ({ () =>
+//              time(s"  JIT[${S}]")(
+//                jit.invokeORC(
+//                  "copy",
+//                  (new Pointer(), LibFfi.Type.Void),
+//                  (a.pointer, LibFfi.Type.Ptr),
+//                  (b.pointer, LibFfi.Type.Ptr),
+//                  (new IntPointer(1.toLong).put(S * slice), LibFfi.Type.UInt32),
+//                  (new IntPointer(1.toLong).put((S + 1) * slice), LibFfi.Type.UInt32)
+//                )
+//              )
+//
+//            }): java.util.concurrent.Callable[Unit]
+//          }.asJavaCollection
+//        )
+//      }
 
 //    time("JIT all"){
 //      (0 until Core).map(S => {
@@ -268,8 +268,8 @@ object Main:
 
       println(s"${a.zip(ax).forall((l, r) => math.abs(l - r) < 0.001)}")
 
-      a.deallocate()
-      b.deallocate()
+//      a.deallocate()
+//      b.deallocate()
     }
 
     //    println(s"After=${readF(a)}")

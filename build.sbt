@@ -8,12 +8,28 @@ lazy val commonSettings = Seq(
 
 lazy val catsVersion = "2.7.0"
 
-lazy val runtime = project.settings(
+lazy val `runtime-scala` = project.settings(
   commonSettings,
-  name := "runtime",
-  fork := true,
+  name           := "runtime-scala",
+  fork           := true,
   Compile / fork := true,
   libraryDependencies ++= Seq(
+    ("com.github.jnr" % "jffi"            % "1.3.8").classifier("native"),
+    "com.github.jnr"  % "jffi"            % "1.3.8",
+    "org.bytedeco"    % "llvm-platform"   % "12.0.1-1.5.6",
+    "org.bytedeco"    % "libffi-platform" % "3.4.2-1.5.6",
+    "org.openjdk.jol" % "jol-core"        % "0.16"
+  )
+)
+
+lazy val `runtime-java` = project.settings(
+  commonSettings,
+  name           := "runtime-java",
+  fork           := true,
+  Compile / fork := true,
+  libraryDependencies ++= Seq(
+    ("com.github.jnr" % "jffi"            % "1.3.8").classifier("native"),
+    "com.github.jnr"  % "jffi"            % "1.3.8",
     "org.bytedeco"    % "llvm-platform"   % "12.0.1-1.5.6",
     "org.bytedeco"    % "libffi-platform" % "3.4.2-1.5.6",
     "org.openjdk.jol" % "jol-core"        % "0.16"
@@ -33,14 +49,14 @@ lazy val compiler = project
       "com.lihaoyi"          %% "pprint"          % "0.7.1"
     )
   )
-  .dependsOn(runtime)
+  .dependsOn(`runtime-scala`)
 
 lazy val mainCls = Some("polyregion.examples.Stage")
 
-lazy val examples = project
+lazy val `examples-scala` = project
   .settings(
     commonSettings,
-    name                 := "examples",
+    name                 := "examples-scala",
     Compile / mainClass  := mainCls,
     assembly / mainClass := mainCls,
     scalacOptions ++= Seq("-Yretain-trees"),
@@ -54,9 +70,9 @@ lazy val examples = project
       "org.scala-lang.modules" %% "scala-parallel-collections" % "1.0.4"
     )
   )
-  .dependsOn(compiler, runtime)
+  .dependsOn(compiler, `runtime-scala`)
 
 lazy val root = project
   .in(file("."))
   .settings(commonSettings)
-  .aggregate(runtime, compiler, examples)
+  .aggregate(compiler, `runtime-scala`, `runtime-java` , `examples-scala`)
