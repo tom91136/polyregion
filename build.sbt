@@ -40,6 +40,7 @@ lazy val compiler = project
   .settings(
     commonSettings,
     name := "compiler",
+    scalacOptions ++= Seq("-Yretain-trees"),
     Compile / PB.targets := Seq(
       scalapb.gen() -> (Compile / sourceManaged).value / "scalapb"
     ),
