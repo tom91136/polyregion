@@ -33,13 +33,13 @@ static void x() {
 
   using namespace foo;
 
-  Alt l = A();
-  T1ALeaf xx ({}, {"a", "b"}, 23, T1BLeaf());
+//  Alt l = A();
+//  T1ALeaf xx ({}, {"a", "b"}, 23, T1BLeaf());
 
 
 
 
-  std::cout << "[] = "  << xx;
+//  std::cout << "[] = "  << xx;
 }
 
 // ======================================================================================

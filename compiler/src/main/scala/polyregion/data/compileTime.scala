@@ -4,17 +4,17 @@ object compileTime {
 
   import scala.quoted.*
 
-  inline def primaryCtorApplyTerms[T, U, TC[x] <: x => U] =
+  inline def primaryCtorApplyTerms[T, U, TC[x] <: Option[x] => U] =
     ${ primaryCtorApplyTermsImpl[T, U, TC] }
 
-  def primaryCtorApplyTermsImpl[T: Type, U: Type, TC[x] <: x => U: Type](using quotes: Quotes): Expr[List[U]] = {
+  def primaryCtorApplyTermsImpl[T: Type, U: Type, TC[x] <: Option[x] => U: Type](using quotes: Quotes): Expr[List[U]] = {
     import quotes.reflect.*
 
     val tpe    = TypeRepr.of[T].dealias.simplified
     val symbol = tpe.typeSymbol
 
     def res[A: Type: ToExpr](e: A) = Expr.summon[TC[A]] match {
-      case Some(x) => '{ ${ x }(${ Expr(e) }) }
+      case Some(x) => '{ ${ x }(Some(${ Expr(e) })) }
       case _       => report.errorAndAbort(s"No implicit found for ${TypeRepr.of[TC[A]].show}")
     }
 
@@ -38,12 +38,20 @@ object compileTime {
           // case Literal(NullConstant)       => res(null)
           // case Literal(ClassOfConstant(x)) => res(x)
           case s @ Select(a, b) =>
+
+            // println(s"${s.show} ${s}, ${a} ${b} ${s.symbol.owner == symbol}")
+
             // println(s"  >${a.tpe.show}"
-            val applied = TypeRepr.of[TC].appliedTo(s.tpe.dealias.simplified)
-            Implicits.search(applied) match {
-              case imp: ImplicitSearchSuccess => '{ ${ imp.tree.asExpr }.asInstanceOf[TC[Any]](${ s.asExpr }) }
+            val applied = TypeRepr.of[TC].appliedTo(s.tpe.dealias.widenTermRefByName)
+            println(s"${applied.show}")
+            // report.info("")
+            val u = Implicits.search(applied) match {
+              case imp: ImplicitSearchSuccess => '{ ${ imp.tree.asExpr }.asInstanceOf[TC[Any]](None) }
               case _                          => report.errorAndAbort(s"No implicit found for ${applied.show}")
             }
+            u
+            // res(s.show :: Nil)
+
         }))
       case _ => None
     }

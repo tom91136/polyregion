@@ -15,6 +15,34 @@ import cats.syntax.all._
 
 object Cpp {
 
+  import collection.immutable.ListSet
+  import collection.mutable.{Builder, LinkedHashMap => MMap}
+
+  extension [A](t: Traversable[A]) {
+
+    def groupByOrderedUnique[K](f: A => K): Map[K, ListSet[A]] =
+      groupByGen(ListSet.newBuilder[A])(f)
+
+    def groupByOrdered[K](f: A => K): Map[K, List[A]] =
+      groupByGen(List.newBuilder[A])(f)
+
+    def groupByGen[K, C[_]](makeBuilder: => Builder[A, C[A]])(f: A => K): Map[K, C[A]] = {
+      val map = MMap[K, Builder[A, C[A]]]()
+      for (i <- t) {
+        val key = f(i)
+        val builder = map.get(key) match {
+          case Some(existing) => existing
+          case None =>
+            val newBuilder = makeBuilder
+            map(key) = newBuilder
+            newBuilder
+        }
+        builder += i
+      }
+      map.view.mapValues(_.result).toMap
+    }
+  }
+
   extension [A](xs: Seq[A]) {
     def csv: String = xs.mkString(", ")
     def ssv: String = xs.mkString(" ")
@@ -30,7 +58,7 @@ object Cpp {
       streamOp: (String, String) => List[String] = (s, v) => List(s"$s << $v;"),
       include: List[String] = Nil
   ) {
-    def declaredName = if (sum) s"${name}Base" else name
+    def declaredName = if (sum) s"Base" else name
   }
 
   enum CppAttrs(val repr: String) {
@@ -41,6 +69,7 @@ object Cpp {
   }
 
   case class StructSource(
+      namespaces: List[String],
       name: String,
       parent: Option[String],
       stmts: List[String],
@@ -49,26 +78,56 @@ object Cpp {
       forwardDeclStmts: List[String]
   )
   object StructSource {
-    def emitHeader(namespace: String, xs: List[StructSource]) = {
-      val includes =
-        ("memory" :: "variant" :: "iterator" :: xs.flatMap(_.includes)).distinct.sorted
-          .map(incl => s"#include <$incl>")
-          .mkString("\n")
 
-      val clsDefs = xs.flatMap { c =>
-        "" ::
-          s"struct ${c.parent.fold(c.name)(s"${c.name} : " + _)} {" //
-          :: c.stmts.map("  " + _) :::                              //
-          "};" ::                                                   //
-          c.forwardDeclStmts                                        //
+    val RequiredIncludes = List("memory", "variant", "iterator")
+    def emitHeader(namespace: String, xs: List[StructSource]) = {
+
+      // def collect[A](xs: List[StructSource])(f: StructSource => A): List[A] =
+      //   xs.flatMap(s => f(s) :: collect(s.nested)(f))
+
+      // val u = collect(xs)(_.includes).flatten
+
+      val includes = (RequiredIncludes ::: xs.flatMap(_.includes)) //
+        .distinct.sorted
+        .map(incl => s"#include <$incl>")
+        .mkString("\n")
+
+      // def emitCls(xs: List[StructSource]): List[String] =
+      //   xs.flatMap { c =>
+      //     "" ::
+      //       s"struct ${c.parent.fold(c.name)(s"${c.name} : " + _)} {"        //
+      //       :: c.stmts.map("  " + _) ::: emitCls(c.nested).map("  " + _) ::: //
+      //       "};" ::                                                          //
+      //       c.forwardDeclStmts                                               //
+      //   }                                                                    //
+
+      val nscs = xs.map(x => x.namespaces -> List(x)).toList.flatMap { (ns, clss) =>
+        val clsDefs = clss.flatMap { c =>
+          "" ::
+            s"struct ${c.parent.fold(c.name)(s"${c.name} : " + _)} {" //
+            :: c.stmts.map("  " + _) :::                              //
+            "};" ::                                                   //
+            c.forwardDeclStmts                                        //
+        }
+      s"namespace ${ns.mkString("::")} { " ::
+        clsDefs.map("  " + _) :::
+        "}" :: Nil
       }
+      // val clsDefs = xs.flatMap { c =>
+      //   "" ::
+      //     s"struct ${c.parent.fold(c.name)(s"${c.name} : " + _)} {" //
+      //     :: c.stmts.map("  " + _) :::                              //
+      //     "};" ::                                                   //
+      //     c.forwardDeclStmts                                        //
+      // }
+      // val clsDefs = emitCls(xs)
 
       s"""|#pragma once
           |
           |$includes
           |
           |namespace $namespace {
-          |${clsDefs.sym("\n", "\n", "\n")}
+          |${nscs.sym("\n", "\n", "\n")}
           |} // namespace $namespace
           | 
           |""".stripMargin
@@ -91,23 +150,28 @@ object Cpp {
       variants: List[StructNode] = Nil
   ) {
     def name = tpe.declaredName
+    def traceUp(p: Option[(StructNode, List[String])]): List[StructNode] =
+      p match {
+        case Some((x, _)) => x :: traceUp(x.parent)
+        case None         => Nil
+      }
+    lazy val namespace = traceUp(parent).map(_.tpe.name).reverse
     def emit: List[StructSource] = {
+
       val ctorInit = members.map { (n, tpe) =>
-        if (tpe.sum) s"$n(std::make_shared<${tpe.name}>($n))"
+        if (tpe.sum) s"$n(std::make_shared<${tpe.name}::Any>($n))"
         else if (tpe.movable) s"$n(std::move($n))"
         else s"$n($n)"
       }
-      val (classDecl, ctorArgs, ctorChain) = parent match {
-        case None => (tpe.name, members, ctorInit)
+      val (ctorArgs, ctorChain) = parent match {
+        case None => (members, ctorInit)
         case Some((base, Nil)) =>
           (
-            s"${name} : ${base.name}",
             members ::: base.members,
             s"${base.name}(${base.members.map((n, _) => n).csv})" :: ctorInit
           )
         case Some((base, xs)) =>
           (
-            s"${name} : ${base.name}",
             members,
             s"${base.name}(${xs.csv})" :: ctorInit
           )
@@ -121,11 +185,11 @@ object Cpp {
         case Nil => " = default;"
         case xs  => s" noexcept : ${xs.csv} {}"
       }
-      val ctorArgExpr  = ctorArgs.map((n, t) => if (t.sum) s"const ${t.name} &$n" else s"${t.name} $n").csv
+      val ctorArgExpr  = ctorArgs.map((n, t) => if (t.sum) s"const ${t.name}::Any &$n" else s"${t.name} $n").csv
       val ctorAttrExpr = ctorAttrs.map(_.repr).sym("", " ", " ")
 
       val memberStmts = members.map { (n, t) =>
-        if (t.sum) s"std::shared_ptr<${t.name}> $n;" else s"${t.name} $n;"
+        if (t.sum) s"std::shared_ptr<${t.name}::Any> $n;" else s"${t.name} $n;"
       }
       val mainCtorStmts = s"$ctorAttrExpr$name($ctorArgExpr)$ctorChainExpr" :: Nil
       val (singletonClsStmts, singletonClsImplStmts) = members match {
@@ -144,8 +208,13 @@ object Cpp {
         // )
         case _ => (Nil, Nil)
       }
+      val nss = if (tpe.sum) namespace :+ tpe.name else namespace
 
-      val streamMethodProto = s"std::ostream &operator<<(std::ostream &os, const ${name} &x)"
+      def ns(name : String) = {
+        nss.sym("", "::", "::") + name
+      }
+
+      val streamMethodProto = s"std::ostream &operator<<(std::ostream &os, const ${ns(name)} &x)"
       val streamStmts =
         // parent.map((c, _) => ("os << \"base=\";" :: c.tpe.streamOp("os", "x"))).toList :::
         members.map((n, tpe) =>
@@ -165,24 +234,39 @@ object Cpp {
       val variantStmt =
         if (tpe.sum) {
           val allVariants = foldVariants(variants)
-          allVariants
-            .map(v => s"struct $v;") :+ s"using ${tpe.name} = std::variant<${allVariants.csv}>;"
+          allVariants.map(v => s"struct $v;") :+ s"using Any = std::variant<${allVariants.csv}>;"
         } else Nil
 
       val stmts     = memberStmts ::: mainCtorStmts ::: singletonClsStmts ::: s"friend $streamMethodProto;" :: Nil
       val implStmts = singletonClsImplStmts ::: streamMethodStmts
       val includes  = members.flatMap(_._2.include)
 
-      StructSource(name, parent.map(_._1.name), stmts, implStmts, includes, variantStmt) :: variants.flatMap(_.emit)
+
+      val struct = StructSource(
+        nss,
+        name,
+        parent.map(x => nss.mkString("::") + "::" + x._1.name),
+        stmts,
+        implStmts,
+        includes,
+        variantStmt
+      )
+
+      // if (tpe.sum) {
+      //   StructSource(tpe.name, None, Nil, Nil, Nil, Nil, struct :: variants.map(_.emit))
+      // } else struct
+
+      struct :: variants.flatMap(_.emit)
+
     }
   }
 
-  trait ToCppTerm[A] extends (A => String)
+  trait ToCppTerm[A] extends (Option[A] => String)
   object ToCppTerm {
-    given ToCppTerm[String]       = x => s"\"$x\""
-    given ToCppTerm[List[String]] = x => x.mkString(".")
-    given ToCppTerm[Int]          = x => s"$x"
-    inline given derived[T](using m: Mirror.Of[T]): ToCppTerm[T] = (x: T) =>
+    given ToCppTerm[String]       = x => s"\"${x.getOrElse("")}\""
+    given ToCppTerm[List[String]] = x => x.toList.flatten.mkString(".")
+    given ToCppTerm[Int]          = x => s"${x.getOrElse(0)}"
+    inline given derived[T](using m: Mirror.Of[T]): ToCppTerm[T] = (_: Option[T]) =>
       inline m match
         case s: Mirror.SumOf[T] =>
           s"${constValue[s.MirroredLabel]}() /*sum*/"
@@ -214,7 +298,7 @@ object Cpp {
     given [A: ToCppType]: ToCppType[List[A]] = { () =>
       val tpe = summon[ToCppType[A]]()
       CppType(
-        s"std::vector<${tpe.name}>",
+        s"std::vector<${if (tpe.sum) s"${tpe.name}::Any" else tpe.name}>",
         movable = true,
         constexpr = false,
         sum = false,
@@ -241,7 +325,7 @@ object Cpp {
       inline m match
         case s: Mirror.SumOf[T] =>
           CppType(
-            constValue[s.MirroredLabel],
+            s"${constValue[s.MirroredLabel]}",
             movable = true,
             constexpr = false, // forAll[m.MirroredElemTypes](_.constexpr),
             streamOp = (o, v) => List(s"$o << static_cast<const ${constValue[s.MirroredLabel]}Base &>($v);"),
@@ -349,49 +433,46 @@ object Foo {
 
     println("\n=========\n")
 
-  implicit val n: Cpp.ToCppType[polyregion.PolyAstUnused.Type]    = Cpp.ToCppType.derived
-  implicit val nn: Cpp.ToCppType[polyregion.PolyAstUnused.Kind]   = Cpp.ToCppType.derived
-  implicit val nnn: Cpp.ToCppType[polyregion.PolyAstUnused.Named] = Cpp.ToCppType.derived
-  implicit val nnnn: Cpp.ToCppType[polyregion.PolyAstUnused.Ref]  = Cpp.ToCppType.derived
+  implicit val n: Cpp.ToCppType[polyregion.PolyAstUnused.Type]      = Cpp.ToCppType.derived
+  implicit val nn: Cpp.ToCppType[polyregion.PolyAstUnused.TypeKind] = Cpp.ToCppType.derived
+  implicit val nnn: Cpp.ToCppType[polyregion.PolyAstUnused.Named]   = Cpp.ToCppType.derived
+  implicit val nnnn: Cpp.ToCppType[polyregion.PolyAstUnused.Term]   = Cpp.ToCppType.derived
 
-  implicit val _n: Cpp.ToCppTerm[polyregion.PolyAstUnused.Type]    = Cpp.ToCppTerm.derived
-  implicit val _nn: Cpp.ToCppTerm[polyregion.PolyAstUnused.Kind]   = Cpp.ToCppTerm.derived
-  implicit val _nnn: Cpp.ToCppTerm[polyregion.PolyAstUnused.Named] = Cpp.ToCppTerm.derived
-  implicit val _nnnn: Cpp.ToCppTerm[polyregion.PolyAstUnused.Ref]  = Cpp.ToCppTerm.derived
+  implicit val _n: Cpp.ToCppTerm[polyregion.PolyAstUnused.Type]      = Cpp.ToCppTerm.derived
+  implicit val _nn: Cpp.ToCppTerm[polyregion.PolyAstUnused.TypeKind] = Cpp.ToCppTerm.derived
+  implicit val _nnn: Cpp.ToCppTerm[polyregion.PolyAstUnused.Named]   = Cpp.ToCppTerm.derived
+  implicit val _nnnn: Cpp.ToCppTerm[polyregion.PolyAstUnused.Term]   = Cpp.ToCppTerm.derived
 //
 
   val alts = Cpp.deriveStruct[polyregion.PolyAstUnused.Sym]().emit
-    ::: Cpp.deriveStruct[polyregion.PolyAstUnused.Kind]().emit
+    ::: Cpp.deriveStruct[polyregion.PolyAstUnused.TypeKind]().emit
     ::: Cpp.deriveStruct[polyregion.PolyAstUnused.Type]().emit
     ::: Cpp.deriveStruct[polyregion.PolyAstUnused.Named]().emit
     ::: Cpp.deriveStruct[polyregion.PolyAstUnused.Position]().emit
-    ::: Cpp.deriveStruct[polyregion.PolyAstUnused.Ref]().emit
-    ::: Cpp.deriveStruct[polyregion.PolyAstUnused.U]().emit
-  // ::: Cpp.deriveStruct[polyregion.PolyAstUnused.Intr]().emit
-  // ::: Cpp.deriveStruct[polyregion.PolyAstUnused.Tree]().emit
-  // ::: Cpp.deriveStruct[polyregion.PolyAstUnused.Ref]().emit
-// //                 ::: Cpp.deriveStruct[polyregion.PolyAstUnused.Tree]().emit
-//   val header = StructSource.emitHeader("foo", alts)
-//   println(header)
-//   println("\n=========\n")
-//   val impl = StructSource.emitImpl("foo", "foo", alts)
-//   println(impl)
-//   println("\n=========\n")
+    ::: Cpp.deriveStruct[polyregion.PolyAstUnused.Term]().emit
+    ::: Cpp.deriveStruct[polyregion.PolyAstUnused.Tree]().emit
 
-//   Files.writeString(
-//     Paths.get("/home/tom/polyregion/native/src/foo.cpp"),
-//     impl,
-//     StandardOpenOption.TRUNCATE_EXISTING,
-//     StandardOpenOption.CREATE,
-//     StandardOpenOption.WRITE
-//   )
-//   Files.writeString(
-//     Paths.get("/home/tom/polyregion/native/src/foo.h"),
-//     header,
-//     StandardOpenOption.TRUNCATE_EXISTING,
-//     StandardOpenOption.CREATE,
-//     StandardOpenOption.WRITE
-//   )
+  val header = StructSource.emitHeader("foo", alts)
+  // println(header)
+  println("\n=========\n")
+  val impl = StructSource.emitImpl("foo", "foo", alts)
+  // println(impl)
+  println("\n=========\n")
+
+  Files.writeString(
+    Paths.get("/home/tom/polyregion/native/src/foo.cpp"),
+    impl,
+    StandardOpenOption.TRUNCATE_EXISTING,
+    StandardOpenOption.CREATE,
+    StandardOpenOption.WRITE
+  )
+  Files.writeString(
+    Paths.get("/home/tom/polyregion/native/src/foo.h"),
+    header,
+    StandardOpenOption.TRUNCATE_EXISTING,
+    StandardOpenOption.CREATE,
+    StandardOpenOption.WRITE
+  )
 //    import Cpp.*
 //    println(T1Mid.T1ALeaf(Nil, List("a", "b"), 23, T1Mid.T1BLeaf))
 
