@@ -8,8 +8,4 @@ Program compile(Buffer *polyast_proto){
 
 }
 
-void release(Program *buffer){
-  std::cout << "Release: "  << std::endl;
-
-
-}
+void release(Program *buffer) { std::cout << "Release: " << std::endl; }

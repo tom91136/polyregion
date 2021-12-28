@@ -80,6 +80,7 @@ add_executable(polyregion_native
         src/codegen/llvm.cpp
         src/codegen/opencl.cpp
         src/dis.cpp
+        src/foo.cpp
         src/main.cpp
         src/codegen/codegen.h src/polyregion.cpp src/polyregion.h)
 
