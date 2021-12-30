@@ -71,7 +71,7 @@ constexpr uint32_t hash(const char *data, size_t const size) noexcept {
   return hash;
 }
 
-constexpr uint32_t hash(const std::string &str) noexcept { return hash(str.data(), str.length()); }
+constexpr uint32_t hash(const std::string_view &str) noexcept { return hash(str.data(), str.length()); }
 
 consteval inline unsigned int operator"" _(char const *p, size_t s) { return hash(p, s); }
 

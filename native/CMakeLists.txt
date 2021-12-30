@@ -99,3 +99,13 @@ message(STATUS "LLVM > ${LLVM_CONFIG_}")
 
 message(STATUS "LLVM libs ${llvm_libraries}")
 target_link_libraries(polyregion_native LLVM LLVMSupport LLVMDemangle capstone-static ${Protobuf_LIBRARIES})
+
+
+set(SANATISE_OPTIONS -fsanitize=address -fsanitize=undefined)
+set(RELEASE_OPTIONS -Ofast -march=native -g)
+set(DEBUG_OPTIONS -O2 -fno-omit-frame-pointer -march=native ${SANATISE_OPTIONS})
+
+target_compile_options(polyregion_native PUBLIC ${COMPILE_OPTIONS})
+target_compile_options(polyregion_native PUBLIC "$<$<CONFIG:RELEASE>:${RELEASE_OPTIONS}>")
+target_compile_options(polyregion_native PUBLIC "$<$<CONFIG:DEBUG>:${DEBUG_OPTIONS}>")
+target_link_options(polyregion_native PUBLIC "$<$<CONFIG:DEBUG>:${SANATISE_OPTIONS}>")

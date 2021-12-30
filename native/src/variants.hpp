@@ -13,8 +13,8 @@ template <typename F, typename Ret, typename A, typename... Rest> //
 A arg1_(Ret (F::*)(A, Rest...));
 template <typename F, typename Ret, typename A, typename... Rest> //
 A arg1_(Ret (F::*)(A, Rest...) const);
-
 template <typename F> struct arg1 { using type = decltype(arg1_(&F::operator())); };
+template <typename T> using arg1_t = typename arg1<T>::type;
 
 } // namespace details
 
@@ -25,15 +25,15 @@ struct is_variant_member<T, std::variant<Ts...>> : public std::disjunction<std::
 template <class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
 template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
-template <typename Variant, typename... Ts,                                               //
-          typename =                                                                      //
-          typename std::enable_if<                                                        //
-              std::conjunction<                                                           //
-                  is_variant_member<typename details::arg1<Ts>::type, Variant>...>::value //
-              >::type                                                                     //
-          >                                                                               //
+template <                                                                                  //
+    typename Variant, typename... Ts,                                                       //
+    typename = std::enable_if_t<                                                            //
+        std::conjunction_v<                                                                 //
+            is_variant_member<std::decay_t<details::arg1_t<Ts>>, std::decay_t<Variant>>...> //
+        >                                                                                   //
+    >                                                                                       //
 constexpr auto total(Variant &&v, Ts &&...ts) {
-  return std::visit(overloaded{ts...}, v);
+  return std::visit(overloaded{ts...}, std::forward<Variant>(v));
 }
 
 }; // namespace polyregion::variants

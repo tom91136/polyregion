@@ -1,7 +1,6 @@
 package polyregion
 
 object PolyAstUnused {
-  // struct Sym { std::vector<std::string>> data } ;
 
   case class Sym(fqn: List[String]) {
     def repr: String = fqn.mkString(".")
@@ -29,16 +28,17 @@ object PolyAstUnused {
     case Int extends Type(TypeKind.Integral)
     case Long extends Type(TypeKind.Integral)
 
-    case Struct(name: Sym, args: List[Type]) extends Type(TypeKind.Ref)
-    case Array(component: Type) extends Type(TypeKind.Ref)
     case String extends Type(TypeKind.Ref)
     case Unit extends Type(TypeKind.Ref)
+    case Struct(name: Sym, args: List[Type]) extends Type(TypeKind.Ref)
+    case Array(component: Type) extends Type(TypeKind.Ref)
+
   }
 
   case class Named(symbol: String, tpe: Type)
 
   enum Term(val tpe: Type) {
-    case Select(init: List[Named], last: Named) extends Term(last.tpe)
+    case Select(init: List[Named], last: Named) extends Term(last.tpe) // TODO
     case BoolConst(value: Boolean) extends Term(Type.Bool)
     case ByteConst(value: Byte) extends Term(Type.Byte)
     case CharConst(value: Char) extends Term(Type.Char)
@@ -68,17 +68,15 @@ object PolyAstUnused {
     case Pow(lhs: Term, rhs: Term, rtn: Type) extends Intr(rtn)
   }
 
-  // Expr
-  //  Alias {  ref : Ref  }
   enum Expr(tpe: Type) extends Tree(tpe) {
     case Alias(ref: Term) extends Expr(ref.tpe)
     case Invoke(lhs: Term, name: String, args: List[Term], rtn: Type) extends Expr(rtn)
-    case Index(lhs: Term.Select, idx: Term, component: Type) extends Expr(component)
+    case Index(lhs: Term, idx: Term, component: Type) extends Expr(component)
   }
 
   enum Stmt extends Tree(Type.Unit) {
     case Comment(value: String)
-    case Var(name: Named, rhs: Expr)
+    case Var(name: Named, expr: Expr)
     case Mut(name: Term.Select, expr: Expr)
     case Update(lhs: Term.Select, idx: Term, value: Term)
     case Effect(lhs: Term.Select, name: String, args: List[Term])
@@ -123,7 +121,7 @@ object PolyAstUnused {
   //    }
 
   case class StructDef(
-      members: List[(String, Type)]
+      members: List[Named]
       //TODO methods
   )
 
