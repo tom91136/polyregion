@@ -1,5 +1,6 @@
 #pragma once
 #include "generated/polyast.h"
+#include "json.hpp"
 #include "variants.hpp"
 #include <ostream>
 
@@ -35,10 +36,11 @@ static void x() {
 
   Tree::Stmt::Return r(i);
 
-  std::cout << a << "\n"
-            << i << "\n"
-            << r << "\n"
-            << "\n";
+  using json = nlohmann::json;
+  json j;
+  j.push_back(1);
+
+  std::cout << a << "\n" << i << "\n" << r << "\n" << j << "\n";
 
   Tree::Expr::Any u = a;
   //
@@ -75,7 +77,6 @@ static void x() {
   );
   std::cout << "k=       " << u << kk << aaa << "\n";
 }
-
 
 } // namespace aaa
 

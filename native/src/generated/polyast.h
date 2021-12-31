@@ -29,20 +29,22 @@ constexpr auto select(const Alternative<T...> &a) {
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "google-explicit-constructor"
 
+
+
 struct Sym {
   std::vector<std::string> fqn;
   explicit Sym(std::vector<std::string> fqn) noexcept : fqn(std::move(fqn)) {}
   friend std::ostream &operator<<(std::ostream &os, const Sym &);
 };
 
-namespace TypeKind {
+namespace TypeKind { 
 
 struct Ref;
 struct Integral;
 struct Fractional;
 using Any = Alternative<Ref, Integral, Fractional>;
 struct Base {
-protected:
+  protected:
   Base() = default;
   friend std::ostream &operator<<(std::ostream &os, const TypeKind::Any &);
 };
@@ -65,7 +67,7 @@ struct Fractional : TypeKind::Base {
   friend std::ostream &operator<<(std::ostream &os, const TypeKind::Fractional &);
 };
 } // namespace TypeKind
-namespace Type {
+namespace Type { 
 
 struct Float;
 struct Double;
@@ -82,12 +84,11 @@ struct Array;
 using Any = Alternative<Float, Double, Bool, Byte, Char, Short, Int, Long, String, Unit, Struct, Array>;
 struct Base {
   TypeKind::Any kind;
-
-protected:
+  protected:
   explicit Base(TypeKind::Any kind) noexcept : kind(std::move(kind)) {}
   friend std::ostream &operator<<(std::ostream &os, const Type::Any &);
 };
-TypeKind::Any kind(const Type::Any &);
+TypeKind::Any kind(const Type::Any&);
 
 struct Float : Type::Base {
   Float() noexcept : Type::Base(TypeKind::Fractional()) {}
@@ -152,8 +153,7 @@ struct Unit : Type::Base {
 struct Struct : Type::Base {
   Sym name;
   std::vector<Type::Any> args;
-  Struct(Sym name, std::vector<Type::Any> args) noexcept
-      : Type::Base(TypeKind::Ref()), name(std::move(name)), args(std::move(args)) {}
+  Struct(Sym name, std::vector<Type::Any> args) noexcept : Type::Base(TypeKind::Ref()), name(std::move(name)), args(std::move(args)) {}
   operator Any() const { return std::make_shared<Struct>(*this); };
   friend std::ostream &operator<<(std::ostream &os, const Type::Struct &);
 };
@@ -165,6 +165,7 @@ struct Array : Type::Base {
   friend std::ostream &operator<<(std::ostream &os, const Type::Array &);
 };
 } // namespace Type
+
 
 struct Named {
   std::string symbol;
@@ -181,7 +182,7 @@ struct Position {
   friend std::ostream &operator<<(std::ostream &os, const Position &);
 };
 
-namespace Term {
+namespace Term { 
 
 struct Select;
 struct BoolConst;
@@ -193,22 +194,19 @@ struct LongConst;
 struct FloatConst;
 struct DoubleConst;
 struct StringConst;
-using Any = Alternative<Select, BoolConst, ByteConst, CharConst, ShortConst, IntConst, LongConst, FloatConst,
-                        DoubleConst, StringConst>;
+using Any = Alternative<Select, BoolConst, ByteConst, CharConst, ShortConst, IntConst, LongConst, FloatConst, DoubleConst, StringConst>;
 struct Base {
   Type::Any tpe;
-
-protected:
+  protected:
   explicit Base(Type::Any tpe) noexcept : tpe(std::move(tpe)) {}
   friend std::ostream &operator<<(std::ostream &os, const Term::Any &);
 };
-Type::Any tpe(const Term::Any &);
+Type::Any tpe(const Term::Any&);
 
 struct Select : Term::Base {
   std::vector<Named> init;
   Named last;
-  Select(std::vector<Named> init, Named last) noexcept
-      : Term::Base(last.tpe), init(std::move(init)), last(std::move(last)) {}
+  Select(std::vector<Named> init, Named last) noexcept : Term::Base(last.tpe), init(std::move(init)), last(std::move(last)) {}
   operator Any() const { return std::make_shared<Select>(*this); };
   friend std::ostream &operator<<(std::ostream &os, const Term::Select &);
 };
@@ -276,7 +274,7 @@ struct StringConst : Term::Base {
   friend std::ostream &operator<<(std::ostream &os, const Term::StringConst &);
 };
 } // namespace Term
-namespace Tree {
+namespace Tree { 
 
 struct Inv;
 struct Sin;
@@ -301,16 +299,14 @@ struct Break;
 struct Cont;
 struct Cond;
 struct Return;
-using Any = Alternative<Inv, Sin, Cos, Tan, Add, Sub, Div, Mul, Mod, Pow, Alias, Invoke, Index, Comment, Var, Mut,
-                        Update, Effect, While, Break, Cont, Cond, Return>;
+using Any = Alternative<Inv, Sin, Cos, Tan, Add, Sub, Div, Mul, Mod, Pow, Alias, Invoke, Index, Comment, Var, Mut, Update, Effect, While, Break, Cont, Cond, Return>;
 struct Base {
   Type::Any tpe;
-
-protected:
+  protected:
   explicit Base(Type::Any tpe) noexcept : tpe(std::move(tpe)) {}
 };
 } // namespace Tree
-namespace Tree::Intr {
+namespace Tree::Intr { 
 
 struct Inv;
 struct Sin;
@@ -325,12 +321,11 @@ struct Pow;
 using Any = Alternative<Inv, Sin, Cos, Tan, Add, Sub, Div, Mul, Mod, Pow>;
 struct Base : Tree::Base {
   Type::Any tpe;
-
-protected:
+  protected:
   explicit Base(Type::Any tpe) noexcept : Tree::Base(tpe), tpe(std::move(tpe)) {}
   friend std::ostream &operator<<(std::ostream &os, const Tree::Intr::Any &);
 };
-Type::Any tpe(const Tree::Intr::Any &);
+Type::Any tpe(const Tree::Intr::Any&);
 
 struct Inv : Tree::Intr::Base {
   Term::Any lhs;
@@ -368,8 +363,7 @@ struct Add : Tree::Intr::Base {
   Term::Any lhs;
   Term::Any rhs;
   Type::Any rtn;
-  Add(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept
-      : Tree::Intr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
+  Add(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept : Tree::Intr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
   operator Any() const { return std::make_shared<Add>(*this); };
   friend std::ostream &operator<<(std::ostream &os, const Tree::Intr::Add &);
 };
@@ -378,8 +372,7 @@ struct Sub : Tree::Intr::Base {
   Term::Any lhs;
   Term::Any rhs;
   Type::Any rtn;
-  Sub(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept
-      : Tree::Intr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
+  Sub(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept : Tree::Intr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
   operator Any() const { return std::make_shared<Sub>(*this); };
   friend std::ostream &operator<<(std::ostream &os, const Tree::Intr::Sub &);
 };
@@ -388,8 +381,7 @@ struct Div : Tree::Intr::Base {
   Term::Any lhs;
   Term::Any rhs;
   Type::Any rtn;
-  Div(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept
-      : Tree::Intr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
+  Div(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept : Tree::Intr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
   operator Any() const { return std::make_shared<Div>(*this); };
   friend std::ostream &operator<<(std::ostream &os, const Tree::Intr::Div &);
 };
@@ -398,8 +390,7 @@ struct Mul : Tree::Intr::Base {
   Term::Any lhs;
   Term::Any rhs;
   Type::Any rtn;
-  Mul(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept
-      : Tree::Intr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
+  Mul(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept : Tree::Intr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
   operator Any() const { return std::make_shared<Mul>(*this); };
   friend std::ostream &operator<<(std::ostream &os, const Tree::Intr::Mul &);
 };
@@ -408,8 +399,7 @@ struct Mod : Tree::Intr::Base {
   Term::Any lhs;
   Term::Any rhs;
   Type::Any rtn;
-  Mod(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept
-      : Tree::Intr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
+  Mod(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept : Tree::Intr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
   operator Any() const { return std::make_shared<Mod>(*this); };
   friend std::ostream &operator<<(std::ostream &os, const Tree::Intr::Mod &);
 };
@@ -418,13 +408,12 @@ struct Pow : Tree::Intr::Base {
   Term::Any lhs;
   Term::Any rhs;
   Type::Any rtn;
-  Pow(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept
-      : Tree::Intr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
+  Pow(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept : Tree::Intr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
   operator Any() const { return std::make_shared<Pow>(*this); };
   friend std::ostream &operator<<(std::ostream &os, const Tree::Intr::Pow &);
 };
 } // namespace Tree::Intr
-namespace Tree::Expr {
+namespace Tree::Expr { 
 
 struct Alias;
 struct Invoke;
@@ -432,12 +421,11 @@ struct Index;
 using Any = Alternative<Alias, Invoke, Index>;
 struct Base : Tree::Base {
   Type::Any tpe;
-
-protected:
+  protected:
   explicit Base(Type::Any tpe) noexcept : Tree::Base(tpe), tpe(std::move(tpe)) {}
   friend std::ostream &operator<<(std::ostream &os, const Tree::Expr::Any &);
 };
-Type::Any tpe(const Tree::Expr::Any &);
+Type::Any tpe(const Tree::Expr::Any&);
 
 struct Alias : Tree::Expr::Base {
   Term::Any ref;
@@ -451,8 +439,7 @@ struct Invoke : Tree::Expr::Base {
   std::string name;
   std::vector<Term::Any> args;
   Type::Any rtn;
-  Invoke(Term::Any lhs, std::string name, std::vector<Term::Any> args, Type::Any rtn) noexcept
-      : Tree::Expr::Base(rtn), lhs(std::move(lhs)), name(std::move(name)), args(std::move(args)), rtn(std::move(rtn)) {}
+  Invoke(Term::Any lhs, std::string name, std::vector<Term::Any> args, Type::Any rtn) noexcept : Tree::Expr::Base(rtn), lhs(std::move(lhs)), name(std::move(name)), args(std::move(args)), rtn(std::move(rtn)) {}
   operator Any() const { return std::make_shared<Invoke>(*this); };
   friend std::ostream &operator<<(std::ostream &os, const Tree::Expr::Invoke &);
 };
@@ -461,13 +448,12 @@ struct Index : Tree::Expr::Base {
   Term::Any lhs;
   Term::Any idx;
   Type::Any component;
-  Index(Term::Any lhs, Term::Any idx, Type::Any component) noexcept
-      : Tree::Expr::Base(component), lhs(std::move(lhs)), idx(std::move(idx)), component(std::move(component)) {}
+  Index(Term::Any lhs, Term::Any idx, Type::Any component) noexcept : Tree::Expr::Base(component), lhs(std::move(lhs)), idx(std::move(idx)), component(std::move(component)) {}
   operator Any() const { return std::make_shared<Index>(*this); };
   friend std::ostream &operator<<(std::ostream &os, const Tree::Expr::Index &);
 };
 } // namespace Tree::Expr
-namespace Tree::Stmt {
+namespace Tree::Stmt { 
 
 struct Comment;
 struct Var;
@@ -481,7 +467,7 @@ struct Cond;
 struct Return;
 using Any = Alternative<Comment, Var, Mut, Update, Effect, While, Break, Cont, Cond, Return>;
 struct Base : Tree::Base {
-protected:
+  protected:
   Base() noexcept : Tree::Base(Type::Unit()) {}
   friend std::ostream &operator<<(std::ostream &os, const Tree::Stmt::Any &);
 };
@@ -504,8 +490,7 @@ struct Var : Tree::Stmt::Base {
 struct Mut : Tree::Stmt::Base {
   Term::Select name;
   Tree::Expr::Any expr;
-  Mut(Term::Select name, Tree::Expr::Any expr) noexcept
-      : Tree::Stmt::Base(), name(std::move(name)), expr(std::move(expr)) {}
+  Mut(Term::Select name, Tree::Expr::Any expr) noexcept : Tree::Stmt::Base(), name(std::move(name)), expr(std::move(expr)) {}
   operator Any() const { return std::make_shared<Mut>(*this); };
   friend std::ostream &operator<<(std::ostream &os, const Tree::Stmt::Mut &);
 };
@@ -514,8 +499,7 @@ struct Update : Tree::Stmt::Base {
   Term::Select lhs;
   Term::Any idx;
   Term::Any value;
-  Update(Term::Select lhs, Term::Any idx, Term::Any value) noexcept
-      : Tree::Stmt::Base(), lhs(std::move(lhs)), idx(std::move(idx)), value(std::move(value)) {}
+  Update(Term::Select lhs, Term::Any idx, Term::Any value) noexcept : Tree::Stmt::Base(), lhs(std::move(lhs)), idx(std::move(idx)), value(std::move(value)) {}
   operator Any() const { return std::make_shared<Update>(*this); };
   friend std::ostream &operator<<(std::ostream &os, const Tree::Stmt::Update &);
 };
@@ -524,8 +508,7 @@ struct Effect : Tree::Stmt::Base {
   Term::Select lhs;
   std::string name;
   std::vector<Term::Any> args;
-  Effect(Term::Select lhs, std::string name, std::vector<Term::Any> args) noexcept
-      : Tree::Stmt::Base(), lhs(std::move(lhs)), name(std::move(name)), args(std::move(args)) {}
+  Effect(Term::Select lhs, std::string name, std::vector<Term::Any> args) noexcept : Tree::Stmt::Base(), lhs(std::move(lhs)), name(std::move(name)), args(std::move(args)) {}
   operator Any() const { return std::make_shared<Effect>(*this); };
   friend std::ostream &operator<<(std::ostream &os, const Tree::Stmt::Effect &);
 };
@@ -533,8 +516,7 @@ struct Effect : Tree::Stmt::Base {
 struct While : Tree::Stmt::Base {
   Tree::Expr::Any cond;
   std::vector<Tree::Stmt::Any> body;
-  While(Tree::Expr::Any cond, std::vector<Tree::Stmt::Any> body) noexcept
-      : Tree::Stmt::Base(), cond(std::move(cond)), body(std::move(body)) {}
+  While(Tree::Expr::Any cond, std::vector<Tree::Stmt::Any> body) noexcept : Tree::Stmt::Base(), cond(std::move(cond)), body(std::move(body)) {}
   operator Any() const { return std::make_shared<While>(*this); };
   friend std::ostream &operator<<(std::ostream &os, const Tree::Stmt::While &);
 };
@@ -555,8 +537,7 @@ struct Cond : Tree::Stmt::Base {
   Tree::Expr::Any cond;
   std::vector<Tree::Stmt::Any> trueBr;
   std::vector<Tree::Stmt::Any> falseBr;
-  Cond(Tree::Expr::Any cond, std::vector<Tree::Stmt::Any> trueBr, std::vector<Tree::Stmt::Any> falseBr) noexcept
-      : Tree::Stmt::Base(), cond(std::move(cond)), trueBr(std::move(trueBr)), falseBr(std::move(falseBr)) {}
+  Cond(Tree::Expr::Any cond, std::vector<Tree::Stmt::Any> trueBr, std::vector<Tree::Stmt::Any> falseBr) noexcept : Tree::Stmt::Base(), cond(std::move(cond)), trueBr(std::move(trueBr)), falseBr(std::move(falseBr)) {}
   operator Any() const { return std::make_shared<Cond>(*this); };
   friend std::ostream &operator<<(std::ostream &os, const Tree::Stmt::Cond &);
 };
@@ -569,13 +550,13 @@ struct Return : Tree::Stmt::Base {
 };
 } // namespace Tree::Stmt
 
+
 struct Function {
   std::string name;
   std::vector<Named> args;
   Type::Any rtn;
   std::vector<Tree::Stmt::Any> body;
-  Function(std::string name, std::vector<Named> args, Type::Any rtn, std::vector<Tree::Stmt::Any> body) noexcept
-      : name(std::move(name)), args(std::move(args)), rtn(std::move(rtn)), body(std::move(body)) {}
+  Function(std::string name, std::vector<Named> args, Type::Any rtn, std::vector<Tree::Stmt::Any> body) noexcept : name(std::move(name)), args(std::move(args)), rtn(std::move(rtn)), body(std::move(body)) {}
   friend std::ostream &operator<<(std::ostream &os, const Function &);
 };
 
@@ -587,3 +568,4 @@ struct StructDef {
 
 } // namespace polyregion::polyast
 #pragma clang diagnostic pop
+

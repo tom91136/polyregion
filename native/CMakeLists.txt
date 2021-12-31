@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.18)
 include(FetchContent)
 
 project(polyregion_native)
@@ -32,8 +32,15 @@ protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS ${CMAKE_CURRENT_SOURCE_DIR}/../compi
 
 FetchContent_Declare(
         capstone
-        GIT_REPOSITORY https://github.com/capstone-engine/capstone.git
-        GIT_TAG 4.0.2
+        URL https://github.com/capstone-engine/capstone/archive/refs/tags/4.0.2.tar.gz
+        URL_HASH MD5=8894344c966a948f1248e66c91b53e2c
+)
+
+FetchContent_Declare(
+        json
+        URL https://github.com/nlohmann/json/releases/download/v3.10.4/json.hpp
+        URL_HASH MD5=c55ff53aa6aa8b87b8313bc2fdcd032a
+        DOWNLOAD_NO_EXTRACT YES # this is a header only lib, so don't anything else
 )
 
 
@@ -66,6 +73,9 @@ set(CAPSTONE_X86_SUPPORT ON CACHE BOOL "")
 FetchContent_MakeAvailable_Args(capstone EXCLUDE_FROM_ALL)
 include_directories("${capstone_BINARY_DIR}/include" "${capstone_SOURCE_DIR}/include")
 
+FetchContent_MakeAvailable(json)
+include_directories("${json_SOURCE_DIR}")
+
 
 #find_library(LLVM PATHS /lib/llvm-12/ REQUIRED)
 
@@ -87,11 +97,11 @@ add_executable(polyregion_native
         src/polyregion.h)
 
 target_precompile_headers(polyregion_native
-        PUBLIC
+        PRIVATE
         src/generated/polyast.h
         src/variants.hpp
         src/utils.hpp
-        PRIVATE
+        ${json_SOURCE_DIR}/json.hpp
         <cstdint>
         <iterator>
         <memory>
@@ -120,7 +130,12 @@ message(STATUS "LLVM > ${LLVM_CONFIG_}")
 
 
 message(STATUS "LLVM libs ${llvm_libraries}")
-target_link_libraries(polyregion_native LLVM LLVMSupport LLVMDemangle capstone-static ${Protobuf_LIBRARIES})
+target_link_libraries(polyregion_native PRIVATE
+        LLVM
+        LLVMSupport
+        LLVMDemangle
+        capstone-static
+        ${Protobuf_LIBRARIES})
 
 
 set(SANATISE_OPTIONS -fsanitize=address -fsanitize=undefined)
