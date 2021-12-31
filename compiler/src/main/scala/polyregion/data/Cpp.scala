@@ -71,10 +71,22 @@ object Cpp {
         .mkString("\n")
 
       val shared = //
-        s"""|template<typename ...T>
+        s"""|
+            |template <typename... T> //
             |using Alternative = std::variant<std::shared_ptr<T>...>;
             |
-            |template <auto member, class... A> auto select(const Alternative<A...> &a) {
+            |template <typename... T> //
+            |constexpr std::variant<T...> unwrap(const Alternative<T...> &a) {
+            |  return std::visit([](auto &&arg) { return std::variant<T...>(*arg); }, a);
+            |}
+            |
+            |template <typename... T> //
+            |constexpr std::variant<T...> operator*(const Alternative<T...> &a) {
+            |  return unwrap(a);
+            |}
+            |
+            |template <auto member, class... T> //
+            |constexpr auto select(const Alternative<T...> &a) {
             |  return std::visit([](auto &&arg) { return *(arg).*member; }, a);
             |}""".stripMargin
 
@@ -255,11 +267,13 @@ object Cpp {
     type Value = String | compileTime.CtorTermSelect[CppType]
     given ToCppTerm[String]                              = x => s"\"${x.getOrElse("")}\""
     given ToCppTerm[compileTime.CtorTermSelect[CppType]] = { x => x.getOrElse("") }
-    inline given derived[T](using m: Mirror.Of[T]): ToCppTerm[T] = (_: Option[T]) =>
-      inline m match
+    inline given derived[T](using m: Mirror.Of[T]): ToCppTerm[T] = { (_: Option[T]) =>
+      inline m match {
         case s: Mirror.SumOf[T]     => summonInline[ToCppType[s.MirroredMonoType]]().qualified + "()"
         case p: Mirror.ProductOf[T] => summonInline[ToCppType[p.MirroredMonoType]]().qualified + "()"
         case x                      => error(s"Unhandled derive: $x")
+      }
+    }
   }
 
   trait ToCppType[A] extends (() => CppType)
@@ -310,7 +324,7 @@ object Cpp {
     inline given derived[T](using m: Mirror.Of[T]): ToCppType[T] = { () =>
       val (ns, kind) = compileTime.mirrorMeta[m.MirroredMonoType]
       val name       = constValue[m.MirroredLabel]
-      inline m match
+      inline m match {
         case s: Mirror.SumOf[T] =>
           CppType(
             ns,
@@ -329,11 +343,12 @@ object Cpp {
             kind = CppType.Kind(kind)
           )
         case x => error(s"Unhandled derive: $x")
+      }
     }
   }
 
   inline def deriveSum[N <: Tuple, T <: Tuple](parent: Option[(StructNode, List[String])] = None): List[StructNode] =
-    inline (erasedValue[N], erasedValue[T]) match
+    inline (erasedValue[N], erasedValue[T]) match {
       case (_: EmptyTuple, _: EmptyTuple) => Nil
       case (_: (n *: ns), _: (t *: ts)) =>
         deriveStruct[t](parent)(using
@@ -341,12 +356,13 @@ object Cpp {
           summonInline[ToCppTerm[t]],
           summonInline[Mirror.Of[t]]
         ) :: deriveSum[ns, ts](parent)
+    }
 
   inline def deriveProduct[L <: Tuple, T <: Tuple]: List[(String, CppType)] =
-    inline (erasedValue[L], erasedValue[T]) match
+    inline (erasedValue[L], erasedValue[T]) match {
       case (_: EmptyTuple, _: EmptyTuple) => Nil
       case (_: (l *: ls), _: (t *: ts)) => (s"${constValue[l]}", summonInline[ToCppType[t]]()) :: deriveProduct[ls, ts]
-
+    }
   inline def deriveStruct[T: ToCppType: ToCppTerm](parent: Option[(StructNode, List[String])] = None)(using
       m: Mirror.Of[T]
   ): StructNode = {
@@ -361,7 +377,7 @@ object Cpp {
       }
     val tpe     = summon[ToCppType[m.MirroredType]]()
     val applied = parent.map((s, _) => (s, ctorTerms))
-    inline m match
+    inline m match {
       case s: Mirror.SumOf[T] =>
         val members = compileTime.sumTypeCtorParams[s.MirroredType, CppType, ToCppType]
         val sum     = StructNode(tpe, members, applied)
@@ -370,85 +386,6 @@ object Cpp {
         val members = deriveProduct[p.MirroredElemLabels, p.MirroredElemTypes]
         StructNode(tpe, members, applied)
       case x => error(s"Unhandled derive: $x")
+    }
   }
-}
-
-object Foo {
-
-  @main def main2(): Unit =
-//    println(Opt.Sm(2, 7) == Opt.Sm(1 + 1, 7))
-//    import Form.*
-//    val x = summon[Form[Opt[Int]]]
-    // compileTime.show[ToCppType[Int]]
-    // compileTime.nonCaseFieldParams[First]
-    // compileTime.nonCaseFieldParams[T1] // enum T1 extends First("") {
-    // compileTime.nonCaseFieldParams[T2, ToCppType]
-    // compileTime.nonCaseFieldParams[First, ToCppType]
-    // val xs = compileTime.nonCaseFieldParams[T2, ToCppType]
-    // xs.foreach { z =>
-    // println(">>" + z._1 + " : " + z._2())
-    // }
-
-    //  enum T2(val x: String) extends First(x)  {
-    //    case T2B extends T2("z")
-
-    // compileTime.primaryCtorApplyTerms[T2.T2B, String, Cpp.ToCppTerm]
-    // compileTime.primaryCtorApplyTerms[T1, String, Cpp.ToCppTerm]
-
-    println("\n=========\n")
-
-//   implicit val n: Cpp.ToCppType[polyregion.PolyAstUnused.Type]      = Cpp.ToCppType.derived
-//   implicit val nn: Cpp.ToCppType[polyregion.PolyAstUnused.TypeKind] = Cpp.ToCppType.derived
-//   implicit val nnn: Cpp.ToCppType[polyregion.PolyAstUnused.Named]   = Cpp.ToCppType.derived
-//   implicit val nnnn: Cpp.ToCppType[polyregion.PolyAstUnused.Term]   = Cpp.ToCppType.derived
-
-//   implicit val _n: Cpp.ToCppTerm[polyregion.PolyAstUnused.Type]      = Cpp.ToCppTerm.derived
-//   implicit val _nn: Cpp.ToCppTerm[polyregion.PolyAstUnused.TypeKind] = Cpp.ToCppTerm.derived
-//   implicit val _nnn: Cpp.ToCppTerm[polyregion.PolyAstUnused.Named]   = Cpp.ToCppTerm.derived
-//   implicit val _nnnn: Cpp.ToCppTerm[polyregion.PolyAstUnused.Term]   = Cpp.ToCppTerm.derived
-// //
-
-  val alts = Cpp.deriveStruct[polyregion.PolyAstUnused.Sym]().emit
-    ::: Cpp.deriveStruct[polyregion.PolyAstUnused.TypeKind]().emit
-    ::: Cpp.deriveStruct[polyregion.PolyAstUnused.Type]().emit
-    ::: Cpp.deriveStruct[polyregion.PolyAstUnused.Named]().emit
-    ::: Cpp.deriveStruct[polyregion.PolyAstUnused.Position]().emit
-    ::: Cpp.deriveStruct[polyregion.PolyAstUnused.Term]().emit
-    ::: Cpp.deriveStruct[polyregion.PolyAstUnused.Tree]().emit
-    ::: Cpp.deriveStruct[polyregion.PolyAstUnused.Function]().emit
-    ::: Cpp.deriveStruct[polyregion.PolyAstUnused.StructDef]().emit
-
-  val header = StructSource.emitHeader("polyregion::polyast", alts)
-  // println(header)
-  println("\n=========\n")
-  val impl = StructSource.emitImpl("polyregion::polyast", "foo", alts)
-  // println(impl)
-  println("\n=========\n" + Paths.get(".").resolve("native/src/generated/").toAbsolutePath)
-
-  val target = Paths.get(".").resolve("native/src/generated/").toAbsolutePath
-
-  Files.writeString(
-    Paths.get("/home/tom/polyregion/native/src/foo.cpp"),
-    impl,
-    StandardOpenOption.TRUNCATE_EXISTING,
-    StandardOpenOption.CREATE,
-    StandardOpenOption.WRITE
-  )
-  Files.writeString(
-    Paths.get("/home/tom/polyregion/native/src/foo.h"),
-    header,
-    StandardOpenOption.TRUNCATE_EXISTING,
-    StandardOpenOption.CREATE,
-    StandardOpenOption.WRITE
-  )
-
-  println(summon[ToCppType[polyregion.PolyAstUnused.TypeKind.Fractional.type]]().qualified)
-//    import Cpp.*
-//    println(T1Mid.T1ALeaf(Nil, List("a", "b"), 23, T1Mid.T1BLeaf))
-
-  // println(Cpp.deriveStruct[Alt]().map(_.emitSource).mkString("\n"))
-  // println(Cpp.deriveStruct[FirstTop]().map(_.emitSource).mkString("\n"))
-  // println(Cpp.deriveStruct[First]().map(_.emitSource).mkString("\n"))
-//    println(Cpp.deriveStruct[Foo]().map(_.emitSource).mkString("\n"))
-  ()
 }

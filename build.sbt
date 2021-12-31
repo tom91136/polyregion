@@ -3,7 +3,8 @@ lazy val commonSettings = Seq(
   version          := "0.0.1-SNAPSHOT",
   organization     := "uk.ac.bristol.uob-hpc",
   organizationName := "University of Bristol",
-  scalacOptions ~= filterConsoleScalacOptions
+  scalacOptions ~= filterConsoleScalacOptions,
+  scalacOptions ++= Seq("-no-indent")
 )
 
 lazy val catsVersion = "2.7.0"
@@ -47,7 +48,8 @@ lazy val compiler = project
     libraryDependencies ++= Seq(
       "com.thesamet.scalapb" %% "scalapb-runtime" % scalapb.compiler.Version.scalapbVersion % "protobuf",
       "org.typelevel"        %% "cats-core"       % catsVersion,
-      "com.lihaoyi"          %% "pprint"          % "0.7.1"
+      "com.lihaoyi"          %% "pprint"          % "0.7.1",
+      "com.lihaoyi"          %% "upickle"         % "1.4.3"
     )
   )
   .dependsOn(`runtime-scala`)
@@ -76,4 +78,4 @@ lazy val `examples-scala` = project
 lazy val root = project
   .in(file("."))
   .settings(commonSettings)
-  .aggregate(compiler, `runtime-scala`, `runtime-java` , `examples-scala`)
+  .aggregate(compiler, `runtime-scala`, `runtime-java`, `examples-scala`)

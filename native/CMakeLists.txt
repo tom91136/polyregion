@@ -80,9 +80,31 @@ add_executable(polyregion_native
         src/codegen/llvm.cpp
         src/codegen/opencl.cpp
         src/dis.cpp
-        src/foo.cpp
+        src/generated/polyast.cpp
         src/main.cpp
-        src/codegen/codegen.h src/polyregion.cpp src/polyregion.h)
+        src/codegen/codegen.h
+        src/polyregion.cpp
+        src/polyregion.h)
+
+target_precompile_headers(polyregion_native
+        PUBLIC
+        src/generated/polyast.h
+        src/variants.hpp
+        src/utils.hpp
+        PRIVATE
+        <cstdint>
+        <iterator>
+        <memory>
+        <string>
+        <variant>
+        <vector>
+        <fstream>
+        <functional>
+        <iostream>
+        <numeric>
+        <sstream>
+        <stdexcept>
+        )
 
 message(STATUS "LLVM > ${LLVM_CONFIG_}")
 
@@ -102,8 +124,8 @@ target_link_libraries(polyregion_native LLVM LLVMSupport LLVMDemangle capstone-s
 
 
 set(SANATISE_OPTIONS -fsanitize=address -fsanitize=undefined)
-set(RELEASE_OPTIONS -Ofast -march=native -g)
-set(DEBUG_OPTIONS -O2 -fno-omit-frame-pointer -march=native ${SANATISE_OPTIONS})
+set(RELEASE_OPTIONS -O3 -march=native)
+set(DEBUG_OPTIONS ${SANATISE_OPTIONS})
 
 target_compile_options(polyregion_native PUBLIC ${COMPILE_OPTIONS})
 target_compile_options(polyregion_native PUBLIC "$<$<CONFIG:RELEASE>:${RELEASE_OPTIONS}>")

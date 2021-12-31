@@ -6,13 +6,14 @@ object compileTime {
 
   enum MirrorKind { case CaseClass, CaseSum, CaseProduct }
   given ToExpr[MirrorKind] with {
-    def apply(x: MirrorKind)(using Quotes) =
+    def apply(x: MirrorKind)(using Quotes) = {
       import quotes.reflect._
       x match {
         case MirrorKind.CaseClass   => '{ MirrorKind.CaseClass }
         case MirrorKind.CaseSum     => '{ MirrorKind.CaseSum }
         case MirrorKind.CaseProduct => '{ MirrorKind.CaseProduct }
       }
+    }
   }
 
   inline def mirrorMeta[T] =
