@@ -1,6 +1,6 @@
 package polyregion.ast
 
-object PolyAstUnused {
+object PolyAst {
 
   case class Sym(fqn: List[String]) {
     def repr: String = fqn.mkString(".")

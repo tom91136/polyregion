@@ -4,6 +4,14 @@ lazy val commonSettings = Seq(
   organization     := "uk.ac.bristol.uob-hpc",
   organizationName := "University of Bristol",
   scalacOptions ~= filterConsoleScalacOptions,
+  scalacOptions ~= { options: Seq[String] =>
+    options.filterNot(
+      Set(
+        "-explain-types",
+        "-explain"
+      )
+    )
+  },
   scalacOptions ++= Seq("-no-indent")
 )
 
@@ -42,14 +50,10 @@ lazy val compiler = project
     commonSettings,
     name := "compiler",
     scalacOptions ++= Seq("-Yretain-trees"),
-    Compile / PB.targets := Seq(
-      scalapb.gen() -> (Compile / sourceManaged).value / "scalapb"
-    ),
     libraryDependencies ++= Seq(
-      "com.thesamet.scalapb" %% "scalapb-runtime" % scalapb.compiler.Version.scalapbVersion % "protobuf",
-      "org.typelevel"        %% "cats-core"       % catsVersion,
-      "com.lihaoyi"          %% "pprint"          % "0.7.1",
-      "com.lihaoyi"          %% "upickle"         % "1.4.3"
+      "org.typelevel" %% "cats-core" % catsVersion,
+      "com.lihaoyi"   %% "pprint"    % "0.7.1",
+      "com.lihaoyi"   %% "upickle"   % "1.4.3"
     )
   )
   .dependsOn(`runtime-scala`)

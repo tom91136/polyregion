@@ -2,7 +2,7 @@ package polyregion
 
 import cats.Eval
 import cats.data.EitherT
-import polyregion.PolyAst
+import polyregion.ast.PolyAst
 
 import java.lang.reflect.Modifier
 import scala.annotation.tailrec
@@ -10,8 +10,8 @@ import scala.reflect.ClassTag
 
 package object internal {
 
-  type VNil[+A] = scala.collection.immutable.Vector[A]
-  val VNil = scala.collection.immutable.Vector
+  // type VNil[+A] = scala.collection.immutable.Vector[A]
+  // val VNil = scala.collection.immutable.Vector
 
   type Result[A] = Either[Throwable, A]
 
@@ -37,11 +37,6 @@ package object internal {
   }
 
   extension (e: => PolyAst.Sym.type) {
-    def apply(raw: String): PolyAst.Sym = {
-      require(!raw.isBlank)
-      // normalise dollar
-      PolyAst.Sym(raw.split('.').toVector)
-    }
     def apply[T <: AnyRef](using tag: ClassTag[T]): PolyAst.Sym = {
       // normalise naming differences
       // Java        => package.Companion$Member
@@ -53,7 +48,7 @@ package object internal {
           case c    => go(c, name :: xs, Modifier.isStatic(cls.getModifiers))
         }
       }
-      PolyAst.Sym(go(tag.runtimeClass).toVector)
+      PolyAst.Sym(go(tag.runtimeClass))
     }
   }
 
@@ -65,29 +60,12 @@ package object internal {
     def repr: String = s"(${p.symbol}:${p.tpe.repr})"
   }
 
-  extension (e: PolyAst.Refs.Ref) {
-
-    def tpe: PolyAst.Types.Type = {
-      import polyregion.PolyAst.Refs.*
-      e match {
-        case Select(head, tail) => tail.lastOption.getOrElse(head).tpe
-        case BoolConst(value)   => PolyAst.Types.BoolTpe()
-        case ByteConst(value)   => PolyAst.Types.ByteTpe()
-        case CharConst(value)   => PolyAst.Types.CharTpe()
-        case ShortConst(value)  => PolyAst.Types.ShortTpe()
-        case IntConst(value)    => PolyAst.Types.IntTpe()
-        case LongConst(value)   => PolyAst.Types.LongTpe()
-        case FloatConst(value)  => PolyAst.Types.FloatTpe()
-        case DoubleConst(value) => PolyAst.Types.DoubleTpe()
-        case StringConst(value) => PolyAst.Types.StringTpe()
-        case Ref.Empty          => PolyAst.Types.Type.Empty
-      }
-    }
+  extension (e: PolyAst.Term) {
 
     def repr: String = {
-      import polyregion.PolyAst.Refs.*
+      import PolyAst.Term.*
       e match {
-        case Select(head, tail) => (head +: tail).map(_.repr).mkString(".")
+        case Select(init, last) => (init :+ last).map(_.repr).mkString(".")
         case BoolConst(value)   => s"Bool($value)"
         case ByteConst(value)   => s"Byte($value)"
         case CharConst(value)   => s"Char($value)"
@@ -97,52 +75,48 @@ package object internal {
         case FloatConst(value)  => s"Float($value)"
         case DoubleConst(value) => s"Double($value)"
         case StringConst(value) => s"String($value)"
-        case Ref.Empty          => "Unit()"
       }
-
     }
   }
 
-  extension (e: PolyAst.Types.Type) {
+  extension (e: PolyAst.Type) {
 
     def repr: String = {
-      import polyregion.PolyAst.Types.*
+      import PolyAst.Type.*
       e match {
-        case RefTpe(head, Vector()) => head.repr
-        case RefTpe(head, xs)       => s"${head.repr}[${xs.map(_.repr).mkString(",")}]"
+        case Struct(sym, Nil)  => sym.repr
+        case Struct(sym, ctor) => s"${sym.repr}[${ctor.map(_.repr).mkString(",")}]"
         //
-        case ArrayTpe(tpe) => s"Array[${tpe.repr}]"
-        case BoolTpe()     => "Bool"
-        case ByteTpe()     => "Byte"
-        case CharTpe()     => "Char"
-        case ShortTpe()    => "Short"
-        case IntTpe()      => "Int"
-        case LongTpe()     => "Long"
-        case FloatTpe()    => "Float"
-        case DoubleTpe()   => "Double"
-        case StringTpe()   => "String"
-        case Type.Empty    => "Unit"
+        case Array(comp) => s"Array[${comp.repr}]"
+        case Bool        => "Bool"
+        case Byte        => "Byte"
+        case Char        => "Char"
+        case Short       => "Short"
+        case Int         => "Int"
+        case Long        => "Long"
+        case Float       => "Float"
+        case Double      => "Double"
+        case String      => "String"
+        case Unit        => "Unit"
       }
-
     }
   }
 
-  extension (e: PolyAst.Tree.Expr) {
+  extension (e: PolyAst.Expr) {
     def repr: String = {
-      import polyregion.PolyAst.Tree.*
+      import PolyAst.Expr.*
       e match {
         case Alias(ref)                   => s"(~>${ref.repr})"
         case Invoke(lhs, name, args, tpe) => s"${lhs.repr}<$name>(${args.map(_.repr).mkString(",")}) : ${tpe.repr}"
         case Index(lhs, idx, tpe)         => s"${lhs.repr}[${idx.repr}] : ${tpe.repr}"
         // case Block(xs, x)                 => s"{\n${xs.map(_.repr).mkString("\n")}\n${x.repr}\n}"
-        case Expr.Empty => "(empty expr)"
       }
     }
   }
 
-  extension (e: PolyAst.Tree.Stmt) {
+  extension (e: PolyAst.Stmt) {
     def repr: String = {
-      import polyregion.PolyAst.Tree.*
+      import PolyAst.Stmt.*
       e match {
         case Comment(value)              => s" // $value"
         case Var(name, rhs)              => s"var ${name.repr} = ${rhs.repr}"
@@ -150,9 +124,9 @@ package object internal {
         case Update(lhs, idx, value)     => s"${lhs.repr}[${idx.repr}] := ${value.repr}"
         case Effect(lhs, name, args)     => s"${lhs.repr}<$name>(${args.map(_.repr).mkString(",")}) : Unit"
         case While(cond, body)           => s"while(${cond.repr}){\n${body.map(_.repr).mkString("\n")}\n}"
-        case Break()                     => s"break;"
+        case Break                       => s"break;"
+        case Cont                        => s"continue;"
         case Cond(cond, trueBr, falseBr) => s"if(${cond.repr}) {\n${trueBr.repr}\n} else {\n${falseBr}\n}"
-        case Stmt.Empty                  => "(empty stmt)"
       }
 
     }

@@ -14,7 +14,6 @@ import fansi.Str
 import cats.syntax.all._
 import polyregion.data.compileTime.CtorTermSelect
 import cats.conversions.variance
-import polyregion.PolyAst.Tree.Var
 
 object Cpp {
 

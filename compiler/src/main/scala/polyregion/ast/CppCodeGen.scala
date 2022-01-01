@@ -100,19 +100,21 @@ object CppCodeGen {
 
     println("\n=========\n")
 
-    import PolyAstUnused._
+    import PolyAst._
 
     import MsgPack.Codec
 
-    given MsgPack.Codec[Sym]      = Codec.derived
-    given MsgPack.Codec[TypeKind] = Codec.derived 
-    given MsgPack.Codec[Type]     = Codec.derived
-    given MsgPack.Codec[Term]     = Codec.derived
-    given MsgPack.Codec[Named]    = Codec.derived
-    given MsgPack.Codec[Position] = Codec.derived
-    given MsgPack.Codec[Intr]     = Codec.derived
-    given MsgPack.Codec[Expr]     = Codec.derived
-    given MsgPack.Codec[Stmt]     = Codec.derived
+    given MsgPack.Codec[Sym]       = Codec.derived
+    given MsgPack.Codec[TypeKind]  = Codec.derived
+    given MsgPack.Codec[Type]      = Codec.derived
+    given MsgPack.Codec[Term]      = Codec.derived
+    given MsgPack.Codec[Named]     = Codec.derived
+    given MsgPack.Codec[Position]  = Codec.derived
+    given MsgPack.Codec[Intr]      = Codec.derived
+    given MsgPack.Codec[Expr]      = Codec.derived
+    given MsgPack.Codec[Stmt]      = Codec.derived
+    given MsgPack.Codec[Function]  = Codec.derived
+    given MsgPack.Codec[StructDef] = Codec.derived
 
     val ast: Stmt = Stmt.Cond(
       Expr.Alias(Term.BoolConst(true)),
@@ -136,16 +138,16 @@ object CppCodeGen {
       StandardOpenOption.WRITE
     )
 
-    val structs = deriveStruct[PolyAstUnused.Sym]() //
-      :: deriveStruct[PolyAstUnused.TypeKind]()
-      :: deriveStruct[PolyAstUnused.Type]()
-      :: deriveStruct[PolyAstUnused.Named]()
-      :: deriveStruct[PolyAstUnused.Position]()
-      :: deriveStruct[PolyAstUnused.Term]()
-      :: deriveStruct[PolyAstUnused.Expr]()
-      :: deriveStruct[PolyAstUnused.Stmt]()
-      :: deriveStruct[PolyAstUnused.Function]()
-      :: deriveStruct[PolyAstUnused.StructDef]()
+    val structs = deriveStruct[Sym]() //
+      :: deriveStruct[TypeKind]()
+      :: deriveStruct[Type]()
+      :: deriveStruct[Named]()
+      :: deriveStruct[Position]()
+      :: deriveStruct[Term]()
+      :: deriveStruct[Expr]()
+      :: deriveStruct[Stmt]()
+      :: deriveStruct[Function]()
+      :: deriveStruct[StructDef]()
       :: Nil
 
     val sources = structs.flatMap(_.emit)
