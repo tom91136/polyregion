@@ -203,3 +203,4 @@ typings/
 *.dll
 *.dylib
 *.bin
+*.msgpack

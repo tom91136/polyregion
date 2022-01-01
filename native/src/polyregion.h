@@ -1,5 +1,7 @@
 #pragma once
 #include "generated/polyast.h"
+#include "generated/polyast_codec.h"
+
 #include "json.hpp"
 #include "variants.hpp"
 #include <ostream>
@@ -27,22 +29,46 @@ void release(Program *buffer);
 
 namespace aaa {
 
+// using json = nlohmann::json;
+//
+// void to_json(json& j, const Sym& p) {
+//   j = json{ {"name", p.fqn} };
+// }
+//
+// void  to_json(  json& j , const Term::FloatConst& p) {
+//   j[0] = p.value;
+// }
+//
+// Term::FloatConst from_json(const json& j) {
+//
+//
+//
+//   auto ord = j.at(0).get<size_t>();
+//   auto t = j.at(1).get<float>();
+//   return Term::FloatConst(t);
+// }
+
 static void x() {
 
   using namespace polyregion::polyast;
 
-  Tree::Expr::Alias a(Term::BoolConst(true));
-  Tree::Expr::Index i(Term::Select({}, Named("a", Type::Float())), Term::IntConst(4), Type::String());
+  Expr::Alias a(Term::BoolConst(true));
+  Expr::Index i(Term::Select({}, Named("a", Type::Float())), Term::IntConst(4), Type::String());
 
-  Tree::Stmt::Return r(i);
+  Stmt::Return r(i);
 
   using json = nlohmann::json;
-  json j;
-  j.push_back(1);
 
-  std::cout << a << "\n" << i << "\n" << r << "\n" << j << "\n";
+  std::ifstream file("./ast.msgpack", std::ios::binary);
+  std::vector<uint8_t> contents((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+  auto j = json::from_msgpack(contents.begin(), contents.end());
+  std::cout << std::setw(1) << j << std::endl;
+  auto x = Stmt::any_json(j);
 
-  Tree::Expr::Any u = a;
+  std::cout << x;
+  //  std::cout << a << "\n" << i << "\n" << r << "\n" << j << "\n";
+
+  Expr::Any u = a;
   //
   //
   auto kk = polyregion::variants::total(

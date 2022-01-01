@@ -52,9 +52,7 @@ object PolyAstUnused {
 
   case class Position(file: String, line: Int, col: Int)
 
-  sealed abstract class Tree(val tpe: Type)
-
-  enum Intr(tpe: Type) extends Tree(tpe) {
+  enum Intr(tpe: Type) {
     case Inv(lhs: Term, rtn: Type) extends Intr(rtn)
     case Sin(lhs: Term, rtn: Type) extends Intr(rtn)
     case Cos(lhs: Term, rtn: Type) extends Intr(rtn)
@@ -68,13 +66,13 @@ object PolyAstUnused {
     case Pow(lhs: Term, rhs: Term, rtn: Type) extends Intr(rtn)
   }
 
-  enum Expr(tpe: Type) extends Tree(tpe) {
+  enum Expr(tpe: Type) {
     case Alias(ref: Term) extends Expr(ref.tpe)
     case Invoke(lhs: Term, name: String, args: List[Term], rtn: Type) extends Expr(rtn)
     case Index(lhs: Term, idx: Term, component: Type) extends Expr(component)
   }
 
-  enum Stmt extends Tree(Type.Unit) {
+  enum Stmt {
     case Comment(value: String)
     case Var(name: Named, expr: Expr)
     case Mut(name: Term.Select, expr: Expr)

@@ -233,134 +233,22 @@ std::ostream &Term::operator<<(std::ostream &os, const Term::StringConst &x) {
   return os;
 }
 
-
-
-std::ostream &Tree::Intr::operator<<(std::ostream &os, const Tree::Intr::Any &x) {
-  os << "Intr(";
-  std::visit([&os](auto &&arg) { os << *arg; }, x);
-  os << ')';
-  return os;
-}
-Type::Any Tree::Intr::tpe(const Tree::Intr::Any& x){ return select<&Tree::Intr::Base::tpe>(x); }
-
-std::ostream &Tree::Intr::operator<<(std::ostream &os, const Tree::Intr::Inv &x) {
-  os << "Inv(";
-  std::visit([&os](auto &&arg) { os << *arg; }, x.lhs);
-  os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.rtn);
-  os << ')';
-  return os;
-}
-
-std::ostream &Tree::Intr::operator<<(std::ostream &os, const Tree::Intr::Sin &x) {
-  os << "Sin(";
-  std::visit([&os](auto &&arg) { os << *arg; }, x.lhs);
-  os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.rtn);
-  os << ')';
-  return os;
-}
-
-std::ostream &Tree::Intr::operator<<(std::ostream &os, const Tree::Intr::Cos &x) {
-  os << "Cos(";
-  std::visit([&os](auto &&arg) { os << *arg; }, x.lhs);
-  os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.rtn);
-  os << ')';
-  return os;
-}
-
-std::ostream &Tree::Intr::operator<<(std::ostream &os, const Tree::Intr::Tan &x) {
-  os << "Tan(";
-  std::visit([&os](auto &&arg) { os << *arg; }, x.lhs);
-  os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.rtn);
-  os << ')';
-  return os;
-}
-
-std::ostream &Tree::Intr::operator<<(std::ostream &os, const Tree::Intr::Add &x) {
-  os << "Add(";
-  std::visit([&os](auto &&arg) { os << *arg; }, x.lhs);
-  os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.rhs);
-  os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.rtn);
-  os << ')';
-  return os;
-}
-
-std::ostream &Tree::Intr::operator<<(std::ostream &os, const Tree::Intr::Sub &x) {
-  os << "Sub(";
-  std::visit([&os](auto &&arg) { os << *arg; }, x.lhs);
-  os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.rhs);
-  os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.rtn);
-  os << ')';
-  return os;
-}
-
-std::ostream &Tree::Intr::operator<<(std::ostream &os, const Tree::Intr::Div &x) {
-  os << "Div(";
-  std::visit([&os](auto &&arg) { os << *arg; }, x.lhs);
-  os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.rhs);
-  os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.rtn);
-  os << ')';
-  return os;
-}
-
-std::ostream &Tree::Intr::operator<<(std::ostream &os, const Tree::Intr::Mul &x) {
-  os << "Mul(";
-  std::visit([&os](auto &&arg) { os << *arg; }, x.lhs);
-  os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.rhs);
-  os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.rtn);
-  os << ')';
-  return os;
-}
-
-std::ostream &Tree::Intr::operator<<(std::ostream &os, const Tree::Intr::Mod &x) {
-  os << "Mod(";
-  std::visit([&os](auto &&arg) { os << *arg; }, x.lhs);
-  os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.rhs);
-  os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.rtn);
-  os << ')';
-  return os;
-}
-
-std::ostream &Tree::Intr::operator<<(std::ostream &os, const Tree::Intr::Pow &x) {
-  os << "Pow(";
-  std::visit([&os](auto &&arg) { os << *arg; }, x.lhs);
-  os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.rhs);
-  os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.rtn);
-  os << ')';
-  return os;
-}
-
-std::ostream &Tree::Expr::operator<<(std::ostream &os, const Tree::Expr::Any &x) {
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Any &x) {
   os << "Expr(";
   std::visit([&os](auto &&arg) { os << *arg; }, x);
   os << ')';
   return os;
 }
-Type::Any Tree::Expr::tpe(const Tree::Expr::Any& x){ return select<&Tree::Expr::Base::tpe>(x); }
+Type::Any Expr::tpe(const Expr::Any& x){ return select<&Expr::Base::tpe>(x); }
 
-std::ostream &Tree::Expr::operator<<(std::ostream &os, const Tree::Expr::Alias &x) {
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Alias &x) {
   os << "Alias(";
   std::visit([&os](auto &&arg) { os << *arg; }, x.ref);
   os << ')';
   return os;
 }
 
-std::ostream &Tree::Expr::operator<<(std::ostream &os, const Tree::Expr::Invoke &x) {
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Invoke &x) {
   os << "Invoke(";
   std::visit([&os](auto &&arg) { os << *arg; }, x.lhs);
   os << ',';
@@ -378,7 +266,7 @@ std::ostream &Tree::Expr::operator<<(std::ostream &os, const Tree::Expr::Invoke 
   return os;
 }
 
-std::ostream &Tree::Expr::operator<<(std::ostream &os, const Tree::Expr::Index &x) {
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Index &x) {
   os << "Index(";
   std::visit([&os](auto &&arg) { os << *arg; }, x.lhs);
   os << ',';
@@ -389,21 +277,21 @@ std::ostream &Tree::Expr::operator<<(std::ostream &os, const Tree::Expr::Index &
   return os;
 }
 
-std::ostream &Tree::Stmt::operator<<(std::ostream &os, const Tree::Stmt::Any &x) {
+std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Any &x) {
   os << "Stmt(";
   std::visit([&os](auto &&arg) { os << *arg; }, x);
   os << ')';
   return os;
 }
 
-std::ostream &Tree::Stmt::operator<<(std::ostream &os, const Tree::Stmt::Comment &x) {
+std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Comment &x) {
   os << "Comment(";
   os << '"' << x.value << '"';
   os << ')';
   return os;
 }
 
-std::ostream &Tree::Stmt::operator<<(std::ostream &os, const Tree::Stmt::Var &x) {
+std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Var &x) {
   os << "Var(";
   os << x.name;
   os << ',';
@@ -412,7 +300,7 @@ std::ostream &Tree::Stmt::operator<<(std::ostream &os, const Tree::Stmt::Var &x)
   return os;
 }
 
-std::ostream &Tree::Stmt::operator<<(std::ostream &os, const Tree::Stmt::Mut &x) {
+std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Mut &x) {
   os << "Mut(";
   os << x.name;
   os << ',';
@@ -421,7 +309,7 @@ std::ostream &Tree::Stmt::operator<<(std::ostream &os, const Tree::Stmt::Mut &x)
   return os;
 }
 
-std::ostream &Tree::Stmt::operator<<(std::ostream &os, const Tree::Stmt::Update &x) {
+std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Update &x) {
   os << "Update(";
   os << x.lhs;
   os << ',';
@@ -432,7 +320,7 @@ std::ostream &Tree::Stmt::operator<<(std::ostream &os, const Tree::Stmt::Update 
   return os;
 }
 
-std::ostream &Tree::Stmt::operator<<(std::ostream &os, const Tree::Stmt::Effect &x) {
+std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Effect &x) {
   os << "Effect(";
   os << x.lhs;
   os << ',';
@@ -448,7 +336,7 @@ std::ostream &Tree::Stmt::operator<<(std::ostream &os, const Tree::Stmt::Effect 
   return os;
 }
 
-std::ostream &Tree::Stmt::operator<<(std::ostream &os, const Tree::Stmt::While &x) {
+std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::While &x) {
   os << "While(";
   std::visit([&os](auto &&arg) { os << *arg; }, x.cond);
   os << ',';
@@ -462,19 +350,19 @@ std::ostream &Tree::Stmt::operator<<(std::ostream &os, const Tree::Stmt::While &
   return os;
 }
 
-std::ostream &Tree::Stmt::operator<<(std::ostream &os, const Tree::Stmt::Break &x) {
+std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Break &x) {
   os << "Break(";
   os << ')';
   return os;
 }
 
-std::ostream &Tree::Stmt::operator<<(std::ostream &os, const Tree::Stmt::Cont &x) {
+std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Cont &x) {
   os << "Cont(";
   os << ')';
   return os;
 }
 
-std::ostream &Tree::Stmt::operator<<(std::ostream &os, const Tree::Stmt::Cond &x) {
+std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Cond &x) {
   os << "Cond(";
   std::visit([&os](auto &&arg) { os << *arg; }, x.cond);
   os << ',';
@@ -495,7 +383,7 @@ std::ostream &Tree::Stmt::operator<<(std::ostream &os, const Tree::Stmt::Cond &x
   return os;
 }
 
-std::ostream &Tree::Stmt::operator<<(std::ostream &os, const Tree::Stmt::Return &x) {
+std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Return &x) {
   os << "Return(";
   std::visit([&os](auto &&arg) { os << *arg; }, x.value);
   os << ')';

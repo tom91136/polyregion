@@ -91,6 +91,7 @@ add_executable(polyregion_native
         src/codegen/opencl.cpp
         src/dis.cpp
         src/generated/polyast.cpp
+        src/generated/polyast_codec.cpp
         src/main.cpp
         src/codegen/codegen.h
         src/polyregion.cpp

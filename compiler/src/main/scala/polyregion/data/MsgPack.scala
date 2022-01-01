@@ -19,6 +19,32 @@ object MsgPack {
       def decode(x: upack.Msg): A = g(x)
     }
 
+    given Codec[Boolean] = Codec(upack.Bool(_), _.bool)
+    given Codec[String]  = Codec(upack.Str(_), _.str)
+    given Codec[Byte]    = Codec(upack.Int32(_), _.int32.toByte)
+    given Codec[Char]    = Codec(upack.Int32(_), _.int32.toChar)
+    given Codec[Short]   = Codec(upack.Int32(_), _.int32.toShort)
+    given Codec[Int]     = Codec(upack.Int32(_), _.int32)
+    given Codec[Long]    = Codec(upack.Int64(_), _.int64)
+    given Codec[Float] = Codec(
+      upack.Float32(_),
+      {
+        case upack.Float32(v)                            => v
+        case upack.Float64(v) if v.toFloat.toDouble == v => v.toFloat
+        case upack.Float64(v) => throw new Exception(s"Float64 to Float32 conversion with loss of precision: $v")
+        case x                => throw new Exception(s"Expected Float32/Float64, got $x")
+      }
+    )
+    given Codec[Double] = Codec(
+      upack.Float64(_),
+      {
+        case upack.Float64(v) => v
+        case x                => throw new Exception(s"Expected Float32/Float64, got $x")
+      }
+    )
+    given [A](using C: Codec[A]): Codec[List[A]] =
+      Codec(xs => upack.Arr(xs.map(C.encode(_))*), _.arr.map(m => C.decode(m)).toList)
+
     object Verbose {
       inline given derived[T](using m: Mirror.Of[T]): Codec[T] = derive(Kind.Verbose)
     }
@@ -41,12 +67,7 @@ object MsgPack {
             val t   = summonAll[s.MirroredElemTypes, Codec](ord).encode(x)
             kind match {
               case Kind.Compact => Arr(Int32(ord), t)
-              case Kind.Verbose =>
-                Obj(
-                  Str("sum") -> Str(sum),
-                  Str("ord") -> Int32(ord),
-                  Str("val") -> t
-                )
+              case Kind.Verbose => Obj(Str("sum") -> Str(sum), Str("ord") -> Int32(ord), Str("val") -> t)
             }
           },
           msg =>
@@ -64,9 +85,9 @@ object MsgPack {
             }
         )
       case p: Mirror.ProductOf[T] =>
-        val xs = deriveProduct[p.MirroredElemLabels, p.MirroredElemTypes]
         Codec[T](
-          x =>
+          x => {
+            val xs = deriveProduct[p.MirroredElemLabels, p.MirroredElemTypes]
             kind match {
               case Kind.Compact => Arr(xs.zip(iterator(x)).map { case ((_, e), v) => e.encode(v) }*)
               case Kind.Verbose =>
@@ -74,16 +95,15 @@ object MsgPack {
                   case (x :: xs) => Obj(x, xs*)
                   case Nil       => Obj()
                 }
-            },
-          msg =>
-            kind match {
-              case Kind.Compact =>
-                val fields = msg.arr.zip(xs).map { case (msg, (_, c)) => c.decode(msg) }
-                p.fromProduct(Tuple.fromArray(fields.toArray))
-              case Kind.Verbose =>
-                val fields = xs.map((field, c) => c.decode(msg.obj(Str(field))))
-                p.fromProduct(Tuple.fromArray(fields.toArray))
             }
+          },
+          msg => {
+            val xs = deriveProduct[p.MirroredElemLabels, p.MirroredElemTypes]
+            p.fromProduct(Tuple.fromArray(kind match {
+              case Kind.Compact => msg.arr.zip(xs).map { case (msg, (_, c)) => c.decode(msg) }.toArray
+              case Kind.Verbose => xs.map((field, c) => c.decode(msg.obj(Str(field)))).toArray
+            }))
+          }
         )
     }
 
@@ -98,18 +118,6 @@ object MsgPack {
       }
 
   }
-
-  given Codec[Boolean] = Codec(upack.Bool(_), _.bool)
-  given Codec[String]  = Codec(upack.Str(_), _.str)
-  given Codec[Byte]    = Codec(upack.Int32(_), _.int32.toByte)
-  given Codec[Char]    = Codec(upack.Int32(_), _.int32.toChar)
-  given Codec[Short]   = Codec(upack.Int32(_), _.int32.toShort)
-  given Codec[Int]     = Codec(upack.Int32(_), _.int32)
-  given Codec[Long]    = Codec(upack.Int64(_), _.int64)
-  given Codec[Float]   = Codec(upack.Float32(_), { case upack.Float32(v) => v })
-  given Codec[Double]  = Codec(upack.Float64(_), { case upack.Float64(v) => v })
-  given [A](using C: Codec[A]): Codec[List[A]] =
-    Codec(xs => upack.Arr(xs.map(C.encode(_))*), _.arr.map(m => C.decode(m)).toList)
 
   def decodeMsg(xs: Array[Byte]): Either[Exception, upack.Msg] =
     try Right(upack.read(xs))

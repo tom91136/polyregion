@@ -42,6 +42,7 @@ object Cpp {
       forwardDeclStmts: List[String],
       nsDeclStmts: List[String]
   )
+
   object StructSource {
 
     val RequiredIncludes = List("memory", "variant", "iterator")
@@ -177,7 +178,7 @@ object Cpp {
               )
 
           val streamMethodStmts =
-            s"std::ostream &${ns("")}operator<<(std::ostream &os, const ${tpe.ref(qualified = true)} &x) {" ::
+            s"std::ostream &${ns("operator<<")}(std::ostream &os, const ${tpe.ref(qualified = true)} &x) {" ::
               s"  os << \"${tpe.name}(\";" ::
               streamStmts.intercalate("os << ',';" :: Nil).map("  " + _) :::
               "  os << ')';" ::
@@ -196,7 +197,7 @@ object Cpp {
       val variantStmt =
         if (tpe.kind == CppType.Kind.Base) {
           val allVariants   = foldVariants(variants)
-          val memberGetters = members.map((n, t) => s"std::shared_ptr<${t.qualified}::Any> $n(const Any &x);")
+          val memberGetters = members.map((n, t) => s"std::shared_ptr<${t.ref(qualified = true)}> $n(const Any &x);")
           allVariants.map(v => s"struct $v;") ::: //
             s"using Any = Alternative<${allVariants.csv}>;" :: Nil
         } else Nil
@@ -233,7 +234,7 @@ object Cpp {
   }
 
   object CppType {
-    enum Kind { case Data, Base, Variant }
+    enum Kind { case StdLib, Data, Base, Variant }
     object Kind {
       def apply(c: compileTime.MirrorKind) = c match {
         case compileTime.MirrorKind.CaseClass   => Data
@@ -245,18 +246,24 @@ object Cpp {
   case class CppType(
       namespace: List[String] = Nil,
       name: String,
-      kind: CppType.Kind = CppType.Kind.Data,
+      kind: CppType.Kind = CppType.Kind.StdLib,
       movable: Boolean = false,
       constexpr: Boolean = true,
       streamOp: (String, String) => List[String] = (s, v) => List(s"$s << $v;"),
-      include: List[String] = Nil
+      include: List[String] = Nil,
+      ctors: List[CppType] = Nil
   ) {
     def ns(name: String) = s"${namespace.sym("", "::", "::")}${name}"
-    def qualified        = ns(name)
+    // def qualified        = ns(name)
 
-    def ref(qualified: Boolean = true) = kind match {
-      case CppType.Kind.Variant | CppType.Kind.Data =>
-        if (qualified) ns(name) else name
+    def applied(qualified: Boolean): String = ctors match {
+      case Nil => name
+      case xs  => s"${name}<${ctors.map(_.ref(qualified)).csv}>"
+    }
+
+    def ref(qualified: Boolean = true): String = kind match {
+      case CppType.Kind.Variant | CppType.Kind.Data | CppType.Kind.StdLib =>
+        if (qualified) ns(applied(qualified)) else applied(qualified)
       case CppType.Kind.Base =>
         if (qualified) ns("Any") else "Any"
     }
@@ -269,8 +276,8 @@ object Cpp {
     given ToCppTerm[compileTime.CtorTermSelect[CppType]] = { x => x.getOrElse("") }
     inline given derived[T](using m: Mirror.Of[T]): ToCppTerm[T] = { (_: Option[T]) =>
       inline m match {
-        case s: Mirror.SumOf[T]     => summonInline[ToCppType[s.MirroredMonoType]]().qualified + "()"
-        case p: Mirror.ProductOf[T] => summonInline[ToCppType[p.MirroredMonoType]]().qualified + "()"
+        case s: Mirror.SumOf[T]     => summonInline[ToCppType[s.MirroredMonoType]]().ref(qualified = true) + "()"
+        case p: Mirror.ProductOf[T] => summonInline[ToCppType[p.MirroredMonoType]]().ref(qualified = true) + "()"
         case x                      => error(s"Unhandled derive: $x")
       }
     }
@@ -299,7 +306,7 @@ object Cpp {
       val tpe = summon[ToCppType[A]]()
       CppType(
         "std" :: Nil,
-        s"vector<${tpe.ref(qualified = true)}>",
+        s"vector",
         movable = true,
         constexpr = false,
         streamOp = { (s, v) =>
@@ -312,7 +319,8 @@ object Cpp {
             s"$s << '}';"
           )
         },
-        include = List("vector")
+        include = List("vector"),
+        ctors = tpe :: Nil
       )
     }
 

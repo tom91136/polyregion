@@ -7,12 +7,94 @@ import java.nio.file.Files
 import java.nio.file.StandardOpenOption
 import java.lang.annotation.Target
 
-import ujson.Arr
 import scala.collection.mutable.ArrayBuffer
+import cats.conversions.variance
+import java.nio.file.Path
 
 object CppCodeGen {
 
-  case class AA(s: String)
+  case class NlohmannJsonCodecSource(namespace: List[String], decls: List[String], impls: List[String])
+  object NlohmannJsonCodecSource {
+    def emit(s: StructNode): List[NlohmannJsonCodecSource] = {
+
+      def fnName(t: CppType) = t.ref(qualified = false).toLowerCase + "_json"
+      def select(idx: Int)   = s"j.at($idx)"
+
+      val body = //
+        if (s.tpe.kind == CppType.Kind.Base) {
+          s"size_t ord = ${select(0)}.get<size_t>();" ::
+            s"const auto t = ${select(1)};" ::
+            "switch (ord) {" ::
+            s.variants.zipWithIndex.map((c, i) => s"case ${i}: return ${c.tpe.ns(fnName(c.tpe))}(t);") :::
+            s"default: throw std::out_of_range(\"Bad ordinal \" + std::to_string(ord));" ::
+            "}" :: Nil
+        } else {
+
+          val ctorInvocation = s.members match {
+            case (name, _) :: Nil => s"${s.tpe.ref(qualified = true)}($name)";
+            case xs               => s.members.map(_._1).mkString("{", ", ", "}")
+          }
+
+          s.members.zipWithIndex.flatMap { case ((name, tpe), idx) =>
+            tpe.kind match {
+              case CppType.Kind.StdLib =>
+                (tpe.namespace, tpe.name, tpe.ctors) match {
+                  case ("std" :: Nil, "vector", x :: Nil) if x.kind != CppType.Kind.StdLib =>
+                    s"${tpe.ref(qualified = true)} $name;" ::
+                      s"auto ${name}_json = ${select(idx)};" ::
+                      s"std::transform(${name}_json.begin(), ${name}_json.end(), std::back_inserter($name), &${x.ns(fnName(x))});"
+                      :: Nil
+                  case _ => s"auto $name = ${select(idx)}.get<${tpe.ref(qualified = true)}>();" :: Nil
+                }
+              case _ => s"auto $name =  ${tpe.ns(fnName(tpe))}(${select(idx)});" :: Nil
+            }
+          } :::
+            s"return ${ctorInvocation};" ::
+            Nil
+        }
+
+      val impls = "" ::
+        s"${s.tpe.ref(qualified = true)} ${s.tpe.ns(fnName(s.tpe))}(const json& j) { " :: //
+        body.map("  " + _) :::                                                            //
+        "}" :: Nil                                                                        //
+
+      val decls = s"[[nodiscard]] ${s.tpe.ref(qualified = true)} ${fnName(s.tpe)}(const json &);" :: Nil
+
+      s.variants.flatMap(s => emit(s)) :+ NlohmannJsonCodecSource(s.tpe.namespace, decls, impls)
+
+    }
+
+    def emitHeader(namespace: String, xs: List[NlohmannJsonCodecSource]) = {
+      val lines = xs
+        .groupMapReduce(_.namespace.mkString("::"))(_.decls)(_ ::: _)
+        .toList
+        .flatMap {
+          case ("", lines) => lines
+          case (ns, lines) => s"namespace $ns { " :: lines ::: s"} // namespace $ns" :: Nil
+
+        }
+      s"""|#pragma once
+          |
+          |#include "json.hpp"
+          |#include "polyast.h"
+          |
+          |using json = nlohmann::json;
+          |
+          |namespace ${namespace} { 
+          |${lines.mkString("\n")}
+          |} // namespace $namespace
+          |
+          |""".stripMargin
+    }
+
+    def emitImpl(namespace: String, headerName: String, xs: List[NlohmannJsonCodecSource]) =
+      s"""|#include "$headerName.h"
+          |namespace $namespace { 
+          |${xs.flatMap(_.impls).mkString("\n")}
+          |} // namespace $namespace
+          |""".stripMargin
+
+  }
 
   @main def main(): Unit = {
 
@@ -22,6 +104,7 @@ object CppCodeGen {
     val s = Sym("a.b")
 
     import MsgPack.Codec.Compact.derived
+    import MsgPack._
 
     given MsgPack.Codec[Sym]      = derived
     given MsgPack.Codec[TypeKind] = derived
@@ -32,42 +115,48 @@ object CppCodeGen {
     given MsgPack.Codec[Intr]     = derived
     given MsgPack.Codec[Stmt]     = derived
     given MsgPack.Codec[Expr]     = derived
-    given MsgPack.Codec[Tree]     = derived
 
-    val ast: Tree = Stmt.Cond(
+    val ast: Stmt = Stmt.Cond(
       Expr.Alias(Term.BoolConst(true)),
-      Stmt.Return(Expr.Alias(Term.Select(Nil, Named("a", Type.Float)))) :: Nil,
-      Stmt.Return(Expr.Alias(Term.IntConst(1))) :: Nil
+      Stmt.Comment("a") :: Nil,
+      Stmt.Comment("b") :: Nil
     )
 
-    println(MsgPack.encodeMsg(ast))
+    pprint.pprintln(MsgPack.encodeMsg(ast))
     println(MsgPack.encode(ast).length)
 
     // println(MsgPack.encodeMsg(ast))
-    println(MsgPack.decode[Tree](MsgPack.encode(ast)))
+    println(MsgPack.decode[Stmt](MsgPack.encode(ast)))
 
-    println(MsgPack.decode[Tree](MsgPack.encode(ast)).right.get == ast)
-    // given ReadWriter[TypeKind] = macroRW
-    // given ReadWriter[Sym]      = macroRW
-    // given ReadWriter[Type]     = macroRW
+    println(MsgPack.decode[Stmt](MsgPack.encode(ast)).right.get == ast)
 
-    // println(write(s, indent = 2, escapeUnicode = true))
+    Files.write(
+      Paths.get(".").resolve("native/ast.msgpack").normalize.toAbsolutePath,
+      MsgPack.encode(ast),
+      StandardOpenOption.TRUNCATE_EXISTING,
+      StandardOpenOption.CREATE,
+      StandardOpenOption.WRITE
+    )
 
-    val alts = deriveStruct[PolyAstUnused.Sym]().emit //
-      ::: deriveStruct[PolyAstUnused.TypeKind]().emit
-      ::: deriveStruct[PolyAstUnused.Type]().emit
-      ::: deriveStruct[PolyAstUnused.Named]().emit
-      ::: deriveStruct[PolyAstUnused.Position]().emit
-      ::: deriveStruct[PolyAstUnused.Term]().emit
-      ::: deriveStruct[PolyAstUnused.Tree]().emit
-      ::: deriveStruct[PolyAstUnused.Function]().emit
-      ::: deriveStruct[PolyAstUnused.StructDef]().emit
+    val structs = deriveStruct[PolyAstUnused.Sym]() //
+      :: deriveStruct[PolyAstUnused.TypeKind]()
+      :: deriveStruct[PolyAstUnused.Type]()
+      :: deriveStruct[PolyAstUnused.Named]()
+      :: deriveStruct[PolyAstUnused.Position]()
+      :: deriveStruct[PolyAstUnused.Term]()
+      :: deriveStruct[PolyAstUnused.Expr]()
+      :: deriveStruct[PolyAstUnused.Stmt]()
+      :: deriveStruct[PolyAstUnused.Function]()
+      :: deriveStruct[PolyAstUnused.StructDef]()
+      :: Nil
 
-    val header = StructSource.emitHeader("polyregion::polyast", alts)
-    // println(header)
+    val sources = structs.flatMap(_.emit)
+
+    val jsonSources = structs.flatMap(NlohmannJsonCodecSource.emit(_))
+
     println("\n=========\n")
-    val impl = StructSource.emitImpl("polyregion::polyast", "polyast", alts)
-    // println(impl)
+
+    val ns = "polyregion::polyast"
 
     val target = Paths.get(".").resolve("native/src/generated/").normalize.toAbsolutePath
 
@@ -75,29 +164,20 @@ object CppCodeGen {
     println(s"Dest=${target}")
     println("\n=========\n")
 
-    Files.writeString(
-      target.resolve("polyast.cpp"),
-      impl,
-      StandardOpenOption.TRUNCATE_EXISTING,
-      StandardOpenOption.CREATE,
-      StandardOpenOption.WRITE
-    )
-    Files.writeString(
-      target.resolve("polyast.h"),
-      header,
+    def overwrite(path: Path)(content: String) = Files.writeString(
+      path,
+      content,
       StandardOpenOption.TRUNCATE_EXISTING,
       StandardOpenOption.CREATE,
       StandardOpenOption.WRITE
     )
 
-    println(summon[ToCppType[PolyAstUnused.TypeKind.Fractional.type]]().qualified)
-//    import Cpp.*
-//    println(T1Mid.T1ALeaf(Nil, List("a", "b"), 23, T1Mid.T1BLeaf))
+    overwrite(target.resolve("polyast.h"))(StructSource.emitHeader(ns, sources))
+    overwrite(target.resolve("polyast.cpp"))(StructSource.emitImpl(ns, "polyast", sources))
 
-    // println(Cpp.deriveStruct[Alt]().map(_.emitSource).mkString("\n"))
-    // println(Cpp.deriveStruct[FirstTop]().map(_.emitSource).mkString("\n"))
-    // println(Cpp.deriveStruct[First]().map(_.emitSource).mkString("\n"))
-//    println(Cpp.deriveStruct[Foo]().map(_.emitSource).mkString("\n"))
+    overwrite(target.resolve("polyast_codec.h"))(NlohmannJsonCodecSource.emitHeader(ns, jsonSources))
+    overwrite(target.resolve("polyast_codec.cpp"))(NlohmannJsonCodecSource.emitImpl(ns, "polyast_codec", jsonSources))
+
     ()
   }
 
