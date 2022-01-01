@@ -42,15 +42,9 @@ object MsgPack {
         case x                => throw new Exception(s"Expected Float32/Float64, got $x")
       }
     )
-    given [A](using C: Codec[A]): Codec[List[A]] =
+    given [A](using C: Codec[A]): Codec[List[A]] = {
+      println("Arr!")
       Codec(xs => upack.Arr(xs.map(C.encode(_))*), _.arr.map(m => C.decode(m)).toList)
-
-    object Verbose {
-      inline given derived[T](using m: Mirror.Of[T]): Codec[T] = derive(Kind.Verbose)
-    }
-
-    object Compact {
-      inline given derived[T](using m: Mirror.Of[T]): Codec[T] = derive(Kind.Compact)
     }
 
     private inline def summonAll[T <: Tuple, TC[_]]: Vector[TC[Any]] = inline erasedValue[T] match {
@@ -58,13 +52,15 @@ object MsgPack {
       case _: (t *: ts)  => summonInline[TC[t]].asInstanceOf[TC[Any]] +: summonAll[ts, TC]
     }
 
-    inline def derive[T](kind: Kind)(using m: Mirror.Of[T]): Codec[T] = inline m match {
+    inline given derived[T](using m: Mirror.Of[T]): Codec[T] = inline m match {
       case s: Mirror.SumOf[T] =>
-        val sum = constValue[s.MirroredLabel].toString
+        val sum      = constValue[s.MirroredLabel].toString
+        lazy val tcs = summonAll[s.MirroredElemTypes, Codec]
+        val kind     = Kind.Compact
         Codec[T](
           { x =>
             val ord = s.ordinal(x)
-            val t   = summonAll[s.MirroredElemTypes, Codec](ord).encode(x)
+            val t   = tcs(ord).encode(x)
             kind match {
               case Kind.Compact => Arr(Int32(ord), t)
               case Kind.Verbose => Obj(Str("sum") -> Str(sum), Str("ord") -> Int32(ord), Str("val") -> t)
@@ -75,19 +71,21 @@ object MsgPack {
               case Kind.Compact =>
                 msg.arr.toList match {
                   case Int32(ord) :: t :: Nil =>
-                    summonAll[s.MirroredElemTypes, Codec](ord).decode(t).asInstanceOf[T]
+                    tcs(ord).decode(t).asInstanceOf[T]
                 }
               case Kind.Verbose =>
                 msg.obj.toList match {
                   case (Str("sum"), Str(sum)) :: (Str("ord"), Int32(ord)) :: (Str("val"), t) :: Nil =>
-                    summonAll[s.MirroredElemTypes, Codec](ord).decode(t).asInstanceOf[T]
+                    tcs(ord).decode(t).asInstanceOf[T]
                 }
             }
         )
       case p: Mirror.ProductOf[T] =>
+        println(s"Der:${constValue[p.MirroredLabel]}")
+        lazy val xs = deriveProduct[p.MirroredElemLabels, p.MirroredElemTypes]
+        val kind    = Kind.Compact
         Codec[T](
-          x => {
-            val xs = deriveProduct[p.MirroredElemLabels, p.MirroredElemTypes]
+          x =>
             kind match {
               case Kind.Compact => Arr(xs.zip(iterator(x)).map { case ((_, e), v) => e.encode(v) }*)
               case Kind.Verbose =>
@@ -95,21 +93,18 @@ object MsgPack {
                   case (x :: xs) => Obj(x, xs*)
                   case Nil       => Obj()
                 }
-            }
-          },
-          msg => {
-            val xs = deriveProduct[p.MirroredElemLabels, p.MirroredElemTypes]
+            },
+          msg =>
             p.fromProduct(Tuple.fromArray(kind match {
               case Kind.Compact => msg.arr.zip(xs).map { case (msg, (_, c)) => c.decode(msg) }.toArray
               case Kind.Verbose => xs.map((field, c) => c.decode(msg.obj(Str(field)))).toArray
             }))
-          }
         )
     }
 
     private def iterator[T](p: T) = p.asInstanceOf[Product].productIterator
 
-    inline def deriveProduct[L <: Tuple, T <: Tuple]: List[(String, Codec[Any])] =
+    private inline def deriveProduct[L <: Tuple, T <: Tuple]: List[(String, Codec[Any])] =
       inline (erasedValue[L], erasedValue[T]) match {
         case (_: EmptyTuple, _: EmptyTuple) => Nil
         case (_: (l *: ls), _: (t *: ts)) =>

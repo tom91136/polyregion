@@ -169,19 +169,30 @@ object Cpp {
         if (tpe.kind == CppType.Kind.Base && hasMoreSumTypes) {
           (Nil, Nil)
         } else {
+          // val streamStmts =
+          //   if (tpe.kind == CppType.Kind.Base) List(s"std::visit([&os](auto &&arg) { os << *arg; }, x);") :: Nil
+          //   else
+          //     members.map((n, tpe) =>
+          //       if (tpe.kind == CppType.Kind.Base) s"std::visit([&os](auto &&arg) { os << *arg; }, x.$n);" :: Nil
+          //       else tpe.streamOp("os", s"x.$n")
+          //     )
+
           val streamStmts =
-            if (tpe.kind == CppType.Kind.Base) List(s"std::visit([&os](auto &&arg) { os << *arg; }, x);") :: Nil
-            else
-              members.map((n, tpe) =>
-                if (tpe.kind == CppType.Kind.Base) s"std::visit([&os](auto &&arg) { os << *arg; }, x.$n);" :: Nil
+            if (tpe.kind == CppType.Kind.Base) "std::visit([&os](auto &&arg) { os << *arg; }, x);" :: Nil
+            else {
+              val fields = members.map((n, tpe) =>
+                if (tpe.kind == CppType.Kind.Base && false) s"std::visit([&os](auto &&arg) { os << *arg; }, x.$n);" :: Nil
                 else tpe.streamOp("os", s"x.$n")
               )
 
+              s"os << \"${tpe.name}(\";" ::
+                fields.intercalate("os << ',';" :: Nil) :::
+                "os << ')';" :: Nil
+            }
+
           val streamMethodStmts =
             s"std::ostream &${ns("operator<<")}(std::ostream &os, const ${tpe.ref(qualified = true)} &x) {" ::
-              s"  os << \"${tpe.name}(\";" ::
-              streamStmts.intercalate("os << ',';" :: Nil).map("  " + _) :::
-              "  os << ')';" ::
+              streamStmts.map("  " + _) :::
               "  return os;" ::
               "}" :: Nil
 
@@ -339,7 +350,6 @@ object Cpp {
             name,
             movable = true,
             constexpr = false, // forAll[m.MirroredElemTypes](_.constexpr),
-            streamOp = (o, v) => List(s"std::visit([&$o](auto &&arg) { $o << arg; }, $v);"),
             kind = CppType.Kind(kind)
           )
         case p: Mirror.ProductOf[T] =>

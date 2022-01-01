@@ -15,9 +15,7 @@ std::ostream &operator<<(std::ostream &os, const Sym &x) {
 }
 
 std::ostream &TypeKind::operator<<(std::ostream &os, const TypeKind::Any &x) {
-  os << "TypeKind(";
   std::visit([&os](auto &&arg) { os << *arg; }, x);
-  os << ')';
   return os;
 }
 
@@ -40,9 +38,7 @@ std::ostream &TypeKind::operator<<(std::ostream &os, const TypeKind::Fractional 
 }
 
 std::ostream &Type::operator<<(std::ostream &os, const Type::Any &x) {
-  os << "Type(";
   std::visit([&os](auto &&arg) { os << *arg; }, x);
-  os << ')';
   return os;
 }
 TypeKind::Any Type::kind(const Type::Any& x){ return select<&Type::Base::kind>(x); }
@@ -113,8 +109,8 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Struct &x) {
   os << ',';
   os << '{';
   if (!x.args.empty()) {
-    std::for_each(x.args.begin(), std::prev(x.args.end()), [&os](auto &&x) { std::visit([&os](auto &&arg) { os << arg; }, x); os << ','; });
-    std::visit([&os](auto &&arg) { os << arg; }, x.args.back());
+    std::for_each(x.args.begin(), std::prev(x.args.end()), [&os](auto &&x) { os << x; os << ','; });
+    os << x.args.back();
   }
   os << '}';
   os << ')';
@@ -123,7 +119,7 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Struct &x) {
 
 std::ostream &Type::operator<<(std::ostream &os, const Type::Array &x) {
   os << "Array(";
-  std::visit([&os](auto &&arg) { os << *arg; }, x.component);
+  os << x.component;
   os << ')';
   return os;
 }
@@ -132,7 +128,7 @@ std::ostream &operator<<(std::ostream &os, const Named &x) {
   os << "Named(";
   os << '"' << x.symbol << '"';
   os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.tpe);
+  os << x.tpe;
   os << ')';
   return os;
 }
@@ -149,9 +145,7 @@ std::ostream &operator<<(std::ostream &os, const Position &x) {
 }
 
 std::ostream &Term::operator<<(std::ostream &os, const Term::Any &x) {
-  os << "Term(";
   std::visit([&os](auto &&arg) { os << *arg; }, x);
-  os << ')';
   return os;
 }
 Type::Any Term::tpe(const Term::Any& x){ return select<&Term::Base::tpe>(x); }
@@ -234,53 +228,49 @@ std::ostream &Term::operator<<(std::ostream &os, const Term::StringConst &x) {
 }
 
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Any &x) {
-  os << "Expr(";
   std::visit([&os](auto &&arg) { os << *arg; }, x);
-  os << ')';
   return os;
 }
 Type::Any Expr::tpe(const Expr::Any& x){ return select<&Expr::Base::tpe>(x); }
 
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Alias &x) {
   os << "Alias(";
-  std::visit([&os](auto &&arg) { os << *arg; }, x.ref);
+  os << x.ref;
   os << ')';
   return os;
 }
 
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Invoke &x) {
   os << "Invoke(";
-  std::visit([&os](auto &&arg) { os << *arg; }, x.lhs);
+  os << x.lhs;
   os << ',';
   os << '"' << x.name << '"';
   os << ',';
   os << '{';
   if (!x.args.empty()) {
-    std::for_each(x.args.begin(), std::prev(x.args.end()), [&os](auto &&x) { std::visit([&os](auto &&arg) { os << arg; }, x); os << ','; });
-    std::visit([&os](auto &&arg) { os << arg; }, x.args.back());
+    std::for_each(x.args.begin(), std::prev(x.args.end()), [&os](auto &&x) { os << x; os << ','; });
+    os << x.args.back();
   }
   os << '}';
   os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.rtn);
+  os << x.rtn;
   os << ')';
   return os;
 }
 
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Index &x) {
   os << "Index(";
-  std::visit([&os](auto &&arg) { os << *arg; }, x.lhs);
+  os << x.lhs;
   os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.idx);
+  os << x.idx;
   os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.component);
+  os << x.component;
   os << ')';
   return os;
 }
 
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Any &x) {
-  os << "Stmt(";
   std::visit([&os](auto &&arg) { os << *arg; }, x);
-  os << ')';
   return os;
 }
 
@@ -295,7 +285,7 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Var &x) {
   os << "Var(";
   os << x.name;
   os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.expr);
+  os << x.expr;
   os << ')';
   return os;
 }
@@ -304,7 +294,7 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Mut &x) {
   os << "Mut(";
   os << x.name;
   os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.expr);
+  os << x.expr;
   os << ')';
   return os;
 }
@@ -313,9 +303,9 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Update &x) {
   os << "Update(";
   os << x.lhs;
   os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.idx);
+  os << x.idx;
   os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.value);
+  os << x.value;
   os << ')';
   return os;
 }
@@ -328,8 +318,8 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Effect &x) {
   os << ',';
   os << '{';
   if (!x.args.empty()) {
-    std::for_each(x.args.begin(), std::prev(x.args.end()), [&os](auto &&x) { std::visit([&os](auto &&arg) { os << arg; }, x); os << ','; });
-    std::visit([&os](auto &&arg) { os << arg; }, x.args.back());
+    std::for_each(x.args.begin(), std::prev(x.args.end()), [&os](auto &&x) { os << x; os << ','; });
+    os << x.args.back();
   }
   os << '}';
   os << ')';
@@ -338,12 +328,12 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Effect &x) {
 
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::While &x) {
   os << "While(";
-  std::visit([&os](auto &&arg) { os << *arg; }, x.cond);
+  os << x.cond;
   os << ',';
   os << '{';
   if (!x.body.empty()) {
-    std::for_each(x.body.begin(), std::prev(x.body.end()), [&os](auto &&x) { std::visit([&os](auto &&arg) { os << arg; }, x); os << ','; });
-    std::visit([&os](auto &&arg) { os << arg; }, x.body.back());
+    std::for_each(x.body.begin(), std::prev(x.body.end()), [&os](auto &&x) { os << x; os << ','; });
+    os << x.body.back();
   }
   os << '}';
   os << ')';
@@ -364,19 +354,19 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Cont &x) {
 
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Cond &x) {
   os << "Cond(";
-  std::visit([&os](auto &&arg) { os << *arg; }, x.cond);
+  os << x.cond;
   os << ',';
   os << '{';
   if (!x.trueBr.empty()) {
-    std::for_each(x.trueBr.begin(), std::prev(x.trueBr.end()), [&os](auto &&x) { std::visit([&os](auto &&arg) { os << arg; }, x); os << ','; });
-    std::visit([&os](auto &&arg) { os << arg; }, x.trueBr.back());
+    std::for_each(x.trueBr.begin(), std::prev(x.trueBr.end()), [&os](auto &&x) { os << x; os << ','; });
+    os << x.trueBr.back();
   }
   os << '}';
   os << ',';
   os << '{';
   if (!x.falseBr.empty()) {
-    std::for_each(x.falseBr.begin(), std::prev(x.falseBr.end()), [&os](auto &&x) { std::visit([&os](auto &&arg) { os << arg; }, x); os << ','; });
-    std::visit([&os](auto &&arg) { os << arg; }, x.falseBr.back());
+    std::for_each(x.falseBr.begin(), std::prev(x.falseBr.end()), [&os](auto &&x) { os << x; os << ','; });
+    os << x.falseBr.back();
   }
   os << '}';
   os << ')';
@@ -385,7 +375,7 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Cond &x) {
 
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Return &x) {
   os << "Return(";
-  std::visit([&os](auto &&arg) { os << *arg; }, x.value);
+  os << x.value;
   os << ')';
   return os;
 }
@@ -401,12 +391,12 @@ std::ostream &operator<<(std::ostream &os, const Function &x) {
   }
   os << '}';
   os << ',';
-  std::visit([&os](auto &&arg) { os << *arg; }, x.rtn);
+  os << x.rtn;
   os << ',';
   os << '{';
   if (!x.body.empty()) {
-    std::for_each(x.body.begin(), std::prev(x.body.end()), [&os](auto &&x) { std::visit([&os](auto &&arg) { os << arg; }, x); os << ','; });
-    std::visit([&os](auto &&arg) { os << arg; }, x.body.back());
+    std::for_each(x.body.begin(), std::prev(x.body.end()), [&os](auto &&x) { os << x; os << ','; });
+    os << x.body.back();
   }
   os << '}';
   os << ')';
