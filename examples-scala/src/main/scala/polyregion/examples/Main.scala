@@ -9,7 +9,7 @@ import polyregion.OrcJIT_
 import java.nio.ByteBuffer
 import java.util.concurrent.{CountDownLatch, Executors}
 
-object Main:
+object Main {
 
   def time[R](op: String)(block: => R): R = {
     val t0     = System.nanoTime()
@@ -144,7 +144,7 @@ object Main:
     mod.validate()
     mod.optimise()
     mod.dump()
-    
+
     val nioBuffer = ByteBuffer.allocateDirect(Integer.BYTES * 100).asIntBuffer()
     val view      = Vector.tabulate(10)(i => nioBuffer.asReadOnlyBuffer().get(i))
     println(">> " + view)
@@ -312,3 +312,4 @@ object Main:
 
     println("End!")
   }
+}

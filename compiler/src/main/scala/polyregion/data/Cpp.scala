@@ -44,7 +44,7 @@ object Cpp {
 
   object StructSource {
 
-    val RequiredIncludes = List("memory", "variant", "iterator")
+    val RequiredIncludes = List("memory", "variant", "iterator", "sstream")
     def emitHeader(namespace: String, xs: List[StructSource]) = {
 
       def nsStart(n: String) = if (n.isEmpty) "" else s"namespace $n { "
@@ -88,6 +88,20 @@ object Cpp {
             |template <auto member, class... T> //
             |constexpr auto select(const Alternative<T...> &a) {
             |  return std::visit([](auto &&arg) { return *(arg).*member; }, a);
+            |}
+            |
+            |template <typename T> //
+            |std::string to_string(const T& x) {
+            |  std::ostringstream ss;
+            |  ss << x;
+            |  return ss.str();
+            |}
+            |
+            |template <typename T, typename... Ts> //
+            |constexpr std::optional<T> get_opt(const Alternative<Ts...> &a) {
+            |  if (const std::shared_ptr<T> *v = std::get_if<std::shared_ptr<T>>(&a)) return {**v};
+            |  else
+            |    return {};
             |}""".stripMargin
 
       s"""|#pragma once
@@ -180,7 +194,8 @@ object Cpp {
             if (tpe.kind == CppType.Kind.Base) "std::visit([&os](auto &&arg) { os << *arg; }, x);" :: Nil
             else {
               val fields = members.map((n, tpe) =>
-                if (tpe.kind == CppType.Kind.Base && false) s"std::visit([&os](auto &&arg) { os << *arg; }, x.$n);" :: Nil
+                if (tpe.kind == CppType.Kind.Base && false)
+                  s"std::visit([&os](auto &&arg) { os << *arg; }, x.$n);" :: Nil
                 else tpe.streamOp("os", s"x.$n")
               )
 

@@ -186,6 +186,101 @@ Term::Any Term::any_json(const json& j) {
   }
 }
 
+Expr::Sin Expr::sin_json(const json& j) { 
+  auto lhs =  Term::any_json(j.at(0));
+  auto rtn =  Type::any_json(j.at(1));
+  return {lhs, rtn};
+}
+
+Expr::Cos Expr::cos_json(const json& j) { 
+  auto lhs =  Term::any_json(j.at(0));
+  auto rtn =  Type::any_json(j.at(1));
+  return {lhs, rtn};
+}
+
+Expr::Tan Expr::tan_json(const json& j) { 
+  auto lhs =  Term::any_json(j.at(0));
+  auto rtn =  Type::any_json(j.at(1));
+  return {lhs, rtn};
+}
+
+Expr::Add Expr::add_json(const json& j) { 
+  auto lhs =  Term::any_json(j.at(0));
+  auto rhs =  Term::any_json(j.at(1));
+  auto rtn =  Type::any_json(j.at(2));
+  return {lhs, rhs, rtn};
+}
+
+Expr::Sub Expr::sub_json(const json& j) { 
+  auto lhs =  Term::any_json(j.at(0));
+  auto rhs =  Term::any_json(j.at(1));
+  auto rtn =  Type::any_json(j.at(2));
+  return {lhs, rhs, rtn};
+}
+
+Expr::Mul Expr::mul_json(const json& j) { 
+  auto lhs =  Term::any_json(j.at(0));
+  auto rhs =  Term::any_json(j.at(1));
+  auto rtn =  Type::any_json(j.at(2));
+  return {lhs, rhs, rtn};
+}
+
+Expr::Div Expr::div_json(const json& j) { 
+  auto lhs =  Term::any_json(j.at(0));
+  auto rhs =  Term::any_json(j.at(1));
+  auto rtn =  Type::any_json(j.at(2));
+  return {lhs, rhs, rtn};
+}
+
+Expr::Mod Expr::mod_json(const json& j) { 
+  auto lhs =  Term::any_json(j.at(0));
+  auto rhs =  Term::any_json(j.at(1));
+  auto rtn =  Type::any_json(j.at(2));
+  return {lhs, rhs, rtn};
+}
+
+Expr::Pow Expr::pow_json(const json& j) { 
+  auto lhs =  Term::any_json(j.at(0));
+  auto rhs =  Term::any_json(j.at(1));
+  auto rtn =  Type::any_json(j.at(2));
+  return {lhs, rhs, rtn};
+}
+
+Expr::Inv Expr::inv_json(const json& j) { 
+  auto lhs =  Term::any_json(j.at(0));
+  return Expr::Inv(lhs);
+}
+
+Expr::Eq Expr::eq_json(const json& j) { 
+  auto lhs =  Term::any_json(j.at(0));
+  auto rhs =  Term::any_json(j.at(1));
+  return {lhs, rhs};
+}
+
+Expr::Lte Expr::lte_json(const json& j) { 
+  auto lhs =  Term::any_json(j.at(0));
+  auto rhs =  Term::any_json(j.at(1));
+  return {lhs, rhs};
+}
+
+Expr::Gte Expr::gte_json(const json& j) { 
+  auto lhs =  Term::any_json(j.at(0));
+  auto rhs =  Term::any_json(j.at(1));
+  return {lhs, rhs};
+}
+
+Expr::Lt Expr::lt_json(const json& j) { 
+  auto lhs =  Term::any_json(j.at(0));
+  auto rhs =  Term::any_json(j.at(1));
+  return {lhs, rhs};
+}
+
+Expr::Gt Expr::gt_json(const json& j) { 
+  auto lhs =  Term::any_json(j.at(0));
+  auto rhs =  Term::any_json(j.at(1));
+  return {lhs, rhs};
+}
+
 Expr::Alias Expr::alias_json(const json& j) { 
   auto ref =  Term::any_json(j.at(0));
   return Expr::Alias(ref);
@@ -202,7 +297,7 @@ Expr::Invoke Expr::invoke_json(const json& j) {
 }
 
 Expr::Index Expr::index_json(const json& j) { 
-  auto lhs =  Term::any_json(j.at(0));
+  auto lhs =  Term::select_json(j.at(0));
   auto idx =  Term::any_json(j.at(1));
   auto component =  Type::any_json(j.at(2));
   return {lhs, idx, component};
@@ -212,9 +307,24 @@ Expr::Any Expr::any_json(const json& j) {
   size_t ord = j.at(0).get<size_t>();
   const auto t = j.at(1);
   switch (ord) {
-  case 0: return Expr::alias_json(t);
-  case 1: return Expr::invoke_json(t);
-  case 2: return Expr::index_json(t);
+  case 0: return Expr::sin_json(t);
+  case 1: return Expr::cos_json(t);
+  case 2: return Expr::tan_json(t);
+  case 3: return Expr::add_json(t);
+  case 4: return Expr::sub_json(t);
+  case 5: return Expr::mul_json(t);
+  case 6: return Expr::div_json(t);
+  case 7: return Expr::mod_json(t);
+  case 8: return Expr::pow_json(t);
+  case 9: return Expr::inv_json(t);
+  case 10: return Expr::eq_json(t);
+  case 11: return Expr::lte_json(t);
+  case 12: return Expr::gte_json(t);
+  case 13: return Expr::lt_json(t);
+  case 14: return Expr::gt_json(t);
+  case 15: return Expr::alias_json(t);
+  case 16: return Expr::invoke_json(t);
+  case 17: return Expr::index_json(t);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
   }
 }

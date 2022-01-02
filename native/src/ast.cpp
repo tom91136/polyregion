@@ -2,171 +2,140 @@
 
 #include "ast.h"
 #include "utils.hpp"
+#include "variants.hpp"
 
-using namespace polyregion::ast;
+using namespace std::string_literals;
+using namespace polyregion::polyast;
 using namespace polyregion;
 using std::string;
 
-[[nodiscard]] string ast::repr(const Sym &sym) { return mk_string<string>(sym.fqn(), std::identity(), "."); }
+[[nodiscard]] string polyast::repr(const Sym &sym) { return mk_string<string>(sym.fqn, std::identity(), "."); }
 
-[[nodiscard]] string ast::repr(const Types_Type &type) {
-  if (auto reftpe = POLY_OPT(type, reftpe); reftpe) {
-    return reftpe->args().empty() //
-               ? repr(reftpe->name())
-               : repr(reftpe->name()) + //
-                     "[" +
-                     mk_string<Types_Type>(
-                         reftpe->args(), [&](auto x) { return repr(x); }, ",") + //
-                     "]";
-  }
-  if (auto arrtpe = POLY_OPT(type, arraytpe); arrtpe) {
-    return "Array[" + repr(arrtpe->tpe()) + "]";
-  }
-  if (type.has_booltpe()) return "Bool";
-  if (type.has_bytetpe()) return "Byte";
-  if (type.has_chartpe()) return "Char";
-  if (type.has_shorttpe()) return "Short";
-  if (type.has_inttpe()) return "Int";
-  if (type.has_longtpe()) return "Long";
-  if (type.has_doubletpe()) return "Double";
-  if (type.has_floattpe()) return "Float";
-  if (type.has_stringtpe()) return "String";
-  return "Unit";
+[[nodiscard]] string polyast::repr(const Type::Any &type) {
+  return variants::total(
+      *type,                                           //
+      [](const Type::Float &x) { return "Float"s; },   //
+      [](const Type::Double &x) { return "Double"s; }, //
+      [](const Type::Bool &x) { return "Bool"s; },     //
+      [](const Type::Byte &x) { return "Byte"s; },     //
+      [](const Type::Char &x) { return "Char"s; },     //
+      [](const Type::Short &x) { return "Short"s; },   //
+      [](const Type::Int &x) { return "Int"s; },       //
+      [](const Type::Long &x) { return "Long"s; },     //
+      [](const Type::String &x) { return "String"s; }, //
+      [](const Type::Unit &x) { return "Unit"s; },     //
+      [](const Type::Struct &x) {
+        return x.args.empty() //
+                   ? repr(x.name)
+                   : repr(x.name) + //
+                         "[" +
+                         mk_string<Type::Any>(
+                             x.args, [&](auto x) { return repr(x); }, ",") +
+                         "]";
+      }, //
+      [](const Type::Array &x) { return "Array[" + repr(x.component) + "]"; });
 }
 
-[[nodiscard]] string ast::repr(const Named &path) { return "(" + path.symbol() + ":" + repr(path.tpe()) + ")"; }
+[[nodiscard]] string polyast::repr(const Named &path) { return "(" + path.symbol + ":" + repr(path.tpe) + ")"; }
 
-[[nodiscard]] string ast::repr(const Refs_Select &select) {
-  return select.tail().empty() //
-             ? repr(select.head())
-             : repr(select.head()) + "." +
-                   mk_string<Named>(
-                       select.tail(), [&](auto x) { return repr(x); }, ".");
+[[nodiscard]] string polyast::repr(const Term::Any &ref) {
+  return variants::total(
+      *ref,
+      [](const Term::Select &x) {
+        return x.init.empty() //
+                   ? repr(x.last)
+                   : mk_string<Named>(
+                         x.init, [&](auto x) { return repr(x); }, ".") +
+                         "." + repr(x.last);
+      },
+      [](const Term::BoolConst &x) { return "Bool(" + std::to_string(x.value) + ")"; },
+      [](const Term::ByteConst &x) { return "Byte(" + std::to_string(x.value) + ")"; },
+      [](const Term::CharConst &x) { return "Char(" + std::to_string(x.value) + ")"; },
+      [](const Term::ShortConst &x) { return "Short(" + std::to_string(x.value) + ")"; },
+      [](const Term::IntConst &x) { return "Int(" + std::to_string(x.value) + ")"; },
+      [](const Term::LongConst &x) { return "Long(" + std::to_string(x.value) + ")"; },
+      [](const Term::DoubleConst &x) { return "Double(" + std::to_string(x.value) + ")"; },
+      [](const Term::FloatConst &x) { return "Float(" + std::to_string(x.value) + ")"; },
+      [](const Term::StringConst &x) { return "String(" + x.value + ")"; });
 }
 
-[[nodiscard]] string ast::repr(const Refs_Ref &ref) {
-  if (auto c = POLY_OPT(ref, select); c) return repr(*c);
-  if (auto c = POLY_OPT(ref, boolconst); c) return "Bool(" + std::to_string(c->value()) + ")";
-  if (auto c = POLY_OPT(ref, byteconst); c) return "Byte(" + std::to_string(c->value()) + ")";
-  if (auto c = POLY_OPT(ref, charconst); c) return "Char(" + std::to_string(c->value()) + ")";
-  if (auto c = POLY_OPT(ref, shortconst); c) return "Short(" + std::to_string(c->value()) + ")";
-  if (auto c = POLY_OPT(ref, intconst); c) return "Int(" + std::to_string(c->value()) + ")";
-  if (auto c = POLY_OPT(ref, longconst); c) return "Long(" + std::to_string(c->value()) + ")";
-  if (auto c = POLY_OPT(ref, doubleconst); c) return "Double(" + std::to_string(c->value()) + ")";
-  if (auto c = POLY_OPT(ref, floatconst); c) return "Float(" + std::to_string(c->value()) + ")";
-  if (auto c = POLY_OPT(ref, stringconst); c) return "String(" + c->value() + ")";
-  return "Unit()";
+[[nodiscard]] string polyast::repr(const Expr::Any &expr) {
+  return variants::total(
+      *expr, //
+      [](const Expr::Sin &x) { return "sin(" + repr(x.lhs) + ")"; },
+      [](const Expr::Cos &x) { return "cos(" + repr(x.lhs) + ")"; },
+      [](const Expr::Tan &x) { return "tan(" + repr(x.lhs) + ")"; },
+
+      [](const Expr::Add &x) { return repr(x.lhs) + " + " + repr(x.rhs); },
+      [](const Expr::Sub &x) { return repr(x.lhs) + " - " + repr(x.rhs); },
+      [](const Expr::Div &x) { return repr(x.lhs) + " / " + repr(x.rhs); },
+      [](const Expr::Mul &x) { return repr(x.lhs) + " * " + repr(x.rhs); },
+      [](const Expr::Mod &x) { return repr(x.lhs) + " % " + repr(x.rhs); },
+      [](const Expr::Pow &x) { return repr(x.lhs) + " ^ " + repr(x.rhs); },
+
+      [](const Expr::Inv &x) { return "!(" + repr(x.lhs) + ")"; },
+      [](const Expr::Eq &x) { return repr(x.lhs) + " == " + repr(x.rhs); },
+      [](const Expr::Lte &x) { return repr(x.lhs) + " <= " + repr(x.rhs); },
+      [](const Expr::Gte &x) { return repr(x.lhs) + " >= " + repr(x.rhs); },
+      [](const Expr::Lt &x) { return repr(x.lhs) + " < " + repr(x.rhs); },
+      [](const Expr::Gt &x) { return repr(x.lhs) + " > " + repr(x.rhs); },
+
+      [](const Expr::Alias &x) { return "(~>" + repr(x.ref) + ")"; },
+      [](const Expr::Invoke &x) {
+        return repr(x.lhs) + "`" + x.name + "`" +
+               mk_string<Term::Any>(
+                   x.args, [&](auto x) { return repr(x); }, ",") +
+               ":" + repr(x.tpe);
+      },
+      [](const Expr::Index &x) { return repr(x.lhs) + "[" + repr(x.idx) + "]"; });
 }
 
-[[nodiscard]] string ast::repr(const Tree_Expr &expr) {
-  if (auto alias = POLY_OPT(expr, alias); alias) {
-    return "(~>" + repr(alias->ref()) + ")";
-  }
-  if (auto invoke = POLY_OPT(expr, invoke); invoke) {
-    return repr(invoke->lhs()) + "`" + invoke->name() + "`" +
-           mk_string<Refs_Ref>(
-               invoke->args(), [&](auto x) { return repr(x); }, ",") +
-           ":" + repr(invoke->tpe());
-  }
-  if (auto index = POLY_OPT(expr, index); index) {
-    return repr(index->lhs()) + "[" + repr(index->idx()) + "]";
-  }
-  return "(unknown repr)";
+[[nodiscard]] string polyast::repr(const Stmt::Any &stmt) {
+  return variants::total(
+      *stmt, //
+      [](const Stmt::Comment &x) { return "// " + x.value; },
+      [](const Stmt::Var &x) { return "var " + repr(x.name) + " = " + repr(x.expr); },
+      [](const Stmt::Mut &x) { return repr(x.name) + " := " + repr(x.expr); },
+      [](const Stmt::Update &x) { return repr(x.lhs) + "[" + repr(x.idx) + "] = " + repr(x.value); },
+      [](const Stmt::Effect &x) {
+        return repr(x.lhs) + "`" + x.name + "`" +
+               mk_string<Term::Any>(
+                   x.args, [&](auto x) { return repr(x); }, ",") +
+               " : Unit";
+      },
+      [](const Stmt::While &x) {
+        return "while(" + repr(x.cond) + "){\n" +
+               mk_string<Stmt::Any>(
+                   x.body, [&](auto x) { return repr(x); }, "\n") +
+               "}";
+      },
+      [](const Stmt::Break &x) { return "break;"s; }, [](const Stmt::Cont &x) { return "continue;"s; },
+      [](const Stmt::Cond &x) {
+        return "if(" + repr(x.cond) + ") { \n" +
+               mk_string<Stmt::Any>(
+                   x.trueBr, [&](auto x) { return repr(x); }, "\n") +
+               "} else {\n" +
+               mk_string<Stmt::Any>(
+                   x.falseBr, [&](auto x) { return repr(x); }, "\n") +
+               "}";
+      },
+      [](const Stmt::Return &x) { return "return " + repr(x.value); });
 }
 
-[[nodiscard]] string ast::repr(const Tree_Stmt &stmt) {
-  if (auto comment = POLY_OPT(stmt, comment); comment) {
-    return "// " + comment->value();
-  }
-  if (auto var = POLY_OPT(stmt, var); var) {
-    return "var " + repr(var->name()) + " = " + repr(var->rhs());
-  }
-  if (auto effect = POLY_OPT(stmt, effect); effect) {
-    return repr(effect->lhs().head()) + "`" + effect->name() + "`" +
-           mk_string<Refs_Ref>(
-               effect->args(), [&](auto x) { return repr(x); }, ",") +
-           " : Unit";
-  }
-  if (auto mut = POLY_OPT(stmt, mut); mut) {
-    return repr(mut->name()) + " := " + repr(mut->expr());
-  }
-  if (auto while_ = POLY_OPT(stmt, while_); while_) {
-    return "while(" + repr(while_->cond()) + "){\n" +
-           mk_string<Tree_Stmt>(
-               while_->body(), [&](auto x) { return repr(x); }, "\n") +
-           "}";
-  }
-  if (auto update = POLY_OPT(stmt, update); update) {
-    return repr(update->lhs()) + "[" + repr(update->idx()) + "] = " + repr(update->value());
-  }
-
-  return "(unknown stmt)";
-}
-
-[[nodiscard]] string ast::repr(const Tree_Function &fn) {
-  return "def " + fn.name() + "(" +
+[[nodiscard]] string polyast::repr(const Function &fn) {
+  return "def " + fn.name + "(" +
          mk_string<Named>(
-             fn.args(), [&](auto x) { return repr(x); }, ",") +
-         ") : " + repr(fn.returntpe()) + " = {\n" +
-         mk_string<Tree_Stmt>(
-             fn.statements(), [&](auto x) { return repr(x); }, "\n") +
+             fn.args, [&](auto x) { return repr(x); }, ",") +
+         ") : " + repr(fn.rtn) + " = {\n" +
+         mk_string<Stmt::Any>(
+             fn.body, [&](auto x) { return repr(x); }, "\n") +
          "\n}";
 }
 
-[[nodiscard]] string repr(const Program &program) {
-  return mk_string<Tree_Function>(
-      program.functions(), [&](auto x) { return repr(x); }, "\n");
-}
-
-Named ast::selectLast(const Refs_Select &select) {
-  return select.tail_size() != 0 ? *select.tail().rbegin() : select.head();
-}
-
-std::optional<ast::NumKind> ast::numKind(const Types_Type &tpe) {
-  if (tpe.has_booltpe()     //
-      || tpe.has_bytetpe()  //
-      || tpe.has_chartpe()  //
-      || tpe.has_shorttpe() //
-      || tpe.has_inttpe()   //
-      || tpe.has_longtpe()) //
-    return {ast::NumKind::Integral};
-  else if (tpe.has_doubletpe() || tpe.has_floattpe())
-    return {ast::NumKind::Fractional};
-  else
-    return {};
-}
-
-std::optional<ast::NumKind> ast::numKind(const Refs_Ref &ref) {
-  if (ref.has_boolconst()     //
-      || ref.has_byteconst()  //
-      || ref.has_charconst()  //
-      || ref.has_shortconst() //
-      || ref.has_intconst()   //
-      || ref.has_longconst()) //
-    return {ast::NumKind::Integral};
-  else if (ref.has_doubleconst() || ref.has_floatconst())
-    return {ast::NumKind::Fractional};
-  else if (ref.has_select())
-    return numKind(selectLast(ref.select()).tpe());
-  else
-    return {};
-}
-
-std::string ast::name(NumKind k) {
-  switch (k) {
-  case NumKind::Integral:
-    return "Integral";
-  case NumKind::Fractional:
-    return "Fractional";
-  default:
-    static_assert("unimplemented KindCase");
-  }
-}
-
-std::string ast::qualified(const Refs_Select &select) {
-  return select.tail_size() == 0 //
-             ? select.head().symbol()
-             : select.head().symbol() + "." +
-                   polyregion::mk_string<Named>(
-                       select.tail(), [](auto &n) { return n.symbol(); }, ".");
+std::string polyast::qualified(const Term::Select &select) {
+  return select.init.empty() //
+             ? select.last.symbol
+             : polyregion::mk_string<Named>(
+                   select.init, [](auto &n) { return n.symbol; }, ".") +
+                   "." + select.last.symbol;
 }

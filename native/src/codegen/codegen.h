@@ -1,9 +1,9 @@
 #pragma once
 
-namespace polyregion::codegen{
+namespace polyregion::codegen {
 
-  class CodeGen{
-    virtual void run(const Tree_Function &fnTree) = 0;
-  };
+class CodeGen {
+  virtual void run(const polyast::Function &fnTree) = 0;
+};
 
-}
+} // namespace polyregion::codegen

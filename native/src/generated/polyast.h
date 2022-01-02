@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <iterator>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <variant>
 #include <vector>
@@ -25,6 +26,20 @@ constexpr std::variant<T...> operator*(const Alternative<T...> &a) {
 template <auto member, class... T> //
 constexpr auto select(const Alternative<T...> &a) {
   return std::visit([](auto &&arg) { return *(arg).*member; }, a);
+}
+
+template <typename T> //
+std::string to_string(const T& x) {
+  std::ostringstream ss;
+  ss << x;
+  return ss.str();
+}
+
+template <typename T, typename... Ts> //
+constexpr std::optional<T> get_opt(const Alternative<Ts...> &a) {
+  if (const std::shared_ptr<T> *v = std::get_if<std::shared_ptr<T>>(&a)) return {**v};
+  else
+    return {};
 }
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "google-explicit-constructor"
@@ -103,49 +118,49 @@ struct Double : Type::Base {
 };
 
 struct Bool : Type::Base {
-  Bool() noexcept : Type::Base(TypeKind::Fractional()) {}
+  Bool() noexcept : Type::Base(TypeKind::Integral()) {}
   operator Any() const { return std::make_shared<Bool>(*this); };
   friend std::ostream &operator<<(std::ostream &os, const Type::Bool &);
 };
 
 struct Byte : Type::Base {
-  Byte() noexcept : Type::Base(TypeKind::Fractional()) {}
+  Byte() noexcept : Type::Base(TypeKind::Integral()) {}
   operator Any() const { return std::make_shared<Byte>(*this); };
   friend std::ostream &operator<<(std::ostream &os, const Type::Byte &);
 };
 
 struct Char : Type::Base {
-  Char() noexcept : Type::Base(TypeKind::Fractional()) {}
+  Char() noexcept : Type::Base(TypeKind::Integral()) {}
   operator Any() const { return std::make_shared<Char>(*this); };
   friend std::ostream &operator<<(std::ostream &os, const Type::Char &);
 };
 
 struct Short : Type::Base {
-  Short() noexcept : Type::Base(TypeKind::Fractional()) {}
+  Short() noexcept : Type::Base(TypeKind::Integral()) {}
   operator Any() const { return std::make_shared<Short>(*this); };
   friend std::ostream &operator<<(std::ostream &os, const Type::Short &);
 };
 
 struct Int : Type::Base {
-  Int() noexcept : Type::Base(TypeKind::Fractional()) {}
+  Int() noexcept : Type::Base(TypeKind::Integral()) {}
   operator Any() const { return std::make_shared<Int>(*this); };
   friend std::ostream &operator<<(std::ostream &os, const Type::Int &);
 };
 
 struct Long : Type::Base {
-  Long() noexcept : Type::Base(TypeKind::Fractional()) {}
+  Long() noexcept : Type::Base(TypeKind::Integral()) {}
   operator Any() const { return std::make_shared<Long>(*this); };
   friend std::ostream &operator<<(std::ostream &os, const Type::Long &);
 };
 
 struct String : Type::Base {
-  String() noexcept : Type::Base(TypeKind::Fractional()) {}
+  String() noexcept : Type::Base(TypeKind::Ref()) {}
   operator Any() const { return std::make_shared<String>(*this); };
   friend std::ostream &operator<<(std::ostream &os, const Type::String &);
 };
 
 struct Unit : Type::Base {
-  Unit() noexcept : Type::Base(TypeKind::Fractional()) {}
+  Unit() noexcept : Type::Base(TypeKind::Ref()) {}
   operator Any() const { return std::make_shared<Unit>(*this); };
   friend std::ostream &operator<<(std::ostream &os, const Type::Unit &);
 };
@@ -276,10 +291,25 @@ struct StringConst : Term::Base {
 } // namespace Term
 namespace Expr { 
 
+struct Sin;
+struct Cos;
+struct Tan;
+struct Add;
+struct Sub;
+struct Mul;
+struct Div;
+struct Mod;
+struct Pow;
+struct Inv;
+struct Eq;
+struct Lte;
+struct Gte;
+struct Lt;
+struct Gt;
 struct Alias;
 struct Invoke;
 struct Index;
-using Any = Alternative<Alias, Invoke, Index>;
+using Any = Alternative<Sin, Cos, Tan, Add, Sub, Mul, Div, Mod, Pow, Inv, Eq, Lte, Gte, Lt, Gt, Alias, Invoke, Index>;
 struct Base {
   Type::Any tpe;
   protected:
@@ -287,6 +317,131 @@ struct Base {
   friend std::ostream &operator<<(std::ostream &os, const Expr::Any &);
 };
 Type::Any tpe(const Expr::Any&);
+
+struct Sin : Expr::Base {
+  Term::Any lhs;
+  Type::Any rtn;
+  Sin(Term::Any lhs, Type::Any rtn) noexcept : Expr::Base(rtn), lhs(std::move(lhs)), rtn(std::move(rtn)) {}
+  operator Any() const { return std::make_shared<Sin>(*this); };
+  friend std::ostream &operator<<(std::ostream &os, const Expr::Sin &);
+};
+
+struct Cos : Expr::Base {
+  Term::Any lhs;
+  Type::Any rtn;
+  Cos(Term::Any lhs, Type::Any rtn) noexcept : Expr::Base(rtn), lhs(std::move(lhs)), rtn(std::move(rtn)) {}
+  operator Any() const { return std::make_shared<Cos>(*this); };
+  friend std::ostream &operator<<(std::ostream &os, const Expr::Cos &);
+};
+
+struct Tan : Expr::Base {
+  Term::Any lhs;
+  Type::Any rtn;
+  Tan(Term::Any lhs, Type::Any rtn) noexcept : Expr::Base(rtn), lhs(std::move(lhs)), rtn(std::move(rtn)) {}
+  operator Any() const { return std::make_shared<Tan>(*this); };
+  friend std::ostream &operator<<(std::ostream &os, const Expr::Tan &);
+};
+
+struct Add : Expr::Base {
+  Term::Any lhs;
+  Term::Any rhs;
+  Type::Any rtn;
+  Add(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept : Expr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
+  operator Any() const { return std::make_shared<Add>(*this); };
+  friend std::ostream &operator<<(std::ostream &os, const Expr::Add &);
+};
+
+struct Sub : Expr::Base {
+  Term::Any lhs;
+  Term::Any rhs;
+  Type::Any rtn;
+  Sub(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept : Expr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
+  operator Any() const { return std::make_shared<Sub>(*this); };
+  friend std::ostream &operator<<(std::ostream &os, const Expr::Sub &);
+};
+
+struct Mul : Expr::Base {
+  Term::Any lhs;
+  Term::Any rhs;
+  Type::Any rtn;
+  Mul(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept : Expr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
+  operator Any() const { return std::make_shared<Mul>(*this); };
+  friend std::ostream &operator<<(std::ostream &os, const Expr::Mul &);
+};
+
+struct Div : Expr::Base {
+  Term::Any lhs;
+  Term::Any rhs;
+  Type::Any rtn;
+  Div(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept : Expr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
+  operator Any() const { return std::make_shared<Div>(*this); };
+  friend std::ostream &operator<<(std::ostream &os, const Expr::Div &);
+};
+
+struct Mod : Expr::Base {
+  Term::Any lhs;
+  Term::Any rhs;
+  Type::Any rtn;
+  Mod(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept : Expr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
+  operator Any() const { return std::make_shared<Mod>(*this); };
+  friend std::ostream &operator<<(std::ostream &os, const Expr::Mod &);
+};
+
+struct Pow : Expr::Base {
+  Term::Any lhs;
+  Term::Any rhs;
+  Type::Any rtn;
+  Pow(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept : Expr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
+  operator Any() const { return std::make_shared<Pow>(*this); };
+  friend std::ostream &operator<<(std::ostream &os, const Expr::Pow &);
+};
+
+struct Inv : Expr::Base {
+  Term::Any lhs;
+  explicit Inv(Term::Any lhs) noexcept : Expr::Base(Type::Bool()), lhs(std::move(lhs)) {}
+  operator Any() const { return std::make_shared<Inv>(*this); };
+  friend std::ostream &operator<<(std::ostream &os, const Expr::Inv &);
+};
+
+struct Eq : Expr::Base {
+  Term::Any lhs;
+  Term::Any rhs;
+  Eq(Term::Any lhs, Term::Any rhs) noexcept : Expr::Base(Type::Bool()), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
+  operator Any() const { return std::make_shared<Eq>(*this); };
+  friend std::ostream &operator<<(std::ostream &os, const Expr::Eq &);
+};
+
+struct Lte : Expr::Base {
+  Term::Any lhs;
+  Term::Any rhs;
+  Lte(Term::Any lhs, Term::Any rhs) noexcept : Expr::Base(Type::Bool()), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
+  operator Any() const { return std::make_shared<Lte>(*this); };
+  friend std::ostream &operator<<(std::ostream &os, const Expr::Lte &);
+};
+
+struct Gte : Expr::Base {
+  Term::Any lhs;
+  Term::Any rhs;
+  Gte(Term::Any lhs, Term::Any rhs) noexcept : Expr::Base(Type::Bool()), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
+  operator Any() const { return std::make_shared<Gte>(*this); };
+  friend std::ostream &operator<<(std::ostream &os, const Expr::Gte &);
+};
+
+struct Lt : Expr::Base {
+  Term::Any lhs;
+  Term::Any rhs;
+  Lt(Term::Any lhs, Term::Any rhs) noexcept : Expr::Base(Type::Bool()), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
+  operator Any() const { return std::make_shared<Lt>(*this); };
+  friend std::ostream &operator<<(std::ostream &os, const Expr::Lt &);
+};
+
+struct Gt : Expr::Base {
+  Term::Any lhs;
+  Term::Any rhs;
+  Gt(Term::Any lhs, Term::Any rhs) noexcept : Expr::Base(Type::Bool()), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
+  operator Any() const { return std::make_shared<Gt>(*this); };
+  friend std::ostream &operator<<(std::ostream &os, const Expr::Gt &);
+};
 
 struct Alias : Expr::Base {
   Term::Any ref;
@@ -306,10 +461,10 @@ struct Invoke : Expr::Base {
 };
 
 struct Index : Expr::Base {
-  Term::Any lhs;
+  Term::Select lhs;
   Term::Any idx;
   Type::Any component;
-  Index(Term::Any lhs, Term::Any idx, Type::Any component) noexcept : Expr::Base(component), lhs(std::move(lhs)), idx(std::move(idx)), component(std::move(component)) {}
+  Index(Term::Select lhs, Term::Any idx, Type::Any component) noexcept : Expr::Base(component), lhs(std::move(lhs)), idx(std::move(idx)), component(std::move(component)) {}
   operator Any() const { return std::make_shared<Index>(*this); };
   friend std::ostream &operator<<(std::ostream &os, const Expr::Index &);
 };

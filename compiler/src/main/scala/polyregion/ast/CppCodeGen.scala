@@ -102,27 +102,13 @@ object CppCodeGen {
 
     import PolyAst._
 
-    import MsgPack.Codec
-
-    given MsgPack.Codec[Sym]       = Codec.derived
-    given MsgPack.Codec[TypeKind]  = Codec.derived
-    given MsgPack.Codec[Type]      = Codec.derived
-    given MsgPack.Codec[Term]      = Codec.derived
-    given MsgPack.Codec[Named]     = Codec.derived
-    given MsgPack.Codec[Position]  = Codec.derived
-    given MsgPack.Codec[Intr]      = Codec.derived
-    given MsgPack.Codec[Expr]      = Codec.derived
-    given MsgPack.Codec[Stmt]      = Codec.derived
-    given MsgPack.Codec[Function]  = Codec.derived
-    given MsgPack.Codec[StructDef] = Codec.derived
-
     val ast: Stmt = Stmt.Cond(
       Expr.Alias(Term.BoolConst(true)),
       Stmt.Comment("a") :: Stmt.Return(Expr.Alias(Term.FloatConst(1.24f))) :: Nil,
       Stmt.Comment("b") :: Nil
     )
 
-    pprint.pprintln(MsgPack.encodeMsg(ast))
+    // pprint.pprintln(MsgPack.encodeMsg(ast))
     println(MsgPack.encode(ast).length)
 
     // println(MsgPack.encodeMsg(ast))

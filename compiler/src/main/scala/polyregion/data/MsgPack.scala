@@ -42,10 +42,8 @@ object MsgPack {
         case x                => throw new Exception(s"Expected Float32/Float64, got $x")
       }
     )
-    given [A](using C: Codec[A]): Codec[List[A]] = {
-      println("Arr!")
+    given [A](using C: Codec[A]): Codec[List[A]] =
       Codec(xs => upack.Arr(xs.map(C.encode(_))*), _.arr.map(m => C.decode(m)).toList)
-    }
 
     private inline def summonAll[T <: Tuple, TC[_]]: Vector[TC[Any]] = inline erasedValue[T] match {
       case _: EmptyTuple => Vector()
@@ -81,7 +79,6 @@ object MsgPack {
             }
         )
       case p: Mirror.ProductOf[T] =>
-        println(s"Der:${constValue[p.MirroredLabel]}")
         lazy val xs = deriveProduct[p.MirroredElemLabels, p.MirroredElemTypes]
         val kind    = Kind.Compact
         Codec[T](

@@ -7,6 +7,21 @@ using json = nlohmann::json;
 
 namespace polyregion::polyast { 
 namespace Expr { 
+[[nodiscard]] Expr::Sin sin_json(const json &);
+[[nodiscard]] Expr::Cos cos_json(const json &);
+[[nodiscard]] Expr::Tan tan_json(const json &);
+[[nodiscard]] Expr::Add add_json(const json &);
+[[nodiscard]] Expr::Sub sub_json(const json &);
+[[nodiscard]] Expr::Mul mul_json(const json &);
+[[nodiscard]] Expr::Div div_json(const json &);
+[[nodiscard]] Expr::Mod mod_json(const json &);
+[[nodiscard]] Expr::Pow pow_json(const json &);
+[[nodiscard]] Expr::Inv inv_json(const json &);
+[[nodiscard]] Expr::Eq eq_json(const json &);
+[[nodiscard]] Expr::Lte lte_json(const json &);
+[[nodiscard]] Expr::Gte gte_json(const json &);
+[[nodiscard]] Expr::Lt lt_json(const json &);
+[[nodiscard]] Expr::Gt gt_json(const json &);
 [[nodiscard]] Expr::Alias alias_json(const json &);
 [[nodiscard]] Expr::Invoke invoke_json(const json &);
 [[nodiscard]] Expr::Index index_json(const json &);

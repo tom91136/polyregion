@@ -65,7 +65,7 @@ object LLVMBackend {
           // if arg => use
           // else
 
-          case Term.BoolConst(v)   => ???
+          case Term.BoolConst(v)   => mod.constInt(mod.i1, if (v) 1 else 0)
           case Term.ByteConst(v)   => mod.constInt(mod.i8, v)
           case Term.ShortConst(v)  => mod.constInt(mod.i16, v)
           case Term.IntConst(v)    => mod.constInt(mod.i32, v)
@@ -77,44 +77,52 @@ object LLVMBackend {
         }
       }
 
-      def resolveExpr(e: Expr, key: String, context: Map[String, LLVMValueRef]): LLVMValueRef = {
+      def resolveExpr(e: Expr, key: String, c: Map[String, LLVMValueRef]): LLVMValueRef = {
         println(s">  resolveExpr { ($key) :" + e.repr)
         val r = e match {
-          case Expr.Invoke(lhs, "+", rhs :: Nil, tpe @ (Type.Float | Type.Double)) =>
-            if (lhs.tpe != tpe) {
-              println(s"Cannot unify result ref ($tpe) with invoke($tpe)")
-              ???
-            }
-            LLVMBuildFAdd(builder, resolveRef(lhs, context), resolveRef(rhs, context), s"${key}_+")
-          case Expr.Invoke(lhs, "+", rhs :: Nil, tpe @ (Type.Int)) =>
-            if (lhs.tpe != tpe) {
-              println(s"Cannot unify result ref ($tpe) with invoke($tpe)")
-              ???
-            }
-            LLVMBuildAdd(builder, resolveRef(lhs, context), resolveRef(rhs, context), s"${key}_+")
 
-          case Expr.Invoke(lhs, "*", rhs :: Nil, tpe @ (Type.Float | Type.Double)) =>
-            if (lhs.tpe != tpe) {
-              println(s"Cannot unify result ref ($tpe) with invoke($tpe)")
-              ???
-            }
-            LLVMBuildFMul(builder, resolveRef(lhs, context), resolveRef(rhs, context), s"${key}_*")
-          case Expr.Invoke(lhs, "<", rhs :: Nil, tpe @ (Type.Bool)) =>
-            if (lhs.tpe != rhs.tpe || rhs.tpe != Type.Int) {
-              println(s"Cannot unify result lhs (${lhs.tpe}) with rhs (${rhs.tpe}) for binary `<`")
-              ???
-            }
-            LLVMBuildICmp(builder, LLVMIntSLT, resolveRef(lhs, context), resolveRef(rhs, context), s"${key}_<")
+          case Expr.Sin(lhs, rtn) => ???
+          case Expr.Cos(lhs, rtn) => ???
+          case Expr.Tan(lhs, rtn) => ???
+
+          case Expr.Add(lhs, rhs, (Type.Float | Type.Double)) =>
+            LLVMBuildFAdd(builder, resolveRef(lhs, c), resolveRef(rhs, c), s"${key}_+")
+          case Expr.Add(lhs, rhs, Type.Int) =>
+            LLVMBuildAdd(builder, resolveRef(lhs, c), resolveRef(rhs, c), s"${key}_+")
+
+          case Expr.Sub(lhs, rhs, (Type.Float | Type.Double)) =>
+            LLVMBuildFSub(builder, resolveRef(lhs, c), resolveRef(rhs, c), s"${key}_-")
+          case Expr.Sub(lhs, rhs, Type.Int) =>
+            LLVMBuildSub(builder, resolveRef(lhs, c), resolveRef(rhs, c), s"${key}_-")
+
+          case Expr.Mul(lhs, rhs, (Type.Float | Type.Double)) =>
+            LLVMBuildFMul(builder, resolveRef(lhs, c), resolveRef(rhs, c), s"${key}_*")
+          case Expr.Mul(lhs, rhs, Type.Int) =>
+            LLVMBuildMul(builder, resolveRef(lhs, c), resolveRef(rhs, c), s"${key}_*")
+
+          case Expr.Div(lhs, rhs, (Type.Float | Type.Double)) =>
+            LLVMBuildFDiv(builder, resolveRef(lhs, c), resolveRef(rhs, c), s"${key}_/")
+          case Expr.Div(lhs, rhs, Type.Int) =>
+            LLVMBuildSDiv(builder, resolveRef(lhs, c), resolveRef(rhs, c), s"${key}_/")
+
+          case Expr.Inv(lhs)      => ???
+          case Expr.Eq(lhs, rhs)  => ???
+          case Expr.Lte(lhs, rhs) => ???
+          case Expr.Gte(lhs, rhs) => ???
+          case Expr.Lt(lhs, rhs) =>
+            LLVMBuildICmp(builder, LLVMIntSLT, resolveRef(lhs, c), resolveRef(rhs, c), s"${key}_<")
+          case Expr.Gt(lhs, rhs) => ???
+
           case Expr.Index(lhs, idx, tpe) =>
             // getelementptr; load
-            val ptr = mod.gepInbound(builder, s"${key}_ptr")(resolveRef(lhs, context), resolveRef(idx, context))
+            val ptr = mod.gepInbound(builder, s"${key}_ptr")(resolveRef(lhs, c), resolveRef(idx, c))
             LLVMBuildLoad(builder, ptr, s"${key}_value")
 
           // load
           //
           case Expr.Alias(ref) =>
             // load
-            resolveRef(ref, context)
+            resolveRef(ref, c)
           // case Tree.Block(stmts, expr) =>
           //   resolveExpr(
           //     expr,

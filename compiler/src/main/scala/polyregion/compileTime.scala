@@ -1,7 +1,5 @@
 package polyregion
 
-import polyregion.PolyAst
-
 import scala.quoted.{Expr, Quotes}
 import scala.quoted.*
 import scala.annotation.tailrec
@@ -12,12 +10,11 @@ import java.nio.file.{Files, Paths, StandardOpenOption}
 import cats.data.EitherT
 import cats.Eval
 import cats.data.NonEmptyList
-import polyregion.ast.PolyAst.Program
-import polyregion.ast.PolyAst.Ref
 import polyregion.ast.PolyAst
 import polyregion.internal.*
 
 import java.lang.reflect.Modifier
+import polyregion.data.MsgPack
 
 object compileTime {
 
@@ -243,14 +240,14 @@ object compileTime {
                 //   else PolyAst.Stmt.Var(path, PolyAst.Tree.Invoke(lhsRef, name, argRefs, tpe))
                 existingTree = (argTrees ++ lhsTrees)
                 lhsSelect <- lhsRef match {
-                  case s @ PolyAst.Term.Select(_, _) => s.success.deferred
-                  case bad                           => s"Illegal LHS for apply: ${bad}".fail.deferred
+                  case Some(s @ PolyAst.Term.Select(_, _)) => s.success.deferred
+                  case bad                                 => s"Illegal LHS for apply: ${bad}".fail.deferred
                 }
 
-              } yield (name, lhsRef, argRefs, tpe) match {
+              } yield (name, lhsSelect, argRefs, tpe) match {
                 case (
                       "apply",
-                      Some(select @ PolyAst.Term.Select(_, _)),
+                      select,
                       Some(idx) :: Nil,
                       tpe
                     ) => //TODO check idx.tpe =:= Int
@@ -259,19 +256,38 @@ object compileTime {
                   (maxDepth, Some(ref), existingTree :+ tree)
                 case (
                       "update",
-                      select @ PolyAst.Term.Select(_, _),
+                      select,
                       Some(idx) :: Some(value) :: Nil,
                       tpe
                     ) => //TODO check idx.tpe =:= Int && value.tpe =:= lhs.tpe
                   val tree = PolyAst.Stmt.Update(select, idx, value)
                   (maxDepth, None, existingTree :+ tree)
-                case (_, lhsSelect @ PolyAst.Term.Select(_, _), _, PolyAst.Type.Unit) =>
+                case (_, lhs, _, PolyAst.Type.Unit) =>
                   val tree = PolyAst.Stmt.Effect(lhsSelect, name, argRefs.flatten)
                   (maxDepth, None, existingTree :+ tree)
-
+                case (name, lhs, Nil, tpe) => // unary op
+                  val term = name match {
+                    case "!" => PolyAst.Expr.Inv(lhs)
+                  }
+                  val tree = PolyAst.Stmt.Var(path, term)
+                  val ref  = PolyAst.Term.Select(Nil, path)
+                  (maxDepth, Some(ref), existingTree :+ tree)
+                case (name, lhs, Some(rhs) :: Nil, tpe) => // binary op
+                  val term = name match {
+                    case "+" => PolyAst.Expr.Add(lhs, rhs, tpe)
+                    case "-" => PolyAst.Expr.Sub(lhs, rhs, tpe)
+                    case "*" => PolyAst.Expr.Mul(lhs, rhs, tpe)
+                    case "/" => PolyAst.Expr.Div(lhs, rhs, tpe)
+                    case "%" => PolyAst.Expr.Mod(lhs, rhs, tpe)
+                    case "<" => PolyAst.Expr.Lt(lhs, rhs)
+                    case ">" => PolyAst.Expr.Gt(lhs, rhs)
+                  }
+                  val tree = PolyAst.Stmt.Var(path, term)
+                  val ref  = PolyAst.Term.Select(Nil, path)
+                  (maxDepth, Some(ref), existingTree :+ tree)
                 case _ =>
                   val tree =
-                    PolyAst.Stmt.Var(path, PolyAst.Expr.Invoke(lhsRef, name, argRefs, tpe))
+                    PolyAst.Stmt.Var(path, PolyAst.Expr.Invoke(lhsSelect, name, argRefs.flatten, tpe))
                   val ref = PolyAst.Term.Select(Nil, path)
                   (maxDepth, Some(ref), existingTree :+ tree)
               }
@@ -302,17 +318,18 @@ object compileTime {
                 (maxDepth, _, bodyTrees)        <- resolveTerm(body, condDepth)
               } yield {
                 val block = condTrees match {
-                  case Nil => ??? // this is illegal, while needs a bool predicate
-                  case PolyAst.Stmt.Var(_, iv @ PolyAst.Expr.Invoke(_, _, _, _)) :: Nil =>
+                  case Nil                            => ??? // this is illegal, while needs a bool predicate
+                  case PolyAst.Stmt.Var(_, iv) :: Nil =>
                     // simple condition:
                     // while(cond)
                     PolyAst.Stmt.While(iv, bodyTrees)
                   case xs =>
                     // complex condition:
                     // while(true) {  stmts...; if(!condRef) break;  }
-
+                    println(xs)
+                    ???
                     val body = (xs :+ PolyAst.Stmt.Cond(
-                      PolyAst.Expr.Alias(condRef),
+                      PolyAst.Expr.Alias(condRef.get),
                       Nil,
                       PolyAst.Stmt.Break :: Nil
                     )) ++ bodyTrees
@@ -329,7 +346,7 @@ object compileTime {
             for {
               t                  <- resolveTpe(tpe.tpe)
               (depth, ref, tree) <- resolveTerm(rhs, depth)
-            } yield (depth, tree :+ PolyAst.Stmt.Var(PolyAst.Named(name, t), PolyAst.Expr.Alias(ref)))
+            } yield (depth, tree :+ PolyAst.Stmt.Var(PolyAst.Named(name, t), PolyAst.Expr.Alias(ref.get)))
           case ValDef(name, tpe, None) => s"Unexpected variable $name:$tpe".fail.deferred
           case t: Term                 => resolveTerm(t, depth).map((depth, ref, tree) => (depth, tree)) // discard ref
         }
@@ -354,7 +371,7 @@ object compileTime {
               identArgs <- captuerdVars.map(_.map((id, tpe) => (id, tpe)))
 //              idx       <- indexArgument.map(_._1)
             } yield (
-              LLVMBackend.codegen(stmts, args*),
+              LLVMBackend.codegen(stmts.toVector, args*),
               identArgs,
               PolyAst.Function(closureName, args, PolyAst.Type.Unit, stmts)
             )
@@ -384,13 +401,14 @@ object compileTime {
 
   def offloadImpl(x: Expr[Any])(using q: Quotes): Expr[Any] = {
     import quotes.reflect.*
-    val r                   = new Resolver(using q)
+    val r                 = new Resolver(using q)
     val (bytes, args, fn) = r.lower(x)
 
+    val astBytes = MsgPack.encode(fn)
 
     Files.write(
       Paths.get("./ast.bin").toAbsolutePath.normalize(),
-      /* fn to byte array */ ???.asInstanceOf[Array[Byte]],
+      astBytes,
       StandardOpenOption.WRITE,
       StandardOpenOption.CREATE,
       StandardOpenOption.TRUNCATE_EXISTING
@@ -437,12 +455,12 @@ object compileTime {
       }
     }
 
-    val astBytes = Expr( /*fn*/???.asInstanceOf[Array[Byte]])
+    val astBytesExpr = Expr(astBytes)
 
     '{
       val data = $bs
       println("LLVM bytes=" + data.size)
-      println("PolyAst bytes=" + ${ astBytes }.size)
+      println("PolyAst bytes=" + ${ astBytesExpr }.size)
 
       val b = polyregion.Runtime.FFIInvocationBuilder()
       ${ Varargs(argExprs('{ b })) }

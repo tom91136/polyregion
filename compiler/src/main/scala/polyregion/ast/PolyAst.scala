@@ -1,8 +1,10 @@
 package polyregion.ast
 
+import polyregion.data.MsgPack
+
 object PolyAst {
 
-  case class Sym(fqn: List[String]) {
+  case class Sym(fqn: List[String]) derives MsgPack.Codec {
     def repr: String = fqn.mkString(".")
   }
   object Sym {
@@ -13,11 +15,11 @@ object PolyAst {
     }
   }
 
-  enum TypeKind {
+  enum TypeKind derives MsgPack.Codec {
     case Ref, Integral, Fractional
   }
 
-  enum Type(val kind: TypeKind) {
+  enum Type(val kind: TypeKind) derives MsgPack.Codec {
     case Float extends Type(TypeKind.Fractional)
     case Double extends Type(TypeKind.Fractional)
 
@@ -35,9 +37,9 @@ object PolyAst {
 
   }
 
-  case class Named(symbol: String, tpe: Type)
+  case class Named(symbol: String, tpe: Type) derives MsgPack.Codec
 
-  enum Term(val tpe: Type) {
+  enum Term(val tpe: Type) derives MsgPack.Codec {
     case Select(init: List[Named], last: Named) extends Term(last.tpe) // TODO
     case BoolConst(value: Boolean) extends Term(Type.Bool)
     case ByteConst(value: Byte) extends Term(Type.Byte)
@@ -50,29 +52,33 @@ object PolyAst {
     case StringConst(value: String) extends Term(Type.String)
   }
 
-  case class Position(file: String, line: Int, col: Int)
+  case class Position(file: String, line: Int, col: Int) derives MsgPack.Codec
 
-  enum Intr(tpe: Type) {
-    case Inv(lhs: Term, rtn: Type) extends Intr(rtn)
-    case Sin(lhs: Term, rtn: Type) extends Intr(rtn)
-    case Cos(lhs: Term, rtn: Type) extends Intr(rtn)
-    case Tan(lhs: Term, rtn: Type) extends Intr(rtn)
+  enum Expr(tpe: Type) derives MsgPack.Codec {
+    case Sin(lhs: Term, rtn: Type) extends Expr(rtn)
+    case Cos(lhs: Term, rtn: Type) extends Expr(rtn)
+    case Tan(lhs: Term, rtn: Type) extends Expr(rtn)
 
-    case Add(lhs: Term, rhs: Term, rtn: Type) extends Intr(rtn)
-    case Sub(lhs: Term, rhs: Term, rtn: Type) extends Intr(rtn)
-    case Div(lhs: Term, rhs: Term, rtn: Type) extends Intr(rtn)
-    case Mul(lhs: Term, rhs: Term, rtn: Type) extends Intr(rtn)
-    case Mod(lhs: Term, rhs: Term, rtn: Type) extends Intr(rtn)
-    case Pow(lhs: Term, rhs: Term, rtn: Type) extends Intr(rtn)
-  }
+    case Add(lhs: Term, rhs: Term, rtn: Type) extends Expr(rtn)
+    case Sub(lhs: Term, rhs: Term, rtn: Type) extends Expr(rtn)
+    case Mul(lhs: Term, rhs: Term, rtn: Type) extends Expr(rtn)
+    case Div(lhs: Term, rhs: Term, rtn: Type) extends Expr(rtn)
+    case Mod(lhs: Term, rhs: Term, rtn: Type) extends Expr(rtn)
+    case Pow(lhs: Term, rhs: Term, rtn: Type) extends Expr(rtn)
 
-  enum Expr(tpe: Type) {
+    case Inv(lhs: Term) extends Expr(Type.Bool)
+    case Eq(lhs: Term, rhs: Term) extends Expr(Type.Bool)
+    case Lte(lhs: Term, rhs: Term) extends Expr(Type.Bool)
+    case Gte(lhs: Term, rhs: Term) extends Expr(Type.Bool)
+    case Lt(lhs: Term, rhs: Term) extends Expr(Type.Bool)
+    case Gt(lhs: Term, rhs: Term) extends Expr(Type.Bool)
+
     case Alias(ref: Term) extends Expr(ref.tpe)
     case Invoke(lhs: Term, name: String, args: List[Term], rtn: Type) extends Expr(rtn)
-    case Index(lhs: Term, idx: Term, component: Type) extends Expr(component)
+    case Index(lhs: Term.Select, idx: Term, component: Type) extends Expr(component)
   }
 
-  enum Stmt {
+  enum Stmt derives MsgPack.Codec {
     case Comment(value: String)
     case Var(name: Named, expr: Expr)
     case Mut(name: Term.Select, expr: Expr)
@@ -85,11 +91,11 @@ object PolyAst {
     case Return(value: Expr)
   }
 
-  case class Function(name: String, args: List[Named], rtn: Type, body: List[Stmt])
+  case class Function(name: String, args: List[Named], rtn: Type, body: List[Stmt]) derives MsgPack.Codec
 
   case class StructDef(
       members: List[Named]
       //TODO methods
-  )
+  ) derives MsgPack.Codec
 
 }

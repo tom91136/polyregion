@@ -233,6 +233,151 @@ std::ostream &Expr::operator<<(std::ostream &os, const Expr::Any &x) {
 }
 Type::Any Expr::tpe(const Expr::Any& x){ return select<&Expr::Base::tpe>(x); }
 
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Sin &x) {
+  os << "Sin(";
+  os << x.lhs;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Cos &x) {
+  os << "Cos(";
+  os << x.lhs;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Tan &x) {
+  os << "Tan(";
+  os << x.lhs;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Add &x) {
+  os << "Add(";
+  os << x.lhs;
+  os << ',';
+  os << x.rhs;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Sub &x) {
+  os << "Sub(";
+  os << x.lhs;
+  os << ',';
+  os << x.rhs;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Mul &x) {
+  os << "Mul(";
+  os << x.lhs;
+  os << ',';
+  os << x.rhs;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Div &x) {
+  os << "Div(";
+  os << x.lhs;
+  os << ',';
+  os << x.rhs;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Mod &x) {
+  os << "Mod(";
+  os << x.lhs;
+  os << ',';
+  os << x.rhs;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Pow &x) {
+  os << "Pow(";
+  os << x.lhs;
+  os << ',';
+  os << x.rhs;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Inv &x) {
+  os << "Inv(";
+  os << x.lhs;
+  os << ')';
+  return os;
+}
+
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Eq &x) {
+  os << "Eq(";
+  os << x.lhs;
+  os << ',';
+  os << x.rhs;
+  os << ')';
+  return os;
+}
+
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Lte &x) {
+  os << "Lte(";
+  os << x.lhs;
+  os << ',';
+  os << x.rhs;
+  os << ')';
+  return os;
+}
+
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Gte &x) {
+  os << "Gte(";
+  os << x.lhs;
+  os << ',';
+  os << x.rhs;
+  os << ')';
+  return os;
+}
+
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Lt &x) {
+  os << "Lt(";
+  os << x.lhs;
+  os << ',';
+  os << x.rhs;
+  os << ')';
+  return os;
+}
+
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Gt &x) {
+  os << "Gt(";
+  os << x.lhs;
+  os << ',';
+  os << x.rhs;
+  os << ')';
+  return os;
+}
+
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Alias &x) {
   os << "Alias(";
   os << x.ref;

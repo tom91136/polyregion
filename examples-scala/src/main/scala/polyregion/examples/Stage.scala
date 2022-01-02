@@ -127,6 +127,12 @@ object Stage {
       }
     }
 
+    // foreach(1 to 10) { n =>
+    //   var foo = n
+    //   foo = 0
+
+    // }
+
     printAndreset("none")
 
     foreachJVM(0 until 10) { n =>
@@ -138,29 +144,12 @@ object Stage {
     }
     printAndreset("JVM")
 
-
     foreach(0 until 10) { n =>
       xs(n) += 2f
       val scalarLambda = 321.1f
       val scalarF      = scalarLambda + 123f
       var refOut       = xs
       xs(n) += ys(n) + refOut(n) * scalar + scalarLambda + scalarF
-    // val a            = (1, 2)
-    // val Vec2(v1, v2) = vv
-    // val (b1, b2)     = a
-    // {
-    // val bar    = Array[Float](1)
-    // val refOut = 42
-    // xs(n) += refOut
-    // }
-
-    // n + 1
-    // val u                 = xs(422)
-    // val bad: Array[Float] = xs.map(_ * 2f)
-
-    // ys
-    // zs
-    // xs(n + 2) = CONST.toFloat + 42f + bad(0)
     }
 
     printAndreset("Native")

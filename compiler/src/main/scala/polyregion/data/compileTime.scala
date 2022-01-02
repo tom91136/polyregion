@@ -92,8 +92,7 @@ object compileTime {
     }
 
     def matchCtor(t: Tree, parent: Option[TypeRepr]): Option[Expr[List[Val]]] = t match {
-
-      case a @ Apply(Select(New(tpeTree), "<init>"), args) if parent.forall(tpeTree.tpe =:= _) =>
+      case a @ Apply(Select(New(tpeTree), "<init>"), args) if parent.forall(tpeTree.tpe =:= _.widenTermRefByName) =>
         Some(Expr.ofList(args.map {
           case i @ Ident(x) =>
             if (i.symbol.owner == symbol) select(x, i.tpe, Nil)
@@ -105,7 +104,6 @@ object compileTime {
             } else {
               // some other constant
               val applied = TypeRepr.of[TermRes].appliedTo(s.tpe.dealias)
-              println(s"${applied.show}")
               Implicits.search(applied) match {
                 case imp: ImplicitSearchSuccess => '{ ${ imp.tree.asExpr }.asInstanceOf[TermRes[Any]](None) }
                 case _                          => report.errorAndAbort(s"No implicit found for ${applied.show}")
@@ -133,9 +131,9 @@ object compileTime {
     (if (tpe.isSingleton) {
        class CtorTraverser extends TreeAccumulator[Option[Expr[List[Val]]]] {
          def foldTree(x: Option[Expr[List[Val]]], tree: Tree)(owner: Symbol): Option[Expr[List[Val]]] =
-           x.orElse(matchCtor(tree, Some(tpe.widenTermRefByName)).orElse(foldOverTree(None, tree)(symbol)))
+           x.orElse(matchCtor(tree, Some(tpe)).orElse(foldOverTree(None, tree)(symbol)))
        }
-       CtorTraverser().foldOverTree(None, symbol.companionClass.tree)(Symbol.noSymbol)
+       CtorTraverser().foldOverTree(None, tpe.termSymbol.tree)(Symbol.noSymbol)
      } else {
        symbol.tree match {
          case ClassDef(name, _, headCtorApply :: _, _, _) =>

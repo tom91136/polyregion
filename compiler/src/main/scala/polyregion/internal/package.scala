@@ -106,6 +106,25 @@ package object internal {
     def repr: String = {
       import PolyAst.Expr.*
       e match {
+
+        case Sin(lhs, rtn) => s"sin(${lhs.repr})"
+        case Cos(lhs, rtn) => s"cos(${lhs.repr})"
+        case Tan(lhs, rtn) => s"san(${lhs.repr})"
+
+        case Add(lhs, rhs, rtn) => s"${lhs.repr} +  ${rhs.repr}"
+        case Sub(lhs, rhs, rtn) => s"${lhs.repr} -  ${rhs.repr}"
+        case Mul(lhs, rhs, rtn) => s"${lhs.repr} *  ${rhs.repr}"
+        case Div(lhs, rhs, rtn) => s"${lhs.repr} /  ${rhs.repr}"
+        case Mod(lhs, rhs, rtn) => s"${lhs.repr} %  ${rhs.repr}"
+        case Pow(lhs, rhs, rtn) => s"${lhs.repr} ^  ${rhs.repr}"
+
+        case Inv(lhs)      => s"!(${lhs.repr})"
+        case Eq(lhs, rhs)  => s"${lhs.repr} == ${rhs.repr}"
+        case Lte(lhs, rhs) => s"${lhs.repr} <= ${rhs.repr}"
+        case Gte(lhs, rhs) => s"${lhs.repr} >= ${rhs.repr}"
+        case Lt(lhs, rhs)  => s"${lhs.repr} < ${rhs.repr}"
+        case Gt(lhs, rhs)  => s"${lhs.repr} > ${rhs.repr}"
+
         case Alias(ref)                   => s"(~>${ref.repr})"
         case Invoke(lhs, name, args, tpe) => s"${lhs.repr}<$name>(${args.map(_.repr).mkString(",")}) : ${tpe.repr}"
         case Index(lhs, idx, tpe)         => s"${lhs.repr}[${idx.repr}] : ${tpe.repr}"

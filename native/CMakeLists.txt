@@ -19,15 +19,8 @@ set(CMAKE_VERBOSE_MAKEFILE ON)
 
 set(LLVM_DIR /lib/llvm-12/cmake)
 
-set(Protobuf_USE_STATIC_LIBS ON)
 
 find_package(LLVM REQUIRED CONFIG)
-find_package(Protobuf REQUIRED)
-
-include_directories(${Protobuf_INCLUDE_DIRS})
-include_directories(${CMAKE_CURRENT_BINARY_DIR})
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../compiler/src/main/protobuf)
-protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS ${CMAKE_CURRENT_SOURCE_DIR}/../compiler/src/main/protobuf/PolyAst.proto)
 
 
 FetchContent_Declare(
@@ -85,7 +78,6 @@ separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
 add_definitions(${LLVM_DEFINITIONS_LIST})
 
 add_executable(polyregion_native
-        ${PROTO_SRCS} ${PROTO_HDRS}
         src/ast.cpp
         src/codegen/llvm.cpp
         src/codegen/opencl.cpp
@@ -135,8 +127,7 @@ target_link_libraries(polyregion_native PRIVATE
         LLVM
         LLVMSupport
         LLVMDemangle
-        capstone-static
-        ${Protobuf_LIBRARIES})
+        capstone-static)
 
 
 set(SANATISE_OPTIONS -fsanitize=address -fsanitize=undefined)
