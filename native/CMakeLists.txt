@@ -133,70 +133,43 @@ target_link_libraries(polyregion_native PRIVATE
         LLVM
         LLVMSupport
         LLVMDemangle
+
+#        lldCOFF
+#        lldCommon
+#        lldCore
+#        lldELF
+#        lldMachO
+#        lldMachO2
+#        lldMinGW
+#        lldReaderWriter
+#        lldWasm
+#        lldYAML
+
         capstone-static)
 
 target_link_libraries(polyregion_runtime PRIVATE
 
 
+        lldDriver
 
- LLVMOrcJIT.a
- LLVMPasses.a
- LLVMObjCARCOpts.a
- LLVMHelloNew.a
- LLVMCoroutines.a
- LLVMipo.a
- LLVMInstrumentation.a
- LLVMVectorize.a
- LLVMLinker.a
- LLVMIRReader.a
- LLVMAsmParser.a
- LLVMFrontendOpenMP.a
- LLVMJITLink.a
- LLVMOrcTargetProcess.a
- LLVMOrcShared.a
- LLVMExecutionEngine.a
- LLVMRuntimeDyld.a
- LLVMX86Disassembler.a
- LLVMX86AsmParser.a
- LLVMX86CodeGen.a
- LLVMCFGuard.a
- LLVMGlobalISel.a
- LLVMX86Desc.a
- LLVMX86Info.a
- LLVMMCDisassembler.a
- LLVMSelectionDAG.a
- LLVMAsmPrinter.a
- LLVMDebugInfoDWARF.a
- LLVMCodeGen.a
- LLVMTarget.a
- LLVMScalarOpts.a
- LLVMInstCombine.a
- LLVMAggressiveInstCombine.a
- LLVMTransformUtils.a
- LLVMBitWriter.a
- LLVMAnalysis.a
- LLVMProfileData.a
- LLVMObject.a
- LLVMTextAPI.a
- LLVMMCParser.a
- LLVMMC.a
- LLVMDebugInfoCodeView.a
- LLVMDebugInfoMSF.a
- LLVMBitReader.a
- LLVMCore.a
- LLVMRemarks.a
- LLVMBitstreamReader.a
- LLVMBinaryFormat.a
- LLVMSupport.a
- LLVMDemangle.a
-
-
-        rt
-        dl
-        pthread
-        m
-        z
-        tinfo
+         lldCOFF
+         lldCommon
+         lldCore
+         lldDriver
+         lldELF
+         lldMachO2
+         lldMachO
+         lldMinGW
+         lldReaderWriter
+         lldWasm
+         lldYAML
+        #
+#        rt
+#        dl
+#        pthread
+#        m
+#        z
+#        tinfo
         #        libLLVMMC.a
 #        libLLVMOrcTargetProcess.a
 #        libLLVMRuntimeDyld.a
