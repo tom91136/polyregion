@@ -6,8 +6,6 @@
 
 #include "generated/polyast_codec.h"
 
-#include "llvm/Support/CommandLine.h"
-#include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 
@@ -37,6 +35,7 @@ void polyregion_initialise() {
 polyregion_program *polyregion_compile(polyregion_buffer *ast) {
   if (!init) {
     return nullptr;
+
   }
 
   std::cout << "Compile: " << std::endl;

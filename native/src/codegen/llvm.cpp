@@ -228,7 +228,7 @@ void codegen::AstTransformer::transform(const std::unique_ptr<llvm::Module> &mod
   auto paramTpes = map_vec<Named, llvm::Type *>(fnTree.args, [&](auto &&named) { return mkTpe(named.tpe); });
   auto fnTpe = llvm::FunctionType::get(mkTpe(fnTree.rtn), {paramTpes}, false);
 
-  auto *fn = llvm::Function::Create(fnTpe, llvm::Function::ExternalLinkage, fnTree.name, *module);
+  auto *fn = llvm::Function::Create(fnTpe, llvm::Function::ExternalLinkage, "lambda", *module);
 
   auto *entry = llvm::BasicBlock::Create(C, "entry", fn);
   B.SetInsertPoint(entry);
@@ -273,7 +273,7 @@ void polyregion::codegen::JitObjectCache::notifyObjectCompiled(const llvm::Modul
 
   auto x = ExitOnErr(llvm::object::createBinary(ObjBuffer));
 
-  std::ofstream outfile("obj.o", std::ofstream::binary);
+  std::ofstream outfile("obj.so", std::ofstream::binary);
   outfile.write(ObjBuffer.getBufferStart(), ObjBuffer.getBufferSize());
   outfile.close();
 
@@ -314,6 +314,9 @@ static std::unique_ptr<llvm::orc::LLJIT> mkJit(llvm::ObjectCache &cache) {
 }
 
 codegen::LLVMCodeGen::LLVMCodeGen() : cache(), jit(mkJit(cache)) {}
+
+#include <unistd.h>
+#include <dlfcn.h>
 void codegen::LLVMCodeGen::run(const Function &fn) {
   using namespace llvm;
 
@@ -325,6 +328,16 @@ void codegen::LLVMCodeGen::run(const Function &fn) {
 
   orc::ThreadSafeModule tsm(std::move(mod), std::move(ctx));
   ExitOnErr(jit->addIRModule(std::move(tsm)));
-  JITEvaluatedSymbol symbol = ExitOnErr(jit->lookup(fn.name));
-  std::cout << "S=" << std::hex << symbol.getAddress() << std::endl;
+  JITEvaluatedSymbol symbol = ExitOnErr(jit->lookup("lambda"));
+  std::cout << "S="<< " " <<symbol.getAddress()  << " "  << std::hex << symbol.getAddress()   << std::endl;
+
+
+  void* client_hndl = dlopen("/home/tom/polyregion/native/obj.so",  RTLD_LAZY);
+  if(!client_hndl){
+    std::cerr << "DL failed=" <<dlerror() <<std::endl;
+  }else{
+    std::cout << "DL="<< " " << client_hndl<< std::endl;
+  }
+
+
 }

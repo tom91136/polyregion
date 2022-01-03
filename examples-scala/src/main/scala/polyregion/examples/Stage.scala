@@ -144,14 +144,27 @@ object Stage {
     }
     printAndreset("JVM")
 
-    foreach(0 until 10) { n =>
-      xs(n) += 2f
-      val scalarLambda = 321.1f
-      val scalarF      = scalarLambda + 123f
-      var refOut       = xs
-      xs(n) += ys(n) + refOut(n) * scalar + scalarLambda + scalarF
-    }
+    // foreach(0 until 10) { n =>
+    //   xs(n) += 2f
+    //   val scalarLambda = 321.1f
+    //   val scalarF      = scalarLambda + 123f
+    //   var refOut       = xs
+    //   xs(n) += ys(n) + refOut(n) * scalar + scalarLambda + scalarF
+    // }
+    import com.kenai.jffi.Library
 
+    val handle =
+      com.kenai.jffi.Library.openLibrary("/home/tom/polyregion/native/obj.so", Library.LAZY);
+
+    println("h=" + handle)
+    val b = polyregion.Runtime.FFIInvocationBuilder()
+    b.arg(1)
+    b.arg(scalar)
+    b.arg(ys.buffer)
+    b.arg(xs.buffer)
+    b.arg(10)
+    b.arg(0)
+    // b.invoke(140462809608192L)
     printAndreset("Native")
 
 //

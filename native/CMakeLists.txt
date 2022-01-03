@@ -3,6 +3,8 @@ include(FetchContent)
 
 project(polyregion_native)
 
+set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON" FORCE)
+
 # FetchContent_MakeAvailable was introduced in 3.14
 # there also isn't a version that accepts extra args at the end for add_subdirectory
 # hence we write one ourselves
@@ -18,9 +20,10 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
 set(LLVM_DIR /lib/llvm-12/cmake)
-
+set(LLD_DIR  /lib/llvm-12/lib/cmake/lld)
 
 find_package(LLVM REQUIRED CONFIG)
+find_package(LLD REQUIRED CONFIG)
 
 
 FetchContent_Declare(
@@ -89,6 +92,9 @@ add_executable(polyregion_native
         src/polyregion.cpp
         src/polyregion.h)
 
+add_executable(polyregion_runtime
+        src/runtime.cpp)
+
 target_precompile_headers(polyregion_native
         PRIVATE
         src/generated/polyast.h
@@ -129,6 +135,88 @@ target_link_libraries(polyregion_native PRIVATE
         LLVMDemangle
         capstone-static)
 
+target_link_libraries(polyregion_runtime PRIVATE
+
+
+
+ LLVMOrcJIT.a
+ LLVMPasses.a
+ LLVMObjCARCOpts.a
+ LLVMHelloNew.a
+ LLVMCoroutines.a
+ LLVMipo.a
+ LLVMInstrumentation.a
+ LLVMVectorize.a
+ LLVMLinker.a
+ LLVMIRReader.a
+ LLVMAsmParser.a
+ LLVMFrontendOpenMP.a
+ LLVMJITLink.a
+ LLVMOrcTargetProcess.a
+ LLVMOrcShared.a
+ LLVMExecutionEngine.a
+ LLVMRuntimeDyld.a
+ LLVMX86Disassembler.a
+ LLVMX86AsmParser.a
+ LLVMX86CodeGen.a
+ LLVMCFGuard.a
+ LLVMGlobalISel.a
+ LLVMX86Desc.a
+ LLVMX86Info.a
+ LLVMMCDisassembler.a
+ LLVMSelectionDAG.a
+ LLVMAsmPrinter.a
+ LLVMDebugInfoDWARF.a
+ LLVMCodeGen.a
+ LLVMTarget.a
+ LLVMScalarOpts.a
+ LLVMInstCombine.a
+ LLVMAggressiveInstCombine.a
+ LLVMTransformUtils.a
+ LLVMBitWriter.a
+ LLVMAnalysis.a
+ LLVMProfileData.a
+ LLVMObject.a
+ LLVMTextAPI.a
+ LLVMMCParser.a
+ LLVMMC.a
+ LLVMDebugInfoCodeView.a
+ LLVMDebugInfoMSF.a
+ LLVMBitReader.a
+ LLVMCore.a
+ LLVMRemarks.a
+ LLVMBitstreamReader.a
+ LLVMBinaryFormat.a
+ LLVMSupport.a
+ LLVMDemangle.a
+
+
+        rt
+        dl
+        pthread
+        m
+        z
+        tinfo
+        #        libLLVMMC.a
+#        libLLVMOrcTargetProcess.a
+#        libLLVMRuntimeDyld.a
+#        libLLVMTarget.a
+
+#        libLLVMAllTargetsDescs.a
+#        libLLVMAllTargetsDisassemblers.a
+#        libLLVMAllTargetsInfos.a
+#        libLLVMBinaryFormat.a
+#        libLLVMJITLink.a
+#        libLLVMMC.a
+#        libLLVMObject.a
+#        libLLVMRuntimeDyld.a
+#        libLLVMSupport.a
+
+         )
+
+
+target_compile_options(polyregion_runtime PUBLIC "$<$<CONFIG:RELEASE>:-flto>")
+target_link_options(polyregion_runtime PUBLIC "$<$<CONFIG:RELEASE>:-flto>")
 
 set(SANATISE_OPTIONS -fsanitize=address -fsanitize=undefined)
 set(RELEASE_OPTIONS -O3 -march=native)
