@@ -2,39 +2,41 @@
 #include "llvm.h"
 #include "ast.h"
 #include "utils.hpp"
+#include "variants.hpp"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Scalar.h"
 #include <dis.h>
-#include <llvm/ExecutionEngine/Orc/LLJIT.h>
-#include <llvm/Object/ObjectFile.h>
+#include <llc.h>
+//#include <llvm/ExecutionEngine/Orc/LLJIT.h>
+//#include <llvm/Object/ObjectFile.h>
 
 using namespace polyregion;
 using namespace polyregion::polyast;
 
 static llvm::ExitOnError ExitOnErr;
 
-llvm::Type *codegen::AstTransformer::mkTpe(const Type::Any &tpe) {
+llvm::Type *backend::AstTransformer::mkTpe(const Type::Any &tpe) {
   return variants::total(
       *tpe,                                                                                    //
-      [&](const Type::Float &x) -> llvm::Type * { return llvm::Type::getFloatTy(C); },        //
-      [&](const Type::Double &x) -> llvm::Type * { return llvm::Type::getDoubleTy(C); },      //
-      [&](const Type::Bool &x) -> llvm::Type * { return llvm::Type::getInt1Ty(C); },          //
-      [&](const Type::Byte &x) -> llvm::Type * { return llvm::Type::getInt8Ty(C); },          //
-      [&](const Type::Char &x) -> llvm::Type * { return llvm::Type::getInt8Ty(C); },          //
-      [&](const Type::Short &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },        //
-      [&](const Type::Int &x) -> llvm::Type * { return llvm::Type::getInt32Ty(C); },          //
-      [&](const Type::Long &x) -> llvm::Type * { return llvm::Type::getInt64Ty(C); },         //
+      [&](const Type::Float &x) -> llvm::Type * { return llvm::Type::getFloatTy(C); },         //
+      [&](const Type::Double &x) -> llvm::Type * { return llvm::Type::getDoubleTy(C); },       //
+      [&](const Type::Bool &x) -> llvm::Type * { return llvm::Type::getInt1Ty(C); },           //
+      [&](const Type::Byte &x) -> llvm::Type * { return llvm::Type::getInt8Ty(C); },           //
+      [&](const Type::Char &x) -> llvm::Type * { return llvm::Type::getInt8Ty(C); },           //
+      [&](const Type::Short &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },         //
+      [&](const Type::Int &x) -> llvm::Type * { return llvm::Type::getInt32Ty(C); },           //
+      [&](const Type::Long &x) -> llvm::Type * { return llvm::Type::getInt64Ty(C); },          //
       [&](const Type::String &x) -> llvm::Type * { return undefined(); },                      //
-      [&](const Type::Unit &x) -> llvm::Type * { return llvm::Type::getVoidTy(C); },          //
+      [&](const Type::Unit &x) -> llvm::Type * { return llvm::Type::getVoidTy(C); },           //
       [&](const Type::Struct &x) -> llvm::Type * { return undefined(); },                      //
       [&](const Type::Array &x) -> llvm::Type * { return mkTpe(x.component)->getPointerTo(); } //
   );
 }
 
-llvm::Value *codegen::AstTransformer::mkSelect(const Term::Select &select) {
+llvm::Value *backend::AstTransformer::mkSelect(const Term::Select &select) {
 
   if (auto x = lut.find(qualified(select)); x != lut.end()) {
     return std::holds_alternative<Type::Array>(*select.last.tpe)        //
@@ -45,7 +47,7 @@ llvm::Value *codegen::AstTransformer::mkSelect(const Term::Select &select) {
   }
 }
 
-llvm::Value *codegen::AstTransformer::mkRef(const Term::Any &ref) {
+llvm::Value *backend::AstTransformer::mkRef(const Term::Any &ref) {
   using llvm::ConstantFP;
   using llvm::ConstantInt;
   return variants::total(
@@ -58,13 +60,11 @@ llvm::Value *codegen::AstTransformer::mkRef(const Term::Any &ref) {
       [&](const Term::IntConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt32Ty(C), x.value); },
       [&](const Term::LongConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt64Ty(C), x.value); },
       [&](const Term::FloatConst &x) -> llvm::Value * { return ConstantFP::get(llvm::Type::getFloatTy(C), x.value); },
-      [&](const Term::DoubleConst &x) -> llvm::Value * {
-        return ConstantFP::get(llvm::Type::getDoubleTy(C), x.value);
-      },
+      [&](const Term::DoubleConst &x) -> llvm::Value * { return ConstantFP::get(llvm::Type::getDoubleTy(C), x.value); },
       [&](const Term::StringConst &x) -> llvm::Value * { return undefined(); });
 }
 
-llvm::Value *codegen::AstTransformer::mkExpr(const Expr::Any &expr, const std::string &key) {
+llvm::Value *backend::AstTransformer::mkExpr(const Expr::Any &expr, const std::string &key) {
 
   const auto binaryExpr = [&](const Term::Any &l, const Term::Any &r) { return std::make_tuple(mkRef(l), mkRef(r)); };
 
@@ -147,7 +147,7 @@ llvm::Value *codegen::AstTransformer::mkExpr(const Expr::Any &expr, const std::s
       });
 }
 
-void codegen::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
+void backend::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
   return variants::total(
       *stmt,
       [&](const Stmt::Comment &x) { /* discard comments */
@@ -223,7 +223,7 @@ void codegen::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) 
   );
 }
 
-void codegen::AstTransformer::transform(const std::unique_ptr<llvm::Module> &module, const Function &fnTree) {
+void backend::AstTransformer::transform(const std::unique_ptr<llvm::Module> &module, const Function &fnTree) {
 
   auto paramTpes = map_vec<Named, llvm::Type *>(fnTree.args, [&](auto &&named) { return mkTpe(named.tpe); });
   auto fnTpe = llvm::FunctionType::get(mkTpe(fnTree.rtn), {paramTpes}, false);
@@ -268,56 +268,57 @@ void codegen::AstTransformer::transform(const std::unique_ptr<llvm::Module> &mod
   module->print(llvm::errs(), nullptr);
 }
 
-void polyregion::codegen::JitObjectCache::notifyObjectCompiled(const llvm::Module *M, llvm::MemoryBufferRef ObjBuffer) {
-  llvm::dbgs() << "Compiled object for " << M->getModuleIdentifier() << "\n";
+//void polyregion::backend::JitObjectCache::notifyObjectCompiled(const llvm::Module *M, llvm::MemoryBufferRef ObjBuffer) {
+//  llvm::dbgs() << "Compiled object for " << M->getModuleIdentifier() << "\n";
+//
+//  auto x = ExitOnErr(llvm::object::createBinary(ObjBuffer));
+//
+//  std::ofstream outfile("obj.o", std::ofstream::binary);
+//  outfile.write(ObjBuffer.getBufferStart(), ObjBuffer.getBufferSize());
+//  outfile.close();
+//
+//  std::cout << "S=" << ObjBuffer.getBufferSize() << std::endl;
+//
+//  if (auto *file = llvm::dyn_cast<llvm::object::ObjectFile>(&*x)) {
+//    llvm::dbgs() << "Yes!\n";
+//    auto sections = dis::disassembleCodeSections(*file);
+//    //    polyregion::dis::dump(std::cerr, sections);
+//    std::cerr << std::endl;
+//  }
+//
+//  CachedObjects[M->getModuleIdentifier()] =
+//      llvm::MemoryBuffer::getMemBufferCopy(ObjBuffer.getBuffer(), ObjBuffer.getBufferIdentifier());
+//}
+//
+//std::unique_ptr<llvm::MemoryBuffer> polyregion::backend::JitObjectCache::getObject(const llvm::Module *M) {
+//  auto I = CachedObjects.find(M->getModuleIdentifier());
+//  if (I == CachedObjects.end()) {
+//    llvm::dbgs() << "No object for " << M->getModuleIdentifier() << " in cache. Compiling.\n";
+//    return nullptr;
+//  }
+//
+//  llvm::dbgs() << "Object for " << M->getModuleIdentifier() << " loaded from cache.\n";
+//  return llvm::MemoryBuffer::getMemBuffer(I->second->getMemBufferRef());
+//}
+//backend::JitObjectCache::~JitObjectCache() = default;
+//void backend::JitObjectCache::anchor() {}
+//backend::JitObjectCache::JitObjectCache() = default;
+//
+//static std::unique_ptr<llvm::orc::LLJIT> mkJit(llvm::ObjectCache &cache) {
+//  using namespace llvm;
+//  orc::LLJITBuilder builder = orc::LLJITBuilder();
+//  builder.setCompileFunctionCreator(
+//      [&](orc::JITTargetMachineBuilder JTMB) -> Expected<std::unique_ptr<orc::IRCompileLayer::IRCompiler>> {
+//        auto TM = JTMB.createTargetMachine();
+//        if (!TM) return TM.takeError();
+//        return std::make_unique<orc::TMOwningSimpleCompiler>(orc::TMOwningSimpleCompiler(std::move(*TM), &cache));
+//      });
+//  return ExitOnErr(builder.create());
+//}
 
-  auto x = ExitOnErr(llvm::object::createBinary(ObjBuffer));
+backend::LLVM::LLVM()  = default; // cache(), jit(mkJit(cache)) {}
 
-  std::ofstream outfile("obj.so", std::ofstream::binary);
-  outfile.write(ObjBuffer.getBufferStart(), ObjBuffer.getBufferSize());
-  outfile.close();
-
-  std::cout << "S=" << ObjBuffer.getBufferSize() << std::endl;
-
-  if (auto *file = llvm::dyn_cast<llvm::object::ObjectFile>(&*x)) {
-    llvm::dbgs() << "Yes!\n";
-    auto sections = dis::disassembleCodeSections(*file);
-    polyregion::dis::dump(std::cerr, sections);
-    std::cerr << std::endl;
-  }
-
-  CachedObjects[M->getModuleIdentifier()] =
-      llvm::MemoryBuffer::getMemBufferCopy(ObjBuffer.getBuffer(), ObjBuffer.getBufferIdentifier());
-}
-
-std::unique_ptr<llvm::MemoryBuffer> polyregion::codegen::JitObjectCache::getObject(const llvm::Module *M) {
-  auto I = CachedObjects.find(M->getModuleIdentifier());
-  if (I == CachedObjects.end()) {
-    llvm::dbgs() << "No object for " << M->getModuleIdentifier() << " in cache. Compiling.\n";
-    return nullptr;
-  }
-
-  llvm::dbgs() << "Object for " << M->getModuleIdentifier() << " loaded from cache.\n";
-  return llvm::MemoryBuffer::getMemBuffer(I->second->getMemBufferRef());
-}
-
-static std::unique_ptr<llvm::orc::LLJIT> mkJit(llvm::ObjectCache &cache) {
-  using namespace llvm;
-  orc::LLJITBuilder builder = orc::LLJITBuilder();
-  builder.setCompileFunctionCreator(
-      [&](orc::JITTargetMachineBuilder JTMB) -> Expected<std::unique_ptr<orc::IRCompileLayer::IRCompiler>> {
-        auto TM = JTMB.createTargetMachine();
-        if (!TM) return TM.takeError();
-        return std::make_unique<orc::TMOwningSimpleCompiler>(orc::TMOwningSimpleCompiler(std::move(*TM), &cache));
-      });
-  return ExitOnErr(builder.create());
-}
-
-codegen::LLVMCodeGen::LLVMCodeGen() : cache(), jit(mkJit(cache)) {}
-
-#include <unistd.h>
-#include <dlfcn.h>
-void codegen::LLVMCodeGen::run(const Function &fn) {
+void backend::LLVM::run(const Function &fn) {
   using namespace llvm;
 
   auto ctx = std::make_unique<llvm::LLVMContext>();
@@ -326,18 +327,38 @@ void codegen::LLVMCodeGen::run(const Function &fn) {
   AstTransformer xform(*ctx);
   xform.transform(mod, fn);
 
-  orc::ThreadSafeModule tsm(std::move(mod), std::move(ctx));
-  ExitOnErr(jit->addIRModule(std::move(tsm)));
-  JITEvaluatedSymbol symbol = ExitOnErr(jit->lookup("lambda"));
-  std::cout << "S="<< " " <<symbol.getAddress()  << " "  << std::hex << symbol.getAddress()   << std::endl;
+  llc::compileModule(std::move(mod), *ctx);
 
 
-  void* client_hndl = dlopen("/home/tom/polyregion/native/obj.so",  RTLD_LAZY);
-  if(!client_hndl){
-    std::cerr << "DL failed=" <<dlerror() <<std::endl;
-  }else{
-    std::cout << "DL="<< " " << client_hndl<< std::endl;
-  }
+//  orc::ThreadSafeModule tsm(std::move(mod), std::move(ctx));
+//  ExitOnErr(jit->addIRModule(std::move(tsm)));
+//  JITEvaluatedSymbol symbol = ExitOnErr(jit->lookup("lambda"));
+//  std::cout << "S= "
+//            << " " << symbol.getAddress() << "  " << std::hex << symbol.getAddress() << std::endl;
 
-
+  //  std::cout << "Prep for DL" << std::endl;
+  //
+  //  void *client_hndl = dlopen("/home/tom/Desktop/prime.so", RTLD_LAZY);
+  //
+  //  std::cout << "Prep for DL =     " << client_hndl << std::endl;
+  //
+  //  if (!client_hndl) {
+  //    std::cerr << "DL failed=" << dlerror() << std::endl;
+  //  } else {
+  //    std::cout << "Handle="
+  //              << " " << client_hndl << std::endl;
+  //    void *ptr = dlsym(client_hndl, "isPrime");
+  //    void *ptr2 = dlsym(client_hndl, "doit");
+  //
+  //    typedef int (*FF)(int);
+  //    typedef char *(*FF2)();
+  //
+  //    FF f = (FF)ptr;
+  //    FF2 f2 = (FF2)ptr2;
+  //
+  //    std::cout << "ptr1="
+  //              << " " << ptr << " ptr2=" << ptr2 << std::endl;
+  //    std::cout << "res="
+  //              << " " << std::to_string(f(100)) << " " << f2() << std::endl;
+  //  }
 }

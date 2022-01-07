@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -18,7 +21,7 @@ typedef struct {
 
 void polyregion_initialise();
 
-polyregion_program *polyregion_compile(polyregion_buffer *polyast_proto);
+polyregion_program *polyregion_compile(polyregion_buffer *polyast);
 
 void polyregion_release(polyregion_program *buffer);
 

@@ -1,8 +1,8 @@
 #pragma once
 
-namespace polyregion::codegen {
+namespace polyregion::backend {
 
-class CodeGen {
+class Backend {
   virtual void run(const polyast::Function &fnTree) = 0;
 };
 

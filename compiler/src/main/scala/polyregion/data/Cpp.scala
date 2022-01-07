@@ -44,7 +44,7 @@ object Cpp {
 
   object StructSource {
 
-    val RequiredIncludes = List("memory", "variant", "iterator", "sstream")
+    val RequiredIncludes = List("memory", "variant", "iterator", "sstream", "optional", "algorithm")
     def emitHeader(namespace: String, xs: List[StructSource]) = {
 
       def nsStart(n: String) = if (n.isEmpty) "" else s"namespace $n { "

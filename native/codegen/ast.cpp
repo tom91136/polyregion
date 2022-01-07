@@ -9,7 +9,10 @@ using namespace polyregion::polyast;
 using namespace polyregion;
 using std::string;
 
-[[nodiscard]] string polyast::repr(const Sym &sym) { return mk_string<string>(sym.fqn, std::identity(), "."); }
+[[nodiscard]] string polyast::repr(const Sym &sym) {
+  return mk_string<string>(
+      sym.fqn, [](auto &&x) { return x; }, ".");
+}
 
 [[nodiscard]] string polyast::repr(const Type::Any &type) {
   return variants::total(

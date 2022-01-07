@@ -1,13 +1,14 @@
 #include "polyregion.h"
 #include "ast.h"
-#include "codegen/llvm.h"
-#include "codegen/opencl.h"
+#include "backend/llvm.h"
+#include "backend/opencl.h"
 #include "json.hpp"
 
 #include "generated/polyast_codec.h"
 
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
+#include "llc.h"
 
 #include <iostream>
 
@@ -22,13 +23,15 @@ void polyregion_initialise() {
 //    llvm::InitLLVM X(argc, argv);
     std::cout << "Init LLVM..." << std::endl;
 
-    llvm::InitializeNativeTarget();
-    llvm::InitializeNativeTargetAsmPrinter();
+//    llvm::InitializeNativeTarget();
+//    llvm::InitializeNativeTargetAsmPrinter();
+//
+//    llvm::InitializeAllTargets();
+//    llvm::InitializeAllTargetInfos();
+//    llvm::InitializeAllTargetMCs();
+//    llvm::InitializeAllDisassemblers();
 
-    llvm::InitializeAllTargets();
-    llvm::InitializeAllTargetInfos();
-    llvm::InitializeAllTargetMCs();
-    llvm::InitializeAllDisassemblers();
+    llc::setup();
   }
 }
 
@@ -49,9 +52,9 @@ polyregion_program *polyregion_compile(polyregion_buffer *ast) {
   std::cout << "[polyregion-native] AST  :" << x << std::endl;
   std::cout << "[polyregion-native] Repr :" << polyast::repr(x) << std::endl;
 
-  codegen::OpenCLCodeGen oclGen;
+  backend::OpenCL oclGen;
   oclGen.run(x);
-  codegen::LLVMCodeGen gen;
+  backend::LLVM gen;
   gen.run(x);
 
   return nullptr;

@@ -22,6 +22,7 @@ lazy val `runtime-scala` = project.settings(
   name           := "runtime-scala",
   fork           := true,
   Compile / fork := true,
+  javah / target := file(".") / "native" / "bindings" / "java-runtime",
   libraryDependencies ++= Seq(
     ("com.github.jnr" % "jffi"            % "1.3.8").classifier("native"),
     "com.github.jnr"  % "jffi"            % "1.3.8",
@@ -50,6 +51,7 @@ lazy val compiler = project
     commonSettings,
     name := "compiler",
     scalacOptions ++= Seq("-Yretain-trees"),
+    javah / target := file(".") / "native" / "bindings" / "java-codegen",
     libraryDependencies ++= Seq(
       "org.typelevel" %% "cats-core" % catsVersion,
       "com.lihaoyi"   %% "pprint"    % "0.7.1",

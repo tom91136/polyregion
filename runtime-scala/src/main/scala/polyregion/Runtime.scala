@@ -144,14 +144,13 @@ object Runtime {
 
     case class Named(symbol: String, tpe: Type)
 
-
     // struct RefBase { Type type; }
     // struct BoolConst : RefBase {
     //   bool value;
     //   explicit BootConst(bool value) : RefBase {Type::Fractional::Float}
     // }
     enum Ref(val tpe: Type) {
-      case Select(init: List[Named], last:  Named) extends Ref(last.tpe)
+      case Select(init: List[Named], last: Named) extends Ref(last.tpe)
       case BoolConst(value: Boolean) extends Ref(Type.Integral.Bool)
       case ByteConst(value: Byte) extends Ref(Type.Integral.Byte)
       case CharConst(value: Char) extends Ref(Type.Integral.Char)
@@ -181,7 +180,6 @@ object Runtime {
       case Pow(lhs: Ref, rhs: Ref, rtn: Type) extends Intr(rtn)
 
     }
-
 
     // Expr
     //  Alias {  ref : Ref  }

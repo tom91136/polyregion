@@ -1,10 +1,11 @@
 #include "opencl.h"
 #include "utils.hpp"
+#include "variants.hpp"
 
 using namespace polyregion;
 using namespace std::string_literals;
 
-std::string codegen::OpenCLCodeGen::mkTpe(const Type::Any &tpe) {
+std::string backend::OpenCL::mkTpe(const Type::Any &tpe) {
   return variants::total(
       *tpe,                                                          //
       [&](const Type::Float &x) { return "float"s; },                //
@@ -22,7 +23,7 @@ std::string codegen::OpenCLCodeGen::mkTpe(const Type::Any &tpe) {
   );
 }
 
-std::string codegen::OpenCLCodeGen::mkRef(const Term::Any &ref) {
+std::string backend::OpenCL::mkRef(const Term::Any &ref) {
   return variants::total(
       *ref, [](const Term::Select &x) { return x.last.symbol; },
       [](const Term::BoolConst &x) { return x.value ? "true"s : "false"s; },
@@ -36,7 +37,7 @@ std::string codegen::OpenCLCodeGen::mkRef(const Term::Any &ref) {
       [](const Term::StringConst &x) { return "" + x.value + ""; }); // FIXME escape string
 }
 
-std::string codegen::OpenCLCodeGen::mkExpr(const Expr::Any &expr, const std::string &key) {
+std::string backend::OpenCL::mkExpr(const Expr::Any &expr, const std::string &key) {
   return variants::total(
       *expr,                                                           //
       [&](const Expr::Sin &x) { return "sin(" + mkRef(x.lhs) + ")"; }, //
@@ -63,13 +64,14 @@ std::string codegen::OpenCLCodeGen::mkExpr(const Expr::Any &expr, const std::str
   );
 }
 
-std::string codegen::OpenCLCodeGen::mkStmt(const Stmt::Any &stmt) {
+std::string backend::OpenCL::mkStmt(const Stmt::Any &stmt) {
   return variants::total(
       *stmt, //
       [&](const Stmt::Comment &x) {
         auto lines = split(x.value, '\n');
         auto commented = map_vec<std::string, std::string>(lines, [](auto &&line) { return "// " + line; });
-        return mk_string<std::string>(commented, std::identity(), "\n");
+        return mk_string<std::string>(
+            commented, [](auto &&x) { return x; }, "\n");
       },
       [&](const Stmt::Var &x) {
         auto line = mkTpe(x.name.tpe) + " " + x.name.symbol + " = " + mkExpr(x.expr, x.name.symbol) + ";";
@@ -105,7 +107,7 @@ std::string codegen::OpenCLCodeGen::mkStmt(const Stmt::Any &stmt) {
   );
 }
 
-void codegen::OpenCLCodeGen::run(const Function &fnTree) {
+void backend::OpenCL::run(const Function &fnTree) {
 
   auto args = mk_string<Named>(
       fnTree.args, [&](auto x) { return mkTpe(x.tpe) + " " + x.symbol; }, ", ");

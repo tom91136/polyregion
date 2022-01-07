@@ -1,14 +1,14 @@
 #pragma once
 
 #include "ast.h"
-#include "codegen.h"
+#include "backend.h"
 #include "generated/polyast.h"
 
-namespace polyregion::codegen {
+namespace polyregion::backend {
 
 using namespace polyregion::polyast;
 
-class OpenCLCodeGen : public polyregion::codegen::CodeGen {
+class OpenCL : public polyregion::backend::Backend {
 
 private:
   std::string mkTpe(const Type::Any &tpe);

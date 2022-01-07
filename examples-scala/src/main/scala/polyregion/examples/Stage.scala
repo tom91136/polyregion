@@ -144,6 +144,12 @@ object Stage {
     }
     printAndreset("JVM")
 
+    offload {
+      var a = 1f
+      xs(0) = 42f
+      xs(1) = a + xs(1)
+    }
+
     // foreach(0 until 10) { n =>
     //   xs(n) += 2f
     //   val scalarLambda = 321.1f

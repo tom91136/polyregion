@@ -1,5 +1,7 @@
 #pragma once
 
+#include "generated/polyast.h"
+
 namespace polyregion::polyast {
 
 std::string repr(const Sym &sym);

@@ -1,30 +1,15 @@
 cmake_minimum_required(VERSION 3.18)
 include(FetchContent)
 
-project(polyregion_native)
+project(polyregion-native)
 
 set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON" FORCE)
 
-# FetchContent_MakeAvailable was introduced in 3.14
-# there also isn't a version that accepts extra args at the end for add_subdirectory
-# hence we write one ourselves
-macro(FetchContent_MakeAvailable_Args NAME ARGS)
-    FetchContent_GetProperties(${NAME})
-    if (NOT ${NAME}_POPULATED)
-        FetchContent_Populate(${NAME})
-        add_subdirectory(${${NAME}_SOURCE_DIR} ${${NAME}_BINARY_DIR} ${ARGS})
-    endif ()
-endmacro()
-
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_VERBOSE_MAKEFILE ON)
-
-set(LLVM_DIR /lib/llvm-12/cmake)
-set(LLD_DIR  /lib/llvm-12/lib/cmake/lld)
-
-find_package(LLVM REQUIRED CONFIG)
-find_package(LLD REQUIRED CONFIG)
-
+FetchContent_Declare(
+        llvm
+        URL https://github.com/llvm/llvm-project/releases/download/llvmorg-13.0.0/llvm-13.0.0.src.tar.xz
+        URL_HASH MD5=8c24626dce3ee9d87d1079ebf0897db5
+)
 
 FetchContent_Declare(
         capstone
@@ -39,16 +24,37 @@ FetchContent_Declare(
         DOWNLOAD_NO_EXTRACT YES # this is a header only lib, so don't anything else
 )
 
+FetchContent_Declare(
+        catch2
+        URL https://github.com/catchorg/Catch2/releases/download/v2.13.8/catch.hpp
+        URL_HASH MD5=e45f70693208dca2b6813a078e3e64eb
+        DOWNLOAD_NO_EXTRACT YES # this is a header only lib, so don't anything else
+)
 
-message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
-message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
+
+# FetchContent_MakeAvailable was introduced in 3.14
+# there also isn't a version that accepts extra args at the end for add_subdirectory
+# hence we write one ourselves
+macro(FetchContent_MakeAvailable_Args NAME ARGS)
+    FetchContent_GetProperties(${NAME})
+    if (NOT ${NAME}_POPULATED)
+        FetchContent_Populate(${NAME})
+        add_subdirectory(${${NAME}_SOURCE_DIR} ${${NAME}_BINARY_DIR} ${ARGS})
+    endif ()
+endmacro()
 
 
-# capstone
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
+
+# use new behaviour for IPO here (e.g enable where possible)
+cmake_policy(SET CMP0069 NEW)
+set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
+
+
+### capstone ###
 set(CAPSTONE_BUILD_TESTS OFF CACHE BOOL "Disable Capstone tests")
 set(CAPSTONE_BUILD_SHARED OFF CACHE BOOL "Disable Capstone shared library")
 set(CAPSTONE_BUILD_CSTOOL OFF CACHE BOOL "Disable cstool build")
-
 
 set(CAPSTONE_MIPS_SUPPORT OFF CACHE BOOL "")
 set(CAPSTONE_PPC_SUPPORT OFF CACHE BOOL "")
@@ -64,138 +70,110 @@ set(CAPSTONE_OSXKERNEL_SUPPORT OFF CACHE BOOL "")
 set(CAPSTONE_ARM_SUPPORT ON CACHE BOOL "")
 set(CAPSTONE_ARM64_SUPPORT ON CACHE BOOL "")
 set(CAPSTONE_X86_SUPPORT ON CACHE BOOL "")
-
-
 FetchContent_MakeAvailable_Args(capstone EXCLUDE_FROM_ALL)
 include_directories("${capstone_BINARY_DIR}/include" "${capstone_SOURCE_DIR}/include")
+### capstone ###
+
+
+set(USE_EXTERNAL_LLVM OFF)
+
+if (USE_EXTERNAL_LLVM)
+    set(LLVM_DIR /lib/llvm-12/cmake)
+    set(LLD_DIR /lib/llvm-12/lib/cmake/lld)
+    find_package(LLVM REQUIRED CONFIG)
+    find_package(LLD REQUIRED CONFIG)
+
+else ()
+    #set(LLVM_ENABLE_PROJECTS "lld-src" CACHE INTERNAL "")
+    #set(LLVM_TARGETS_TO_BUILD "X86;PowerPC;AArch64;ARM;NVPTX;AMDGPU;WebAssembly" CACHE INTERNAL "")
+    set(LLVM_TARGETS_TO_BUILD "X86" CACHE INTERNAL "")
+    set(LLVM_CCACHE_BUILD ON CACHE BOOL "")
+    set(LLVM_ENABLE_IDE ON CACHE BOOL "")
+    set(LLVM_ENABLE_LTO "Thin" CACHE INTERNAL "")
+    set(LLVM_ENABLE_ZLIB OFF CACHE BOOL "")
+    set(LLVM_ENABLE_UNWIND_TABLES OFF CACHE BOOL "")
+    set(LLVM_STATIC_LINK_CXX_STDLIB ON CACHE BOOL "")
+    set(BUILD_SHARED_LIBS ON CACHE BOOL "") # for dev mode only
+
+    #    set(LLVM_ENABLE_LLD ON CACHE BOOL "")
+
+    set(LLVM_USE_LINKER "/usr/bin/ld.lld-12" CACHE INTERNAL "")
+
+    set(LLVM_ENABLE_RTTI OFF CACHE BOOL "") # so we get typeinfo
+
+    set(LLVM_BUILD_RUNTIME OFF CACHE BOOL "")
+
+    set(LLVM_BUILD_TOOLS OFF CACHE BOOL "")
+    set(LLVM_INCLUDE_TOOLS OFF CACHE BOOL "")
+
+    set(LLVM_BUILD_EXAMPLES OFF CACHE BOOL "")
+    set(LLVM_INCLUDE_EXAMPLES OFF CACHE BOOL "")
+
+    set(LLVM_BUILD_TESTS OFF CACHE BOOL "")
+    set(LLVM_INCLUDE_TESTS OFF CACHE BOOL "")
+
+    set(LLVM_BUILD_BENCHMARKS OFF CACHE BOOL "")
+    set(LLVM_INCLUDE_BENCHMARKS OFF CACHE BOOL "")
+
+    set(LLVM_BUILD_DOCS OFF CACHE BOOL "")
+    set(LLVM_INCLUDE_DOCS OFF CACHE BOOL "")
+
+    set(LLVM_INCLUDE_DOCS OFF CACHE BOOL "")
+    set(LLVM_INSTALL_UTILS OFF CACHE BOOL "")
+
+    set(LLVM_ENABLE_BINDINGS OFF CACHE BOOL "")
+    set(LLVM_USE_HOST_TOOLS ON CACHE BOOL "")
+
+
+    cmake_policy(SET CMP0116 OLD)
+    set(CMAKE_POLICY_DEFAULT_CMP0116 OLD)
+
+
+    # XXX all LLVM specific cmake variables must be set BEFORE FetchContent_MakeAvailable otherwise they have no effect
+    FetchContent_MakeAvailable_Args(llvm EXCLUDE_FROM_ALL)
+    #list (APPEND CMAKE_MODULE_PATH "${llvm_SOURCE_DIR}/cmake/modules")
+    find_package(LLVM REQUIRED CONFIG NO_DEFAULT_PATH
+            PATHS "${llvm_BINARY_DIR}/lib/cmake/llvm")
+    include_directories("${llvm_BINARY_DIR}/include" "${llvm_SOURCE_DIR}/include")
+    message(STATUS "Using LLVM: ${LLVM_PACKAGE_VERSION} (${llvm_SOURCE_DIR})")
+
+endif ()
+
 
 FetchContent_MakeAvailable(json)
+FetchContent_MakeAvailable(catch2)
+
 include_directories("${json_SOURCE_DIR}")
-
-
-#find_library(LLVM PATHS /lib/llvm-12/ REQUIRED)
-
-include_directories(src)
+include_directories("${catch2_SOURCE_DIR}")
 include_directories(${LLVM_INCLUDE_DIRS})
-separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
-add_definitions(${LLVM_DEFINITIONS_LIST})
 
-add_executable(polyregion_native
-        src/ast.cpp
-        src/codegen/llvm.cpp
-        src/codegen/opencl.cpp
-        src/dis.cpp
-        src/generated/polyast.cpp
-        src/generated/polyast_codec.cpp
-        src/main.cpp
-        src/codegen/codegen.h
-        src/polyregion.cpp
-        src/polyregion.h)
+# set CXX stuff here in case LLVM overwrites it
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_executable(polyregion_runtime
-        src/runtime.cpp)
-
-target_precompile_headers(polyregion_native
-        PRIVATE
-        src/generated/polyast.h
-        src/variants.hpp
-        src/utils.hpp
-        ${json_SOURCE_DIR}/json.hpp
-        <cstdint>
-        <iterator>
-        <memory>
-        <string>
-        <variant>
-        <vector>
-        <fstream>
-        <functional>
-        <iostream>
-        <numeric>
-        <sstream>
-        <stdexcept>
+set(COMMON_LINK_OPTIONS -fuse-ld=${CMAKE_LINKER})
+set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer)
+set(COMMON_COMPILE_OPTIONS
+        -fno-rtti
+        -pedantic
+        -Wall
+        -Wextra
+        # -Wshadow         # too prevalent in LLVM
+        # -Wold-style-cast # too prevalent in LLVM
+        -Wcast-align
+        -Werror=return-type
+        -Wno-unused-parameter
+        -Wno-unused-function
+        -Wno-unused-variable
         )
 
-message(STATUS "LLVM > ${LLVM_CONFIG_}")
 
-#get_cmake_property(_variableNames VARIABLES)
-#list (SORT _variableNames)
-#foreach (_variableName ${_variableNames})
-#    message(STATUS "${_variableName}=${${_variableName}}")
-#endforeach()
-#execute_process(
-#        COMMAND llvm-config --libs Core OrcJIT Support nativecodegen ExecutionEngine
-#        OUTPUT_VARIABLE llvm_libraries
-#        OUTPUT_STRIP_TRAILING_WHITESPACE)
+message("CMAKE_LINKER=${CMAKE_LINKER}")
 
+#set(LD_FLAGS
+#        -fuse-ld=/usr/bin/ld.lld-12
+#        -flto)
 
-message(STATUS "LLVM libs ${llvm_libraries}")
-target_link_libraries(polyregion_native PRIVATE
-        LLVM
-        LLVMSupport
-        LLVMDemangle
-
-#        lldCOFF
-#        lldCommon
-#        lldCore
-#        lldELF
-#        lldMachO
-#        lldMachO2
-#        lldMinGW
-#        lldReaderWriter
-#        lldWasm
-#        lldYAML
-
-        capstone-static)
-
-target_link_libraries(polyregion_runtime PRIVATE
-
-
-        lldDriver
-
-         lldCOFF
-         lldCommon
-         lldCore
-         lldDriver
-         lldELF
-         lldMachO2
-         lldMachO
-         lldMinGW
-         lldReaderWriter
-         lldWasm
-         lldYAML
-        #
-#        rt
-#        dl
-#        pthread
-#        m
-#        z
-#        tinfo
-        #        libLLVMMC.a
-#        libLLVMOrcTargetProcess.a
-#        libLLVMRuntimeDyld.a
-#        libLLVMTarget.a
-
-#        libLLVMAllTargetsDescs.a
-#        libLLVMAllTargetsDisassemblers.a
-#        libLLVMAllTargetsInfos.a
-#        libLLVMBinaryFormat.a
-#        libLLVMJITLink.a
-#        libLLVMMC.a
-#        libLLVMObject.a
-#        libLLVMRuntimeDyld.a
-#        libLLVMSupport.a
-
-         )
-
-
-target_compile_options(polyregion_runtime PUBLIC "$<$<CONFIG:RELEASE>:-flto>")
-target_link_options(polyregion_runtime PUBLIC "$<$<CONFIG:RELEASE>:-flto>")
-
-set(SANATISE_OPTIONS -fsanitize=address -fsanitize=undefined)
-set(RELEASE_OPTIONS -O3 -march=native)
-set(DEBUG_OPTIONS ${SANATISE_OPTIONS})
-
-target_compile_options(polyregion_native PUBLIC ${COMPILE_OPTIONS})
-target_compile_options(polyregion_native PUBLIC "$<$<CONFIG:RELEASE>:${RELEASE_OPTIONS}>")
-target_compile_options(polyregion_native PUBLIC "$<$<CONFIG:DEBUG>:${DEBUG_OPTIONS}>")
-target_link_options(polyregion_native PUBLIC "$<$<CONFIG:DEBUG>:${SANATISE_OPTIONS}>")
+add_subdirectory(codegen)
+add_subdirectory(runtime)
+add_subdirectory(bindings)
