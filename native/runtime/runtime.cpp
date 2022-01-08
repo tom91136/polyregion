@@ -1,16 +1,71 @@
 #include <bitset>
-#include <fstream>
 #include <iostream>
+#include <numeric>
 
 #include "ffi.h"
 #include "runtime.h"
+#include "utils.hpp"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 
-void polyregion_consume_error(char *err) {
+static char *error(const std::string &s) { return strdup(s.c_str()); };
+
+struct polyregion_object {
+  std::unique_ptr<llvm::object::ObjectFile> file;
+  polyregion_object() = delete;
+  polyregion_object(const polyregion_object &other) = delete;
+  explicit polyregion_object(std::unique_ptr<llvm::object::ObjectFile> file) : file(std::move(file)) {}
+};
+
+void polyregion_release_object(polyregion_object_ref *ref) {
+  if (ref) {
+    std::free(ref->message);
+    delete ref->object;
+    delete ref;
+  }
+}
+
+polyregion_object_ref *polyregion_load_object(const uint8_t *object, size_t object_size) {
+  llvm::MemoryBufferRef buffer(llvm::StringRef(reinterpret_cast<const char *>(object), object_size), "");
+  auto ref = new polyregion_object_ref{};
+  auto obj = llvm::object::ObjectFile::createObjectFile(buffer);
+  if (auto e = obj.takeError()) {
+    ref->message = error(toString(std::move(e)));
+    return ref;
+  }
+  ref->object = new polyregion_object{std::move(*obj)};
+  return ref;
+}
+
+void polyregion_release_enumerate(polyregion_symbol_table *table) {
+  if (table) {
+    for (size_t i = 0; i < table->size; ++i) {
+      std::free(table->symbols[i].name);
+    }
+    delete[] table->symbols;
+    delete table;
+  }
+}
+
+polyregion_symbol_table *polyregion_enumerate(const polyregion_object *object) {
+  llvm::SectionMemoryManager mm;
+  llvm::RuntimeDyld ld(mm, mm);
+  ld.loadObject(*object->file);
+  auto table = ld.getSymbolTable();
+
+  auto xs = new polyregion_symbol[table.size()];
+
+  std::transform(table.begin(), table.end(), xs, [](auto &p) {
+    // copy name here as the symbol table is deleted with dyld
+    return polyregion_symbol{strdup(p.first.str().c_str()), p.second.getAddress()};
+  });
+  return new polyregion_symbol_table{xs, table.size()};
+}
+
+void polyregion_release_invoke(char *err) {
   if (err) std::free(err);
 }
 
-char *polyregion_invoke(const uint8_t *object, size_t object_size, //
+char *polyregion_invoke(const polyregion_object *object,
                         const char *symbol,                        //
                         const polyregion_data *args, size_t nargs, //
                         polyregion_data *rtn                       //
@@ -45,23 +100,23 @@ char *polyregion_invoke(const uint8_t *object, size_t object_size, //
     }
   };
 
-  const auto error = [](const std::string &s) -> char * { return strdup(s.c_str()); };
-
-  llvm::MemoryBufferRef buffer(llvm::StringRef(reinterpret_cast<const char *>(object), object_size), "");
-
-  auto obj = llvm::object::ObjectFile::createObjectFile(buffer);
-  if (auto e = obj.takeError()) {
-    return error(toString(std::move(e)));
-  }
-
   llvm::SectionMemoryManager mm;
   llvm::RuntimeDyld ld(mm, mm);
-  ld.loadObject(**obj);
+  ld.loadObject(*object->file);
 
   auto sym = ld.getSymbol(symbol);
+
+  if (!sym && (object->file->isMachO() || object->file->isMachOUniversalBinary())) {
+    // Mach-O has a leading underscore for all exported symbols, we try again with that prepended
+    sym = ld.getSymbol(std::string("_") + symbol);
+  }
+
   if (!sym) {
-    return error("Symbol `" + std::string(symbol) + "` not found in the given object of size " +
-                 std::to_string(object_size));
+    auto table = ld.getSymbolTable();
+    auto symbols = polyregion::mk_string<llvm::StringRef, llvm::JITEvaluatedSymbol>(
+        table, [](auto &x) { return "[`" + x.first.str() + "`@" + polyregion::hex(x.second.getAddress()) + "]"; }, ",");
+    return error("Symbol `" + std::string(symbol) + "` not found in the given object, available symbols (" +
+                 std::to_string(table.size()) + ") = " + symbols);
   }
 
   ld.finalizeWithMemoryManagerLocking();
@@ -99,63 +154,4 @@ char *polyregion_invoke(const uint8_t *object, size_t object_size, //
   default:
     return error("ffi_prep_cif: unknown error (" + std::to_string(status) + ")");
   }
-}
-
-int main(int argc, char*argv[]) {
-
-  std::string path = "/home/tom/polyregion/native/the_obj2.o";
-  //  std::string path = "/home/tom/Desktop/prime.o";
-  std::fstream s(path, std::ios::binary | std::ios::in);
-  if (!s.good()) {
-    throw std::invalid_argument("Bad file: " + path);
-  }
-  s.ignore(std::numeric_limits<std::streamsize>::max());
-  auto len = s.gcount();
-  s.clear();
-  s.seekg(0, std::ios::beg);
-  std::vector<uint8_t> xs(len / sizeof(uint8_t));
-  s.read(reinterpret_cast<char *>(xs.data()), len);
-  s.close();
-
-  int u;
-  polyregion_data rtn{.type = polyregion_type::Void, .ptr = &u};
-
-  std::vector<float> data = {1.1, 2.1, 3.1};
-  auto ptr = data.data();
-  polyregion_data arg1{.type = polyregion_type::Ptr, .ptr = &ptr}; // XXX pointer to T, so ** for pointers
-
-  auto err = polyregion_invoke(xs.data(), xs.size(), "lambda", &arg1, 1, &rtn);
-
-  //  int exp = 0;
-  //  int in = 99;
-  //  polyregion_data arg1{.type = polyregion_type::Int, .ptr = &in};
-  //  polyregion_data rtn{.type = polyregion_type::Int, .ptr = &exp};
-  //  polyregion_invoke(xs.data(), xs.size(), "lambda", &arg1, 1, &rtn, &err);
-
-  auto mk = [](float f) {
-    long long unsigned int f_as_int = 0;
-    std::memcpy(&f_as_int, &f, sizeof(float));            // 2.
-    std::bitset<8 * sizeof(float)> f_as_bitset{f_as_int}; // 3.
-    return f_as_bitset;
-  };
-
-  if (err) {
-    std::cerr << "Err:" << err << std::endl;
-  } else {
-
-    std::bitset<32> act1 = mk(data[0]);
-    std::bitset<32> act2 = mk(data[1]);
-
-    float d = 1;
-    std::bitset<32> exp = mk(d);
-    std::cout << exp << '\n';
-    std::cout << act1 << '\n';
-    std::cout << act2 << '\n';
-
-    std::cout << "r=" << data[0] << std::endl;
-    std::cout << "r=" << data[1] << std::endl;
-    std::cout << "r=" << data[2] << std::endl;
-    std::cout << "OK" << err << std::endl;
-  }
-  polyregion_consume_error(err);
 }

@@ -10,8 +10,8 @@ extern "C" {
 typedef enum { Invalid = 0, LLVM, OpenCL } Backend;
 
 typedef struct {
-  size_t size;
   uint8_t *data;
+  size_t size;
 } polyregion_buffer;
 
 typedef struct {

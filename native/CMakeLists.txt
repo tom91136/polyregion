@@ -5,6 +5,11 @@ project(polyregion-native)
 
 set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON" FORCE)
 
+set(LIBFFI_LIBRARY_PATH "" CACHE INTERNAL "libffi library path")
+set(LIBFFI_HEADER_PATH "" CACHE INTERNAL "libffi header path")
+set(LINKER "" CACHE INTERNAL "Path to custom linker")
+
+
 FetchContent_Declare(
         llvm
         URL https://github.com/llvm/llvm-project/releases/download/llvmorg-13.0.0/llvm-13.0.0.src.tar.xz
@@ -84,10 +89,8 @@ if (USE_EXTERNAL_LLVM)
     find_package(LLD REQUIRED CONFIG)
 
 else ()
-    #set(LLVM_ENABLE_PROJECTS "lld-src" CACHE INTERNAL "")
-    #set(LLVM_TARGETS_TO_BUILD "X86;PowerPC;AArch64;ARM;NVPTX;AMDGPU;WebAssembly" CACHE INTERNAL "")
-    set(LLVM_TARGETS_TO_BUILD "X86" CACHE INTERNAL "")
-    set(LLVM_CCACHE_BUILD ON CACHE BOOL "")
+    set(LLVM_TARGETS_TO_BUILD "X86;AArch64;ARM;NVPTX;AMDGPU;WebAssembly" CACHE INTERNAL "")
+    #    set(LLVM_TARGETS_TO_BUILD "X86" CACHE INTERNAL "")
     set(LLVM_ENABLE_IDE ON CACHE BOOL "")
     set(LLVM_ENABLE_LTO "Thin" CACHE INTERNAL "")
     set(LLVM_ENABLE_ZLIB OFF CACHE BOOL "")
@@ -97,7 +100,10 @@ else ()
 
     #    set(LLVM_ENABLE_LLD ON CACHE BOOL "")
 
-    set(LLVM_USE_LINKER "/usr/bin/ld.lld-12" CACHE INTERNAL "")
+    if (LINKER)
+        set(LLVM_USE_LINKER "${LINKER}" CACHE INTERNAL "")
+    endif ()
+
 
     set(LLVM_ENABLE_RTTI OFF CACHE BOOL "") # so we get typeinfo
 
@@ -176,4 +182,4 @@ message("CMAKE_LINKER=${CMAKE_LINKER}")
 
 add_subdirectory(codegen)
 add_subdirectory(runtime)
-add_subdirectory(bindings)
+#add_subdirectory(bindings)

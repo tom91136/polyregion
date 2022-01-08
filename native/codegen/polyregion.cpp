@@ -1,16 +1,15 @@
-#include "polyregion.h"
+#include <iostream>
+#include <unordered_map>
+
 #include "ast.h"
 #include "backend/llvm.h"
 #include "backend/opencl.h"
 #include "json.hpp"
+#include "polyregion.h"
 
 #include "generated/polyast_codec.h"
 
-#include "llvm/Support/TargetRegistry.h"
-#include "llvm/Support/TargetSelect.h"
 #include "llc.h"
-
-#include <iostream>
 
 std::atomic_bool init = false;
 
@@ -18,18 +17,18 @@ void polyregion_initialise() {
   if (!init) {
     init = true;
 
-//    int argc = 0;
-//     char *argv[]  = {};
-//    llvm::InitLLVM X(argc, argv);
+    //    int argc = 0;
+    //     char *argv[]  = {};
+    //    llvm::InitLLVM X(argc, argv);
     std::cout << "Init LLVM..." << std::endl;
 
-//    llvm::InitializeNativeTarget();
-//    llvm::InitializeNativeTargetAsmPrinter();
-//
-//    llvm::InitializeAllTargets();
-//    llvm::InitializeAllTargetInfos();
-//    llvm::InitializeAllTargetMCs();
-//    llvm::InitializeAllDisassemblers();
+    //    llvm::InitializeNativeTarget();
+    //    llvm::InitializeNativeTargetAsmPrinter();
+    //
+    //    llvm::InitializeAllTargets();
+    //    llvm::InitializeAllTargetInfos();
+    //    llvm::InitializeAllTargetMCs();
+    //    llvm::InitializeAllDisassemblers();
 
     llc::setup();
   }
@@ -38,7 +37,6 @@ void polyregion_initialise() {
 polyregion_program *polyregion_compile(polyregion_buffer *ast) {
   if (!init) {
     return nullptr;
-
   }
 
   std::cout << "Compile: " << std::endl;

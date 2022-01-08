@@ -17,6 +17,7 @@ add_executable(codegen-drv driver.cpp)
 
 
 target_include_directories(codegen-lib PRIVATE .)
+target_include_directories(codegen-lib PRIVATE ../include)
 
 
 #target_precompile_headers(codegen
@@ -92,10 +93,9 @@ set(COMPILE_OPTIONS
         "$<$<CONFIG:DEBUG>:${COMMON_DEBUG_OPTIONS}>"
         )
 
-set(COMMON_LINK_OPTIONS
-        "$<$<CONFIG:RELEASE>:${COMMON_LINK_OPTIONS}>"
-        "$<$<CONFIG:DEBUG>:${COMMON_LINK_OPTIONS}>"
-        "$<$<CONFIG:DEBUG>:${COMMON_DEBUG_OPTIONS};${COMMON_LINK_OPTIONS}>"
+set(LINK_OPTIONS
+        ${COMMON_LINK_OPTIONS}
+        "$<$<CONFIG:DEBUG>:${COMMON_DEBUG_OPTIONS}>"
         )
 
 target_compile_options(codegen-lib PUBLIC ${COMPILE_OPTIONS})

@@ -123,13 +123,34 @@ const static uint8_t X86_FMA__MACH_O[] = {
     0x00, 0x5f, 0x66, 0x6d, 0x61, 0x5f, 0x00, 0x00};
 
 TEST_CASE("NULL object file is an error") {
-  auto r = polyregion_invoke(nullptr, 0, nullptr, 0, 0, nullptr);
-  REQUIRE_THAT(r, Catch::Contains("object file"));
+  auto o = polyregion_load_object(nullptr, 0);
+  CHECK_THAT(o->message, Catch::Contains("object file"));
+  CHECK(o->object == nullptr);
+  polyregion_release_object(o);
 }
 
-TEST_CASE("error is consumed ") {
-  auto r = polyregion_invoke(nullptr, 0, nullptr, 0, 0, nullptr);
-  polyregion_consume_error(r);
+TEST_CASE("x86 enumerate fma") {
+
+  auto [name,expected, obj, len] = GENERATE(std::make_tuple("X86_FMA__ELF", "fma_", X86_FMA__ELF, sizeof(X86_FMA__ELF)),
+                                       std::make_tuple("X86_FMA__COFF", "fma_", X86_FMA__COFF, sizeof(X86_FMA__COFF)),
+                                       std::make_tuple("X86_FMA__MACH_O", "_fma_", X86_FMA__MACH_O, sizeof(X86_FMA__MACH_O)));
+
+  SECTION(name , expected) {
+    const auto o = polyregion_load_object(obj, len);
+    auto table = polyregion_enumerate(o->object);
+
+    REQUIRE(table->size >= 1);
+    CHECK_THAT(table->symbols[table->size-1].name , Catch::Equals(expected) );
+
+    for(size_t i = 0; i < table->size;  ++ i){
+      INFO("[" << i << "]" << table->symbols[i].name);
+
+    }
+//    std::cout << table->symbols[0].name << std::endl;
+
+    polyregion_release_enumerate(table);
+    polyregion_release_object(o);
+  }
 }
 
 TEST_CASE("x86 ELF invoke int(int, int, int)") {
@@ -146,12 +167,13 @@ TEST_CASE("x86 ELF invoke int(int, int, int)") {
                                          {polyregion_type::Int, (void *)(&b)},
                                          {polyregion_type::Int, (void *)(&c)}};
     polyregion_data return_{polyregion_type::Int, &actual};
-
-    auto error = polyregion_invoke(obj, len, "fma_", args.data(), args.size(), &return_);
+    const auto o = polyregion_load_object(obj, len);
+    auto error = polyregion_invoke(o->object, "fma_", args.data(), args.size(), &return_);
     //  char* error = nullptr;
     REQUIRE(error == nullptr);
     CHECK(actual == (a * b + c));
 
-    polyregion_consume_error(error);
+    polyregion_release_invoke(error);
+    polyregion_release_object(o);
   }
 }

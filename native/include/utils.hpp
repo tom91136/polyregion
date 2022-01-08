@@ -25,6 +25,16 @@ std::string mk_string(const Container<T> &xs,
                               [delim](auto &&a, auto &&b) -> std::string { return a + delim + b; }, f);
 }
 
+template <typename K, typename V, template <typename...> typename Container>
+std::string mk_string(const Container<K, V> &xs,
+                      const std::function<std::string(const typename Container<K, V>::value_type &)> &f, //
+                      const std::string &delim) {
+  return std::empty(xs) ? ""
+                        : std::transform_reduce(
+                              ++std::begin(xs), std::end(xs), f(*std::begin(xs)),
+                              [delim](auto &&a, auto &&b) -> std::string { return a + delim + b; }, f);
+}
+
 template <typename T, typename U, template <typename...> typename Container>
 std::vector<U> map_vec(const Container<T> &xs, const std::function<U(const T &)> &f) {
   std::vector<U> ys(std::size(xs));
@@ -41,10 +51,10 @@ static std::vector<std::string> split(const std::string &str, char delim) {
   return xs;
 }
 
-template <typename T> std::vector<T> readNStruct(const std::string &path) {
+template <typename T> std::vector<T> read_struct(const std::string &path) {
   std::fstream s(path, std::ios::binary | std::ios::in);
   if (!s.good()) {
-    throw std::invalid_argument("Bad file: " + path);
+    throw std::invalid_argument("Cannot open binary file for reading: " + path);
   }
   s.ignore(std::numeric_limits<std::streamsize>::max());
   auto len = s.gcount();
@@ -57,9 +67,15 @@ template <typename T> std::vector<T> readNStruct(const std::string &path) {
 }
 
 template <typename T, template <typename...> typename Container>
-
 std::optional<T> get_opt(const Container<T> &xs, size_t i) {
   return i > std::size(xs) ? std::nullopt : std::make_optional(xs[i]);
+}
+
+template <typename T, typename = typename std::enable_if_t<std::is_arithmetic_v<T>, T>> //
+std::string hex(T t) {
+  std::stringstream stream;
+  stream << std::hex << t;
+  return std::string(stream.str());
 }
 
 constexpr uint32_t hash(const char *data, size_t const size) noexcept {

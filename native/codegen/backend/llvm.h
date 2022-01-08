@@ -1,6 +1,7 @@
 #pragma once
 
 #include <utility>
+#include <unordered_map>
 
 #include "ast.h"
 #include "backend.h"
