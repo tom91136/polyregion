@@ -2,16 +2,15 @@
 
 #include <fstream>
 #include <functional>
-#include <iostream>
 #include <numeric>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace polyregion {
 
-template <typename T = std::nullptr_t> T undefined(const std::string &message = "not implemented") {
+template <typename T = std::nullptr_t> //
+constexpr T undefined(const std::string &message = "not implemented") {
   throw std::logic_error(message);
 }
 
@@ -26,9 +25,9 @@ std::string mk_string(const Container<T> &xs,
 }
 
 template <typename K, typename V, template <typename...> typename Container>
-std::string mk_string(const Container<K, V> &xs,
-                      const std::function<std::string(const typename Container<K, V>::value_type &)> &f, //
-                      const std::string &delim) {
+std::string mk_string2(const Container<K, V> &xs,
+                       const std::function<std::string(const typename Container<K, V>::value_type &)> &f, //
+                       const std::string &delim) {
   return std::empty(xs) ? ""
                         : std::transform_reduce(
                               ++std::begin(xs), std::end(xs), f(*std::begin(xs)),
@@ -36,8 +35,8 @@ std::string mk_string(const Container<K, V> &xs,
 }
 
 template <typename T, typename U, template <typename...> typename Container>
-std::vector<U> map_vec(const Container<T> &xs, const std::function<U(const T &)> &f) {
-  std::vector<U> ys(std::size(xs));
+Container<U> map_vec(const Container<T> &xs, const std::function<U(const T &)> &f) {
+  Container<U> ys(std::size(xs));
   std::transform(std::begin(xs), std::end(xs), ys.begin(), f);
   return ys;
 }
@@ -67,15 +66,17 @@ template <typename T> std::vector<T> read_struct(const std::string &path) {
 }
 
 template <typename T, template <typename...> typename Container>
-std::optional<T> get_opt(const Container<T> &xs, size_t i) {
+constexpr std::optional<T> get_opt(const Container<T> &xs, size_t i) {
   return i > std::size(xs) ? std::nullopt : std::make_optional(xs[i]);
 }
-
-template <typename T, typename = typename std::enable_if_t<std::is_arithmetic_v<T>, T>> //
-std::string hex(T t) {
-  std::stringstream stream;
-  stream << std::hex << t;
-  return std::string(stream.str());
+// https://stackoverflow.com/a/33447587/896997
+template <typename N, typename = typename std::enable_if_t<std::is_arithmetic_v<N>, N>>
+std::string hex(N w, size_t hex_len = sizeof(N) << 1) {
+  static const char *digits = "0123456789ABCDEF";
+  std::string rc(hex_len, '0');
+  for (size_t i = 0, j = (hex_len - 1) * 4; i < hex_len; ++i, j -= 4)
+    rc[i] = digits[(w >> j) & 0x0f];
+  return rc;
 }
 
 constexpr uint32_t hash(const char *data, size_t const size) noexcept {

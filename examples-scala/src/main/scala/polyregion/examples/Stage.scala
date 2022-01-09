@@ -4,6 +4,7 @@ import com.kenai.jffi.HeapInvocationBuffer
 
 import java.nio.ByteBuffer
 import scala.collection.mutable.ArrayBuffer
+import polyregion.PolyregionRuntime
 
 object Stage {
 
@@ -111,7 +112,19 @@ object Stage {
 
   val scalar = 42.69f
 
-  def main(args: Array[String]): Unit = {
+  def main(args: Array[String]) = {
+    PolyregionRuntime.load();
+    PolyregionRuntime.invoke(
+      Array.emptyByteArray,
+      "abc",
+      1,
+      java.nio.ByteBuffer.allocate(0),
+      Array.emptyByteArray,
+      Array.emptyObjectArray
+    );
+  }
+
+  def main2(args: Array[String]): Unit = {
     val xs = polyregion.Buffer.ofDim[Float](10)
     val ys = polyregion.Buffer.ofDim[Float](10)
 

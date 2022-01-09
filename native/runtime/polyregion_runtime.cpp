@@ -1,13 +1,9 @@
-#include <bitset>
-#include <iostream>
-#include <numeric>
-
 #include "ffi.h"
-#include "runtime.h"
+#include "polyregion_runtime.h"
 #include "utils.hpp"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 
-static char *error(const std::string &s) { return strdup(s.c_str()); };
+static constexpr char *error(const std::string &s) { return strdup(s.c_str()); };
 
 struct polyregion_object {
   std::unique_ptr<llvm::object::ObjectFile> file;
@@ -80,7 +76,7 @@ char *polyregion_invoke(const polyregion_object *object,
     case Byte:
       return &ffi_type_sint8;
     case Char:
-      return &ffi_type_sint8;
+      return &ffi_type_uint8;
     case Short:
       return &ffi_type_sint16;
     case Int:
@@ -113,7 +109,7 @@ char *polyregion_invoke(const polyregion_object *object,
 
   if (!sym) {
     auto table = ld.getSymbolTable();
-    auto symbols = polyregion::mk_string<llvm::StringRef, llvm::JITEvaluatedSymbol>(
+    auto symbols = polyregion::mk_string2<llvm::StringRef, llvm::JITEvaluatedSymbol>(
         table, [](auto &x) { return "[`" + x.first.str() + "`@" + polyregion::hex(x.second.getAddress()) + "]"; }, ",");
     return error("Symbol `" + std::string(symbol) + "` not found in the given object, available symbols (" +
                  std::to_string(table.size()) + ") = " + symbols);
@@ -124,8 +120,6 @@ char *polyregion_invoke(const polyregion_object *object,
   if (ld.hasError()) {
     return error("Symbol `" + std::string(symbol) + "` failed to finalise for execution: " + ld.getErrorString().str());
   }
-
-  std::cout << "[" << symbol << "] = " << sym.getAddress() << std::endl;
 
   auto rtnFFIType = toFFITpe(rtn->type);
   if (!rtnFFIType) {
@@ -155,3 +149,4 @@ char *polyregion_invoke(const polyregion_object *object,
     return error("ffi_prep_cif: unknown error (" + std::to_string(status) + ")");
   }
 }
+

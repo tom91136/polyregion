@@ -10,10 +10,10 @@ extern "C" {
 /*
  * Class:      polyregion_PolyregionRuntime
  * Method:     invoke
- * Signature:  ([B[Ljava/nio/Buffer;)Ljava/util/Optional;
+ * Signature:  ([BLjava/lang/String;BLjava/nio/Buffer;[B[Ljava/lang/Object;)V
  */
-JNIEXPORT jobject JNICALL Java_polyregion_PolyregionRuntime_invoke
-  (JNIEnv *, jclass, jbyteArray, jobjectArray);
+JNIEXPORT void JNICALL Java_polyregion_PolyregionRuntime_invoke
+  (JNIEnv *, jclass, jbyteArray, jstring, jbyte, jobject, jbyteArray, jobjectArray);
 
 #ifdef __cplusplus
 }

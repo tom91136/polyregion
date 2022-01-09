@@ -10,6 +10,7 @@
 #include "llvm/Transforms/Scalar.h"
 #include <dis.h>
 #include <llc.h>
+#include <iostream>
 //#include <llvm/ExecutionEngine/Orc/LLJIT.h>
 //#include <llvm/Object/ObjectFile.h>
 

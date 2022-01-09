@@ -66,6 +66,7 @@ lazy val `examples-scala` = project
   .settings(
     commonSettings,
     name                 := "examples-scala",
+    fork                 := true,
     Compile / mainClass  := mainCls,
     assembly / mainClass := mainCls,
     scalacOptions ++= Seq("-Yretain-trees"),

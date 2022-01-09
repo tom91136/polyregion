@@ -6,8 +6,8 @@ set(LIB_SOURCES
         backend/llvm.cpp
         backend/opencl.cpp
         llc.cpp
-        polyregion.cpp
-        polyregion.h)
+        polyregion_codegen.cpp
+        polyregion_codegen.h)
 
 add_library(codegen-lib ${LIB_SOURCES})
 add_dependencies(codegen-lib intrinsics_gen)
@@ -15,9 +15,8 @@ add_dependencies(codegen-lib intrinsics_gen)
 add_executable(codegen-tests test.cpp test-main.cpp)
 add_executable(codegen-drv driver.cpp)
 
-
-target_include_directories(codegen-lib PRIVATE .)
-target_include_directories(codegen-lib PRIVATE ../include)
+target_include_directories(codegen-drv PRIVATE ../include)
+target_include_directories(codegen-lib PRIVATE . ../include)
 
 
 #target_precompile_headers(codegen
@@ -84,8 +83,8 @@ target_link_libraries(codegen-lib PRIVATE
         #        "$<$<CONFIG:DEBUG>:LLVM>"  # linking all the static libs is too slow for dev
 #        capstone-static
         )
-target_link_libraries(codegen-tests PUBLIC codegen-lib)
-target_link_libraries(codegen-drv PUBLIC codegen-lib ${LLVM_LIBS})
+target_link_libraries(codegen-tests PRIVATE codegen-lib)
+target_link_libraries(codegen-drv PRIVATE codegen-lib ${LLVM_LIBS})
 
 set(COMPILE_OPTIONS
         ${COMMON_COMPILE_OPTIONS}
@@ -98,10 +97,10 @@ set(LINK_OPTIONS
         "$<$<CONFIG:DEBUG>:${COMMON_DEBUG_OPTIONS}>"
         )
 
-target_compile_options(codegen-lib PUBLIC ${COMPILE_OPTIONS})
-target_compile_options(codegen-drv PUBLIC ${COMPILE_OPTIONS})
-target_compile_options(codegen-tests PUBLIC ${COMPILE_OPTIONS})
+target_compile_options(codegen-lib PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(codegen-drv PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(codegen-tests PRIVATE ${COMPILE_OPTIONS})
 
-target_link_options(codegen-lib PUBLIC ${LINK_OPTIONS})
-target_link_options(codegen-drv PUBLIC ${LINK_OPTIONS})
-target_link_options(codegen-tests PUBLIC ${LINK_OPTIONS})
+target_link_options(codegen-lib PRIVATE ${LINK_OPTIONS})
+target_link_options(codegen-drv PRIVATE ${LINK_OPTIONS})
+target_link_options(codegen-tests PRIVATE ${LINK_OPTIONS})

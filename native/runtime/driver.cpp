@@ -2,7 +2,7 @@
 #include <string>
 #include <vector>
 
-#include "runtime.h"
+#include "polyregion_runtime.h"
 #include "utils.hpp"
 
 int main(int argc, char *argv[]) {
@@ -28,6 +28,10 @@ int main(int argc, char *argv[]) {
             std::cout << "  "
                       << "`" << sym.name << "`"
                       << "(0x" << std::hex << sym.address << ")" << std::endl;
+          }
+          auto r = polyregion_invoke(ref->object, "lambda", nullptr, 0, nullptr);
+          if (r) {
+            std::cerr << r << std::endl;
           }
           polyregion_release_enumerate(table);
         }

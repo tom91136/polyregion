@@ -4,12 +4,10 @@
 #include "ast.h"
 #include "backend/llvm.h"
 #include "backend/opencl.h"
-#include "json.hpp"
-#include "polyregion.h"
-
 #include "generated/polyast_codec.h"
-
+#include "json.hpp"
 #include "llc.h"
+#include "polyregion_codegen.h"
 
 std::atomic_bool init = false;
 

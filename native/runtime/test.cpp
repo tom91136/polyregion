@@ -1,5 +1,5 @@
 #include "catch.hpp"
-#include "runtime.h"
+#include "polyregion_runtime.h"
 #include <iostream>
 
 // x86_64-pc-windows-msvc
@@ -131,22 +131,22 @@ TEST_CASE("NULL object file is an error") {
 
 TEST_CASE("x86 enumerate fma") {
 
-  auto [name,expected, obj, len] = GENERATE(std::make_tuple("X86_FMA__ELF", "fma_", X86_FMA__ELF, sizeof(X86_FMA__ELF)),
-                                       std::make_tuple("X86_FMA__COFF", "fma_", X86_FMA__COFF, sizeof(X86_FMA__COFF)),
-                                       std::make_tuple("X86_FMA__MACH_O", "_fma_", X86_FMA__MACH_O, sizeof(X86_FMA__MACH_O)));
+  auto [name, expected, obj, len] =
+      GENERATE(std::make_tuple("X86_FMA__ELF", "fma_", X86_FMA__ELF, sizeof(X86_FMA__ELF)),
+               std::make_tuple("X86_FMA__COFF", "fma_", X86_FMA__COFF, sizeof(X86_FMA__COFF)),
+               std::make_tuple("X86_FMA__MACH_O", "_fma_", X86_FMA__MACH_O, sizeof(X86_FMA__MACH_O)));
 
-  SECTION(name , expected) {
+  SECTION(name, expected) {
     const auto o = polyregion_load_object(obj, len);
     auto table = polyregion_enumerate(o->object);
 
     REQUIRE(table->size >= 1);
-    CHECK_THAT(table->symbols[table->size-1].name , Catch::Equals(expected) );
+    CHECK_THAT(table->symbols[table->size - 1].name, Catch::Equals(expected));
 
-    for(size_t i = 0; i < table->size;  ++ i){
+    for (size_t i = 0; i < table->size; ++i) {
       INFO("[" << i << "]" << table->symbols[i].name);
-
     }
-//    std::cout << table->symbols[0].name << std::endl;
+    //    std::cout << table->symbols[0].name << std::endl;
 
     polyregion_release_enumerate(table);
     polyregion_release_object(o);

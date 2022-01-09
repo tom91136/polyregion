@@ -1,3 +1,5 @@
+#include <iostream>
+
 #include "opencl.h"
 #include "utils.hpp"
 #include "variants.hpp"

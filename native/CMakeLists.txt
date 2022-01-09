@@ -8,6 +8,11 @@ set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON" FORCE)
 set(LIBFFI_LIBRARY_PATH "" CACHE INTERNAL "libffi library path")
 set(LIBFFI_HEADER_PATH "" CACHE INTERNAL "libffi header path")
 set(LINKER "" CACHE INTERNAL "Path to custom linker")
+set(POLYREGION_SHARED_LIB OFF CACHE BOOL "")
+
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+set(CMAKE_CXX_COMPILE_OPTIONS_IPO -flto=thin)
 
 
 FetchContent_Declare(
@@ -49,35 +54,33 @@ macro(FetchContent_MakeAvailable_Args NAME ARGS)
 endmacro()
 
 
-set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
-
 # use new behaviour for IPO here (e.g enable where possible)
 cmake_policy(SET CMP0069 NEW)
 set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
 
 
-### capstone ###
-set(CAPSTONE_BUILD_TESTS OFF CACHE BOOL "Disable Capstone tests")
-set(CAPSTONE_BUILD_SHARED OFF CACHE BOOL "Disable Capstone shared library")
-set(CAPSTONE_BUILD_CSTOOL OFF CACHE BOOL "Disable cstool build")
-
-set(CAPSTONE_MIPS_SUPPORT OFF CACHE BOOL "")
-set(CAPSTONE_PPC_SUPPORT OFF CACHE BOOL "")
-set(CAPSTONE_SPARC_SUPPORT OFF CACHE BOOL "")
-set(CAPSTONE_SYSZ_SUPPORT OFF CACHE BOOL "")
-set(CAPSTONE_XCORE_SUPPORT OFF CACHE BOOL "")
-set(CAPSTONE_M68K_SUPPORT OFF CACHE BOOL "")
-set(CAPSTONE_TMS320C64X_SUPPORT OFF CACHE BOOL "")
-set(CAPSTONE_M680X_SUPPORT OFF CACHE BOOL "")
-set(CAPSTONE_EVM_SUPPORT OFF CACHE BOOL "")
-set(CAPSTONE_OSXKERNEL_SUPPORT OFF CACHE BOOL "")
-
-set(CAPSTONE_ARM_SUPPORT ON CACHE BOOL "")
-set(CAPSTONE_ARM64_SUPPORT ON CACHE BOOL "")
-set(CAPSTONE_X86_SUPPORT ON CACHE BOOL "")
-FetchContent_MakeAvailable_Args(capstone EXCLUDE_FROM_ALL)
-include_directories("${capstone_BINARY_DIR}/include" "${capstone_SOURCE_DIR}/include")
-### capstone ###
+#### capstone ###
+#set(CAPSTONE_BUILD_TESTS OFF CACHE BOOL "Disable Capstone tests")
+#set(CAPSTONE_BUILD_SHARED OFF CACHE BOOL "Disable Capstone shared library")
+#set(CAPSTONE_BUILD_CSTOOL OFF CACHE BOOL "Disable cstool build")
+#
+#set(CAPSTONE_MIPS_SUPPORT OFF CACHE BOOL "")
+#set(CAPSTONE_PPC_SUPPORT OFF CACHE BOOL "")
+#set(CAPSTONE_SPARC_SUPPORT OFF CACHE BOOL "")
+#set(CAPSTONE_SYSZ_SUPPORT OFF CACHE BOOL "")
+#set(CAPSTONE_XCORE_SUPPORT OFF CACHE BOOL "")
+#set(CAPSTONE_M68K_SUPPORT OFF CACHE BOOL "")
+#set(CAPSTONE_TMS320C64X_SUPPORT OFF CACHE BOOL "")
+#set(CAPSTONE_M680X_SUPPORT OFF CACHE BOOL "")
+#set(CAPSTONE_EVM_SUPPORT OFF CACHE BOOL "")
+#set(CAPSTONE_OSXKERNEL_SUPPORT OFF CACHE BOOL "")
+#
+#set(CAPSTONE_ARM_SUPPORT ON CACHE BOOL "")
+#set(CAPSTONE_ARM64_SUPPORT ON CACHE BOOL "")
+#set(CAPSTONE_X86_SUPPORT ON CACHE BOOL "")
+#FetchContent_MakeAvailable_Args(capstone EXCLUDE_FROM_ALL)
+#include_directories("${capstone_BINARY_DIR}/include" "${capstone_SOURCE_DIR}/include")
+#### capstone ###
 
 
 set(USE_EXTERNAL_LLVM OFF)
@@ -92,17 +95,24 @@ else ()
     set(LLVM_TARGETS_TO_BUILD "X86;AArch64;ARM;NVPTX;AMDGPU;WebAssembly" CACHE INTERNAL "")
     #    set(LLVM_TARGETS_TO_BUILD "X86" CACHE INTERNAL "")
     set(LLVM_ENABLE_IDE ON CACHE BOOL "")
+    set(LLVM_ENABLE_THREADS ON CACHE BOOL "")
     set(LLVM_ENABLE_LTO "Thin" CACHE INTERNAL "")
+
     set(LLVM_ENABLE_ZLIB OFF CACHE BOOL "")
+    set(LLVM_ENABLE_LIBXML2 OFF CACHE BOOL "")
+    set(LLVM_ENABLE_LIBPFM OFF CACHE BOOL "")
+    set(LLVM_ENABLE_TERMINFO OFF CACHE BOOL "")
+
     set(LLVM_ENABLE_UNWIND_TABLES OFF CACHE BOOL "")
     set(LLVM_STATIC_LINK_CXX_STDLIB ON CACHE BOOL "")
-    set(BUILD_SHARED_LIBS ON CACHE BOOL "") # for dev mode only
+    set(BUILD_SHARED_LIBS ${POLYREGION_SHARED_LIB} CACHE BOOL "")
 
     #    set(LLVM_ENABLE_LLD ON CACHE BOOL "")
 
-    if (LINKER)
-        set(LLVM_USE_LINKER "${LINKER}" CACHE INTERNAL "")
-    endif ()
+    #    if (LINKER)
+    #        set(LLVM_USE_LINKER "${LINKER}" CACHE INTERNAL "")
+    #    endif ()
+    #    set(CMAKE_CXX_FLAGS "-fvisibility=hidden  -ffunction-sections -fdata-sections" CACHE INTERNAL "")
 
 
     set(LLVM_ENABLE_RTTI OFF CACHE BOOL "") # so we get typeinfo
@@ -157,10 +167,14 @@ include_directories(${LLVM_INCLUDE_DIRS})
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(COMMON_LINK_OPTIONS -fuse-ld=${CMAKE_LINKER})
+
 set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer)
 set(COMMON_COMPILE_OPTIONS
-        -fno-rtti
+        -fvisibility=hidden       # don't export anything by default
+        -fvisibility-inlines-hidden
+        -ffunction-sections       # keep functions in its own section for better --gc-sections results
+        -fdata-sections           # same as above
+        -fno-rtti                 # don't use RTTI for space
         -pedantic
         -Wall
         -Wextra
@@ -172,14 +186,21 @@ set(COMMON_COMPILE_OPTIONS
         -Wno-unused-function
         -Wno-unused-variable
         )
-
+set(COMMON_LINKER_OPTIONS
+        LINKER:--exclude-libs=ALL # ld/lld exports all object symbols by default, don't do that
+        LINKER:--gc-sections      # remove unused sections
+        LINKER:-s                 # strip symbols not used for DSO
+        LINKER:-O3                # O3 for linker means optimise for space
+        )
+set(COMMON_LINK_OPTIONS
+        -static-libgcc
+        -static-libstdc++
+        --ld-path=${CMAKE_LINKER}
+        ${COMMON_COMPILE_OPTIONS}
+        ${COMMON_LINKER_OPTIONS})
 
 message("CMAKE_LINKER=${CMAKE_LINKER}")
 
-#set(LD_FLAGS
-#        -fuse-ld=/usr/bin/ld.lld-12
-#        -flto)
-
 add_subdirectory(codegen)
 add_subdirectory(runtime)
-#add_subdirectory(bindings)
+add_subdirectory(bindings)
