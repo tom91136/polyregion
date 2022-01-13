@@ -184,7 +184,7 @@ object CppCodeGen {
 
     val ns = "polyregion::polyast"
 
-    val target = Paths.get(".").resolve("native/codegen/generated/").normalize.toAbsolutePath
+    val target = Paths.get(".").resolve("native/compiler/generated/").normalize.toAbsolutePath
 
     Files.createDirectories(target)
     println(s"Dest=${target}")
