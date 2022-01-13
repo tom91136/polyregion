@@ -109,7 +109,9 @@ std::string backend::OpenCL::mkStmt(const Stmt::Any &stmt) {
   );
 }
 
-void backend::OpenCL::run(const Function &fnTree) {
+compiler::Compilation backend::OpenCL::run(const Function &fnTree) {
+
+  auto start = compiler::Clock::now();
 
   auto args = mk_string<Named>(
       fnTree.args, [&](auto x) { return mkTpe(x.tpe) + " " + x.symbol; }, ", ");
@@ -121,4 +123,13 @@ void backend::OpenCL::run(const Function &fnTree) {
 
   auto def = prototype + "{\n" + body + "\n}";
   std::cout << def << std::endl;
+
+  std::vector<uint8_t> data(def.c_str(), def.c_str() + def.length() + 1);
+
+  return compiler::Compilation(                                                    //
+      data,                                                                        //
+      {},                                                                          //
+      {{"polyast_to_opencl", compiler::elapsedNs(compiler::Clock::now(), start)}}, //
+      ""                                                                           //
+  );
 }

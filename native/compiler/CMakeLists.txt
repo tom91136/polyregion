@@ -1,25 +1,30 @@
 set(LIB_SOURCES
         generated/polyast.cpp
         generated/polyast_codec.cpp
+
+        backend/llvm.cpp
+        backend/llvmc.cpp
+        backend/opencl.cpp
+
         ast.cpp
         dis.cpp
-        backend/llvm.cpp
-        backend/opencl.cpp
-        llc.cpp
-        polyregion_codegen.cpp
-        polyregion_codegen.h)
 
-add_library(codegen-lib ${LIB_SOURCES})
-add_dependencies(codegen-lib intrinsics_gen)
+        compiler.cpp
+        polyregion_compiler.cpp
+        )
 
-add_executable(codegen-tests test.cpp test-main.cpp)
-add_executable(codegen-drv driver.cpp)
+add_library(compiler-lib ${LIB_SOURCES})
+add_dependencies(compiler-lib intrinsics_gen)
 
-target_include_directories(codegen-drv PRIVATE ../include)
-target_include_directories(codegen-lib PRIVATE . ../include)
+add_executable(compiler-tests test.cpp test-main.cpp)
+add_executable(compiler-drv driver.cpp)
+
+target_include_directories(compiler-tests PRIVATE . ../include)
+target_include_directories(compiler-drv PRIVATE . ../include)
+target_include_directories(compiler-lib PRIVATE . ../include)
 
 
-#target_precompile_headers(codegen
+#target_precompile_headers(compiler
 #        PRIVATE
 #        generated/polyast.h
 #        variants.hpp
@@ -49,7 +54,7 @@ llvm_map_components_to_libnames(LLVM_LIBS
         #        ipo
         #        instcombine
         #        native
-        #        nativecodegen
+        #        nativecompiler
         #        orcjit
 
 
@@ -73,18 +78,17 @@ llvm_map_components_to_libnames(LLVM_LIBS
         vectorize
 
         )
-message(STATUS "[codegen] Adding LLVM libs = ${LLVM_LIBS}")
+message(STATUS "[compiler] Adding LLVM libs = ${LLVM_LIBS}")
 
 
-
-target_link_libraries(codegen-lib PRIVATE
+target_link_libraries(compiler-lib PRIVATE
         "$<$<CONFIG:RELEASE>:${LLVM_LIBS}>"
         "$<$<CONFIG:DEBUG>:${LLVM_LIBS}>"
         #        "$<$<CONFIG:DEBUG>:LLVM>"  # linking all the static libs is too slow for dev
-#        capstone-static
+        #        capstone-static
         )
-target_link_libraries(codegen-tests PRIVATE codegen-lib)
-target_link_libraries(codegen-drv PRIVATE codegen-lib ${LLVM_LIBS})
+target_link_libraries(compiler-tests PRIVATE compiler-lib)
+target_link_libraries(compiler-drv PRIVATE compiler-lib ${LLVM_LIBS})
 
 set(COMPILE_OPTIONS
         ${COMMON_COMPILE_OPTIONS}
@@ -97,10 +101,10 @@ set(LINK_OPTIONS
         "$<$<CONFIG:DEBUG>:${COMMON_DEBUG_OPTIONS}>"
         )
 
-target_compile_options(codegen-lib PRIVATE ${COMPILE_OPTIONS})
-target_compile_options(codegen-drv PRIVATE ${COMPILE_OPTIONS})
-target_compile_options(codegen-tests PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(compiler-lib PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(compiler-drv PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(compiler-tests PRIVATE ${COMPILE_OPTIONS})
 
-target_link_options(codegen-lib PRIVATE ${LINK_OPTIONS})
-target_link_options(codegen-drv PRIVATE ${LINK_OPTIONS})
-target_link_options(codegen-tests PRIVATE ${LINK_OPTIONS})
+target_link_options(compiler-lib PRIVATE ${LINK_OPTIONS})
+target_link_options(compiler-drv PRIVATE ${LINK_OPTIONS})
+target_link_options(compiler-tests PRIVATE ${LINK_OPTIONS})

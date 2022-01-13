@@ -17,41 +17,40 @@ lazy val commonSettings = Seq(
 
 lazy val catsVersion = "2.7.0"
 
-lazy val `runtime-scala` = project.settings(
-  commonSettings,
-  name           := "runtime-scala",
-  fork           := true,
-  Compile / fork := true,
-  javah / target := file(".") / "native" / "bindings" / "java-runtime",
-  libraryDependencies ++= Seq(
-    ("com.github.jnr" % "jffi"            % "1.3.8").classifier("native"),
-    "com.github.jnr"  % "jffi"            % "1.3.8",
-    "org.bytedeco"    % "llvm-platform"   % "12.0.1-1.5.6",
-    "org.bytedeco"    % "libffi-platform" % "3.4.2-1.5.6",
-    "org.openjdk.jol" % "jol-core"        % "0.16"
-  )
-)
-
 lazy val `runtime-java` = project.settings(
   commonSettings,
   name           := "runtime-java",
   fork           := true,
   Compile / fork := true,
+  javah / target := file(".") / "native" / "bindings" / "java-runtime",
   libraryDependencies ++= Seq(
-    ("com.github.jnr" % "jffi"            % "1.3.8").classifier("native"),
-    "com.github.jnr"  % "jffi"            % "1.3.8",
-    "org.bytedeco"    % "llvm-platform"   % "12.0.1-1.5.6",
-    "org.bytedeco"    % "libffi-platform" % "3.4.2-1.5.6",
-    "org.openjdk.jol" % "jol-core"        % "0.16"
   )
 )
+
+lazy val `runtime-scala` = project
+  .settings(
+    commonSettings,
+    name           := "runtime-scala",
+    fork           := true,
+    Compile / fork := true,
+    libraryDependencies ++= Seq(
+      ("com.github.jnr" % "jffi"            % "1.3.8").classifier("native"),
+      "com.github.jnr"  % "jffi"            % "1.3.8",
+      "org.bytedeco"    % "llvm-platform"   % "12.0.1-1.5.6",
+      "org.bytedeco"    % "libffi-platform" % "3.4.2-1.5.6",
+      "org.openjdk.jol" % "jol-core"        % "0.16"
+    )
+  )
+  .dependsOn(`runtime-java`)
 
 lazy val compiler = project
   .settings(
     commonSettings,
     name := "compiler",
     scalacOptions ++= Seq("-Yretain-trees"),
-    javah / target := file(".") / "native" / "bindings" / "java-codegen",
+    fork           := true,
+    Compile / fork := true,
+    javah / target := file(".") / "native" / "bindings" / "java-compiler",
     libraryDependencies ++= Seq(
       "org.typelevel" %% "cats-core" % catsVersion,
       "com.lihaoyi"   %% "pprint"    % "0.7.1",

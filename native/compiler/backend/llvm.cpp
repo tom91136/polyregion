@@ -1,18 +1,16 @@
+#include <iostream>
 
-#include "llvm.h"
 #include "ast.h"
+#include "llvm.h"
+#include "llvmc.h"
 #include "utils.hpp"
 #include "variants.hpp"
+
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Scalar.h"
-#include <dis.h>
-#include <llc.h>
-#include <iostream>
-//#include <llvm/ExecutionEngine/Orc/LLJIT.h>
-//#include <llvm/Object/ObjectFile.h>
 
 using namespace polyregion;
 using namespace polyregion::polyast;
@@ -269,73 +267,81 @@ void backend::AstTransformer::transform(const std::unique_ptr<llvm::Module> &mod
   module->print(llvm::errs(), nullptr);
 }
 
-//void polyregion::backend::JitObjectCache::notifyObjectCompiled(const llvm::Module *M, llvm::MemoryBufferRef ObjBuffer) {
-//  llvm::dbgs() << "Compiled object for " << M->getModuleIdentifier() << "\n";
+// void polyregion::backend::JitObjectCache::notifyObjectCompiled(const llvm::Module *M, llvm::MemoryBufferRef
+// ObjBuffer) {
+//   llvm::dbgs() << "Compiled object for " << M->getModuleIdentifier() << "\n";
 //
-//  auto x = ExitOnErr(llvm::object::createBinary(ObjBuffer));
+//   auto x = ExitOnErr(llvm::object::createBinary(ObjBuffer));
 //
-//  std::ofstream outfile("obj.o", std::ofstream::binary);
-//  outfile.write(ObjBuffer.getBufferStart(), ObjBuffer.getBufferSize());
-//  outfile.close();
+//   std::ofstream outfile("obj.o", std::ofstream::binary);
+//   outfile.write(ObjBuffer.getBufferStart(), ObjBuffer.getBufferSize());
+//   outfile.close();
 //
-//  std::cout << "S=" << ObjBuffer.getBufferSize() << std::endl;
+//   std::cout << "S=" << ObjBuffer.getBufferSize() << std::endl;
 //
-//  if (auto *file = llvm::dyn_cast<llvm::object::ObjectFile>(&*x)) {
-//    llvm::dbgs() << "Yes!\n";
-//    auto sections = dis::disassembleCodeSections(*file);
-//    //    polyregion::dis::dump(std::cerr, sections);
-//    std::cerr << std::endl;
-//  }
+//   if (auto *file = llvm::dyn_cast<llvm::object::ObjectFile>(&*x)) {
+//     llvm::dbgs() << "Yes!\n";
+//     auto sections = dis::disassembleCodeSections(*file);
+//     //    polyregion::dis::dump(std::cerr, sections);
+//     std::cerr << std::endl;
+//   }
 //
-//  CachedObjects[M->getModuleIdentifier()] =
-//      llvm::MemoryBuffer::getMemBufferCopy(ObjBuffer.getBuffer(), ObjBuffer.getBufferIdentifier());
-//}
+//   CachedObjects[M->getModuleIdentifier()] =
+//       llvm::MemoryBuffer::getMemBufferCopy(ObjBuffer.getBuffer(), ObjBuffer.getBufferIdentifier());
+// }
 //
-//std::unique_ptr<llvm::MemoryBuffer> polyregion::backend::JitObjectCache::getObject(const llvm::Module *M) {
-//  auto I = CachedObjects.find(M->getModuleIdentifier());
-//  if (I == CachedObjects.end()) {
-//    llvm::dbgs() << "No object for " << M->getModuleIdentifier() << " in cache. Compiling.\n";
-//    return nullptr;
-//  }
+// std::unique_ptr<llvm::MemoryBuffer> polyregion::backend::JitObjectCache::getObject(const llvm::Module *M) {
+//   auto I = CachedObjects.find(M->getModuleIdentifier());
+//   if (I == CachedObjects.end()) {
+//     llvm::dbgs() << "No object for " << M->getModuleIdentifier() << " in cache. Compiling.\n";
+//     return nullptr;
+//   }
 //
-//  llvm::dbgs() << "Object for " << M->getModuleIdentifier() << " loaded from cache.\n";
-//  return llvm::MemoryBuffer::getMemBuffer(I->second->getMemBufferRef());
-//}
-//backend::JitObjectCache::~JitObjectCache() = default;
-//void backend::JitObjectCache::anchor() {}
-//backend::JitObjectCache::JitObjectCache() = default;
+//   llvm::dbgs() << "Object for " << M->getModuleIdentifier() << " loaded from cache.\n";
+//   return llvm::MemoryBuffer::getMemBuffer(I->second->getMemBufferRef());
+// }
+// backend::JitObjectCache::~JitObjectCache() = default;
+// void backend::JitObjectCache::anchor() {}
+// backend::JitObjectCache::JitObjectCache() = default;
 //
-//static std::unique_ptr<llvm::orc::LLJIT> mkJit(llvm::ObjectCache &cache) {
-//  using namespace llvm;
-//  orc::LLJITBuilder builder = orc::LLJITBuilder();
-//  builder.setCompileFunctionCreator(
-//      [&](orc::JITTargetMachineBuilder JTMB) -> Expected<std::unique_ptr<orc::IRCompileLayer::IRCompiler>> {
-//        auto TM = JTMB.createTargetMachine();
-//        if (!TM) return TM.takeError();
-//        return std::make_unique<orc::TMOwningSimpleCompiler>(orc::TMOwningSimpleCompiler(std::move(*TM), &cache));
-//      });
-//  return ExitOnErr(builder.create());
-//}
+// static std::unique_ptr<llvm::orc::LLJIT> mkJit(llvm::ObjectCache &cache) {
+//   using namespace llvm;
+//   orc::LLJITBuilder builder = orc::LLJITBuilder();
+//   builder.setCompileFunctionCreator(
+//       [&](orc::JITTargetMachineBuilder JTMB) -> Expected<std::unique_ptr<orc::IRCompileLayer::IRCompiler>> {
+//         auto TM = JTMB.createTargetMachine();
+//         if (!TM) return TM.takeError();
+//         return std::make_unique<orc::TMOwningSimpleCompiler>(orc::TMOwningSimpleCompiler(std::move(*TM), &cache));
+//       });
+//   return ExitOnErr(builder.create());
+// }
 
-backend::LLVM::LLVM()  = default; // cache(), jit(mkJit(cache)) {}
+backend::LLVM::LLVM() = default; // cache(), jit(mkJit(cache)) {}
 
-void backend::LLVM::run(const Function &fn) {
+compiler::Compilation backend::LLVM::run(const Function &fn) {
   using namespace llvm;
 
   auto ctx = std::make_unique<llvm::LLVMContext>();
   auto mod = std::make_unique<llvm::Module>("test", *ctx);
 
+  auto astXform = compiler::Clock::now();
+
   AstTransformer xform(*ctx);
   xform.transform(mod, fn);
 
-  llc::compileModule(std::move(mod), *ctx);
+  auto elapsed = compiler::elapsedNs(compiler::Clock::now(), astXform);
 
+  auto c = llvmc::compileModule(true, std::move(mod), *ctx);
 
-//  orc::ThreadSafeModule tsm(std::move(mod), std::move(ctx));
-//  ExitOnErr(jit->addIRModule(std::move(tsm)));
-//  JITEvaluatedSymbol symbol = ExitOnErr(jit->lookup("lambda"));
-//  std::cout << "S= "
-//            << " " << symbol.getAddress() << "  " << std::hex << symbol.getAddress() << std::endl;
+  c.elapsed.insert(c.elapsed.begin(), {"ast_to_llvm_ir", elapsed});
+
+  return c;
+
+  //  orc::ThreadSafeModule tsm(std::move(mod), std::move(ctx));
+  //  ExitOnErr(jit->addIRModule(std::move(tsm)));
+  //  JITEvaluatedSymbol symbol = ExitOnErr(jit->lookup("lambda"));
+  //  std::cout << "S= "
+  //            << " " << symbol.getAddress() << "  " << std::hex << symbol.getAddress() << std::endl;
 
   //  std::cout << "Prep for DL" << std::endl;
   //

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <utility>
 #include <unordered_map>
+#include <utility>
 
 #include "ast.h"
 #include "backend.h"
@@ -20,7 +20,7 @@ namespace polyregion::backend {
 using namespace polyregion::polyast;
 
 class AstTransformer {
-   llvm::LLVMContext &C;
+  llvm::LLVMContext &C;
 
 private:
   std::unordered_map<std::string, llvm::Value *> lut;
@@ -33,33 +33,33 @@ private:
   void mkStmt(const Stmt::Any &stmt, llvm::Function *fn);
 
 public:
-  explicit AstTransformer( llvm::LLVMContext &c) : C(c), lut(), B(C) {}
+  explicit AstTransformer(llvm::LLVMContext &c) : C(c), lut(), B(C) {}
   void transform(const std::unique_ptr<llvm::Module> &module, const Function &arg);
 };
 
-//class JitObjectCache : public llvm::ObjectCache {
-//private:
-//  llvm::StringMap<std::unique_ptr<llvm::MemoryBuffer>> CachedObjects;
+// class JitObjectCache : public llvm::ObjectCache {
+// private:
+//   llvm::StringMap<std::unique_ptr<llvm::MemoryBuffer>> CachedObjects;
 //
-//public:
+// public:
 //
-//  JitObjectCache()  ;
-//  void notifyObjectCompiled(const llvm::Module *M, llvm::MemoryBufferRef ObjBuffer) override;
-//  std::unique_ptr<llvm::MemoryBuffer> getObject(const llvm::Module *M) override;
-//  ~JitObjectCache() override ;
-//  void anchor() override  ;
+//   JitObjectCache()  ;
+//   void notifyObjectCompiled(const llvm::Module *M, llvm::MemoryBufferRef ObjBuffer) override;
+//   std::unique_ptr<llvm::MemoryBuffer> getObject(const llvm::Module *M) override;
+//   ~JitObjectCache() override ;
+//   void anchor() override  ;
 //
-//};
+// };
 
 class LLVM : public Backend {
 
 private:
-//  JitObjectCache cache;
-//  std::unique_ptr<llvm::orc::LLJIT> jit;
+  //  JitObjectCache cache;
+  //  std::unique_ptr<llvm::orc::LLJIT> jit;
 
 public:
   explicit LLVM();
-  void run(const Function &fn) override;
+  compiler::Compilation run(const Function &fn) override;
 };
 
 } // namespace polyregion::backend

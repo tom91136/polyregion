@@ -3,17 +3,13 @@
 #include <cstddef>
 #include <cstdint>
 
-#if MSVC
-  #define EXPORT __declspec(dllexport)
-#else
-  #define EXPORT __attribute__((visibility("default")))
-#endif
+#include "export.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef enum {
+typedef enum EXPORT {
   Bool = 1,
   Byte,
   Char,

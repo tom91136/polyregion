@@ -10,6 +10,7 @@ import java.lang.annotation.Target
 import scala.collection.mutable.ArrayBuffer
 import cats.conversions.variance
 import java.nio.file.Path
+import polyregion.PolyregionCompiler
 
 object CppCodeGen {
 
@@ -17,15 +18,16 @@ object CppCodeGen {
   object NlohmannJsonCodecSource {
     def emit(s: StructNode): List[NlohmannJsonCodecSource] = {
 
-      def fnName(t: CppType) = t.ref(qualified = false).toLowerCase + "_json"
-      def select(idx: Int)   = s"j.at($idx)"
+      def fromJsonFn(t: CppType) = t.ref(qualified = false).toLowerCase + "_from_json"
+      def toJsonFn(t: CppType)   = t.ref(qualified = false).toLowerCase + "_to_json"
+      def jsonAt(idx: Int)       = s"j.at($idx)"
 
-      val body = //
+      val fromJsonBody = //
         if (s.tpe.kind == CppType.Kind.Base) {
-          s"size_t ord = ${select(0)}.get<size_t>();" ::
-            s"const auto t = ${select(1)};" ::
+          s"size_t ord = ${jsonAt(0)}.get<size_t>();" ::
+            s"const auto t = ${jsonAt(1)};" ::
             "switch (ord) {" ::
-            s.variants.zipWithIndex.map((c, i) => s"case ${i}: return ${c.tpe.ns(fnName(c.tpe))}(t);") :::
+            s.variants.zipWithIndex.map((c, i) => s"case ${i}: return ${c.tpe.ns(fromJsonFn(c.tpe))}(t);") :::
             s"default: throw std::out_of_range(\"Bad ordinal \" + std::to_string(ord));" ::
             "}" :: Nil
         } else {
@@ -41,26 +43,59 @@ object CppCodeGen {
                 (tpe.namespace, tpe.name, tpe.ctors) match {
                   case ("std" :: Nil, "vector", x :: Nil) if x.kind != CppType.Kind.StdLib =>
                     s"${tpe.ref(qualified = true)} $name;" ::
-                      s"auto ${name}_json = ${select(idx)};" ::
-                      s"std::transform(${name}_json.begin(), ${name}_json.end(), std::back_inserter($name), &${x.ns(fnName(x))});"
+                      s"auto ${name}_json = ${jsonAt(idx)};" ::
+                      s"std::transform(${name}_json.begin(), ${name}_json.end(), std::back_inserter($name), &${x.ns(fromJsonFn(x))});"
                       :: Nil
-                  case _ => s"auto $name = ${select(idx)}.get<${tpe.ref(qualified = true)}>();" :: Nil
+                  case _ => s"auto $name = ${jsonAt(idx)}.get<${tpe.ref(qualified = true)}>();" :: Nil
                 }
-              case _ => s"auto $name =  ${tpe.ns(fnName(tpe))}(${select(idx)});" :: Nil
+              case _ => s"auto $name =  ${tpe.ns(fromJsonFn(tpe))}(${jsonAt(idx)});" :: Nil
             }
           } :::
             s"return ${ctorInvocation};" ::
             Nil
         }
 
-      val impls = "" ::
-        s"${s.tpe.ref(qualified = true)} ${s.tpe.ns(fnName(s.tpe))}(const json& j) { " :: //
-        body.map("  " + _) :::                                                            //
-        "}" :: Nil                                                                        //
+        val toJsonBody = //
+          if (s.tpe.kind == CppType.Kind.Base) {
+            "return std::visit(overloaded{" ::
+              s.variants.zipWithIndex.map((c, i) =>
+                s"[](const ${c.tpe.ref(qualified = true)} &y) -> json { return {$i, ${c.tpe.ns(toJsonFn(c.tpe))}(y)}; },"
+              ) ::: "[](const auto &x) -> json { throw std::out_of_range(\"Unimplemented type:\" + to_string(x) ); }" ::
+              "}, *x);" :: Nil
+          } else {
+            s.members.flatMap { case (name, tpe) =>
+              tpe.kind match {
+                case CppType.Kind.StdLib =>
+                  (tpe.namespace ::: tpe.name :: Nil, tpe.ctors) match {
+                    case ("std" :: "vector" :: Nil, x :: Nil) if x.kind != CppType.Kind.StdLib =>
+                      s"std::vector<json> $name;" ::
+                        s"std::transform(x.${name}.begin(), x.${name}.end(), std::back_inserter($name), &${x.ns(toJsonFn(x))});"
+                        :: Nil
+                    case _ => s"auto $name = x.${name};" :: Nil
+                  }
+                case _ => s"auto $name =  ${tpe.ns(toJsonFn(tpe))}(x.${name});" :: Nil
+              }
+            } :::
+              s"return json::array(${s.members.map(_._1).mkString("{", ", ", "}")});" ::
+              Nil
+          }
 
-      val decls = s"[[nodiscard]] ${s.tpe.ref(qualified = true)} ${fnName(s.tpe)}(const json &);" :: Nil
+      val fromJsonImpl = "" ::
+        s"${s.tpe.ref(qualified = true)} ${s.tpe.ns(fromJsonFn(s.tpe))}(const json& j) { " :: //
+        fromJsonBody.map("  " + _) :::                                                        //
+        "}" :: Nil                                                                            //
 
-      s.variants.flatMap(s => emit(s)) :+ NlohmannJsonCodecSource(s.tpe.namespace, decls, impls)
+      val toJsonImpl = "" ::
+        s"json ${s.tpe.ns(toJsonFn(s.tpe))}(const ${s.tpe.ref(qualified = true)}& x) { " :: //
+        toJsonBody.map("  " + _) :::
+        "}" :: Nil //
+
+      val decls =
+        s"[[nodiscard]] EXPORT ${s.tpe.ref(qualified = true)} ${fromJsonFn(s.tpe)}(const json &);" ::
+          s"[[nodiscard]] EXPORT json ${toJsonFn(s.tpe)}(const ${s.tpe.ref(qualified = true)} &);" ::
+          Nil
+
+      s.variants.flatMap(s => emit(s)) :+ NlohmannJsonCodecSource(s.tpe.namespace, decls, fromJsonImpl ::: toJsonImpl)
 
     }
 
@@ -77,6 +112,7 @@ object CppCodeGen {
           |
           |#include "json.hpp"
           |#include "polyast.h"
+          |#include "export.h"
           |
           |using json = nlohmann::json;
           |
@@ -89,6 +125,10 @@ object CppCodeGen {
 
     def emitImpl(namespace: String, headerName: String, xs: List[NlohmannJsonCodecSource]) =
       s"""|#include "$headerName.h"
+          |
+          |template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
+          |template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
+          |
           |namespace $namespace { 
           |${xs.flatMap(_.impls).mkString("\n")}
           |} // namespace $namespace
@@ -117,7 +157,7 @@ object CppCodeGen {
     println(MsgPack.decode[Stmt](MsgPack.encode(ast)).right.get == ast)
 
     Files.write(
-      Paths.get(".").resolve("native/ast.msgpack").normalize.toAbsolutePath,
+      Paths.get("..").resolve("native/ast.msgpack").normalize.toAbsolutePath,
       MsgPack.encode(ast),
       StandardOpenOption.TRUNCATE_EXISTING,
       StandardOpenOption.CREATE,
@@ -144,7 +184,7 @@ object CppCodeGen {
 
     val ns = "polyregion::polyast"
 
-    val target = Paths.get(".").resolve("native/src/generated/").normalize.toAbsolutePath
+    val target = Paths.get(".").resolve("native/codegen/generated/").normalize.toAbsolutePath
 
     Files.createDirectories(target)
     println(s"Dest=${target}")
@@ -164,7 +204,24 @@ object CppCodeGen {
     overwrite(target.resolve("polyast_codec.h"))(NlohmannJsonCodecSource.emitHeader(ns, jsonSources))
     overwrite(target.resolve("polyast_codec.cpp"))(NlohmannJsonCodecSource.emitImpl(ns, "polyast_codec", jsonSources))
 
+    println(MsgPack.encode(PolyAst.Expr.Alias(PolyAst.Term.IntConst(1))).map(_.toInt.toHexString).toList)
+    // MsgPack.encodeMsg(PolyAst.Expr.Alias(PolyAst.Term.IntConst(1)))
+
     ()
+
+    PolyregionCompiler.load()
+    try {
+      val c = PolyregionCompiler.compile(Array(), true, 0);
+      println(c.program)
+      println(c.disassembly)
+      println(c.messages)
+      println(c.elapsed)
+    } catch {
+      case e => e.printStackTrace();
+
+    }
+    println("Done")
+
   }
 
 }

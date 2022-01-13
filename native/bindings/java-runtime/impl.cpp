@@ -5,7 +5,7 @@
 #include "polyregion_runtime.h"
 
 static void throwGeneric(JNIEnv *env, const std::string &message) {
-  if (auto exClass = env->FindClass("polyregion/PolyregionRuntime$PolyregionException"); exClass) {
+  if (auto exClass = env->FindClass("polyregion/PolyregionException"); exClass) {
     env->ThrowNew(exClass, message.c_str());
   }
 }

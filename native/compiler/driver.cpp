@@ -1,14 +1,15 @@
-#include "polyregion_codegen.h"
+#include "compiler.h"
 #include "utils.hpp"
 
 int main(int argc, char *argv[]) {
 
-  polyregion_initialise();
+  polyregion::compiler::initialise();
 
   std::vector<uint8_t> xs = polyregion::read_struct<uint8_t>("../ast.bin");
 
-  polyregion_buffer buffer{xs.data(), xs.size()};
-  polyregion_compile(&buffer);
+  auto c = polyregion::compiler::compile(xs);
+
+  // TODO
 
   return EXIT_SUCCESS;
 }

@@ -11,8 +11,17 @@ set(LINKER "" CACHE INTERNAL "Path to custom linker")
 set(POLYREGION_SHARED_LIB OFF CACHE BOOL "")
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
-set(CMAKE_CXX_COMPILE_OPTIONS_IPO -flto=thin)
+
+
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(STATUS "LTO disabled in Debug mode")
+    set(DEBUG ON)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
+else ()
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+    set(DEBUG OFF)
+    set(CMAKE_CXX_COMPILE_OPTIONS_IPO -flto=thin)
+endif ()
 
 
 FetchContent_Declare(
@@ -96,7 +105,9 @@ else ()
     #    set(LLVM_TARGETS_TO_BUILD "X86" CACHE INTERNAL "")
     set(LLVM_ENABLE_IDE ON CACHE BOOL "")
     set(LLVM_ENABLE_THREADS ON CACHE BOOL "")
-    set(LLVM_ENABLE_LTO "Thin" CACHE INTERNAL "")
+    if (CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+        set(LLVM_ENABLE_LTO "Thin" CACHE INTERNAL "")
+    endif ()
 
     set(LLVM_ENABLE_ZLIB OFF CACHE BOOL "")
     set(LLVM_ENABLE_LIBXML2 OFF CACHE BOOL "")
@@ -164,7 +175,7 @@ include_directories("${catch2_SOURCE_DIR}")
 include_directories(${LLVM_INCLUDE_DIRS})
 
 # set CXX stuff here in case LLVM overwrites it
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 
@@ -186,12 +197,28 @@ set(COMMON_COMPILE_OPTIONS
         -Wno-unused-function
         -Wno-unused-variable
         )
-set(COMMON_LINKER_OPTIONS
-        LINKER:--exclude-libs=ALL # ld/lld exports all object symbols by default, don't do that
-        LINKER:--gc-sections      # remove unused sections
-        LINKER:-s                 # strip symbols not used for DSO
-        LINKER:-O3                # O3 for linker means optimise for space
-        )
+
+if (DEBUG)
+    # --exclude-libs=ALL kills -fsanitize=*
+    set(COMMON_LINKER_OPTIONS
+            LINKER:--gc-sections      # remove unused sections
+            LINKER:-s                 # strip symbols not used for DSO
+            LINKER:-O3                # O3 for linker means optimise for space
+            )
+    set(COMMON_COMPILE_OPTIONS ${COMMON_COMPILE_OPTIONS})
+else ()
+    set(COMMON_LINKER_OPTIONS
+            LINKER:--exclude-libs=ALL # ld/lld exports all object symbols by default, don't do that
+            LINKER:--gc-sections      # remove unused sections
+            LINKER:-s                 # strip symbols not used for DSO
+            LINKER:-O3                # O3 for linker means optimise for space
+            )
+    set(COMMON_COMPILE_OPTIONS ${COMMON_COMPILE_OPTIONS}
+            -fvisibility=hidden       # don't export anything by default
+            -fvisibility-inlines-hidden
+            )
+endif ()
+
 set(COMMON_LINK_OPTIONS
         -static-libgcc
         -static-libstdc++
@@ -201,6 +228,6 @@ set(COMMON_LINK_OPTIONS
 
 message("CMAKE_LINKER=${CMAKE_LINKER}")
 
-add_subdirectory(codegen)
+add_subdirectory(compiler)
 add_subdirectory(runtime)
 add_subdirectory(bindings)

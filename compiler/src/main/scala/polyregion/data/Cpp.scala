@@ -52,11 +52,11 @@ object Cpp {
 
       val (_, stmts) = xs.foldLeft[(Option[String], List[String])]((None, Nil)) { case ((ns, stmts), cls) =>
         val moreStmts = "" ::
-          cls.forwardDeclStmts :::                                        //
-          s"struct ${cls.parent.fold(cls.name)(s"${cls.name} : " + _)} {" //
-          :: cls.stmts.map("  " + _) :::                                  //
-          "};" ::                                                         //
-          cls.nsDeclStmts                                                 //
+          cls.forwardDeclStmts :::                                               //
+          s"struct EXPORT ${cls.parent.fold(cls.name)(s"${cls.name} : " + _)} {" //
+          :: cls.stmts.map("  " + _) :::                                         //
+          "};" ::                                                                //
+          cls.nsDeclStmts                                                        //
         val nsName = cls.namespaces.mkString("::")
         ns match {
           case None                   => (Some(nsName), stmts ::: nsStart(nsName) :: moreStmts)
@@ -107,6 +107,7 @@ object Cpp {
       s"""|#pragma once
           |
           |$includes
+          |#include "export.h"
           |
           |namespace $namespace {
           |$shared
@@ -211,7 +212,7 @@ object Cpp {
               "}" :: Nil
 
           val streamProto =
-            s"friend std::ostream &operator<<(std::ostream &os, const ${tpe.ref(qualified = true)} &);" :: Nil
+            s"EXPORT friend std::ostream &operator<<(std::ostream &os, const ${tpe.ref(qualified = true)} &);" :: Nil
           (streamProto, streamMethodStmts)
         }
 
@@ -229,7 +230,7 @@ object Cpp {
 
       val conversion =
         if (tpe.kind == CppType.Kind.Variant)
-          s"operator Any() const { return std::make_shared<${tpe.name}>(*this); };" :: Nil
+          s"EXPORT operator Any() const { return std::make_shared<${tpe.name}>(*this); };" :: Nil
         else Nil
 
       val visibility = if (tpe.kind == CppType.Kind.Base) "protected:" :: Nil else Nil
@@ -239,18 +240,37 @@ object Cpp {
           val arg = tpe.ref(qualified = true)
           val rtn = t.ref(qualified = true)
           (
-            s"$rtn $n(const $arg&);",
+            s"EXPORT $rtn $n(const $arg&);",
             s"$rtn ${ns(n)}(const $arg& x){ return select<&${clsName(qualified = true)}::$n>(x); }"
           )
         }.unzip
       } else (Nil, Nil)
 
+      val equalitySig =
+        s"EXPORT friend bool operator==(const ${clsName(qualified = true)} &, const ${clsName(qualified = true)} &);" :: Nil
+      val equalityImpl = members match {
+        case Nil =>
+          s"bool ${ns("operator==")}(const ${clsName(qualified = true)} &, const ${clsName(qualified = true)} &) { return true; }" :: Nil
+        case xs =>
+          s"bool ${ns("operator==")}(const ${clsName(qualified = true)} &l, const ${clsName(qualified = true)} &r) { " ::
+            xs.map { (n, tpe) =>
+              val deref = (s: String) => if (tpe.kind == CppType.Kind.Base) s"*$s.$n" else s"$s.$n"
+              val op    = s"${deref("l")} == ${deref("r")}"
+              (tpe.kind, tpe.namespace ::: tpe.name :: Nil, tpe.ctors) match {
+                case (CppType.Kind.StdLib, "std" :: "vector" :: Nil, x :: Nil) if x.kind == CppType.Kind.Base =>
+                  s"std::equal(l.$n.begin(), l.$n.end(), r.$n.begin(), [](auto &&l, auto &&r) { return *l == *r; })"
+                case _ => op
+              }
+            }.sym("  return ", " && ", ";") ::
+            "}" :: Nil
+      }
+
       StructSource(
         namespaces = tpe.namespace,
         name = clsName(qualified = false),
         parent = parent.map(x => x._1.clsName(qualified = true)),
-        stmts = memberStmts ::: visibility ::: ctorStmt :: conversion ::: streamSig,
-        implStmts = streamImpl ::: nsImpl,
+        stmts = memberStmts ::: visibility ::: ctorStmt :: conversion ::: streamSig ::: equalitySig,
+        implStmts = streamImpl ::: equalityImpl ::: nsImpl,
         includes = members.flatMap(_._2.include),
         variantStmt,
         nsDecl

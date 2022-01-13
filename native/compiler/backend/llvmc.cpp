@@ -1,4 +1,5 @@
-#include "llc.h"
+#include "llvmc.h"
+
 #include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/CodeGen/CommandFlags.h"
@@ -26,43 +27,44 @@
 #include <fstream>
 #include <iostream>
 
-using namespace llvm;
+using namespace polyregion::backend;
 
-void llc::setup() {
+void llvmc::initialise() {
 
-  LLVMContext Context;
+  llvm::LLVMContext Context;
 
   // Initialize targets first, so that --version shows registered targets.
-  InitializeAllTargets();
-  InitializeAllTargetMCs();
-  InitializeAllAsmPrinters();
-  InitializeAllAsmParsers();
+  llvm::InitializeAllTargets();
+  llvm::InitializeAllTargetMCs();
+  llvm::InitializeAllAsmPrinters();
+  llvm::InitializeAllAsmParsers();
 
   // Initialize codegen and IR passes used by llc so that the -print-after,
   // -print-before, and -stop-after options work.
-  PassRegistry *Registry = PassRegistry::getPassRegistry();
-  initializeCore(*Registry);
-  initializeCodeGen(*Registry);
-  initializeLoopStrengthReducePass(*Registry);
-  initializeLowerIntrinsicsPass(*Registry);
-  initializeEntryExitInstrumenterPass(*Registry);
-  initializePostInlineEntryExitInstrumenterPass(*Registry);
-  initializeUnreachableBlockElimLegacyPassPass(*Registry);
-  initializeConstantHoistingLegacyPassPass(*Registry);
-  initializeScalarOpts(*Registry);
-  initializeVectorization(*Registry);
-  initializeScalarizeMaskedMemIntrinLegacyPassPass(*Registry);
-  initializeExpandReductionsPass(*Registry);
-  initializeExpandVectorPredicationPass(*Registry);
-  initializeHardwareLoopsPass(*Registry);
-  initializeTransformUtils(*Registry);
-  initializeReplaceWithVeclibLegacyPass(*Registry);
-
-  // Register the target printer for --version.
-  cl::AddExtraVersionPrinter(TargetRegistry::printRegisteredTargetsForVersion);
+  auto *r = llvm::PassRegistry::getPassRegistry();
+  initializeCore(*r);
+  initializeCodeGen(*r);
+  initializeLoopStrengthReducePass(*r);
+  initializeLowerIntrinsicsPass(*r);
+  initializeEntryExitInstrumenterPass(*r);
+  initializePostInlineEntryExitInstrumenterPass(*r);
+  initializeUnreachableBlockElimLegacyPassPass(*r);
+  initializeConstantHoistingLegacyPassPass(*r);
+  initializeScalarOpts(*r);
+  initializeVectorization(*r);
+  initializeScalarizeMaskedMemIntrinLegacyPassPass(*r);
+  initializeExpandReductionsPass(*r);
+  initializeExpandVectorPredicationPass(*r);
+  initializeHardwareLoopsPass(*r);
+  initializeTransformUtils(*r);
+  initializeReplaceWithVeclibLegacyPass(*r);
 }
 
-int llc::compileModule(std::unique_ptr<Module> M, LLVMContext &Context) {
+polyregion::compiler::Compilation llvmc::compileModule(bool emitDisassembly,            //
+                                        std::unique_ptr<llvm::Module> M, //
+                                        llvm::LLVMContext &Context) {
+  using namespace llvm;
+
   SMDiagnostic Err;
 
   std::string CPUStr = sys::getHostCPUName().str();
@@ -85,6 +87,10 @@ int llc::compileModule(std::unique_ptr<Module> M, LLVMContext &Context) {
   std::string Error;
   const Target *TheTarget = TargetRegistry::lookupTarget("", TheTriple, Error);
 
+  if (!Error.empty()) {
+    return polyregion::compiler::Compilation{""};
+  }
+
   std::cout << "E=" << Error << "; " << SysDefaultTriple << std::endl;
 
   TargetOptions Options;
@@ -99,7 +105,8 @@ int llc::compileModule(std::unique_ptr<Module> M, LLVMContext &Context) {
 
   auto mkPass = [&](const std::function<void(LLVMTargetMachine &, legacy::PassManager &, MCContext &)> &f) {
     legacy::PassManager PM;
-    auto &LLVMTM = static_cast<LLVMTargetMachine &>(*TM);
+    // XXX we have no rtti here so no dynamic cast
+    auto &LLVMTM = static_cast<LLVMTargetMachine &>(*TM);    // NOLINT(cppcoreguidelines-pro-type-static-cast-downcast)
     auto *MMIWP = new MachineModuleInfoWrapperPass(&LLVMTM); // pass manager takes owner of this
 
     TargetPassConfig *PassConfig = LLVMTM.createPassConfig(PM);
@@ -161,5 +168,5 @@ int llc::compileModule(std::unique_ptr<Module> M, LLVMContext &Context) {
   //    std::cout << "E=" << toString(std::move(e)) << std::endl;
   //  }
 
-  return 0;
+  return polyregion::compiler::Compilation{};
 }

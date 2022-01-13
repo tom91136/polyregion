@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstring>
 #include <fstream>
 #include <functional>
 #include <numeric>
@@ -77,6 +78,16 @@ std::string hex(N w, size_t hex_len = sizeof(N) << 1) {
   for (size_t i = 0, j = (hex_len - 1) * 4; i < hex_len; ++i, j -= 4)
     rc[i] = digits[(w >> j) & 0x0f];
   return rc;
+}
+
+static inline char *new_str(const std::string &s) {
+  auto xs = new char[s.length() + 1];
+  std::copy(s.c_str(), s.c_str() + s.length() + 1, xs);
+  return xs;
+}
+
+static inline void free_str(const char *s) {
+  delete[] s;
 }
 
 constexpr uint32_t hash(const char *data, size_t const size) noexcept {

@@ -119,8 +119,8 @@ object Stage {
       "abc",
       1,
       java.nio.ByteBuffer.allocate(0),
-      Array.emptyByteArray,
-      Array.emptyObjectArray
+      Array(),
+      Array[java.nio.Buffer]()
     );
   }
 

@@ -1,9 +1,9 @@
-#include "ffi.h"
 #include "polyregion_runtime.h"
+#include "ffi.h"
 #include "utils.hpp"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 
-static constexpr char *error(const std::string &s) { return strdup(s.c_str()); };
+static constexpr char *error(const std::string &s) { return polyregion::new_str(s); }
 
 struct polyregion_object {
   std::unique_ptr<llvm::object::ObjectFile> file;
@@ -14,7 +14,7 @@ struct polyregion_object {
 
 void polyregion_release_object(polyregion_object_ref *ref) {
   if (ref) {
-    std::free(ref->message);
+    polyregion::free_str(ref->message);
     delete ref->object;
     delete ref;
   }
@@ -35,7 +35,7 @@ polyregion_object_ref *polyregion_load_object(const uint8_t *object, size_t obje
 void polyregion_release_enumerate(polyregion_symbol_table *table) {
   if (table) {
     for (size_t i = 0; i < table->size; ++i) {
-      std::free(table->symbols[i].name);
+      polyregion::free_str(table->symbols[i].name);
     }
     delete[] table->symbols;
     delete table;
@@ -52,14 +52,12 @@ polyregion_symbol_table *polyregion_enumerate(const polyregion_object *object) {
 
   std::transform(table.begin(), table.end(), xs, [](auto &p) {
     // copy name here as the symbol table is deleted with dyld
-    return polyregion_symbol{strdup(p.first.str().c_str()), p.second.getAddress()};
+    return polyregion_symbol{polyregion::new_str(p.first.str()), p.second.getAddress()};
   });
   return new polyregion_symbol_table{xs, table.size()};
 }
 
-void polyregion_release_invoke(char *err) {
-  if (err) std::free(err);
-}
+void polyregion_release_invoke(char *err) { polyregion::free_str(err); }
 
 char *polyregion_invoke(const polyregion_object *object,
                         const char *symbol,                        //
@@ -149,4 +147,3 @@ char *polyregion_invoke(const polyregion_object *object,
     return error("ffi_prep_cif: unknown error (" + std::to_string(status) + ")");
   }
 }
-
