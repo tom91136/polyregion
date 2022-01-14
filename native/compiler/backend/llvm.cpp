@@ -324,16 +324,16 @@ compiler::Compilation backend::LLVM::run(const Function &fn) {
   auto ctx = std::make_unique<llvm::LLVMContext>();
   auto mod = std::make_unique<llvm::Module>("test", *ctx);
 
-  auto astXform = compiler::Clock::now();
+  auto astXform = compiler::nowMono();
 
   AstTransformer xform(*ctx);
   xform.transform(mod, fn);
 
-  auto elapsed = compiler::elapsedNs(compiler::Clock::now(), astXform);
+  auto elapsed = compiler::elapsedNs(astXform);
 
   auto c = llvmc::compileModule(true, std::move(mod), *ctx);
 
-  c.elapsed.insert(c.elapsed.begin(), {"ast_to_llvm_ir", elapsed});
+  c.events.emplace_back(compiler::nowMs(), "ast_to_llvm_ir", elapsed);
 
   return c;
 

@@ -26,8 +26,8 @@ object Cpp {
 
   enum CppAttrs(val repr: String) {
     case Constexpr extends CppAttrs("constexpr")
-    case Explicit extends CppAttrs("explicit")
-    case Const extends CppAttrs("const")
+    case Explicit  extends CppAttrs("explicit")
+    case Const     extends CppAttrs("const")
     def cond(p: Boolean) = if (p) Some(this) else None
   }
 
@@ -161,7 +161,7 @@ object Cpp {
       }
 
       import CppAttrs.*
-      //TODO re-enable constexpr later
+      // TODO re-enable constexpr later
       val ctorAttrs = List(Constexpr.cond(tpe.constexpr && false), Explicit.cond(ctorArgs.sizeIs == 1)).flatten
 
       val ctorChainExpr = ctorChain match {

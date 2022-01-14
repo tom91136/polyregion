@@ -208,20 +208,6 @@ object CppCodeGen {
     // MsgPack.encodeMsg(PolyAst.Expr.Alias(PolyAst.Term.IntConst(1)))
 
     ()
-
-    PolyregionCompiler.load()
-    try {
-      val c = PolyregionCompiler.compile(Array(), true, 0);
-      println(c.program)
-      println(c.disassembly)
-      println(c.messages)
-      println(c.elapsed)
-    } catch {
-      case e => e.printStackTrace();
-
-    }
-    println("Done")
-
   }
 
 }

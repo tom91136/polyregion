@@ -18,7 +18,8 @@ package object internal {
   type Deferred[A] = EitherT[Eval, Throwable, A]
 
   extension [A](a: Result[A]) {
-    def deferred: Deferred[A] = EitherT.fromEither[Eval](a)
+    def deferred: Deferred[A]       = EitherT.fromEither[Eval](a)
+    def withFilter(p: A => Boolean) = a.flatMap(x => (if (p(x)) Right(x) else Left(new MatchError(x))))
   }
 
   extension [A](a: Deferred[A]) {

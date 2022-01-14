@@ -7,6 +7,26 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+#undef polyregion_PolyregionRuntime_TYPE_1BOOL
+#define polyregion_PolyregionRuntime_TYPE_1BOOL 1L
+#undef polyregion_PolyregionRuntime_TYPE_1BYTE
+#define polyregion_PolyregionRuntime_TYPE_1BYTE 2L
+#undef polyregion_PolyregionRuntime_TYPE_1CHAR
+#define polyregion_PolyregionRuntime_TYPE_1CHAR 3L
+#undef polyregion_PolyregionRuntime_TYPE_1SHORT
+#define polyregion_PolyregionRuntime_TYPE_1SHORT 4L
+#undef polyregion_PolyregionRuntime_TYPE_1INT
+#define polyregion_PolyregionRuntime_TYPE_1INT 5L
+#undef polyregion_PolyregionRuntime_TYPE_1LONG
+#define polyregion_PolyregionRuntime_TYPE_1LONG 6L
+#undef polyregion_PolyregionRuntime_TYPE_1FLOAT
+#define polyregion_PolyregionRuntime_TYPE_1FLOAT 7L
+#undef polyregion_PolyregionRuntime_TYPE_1DOUBLE
+#define polyregion_PolyregionRuntime_TYPE_1DOUBLE 8L
+#undef polyregion_PolyregionRuntime_TYPE_1PTR
+#define polyregion_PolyregionRuntime_TYPE_1PTR 9L
+#undef polyregion_PolyregionRuntime_TYPE_1VOID
+#define polyregion_PolyregionRuntime_TYPE_1VOID 10L
 /*
  * Class:      polyregion_PolyregionRuntime
  * Method:     invoke

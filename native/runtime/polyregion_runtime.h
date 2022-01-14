@@ -38,6 +38,7 @@ typedef struct EXPORT {
 } polyregion_symbol_table;
 
 struct EXPORT polyregion_object;
+
 typedef struct EXPORT {
   polyregion_object *object;
   char *message;

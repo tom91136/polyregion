@@ -6,6 +6,8 @@
 // x86_64-pc-linux-gnu
 // x86_64-apple-darwin
 
+// echo "void set_(int a*, int b) { return a[0] = b; }"
+
 // echo "int fma_(int a, int b, int c) { return a*b+c; }" |
 // clang -target x86_64-pc-linux-gnu -fPIC -Os -c -o- -xc - |
 // xxd -i

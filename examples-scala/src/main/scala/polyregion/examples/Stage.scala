@@ -1,10 +1,11 @@
 package polyregion.examples
 
-import com.kenai.jffi.HeapInvocationBuffer
+// import com.kenai.jffi.HeapInvocationBuffer
 
 import java.nio.ByteBuffer
 import scala.collection.mutable.ArrayBuffer
-import polyregion.PolyregionRuntime
+import java.nio.file.Files
+import java.nio.file.Paths
 
 object Stage {
 
@@ -112,19 +113,35 @@ object Stage {
 
   val scalar = 42.69f
 
-  def main(args: Array[String]) = {
-    PolyregionRuntime.load();
-    PolyregionRuntime.invoke(
-      Array.emptyByteArray,
-      "abc",
-      1,
-      java.nio.ByteBuffer.allocate(0),
-      Array(),
-      Array[java.nio.Buffer]()
-    );
-  }
+  // def main(args: Array[String]) = {
+  //   import polyregion.PolyregionRuntime
+  //   import polyregion.PolyregionCompiler
 
-  def main2(args: Array[String]): Unit = {
+  //   PolyregionRuntime.load()
+  //   PolyregionCompiler.load()
+
+  //   val ast = Files.readAllBytes(Paths.get("/home/tom/polyregion/ast.bin"))
+
+  //   val c = PolyregionCompiler.compile(ast, true, PolyregionCompiler.BACKEND_LLVM)
+  //    println(s"Program=${c.program.length}")
+  //    println(s"${c.events.getClass}")
+  //     println(s"Elapsed=\n${c.events.map(e => s"[${e.epochMillis}] ${e.name}: ${e.elapsedNanos}").mkString("\n")}")
+  //     println(s"Messages=\n  ${c.messages}")
+  //     println(s"Asm=\n${c.disassembly}")
+
+  //   // PolyregionRuntime.invoke(
+  //   //   Array.emptyByteArray,
+  //   //   "abc",
+  //   //   1,
+  //   //   java.nio.ByteBuffer.allocate(0),
+  //   //   Array(),
+  //   //   Array[java.nio.Buffer]()
+  //   // );
+  //   println("Done!")
+  //   ()
+  // }
+
+  def main(args: Array[String]): Unit = {
     val xs = polyregion.Buffer.ofDim[Float](10)
     val ys = polyregion.Buffer.ofDim[Float](10)
 
@@ -134,7 +151,6 @@ object Stage {
       println(s" ys = ${ys.toList}")
       println("---")
       for (x <- xs.indices) {
-
         xs(x) = x.toFloat
         ys(x) = x.toFloat
       }
@@ -145,6 +161,7 @@ object Stage {
     //   foo = 0
 
     // }
+    
 
     printAndreset("none")
 
@@ -158,9 +175,9 @@ object Stage {
     printAndreset("JVM")
 
     offload {
-      var a = 1f
+      // var a = 1f
       xs(0) = 42f
-      xs(1) = a + xs(1)
+      xs(1) = 34f
     }
 
     // foreach(0 until 10) { n =>
@@ -170,19 +187,7 @@ object Stage {
     //   var refOut       = xs
     //   xs(n) += ys(n) + refOut(n) * scalar + scalarLambda + scalarF
     // }
-    import com.kenai.jffi.Library
-
-    val handle =
-      com.kenai.jffi.Library.openLibrary("/home/tom/polyregion/native/obj.so", Library.LAZY);
-
-    println("h=" + handle)
-    val b = polyregion.Runtime.FFIInvocationBuilder()
-    b.arg(1)
-    b.arg(scalar)
-    b.arg(ys.buffer)
-    b.arg(xs.buffer)
-    b.arg(10)
-    b.arg(0)
+ 
     // b.invoke(140462809608192L)
     printAndreset("Native")
 

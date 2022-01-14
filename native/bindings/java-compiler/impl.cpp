@@ -1,6 +1,6 @@
+#include <iostream>
 #include <string>
 #include <vector>
-#include <iostream>
 
 #include "compiler.h"
 #include "polyregion_PolyregionCompiler.h"
@@ -14,12 +14,9 @@ static void throwGeneric(JNIEnv *env, const std::string &message) {
   }
 }
 
-static std::pair<jobject, jclass> newNoArgObject(JNIEnv *env, const std::string &name) {
-  if (auto clazz = env->FindClass(name.c_str()); clazz) {
-    auto ctor = env->GetMethodID(clazz, "<init>", "()V"); // no parameters
-    return {env->NewObject(clazz, ctor), clazz};
-  } else
-    return {nullptr, nullptr};
+static jobject newNoArgObject(JNIEnv *env, jclass clazz) {
+  auto ctor = env->GetMethodID(clazz, "<init>", "()V"); // no parameters
+  return env->NewObject(clazz, ctor);
 }
 
 // public final class Elapsed {
@@ -36,27 +33,26 @@ static std::pair<jobject, jclass> newNoArgObject(JNIEnv *env, const std::string 
 jobject Java_polyregion_PolyregionCompiler_compile(JNIEnv *env, jclass thisCls, jbyteArray ast,
                                                    jboolean emitDisassembly, jshort backend) {
 
-
   auto astData = env->GetByteArrayElements(ast, nullptr);
   auto c = polyregion::compiler::compile(std::vector<uint8_t>(astData, astData + env->GetArrayLength(ast)));
   env->ReleaseByteArrayElements(ast, astData, JNI_ABORT);
 
-  std::cout << "Compile complete" <<std::endl;
+  std::cout << "Compile complete" << std::endl;
 
-
-  auto [compilation, compilationCls] = newNoArgObject(env, "polyregion/Compilation");
+  auto compilationCls = env->FindClass("polyregion/Compilation");
+  auto compilation = newNoArgObject(env, compilationCls);
   auto programField = env->GetFieldID(compilationCls, "program", "[B");
   auto messagesField = env->GetFieldID(compilationCls, "messages", StringSignature);
   auto disassemblyField = env->GetFieldID(compilationCls, "disassembly", StringSignature);
-  std::cout << compilation <<std::endl;
-  // FIXME field not found!?
-  //  auto elapsedField = env->GetFieldID(compilationCls, "elapsed", "[Lpolyregion/Elapsed");
+  auto eventsField = env->GetFieldID(compilationCls, "events", "[Lpolyregion/Event;");
+  std::cout << c << std::endl;
 
   if (c.binary) {
     auto bin = env->NewByteArray(jsize(c.binary->size()));
     auto binElems = env->GetByteArrayElements(bin, nullptr);
     std::copy(c.binary->begin(), c.binary->end(), binElems);
     env->ReleaseByteArrayElements(bin, binElems, JNI_COMMIT);
+    env->SetObjectField(compilation, programField, bin);
   }
 
   if (c.disassembly) {
@@ -65,16 +61,19 @@ jobject Java_polyregion_PolyregionCompiler_compile(JNIEnv *env, jclass thisCls, 
 
   env->SetObjectField(compilation, messagesField, env->NewStringUTF(c.messages.c_str()));
 
-  auto [elapsed, elapsedCls] = newNoArgObject(env, "polyregion/Elapsed");
-  auto nameField = env->GetFieldID(elapsedCls, "name", StringSignature);
-  auto nanosField = env->GetFieldID(elapsedCls, "nanos", "J");
-  auto elapsedElems = env->NewObjectArray(jint(c.elapsed.size()), elapsedCls, elapsed);
-  for (jsize i = 0; i < c.elapsed.size(); ++i) {
-    auto elem = env->GetObjectArrayElement(elapsedElems, i);
-    env->SetObjectField(elem, nameField, env->NewStringUTF(c.elapsed[i].first.c_str()));
-    env->SetLongField(elem, nanosField, jlong(c.elapsed[i].second));
+  auto eventCls = env->FindClass("polyregion/Event");
+  auto epochMillisField = env->GetFieldID(eventCls, "epochMillis", "J");
+  auto nameField = env->GetFieldID(eventCls, "name", StringSignature);
+  auto eventNanosField = env->GetFieldID(eventCls, "elapsedNanos", "J");
+  auto events = env->NewObjectArray(jint(c.events.size()), eventCls, nullptr);
+  for (jsize i = 0; i < jsize(c.events.size()); ++i) {
+    auto elem = newNoArgObject(env, eventCls);
+    env->SetLongField(elem, epochMillisField, jlong(c.events[i].epochMillis));
+    env->SetObjectField(elem, nameField, env->NewStringUTF(c.events[i].name.c_str()));
+    env->SetLongField(elem, eventNanosField, jlong(c.events[i].elapsedNanos));
+    env->SetObjectArrayElement(events, i, elem);
   }
-
+  env->SetObjectField(compilation, eventsField, events);
   return compilation;
 }
 

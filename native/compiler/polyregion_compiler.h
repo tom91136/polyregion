@@ -23,15 +23,16 @@ typedef struct EXPORT {
 } polyregion_buffer;
 
 typedef struct EXPORT {
+  int64_t epochMillis;
   char *name;
-  uint64_t elapsedNano;
-} polyregion_elapsed;
+  int64_t elapsedNanos;
+} polyregion_event;
 
 typedef struct EXPORT {
   polyregion_buffer program;
   char *disassembly;
   char *messages;
-  polyregion_elapsed *elapsed;
+  polyregion_event *elapsed;
   size_t elapsed_size;
 } polyregion_compilation;
 

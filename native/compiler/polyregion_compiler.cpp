@@ -30,15 +30,15 @@ polyregion_compilation *polyregion_compile(const polyregion_buffer *ast, bool em
 
   auto dis = compilation.disassembly ? polyregion::new_str(*compilation.disassembly) : nullptr;
 
-  auto elapsed = new polyregion_elapsed[compilation.elapsed.size()];
-  std::transform(compilation.elapsed.begin(), compilation.elapsed.end(), elapsed, [](auto &e) {
-    return polyregion_elapsed{polyregion::new_str(e.first), e.second};
+  auto elapsed = new polyregion_event[compilation.events.size()];
+  std::transform(compilation.events.begin(), compilation.events.end(), elapsed, [](auto &e) {
+    return polyregion_event{e.epochMillis, polyregion::new_str(e.name), e.elapsedNanos};
   });
 
   return new polyregion_compilation{
       bin, dis,                                           //
       polyregion::new_str(compilation.messages), elapsed, //
-      compilation.elapsed.size()                          //
+      compilation.events.size()                           //
   };
 }
 

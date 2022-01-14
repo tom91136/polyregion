@@ -111,7 +111,7 @@ std::string backend::OpenCL::mkStmt(const Stmt::Any &stmt) {
 
 compiler::Compilation backend::OpenCL::run(const Function &fnTree) {
 
-  auto start = compiler::Clock::now();
+  auto start = compiler::nowMono();
 
   auto args = mk_string<Named>(
       fnTree.args, [&](auto x) { return mkTpe(x.tpe) + " " + x.symbol; }, ", ");
@@ -126,10 +126,10 @@ compiler::Compilation backend::OpenCL::run(const Function &fnTree) {
 
   std::vector<uint8_t> data(def.c_str(), def.c_str() + def.length() + 1);
 
-  return compiler::Compilation(                                                    //
-      data,                                                                        //
-      {},                                                                          //
-      {{"polyast_to_opencl", compiler::elapsedNs(compiler::Clock::now(), start)}}, //
-      ""                                                                           //
+  return compiler::Compilation(                                               //
+      data,                                                                   //
+      {},                                                                     //
+      {{compiler::nowMs(), "polyast_to_opencl", compiler::elapsedNs(start)}}, //
+      ""                                                                      //
   );
 }

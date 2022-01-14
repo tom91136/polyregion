@@ -61,9 +61,11 @@ void llvmc::initialise() {
 }
 
 polyregion::compiler::Compilation llvmc::compileModule(bool emitDisassembly,            //
-                                        std::unique_ptr<llvm::Module> M, //
-                                        llvm::LLVMContext &Context) {
+                                                       std::unique_ptr<llvm::Module> M, //
+                                                       llvm::LLVMContext &Context) {
   using namespace llvm;
+
+  auto start = compiler::nowMono();
 
   SMDiagnostic Err;
 
@@ -168,5 +170,13 @@ polyregion::compiler::Compilation llvmc::compileModule(bool emitDisassembly,    
   //    std::cout << "E=" << toString(std::move(e)) << std::endl;
   //  }
 
-  return polyregion::compiler::Compilation{};
+  auto elapsed = compiler::elapsedNs(start);
+  polyregion::compiler::Compilation c(                          //
+      std::vector<uint8_t>(objBuffer.begin(), objBuffer.end()), //
+      std::string(asmBuffer.begin(), asmBuffer.end()),          //
+      {{compiler::nowMs(), "llvm_to_obj", elapsed}},            //
+      ""                                                        //
+  );
+
+  return c;
 }

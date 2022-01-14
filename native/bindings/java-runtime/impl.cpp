@@ -1,3 +1,4 @@
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -5,7 +6,7 @@
 #include "polyregion_runtime.h"
 
 static void throwGeneric(JNIEnv *env, const std::string &message) {
-  if (auto exClass = env->FindClass("polyregion/PolyregionException"); exClass) {
+  if (auto exClass = env->FindClass("polyregion/PolyregionRuntimeException"); exClass) {
     env->ThrowNew(exClass, message.c_str());
   }
 }
@@ -38,14 +39,41 @@ void Java_polyregion_PolyregionRuntime_invoke(JNIEnv *env, jclass thisCls,      
     polyregion_data rtn{static_cast<polyregion_type>(returnType), env->GetDirectBufferAddress(returnPtr)};
     std::vector<polyregion_data> params(env->GetArrayLength(paramPtrs));
 
+    std::vector<void*> pointer1 (env->GetArrayLength(paramPtrs));
+
     auto paramTypes_ = env->GetByteArrayElements(paramTypes, nullptr);
     for (jint i = 0; i < env->GetArrayLength(paramPtrs); ++i) {
       params[i].type = static_cast<polyregion_type>(paramTypes_[i]);
-      params[i].ptr = env->GetObjectArrayElement(paramPtrs, i);
+      switch (params[i].type) {
+      case Bool:
+      case Byte:
+      case Char:
+      case Short:
+      case Int:
+      case Long:
+      case Float:
+      case Double:
+      case Void:
+        pointer1[i] = env->GetObjectArrayElement(paramPtrs, i);
+        params[i].ptr = &pointer1[i];
+        break;
+      case Ptr: {
+        std::cout << "PRE" << std::endl;
+        pointer1[i] = env->GetDirectBufferAddress(env->GetObjectArrayElement(paramPtrs, i));
+        params[i].ptr = &pointer1[i];
+        break;
+      }
+      }
+
+      std::cout << "GO" << std::endl;
+
+      //      params[i].ptr = env->GetObjectArrayElement(paramPtrs, i);
     }
     env->ReleaseByteArrayElements(paramTypes, paramTypes_, JNI_ABORT);
+    std::cout << "INV" << std::endl;
 
     auto error = polyregion_invoke(obj->object, sym, params.data(), env->GetArrayLength(paramPtrs), &rtn);
+    std::cout << "exit" << std::endl;
 
     if (error) {
       throwGeneric(env, error);
