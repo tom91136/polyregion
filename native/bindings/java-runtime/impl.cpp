@@ -1,4 +1,3 @@
-#include <iostream>
 #include <string>
 #include <vector>
 
@@ -39,7 +38,7 @@ void Java_polyregion_PolyregionRuntime_invoke(JNIEnv *env, jclass thisCls,      
     polyregion_data rtn{static_cast<polyregion_type>(returnType), env->GetDirectBufferAddress(returnPtr)};
     std::vector<polyregion_data> params(env->GetArrayLength(paramPtrs));
 
-    std::vector<void*> pointer1 (env->GetArrayLength(paramPtrs));
+    std::vector<void *> pointers(env->GetArrayLength(paramPtrs));
 
     auto paramTypes_ = env->GetByteArrayElements(paramTypes, nullptr);
     for (jint i = 0; i < env->GetArrayLength(paramPtrs); ++i) {
@@ -53,27 +52,23 @@ void Java_polyregion_PolyregionRuntime_invoke(JNIEnv *env, jclass thisCls,      
       case Long:
       case Float:
       case Double:
-      case Void:
-        pointer1[i] = env->GetObjectArrayElement(paramPtrs, i);
-        params[i].ptr = &pointer1[i];
+      case Void: {
+        pointers[i] = env->GetObjectArrayElement(paramPtrs, i);
+        params[i].ptr = &pointers[i];
         break;
+      }
       case Ptr: {
-        std::cout << "PRE" << std::endl;
-        pointer1[i] = env->GetDirectBufferAddress(env->GetObjectArrayElement(paramPtrs, i));
-        params[i].ptr = &pointer1[i];
+        pointers[i] = env->GetDirectBufferAddress(env->GetObjectArrayElement(paramPtrs, i));
+        params[i].ptr = &pointers[i];
         break;
       }
+      default:
+        throwGeneric(env, "Unimplemented parameter type " + std::to_string(params[i].type));
       }
-
-      std::cout << "GO" << std::endl;
-
-      //      params[i].ptr = env->GetObjectArrayElement(paramPtrs, i);
     }
     env->ReleaseByteArrayElements(paramTypes, paramTypes_, JNI_ABORT);
-    std::cout << "INV" << std::endl;
 
     auto error = polyregion_invoke(obj->object, sym, params.data(), env->GetArrayLength(paramPtrs), &rtn);
-    std::cout << "exit" << std::endl;
 
     if (error) {
       throwGeneric(env, error);

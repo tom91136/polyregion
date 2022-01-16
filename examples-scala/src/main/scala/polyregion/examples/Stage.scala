@@ -2,6 +2,9 @@ package polyregion.examples
 
 // import com.kenai.jffi.HeapInvocationBuffer
 
+
+import org.bytedeco.llvm.global.LLVM
+
 import java.nio.ByteBuffer
 import scala.collection.mutable.ArrayBuffer
 import java.nio.file.Files
@@ -161,7 +164,6 @@ object Stage {
     //   foo = 0
 
     // }
-    
 
     printAndreset("none")
 
@@ -172,11 +174,11 @@ object Stage {
       var refOut       = xs
       xs(n) += ys(n) + refOut(n) * scalar + scalarLambda + scalarF
     }
-    printAndreset("JVM")
+    printAndreset("JVM ")
 
     offload {
       // var a = 1f
-      xs(0) = 42f
+      xs(0) = 1f
       xs(1) = 34f
     }
 

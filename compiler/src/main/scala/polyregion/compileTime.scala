@@ -60,14 +60,13 @@ object compileTime {
     }
   }
 
-  inline def offload(inline x: Any): Any = ${ offloadImpl('x) }
+   inline def offload(inline x: Any): Any = ${ offloadImpl('x) }
+//  inline def offload(inline x: Any): Any = ${ 'x }
 
   def offloadImpl(x: Expr[Any])(using q: Quotes): Expr[Any] = {
     import quotes.reflect.*
     val xform = new AstTransformer(using q)
 
-
-    PolyregionCompiler.load()
 
     val result = for {
       (captures, fn) <- xform.lower(x)
@@ -87,7 +86,7 @@ object compileTime {
     } yield {
 
       println(s"Program=${c.program.length}")
-      println(s"Elapsed=\n${c.events.map(e => s"[${e.epochMillis}] ${e.name}: ${e.elapsedNanos}").mkString("\n")}")
+      println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
       println(s"Messages=\n  ${c.messages}")
       println(s"Asm=\n${c.disassembly}")
 
@@ -168,7 +167,6 @@ object compileTime {
 
         println(s"Invoking with ${argTypes.zip(argBuffers).toList}")
 
-        PolyregionRuntime.load()
         PolyregionRuntime.invoke(programBytes, ${ fnName }, rtnType, rtnBuffer, argTypes, argBuffers)
         // Runtime.ingest(data, b.invoke(_))
       }

@@ -1,4 +1,3 @@
-#include <iostream>
 #include <string>
 #include <vector>
 
@@ -19,17 +18,6 @@ static jobject newNoArgObject(JNIEnv *env, jclass clazz) {
   return env->NewObject(clazz, ctor);
 }
 
-// public final class Elapsed {
-//   String name;
-//   long nanos;
-// }
-// public final class Compilation {
-//   byte[] program;
-//   String disassembly;
-//   String messages;
-//   Elapsed[] elapsed;
-// }
-
 jobject Java_polyregion_PolyregionCompiler_compile(JNIEnv *env, jclass thisCls, jbyteArray ast,
                                                    jboolean emitDisassembly, jshort backend) {
 
@@ -37,15 +25,12 @@ jobject Java_polyregion_PolyregionCompiler_compile(JNIEnv *env, jclass thisCls, 
   auto c = polyregion::compiler::compile(std::vector<uint8_t>(astData, astData + env->GetArrayLength(ast)));
   env->ReleaseByteArrayElements(ast, astData, JNI_ABORT);
 
-  std::cout << "Compile complete" << std::endl;
-
   auto compilationCls = env->FindClass("polyregion/Compilation");
   auto compilation = newNoArgObject(env, compilationCls);
   auto programField = env->GetFieldID(compilationCls, "program", "[B");
   auto messagesField = env->GetFieldID(compilationCls, "messages", StringSignature);
   auto disassemblyField = env->GetFieldID(compilationCls, "disassembly", StringSignature);
   auto eventsField = env->GetFieldID(compilationCls, "events", "[Lpolyregion/Event;");
-  std::cout << c << std::endl;
 
   if (c.binary) {
     auto bin = env->NewByteArray(jsize(c.binary->size()));

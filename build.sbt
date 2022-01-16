@@ -15,46 +15,53 @@ lazy val commonSettings = Seq(
   scalacOptions ++= Seq("-no-indent")
 )
 
-lazy val catsVersion = "2.7.0"
+lazy val catsVersion  = "2.7.0"
+lazy val munitVersion = "1.0.0-M1"
 
-lazy val `runtime-java` = project.settings(
+lazy val `loader-jvm` = project.settings(
   commonSettings,
-  name           := "runtime-java",
-  fork           := true,
-  Compile / fork := true,
-  javah / target := file(".") / "native" / "bindings" / "java-runtime",
-  libraryDependencies ++= Seq(
-  )
+  name             := "loader-jvm",
+  autoScalaLibrary := false
 )
+
+lazy val bindingsDir      = file(".") / "native" / "bindings"
+lazy val loaderShadeRules = Seq(ShadeRule.rename("polyregion.loader.**" -> "polyregion.shaded.loader.@1").inProject)
+
+lazy val `runtime-java` = project
+  .settings(
+    commonSettings,
+    name                := "runtime-java",
+    javah / target      := bindingsDir / "java-runtime",
+    autoScalaLibrary    := false,
+    assemblyShadeRules  := loaderShadeRules,
+    assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly"))
+  )
+  .dependsOn(`loader-jvm`)
 
 lazy val `runtime-scala` = project
   .settings(
     commonSettings,
-    name           := "runtime-scala",
-    fork           := true,
-    Compile / fork := true,
+    name := "runtime-scala",
     libraryDependencies ++= Seq(
-      ("com.github.jnr" % "jffi"            % "1.3.8").classifier("native"),
-      "com.github.jnr"  % "jffi"            % "1.3.8",
-      "org.bytedeco"    % "llvm-platform"   % "12.0.1-1.5.6",
-      "org.bytedeco"    % "libffi-platform" % "3.4.2-1.5.6",
-      "org.openjdk.jol" % "jol-core"        % "0.16"
-    )
+      "org.scalameta" %% "munit" % munitVersion % Test
+    ),
+    assemblyShadeRules  := loaderShadeRules,
+    assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly"))
   )
   .dependsOn(`runtime-java`)
 
 lazy val compiler = project
   .settings(
     commonSettings,
-    name := "compiler",
-    scalacOptions ++= Seq("-Yretain-trees"),
-    fork           := true,
-    Compile / fork := true,
-    javah / target := file(".") / "native" / "bindings" / "java-compiler",
+    name                := "compiler",
+    javah / target      := bindingsDir / "java-compiler",
+    assemblyShadeRules  := loaderShadeRules,
+    assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly")),
     libraryDependencies ++= Seq(
-      "org.typelevel" %% "cats-core" % catsVersion,
       "com.lihaoyi"   %% "pprint"    % "0.7.1",
-      "com.lihaoyi"   %% "upickle"   % "1.4.3"
+      "com.lihaoyi"   %% "upickle"   % "1.4.3",
+      "org.typelevel" %% "cats-core" % catsVersion,
+      "org.scalameta" %% "munit"     % munitVersion % Test
     )
   )
   .dependsOn(`runtime-scala`)
@@ -70,6 +77,11 @@ lazy val `examples-scala` = project
     assembly / mainClass := mainCls,
     scalacOptions ++= Seq("-Yretain-trees"),
     libraryDependencies ++= Seq(
+      ("com.github.jnr"         % "jffi"                       % "1.3.8").classifier("native"),
+      "com.github.jnr"          % "jffi"                       % "1.3.8",
+      "org.bytedeco"            % "llvm-platform"              % "12.0.1-1.5.6",
+      "org.bytedeco"            % "libffi-platform"            % "3.4.2-1.5.6",
+      "org.openjdk.jol"         % "jol-core"                   % "0.16",
       "net.openhft"             % "affinity"                   % "3.20.0",
       "org.typelevel"          %% "cats-core"                  % catsVersion,
       "io.github.iltotore"     %% "iron"                       % "1.1.2",
@@ -84,4 +96,4 @@ lazy val `examples-scala` = project
 lazy val root = project
   .in(file("."))
   .settings(commonSettings)
-  .aggregate(compiler, `runtime-scala`, `runtime-java`, `examples-scala`)
+  .aggregate(`loader-jvm`, `runtime-scala`, `runtime-java`, compiler, `examples-scala`)

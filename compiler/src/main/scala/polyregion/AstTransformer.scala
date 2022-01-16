@@ -251,10 +251,8 @@ class AstTransformer(using val q: Quotes) {
     acc.foldOverTree(Nil, in)(Symbol.noSymbol)
   }
 
-  def resolveBlock(block: Block): Result[List[PolyAst.Stmt]] = {
-    pprint.pprintln(block.statements :+ block.expr)
-
-    val out = (block.statements :+ block.expr).foldLeftM((0, List.empty[PolyAst.Stmt])) { case ((prev, ts), stmt) =>
+  def resolveStmts(stmts: List[Statement]): Result[List[PolyAst.Stmt]] = {
+    val out = stmts.foldLeftM((0, List.empty[PolyAst.Stmt])) { case ((prev, ts), stmt) =>
       resolveTree(stmt, prev).map((curr, tss) =>
         (curr, (ts :+ PolyAst.Stmt.Comment(stmt.show.replaceAll("\n", ""))) ++ tss)
       )
@@ -296,17 +294,17 @@ class AstTransformer(using val q: Quotes) {
     _ = println(s" -> name:    ${closureName}")
     _ = println(s" -> captures (names):   ${capturedIdents.map(_.name)}")
     _ = println(s"    ${captuerdVars.map(xs => xs.map((n, t) => s"${n.name}: ${t.repr}").mkString("\n    "))}")
-    _ = println(s" -> body(short):\n${block.show(using Printer.TreeShortCode).indent(4)}")
     _ = println(s" -> body(long):\n${block.show(using Printer.TreeAnsiCode).indent(4)}")
 
     idents = collectTree[Ident](block) { case i @ Ident(name) => i :: Nil }
     _      = println(idents)
 
     block <- block match {
-      case b @ Block(_, _) => b.success
-      case bad             => s"block required, got $bad".fail
+      case Block(xs, x) => (xs :+ x).success
+      case x => List(x).success
+      // case bad             => s"block required, got $bad".fail
     }
-    stmts    <- resolveBlock(block)
+    stmts    <- resolveStmts(block)
     args     <- captuerdVars.map(_.map((id, tpe) => PolyAst.Named(id.name, tpe)))
     captures <- captuerdVars
 

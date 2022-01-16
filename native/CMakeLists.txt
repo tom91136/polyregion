@@ -179,10 +179,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 
-set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer)
+set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan)
 set(COMMON_COMPILE_OPTIONS
-        -fvisibility=hidden       # don't export anything by default
-        -fvisibility-inlines-hidden
         -ffunction-sections       # keep functions in its own section for better --gc-sections results
         -fdata-sections           # same as above
         -fno-rtti                 # don't use RTTI for space
