@@ -12,7 +12,9 @@ lazy val commonSettings = Seq(
       )
     )
   },
-  scalacOptions ++= Seq("-no-indent")
+  scalacOptions ++= Seq("-no-indent"),
+  scalafmtDetailedError := true,
+  scalafmtFailOnErrors := true
 )
 
 lazy val catsVersion  = "2.7.0"
@@ -57,6 +59,7 @@ lazy val compiler = project
     javah / target      := bindingsDir / "java-compiler",
     assemblyShadeRules  := loaderShadeRules,
     assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly")),
+    scalacOptions ++= Seq("-Yretain-trees"), // XXX we need this so that the AST -> C++ conversion with partial ctors work
     libraryDependencies ++= Seq(
       "com.lihaoyi"   %% "pprint"    % "0.7.1",
       "com.lihaoyi"   %% "upickle"   % "1.4.3",

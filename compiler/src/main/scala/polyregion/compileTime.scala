@@ -60,13 +60,16 @@ object compileTime {
     }
   }
 
-   inline def offload(inline x: Any): Any = ${ offloadImpl('x) }
-//  inline def offload(inline x: Any): Any = ${ 'x }
+  inline def offload[A](inline x: => A): A = ${ offloadImpl[A]('x) }
 
-  def offloadImpl(x: Expr[Any])(using q: Quotes): Expr[Any] = {
+  private[polyregion] inline def offloadValidate[A](inline x: => A): Boolean = ${ offloadValidateImpl[A]('x) }
+
+  private def offloadValidateImpl[A: Type](x: Expr[Any])(using q: Quotes): Expr[Boolean] =
+    '{ ${ offloadImpl[A](x) } == $x }
+
+  private def offloadImpl[A: Type](x: Expr[Any])(using q: Quotes): Expr[A] = {
     import quotes.reflect.*
     val xform = new AstTransformer(using q)
-
 
     val result = for {
       (captures, fn) <- xform.lower(x)
@@ -112,7 +115,7 @@ object compileTime {
         }
 
       val rtnBufferExpr = fn.rtn match {
-        case PolyAst.Type.Unit   => '{ Buffer.nil[Int] } // 0 length return
+        case PolyAst.Type.Unit   => '{ Buffer.nil[Int] }
         case PolyAst.Type.Float  => '{ Buffer.ref[Float] }
         case PolyAst.Type.Double => '{ Buffer.ref[Double] }
         case PolyAst.Type.Bool   => '{ Buffer.ref[Boolean] }
@@ -159,7 +162,7 @@ object compileTime {
         println("Program bytes=" + programBytes.size)
         println("PolyAst bytes=" + astBytes.size)
 
-        val rtnBuffer = ${ rtnBufferExpr }.buffer
+        val rtnBuffer = ${ rtnBufferExpr }
         val rtnType   = ${ tpeAsRuntimeTpe(fn.rtn) }
 
         val argTypes   = Array(${ Varargs(fn.args.map(n => tpeAsRuntimeTpe(n.tpe))) }*)
@@ -167,8 +170,9 @@ object compileTime {
 
         println(s"Invoking with ${argTypes.zip(argBuffers).toList}")
 
-        PolyregionRuntime.invoke(programBytes, ${ fnName }, rtnType, rtnBuffer, argTypes, argBuffers)
-        // Runtime.ingest(data, b.invoke(_))
+        PolyregionRuntime.invoke(programBytes, ${ fnName }, rtnType, rtnBuffer.buffer, argTypes, argBuffers)
+
+        (if (rtnBuffer.isEmpty) () else rtnBuffer(0)).asInstanceOf[A]
       }
     }
 

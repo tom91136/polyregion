@@ -146,6 +146,7 @@ package object internal {
         case While(cond, body)           => s"while(${cond.repr}){\n${body.map(_.repr).mkString("\n")}\n}"
         case Break                       => s"break;"
         case Cont                        => s"continue;"
+        case Return(expr)                => s"return ${expr.repr}"
         case Cond(cond, trueBr, falseBr) => s"if(${cond.repr}) {\n${trueBr.repr}\n} else {\n${falseBr}\n}"
       }
 

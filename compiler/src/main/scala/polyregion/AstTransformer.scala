@@ -60,6 +60,21 @@ class AstTransformer(using val q: Quotes) {
           case (BufferTpe, component :: Nil) => PolyAst.Type.Array(component)
           case (n, ys)                       => PolyAst.Type.Struct(n, ys)
         }
+
+      // widen singletons
+      case ConstantType(BooleanConstant(_)) => PolyAst.Type.Bool.success.deferred
+      case ConstantType(ByteConstant(_))    => PolyAst.Type.Byte.success.deferred
+      case ConstantType(ShortConstant(_))   => PolyAst.Type.Short.success.deferred
+      case ConstantType(IntConstant(_))     => PolyAst.Type.Int.success.deferred
+      case ConstantType(LongConstant(_))    => PolyAst.Type.Long.success.deferred
+      case ConstantType(FloatConstant(_))   => PolyAst.Type.Float.success.deferred
+      case ConstantType(DoubleConstant(_))  => PolyAst.Type.Double.success.deferred
+      case ConstantType(CharConstant(_))    => PolyAst.Type.Char.success.deferred
+      case ConstantType(StringConstant(_))  => PolyAst.Type.String.success.deferred
+      case ConstantType(UnitConstant)       => PolyAst.Type.Unit.success.deferred
+      case ConstantType(NullConstant)       => ???
+      case ConstantType(ClassOfConstant(r)) => ???
+
       case expr =>
         resolveSym(expr).map {
           case PolyAst.Sym("scala" :: "Unit" :: Nil)            => PolyAst.Type.Unit
@@ -77,6 +92,27 @@ class AstTransformer(using val q: Quotes) {
     }
   }
 
+  def resolveTrees(depth: Int, args: List[Tree]): Deferred[(Int, Option[PolyAst.Term], List[PolyAst.Stmt])] =
+    args match {
+      case Nil => (depth, None, Nil).success.deferred
+      case x :: xs =>
+        resolveTree(x, depth).flatMap(xs.foldLeftM(_) { case ((prev, _, stmts0), term) =>
+          resolveTree(term, prev).map((curr, ref, stmts) =>
+            (curr, ref, (stmts :+ PolyAst.Stmt.Comment(term.show)) ++ stmts0)
+          )
+        })
+    }
+
+  def resolveTree(c: Tree, depth: Int = 0): Deferred[(Int, Option[PolyAst.Term], List[PolyAst.Stmt])] = c match {
+    case ValDef(name, tpe, Some(rhs)) =>
+      for {
+        t                  <- resolveTpe(tpe.tpe)
+        (depth, ref, tree) <- resolveTerm(rhs, depth)
+      } yield (depth, None, tree :+ PolyAst.Stmt.Var(PolyAst.Named(name, t), PolyAst.Expr.Alias(ref.get)))
+    case ValDef(name, tpe, None) => s"Unexpected variable $name:$tpe".fail.deferred
+    case t: Term                 => resolveTerm(t, depth)
+  }
+
   def resolveTerms(depth: Int, args: List[Term]) = args match {
     case Nil => (depth, Nil, Nil).success.deferred
     case x :: xs =>
@@ -85,14 +121,6 @@ class AstTransformer(using val q: Quotes) {
         .flatMap(xs.foldLeftM(_) { case ((prev, rs, tss), term) =>
           resolveTerm(term, prev).map((curr, r, ts) => (curr, rs :+ r, ts ++ tss))
         })
-  }
-
-  def resolveTrees(depth: Int, args: List[Tree]): Deferred[(Int, List[PolyAst.Stmt])] = args match {
-    case Nil => (depth, Nil).success.deferred
-    case x :: xs =>
-      resolveTree(x, depth).flatMap(xs.foldLeftM(_) { case ((prev, tss), term) =>
-        resolveTree(term, prev).map((curr, ts) => (curr, tss ++ ts))
-      })
   }
 
   def resolveTerm(term: Term, depth: Int = 0): Deferred[(Int, Option[PolyAst.Term], List[PolyAst.Stmt])] = term match {
@@ -118,6 +146,8 @@ class AstTransformer(using val q: Quotes) {
     case c @ Literal(FloatConstant(v))   => ((depth, Some(PolyAst.Term.FloatConst(v)), Nil)).success.deferred
     case c @ Literal(DoubleConstant(v))  => ((depth, Some(PolyAst.Term.DoubleConst(v)), Nil)).success.deferred
     case c @ Literal(LongConstant(v))    => ((depth, Some(PolyAst.Term.LongConst(v)), Nil)).success.deferred
+    case c @ Literal(ShortConstant(v))    => ((depth, Some(PolyAst.Term.ShortConst(v)), Nil)).success.deferred
+    case c @ Literal(ByteConstant(v))    => ((depth, Some(PolyAst.Term.ByteConst(v)), Nil)).success.deferred
     case c @ Literal(CharConstant(v))    => ((depth, Some(PolyAst.Term.CharConst(v)), Nil)).success.deferred
     case c @ Literal(UnitConstant())     => ???
     case ap @ Apply(Select(qualifier, name), args) =>
@@ -186,8 +216,8 @@ class AstTransformer(using val q: Quotes) {
     case Inlined(None, Nil, expansion) => resolveTerm(expansion, depth) // simple-inline
     case Block(stat, expr) => // stat : List[Statement]
       for {
-        (statDepth, statTrees) <- resolveTrees(depth, stat)
-        (exprDepth, ref, tree) <- resolveTerm(expr, statDepth)
+        (statDepth, _, statTrees) <- resolveTrees(depth, stat)
+        (exprDepth, ref, tree)    <- resolveTerm(expr, statDepth)
       } yield (exprDepth, ref, statTrees ++ tree)
 
     case Assign(lhs, rhs) =>
@@ -233,16 +263,6 @@ class AstTransformer(using val q: Quotes) {
     case _ => s"[$depth] Unhandled: $term".fail.deferred
   }
 
-  def resolveTree(c: Tree, depth: Int = 0): Deferred[(Int, List[PolyAst.Stmt])] = c match {
-    case ValDef(name, tpe, Some(rhs)) =>
-      for {
-        t                  <- resolveTpe(tpe.tpe)
-        (depth, ref, tree) <- resolveTerm(rhs, depth)
-      } yield (depth, tree :+ PolyAst.Stmt.Var(PolyAst.Named(name, t), PolyAst.Expr.Alias(ref.get)))
-    case ValDef(name, tpe, None) => s"Unexpected variable $name:$tpe".fail.deferred
-    case t: Term                 => resolveTerm(t, depth).map((depth, ref, tree) => (depth, tree)) // discard ref
-  }
-
   def collectTree[A](in: Tree)(f: PartialFunction[Tree, List[A]]) = {
     val acc = new TreeAccumulator[List[A]] {
       def foldTree(xs: List[A], tree: Tree)(owner: Symbol): List[A] =
@@ -251,34 +271,37 @@ class AstTransformer(using val q: Quotes) {
     acc.foldOverTree(Nil, in)(Symbol.noSymbol)
   }
 
-  def resolveStmts(stmts: List[Statement]): Result[List[PolyAst.Stmt]] = {
-    val out = stmts.foldLeftM((0, List.empty[PolyAst.Stmt])) { case ((prev, ts), stmt) =>
-      resolveTree(stmt, prev).map((curr, tss) =>
-        (curr, (ts :+ PolyAst.Stmt.Comment(stmt.show.replaceAll("\n", ""))) ++ tss)
-      )
-    }
+  // def resolveStmts(stmts: List[Statement]): Result[List[PolyAst.Stmt]] = {
+  //   val out =
 
-    println(">>>")
-    println(out.map(x => (x._2.map(_.repr)).repr.mkString("\n")).resolve.fold(_.getMessage, identity))
-    println("<<<")
+  //     stmts.foldLeftM((0, List.empty[PolyAst.Stmt])) { case ((prev, ts), stmt) =>
+  //     resolveTree(stmt, prev).map((curr,  tss) =>
+  //       (curr, (ts :+ PolyAst.Stmt.Comment(stmt.show.replaceAll("\n", ""))) ++ tss)
+  //     )
+  //   }
 
-    out.map(_._2).resolve
+  //   println(">>>")
+  //   println(out.map(x => (x._2.map(_.repr)).repr.mkString("\n")).resolve.fold(_.getMessage, identity))
+  //   println("<<<")
 
-    // for {
-    //   stmts     <- out.map(_._2)
-    //   args      <- captuerdVars.map(_.map((id, tpe) => PolyAst.Named(id.name, tpe)))
-    //   identArgs <- captuerdVars.map(_.map((id, tpe) => (id, tpe)))
-    // } yield PolyAst.Function(closureName, args, PolyAst.Type.Unit, stmts)
+  //   out.map(_._2).resolve
 
-  }
+  //   // for {
+  //   //   stmts     <- out.map(_._2)
+  //   //   args      <- captuerdVars.map(_.map((id, tpe) => PolyAst.Named(id.name, tpe)))
+  //   //   identArgs <- captuerdVars.map(_.map((id, tpe) => (id, tpe)))
+  //   // } yield PolyAst.Function(closureName, args, PolyAst.Type.Unit, stmts)
+
+  // }
 
   def lower(x: Expr[Any]): Result[(List[(Ident, PolyAst.Type)], PolyAst.Function)] = for {
-    block <- extractInlineBlock(x.asTerm)
-//        _ = pprint.pprintln(terms)
+    term <- extractInlineBlock(x.asTerm)
+
+    //  _ = pprint.pprintln(block)
 //        closure <- extractClosureBody(block)
 
-    closureName = block.pos.toString
-    captures = collectTree[Ident](block) { case ident: Ident =>
+    closureName = term.pos.toString
+    captures = collectTree[Ident](term) { case ident: Ident =>
       val owner = ident.symbol.owner
       // FIXME TODO make sure the owner is actually this macro, and not any other macro
       if (owner.flags.is(Flags.Macro)) Nil else ident :: Nil
@@ -294,20 +317,33 @@ class AstTransformer(using val q: Quotes) {
     _ = println(s" -> name:    ${closureName}")
     _ = println(s" -> captures (names):   ${capturedIdents.map(_.name)}")
     _ = println(s"    ${captuerdVars.map(xs => xs.map((n, t) => s"${n.name}: ${t.repr}").mkString("\n    "))}")
-    _ = println(s" -> body(long):\n${block.show(using Printer.TreeAnsiCode).indent(4)}")
+    _ = println(s" -> body(long):\n${term.show(using Printer.TreeAnsiCode).indent(4)}")
 
-    idents = collectTree[Ident](block) { case i @ Ident(name) => i :: Nil }
+    idents = collectTree[Ident](term) { case i @ Ident(name) => i :: Nil }
     _      = println(idents)
 
-    block <- block match {
-      case Block(xs, x) => (xs :+ x).success
-      case x => List(x).success
-      // case bad             => s"block required, got $bad".fail
-    }
-    stmts    <- resolveStmts(block)
+    // block <- term match {
+    //   case Block(xs, x) => (xs :+ x).success // de-block
+    //   case Return(x, sym) => List(x).success // can't really happen because return in lambda is illegal in Scala
+    //   // Ref and Literal are the most common ones for the last
+    //   case x => List(x).success
+    //   // case bad             => s"block required, got $bad".fail
+    // }
+    (_, ref, stmts) <- resolveTrees(0, term :: Nil).resolve
+
+    fnTpe <- resolveTpe(term.tpe).resolve
+    returnTerm = ref.getOrElse(PolyAst.Term.UnitConst)
+    _ <-
+      if (fnTpe != returnTerm.tpe) {
+        s"lambda tpe ($fnTpe) != last term tpe (${returnTerm.tpe}), term was $returnTerm".fail
+      } else ().success
+    fnReturn = PolyAst.Stmt.Return(PolyAst.Expr.Alias(returnTerm))
+    fnStmts  = stmts :+ fnReturn
+    _        = println(s" -> PolyAsT:\n${fnStmts.map(_.repr).mkString("\n")}")
+
     args     <- captuerdVars.map(_.map((id, tpe) => PolyAst.Named(id.name, tpe)))
     captures <- captuerdVars
 
-  } yield (captures, PolyAst.Function(closureName, args, PolyAst.Type.Unit, stmts))
+  } yield (captures, PolyAst.Function(closureName, args, fnTpe, stmts :+ fnReturn))
 
 }

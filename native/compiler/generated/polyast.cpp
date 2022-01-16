@@ -202,6 +202,13 @@ bool Term::operator==(const Term::Select &l, const Term::Select &r) {
   return l.init == r.init && l.last == r.last;
 }
 
+std::ostream &Term::operator<<(std::ostream &os, const Term::UnitConst &x) {
+  os << "UnitConst(";
+  os << ')';
+  return os;
+}
+bool Term::operator==(const Term::UnitConst &, const Term::UnitConst &) { return true; }
+
 std::ostream &Term::operator<<(std::ostream &os, const Term::BoolConst &x) {
   os << "BoolConst(";
   os << x.value;

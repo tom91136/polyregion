@@ -220,11 +220,12 @@ endif ()
 set(COMMON_LINK_OPTIONS
         -static-libgcc
         -static-libstdc++
-        --ld-path=${CMAKE_LINKER}
         ${COMMON_COMPILE_OPTIONS}
         ${COMMON_LINKER_OPTIONS})
 
-message("CMAKE_LINKER=${CMAKE_LINKER}")
+if (LINKER)
+    set(COMMON_LINK_OPTIONS --ld-path=${LINKER} ${COMMON_LINK_OPTIONS})
+endif ()
 
 add_subdirectory(compiler)
 add_subdirectory(runtime)

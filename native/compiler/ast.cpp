@@ -51,6 +51,7 @@ using std::string;
                          x.init, [&](auto x) { return repr(x); }, ".") +
                          "." + repr(x.last);
       },
+      [](const Term::UnitConst &x) { return "Unit()"s; },
       [](const Term::BoolConst &x) { return "Bool(" + std::to_string(x.value) + ")"; },
       [](const Term::ByteConst &x) { return "Byte(" + std::to_string(x.value) + ")"; },
       [](const Term::CharConst &x) { return "Char(" + std::to_string(x.value) + ")"; },

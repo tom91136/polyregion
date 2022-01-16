@@ -52,6 +52,7 @@ llvm::Value *backend::AstTransformer::mkRef(const Term::Any &ref) {
   return variants::total(
       *ref, //
       [&](const Term::Select &x) -> llvm::Value * { return mkSelect(x); },
+      [&](const Term::UnitConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt1Ty(C), 0); },
       [&](const Term::BoolConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt1Ty(C), x.value); },
       [&](const Term::ByteConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt8Ty(C), x.value); },
       [&](const Term::CharConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt8Ty(C), x.value); },
@@ -197,7 +198,8 @@ void backend::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) 
         }
         B.SetInsertPoint(loopExit);
       },
-      [&](const Stmt::Break &x) { undefined("break"); }, [&](const Stmt::Cont &x) { undefined("break"); },
+      [&](const Stmt::Break &x) { undefined("break"); }, //
+      [&](const Stmt::Cont &x) { undefined("cont"); },   //
       [&](const Stmt::Cond &x) {
         auto condTrue = llvm::BasicBlock::Create(C, "cond_true", fn);
         auto condFalse = llvm::BasicBlock::Create(C, "cond_false", fn);
@@ -217,7 +219,13 @@ void backend::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) 
         }
         B.SetInsertPoint(condExit);
       },
-      [&](const Stmt::Return &x) { undefined("break"); }
+      [&](const Stmt::Return &x) {
+        if (std::holds_alternative<Type::Unit>(*tpe(x.value))) {
+          B.CreateRetVoid();
+        } else {
+          B.CreateRet(mkExpr(x.value, "return"));
+        }
+      } //
 
   );
 }
@@ -251,7 +259,6 @@ void backend::AstTransformer::transform(const std::unique_ptr<llvm::Module> &mod
     std::cout << "[LLVM]" << repr(stmt) << std::endl;
     mkStmt(stmt, fn);
   }
-  B.CreateRetVoid();
   module->print(llvm::errs(), nullptr);
   llvm::verifyModule(*module, &llvm::errs());
   std::cout << "Pre-opt verify OK!" << std::endl;

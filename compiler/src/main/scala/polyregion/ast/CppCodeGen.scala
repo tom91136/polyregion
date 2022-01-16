@@ -142,27 +142,27 @@ object CppCodeGen {
 
     import PolyAst._
 
-    val ast: Stmt = Stmt.Cond(
-      Expr.Alias(Term.BoolConst(true)),
-      Stmt.Comment("a") :: Stmt.Return(Expr.Alias(Term.FloatConst(1.24f))) :: Nil,
-      Stmt.Comment("b") :: Nil
-    )
+    // val ast: Stmt = Stmt.Cond(
+    //   Expr.Alias(Term.BoolConst(true)),
+    //   Stmt.Comment("a") :: Stmt.Return(Expr.Alias(Term.FloatConst(1.24f))) :: Nil,
+    //   Stmt.Comment("b") :: Nil
+    // )
 
-    // pprint.pprintln(MsgPack.encodeMsg(ast))
-    println(MsgPack.encode(ast).length)
+    // // pprint.pprintln(MsgPack.encodeMsg(ast))
+    // println(MsgPack.encode(ast).length)
 
-    // println(MsgPack.encodeMsg(ast))
-    println(MsgPack.decode[Stmt](MsgPack.encode(ast)))
+    // // println(MsgPack.encodeMsg(ast))
+    // println(MsgPack.decode[Stmt](MsgPack.encode(ast)))
 
-    println(MsgPack.decode[Stmt](MsgPack.encode(ast)).right.get == ast)
+    // println(MsgPack.decode[Stmt](MsgPack.encode(ast)).right.get == ast)
 
-    Files.write(
-      Paths.get("..").resolve("native/ast.msgpack").normalize.toAbsolutePath,
-      MsgPack.encode(ast),
-      StandardOpenOption.TRUNCATE_EXISTING,
-      StandardOpenOption.CREATE,
-      StandardOpenOption.WRITE
-    )
+    // Files.write(
+    //   Paths.get("..").resolve("native/ast.msgpack").normalize.toAbsolutePath,
+    //   MsgPack.encode(ast),
+    //   StandardOpenOption.TRUNCATE_EXISTING,
+    //   StandardOpenOption.CREATE,
+    //   StandardOpenOption.WRITE
+    // )
 
     val structs = deriveStruct[Sym]() //
       :: deriveStruct[TypeKind]()

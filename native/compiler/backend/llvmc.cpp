@@ -156,13 +156,13 @@ polyregion::compiler::Compilation llvmc::compileModule(bool emitDisassembly,    
   std::cout << "Done = "
             << " b=" << asmBuffer.size() << std::endl;
 
-  std::ofstream file("the_obj2.o", std::ios::binary);
-  file.write(objBuffer.data(), ssize_t(objBuffer.size_in_bytes()));
-  file.flush();
-
-  std::ofstream file2("the_obj2.s", std::ios::binary);
-  file2.write(asmBuffer.data(), ssize_t(asmBuffer.size_in_bytes()));
-  file2.flush();
+//  std::ofstream file("the_obj2.o", std::ios::binary);
+//  file.write(objBuffer.data(), ssize_t(objBuffer.size_in_bytes()));
+//  file.flush();
+//
+//  std::ofstream file2("the_obj2.s", std::ios::binary);
+//  file2.write(asmBuffer.data(), ssize_t(asmBuffer.size_in_bytes()));
+//  file2.flush();
 
   //  auto b =
   //      llvm::object::createBinary(*llvm::MemoryBuffer::getMemBuffer(StringRef(data.data(), data.size()), "", false));

@@ -22,7 +22,13 @@ jobject Java_polyregion_PolyregionCompiler_compile(JNIEnv *env, jclass thisCls, 
                                                    jboolean emitDisassembly, jshort backend) {
 
   auto astData = env->GetByteArrayElements(ast, nullptr);
-  auto c = polyregion::compiler::compile(std::vector<uint8_t>(astData, astData + env->GetArrayLength(ast)));
+
+  polyregion::compiler::Compilation c;
+  try {
+    c = polyregion::compiler::compile(std::vector<uint8_t>(astData, astData + env->GetArrayLength(ast)));
+  } catch (const std::exception &e) {
+    c.messages = e.what();
+  }
   env->ReleaseByteArrayElements(ast, astData, JNI_ABORT);
 
   auto compilationCls = env->FindClass("polyregion/Compilation");
@@ -38,6 +44,8 @@ jobject Java_polyregion_PolyregionCompiler_compile(JNIEnv *env, jclass thisCls, 
     std::copy(c.binary->begin(), c.binary->end(), binElems);
     env->ReleaseByteArrayElements(bin, binElems, JNI_COMMIT);
     env->SetObjectField(compilation, programField, bin);
+  } else {
+    throwGeneric(env, c.messages);
   }
 
   if (c.disassembly) {

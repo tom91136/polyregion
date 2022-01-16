@@ -223,6 +223,7 @@ struct EXPORT Position {
 namespace Term { 
 
 struct Select;
+struct UnitConst;
 struct BoolConst;
 struct ByteConst;
 struct CharConst;
@@ -232,7 +233,7 @@ struct LongConst;
 struct FloatConst;
 struct DoubleConst;
 struct StringConst;
-using Any = Alternative<Select, BoolConst, ByteConst, CharConst, ShortConst, IntConst, LongConst, FloatConst, DoubleConst, StringConst>;
+using Any = Alternative<Select, UnitConst, BoolConst, ByteConst, CharConst, ShortConst, IntConst, LongConst, FloatConst, DoubleConst, StringConst>;
 struct EXPORT Base {
   Type::Any tpe;
   protected:
@@ -249,6 +250,13 @@ struct EXPORT Select : Term::Base {
   EXPORT operator Any() const { return std::make_shared<Select>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::Select &);
   EXPORT friend bool operator==(const Term::Select &, const Term::Select &);
+};
+
+struct EXPORT UnitConst : Term::Base {
+  UnitConst() noexcept : Term::Base(Type::Unit()) {}
+  EXPORT operator Any() const { return std::make_shared<UnitConst>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::UnitConst &);
+  EXPORT friend bool operator==(const Term::UnitConst &, const Term::UnitConst &);
 };
 
 struct EXPORT BoolConst : Term::Base {
