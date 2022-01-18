@@ -75,6 +75,27 @@ object Runtime {
       override def putAll(xs: Char*): this.type       = { buffer.put(xs.toArray); this }
       override def pointer: Option[Long]              = ptr(buffer)
     }
+    class StructBuffer[A](val buffer: java.nio.ByteBuffer)(using struct: NativeStruct[A]) extends Buffer[A] {
+      override def update(idx: Int, elem: A): Unit = ???
+      override def apply(i: Int): A                = ???
+      override def length: Int                     = buffer.capacity() / struct.sizeInBytes
+      override def putAll(xs: A*): this.type       = ???
+      override def pointer: Option[Long]           = ptr(buffer)
+    }
+
+    // case class Z(a : Int, b: String)
+    //
+
+    enum Type {
+      case Double, Float, Long, Int, Short, Char, Byte // String
+    }
+
+    trait NativeStruct[A] {
+      def sizeInBytes: Int
+      def members: IndexedSeq[(Type, String)]
+      def encode(offset: Int, buffer: ByteBuffer, a: A): Unit
+      def decode(offset: Int, buffer: ByteBuffer): A
+    }
 
     def ofDim[T <: AnyVal](dim: Int)(using tag: ClassTag[T]): Buffer[T] = (tag.runtimeClass match {
       case java.lang.Double.TYPE    => DoubleBuffer(alloc(java.lang.Double.BYTES * dim).asDoubleBuffer())
@@ -90,6 +111,8 @@ object Runtime {
     def nil[T <: AnyVal](using tag: ClassTag[T]): Buffer[T] = ofDim[T](0)
 
     def apply[T <: AnyVal](xs: T*)(using tag: ClassTag[T]): Buffer[T] = ofDim[T](xs.size).putAll(xs*)
+    def apply[T <: AnyRef](xs: T*)(using struct: NativeStruct[T]): Buffer[T] =
+      StructBuffer[T](alloc(struct.sizeInBytes * xs.size))
 
   }
 
