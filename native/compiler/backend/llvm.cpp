@@ -19,19 +19,19 @@ static llvm::ExitOnError ExitOnErr;
 
 llvm::Type *backend::AstTransformer::mkTpe(const Type::Any &tpe) {
   return variants::total(
-      *tpe,                                                                                    //
-      [&](const Type::Float &x) -> llvm::Type * { return llvm::Type::getFloatTy(C); },         //
-      [&](const Type::Double &x) -> llvm::Type * { return llvm::Type::getDoubleTy(C); },       //
-      [&](const Type::Bool &x) -> llvm::Type * { return llvm::Type::getInt1Ty(C); },           //
-      [&](const Type::Byte &x) -> llvm::Type * { return llvm::Type::getInt8Ty(C); },           //
-      [&](const Type::Char &x) -> llvm::Type * { return llvm::Type::getInt8Ty(C); },           //
-      [&](const Type::Short &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },         //
-      [&](const Type::Int &x) -> llvm::Type * { return llvm::Type::getInt32Ty(C); },           //
-      [&](const Type::Long &x) -> llvm::Type * { return llvm::Type::getInt64Ty(C); },          //
-      [&](const Type::String &x) -> llvm::Type * { return undefined(); },                      //
-      [&](const Type::Unit &x) -> llvm::Type * { return llvm::Type::getVoidTy(C); },           //
-      [&](const Type::Struct &x) -> llvm::Type * { return undefined(); },                      //
-      [&](const Type::Array &x) -> llvm::Type * { return mkTpe(x.component)->getPointerTo(); } //
+      *tpe,                                                                                      //
+      [&](const Type::Float &x) -> llvm::Type * { return llvm::Type::getFloatTy(C); },           //
+      [&](const Type::Double &x) -> llvm::Type * { return llvm::Type::getDoubleTy(C); },         //
+      [&](const Type::Bool &x) -> llvm::Type * { return llvm::Type::getInt1Ty(C); },             //
+      [&](const Type::Byte &x) -> llvm::Type * { return llvm::Type::getInt8Ty(C); },             //
+      [&](const Type::Char &x) -> llvm::Type * { return llvm::Type::getInt8Ty(C); },             //
+      [&](const Type::Short &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },           //
+      [&](const Type::Int &x) -> llvm::Type * { return llvm::Type::getInt32Ty(C); },             //
+      [&](const Type::Long &x) -> llvm::Type * { return llvm::Type::getInt64Ty(C); },            //
+      [&](const Type::String &x) -> llvm::Type * { return undefined(__FILE_NAME__, __LINE__); }, //
+      [&](const Type::Unit &x) -> llvm::Type * { return llvm::Type::getVoidTy(C); },             //
+      [&](const Type::Struct &x) -> llvm::Type * { return undefined(__FILE_NAME__, __LINE__); }, //
+      [&](const Type::Array &x) -> llvm::Type * { return mkTpe(x.component)->getPointerTo(); }   //
   );
 }
 
@@ -42,7 +42,7 @@ llvm::Value *backend::AstTransformer::mkSelect(const Term::Select &select) {
                ? x->second                                              //
                : B.CreateLoad(x->second, qualified(select) + "_value"); //
   } else {
-    return undefined("Unseen select: " + to_string(select));
+    return undefined(__FILE_NAME__, __LINE__, "Unseen select: " + to_string(select));
   }
 }
 
@@ -61,7 +61,7 @@ llvm::Value *backend::AstTransformer::mkRef(const Term::Any &ref) {
       [&](const Term::LongConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt64Ty(C), x.value); },
       [&](const Term::FloatConst &x) -> llvm::Value * { return ConstantFP::get(llvm::Type::getFloatTy(C), x.value); },
       [&](const Term::DoubleConst &x) -> llvm::Value * { return ConstantFP::get(llvm::Type::getDoubleTy(C), x.value); },
-      [&](const Term::StringConst &x) -> llvm::Value * { return undefined(); });
+      [&](const Term::StringConst &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); });
 }
 
 llvm::Value *backend::AstTransformer::mkExpr(const Expr::Any &expr, const std::string &key) {
@@ -73,23 +73,22 @@ llvm::Value *backend::AstTransformer::mkExpr(const Expr::Any &expr, const std::s
           const std::function<llvm::Value *(llvm::Value *, llvm::Value *)> &integralFn,
           const std::function<llvm::Value *(llvm::Value *, llvm::Value *)> &fractionalFn) -> llvm::Value * {
     auto [lhs, rhs] = binaryExpr(l, r);
-    std::cout << "-> " << kind(promoteTo) << promoteTo << std::endl;
     if (std::holds_alternative<TypeKind::Integral>(*kind(promoteTo))) {
       return integralFn(lhs, rhs);
     } else if (std::holds_alternative<TypeKind::Fractional>(*kind(promoteTo))) {
       return fractionalFn(lhs, rhs);
     } else {
       //    B.CreateSIToFP()
-      return undefined();
+      return undefined(__FILE_NAME__, __LINE__);
     }
   };
 
   return variants::total(
       *expr, //
 
-      [&](const Expr::Sin &x) -> llvm::Value * { return undefined(); },
-      [&](const Expr::Cos &x) -> llvm::Value * { return undefined(); },
-      [&](const Expr::Tan &x) -> llvm::Value * { return undefined(); },
+      [&](const Expr::Sin &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); },
+      [&](const Expr::Cos &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); },
+      [&](const Expr::Tan &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); },
 
       [&](const Expr::Add &x) -> llvm::Value * {
         return binaryNumOp(
@@ -121,12 +120,12 @@ llvm::Value *backend::AstTransformer::mkExpr(const Expr::Any &expr, const std::s
             [&](auto l, auto r) { return B.CreateSRem(l, r, key + "_%"); },
             [&](auto l, auto r) { return B.CreateFRem(l, r, key + "_%"); });
       },
-      [&](const Expr::Pow &x) -> llvm::Value * { return undefined(); },
+      [&](const Expr::Pow &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); },
 
-      [&](const Expr::Inv &x) -> llvm::Value * { return undefined(); },
-      [&](const Expr::Eq &x) -> llvm::Value * { return undefined(); },
-      [&](const Expr::Lte &x) -> llvm::Value * { return undefined(); },
-      [&](const Expr::Gte &x) -> llvm::Value * { return undefined(); },
+      [&](const Expr::Inv &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); },
+      [&](const Expr::Eq &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); },
+      [&](const Expr::Lte &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); },
+      [&](const Expr::Gte &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); },
       [&](const Expr::Lt &x) -> llvm::Value * {
         auto [lhs, rhs] = binaryExpr(x.lhs, x.rhs);
         return B.CreateICmpSLT(lhs, rhs, key + "_<");
@@ -139,7 +138,7 @@ llvm::Value *backend::AstTransformer::mkExpr(const Expr::Any &expr, const std::s
       [&](const Expr::Alias &x) -> llvm::Value * { return mkRef(x.ref); },
       [&](const Expr::Invoke &x) -> llvm::Value * {
         //        auto lhs = mkRef(x.lhs );
-        return undefined("Unimplemented invoke:`" + x.name + "`");
+        return undefined(__FILE_NAME__, __LINE__, "Unimplemented invoke:`" + x.name + "`");
       },
       [&](const Expr::Index &x) -> llvm::Value * {
         auto ptr = B.CreateInBoundsGEP(mkSelect(x.lhs), {mkRef(x.idx)}, key + "_ptr");
@@ -155,11 +154,17 @@ void backend::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) 
       },
       [&](const Stmt::Var &x) {
         if (std::holds_alternative<Type::Array>(*x.name.tpe)) {
-          lut[x.name.symbol] = mkExpr(x.expr, x.name.symbol);
+          if (x.expr) {
+            lut[x.name.symbol] = mkExpr(*x.expr, x.name.symbol);
+          } else {
+            undefined(__FILE_NAME__, __LINE__, "var array with no expr?");
+          }
         } else {
           auto stack = B.CreateAlloca(mkTpe(x.name.tpe), nullptr, x.name.symbol + "_stack_ptr");
-          auto val = mkExpr(x.expr, x.name.symbol + "_var_rhs");
-          B.CreateStore(val, stack);
+          if (x.expr) {
+            auto val = mkExpr(*x.expr, x.name.symbol + "_var_rhs");
+            B.CreateStore(val, stack);
+          }
           lut[x.name.symbol] = stack;
         }
       },
@@ -177,7 +182,7 @@ void backend::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) 
         if (x.args.size() == 1) {
           auto name = x.name;
           auto rhs = x.args[0];
-          undefined("effect not implemented");
+          undefined(__FILE_NAME__, __LINE__, "effect not implemented");
         }
       },
       [&](const Stmt::While &x) {
@@ -198,8 +203,8 @@ void backend::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) 
         }
         B.SetInsertPoint(loopExit);
       },
-      [&](const Stmt::Break &x) { undefined("break"); }, //
-      [&](const Stmt::Cont &x) { undefined("cont"); },   //
+      [&](const Stmt::Break &x) { undefined(__FILE_NAME__, __LINE__, "break"); }, //
+      [&](const Stmt::Cont &x) { undefined(__FILE_NAME__, __LINE__, "cont"); },   //
       [&](const Stmt::Cond &x) {
         auto condTrue = llvm::BasicBlock::Create(C, "cond_true", fn);
         auto condFalse = llvm::BasicBlock::Create(C, "cond_false", fn);
@@ -256,12 +261,12 @@ void backend::AstTransformer::transform(const std::unique_ptr<llvm::Module> &mod
       });
 
   for (auto &stmt : fnTree.body) {
-    std::cout << "[LLVM]" << repr(stmt) << std::endl;
+    //    std::cout << "[LLVM]" << repr(stmt) << std::endl;
     mkStmt(stmt, fn);
   }
   module->print(llvm::errs(), nullptr);
   llvm::verifyModule(*module, &llvm::errs());
-  std::cout << "Pre-opt verify OK!" << std::endl;
+  //  std::cout << "Pre-opt verify OK!" << std::endl;
 
   llvm::PassManagerBuilder builder;
   //  builder.OptLevel = 3;

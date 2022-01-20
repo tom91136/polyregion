@@ -4,15 +4,34 @@
 
 #include "polyregion_runtime.h"
 #include "utils.hpp"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
 
 int main(int argc, char *argv[]) {
   std::vector<std::string> args(argv + 1, argv + argc);
+
+  llvm::LLVMContext c ;
+
+//  auto str = llvm::StructType::create({llvm::Type::getInt16Ty(c), llvm::Type::getFloatTy(c)});
+////  llvm::Module m("a", c);
+//  llvm::DataLayout layout("");
+//
+//  std::cout << layout.getStringRepresentation() << std::endl;
+//  auto l = layout.getStructLayout(str);
+//
+//  std::cout << l->getAlignment().value() << std::endl;
+
   if (args.empty()) {
     std::cout << "runtime-drv: read and enumerate executable symbols in objects\n"
                  "usage: \n"
               << argv[0] << " [<obj file path>...]\n"
               << std::endl;
   } else {
+
+
+
     for (auto &arg : args) {
       std::cout << "[" << arg << "]" << std::endl;
       try {

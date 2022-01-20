@@ -44,6 +44,8 @@ object MsgPack {
     )
     given [A](using C: Codec[A]): Codec[List[A]] =
       Codec(xs => upack.Arr(xs.map(C.encode(_))*), _.arr.map(m => C.decode(m)).toList)
+    given [A](using C: Codec[A]): Codec[Option[A]] =
+      Codec(_.fold(upack.Null)(C.encode(_)), x => if (x.isNull) None else Some(C.decode(x)))
 
     private inline def summonAll[T <: Tuple, TC[_]]: Vector[TC[Any]] = inline erasedValue[T] match {
       case _: EmptyTuple => Vector()

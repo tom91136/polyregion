@@ -672,13 +672,13 @@ json Stmt::comment_to_json(const Stmt::Comment& x) {
 
 Stmt::Var Stmt::var_from_json(const json& j) { 
   auto name =  named_from_json(j.at(0));
-  auto expr =  Expr::any_from_json(j.at(1));
+  auto expr = j.at(1).is_null() ? std::nullopt : std::make_optional(Expr::any_from_json(j.at(1)));
   return {name, expr};
 }
 
 json Stmt::var_to_json(const Stmt::Var& x) { 
   auto name =  named_to_json(x.name);
-  auto expr =  Expr::any_to_json(x.expr);
+  auto expr = x.expr ? Expr::any_to_json(*x.expr) : json{};
   return json::array({name, expr});
 }
 

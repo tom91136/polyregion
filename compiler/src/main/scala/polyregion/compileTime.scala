@@ -60,12 +60,12 @@ object compileTime {
     }
   }
 
-  inline def offload[A](inline x: => A): A = ${ offloadImpl[A]('x) }
-
   private[polyregion] inline def offloadValidate[A](inline x: => A): Boolean = ${ offloadValidateImpl[A]('x) }
 
   private def offloadValidateImpl[A: Type](x: Expr[Any])(using q: Quotes): Expr[Boolean] =
     '{ ${ offloadImpl[A](x) } == $x }
+
+  inline def offload[A](inline x: => A): A = ${ offloadImpl[A]('x) }
 
   private def offloadImpl[A: Type](x: Expr[Any])(using q: Quotes): Expr[A] = {
     import quotes.reflect.*
@@ -115,7 +115,7 @@ object compileTime {
         }
 
       val rtnBufferExpr = fn.rtn match {
-        case PolyAst.Type.Unit   => '{ Buffer.nil[Int] }
+        case PolyAst.Type.Unit   => '{ Buffer.empty[Int] }
         case PolyAst.Type.Float  => '{ Buffer.ref[Float] }
         case PolyAst.Type.Double => '{ Buffer.ref[Double] }
         case PolyAst.Type.Bool   => '{ Buffer.ref[Boolean] }
@@ -132,7 +132,7 @@ object compileTime {
       val captureExprs = captures.map { (ident, tpe) =>
         val expr = ident.asExpr
         val wrapped = tpe match {
-          case PolyAst.Type.Unit   => '{ Buffer.nil[Int] }
+          case PolyAst.Type.Unit   => '{ Buffer.empty[Int] }
           case PolyAst.Type.Bool   => '{ Buffer[Boolean](${ expr.asExprOf[Boolean] }) }
           case PolyAst.Type.Byte   => '{ Buffer[Byte](${ expr.asExprOf[Byte] }) }
           case PolyAst.Type.Char   => '{ Buffer[Char](${ expr.asExprOf[Char] }) }
@@ -152,7 +152,10 @@ object compileTime {
             println(s"???= $unknown ")
             ???
         }
-        '{ ${ wrapped }.buffer }
+        '{
+          println(s"mkBuffer: ${ ${wrapped}  }")
+         ${ wrapped }.buffer
+          }
       }
 
       '{
@@ -167,6 +170,7 @@ object compileTime {
 
         val argTypes   = Array(${ Varargs(fn.args.map(n => tpeAsRuntimeTpe(n.tpe))) }*)
         val argBuffers = Array(${ Varargs(captureExprs) }*)
+
 
         println(s"Invoking with ${argTypes.zip(argBuffers).toList}")
 

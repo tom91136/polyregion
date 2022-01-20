@@ -9,18 +9,20 @@
 extern "C" {
 #endif
 
-typedef enum EXPORT {
-  Bool = 1,
-  Byte,
-  Char,
-  Short,
-  Int,
-  Long,
-  Float,
-  Double,
-  Ptr,
-  Void,
+typedef struct EXPORT {
+  uint8_t ordinal;
 } polyregion_type;
+
+EXPORT extern const polyregion_type POLYREGION_BOOL;
+EXPORT extern const polyregion_type POLYREGION_BYTE;
+EXPORT extern const polyregion_type POLYREGION_CHAR;
+EXPORT extern const polyregion_type POLYREGION_SHORT;
+EXPORT extern const polyregion_type POLYREGION_INT;
+EXPORT extern const polyregion_type POLYREGION_LONG;
+EXPORT extern const polyregion_type POLYREGION_FLOAT;
+EXPORT extern const polyregion_type POLYREGION_DOUBLE;
+EXPORT extern const polyregion_type POLYREGION_PTR;
+EXPORT extern const polyregion_type POLYREGION_VOID;
 
 typedef struct EXPORT {
   polyregion_type type;

@@ -78,7 +78,7 @@ polyregion::compiler::Compilation llvmc::compileModule(bool emitDisassembly,    
       Features.AddFeature(F.first(), F.second);
   std::string FeaturesStr = Features.getString();
 
-  std::cout << "F=" << FeaturesStr << std::endl;
+//  std::cout << "F=" << FeaturesStr << std::endl;
   CodeGenOpt::Level OLvl = CodeGenOpt::Aggressive;
 
   std::string IRTargetTriple = M->getDataLayoutStr();
@@ -93,7 +93,7 @@ polyregion::compiler::Compilation llvmc::compileModule(bool emitDisassembly,    
     return polyregion::compiler::Compilation{""};
   }
 
-  std::cout << "E=" << Error << "; " << SysDefaultTriple << std::endl;
+//  std::cout << "E=" << Error << "; " << SysDefaultTriple << std::endl;
 
   TargetOptions Options;
   std::unique_ptr<TargetMachine> TM(TheTarget->createTargetMachine( //
@@ -153,8 +153,8 @@ polyregion::compiler::Compilation llvmc::compileModule(bool emitDisassembly,    
   //    });
   //  }
 
-  std::cout << "Done = "
-            << " b=" << asmBuffer.size() << std::endl;
+//  std::cout << "Done = "
+//            << " b=" << asmBuffer.size() << std::endl;
 
 //  std::ofstream file("the_obj2.o", std::ios::binary);
 //  file.write(objBuffer.data(), ssize_t(objBuffer.size_in_bytes()));

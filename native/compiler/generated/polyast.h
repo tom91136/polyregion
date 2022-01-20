@@ -560,8 +560,8 @@ struct EXPORT Comment : Stmt::Base {
 
 struct EXPORT Var : Stmt::Base {
   Named name;
-  Expr::Any expr;
-  Var(Named name, Expr::Any expr) noexcept : Stmt::Base(), name(std::move(name)), expr(std::move(expr)) {}
+  std::optional<Expr::Any> expr;
+  Var(Named name, std::optional<Expr::Any> expr) noexcept : Stmt::Base(), name(std::move(name)), expr(std::move(expr)) {}
   EXPORT operator Any() const { return std::make_shared<Var>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Stmt::Var &);
   EXPORT friend bool operator==(const Stmt::Var &, const Stmt::Var &);

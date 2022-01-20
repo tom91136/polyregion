@@ -6,13 +6,14 @@
 #include <numeric>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace polyregion {
 
 template <typename T = std::nullptr_t> //
-constexpr T undefined(const std::string &message = "not implemented") {
-  throw std::logic_error(message);
+constexpr T undefined(const std::string &file, size_t line, const std::string &message = "not implemented") {
+  throw std::logic_error(file + ":" + std::to_string(line) + ": " + message);
 }
 
 template <typename T, template <typename...> typename Container>
@@ -86,9 +87,9 @@ static inline char *new_str(const std::string &s) {
   return xs;
 }
 
-static inline void free_str(const char *s) {
-  delete[] s;
-}
+static inline void free_str(const char *s) { delete[] s; }
+
+template <typename E> constexpr auto to_underlying(E e) noexcept { return static_cast<std::underlying_type_t<E>>(e); }
 
 constexpr uint32_t hash(const char *data, size_t const size) noexcept {
   uint32_t hash = 5381;

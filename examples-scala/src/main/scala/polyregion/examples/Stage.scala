@@ -2,8 +2,7 @@ package polyregion.examples
 
 // import com.kenai.jffi.HeapInvocationBuffer
 
-
-import org.bytedeco.llvm.global.LLVM
+// import org.bytedeco.llvm.global.LLVM
 
 import java.nio.ByteBuffer
 import scala.collection.mutable.ArrayBuffer
@@ -176,11 +175,13 @@ object Stage {
     }
     printAndreset("JVM ")
 
-    offload {
+    val u = offload {
       // var a = 1f
-      xs(0) = 1f
+      xs(0) = 1.2f
       xs(1) = 34f
+      xs(0) + xs(1)
     }
+    println(s"Ans=$u")
 
     // foreach(0 until 10) { n =>
     //   xs(n) += 2f
@@ -189,7 +190,7 @@ object Stage {
     //   var refOut       = xs
     //   xs(n) += ys(n) + refOut(n) * scalar + scalarLambda + scalarF
     // }
- 
+
     // b.invoke(140462809608192L)
     printAndreset("Native")
 

@@ -368,6 +368,26 @@ object Cpp {
         ctors = tpe :: Nil
       )
     }
+    given [A: ToCppType]: ToCppType[Option[A]] = { () =>
+      val tpe = summon[ToCppType[A]]()
+      CppType(
+        "std" :: Nil,
+        s"optional",
+        movable = true,
+        constexpr = false,
+        streamOp = { (s, v) =>
+          List(
+            s"$s << '{';",
+            s"if ($v) {",
+            s"  ${tpe.streamOp(s, s"*$v").mkString(";")}",
+            s"}",
+            s"$s << '}';"
+          )
+        },
+        include = List("optional"),
+        ctors = tpe :: Nil
+      )
+    }
 
     // inline def forAll[T <: Tuple](p: CppType => Boolean): Boolean =
     //   inline erasedValue[T] match

@@ -563,12 +563,16 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Var &x) {
   os << "Var(";
   os << x.name;
   os << ',';
-  os << x.expr;
+  os << '{';
+  if (x.expr) {
+    os << *x.expr;
+  }
+  os << '}';
   os << ')';
   return os;
 }
 bool Stmt::operator==(const Stmt::Var &l, const Stmt::Var &r) { 
-  return l.name == r.name && *l.expr == *r.expr;
+  return l.name == r.name && l.expr == r.expr;
 }
 
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Mut &x) {

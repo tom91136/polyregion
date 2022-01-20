@@ -79,7 +79,8 @@ std::string backend::OpenCL::mkStmt(const Stmt::Any &stmt) {
             commented, [](auto &&x) { return x; }, "\n");
       },
       [&](const Stmt::Var &x) {
-        auto line = mkTpe(x.name.tpe) + " " + x.name.symbol + " = " + mkExpr(x.expr, x.name.symbol) + ";";
+        auto line =
+            mkTpe(x.name.tpe) + " " + x.name.symbol + (x.expr ? (" = " + mkExpr(*x.expr, x.name.symbol)) : "") + ";";
         return line;
       },
       [&](const Stmt::Mut &x) { return x.name.last.symbol + " = " + mkExpr(x.expr, "?") + ";"; },

@@ -14,7 +14,7 @@ lazy val commonSettings = Seq(
   },
   scalacOptions ++= Seq("-no-indent"),
   scalafmtDetailedError := true,
-  scalafmtFailOnErrors := true
+  scalafmtFailOnErrors  := true
 )
 
 lazy val catsVersion  = "2.7.0"
@@ -59,10 +59,12 @@ lazy val compiler = project
     javah / target      := bindingsDir / "java-compiler",
     assemblyShadeRules  := loaderShadeRules,
     assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly")),
-    scalacOptions ++= Seq("-Yretain-trees"), // XXX we need this so that the AST -> C++ conversion with partial ctors work
+    scalacOptions ++= Seq(
+      "-Yretain-trees" // XXX we need this so that the AST -> C++ conversion with partial ctors work
+    ),
     libraryDependencies ++= Seq(
       "com.lihaoyi"   %% "pprint"    % "0.7.1",
-      "com.lihaoyi"   %% "upickle"   % "1.4.3",
+      "com.lihaoyi"   %% "upickle"   % "1.4.4",
       "org.typelevel" %% "cats-core" % catsVersion,
       "org.scalameta" %% "munit"     % munitVersion % Test
     )
@@ -80,23 +82,39 @@ lazy val `examples-scala` = project
     assembly / mainClass := mainCls,
     scalacOptions ++= Seq("-Yretain-trees"),
     libraryDependencies ++= Seq(
-      ("com.github.jnr"         % "jffi"                       % "1.3.8").classifier("native"),
-      "com.github.jnr"          % "jffi"                       % "1.3.8",
-      "org.bytedeco"            % "llvm-platform"              % "12.0.1-1.5.6",
-      "org.bytedeco"            % "libffi-platform"            % "3.4.2-1.5.6",
-      "org.openjdk.jol"         % "jol-core"                   % "0.16",
-      "net.openhft"             % "affinity"                   % "3.20.0",
-      "org.typelevel"          %% "cats-core"                  % catsVersion,
-      "io.github.iltotore"     %% "iron"                       % "1.1.2",
-      "io.github.iltotore"     %% "iron-numeric"               % "1.1-1.0.1",
-      "io.github.iltotore"     %% "iron-string"                % "1.1-0.1.0",
-      "io.github.iltotore"     %% "iron-iterable"              % "1.1-0.1.0",
-      "org.scala-lang.modules" %% "scala-parallel-collections" % "1.0.4"
+      // ("com.github.jnr"         % "jffi"                       % "1.3.8").classifier("native"),
+      // "com.github.jnr"          % "jffi"                       % "1.3.8",
+      // "org.bytedeco"            % "llvm-platform"              % "12.0.1-1.5.6",
+      // "org.bytedeco"            % "libffi-platform"            % "3.4.2-1.5.6",
+      // "org.openjdk.jol"         % "jol-core"                   % "0.16",
+      // "net.openhft"             % "affinity"                   % "3.20.0",
+      // "org.typelevel"          %% "cats-core"                  % catsVersion,
+      // "io.github.iltotore"     %% "iron"                       % "1.1.2",
+      // "io.github.iltotore"     %% "iron-numeric"               % "1.1-1.0.1",
+      // "io.github.iltotore"     %% "iron-string"                % "1.1-0.1.0",
+      // "io.github.iltotore"     %% "iron-iterable"              % "1.1-0.1.0",
+      // "org.scala-lang.modules" %% "scala-parallel-collections" % "1.0.4"
     )
   )
-  .dependsOn(compiler, `runtime-scala`)
+  .dependsOn(compiler % Provided, `runtime-scala`)
+
+lazy val `benchmarks-scala` = project
+  .enablePlugins(JmhPlugin)
+  .settings(
+    commonSettings,
+    name                 := "benchmarks-scala",
+    fork                 := true,
+    Compile / mainClass  := Some("polyregion.benchmarks.Main"),
+    assembly / mainClass := Some("polyregion.benchmarks.Main"),
+    scalacOptions ++= Seq("-Yretain-trees"),
+    libraryDependencies ++= Seq(
+      // "net.openhft"             % "affinity"                   % "3.20.0",
+      // "org.scala-lang.modules" %% "scala-parallel-collections" % "1.0.4"
+    )
+  )
+  .dependsOn(compiler % Provided, `runtime-scala`)
 
 lazy val root = project
   .in(file("."))
   .settings(commonSettings)
-  .aggregate(`loader-jvm`, `runtime-scala`, `runtime-java`, compiler, `examples-scala`)
+  .aggregate(`loader-jvm`, `runtime-scala`, `runtime-java`, compiler, `examples-scala`, `benchmarks-scala`)

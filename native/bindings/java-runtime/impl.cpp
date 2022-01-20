@@ -2,8 +2,10 @@
 #include <vector>
 
 #include "polyregion_PolyregionRuntime.h"
-#include "polyregion_runtime.h"
+#include "runtime.h"
+#include "utils.hpp"
 
+using namespace polyregion;
 static void throwGeneric(JNIEnv *env, const std::string &message) {
   if (auto exClass = env->FindClass("polyregion/PolyregionRuntimeException"); exClass) {
     env->ThrowNew(exClass, message.c_str());
@@ -27,55 +29,54 @@ void Java_polyregion_PolyregionRuntime_invoke(JNIEnv *env, jclass thisCls,      
     return;
   }
 
-  auto obj = polyregion_load_object(reinterpret_cast<const uint8_t *>(objData), env->GetArrayLength(object));
-
-  if (!obj->object) {
-    throwGeneric(env, std::string(obj->message));
-  } else {
-
-    auto sym = env->GetStringUTFChars(symbol, nullptr);
-
-    polyregion_data rtn{static_cast<polyregion_type>(returnType), env->GetDirectBufferAddress(returnPtr)};
-    std::vector<polyregion_data> params(env->GetArrayLength(paramPtrs));
-
+  auto sym = env->GetStringUTFChars(symbol, nullptr);
+  try {
+    auto data = reinterpret_cast<const uint8_t *>(objData);
+    std::vector<uint8_t> bytes(data, data + env->GetArrayLength(object));
+    runtime::Object obj(bytes);
+    runtime::TypedPointer rtn{static_cast<runtime::Type>(returnType), env->GetDirectBufferAddress(returnPtr)};
+    std::vector<runtime::TypedPointer> params(env->GetArrayLength(paramPtrs));
     std::vector<void *> pointers(env->GetArrayLength(paramPtrs));
-
     auto paramTypes_ = env->GetByteArrayElements(paramTypes, nullptr);
     for (jint i = 0; i < env->GetArrayLength(paramPtrs); ++i) {
-      params[i].type = static_cast<polyregion_type>(paramTypes_[i]);
-      switch (params[i].type) {
-      case Bool:
-      case Byte:
-      case Char:
-      case Short:
-      case Int:
-      case Long:
-      case Float:
-      case Double:
-      case Void: {
-        pointers[i] = env->GetObjectArrayElement(paramPtrs, i);
-        params[i].ptr = &pointers[i];
+      params[i].first = static_cast<runtime::Type>(paramTypes_[i]);
+      switch (params[i].first) {
+      case runtime::Type::Bool:
+      case runtime::Type::Byte:
+      case runtime::Type::Char:
+      case runtime::Type::Short:
+      case runtime::Type::Int:
+      case runtime::Type::Long:
+      case runtime::Type::Float:
+      case runtime::Type::Double:
+      case runtime::Type::Void: {
+        pointers[i] = env->GetDirectBufferAddress(env->GetObjectArrayElement(paramPtrs, i));
+        if (!pointers[i]) {
+          throwGeneric(env, "Unable to retrieve direct buffer address");
+          return;
+        }
+        params[i].second = pointers[i]; // XXX no indirection
         break;
       }
-      case Ptr: {
+      case runtime::Type::Ptr: {
         pointers[i] = env->GetDirectBufferAddress(env->GetObjectArrayElement(paramPtrs, i));
-        params[i].ptr = &pointers[i];
+        if (!pointers[i]) {
+          throwGeneric(env, "Unable to retrieve direct buffer address");
+          return;
+        }
+        params[i].second = &pointers[i]; // XXX pointer indirection
         break;
       }
       default:
-        throwGeneric(env, "Unimplemented parameter type " + std::to_string(params[i].type));
+        throwGeneric(env, "Unimplemented parameter type " + std::to_string(to_underlying(params[i].first)));
       }
     }
     env->ReleaseByteArrayElements(paramTypes, paramTypes_, JNI_ABORT);
 
-    auto error = polyregion_invoke(obj->object, sym, params.data(), env->GetArrayLength(paramPtrs), &rtn);
-
-    if (error) {
-      throwGeneric(env, error);
-    }
-
-    env->ReleaseStringUTFChars(symbol, sym);
+    obj.invoke(sym, params, rtn);
+  } catch (const std::exception &e) {
+    throwGeneric(env, e.what());
   }
-  polyregion_release_object(obj);
+  env->ReleaseStringUTFChars(symbol, sym);
   env->ReleaseByteArrayElements(object, objData, JNI_ABORT);
 }

@@ -47,6 +47,22 @@ struct EXPORT Compilation {
 
 EXPORT void initialise();
 
+enum class Tpe { Int };
+
+struct EXPORT Member {
+  Tpe tpe;
+  uint32_t offset;
+  uint32_t size;
+};
+
+struct EXPORT Layout {
+  uint64_t sizeInBytes;
+  uint64_t alignment;
+  std::vector<Member> members;
+};
+
+EXPORT Layout layoutOf(std::vector<Tpe> members, bool packed);
+
 EXPORT Compilation compile(std::vector<uint8_t> ast);
 
 } // namespace polyregion::compiler

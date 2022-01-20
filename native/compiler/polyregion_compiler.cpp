@@ -11,11 +11,9 @@ static_assert(                                                //
         std::underlying_type_t<polyregion::compiler::Backend> //
         >);
 
-template <typename E> constexpr auto to_underlying(E e) noexcept { return static_cast<std::underlying_type_t<E>>(e); }
-
-const polyregion_backend POLYREGION_BACKEND_LLVM = {to_underlying(polyregion::compiler::Backend::LLVM)};
-const polyregion_backend POLYREGION_BACKEND_OPENCL = {to_underlying(polyregion::compiler::Backend::OpenCL)};
-const polyregion_backend POLYREGION_BACKEND_CUDA = {to_underlying(polyregion::compiler::Backend::CUDA)};
+const polyregion_backend POLYREGION_BACKEND_LLVM = {polyregion::to_underlying(polyregion::compiler::Backend::LLVM)};
+const polyregion_backend POLYREGION_BACKEND_OPENCL = {polyregion::to_underlying(polyregion::compiler::Backend::OpenCL)};
+const polyregion_backend POLYREGION_BACKEND_CUDA = {polyregion::to_underlying(polyregion::compiler::Backend::CUDA)};
 
 void polyregion_initialise() { polyregion::compiler::initialise(); }
 

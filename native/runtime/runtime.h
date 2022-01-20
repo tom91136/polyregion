@@ -3,13 +3,13 @@
 #include "export.h"
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
-#include <optional>
 
 namespace polyregion::runtime {
 
-enum class EXPORT Type {
+enum class EXPORT Type : uint8_t {
   Bool = 1,
   Byte,
   Char,
@@ -22,19 +22,18 @@ enum class EXPORT Type {
   Void,
 };
 
-struct ObjectRef;
-
 using TypedPointer = std::pair<Type, void *>;
 
-EXPORT std::unique_ptr<ObjectRef> loadObject(const std::vector<uint8_t> &object); //
+struct Data;
 
-EXPORT std::vector<std::pair<std::string, uint64_t>> enumerate(const ObjectRef &object); //
+class EXPORT Object {
+  std::unique_ptr<Data> data;
 
-EXPORT std::optional<std::string> invoke(const ObjectRef &object,        //
-                                         const std::string &symbol,      //
-                                         const std::vector<TypedPointer> &args, //
-                                         TypedPointer rtn                //
-
-);
+public:
+  virtual ~Object();
+  EXPORT explicit Object(const std::vector<uint8_t> &object);
+  EXPORT std::vector<std::pair<std::string, uint64_t>> enumerate();
+  EXPORT void invoke(const std::string &symbol, const std::vector<TypedPointer> &args, TypedPointer rtn);
+};
 
 } // namespace polyregion::runtime

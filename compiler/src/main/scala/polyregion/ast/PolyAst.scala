@@ -81,7 +81,7 @@ object PolyAst {
 
   enum Stmt derives MsgPack.Codec {
     case Comment(value: String)
-    case Var(name: Named, expr: Expr)
+    case Var(name: Named, expr: Option[Expr])
     case Mut(name: Term.Select, expr: Expr)
     case Update(lhs: Term.Select, idx: Term, value: Term)
     case Effect(lhs: Term.Select, name: String, args: List[Term])
