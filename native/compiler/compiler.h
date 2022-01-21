@@ -16,7 +16,7 @@ using MonoClock = std::chrono::steady_clock;
 using TimePoint = std::chrono::steady_clock::time_point;
 
 [[nodiscard]] TimePoint nowMono();
-[[nodiscard]] constexpr int64_t elapsedNs(const TimePoint &a, const TimePoint &b = nowMono());
+[[nodiscard]] int64_t elapsedNs(const TimePoint &a, const TimePoint &b = nowMono());
 [[nodiscard]] int64_t nowMs();
 
 enum class EXPORT Backend : uint8_t { Invalid = 0, LLVM, OpenCL, CUDA };

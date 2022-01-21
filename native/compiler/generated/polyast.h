@@ -1,3 +1,6 @@
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunknown-pragmas"
+
 #pragma once
 
 #include <algorithm>
@@ -762,5 +765,6 @@ struct EXPORT StructDef {
 };
 
 } // namespace polyregion::polyast
-#pragma clang diagnostic pop
+#pragma clang diagnostic pop // ide google-explicit-constructor
 
+#pragma clang diagnostic pop // -Wunknown-pragmas

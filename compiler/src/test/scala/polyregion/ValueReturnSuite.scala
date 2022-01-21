@@ -4,9 +4,7 @@ import scala.compiletime._
 
 class ValueReturnSuite extends BaseSuite {
 
-  final val Enable = true
-
-  inline def testValueReturn[A](inline r: A) = if (Enable) {
+  inline def testValueReturn[A](inline r: A) = if (Toggles.ValueReturnSuite) {
     test(s"${r.getClass}-const=$r")(assertOffload[A](r))
     val x: A = r
     test(s"${r.getClass}-ref1=$r")(assertOffload[A](x))

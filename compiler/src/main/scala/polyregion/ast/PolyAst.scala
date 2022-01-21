@@ -5,7 +5,7 @@ import polyregion.data.MsgPack
 object PolyAst {
 
   case class Sym(fqn: List[String]) derives MsgPack.Codec {
-    def repr: String = fqn.mkString(".")
+    def repr: String          = fqn.mkString(".")
   }
   object Sym {
     def apply(raw: String): Sym = {
@@ -13,6 +13,8 @@ object PolyAst {
       // normalise dollar
       Sym(raw.split('.').toList)
     }
+    def unapply(s: Sym): Option[(List[String], String)] =
+      s.fqn.lastOption.map(x => s.fqn.init -> x)
   }
 
   enum TypeKind derives MsgPack.Codec {

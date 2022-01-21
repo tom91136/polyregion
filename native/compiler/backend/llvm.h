@@ -29,7 +29,7 @@ private:
   llvm::Type *mkTpe(const Type::Any &tpe);
   llvm::Value *mkSelect(const Term::Select &select);
   llvm::Value *mkRef(const Term::Any &ref);
-  llvm::Value *mkExpr(const Expr::Any &expr, const std::string &key);
+  llvm::Value *mkExpr(const Expr::Any &expr, llvm::Function *fn, const std::string &key);
   void mkStmt(const Stmt::Any &stmt, llvm::Function *fn);
 
 public:

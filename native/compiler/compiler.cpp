@@ -16,7 +16,7 @@ static std::atomic_bool init = false;
 
 compiler::TimePoint compiler::nowMono() { return MonoClock::now(); }
 
-constexpr int64_t compiler::elapsedNs(const TimePoint &a, const TimePoint &b) {
+int64_t compiler::elapsedNs(const TimePoint &a, const TimePoint &b) {
   return std::chrono::duration_cast<std::chrono::nanoseconds>(b - a).count();
 }
 

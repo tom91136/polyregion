@@ -6,6 +6,7 @@
 #include "utils.hpp"
 #include "variants.hpp"
 
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
@@ -38,9 +39,9 @@ llvm::Type *backend::AstTransformer::mkTpe(const Type::Any &tpe) {
 llvm::Value *backend::AstTransformer::mkSelect(const Term::Select &select) {
 
   if (auto x = lut.find(qualified(select)); x != lut.end()) {
-    return std::holds_alternative<Type::Array>(*select.last.tpe)        //
-               ? x->second                                              //
-               : B.CreateLoad(x->second, qualified(select) + "_value"); //
+    return std::holds_alternative<Type::Array>(*select.last.tpe)                           //
+               ? x->second                                                                 //
+               : B.CreateLoad(mkTpe(select.tpe), x->second, qualified(select) + "_value"); //
   } else {
     return undefined(__FILE_NAME__, __LINE__, "Unseen select: " + to_string(select));
   }
@@ -64,7 +65,7 @@ llvm::Value *backend::AstTransformer::mkRef(const Term::Any &ref) {
       [&](const Term::StringConst &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); });
 }
 
-llvm::Value *backend::AstTransformer::mkExpr(const Expr::Any &expr, const std::string &key) {
+llvm::Value *backend::AstTransformer::mkExpr(const Expr::Any &expr, llvm::Function *fn, const std::string &key) {
 
   const auto binaryExpr = [&](const Term::Any &l, const Term::Any &r) { return std::make_tuple(mkRef(l), mkRef(r)); };
 
@@ -83,13 +84,23 @@ llvm::Value *backend::AstTransformer::mkExpr(const Expr::Any &expr, const std::s
     }
   };
 
+  const auto unaryIntrinsic = [&](llvm::Intrinsic::ID id, const Type::Any &tpe, const Term::Any &arg) {
+    auto cos = llvm::Intrinsic::getDeclaration(fn->getParent(), id, {mkTpe(tpe)});
+    return B.CreateCall(cos, mkRef(arg));
+  };
+
   return variants::total(
       *expr, //
 
-      [&](const Expr::Sin &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "Sin"); },
-      [&](const Expr::Cos &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "Cos"); },
-      [&](const Expr::Tan &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "Tan"); },
-      [&](const Expr::Abs &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "Abs"); },
+      [&](const Expr::Sin &x) -> llvm::Value * { return unaryIntrinsic(llvm::Intrinsic::sin, x.rtn, x.lhs); },
+      [&](const Expr::Cos &x) -> llvm::Value * { return unaryIntrinsic(llvm::Intrinsic::cos, x.rtn, x.lhs); },
+      [&](const Expr::Tan &x) -> llvm::Value * {
+        // XXX apparently there isn't a tan in LLVM so we do the trig identities here for now
+        auto sin = unaryIntrinsic(llvm::Intrinsic::sin, x.rtn, x.lhs);
+        auto cos = unaryIntrinsic(llvm::Intrinsic::cos, x.rtn, x.lhs);
+        return B.CreateFDiv(sin, cos, key + "_tan");
+      },
+      [&](const Expr::Abs &x) -> llvm::Value * { return unaryIntrinsic(llvm::Intrinsic::abs, x.rtn, x.lhs); },
 
       [&](const Expr::Add &x) -> llvm::Value * {
         return binaryNumOp(
@@ -121,7 +132,7 @@ llvm::Value *backend::AstTransformer::mkExpr(const Expr::Any &expr, const std::s
             [&](auto l, auto r) { return B.CreateSRem(l, r, key + "_%"); },
             [&](auto l, auto r) { return B.CreateFRem(l, r, key + "_%"); });
       },
-      [&](const Expr::Pow &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "Pow"); },
+      [&](const Expr::Pow &x) -> llvm::Value * { return unaryIntrinsic(llvm::Intrinsic::pow, x.rtn, x.lhs); },
 
       [](const Expr::BNot &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "BNot"); },
       [](const Expr::BAnd &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "BAnd"); },
@@ -152,8 +163,9 @@ llvm::Value *backend::AstTransformer::mkExpr(const Expr::Any &expr, const std::s
         return undefined(__FILE_NAME__, __LINE__, "Unimplemented invoke:`" + x.name + "`");
       },
       [&](const Expr::Index &x) -> llvm::Value * {
-        auto ptr = B.CreateInBoundsGEP(mkSelect(x.lhs), {mkRef(x.idx)}, key + "_ptr");
-        return B.CreateLoad(ptr, key + "_value");
+        auto tpe = mkTpe(x.tpe);
+        auto ptr = B.CreateInBoundsGEP(tpe, mkSelect(x.lhs), mkRef(x.idx), key + "_ptr");
+        return B.CreateLoad(tpe, ptr, key + "_value");
       });
 }
 
@@ -166,27 +178,27 @@ void backend::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) 
       [&](const Stmt::Var &x) {
         if (std::holds_alternative<Type::Array>(*x.name.tpe)) {
           if (x.expr) {
-            lut[x.name.symbol] = mkExpr(*x.expr, x.name.symbol);
+            lut[x.name.symbol] = mkExpr(*x.expr, fn, x.name.symbol);
           } else {
             undefined(__FILE_NAME__, __LINE__, "var array with no expr?");
           }
         } else {
           auto stack = B.CreateAlloca(mkTpe(x.name.tpe), nullptr, x.name.symbol + "_stack_ptr");
           if (x.expr) {
-            auto val = mkExpr(*x.expr, x.name.symbol + "_var_rhs");
+            auto val = mkExpr(*x.expr, fn, x.name.symbol + "_var_rhs");
             B.CreateStore(val, stack);
           }
           lut[x.name.symbol] = stack;
         }
       },
       [&](const Stmt::Mut &x) {
-        auto expr = mkExpr(x.expr, qualified(x.name) + "_mut");
+        auto expr = mkExpr(x.expr, fn, qualified(x.name) + "_mut");
         auto select = lut[qualified(x.name)]; // XXX do NOT allocate (mkSelect) here, we're mutating!
         B.CreateStore(expr, select);
       },
       [&](const Stmt::Update &x) {
         auto select = x.lhs;
-        auto ptr = B.CreateInBoundsGEP(mkSelect(select), {mkRef(x.idx)}, qualified(select) + "_ptr");
+        auto ptr = B.CreateInBoundsGEP(mkTpe(select.tpe), mkSelect(select), mkRef(x.idx), qualified(select) + "_ptr");
         B.CreateStore(mkRef(x.value), ptr);
       },
       [&](const Stmt::Effect &x) {
@@ -203,7 +215,7 @@ void backend::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) 
         B.CreateBr(loopTest);
         {
           B.SetInsertPoint(loopTest);
-          auto continue_ = mkExpr(x.cond, "loop");
+          auto continue_ = mkExpr(x.cond, fn, "loop");
           B.CreateCondBr(continue_, loopBody, loopExit);
         }
         {
@@ -220,7 +232,7 @@ void backend::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) 
         auto condTrue = llvm::BasicBlock::Create(C, "cond_true", fn);
         auto condFalse = llvm::BasicBlock::Create(C, "cond_false", fn);
         auto condExit = llvm::BasicBlock::Create(C, "cond_exit", fn);
-        B.CreateCondBr(mkExpr(x.cond, "cond"), condTrue, condFalse);
+        B.CreateCondBr(mkExpr(x.cond, fn, "cond"), condTrue, condFalse);
         {
           B.SetInsertPoint(condTrue);
           for (auto &body : x.trueBr)
@@ -239,7 +251,7 @@ void backend::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) 
         if (std::holds_alternative<Type::Unit>(*tpe(x.value))) {
           B.CreateRetVoid();
         } else {
-          B.CreateRet(mkExpr(x.value, "return"));
+          B.CreateRet(mkExpr(x.value, fn, "return"));
         }
       } //
 

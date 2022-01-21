@@ -5,9 +5,7 @@ import scala.compiletime._
 
 class ControlFlowSuite extends BaseSuite {
 
-  final val Enable = true
-
-  inline def testExpr[A](inline name : String)(inline f: => A) = if (Enable) {
+  inline def testExpr[A](inline name : String)(inline f: => A) = if (Toggles.ControlFlowSuite) {
     test(name)(assertOffload[A](f))
   }
 

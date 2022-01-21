@@ -104,7 +104,10 @@ object Cpp {
             |    return {};
             |}""".stripMargin
 
-      s"""|#pragma once
+      s"""|#pragma clang diagnostic push
+          |#pragma clang diagnostic ignored "-Wunknown-pragmas"
+          |
+          |#pragma once
           |
           |$includes
           |#include "export.h"
@@ -115,8 +118,9 @@ object Cpp {
           |#pragma ide diagnostic ignored "google-explicit-constructor"
           |${stmts.sym("\n", "\n", "\n")}
           |} // namespace $namespace
-          |#pragma clang diagnostic pop
+          |#pragma clang diagnostic pop // ide google-explicit-constructor
           |
+          |#pragma clang diagnostic pop // -Wunknown-pragmas
           |""".stripMargin
     }
     def emitImpl(namespace: String, headerName: String, xs: List[StructSource]) =

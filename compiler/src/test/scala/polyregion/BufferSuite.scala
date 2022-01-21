@@ -6,15 +6,9 @@ import scala.reflect.ClassTag
 
 class BufferSuite extends BaseSuite {
 
-  final val Enable = true
   final val FillN  = 20
 
-  inline def unrollInclusive[U](inline n: Int)(inline f: Int => Unit): Unit = {
-    f(n)
-    if (n > 0) unrollInclusive(n - 1)(f)
-  }
-
-  inline def assertFill[A <: AnyVal](inline n: Int, inline expected: A)(using C: ClassTag[A]) = if (Enable) {
+  inline def assertFill[A <: AnyVal](inline n: Int, inline expected: A)(using C: ClassTag[A]) = if (Toggles.BufferSuite) {
     test(s"${C.runtimeClass}-fill-x$n=$expected") {
       val xs = Buffer.ofDim[A](n)
       assertEquals(

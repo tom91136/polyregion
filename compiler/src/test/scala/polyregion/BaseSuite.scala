@@ -13,6 +13,11 @@ trait BaseSuite extends munit.FunSuite {
       assertEquals(a, e)
   }
 
+  inline def unrollInclusive[U](inline n: Int)(inline f: Int => Unit): Unit = {
+    f(n)
+    if (n > 0) unrollInclusive(n - 1)(f)
+  }
+
   inline def assertOffload[A](inline f: => A) =
     assertValEquals(polyregion.compileTime.offload[A](f), f)
 

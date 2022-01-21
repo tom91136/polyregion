@@ -36,22 +36,69 @@ class AstTransformer(using val q: Quotes) {
 
   val BufferTpe = PolyAst.Sym[Buffer[_]]
 
-  // we may encounter singleton types hence maybe term
-  def resolveTpe(trace: List[Tree] = Nil)(repr: TypeRepr): Deferred[(Option[PolyAst.Term], PolyAst.Type)] = {
+  object Symbols {
+    val JavaLang  = "java" :: "lang" :: Nil
+    val Scala     = "scala" :: Nil
+    val ScalaMath = "scala" :: "math" :: "package$" :: Nil
+  }
 
-    @tailrec def resolveSym(ref: TypeRepr): Result[PolyAst.Sym] = ref match {
-      case ThisType(tpe) => resolveSym(tpe)
-      case tpe: NamedType =>
-        tpe.classSymbol match {
-          case None => s"Named type is not a class: ${tpe}".fail
-          case Some(sym) if sym.name == "<root>" => // discard root package
-            resolveSym(tpe.qualifier)
-          case Some(sym) => PolyAst.Sym(sym.fullName).success
+  def resolveIntrinsics(ctx: Context)(ap: Apply): Deferred[(Int, Option[PolyAst.Term], List[PolyAst.Stmt])] = {
+
+    val lhsSym   = ap.fun.symbol
+    val rhsTerms = ap.args
+
+    import PolyAst.Sym
+
+    (Sym(lhsSym.fullName), rhsTerms) match {
+      case (Sym(Symbols.ScalaMath, op), x :: Nil) => // unary scala.math ops
+        resolveTerm(ctx.down(ap))(x).subflatMap {
+          case (d, None, tree) => "Arg resolved to none".fail
+          case (d, Some(ref0), tree0) =>
+            val name = ctx.name(ref0.tpe)
+            val tree = PolyAst.Stmt.Var(
+              name,
+              Some(op match {
+                case "sin" => PolyAst.Expr.Sin(ref0, ref0.tpe)
+                case "cos" => PolyAst.Expr.Cos(ref0, ref0.tpe)
+                case "tan" => PolyAst.Expr.Tan(ref0, ref0.tpe)
+                case "abs" => PolyAst.Expr.Abs(ref0, ref0.tpe)
+              })
+            )
+            (d + 1, Some(PolyAst.Term.Select(Nil, name)), tree0 :+ tree).success
         }
-      // case NoPrefix()    => None.success
-      case invalid => s"Invalid type: ${invalid}\nTrace:\n  ${trace.mkString("\n  ")}".fail
+
+      case (
+            Sym(
+              Symbols.Scala :+ (
+                "Byte" | "Short" | "Int" | "Long" | "Float" | "Double" | "Char"
+              ),
+              op
+            ),
+            x :: Nil
+          ) =>
+
+
+        ???
+      case bad => ???
     }
 
+  }
+
+  @tailrec final def resolveSym(ref: TypeRepr): Result[PolyAst.Sym] = ref.dealias.simplified match {
+    case ThisType(tpe) => resolveSym(tpe)
+    case tpe: NamedType =>
+      tpe.classSymbol match {
+        case None => s"Named type is not a class: ${tpe}".fail
+        case Some(sym) if sym.name == "<root>" => // discard root package
+          resolveSym(tpe.qualifier)
+        case Some(sym) => PolyAst.Sym(sym.fullName).success
+      }
+    // case NoPrefix()    => None.success
+    case invalid => s"Invalid type: ${invalid}".fail
+  }
+
+  // we may encounter singleton types hence maybe term
+  def resolveTpe(trace: List[Tree] = Nil)(repr: TypeRepr): Deferred[(Option[PolyAst.Term], PolyAst.Type)] =
     repr.dealias.widenTermRefByName.simplified match {
       case andOr: AndOrType =>
         for {
@@ -90,22 +137,21 @@ class AstTransformer(using val q: Quotes) {
       case expr =>
         resolveSym(expr)
           .map {
-            case PolyAst.Sym("scala" :: "Unit" :: Nil)            => PolyAst.Type.Unit
-            case PolyAst.Sym("scala" :: "Boolean" :: Nil)         => PolyAst.Type.Bool
-            case PolyAst.Sym("scala" :: "Byte" :: Nil)            => PolyAst.Type.Byte
-            case PolyAst.Sym("scala" :: "Short" :: Nil)           => PolyAst.Type.Short
-            case PolyAst.Sym("scala" :: "Int" :: Nil)             => PolyAst.Type.Int
-            case PolyAst.Sym("scala" :: "Long" :: Nil)            => PolyAst.Type.Long
-            case PolyAst.Sym("scala" :: "Float" :: Nil)           => PolyAst.Type.Float
-            case PolyAst.Sym("scala" :: "Double" :: Nil)          => PolyAst.Type.Double
-            case PolyAst.Sym("scala" :: "Char" :: Nil)            => PolyAst.Type.Char
-            case PolyAst.Sym("java" :: "lang" :: "String" :: Nil) => PolyAst.Type.String
-            case sym                                              => PolyAst.Type.Struct(sym, Nil)
+            case PolyAst.Sym(Symbols.Scala, "Unit")      => PolyAst.Type.Unit
+            case PolyAst.Sym(Symbols.Scala, "Boolean")   => PolyAst.Type.Bool
+            case PolyAst.Sym(Symbols.Scala, "Byte")      => PolyAst.Type.Byte
+            case PolyAst.Sym(Symbols.Scala, "Short")     => PolyAst.Type.Short
+            case PolyAst.Sym(Symbols.Scala, "Int")       => PolyAst.Type.Int
+            case PolyAst.Sym(Symbols.Scala, "Long")      => PolyAst.Type.Long
+            case PolyAst.Sym(Symbols.Scala, "Float")     => PolyAst.Type.Float
+            case PolyAst.Sym(Symbols.Scala, "Double")    => PolyAst.Type.Double
+            case PolyAst.Sym(Symbols.Scala, "Char")      => PolyAst.Type.Char
+            case PolyAst.Sym(Symbols.JavaLang, "String") => PolyAst.Type.String
+            case sym                                     => PolyAst.Type.Struct(sym, Nil)
           }
           .map(None -> _)
           .deferred
     }
-  }
 
   case class Context(depth: Int, trace: List[Tree], refs: Map[Ref, Reference]) {
     def log(t: Tree)   = copy(trace = t :: trace)
@@ -113,6 +159,9 @@ class AstTransformer(using val q: Quotes) {
 
     def down(t: Tree)           = log(t).at(depth + 1)
     def at(t: Tree, depth: Int) = copy(trace = t :: trace, depth = depth)
+
+    def name(tpe: PolyAst.Type) = PolyAst.Named(s"v$depth", tpe)
+
   }
 
   def resolveTrees(ctx: Context)(args: List[Tree]): Deferred[(Int, Option[PolyAst.Term], List[PolyAst.Stmt])] =
@@ -183,7 +232,8 @@ class AstTransformer(using val q: Quotes) {
           s"[depth=${ctx.depth}] Ref ${x} was not identified at closure args stage ".fail.deferred
 
       }
-    case ap @ Apply(Select(qualifier, name), args) =>
+
+    case ap @ Apply(s @ Select(qualifier, name), args) =>
       for {
         (_, tpe)                      <- resolveTpe(term :: ctx.trace)(ap.tpe)
         (lhsDepth, lhsRef, lhsTrees)  <- resolveTerm(ctx.down(term))(qualifier) // go down here
@@ -228,6 +278,7 @@ class AstTransformer(using val q: Quotes) {
           val ref  = PolyAst.Term.Select(Nil, path)
           (maxDepth, Some(ref), existingTree :+ tree)
         case (name, lhs, Some(rhs) :: Nil, tpe) => // binary op
+          println(s"apply, q=${s.symbol.fullName} = ${resolveSym(s.tpe)}; $ap")
           val term = name match {
             case "+"  => PolyAst.Expr.Add(lhs, rhs, tpe)
             case "-"  => PolyAst.Expr.Sub(lhs, rhs, tpe)
@@ -252,6 +303,9 @@ class AstTransformer(using val q: Quotes) {
           val ref = PolyAst.Term.Select(Nil, path)
           (maxDepth, Some(ref), existingTree :+ tree)
       }
+    case ap @ Apply(x, args) =>
+      println(s"apply, q=${x.tpe}; $args")
+      ???
     case Block(stat, expr) => // stat : List[Statement]
       for {
         (statDepth, _, statTrees) <- resolveTrees(ctx.log(term))(stat)
