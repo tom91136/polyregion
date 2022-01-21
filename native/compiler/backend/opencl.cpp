@@ -48,16 +48,27 @@ std::string backend::OpenCL::mkExpr(const Expr::Any &expr, const std::string &ke
       [&](const Expr::Sin &x) { return "sin(" + mkRef(x.lhs) + ")"; }, //
       [&](const Expr::Cos &x) { return "cos(" + mkRef(x.lhs) + ")"; }, //
       [&](const Expr::Tan &x) { return "tan(" + mkRef(x.lhs) + ")"; }, //
+      [&](const Expr::Abs &x) { return "abs(" + mkRef(x.lhs) + ")"; }, //
 
       [&](const Expr::Add &x) { return mkRef(x.lhs) + " + " + mkRef(x.rhs); }, //
       [&](const Expr::Sub &x) { return mkRef(x.lhs) + " - " + mkRef(x.rhs); }, //
       [&](const Expr::Div &x) { return mkRef(x.lhs) + " / " + mkRef(x.rhs); }, //
       [&](const Expr::Mul &x) { return mkRef(x.lhs) + " * " + mkRef(x.rhs); }, //
-      [&](const Expr::Mod &x) { return mkRef(x.lhs) + " % " + mkRef(x.rhs); }, //
+      [&](const Expr::Rem &x) { return mkRef(x.lhs) + " % " + mkRef(x.rhs); }, //
       [&](const Expr::Pow &x) { return mkRef(x.lhs) + " ^ " + mkRef(x.rhs); }, //
 
-      [&](const Expr::Inv &x) { return "!(" + mkRef(x.lhs) + ")"; },            //
+      [](const Expr::BNot &x) { return "^" + repr(x.lhs); },                 //
+      [](const Expr::BAnd &x) { return repr(x.lhs) + " & " + repr(x.rhs); }, //
+      [](const Expr::BOr &x) { return repr(x.lhs) + " | " + repr(x.rhs); },  //
+      [](const Expr::BXor &x) { return repr(x.lhs) + " ^ " + repr(x.rhs); }, //
+      [](const Expr::BSL &x) { return repr(x.lhs) + " >> " + repr(x.rhs); }, //
+      [](const Expr::BSR &x) { return repr(x.lhs) + " << " + repr(x.rhs); }, //
+
+      [&](const Expr::Not &x) { return "!(" + mkRef(x.lhs) + ")"; },            //
       [&](const Expr::Eq &x) { return mkRef(x.lhs) + " == " + mkRef(x.rhs); },  //
+      [](const Expr::Neq &x) { return repr(x.lhs) + " != " + repr(x.rhs); },    //
+      [](const Expr::And &x) { return repr(x.lhs) + " && " + repr(x.rhs); },    //
+      [](const Expr::Or &x) { return repr(x.lhs) + " || " + repr(x.rhs); },     //
       [&](const Expr::Lte &x) { return mkRef(x.lhs) + " <= " + mkRef(x.rhs); }, //
       [&](const Expr::Gte &x) { return mkRef(x.lhs) + " >= " + mkRef(x.rhs); }, //
       [&](const Expr::Lt &x) { return mkRef(x.lhs) + " < " + mkRef(x.rhs); },   //
@@ -101,15 +112,15 @@ std::string backend::OpenCL::mkStmt(const Stmt::Any &stmt) {
       [&](const Stmt::Break &x) { return "break;"s; },   //
       [&](const Stmt::Cont &x) { return "continue;"s; }, //
       [&](const Stmt::Cond &x) {
-        return "if(" + repr(x.cond) + ") { \n" +
+        return "if(" + mkExpr(x.cond, "if") + ") { \n" +
                mk_string<Stmt::Any>(
-                   x.trueBr, [&](auto x) { return repr(x); }, "\n") +
+                   x.trueBr, [&](auto x) { return mkStmt(x); }, "\n") +
                "} else {\n" +
                mk_string<Stmt::Any>(
-                   x.falseBr, [&](auto x) { return repr(x); }, "\n") +
+                   x.falseBr, [&](auto x) { return mkStmt(x); }, "\n") +
                "}";
       },
-      [&](const Stmt::Return &x) { return "return " + repr(x.value); } //
+      [&](const Stmt::Return &x) { return "return " + mkExpr(x.value, "rtn") + ";"; } //
   );
 }
 

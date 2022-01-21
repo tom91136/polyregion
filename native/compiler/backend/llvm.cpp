@@ -86,9 +86,10 @@ llvm::Value *backend::AstTransformer::mkExpr(const Expr::Any &expr, const std::s
   return variants::total(
       *expr, //
 
-      [&](const Expr::Sin &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); },
-      [&](const Expr::Cos &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); },
-      [&](const Expr::Tan &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); },
+      [&](const Expr::Sin &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "Sin"); },
+      [&](const Expr::Cos &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "Cos"); },
+      [&](const Expr::Tan &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "Tan"); },
+      [&](const Expr::Abs &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "Abs"); },
 
       [&](const Expr::Add &x) -> llvm::Value * {
         return binaryNumOp(
@@ -114,18 +115,28 @@ llvm::Value *backend::AstTransformer::mkExpr(const Expr::Any &expr, const std::s
             [&](auto l, auto r) { return B.CreateMul(l, r, key + "_/"); },
             [&](auto l, auto r) { return B.CreateFMul(l, r, key + "_/"); });
       },
-      [&](const Expr::Mod &x) -> llvm::Value * {
+      [&](const Expr::Rem &x) -> llvm::Value * {
         return binaryNumOp(
             x.lhs, x.rhs, x.rtn, //
             [&](auto l, auto r) { return B.CreateSRem(l, r, key + "_%"); },
             [&](auto l, auto r) { return B.CreateFRem(l, r, key + "_%"); });
       },
-      [&](const Expr::Pow &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); },
+      [&](const Expr::Pow &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "Pow"); },
 
-      [&](const Expr::Inv &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); },
-      [&](const Expr::Eq &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); },
-      [&](const Expr::Lte &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); },
-      [&](const Expr::Gte &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); },
+      [](const Expr::BNot &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "BNot"); },
+      [](const Expr::BAnd &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "BAnd"); },
+      [](const Expr::BOr &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "BOr"); },
+      [](const Expr::BXor &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "BXor"); },
+      [](const Expr::BSL &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "BSL"); },
+      [](const Expr::BSR &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "BSR"); },
+
+      [&](const Expr::Not &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "Inv"); },
+      [&](const Expr::Eq &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "Eq"); },
+      [](const Expr::Neq &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "Neq"); },
+      [](const Expr::And &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "And"); },
+      [](const Expr::Or &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "Or"); },
+      [&](const Expr::Lte &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "Lte"); },
+      [&](const Expr::Gte &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "Gte"); },
       [&](const Expr::Lt &x) -> llvm::Value * {
         auto [lhs, rhs] = binaryExpr(x.lhs, x.rhs);
         return B.CreateICmpSLT(lhs, rhs, key + "_<");

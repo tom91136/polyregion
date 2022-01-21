@@ -69,16 +69,27 @@ using std::string;
       [](const Expr::Sin &x) { return "sin(" + repr(x.lhs) + ")"; },
       [](const Expr::Cos &x) { return "cos(" + repr(x.lhs) + ")"; },
       [](const Expr::Tan &x) { return "tan(" + repr(x.lhs) + ")"; },
+      [](const Expr::Abs &x) { return "abs(" + repr(x.lhs) + ")"; },
 
       [](const Expr::Add &x) { return repr(x.lhs) + " + " + repr(x.rhs); },
       [](const Expr::Sub &x) { return repr(x.lhs) + " - " + repr(x.rhs); },
       [](const Expr::Div &x) { return repr(x.lhs) + " / " + repr(x.rhs); },
       [](const Expr::Mul &x) { return repr(x.lhs) + " * " + repr(x.rhs); },
-      [](const Expr::Mod &x) { return repr(x.lhs) + " % " + repr(x.rhs); },
+      [](const Expr::Rem &x) { return repr(x.lhs) + " % " + repr(x.rhs); },
       [](const Expr::Pow &x) { return repr(x.lhs) + " ^ " + repr(x.rhs); },
 
-      [](const Expr::Inv &x) { return "!(" + repr(x.lhs) + ")"; },
+      [](const Expr::BNot &x) { return "^" + repr(x.lhs); },
+      [](const Expr::BAnd &x) { return repr(x.lhs) + " & " + repr(x.rhs); },
+      [](const Expr::BOr &x) { return repr(x.lhs) + " | " + repr(x.rhs); },
+      [](const Expr::BXor &x) { return repr(x.lhs) + " ^ " + repr(x.rhs); },
+      [](const Expr::BSL &x) { return repr(x.lhs) + " >> " + repr(x.rhs); },
+      [](const Expr::BSR &x) { return repr(x.lhs) + " << " + repr(x.rhs); },
+
+      [](const Expr::Not &x) { return "!(" + repr(x.lhs) + ")"; },
       [](const Expr::Eq &x) { return repr(x.lhs) + " == " + repr(x.rhs); },
+      [](const Expr::Neq &x) { return repr(x.lhs) + " != " + repr(x.rhs); },
+      [](const Expr::And &x) { return repr(x.lhs) + " && " + repr(x.rhs); },
+      [](const Expr::Or &x) { return repr(x.lhs) + " || " + repr(x.rhs); },
       [](const Expr::Lte &x) { return repr(x.lhs) + " <= " + repr(x.rhs); },
       [](const Expr::Gte &x) { return repr(x.lhs) + " >= " + repr(x.rhs); },
       [](const Expr::Lt &x) { return repr(x.lhs) + " < " + repr(x.rhs); },
@@ -98,7 +109,7 @@ using std::string;
   return variants::total(
       *stmt, //
       [](const Stmt::Comment &x) { return "// " + x.value; },
-      [](const Stmt::Var &x) { return "var " + repr(x.name) + " = " +  (x.expr ?  repr(*x.expr) : "_") ; },
+      [](const Stmt::Var &x) { return "var " + repr(x.name) + " = " + (x.expr ? repr(*x.expr) : "_"); },
       [](const Stmt::Mut &x) { return repr(x.name) + " := " + repr(x.expr); },
       [](const Stmt::Update &x) { return repr(x.lhs) + "[" + repr(x.idx) + "] = " + repr(x.value); },
       [](const Stmt::Effect &x) {

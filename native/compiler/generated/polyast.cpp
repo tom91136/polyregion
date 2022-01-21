@@ -344,6 +344,18 @@ bool Expr::operator==(const Expr::Tan &l, const Expr::Tan &r) {
   return *l.lhs == *r.lhs && *l.rtn == *r.rtn;
 }
 
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Abs &x) {
+  os << "Abs(";
+  os << x.lhs;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Expr::operator==(const Expr::Abs &l, const Expr::Abs &r) { 
+  return *l.lhs == *r.lhs && *l.rtn == *r.rtn;
+}
+
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Add &x) {
   os << "Add(";
   os << x.lhs;
@@ -400,8 +412,8 @@ bool Expr::operator==(const Expr::Div &l, const Expr::Div &r) {
   return *l.lhs == *r.lhs && *l.rhs == *r.rhs && *l.rtn == *r.rtn;
 }
 
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::Mod &x) {
-  os << "Mod(";
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Rem &x) {
+  os << "Rem(";
   os << x.lhs;
   os << ',';
   os << x.rhs;
@@ -410,7 +422,7 @@ std::ostream &Expr::operator<<(std::ostream &os, const Expr::Mod &x) {
   os << ')';
   return os;
 }
-bool Expr::operator==(const Expr::Mod &l, const Expr::Mod &r) { 
+bool Expr::operator==(const Expr::Rem &l, const Expr::Rem &r) { 
   return *l.lhs == *r.lhs && *l.rhs == *r.rhs && *l.rtn == *r.rtn;
 }
 
@@ -428,13 +440,95 @@ bool Expr::operator==(const Expr::Pow &l, const Expr::Pow &r) {
   return *l.lhs == *r.lhs && *l.rhs == *r.rhs && *l.rtn == *r.rtn;
 }
 
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::Inv &x) {
-  os << "Inv(";
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::BNot &x) {
+  os << "BNot(";
+  os << x.lhs;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Expr::operator==(const Expr::BNot &l, const Expr::BNot &r) { 
+  return *l.lhs == *r.lhs && *l.rtn == *r.rtn;
+}
+
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::BAnd &x) {
+  os << "BAnd(";
+  os << x.lhs;
+  os << ',';
+  os << x.rhs;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Expr::operator==(const Expr::BAnd &l, const Expr::BAnd &r) { 
+  return *l.lhs == *r.lhs && *l.rhs == *r.rhs && *l.rtn == *r.rtn;
+}
+
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::BOr &x) {
+  os << "BOr(";
+  os << x.lhs;
+  os << ',';
+  os << x.rhs;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Expr::operator==(const Expr::BOr &l, const Expr::BOr &r) { 
+  return *l.lhs == *r.lhs && *l.rhs == *r.rhs && *l.rtn == *r.rtn;
+}
+
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::BXor &x) {
+  os << "BXor(";
+  os << x.lhs;
+  os << ',';
+  os << x.rhs;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Expr::operator==(const Expr::BXor &l, const Expr::BXor &r) { 
+  return *l.lhs == *r.lhs && *l.rhs == *r.rhs && *l.rtn == *r.rtn;
+}
+
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::BSL &x) {
+  os << "BSL(";
+  os << x.lhs;
+  os << ',';
+  os << x.rhs;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Expr::operator==(const Expr::BSL &l, const Expr::BSL &r) { 
+  return *l.lhs == *r.lhs && *l.rhs == *r.rhs && *l.rtn == *r.rtn;
+}
+
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::BSR &x) {
+  os << "BSR(";
+  os << x.lhs;
+  os << ',';
+  os << x.rhs;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Expr::operator==(const Expr::BSR &l, const Expr::BSR &r) { 
+  return *l.lhs == *r.lhs && *l.rhs == *r.rhs && *l.rtn == *r.rtn;
+}
+
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Not &x) {
+  os << "Not(";
   os << x.lhs;
   os << ')';
   return os;
 }
-bool Expr::operator==(const Expr::Inv &l, const Expr::Inv &r) { 
+bool Expr::operator==(const Expr::Not &l, const Expr::Not &r) { 
   return *l.lhs == *r.lhs;
 }
 
@@ -447,6 +541,42 @@ std::ostream &Expr::operator<<(std::ostream &os, const Expr::Eq &x) {
   return os;
 }
 bool Expr::operator==(const Expr::Eq &l, const Expr::Eq &r) { 
+  return *l.lhs == *r.lhs && *l.rhs == *r.rhs;
+}
+
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Neq &x) {
+  os << "Neq(";
+  os << x.lhs;
+  os << ',';
+  os << x.rhs;
+  os << ')';
+  return os;
+}
+bool Expr::operator==(const Expr::Neq &l, const Expr::Neq &r) { 
+  return *l.lhs == *r.lhs && *l.rhs == *r.rhs;
+}
+
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::And &x) {
+  os << "And(";
+  os << x.lhs;
+  os << ',';
+  os << x.rhs;
+  os << ')';
+  return os;
+}
+bool Expr::operator==(const Expr::And &l, const Expr::And &r) { 
+  return *l.lhs == *r.lhs && *l.rhs == *r.rhs;
+}
+
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Or &x) {
+  os << "Or(";
+  os << x.lhs;
+  os << ',';
+  os << x.rhs;
+  os << ')';
+  return os;
+}
+bool Expr::operator==(const Expr::Or &l, const Expr::Or &r) { 
   return *l.lhs == *r.lhs && *l.rhs == *r.rhs;
 }
 

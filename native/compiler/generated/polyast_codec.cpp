@@ -413,6 +413,18 @@ json Expr::tan_to_json(const Expr::Tan& x) {
   return json::array({lhs, rtn});
 }
 
+Expr::Abs Expr::abs_from_json(const json& j) { 
+  auto lhs =  Term::any_from_json(j.at(0));
+  auto rtn =  Type::any_from_json(j.at(1));
+  return {lhs, rtn};
+}
+
+json Expr::abs_to_json(const Expr::Abs& x) { 
+  auto lhs =  Term::any_to_json(x.lhs);
+  auto rtn =  Type::any_to_json(x.rtn);
+  return json::array({lhs, rtn});
+}
+
 Expr::Add Expr::add_from_json(const json& j) { 
   auto lhs =  Term::any_from_json(j.at(0));
   auto rhs =  Term::any_from_json(j.at(1));
@@ -469,14 +481,14 @@ json Expr::div_to_json(const Expr::Div& x) {
   return json::array({lhs, rhs, rtn});
 }
 
-Expr::Mod Expr::mod_from_json(const json& j) { 
+Expr::Rem Expr::rem_from_json(const json& j) { 
   auto lhs =  Term::any_from_json(j.at(0));
   auto rhs =  Term::any_from_json(j.at(1));
   auto rtn =  Type::any_from_json(j.at(2));
   return {lhs, rhs, rtn};
 }
 
-json Expr::mod_to_json(const Expr::Mod& x) { 
+json Expr::rem_to_json(const Expr::Rem& x) { 
   auto lhs =  Term::any_to_json(x.lhs);
   auto rhs =  Term::any_to_json(x.rhs);
   auto rtn =  Type::any_to_json(x.rtn);
@@ -497,12 +509,94 @@ json Expr::pow_to_json(const Expr::Pow& x) {
   return json::array({lhs, rhs, rtn});
 }
 
-Expr::Inv Expr::inv_from_json(const json& j) { 
+Expr::BNot Expr::bnot_from_json(const json& j) { 
   auto lhs =  Term::any_from_json(j.at(0));
-  return Expr::Inv(lhs);
+  auto rtn =  Type::any_from_json(j.at(1));
+  return {lhs, rtn};
 }
 
-json Expr::inv_to_json(const Expr::Inv& x) { 
+json Expr::bnot_to_json(const Expr::BNot& x) { 
+  auto lhs =  Term::any_to_json(x.lhs);
+  auto rtn =  Type::any_to_json(x.rtn);
+  return json::array({lhs, rtn});
+}
+
+Expr::BAnd Expr::band_from_json(const json& j) { 
+  auto lhs =  Term::any_from_json(j.at(0));
+  auto rhs =  Term::any_from_json(j.at(1));
+  auto rtn =  Type::any_from_json(j.at(2));
+  return {lhs, rhs, rtn};
+}
+
+json Expr::band_to_json(const Expr::BAnd& x) { 
+  auto lhs =  Term::any_to_json(x.lhs);
+  auto rhs =  Term::any_to_json(x.rhs);
+  auto rtn =  Type::any_to_json(x.rtn);
+  return json::array({lhs, rhs, rtn});
+}
+
+Expr::BOr Expr::bor_from_json(const json& j) { 
+  auto lhs =  Term::any_from_json(j.at(0));
+  auto rhs =  Term::any_from_json(j.at(1));
+  auto rtn =  Type::any_from_json(j.at(2));
+  return {lhs, rhs, rtn};
+}
+
+json Expr::bor_to_json(const Expr::BOr& x) { 
+  auto lhs =  Term::any_to_json(x.lhs);
+  auto rhs =  Term::any_to_json(x.rhs);
+  auto rtn =  Type::any_to_json(x.rtn);
+  return json::array({lhs, rhs, rtn});
+}
+
+Expr::BXor Expr::bxor_from_json(const json& j) { 
+  auto lhs =  Term::any_from_json(j.at(0));
+  auto rhs =  Term::any_from_json(j.at(1));
+  auto rtn =  Type::any_from_json(j.at(2));
+  return {lhs, rhs, rtn};
+}
+
+json Expr::bxor_to_json(const Expr::BXor& x) { 
+  auto lhs =  Term::any_to_json(x.lhs);
+  auto rhs =  Term::any_to_json(x.rhs);
+  auto rtn =  Type::any_to_json(x.rtn);
+  return json::array({lhs, rhs, rtn});
+}
+
+Expr::BSL Expr::bsl_from_json(const json& j) { 
+  auto lhs =  Term::any_from_json(j.at(0));
+  auto rhs =  Term::any_from_json(j.at(1));
+  auto rtn =  Type::any_from_json(j.at(2));
+  return {lhs, rhs, rtn};
+}
+
+json Expr::bsl_to_json(const Expr::BSL& x) { 
+  auto lhs =  Term::any_to_json(x.lhs);
+  auto rhs =  Term::any_to_json(x.rhs);
+  auto rtn =  Type::any_to_json(x.rtn);
+  return json::array({lhs, rhs, rtn});
+}
+
+Expr::BSR Expr::bsr_from_json(const json& j) { 
+  auto lhs =  Term::any_from_json(j.at(0));
+  auto rhs =  Term::any_from_json(j.at(1));
+  auto rtn =  Type::any_from_json(j.at(2));
+  return {lhs, rhs, rtn};
+}
+
+json Expr::bsr_to_json(const Expr::BSR& x) { 
+  auto lhs =  Term::any_to_json(x.lhs);
+  auto rhs =  Term::any_to_json(x.rhs);
+  auto rtn =  Type::any_to_json(x.rtn);
+  return json::array({lhs, rhs, rtn});
+}
+
+Expr::Not Expr::not_from_json(const json& j) { 
+  auto lhs =  Term::any_from_json(j.at(0));
+  return Expr::Not(lhs);
+}
+
+json Expr::not_to_json(const Expr::Not& x) { 
   auto lhs =  Term::any_to_json(x.lhs);
   return json::array({lhs});
 }
@@ -514,6 +608,42 @@ Expr::Eq Expr::eq_from_json(const json& j) {
 }
 
 json Expr::eq_to_json(const Expr::Eq& x) { 
+  auto lhs =  Term::any_to_json(x.lhs);
+  auto rhs =  Term::any_to_json(x.rhs);
+  return json::array({lhs, rhs});
+}
+
+Expr::Neq Expr::neq_from_json(const json& j) { 
+  auto lhs =  Term::any_from_json(j.at(0));
+  auto rhs =  Term::any_from_json(j.at(1));
+  return {lhs, rhs};
+}
+
+json Expr::neq_to_json(const Expr::Neq& x) { 
+  auto lhs =  Term::any_to_json(x.lhs);
+  auto rhs =  Term::any_to_json(x.rhs);
+  return json::array({lhs, rhs});
+}
+
+Expr::And Expr::and_from_json(const json& j) { 
+  auto lhs =  Term::any_from_json(j.at(0));
+  auto rhs =  Term::any_from_json(j.at(1));
+  return {lhs, rhs};
+}
+
+json Expr::and_to_json(const Expr::And& x) { 
+  auto lhs =  Term::any_to_json(x.lhs);
+  auto rhs =  Term::any_to_json(x.rhs);
+  return json::array({lhs, rhs});
+}
+
+Expr::Or Expr::or_from_json(const json& j) { 
+  auto lhs =  Term::any_from_json(j.at(0));
+  auto rhs =  Term::any_from_json(j.at(1));
+  return {lhs, rhs};
+}
+
+json Expr::or_to_json(const Expr::Or& x) { 
   auto lhs =  Term::any_to_json(x.lhs);
   auto rhs =  Term::any_to_json(x.rhs);
   return json::array({lhs, rhs});
@@ -617,21 +747,31 @@ Expr::Any Expr::any_from_json(const json& j) {
   case 0: return Expr::sin_from_json(t);
   case 1: return Expr::cos_from_json(t);
   case 2: return Expr::tan_from_json(t);
-  case 3: return Expr::add_from_json(t);
-  case 4: return Expr::sub_from_json(t);
-  case 5: return Expr::mul_from_json(t);
-  case 6: return Expr::div_from_json(t);
-  case 7: return Expr::mod_from_json(t);
-  case 8: return Expr::pow_from_json(t);
-  case 9: return Expr::inv_from_json(t);
-  case 10: return Expr::eq_from_json(t);
-  case 11: return Expr::lte_from_json(t);
-  case 12: return Expr::gte_from_json(t);
-  case 13: return Expr::lt_from_json(t);
-  case 14: return Expr::gt_from_json(t);
-  case 15: return Expr::alias_from_json(t);
-  case 16: return Expr::invoke_from_json(t);
-  case 17: return Expr::index_from_json(t);
+  case 3: return Expr::abs_from_json(t);
+  case 4: return Expr::add_from_json(t);
+  case 5: return Expr::sub_from_json(t);
+  case 6: return Expr::mul_from_json(t);
+  case 7: return Expr::div_from_json(t);
+  case 8: return Expr::rem_from_json(t);
+  case 9: return Expr::pow_from_json(t);
+  case 10: return Expr::bnot_from_json(t);
+  case 11: return Expr::band_from_json(t);
+  case 12: return Expr::bor_from_json(t);
+  case 13: return Expr::bxor_from_json(t);
+  case 14: return Expr::bsl_from_json(t);
+  case 15: return Expr::bsr_from_json(t);
+  case 16: return Expr::not_from_json(t);
+  case 17: return Expr::eq_from_json(t);
+  case 18: return Expr::neq_from_json(t);
+  case 19: return Expr::and_from_json(t);
+  case 20: return Expr::or_from_json(t);
+  case 21: return Expr::lte_from_json(t);
+  case 22: return Expr::gte_from_json(t);
+  case 23: return Expr::lt_from_json(t);
+  case 24: return Expr::gt_from_json(t);
+  case 25: return Expr::alias_from_json(t);
+  case 26: return Expr::invoke_from_json(t);
+  case 27: return Expr::index_from_json(t);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
   }
 }
@@ -641,21 +781,31 @@ json Expr::any_to_json(const Expr::Any& x) {
   [](const Expr::Sin &y) -> json { return {0, Expr::sin_to_json(y)}; },
   [](const Expr::Cos &y) -> json { return {1, Expr::cos_to_json(y)}; },
   [](const Expr::Tan &y) -> json { return {2, Expr::tan_to_json(y)}; },
-  [](const Expr::Add &y) -> json { return {3, Expr::add_to_json(y)}; },
-  [](const Expr::Sub &y) -> json { return {4, Expr::sub_to_json(y)}; },
-  [](const Expr::Mul &y) -> json { return {5, Expr::mul_to_json(y)}; },
-  [](const Expr::Div &y) -> json { return {6, Expr::div_to_json(y)}; },
-  [](const Expr::Mod &y) -> json { return {7, Expr::mod_to_json(y)}; },
-  [](const Expr::Pow &y) -> json { return {8, Expr::pow_to_json(y)}; },
-  [](const Expr::Inv &y) -> json { return {9, Expr::inv_to_json(y)}; },
-  [](const Expr::Eq &y) -> json { return {10, Expr::eq_to_json(y)}; },
-  [](const Expr::Lte &y) -> json { return {11, Expr::lte_to_json(y)}; },
-  [](const Expr::Gte &y) -> json { return {12, Expr::gte_to_json(y)}; },
-  [](const Expr::Lt &y) -> json { return {13, Expr::lt_to_json(y)}; },
-  [](const Expr::Gt &y) -> json { return {14, Expr::gt_to_json(y)}; },
-  [](const Expr::Alias &y) -> json { return {15, Expr::alias_to_json(y)}; },
-  [](const Expr::Invoke &y) -> json { return {16, Expr::invoke_to_json(y)}; },
-  [](const Expr::Index &y) -> json { return {17, Expr::index_to_json(y)}; },
+  [](const Expr::Abs &y) -> json { return {3, Expr::abs_to_json(y)}; },
+  [](const Expr::Add &y) -> json { return {4, Expr::add_to_json(y)}; },
+  [](const Expr::Sub &y) -> json { return {5, Expr::sub_to_json(y)}; },
+  [](const Expr::Mul &y) -> json { return {6, Expr::mul_to_json(y)}; },
+  [](const Expr::Div &y) -> json { return {7, Expr::div_to_json(y)}; },
+  [](const Expr::Rem &y) -> json { return {8, Expr::rem_to_json(y)}; },
+  [](const Expr::Pow &y) -> json { return {9, Expr::pow_to_json(y)}; },
+  [](const Expr::BNot &y) -> json { return {10, Expr::bnot_to_json(y)}; },
+  [](const Expr::BAnd &y) -> json { return {11, Expr::band_to_json(y)}; },
+  [](const Expr::BOr &y) -> json { return {12, Expr::bor_to_json(y)}; },
+  [](const Expr::BXor &y) -> json { return {13, Expr::bxor_to_json(y)}; },
+  [](const Expr::BSL &y) -> json { return {14, Expr::bsl_to_json(y)}; },
+  [](const Expr::BSR &y) -> json { return {15, Expr::bsr_to_json(y)}; },
+  [](const Expr::Not &y) -> json { return {16, Expr::not_to_json(y)}; },
+  [](const Expr::Eq &y) -> json { return {17, Expr::eq_to_json(y)}; },
+  [](const Expr::Neq &y) -> json { return {18, Expr::neq_to_json(y)}; },
+  [](const Expr::And &y) -> json { return {19, Expr::and_to_json(y)}; },
+  [](const Expr::Or &y) -> json { return {20, Expr::or_to_json(y)}; },
+  [](const Expr::Lte &y) -> json { return {21, Expr::lte_to_json(y)}; },
+  [](const Expr::Gte &y) -> json { return {22, Expr::gte_to_json(y)}; },
+  [](const Expr::Lt &y) -> json { return {23, Expr::lt_to_json(y)}; },
+  [](const Expr::Gt &y) -> json { return {24, Expr::gt_to_json(y)}; },
+  [](const Expr::Alias &y) -> json { return {25, Expr::alias_to_json(y)}; },
+  [](const Expr::Invoke &y) -> json { return {26, Expr::invoke_to_json(y)}; },
+  [](const Expr::Index &y) -> json { return {27, Expr::index_to_json(y)}; },
   [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
   }, *x);
 }

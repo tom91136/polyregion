@@ -38,7 +38,6 @@ class AstTransformer(using val q: Quotes) {
 
   // we may encounter singleton types hence maybe term
   def resolveTpe(trace: List[Tree] = Nil)(repr: TypeRepr): Deferred[(Option[PolyAst.Term], PolyAst.Type)] = {
-    println(repr)
 
     @tailrec def resolveSym(ref: TypeRepr): Result[PolyAst.Sym] = ref match {
       case ThisType(tpe) => resolveSym(tpe)
@@ -54,27 +53,14 @@ class AstTransformer(using val q: Quotes) {
     }
 
     repr.dealias.widenTermRefByName.simplified match {
-      case andOr : AndOrType => 
-        
-        for{
-          (leftTerm, leftTpe) <- resolveTpe(trace)(andOr.left)
+      case andOr: AndOrType =>
+        for {
+          (leftTerm, leftTpe)   <- resolveTpe(trace)(andOr.left)
           (rightTerm, rightTpe) <- resolveTpe(trace)(andOr.right)
-        } yield {
-          if(leftTpe == rightTpe) leftTerm.orElse(rightTerm) -> leftTpe
+        } yield
+          if (leftTpe == rightTpe) leftTerm.orElse(rightTerm) -> leftTpe
           else ???
-      }
-         
-        
-      // case AndType(a, b) => ???
-      // case OrType(l, r) =>
-      //   val lw = l.widen
-      //   val rw = r.widen
 
-      //   if (lw =:= rw) resolveTpe(trace)(lw)
-      //   else {
-      //     println(s"$lw $rw")
-      //     ???
-      //   }
       case tpe @ AppliedType(ctor, args) =>
         for {
           name <- resolveSym(ctor).deferred
@@ -163,17 +149,17 @@ class AstTransformer(using val q: Quotes) {
   }
 
   def resolveTerm(ctx: Context)(term: Term): Deferred[(Int, Option[PolyAst.Term], List[PolyAst.Stmt])] = term match {
-    case Typed(x, _)                     => resolveTerm(ctx.log(term))(x)
-    case Inlined(None, Nil, expansion)   => resolveTerm(ctx.log(term))(expansion) // simple-inline
-    case c @ Literal(BooleanConstant(v)) => ((ctx.depth, Some(PolyAst.Term.BoolConst(v)), Nil)).pure
-    case c @ Literal(IntConstant(v))     => ((ctx.depth, Some(PolyAst.Term.IntConst(v)), Nil)).pure
-    case c @ Literal(FloatConstant(v))   => ((ctx.depth, Some(PolyAst.Term.FloatConst(v)), Nil)).pure
-    case c @ Literal(DoubleConstant(v))  => ((ctx.depth, Some(PolyAst.Term.DoubleConst(v)), Nil)).pure
-    case c @ Literal(LongConstant(v))    => ((ctx.depth, Some(PolyAst.Term.LongConst(v)), Nil)).pure
-    case c @ Literal(ShortConstant(v))   => ((ctx.depth, Some(PolyAst.Term.ShortConst(v)), Nil)).pure
-    case c @ Literal(ByteConstant(v))    => ((ctx.depth, Some(PolyAst.Term.ByteConst(v)), Nil)).pure
-    case c @ Literal(CharConstant(v))    => ((ctx.depth, Some(PolyAst.Term.CharConst(v)), Nil)).pure
-    case c @ Literal(UnitConstant())     => ((ctx.depth, Some(PolyAst.Term.UnitConst), Nil)).pure
+    case Typed(x, _)                        => resolveTerm(ctx.log(term))(x)
+    case Inlined(call, bindings, expansion) => resolveTerm(ctx.log(term))(expansion) // simple-inline
+    case c @ Literal(BooleanConstant(v))    => ((ctx.depth, Some(PolyAst.Term.BoolConst(v)), Nil)).pure
+    case c @ Literal(IntConstant(v))        => ((ctx.depth, Some(PolyAst.Term.IntConst(v)), Nil)).pure
+    case c @ Literal(FloatConstant(v))      => ((ctx.depth, Some(PolyAst.Term.FloatConst(v)), Nil)).pure
+    case c @ Literal(DoubleConstant(v))     => ((ctx.depth, Some(PolyAst.Term.DoubleConst(v)), Nil)).pure
+    case c @ Literal(LongConstant(v))       => ((ctx.depth, Some(PolyAst.Term.LongConst(v)), Nil)).pure
+    case c @ Literal(ShortConstant(v))      => ((ctx.depth, Some(PolyAst.Term.ShortConst(v)), Nil)).pure
+    case c @ Literal(ByteConstant(v))       => ((ctx.depth, Some(PolyAst.Term.ByteConst(v)), Nil)).pure
+    case c @ Literal(CharConstant(v))       => ((ctx.depth, Some(PolyAst.Term.CharConst(v)), Nil)).pure
+    case c @ Literal(UnitConstant())        => ((ctx.depth, Some(PolyAst.Term.UnitConst), Nil)).pure
     case r: Ref =>
       (ctx.refs.get(r), r) match {
         case (Some(Reference(value, tpe)), _) =>
@@ -183,8 +169,15 @@ class AstTransformer(using val q: Quotes) {
           }
           ((ctx.depth, Some(term), Nil)).pure
         case (None, i @ Ident(s)) =>
+          val name = i.tpe match {
+            // we've encountered a case where the ident's name is different from the TermRef's name
+            // this is likely a result of inline where we end up with synthetic names
+            // we use the TermRefs name in this case
+            case TermRef(_, name) if name != s => name
+            case _                             => s
+          }
           resolveTpe(term :: ctx.trace)(i.tpe).map { (_, tpe) =>
-            (ctx.depth, Some(PolyAst.Term.Select(Nil, PolyAst.Named(s, tpe))), Nil)
+            (ctx.depth, Some(PolyAst.Term.Select(Nil, PolyAst.Named(name, tpe))), Nil)
           }
         case (None, x) =>
           s"[depth=${ctx.depth}] Ref ${x} was not identified at closure args stage ".fail.deferred
@@ -229,20 +222,26 @@ class AstTransformer(using val q: Quotes) {
           (maxDepth, None, existingTree :+ tree)
         case (name, lhs, Nil, tpe) => // unary op
           val term = name match {
-            case "!" => PolyAst.Expr.Inv(lhs)
+            case "!" => PolyAst.Expr.Not(lhs)
           }
           val tree = PolyAst.Stmt.Var(path, Some(term))
           val ref  = PolyAst.Term.Select(Nil, path)
           (maxDepth, Some(ref), existingTree :+ tree)
         case (name, lhs, Some(rhs) :: Nil, tpe) => // binary op
           val term = name match {
-            case "+" => PolyAst.Expr.Add(lhs, rhs, tpe)
-            case "-" => PolyAst.Expr.Sub(lhs, rhs, tpe)
-            case "*" => PolyAst.Expr.Mul(lhs, rhs, tpe)
-            case "/" => PolyAst.Expr.Div(lhs, rhs, tpe)
-            case "%" => PolyAst.Expr.Mod(lhs, rhs, tpe)
-            case "<" => PolyAst.Expr.Lt(lhs, rhs)
-            case ">" => PolyAst.Expr.Gt(lhs, rhs)
+            case "+"  => PolyAst.Expr.Add(lhs, rhs, tpe)
+            case "-"  => PolyAst.Expr.Sub(lhs, rhs, tpe)
+            case "*"  => PolyAst.Expr.Mul(lhs, rhs, tpe)
+            case "/"  => PolyAst.Expr.Div(lhs, rhs, tpe)
+            case "%"  => PolyAst.Expr.Rem(lhs, rhs, tpe)
+            case "<"  => PolyAst.Expr.Lt(lhs, rhs)
+            case "<=" => PolyAst.Expr.Lte(lhs, rhs)
+            case ">"  => PolyAst.Expr.Gt(lhs, rhs)
+            case ">=" => PolyAst.Expr.Gte(lhs, rhs)
+            case "==" => PolyAst.Expr.Eq(lhs, rhs)
+            case "!=" => PolyAst.Expr.Neq(lhs, rhs)
+            case "&&" => PolyAst.Expr.And(lhs, rhs)
+            case "||" => PolyAst.Expr.Or(lhs, rhs)
           }
           val tree = PolyAst.Stmt.Var(path, Some(term))
           val ref  = PolyAst.Term.Select(Nil, path)
@@ -298,11 +297,6 @@ class AstTransformer(using val q: Quotes) {
           case _ =>
             s"condition unification failure, then=${thenRefOpt} else=${elseRefOpt}, expr tpe=${tpe}".fail.deferred
         }
-
-        _ = println(tpe)
-
-        // don't do this if unit
-
       } yield cond
     case While(cond, body) =>
       for {
@@ -345,29 +339,6 @@ class AstTransformer(using val q: Quotes) {
       .getOrElse(acc.foldOverTree(Nil, in)(Symbol.noSymbol))
   }
 
-  // def resolveStmts(stmts: List[Statement]): Result[List[PolyAst.Stmt]] = {
-  //   val out =
-
-  //     stmts.foldLeftM((0, List.empty[PolyAst.Stmt])) { case ((prev, ts), stmt) =>
-  //     resolveTree(stmt, prev).map((curr,  tss) =>
-  //       (curr, (ts :+ PolyAst.Stmt.Comment(stmt.show.replaceAll("\n", ""))) ++ tss)
-  //     )
-  //   }
-
-  //   println(">>>")
-  //   println(out.map(x => (x._2.map(_.repr)).repr.mkString("\n")).resolve.fold(_.getMessage, identity))
-  //   println("<<<")
-
-  //   out.map(_._2).resolve
-
-  //   // for {
-  //   //   stmts     <- out.map(_._2)
-  //   //   args      <- captuerdVars.map(_.map((id, tpe) => PolyAst.Named(id.name, tpe)))
-  //   //   identArgs <- captuerdVars.map(_.map((id, tpe) => (id, tpe)))
-  //   // } yield PolyAst.Function(closureName, args, PolyAst.Type.Unit, stmts)
-
-  // }
-
   // case class Reference(name: String, tpe: TypeRepr)
   case class Reference(value: String | PolyAst.Term, tpe: PolyAst.Type)
 
@@ -379,15 +350,6 @@ class AstTransformer(using val q: Quotes) {
 
     pos         = term.pos
     closureName = s"${pos.sourceFile.name}:${pos.startLine}-${pos.endLine}"
-    // captures = collectTree[Ident](term) { x =>
-    //   x match {
-    //     case ident: Ident =>
-    //       val owner = ident.symbol.owner
-    //       // FIXME TODO make sure the owner is actually this macro, and not any other macro
-    //       Some(if (owner.flags.is(Flags.Macro)) Nil else ident :: Nil)
-    //     case _ => None
-    //   }
-    // }
 
     _ = println(s"========${closureName}=========")
     _ = println(Paths.get(".").toAbsolutePath)

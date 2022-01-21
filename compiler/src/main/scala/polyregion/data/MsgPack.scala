@@ -72,11 +72,13 @@ object MsgPack {
                 msg.arr.toList match {
                   case Int32(ord) :: t :: Nil =>
                     tcs(ord).decode(t).asInstanceOf[T]
+                  case xs => throw new RuntimeException(s"Bad structure ${xs}")
                 }
               case Kind.Verbose =>
                 msg.obj.toList match {
                   case (Str("sum"), Str(sum)) :: (Str("ord"), Int32(ord)) :: (Str("val"), t) :: Nil =>
                     tcs(ord).decode(t).asInstanceOf[T]
+                  case xs => throw new RuntimeException(s"Bad structure ${xs}")
                 }
             }
         )

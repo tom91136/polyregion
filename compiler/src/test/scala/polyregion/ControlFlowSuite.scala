@@ -3,41 +3,41 @@ package polyregion
 import polyregion.compileTime._
 import scala.compiletime._
 
-class ControlFlowSuite extends munit.FunSuite {
+class ControlFlowSuite extends BaseSuite {
 
   final val Enable = true
 
-  inline def assertOffload[A](inline f: => A) = if (Enable) {
-    assertEquals(offload[A](f), f)
+  inline def testExpr[A](inline name : String)(inline f: => A) = if (Enable) {
+    test(name)(assertOffload[A](f))
   }
 
-  test("stmts")(assertOffload { 1; 2 })
+  testExpr("stmts")  { 1; 2 }
 
-  test("const-if-true") {
-    assertOffload((if (true) 42 else 69))
+  testExpr("const-if-true") {
+     (if (true) 42 else 69)
   }
 
-  test("ref-if-true") {
+  testExpr("ref-if-true") {
     val x = true
-    assertOffload((if (x) 42 else 69))
+     (if (x) 42 else 69)
   }
 
-  test("while-le-inc")(assertOffload {
+  testExpr("while-le-inc")   {
     val lim = 10
     var i   = 0
     while (i < lim)
       i += 1
     i
-  })
-
-  test("ref-if-if-true") {
-    val x = true
-    val y = true
-    assertOffload((if (x) (if (y) 1 else 2) else 3))
   }
 
-  test("const-if-if-true") {
-    assertOffload((if (true) (if (true) 1 else 2) else 3))
+  testExpr("ref-if-if-true") {
+    val x = true
+    val y = true
+     (if (x) (if (y) 1 else 2) else 3)
+  }
+
+  testExpr("const-if-if-true") {
+     (if (true) (if (true) 1 else 2) else 3)
   }
 
   // test("const-if-false") {

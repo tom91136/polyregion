@@ -142,6 +142,8 @@ object compileTime {
           case PolyAst.Type.Float  => '{ Buffer[Float](${ expr.asExprOf[Float] }) }
           case PolyAst.Type.Double => '{ Buffer[Double](${ expr.asExprOf[Double] }) }
 
+          case PolyAst.Type.Array(PolyAst.Type.Bool)   => expr.asExprOf[Buffer[Boolean]]
+          case PolyAst.Type.Array(PolyAst.Type.Char)   => expr.asExprOf[Buffer[Char]]
           case PolyAst.Type.Array(PolyAst.Type.Byte)   => expr.asExprOf[Buffer[Byte]]
           case PolyAst.Type.Array(PolyAst.Type.Short)  => expr.asExprOf[Buffer[Short]]
           case PolyAst.Type.Array(PolyAst.Type.Int)    => expr.asExprOf[Buffer[Int]]
@@ -153,9 +155,9 @@ object compileTime {
             ???
         }
         '{
-          println(s"mkBuffer: ${ ${wrapped}  }")
-         ${ wrapped }.buffer
-          }
+          println(s"mkBuffer: ${${ wrapped }}")
+          ${ wrapped }.buffer
+        }
       }
 
       '{
@@ -170,7 +172,6 @@ object compileTime {
 
         val argTypes   = Array(${ Varargs(fn.args.map(n => tpeAsRuntimeTpe(n.tpe))) }*)
         val argBuffers = Array(${ Varargs(captureExprs) }*)
-
 
         println(s"Invoking with ${argTypes.zip(argBuffers).toList}")
 

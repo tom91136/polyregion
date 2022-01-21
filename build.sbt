@@ -60,6 +60,7 @@ lazy val compiler = project
     assemblyShadeRules  := loaderShadeRules,
     assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly")),
     scalacOptions ++= Seq(
+      "-Xmax-inlines", "64", // the AST has lots of leaf nodes and we use inline so bump the limit
       "-Yretain-trees" // XXX we need this so that the AST -> C++ conversion with partial ctors work
     ),
     libraryDependencies ++= Seq(

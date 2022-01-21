@@ -1,23 +1,10 @@
 package polyregion
 
-import polyregion.compileTime._
 import scala.compiletime._
 
-class ValueReturnSuite extends munit.FunSuite {
+class ValueReturnSuite extends BaseSuite {
 
   final val Enable = true
-
-  def assertValEquals[A](expected: A, actual: A): Unit = (expected.asMatchable, actual.asMatchable) match {
-    case (e: Float, a: Float) => //
-      assertEquals(java.lang.Float.floatToIntBits(e), java.lang.Float.floatToIntBits(a))
-    case (e: Double, a: Double) => //
-      assertEquals(java.lang.Double.doubleToLongBits(e), java.lang.Double.doubleToLongBits(a))
-    case (e, a) => //
-      assertEquals(e, a)
-  }
-
-  inline def assertOffload[A](inline f: => A) =
-    assertValEquals(offload[A](f), f)
 
   inline def testValueReturn[A](inline r: A) = if (Enable) {
     test(s"${r.getClass}-const=$r")(assertOffload[A](r))
@@ -25,6 +12,8 @@ class ValueReturnSuite extends munit.FunSuite {
     test(s"${r.getClass}-ref1=$r")(assertOffload[A](x))
     val y: A = x
     test(s"${r.getClass}-ref2=$r")(assertOffload[A](y))
+    val z: A = y
+    test(s"${r.getClass}-ref3=$r")(assertOffload[A](z))
   }
 
   testValueReturn[Char](0)

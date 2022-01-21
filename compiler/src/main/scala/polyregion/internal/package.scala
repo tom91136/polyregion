@@ -115,17 +115,29 @@ extension (e: PolyAst.Expr) {
 
       case Sin(lhs, rtn) => s"sin(${lhs.repr})"
       case Cos(lhs, rtn) => s"cos(${lhs.repr})"
-      case Tan(lhs, rtn) => s"san(${lhs.repr})"
+      case Tan(lhs, rtn) => s"tan(${lhs.repr})"
+      case Abs(lhs, rtn) => s"abs(${lhs.repr})"
 
-      case Add(lhs, rhs, rtn) => s"${lhs.repr} +  ${rhs.repr}"
-      case Sub(lhs, rhs, rtn) => s"${lhs.repr} -  ${rhs.repr}"
-      case Mul(lhs, rhs, rtn) => s"${lhs.repr} *  ${rhs.repr}"
-      case Div(lhs, rhs, rtn) => s"${lhs.repr} /  ${rhs.repr}"
-      case Mod(lhs, rhs, rtn) => s"${lhs.repr} %  ${rhs.repr}"
-      case Pow(lhs, rhs, rtn) => s"${lhs.repr} ^  ${rhs.repr}"
+      case Add(lhs, rhs, rtn) => s"${lhs.repr} + ${rhs.repr}"
+      case Sub(lhs, rhs, rtn) => s"${lhs.repr} - ${rhs.repr}"
+      case Mul(lhs, rhs, rtn) => s"${lhs.repr} * ${rhs.repr}"
+      case Div(lhs, rhs, rtn) => s"${lhs.repr} / ${rhs.repr}"
+      case Rem(lhs, rhs, rtn) => s"${lhs.repr} % ${rhs.repr}"
 
-      case Inv(lhs)      => s"!(${lhs.repr})"
+      case Pow(lhs, rhs, rtn) => s"${lhs.repr} ** ${rhs.repr}"
+
+      case BNot(lhs, _)      => s"~${lhs.repr}"
+      case BAnd(lhs, rhs, _) => s"${lhs.repr} & ${rhs.repr}"
+      case BOr(lhs, rhs, _)  => s"${lhs.repr} | ${rhs.repr}"
+      case BXor(lhs, rhs, _) => s"${lhs.repr} ^ ${rhs.repr}"
+      case BSL(lhs, rhs, _)  => s"${lhs.repr} < <${rhs.repr}"
+      case BSR(lhs, rhs, _)  => s"${lhs.repr} > >${rhs.repr}"
+
+      case Not(lhs)      => s"!(${lhs.repr})"
       case Eq(lhs, rhs)  => s"${lhs.repr} == ${rhs.repr}"
+      case Neq(lhs, rhs) => s"${lhs.repr} != ${rhs.repr}"
+      case And(lhs, rhs) => s"${lhs.repr} && ${rhs.repr}"
+      case Or(lhs, rhs)  => s"${lhs.repr} || ${rhs.repr}"
       case Lte(lhs, rhs) => s"${lhs.repr} <= ${rhs.repr}"
       case Gte(lhs, rhs) => s"${lhs.repr} >= ${rhs.repr}"
       case Lt(lhs, rhs)  => s"${lhs.repr} < ${rhs.repr}"
@@ -143,7 +155,7 @@ extension (e: PolyAst.Stmt) {
   def repr: String = {
     import PolyAst.Stmt.*
     e match {
-      case Comment(value)          => s" // $value"
+      case Comment(value)          => s"// $value"
       case Var(name, rhs)          => s"var ${name.repr} = ${rhs.fold("_")(_.repr)}"
       case Mut(name, expr)         => s"${name.repr} := ${expr.repr}"
       case Update(lhs, idx, value) => s"${lhs.repr}[${idx.repr}] := ${value.repr}"

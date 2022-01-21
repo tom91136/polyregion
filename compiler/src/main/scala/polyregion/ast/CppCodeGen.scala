@@ -16,83 +16,81 @@ object CppCodeGen {
 
   case class NlohmannJsonCodecSource(namespace: List[String], decls: List[String], impls: List[String])
   object NlohmannJsonCodecSource {
-    def emit(s: StructNode): List[NlohmannJsonCodecSource] = {
 
-      def fromJsonFn(t: CppType) = t.ref(qualified = false).toLowerCase + "_from_json"
-      def toJsonFn(t: CppType)   = t.ref(qualified = false).toLowerCase + "_to_json"
-      def jsonAt(idx: Int)       = s"j.at($idx)"
+    def fromJsonFn(t: CppType) = t.ref(qualified = false).toLowerCase + "_from_json"
+    def toJsonFn(t: CppType)   = t.ref(qualified = false).toLowerCase + "_to_json"
+    def jsonAt(idx: Int)       = s"j.at($idx)"
 
-      val fromJsonBody = //
-        if (s.tpe.kind == CppType.Kind.Base) {
-          s"size_t ord = ${jsonAt(0)}.get<size_t>();" ::
-            s"const auto t = ${jsonAt(1)};" ::
-            "switch (ord) {" ::
-            s.variants.zipWithIndex.map((c, i) => s"case ${i}: return ${c.tpe.ns(fromJsonFn(c.tpe))}(t);") :::
-            s"default: throw std::out_of_range(\"Bad ordinal \" + std::to_string(ord));" ::
-            "}" :: Nil
-        } else {
+    def fromJsonBody(s: StructNode) = if (s.tpe.kind == CppType.Kind.Base) {
+      s"size_t ord = ${jsonAt(0)}.get<size_t>();" ::
+        s"const auto t = ${jsonAt(1)};" ::
+        "switch (ord) {" ::
+        s.variants.zipWithIndex.map((c, i) => s"case ${i}: return ${c.tpe.ns(fromJsonFn(c.tpe))}(t);") :::
+        s"default: throw std::out_of_range(\"Bad ordinal \" + std::to_string(ord));" ::
+        "}" :: Nil
+    } else {
 
-          val ctorInvocation = s.members match {
-            case (name, _) :: Nil => s"${s.tpe.ref(qualified = true)}($name)";
-            case xs               => s.members.map(_._1).mkString("{", ", ", "}")
-          }
+      val ctorInvocation = s.members match {
+        case (name, _) :: Nil => s"${s.tpe.ref(qualified = true)}($name)";
+        case xs               => s.members.map(_._1).mkString("{", ", ", "}")
+      }
 
-          s.members.zipWithIndex.flatMap { case ((name, tpe), idx) =>
-            tpe.kind match {
-              case CppType.Kind.StdLib =>
-                (tpe.namespace ::: tpe.name :: Nil, tpe.ctors) match {
-                  case ("std" :: "optional" :: Nil, x :: Nil) if x.kind != CppType.Kind.StdLib =>
-                    val nested = s"${x.ns(fromJsonFn(x))}(${jsonAt(idx)})"
-                    s"auto $name = ${jsonAt(idx)}.is_null() ? std::nullopt : std::make_optional($nested);" :: Nil
-                  case ("std" :: "vector" :: Nil, x :: Nil) if x.kind != CppType.Kind.StdLib =>
-                    s"${tpe.ref(qualified = true)} $name;" ::
-                      s"auto ${name}_json = ${jsonAt(idx)};" ::
-                      s"std::transform(${name}_json.begin(), ${name}_json.end(), std::back_inserter($name), &${x.ns(fromJsonFn(x))});"
-                      :: Nil
-                  case _ => s"auto $name = ${jsonAt(idx)}.get<${tpe.ref(qualified = true)}>();" :: Nil
-                }
-              case _ => s"auto $name =  ${tpe.ns(fromJsonFn(tpe))}(${jsonAt(idx)});" :: Nil
+      s.members.zipWithIndex.flatMap { case ((name, tpe), idx) =>
+        tpe.kind match {
+          case CppType.Kind.StdLib =>
+            (tpe.namespace ::: tpe.name :: Nil, tpe.ctors) match {
+              case ("std" :: "optional" :: Nil, x :: Nil) if x.kind != CppType.Kind.StdLib =>
+                val nested = s"${x.ns(fromJsonFn(x))}(${jsonAt(idx)})"
+                s"auto $name = ${jsonAt(idx)}.is_null() ? std::nullopt : std::make_optional($nested);" :: Nil
+              case ("std" :: "vector" :: Nil, x :: Nil) if x.kind != CppType.Kind.StdLib =>
+                s"${tpe.ref(qualified = true)} $name;" ::
+                  s"auto ${name}_json = ${jsonAt(idx)};" ::
+                  s"std::transform(${name}_json.begin(), ${name}_json.end(), std::back_inserter($name), &${x.ns(fromJsonFn(x))});"
+                  :: Nil
+              case _ => s"auto $name = ${jsonAt(idx)}.get<${tpe.ref(qualified = true)}>();" :: Nil
             }
-          } :::
-            s"return ${ctorInvocation};" ::
-            Nil
+          case _ => s"auto $name =  ${tpe.ns(fromJsonFn(tpe))}(${jsonAt(idx)});" :: Nil
         }
+      } :::
+        s"return ${ctorInvocation};" ::
+        Nil
+    }
 
-        val toJsonBody = //
-          if (s.tpe.kind == CppType.Kind.Base) {
-            "return std::visit(overloaded{" ::
-              s.variants.zipWithIndex.map((c, i) =>
-                s"[](const ${c.tpe.ref(qualified = true)} &y) -> json { return {$i, ${c.tpe.ns(toJsonFn(c.tpe))}(y)}; },"
-              ) ::: "[](const auto &x) -> json { throw std::out_of_range(\"Unimplemented type:\" + to_string(x) ); }" ::
-              "}, *x);" :: Nil
-          } else {
-            s.members.flatMap { case (name, tpe) =>
-              tpe.kind match {
-                case CppType.Kind.StdLib =>
-                  (tpe.namespace ::: tpe.name :: Nil, tpe.ctors) match {
-                    case ("std" :: "optional" :: Nil, x :: Nil) if x.kind != CppType.Kind.StdLib =>
-                      s"auto $name = x.${name} ? ${x.ns(toJsonFn(x))}(*x.${name}) : json{};" :: Nil
-                    case ("std" :: "vector" :: Nil, x :: Nil) if x.kind != CppType.Kind.StdLib =>
-                      s"std::vector<json> $name;" ::
-                        s"std::transform(x.${name}.begin(), x.${name}.end(), std::back_inserter($name), &${x.ns(toJsonFn(x))});"
-                        :: Nil
-                    case _ => s"auto $name = x.${name};" :: Nil
-                  }
-                case _ => s"auto $name =  ${tpe.ns(toJsonFn(tpe))}(x.${name});" :: Nil
-              }
-            } :::
-              s"return json::array(${s.members.map(_._1).mkString("{", ", ", "}")});" ::
-              Nil
-          }
+    def toJsonBody(s: StructNode) = if (s.tpe.kind == CppType.Kind.Base) {
+      "return std::visit(overloaded{" ::
+        s.variants.zipWithIndex.map((c, i) =>
+          s"[](const ${c.tpe.ref(qualified = true)} &y) -> json { return {$i, ${c.tpe.ns(toJsonFn(c.tpe))}(y)}; },"
+        ) ::: "[](const auto &x) -> json { throw std::out_of_range(\"Unimplemented type:\" + to_string(x) ); }" ::
+        "}, *x);" :: Nil
+    } else {
+      s.members.flatMap { case (name, tpe) =>
+        tpe.kind match {
+          case CppType.Kind.StdLib =>
+            (tpe.namespace ::: tpe.name :: Nil, tpe.ctors) match {
+              case ("std" :: "optional" :: Nil, x :: Nil) if x.kind != CppType.Kind.StdLib =>
+                s"auto $name = x.${name} ? ${x.ns(toJsonFn(x))}(*x.${name}) : json{};" :: Nil
+              case ("std" :: "vector" :: Nil, x :: Nil) if x.kind != CppType.Kind.StdLib =>
+                s"std::vector<json> $name;" ::
+                  s"std::transform(x.${name}.begin(), x.${name}.end(), std::back_inserter($name), &${x.ns(toJsonFn(x))});"
+                  :: Nil
+              case _ => s"auto $name = x.${name};" :: Nil
+            }
+          case _ => s"auto $name =  ${tpe.ns(toJsonFn(tpe))}(x.${name});" :: Nil
+        }
+      } :::
+        s"return json::array(${s.members.map(_._1).mkString("{", ", ", "}")});" ::
+        Nil
+    }
 
+    def emit(s: StructNode): List[NlohmannJsonCodecSource] = {
       val fromJsonImpl = "" ::
         s"${s.tpe.ref(qualified = true)} ${s.tpe.ns(fromJsonFn(s.tpe))}(const json& j) { " :: //
-        fromJsonBody.map("  " + _) :::                                                        //
+        fromJsonBody(s).map("  " + _) :::                                                     //
         "}" :: Nil                                                                            //
 
       val toJsonImpl = "" ::
         s"json ${s.tpe.ns(toJsonFn(s.tpe))}(const ${s.tpe.ref(qualified = true)}& x) { " :: //
-        toJsonBody.map("  " + _) :::
+        toJsonBody(s).map("  " + _) :::
         "}" :: Nil //
 
       val decls =
@@ -100,8 +98,8 @@ object CppCodeGen {
           s"[[nodiscard]] EXPORT json ${toJsonFn(s.tpe)}(const ${s.tpe.ref(qualified = true)} &);" ::
           Nil
 
-      s.variants.flatMap(s => emit(s)) :+ NlohmannJsonCodecSource(s.tpe.namespace, decls, fromJsonImpl ::: toJsonImpl)
-
+      s.variants.flatMap(s => emit(s)) :+
+        NlohmannJsonCodecSource(s.tpe.namespace, decls, fromJsonImpl ::: toJsonImpl)
     }
 
     def emitHeader(namespace: String, xs: List[NlohmannJsonCodecSource]) = {

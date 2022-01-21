@@ -336,14 +336,24 @@ namespace Expr {
 struct Sin;
 struct Cos;
 struct Tan;
+struct Abs;
 struct Add;
 struct Sub;
 struct Mul;
 struct Div;
-struct Mod;
+struct Rem;
 struct Pow;
-struct Inv;
+struct BNot;
+struct BAnd;
+struct BOr;
+struct BXor;
+struct BSL;
+struct BSR;
+struct Not;
 struct Eq;
+struct Neq;
+struct And;
+struct Or;
 struct Lte;
 struct Gte;
 struct Lt;
@@ -351,7 +361,7 @@ struct Gt;
 struct Alias;
 struct Invoke;
 struct Index;
-using Any = Alternative<Sin, Cos, Tan, Add, Sub, Mul, Div, Mod, Pow, Inv, Eq, Lte, Gte, Lt, Gt, Alias, Invoke, Index>;
+using Any = Alternative<Sin, Cos, Tan, Abs, Add, Sub, Mul, Div, Rem, Pow, BNot, BAnd, BOr, BXor, BSL, BSR, Not, Eq, Neq, And, Or, Lte, Gte, Lt, Gt, Alias, Invoke, Index>;
 struct EXPORT Base {
   Type::Any tpe;
   protected:
@@ -386,6 +396,15 @@ struct EXPORT Tan : Expr::Base {
   EXPORT operator Any() const { return std::make_shared<Tan>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Tan &);
   EXPORT friend bool operator==(const Expr::Tan &, const Expr::Tan &);
+};
+
+struct EXPORT Abs : Expr::Base {
+  Term::Any lhs;
+  Type::Any rtn;
+  Abs(Term::Any lhs, Type::Any rtn) noexcept : Expr::Base(rtn), lhs(std::move(lhs)), rtn(std::move(rtn)) {}
+  EXPORT operator Any() const { return std::make_shared<Abs>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Abs &);
+  EXPORT friend bool operator==(const Expr::Abs &, const Expr::Abs &);
 };
 
 struct EXPORT Add : Expr::Base {
@@ -428,14 +447,14 @@ struct EXPORT Div : Expr::Base {
   EXPORT friend bool operator==(const Expr::Div &, const Expr::Div &);
 };
 
-struct EXPORT Mod : Expr::Base {
+struct EXPORT Rem : Expr::Base {
   Term::Any lhs;
   Term::Any rhs;
   Type::Any rtn;
-  Mod(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept : Expr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
-  EXPORT operator Any() const { return std::make_shared<Mod>(*this); };
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Mod &);
-  EXPORT friend bool operator==(const Expr::Mod &, const Expr::Mod &);
+  Rem(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept : Expr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
+  EXPORT operator Any() const { return std::make_shared<Rem>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Rem &);
+  EXPORT friend bool operator==(const Expr::Rem &, const Expr::Rem &);
 };
 
 struct EXPORT Pow : Expr::Base {
@@ -448,12 +467,71 @@ struct EXPORT Pow : Expr::Base {
   EXPORT friend bool operator==(const Expr::Pow &, const Expr::Pow &);
 };
 
-struct EXPORT Inv : Expr::Base {
+struct EXPORT BNot : Expr::Base {
   Term::Any lhs;
-  explicit Inv(Term::Any lhs) noexcept : Expr::Base(Type::Bool()), lhs(std::move(lhs)) {}
-  EXPORT operator Any() const { return std::make_shared<Inv>(*this); };
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Inv &);
-  EXPORT friend bool operator==(const Expr::Inv &, const Expr::Inv &);
+  Type::Any rtn;
+  BNot(Term::Any lhs, Type::Any rtn) noexcept : Expr::Base(rtn), lhs(std::move(lhs)), rtn(std::move(rtn)) {}
+  EXPORT operator Any() const { return std::make_shared<BNot>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::BNot &);
+  EXPORT friend bool operator==(const Expr::BNot &, const Expr::BNot &);
+};
+
+struct EXPORT BAnd : Expr::Base {
+  Term::Any lhs;
+  Term::Any rhs;
+  Type::Any rtn;
+  BAnd(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept : Expr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
+  EXPORT operator Any() const { return std::make_shared<BAnd>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::BAnd &);
+  EXPORT friend bool operator==(const Expr::BAnd &, const Expr::BAnd &);
+};
+
+struct EXPORT BOr : Expr::Base {
+  Term::Any lhs;
+  Term::Any rhs;
+  Type::Any rtn;
+  BOr(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept : Expr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
+  EXPORT operator Any() const { return std::make_shared<BOr>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::BOr &);
+  EXPORT friend bool operator==(const Expr::BOr &, const Expr::BOr &);
+};
+
+struct EXPORT BXor : Expr::Base {
+  Term::Any lhs;
+  Term::Any rhs;
+  Type::Any rtn;
+  BXor(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept : Expr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
+  EXPORT operator Any() const { return std::make_shared<BXor>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::BXor &);
+  EXPORT friend bool operator==(const Expr::BXor &, const Expr::BXor &);
+};
+
+struct EXPORT BSL : Expr::Base {
+  Term::Any lhs;
+  Term::Any rhs;
+  Type::Any rtn;
+  BSL(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept : Expr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
+  EXPORT operator Any() const { return std::make_shared<BSL>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::BSL &);
+  EXPORT friend bool operator==(const Expr::BSL &, const Expr::BSL &);
+};
+
+struct EXPORT BSR : Expr::Base {
+  Term::Any lhs;
+  Term::Any rhs;
+  Type::Any rtn;
+  BSR(Term::Any lhs, Term::Any rhs, Type::Any rtn) noexcept : Expr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), rtn(std::move(rtn)) {}
+  EXPORT operator Any() const { return std::make_shared<BSR>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::BSR &);
+  EXPORT friend bool operator==(const Expr::BSR &, const Expr::BSR &);
+};
+
+struct EXPORT Not : Expr::Base {
+  Term::Any lhs;
+  explicit Not(Term::Any lhs) noexcept : Expr::Base(Type::Bool()), lhs(std::move(lhs)) {}
+  EXPORT operator Any() const { return std::make_shared<Not>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Not &);
+  EXPORT friend bool operator==(const Expr::Not &, const Expr::Not &);
 };
 
 struct EXPORT Eq : Expr::Base {
@@ -463,6 +541,33 @@ struct EXPORT Eq : Expr::Base {
   EXPORT operator Any() const { return std::make_shared<Eq>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Eq &);
   EXPORT friend bool operator==(const Expr::Eq &, const Expr::Eq &);
+};
+
+struct EXPORT Neq : Expr::Base {
+  Term::Any lhs;
+  Term::Any rhs;
+  Neq(Term::Any lhs, Term::Any rhs) noexcept : Expr::Base(Type::Bool()), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
+  EXPORT operator Any() const { return std::make_shared<Neq>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Neq &);
+  EXPORT friend bool operator==(const Expr::Neq &, const Expr::Neq &);
+};
+
+struct EXPORT And : Expr::Base {
+  Term::Any lhs;
+  Term::Any rhs;
+  And(Term::Any lhs, Term::Any rhs) noexcept : Expr::Base(Type::Bool()), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
+  EXPORT operator Any() const { return std::make_shared<And>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::And &);
+  EXPORT friend bool operator==(const Expr::And &, const Expr::And &);
+};
+
+struct EXPORT Or : Expr::Base {
+  Term::Any lhs;
+  Term::Any rhs;
+  Or(Term::Any lhs, Term::Any rhs) noexcept : Expr::Base(Type::Bool()), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
+  EXPORT operator Any() const { return std::make_shared<Or>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Or &);
+  EXPORT friend bool operator==(const Expr::Or &, const Expr::Or &);
 };
 
 struct EXPORT Lte : Expr::Base {
