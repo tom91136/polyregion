@@ -30,18 +30,18 @@ class BufferSuite extends BaseSuite {
   assertFill[Double](0, 0)
   assertFill[Boolean](0, false)
 
-  assertFill[Char](FillN, 0)
-  assertFill[Char](FillN, 255)
-  assertFill[Char](FillN, 1)
-  assertFill[Char](FillN, 0)
-  assertFill[Char](FillN, 42)
-
   assertFill[Byte](FillN, -128)
   assertFill[Byte](FillN, 127)
   assertFill[Byte](FillN, 1)
   assertFill[Byte](FillN, -1)
   assertFill[Byte](FillN, 0)
   assertFill[Byte](FillN, 42)
+
+  assertFill[Char](FillN, '\u0000')
+  assertFill[Char](FillN, '\uFFFF')
+  assertFill[Char](FillN, 1)
+  assertFill[Char](FillN, 0)
+  assertFill[Char](FillN, 42)
 
   assertFill[Short](FillN, -32768)
   assertFill[Short](FillN, 32767)

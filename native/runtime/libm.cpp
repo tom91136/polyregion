@@ -1,6 +1,3 @@
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunknown-pragmas"
-#pragma ide diagnostic ignored "modernize-deprecated-headers"
 #include "libm.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/DynamicLibrary.h"
@@ -22,6 +19,11 @@ template <typename T> static void sym(const std::string &name, T f) {
   llvm::sys::DynamicLibrary::AddSymbol(name, (void *)f);
 }
 
+template <typename T> static void sincos_local(T x, T *sin, T *cos) {
+  *sin = std::sin(x);
+  *cos = std::cos(x);
+}
+
 void polyregion::libm::exportAll() {
 
   using I = int;
@@ -31,8 +33,12 @@ void polyregion::libm::exportAll() {
   using L = long;
   using LL = long long;
 
-
   // make sure we cover all of https://en.cppreference.com/w/c/numeric/math and use the correct name
+
+  // Non-standard GNU
+  sym<void (*)(D, D *, D *)>("sincos", &sincos_local);
+  sym<void (*)(F, F *, F *)>("sincosf", &sincos_local);
+  sym<void (*)(LD, LD *, LD *)>("sincosl", &sincos_local);
 
   // Basic
   sym<D>("fabs", &std::fabs);
@@ -264,5 +270,3 @@ void polyregion::libm::exportAll() {
   sym<F>("copysignf", &std::copysign);
   sym<LD>("copysignl", &std::copysign);
 }
-
-#pragma clang diagnostic pop

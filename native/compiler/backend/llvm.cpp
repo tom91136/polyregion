@@ -25,7 +25,7 @@ llvm::Type *backend::AstTransformer::mkTpe(const Type::Any &tpe) {
       [&](const Type::Double &x) -> llvm::Type * { return llvm::Type::getDoubleTy(C); },         //
       [&](const Type::Bool &x) -> llvm::Type * { return llvm::Type::getInt1Ty(C); },             //
       [&](const Type::Byte &x) -> llvm::Type * { return llvm::Type::getInt8Ty(C); },             //
-      [&](const Type::Char &x) -> llvm::Type * { return llvm::Type::getInt8Ty(C); },             //
+      [&](const Type::Char &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },             //
       [&](const Type::Short &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },           //
       [&](const Type::Int &x) -> llvm::Type * { return llvm::Type::getInt32Ty(C); },             //
       [&](const Type::Long &x) -> llvm::Type * { return llvm::Type::getInt64Ty(C); },            //
@@ -56,7 +56,7 @@ llvm::Value *backend::AstTransformer::mkRef(const Term::Any &ref) {
       [&](const Term::UnitConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt1Ty(C), 0); },
       [&](const Term::BoolConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt1Ty(C), x.value); },
       [&](const Term::ByteConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt8Ty(C), x.value); },
-      [&](const Term::CharConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt8Ty(C), x.value); },
+      [&](const Term::CharConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt16Ty(C), x.value); },
       [&](const Term::ShortConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt16Ty(C), x.value); },
       [&](const Term::IntConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt32Ty(C), x.value); },
       [&](const Term::LongConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt64Ty(C), x.value); },
@@ -89,16 +89,21 @@ llvm::Value *backend::AstTransformer::mkExpr(const Expr::Any &expr, llvm::Functi
     return B.CreateCall(cos, mkRef(arg));
   };
 
+  const auto externUnaryCall = [&](const std::string &name, const Type::Any &tpe, const Term::Any &arg) {
+    auto t = mkTpe(tpe);
+    auto ft = llvm::FunctionType::get(t, {t}, false);
+    auto f = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, name, fn->getParent());
+    return B.CreateCall(f, mkRef(arg));
+  };
+
   return variants::total(
       *expr, //
 
       [&](const Expr::Sin &x) -> llvm::Value * { return unaryIntrinsic(llvm::Intrinsic::sin, x.rtn, x.lhs); },
       [&](const Expr::Cos &x) -> llvm::Value * { return unaryIntrinsic(llvm::Intrinsic::cos, x.rtn, x.lhs); },
       [&](const Expr::Tan &x) -> llvm::Value * {
-        // XXX apparently there isn't a tan in LLVM so we do the trig identities here for now
-        auto sin = unaryIntrinsic(llvm::Intrinsic::sin, x.rtn, x.lhs);
-        auto cos = unaryIntrinsic(llvm::Intrinsic::cos, x.rtn, x.lhs);
-        return B.CreateFDiv(sin, cos, key + "_tan");
+        // XXX apparently there isn't a tan in LLVM so we just do an external call
+        return externUnaryCall("tan", x.rtn, x.lhs);
       },
       [&](const Expr::Abs &x) -> llvm::Value * { return unaryIntrinsic(llvm::Intrinsic::abs, x.rtn, x.lhs); },
 
@@ -198,7 +203,7 @@ void backend::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) 
       },
       [&](const Stmt::Update &x) {
         auto select = x.lhs;
-        auto ptr = B.CreateInBoundsGEP( mkSelect(select), mkRef(x.idx), qualified(select) + "_ptr");
+        auto ptr = B.CreateInBoundsGEP(mkSelect(select), mkRef(x.idx), qualified(select) + "_ptr");
         B.CreateStore(mkRef(x.value), ptr);
       },
       [&](const Stmt::Effect &x) {

@@ -46,7 +46,7 @@ void polyregion::runtime::Object::invoke(const std::string &symbol, const std::v
     case Type::Byte:
       return &ffi_type_sint8;
     case Type::Char:
-      return &ffi_type_uint8;
+      return &ffi_type_uint16;
     case Type::Short:
       return &ffi_type_sint16;
     case Type::Int:
