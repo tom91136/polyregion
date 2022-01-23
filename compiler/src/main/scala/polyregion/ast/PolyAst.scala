@@ -13,8 +13,10 @@ object PolyAst {
       // normalise dollar
       Sym(raw.split('.').toList)
     }
-    def unapply(s: Sym): Option[(List[String], String)] =
-      s.fqn.lastOption.map(x => s.fqn.init -> x)
+
+    def unapply(xs : List[String]) : Option[(Sym, String)]  = 
+      xs.lastOption.map(x => Sym(xs.init) -> x ) 
+
   }
 
   enum TypeKind derives MsgPack.Codec {

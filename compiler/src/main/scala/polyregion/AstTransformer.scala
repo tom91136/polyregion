@@ -34,54 +34,110 @@ class AstTransformer(using val q: Quotes) {
     case x                        => s"Illegal top-level inline tree: ${x}".fail
   }
 
-  val BufferTpe = PolyAst.Sym[Buffer[_]]
-
   object Symbols {
     val JavaLang  = "java" :: "lang" :: Nil
     val Scala     = "scala" :: Nil
     val ScalaMath = "scala" :: "math" :: "package$" :: Nil
+    val JavaMath  = "java" :: "lang" :: "Math$" :: Nil
+    val SeqOps    = "scala" :: "collection" :: "mutable" :: "SeqOps" :: Nil
+    val Buffer    = PolyAst.Sym[Buffer[_]]
+
   }
 
   def resolveIntrinsics(ctx: Context)(ap: Apply): Deferred[(Int, Option[PolyAst.Term], List[PolyAst.Stmt])] = {
 
-    val lhsSym   = ap.fun.symbol
-    val rhsTerms = ap.args
+    def resolveModuleApply(receiverSym: PolyAst.Sym, tpe: PolyAst.Type)(args: List[Option[PolyAst.Term]]) = {
 
-    import PolyAst.Sym
+      val outName = PolyAst.Named(s"v${ctx.depth}", tpe)
+      val outRef  = PolyAst.Term.Select(Nil, outName)
 
-    (Sym(lhsSym.fullName), rhsTerms) match {
-      case (Sym(Symbols.ScalaMath, op), x :: Nil) => // unary scala.math ops
-        resolveTerm(ctx.down(ap))(x).subflatMap {
-          case (d, None, tree) => "Arg resolved to none".fail
-          case (d, Some(ref0), tree0) =>
-            val name = ctx.name(ref0.tpe)
-            val tree = PolyAst.Stmt.Var(
-              name,
-              Some(op match {
-                case "sin" => PolyAst.Expr.Sin(ref0, ref0.tpe)
-                case "cos" => PolyAst.Expr.Cos(ref0, ref0.tpe)
-                case "tan" => PolyAst.Expr.Tan(ref0, ref0.tpe)
-                case "abs" => PolyAst.Expr.Abs(ref0, ref0.tpe)
-              })
-            )
-            (d + 1, Some(PolyAst.Term.Select(Nil, name)), tree0 :+ tree).success
-        }
-
-      case (
-            Sym(
-              Symbols.Scala :+ (
-                "Byte" | "Short" | "Int" | "Long" | "Float" | "Double" | "Char"
-              ),
-              op
-            ),
-            x :: Nil
-          ) =>
-
-
-        ???
-      case bad => ???
+      (receiverSym.fqn, args) match {
+        case ((Symbols.ScalaMath | Symbols.JavaMath) :+ op, Some(x) :: Some(y) :: Nil) => // scala.math binary
+          ???
+        case ((Symbols.ScalaMath | Symbols.JavaMath) :+ op, Some(x) :: Nil) => // scala.math unary
+          val expr = op match {
+            case "sin" => PolyAst.Expr.Sin(x, tpe)
+            case "cos" => PolyAst.Expr.Cos(x, tpe)
+            case "tan" => PolyAst.Expr.Tan(x, tpe)
+            case "abs" => PolyAst.Expr.Abs(x, tpe)
+          }
+          (Some(outRef), PolyAst.Stmt.Var(outName, Some(expr)) :: Nil)
+        case (sym, args) =>
+          println(s"${sym.mkString(".")}(${args.mkString(",")}) ")
+          ???
+      }
     }
 
+    def resolveInstanceApply(
+        receiverSym: PolyAst.Sym,
+        tpe: PolyAst.Type
+    )(receiver: Option[PolyAst.Term], args: List[Option[PolyAst.Term]]) = {
+
+      val outName = PolyAst.Named(s"v${ctx.depth}", tpe)
+      val outRef  = PolyAst.Term.Select(Nil, outName)
+
+      (receiverSym.fqn, receiver, args) match {
+        case (
+              Symbols.Scala :+ (
+                "Byte" | "Short" | "Int" | "Long" | "Float" | "Double" | "Char"
+              ) :+ op,
+              Some(x),
+              Some(y) :: Nil
+            ) =>
+          val expr = op match {
+            case "+"  => PolyAst.Expr.Add(x, y, tpe)
+            case "-"  => PolyAst.Expr.Sub(x, y, tpe)
+            case "*"  => PolyAst.Expr.Mul(x, y, tpe)
+            case "/"  => PolyAst.Expr.Div(x, y, tpe)
+            case "%"  => PolyAst.Expr.Rem(x, y, tpe)
+            case "<"  => PolyAst.Expr.Lt(x, y)
+            case "<=" => PolyAst.Expr.Lte(x, y)
+            case ">"  => PolyAst.Expr.Gt(x, y)
+            case ">=" => PolyAst.Expr.Gte(x, y)
+            case "==" => PolyAst.Expr.Eq(x, y)
+            case "!=" => PolyAst.Expr.Neq(x, y)
+            case "&&" => PolyAst.Expr.And(x, y)
+            case "||" => PolyAst.Expr.Or(x, y)
+          }
+          (Some(outRef), PolyAst.Stmt.Var(outName, Some(expr)) :: Nil)
+        case (Symbols.SeqOps :+ "apply", Some(xs: PolyAst.Term.Select), Some(idx) :: Nil) =>
+          (Some(outRef), PolyAst.Stmt.Var(outName, Some(PolyAst.Expr.Index(xs, idx, tpe))) :: Nil)
+        case (Symbols.SeqOps :+ "update", Some(xs: PolyAst.Term.Select), Some(idx) :: Some(x) :: Nil) =>
+          (None, PolyAst.Stmt.Update(xs, idx, x) :: Nil)
+        case (sym, recv, args) =>
+          println(s" (($recv) : ${sym.mkString(".")})(${args.mkString(",")}) ")
+          ???
+      }
+    }
+
+    for {
+      (_, tpe) <- resolveTpe(ap :: ctx.trace)(ap.tpe)
+
+      receiverOwnerFlags = ap.fun.symbol.maybeOwner.flags
+      receiverSym        = PolyAst.Sym(ap.fun.symbol.fullName)
+
+      _ = println(s"receiverFlags:${receiverSym} = ${receiverOwnerFlags.show}")
+
+      (argsDepth, argRefs, argTrees) <- resolveTerms(ctx.down(ap))(ap.args)
+
+      r <-
+        if (receiverOwnerFlags.is(Flags.Module)) { // receiver is an object/package object
+          val (outRef, tree) = resolveModuleApply(receiverSym, tpe)(argRefs) //
+          (argsDepth, outRef, argTrees ::: tree).success.deferred
+        } else {
+
+          for {
+            (receiverDepth, receiverRef, receiverTrees) <- ap.fun match {
+              case Select(q, n) => resolveTerm(ctx.at(ap, argsDepth))(q)
+              case _            => ??? // (ctx.depth, None, Nil).success.deferred
+            }
+
+            (outRef, tree) = resolveInstanceApply(receiverSym, tpe)(receiverRef, argRefs)
+          } yield (receiverDepth, outRef, receiverTrees ::: argTrees ::: tree)
+
+        }
+
+    } yield r
   }
 
   @tailrec final def resolveSym(ref: TypeRepr): Result[PolyAst.Sym] = ref.dealias.simplified match {
@@ -113,8 +169,8 @@ class AstTransformer(using val q: Quotes) {
           name <- resolveSym(ctor).deferred
           xs   <- args.traverse(resolveTpe(trace)(_))
         } yield (name, xs) match {
-          case (BufferTpe, (_, component) :: Nil) => None -> PolyAst.Type.Array(component)
-          case (n, ys)                            => ??? // None -> PolyAst.Type.Struct(n, ys)
+          case (Symbols.Buffer, (_, component) :: Nil) => None -> PolyAst.Type.Array(component)
+          case (n, ys)                                 => ??? // None -> PolyAst.Type.Struct(n, ys)
         }
 
       // widen singletons
@@ -137,17 +193,17 @@ class AstTransformer(using val q: Quotes) {
       case expr =>
         resolveSym(expr)
           .map {
-            case PolyAst.Sym(Symbols.Scala, "Unit")      => PolyAst.Type.Unit
-            case PolyAst.Sym(Symbols.Scala, "Boolean")   => PolyAst.Type.Bool
-            case PolyAst.Sym(Symbols.Scala, "Byte")      => PolyAst.Type.Byte
-            case PolyAst.Sym(Symbols.Scala, "Short")     => PolyAst.Type.Short
-            case PolyAst.Sym(Symbols.Scala, "Int")       => PolyAst.Type.Int
-            case PolyAst.Sym(Symbols.Scala, "Long")      => PolyAst.Type.Long
-            case PolyAst.Sym(Symbols.Scala, "Float")     => PolyAst.Type.Float
-            case PolyAst.Sym(Symbols.Scala, "Double")    => PolyAst.Type.Double
-            case PolyAst.Sym(Symbols.Scala, "Char")      => PolyAst.Type.Char
-            case PolyAst.Sym(Symbols.JavaLang, "String") => PolyAst.Type.String
-            case sym                                     => PolyAst.Type.Struct(sym, Nil)
+            case PolyAst.Sym(Symbols.Scala :+ "Unit")      => PolyAst.Type.Unit
+            case PolyAst.Sym(Symbols.Scala :+ "Boolean")   => PolyAst.Type.Bool
+            case PolyAst.Sym(Symbols.Scala :+ "Byte")      => PolyAst.Type.Byte
+            case PolyAst.Sym(Symbols.Scala :+ "Short")     => PolyAst.Type.Short
+            case PolyAst.Sym(Symbols.Scala :+ "Int")       => PolyAst.Type.Int
+            case PolyAst.Sym(Symbols.Scala :+ "Long")      => PolyAst.Type.Long
+            case PolyAst.Sym(Symbols.Scala :+ "Float")     => PolyAst.Type.Float
+            case PolyAst.Sym(Symbols.Scala :+ "Double")    => PolyAst.Type.Double
+            case PolyAst.Sym(Symbols.Scala :+ "Char")      => PolyAst.Type.Char
+            case PolyAst.Sym(Symbols.JavaLang :+ "String") => PolyAst.Type.String
+            case sym                                       => PolyAst.Type.Struct(sym, Nil)
           }
           .map(None -> _)
           .deferred
@@ -233,79 +289,81 @@ class AstTransformer(using val q: Quotes) {
 
       }
 
-    case ap @ Apply(s @ Select(qualifier, name), args) =>
-      for {
-        (_, tpe)                      <- resolveTpe(term :: ctx.trace)(ap.tpe)
-        (lhsDepth, lhsRef, lhsTrees)  <- resolveTerm(ctx.down(term))(qualifier) // go down here
-        (maxDepth, argRefs, argTrees) <- resolveTerms(ctx.at(term, lhsDepth))(args)
+    case ap @ Apply(_, _) =>
+      resolveIntrinsics(ctx)(ap)
 
-        path = PolyAst.Named(s"v${ctx.depth}", tpe)
-        // tree = // don't save a ref for unit methods
-        //   if (tpe == PolyAst.Type.Empty) PolyAst.Tree.Effect(lhsRef, name, argRefs)
-        //   else PolyAst.Stmt.Var(path, PolyAst.Tree.Invoke(lhsRef, name, argRefs, tpe))
-        existingTree = (argTrees ++ lhsTrees)
-        lhsSelect <- lhsRef match {
-          case Some(s @ PolyAst.Term.Select(_, _)) => s.pure
-          case bad                                 => s"Illegal LHS for apply: ${bad}".fail.deferred
-        }
+    //   for {
+    //     (_, tpe)                      <- resolveTpe(term :: ctx.trace)(ap.tpe)
+    //     (lhsDepth, lhsRef, lhsTrees)  <- resolveTerm(ctx.down(term))(qualifier) // go down here
+    //     (maxDepth, argRefs, argTrees) <- resolveTerms(ctx.at(term, lhsDepth))(args)
 
-      } yield (name, lhsSelect, argRefs, tpe) match {
-        case (
-              "apply",
-              select,
-              Some(idx) :: Nil,
-              tpe
-            ) => // TODO check idx.tpe =:= Int
-          val tree = PolyAst.Stmt.Var(path, Some(PolyAst.Expr.Index(select, idx, tpe)))
-          val ref  = PolyAst.Term.Select(Nil, path)
-          (maxDepth, Some(ref), existingTree :+ tree)
-        case (
-              "update",
-              select,
-              Some(idx) :: Some(value) :: Nil,
-              tpe
-            ) => // TODO check idx.tpe =:= Int && value.tpe =:= lhs.tpe
-          val tree = PolyAst.Stmt.Update(select, idx, value)
-          (maxDepth, None, existingTree :+ tree)
-        case (_, lhs, _, PolyAst.Type.Unit) =>
-          val tree = PolyAst.Stmt.Effect(lhsSelect, name, argRefs.flatten)
-          (maxDepth, None, existingTree :+ tree)
-        case (name, lhs, Nil, tpe) => // unary op
-          val term = name match {
-            case "!" => PolyAst.Expr.Not(lhs)
-          }
-          val tree = PolyAst.Stmt.Var(path, Some(term))
-          val ref  = PolyAst.Term.Select(Nil, path)
-          (maxDepth, Some(ref), existingTree :+ tree)
-        case (name, lhs, Some(rhs) :: Nil, tpe) => // binary op
-          println(s"apply, q=${s.symbol.fullName} = ${resolveSym(s.tpe)}; $ap")
-          val term = name match {
-            case "+"  => PolyAst.Expr.Add(lhs, rhs, tpe)
-            case "-"  => PolyAst.Expr.Sub(lhs, rhs, tpe)
-            case "*"  => PolyAst.Expr.Mul(lhs, rhs, tpe)
-            case "/"  => PolyAst.Expr.Div(lhs, rhs, tpe)
-            case "%"  => PolyAst.Expr.Rem(lhs, rhs, tpe)
-            case "<"  => PolyAst.Expr.Lt(lhs, rhs)
-            case "<=" => PolyAst.Expr.Lte(lhs, rhs)
-            case ">"  => PolyAst.Expr.Gt(lhs, rhs)
-            case ">=" => PolyAst.Expr.Gte(lhs, rhs)
-            case "==" => PolyAst.Expr.Eq(lhs, rhs)
-            case "!=" => PolyAst.Expr.Neq(lhs, rhs)
-            case "&&" => PolyAst.Expr.And(lhs, rhs)
-            case "||" => PolyAst.Expr.Or(lhs, rhs)
-          }
-          val tree = PolyAst.Stmt.Var(path, Some(term))
-          val ref  = PolyAst.Term.Select(Nil, path)
-          (maxDepth, Some(ref), existingTree :+ tree)
-        case _ =>
-          val tree =
-            PolyAst.Stmt.Var(path, Some(PolyAst.Expr.Invoke(lhsSelect, name, argRefs.flatten, tpe)))
-          val ref = PolyAst.Term.Select(Nil, path)
-          (maxDepth, Some(ref), existingTree :+ tree)
-      }
-    case ap @ Apply(x, args) =>
-      println(s"apply, q=${x.tpe}; $args")
-      ???
+    //     path = PolyAst.Named(s"v${ctx.depth}", tpe)
+    //     // tree = // don't save a ref for unit methods
+    //     //   if (tpe == PolyAst.Type.Empty) PolyAst.Tree.Effect(lhsRef, name, argRefs)
+    //     //   else PolyAst.Stmt.Var(path, PolyAst.Tree.Invoke(lhsRef, name, argRefs, tpe))
+    //     existingTree = (argTrees ++ lhsTrees)
+    //     lhsSelect <- lhsRef match {
+    //       case Some(s @ PolyAst.Term.Select(_, _)) => s.pure
+    //       case bad                                 => s"Illegal LHS for apply: ${bad}".fail.deferred
+    //     }
+
+    //   } yield (name, lhsSelect, argRefs, tpe) match {
+    //     case (
+    //           "apply",
+    //           select,
+    //           Some(idx) :: Nil,
+    //           tpe
+    //         ) => // TODO check idx.tpe =:= Int
+    //       val tree = PolyAst.Stmt.Var(path, Some(PolyAst.Expr.Index(select, idx, tpe)))
+    //       val ref  = PolyAst.Term.Select(Nil, path)
+    //       (maxDepth, Some(ref), existingTree :+ tree)
+    //     case (
+    //           "update",
+    //           select,
+    //           Some(idx) :: Some(value) :: Nil,
+    //           tpe
+    //         ) => // TODO check idx.tpe =:= Int && value.tpe =:= lhs.tpe
+    //       val tree = PolyAst.Stmt.Update(select, idx, value)
+    //       (maxDepth, None, existingTree :+ tree)
+    //     case (_, lhs, _, PolyAst.Type.Unit) =>
+    //       val tree = PolyAst.Stmt.Effect(lhsSelect, name, argRefs.flatten)
+    //       (maxDepth, None, existingTree :+ tree)
+    //     case (name, lhs, Nil, tpe) => // unary op
+    //       val term = name match {
+    //         case "!" => PolyAst.Expr.Not(lhs)
+    //       }
+    //       val tree = PolyAst.Stmt.Var(path, Some(term))
+    //       val ref  = PolyAst.Term.Select(Nil, path)
+    //       (maxDepth, Some(ref), existingTree :+ tree)
+    //     case (name, lhs, Some(rhs) :: Nil, tpe) => // binary op
+    //       println(s"apply, q=${s.symbol.fullName} = ${resolveSym(s.tpe)}; $ap")
+    //       val term = name match {
+    //         case "+"  => PolyAst.Expr.Add(lhs, rhs, tpe)
+    //         case "-"  => PolyAst.Expr.Sub(lhs, rhs, tpe)
+    //         case "*"  => PolyAst.Expr.Mul(lhs, rhs, tpe)
+    //         case "/"  => PolyAst.Expr.Div(lhs, rhs, tpe)
+    //         case "%"  => PolyAst.Expr.Rem(lhs, rhs, tpe)
+    //         case "<"  => PolyAst.Expr.Lt(lhs, rhs)
+    //         case "<=" => PolyAst.Expr.Lte(lhs, rhs)
+    //         case ">"  => PolyAst.Expr.Gt(lhs, rhs)
+    //         case ">=" => PolyAst.Expr.Gte(lhs, rhs)
+    //         case "==" => PolyAst.Expr.Eq(lhs, rhs)
+    //         case "!=" => PolyAst.Expr.Neq(lhs, rhs)
+    //         case "&&" => PolyAst.Expr.And(lhs, rhs)
+    //         case "||" => PolyAst.Expr.Or(lhs, rhs)
+    //       }
+    //       val tree = PolyAst.Stmt.Var(path, Some(term))
+    //       val ref  = PolyAst.Term.Select(Nil, path)
+    //       (maxDepth, Some(ref), existingTree :+ tree)
+    //     case _ =>
+    //       val tree =
+    //         PolyAst.Stmt.Var(path, Some(PolyAst.Expr.Invoke(lhsSelect, name, argRefs.flatten, tpe)))
+    //       val ref = PolyAst.Term.Select(Nil, path)
+    //       (maxDepth, Some(ref), existingTree :+ tree)
+    //   }
+    // case ap @ Apply(x, args) =>
+    //   println(s"apply, q=${x.tpe}; $args")
+    //   ???
     case Block(stat, expr) => // stat : List[Statement]
       for {
         (statDepth, _, statTrees) <- resolveTrees(ctx.log(term))(stat)
@@ -411,7 +469,8 @@ class AstTransformer(using val q: Quotes) {
     externalRefs = collectTree[Ref](term) {
       // FIXME TODO make sure the owner is actually this macro, and not any other macro
       case ref: Ref
-          if !ref.symbol.owner.flags.is(Flags.Macro) &&
+          if !ref.symbol.maybeOwner.flags.is(Flags.Macro) &&
+            !ref.symbol.maybeOwner.flags.is(Flags.Module) &&
             !ref.symbol.flags.is(Flags.Method) =>
         Some(ref :: Nil)
       case _ => None
@@ -432,9 +491,13 @@ class AstTransformer(using val q: Quotes) {
         // free vals             :  Flags.{}
         // val ident = Ident.apply(TermRef.apply(s.tpe.dealias.simplified, "_ref_" + name + "_" + s.pos.startLine + "_"))
         // val alias = '{ val ${ident.asExpr} = ${s.asExpr} }
+
+        println(s">>>!${s.symbol.maybeOwner.flags.is(Flags.Module)}")
+
         resolveTpe(term :: Nil)(s.tpe).map {
           case (Some(x), tpe) => s -> Reference(x, tpe)
-          case (None, tpe)    => s -> Reference("_ref_" + name + "_" + s.pos.startLine + "_", tpe)
+          case (None, tpe) =>
+            s -> Reference("_ref_" + name + "_" + s.pos.startLine + "_", tpe)
         }
     }.resolve
 

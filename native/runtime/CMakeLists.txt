@@ -1,5 +1,5 @@
 
-add_library(runtime-lib STATIC runtime.cpp polyregion_runtime.cpp)
+add_library(runtime-lib STATIC libm.cpp runtime.cpp polyregion_runtime.cpp)
 add_dependencies(runtime-lib intrinsics_gen) # for LLVM tblgen
 
 add_executable(runtime-tests test.cpp test-main.cpp)

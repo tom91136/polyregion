@@ -1,6 +1,7 @@
 #include "runtime.h"
 
 #include "ffi.h"
+#include "libm.h"
 #include "utils.hpp"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 
@@ -64,6 +65,8 @@ void polyregion::runtime::Object::invoke(const std::string &symbol, const std::v
       return nullptr;
     }
   };
+
+  polyregion::libm::exportAll();
 
   llvm::SectionMemoryManager mm;
   llvm::RuntimeDyld ld(mm, mm);

@@ -198,7 +198,7 @@ void backend::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) 
       },
       [&](const Stmt::Update &x) {
         auto select = x.lhs;
-        auto ptr = B.CreateInBoundsGEP(mkTpe(select.tpe), mkSelect(select), mkRef(x.idx), qualified(select) + "_ptr");
+        auto ptr = B.CreateInBoundsGEP( mkSelect(select), mkRef(x.idx), qualified(select) + "_ptr");
         B.CreateStore(mkRef(x.value), ptr);
       },
       [&](const Stmt::Effect &x) {

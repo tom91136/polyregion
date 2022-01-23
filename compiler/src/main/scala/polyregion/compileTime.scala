@@ -155,7 +155,7 @@ object compileTime {
             ???
         }
         '{
-          println(s"mkBuffer: ${${ wrapped }}")
+          // println(s"mkBuffer: ${${ wrapped }}")
           ${ wrapped }.buffer
         }
       }
@@ -164,8 +164,8 @@ object compileTime {
         val programBytes = $programBytesExpr
         val astBytes     = $astBytesExpr
 
-        println("Program bytes=" + programBytes.size)
-        println("PolyAst bytes=" + astBytes.size)
+        // println("Program bytes=" + programBytes.size)
+        // println("PolyAst bytes=" + astBytes.size)
 
         val rtnBuffer = ${ rtnBufferExpr }
         val rtnType   = ${ tpeAsRuntimeTpe(fn.rtn) }
@@ -173,7 +173,7 @@ object compileTime {
         val argTypes   = Array(${ Varargs(fn.args.map(n => tpeAsRuntimeTpe(n.tpe))) }*)
         val argBuffers = Array(${ Varargs(captureExprs) }*)
 
-        println(s"Invoking with ${argTypes.zip(argBuffers).toList}")
+        // println(s"Invoking with ${argTypes.zip(argBuffers).toList}")
 
         PolyregionRuntime.invoke(programBytes, ${ fnName }, rtnType, rtnBuffer.buffer, argTypes, argBuffers)
 
