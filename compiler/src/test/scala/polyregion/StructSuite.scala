@@ -3,7 +3,7 @@ package polyregion
 import polyregion.compileTime._
 import scala.compiletime._
 import scala.reflect.ClassTag
-import polyregion.Runtime.NativeStruct
+import polyregion.NativeStruct
 
 class StructSuite extends BaseSuite {
 
@@ -11,12 +11,22 @@ class StructSuite extends BaseSuite {
     test(s"${C.runtimeClass}=${codeOf(r)}=${r}")(assertOffload[A](r))
   }
 
-  // case class Foo(a : Int, b : Short, c : Float) derives NativeStruct
+  case class Foo(a: Byte, b: Int, c: Byte)
 
+  test("a") {
 
-  showOffsets[Int]
+    given NativeStruct[Foo] = nativeStructOf[Foo]
+    val xs                  = Buffer(Foo(1, 2, 3))
+    println(xs)
 
- inline def testValueReturn[A](inline r: A) = if (Toggles.StructSuite) {
+    xs(0) = Foo(3, 2, 1)
+    println(xs)
+    xs(0) = Foo(1, 2, 3)
+    println(xs)
+
+  }
+
+  inline def testValueReturn[A](inline r: A) = if (Toggles.StructSuite) {
     test(s"${r.getClass}-const=$r")(assertOffload[A](r))
     val x: A = r
     test(s"${r.getClass}-ref1=$r")(assertOffload[A](x))
@@ -27,7 +37,5 @@ class StructSuite extends BaseSuite {
   }
 
   // testValueReturn[Foo](Foo(1, 2, 3f))
-
- 
 
 }

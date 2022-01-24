@@ -15,6 +15,7 @@ import polyregion.internal.*
 
 import java.lang.reflect.Modifier
 import polyregion.data.MsgPack
+import polyregion.ast.PolyAst.StructDef
 
 class AstTransformer(using val q: Quotes) {
 
@@ -379,6 +380,23 @@ class AstTransformer(using val q: Quotes) {
 
   // case class Reference(name: String, tpe: TypeRepr)
   case class Reference(value: String | PolyAst.Term, tpe: PolyAst.Type)
+
+  def lowerProductType[A:Type] : Deferred[StructDef] = {
+
+    val tpeSym = TypeTree.of[A].symbol
+
+    if (!tpeSym.flags.is(Flags.Case)) {
+      throw RuntimeException(s"Unsupported combination of flags: ${tpeSym.flags.show}")
+    }
+
+    tpeSym.caseFields
+      .traverse(field =>
+        resolveTpe(tpeSym.tree :: Nil)(field.tree.asInstanceOf[ValDef].tpt.tpe).map((_, t) =>
+          PolyAst.Named(field.name, t)
+        )
+      )
+      .map(PolyAst.StructDef(PolyAst.Sym(tpeSym.fullName), _))
+  }
 
   def lower(x: Expr[Any]): Result[(List[(Ref, PolyAst.Type)], PolyAst.Function)] = for {
     term <- extractInlineBlock(x.asTerm)
