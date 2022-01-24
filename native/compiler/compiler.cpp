@@ -41,6 +41,24 @@ std::ostream &compiler::operator<<(std::ostream &os, const compiler::Compilation
   return os;
 }
 
+std::ostream &compiler::operator<<(std::ostream &os, const compiler::Member &member) {
+  return os << "Member { "                                 //
+            << "name: " << member.name                     //
+            << ", offsetInBytes: " << member.offsetInBytes //
+            << ", sizeInBytes: " << member.sizeInBytes     //
+            << "}";
+}
+
+std::ostream &compiler::operator<<(std::ostream &os, const compiler::Layout &layout) {
+  os << "Layout { "                               //
+     << "\n  sizeInBytes: " << layout.sizeInBytes //
+     << "\n  alignment: " << layout.alignment     //
+     << "\n  members: ";                          //
+  for (auto &&l : layout.members)
+    os << "\n    " << l;
+  return os << "}";
+}
+
 void compiler::initialise() {
   if (!init) {
     init = true;
@@ -49,24 +67,71 @@ void compiler::initialise() {
   }
 }
 
-compiler::Compilation compiler::compile(std::vector<uint8_t> astBytes) {
-  if (!init) {
-    return Compilation{"initialise was not called before"};
-  }
-
-  std::vector<Event> events;
-
-  std::cout << "[polyregion-native] Len  : " << astBytes.size() << std::endl;
-
-  auto jsonStart = nowMono();
+static json deserialiseAst(const compiler::Bytes &astBytes) {
   json json;
   try {
     json = nlohmann::json::from_msgpack(astBytes.data(), astBytes.data() + astBytes.size());
   } catch (nlohmann::json::exception &e) {
-    return Compilation("Unable to parse packed ast:" + std::string(e.what()));
+    throw std::logic_error("Unable to parse packed ast:" + std::string(e.what()));
   }
-  events.emplace_back(nowMs(), "ast_deserialise", elapsedNs(jsonStart));
+  return json;
+}
 
+compiler::Layout compiler::layoutOf(const polyast::StructDef &def, bool packed) {
+
+  llvm::LLVMContext c;
+  backend::LLVMAstTransformer xform(c);
+
+  auto layout = backend::llvmc::targetMachine().createDataLayout();
+
+  std::vector<llvm::Type *> types(def.members.size());
+  std::transform(def.members.begin(), def.members.end(), types.begin(),
+                 [&](const polyast::Named &n) { return xform.mkTpe(n.tpe); });
+
+  auto structTy = llvm::StructType::create(c, types);
+  auto structLayout = layout.getStructLayout(structTy);
+  std::vector<compiler::Member> out;
+  for (size_t i = 0; i < def.members.size(); ++i) {
+    out.emplace_back(def.members[i],                                      //
+                     structLayout->getElementOffset(i),                   //
+                     layout.getTypeAllocSize(structTy->getElementType(i)) //
+    );
+  }
+
+  return {structLayout->getSizeInBytes(), structLayout->getAlignment().value(), out};
+}
+
+compiler::Layout compiler::layoutOf(const Bytes &structDef, bool packed) {
+  json json = deserialiseAst(structDef);
+  auto def = polyast::structdef_from_json(json);
+  return layoutOf(def, packed);
+}
+
+compiler::Compilation compiler::compile(const polyast::Function &f) {
+  if (!init) {
+    return Compilation{"initialise was not called before"};
+  }
+  backend::OpenCL oclGen;
+  oclGen.run(f);
+
+  backend::LLVM gen;
+  Compilation c;
+  try {
+    c = gen.run(f);
+  } catch (const std::exception &e) {
+    c.messages = e.what();
+  }
+  return c;
+}
+
+compiler::Compilation compiler::compile(const Bytes &astBytes) {
+
+  std::vector<Event> events;
+
+  std::cout << "[polyregion-native] Len  : " << astBytes.size() << std::endl;
+  auto jsonStart = nowMono();
+  json json = deserialiseAst(astBytes);
+  events.emplace_back(nowMs(), "ast_deserialise", elapsedNs(jsonStart));
   std::cout << "[polyregion-native] JSON :" << json << std::endl;
 
   auto astLift = nowMono();
@@ -76,12 +141,8 @@ compiler::Compilation compiler::compile(std::vector<uint8_t> astBytes) {
   std::cout << "[polyregion-native] AST  :" << ast << std::endl;
   std::cout << "[polyregion-native] Repr :" << polyast::repr(ast) << std::endl;
 
-  backend::OpenCL oclGen;
-  oclGen.run(ast);
+  auto r = compile(ast);
+  r.events.insert(r.events.end(), events.begin(), events.end());
 
-  backend::LLVM gen;
-  auto c = gen.run(ast);
-  c.events.insert(c.events.end(), events.begin(), events.end());
-
-  return c;
+  return r;
 }

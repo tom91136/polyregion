@@ -141,27 +141,24 @@ json Type::unit_to_json(const Type::Unit& x) {
 
 Type::Struct Type::struct_from_json(const json& j) { 
   auto name =  sym_from_json(j.at(0));
-  std::vector<Type::Any> args;
-  auto args_json = j.at(1);
-  std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &Type::any_from_json);
-  return {name, args};
+  return Type::Struct(name);
 }
 
 json Type::struct_to_json(const Type::Struct& x) { 
   auto name =  sym_to_json(x.name);
-  std::vector<json> args;
-  std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &Type::any_to_json);
-  return json::array({name, args});
+  return json::array({name});
 }
 
 Type::Array Type::array_from_json(const json& j) { 
   auto component =  Type::any_from_json(j.at(0));
-  return Type::Array(component);
+  auto length = j.at(1).is_null() ? std::nullopt : std::make_optional(j.at(1).get<int32_t>());
+  return {component, length};
 }
 
 json Type::array_to_json(const Type::Array& x) { 
   auto component =  Type::any_to_json(x.component);
-  return json::array({component});
+  auto length = x.length ? json{*x.length} : json{};
+  return json::array({component, length});
 }
 
 Type::Any Type::any_from_json(const json& j) { 
@@ -993,15 +990,17 @@ json function_to_json(const Function& x) {
 }
 
 StructDef structdef_from_json(const json& j) { 
+  auto name =  sym_from_json(j.at(0));
   std::vector<Named> members;
-  auto members_json = j.at(0);
+  auto members_json = j.at(1);
   std::transform(members_json.begin(), members_json.end(), std::back_inserter(members), &named_from_json);
-  return StructDef(members);
+  return {name, members};
 }
 
 json structdef_to_json(const StructDef& x) { 
+  auto name =  sym_to_json(x.name);
   std::vector<json> members;
   std::transform(x.members.begin(), x.members.end(), std::back_inserter(members), &named_to_json);
-  return json::array({members});
+  return json::array({name, members});
 }
 } // namespace polyregion::polyast

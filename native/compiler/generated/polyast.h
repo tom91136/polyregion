@@ -189,8 +189,7 @@ struct EXPORT Unit : Type::Base {
 
 struct EXPORT Struct : Type::Base {
   Sym name;
-  std::vector<Type::Any> args;
-  Struct(Sym name, std::vector<Type::Any> args) noexcept : Type::Base(TypeKind::Ref()), name(std::move(name)), args(std::move(args)) {}
+  explicit Struct(Sym name) noexcept : Type::Base(TypeKind::Ref()), name(std::move(name)) {}
   EXPORT operator Any() const { return std::make_shared<Struct>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Struct &);
   EXPORT friend bool operator==(const Type::Struct &, const Type::Struct &);
@@ -198,7 +197,8 @@ struct EXPORT Struct : Type::Base {
 
 struct EXPORT Array : Type::Base {
   Type::Any component;
-  explicit Array(Type::Any component) noexcept : Type::Base(TypeKind::Ref()), component(std::move(component)) {}
+  std::optional<int32_t> length;
+  Array(Type::Any component, std::optional<int32_t> length) noexcept : Type::Base(TypeKind::Ref()), component(std::move(component)), length(std::move(length)) {}
   EXPORT operator Any() const { return std::make_shared<Array>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Array &);
   EXPORT friend bool operator==(const Type::Array &, const Type::Array &);
@@ -758,13 +758,250 @@ struct EXPORT Function {
 };
 
 struct EXPORT StructDef {
+  Sym name;
   std::vector<Named> members;
-  explicit StructDef(std::vector<Named> members) noexcept : members(std::move(members)) {}
+  StructDef(Sym name, std::vector<Named> members) noexcept : name(std::move(name)), members(std::move(members)) {}
   EXPORT friend std::ostream &operator<<(std::ostream &os, const StructDef &);
   EXPORT friend bool operator==(const StructDef &, const StructDef &);
 };
 
 } // namespace polyregion::polyast
 #pragma clang diagnostic pop // ide google-explicit-constructor
+namespace std {
+
+template <typename T> struct std::hash<std::vector<T>> {
+  std::size_t operator()(std::vector<T> const &xs) const noexcept {
+    std::size_t seed = xs.size();
+    for (auto &x : xs) {
+      seed ^= std::hash<T>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+    }
+    return seed;
+  }
+};
+
+template <> struct std::hash<polyregion::polyast::Sym> {
+  std::size_t operator()(const polyregion::polyast::Sym &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::TypeKind::Base> {
+  std::size_t operator()(const polyregion::polyast::TypeKind::Base &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::TypeKind::Ref> {
+  std::size_t operator()(const polyregion::polyast::TypeKind::Ref &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::TypeKind::Integral> {
+  std::size_t operator()(const polyregion::polyast::TypeKind::Integral &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::TypeKind::Fractional> {
+  std::size_t operator()(const polyregion::polyast::TypeKind::Fractional &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Type::Base> {
+  std::size_t operator()(const polyregion::polyast::Type::Base &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Type::Float> {
+  std::size_t operator()(const polyregion::polyast::Type::Float &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Type::Double> {
+  std::size_t operator()(const polyregion::polyast::Type::Double &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Type::Bool> {
+  std::size_t operator()(const polyregion::polyast::Type::Bool &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Type::Byte> {
+  std::size_t operator()(const polyregion::polyast::Type::Byte &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Type::Char> {
+  std::size_t operator()(const polyregion::polyast::Type::Char &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Type::Short> {
+  std::size_t operator()(const polyregion::polyast::Type::Short &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Type::Int> {
+  std::size_t operator()(const polyregion::polyast::Type::Int &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Type::Long> {
+  std::size_t operator()(const polyregion::polyast::Type::Long &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Type::String> {
+  std::size_t operator()(const polyregion::polyast::Type::String &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Type::Unit> {
+  std::size_t operator()(const polyregion::polyast::Type::Unit &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Type::Struct> {
+  std::size_t operator()(const polyregion::polyast::Type::Struct &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Type::Array> {
+  std::size_t operator()(const polyregion::polyast::Type::Array &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Named> {
+  std::size_t operator()(const polyregion::polyast::Named &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Position> {
+  std::size_t operator()(const polyregion::polyast::Position &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Term::Base> {
+  std::size_t operator()(const polyregion::polyast::Term::Base &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Term::Select> {
+  std::size_t operator()(const polyregion::polyast::Term::Select &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Term::UnitConst> {
+  std::size_t operator()(const polyregion::polyast::Term::UnitConst &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Term::BoolConst> {
+  std::size_t operator()(const polyregion::polyast::Term::BoolConst &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Term::ByteConst> {
+  std::size_t operator()(const polyregion::polyast::Term::ByteConst &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Term::CharConst> {
+  std::size_t operator()(const polyregion::polyast::Term::CharConst &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Term::ShortConst> {
+  std::size_t operator()(const polyregion::polyast::Term::ShortConst &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Term::IntConst> {
+  std::size_t operator()(const polyregion::polyast::Term::IntConst &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Term::LongConst> {
+  std::size_t operator()(const polyregion::polyast::Term::LongConst &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Term::FloatConst> {
+  std::size_t operator()(const polyregion::polyast::Term::FloatConst &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Term::DoubleConst> {
+  std::size_t operator()(const polyregion::polyast::Term::DoubleConst &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Term::StringConst> {
+  std::size_t operator()(const polyregion::polyast::Term::StringConst &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Base> {
+  std::size_t operator()(const polyregion::polyast::Expr::Base &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Sin> {
+  std::size_t operator()(const polyregion::polyast::Expr::Sin &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Cos> {
+  std::size_t operator()(const polyregion::polyast::Expr::Cos &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Tan> {
+  std::size_t operator()(const polyregion::polyast::Expr::Tan &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Abs> {
+  std::size_t operator()(const polyregion::polyast::Expr::Abs &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Add> {
+  std::size_t operator()(const polyregion::polyast::Expr::Add &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Sub> {
+  std::size_t operator()(const polyregion::polyast::Expr::Sub &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Mul> {
+  std::size_t operator()(const polyregion::polyast::Expr::Mul &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Div> {
+  std::size_t operator()(const polyregion::polyast::Expr::Div &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Rem> {
+  std::size_t operator()(const polyregion::polyast::Expr::Rem &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Pow> {
+  std::size_t operator()(const polyregion::polyast::Expr::Pow &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::BNot> {
+  std::size_t operator()(const polyregion::polyast::Expr::BNot &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::BAnd> {
+  std::size_t operator()(const polyregion::polyast::Expr::BAnd &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::BOr> {
+  std::size_t operator()(const polyregion::polyast::Expr::BOr &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::BXor> {
+  std::size_t operator()(const polyregion::polyast::Expr::BXor &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::BSL> {
+  std::size_t operator()(const polyregion::polyast::Expr::BSL &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::BSR> {
+  std::size_t operator()(const polyregion::polyast::Expr::BSR &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Not> {
+  std::size_t operator()(const polyregion::polyast::Expr::Not &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Eq> {
+  std::size_t operator()(const polyregion::polyast::Expr::Eq &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Neq> {
+  std::size_t operator()(const polyregion::polyast::Expr::Neq &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::And> {
+  std::size_t operator()(const polyregion::polyast::Expr::And &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Or> {
+  std::size_t operator()(const polyregion::polyast::Expr::Or &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Lte> {
+  std::size_t operator()(const polyregion::polyast::Expr::Lte &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Gte> {
+  std::size_t operator()(const polyregion::polyast::Expr::Gte &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Lt> {
+  std::size_t operator()(const polyregion::polyast::Expr::Lt &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Gt> {
+  std::size_t operator()(const polyregion::polyast::Expr::Gt &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Alias> {
+  std::size_t operator()(const polyregion::polyast::Expr::Alias &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Invoke> {
+  std::size_t operator()(const polyregion::polyast::Expr::Invoke &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Index> {
+  std::size_t operator()(const polyregion::polyast::Expr::Index &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Stmt::Base> {
+  std::size_t operator()(const polyregion::polyast::Stmt::Base &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Stmt::Comment> {
+  std::size_t operator()(const polyregion::polyast::Stmt::Comment &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Stmt::Var> {
+  std::size_t operator()(const polyregion::polyast::Stmt::Var &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Stmt::Mut> {
+  std::size_t operator()(const polyregion::polyast::Stmt::Mut &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Stmt::Update> {
+  std::size_t operator()(const polyregion::polyast::Stmt::Update &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Stmt::Effect> {
+  std::size_t operator()(const polyregion::polyast::Stmt::Effect &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Stmt::While> {
+  std::size_t operator()(const polyregion::polyast::Stmt::While &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Stmt::Break> {
+  std::size_t operator()(const polyregion::polyast::Stmt::Break &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Stmt::Cont> {
+  std::size_t operator()(const polyregion::polyast::Stmt::Cont &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Stmt::Cond> {
+  std::size_t operator()(const polyregion::polyast::Stmt::Cond &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Stmt::Return> {
+  std::size_t operator()(const polyregion::polyast::Stmt::Return &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Function> {
+  std::size_t operator()(const polyregion::polyast::Function &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::StructDef> {
+  std::size_t operator()(const polyregion::polyast::StructDef &) const noexcept;
+};
+
+}
 
 #pragma clang diagnostic pop // -Wunknown-pragmas

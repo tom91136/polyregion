@@ -5,7 +5,7 @@ import polyregion.data.MsgPack
 object PolyAst {
 
   case class Sym(fqn: List[String]) derives MsgPack.Codec {
-    def repr: String          = fqn.mkString(".")
+    def repr: String = fqn.mkString(".")
   }
   object Sym {
     def apply(raw: String): Sym = {
@@ -14,8 +14,8 @@ object PolyAst {
       Sym(raw.split('.').toList)
     }
 
-    def unapply(xs : List[String]) : Option[(Sym, String)]  = 
-      xs.lastOption.map(x => Sym(xs.init) -> x ) 
+    def unapply(xs: List[String]): Option[(Sym, String)] =
+      xs.lastOption.map(x => Sym(xs.init) -> x)
 
   }
 
@@ -34,10 +34,10 @@ object PolyAst {
     case Int   extends Type(TypeKind.Integral)
     case Long  extends Type(TypeKind.Integral)
 
-    case String                              extends Type(TypeKind.Ref)
-    case Unit                                extends Type(TypeKind.Ref)
-    case Struct(name: Sym, args: List[Type]) extends Type(TypeKind.Ref)
-    case Array(component: Type)              extends Type(TypeKind.Ref)
+    case String                                      extends Type(TypeKind.Ref)
+    case Unit                                        extends Type(TypeKind.Ref)
+    case Struct(name: Sym)                           extends Type(TypeKind.Ref)
+    case Array(component: Type, length: Option[Int]) extends Type(TypeKind.Ref)
 
   }
 
@@ -114,11 +114,13 @@ object PolyAst {
     case Return(value: Expr)
   }
 
-  case class Function(name: String, args: List[Named], rtn: Type, body: List[Stmt]) derives MsgPack.Codec
+  case class StructDef(name: Sym, members: List[Named]) derives MsgPack.Codec
 
-  case class StructDef(
-      members: List[Named]
-      // TODO methods
-  ) derives MsgPack.Codec
+  case class Function(    //
+      name: String,       //
+      args: List[Named],  //
+      rtn: Type,          //
+      body: List[Stmt]    //
+  ) derives MsgPack.Codec //
 
 }

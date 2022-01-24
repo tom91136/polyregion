@@ -19,21 +19,24 @@ namespace polyregion::backend {
 
 using namespace polyregion::polyast;
 
-class AstTransformer {
+class LLVMAstTransformer {
   llvm::LLVMContext &C;
 
 private:
   std::unordered_map<std::string, llvm::Value *> lut;
+  std::unordered_map<Sym, llvm::StructType *> structTypes;
   llvm::IRBuilder<> B;
 
-  llvm::Type *mkTpe(const Type::Any &tpe);
   llvm::Value *mkSelect(const Term::Select &select);
   llvm::Value *mkRef(const Term::Any &ref);
   llvm::Value *mkExpr(const Expr::Any &expr, llvm::Function *fn, const std::string &key);
   void mkStmt(const Stmt::Any &stmt, llvm::Function *fn);
 
 public:
-  explicit AstTransformer(llvm::LLVMContext &c) : C(c), lut(), B(C) {}
+  llvm::Type *mkTpe(const Type::Any &tpe);
+
+  explicit LLVMAstTransformer(llvm::LLVMContext &c) : C(c), lut(), structTypes(), B(C) {}
+  void define(const std::vector<StructDef> &structs);
   void transform(const std::unique_ptr<llvm::Module> &module, const Function &arg);
 };
 

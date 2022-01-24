@@ -29,9 +29,42 @@
 
 using namespace polyregion::backend;
 
-void llvmc::initialise() {
+static std::unique_ptr<llvm::TargetMachine> createTargetMachine() {
+  using namespace llvm;
 
-  llvm::LLVMContext Context;
+  std::string CPUStr = sys::getHostCPUName().str();
+
+  StringMap<bool> HostFeatures;
+  SubtargetFeatures Features;
+  if (sys::getHostCPUFeatures(HostFeatures))
+    for (auto &F : HostFeatures)
+      Features.AddFeature(F.first(), F.second);
+  std::string FeaturesStr = Features.getString();
+
+  CodeGenOpt::Level OLvl = CodeGenOpt::Aggressive;
+
+  std::string WantedTriple = Triple::normalize("x86_64-pc-linux-gnu"); // TODO fix this
+  std::string SysDefaultTriple = sys::getDefaultTargetTriple();
+  Triple TheTriple = Triple(SysDefaultTriple);
+
+  std::string targetError;
+  const Target *TheTarget = TargetRegistry::lookupTarget("", TheTriple, targetError);
+  if (!targetError.empty()) {
+    throw std::logic_error("Target lookup failed: " + targetError);
+  }
+
+  TargetOptions Options;
+  std::unique_ptr<TargetMachine> TM(TheTarget->createTargetMachine( //
+      TheTriple.getTriple(),                                        //
+      CPUStr,                                                       //
+      FeaturesStr,                                                  //
+      Options, Reloc::Model::PIC_, llvm::None, OLvl));
+  return TM;
+}
+
+std::unique_ptr<llvm::TargetMachine> currentMachine;
+
+void llvmc::initialise() {
 
   // Initialize targets first, so that --version shows registered targets.
   llvm::InitializeAllTargets();
@@ -58,57 +91,27 @@ void llvmc::initialise() {
   initializeHardwareLoopsPass(*r);
   initializeTransformUtils(*r);
   initializeReplaceWithVeclibLegacyPass(*r);
+
+  currentMachine = createTargetMachine();
 }
+
+const llvm::TargetMachine &llvmc::targetMachine() { return *currentMachine; }
 
 polyregion::compiler::Compilation llvmc::compileModule(bool emitDisassembly,            //
                                                        std::unique_ptr<llvm::Module> M, //
                                                        llvm::LLVMContext &Context) {
   using namespace llvm;
-
   auto start = compiler::nowMono();
 
-  SMDiagnostic Err;
-
-  std::string CPUStr = sys::getHostCPUName().str();
-
-  StringMap<bool> HostFeatures;
-  SubtargetFeatures Features;
-  if (sys::getHostCPUFeatures(HostFeatures))
-    for (auto &F : HostFeatures)
-      Features.AddFeature(F.first(), F.second);
-  std::string FeaturesStr = Features.getString();
-
-//  std::cout << "F=" << FeaturesStr << std::endl;
-  CodeGenOpt::Level OLvl = CodeGenOpt::Aggressive;
-
-  std::string IRTargetTriple = M->getDataLayoutStr();
-  std::string WantedTriple = Triple::normalize("x86_64-pc-linux-gnu");
-  std::string SysDefaultTriple = sys::getDefaultTargetTriple();
-  Triple TheTriple = Triple(SysDefaultTriple);
-
-  std::string Error;
-  const Target *TheTarget = TargetRegistry::lookupTarget("", TheTriple, Error);
-
-  if (!Error.empty()) {
-    return polyregion::compiler::Compilation{""};
-  }
-
-//  std::cout << "E=" << Error << "; " << SysDefaultTriple << std::endl;
-
-  TargetOptions Options;
-  std::unique_ptr<TargetMachine> TM(TheTarget->createTargetMachine( //
-      TheTriple.getTriple(),                                        //
-      CPUStr,                                                       //
-      FeaturesStr,                                                  //
-      Options, Reloc::Model::PIC_, llvm::None, OLvl));
-  M->setDataLayout(TM->createDataLayout());
+  M->setDataLayout(currentMachine->createDataLayout());
 
   verifyModule(*M, &errs());
 
   auto mkPass = [&](const std::function<void(LLVMTargetMachine &, legacy::PassManager &, MCContext &)> &f) {
     legacy::PassManager PM;
     // XXX we have no rtti here so no dynamic cast
-    auto &LLVMTM = static_cast<LLVMTargetMachine &>(*TM);    // NOLINT(cppcoreguidelines-pro-type-static-cast-downcast)
+    auto &LLVMTM =
+        static_cast<LLVMTargetMachine &>(*currentMachine);   // NOLINT(cppcoreguidelines-pro-type-static-cast-downcast)
     auto *MMIWP = new MachineModuleInfoWrapperPass(&LLVMTM); // pass manager takes owner of this
 
     TargetPassConfig *PassConfig = LLVMTM.createPassConfig(PM);
@@ -153,16 +156,16 @@ polyregion::compiler::Compilation llvmc::compileModule(bool emitDisassembly,    
   //    });
   //  }
 
-//  std::cout << "Done = "
-//            << " b=" << asmBuffer.size() << std::endl;
+  //  std::cout << "Done = "
+  //            << " b=" << asmBuffer.size() << std::endl;
 
-//  std::ofstream file("the_obj2.o", std::ios::binary);
-//  file.write(objBuffer.data(), ssize_t(objBuffer.size_in_bytes()));
-//  file.flush();
-//
-//  std::ofstream file2("the_obj2.s", std::ios::binary);
-//  file2.write(asmBuffer.data(), ssize_t(asmBuffer.size_in_bytes()));
-//  file2.flush();
+  //  std::ofstream file("the_obj2.o", std::ios::binary);
+  //  file.write(objBuffer.data(), ssize_t(objBuffer.size_in_bytes()));
+  //  file.flush();
+  //
+  //  std::ofstream file2("the_obj2.s", std::ios::binary);
+  //  file2.write(asmBuffer.data(), ssize_t(asmBuffer.size_in_bytes()));
+  //  file2.flush();
 
   //  auto b =
   //      llvm::object::createBinary(*llvm::MemoryBuffer::getMemBuffer(StringRef(data.data(), data.size()), "", false));

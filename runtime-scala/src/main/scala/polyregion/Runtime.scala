@@ -12,18 +12,19 @@ object Runtime {
   }
 
   trait NativeStruct[A] {
+    def name: String
     def sizeInBytes: Int
-    def members: IndexedSeq[(Type, String)]
+    def members: IndexedSeq[(String, Type)]
     def encode(buffer: java.nio.ByteBuffer, a: A): Unit
     def decode(buffer: java.nio.ByteBuffer): A
   }
 
   trait Buffer[A] extends mutable.IndexedSeq[A] {
-    def name : String
+    def name: String
     def pointer: Option[Long]
     def buffer: java.nio.Buffer
     def putAll(xs: A*): this.type
-    override def toString:String = s"Buffer[$name](${mkString(", ")})"
+    override def toString: String = s"Buffer[$name](${mkString(", ")})"
   }
 
   object Buffer {
@@ -42,7 +43,7 @@ object Runtime {
       java.nio.ByteBuffer.allocateDirect(size).order(java.nio.ByteOrder.nativeOrder())
 
     class DoubleBuffer(val buffer: java.nio.DoubleBuffer) extends Buffer[Double] {
-      override val name = "Double"
+      override val name                                 = "Double"
       override def update(idx: Int, elem: Double): Unit = buffer.put(idx, elem)
       override def apply(i: Int): Double                = buffer.get(i)
       override def length: Int                          = buffer.capacity()
@@ -50,7 +51,7 @@ object Runtime {
       override def pointer: Option[Long]                = ptr(buffer)
     }
     class FloatBuffer(val buffer: java.nio.FloatBuffer) extends Buffer[Float] {
-      override val name = "Float"
+      override val name                                = "Float"
       override def update(idx: Int, elem: Float): Unit = buffer.put(idx, elem)
       override def apply(i: Int): Float                = buffer.get(i)
       override def length: Int                         = buffer.capacity()
@@ -58,7 +59,7 @@ object Runtime {
       override def pointer: Option[Long]               = ptr(buffer)
     }
     class LongBuffer(val buffer: java.nio.LongBuffer) extends Buffer[Long] {
-      override val name = "Long"
+      override val name                               = "Long"
       override def update(idx: Int, elem: Long): Unit = buffer.put(idx, elem)
       override def apply(i: Int): Long                = buffer.get(i)
       override def length: Int                        = buffer.capacity()
@@ -66,7 +67,7 @@ object Runtime {
       override def pointer: Option[Long]              = ptr(buffer)
     }
     class IntBuffer(val buffer: java.nio.IntBuffer) extends Buffer[Int] {
-      override val name = "Int"
+      override val name                              = "Int"
       override def update(idx: Int, elem: Int): Unit = buffer.put(idx, elem)
       override def apply(i: Int): Int                = buffer.get(i)
       override def length: Int                       = buffer.capacity()
@@ -74,7 +75,7 @@ object Runtime {
       override def pointer: Option[Long]             = ptr(buffer)
     }
     class ShortBuffer(val buffer: java.nio.ShortBuffer) extends Buffer[Short] {
-      override val name = "Short"
+      override val name                                = "Short"
       override def update(idx: Int, elem: Short): Unit = buffer.put(idx, elem)
       override def apply(i: Int): Short                = buffer.get(i)
       override def length: Int                         = buffer.capacity()
@@ -82,7 +83,7 @@ object Runtime {
       override def pointer: Option[Long]               = ptr(buffer)
     }
     class ByteBuffer(val buffer: java.nio.ByteBuffer) extends Buffer[Byte] {
-      override val name = "Byte"
+      override val name                               = "Byte"
       override def update(idx: Int, elem: Byte): Unit = buffer.put(idx, elem)
       override def apply(i: Int): Byte                = buffer.get(i)
       override def length: Int                        = buffer.capacity()
@@ -90,7 +91,7 @@ object Runtime {
       override def pointer: Option[Long]              = ptr(buffer)
     }
     class CharBuffer(val buffer: java.nio.CharBuffer) extends Buffer[Char] {
-      override val name = "Char"
+      override val name                               = "Char"
       override def update(idx: Int, elem: Char): Unit = buffer.put(idx, elem)
       override def apply(i: Int): Char                = buffer.get(i)
       override def length: Int                        = buffer.capacity()
@@ -98,7 +99,7 @@ object Runtime {
       override def pointer: Option[Long]              = ptr(buffer)
     }
     class BoolBuffer(val buffer: java.nio.ByteBuffer) extends Buffer[Boolean] {
-      override val name = "Boolean"
+      override val name                                  = "Boolean"
       override def update(idx: Int, elem: Boolean): Unit = buffer.put(idx, (if (elem) 1 else 0).toByte)
       override def apply(i: Int): Boolean                = buffer.get(i) != 0
       override def length: Int                           = buffer.capacity()

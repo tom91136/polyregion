@@ -9,7 +9,9 @@ public class PolyregionCompiler {
 
   public static final short BACKEND_LLVM = 0;
 
-  public static native Compilation compile(byte[] ast, boolean emitAssembly, short backend);
+  public static native Compilation compile(byte[] function, boolean emitAssembly, short backend);
+
+  public static native Layout layoutOf(byte[] structDef, boolean pack);
 
   private static AtomicBoolean loaded = new AtomicBoolean();
 

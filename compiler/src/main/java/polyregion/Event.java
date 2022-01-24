@@ -14,8 +14,8 @@ public final class Event {
         + epochMillis
         + " "
         + name
-        + " : "        +
-            String.format( "%.3f", ((double) elapsedNanos) / 1.0e6 )
+        + " : "
+        + String.format("%.3f", ((double) elapsedNanos) / 1.0e6)
         + "ms}";
   }
 }

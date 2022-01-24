@@ -6,9 +6,9 @@ add_executable(runtime-tests test.cpp test-main.cpp)
 add_executable(runtime-drv driver.cpp)
 #add_library(runtime-dylib SHARED polyregion_runtime.cpp)
 
-target_include_directories(runtime-lib PRIVATE ../include ${LIBFFI_HEADER_PATH})
-target_include_directories(runtime-drv PRIVATE ../include)
-target_include_directories(runtime-tests PRIVATE ../include)
+target_include_directories(runtime-lib PUBLIC ../include ${LIBFFI_HEADER_PATH})
+target_include_directories(runtime-drv PUBLIC ../include)
+target_include_directories(runtime-tests PUBLIC ../include)
 #target_include_directories(runtime-dylib PRIVATE ../include)
 
 set(LLVM_LIBS

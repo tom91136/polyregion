@@ -1,6 +1,7 @@
 #pragma once
 
 #include "export.h"
+#include "types.h"
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -8,19 +9,6 @@
 #include <vector>
 
 namespace polyregion::runtime {
-
-enum class EXPORT Type : uint8_t {
-  Bool = 1,
-  Byte,
-  Char,
-  Short,
-  Int,
-  Long,
-  Float,
-  Double,
-  Ptr,
-  Void,
-};
 
 using TypedPointer = std::pair<Type, void *>;
 

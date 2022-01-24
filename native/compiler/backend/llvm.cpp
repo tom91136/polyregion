@@ -18,25 +18,38 @@ using namespace polyregion::polyast;
 
 static llvm::ExitOnError ExitOnErr;
 
-llvm::Type *backend::AstTransformer::mkTpe(const Type::Any &tpe) {
-  return variants::total(
+llvm::Type *backend::LLVMAstTransformer::mkTpe(const Type::Any &tpe) {                               //
+  return variants::total(                                                                        //
       *tpe,                                                                                      //
       [&](const Type::Float &x) -> llvm::Type * { return llvm::Type::getFloatTy(C); },           //
       [&](const Type::Double &x) -> llvm::Type * { return llvm::Type::getDoubleTy(C); },         //
       [&](const Type::Bool &x) -> llvm::Type * { return llvm::Type::getInt1Ty(C); },             //
       [&](const Type::Byte &x) -> llvm::Type * { return llvm::Type::getInt8Ty(C); },             //
-      [&](const Type::Char &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },             //
+      [&](const Type::Char &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },            //
       [&](const Type::Short &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },           //
       [&](const Type::Int &x) -> llvm::Type * { return llvm::Type::getInt32Ty(C); },             //
       [&](const Type::Long &x) -> llvm::Type * { return llvm::Type::getInt64Ty(C); },            //
       [&](const Type::String &x) -> llvm::Type * { return undefined(__FILE_NAME__, __LINE__); }, //
       [&](const Type::Unit &x) -> llvm::Type * { return llvm::Type::getVoidTy(C); },             //
-      [&](const Type::Struct &x) -> llvm::Type * { return undefined(__FILE_NAME__, __LINE__); }, //
-      [&](const Type::Array &x) -> llvm::Type * { return mkTpe(x.component)->getPointerTo(); }   //
+      [&](const Type::Struct &x) -> llvm::Type * {
+        if (auto def = structTypes.find(x.name); def != structTypes.end()) {
+          return def->second;
+        } else {
+          return undefined(__FILE_NAME__, __LINE__, "Unseen struct def : " + to_string(x));
+        }
+      }, //
+      [&](const Type::Array &x) -> llvm::Type * {
+        if (x.length) {
+          return llvm::ArrayType::get(mkTpe(x.component), *x.length);
+        } else {
+          return mkTpe(x.component)->getPointerTo();
+        }
+      }
+
   );
 }
 
-llvm::Value *backend::AstTransformer::mkSelect(const Term::Select &select) {
+llvm::Value *backend::LLVMAstTransformer::mkSelect(const Term::Select &select) {
 
   if (auto x = lut.find(qualified(select)); x != lut.end()) {
     return std::holds_alternative<Type::Array>(*select.last.tpe)                           //
@@ -47,7 +60,7 @@ llvm::Value *backend::AstTransformer::mkSelect(const Term::Select &select) {
   }
 }
 
-llvm::Value *backend::AstTransformer::mkRef(const Term::Any &ref) {
+llvm::Value *backend::LLVMAstTransformer::mkRef(const Term::Any &ref) {
   using llvm::ConstantFP;
   using llvm::ConstantInt;
   return variants::total(
@@ -65,7 +78,7 @@ llvm::Value *backend::AstTransformer::mkRef(const Term::Any &ref) {
       [&](const Term::StringConst &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); });
 }
 
-llvm::Value *backend::AstTransformer::mkExpr(const Expr::Any &expr, llvm::Function *fn, const std::string &key) {
+llvm::Value *backend::LLVMAstTransformer::mkExpr(const Expr::Any &expr, llvm::Function *fn, const std::string &key) {
 
   const auto binaryExpr = [&](const Term::Any &l, const Term::Any &r) { return std::make_tuple(mkRef(l), mkRef(r)); };
 
@@ -174,7 +187,7 @@ llvm::Value *backend::AstTransformer::mkExpr(const Expr::Any &expr, llvm::Functi
       });
 }
 
-void backend::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
+void backend::LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
   return variants::total(
       *stmt,
       [&](const Stmt::Comment &x) { /* discard comments */
@@ -263,7 +276,7 @@ void backend::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) 
   );
 }
 
-void backend::AstTransformer::transform(const std::unique_ptr<llvm::Module> &module, const Function &fnTree) {
+void backend::LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> &module, const Function &fnTree) {
 
   auto paramTpes = map_vec<Named, llvm::Type *>(fnTree.args, [&](auto &&named) { return mkTpe(named.tpe); });
   auto fnTpe = llvm::FunctionType::get(mkTpe(fnTree.rtn), {paramTpes}, false);
@@ -366,7 +379,7 @@ compiler::Compilation backend::LLVM::run(const Function &fn) {
 
   auto astXform = compiler::nowMono();
 
-  AstTransformer xform(*ctx);
+  LLVMAstTransformer xform(*ctx);
   xform.transform(mod, fn);
 
   auto elapsed = compiler::elapsedNs(astXform);

@@ -44,6 +44,29 @@ object compileTime {
     '{}
   }
 
+  inline def showOffsets[B]: Unit = ${ showOffsetsImpl[B] }
+
+  def showOffsetsImpl[B: Type](using Quotes): Expr[Unit] = {
+    import quotes.reflect.*
+    println(TypeRepr.of[B].typeSymbol.tree.show)
+    import pprint.*
+    pprint.pprintln(TypeRepr.of[B].typeSymbol)
+
+    val sd = PolyAst.StructDef(
+      PolyAst.Sym("a.b"),
+      PolyAst.Named("e", PolyAst.Type.Byte) ::
+        PolyAst.Named("a", PolyAst.Type.Int) ::
+        PolyAst.Named("b", PolyAst.Type.Float) ::
+        PolyAst.Named("c", PolyAst.Type.Byte) ::
+        PolyAst.Named("d", PolyAst.Type.Byte) ::
+        Nil
+    )
+    val s = PolyregionCompiler.layoutOf(MsgPack.encode(sd), false)
+    println(s"s=${s}")
+
+    '{}
+  }
+
   inline def foreachJVM(inline range: Range)(inline x: Int => Unit): Any =
     range.foreach(x)
 
@@ -99,16 +122,16 @@ object compileTime {
 
       val tpeAsRuntimeTpe = (t: PolyAst.Type) =>
         t match {
-          case PolyAst.Type.Bool     => '{ PolyregionRuntime.TYPE_BOOL }
-          case PolyAst.Type.Byte     => '{ PolyregionRuntime.TYPE_BYTE }
-          case PolyAst.Type.Char     => '{ PolyregionRuntime.TYPE_CHAR }
-          case PolyAst.Type.Short    => '{ PolyregionRuntime.TYPE_SHORT }
-          case PolyAst.Type.Int      => '{ PolyregionRuntime.TYPE_INT }
-          case PolyAst.Type.Long     => '{ PolyregionRuntime.TYPE_LONG }
-          case PolyAst.Type.Float    => '{ PolyregionRuntime.TYPE_FLOAT }
-          case PolyAst.Type.Double   => '{ PolyregionRuntime.TYPE_DOUBLE }
-          case PolyAst.Type.Array(_) => '{ PolyregionRuntime.TYPE_PTR }
-          case PolyAst.Type.Unit     => '{ PolyregionRuntime.TYPE_VOID }
+          case PolyAst.Type.Bool        => '{ PolyregionRuntime.TYPE_BOOL }
+          case PolyAst.Type.Byte        => '{ PolyregionRuntime.TYPE_BYTE }
+          case PolyAst.Type.Char        => '{ PolyregionRuntime.TYPE_CHAR }
+          case PolyAst.Type.Short       => '{ PolyregionRuntime.TYPE_SHORT }
+          case PolyAst.Type.Int         => '{ PolyregionRuntime.TYPE_INT }
+          case PolyAst.Type.Long        => '{ PolyregionRuntime.TYPE_LONG }
+          case PolyAst.Type.Float       => '{ PolyregionRuntime.TYPE_FLOAT }
+          case PolyAst.Type.Double      => '{ PolyregionRuntime.TYPE_DOUBLE }
+          case PolyAst.Type.Array(_, _) => '{ PolyregionRuntime.TYPE_PTR }
+          case PolyAst.Type.Unit        => '{ PolyregionRuntime.TYPE_VOID }
           case unknown =>
             println(s"tpeAsRuntimeTpe ??? = $unknown ")
             ???
@@ -142,14 +165,14 @@ object compileTime {
           case PolyAst.Type.Float  => '{ Buffer[Float](${ expr.asExprOf[Float] }) }
           case PolyAst.Type.Double => '{ Buffer[Double](${ expr.asExprOf[Double] }) }
 
-          case PolyAst.Type.Array(PolyAst.Type.Bool)   => expr.asExprOf[Buffer[Boolean]]
-          case PolyAst.Type.Array(PolyAst.Type.Char)   => expr.asExprOf[Buffer[Char]]
-          case PolyAst.Type.Array(PolyAst.Type.Byte)   => expr.asExprOf[Buffer[Byte]]
-          case PolyAst.Type.Array(PolyAst.Type.Short)  => expr.asExprOf[Buffer[Short]]
-          case PolyAst.Type.Array(PolyAst.Type.Int)    => expr.asExprOf[Buffer[Int]]
-          case PolyAst.Type.Array(PolyAst.Type.Long)   => expr.asExprOf[Buffer[Long]]
-          case PolyAst.Type.Array(PolyAst.Type.Float)  => expr.asExprOf[Buffer[Float]]
-          case PolyAst.Type.Array(PolyAst.Type.Double) => expr.asExprOf[Buffer[Double]]
+          case PolyAst.Type.Array(PolyAst.Type.Bool, None)   => expr.asExprOf[Buffer[Boolean]]
+          case PolyAst.Type.Array(PolyAst.Type.Char, None)   => expr.asExprOf[Buffer[Char]]
+          case PolyAst.Type.Array(PolyAst.Type.Byte, None)   => expr.asExprOf[Buffer[Byte]]
+          case PolyAst.Type.Array(PolyAst.Type.Short, None)  => expr.asExprOf[Buffer[Short]]
+          case PolyAst.Type.Array(PolyAst.Type.Int, None)    => expr.asExprOf[Buffer[Int]]
+          case PolyAst.Type.Array(PolyAst.Type.Long, None)   => expr.asExprOf[Buffer[Long]]
+          case PolyAst.Type.Array(PolyAst.Type.Float, None)  => expr.asExprOf[Buffer[Float]]
+          case PolyAst.Type.Array(PolyAst.Type.Double, None) => expr.asExprOf[Buffer[Double]]
           case unknown =>
             println(s"???= $unknown ")
             ???

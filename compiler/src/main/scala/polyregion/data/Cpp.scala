@@ -39,7 +39,9 @@ object Cpp {
       implStmts: List[String],
       includes: List[String],
       forwardDeclStmts: List[String],
-      nsDeclStmts: List[String]
+      nsDeclStmts: List[String],
+      stdSpecialisationsDeclStmts: String => List[String],
+      stdSpecialisationsStmts: String => List[String]
   )
 
   object StructSource {
@@ -69,6 +71,22 @@ object Cpp {
         .distinct.sorted
         .map(incl => s"#include <$incl>")
         .mkString("\n")
+
+      val stdSpecialisationDecl = //
+        s"""|namespace std {
+            |
+            |template <typename T> struct std::hash<std::vector<T>> {
+            |  std::size_t operator()(std::vector<T> const &xs) const noexcept {
+            |    std::size_t seed = xs.size();
+            |    for (auto &x : xs) {
+            |      seed ^= std::hash<T>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+            |    }
+            |    return seed;
+            |  }
+            |};
+            |${xs.flatMap(_.stdSpecialisationsDeclStmts(namespace)).sym("\n", "\n", "\n")}
+            |}
+            |""".stripMargin
 
       val shared = //
         s"""|
@@ -119,19 +137,23 @@ object Cpp {
           |${stmts.sym("\n", "\n", "\n")}
           |} // namespace $namespace
           |#pragma clang diagnostic pop // ide google-explicit-constructor
-          |
+          |$stdSpecialisationDecl
           |#pragma clang diagnostic pop // -Wunknown-pragmas
           |""".stripMargin
     }
     def emitImpl(namespace: String, headerName: String, xs: List[StructSource]) =
       s"""|#include "$headerName.h"
-          |
-          |namespace $namespace {
-          |
-          |${xs.map(_.implStmts.mkString("\n")).mkString("\n\n")}
-          |
-          |} // namespace $namespace
-          |""".stripMargin
+            |
+            |namespace $namespace {
+            |
+            |${xs.map(_.implStmts.mkString("\n")).mkString("\n\n")}
+            |
+            |} // namespace $namespace
+            |
+            |${xs.flatMap(_.stdSpecialisationsStmts(namespace)).sym("\n", "\n", "\n")}
+            |
+            |""".stripMargin
+
   }
 
   case class StructNode(
@@ -250,6 +272,26 @@ object Cpp {
         }.unzip
       } else (Nil, Nil)
 
+      val stdSpecialisationsDeclStmts = (ns: String) =>
+        s"template <> struct std::hash<$ns::${clsName(qualified = true)}> {" ::
+          s"  std::size_t operator()(const $ns::${clsName(qualified = true)} &) const noexcept;" ::
+          s"};" :: Nil
+
+      val stdSpecialisationsStmts = (ns: String) =>
+        s"std::size_t std::hash<$ns::${clsName(qualified = true)}>::operator()(const $ns::${clsName(qualified = true)} &x) const noexcept {"
+      ::
+      (members match {
+        case Nil => s"std::size_t seed = std::hash<std::string>()(\"$ns::${clsName(qualified = true)}\");" :: Nil
+        case (n, t) :: xs =>
+          xs.foldLeft[List[String]](
+            s"std::size_t seed = std::hash<decltype(x.${n})>()(x.${n});" :: Nil
+          ) { case (acc, (n, t)) =>
+            acc :+ s"seed ^= std::hash<decltype(x.${n})>()(x.${n}) + 0x9e3779b9 + (seed << 6) + (seed >> 2);"
+          }
+      }).map("  " + _) :::
+        s"  return seed;" ::
+        s"}" :: Nil
+
       val equalitySig =
         s"EXPORT friend bool operator==(const ${clsName(qualified = true)} &, const ${clsName(qualified = true)} &);" :: Nil
       val equalityImpl = members match {
@@ -277,7 +319,9 @@ object Cpp {
         implStmts = streamImpl ::: equalityImpl ::: nsImpl,
         includes = members.flatMap(_._2.include),
         variantStmt,
-        nsDecl
+        nsDecl,
+        stdSpecialisationsDeclStmts,
+        stdSpecialisationsStmts
       ) :: variants.flatMap(_.emit)
     }
   }

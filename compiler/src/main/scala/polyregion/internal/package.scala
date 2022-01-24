@@ -90,20 +90,18 @@ extension (e: PolyAst.Type) {
   def repr: String = {
     import PolyAst.Type.*
     e match {
-      case Struct(sym, Nil)  => sym.repr
-      case Struct(sym, ctor) => s"${sym.repr}[${ctor.map(_.repr).mkString(",")}]"
-      //
-      case Array(comp) => s"Array[${comp.repr}]"
-      case Bool        => "Bool"
-      case Byte        => "Byte"
-      case Char        => "Char"
-      case Short       => "Short"
-      case Int         => "Int"
-      case Long        => "Long"
-      case Float       => "Float"
-      case Double      => "Double"
-      case String      => "String"
-      case Unit        => "Unit"
+      case Struct(sym)    => s"Struct[${sym.repr}]"
+      case Array(comp, n) => s"Array[${comp.repr}${n.map(x => s";$x").getOrElse("")}]"
+      case Bool           => "Bool"
+      case Byte           => "Byte"
+      case Char           => "Char"
+      case Short          => "Short"
+      case Int            => "Int"
+      case Long           => "Long"
+      case Float          => "Float"
+      case Double         => "Double"
+      case String         => "String"
+      case Unit           => "Unit"
     }
   }
 }

@@ -14,14 +14,14 @@ set(LIB_SOURCES
         )
 
 add_library(compiler-lib ${LIB_SOURCES})
-add_dependencies(compiler-lib intrinsics_gen)
+add_dependencies(compiler-lib intrinsics_gen runtime-lib)
 
 add_executable(compiler-tests test.cpp test-main.cpp)
 add_executable(compiler-drv driver.cpp)
 
-target_include_directories(compiler-tests PRIVATE . ../include)
-target_include_directories(compiler-drv PRIVATE . ../include)
-target_include_directories(compiler-lib PRIVATE . ../include)
+target_include_directories(compiler-tests PUBLIC . ../include)
+target_include_directories(compiler-drv PUBLIC . ../include)
+target_include_directories(compiler-lib PUBLIC . ../include)
 
 
 #target_precompile_headers(compiler

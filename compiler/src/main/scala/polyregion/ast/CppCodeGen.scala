@@ -39,8 +39,13 @@ object CppCodeGen {
         tpe.kind match {
           case CppType.Kind.StdLib =>
             (tpe.namespace ::: tpe.name :: Nil, tpe.ctors) match {
-              case ("std" :: "optional" :: Nil, x :: Nil) if x.kind != CppType.Kind.StdLib =>
-                val nested = s"${x.ns(fromJsonFn(x))}(${jsonAt(idx)})"
+              case ("std" :: "optional" :: Nil, x :: Nil) =>
+                val nested =
+                  if (x.kind != CppType.Kind.StdLib)
+                    s"${x.ns(fromJsonFn(x))}(${jsonAt(idx)})"
+                  else
+                    s"${jsonAt(idx)}.get<${x.ref(qualified = true)}>()"
+
                 s"auto $name = ${jsonAt(idx)}.is_null() ? std::nullopt : std::make_optional($nested);" :: Nil
               case ("std" :: "vector" :: Nil, x :: Nil) if x.kind != CppType.Kind.StdLib =>
                 s"${tpe.ref(qualified = true)} $name;" ::
@@ -67,8 +72,12 @@ object CppCodeGen {
         tpe.kind match {
           case CppType.Kind.StdLib =>
             (tpe.namespace ::: tpe.name :: Nil, tpe.ctors) match {
-              case ("std" :: "optional" :: Nil, x :: Nil) if x.kind != CppType.Kind.StdLib =>
-                s"auto $name = x.${name} ? ${x.ns(toJsonFn(x))}(*x.${name}) : json{};" :: Nil
+              case ("std" :: "optional" :: Nil, x :: Nil) =>
+                val deref =
+                  if (x.kind != CppType.Kind.StdLib) s"${x.ns(toJsonFn(x))}(*x.${name})"
+                  else s"json{*x.${name}}"
+                s"auto $name = x.${name} ? $deref : json{};" :: Nil
+
               case ("std" :: "vector" :: Nil, x :: Nil) if x.kind != CppType.Kind.StdLib =>
                 s"std::vector<json> $name;" ::
                   s"std::transform(x.${name}.begin(), x.${name}.end(), std::back_inserter($name), &${x.ns(toJsonFn(x))});"

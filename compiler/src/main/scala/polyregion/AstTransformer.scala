@@ -169,7 +169,7 @@ class AstTransformer(using val q: Quotes) {
           name <- resolveSym(ctor).deferred
           xs   <- args.traverse(resolveTpe(trace)(_))
         } yield (name, xs) match {
-          case (Symbols.Buffer, (_, component) :: Nil) => None -> PolyAst.Type.Array(component)
+          case (Symbols.Buffer, (_, component) :: Nil) => None -> PolyAst.Type.Array(component, None)
           case (n, ys)                                 => ??? // None -> PolyAst.Type.Struct(n, ys)
         }
 
@@ -203,7 +203,7 @@ class AstTransformer(using val q: Quotes) {
             case PolyAst.Sym(Symbols.Scala :+ "Double")    => PolyAst.Type.Double
             case PolyAst.Sym(Symbols.Scala :+ "Char")      => PolyAst.Type.Char
             case PolyAst.Sym(Symbols.JavaLang :+ "String") => PolyAst.Type.String
-            case sym                                       => PolyAst.Type.Struct(sym, Nil)
+            case sym                                       => PolyAst.Type.Struct(sym)
           }
           .map(None -> _)
           .deferred
@@ -289,81 +289,7 @@ class AstTransformer(using val q: Quotes) {
 
       }
 
-    case ap @ Apply(_, _) =>
-      resolveIntrinsics(ctx)(ap)
-
-    //   for {
-    //     (_, tpe)                      <- resolveTpe(term :: ctx.trace)(ap.tpe)
-    //     (lhsDepth, lhsRef, lhsTrees)  <- resolveTerm(ctx.down(term))(qualifier) // go down here
-    //     (maxDepth, argRefs, argTrees) <- resolveTerms(ctx.at(term, lhsDepth))(args)
-
-    //     path = PolyAst.Named(s"v${ctx.depth}", tpe)
-    //     // tree = // don't save a ref for unit methods
-    //     //   if (tpe == PolyAst.Type.Empty) PolyAst.Tree.Effect(lhsRef, name, argRefs)
-    //     //   else PolyAst.Stmt.Var(path, PolyAst.Tree.Invoke(lhsRef, name, argRefs, tpe))
-    //     existingTree = (argTrees ++ lhsTrees)
-    //     lhsSelect <- lhsRef match {
-    //       case Some(s @ PolyAst.Term.Select(_, _)) => s.pure
-    //       case bad                                 => s"Illegal LHS for apply: ${bad}".fail.deferred
-    //     }
-
-    //   } yield (name, lhsSelect, argRefs, tpe) match {
-    //     case (
-    //           "apply",
-    //           select,
-    //           Some(idx) :: Nil,
-    //           tpe
-    //         ) => // TODO check idx.tpe =:= Int
-    //       val tree = PolyAst.Stmt.Var(path, Some(PolyAst.Expr.Index(select, idx, tpe)))
-    //       val ref  = PolyAst.Term.Select(Nil, path)
-    //       (maxDepth, Some(ref), existingTree :+ tree)
-    //     case (
-    //           "update",
-    //           select,
-    //           Some(idx) :: Some(value) :: Nil,
-    //           tpe
-    //         ) => // TODO check idx.tpe =:= Int && value.tpe =:= lhs.tpe
-    //       val tree = PolyAst.Stmt.Update(select, idx, value)
-    //       (maxDepth, None, existingTree :+ tree)
-    //     case (_, lhs, _, PolyAst.Type.Unit) =>
-    //       val tree = PolyAst.Stmt.Effect(lhsSelect, name, argRefs.flatten)
-    //       (maxDepth, None, existingTree :+ tree)
-    //     case (name, lhs, Nil, tpe) => // unary op
-    //       val term = name match {
-    //         case "!" => PolyAst.Expr.Not(lhs)
-    //       }
-    //       val tree = PolyAst.Stmt.Var(path, Some(term))
-    //       val ref  = PolyAst.Term.Select(Nil, path)
-    //       (maxDepth, Some(ref), existingTree :+ tree)
-    //     case (name, lhs, Some(rhs) :: Nil, tpe) => // binary op
-    //       println(s"apply, q=${s.symbol.fullName} = ${resolveSym(s.tpe)}; $ap")
-    //       val term = name match {
-    //         case "+"  => PolyAst.Expr.Add(lhs, rhs, tpe)
-    //         case "-"  => PolyAst.Expr.Sub(lhs, rhs, tpe)
-    //         case "*"  => PolyAst.Expr.Mul(lhs, rhs, tpe)
-    //         case "/"  => PolyAst.Expr.Div(lhs, rhs, tpe)
-    //         case "%"  => PolyAst.Expr.Rem(lhs, rhs, tpe)
-    //         case "<"  => PolyAst.Expr.Lt(lhs, rhs)
-    //         case "<=" => PolyAst.Expr.Lte(lhs, rhs)
-    //         case ">"  => PolyAst.Expr.Gt(lhs, rhs)
-    //         case ">=" => PolyAst.Expr.Gte(lhs, rhs)
-    //         case "==" => PolyAst.Expr.Eq(lhs, rhs)
-    //         case "!=" => PolyAst.Expr.Neq(lhs, rhs)
-    //         case "&&" => PolyAst.Expr.And(lhs, rhs)
-    //         case "||" => PolyAst.Expr.Or(lhs, rhs)
-    //       }
-    //       val tree = PolyAst.Stmt.Var(path, Some(term))
-    //       val ref  = PolyAst.Term.Select(Nil, path)
-    //       (maxDepth, Some(ref), existingTree :+ tree)
-    //     case _ =>
-    //       val tree =
-    //         PolyAst.Stmt.Var(path, Some(PolyAst.Expr.Invoke(lhsSelect, name, argRefs.flatten, tpe)))
-    //       val ref = PolyAst.Term.Select(Nil, path)
-    //       (maxDepth, Some(ref), existingTree :+ tree)
-    //   }
-    // case ap @ Apply(x, args) =>
-    //   println(s"apply, q=${x.tpe}; $args")
-    //   ???
+    case ap @ Apply(_, _) => resolveIntrinsics(ctx)(ap)
     case Block(stat, expr) => // stat : List[Statement]
       for {
         (statDepth, _, statTrees) <- resolveTrees(ctx.log(term))(stat)

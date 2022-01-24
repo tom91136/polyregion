@@ -17,6 +17,14 @@ extern "C" {
 JNIEXPORT jobject JNICALL Java_polyregion_PolyregionCompiler_compile
   (JNIEnv *, jclass, jbyteArray, jboolean, jshort);
 
+/*
+ * Class:      polyregion_PolyregionCompiler
+ * Method:     layoutOf
+ * Signature:  ([BZ)Lpolyregion/Layout;
+ */
+JNIEXPORT jobject JNICALL Java_polyregion_PolyregionCompiler_layoutOf
+  (JNIEnv *, jclass, jbyteArray, jboolean);
+
 #ifdef __cplusplus
 }
 #endif

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "export.h"
+#include "generated/polyast.h"
 
 namespace polyregion::compiler {
 
@@ -29,8 +30,10 @@ struct EXPORT Event {
       : epochMillis(epochMillis), name(std::move(name)), elapsedNanos(elapsedNanos) {}
 };
 
+using Bytes = std::vector<uint8_t>;
+
 struct EXPORT Compilation {
-  std::optional<std::vector<uint8_t>> binary;
+  std::optional<Bytes> binary;
   std::optional<std::string> disassembly;
   std::vector<Event> events;
   std::string messages;
@@ -47,22 +50,28 @@ struct EXPORT Compilation {
 
 EXPORT void initialise();
 
-enum class Tpe { Int };
-
 struct EXPORT Member {
-  Tpe tpe;
-  uint32_t offset;
-  uint32_t size;
+  polyast::Named name;
+  uint64_t offsetInBytes;
+  uint64_t sizeInBytes;
+  Member(decltype(name) name, decltype(offsetInBytes) offsetInBytes, decltype(sizeInBytes) sizeInBytes)
+      : name(std::move(name)), offsetInBytes(offsetInBytes), sizeInBytes(sizeInBytes) {}
+  friend std::ostream &operator<<(std::ostream &os, const Member &member);
 };
 
 struct EXPORT Layout {
   uint64_t sizeInBytes;
   uint64_t alignment;
   std::vector<Member> members;
+  Layout(decltype(sizeInBytes) sizeInBytes, decltype(alignment) alignment, decltype(members) members)
+      : sizeInBytes(sizeInBytes), alignment(alignment), members(std::move(members)) {}
+  friend std::ostream &operator<<(std::ostream &os, const Layout &layout);
 };
 
-EXPORT Layout layoutOf(std::vector<Tpe> members, bool packed);
+EXPORT Layout layoutOf(const polyast::StructDef &def, bool packed);
+EXPORT Layout layoutOf(const Bytes &def, bool packed);
 
-EXPORT Compilation compile(std::vector<uint8_t> ast);
+EXPORT Compilation compile(const polyast::Function &f);
+EXPORT Compilation compile(const Bytes &f);
 
 } // namespace polyregion::compiler
