@@ -18,7 +18,14 @@ using namespace polyregion::polyast;
 
 static llvm::ExitOnError ExitOnErr;
 
-llvm::Type *backend::LLVMAstTransformer::mkTpe(const Type::Any &tpe) {                               //
+llvm::StructType *backend::LLVMAstTransformer::mkStruct(const StructDef &def) {
+  std::vector<llvm::Type *> types(def.members.size());
+  std::transform(def.members.begin(), def.members.end(), types.begin(),
+                 [&](const polyast::Named &n) { return mkTpe(n.tpe); });
+  return llvm::StructType::create(C, types);
+}
+
+llvm::Type *backend::LLVMAstTransformer::mkTpe(const Type::Any &tpe) {                           //
   return variants::total(                                                                        //
       *tpe,                                                                                      //
       [&](const Type::Float &x) -> llvm::Type * { return llvm::Type::getFloatTy(C); },           //
@@ -277,6 +284,14 @@ void backend::LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *
 }
 
 void backend::LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> &module, const Function &fnTree) {
+
+  // setup the struct defs first so that structs in params work
+  std::transform(                                    //
+      fnTree.defs.begin(), fnTree.defs.end(),        //
+      std::inserter(structTypes, structTypes.end()), //
+      [&](auto &x) -> std::pair<Sym, llvm::StructType *> {
+        return {x.name, mkStruct(x)};
+      });
 
   auto paramTpes = map_vec<Named, llvm::Type *>(fnTree.args, [&](auto &&named) { return mkTpe(named.tpe); });
   auto fnTpe = llvm::FunctionType::get(mkTpe(fnTree.rtn), {paramTpes}, false);

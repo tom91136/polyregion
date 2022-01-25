@@ -116,11 +116,12 @@ object PolyAst {
 
   case class StructDef(name: Sym, members: List[Named]) derives MsgPack.Codec
 
-  case class Function(    //
-      name: String,       //
-      args: List[Named],  //
-      rtn: Type,          //
-      body: List[Stmt]    //
-  ) derives MsgPack.Codec //
+  case class Function(      //
+      name: String,         //
+      args: List[Named],    //
+      rtn: Type,            //
+      body: List[Stmt],     //
+      defs: List[StructDef] //
+  ) derives MsgPack.Codec   //
 
 }

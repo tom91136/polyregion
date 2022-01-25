@@ -5,8 +5,9 @@ object Toggles {
   final inline val ControlFlowSuite = false
   final inline val MathSuite        = false
   final inline val ValueReturnSuite = false
+  final inline val CaptureSuite = true
 
   final inline val IntrinsicSuite   = false
 
-  final inline val StructSuite   = true
+  final inline val StructSuite   = false
 }

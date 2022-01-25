@@ -19,6 +19,6 @@ trait BaseSuite extends munit.FunSuite {
   }
 
   inline def assertOffload[A](inline f: => A) =
-    assertValEquals(polyregion.compileTime.offload[A](f), f)
+    assertValEquals(polyregion.compiletime.offload[A](f), f)
 
 }

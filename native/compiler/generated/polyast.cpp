@@ -814,6 +814,23 @@ bool Stmt::operator==(const Stmt::Return &l, const Stmt::Return &r) {
   return *l.value == *r.value;
 }
 
+std::ostream &operator<<(std::ostream &os, const StructDef &x) {
+  os << "StructDef(";
+  os << x.name;
+  os << ',';
+  os << '{';
+  if (!x.members.empty()) {
+    std::for_each(x.members.begin(), std::prev(x.members.end()), [&os](auto &&x) { os << x; os << ','; });
+    os << x.members.back();
+  }
+  os << '}';
+  os << ')';
+  return os;
+}
+bool operator==(const StructDef &l, const StructDef &r) { 
+  return l.name == r.name && l.members == r.members;
+}
+
 std::ostream &operator<<(std::ostream &os, const Function &x) {
   os << "Function(";
   os << '"' << x.name << '"';
@@ -833,28 +850,18 @@ std::ostream &operator<<(std::ostream &os, const Function &x) {
     os << x.body.back();
   }
   os << '}';
-  os << ')';
-  return os;
-}
-bool operator==(const Function &l, const Function &r) { 
-  return l.name == r.name && l.args == r.args && *l.rtn == *r.rtn && std::equal(l.body.begin(), l.body.end(), r.body.begin(), [](auto &&l, auto &&r) { return *l == *r; });
-}
-
-std::ostream &operator<<(std::ostream &os, const StructDef &x) {
-  os << "StructDef(";
-  os << x.name;
   os << ',';
   os << '{';
-  if (!x.members.empty()) {
-    std::for_each(x.members.begin(), std::prev(x.members.end()), [&os](auto &&x) { os << x; os << ','; });
-    os << x.members.back();
+  if (!x.defs.empty()) {
+    std::for_each(x.defs.begin(), std::prev(x.defs.end()), [&os](auto &&x) { os << x; os << ','; });
+    os << x.defs.back();
   }
   os << '}';
   os << ')';
   return os;
 }
-bool operator==(const StructDef &l, const StructDef &r) { 
-  return l.name == r.name && l.members == r.members;
+bool operator==(const Function &l, const Function &r) { 
+  return l.name == r.name && l.args == r.args && *l.rtn == *r.rtn && std::equal(l.body.begin(), l.body.end(), r.body.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && l.defs == r.defs;
 }
 
 } // namespace polyregion::polyast
@@ -1202,16 +1209,17 @@ std::size_t std::hash<polyregion::polyast::Stmt::Return>::operator()(const polyr
   std::size_t seed = std::hash<decltype(x.value)>()(x.value);
   return seed;
 }
+std::size_t std::hash<polyregion::polyast::StructDef>::operator()(const polyregion::polyast::StructDef &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.name)>()(x.name);
+  seed ^= std::hash<decltype(x.members)>()(x.members) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
 std::size_t std::hash<polyregion::polyast::Function>::operator()(const polyregion::polyast::Function &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.name)>()(x.name);
   seed ^= std::hash<decltype(x.args)>()(x.args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.body)>()(x.body) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::StructDef>::operator()(const polyregion::polyast::StructDef &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.name)>()(x.name);
-  seed ^= std::hash<decltype(x.members)>()(x.members) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.defs)>()(x.defs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
 

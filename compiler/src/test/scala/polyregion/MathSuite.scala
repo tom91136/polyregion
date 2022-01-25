@@ -1,6 +1,6 @@
 package polyregion
 
-import polyregion.compileTime._
+import polyregion.compiletime._
 import scala.compiletime._
 import scala.reflect.ClassTag
 

@@ -54,7 +54,7 @@ object Stage {
 
   val CONST = 42
 
-  import polyregion.compileTime._
+  import polyregion.compiletime._
 
   // showTpe[Bar]
 

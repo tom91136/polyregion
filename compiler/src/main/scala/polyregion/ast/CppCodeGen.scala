@@ -1,16 +1,19 @@
 package polyregion.ast
 
-import polyregion.data.Cpp._
+import polyregion.data.Cpp.*
 import polyregion.data.MsgPack
+
 import java.nio.file.Paths
 import java.nio.file.Files
 import java.nio.file.StandardOpenOption
 import java.lang.annotation.Target
-
 import scala.collection.mutable.ArrayBuffer
 import cats.conversions.variance
+
 import java.nio.file.Path
 import polyregion.PolyregionCompiler
+
+import java.nio.{ByteBuffer, ByteOrder}
 
 object CppCodeGen {
 
@@ -184,8 +187,8 @@ object CppCodeGen {
       :: deriveStruct[Term]()
       :: deriveStruct[Expr]()
       :: deriveStruct[Stmt]()
-      :: deriveStruct[Function]()
       :: deriveStruct[StructDef]()
+      :: deriveStruct[Function]()
       :: Nil
 
     val sources = structs.flatMap(_.emit)
@@ -218,6 +221,10 @@ object CppCodeGen {
 
     println(MsgPack.encode(PolyAst.Expr.Alias(PolyAst.Term.IntConst(1))).map(_.toInt.toHexString).toList)
     // MsgPack.encodeMsg(PolyAst.Expr.Alias(PolyAst.Term.IntConst(1)))
+
+    val b = ByteBuffer.allocate(8).order(ByteOrder.nativeOrder())
+    b.putInt(4, 2).order(ByteOrder.BIG_ENDIAN)
+    println(b.getInt(4))
 
     ()
   }

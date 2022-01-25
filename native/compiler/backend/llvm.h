@@ -33,10 +33,10 @@ private:
   void mkStmt(const Stmt::Any &stmt, llvm::Function *fn);
 
 public:
+  llvm::StructType *mkStruct(const StructDef &def);
   llvm::Type *mkTpe(const Type::Any &tpe);
 
   explicit LLVMAstTransformer(llvm::LLVMContext &c) : C(c), lut(), structTypes(), B(C) {}
-  void define(const std::vector<StructDef> &structs);
   void transform(const std::unique_ptr<llvm::Module> &module, const Function &arg);
 };
 

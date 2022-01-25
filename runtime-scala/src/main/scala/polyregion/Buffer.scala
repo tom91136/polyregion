@@ -98,11 +98,10 @@ object Buffer {
     override def pointer: Option[Long] = ptr(buffer)
   }
   class StructBuffer[A](val buffer: java.nio.ByteBuffer)(using S: NativeStruct[A]) extends Buffer[A] {
-    override val name = "Struct"
-    override def update(idx: Int, elem: A): Unit =
-      S.encode(buffer.position(idx * S.sizeInBytes).limit(idx * S.sizeInBytes + S.sizeInBytes).slice(), elem)
-    override def apply(i: Int): A = S.decode(buffer.position(i * S.sizeInBytes).limit(i * S.sizeInBytes + S.sizeInBytes))
-    override def length: Int      = buffer.capacity() / S.sizeInBytes
+    override val name                            = "Struct"
+    override def update(idx: Int, elem: A): Unit = S.encode(buffer, idx, elem)
+    override def apply(i: Int): A                = S.decode(buffer, i)
+    override def length: Int                     = buffer.capacity() / S.sizeInBytes
     override def putAll(xs: A*): this.type = {
       var i = 0
       val n = length

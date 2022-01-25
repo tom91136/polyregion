@@ -81,14 +81,9 @@ compiler::Layout compiler::layoutOf(const polyast::StructDef &def, bool packed) 
 
   llvm::LLVMContext c;
   backend::LLVMAstTransformer xform(c);
+  auto structTy = xform.mkStruct(def);
 
   auto layout = backend::llvmc::targetMachine().createDataLayout();
-
-  std::vector<llvm::Type *> types(def.members.size());
-  std::transform(def.members.begin(), def.members.end(), types.begin(),
-                 [&](const polyast::Named &n) { return xform.mkTpe(n.tpe); });
-
-  auto structTy = llvm::StructType::create(c, types);
   auto structLayout = layout.getStructLayout(structTy);
   std::vector<compiler::Member> out;
   for (size_t i = 0; i < def.members.size(); ++i) {

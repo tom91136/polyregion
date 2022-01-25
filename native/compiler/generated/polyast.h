@@ -747,22 +747,23 @@ struct EXPORT Return : Stmt::Base {
 } // namespace Stmt
 
 
-struct EXPORT Function {
-  std::string name;
-  std::vector<Named> args;
-  Type::Any rtn;
-  std::vector<Stmt::Any> body;
-  Function(std::string name, std::vector<Named> args, Type::Any rtn, std::vector<Stmt::Any> body) noexcept : name(std::move(name)), args(std::move(args)), rtn(std::move(rtn)), body(std::move(body)) {}
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Function &);
-  EXPORT friend bool operator==(const Function &, const Function &);
-};
-
 struct EXPORT StructDef {
   Sym name;
   std::vector<Named> members;
   StructDef(Sym name, std::vector<Named> members) noexcept : name(std::move(name)), members(std::move(members)) {}
   EXPORT friend std::ostream &operator<<(std::ostream &os, const StructDef &);
   EXPORT friend bool operator==(const StructDef &, const StructDef &);
+};
+
+struct EXPORT Function {
+  std::string name;
+  std::vector<Named> args;
+  Type::Any rtn;
+  std::vector<Stmt::Any> body;
+  std::vector<StructDef> defs;
+  Function(std::string name, std::vector<Named> args, Type::Any rtn, std::vector<Stmt::Any> body, std::vector<StructDef> defs) noexcept : name(std::move(name)), args(std::move(args)), rtn(std::move(rtn)), body(std::move(body)), defs(std::move(defs)) {}
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Function &);
+  EXPORT friend bool operator==(const Function &, const Function &);
 };
 
 } // namespace polyregion::polyast
@@ -995,11 +996,11 @@ template <> struct std::hash<polyregion::polyast::Stmt::Cond> {
 template <> struct std::hash<polyregion::polyast::Stmt::Return> {
   std::size_t operator()(const polyregion::polyast::Stmt::Return &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Function> {
-  std::size_t operator()(const polyregion::polyast::Function &) const noexcept;
-};
 template <> struct std::hash<polyregion::polyast::StructDef> {
   std::size_t operator()(const polyregion::polyast::StructDef &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Function> {
+  std::size_t operator()(const polyregion::polyast::Function &) const noexcept;
 };
 
 }

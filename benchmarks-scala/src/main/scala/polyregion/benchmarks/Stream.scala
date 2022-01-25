@@ -2,7 +2,7 @@ package polyregion.benchmarks
 
 import org.openjdk.jmh.annotations._
 import java.util.concurrent.TimeUnit
-import polyregion.compileTime._
+import polyregion.compiletime._
 import polyregion.Runtime._
 
 @OutputTimeUnit(TimeUnit.MILLISECONDS)

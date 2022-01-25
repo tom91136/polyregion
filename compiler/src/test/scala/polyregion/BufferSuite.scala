@@ -1,6 +1,6 @@
 package polyregion
 
-import polyregion.compileTime._
+import polyregion.compiletime._
 import scala.compiletime._
 import scala.reflect.ClassTag
 
@@ -86,6 +86,7 @@ class BufferSuite extends BaseSuite {
 
   assertFill[Boolean](FillN, true)
   assertFill[Boolean](FillN, false)
+  
 
   // assertFill[Unit](())
 

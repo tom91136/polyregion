@@ -967,28 +967,6 @@ json Stmt::any_to_json(const Stmt::Any& x) {
   }, *x);
 }
 
-Function function_from_json(const json& j) { 
-  auto name = j.at(0).get<std::string>();
-  std::vector<Named> args;
-  auto args_json = j.at(1);
-  std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &named_from_json);
-  auto rtn =  Type::any_from_json(j.at(2));
-  std::vector<Stmt::Any> body;
-  auto body_json = j.at(3);
-  std::transform(body_json.begin(), body_json.end(), std::back_inserter(body), &Stmt::any_from_json);
-  return {name, args, rtn, body};
-}
-
-json function_to_json(const Function& x) { 
-  auto name = x.name;
-  std::vector<json> args;
-  std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &named_to_json);
-  auto rtn =  Type::any_to_json(x.rtn);
-  std::vector<json> body;
-  std::transform(x.body.begin(), x.body.end(), std::back_inserter(body), &Stmt::any_to_json);
-  return json::array({name, args, rtn, body});
-}
-
 StructDef structdef_from_json(const json& j) { 
   auto name =  sym_from_json(j.at(0));
   std::vector<Named> members;
@@ -1002,5 +980,32 @@ json structdef_to_json(const StructDef& x) {
   std::vector<json> members;
   std::transform(x.members.begin(), x.members.end(), std::back_inserter(members), &named_to_json);
   return json::array({name, members});
+}
+
+Function function_from_json(const json& j) { 
+  auto name = j.at(0).get<std::string>();
+  std::vector<Named> args;
+  auto args_json = j.at(1);
+  std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &named_from_json);
+  auto rtn =  Type::any_from_json(j.at(2));
+  std::vector<Stmt::Any> body;
+  auto body_json = j.at(3);
+  std::transform(body_json.begin(), body_json.end(), std::back_inserter(body), &Stmt::any_from_json);
+  std::vector<StructDef> defs;
+  auto defs_json = j.at(4);
+  std::transform(defs_json.begin(), defs_json.end(), std::back_inserter(defs), &structdef_from_json);
+  return {name, args, rtn, body, defs};
+}
+
+json function_to_json(const Function& x) { 
+  auto name = x.name;
+  std::vector<json> args;
+  std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &named_to_json);
+  auto rtn =  Type::any_to_json(x.rtn);
+  std::vector<json> body;
+  std::transform(x.body.begin(), x.body.end(), std::back_inserter(body), &Stmt::any_to_json);
+  std::vector<json> defs;
+  std::transform(x.defs.begin(), x.defs.end(), std::back_inserter(defs), &structdef_to_json);
+  return json::array({name, args, rtn, body, defs});
 }
 } // namespace polyregion::polyast

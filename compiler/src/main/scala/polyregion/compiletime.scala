@@ -19,7 +19,7 @@ import polyregion.data.MsgPack
 import java.time.Duration
 import scala.collection.immutable.ArraySeq
 
-object compileTime {
+object compiletime {
 
   extension [A](xs: Array[A]) {
     inline def foreach(inline r: Range)(inline f: Int => Unit) =
@@ -50,8 +50,6 @@ object compileTime {
   def nativeStructOfImpl[A: Type](using Quotes): Expr[NativeStruct[A]] = {
     import quotes.reflect.*
     println(TypeRepr.of[A].typeSymbol.tree.show)
-    import pprint.*
-    pprint.pprintln(TypeRepr.of[A].typeSymbol)
 
     val xform = new AstTransformer()
     xform.lowerProductType[A].resolve match {
@@ -62,20 +60,26 @@ object compileTime {
 
         val tpeSym = TypeTree.of[A].symbol
 
-        def encodeField(buffer: Expr[java.nio.ByteBuffer], a: Expr[A], named: PolyAst.Named, m: Member) = {
-          val offset = Expr(m.offsetInBytes.toInt)
-          val value  = Select.unique(a.asTerm, named.symbol)
+        def encodeField(
+            buffer: Expr[java.nio.ByteBuffer],
+            offset: Expr[Int],
+            a: Expr[A],
+            named: PolyAst.Named,
+            m: Member
+        ) = {
+          val byteOffset = '{ $offset + ${ Expr(m.offsetInBytes.toInt) } }
+          val value      = Select.unique(a.asTerm, named.symbol)
           named.tpe match {
-            case PolyAst.Type.Float  => '{ ${ buffer }.putFloat(${ offset }, ${ value.asExprOf[Float] }); () }
-            case PolyAst.Type.Double => '{ ${ buffer }.putDouble(${ offset }, ${ value.asExprOf[Double] }); () }
+            case PolyAst.Type.Float  => '{ ${ buffer }.putFloat(${ byteOffset }, ${ value.asExprOf[Float] }); () }
+            case PolyAst.Type.Double => '{ ${ buffer }.putDouble(${ byteOffset }, ${ value.asExprOf[Double] }); () }
 
             case PolyAst.Type.Bool =>
-              '{ ${ buffer }.put(${ offset }, (if (!${ value.asExprOf[Boolean] }) 0 else 1).toByte); () }
-            case PolyAst.Type.Byte  => '{ ${ buffer }.put(${ offset }, ${ value.asExprOf[Byte] }); () }
-            case PolyAst.Type.Char  => '{ ${ buffer }.putChar(${ offset }, ${ value.asExprOf[Char] }); () }
-            case PolyAst.Type.Short => '{ ${ buffer }.putShort(${ offset }, ${ value.asExprOf[Short] }); () }
-            case PolyAst.Type.Int   => '{ ${ buffer }.putInt(${ offset }, ${ value.asExprOf[Int] }); () }
-            case PolyAst.Type.Long  => '{ ${ buffer }.putLong(${ offset }, ${ value.asExprOf[Long] }); () }
+              '{ ${ buffer }.put(${ byteOffset }, (if (!${ value.asExprOf[Boolean] }) 0 else 1).toByte); () }
+            case PolyAst.Type.Byte  => '{ ${ buffer }.put(${ byteOffset }, ${ value.asExprOf[Byte] }); () }
+            case PolyAst.Type.Char  => '{ ${ buffer }.putChar(${ byteOffset }, ${ value.asExprOf[Char] }); () }
+            case PolyAst.Type.Short => '{ ${ buffer }.putShort(${ byteOffset }, ${ value.asExprOf[Short] }); () }
+            case PolyAst.Type.Int   => '{ ${ buffer }.putInt(${ byteOffset }, ${ value.asExprOf[Int] }); () }
+            case PolyAst.Type.Long  => '{ ${ buffer }.putLong(${ byteOffset }, ${ value.asExprOf[Long] }); () }
 
             case PolyAst.Type.String                   => ???
             case PolyAst.Type.Unit                     => ???
@@ -85,18 +89,18 @@ object compileTime {
 
         }
 
-        def decodeField(buffer: Expr[java.nio.ByteBuffer], named: PolyAst.Named, m: Member) = {
-          val offset = Expr(m.offsetInBytes.toInt)
+        def decodeField(buffer: Expr[java.nio.ByteBuffer], offset: Expr[Int], named: PolyAst.Named, m: Member) = {
+          val byteOffset = '{ $offset + ${ Expr(m.offsetInBytes.toInt) } }
           named.tpe match {
-            case PolyAst.Type.Float  => '{ ${ buffer }.getFloat(${ offset }) }
-            case PolyAst.Type.Double => '{ ${ buffer }.getDouble(${ offset }) }
+            case PolyAst.Type.Float  => '{ ${ buffer }.getFloat(${ byteOffset }) }
+            case PolyAst.Type.Double => '{ ${ buffer }.getDouble(${ byteOffset }) }
 
-            case PolyAst.Type.Bool  => '{ if (${ buffer }.get(${ offset }) == 0) false else true }
-            case PolyAst.Type.Byte  => '{ ${ buffer }.get(${ offset }) }
-            case PolyAst.Type.Char  => '{ ${ buffer }.getChar(${ offset }) }
-            case PolyAst.Type.Short => '{ ${ buffer }.getShort(${ offset }) }
-            case PolyAst.Type.Int   => '{ ${ buffer }.getInt(${ offset }) }
-            case PolyAst.Type.Long  => '{ ${ buffer }.getLong(${ offset }) }
+            case PolyAst.Type.Bool  => '{ if (${ buffer }.get(${ byteOffset }) == 0) false else true }
+            case PolyAst.Type.Byte  => '{ ${ buffer }.get(${ byteOffset }) }
+            case PolyAst.Type.Char  => '{ ${ buffer }.getChar(${ byteOffset }) }
+            case PolyAst.Type.Short => '{ ${ buffer }.getShort(${ byteOffset }) }
+            case PolyAst.Type.Int   => '{ ${ buffer }.getInt(${ byteOffset }) }
+            case PolyAst.Type.Long  => '{ ${ buffer }.getLong(${ byteOffset }) }
 
             case PolyAst.Type.String                   => ???
             case PolyAst.Type.Unit                     => ???
@@ -106,24 +110,25 @@ object compileTime {
 
         }
 
-        val fields = sdef.members.zip(layout.members).toList
+        val fields = sdef.members.zip(layout.members)
         '{
           new NativeStruct[A] {
             override val name        = ${ Expr(tpeSym.fullName) }
             override val sizeInBytes = ${ Expr(layout.sizeInBytes.toInt) }
             // override def member                                          = Vector()
-            override def encode(buffer: java.nio.ByteBuffer, a: A): Unit = ${
-              Expr.ofList(
-                fields
-                  .map((named, member) => encodeField('buffer, 'a, named, member))
-              )
+            override def encode(buffer: java.nio.ByteBuffer, index: Int, a: A): Unit = {
+              val offset = sizeInBytes * index
+              ${ Expr.ofList(fields.map((named, member) => encodeField('buffer, 'offset, 'a, named, member))) }
             }
 
-            override def decode(buffer: java.nio.ByteBuffer): A = ${
-              Select
-                .unique(New(TypeTree.of[A]), "<init>")
-                .appliedToArgs(fields.map((named, member) => decodeField('buffer, named, member).asTerm))
-                .asExprOf[A]
+            override def decode(buffer: java.nio.ByteBuffer, index: Int): A = {
+              val offset = sizeInBytes * index
+              ${
+                Select
+                  .unique(New(TypeTree.of[A]), "<init>")
+                  .appliedToArgs(fields.map((named, member) => decodeField('buffer, 'offset, named, member).asTerm))
+                  .asExprOf[A]
+              }
             }
           }
         }
@@ -265,14 +270,15 @@ object compileTime {
           case PolyAst.Type.Float  => '{ Buffer[Float](${ expr.asExprOf[Float] }) }
           case PolyAst.Type.Double => '{ Buffer[Double](${ expr.asExprOf[Double] }) }
 
-          case PolyAst.Type.Array(PolyAst.Type.Bool, None)   => expr.asExprOf[Buffer[Boolean]]
-          case PolyAst.Type.Array(PolyAst.Type.Char, None)   => expr.asExprOf[Buffer[Char]]
-          case PolyAst.Type.Array(PolyAst.Type.Byte, None)   => expr.asExprOf[Buffer[Byte]]
-          case PolyAst.Type.Array(PolyAst.Type.Short, None)  => expr.asExprOf[Buffer[Short]]
-          case PolyAst.Type.Array(PolyAst.Type.Int, None)    => expr.asExprOf[Buffer[Int]]
-          case PolyAst.Type.Array(PolyAst.Type.Long, None)   => expr.asExprOf[Buffer[Long]]
-          case PolyAst.Type.Array(PolyAst.Type.Float, None)  => expr.asExprOf[Buffer[Float]]
-          case PolyAst.Type.Array(PolyAst.Type.Double, None) => expr.asExprOf[Buffer[Double]]
+          case PolyAst.Type.Array(PolyAst.Type.Bool, None)      => expr.asExprOf[Buffer[Boolean]]
+          case PolyAst.Type.Array(PolyAst.Type.Char, None)      => expr.asExprOf[Buffer[Char]]
+          case PolyAst.Type.Array(PolyAst.Type.Byte, None)      => expr.asExprOf[Buffer[Byte]]
+          case PolyAst.Type.Array(PolyAst.Type.Short, None)     => expr.asExprOf[Buffer[Short]]
+          case PolyAst.Type.Array(PolyAst.Type.Int, None)       => expr.asExprOf[Buffer[Int]]
+          case PolyAst.Type.Array(PolyAst.Type.Long, None)      => expr.asExprOf[Buffer[Long]]
+          case PolyAst.Type.Array(PolyAst.Type.Float, None)     => expr.asExprOf[Buffer[Float]]
+          case PolyAst.Type.Array(PolyAst.Type.Double, None)    => expr.asExprOf[Buffer[Double]]
+          case PolyAst.Type.Array(PolyAst.Type.Struct(s), None) => expr.asExprOf[Buffer[_]]
           case unknown =>
             println(s"???= $unknown ")
             ???
