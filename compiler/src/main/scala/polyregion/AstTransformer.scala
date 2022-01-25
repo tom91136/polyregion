@@ -414,7 +414,7 @@ class AstTransformer(using val q: Quotes) {
     term <- extractInlineBlock(x.asTerm)
 
     //  _ = pprint.pprintln(block)
-//        closure <- extractClosureBody(block)
+    //        closure <- extractClosureBody(block)
 
     pos         = term.pos
     closureName = s"${pos.sourceFile.name}:${pos.startLine}-${pos.endLine}"
@@ -435,16 +435,34 @@ class AstTransformer(using val q: Quotes) {
       case _ => Nil
     }
 
-    filteredExternalRefs = externalRefs.collect {
-      case i @ Ident(_)                                         => i
-      case s @ Select(_, _) if !s.symbol.flags.is(Flags.Method) => s
+    valExternalRefs = externalRefs.filter {s =>
+      s.symbol.isValDef && !s.symbol.flags.is(Flags.Module)
+    }.distinctBy(_.symbol)
+
+    collapsed = valExternalRefs.foldLeft(List.empty[Ref]){
+      case (acc, i @Ident(_)) => i::acc
+      case (acc, s@Select(i, _)) =>
+
+        // for this select, find all nested idents
+        //  if (acc contains ident) then
+        //    // the parent was brought in as foreign, keep this
+
+        //
+
+
+        acc
+//        s ::acc.filterNot(x => x.symbol == i.symbol)
+
     }
-    _ = println(s" -> all refs  (found):         \n${externalRefs.map(_.show).mkString("\n").indent(4)}")
-    _ = println(s" -> filtered  (found):         \n${filteredExternalRefs.map(_.show).mkString("\n").indent(4)}")
+
+    _ = println(s" -> foreign refs:         \n${externalRefs.map(_.show).mkString("\n").indent(4)}")
+    _ = println(s" -> filtered  (found):         \n${valExternalRefs.map(x =>    s"${x.show} (${x.symbol}) ~> $x").mkString("\n").indent(4)}")
+    _ = println(s" -> collapse  (found):         \n${collapsed.map(x =>   s"${x.symbol} ~> $x").mkString("\n").indent(4)}")
+
 
     c = Context(0, term :: Nil, Map(), Set())
 
-    typedExternalRefs <- filteredExternalRefs.traverseFilter {
+    typedExternalRefs <- valExternalRefs.traverseFilter {
       case i @ Ident(_) =>
         resolveTpe(c)(i.tpe).map {
           case (Some(x), tpe, c) => Some((i, Reference(x, tpe), c))
@@ -504,7 +522,7 @@ class AstTransformer(using val q: Quotes) {
 
     (_, fnTpe, c) <- resolveTpe(c)(term.tpe).resolve
 
-//    _ = println(c)
+    //    _ = println(c)
 
     v <- c.defs.toList.traverse(s => lowerProductType(s.typeSymbol)).resolve
     _ = println(s"sdd=${v}")
