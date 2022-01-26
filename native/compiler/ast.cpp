@@ -146,3 +146,25 @@ std::string polyast::qualified(const Term::Select &select) {
                    select.init, [](auto &n) { return n.symbol; }, ".") +
                    "." + select.last.symbol;
 }
+
+std::string polyast::qualified(const Sym &sym) {
+  return polyregion::mk_string<std::string>(
+      sym.fqn, [](auto &n) { return n; }, ".");
+}
+
+std::vector<Named> polyast::path(const Term::Select &select) {
+  std::vector<Named> xs(select.init);
+  xs.push_back(select.last);
+  return xs;
+}
+
+Named polyast::head(const Term::Select &select) { return select.init.empty() ? select.last : select.init[0]; }
+
+std::vector<Named> polyast::tail(const Term::Select &select) {
+  if (select.init.empty()) return {select.last};
+  else {
+    std::vector<Named> xs(std::next(select.init.begin()), select.init.end());
+    xs.push_back(select.last);
+    return xs;
+  }
+}

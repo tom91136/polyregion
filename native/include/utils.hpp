@@ -16,6 +16,10 @@ constexpr T undefined(const std::string &file, size_t line, const std::string &m
   throw std::logic_error(file + ":" + std::to_string(line) + ": " + message);
 }
 
+[[noreturn]]  static  void error(const std::string &file, size_t line, const std::string &message = "not implemented") {
+  throw std::logic_error(file + ":" + std::to_string(line) + ": " + message);
+}
+
 template <typename T, template <typename...> typename Container>
 std::string mk_string(const Container<T> &xs,
                       const std::function<std::string(const T &)> &f, //
@@ -71,6 +75,14 @@ template <typename T, template <typename...> typename Container>
 constexpr std::optional<T> get_opt(const Container<T> &xs, size_t i) {
   return i > std::size(xs) ? std::nullopt : std::make_optional(xs[i]);
 }
+
+template <typename K, typename V, template <typename...> typename Container>
+constexpr std::optional<V> get_opt(const Container<K, V> &xs,const  K &k) {
+  if (auto v = xs.find(k); v != xs.end()) return std::make_optional(v->second);
+  else
+    return std::nullopt;
+}
+
 // https://stackoverflow.com/a/33447587/896997
 template <typename N, typename = typename std::enable_if_t<std::is_arithmetic_v<N>, N>>
 std::string hex(N w, size_t hex_len = sizeof(N) << 1) {

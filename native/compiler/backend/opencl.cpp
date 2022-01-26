@@ -20,26 +20,26 @@ std::string backend::OpenCL::mkTpe(const Type::Any &tpe) {
       [&](const Type::Long &x) { return "int64_t"s; },               //
       [&](const Type::String &x) { return "char *"s; },              //
       [&](const Type::Unit &x) { return "void"s; },                  //
-      [&](const Type::Struct &x) { return "???"s; },                 //
+      [&](const Type::Struct &x) { return qualified(x.name); },      //
       [&](const Type::Array &x) { return mkTpe(x.component) + "*"; } //
   );
 }
 
 std::string backend::OpenCL::mkRef(const Term::Any &ref) {
   return variants::total(
-      *ref,                                                                  //
-      [](const Term::Select &x) { return x.last.symbol; },                   //
-      [](const Term::UnitConst &x) { return "/*void*/"s; },                  //
-      [](const Term::BoolConst &x) { return x.value ? "true"s : "false"s; }, //
-      [](const Term::ByteConst &x) { return std::to_string(x.value); },      //
-      [](const Term::CharConst &x) { return std::to_string(x.value); },      //
-      [](const Term::ShortConst &x) { return std::to_string(x.value); },     //
-      [](const Term::IntConst &x) { return std::to_string(x.value); },       //
-      [](const Term::LongConst &x) { return std::to_string(x.value); },      //
-      [](const Term::DoubleConst &x) { return std::to_string(x.value); },    //
-      [](const Term::FloatConst &x) { return std::to_string(x.value); },     //
-      [](const Term::StringConst &x) { return "" + x.value + ""; }           //
-  );                                                                         // FIXME escape string
+      *ref,                                                                                 //
+      [](const Term::Select &x) { return mk_string<Named>(path(x), &Named::symbol, "."); }, //
+      [](const Term::UnitConst &x) { return "/*void*/"s; },                                 //
+      [](const Term::BoolConst &x) { return x.value ? "true"s : "false"s; },                //
+      [](const Term::ByteConst &x) { return std::to_string(x.value); },                     //
+      [](const Term::CharConst &x) { return std::to_string(x.value); },                     //
+      [](const Term::ShortConst &x) { return std::to_string(x.value); },                    //
+      [](const Term::IntConst &x) { return std::to_string(x.value); },                      //
+      [](const Term::LongConst &x) { return std::to_string(x.value); },                     //
+      [](const Term::DoubleConst &x) { return std::to_string(x.value); },                   //
+      [](const Term::FloatConst &x) { return std::to_string(x.value); },                    //
+      [](const Term::StringConst &x) { return "" + x.value + ""; }                          //
+  );                                                                                        // FIXME escape string
 }
 
 std::string backend::OpenCL::mkExpr(const Expr::Any &expr, const std::string &key) {

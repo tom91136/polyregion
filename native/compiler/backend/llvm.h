@@ -23,43 +23,25 @@ class LLVMAstTransformer {
   llvm::LLVMContext &C;
 
 private:
+  using StructMemberTable = std::unordered_map<std::string, size_t>;
   std::unordered_map<std::string, llvm::Value *> lut;
-  std::unordered_map<Sym, llvm::StructType *> structTypes;
+  std::unordered_map<Sym, std::pair<llvm::StructType *, StructMemberTable>> structTypes;
   llvm::IRBuilder<> B;
 
-  llvm::Value *mkSelect(const Term::Select &select);
+  llvm::Value *mkSelect(const Term::Select &s);
   llvm::Value *mkRef(const Term::Any &ref);
   llvm::Value *mkExpr(const Expr::Any &expr, llvm::Function *fn, const std::string &key);
   void mkStmt(const Stmt::Any &stmt, llvm::Function *fn);
 
 public:
-  llvm::StructType *mkStruct(const StructDef &def);
+  std::pair<llvm::StructType *, StructMemberTable> mkStruct(const StructDef &def);
   llvm::Type *mkTpe(const Type::Any &tpe);
 
   explicit LLVMAstTransformer(llvm::LLVMContext &c) : C(c), lut(), structTypes(), B(C) {}
   void transform(const std::unique_ptr<llvm::Module> &module, const Function &arg);
 };
 
-// class JitObjectCache : public llvm::ObjectCache {
-// private:
-//   llvm::StringMap<std::unique_ptr<llvm::MemoryBuffer>> CachedObjects;
-//
-// public:
-//
-//   JitObjectCache()  ;
-//   void notifyObjectCompiled(const llvm::Module *M, llvm::MemoryBufferRef ObjBuffer) override;
-//   std::unique_ptr<llvm::MemoryBuffer> getObject(const llvm::Module *M) override;
-//   ~JitObjectCache() override ;
-//   void anchor() override  ;
-//
-// };
-
 class LLVM : public Backend {
-
-private:
-  //  JitObjectCache cache;
-  //  std::unique_ptr<llvm::orc::LLJIT> jit;
-
 public:
   explicit LLVM();
   compiler::Compilation run(const Function &fn) override;

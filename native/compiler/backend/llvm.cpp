@@ -15,17 +15,30 @@
 
 using namespace polyregion;
 using namespace polyregion::polyast;
+using namespace polyregion::backend;
 
 static llvm::ExitOnError ExitOnErr;
 
-llvm::StructType *backend::LLVMAstTransformer::mkStruct(const StructDef &def) {
+template <typename T> static std::string llvm_tostring(const T *t) {
+  std::string str;
+  llvm::raw_string_ostream rso(str);
+  t->print(rso);
+  return rso.str();
+}
+
+std::pair<llvm::StructType *, LLVMAstTransformer::StructMemberTable>
+LLVMAstTransformer::mkStruct(const StructDef &def) {
   std::vector<llvm::Type *> types(def.members.size());
   std::transform(def.members.begin(), def.members.end(), types.begin(),
                  [&](const polyast::Named &n) { return mkTpe(n.tpe); });
-  return llvm::StructType::create(C, types);
+  LLVMAstTransformer::StructMemberTable table;
+  for (size_t i = 0; i < def.members.size(); ++i) {
+    table[def.members[i].symbol] = i;
+  }
+  return {llvm::StructType::create(C, types, qualified(def.name)), table};
 }
 
-llvm::Type *backend::LLVMAstTransformer::mkTpe(const Type::Any &tpe) {                           //
+llvm::Type *LLVMAstTransformer::mkTpe(const Type::Any &tpe) {                                    //
   return variants::total(                                                                        //
       *tpe,                                                                                      //
       [&](const Type::Float &x) -> llvm::Type * { return llvm::Type::getFloatTy(C); },           //
@@ -39,8 +52,8 @@ llvm::Type *backend::LLVMAstTransformer::mkTpe(const Type::Any &tpe) {          
       [&](const Type::String &x) -> llvm::Type * { return undefined(__FILE_NAME__, __LINE__); }, //
       [&](const Type::Unit &x) -> llvm::Type * { return llvm::Type::getVoidTy(C); },             //
       [&](const Type::Struct &x) -> llvm::Type * {
-        if (auto def = structTypes.find(x.name); def != structTypes.end()) {
-          return def->second;
+        if (auto def = polyregion::get_opt(structTypes, x.name); def) {
+          return def->first;
         } else {
           return undefined(__FILE_NAME__, __LINE__, "Unseen struct def : " + to_string(x));
         }
@@ -56,18 +69,68 @@ llvm::Type *backend::LLVMAstTransformer::mkTpe(const Type::Any &tpe) {          
   );
 }
 
-llvm::Value *backend::LLVMAstTransformer::mkSelect(const Term::Select &select) {
+llvm::Value *LLVMAstTransformer::mkSelect(const Term::Select &select) {
 
-  if (auto x = lut.find(qualified(select)); x != lut.end()) {
-    return std::holds_alternative<Type::Array>(*select.last.tpe)                           //
-               ? x->second                                                                 //
-               : B.CreateLoad(mkTpe(select.tpe), x->second, qualified(select) + "_value"); //
+  auto fail = [&]() { return " (part of the select expression " + to_string(select) + ")"; };
+
+  auto structTypeOf = [&](const Type::Any &tpe) -> std::pair<llvm::StructType *, StructMemberTable> {
+    if (auto s = polyast::get_opt<Type::Struct>(tpe); s) {
+      if (auto def = polyregion::get_opt(structTypes, s->name); def) return *def;
+      else
+        error(__FILE_NAME__, __LINE__, "Unseen struct type " + to_string(s->name) + " in select path" + fail());
+    } else
+      error(__FILE_NAME__, __LINE__, "Illegal select path involving non-struct type " + to_string(tpe) + fail());
+  };
+
+  auto selectNamed = [&](const Named &named) -> llvm::Value * {
+    //  check the LUT table for known variables brought in scope by parameters
+    if (auto x = polyregion::get_opt(lut, named.symbol); x) {
+      if (std::holds_alternative<Type::Array>(*named.tpe) || std::holds_alternative<Type::Struct>(*named.tpe)) {
+        return *x;
+      } else {
+        return B.CreateLoad(mkTpe(named.tpe), *x, named.symbol + "_value");
+      } //
+    } else {
+      auto pool = mk_string2<std::string, llvm::Value *>(
+          lut, [](auto &&p) { return p.first + " = " + llvm_tostring(p.second); }, "\n->");
+      return undefined(__FILE_NAME__, __LINE__, "Unseen select: " + to_string(select) + ", LUT=\n->" + pool);
+    }
+  };
+
+  if (select.init.empty()) {
+    // plain path lookup
+    return selectNamed(select.last);
   } else {
-    return undefined(__FILE_NAME__, __LINE__, "Unseen select: " + to_string(select));
+    // we're in a select chain, init elements must return struct type; the head must come from LUT
+
+    auto head = selectNamed(select.init.front());
+    auto [structTy, _] = structTypeOf(select.init.front().tpe);
+
+    auto selectors = tail(select);
+
+    std::vector<llvm::Value *> selectorValues;
+    selectorValues.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0));
+
+    auto tpe = select.init.front().tpe;
+    for (auto &path : selectors) {
+      auto [ignore, table] = structTypeOf(tpe);
+      if (auto idx = get_opt(table, path.symbol); idx) {
+        selectorValues.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), *idx));
+
+        tpe = path.tpe;
+      } else {
+        return undefined(__FILE_NAME__, __LINE__,
+                         "Illegal select path with unknown struct member index of name `" + to_string(path) + "`" +
+                             fail());
+      }
+    }
+
+    auto ptr = B.CreateInBoundsGEP(structTy, head, selectorValues, qualified(select) + "_ptr");
+    return B.CreateLoad(mkTpe(select.tpe), ptr, qualified(select) + "_value");
   }
 }
 
-llvm::Value *backend::LLVMAstTransformer::mkRef(const Term::Any &ref) {
+llvm::Value *LLVMAstTransformer::mkRef(const Term::Any &ref) {
   using llvm::ConstantFP;
   using llvm::ConstantInt;
   return variants::total(
@@ -85,7 +148,7 @@ llvm::Value *backend::LLVMAstTransformer::mkRef(const Term::Any &ref) {
       [&](const Term::StringConst &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); });
 }
 
-llvm::Value *backend::LLVMAstTransformer::mkExpr(const Expr::Any &expr, llvm::Function *fn, const std::string &key) {
+llvm::Value *LLVMAstTransformer::mkExpr(const Expr::Any &expr, llvm::Function *fn, const std::string &key) {
 
   const auto binaryExpr = [&](const Term::Any &l, const Term::Any &r) { return std::make_tuple(mkRef(l), mkRef(r)); };
 
@@ -194,7 +257,7 @@ llvm::Value *backend::LLVMAstTransformer::mkExpr(const Expr::Any &expr, llvm::Fu
       });
 }
 
-void backend::LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
+void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
   return variants::total(
       *stmt,
       [&](const Stmt::Comment &x) { /* discard comments */
@@ -283,13 +346,13 @@ void backend::LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *
   );
 }
 
-void backend::LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> &module, const Function &fnTree) {
+void LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> &module, const Function &fnTree) {
 
   // setup the struct defs first so that structs in params work
   std::transform(                                    //
       fnTree.defs.begin(), fnTree.defs.end(),        //
       std::inserter(structTypes, structTypes.end()), //
-      [&](auto &x) -> std::pair<Sym, llvm::StructType *> {
+      [&](auto &x) -> std::pair<Sym, std::pair<llvm::StructType *, LLVMAstTransformer::StructMemberTable>> {
         return {x.name, mkStruct(x)};
       });
 
@@ -335,55 +398,6 @@ void backend::LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> 
   module->print(llvm::errs(), nullptr);
 }
 
-// void polyregion::backend::JitObjectCache::notifyObjectCompiled(const llvm::Module *M, llvm::MemoryBufferRef
-// ObjBuffer) {
-//   llvm::dbgs() << "Compiled object for " << M->getModuleIdentifier() << "\n";
-//
-//   auto x = ExitOnErr(llvm::object::createBinary(ObjBuffer));
-//
-//   std::ofstream outfile("obj.o", std::ofstream::binary);
-//   outfile.write(ObjBuffer.getBufferStart(), ObjBuffer.getBufferSize());
-//   outfile.close();
-//
-//   std::cout << "S=" << ObjBuffer.getBufferSize() << std::endl;
-//
-//   if (auto *file = llvm::dyn_cast<llvm::object::ObjectFile>(&*x)) {
-//     llvm::dbgs() << "Yes!\n";
-//     auto sections = dis::disassembleCodeSections(*file);
-//     //    polyregion::dis::dump(std::cerr, sections);
-//     std::cerr << std::endl;
-//   }
-//
-//   CachedObjects[M->getModuleIdentifier()] =
-//       llvm::MemoryBuffer::getMemBufferCopy(ObjBuffer.getBuffer(), ObjBuffer.getBufferIdentifier());
-// }
-//
-// std::unique_ptr<llvm::MemoryBuffer> polyregion::backend::JitObjectCache::getObject(const llvm::Module *M) {
-//   auto I = CachedObjects.find(M->getModuleIdentifier());
-//   if (I == CachedObjects.end()) {
-//     llvm::dbgs() << "No object for " << M->getModuleIdentifier() << " in cache. Compiling.\n";
-//     return nullptr;
-//   }
-//
-//   llvm::dbgs() << "Object for " << M->getModuleIdentifier() << " loaded from cache.\n";
-//   return llvm::MemoryBuffer::getMemBuffer(I->second->getMemBufferRef());
-// }
-// backend::JitObjectCache::~JitObjectCache() = default;
-// void backend::JitObjectCache::anchor() {}
-// backend::JitObjectCache::JitObjectCache() = default;
-//
-// static std::unique_ptr<llvm::orc::LLJIT> mkJit(llvm::ObjectCache &cache) {
-//   using namespace llvm;
-//   orc::LLJITBuilder builder = orc::LLJITBuilder();
-//   builder.setCompileFunctionCreator(
-//       [&](orc::JITTargetMachineBuilder JTMB) -> Expected<std::unique_ptr<orc::IRCompileLayer::IRCompiler>> {
-//         auto TM = JTMB.createTargetMachine();
-//         if (!TM) return TM.takeError();
-//         return std::make_unique<orc::TMOwningSimpleCompiler>(orc::TMOwningSimpleCompiler(std::move(*TM), &cache));
-//       });
-//   return ExitOnErr(builder.create());
-// }
-
 backend::LLVM::LLVM() = default; // cache(), jit(mkJit(cache)) {}
 
 compiler::Compilation backend::LLVM::run(const Function &fn) {
@@ -404,36 +418,4 @@ compiler::Compilation backend::LLVM::run(const Function &fn) {
   c.events.emplace_back(compiler::nowMs(), "ast_to_llvm_ir", elapsed);
 
   return c;
-
-  //  orc::ThreadSafeModule tsm(std::move(mod), std::move(ctx));
-  //  ExitOnErr(jit->addIRModule(std::move(tsm)));
-  //  JITEvaluatedSymbol symbol = ExitOnErr(jit->lookup("lambda"));
-  //  std::cout << "S= "
-  //            << " " << symbol.getAddress() << "  " << std::hex << symbol.getAddress() << std::endl;
-
-  //  std::cout << "Prep for DL" << std::endl;
-  //
-  //  void *client_hndl = dlopen("/home/tom/Desktop/prime.so", RTLD_LAZY);
-  //
-  //  std::cout << "Prep for DL =     " << client_hndl << std::endl;
-  //
-  //  if (!client_hndl) {
-  //    std::cerr << "DL failed=" << dlerror() << std::endl;
-  //  } else {
-  //    std::cout << "Handle="
-  //              << " " << client_hndl << std::endl;
-  //    void *ptr = dlsym(client_hndl, "isPrime");
-  //    void *ptr2 = dlsym(client_hndl, "doit");
-  //
-  //    typedef int (*FF)(int);
-  //    typedef char *(*FF2)();
-  //
-  //    FF f = (FF)ptr;
-  //    FF2 f2 = (FF2)ptr2;
-  //
-  //    std::cout << "ptr1="
-  //              << " " << ptr << " ptr2=" << ptr2 << std::endl;
-  //    std::cout << "res="
-  //              << " " << std::to_string(f(100)) << " " << f2() << std::endl;
-  //  }
 }

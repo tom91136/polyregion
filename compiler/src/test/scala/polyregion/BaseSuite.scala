@@ -18,7 +18,14 @@ trait BaseSuite extends munit.FunSuite {
     if (n > 0) unrollInclusive(n - 1)(f)
   }
 
-  inline def assertOffload[A](inline f: => A) =
-    assertValEquals(polyregion.compiletime.offload[A](f), f)
+  inline def assertOffload[A](inline f: => A) = {
+    val expected =
+      try
+        f
+      catch {
+        case e: Throwable => throw new AssertionError(s"offload reference expression ${codeOf(f)} failed to execute", e)
+      }
+    assertValEquals(polyregion.compiletime.offload[A](f), expected)
+  }
 
 }

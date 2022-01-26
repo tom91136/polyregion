@@ -222,7 +222,7 @@ class AstTransformer(using val q: Quotes) {
           .deferred
     }
 
-  case class Context(depth: Int, trace: List[Tree], refs: Map[Ref, Reference], defs: Set[TypeRepr]) {
+  case class Context(depth: Int, trace: List[Tree], refs: Map[Symbol, Reference], defs: Set[TypeRepr]) {
     def log(t: Tree)  = copy(trace = t :: trace)
     def down(t: Tree) = log(t).copy(depth = depth + 1)
 
@@ -278,7 +278,7 @@ class AstTransformer(using val q: Quotes) {
     case c @ Literal(CharConstant(v))       => (ctx, Some(PolyAst.Term.CharConst(v)), Nil).pure
     case c @ Literal(UnitConstant())        => (ctx, Some(PolyAst.Term.UnitConst), Nil).pure
     case r: Ref =>
-      (ctx.refs.get(r), r) match {
+      (ctx.refs.get(r.symbol), r) match {
         case (Some(Reference(value, tpe)), _) =>
           val term = value match {
             case name: String       => PolyAst.Term.Select(Nil, PolyAst.Named(name, tpe))
@@ -296,8 +296,22 @@ class AstTransformer(using val q: Quotes) {
           resolveTpe(ctx.log(term))(i.tpe).map { (_, tpe, c) =>
             (c, Some(PolyAst.Term.Select(Nil, PolyAst.Named(name, tpe))), Nil)
           }
+        case (None, s@Select(root, name)) =>
+
+          for{
+            (_, tpe, c) <- resolveTpe(ctx.log(term))(s.tpe)
+            (c, lhsRef, lhsTree) <- resolveTerm(c.log(term))(root)
+            ref  <- lhsRef match {
+              case Some(PolyAst.Term.Select(xs, x)) =>
+                PolyAst.Term.Select(  xs :+ x, PolyAst.Named(name, tpe) ).success.deferred
+              case bad        => s"illegal select root ${bad}".fail.deferred
+            }
+          } yield (c, Some(ref), lhsTree)
+
         case (None, x) =>
-          s"[depth=${ctx.depth}] Ref ${x} with tpe=${x.tpe} was not identified at closure args stage ".fail.deferred
+          s"[depth=${ctx.depth}] Ref ${x} with tpe=${x.tpe} was not identified at closure args stage, ref pool:\n->${ctx.refs.mkString("\n->")} ".fail.deferred
+
+
 
       }
 
@@ -515,7 +529,7 @@ class AstTransformer(using val q: Quotes) {
     //   // case bad             => s"block required, got $bad".fail
     // }
     (c, ref, stmts) <- resolveTrees(
-      Context(0, Nil, typedExternalRefs.map((a, b, c) => (a, b)).toMap, typedExternalRefs.map(_._3.defs).flatten.toSet)
+      Context(0, Nil, typedExternalRefs.map((a, b, c) => (a.symbol, b)).toMap, typedExternalRefs.map(_._3.defs).flatten.toSet)
     )(term :: Nil).resolve
 
     (_, fnTpe, c) <- resolveTpe(c)(term.tpe).resolve

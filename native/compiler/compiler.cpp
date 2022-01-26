@@ -81,7 +81,7 @@ compiler::Layout compiler::layoutOf(const polyast::StructDef &def, bool packed) 
 
   llvm::LLVMContext c;
   backend::LLVMAstTransformer xform(c);
-  auto structTy = xform.mkStruct(def);
+  auto [structTy, _] = xform.mkStruct(def);
 
   auto layout = backend::llvmc::targetMachine().createDataLayout();
   auto structLayout = layout.getStructLayout(structTy);
