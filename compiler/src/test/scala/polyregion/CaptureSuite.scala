@@ -12,50 +12,61 @@ class CaptureSuite extends BaseSuite {
 
   {
 
-    object Const {
-      final val MyConstant = 42
-      object Const2{
-        final val myConstant2 = 43
+    object ConstA {
+      final val MyConstantA = 42
+      object ConstB{
+        final val MyConstantB = 43
       }
     }
 
     {
-      import Const._
+      import ConstA._
       testCapture("constant-in-scope-x1") {
-        MyConstant
+        MyConstantA
       }
-      val a = MyConstant
-      class V{val b = 1}
-      val x = new V
+      val a = MyConstantA
+      class Bar{
+        val e = 3
+      }
+      class Foo{
+        val b = 1
+        val c = 2
+        val d = new Bar
+
+      }
+      val x = new Foo
 
 
       case class Node(elem: Int, next: Option[Node])
-
       case class A(ax: Int)
       given NativeStruct[A] = nativeStructOf
       val buffer  = Buffer(A(1), A(2))
-
       val node = Node(1, Some(Node(2, None)))
+      val (b1, b2) = (1,2)
 
       // buffer
+      // a
       // x.b
-      // MyConstant
-      // myConstant2
+      // x.c
+      // x.d.e
+      // MyConstantA
+      // MyConstantB
       // node.elem
-      // node.next.isDefined
+      // b1
 
       testCapture("constant-in-scope-x2") {
-        val u =  MyConstant
-        val v =  Const2.myConstant2
+        val u =  MyConstantA
+        val v =  ConstB.MyConstantB
 
         val nodeA = node.elem
-        val nodeB = node.next.isDefined
 
+//        val b = buffer(u).ax
+//        val c = buffer(0).ax
 
+//        val m = x.d.e
+//        val y1 = b1
 
-        val b = buffer(u).ax
-        val c = buffer(0).ax
-        MyConstant + a + x.b
+//        MyConstantA + a + x.b + x.c
       }
     }
 

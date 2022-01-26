@@ -176,7 +176,11 @@ class AstTransformer(using val q: Quotes) {
           xs   <- args.traverse(resolveTpe(c)(_))
         } yield (name, xs) match {
           case (Symbols.Buffer, (_, component, c) :: Nil) => (None, PolyAst.Type.Array(component, None), c)
-          case (n, ys)                                    => ??? // None -> PolyAst.Type.Struct(n, ys)
+          case (n, ys)                                    =>
+          println(s"Applied = ${n} args=${ys.map(x => (x._1, x._2)).mkString(",")}")
+
+            ???
+          // None -> PolyAst.Type.Struct(n, ys)
         }
 
       // widen singletons
@@ -264,15 +268,15 @@ class AstTransformer(using val q: Quotes) {
   def resolveTerm(ctx: Context)(term: Term): Deferred[TermRes] = term match {
     case Typed(x, _)                        => resolveTerm(ctx.log(term))(x)
     case Inlined(call, bindings, expansion) => resolveTerm(ctx.log(term))(expansion) // simple-inline
-    case c @ Literal(BooleanConstant(v))    => ((ctx, Some(PolyAst.Term.BoolConst(v)), Nil)).pure
-    case c @ Literal(IntConstant(v))        => ((ctx, Some(PolyAst.Term.IntConst(v)), Nil)).pure
-    case c @ Literal(FloatConstant(v))      => ((ctx, Some(PolyAst.Term.FloatConst(v)), Nil)).pure
-    case c @ Literal(DoubleConstant(v))     => ((ctx, Some(PolyAst.Term.DoubleConst(v)), Nil)).pure
-    case c @ Literal(LongConstant(v))       => ((ctx, Some(PolyAst.Term.LongConst(v)), Nil)).pure
-    case c @ Literal(ShortConstant(v))      => ((ctx, Some(PolyAst.Term.ShortConst(v)), Nil)).pure
-    case c @ Literal(ByteConstant(v))       => ((ctx, Some(PolyAst.Term.ByteConst(v)), Nil)).pure
-    case c @ Literal(CharConstant(v))       => ((ctx, Some(PolyAst.Term.CharConst(v)), Nil)).pure
-    case c @ Literal(UnitConstant())        => ((ctx, Some(PolyAst.Term.UnitConst), Nil)).pure
+    case c @ Literal(BooleanConstant(v))    => (ctx, Some(PolyAst.Term.BoolConst(v)), Nil).pure
+    case c @ Literal(IntConstant(v))        => (ctx, Some(PolyAst.Term.IntConst(v)), Nil).pure
+    case c @ Literal(FloatConstant(v))      => (ctx, Some(PolyAst.Term.FloatConst(v)), Nil).pure
+    case c @ Literal(DoubleConstant(v))     => (ctx, Some(PolyAst.Term.DoubleConst(v)), Nil).pure
+    case c @ Literal(LongConstant(v))       => (ctx, Some(PolyAst.Term.LongConst(v)), Nil).pure
+    case c @ Literal(ShortConstant(v))      => (ctx, Some(PolyAst.Term.ShortConst(v)), Nil).pure
+    case c @ Literal(ByteConstant(v))       => (ctx, Some(PolyAst.Term.ByteConst(v)), Nil).pure
+    case c @ Literal(CharConstant(v))       => (ctx, Some(PolyAst.Term.CharConst(v)), Nil).pure
+    case c @ Literal(UnitConstant())        => (ctx, Some(PolyAst.Term.UnitConst), Nil).pure
     case r: Ref =>
       (ctx.refs.get(r), r) match {
         case (Some(Reference(value, tpe)), _) =>
@@ -379,7 +383,8 @@ class AstTransformer(using val q: Quotes) {
       def foldTree(xs: List[A], tree: Tree)(owner: Symbol): List[A] =
         foldOverTree(f(tree) ::: xs, tree)(owner)
     }
-    acc.foldOverTree(Nil, in)(Symbol.noSymbol)
+
+    f(in) ::: acc.foldOverTree(Nil, in)(Symbol.noSymbol)
   }
 
   // case class Reference(name: String, tpe: TypeRepr)
@@ -400,14 +405,10 @@ class AstTransformer(using val q: Quotes) {
       .map(PolyAst.StructDef(PolyAst.Sym(tpeSym.fullName), _))
   }
 
-  @tailrec final def flattenRefs(r: Term, xs: List[Ref] = Nil): List[Ref] = r match {
-    case s @ Select(nested @ Select(x, _), _) =>
-      println(s"got ${s}")
-      flattenRefs(x, xs)
-    case s @ Select(_, _) =>
-      println(s"got! ${s}")
-      s :: xs
-    case id @ Ident(_) => id :: xs
+  @tailrec final def resolveRootIdent(t: Term, xs: List[String] = Nil): Option[(Ident, List[String])] = t match {
+    case Select(x, n) => resolveRootIdent(x, n :: xs) // outside first, no need to reverse at the end
+    case i @ Ident(_) => Some(i, xs)
+    case _            => None        // we got a non ref node, give up
   }
 
   def lower(x: Expr[Any]): Result[(List[(Ref, PolyAst.Type)], PolyAst.Function)] = for {
@@ -424,45 +425,42 @@ class AstTransformer(using val q: Quotes) {
     _ = println(s" -> name:               ${closureName}")
     _ = println(s" -> body(Quotes):\n${x.asTerm.toString.indent(4)}")
 
-    externalRefs = collectTree[Ref](term) {
+    foreignRefs = collectTree[Ref](term) {
       // FIXME TODO make sure the owner is actually this macro, and not any other macro
-      case ref: Ref
-          if !ref.symbol.maybeOwner.flags.is(Flags.Macro)
-//             && !ref.symbol.maybeOwner.flags.is(Flags.Module)
-//             && !ref.symbol.flags.is(Flags.Method)
-          =>
-        ref :: Nil
-      case _ => Nil
+      case ref: Ref if !ref.symbol.maybeOwner.flags.is(Flags.Macro) => ref :: Nil
+      case _                                                        => Nil
     }
 
-    valExternalRefs = externalRefs.filter {s =>
-      s.symbol.isValDef && !s.symbol.flags.is(Flags.Module)
-    }.distinctBy(_.symbol)
+    // drop anything that isn't a val ref and resolve root ident
+    normalisedForeignValRefs = (for {
+      s <- foreignRefs.distinctBy(_.symbol)
+      if s.symbol.isValDef && !s.symbol.flags.is(Flags.Module)
+      (root, path) <- resolveRootIdent(s)
+    } yield (root, path.toVector, s)).sortBy(_._2.length)
 
-    collapsed = valExternalRefs.foldLeft(List.empty[Ref]){
-      case (acc, i @Ident(_)) => i::acc
-      case (acc, s@Select(i, _)) =>
-
-        // for this select, find all nested idents
-        //  if (acc contains ident) then
-        //    // the parent was brought in as foreign, keep this
-
-        //
+    collapsed = normalisedForeignValRefs.foldLeft(Vector.empty[ (Ident, Vector[String], Ref ) ]) {
+      case (acc, x@(_, _, Ident(_)) )                  =>  acc :+ x
+      case (acc, x@ (root, path, s @ Select(i, _)) )   =>
 
 
-        acc
-//        s ::acc.filterNot(x => x.symbol == i.symbol)
+        println(s"$root->${path}")
 
-    }
+          acc.filterNot( (root0, path0, _)  => root.symbol == root0.symbol   && path.startsWith(path0)) :+ x
+    }.map(_._3)
 
-    _ = println(s" -> foreign refs:         \n${externalRefs.map(_.show).mkString("\n").indent(4)}")
-    _ = println(s" -> filtered  (found):         \n${valExternalRefs.map(x =>    s"${x.show} (${x.symbol}) ~> $x").mkString("\n").indent(4)}")
-    _ = println(s" -> collapse  (found):         \n${collapsed.map(x =>   s"${x.symbol} ~> $x").mkString("\n").indent(4)}")
-
+    _ = println(
+      s" -> foreign refs:         \n${foreignRefs.map(x => s"${x.show} (${x.symbol}) ~> $x").mkString("\n").indent(4)}"
+    )
+    _ = println(
+      s" -> filtered  (found):         \n${normalisedForeignValRefs.map(x => s"${x._3.show} (${x._3.symbol}) ~> $x").mkString("\n").indent(4)}"
+    )
+    _ = println(
+      s" -> collapse  (found):         \n${collapsed.map(x => s"${x.symbol} ~> $x").mkString("\n").indent(4)}"
+    )
 
     c = Context(0, term :: Nil, Map(), Set())
 
-    typedExternalRefs <- valExternalRefs.traverseFilter {
+    typedExternalRefs <- collapsed.traverseFilter {
       case i @ Ident(_) =>
         resolveTpe(c)(i.tpe).map {
           case (Some(x), tpe, c) => Some((i, Reference(x, tpe), c))
@@ -539,6 +537,6 @@ class AstTransformer(using val q: Quotes) {
     args     = capturedNames.map(_._2)
     captures = capturedNames.map((r, n) => r -> n.tpe)
 
-  } yield (captures, PolyAst.Function(closureName, args, fnTpe, stmts :+ fnReturn, v))
+  } yield (captures.toList, PolyAst.Function(closureName, args.toList, fnTpe, stmts :+ fnReturn, v))
 
 }
