@@ -65,8 +65,6 @@ class AstTransformer(using val q: Quotes) {
           }
           (Some(outRef), PolyAst.Stmt.Var(outName, Some(expr)) :: Nil)
         case (sym, args) =>
-
-
           println(receiverSym)
           println(s"${sym.mkString(".")}(${args.mkString(",")}) ")
           ???
@@ -122,38 +120,57 @@ class AstTransformer(using val q: Quotes) {
     for {
       (_, tpe, c) <- resolveTpe(c.log(ap))(ap.tpe)
 
-      receiverOwner  = ap.fun.symbol.maybeOwner 
-      receiverOwnerFlags =  receiverOwner.flags
+      receiverOwner      = ap.fun.symbol.maybeOwner
+      receiverOwnerFlags = receiverOwner.flags
       receiverSym        = PolyAst.Sym(ap.fun.symbol.fullName)
 
-      
       _ = println(s"receiverFlags:${receiverSym} = ${receiverOwnerFlags.show} (${receiverOwner})")
 
-
-      
       // method calls on a module
       // * Symbol.companionClass gives the case class symbol if this is a module, otherwise Symbol.isNoSymbol
       // * Symbol.companionClass gives the module symbol if this is a case class, otherwise Symbol.isNoSymbol
       // * Symbol.companionModule on a module gives the val def of the singleton
-      
 
+      // _ = println(s"${receiverOwner.companionClass.tree.show}")
+      _ = println(s"->${ap.symbol.tree}")
 
+      // _ = println(s"${receiverOwner.flags.show}")
+      // _ = println(s"${receiverOwner.companionClass.flags.show}")
 
-      _ = println(s"${receiverOwner.companionClass.tree.show}")
-      _ = println(s"${receiverOwner.tree.show}")
-
-      _ = println(s"${receiverOwner.flags.show}")
-      _ = println(s"${receiverOwner.companionClass.flags.show}")
-
-       _ = println("==")
-      _ = println(ap.fun.symbol.tree.show + "\n" +  receiverOwner.companionClass.primaryConstructor.tree.show)
+      //  _ = println("==")
+      // _ = println(ap.fun.symbol.tree.toString + "\n" +  ap.fun.symbol.tree.show)
 
       (c, argRefs, argTrees) <- resolveTerms(c.down(ap))(ap.args)
 
       r <-
         if (receiverOwnerFlags.is(Flags.Module)) { // receiver is an object/package object
-          
 
+
+          if (ap.symbol.isDefDef) {
+
+            
+
+            ap.symbol.tree match {
+              case DefDef(name, args, tpe, Some(impl)) =>
+
+                // for each def def
+                // replace all occurrence of idents where the symbol is the same as the def  
+
+
+                val idents= collectTree(impl){
+                  case i@Ident(x) => i.symbol :: Nil
+                  case _ => Nil
+                }
+                args match{
+                  case TermParamClause(xs) :: Nil => println( ">>>!"+xs.map(x => x.symbol -> idents.contains(x.symbol) ) )
+                  case _ => ???
+                }
+                println(s">>>Def=${impl  }")
+                println(s">>> ${idents}")
+                println(s">>> args=${args}")
+
+            }
+          }
 
           val (outRef, tree) = resolveModuleApply(receiverSym, tpe)(argRefs) //
           (c, outRef, argTrees ::: tree).success.deferred
