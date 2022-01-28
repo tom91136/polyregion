@@ -12,7 +12,7 @@ class BufferSuite extends BaseSuite {
     test(s"${C.runtimeClass}-fill-x$n=$expected") {
       val xs = Buffer.ofDim[A](n)
       assertEquals(
-        offload {
+        doOffload {
           unrollInclusive(n - 1)(i => xs(i) = expected)
         },
         ()

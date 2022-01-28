@@ -7,7 +7,7 @@ object Main {
 
   final val Iterations = 3
   final val Forks      = 1
-  final val Time       = TimeValue.seconds(1)
+  final val Time       = TimeValue.seconds(5)
 
   def main(args: Array[String]): Unit = {
     val opts = new OptionsBuilder()

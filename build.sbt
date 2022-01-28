@@ -109,7 +109,7 @@ lazy val `benchmarks-scala` = project
     assembly / mainClass := Some("polyregion.benchmarks.Main"),
     scalacOptions ++= Seq("-Yretain-trees"),
     libraryDependencies ++= Seq(
-      // "net.openhft"             % "affinity"                   % "3.20.0",
+      "net.openhft"             % "affinity"                   % "3.20.0",
       // "org.scala-lang.modules" %% "scala-parallel-collections" % "1.0.4"
     )
   )

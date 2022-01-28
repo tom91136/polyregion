@@ -15,6 +15,8 @@ class ValueReturnSuite extends BaseSuite {
     test(s"${r.getClass}-ref3=$r")(assertOffload[A](z))
   }
 
+  // assert values survives round trip
+
   testValueReturn[Char](0)
   testValueReturn[Char](255)
   testValueReturn[Char](1)

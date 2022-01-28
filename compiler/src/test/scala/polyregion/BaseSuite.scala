@@ -4,6 +4,8 @@ trait BaseSuite extends munit.FunSuite {
 
   import scala.compiletime._
 
+  inline def doOffload[A](inline x: => A): A = if (Toggles.NoOffload) x else polyregion.compiletime.offload[A](x)
+
   def assertValEquals[A](actual: A, expected: A): Unit = (actual.asMatchable, expected.asMatchable) match {
     case (a: Float, e: Float) => //
       assertEquals(java.lang.Float.floatToIntBits(a), java.lang.Float.floatToIntBits(e))
@@ -14,8 +16,9 @@ trait BaseSuite extends munit.FunSuite {
   }
 
   inline def unrollInclusive[U](inline n: Int)(inline f: Int => Unit): Unit = {
-    f(n)
-    if (n > 0) unrollInclusive(n - 1)(f)
+    if (n >= 0) f(n)
+    if (n > 0)
+      unrollInclusive(n - 1)(f)
   }
 
   inline def assertOffload[A](inline f: => A) = {
@@ -25,7 +28,7 @@ trait BaseSuite extends munit.FunSuite {
       catch {
         case e: Throwable => throw new AssertionError(s"offload reference expression ${codeOf(f)} failed to execute", e)
       }
-    assertValEquals(polyregion.compiletime.offload[A](f), expected)
+    assertValEquals(doOffload[A](f), expected)
   }
 
 }

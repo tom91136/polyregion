@@ -16,15 +16,18 @@ import polyregion.internal.*
 
 import java.lang.reflect.Modifier
 import polyregion.data.MsgPack
+
 import java.time.Duration
+import java.util.concurrent.CountDownLatch
 import scala.collection.immutable.ArraySeq
+import scala.concurrent.ExecutionContext
 
 object compiletime {
 
-  extension [A](xs: Array[A]) {
-    inline def foreach(inline r: Range)(inline f: Int => Unit) =
-      ${ offloadImpl('f) }
-  }
+  // extension [A](xs: Array[A]) {
+  //   inline def foreach(inline r: Range)(inline f: Int => Unit) =
+  //     ${ offloadImpl('f) }
+  // }
 
   inline def showExpr(inline x: Any): Any = ${ showExprImpl('x) }
 
@@ -172,10 +175,42 @@ object compiletime {
   //   }
   // }
 
-  inline def foreachJVM(inline range: Range)(inline x: Int => Unit): Any =
-    range.foreach(x)
+  inline def foreachJVMPar(inline range: Range)(inline x: Int => Unit)(using ec: ExecutionContext): Unit = {
+    val n     = java.lang.Runtime.getRuntime.availableProcessors()
+    val latch = new CountDownLatch(n)
+    Runtime.splitStatic(range)(n).foreach { r =>
+      ec.execute { () =>
+        try foreachJVM(r)(x)
+        finally latch.countDown()
+      }
+    }
+    latch.await()
+  }
 
-  inline def foreach(range: Range)(inline x: Int => Unit): Any = {
+  inline def foreachJVM(inline range: Range)(inline x: Int => Unit): Unit = {
+    val start = range.start
+    val bound = if (range.isInclusive) range.end - 1 else range.end
+    val step  = range.step
+    var i     = start
+    while (i < bound) {
+      x(i)
+      i += step
+    }
+  }
+
+  inline def foreachPar(range: Range)(inline x: Int => Unit)(using ec: ExecutionContext): Unit = {
+    val n     = java.lang.Runtime.getRuntime.availableProcessors()
+    val latch = new CountDownLatch(n)
+    Runtime.splitStatic(range)(n).foreach { r =>
+      ec.execute { () =>
+        try foreach(r)(x)
+        finally latch.countDown()
+      }
+    }
+    latch.await()
+  }
+
+  inline def foreach(inline range: Range)(inline x: Int => Unit): Unit = {
     val start = range.start
     val bound = if (range.isInclusive) range.end - 1 else range.end
     val step  = range.step
@@ -187,11 +222,6 @@ object compiletime {
       }
     }
   }
-
-  private[polyregion] inline def offloadValidate[A](inline x: => A): Boolean = ${ offloadValidateImpl[A]('x) }
-
-  private def offloadValidateImpl[A: Type](x: Expr[Any])(using q: Quotes): Expr[Boolean] =
-    '{ ${ offloadImpl[A](x) } == $x }
 
   inline def offload[A](inline x: => A): A = ${ offloadImpl[A]('x) }
 
@@ -257,6 +287,12 @@ object compiletime {
           ???
       }
 
+      val rtnExpr = (buffer: Expr[Buffer[?]]) =>
+        fn.rtn match {
+          case PolyAst.Type.Unit => '{ ().asInstanceOf[A] }
+          case _                 => '{ $buffer(0).asInstanceOf[A] }
+        }
+
       val captureExprs = captures.map { (ident, tpe) =>
         val expr = ident.asExpr
         val wrapped = tpe match {
@@ -291,7 +327,7 @@ object compiletime {
 
       '{
         val programBytes = $programBytesExpr
-        val astBytes     = $astBytesExpr
+        // val astBytes     = $astBytesExpr
 
         // println("Program bytes=" + programBytes.size)
         // println("PolyAst bytes=" + astBytes.size)
@@ -306,7 +342,7 @@ object compiletime {
 
         PolyregionRuntime.invoke(programBytes, ${ fnName }, rtnType, rtnBuffer.buffer, argTypes, argBuffers)
 
-        (if (rtnBuffer.isEmpty) () else rtnBuffer(0)).asInstanceOf[A]
+        ${ rtnExpr('rtnBuffer) }
       }
     }
 

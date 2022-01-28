@@ -1,3 +1,0 @@
-package polyregion
-
-object compileTime {}

@@ -65,6 +65,9 @@ class AstTransformer(using val q: Quotes) {
           }
           (Some(outRef), PolyAst.Stmt.Var(outName, Some(expr)) :: Nil)
         case (sym, args) =>
+
+
+          println(receiverSym)
           println(s"${sym.mkString(".")}(${args.mkString(",")}) ")
           ???
       }
@@ -119,15 +122,39 @@ class AstTransformer(using val q: Quotes) {
     for {
       (_, tpe, c) <- resolveTpe(c.log(ap))(ap.tpe)
 
-      receiverOwnerFlags = ap.fun.symbol.maybeOwner.flags
+      receiverOwner  = ap.fun.symbol.maybeOwner 
+      receiverOwnerFlags =  receiverOwner.flags
       receiverSym        = PolyAst.Sym(ap.fun.symbol.fullName)
 
-      _ = println(s"receiverFlags:${receiverSym} = ${receiverOwnerFlags.show}")
+      
+      _ = println(s"receiverFlags:${receiverSym} = ${receiverOwnerFlags.show} (${receiverOwner})")
+
+
+      
+      // method calls on a module
+      // * Symbol.companionClass gives the case class symbol if this is a module, otherwise Symbol.isNoSymbol
+      // * Symbol.companionClass gives the module symbol if this is a case class, otherwise Symbol.isNoSymbol
+      // * Symbol.companionModule on a module gives the val def of the singleton
+      
+
+
+
+      _ = println(s"${receiverOwner.companionClass.tree.show}")
+      _ = println(s"${receiverOwner.tree.show}")
+
+      _ = println(s"${receiverOwner.flags.show}")
+      _ = println(s"${receiverOwner.companionClass.flags.show}")
+
+       _ = println("==")
+      _ = println(ap.fun.symbol.tree.show + "\n" +  receiverOwner.companionClass.primaryConstructor.tree.show)
 
       (c, argRefs, argTrees) <- resolveTerms(c.down(ap))(ap.args)
 
       r <-
         if (receiverOwnerFlags.is(Flags.Module)) { // receiver is an object/package object
+          
+
+
           val (outRef, tree) = resolveModuleApply(receiverSym, tpe)(argRefs) //
           (c, outRef, argTrees ::: tree).success.deferred
         } else {
@@ -176,8 +203,8 @@ class AstTransformer(using val q: Quotes) {
           xs   <- args.traverse(resolveTpe(c)(_))
         } yield (name, xs) match {
           case (Symbols.Buffer, (_, component, c) :: Nil) => (None, PolyAst.Type.Array(component, None), c)
-          case (n, ys)                                    =>
-          println(s"Applied = ${n} args=${ys.map(x => (x._1, x._2)).mkString(",")}")
+          case (n, ys) =>
+            println(s"Applied = ${n} args=${ys.map(x => (x._1, x._2)).mkString(",")}")
 
             ???
           // None -> PolyAst.Type.Struct(n, ys)
@@ -296,22 +323,20 @@ class AstTransformer(using val q: Quotes) {
           resolveTpe(ctx.log(term))(i.tpe).map { (_, tpe, c) =>
             (c, Some(PolyAst.Term.Select(Nil, PolyAst.Named(name, tpe))), Nil)
           }
-        case (None, s@Select(root, name)) =>
-
-          for{
-            (_, tpe, c) <- resolveTpe(ctx.log(term))(s.tpe)
+        case (None, s @ Select(root, name)) =>
+          for {
+            (_, tpe, c)          <- resolveTpe(ctx.log(term))(s.tpe)
             (c, lhsRef, lhsTree) <- resolveTerm(c.log(term))(root)
-            ref  <- lhsRef match {
+            ref <- lhsRef match {
               case Some(PolyAst.Term.Select(xs, x)) =>
-                PolyAst.Term.Select(  xs :+ x, PolyAst.Named(name, tpe) ).success.deferred
-              case bad        => s"illegal select root ${bad}".fail.deferred
+                PolyAst.Term.Select(xs :+ x, PolyAst.Named(name, tpe)).success.deferred
+              case bad => s"illegal select root ${bad}".fail.deferred
             }
           } yield (c, Some(ref), lhsTree)
 
         case (None, x) =>
-          s"[depth=${ctx.depth}] Ref ${x} with tpe=${x.tpe} was not identified at closure args stage, ref pool:\n->${ctx.refs.mkString("\n->")} ".fail.deferred
-
-
+          s"[depth=${ctx.depth}] Ref ${x} with tpe=${x.tpe} was not identified at closure args stage, ref pool:\n->${ctx.refs
+            .mkString("\n->")} ".fail.deferred
 
       }
 
@@ -422,7 +447,7 @@ class AstTransformer(using val q: Quotes) {
   @tailrec final def resolveRootIdent(t: Term, xs: List[String] = Nil): Option[(Ident, List[String])] = t match {
     case Select(x, n) => resolveRootIdent(x, n :: xs) // outside first, no need to reverse at the end
     case i @ Ident(_) => Some(i, xs)
-    case _            => None        // we got a non ref node, give up
+    case _            => None                         // we got a non ref node, give up
   }
 
   def lower(x: Expr[Any]): Result[(List[(Ref, PolyAst.Type)], PolyAst.Function)] = for {
@@ -448,19 +473,22 @@ class AstTransformer(using val q: Quotes) {
     // drop anything that isn't a val ref and resolve root ident
     normalisedForeignValRefs = (for {
       s <- foreignRefs.distinctBy(_.symbol)
-      if s.symbol.isValDef && !s.symbol.flags.is(Flags.Module)
+      if !s.symbol.flags.is(Flags.Module) && (
+        s.symbol.isValDef ||
+          (s.symbol.isDefDef && s.symbol.flags.is(Flags.FieldAccessor))
+      )
       (root, path) <- resolveRootIdent(s)
     } yield (root, path.toVector, s)).sortBy(_._2.length)
 
-    collapsed = normalisedForeignValRefs.foldLeft(Vector.empty[ (Ident, Vector[String], Ref ) ]) {
-      case (acc, x@(_, _, Ident(_)) )                  =>  acc :+ x
-      case (acc, x@ (root, path, s @ Select(i, _)) )   =>
+    collapsed = normalisedForeignValRefs
+      .foldLeft(Vector.empty[(Ident, Vector[String], Ref)]) {
+        case (acc, x @ (_, _, Ident(_))) => acc :+ x
+        case (acc, x @ (root, path, s @ Select(i, _))) =>
+          println(s"$root->${path}")
 
-
-        println(s"$root->${path}")
-
-          acc.filterNot( (root0, path0, _)  => root.symbol == root0.symbol   && path.startsWith(path0)) :+ x
-    }.map(_._3)
+          acc.filterNot((root0, path0, _) => root.symbol == root0.symbol && path.startsWith(path0)) :+ x
+      }
+      .map(_._3)
 
     _ = println(
       s" -> foreign refs:         \n${foreignRefs.map(x => s"${x.show} (${x.symbol}) ~> $x").mkString("\n").indent(4)}"
@@ -529,7 +557,12 @@ class AstTransformer(using val q: Quotes) {
     //   // case bad             => s"block required, got $bad".fail
     // }
     (c, ref, stmts) <- resolveTrees(
-      Context(0, Nil, typedExternalRefs.map((a, b, c) => (a.symbol, b)).toMap, typedExternalRefs.map(_._3.defs).flatten.toSet)
+      Context(
+        0,
+        Nil,
+        typedExternalRefs.map((a, b, c) => (a.symbol, b)).toMap,
+        typedExternalRefs.map(_._3.defs).flatten.toSet
+      )
     )(term :: Nil).resolve
 
     (_, fnTpe, c) <- resolveTpe(c)(term.tpe).resolve

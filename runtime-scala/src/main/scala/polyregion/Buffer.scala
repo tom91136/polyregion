@@ -25,8 +25,14 @@ object Buffer {
   inline private def ptr(b: java.nio.Buffer): Option[Long] =
     if (b.isDirect) Some(b.asInstanceOf[sun.nio.ch.DirectBuffer].address) else None
 
-  inline private def alloc(size: Int): java.nio.ByteBuffer =
-    java.nio.ByteBuffer.allocateDirect(size).order(java.nio.ByteOrder.nativeOrder())
+  inline private def alloc(elemSize: Int, n: Int): java.nio.ByteBuffer = {
+    val bytes =
+      try math.multiplyExact(elemSize, n)
+      catch {
+        case e => throw new IllegalArgumentException(s"Cannot allocated buffer of size ${elemSize * n} (overflow?)", e)
+      }
+    java.nio.ByteBuffer.allocateDirect(bytes).order(java.nio.ByteOrder.nativeOrder())
+  }
 
   class DoubleBuffer(val buffer: java.nio.DoubleBuffer) extends Buffer[Double] {
     override val name                                 = "Double"
@@ -112,14 +118,14 @@ object Buffer {
   }
 
   def ofDim[A <: AnyVal](dim: Int)(using tag: ClassTag[A]): Buffer[A] = (tag.runtimeClass match {
-    case java.lang.Double.TYPE    => DoubleBuffer(alloc(java.lang.Double.BYTES * dim).asDoubleBuffer())
-    case java.lang.Float.TYPE     => FloatBuffer(alloc(java.lang.Float.BYTES * dim).asFloatBuffer())
-    case java.lang.Long.TYPE      => LongBuffer(alloc(java.lang.Long.BYTES * dim).asLongBuffer())
-    case java.lang.Integer.TYPE   => IntBuffer(alloc(java.lang.Integer.BYTES * dim).asIntBuffer())
-    case java.lang.Short.TYPE     => ShortBuffer(alloc(java.lang.Short.BYTES * dim).asShortBuffer())
-    case java.lang.Character.TYPE => CharBuffer(alloc(java.lang.Character.BYTES * dim).asCharBuffer())
-    case java.lang.Byte.TYPE      => ByteBuffer(alloc(java.lang.Byte.BYTES * dim))
-    case java.lang.Boolean.TYPE   => BoolBuffer(alloc(java.lang.Byte.BYTES * dim))
+    case java.lang.Double.TYPE    => DoubleBuffer(alloc(java.lang.Double.BYTES, dim).asDoubleBuffer())
+    case java.lang.Float.TYPE     => FloatBuffer(alloc(java.lang.Float.BYTES, dim).asFloatBuffer())
+    case java.lang.Long.TYPE      => LongBuffer(alloc(java.lang.Long.BYTES, dim).asLongBuffer())
+    case java.lang.Integer.TYPE   => IntBuffer(alloc(java.lang.Integer.BYTES, dim).asIntBuffer())
+    case java.lang.Short.TYPE     => ShortBuffer(alloc(java.lang.Short.BYTES, dim).asShortBuffer())
+    case java.lang.Character.TYPE => CharBuffer(alloc(java.lang.Character.BYTES, dim).asCharBuffer())
+    case java.lang.Byte.TYPE      => ByteBuffer(alloc(java.lang.Byte.BYTES, dim))
+    case java.lang.Boolean.TYPE   => BoolBuffer(alloc(java.lang.Byte.BYTES, dim))
   }).asInstanceOf[Buffer[A]]
 
   // AnyVals
@@ -143,7 +149,7 @@ object Buffer {
   // AnyRefs
 
   def apply[A <: AnyRef](xs: A*)(using S: NativeStruct[A]): Buffer[A] =
-    StructBuffer[A](alloc(S.sizeInBytes * xs.size)).putAll(xs*)
+    StructBuffer[A](alloc(S.sizeInBytes, xs.size)).putAll(xs*)
   def empty[A <: AnyRef: NativeStruct]: Buffer[A] = //
     apply[A]()
   def fill[A <: AnyRef: ClassTag: NativeStruct](n: Int)(elem: => A): Buffer[A] = apply[A](ArraySeq.fill(n)(elem)*)

@@ -69,13 +69,13 @@ class CaptureSuite extends BaseSuite {
     }
   }
 
-//  testCapture("scala2x-constant-x1") {
-//    Int.MaxValue
-//  }
-//
-//  testCapture("scala2x-constant-x2") {
-//    Int.MaxValue - Int.MinValue
-//  }
+  testCapture("scala2x-constant-x1") {
+    Int.MaxValue
+  }
+
+  testCapture("scala2x-constant-x2") {
+    Int.MaxValue - Int.MinValue
+  }
 
   {
     val A: Int = 42

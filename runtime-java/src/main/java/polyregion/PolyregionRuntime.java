@@ -42,7 +42,9 @@ public class PolyregionRuntime {
     if (!loaded.getAndSet(true)) {
       Loader.loadDirect(
           Paths.get(
-              "/home/tom/polyregion/native/cmake-build-debug-clang/bindings/libjava-runtime.so"),
+//              "/home/tom/polyregion/native/cmake-build-debug-clang/bindings/libjava-runtime.so"
+              "/home/tom/polyregion/native/cmake-build-release-clang/bindings/libjava-runtime.so"
+          ),
           RESOURCE_DIR);
     }
   }
