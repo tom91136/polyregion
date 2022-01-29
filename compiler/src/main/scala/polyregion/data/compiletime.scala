@@ -1,6 +1,6 @@
 package polyregion.data
 
-object compileTime {
+object compiletime {
 
   import scala.quoted.*
 

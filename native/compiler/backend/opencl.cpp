@@ -124,7 +124,8 @@ std::string backend::OpenCL::mkStmt(const Stmt::Any &stmt) {
   );
 }
 
-compiler::Compilation backend::OpenCL::run(const Function &fnTree) {
+compiler::Compilation backend::OpenCL::run(const Program &program) {
+  auto fnTree = program.entry;
 
   auto start = compiler::nowMono();
 

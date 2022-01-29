@@ -850,6 +850,23 @@ std::ostream &operator<<(std::ostream &os, const Function &x) {
     os << x.body.back();
   }
   os << '}';
+  os << ')';
+  return os;
+}
+bool operator==(const Function &l, const Function &r) { 
+  return l.name == r.name && l.args == r.args && *l.rtn == *r.rtn && std::equal(l.body.begin(), l.body.end(), r.body.begin(), [](auto &&l, auto &&r) { return *l == *r; });
+}
+
+std::ostream &operator<<(std::ostream &os, const Program &x) {
+  os << "Program(";
+  os << x.entry;
+  os << ',';
+  os << '{';
+  if (!x.functions.empty()) {
+    std::for_each(x.functions.begin(), std::prev(x.functions.end()), [&os](auto &&x) { os << x; os << ','; });
+    os << x.functions.back();
+  }
+  os << '}';
   os << ',';
   os << '{';
   if (!x.defs.empty()) {
@@ -860,8 +877,8 @@ std::ostream &operator<<(std::ostream &os, const Function &x) {
   os << ')';
   return os;
 }
-bool operator==(const Function &l, const Function &r) { 
-  return l.name == r.name && l.args == r.args && *l.rtn == *r.rtn && std::equal(l.body.begin(), l.body.end(), r.body.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && l.defs == r.defs;
+bool operator==(const Program &l, const Program &r) { 
+  return l.entry == r.entry && l.functions == r.functions && l.defs == r.defs;
 }
 
 } // namespace polyregion::polyast
@@ -1219,6 +1236,11 @@ std::size_t std::hash<polyregion::polyast::Function>::operator()(const polyregio
   seed ^= std::hash<decltype(x.args)>()(x.args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.body)>()(x.body) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Program>::operator()(const polyregion::polyast::Program &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.entry)>()(x.entry);
+  seed ^= std::hash<decltype(x.functions)>()(x.functions) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.defs)>()(x.defs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }

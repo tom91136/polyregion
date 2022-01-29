@@ -346,11 +346,13 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
   );
 }
 
-void LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> &module, const Function &fnTree) {
+void LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> &module, const Program &program) {
+
+  auto fnTree = program.entry;
 
   // setup the struct defs first so that structs in params work
   std::transform(                                    //
-      fnTree.defs.begin(), fnTree.defs.end(),        //
+      program.defs.begin(), program.defs.end(),        //
       std::inserter(structTypes, structTypes.end()), //
       [&](auto &x) -> std::pair<Sym, std::pair<llvm::StructType *, LLVMAstTransformer::StructMemberTable>> {
         return {x.name, mkStruct(x)};
@@ -400,7 +402,7 @@ void LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> &module, 
 
 backend::LLVM::LLVM() = default; // cache(), jit(mkJit(cache)) {}
 
-compiler::Compilation backend::LLVM::run(const Function &fn) {
+compiler::Compilation backend::LLVM::run(const Program &program) {
   using namespace llvm;
 
   auto ctx = std::make_unique<llvm::LLVMContext>();
@@ -409,7 +411,7 @@ compiler::Compilation backend::LLVM::run(const Function &fn) {
   auto astXform = compiler::nowMono();
 
   LLVMAstTransformer xform(*ctx);
-  xform.transform(mod, fn);
+  xform.transform(mod, program);
 
   auto elapsed = compiler::elapsedNs(astXform);
 

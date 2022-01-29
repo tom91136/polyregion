@@ -760,10 +760,18 @@ struct EXPORT Function {
   std::vector<Named> args;
   Type::Any rtn;
   std::vector<Stmt::Any> body;
-  std::vector<StructDef> defs;
-  Function(std::string name, std::vector<Named> args, Type::Any rtn, std::vector<Stmt::Any> body, std::vector<StructDef> defs) noexcept : name(std::move(name)), args(std::move(args)), rtn(std::move(rtn)), body(std::move(body)), defs(std::move(defs)) {}
+  Function(std::string name, std::vector<Named> args, Type::Any rtn, std::vector<Stmt::Any> body) noexcept : name(std::move(name)), args(std::move(args)), rtn(std::move(rtn)), body(std::move(body)) {}
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Function &);
   EXPORT friend bool operator==(const Function &, const Function &);
+};
+
+struct EXPORT Program {
+  Function entry;
+  std::vector<Function> functions;
+  std::vector<StructDef> defs;
+  Program(Function entry, std::vector<Function> functions, std::vector<StructDef> defs) noexcept : entry(std::move(entry)), functions(std::move(functions)), defs(std::move(defs)) {}
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Program &);
+  EXPORT friend bool operator==(const Program &, const Program &);
 };
 
 } // namespace polyregion::polyast
@@ -1001,6 +1009,9 @@ template <> struct std::hash<polyregion::polyast::StructDef> {
 };
 template <> struct std::hash<polyregion::polyast::Function> {
   std::size_t operator()(const polyregion::polyast::Function &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Program> {
+  std::size_t operator()(const polyregion::polyast::Program &) const noexcept;
 };
 
 }

@@ -121,7 +121,12 @@ object PolyAst {
       args: List[Named],    //
       rtn: Type,            //
       body: List[Stmt],     //
-      defs: List[StructDef] //
   ) derives MsgPack.Codec   //
+
+  case class Program(
+      entry: Function,
+      functions: List[Function],
+      defs: List[StructDef]
+  ) derives MsgPack.Codec
 
 }

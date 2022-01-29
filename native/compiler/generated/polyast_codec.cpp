@@ -991,10 +991,7 @@ Function function_from_json(const json& j) {
   std::vector<Stmt::Any> body;
   auto body_json = j.at(3);
   std::transform(body_json.begin(), body_json.end(), std::back_inserter(body), &Stmt::any_from_json);
-  std::vector<StructDef> defs;
-  auto defs_json = j.at(4);
-  std::transform(defs_json.begin(), defs_json.end(), std::back_inserter(defs), &structdef_from_json);
-  return {name, args, rtn, body, defs};
+  return {name, args, rtn, body};
 }
 
 json function_to_json(const Function& x) { 
@@ -1004,8 +1001,38 @@ json function_to_json(const Function& x) {
   auto rtn =  Type::any_to_json(x.rtn);
   std::vector<json> body;
   std::transform(x.body.begin(), x.body.end(), std::back_inserter(body), &Stmt::any_to_json);
+  return json::array({name, args, rtn, body});
+}
+
+Program program_from_json(const json& j) { 
+  auto entry =  function_from_json(j.at(0));
+  std::vector<Function> functions;
+  auto functions_json = j.at(1);
+  std::transform(functions_json.begin(), functions_json.end(), std::back_inserter(functions), &function_from_json);
+  std::vector<StructDef> defs;
+  auto defs_json = j.at(2);
+  std::transform(defs_json.begin(), defs_json.end(), std::back_inserter(defs), &structdef_from_json);
+  return {entry, functions, defs};
+}
+
+json program_to_json(const Program& x) { 
+  auto entry =  function_to_json(x.entry);
+  std::vector<json> functions;
+  std::transform(x.functions.begin(), x.functions.end(), std::back_inserter(functions), &function_to_json);
   std::vector<json> defs;
   std::transform(x.defs.begin(), x.defs.end(), std::back_inserter(defs), &structdef_to_json);
-  return json::array({name, args, rtn, body, defs});
+  return json::array({entry, functions, defs});
+}
+json hashed_from_json(const json& j) { 
+  auto hash = j.at(0).get<std::string>();
+  auto data = j.at(1);
+  if(hash != "76f54358385e90e74c89b021cf4fb3fa") {
+   throw std::runtime_error("Expecting ADT hash to be 76f54358385e90e74c89b021cf4fb3fa, but was " + hash);
+  }
+  return data;
+}
+
+json hashed_to_json(const json& x) { 
+  return json::array({"76f54358385e90e74c89b021cf4fb3fa", x});
 }
 } // namespace polyregion::polyast

@@ -17,7 +17,7 @@ private:
   std::string mkStmt(const Stmt::Any &stmt);
 
 public:
-  compiler::Compilation run(const Function &arg) override;
+  compiler::Compilation run(const Program &) override;
 };
 
 } // namespace polyregion::codegen

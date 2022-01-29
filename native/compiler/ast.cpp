@@ -139,6 +139,21 @@ using std::string;
          "\n}";
 }
 
+[[nodiscard]] string polyast::repr(const StructDef &def) {
+  return "struct " + repr(def.name) + " { " +
+         mk_string<Named>(
+             def.members, [](auto &&x) { return repr(x); }, ",") +
+         " }";
+}
+
+[[nodiscard]] string polyast::repr(const Program &program) {
+  auto defs = mk_string<StructDef>(
+      program.defs, [](auto &&x) { return repr(x); }, "\n");
+  auto fns = mk_string<Function>(
+      program.functions, [](auto &&x) { return repr(x); }, "\n");
+  return defs + "\n" + fns + "\n" + repr(program.entry);
+}
+
 std::string polyast::qualified(const Term::Select &select) {
   return select.init.empty() //
              ? select.last.symbol

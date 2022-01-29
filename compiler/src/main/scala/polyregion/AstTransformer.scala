@@ -46,6 +46,28 @@ class AstTransformer(using val q: Quotes) {
 
   }
 
+  // def inlineApply(ap: Apply) =
+  //   ap.symbol.tree match {
+  //     case DefDef(name, argss, tpe, Some(body)) =>
+  //       val argTerms = argss.collect { case TermParamClause(xs) => xs }.flatten
+
+  //       val idents = collectTree(body) {
+  //         case i @ Ident(x) => i.symbol :: Nil
+  //         case _            => Nil
+  //       }
+
+  //       idents.map{i => i -> }
+
+  //       argss match {
+  //         case TermParamClause(xs) :: Nil => println(">>>!" + xs.map(x => x.symbol -> idents.contains(x.symbol)))
+  //         case _                          => ???
+  //       }
+  //       println(s">>>Def=${impl}")
+  //       println(s">>> ${idents}")
+  //       println(s">>> args=${args}")
+  //     case _ => ???
+  //   }
+
   def resolveIntrinsics(c: Context)(ap: Apply): Deferred[TermRes] = {
 
     def resolveModuleApply(receiverSym: PolyAst.Sym, tpe: PolyAst.Type)(args: List[Option[PolyAst.Term]]) = {
@@ -145,27 +167,23 @@ class AstTransformer(using val q: Quotes) {
       r <-
         if (receiverOwnerFlags.is(Flags.Module)) { // receiver is an object/package object
 
-
           if (ap.symbol.isDefDef) {
-
-            
 
             ap.symbol.tree match {
               case DefDef(name, args, tpe, Some(impl)) =>
-
                 // for each def def
-                // replace all occurrence of idents where the symbol is the same as the def  
+                // replace all occurrence of idents where the symbol is the same as the def
 
-
-                val idents= collectTree(impl){
-                  case i@Ident(x) => i.symbol :: Nil
-                  case _ => Nil
+                val idents = collectTree(impl) {
+                  case i @ Ident(x) => i.symbol :: Nil
+                  case _            => Nil
                 }
-                args match{
-                  case TermParamClause(xs) :: Nil => println( ">>>!"+xs.map(x => x.symbol -> idents.contains(x.symbol) ) )
+                args match {
+                  case TermParamClause(xs) :: Nil =>
+                    println(">>>!" + xs.map(x => x.symbol -> idents.contains(x.symbol)))
                   case _ => ???
                 }
-                println(s">>>Def=${impl  }")
+                println(s">>>Def=${impl}")
                 println(s">>> ${idents}")
                 println(s">>> args=${args}")
 
@@ -467,7 +485,7 @@ class AstTransformer(using val q: Quotes) {
     case _            => None                         // we got a non ref node, give up
   }
 
-  def lower(x: Expr[Any]): Result[(List[(Ref, PolyAst.Type)], PolyAst.Function)] = for {
+  def lower(x: Expr[Any]): Result[(List[(Ref, PolyAst.Type)], PolyAst.Program)] = for {
     term <- extractInlineBlock(x.asTerm)
 
     //  _ = pprint.pprintln(block)
@@ -586,8 +604,8 @@ class AstTransformer(using val q: Quotes) {
 
     //    _ = println(c)
 
-    v <- c.defs.toList.traverse(s => lowerProductType(s.typeSymbol)).resolve
-    _ = println(s"sdd=${v}")
+    defs <- c.defs.toList.traverse(s => lowerProductType(s.typeSymbol)).resolve
+    _ = println(s"defs=${defs}")
 
     returnTerm = ref.getOrElse(PolyAst.Term.UnitConst)
     _ <-
@@ -601,6 +619,9 @@ class AstTransformer(using val q: Quotes) {
     args     = capturedNames.map(_._2)
     captures = capturedNames.map((r, n) => r -> n.tpe)
 
-  } yield (captures.toList, PolyAst.Function(closureName, args.toList, fnTpe, stmts :+ fnReturn, v))
+  } yield (
+    captures.toList,
+    PolyAst.Program(PolyAst.Function(closureName, args.toList, fnTpe, stmts :+ fnReturn), Nil, defs)
+  )
 
 }

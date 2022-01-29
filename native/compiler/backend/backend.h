@@ -6,7 +6,7 @@ namespace polyregion::backend {
 using namespace polyregion;
 
 class Backend {
-  virtual compiler::Compilation run(const polyast::Function &fnTree) = 0;
+  virtual compiler::Compilation run(const polyast::Program &program) = 0;
 };
 
 } // namespace polyregion::backend

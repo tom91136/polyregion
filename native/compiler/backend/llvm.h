@@ -38,13 +38,13 @@ public:
   llvm::Type *mkTpe(const Type::Any &tpe);
 
   explicit LLVMAstTransformer(llvm::LLVMContext &c) : C(c), lut(), structTypes(), B(C) {}
-  void transform(const std::unique_ptr<llvm::Module> &module, const Function &arg);
+  void transform(const std::unique_ptr<llvm::Module> &module, const Program &);
 };
 
 class LLVM : public Backend {
 public:
   explicit LLVM();
-  compiler::Compilation run(const Function &fn) override;
+  compiler::Compilation run(const Program &) override;
 };
 
 } // namespace polyregion::backend

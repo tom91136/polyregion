@@ -115,6 +115,9 @@ object MsgPack {
 
   }
 
+  case class Versioned[T](hash : String, t:T) derives MsgPack.Codec
+
+
   def decodeMsg(xs: Array[Byte]): Either[Exception, upack.Msg] =
     try Right(upack.read(xs))
     catch { case e: Exception => Left(e) }

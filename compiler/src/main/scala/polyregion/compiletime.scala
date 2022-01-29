@@ -21,6 +21,7 @@ import java.time.Duration
 import java.util.concurrent.CountDownLatch
 import scala.collection.immutable.ArraySeq
 import scala.concurrent.ExecutionContext
+import polyregion.ast.CppCodeGen
 
 object compiletime {
 
@@ -58,7 +59,7 @@ object compiletime {
     xform.lowerProductType[A].resolve match {
       case Left(e) => throw e
       case Right(sdef) =>
-        val layout = PolyregionCompiler.layoutOf(MsgPack.encode(sdef), false)
+        val layout = PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, sdef)), false)
         println(s"layout=${layout}")
 
         val tpeSym = TypeTree.of[A].symbol
@@ -230,20 +231,18 @@ object compiletime {
     val xform = new AstTransformer(using q)
 
     val result = for {
-      (captures, fn) <- xform.lower(x)
-      serialisedAst  <- Either.catchNonFatal(MsgPack.encode(fn))
+      (captures, prog) <- xform.lower(x)
+      serialisedAst    <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, prog)))
       _ <- Either.catchNonFatal(
         Files.write(
-          Paths.get("./ast.bin").toAbsolutePath.normalize(),
+          Paths.get("./ast.msgpack").toAbsolutePath.normalize(),
           serialisedAst,
           StandardOpenOption.WRITE,
           StandardOpenOption.CREATE,
           StandardOpenOption.TRUNCATE_EXISTING
         )
       )
-
       c <- Either.catchNonFatal(PolyregionCompiler.compile(serialisedAst, true, PolyregionCompiler.BACKEND_LLVM))
-
     } yield {
 
       println(s"Program=${c.program.length}")
@@ -272,7 +271,7 @@ object compiletime {
             ???
         }
 
-      val rtnBufferExpr = fn.rtn match {
+      val rtnBufferExpr = prog.entry.rtn match {
         case PolyAst.Type.Unit   => '{ Buffer.empty[Int] }
         case PolyAst.Type.Float  => '{ Buffer.ref[Float] }
         case PolyAst.Type.Double => '{ Buffer.ref[Double] }
@@ -288,7 +287,7 @@ object compiletime {
       }
 
       val rtnExpr = (buffer: Expr[Buffer[?]]) =>
-        fn.rtn match {
+        prog.entry.rtn match {
           case PolyAst.Type.Unit => '{ ().asInstanceOf[A] }
           case _                 => '{ $buffer(0).asInstanceOf[A] }
         }
@@ -333,9 +332,9 @@ object compiletime {
         // println("PolyAst bytes=" + astBytes.size)
 
         val rtnBuffer = ${ rtnBufferExpr }
-        val rtnType   = ${ tpeAsRuntimeTpe(fn.rtn) }
+        val rtnType   = ${ tpeAsRuntimeTpe(prog.entry.rtn) }
 
-        val argTypes   = Array(${ Varargs(fn.args.map(n => tpeAsRuntimeTpe(n.tpe))) }*)
+        val argTypes   = Array(${ Varargs(prog.entry.args.map(n => tpeAsRuntimeTpe(n.tpe))) }*)
         val argBuffers = Array(${ Varargs(captureExprs) }*)
 
         // println(s"Invoking with ${argTypes.zip(argBuffers).toList}")

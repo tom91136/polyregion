@@ -165,5 +165,9 @@ namespace Term {
 [[nodiscard]] EXPORT json structdef_to_json(const StructDef &);
 [[nodiscard]] EXPORT Function function_from_json(const json &);
 [[nodiscard]] EXPORT json function_to_json(const Function &);
+[[nodiscard]] EXPORT Program program_from_json(const json &);
+[[nodiscard]] EXPORT json program_to_json(const Program &);
+[[nodiscard]] EXPORT json hashed_to_json(const json&);
+[[nodiscard]] EXPORT json hashed_from_json(const json&);
 } // namespace polyregion::polyast
 

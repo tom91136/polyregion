@@ -68,13 +68,13 @@ void compiler::initialise() {
 }
 
 static json deserialiseAst(const compiler::Bytes &astBytes) {
-  json json;
   try {
-    json = nlohmann::json::from_msgpack(astBytes.data(), astBytes.data() + astBytes.size());
+    auto json = nlohmann::json::from_msgpack(astBytes.data(), astBytes.data() + astBytes.size());
+    // the JSON comes in versioned with the hash
+    return polyast::hashed_from_json(json);
   } catch (nlohmann::json::exception &e) {
     throw std::logic_error("Unable to parse packed ast:" + std::string(e.what()));
   }
-  return json;
 }
 
 compiler::Layout compiler::layoutOf(const polyast::StructDef &def, bool packed) {
@@ -102,17 +102,17 @@ compiler::Layout compiler::layoutOf(const Bytes &structDef, bool packed) {
   return layoutOf(def, packed);
 }
 
-compiler::Compilation compiler::compile(const polyast::Function &f) {
+compiler::Compilation compiler::compile(const polyast::Program &program) {
   if (!init) {
     return Compilation{"initialise was not called before"};
   }
   backend::OpenCL oclGen;
-  oclGen.run(f);
+  oclGen.run(program);
 
   backend::LLVM gen;
   Compilation c;
   try {
-    c = gen.run(f);
+    c = gen.run(program);
   } catch (const std::exception &e) {
     c.messages = e.what();
   }
@@ -130,13 +130,13 @@ compiler::Compilation compiler::compile(const Bytes &astBytes) {
   std::cout << "[polyregion-native] JSON :" << json << std::endl;
 
   auto astLift = nowMono();
-  auto ast = polyast::function_from_json(json);
+  auto program = polyast::program_from_json(json);
   events.emplace_back(nowMs(), "ast_lift", elapsedNs(astLift));
 
-  std::cout << "[polyregion-native] AST  :" << ast << std::endl;
-  std::cout << "[polyregion-native] Repr :" << polyast::repr(ast) << std::endl;
+  std::cout << "[polyregion-native] AST  :" << program << std::endl;
+  std::cout << "[polyregion-native] Repr :" << polyast::repr(program) << std::endl;
 
-  auto r = compile(ast);
+  auto r = compile(program);
   r.events.insert(r.events.end(), events.begin(), events.end());
 
   return r;

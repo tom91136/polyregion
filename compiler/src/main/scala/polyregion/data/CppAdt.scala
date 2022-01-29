@@ -12,7 +12,7 @@ import java.nio.file.StandardOpenOption
 import scala.annotation.tailrec
 import fansi.Str
 import cats.syntax.all._
-import polyregion.data.compileTime.CtorTermSelect
+import polyregion.data.compiletime.CtorTermSelect
 import cats.conversions.variance
 
 object Cpp {
@@ -329,10 +329,10 @@ object Cpp {
   object CppType {
     enum Kind { case StdLib, Data, Base, Variant }
     object Kind {
-      def apply(c: compileTime.MirrorKind) = c match {
-        case compileTime.MirrorKind.CaseClass   => Data
-        case compileTime.MirrorKind.CaseProduct => Variant
-        case compileTime.MirrorKind.CaseSum     => Base
+      def apply(c: compiletime.MirrorKind) = c match {
+        case compiletime.MirrorKind.CaseClass   => Data
+        case compiletime.MirrorKind.CaseProduct => Variant
+        case compiletime.MirrorKind.CaseSum     => Base
       }
     }
   }
@@ -364,9 +364,9 @@ object Cpp {
 
   trait ToCppTerm[A] extends (Option[A] => ToCppTerm.Value)
   object ToCppTerm {
-    type Value = String | compileTime.CtorTermSelect[CppType]
+    type Value = String | compiletime.CtorTermSelect[CppType]
     given ToCppTerm[String]                              = x => s"\"${x.getOrElse("")}\""
-    given ToCppTerm[compileTime.CtorTermSelect[CppType]] = { x => x.getOrElse("") }
+    given ToCppTerm[compiletime.CtorTermSelect[CppType]] = { x => x.getOrElse("") }
     inline given derived[T](using m: Mirror.Of[T]): ToCppTerm[T] = { (_: Option[T]) =>
       inline m match {
         case s: Mirror.SumOf[T]     => summonInline[ToCppType[s.MirroredMonoType]]().ref(qualified = true) + "()"
@@ -443,7 +443,7 @@ object Cpp {
     //     case _: (t *: ts)  => p(summonInline[ToCppType[t]]()) && forAll[ts](p)
 
     inline given derived[T](using m: Mirror.Of[T]): ToCppType[T] = { () =>
-      val (ns, kind) = compileTime.mirrorMeta[m.MirroredMonoType]
+      val (ns, kind) = compiletime.mirrorMeta[m.MirroredMonoType]
       val name       = constValue[m.MirroredLabel]
       inline m match {
         case s: Mirror.SumOf[T] =>
@@ -487,7 +487,7 @@ object Cpp {
       m: Mirror.Of[T]
   ): StructNode = {
     val ctorTerms =
-      compileTime.primaryCtorApplyTerms[m.MirroredType, ToCppTerm.Value, ToCppTerm, CppType, ToCppType].map {
+      compiletime.primaryCtorApplyTerms[m.MirroredType, ToCppTerm.Value, ToCppTerm, CppType, ToCppType].map {
         case x: String                   => x
         case CtorTermSelect((x, _), Nil) => x
         case CtorTermSelect((x, xt), (y, yt) :: Nil) =>
@@ -499,7 +499,7 @@ object Cpp {
     val applied = parent.map((s, _) => (s, ctorTerms))
     inline m match {
       case s: Mirror.SumOf[T] =>
-        val members = compileTime.sumTypeCtorParams[s.MirroredType, CppType, ToCppType]
+        val members = compiletime.sumTypeCtorParams[s.MirroredType, CppType, ToCppType]
         val sum     = StructNode(tpe, members, applied)
         sum.copy(variants = deriveSum[s.MirroredElemLabels, s.MirroredElemTypes](Some((sum, ctorTerms))))
       case p: Mirror.ProductOf[T] =>
