@@ -639,9 +639,7 @@ bool Expr::operator==(const Expr::Alias &l, const Expr::Alias &r) {
 
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Invoke &x) {
   os << "Invoke(";
-  os << x.lhs;
-  os << ',';
-  os << '"' << x.name << '"';
+  os << x.name;
   os << ',';
   os << '{';
   if (!x.args.empty()) {
@@ -655,7 +653,7 @@ std::ostream &Expr::operator<<(std::ostream &os, const Expr::Invoke &x) {
   return os;
 }
 bool Expr::operator==(const Expr::Invoke &l, const Expr::Invoke &r) { 
-  return *l.lhs == *r.lhs && l.name == r.name && std::equal(l.args.begin(), l.args.end(), r.args.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && *l.rtn == *r.rtn;
+  return l.name == r.name && std::equal(l.args.begin(), l.args.end(), r.args.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && *l.rtn == *r.rtn;
 }
 
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Index &x) {
@@ -732,9 +730,7 @@ bool Stmt::operator==(const Stmt::Update &l, const Stmt::Update &r) {
 
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Effect &x) {
   os << "Effect(";
-  os << x.lhs;
-  os << ',';
-  os << '"' << x.name << '"';
+  os << x.name;
   os << ',';
   os << '{';
   if (!x.args.empty()) {
@@ -746,7 +742,7 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Effect &x) {
   return os;
 }
 bool Stmt::operator==(const Stmt::Effect &l, const Stmt::Effect &r) { 
-  return l.lhs == r.lhs && l.name == r.name && std::equal(l.args.begin(), l.args.end(), r.args.begin(), [](auto &&l, auto &&r) { return *l == *r; });
+  return l.name == r.name && std::equal(l.args.begin(), l.args.end(), r.args.begin(), [](auto &&l, auto &&r) { return *l == *r; });
 }
 
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::While &x) {
@@ -1161,8 +1157,7 @@ std::size_t std::hash<polyregion::polyast::Expr::Alias>::operator()(const polyre
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Expr::Invoke>::operator()(const polyregion::polyast::Expr::Invoke &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.lhs)>()(x.lhs);
-  seed ^= std::hash<decltype(x.name)>()(x.name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  std::size_t seed = std::hash<decltype(x.name)>()(x.name);
   seed ^= std::hash<decltype(x.args)>()(x.args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
@@ -1198,8 +1193,7 @@ std::size_t std::hash<polyregion::polyast::Stmt::Update>::operator()(const polyr
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Stmt::Effect>::operator()(const polyregion::polyast::Stmt::Effect &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.lhs)>()(x.lhs);
-  seed ^= std::hash<decltype(x.name)>()(x.name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  std::size_t seed = std::hash<decltype(x.name)>()(x.name);
   seed ^= std::hash<decltype(x.args)>()(x.args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }

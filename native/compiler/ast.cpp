@@ -89,10 +89,10 @@ using std::string;
 
       [](const Expr::Alias &x) { return "(~>" + repr(x.ref) + ")"; },
       [](const Expr::Invoke &x) {
-        return repr(x.lhs) + "`" + x.name + "`" +
+        return repr(x.name) + "(" +
                mk_string<Term::Any>(
                    x.args, [&](auto x) { return repr(x); }, ",") +
-               ":" + repr(x.tpe);
+               ")" + ":" + repr(x.tpe);
       },
       [](const Expr::Index &x) { return repr(x.lhs) + "[" + repr(x.idx) + "]"; });
 }
@@ -105,10 +105,10 @@ using std::string;
       [](const Stmt::Mut &x) { return repr(x.name) + " := " + repr(x.expr); },
       [](const Stmt::Update &x) { return repr(x.lhs) + "[" + repr(x.idx) + "] = " + repr(x.value); },
       [](const Stmt::Effect &x) {
-        return repr(x.lhs) + "`" + x.name + "`" +
+        return repr(x.name) + "(" +
                mk_string<Term::Any>(
                    x.args, [&](auto x) { return repr(x); }, ",") +
-               " : Unit";
+               ")" + " : Unit";
       },
       [](const Stmt::While &x) {
         return "while(" + repr(x.cond) + "){\n" +

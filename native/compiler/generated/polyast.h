@@ -618,11 +618,10 @@ struct EXPORT Alias : Expr::Base {
 };
 
 struct EXPORT Invoke : Expr::Base {
-  Term::Any lhs;
-  std::string name;
+  Sym name;
   std::vector<Term::Any> args;
   Type::Any rtn;
-  Invoke(Term::Any lhs, std::string name, std::vector<Term::Any> args, Type::Any rtn) noexcept : Expr::Base(rtn), lhs(std::move(lhs)), name(std::move(name)), args(std::move(args)), rtn(std::move(rtn)) {}
+  Invoke(Sym name, std::vector<Term::Any> args, Type::Any rtn) noexcept : Expr::Base(rtn), name(std::move(name)), args(std::move(args)), rtn(std::move(rtn)) {}
   EXPORT operator Any() const { return std::make_shared<Invoke>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Invoke &);
   EXPORT friend bool operator==(const Expr::Invoke &, const Expr::Invoke &);
@@ -695,10 +694,9 @@ struct EXPORT Update : Stmt::Base {
 };
 
 struct EXPORT Effect : Stmt::Base {
-  Term::Select lhs;
-  std::string name;
+  Sym name;
   std::vector<Term::Any> args;
-  Effect(Term::Select lhs, std::string name, std::vector<Term::Any> args) noexcept : Stmt::Base(), lhs(std::move(lhs)), name(std::move(name)), args(std::move(args)) {}
+  Effect(Sym name, std::vector<Term::Any> args) noexcept : Stmt::Base(), name(std::move(name)), args(std::move(args)) {}
   EXPORT operator Any() const { return std::make_shared<Effect>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Stmt::Effect &);
   EXPORT friend bool operator==(const Stmt::Effect &, const Stmt::Effect &);

@@ -7,7 +7,8 @@ import polyregion.NativeStruct
 
 class StructSuite extends BaseSuite {
 
-  case class Vec3(a: Float, b: Float, c: Float)
+  case class Vec3(val a: Float, b: Float, c: Float){
+  }
   object Vec3{
     def apply(a : Float) : Vec3 = Vec3(a,a,a)
   }
@@ -37,11 +38,21 @@ class StructSuite extends BaseSuite {
     }
   }
 
+  // class Foo(i : Int) {
+  //     def this(f : Float) = this(1)
+  // }
+
   testExpr("return") {
     assertOffload(
       Vec3(0.0, 1.0, 2.0)
     )
   }
+
+  // testExpr("return") {
+  //   assertOffload(
+  //     new Foo(1f)
+  //   )
+  // }
 
   // testExpr("use-and-return") {
   //   assertOffload {

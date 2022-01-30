@@ -248,7 +248,7 @@ llvm::Value *LLVMAstTransformer::mkExpr(const Expr::Any &expr, llvm::Function *f
       [&](const Expr::Alias &x) -> llvm::Value * { return mkRef(x.ref); },
       [&](const Expr::Invoke &x) -> llvm::Value * {
         //        auto lhs = mkRef(x.lhs );
-        return undefined(__FILE_NAME__, __LINE__, "Unimplemented invoke:`" + x.name + "`");
+        return undefined(__FILE_NAME__, __LINE__, "Unimplemented invoke:`" + repr(x.name) + "`");
       },
       [&](const Expr::Index &x) -> llvm::Value * {
         auto tpe = mkTpe(x.tpe);

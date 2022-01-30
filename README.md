@@ -42,6 +42,8 @@ TODO
  
 TODO
 
+ * Nested `def`
+ * `lazy val`
  * `try catch`
  * Instantiation and access of Arrays in offload 
  * Instantiation and access of Arrays as parameter

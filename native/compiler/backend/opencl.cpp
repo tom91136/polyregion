@@ -101,7 +101,6 @@ std::string backend::OpenCL::mkStmt(const Stmt::Any &stmt) {
         return qualified(x.lhs) + "[" + idx + "] = " + val + ";";
       },
       [&](const Stmt::Effect &x) -> std::string {
-        auto lhs = (x.lhs.last.symbol);
         throw std::logic_error("no impl");
       },
       [&](const Stmt::While &x) {

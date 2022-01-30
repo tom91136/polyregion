@@ -141,9 +141,9 @@ extension (e: PolyAst.Expr) {
       case Lt(lhs, rhs)  => s"${lhs.repr} < ${rhs.repr}"
       case Gt(lhs, rhs)  => s"${lhs.repr} > ${rhs.repr}"
 
-      case Alias(ref)                   => s"(~>${ref.repr})"
-      case Invoke(lhs, name, args, tpe) => s"${lhs.repr}<$name>(${args.map(_.repr).mkString(",")}) : ${tpe.repr}"
-      case Index(lhs, idx, tpe)         => s"${lhs.repr}[${idx.repr}] : ${tpe.repr}"
+      case Alias(ref)              => s"(~>${ref.repr})"
+      case Invoke(name, args, tpe) => s"${name.repr}(${args.map(_.repr).mkString(",")}) : ${tpe.repr}"
+      case Index(lhs, idx, tpe)    => s"${lhs.repr}[${idx.repr}] : ${tpe.repr}"
       // case Block(xs, x)                 => s"{\n${xs.map(_.repr).mkString("\n")}\n${x.repr}\n}"
     }
   }
@@ -157,7 +157,7 @@ extension (e: PolyAst.Stmt) {
       case Var(name, rhs)          => s"var ${name.repr} = ${rhs.fold("_")(_.repr)}"
       case Mut(name, expr)         => s"${name.repr} := ${expr.repr}"
       case Update(lhs, idx, value) => s"${lhs.repr}[${idx.repr}] := ${value.repr}"
-      case Effect(lhs, name, args) => s"${lhs.repr}<$name>(${args.map(_.repr).mkString(",")}) : Unit"
+      case Effect(name, args)      => s"${name.repr}(${args.map(_.repr).mkString(",")}) : Unit"
       case While(cond, body)       => s"while(${cond.repr}){\n${body.map(_.repr).mkString("\n")}\n}"
       case Break                   => s"break;"
       case Cont                    => s"continue;"

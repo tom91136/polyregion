@@ -705,22 +705,20 @@ json Expr::alias_to_json(const Expr::Alias& x) {
 }
 
 Expr::Invoke Expr::invoke_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto name = j.at(1).get<std::string>();
+  auto name =  sym_from_json(j.at(0));
   std::vector<Term::Any> args;
-  auto args_json = j.at(2);
+  auto args_json = j.at(1);
   std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &Term::any_from_json);
-  auto rtn =  Type::any_from_json(j.at(3));
-  return {lhs, name, args, rtn};
+  auto rtn =  Type::any_from_json(j.at(2));
+  return {name, args, rtn};
 }
 
 json Expr::invoke_to_json(const Expr::Invoke& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto name = x.name;
+  auto name =  sym_to_json(x.name);
   std::vector<json> args;
   std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &Term::any_to_json);
   auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({lhs, name, args, rtn});
+  return json::array({name, args, rtn});
 }
 
 Expr::Index Expr::index_from_json(const json& j) { 
@@ -856,20 +854,18 @@ json Stmt::update_to_json(const Stmt::Update& x) {
 }
 
 Stmt::Effect Stmt::effect_from_json(const json& j) { 
-  auto lhs =  Term::select_from_json(j.at(0));
-  auto name = j.at(1).get<std::string>();
+  auto name =  sym_from_json(j.at(0));
   std::vector<Term::Any> args;
-  auto args_json = j.at(2);
+  auto args_json = j.at(1);
   std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &Term::any_from_json);
-  return {lhs, name, args};
+  return {name, args};
 }
 
 json Stmt::effect_to_json(const Stmt::Effect& x) { 
-  auto lhs =  Term::select_to_json(x.lhs);
-  auto name = x.name;
+  auto name =  sym_to_json(x.name);
   std::vector<json> args;
   std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &Term::any_to_json);
-  return json::array({lhs, name, args});
+  return json::array({name, args});
 }
 
 Stmt::While Stmt::while_from_json(const json& j) { 
@@ -1026,13 +1022,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "76f54358385e90e74c89b021cf4fb3fa") {
-   throw std::runtime_error("Expecting ADT hash to be 76f54358385e90e74c89b021cf4fb3fa, but was " + hash);
+  if(hash != "871eb2c2275f2551f38f4f97a35d5081") {
+   throw std::runtime_error("Expecting ADT hash to be 871eb2c2275f2551f38f4f97a35d5081, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"76f54358385e90e74c89b021cf4fb3fa", x});
+  return json::array({"871eb2c2275f2551f38f4f97a35d5081", x});
 }
 } // namespace polyregion::polyast
