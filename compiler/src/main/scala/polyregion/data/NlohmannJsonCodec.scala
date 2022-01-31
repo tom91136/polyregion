@@ -1,19 +1,14 @@
 package polyregion.data
 
+import cats.conversions.variance
+import polyregion.PolyregionCompiler
 import polyregion.data.Cpp.*
 import polyregion.data.MsgPack
 
-import java.nio.file.Paths
-import java.nio.file.Files
-import java.nio.file.StandardOpenOption
 import java.lang.annotation.Target
-import scala.collection.mutable.ArrayBuffer
-import cats.conversions.variance
-
-import java.nio.file.Path
-import polyregion.PolyregionCompiler
-
+import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import java.nio.{ByteBuffer, ByteOrder}
+import scala.collection.mutable.ArrayBuffer
 
 case class NlohmannJsonCodec(namespace: List[String], decls: List[String], impls: List[String])
 object NlohmannJsonCodec {

@@ -1,11 +1,12 @@
 package polyregion.compiler
 
-import scala.quoted.*
-import scala.annotation.tailrec
-import polyregion.ast.{PolyAst => p}
-import polyregion.internal.*
-import cats.syntax.all.*
 import cats.data.EitherT
+import cats.syntax.all.*
+import polyregion.ast.PolyAst as p
+import polyregion.internal.*
+
+import scala.annotation.tailrec
+import scala.quoted.*
 
 object TreeMapper {
 
@@ -160,10 +161,10 @@ object TreeMapper {
         } yield cond
       case q.While(cond, body) =>
         for {
-          (condRef, c) <- c.down(term).mapTerm(cond)
-          (_, bodyCtx) <- c.noStmts.mapTerm(body)
+          (condRef, condCtx) <- c.noStmts.down(term).mapTerm(cond)
+          (_, bodyCtx) <- condCtx.noStmts.mapTerm(body)
         } yield {
-          val block = c.stmts match {
+          val block = condCtx.stmts match {
             case Nil                              => ??? // this is illegal, while needs a bool predicate
             case p.Stmt.Var(_, Some(cond)) :: Nil =>
               // simple condition:
@@ -173,6 +174,7 @@ object TreeMapper {
             case xs =>
               // complex condition:
               // while(true) {  stmts...; if(!condRef) break;  }
+              println(">>>>>"+term.show)
               println(">>>>>"+condRef)
               println(">>>>>"+xs)
               ???

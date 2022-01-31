@@ -1,10 +1,11 @@
 package polyregion.compiler
 
-import scala.quoted.Expr
-import polyregion.internal.*
-import polyregion.ast.{PolyAst => p}
-import java.nio.file.Paths
 import cats.syntax.all.*
+import polyregion.ast.PolyAst as p
+import polyregion.internal.*
+
+import java.nio.file.Paths
+import scala.quoted.Expr
 
 object Compiler {
 
@@ -19,14 +20,15 @@ object Compiler {
     println(s" -> name:               ${closureName}")
     println(s" -> body(Quotes):\n${x.asTerm.toString.indent(4)}")
 
-    import TreeMapper.*
-    import Retyper.*
     import RefOutliner.*
+    import Retyper.*
     import TreeIntrinsifier.*
+    import TreeMapper.*
+    import TreeUnitExprEliminator.*
 
     for {
 
-      (c, typedExternalRefs) <- outline(term)
+      (typedExternalRefs, c) <- outline(term)
 
       capturedNames = typedExternalRefs
         .collect {
@@ -59,7 +61,9 @@ object Compiler {
         } else ().success
       fnReturn = p.Stmt.Return(p.Expr.Alias(returnTerm))
 
-      fnStmts = intrinsify(c.stmts :+ fnReturn)
+      passes = intrinsify >>> eliminateUnitExpr
+
+      fnStmts = passes(c.stmts :+ fnReturn)
 
       _ = println(s" -> PolyAst:\n${fnStmts.map(_.repr).mkString("\n")}")
 

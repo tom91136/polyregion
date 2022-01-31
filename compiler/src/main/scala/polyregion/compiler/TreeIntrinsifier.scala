@@ -1,23 +1,24 @@
 package polyregion.compiler
 
-import scala.quoted.*
-import scala.annotation.tailrec
-import polyregion.ast.{PolyAst => p}
-import polyregion.internal.*
-import cats.syntax.all.*
 import cats.data.EitherT
+import cats.syntax.all.*
+import polyregion.ast.PolyAst as p
+import polyregion.internal.*
+
+import scala.annotation.tailrec
+import scala.quoted.*
 
 object TreeIntrinsifier {
 
   import Retyper.*
 
-  def intrinsify(using q: Quoted)(xs: List[p.Stmt]): List[p.Stmt] = for {
+  def intrinsify(xs: List[p.Stmt]): List[p.Stmt] = for {
     x <- xs
     x <- intrinsifyInstanceApply(x)
     x <- intrinsifyModuleApply(x)
   } yield x
 
-  private def intrinsifyInstanceApply(using q: Quoted)(s: p.Stmt) = s.mapExpr {
+  private def intrinsifyInstanceApply(s: p.Stmt) = s.mapExpr {
     case inv @ p.Expr.Invoke(sym, Some(recv), args, rtn) =>
       (sym.fqn, recv, args) match {
         case (
@@ -53,11 +54,10 @@ object TreeIntrinsifier {
           println(s"No instance intrinsic for call: (($recv) : ${sym.mkString(".")})(${args.mkString(",")}) ")
           (inv, Nil)
       }
-
     case x => (x, Nil)
   }
 
-  private def intrinsifyModuleApply(using q: Quoted)(s: p.Stmt) = s.mapExpr {
+  private def intrinsifyModuleApply(s: p.Stmt) = s.mapExpr {
     case inv @ p.Expr.Invoke(sym, None, args, rtn) =>
       (sym.fqn, args) match {
         case ((Symbols.ScalaMath | Symbols.JavaMath) :+ op, x :: y :: Nil) => // scala.math binary

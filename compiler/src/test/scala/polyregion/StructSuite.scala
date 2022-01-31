@@ -42,11 +42,11 @@ class StructSuite extends BaseSuite {
   //     def this(f : Float) = this(1)
   // }
 
-  // testExpr("return") {
-  //   assertOffload(
-  //     Vec3(0.0, 1.0, 2.0)
-  //   )
-  // }
+  testExpr("return") {
+    assertOffload(
+      Vec3(0.0, 1.0, 2.0)
+    )
+  }
 
   // testExpr("return") {
   //   assertOffload(

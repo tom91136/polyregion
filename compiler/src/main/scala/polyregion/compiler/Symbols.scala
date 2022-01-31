@@ -1,7 +1,7 @@
 package polyregion.compiler
 
-import polyregion.ast.PolyAst
 import polyregion.Buffer
+import polyregion.ast. { PolyAst => p}
 import polyregion.internal.*
 
 object Symbols {
@@ -11,5 +11,5 @@ object Symbols {
   val JavaMath      = "java" :: "lang" :: "Math$" :: Nil
   val SeqMutableOps = "scala" :: "collection" :: "mutable" :: "SeqOps" :: Nil
   val SeqOps        = "scala" :: "collection" :: "SeqOps" :: Nil
-  val Buffer        = PolyAst.Sym[Buffer[_]]
+  val Buffer        = p.Sym[Buffer[_]]
 }

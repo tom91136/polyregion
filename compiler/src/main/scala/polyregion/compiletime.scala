@@ -1,27 +1,21 @@
 package polyregion
 
-import scala.quoted.{Expr, Quotes}
-import scala.quoted.*
-import scala.annotation.tailrec
-import scala.reflect.ClassTag
-import fansi.ErrorMode.Throw
-
-import java.nio.file.{Files, Paths, StandardOpenOption}
-import cats.data.EitherT
 import cats.Eval
+import cats.data.EitherT
 import cats.syntax.all.*
-import cats.data.NonEmptyList
-import polyregion.ast.PolyAst
+import polyregion.ast.{CppCodeGen, PolyAst}
+import polyregion.data.MsgPack
 import polyregion.internal.*
 
 import java.lang.reflect.Modifier
-import polyregion.data.MsgPack
-
+import java.nio.file.{Files, Paths, StandardOpenOption}
 import java.time.Duration
 import java.util.concurrent.CountDownLatch
+import scala.annotation.tailrec
 import scala.collection.immutable.ArraySeq
 import scala.concurrent.ExecutionContext
-import polyregion.ast.CppCodeGen
+import scala.quoted.*
+import scala.reflect.ClassTag
 
 object compiletime {
 
@@ -222,11 +216,8 @@ object compiletime {
   inline def offload[A](inline x: => A): A = ${ offloadImpl[A]('x) }
 
   private def offloadImpl[A: Type](x: Expr[Any])(using q: Quotes): Expr[A] = {
-    import quotes.reflect.*
 
-    
     implicit val Q = compiler.Quoted(q)
-    
 
     val result = for {
       (captures, prog) <- compiler.Compiler.compile(x)

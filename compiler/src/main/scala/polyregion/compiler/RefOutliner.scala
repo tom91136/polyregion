@@ -16,7 +16,7 @@ object RefOutliner {
     case _              => None               // we got a non ref node, give up
   }
 
-  def outline(using q: Quoted)(term: q.Term): Result[(q.FnContext, Vector[(q.Ref, q.Reference)])] = {
+  def outline(using q: Quoted)(term: q.Term): Result[(Vector[(q.Ref, q.Reference)], q.FnContext)] = {
 
     val foreignRefs = q.collectTree[q.Ref](term) {
       // FIXME TODO make sure the owner is actually this macro, and not any other macro
@@ -61,16 +61,16 @@ object RefOutliner {
       s" -> collapse  (found):${" " * 9}\n${sharedValRefs.map(x => s"${x.symbol} ~> $x").mkString("\n").indent(4)}"
     )
 
-    val references = sharedValRefs.foldLeftM((q.FnContext(), Vector.empty[(q.Ref, q.Reference)])) {
-      case ((c, xs), i @ q.Ident(_)) =>
+    val references = sharedValRefs.foldLeftM((Vector.empty[(q.Ref, q.Reference)], q.FnContext())) {
+      case ((xs, c), i @ q.Ident(_)) =>
         c.typer(i.tpe).map {
-          case (Some(x), tpe, c) => (c, xs :+ (i, q.Reference(x, tpe)))
-          case (None, tpe, c)    => (c, xs :+ (i, q.Reference(i.symbol.name, tpe)))
+          case (Some(x), tpe, c) => (xs :+ (i, q.Reference(x, tpe)), c)
+          case (None, tpe, c)    => (xs :+ (i, q.Reference(i.symbol.name, tpe)), c)
         }
-      case ((c, xs), s @ q.Select(term, name)) =>
+      case ((xs, c), s @ q.Select(term, name)) =>
         c.typer(s.tpe).map {
-          case (Some(x), tpe, c) => (c, xs :+ (s, q.Reference(x, tpe)))
-          case (None, tpe, c)    => (c, xs :+ (s, q.Reference("_ref_" + name + "_" + s.pos.startLine + "_", tpe)))
+          case (Some(x), tpe, c) => (xs :+ (s, q.Reference(x, tpe)), c)
+          case (None, tpe, c)    => (xs :+ (s, q.Reference("_ref_" + name + "_" + s.pos.startLine + "_", tpe)), c)
         }
       case (_, r) =>
         q.report.errorAndAbort(s"Unexpected val (reference) kind while outlining", r.asExpr)

@@ -1,8 +1,8 @@
 package polyregion.data
 
-import scala.deriving.*
-import scala.compiletime.{constValue, erasedValue, summonInline}
 import scala.collection.mutable.LinkedHashMap
+import scala.compiletime.{constValue, erasedValue, summonInline}
+import scala.deriving.*
 
 object MsgPack {
 
@@ -12,7 +12,7 @@ object MsgPack {
   trait Codec[A] extends Encoder[A], Decoder[A]
   object Codec {
 
-    import upack._
+    import upack.*
 
     def apply[A](f: A => upack.Msg, g: upack.Msg => A) = new Codec[A] {
       def encode(x: A): upack.Msg = f(x)

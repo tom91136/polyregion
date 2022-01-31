@@ -1,19 +1,16 @@
 package polyregion.data
 
-import polyregion.data.Cpp.ToCppType
-
-import scala.deriving.*
-import scala.compiletime.{constValue, erasedValue, error, summonInline}
-import scala.collection.immutable.LazyList.cons
-import polyregion.data.Cpp.StructSource
-import java.nio.file.Paths
-import java.nio.file.Files
-import java.nio.file.StandardOpenOption
-import scala.annotation.tailrec
-import fansi.Str
-import cats.syntax.all._
-import polyregion.data.compiletime.CtorTermSelect
 import cats.conversions.variance
+import cats.syntax.all.*
+import fansi.Str
+import polyregion.data.Cpp.{StructSource, ToCppType}
+import polyregion.data.compiletime.CtorTermSelect
+
+import java.nio.file.{Files, Paths, StandardOpenOption}
+import scala.annotation.tailrec
+import scala.collection.immutable.LazyList.cons
+import scala.compiletime.{constValue, erasedValue, error, summonInline}
+import scala.deriving.*
 
 object Cpp {
 
