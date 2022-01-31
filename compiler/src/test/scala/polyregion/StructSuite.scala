@@ -21,7 +21,7 @@ class StructSuite extends BaseSuite {
   // given NativeStruct[Vec3N] = nativeStructOf
   // given NativeStruct[Vec33] = nativeStructOf
 
-  inline def testExpr(inline name: String)(inline r: Any) = if (Toggles.StructSuite) {
+  inline def testExpr(inline name: String)(inline r: => Any) = if (Toggles.StructSuite) {
     test(name)(r)
   }
 
@@ -42,11 +42,11 @@ class StructSuite extends BaseSuite {
   //     def this(f : Float) = this(1)
   // }
 
-  testExpr("return") {
-    assertOffload(
-      Vec3(0.0, 1.0, 2.0)
-    )
-  }
+  // testExpr("return") {
+  //   assertOffload(
+  //     Vec3(0.0, 1.0, 2.0)
+  //   )
+  // }
 
   // testExpr("return") {
   //   assertOffload(

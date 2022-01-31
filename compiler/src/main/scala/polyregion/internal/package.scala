@@ -8,10 +8,7 @@ import java.lang.reflect.Modifier
 import scala.annotation.tailrec
 import scala.reflect.ClassTag
 
-// type VNil[+A] = scala.collection.immutable.Vector[A]
-// val VNil = scala.collection.immutable.Vector
-
-class CompilerException(m: String) extends Exception(m) {}
+class CompilerException(m: String) extends Exception(m) 
 
 type Result[A] = Either[Throwable, A]
 
