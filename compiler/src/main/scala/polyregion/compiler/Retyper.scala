@@ -6,6 +6,8 @@ import polyregion.ast.PolyAst
 import polyregion.internal.*
 import cats.syntax.all.toTraverseOps
 
+import polyregion.ast.{PolyAst => p}
+
 object Retyper {
 
   @tailrec private final def resolveSym(using q: Quoted)(ref: q.TypeRepr): Result[PolyAst.Sym] =
@@ -21,6 +23,23 @@ object Retyper {
       // case NoPrefix()    => None.success
       case invalid => s"Invalid type: ${invalid}".fail
     }
+
+  def lowerProductType[A: Type](using q: Quoted): Deferred[p.StructDef] = lowerProductType(q.TypeRepr.of[A].typeSymbol)
+  def lowerProductType(using q: Quoted)(tpeSym: q.Symbol): Deferred[p.StructDef] = {
+
+    if (!tpeSym.flags.is(q.Flags.Case)) {
+      throw RuntimeException(s"Unsupported combination of flags: ${tpeSym.flags.show}")
+    }
+
+    tpeSym.caseFields
+      .traverse(field =>
+        (field.tree match {
+          case d: q.ValDef => q.FnContext().typer(d.tpt.tpe).map((_, t, c) => p.Named(field.name, t))
+          case _           => ???
+        })
+      )
+      .map(PolyAst.StructDef(PolyAst.Sym(tpeSym.fullName), _))
+  }
 
   extension (using q: Quoted)(c: q.FnContext) {
 

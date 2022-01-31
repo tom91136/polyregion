@@ -25,11 +25,6 @@ import polyregion.ast.CppCodeGen
 
 object compiletime {
 
-  // extension [A](xs: Array[A]) {
-  //   inline def foreach(inline r: Range)(inline f: Int => Unit) =
-  //     ${ offloadImpl('f) }
-  // }
-
   inline def showExpr(inline x: Any): Any = ${ showExprImpl('x) }
 
   def showExprImpl(x: Expr[Any])(using q: Quotes): Expr[Any] = {
@@ -228,10 +223,13 @@ object compiletime {
 
   private def offloadImpl[A: Type](x: Expr[Any])(using q: Quotes): Expr[A] = {
     import quotes.reflect.*
-    val xform = new AstTransformer(using q)
+
+    
+    implicit val Q = compiler.Quoted(q)
+    
 
     val result = for {
-      (captures, prog) <- xform.lower(x)
+      (captures, prog) <- compiler.Compiler.compile(x)
       serialisedAst    <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, prog)))
       _ <- Either.catchNonFatal(
         Files.write(

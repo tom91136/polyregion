@@ -8,7 +8,7 @@ import java.lang.reflect.Modifier
 import scala.annotation.tailrec
 import scala.reflect.ClassTag
 
-class CompilerException(m: String) extends Exception(m) 
+class CompilerException(m: String) extends Exception(m)
 
 type Result[A] = Either[Throwable, A]
 
@@ -138,15 +138,34 @@ extension (e: PolyAst.Expr) {
       case Lt(lhs, rhs)  => s"${lhs.repr} < ${rhs.repr}"
       case Gt(lhs, rhs)  => s"${lhs.repr} > ${rhs.repr}"
 
-      case Alias(ref)              => s"(~>${ref.repr})"
-      case Invoke(name, args, tpe) => s"${name.repr}(${args.map(_.repr).mkString(",")}) : ${tpe.repr}"
-      case Index(lhs, idx, tpe)    => s"${lhs.repr}[${idx.repr}] : ${tpe.repr}"
+      case Alias(ref) => s"(~>${ref.repr})"
+      case Invoke(name, recv, args, tpe) =>
+        s"${recv.map(_.repr).getOrElse("<module>")}.${name.repr}(${args.map(_.repr).mkString(",")}) : ${tpe.repr}"
+      case Index(lhs, idx, tpe) => s"${lhs.repr}[${idx.repr}] : ${tpe.repr}"
       // case Block(xs, x)                 => s"{\n${xs.map(_.repr).mkString("\n")}\n${x.repr}\n}"
     }
   }
 }
 
 extension (e: PolyAst.Stmt) {
+
+  def mapExpr(f: PolyAst.Expr => (PolyAst.Expr, List[PolyAst.Stmt])): List[PolyAst.Stmt] = {
+    import PolyAst.Stmt.*
+    e match {
+      case x @ Comment(_)      => x :: Nil
+      case Var(name, rhs)      => rhs.map(f).map((y, xs) => xs :+ Var(name, Some(y))).getOrElse(Var(name, None) :: Nil)
+      case Mut(name, expr)     => val (y, xs) = f(expr); xs :+ Mut(name, y)
+      case x @ Update(_, _, _) => x :: Nil
+      case While(cond, body)   => val (y, xs) = f(cond); xs :+ While(y, body.flatMap(_.mapExpr(f)))
+      case x @ Break           => x :: Nil
+      case x @ Cont            => x :: Nil
+      case Cond(cond, trueBr, falseBr) =>
+        val (y, xs) = f(cond)
+        xs :+ Cond(y, trueBr.flatMap(_.mapExpr(f)), falseBr.flatMap(_.mapExpr(f)))
+      case Return(expr) => val (y, xs) = f(expr); xs :+ Return(y)
+    }
+  }
+
   def repr: String = {
     import PolyAst.Stmt.*
     e match {
@@ -154,7 +173,6 @@ extension (e: PolyAst.Stmt) {
       case Var(name, rhs)          => s"var ${name.repr} = ${rhs.fold("_")(_.repr)}"
       case Mut(name, expr)         => s"${name.repr} := ${expr.repr}"
       case Update(lhs, idx, value) => s"${lhs.repr}[${idx.repr}] := ${value.repr}"
-      case Effect(name, args)      => s"${name.repr}(${args.map(_.repr).mkString(",")}) : Unit"
       case While(cond, body)       => s"while(${cond.repr}){\n${body.map(_.repr).mkString("\n")}\n}"
       case Break                   => s"break;"
       case Cont                    => s"continue;"

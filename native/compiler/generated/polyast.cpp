@@ -642,6 +642,12 @@ std::ostream &Expr::operator<<(std::ostream &os, const Expr::Invoke &x) {
   os << x.name;
   os << ',';
   os << '{';
+  if (x.receiver) {
+    os << *x.receiver;
+  }
+  os << '}';
+  os << ',';
+  os << '{';
   if (!x.args.empty()) {
     std::for_each(x.args.begin(), std::prev(x.args.end()), [&os](auto &&x) { os << x; os << ','; });
     os << x.args.back();
@@ -653,7 +659,7 @@ std::ostream &Expr::operator<<(std::ostream &os, const Expr::Invoke &x) {
   return os;
 }
 bool Expr::operator==(const Expr::Invoke &l, const Expr::Invoke &r) { 
-  return l.name == r.name && std::equal(l.args.begin(), l.args.end(), r.args.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && *l.rtn == *r.rtn;
+  return l.name == r.name && l.receiver == r.receiver && std::equal(l.args.begin(), l.args.end(), r.args.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && *l.rtn == *r.rtn;
 }
 
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Index &x) {
@@ -726,23 +732,6 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Update &x) {
 }
 bool Stmt::operator==(const Stmt::Update &l, const Stmt::Update &r) { 
   return l.lhs == r.lhs && *l.idx == *r.idx && *l.value == *r.value;
-}
-
-std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Effect &x) {
-  os << "Effect(";
-  os << x.name;
-  os << ',';
-  os << '{';
-  if (!x.args.empty()) {
-    std::for_each(x.args.begin(), std::prev(x.args.end()), [&os](auto &&x) { os << x; os << ','; });
-    os << x.args.back();
-  }
-  os << '}';
-  os << ')';
-  return os;
-}
-bool Stmt::operator==(const Stmt::Effect &l, const Stmt::Effect &r) { 
-  return l.name == r.name && std::equal(l.args.begin(), l.args.end(), r.args.begin(), [](auto &&l, auto &&r) { return *l == *r; });
 }
 
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::While &x) {
@@ -1158,6 +1147,7 @@ std::size_t std::hash<polyregion::polyast::Expr::Alias>::operator()(const polyre
 }
 std::size_t std::hash<polyregion::polyast::Expr::Invoke>::operator()(const polyregion::polyast::Expr::Invoke &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.name)>()(x.name);
+  seed ^= std::hash<decltype(x.receiver)>()(x.receiver) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.args)>()(x.args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
@@ -1190,11 +1180,6 @@ std::size_t std::hash<polyregion::polyast::Stmt::Update>::operator()(const polyr
   std::size_t seed = std::hash<decltype(x.lhs)>()(x.lhs);
   seed ^= std::hash<decltype(x.idx)>()(x.idx) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.value)>()(x.value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::Stmt::Effect>::operator()(const polyregion::polyast::Stmt::Effect &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.name)>()(x.name);
-  seed ^= std::hash<decltype(x.args)>()(x.args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Stmt::While>::operator()(const polyregion::polyast::Stmt::While &x) const noexcept {

@@ -12,16 +12,15 @@ object TreeMapper {
   import Retyper.*
   extension (using q: Quoted)(c: q.FnContext) {
 
-    def mapTrees(args: List[q.Tree]): Deferred[(p.Term, q.FnContext)] =
-      args match {
-        case Nil => (p.Term.UnitConst, c).pure
-        case x :: xs =>
-          (c ::= p.Stmt.Comment(x.show))
-            .mapTree(x)
-            .flatMap(xs.foldLeftM(_) { case ((_, c0), term) =>
-              (c0 ::= p.Stmt.Comment(term.show)).mapTree(term)
-            })
-      }
+    def mapTrees(args: List[q.Tree]): Deferred[(p.Term, q.FnContext)] = args match {
+      case Nil => (p.Term.UnitConst, c).pure
+      case x :: xs =>
+        (c ::= p.Stmt.Comment(x.show))
+          .mapTree(x)
+          .flatMap(xs.foldLeftM(_) { case ((_, c0), term) =>
+            (c0 ::= p.Stmt.Comment(term.show)).mapTree(term)
+          })
+    }
 
     def mapTree(tree: q.Tree): Deferred[(p.Term, q.FnContext)] = tree match {
       case q.ValDef(name, tpe, Some(rhs)) =>
@@ -96,24 +95,32 @@ object TreeMapper {
         for {
           (_, tpe, c)  <- c.typer(ap.tpe)
           (argRefs, c) <- c.down(ap).mapTerms(ap.args)
-
           receiverSym        = p.Sym(ap.fun.symbol.fullName)
           receiverOwner      = ap.fun.symbol.maybeOwner
           receiverOwnerFlags = receiverOwner.flags
-
-          moduleApply = receiverOwnerFlags.is(q.Flags.Module)
-
-          _ = println(s"receiverFlags:${receiverSym} = ${receiverOwnerFlags.show} (${receiverOwner})")
-
+          _                  = println(s"receiverFlags:${receiverSym} = ${receiverOwnerFlags.show} (${receiverOwner})")
           // method calls on a module
           // * Symbol.companionClass gives the case class symbol if this is a module, otherwise Symbol.isNoSymbol
           // * Symbol.companionClass gives the module symbol if this is a case class, otherwise Symbol.isNoSymbol
           // * Symbol.companionModule on a module gives the val def of the singleton
-
+          name = c.named(tpe)
+          (expr, c) <-
+            if (receiverOwnerFlags.is(q.Flags.Module)) // Object.x(ys)
+              (p.Expr.Invoke(receiverSym, None, argRefs, tpe), c).success.deferred
+            else
+              ap.fun match {
+                case q.Select(q.New(tt), "<init>") => // new X
+                  println(s"impl=${ap.symbol.tree.asInstanceOf[q.DefDef].rhs}")
+                  println(s"args=${ap.args.map(_.tpe.dealias.widenTermRefByName)}")
+                  ???
+                case s @ q.Select(q, n) => // s.y(zs)
+                  (c !! s)
+                    .mapTerm(q)
+                    .map((receiverRef, c) => (p.Expr.Invoke(receiverSym, Some(receiverRef), argRefs, tpe), c))
+                case _ => ??? // (ctx.depth, None, Nil).success.deferred
+              }
           _ = println(s"->${ap.symbol.tree.show}")
-
-        } yield ???
-
+        } yield (p.Term.Select(Nil, name), c ::= p.Stmt.Var(name, Some(expr)))
       case q.Block(stat, expr) =>
         for {
           (_, c)   <- (c !! term).mapTrees(stat)
@@ -166,8 +173,10 @@ object TreeMapper {
             case xs =>
               // complex condition:
               // while(true) {  stmts...; if(!condRef) break;  }
-              println(xs)
+              println(">>>>>"+condRef)
+              println(">>>>>"+xs)
               ???
+              
               val body = (xs :+ p.Stmt.Cond(
                 p.Expr.Alias(condRef),
                 Nil,

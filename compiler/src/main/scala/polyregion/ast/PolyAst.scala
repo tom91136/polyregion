@@ -96,9 +96,9 @@ object PolyAst {
     case Lt(lhs: Term, rhs: Term)  extends Expr(Type.Bool)
     case Gt(lhs: Term, rhs: Term)  extends Expr(Type.Bool)
 
-    case Alias(ref: Term)                                    extends Expr(ref.tpe)
-    case Invoke(name: Sym, args: List[Term], rtn: Type)      extends Expr(rtn)
-    case Index(lhs: Term.Select, idx: Term, component: Type) extends Expr(component)
+    case Alias(ref: Term)                                                       extends Expr(ref.tpe)
+    case Invoke(name: Sym, receiver: Option[Term], args: List[Term], rtn: Type) extends Expr(rtn)
+    case Index(lhs: Term.Select, idx: Term, component: Type)                    extends Expr(component)
   }
 
   enum Stmt derives MsgPack.Codec {
@@ -106,7 +106,6 @@ object PolyAst {
     case Var(name: Named, expr: Option[Expr])
     case Mut(name: Term.Select, expr: Expr)
     case Update(lhs: Term.Select, idx: Term, value: Term)
-    case Effect(name: Sym, args: List[Term])
     case While(cond: Expr, body: List[Stmt])
     case Break
     case Cont

@@ -27,8 +27,10 @@ class Quoted(val q: Quotes) {
     def named(tpe: PolyAst.Type) = PolyAst.Named(s"v${depth}", tpe)
 
     def noStmts = copy(stmts = Nil)
+    def inject(refs : Map[Symbol, Reference]) = copy(refs = refs ++refs)
     infix def ::= (xs : PolyAst.Stmt*) = copy(stmts = stmts ++ xs)
     infix def replaceStmts (xs : Seq[PolyAst.Stmt]) = copy(stmts = xs.toList)
+
 
   }
 
@@ -52,18 +54,5 @@ class Quoted(val q: Quotes) {
     }
     f(in) ::: acc.foldOverTree(Nil, in)(Symbol.noSymbol)
   }
-
-}
-
-def doIt(using q: Quotes) = {
-
-  implicit val Q = Quoted(q)
-
-  import Q.*
-  import Retyper.*
-
-  val fn = FnContext()
-
-  fn.typer(TypeRepr.of[Int])
 
 }

@@ -16,7 +16,7 @@ object RefOutliner {
     case _              => None               // we got a non ref node, give up
   }
 
-  def outline(using q: Quoted)(term: q.Term): Result[(q.FnContext, Vector[(q.Ident | q.Select, q.Reference)])] = {
+  def outline(using q: Quoted)(term: q.Term): Result[(q.FnContext, Vector[(q.Ref, q.Reference)])] = {
 
     val foreignRefs = q.collectTree[q.Ref](term) {
       // FIXME TODO make sure the owner is actually this macro, and not any other macro
@@ -61,7 +61,7 @@ object RefOutliner {
       s" -> collapse  (found):${" " * 9}\n${sharedValRefs.map(x => s"${x.symbol} ~> $x").mkString("\n").indent(4)}"
     )
 
-    val references = sharedValRefs.foldLeftM((q.FnContext(), Vector.empty[(q.Ident | q.Select, q.Reference)])) {
+    val references = sharedValRefs.foldLeftM((q.FnContext(), Vector.empty[(q.Ref, q.Reference)])) {
       case ((c, xs), i @ q.Ident(_)) =>
         c.typer(i.tpe).map {
           case (Some(x), tpe, c) => (c, xs :+ (i, q.Reference(x, tpe)))

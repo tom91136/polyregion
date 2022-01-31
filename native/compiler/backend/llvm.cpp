@@ -248,7 +248,7 @@ llvm::Value *LLVMAstTransformer::mkExpr(const Expr::Any &expr, llvm::Function *f
       [&](const Expr::Alias &x) -> llvm::Value * { return mkRef(x.ref); },
       [&](const Expr::Invoke &x) -> llvm::Value * {
         //        auto lhs = mkRef(x.lhs );
-        return undefined(__FILE_NAME__, __LINE__, "Unimplemented invoke:`" + repr(x.name) + "`");
+        return undefined(__FILE_NAME__, __LINE__, "Unimplemented invoke:`" + repr(x) + "`");
       },
       [&](const Expr::Index &x) -> llvm::Value * {
         auto tpe = mkTpe(x.tpe);
@@ -288,13 +288,6 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
         auto select = x.lhs;
         auto ptr = B.CreateInBoundsGEP(mkSelect(select), mkRef(x.idx), qualified(select) + "_ptr");
         B.CreateStore(mkRef(x.value), ptr);
-      },
-      [&](const Stmt::Effect &x) {
-        if (x.args.size() == 1) {
-          auto name = x.name;
-          auto rhs = x.args[0];
-          undefined(__FILE_NAME__, __LINE__, "effect not implemented");
-        }
       },
       [&](const Stmt::While &x) {
         auto loopTest = llvm::BasicBlock::Create(C, "loop_test", fn);
@@ -352,7 +345,7 @@ void LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> &module, 
 
   // setup the struct defs first so that structs in params work
   std::transform(                                    //
-      program.defs.begin(), program.defs.end(),        //
+      program.defs.begin(), program.defs.end(),      //
       std::inserter(structTypes, structTypes.end()), //
       [&](auto &x) -> std::pair<Sym, std::pair<llvm::StructType *, LLVMAstTransformer::StructMemberTable>> {
         return {x.name, mkStruct(x)};

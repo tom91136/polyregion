@@ -76,8 +76,6 @@ namespace Stmt {
 [[nodiscard]] EXPORT json mut_to_json(const Stmt::Mut &);
 [[nodiscard]] EXPORT Stmt::Update update_from_json(const json &);
 [[nodiscard]] EXPORT json update_to_json(const Stmt::Update &);
-[[nodiscard]] EXPORT Stmt::Effect effect_from_json(const json &);
-[[nodiscard]] EXPORT json effect_to_json(const Stmt::Effect &);
 [[nodiscard]] EXPORT Stmt::While while_from_json(const json &);
 [[nodiscard]] EXPORT json while_to_json(const Stmt::While &);
 [[nodiscard]] EXPORT Stmt::Break break_from_json(const json &);

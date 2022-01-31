@@ -619,9 +619,10 @@ struct EXPORT Alias : Expr::Base {
 
 struct EXPORT Invoke : Expr::Base {
   Sym name;
+  std::optional<Term::Any> receiver;
   std::vector<Term::Any> args;
   Type::Any rtn;
-  Invoke(Sym name, std::vector<Term::Any> args, Type::Any rtn) noexcept : Expr::Base(rtn), name(std::move(name)), args(std::move(args)), rtn(std::move(rtn)) {}
+  Invoke(Sym name, std::optional<Term::Any> receiver, std::vector<Term::Any> args, Type::Any rtn) noexcept : Expr::Base(rtn), name(std::move(name)), receiver(std::move(receiver)), args(std::move(args)), rtn(std::move(rtn)) {}
   EXPORT operator Any() const { return std::make_shared<Invoke>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Invoke &);
   EXPORT friend bool operator==(const Expr::Invoke &, const Expr::Invoke &);
@@ -643,13 +644,12 @@ struct Comment;
 struct Var;
 struct Mut;
 struct Update;
-struct Effect;
 struct While;
 struct Break;
 struct Cont;
 struct Cond;
 struct Return;
-using Any = Alternative<Comment, Var, Mut, Update, Effect, While, Break, Cont, Cond, Return>;
+using Any = Alternative<Comment, Var, Mut, Update, While, Break, Cont, Cond, Return>;
 struct EXPORT Base {
   protected:
   Base() = default;
@@ -691,15 +691,6 @@ struct EXPORT Update : Stmt::Base {
   EXPORT operator Any() const { return std::make_shared<Update>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Stmt::Update &);
   EXPORT friend bool operator==(const Stmt::Update &, const Stmt::Update &);
-};
-
-struct EXPORT Effect : Stmt::Base {
-  Sym name;
-  std::vector<Term::Any> args;
-  Effect(Sym name, std::vector<Term::Any> args) noexcept : Stmt::Base(), name(std::move(name)), args(std::move(args)) {}
-  EXPORT operator Any() const { return std::make_shared<Effect>(*this); };
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Stmt::Effect &);
-  EXPORT friend bool operator==(const Stmt::Effect &, const Stmt::Effect &);
 };
 
 struct EXPORT While : Stmt::Base {
@@ -983,9 +974,6 @@ template <> struct std::hash<polyregion::polyast::Stmt::Mut> {
 };
 template <> struct std::hash<polyregion::polyast::Stmt::Update> {
   std::size_t operator()(const polyregion::polyast::Stmt::Update &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::Stmt::Effect> {
-  std::size_t operator()(const polyregion::polyast::Stmt::Effect &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Stmt::While> {
   std::size_t operator()(const polyregion::polyast::Stmt::While &) const noexcept;

@@ -100,9 +100,6 @@ std::string backend::OpenCL::mkStmt(const Stmt::Any &stmt) {
         auto val = mkRef(x.value);
         return qualified(x.lhs) + "[" + idx + "] = " + val + ";";
       },
-      [&](const Stmt::Effect &x) -> std::string {
-        throw std::logic_error("no impl");
-      },
       [&](const Stmt::While &x) {
         auto body = mk_string<Stmt::Any>(
             x.body, [&](auto &stmt) { return mkStmt(stmt); }, "\n");

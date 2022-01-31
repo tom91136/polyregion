@@ -111,7 +111,7 @@ class AstTransformer(using val q: Quotes) {
     val outName = PolyAst.Named(s"v${c.depth}", tpe)
     val outRef  = PolyAst.Term.Select(Nil, outName)
 
-    val expr = PolyAst.Expr.Invoke(receiverSym, args, tpe)
+    val expr = PolyAst.Expr.Invoke(receiverSym,None, args, tpe)
 
     // var x = new A
     // x.a = 1

@@ -89,7 +89,7 @@ using std::string;
 
       [](const Expr::Alias &x) { return "(~>" + repr(x.ref) + ")"; },
       [](const Expr::Invoke &x) {
-        return repr(x.name) + "(" +
+        return (x.receiver ? repr(*x.receiver) : "<module>") + "." + repr(x.name) + "(" +
                mk_string<Term::Any>(
                    x.args, [&](auto x) { return repr(x); }, ",") +
                ")" + ":" + repr(x.tpe);
@@ -104,12 +104,6 @@ using std::string;
       [](const Stmt::Var &x) { return "var " + repr(x.name) + " = " + (x.expr ? repr(*x.expr) : "_"); },
       [](const Stmt::Mut &x) { return repr(x.name) + " := " + repr(x.expr); },
       [](const Stmt::Update &x) { return repr(x.lhs) + "[" + repr(x.idx) + "] = " + repr(x.value); },
-      [](const Stmt::Effect &x) {
-        return repr(x.name) + "(" +
-               mk_string<Term::Any>(
-                   x.args, [&](auto x) { return repr(x); }, ",") +
-               ")" + " : Unit";
-      },
       [](const Stmt::While &x) {
         return "while(" + repr(x.cond) + "){\n" +
                mk_string<Stmt::Any>(
