@@ -93,13 +93,19 @@ object TreeMapper {
         }
 
       case ap @ q.Apply(_, _) =>
+        val receiverSym        = p.Sym(ap.fun.symbol.fullName)
+        val receiverOwner      = ap.fun.symbol.maybeOwner
+        val receiverOwnerFlags = receiverOwner.flags
         for {
           (_, tpe, c)  <- c.typer(ap.tpe)
           (argRefs, c) <- c.down(ap).mapTerms(ap.args)
-          receiverSym        = p.Sym(ap.fun.symbol.fullName)
-          receiverOwner      = ap.fun.symbol.maybeOwner
-          receiverOwnerFlags = receiverOwner.flags
-          _                  = println(s"receiverFlags:${receiverSym} = ${receiverOwnerFlags.show} (${receiverOwner})")
+          c <- ap.fun.symbol.tree match {
+            case d: q.DefDef => c.mark(d).success.deferred
+            case bad         => s"Unexpected ap symbol ${bad.show}".fail.deferred
+          }
+
+          _ = println(s"receiverFlags:${receiverSym} = ${receiverOwnerFlags.show} (${receiverOwner})")
+
           // method calls on a module
           // * Symbol.companionClass gives the case class symbol if this is a module, otherwise Symbol.isNoSymbol
           // * Symbol.companionClass gives the module symbol if this is a case class, otherwise Symbol.isNoSymbol
@@ -111,9 +117,36 @@ object TreeMapper {
             else
               ap.fun match {
                 case q.Select(q.New(tt), "<init>") => // new X
-                  println(s"impl=${ap.symbol.tree.asInstanceOf[q.DefDef].rhs}")
-                  println(s"args=${ap.args.map(_.tpe.dealias.widenTermRefByName)}")
-                  ???
+                  ap.symbol.tree match {
+                    case q.DefDef(_, _, _, None) =>
+                      // println(s"impl=${ap.symbol.tree.asInstanceOf[q.DefDef].rhs}")
+                      println(s"args=${ap.args.map(_.tpe.dealias.widenTermRefByName)}")
+
+                      (for {
+                        sdef <- (tpe match {
+                          case p.Type.Struct(s) => c.clss.get(s)
+                          case _                => None
+                        }).failIfEmpty(s"No StructDef found for type $tpe")
+
+                        structTpes = sdef.members.map(_.tpe)
+                        argTpes    = argRefs.map(_.tpe)
+
+                        name = p.Named("new", tpe)
+                        expr = p.Stmt.Var(name, None)
+
+                        _ <-
+                          if (structTpes == argTpes) ().success
+                          else s"Ctor args mismatch, class expects ${sdef.members} but was given ${argTpes}".fail
+
+                        setMemberExprs = sdef.members.zip(argRefs).map { (member, value) =>
+                          p.Stmt.Mut(p.Term.Select(name :: Nil, member), p.Expr.Alias(value))
+                        }
+
+                      } yield (p.Expr.Alias(p.Term.Select(Nil, name)), c.::=(expr +: setMemberExprs*))).deferred
+
+                    case x => s"Found ctor signature, expecting def with no rhs but got: $x".fail.deferred
+                  }
+
                 case s @ q.Select(q, n) => // s.y(zs)
                   (c !! s)
                     .mapTerm(q)
@@ -162,7 +195,7 @@ object TreeMapper {
       case q.While(cond, body) =>
         for {
           (condRef, condCtx) <- c.noStmts.down(term).mapTerm(cond)
-          (_, bodyCtx) <- condCtx.noStmts.mapTerm(body)
+          (_, bodyCtx)       <- condCtx.noStmts.mapTerm(body)
         } yield {
           val block = condCtx.stmts match {
             case Nil                              => ??? // this is illegal, while needs a bool predicate
@@ -174,11 +207,11 @@ object TreeMapper {
             case xs =>
               // complex condition:
               // while(true) {  stmts...; if(!condRef) break;  }
-              println(">>>>>"+term.show)
-              println(">>>>>"+condRef)
-              println(">>>>>"+xs)
+              println(">>>>>" + term.show)
+              println(">>>>>" + condRef)
+              println(">>>>>" + xs)
               ???
-              
+
               val body = (xs :+ p.Stmt.Cond(
                 p.Expr.Alias(condRef),
                 Nil,

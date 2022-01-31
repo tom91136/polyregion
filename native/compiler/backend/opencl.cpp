@@ -128,7 +128,7 @@ compiler::Compilation backend::OpenCL::run(const Program &program) {
   auto args = mk_string<Named>(
       fnTree.args, [&](auto x) { return mkTpe(x.tpe) + " " + x.symbol; }, ", ");
 
-  auto prototype = mkTpe(fnTree.rtn) + " " + fnTree.name + "(" + args + ")";
+  auto prototype = mkTpe(fnTree.rtn) + " " + qualified(fnTree.name) + "(" + args + ")";
 
   auto body = mk_string<Stmt::Any>(
       fnTree.body, [&](auto &stmt) { return mkStmt(stmt); }, "\n");

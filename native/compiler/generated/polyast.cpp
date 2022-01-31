@@ -818,7 +818,7 @@ bool operator==(const StructDef &l, const StructDef &r) {
 
 std::ostream &operator<<(std::ostream &os, const Function &x) {
   os << "Function(";
-  os << '"' << x.name << '"';
+  os << x.name;
   os << ',';
   os << '{';
   if (!x.args.empty()) {

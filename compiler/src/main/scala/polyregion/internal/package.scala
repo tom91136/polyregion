@@ -182,4 +182,12 @@ extension (e: PolyAst.Stmt) {
     }
 
   }
+
+}
+
+extension (f: PolyAst.Function) {
+  def repr: String =
+    s"""${f.name.repr}(${f.args.map(_.repr).mkString(", ")}) : ${f.rtn.repr} = {
+       |${f.body.map(_.repr).map("  " + _).mkString("\n")}
+		   |}""".stripMargin
 }

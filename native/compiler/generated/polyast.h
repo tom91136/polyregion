@@ -745,11 +745,11 @@ struct EXPORT StructDef {
 };
 
 struct EXPORT Function {
-  std::string name;
+  Sym name;
   std::vector<Named> args;
   Type::Any rtn;
   std::vector<Stmt::Any> body;
-  Function(std::string name, std::vector<Named> args, Type::Any rtn, std::vector<Stmt::Any> body) noexcept : name(std::move(name)), args(std::move(args)), rtn(std::move(rtn)), body(std::move(body)) {}
+  Function(Sym name, std::vector<Named> args, Type::Any rtn, std::vector<Stmt::Any> body) noexcept : name(std::move(name)), args(std::move(args)), rtn(std::move(rtn)), body(std::move(body)) {}
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Function &);
   EXPORT friend bool operator==(const Function &, const Function &);
 };

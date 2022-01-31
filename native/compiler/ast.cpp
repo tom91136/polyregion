@@ -124,7 +124,7 @@ using std::string;
 }
 
 [[nodiscard]] string polyast::repr(const Function &fn) {
-  return "def " + fn.name + "(" +
+  return "def " + repr(fn.name) + "(" +
          mk_string<Named>(
              fn.args, [&](auto x) { return repr(x); }, ",") +
          ") : " + repr(fn.rtn) + " = {\n" +

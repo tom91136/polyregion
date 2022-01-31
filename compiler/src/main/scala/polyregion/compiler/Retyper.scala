@@ -98,9 +98,10 @@ object Retyper {
               case p.Sym(Symbols.JavaLang :+ "String") => p.Type.String
               case sym                                 => p.Type.Struct(sym)
             }
-            .map {
-              case s @ p.Type.Struct(_) => (None, s, c.copy(clss = c.clss + expr))
-              case x                    => (None, x, c)
+            .flatMap {
+              case s @ p.Type.Struct(sym) =>
+                lowerProductType(expr.typeSymbol).map(d => (None, s, c.copy(clss = c.clss + (sym -> d)))).resolve
+              case x => (None, x, c).success
             }
             .deferred
       }

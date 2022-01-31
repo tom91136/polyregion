@@ -964,7 +964,7 @@ json structdef_to_json(const StructDef& x) {
 }
 
 Function function_from_json(const json& j) { 
-  auto name = j.at(0).get<std::string>();
+  auto name =  sym_from_json(j.at(0));
   std::vector<Named> args;
   auto args_json = j.at(1);
   std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &named_from_json);
@@ -976,7 +976,7 @@ Function function_from_json(const json& j) {
 }
 
 json function_to_json(const Function& x) { 
-  auto name = x.name;
+  auto name =  sym_to_json(x.name);
   std::vector<json> args;
   std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &named_to_json);
   auto rtn =  Type::any_to_json(x.rtn);
@@ -1007,13 +1007,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "02bd4aae1ce661d6c7d9c7438185313c") {
-   throw std::runtime_error("Expecting ADT hash to be 02bd4aae1ce661d6c7d9c7438185313c, but was " + hash);
+  if(hash != "bb0b2e2f2fb4bb7062914687e0b76f6c") {
+   throw std::runtime_error("Expecting ADT hash to be bb0b2e2f2fb4bb7062914687e0b76f6c, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"02bd4aae1ce661d6c7d9c7438185313c", x});
+  return json::array({"bb0b2e2f2fb4bb7062914687e0b76f6c", x});
 }
 } // namespace polyregion::polyast

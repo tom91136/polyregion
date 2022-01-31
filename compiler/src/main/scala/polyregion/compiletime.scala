@@ -40,12 +40,13 @@ object compiletime {
 
   inline def nativeStructOf[A]: NativeStruct[A] = ${ nativeStructOfImpl[A] }
 
-  def nativeStructOfImpl[A: Type](using Quotes): Expr[NativeStruct[A]] = {
+  def nativeStructOfImpl[A: Type](using q: Quotes): Expr[NativeStruct[A]] = {
     import quotes.reflect.*
     println(TypeRepr.of[A].typeSymbol.tree.show)
 
-    val xform = new AstTransformer()
-    xform.lowerProductType[A].resolve match {
+    implicit val Q = compiler.Quoted(q)
+
+    compiler.Retyper.lowerProductType[A].resolve match {
       case Left(e) => throw e
       case Right(sdef) =>
         val layout = PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, sdef)), false)

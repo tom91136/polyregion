@@ -18,8 +18,8 @@ class Quoted(val q: Quotes) {
 
       refs: Map[Symbol, Reference] = Map.empty, // ident/select table
 
-      clss: Set[TypeRepr] = Set.empty, // external class defs
-      defs: Set[DefDef] = Set.empty,   // external def defs
+      clss: Map[p.Sym, p.StructDef] = Map.empty, // external class defs
+      defs: Set[DefDef] = Set.empty,             // external def defs
 
       stmts: List[p.Stmt] = List.empty // fn statements
   ) {
@@ -29,6 +29,7 @@ class Quoted(val q: Quotes) {
 
     def noStmts                              = copy(stmts = Nil)
     def inject(refs: Map[Symbol, Reference]) = copy(refs = refs ++ refs)
+    def mark(d: DefDef)                      = copy(defs = defs + d)
     infix def ::=(xs: p.Stmt*)               = copy(stmts = stmts ++ xs)
     infix def replaceStmts(xs: Seq[p.Stmt])  = copy(stmts = xs.toList)
 

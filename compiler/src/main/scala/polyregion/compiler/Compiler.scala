@@ -50,15 +50,33 @@ object Compiler {
 
       (_, fnTpe, c) <- c.typer(term.tpe).resolve
 
-      clsDefs <- c.clss.toList.traverse(s => lowerProductType(s.typeSymbol)).resolve
+      clsDefs = c.clss.values.toList
 
-      _ = println(s"ClsDefs=${clsDefs}")
+      _ = println(s"ClsDefs = ${clsDefs}")
+      _ = println(s"DefDefs = ${c.defs.map(_.show).mkString("\n")}")
+
+      auxFns <- c.defs.toList.traverse { f =>
+        for {
+          (_, fnTpe, c) <- c.typer(f.returnTpt.tpe)
+
+          args = f.paramss
+            .flatMap(_.params)
+            .collect { case d: q.ValDef => d }
+          // TODO handle default value (ValDef.rhs)
+          // FIXME extra stmts here
+          (namedArgs, c) <- args.foldMapM(a => c.typer(a.tpt.tpe).map((_, t, c) => (p.Named(a.name, t) :: Nil, c)))
+          (ref, c) <- c.mapTerm(f.rhs.get)
+        } yield p.Function(p.Sym(f.symbol.fullName), namedArgs, fnTpe, c.stmts)
+      }.resolve
+
+      _ = println(s"AUX:\n==>${auxFns.map(_.repr).mkString("\n==>")}")
 
       returnTerm = ref
       _ <-
         if (fnTpe != returnTerm.tpe) {
           s"lambda tpe ($fnTpe) != last term tpe (${returnTerm.tpe}), term was $returnTerm".fail
         } else ().success
+
       fnReturn = p.Stmt.Return(p.Expr.Alias(returnTerm))
 
       passes = intrinsify >>> eliminateUnitExpr
@@ -72,7 +90,7 @@ object Compiler {
 
     } yield (
       captures.toList,
-      p.Program(p.Function(closureName, args.toList, fnTpe, fnStmts), Nil, clsDefs)
+      p.Program(p.Function(p.Sym(closureName :: Nil), args.toList, fnTpe, fnStmts), Nil, clsDefs)
     )
   }
 
