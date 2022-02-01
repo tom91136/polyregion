@@ -1,6 +1,7 @@
 package polyregion.ast
 
 import polyregion.data.MsgPack
+import cats.data.Op
 
 object PolyAst {
 
@@ -59,31 +60,22 @@ object PolyAst {
 
   case class Position(file: String, line: Int, col: Int) derives MsgPack.Codec
 
-  enum Expr(tpe: Type) derives MsgPack.Codec {
+  enum BinaryIntrinsicKind {
+    case Add, Sub, Mul, Div, Rem
+    case Pow
+    case BAnd, BOr, BXor, BSL, BSR
+  }
 
-    // unary intrinsic
-    case Sin(lhs: Term, rtn: Type) extends Expr(rtn)
-    case Cos(lhs: Term, rtn: Type) extends Expr(rtn)
-    case Tan(lhs: Term, rtn: Type) extends Expr(rtn)
-    case Abs(lhs: Term, rtn: Type) extends Expr(rtn)
+  enum UnaryIntrinsicKind {
+    case Sin, Cos, Tan, Abs
+    case BNot
+  }
 
-    // basic
-    case Add(lhs: Term, rhs: Term, rtn: Type) extends Expr(rtn) // l+r
-    case Sub(lhs: Term, rhs: Term, rtn: Type) extends Expr(rtn) // l-r
-    case Mul(lhs: Term, rhs: Term, rtn: Type) extends Expr(rtn) // l*r
-    case Div(lhs: Term, rhs: Term, rtn: Type) extends Expr(rtn) // l/r
-    case Rem(lhs: Term, rhs: Term, rtn: Type) extends Expr(rtn) // l%r
+  enum Expr(val tpe: Type) derives MsgPack.Codec {
 
-    // extra
-    case Pow(lhs: Term, rhs: Term, rtn: Type) extends Expr(rtn) // l**r
-
-    // bitwise
-    case BNot(lhs: Term, rtn: Type)            extends Expr(rtn) // ~l
-    case BAnd(lhs: Term, rhs: Term, rtn: Type) extends Expr(rtn) // l&r
-    case BOr(lhs: Term, rhs: Term, rtn: Type)  extends Expr(rtn) // l|r
-    case BXor(lhs: Term, rhs: Term, rtn: Type) extends Expr(rtn) // l^r
-    case BSL(lhs: Term, rhs: Term, rtn: Type)  extends Expr(rtn) // l<<r
-    case BSR(lhs: Term, rhs: Term, rtn: Type)  extends Expr(rtn) // l>>r
+    // unary  
+    case UnaryIntrinsic(lhs: Term, kind : UnaryIntrinsicKind, rtn: Type) extends Expr(rtn)
+    case BinaryIntrinsic(lhs: Term, rhs: Term, kind : BinaryIntrinsicKind, rtn: Type) extends Expr(rtn)  
 
     // logical
     case Not(lhs: Term)            extends Expr(Type.Bool)

@@ -8,38 +8,10 @@ using json = nlohmann::json;
 
 namespace polyregion::polyast { 
 namespace Expr { 
-[[nodiscard]] EXPORT Expr::Sin sin_from_json(const json &);
-[[nodiscard]] EXPORT json sin_to_json(const Expr::Sin &);
-[[nodiscard]] EXPORT Expr::Cos cos_from_json(const json &);
-[[nodiscard]] EXPORT json cos_to_json(const Expr::Cos &);
-[[nodiscard]] EXPORT Expr::Tan tan_from_json(const json &);
-[[nodiscard]] EXPORT json tan_to_json(const Expr::Tan &);
-[[nodiscard]] EXPORT Expr::Abs abs_from_json(const json &);
-[[nodiscard]] EXPORT json abs_to_json(const Expr::Abs &);
-[[nodiscard]] EXPORT Expr::Add add_from_json(const json &);
-[[nodiscard]] EXPORT json add_to_json(const Expr::Add &);
-[[nodiscard]] EXPORT Expr::Sub sub_from_json(const json &);
-[[nodiscard]] EXPORT json sub_to_json(const Expr::Sub &);
-[[nodiscard]] EXPORT Expr::Mul mul_from_json(const json &);
-[[nodiscard]] EXPORT json mul_to_json(const Expr::Mul &);
-[[nodiscard]] EXPORT Expr::Div div_from_json(const json &);
-[[nodiscard]] EXPORT json div_to_json(const Expr::Div &);
-[[nodiscard]] EXPORT Expr::Rem rem_from_json(const json &);
-[[nodiscard]] EXPORT json rem_to_json(const Expr::Rem &);
-[[nodiscard]] EXPORT Expr::Pow pow_from_json(const json &);
-[[nodiscard]] EXPORT json pow_to_json(const Expr::Pow &);
-[[nodiscard]] EXPORT Expr::BNot bnot_from_json(const json &);
-[[nodiscard]] EXPORT json bnot_to_json(const Expr::BNot &);
-[[nodiscard]] EXPORT Expr::BAnd band_from_json(const json &);
-[[nodiscard]] EXPORT json band_to_json(const Expr::BAnd &);
-[[nodiscard]] EXPORT Expr::BOr bor_from_json(const json &);
-[[nodiscard]] EXPORT json bor_to_json(const Expr::BOr &);
-[[nodiscard]] EXPORT Expr::BXor bxor_from_json(const json &);
-[[nodiscard]] EXPORT json bxor_to_json(const Expr::BXor &);
-[[nodiscard]] EXPORT Expr::BSL bsl_from_json(const json &);
-[[nodiscard]] EXPORT json bsl_to_json(const Expr::BSL &);
-[[nodiscard]] EXPORT Expr::BSR bsr_from_json(const json &);
-[[nodiscard]] EXPORT json bsr_to_json(const Expr::BSR &);
+[[nodiscard]] EXPORT Expr::UnaryIntrinsic unaryintrinsic_from_json(const json &);
+[[nodiscard]] EXPORT json unaryintrinsic_to_json(const Expr::UnaryIntrinsic &);
+[[nodiscard]] EXPORT Expr::BinaryIntrinsic binaryintrinsic_from_json(const json &);
+[[nodiscard]] EXPORT json binaryintrinsic_to_json(const Expr::BinaryIntrinsic &);
 [[nodiscard]] EXPORT Expr::Not not_from_json(const json &);
 [[nodiscard]] EXPORT json not_to_json(const Expr::Not &);
 [[nodiscard]] EXPORT Expr::Eq eq_from_json(const json &);
@@ -89,6 +61,20 @@ namespace Stmt {
 [[nodiscard]] EXPORT Stmt::Any any_from_json(const json &);
 [[nodiscard]] EXPORT json any_to_json(const Stmt::Any &);
 } // namespace Stmt
+namespace UnaryIntrinsicKind { 
+[[nodiscard]] EXPORT UnaryIntrinsicKind::Sin sin_from_json(const json &);
+[[nodiscard]] EXPORT json sin_to_json(const UnaryIntrinsicKind::Sin &);
+[[nodiscard]] EXPORT UnaryIntrinsicKind::Cos cos_from_json(const json &);
+[[nodiscard]] EXPORT json cos_to_json(const UnaryIntrinsicKind::Cos &);
+[[nodiscard]] EXPORT UnaryIntrinsicKind::Tan tan_from_json(const json &);
+[[nodiscard]] EXPORT json tan_to_json(const UnaryIntrinsicKind::Tan &);
+[[nodiscard]] EXPORT UnaryIntrinsicKind::Abs abs_from_json(const json &);
+[[nodiscard]] EXPORT json abs_to_json(const UnaryIntrinsicKind::Abs &);
+[[nodiscard]] EXPORT UnaryIntrinsicKind::BNot bnot_from_json(const json &);
+[[nodiscard]] EXPORT json bnot_to_json(const UnaryIntrinsicKind::BNot &);
+[[nodiscard]] EXPORT UnaryIntrinsicKind::Any any_from_json(const json &);
+[[nodiscard]] EXPORT json any_to_json(const UnaryIntrinsicKind::Any &);
+} // namespace UnaryIntrinsicKind
 namespace TypeKind { 
 [[nodiscard]] EXPORT TypeKind::Ref ref_from_json(const json &);
 [[nodiscard]] EXPORT json ref_to_json(const TypeKind::Ref &);
@@ -99,34 +85,6 @@ namespace TypeKind {
 [[nodiscard]] EXPORT TypeKind::Any any_from_json(const json &);
 [[nodiscard]] EXPORT json any_to_json(const TypeKind::Any &);
 } // namespace TypeKind
-namespace Type { 
-[[nodiscard]] EXPORT Type::Float float_from_json(const json &);
-[[nodiscard]] EXPORT json float_to_json(const Type::Float &);
-[[nodiscard]] EXPORT Type::Double double_from_json(const json &);
-[[nodiscard]] EXPORT json double_to_json(const Type::Double &);
-[[nodiscard]] EXPORT Type::Bool bool_from_json(const json &);
-[[nodiscard]] EXPORT json bool_to_json(const Type::Bool &);
-[[nodiscard]] EXPORT Type::Byte byte_from_json(const json &);
-[[nodiscard]] EXPORT json byte_to_json(const Type::Byte &);
-[[nodiscard]] EXPORT Type::Char char_from_json(const json &);
-[[nodiscard]] EXPORT json char_to_json(const Type::Char &);
-[[nodiscard]] EXPORT Type::Short short_from_json(const json &);
-[[nodiscard]] EXPORT json short_to_json(const Type::Short &);
-[[nodiscard]] EXPORT Type::Int int_from_json(const json &);
-[[nodiscard]] EXPORT json int_to_json(const Type::Int &);
-[[nodiscard]] EXPORT Type::Long long_from_json(const json &);
-[[nodiscard]] EXPORT json long_to_json(const Type::Long &);
-[[nodiscard]] EXPORT Type::String string_from_json(const json &);
-[[nodiscard]] EXPORT json string_to_json(const Type::String &);
-[[nodiscard]] EXPORT Type::Unit unit_from_json(const json &);
-[[nodiscard]] EXPORT json unit_to_json(const Type::Unit &);
-[[nodiscard]] EXPORT Type::Struct struct_from_json(const json &);
-[[nodiscard]] EXPORT json struct_to_json(const Type::Struct &);
-[[nodiscard]] EXPORT Type::Array array_from_json(const json &);
-[[nodiscard]] EXPORT json array_to_json(const Type::Array &);
-[[nodiscard]] EXPORT Type::Any any_from_json(const json &);
-[[nodiscard]] EXPORT json any_to_json(const Type::Any &);
-} // namespace Type
 namespace Term { 
 [[nodiscard]] EXPORT Term::Select select_from_json(const json &);
 [[nodiscard]] EXPORT json select_to_json(const Term::Select &);
@@ -165,6 +123,60 @@ namespace Term {
 [[nodiscard]] EXPORT json function_to_json(const Function &);
 [[nodiscard]] EXPORT Program program_from_json(const json &);
 [[nodiscard]] EXPORT json program_to_json(const Program &);
+namespace Type { 
+[[nodiscard]] EXPORT Type::Float float_from_json(const json &);
+[[nodiscard]] EXPORT json float_to_json(const Type::Float &);
+[[nodiscard]] EXPORT Type::Double double_from_json(const json &);
+[[nodiscard]] EXPORT json double_to_json(const Type::Double &);
+[[nodiscard]] EXPORT Type::Bool bool_from_json(const json &);
+[[nodiscard]] EXPORT json bool_to_json(const Type::Bool &);
+[[nodiscard]] EXPORT Type::Byte byte_from_json(const json &);
+[[nodiscard]] EXPORT json byte_to_json(const Type::Byte &);
+[[nodiscard]] EXPORT Type::Char char_from_json(const json &);
+[[nodiscard]] EXPORT json char_to_json(const Type::Char &);
+[[nodiscard]] EXPORT Type::Short short_from_json(const json &);
+[[nodiscard]] EXPORT json short_to_json(const Type::Short &);
+[[nodiscard]] EXPORT Type::Int int_from_json(const json &);
+[[nodiscard]] EXPORT json int_to_json(const Type::Int &);
+[[nodiscard]] EXPORT Type::Long long_from_json(const json &);
+[[nodiscard]] EXPORT json long_to_json(const Type::Long &);
+[[nodiscard]] EXPORT Type::String string_from_json(const json &);
+[[nodiscard]] EXPORT json string_to_json(const Type::String &);
+[[nodiscard]] EXPORT Type::Unit unit_from_json(const json &);
+[[nodiscard]] EXPORT json unit_to_json(const Type::Unit &);
+[[nodiscard]] EXPORT Type::Struct struct_from_json(const json &);
+[[nodiscard]] EXPORT json struct_to_json(const Type::Struct &);
+[[nodiscard]] EXPORT Type::Array array_from_json(const json &);
+[[nodiscard]] EXPORT json array_to_json(const Type::Array &);
+[[nodiscard]] EXPORT Type::Any any_from_json(const json &);
+[[nodiscard]] EXPORT json any_to_json(const Type::Any &);
+} // namespace Type
+namespace BinaryIntrinsicKind { 
+[[nodiscard]] EXPORT BinaryIntrinsicKind::Add add_from_json(const json &);
+[[nodiscard]] EXPORT json add_to_json(const BinaryIntrinsicKind::Add &);
+[[nodiscard]] EXPORT BinaryIntrinsicKind::Sub sub_from_json(const json &);
+[[nodiscard]] EXPORT json sub_to_json(const BinaryIntrinsicKind::Sub &);
+[[nodiscard]] EXPORT BinaryIntrinsicKind::Mul mul_from_json(const json &);
+[[nodiscard]] EXPORT json mul_to_json(const BinaryIntrinsicKind::Mul &);
+[[nodiscard]] EXPORT BinaryIntrinsicKind::Div div_from_json(const json &);
+[[nodiscard]] EXPORT json div_to_json(const BinaryIntrinsicKind::Div &);
+[[nodiscard]] EXPORT BinaryIntrinsicKind::Rem rem_from_json(const json &);
+[[nodiscard]] EXPORT json rem_to_json(const BinaryIntrinsicKind::Rem &);
+[[nodiscard]] EXPORT BinaryIntrinsicKind::Pow pow_from_json(const json &);
+[[nodiscard]] EXPORT json pow_to_json(const BinaryIntrinsicKind::Pow &);
+[[nodiscard]] EXPORT BinaryIntrinsicKind::BAnd band_from_json(const json &);
+[[nodiscard]] EXPORT json band_to_json(const BinaryIntrinsicKind::BAnd &);
+[[nodiscard]] EXPORT BinaryIntrinsicKind::BOr bor_from_json(const json &);
+[[nodiscard]] EXPORT json bor_to_json(const BinaryIntrinsicKind::BOr &);
+[[nodiscard]] EXPORT BinaryIntrinsicKind::BXor bxor_from_json(const json &);
+[[nodiscard]] EXPORT json bxor_to_json(const BinaryIntrinsicKind::BXor &);
+[[nodiscard]] EXPORT BinaryIntrinsicKind::BSL bsl_from_json(const json &);
+[[nodiscard]] EXPORT json bsl_to_json(const BinaryIntrinsicKind::BSL &);
+[[nodiscard]] EXPORT BinaryIntrinsicKind::BSR bsr_from_json(const json &);
+[[nodiscard]] EXPORT json bsr_to_json(const BinaryIntrinsicKind::BSR &);
+[[nodiscard]] EXPORT BinaryIntrinsicKind::Any any_from_json(const json &);
+[[nodiscard]] EXPORT json any_to_json(const BinaryIntrinsicKind::Any &);
+} // namespace BinaryIntrinsicKind
 [[nodiscard]] EXPORT json hashed_to_json(const json&);
 [[nodiscard]] EXPORT json hashed_from_json(const json&);
 } // namespace polyregion::polyast

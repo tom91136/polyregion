@@ -26,11 +26,11 @@ object IntrinsifyPass {
               y :: Nil
             ) =>
           val expr = op match {
-            case "+"  => p.Expr.Add(x, y, rtn)
-            case "-"  => p.Expr.Sub(x, y, rtn)
-            case "*"  => p.Expr.Mul(x, y, rtn)
-            case "/"  => p.Expr.Div(x, y, rtn)
-            case "%"  => p.Expr.Rem(x, y, rtn)
+            case "+"  => p.Expr.BinaryIntrinsic(x, y, p.BinaryIntrinsicKind.Add, rtn)
+            case "-"  => p.Expr.BinaryIntrinsic(x, y, p.BinaryIntrinsicKind.Sub, rtn)
+            case "*"  => p.Expr.BinaryIntrinsic(x, y, p.BinaryIntrinsicKind.Mul, rtn)
+            case "/"  => p.Expr.BinaryIntrinsic(x, y, p.BinaryIntrinsicKind.Div, rtn)
+            case "%"  => p.Expr.BinaryIntrinsic(x, y, p.BinaryIntrinsicKind.Rem, rtn)
             case "<"  => p.Expr.Lt(x, y)
             case "<=" => p.Expr.Lte(x, y)
             case ">"  => p.Expr.Gt(x, y)
@@ -63,10 +63,10 @@ object IntrinsifyPass {
           ???
         case ((Symbols.ScalaMath | Symbols.JavaMath) :+ op, x :: Nil) => // scala.math unary
           val expr = op match {
-            case "sin" => p.Expr.Sin(x, rtn)
-            case "cos" => p.Expr.Cos(x, rtn)
-            case "tan" => p.Expr.Tan(x, rtn)
-            case "abs" => p.Expr.Abs(x, rtn)
+            case "sin" => p.Expr.UnaryIntrinsic(x, p.UnaryIntrinsicKind.Sin, rtn)
+            case "cos" => p.Expr.UnaryIntrinsic(x, p.UnaryIntrinsicKind.Cos, rtn)
+            case "tan" => p.Expr.UnaryIntrinsic(x, p.UnaryIntrinsicKind.Tan, rtn)
+            case "abs" => p.Expr.UnaryIntrinsic(x, p.UnaryIntrinsicKind.Abs, rtn)
           }
           (expr, Nil)
         case (sym, args) =>

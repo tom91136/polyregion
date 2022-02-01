@@ -97,25 +97,33 @@ extension (e: p.Type) {
 
 extension (e: p.Expr) {
   def repr: String = e match {
-    case p.Expr.Sin(lhs, rtn) => s"sin(${lhs.repr})"
-    case p.Expr.Cos(lhs, rtn) => s"cos(${lhs.repr})"
-    case p.Expr.Tan(lhs, rtn) => s"tan(${lhs.repr})"
-    case p.Expr.Abs(lhs, rtn) => s"abs(${lhs.repr})"
+    case p.Expr.UnaryIntrinsic(lhs, kind, rtn) =>
+      val fn = kind match {
+        case p.UnaryIntrinsicKind.Sin  => "sin"
+        case p.UnaryIntrinsicKind.Cos  => "cos"
+        case p.UnaryIntrinsicKind.Tan  => "tan"
+        case p.UnaryIntrinsicKind.Abs  => "abs"
+        case p.UnaryIntrinsicKind.BNot => "~"
 
-    case p.Expr.Add(lhs, rhs, rtn) => s"${lhs.repr} + ${rhs.repr}"
-    case p.Expr.Sub(lhs, rhs, rtn) => s"${lhs.repr} - ${rhs.repr}"
-    case p.Expr.Mul(lhs, rhs, rtn) => s"${lhs.repr} * ${rhs.repr}"
-    case p.Expr.Div(lhs, rhs, rtn) => s"${lhs.repr} / ${rhs.repr}"
-    case p.Expr.Rem(lhs, rhs, rtn) => s"${lhs.repr} % ${rhs.repr}"
+      }
+      s"$fn(${lhs.repr})"
 
-    case p.Expr.Pow(lhs, rhs, rtn) => s"${lhs.repr} ** ${rhs.repr}"
+    case p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn) =>
+      val op = kind match {
+        case p.BinaryIntrinsicKind.Add  => s"+"
+        case p.BinaryIntrinsicKind.Sub  => s"-"
+        case p.BinaryIntrinsicKind.Mul  => s"*"
+        case p.BinaryIntrinsicKind.Div  => s"/"
+        case p.BinaryIntrinsicKind.Rem  => s"%"
+        case p.BinaryIntrinsicKind.Pow  => s"**"
+        case p.BinaryIntrinsicKind.BAnd => s"&"
+        case p.BinaryIntrinsicKind.BOr  => s"|"
+        case p.BinaryIntrinsicKind.BXor => s"^"
+        case p.BinaryIntrinsicKind.BSL  => s"<<"
+        case p.BinaryIntrinsicKind.BSR  => s">>"
+      }
 
-    case p.Expr.BNot(lhs, _)      => s"~${lhs.repr}"
-    case p.Expr.BAnd(lhs, rhs, _) => s"${lhs.repr} & ${rhs.repr}"
-    case p.Expr.BOr(lhs, rhs, _)  => s"${lhs.repr} | ${rhs.repr}"
-    case p.Expr.BXor(lhs, rhs, _) => s"${lhs.repr} ^ ${rhs.repr}"
-    case p.Expr.BSL(lhs, rhs, _)  => s"${lhs.repr} < <${rhs.repr}"
-    case p.Expr.BSR(lhs, rhs, _)  => s"${lhs.repr} > >${rhs.repr}"
+      s"${lhs.repr} ${op} ${rhs.repr}"
 
     case p.Expr.Not(lhs)      => s"!(${lhs.repr})"
     case p.Expr.Eq(lhs, rhs)  => s"${lhs.repr} == ${rhs.repr}"
@@ -164,6 +172,26 @@ extension (e: p.Stmt) {
 
   def mapExpr(f: p.Expr => (p.Expr, List[p.Stmt])): List[p.Stmt] = e.mapAccExpr[Unit](f(_) ++ Nil *: EmptyTuple)._1
 
+  def mapTerm(g: p.Term.Select => p.Term.Select, f: p.Term => p.Term): List[p.Stmt] =
+    e.mapExpr {
+      case p.Expr.UnaryIntrinsic(lhs, kind, rtn)       => (p.Expr.UnaryIntrinsic(f(lhs), kind, rtn), Nil)
+      case p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn) => (p.Expr.BinaryIntrinsic(f(lhs), f(rhs), kind, rtn), Nil)
+
+      case p.Expr.Not(lhs)      => (p.Expr.Not(f(lhs)), Nil)
+      case p.Expr.Eq(lhs, rhs)  => (p.Expr.Eq(f(lhs), f(rhs)), Nil)
+      case p.Expr.Neq(lhs, rhs) => (p.Expr.Neq(f(lhs), f(rhs)), Nil)
+      case p.Expr.And(lhs, rhs) => (p.Expr.And(f(lhs), f(rhs)), Nil)
+      case p.Expr.Or(lhs, rhs)  => (p.Expr.Or(f(lhs), f(rhs)), Nil)
+      case p.Expr.Lte(lhs, rhs) => (p.Expr.Lte(f(lhs), f(rhs)), Nil)
+      case p.Expr.Gte(lhs, rhs) => (p.Expr.Gte(f(lhs), f(rhs)), Nil)
+      case p.Expr.Lt(lhs, rhs)  => (p.Expr.Lt(f(lhs), f(rhs)), Nil)
+      case p.Expr.Gt(lhs, rhs)  => (p.Expr.Gt(f(lhs), f(rhs)), Nil)
+
+      case p.Expr.Alias(ref)                        => (p.Expr.Alias(f(ref)), Nil)
+      case p.Expr.Invoke(name, receiver, args, rtn) => (p.Expr.Invoke(name, receiver.map(f), args.map(f), rtn), Nil)
+      case p.Expr.Index(lhs, idx, component)        => (p.Expr.Index(g(lhs), f(idx), component), Nil)
+    }
+
   // def mapExpr(f: p.Expr => (p.Expr, List[p.Stmt])): List[p.Stmt] = e match {
   //   case x @ p.Stmt.Comment(_) => x :: Nil
   //   case p.Stmt.Var(name, rhs) =>
@@ -197,6 +225,8 @@ extension (e: p.Stmt) {
       (ss, (tass ::: fass).flatten ::: ass)
     case x @ p.Stmt.Return(_) => f(x)
   }
+
+  def acc[A](f: p.Stmt => List[A]): List[A] = e.mapAcc[A](x => (x :: Nil, f(x)))._2
 
   def map(f: p.Stmt => List[p.Stmt]): List[p.Stmt] = e.mapAcc[Unit](x => (f(x), Nil))._1
 

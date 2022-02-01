@@ -374,218 +374,222 @@ json Term::any_to_json(const Term::Any& x) {
   }, *x);
 }
 
-Expr::Sin Expr::sin_from_json(const json& j) { 
+BinaryIntrinsicKind::Add BinaryIntrinsicKind::add_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::add_to_json(const BinaryIntrinsicKind::Add& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::Sub BinaryIntrinsicKind::sub_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::sub_to_json(const BinaryIntrinsicKind::Sub& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::Mul BinaryIntrinsicKind::mul_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::mul_to_json(const BinaryIntrinsicKind::Mul& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::Div BinaryIntrinsicKind::div_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::div_to_json(const BinaryIntrinsicKind::Div& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::Rem BinaryIntrinsicKind::rem_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::rem_to_json(const BinaryIntrinsicKind::Rem& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::Pow BinaryIntrinsicKind::pow_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::pow_to_json(const BinaryIntrinsicKind::Pow& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::BAnd BinaryIntrinsicKind::band_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::band_to_json(const BinaryIntrinsicKind::BAnd& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::BOr BinaryIntrinsicKind::bor_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::bor_to_json(const BinaryIntrinsicKind::BOr& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::BXor BinaryIntrinsicKind::bxor_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::bxor_to_json(const BinaryIntrinsicKind::BXor& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::BSL BinaryIntrinsicKind::bsl_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::bsl_to_json(const BinaryIntrinsicKind::BSL& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::BSR BinaryIntrinsicKind::bsr_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::bsr_to_json(const BinaryIntrinsicKind::BSR& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::Any BinaryIntrinsicKind::any_from_json(const json& j) { 
+  size_t ord = j.at(0).get<size_t>();
+  const auto t = j.at(1);
+  switch (ord) {
+  case 0: return BinaryIntrinsicKind::add_from_json(t);
+  case 1: return BinaryIntrinsicKind::sub_from_json(t);
+  case 2: return BinaryIntrinsicKind::mul_from_json(t);
+  case 3: return BinaryIntrinsicKind::div_from_json(t);
+  case 4: return BinaryIntrinsicKind::rem_from_json(t);
+  case 5: return BinaryIntrinsicKind::pow_from_json(t);
+  case 6: return BinaryIntrinsicKind::band_from_json(t);
+  case 7: return BinaryIntrinsicKind::bor_from_json(t);
+  case 8: return BinaryIntrinsicKind::bxor_from_json(t);
+  case 9: return BinaryIntrinsicKind::bsl_from_json(t);
+  case 10: return BinaryIntrinsicKind::bsr_from_json(t);
+  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
+  }
+}
+
+json BinaryIntrinsicKind::any_to_json(const BinaryIntrinsicKind::Any& x) { 
+  return std::visit(overloaded{
+  [](const BinaryIntrinsicKind::Add &y) -> json { return {0, BinaryIntrinsicKind::add_to_json(y)}; },
+  [](const BinaryIntrinsicKind::Sub &y) -> json { return {1, BinaryIntrinsicKind::sub_to_json(y)}; },
+  [](const BinaryIntrinsicKind::Mul &y) -> json { return {2, BinaryIntrinsicKind::mul_to_json(y)}; },
+  [](const BinaryIntrinsicKind::Div &y) -> json { return {3, BinaryIntrinsicKind::div_to_json(y)}; },
+  [](const BinaryIntrinsicKind::Rem &y) -> json { return {4, BinaryIntrinsicKind::rem_to_json(y)}; },
+  [](const BinaryIntrinsicKind::Pow &y) -> json { return {5, BinaryIntrinsicKind::pow_to_json(y)}; },
+  [](const BinaryIntrinsicKind::BAnd &y) -> json { return {6, BinaryIntrinsicKind::band_to_json(y)}; },
+  [](const BinaryIntrinsicKind::BOr &y) -> json { return {7, BinaryIntrinsicKind::bor_to_json(y)}; },
+  [](const BinaryIntrinsicKind::BXor &y) -> json { return {8, BinaryIntrinsicKind::bxor_to_json(y)}; },
+  [](const BinaryIntrinsicKind::BSL &y) -> json { return {9, BinaryIntrinsicKind::bsl_to_json(y)}; },
+  [](const BinaryIntrinsicKind::BSR &y) -> json { return {10, BinaryIntrinsicKind::bsr_to_json(y)}; },
+  [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
+  }, *x);
+}
+
+UnaryIntrinsicKind::Sin UnaryIntrinsicKind::sin_from_json(const json& j) { 
+  return {};
+}
+
+json UnaryIntrinsicKind::sin_to_json(const UnaryIntrinsicKind::Sin& x) { 
+  return json::array({});
+}
+
+UnaryIntrinsicKind::Cos UnaryIntrinsicKind::cos_from_json(const json& j) { 
+  return {};
+}
+
+json UnaryIntrinsicKind::cos_to_json(const UnaryIntrinsicKind::Cos& x) { 
+  return json::array({});
+}
+
+UnaryIntrinsicKind::Tan UnaryIntrinsicKind::tan_from_json(const json& j) { 
+  return {};
+}
+
+json UnaryIntrinsicKind::tan_to_json(const UnaryIntrinsicKind::Tan& x) { 
+  return json::array({});
+}
+
+UnaryIntrinsicKind::Abs UnaryIntrinsicKind::abs_from_json(const json& j) { 
+  return {};
+}
+
+json UnaryIntrinsicKind::abs_to_json(const UnaryIntrinsicKind::Abs& x) { 
+  return json::array({});
+}
+
+UnaryIntrinsicKind::BNot UnaryIntrinsicKind::bnot_from_json(const json& j) { 
+  return {};
+}
+
+json UnaryIntrinsicKind::bnot_to_json(const UnaryIntrinsicKind::BNot& x) { 
+  return json::array({});
+}
+
+UnaryIntrinsicKind::Any UnaryIntrinsicKind::any_from_json(const json& j) { 
+  size_t ord = j.at(0).get<size_t>();
+  const auto t = j.at(1);
+  switch (ord) {
+  case 0: return UnaryIntrinsicKind::sin_from_json(t);
+  case 1: return UnaryIntrinsicKind::cos_from_json(t);
+  case 2: return UnaryIntrinsicKind::tan_from_json(t);
+  case 3: return UnaryIntrinsicKind::abs_from_json(t);
+  case 4: return UnaryIntrinsicKind::bnot_from_json(t);
+  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
+  }
+}
+
+json UnaryIntrinsicKind::any_to_json(const UnaryIntrinsicKind::Any& x) { 
+  return std::visit(overloaded{
+  [](const UnaryIntrinsicKind::Sin &y) -> json { return {0, UnaryIntrinsicKind::sin_to_json(y)}; },
+  [](const UnaryIntrinsicKind::Cos &y) -> json { return {1, UnaryIntrinsicKind::cos_to_json(y)}; },
+  [](const UnaryIntrinsicKind::Tan &y) -> json { return {2, UnaryIntrinsicKind::tan_to_json(y)}; },
+  [](const UnaryIntrinsicKind::Abs &y) -> json { return {3, UnaryIntrinsicKind::abs_to_json(y)}; },
+  [](const UnaryIntrinsicKind::BNot &y) -> json { return {4, UnaryIntrinsicKind::bnot_to_json(y)}; },
+  [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
+  }, *x);
+}
+
+Expr::UnaryIntrinsic Expr::unaryintrinsic_from_json(const json& j) { 
   auto lhs =  Term::any_from_json(j.at(0));
-  auto rtn =  Type::any_from_json(j.at(1));
-  return {lhs, rtn};
+  auto kind =  UnaryIntrinsicKind::any_from_json(j.at(1));
+  auto rtn =  Type::any_from_json(j.at(2));
+  return {lhs, kind, rtn};
 }
 
-json Expr::sin_to_json(const Expr::Sin& x) { 
+json Expr::unaryintrinsic_to_json(const Expr::UnaryIntrinsic& x) { 
   auto lhs =  Term::any_to_json(x.lhs);
+  auto kind =  UnaryIntrinsicKind::any_to_json(x.kind);
   auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({lhs, rtn});
+  return json::array({lhs, kind, rtn});
 }
 
-Expr::Cos Expr::cos_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto rtn =  Type::any_from_json(j.at(1));
-  return {lhs, rtn};
-}
-
-json Expr::cos_to_json(const Expr::Cos& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({lhs, rtn});
-}
-
-Expr::Tan Expr::tan_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto rtn =  Type::any_from_json(j.at(1));
-  return {lhs, rtn};
-}
-
-json Expr::tan_to_json(const Expr::Tan& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({lhs, rtn});
-}
-
-Expr::Abs Expr::abs_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto rtn =  Type::any_from_json(j.at(1));
-  return {lhs, rtn};
-}
-
-json Expr::abs_to_json(const Expr::Abs& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({lhs, rtn});
-}
-
-Expr::Add Expr::add_from_json(const json& j) { 
+Expr::BinaryIntrinsic Expr::binaryintrinsic_from_json(const json& j) { 
   auto lhs =  Term::any_from_json(j.at(0));
   auto rhs =  Term::any_from_json(j.at(1));
-  auto rtn =  Type::any_from_json(j.at(2));
-  return {lhs, rhs, rtn};
+  auto kind =  BinaryIntrinsicKind::any_from_json(j.at(2));
+  auto rtn =  Type::any_from_json(j.at(3));
+  return {lhs, rhs, kind, rtn};
 }
 
-json Expr::add_to_json(const Expr::Add& x) { 
+json Expr::binaryintrinsic_to_json(const Expr::BinaryIntrinsic& x) { 
   auto lhs =  Term::any_to_json(x.lhs);
   auto rhs =  Term::any_to_json(x.rhs);
+  auto kind =  BinaryIntrinsicKind::any_to_json(x.kind);
   auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({lhs, rhs, rtn});
-}
-
-Expr::Sub Expr::sub_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto rhs =  Term::any_from_json(j.at(1));
-  auto rtn =  Type::any_from_json(j.at(2));
-  return {lhs, rhs, rtn};
-}
-
-json Expr::sub_to_json(const Expr::Sub& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto rhs =  Term::any_to_json(x.rhs);
-  auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({lhs, rhs, rtn});
-}
-
-Expr::Mul Expr::mul_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto rhs =  Term::any_from_json(j.at(1));
-  auto rtn =  Type::any_from_json(j.at(2));
-  return {lhs, rhs, rtn};
-}
-
-json Expr::mul_to_json(const Expr::Mul& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto rhs =  Term::any_to_json(x.rhs);
-  auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({lhs, rhs, rtn});
-}
-
-Expr::Div Expr::div_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto rhs =  Term::any_from_json(j.at(1));
-  auto rtn =  Type::any_from_json(j.at(2));
-  return {lhs, rhs, rtn};
-}
-
-json Expr::div_to_json(const Expr::Div& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto rhs =  Term::any_to_json(x.rhs);
-  auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({lhs, rhs, rtn});
-}
-
-Expr::Rem Expr::rem_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto rhs =  Term::any_from_json(j.at(1));
-  auto rtn =  Type::any_from_json(j.at(2));
-  return {lhs, rhs, rtn};
-}
-
-json Expr::rem_to_json(const Expr::Rem& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto rhs =  Term::any_to_json(x.rhs);
-  auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({lhs, rhs, rtn});
-}
-
-Expr::Pow Expr::pow_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto rhs =  Term::any_from_json(j.at(1));
-  auto rtn =  Type::any_from_json(j.at(2));
-  return {lhs, rhs, rtn};
-}
-
-json Expr::pow_to_json(const Expr::Pow& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto rhs =  Term::any_to_json(x.rhs);
-  auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({lhs, rhs, rtn});
-}
-
-Expr::BNot Expr::bnot_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto rtn =  Type::any_from_json(j.at(1));
-  return {lhs, rtn};
-}
-
-json Expr::bnot_to_json(const Expr::BNot& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({lhs, rtn});
-}
-
-Expr::BAnd Expr::band_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto rhs =  Term::any_from_json(j.at(1));
-  auto rtn =  Type::any_from_json(j.at(2));
-  return {lhs, rhs, rtn};
-}
-
-json Expr::band_to_json(const Expr::BAnd& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto rhs =  Term::any_to_json(x.rhs);
-  auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({lhs, rhs, rtn});
-}
-
-Expr::BOr Expr::bor_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto rhs =  Term::any_from_json(j.at(1));
-  auto rtn =  Type::any_from_json(j.at(2));
-  return {lhs, rhs, rtn};
-}
-
-json Expr::bor_to_json(const Expr::BOr& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto rhs =  Term::any_to_json(x.rhs);
-  auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({lhs, rhs, rtn});
-}
-
-Expr::BXor Expr::bxor_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto rhs =  Term::any_from_json(j.at(1));
-  auto rtn =  Type::any_from_json(j.at(2));
-  return {lhs, rhs, rtn};
-}
-
-json Expr::bxor_to_json(const Expr::BXor& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto rhs =  Term::any_to_json(x.rhs);
-  auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({lhs, rhs, rtn});
-}
-
-Expr::BSL Expr::bsl_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto rhs =  Term::any_from_json(j.at(1));
-  auto rtn =  Type::any_from_json(j.at(2));
-  return {lhs, rhs, rtn};
-}
-
-json Expr::bsl_to_json(const Expr::BSL& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto rhs =  Term::any_to_json(x.rhs);
-  auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({lhs, rhs, rtn});
-}
-
-Expr::BSR Expr::bsr_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto rhs =  Term::any_from_json(j.at(1));
-  auto rtn =  Type::any_from_json(j.at(2));
-  return {lhs, rhs, rtn};
-}
-
-json Expr::bsr_to_json(const Expr::BSR& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto rhs =  Term::any_to_json(x.rhs);
-  auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({lhs, rhs, rtn});
+  return json::array({lhs, rhs, kind, rtn});
 }
 
 Expr::Not Expr::not_from_json(const json& j) { 
@@ -741,68 +745,40 @@ Expr::Any Expr::any_from_json(const json& j) {
   size_t ord = j.at(0).get<size_t>();
   const auto t = j.at(1);
   switch (ord) {
-  case 0: return Expr::sin_from_json(t);
-  case 1: return Expr::cos_from_json(t);
-  case 2: return Expr::tan_from_json(t);
-  case 3: return Expr::abs_from_json(t);
-  case 4: return Expr::add_from_json(t);
-  case 5: return Expr::sub_from_json(t);
-  case 6: return Expr::mul_from_json(t);
-  case 7: return Expr::div_from_json(t);
-  case 8: return Expr::rem_from_json(t);
-  case 9: return Expr::pow_from_json(t);
-  case 10: return Expr::bnot_from_json(t);
-  case 11: return Expr::band_from_json(t);
-  case 12: return Expr::bor_from_json(t);
-  case 13: return Expr::bxor_from_json(t);
-  case 14: return Expr::bsl_from_json(t);
-  case 15: return Expr::bsr_from_json(t);
-  case 16: return Expr::not_from_json(t);
-  case 17: return Expr::eq_from_json(t);
-  case 18: return Expr::neq_from_json(t);
-  case 19: return Expr::and_from_json(t);
-  case 20: return Expr::or_from_json(t);
-  case 21: return Expr::lte_from_json(t);
-  case 22: return Expr::gte_from_json(t);
-  case 23: return Expr::lt_from_json(t);
-  case 24: return Expr::gt_from_json(t);
-  case 25: return Expr::alias_from_json(t);
-  case 26: return Expr::invoke_from_json(t);
-  case 27: return Expr::index_from_json(t);
+  case 0: return Expr::unaryintrinsic_from_json(t);
+  case 1: return Expr::binaryintrinsic_from_json(t);
+  case 2: return Expr::not_from_json(t);
+  case 3: return Expr::eq_from_json(t);
+  case 4: return Expr::neq_from_json(t);
+  case 5: return Expr::and_from_json(t);
+  case 6: return Expr::or_from_json(t);
+  case 7: return Expr::lte_from_json(t);
+  case 8: return Expr::gte_from_json(t);
+  case 9: return Expr::lt_from_json(t);
+  case 10: return Expr::gt_from_json(t);
+  case 11: return Expr::alias_from_json(t);
+  case 12: return Expr::invoke_from_json(t);
+  case 13: return Expr::index_from_json(t);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
   }
 }
 
 json Expr::any_to_json(const Expr::Any& x) { 
   return std::visit(overloaded{
-  [](const Expr::Sin &y) -> json { return {0, Expr::sin_to_json(y)}; },
-  [](const Expr::Cos &y) -> json { return {1, Expr::cos_to_json(y)}; },
-  [](const Expr::Tan &y) -> json { return {2, Expr::tan_to_json(y)}; },
-  [](const Expr::Abs &y) -> json { return {3, Expr::abs_to_json(y)}; },
-  [](const Expr::Add &y) -> json { return {4, Expr::add_to_json(y)}; },
-  [](const Expr::Sub &y) -> json { return {5, Expr::sub_to_json(y)}; },
-  [](const Expr::Mul &y) -> json { return {6, Expr::mul_to_json(y)}; },
-  [](const Expr::Div &y) -> json { return {7, Expr::div_to_json(y)}; },
-  [](const Expr::Rem &y) -> json { return {8, Expr::rem_to_json(y)}; },
-  [](const Expr::Pow &y) -> json { return {9, Expr::pow_to_json(y)}; },
-  [](const Expr::BNot &y) -> json { return {10, Expr::bnot_to_json(y)}; },
-  [](const Expr::BAnd &y) -> json { return {11, Expr::band_to_json(y)}; },
-  [](const Expr::BOr &y) -> json { return {12, Expr::bor_to_json(y)}; },
-  [](const Expr::BXor &y) -> json { return {13, Expr::bxor_to_json(y)}; },
-  [](const Expr::BSL &y) -> json { return {14, Expr::bsl_to_json(y)}; },
-  [](const Expr::BSR &y) -> json { return {15, Expr::bsr_to_json(y)}; },
-  [](const Expr::Not &y) -> json { return {16, Expr::not_to_json(y)}; },
-  [](const Expr::Eq &y) -> json { return {17, Expr::eq_to_json(y)}; },
-  [](const Expr::Neq &y) -> json { return {18, Expr::neq_to_json(y)}; },
-  [](const Expr::And &y) -> json { return {19, Expr::and_to_json(y)}; },
-  [](const Expr::Or &y) -> json { return {20, Expr::or_to_json(y)}; },
-  [](const Expr::Lte &y) -> json { return {21, Expr::lte_to_json(y)}; },
-  [](const Expr::Gte &y) -> json { return {22, Expr::gte_to_json(y)}; },
-  [](const Expr::Lt &y) -> json { return {23, Expr::lt_to_json(y)}; },
-  [](const Expr::Gt &y) -> json { return {24, Expr::gt_to_json(y)}; },
-  [](const Expr::Alias &y) -> json { return {25, Expr::alias_to_json(y)}; },
-  [](const Expr::Invoke &y) -> json { return {26, Expr::invoke_to_json(y)}; },
-  [](const Expr::Index &y) -> json { return {27, Expr::index_to_json(y)}; },
+  [](const Expr::UnaryIntrinsic &y) -> json { return {0, Expr::unaryintrinsic_to_json(y)}; },
+  [](const Expr::BinaryIntrinsic &y) -> json { return {1, Expr::binaryintrinsic_to_json(y)}; },
+  [](const Expr::Not &y) -> json { return {2, Expr::not_to_json(y)}; },
+  [](const Expr::Eq &y) -> json { return {3, Expr::eq_to_json(y)}; },
+  [](const Expr::Neq &y) -> json { return {4, Expr::neq_to_json(y)}; },
+  [](const Expr::And &y) -> json { return {5, Expr::and_to_json(y)}; },
+  [](const Expr::Or &y) -> json { return {6, Expr::or_to_json(y)}; },
+  [](const Expr::Lte &y) -> json { return {7, Expr::lte_to_json(y)}; },
+  [](const Expr::Gte &y) -> json { return {8, Expr::gte_to_json(y)}; },
+  [](const Expr::Lt &y) -> json { return {9, Expr::lt_to_json(y)}; },
+  [](const Expr::Gt &y) -> json { return {10, Expr::gt_to_json(y)}; },
+  [](const Expr::Alias &y) -> json { return {11, Expr::alias_to_json(y)}; },
+  [](const Expr::Invoke &y) -> json { return {12, Expr::invoke_to_json(y)}; },
+  [](const Expr::Index &y) -> json { return {13, Expr::index_to_json(y)}; },
   [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
   }, *x);
 }
@@ -1007,13 +983,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "bb0b2e2f2fb4bb7062914687e0b76f6c") {
-   throw std::runtime_error("Expecting ADT hash to be bb0b2e2f2fb4bb7062914687e0b76f6c, but was " + hash);
+  if(hash != "3f15871511abb70d44a34656a6e5f4d1") {
+   throw std::runtime_error("Expecting ADT hash to be 3f15871511abb70d44a34656a6e5f4d1, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"bb0b2e2f2fb4bb7062914687e0b76f6c", x});
+  return json::array({"3f15871511abb70d44a34656a6e5f4d1", x});
 }
 } // namespace polyregion::polyast

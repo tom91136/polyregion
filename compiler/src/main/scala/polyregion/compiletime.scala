@@ -223,7 +223,7 @@ object compiletime {
     implicit val Q = compiler.Quoted(q)
 
     val result = for {
-      (captures, prog) <- compiler.Compiler.compile(x)
+      (captures, prog) <- compiler.Compiler.compileExpr(x)
       serialisedAst    <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, prog)))
       _ <- Either.catchNonFatal(
         Files.write(

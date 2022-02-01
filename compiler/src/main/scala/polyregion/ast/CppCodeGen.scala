@@ -35,6 +35,8 @@ object CppCodeGen {
     :: deriveStruct[Named]()
     :: deriveStruct[Position]()
     :: deriveStruct[Term]()
+    :: deriveStruct[BinaryIntrinsicKind]()
+    :: deriveStruct[UnaryIntrinsicKind]()
     :: deriveStruct[Expr]()
     :: deriveStruct[Stmt]()
     :: deriveStruct[StructDef]()

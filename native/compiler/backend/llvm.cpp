@@ -181,53 +181,79 @@ llvm::Value *LLVMAstTransformer::mkExpr(const Expr::Any &expr, llvm::Function *f
 
   return variants::total(
       *expr, //
+      [&](const Expr::UnaryIntrinsic &x) {
+        return variants::total(
+            *x.kind, //
+            [&](const UnaryIntrinsicKind::Sin &) -> llvm::Value * {
+              return unaryIntrinsic(llvm::Intrinsic::sin, x.rtn, x.lhs);
+            },
+            [&](const UnaryIntrinsicKind::Cos &) -> llvm::Value * {
+              return unaryIntrinsic(llvm::Intrinsic::cos, x.rtn, x.lhs);
+            },
+            [&](const UnaryIntrinsicKind::Tan &) -> llvm::Value * {
+              // XXX apparently there isn't a tan in LLVM so we just do an external call
+              return externUnaryCall("tan", x.rtn, x.lhs);
+            },
+            [&](const UnaryIntrinsicKind::Abs &) -> llvm::Value * {
+              return unaryIntrinsic(llvm::Intrinsic::abs, x.rtn, x.lhs);
+            },
+            [&](const UnaryIntrinsicKind::BNot &) -> llvm::Value * {
+              return undefined(__FILE_NAME__, __LINE__, "BNot");
+            });
+      },
+      [&](const Expr::BinaryIntrinsic &x) {
+        return variants::total(
+            *x.kind, //
+            [&](const BinaryIntrinsicKind::Add &) -> llvm::Value * {
+              return binaryNumOp(
+                  x.lhs, x.rhs, x.rtn, //
+                  [&](auto l, auto r) { return B.CreateAdd(l, r, key + "_+"); },
+                  [&](auto l, auto r) { return B.CreateFAdd(l, r, key + "_+"); });
+            },
+            [&](const BinaryIntrinsicKind::Sub &) -> llvm::Value * {
+              return binaryNumOp(
+                  x.lhs, x.rhs, x.rtn, //
+                  [&](auto l, auto r) { return B.CreateSub(l, r, key + "_-"); },
+                  [&](auto l, auto r) { return B.CreateFSub(l, r, key + "_-"); });
+            },
+            [&](const BinaryIntrinsicKind::Div &) -> llvm::Value * {
+              return binaryNumOp(
+                  x.lhs, x.rhs, x.rtn, //
+                  [&](auto l, auto r) { return B.CreateSDiv(l, r, key + "_*"); },
+                  [&](auto l, auto r) { return B.CreateFDiv(l, r, key + "_*"); });
+            },
+            [&](const BinaryIntrinsicKind::Mul &) -> llvm::Value * {
+              return binaryNumOp(
+                  x.lhs, x.rhs, x.rtn, //
+                  [&](auto l, auto r) { return B.CreateMul(l, r, key + "_/"); },
+                  [&](auto l, auto r) { return B.CreateFMul(l, r, key + "_/"); });
+            },
+            [&](const BinaryIntrinsicKind::Rem &) -> llvm::Value * {
+              return binaryNumOp(
+                  x.lhs, x.rhs, x.rtn, //
+                  [&](auto l, auto r) { return B.CreateSRem(l, r, key + "_%"); },
+                  [&](auto l, auto r) { return B.CreateFRem(l, r, key + "_%"); });
+            },
+            [&](const BinaryIntrinsicKind::Pow &) -> llvm::Value * {
+              return unaryIntrinsic(llvm::Intrinsic::pow, x.rtn, x.lhs);
+            },
 
-      [&](const Expr::Sin &x) -> llvm::Value * { return unaryIntrinsic(llvm::Intrinsic::sin, x.rtn, x.lhs); },
-      [&](const Expr::Cos &x) -> llvm::Value * { return unaryIntrinsic(llvm::Intrinsic::cos, x.rtn, x.lhs); },
-      [&](const Expr::Tan &x) -> llvm::Value * {
-        // XXX apparently there isn't a tan in LLVM so we just do an external call
-        return externUnaryCall("tan", x.rtn, x.lhs);
+            [&](const BinaryIntrinsicKind::BAnd &) -> llvm::Value * {
+              return undefined(__FILE_NAME__, __LINE__, "BAnd");
+            },
+            [&](const BinaryIntrinsicKind::BOr &) -> llvm::Value * {
+              return undefined(__FILE_NAME__, __LINE__, "BOr");
+            },
+            [&](const BinaryIntrinsicKind::BXor &) -> llvm::Value * {
+              return undefined(__FILE_NAME__, __LINE__, "BXor");
+            },
+            [&](const BinaryIntrinsicKind::BSL &) -> llvm::Value * {
+              return undefined(__FILE_NAME__, __LINE__, "BSL");
+            },
+            [&](const BinaryIntrinsicKind::BSR &) -> llvm::Value * {
+              return undefined(__FILE_NAME__, __LINE__, "BSR");
+            });
       },
-      [&](const Expr::Abs &x) -> llvm::Value * { return unaryIntrinsic(llvm::Intrinsic::abs, x.rtn, x.lhs); },
-
-      [&](const Expr::Add &x) -> llvm::Value * {
-        return binaryNumOp(
-            x.lhs, x.rhs, x.rtn, //
-            [&](auto l, auto r) { return B.CreateAdd(l, r, key + "_+"); },
-            [&](auto l, auto r) { return B.CreateFAdd(l, r, key + "_+"); });
-      },
-      [&](const Expr::Sub &x) -> llvm::Value * {
-        return binaryNumOp(
-            x.lhs, x.rhs, x.rtn, //
-            [&](auto l, auto r) { return B.CreateSub(l, r, key + "_-"); },
-            [&](auto l, auto r) { return B.CreateFSub(l, r, key + "_-"); });
-      },
-      [&](const Expr::Div &x) -> llvm::Value * {
-        return binaryNumOp(
-            x.lhs, x.rhs, x.rtn, //
-            [&](auto l, auto r) { return B.CreateSDiv(l, r, key + "_*"); },
-            [&](auto l, auto r) { return B.CreateFDiv(l, r, key + "_*"); });
-      },
-      [&](const Expr::Mul &x) -> llvm::Value * {
-        return binaryNumOp(
-            x.lhs, x.rhs, x.rtn, //
-            [&](auto l, auto r) { return B.CreateMul(l, r, key + "_/"); },
-            [&](auto l, auto r) { return B.CreateFMul(l, r, key + "_/"); });
-      },
-      [&](const Expr::Rem &x) -> llvm::Value * {
-        return binaryNumOp(
-            x.lhs, x.rhs, x.rtn, //
-            [&](auto l, auto r) { return B.CreateSRem(l, r, key + "_%"); },
-            [&](auto l, auto r) { return B.CreateFRem(l, r, key + "_%"); });
-      },
-      [&](const Expr::Pow &x) -> llvm::Value * { return unaryIntrinsic(llvm::Intrinsic::pow, x.rtn, x.lhs); },
-
-      [](const Expr::BNot &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "BNot"); },
-      [](const Expr::BAnd &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "BAnd"); },
-      [](const Expr::BOr &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "BOr"); },
-      [](const Expr::BXor &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "BXor"); },
-      [](const Expr::BSL &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "BSL"); },
-      [](const Expr::BSR &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "BSR"); },
 
       [&](const Expr::Not &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "Inv"); },
       [&](const Expr::Eq &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "Eq"); },
