@@ -1,16 +1,15 @@
-package polyregion.compiler
+package polyregion.compiler.pass
 
 import cats.data.EitherT
 import cats.syntax.all.*
 import polyregion.ast.PolyAst as p
-import polyregion.internal.*
+import polyregion.*
 
 import scala.annotation.tailrec
 import scala.quoted.*
+import polyregion.compiler.Symbols
 
-object TreeIntrinsifier {
-
-  import Retyper.*
+object IntrinsifyPass {
 
   def intrinsify(xs: List[p.Stmt]): List[p.Stmt] = for {
     x <- xs

@@ -2,7 +2,7 @@ package polyregion.compiler
 
 import cats.syntax.all.toTraverseOps
 import polyregion.ast.PolyAst as p
-import polyregion.internal.*
+import polyregion.*
 
 import scala.annotation.tailrec
 import scala.quoted.*

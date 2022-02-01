@@ -3,7 +3,7 @@ package polyregion.compiler
 import cats.data.EitherT
 import cats.syntax.all.*
 import polyregion.ast.PolyAst as p
-import polyregion.internal.*
+import polyregion.*
 
 import scala.annotation.tailrec
 import scala.quoted.*

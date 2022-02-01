@@ -1,8 +1,8 @@
 package polyregion.compiler
 
 import polyregion.Buffer
-import polyregion.ast. { PolyAst => p}
-import polyregion.internal.*
+import polyregion.ast.{PolyAst => p}
+import polyregion.*
 
 object Symbols {
   val JavaLang      = "java" :: "lang" :: Nil

@@ -61,7 +61,7 @@ object CppCodeGen {
 
     val jsonCodecHeader = NlohmannJsonCodec.emitHeader(namespace, jsonCodecSources)
     val jsonCodecImpl   = NlohmannJsonCodec.emitImpl(namespace, jsonCodecFileName, AdtHash, jsonCodecSources)
-    val target = Paths.get(".").resolve("native/compiler/generated/").normalize.toAbsolutePath
+    val target          = Paths.get(".").resolve("native/compiler/generated/").normalize.toAbsolutePath
     println(s"Generated Codec=${(jsonCodecHeader + jsonCodecImpl).count(_ == '\n')} lines")
 
     println(s"MD5=${AdtHash}")

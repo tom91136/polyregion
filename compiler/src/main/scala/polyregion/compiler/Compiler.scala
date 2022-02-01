@@ -2,12 +2,35 @@ package polyregion.compiler
 
 import cats.syntax.all.*
 import polyregion.ast.PolyAst as p
-import polyregion.internal.*
+import polyregion.*
 
 import java.nio.file.Paths
 import scala.quoted.Expr
 
 object Compiler {
+
+  import RefOutliner.*
+  import TreeMapper.*
+  import Retyper.*
+
+  import pass.IntrinsifyPass.*
+  import pass.FnInlinePass.*
+  import pass.UnitExprElisionPass.*
+
+  def compileFn(using q: Quoted)(f: q.DefDef): Result[p.Function] = (for {
+    (fnRtnValue, fnTpe, c) <- q.FnContext().typer(f.returnTpt.tpe)
+    args = f.paramss
+      .flatMap(_.params)
+      .collect { case d: q.ValDef => d }
+    // TODO handle default value (ValDef.rhs)
+    (namedArgs, c) <- args.foldMapM(a => c.typer(a.tpt.tpe).map((_, t, c) => (p.Named(a.name, t) :: Nil, c)))
+    (lastTerm, c)  <- fnRtnValue.fold(c.mapTerm(f.rhs.get))((_, c).success.deferred)
+  } yield p.Function(
+    p.Sym(f.symbol.fullName),
+    namedArgs,
+    fnTpe,
+    c.stmts :+ p.Stmt.Return(p.Expr.Alias(lastTerm))
+  )).resolve
 
   def compile(using q: Quoted)(x: Expr[Any]): Result[(List[(q.Ref, p.Type)], p.Program)] = {
 
@@ -19,12 +42,6 @@ object Compiler {
     println(Paths.get(".").toAbsolutePath)
     println(s" -> name:               ${closureName}")
     println(s" -> body(Quotes):\n${x.asTerm.toString.indent(4)}")
-
-    import RefOutliner.*
-    import Retyper.*
-    import TreeIntrinsifier.*
-    import TreeMapper.*
-    import TreeUnitExprEliminator.*
 
     for {
 
@@ -56,18 +73,8 @@ object Compiler {
       _ = println(s"DefDefs = ${c.defs.map(_.show).mkString("\n")}")
 
       auxFns <- c.defs.toList.traverse { f =>
-        for {
-          (_, fnTpe, c) <- c.typer(f.returnTpt.tpe)
-
-          args = f.paramss
-            .flatMap(_.params)
-            .collect { case d: q.ValDef => d }
-          // TODO handle default value (ValDef.rhs)
-          // FIXME extra stmts here
-          (namedArgs, c) <- args.foldMapM(a => c.typer(a.tpt.tpe).map((_, t, c) => (p.Named(a.name, t) :: Nil, c)))
-          (ref, c) <- c.mapTerm(f.rhs.get)
-        } yield p.Function(p.Sym(f.symbol.fullName), namedArgs, fnTpe, c.stmts)
-      }.resolve
+        compileFn(f)
+      }
 
       _ = println(s"AUX:\n==>${auxFns.map(_.repr).mkString("\n==>")}")
 

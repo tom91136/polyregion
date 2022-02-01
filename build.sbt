@@ -12,7 +12,7 @@ lazy val commonSettings = Seq(
       )
     )
   },
-  scalacOptions ++= Seq("-no-indent"),
+  scalacOptions ++= Seq("-no-indent", "-Wconf:cat=other-match-analysis:error"),
   scalafmtDetailedError := true,
   scalafmtFailOnErrors  := true
 )

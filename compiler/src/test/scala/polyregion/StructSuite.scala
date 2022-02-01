@@ -48,6 +48,13 @@ class StructSuite extends BaseSuite {
     )
   }
 
+  
+  // testExpr("return") {
+  //   assertOffload(
+  //     Array(Vec3(0.0, 1.0, 2.0))
+  //   )
+  // }
+
   // testExpr("return") {
   //   assertOffload(
   //     new Foo(1f)

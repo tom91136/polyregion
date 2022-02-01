@@ -5,7 +5,7 @@ import cats.data.EitherT
 import cats.syntax.all.*
 import polyregion.ast.{CppCodeGen, PolyAst}
 import polyregion.data.MsgPack
-import polyregion.internal.*
+import polyregion.*
 
 import java.lang.reflect.Modifier
 import java.nio.file.{Files, Paths, StandardOpenOption}
@@ -16,7 +16,9 @@ import scala.collection.immutable.ArraySeq
 import scala.concurrent.ExecutionContext
 import scala.quoted.*
 import scala.reflect.ClassTag
+import scala.annotation.compileTimeOnly
 
+@compileTimeOnly("This class only exists at compile-time to expose offload methods")
 object compiletime {
 
   inline def showExpr(inline x: Any): Any = ${ showExprImpl('x) }

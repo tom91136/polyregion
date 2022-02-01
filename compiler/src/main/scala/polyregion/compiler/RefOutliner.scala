@@ -2,7 +2,7 @@ package polyregion.compiler
 
 import scala.annotation.tailrec
 import cats.syntax.all.*
-import polyregion.internal.*
+import polyregion.*
 import Retyper.*
 
 object RefOutliner {
