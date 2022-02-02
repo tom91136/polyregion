@@ -69,7 +69,7 @@ llvm::Type *LLVMAstTransformer::mkTpe(const Type::Any &tpe) {                   
   );
 }
 
-llvm::Value *LLVMAstTransformer::mkSelect(const Term::Select &select) {
+llvm::Value *LLVMAstTransformer::mkSelect(const Term::Select &select, bool load  ) {
 
   auto fail = [&]() { return " (part of the select expression " + to_string(select) + ")"; };
 
@@ -126,7 +126,8 @@ llvm::Value *LLVMAstTransformer::mkSelect(const Term::Select &select) {
     }
 
     auto ptr = B.CreateInBoundsGEP(structTy, head, selectorValues, qualified(select) + "_ptr");
-    return B.CreateLoad(mkTpe(select.tpe), ptr, qualified(select) + "_value");
+    if(load) return B.CreateLoad(mkTpe(select.tpe), ptr, qualified(select) + "_value");
+    else return ptr;
   }
 }
 
@@ -296,6 +297,17 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
           } else {
             undefined(__FILE_NAME__, __LINE__, "var array with no expr?");
           }
+
+        } else if (std::holds_alternative<Type::Struct>(*x.name.tpe)) {
+          std::cout << "var to " <<  (x.expr ? repr(*x.expr) : "_") << std::endl;
+
+          if (x.expr) {
+            lut[x.name.symbol] = mkExpr(*x.expr, fn, x.name.symbol);
+          } else {
+            auto stack = B.CreateAlloca(mkTpe(x.name.tpe), nullptr, x.name.symbol + "_stack_ptr");
+            lut[x.name.symbol] = stack;
+          }
+
         } else {
           auto stack = B.CreateAlloca(mkTpe(x.name.tpe), nullptr, x.name.symbol + "_stack_ptr");
           if (x.expr) {
@@ -307,7 +319,8 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
       },
       [&](const Stmt::Mut &x) {
         auto expr = mkExpr(x.expr, fn, qualified(x.name) + "_mut");
-        auto select = lut[qualified(x.name)]; // XXX do NOT allocate (mkSelect) here, we're mutating!
+        auto select = mkSelect(x.name, false); // XXX do NOT allocate (mkSelect) here, we're mutating!
+        std::cout << "storing to " << select<< std::endl;
         B.CreateStore(expr, select);
       },
       [&](const Stmt::Update &x) {

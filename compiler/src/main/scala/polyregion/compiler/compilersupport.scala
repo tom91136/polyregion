@@ -172,8 +172,14 @@ extension (e: p.Stmt) {
 
   def mapExpr(f: p.Expr => (p.Expr, List[p.Stmt])): List[p.Stmt] = e.mapAccExpr[Unit](f(_) ++ Nil *: EmptyTuple)._1
 
-  def mapTerm(g: p.Term.Select => p.Term.Select, f: p.Term => p.Term): List[p.Stmt] =
-    e.mapExpr {
+  
+  def mapTerm(g: p.Term.Select => p.Term.Select, f: p.Term => p.Term): List[p.Stmt] = e
+    .map {
+      case p.Stmt.Mut(name, expr)         => p.Stmt.Mut(g(name), expr) :: Nil
+      case p.Stmt.Update(lhs, idx, value) => p.Stmt.Update(g(lhs), f(idx), f(value)) :: Nil
+      case x                              => x :: Nil
+    }
+    .flatMap(_.mapExpr {
       case p.Expr.UnaryIntrinsic(lhs, kind, rtn)       => (p.Expr.UnaryIntrinsic(f(lhs), kind, rtn), Nil)
       case p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn) => (p.Expr.BinaryIntrinsic(f(lhs), f(rhs), kind, rtn), Nil)
 
@@ -186,26 +192,15 @@ extension (e: p.Stmt) {
       case p.Expr.Gte(lhs, rhs) => (p.Expr.Gte(f(lhs), f(rhs)), Nil)
       case p.Expr.Lt(lhs, rhs)  => (p.Expr.Lt(f(lhs), f(rhs)), Nil)
       case p.Expr.Gt(lhs, rhs)  => (p.Expr.Gt(f(lhs), f(rhs)), Nil)
-
-      case p.Expr.Alias(ref)                        => (p.Expr.Alias(f(ref)), Nil)
+      case p.Expr.Alias(ref) =>
+        val h = ref match {
+          // case x @ p.Term.Select(_, _) => g(x)
+          case x                       => f(x)
+        }
+        (p.Expr.Alias(h), Nil)
       case p.Expr.Invoke(name, receiver, args, rtn) => (p.Expr.Invoke(name, receiver.map(f), args.map(f), rtn), Nil)
       case p.Expr.Index(lhs, idx, component)        => (p.Expr.Index(g(lhs), f(idx), component), Nil)
-    }
-
-  // def mapExpr(f: p.Expr => (p.Expr, List[p.Stmt])): List[p.Stmt] = e match {
-  //   case x @ p.Stmt.Comment(_) => x :: Nil
-  //   case p.Stmt.Var(name, rhs) =>
-  //     rhs.map(f).map((y, xs) => xs :+ p.Stmt.Var(name, Some(y))).getOrElse(p.Stmt.Var(name, None) :: Nil)
-  //   case p.Stmt.Mut(name, expr)     => val (y, xs) = f(expr); xs :+ p.Stmt.Mut(name, y)
-  //   case x @ p.Stmt.Update(_, _, _) => x :: Nil
-  //   case p.Stmt.While(cond, body)   => val (y, xs) = f(cond); xs :+ p.Stmt.While(y, body.flatMap(_.mapExpr(f)))
-  //   case x @ p.Stmt.Break           => x :: Nil
-  //   case x @ p.Stmt.Cont            => x :: Nil
-  //   case p.Stmt.Cond(cond, trueBr, falseBr) =>
-  //     val (y, xs) = f(cond)
-  //     xs :+ p.Stmt.Cond(y, trueBr.flatMap(_.mapExpr(f)), falseBr.flatMap(_.mapExpr(f)))
-  //   case p.Stmt.Return(expr) => val (y, xs) = f(expr); xs :+ p.Stmt.Return(y)
-  // }
+    })
 
   def mapAcc[A](f: p.Stmt => (List[p.Stmt], List[A])): (List[p.Stmt], List[A]) = e match {
     case x @ p.Stmt.Comment(_)      => f(x)
@@ -229,18 +224,6 @@ extension (e: p.Stmt) {
   def acc[A](f: p.Stmt => List[A]): List[A] = e.mapAcc[A](x => (x :: Nil, f(x)))._2
 
   def map(f: p.Stmt => List[p.Stmt]): List[p.Stmt] = e.mapAcc[Unit](x => (f(x), Nil))._1
-
-  // def map(f: p.Stmt => List[p.Stmt]): List[p.Stmt] = e match {
-  //   case x @ p.Stmt.Comment(_)              => f(x)
-  //   case x @ p.Stmt.Var(_, _)               => f(x)
-  //   case x @ p.Stmt.Mut(_, _)               => f(x)
-  //   case x @ p.Stmt.Update(_, _, _)         => f(x)
-  //   case p.Stmt.While(cond, body)           => f(p.Stmt.While(cond, body.flatMap(f)))
-  //   case x @ p.Stmt.Break                   => f(x)
-  //   case x @ p.Stmt.Cont                    => f(x)
-  //   case p.Stmt.Cond(cond, trueBr, falseBr) => f(p.Stmt.Cond(cond, trueBr.flatMap(f), falseBr.flatMap(f)))
-  //   case x @ p.Stmt.Return(_)               => f(x)
-  // }
 
   def repr: String = e match {
     case p.Stmt.Comment(value)          => s"// $value"

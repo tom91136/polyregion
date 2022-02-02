@@ -110,10 +110,17 @@ object TreeMapper {
           // * Symbol.companionClass gives the case class symbol if this is a module, otherwise Symbol.isNoSymbol
           // * Symbol.companionClass gives the module symbol if this is a case class, otherwise Symbol.isNoSymbol
           // * Symbol.companionModule on a module gives the val def of the singleton
-          name = c.named(tpe)
-          (expr, c) <-
+
+          mkReturn = (expr: p.Expr, c: q.FnContext) => {
+            val name = c.named(tpe)
+            (p.Term.Select(Nil, name), c ::= p.Stmt.Var(name, Some(expr)))
+          }
+
+          _ = println(s"->${ap.symbol.tree.show}")
+
+          (ref, c) <-
             if (receiverOwnerFlags.is(q.Flags.Module)) // Object.x(ys)
-              (p.Expr.Invoke(receiverSym, None, argRefs, tpe), c).success.deferred
+              mkReturn(p.Expr.Invoke(receiverSym, None, argRefs, tpe), c).success.deferred
             else
               ap.fun match {
                 case q.Select(q.New(tt), "<init>") => // new X
@@ -131,7 +138,7 @@ object TreeMapper {
                         structTpes = sdef.members.map(_.tpe)
                         argTpes    = argRefs.map(_.tpe)
 
-                        name = p.Named("new", tpe)
+                        name = p.Named(s"v${c.depth}_new", tpe)
                         expr = p.Stmt.Var(name, None)
 
                         _ <-
@@ -142,19 +149,16 @@ object TreeMapper {
                           p.Stmt.Mut(p.Term.Select(name :: Nil, member), p.Expr.Alias(value))
                         }
 
-                      } yield (p.Expr.Alias(p.Term.Select(Nil, name)), c.::=(expr +: setMemberExprs*))).deferred
-
+                      } yield ((p.Term.Select(Nil, name)), c.::=(expr +: setMemberExprs*))).deferred
                     case x => s"Found ctor signature, expecting def with no rhs but got: $x".fail.deferred
                   }
-
                 case s @ q.Select(q, n) => // s.y(zs)
                   (c !! s)
                     .mapTerm(q)
-                    .map((receiverRef, c) => (p.Expr.Invoke(receiverSym, Some(receiverRef), argRefs, tpe), c))
+                    .map((receiverRef, c) => mkReturn(p.Expr.Invoke(receiverSym, Some(receiverRef), argRefs, tpe), c))
                 case _ => ??? // (ctx.depth, None, Nil).success.deferred
               }
-          _ = println(s"->${ap.symbol.tree.show}")
-        } yield (p.Term.Select(Nil, name), c ::= p.Stmt.Var(name, Some(expr)))
+        } yield (ref, c)
       case q.Block(stat, expr) =>
         for {
           (_, c)   <- (c !! term).mapTrees(stat)

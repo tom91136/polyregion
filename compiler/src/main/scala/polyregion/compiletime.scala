@@ -234,6 +234,7 @@ object compiletime {
           StandardOpenOption.TRUNCATE_EXISTING
         )
       )
+      // _ <- Either.catchNonFatal(throw new RuntimeException("STOP"))
       c <- Either.catchNonFatal(PolyregionCompiler.compile(serialisedAst, true, PolyregionCompiler.BACKEND_LLVM))
     } yield {
 

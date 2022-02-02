@@ -102,7 +102,7 @@ std::string backend::OpenCL::mkStmt(const Stmt::Any &stmt) {
             mkTpe(x.name.tpe) + " " + x.name.symbol + (x.expr ? (" = " + mkExpr(*x.expr, x.name.symbol)) : "") + ";";
         return line;
       },
-      [&](const Stmt::Mut &x) { return x.name.last.symbol + " = " + mkExpr(x.expr, "?") + ";"; },
+      [&](const Stmt::Mut &x) { return polyast::qualified(x.name) + " = " + mkExpr(x.expr, "?") + ";"; },
       [&](const Stmt::Update &x) {
         auto idx = mkRef(x.idx);
         auto val = mkRef(x.value);

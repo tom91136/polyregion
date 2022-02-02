@@ -28,7 +28,7 @@ private:
   std::unordered_map<Sym, std::pair<llvm::StructType *, StructMemberTable>> structTypes;
   llvm::IRBuilder<> B;
 
-  llvm::Value *mkSelect(const Term::Select &s);
+  llvm::Value *mkSelect(const Term::Select &s, bool load = true);
   llvm::Value *mkRef(const Term::Any &ref);
   llvm::Value *mkExpr(const Expr::Any &expr, llvm::Function *fn, const std::string &key);
   void mkStmt(const Stmt::Any &stmt, llvm::Function *fn);

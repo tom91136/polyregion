@@ -85,7 +85,8 @@ object Compiler {
 
       allFns = closureFn :: fns
 
-      elided = FnInlinePass.inlineAll(FnAllocElisionPass.transform(allFns))
+      elided = FnInlinePass.inlineAll ( (allFns))
+      // elided = allFns
 
       passes = intrinsify >>> eliminateUnitExpr
 

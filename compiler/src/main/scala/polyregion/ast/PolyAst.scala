@@ -39,7 +39,6 @@ object PolyAst {
     case Unit                                        extends Type(TypeKind.Ref)
     case Struct(name: Sym)                           extends Type(TypeKind.Ref)
     case Array(component: Type, length: Option[Int]) extends Type(TypeKind.Ref)
-
   }
 
   case class Named(symbol: String, tpe: Type) derives MsgPack.Codec
@@ -73,11 +72,9 @@ object PolyAst {
 
   enum Expr(val tpe: Type) derives MsgPack.Codec {
 
-    // unary  
     case UnaryIntrinsic(lhs: Term, kind : UnaryIntrinsicKind, rtn: Type) extends Expr(rtn)
     case BinaryIntrinsic(lhs: Term, rhs: Term, kind : BinaryIntrinsicKind, rtn: Type) extends Expr(rtn)  
 
-    // logical
     case Not(lhs: Term)            extends Expr(Type.Bool)
     case Eq(lhs: Term, rhs: Term)  extends Expr(Type.Bool)
     case Neq(lhs: Term, rhs: Term) extends Expr(Type.Bool)
