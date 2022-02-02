@@ -12,6 +12,16 @@ class Quoted(val q: Quotes) {
 
   case class Reference(value: String | p.Term, tpe: p.Type)
 
+  case class FnDependencies(
+      clss: Map[p.Sym, p.StructDef] = Map.empty, // external class defs
+      defs: Set[DefDef] = Set.empty              // external def defs
+  )
+
+  given Monoid[FnDependencies] = Monoid.instance(
+    FnDependencies(),                                            //
+    (x, y) => FnDependencies(x.clss ++ y.clss, x.defs ++ y.defs) //
+  )
+
   case class FnContext(
       depth: Int = 0,                  // ref depth
       traces: List[Tree] = List.empty, // debug
@@ -32,6 +42,8 @@ class Quoted(val q: Quotes) {
     def mark(d: DefDef)                      = copy(defs = defs + d)
     infix def ::=(xs: p.Stmt*)               = copy(stmts = stmts ++ xs)
     infix def replaceStmts(xs: Seq[p.Stmt])  = copy(stmts = xs.toList)
+
+    def deps = FnDependencies(clss, defs)
 
   }
 

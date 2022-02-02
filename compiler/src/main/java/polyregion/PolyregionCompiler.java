@@ -11,7 +11,7 @@ public class PolyregionCompiler {
 
   public static native Compilation compile(byte[] function, boolean emitAssembly, short backend);
 
-  public static native Layout layoutOf(byte[] structDef, boolean pack);
+  public static native Layout layoutOf(byte[] structDef);
 
   private static AtomicBoolean loaded = new AtomicBoolean();
 

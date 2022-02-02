@@ -20,10 +20,10 @@ JNIEXPORT jobject JNICALL Java_polyregion_PolyregionCompiler_compile
 /*
  * Class:      polyregion_PolyregionCompiler
  * Method:     layoutOf
- * Signature:  ([BZ)Lpolyregion/Layout;
+ * Signature:  ([B)Lpolyregion/Layout;
  */
 JNIEXPORT jobject JNICALL Java_polyregion_PolyregionCompiler_layoutOf
-  (JNIEnv *, jclass, jbyteArray, jboolean);
+  (JNIEnv *, jclass, jbyteArray);
 
 #ifdef __cplusplus
 }

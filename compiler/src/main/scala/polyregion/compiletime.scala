@@ -51,7 +51,7 @@ object compiletime {
     compiler.Retyper.lowerProductType[A].resolve match {
       case Left(e) => throw e
       case Right(sdef) =>
-        val layout = PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, sdef)), false)
+        val layout = PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, sdef)))
         println(s"layout=${layout}")
 
         val tpeSym = TypeTree.of[A].symbol
@@ -223,7 +223,7 @@ object compiletime {
     implicit val Q = compiler.Quoted(q)
 
     val result = for {
-      (captures, prog) <- compiler.Compiler.compileExpr(x)
+      (allocs, captures, prog) <- compiler.Compiler.compileExpr(x)
       serialisedAst    <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, prog)))
       _ <- Either.catchNonFatal(
         Files.write(
@@ -235,6 +235,10 @@ object compiletime {
         )
       )
       // _ <- Either.catchNonFatal(throw new RuntimeException("STOP"))
+
+      layout <- Either.catchNonFatal(PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, prog.defs))))
+        _= println(s"layout=${layout}")
+
       c <- Either.catchNonFatal(PolyregionCompiler.compile(serialisedAst, true, PolyregionCompiler.BACKEND_LLVM))
     } yield {
 
@@ -284,6 +288,30 @@ object compiletime {
           case PolyAst.Type.Unit => '{ ().asInstanceOf[A] }
           case _                 => '{ $buffer(0).asInstanceOf[A] }
         }
+
+
+        val defLut = prog.defs.map(d => d.name -> d).toMap
+      val allocExprs = allocs.map{tpe => 
+        tpe match {
+           case PolyAst.Type.Unit   => '{ Buffer.empty[Int] }
+        case PolyAst.Type.Float  => '{ Buffer.ref[Float] }
+        case PolyAst.Type.Double => '{ Buffer.ref[Double] }
+        case PolyAst.Type.Bool   => '{ Buffer.ref[Boolean] }
+        case PolyAst.Type.Byte   => '{ Buffer.ref[Byte] }
+        case PolyAst.Type.Char   => '{ Buffer.ref[Char] }
+        case PolyAst.Type.Short  => '{ Buffer.ref[Short] }
+        case PolyAst.Type.Int    => '{ Buffer.ref[Int] }
+        case PolyAst.Type.Long   => '{ Buffer.ref[Long] }
+
+          case PolyAst.Type.Struct(sym) =>   ???
+
+          case unknown =>
+          println(s"allocExprs ??? = $unknown ")
+          ???
+        }
+        
+
+        }  
 
       val captureExprs = captures.map { (ident, tpe) =>
         val expr = ident.asExpr

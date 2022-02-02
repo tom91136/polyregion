@@ -77,7 +77,7 @@ static json deserialiseAst(const compiler::Bytes &astBytes) {
   }
 }
 
-compiler::Layout compiler::layoutOf(const polyast::StructDef &def, bool packed) {
+compiler::Layout compiler::layoutOf(const polyast::StructDef &def) {
 
   llvm::LLVMContext c;
   backend::LLVMAstTransformer xform(c);
@@ -93,13 +93,13 @@ compiler::Layout compiler::layoutOf(const polyast::StructDef &def, bool packed) 
     );
   }
 
-  return {structLayout->getSizeInBytes(), structLayout->getAlignment().value(), out};
+  return {def.name, structLayout->getSizeInBytes(), structLayout->getAlignment().value(), out};
 }
 
-compiler::Layout compiler::layoutOf(const Bytes &structDef, bool packed) {
+compiler::Layout compiler::layoutOf(const Bytes &structDef) {
   json json = deserialiseAst(structDef);
   auto def = polyast::structdef_from_json(json);
-  return layoutOf(def, packed);
+  return layoutOf(def);
 }
 
 compiler::Compilation compiler::compile(const polyast::Program &program) {

@@ -25,18 +25,18 @@ class StructSuite extends BaseSuite {
     test(name)(r)
   }
 
-  testExpr("buffer-param") {
-    val xs = Buffer.tabulate(10)(x =>
-      Vec3(
-        x * math.Pi.toFloat * 1, //
-        x * math.Pi.toFloat * 2, //
-        x * math.Pi.toFloat * 3  //
-      )
-    )
-    assertOffload {
-      xs(0).a + xs(0).b + xs(0).c
-    }
-  }
+  // testExpr("buffer-param") {
+  //   val xs = Buffer.tabulate(10)(x =>
+  //     Vec3(
+  //       x * math.Pi.toFloat * 1, //
+  //       x * math.Pi.toFloat * 2, //
+  //       x * math.Pi.toFloat * 3  //
+  //     )
+  //   )
+  //   assertOffload {
+  //     xs(0).a + xs(0).b + xs(0).c
+  //   }
+  // }
 
   // class Foo(i : Int) {
   //     def this(f : Float) = this(1)

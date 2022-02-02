@@ -30,11 +30,10 @@ static T transformByteArray(JNIEnv *env, jbyteArray data,
 
 }
 
-JNIEXPORT jobject JNICALL Java_polyregion_PolyregionCompiler_layoutOf(JNIEnv *env, jclass thisCls, jbyteArray structDef,
-                                                                      jboolean packed) {
+JNIEXPORT jobject JNICALL Java_polyregion_PolyregionCompiler_layoutOf(JNIEnv *env, jclass thisCls, jbyteArray structDef) {
 
   auto l = transformByteArray<polyregion::compiler::Layout>(
-      env, structDef, [&](auto &&xs) { return polyregion::compiler::layoutOf(xs, packed); });
+      env, structDef, [&](auto &&xs) { return polyregion::compiler::layoutOf(xs); });
 
   auto layoutCls = env->FindClass("polyregion/Layout");
   auto layout = newNoArgObject(env, layoutCls);

@@ -99,8 +99,8 @@ object TreeMapper {
         for {
           (_, tpe, c)  <- c.typer(ap.tpe)
           (argRefs, c) <- c.down(ap).mapTerms(ap.args)
-          c <- ap.fun.symbol.tree match {
-            case d: q.DefDef => c.mark(d).success.deferred
+          defdef <- ap.fun.symbol.tree match {
+            case d: q.DefDef => d.success.deferred
             case bad         => s"Unexpected ap symbol ${bad.show}".fail.deferred
           }
 
@@ -120,7 +120,7 @@ object TreeMapper {
 
           (ref, c) <-
             if (receiverOwnerFlags.is(q.Flags.Module)) // Object.x(ys)
-              mkReturn(p.Expr.Invoke(receiverSym, None, argRefs, tpe), c).success.deferred
+              mkReturn(p.Expr.Invoke(receiverSym, None, argRefs, tpe), c.mark(defdef)).success.deferred
             else
               ap.fun match {
                 case q.Select(q.New(tt), "<init>") => // new X
@@ -153,7 +153,7 @@ object TreeMapper {
                     case x => s"Found ctor signature, expecting def with no rhs but got: $x".fail.deferred
                   }
                 case s @ q.Select(q, n) => // s.y(zs)
-                  (c !! s)
+                  (c !! s).mark(defdef)
                     .mapTerm(q)
                     .map((receiverRef, c) => mkReturn(p.Expr.Invoke(receiverSym, Some(receiverRef), argRefs, tpe), c))
                 case _ => ??? // (ctx.depth, None, Nil).success.deferred

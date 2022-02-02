@@ -36,6 +36,7 @@ private:
 public:
   std::pair<llvm::StructType *, StructMemberTable> mkStruct(const StructDef &def);
   llvm::Type *mkTpe(const Type::Any &tpe);
+  std::optional<llvm::StructType *> lookup(const Sym &s);
 
   explicit LLVMAstTransformer(llvm::LLVMContext &c) : C(c), lut(), structTypes(), B(C) {}
   void transform(const std::unique_ptr<llvm::Module> &module, const Program &);

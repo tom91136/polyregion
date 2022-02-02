@@ -69,7 +69,7 @@ llvm::Type *LLVMAstTransformer::mkTpe(const Type::Any &tpe) {                   
   );
 }
 
-llvm::Value *LLVMAstTransformer::mkSelect(const Term::Select &select, bool load  ) {
+llvm::Value *LLVMAstTransformer::mkSelect(const Term::Select &select, bool load) {
 
   auto fail = [&]() { return " (part of the select expression " + to_string(select) + ")"; };
 
@@ -126,8 +126,9 @@ llvm::Value *LLVMAstTransformer::mkSelect(const Term::Select &select, bool load 
     }
 
     auto ptr = B.CreateInBoundsGEP(structTy, head, selectorValues, qualified(select) + "_ptr");
-    if(load) return B.CreateLoad(mkTpe(select.tpe), ptr, qualified(select) + "_value");
-    else return ptr;
+    if (load) return B.CreateLoad(mkTpe(select.tpe), ptr, qualified(select) + "_value");
+    else
+      return ptr;
   }
 }
 
@@ -299,7 +300,7 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
           }
 
         } else if (std::holds_alternative<Type::Struct>(*x.name.tpe)) {
-          std::cout << "var to " <<  (x.expr ? repr(*x.expr) : "_") << std::endl;
+          std::cout << "var to " << (x.expr ? repr(*x.expr) : "_") << std::endl;
 
           if (x.expr) {
             lut[x.name.symbol] = mkExpr(*x.expr, fn, x.name.symbol);
@@ -320,7 +321,7 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
       [&](const Stmt::Mut &x) {
         auto expr = mkExpr(x.expr, fn, qualified(x.name) + "_mut");
         auto select = mkSelect(x.name, false); // XXX do NOT allocate (mkSelect) here, we're mutating!
-        std::cout << "storing to " << select<< std::endl;
+        std::cout << "storing to " << select << std::endl;
         B.CreateStore(expr, select);
       },
       [&](const Stmt::Update &x) {
@@ -431,6 +432,11 @@ void LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> &module, 
   llvm::verifyModule(*module, &llvm::errs());
   module->print(llvm::errs(), nullptr);
 }
+std::optional<llvm::StructType *> LLVMAstTransformer::lookup(const Sym &s) {
+  if (auto x = get_opt(structTypes, s); x) return x->first;
+  else
+    return {};
+}
 
 backend::LLVM::LLVM() = default; // cache(), jit(mkJit(cache)) {}
 
@@ -448,6 +454,17 @@ compiler::Compilation backend::LLVM::run(const Program &program) {
   auto elapsed = compiler::elapsedNs(astXform);
 
   auto c = llvmc::compileModule(true, std::move(mod), *ctx);
+
+  // at this point we know the target machine, so we derive the struct layout here
+  for (auto def : program.defs) {
+    auto x = xform.lookup(def.name);
+    if (!x) {
+      throw std::logic_error("Missing struct def:" + repr(def));
+    } else {
+      // FIXME this needs to use the same LLVM target machine context as the compiler
+      c.layouts.emplace_back(compiler::layoutOf(def));
+    }
+  }
 
   c.events.emplace_back(compiler::nowMs(), "ast_to_llvm_ir", elapsed);
 

@@ -3,6 +3,7 @@ package polyregion;
 import java.util.Arrays;
 
 public final class Layout {
+  public String[] name;
   public long sizeInBytes;
   public long alignment;
   public Member[] members;
@@ -10,7 +11,9 @@ public final class Layout {
   @Override
   public String toString() {
     return "Layout{"
-        + "size="
+        + "name=" 
+        + Arrays.toString(members)
+        + ", size="
         + sizeInBytes
         + ", alignment="
         + alignment

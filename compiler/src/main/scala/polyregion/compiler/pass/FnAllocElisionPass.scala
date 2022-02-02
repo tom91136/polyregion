@@ -8,10 +8,19 @@ import polyregion.*
 import scala.annotation.tailrec
 import scala.quoted.*
 import scala.collection.immutable.VectorMap
+import cats.Foldable
 
 object FnAllocElisionPass {
 
-  def transform(xs: List[p.Function]): List[p.Function] = {
+  @tailrec def doUntilNotEq[A](x: A)(f: A => A): A = {
+    val y = f(x)
+    if (y == x) y
+    else doUntilNotEq(y)(f)
+  }
+
+  def transform(xs: List[p.Function]): List[p.Function] = doUntilNotEq(xs)(rewriteOnce(_))
+
+  private def rewriteOnce(fs: List[p.Function]) = {
 
     // def fn(...): S {
     //   var x: S = ...
@@ -23,18 +32,19 @@ object FnAllocElisionPass {
     //   (x.a: S.x) := ...
     //   return x
     // }
-    //
 
     // rewrite all functions where the body allocate a struct
-    val functions = xs.map { f =>
-      // delete vars
-      val (stmts, allocNames) = f.body.foldMap(_.mapAcc[p.Named] {
-        case p.Stmt.Var(n @ p.Named(_, tpe), None) if tpe.kind == p.TypeKind.Ref && tpe != p.Type.Unit =>
-          (Nil, n :: Nil)
-        case x => (x :: Nil, Nil)
-      })
-      f.name -> (allocNames, f.copy(rtn = p.Type.Unit, body = stmts, args = allocNames ::: f.args))
-    }.to(VectorMap)
+    val functions = fs
+      .map { f =>
+        // delete vars
+        val (stmts, allocNames) = f.body.foldMap(_.mapAcc[p.Named] {
+          case p.Stmt.Var(n @ p.Named(_, tpe), None) if tpe.kind == p.TypeKind.Ref && tpe != p.Type.Unit =>
+            (Nil, n :: Nil)
+          case x => (x :: Nil, Nil)
+        })
+        f.name -> (allocNames, f.copy(rtn = p.Type.Unit, body = stmts, args = allocNames ::: f.args))
+      }
+      .to(VectorMap)
 
     // rewrite all call sites for all functions
     functions.values.map { (_, f) =>
@@ -52,4 +62,5 @@ object FnAllocElisionPass {
       })
     }.toList
   }
+
 }

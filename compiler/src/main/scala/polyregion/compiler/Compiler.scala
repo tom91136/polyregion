@@ -6,8 +6,8 @@ import polyregion.*
 
 import java.nio.file.Paths
 import scala.quoted.Expr
-import polyregion.compiler.pass.FnAllocElisionPass
-import polyregion.compiler.pass.FnInlinePass
+
+import polyregion.compiler.pass.*
 
 object Compiler {
 
@@ -15,26 +15,31 @@ object Compiler {
   import TreeMapper.*
   import Retyper.*
 
-  import pass.IntrinsifyPass.*
-  import pass.FnInlinePass.*
-  import pass.UnitExprElisionPass.*
+  private val LocalOptPasses = //
+    IntrinsifyPass.intrinsify >>>
+      UnitExprElisionPass.eliminateUnitExpr
 
-  def compileFn(using q: Quoted)(f: q.DefDef): Result[(q.FnContext, p.Function)] = (for {
+  private val GlobalOptPasses = //
+    FnInlinePass.inlineAll >>>
+      FnAllocElisionPass.transform
+
+  def compileFn(using q: Quoted)(f: q.DefDef): Result[(q.FnDependencies, p.Function)] = (for {
     (fnRtnValue, fnTpe, c) <- q.FnContext().typer(f.returnTpt.tpe)
+    _ = println(s" -> Compile dependent method: ${f.show}")
     args = f.paramss
       .flatMap(_.params)
       .collect { case d: q.ValDef => d }
     // TODO handle default value (ValDef.rhs)
     (namedArgs, c) <- args.foldMapM(a => c.typer(a.tpt.tpe).map((_, t, c) => (p.Named(a.name, t) :: Nil, c)))
     (lastTerm, c)  <- fnRtnValue.fold(c.mapTerm(f.rhs.get))((_, c).success.deferred)
-  } yield c -> p.Function(
+  } yield c.deps -> p.Function(
     p.Sym(f.symbol.fullName),
     namedArgs,
     fnTpe,
-    c.stmts :+ p.Stmt.Return(p.Expr.Alias(lastTerm))
+    LocalOptPasses(c.stmts :+ p.Stmt.Return(p.Expr.Alias(lastTerm)))
   )).resolve
 
-  def compileExpr(using q: Quoted)(x: Expr[Any]): Result[(List[(q.Ref, p.Type)], p.Program)] = {
+  def compileClosure(using q: Quoted)(x: Expr[Any]): Result[(q.FnDependencies, List[(q.Ref, p.Type)], p.Function)] = {
 
     val term        = x.asTerm
     val pos         = term.pos
@@ -46,9 +51,7 @@ object Compiler {
     println(s" -> body(Quotes):\n${x.asTerm.toString.indent(4)}")
 
     for {
-
       (typedExternalRefs, c) <- outline(term)
-
       capturedNames = typedExternalRefs
         .collect {
           case (r, q.Reference(name: String, tpe)) if tpe != p.Type.Unit =>
@@ -69,42 +72,53 @@ object Compiler {
 
       (_, fnTpe, c) <- c.typer(term.tpe).resolve
 
-      args      = capturedNames.map(_._2)
-      fnReturn  = p.Stmt.Return(p.Expr.Alias(returnTerm))
-      closureFn = p.Function(p.Sym(closureName :: Nil), args.toList, fnTpe, c.stmts :+ fnReturn)
-
       _ <-
         if (fnTpe != returnTerm.tpe) {
           s"lambda tpe ($fnTpe) != last term tpe (${returnTerm.tpe}), term was $returnTerm".fail
         } else ().success
 
-      dependentFns <- c.defs.toList.traverse { f =>
-        compileFn(f)
-      }
-      (ctxs, fns) = dependentFns.unzip
+      (captures, names) = capturedNames.toList.map((r, n) => (r -> n.tpe, n)).unzip
+      closureFn = p.Function(
+        p.Sym(closureName :: Nil),
+        names,
+        fnTpe,
+        LocalOptPasses(c.stmts :+ p.Stmt.Return(p.Expr.Alias(returnTerm)))
+      )
+    } yield (c.deps, captures, closureFn)
+  }
+
+  def compileExpr(using q: Quoted)(x: Expr[Any]): Result[
+    (
+        List[p.Type],
+        List[(q.Ref, p.Type)],
+        p.Program
+    )
+  ] =
+    for {
+
+      (deps, closureArgs, closureFn) <- compileClosure(x)
+
+      (deps, fns) <- (deps, List.empty[p.Function]).iterateWhileM { case (deps, fs) =>
+        deps.defs.toList.traverse(compileFn(_)).map(xs => xs.unzip.bimap(_.combineAll, _ ++ fs))
+      }(_._1.defs.nonEmpty)
 
       allFns = closureFn :: fns
 
-      elided = FnInlinePass.inlineAll ( (allFns))
-      // elided = allFns
+      optimised = GlobalOptPasses(allFns)
 
-      passes = intrinsify >>> eliminateUnitExpr
+      _       = println(s"PolyAST:\n==>${optimised.map(_.repr).mkString("\n==>")}")
+      clsDefs = deps.clss.values.toList
+      _       = println(s"ClsDefs = ${clsDefs}")
 
-      optimised = elided.map(f => f.copy(body = passes(f.body)))
-
-      _ = println(s"PolyAST:\n==>${optimised.map(_.repr).mkString("\n==>")}")
-
-      clsDefs = c.clss.values.toList
-
-      _ = println(s"ClsDefs = ${clsDefs}")
-      // _ = println(s"DefDefs = ${c.defs.map(_.show).mkString("\n")}")
-
-      captures = capturedNames.map((r, n) => r -> n.tpe)
+      allocArgs = optimised.head.args.lastIndexOfSlice(closureFn.args) match {
+        case -1 => ???
+        case n  => optimised.head.args.take(n).map(_.tpe)
+      }
 
     } yield (
-      captures.toList,
+      allocArgs,
+      closureArgs,
       p.Program(optimised.head, optimised.tail, clsDefs)
     )
-  }
 
 }

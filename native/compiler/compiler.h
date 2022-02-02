@@ -22,6 +22,26 @@ using TimePoint = std::chrono::steady_clock::time_point;
 
 enum class EXPORT Backend : uint8_t { Invalid = 0, LLVM, OpenCL, CUDA };
 
+struct EXPORT Member {
+  polyast::Named name;
+  uint64_t offsetInBytes;
+  uint64_t sizeInBytes;
+  Member(decltype(name) name, decltype(offsetInBytes) offsetInBytes, decltype(sizeInBytes) sizeInBytes)
+      : name(std::move(name)), offsetInBytes(offsetInBytes), sizeInBytes(sizeInBytes) {}
+  friend std::ostream &operator<<(std::ostream &, const Member &);
+};
+
+struct EXPORT Layout {
+  polyast::Sym name;
+  uint64_t sizeInBytes;
+  uint64_t alignment;
+  std::vector<Member> members;
+  Layout(decltype(name) name, decltype(sizeInBytes) sizeInBytes, decltype(alignment) alignment,
+         decltype(members) members)
+      : name(std::move(name)), sizeInBytes(sizeInBytes), alignment(alignment), members(std::move(members)) {}
+  friend std::ostream &operator<<(std::ostream &, const Layout &);
+};
+
 struct EXPORT Event {
   int64_t epochMillis;
   std::string name;
@@ -33,6 +53,7 @@ struct EXPORT Event {
 using Bytes = std::vector<uint8_t>;
 
 struct EXPORT Compilation {
+  std::vector<Layout> layouts;
   std::optional<Bytes> binary;
   std::optional<std::string> disassembly;
   std::vector<Event> events;
@@ -50,26 +71,8 @@ struct EXPORT Compilation {
 
 EXPORT void initialise();
 
-struct EXPORT Member {
-  polyast::Named name;
-  uint64_t offsetInBytes;
-  uint64_t sizeInBytes;
-  Member(decltype(name) name, decltype(offsetInBytes) offsetInBytes, decltype(sizeInBytes) sizeInBytes)
-      : name(std::move(name)), offsetInBytes(offsetInBytes), sizeInBytes(sizeInBytes) {}
-  friend std::ostream &operator<<(std::ostream &, const Member &);
-};
-
-struct EXPORT Layout {
-  uint64_t sizeInBytes;
-  uint64_t alignment;
-  std::vector<Member> members;
-  Layout(decltype(sizeInBytes) sizeInBytes, decltype(alignment) alignment, decltype(members) members)
-      : sizeInBytes(sizeInBytes), alignment(alignment), members(std::move(members)) {}
-  friend std::ostream &operator<<(std::ostream &, const Layout &);
-};
-
-EXPORT Layout layoutOf(const polyast::StructDef &, bool packed);
-EXPORT Layout layoutOf(const Bytes &, bool packed);
+EXPORT Layout layoutOf(const polyast::StructDef &);
+EXPORT Layout layoutOf(const Bytes &);
 
 EXPORT Compilation compile(const polyast::Program &);
 EXPORT Compilation compile(const Bytes &);
