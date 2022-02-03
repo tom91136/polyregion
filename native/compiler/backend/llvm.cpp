@@ -150,7 +150,7 @@ llvm::Value *LLVMAstTransformer::mkRef(const Term::Any &ref) {
       [&](const Term::StringConst &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); });
 }
 
-llvm::Value *LLVMAstTransformer::mkExpr(const Expr::Any &expr, llvm::Function *fn, const std::string &key) {
+llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Function *fn, const std::string &key) {
 
   const auto binaryExpr = [&](const Term::Any &l, const Term::Any &r) { return std::make_tuple(mkRef(l), mkRef(r)); };
 
@@ -294,7 +294,7 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
       [&](const Stmt::Var &x) {
         if (std::holds_alternative<Type::Array>(*x.name.tpe)) {
           if (x.expr) {
-            lut[x.name.symbol] = mkExpr(*x.expr, fn, x.name.symbol);
+            lut[x.name.symbol] = mkExprValue(*x.expr, fn, x.name.symbol);
           } else {
             undefined(__FILE_NAME__, __LINE__, "var array with no expr?");
           }
@@ -303,7 +303,7 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
           std::cout << "var to " << (x.expr ? repr(*x.expr) : "_") << std::endl;
 
           if (x.expr) {
-            lut[x.name.symbol] = mkExpr(*x.expr, fn, x.name.symbol);
+            lut[x.name.symbol] = mkExprValue(*x.expr, fn, x.name.symbol);
           } else {
             auto stack = B.CreateAlloca(mkTpe(x.name.tpe), nullptr, x.name.symbol + "_stack_ptr");
             lut[x.name.symbol] = stack;
@@ -312,28 +312,38 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
         } else {
           auto stack = B.CreateAlloca(mkTpe(x.name.tpe), nullptr, x.name.symbol + "_stack_ptr");
           if (x.expr) {
-            auto val = mkExpr(*x.expr, fn, x.name.symbol + "_var_rhs");
+            auto val = mkExprValue(*x.expr, fn, x.name.symbol + "_var_rhs");
             B.CreateStore(val, stack);
           }
           lut[x.name.symbol] = stack;
         }
       },
       [&](const Stmt::Mut &x) {
-        auto expr = mkExpr(x.expr, fn, qualified(x.name) + "_mut");
-        auto select = mkSelect(x.name, false); // XXX do NOT allocate (mkSelect) here, we're mutating!
-        std::cout << "storing to " << select << std::endl;
+        auto exprValue = mkExprValue(x.expr, fn, qualified(x.name) + "_mut"); // value
+        //  XXX do NOT allocate (mkSelect) here, we're mutating!
+        auto selectPtr = mkSelect(x.name, false);  // ptr
 
-        if(x.copy){
+        // selectPtr := exprValue
 
+        std::cout << "storing to " << selectPtr << std::endl;
+
+        if (x.copy) {
           // http://nondot.org/sabre/LLVMNotes/SizeOf-OffsetOf-VariableSizedStructs.txt
           // we want
           // %Size = getelementptr %T* null, i32 1
           // %SizeI = ptrtoint %T* %Size to i32
-          auto sizeP = B.CreateGEP(expr->getType(), llvm::ConstantPointerNull::get(expr->getType()->getPointerTo()) , {});
+          auto sizeP = B.CreateGEP(  llvm::ConstantPointerNull::get(selectPtr->getType()->getPointerTo()), {}, "sizeP");
           auto size = B.CreatePtrToInt(sizeP, llvm::Type::getInt32Ty(C));
-          B.CreateMemCpyInline(select,{} , expr,{},size);
-        }else{
-          B.CreateStore(expr, select);
+
+          // expr is a value, see if we want to deref it
+          // TODO mkExprValue needs to return a pair w/ ptr if exists
+
+          //
+          B.CreateMemCpyInline(selectPtr, {}, exprValue, {}, size);
+          //          B.CreateStore(exprValue, selectPtr);
+
+        } else {
+          B.CreateStore(exprValue, selectPtr);
         }
       },
       [&](const Stmt::Update &x) {
@@ -348,7 +358,7 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
         B.CreateBr(loopTest);
         {
           B.SetInsertPoint(loopTest);
-          auto continue_ = mkExpr(x.cond, fn, "loop");
+          auto continue_ = mkExprValue(x.cond, fn, "loop");
           B.CreateCondBr(continue_, loopBody, loopExit);
         }
         {
@@ -365,7 +375,7 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
         auto condTrue = llvm::BasicBlock::Create(C, "cond_true", fn);
         auto condFalse = llvm::BasicBlock::Create(C, "cond_false", fn);
         auto condExit = llvm::BasicBlock::Create(C, "cond_exit", fn);
-        B.CreateCondBr(mkExpr(x.cond, fn, "cond"), condTrue, condFalse);
+        B.CreateCondBr(mkExprValue(x.cond, fn, "cond"), condTrue, condFalse);
         {
           B.SetInsertPoint(condTrue);
           for (auto &body : x.trueBr)
@@ -384,7 +394,7 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
         if (std::holds_alternative<Type::Unit>(*tpe(x.value))) {
           B.CreateRetVoid();
         } else {
-          B.CreateRet(mkExpr(x.value, fn, "return"));
+          B.CreateRet(mkExprValue(x.value, fn, "return"));
         }
       } //
 
@@ -409,6 +419,7 @@ void LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> &module, 
       *kind(fnTree.rtn),                                                                       //
       [&](const TypeKind::Fractional &) -> llvm::Type * { return mkTpe(fnTree.rtn); },         //
       [&](const TypeKind::Integral &) -> llvm::Type * { return mkTpe(fnTree.rtn); },           //
+      [&](const TypeKind::None &) -> llvm::Type * { return mkTpe(fnTree.rtn); },               //
       [&](const TypeKind::Ref &) -> llvm::Type * { return mkTpe(fnTree.rtn)->getPointerTo(); } //
   );
 

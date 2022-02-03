@@ -76,6 +76,8 @@ namespace UnaryIntrinsicKind {
 [[nodiscard]] EXPORT json any_to_json(const UnaryIntrinsicKind::Any &);
 } // namespace UnaryIntrinsicKind
 namespace TypeKind { 
+[[nodiscard]] EXPORT TypeKind::None none_from_json(const json &);
+[[nodiscard]] EXPORT json none_to_json(const TypeKind::None &);
 [[nodiscard]] EXPORT TypeKind::Ref ref_from_json(const json &);
 [[nodiscard]] EXPORT json ref_to_json(const TypeKind::Ref &);
 [[nodiscard]] EXPORT TypeKind::Integral integral_from_json(const json &);
@@ -140,10 +142,10 @@ namespace Type {
 [[nodiscard]] EXPORT json int_to_json(const Type::Int &);
 [[nodiscard]] EXPORT Type::Long long_from_json(const json &);
 [[nodiscard]] EXPORT json long_to_json(const Type::Long &);
-[[nodiscard]] EXPORT Type::String string_from_json(const json &);
-[[nodiscard]] EXPORT json string_to_json(const Type::String &);
 [[nodiscard]] EXPORT Type::Unit unit_from_json(const json &);
 [[nodiscard]] EXPORT json unit_to_json(const Type::Unit &);
+[[nodiscard]] EXPORT Type::String string_from_json(const json &);
+[[nodiscard]] EXPORT json string_to_json(const Type::String &);
 [[nodiscard]] EXPORT Type::Struct struct_from_json(const json &);
 [[nodiscard]] EXPORT json struct_to_json(const Type::Struct &);
 [[nodiscard]] EXPORT Type::Array array_from_json(const json &);

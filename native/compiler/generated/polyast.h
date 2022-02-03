@@ -61,15 +61,23 @@ struct EXPORT Sym {
 
 namespace TypeKind { 
 
+struct None;
 struct Ref;
 struct Integral;
 struct Fractional;
-using Any = Alternative<Ref, Integral, Fractional>;
+using Any = Alternative<None, Ref, Integral, Fractional>;
 struct EXPORT Base {
   protected:
   Base() = default;
   EXPORT friend std::ostream &operator<<(std::ostream &os, const TypeKind::Any &);
   EXPORT friend bool operator==(const TypeKind::Base &, const TypeKind::Base &);
+};
+
+struct EXPORT None : TypeKind::Base {
+  None() noexcept : TypeKind::Base() {}
+  EXPORT operator Any() const { return std::make_shared<None>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const TypeKind::None &);
+  EXPORT friend bool operator==(const TypeKind::None &, const TypeKind::None &);
 };
 
 struct EXPORT Ref : TypeKind::Base {
@@ -103,11 +111,11 @@ struct Char;
 struct Short;
 struct Int;
 struct Long;
-struct String;
 struct Unit;
+struct String;
 struct Struct;
 struct Array;
-using Any = Alternative<Float, Double, Bool, Byte, Char, Short, Int, Long, String, Unit, Struct, Array>;
+using Any = Alternative<Float, Double, Bool, Byte, Char, Short, Int, Long, Unit, String, Struct, Array>;
 struct EXPORT Base {
   TypeKind::Any kind;
   protected:
@@ -173,18 +181,18 @@ struct EXPORT Long : Type::Base {
   EXPORT friend bool operator==(const Type::Long &, const Type::Long &);
 };
 
+struct EXPORT Unit : Type::Base {
+  Unit() noexcept : Type::Base(TypeKind::None()) {}
+  EXPORT operator Any() const { return std::make_shared<Unit>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Unit &);
+  EXPORT friend bool operator==(const Type::Unit &, const Type::Unit &);
+};
+
 struct EXPORT String : Type::Base {
   String() noexcept : Type::Base(TypeKind::Ref()) {}
   EXPORT operator Any() const { return std::make_shared<String>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::String &);
   EXPORT friend bool operator==(const Type::String &, const Type::String &);
-};
-
-struct EXPORT Unit : Type::Base {
-  Unit() noexcept : Type::Base(TypeKind::Ref()) {}
-  EXPORT operator Any() const { return std::make_shared<Unit>(*this); };
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Unit &);
-  EXPORT friend bool operator==(const Type::Unit &, const Type::Unit &);
 };
 
 struct EXPORT Struct : Type::Base {
@@ -784,6 +792,9 @@ template <> struct std::hash<polyregion::polyast::Sym> {
 template <> struct std::hash<polyregion::polyast::TypeKind::Base> {
   std::size_t operator()(const polyregion::polyast::TypeKind::Base &) const noexcept;
 };
+template <> struct std::hash<polyregion::polyast::TypeKind::None> {
+  std::size_t operator()(const polyregion::polyast::TypeKind::None &) const noexcept;
+};
 template <> struct std::hash<polyregion::polyast::TypeKind::Ref> {
   std::size_t operator()(const polyregion::polyast::TypeKind::Ref &) const noexcept;
 };
@@ -820,11 +831,11 @@ template <> struct std::hash<polyregion::polyast::Type::Int> {
 template <> struct std::hash<polyregion::polyast::Type::Long> {
   std::size_t operator()(const polyregion::polyast::Type::Long &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Type::String> {
-  std::size_t operator()(const polyregion::polyast::Type::String &) const noexcept;
-};
 template <> struct std::hash<polyregion::polyast::Type::Unit> {
   std::size_t operator()(const polyregion::polyast::Type::Unit &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Type::String> {
+  std::size_t operator()(const polyregion::polyast::Type::String &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Type::Struct> {
   std::size_t operator()(const polyregion::polyast::Type::Struct &) const noexcept;

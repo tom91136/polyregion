@@ -15,6 +15,14 @@ json sym_to_json(const Sym& x) {
   return json::array({fqn});
 }
 
+TypeKind::None TypeKind::none_from_json(const json& j) { 
+  return {};
+}
+
+json TypeKind::none_to_json(const TypeKind::None& x) { 
+  return json::array({});
+}
+
 TypeKind::Ref TypeKind::ref_from_json(const json& j) { 
   return {};
 }
@@ -43,18 +51,20 @@ TypeKind::Any TypeKind::any_from_json(const json& j) {
   size_t ord = j.at(0).get<size_t>();
   const auto t = j.at(1);
   switch (ord) {
-  case 0: return TypeKind::ref_from_json(t);
-  case 1: return TypeKind::integral_from_json(t);
-  case 2: return TypeKind::fractional_from_json(t);
+  case 0: return TypeKind::none_from_json(t);
+  case 1: return TypeKind::ref_from_json(t);
+  case 2: return TypeKind::integral_from_json(t);
+  case 3: return TypeKind::fractional_from_json(t);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
   }
 }
 
 json TypeKind::any_to_json(const TypeKind::Any& x) { 
   return std::visit(overloaded{
-  [](const TypeKind::Ref &y) -> json { return {0, TypeKind::ref_to_json(y)}; },
-  [](const TypeKind::Integral &y) -> json { return {1, TypeKind::integral_to_json(y)}; },
-  [](const TypeKind::Fractional &y) -> json { return {2, TypeKind::fractional_to_json(y)}; },
+  [](const TypeKind::None &y) -> json { return {0, TypeKind::none_to_json(y)}; },
+  [](const TypeKind::Ref &y) -> json { return {1, TypeKind::ref_to_json(y)}; },
+  [](const TypeKind::Integral &y) -> json { return {2, TypeKind::integral_to_json(y)}; },
+  [](const TypeKind::Fractional &y) -> json { return {3, TypeKind::fractional_to_json(y)}; },
   [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
   }, *x);
 }
@@ -123,19 +133,19 @@ json Type::long_to_json(const Type::Long& x) {
   return json::array({});
 }
 
-Type::String Type::string_from_json(const json& j) { 
-  return {};
-}
-
-json Type::string_to_json(const Type::String& x) { 
-  return json::array({});
-}
-
 Type::Unit Type::unit_from_json(const json& j) { 
   return {};
 }
 
 json Type::unit_to_json(const Type::Unit& x) { 
+  return json::array({});
+}
+
+Type::String Type::string_from_json(const json& j) { 
+  return {};
+}
+
+json Type::string_to_json(const Type::String& x) { 
   return json::array({});
 }
 
@@ -173,8 +183,8 @@ Type::Any Type::any_from_json(const json& j) {
   case 5: return Type::short_from_json(t);
   case 6: return Type::int_from_json(t);
   case 7: return Type::long_from_json(t);
-  case 8: return Type::string_from_json(t);
-  case 9: return Type::unit_from_json(t);
+  case 8: return Type::unit_from_json(t);
+  case 9: return Type::string_from_json(t);
   case 10: return Type::struct_from_json(t);
   case 11: return Type::array_from_json(t);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
@@ -191,8 +201,8 @@ json Type::any_to_json(const Type::Any& x) {
   [](const Type::Short &y) -> json { return {5, Type::short_to_json(y)}; },
   [](const Type::Int &y) -> json { return {6, Type::int_to_json(y)}; },
   [](const Type::Long &y) -> json { return {7, Type::long_to_json(y)}; },
-  [](const Type::String &y) -> json { return {8, Type::string_to_json(y)}; },
-  [](const Type::Unit &y) -> json { return {9, Type::unit_to_json(y)}; },
+  [](const Type::Unit &y) -> json { return {8, Type::unit_to_json(y)}; },
+  [](const Type::String &y) -> json { return {9, Type::string_to_json(y)}; },
   [](const Type::Struct &y) -> json { return {10, Type::struct_to_json(y)}; },
   [](const Type::Array &y) -> json { return {11, Type::array_to_json(y)}; },
   [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
@@ -985,13 +995,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "d4e8ee905545827c24cda5bc0f1280f2") {
-   throw std::runtime_error("Expecting ADT hash to be d4e8ee905545827c24cda5bc0f1280f2, but was " + hash);
+  if(hash != "7c7116d2e3ab0dafa43b6f07fa7b74a9") {
+   throw std::runtime_error("Expecting ADT hash to be 7c7116d2e3ab0dafa43b6f07fa7b74a9, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"d4e8ee905545827c24cda5bc0f1280f2", x});
+  return json::array({"7c7116d2e3ab0dafa43b6f07fa7b74a9", x});
 }
 } // namespace polyregion::polyast

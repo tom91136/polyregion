@@ -37,7 +37,7 @@ object FnPtrReturnToOutParamPass {
     val functions =
       fs.map { f =>
         val rewritten =
-          if (f.rtn.kind != p.TypeKind.Ref || f.rtn == p.Type.Unit) (None, f)
+          if (f.rtn.kind != p.TypeKind.Ref) (None, f)
           else {
             val outParam = p.Named("return_out", f.rtn)
             val stmts = f.body.foldMap(_.map {

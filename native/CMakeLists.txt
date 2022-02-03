@@ -198,11 +198,7 @@ set(COMMON_COMPILE_OPTIONS
 
 if (DEBUG)
     # --exclude-libs=ALL kills -fsanitize=*
-    set(COMMON_LINKER_OPTIONS
-            LINKER:--gc-sections      # remove unused sections
-            LINKER:-s                 # strip symbols not used for DSO
-            LINKER:-O3                # O3 for linker means optimise for space
-            )
+    # keep sections for debug!
     set(COMMON_COMPILE_OPTIONS ${COMMON_COMPILE_OPTIONS})
 else ()
     set(COMMON_LINKER_OPTIONS

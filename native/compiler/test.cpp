@@ -80,7 +80,7 @@ TEST_CASE("struct alloc", "[compiler]") {
       {
           Stmt::Var(Named("x", Type::Struct(sdef)), {}),
           Stmt::Mut(Term::Select({Named("x", Type::Struct(sdef))}, Named("x", Type::Int())),
-                    Expr::Alias(Term::IntConst(42))),
+                    Expr::Alias(Term::IntConst(42)), true),
           Stmt::Var(Named("y", Type::Struct(sdef)), {Expr::Alias(Term::Select({}, Named("x", Type::Struct(sdef))))}),
           Stmt::Return(Expr::Alias(Term::UnitConst())),
       });

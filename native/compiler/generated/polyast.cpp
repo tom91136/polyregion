@@ -23,6 +23,13 @@ std::ostream &TypeKind::operator<<(std::ostream &os, const TypeKind::Any &x) {
 }
 bool TypeKind::operator==(const TypeKind::Base &, const TypeKind::Base &) { return true; }
 
+std::ostream &TypeKind::operator<<(std::ostream &os, const TypeKind::None &x) {
+  os << "None(";
+  os << ')';
+  return os;
+}
+bool TypeKind::operator==(const TypeKind::None &, const TypeKind::None &) { return true; }
+
 std::ostream &TypeKind::operator<<(std::ostream &os, const TypeKind::Ref &x) {
   os << "Ref(";
   os << ')';
@@ -109,19 +116,19 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Long &x) {
 }
 bool Type::operator==(const Type::Long &, const Type::Long &) { return true; }
 
-std::ostream &Type::operator<<(std::ostream &os, const Type::String &x) {
-  os << "String(";
-  os << ')';
-  return os;
-}
-bool Type::operator==(const Type::String &, const Type::String &) { return true; }
-
 std::ostream &Type::operator<<(std::ostream &os, const Type::Unit &x) {
   os << "Unit(";
   os << ')';
   return os;
 }
 bool Type::operator==(const Type::Unit &, const Type::Unit &) { return true; }
+
+std::ostream &Type::operator<<(std::ostream &os, const Type::String &x) {
+  os << "String(";
+  os << ')';
+  return os;
+}
+bool Type::operator==(const Type::String &, const Type::String &) { return true; }
 
 std::ostream &Type::operator<<(std::ostream &os, const Type::Struct &x) {
   os << "Struct(";
@@ -819,6 +826,10 @@ std::size_t std::hash<polyregion::polyast::TypeKind::Base>::operator()(const pol
   std::size_t seed = std::hash<std::string>()("polyregion::polyast::TypeKind::Base");
   return seed;
 }
+std::size_t std::hash<polyregion::polyast::TypeKind::None>::operator()(const polyregion::polyast::TypeKind::None &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::TypeKind::None");
+  return seed;
+}
 std::size_t std::hash<polyregion::polyast::TypeKind::Ref>::operator()(const polyregion::polyast::TypeKind::Ref &x) const noexcept {
   std::size_t seed = std::hash<std::string>()("polyregion::polyast::TypeKind::Ref");
   return seed;
@@ -867,12 +878,12 @@ std::size_t std::hash<polyregion::polyast::Type::Long>::operator()(const polyreg
   std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::Long");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Type::String>::operator()(const polyregion::polyast::Type::String &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::String");
-  return seed;
-}
 std::size_t std::hash<polyregion::polyast::Type::Unit>::operator()(const polyregion::polyast::Type::Unit &x) const noexcept {
   std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::Unit");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Type::String>::operator()(const polyregion::polyast::Type::String &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::String");
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Type::Struct>::operator()(const polyregion::polyast::Type::Struct &x) const noexcept {

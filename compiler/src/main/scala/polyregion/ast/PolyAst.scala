@@ -21,7 +21,7 @@ object PolyAst {
   }
 
   enum TypeKind derives MsgPack.Codec {
-    case Ref, Integral, Fractional
+    case None, Ref, Integral, Fractional
   }
 
   enum Type(val kind: TypeKind) derives MsgPack.Codec {
@@ -35,8 +35,10 @@ object PolyAst {
     case Int   extends Type(TypeKind.Integral)
     case Long  extends Type(TypeKind.Integral)
 
+    case Unit                                        extends Type(TypeKind.None)
+
+    // specialisations
     case String                                      extends Type(TypeKind.Ref)
-    case Unit                                        extends Type(TypeKind.Ref)
     case Struct(name: Sym)                           extends Type(TypeKind.Ref)
     case Array(component: Type, length: Option[Int]) extends Type(TypeKind.Ref)
   }
