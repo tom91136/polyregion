@@ -21,7 +21,7 @@ object Compiler {
 
   private val GlobalOptPasses = //
     FnInlinePass.inlineAll >>>
-      FnAllocElisionPass.transform
+      FnPtrReturnToOutParamPass.transform
 
   def compileFn(using q: Quoted)(f: q.DefDef): Result[(q.FnDependencies, p.Function)] = (for {
     (fnRtnValue, fnTpe, c) <- q.FnContext().typer(f.returnTpt.tpe)

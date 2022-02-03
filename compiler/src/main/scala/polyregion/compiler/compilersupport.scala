@@ -154,8 +154,8 @@ extension (e: p.Stmt) {
           val (y, xs, as) = f(x)
           (xs :+ p.Stmt.Var(name, Some(y)), as)
       }
-    case p.Stmt.Mut(name, expr)     => val (y, xs, as) = f(expr); (xs :+ p.Stmt.Mut(name, y), as)
-    case x @ p.Stmt.Update(_, _, _) => (x :: Nil, Nil)
+    case p.Stmt.Mut(name, expr, copy) => val (y, xs, as) = f(expr); (xs :+ p.Stmt.Mut(name, y, copy), as)
+    case x @ p.Stmt.Update(_, _, _)   => (x :: Nil, Nil)
     case p.Stmt.While(cond, body) =>
       val (y, xs, as) = f(cond)
       val (bss, bass) = body.map(_.mapAccExpr(f)).unzip
@@ -172,10 +172,9 @@ extension (e: p.Stmt) {
 
   def mapExpr(f: p.Expr => (p.Expr, List[p.Stmt])): List[p.Stmt] = e.mapAccExpr[Unit](f(_) ++ Nil *: EmptyTuple)._1
 
-  
   def mapTerm(g: p.Term.Select => p.Term.Select, f: p.Term => p.Term): List[p.Stmt] = e
     .map {
-      case p.Stmt.Mut(name, expr)         => p.Stmt.Mut(g(name), expr) :: Nil
+      case p.Stmt.Mut(name, expr, copy)   => p.Stmt.Mut(g(name), expr, copy) :: Nil
       case p.Stmt.Update(lhs, idx, value) => p.Stmt.Update(g(lhs), f(idx), f(value)) :: Nil
       case x                              => x :: Nil
     }
@@ -195,7 +194,7 @@ extension (e: p.Stmt) {
       case p.Expr.Alias(ref) =>
         val h = ref match {
           // case x @ p.Term.Select(_, _) => g(x)
-          case x                       => f(x)
+          case x => f(x)
         }
         (p.Expr.Alias(h), Nil)
       case p.Expr.Invoke(name, receiver, args, rtn) => (p.Expr.Invoke(name, receiver.map(f), args.map(f), rtn), Nil)
@@ -205,7 +204,7 @@ extension (e: p.Stmt) {
   def mapAcc[A](f: p.Stmt => (List[p.Stmt], List[A])): (List[p.Stmt], List[A]) = e match {
     case x @ p.Stmt.Comment(_)      => f(x)
     case x @ p.Stmt.Var(_, _)       => f(x)
-    case x @ p.Stmt.Mut(_, _)       => f(x)
+    case x @ p.Stmt.Mut(_, _, _)    => f(x)
     case x @ p.Stmt.Update(_, _, _) => f(x)
     case p.Stmt.While(cond, body) =>
       val (sss0, xss) = body.map(_.mapAcc(f)).unzip
@@ -228,7 +227,7 @@ extension (e: p.Stmt) {
   def repr: String = e match {
     case p.Stmt.Comment(value)          => s"// $value"
     case p.Stmt.Var(name, rhs)          => s"var ${name.repr} = ${rhs.fold("_")(_.repr)}"
-    case p.Stmt.Mut(name, expr)         => s"${name.repr} := ${expr.repr}"
+    case p.Stmt.Mut(name, expr, copy)   => s"${name.repr} ${if (copy) ":=!" else ":="} ${expr.repr}"
     case p.Stmt.Update(lhs, idx, value) => s"${lhs.repr}[${idx.repr}] := ${value.repr}"
     case p.Stmt.While(cond, body)       => s"while(${cond.repr}){\n${body.map(_.repr).mkString("\n")}\n}"
     case p.Stmt.Break                   => s"break;"

@@ -322,7 +322,19 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
         auto expr = mkExpr(x.expr, fn, qualified(x.name) + "_mut");
         auto select = mkSelect(x.name, false); // XXX do NOT allocate (mkSelect) here, we're mutating!
         std::cout << "storing to " << select << std::endl;
-        B.CreateStore(expr, select);
+
+        if(x.copy){
+
+          // http://nondot.org/sabre/LLVMNotes/SizeOf-OffsetOf-VariableSizedStructs.txt
+          // we want
+          // %Size = getelementptr %T* null, i32 1
+          // %SizeI = ptrtoint %T* %Size to i32
+          auto sizeP = B.CreateGEP(expr->getType(), llvm::ConstantPointerNull::get(expr->getType()->getPointerTo()) , {});
+          auto size = B.CreatePtrToInt(sizeP, llvm::Type::getInt32Ty(C));
+          B.CreateMemCpyInline(select,{} , expr,{},size);
+        }else{
+          B.CreateStore(expr, select);
+        }
       },
       [&](const Stmt::Update &x) {
         auto select = x.lhs;
@@ -392,7 +404,15 @@ void LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> &module, 
       });
 
   auto paramTpes = map_vec<Named, llvm::Type *>(fnTree.args, [&](auto &&named) { return mkTpe(named.tpe); });
-  auto fnTpe = llvm::FunctionType::get(mkTpe(fnTree.rtn), {paramTpes}, false);
+
+  auto rtnTpe = variants::total(
+      *kind(fnTree.rtn),                                                                       //
+      [&](const TypeKind::Fractional &) -> llvm::Type * { return mkTpe(fnTree.rtn); },         //
+      [&](const TypeKind::Integral &) -> llvm::Type * { return mkTpe(fnTree.rtn); },           //
+      [&](const TypeKind::Ref &) -> llvm::Type * { return mkTpe(fnTree.rtn)->getPointerTo(); } //
+  );
+
+  auto fnTpe = llvm::FunctionType::get(rtnTpe, {paramTpes}, false);
 
   auto *fn = llvm::Function::Create(fnTpe, llvm::Function::ExternalLinkage, "lambda", *module);
 
@@ -456,7 +476,7 @@ compiler::Compilation backend::LLVM::run(const Program &program) {
   auto c = llvmc::compileModule(true, std::move(mod), *ctx);
 
   // at this point we know the target machine, so we derive the struct layout here
-  for (auto def : program.defs) {
+  for (const auto &def : program.defs) {
     auto x = xform.lookup(def.name);
     if (!x) {
       throw std::logic_error("Missing struct def:" + repr(def));

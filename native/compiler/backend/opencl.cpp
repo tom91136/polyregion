@@ -27,19 +27,19 @@ std::string backend::OpenCL::mkTpe(const Type::Any &tpe) {
 
 std::string backend::OpenCL::mkRef(const Term::Any &ref) {
   return variants::total(
-      *ref,                                                                                 //
-      [](const Term::Select &x) { return polyast::qualified(x);  }, //
-      [](const Term::UnitConst &x) { return "/*void*/"s; },                                 //
-      [](const Term::BoolConst &x) { return x.value ? "true"s : "false"s; },                //
-      [](const Term::ByteConst &x) { return std::to_string(x.value); },                     //
-      [](const Term::CharConst &x) { return std::to_string(x.value); },                     //
-      [](const Term::ShortConst &x) { return std::to_string(x.value); },                    //
-      [](const Term::IntConst &x) { return std::to_string(x.value); },                      //
-      [](const Term::LongConst &x) { return std::to_string(x.value); },                     //
-      [](const Term::DoubleConst &x) { return std::to_string(x.value); },                   //
-      [](const Term::FloatConst &x) { return std::to_string(x.value); },                    //
-      [](const Term::StringConst &x) { return "" + x.value + ""; }                          //
-  );                                                                                        // FIXME escape string
+      *ref,                                                                  //
+      [](const Term::Select &x) { return polyast::qualified(x); },           //
+      [](const Term::UnitConst &x) { return "/*void*/"s; },                  //
+      [](const Term::BoolConst &x) { return x.value ? "true"s : "false"s; }, //
+      [](const Term::ByteConst &x) { return std::to_string(x.value); },      //
+      [](const Term::CharConst &x) { return std::to_string(x.value); },      //
+      [](const Term::ShortConst &x) { return std::to_string(x.value); },     //
+      [](const Term::IntConst &x) { return std::to_string(x.value); },       //
+      [](const Term::LongConst &x) { return std::to_string(x.value); },      //
+      [](const Term::DoubleConst &x) { return std::to_string(x.value); },    //
+      [](const Term::FloatConst &x) { return std::to_string(x.value); },     //
+      [](const Term::StringConst &x) { return "" + x.value + ""; }           //
+  );                                                                         // FIXME escape string
 }
 
 std::string backend::OpenCL::mkExpr(const Expr::Any &expr, const std::string &key) {
@@ -102,7 +102,14 @@ std::string backend::OpenCL::mkStmt(const Stmt::Any &stmt) {
             mkTpe(x.name.tpe) + " " + x.name.symbol + (x.expr ? (" = " + mkExpr(*x.expr, x.name.symbol)) : "") + ";";
         return line;
       },
-      [&](const Stmt::Mut &x) { return polyast::qualified(x.name) + " = " + mkExpr(x.expr, "?") + ";"; },
+      [&](const Stmt::Mut &x) {
+        if (x.copy) {
+          return "memcpy(" + //
+                 polyast::qualified(x.name) + ", " + mkExpr(x.expr, "?") + ", sizeof(" + mkTpe(tpe(x.expr)) + "));";
+        } else {
+          return polyast::qualified(x.name) + " = " + mkExpr(x.expr, "?") + ";";
+        }
+      },
       [&](const Stmt::Update &x) {
         auto idx = mkRef(x.idx);
         auto val = mkRef(x.value);

@@ -5,6 +5,7 @@
 #include "polyregion_PolyregionCompiler.h"
 #include "polyregion_compiler.h"
 
+static constexpr const char *StringArraySignature = "[Ljava/lang/String;";
 static constexpr const char *StringSignature = "Ljava/lang/String;";
 static constexpr const char *LongSignature = "J";
 
@@ -26,21 +27,21 @@ static T transformByteArray(JNIEnv *env, jbyteArray data,
   auto bytes = polyregion::compiler::Bytes(dataBytes, dataBytes + env->GetArrayLength(data));
   env->ReleaseByteArrayElements(data, dataBytes, JNI_ABORT);
   return f(bytes);
-
-
 }
 
-JNIEXPORT jobject JNICALL Java_polyregion_PolyregionCompiler_layoutOf(JNIEnv *env, jclass thisCls, jbyteArray structDef) {
-
-  auto l = transformByteArray<polyregion::compiler::Layout>(
-      env, structDef, [&](auto &&xs) { return polyregion::compiler::layoutOf(xs); });
-
+static jobject mkLayout(JNIEnv *env, const polyregion::compiler::Layout &l) {
   auto layoutCls = env->FindClass("polyregion/Layout");
   auto layout = newNoArgObject(env, layoutCls);
+  auto nameField = env->GetFieldID(layoutCls, "name", StringArraySignature);
   auto sizeInBytesField = env->GetFieldID(layoutCls, "sizeInBytes", LongSignature);
   auto alignmentField = env->GetFieldID(layoutCls, "alignment", LongSignature);
   auto membersField = env->GetFieldID(layoutCls, "members", "[Lpolyregion/Member;");
 
+  auto nameFqn = env->NewObjectArray(jint(l.name.fqn.size()), env->FindClass("java/lang/String"), nullptr);
+  for (jsize i = 0; i < jsize(l.name.fqn.size()); ++i) {
+    env->SetObjectArrayElement(nameFqn, i, env->NewStringUTF(l.name.fqn[i].c_str()));
+  }
+  env->SetObjectField(layout, nameField, nameFqn);
   env->SetLongField(layout, sizeInBytesField, jlong(l.sizeInBytes));
   env->SetLongField(layout, alignmentField, jlong(l.alignment));
 
@@ -62,6 +63,13 @@ JNIEXPORT jobject JNICALL Java_polyregion_PolyregionCompiler_layoutOf(JNIEnv *en
   return layout;
 }
 
+JNIEXPORT jobject JNICALL Java_polyregion_PolyregionCompiler_layoutOf(JNIEnv *env, jclass thisCls,
+                                                                      jbyteArray structDef) {
+  auto l = transformByteArray<polyregion::compiler::Layout>(
+      env, structDef, [&](auto &&xs) { return polyregion::compiler::layoutOf(xs); });
+  return mkLayout(env, l);
+}
+
 jobject Java_polyregion_PolyregionCompiler_compile(JNIEnv *env, jclass thisCls, jbyteArray function,
                                                    jboolean emitDisassembly, jshort backend) {
 
@@ -74,6 +82,7 @@ jobject Java_polyregion_PolyregionCompiler_compile(JNIEnv *env, jclass thisCls, 
   auto messagesField = env->GetFieldID(compilationCls, "messages", StringSignature);
   auto disassemblyField = env->GetFieldID(compilationCls, "disassembly", StringSignature);
   auto eventsField = env->GetFieldID(compilationCls, "events", "[Lpolyregion/Event;");
+  auto layoutsField = env->GetFieldID(compilationCls, "layouts", "[Lpolyregion/Layout;");
 
   if (c.binary) {
     auto bin = env->NewByteArray(jsize(c.binary->size()));
@@ -90,6 +99,13 @@ jobject Java_polyregion_PolyregionCompiler_compile(JNIEnv *env, jclass thisCls, 
   }
 
   env->SetObjectField(compilation, messagesField, env->NewStringUTF(c.messages.c_str()));
+
+  auto layouts = env->NewObjectArray(jint(c.layouts.size()), env->FindClass("polyregion/Layout"), nullptr);
+  for (jsize i = 0; i < jsize(c.layouts.size()); ++i) {
+    env->SetObjectArrayElement(layouts, i, mkLayout(env, c.layouts[i]));
+  }
+  env->SetObjectField(compilation, layoutsField, layouts);
+
 
   auto eventCls = env->FindClass("polyregion/Event");
   auto epochMillisField = env->GetFieldID(eventCls, "epochMillis", LongSignature);

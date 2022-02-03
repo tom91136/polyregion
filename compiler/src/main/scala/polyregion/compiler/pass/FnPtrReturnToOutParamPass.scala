@@ -10,7 +10,7 @@ import scala.quoted.*
 import scala.collection.immutable.VectorMap
 import cats.Foldable
 
-object FnAllocElisionPass {
+object FnPtrReturnToOutParamPass {
 
   @tailrec def doUntilNotEq[A](x: A)(f: A => A): A = {
     val y = f(x)
@@ -34,17 +34,22 @@ object FnAllocElisionPass {
     // }
 
     // rewrite all functions where the body allocate a struct
-    val functions = fs
-      .map { f =>
-        // delete vars
-        val (stmts, allocNames) = f.body.foldMap(_.mapAcc[p.Named] {
-          case p.Stmt.Var(n @ p.Named(_, tpe), None) if tpe.kind == p.TypeKind.Ref && tpe != p.Type.Unit =>
-            (Nil, n :: Nil)
-          case x => (x :: Nil, Nil)
-        })
-        f.name -> (allocNames, f.copy(rtn = p.Type.Unit, body = stmts, args = allocNames ::: f.args))
-      }
-      .to(VectorMap)
+    val functions =
+      fs.map { f =>
+        val rewritten =
+          if (f.rtn.kind != p.TypeKind.Ref || f.rtn == p.Type.Unit) (None, f)
+          else {
+            val outParam = p.Named("return_out", f.rtn)
+            val stmts = f.body.foldMap(_.map {
+              case p.Stmt.Return(e) =>
+                p.Stmt.Mut(p.Term.Select(Nil, outParam), e, copy = true) ::
+                  p.Stmt.Return(p.Expr.Alias(p.Term.UnitConst)) :: Nil
+              case x => (x :: Nil)
+            })
+            (Some(outParam), f.copy(args = outParam :: f.args, rtn = p.Type.Unit, body = stmts))
+          }
+      (f.name, rewritten)
+      }.to(VectorMap) // make sure we keep the order
 
     // rewrite all call sites for all functions
     functions.values.map { (_, f) =>
@@ -52,10 +57,10 @@ object FnAllocElisionPass {
         x.mapExpr {
           case ivk @ p.Expr.Invoke(name, recv, args, tpe) =>
             functions.get(name) match {
-              case None => (ivk, Nil)
-              case Some((allocNames, _)) =>
-                val vars = allocNames.map(p.Stmt.Var(_, None))
-                (ivk.copy(args = allocNames.map(p.Term.Select(Nil, _)) ::: ivk.args), vars)
+              case Some((None, _)) | None => (ivk, Nil)
+              case Some((Some(outParam), _)) =>
+                val outVar = p.Stmt.Var(outParam, None)
+                (ivk.copy(args = p.Term.Select(Nil, outParam) :: ivk.args), outVar :: Nil)
             }
           case x => (x, Nil)
         }

@@ -148,8 +148,11 @@ object Buffer {
 
   // AnyRefs
 
+  def ofZeroed[A <: AnyRef](dim: Int)(using S: NativeStruct[A]): Buffer[A] =
+    StructBuffer[A](alloc(S.sizeInBytes, dim)) // zeros by default
   def apply[A <: AnyRef](xs: A*)(using S: NativeStruct[A]): Buffer[A] =
-    StructBuffer[A](alloc(S.sizeInBytes, xs.size)).putAll(xs*)
+    ofZeroed(xs.size).putAll(xs*)
+
   def empty[A <: AnyRef: NativeStruct]: Buffer[A] = //
     apply[A]()
   def fill[A <: AnyRef: ClassTag: NativeStruct](n: Int)(elem: => A): Buffer[A] = apply[A](ArraySeq.fill(n)(elem)*)

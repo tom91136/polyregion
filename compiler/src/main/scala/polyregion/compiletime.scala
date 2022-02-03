@@ -224,7 +224,7 @@ object compiletime {
 
     val result = for {
       (allocs, captures, prog) <- compiler.Compiler.compileExpr(x)
-      serialisedAst    <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, prog)))
+      serialisedAst            <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, prog)))
       _ <- Either.catchNonFatal(
         Files.write(
           Paths.get("./ast.msgpack").toAbsolutePath.normalize(),
@@ -236,9 +236,10 @@ object compiletime {
       )
       // _ <- Either.catchNonFatal(throw new RuntimeException("STOP"))
 
-      layout <- Either.catchNonFatal(PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, prog.defs))))
-        _= println(s"layout=${layout}")
+      // layout <- Either.catchNonFatal(PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, prog.defs))))
+      //   _= println(s"layout=${layout}")
 
+      // _ = ???
       c <- Either.catchNonFatal(PolyregionCompiler.compile(serialisedAst, true, PolyregionCompiler.BACKEND_LLVM))
     } yield {
 
@@ -262,6 +263,7 @@ object compiletime {
           case PolyAst.Type.Float       => '{ PolyregionRuntime.TYPE_FLOAT }
           case PolyAst.Type.Double      => '{ PolyregionRuntime.TYPE_DOUBLE }
           case PolyAst.Type.Array(_, _) => '{ PolyregionRuntime.TYPE_PTR }
+          case PolyAst.Type.Struct(_)   => '{ PolyregionRuntime.TYPE_PTR }
           case PolyAst.Type.Unit        => '{ PolyregionRuntime.TYPE_VOID }
           case unknown =>
             println(s"tpeAsRuntimeTpe ??? = $unknown ")
@@ -278,6 +280,12 @@ object compiletime {
         case PolyAst.Type.Short  => '{ Buffer.ref[Short] }
         case PolyAst.Type.Int    => '{ Buffer.ref[Int] }
         case PolyAst.Type.Long   => '{ Buffer.ref[Long] }
+        case PolyAst.Type.Struct(_) =>
+          import quotes.reflect.*
+          // summon[NativeStruct[A]]
+          // '{ Buffer.ofZeroed[](1)(using summon[NativeStruct[A]]) }
+          ???
+
         case unknown =>
           println(s"rtnBufferExpr ??? = $unknown ")
           ???
@@ -286,32 +294,29 @@ object compiletime {
       val rtnExpr = (buffer: Expr[Buffer[?]]) =>
         prog.entry.rtn match {
           case PolyAst.Type.Unit => '{ ().asInstanceOf[A] }
-          case _                 => '{ $buffer(0).asInstanceOf[A] }
+          case PolyAst.Type.Struct(_) =>
+            '{
+              println(s"m=${$buffer(0)}")
+
+              ().asInstanceOf[A]
+            }
+          case _ => '{ $buffer(0).asInstanceOf[A] }
         }
 
+      val layoutLut = c.layouts.map(l => PolyAst.Sym(l.name.toList) -> l).toMap
 
-        val defLut = prog.defs.map(d => d.name -> d).toMap
-      val allocExprs = allocs.map{tpe => 
+      val allocExprs = allocs.map { tpe =>
         tpe match {
-           case PolyAst.Type.Unit   => '{ Buffer.empty[Int] }
-        case PolyAst.Type.Float  => '{ Buffer.ref[Float] }
-        case PolyAst.Type.Double => '{ Buffer.ref[Double] }
-        case PolyAst.Type.Bool   => '{ Buffer.ref[Boolean] }
-        case PolyAst.Type.Byte   => '{ Buffer.ref[Byte] }
-        case PolyAst.Type.Char   => '{ Buffer.ref[Char] }
-        case PolyAst.Type.Short  => '{ Buffer.ref[Short] }
-        case PolyAst.Type.Int    => '{ Buffer.ref[Int] }
-        case PolyAst.Type.Long   => '{ Buffer.ref[Long] }
-
-          case PolyAst.Type.Struct(sym) =>   ???
-
+          case PolyAst.Type.Struct(sym) =>
+            val size = layoutLut(sym).sizeInBytes.toInt
+            println(s"alloc = ${size}")
+            '{ Buffer.ofDim[Byte](${ Expr(size) }).buffer }
           case unknown =>
-          println(s"allocExprs ??? = $unknown ")
-          ???
+            println(s"allocExprs ??? = $unknown ")
+            ???
         }
-        
 
-        }  
+      }
 
       val captureExprs = captures.map { (ident, tpe) =>
         val expr = ident.asExpr
@@ -345,6 +350,9 @@ object compiletime {
         }
       }
 
+      val paramExprs = allocExprs ++ captureExprs
+      val paramTpes  = (allocs ++ captures.map((_, t) => t)).map(tpeAsRuntimeTpe(_))
+
       '{
         val programBytes = $programBytesExpr
         // val astBytes     = $astBytesExpr
@@ -355,8 +363,8 @@ object compiletime {
         val rtnBuffer = ${ rtnBufferExpr }
         val rtnType   = ${ tpeAsRuntimeTpe(prog.entry.rtn) }
 
-        val argTypes   = Array(${ Varargs(prog.entry.args.map(n => tpeAsRuntimeTpe(n.tpe))) }*)
-        val argBuffers = Array(${ Varargs(captureExprs) }*)
+        val argTypes   = Array(${ Varargs(paramTpes) }*)
+        val argBuffers = Array(${ Varargs(paramExprs) }*)
 
         // println(s"Invoking with ${argTypes.zip(argBuffers).toList}")
 

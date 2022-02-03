@@ -70,7 +70,7 @@ object FnInlinePass {
                     val returnName               = p.Named("phi", tpe)
                     val returnRef: p.Term.Select = p.Term.Select(Nil, returnName)
                     val returnRebound = argSubstituted.flatMap(_.map {
-                      case p.Stmt.Return(e) => p.Stmt.Mut(returnRef, e) :: Nil
+                      case p.Stmt.Return(e) => p.Stmt.Mut(returnRef, e, copy = false) :: Nil
                       case x                => x :: Nil
                     })
                     (p.Expr.Alias(returnRef), p.Stmt.Var(returnName, None) :: returnRebound)

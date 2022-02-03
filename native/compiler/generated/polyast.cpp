@@ -653,11 +653,13 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Mut &x) {
   os << x.name;
   os << ',';
   os << x.expr;
+  os << ',';
+  os << x.copy;
   os << ')';
   return os;
 }
 bool Stmt::operator==(const Stmt::Mut &l, const Stmt::Mut &r) { 
-  return l.name == r.name && *l.expr == *r.expr;
+  return l.name == r.name && *l.expr == *r.expr && l.copy == r.copy;
 }
 
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Update &x) {
@@ -1108,6 +1110,7 @@ std::size_t std::hash<polyregion::polyast::Stmt::Var>::operator()(const polyregi
 std::size_t std::hash<polyregion::polyast::Stmt::Mut>::operator()(const polyregion::polyast::Stmt::Mut &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.name)>()(x.name);
   seed ^= std::hash<decltype(x.expr)>()(x.expr) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.copy)>()(x.copy) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Stmt::Update>::operator()(const polyregion::polyast::Stmt::Update &x) const noexcept {

@@ -5,8 +5,10 @@ import java.util.Arrays;
 public final class Compilation {
   public byte[] program;
   public Event[] events;
+  public Layout[] layouts;
   public String messages;
   public String disassembly;
+
 
   @Override
   public String toString() {
@@ -16,6 +18,8 @@ public final class Compilation {
         + "KB"
         + ", events="
         + Arrays.toString(events)
+        + ", layouts="
+        + Arrays.toString(layouts)
         + ", messages='"
         + messages
         + '\''

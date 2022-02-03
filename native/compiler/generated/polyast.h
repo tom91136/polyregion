@@ -677,7 +677,8 @@ struct EXPORT Var : Stmt::Base {
 struct EXPORT Mut : Stmt::Base {
   Term::Select name;
   Expr::Any expr;
-  Mut(Term::Select name, Expr::Any expr) noexcept : Stmt::Base(), name(std::move(name)), expr(std::move(expr)) {}
+  bool copy;
+  Mut(Term::Select name, Expr::Any expr, bool copy) noexcept : Stmt::Base(), name(std::move(name)), expr(std::move(expr)), copy(copy) {}
   EXPORT operator Any() const { return std::make_shared<Mut>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Stmt::Mut &);
   EXPORT friend bool operator==(const Stmt::Mut &, const Stmt::Mut &);

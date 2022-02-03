@@ -146,14 +146,14 @@ object TreeMapper {
                           else s"Ctor args mismatch, class expects ${sdef.members} but was given ${argTpes}".fail
 
                         setMemberExprs = sdef.members.zip(argRefs).map { (member, value) =>
-                          p.Stmt.Mut(p.Term.Select(name :: Nil, member), p.Expr.Alias(value))
+                          p.Stmt.Mut(p.Term.Select(name :: Nil, member), p.Expr.Alias(value), copy = false)
                         }
-
                       } yield ((p.Term.Select(Nil, name)), c.::=(expr +: setMemberExprs*))).deferred
                     case x => s"Found ctor signature, expecting def with no rhs but got: $x".fail.deferred
                   }
                 case s @ q.Select(q, n) => // s.y(zs)
-                  (c !! s).mark(defdef)
+                  (c !! s)
+                    .mark(defdef)
                     .mapTerm(q)
                     .map((receiverRef, c) => mkReturn(p.Expr.Invoke(receiverSym, Some(receiverRef), argRefs, tpe), c))
                 case _ => ??? // (ctx.depth, None, Nil).success.deferred
@@ -170,7 +170,7 @@ object TreeMapper {
           (rhsRef, c) <- (c !! term).mapTerm(rhs)
           r <- (lhsRef, rhsRef) match {
             case (s @ p.Term.Select(Nil, _), rhs) =>
-              (p.Term.UnitConst, c ::= p.Stmt.Mut(s, p.Expr.Alias(rhs))).pure
+              (p.Term.UnitConst, c ::= p.Stmt.Mut(s, p.Expr.Alias(rhs), copy = false)).pure
             case bad => s"Illegal assign LHS,RHS: ${bad}".fail.deferred
           }
         } yield r
@@ -188,8 +188,8 @@ object TreeMapper {
               val result = p.Stmt.Var(name, None)
               val cond = p.Stmt.Cond(
                 p.Expr.Alias(condRef),
-                thenCtx.stmts :+ p.Stmt.Mut(p.Term.Select(Nil, name), p.Expr.Alias(thenRef)),
-                elseCtx.stmts :+ p.Stmt.Mut(p.Term.Select(Nil, name), p.Expr.Alias(elseRef))
+                thenCtx.stmts :+ p.Stmt.Mut(p.Term.Select(Nil, name), p.Expr.Alias(thenRef), copy = false),
+                elseCtx.stmts :+ p.Stmt.Mut(p.Term.Select(Nil, name), p.Expr.Alias(elseRef), copy = false)
               )
               (p.Term.Select(Nil, name), elseCtx.replaceStmts(ifCtx.stmts :+ result :+ cond)).success.deferred
             case _ =>
