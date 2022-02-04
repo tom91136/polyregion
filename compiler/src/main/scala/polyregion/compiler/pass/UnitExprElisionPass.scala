@@ -7,14 +7,15 @@ import polyregion.*
 
 import scala.annotation.tailrec
 import scala.quoted.*
+import polyregion.compiler.Quoted
 
 object UnitExprElisionPass {
 
-  def eliminateUnitExpr(xs: List[p.Stmt]): List[p.Stmt] = xs.flatMap {
+  def eliminateUnitExpr(using q: Quoted)(xs: q.FnContext): q.FnContext = xs.mapStmts(_.flatMap {
     _.map {
       case p.Stmt.Var(p.Named(_, p.Type.Unit), Some(p.Expr.Alias(p.Term.UnitConst)) | None) => Nil
       case x                                                                                => x :: Nil
     }
-  }
+  })
 
 }

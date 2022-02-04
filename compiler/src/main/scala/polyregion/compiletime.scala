@@ -218,13 +218,33 @@ object compiletime {
 
   inline def offload[A](inline x: => A): A = ${ offloadImpl[A]('x) }
 
+  private def tpeAsRuntimeTpe(t: PolyAst.Type)(using Quotes) = t match {
+    case PolyAst.Type.Bool        => '{ PolyregionRuntime.TYPE_BOOL }
+    case PolyAst.Type.Byte        => '{ PolyregionRuntime.TYPE_BYTE }
+    case PolyAst.Type.Char        => '{ PolyregionRuntime.TYPE_CHAR }
+    case PolyAst.Type.Short       => '{ PolyregionRuntime.TYPE_SHORT }
+    case PolyAst.Type.Int         => '{ PolyregionRuntime.TYPE_INT }
+    case PolyAst.Type.Long        => '{ PolyregionRuntime.TYPE_LONG }
+    case PolyAst.Type.Float       => '{ PolyregionRuntime.TYPE_FLOAT }
+    case PolyAst.Type.Double      => '{ PolyregionRuntime.TYPE_DOUBLE }
+    case PolyAst.Type.Array(_, _) => '{ PolyregionRuntime.TYPE_PTR }
+    case PolyAst.Type.Struct(_)   => '{ PolyregionRuntime.TYPE_PTR }
+    case PolyAst.Type.Unit        => '{ PolyregionRuntime.TYPE_VOID }
+    case unknown =>
+      println(s"tpeAsRuntimeTpe ??? = $unknown ")
+      ???
+  }
+
+  def noStructReturn: Nothing = throw new AssertionError(
+    "Compiler bug: returning struct is not possible, " +
+      "it should have been transformed to an out param in one of the passes."
+  )
+
   private def offloadImpl[A: Type](x: Expr[Any])(using q: Quotes): Expr[A] = {
-
     implicit val Q = compiler.Quoted(q)
-
     val result = for {
-      (allocs, captures, prog) <- compiler.Compiler.compileExpr(x)
-      serialisedAst            <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, prog)))
+      (outReturnParams, captures, prog) <- compiler.Compiler.compileExpr(x)
+      serialisedAst <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, prog)))
       _ <- Either.catchNonFatal(
         Files.write(
           Paths.get("./ast.msgpack").toAbsolutePath.normalize(),
@@ -235,87 +255,57 @@ object compiletime {
         )
       )
       // _ <- Either.catchNonFatal(throw new RuntimeException("STOP"))
-
       // layout <- Either.catchNonFatal(PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, prog.defs))))
       //   _= println(s"layout=${layout}")
-
-      // _ = ???
       c <- Either.catchNonFatal(PolyregionCompiler.compile(serialisedAst, true, PolyregionCompiler.BACKEND_LLVM))
     } yield {
 
       println(s"Program=${c.program.length}")
       println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
       println(s"Messages=\n  ${c.messages}")
-      println(s"Asm=\n${c.disassembly}")
 
       val programBytesExpr = Expr(c.program)
       val astBytesExpr     = Expr(serialisedAst)
       val fnName           = Expr("lambda")
 
-      val tpeAsRuntimeTpe = (t: PolyAst.Type) =>
-        t match {
-          case PolyAst.Type.Bool        => '{ PolyregionRuntime.TYPE_BOOL }
-          case PolyAst.Type.Byte        => '{ PolyregionRuntime.TYPE_BYTE }
-          case PolyAst.Type.Char        => '{ PolyregionRuntime.TYPE_CHAR }
-          case PolyAst.Type.Short       => '{ PolyregionRuntime.TYPE_SHORT }
-          case PolyAst.Type.Int         => '{ PolyregionRuntime.TYPE_INT }
-          case PolyAst.Type.Long        => '{ PolyregionRuntime.TYPE_LONG }
-          case PolyAst.Type.Float       => '{ PolyregionRuntime.TYPE_FLOAT }
-          case PolyAst.Type.Double      => '{ PolyregionRuntime.TYPE_DOUBLE }
-          case PolyAst.Type.Array(_, _) => '{ PolyregionRuntime.TYPE_PTR }
-          case PolyAst.Type.Struct(_)   => '{ PolyregionRuntime.TYPE_PTR }
-          case PolyAst.Type.Unit        => '{ PolyregionRuntime.TYPE_VOID }
-          case unknown =>
-            println(s"tpeAsRuntimeTpe ??? = $unknown ")
-            ???
-        }
-
-      val rtnBufferExpr = prog.entry.rtn match {
-        case PolyAst.Type.Unit   => '{ Buffer.empty[Int] }
-        case PolyAst.Type.Float  => '{ Buffer.ref[Float] }
-        case PolyAst.Type.Double => '{ Buffer.ref[Double] }
-        case PolyAst.Type.Bool   => '{ Buffer.ref[Boolean] }
-        case PolyAst.Type.Byte   => '{ Buffer.ref[Byte] }
-        case PolyAst.Type.Char   => '{ Buffer.ref[Char] }
-        case PolyAst.Type.Short  => '{ Buffer.ref[Short] }
-        case PolyAst.Type.Int    => '{ Buffer.ref[Int] }
-        case PolyAst.Type.Long   => '{ Buffer.ref[Long] }
-        case PolyAst.Type.Struct(_) =>
-          import quotes.reflect.*
-          // summon[NativeStruct[A]]
-          // '{ Buffer.ofZeroed[](1)(using summon[NativeStruct[A]]) }
-          ???
-
-        case unknown =>
-          println(s"rtnBufferExpr ??? = $unknown ")
-          ???
-      }
-
-      val rtnExpr = (buffer: Expr[Buffer[?]]) =>
+      val (rtnBufferTpe, rtnBufferExpr) = (
+        tpeAsRuntimeTpe(prog.entry.rtn),
         prog.entry.rtn match {
-          case PolyAst.Type.Unit => '{ ().asInstanceOf[A] }
-          case PolyAst.Type.Struct(_) =>
-            '{
-              println(s"m=${$buffer(0)}")
-
-              ().asInstanceOf[A]
-            }
-          case _ => '{ $buffer(0).asInstanceOf[A] }
+          case PolyAst.Type.Unit      => '{ Buffer.empty[Int] }
+          case PolyAst.Type.Float     => '{ Buffer.ref[Float] }
+          case PolyAst.Type.Double    => '{ Buffer.ref[Double] }
+          case PolyAst.Type.Bool      => '{ Buffer.ref[Boolean] }
+          case PolyAst.Type.Byte      => '{ Buffer.ref[Byte] }
+          case PolyAst.Type.Char      => '{ Buffer.ref[Char] }
+          case PolyAst.Type.Short     => '{ Buffer.ref[Short] }
+          case PolyAst.Type.Int       => '{ Buffer.ref[Int] }
+          case PolyAst.Type.Long      => '{ Buffer.ref[Long] }
+          case PolyAst.Type.Struct(_) => noStructReturn
         }
+      )
 
-      val layoutLut = c.layouts.map(l => PolyAst.Sym(l.name.toList) -> l).toMap
+      println(s"out=${outReturnParams}")
 
-      val allocExprs = allocs.map { tpe =>
-        tpe match {
-          case PolyAst.Type.Struct(sym) =>
-            val size = layoutLut(sym).sizeInBytes.toInt
-            println(s"alloc = ${size}")
-            '{ Buffer.ofDim[Byte](${ Expr(size) }).buffer }
-          case unknown =>
-            println(s"allocExprs ??? = $unknown ")
-            ???
-        }
+      val outReturnParamExpr = outReturnParams match {
+        case Nil => None
+        case (t @ PolyAst.Type.Struct(sym)) :: Nil =>
+          import quotes.reflect.*
+          val imp = Expr.summon[NativeStruct[A]].get
+          // val x = TypeRepr.of[A].asType
+          Some(
+            (
+              t,
+              '{
+                println(s"imp=${${ imp }}")
 
+                val u = Buffer.ofZeroedAny(1)(using $imp.asInstanceOf[NativeStruct[Any]])
+                println(s"u=$u")
+                u.asInstanceOf[Buffer[A]]
+              }
+            )
+          )
+        case bad :: Nil => throw new AssertionError(s"Compiler bug: non-struct out return param ($bad)!?")
+        case xs         => throw new AssertionError(s"Compiler bug: more than one out return param ($xs)!?")
       }
 
       val captureExprs = captures.map { (ident, tpe) =>
@@ -349,29 +339,50 @@ object compiletime {
           ${ wrapped }.buffer
         }
       }
+      val captureTps = captures.map((_, t) => tpeAsRuntimeTpe(t))
 
-      val paramExprs = allocExprs ++ captureExprs
-      val paramTpes  = (allocs ++ captures.map((_, t) => t)).map(tpeAsRuntimeTpe(_))
+      val code = outReturnParamExpr match {
+        case Some((t, expr)) =>
+          '{
+            val programBytes = $programBytesExpr
 
-      '{
-        val programBytes = $programBytesExpr
-        // val astBytes     = $astBytesExpr
+            val rtnBuffer = ${ rtnBufferExpr }
+            val rtnType   = ${ rtnBufferTpe }
 
-        // println("Program bytes=" + programBytes.size)
-        // println("PolyAst bytes=" + astBytes.size)
+            val outReturn = ${ expr }
 
-        val rtnBuffer = ${ rtnBufferExpr }
-        val rtnType   = ${ tpeAsRuntimeTpe(prog.entry.rtn) }
+            val argTypes   = Array(${ Varargs(tpeAsRuntimeTpe(t) :: captureTps) }*) // List[Expr[Byte]]
+            val argBuffers = Array(${ Varargs('{ outReturn.buffer } :: captureExprs) }*)
 
-        val argTypes   = Array(${ Varargs(paramTpes) }*)
-        val argBuffers = Array(${ Varargs(paramExprs) }*)
+            // println(s"Invoking with ${argTypes.zip(argBuffers).toList}")
 
-        // println(s"Invoking with ${argTypes.zip(argBuffers).toList}")
+            PolyregionRuntime.invoke(programBytes, ${ fnName }, rtnType, rtnBuffer.buffer, argTypes, argBuffers)
 
-        PolyregionRuntime.invoke(programBytes, ${ fnName }, rtnType, rtnBuffer.buffer, argTypes, argBuffers)
+            outReturn(0)
+          }
+        case None =>
+          '{
+            val programBytes = $programBytesExpr
+            val rtnBuffer    = ${ rtnBufferExpr }
+            val rtnType      = ${ rtnBufferTpe }
 
-        ${ rtnExpr('rtnBuffer) }
+            val argTypes   = Array(${ Varargs(captureTps) }*)
+            val argBuffers = Array(${ Varargs(captureExprs) }*)
+
+            PolyregionRuntime.invoke(programBytes, ${ fnName }, rtnType, rtnBuffer.buffer, argTypes, argBuffers)
+            ${
+              prog.entry.rtn match {
+                case PolyAst.Type.Struct(_) => noStructReturn
+                case PolyAst.Type.Unit      => '{ ().asInstanceOf[A] }
+                case _                      => '{ rtnBuffer(0).asInstanceOf[A] }
+              }
+            }
+          }
+
       }
+
+      // println("Code=" + code.show)
+      code
     }
 
 //    println(prog.toByteArray.mkString(" "))

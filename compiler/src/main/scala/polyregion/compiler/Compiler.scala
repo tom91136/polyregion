@@ -15,7 +15,7 @@ object Compiler {
   import TreeMapper.*
   import Retyper.*
 
-  private val LocalOptPasses = //
+  private def runLocalOptPass(using Quoted) = //
     IntrinsifyPass.intrinsify >>>
       UnitExprElisionPass.eliminateUnitExpr
 
@@ -31,13 +31,18 @@ object Compiler {
       .collect { case d: q.ValDef => d }
     // TODO handle default value (ValDef.rhs)
     (namedArgs, c) <- args.foldMapM(a => c.typer(a.tpt.tpe).map((_, t, c) => (p.Named(a.name, t) :: Nil, c)))
-    (lastTerm, c)  <- fnRtnValue.fold(c.mapTerm(f.rhs.get))((_, c).success.deferred)
-  } yield c.deps -> p.Function(
-    p.Sym(f.symbol.fullName),
-    namedArgs,
-    fnTpe,
-    LocalOptPasses(c.stmts :+ p.Stmt.Return(p.Expr.Alias(lastTerm)))
-  )).resolve
+
+    body <- fnRtnValue.fold(f.rhs.traverse(c.mapTerm(_)))(x => Some((x, c)).success.deferred)
+    mkFn   = (xs: List[p.Stmt]) => p.Function(p.Sym(f.symbol.fullName), namedArgs, fnTpe, xs)
+    runOpt = (c: q.FnContext) => runLocalOptPass(c)
+
+  } yield body match {
+    case None =>
+      (runOpt(c).deps, mkFn(Nil))
+    case Some((term, preOptCtx)) =>
+      val c = runOpt(preOptCtx.mapStmts(_ :+ p.Stmt.Return(p.Expr.Alias(term))))
+      (c.deps, mkFn((c.stmts)))
+  }).resolve
 
   def compileClosure(using q: Quoted)(x: Expr[Any]): Result[(q.FnDependencies, List[(q.Ref, p.Type)], p.Function)] = {
 
@@ -70,7 +75,7 @@ object Compiler {
         .mapTerm(term)
         .resolve
 
-      (_, fnTpe, c) <- c.typer(term.tpe).resolve
+      (_, fnTpe, preOptCtx) <- c.typer(term.tpe).resolve
 
       _ <-
         if (fnTpe != returnTerm.tpe) {
@@ -78,11 +83,15 @@ object Compiler {
         } else ().success
 
       (captures, names) = capturedNames.toList.map((r, n) => (r -> n.tpe, n)).unzip
+
+
+      c = runLocalOptPass(preOptCtx)
+
       closureFn = p.Function(
         p.Sym(closureName :: Nil),
         names,
         fnTpe,
-        LocalOptPasses(c.stmts :+ p.Stmt.Return(p.Expr.Alias(returnTerm)))
+        (c.stmts :+ p.Stmt.Return(p.Expr.Alias(returnTerm)) )
       )
     } yield (c.deps, captures, closureFn)
   }
@@ -99,7 +108,7 @@ object Compiler {
       (deps, closureArgs, closureFn) <- compileClosure(x)
 
       (deps, fns) <- (deps, List.empty[p.Function]).iterateWhileM { case (deps, fs) =>
-        deps.defs.toList.traverse(compileFn(_)).map(xs => xs.unzip.bimap(_.combineAll, _ ++ fs))
+        deps.defs.values.toList.traverse(compileFn(_)).map(xs => xs.unzip.bimap(_.combineAll, _ ++ fs))
       }(_._1.defs.nonEmpty)
 
       allFns = closureFn :: fns
@@ -110,13 +119,13 @@ object Compiler {
       clsDefs = deps.clss.values.toList
       _       = println(s"ClsDefs = ${clsDefs}")
 
-      allocArgs = optimised.head.args.lastIndexOfSlice(closureFn.args) match {
+      outReturnParams = optimised.head.args.lastIndexOfSlice(closureFn.args) match {
         case -1 => ???
         case n  => optimised.head.args.take(n).map(_.tpe)
       }
 
     } yield (
-      allocArgs,
+      outReturnParams,
       closureArgs,
       p.Program(optimised.head, optimised.tail, clsDefs)
     )

@@ -7,8 +7,6 @@ public final class Compilation {
   public Event[] events;
   public Layout[] layouts;
   public String messages;
-  public String disassembly;
-
 
   @Override
   public String toString() {
@@ -22,10 +20,7 @@ public final class Compilation {
         + Arrays.toString(layouts)
         + ", messages='"
         + messages
-        + '\''
-        + ", disassembly='"
-        + disassembly
-        + '\''
+        + "\'"
         + '}';
   }
 }

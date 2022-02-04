@@ -74,6 +74,93 @@ TEST_CASE("struct member access", "[compiler]") {
   polyregion::compiler::compile(p);
 }
 
+TEST_CASE("mut prim", "[compiler]") {
+  polyregion_initialise();
+
+  Function fn(Sym({"foo"}), {}, Type::Int(),
+              {
+                  Var(Named("s", Type::Int()), {}),
+                  Mut(Select({}, Named("s", Type::Int())), Alias(IntConst(42)), false),
+                  Return(Alias(IntConst(69))),
+              });
+
+  INFO(repr(fn))
+  Program p(fn, {}, {});
+  auto c = polyregion::compiler::compile(p);
+  std::cout << c << std::endl;
+  CHECK(c.messages == "");
+  CHECK(c.binary != std::nullopt);
+}
+
+TEST_CASE("struct buffer assign", "[compiler]") {
+  polyregion_initialise();
+
+  Sym myStructSym({"MyStruct"});
+  Named defX = Named("x", Type::Int());
+  Named defY = Named("y", Type::Int());
+  StructDef def(myStructSym, {defX, defY});
+  Type::Struct myStruct(myStructSym);
+
+  Function fn(Sym({"foo"}), {Named("s", Type::Array(myStruct, {}))}, Type::Int(),
+              {
+
+                  Var(Named("a", myStruct), { Index(Select({}, Named("s", myStruct)), Term::IntConst(0), myStruct) }),
+
+
+                  Var(Named("b", myStruct), {  Alias(Select({Named("a", myStruct)}, defX ))  }),
+
+//                  Mut(Select({Named("s", Type::Array(myStruct, {}))}, defX), Alias(IntConst(42)), false),
+                  Return(Alias(IntConst(69))),
+              });
+
+  INFO(repr(fn))
+  Program p(fn, {}, {def});
+  auto c = polyregion::compiler::compile(p);
+  std::cout << c << std::endl;
+  CHECK(c.messages == "");
+  CHECK(c.binary != std::nullopt);
+}
+
+
+TEST_CASE("mut struct buffer", "[compiler]") {
+  polyregion_initialise();
+
+  Sym myStructSym({"MyStruct"});
+  Named defX = Named("x", Type::Int());
+  Named defY = Named("y", Type::Int());
+  StructDef def(myStructSym, {defX, defY});
+  Type::Struct myStruct(myStructSym);
+
+  Function fn(Sym({"foo"}), {Named("s", Type::Array(myStruct, {}))}, Type::Int(),
+              {
+                  Mut(Select({Named("s", Type::Array(myStruct, {}))}, defX), Alias(IntConst(42)), false),
+                  Return(Alias(IntConst(69))),
+              });
+
+  INFO(repr(fn))
+  Program p(fn, {}, {def});
+  auto c = polyregion::compiler::compile(p);
+  std::cout << c << std::endl;
+  CHECK(c.messages == "");
+  CHECK(c.binary != std::nullopt);
+}
+
+TEST_CASE("mut prim buffer", "[compiler]") {
+  polyregion_initialise();
+  Function fn(Sym({"foo"}), {Named("s", Type::Array(Type::Int(), {}))}, Type::Int(),
+              {
+                  Mut(Select({}, Named("s", Type::Array(Type::Int(), {}))), Alias(IntConst(42)), false),
+                  Return(Alias(IntConst(69))),
+              });
+
+  INFO(repr(fn))
+  Program p(fn, {}, {});
+  auto c = polyregion::compiler::compile(p);
+  std::cout << c << std::endl;
+  CHECK(c.messages == "");
+  CHECK(c.binary != std::nullopt);
+}
+
 TEST_CASE("struct alloc", "[compiler]") {
   polyregion_initialise();
 
@@ -90,8 +177,8 @@ TEST_CASE("struct alloc", "[compiler]") {
                   Mut(Select({Named("s", myStruct)}, defY), Alias(IntConst(43)), false),
 
                   Mut(Select({}, Named("out", myStruct)), Alias(Select({}, Named("s", myStruct))), true),
-//                  Return(Alias(UnitConst())),
-                  Return(Alias(IntConst(69)) ),
+                  //                  Return(Alias(UnitConst())),
+                  Return(Alias(IntConst(69))),
               });
 
   INFO(repr(fn))
@@ -99,7 +186,7 @@ TEST_CASE("struct alloc", "[compiler]") {
   Program p(fn, {}, {def});
 
   auto c = polyregion::compiler::compile(p);
-  std::cout << c <<std::endl;
+  std::cout << c << std::endl;
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);
 }

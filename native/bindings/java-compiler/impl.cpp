@@ -80,7 +80,6 @@ jobject Java_polyregion_PolyregionCompiler_compile(JNIEnv *env, jclass thisCls, 
   auto compilation = newNoArgObject(env, compilationCls);
   auto programField = env->GetFieldID(compilationCls, "program", "[B");
   auto messagesField = env->GetFieldID(compilationCls, "messages", StringSignature);
-  auto disassemblyField = env->GetFieldID(compilationCls, "disassembly", StringSignature);
   auto eventsField = env->GetFieldID(compilationCls, "events", "[Lpolyregion/Event;");
   auto layoutsField = env->GetFieldID(compilationCls, "layouts", "[Lpolyregion/Layout;");
 
@@ -94,10 +93,6 @@ jobject Java_polyregion_PolyregionCompiler_compile(JNIEnv *env, jclass thisCls, 
     throwGeneric(env, c.messages);
   }
 
-  if (c.disassembly) {
-    env->SetObjectField(compilation, disassemblyField, env->NewStringUTF(c.disassembly->c_str()));
-  }
-
   env->SetObjectField(compilation, messagesField, env->NewStringUTF(c.messages.c_str()));
 
   auto layouts = env->NewObjectArray(jint(c.layouts.size()), env->FindClass("polyregion/Layout"), nullptr);
@@ -106,17 +101,18 @@ jobject Java_polyregion_PolyregionCompiler_compile(JNIEnv *env, jclass thisCls, 
   }
   env->SetObjectField(compilation, layoutsField, layouts);
 
-
   auto eventCls = env->FindClass("polyregion/Event");
   auto epochMillisField = env->GetFieldID(eventCls, "epochMillis", LongSignature);
   auto nameField = env->GetFieldID(eventCls, "name", StringSignature);
+  auto dataField = env->GetFieldID(eventCls, "data", StringSignature);
   auto eventNanosField = env->GetFieldID(eventCls, "elapsedNanos", LongSignature);
   auto events = env->NewObjectArray(jint(c.events.size()), eventCls, nullptr);
   for (jsize i = 0; i < jsize(c.events.size()); ++i) {
     auto elem = newNoArgObject(env, eventCls);
     env->SetLongField(elem, epochMillisField, jlong(c.events[i].epochMillis));
-    env->SetObjectField(elem, nameField, env->NewStringUTF(c.events[i].name.c_str()));
     env->SetLongField(elem, eventNanosField, jlong(c.events[i].elapsedNanos));
+    env->SetObjectField(elem, nameField, env->NewStringUTF(c.events[i].name.c_str()));
+    env->SetObjectField(elem, dataField, env->NewStringUTF(c.events[i].data.c_str()));
     env->SetObjectArrayElement(events, i, elem);
   }
   env->SetObjectField(compilation, eventsField, events);

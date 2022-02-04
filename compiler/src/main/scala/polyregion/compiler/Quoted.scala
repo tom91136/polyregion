@@ -14,7 +14,7 @@ class Quoted(val q: Quotes) {
 
   case class FnDependencies(
       clss: Map[p.Sym, p.StructDef] = Map.empty, // external class defs
-      defs: Set[DefDef] = Set.empty              // external def defs
+      defs: Map[p.Sym, DefDef] = Map.empty       // external def defs
   )
 
   given Monoid[FnDependencies] = Monoid.instance(
@@ -29,7 +29,7 @@ class Quoted(val q: Quotes) {
       refs: Map[Symbol, Reference] = Map.empty, // ident/select table
 
       clss: Map[p.Sym, p.StructDef] = Map.empty, // external class defs
-      defs: Set[DefDef] = Set.empty,             // external def defs
+      defs: Map[p.Sym, DefDef] = Map.empty,      // external def defs
 
       stmts: List[p.Stmt] = List.empty // fn statements
   ) {
@@ -37,11 +37,12 @@ class Quoted(val q: Quotes) {
     def down(t: Tree)      = !!(t).copy(depth = depth + 1)
     def named(tpe: p.Type) = p.Named(s"v${depth}", tpe)
 
-    def noStmts                              = copy(stmts = Nil)
-    def inject(refs: Map[Symbol, Reference]) = copy(refs = refs ++ refs)
-    def mark(d: DefDef)                      = copy(defs = defs + d)
-    infix def ::=(xs: p.Stmt*)               = copy(stmts = stmts ++ xs)
-    infix def replaceStmts(xs: Seq[p.Stmt])  = copy(stmts = xs.toList)
+    def noStmts                                 = copy(stmts = Nil)
+    def inject(refs: Map[Symbol, Reference])    = copy(refs = refs ++ refs)
+    def mark(s: p.Sym, d: DefDef)               = copy(defs = defs + (s -> d))
+    infix def ::=(xs: p.Stmt*)                  = copy(stmts = stmts ++ xs)
+    def replaceStmts(xs: Seq[p.Stmt])           = copy(stmts = xs.toList)
+    def mapStmts(f: Seq[p.Stmt] => Seq[p.Stmt]) = copy(stmts = f(stmts).toList)
 
     def deps = FnDependencies(clss, defs)
 

@@ -150,6 +150,12 @@ object Buffer {
 
   def ofZeroed[A <: AnyRef](dim: Int)(using S: NativeStruct[A]): Buffer[A] =
     StructBuffer[A](alloc(S.sizeInBytes, dim)) // zeros by default
+
+
+  def ofZeroedAny(dim: Int)(using S: NativeStruct[Any]): Buffer[Any] =
+    StructBuffer[Any](alloc(S.sizeInBytes, dim)) // zeros by default
+
+
   def apply[A <: AnyRef](xs: A*)(using S: NativeStruct[A]): Buffer[A] =
     ofZeroed(xs.size).putAll(xs*)
 

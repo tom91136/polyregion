@@ -11,7 +11,7 @@ public final class Layout {
   @Override
   public String toString() {
     return "Layout{"
-        + "name=" 
+        + "name="
         + Arrays.toString(members)
         + ", size="
         + sizeInBytes

@@ -8,16 +8,18 @@ import polyregion.*
 import scala.annotation.tailrec
 import scala.quoted.*
 import polyregion.compiler.Symbols
+import polyregion.compiler.Quoted
 
 object IntrinsifyPass {
 
-  def intrinsify(xs: List[p.Stmt]): List[p.Stmt] = for {
-    x <- xs
-    x <- intrinsifyInstanceApply(x)
-    x <- intrinsifyModuleApply(x)
-  } yield x
+  def intrinsify(using q: Quoted)(c: q.FnContext): q.FnContext = {
+    val (xs, instanceSyms)   = c.stmts.foldMapM(intrinsifyInstanceApply(_))
+    val (ys, moduleSyms) = xs.foldMapM(intrinsifyModuleApply(_))
+    val eliminated       = c.defs -- (instanceSyms ++ moduleSyms)
+    c.replaceStmts(ys).copy(defs = eliminated)
+  }
 
-  private def intrinsifyInstanceApply(s: p.Stmt) = s.mapExpr {
+  private def intrinsifyInstanceApply(s: p.Stmt) = s.mapAccExpr[p.Sym] {
     case inv @ p.Expr.Invoke(sym, Some(recv), args, rtn) =>
       (sym.fqn, recv, args) match {
         case (
@@ -40,23 +42,23 @@ object IntrinsifyPass {
             case "&&" => p.Expr.And(x, y)
             case "||" => p.Expr.Or(x, y)
           }
-          (expr, Nil)
+          (expr, Nil, sym :: Nil)
         case ((Symbols.SeqOps | Symbols.SeqMutableOps) :+ "apply", (xs: p.Term.Select), idx :: Nil) =>
-          (p.Expr.Index(xs, idx, rtn), Nil)
+          (p.Expr.Index(xs, idx, rtn), Nil, sym :: Nil)
         case (
               (Symbols.SeqOps | Symbols.SeqMutableOps) :+ "update",
               (xs: p.Term.Select),
               idx :: x :: Nil
             ) =>
-          (p.Expr.Alias(p.Term.UnitConst), p.Stmt.Update(xs, idx, x) :: Nil)
-        case (sym, recv, args) =>
-          println(s"No instance intrinsic for call: (($recv) : ${sym.mkString(".")})(${args.mkString(",")}) ")
-          (inv, Nil)
+          (p.Expr.Alias(p.Term.UnitConst), p.Stmt.Update(xs, idx, x) :: Nil, sym :: Nil)
+        case (unknownSym, recv, args) =>
+          println(s"No instance intrinsic for call: (($recv) : ${unknownSym.mkString(".")})(${args.mkString(",")}) ")
+          (inv, Nil, Nil)
       }
-    case x => (x, Nil)
+    case x => (x, Nil, Nil)
   }
 
-  private def intrinsifyModuleApply(s: p.Stmt) = s.mapExpr {
+  private def intrinsifyModuleApply(s: p.Stmt) = s.mapAccExpr[p.Sym] {
     case inv @ p.Expr.Invoke(sym, None, args, rtn) =>
       (sym.fqn, args) match {
         case ((Symbols.ScalaMath | Symbols.JavaMath) :+ op, x :: y :: Nil) => // scala.math binary
@@ -68,13 +70,12 @@ object IntrinsifyPass {
             case "tan" => p.Expr.UnaryIntrinsic(x, p.UnaryIntrinsicKind.Tan, rtn)
             case "abs" => p.Expr.UnaryIntrinsic(x, p.UnaryIntrinsicKind.Abs, rtn)
           }
-          (expr, Nil)
-        case (sym, args) =>
-          println(s"No module intrinsic for: ${sym.mkString(".")}(${args.mkString(",")}) ")
-          (inv, Nil)
+          (expr, Nil, sym :: Nil)
+        case (unknownSym, args) =>
+          println(s"No module intrinsic for: ${unknownSym.mkString(".")}(${args.mkString(",")}) ")
+          (inv, Nil, Nil)
       }
-
-    case x => (x, Nil)
+    case x => (x, Nil, Nil)
   }
 
 }

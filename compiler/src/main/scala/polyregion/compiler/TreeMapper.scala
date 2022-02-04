@@ -120,7 +120,7 @@ object TreeMapper {
 
           (ref, c) <-
             if (receiverOwnerFlags.is(q.Flags.Module)) // Object.x(ys)
-              mkReturn(p.Expr.Invoke(receiverSym, None, argRefs, tpe), c.mark(defdef)).success.deferred
+              mkReturn(p.Expr.Invoke(receiverSym, None, argRefs, tpe), c.mark(receiverSym,defdef)).success.deferred
             else
               ap.fun match {
                 case q.Select(q.New(tt), "<init>") => // new X
@@ -153,7 +153,7 @@ object TreeMapper {
                   }
                 case s @ q.Select(q, n) => // s.y(zs)
                   (c !! s)
-                    .mark(defdef)
+                    .mark(receiverSym,defdef)
                     .mapTerm(q)
                     .map((receiverRef, c) => mkReturn(p.Expr.Invoke(receiverSym, Some(receiverRef), argRefs, tpe), c))
                 case _ => ??? // (ctx.depth, None, Nil).success.deferred

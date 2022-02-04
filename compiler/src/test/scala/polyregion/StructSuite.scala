@@ -13,11 +13,16 @@ class StructSuite extends BaseSuite {
     def apply(a : Float) : Vec3 = Vec3(a,a,a)
   }
 
+  case class I32B(val v: Int){
+  }
+
   // case class Vec3N(a: Float, b: Float, c: Float)(n: Int)
 
   case class Vec33(a: Vec3, b: Vec3, c: Vec3)
 
   given NativeStruct[Vec3]  = nativeStructOf
+  // given NativeStruct[I32B]  = nativeStructOf
+
   // given NativeStruct[Vec3N] = nativeStructOf
   // given NativeStruct[Vec33] = nativeStructOf
 
@@ -25,28 +30,36 @@ class StructSuite extends BaseSuite {
     test(name)(r)
   }
 
-  // testExpr("buffer-param") {
-  //   val xs = Buffer.tabulate(10)(x =>
-  //     Vec3(
-  //       x * math.Pi.toFloat * 1, //
-  //       x * math.Pi.toFloat * 2, //
-  //       x * math.Pi.toFloat * 3  //
-  //     )
-  //   )
-  //   assertOffload {
-  //     xs(0).a + xs(0).b + xs(0).c
-  //   }
-  // }
+  testExpr("buffer-param") {
+    val xs = Buffer.tabulate(10)(x =>
+      Vec3(
+        x * math.Pi.toFloat * 1, //
+        x * math.Pi.toFloat * 2, //
+        x * math.Pi.toFloat * 3  //
+      )
+    )
+    assertOffload {
+      xs(0).a + xs(0).b + xs(0).c
+    }
+  }
 
   // class Foo(i : Int) {
   //     def this(f : Float) = this(1)
   // }
 
-  testExpr("return") {
-    assertOffload(
-      Vec3(0.0, 1.0, 2.0)
-    )
-  }
+  // testExpr("return") {
+  //   assertOffload(
+  //     Vec3(42.0, 1.0, 2.0)
+  //   )
+  // }
+
+  // testExpr("I32B") {
+
+    
+  //   assertOffload(
+  //     I32B(42)
+  //   )
+  // }
 
   
   // testExpr("return") {

@@ -62,7 +62,8 @@ llvm::Type *LLVMAstTransformer::mkTpe(const Type::Any &tpe) {                   
         if (x.length) {
           return llvm::ArrayType::get(mkTpe(x.component), *x.length);
         } else {
-          return mkTpe(x.component)->getPointerTo();
+          auto comp = mkTpe(x.component);
+          return comp->isPointerTy() ? comp : comp->getPointerTo();
         }
       }
 
@@ -88,7 +89,7 @@ llvm::Value *LLVMAstTransformer::mkSelect(const Term::Select &select, bool load)
       if (std::holds_alternative<Type::Array>(*named.tpe) || std::holds_alternative<Type::Struct>(*named.tpe)) {
         return *x;
       } else {
-        return B.CreateLoad(mkTpe(named.tpe), *x, named.symbol + "_value");
+        return load ? B.CreateLoad(mkTpe(named.tpe), *x, named.symbol + "_value") : *x;
       } //
     } else {
       auto pool = mk_string2<std::string, llvm::Value *>(
@@ -99,6 +100,7 @@ llvm::Value *LLVMAstTransformer::mkSelect(const Term::Select &select, bool load)
 
   if (select.init.empty()) {
     // plain path lookup
+    // FIXME inline selectNamed!!
     return selectNamed(select.last);
   } else {
     // we're in a select chain, init elements must return struct type; the head must come from LUT
@@ -137,7 +139,7 @@ llvm::Value *LLVMAstTransformer::mkRef(const Term::Any &ref) {
   using llvm::ConstantInt;
   return variants::total(
       *ref, //
-      [&](const Term::Select &x) -> llvm::Value * { return mkSelect(x); },
+      [&](const Term::Select &x) -> llvm::Value * { return mkSelect(x, false); },
       [&](const Term::UnitConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt1Ty(C), 0); },
       [&](const Term::BoolConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt1Ty(C), x.value); },
       [&](const Term::ByteConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt8Ty(C), x.value); },
@@ -280,8 +282,16 @@ llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Functi
       },
       [&](const Expr::Index &x) -> llvm::Value * {
         auto tpe = mkTpe(x.tpe);
-        auto ptr = B.CreateInBoundsGEP(tpe, mkSelect(x.lhs), mkRef(x.idx), key + "_ptr");
-        return B.CreateLoad(tpe, ptr, key + "_value");
+
+        auto l = mkSelect(x.lhs, false);
+        std::cout << "O=" << llvm_tostring(l) << std::endl;
+        std::cout << "O=" << llvm_tostring(tpe) << std::endl;
+        std::cout << "O=" << llvm_tostring(tpe->getPointerElementType()) << std::endl;
+
+        auto ptr =
+            B.CreateInBoundsGEP(tpe->getPointerElementType(), mkSelect(x.lhs, false), mkRef(x.idx), key + "_ptr");
+
+        return B.CreateLoad(tpe->getPointerElementType(), ptr, key + "_value");
       });
 }
 
@@ -337,22 +347,30 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
 
         // XXX copy is implicit for non-pointers, even if copy is false
         if (x.copy && exprValue->getType()->isPointerTy()) {
+
           // http://nondot.org/sabre/LLVMNotes/SizeOf-OffsetOf-VariableSizedStructs.txt
           // we want
-          // %Size = getelementptr %T* null, i32 1
-          // %SizeI = ptrtoint %T* %Size to i32
-          auto sizeP = B.CreateGEP(llvm::ConstantPointerNull::get(selectPtr->getType()->getPointerTo()), {}, "sizeP");
-          auto size = B.CreatePtrToInt(sizeP, llvm::Type::getInt32Ty(C));
+          // %SizePtr = getelementptr %T, %T* null, i32 1
+          // %Size = ptrtoint %T* %SizePtr to i32
+
+          auto sizePtr =
+              B.CreateGEP(selectPtr->getType()->getPointerElementType(),
+                          llvm::ConstantPointerNull::get(llvm::dyn_cast<llvm::PointerType>(selectPtr->getType())),
+                          llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 1), "sizePtr");
+          auto size = B.CreatePtrToInt(sizePtr, llvm::Type::getInt32Ty(C));
 
           // expr is a value, see if we want to deref it
           // TODO mkExprValue needs to return a pair w/ ptr if exists
 
-          B.CreateMemCpyInline(selectPtr, {}, exprValue, {}, size);
-          //          B.CreateStore(exprValue, selectPtr);
-
+          // XXX CreateMemCpyInline has a immarg size so %size must be a pure constant, this is crazy
+          B.CreateMemCpy(selectPtr, {}, exprValue, {}, size);
         } else {
 
-          B.CreateStore(exprValue, selectPtr);
+          // we're here if expr is not a pointer (i.e. not a struct/array)
+
+          std::cout << llvm_tostring(mkSelect(x.name, false)) << " := " << llvm_tostring(exprValue) << std::endl;
+
+          B.CreateStore(exprValue, mkSelect(x.name, false));
         }
       },
       [&](const Stmt::Update &x) {

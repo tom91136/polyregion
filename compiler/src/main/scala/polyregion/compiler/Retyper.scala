@@ -6,6 +6,7 @@ import polyregion.*
 
 import scala.annotation.tailrec
 import scala.quoted.*
+import simulacrum.typeclass
 
 object Retyper {
 
@@ -27,7 +28,7 @@ object Retyper {
   def lowerProductType(using q: Quoted)(tpeSym: q.Symbol): Deferred[p.StructDef] = {
 
     if (!tpeSym.flags.is(q.Flags.Case)) {
-      throw RuntimeException(s"Unsupported combination of flags: ${tpeSym.flags.show}")
+      throw RuntimeException(s"Unsupported combination of flags: ${tpeSym.flags.show} for ${tpeSym}")
     }
 
     tpeSym.caseFields
