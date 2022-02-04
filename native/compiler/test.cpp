@@ -9,21 +9,25 @@
 
 using namespace polyregion::polyast;
 
+using namespace Stmt;
+using namespace Term;
+using namespace Expr;
+
 TEST_CASE("json round-trip", "[ast]") {
   Function expected(                                        //
       Sym({"foo"}),                                         //
       {Named("a", Type::Int()), Named("b", Type::Float())}, //
       Type::Unit(),                                         //
       {
-          Stmt::Comment("a"),                                     //
-          Stmt::Comment("b"),                                     //
-          Stmt::Break(),                                          //
-          Stmt::Return(Expr::Alias(Term::IntConst(1))),           //
-          Stmt::Cond(                                             //
-              Expr::Alias(Term::BoolConst(true)),                 //
-              {Stmt::Return(Expr::Alias(Term::IntConst(1)))},     //
-              {Stmt::Return(Expr::Alias(Term::BoolConst(false)))} //
-              )                                                   //
+          Comment("a"),                         //
+          Comment("b"),                         //
+          Break(),                              //
+          Return(Alias(IntConst(1))),           //
+          Cond(                                 //
+              Alias(BoolConst(true)),           //
+              {Return(Alias(IntConst(1)))},     //
+              {Return(Alias(BoolConst(false)))} //
+              )                                 //
       });
   auto actual = function_from_json(function_to_json(expected));
   CHECK(expected == actual);
@@ -51,18 +55,18 @@ TEST_CASE("empty function should compile", "[compiler]") {
 TEST_CASE("struct member access", "[compiler]") {
   polyregion_initialise();
 
-  auto sdef = Sym({"a", "b"});
+  Sym sdef({"a", "b"});
   StructDef def(sdef, {Named("x", Type::Int()), Named("y", Type::Int())});
-  auto arg = Named("in", Type::Struct(sdef));
+  Named arg("in", Type::Struct(sdef));
   Function fn(Sym({"foo"}), {arg}, Type::Unit(),
               {
-                  Stmt::Var(                    //
+                  Var(                          //
                       Named("y2", Type::Int()), //
                       {
-                          Expr::Alias(Term::Select({arg}, Named("y", Type::Int()))) //
-                      }                                                             //
+                          Alias(Select({arg}, Named("y", Type::Int()))) //
+                      }                                                 //
                       ),
-                  Stmt::Return(Expr::Alias(Term::UnitConst())),
+                  Return(Alias(UnitConst())),
               });
 
   Program p(fn, {}, {def});
@@ -73,24 +77,29 @@ TEST_CASE("struct member access", "[compiler]") {
 TEST_CASE("struct alloc", "[compiler]") {
   polyregion_initialise();
 
-  auto sdef = Sym({"MyStruct"});
-  StructDef def(sdef, {Named("x", Type::Int()), Named("y", Type::Int())});
-  Function fn(
-      Sym({"foo"}), {}, Type::Unit(),
-      {
-          Stmt::Var(Named("x", Type::Struct(sdef)), {}),
-          Stmt::Mut(Term::Select({Named("x", Type::Struct(sdef))}, Named("x", Type::Int())),
-                    Expr::Alias(Term::IntConst(42)), true),
-          Stmt::Var(Named("y", Type::Struct(sdef)), {Expr::Alias(Term::Select({}, Named("x", Type::Struct(sdef))))}),
-          Stmt::Return(Expr::Alias(Term::UnitConst())),
-      });
+  Sym myStructSym({"MyStruct"});
+  Named defX = Named("x", Type::Int());
+  Named defY = Named("y", Type::Int());
+  StructDef def(myStructSym, {defX, defY});
+  Type::Struct myStruct(myStructSym);
+
+  Function fn(Sym({"foo"}), {Named("out", myStruct)}, Type::Int(),
+              {
+                  Var(Named("s", myStruct), {}),
+                  Mut(Select({Named("s", myStruct)}, defX), Alias(IntConst(42)), false),
+                  Mut(Select({Named("s", myStruct)}, defY), Alias(IntConst(43)), false),
+
+                  Mut(Select({}, Named("out", myStruct)), Alias(Select({}, Named("s", myStruct))), true),
+//                  Return(Alias(UnitConst())),
+                  Return(Alias(IntConst(69)) ),
+              });
 
   INFO(repr(fn))
 
   Program p(fn, {}, {def});
 
   auto c = polyregion::compiler::compile(p);
-  CHECK(c.messages.empty());
+  std::cout << c <<std::endl;
+  CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);
-
 }

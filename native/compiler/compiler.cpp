@@ -4,7 +4,7 @@
 #include "ast.h"
 #include "backend/llvm.h"
 #include "backend/llvmc.h"
-#include "backend/opencl.h"
+#include "backend/c99.h"
 #include "compiler.h"
 #include "generated/polyast_codec.h"
 #include "json.hpp"
@@ -26,18 +26,25 @@ int64_t compiler::nowMs() {
 }
 
 std::ostream &compiler::operator<<(std::ostream &os, const compiler::Compilation &compilation) {
-  auto events = mk_string<Event>(
-      compilation.events,
-      [](auto &e) {
-        return "[" + std::to_string(e.epochMillis) + "] " + e.name + ": " + std::to_string(e.elapsedNanos) + "ns";
-      },
-      ", ");
-  os << "Compilation {"                                                                                 //
-     << "\n  binary: " << (compilation.binary ? std::to_string(compilation.binary->size()) : "(empty)") //
-     << "\n  disassembly:\n`" << compilation.disassembly.value_or("(empty)") << "`"                     //
-     << "\n  events: " << events                                                                        //
-     << "\n  messages: `" << compilation.messages << "`"                                                //
-     << "\n}";
+  os << "Compilation {"                                                                                            //
+     << "\n  binary: " << (compilation.binary ? std::to_string(compilation.binary->size()) + " bytes" : "(empty)") //
+     << "\n  messages: `" << compilation.messages << "`"                                                           //
+     << "\n  events:\n";
+
+  for (auto &e : compilation.events) {
+    os << "    [" << e.epochMillis << ", +" << (double(e.elapsedNanos) / 1e6) << "ms] " << e.name;
+    if (e.data.empty()) continue;
+    os << ":\n";
+    std::stringstream ss(e.data);
+    std::string l;
+    size_t ln = 0;
+    while (std::getline(ss, l, '\n')) {
+      ln++;
+      os << "    " << std::setw(3) << ln << "│" << l << '\n';
+    }
+    os << "       ╰───\n";
+  }
+  os << "\n}";
   return os;
 }
 
@@ -102,12 +109,17 @@ compiler::Layout compiler::layoutOf(const Bytes &structDef) {
   return layoutOf(def);
 }
 
+static void sortEvents(compiler::Compilation &c) {
+  std::sort(c.events.begin(), c.events.end(),
+            [](const auto &l, const auto &r) { return l.epochMillis < r.epochMillis; });
+}
+
 compiler::Compilation compiler::compile(const polyast::Program &program) {
   if (!init) {
     return Compilation{"initialise was not called before"};
   }
-  backend::OpenCL oclGen;
-  oclGen.run(program);
+  backend::C99 c99Gen;
+  c99Gen.run(program);
 
   backend::LLVM gen;
   Compilation c;
@@ -116,6 +128,7 @@ compiler::Compilation compiler::compile(const polyast::Program &program) {
   } catch (const std::exception &e) {
     c.messages = e.what();
   }
+  sortEvents(c);
   return c;
 }
 
@@ -126,18 +139,18 @@ compiler::Compilation compiler::compile(const Bytes &astBytes) {
   std::cout << "[polyregion-native] Len  : " << astBytes.size() << std::endl;
   auto jsonStart = nowMono();
   json json = deserialiseAst(astBytes);
-  events.emplace_back(nowMs(), "ast_deserialise", elapsedNs(jsonStart));
+  events.emplace_back(nowMs(), elapsedNs(jsonStart), "ast_deserialise", "");
   std::cout << "[polyregion-native] JSON :" << json << std::endl;
 
   auto astLift = nowMono();
   auto program = polyast::program_from_json(json);
-  events.emplace_back(nowMs(), "ast_lift", elapsedNs(astLift));
+  events.emplace_back(nowMs(), elapsedNs(astLift), "ast_lift", "");
 
   std::cout << "[polyregion-native] AST  :" << program << std::endl;
   std::cout << "[polyregion-native] Repr :" << polyast::repr(program) << std::endl;
 
-  auto r = compile(program);
-  r.events.insert(r.events.end(), events.begin(), events.end());
-
-  return r;
+  auto c = compile(program);
+  c.events.insert(c.events.end(), events.begin(), events.end());
+  sortEvents(c);
+  return c;
 }

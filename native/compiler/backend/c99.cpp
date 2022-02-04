@@ -1,13 +1,13 @@
 #include <iostream>
 
-#include "opencl.h"
+#include "c99.h"
 #include "utils.hpp"
 #include "variants.hpp"
 
 using namespace polyregion;
 using namespace std::string_literals;
 
-std::string backend::OpenCL::mkTpe(const Type::Any &tpe) {
+std::string backend::C99::mkTpe(const Type::Any &tpe) {
   return variants::total(
       *tpe,                                                          //
       [&](const Type::Float &x) { return "float"s; },                //
@@ -25,7 +25,7 @@ std::string backend::OpenCL::mkTpe(const Type::Any &tpe) {
   );
 }
 
-std::string backend::OpenCL::mkRef(const Term::Any &ref) {
+std::string backend::C99::mkRef(const Term::Any &ref) {
   return variants::total(
       *ref,                                                                  //
       [](const Term::Select &x) { return polyast::qualified(x); },           //
@@ -42,7 +42,7 @@ std::string backend::OpenCL::mkRef(const Term::Any &ref) {
   );                                                                         // FIXME escape string
 }
 
-std::string backend::OpenCL::mkExpr(const Expr::Any &expr, const std::string &key) {
+std::string backend::C99::mkExpr(const Expr::Any &expr, const std::string &key) {
   return variants::total(
       *expr, //
       [](const Expr::UnaryIntrinsic &x) {
@@ -88,7 +88,7 @@ std::string backend::OpenCL::mkExpr(const Expr::Any &expr, const std::string &ke
   );
 }
 
-std::string backend::OpenCL::mkStmt(const Stmt::Any &stmt) {
+std::string backend::C99::mkStmt(const Stmt::Any &stmt) {
   return variants::total(
       *stmt, //
       [&](const Stmt::Comment &x) {
@@ -135,7 +135,7 @@ std::string backend::OpenCL::mkStmt(const Stmt::Any &stmt) {
   );
 }
 
-compiler::Compilation backend::OpenCL::run(const Program &program) {
+compiler::Compilation backend::C99::run(const Program &program) {
   auto fnTree = program.entry;
 
   auto start = compiler::nowMono();
@@ -146,17 +146,27 @@ compiler::Compilation backend::OpenCL::run(const Program &program) {
   auto prototype = mkTpe(fnTree.rtn) + " " + qualified(fnTree.name) + "(" + args + ")";
 
   auto body = mk_string<Stmt::Any>(
-      fnTree.body, [&](auto &stmt) { return mkStmt(stmt); }, "\n");
+      fnTree.body, [&](auto &stmt) { return "  " + mkStmt(stmt); }, "\n");
 
-  auto def = prototype + "{\n" + body + "\n}";
+  auto structDefs = mk_string<StructDef>(
+      program.defs,
+      [&](auto &x) {
+        return std::accumulate(                                                                           //
+                   x.members.begin(), x.members.end(),                                                    //
+                   "typedef struct {"s,                                                                   //
+                   [&](auto &&acc, auto m) { return acc + "\n  " + mkTpe(m.tpe) + " " + m.symbol + ";"; } //
+                   ) +
+               "\n} " + qualified(x.name) + ";";
+      },
+      "\n");
+
+  auto def = structDefs + "\n" + prototype + "{\n" + body + "\n}";
   std::cout << def << std::endl;
-
   std::vector<uint8_t> data(def.c_str(), def.c_str() + def.length() + 1);
 
-  return compiler::Compilation(                                               //
-      data,                                                                   //
-      {},                                                                     //
-      {{compiler::nowMs(), "polyast_to_opencl", compiler::elapsedNs(start)}}, //
-      ""                                                                      //
+  return compiler::Compilation(                                                   //
+      data,                                                                       //
+      {{compiler::nowMs(), compiler::elapsedNs(start), "polyast_to_opencl", ""}}, //
+      ""                                                                          //
   );
 }

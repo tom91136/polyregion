@@ -4,7 +4,7 @@ set(LIB_SOURCES
 
         backend/llvm.cpp
         backend/llvmc.cpp
-        backend/opencl.cpp
+        backend/c99.cpp
 
         ast.cpp
         dis.cpp

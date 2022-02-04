@@ -24,8 +24,7 @@ enum class EXPORT Backend : uint8_t { Invalid = 0, LLVM, OpenCL, CUDA };
 
 struct EXPORT Member {
   polyast::Named name;
-  uint64_t offsetInBytes;
-  uint64_t sizeInBytes;
+  uint64_t offsetInBytes, sizeInBytes;
   Member(decltype(name) name, decltype(offsetInBytes) offsetInBytes, decltype(sizeInBytes) sizeInBytes)
       : name(std::move(name)), offsetInBytes(offsetInBytes), sizeInBytes(sizeInBytes) {}
   friend std::ostream &operator<<(std::ostream &, const Member &);
@@ -33,21 +32,21 @@ struct EXPORT Member {
 
 struct EXPORT Layout {
   polyast::Sym name;
-  uint64_t sizeInBytes;
-  uint64_t alignment;
+  uint64_t sizeInBytes, alignment;
   std::vector<Member> members;
-  Layout(decltype(name) name, decltype(sizeInBytes) sizeInBytes, decltype(alignment) alignment,
-         decltype(members) members)
+  Layout(decltype(name) name,                                              //
+         decltype(sizeInBytes) sizeInBytes, decltype(alignment) alignment, //
+         decltype(members) members)                                        //
       : name(std::move(name)), sizeInBytes(sizeInBytes), alignment(alignment), members(std::move(members)) {}
   friend std::ostream &operator<<(std::ostream &, const Layout &);
 };
 
 struct EXPORT Event {
-  int64_t epochMillis;
-  std::string name;
-  int64_t elapsedNanos;
-  Event(int64_t epochMillis, std::string name, int64_t elapsedNanos)
-      : epochMillis(epochMillis), name(std::move(name)), elapsedNanos(elapsedNanos) {}
+  int64_t epochMillis, elapsedNanos;
+  std::string name, data;
+  Event(decltype(epochMillis) epochMillis, decltype(elapsedNanos) elapsedNanos, //
+        decltype(name) name, decltype(data) data)                               //
+      : epochMillis(epochMillis), elapsedNanos(elapsedNanos), name(std::move(name)), data(std::move(data)) {}
 };
 
 using Bytes = std::vector<uint8_t>;
@@ -55,17 +54,14 @@ using Bytes = std::vector<uint8_t>;
 struct EXPORT Compilation {
   std::vector<Layout> layouts;
   std::optional<Bytes> binary;
-  std::optional<std::string> disassembly;
   std::vector<Event> events;
   std::string messages;
   Compilation() = default;
   explicit Compilation(decltype(messages) messages) : messages(std::move(messages)) {}
-  Compilation(decltype(binary) binary,           //
-              decltype(disassembly) disassembly, //
-              decltype(events) events,           //
+  Compilation(decltype(binary) binary, //
+              decltype(events) events, //
               decltype(messages) messages)
-      : binary(std::move(binary)), disassembly(std::move(disassembly)), events(std::move(events)),
-        messages(std::move(messages)) {}
+      : binary(std::move(binary)), events(std::move(events)), messages(std::move(messages)) {}
   EXPORT friend std::ostream &operator<<(std::ostream &, const Compilation &);
 };
 

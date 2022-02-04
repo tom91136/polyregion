@@ -39,7 +39,9 @@ public:
   std::optional<llvm::StructType *> lookup(const Sym &s);
 
   explicit LLVMAstTransformer(llvm::LLVMContext &c) : C(c), lut(), structTypes(), B(C) {}
-  void transform(const std::unique_ptr<llvm::Module> &module, const Program &);
+
+  std::pair<std::optional<std::string>, std::string> transform(const std::unique_ptr<llvm::Module> &module, const Program &);
+  std::pair<std::optional<std::string>, std::string> optimise(const std::unique_ptr<llvm::Module> &module);
 };
 
 class LLVM : public Backend {

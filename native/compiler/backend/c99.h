@@ -8,7 +8,7 @@ namespace polyregion::backend {
 
 using namespace polyregion::polyast;
 
-class OpenCL : public polyregion::backend::Backend {
+class C99 : public polyregion::backend::Backend {
 
 private:
   std::string mkTpe(const Type::Any &tpe);

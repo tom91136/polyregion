@@ -26,30 +26,29 @@ polyregion_compilation *polyregion_compile(const polyregion_buffer *ast, bool em
   auto bin = compilation.binary ? polyregion_buffer{compilation.binary->data(), compilation.binary->size()}
                                 : polyregion_buffer{nullptr, 0};
 
-  auto dis = compilation.disassembly ? polyregion::new_str(*compilation.disassembly) : nullptr;
-
   auto elapsed = new polyregion_event[compilation.events.size()];
   std::transform(compilation.events.begin(), compilation.events.end(), elapsed, [](auto &e) {
-    return polyregion_event{e.epochMillis, polyregion::new_str(e.name), e.elapsedNanos};
+    return polyregion_event{e.epochMillis, e.elapsedNanos, polyregion::new_str(e.name), polyregion::new_str(e.data)};
   });
 
   return new polyregion_compilation{
-      bin, dis,                                           //
-      polyregion::new_str(compilation.messages), elapsed, //
-      compilation.events.size()                           //
+      bin,                                       //
+      polyregion::new_str(compilation.messages), //
+      elapsed,                                   //
+      compilation.events.size()                  //
   };
 }
 
 void polyregion_release_compile(polyregion_compilation *buffer) {
   if (buffer) {
     polyregion::free_str(buffer->messages);
-    polyregion::free_str(buffer->disassembly);
-    if (buffer->elapsed) {
+    if (buffer->events) {
       for (size_t i = 0; i < buffer->elapsed_size; ++i) {
-        polyregion::free_str(buffer->elapsed[i].name);
+        polyregion::free_str(buffer->events[i].name);
+        polyregion::free_str(buffer->events[i].data);
       }
     }
-    delete[] buffer->elapsed;
+    delete[] buffer->events;
   }
   delete buffer;
 }

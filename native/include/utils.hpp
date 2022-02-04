@@ -20,7 +20,7 @@ constexpr T undefined(const std::string &file, size_t line, const std::string &m
   throw std::logic_error(file + ":" + std::to_string(line) + ": " + message);
 }
 
-template <typename T, template <typename...> typename Container>
+template <typename T, template <typename...> typename Container = std::vector>
 std::string mk_string(const Container<T> &xs,
                       const std::function<std::string(const T &)> &f, //
                       const std::string &delim) {

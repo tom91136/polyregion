@@ -187,75 +187,74 @@ static void setFunctionAttributes(llvm::StringRef CPU, llvm::StringRef Features,
 polyregion::compiler::Compilation llvmc::compileModule(bool emitDisassembly,            //
                                                        std::unique_ptr<llvm::Module> M, //
                                                        llvm::LLVMContext &Context) {
-  using namespace llvm;
   auto start = compiler::nowMono();
 
   M->setDataLayout(LLVMCurrentMachine->createDataLayout());
 
-  for (Function &F : M->functions())
+  for (llvm::Function &F : M->functions())
     setFunctionAttributes(LLVMCPUStr, LLVMFeaturesStr, F);
 
-  verifyModule(*M, &errs());
-
   // AddOptimizationPasses
-  PassManagerBuilder B;
+  llvm::PassManagerBuilder B;
   B.NewGVN = true;
   B.SizeLevel = 0;
   B.OptLevel = 3;
   B.LoopVectorize = true;
   B.SLPVectorize = true;
-//  B.RerollLoops = true;
-//  B.LoopsInterleaved = true;
+  //  B.RerollLoops = true;
+  //  B.LoopsInterleaved = true;
 
-  auto doCodegen = [&](Module &m,
-                       const std::function<void(LLVMTargetMachine &, legacy::PassManager &, MCContext &)> &f) {
-    legacy::PassManager PM;
-    // XXX we have no rtti here so no dynamic cast
-    auto &LLVMTM = static_cast<LLVMTargetMachine &>( // NOLINT(cppcoreguidelines-pro-type-static-cast-downcast)
-        *LLVMCurrentMachine);
-    auto *MMIWP = new MachineModuleInfoWrapperPass(&LLVMTM); // pass manager takes owner of this
-    PM.add(MMIWP);
-    PM.add(createTargetTransformInfoWrapperPass(LLVMCurrentMachine->getTargetIRAnalysis()));
-    TargetPassConfig *PassConfig = LLVMTM.createPassConfig(PM);
-    // Set PassConfig options provided by TargetMachine.
-    PassConfig->setDisableVerify(true);
-    PM.add(PassConfig);
+  auto doCodegen =
+      [&](llvm::Module &m,
+          const std::function<void(llvm::LLVMTargetMachine &, llvm::legacy::PassManager &, llvm::MCContext &)> &f) {
+        llvm::legacy::PassManager PM;
+        // XXX we have no rtti here so no dynamic cast
+        auto &LLVMTM =
+            static_cast<llvm::LLVMTargetMachine &>( // NOLINT(cppcoreguidelines-pro-type-static-cast-downcast)
+                *LLVMCurrentMachine);
+        auto *MMIWP = new llvm::MachineModuleInfoWrapperPass(&LLVMTM); // pass manager takes owner of this
+        PM.add(MMIWP);
+        PM.add(createTargetTransformInfoWrapperPass(LLVMCurrentMachine->getTargetIRAnalysis()));
+        llvm::TargetPassConfig *PassConfig = LLVMTM.createPassConfig(PM);
+        // Set PassConfig options provided by TargetMachine.
+        PassConfig->setDisableVerify(true);
+        PM.add(PassConfig);
 
-    // PM done
+        // PM done
 
-    legacy::FunctionPassManager FNP(&m);
-    FNP.add(createTargetTransformInfoWrapperPass(LLVMCurrentMachine->getTargetIRAnalysis()));
+        llvm::legacy::FunctionPassManager FNP(&m);
+        FNP.add(createTargetTransformInfoWrapperPass(LLVMCurrentMachine->getTargetIRAnalysis()));
 
-    LLVMCurrentMachine->adjustPassManager(B);
-    B.populateFunctionPassManager(FNP);
-    B.populateModulePassManager(PM);
+        LLVMCurrentMachine->adjustPassManager(B);
+        B.populateFunctionPassManager(FNP);
+        B.populateModulePassManager(PM);
 
-    FNP.doInitialization();
-    for (Function &func : *M) {
-      FNP.run(func);
-    }
-    FNP.doFinalization();
+        FNP.doInitialization();
+        for (llvm::Function &func : *M) {
+          FNP.run(func);
+        }
+        FNP.doFinalization();
 
-    if (PassConfig->addISelPasses()) throw std::logic_error("No ISEL");
-    PassConfig->addMachinePasses();
-    PassConfig->setInitialized();
+        if (PassConfig->addISelPasses()) throw std::logic_error("No ISEL");
+        PassConfig->addMachinePasses();
+        PassConfig->setInitialized();
 
-    if (TargetPassConfig::willCompleteCodeGenPipeline()) {
-      f(LLVMTM, PM, MMIWP->getMMI().getContext());
-    }
-    PM.run(m);
-  };
+        if (llvm::TargetPassConfig::willCompleteCodeGenPipeline()) {
+          f(LLVMTM, PM, MMIWP->getMMI().getContext());
+        }
+        PM.run(m);
+      };
 
   llvm::SmallVector<char, 0> asmBuffer;
   llvm::raw_svector_ostream asmStream(asmBuffer);
   doCodegen(*llvm::CloneModule(*M), [&](auto &tm, auto &pm, auto &ctx) {
-    tm.addAsmPrinter(pm, asmStream, nullptr, CodeGenFileType::CGFT_AssemblyFile, ctx);
+    tm.addAsmPrinter(pm, asmStream, nullptr, llvm::CodeGenFileType::CGFT_AssemblyFile, ctx);
   });
 
   llvm::SmallVector<char, 0> objBuffer;
   llvm::raw_svector_ostream objStream(objBuffer);
   doCodegen(*llvm::CloneModule(*M), [&](auto &tm, auto &pm, auto &ctx) {
-    tm.addAsmPrinter(pm, objStream, nullptr, CodeGenFileType::CGFT_ObjectFile, ctx);
+    tm.addAsmPrinter(pm, objStream, nullptr, llvm::CodeGenFileType::CGFT_ObjectFile, ctx);
   });
 
   //  for (auto &&f : MMIWP->getMMI().getModule()->functions()) {
@@ -273,26 +272,11 @@ polyregion::compiler::Compilation llvmc::compileModule(bool emitDisassembly,    
   //  std::cout << "Done = "
   //            << " b=" << asmBuffer.size() << std::endl;
 
-  //  std::ofstream file("the_obj2.o", std::ios::binary);
-  //  file.write(objBuffer.data(), ssize_t(objBuffer.size_in_bytes()));
-  //  file.flush();
-  //
-  //  std::ofstream file2("the_obj2.s", std::ios::binary);
-  //  file2.write(asmBuffer.data(), ssize_t(asmBuffer.size_in_bytes()));
-  //  file2.flush();
-
-  //  auto b =
-  //      llvm::object::createBinary(*llvm::MemoryBuffer::getMemBuffer(StringRef(data.data(), data.size()), "", false));
-  //  if (auto e = b.takeError()) {
-  //    std::cout << "E=" << toString(std::move(e)) << std::endl;
-  //  }
-
   auto elapsed = compiler::elapsedNs(start);
-  polyregion::compiler::Compilation c(                          //
-      std::vector<uint8_t>(objBuffer.begin(), objBuffer.end()), //
-      std::string(asmBuffer.begin(), asmBuffer.end()),          //
-      {{compiler::nowMs(), "llvm_to_obj", elapsed}},            //
-      ""                                                        //
+  polyregion::compiler::Compilation c(                                                                //
+      std::vector<uint8_t>(objBuffer.begin(), objBuffer.end()),                                       //
+      {{compiler::nowMs(), elapsed, "llvm_to_obj", std::string(asmBuffer.begin(), asmBuffer.end())}}, //
+      ""                                                                                              //
   );
 
   return c;

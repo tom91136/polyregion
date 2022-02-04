@@ -53,7 +53,7 @@ llvm::Type *LLVMAstTransformer::mkTpe(const Type::Any &tpe) {                   
       [&](const Type::Unit &x) -> llvm::Type * { return llvm::Type::getVoidTy(C); },             //
       [&](const Type::Struct &x) -> llvm::Type * {
         if (auto def = polyregion::get_opt(structTypes, x.name); def) {
-          return def->first;
+          return def->first->getPointerTo();
         } else {
           return undefined(__FILE_NAME__, __LINE__, "Unseen struct def : " + to_string(x));
         }
@@ -303,9 +303,17 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
           std::cout << "var to " << (x.expr ? repr(*x.expr) : "_") << std::endl;
 
           if (x.expr) {
+            // check that the expr is also a pointer: lhs* = rhs*
             lut[x.name.symbol] = mkExprValue(*x.expr, fn, x.name.symbol);
           } else {
-            auto stack = B.CreateAlloca(mkTpe(x.name.tpe), nullptr, x.name.symbol + "_stack_ptr");
+            // otherwise, stack allocate the struct and return the pointer to that
+            llvm::Type *structPtrTy = mkTpe(x.name.tpe);
+            if (!structPtrTy->isPointerTy()) {
+              throw std::logic_error("The LLVM struct type `" + llvm_tostring(structPtrTy) +
+                                     "` was not a pointer to the struct " + repr(x.name.tpe) +
+                                     " in stmt:" + repr(stmt));
+            }
+            auto stack = B.CreateAlloca(structPtrTy->getPointerElementType(), nullptr, x.name.symbol + "_stack_ptr");
             lut[x.name.symbol] = stack;
           }
 
@@ -321,28 +329,29 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
       [&](const Stmt::Mut &x) {
         auto exprValue = mkExprValue(x.expr, fn, qualified(x.name) + "_mut"); // value
         //  XXX do NOT allocate (mkSelect) here, we're mutating!
-        auto selectPtr = mkSelect(x.name, false);  // ptr
+        auto selectPtr = mkSelect(x.name, false); // ptr
 
         // selectPtr := exprValue
 
-        std::cout << "storing to " << selectPtr << std::endl;
+        std::cout << llvm_tostring(selectPtr) << " := " << llvm_tostring(exprValue) << std::endl;
 
-        if (x.copy) {
+        // XXX copy is implicit for non-pointers, even if copy is false
+        if (x.copy && exprValue->getType()->isPointerTy()) {
           // http://nondot.org/sabre/LLVMNotes/SizeOf-OffsetOf-VariableSizedStructs.txt
           // we want
           // %Size = getelementptr %T* null, i32 1
           // %SizeI = ptrtoint %T* %Size to i32
-          auto sizeP = B.CreateGEP(  llvm::ConstantPointerNull::get(selectPtr->getType()->getPointerTo()), {}, "sizeP");
+          auto sizeP = B.CreateGEP(llvm::ConstantPointerNull::get(selectPtr->getType()->getPointerTo()), {}, "sizeP");
           auto size = B.CreatePtrToInt(sizeP, llvm::Type::getInt32Ty(C));
 
           // expr is a value, see if we want to deref it
           // TODO mkExprValue needs to return a pair w/ ptr if exists
 
-          //
           B.CreateMemCpyInline(selectPtr, {}, exprValue, {}, size);
           //          B.CreateStore(exprValue, selectPtr);
 
         } else {
+
           B.CreateStore(exprValue, selectPtr);
         }
       },
@@ -401,11 +410,12 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
   );
 }
 
-void LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> &module, const Program &program) {
+std::pair<std::optional<std::string>, std::string>
+LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> &module, const Program &program) {
 
   auto fnTree = program.entry;
 
-  // setup the struct defs first so that structs in params work
+  // set up the struct defs first so that structs in params work
   std::transform(                                    //
       program.defs.begin(), program.defs.end(),      //
       std::inserter(structTypes, structTypes.end()), //
@@ -436,7 +446,8 @@ void LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> &module, 
       std::inserter(lut, lut.end()),                       //
       [&](auto &arg, const auto &named) -> std::pair<std::string, llvm::Value *> {
         arg.setName(named.symbol);
-        if (std::holds_alternative<Type::Array>(*named.tpe)) {
+
+        if (std::holds_alternative<TypeKind::Ref>(*kind(named.tpe))) {
           return {named.symbol, &arg};
         } else {
           auto stack = B.CreateAlloca(mkTpe(named.tpe), nullptr, named.symbol + "_stack_ptr");
@@ -449,20 +460,42 @@ void LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> &module, 
     //    std::cout << "[LLVM]" << repr(stmt) << std::endl;
     mkStmt(stmt, fn);
   }
-  module->print(llvm::errs(), nullptr);
-  llvm::verifyModule(*module, &llvm::errs());
-  //  std::cout << "Pre-opt verify OK!" << std::endl;
 
+  std::string ir;
+  llvm::raw_string_ostream irOut(ir);
+  module->print(irOut, nullptr);
+
+  std::string err;
+  llvm::raw_string_ostream errOut(err);
+  if (llvm::verifyModule(*module, &errOut)) {
+    return {errOut.str(), irOut.str()};
+  } else {
+    return {{}, irOut.str()};
+  }
+}
+
+std::pair<std::optional<std::string>, std::string>
+LLVMAstTransformer::optimise(const std::unique_ptr<llvm::Module> &module) {
   llvm::PassManagerBuilder builder;
-  //  builder.OptLevel = 3;
+  builder.OptLevel = 3;
   llvm::legacy::PassManager m;
   builder.populateModulePassManager(m);
   m.add(llvm::createInstructionCombiningPass());
   m.run(*module);
 
-  llvm::verifyModule(*module, &llvm::errs());
-  module->print(llvm::errs(), nullptr);
+  std::string ir;
+  llvm::raw_string_ostream irOut(ir);
+  module->print(irOut, nullptr);
+
+  std::string err;
+  llvm::raw_string_ostream errOut(err);
+  if (llvm::verifyModule(*module, &errOut)) {
+    return {errOut.str(), irOut.str()};
+  } else {
+    return {{}, irOut.str()};
+  }
 }
+
 std::optional<llvm::StructType *> LLVMAstTransformer::lookup(const Sym &s) {
   if (auto x = get_opt(structTypes, s); x) return x->first;
   else
@@ -477,12 +510,24 @@ compiler::Compilation backend::LLVM::run(const Program &program) {
   auto ctx = std::make_unique<llvm::LLVMContext>();
   auto mod = std::make_unique<llvm::Module>("test", *ctx);
 
-  auto astXform = compiler::nowMono();
-
   LLVMAstTransformer xform(*ctx);
-  xform.transform(mod, program);
 
-  auto elapsed = compiler::elapsedNs(astXform);
+  auto rawXform = compiler::nowMono();
+  auto [rawError, rawIR] = xform.transform(mod, program);
+  auto rawXformElapsed = compiler::elapsedNs(rawXform);
+  auto optXform = compiler::nowMono();
+  auto [optError, optIR] = xform.optimise(mod);
+  auto optXformElapsed = compiler::elapsedNs(optXform);
+
+  compiler::Event ast2IR(compiler::nowMs(), rawXformElapsed, "ast_to_llvm_ir", rawIR);
+  compiler::Event astOpt(compiler::nowMs(), optXformElapsed, "llvm_ir_opt", optIR);
+
+  if (rawError || optError) {
+    return compiler::Compilation({},               //
+                                 {ast2IR, astOpt}, //
+                                 mk_string<std::string>(
+                                     {rawError.value_or(""), optError.value_or("")}, [](auto &&x) { return x; }, "\n"));
+  }
 
   auto c = llvmc::compileModule(true, std::move(mod), *ctx);
 
@@ -497,7 +542,8 @@ compiler::Compilation backend::LLVM::run(const Program &program) {
     }
   }
 
-  c.events.emplace_back(compiler::nowMs(), "ast_to_llvm_ir", elapsed);
+  c.events.emplace_back(ast2IR);
+  c.events.emplace_back(astOpt);
 
   return c;
 }
