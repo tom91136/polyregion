@@ -245,15 +245,6 @@ object compiletime {
     val result = for {
       (outReturnParams, captures, prog) <- compiler.Compiler.compileExpr(x)
       serialisedAst <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, prog)))
-      _ <- Either.catchNonFatal(
-        Files.write(
-          Paths.get("./ast.msgpack").toAbsolutePath.normalize(),
-          serialisedAst,
-          StandardOpenOption.WRITE,
-          StandardOpenOption.CREATE,
-          StandardOpenOption.TRUNCATE_EXISTING
-        )
-      )
       // _ <- Either.catchNonFatal(throw new RuntimeException("STOP"))
       // layout <- Either.catchNonFatal(PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, prog.defs))))
       //   _= println(s"layout=${layout}")
@@ -321,9 +312,11 @@ object compiletime {
           case PolyAst.Type.Float  => '{ Buffer[Float](${ expr.asExprOf[Float] }) }
           case PolyAst.Type.Double => '{ Buffer[Double](${ expr.asExprOf[Double] }) }
           case PolyAst.Type.Struct(_) =>
-            import quotes.reflect.*
-            // FIXME this should be the param type, not return!
-            val imp = Expr.summon[NativeStruct[A]].get
+            val tc = Q.TypeRepr.of[NativeStruct].appliedTo(ident.tpe.widenTermRefByName)
+            val imp = Q.Implicits.search(tc) match {
+              case ok: Q.ImplicitSearchSuccess   => ok.tree.asExpr
+              case fail: Q.ImplicitSearchFailure => Q.report.errorAndAbort(fail.explanation, ident.asExpr)
+            }
             '{ Buffer.refAny(${ expr.asExprOf[Any] })(using $imp.asInstanceOf[NativeStruct[Any]]) }
           case PolyAst.Type.Array(PolyAst.Type.Bool, None)      => expr.asExprOf[Buffer[Boolean]]
           case PolyAst.Type.Array(PolyAst.Type.Char, None)      => expr.asExprOf[Buffer[Char]]
@@ -355,10 +348,8 @@ object compiletime {
 
             val outReturn = ${ expr }
 
-            val argTypes   = Array(${ Varargs(tpeAsRuntimeTpe(t) :: captureTps) }*) // List[Expr[Byte]]
+            val argTypes   = Array(${ Varargs(tpeAsRuntimeTpe(t) :: captureTps) }*)
             val argBuffers = Array(${ Varargs('{ outReturn.buffer } :: captureExprs) }*)
-
-            // println(s"Invoking with ${argTypes.zip(argBuffers).toList}")
 
             PolyregionRuntime.invoke(programBytes, ${ fnName }, rtnType, rtnBuffer.buffer, argTypes, argBuffers)
 

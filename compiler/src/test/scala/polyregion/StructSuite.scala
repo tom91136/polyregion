@@ -7,6 +7,9 @@ import polyregion.NativeStruct
 
 class StructSuite extends BaseSuite {
 
+  // case class T3[A <: AnyVal](val a: A, b: A, c: A)
+  // given [A <:AnyVal ]: NativeStruct[T3[A]]    = nativeStructOf
+
   case class Char3(val a: Char, b: Char, c: Char)
   case class Byte3(val a: Byte, b: Byte, c: Byte)
   case class Short3(val a: Short, b: Short, c: Short)
@@ -38,76 +41,81 @@ class StructSuite extends BaseSuite {
     test(name)(r)
   }
 
-  // testExpr("buffer-param") {
-  //   val xs = Buffer.tabulate(10)(x =>
-  //     Float3(
-  //       x * math.Pi.toFloat * 1, //
-  //       x * math.Pi.toFloat * 2, //
-  //       x * math.Pi.toFloat * 3  //
-  //     )
-  //   )
-  //   assertOffload(xs(0).a + xs(0).b + xs(0).c)
-  // }
+  testExpr("buffer-param") {
+    val xs = Buffer.tabulate(10)(x =>
+      Float3(
+        x * math.Pi.toFloat * 1, //
+        x * math.Pi.toFloat * 2, //
+        x * math.Pi.toFloat * 3  //
+      )
+    )
+    assertOffload(xs(1).a + xs(3).b + xs(5).c)
+  }
 
-  // testExpr("arg") {
-  //   val x = Float3(42.0, 1.0, 2.0)
-  //   assertOffload { val y = x; y }
-  // }
-
-  // testExpr("return") {
-  //   assertOffload(Float3(42.0, 1.0, 2.0))
-  // }
-
-  // testExpr("passthrough") {
-  //   val x = Float3(42.0, 1.0, 2.0)
-  //   assertOffload {
-  //     val y = x
-  //     val z = y
-  //     z
-  //   }
-  // }
-
-  testExpr("arg-deref-member") {
+  testExpr("passthrough") {
     val x = Float3(42.0, 1.0, 2.0)
     assertOffload {
       val y = x
+      val z = y
+      z
+    }
+  }
+
+  testExpr("arg-deref-member-mix") {
+    val x = Float3(42.0, 1.0, 2.0)
+    assertOffload {
+      val y = x // ref elision
       y.a + y.b + y.c
     }
   }
 
-  // testExpr("deref-member") {
-  //   assertOffload {
-  //     val x = Float3(42.0, 1.0, 2.0)
-  //     x.a + x.b + x.c
-  //   }
-  // }
+  testExpr("deref-member-mix") {
+    assertOffload {
+      val x = Float3(42.0, 1.0, 2.0)
+      x.a + x.b + x.c
+    }
+  }
 
-  // testExpr("I32B") {
+  testExpr("arg-deref-member") {
+    val x = Float3(42.0, 1.0, 2.0)
+    assertOffload {
+      val y = x // ref elision
+      y.c
+    }
+  }
 
-  //   assertOffload(
-  //     I32B(42)
-  //   )
-  // }
+  testExpr("deref-member") {
+    assertOffload {
+      val x = Float3(42.0, 1.0, 2.0)
+      x.c
+    }
+  }
 
-  // testExpr("return") {
-  //   assertOffload(
-  //     new Foo(1f)
-  //   )
-  // }
+  testExpr("deref-member-direct") {
+    assertOffload {
+      Float3(42.0, 1.0, 2.0).c
+    }
+  }
 
-  // testExpr("use-and-return") {
-  //   assertOffload {
-  //     val x = Vec3(0.0, 1.0, 2.0)
-  //     x.a + x.b + x.c
-  //   }
-  // }
+  testExpr("return") {
+    assertOffload(Float3(42.0, 1.0, 2.0))
+  }
 
-  // testExpr("return-ref") {
-  //   val a = 0.1f
-  //   val b = 0.2f
-  //   val c = 0.3f
-  //   assertOffload(Vec3(a, b, c))
-  // }
+  testExpr("ctor-arg") {
+    val a = 0.1f
+    val b = 0.2f
+    val c = 0.3f
+    assertOffload(Float3(a, b, c))
+  }
+
+  testExpr("ctor") {
+    assertOffload {
+      val a = 0.1f
+      val b = 0.2f
+      val c = 0.3f
+      Float3(a, b, c)
+    }
+  }
 
   // testExpr("param") {
   //   val v = Vec3(0.0, 1.0, 2.0)

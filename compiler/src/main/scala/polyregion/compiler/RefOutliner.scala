@@ -32,6 +32,10 @@ object RefOutliner {
           (s.symbol.isDefDef && s.symbol.flags.is(q.Flags.FieldAccessor))
       )
       (root, path) <- idents(s)
+
+      // the entire path is not foreign if the root is not foreign
+      if !root.symbol.maybeOwner.flags.is(q.Flags.Macro)
+
     } yield (root, path.toVector, s)).sortBy(_._2.length)
 
     // remove refs if already covered by the same root
