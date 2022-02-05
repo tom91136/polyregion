@@ -29,6 +29,11 @@ constexpr std::variant<T...> operator*(const Alternative<T...> &a) {
   return unwrap(a);
 }
 
+template <typename... T> //
+constexpr bool operator==(const Alternative<T...> &l,const Alternative<T...> &r) {
+  return unwrap(l) == unwrap(r);
+}
+
 template <auto member, class... T> //
 constexpr auto select(const Alternative<T...> &a) {
   return std::visit([](auto &&arg) { return *(arg).*member; }, a);

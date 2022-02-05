@@ -16,7 +16,7 @@ constexpr T undefined(const std::string &file, size_t line, const std::string &m
   throw std::logic_error(file + ":" + std::to_string(line) + ": " + message);
 }
 
-[[noreturn]]  static  void error(const std::string &file, size_t line, const std::string &message = "not implemented") {
+[[noreturn]] static void error(const std::string &file, size_t line, const std::string &message = "not implemented") {
   throw std::logic_error(file + ":" + std::to_string(line) + ": " + message);
 }
 
@@ -45,6 +45,20 @@ Container<U> map_vec(const Container<T> &xs, const std::function<U(const T &)> &
   Container<U> ys(std::size(xs));
   std::transform(std::begin(xs), std::end(xs), ys.begin(), f);
   return ys;
+}
+
+template <typename T, typename F> //
+std::optional<std::result_of_t<F(T)>> map_opt(const std::optional<T> &maybe, F &&f) {
+  if (maybe) return std::forward<F>(f)(*maybe);
+  else
+    return std::nullopt;
+}
+
+template <typename T, typename F> //
+std::result_of_t<F(T)> bind_opt(const std::optional<T> &maybe, F &&f) {
+  if (maybe) return std::forward<F>(f)(*maybe);
+  else
+    return std::nullopt;
 }
 
 static std::vector<std::string> split(const std::string &str, char delim) {
@@ -77,7 +91,7 @@ constexpr std::optional<T> get_opt(const Container<T> &xs, size_t i) {
 }
 
 template <typename K, typename V, template <typename...> typename Container>
-constexpr std::optional<V> get_opt(const Container<K, V> &xs,const  K &k) {
+constexpr std::optional<V> get_opt(const Container<K, V> &xs, const K &k) {
   if (auto v = xs.find(k); v != xs.end()) return std::make_optional(v->second);
   else
     return std::nullopt;

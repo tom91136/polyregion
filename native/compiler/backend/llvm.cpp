@@ -70,7 +70,7 @@ llvm::Type *LLVMAstTransformer::mkTpe(const Type::Any &tpe) {                   
   );
 }
 
-llvm::Value *LLVMAstTransformer::mkSelect(const Term::Select &select, bool load) {
+llvm::Value *LLVMAstTransformer::mkSelectPtr(const Term::Select &select) {
 
   auto fail = [&]() { return " (part of the select expression " + to_string(select) + ")"; };
 
@@ -86,39 +86,30 @@ llvm::Value *LLVMAstTransformer::mkSelect(const Term::Select &select, bool load)
   auto selectNamed = [&](const Named &named) -> llvm::Value * {
     //  check the LUT table for known variables brought in scope by parameters
     if (auto x = polyregion::get_opt(lut, named.symbol); x) {
-      if (std::holds_alternative<Type::Array>(*named.tpe) || std::holds_alternative<Type::Struct>(*named.tpe)) {
-        return *x;
-      } else {
-        return load ? B.CreateLoad(mkTpe(named.tpe), *x, named.symbol + "_value") : *x;
-      } //
+      return *x;
     } else {
       auto pool = mk_string2<std::string, llvm::Value *>(
-          lut, [](auto &&p) { return p.first + " = " + llvm_tostring(p.second); }, "\n->");
-      return undefined(__FILE_NAME__, __LINE__, "Unseen select: " + to_string(select) + ", LUT=\n->" + pool);
+          lut, [](auto &&p) { return "`" + p.first + "` = {" + llvm_tostring(p.second) + "}"; }, "\n->");
+      return undefined(__FILE_NAME__, __LINE__,
+                       "Unseen variable: " + to_string(named) + ", variable table=\n->" + pool);
     }
   };
 
-  if (select.init.empty()) {
-    // plain path lookup
-    // FIXME inline selectNamed!!
-    return selectNamed(select.last);
-  } else {
+  if (select.init.empty()) return selectNamed(select.last); // local var lookup
+  else {
     // we're in a select chain, init elements must return struct type; the head must come from LUT
+    auto [head, tail] = uncons(select);
+    auto local = selectNamed(head);
+    auto [structTy, _] = structTypeOf(head.tpe);
 
-    auto head = selectNamed(select.init.front());
-    auto [structTy, _] = structTypeOf(select.init.front().tpe);
+    std::vector<llvm::Value *> gepIndices;
+    gepIndices.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0));
 
-    auto selectors = tail(select);
-
-    std::vector<llvm::Value *> selectorValues;
-    selectorValues.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0));
-
-    auto tpe = select.init.front().tpe;
-    for (auto &path : selectors) {
+    auto tpe = head.tpe;
+    for (auto &path : tail) {
       auto [ignore, table] = structTypeOf(tpe);
       if (auto idx = get_opt(table, path.symbol); idx) {
-        selectorValues.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), *idx));
-
+        gepIndices.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), *idx));
         tpe = path.tpe;
       } else {
         return undefined(__FILE_NAME__, __LINE__,
@@ -127,10 +118,12 @@ llvm::Value *LLVMAstTransformer::mkSelect(const Term::Select &select, bool load)
       }
     }
 
-    auto ptr = B.CreateInBoundsGEP(structTy, head, selectorValues, qualified(select) + "_ptr");
-    if (load) return B.CreateLoad(mkTpe(select.tpe), ptr, qualified(select) + "_value");
-    else
-      return ptr;
+    auto pool = mk_string2<std::string, llvm::Value *>(
+        lut, [](auto &&p) { return p.first + " = " + llvm_tostring(p.second); }, "\n->");
+
+    std::cout << "->>" << llvm_tostring(local) << std::endl;
+    std::cout << pool << std::endl;
+    return B.CreateInBoundsGEP(structTy, local, gepIndices, qualified(select) + "_ptr");
   }
 }
 
@@ -139,7 +132,7 @@ llvm::Value *LLVMAstTransformer::mkRef(const Term::Any &ref) {
   using llvm::ConstantInt;
   return variants::total(
       *ref, //
-      [&](const Term::Select &x) -> llvm::Value * { return mkSelect(x, false); },
+      [&](const Term::Select &x) -> llvm::Value * { return mkSelectPtr(x); },
       [&](const Term::UnitConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt1Ty(C), 0); },
       [&](const Term::BoolConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt1Ty(C), x.value); },
       [&](const Term::ByteConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt8Ty(C), x.value); },
@@ -282,17 +275,15 @@ llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Functi
       },
       [&](const Expr::Index &x) -> llvm::Value * {
         auto tpe = mkTpe(x.tpe);
-
-        auto l = mkSelect(x.lhs, false);
-        std::cout << "O=" << llvm_tostring(l) << std::endl;
-        std::cout << "O=" << llvm_tostring(tpe) << std::endl;
-        std::cout << "O=" << llvm_tostring(tpe->getPointerElementType()) << std::endl;
-
-        auto ptr =
-            B.CreateInBoundsGEP(tpe->getPointerElementType(), mkSelect(x.lhs, false), mkRef(x.idx), key + "_ptr");
-
-        return B.CreateLoad(tpe->getPointerElementType(), ptr, key + "_value");
+        auto ptr = B.CreateInBoundsGEP(tpe->getPointerElementType(), mkSelectPtr(x.lhs), mkRef(x.idx), key + "_ptr");
+        return ptr;
+        //        return B.CreateLoad(tpe->getPointerElementType(), ptr, key + "_value");
       });
+}
+llvm::Value *LLVMAstTransformer::conditionalLoad(llvm::Value *rhs) {
+  return rhs->getType()->isPointerTy() // deref the rhs if it's a pointer
+             ? B.CreateLoad(rhs->getType(), rhs)
+             : rhs;
 }
 
 void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
@@ -302,19 +293,25 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
                                     return;
       },
       [&](const Stmt::Var &x) {
+        // [T : ref] =>> t:T  = _        ; lut += &t
+        // [T : ref] =>> t:T* = &(rhs:T) ; lut += t
+        // [T : val] =>> t:T  =   rhs:T  ; lut += &t
+
+        if (x.expr && tpe(*x.expr) != x.name.tpe) {
+          throw std::logic_error("Semantic error: name type and rhs expr mismatch (" + repr(x) + ")");
+        }
+        std::cout << "->var to " << (x.expr ? repr(*x.expr) : "_") << std::endl;
+
+        auto rhs = map_opt(x.expr, [&](auto &&expr) { return mkExprValue(expr, fn, x.name.symbol + "_var_rhs"); });
         if (std::holds_alternative<Type::Array>(*x.name.tpe)) {
-          if (x.expr) {
-            lut[x.name.symbol] = mkExprValue(*x.expr, fn, x.name.symbol);
+          if (rhs) {
+            lut[x.name.symbol] = *rhs;
           } else {
             undefined(__FILE_NAME__, __LINE__, "var array with no expr?");
           }
-
         } else if (std::holds_alternative<Type::Struct>(*x.name.tpe)) {
-          std::cout << "var to " << (x.expr ? repr(*x.expr) : "_") << std::endl;
-
-          if (x.expr) {
-            // check that the expr is also a pointer: lhs* = rhs*
-            lut[x.name.symbol] = mkExprValue(*x.expr, fn, x.name.symbol);
+          if (rhs) {
+            lut[x.name.symbol] = *rhs;
           } else {
             // otherwise, stack allocate the struct and return the pointer to that
             llvm::Type *structPtrTy = mkTpe(x.name.tpe);
@@ -323,60 +320,62 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
                                      "` was not a pointer to the struct " + repr(x.name.tpe) +
                                      " in stmt:" + repr(stmt));
             }
-            auto stack = B.CreateAlloca(structPtrTy->getPointerElementType(), nullptr, x.name.symbol + "_stack_ptr");
-            lut[x.name.symbol] = stack;
+            auto ptr = B.CreateAlloca(structPtrTy->getPointerElementType(), nullptr, x.name.symbol + "_stack_ptr");
+            lut[x.name.symbol] = ptr;
           }
-
         } else {
-          auto stack = B.CreateAlloca(mkTpe(x.name.tpe), nullptr, x.name.symbol + "_stack_ptr");
-          if (x.expr) {
-            auto val = mkExprValue(*x.expr, fn, x.name.symbol + "_var_rhs");
-            B.CreateStore(val, stack);
+          // plain primitives now
+          auto ptr = B.CreateAlloca(mkTpe(x.name.tpe), nullptr, x.name.symbol + "_stack_ptr");
+          if (rhs) {
+            B.CreateStore(conditionalLoad(*rhs), ptr); //
           }
-          lut[x.name.symbol] = stack;
+          lut[x.name.symbol] = ptr;
         }
       },
       [&](const Stmt::Mut &x) {
-        auto exprValue = mkExprValue(x.expr, fn, qualified(x.name) + "_mut"); // value
-        //  XXX do NOT allocate (mkSelect) here, we're mutating!
-        auto selectPtr = mkSelect(x.name, false); // ptr
+        // [T : ref]        =>> t   := &(rhs:T) ; lut += t
+        // [T : ref {u: U}] =>> t.u := &(rhs:U)
+        // [T : val]        =>> t   :=   rhs:T
+        if (tpe(x.expr) != x.name.tpe) {
+          throw std::logic_error("Semantic error: name type (" +to_string(tpe(x.expr))+ ") and rhs expr (" +to_string(x.name.tpe)+ ") mismatch (" + repr(x) + ")");
+        }
+        auto rhs = mkExprValue(x.expr, fn, qualified(x.name) + "_mut");
+        auto lhsPtr = mkSelectPtr(x.name);
 
-        // selectPtr := exprValue
-
-        std::cout << llvm_tostring(selectPtr) << " := " << llvm_tostring(exprValue) << std::endl;
-
-        // XXX copy is implicit for non-pointers, even if copy is false
-        if (x.copy && exprValue->getType()->isPointerTy()) {
-
-          // http://nondot.org/sabre/LLVMNotes/SizeOf-OffsetOf-VariableSizedStructs.txt
-          // we want
-          // %SizePtr = getelementptr %T, %T* null, i32 1
-          // %Size = ptrtoint %T* %SizePtr to i32
-
-          auto sizePtr =
-              B.CreateGEP(selectPtr->getType()->getPointerElementType(),
-                          llvm::ConstantPointerNull::get(llvm::dyn_cast<llvm::PointerType>(selectPtr->getType())),
-                          llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 1), "sizePtr");
-          auto size = B.CreatePtrToInt(sizePtr, llvm::Type::getInt32Ty(C));
-
-          // expr is a value, see if we want to deref it
-          // TODO mkExprValue needs to return a pair w/ ptr if exists
-
-          // XXX CreateMemCpyInline has a immarg size so %size must be a pure constant, this is crazy
-          B.CreateMemCpy(selectPtr, {}, exprValue, {}, size);
+        if (std::holds_alternative<TypeKind::Ref>(*kind(tpe(x.expr)))) {
+          if (x.name.init.empty()) { // local var, replace entry in lut or memcpy
+            if (!rhs->getType()->isPointerTy()) {
+              throw std::logic_error("Semantic error: rhs isn't a pointer type (" + repr(x) + ")");
+            }
+            if (!x.copy) lut[x.name.last.symbol] = rhs;
+            else {
+              // http://nondot.org/sabre/LLVMNotes/SizeOf-OffsetOf-VariableSizedStructs.txt
+              // we want
+              // %SizePtr = getelementptr %T, %T* null, i32 1
+              // %Size = ptrtoint %T* %SizePtr to i32
+              auto sizePtr =
+                  B.CreateGEP(lhsPtr->getType()->getPointerElementType(),
+                              llvm::ConstantPointerNull::get(llvm::dyn_cast<llvm::PointerType>(lhsPtr->getType())),
+                              llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 1), "sizePtr");
+              auto sizeVal = B.CreatePtrToInt(sizePtr, llvm::Type::getInt32Ty(C));
+              // XXX CreateMemCpyInline has an immarg size so %size must be a pure constant, this is crazy
+              B.CreateMemCpy(lhsPtr, {}, rhs, {}, sizeVal);
+            }
+          } else {
+            B.CreateStore(conditionalLoad(rhs), mkSelectPtr(x.name)); // ignore copy, modify struct member
+          }
         } else {
-
-          // we're here if expr is not a pointer (i.e. not a struct/array)
-
-          std::cout << llvm_tostring(mkSelect(x.name, false)) << " := " << llvm_tostring(exprValue) << std::endl;
-
-          B.CreateStore(exprValue, mkSelect(x.name, false));
+          B.CreateStore(conditionalLoad(rhs), mkSelectPtr(x.name)); // ignore copy
         }
       },
       [&](const Stmt::Update &x) {
         auto select = x.lhs;
-        auto ptr = B.CreateInBoundsGEP(mkSelect(select), mkRef(x.idx), qualified(select) + "_ptr");
-        B.CreateStore(mkRef(x.value), ptr);
+        auto dest = mkSelectPtr(select);
+        auto ptr = B.CreateInBoundsGEP(                     //
+            dest->getType()->getPointerElementType(), dest, //
+            mkRef(x.idx), qualified(select) + "_ptr"        //
+        );                                                  //
+        B.CreateStore(conditionalLoad(mkRef(x.value)), ptr);
       },
       [&](const Stmt::While &x) {
         auto loopTest = llvm::BasicBlock::Create(C, "loop_test", fn);
@@ -386,7 +385,7 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
         {
           B.SetInsertPoint(loopTest);
           auto continue_ = mkExprValue(x.cond, fn, "loop");
-          B.CreateCondBr(continue_, loopBody, loopExit);
+          B.CreateCondBr(conditionalLoad(continue_), loopBody, loopExit);
         }
         {
           B.SetInsertPoint(loopBody);
@@ -402,7 +401,7 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
         auto condTrue = llvm::BasicBlock::Create(C, "cond_true", fn);
         auto condFalse = llvm::BasicBlock::Create(C, "cond_false", fn);
         auto condExit = llvm::BasicBlock::Create(C, "cond_exit", fn);
-        B.CreateCondBr(mkExprValue(x.cond, fn, "cond"), condTrue, condFalse);
+        B.CreateCondBr(conditionalLoad(mkExprValue(x.cond, fn, "cond")), condTrue, condFalse);
         {
           B.SetInsertPoint(condTrue);
           for (auto &body : x.trueBr)
@@ -421,7 +420,7 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
         if (std::holds_alternative<Type::Unit>(*tpe(x.value))) {
           B.CreateRetVoid();
         } else {
-          B.CreateRet(mkExprValue(x.value, fn, "return"));
+          B.CreateRet(conditionalLoad(mkExprValue(x.value, fn, "return")));
         }
       } //
 

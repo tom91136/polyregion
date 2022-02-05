@@ -107,7 +107,7 @@ TEST_CASE("struct buffer assign", "[compiler]") {
                   Var(Named("a", myStruct), { Index(Select({}, Named("s", myStruct)), Term::IntConst(0), myStruct) }),
 
 
-                  Var(Named("b", myStruct), {  Alias(Select({Named("a", myStruct)}, defX ))  }),
+                  Var(Named("b", Type::Int()), {  Alias(Select({Named("a", myStruct)}, defX ))  }),
 
 //                  Mut(Select({Named("s", Type::Array(myStruct, {}))}, defX), Alias(IntConst(42)), false),
                   Return(Alias(IntConst(69))),
@@ -145,11 +145,11 @@ TEST_CASE("mut struct buffer", "[compiler]") {
   CHECK(c.binary != std::nullopt);
 }
 
-TEST_CASE("mut prim buffer", "[compiler]") {
+TEST_CASE("update prim buffer", "[compiler]") {
   polyregion_initialise();
   Function fn(Sym({"foo"}), {Named("s", Type::Array(Type::Int(), {}))}, Type::Int(),
               {
-                  Mut(Select({}, Named("s", Type::Array(Type::Int(), {}))), Alias(IntConst(42)), false),
+                  Update(Select({}, Named("s", Type::Array(Type::Int(), {}))), IntConst(7) ,  (IntConst(42))),
                   Return(Alias(IntConst(69))),
               });
 

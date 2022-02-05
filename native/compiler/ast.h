@@ -20,5 +20,7 @@ std::vector<Named> path(const Term::Select &);
 Named head(const Term::Select &);
 std::vector<Named> tail(const Term::Select &);
 
+std::pair< Named, std::vector<Named>> uncons(const Term::Select &);
+
 
 } // namespace polyregion::polyast

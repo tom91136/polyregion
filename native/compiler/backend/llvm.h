@@ -28,7 +28,7 @@ private:
   std::unordered_map<Sym, std::pair<llvm::StructType *, StructMemberTable>> structTypes;
   llvm::IRBuilder<> B;
 
-  llvm::Value *mkSelect(const Term::Select &s, bool load = true);
+  llvm::Value *mkSelectPtr(const Term::Select &select);
   llvm::Value *mkRef(const Term::Any &ref);
   llvm::Value *mkExprValue(const Expr::Any &expr, llvm::Function *fn, const std::string &key);
   void mkStmt(const Stmt::Any &stmt, llvm::Function *fn);
@@ -42,6 +42,7 @@ public:
 
   std::pair<std::optional<std::string>, std::string> transform(const std::unique_ptr<llvm::Module> &module, const Program &);
   std::pair<std::optional<std::string>, std::string> optimise(const std::unique_ptr<llvm::Module> &module);
+  llvm::Value *conditionalLoad(llvm::Value *rhs);
 };
 
 class LLVM : public Backend {

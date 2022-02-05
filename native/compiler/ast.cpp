@@ -175,7 +175,7 @@ std::vector<Named> polyast::path(const Term::Select &select) {
   return xs;
 }
 
-Named polyast::head(const Term::Select &select) { return select.init.empty() ? select.last : select.init[0]; }
+Named polyast::head(const Term::Select &select) { return select.init.empty() ? select.last : select.init.front(); }
 
 std::vector<Named> polyast::tail(const Term::Select &select) {
   if (select.init.empty()) return {select.last};
@@ -183,5 +183,14 @@ std::vector<Named> polyast::tail(const Term::Select &select) {
     std::vector<Named> xs(std::next(select.init.begin()), select.init.end());
     xs.push_back(select.last);
     return xs;
+  }
+}
+
+std::pair<Named, std::vector<Named>> polyast::uncons(const Term::Select &select) {
+  if (select.init.empty()) return {{select.last}, {}};
+  else {
+    std::vector<Named> xs(std::next(select.init.begin()), select.init.end());
+    xs.push_back(select.last);
+    return {select.init.front(), xs};
   }
 }
