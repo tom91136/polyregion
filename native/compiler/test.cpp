@@ -13,6 +13,13 @@ using namespace Stmt;
 using namespace Term;
 using namespace Expr;
 
+template <typename P> static void assertCompilationSucceeded(const P &p) {
+  INFO(repr(p));
+  auto c = polyregion::compiler::compile(p);
+  CHECK(c.messages == "");
+  CHECK(c.binary != std::nullopt);
+}
+
 TEST_CASE("json round-trip", "[ast]") {
   Function expected(                                        //
       Sym({"foo"}),                                         //
@@ -40,17 +47,12 @@ TEST_CASE("initialise more than once should work", "[compiler]") {
   polyregion_initialise();
 }
 
-TEST_CASE("empty function should compile", "[compiler]") {
-  polyregion_initialise();
-  Function fn(Sym({"foo"}), {}, Type::Unit(), {});
-  auto data = nlohmann::json::to_msgpack(function_to_json(fn));
-
-  polyregion_buffer buffer{data.data(), data.size()};
-
-  auto compilation = polyregion_compile(&buffer, true, POLYREGION_BACKEND_LLVM);
-
-  polyregion_release_compile(compilation);
-}
+//TEST_CASE("empty function should compile", "[compiler]") {
+//  polyregion_initialise();
+//  Function fn(Sym({"foo"}), {}, Type::Unit(), {});
+//  Program p(fn, {}, {});
+//  assertCompilationSucceeded(p);
+//}
 
 TEST_CASE("struct member access", "[compiler]") {
   polyregion_initialise();
@@ -70,8 +72,7 @@ TEST_CASE("struct member access", "[compiler]") {
               });
 
   Program p(fn, {}, {def});
-
-  polyregion::compiler::compile(p);
+  assertCompilationSucceeded(p);
 }
 
 TEST_CASE("mut prim", "[compiler]") {
@@ -86,13 +87,10 @@ TEST_CASE("mut prim", "[compiler]") {
 
   INFO(repr(fn))
   Program p(fn, {}, {});
-  auto c = polyregion::compiler::compile(p);
-  std::cout << c << std::endl;
-  CHECK(c.messages == "");
-  CHECK(c.binary != std::nullopt);
+  assertCompilationSucceeded(p);
 }
 
-TEST_CASE("struct buffer assign", "[compiler]") {
+TEST_CASE("index struct buffer member", "[compiler]") {
   polyregion_initialise();
 
   Sym myStructSym({"MyStruct"});
@@ -101,28 +99,23 @@ TEST_CASE("struct buffer assign", "[compiler]") {
   StructDef def(myStructSym, {defX, defY});
   Type::Struct myStruct(myStructSym);
 
-  Function fn(Sym({"foo"}), {Named("s", Type::Array(myStruct, {}))}, Type::Int(),
-              {
+  Function fn(
+      Sym({"foo"}), {Named("s", Type::Array(myStruct, {}))}, Type::Int(),
+      {
 
-                  Var(Named("a", myStruct), { Index(Select({}, Named("s", myStruct)), Term::IntConst(0), myStruct) }),
+          Var(Named("a", myStruct),
+              {Index(Select({}, Named("s", Type::Array(myStruct, {}))), Term::IntConst(0), myStruct)}),
 
+          Var(Named("b", Type::Int()), {Alias(Select({Named("a", myStruct)}, defX))}),
 
-                  Var(Named("b", Type::Int()), {  Alias(Select({Named("a", myStruct)}, defX ))  }),
-
-//                  Mut(Select({Named("s", Type::Array(myStruct, {}))}, defX), Alias(IntConst(42)), false),
-                  Return(Alias(IntConst(69))),
-              });
-
-  INFO(repr(fn))
+          //                  Mut(Select({Named("s", Type::Array(myStruct, {}))}, defX), Alias(IntConst(42)), false),
+          Return(Alias(IntConst(69))),
+      });
   Program p(fn, {}, {def});
-  auto c = polyregion::compiler::compile(p);
-  std::cout << c << std::endl;
-  CHECK(c.messages == "");
-  CHECK(c.binary != std::nullopt);
+  assertCompilationSucceeded(p);
 }
 
-
-TEST_CASE("mut struct buffer", "[compiler]") {
+TEST_CASE("update struct buffer elem member", "[compiler]") {
   polyregion_initialise();
 
   Sym myStructSym({"MyStruct"});
@@ -131,34 +124,46 @@ TEST_CASE("mut struct buffer", "[compiler]") {
   StructDef def(myStructSym, {defX, defY});
   Type::Struct myStruct(myStructSym);
 
-  Function fn(Sym({"foo"}), {Named("s", Type::Array(myStruct, {}))}, Type::Int(),
-              {
-                  Mut(Select({Named("s", Type::Array(myStruct, {}))}, defX), Alias(IntConst(42)), false),
-                  Return(Alias(IntConst(69))),
-              });
-
-  INFO(repr(fn))
+  Function fn(
+      Sym({"foo"}), {Named("xs", Type::Array(myStruct, {}))}, Type::Int(),
+      {
+          Var(Named("x", myStruct), Index(Select({}, Named("xs", Type::Array(myStruct, {}))), IntConst(0), myStruct)),
+          Mut(Select({Named("x", myStruct)}, defX), Alias(IntConst(42)), false),
+          Return(Alias(IntConst(69))),
+      });
   Program p(fn, {}, {def});
-  auto c = polyregion::compiler::compile(p);
-  std::cout << c << std::endl;
-  CHECK(c.messages == "");
-  CHECK(c.binary != std::nullopt);
+  assertCompilationSucceeded(p);
+}
+
+TEST_CASE("update struct buffer elem", "[compiler]") {
+  polyregion_initialise();
+
+  Sym myStructSym({"MyStruct"});
+  Named defX = Named("x", Type::Int());
+  Named defY = Named("y", Type::Int());
+  StructDef def(myStructSym, {defX, defY});
+  Type::Struct myStruct(myStructSym);
+
+  Function fn(
+      Sym({"foo"}), {Named("xs", Type::Array(myStruct, {}))}, Type::Int(),
+      {
+          Var(Named("data", myStruct), {}),
+          Update(Select({}, Named("xs", Type::Array(myStruct, {}))), IntConst(7), Select({}, Named("data", myStruct))),
+          Return(Alias(IntConst(69))),
+      });
+  Program p(fn, {}, {def});
+  assertCompilationSucceeded(p);
 }
 
 TEST_CASE("update prim buffer", "[compiler]") {
   polyregion_initialise();
   Function fn(Sym({"foo"}), {Named("s", Type::Array(Type::Int(), {}))}, Type::Int(),
               {
-                  Update(Select({}, Named("s", Type::Array(Type::Int(), {}))), IntConst(7) ,  (IntConst(42))),
+                  Update(Select({}, Named("s", Type::Array(Type::Int(), {}))), IntConst(7), (IntConst(42))),
                   Return(Alias(IntConst(69))),
               });
-
-  INFO(repr(fn))
   Program p(fn, {}, {});
-  auto c = polyregion::compiler::compile(p);
-  std::cout << c << std::endl;
-  CHECK(c.messages == "");
-  CHECK(c.binary != std::nullopt);
+  assertCompilationSucceeded(p);
 }
 
 TEST_CASE("struct alloc", "[compiler]") {
@@ -181,12 +186,6 @@ TEST_CASE("struct alloc", "[compiler]") {
                   Return(Alias(IntConst(69))),
               });
 
-  INFO(repr(fn))
-
   Program p(fn, {}, {def});
-
-  auto c = polyregion::compiler::compile(p);
-  std::cout << c << std::endl;
-  CHECK(c.messages == "");
-  CHECK(c.binary != std::nullopt);
+  assertCompilationSucceeded(p);
 }

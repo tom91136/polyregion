@@ -41,7 +41,7 @@ class CaptureSuite extends BaseSuite {
       val bufferOfA         = Buffer(A(1, 2), A(3, 4))
       val node              = Node(1, Some(Node(2, None)))
       val (t1, t2)          = (1, 2)
-      testCapture("all-captures") {
+      testCapture("complex-captures") {
         val u = MyConstantA
         val v = ConstB.MyConstantB
         val e = node.elem

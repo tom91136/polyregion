@@ -17,8 +17,6 @@ using namespace polyregion;
 using namespace polyregion::polyast;
 using namespace polyregion::backend;
 
-static llvm::ExitOnError ExitOnErr;
-
 template <typename T> static std::string llvm_tostring(const T *t) {
   std::string str;
   llvm::raw_string_ostream rso(str);
@@ -86,10 +84,20 @@ llvm::Value *LLVMAstTransformer::mkSelectPtr(const Term::Select &select) {
   auto selectNamed = [&](const Named &named) -> llvm::Value * {
     //  check the LUT table for known variables brought in scope by parameters
     if (auto x = polyregion::get_opt(lut, named.symbol); x) {
-      return *x;
+      auto [tpe, value] = *x;
+      if (named.tpe != tpe) {
+        error(__FILE_NAME__, __LINE__,
+              "Named local variable type (" + to_string(named.tpe) + ") is different from located variable type (" +
+                  to_string(tpe) + ")");
+      }
+      return value;
     } else {
-      auto pool = mk_string2<std::string, llvm::Value *>(
-          lut, [](auto &&p) { return "`" + p.first + "` = {" + llvm_tostring(p.second) + "}"; }, "\n->");
+      auto pool = mk_string2<std::string, std::pair<Type::Any, llvm::Value *>>(
+          lut,
+          [](auto &&p) {
+            return "`" + p.first + "` = " + to_string(p.second.first) + "(IR=" + llvm_tostring(p.second.second) + ")";
+          },
+          "\n->");
       return undefined(__FILE_NAME__, __LINE__,
                        "Unseen variable: " + to_string(named) + ", variable table=\n->" + pool);
     }
@@ -118,11 +126,6 @@ llvm::Value *LLVMAstTransformer::mkSelectPtr(const Term::Select &select) {
       }
     }
 
-    auto pool = mk_string2<std::string, llvm::Value *>(
-        lut, [](auto &&p) { return p.first + " = " + llvm_tostring(p.second); }, "\n->");
-
-    std::cout << "->>" << llvm_tostring(local) << std::endl;
-    std::cout << pool << std::endl;
     return B.CreateInBoundsGEP(structTy, local, gepIndices, qualified(select) + "_ptr");
   }
 }
@@ -147,7 +150,9 @@ llvm::Value *LLVMAstTransformer::mkRef(const Term::Any &ref) {
 
 llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Function *fn, const std::string &key) {
 
-  const auto binaryExpr = [&](const Term::Any &l, const Term::Any &r) { return std::make_tuple(mkRef(l), mkRef(r)); };
+  const auto binaryExpr = [&](const Term::Any &l, const Term::Any &r) {
+    return std::make_tuple(conditionalLoad(mkRef(l)), conditionalLoad(mkRef(r)));
+  };
 
   const auto binaryNumOp =
       [&](const Term::Any &l, const Term::Any &r, const Type::Any &promoteTo,
@@ -166,19 +171,25 @@ llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Functi
 
   const auto unaryIntrinsic = [&](llvm::Intrinsic::ID id, const Type::Any &tpe, const Term::Any &arg) {
     auto cos = llvm::Intrinsic::getDeclaration(fn->getParent(), id, {mkTpe(tpe)});
-    return B.CreateCall(cos, mkRef(arg));
+    return B.CreateCall(cos, conditionalLoad(mkRef(arg)));
   };
 
   const auto externUnaryCall = [&](const std::string &name, const Type::Any &tpe, const Term::Any &arg) {
     auto t = mkTpe(tpe);
     auto ft = llvm::FunctionType::get(t, {t}, false);
     auto f = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, name, fn->getParent());
-    return B.CreateCall(f, mkRef(arg));
+    return B.CreateCall(f, conditionalLoad(mkRef(arg)));
   };
 
   return variants::total(
       *expr, //
       [&](const Expr::UnaryIntrinsic &x) {
+        if (x.rtn != tpe(x.lhs)) {
+          throw std::logic_error("Semantic error: arg type (" + to_string(tpe(x.lhs)) +
+                                 ") of unary intrinsic doesn't match return type (" + to_string(x.rtn) + ")(" +
+                                 repr(x) + ")");
+        }
+
         return variants::total(
             *x.kind, //
             [&](const UnaryIntrinsicKind::Sin &) -> llvm::Value * {
@@ -199,6 +210,18 @@ llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Functi
             });
       },
       [&](const Expr::BinaryIntrinsic &x) {
+        if (x.rtn != tpe(x.lhs)) {
+          throw std::logic_error("Semantic error: lhs arg type (" + to_string(tpe(x.lhs)) +
+                                 ") of binary intrinsic doesn't match return type (" + to_string(x.rtn) + ")(" +
+                                 repr(x) + ")");
+        }
+
+        if (x.rtn != tpe(x.rhs)) {
+          throw std::logic_error("Semantic error: rhs arg type (" + to_string(tpe(x.rhs)) +
+                                 ") of binary intrinsic doesn't match return type (" + to_string(x.rtn) + ")(" +
+                                 repr(x) + ")");
+        }
+
         return variants::total(
             *x.kind, //
             [&](const BinaryIntrinsicKind::Add &) -> llvm::Value * {
@@ -274,15 +297,20 @@ llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Functi
         return undefined(__FILE_NAME__, __LINE__, "Unimplemented invoke:`" + repr(x) + "`");
       },
       [&](const Expr::Index &x) -> llvm::Value * {
-        auto tpe = mkTpe(x.tpe);
-        auto ptr = B.CreateInBoundsGEP(tpe->getPointerElementType(), mkSelectPtr(x.lhs), mkRef(x.idx), key + "_ptr");
-        return ptr;
-        //        return B.CreateLoad(tpe->getPointerElementType(), ptr, key + "_value");
+        if (auto arrTpe = get_opt<Type::Array>(x.lhs.tpe); arrTpe) {
+          auto ty = mkTpe(arrTpe->component);
+          return B.CreateInBoundsGEP(ty->isPointerTy() ? ty->getPointerElementType() : ty, //
+                                     mkSelectPtr(x.lhs),                                   //
+                                     conditionalLoad(mkRef(x.idx)), key + "_ptr");
+        } else {
+          throw std::logic_error("Semantic error: array index not called on array type (" + to_string(x.lhs.tpe) +
+                                 ")(" + repr(x) + ")");
+        }
       });
 }
 llvm::Value *LLVMAstTransformer::conditionalLoad(llvm::Value *rhs) {
   return rhs->getType()->isPointerTy() // deref the rhs if it's a pointer
-             ? B.CreateLoad(rhs->getType(), rhs)
+             ? B.CreateLoad(rhs->getType()->getPointerElementType(), rhs)
              : rhs;
 }
 
@@ -300,18 +328,17 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
         if (x.expr && tpe(*x.expr) != x.name.tpe) {
           throw std::logic_error("Semantic error: name type and rhs expr mismatch (" + repr(x) + ")");
         }
-        std::cout << "->var to " << (x.expr ? repr(*x.expr) : "_") << std::endl;
-
         auto rhs = map_opt(x.expr, [&](auto &&expr) { return mkExprValue(expr, fn, x.name.symbol + "_var_rhs"); });
         if (std::holds_alternative<Type::Array>(*x.name.tpe)) {
           if (rhs) {
-            lut[x.name.symbol] = *rhs;
+
+            lut[x.name.symbol] = {x.name.tpe, *rhs};
           } else {
             undefined(__FILE_NAME__, __LINE__, "var array with no expr?");
           }
         } else if (std::holds_alternative<Type::Struct>(*x.name.tpe)) {
           if (rhs) {
-            lut[x.name.symbol] = *rhs;
+            lut[x.name.symbol] = {x.name.tpe, *rhs};
           } else {
             // otherwise, stack allocate the struct and return the pointer to that
             llvm::Type *structPtrTy = mkTpe(x.name.tpe);
@@ -321,7 +348,7 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
                                      " in stmt:" + repr(stmt));
             }
             auto ptr = B.CreateAlloca(structPtrTy->getPointerElementType(), nullptr, x.name.symbol + "_stack_ptr");
-            lut[x.name.symbol] = ptr;
+            lut[x.name.symbol] = {x.name.tpe, ptr};
           }
         } else {
           // plain primitives now
@@ -329,7 +356,7 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
           if (rhs) {
             B.CreateStore(conditionalLoad(*rhs), ptr); //
           }
-          lut[x.name.symbol] = ptr;
+          lut[x.name.symbol] = {x.name.tpe, ptr};
         }
       },
       [&](const Stmt::Mut &x) {
@@ -337,7 +364,8 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
         // [T : ref {u: U}] =>> t.u := &(rhs:U)
         // [T : val]        =>> t   :=   rhs:T
         if (tpe(x.expr) != x.name.tpe) {
-          throw std::logic_error("Semantic error: name type (" +to_string(tpe(x.expr))+ ") and rhs expr (" +to_string(x.name.tpe)+ ") mismatch (" + repr(x) + ")");
+          throw std::logic_error("Semantic error: name type (" + to_string(tpe(x.expr)) + ") and rhs expr (" +
+                                 to_string(x.name.tpe) + ") mismatch (" + repr(x) + ")");
         }
         auto rhs = mkExprValue(x.expr, fn, qualified(x.name) + "_mut");
         auto lhsPtr = mkSelectPtr(x.name);
@@ -347,7 +375,7 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
             if (!rhs->getType()->isPointerTy()) {
               throw std::logic_error("Semantic error: rhs isn't a pointer type (" + repr(x) + ")");
             }
-            if (!x.copy) lut[x.name.last.symbol] = rhs;
+            if (!x.copy) lut[x.name.last.symbol] = {x.name.tpe, rhs};
             else {
               // http://nondot.org/sabre/LLVMNotes/SizeOf-OffsetOf-VariableSizedStructs.txt
               // we want
@@ -369,13 +397,22 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
         }
       },
       [&](const Stmt::Update &x) {
-        auto select = x.lhs;
-        auto dest = mkSelectPtr(select);
-        auto ptr = B.CreateInBoundsGEP(                     //
-            dest->getType()->getPointerElementType(), dest, //
-            mkRef(x.idx), qualified(select) + "_ptr"        //
-        );                                                  //
-        B.CreateStore(conditionalLoad(mkRef(x.value)), ptr);
+        if (auto arrTpe = get_opt<Type::Array>(x.lhs.tpe); arrTpe) {
+          if (arrTpe->component != tpe(x.value)) {
+            throw std::logic_error("Semantic error: array component type (" + to_string(arrTpe->component) +
+                                   ") and rhs expr (" + to_string(tpe(x.value)) + ") mismatch (" + repr(x) + ")");
+          } else {
+            auto dest = mkSelectPtr(x.lhs);
+            auto ptr = B.CreateInBoundsGEP(                              //
+                dest->getType()->getPointerElementType(), dest,          //
+                conditionalLoad(mkRef(x.idx)), qualified(x.lhs) + "_ptr" //
+            );                                                           //
+            B.CreateStore(conditionalLoad(mkRef(x.value)), ptr);
+          }
+        } else {
+          throw std::logic_error("Semantic error: array update not called on array type (" + to_string(x.lhs.tpe) +
+                                 ")(" + repr(x) + ")");
+        }
       },
       [&](const Stmt::While &x) {
         auto loopTest = llvm::BasicBlock::Create(C, "loop_test", fn);
@@ -461,20 +498,19 @@ LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> &module, const
   std::transform(                                          //
       fn->arg_begin(), fn->arg_end(), fnTree.args.begin(), //
       std::inserter(lut, lut.end()),                       //
-      [&](auto &arg, const auto &named) -> std::pair<std::string, llvm::Value *> {
+      [&](auto &arg, const auto &named) -> std::pair<std::string, std::pair<Type::Any, llvm::Value *>> {
         arg.setName(named.symbol);
 
         if (std::holds_alternative<TypeKind::Ref>(*kind(named.tpe))) {
-          return {named.symbol, &arg};
+          return {named.symbol, {named.tpe, &arg}};
         } else {
           auto stack = B.CreateAlloca(mkTpe(named.tpe), nullptr, named.symbol + "_stack_ptr");
           B.CreateStore(&arg, stack);
-          return {named.symbol, stack};
+          return {named.symbol, {named.tpe, stack}};
         }
       });
 
   for (auto &stmt : fnTree.body) {
-    //    std::cout << "[LLVM]" << repr(stmt) << std::endl;
     mkStmt(stmt, fn);
   }
 

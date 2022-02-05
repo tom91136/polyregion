@@ -320,7 +320,11 @@ object compiletime {
           case PolyAst.Type.Long   => '{ Buffer[Long](${ expr.asExprOf[Long] }) }
           case PolyAst.Type.Float  => '{ Buffer[Float](${ expr.asExprOf[Float] }) }
           case PolyAst.Type.Double => '{ Buffer[Double](${ expr.asExprOf[Double] }) }
-
+          case PolyAst.Type.Struct(_) =>
+            import quotes.reflect.*
+            // FIXME this should be the param type, not return!
+            val imp = Expr.summon[NativeStruct[A]].get
+            '{ Buffer.refAny(${ expr.asExprOf[Any] })(using $imp.asInstanceOf[NativeStruct[Any]]) }
           case PolyAst.Type.Array(PolyAst.Type.Bool, None)      => expr.asExprOf[Buffer[Boolean]]
           case PolyAst.Type.Array(PolyAst.Type.Char, None)      => expr.asExprOf[Buffer[Char]]
           case PolyAst.Type.Array(PolyAst.Type.Byte, None)      => expr.asExprOf[Buffer[Byte]]

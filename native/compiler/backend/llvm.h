@@ -24,7 +24,7 @@ class LLVMAstTransformer {
 
 private:
   using StructMemberTable = std::unordered_map<std::string, size_t>;
-  std::unordered_map<std::string, llvm::Value *> lut;
+  std::unordered_map<std::string, std::pair<Type::Any, llvm::Value *>> lut;
   std::unordered_map<Sym, std::pair<llvm::StructType *, StructMemberTable>> structTypes;
   llvm::IRBuilder<> B;
 
@@ -40,7 +40,8 @@ public:
 
   explicit LLVMAstTransformer(llvm::LLVMContext &c) : C(c), lut(), structTypes(), B(C) {}
 
-  std::pair<std::optional<std::string>, std::string> transform(const std::unique_ptr<llvm::Module> &module, const Program &);
+  std::pair<std::optional<std::string>, std::string> transform(const std::unique_ptr<llvm::Module> &module,
+                                                               const Program &);
   std::pair<std::optional<std::string>, std::string> optimise(const std::unique_ptr<llvm::Module> &module);
   llvm::Value *conditionalLoad(llvm::Value *rhs);
 };

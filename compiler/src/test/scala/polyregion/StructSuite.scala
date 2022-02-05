@@ -7,64 +7,85 @@ import polyregion.NativeStruct
 
 class StructSuite extends BaseSuite {
 
-  case class Vec3(val a: Float, b: Float, c: Float){
-  }
-  object Vec3{
-    def apply(a : Float) : Vec3 = Vec3(a,a,a)
-  }
+  case class Char3(val a: Char, b: Char, c: Char)
+  case class Byte3(val a: Byte, b: Byte, c: Byte)
+  case class Short3(val a: Short, b: Short, c: Short)
+  case class Int3(val a: Int, b: Int, c: Int)
+  case class Long3(val a: Long, b: Long, c: Long)
+  case class Float3(val a: Float, b: Float, c: Float)
+  case class Double3(val a: Double, b: Double, c: Double)
+  case class Boolean3(val a: Boolean, b: Boolean, c: Boolean)
 
-  case class I32B(val v: Int){
-  }
+  case class Char3x3(val a: Char3, b: Char3, c: Char3)
+  case class Byte3x3(val a: Byte3, b: Byte3, c: Byte3)
+  case class Short3x3(val a: Short3, b: Short3, c: Short3)
+  case class Int3x3(val a: Int3, b: Int3, c: Int3)
+  case class Long3x3(val a: Long3, b: Long3, c: Long3)
+  case class Float3x3(val a: Float3, b: Float3, c: Float3)
+  case class Double3x3(val a: Double3, b: Double3, c: Double3)
+  case class Boolean3x3(val a: Boolean3, b: Boolean3, c: Boolean3)
 
-  // case class Vec3N(a: Float, b: Float, c: Float)(n: Int)
-
-  case class Vec33(a: Vec3, b: Vec3, c: Vec3)
-
-  given NativeStruct[Vec3]  = nativeStructOf
-  // given NativeStruct[I32B]  = nativeStructOf
-
-  // given NativeStruct[Vec3N] = nativeStructOf
-  // given NativeStruct[Vec33] = nativeStructOf
+  given NativeStruct[Char3]    = nativeStructOf
+  given NativeStruct[Byte3]    = nativeStructOf
+  given NativeStruct[Short3]   = nativeStructOf
+  given NativeStruct[Int3]     = nativeStructOf
+  given NativeStruct[Long3]    = nativeStructOf
+  given NativeStruct[Float3]   = nativeStructOf
+  given NativeStruct[Double3]  = nativeStructOf
+  given NativeStruct[Boolean3] = nativeStructOf
 
   inline def testExpr(inline name: String)(inline r: => Any) = if (Toggles.StructSuite) {
     test(name)(r)
   }
 
-  testExpr("buffer-param") {
-    val xs = Buffer.tabulate(10)(x =>
-      Vec3(
-        x * math.Pi.toFloat * 1, //
-        x * math.Pi.toFloat * 2, //
-        x * math.Pi.toFloat * 3  //
-      )
-    )
-    assertOffload {
-      xs(0).a + xs(0).b + xs(0).c
-    }
-  }
+  // testExpr("buffer-param") {
+  //   val xs = Buffer.tabulate(10)(x =>
+  //     Float3(
+  //       x * math.Pi.toFloat * 1, //
+  //       x * math.Pi.toFloat * 2, //
+  //       x * math.Pi.toFloat * 3  //
+  //     )
+  //   )
+  //   assertOffload(xs(0).a + xs(0).b + xs(0).c)
+  // }
 
-  // class Foo(i : Int) {
-  //     def this(f : Float) = this(1)
+  // testExpr("arg") {
+  //   val x = Float3(42.0, 1.0, 2.0)
+  //   assertOffload { val y = x; y }
   // }
 
   // testExpr("return") {
-  //   assertOffload(
-  //     Vec3(42.0, 1.0, 2.0)
-  //   )
+  //   assertOffload(Float3(42.0, 1.0, 2.0))
+  // }
+
+  // testExpr("passthrough") {
+  //   val x = Float3(42.0, 1.0, 2.0)
+  //   assertOffload {
+  //     val y = x
+  //     val z = y
+  //     z
+  //   }
+  // }
+
+  testExpr("arg-deref-member") {
+    val x = Float3(42.0, 1.0, 2.0)
+    assertOffload {
+      val y = x
+      y.a + y.b + y.c
+    }
+  }
+
+  // testExpr("deref-member") {
+  //   assertOffload {
+  //     val x = Float3(42.0, 1.0, 2.0)
+  //     x.a + x.b + x.c
+  //   }
   // }
 
   // testExpr("I32B") {
 
-    
   //   assertOffload(
   //     I32B(42)
-  //   )
-  // }
-
-  
-  // testExpr("return") {
-  //   assertOffload(
-  //     Array(Vec3(0.0, 1.0, 2.0))
   //   )
   // }
 

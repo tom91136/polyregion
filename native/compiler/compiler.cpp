@@ -118,8 +118,8 @@ compiler::Compilation compiler::compile(const polyast::Program &program) {
   if (!init) {
     return Compilation{"initialise was not called before"};
   }
-  backend::C99 c99Gen;
-  c99Gen.run(program);
+//  backend::C99 c99Gen;
+//  c99Gen.run(program);
 
   backend::LLVM gen;
   Compilation c;
@@ -136,18 +136,18 @@ compiler::Compilation compiler::compile(const Bytes &astBytes) {
 
   std::vector<Event> events;
 
-  std::cout << "[polyregion-native] Len  : " << astBytes.size() << std::endl;
+//  std::cout << "[polyregion-native] Len  : " << astBytes.size() << std::endl;
   auto jsonStart = nowMono();
   json json = deserialiseAst(astBytes);
   events.emplace_back(nowMs(), elapsedNs(jsonStart), "ast_deserialise", "");
-  std::cout << "[polyregion-native] JSON :" << json << std::endl;
+//  std::cout << "[polyregion-native] JSON :" << json << std::endl;
 
   auto astLift = nowMono();
   auto program = polyast::program_from_json(json);
   events.emplace_back(nowMs(), elapsedNs(astLift), "ast_lift", "");
 
-  std::cout << "[polyregion-native] AST  :" << program << std::endl;
-  std::cout << "[polyregion-native] Repr :" << polyast::repr(program) << std::endl;
+//  std::cout << "[polyregion-native] AST  :" << program << std::endl;
+//  std::cout << "[polyregion-native] Repr :" << polyast::repr(program) << std::endl;
 
   auto c = compile(program);
   c.events.insert(c.events.end(), events.begin(), events.end());
