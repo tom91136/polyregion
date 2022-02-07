@@ -61,6 +61,9 @@ object IntrinsifyPass {
   private def intrinsifyModuleApply(s: p.Stmt) = s.mapAccExpr[p.Sym] {
     case inv @ p.Expr.Invoke(sym, None, args, rtn) =>
       (sym.fqn, args) match {
+        case (Symbols.ArrayModule :+ "ofDim2", x   :: Nil) => 
+          ???
+          // scala.math binary
         case ((Symbols.ScalaMath | Symbols.JavaMath) :+ op, x :: y :: Nil) => // scala.math binary
           ???
         case ((Symbols.ScalaMath | Symbols.JavaMath) :+ op, x :: Nil) => // scala.math unary
@@ -72,7 +75,7 @@ object IntrinsifyPass {
           }
           (expr, Nil, sym :: Nil)
         case (unknownSym, args) =>
-          println(s"No module intrinsic for: ${unknownSym.mkString(".")}(${args.mkString(",")}) ")
+          println(s"No module intrinsic for: ${unknownSym.mkString(".")}(${args.map(_.repr).mkString(",")}) ")
           (inv, Nil, Nil)
       }
     case x => (x, Nil, Nil)

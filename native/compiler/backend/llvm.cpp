@@ -53,7 +53,7 @@ llvm::Type *LLVMAstTransformer::mkTpe(const Type::Any &tpe) {                   
         if (auto def = polyregion::get_opt(structTypes, x.name); def) {
           return def->first->getPointerTo();
         } else {
-          return undefined(__FILE_NAME__, __LINE__, "Unseen struct def : " + to_string(x));
+          return undefined(__FILE_NAME__, __LINE__, "Unseen struct def: " + to_string(x));
         }
       }, //
       [&](const Type::Array &x) -> llvm::Type * {
@@ -63,8 +63,10 @@ llvm::Type *LLVMAstTransformer::mkTpe(const Type::Any &tpe) {                   
           auto comp = mkTpe(x.component);
           return comp->isPointerTy() ? comp : comp->getPointerTo();
         }
-      }
-
+      },
+      [&](const Type::Erased &x) -> llvm::Type * {
+        return undefined(__FILE_NAME__, __LINE__, "Erased type appeared: " + to_string(x));
+      } //
   );
 }
 

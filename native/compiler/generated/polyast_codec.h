@@ -150,6 +150,8 @@ namespace Type {
 [[nodiscard]] EXPORT json struct_to_json(const Type::Struct &);
 [[nodiscard]] EXPORT Type::Array array_from_json(const json &);
 [[nodiscard]] EXPORT json array_to_json(const Type::Array &);
+[[nodiscard]] EXPORT Type::Erased erased_from_json(const json &);
+[[nodiscard]] EXPORT json erased_to_json(const Type::Erased &);
 [[nodiscard]] EXPORT Type::Any any_from_json(const json &);
 [[nodiscard]] EXPORT json any_to_json(const Type::Any &);
 } // namespace Type

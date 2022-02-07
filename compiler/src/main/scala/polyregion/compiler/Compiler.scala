@@ -53,7 +53,9 @@ object Compiler {
     println(s"========${closureName}=========")
     println(Paths.get(".").toAbsolutePath)
     println(s" -> name:               ${closureName}")
-    println(s" -> body(Quotes):\n${x.asTerm.toString.indent(4)}")
+    println(s" -> body(Quotes):\n")
+    pprint.pprintln(x.asTerm, indent = 2, showFieldNames = true)
+    println(s" -> body(long):\n${x.asTerm.show(using q.Printer.TreeAnsiCode).indent(4)}")
 
     for {
       (typedExternalRefs, c) <- outline(term)
@@ -68,7 +70,7 @@ object Compiler {
         s" -> all refs (typed):         \n${typedExternalRefs.map((tree, ref) => s"$ref => $tree").mkString("\n").indent(4)}"
       )
       _ = println(s" -> captured refs:    \n${capturedNames.map(_._2.repr).mkString("\n").indent(4)}")
-      _ = println(s" -> body(long):\n${x.asTerm.show(using q.Printer.TreeAnsiCode).indent(4)}")
+      
 
       (returnTerm, c) <- c
         .inject(typedExternalRefs.map((ref, r) => ref.symbol -> r).toMap)

@@ -41,6 +41,7 @@ object PolyAst {
     case String                                      extends Type(TypeKind.Ref)
     case Struct(name: Sym)                           extends Type(TypeKind.Ref)
     case Array(component: Type, length: Option[Int]) extends Type(TypeKind.Ref)
+    case Erased(name: Sym, args: List[Type])         extends Type(TypeKind.Ref)
   }
 
   case class Named(symbol: String, tpe: Type) derives MsgPack.Codec

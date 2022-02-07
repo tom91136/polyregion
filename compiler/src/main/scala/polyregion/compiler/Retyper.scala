@@ -1,6 +1,6 @@
 package polyregion.compiler
 
-import cats.syntax.all.toTraverseOps
+import cats.syntax.all.*
 import polyregion.ast.PolyAst as p
 import polyregion.*
 
@@ -53,20 +53,14 @@ object Retyper {
           } yield
             if leftTpe == rightTpe then (leftTerm.orElse(rightTerm), leftTpe, c)
             else ???
-
         case tpe @ AppliedType(ctor, args) =>
           for {
-            name <- resolveSym(ctor).deferred
-            xs   <- args.traverse(c.typer(_))
+            name    <- resolveSym(ctor).deferred
+            (xs, c) <- args.foldMapM(x => c.typer(x).map((v, t, c) => ((v, t) :: Nil, c)))
           } yield (name, xs) match {
-            case (Symbols.Buffer, (_, component, c) :: Nil) => (None, p.Type.Array(component, None), c)
-            case (n, ys) =>
-              println(s"Applied = ${n} args=${ys.map(x => (x._1, x._2)).mkString(",")}")
-
-              ???
-            // None -> p.Type.Struct(n, ys)
+            case (Symbols.Buffer, (_, comp) :: Nil) => (None, p.Type.Array(comp, None), c)
+            case (n, ys)                            => (None, p.Type.Erased(n, ys.map(_._2)), c)
           }
-
         // widen singletons
         case ConstantType(x) =>
           (x match {

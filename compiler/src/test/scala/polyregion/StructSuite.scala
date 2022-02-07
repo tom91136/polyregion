@@ -28,20 +28,82 @@ class StructSuite extends BaseSuite {
   case class Double3x3(val a: Double3, b: Double3, c: Double3)
   case class Boolean3x3(val a: Boolean3, b: Boolean3, c: Boolean3)
 
-  given NativeStruct[Char3]    = nativeStructOf
-  given NativeStruct[Byte3]    = nativeStructOf
-  given NativeStruct[Short3]   = nativeStructOf
-  given NativeStruct[Int3]     = nativeStructOf
-  given NativeStruct[Long3]    = nativeStructOf
-  given NativeStruct[Float3]   = nativeStructOf
-  given NativeStruct[Double3]  = nativeStructOf
-  given NativeStruct[Boolean3] = nativeStructOf
-
-  inline def testExpr(inline name: String)(inline r: => Any) = if (Toggles.StructSuite) {
-    test(name)(r)
+  inline def dummyNativeStruct[A] = new NativeStruct[A] {
+    def name: String                                                = ""
+    def sizeInBytes: Int                                            = 1
+    def encode(buffer: java.nio.ByteBuffer, index: Int, a: A): Unit = ()
+    def decode(buffer: java.nio.ByteBuffer, index: Int): A          = ???
   }
 
-  testExpr("buffer-param") {
+  inline given NativeStruct[Char3]    = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
+  inline given NativeStruct[Byte3]    = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
+  inline given NativeStruct[Short3]   = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
+  inline given NativeStruct[Int3]     = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
+  inline given NativeStruct[Long3]    = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
+  inline given NativeStruct[Float3]   = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
+  inline given NativeStruct[Double3]  = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
+  inline given NativeStruct[Boolean3] = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
+
+  inline def testExpr[A](inline name: String)(inline r: => A) = if (Toggles.StructSuite) {
+    test(name)(assertOffload(r))
+  }
+
+  // val xs = Buffer.range(0, 10)
+
+  // assertOffload {
+  //   val outside = 4
+  //   xs.foreach2(i => i + 1 + outside)
+  //   // val f =  { (i : Int) => i+1}
+  //   // val x = 2
+  //   // f(x)
+  //   ()
+
+  // }
+
+  //       [_:Range]
+  //         | [filter]                                                          ''.map((a, b) => a+b)
+  // (0 to 10).withFilter(i => i > 5).map(x => (x, x+1)).flatMap(x => Array(x,x,x)).foreach((a, b) => a+b)
+  // var _i = 0
+  // while(_i < 10){
+  //
+  //   if( !( _i > 5 ) ) continue;  # (i => i > 5)(_i)         =:= if(!f(_i))
+  //   
+  //   val _v' = (_i, _i+1)         # (x => (x, x+1))(_i)      =:= val _v' = f(_i) 
+  //
+  //   val _jx = Array(_v',_v',_v') # (x => Array(x,x,x))(_v') =:= val _jx = f(_v')
+  //   var _j = 0
+  //   while(_j < 10) {
+  //     val v2 = jx(_j)  
+  //     v2._1 + v2._2              # ((a,b) => a+b)(_v')      =:= f(_v')
+  //   } 
+  //   
+  //   
+
+  //   _i+=1
+  // }
+
+  // assertOffload{
+  //   var x = 1
+  //   val arr = List[Int](1,2,3)
+
+  //   // withFilter(f) === if(f(x)) continue;
+  //   // flatMap(f)    === val x = _; while(true){ f(x) }
+  //   // foreach(f)    === f(x)
+  //   // map(f)        === val x' = f(x)
+
+  //   arr.withFilter(c => c > 5).flatMap{c => arr.map{d => c+d}}
+  //   for{
+  //     a <- arr
+  //     if a > 5
+  //       n = a
+  //       o = n
+  //     b <- arr
+  //   } yield  a+b
+  //   1
+
+  // }
+
+  {
     val xs = Buffer.tabulate(10)(x =>
       Float3(
         x * math.Pi.toFloat * 1, //
@@ -49,72 +111,62 @@ class StructSuite extends BaseSuite {
         x * math.Pi.toFloat * 3  //
       )
     )
-    assertOffload(xs(1).a + xs(3).b + xs(5).c)
+    testExpr("buffer-param")(xs(1).a + xs(3).b + xs(5).c)
   }
 
-  testExpr("passthrough") {
+  {
     val x = Float3(42.0, 1.0, 2.0)
-    assertOffload {
+    testExpr("passthrough") {
       val y = x
       val z = y
       z
     }
   }
 
-  testExpr("arg-deref-member-mix") {
+  {
     val x = Float3(42.0, 1.0, 2.0)
-    assertOffload {
+    testExpr("arg-deref-member-mix") {
       val y = x // ref elision
       y.a + y.b + y.c
     }
   }
 
   testExpr("deref-member-mix") {
-    assertOffload {
-      val x = Float3(42.0, 1.0, 2.0)
-      x.a + x.b + x.c
-    }
+    val x = Float3(42.0, 1.0, 2.0)
+    x.a + x.b + x.c
   }
 
-  testExpr("arg-deref-member") {
+  {
     val x = Float3(42.0, 1.0, 2.0)
-    assertOffload {
+    testExpr("arg-deref-member") {
       val y = x // ref elision
       y.c
     }
   }
 
   testExpr("deref-member") {
-    assertOffload {
-      val x = Float3(42.0, 1.0, 2.0)
-      x.c
-    }
+    val x = Float3(42.0, 1.0, 2.0)
+    x.c
   }
 
   testExpr("deref-member-direct") {
-    assertOffload {
-      Float3(42.0, 1.0, 2.0).c
-    }
+    Float3(42.0, 1.0, 2.0).c
   }
 
-  testExpr("return") {
-    assertOffload(Float3(42.0, 1.0, 2.0))
-  }
+  testExpr("return")(Float3(42.0, 1.0, 2.0))
 
-  testExpr("ctor-arg") {
+  {
     val a = 0.1f
     val b = 0.2f
     val c = 0.3f
-    assertOffload(Float3(a, b, c))
+    testExpr("ctor-arg")(Float3(a, b, c))
   }
 
   testExpr("ctor") {
-    assertOffload {
-      val a = 0.1f
-      val b = 0.2f
-      val c = 0.3f
-      Float3(a, b, c)
-    }
+    val a = 0.1f
+    val b = 0.2f
+    val c = 0.3f
+    Float3(a, b, c)
   }
 
   // testExpr("param") {

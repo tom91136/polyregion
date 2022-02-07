@@ -3,6 +3,7 @@ package polyregion.compiler
 import scala.annotation.tailrec
 import cats.syntax.all.*
 import polyregion.*
+import polyregion.ast.PolyAst as p
 import Retyper.*
 
 object RefOutliner {
@@ -31,6 +32,8 @@ object RefOutliner {
         s.symbol.isValDef ||
           (s.symbol.isDefDef && s.symbol.flags.is(q.Flags.FieldAccessor))
       )
+
+      _ = println(s">> > $s = ${s.tpe.widenTermRefByName}")
       (root, path) <- idents(s)
 
       // the entire path is not foreign if the root is not foreign
@@ -56,7 +59,7 @@ object RefOutliner {
     // free vals             :  Flags.{}
 
     println(
-      s" -> foreign refs:${" " * 9}\n${foreignRefs.map(x => s"${x.show} (${x.symbol}) ~> $x").mkString("\n").indent(4)}"
+      s" -> foreign refs:${" " * 9}\n${foreignRefs.map(x => s"${x.show} (${x.symbol}) ~> $x, tpe=${x.tpe.widenTermRefByName.show}").mkString("\n").indent(4)}"
     )
     println(
       s" -> filtered  (found):${" " * 9}\n${normalisedForeignValRefs.map(x => s"${x._3.show} (${x._3.symbol}) ~> $x").mkString("\n").indent(4)}"
@@ -65,7 +68,7 @@ object RefOutliner {
       s" -> collapse  (found):${" " * 9}\n${sharedValRefs.map(x => s"${x.symbol} ~> $x").mkString("\n").indent(4)}"
     )
 
-    val references = sharedValRefs.foldLeftM((Vector.empty[(q.Ref, q.Reference)], q.FnContext())) {
+    val typedRefs = sharedValRefs.foldLeftM((Vector.empty[(q.Ref, q.Reference)], q.FnContext())) {
       case ((xs, c), i @ q.Ident(_)) =>
         c.typer(i.tpe).map {
           case (Some(x), tpe, c) => (xs :+ (i, q.Reference(x, tpe)), c)
@@ -79,7 +82,24 @@ object RefOutliner {
       case (_, r) =>
         q.report.errorAndAbort(s"Unexpected val (reference) kind while outlining", r.asExpr)
     }
-    references.resolve
+
+    // remove anything we can't use, like ClassTag
+    val filteredTypedRefs = typedRefs.map { (xs, c) =>
+      val ys = xs.filter {
+        case (_, q.Reference(_, p.Type.Erased(Symbols.ClassTag, _))) => false
+        case _                                                       => true
+      }
+      (ys, c)
+    }
+
+    val resolved = filteredTypedRefs.resolve
+    println(resolved match {
+      case Right((xs, c)) =>
+        s" -> typer   (found):${" " * 9}\n${xs.map((r, ref) => s"${r.symbol} ~> $ref").mkString("\n").indent(4)}"
+      case Left(e) => s" -> typer   (found):${e.getMessage}"
+    })
+
+    resolved
   }
 
 }

@@ -281,7 +281,10 @@ object compiletime {
         case Nil => None
         case (t @ PolyAst.Type.Struct(sym)) :: Nil =>
           import quotes.reflect.*
-          val imp = Expr.summon[NativeStruct[A]].get
+          val imp = Expr.summon[NativeStruct[A]] match {
+            case Some(x) => x
+            case None => Q.report.errorAndAbort(s"No implicit found for return struct value ${TypeRepr.of[NativeStruct[A]].show}" )
+          }
           // val x = TypeRepr.of[A].asType
           Some(
             (

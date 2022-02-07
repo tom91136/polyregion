@@ -3,6 +3,7 @@ package polyregion.compiler
 import polyregion.Buffer
 import polyregion.ast.{PolyAst => p}
 import polyregion.*
+import scala.reflect.ClassTag
 
 object Symbols {
   val JavaLang      = "java" :: "lang" :: Nil
@@ -11,5 +12,17 @@ object Symbols {
   val JavaMath      = "java" :: "lang" :: "Math$" :: Nil
   val SeqMutableOps = "scala" :: "collection" :: "mutable" :: "SeqOps" :: Nil
   val SeqOps        = "scala" :: "collection" :: "SeqOps" :: Nil
-  val Buffer        = p.Sym[Buffer[_]]
+
+  val Buffer   = p.Sym[Buffer[_]]
+  val ClassTag = p.Sym[ClassTag[_]]
+
+  val ArrayModule = "scala" :: "Array$" :: Nil
+
+  // Array don't delegate to aneeds a ClassTag which it can't have for *
+
+  // val Array         = p.Sym(classOf[Array[Int]])
+
+  // println(">"+Symbols.ClassTag)
+  // println(">"+Symbols.Array)
+
 }

@@ -16,19 +16,24 @@ using std::string;
 
 [[nodiscard]] string polyast::repr(const Type::Any &type) {
   return variants::total(
-      *type,                                                                //
-      [](const Type::Float &x) { return "Float"s; },                        //
-      [](const Type::Double &x) { return "Double"s; },                      //
-      [](const Type::Bool &x) { return "Bool"s; },                          //
-      [](const Type::Byte &x) { return "Byte"s; },                          //
-      [](const Type::Char &x) { return "Char"s; },                          //
-      [](const Type::Short &x) { return "Short"s; },                        //
-      [](const Type::Int &x) { return "Int"s; },                            //
-      [](const Type::Long &x) { return "Long"s; },                          //
-      [](const Type::String &x) { return "String"s; },                      //
-      [](const Type::Unit &x) { return "Unit"s; },                          //
-      [](const Type::Struct &x) { return "Struct[" + repr(x.name) + "]"; }, //
-      [](const Type::Array &x) { return "Array[" + repr(x.component) + "]"; });
+      *type,                                                                                //
+      [](const Type::Float &x) { return "Float"s; },                                        //
+      [](const Type::Double &x) { return "Double"s; },                                      //
+      [](const Type::Bool &x) { return "Bool"s; },                                          //
+      [](const Type::Byte &x) { return "Byte"s; },                                          //
+      [](const Type::Char &x) { return "Char"s; },                                          //
+      [](const Type::Short &x) { return "Short"s; },                                        //
+      [](const Type::Int &x) { return "Int"s; },                                            //
+      [](const Type::Long &x) { return "Long"s; },                                          //
+      [](const Type::String &x) { return "String"s; },                                      //
+      [](const Type::Unit &x) { return "Unit"s; },                                          //
+      [](const Type::Struct &x) { return "Struct[" + repr(x.name) + "]"; },                 //
+      [](const Type::Array &x) { return "Array[" + repr(x.component) + "]"; },              //
+      [](const Type::Erased &x) {                                                           //
+        auto params = mk_string<Type::Any>(                                                 //
+            x.args, [&](auto &x) { return repr(x); }, ", ");                                //
+        return "Erased[" + repr(x.name) + (x.args.empty() ? "" : "[" + params + "]") + "]"; //
+      });
 }
 
 [[nodiscard]] string polyast::repr(const Named &path) { return "(" + path.symbol + ":" + repr(path.tpe) + ")"; }

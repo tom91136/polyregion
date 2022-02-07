@@ -10,6 +10,15 @@ trait Buffer[A] extends mutable.IndexedSeq[A] {
   def pointer: Option[Long]
   def buffer: java.nio.Buffer
   def putAll(xs: A*): this.type
+    def foreach2( f : Int => Int) : Int = {
+    var i = 0
+    var out = 0
+    while(i < 10){
+      out = f(i)
+      i+=1
+    }
+    out
+  }
   override def toString: String = s"Buffer[$name](${mkString(", ")})"
 }
 

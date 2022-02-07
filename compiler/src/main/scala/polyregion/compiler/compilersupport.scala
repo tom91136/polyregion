@@ -39,19 +39,24 @@ extension (e: => Throwable) {
 }
 
 extension (e: => p.Sym.type) {
-  def apply[T <: AnyRef](using tag: ClassTag[T]): p.Sym = {
+
+  def apply[T](using tag: ClassTag[T]): p.Sym = apply(tag.runtimeClass)
+
+  def apply[T](cls: Class[T]): p.Sym = {
     // normalise naming differences
     // Java        => package.Companion$Member
     // Scala Macro => package.Companion$.Member
     @tailrec def go(cls: Class[_], xs: List[String] = Nil, companion: Boolean = false): List[String] = {
       val name = cls.getSimpleName + (if (companion) "$" else "")
       cls.getEnclosingClass match {
-        case null => cls.getPackageName :: name :: xs
+        case null => cls.getPackageName.split("\\.").toList ::: name :: xs
         case c    => go(c, name :: xs, Modifier.isStatic(cls.getModifiers))
       }
     }
-    p.Sym(go(tag.runtimeClass))
+    p.Sym(go(cls))
   }
+
+
 }
 
 extension (e: p.Sym) {
@@ -80,18 +85,19 @@ extension (e: p.Term) {
 
 extension (e: p.Type) {
   def repr: String = e match {
-    case p.Type.Struct(sym)    => s"Struct[${sym.repr}]"
-    case p.Type.Array(comp, n) => s"Array[${comp.repr}${n.map(x => s";$x").getOrElse("")}]"
-    case p.Type.Bool           => "Bool"
-    case p.Type.Byte           => "Byte"
-    case p.Type.Char           => "Char"
-    case p.Type.Short          => "Short"
-    case p.Type.Int            => "Int"
-    case p.Type.Long           => "Long"
-    case p.Type.Float          => "Float"
-    case p.Type.Double         => "Double"
-    case p.Type.String         => "String"
-    case p.Type.Unit           => "Unit"
+    case p.Type.Erased(sym, args) => s"Erased[${sym.repr}[${args.map(_.repr).mkString(",")}]]"
+    case p.Type.Struct(sym)       => s"Struct[${sym.repr}]"
+    case p.Type.Array(comp, n)    => s"Array[${comp.repr}${n.map(x => s";$x").getOrElse("")}]"
+    case p.Type.Bool              => "Bool"
+    case p.Type.Byte              => "Byte"
+    case p.Type.Char              => "Char"
+    case p.Type.Short             => "Short"
+    case p.Type.Int               => "Int"
+    case p.Type.Long              => "Long"
+    case p.Type.Float             => "Float"
+    case p.Type.Double            => "Double"
+    case p.Type.String            => "String"
+    case p.Type.Unit              => "Unit"
   }
 }
 

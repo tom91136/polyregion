@@ -120,7 +120,8 @@ struct Unit;
 struct String;
 struct Struct;
 struct Array;
-using Any = Alternative<Float, Double, Bool, Byte, Char, Short, Int, Long, Unit, String, Struct, Array>;
+struct Erased;
+using Any = Alternative<Float, Double, Bool, Byte, Char, Short, Int, Long, Unit, String, Struct, Array, Erased>;
 struct EXPORT Base {
   TypeKind::Any kind;
   protected:
@@ -215,6 +216,15 @@ struct EXPORT Array : Type::Base {
   EXPORT operator Any() const { return std::make_shared<Array>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Array &);
   EXPORT friend bool operator==(const Type::Array &, const Type::Array &);
+};
+
+struct EXPORT Erased : Type::Base {
+  Sym name;
+  std::vector<Type::Any> args;
+  Erased(Sym name, std::vector<Type::Any> args) noexcept : Type::Base(TypeKind::Ref()), name(std::move(name)), args(std::move(args)) {}
+  EXPORT operator Any() const { return std::make_shared<Erased>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Erased &);
+  EXPORT friend bool operator==(const Type::Erased &, const Type::Erased &);
 };
 } // namespace Type
 
@@ -847,6 +857,9 @@ template <> struct std::hash<polyregion::polyast::Type::Struct> {
 };
 template <> struct std::hash<polyregion::polyast::Type::Array> {
   std::size_t operator()(const polyregion::polyast::Type::Array &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Type::Erased> {
+  std::size_t operator()(const polyregion::polyast::Type::Erased &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Named> {
   std::size_t operator()(const polyregion::polyast::Named &) const noexcept;

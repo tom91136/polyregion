@@ -156,6 +156,23 @@ bool Type::operator==(const Type::Array &l, const Type::Array &r) {
   return *l.component == *r.component && l.length == r.length;
 }
 
+std::ostream &Type::operator<<(std::ostream &os, const Type::Erased &x) {
+  os << "Erased(";
+  os << x.name;
+  os << ',';
+  os << '{';
+  if (!x.args.empty()) {
+    std::for_each(x.args.begin(), std::prev(x.args.end()), [&os](auto &&x) { os << x; os << ','; });
+    os << x.args.back();
+  }
+  os << '}';
+  os << ')';
+  return os;
+}
+bool Type::operator==(const Type::Erased &l, const Type::Erased &r) { 
+  return l.name == r.name && std::equal(l.args.begin(), l.args.end(), r.args.begin(), [](auto &&l, auto &&r) { return *l == *r; });
+}
+
 std::ostream &operator<<(std::ostream &os, const Named &x) {
   os << "Named(";
   os << '"' << x.symbol << '"';
@@ -893,6 +910,11 @@ std::size_t std::hash<polyregion::polyast::Type::Struct>::operator()(const polyr
 std::size_t std::hash<polyregion::polyast::Type::Array>::operator()(const polyregion::polyast::Type::Array &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.component)>()(x.component);
   seed ^= std::hash<decltype(x.length)>()(x.length) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Type::Erased>::operator()(const polyregion::polyast::Type::Erased &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.name)>()(x.name);
+  seed ^= std::hash<decltype(x.args)>()(x.args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Named>::operator()(const polyregion::polyast::Named &x) const noexcept {

@@ -31,7 +31,12 @@ object TreeMapper {
           (ref, c)     <- term.fold((c !! tree).mapTerm(rhs))((_, c).pure)
         } yield (p.Term.UnitConst, c ::= p.Stmt.Var(p.Named(name, t), Some(p.Expr.Alias(ref))))
       case q.ValDef(name, tpe, None) => s"Unexpected variable $name:$tpe".fail.deferred
-      case t: q.Term                 => (c !! tree).mapTerm(t)
+      // DefDef here comes from general closures ( (a:A) => ??? )
+      case t: q.Term => (c !! tree).mapTerm(t)
+      case tree =>
+        s"[depth=${c.depth}] Unhandled: $tree\nSymbol:\n${tree.symbol}\nTrace was:\n${(tree :: c.traces)
+          .map(x => "\t" + x.show + "\n\t" + x)
+          .mkString("\n---\n")}".fail.deferred
     }
 
     def mapTerms(args: List[q.Term]) = args match {
@@ -92,10 +97,28 @@ object TreeMapper {
 
         }
 
-      case ap @ q.Apply(_, _) =>
+      case ap @ q.Apply(aa, _) =>
         val receiverSym        = p.Sym(ap.fun.symbol.fullName)
         val receiverOwner      = ap.fun.symbol.maybeOwner
         val receiverOwnerFlags = receiverOwner.flags
+
+        //
+        println(s"A=${ap.args}")
+
+        // ap.args(0) match {
+        //   case q.Block(dd::Nil, _) =>
+
+        //     dd match {
+        //       case d : q.DefDef =>
+        //         val r = d.rhs.get
+        //         println(s"dd=$d")
+        //         println(s"r=$r")
+        //         println(s"R=${q.Term.betaReduce(r.appliedToArgs (q.Literal(q.IntConstant(1))   ::Nil  ) )}"         )
+
+        //     }
+
+        // }
+
         for {
           (_, tpe, c)  <- c.typer(ap.tpe)
           (argRefs, c) <- c.down(ap).mapTerms(ap.args)
@@ -116,11 +139,15 @@ object TreeMapper {
             (p.Term.Select(Nil, name), c ::= p.Stmt.Var(name, Some(expr)))
           }
 
-          _ = println(s"->${ap.symbol.tree.show}")
+
+
+          _ = println(s"saw apply -> ${ap.symbol.tree.show}")
+          _ = println(s"inner is  -> ${ap.fun.tpe.dealias.widenTermRefByName.typeSymbol}")
+          _ = println(s"${ap.args}}")
 
           (ref, c) <-
             if (receiverOwnerFlags.is(q.Flags.Module)) // Object.x(ys)
-              mkReturn(p.Expr.Invoke(receiverSym, None, argRefs, tpe), c.mark(receiverSym,defdef)).success.deferred
+              mkReturn(p.Expr.Invoke(receiverSym, None, argRefs, tpe), c.mark(receiverSym, defdef)).success.deferred
             else
               ap.fun match {
                 case q.Select(q.New(tt), "<init>") => // new X
@@ -153,7 +180,7 @@ object TreeMapper {
                   }
                 case s @ q.Select(q, n) => // s.y(zs)
                   (c !! s)
-                    .mark(receiverSym,defdef)
+                    .mark(receiverSym, defdef)
                     .mapTerm(q)
                     .map((receiverRef, c) => mkReturn(p.Expr.Invoke(receiverSym, Some(receiverRef), argRefs, tpe), c))
                 case _ => ??? // (ctx.depth, None, Nil).success.deferred
