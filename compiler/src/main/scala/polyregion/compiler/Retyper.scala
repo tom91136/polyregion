@@ -34,8 +34,12 @@ object Retyper {
     tpeSym.caseFields
       .traverse(field =>
         (field.tree match {
-          case d: q.ValDef => q.FnContext().typer(d.tpt.tpe).map((_, t, c) => p.Named(field.name, t))
-          case _           => ???
+          case d: q.ValDef =>
+            q.FnContext().typer(d.tpt.tpe).flatMap {
+              case (_, t: p.Type, c) => p.Named(field.name, t).success.deferred
+              case (_, bad, c)       => s"bad erased type $bad".fail.deferred
+            }
+          case _ => ???
         })
       )
       .map(p.StructDef(p.Sym(tpeSym.fullName), _))
@@ -43,39 +47,40 @@ object Retyper {
 
   extension (using q: Quoted)(c: q.FnContext) {
 
-    def typer(repr: q.TypeRepr): Deferred[(Option[p.Term], p.Type, q.FnContext)] = {
-      import q.*
+    def typer(repr: q.TypeRepr): Deferred[(Option[p.Term], q.Tpe, q.FnContext)] =
       repr.dealias.widenTermRefByName.simplified match {
-        case andOr: AndOrType =>
+        // case q.MethodType(names, args, rtn) => ???
+
+        case andOr: q.AndOrType =>
           for {
             (leftTerm, leftTpe, c)   <- c.typer(andOr.left)
             (rightTerm, rightTpe, c) <- c.typer(andOr.right)
           } yield
             if leftTpe == rightTpe then (leftTerm.orElse(rightTerm), leftTpe, c)
             else ???
-        case tpe @ AppliedType(ctor, args) =>
+        case tpe @ q.AppliedType(ctor, args) =>
           for {
             name    <- resolveSym(ctor).deferred
             (xs, c) <- args.foldMapM(x => c.typer(x).map((v, t, c) => ((v, t) :: Nil, c)))
           } yield (name, xs) match {
-            case (Symbols.Buffer, (_, comp) :: Nil) => (None, p.Type.Array(comp, None), c)
-            case (n, ys)                            => (None, p.Type.Erased(n, ys.map(_._2)), c)
+            case (Symbols.Buffer, (_, comp: p.Type) :: Nil) => (None, p.Type.Array(comp, None), c)
+            case (n, ys)                                    => (None, q.ErasedTpe(n, ys.map(_._2)), c)
           }
         // widen singletons
-        case ConstantType(x) =>
+        case q.ConstantType(x) =>
           (x match {
-            case BooleanConstant(v) => (Some(p.Term.BoolConst(v)), p.Type.Bool, c)
-            case ByteConstant(v)    => (Some(p.Term.ByteConst(v)), p.Type.Byte, c)
-            case ShortConstant(v)   => (Some(p.Term.ShortConst(v)), p.Type.Short, c)
-            case IntConstant(v)     => (Some(p.Term.IntConst(v)), p.Type.Int, c)
-            case LongConstant(v)    => (Some(p.Term.LongConst(v)), p.Type.Long, c)
-            case FloatConstant(v)   => (Some(p.Term.FloatConst(v)), p.Type.Float, c)
-            case DoubleConstant(v)  => (Some(p.Term.DoubleConst(v)), p.Type.Double, c)
-            case CharConstant(v)    => (Some(p.Term.CharConst(v)), p.Type.Char, c)
-            case StringConstant(v)  => ???
-            case UnitConstant       => (Some(p.Term.UnitConst), p.Type.Unit, c)
-            case NullConstant       => ???
-            case ClassOfConstant(r) => ???
+            case q.BooleanConstant(v) => (Some(p.Term.BoolConst(v)), p.Type.Bool, c)
+            case q.ByteConstant(v)    => (Some(p.Term.ByteConst(v)), p.Type.Byte, c)
+            case q.ShortConstant(v)   => (Some(p.Term.ShortConst(v)), p.Type.Short, c)
+            case q.IntConstant(v)     => (Some(p.Term.IntConst(v)), p.Type.Int, c)
+            case q.LongConstant(v)    => (Some(p.Term.LongConst(v)), p.Type.Long, c)
+            case q.FloatConstant(v)   => (Some(p.Term.FloatConst(v)), p.Type.Float, c)
+            case q.DoubleConstant(v)  => (Some(p.Term.DoubleConst(v)), p.Type.Double, c)
+            case q.CharConstant(v)    => (Some(p.Term.CharConst(v)), p.Type.Char, c)
+            case q.StringConstant(v)  => ???
+            case q.UnitConstant       => (Some(p.Term.UnitConst), p.Type.Unit, c)
+            case q.NullConstant       => ???
+            case q.ClassOfConstant(r) => ???
           }).pure
 
         case expr =>
@@ -100,6 +105,5 @@ object Retyper {
             }
             .deferred
       }
-    }
   }
 }

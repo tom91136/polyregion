@@ -85,7 +85,6 @@ extension (e: p.Term) {
 
 extension (e: p.Type) {
   def repr: String = e match {
-    case p.Type.Erased(sym, args) => s"Erased[${sym.repr}[${args.map(_.repr).mkString(",")}]]"
     case p.Type.Struct(sym)       => s"Struct[${sym.repr}]"
     case p.Type.Array(comp, n)    => s"Array[${comp.repr}${n.map(x => s";$x").getOrElse("")}]"
     case p.Type.Bool              => "Bool"

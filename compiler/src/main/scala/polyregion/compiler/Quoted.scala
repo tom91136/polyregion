@@ -10,7 +10,7 @@ class Quoted(val q: Quotes) {
   import q.reflect.*
   export q.reflect.*
 
-  case class Reference(value: String | p.Term, tpe: p.Type)
+  case class Reference(value: String | p.Term, tpe: Tpe)
 
   case class FnDependencies(
       clss: Map[p.Sym, p.StructDef] = Map.empty, // external class defs
@@ -22,18 +22,16 @@ class Quoted(val q: Quotes) {
     (x, y) => FnDependencies(x.clss ++ y.clss, x.defs ++ y.defs) //
   )
 
-  case class Suspended(args: List[p.Named], rtn: p.Type, body: List[p.Stmt])
 
-  case class Value(actual: p.Term | Suspended) {
-    def tpe = actual match {
-      case t: p.Term    => t.tpe
-      case s: Suspended => s.rtn
-    }
-  }
+  type Val = p.Term | ErasedClosureVal
+  type Tpe = p.Type | ErasedTpe | ErasedClosureTpe
 
-  extension (t: p.Term) {
-    def lift = Value(t)
-  }
+  case class ErasedClosureVal(args: List[p.Named], rtn: p.Type, body: List[p.Stmt])
+
+
+  case class ErasedTpe(name: p.Sym, args: List[Tpe])
+  case class ErasedClosureTpe(args : List[Tpe], rtn : Tpe)
+
 
   case class FnContext(
       depth: Int = 0,                  // ref depth
@@ -44,14 +42,14 @@ class Quoted(val q: Quotes) {
       clss: Map[p.Sym, p.StructDef] = Map.empty, // external class defs
       defs: Map[p.Sym, DefDef] = Map.empty,      // external def defs
 
-      suspended : Map[p.Term.Select, Suspended] = Map.empty,
+      suspended : Map[p.Term.Select, ErasedClosureVal] = Map.empty,
 
       stmts: List[p.Stmt] = List.empty // fn statements
   ) {
     infix def !!(t: Tree)  = copy(traces = t :: traces)
     def down(t: Tree)      = !!(t).copy(depth = depth + 1)
     def named(tpe: p.Type) = p.Named(s"v${depth}", tpe)
-    def suspend(k: p.Term.Select)(v : Suspended) = copy(suspended = suspended + (k->v))
+    def suspend(k: p.Term.Select)(v : ErasedClosureVal) = copy(suspended = suspended + (k->v))
 
     def noStmts                                 = copy(stmts = Nil)
     def inject(refs: Map[Symbol, Reference])    = copy(refs = refs ++ refs)

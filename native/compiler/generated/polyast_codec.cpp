@@ -171,21 +171,6 @@ json Type::array_to_json(const Type::Array& x) {
   return json::array({component, length});
 }
 
-Type::Erased Type::erased_from_json(const json& j) { 
-  auto name =  sym_from_json(j.at(0));
-  std::vector<Type::Any> args;
-  auto args_json = j.at(1);
-  std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &Type::any_from_json);
-  return {name, args};
-}
-
-json Type::erased_to_json(const Type::Erased& x) { 
-  auto name =  sym_to_json(x.name);
-  std::vector<json> args;
-  std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &Type::any_to_json);
-  return json::array({name, args});
-}
-
 Type::Any Type::any_from_json(const json& j) { 
   size_t ord = j.at(0).get<size_t>();
   const auto t = j.at(1);
@@ -202,7 +187,6 @@ Type::Any Type::any_from_json(const json& j) {
   case 9: return Type::string_from_json(t);
   case 10: return Type::struct_from_json(t);
   case 11: return Type::array_from_json(t);
-  case 12: return Type::erased_from_json(t);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
   }
 }
@@ -221,7 +205,6 @@ json Type::any_to_json(const Type::Any& x) {
   [](const Type::String &y) -> json { return {9, Type::string_to_json(y)}; },
   [](const Type::Struct &y) -> json { return {10, Type::struct_to_json(y)}; },
   [](const Type::Array &y) -> json { return {11, Type::array_to_json(y)}; },
-  [](const Type::Erased &y) -> json { return {12, Type::erased_to_json(y)}; },
   [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
   }, *x);
 }
@@ -1012,13 +995,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "a1909de1f07440f796fbea5bfb87544a") {
-   throw std::runtime_error("Expecting ADT hash to be a1909de1f07440f796fbea5bfb87544a, but was " + hash);
+  if(hash != "e64945e9dd3337572fe9a7ce4b82d807") {
+   throw std::runtime_error("Expecting ADT hash to be e64945e9dd3337572fe9a7ce4b82d807, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"a1909de1f07440f796fbea5bfb87544a", x});
+  return json::array({"e64945e9dd3337572fe9a7ce4b82d807", x});
 }
 } // namespace polyregion::polyast

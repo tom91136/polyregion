@@ -63,9 +63,6 @@ llvm::Type *LLVMAstTransformer::mkTpe(const Type::Any &tpe) {                   
           auto comp = mkTpe(x.component);
           return comp->isPointerTy() ? comp : comp->getPointerTo();
         }
-      },
-      [&](const Type::Erased &x) -> llvm::Type * {
-        return undefined(__FILE_NAME__, __LINE__, "Erased type appeared: " + to_string(x));
       } //
   );
 }

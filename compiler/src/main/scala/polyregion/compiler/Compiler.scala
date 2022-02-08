@@ -25,12 +25,22 @@ object Compiler {
 
   def compileFn(using q: Quoted)(f: q.DefDef): Result[(q.FnDependencies, p.Function)] = (for {
     (fnRtnValue, fnTpe, c) <- q.FnContext().typer(f.returnTpt.tpe)
+    fnTpe <- fnTpe match {
+      case tpe: p.Type => tpe.success.deferred
+      case bad         => s"bad function return type $bad".fail.deferred
+    }
+
     _ = println(s" -> Compile dependent method: ${f.show}")
     args = f.paramss
       .flatMap(_.params)
       .collect { case d: q.ValDef => d }
     // TODO handle default value (ValDef.rhs)
-    (namedArgs, c) <- args.foldMapM(a => c.typer(a.tpt.tpe).map((_, t, c) => (p.Named(a.name, t) :: Nil, c)))
+    (namedArgs, c) <- args.foldMapM(arg =>
+      c.typer(arg.tpt.tpe).subflatMap {
+        case (_, t: p.Type, c) => (p.Named(arg.name, t) :: Nil, c).success
+        case (_, bad, c)       => s"erased arg type encountered $bad".fail
+      }
+    )
 
     body <- fnRtnValue.fold(f.rhs.traverse(c.mapTerm(_)))(x => Some((x, c)).success.deferred)
     mkFn   = (xs: List[p.Stmt]) => p.Function(p.Sym(f.symbol.fullName), namedArgs, fnTpe, xs)
@@ -39,7 +49,12 @@ object Compiler {
   } yield body match {
     case None =>
       (runOpt(c).deps, mkFn(Nil))
-    case Some((term, preOptCtx)) =>
+    case Some((value, preOptCtx)) =>
+      val term = value match {
+        case t: p.Term => t
+        case _         => ???
+      }
+
       val c = runOpt(preOptCtx.mapStmts(_ :+ p.Stmt.Return(p.Expr.Alias(term))))
       (c.deps, mkFn((c.stmts)))
   }).resolve
@@ -59,10 +74,11 @@ object Compiler {
 
     for {
       (typedExternalRefs, c) <- outline(term)
+
+      // we can discard incoming references here safely iff we also never use them in the resulting p.Function
       capturedNames = typedExternalRefs
         .collect {
-          case (r, q.Reference(name: String, tpe)) if tpe != p.Type.Unit =>
-            (r, p.Named(name, tpe))
+          case (r, q.Reference(name: String, tpe: p.Type)) if tpe != p.Type.Unit => (r, p.Named(name, tpe))
         }
         .distinctBy(_._1.symbol.pos)
 
@@ -70,7 +86,6 @@ object Compiler {
         s" -> all refs (typed):         \n${typedExternalRefs.map((tree, ref) => s"$ref => $tree").mkString("\n").indent(4)}"
       )
       _ = println(s" -> captured refs:    \n${capturedNames.map(_._2.repr).mkString("\n").indent(4)}")
-      
 
       (returnTerm, c) <- c
         .inject(typedExternalRefs.map((ref, r) => ref.symbol -> r).toMap)
@@ -79,6 +94,16 @@ object Compiler {
 
       (_, fnTpe, preOptCtx) <- c.typer(term.tpe).resolve
 
+      fnTpe <- fnTpe match {
+        case tpe: p.Type => tpe.success
+        case bad         => s"bad function return type $bad".fail
+      }
+
+      returnTerm <- returnTerm match {
+        case term: p.Term => term.success
+        case bad          => s"bad function return value $bad".fail
+      }
+
       _ <-
         if (fnTpe != returnTerm.tpe) {
           s"lambda tpe ($fnTpe) != last term tpe (${returnTerm.tpe}), term was $returnTerm".fail
@@ -86,14 +111,15 @@ object Compiler {
 
       (captures, names) = capturedNames.toList.map((r, n) => (r -> n.tpe, n)).unzip
 
-
       c = runLocalOptPass(preOptCtx)
+
+       
 
       closureFn = p.Function(
         p.Sym(closureName :: Nil),
         names,
         fnTpe,
-        (c.stmts :+ p.Stmt.Return(p.Expr.Alias(returnTerm)) )
+        (c.stmts :+ p.Stmt.Return(p.Expr.Alias(returnTerm)))
       )
     } yield (c.deps, captures, closureFn)
   }
