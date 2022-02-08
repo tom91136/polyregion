@@ -22,6 +22,19 @@ class Quoted(val q: Quotes) {
     (x, y) => FnDependencies(x.clss ++ y.clss, x.defs ++ y.defs) //
   )
 
+  case class Suspended(args: List[p.Named], rtn: p.Type, body: List[p.Stmt])
+
+  case class Value(actual: p.Term | Suspended) {
+    def tpe = actual match {
+      case t: p.Term    => t.tpe
+      case s: Suspended => s.rtn
+    }
+  }
+
+  extension (t: p.Term) {
+    def lift = Value(t)
+  }
+
   case class FnContext(
       depth: Int = 0,                  // ref depth
       traces: List[Tree] = List.empty, // debug
@@ -31,11 +44,14 @@ class Quoted(val q: Quotes) {
       clss: Map[p.Sym, p.StructDef] = Map.empty, // external class defs
       defs: Map[p.Sym, DefDef] = Map.empty,      // external def defs
 
+      suspended : Map[p.Term.Select, Suspended] = Map.empty,
+
       stmts: List[p.Stmt] = List.empty // fn statements
   ) {
     infix def !!(t: Tree)  = copy(traces = t :: traces)
     def down(t: Tree)      = !!(t).copy(depth = depth + 1)
     def named(tpe: p.Type) = p.Named(s"v${depth}", tpe)
+    def suspend(k: p.Term.Select)(v : Suspended) = copy(suspended = suspended + (k->v))
 
     def noStmts                                 = copy(stmts = Nil)
     def inject(refs: Map[Symbol, Reference])    = copy(refs = refs ++ refs)
@@ -57,6 +73,7 @@ class Quoted(val q: Quotes) {
         x.refs ++ y.refs,
         x.clss ++ y.clss,
         x.defs ++ y.defs,
+        x.suspended ++ y.suspended,
         x.stmts ::: y.stmts
       )
   )

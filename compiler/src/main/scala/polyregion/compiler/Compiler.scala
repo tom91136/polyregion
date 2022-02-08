@@ -109,6 +109,9 @@ object Compiler {
 
       (deps, closureArgs, closureFn) <- compileClosure(x)
 
+      _ = println("=======\nmain closure compiled\n=======")
+      _ = println(s"${closureFn.repr}")
+
       (deps, fns) <- (deps, List.empty[p.Function]).iterateWhileM { case (deps, fs) =>
         deps.defs.values.toList.traverse(compileFn(_)).map(xs => xs.unzip.bimap(_.combineAll, _ ++ fs))
       }(_._1.defs.nonEmpty)

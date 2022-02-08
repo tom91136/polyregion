@@ -15,8 +15,17 @@ class InlineArraySuite extends BaseSuite {
 
   inline def assertInlineFill[A <: AnyVal](inline n: Int, inline expected: A)(using C: ClassTag[A]) =
     if (Toggles.InlineArraySuite) {
+
+      val aa = Buffer(1d)
       test(s"${C.runtimeClass}-fill-x$n=$expected") {
         val actual = doOffload {
+
+          
+
+
+          //  val fff = ( (x : Int) => aa(x) = 2d ) 
+          //  fff(1)
+          //  fff(2)
           val xs = Array.ofDim[A](n)
           unrollInclusive(n - 1)(i => xs(i) = expected)
           xs
