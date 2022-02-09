@@ -48,7 +48,7 @@ class InlineArraySuite extends BaseSuite {
       }
     }
 
-  assertInlineFill[Char](0, 0)
+//  assertInlineFill[Char](0, 0)
   // assertInlineFill[Byte](0, 0)
   // assertInlineFill[Short](0, 0)
   // assertInlineFill[Int](0, 0)

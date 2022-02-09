@@ -48,13 +48,24 @@ object Retyper {
 
   extension (using q: Quoted)(c: q.FnContext) {
 
+    def typerN(xs: List[q.TypeRepr]): Deferred[(List[(Option[p.Term], q.Tpe)], q.FnContext)] = xs match {
+      case Nil     => (Nil, c).pure
+      case x :: xs =>
+        // TODO make sure we get the right order back!
+        c.typer(x).flatMap { (v, t, c) =>
+          xs.foldLeftM(((v, t) :: Nil, c)) { case ((ys, c), x) =>
+            c.typer(x).map((v, t, c) => ((v, t) :: ys, c))
+          }
+        }
+    }
+
     def typer(repr: q.TypeRepr): Deferred[(Option[p.Term], q.Tpe, q.FnContext)] =
       repr.dealias.widenTermRefByName.simplified match {
         case q.MethodType(_, args, rtn) =>
           for {
             (_, tpe, c) <- c.typer(rtn)
-            (xs, c)     <- args.foldMapM(x => c.typer(x).map((v, t, c) => ((v, t) :: Nil, c)))
-          } yield (None, q.ErasedClosureTpe(xs.map(_._2), tpe), c)
+            (xs, c)     <- c.typerN(args)
+          } yield (None, q.ErasedFnTpe(xs.map(_._2), tpe), c)
         case andOr: q.AndOrType =>
           for {
             (leftTerm, leftTpe, c)   <- c.typer(andOr.left)
@@ -65,7 +76,7 @@ object Retyper {
         case tpe @ q.AppliedType(ctor, args) =>
           for {
             (name, module) <- resolveSym(ctor).deferred
-            (xs, c)        <- args.foldMapM(x => c.typer(x).map((v, t, c) => ((v, t) :: Nil, c)))
+            (xs, c)        <- c.typerN(args)
           } yield (name, module, xs) match {
             case (Symbols.Buffer, false, (_, comp: p.Type) :: Nil) => (None, p.Type.Array(comp, None), c)
             case (_, _, ys) if tpe.isFunctionType                  => // FunctionN
@@ -74,8 +85,8 @@ object Retyper {
                 None,
                 ys.map(_._2) match {
                   case Nil      => ???
-                  case x :: Nil => q.ErasedClosureTpe(Nil, x)
-                  case xs :+ x  => q.ErasedClosureTpe(xs, x)
+                  case x :: Nil => q.ErasedFnTpe(Nil, x)
+                  case xs :+ x  => q.ErasedFnTpe(xs, x)
                 },
                 c
               )
