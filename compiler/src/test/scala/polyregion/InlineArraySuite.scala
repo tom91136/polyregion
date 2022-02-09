@@ -5,6 +5,11 @@ import scala.compiletime._
 import scala.reflect.ClassTag
 import polyregion.NativeStruct
 
+object X{
+    def m2(a: Int) = 12
+    def u = 3
+  }
+
 class InlineArraySuite extends BaseSuite {
 
   inline def testExpr(inline name: String)(inline r: Any) = if (Toggles.InlineArraySuite) {
@@ -13,19 +18,28 @@ class InlineArraySuite extends BaseSuite {
 
   inline val FillN = 1
 
+  
+
   inline def assertInlineFill[A <: AnyVal](inline n: Int, inline expected: A)(using C: ClassTag[A]) =
     if (Toggles.InlineArraySuite) {
 
       val aa = Buffer(1d)
+      val m = 2
       test(s"${C.runtimeClass}-fill-x$n=$expected") {
         val actual = doOffload {
 
-          
+
+          // val u = scala.math.cos(_)   
+          X.u
+          X.m2(2)
+          scala.math.cos(2)       
+          m*2
 
 
           //  val fff = ( (x : Int) => aa(x) = 2d ) 
           //  fff(1)
           //  fff(2)
+          math.cos(0d)
           val xs = Array.ofDim[A](n)
           unrollInclusive(n - 1)(i => xs(i) = expected)
           xs

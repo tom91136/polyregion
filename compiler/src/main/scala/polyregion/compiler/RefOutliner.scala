@@ -33,10 +33,10 @@ object RefOutliner {
           (s.symbol.isDefDef && s.symbol.flags.is(q.Flags.FieldAccessor))
       )
 
-      _ = println(s">> > $s = ${s.tpe.widenTermRefByName}")
       (root, path) <- idents(s)
 
       // the entire path is not foreign if the root is not foreign
+      // TODO see above, need robust owner validation
       if !root.symbol.maybeOwner.flags.is(q.Flags.Macro)
 
     } yield (root, path.toVector, s)).sortBy(_._2.length)
@@ -86,8 +86,8 @@ object RefOutliner {
     // remove anything we can't use, like ClassTag
     val filteredTypedRefs = typedRefs.map { (xs, c) =>
       val ys = xs.filter {
-        case (_, q.Reference(_, q.ErasedTpe(Symbols.ClassTag, _))) => false
-        case _                                                     => true
+        case (_, q.Reference(_, q.ErasedTpe(Symbols.ClassTag, false, _))) => false
+        case _                                                            => true
       }
       (ys, c)
     }

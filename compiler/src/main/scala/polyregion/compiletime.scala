@@ -283,7 +283,8 @@ object compiletime {
           import quotes.reflect.*
           val imp = Expr.summon[NativeStruct[A]] match {
             case Some(x) => x
-            case None => Q.report.errorAndAbort(s"No implicit found for return struct value ${TypeRepr.of[NativeStruct[A]].show}" )
+            case None =>
+              Q.report.errorAndAbort(s"No implicit found for return struct value ${TypeRepr.of[NativeStruct[A]].show}")
           }
           // val x = TypeRepr.of[A].asType
           Some(

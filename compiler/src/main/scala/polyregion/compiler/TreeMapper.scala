@@ -24,30 +24,26 @@ object TreeMapper {
     }
 
     def mapTree(tree: q.Tree): Deferred[(q.Val, q.FnContext)] = tree match {
-      case q.ValDef(name, tpe, Some(rhs)) =>
+      case q.ValDef(name, tpeTree, Some(rhs)) =>
         for {
-          (term, t, c) <- c.typer(tpe.tpe)
-          t <- t match {
-            case tpe: p.Type => tpe.success.deferred
-            case bad         => s"illegal erased type ${bad}".fail.deferred
-          }
+          (term, tpe, c) <- c.typer(tpeTree.tpe)
           // if tpe is singleton, substitute with constant directly
           (ref, c) <- term.fold((c !! tree).mapTerm(rhs))(x => (x, c).pure)
-          c2 = ref match {
-            case term: p.Term                => c ::= p.Stmt.Var(p.Named(name, t), Some(p.Expr.Alias(term)))
-            case partial: q.ErasedClosureVal => c.suspend(p.Term.Select(Nil, p.Named(name, t)))(partial)
+        } yield (
+          p.Term.UnitConst,
+          (ref, tpe) match {
+            case (term: p.Term, tpe: p.Type) => c ::= p.Stmt.Var(p.Named(name, tpe), Some(p.Expr.Alias(term)))
+            case (v: q.ErasedClosureVal, tpe: q.ErasedClosureTpe) => c.suspend(name -> tpe)(v)
           }
-        } yield (p.Term.UnitConst, c2)
-      case q.ValDef(name, tpe, None) => s"Unexpected variable $name:$tpe".fail.deferred
+        )
+      case q.ValDef(name, tpe, None) => c.fail(s"Unexpected variable $name:$tpe")
       // DefDef here comes from general closures ( (a:A) => ??? )
       case t: q.Term => (c !! tree).mapTerm(t)
 
       // def f(x...) : A = ??? === val f : x... => A = ???
 
-      case tree =>
-        s"[depth=${c.depth}] Unhandled: $tree\nSymbol:\n${tree.symbol}\nTrace was:\n${(tree :: c.traces)
-          .map(x => "\t" + x.show + "\n\t" + x)
-          .mkString("\n---\n")}".fail.deferred
+      case tree => c.fail(s"Unhandled: $tree\nSymbol:\n${tree.symbol}")
+
     }
 
     def mapTerms(args: List[q.Term]): Deferred[(List[q.Val], q.FnContext)] = args match {
@@ -77,8 +73,8 @@ object TreeMapper {
           case (Some(q.Reference(value, tpe)), _) =>
             val term = (value, tpe) match {
               case (name: String, tpe: p.Type) => p.Term.Select(Nil, p.Named(name, tpe))
-              case (term: p.Term, _) => term
-              case _ => ???
+              case (term: p.Term, _)           => term
+              case _                           => ???
             }
             (term, c !! r).pure
           case (None, i @ q.Ident(s)) =>
@@ -89,33 +85,97 @@ object TreeMapper {
               case q.TermRef(_, name) if name != s => name
               case _                               => s
             }
-
+            println(s"$i = $s")
             for {
               (_, tpe, c) <- c.typer(i.tpe)
-              tpe <- tpe match {
-                case tpe: p.Type => tpe.success.deferred
-                case bad         => s"illegal erased type ${bad}".fail.deferred
+              // Ident is local, so if it is an erased closure type, we check the context first to see if we have a defined suspension
+              // for types that are already part of PolyAst, we just use it as is
+              term <- tpe match {
+                case tpe: p.Type => p.Term.Select(Nil, p.Named(name, tpe)).success.deferred
+                case ect: q.ErasedClosureTpe =>
+                  c.suspended.get(name -> ect) match {
+                    case Some(x) => x.success.deferred
+                    case None    => c.fail[q.Val](s"Can't find a previous definition of ${i}")
+                  }
+                case q.ErasedTpe(sym, true, Nil) => q.ErasedModuleSelect(sym).success.deferred
+                case et: q.ErasedTpe             => c.fail[q.Val](s"Saw ${et}")
               }
-            } yield (p.Term.Select(Nil, p.Named(name, tpe)), c !! r)
+            } yield (term, c !! r)
           case (None, s @ q.Select(root, name)) =>
+            println(s"sel $s")
             for {
-              (_, tpe, c) <- c.typer(s.tpe)
-              tpe <- tpe match {
-                case tpe: p.Type =>
-                  tpe.success.deferred
-                case bad => s"illegal erased type ${bad}".fail.deferred
-              }
-              (lhsRef, c) <- (c !! term).mapTerm(root)
-              ref <- lhsRef match {
-                case p.Term.Select(xs, x) =>
-                  p.Term.Select(xs :+ x, p.Named(name, tpe)).success.deferred
-                case bad => s"illegal select root ${bad}".fail.deferred
-              }
-            } yield (ref, c)
+              (_, tpe, c)  <- c.typer(s.tpe)
+              (rootVal, c) <- (c !! term).mapTerm(root)
+              _ = println(s"Clear sel $s, tpe=${tpe}")
 
-          case (None, x) =>
-            s"[depth=${c.depth}] Ref ${x} with tpe=${x.tpe} was not identified at closure args stage, ref pool:\n->${c.refs
-              .mkString("\n->")} ".fail.deferred
+              // for selects, we got two cases
+              // (a:p.Type).(b:p.Type).(c:p.Type)
+              //   - This is the simple case where we just lift it to a PolyAst Select
+              // (a:p.Type).(b:p.Type).(f:ErasedClosureTpe(X..., Y))
+              //   - This gets lifted into an ErasedClosureVal using the correct name for immediate return as it's likely a foreign module call.
+              //     This sort of select could be
+              // it is an error if the select chain ends up with a Erased* type in the middle, we only expect it to appear last
+              (term, c) <- tpe match {
+                case tpe: p.Type =>
+                  rootVal match {
+                    case p.Term.Select(xs, x) => (p.Term.Select(xs :+ x, p.Named(name, tpe)), c).success.deferred
+                    case q.ErasedModuleSelect(module) =>
+                      s.symbol.tree match {
+                        case dd: q.DefDef
+                            if dd.paramss.isEmpty => // no-arg module def call (i.e. `object X{ def y :Int = ??? }` )
+                          val fnSym = module :+ name
+                          val named = c.named(tpe)
+                          (
+                            p.Term.Select(Nil, named),
+                            c.mark(fnSym, dd) ::= p.Stmt.Var(named, Some(p.Expr.Invoke(fnSym, None, Nil, tpe)))
+                          ).success.deferred
+                        case dd: q.DefDef =>
+                          c.fail(s"Unexpected arg list ${dd.paramss} for a 0-arg def via module ref ${module.repr}")
+                        case vd: q.ValDef =>
+                          c.fail(s"$vd via module ref ${module.repr} was not intercepted by the outliner!?")
+                        case bad =>
+                          c.fail(s"Unsupported construct $bad via module ref ${module.repr}")
+                      }
+                    case bad => c.fail(s"Unexpected root of a select that leads to a non-erased ${tpe} type: ${bad}")
+                  }
+
+                case ect: q.ErasedClosureTpe =>
+                  println(">>>>" + (c !! term).mapTerm(root).resolve.map(_._1))
+
+                  println(s"$ect $name")
+
+                  // a.f(_)(_)
+                  // ect.rtn : Term | ECV
+                  // case Term => Invoke
+                  // case ECV  => ???
+
+
+                  rootVal match {
+                    case receiver: p.Term =>
+                      q.ErasedClosureVal(
+                        ect.args.zipWithIndex.map((x, i) => (s"_$i", x)),
+                        ect.rtn,
+                        List(p.Stmt.Return(p.Expr.Invoke(p.Sym(name), Some(receiver), ???, ???)))
+                      )
+                    case q.ErasedModuleSelect(mod) =>
+                      q.ErasedClosureVal(
+                        ect.args.zipWithIndex.map((x, i) => (s"_$i", x)),
+                        ect.rtn,
+                        List(p.Stmt.Return(p.Expr.Invoke(mod :+ name, None, ???, ???)))
+                      )
+                    case bad => c.fail(s"Unexpected root of a select that leads to an erased ${ect} type: ${bad}")
+                  }
+
+                  ???
+
+                // rootVal
+                // case q.ErasedTpe(sym, true, Nil) => (q.ErasedModuleSelect(sym), c).success.deferred
+                case et: q.ErasedTpe => c.fail[(q.Val, q.FnContext)](s"Saw ${et}")
+              }
+
+            } yield (term, c)
+
+          case (None, x) => c.fail(s"Ref ${x} with tpe=${x.tpe} was not identified at closure args stage")
 
         }
 
@@ -142,15 +202,22 @@ object TreeMapper {
         // }
 
         for {
-          (_, tpe, c)  <- c.typer(ap.tpe)
+          (_, rtnTpe, c) <- c.typer(ap.tpe)
+          (_, funTpe, c) <- c.typer(ap.fun.tpe)
+          _ = println(s"B=$funTpe")
           (funVal, c)  <- c.mapTerm(ap.fun)
-          (argRefs, c) <- c.down(ap).mapTerms(ap.args)
+          (argVals, c) <- c.down(ap).mapTerms(ap.args)
 
-          _ = (funVal, tpe) match {
-            case (term: p.Term, tpe: p.Type)                                   =>
-            case (closure: q.ErasedClosureVal, closureTpe: q.ErasedClosureTpe) =>
-            case (_, _)                                                        => ???
+          argTerms <- argVals.traverse {
+            case t: p.Term => t.success.deferred
+            case bad       => c.fail(s"Illegal ${bad}")
           }
+
+          // _ = (funVal, tpe) match {
+          //   case (term: p.Term, tpe: p.Type)                                   =>
+          //   case (closure: q.ErasedClosureVal, closureTpe: q.ErasedClosureTpe) =>
+          //   case (_, _)                                                        => ???
+          // }
 
           defdef <- ap.fun.symbol.tree match {
             case d: q.DefDef => d.success.deferred // if we see this then the call is probably fully applied at the end
@@ -172,7 +239,7 @@ object TreeMapper {
           _ = println(s"saw apply -> ${ap.symbol.tree.show}")
           _ = println(s"inner is  -> ${defdef.show}")
 
-          withoutErasedTerms = argRefs
+          withoutErasedTerms = argVals
           // .filter(_.tpe match {
           //   case p.Type.Erased(_, _) => false
           //   case _                   => true
@@ -193,10 +260,10 @@ object TreeMapper {
                       println(s"args=${ap.args.map(_.tpe.dealias.widenTermRefByName)}")
 
                       (for {
-                        sdef <- (tpe match {
+                        sdef <- (rtnTpe match {
                           case p.Type.Struct(s) => c.clss.get(s)
                           case _                => None
-                        }).failIfEmpty(s"No StructDef found for type $tpe")
+                        }).failIfEmpty(s"No StructDef found for type $rtnTpe")
 
                         structTpes = sdef.members.map(_.tpe)
                         argTpes    = withoutErasedTerms.map(x => ???)
@@ -214,11 +281,16 @@ object TreeMapper {
                       } yield ((p.Term.Select(Nil, name)), c.::=(expr +: setMemberExprs*))).deferred
                     case x => s"Found ctor signature, expecting def with no rhs but got: $x".fail.deferred
                   }
-                case s @ q.Select(q, n) => // s.y(zs)
+                case s @ q.Select(q, n) =>
+                  // up
+
+                  // s.y(zs)
                   (c !! s)
                     .mark(receiverSym, defdef)
                     .mapTerm(q)
-                    .map((receiverRef, c) => mkReturn(p.Expr.Invoke(receiverSym, Some(???), ???, ???), c))
+                    .map((receiverRef, c) =>
+                      mkReturn(p.Expr.Invoke(receiverSym, Some(receiverRef.asInstanceOf[p.Term]), argTerms, ???), c)
+                    )
                 case _ => ??? // (ctx.depth, None, Nil).success.deferred
               }
         } yield (ref, c)
@@ -231,16 +303,21 @@ object TreeMapper {
         for {
           (lhsRef, c) <- c.down(term).mapTerm(lhs) // go down here
           (rhsRef, c) <- (c !! term).mapTerm(rhs)
+
           r <- (lhsRef, rhsRef) match {
+            case (lhsClosure: q.ErasedClosureVal, rhsClosure: q.ErasedClosureVal) =>
+              if (lhsClosure.tpe != rhsClosure.tpe) c.fail(s"Assignment of incompatible type ${lhsRef} := ${rhsRef}")
+              else ???
+
             case (s @ p.Term.Select(Nil, _), rhs) =>
               (
                 p.Term.UnitConst,
                 rhs match {
                   case t: p.Term             => c ::= p.Stmt.Mut(s, p.Expr.Alias(t), copy = false)
-                  case p: q.ErasedClosureVal => c.suspend(s)(p)
+                  case p: q.ErasedClosureVal => ??? // c.suspend(s)(p)
                 }
               ).pure
-            case bad => s"Illegal assign LHS,RHS: ${bad}".fail.deferred
+            case bad => c.fail(s"Illegal assign LHS,RHS: ${bad}")
           }
         } yield r
       case q.If(cond, thenTerm, elseTerm) =>
@@ -255,7 +332,7 @@ object TreeMapper {
             v match {
               case t: p.Term => t.success.deferred
               case partial: q.ErasedClosureVal =>
-                s"$name term of an if-then-else statement (${term.show}) is partial ($partial)".fail.deferred
+                c.fail(s"$name term of an if-then-else statement (${term.show}) is partial ($partial)")
             }
 
           condRef <- failIfPartial("condition", condVal)
@@ -263,7 +340,7 @@ object TreeMapper {
           elseRef <- failIfPartial("else", elseVal)
           tpe <- tpe match {
             case tpe: p.Type => tpe.success.deferred
-            case bad         => s"illegal erased type ${bad}".fail.deferred
+            case bad         => c.fail(s"illegal erased type ${bad}")
           }
 
           _ <- (if (condRef.tpe != p.Type.Bool) s"Cond must be a Bool ref, got ${condRef}".fail

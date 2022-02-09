@@ -74,6 +74,8 @@ object Compiler {
 
     for {
       (typedExternalRefs, c) <- outline(term)
+      // TODO if we have a reference with an erased closure type, we need to find the 
+      // implementation and suspend it to FnContext otherwise we won't find the suspension in mapper
 
       // we can discard incoming references here safely iff we also never use them in the resulting p.Function
       capturedNames = typedExternalRefs
@@ -112,8 +114,6 @@ object Compiler {
       (captures, names) = capturedNames.toList.map((r, n) => (r -> n.tpe, n)).unzip
 
       c = runLocalOptPass(preOptCtx)
-
-       
 
       closureFn = p.Function(
         p.Sym(closureName :: Nil),

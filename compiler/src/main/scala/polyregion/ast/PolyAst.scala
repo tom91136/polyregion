@@ -6,7 +6,8 @@ import cats.data.Op
 object PolyAst {
 
   case class Sym(fqn: List[String]) derives MsgPack.Codec {
-    def repr: String = fqn.mkString(".")
+    def repr: String             = fqn.mkString(".")
+    infix def :+(s: String): Sym = copy(fqn = fqn :+ s)
   }
   object Sym {
     def apply(raw: String): Sym = {
@@ -35,7 +36,7 @@ object PolyAst {
     case Int   extends Type(TypeKind.Integral)
     case Long  extends Type(TypeKind.Integral)
 
-    case Unit                                        extends Type(TypeKind.None)
+    case Unit extends Type(TypeKind.None)
 
     // specialisations
     case String                                      extends Type(TypeKind.Ref)
@@ -74,8 +75,8 @@ object PolyAst {
 
   enum Expr(val tpe: Type) derives MsgPack.Codec {
 
-    case UnaryIntrinsic(lhs: Term, kind : UnaryIntrinsicKind, rtn: Type) extends Expr(rtn)
-    case BinaryIntrinsic(lhs: Term, rhs: Term, kind : BinaryIntrinsicKind, rtn: Type) extends Expr(rtn)  
+    case UnaryIntrinsic(lhs: Term, kind: UnaryIntrinsicKind, rtn: Type)              extends Expr(rtn)
+    case BinaryIntrinsic(lhs: Term, rhs: Term, kind: BinaryIntrinsicKind, rtn: Type) extends Expr(rtn)
 
     case Not(lhs: Term)            extends Expr(Type.Bool)
     case Eq(lhs: Term, rhs: Term)  extends Expr(Type.Bool)
