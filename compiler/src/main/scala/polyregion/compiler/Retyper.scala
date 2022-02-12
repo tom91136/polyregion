@@ -10,21 +10,6 @@ import simulacrum.typeclass
 
 object Retyper {
 
-  @tailrec private final def resolveSym(using q: Quoted)(ref: q.TypeRepr): Result[(p.Sym, Boolean)] =
-    ref.dealias.simplified match {
-      case q.ThisType(tpe) => resolveSym(tpe)
-      case tpe: q.NamedType =>
-        tpe.classSymbol match {
-          case None => s"Named type is not a class: ${tpe}".fail
-          case Some(sym) if sym.name == "<root>" => // discard root package
-            resolveSym(tpe.qualifier)
-          case Some(sym) =>
-            (p.Sym(sym.fullName), sym.flags.is(q.Flags.Module)).success
-        }
-      // case NoPrefix()    => None.success
-      case invalid => s"Invalid type: ${invalid}".fail
-    }
-
   def lowerProductType[A: Type](using q: Quoted): Deferred[p.StructDef] = lowerProductType(q.TypeRepr.of[A].typeSymbol)
   def lowerProductType(using q: Quoted)(tpeSym: q.Symbol): Deferred[p.StructDef] = {
 
@@ -46,6 +31,21 @@ object Retyper {
       .map(p.StructDef(p.Sym(tpeSym.fullName), _))
   }
 
+  @tailrec private final def resolveSym(using q: Quoted)(ref: q.TypeRepr): Result[(p.Sym, Boolean)] =
+    ref.dealias.simplified match {
+      case q.ThisType(tpe) => resolveSym(tpe)
+      case tpe: q.NamedType =>
+        tpe.classSymbol match {
+          case None => s"Named type is not a class: ${tpe}".fail
+          case Some(sym) if sym.name == "<root>" => // discard root package
+            resolveSym(tpe.qualifier)
+          case Some(sym) =>
+            (p.Sym(sym.fullName), sym.flags.is(q.Flags.Module)).success
+        }
+      // case NoPrefix()    => None.success
+      case invalid => s"Invalid type: ${invalid}".fail
+    }
+
   extension (using q: Quoted)(c: q.FnContext) {
 
     def typerN(xs: List[q.TypeRepr]): Deferred[(List[(Option[p.Term], q.Tpe)], q.FnContext)] = xs match {
@@ -61,11 +61,19 @@ object Retyper {
 
     def typer(repr: q.TypeRepr): Deferred[(Option[p.Term], q.Tpe, q.FnContext)] =
       repr.dealias.widenTermRefByName.simplified match {
+        case q.PolyType(names, bounds, rtn) =>
+          for {
+            (_, m1, c) <- c.typer(rtn)
+            m2 = m1 match {
+              case q.ErasedFnTpe(xs, args, tpe) => q.ErasedFnTpe(names ::: xs, args, tpe)
+              case _                            => ??? // XXX we only support generic methods for now:
+            }
+          } yield (None, m2, c)
         case q.MethodType(_, args, rtn) =>
           for {
             (_, tpe, c) <- c.typer(rtn)
             (xs, c)     <- c.typerN(args)
-          } yield (None, q.ErasedFnTpe(xs.map(_._2), tpe), c)
+          } yield (None, q.ErasedFnTpe(Nil, xs.map(_._2), tpe), c)
         case andOr: q.AndOrType =>
           for {
             (leftTerm, leftTpe, c)   <- c.typer(andOr.left)
@@ -74,6 +82,9 @@ object Retyper {
             if leftTpe == rightTpe then (leftTerm.orElse(rightTerm), leftTpe, c)
             else ???
         case tpe @ q.AppliedType(ctor, args) =>
+          Thread.dumpStack()
+          println(s"AP = ${ctor} + ${args}")
+
           for {
             (name, module) <- resolveSym(ctor).deferred
             (xs, c)        <- c.typerN(args)
@@ -85,8 +96,8 @@ object Retyper {
                 None,
                 ys.map(_._2) match {
                   case Nil      => ???
-                  case x :: Nil => q.ErasedFnTpe(Nil, x)
-                  case xs :+ x  => q.ErasedFnTpe(xs, x)
+                  case x :: Nil => q.ErasedFnTpe(Nil, Nil, x)
+                  case xs :+ x  => q.ErasedFnTpe(Nil, xs, x)
                 },
                 c
               )
@@ -111,6 +122,7 @@ object Retyper {
           }).pure
 
         case expr =>
+          println(s"r=${expr} = ${repr}")
           resolveSym(expr)
             .map[q.Tpe] {
               case (p.Sym(Symbols.Scala :+ "Unit"), false)      => p.Type.Unit

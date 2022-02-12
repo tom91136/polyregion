@@ -28,18 +28,15 @@ class Quoted(val q: Quotes) {
 
   case class ErasedModuleSelect(sym: p.Sym)
 
-
   case class ErasedMethodVal(receiver: p.Sym | p.Term, sym: p.Sym, tpe: ErasedFnTpe)
 
   case class ErasedTpe(name: p.Sym, module: Boolean, args: List[Tpe]) {
-    override def toString = {
-      s"${if(module) "<module>." else ""}${name.repr}${if(args.isEmpty) "" else args.mkString("[", ", ", "]")  }"
-    }
+    override def toString =
+      s"${if (module) "<module>." else ""}${name.repr}${if (args.isEmpty) "" else args.mkString("[", ", ", "]")}"
   }
-  case class ErasedFnTpe(args: List[Tpe], rtn: Tpe) {
-    override def toString = {
-      s"{ (${args.mkString(",")}) => ${rtn}}"
-    }
+  case class ErasedFnTpe(tpeArgs: List[String], args: List[Tpe], rtn: Tpe) {
+    override def toString =
+      s"[${tpeArgs.mkString(",")}] =>> { (${args.mkString(",")}) => ${rtn}}"
   }
 
   case class FnContext(
@@ -54,9 +51,9 @@ class Quoted(val q: Quotes) {
       suspended: Map[(String, ErasedFnTpe), ErasedMethodVal] = Map.empty,
       stmts: List[p.Stmt] = List.empty // fn statements
   ) {
-    infix def !!(t: Tree)                                      = copy(traces = t :: traces)
-    def down(t: Tree)                                          = !!(t).copy(depth = depth + 1)
-    def named(tpe: p.Type)                                     = p.Named(s"v${depth}", tpe)
+    infix def !!(t: Tree)                                     = copy(traces = t :: traces)
+    def down(t: Tree)                                         = !!(t).copy(depth = depth + 1)
+    def named(tpe: p.Type)                                    = p.Named(s"v${depth}", tpe)
     def suspend(k: (String, ErasedFnTpe))(v: ErasedMethodVal) = copy(suspended = suspended + (k -> v))
 
     def noStmts                                 = copy(stmts = Nil)
@@ -71,7 +68,7 @@ class Quoted(val q: Quotes) {
 		 |[Refs]:
 		 |  -> ${refs.mkString("\n  -> ")}
 		 |[Trace]
-		 |  ->${traces.map(x => s"${x.show} -> $x"  .indent(1)).mkString("---\n  ->")}
+		 |  ->${traces.map(x => s"${x.show} -> $x".indent(1)).mkString("---\n  ->")}
 		 |[Stmts]
 		 |  ->${stmts.map(_.repr.indent(1)).mkString("  ->")}""".stripMargin.fail[A].deferred
 

@@ -40,7 +40,8 @@ class InlineArraySuite extends BaseSuite {
           //  fff(1)
           //  fff(2)
           math.cos(0d)
-          val xs = Array.ofDim[A](n)
+           val xs = Array.ofDim[A](n)
+//          val xs = new Array[Int](n)
           unrollInclusive(n - 1)(i => xs(i) = expected)
           xs
         }
@@ -48,7 +49,7 @@ class InlineArraySuite extends BaseSuite {
       }
     }
 
-//  assertInlineFill[Char](0, 0)
+ assertInlineFill[Char](0, 0)
   // assertInlineFill[Byte](0, 0)
   // assertInlineFill[Short](0, 0)
   // assertInlineFill[Int](0, 0)

@@ -98,6 +98,9 @@ object TreeMapper {
           }
         } yield (term, c)
       case (None, s @ q.Select(root, name)) =>
+    
+        println(s"=>>> ${s.tpe.widenTermRefByName}")
+
         for {
           (_, tpe, c) <- c.typer(s.tpe)
           // _ = println(s"sel $s = ${tpe}")
@@ -150,6 +153,13 @@ object TreeMapper {
       println(s"${term.show} = ${c.stmts.size}")
 
       term match {
+        case q.TypeApply(term, args) =>
+
+throw c.mapTerm(term).resolve.left.get
+
+
+          println(c.mapTerm(term).resolve)
+          ???
         case q.Typed(x, _)                        => (c !! term).mapTerm(x)
         case q.Inlined(call, bindings, expansion) => (c !! term).mapTerm(expansion) // simple-inline
         case q.Literal(q.BooleanConstant(v))      => (p.Term.BoolConst(v), c !! term).pure
@@ -189,7 +199,7 @@ object TreeMapper {
             (_, funTpe, c) <- c.typer(ap.fun.tpe)
 
             // _ = println(s"B=$funTpe")
-            (funVal, c)  <- c.mapTerm(ap.fun)
+            (funVal, c)  <- (c !! ap).mapTerm(ap.fun)
             (argVals, c) <- c.down(ap).mapTerms(ap.args)
 
             argTerms <- argVals.traverse {
