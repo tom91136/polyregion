@@ -36,7 +36,8 @@ public class PolyregionRuntime {
 
   public static native byte invokeByte(byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs);
 
-  public static native Buffer invokeObject(byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs);
+  public static native Buffer invokeObject(
+      byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs, int rtnBytes);
 
   private static final Path RESOURCE_DIR = Loader.HOME_DIR.resolve(".polyregion");
   private static final AtomicBoolean loaded = new AtomicBoolean();

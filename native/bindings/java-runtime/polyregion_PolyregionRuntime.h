@@ -94,10 +94,10 @@ JNIEXPORT jbyte JNICALL Java_polyregion_PolyregionRuntime_invokeByte
 /*
  * Class:      polyregion_PolyregionRuntime
  * Method:     invokeObject
- * Signature:  ([BLjava/lang/String;[B[Ljava/nio/Buffer;)Ljava/nio/Buffer;
+ * Signature:  ([BLjava/lang/String;[B[Ljava/nio/Buffer;I)Ljava/nio/Buffer;
  */
 JNIEXPORT jobject JNICALL Java_polyregion_PolyregionRuntime_invokeObject
-  (JNIEnv *, jclass, jbyteArray, jstring, jbyteArray, jobjectArray);
+  (JNIEnv *, jclass, jbyteArray, jstring, jbyteArray, jobjectArray, jint);
 
 #ifdef __cplusplus
 }

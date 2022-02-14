@@ -39,13 +39,21 @@ static std::string copyString(JNIEnv *env, jstring str) {
   return out;
 }
 
-static std::pair<std::vector<runtime::TypedPointer>, std::vector<void *>> bindArgs( //
+using Buffer = std::pair<void *, jobject>;
+
+static std::pair<std::vector<runtime::TypedPointer>, std::vector<Buffer>> bindArgs( //
     JNIEnv *env, jbyteArray argTypes, jobjectArray argPtrs) {
   std::vector<runtime::TypedPointer> params(env->GetArrayLength(argPtrs));
-  std::vector<void *> pointers(env->GetArrayLength(argPtrs));
+  std::vector<std::pair<void *, jobject>> pointers(env->GetArrayLength(argPtrs));
   auto argTypes_ = env->GetByteArrayElements(argTypes, nullptr);
   for (jint i = 0; i < env->GetArrayLength(argPtrs); ++i) {
     params[i].first = static_cast<runtime::Type>(argTypes_[i]);
+    auto buffer = env->GetObjectArrayElement(argPtrs, i);
+    pointers[i] = {env->GetDirectBufferAddress(buffer), buffer};
+    if (!pointers[i].first) {
+      throwGeneric(env, "Unable to retrieve direct buffer address");
+      return {};
+    }
     switch (params[i].first) {
     case runtime::Type::Bool:
     case runtime::Type::Byte:
@@ -56,21 +64,11 @@ static std::pair<std::vector<runtime::TypedPointer>, std::vector<void *>> bindAr
     case runtime::Type::Float:
     case runtime::Type::Double:
     case runtime::Type::Void: {
-      pointers[i] = env->GetDirectBufferAddress(env->GetObjectArrayElement(argPtrs, i));
-      if (!pointers[i]) {
-        throwGeneric(env, "Unable to retrieve direct buffer address");
-        return {};
-      }
-      params[i].second = pointers[i]; // XXX no indirection
+      params[i].second = pointers[i].first; // XXX no indirection
       break;
     }
     case runtime::Type::Ptr: {
-      pointers[i] = env->GetDirectBufferAddress(env->GetObjectArrayElement(argPtrs, i));
-      if (!pointers[i]) {
-        throwGeneric(env, "Unable to retrieve direct buffer address");
-        return {};
-      }
-      params[i].second = &pointers[i]; // XXX pointer indirection
+      params[i].second = &pointers[i].first; // XXX pointer indirection
       break;
     }
     default:
@@ -130,6 +128,37 @@ R invokePrimitive(JNIEnv *env, jbyteArray object, jstring symbol, jbyteArray arg
   });
 }
 
+//TODO
+template <typename R, runtime::Type RT>
+jobject invokeObject(JNIEnv *env, jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs) {
+  return invokeGeneric<R>(env, object, argTypes, argPtrs, [&](auto &obj, auto &params) {
+    void *rtnData{};
+    runtime::TypedPointer rtn{RT, &rtnData};
+
+    // we got four possible cases when a function return pointers:
+    //  1. Pointer to one of the argument   => passthrough
+    //  2. Pointer to malloc'd memory       => passthrough
+    //  3. Pointer within a malloc'd region => copy
+    //  4. Pointer to stack allocated data  => copy
+
+    std::unordered_map<void *, jobject> allocations;
+
+    auto allocator = [&](size_t size) {
+      std::cerr << "[runtime] Allocating " << size << "bytes @ ";
+      auto buffer = env->CallStaticObjectMethod(ByteBuffer, ByteBuffer_allocateDirect, size);
+      auto ptr = env->GetDirectBufferAddress(buffer);
+      allocations[ptr] = buffer;
+      std::cerr << ptr << std::endl;
+      return ptr;
+    };
+
+    //
+    obj.invoke(copyString(env, symbol), allocator, params, rtn);
+
+    return rtnData;
+  });
+}
+
 JNIEXPORT void JNICALL Java_polyregion_PolyregionRuntime_invoke( //
     JNIEnv *env, jclass, jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs) {
   invokePrimitive<std::nullptr_t, runtime::Type::Void>(env, object, symbol, argTypes, argPtrs);
@@ -163,6 +192,7 @@ JNIEXPORT jbyte JNICALL Java_polyregion_PolyregionRuntime_invokeByte( //
   return invokePrimitive<jbyte, runtime::Type::Byte>(env, object, symbol, argTypes, argPtrs);
 }
 JNIEXPORT jobject JNICALL Java_polyregion_PolyregionRuntime_invokeObject( //
-    JNIEnv *env, jclass, jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs) {
+    JNIEnv *env, jclass, jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs, jint rtnBytes) {
+
   return nullptr;
 }
