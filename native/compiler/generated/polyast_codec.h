@@ -36,6 +36,8 @@ namespace Expr {
 [[nodiscard]] EXPORT json invoke_to_json(const Expr::Invoke &);
 [[nodiscard]] EXPORT Expr::Index index_from_json(const json &);
 [[nodiscard]] EXPORT json index_to_json(const Expr::Index &);
+[[nodiscard]] EXPORT Expr::Alloc alloc_from_json(const json &);
+[[nodiscard]] EXPORT json alloc_to_json(const Expr::Alloc &);
 [[nodiscard]] EXPORT Expr::Any any_from_json(const json &);
 [[nodiscard]] EXPORT json any_to_json(const Expr::Any &);
 } // namespace Expr

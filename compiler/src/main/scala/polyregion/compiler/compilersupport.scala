@@ -56,7 +56,6 @@ extension (e: => p.Sym.type) {
     p.Sym(go(cls))
   }
 
-
 }
 
 extension (e: p.Sym) {
@@ -85,18 +84,18 @@ extension (e: p.Term) {
 
 extension (e: p.Type) {
   def repr: String = e match {
-    case p.Type.Struct(sym)       => s"Struct[${sym.repr}]"
-    case p.Type.Array(comp, n)    => s"Array[${comp.repr}${n.map(x => s";$x").getOrElse("")}]"
-    case p.Type.Bool              => "Bool"
-    case p.Type.Byte              => "Byte"
-    case p.Type.Char              => "Char"
-    case p.Type.Short             => "Short"
-    case p.Type.Int               => "Int"
-    case p.Type.Long              => "Long"
-    case p.Type.Float             => "Float"
-    case p.Type.Double            => "Double"
-    case p.Type.String            => "String"
-    case p.Type.Unit              => "Unit"
+    case p.Type.Struct(sym) => s"Struct[${sym.repr}]"
+    case p.Type.Array(comp) => s"Array[${comp.repr}]"
+    case p.Type.Bool        => "Bool"
+    case p.Type.Byte        => "Byte"
+    case p.Type.Char        => "Char"
+    case p.Type.Short       => "Short"
+    case p.Type.Int         => "Int"
+    case p.Type.Long        => "Long"
+    case p.Type.Float       => "Float"
+    case p.Type.Double      => "Double"
+    case p.Type.String      => "String"
+    case p.Type.Unit        => "Unit"
   }
 }
 
@@ -144,7 +143,7 @@ extension (e: p.Expr) {
     case p.Expr.Invoke(name, recv, args, tpe) =>
       s"${recv.map(_.repr).getOrElse("<module>")}.${name.repr}(${args.map(_.repr).mkString(",")}) : ${tpe.repr}"
     case p.Expr.Index(lhs, idx, tpe) => s"${lhs.repr}[${idx.repr}] : ${tpe.repr}"
-    // case Block(xs, x)                 => s"{\n${xs.map(_.repr).mkString("\n")}\n${x.repr}\n}"
+    case p.Expr.Alloc(tpe, size)        => s"new [${tpe.component.repr}*${size.repr}]"
   }
 }
 
@@ -204,6 +203,8 @@ extension (e: p.Stmt) {
         (p.Expr.Alias(h), Nil)
       case p.Expr.Invoke(name, receiver, args, rtn) => (p.Expr.Invoke(name, receiver.map(f), args.map(f), rtn), Nil)
       case p.Expr.Index(lhs, idx, component)        => (p.Expr.Index(g(lhs), f(idx), component), Nil)
+      // case p.Expr.MkArray(elem)                     => (p.Expr.MkArray(elem), Nil)
+
     })
 
   def mapAcc[A](f: p.Stmt => (List[p.Stmt], List[A])): (List[p.Stmt], List[A]) = e match {
@@ -230,7 +231,7 @@ extension (e: p.Stmt) {
   def map(f: p.Stmt => List[p.Stmt]): List[p.Stmt] = e.mapAcc[Unit](x => (f(x), Nil))._1
 
   def repr: String = e match {
-    case p.Stmt.Comment(value)          => s"// $value"
+    case p.Stmt.Comment(value)          => s" /* $value */"
     case p.Stmt.Var(name, rhs)          => s"var ${name.repr} = ${rhs.fold("_")(_.repr)}"
     case p.Stmt.Mut(name, expr, copy)   => s"${name.repr} ${if (copy) ":=!" else ":="} ${expr.repr}"
     case p.Stmt.Update(lhs, idx, value) => s"${lhs.repr}[${idx.repr}] := ${value.repr}"

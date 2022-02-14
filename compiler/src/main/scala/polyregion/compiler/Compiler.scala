@@ -23,41 +23,46 @@ object Compiler {
     FnInlinePass.inlineAll >>>
       FnPtrReturnToOutParamPass.transform
 
-  def compileFn(using q: Quoted)(f: q.DefDef): Result[(q.FnDependencies, p.Function)] = (for {
-    (fnRtnValue, fnTpe, c) <- q.FnContext().typer(f.returnTpt.tpe)
-    fnTpe <- fnTpe match {
-      case tpe: p.Type => tpe.success.deferred
-      case bad         => s"bad function return type $bad".fail.deferred
-    }
+  def compileFn(using q: Quoted)(f: q.DefDef): Result[(q.FnDependencies, p.Function)] = {
+    println(s" -> Compile dependent method: ${f.show}")
+    (for {
 
-    _ = println(s" -> Compile dependent method: ${f.show}")
-    args = f.paramss
-      .flatMap(_.params)
-      .collect { case d: q.ValDef => d }
-    // TODO handle default value (ValDef.rhs)
-    (namedArgs, c) <- args.foldMapM(arg =>
-      c.typer(arg.tpt.tpe).subflatMap {
-        case (_, t: p.Type, c) => (p.Named(arg.name, t) :: Nil, c).success
-        case (_, bad, c)       => s"erased arg type encountered $bad".fail
-      }
-    )
+      (fnRtnValue, fnTpe, c) <- q.FnContext().typer(f.returnTpt.tpe)
 
-    body <- fnRtnValue.fold(f.rhs.traverse(c.mapTerm(_)))(x => Some((x, c)).success.deferred)
-    mkFn   = (xs: List[p.Stmt]) => p.Function(p.Sym(f.symbol.fullName), namedArgs, fnTpe, xs)
-    runOpt = (c: q.FnContext) => runLocalOptPass(c)
-
-  } yield body match {
-    case None =>
-      (runOpt(c).deps, mkFn(Nil))
-    case Some((value, preOptCtx)) =>
-      val term = value match {
-        case t: p.Term => t
-        case _         => ???
+      fnTpe <- fnTpe match {
+        case tpe: p.Type => tpe.success.deferred
+        case bad         => s"bad function return type $bad".fail.deferred
       }
 
-      val c = runOpt(preOptCtx.mapStmts(_ :+ p.Stmt.Return(p.Expr.Alias(term))))
-      (c.deps, mkFn((c.stmts)))
-  }).resolve
+      args = f.paramss
+        .flatMap(_.params)
+        .collect { case d: q.ValDef => d }
+
+      // TODO handle default value (ValDef.rhs)
+      (namedArgs, c) <- args.foldMapM(arg =>
+        c.typer(arg.tpt.tpe).subflatMap {
+          case (_, t: p.Type, c) => (p.Named(arg.name, t) :: Nil, c).success
+          case (_, bad, c)       => s"erased arg type encountered $bad".fail
+        }
+      )
+
+      body <- fnRtnValue.fold(f.rhs.traverse(c.mapTerm(_)))(x => Some((x, c)).success.deferred)
+      mkFn   = (xs: List[p.Stmt]) => p.Function(p.Sym(f.symbol.fullName), namedArgs, fnTpe, xs)
+      runOpt = (c: q.FnContext) => runLocalOptPass(c)
+
+    } yield body match {
+      case None =>
+        (runOpt(c).deps, mkFn(Nil))
+      case Some((value, preOptCtx)) =>
+        val term = value match {
+          case t: p.Term => t
+          case _         => ???
+        }
+
+        val c = runOpt(preOptCtx.mapStmts(_ :+ p.Stmt.Return(p.Expr.Alias(term))))
+        (c.deps, mkFn((c.stmts)))
+    }).resolve
+  }
 
   def compileClosure(using q: Quoted)(x: Expr[Any]): Result[(q.FnDependencies, List[(q.Ref, p.Type)], p.Function)] = {
 
@@ -74,7 +79,7 @@ object Compiler {
 
     for {
       (typedExternalRefs, c) <- outline(term)
-      // TODO if we have a reference with an erased closure type, we need to find the 
+      // TODO if we have a reference with an erased closure type, we need to find the
       // implementation and suspend it to FnContext otherwise we won't find the suspension in mapper
 
       // we can discard incoming references here safely iff we also never use them in the resulting p.Function
@@ -138,9 +143,12 @@ object Compiler {
       _ = println("=======\nmain closure compiled\n=======")
       _ = println(s"${closureFn.repr}")
 
+      _ = println(s" -> dependent methods = ${deps.defs.size}")
+
       (deps, fns) <- (deps, List.empty[p.Function]).iterateWhileM { case (deps, fs) =>
         deps.defs.values.toList.traverse(compileFn(_)).map(xs => xs.unzip.bimap(_.combineAll, _ ++ fs))
       }(_._1.defs.nonEmpty)
+      _ = println(s" -> dependent methods compiled")
 
       allFns = closureFn :: fns
 

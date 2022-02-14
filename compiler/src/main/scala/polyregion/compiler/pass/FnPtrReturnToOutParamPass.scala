@@ -18,9 +18,17 @@ object FnPtrReturnToOutParamPass {
     else doUntilNotEq(y)(f)
   }
 
-  def transform(xs: List[p.Function]): List[p.Function] = doUntilNotEq(xs)(rewriteOnce(_))
+  def transform(xs: List[p.Function]): List[p.Function] = xs //doUntilNotEq(xs)(rewriteOnce(_))
 
   private def rewriteOnce(fs: List[p.Function]) = {
+
+    // P                   // stack alloc, copy return A
+
+    // P[]                 // heap alloc, return direct ptr 
+    // Struct{}[]          // heap alloc, return direct ptr 
+    // Struct{ Struct{} }  // heap alloc, return direct ptr 
+    // Struct{ A[], B }    // heap alloc, return direct ptr 
+    // Struct{ A, B }      // heap alloc, return direct ptr 
 
     // def fn(...): S {
     //   var x: S = ...

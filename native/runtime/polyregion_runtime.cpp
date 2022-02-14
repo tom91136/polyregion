@@ -81,7 +81,8 @@ char *polyregion_invoke(const polyregion_object *object,
   std::transform(args, args + nargs, typedArgs.begin(), toTyped);
 
   try {
-    object->data->invoke(symbol, typedArgs, toTyped(*rtn));
+    object->data->invoke(
+        symbol, [](size_t size) { return std::malloc(size); }, typedArgs, toTyped(*rtn));
     return nullptr;
   } catch (const std::exception &e) {
     return new_str(e.what());

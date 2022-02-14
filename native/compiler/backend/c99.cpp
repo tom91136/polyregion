@@ -82,9 +82,10 @@ std::string backend::C99::mkExpr(const Expr::Any &expr, const std::string &key) 
       [&](const Expr::Lt &x) { return mkRef(x.lhs) + " < " + mkRef(x.rhs); },   //
       [&](const Expr::Gt &x) { return mkRef(x.lhs) + " > " + mkRef(x.rhs); },   //
 
-      [&](const Expr::Alias &x) { return mkRef(x.ref); },                               //
-      [&](const Expr::Invoke &x) { return "???"s; },                                    //
-      [&](const Expr::Index &x) { return qualified(x.lhs) + "[" + mkRef(x.idx) + "]"; } //
+      [&](const Expr::Alias &x) { return mkRef(x.ref); },                                //
+      [&](const Expr::Invoke &x) { return "???"s; },                                     //
+      [&](const Expr::Index &x) { return qualified(x.lhs) + "[" + mkRef(x.idx) + "]"; }, //
+      [&](const Expr::Alloc &x) { return "{/*" + to_string(x) + "*/}"; }                 //
   );
 }
 

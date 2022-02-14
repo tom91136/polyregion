@@ -24,19 +24,21 @@ class Quoted(val q: Quotes) {
   )
 
   type Val = p.Term | ErasedMethodVal | ErasedModuleSelect
-  type Tpe = p.Type | ErasedTpe | ErasedFnTpe
+  type Tpe = p.Type | ErasedTpe | ErasedOpaqueTpe | ErasedFnTpe
 
   case class ErasedModuleSelect(sym: p.Sym)
 
   case class ErasedMethodVal(receiver: p.Sym | p.Term, sym: p.Sym, tpe: ErasedFnTpe)
 
+  case class ErasedOpaqueTpe(underlying : q.reflect.TypeRepr)
+
   case class ErasedTpe(name: p.Sym, module: Boolean, args: List[Tpe]) {
     override def toString =
-      s"${if (module) "<module>." else ""}${name.repr}${if (args.isEmpty) "" else args.mkString("[", ", ", "]")}"
+      s"<!${if (module) "<module>." else ""}${name.repr}${if (args.isEmpty) "" else args.mkString("[", ", ", "]")}>"
   }
-  case class ErasedFnTpe(tpeArgs: List[String], args: List[Tpe], rtn: Tpe) {
+  case class ErasedFnTpe(  args: List[Tpe], rtn: Tpe) {
     override def toString =
-      s"[${tpeArgs.mkString(",")}] =>> { (${args.mkString(",")}) => ${rtn}}"
+      s"!{ (${args.mkString(",")}) => ${rtn} }"
   }
 
   case class FnContext(

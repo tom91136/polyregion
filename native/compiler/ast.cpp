@@ -103,7 +103,8 @@ using std::string;
                    x.args, [&](auto x) { return repr(x); }, ",") +
                ")" + ":" + repr(x.tpe);
       },
-      [](const Expr::Index &x) { return repr(x.lhs) + "[" + repr(x.idx) + "]"; });
+      [](const Expr::Index &x) { return repr(x.lhs) + "[" + repr(x.idx) + "]"; },
+      [](const Expr::Alloc &x) { return "new [" + repr(x.witness.component) + "*" + repr(x.size) + "]"; });
 }
 
 [[nodiscard]] string polyast::repr(const Stmt::Any &stmt) {

@@ -165,10 +165,10 @@ TEST_CASE("x86 ELF invoke int(int, int, int)") {
     const int a = 1, b = 2, c = 3;
     int actual = -1;
 
-    std::vector<polyregion_data> args = {{polyregion_type::Int, (void *)(&a)},
-                                         {polyregion_type::Int, (void *)(&b)},
-                                         {polyregion_type::Int, (void *)(&c)}};
-    polyregion_data return_{polyregion_type::Int, &actual};
+    std::vector<polyregion_data> args = {{ POLYREGION_INT, (void *)(&a)},
+                                         { POLYREGION_INT, (void *)(&b)},
+                                         { POLYREGION_INT, (void *)(&c)}};
+    polyregion_data return_{ POLYREGION_INT, &actual};
     const auto o = polyregion_load_object(obj, len);
     auto error = polyregion_invoke(o->object, "fma_", args.data(), args.size(), &return_);
     //  char* error = nullptr;

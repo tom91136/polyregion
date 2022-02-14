@@ -143,17 +143,11 @@ bool Type::operator==(const Type::Struct &l, const Type::Struct &r) {
 std::ostream &Type::operator<<(std::ostream &os, const Type::Array &x) {
   os << "Array(";
   os << x.component;
-  os << ',';
-  os << '{';
-  if (x.length) {
-    os << *x.length;
-  }
-  os << '}';
   os << ')';
   return os;
 }
 bool Type::operator==(const Type::Array &l, const Type::Array &r) { 
-  return *l.component == *r.component && l.length == r.length;
+  return *l.component == *r.component;
 }
 
 std::ostream &operator<<(std::ostream &os, const Named &x) {
@@ -623,6 +617,18 @@ bool Expr::operator==(const Expr::Index &l, const Expr::Index &r) {
   return l.lhs == r.lhs && *l.idx == *r.idx && *l.component == *r.component;
 }
 
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Alloc &x) {
+  os << "Alloc(";
+  os << x.witness;
+  os << ',';
+  os << x.size;
+  os << ')';
+  return os;
+}
+bool Expr::operator==(const Expr::Alloc &l, const Expr::Alloc &r) { 
+  return l.witness == r.witness && *l.size == *r.size;
+}
+
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Any &x) {
   std::visit([&os](auto &&arg) { os << *arg; }, x);
   return os;
@@ -892,7 +898,6 @@ std::size_t std::hash<polyregion::polyast::Type::Struct>::operator()(const polyr
 }
 std::size_t std::hash<polyregion::polyast::Type::Array>::operator()(const polyregion::polyast::Type::Array &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.component)>()(x.component);
-  seed ^= std::hash<decltype(x.length)>()(x.length) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Named>::operator()(const polyregion::polyast::Named &x) const noexcept {
@@ -1103,6 +1108,11 @@ std::size_t std::hash<polyregion::polyast::Expr::Index>::operator()(const polyre
   std::size_t seed = std::hash<decltype(x.lhs)>()(x.lhs);
   seed ^= std::hash<decltype(x.idx)>()(x.idx) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.component)>()(x.component) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Expr::Alloc>::operator()(const polyregion::polyast::Expr::Alloc &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.witness)>()(x.witness);
+  seed ^= std::hash<decltype(x.size)>()(x.size) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Stmt::Base>::operator()(const polyregion::polyast::Stmt::Base &x) const noexcept {

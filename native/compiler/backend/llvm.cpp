@@ -24,6 +24,21 @@ template <typename T> static std::string llvm_tostring(const T *t) {
   return rso.str();
 }
 
+static llvm::Value *sizeOf(llvm::IRBuilder<> &B, llvm::LLVMContext &C, llvm::Type *ptrTpe) {
+  // http://nondot.org/sabre/LLVMNotes/SizeOf-OffsetOf-VariableSizedStructs.txt
+  // we want
+  // %SizePtr = getelementptr %T, %T* null, i32 1
+  // %Size = ptrtoint %T* %SizePtr to i32
+  auto sizePtr = B.CreateGEP(                                                 //
+      ptrTpe->getPointerElementType(),                                           //
+      llvm::ConstantPointerNull::get(llvm::dyn_cast<llvm::PointerType>(ptrTpe)), //
+      llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 1),                   //
+      "sizePtr"                                                               //
+  );
+  auto sizeVal = B.CreatePtrToInt(sizePtr, llvm::Type::getInt32Ty(C));
+  return sizeVal;
+}
+
 std::pair<llvm::StructType *, LLVMAstTransformer::StructMemberTable>
 LLVMAstTransformer::mkStruct(const StructDef &def) {
   std::vector<llvm::Type *> types(def.members.size());
@@ -57,12 +72,8 @@ llvm::Type *LLVMAstTransformer::mkTpe(const Type::Any &tpe) {                   
         }
       }, //
       [&](const Type::Array &x) -> llvm::Type * {
-        if (x.length) {
-          return llvm::ArrayType::get(mkTpe(x.component), *x.length);
-        } else {
-          auto comp = mkTpe(x.component);
-          return comp->isPointerTy() ? comp : comp->getPointerTo();
-        }
+        auto comp = mkTpe(x.component);
+        return comp->isPointerTy() ? comp : comp->getPointerTo();
       } //
   );
 }
@@ -305,7 +316,22 @@ llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Functi
           throw std::logic_error("Semantic error: array index not called on array type (" + to_string(x.lhs.tpe) +
                                  ")(" + repr(x) + ")");
         }
-      });
+      },
+      [&](const Expr::Alloc &x) -> llvm::Value * { //
+        auto size = mkRef(x.size);
+        auto elemSize = sizeOf(B, C, mkTpe(x.witness));
+
+        auto ft = llvm::FunctionType::get(llvm::Type::getInt8Ty(C)->getPointerTo(), {llvm::Type::getInt32Ty(C)}, false);
+        auto f = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, "malloc", fn->getParent());
+
+        auto ptr = B.CreateCall(f, B.CreateMul(size, elemSize));
+        return B.CreateBitCast(ptr, mkTpe(x.witness));
+
+        //        auto ptr = B.CreateAlloca(mkTpe(x.witness.component), size, "array_alloc_stack_ptr");
+        //        return ptr;
+      }
+
+  );
 }
 llvm::Value *LLVMAstTransformer::conditionalLoad(llvm::Value *rhs) {
   return rhs->getType()->isPointerTy() // deref the rhs if it's a pointer
@@ -330,7 +356,6 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
         auto rhs = map_opt(x.expr, [&](auto &&expr) { return mkExprValue(expr, fn, x.name.symbol + "_var_rhs"); });
         if (std::holds_alternative<Type::Array>(*x.name.tpe)) {
           if (rhs) {
-
             lut[x.name.symbol] = {x.name.tpe, *rhs};
           } else {
             undefined(__FILE_NAME__, __LINE__, "var array with no expr?");
@@ -376,17 +401,9 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
             }
             if (!x.copy) lut[x.name.last.symbol] = {x.name.tpe, rhs};
             else {
-              // http://nondot.org/sabre/LLVMNotes/SizeOf-OffsetOf-VariableSizedStructs.txt
-              // we want
-              // %SizePtr = getelementptr %T, %T* null, i32 1
-              // %Size = ptrtoint %T* %SizePtr to i32
-              auto sizePtr =
-                  B.CreateGEP(lhsPtr->getType()->getPointerElementType(),
-                              llvm::ConstantPointerNull::get(llvm::dyn_cast<llvm::PointerType>(lhsPtr->getType())),
-                              llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 1), "sizePtr");
-              auto sizeVal = B.CreatePtrToInt(sizePtr, llvm::Type::getInt32Ty(C));
+
               // XXX CreateMemCpyInline has an immarg size so %size must be a pure constant, this is crazy
-              B.CreateMemCpy(lhsPtr, {}, rhs, {}, sizeVal);
+              B.CreateMemCpy(lhsPtr, {}, rhs, {}, sizeOf(B, C, lhsPtr->getType()));
             }
           } else {
             B.CreateStore(conditionalLoad(rhs), mkSelectPtr(x.name)); // ignore copy, modify struct member
@@ -456,7 +473,7 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
         if (std::holds_alternative<Type::Unit>(*tpe(x.value))) {
           B.CreateRetVoid();
         } else {
-          B.CreateRet(conditionalLoad(mkExprValue(x.value, fn, "return")));
+          B.CreateRet( (mkExprValue(x.value, fn, "return")));
         }
       } //
 
@@ -483,7 +500,7 @@ LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> &module, const
       [&](const TypeKind::Fractional &) -> llvm::Type * { return mkTpe(fnTree.rtn); },         //
       [&](const TypeKind::Integral &) -> llvm::Type * { return mkTpe(fnTree.rtn); },           //
       [&](const TypeKind::None &) -> llvm::Type * { return mkTpe(fnTree.rtn); },               //
-      [&](const TypeKind::Ref &) -> llvm::Type * { return mkTpe(fnTree.rtn)->getPointerTo(); } //
+      [&](const TypeKind::Ref &) -> llvm::Type * { return mkTpe(fnTree.rtn); } //
   );
 
   auto fnTpe = llvm::FunctionType::get(rtnTpe, {paramTpes}, false);

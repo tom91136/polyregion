@@ -161,14 +161,12 @@ json Type::struct_to_json(const Type::Struct& x) {
 
 Type::Array Type::array_from_json(const json& j) { 
   auto component =  Type::any_from_json(j.at(0));
-  auto length = j.at(1).is_null() ? std::nullopt : std::make_optional(j.at(1).get<int32_t>());
-  return {component, length};
+  return Type::Array(component);
 }
 
 json Type::array_to_json(const Type::Array& x) { 
   auto component =  Type::any_to_json(x.component);
-  auto length = x.length ? json{*x.length} : json{};
-  return json::array({component, length});
+  return json::array({component});
 }
 
 Type::Any Type::any_from_json(const json& j) { 
@@ -751,6 +749,18 @@ json Expr::index_to_json(const Expr::Index& x) {
   return json::array({lhs, idx, component});
 }
 
+Expr::Alloc Expr::alloc_from_json(const json& j) { 
+  auto witness =  Type::array_from_json(j.at(0));
+  auto size =  Term::any_from_json(j.at(1));
+  return {witness, size};
+}
+
+json Expr::alloc_to_json(const Expr::Alloc& x) { 
+  auto witness =  Type::array_to_json(x.witness);
+  auto size =  Term::any_to_json(x.size);
+  return json::array({witness, size});
+}
+
 Expr::Any Expr::any_from_json(const json& j) { 
   size_t ord = j.at(0).get<size_t>();
   const auto t = j.at(1);
@@ -769,6 +779,7 @@ Expr::Any Expr::any_from_json(const json& j) {
   case 11: return Expr::alias_from_json(t);
   case 12: return Expr::invoke_from_json(t);
   case 13: return Expr::index_from_json(t);
+  case 14: return Expr::alloc_from_json(t);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
   }
 }
@@ -789,6 +800,7 @@ json Expr::any_to_json(const Expr::Any& x) {
   [](const Expr::Alias &y) -> json { return {11, Expr::alias_to_json(y)}; },
   [](const Expr::Invoke &y) -> json { return {12, Expr::invoke_to_json(y)}; },
   [](const Expr::Index &y) -> json { return {13, Expr::index_to_json(y)}; },
+  [](const Expr::Alloc &y) -> json { return {14, Expr::alloc_to_json(y)}; },
   [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
   }, *x);
 }
@@ -995,13 +1007,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "e64945e9dd3337572fe9a7ce4b82d807") {
-   throw std::runtime_error("Expecting ADT hash to be e64945e9dd3337572fe9a7ce4b82d807, but was " + hash);
+  if(hash != "7630145cb733687786252138c456432c") {
+   throw std::runtime_error("Expecting ADT hash to be 7630145cb733687786252138c456432c, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"e64945e9dd3337572fe9a7ce4b82d807", x});
+  return json::array({"7630145cb733687786252138c456432c", x});
 }
 } // namespace polyregion::polyast

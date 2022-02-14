@@ -7,7 +7,9 @@ object PolyAst {
 
   case class Sym(fqn: List[String]) derives MsgPack.Codec {
     def repr: String             = fqn.mkString(".")
-    infix def :+(s: String): Sym = copy(fqn = fqn :+ s)
+    infix def :+(s: String): Sym = Sym(fqn :+ s)
+    infix def ~(s: Sym): Sym     = Sym(fqn ++ s.fqn)
+
   }
   object Sym {
     def apply(raw: String): Sym = {
@@ -39,9 +41,9 @@ object PolyAst {
     case Unit extends Type(TypeKind.None)
 
     // specialisations
-    case String                                      extends Type(TypeKind.Ref)
-    case Struct(name: Sym)                           extends Type(TypeKind.Ref)
-    case Array(component: Type, length: Option[Int]) extends Type(TypeKind.Ref)
+    case String                 extends Type(TypeKind.Ref)
+    case Struct(name: Sym)      extends Type(TypeKind.Ref)
+    case Array(component: Type) extends Type(TypeKind.Ref)
   }
 
   case class Named(symbol: String, tpe: Type) derives MsgPack.Codec
@@ -91,6 +93,7 @@ object PolyAst {
     case Alias(ref: Term)                                                       extends Expr(ref.tpe)
     case Invoke(name: Sym, receiver: Option[Term], args: List[Term], rtn: Type) extends Expr(rtn)
     case Index(lhs: Term.Select, idx: Term, component: Type)                    extends Expr(component)
+    case Alloc(witness: Type.Array, size: Term)                                 extends Expr(witness)
   }
 
   enum Stmt derives MsgPack.Codec {

@@ -16,6 +16,7 @@ object Symbols {
   val Buffer   = p.Sym[Buffer[_]]
   val ClassTag = p.Sym[ClassTag[_]]
 
+  val Array = p.Sym( "scala" :: "Array" :: Nil)
   val ArrayModule = "scala" :: "Array$" :: Nil
 
   // Array don't delegate to aneeds a ClassTag which it can't have for *

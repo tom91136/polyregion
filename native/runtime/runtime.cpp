@@ -1,11 +1,17 @@
 #include "runtime.h"
 
+#include <iostream>
+#include <utility>
+
 #include "ffi.h"
 #include "libm.h"
 #include "utils.hpp"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
+#include "llvm/Support/DynamicLibrary.h"
 
 using namespace polyregion;
+
+void polyregion::runtime::init() { polyregion::libm::exportAll(); }
 
 struct runtime::Data {
   std::unique_ptr<llvm::object::ObjectFile> file;
@@ -24,7 +30,7 @@ polyregion::runtime::Object::Object(const std::vector<uint8_t> &object) {
   }
 }
 
-std::vector<std::pair<std::string, uint64_t>> polyregion::runtime::Object::enumerate() {
+std::vector<std::pair<std::string, uint64_t>> polyregion::runtime::Object::enumerate() const {
   llvm::SectionMemoryManager mm;
   llvm::RuntimeDyld ld(mm, mm);
   ld.loadObject(*data->file);
@@ -34,56 +40,68 @@ std::vector<std::pair<std::string, uint64_t>> polyregion::runtime::Object::enume
                  [](auto &p) { return std::make_pair(p.first, p.second.getAddress()); });
   return result;
 }
-void polyregion::runtime::Object::invoke(const std::string &symbol, const std::vector<TypedPointer> &args,
-                                         runtime::TypedPointer rtn) {
+
+constexpr static ffi_type *toFFITpe(const runtime::Type &tpe) {
+  switch (tpe) {
+  case polyregion::runtime::Type::Bool:
+    return &ffi_type_sint8;
+  case polyregion::runtime::Type::Byte:
+    return &ffi_type_sint8;
+  case polyregion::runtime::Type::Char:
+    return &ffi_type_uint16;
+  case polyregion::runtime::Type::Short:
+    return &ffi_type_sint16;
+  case polyregion::runtime::Type::Int:
+    return &ffi_type_sint32;
+  case polyregion::runtime::Type::Long:
+    return &ffi_type_sint64;
+  case polyregion::runtime::Type::Float:
+    return &ffi_type_float;
+  case polyregion::runtime::Type::Double:
+    return &ffi_type_double;
+  case polyregion::runtime::Type::Ptr:
+    return &ffi_type_pointer;
+  case polyregion::runtime::Type::Void:
+    return &ffi_type_void;
+  default:
+    return nullptr;
+  }
+}
+
+thread_local static std::function<void *(size_t)> _alloc;
+EXPORT static void *polyregion::runtime::_malloc(size_t size) { return _alloc(size); }
+
+class EXPORT ThreadLocalMallocFnMemoryManager : public llvm::SectionMemoryManager {
+
+public:
+  explicit ThreadLocalMallocFnMemoryManager(MemoryMapper *mm = nullptr) : SectionMemoryManager(mm) {}
+
+private:
+  uint64_t getSymbolAddress(const std::string &Name) override {
+    std::cout << "External call `" << Name << "`" << std::endl;
+    return Name == "malloc" ? (uint64_t)&polyregion::runtime::_malloc : RTDyldMemoryManager::getSymbolAddress(Name);
+  }
+};
+
+void polyregion::runtime::Object::invoke(const std::string &symbol,                  //
+                                         const std::function<void *(size_t)> &alloc, //
+                                         const std::vector<TypedPointer> &args,      //
+                                         runtime::TypedPointer rtn) const {
 
   static_assert(sizeof(uint8_t) == sizeof(char));
 
-  const auto toFFITpe = [&](const runtime::Type &tpe) -> ffi_type * {
-    switch (tpe) {
-    case Type::Bool:
-      return &ffi_type_sint8;
-    case Type::Byte:
-      return &ffi_type_sint8;
-    case Type::Char:
-      return &ffi_type_uint16;
-    case Type::Short:
-      return &ffi_type_sint16;
-    case Type::Int:
-      return &ffi_type_sint32;
-    case Type::Long:
-      return &ffi_type_sint64;
-    case Type::Float:
-      return &ffi_type_float;
-    case Type::Double:
-      return &ffi_type_double;
-    case Type::Ptr:
-      return &ffi_type_pointer;
-    case Type::Void:
-      return &ffi_type_void;
-    default:
-      return nullptr;
-    }
-  };
-
-  polyregion::libm::exportAll();
-
-  llvm::SectionMemoryManager mm;
+  ThreadLocalMallocFnMemoryManager mm;
   llvm::RuntimeDyld ld(mm, mm);
   ld.loadObject(*data->file);
 
-  auto sym = ld.getSymbol(symbol);
-
-  if (!sym && (data->file->isMachO() || data->file->isMachOUniversalBinary())) {
-    // Mach-O has a leading underscore for all exported symbols, we try again with that prepended
-    sym = ld.getSymbol(std::string("_") + symbol);
-  }
+  auto fnName = (data->file->isMachO() || data->file->isMachOUniversalBinary()) ? std::string("_") + symbol : symbol;
+  auto sym = ld.getSymbol(fnName);
 
   if (!sym) {
     auto table = ld.getSymbolTable();
     auto symbols = polyregion::mk_string2<llvm::StringRef, llvm::JITEvaluatedSymbol>(
         table, [](auto &x) { return "[`" + x.first.str() + "`@" + polyregion::hex(x.second.getAddress()) + "]"; }, ",");
-    throw std::logic_error("Symbol `" + std::string(symbol) + "` not found in the given object, available symbols (" +
+    throw std::logic_error("Symbol `" + std::string(fnName) + "` not found in the given object, available symbols (" +
                            std::to_string(table.size()) + ") = " + symbols);
   }
 

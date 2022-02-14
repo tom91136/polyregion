@@ -81,13 +81,22 @@ object TreeMapper {
           (term, c) <- tpe match {
             case q.ErasedTpe(sym, true, Nil) => (q.ErasedModuleSelect(sym), c).success.deferred
             case tpe: p.Type                 => (p.Term.Select(Nil, p.Named(name, tpe)), c).success.deferred
-            case ect: q.ErasedFnTpe          =>
+            case ect: q.ErasedOpaqueTpe => // (selector...).(x:(X=>Y))
+              val defdef = i.symbol.tree match {
+                case dd: q.DefDef => dd
+                case _            => ???
+              }
+              println(s"->$defdef")
+              // (q.ErasedModuleSelect(defdef), c).success.deferred
+              ???
+            case ect: q.ErasedFnTpe =>
               // we may end up here and not Select for functions inside modules, not entirely sure why that is
               // if this is true, ident's name will be the function name
               i.symbol.tree match {
                 case f: q.DefDef => // (Symbol...).(x: X=>Y)
-                  val sym = p.Sym(i.symbol.fullName)
-                  (q.ErasedMethodVal(p.Sym(i.symbol.maybeOwner.fullName), sym, ect), c.mark(sym, f)).success.deferred
+                  val sym      = p.Sym(i.symbol.name)
+                  val receiver = p.Sym(i.symbol.maybeOwner.fullName)
+                  (q.ErasedMethodVal(receiver, sym, ect), c.mark(receiver ~ sym, f)).success.deferred
                 case _ =>
                   c.suspended.get(name -> ect) match {
                     case Some(x) => (x, c).success.deferred
@@ -98,8 +107,7 @@ object TreeMapper {
           }
         } yield (term, c)
       case (None, s @ q.Select(root, name)) =>
-    
-        println(s"=>>> ${s.tpe.widenTermRefByName}")
+        // we must stop at the PolyType boundary as we discard any unapplied type trees
 
         for {
           (_, tpe, c) <- c.typer(s.tpe)
@@ -128,17 +136,24 @@ object TreeMapper {
                 case (bad, c) =>
                   c.fail(s"Unexpected root of a select that leads to a non-erased ${tpe} type: ${bad}")
               }
+            case ect: q.ErasedOpaqueTpe => // (selector...).(x:(X=>Y))
+              val defdef = s.symbol.tree match {
+                case dd: q.DefDef => dd
+                case _            => ???
+              }
+              // (q.ErasedModuleSelect(defdef), c).success.deferred
+              ???
             case ect: q.ErasedFnTpe => // (selector...).(x:(X=>Y))
               val defdef = s.symbol.tree match {
                 case dd: q.DefDef => dd
                 case _            => ???
               }
-              val sym = p.Sym(s.symbol.fullName)
-              c.mark(sym, defdef).mapTerm(root).flatMap {
+              val sym = p.Sym(s.symbol.name)
+              c.mapTerm(root).flatMap {
                 case (receiver: p.Term, c) => // `val f : X => Y = ??? | def f(x: X): Y = ???`
-                  (q.ErasedMethodVal(receiver, sym, ect), c).success.deferred
+                  (q.ErasedMethodVal(receiver, sym, ect), c.mark(sym, defdef)).success.deferred
                 case (q.ErasedModuleSelect(module), c) =>
-                  (q.ErasedMethodVal(module, sym, ect), c).success.deferred
+                  (q.ErasedMethodVal(module, sym, ect), c.mark(module ~ sym, defdef)).success.deferred
                 case (bad, c) => c.fail(s"Unexpected root of a select that leads to an erased ${tpe} type: ${bad}")
               }
             case et: q.ErasedTpe => c.fail[(q.Val, q.FnContext)](s"Saw ${et}")
@@ -150,16 +165,31 @@ object TreeMapper {
 
     def mapTerm(term: q.Term): Deferred[(q.Val, q.FnContext)] = {
 
-      println(s"${term.show} = ${c.stmts.size}")
+      // println(s">>${term.show} = ${c.stmts.size} ~ ${term}")
 
       term match {
-        case q.TypeApply(term, args) =>
+        case a @ q.TypeApply(term, args) =>
+          val m = for {
+            (_, tpe, c) <- c.typer(a.tpe)
+            (v, c) <- tpe match {
+              case ect: q.ErasedFnTpe =>
+                a.symbol.tree match {
+                  case f: q.DefDef => // (Symbol...).(x: X=>Y)
+                    val sym      = p.Sym(a.symbol.name)
+                    val receiver = p.Sym(a.symbol.maybeOwner.fullName)
+                    println(s">>>>${receiver ~ sym}")
+                    (q.ErasedMethodVal(receiver, sym, ect), c.mark(receiver ~ sym, f)).success.deferred // ofDim
+                  case _ => ???
+                }
+              case bad => c.fail[(q.Val, q.FnContext)](s"Saw ${bad}")
+            }
+          } yield (v, c)
 
-throw c.mapTerm(term).resolve.left.get
+          // T =>
+          // throw c.mapTerm(term).resolve.left.get
 
-
-          println(c.mapTerm(term).resolve)
-          ???
+          // println(c.mapTerm(term).resolve)
+          m
         case q.Typed(x, _)                        => (c !! term).mapTerm(x)
         case q.Inlined(call, bindings, expansion) => (c !! term).mapTerm(expansion) // simple-inline
         case q.Literal(q.BooleanConstant(v))      => (p.Term.BoolConst(v), c !! term).pure
@@ -194,37 +224,25 @@ throw c.mapTerm(term).resolve.left.get
 
           // }
 
+          println(s">>>${ap}")
           for {
             (_, rtnTpe, c) <- c.typer(ap.tpe)
             (_, funTpe, c) <- c.typer(ap.fun.tpe)
+            (funVal, c)    <- (c !! ap).mapTerm(ap.fun)
+            (argTpes, c)   <- c.typerN(ap.args.map(_.tpe))
 
-            // _ = println(s"B=$funTpe")
-            (funVal, c)  <- (c !! ap).mapTerm(ap.fun)
-            (argVals, c) <- c.down(ap).mapTerms(ap.args)
+            // discard application of erased types
+            argsNoErasedTpe = argTpes.zip(ap.args).flatMap {
+              case ((_, _: q.ErasedTpe), x) => Nil
+              case ((_, _), x)              => x :: Nil
+            }
+
+            (argVals, c) <- c.down(ap).mapTerms(argsNoErasedTpe)
 
             argTerms <- argVals.traverse {
               case t: p.Term => t.success.deferred
               case bad       => c.fail(s"Illegal ${bad}")
             }
-
-            // _ = (funVal, tpe) match {
-            //   case (term: p.Term, tpe: p.Type)                                   =>
-            //   case (closure: q.ErasedMethodVal, closureTpe: q.ErasedFnTpe) =>
-            //   case (_, _)                                                        => ???
-            // }
-
-            defdef <- ap.fun.symbol.tree match {
-              case d: q.DefDef =>
-                d.success.deferred // if we see this then the call is probably fully applied at the end
-              case bad => s"Unexpected ap symbol ${bad.show}".fail.deferred
-            }
-
-            _ = println(s">>>receiverFlags:${receiverSym} = ${receiverOwnerFlags.show} (${receiverOwner})")
-
-            // method calls on a module
-            // * Symbol.companionClass gives the case class symbol if this is a module, otherwise Symbol.isNoSymbol
-            // * Symbol.companionClass gives the module symbol if this is a case class, otherwise Symbol.isNoSymbol
-            // * Symbol.companionModule on a module gives the val def of the singleton
 
             mkReturn = (expr: p.Expr, c: q.FnContext) => {
               val name = c.named(expr.tpe)
@@ -235,14 +253,20 @@ throw c.mapTerm(term).resolve.left.get
             // _ = println(s"inner is  -> ${defdef.show}")
             // _ = println(s"inner is  -> ${funVal} AP ${argTerms}")
 
-            (ref, c) <- funVal match {
-              case q.ErasedMethodVal(module: p.Sym, sym, tpe) => // module call
+            (ref, c) <- (argTerms, funVal) match {
+              case (Nil, x) => (x, c).success.deferred
+              case (_, q.ErasedMethodVal(module: p.Sym, sym, tpe)) => // module call
                 val t = tpe.rtn match {
                   case t: p.Type => t
-                  case _         => ???
+                  case q.ErasedFnTpe(args, rtn: p.Type) if args.forall {
+                        case _: q.ErasedTpe => true
+                        case _              => false
+                      } =>
+                    rtn
+                  case _ => ???
                 }
-                mkReturn(p.Expr.Invoke(sym, None, argTerms, t), c).success.deferred
-              case q.ErasedMethodVal(receiver: p.Term, sym, tpe) => // instance call
+                mkReturn(p.Expr.Invoke(module ~ sym, None, argTerms, t), c).success.deferred
+              case (_, q.ErasedMethodVal(receiver: p.Term, sym, tpe)) => // instance call
                 val t = tpe.rtn match {
                   case t: p.Type => t
                   case _         => ???
@@ -250,60 +274,6 @@ throw c.mapTerm(term).resolve.left.get
                 mkReturn(p.Expr.Invoke(sym, Some(receiver), argTerms, t), c).success.deferred
             }
 
-            // withoutErasedTerms = argVals
-            // // .filter(_.tpe match {
-            // //   case p.Type.Erased(_, _) => false
-            // //   case _                   => true
-            // // })
-
-            // (ref, c) <-
-            //   if (receiverOwnerFlags.is(q.Flags.Module)) // Object.x(ys)(erased?)
-            //     mkReturn(
-            //       p.Expr.Invoke(receiverSym, None, ???, ???),
-            //       c.mark(receiverSym, defdef)
-            //     ).success.deferred
-            //   else
-            //     ap.fun match {
-            //       case q.Select(q.New(tt), "<init>") => // new X
-            //         ap.symbol.tree match {
-            //           case q.DefDef(_, _, _, None) =>
-            //             // println(s"impl=${ap.symbol.tree.asInstanceOf[q.DefDef].rhs}")
-            //             println(s"args=${ap.args.map(_.tpe.dealias.widenTermRefByName)}")
-
-            //             (for {
-            //               sdef <- (rtnTpe match {
-            //                 case p.Type.Struct(s) => c.clss.get(s)
-            //                 case _                => None
-            //               }).failIfEmpty(s"No StructDef found for type $rtnTpe")
-
-            //               structTpes = sdef.members.map(_.tpe)
-            //               argTpes    = withoutErasedTerms.map(x => ???)
-
-            //               name = p.Named(s"v${c.depth}_new", ???)
-            //               expr = p.Stmt.Var(name, None)
-
-            //               _ <-
-            //                 if (structTpes == argTpes) ().success
-            //                 else s"Ctor args mismatch, class expects ${sdef.members} but was given ${argTpes}".fail
-
-            //               setMemberExprs = sdef.members.zip(withoutErasedTerms).map { (member, value) =>
-            //                 p.Stmt.Mut(p.Term.Select(name :: Nil, member), p.Expr.Alias(???), copy = false)
-            //               }
-            //             } yield ((p.Term.Select(Nil, name)), c.::=(expr +: setMemberExprs*))).deferred
-            //           case x => s"Found ctor signature, expecting def with no rhs but got: $x".fail.deferred
-            //         }
-            //       case s @ q.Select(q, n) =>
-            //         // up
-
-            //         // s.y(zs)
-            //         (c !! s)
-            //           .mark(receiverSym, defdef)
-            //           .mapTerm(q)
-            //           .map((receiverRef, c) =>
-            //             mkReturn(p.Expr.Invoke(receiverSym, Some(receiverRef.asInstanceOf[p.Term]), argTerms, ???), c)
-            //           )
-            //       case _ => ??? // (ctx.depth, None, Nil).success.deferred
-            //     }
           } yield (ref, c)
         case q.Block(stat, expr) =>
           for {

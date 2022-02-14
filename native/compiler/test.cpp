@@ -14,8 +14,9 @@ using namespace Term;
 using namespace Expr;
 
 template <typename P> static void assertCompilationSucceeded(const P &p) {
-  INFO(repr(p));
+  INFO(repr(p))
   auto c = polyregion::compiler::compile(p);
+  std::cout << c << std::endl;
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);
 }
@@ -47,12 +48,12 @@ TEST_CASE("initialise more than once should work", "[compiler]") {
   polyregion_initialise();
 }
 
-//TEST_CASE("empty function should compile", "[compiler]") {
-//  polyregion_initialise();
-//  Function fn(Sym({"foo"}), {}, Type::Unit(), {});
-//  Program p(fn, {}, {});
-//  assertCompilationSucceeded(p);
-//}
+// TEST_CASE("empty function should compile", "[compiler]") {
+//   polyregion_initialise();
+//   Function fn(Sym({"foo"}), {}, Type::Unit(), {});
+//   Program p(fn, {}, {});
+//   assertCompilationSucceeded(p);
+// }
 
 TEST_CASE("struct member access", "[compiler]") {
   polyregion_initialise();
@@ -100,15 +101,15 @@ TEST_CASE("index struct buffer member", "[compiler]") {
   Type::Struct myStruct(myStructSym);
 
   Function fn(
-      Sym({"foo"}), {Named("s", Type::Array(myStruct, {}))}, Type::Int(),
+      Sym({"foo"}), {Named("s", Type::Array(myStruct))}, Type::Int(),
       {
 
           Var(Named("a", myStruct),
-              {Index(Select({}, Named("s", Type::Array(myStruct, {}))), Term::IntConst(0), myStruct)}),
+              {Index(Select({}, Named("s", Type::Array(myStruct))), Term::IntConst(0), myStruct)}),
 
           Var(Named("b", Type::Int()), {Alias(Select({Named("a", myStruct)}, defX))}),
 
-          //                  Mut(Select({Named("s", Type::Array(myStruct, {}))}, defX), Alias(IntConst(42)), false),
+          //                  Mut(Select({Named("s", Type::Array(myStruct ))}, defX), Alias(IntConst(42)), false),
           Return(Alias(IntConst(69))),
       });
   Program p(fn, {}, {def});
@@ -125,9 +126,9 @@ TEST_CASE("update struct buffer elem member", "[compiler]") {
   Type::Struct myStruct(myStructSym);
 
   Function fn(
-      Sym({"foo"}), {Named("xs", Type::Array(myStruct, {}))}, Type::Int(),
+      Sym({"foo"}), {Named("xs", Type::Array(myStruct))}, Type::Int(),
       {
-          Var(Named("x", myStruct), Index(Select({}, Named("xs", Type::Array(myStruct, {}))), IntConst(0), myStruct)),
+          Var(Named("x", myStruct), Index(Select({}, Named("xs", Type::Array(myStruct))), IntConst(0), myStruct)),
           Mut(Select({Named("x", myStruct)}, defX), Alias(IntConst(42)), false),
           Return(Alias(IntConst(69))),
       });
@@ -145,10 +146,10 @@ TEST_CASE("update struct buffer elem", "[compiler]") {
   Type::Struct myStruct(myStructSym);
 
   Function fn(
-      Sym({"foo"}), {Named("xs", Type::Array(myStruct, {}))}, Type::Int(),
+      Sym({"foo"}), {Named("xs", Type::Array(myStruct))}, Type::Int(),
       {
           Var(Named("data", myStruct), {}),
-          Update(Select({}, Named("xs", Type::Array(myStruct, {}))), IntConst(7), Select({}, Named("data", myStruct))),
+          Update(Select({}, Named("xs", Type::Array(myStruct))), IntConst(7), Select({}, Named("data", myStruct))),
           Return(Alias(IntConst(69))),
       });
   Program p(fn, {}, {def});
@@ -157,9 +158,9 @@ TEST_CASE("update struct buffer elem", "[compiler]") {
 
 TEST_CASE("update prim buffer", "[compiler]") {
   polyregion_initialise();
-  Function fn(Sym({"foo"}), {Named("s", Type::Array(Type::Int(), {}))}, Type::Int(),
+  Function fn(Sym({"foo"}), {Named("s", Type::Array(Type::Int()))}, Type::Int(),
               {
-                  Update(Select({}, Named("s", Type::Array(Type::Int(), {}))), IntConst(7), (IntConst(42))),
+                  Update(Select({}, Named("s", Type::Array(Type::Int()))), IntConst(7), (IntConst(42))),
                   Return(Alias(IntConst(69))),
               });
   Program p(fn, {}, {});
@@ -187,5 +188,20 @@ TEST_CASE("struct alloc", "[compiler]") {
               });
 
   Program p(fn, {}, {def});
+  assertCompilationSucceeded(p);
+}
+
+TEST_CASE("array alloc", "[compiler]") {
+  polyregion_initialise();
+
+  auto arr = Type::Array(Type::Int());
+
+  Function fn(Sym({"foo"}), {}, arr,
+              {
+                  Var(Named("s", arr), {Alloc(arr, IntConst(10))}),
+                  Return(Alias(Select({}, Named("s", arr)))),
+              });
+
+  Program p(fn, {}, {});
   assertCompilationSucceeded(p);
 }

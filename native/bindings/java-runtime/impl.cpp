@@ -1,3 +1,5 @@
+#include <cassert>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -12,71 +14,155 @@ static void throwGeneric(JNIEnv *env, const std::string &message) {
   }
 }
 
-void Java_polyregion_PolyregionRuntime_invoke(JNIEnv *env, jclass thisCls,                  //
-                                              jbyteArray object, jstring symbol,            //
-                                              jbyte returnType, jobject returnPtr,          //
-                                              jbyteArray paramTypes, jobjectArray paramPtrs //
-) {
+jclass ByteBuffer;
+jmethodID ByteBuffer_allocateDirect;
 
+jint JNI_OnLoad(JavaVM *vm, void *reserved) {
+
+  polyregion::runtime::init();
+
+  JNIEnv *env;
+  vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_1);
+
+  ByteBuffer = env->FindClass("java/nio/ByteBuffer");
+  if (!ByteBuffer) env->FatalError("ByteBuffer not found!");
+  ByteBuffer_allocateDirect = env->GetStaticMethodID(ByteBuffer, "allocateDirect", "(I)Ljava/nio/ByteBuffer;");
+  if (!ByteBuffer_allocateDirect) env->FatalError("ByteBuffer.allocateDirect not found!");
+
+  return JNI_VERSION_1_1;
+}
+
+static std::string copyString(JNIEnv *env, jstring str) {
+  auto data = env->GetStringUTFChars(str, nullptr);
+  std::string out(data);
+  env->ReleaseStringUTFChars(str, data);
+  return out;
+}
+
+static std::pair<std::vector<runtime::TypedPointer>, std::vector<void *>> bindArgs( //
+    JNIEnv *env, jbyteArray argTypes, jobjectArray argPtrs) {
+  std::vector<runtime::TypedPointer> params(env->GetArrayLength(argPtrs));
+  std::vector<void *> pointers(env->GetArrayLength(argPtrs));
+  auto argTypes_ = env->GetByteArrayElements(argTypes, nullptr);
+  for (jint i = 0; i < env->GetArrayLength(argPtrs); ++i) {
+    params[i].first = static_cast<runtime::Type>(argTypes_[i]);
+    switch (params[i].first) {
+    case runtime::Type::Bool:
+    case runtime::Type::Byte:
+    case runtime::Type::Char:
+    case runtime::Type::Short:
+    case runtime::Type::Int:
+    case runtime::Type::Long:
+    case runtime::Type::Float:
+    case runtime::Type::Double:
+    case runtime::Type::Void: {
+      pointers[i] = env->GetDirectBufferAddress(env->GetObjectArrayElement(argPtrs, i));
+      if (!pointers[i]) {
+        throwGeneric(env, "Unable to retrieve direct buffer address");
+        return {};
+      }
+      params[i].second = pointers[i]; // XXX no indirection
+      break;
+    }
+    case runtime::Type::Ptr: {
+      pointers[i] = env->GetDirectBufferAddress(env->GetObjectArrayElement(argPtrs, i));
+      if (!pointers[i]) {
+        throwGeneric(env, "Unable to retrieve direct buffer address");
+        return {};
+      }
+      params[i].second = &pointers[i]; // XXX pointer indirection
+      break;
+    }
+    default:
+      throwGeneric(env, "Unimplemented parameter type " + std::to_string(to_underlying(params[i].first)));
+    }
+  }
+  env->ReleaseByteArrayElements(argTypes, argTypes_, JNI_ABORT);
+  return {params, pointers};
+}
+
+template <typename R>
+static R invokeGeneric(JNIEnv *env, jbyteArray object, jbyteArray argTypes, jobjectArray argPtrs,
+                       const std::function<R(const runtime::Object &, const std::vector<runtime::TypedPointer> &)> &f) {
   auto objData = env->GetByteArrayElements(object, nullptr);
   if (!objData) {
     throwGeneric(env, "Cannot read object byte[]");
-    return;
+    return {};
   }
-
-  if (env->GetArrayLength(paramTypes) != env->GetArrayLength(paramPtrs)) {
-    throwGeneric(env, "paramPtrs size !=  paramTypes size");
-    return;
+  if (env->GetArrayLength(argTypes) != env->GetArrayLength(argPtrs)) {
+    throwGeneric(env, "argPtrs size !=  argTypes size");
+    return {};
   }
-
-  auto sym = env->GetStringUTFChars(symbol, nullptr);
   try {
     auto data = reinterpret_cast<const uint8_t *>(objData);
     std::vector<uint8_t> bytes(data, data + env->GetArrayLength(object));
     runtime::Object obj(bytes);
-    runtime::TypedPointer rtn{static_cast<runtime::Type>(returnType), env->GetDirectBufferAddress(returnPtr)};
-    std::vector<runtime::TypedPointer> params(env->GetArrayLength(paramPtrs));
-    std::vector<void *> pointers(env->GetArrayLength(paramPtrs));
-    auto paramTypes_ = env->GetByteArrayElements(paramTypes, nullptr);
-    for (jint i = 0; i < env->GetArrayLength(paramPtrs); ++i) {
-      params[i].first = static_cast<runtime::Type>(paramTypes_[i]);
-      switch (params[i].first) {
-      case runtime::Type::Bool:
-      case runtime::Type::Byte:
-      case runtime::Type::Char:
-      case runtime::Type::Short:
-      case runtime::Type::Int:
-      case runtime::Type::Long:
-      case runtime::Type::Float:
-      case runtime::Type::Double:
-      case runtime::Type::Void: {
-        pointers[i] = env->GetDirectBufferAddress(env->GetObjectArrayElement(paramPtrs, i));
-        if (!pointers[i]) {
-          throwGeneric(env, "Unable to retrieve direct buffer address");
-          return;
-        }
-        params[i].second = pointers[i]; // XXX no indirection
-        break;
-      }
-      case runtime::Type::Ptr: {
-        pointers[i] = env->GetDirectBufferAddress(env->GetObjectArrayElement(paramPtrs, i));
-        if (!pointers[i]) {
-          throwGeneric(env, "Unable to retrieve direct buffer address");
-          return;
-        }
-        params[i].second = &pointers[i]; // XXX pointer indirection
-        break;
-      }
-      default:
-        throwGeneric(env, "Unimplemented parameter type " + std::to_string(to_underlying(params[i].first)));
-      }
-    }
-    env->ReleaseByteArrayElements(paramTypes, paramTypes_, JNI_ABORT);
 
-    obj.invoke(sym, params, rtn);
+    // XXX we MUST hold on to the vector of pointers in the same block as invoke even if we don't use it
+    auto [params, _] = bindArgs(env, argTypes, argPtrs);
+
+    return f(obj, params);
+
+    env->ReleaseByteArrayElements(object, objData, JNI_ABORT);
   } catch (const std::exception &e) {
     throwGeneric(env, e.what());
+    return {};
   }
-  env->ReleaseStringUTFChars(symbol, sym);
-  env->ReleaseByteArrayElements(object, objData, JNI_ABORT);
+}
+
+template <typename R, runtime::Type RT>
+R invokePrimitive(JNIEnv *env, jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs) {
+  return invokeGeneric<R>(env, object, argTypes, argPtrs, [&](auto &obj, auto &params) {
+    R rtnData{};
+    runtime::TypedPointer rtn{RT, &rtnData};
+    std::unordered_map<void *, jobject> allocations;
+    auto allocator = [&](size_t size) {
+      std::cerr << "[runtime] Allocating " << size << "bytes @ ";
+      auto buffer = env->CallStaticObjectMethod(ByteBuffer, ByteBuffer_allocateDirect, size);
+      auto ptr = env->GetDirectBufferAddress(buffer);
+      allocations[ptr] = buffer;
+      std::cerr << ptr << std::endl;
+      return ptr;
+    };
+
+    obj.invoke(copyString(env, symbol), allocator, params, rtn);
+    return rtnData;
+  });
+}
+
+JNIEXPORT void JNICALL Java_polyregion_PolyregionRuntime_invoke( //
+    JNIEnv *env, jclass, jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs) {
+  invokePrimitive<std::nullptr_t, runtime::Type::Void>(env, object, symbol, argTypes, argPtrs);
+}
+JNIEXPORT jint JNICALL Java_polyregion_PolyregionRuntime_invokeInt( //
+    JNIEnv *env, jclass, jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs) {
+  return invokePrimitive<jint, runtime::Type::Int>(env, object, symbol, argTypes, argPtrs);
+}
+JNIEXPORT jlong JNICALL Java_polyregion_PolyregionRuntime_invokeLong( //
+    JNIEnv *env, jclass, jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs) {
+  return invokePrimitive<jlong, runtime::Type::Long>(env, object, symbol, argTypes, argPtrs);
+}
+JNIEXPORT jfloat JNICALL Java_polyregion_PolyregionRuntime_invokeFloat( //
+    JNIEnv *env, jclass, jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs) {
+  return invokePrimitive<jfloat, runtime::Type::Float>(env, object, symbol, argTypes, argPtrs);
+}
+JNIEXPORT jdouble JNICALL Java_polyregion_PolyregionRuntime_invokeDouble( //
+    JNIEnv *env, jclass, jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs) {
+  return invokePrimitive<jdouble, runtime::Type::Double>(env, object, symbol, argTypes, argPtrs);
+}
+JNIEXPORT jshort JNICALL Java_polyregion_PolyregionRuntime_invokeShort( //
+    JNIEnv *env, jclass, jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs) {
+  return invokePrimitive<jshort, runtime::Type::Short>(env, object, symbol, argTypes, argPtrs);
+}
+JNIEXPORT jchar JNICALL Java_polyregion_PolyregionRuntime_invokeChar( //
+    JNIEnv *env, jclass, jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs) {
+  return invokePrimitive<jchar, runtime::Type::Char>(env, object, symbol, argTypes, argPtrs);
+}
+JNIEXPORT jbyte JNICALL Java_polyregion_PolyregionRuntime_invokeByte( //
+    JNIEnv *env, jclass, jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs) {
+  return invokePrimitive<jbyte, runtime::Type::Byte>(env, object, symbol, argTypes, argPtrs);
+}
+JNIEXPORT jobject JNICALL Java_polyregion_PolyregionRuntime_invokeObject( //
+    JNIEnv *env, jclass, jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs) {
+  return nullptr;
 }

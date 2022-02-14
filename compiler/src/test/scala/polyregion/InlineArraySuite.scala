@@ -4,12 +4,17 @@ import polyregion.compiletime._
 import scala.compiletime._
 import scala.reflect.ClassTag
 import polyregion.NativeStruct
+import scala.collection.BuildFrom
+import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
+import scala.collection.Factory
 
-object X{
-    def m2(a: Int) = 12
-    def u = 3
-  }
+object X {
+  def m2(a: Int) = 12
+  def u          = 3
+}
 
+def gen[A, B, C](n: A, x: Int): C = ???
 class InlineArraySuite extends BaseSuite {
 
   inline def testExpr(inline name: String)(inline r: Any) = if (Toggles.InlineArraySuite) {
@@ -18,29 +23,26 @@ class InlineArraySuite extends BaseSuite {
 
   inline val FillN = 1
 
-  
-
   inline def assertInlineFill[A <: AnyVal](inline n: Int, inline expected: A)(using C: ClassTag[A]) =
     if (Toggles.InlineArraySuite) {
 
       val aa = Buffer(1d)
-      val m = 2
+      val m  = 2
       test(s"${C.runtimeClass}-fill-x$n=$expected") {
         val actual = doOffload {
 
+          // val u = scala.math.cos(_)
+          // X.u
+          // X.m2(2)
+          // scala.math.cos(2)
+          // m*2
 
-          // val u = scala.math.cos(_)   
-          X.u
-          X.m2(2)
-          scala.math.cos(2)       
-          m*2
-
-
-          //  val fff = ( (x : Int) => aa(x) = 2d ) 
+          //  val fff = ( (x : Int) => aa(x) = 2d )
           //  fff(1)
           //  fff(2)
           math.cos(0d)
-           val xs = Array.ofDim[A](n)
+          // gen[Int, Int, Int](1,2)
+          val xs = Array.ofDim[A](2)
 //          val xs = new Array[Int](n)
           unrollInclusive(n - 1)(i => xs(i) = expected)
           xs
@@ -49,7 +51,16 @@ class InlineArraySuite extends BaseSuite {
       }
     }
 
- assertInlineFill[Char](0, 0)
+    val a = ArrayBuffer(1)
+  // a.toSeq.type
+
+  class A[B]()
+
+  // type MkCol[A, C[_]] = Factory[A, C[A]]
+  type MkCol = [a, c[_]] =>> Factory[a, c[a]]
+  val x = summon[MkCol[Int, Array]]
+
+  assertInlineFill[Char](0, 0)
   // assertInlineFill[Byte](0, 0)
   // assertInlineFill[Short](0, 0)
   // assertInlineFill[Int](0, 0)

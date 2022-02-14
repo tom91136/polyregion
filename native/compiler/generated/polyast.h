@@ -210,8 +210,7 @@ struct EXPORT Struct : Type::Base {
 
 struct EXPORT Array : Type::Base {
   Type::Any component;
-  std::optional<int32_t> length;
-  Array(Type::Any component, std::optional<int32_t> length) noexcept : Type::Base(TypeKind::Ref()), component(std::move(component)), length(std::move(length)) {}
+  explicit Array(Type::Any component) noexcept : Type::Base(TypeKind::Ref()), component(std::move(component)) {}
   EXPORT operator Any() const { return std::make_shared<Array>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Array &);
   EXPORT friend bool operator==(const Type::Array &, const Type::Array &);
@@ -511,7 +510,8 @@ struct Gt;
 struct Alias;
 struct Invoke;
 struct Index;
-using Any = Alternative<UnaryIntrinsic, BinaryIntrinsic, Not, Eq, Neq, And, Or, Lte, Gte, Lt, Gt, Alias, Invoke, Index>;
+struct Alloc;
+using Any = Alternative<UnaryIntrinsic, BinaryIntrinsic, Not, Eq, Neq, And, Or, Lte, Gte, Lt, Gt, Alias, Invoke, Index, Alloc>;
 struct EXPORT Base {
   Type::Any tpe;
   protected:
@@ -649,6 +649,15 @@ struct EXPORT Index : Expr::Base {
   EXPORT operator Any() const { return std::make_shared<Index>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Index &);
   EXPORT friend bool operator==(const Expr::Index &, const Expr::Index &);
+};
+
+struct EXPORT Alloc : Expr::Base {
+  Type::Array witness;
+  Term::Any size;
+  Alloc(Type::Array witness, Term::Any size) noexcept : Expr::Base(witness), witness(std::move(witness)), size(std::move(size)) {}
+  EXPORT operator Any() const { return std::make_shared<Alloc>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Alloc &);
+  EXPORT friend bool operator==(const Expr::Alloc &, const Expr::Alloc &);
 };
 } // namespace Expr
 namespace Stmt { 
@@ -988,6 +997,9 @@ template <> struct std::hash<polyregion::polyast::Expr::Invoke> {
 };
 template <> struct std::hash<polyregion::polyast::Expr::Index> {
   std::size_t operator()(const polyregion::polyast::Expr::Index &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Alloc> {
+  std::size_t operator()(const polyregion::polyast::Expr::Alloc &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Stmt::Base> {
   std::size_t operator()(const polyregion::polyast::Stmt::Base &) const noexcept;
