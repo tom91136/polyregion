@@ -10,15 +10,16 @@ trait Buffer[A] extends mutable.IndexedSeq[A] {
   def pointer: Option[Long]
   def buffer: java.nio.Buffer
   def putAll(xs: A*): this.type
-    def foreach2( f : Int => Int) : Int = {
-    var i = 0
+  def foreach2(f: Int => Int): Int = {
+    var i   = 0
     var out = 0
-    while(i < 10){
+    while (i < 10) {
       out = f(i)
-      i+=1
+      i += 1
     }
     out
   }
+  def copyToArray: Array[A]
   override def toString: String = s"Buffer[$name](${mkString(", ")})"
 }
 
@@ -50,6 +51,13 @@ object Buffer {
     override def length: Int                          = buffer.capacity()
     override def putAll(xs: Double*): this.type       = { buffer.put(xs.toArray); this }
     override def pointer: Option[Long]                = ptr(buffer)
+    override def copyToArray: Array[Double] =
+      if (buffer.hasArray) buffer.array
+      else {
+        val xs = new Array[Double](buffer.capacity)
+        buffer.get(xs)
+        xs
+      }
   }
   class FloatBuffer(val buffer: java.nio.FloatBuffer) extends Buffer[Float] {
     override val name                                = "Float"
@@ -58,6 +66,13 @@ object Buffer {
     override def length: Int                         = buffer.capacity()
     override def putAll(xs: Float*): this.type       = { buffer.put(xs.toArray); this }
     override def pointer: Option[Long]               = ptr(buffer)
+    override def copyToArray: Array[Float] =
+      if (buffer.hasArray) buffer.array
+      else {
+        val xs = new Array[Float](buffer.capacity)
+        buffer.get(xs)
+        xs
+      }
   }
   class LongBuffer(val buffer: java.nio.LongBuffer) extends Buffer[Long] {
     override val name                               = "Long"
@@ -66,6 +81,13 @@ object Buffer {
     override def length: Int                        = buffer.capacity()
     override def putAll(xs: Long*): this.type       = { buffer.put(xs.toArray); this }
     override def pointer: Option[Long]              = ptr(buffer)
+    override def copyToArray: Array[Long] =
+      if (buffer.hasArray) buffer.array
+      else {
+        val xs = new Array[Long](buffer.capacity)
+        buffer.get(xs)
+        xs
+      }
   }
   class IntBuffer(val buffer: java.nio.IntBuffer) extends Buffer[Int] {
     override val name                              = "Int"
@@ -74,6 +96,13 @@ object Buffer {
     override def length: Int                       = buffer.capacity()
     override def putAll(xs: Int*): this.type       = { buffer.put(xs.toArray); this }
     override def pointer: Option[Long]             = ptr(buffer)
+    override def copyToArray: Array[Int] =
+      if (buffer.hasArray) buffer.array
+      else {
+        val xs = new Array[Int](buffer.capacity)
+        buffer.get(xs)
+        xs
+      }
   }
   class ShortBuffer(val buffer: java.nio.ShortBuffer) extends Buffer[Short] {
     override val name                                = "Short"
@@ -82,6 +111,13 @@ object Buffer {
     override def length: Int                         = buffer.capacity()
     override def putAll(xs: Short*): this.type       = { buffer.put(xs.toArray); this }
     override def pointer: Option[Long]               = ptr(buffer)
+    override def copyToArray: Array[Short] =
+      if (buffer.hasArray) buffer.array
+      else {
+        val xs = new Array[Short](buffer.capacity)
+        buffer.get(xs)
+        xs
+      }
   }
   class ByteBuffer(val buffer: java.nio.ByteBuffer) extends Buffer[Byte] {
     override val name                               = "Byte"
@@ -90,6 +126,13 @@ object Buffer {
     override def length: Int                        = buffer.capacity()
     override def putAll(xs: Byte*): this.type       = { buffer.put(xs.toArray); this }
     override def pointer: Option[Long]              = ptr(buffer)
+    override def copyToArray: Array[Byte] =
+      if (buffer.hasArray) buffer.array
+      else {
+        val xs = new Array[Byte](buffer.capacity)
+        buffer.get(xs)
+        xs
+      }
   }
   class CharBuffer(val buffer: java.nio.CharBuffer) extends Buffer[Char] {
     override val name                               = "Char"
@@ -98,6 +141,13 @@ object Buffer {
     override def length: Int                        = buffer.capacity()
     override def putAll(xs: Char*): this.type       = { buffer.put(xs.toArray); this }
     override def pointer: Option[Long]              = ptr(buffer)
+    override def copyToArray: Array[Char] =
+      if (buffer.hasArray) buffer.array
+      else {
+        val xs = new Array[Char](buffer.capacity)
+        buffer.get(xs)
+        xs
+      }
   }
   class BoolBuffer(val buffer: java.nio.ByteBuffer) extends Buffer[Boolean] {
     override val name                                  = "Boolean"
@@ -110,7 +160,9 @@ object Buffer {
       while (i < n) { update(i, xs(i)); i += 1 }
       this
     }
-    override def pointer: Option[Long] = ptr(buffer)
+    override def pointer: Option[Long]       = ptr(buffer)
+    override def copyToArray: Array[Boolean] = this.toArray
+
   }
   class StructBuffer[A](val buffer: java.nio.ByteBuffer)(using S: NativeStruct[A]) extends Buffer[A] {
     override val name                            = "Struct"
@@ -124,21 +176,26 @@ object Buffer {
       this
     }
     override def pointer: Option[Long] = ptr(buffer)
+    override def copyToArray: Array[A] = ???
+
   }
 
-  def view[A <: AnyVal](actual : java.nio.ByteBuffer)(using tag: ClassTag[A]): Buffer[A] = (tag.runtimeClass match {
-    case java.lang.Double.TYPE    => DoubleBuffer(actual.asDoubleBuffer())
-    case java.lang.Float.TYPE     => FloatBuffer(actual.asFloatBuffer())
-    case java.lang.Long.TYPE      => LongBuffer(actual.asLongBuffer())
-    case java.lang.Integer.TYPE   => IntBuffer(actual.asIntBuffer())
-    case java.lang.Short.TYPE     => ShortBuffer(actual.asShortBuffer())
-    case java.lang.Character.TYPE => CharBuffer(actual.asCharBuffer())
-    case java.lang.Boolean.TYPE   => BoolBuffer(actual)
-    case java.lang.Byte.TYPE      => ByteBuffer(actual)
-    case java.lang.Void.TYPE      => ByteBuffer(actual)
-  }).asInstanceOf[Buffer[A]]
+  def view[A <: AnyVal](actual: java.nio.ByteBuffer)(using tag: ClassTag[A]): Buffer[A] = {
+    actual.order(java.nio.ByteOrder.nativeOrder())
+    (tag.runtimeClass match {
+      case java.lang.Double.TYPE    => DoubleBuffer(actual.asDoubleBuffer())
+      case java.lang.Float.TYPE     => FloatBuffer(actual.asFloatBuffer())
+      case java.lang.Long.TYPE      => LongBuffer(actual.asLongBuffer())
+      case java.lang.Integer.TYPE   => IntBuffer(actual.asIntBuffer())
+      case java.lang.Short.TYPE     => ShortBuffer(actual.asShortBuffer())
+      case java.lang.Character.TYPE => CharBuffer(actual.asCharBuffer())
+      case java.lang.Boolean.TYPE   => BoolBuffer(actual)
+      case java.lang.Byte.TYPE      => ByteBuffer(actual)
+      case java.lang.Void.TYPE      => ByteBuffer(actual)
+    }).asInstanceOf[Buffer[A]]
+  }
 
-  def ofDim[A <: AnyVal](dim: Int)(using tag: ClassTag[A]): Buffer[A] =   (tag.runtimeClass match {
+  def ofDim[A <: AnyVal](dim: Int)(using tag: ClassTag[A]): Buffer[A] = (tag.runtimeClass match {
     case java.lang.Double.TYPE    => DoubleBuffer(alloc(java.lang.Double.BYTES, dim).asDoubleBuffer())
     case java.lang.Float.TYPE     => FloatBuffer(alloc(java.lang.Float.BYTES, dim).asFloatBuffer())
     case java.lang.Long.TYPE      => LongBuffer(alloc(java.lang.Long.BYTES, dim).asLongBuffer())
@@ -173,11 +230,10 @@ object Buffer {
   def ofZeroed[A <: AnyRef](dim: Int)(using S: NativeStruct[A]): Buffer[A] =
     StructBuffer[A](alloc(S.sizeInBytes, dim)) // zeros by default
 
-
   def ofZeroedAny(dim: Int)(using S: NativeStruct[Any]): Buffer[Any] =
     StructBuffer[Any](alloc(S.sizeInBytes, dim)) // zeros by default
 
-  def refAny(x :Any)(using S: NativeStruct[Any]): Buffer[Any] =
+  def refAny(x: Any)(using S: NativeStruct[Any]): Buffer[Any] =
     ofZeroedAny(1).putAll(x)
 
   def apply[A <: AnyRef](xs: A*)(using S: NativeStruct[A]): Buffer[A] =

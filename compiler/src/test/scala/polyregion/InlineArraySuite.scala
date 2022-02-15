@@ -44,12 +44,10 @@ class InlineArraySuite extends BaseSuite {
           math.cos(0d)
           // gen[Int, Int, Int](1,2)
           val xs = Array.ofDim[A](2)
-//          val xs = new Array[Int](n)
           unrollInclusive(n - 1)(i => xs(i) = expected)
           xs
         }
-        println(s"R=$actual")
-        // actual.foreach(x => assertValEquals(x, expected))
+        actual.foreach(x => assertValEquals(x, expected))
       }
     }
 
@@ -61,18 +59,9 @@ class InlineArraySuite extends BaseSuite {
     // val x = summon[MkCol2[Array[Int][]] ]
     // val m  = Buffer[Int]().to(Array)
 
-    test("a") {
-      val rr = doOffload {
+ 
 
-        val xs = Array.ofDim[Int](2)
-        xs(0) = 42
-        xs(1) = 43
-        xs
-      }
-      println(s"R=$rr")
-    }
-
-  // assertInlineFill[Char](0, 0)
+  assertInlineFill[Char](0, 0)
   // assertInlineFill[Byte](0, 0)
   // assertInlineFill[Short](0, 0)
   // assertInlineFill[Int](0, 0)

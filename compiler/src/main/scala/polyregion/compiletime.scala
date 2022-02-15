@@ -395,7 +395,7 @@ object compiletime {
       //   case xs => throw new AssertionError(s"Compiler bug: more than one out return param ($xs)!?")
       // }
 
-      def liftTpe(t: p.Type) = t match {
+      transparent inline def liftTpe(t: p.Type) = t match {
         case p.Type.Bool   => Type.of[Boolean]
         case p.Type.Char   => Type.of[Char]
         case p.Type.Byte   => Type.of[Byte]
@@ -447,136 +447,54 @@ object compiletime {
       }
       val captureTps = captures.map((_, t) => tpeAsRuntimeTpe(t))
 
+      def wrap(buffer: Expr[java.nio.ByteBuffer], comp: p.Type) =
+        comp match {
+          case p.Type.Unit   => '{ Buffer.view[Unit](${ buffer }) }
+          case p.Type.Float  => '{ Buffer.view[Float](${ buffer }) }
+          case p.Type.Double => '{ Buffer.view[Double](${ buffer }) }
+          case p.Type.Bool   => '{ Buffer.view[Boolean](${ buffer }) }
+          case p.Type.Byte   => '{ Buffer.view[Byte](${ buffer }) }
+          case p.Type.Char   => '{ Buffer.view[Char](${ buffer }) }
+          case p.Type.Short  => '{ Buffer.view[Short](${ buffer }) }
+          case p.Type.Int    => '{ Buffer.view[Int](${ buffer }) }
+          case p.Type.Long   => '{ Buffer.view[Long](${ buffer }) }
+          case _             => ???
+        }
+
       val code = '{
 
         val bytes = $programBytesExpr
-        // val rtnBuffer    = ${ rtnBufferExpr }
-        // val rtnType      = ${ rtnBufferTpe }
-
         val argTypes   = Array(${ Varargs(captureTps) }*)
         val argBuffers = Array(${ Varargs(captureExprs) }*)
 
         ${
-          prog.entry.rtn match {
-            case p.Type.Unit   => '{ PolyregionRuntime.invoke(bytes, $fnName, argTypes, argBuffers) }.asExprOf[A]
-            case p.Type.Float  => '{ PolyregionRuntime.invokeFloat(bytes, $fnName, argTypes, argBuffers) }.asExprOf[A]
-            case p.Type.Double => '{ PolyregionRuntime.invokeDouble(bytes, $fnName, argTypes, argBuffers) }.asExprOf[A]
-            case p.Type.Bool   => '{ PolyregionRuntime.invokeBool(bytes, $fnName, argTypes, argBuffers) }.asExprOf[A]
-            case p.Type.Byte   => '{ PolyregionRuntime.invokeByte(bytes, $fnName, argTypes, argBuffers) }.asExprOf[A]
-            case p.Type.Char   => '{ PolyregionRuntime.invokeChar(bytes, $fnName, argTypes, argBuffers) }.asExprOf[A]
-            case p.Type.Short  => '{ PolyregionRuntime.invokeShort(bytes, $fnName, argTypes, argBuffers) }.asExprOf[A]
-            case p.Type.Int    => '{ PolyregionRuntime.invokeInt(bytes, $fnName, argTypes, argBuffers) }.asExprOf[A]
-            case p.Type.Long   => '{ PolyregionRuntime.invokeLong(bytes, $fnName, argTypes, argBuffers) }.asExprOf[A]
+          (prog.entry.rtn match {
+            case p.Type.Unit   => '{ PolyregionRuntime.invoke(bytes, $fnName, argTypes, argBuffers) } 
+            case p.Type.Float  => '{ PolyregionRuntime.invokeFloat(bytes, $fnName, argTypes, argBuffers) } 
+            case p.Type.Double => '{ PolyregionRuntime.invokeDouble(bytes, $fnName, argTypes, argBuffers) } 
+            case p.Type.Bool   => '{ PolyregionRuntime.invokeBool(bytes, $fnName, argTypes, argBuffers) } 
+            case p.Type.Byte   => '{ PolyregionRuntime.invokeByte(bytes, $fnName, argTypes, argBuffers) } 
+            case p.Type.Char   => '{ PolyregionRuntime.invokeChar(bytes, $fnName, argTypes, argBuffers) } 
+            case p.Type.Short  => '{ PolyregionRuntime.invokeShort(bytes, $fnName, argTypes, argBuffers) } 
+            case p.Type.Int    => '{ PolyregionRuntime.invokeInt(bytes, $fnName, argTypes, argBuffers) } 
+            case p.Type.Long   => '{ PolyregionRuntime.invokeLong(bytes, $fnName, argTypes, argBuffers) } 
             case x @ p.Type.Struct(_) => noComplexReturn(s"struct (${x.repr})")
-
             case p.Type.Array(comp) =>
-              val buffer = '{
-                PolyregionRuntime.invokeObject(bytes, $fnName, argTypes, argBuffers, -1)
-              }
-
-              val wrapped = comp match {
-                case p.Type.Unit   => '{ Buffer.view[Unit]($buffer) }
-                case p.Type.Float  => '{ Buffer.view[Float]($buffer) }
-                case p.Type.Double => '{ Buffer.view[Double]($buffer) }
-                case p.Type.Bool   => '{ Buffer.view[Boolean]($buffer) }
-                case p.Type.Byte   => '{ Buffer.view[Byte]($buffer) }
-                case p.Type.Char   => '{ Buffer.view[Char]($buffer) }
-                case p.Type.Short  => '{ Buffer.view[Short]($buffer) }
-                case p.Type.Int    => '{ Buffer.view[Int]($buffer) }
-                case p.Type.Long   => '{ Buffer.view[Long]($buffer) }
-                case _             => ???
-              }
-
-              val out = Type.of[A] match {
-                case '[Buffer[a]] => wrapped.asExprOf[A]
-                case '[Array[a]]  => 
-                
-            val tc = Q.TypeRepr.of[ClassTag[_]].appliedTo(Q.TypeRepr.of[a])
-
-                val imp = Q.Implicits.search(tc) match {
-              case ok: Q.ImplicitSearchSuccess   => ok.tree.asExpr
-              case fail: Q.ImplicitSearchFailure => Q.report.errorAndAbort(fail.explanation )
-            }
-                '{ 
-                  val v = $wrapped
-                println(v)
-                println(v)
-                println(v)
-
-                 
-                // v.toArray[a](${imp}.asInstanceOf[ClassTag[a]] ).asInstanceOf[Array[a]] 
-
-                Array(1,2) 
+              '{
+                val buffer = PolyregionRuntime.invokeObject(bytes, $fnName, argTypes, argBuffers, -1)
+                ${
+                  Type.of[A] match {
+                    case '[Buffer[a]] => wrap('{ buffer }, comp)  // passthrough
+                    case '[Array[a]]  => '{ ${ wrap('{ buffer }, comp) }.copyToArray } 
+                    case m            => ???
+                  }
                 }
-                case m            => ???
+
               }
-
-              out.asExprOf[A]
-
-          }
+          }).asExprOf[A]
         }
       }
-
-      // val code = outReturnParamExpr match {
-      //   case Some((t, expr)) =>
-      //     '{
-      //       val programBytes = $programBytesExpr
-
-      //       val rtnBuffer = ${ rtnBufferExpr }
-      //       val rtnType   = ${ rtnBufferTpe }
-
-      //       val outReturn = ${ expr }
-
-      //       val argTypes   = Array(${ Varargs(tpeAsRuntimeTpe(t) :: captureTps) }*)
-      //       val argBuffers = Array(${ Varargs('{ outReturn.buffer } :: captureExprs) }*)
-
-      //       ${
-      //         prog.entry.rtn match {
-      //           case p.Type.Unit          => '{  PolyregionRuntime.invoke(programBytes, $fnName, argTypes, argBuffers) }
-      //           case p.Type.Float         => '{  PolyregionRuntime.invokeFloat(programBytes, $fnName, argTypes, argBuffers) }
-      //           case p.Type.Double        => '{  PolyregionRuntime.invokeDouble(programBytes, $fnName, argTypes, argBuffers) }
-      //           case p.Type.Bool          => '{  PolyregionRuntime.invokeBoolean(programBytes, $fnName, argTypes, argBuffers) }
-      //           case p.Type.Byte          => '{  PolyregionRuntime.invokeByte(programBytes, $fnName, argTypes, argBuffers) }
-      //           case p.Type.Char          => '{  PolyregionRuntime.invokeChar(programBytes, $fnName, argTypes, argBuffers) }
-      //           case p.Type.Short         => '{  PolyregionRuntime.invokeShort(programBytes, $fnName, argTypes, argBuffers) }
-      //           case p.Type.Int           => '{  PolyregionRuntime.invokeInt(programBytes, $fnName, argTypes, argBuffers) }
-      //           case p.Type.Long          => '{  PolyregionRuntime.invokeLong(programBytes, $fnName, argTypes, argBuffers) }
-      //           case x @ p.Type.Struct(_) => noComplexReturn(s"struct (${x.repr})")
-      //           case x @ p.Type.Array(_)  => noComplexReturn(s"array (${x.repr})")
-      //         }
-      //       }
-      //       PolyregionRuntime.invoke(programBytes, ${ fnName }, argTypes, argBuffers)
-
-      //       ${
-      //         t match {
-      //           case s @ p.Type.Struct(_) => '{ outReturn(0) }
-      //           case s @ p.Type.Array(_)  => '{ ().asInstanceOf[A] }
-      //           case _                    => ???
-      //         }
-      //       }
-      //     }
-      //   case None =>
-      //     '{
-      //       val programBytes = $programBytesExpr
-      //       val rtnBuffer    = ${ rtnBufferExpr }
-      //       val rtnType      = ${ rtnBufferTpe }
-
-      //       val argTypes   = Array(${ Varargs(captureTps) }*)
-      //       val argBuffers = Array(${ Varargs(captureExprs) }*)
-
-      //       PolyregionRuntime.invoke(programBytes, ${ fnName }, argTypes, argBuffers)
-      //       ${
-      //         prog.entry.rtn match {
-      //           case s @ p.Type.Struct(_) => noComplexReturn(s"struct ${s}")
-      //           case p.Type.Unit          => '{ ().asInstanceOf[A] }
-      //           case _                    => '{ rtnBuffer(0).asInstanceOf[A] }
-      //         }
-      //       }
-      //     }
-
-      // }
-
-      // println("Code=" + code.show)
+      println("Code=" + code.show)
       code
     }
 
