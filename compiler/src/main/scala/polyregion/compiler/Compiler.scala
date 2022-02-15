@@ -20,8 +20,7 @@ object Compiler {
       UnitExprElisionPass.eliminateUnitExpr
 
   private val GlobalOptPasses = //
-    FnInlinePass.inlineAll >>>
-      FnPtrReturnToOutParamPass.transform
+    FnInlinePass.inlineAll  // >>> FnPtrReturnToOutParamPass.transform
 
   def compileFn(using q: Quoted)(f: q.DefDef): Result[(q.FnDependencies, p.Function)] = {
     println(s" -> Compile dependent method: ${f.show}")
@@ -131,7 +130,7 @@ object Compiler {
 
   def compileExpr(using q: Quoted)(x: Expr[Any]): Result[
     (
-        List[p.Type],
+        // List[p.Type],
         List[(q.Ref, p.Type)],
         p.Program
     )
@@ -158,13 +157,13 @@ object Compiler {
       clsDefs = deps.clss.values.toList
       _       = println(s"ClsDefs = ${clsDefs}")
 
-      outReturnParams = optimised.head.args.lastIndexOfSlice(closureFn.args) match {
-        case -1 => ???
-        case n  => optimised.head.args.take(n).map(_.tpe)
-      }
+      // outReturnParams = optimised.head.args.lastIndexOfSlice(closureFn.args) match {
+      //   case -1 => ???
+      //   case n  => optimised.head.args.take(n).map(_.tpe)
+      // }
 
     } yield (
-      outReturnParams,
+      // outReturnParams,
       closureArgs,
       p.Program(optimised.head, optimised.tail, clsDefs)
     )

@@ -126,15 +126,28 @@ object Buffer {
     override def pointer: Option[Long] = ptr(buffer)
   }
 
-  def ofDim[A <: AnyVal](dim: Int)(using tag: ClassTag[A]): Buffer[A] = (tag.runtimeClass match {
+  def view[A <: AnyVal](actual : java.nio.ByteBuffer)(using tag: ClassTag[A]): Buffer[A] = (tag.runtimeClass match {
+    case java.lang.Double.TYPE    => DoubleBuffer(actual.asDoubleBuffer())
+    case java.lang.Float.TYPE     => FloatBuffer(actual.asFloatBuffer())
+    case java.lang.Long.TYPE      => LongBuffer(actual.asLongBuffer())
+    case java.lang.Integer.TYPE   => IntBuffer(actual.asIntBuffer())
+    case java.lang.Short.TYPE     => ShortBuffer(actual.asShortBuffer())
+    case java.lang.Character.TYPE => CharBuffer(actual.asCharBuffer())
+    case java.lang.Boolean.TYPE   => BoolBuffer(actual)
+    case java.lang.Byte.TYPE      => ByteBuffer(actual)
+    case java.lang.Void.TYPE      => ByteBuffer(actual)
+  }).asInstanceOf[Buffer[A]]
+
+  def ofDim[A <: AnyVal](dim: Int)(using tag: ClassTag[A]): Buffer[A] =   (tag.runtimeClass match {
     case java.lang.Double.TYPE    => DoubleBuffer(alloc(java.lang.Double.BYTES, dim).asDoubleBuffer())
     case java.lang.Float.TYPE     => FloatBuffer(alloc(java.lang.Float.BYTES, dim).asFloatBuffer())
     case java.lang.Long.TYPE      => LongBuffer(alloc(java.lang.Long.BYTES, dim).asLongBuffer())
     case java.lang.Integer.TYPE   => IntBuffer(alloc(java.lang.Integer.BYTES, dim).asIntBuffer())
     case java.lang.Short.TYPE     => ShortBuffer(alloc(java.lang.Short.BYTES, dim).asShortBuffer())
     case java.lang.Character.TYPE => CharBuffer(alloc(java.lang.Character.BYTES, dim).asCharBuffer())
-    case java.lang.Byte.TYPE      => ByteBuffer(alloc(java.lang.Byte.BYTES, dim))
     case java.lang.Boolean.TYPE   => BoolBuffer(alloc(java.lang.Byte.BYTES, dim))
+    case java.lang.Byte.TYPE      => ByteBuffer(alloc(java.lang.Byte.BYTES, dim))
+    case java.lang.Void.TYPE      => ByteBuffer(alloc(0, dim))
   }).asInstanceOf[Buffer[A]]
 
   // AnyVals

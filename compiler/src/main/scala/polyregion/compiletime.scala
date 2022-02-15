@@ -297,7 +297,6 @@ object compiletime {
     case p.Type.Struct(_) => '{ PolyregionRuntime.TYPE_PTR }
     case p.Type.Unit      => '{ PolyregionRuntime.TYPE_VOID }
     case unknown =>
-      Integer.val
       println(s"tpeAsRuntimeTpe ??? = $unknown ")
       ???
   }
@@ -310,8 +309,8 @@ object compiletime {
   private def offloadImpl[A: Type](x: Expr[Any])(using q: Quotes): Expr[A] = {
     implicit val Q = compiler.Quoted(q)
     val result = for {
-      (outReturnParams, captures, prog) <- compiler.Compiler.compileExpr(x)
-      serialisedAst <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, prog)))
+      (captures, prog) <- compiler.Compiler.compileExpr(x)
+      serialisedAst    <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, prog)))
       // _ <- Either.catchNonFatal(throw new RuntimeException("STOP"))
       // layout <- Either.catchNonFatal(PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, prog.defs))))
       //   _= println(s"layout=${layout}")
@@ -326,76 +325,86 @@ object compiletime {
       val astBytesExpr     = Expr(serialisedAst)
       val fnName           = Expr("lambda")
 
-      val (rtnBufferTpe, rtnBufferExpr) = (
-        tpeAsRuntimeTpe(prog.entry.rtn),
-        prog.entry.rtn match {
-          case p.Type.Unit          => '{ Buffer.empty[Int] }
-          case p.Type.Float         => '{ Buffer.ref[Float] }
-          case p.Type.Double        => '{ Buffer.ref[Double] }
-          case p.Type.Bool          => '{ Buffer.ref[Boolean] }
-          case p.Type.Byte          => '{ Buffer.ref[Byte] }
-          case p.Type.Char          => '{ Buffer.ref[Char] }
-          case p.Type.Short         => '{ Buffer.ref[Short] }
-          case p.Type.Int           => '{ Buffer.ref[Int] }
-          case p.Type.Long          => '{ Buffer.ref[Long] }
-          case x @ p.Type.Struct(_) => noComplexReturn(s"struct (${x.repr})")
-          case x @ p.Type.Array(_)  => noComplexReturn(s"array (${x.repr})")
-        }
-      )
+      // val (rtnBufferTpe, rtnBufferExpr) = (
+      //   tpeAsRuntimeTpe(prog.entry.rtn),
+      //   prog.entry.rtn match {
+      //     case p.Type.Unit          => '{ Buffer.empty[Int] }
+      //     case p.Type.Float         => '{ Buffer.ref[Float] }
+      //     case p.Type.Double        => '{ Buffer.ref[Double] }
+      //     case p.Type.Bool          => '{ Buffer.ref[Boolean] }
+      //     case p.Type.Byte          => '{ Buffer.ref[Byte] }
+      //     case p.Type.Char          => '{ Buffer.ref[Char] }
+      //     case p.Type.Short         => '{ Buffer.ref[Short] }
+      //     case p.Type.Int           => '{ Buffer.ref[Int] }
+      //     case p.Type.Long          => '{ Buffer.ref[Long] }
+      //     case x @ p.Type.Struct(_) => noComplexReturn(s"struct (${x.repr})")
+      //     case x @ p.Type.Array(_)  => noComplexReturn(s"array (${x.repr})")
+      //   }
+      // )
 
-      println(s"out=${outReturnParams}")
+      // val outReturnParamExpr = outReturnParams match {
+      //   case Nil => None
+      //   case (t @ p.Type.Struct(sym)) :: Nil =>
+      //     val imp = Expr.summon[NativeStruct[A]] match {
+      //       case Some(x) => x
+      //       case None =>
+      //         Q.report.errorAndAbort(
+      //           s"No implicit found for return struct value ${Q.TypeRepr.of[NativeStruct[A]].show}"
+      //         )
+      //     }
+      //     // val x = TypeRepr.of[A].asType
+      //     Some(
+      //       (
+      //         t,
+      //         '{
+      //           println(s"imp=${${ imp }}")
 
-      val outReturnParamExpr = outReturnParams match {
-        case Nil => None
-        case (t @ p.Type.Struct(sym)) :: Nil =>
-          val imp = Expr.summon[NativeStruct[A]] match {
-            case Some(x) => x
-            case None =>
-              Q.report.errorAndAbort(
-                s"No implicit found for return struct value ${Q.TypeRepr.of[NativeStruct[A]].show}"
-              )
-          }
-          // val x = TypeRepr.of[A].asType
-          Some(
-            (
-              t,
-              '{
-                println(s"imp=${${ imp }}")
+      //           val u = Buffer.ofZeroedAny(1)(using $imp.asInstanceOf[NativeStruct[Any]])
+      //           println(s"u=$u")
+      //           u.asInstanceOf[Buffer[A]]
+      //         }
+      //       )
+      //     )
+      //   case (t @ p.Type.Array(comp)) :: Nil =>
+      //     // nested arrays will be pointers
 
-                val u = Buffer.ofZeroedAny(1)(using $imp.asInstanceOf[NativeStruct[Any]])
-                println(s"u=$u")
-                u.asInstanceOf[Buffer[A]]
-              }
-            )
-          )
-        case (t @ p.Type.Array(comp)) :: Nil =>
-          // nested arrays will be pointers
+      //     val imp = Expr.summon[Factory[_, A]] match {
+      //       case Some(x) => x
+      //       case None =>
+      //         Q.report.errorAndAbort(
+      //           s"No implicit found for return collection value ${Q.TypeRepr.of[Factory[_, A]].show}"
+      //         )
+      //     }
 
-          val imp = Expr.summon[Factory[_, A]] match {
-            case Some(x) => x
-            case None =>
-              Q.report.errorAndAbort(
-                s"No implicit found for return collection value ${Q.TypeRepr.of[Factory[_, A]].show}"
-              )
-          }
+      //     println(">>>" + imp.show)
 
-          println(">>>" + imp.show)
+      //     Some(
+      //       (
+      //         t,
+      //         '{
+      //           val u = Buffer.ofZeroedAny(1)(using $imp.asInstanceOf[NativeStruct[Any]])
+      //           println(s"u=$u")
+      //           // '{ $imp.fromSpecific() }
+      //           u.asInstanceOf[Buffer[A]]
+      //         }
+      //       )
+      //     )
 
-          Some(
-            (
-              t,
-              '{
-                val u = Buffer.ofZeroedAny(1)(using $imp.asInstanceOf[NativeStruct[Any]])
-                println(s"u=$u")
-                // '{ $imp.fromSpecific() }
-                u.asInstanceOf[Buffer[A]]
-              }
-            )
-          )
+      //   case bad :: Nil =>
+      //     throw new AssertionError(s"Compiler bug: expecting struct or array out return param but was $bad")
+      //   case xs => throw new AssertionError(s"Compiler bug: more than one out return param ($xs)!?")
+      // }
 
-        case bad :: Nil =>
-          throw new AssertionError(s"Compiler bug: expecting struct or array out return param but was $bad")
-        case xs => throw new AssertionError(s"Compiler bug: more than one out return param ($xs)!?")
+      def liftTpe(t: p.Type) = t match {
+        case p.Type.Bool   => Type.of[Boolean]
+        case p.Type.Char   => Type.of[Char]
+        case p.Type.Byte   => Type.of[Byte]
+        case p.Type.Short  => Type.of[Short]
+        case p.Type.Int    => Type.of[Int]
+        case p.Type.Long   => Type.of[Long]
+        case p.Type.Float  => Type.of[Float]
+        case p.Type.Double => Type.of[Double]
+        case p.Type.Unit   => Type.of[Unit]
       }
 
       val captureExprs = captures.map { (ident, tpe) =>
@@ -425,6 +434,7 @@ object compiletime {
           case p.Type.Array(p.Type.Long)      => expr.asExprOf[Buffer[Long]]
           case p.Type.Array(p.Type.Float)     => expr.asExprOf[Buffer[Float]]
           case p.Type.Array(p.Type.Double)    => expr.asExprOf[Buffer[Double]]
+          case p.Type.Array(p.Type.Unit)      => expr.asExprOf[Buffer[Int]] // TODO test me
           case p.Type.Array(p.Type.Struct(s)) => expr.asExprOf[Buffer[_]]
           case unknown =>
             println(s"???= $unknown ")
@@ -437,49 +447,134 @@ object compiletime {
       }
       val captureTps = captures.map((_, t) => tpeAsRuntimeTpe(t))
 
-      val code = outReturnParamExpr match {
-        case Some((t, expr)) =>
-          '{
-            val programBytes = $programBytesExpr
+      val code = '{
 
-            val rtnBuffer = ${ rtnBufferExpr }
-            val rtnType   = ${ rtnBufferTpe }
+        val bytes = $programBytesExpr
+        // val rtnBuffer    = ${ rtnBufferExpr }
+        // val rtnType      = ${ rtnBufferTpe }
 
-            val outReturn = ${ expr }
+        val argTypes   = Array(${ Varargs(captureTps) }*)
+        val argBuffers = Array(${ Varargs(captureExprs) }*)
 
-            val argTypes   = Array(${ Varargs(tpeAsRuntimeTpe(t) :: captureTps) }*)
-            val argBuffers = Array(${ Varargs('{ outReturn.buffer } :: captureExprs) }*)
+        ${
+          prog.entry.rtn match {
+            case p.Type.Unit   => '{ PolyregionRuntime.invoke(bytes, $fnName, argTypes, argBuffers) }.asExprOf[A]
+            case p.Type.Float  => '{ PolyregionRuntime.invokeFloat(bytes, $fnName, argTypes, argBuffers) }.asExprOf[A]
+            case p.Type.Double => '{ PolyregionRuntime.invokeDouble(bytes, $fnName, argTypes, argBuffers) }.asExprOf[A]
+            case p.Type.Bool   => '{ PolyregionRuntime.invokeBool(bytes, $fnName, argTypes, argBuffers) }.asExprOf[A]
+            case p.Type.Byte   => '{ PolyregionRuntime.invokeByte(bytes, $fnName, argTypes, argBuffers) }.asExprOf[A]
+            case p.Type.Char   => '{ PolyregionRuntime.invokeChar(bytes, $fnName, argTypes, argBuffers) }.asExprOf[A]
+            case p.Type.Short  => '{ PolyregionRuntime.invokeShort(bytes, $fnName, argTypes, argBuffers) }.asExprOf[A]
+            case p.Type.Int    => '{ PolyregionRuntime.invokeInt(bytes, $fnName, argTypes, argBuffers) }.asExprOf[A]
+            case p.Type.Long   => '{ PolyregionRuntime.invokeLong(bytes, $fnName, argTypes, argBuffers) }.asExprOf[A]
+            case x @ p.Type.Struct(_) => noComplexReturn(s"struct (${x.repr})")
 
-            PolyregionRuntime.invoke(programBytes, ${ fnName }, rtnType, rtnBuffer.buffer, argTypes, argBuffers)
-
-            ${
-              t match {
-                case s @ p.Type.Struct(_) => '{ outReturn(0) }
-                case s @ p.Type.Array(_)  => '{ ().asInstanceOf[A] }
-                case _                    => ???
+            case p.Type.Array(comp) =>
+              val buffer = '{
+                PolyregionRuntime.invokeObject(bytes, $fnName, argTypes, argBuffers, -1)
               }
-            }
-          }
-        case None =>
-          '{
-            val programBytes = $programBytesExpr
-            val rtnBuffer    = ${ rtnBufferExpr }
-            val rtnType      = ${ rtnBufferTpe }
 
-            val argTypes   = Array(${ Varargs(captureTps) }*)
-            val argBuffers = Array(${ Varargs(captureExprs) }*)
-
-            PolyregionRuntime.invoke(programBytes, ${ fnName }, rtnType, rtnBuffer.buffer, argTypes, argBuffers)
-            ${
-              prog.entry.rtn match {
-                case s @ p.Type.Struct(_) => noComplexReturn(s"struct ${s}")
-                case p.Type.Unit          => '{ ().asInstanceOf[A] }
-                case _                    => '{ rtnBuffer(0).asInstanceOf[A] }
+              val wrapped = comp match {
+                case p.Type.Unit   => '{ Buffer.view[Unit]($buffer) }
+                case p.Type.Float  => '{ Buffer.view[Float]($buffer) }
+                case p.Type.Double => '{ Buffer.view[Double]($buffer) }
+                case p.Type.Bool   => '{ Buffer.view[Boolean]($buffer) }
+                case p.Type.Byte   => '{ Buffer.view[Byte]($buffer) }
+                case p.Type.Char   => '{ Buffer.view[Char]($buffer) }
+                case p.Type.Short  => '{ Buffer.view[Short]($buffer) }
+                case p.Type.Int    => '{ Buffer.view[Int]($buffer) }
+                case p.Type.Long   => '{ Buffer.view[Long]($buffer) }
+                case _             => ???
               }
-            }
-          }
 
+              val out = Type.of[A] match {
+                case '[Buffer[a]] => wrapped.asExprOf[A]
+                case '[Array[a]]  => 
+                
+            val tc = Q.TypeRepr.of[ClassTag[_]].appliedTo(Q.TypeRepr.of[a])
+
+                val imp = Q.Implicits.search(tc) match {
+              case ok: Q.ImplicitSearchSuccess   => ok.tree.asExpr
+              case fail: Q.ImplicitSearchFailure => Q.report.errorAndAbort(fail.explanation )
+            }
+                '{ 
+                  val v = $wrapped
+                println(v)
+                println(v)
+                println(v)
+
+                 
+                // v.toArray[a](${imp}.asInstanceOf[ClassTag[a]] ).asInstanceOf[Array[a]] 
+
+                Array(1,2) 
+                }
+                case m            => ???
+              }
+
+              out.asExprOf[A]
+
+          }
+        }
       }
+
+      // val code = outReturnParamExpr match {
+      //   case Some((t, expr)) =>
+      //     '{
+      //       val programBytes = $programBytesExpr
+
+      //       val rtnBuffer = ${ rtnBufferExpr }
+      //       val rtnType   = ${ rtnBufferTpe }
+
+      //       val outReturn = ${ expr }
+
+      //       val argTypes   = Array(${ Varargs(tpeAsRuntimeTpe(t) :: captureTps) }*)
+      //       val argBuffers = Array(${ Varargs('{ outReturn.buffer } :: captureExprs) }*)
+
+      //       ${
+      //         prog.entry.rtn match {
+      //           case p.Type.Unit          => '{  PolyregionRuntime.invoke(programBytes, $fnName, argTypes, argBuffers) }
+      //           case p.Type.Float         => '{  PolyregionRuntime.invokeFloat(programBytes, $fnName, argTypes, argBuffers) }
+      //           case p.Type.Double        => '{  PolyregionRuntime.invokeDouble(programBytes, $fnName, argTypes, argBuffers) }
+      //           case p.Type.Bool          => '{  PolyregionRuntime.invokeBoolean(programBytes, $fnName, argTypes, argBuffers) }
+      //           case p.Type.Byte          => '{  PolyregionRuntime.invokeByte(programBytes, $fnName, argTypes, argBuffers) }
+      //           case p.Type.Char          => '{  PolyregionRuntime.invokeChar(programBytes, $fnName, argTypes, argBuffers) }
+      //           case p.Type.Short         => '{  PolyregionRuntime.invokeShort(programBytes, $fnName, argTypes, argBuffers) }
+      //           case p.Type.Int           => '{  PolyregionRuntime.invokeInt(programBytes, $fnName, argTypes, argBuffers) }
+      //           case p.Type.Long          => '{  PolyregionRuntime.invokeLong(programBytes, $fnName, argTypes, argBuffers) }
+      //           case x @ p.Type.Struct(_) => noComplexReturn(s"struct (${x.repr})")
+      //           case x @ p.Type.Array(_)  => noComplexReturn(s"array (${x.repr})")
+      //         }
+      //       }
+      //       PolyregionRuntime.invoke(programBytes, ${ fnName }, argTypes, argBuffers)
+
+      //       ${
+      //         t match {
+      //           case s @ p.Type.Struct(_) => '{ outReturn(0) }
+      //           case s @ p.Type.Array(_)  => '{ ().asInstanceOf[A] }
+      //           case _                    => ???
+      //         }
+      //       }
+      //     }
+      //   case None =>
+      //     '{
+      //       val programBytes = $programBytesExpr
+      //       val rtnBuffer    = ${ rtnBufferExpr }
+      //       val rtnType      = ${ rtnBufferTpe }
+
+      //       val argTypes   = Array(${ Varargs(captureTps) }*)
+      //       val argBuffers = Array(${ Varargs(captureExprs) }*)
+
+      //       PolyregionRuntime.invoke(programBytes, ${ fnName }, argTypes, argBuffers)
+      //       ${
+      //         prog.entry.rtn match {
+      //           case s @ p.Type.Struct(_) => noComplexReturn(s"struct ${s}")
+      //           case p.Type.Unit          => '{ ().asInstanceOf[A] }
+      //           case _                    => '{ rtnBuffer(0).asInstanceOf[A] }
+      //         }
+      //       }
+      //     }
+
+      // }
 
       // println("Code=" + code.show)
       code

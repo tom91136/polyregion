@@ -32,7 +32,39 @@ extern "C" {
  * Method:     invoke
  * Signature:  ([BLjava/lang/String;[B[Ljava/nio/Buffer;)V
  */
-JNIEXPORT void JNICALL Java_polyregion_PolyregionRuntime_invoke
+[[maybe_unused]] JNIEXPORT void JNICALL Java_polyregion_PolyregionRuntime_invoke
+  (JNIEnv *, jclass, jbyteArray, jstring, jbyteArray, jobjectArray);
+
+/*
+ * Class:      polyregion_PolyregionRuntime
+ * Method:     invokeBool
+ * Signature:  ([BLjava/lang/String;[B[Ljava/nio/Buffer;)Z
+ */
+JNIEXPORT jboolean JNICALL Java_polyregion_PolyregionRuntime_invokeBool
+  (JNIEnv *, jclass, jbyteArray, jstring, jbyteArray, jobjectArray);
+
+/*
+ * Class:      polyregion_PolyregionRuntime
+ * Method:     invokeByte
+ * Signature:  ([BLjava/lang/String;[B[Ljava/nio/Buffer;)B
+ */
+JNIEXPORT jbyte JNICALL Java_polyregion_PolyregionRuntime_invokeByte
+  (JNIEnv *, jclass, jbyteArray, jstring, jbyteArray, jobjectArray);
+
+/*
+ * Class:      polyregion_PolyregionRuntime
+ * Method:     invokeChar
+ * Signature:  ([BLjava/lang/String;[B[Ljava/nio/Buffer;)C
+ */
+JNIEXPORT jchar JNICALL Java_polyregion_PolyregionRuntime_invokeChar
+  (JNIEnv *, jclass, jbyteArray, jstring, jbyteArray, jobjectArray);
+
+/*
+ * Class:      polyregion_PolyregionRuntime
+ * Method:     invokeShort
+ * Signature:  ([BLjava/lang/String;[B[Ljava/nio/Buffer;)S
+ */
+JNIEXPORT jshort JNICALL Java_polyregion_PolyregionRuntime_invokeShort
   (JNIEnv *, jclass, jbyteArray, jstring, jbyteArray, jobjectArray);
 
 /*
@@ -65,30 +97,6 @@ JNIEXPORT jfloat JNICALL Java_polyregion_PolyregionRuntime_invokeFloat
  * Signature:  ([BLjava/lang/String;[B[Ljava/nio/Buffer;)D
  */
 JNIEXPORT jdouble JNICALL Java_polyregion_PolyregionRuntime_invokeDouble
-  (JNIEnv *, jclass, jbyteArray, jstring, jbyteArray, jobjectArray);
-
-/*
- * Class:      polyregion_PolyregionRuntime
- * Method:     invokeShort
- * Signature:  ([BLjava/lang/String;[B[Ljava/nio/Buffer;)S
- */
-JNIEXPORT jshort JNICALL Java_polyregion_PolyregionRuntime_invokeShort
-  (JNIEnv *, jclass, jbyteArray, jstring, jbyteArray, jobjectArray);
-
-/*
- * Class:      polyregion_PolyregionRuntime
- * Method:     invokeChar
- * Signature:  ([BLjava/lang/String;[B[Ljava/nio/Buffer;)C
- */
-JNIEXPORT jchar JNICALL Java_polyregion_PolyregionRuntime_invokeChar
-  (JNIEnv *, jclass, jbyteArray, jstring, jbyteArray, jobjectArray);
-
-/*
- * Class:      polyregion_PolyregionRuntime
- * Method:     invokeByte
- * Signature:  ([BLjava/lang/String;[B[Ljava/nio/Buffer;)B
- */
-JNIEXPORT jbyte JNICALL Java_polyregion_PolyregionRuntime_invokeByte
   (JNIEnv *, jclass, jbyteArray, jstring, jbyteArray, jobjectArray);
 
 /*

@@ -68,8 +68,8 @@ constexpr static ffi_type *toFFITpe(const runtime::Type &tpe) {
   }
 }
 
-thread_local static std::function<void *(size_t)> _alloc;
-EXPORT static void *polyregion::runtime::_malloc(size_t size) { return _alloc(size); }
+thread_local static std::function<void *(size_t)> threadLocalMallocFn;
+EXPORT static void *polyregion::runtime::_malloc(size_t size) { return threadLocalMallocFn(size); }
 
 class EXPORT ThreadLocalMallocFnMemoryManager : public llvm::SectionMemoryManager {
 
@@ -89,6 +89,7 @@ void polyregion::runtime::Object::invoke(const std::string &symbol,             
                                          runtime::TypedPointer rtn) const {
 
   static_assert(sizeof(uint8_t) == sizeof(char));
+  threadLocalMallocFn = alloc;
 
   ThreadLocalMallocFnMemoryManager mm;
   llvm::RuntimeDyld ld(mm, mm);

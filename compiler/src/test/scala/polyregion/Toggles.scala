@@ -8,7 +8,6 @@ object Toggles {
   final inline val InlineArraySuite  = true
 
   // ok
-
   final inline val BufferSuite      = false
   final inline val CaptureSuite     = false
   final inline val ControlFlowSuite = false

@@ -2,6 +2,7 @@ package polyregion;
 
 import polyregion.loader.Loader;
 
+import java.nio.ByteBuffer;
 import java.nio.Buffer;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -22,6 +23,14 @@ public class PolyregionRuntime {
 
   public static native void invoke(byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs);
 
+  public static native boolean invokeBool(byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs);
+
+  public static native byte invokeByte(byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs);
+
+  public static native char invokeChar(byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs);
+
+  public static native short invokeShort(byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs);
+
   public static native int invokeInt(byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs);
 
   public static native long invokeLong(byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs);
@@ -30,13 +39,7 @@ public class PolyregionRuntime {
 
   public static native double invokeDouble(byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs);
 
-  public static native short invokeShort(byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs);
-
-  public static native char invokeChar(byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs);
-
-  public static native byte invokeByte(byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs);
-
-  public static native Buffer invokeObject(
+  public static native ByteBuffer invokeObject(
       byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs, int rtnBytes);
 
   private static final Path RESOURCE_DIR = Loader.HOME_DIR.resolve(".polyregion");
@@ -53,8 +56,9 @@ public class PolyregionRuntime {
       Loader.loadDirect(
           Paths.get(
               //
-              // "/home/tom/polyregion/native/cmake-build-debug-clang/bindings/libjava-runtime.so"
-              "/home/tom/polyregion/native/cmake-build-release-clang/bindings/libjava-runtime.so"),
+              "/home/tom/polyregion/native/cmake-build-debug-clang/bindings/libjava-runtime.so"
+              // "/home/tom/polyregion/native/cmake-build-release-clang/bindings/libjava-runtime.so"
+              ),
           RESOURCE_DIR);
     }
   }

@@ -28,6 +28,7 @@ class InlineArraySuite extends BaseSuite {
 
       val aa = Buffer(1d)
       val m  = 2
+      println("Go !!!!")
       test(s"${C.runtimeClass}-fill-x$n=$expected") {
         val actual = doOffload {
 
@@ -47,20 +48,31 @@ class InlineArraySuite extends BaseSuite {
           unrollInclusive(n - 1)(i => xs(i) = expected)
           xs
         }
-        actual.foreach(x => assertValEquals(x, expected))
+        println(s"R=$actual")
+        // actual.foreach(x => assertValEquals(x, expected))
       }
     }
 
-    val a = ArrayBuffer(1)
-  // a.toSeq.type
+    // class A[B]()
+    // // type MkCol[A, C[_]] = Factory[A, C[A]]
+    // type MkCol = [a, c[_]] =>> Factory[a, c[a]]
+    // val x = summon[MkCol[Int, Array]]
+    // type MkCol2[C[_]] = [x] =>> Factory[x, C[x]]
+    // val x = summon[MkCol2[Array[Int][]] ]
+    // val m  = Buffer[Int]().to(Array)
 
-  class A[B]()
+    test("a") {
+      val rr = doOffload {
 
-  // type MkCol[A, C[_]] = Factory[A, C[A]]
-  type MkCol = [a, c[_]] =>> Factory[a, c[a]]
-  val x = summon[MkCol[Int, Array]]
+        val xs = Array.ofDim[Int](2)
+        xs(0) = 42
+        xs(1) = 43
+        xs
+      }
+      println(s"R=$rr")
+    }
 
-  assertInlineFill[Char](0, 0)
+  // assertInlineFill[Char](0, 0)
   // assertInlineFill[Byte](0, 0)
   // assertInlineFill[Short](0, 0)
   // assertInlineFill[Int](0, 0)

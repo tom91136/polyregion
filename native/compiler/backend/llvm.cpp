@@ -29,11 +29,11 @@ static llvm::Value *sizeOf(llvm::IRBuilder<> &B, llvm::LLVMContext &C, llvm::Typ
   // we want
   // %SizePtr = getelementptr %T, %T* null, i32 1
   // %Size = ptrtoint %T* %SizePtr to i32
-  auto sizePtr = B.CreateGEP(                                                 //
+  auto sizePtr = B.CreateGEP(                                                    //
       ptrTpe->getPointerElementType(),                                           //
       llvm::ConstantPointerNull::get(llvm::dyn_cast<llvm::PointerType>(ptrTpe)), //
-      llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 1),                   //
-      "sizePtr"                                                               //
+      llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 1),                      //
+      "sizePtr"                                                                  //
   );
   auto sizeVal = B.CreatePtrToInt(sizePtr, llvm::Type::getInt32Ty(C));
   return sizeVal;
@@ -470,10 +470,15 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
         B.SetInsertPoint(condExit);
       },
       [&](const Stmt::Return &x) {
-        if (std::holds_alternative<Type::Unit>(*tpe(x.value))) {
+        auto rtnTpe = tpe(x.value);
+        if (std::holds_alternative<Type::Unit>(*rtnTpe)) {
           B.CreateRetVoid();
         } else {
-          B.CreateRet( (mkExprValue(x.value, fn, "return")));
+          if (std::holds_alternative<TypeKind::Ref>(*kind(rtnTpe))) {
+            B.CreateRet((mkExprValue(x.value, fn, "return")));
+          } else {
+            B.CreateRet(conditionalLoad(mkExprValue(x.value, fn, "return")));
+          }
         }
       } //
 
@@ -496,11 +501,11 @@ LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> &module, const
   auto paramTpes = map_vec<Named, llvm::Type *>(fnTree.args, [&](auto &&named) { return mkTpe(named.tpe); });
 
   auto rtnTpe = variants::total(
-      *kind(fnTree.rtn),                                                                       //
-      [&](const TypeKind::Fractional &) -> llvm::Type * { return mkTpe(fnTree.rtn); },         //
-      [&](const TypeKind::Integral &) -> llvm::Type * { return mkTpe(fnTree.rtn); },           //
-      [&](const TypeKind::None &) -> llvm::Type * { return mkTpe(fnTree.rtn); },               //
-      [&](const TypeKind::Ref &) -> llvm::Type * { return mkTpe(fnTree.rtn); } //
+      *kind(fnTree.rtn),                                                               //
+      [&](const TypeKind::Fractional &) -> llvm::Type * { return mkTpe(fnTree.rtn); }, //
+      [&](const TypeKind::Integral &) -> llvm::Type * { return mkTpe(fnTree.rtn); },   //
+      [&](const TypeKind::None &) -> llvm::Type * { return mkTpe(fnTree.rtn); },       //
+      [&](const TypeKind::Ref &) -> llvm::Type * { return mkTpe(fnTree.rtn); }         //
   );
 
   auto fnTpe = llvm::FunctionType::get(rtnTpe, {paramTpes}, false);
