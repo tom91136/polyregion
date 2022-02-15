@@ -3,7 +3,6 @@ package polyregion;
 import polyregion.loader.Loader;
 
 import java.nio.ByteBuffer;
-import java.nio.Buffer;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -21,26 +20,35 @@ public class PolyregionRuntime {
   public static final byte TYPE_PTR = 9;
   public static final byte TYPE_VOID = 10;
 
-  public static native void invoke(byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs);
+  public static native void invoke( //
+      byte[] xs, String sym, byte[] argTys, ByteBuffer[] argPtrs);
 
-  public static native boolean invokeBool(byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs);
+  public static native boolean invokeBool( //
+      byte[] xs, String sym, byte[] argTys, ByteBuffer[] argPtrs);
 
-  public static native byte invokeByte(byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs);
+  public static native byte invokeByte( //
+      byte[] xs, String sym, byte[] argTys, ByteBuffer[] argPtrs);
 
-  public static native char invokeChar(byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs);
+  public static native char invokeChar( //
+      byte[] xs, String sym, byte[] argTys, ByteBuffer[] argPtrs);
 
-  public static native short invokeShort(byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs);
+  public static native short invokeShort( //
+      byte[] xs, String sym, byte[] argTys, ByteBuffer[] argPtrs);
 
-  public static native int invokeInt(byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs);
+  public static native int invokeInt( //
+      byte[] xs, String sym, byte[] argTys, ByteBuffer[] argPtrs);
 
-  public static native long invokeLong(byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs);
+  public static native long invokeLong( //
+      byte[] xs, String sym, byte[] argTys, ByteBuffer[] argPtrs);
 
-  public static native float invokeFloat(byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs);
+  public static native float invokeFloat( //
+      byte[] xs, String sym, byte[] argTys, ByteBuffer[] argPtrs);
 
-  public static native double invokeDouble(byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs);
+  public static native double invokeDouble( //
+      byte[] xs, String sym, byte[] argTys, ByteBuffer[] argPtrs);
 
-  public static native ByteBuffer invokeObject(
-      byte[] xs, String sym, byte[] argTys, Buffer[] argPtrs, int rtnBytes);
+  public static native ByteBuffer invokeObject( //
+      byte[] xs, String sym, byte[] argTys, ByteBuffer[] argPtrs, int rtnBytes);
 
   private static final Path RESOURCE_DIR = Loader.HOME_DIR.resolve(".polyregion");
   private static final AtomicBoolean loaded = new AtomicBoolean();

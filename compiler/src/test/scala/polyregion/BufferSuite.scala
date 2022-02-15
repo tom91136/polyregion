@@ -6,9 +6,11 @@ import scala.reflect.ClassTag
 
 class BufferSuite extends BaseSuite {
 
-  final val FillN  = 20
+  final val FillN = 20
 
-  inline def assertFill[A <: AnyVal](inline n: Int, inline expected: A)(using C: ClassTag[A]) = if (Toggles.BufferSuite) {
+  inline def assertFill[A <: AnyVal](inline n: Int, inline expected: A)(using C: ClassTag[A]) = if (
+    Toggles.BufferSuite
+  ) {
     test(s"${C.runtimeClass}-fill-x$n=$expected") {
       val xs = Buffer.ofDim[A](n)
       assertEquals(
@@ -16,6 +18,17 @@ class BufferSuite extends BaseSuite {
           unrollInclusive(n - 1)(i => xs(i) = expected)
         },
         ()
+      )
+      xs.foreach(assertValEquals(_, expected))
+    }
+    test(s"${C.runtimeClass}-fill-x-return$n=$expected") {
+      val xs = Buffer.ofDim[A](n)
+      // make sure we get the same backing buffer instance back
+      assert(
+        doOffload {
+          unrollInclusive(n - 1)(i => xs(i) = expected)
+          xs
+        }.backingBuffer eq xs.backingBuffer
       )
       xs.foreach(assertValEquals(_, expected))
     }
@@ -86,7 +99,6 @@ class BufferSuite extends BaseSuite {
 
   assertFill[Boolean](FillN, true)
   assertFill[Boolean](FillN, false)
-  
 
   // assertFill[Unit](())
 

@@ -318,8 +318,8 @@ object compiletime {
     } yield {
 
       println(s"Program=${c.program.length}")
-      println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
-      println(s"Messages=\n  ${c.messages}")
+      // println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
+      // println(s"Messages=\n  ${c.messages}")
 
       val programBytesExpr = Expr(c.program)
       val astBytesExpr     = Expr(serialisedAst)
@@ -442,7 +442,7 @@ object compiletime {
         }
         '{
           // println(s"mkBuffer: ${${ wrapped }}")
-          ${ wrapped }.buffer
+          ${ wrapped }.backingBuffer
         }
       }
       val captureTps = captures.map((_, t) => tpeAsRuntimeTpe(t))
@@ -463,29 +463,29 @@ object compiletime {
 
       val code = '{
 
-        val bytes = $programBytesExpr
+        val bytes      = $programBytesExpr
         val argTypes   = Array(${ Varargs(captureTps) }*)
         val argBuffers = Array(${ Varargs(captureExprs) }*)
 
         ${
           (prog.entry.rtn match {
-            case p.Type.Unit   => '{ PolyregionRuntime.invoke(bytes, $fnName, argTypes, argBuffers) } 
-            case p.Type.Float  => '{ PolyregionRuntime.invokeFloat(bytes, $fnName, argTypes, argBuffers) } 
-            case p.Type.Double => '{ PolyregionRuntime.invokeDouble(bytes, $fnName, argTypes, argBuffers) } 
-            case p.Type.Bool   => '{ PolyregionRuntime.invokeBool(bytes, $fnName, argTypes, argBuffers) } 
-            case p.Type.Byte   => '{ PolyregionRuntime.invokeByte(bytes, $fnName, argTypes, argBuffers) } 
-            case p.Type.Char   => '{ PolyregionRuntime.invokeChar(bytes, $fnName, argTypes, argBuffers) } 
-            case p.Type.Short  => '{ PolyregionRuntime.invokeShort(bytes, $fnName, argTypes, argBuffers) } 
-            case p.Type.Int    => '{ PolyregionRuntime.invokeInt(bytes, $fnName, argTypes, argBuffers) } 
-            case p.Type.Long   => '{ PolyregionRuntime.invokeLong(bytes, $fnName, argTypes, argBuffers) } 
+            case p.Type.Unit          => '{ PolyregionRuntime.invoke(bytes, $fnName, argTypes, argBuffers) }
+            case p.Type.Float         => '{ PolyregionRuntime.invokeFloat(bytes, $fnName, argTypes, argBuffers) }
+            case p.Type.Double        => '{ PolyregionRuntime.invokeDouble(bytes, $fnName, argTypes, argBuffers) }
+            case p.Type.Bool          => '{ PolyregionRuntime.invokeBool(bytes, $fnName, argTypes, argBuffers) }
+            case p.Type.Byte          => '{ PolyregionRuntime.invokeByte(bytes, $fnName, argTypes, argBuffers) }
+            case p.Type.Char          => '{ PolyregionRuntime.invokeChar(bytes, $fnName, argTypes, argBuffers) }
+            case p.Type.Short         => '{ PolyregionRuntime.invokeShort(bytes, $fnName, argTypes, argBuffers) }
+            case p.Type.Int           => '{ PolyregionRuntime.invokeInt(bytes, $fnName, argTypes, argBuffers) }
+            case p.Type.Long          => '{ PolyregionRuntime.invokeLong(bytes, $fnName, argTypes, argBuffers) }
             case x @ p.Type.Struct(_) => noComplexReturn(s"struct (${x.repr})")
             case p.Type.Array(comp) =>
               '{
-                val buffer = PolyregionRuntime.invokeObject(bytes, $fnName, argTypes, argBuffers, -1)
+                var buffer = PolyregionRuntime.invokeObject(bytes, $fnName, argTypes, argBuffers, -1)
                 ${
                   Type.of[A] match {
-                    case '[Buffer[a]] => wrap('{ buffer }, comp)  // passthrough
-                    case '[Array[a]]  => '{ ${ wrap('{ buffer }, comp) }.copyToArray } 
+                    case '[Buffer[a]] => wrap('{ buffer }, comp) // passthrough
+                    case '[Array[a]]  => '{ ${ wrap('{ buffer }, comp) }.copyToArray }
                     case m            => ???
                   }
                 }
@@ -494,7 +494,7 @@ object compiletime {
           }).asExprOf[A]
         }
       }
-      println("Code=" + code.show)
+      // println("Code=" + code.show)
       code
     }
 

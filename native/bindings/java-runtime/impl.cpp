@@ -14,27 +14,40 @@ static void throwGeneric(JNIEnv *env, const std::string &message) {
   }
 }
 
-jclass ByteBuffer;
-jmethodID ByteBuffer_allocateDirect;
+static jclass ByteBuffer;
+static jmethodID ByteBuffer_allocateDirect;
 
-static JavaVM *jvm; // safe to do
+static jclass bindGlobalClassRef(JNIEnv *env, const std::string &name) {
+  jclass localClsRef;
+  localClsRef = env->FindClass(name.c_str());
+  auto ref = (jclass)env->NewGlobalRef(localClsRef);
+  env->DeleteLocalRef(localClsRef);
+  return ref;
+}
 
 [[maybe_unused]] jint JNI_OnLoad(JavaVM *vm, void *reserved) {
 
   polyregion::runtime::init();
 
   JNIEnv *env;
-  vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_1);
+  if (vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_1) != JNI_OK) {
+    return JNI_ERR;
+  }
 
-  jint rs = env->GetJavaVM(&jvm);
-  assert(rs == JNI_OK);
-
-  ByteBuffer = env->FindClass("java/nio/ByteBuffer");
+  // pin the class as global ref so that method-ref remains usable
+  ByteBuffer = bindGlobalClassRef(env, "java/nio/ByteBuffer");
   if (!ByteBuffer) env->FatalError("ByteBuffer not found!");
+
   ByteBuffer_allocateDirect = env->GetStaticMethodID(ByteBuffer, "allocateDirect", "(I)Ljava/nio/ByteBuffer;");
   if (!ByteBuffer_allocateDirect) env->FatalError("ByteBuffer.allocateDirect not found!");
 
   return JNI_VERSION_1_1;
+}
+
+[[maybe_unused]] void JNI_OnUnload(JavaVM *vm, void *reserved) {
+  JNIEnv *env;
+  vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_1);
+  env->DeleteGlobalRef(ByteBuffer);
 }
 
 static std::string copyString(JNIEnv *env, jstring str) {
@@ -53,17 +66,15 @@ struct NIOBuffer {
       : buffer(buffer), ptr(env->GetDirectBufferAddress(buffer)), sizeInBytes(env->GetDirectBufferCapacity(buffer)) {}
 };
 
-static jobject allocDirect(JNIEnv *env, size_t bytes) {
-  std::cout << "ByteBuffer = " << ByteBuffer << ";ByteBuffer_allocateDirect =  " << ByteBuffer_allocateDirect
-            << std::endl;
-  return env->CallStaticObjectMethod(ByteBuffer, ByteBuffer_allocateDirect, bytes);
-}
-
-static JNIEnv *attach() {
-  JNIEnv *env;
-  jint rs = jvm->AttachCurrentThread(reinterpret_cast<void **>(&env), nullptr);
-  assert(rs == JNI_OK);
-  return env;
+static jobject allocDirect(JNIEnv *env, jint bytes) {
+  auto buffer = env->CallStaticObjectMethod(ByteBuffer, ByteBuffer_allocateDirect, bytes);
+  if (env->ExceptionCheck()) {
+    env->Throw(env->ExceptionOccurred());
+  }
+  if (!buffer) {
+    throwGeneric(env, "JNI ByteBuffer allocation of " + std::to_string(bytes) + " bytes returned NULL");
+  }
+  return buffer;
 }
 
 template <typename R>
@@ -116,9 +127,9 @@ static R invokeGeneric(JNIEnv *env, jbyteArray object, jbyteArray argTypes, jobj
     }
     env->ReleaseByteArrayElements(argTypes, argTypes_, JNI_ABORT);
 
-    return f(obj, params);
-
+    auto result = f(obj, params);
     env->ReleaseByteArrayElements(object, objData, JNI_ABORT);
+    return result;
   } catch (const std::exception &e) {
     throwGeneric(env, e.what());
     return {};
@@ -132,24 +143,21 @@ static R invokePrimitive(JNIEnv *env, //
     R rtnData{};
     runtime::TypedPointer rtn{RT, &rtnData};
 
-    auto allocator = [](size_t size) {
-      std::cerr << "[runtime][primitive] Allocating " << size << "bytes @ ";
-      auto env = attach();
-      auto buffer = allocDirect(env, size);
+    auto allocator = [&](size_t size) {
+      std::cerr << "[runtime][primitive] Allocating " << size << "bytes" << std::endl;
+      auto buffer = allocDirect(env, jint(size));
       auto ptr = env->GetDirectBufferAddress(buffer);
-      std::cerr << ptr << std::endl;
       return ptr;
     };
 
     obj.invoke(copyString(env, symbol), allocator, params, rtn);
-    std::cout << ">>>>>>>> " << rtnData << std::endl;
     return rtnData;
   });
 }
 
-jobject invokeObject(JNIEnv *env, //
-                     jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs, jint rtnBytes) {
-
+static jobject invokeObject(JNIEnv *env, //
+                            jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs,
+                            jint rtnBytes) {
   return invokeGeneric<jobject>(env, object, argTypes, argPtrs, [&](auto &obj, auto &params) -> jobject {
     // we got four possible cases when a function return pointers:
     //  1. Pointer to one of the argument   (LUT[ptr]==Some) => passthrough
@@ -166,18 +174,15 @@ jobject invokeObject(JNIEnv *env, //
     }
 
     // make our allocator store it as well
-    auto allocator = [&allocations](size_t size) {
-      std::cerr << "[runtime][obj rtn] Allocating " << size << " bytes @ ";
-      auto env = attach();
-      auto buffer = NIOBuffer(env, allocDirect(env, size));
+    auto allocator = [&](size_t size) {
+      std::cerr << "[runtime][obj rtn] Allocating " << size << "bytes" << std::endl;
+      auto buffer = NIOBuffer(env, allocDirect(env, jint(size)));
       allocations[buffer.ptr] = buffer;
-      std::cerr << buffer.ptr << std::endl;
       return buffer.ptr;
     };
 
     void *rtnData{};
     runtime::TypedPointer rtn{runtime::Type::Ptr, &rtnData};
-
     obj.invoke(copyString(env, symbol), allocator, params, rtn);
 
     if (auto r = allocations.find(rtnData); r != allocations.end()) {
@@ -186,12 +191,22 @@ jobject invokeObject(JNIEnv *env, //
         throwGeneric(env, "Bad size (" + std::to_string(rtnBytes) + ") for passthrough buffer of " +
                               std::to_string(buffer.sizeInBytes) + " bytes; use -1 for passthrough");
         return nullptr;
-      } else
+      } else {
+        if (env->ExceptionCheck()) {
+          env->Throw(env->ExceptionOccurred());
+        }
         return buffer.buffer;
-    } else { // not in the allocation table, copy the result
-      auto buffer = allocDirect(env, rtnBytes);
-      std::memcpy(env->GetDirectBufferAddress(buffer), rtnData, rtnBytes);
-      return buffer;
+      }
+
+    } else {
+      if (rtnBytes < 0) {
+        throwGeneric(env, "Bad size (" + std::to_string(rtnBytes) + ") for copy buffer");
+        return nullptr;
+      } else {
+        auto buffer = allocDirect(env, rtnBytes);
+        std::memcpy(env->GetDirectBufferAddress(buffer), rtnData, rtnBytes);
+        return buffer;
+      }
     }
   });
 }
