@@ -19,6 +19,13 @@ import net.openhft.affinity.AffinityLock
   )
   var size: Int = _
 
+@Param(
+    Array(
+    "10"
+    )
+  )
+  var iter : Int = _ 
+
   @Param(
     Array(
       "0.4"
@@ -94,49 +101,33 @@ class Stream {
 
   @Benchmark
   def streamJVM(data: StreamData) = {
-    val a   = AffinityLock.acquireLock(0)
+    // val a   = AffinityLock.acquireLock(0)
     var res = 0d
-    for (_ <- 0 until 10) {
-      // foreachJVM(0 until data.size)(i => data.c_(i) = data.a_(i))
-      // foreachJVM(0 until data.size)(i => data.b_(i) = data.scalar * data.c_(i))
-      // foreachJVM(0 until data.size)(i => data.c_(i) = data.a_(i) + data.b_(i))
-      // foreachJVM(0 until data.size)(i => data.a_(i) = data.b_(i) + (data.scalar * data.b_(i)))
-      // foreachJVM(0 until data.size)(i => data.a_(i) = data.b_(i) * data.scalar * data.b_(i))
-      res = {
-        var i   = 0
-        var acc = 0d
-        while (i < data.size) {
-          acc += data.a(i) + data.b(i)
-          i += 1
-        }
-        acc
-      }
+    for (_ <- 0 until data.iter) {
+      foreachJVMPar(0 until data.size)(i => data.c_(i) = data.a_(i))
+      foreachJVMPar(0 until data.size)(i => data.b_(i) = data.scalar * data.c_(i))
+      foreachJVMPar(0 until data.size)(i => data.c_(i) = data.a_(i) + data.b_(i))
+      foreachJVMPar(0 until data.size)(i => data.a_(i) = data.b_(i) + (data.scalar * data.b_(i)))
+      foreachJVMPar(0 until data.size)(i => data.a_(i) = data.b_(i) * data.scalar * data.b_(i))
+      res = reduceJVMPar[Double](0 until data.size)(res, i => data.a(i) + data.b(i))(_ + _)
     }
-    a.close()
+    // a.close()
     res
   }
 
   @Benchmark
   def streamPolyregion(data: StreamData) = {
-    val a   = AffinityLock.acquireLock(0)
+    // val a   = AffinityLock.acquireLock(0)
     var res = 0d
-    for (_ <- 0 until 10) {
-      // foreach(0 until data.size)(i => data.c(i) = data.a(i))
-      // foreach(0 until data.size)(i => data.b(i) = data.scalar * data.c(i))
-      // foreach(0 until data.size)(i => data.c(i) = data.a(i) + data.b(i))
-      // foreach(0 until data.size)(i => data.a(i) = data.b(i) + (data.scalar * data.b(i)))
-      // foreach(0 until data.size)(i => data.a(i) = data.b(i) * data.scalar * data.b(i))
-      res = offload {
-        var i   = 0
-        var acc = 0d
-        while (i < data.size) {
-          acc += data.a(i) + data.b(i)
-          i += 1
-        }
-        acc
-      }
+    for (_ <- 0 until data.iter) {
+      foreachPar(0 until data.size)(i => data.c(i) = data.a(i))
+      foreachPar(0 until data.size)(i => data.b(i) = data.scalar * data.c(i))
+      foreachPar(0 until data.size)(i => data.c(i) = data.a(i) + data.b(i))
+      foreachPar(0 until data.size)(i => data.a(i) = data.b(i) + (data.scalar * data.b(i)))
+      foreachPar(0 until data.size)(i => data.a(i) = data.b(i) * data.scalar * data.b(i))
+      res = reducePar[Double](0 until data.size)(res, i => data.a(i) + data.b(i))(_ + _)
     }
-    a.close()
+    // a.close()
     res
   }
 

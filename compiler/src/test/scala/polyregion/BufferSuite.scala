@@ -32,6 +32,19 @@ class BufferSuite extends BaseSuite {
       )
       xs.foreach(assertValEquals(_, expected))
     }
+
+    if (n != 0) {
+      test(s"${C.runtimeClass}-fill-x-return-at-0$n=$expected") {
+        val xs = Buffer.ofDim[A](n)
+        assertValEquals(
+          doOffload {
+            unrollInclusive(n - 1)(i => xs(i) = expected)
+            xs(0)
+          },
+          xs(0)
+        )
+      }
+    }
   }
 
   assertFill[Char](0, 0)
