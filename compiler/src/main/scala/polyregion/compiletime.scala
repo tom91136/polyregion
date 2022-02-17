@@ -318,8 +318,8 @@ object compiletime {
     } yield {
 
       println(s"Program=${c.program.length}")
-      // println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
-      // println(s"Messages=\n  ${c.messages}")
+      println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
+      println(s"Messages=\n  ${c.messages}")
 
       val programBytesExpr = Expr(c.program)
       val astBytesExpr     = Expr(serialisedAst)
@@ -479,21 +479,14 @@ object compiletime {
             case p.Type.Int    => '{ PolyregionRuntime.invokeInt(bytes, $fnName, argTypes, argBuffers) }
             case p.Type.Long   => '{ PolyregionRuntime.invokeLong(bytes, $fnName, argTypes, argBuffers) }
             case x @ p.Type.Struct(_) =>
-
-              val tc = Q.TypeRepr.of[NativeStruct].appliedTo(Q.TypeTree.of[A].tpe.widenTermRefByName)
-              val imp = Q.Implicits.search(tc) match {
-                case ok: Q.ImplicitSearchSuccess   => ok.tree.asExpr
-                case fail: Q.ImplicitSearchFailure => Q.report.errorAndAbort(fail.explanation)
+              val imp = Expr.summon[NativeStruct[A]] match {
+                case None    => Q.report.errorAndAbort(s"Cannot find NativeStruct for type ${Type.of[A]}")
+                case Some(x) => x
               }
-
               '{
                 var buffer = PolyregionRuntime.invokeObject(bytes, $fnName, argTypes, argBuffers, -1)
-                
-                Buffer.structViewAny(buffer)(using $imp.asInstanceOf[NativeStruct[Any]])(0).asInstanceOf[A]
-
+                Buffer.structViewAny[A](buffer)(using $imp)(0)
               }
-
-            // noComplexReturn(s"struct (${x.repr})")
             case p.Type.Array(comp) =>
               '{
                 var buffer = PolyregionRuntime.invokeObject(bytes, $fnName, argTypes, argBuffers, -1)

@@ -175,7 +175,7 @@ static jobject invokeObject(JNIEnv *env, //
 
     // make our allocator store it as well
     auto allocator = [&](size_t size) {
-      std::cerr << "[runtime][obj rtn] Allocating " << size << "bytes" << std::endl;
+      std::cerr << "[runtime][obj rtn] Allocating " << size << " bytes" << std::endl;
       auto buffer = NIOBuffer(env, allocDirect(env, jint(size)));
       allocations[buffer.ptr] = buffer;
       return buffer.ptr;

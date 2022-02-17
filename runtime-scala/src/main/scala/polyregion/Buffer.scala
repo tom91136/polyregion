@@ -191,8 +191,9 @@ object Buffer {
   }
 
 
-  def structViewAny(actual: java.nio.ByteBuffer)(using S: NativeStruct[Any]): Buffer[Any] = {
-    StructBuffer[Any](actual, actual) // zeros by default
+  def structViewAny[A](actual: java.nio.ByteBuffer)(using S: NativeStruct[A]): Buffer[A] = {
+    actual.order(java.nio.ByteOrder.nativeOrder())
+    StructBuffer[A](actual, actual) // zeros by default
   }
 
   def ofDim[A <: AnyVal](dim: Int)(using tag: ClassTag[A]): Buffer[A] = (tag.runtimeClass match {

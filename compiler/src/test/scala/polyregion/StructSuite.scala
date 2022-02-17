@@ -35,14 +35,14 @@ class StructSuite extends BaseSuite {
     def decode(buffer: java.nio.ByteBuffer, index: Int): A          = ???
   }
 
-    given NativeStruct[Char3]    = /* if (Toggles.StructSuite)*/ nativeStructOf  // else dummyNativeStruct
-    given NativeStruct[Byte3]    = /* if (Toggles.StructSuite)*/ nativeStructOf  // else dummyNativeStruct
-    given NativeStruct[Short3]   = /* if (Toggles.StructSuite)*/ nativeStructOf  // else dummyNativeStruct
-    given NativeStruct[Int3]     = /* if (Toggles.StructSuite)*/ nativeStructOf  // else dummyNativeStruct
-    given NativeStruct[Long3]    = /* if (Toggles.StructSuite)*/ nativeStructOf  // else dummyNativeStruct
-    given NativeStruct[Float3]   = /* if (Toggles.StructSuite)*/ nativeStructOf  // else dummyNativeStruct
-    given NativeStruct[Double3]  = /* if (Toggles.StructSuite)*/ nativeStructOf  // else dummyNativeStruct
-    given NativeStruct[Boolean3] = /* if (Toggles.StructSuite)*/ nativeStructOf  // else dummyNativeStruct
+  given NativeStruct[Char3]    = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
+  given NativeStruct[Byte3]    = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
+  given NativeStruct[Short3]   = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
+  given NativeStruct[Int3]     = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
+  given NativeStruct[Long3]    = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
+  given NativeStruct[Float3]   = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
+  given NativeStruct[Double3]  = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
+  given NativeStruct[Boolean3] = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
 
   inline def testExpr[A](inline name: String)(inline r: => A) = if (Toggles.StructSuite) {
     test(name)(assertOffload(r))
@@ -67,17 +67,17 @@ class StructSuite extends BaseSuite {
   // while(_i < 10){
   //
   //   if( !( _i > 5 ) ) continue;  # (i => i > 5)(_i)         =:= if(!f(_i))
-  //   
-  //   val _v' = (_i, _i+1)         # (x => (x, x+1))(_i)      =:= val _v' = f(_i) 
+  //
+  //   val _v' = (_i, _i+1)         # (x => (x, x+1))(_i)      =:= val _v' = f(_i)
   //
   //   val _jx = Array(_v',_v',_v') # (x => Array(x,x,x))(_v') =:= val _jx = f(_v')
   //   var _j = 0
   //   while(_j < 10) {
-  //     val v2 = jx(_j)  
+  //     val v2 = jx(_j)
   //     v2._1 + v2._2              # ((a,b) => a+b)(_v')      =:= f(_v')
-  //   } 
-  //   
-  //   
+  //   }
+  //
+  //
 
   //   _i+=1
   // }
@@ -159,23 +159,16 @@ class StructSuite extends BaseSuite {
     val a = 0.1f
     val b = 0.2f
     val c = 0.3f
-    testExpr("ctor-arg")(Float3(a, b, c))
+    testExpr("ctor-arg-return")(Float3(a, b, c))
   }
 
-  testExpr("ctor") {
+  testExpr("ctor-return") {
     val a = 0.1f
     val b = 0.2f
     val c = 0.3f
     Float3(a, b, c)
   }
 
-  // testExpr("param") {
-  //   val v = Vec3(0.0, 1.0, 2.0)
-  //   assertOffload {
-  //     val x = v // ref elision, otherwise we'll be passing x.a, x.b, x.c as params
-  //     x.a + x.b + x.c
-  //   }
-  // }
 
   // testExpr("nested-buffer-param") {
   //   val xs = Buffer.tabulate(10)(x =>

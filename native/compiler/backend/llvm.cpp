@@ -39,6 +39,12 @@ static llvm::Value *sizeOf(llvm::IRBuilder<> &B, llvm::LLVMContext &C, llvm::Typ
   return sizeVal;
 }
 
+static llvm::Value *invokeMalloc(llvm::IRBuilder<> &B, llvm::LLVMContext &C, llvm::Module *m, llvm::Value *size) {
+  auto ft = llvm::FunctionType::get(llvm::Type::getInt8Ty(C)->getPointerTo(), {llvm::Type::getInt32Ty(C)}, false);
+  auto f = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, "malloc", m);
+  return B.CreateCall(f, size);
+}
+
 std::pair<llvm::StructType *, LLVMAstTransformer::StructMemberTable>
 LLVMAstTransformer::mkStruct(const StructDef &def) {
   std::vector<llvm::Type *> types(def.members.size());
@@ -320,19 +326,11 @@ llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Functi
       [&](const Expr::Alloc &x) -> llvm::Value * { //
         auto size = mkRef(x.size);
         auto elemSize = sizeOf(B, C, mkTpe(x.witness));
-
-        auto ft = llvm::FunctionType::get(llvm::Type::getInt8Ty(C)->getPointerTo(), {llvm::Type::getInt32Ty(C)}, false);
-        auto f = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, "malloc", fn->getParent());
-
-        auto ptr = B.CreateCall(f, B.CreateMul(size, elemSize));
+        auto ptr = invokeMalloc(B, C, fn->getParent(), B.CreateMul(size, elemSize));
         return B.CreateBitCast(ptr, mkTpe(x.witness));
-
-        //        auto ptr = B.CreateAlloca(mkTpe(x.witness.component), size, "array_alloc_stack_ptr");
-        //        return ptr;
-      }
-
-  );
+      });
 }
+
 llvm::Value *LLVMAstTransformer::conditionalLoad(llvm::Value *rhs) {
   return rhs->getType()->isPointerTy() // deref the rhs if it's a pointer
              ? B.CreateLoad(rhs->getType()->getPointerElementType(), rhs)
@@ -364,15 +362,16 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
           if (rhs) {
             lut[x.name.symbol] = {x.name.tpe, *rhs};
           } else {
-            // otherwise, stack allocate the struct and return the pointer to that
+            // otherwise, heap allocate the struct and return the pointer to that
             llvm::Type *structPtrTy = mkTpe(x.name.tpe);
             if (!structPtrTy->isPointerTy()) {
               throw std::logic_error("The LLVM struct type `" + llvm_tostring(structPtrTy) +
                                      "` was not a pointer to the struct " + repr(x.name.tpe) +
                                      " in stmt:" + repr(stmt));
             }
-            auto ptr = B.CreateAlloca(structPtrTy->getPointerElementType(), nullptr, x.name.symbol + "_stack_ptr");
-            lut[x.name.symbol] = {x.name.tpe, ptr};
+            auto elemSize = sizeOf(B, C, structPtrTy);
+            auto ptr = invokeMalloc(B, C, fn->getParent(),  elemSize);
+            lut[x.name.symbol] = {x.name.tpe, B.CreateBitCast(ptr, structPtrTy)};
           }
         } else {
           // plain primitives now
