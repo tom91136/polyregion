@@ -178,44 +178,49 @@ object Buffer {
   def view[A <: AnyVal](actual: java.nio.ByteBuffer)(using tag: ClassTag[A]): Buffer[A] = {
     actual.order(java.nio.ByteOrder.nativeOrder())
     (tag.runtimeClass match {
-      case java.lang.Double.TYPE    => DoubleBuffer(actual, actual.asDoubleBuffer())
-      case java.lang.Float.TYPE     => FloatBuffer(actual, actual.asFloatBuffer())
-      case java.lang.Long.TYPE      => LongBuffer(actual, actual.asLongBuffer())
-      case java.lang.Integer.TYPE   => IntBuffer(actual, actual.asIntBuffer())
-      case java.lang.Short.TYPE     => ShortBuffer(actual, actual.asShortBuffer())
-      case java.lang.Character.TYPE => CharBuffer(actual, actual.asCharBuffer())
-      case java.lang.Boolean.TYPE   => BoolBuffer(actual, actual)
-      case java.lang.Byte.TYPE      => ByteBuffer(actual, actual)
-      case java.lang.Void.TYPE      => ByteBuffer(actual, actual)
+      case x if x.equals(java.lang.Double.TYPE)    => DoubleBuffer(actual, actual.asDoubleBuffer())
+      case x if x.equals(java.lang.Float.TYPE)     => FloatBuffer(actual, actual.asFloatBuffer())
+      case x if x.equals(java.lang.Long.TYPE)      => LongBuffer(actual, actual.asLongBuffer())
+      case x if x.equals(java.lang.Integer.TYPE)   => IntBuffer(actual, actual.asIntBuffer())
+      case x if x.equals(java.lang.Short.TYPE)     => ShortBuffer(actual, actual.asShortBuffer())
+      case x if x.equals(java.lang.Character.TYPE) => CharBuffer(actual, actual.asCharBuffer())
+      case x if x.equals(java.lang.Boolean.TYPE)   => BoolBuffer(actual, actual)
+      case x if x.equals(java.lang.Byte.TYPE)      => ByteBuffer(actual, actual)
+      case x if x.equals(java.lang.Void.TYPE)      => ByteBuffer(actual, actual)
     }).asInstanceOf[Buffer[A]]
   }
 
+
+  def structViewAny(actual: java.nio.ByteBuffer)(using S: NativeStruct[Any]): Buffer[Any] = {
+    StructBuffer[Any](actual, actual) // zeros by default
+  }
+
   def ofDim[A <: AnyVal](dim: Int)(using tag: ClassTag[A]): Buffer[A] = (tag.runtimeClass match {
-    case java.lang.Double.TYPE =>
+    case x if x.equals(java.lang.Double.TYPE) =>
       val buffer = alloc(java.lang.Double.BYTES, dim)
       DoubleBuffer(buffer, buffer.asDoubleBuffer())
-    case java.lang.Float.TYPE =>
+    case x if x.equals(java.lang.Float.TYPE) =>
       val buffer = alloc(java.lang.Float.BYTES, dim)
       FloatBuffer(buffer, buffer.asFloatBuffer())
-    case java.lang.Long.TYPE =>
+    case x if x.equals(java.lang.Long.TYPE) =>
       val buffer = alloc(java.lang.Long.BYTES, dim)
       LongBuffer(buffer, buffer.asLongBuffer())
-    case java.lang.Integer.TYPE =>
+    case x if x.equals(java.lang.Integer.TYPE) =>
       val buffer = alloc(java.lang.Integer.BYTES, dim)
       IntBuffer(buffer, buffer.asIntBuffer())
-    case java.lang.Short.TYPE =>
+    case x if x.equals(java.lang.Short.TYPE) =>
       val buffer = alloc(java.lang.Short.BYTES, dim)
       ShortBuffer(buffer, buffer.asShortBuffer())
-    case java.lang.Character.TYPE =>
+    case x if x.equals(java.lang.Character.TYPE) =>
       val buffer = alloc(java.lang.Character.BYTES, dim)
       CharBuffer(buffer, buffer.asCharBuffer())
-    case java.lang.Boolean.TYPE =>
+    case x if x.equals(java.lang.Boolean.TYPE) =>
       val buffer = alloc(java.lang.Byte.BYTES, dim)
       BoolBuffer(buffer, buffer)
-    case java.lang.Byte.TYPE =>
+    case x if x.equals(java.lang.Byte.TYPE) =>
       val buffer = alloc(java.lang.Byte.BYTES, dim)
       ByteBuffer(buffer, buffer)
-    case java.lang.Void.TYPE =>
+    case x if x.equals(java.lang.Void.TYPE) =>
       val buffer = alloc(0, dim)
       ByteBuffer(buffer, buffer)
   }).asInstanceOf[Buffer[A]]

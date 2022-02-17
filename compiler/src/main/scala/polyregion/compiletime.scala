@@ -469,16 +469,31 @@ object compiletime {
 
         ${
           (prog.entry.rtn match {
-            case p.Type.Unit          => '{ PolyregionRuntime.invoke(bytes, $fnName, argTypes, argBuffers) }
-            case p.Type.Float         => '{ PolyregionRuntime.invokeFloat(bytes, $fnName, argTypes, argBuffers) }
-            case p.Type.Double        => '{ PolyregionRuntime.invokeDouble(bytes, $fnName, argTypes, argBuffers) }
-            case p.Type.Bool          => '{ PolyregionRuntime.invokeBool(bytes, $fnName, argTypes, argBuffers) }
-            case p.Type.Byte          => '{ PolyregionRuntime.invokeByte(bytes, $fnName, argTypes, argBuffers) }
-            case p.Type.Char          => '{ PolyregionRuntime.invokeChar(bytes, $fnName, argTypes, argBuffers) }
-            case p.Type.Short         => '{ PolyregionRuntime.invokeShort(bytes, $fnName, argTypes, argBuffers) }
-            case p.Type.Int           => '{ PolyregionRuntime.invokeInt(bytes, $fnName, argTypes, argBuffers) }
-            case p.Type.Long          => '{ PolyregionRuntime.invokeLong(bytes, $fnName, argTypes, argBuffers) }
-            case x @ p.Type.Struct(_) => noComplexReturn(s"struct (${x.repr})")
+            case p.Type.Unit   => '{ PolyregionRuntime.invoke(bytes, $fnName, argTypes, argBuffers) }
+            case p.Type.Float  => '{ PolyregionRuntime.invokeFloat(bytes, $fnName, argTypes, argBuffers) }
+            case p.Type.Double => '{ PolyregionRuntime.invokeDouble(bytes, $fnName, argTypes, argBuffers) }
+            case p.Type.Bool   => '{ PolyregionRuntime.invokeBool(bytes, $fnName, argTypes, argBuffers) }
+            case p.Type.Byte   => '{ PolyregionRuntime.invokeByte(bytes, $fnName, argTypes, argBuffers) }
+            case p.Type.Char   => '{ PolyregionRuntime.invokeChar(bytes, $fnName, argTypes, argBuffers) }
+            case p.Type.Short  => '{ PolyregionRuntime.invokeShort(bytes, $fnName, argTypes, argBuffers) }
+            case p.Type.Int    => '{ PolyregionRuntime.invokeInt(bytes, $fnName, argTypes, argBuffers) }
+            case p.Type.Long   => '{ PolyregionRuntime.invokeLong(bytes, $fnName, argTypes, argBuffers) }
+            case x @ p.Type.Struct(_) =>
+
+              val tc = Q.TypeRepr.of[NativeStruct].appliedTo(Q.TypeTree.of[A].tpe.widenTermRefByName)
+              val imp = Q.Implicits.search(tc) match {
+                case ok: Q.ImplicitSearchSuccess   => ok.tree.asExpr
+                case fail: Q.ImplicitSearchFailure => Q.report.errorAndAbort(fail.explanation)
+              }
+
+              '{
+                var buffer = PolyregionRuntime.invokeObject(bytes, $fnName, argTypes, argBuffers, -1)
+                
+                Buffer.structViewAny(buffer)(using $imp.asInstanceOf[NativeStruct[Any]])(0).asInstanceOf[A]
+
+              }
+
+            // noComplexReturn(s"struct (${x.repr})")
             case p.Type.Array(comp) =>
               '{
                 var buffer = PolyregionRuntime.invokeObject(bytes, $fnName, argTypes, argBuffers, -1)
@@ -489,7 +504,6 @@ object compiletime {
                     case m            => ???
                   }
                 }
-
               }
           }).asExprOf[A]
         }

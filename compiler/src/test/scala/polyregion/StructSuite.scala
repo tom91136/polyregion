@@ -35,14 +35,14 @@ class StructSuite extends BaseSuite {
     def decode(buffer: java.nio.ByteBuffer, index: Int): A          = ???
   }
 
-  inline given NativeStruct[Char3]    = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
-  inline given NativeStruct[Byte3]    = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
-  inline given NativeStruct[Short3]   = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
-  inline given NativeStruct[Int3]     = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
-  inline given NativeStruct[Long3]    = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
-  inline given NativeStruct[Float3]   = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
-  inline given NativeStruct[Double3]  = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
-  inline given NativeStruct[Boolean3] = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
+    given NativeStruct[Char3]    = /* if (Toggles.StructSuite)*/ nativeStructOf  // else dummyNativeStruct
+    given NativeStruct[Byte3]    = /* if (Toggles.StructSuite)*/ nativeStructOf  // else dummyNativeStruct
+    given NativeStruct[Short3]   = /* if (Toggles.StructSuite)*/ nativeStructOf  // else dummyNativeStruct
+    given NativeStruct[Int3]     = /* if (Toggles.StructSuite)*/ nativeStructOf  // else dummyNativeStruct
+    given NativeStruct[Long3]    = /* if (Toggles.StructSuite)*/ nativeStructOf  // else dummyNativeStruct
+    given NativeStruct[Float3]   = /* if (Toggles.StructSuite)*/ nativeStructOf  // else dummyNativeStruct
+    given NativeStruct[Double3]  = /* if (Toggles.StructSuite)*/ nativeStructOf  // else dummyNativeStruct
+    given NativeStruct[Boolean3] = /* if (Toggles.StructSuite)*/ nativeStructOf  // else dummyNativeStruct
 
   inline def testExpr[A](inline name: String)(inline r: => A) = if (Toggles.StructSuite) {
     test(name)(assertOffload(r))

@@ -202,6 +202,16 @@ object TreeMapper {
         case q.Literal(q.CharConstant(v))         => (p.Term.CharConst(v), c !! term).pure
         case q.Literal(q.UnitConstant())          => (p.Term.UnitConst, c !! term).pure
         case r: q.Ref                             => (c !! r).mapRef(r)
+        case q.New(tptTree)                       =>
+          // println(s"New=${term.show}")
+
+          (c !! term).typer(tptTree.tpe).map {
+            case (_, tpe: p.Type, c) =>
+              val name = c.named(tpe)
+              (p.Term.Select(Nil, name), c ::= p.Stmt.Var(name, None))
+            case (_, tpe, c) => ???
+
+          }
         case ap @ q.Apply(_, _) =>
           val receiverSym        = p.Sym(ap.fun.symbol.fullName)
           val receiverOwner      = ap.fun.symbol.maybeOwner
@@ -237,6 +247,8 @@ object TreeMapper {
               case ((_, _), x)              => x :: Nil
             }
 
+            // _ = println(s"M=${funVal} (...) ")
+
             (argVals, c) <- c.down(ap).mapTerms(argsNoErasedTpe)
 
             argTerms <- argVals.traverse {
@@ -255,6 +267,26 @@ object TreeMapper {
 
             (ref, c) <- (argTerms, funVal) match {
               case (Nil, x) => (x, c).success.deferred
+              case (_, q.ErasedMethodVal(receiver: p.Term.Select, p.Sym("<init>" :: Nil), fnTpe)) => // ctor call
+                (for {
+                  sdef <- (fnTpe.rtn match {
+                    case p.Type.Struct(s) => c.clss.get(s)
+                    case _                => None
+                  }).failIfEmpty(s"No StructDef found for type ${fnTpe.rtn}")
+
+                  // we need to also make sure the ctor has no impl here
+                  // that would mean it's in the form of `class X(val field : Y)`
+                  structTpes  = sdef.members.map(_.tpe)
+                  ctorArgTpes = fnTpe.args
+
+                  _ <-
+                    if (structTpes == argTpes.map(_._2) && structTpes == ctorArgTpes) ().success
+                    else s"Ctor args mismatch, class expects ${structTpes}, fn expects ${ctorArgTpes} and was applied with ${argTpes}".fail
+
+                  setMemberExprs = sdef.members.zip(argTerms).map { (member, value) =>
+                    p.Stmt.Mut(p.Term.Select(receiver.init :+ receiver.last, member), p.Expr.Alias(value), copy = false)
+                  }
+                } yield (receiver, c.::=(setMemberExprs*))).deferred
               case (_, q.ErasedMethodVal(module: p.Sym, sym, tpe)) => // module call
                 val t = tpe.rtn match {
                   case t: p.Type => t
@@ -272,6 +304,7 @@ object TreeMapper {
                   case _         => ???
                 }
                 mkReturn(p.Expr.Invoke(sym, Some(receiver), argTerms, t), c).success.deferred
+
             }
 
           } yield (ref, c)

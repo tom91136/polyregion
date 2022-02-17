@@ -20,7 +20,7 @@ object Compiler {
       UnitExprElisionPass.eliminateUnitExpr
 
   private val GlobalOptPasses = //
-    FnInlinePass.inlineAll  // >>> FnPtrReturnToOutParamPass.transform
+    FnInlinePass.inlineAll // >>> FnPtrReturnToOutParamPass.transform
 
   def compileFn(using q: Quoted)(f: q.DefDef): Result[(q.FnDependencies, p.Function)] = {
     println(s" -> Compile dependent method: ${f.show}")
@@ -59,7 +59,13 @@ object Compiler {
         }
 
         val c = runOpt(preOptCtx.mapStmts(_ :+ p.Stmt.Return(p.Expr.Alias(term))))
-        (c.deps, mkFn((c.stmts)))
+
+        val deptFn = mkFn((c.stmts))
+
+        println(s"=====Dependent method ${deptFn.name} ====")
+        println(deptFn.repr)
+
+        (c.deps, deptFn)
     }).resolve
   }
 
@@ -143,11 +149,18 @@ object Compiler {
       _ = println(s"${closureFn.repr}")
 
       _ = println(s" -> dependent methods = ${deps.defs.size}")
+      _ = println(s" -> dependent structs = ${deps.clss.size}")
 
+      // TODO rewrite me, this looks like garbage
       (deps, fns) <- (deps, List.empty[p.Function]).iterateWhileM { case (deps, fs) =>
-        deps.defs.values.toList.traverse(compileFn(_)).map(xs => xs.unzip.bimap(_.combineAll, _ ++ fs))
+        deps.defs.values.toList
+          .traverse(compileFn(_))
+          .map(xs => xs.unzip.bimap(_.combineAll, _ ++ fs))
+          .map((d, f) => (d |+| deps.copy(defs = Map()), f))
       }(_._1.defs.nonEmpty)
+
       _ = println(s" -> dependent methods compiled")
+      _ = println(s" -> dependent structs = ${deps.clss.size}")
 
       allFns = closureFn :: fns
 

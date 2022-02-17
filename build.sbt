@@ -12,7 +12,11 @@ lazy val commonSettings = Seq(
       )
     )
   },
-  scalacOptions ++= Seq("-no-indent", "-Wconf:cat=other-match-analysis:error"),
+  scalacOptions ++= Seq(                     //
+    "-no-indent",                            //
+    "-Wconf:cat=other-match-analysis:error", //
+    // "-language:strictEquality"
+  ),
   scalafmtDetailedError := true,
   scalafmtFailOnErrors  := true
 )
@@ -60,7 +64,8 @@ lazy val compiler = project
     assemblyShadeRules  := loaderShadeRules,
     assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly")),
     scalacOptions ++= Seq(
-      "-Xmax-inlines", "64", // the AST has lots of leaf nodes and we use inline so bump the limit
+      "-Xmax-inlines",
+      "64",            // the AST has lots of leaf nodes and we use inline so bump the limit
       "-Yretain-trees" // XXX we need this so that the AST -> C++ conversion with partial ctors work
     ),
     libraryDependencies ++= Seq(
@@ -109,7 +114,7 @@ lazy val `benchmarks-scala` = project
     assembly / mainClass := Some("polyregion.benchmarks.Main"),
     scalacOptions ++= Seq("-Yretain-trees"),
     libraryDependencies ++= Seq(
-      "net.openhft"             % "affinity"                   % "3.20.0",
+      "net.openhft" % "affinity" % "3.20.0"
       // "org.scala-lang.modules" %% "scala-parallel-collections" % "1.0.4"
     )
   )
