@@ -423,6 +423,81 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::BNot &, const UnaryIntrinsicKind::BNot &) { return true; }
 
+std::ostream &BinaryLogicIntrinsicKind::operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Any &x) {
+  std::visit([&os](auto &&arg) { os << *arg; }, x);
+  return os;
+}
+bool BinaryLogicIntrinsicKind::operator==(const BinaryLogicIntrinsicKind::Base &, const BinaryLogicIntrinsicKind::Base &) { return true; }
+
+std::ostream &BinaryLogicIntrinsicKind::operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Eq &x) {
+  os << "Eq(";
+  os << ')';
+  return os;
+}
+bool BinaryLogicIntrinsicKind::operator==(const BinaryLogicIntrinsicKind::Eq &, const BinaryLogicIntrinsicKind::Eq &) { return true; }
+
+std::ostream &BinaryLogicIntrinsicKind::operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Neq &x) {
+  os << "Neq(";
+  os << ')';
+  return os;
+}
+bool BinaryLogicIntrinsicKind::operator==(const BinaryLogicIntrinsicKind::Neq &, const BinaryLogicIntrinsicKind::Neq &) { return true; }
+
+std::ostream &BinaryLogicIntrinsicKind::operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::And &x) {
+  os << "And(";
+  os << ')';
+  return os;
+}
+bool BinaryLogicIntrinsicKind::operator==(const BinaryLogicIntrinsicKind::And &, const BinaryLogicIntrinsicKind::And &) { return true; }
+
+std::ostream &BinaryLogicIntrinsicKind::operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Or &x) {
+  os << "Or(";
+  os << ')';
+  return os;
+}
+bool BinaryLogicIntrinsicKind::operator==(const BinaryLogicIntrinsicKind::Or &, const BinaryLogicIntrinsicKind::Or &) { return true; }
+
+std::ostream &BinaryLogicIntrinsicKind::operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Lte &x) {
+  os << "Lte(";
+  os << ')';
+  return os;
+}
+bool BinaryLogicIntrinsicKind::operator==(const BinaryLogicIntrinsicKind::Lte &, const BinaryLogicIntrinsicKind::Lte &) { return true; }
+
+std::ostream &BinaryLogicIntrinsicKind::operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Gte &x) {
+  os << "Gte(";
+  os << ')';
+  return os;
+}
+bool BinaryLogicIntrinsicKind::operator==(const BinaryLogicIntrinsicKind::Gte &, const BinaryLogicIntrinsicKind::Gte &) { return true; }
+
+std::ostream &BinaryLogicIntrinsicKind::operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Lt &x) {
+  os << "Lt(";
+  os << ')';
+  return os;
+}
+bool BinaryLogicIntrinsicKind::operator==(const BinaryLogicIntrinsicKind::Lt &, const BinaryLogicIntrinsicKind::Lt &) { return true; }
+
+std::ostream &BinaryLogicIntrinsicKind::operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Gt &x) {
+  os << "Gt(";
+  os << ')';
+  return os;
+}
+bool BinaryLogicIntrinsicKind::operator==(const BinaryLogicIntrinsicKind::Gt &, const BinaryLogicIntrinsicKind::Gt &) { return true; }
+
+std::ostream &UnaryLogicIntrinsicKind::operator<<(std::ostream &os, const UnaryLogicIntrinsicKind::Any &x) {
+  std::visit([&os](auto &&arg) { os << *arg; }, x);
+  return os;
+}
+bool UnaryLogicIntrinsicKind::operator==(const UnaryLogicIntrinsicKind::Base &, const UnaryLogicIntrinsicKind::Base &) { return true; }
+
+std::ostream &UnaryLogicIntrinsicKind::operator<<(std::ostream &os, const UnaryLogicIntrinsicKind::Not &x) {
+  os << "Not(";
+  os << ')';
+  return os;
+}
+bool UnaryLogicIntrinsicKind::operator==(const UnaryLogicIntrinsicKind::Not &, const UnaryLogicIntrinsicKind::Not &) { return true; }
+
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Any &x) {
   std::visit([&os](auto &&arg) { os << *arg; }, x);
   return os;
@@ -462,110 +537,42 @@ bool Expr::operator==(const Expr::BinaryIntrinsic &l, const Expr::BinaryIntrinsi
   return *l.lhs == *r.lhs && *l.rhs == *r.rhs && *l.kind == *r.kind && *l.rtn == *r.rtn;
 }
 
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::Not &x) {
-  os << "Not(";
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::UnaryLogicIntrinsic &x) {
+  os << "UnaryLogicIntrinsic(";
   os << x.lhs;
+  os << ',';
+  os << x.kind;
   os << ')';
   return os;
 }
-bool Expr::operator==(const Expr::Not &l, const Expr::Not &r) { 
-  return *l.lhs == *r.lhs;
+bool Expr::operator==(const Expr::UnaryLogicIntrinsic &l, const Expr::UnaryLogicIntrinsic &r) { 
+  return *l.lhs == *r.lhs && *l.kind == *r.kind;
 }
 
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::Eq &x) {
-  os << "Eq(";
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::BinaryLogicIntrinsic &x) {
+  os << "BinaryLogicIntrinsic(";
   os << x.lhs;
   os << ',';
   os << x.rhs;
+  os << ',';
+  os << x.kind;
   os << ')';
   return os;
 }
-bool Expr::operator==(const Expr::Eq &l, const Expr::Eq &r) { 
-  return *l.lhs == *r.lhs && *l.rhs == *r.rhs;
+bool Expr::operator==(const Expr::BinaryLogicIntrinsic &l, const Expr::BinaryLogicIntrinsic &r) { 
+  return *l.lhs == *r.lhs && *l.rhs == *r.rhs && *l.kind == *r.kind;
 }
 
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::Neq &x) {
-  os << "Neq(";
-  os << x.lhs;
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Cast &x) {
+  os << "Cast(";
+  os << x.from;
   os << ',';
-  os << x.rhs;
+  os << x.as;
   os << ')';
   return os;
 }
-bool Expr::operator==(const Expr::Neq &l, const Expr::Neq &r) { 
-  return *l.lhs == *r.lhs && *l.rhs == *r.rhs;
-}
-
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::And &x) {
-  os << "And(";
-  os << x.lhs;
-  os << ',';
-  os << x.rhs;
-  os << ')';
-  return os;
-}
-bool Expr::operator==(const Expr::And &l, const Expr::And &r) { 
-  return *l.lhs == *r.lhs && *l.rhs == *r.rhs;
-}
-
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::Or &x) {
-  os << "Or(";
-  os << x.lhs;
-  os << ',';
-  os << x.rhs;
-  os << ')';
-  return os;
-}
-bool Expr::operator==(const Expr::Or &l, const Expr::Or &r) { 
-  return *l.lhs == *r.lhs && *l.rhs == *r.rhs;
-}
-
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::Lte &x) {
-  os << "Lte(";
-  os << x.lhs;
-  os << ',';
-  os << x.rhs;
-  os << ')';
-  return os;
-}
-bool Expr::operator==(const Expr::Lte &l, const Expr::Lte &r) { 
-  return *l.lhs == *r.lhs && *l.rhs == *r.rhs;
-}
-
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::Gte &x) {
-  os << "Gte(";
-  os << x.lhs;
-  os << ',';
-  os << x.rhs;
-  os << ')';
-  return os;
-}
-bool Expr::operator==(const Expr::Gte &l, const Expr::Gte &r) { 
-  return *l.lhs == *r.lhs && *l.rhs == *r.rhs;
-}
-
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::Lt &x) {
-  os << "Lt(";
-  os << x.lhs;
-  os << ',';
-  os << x.rhs;
-  os << ')';
-  return os;
-}
-bool Expr::operator==(const Expr::Lt &l, const Expr::Lt &r) { 
-  return *l.lhs == *r.lhs && *l.rhs == *r.rhs;
-}
-
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::Gt &x) {
-  os << "Gt(";
-  os << x.lhs;
-  os << ',';
-  os << x.rhs;
-  os << ')';
-  return os;
-}
-bool Expr::operator==(const Expr::Gt &l, const Expr::Gt &r) { 
-  return *l.lhs == *r.lhs && *l.rhs == *r.rhs;
+bool Expr::operator==(const Expr::Cast &l, const Expr::Cast &r) { 
+  return *l.from == *r.from && *l.as == *r.as;
 }
 
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Alias &x) {
@@ -1032,6 +1039,50 @@ std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::BNot>::operator()
   std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::BNot");
   return seed;
 }
+std::size_t std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Base>::operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Base &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryLogicIntrinsicKind::Base");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Eq>::operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Eq &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryLogicIntrinsicKind::Eq");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Neq>::operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Neq &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryLogicIntrinsicKind::Neq");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::And>::operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::And &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryLogicIntrinsicKind::And");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Or>::operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Or &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryLogicIntrinsicKind::Or");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Lte>::operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Lte &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryLogicIntrinsicKind::Lte");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Gte>::operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Gte &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryLogicIntrinsicKind::Gte");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Lt>::operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Lt &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryLogicIntrinsicKind::Lt");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Gt>::operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Gt &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryLogicIntrinsicKind::Gt");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::UnaryLogicIntrinsicKind::Base>::operator()(const polyregion::polyast::UnaryLogicIntrinsicKind::Base &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryLogicIntrinsicKind::Base");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::UnaryLogicIntrinsicKind::Not>::operator()(const polyregion::polyast::UnaryLogicIntrinsicKind::Not &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryLogicIntrinsicKind::Not");
+  return seed;
+}
 std::size_t std::hash<polyregion::polyast::Expr::Base>::operator()(const polyregion::polyast::Expr::Base &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.tpe)>()(x.tpe);
   return seed;
@@ -1049,48 +1100,20 @@ std::size_t std::hash<polyregion::polyast::Expr::BinaryIntrinsic>::operator()(co
   seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Expr::Not>::operator()(const polyregion::polyast::Expr::Not &x) const noexcept {
+std::size_t std::hash<polyregion::polyast::Expr::UnaryLogicIntrinsic>::operator()(const polyregion::polyast::Expr::UnaryLogicIntrinsic &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.lhs)>()(x.lhs);
+  seed ^= std::hash<decltype(x.kind)>()(x.kind) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Expr::Eq>::operator()(const polyregion::polyast::Expr::Eq &x) const noexcept {
+std::size_t std::hash<polyregion::polyast::Expr::BinaryLogicIntrinsic>::operator()(const polyregion::polyast::Expr::BinaryLogicIntrinsic &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.lhs)>()(x.lhs);
   seed ^= std::hash<decltype(x.rhs)>()(x.rhs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.kind)>()(x.kind) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Expr::Neq>::operator()(const polyregion::polyast::Expr::Neq &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.lhs)>()(x.lhs);
-  seed ^= std::hash<decltype(x.rhs)>()(x.rhs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::Expr::And>::operator()(const polyregion::polyast::Expr::And &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.lhs)>()(x.lhs);
-  seed ^= std::hash<decltype(x.rhs)>()(x.rhs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::Expr::Or>::operator()(const polyregion::polyast::Expr::Or &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.lhs)>()(x.lhs);
-  seed ^= std::hash<decltype(x.rhs)>()(x.rhs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::Expr::Lte>::operator()(const polyregion::polyast::Expr::Lte &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.lhs)>()(x.lhs);
-  seed ^= std::hash<decltype(x.rhs)>()(x.rhs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::Expr::Gte>::operator()(const polyregion::polyast::Expr::Gte &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.lhs)>()(x.lhs);
-  seed ^= std::hash<decltype(x.rhs)>()(x.rhs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::Expr::Lt>::operator()(const polyregion::polyast::Expr::Lt &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.lhs)>()(x.lhs);
-  seed ^= std::hash<decltype(x.rhs)>()(x.rhs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::Expr::Gt>::operator()(const polyregion::polyast::Expr::Gt &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.lhs)>()(x.lhs);
-  seed ^= std::hash<decltype(x.rhs)>()(x.rhs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+std::size_t std::hash<polyregion::polyast::Expr::Cast>::operator()(const polyregion::polyast::Expr::Cast &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.from)>()(x.from);
+  seed ^= std::hash<decltype(x.as)>()(x.as) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Expr::Alias>::operator()(const polyregion::polyast::Expr::Alias &x) const noexcept {

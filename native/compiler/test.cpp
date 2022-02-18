@@ -205,3 +205,39 @@ TEST_CASE("array alloc", "[compiler]") {
   Program p(fn, {}, {});
   assertCompilationSucceeded(p);
 }
+
+TEST_CASE("cast expr", "[compiler]") {
+  polyregion_initialise();
+
+  Function fn(Sym({"foo"}), {}, Type::Int(),
+              {
+                  Var(Named("d", Type::Double()), {Cast(IntConst(10), Type::Double())}),
+                  Var(Named("i", Type::Int()), {Cast(Select({}, Named("d", Type::Double())), Type::Int())}),
+
+                  Return(Alias(Select({}, Named("i", Type::Int())))),
+              });
+
+  Program p(fn, {}, {});
+  assertCompilationSucceeded(p);
+}
+
+TEST_CASE("cast fp to int expr", "[compiler]") {
+  polyregion_initialise();
+
+//  auto from  = DoubleConst(0x1.fffffffffffffP+1023);
+    auto from  = FloatConst(0x1.fffffeP+127f);
+//    auto from  = IntConst( (1<<31)-1);
+  auto to  = Type::Int();
+
+  Function fn(Sym({"foo"}), {}, to,
+              {
+                  Var(Named("i", from.tpe), {Alias(from )}),
+
+                  Var(Named("d", to), {Cast(Select({}, Named("i", from.tpe)), to)}),
+
+                  Return(Alias(Select({}, Named("d", to)))),
+              });
+
+  Program p(fn, {}, {});
+  assertCompilationSucceeded(p);
+}

@@ -23,6 +23,19 @@ object IntrinsifyPass {
   private def intrinsifyInstanceApply(s: p.Stmt, idx: Int) = s.mapAccExpr[p.Sym] {
     case inv @ p.Expr.Invoke(sym, Some(recv), args, rtn) =>
       (sym.fqn, recv, args) match {
+
+        case (op :: Nil, x, Nil) if x.tpe.kind == p.TypeKind.Integral || x.tpe.kind == p.TypeKind.Fractional =>
+          val expr = op match {
+            case "toDouble" => p.Expr.Cast(recv, p.Type.Double)
+            case "toFloat"  => p.Expr.Cast(recv, p.Type.Float)
+            case "toLong"   => p.Expr.Cast(recv, p.Type.Long)
+            case "toInt"    => p.Expr.Cast(recv, p.Type.Int)
+            case "toShort"  => p.Expr.Cast(recv, p.Type.Short)
+            case "toChar"   => p.Expr.Cast(recv, p.Type.Char)
+            case "toByte"   => p.Expr.Cast(recv, p.Type.Byte)
+            case _          => ???
+          }
+          (expr, Nil, sym :: Nil)
         case (op :: Nil, x, y :: Nil)
             if (x.tpe == y.tpe) && (x.tpe.kind == p.TypeKind.Integral || x.tpe.kind == p.TypeKind.Fractional) =>
           val expr = op match {
@@ -31,14 +44,14 @@ object IntrinsifyPass {
             case "*"  => p.Expr.BinaryIntrinsic(x, y, p.BinaryIntrinsicKind.Mul, rtn)
             case "/"  => p.Expr.BinaryIntrinsic(x, y, p.BinaryIntrinsicKind.Div, rtn)
             case "%"  => p.Expr.BinaryIntrinsic(x, y, p.BinaryIntrinsicKind.Rem, rtn)
-            case "<"  => p.Expr.Lt(x, y)
-            case "<=" => p.Expr.Lte(x, y)
-            case ">"  => p.Expr.Gt(x, y)
-            case ">=" => p.Expr.Gte(x, y)
-            case "==" => p.Expr.Eq(x, y)
-            case "!=" => p.Expr.Neq(x, y)
-            case "&&" => p.Expr.And(x, y)
-            case "||" => p.Expr.Or(x, y)
+            case "<"  => p.Expr.BinaryLogicIntrinsic(x, y, p.BinaryLogicIntrinsicKind.Lt)
+            case "<=" => p.Expr.BinaryLogicIntrinsic(x, y, p.BinaryLogicIntrinsicKind.Lte)
+            case ">"  => p.Expr.BinaryLogicIntrinsic(x, y, p.BinaryLogicIntrinsicKind.Gt)
+            case ">=" => p.Expr.BinaryLogicIntrinsic(x, y, p.BinaryLogicIntrinsicKind.Gte)
+            case "==" => p.Expr.BinaryLogicIntrinsic(x, y, p.BinaryLogicIntrinsicKind.Eq)
+            case "!=" => p.Expr.BinaryLogicIntrinsic(x, y, p.BinaryLogicIntrinsicKind.Neq)
+            case "&&" => p.Expr.BinaryLogicIntrinsic(x, y, p.BinaryLogicIntrinsicKind.And)
+            case "||" => p.Expr.BinaryLogicIntrinsic(x, y, p.BinaryLogicIntrinsicKind.Or)
           }
           (expr, Nil, sym :: Nil)
         case ("apply" :: Nil, (xs @ p.Term.Select(_, p.Named(_, p.Type.Array(_)))), idx :: Nil)

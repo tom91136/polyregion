@@ -6,6 +6,9 @@ object Toggles {
   // need impl
   final inline val FunctionCallSuite = false
 
+  //
+  final inline val ApiSuite = false
+
   // ok
   final inline val InlineArraySuite = false
   final inline val BufferSuite      = false
@@ -14,8 +17,7 @@ object Toggles {
   final inline val MathSuite        = false
   final inline val ValueReturnSuite = false
   final inline val IntrinsicSuite   = false
-
-  // `new` needs fixing
-  final inline val StructSuite = true
+  final inline val StructSuite      = false
+  final inline val CastSuite        = false
 
 }

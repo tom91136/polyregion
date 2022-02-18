@@ -37,6 +37,8 @@ object CppCodeGen {
     :: deriveStruct[Term]()
     :: deriveStruct[BinaryIntrinsicKind]()
     :: deriveStruct[UnaryIntrinsicKind]()
+    :: deriveStruct[BinaryLogicIntrinsicKind]()
+    :: deriveStruct[UnaryLogicIntrinsicKind]()
     :: deriveStruct[Expr]()
     :: deriveStruct[Stmt]()
     :: deriveStruct[StructDef]()

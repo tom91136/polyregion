@@ -70,9 +70,17 @@ object PolyAst {
     case BAnd, BOr, BXor, BSL, BSR
   }
 
+  enum BinaryLogicIntrinsicKind {
+    case Eq, Neq, And, Or, Lte, Gte, Lt, Gt
+  }
+
   enum UnaryIntrinsicKind {
     case Sin, Cos, Tan, Abs
     case BNot
+  }
+
+  enum UnaryLogicIntrinsicKind {
+    case Not
   }
 
   enum Expr(val tpe: Type) derives MsgPack.Codec {
@@ -80,16 +88,10 @@ object PolyAst {
     case UnaryIntrinsic(lhs: Term, kind: UnaryIntrinsicKind, rtn: Type)              extends Expr(rtn)
     case BinaryIntrinsic(lhs: Term, rhs: Term, kind: BinaryIntrinsicKind, rtn: Type) extends Expr(rtn)
 
-    case Not(lhs: Term)            extends Expr(Type.Bool)
-    case Eq(lhs: Term, rhs: Term)  extends Expr(Type.Bool)
-    case Neq(lhs: Term, rhs: Term) extends Expr(Type.Bool)
-    case And(lhs: Term, rhs: Term) extends Expr(Type.Bool)
-    case Or(lhs: Term, rhs: Term)  extends Expr(Type.Bool)
-    case Lte(lhs: Term, rhs: Term) extends Expr(Type.Bool)
-    case Gte(lhs: Term, rhs: Term) extends Expr(Type.Bool)
-    case Lt(lhs: Term, rhs: Term)  extends Expr(Type.Bool)
-    case Gt(lhs: Term, rhs: Term)  extends Expr(Type.Bool)
+    case UnaryLogicIntrinsic(lhs: Term, kind: UnaryLogicIntrinsicKind)              extends Expr(Type.Bool)
+    case BinaryLogicIntrinsic(lhs: Term, rhs: Term, kind: BinaryLogicIntrinsicKind) extends Expr(Type.Bool)
 
+    case Cast(from: Term, as: Type)                                             extends Expr(as)
     case Alias(ref: Term)                                                       extends Expr(ref.tpe)
     case Invoke(name: Sym, receiver: Option[Term], args: List[Term], rtn: Type) extends Expr(rtn)
     case Index(lhs: Term.Select, idx: Term, component: Type)                    extends Expr(component)

@@ -78,9 +78,14 @@ object TreeMapper {
           (_, tpe, c) <- c.typer(i.tpe)
           // Ident is local, so if it is an erased closure type, we check the context first to see if we have a defined suspension
           // for types that are already part of PolyAst, we just use it as is
+          _ = println(s"sel ident $s = ${tpe}")
+
           (term, c) <- tpe match {
             case q.ErasedTpe(sym, true, Nil) => (q.ErasedModuleSelect(sym), c).success.deferred
-            case tpe: p.Type                 => (p.Term.Select(Nil, p.Named(name, tpe)), c).success.deferred
+            case tpe: p.Type =>
+              println(s"in2 = ${tpe} = ${i} = ${i.symbol}")
+
+              (p.Term.Select(Nil, p.Named(name, tpe)), c).success.deferred
             case ect: q.ErasedOpaqueTpe => // (selector...).(x:(X=>Y))
               val defdef = i.symbol.tree match {
                 case dd: q.DefDef => dd
@@ -107,22 +112,73 @@ object TreeMapper {
           }
         } yield (term, c)
       case (None, s @ q.Select(root, name)) =>
+        println(s"S=${s.symbol}")
         // we must stop at the PolyType boundary as we discard any unapplied type trees
 
         for {
           (_, tpe, c) <- c.typer(s.tpe)
-          // _ = println(s"sel $s = ${tpe}")
+          _ = println(s"sel $s = ${tpe}")
           // don't resolve root here yet
           (term, c) <- tpe match {
             case q.ErasedTpe(sym, true, Nil) => // <module>.(...)
               (q.ErasedModuleSelect(sym), c).success.deferred
             case tpe: p.Type => // (selector...).(x:Term)
+              println(s"X=$tpe")
+
+//              s.symbol.tree match {
+//                case dd: q.DefDef if dd.paramss.isEmpty => // no-arg def call (i.e. `object X{ def y :Int = ??? }` )
+//                  c.mapTerm(root).flatMap {
+//                    case (s@p.Term.Select(xs, x), c) =>
+//                      val sym      = p.Sym(dd.symbol.name)
+//                      val receiver = p.Sym(dd.symbol.maybeOwner.fullName)
+//                      (q.ErasedMethodVal(receiver, sym, ect), c.mark(receiver ~ sym, f)).success.deferred
+//
+//                      val fnSym = module :+ name
+//                      val named = c.named(tpe)
+//                      val c1    = c.mark(fnSym, dd) ::= p.Stmt.Var(named, Some(p.Expr.Invoke(fnSym, None, Nil, tpe)))
+//                      (p.Term.Select(Nil, named), c1).success.deferred
+//
+//
+//                      (p.Term.Select(xs :+ x, p.Named(name, tpe)), c).success.deferred
+//                    case (q.ErasedModuleSelect(module), c) =>
+//                      val fnSym = module :+ name
+//                      val named = c.named(tpe)
+//                      val c1    = c.mark(fnSym, dd) ::= p.Stmt.Var(named, Some(p.Expr.Invoke(fnSym, None, Nil, tpe)))
+//                      (p.Term.Select(Nil, named), c1).success.deferred
+//                    case _ => ???
+//                  }
+//                case dd: q.DefDef =>
+//                  c.fail(s"Unexpected arg list ${dd.paramss} for a 0-arg def")
+////                case vd: q.ValDef =>
+////                  c.fail(s"$vd via module ref ${module.repr} was not intercepted by the outliner!?")
+//                case bad =>
+//                  c.fail(s"Unsupported construct $bad")
+//              }
+
               c.mapTerm(root).flatMap {
-                case (p.Term.Select(xs, x), c) => (p.Term.Select(xs :+ x, p.Named(name, tpe)), c).success.deferred
+                case (select @ p.Term.Select(xs, x), c) =>
+                  s.symbol.tree match {
+                    case dd: q.DefDef if dd.paramss.isEmpty =>
+                      // no-arg instance def call (i.e. `x.toDouble` )
+                      val fnSym = p.Sym(s.symbol.name)
+                      val named = c.named(tpe)
+                      val c1    = c.mark(fnSym, dd) ::= p.Stmt.Var(named, Some(p.Expr.Invoke(fnSym, Some(select), Nil, tpe)))
+                      (p.Term.Select(Nil, named), c1).success.deferred
+                    case dd: q.DefDef =>
+                      c.fail(s"Unexpected arg list ${dd.paramss} for a 0-arg def via instance ref ${select.repr}")
+                    case vd: q.ValDef =>
+                      (p.Term.Select(xs :+ x, p.Named(name, tpe)), c).success.deferred
+
+//                      c.fail(s"$vd via instance ref ${select.repr} was not intercepted by the outliner!?")
+                    case bad => c.fail(s"Unsupported construct $bad via instance ref ${select.repr}")
+                  }
+
+//                  println(s"SEL s = ${s.symbol.tree}")
+
                 case (q.ErasedModuleSelect(module), c) =>
                   s.symbol.tree match {
-                    case dd: q.DefDef
-                        if dd.paramss.isEmpty => // no-arg module def call (i.e. `object X{ def y :Int = ??? }` )
+                    case dd: q.DefDef if dd.paramss.isEmpty =>
+                      // no-arg module def call (i.e. `object X{ def y :Int = ??? }` )
                       val fnSym = module :+ name
                       val named = c.named(tpe)
                       val c1    = c.mark(fnSym, dd) ::= p.Stmt.Var(named, Some(p.Expr.Invoke(fnSym, None, Nil, tpe)))
@@ -133,8 +189,18 @@ object TreeMapper {
                       c.fail(s"$vd via module ref ${module.repr} was not intercepted by the outliner!?")
                     case bad => c.fail(s"Unsupported construct $bad via module ref ${module.repr}")
                   }
-                case (bad, c) =>
-                  c.fail(s"Unexpected root of a select that leads to a non-erased ${tpe} type: ${bad}")
+                case (term : p.Term, c) =>
+                  s.symbol.tree match {
+                    case dd: q.DefDef if dd.paramss.isEmpty =>
+                      // no-arg instance def call (i.e. `1.toDouble` )
+                      val fnSym = p.Sym(s.symbol.name)
+                      val named = c.named(tpe)
+                      val c1    = c.mark(fnSym, dd) ::= p.Stmt.Var(named, Some(p.Expr.Invoke(fnSym, Some(term), Nil, tpe)))
+                      (p.Term.Select(Nil, named), c1).success.deferred
+                    case bad => c.fail(s"Unsupported construct $bad via instance ref ${term.repr}")
+                  }
+                case (bad  , c) =>
+                c.fail(s"Unexpected root of a select that leads to a non-erased ${tpe} type: ${bad}")
               }
             case ect: q.ErasedOpaqueTpe => // (selector...).(x:(X=>Y))
               val defdef = s.symbol.tree match {
@@ -281,7 +347,8 @@ object TreeMapper {
 
                   _ <-
                     if (structTpes == argTpes.map(_._2) && structTpes == ctorArgTpes) ().success
-                    else s"Ctor args mismatch, class expects ${structTpes}, fn expects ${ctorArgTpes} and was applied with ${argTpes}".fail
+                    else
+                      s"Ctor args mismatch, class expects ${structTpes}, fn expects ${ctorArgTpes} and was applied with ${argTpes}".fail
 
                   setMemberExprs = sdef.members.zip(argTerms).map { (member, value) =>
                     p.Stmt.Mut(p.Term.Select(receiver.init :+ receiver.last, member), p.Expr.Alias(value), copy = false)

@@ -12,24 +12,12 @@ namespace Expr {
 [[nodiscard]] EXPORT json unaryintrinsic_to_json(const Expr::UnaryIntrinsic &);
 [[nodiscard]] EXPORT Expr::BinaryIntrinsic binaryintrinsic_from_json(const json &);
 [[nodiscard]] EXPORT json binaryintrinsic_to_json(const Expr::BinaryIntrinsic &);
-[[nodiscard]] EXPORT Expr::Not not_from_json(const json &);
-[[nodiscard]] EXPORT json not_to_json(const Expr::Not &);
-[[nodiscard]] EXPORT Expr::Eq eq_from_json(const json &);
-[[nodiscard]] EXPORT json eq_to_json(const Expr::Eq &);
-[[nodiscard]] EXPORT Expr::Neq neq_from_json(const json &);
-[[nodiscard]] EXPORT json neq_to_json(const Expr::Neq &);
-[[nodiscard]] EXPORT Expr::And and_from_json(const json &);
-[[nodiscard]] EXPORT json and_to_json(const Expr::And &);
-[[nodiscard]] EXPORT Expr::Or or_from_json(const json &);
-[[nodiscard]] EXPORT json or_to_json(const Expr::Or &);
-[[nodiscard]] EXPORT Expr::Lte lte_from_json(const json &);
-[[nodiscard]] EXPORT json lte_to_json(const Expr::Lte &);
-[[nodiscard]] EXPORT Expr::Gte gte_from_json(const json &);
-[[nodiscard]] EXPORT json gte_to_json(const Expr::Gte &);
-[[nodiscard]] EXPORT Expr::Lt lt_from_json(const json &);
-[[nodiscard]] EXPORT json lt_to_json(const Expr::Lt &);
-[[nodiscard]] EXPORT Expr::Gt gt_from_json(const json &);
-[[nodiscard]] EXPORT json gt_to_json(const Expr::Gt &);
+[[nodiscard]] EXPORT Expr::UnaryLogicIntrinsic unarylogicintrinsic_from_json(const json &);
+[[nodiscard]] EXPORT json unarylogicintrinsic_to_json(const Expr::UnaryLogicIntrinsic &);
+[[nodiscard]] EXPORT Expr::BinaryLogicIntrinsic binarylogicintrinsic_from_json(const json &);
+[[nodiscard]] EXPORT json binarylogicintrinsic_to_json(const Expr::BinaryLogicIntrinsic &);
+[[nodiscard]] EXPORT Expr::Cast cast_from_json(const json &);
+[[nodiscard]] EXPORT json cast_to_json(const Expr::Cast &);
 [[nodiscard]] EXPORT Expr::Alias alias_from_json(const json &);
 [[nodiscard]] EXPORT json alias_to_json(const Expr::Alias &);
 [[nodiscard]] EXPORT Expr::Invoke invoke_from_json(const json &);
@@ -41,6 +29,26 @@ namespace Expr {
 [[nodiscard]] EXPORT Expr::Any any_from_json(const json &);
 [[nodiscard]] EXPORT json any_to_json(const Expr::Any &);
 } // namespace Expr
+namespace BinaryLogicIntrinsicKind { 
+[[nodiscard]] EXPORT BinaryLogicIntrinsicKind::Eq eq_from_json(const json &);
+[[nodiscard]] EXPORT json eq_to_json(const BinaryLogicIntrinsicKind::Eq &);
+[[nodiscard]] EXPORT BinaryLogicIntrinsicKind::Neq neq_from_json(const json &);
+[[nodiscard]] EXPORT json neq_to_json(const BinaryLogicIntrinsicKind::Neq &);
+[[nodiscard]] EXPORT BinaryLogicIntrinsicKind::And and_from_json(const json &);
+[[nodiscard]] EXPORT json and_to_json(const BinaryLogicIntrinsicKind::And &);
+[[nodiscard]] EXPORT BinaryLogicIntrinsicKind::Or or_from_json(const json &);
+[[nodiscard]] EXPORT json or_to_json(const BinaryLogicIntrinsicKind::Or &);
+[[nodiscard]] EXPORT BinaryLogicIntrinsicKind::Lte lte_from_json(const json &);
+[[nodiscard]] EXPORT json lte_to_json(const BinaryLogicIntrinsicKind::Lte &);
+[[nodiscard]] EXPORT BinaryLogicIntrinsicKind::Gte gte_from_json(const json &);
+[[nodiscard]] EXPORT json gte_to_json(const BinaryLogicIntrinsicKind::Gte &);
+[[nodiscard]] EXPORT BinaryLogicIntrinsicKind::Lt lt_from_json(const json &);
+[[nodiscard]] EXPORT json lt_to_json(const BinaryLogicIntrinsicKind::Lt &);
+[[nodiscard]] EXPORT BinaryLogicIntrinsicKind::Gt gt_from_json(const json &);
+[[nodiscard]] EXPORT json gt_to_json(const BinaryLogicIntrinsicKind::Gt &);
+[[nodiscard]] EXPORT BinaryLogicIntrinsicKind::Any any_from_json(const json &);
+[[nodiscard]] EXPORT json any_to_json(const BinaryLogicIntrinsicKind::Any &);
+} // namespace BinaryLogicIntrinsicKind
 namespace Stmt { 
 [[nodiscard]] EXPORT Stmt::Comment comment_from_json(const json &);
 [[nodiscard]] EXPORT json comment_to_json(const Stmt::Comment &);
@@ -77,6 +85,12 @@ namespace UnaryIntrinsicKind {
 [[nodiscard]] EXPORT UnaryIntrinsicKind::Any any_from_json(const json &);
 [[nodiscard]] EXPORT json any_to_json(const UnaryIntrinsicKind::Any &);
 } // namespace UnaryIntrinsicKind
+namespace UnaryLogicIntrinsicKind { 
+[[nodiscard]] EXPORT UnaryLogicIntrinsicKind::Not not_from_json(const json &);
+[[nodiscard]] EXPORT json not_to_json(const UnaryLogicIntrinsicKind::Not &);
+[[nodiscard]] EXPORT UnaryLogicIntrinsicKind::Any any_from_json(const json &);
+[[nodiscard]] EXPORT json any_to_json(const UnaryLogicIntrinsicKind::Any &);
+} // namespace UnaryLogicIntrinsicKind
 namespace TypeKind { 
 [[nodiscard]] EXPORT TypeKind::None none_from_json(const json &);
 [[nodiscard]] EXPORT json none_to_json(const TypeKind::None &);

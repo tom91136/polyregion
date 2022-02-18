@@ -494,11 +494,8 @@ struct EXPORT BNot : UnaryIntrinsicKind::Base {
   EXPORT friend bool operator==(const UnaryIntrinsicKind::BNot &, const UnaryIntrinsicKind::BNot &);
 };
 } // namespace UnaryIntrinsicKind
-namespace Expr { 
+namespace BinaryLogicIntrinsicKind { 
 
-struct UnaryIntrinsic;
-struct BinaryIntrinsic;
-struct Not;
 struct Eq;
 struct Neq;
 struct And;
@@ -507,11 +504,100 @@ struct Lte;
 struct Gte;
 struct Lt;
 struct Gt;
+using Any = Alternative<Eq, Neq, And, Or, Lte, Gte, Lt, Gt>;
+struct EXPORT Base {
+  protected:
+  Base() = default;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Any &);
+  EXPORT friend bool operator==(const BinaryLogicIntrinsicKind::Base &, const BinaryLogicIntrinsicKind::Base &);
+};
+
+struct EXPORT Eq : BinaryLogicIntrinsicKind::Base {
+  Eq() noexcept : BinaryLogicIntrinsicKind::Base() {}
+  EXPORT operator Any() const { return std::make_shared<Eq>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Eq &);
+  EXPORT friend bool operator==(const BinaryLogicIntrinsicKind::Eq &, const BinaryLogicIntrinsicKind::Eq &);
+};
+
+struct EXPORT Neq : BinaryLogicIntrinsicKind::Base {
+  Neq() noexcept : BinaryLogicIntrinsicKind::Base() {}
+  EXPORT operator Any() const { return std::make_shared<Neq>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Neq &);
+  EXPORT friend bool operator==(const BinaryLogicIntrinsicKind::Neq &, const BinaryLogicIntrinsicKind::Neq &);
+};
+
+struct EXPORT And : BinaryLogicIntrinsicKind::Base {
+  And() noexcept : BinaryLogicIntrinsicKind::Base() {}
+  EXPORT operator Any() const { return std::make_shared<And>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::And &);
+  EXPORT friend bool operator==(const BinaryLogicIntrinsicKind::And &, const BinaryLogicIntrinsicKind::And &);
+};
+
+struct EXPORT Or : BinaryLogicIntrinsicKind::Base {
+  Or() noexcept : BinaryLogicIntrinsicKind::Base() {}
+  EXPORT operator Any() const { return std::make_shared<Or>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Or &);
+  EXPORT friend bool operator==(const BinaryLogicIntrinsicKind::Or &, const BinaryLogicIntrinsicKind::Or &);
+};
+
+struct EXPORT Lte : BinaryLogicIntrinsicKind::Base {
+  Lte() noexcept : BinaryLogicIntrinsicKind::Base() {}
+  EXPORT operator Any() const { return std::make_shared<Lte>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Lte &);
+  EXPORT friend bool operator==(const BinaryLogicIntrinsicKind::Lte &, const BinaryLogicIntrinsicKind::Lte &);
+};
+
+struct EXPORT Gte : BinaryLogicIntrinsicKind::Base {
+  Gte() noexcept : BinaryLogicIntrinsicKind::Base() {}
+  EXPORT operator Any() const { return std::make_shared<Gte>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Gte &);
+  EXPORT friend bool operator==(const BinaryLogicIntrinsicKind::Gte &, const BinaryLogicIntrinsicKind::Gte &);
+};
+
+struct EXPORT Lt : BinaryLogicIntrinsicKind::Base {
+  Lt() noexcept : BinaryLogicIntrinsicKind::Base() {}
+  EXPORT operator Any() const { return std::make_shared<Lt>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Lt &);
+  EXPORT friend bool operator==(const BinaryLogicIntrinsicKind::Lt &, const BinaryLogicIntrinsicKind::Lt &);
+};
+
+struct EXPORT Gt : BinaryLogicIntrinsicKind::Base {
+  Gt() noexcept : BinaryLogicIntrinsicKind::Base() {}
+  EXPORT operator Any() const { return std::make_shared<Gt>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Gt &);
+  EXPORT friend bool operator==(const BinaryLogicIntrinsicKind::Gt &, const BinaryLogicIntrinsicKind::Gt &);
+};
+} // namespace BinaryLogicIntrinsicKind
+namespace UnaryLogicIntrinsicKind { 
+
+struct Not;
+using Any = Alternative<Not>;
+struct EXPORT Base {
+  protected:
+  Base() = default;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryLogicIntrinsicKind::Any &);
+  EXPORT friend bool operator==(const UnaryLogicIntrinsicKind::Base &, const UnaryLogicIntrinsicKind::Base &);
+};
+
+struct EXPORT Not : UnaryLogicIntrinsicKind::Base {
+  Not() noexcept : UnaryLogicIntrinsicKind::Base() {}
+  EXPORT operator Any() const { return std::make_shared<Not>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryLogicIntrinsicKind::Not &);
+  EXPORT friend bool operator==(const UnaryLogicIntrinsicKind::Not &, const UnaryLogicIntrinsicKind::Not &);
+};
+} // namespace UnaryLogicIntrinsicKind
+namespace Expr { 
+
+struct UnaryIntrinsic;
+struct BinaryIntrinsic;
+struct UnaryLogicIntrinsic;
+struct BinaryLogicIntrinsic;
+struct Cast;
 struct Alias;
 struct Invoke;
 struct Index;
 struct Alloc;
-using Any = Alternative<UnaryIntrinsic, BinaryIntrinsic, Not, Eq, Neq, And, Or, Lte, Gte, Lt, Gt, Alias, Invoke, Index, Alloc>;
+using Any = Alternative<UnaryIntrinsic, BinaryIntrinsic, UnaryLogicIntrinsic, BinaryLogicIntrinsic, Cast, Alias, Invoke, Index, Alloc>;
 struct EXPORT Base {
   Type::Any tpe;
   protected:
@@ -542,84 +628,32 @@ struct EXPORT BinaryIntrinsic : Expr::Base {
   EXPORT friend bool operator==(const Expr::BinaryIntrinsic &, const Expr::BinaryIntrinsic &);
 };
 
-struct EXPORT Not : Expr::Base {
+struct EXPORT UnaryLogicIntrinsic : Expr::Base {
   Term::Any lhs;
-  explicit Not(Term::Any lhs) noexcept : Expr::Base(Type::Bool()), lhs(std::move(lhs)) {}
-  EXPORT operator Any() const { return std::make_shared<Not>(*this); };
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Not &);
-  EXPORT friend bool operator==(const Expr::Not &, const Expr::Not &);
+  UnaryLogicIntrinsicKind::Any kind;
+  UnaryLogicIntrinsic(Term::Any lhs, UnaryLogicIntrinsicKind::Any kind) noexcept : Expr::Base(Type::Bool()), lhs(std::move(lhs)), kind(std::move(kind)) {}
+  EXPORT operator Any() const { return std::make_shared<UnaryLogicIntrinsic>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::UnaryLogicIntrinsic &);
+  EXPORT friend bool operator==(const Expr::UnaryLogicIntrinsic &, const Expr::UnaryLogicIntrinsic &);
 };
 
-struct EXPORT Eq : Expr::Base {
+struct EXPORT BinaryLogicIntrinsic : Expr::Base {
   Term::Any lhs;
   Term::Any rhs;
-  Eq(Term::Any lhs, Term::Any rhs) noexcept : Expr::Base(Type::Bool()), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
-  EXPORT operator Any() const { return std::make_shared<Eq>(*this); };
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Eq &);
-  EXPORT friend bool operator==(const Expr::Eq &, const Expr::Eq &);
+  BinaryLogicIntrinsicKind::Any kind;
+  BinaryLogicIntrinsic(Term::Any lhs, Term::Any rhs, BinaryLogicIntrinsicKind::Any kind) noexcept : Expr::Base(Type::Bool()), lhs(std::move(lhs)), rhs(std::move(rhs)), kind(std::move(kind)) {}
+  EXPORT operator Any() const { return std::make_shared<BinaryLogicIntrinsic>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::BinaryLogicIntrinsic &);
+  EXPORT friend bool operator==(const Expr::BinaryLogicIntrinsic &, const Expr::BinaryLogicIntrinsic &);
 };
 
-struct EXPORT Neq : Expr::Base {
-  Term::Any lhs;
-  Term::Any rhs;
-  Neq(Term::Any lhs, Term::Any rhs) noexcept : Expr::Base(Type::Bool()), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
-  EXPORT operator Any() const { return std::make_shared<Neq>(*this); };
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Neq &);
-  EXPORT friend bool operator==(const Expr::Neq &, const Expr::Neq &);
-};
-
-struct EXPORT And : Expr::Base {
-  Term::Any lhs;
-  Term::Any rhs;
-  And(Term::Any lhs, Term::Any rhs) noexcept : Expr::Base(Type::Bool()), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
-  EXPORT operator Any() const { return std::make_shared<And>(*this); };
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::And &);
-  EXPORT friend bool operator==(const Expr::And &, const Expr::And &);
-};
-
-struct EXPORT Or : Expr::Base {
-  Term::Any lhs;
-  Term::Any rhs;
-  Or(Term::Any lhs, Term::Any rhs) noexcept : Expr::Base(Type::Bool()), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
-  EXPORT operator Any() const { return std::make_shared<Or>(*this); };
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Or &);
-  EXPORT friend bool operator==(const Expr::Or &, const Expr::Or &);
-};
-
-struct EXPORT Lte : Expr::Base {
-  Term::Any lhs;
-  Term::Any rhs;
-  Lte(Term::Any lhs, Term::Any rhs) noexcept : Expr::Base(Type::Bool()), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
-  EXPORT operator Any() const { return std::make_shared<Lte>(*this); };
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Lte &);
-  EXPORT friend bool operator==(const Expr::Lte &, const Expr::Lte &);
-};
-
-struct EXPORT Gte : Expr::Base {
-  Term::Any lhs;
-  Term::Any rhs;
-  Gte(Term::Any lhs, Term::Any rhs) noexcept : Expr::Base(Type::Bool()), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
-  EXPORT operator Any() const { return std::make_shared<Gte>(*this); };
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Gte &);
-  EXPORT friend bool operator==(const Expr::Gte &, const Expr::Gte &);
-};
-
-struct EXPORT Lt : Expr::Base {
-  Term::Any lhs;
-  Term::Any rhs;
-  Lt(Term::Any lhs, Term::Any rhs) noexcept : Expr::Base(Type::Bool()), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
-  EXPORT operator Any() const { return std::make_shared<Lt>(*this); };
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Lt &);
-  EXPORT friend bool operator==(const Expr::Lt &, const Expr::Lt &);
-};
-
-struct EXPORT Gt : Expr::Base {
-  Term::Any lhs;
-  Term::Any rhs;
-  Gt(Term::Any lhs, Term::Any rhs) noexcept : Expr::Base(Type::Bool()), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
-  EXPORT operator Any() const { return std::make_shared<Gt>(*this); };
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Gt &);
-  EXPORT friend bool operator==(const Expr::Gt &, const Expr::Gt &);
+struct EXPORT Cast : Expr::Base {
+  Term::Any from;
+  Type::Any as;
+  Cast(Term::Any from, Type::Any as) noexcept : Expr::Base(as), from(std::move(from)), as(std::move(as)) {}
+  EXPORT operator Any() const { return std::make_shared<Cast>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Cast &);
+  EXPORT friend bool operator==(const Expr::Cast &, const Expr::Cast &);
 };
 
 struct EXPORT Alias : Expr::Base {
@@ -953,6 +987,39 @@ template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Abs> {
 template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::BNot> {
   std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::BNot &) const noexcept;
 };
+template <> struct std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Base> {
+  std::size_t operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Base &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Eq> {
+  std::size_t operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Eq &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Neq> {
+  std::size_t operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Neq &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::And> {
+  std::size_t operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::And &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Or> {
+  std::size_t operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Or &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Lte> {
+  std::size_t operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Lte &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Gte> {
+  std::size_t operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Gte &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Lt> {
+  std::size_t operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Lt &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Gt> {
+  std::size_t operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Gt &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::UnaryLogicIntrinsicKind::Base> {
+  std::size_t operator()(const polyregion::polyast::UnaryLogicIntrinsicKind::Base &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::UnaryLogicIntrinsicKind::Not> {
+  std::size_t operator()(const polyregion::polyast::UnaryLogicIntrinsicKind::Not &) const noexcept;
+};
 template <> struct std::hash<polyregion::polyast::Expr::Base> {
   std::size_t operator()(const polyregion::polyast::Expr::Base &) const noexcept;
 };
@@ -962,32 +1029,14 @@ template <> struct std::hash<polyregion::polyast::Expr::UnaryIntrinsic> {
 template <> struct std::hash<polyregion::polyast::Expr::BinaryIntrinsic> {
   std::size_t operator()(const polyregion::polyast::Expr::BinaryIntrinsic &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Expr::Not> {
-  std::size_t operator()(const polyregion::polyast::Expr::Not &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Expr::UnaryLogicIntrinsic> {
+  std::size_t operator()(const polyregion::polyast::Expr::UnaryLogicIntrinsic &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Expr::Eq> {
-  std::size_t operator()(const polyregion::polyast::Expr::Eq &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Expr::BinaryLogicIntrinsic> {
+  std::size_t operator()(const polyregion::polyast::Expr::BinaryLogicIntrinsic &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Expr::Neq> {
-  std::size_t operator()(const polyregion::polyast::Expr::Neq &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::Expr::And> {
-  std::size_t operator()(const polyregion::polyast::Expr::And &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::Expr::Or> {
-  std::size_t operator()(const polyregion::polyast::Expr::Or &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::Expr::Lte> {
-  std::size_t operator()(const polyregion::polyast::Expr::Lte &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::Expr::Gte> {
-  std::size_t operator()(const polyregion::polyast::Expr::Gte &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::Expr::Lt> {
-  std::size_t operator()(const polyregion::polyast::Expr::Lt &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::Expr::Gt> {
-  std::size_t operator()(const polyregion::polyast::Expr::Gt &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Expr::Cast> {
+  std::size_t operator()(const polyregion::polyast::Expr::Cast &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Expr::Alias> {
   std::size_t operator()(const polyregion::polyast::Expr::Alias &) const noexcept;

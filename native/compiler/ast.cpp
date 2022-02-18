@@ -86,16 +86,26 @@ using std::string;
             [](const BinaryIntrinsicKind::BSR &x) { return "<<"; });
         return repr(x.lhs) + " " + std::string(op) + " " + repr(x.rhs);
       },
-      [](const Expr::Not &x) { return "!(" + repr(x.lhs) + ")"; },
-      [](const Expr::Eq &x) { return repr(x.lhs) + " == " + repr(x.rhs); },
-      [](const Expr::Neq &x) { return repr(x.lhs) + " != " + repr(x.rhs); },
-      [](const Expr::And &x) { return repr(x.lhs) + " && " + repr(x.rhs); },
-      [](const Expr::Or &x) { return repr(x.lhs) + " || " + repr(x.rhs); },
-      [](const Expr::Lte &x) { return repr(x.lhs) + " <= " + repr(x.rhs); },
-      [](const Expr::Gte &x) { return repr(x.lhs) + " >= " + repr(x.rhs); },
-      [](const Expr::Lt &x) { return repr(x.lhs) + " < " + repr(x.rhs); },
-      [](const Expr::Gt &x) { return repr(x.lhs) + " > " + repr(x.rhs); },
-
+      [](const Expr::UnaryLogicIntrinsic &x) {
+        auto op = variants::total( //
+            *x.kind,               //
+            [](const UnaryLogicIntrinsicKind::Not &x) { return "!"; });
+        return std::string(op) + "(" + repr(x.lhs) + ")";
+      },
+      [](const Expr::BinaryLogicIntrinsic &x) {
+        auto op = variants::total(
+            *x.kind, //
+            [](const BinaryLogicIntrinsicKind::Eq &x) { return "=="; },
+            [](const BinaryLogicIntrinsicKind::Neq &x) { return "!="; },
+            [](const BinaryLogicIntrinsicKind::And &x) { return "&&"; },
+            [](const BinaryLogicIntrinsicKind::Or &x) { return "||"; },
+            [](const BinaryLogicIntrinsicKind::Lte &x) { return "<="; },
+            [](const BinaryLogicIntrinsicKind::Gte &x) { return ">="; },
+            [](const BinaryLogicIntrinsicKind::Lt &x) { return "<"; },
+            [](const BinaryLogicIntrinsicKind::Gt &x) { return ">"; });
+        return repr(x.lhs) + " " + std::string(op) + " " + repr(x.rhs);
+      },
+      [](const Expr::Cast &x) { return "(" + repr(x.from) + ".to[" + repr(x.as) + "])"; },
       [](const Expr::Alias &x) { return "(~>" + repr(x.ref) + ")"; },
       [](const Expr::Invoke &x) {
         return (x.receiver ? repr(*x.receiver) : "<module>") + "." + repr(x.name) + "(" +

@@ -45,6 +45,14 @@ static llvm::Value *invokeMalloc(llvm::IRBuilder<> &B, llvm::LLVMContext &C, llv
   return B.CreateCall(f, size);
 }
 
+static bool isUnsigned(const Type::Any &tpe) {
+  // the only unsigned type in PolyAst
+  return std::holds_alternative<Type::Char>(*tpe);
+}
+
+static constexpr int64_t nIntMin(uint64_t bits) { return -(int64_t(1) << (bits - 1)); }
+static constexpr int64_t nIntMax(uint64_t bits) { return (int64_t(1) << (bits - 1)) - 1; }
+
 std::pair<llvm::StructType *, LLVMAstTransformer::StructMemberTable>
 LLVMAstTransformer::mkStruct(const StructDef &def) {
   std::vector<llvm::Type *> types(def.members.size());
@@ -197,6 +205,8 @@ llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Functi
     return B.CreateCall(f, conditionalLoad(mkRef(arg)));
   };
 
+  using ValPtr = llvm::Value *;
+
   return variants::total(
       *expr, //
       [&](const Expr::UnaryIntrinsic &x) {
@@ -208,22 +218,20 @@ llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Functi
 
         return variants::total(
             *x.kind, //
-            [&](const UnaryIntrinsicKind::Sin &) -> llvm::Value * {
+            [&](const UnaryIntrinsicKind::Sin &) -> ValPtr {
               return unaryIntrinsic(llvm::Intrinsic::sin, x.rtn, x.lhs);
             },
-            [&](const UnaryIntrinsicKind::Cos &) -> llvm::Value * {
+            [&](const UnaryIntrinsicKind::Cos &) -> ValPtr {
               return unaryIntrinsic(llvm::Intrinsic::cos, x.rtn, x.lhs);
             },
-            [&](const UnaryIntrinsicKind::Tan &) -> llvm::Value * {
+            [&](const UnaryIntrinsicKind::Tan &) -> ValPtr {
               // XXX apparently there isn't a tan in LLVM so we just do an external call
               return externUnaryCall("tan", x.rtn, x.lhs);
             },
-            [&](const UnaryIntrinsicKind::Abs &) -> llvm::Value * {
+            [&](const UnaryIntrinsicKind::Abs &) -> ValPtr {
               return unaryIntrinsic(llvm::Intrinsic::abs, x.rtn, x.lhs);
             },
-            [&](const UnaryIntrinsicKind::BNot &) -> llvm::Value * {
-              return undefined(__FILE_NAME__, __LINE__, "BNot");
-            });
+            [&](const UnaryIntrinsicKind::BNot &) -> ValPtr { return undefined(__FILE_NAME__, __LINE__, "BNot"); });
       },
       [&](const Expr::BinaryIntrinsic &x) {
         if (x.rtn != tpe(x.lhs)) {
@@ -237,82 +245,134 @@ llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Functi
                                  ") of binary intrinsic doesn't match return type (" + to_string(x.rtn) + ")(" +
                                  repr(x) + ")");
         }
-
         return variants::total(
             *x.kind, //
-            [&](const BinaryIntrinsicKind::Add &) -> llvm::Value * {
+            [&](const BinaryIntrinsicKind::Add &) -> ValPtr {
               return binaryNumOp(
                   x.lhs, x.rhs, x.rtn, //
                   [&](auto l, auto r) { return B.CreateAdd(l, r, key + "_+"); },
                   [&](auto l, auto r) { return B.CreateFAdd(l, r, key + "_+"); });
             },
-            [&](const BinaryIntrinsicKind::Sub &) -> llvm::Value * {
+            [&](const BinaryIntrinsicKind::Sub &) -> ValPtr {
               return binaryNumOp(
                   x.lhs, x.rhs, x.rtn, //
                   [&](auto l, auto r) { return B.CreateSub(l, r, key + "_-"); },
                   [&](auto l, auto r) { return B.CreateFSub(l, r, key + "_-"); });
             },
-            [&](const BinaryIntrinsicKind::Div &) -> llvm::Value * {
+            [&](const BinaryIntrinsicKind::Div &) -> ValPtr {
               return binaryNumOp(
                   x.lhs, x.rhs, x.rtn, //
                   [&](auto l, auto r) { return B.CreateSDiv(l, r, key + "_*"); },
                   [&](auto l, auto r) { return B.CreateFDiv(l, r, key + "_*"); });
             },
-            [&](const BinaryIntrinsicKind::Mul &) -> llvm::Value * {
+            [&](const BinaryIntrinsicKind::Mul &) -> ValPtr {
               return binaryNumOp(
                   x.lhs, x.rhs, x.rtn, //
                   [&](auto l, auto r) { return B.CreateMul(l, r, key + "_/"); },
                   [&](auto l, auto r) { return B.CreateFMul(l, r, key + "_/"); });
             },
-            [&](const BinaryIntrinsicKind::Rem &) -> llvm::Value * {
+            [&](const BinaryIntrinsicKind::Rem &) -> ValPtr {
               return binaryNumOp(
                   x.lhs, x.rhs, x.rtn, //
                   [&](auto l, auto r) { return B.CreateSRem(l, r, key + "_%"); },
                   [&](auto l, auto r) { return B.CreateFRem(l, r, key + "_%"); });
             },
-            [&](const BinaryIntrinsicKind::Pow &) -> llvm::Value * {
+            [&](const BinaryIntrinsicKind::Pow &) -> ValPtr {
               return unaryIntrinsic(llvm::Intrinsic::pow, x.rtn, x.lhs);
             },
-
-            [&](const BinaryIntrinsicKind::BAnd &) -> llvm::Value * {
-              return undefined(__FILE_NAME__, __LINE__, "BAnd");
-            },
-            [&](const BinaryIntrinsicKind::BOr &) -> llvm::Value * {
-              return undefined(__FILE_NAME__, __LINE__, "BOr");
-            },
-            [&](const BinaryIntrinsicKind::BXor &) -> llvm::Value * {
-              return undefined(__FILE_NAME__, __LINE__, "BXor");
-            },
-            [&](const BinaryIntrinsicKind::BSL &) -> llvm::Value * {
-              return undefined(__FILE_NAME__, __LINE__, "BSL");
-            },
-            [&](const BinaryIntrinsicKind::BSR &) -> llvm::Value * {
-              return undefined(__FILE_NAME__, __LINE__, "BSR");
-            });
+            [&](const BinaryIntrinsicKind::BAnd &) -> ValPtr { return undefined(__FILE_NAME__, __LINE__, "BAnd"); },
+            [&](const BinaryIntrinsicKind::BOr &) -> ValPtr { return undefined(__FILE_NAME__, __LINE__, "BOr"); },
+            [&](const BinaryIntrinsicKind::BXor &) -> ValPtr { return undefined(__FILE_NAME__, __LINE__, "BXor"); },
+            [&](const BinaryIntrinsicKind::BSL &) -> ValPtr { return undefined(__FILE_NAME__, __LINE__, "BSL"); },
+            [&](const BinaryIntrinsicKind::BSR &) -> ValPtr { return undefined(__FILE_NAME__, __LINE__, "BSR"); });
       },
-
-      [&](const Expr::Not &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "Inv"); },
-      [&](const Expr::Eq &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "Eq"); },
-      [](const Expr::Neq &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "Neq"); },
-      [](const Expr::And &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "And"); },
-      [](const Expr::Or &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "Or"); },
-      [&](const Expr::Lte &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "Lte"); },
-      [&](const Expr::Gte &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__, "Gte"); },
-      [&](const Expr::Lt &x) -> llvm::Value * {
-        auto [lhs, rhs] = binaryExpr(x.lhs, x.rhs);
-        return B.CreateICmpSLT(lhs, rhs, key + "_<");
+      [&](const Expr::UnaryLogicIntrinsic &x) -> ValPtr {
+        return variants::total( //
+            *x.kind,            //
+            [&](const UnaryLogicIntrinsicKind::Not &x) -> ValPtr { return undefined(__FILE_NAME__, __LINE__, "!"); });
       },
-      [&](const Expr::Gt &x) -> llvm::Value * {
-        auto [lhs, rhs] = binaryExpr(x.lhs, x.rhs);
-        return B.CreateICmpSGT(lhs, rhs, key + "_>");
+      [&](const Expr::BinaryLogicIntrinsic &x) -> ValPtr {
+        auto lhs = conditionalLoad(mkRef(x.lhs));
+        auto rhs = conditionalLoad(mkRef(x.rhs));
+        return variants::total(
+            *x.kind, //
+            [&](const BinaryLogicIntrinsicKind::Eq &) -> ValPtr { return undefined(__FILE_NAME__, __LINE__, "=="); },
+            [&](const BinaryLogicIntrinsicKind::Neq &) -> ValPtr { return undefined(__FILE_NAME__, __LINE__, "!="); },
+            [&](const BinaryLogicIntrinsicKind::And &) -> ValPtr { return undefined(__FILE_NAME__, __LINE__, "&&"); },
+            [&](const BinaryLogicIntrinsicKind::Or &) -> ValPtr { return undefined(__FILE_NAME__, __LINE__, "||"); },
+            [&](const BinaryLogicIntrinsicKind::Lte &) -> ValPtr { return undefined(__FILE_NAME__, __LINE__, "<="); },
+            [&](const BinaryLogicIntrinsicKind::Gte &) -> ValPtr { return undefined(__FILE_NAME__, __LINE__, ">="); },
+            [&](const BinaryLogicIntrinsicKind::Lt &) -> ValPtr { return B.CreateICmpSLT(lhs, rhs, key + "_<"); },
+            [&](const BinaryLogicIntrinsicKind::Gt &x) -> ValPtr { return B.CreateICmpSGT(lhs, rhs, key + "_>"); });
       },
+      [&](const Expr::Cast &x) -> ValPtr {
+        // we only allow widening or narrowing of integral and fractional types
+        // pointers are not allowed to participate on either end
+        auto from = conditionalLoad(mkRef(x.from));
+        auto fromTpe = mkTpe(tpe(x.from));
+        auto toTpe = mkTpe(x.as);
+        enum class NumKind { Fractional, Integral };
 
-      [&](const Expr::Alias &x) -> llvm::Value * { return mkRef(x.ref); },
-      [&](const Expr::Invoke &x) -> llvm::Value * {
+        auto fromKind = variants::total(
+            *kind(tpe(x.from)), [&](const TypeKind::Integral &) -> NumKind { return NumKind::Integral; },
+            [&](const TypeKind::Fractional &) -> NumKind { return NumKind::Fractional; },
+            [&](const TypeKind::Ref &) -> NumKind {
+              throw std::logic_error("Semantic error: conversion from ref type (" + to_string(fromTpe) +
+                                     ") is not allowed");
+            },
+            [&](const TypeKind::None &) -> NumKind { error(__FILE_NAME__, __LINE__, "none!?"); });
+
+        auto toKind = variants::total(
+            *kind(x.as), //
+            [&](const TypeKind::Integral &) -> NumKind { return NumKind::Integral; },
+            [&](const TypeKind::Fractional &) -> NumKind { return NumKind::Fractional; },
+            [&](const TypeKind::Ref &) -> NumKind {
+              throw std::logic_error("Semantic error: conversion to ref type (" + to_string(fromTpe) +
+                                     ") is not allowed");
+            },
+            [&](const TypeKind::None &) -> NumKind { error(__FILE_NAME__, __LINE__, "none!?"); });
+
+        if (fromKind == NumKind::Fractional && toKind == NumKind::Integral) {
+
+          // to the equally sized integral type first if narrowing; XXX narrowing directly produces a poison value
+
+          llvm::Value *c = nullptr;
+          if (fromTpe->getPrimitiveSizeInBits() > toTpe->getPrimitiveSizeInBits() || true) {
+            auto min32BitIntBits = std::max<llvm::TypeSize::ScalarTy>(32, toTpe->getPrimitiveSizeInBits());
+            auto toTpeMaxInFp = llvm::ConstantFP::get(fromTpe, double(nIntMax(min32BitIntBits)));
+            auto toTpeMinInFp = llvm::ConstantFP::get(fromTpe, double(nIntMin(min32BitIntBits)));
+            auto min32BitIntTy = llvm::Type::getIntNTy(C, min32BitIntBits);
+            auto toTpeMaxInInt = llvm::ConstantInt::get(min32BitIntTy, nIntMax(min32BitIntBits));
+            auto toTpeMinInInt = llvm::ConstantInt::get(min32BitIntTy, nIntMin(min32BitIntBits));
+
+            c = B.CreateSelect(B.CreateFCmpOGE(from, toTpeMaxInFp), toTpeMaxInInt,                //
+                               B.CreateSelect(B.CreateFCmpOLE(from, toTpeMinInFp), toTpeMinInInt, //
+                                              B.CreateFPToSI(from, min32BitIntTy)));
+            c = B.CreateIntCast(c, toTpe, !isUnsigned(x.as));
+
+          } else {
+            c = B.CreateFPToSI(from, toTpe, "fractional_to_integral_cast");
+          }
+
+          auto zero = llvm::ConstantInt::get(toTpe, 0);
+          return B.CreateSelect(B.CreateFCmpUNO(from, from), zero, c);
+        } else if (fromKind == NumKind::Integral && toKind == NumKind::Fractional) {
+          // XXX this is a *widening* conversion, even though we may lose precision
+          // XXX here the result is rounded using the default rounding mode so the dest bit width doesn't matter
+          return isUnsigned(tpe(x.from)) ? B.CreateUIToFP(from, toTpe) : B.CreateSIToFP(from, toTpe);
+        } else if (fromKind == NumKind::Integral && toKind == NumKind::Integral) {
+          return B.CreateIntCast(from, toTpe, !isUnsigned(tpe(x.from)), "integral_cast");
+        } else if (fromKind == NumKind::Fractional && toKind == NumKind::Fractional) {
+          return B.CreateFPCast(from, toTpe, "fractional_cast");
+        } else
+          error(__FILE_NAME__, __LINE__, "unhandled cast");
+      },
+      [&](const Expr::Alias &x) -> ValPtr { return mkRef(x.ref); },
+      [&](const Expr::Invoke &x) -> ValPtr {
         //        auto lhs = mkRef(x.lhs );
         return undefined(__FILE_NAME__, __LINE__, "Unimplemented invoke:`" + repr(x) + "`");
       },
-      [&](const Expr::Index &x) -> llvm::Value * {
+      [&](const Expr::Index &x) -> ValPtr {
         if (auto arrTpe = get_opt<Type::Array>(x.lhs.tpe); arrTpe) {
           auto ty = mkTpe(arrTpe->component);
           return B.CreateInBoundsGEP(ty->isPointerTy() ? ty->getPointerElementType() : ty, //
@@ -323,7 +383,7 @@ llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Functi
                                  ")(" + repr(x) + ")");
         }
       },
-      [&](const Expr::Alloc &x) -> llvm::Value * { //
+      [&](const Expr::Alloc &x) -> ValPtr { //
         auto size = mkRef(x.size);
         auto elemSize = sizeOf(B, C, mkTpe(x.witness));
         auto ptr = invokeMalloc(B, C, fn->getParent(), B.CreateMul(size, elemSize));
@@ -370,7 +430,7 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
                                      " in stmt:" + repr(stmt));
             }
             auto elemSize = sizeOf(B, C, structPtrTy);
-            auto ptr = invokeMalloc(B, C, fn->getParent(),  elemSize);
+            auto ptr = invokeMalloc(B, C, fn->getParent(), elemSize);
             lut[x.name.symbol] = {x.name.tpe, B.CreateBitCast(ptr, structPtrTy)};
           }
         } else {

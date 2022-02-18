@@ -108,10 +108,13 @@ extension (e: p.Expr) {
         case p.UnaryIntrinsicKind.Tan  => "tan"
         case p.UnaryIntrinsicKind.Abs  => "abs"
         case p.UnaryIntrinsicKind.BNot => "~"
-
       }
       s"$fn(${lhs.repr})"
-
+    case p.Expr.UnaryLogicIntrinsic(lhs, kind) =>
+      val fn = kind match {
+        case p.UnaryLogicIntrinsicKind.Not => "!"
+      }
+      s"$fn(${lhs.repr})"
     case p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn) =>
       val op = kind match {
         case p.BinaryIntrinsicKind.Add  => s"+"
@@ -126,24 +129,27 @@ extension (e: p.Expr) {
         case p.BinaryIntrinsicKind.BSL  => s"<<"
         case p.BinaryIntrinsicKind.BSR  => s">>"
       }
-
       s"${lhs.repr} ${op} ${rhs.repr}"
 
-    case p.Expr.Not(lhs)      => s"!(${lhs.repr})"
-    case p.Expr.Eq(lhs, rhs)  => s"${lhs.repr} == ${rhs.repr}"
-    case p.Expr.Neq(lhs, rhs) => s"${lhs.repr} != ${rhs.repr}"
-    case p.Expr.And(lhs, rhs) => s"${lhs.repr} && ${rhs.repr}"
-    case p.Expr.Or(lhs, rhs)  => s"${lhs.repr} || ${rhs.repr}"
-    case p.Expr.Lte(lhs, rhs) => s"${lhs.repr} <= ${rhs.repr}"
-    case p.Expr.Gte(lhs, rhs) => s"${lhs.repr} >= ${rhs.repr}"
-    case p.Expr.Lt(lhs, rhs)  => s"${lhs.repr} < ${rhs.repr}"
-    case p.Expr.Gt(lhs, rhs)  => s"${lhs.repr} > ${rhs.repr}"
+    case p.Expr.BinaryLogicIntrinsic(lhs, rhs, kind) =>
+      val op = kind match {
+        case p.BinaryLogicIntrinsicKind.Eq  => "=="
+        case p.BinaryLogicIntrinsicKind.Neq => "!="
+        case p.BinaryLogicIntrinsicKind.And => "&&"
+        case p.BinaryLogicIntrinsicKind.Or  => "||"
+        case p.BinaryLogicIntrinsicKind.Lte => "<="
+        case p.BinaryLogicIntrinsicKind.Gte => ">="
+        case p.BinaryLogicIntrinsicKind.Lt  => "<"
+        case p.BinaryLogicIntrinsicKind.Gt  => ">"
+      }
+      s"${lhs.repr} ${op} ${rhs.repr}"
+    case p.Expr.Cast(from, to) => s"${from.repr}.to[${to.repr}]"
+    case p.Expr.Alias(ref)     => s"(~>${ref.repr})"
 
-    case p.Expr.Alias(ref) => s"(~>${ref.repr})"
     case p.Expr.Invoke(name, recv, args, tpe) =>
       s"${recv.map(_.repr).getOrElse("<module>")}.${name.repr}(${args.map(_.repr).mkString(",")}) : ${tpe.repr}"
     case p.Expr.Index(lhs, idx, tpe) => s"${lhs.repr}[${idx.repr}] : ${tpe.repr}"
-    case p.Expr.Alloc(tpe, size)        => s"new [${tpe.component.repr}*${size.repr}]"
+    case p.Expr.Alloc(tpe, size)     => s"new [${tpe.component.repr}*${size.repr}]"
   }
 }
 
@@ -186,15 +192,10 @@ extension (e: p.Stmt) {
       case p.Expr.UnaryIntrinsic(lhs, kind, rtn)       => (p.Expr.UnaryIntrinsic(f(lhs), kind, rtn), Nil)
       case p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn) => (p.Expr.BinaryIntrinsic(f(lhs), f(rhs), kind, rtn), Nil)
 
-      case p.Expr.Not(lhs)      => (p.Expr.Not(f(lhs)), Nil)
-      case p.Expr.Eq(lhs, rhs)  => (p.Expr.Eq(f(lhs), f(rhs)), Nil)
-      case p.Expr.Neq(lhs, rhs) => (p.Expr.Neq(f(lhs), f(rhs)), Nil)
-      case p.Expr.And(lhs, rhs) => (p.Expr.And(f(lhs), f(rhs)), Nil)
-      case p.Expr.Or(lhs, rhs)  => (p.Expr.Or(f(lhs), f(rhs)), Nil)
-      case p.Expr.Lte(lhs, rhs) => (p.Expr.Lte(f(lhs), f(rhs)), Nil)
-      case p.Expr.Gte(lhs, rhs) => (p.Expr.Gte(f(lhs), f(rhs)), Nil)
-      case p.Expr.Lt(lhs, rhs)  => (p.Expr.Lt(f(lhs), f(rhs)), Nil)
-      case p.Expr.Gt(lhs, rhs)  => (p.Expr.Gt(f(lhs), f(rhs)), Nil)
+      case p.Expr.UnaryLogicIntrinsic(lhs, kind)       => (p.Expr.UnaryLogicIntrinsic(f(lhs), kind), Nil)
+      case p.Expr.BinaryLogicIntrinsic(lhs, rhs, kind) => (p.Expr.BinaryLogicIntrinsic(f(lhs), f(rhs), kind), Nil)
+
+      case p.Expr.Cast(from, to) => (p.Expr.Cast(f(from), to), Nil)
       case p.Expr.Alias(ref) =>
         val h = ref match {
           // case x @ p.Term.Select(_, _) => g(x)

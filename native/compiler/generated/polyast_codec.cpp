@@ -570,6 +570,124 @@ json UnaryIntrinsicKind::any_to_json(const UnaryIntrinsicKind::Any& x) {
   }, *x);
 }
 
+BinaryLogicIntrinsicKind::Eq BinaryLogicIntrinsicKind::eq_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryLogicIntrinsicKind::eq_to_json(const BinaryLogicIntrinsicKind::Eq& x) { 
+  return json::array({});
+}
+
+BinaryLogicIntrinsicKind::Neq BinaryLogicIntrinsicKind::neq_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryLogicIntrinsicKind::neq_to_json(const BinaryLogicIntrinsicKind::Neq& x) { 
+  return json::array({});
+}
+
+BinaryLogicIntrinsicKind::And BinaryLogicIntrinsicKind::and_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryLogicIntrinsicKind::and_to_json(const BinaryLogicIntrinsicKind::And& x) { 
+  return json::array({});
+}
+
+BinaryLogicIntrinsicKind::Or BinaryLogicIntrinsicKind::or_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryLogicIntrinsicKind::or_to_json(const BinaryLogicIntrinsicKind::Or& x) { 
+  return json::array({});
+}
+
+BinaryLogicIntrinsicKind::Lte BinaryLogicIntrinsicKind::lte_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryLogicIntrinsicKind::lte_to_json(const BinaryLogicIntrinsicKind::Lte& x) { 
+  return json::array({});
+}
+
+BinaryLogicIntrinsicKind::Gte BinaryLogicIntrinsicKind::gte_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryLogicIntrinsicKind::gte_to_json(const BinaryLogicIntrinsicKind::Gte& x) { 
+  return json::array({});
+}
+
+BinaryLogicIntrinsicKind::Lt BinaryLogicIntrinsicKind::lt_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryLogicIntrinsicKind::lt_to_json(const BinaryLogicIntrinsicKind::Lt& x) { 
+  return json::array({});
+}
+
+BinaryLogicIntrinsicKind::Gt BinaryLogicIntrinsicKind::gt_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryLogicIntrinsicKind::gt_to_json(const BinaryLogicIntrinsicKind::Gt& x) { 
+  return json::array({});
+}
+
+BinaryLogicIntrinsicKind::Any BinaryLogicIntrinsicKind::any_from_json(const json& j) { 
+  size_t ord = j.at(0).get<size_t>();
+  const auto t = j.at(1);
+  switch (ord) {
+  case 0: return BinaryLogicIntrinsicKind::eq_from_json(t);
+  case 1: return BinaryLogicIntrinsicKind::neq_from_json(t);
+  case 2: return BinaryLogicIntrinsicKind::and_from_json(t);
+  case 3: return BinaryLogicIntrinsicKind::or_from_json(t);
+  case 4: return BinaryLogicIntrinsicKind::lte_from_json(t);
+  case 5: return BinaryLogicIntrinsicKind::gte_from_json(t);
+  case 6: return BinaryLogicIntrinsicKind::lt_from_json(t);
+  case 7: return BinaryLogicIntrinsicKind::gt_from_json(t);
+  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
+  }
+}
+
+json BinaryLogicIntrinsicKind::any_to_json(const BinaryLogicIntrinsicKind::Any& x) { 
+  return std::visit(overloaded{
+  [](const BinaryLogicIntrinsicKind::Eq &y) -> json { return {0, BinaryLogicIntrinsicKind::eq_to_json(y)}; },
+  [](const BinaryLogicIntrinsicKind::Neq &y) -> json { return {1, BinaryLogicIntrinsicKind::neq_to_json(y)}; },
+  [](const BinaryLogicIntrinsicKind::And &y) -> json { return {2, BinaryLogicIntrinsicKind::and_to_json(y)}; },
+  [](const BinaryLogicIntrinsicKind::Or &y) -> json { return {3, BinaryLogicIntrinsicKind::or_to_json(y)}; },
+  [](const BinaryLogicIntrinsicKind::Lte &y) -> json { return {4, BinaryLogicIntrinsicKind::lte_to_json(y)}; },
+  [](const BinaryLogicIntrinsicKind::Gte &y) -> json { return {5, BinaryLogicIntrinsicKind::gte_to_json(y)}; },
+  [](const BinaryLogicIntrinsicKind::Lt &y) -> json { return {6, BinaryLogicIntrinsicKind::lt_to_json(y)}; },
+  [](const BinaryLogicIntrinsicKind::Gt &y) -> json { return {7, BinaryLogicIntrinsicKind::gt_to_json(y)}; },
+  [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
+  }, *x);
+}
+
+UnaryLogicIntrinsicKind::Not UnaryLogicIntrinsicKind::not_from_json(const json& j) { 
+  return {};
+}
+
+json UnaryLogicIntrinsicKind::not_to_json(const UnaryLogicIntrinsicKind::Not& x) { 
+  return json::array({});
+}
+
+UnaryLogicIntrinsicKind::Any UnaryLogicIntrinsicKind::any_from_json(const json& j) { 
+  size_t ord = j.at(0).get<size_t>();
+  const auto t = j.at(1);
+  switch (ord) {
+  case 0: return UnaryLogicIntrinsicKind::not_from_json(t);
+  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
+  }
+}
+
+json UnaryLogicIntrinsicKind::any_to_json(const UnaryLogicIntrinsicKind::Any& x) { 
+  return std::visit(overloaded{
+  [](const UnaryLogicIntrinsicKind::Not &y) -> json { return {0, UnaryLogicIntrinsicKind::not_to_json(y)}; },
+  [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
+  }, *x);
+}
+
 Expr::UnaryIntrinsic Expr::unaryintrinsic_from_json(const json& j) { 
   auto lhs =  Term::any_from_json(j.at(0));
   auto kind =  UnaryIntrinsicKind::any_from_json(j.at(1));
@@ -600,110 +718,42 @@ json Expr::binaryintrinsic_to_json(const Expr::BinaryIntrinsic& x) {
   return json::array({lhs, rhs, kind, rtn});
 }
 
-Expr::Not Expr::not_from_json(const json& j) { 
+Expr::UnaryLogicIntrinsic Expr::unarylogicintrinsic_from_json(const json& j) { 
   auto lhs =  Term::any_from_json(j.at(0));
-  return Expr::Not(lhs);
+  auto kind =  UnaryLogicIntrinsicKind::any_from_json(j.at(1));
+  return {lhs, kind};
 }
 
-json Expr::not_to_json(const Expr::Not& x) { 
+json Expr::unarylogicintrinsic_to_json(const Expr::UnaryLogicIntrinsic& x) { 
   auto lhs =  Term::any_to_json(x.lhs);
-  return json::array({lhs});
+  auto kind =  UnaryLogicIntrinsicKind::any_to_json(x.kind);
+  return json::array({lhs, kind});
 }
 
-Expr::Eq Expr::eq_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto rhs =  Term::any_from_json(j.at(1));
-  return {lhs, rhs};
-}
-
-json Expr::eq_to_json(const Expr::Eq& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto rhs =  Term::any_to_json(x.rhs);
-  return json::array({lhs, rhs});
-}
-
-Expr::Neq Expr::neq_from_json(const json& j) { 
+Expr::BinaryLogicIntrinsic Expr::binarylogicintrinsic_from_json(const json& j) { 
   auto lhs =  Term::any_from_json(j.at(0));
   auto rhs =  Term::any_from_json(j.at(1));
-  return {lhs, rhs};
+  auto kind =  BinaryLogicIntrinsicKind::any_from_json(j.at(2));
+  return {lhs, rhs, kind};
 }
 
-json Expr::neq_to_json(const Expr::Neq& x) { 
+json Expr::binarylogicintrinsic_to_json(const Expr::BinaryLogicIntrinsic& x) { 
   auto lhs =  Term::any_to_json(x.lhs);
   auto rhs =  Term::any_to_json(x.rhs);
-  return json::array({lhs, rhs});
+  auto kind =  BinaryLogicIntrinsicKind::any_to_json(x.kind);
+  return json::array({lhs, rhs, kind});
 }
 
-Expr::And Expr::and_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto rhs =  Term::any_from_json(j.at(1));
-  return {lhs, rhs};
+Expr::Cast Expr::cast_from_json(const json& j) { 
+  auto from =  Term::any_from_json(j.at(0));
+  auto as =  Type::any_from_json(j.at(1));
+  return {from, as};
 }
 
-json Expr::and_to_json(const Expr::And& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto rhs =  Term::any_to_json(x.rhs);
-  return json::array({lhs, rhs});
-}
-
-Expr::Or Expr::or_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto rhs =  Term::any_from_json(j.at(1));
-  return {lhs, rhs};
-}
-
-json Expr::or_to_json(const Expr::Or& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto rhs =  Term::any_to_json(x.rhs);
-  return json::array({lhs, rhs});
-}
-
-Expr::Lte Expr::lte_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto rhs =  Term::any_from_json(j.at(1));
-  return {lhs, rhs};
-}
-
-json Expr::lte_to_json(const Expr::Lte& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto rhs =  Term::any_to_json(x.rhs);
-  return json::array({lhs, rhs});
-}
-
-Expr::Gte Expr::gte_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto rhs =  Term::any_from_json(j.at(1));
-  return {lhs, rhs};
-}
-
-json Expr::gte_to_json(const Expr::Gte& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto rhs =  Term::any_to_json(x.rhs);
-  return json::array({lhs, rhs});
-}
-
-Expr::Lt Expr::lt_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto rhs =  Term::any_from_json(j.at(1));
-  return {lhs, rhs};
-}
-
-json Expr::lt_to_json(const Expr::Lt& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto rhs =  Term::any_to_json(x.rhs);
-  return json::array({lhs, rhs});
-}
-
-Expr::Gt Expr::gt_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto rhs =  Term::any_from_json(j.at(1));
-  return {lhs, rhs};
-}
-
-json Expr::gt_to_json(const Expr::Gt& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto rhs =  Term::any_to_json(x.rhs);
-  return json::array({lhs, rhs});
+json Expr::cast_to_json(const Expr::Cast& x) { 
+  auto from =  Term::any_to_json(x.from);
+  auto as =  Type::any_to_json(x.as);
+  return json::array({from, as});
 }
 
 Expr::Alias Expr::alias_from_json(const json& j) { 
@@ -767,19 +817,13 @@ Expr::Any Expr::any_from_json(const json& j) {
   switch (ord) {
   case 0: return Expr::unaryintrinsic_from_json(t);
   case 1: return Expr::binaryintrinsic_from_json(t);
-  case 2: return Expr::not_from_json(t);
-  case 3: return Expr::eq_from_json(t);
-  case 4: return Expr::neq_from_json(t);
-  case 5: return Expr::and_from_json(t);
-  case 6: return Expr::or_from_json(t);
-  case 7: return Expr::lte_from_json(t);
-  case 8: return Expr::gte_from_json(t);
-  case 9: return Expr::lt_from_json(t);
-  case 10: return Expr::gt_from_json(t);
-  case 11: return Expr::alias_from_json(t);
-  case 12: return Expr::invoke_from_json(t);
-  case 13: return Expr::index_from_json(t);
-  case 14: return Expr::alloc_from_json(t);
+  case 2: return Expr::unarylogicintrinsic_from_json(t);
+  case 3: return Expr::binarylogicintrinsic_from_json(t);
+  case 4: return Expr::cast_from_json(t);
+  case 5: return Expr::alias_from_json(t);
+  case 6: return Expr::invoke_from_json(t);
+  case 7: return Expr::index_from_json(t);
+  case 8: return Expr::alloc_from_json(t);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
   }
 }
@@ -788,19 +832,13 @@ json Expr::any_to_json(const Expr::Any& x) {
   return std::visit(overloaded{
   [](const Expr::UnaryIntrinsic &y) -> json { return {0, Expr::unaryintrinsic_to_json(y)}; },
   [](const Expr::BinaryIntrinsic &y) -> json { return {1, Expr::binaryintrinsic_to_json(y)}; },
-  [](const Expr::Not &y) -> json { return {2, Expr::not_to_json(y)}; },
-  [](const Expr::Eq &y) -> json { return {3, Expr::eq_to_json(y)}; },
-  [](const Expr::Neq &y) -> json { return {4, Expr::neq_to_json(y)}; },
-  [](const Expr::And &y) -> json { return {5, Expr::and_to_json(y)}; },
-  [](const Expr::Or &y) -> json { return {6, Expr::or_to_json(y)}; },
-  [](const Expr::Lte &y) -> json { return {7, Expr::lte_to_json(y)}; },
-  [](const Expr::Gte &y) -> json { return {8, Expr::gte_to_json(y)}; },
-  [](const Expr::Lt &y) -> json { return {9, Expr::lt_to_json(y)}; },
-  [](const Expr::Gt &y) -> json { return {10, Expr::gt_to_json(y)}; },
-  [](const Expr::Alias &y) -> json { return {11, Expr::alias_to_json(y)}; },
-  [](const Expr::Invoke &y) -> json { return {12, Expr::invoke_to_json(y)}; },
-  [](const Expr::Index &y) -> json { return {13, Expr::index_to_json(y)}; },
-  [](const Expr::Alloc &y) -> json { return {14, Expr::alloc_to_json(y)}; },
+  [](const Expr::UnaryLogicIntrinsic &y) -> json { return {2, Expr::unarylogicintrinsic_to_json(y)}; },
+  [](const Expr::BinaryLogicIntrinsic &y) -> json { return {3, Expr::binarylogicintrinsic_to_json(y)}; },
+  [](const Expr::Cast &y) -> json { return {4, Expr::cast_to_json(y)}; },
+  [](const Expr::Alias &y) -> json { return {5, Expr::alias_to_json(y)}; },
+  [](const Expr::Invoke &y) -> json { return {6, Expr::invoke_to_json(y)}; },
+  [](const Expr::Index &y) -> json { return {7, Expr::index_to_json(y)}; },
+  [](const Expr::Alloc &y) -> json { return {8, Expr::alloc_to_json(y)}; },
   [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
   }, *x);
 }
@@ -1007,13 +1045,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "7630145cb733687786252138c456432c") {
-   throw std::runtime_error("Expecting ADT hash to be 7630145cb733687786252138c456432c, but was " + hash);
+  if(hash != "210087908d9600ac63885f511fd95d8b") {
+   throw std::runtime_error("Expecting ADT hash to be 210087908d9600ac63885f511fd95d8b, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"7630145cb733687786252138c456432c", x});
+  return json::array({"210087908d9600ac63885f511fd95d8b", x});
 }
 } // namespace polyregion::polyast

@@ -72,16 +72,26 @@ std::string backend::C99::mkExpr(const Expr::Any &expr, const std::string &key) 
             [](const BinaryIntrinsicKind::BSR &x) { return "<<"; });
         return repr(x.lhs) + " " + std::string(op) + " " + repr(x.rhs);
       },
-      [&](const Expr::Not &x) { return "!(" + mkRef(x.lhs) + ")"; },            //
-      [&](const Expr::Eq &x) { return mkRef(x.lhs) + " == " + mkRef(x.rhs); },  //
-      [](const Expr::Neq &x) { return repr(x.lhs) + " != " + repr(x.rhs); },    //
-      [](const Expr::And &x) { return repr(x.lhs) + " && " + repr(x.rhs); },    //
-      [](const Expr::Or &x) { return repr(x.lhs) + " || " + repr(x.rhs); },     //
-      [&](const Expr::Lte &x) { return mkRef(x.lhs) + " <= " + mkRef(x.rhs); }, //
-      [&](const Expr::Gte &x) { return mkRef(x.lhs) + " >= " + mkRef(x.rhs); }, //
-      [&](const Expr::Lt &x) { return mkRef(x.lhs) + " < " + mkRef(x.rhs); },   //
-      [&](const Expr::Gt &x) { return mkRef(x.lhs) + " > " + mkRef(x.rhs); },   //
-
+      [](const Expr::UnaryLogicIntrinsic &x) {
+        auto op = variants::total( //
+            *x.kind,               //
+            [](const UnaryLogicIntrinsicKind::Not &x) { return "!"; });
+        return std::string(op) + "(" + repr(x.lhs) + ")";
+      },
+      [](const Expr::BinaryLogicIntrinsic &x) {
+        auto op = variants::total(
+            *x.kind, //
+            [](const BinaryLogicIntrinsicKind::Eq &x) { return "=="; },
+            [](const BinaryLogicIntrinsicKind::Neq &x) { return "!="; },
+            [](const BinaryLogicIntrinsicKind::And &x) { return "&&"; },
+            [](const BinaryLogicIntrinsicKind::Or &x) { return "||"; },
+            [](const BinaryLogicIntrinsicKind::Lte &x) { return "<="; },
+            [](const BinaryLogicIntrinsicKind::Gte &x) { return ">="; },
+            [](const BinaryLogicIntrinsicKind::Lt &x) { return "<"; },
+            [](const BinaryLogicIntrinsicKind::Gt &x) { return ">"; });
+        return repr(x.lhs) + " " + std::string(op) + " " + repr(x.rhs);
+      },
+      [](const Expr::Cast &x) { return "((" + repr(x.as) + ") " + repr(x.from) + ")"; },
       [&](const Expr::Alias &x) { return mkRef(x.ref); },                                //
       [&](const Expr::Invoke &x) { return "???"s; },                                     //
       [&](const Expr::Index &x) { return qualified(x.lhs) + "[" + mkRef(x.idx) + "]"; }, //
