@@ -11,67 +11,70 @@ class IntrinsicSuite extends BaseSuite {
   }
 
   {
-    val a = 1d
-    testExpr[Double](math.sin(a))           //
-    testExpr[Double](java.lang.Math.sin(a)) //
+    val a = 1.23d
+    val b = -0.12d
+    testExpr[Double](math.sin(a))  // D
+    testExpr[Double](math.cos(a))  // D
+    testExpr[Double](math.tan(a))  // D
+    testExpr[Double](math.asin(a)) // D
+    testExpr[Double](math.acos(a)) // D
+    testExpr[Double](math.atan(a)) // D
+    testExpr[Double](math.sinh(a)) // D
+    testExpr[Double](math.cosh(a)) // D
+    testExpr[Double](math.tanh(a)) // D
+
+    testExpr[Double](math.ceil(a))  // D
+    testExpr[Double](math.floor(a)) // D
+    testExpr[Double](math.rint(a))  // D
+
+    testExpr[Double](math.sqrt(a))  // D
+    testExpr[Double](math.cbrt(a))  // D
+    testExpr[Double](math.exp(a))   // D
+    testExpr[Double](math.expm1(a)) // D
+    testExpr[Double](math.log(a))   // D
+    testExpr[Double](math.log1p(a)) // D
+    testExpr[Double](math.log10(a)) // D
+
+    testExpr[Double](math.atan2(a, b))  // D
+    testExpr[Double](math.hypot(a, b))  // D
+    testExpr[Double](math.pow(a, b))    // D
+    testExpr[Double](math.toDegrees(a)) // D
+    testExpr[Double](math.toRadians(a)) // D
+
+    // TODO parameterise these
+
+    testExpr[Double](math.abs(b)) // I, L, F, D
+    //  testExpr[Double](math.min(a, b)) // I, L, F, D
+    //  testExpr[Double](math.max(a, b)) // I, L, F, D
+    testExpr[Double](math.signum(b)) // I, L, F, D
+
+    //  testExpr[Double](math.copySign(a, b)) //  F, D
+
+    //  testExpr[Double](math.scalb(a, 1)) // F(F, I), D(D, I)
+    //  testExpr[Long](math.round(a)) // L(L) = id, I(F), L(D)
+
     {
       import scala.math._
       testExpr[Double](sin(a))
-    } //
-    {
-      import java.lang.Math._
-      testExpr[Double](sin(a))
-    } //
-    {
-      import scala.{math => mymath}
-      testExpr[Double](mymath.sin(a))
-    } //
-    {
-      import java.lang.{Math => mymath}
-      testExpr[Double](mymath.sin(a))
-    } //
-  }
-
-  {
-    val a = 1d
-    testExpr[Double](math.cos(a))           //
-    testExpr[Double](java.lang.Math.cos(a)) //
-    {
-      import scala.math._
       testExpr[Double](cos(a))
-    } //
-    {
-      import java.lang.Math._
-      testExpr[Double](cos(a))
-    } //
-    {
-      import scala.{math => mymath}
-      testExpr[Double](mymath.cos(a))
-    } //
-    {
-      import java.lang.{Math => mymath}
-      testExpr[Double](mymath.cos(a))
-    } //
-  }
-
-  {
-    val a = 1d
-    testExpr[Double](math.tan(a))           //
-    testExpr[Double](java.lang.Math.tan(a)) //
-    {
-      import scala.math._
       testExpr[Double](tan(a))
     } //
     {
       import java.lang.Math._
+      testExpr[Double](sin(a))
+      testExpr[Double](cos(a))
       testExpr[Double](tan(a))
     } //
     {
       import scala.{math => mymath}
+      testExpr[Double](mymath.sin(a))
+      testExpr[Double](mymath.cos(a))
       testExpr[Double](mymath.tan(a))
     } //
     {
       import java.lang.{Math => mymath}
+      testExpr[Double](mymath.sin(a))
+      testExpr[Double](mymath.cos(a))
       testExpr[Double](mymath.tan(a))
     } //
   }

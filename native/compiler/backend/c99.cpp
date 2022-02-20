@@ -47,29 +47,59 @@ std::string backend::C99::mkExpr(const Expr::Any &expr, const std::string &key) 
       *expr, //
       [](const Expr::UnaryIntrinsic &x) {
         auto op = variants::total(
-            *x.kind, //
-            [](const UnaryIntrinsicKind::Sin &x) { return "sin"; },
-            [](const UnaryIntrinsicKind::Cos &x) { return "cos"; },
-            [](const UnaryIntrinsicKind::Tan &x) { return "tan"; },
-            [](const UnaryIntrinsicKind::Abs &x) { return "abs"; },
-            [](const UnaryIntrinsicKind::BNot &x) { return "~"; });
+            *x.kind,                                                 //
+            [](const UnaryIntrinsicKind::Sin &) { return "sin"; },   //
+            [](const UnaryIntrinsicKind::Cos &) { return "cos"; },   //
+            [](const UnaryIntrinsicKind::Tan &) { return "tan"; },   //
+            [](const UnaryIntrinsicKind::Asin &) { return "asin"; }, //
+            [](const UnaryIntrinsicKind::Acos &) { return "acos"; }, //
+            [](const UnaryIntrinsicKind::Atan &) { return "atan"; }, //
+            [](const UnaryIntrinsicKind::Sinh &) { return "sinh"; }, //
+            [](const UnaryIntrinsicKind::Cosh &) { return "cosh"; }, //
+            [](const UnaryIntrinsicKind::Tanh &) { return "tanh"; }, //
+
+            [](const UnaryIntrinsicKind::Signum &) { return "signum"; }, //
+            [](const UnaryIntrinsicKind::Abs &) { return "abs"; },       //
+            [](const UnaryIntrinsicKind::Round &) { return "round"; },   //
+            [](const UnaryIntrinsicKind::Ceil &) { return "ceil"; },     //
+            [](const UnaryIntrinsicKind::Floor &) { return "floor"; },   //
+            [](const UnaryIntrinsicKind::Rint &) { return "rint"; },     //
+
+            [](const UnaryIntrinsicKind::Sqrt &) { return "sqrt"; },   //
+            [](const UnaryIntrinsicKind::Cbrt &) { return "cbrt"; },   //
+            [](const UnaryIntrinsicKind::Exp &) { return "exp"; },     //
+            [](const UnaryIntrinsicKind::Expm1 &) { return "expm1"; }, //
+            [](const UnaryIntrinsicKind::Log &) { return "log"; },     //
+            [](const UnaryIntrinsicKind::Log1p &) { return "log1p"; }, //
+            [](const UnaryIntrinsicKind::Log10 &) { return "log10"; }, //
+            [](const UnaryIntrinsicKind::BNot &) { return "~"; }       //
+        );
         return std::string(op) + "(" + repr(x.lhs) + ")";
       },
       [](const Expr::BinaryIntrinsic &x) {
         auto op = variants::total(
-            *x.kind, //
-            [](const BinaryIntrinsicKind::Add &x) { return "+"; },
-            [](const BinaryIntrinsicKind::Sub &x) { return "-"; },
-            [](const BinaryIntrinsicKind::Div &x) { return "/"; },
-            [](const BinaryIntrinsicKind::Mul &x) { return "*"; },
-            [](const BinaryIntrinsicKind::Rem &x) { return "%"; },
-            [](const BinaryIntrinsicKind::Pow &x) { return "**"; },
+            *x.kind,                                              //
+            [](const BinaryIntrinsicKind::Add &) { return "+"; }, //
+            [](const BinaryIntrinsicKind::Sub &) { return "-"; }, //
+            [](const BinaryIntrinsicKind::Mul &) { return "*"; }, //
+            [](const BinaryIntrinsicKind::Div &) { return "/"; }, //
+            [](const BinaryIntrinsicKind::Rem &) { return "%"; }, //
 
-            [](const BinaryIntrinsicKind::BAnd &x) { return "&"; },
-            [](const BinaryIntrinsicKind::BOr &x) { return "|"; },
-            [](const BinaryIntrinsicKind::BXor &x) { return "^"; },
-            [](const BinaryIntrinsicKind::BSL &x) { return ">>"; },
-            [](const BinaryIntrinsicKind::BSR &x) { return "<<"; });
+            [](const BinaryIntrinsicKind::Pow &) { return "**"; }, //
+
+            [](const BinaryIntrinsicKind::Min &) { return "min"; }, //
+            [](const BinaryIntrinsicKind::Max &) { return "max"; }, //
+
+            [](const BinaryIntrinsicKind::Atan2 &) { return "atan2"; }, //
+            [](const BinaryIntrinsicKind::Hypot &) { return "hypot"; }, //
+
+            [](const BinaryIntrinsicKind::BAnd &) { return "&"; },  //
+            [](const BinaryIntrinsicKind::BOr &) { return "|"; },   //
+            [](const BinaryIntrinsicKind::BXor &) { return "^"; },  //
+            [](const BinaryIntrinsicKind::BSL &) { return "<<"; },  //
+            [](const BinaryIntrinsicKind::BSR &) { return ">>"; },  //
+            [](const BinaryIntrinsicKind::BZSR &) { return ">>>"; } //
+        );
         return repr(x.lhs) + " " + std::string(op) + " " + repr(x.rhs);
       },
       [](const Expr::UnaryLogicIntrinsic &x) {
@@ -80,15 +110,16 @@ std::string backend::C99::mkExpr(const Expr::Any &expr, const std::string &key) 
       },
       [](const Expr::BinaryLogicIntrinsic &x) {
         auto op = variants::total(
-            *x.kind, //
-            [](const BinaryLogicIntrinsicKind::Eq &x) { return "=="; },
-            [](const BinaryLogicIntrinsicKind::Neq &x) { return "!="; },
-            [](const BinaryLogicIntrinsicKind::And &x) { return "&&"; },
-            [](const BinaryLogicIntrinsicKind::Or &x) { return "||"; },
-            [](const BinaryLogicIntrinsicKind::Lte &x) { return "<="; },
-            [](const BinaryLogicIntrinsicKind::Gte &x) { return ">="; },
-            [](const BinaryLogicIntrinsicKind::Lt &x) { return "<"; },
-            [](const BinaryLogicIntrinsicKind::Gt &x) { return ">"; });
+            *x.kind,                                                     //
+            [](const BinaryLogicIntrinsicKind::Eq &x) { return "=="; },  //
+            [](const BinaryLogicIntrinsicKind::Neq &x) { return "!="; }, //
+            [](const BinaryLogicIntrinsicKind::And &x) { return "&&"; }, //
+            [](const BinaryLogicIntrinsicKind::Or &x) { return "||"; },  //
+            [](const BinaryLogicIntrinsicKind::Lte &x) { return "<="; }, //
+            [](const BinaryLogicIntrinsicKind::Gte &x) { return ">="; }, //
+            [](const BinaryLogicIntrinsicKind::Lt &x) { return "<"; },   //
+            [](const BinaryLogicIntrinsicKind::Gt &x) { return ">"; }    //
+        );
         return repr(x.lhs) + " " + std::string(op) + " " + repr(x.rhs);
       },
       [](const Expr::Cast &x) { return "((" + repr(x.as) + ") " + repr(x.from) + ")"; },

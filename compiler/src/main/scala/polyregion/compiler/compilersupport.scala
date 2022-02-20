@@ -1,27 +1,25 @@
-package polyregion
+package polyregion.compiler
 
-import cats.Eval
-import cats.data.EitherT
 import polyregion.ast.PolyAst as p
 
 import java.lang.reflect.Modifier
 import scala.annotation.tailrec
 import scala.reflect.ClassTag
 
-class CompilerException(m: String) extends Exception(m)
+final class CompilerException(m: String) extends Exception(m)
 
 type Result[A] = Either[Throwable, A]
 
-type Deferred[A] = EitherT[Eval, Throwable, A]
+type Deferred[A] = cats.data.EitherT[cats.Eval, Throwable, A]
 
 extension [A](a: Result[A]) {
-  def deferred: Deferred[A]       = EitherT.fromEither[Eval](a)
-  def withFilter(p: A => Boolean) = a.flatMap(x => (if (p(x)) Right(x) else Left(new MatchError(x))))
+  def deferred: Deferred[A]       = cats.data.EitherT.fromEither[cats.Eval](a)
+  def withFilter(p: A => Boolean) = a.flatMap(x => if (p(x)) Right(x) else Left(new MatchError(x)))
 }
 
 extension [A](a: Deferred[A]) {
   def resolve: Result[A]          = a.value.value
-  def withFilter(p: A => Boolean) = a.subflatMap(x => (if (p(x)) Right(x) else Left(new MatchError(x))))
+  def withFilter(p: A => Boolean) = a.subflatMap(x => if (p(x)) Right(x) else Left(new MatchError(x)))
 }
 
 extension [A](a: A) {
@@ -106,7 +104,28 @@ extension (e: p.Expr) {
         case p.UnaryIntrinsicKind.Sin  => "sin"
         case p.UnaryIntrinsicKind.Cos  => "cos"
         case p.UnaryIntrinsicKind.Tan  => "tan"
-        case p.UnaryIntrinsicKind.Abs  => "abs"
+        case p.UnaryIntrinsicKind.Asin => "asin"
+        case p.UnaryIntrinsicKind.Acos => "acos"
+        case p.UnaryIntrinsicKind.Atan => "atan"
+        case p.UnaryIntrinsicKind.Sinh => "sinh"
+        case p.UnaryIntrinsicKind.Cosh => "cosh"
+        case p.UnaryIntrinsicKind.Tanh => "tanh"
+
+        case p.UnaryIntrinsicKind.Signum => "signum"
+        case p.UnaryIntrinsicKind.Abs    => "abs"
+        case p.UnaryIntrinsicKind.Round  => "round"
+        case p.UnaryIntrinsicKind.Ceil   => "ceil"
+        case p.UnaryIntrinsicKind.Floor  => "floor"
+        case p.UnaryIntrinsicKind.Rint   => "rint"
+
+        case p.UnaryIntrinsicKind.Sqrt  => "sqrt"
+        case p.UnaryIntrinsicKind.Cbrt  => "cbrt"
+        case p.UnaryIntrinsicKind.Exp   => "exp"
+        case p.UnaryIntrinsicKind.Expm1 => "expm1"
+        case p.UnaryIntrinsicKind.Log   => "log"
+        case p.UnaryIntrinsicKind.Log1p => "log1p"
+        case p.UnaryIntrinsicKind.Log10 => "log10"
+
         case p.UnaryIntrinsicKind.BNot => "~"
       }
       s"$fn(${lhs.repr})"
@@ -117,19 +136,28 @@ extension (e: p.Expr) {
       s"$fn(${lhs.repr})"
     case p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn) =>
       val op = kind match {
-        case p.BinaryIntrinsicKind.Add  => s"+"
-        case p.BinaryIntrinsicKind.Sub  => s"-"
-        case p.BinaryIntrinsicKind.Mul  => s"*"
-        case p.BinaryIntrinsicKind.Div  => s"/"
-        case p.BinaryIntrinsicKind.Rem  => s"%"
-        case p.BinaryIntrinsicKind.Pow  => s"**"
-        case p.BinaryIntrinsicKind.BAnd => s"&"
-        case p.BinaryIntrinsicKind.BOr  => s"|"
-        case p.BinaryIntrinsicKind.BXor => s"^"
-        case p.BinaryIntrinsicKind.BSL  => s"<<"
-        case p.BinaryIntrinsicKind.BSR  => s">>"
+        case p.BinaryIntrinsicKind.Add => "+"
+        case p.BinaryIntrinsicKind.Sub => "-"
+        case p.BinaryIntrinsicKind.Mul => "*"
+        case p.BinaryIntrinsicKind.Div => "/"
+        case p.BinaryIntrinsicKind.Rem => "%"
+
+        case p.BinaryIntrinsicKind.Pow => "**"
+
+        case p.BinaryIntrinsicKind.Min => "min"
+        case p.BinaryIntrinsicKind.Max => "max"
+
+        case p.BinaryIntrinsicKind.Atan2 => "atan2"
+        case p.BinaryIntrinsicKind.Hypot => "hypot"
+
+        case p.BinaryIntrinsicKind.BAnd => "&"
+        case p.BinaryIntrinsicKind.BOr  => "|"
+        case p.BinaryIntrinsicKind.BXor => "^"
+        case p.BinaryIntrinsicKind.BSL  => "<<"
+        case p.BinaryIntrinsicKind.BSR  => ">>"
+        case p.BinaryIntrinsicKind.BZSR => ">>>"
       }
-      s"${lhs.repr} ${op} ${rhs.repr}"
+      s"${lhs.repr} $op ${rhs.repr}"
 
     case p.Expr.BinaryLogicIntrinsic(lhs, rhs, kind) =>
       val op = kind match {
@@ -142,7 +170,7 @@ extension (e: p.Expr) {
         case p.BinaryLogicIntrinsicKind.Lt  => "<"
         case p.BinaryLogicIntrinsicKind.Gt  => ">"
       }
-      s"${lhs.repr} ${op} ${rhs.repr}"
+      s"${lhs.repr} $op ${rhs.repr}"
     case p.Expr.Cast(from, to) => s"${from.repr}.to[${to.repr}]"
     case p.Expr.Alias(ref)     => s"(~>${ref.repr})"
 
@@ -204,7 +232,7 @@ extension (e: p.Stmt) {
         (p.Expr.Alias(h), Nil)
       case p.Expr.Invoke(name, receiver, args, rtn) => (p.Expr.Invoke(name, receiver.map(f), args.map(f), rtn), Nil)
       case p.Expr.Index(lhs, idx, component)        => (p.Expr.Index(g(lhs), f(idx), component), Nil)
-      // case p.Expr.MkArray(elem)                     => (p.Expr.MkArray(elem), Nil)
+      case p.Expr.Alloc(witness, term)              => (p.Expr.Alloc(witness, f(term)), Nil)
 
     })
 

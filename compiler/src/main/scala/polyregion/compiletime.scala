@@ -7,7 +7,7 @@ import polyregion.ast.{CppCodeGen, PolyAst}
 import polyregion.ast.PolyAst as p
 
 import polyregion.data.MsgPack
-import polyregion.*
+import polyregion.compiler.*
 
 import java.lang.reflect.Modifier
 import java.nio.file.{Files, Paths, StandardOpenOption}

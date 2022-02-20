@@ -3,7 +3,7 @@ package polyregion.compiler.pass
 import cats.data.EitherT
 import cats.syntax.all.*
 import polyregion.ast.PolyAst as p
-import polyregion.*
+import polyregion.compiler.*
 
 import scala.annotation.tailrec
 import scala.quoted.*
@@ -18,9 +18,8 @@ object FnInlinePass {
         x.mapExpr {
           case ivk @ p.Expr.Invoke(name, recv, args, tpe) =>
             lut.get(name) match {
-              case None => (ivk, Nil) // can't find fn, keep it for now
+              case None    => (ivk, Nil) // can't find fn, keep it for now
               case Some(f) =>
-
                 // do substitution first so the incoming names are not mangled
                 val argSubstituted =
                   f.args.map(p.Term.Select(Nil, _)).zip(args).foldLeft(f.body) { case (xs, (target, replacement)) =>

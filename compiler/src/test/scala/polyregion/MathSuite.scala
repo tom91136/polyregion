@@ -20,13 +20,23 @@ class MathSuite extends BaseSuite {
     testExpr[V](a - b)
     testExpr[V](a * b)
     testExpr[V](a / b)
+    testExpr[V](~a)
 
     testExpr[V](a + b + c + d)
     testExpr[V](a - b - c - d)
     testExpr[V](a * b * c * d)
     testExpr[V](a / b / c / d)
+    testExpr[V](a % b % c % d)
+    testExpr[V](a << b << c << d)
+    testExpr[V](a >> b >> c >> d)
+    testExpr[V](a >>> b >>> c >>> d)
+    testExpr[V](a ^ b ^ c ^ d)
+    testExpr[V](a | b | c | d)
+    testExpr[V](a & b & c & d)
 
-    testExpr[V](a + b - c * d / a)
+    testExpr[V](a + b - c * d / a % b)
+    testExpr[V](a << b >> c >>> d ^ a | b & ~a)
+
   }
 
   {
@@ -39,13 +49,22 @@ class MathSuite extends BaseSuite {
     testExpr[V](a - b)
     testExpr[V](a * b)
     testExpr[V](a / b)
+    testExpr[V](~a)
 
     testExpr[V](a + b + c + d)
     testExpr[V](a - b - c - d)
     testExpr[V](a * b * c * d)
     testExpr[V](a / b / c / d)
+    testExpr[V](a % b % c % d)
+    testExpr[V](a << b << c << d)
+    testExpr[V](a >> b >> c >> d)
+    testExpr[V](a >>> b >>> c >>> d)
+    testExpr[V](a ^ b ^ c ^ d)
+    testExpr[V](a | b | c | d)
+    testExpr[V](a & b & c & d)
 
-    testExpr[V](a + b - c * d / a)
+    testExpr[V](a + b - c * d / a % b)
+    testExpr[V](a << b >> c >>> d ^ a | b & ~a)
   }
 
   {

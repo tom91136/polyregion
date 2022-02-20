@@ -67,7 +67,9 @@ object PolyAst {
   enum BinaryIntrinsicKind {
     case Add, Sub, Mul, Div, Rem
     case Pow
-    case BAnd, BOr, BXor, BSL, BSR
+    case Min, Max
+    case Atan2, Hypot
+    case BAnd, BOr, BXor, BSL, BSR, BZSR
   }
 
   enum BinaryLogicIntrinsicKind {
@@ -75,7 +77,9 @@ object PolyAst {
   }
 
   enum UnaryIntrinsicKind {
-    case Sin, Cos, Tan, Abs
+    case Sin, Cos, Tan, Asin, Acos, Atan, Sinh, Cosh, Tanh
+    case Signum, Abs, Round, Ceil, Floor, Rint
+    case Sqrt, Cbrt, Exp, Expm1, Log, Log1p, Log10
     case BNot
   }
 
