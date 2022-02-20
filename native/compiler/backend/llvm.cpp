@@ -289,19 +289,21 @@ llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Functi
       [&](const Expr::UnaryLogicIntrinsic &x) -> ValPtr {
         return variants::total( //
             *x.kind,            //
-            [&](const UnaryLogicIntrinsicKind::Not &x) -> ValPtr { return undefined(__FILE_NAME__, __LINE__, "!"); });
+            [&](const UnaryLogicIntrinsicKind::Not &) -> ValPtr {
+              return B.CreateNot(conditionalLoad(mkRef(x.lhs)), key + "_!");
+            });
       },
       [&](const Expr::BinaryLogicIntrinsic &x) -> ValPtr {
         auto lhs = conditionalLoad(mkRef(x.lhs));
         auto rhs = conditionalLoad(mkRef(x.rhs));
         return variants::total(
             *x.kind, //
-            [&](const BinaryLogicIntrinsicKind::Eq &) -> ValPtr { return undefined(__FILE_NAME__, __LINE__, "=="); },
-            [&](const BinaryLogicIntrinsicKind::Neq &) -> ValPtr { return undefined(__FILE_NAME__, __LINE__, "!="); },
-            [&](const BinaryLogicIntrinsicKind::And &) -> ValPtr { return undefined(__FILE_NAME__, __LINE__, "&&"); },
-            [&](const BinaryLogicIntrinsicKind::Or &) -> ValPtr { return undefined(__FILE_NAME__, __LINE__, "||"); },
-            [&](const BinaryLogicIntrinsicKind::Lte &) -> ValPtr { return undefined(__FILE_NAME__, __LINE__, "<="); },
-            [&](const BinaryLogicIntrinsicKind::Gte &) -> ValPtr { return undefined(__FILE_NAME__, __LINE__, ">="); },
+            [&](const BinaryLogicIntrinsicKind::Eq &) -> ValPtr { return B.CreateICmpEQ(lhs, rhs, key + "_=="); },
+            [&](const BinaryLogicIntrinsicKind::Neq &) -> ValPtr { return B.CreateICmpNE(lhs, rhs, key + "_!="); },
+            [&](const BinaryLogicIntrinsicKind::And &) -> ValPtr { return B.CreateLogicalAnd(lhs, rhs, key + "_&&"); },
+            [&](const BinaryLogicIntrinsicKind::Or &) -> ValPtr { return B.CreateLogicalOr(lhs, rhs, key + "_||"); },
+            [&](const BinaryLogicIntrinsicKind::Lte &) -> ValPtr { return B.CreateICmpSLE(lhs, rhs, key + "_<="); },
+            [&](const BinaryLogicIntrinsicKind::Gte &) -> ValPtr { return B.CreateICmpSGE(lhs, rhs, key + "_>="); },
             [&](const BinaryLogicIntrinsicKind::Lt &) -> ValPtr { return B.CreateICmpSLT(lhs, rhs, key + "_<"); },
             [&](const BinaryLogicIntrinsicKind::Gt &x) -> ValPtr { return B.CreateICmpSGT(lhs, rhs, key + "_>"); });
       },

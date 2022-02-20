@@ -11,6 +11,7 @@ object Toggles {
 
   // ok
   final inline val InlineArraySuite = false
+  final inline val LogicSuite       = false
   final inline val BufferSuite      = false
   final inline val CaptureSuite     = false
   final inline val ControlFlowSuite = false

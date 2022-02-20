@@ -23,17 +23,17 @@ object IntrinsifyPass {
   private def intrinsifyInstanceApply(s: p.Stmt, idx: Int) = s.mapAccExpr[p.Sym] {
     case inv @ p.Expr.Invoke(sym, Some(recv), args, rtn) =>
       (sym.fqn, recv, args) match {
-
         case (op :: Nil, x, Nil) if x.tpe.kind == p.TypeKind.Integral || x.tpe.kind == p.TypeKind.Fractional =>
+          // xxx bool is integral
           val expr = op match {
-            case "toDouble" => p.Expr.Cast(recv, p.Type.Double)
-            case "toFloat"  => p.Expr.Cast(recv, p.Type.Float)
-            case "toLong"   => p.Expr.Cast(recv, p.Type.Long)
-            case "toInt"    => p.Expr.Cast(recv, p.Type.Int)
-            case "toShort"  => p.Expr.Cast(recv, p.Type.Short)
-            case "toChar"   => p.Expr.Cast(recv, p.Type.Char)
-            case "toByte"   => p.Expr.Cast(recv, p.Type.Byte)
-            case _          => ???
+            case "toDouble"                        => p.Expr.Cast(recv, p.Type.Double)
+            case "toFloat"                         => p.Expr.Cast(recv, p.Type.Float)
+            case "toLong"                          => p.Expr.Cast(recv, p.Type.Long)
+            case "toInt"                           => p.Expr.Cast(recv, p.Type.Int)
+            case "toShort"                         => p.Expr.Cast(recv, p.Type.Short)
+            case "toChar"                          => p.Expr.Cast(recv, p.Type.Char)
+            case "toByte"                          => p.Expr.Cast(recv, p.Type.Byte)
+            case "unary_!" if x.tpe == p.Type.Bool => p.Expr.UnaryLogicIntrinsic(recv, p.UnaryLogicIntrinsicKind.Not)
           }
           (expr, Nil, sym :: Nil)
         case (op :: Nil, x, y :: Nil)
