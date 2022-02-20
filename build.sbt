@@ -12,9 +12,9 @@ lazy val commonSettings = Seq(
       )
     )
   },
-  scalacOptions ++= Seq(                     //
-    "-no-indent",                            //
-    "-Wconf:cat=other-match-analysis:error", //
+  scalacOptions ++= Seq(                    //
+    "-no-indent",                           //
+    "-Wconf:cat=other-match-analysis:error" //
     // "-language:strictEquality"
   ),
   scalafmtDetailedError := true,
@@ -88,18 +88,8 @@ lazy val `examples-scala` = project
     assembly / mainClass := mainCls,
     scalacOptions ++= Seq("-Yretain-trees"),
     libraryDependencies ++= Seq(
-      // ("com.github.jnr"         % "jffi"                       % "1.3.8").classifier("native"),
-      // "com.github.jnr"          % "jffi"                       % "1.3.8",
-      // "org.bytedeco"            % "llvm-platform"              % "12.0.1-1.5.6",
-      // "org.bytedeco"            % "libffi-platform"            % "3.4.2-1.5.6",
-      // "org.openjdk.jol"         % "jol-core"                   % "0.16",
-      // "net.openhft"             % "affinity"                   % "3.20.0",
-      // "org.typelevel"          %% "cats-core"                  % catsVersion,
-      // "io.github.iltotore"     %% "iron"                       % "1.1.2",
-      // "io.github.iltotore"     %% "iron-numeric"               % "1.1-1.0.1",
-      // "io.github.iltotore"     %% "iron-string"                % "1.1-0.1.0",
-      // "io.github.iltotore"     %% "iron-iterable"              % "1.1-0.1.0",
-      // "org.scala-lang.modules" %% "scala-parallel-collections" % "1.0.4"
+      ("com.github.pathikrit"  %% "better-files"               % "3.9.1").cross(CrossVersion.for3Use2_13),
+      "org.scala-lang.modules" %% "scala-parallel-collections" % "1.0.4"
     )
   )
   .dependsOn(compiler % Provided, `runtime-scala`)
