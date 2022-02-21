@@ -519,7 +519,9 @@ struct Log;
 struct Log1p;
 struct Log10;
 struct BNot;
-using Any = Alternative<Sin, Cos, Tan, Asin, Acos, Atan, Sinh, Cosh, Tanh, Signum, Abs, Round, Ceil, Floor, Rint, Sqrt, Cbrt, Exp, Expm1, Log, Log1p, Log10, BNot>;
+struct Pos;
+struct Neg;
+using Any = Alternative<Sin, Cos, Tan, Asin, Acos, Atan, Sinh, Cosh, Tanh, Signum, Abs, Round, Ceil, Floor, Rint, Sqrt, Cbrt, Exp, Expm1, Log, Log1p, Log10, BNot, Pos, Neg>;
 struct EXPORT Base {
   protected:
   Base() = default;
@@ -686,6 +688,20 @@ struct EXPORT BNot : UnaryIntrinsicKind::Base {
   EXPORT operator Any() const { return std::make_shared<BNot>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::BNot &);
   EXPORT friend bool operator==(const UnaryIntrinsicKind::BNot &, const UnaryIntrinsicKind::BNot &);
+};
+
+struct EXPORT Pos : UnaryIntrinsicKind::Base {
+  Pos() noexcept : UnaryIntrinsicKind::Base() {}
+  EXPORT operator Any() const { return std::make_shared<Pos>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Pos &);
+  EXPORT friend bool operator==(const UnaryIntrinsicKind::Pos &, const UnaryIntrinsicKind::Pos &);
+};
+
+struct EXPORT Neg : UnaryIntrinsicKind::Base {
+  Neg() noexcept : UnaryIntrinsicKind::Base() {}
+  EXPORT operator Any() const { return std::make_shared<Neg>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Neg &);
+  EXPORT friend bool operator==(const UnaryIntrinsicKind::Neg &, const UnaryIntrinsicKind::Neg &);
 };
 } // namespace UnaryIntrinsicKind
 namespace BinaryLogicIntrinsicKind { 
@@ -1249,6 +1265,12 @@ template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Log10> {
 };
 template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::BNot> {
   std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::BNot &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Pos> {
+  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Pos &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Neg> {
+  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Neg &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Base> {
   std::size_t operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Base &) const noexcept;

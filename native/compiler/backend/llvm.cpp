@@ -316,6 +316,18 @@ llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Functi
 
             [&](const UnaryIntrinsicKind::BNot &) -> ValPtr {
               return unaryExpr(arg, tpe, [&](auto x) { return B.CreateNot(x); });
+            },
+            [&](const UnaryIntrinsicKind::Pos &) -> ValPtr {
+              return unaryNumOp(
+                  arg, tpe,                  //
+                  [&](auto x) { return x; }, //
+                  [&](auto x) { return x; });
+            },
+            [&](const UnaryIntrinsicKind::Neg &) -> ValPtr {
+              return unaryNumOp(
+                  arg, tpe,                               //
+                  [&](auto x) { return B.CreateNeg(x); }, //
+                  [&](auto x) { return B.CreateFNeg(x); });
             });
       },
       [&](const Expr::BinaryIntrinsic &x) {
@@ -520,7 +532,8 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
         // [T : val] =>> t:T  =   rhs:T  ; lut += &t
 
         if (x.expr && tpe(*x.expr) != x.name.tpe) {
-          throw std::logic_error("Semantic error: name type and rhs expr mismatch (" + repr(x) + ")");
+          throw std::logic_error("Semantic error: name type " + to_string(x.name.tpe) + " and rhs expr type " +
+                                 to_string(tpe(*x.expr)) + " mismatch (" + repr(x) + ")");
         }
         auto rhs = map_opt(x.expr, [&](auto &&expr) { return mkExprValue(expr, fn, x.name.symbol + "_var_rhs"); });
         if (std::holds_alternative<Type::Array>(*x.name.tpe)) {

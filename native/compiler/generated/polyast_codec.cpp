@@ -740,6 +740,22 @@ json UnaryIntrinsicKind::bnot_to_json(const UnaryIntrinsicKind::BNot& x) {
   return json::array({});
 }
 
+UnaryIntrinsicKind::Pos UnaryIntrinsicKind::pos_from_json(const json& j) { 
+  return {};
+}
+
+json UnaryIntrinsicKind::pos_to_json(const UnaryIntrinsicKind::Pos& x) { 
+  return json::array({});
+}
+
+UnaryIntrinsicKind::Neg UnaryIntrinsicKind::neg_from_json(const json& j) { 
+  return {};
+}
+
+json UnaryIntrinsicKind::neg_to_json(const UnaryIntrinsicKind::Neg& x) { 
+  return json::array({});
+}
+
 UnaryIntrinsicKind::Any UnaryIntrinsicKind::any_from_json(const json& j) { 
   size_t ord = j.at(0).get<size_t>();
   const auto t = j.at(1);
@@ -767,6 +783,8 @@ UnaryIntrinsicKind::Any UnaryIntrinsicKind::any_from_json(const json& j) {
   case 20: return UnaryIntrinsicKind::log1p_from_json(t);
   case 21: return UnaryIntrinsicKind::log10_from_json(t);
   case 22: return UnaryIntrinsicKind::bnot_from_json(t);
+  case 23: return UnaryIntrinsicKind::pos_from_json(t);
+  case 24: return UnaryIntrinsicKind::neg_from_json(t);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
   }
 }
@@ -796,6 +814,8 @@ json UnaryIntrinsicKind::any_to_json(const UnaryIntrinsicKind::Any& x) {
   [](const UnaryIntrinsicKind::Log1p &y) -> json { return {20, UnaryIntrinsicKind::log1p_to_json(y)}; },
   [](const UnaryIntrinsicKind::Log10 &y) -> json { return {21, UnaryIntrinsicKind::log10_to_json(y)}; },
   [](const UnaryIntrinsicKind::BNot &y) -> json { return {22, UnaryIntrinsicKind::bnot_to_json(y)}; },
+  [](const UnaryIntrinsicKind::Pos &y) -> json { return {23, UnaryIntrinsicKind::pos_to_json(y)}; },
+  [](const UnaryIntrinsicKind::Neg &y) -> json { return {24, UnaryIntrinsicKind::neg_to_json(y)}; },
   [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
   }, *x);
 }
@@ -1275,13 +1295,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "83304ca859c16e8f6941fedd8639af2a") {
-   throw std::runtime_error("Expecting ADT hash to be 83304ca859c16e8f6941fedd8639af2a, but was " + hash);
+  if(hash != "1239f767cde40f268ac665c75d38ddf0") {
+   throw std::runtime_error("Expecting ADT hash to be 1239f767cde40f268ac665c75d38ddf0, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"83304ca859c16e8f6941fedd8639af2a", x});
+  return json::array({"1239f767cde40f268ac665c75d38ddf0", x});
 }
 } // namespace polyregion::polyast

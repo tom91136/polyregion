@@ -127,6 +127,11 @@ extension (e: p.Expr) {
         case p.UnaryIntrinsicKind.Log10 => "log10"
 
         case p.UnaryIntrinsicKind.BNot => "~"
+
+        case p.UnaryIntrinsicKind.Pos => "+"
+        case p.UnaryIntrinsicKind.Neg => "-"
+
+
       }
       s"$fn(${lhs.repr})"
     case p.Expr.UnaryLogicIntrinsic(lhs, kind) =>

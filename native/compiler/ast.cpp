@@ -86,7 +86,9 @@ using std::string;
             [](const UnaryIntrinsicKind::Log &) { return "log"; },     //
             [](const UnaryIntrinsicKind::Log1p &) { return "log1p"; }, //
             [](const UnaryIntrinsicKind::Log10 &) { return "log10"; }, //
-            [](const UnaryIntrinsicKind::BNot &) { return "~"; }       //
+            [](const UnaryIntrinsicKind::BNot &) { return "~"; },      //
+            [](const UnaryIntrinsicKind::Pos &) { return "+"; },       //
+            [](const UnaryIntrinsicKind::Neg &) { return "-"; }        //
         );
         return std::string(op) + "(" + repr(x.lhs) + ")";
       },

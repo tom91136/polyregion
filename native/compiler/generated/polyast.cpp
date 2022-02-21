@@ -584,6 +584,20 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::BNot &, const UnaryIntrinsicKind::BNot &) { return true; }
 
+std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Pos &x) {
+  os << "Pos(";
+  os << ')';
+  return os;
+}
+bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Pos &, const UnaryIntrinsicKind::Pos &) { return true; }
+
+std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Neg &x) {
+  os << "Neg(";
+  os << ')';
+  return os;
+}
+bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Neg &, const UnaryIntrinsicKind::Neg &) { return true; }
+
 std::ostream &BinaryLogicIntrinsicKind::operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Any &x) {
   std::visit([&os](auto &&arg) { os << *arg; }, x);
   return os;
@@ -1290,6 +1304,14 @@ std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Log10>::operator(
 }
 std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::BNot>::operator()(const polyregion::polyast::UnaryIntrinsicKind::BNot &x) const noexcept {
   std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::BNot");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Pos>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Pos &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Pos");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Neg>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Neg &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Neg");
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Base>::operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Base &x) const noexcept {

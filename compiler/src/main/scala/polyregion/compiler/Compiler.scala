@@ -24,6 +24,8 @@ object Compiler {
 
   def compileFn(using q: Quoted)(f: q.DefDef): Result[(q.FnDependencies, p.Function)] = {
     println(s" -> Compile dependent method: ${f.show}")
+    println(s" -> body(long):\n${f.show(using q.Printer.TreeAnsiCode).indent(4)}")
+
     (for {
 
       (fnRtnValue, fnTpe, c) <- q.FnContext().typer(f.returnTpt.tpe)

@@ -118,6 +118,10 @@ namespace UnaryIntrinsicKind {
 [[nodiscard]] EXPORT json log10_to_json(const UnaryIntrinsicKind::Log10 &);
 [[nodiscard]] EXPORT UnaryIntrinsicKind::BNot bnot_from_json(const json &);
 [[nodiscard]] EXPORT json bnot_to_json(const UnaryIntrinsicKind::BNot &);
+[[nodiscard]] EXPORT UnaryIntrinsicKind::Pos pos_from_json(const json &);
+[[nodiscard]] EXPORT json pos_to_json(const UnaryIntrinsicKind::Pos &);
+[[nodiscard]] EXPORT UnaryIntrinsicKind::Neg neg_from_json(const json &);
+[[nodiscard]] EXPORT json neg_to_json(const UnaryIntrinsicKind::Neg &);
 [[nodiscard]] EXPORT UnaryIntrinsicKind::Any any_from_json(const json &);
 [[nodiscard]] EXPORT json any_to_json(const UnaryIntrinsicKind::Any &);
 } // namespace UnaryIntrinsicKind

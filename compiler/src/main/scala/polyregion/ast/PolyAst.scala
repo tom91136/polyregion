@@ -81,6 +81,7 @@ object PolyAst {
     case Signum, Abs, Round, Ceil, Floor, Rint
     case Sqrt, Cbrt, Exp, Expm1, Log, Log1p, Log10
     case BNot
+    case Pos, Neg
   }
 
   enum UnaryLogicIntrinsicKind {
