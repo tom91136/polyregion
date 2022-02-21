@@ -30,7 +30,7 @@ private:
 
   llvm::Value *mkSelectPtr(const Term::Select &select);
   llvm::Value *mkRef(const Term::Any &ref);
-  llvm::Value *mkExprValue(const Expr::Any &expr, llvm::Function *fn, const std::string &key);
+  llvm::Value *mkExprValue(const Expr::Any &expr, llvm::Function *overload, const std::string &key);
   void mkStmt(const Stmt::Any &stmt, llvm::Function *fn);
 
 public:

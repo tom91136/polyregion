@@ -174,52 +174,58 @@ llvm::Value *LLVMAstTransformer::mkRef(const Term::Any &ref) {
 
 llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Function *fn, const std::string &key) {
 
-  const auto binaryExpr = [&](const Term::Any &l, const Term::Any &r,
-                              const std::function<llvm::Value *(llvm::Value *, llvm::Value *)> &fn) {
+  using ValPtr = llvm::Value *;
+  namespace Intr = llvm::Intrinsic;
+
+  const auto unaryExpr = [&](const Term::Any &l, const Type::Any &rtn, const std::function<ValPtr(ValPtr)> &fn) {
+    if (tpe(l) != rtn) {
+      throw std::logic_error("Semantic error: lhs type " + to_string(tpe(l)) + " of binary numeric operation in " +
+                             to_string(expr) + " doesn't match return type " + to_string(rtn));
+    }
+
+    return fn(conditionalLoad(mkRef(l)));
+  };
+
+  const auto binaryExpr = [&](const Term::Any &l, const Term::Any &r, const Type::Any &rtn,
+                              const std::function<ValPtr(ValPtr, ValPtr)> &fn) {
+    if (tpe(l) != rtn) {
+      throw std::logic_error("Semantic error: lhs type " + to_string(tpe(l)) + " of binary numeric operation in " +
+                             to_string(expr) + " doesn't match return type " + to_string(rtn));
+    }
+    if (tpe(r) != rtn) {
+      throw std::logic_error("Semantic error: rhs type " + to_string(tpe(r)) + " of binary numeric operation in " +
+                             to_string(expr) + " doesn't match return type " + to_string(rtn));
+    }
+
     return fn(conditionalLoad(mkRef(l)), conditionalLoad(mkRef(r)));
   };
 
-  const auto binaryNumOp =
-      [&](const Term::Any &l, const Term::Any &r, const Type::Any &tpe,
-          const std::function<llvm::Value *(llvm::Value *, llvm::Value *)> &integralFn,
-          const std::function<llvm::Value *(llvm::Value *, llvm::Value *)> &fractionalFn) -> llvm::Value * {
-    return binaryExpr(l, r, [&](auto lhs, auto rhs) -> llvm::Value * {
-      if (std::holds_alternative<TypeKind::Integral>(*kind(tpe))) {
-        return integralFn(lhs, rhs);
-      } else if (std::holds_alternative<TypeKind::Fractional>(*kind(tpe))) {
-        return fractionalFn(lhs, rhs);
+  const auto unaryNumOp = [&](const Term::Any &arg, const Type::Any &rtn,
+                              const std::function<ValPtr(ValPtr)> &integralFn,
+                              const std::function<ValPtr(ValPtr)> &fractionalFn) -> ValPtr {
+    return unaryExpr(arg, rtn, [&](auto lhs) -> ValPtr {
+      if (holds<TypeKind::Integral>(kind(rtn))) {
+        return integralFn(lhs);
+      } else if (holds<TypeKind::Fractional>(kind(rtn))) {
+        return fractionalFn(lhs);
       } else {
         return undefined(__FILE_NAME__, __LINE__);
       }
     });
   };
 
-  const auto unaryNumOp = //
-      [&](const Term::Any &arg, const Type::Any &tpe, const std::function<llvm::Value *(llvm::Value *)> &integralFn,
-          const std::function<llvm::Value *(llvm::Value *)> &fractionalFn) -> llvm::Value * {
-    auto x = conditionalLoad(mkRef(arg));
-    if (std::holds_alternative<TypeKind::Integral>(*kind(tpe))) {
-      return integralFn(x);
-    } else if (std::holds_alternative<TypeKind::Fractional>(*kind(tpe))) {
-      return fractionalFn(x);
-    } else {
-      return undefined(__FILE_NAME__, __LINE__);
-    }
-  };
-
-  const auto unaryIntrinsic = [&](llvm::Intrinsic::ID id, const Type::Any &tpe, const Term::Any &arg) {
-    auto t = mkTpe(tpe);
-    auto cos = llvm::Intrinsic::getDeclaration(fn->getParent(), id, t);
-    return B.CreateCall(cos, conditionalLoad(mkRef(arg)));
-  };
-
-  const auto binaryIntrinsic = [&](llvm::Intrinsic::ID id, const Type::Any &tpe, //
-                                   const Term::Any &lhs, const Term::Any &rhs) {
-    auto t = mkTpe(tpe);
-    // XXX the type here is about the overloading of intrinsic names, not about the parameter types
-    // i.e. f32 is for foo.f32(float %a, float %b, float %c)
-    auto cos = llvm::Intrinsic::getDeclaration(fn->getParent(), id, t);
-    return B.CreateCall(cos, {conditionalLoad(mkRef(lhs)), conditionalLoad(mkRef(rhs))});
+  const auto binaryNumOp = [&](const Term::Any &l, const Term::Any &r, const Type::Any &rtn,
+                               const std::function<ValPtr(ValPtr, ValPtr)> &integralFn,
+                               const std::function<ValPtr(ValPtr, ValPtr)> &fractionalFn) -> ValPtr {
+    return binaryExpr(l, r, rtn, [&](auto lhs, auto rhs) -> ValPtr {
+      if (holds<TypeKind::Integral>(kind(rtn))) {
+        return integralFn(lhs, rhs);
+      } else if (holds<TypeKind::Fractional>(kind(rtn))) {
+        return fractionalFn(lhs, rhs);
+      } else {
+        return undefined(__FILE_NAME__, __LINE__);
+      }
+    });
   };
 
   const auto externUnaryCall = [&](const std::string &name, const Type::Any &tpe, const Term::Any &arg) {
@@ -237,17 +243,22 @@ llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Functi
     return B.CreateCall(f, {conditionalLoad(mkRef(lhs)), conditionalLoad(mkRef(rhs))});
   };
 
-  using ValPtr = llvm::Value *;
-  namespace Intr = llvm::Intrinsic;
+  const auto unaryIntrinsic = [&](llvm::Intrinsic::ID id, const Type::Any &overload, const Term::Any &arg) {
+    auto callee = llvm::Intrinsic::getDeclaration(fn->getParent(), id, mkTpe(overload));
+    return B.CreateCall(callee, conditionalLoad(mkRef(arg)));
+  };
+
+  const auto binaryIntrinsic = [&](llvm::Intrinsic::ID id, const Type::Any &overload, //
+                                   const Term::Any &lhs, const Term::Any &rhs) {
+    // XXX the overload type here is about the overloading of intrinsic names, not about the parameter types
+    // i.e. f32 is for foo.f32(float %a, float %b, float %c)
+    auto callee = llvm::Intrinsic::getDeclaration(fn->getParent(), id, mkTpe(overload));
+    return B.CreateCall(callee, {conditionalLoad(mkRef(lhs)), conditionalLoad(mkRef(rhs))});
+  };
 
   return variants::total(
       *expr, //
       [&](const Expr::UnaryIntrinsic &x) {
-        if (x.rtn != tpe(x.lhs)) {
-          throw std::logic_error("Semantic error: arg type (" + to_string(tpe(x.lhs)) +
-                                 ") of unary intrinsic doesn't match return type (" + to_string(x.rtn) + ")(" +
-                                 repr(x) + ")");
-        }
         auto tpe = x.rtn;
         auto arg = x.lhs;
         return variants::total(
@@ -264,27 +275,25 @@ llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Functi
             [&](const UnaryIntrinsicKind::Tanh &) -> ValPtr { return externUnaryCall("tanh", tpe, arg); }, //
 
             [&](const UnaryIntrinsicKind::Signum &) -> ValPtr {
-              auto val = conditionalLoad(mkRef(arg));
-              if (std::holds_alternative<TypeKind::Integral>(*kind(tpe))) {
-                auto msbOffset = val->getType()->getPrimitiveSizeInBits() - 1;
-                return B.CreateOr(B.CreateAShr(val, msbOffset), B.CreateLShr(B.CreateNeg(val), msbOffset));
-              } else if (std::holds_alternative<TypeKind::Fractional>(*kind(tpe))) {
-                auto nan = B.CreateFCmpUNO(val, val);
-                auto zero = B.CreateFCmpUNO(val, llvm::ConstantFP::get(val->getType(), 0));
-                Term::Any magnitude;
-                if (std::holds_alternative<Type::Float>(*tpe)) {
-                  magnitude = Term::FloatConst(1);
-                } else if (std::holds_alternative<Type::Double>(*tpe)) {
-                  magnitude = Term::DoubleConst(1);
-                } else {
-                  error(__FILE_NAME__, __LINE__);
-                }
-                return B.CreateSelect(B.CreateLogicalOr(nan, zero), val,
-                                      binaryIntrinsic(Intr::copysign, tpe, magnitude, arg));
-              } else {
-                throw std::logic_error("Semantic error: signum not called on numeric type (" + to_string(tpe) + ")(" +
-                                       repr(x) + ")");
-              }
+              return unaryNumOp(
+                  arg, tpe, //
+                  [&](auto x) {
+                    auto msbOffset = x->getType()->getPrimitiveSizeInBits() - 1;
+                    return B.CreateOr(B.CreateAShr(x, msbOffset), B.CreateLShr(B.CreateNeg(x), msbOffset));
+                  },
+                  [&](auto x) {
+                    auto nan = B.CreateFCmpUNO(x, x);
+                    auto zero = B.CreateFCmpUNO(x, llvm::ConstantFP::get(x->getType(), 0));
+                    Term::Any magnitude;
+                    if (holds<Type::Float>(tpe))        //
+                      magnitude = Term::FloatConst(1);  //
+                    else if (holds<Type::Double>(tpe))  //
+                      magnitude = Term::DoubleConst(1); //
+                    else
+                      error(__FILE_NAME__, __LINE__);
+                    return B.CreateSelect(B.CreateLogicalOr(nan, zero), x,
+                                          binaryIntrinsic(Intr::copysign, tpe, magnitude, arg));
+                  });
             }, //
             [&](const UnaryIntrinsicKind::Abs &) -> ValPtr {
               return unaryNumOp(
@@ -295,7 +304,7 @@ llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Functi
             [&](const UnaryIntrinsicKind::Round &) -> ValPtr { return unaryIntrinsic(Intr::round, tpe, arg); }, //
             [&](const UnaryIntrinsicKind::Ceil &) -> ValPtr { return unaryIntrinsic(Intr::ceil, tpe, arg); },   //
             [&](const UnaryIntrinsicKind::Floor &) -> ValPtr { return unaryIntrinsic(Intr::floor, tpe, arg); }, //
-            [&](const UnaryIntrinsicKind::Rint &) -> ValPtr { return unaryIntrinsic(Intr::rint, tpe, arg); }, //
+            [&](const UnaryIntrinsicKind::Rint &) -> ValPtr { return unaryIntrinsic(Intr::rint, tpe, arg); },   //
 
             [&](const UnaryIntrinsicKind::Sqrt &) -> ValPtr { return unaryIntrinsic(Intr::sqrt, tpe, arg); },   //
             [&](const UnaryIntrinsicKind::Cbrt &) -> ValPtr { return externUnaryCall("cbrt", tpe, arg); },      //
@@ -305,53 +314,46 @@ llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Functi
             [&](const UnaryIntrinsicKind::Log1p &) -> ValPtr { return externUnaryCall("log1p", tpe, arg); },    //
             [&](const UnaryIntrinsicKind::Log10 &) -> ValPtr { return unaryIntrinsic(Intr::log10, tpe, arg); }, //
 
-            [&](const UnaryIntrinsicKind::BNot &) -> ValPtr { return B.CreateNot(conditionalLoad(mkRef(arg))); });
+            [&](const UnaryIntrinsicKind::BNot &) -> ValPtr {
+              return unaryExpr(arg, tpe, [&](auto x) { return B.CreateNot(x); });
+            });
       },
       [&](const Expr::BinaryIntrinsic &x) {
-        if (x.rtn != tpe(x.lhs)) {
-          throw std::logic_error("Semantic error: lhs arg type (" + to_string(tpe(x.lhs)) +
-                                 ") of binary intrinsic doesn't match return type (" + to_string(x.rtn) + ")(" +
-                                 repr(x) + ")");
-        }
-
-        if (x.rtn != tpe(x.rhs)) {
-          throw std::logic_error("Semantic error: rhs arg type (" + to_string(tpe(x.rhs)) +
-                                 ") of binary intrinsic doesn't match return type (" + to_string(x.rtn) + ")(" +
-                                 repr(x) + ")");
-        }
         return variants::total(
             *x.kind, //
             [&](const BinaryIntrinsicKind::Add &) -> ValPtr {
               return binaryNumOp(
                   x.lhs, x.rhs, x.rtn, //
-                  [&](auto l, auto r) { return B.CreateAdd(l, r, key + "_+"); },
-                  [&](auto l, auto r) { return B.CreateFAdd(l, r, key + "_+"); });
+                  [&](auto l, auto r) { return B.CreateAdd(l, r, key); },
+                  [&](auto l, auto r) { return B.CreateFAdd(l, r, key); });
             },
             [&](const BinaryIntrinsicKind::Sub &) -> ValPtr {
               return binaryNumOp(
                   x.lhs, x.rhs, x.rtn, //
-                  [&](auto l, auto r) { return B.CreateSub(l, r, key + "_-"); },
-                  [&](auto l, auto r) { return B.CreateFSub(l, r, key + "_-"); });
+                  [&](auto l, auto r) { return B.CreateSub(l, r, key); },
+                  [&](auto l, auto r) { return B.CreateFSub(l, r, key); });
             },
             [&](const BinaryIntrinsicKind::Div &) -> ValPtr {
               return binaryNumOp(
                   x.lhs, x.rhs, x.rtn, //
-                  [&](auto l, auto r) { return B.CreateSDiv(l, r, key + "_*"); },
-                  [&](auto l, auto r) { return B.CreateFDiv(l, r, key + "_*"); });
+                  [&](auto l, auto r) { return B.CreateSDiv(l, r, key); },
+                  [&](auto l, auto r) { return B.CreateFDiv(l, r, key); });
             },
             [&](const BinaryIntrinsicKind::Mul &) -> ValPtr {
               return binaryNumOp(
                   x.lhs, x.rhs, x.rtn, //
-                  [&](auto l, auto r) { return B.CreateMul(l, r, key + "_/"); },
-                  [&](auto l, auto r) { return B.CreateFMul(l, r, key + "_/"); });
+                  [&](auto l, auto r) { return B.CreateMul(l, r, key); },
+                  [&](auto l, auto r) { return B.CreateFMul(l, r, key); });
             },
             [&](const BinaryIntrinsicKind::Rem &) -> ValPtr {
               return binaryNumOp(
                   x.lhs, x.rhs, x.rtn, //
-                  [&](auto l, auto r) { return B.CreateSRem(l, r, key + "_%"); },
-                  [&](auto l, auto r) { return B.CreateFRem(l, r, key + "_%"); });
+                  [&](auto l, auto r) { return B.CreateSRem(l, r, key); },
+                  [&](auto l, auto r) { return B.CreateFRem(l, r, key); });
             },
-            [&](const BinaryIntrinsicKind::Pow &) -> ValPtr { return binaryIntrinsic(Intr::pow, x.rtn, x.lhs, x.rhs); },
+            [&](const BinaryIntrinsicKind::Pow &) -> ValPtr {
+              return binaryIntrinsic(Intr::pow, x.rtn, x.lhs, x.rhs); //
+            },
 
             [&](const BinaryIntrinsicKind::Min &) -> ValPtr {
               return binaryNumOp(
@@ -374,22 +376,22 @@ llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Functi
             }, //
 
             [&](const BinaryIntrinsicKind::BAnd &) -> ValPtr {
-              return binaryExpr(x.lhs, x.rhs, [&](auto l, auto r) { return B.CreateAnd(l, r); });
+              return binaryExpr(x.lhs, x.rhs, x.rtn, [&](auto l, auto r) { return B.CreateAnd(l, r); });
             },
             [&](const BinaryIntrinsicKind::BOr &) -> ValPtr {
-              return binaryExpr(x.lhs, x.rhs, [&](auto l, auto r) { return B.CreateOr(l, r); });
+              return binaryExpr(x.lhs, x.rhs, x.rtn, [&](auto l, auto r) { return B.CreateOr(l, r); });
             },
             [&](const BinaryIntrinsicKind::BXor &) -> ValPtr {
-              return binaryExpr(x.lhs, x.rhs, [&](auto l, auto r) { return B.CreateXor(l, r); });
+              return binaryExpr(x.lhs, x.rhs, x.rtn, [&](auto l, auto r) { return B.CreateXor(l, r); });
             },
             [&](const BinaryIntrinsicKind::BSL &) -> ValPtr {
-              return binaryExpr(x.lhs, x.rhs, [&](auto l, auto r) { return B.CreateShl(l, r); });
+              return binaryExpr(x.lhs, x.rhs, x.rtn, [&](auto l, auto r) { return B.CreateShl(l, r); });
             },
             [&](const BinaryIntrinsicKind::BSR &) -> ValPtr {
-              return binaryExpr(x.lhs, x.rhs, [&](auto l, auto r) { return B.CreateAShr(l, r); });
+              return binaryExpr(x.lhs, x.rhs, x.rtn, [&](auto l, auto r) { return B.CreateAShr(l, r); });
             },
             [&](const BinaryIntrinsicKind::BZSR &) -> ValPtr {
-              return binaryExpr(x.lhs, x.rhs, [&](auto l, auto r) { return B.CreateLShr(l, r); });
+              return binaryExpr(x.lhs, x.rhs, x.rtn, [&](auto l, auto r) { return B.CreateLShr(l, r); });
             } //
         );
       },
@@ -397,7 +399,7 @@ llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Functi
         return variants::total( //
             *x.kind,            //
             [&](const UnaryLogicIntrinsicKind::Not &) -> ValPtr {
-              return B.CreateNot(conditionalLoad(mkRef(x.lhs)), key + "_!");
+              return B.CreateNot(conditionalLoad(mkRef(x.lhs)), key);
             });
       },
       [&](const Expr::BinaryLogicIntrinsic &x) -> ValPtr {
@@ -405,14 +407,14 @@ llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Functi
         auto rhs = conditionalLoad(mkRef(x.rhs));
         return variants::total(
             *x.kind, //
-            [&](const BinaryLogicIntrinsicKind::Eq &) -> ValPtr { return B.CreateICmpEQ(lhs, rhs, key + "_=="); },
-            [&](const BinaryLogicIntrinsicKind::Neq &) -> ValPtr { return B.CreateICmpNE(lhs, rhs, key + "_!="); },
-            [&](const BinaryLogicIntrinsicKind::And &) -> ValPtr { return B.CreateLogicalAnd(lhs, rhs, key + "_&&"); },
-            [&](const BinaryLogicIntrinsicKind::Or &) -> ValPtr { return B.CreateLogicalOr(lhs, rhs, key + "_||"); },
-            [&](const BinaryLogicIntrinsicKind::Lte &) -> ValPtr { return B.CreateICmpSLE(lhs, rhs, key + "_<="); },
-            [&](const BinaryLogicIntrinsicKind::Gte &) -> ValPtr { return B.CreateICmpSGE(lhs, rhs, key + "_>="); },
-            [&](const BinaryLogicIntrinsicKind::Lt &) -> ValPtr { return B.CreateICmpSLT(lhs, rhs, key + "_<"); },
-            [&](const BinaryLogicIntrinsicKind::Gt &x) -> ValPtr { return B.CreateICmpSGT(lhs, rhs, key + "_>"); });
+            [&](const BinaryLogicIntrinsicKind::Eq &) -> ValPtr { return B.CreateICmpEQ(lhs, rhs); },
+            [&](const BinaryLogicIntrinsicKind::Neq &) -> ValPtr { return B.CreateICmpNE(lhs, rhs); },
+            [&](const BinaryLogicIntrinsicKind::And &) -> ValPtr { return B.CreateLogicalAnd(lhs, rhs); },
+            [&](const BinaryLogicIntrinsicKind::Or &) -> ValPtr { return B.CreateLogicalOr(lhs, rhs); },
+            [&](const BinaryLogicIntrinsicKind::Lte &) -> ValPtr { return B.CreateICmpSLE(lhs, rhs); },
+            [&](const BinaryLogicIntrinsicKind::Gte &) -> ValPtr { return B.CreateICmpSGE(lhs, rhs); },
+            [&](const BinaryLogicIntrinsicKind::Lt &) -> ValPtr { return B.CreateICmpSLT(lhs, rhs); },
+            [&](const BinaryLogicIntrinsicKind::Gt &x) -> ValPtr { return B.CreateICmpSGT(lhs, rhs); });
       },
       [&](const Expr::Cast &x) -> ValPtr {
         // we only allow widening or narrowing of integral and fractional types

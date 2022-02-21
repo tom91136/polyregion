@@ -53,6 +53,9 @@ TODO
 TODO
 
 * General implicit conversions/extensions (e.g `RichInt`, `ArrayOps`, etc)
+* All numeric type overloads for the math libraries
+
+
 * Nested `def`
 * `lazy val`
 * `try catch` & `throw`

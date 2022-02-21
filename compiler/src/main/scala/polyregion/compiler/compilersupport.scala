@@ -275,8 +275,9 @@ extension (e: p.Stmt) {
 }
 
 extension (f: p.Function) {
+  def signature = s"${f.name.repr}(${f.args.map(_.repr).mkString(", ")}) : ${f.rtn.repr}"
   def repr: String =
-    s"""${f.name.repr}(${f.args.map(_.repr).mkString(", ")}) : ${f.rtn.repr} = {
+    s"""${f.signature} = {
        |${f.body.map(_.repr).map("  " + _).mkString("\n")}
 		   |}""".stripMargin
 }

@@ -10,99 +10,188 @@ class MathSuite extends BaseSuite {
     test(s"${C.runtimeClass}=${codeOf(r)}=${r}")(assertOffload[A](r))
   }
 
+  // XXX Short, Byte, Char ops promote to Int
+
   {
-    type V = Int
+    type V = Short
     val a: V = 1
     val b: V = 2
     val c: V = 3
     val d: V = 4
-    testExpr[V](a + b)
-    testExpr[V](a - b)
-    testExpr[V](a * b)
-    testExpr[V](a / b)
-    testExpr[V](~a)
-
-    testExpr[V](a + b + c + d)
-    testExpr[V](a - b - c - d)
-    testExpr[V](a * b * c * d)
-    testExpr[V](a / b / c / d)
-    testExpr[V](a % b % c % d)
-    testExpr[V](a << b << c << d)
-    testExpr[V](a >> b >> c >> d)
-    testExpr[V](a >>> b >>> c >>> d)
-    testExpr[V](a ^ b ^ c ^ d)
-    testExpr[V](a | b | c | d)
-    testExpr[V](a & b & c & d)
-
-    testExpr[V](a + b - c * d / a % b)
-    testExpr[V](a << b >> c >>> d ^ a | b & ~a)
+    testExpr[Int](a + b)
+//    testExpr[Int](a - b)
+//    testExpr[Int](a * b)
+//    testExpr[Int](a / b)
+//    testExpr[Int](~a)
+//
+//    testExpr[Int](a + b + c + d)
+//    testExpr[Int](a - b - c - d)
+//    testExpr[Int](a * b * c * d)
+//    testExpr[Int](a / b / c / d)
+//    testExpr[Int](a % b % c % d)
+//    testExpr[Int](a << b << c << d)
+//    testExpr[Int](a >> b >> c >> d)
+//    testExpr[Int](a >>> b >>> c >>> d)
+//    testExpr[Int](a ^ b ^ c ^ d)
+//    testExpr[Int](a | b | c | d)
+//    testExpr[Int](a & b & c & d)
+//
+//    testExpr[Int](a + b - c * d / a % b)
+//    testExpr[Int](a << b >> c >>> d ^ a | b & ~a)
 
   }
 
-  {
-    type V = Long
-    val a: V = 1
-    val b: V = 2
-    val c: V = 3
-    val d: V = 4
-    testExpr[V](a + b)
-    testExpr[V](a - b)
-    testExpr[V](a * b)
-    testExpr[V](a / b)
-    testExpr[V](~a)
-
-    testExpr[V](a + b + c + d)
-    testExpr[V](a - b - c - d)
-    testExpr[V](a * b * c * d)
-    testExpr[V](a / b / c / d)
-    testExpr[V](a % b % c % d)
-    testExpr[V](a << b << c << d)
-    testExpr[V](a >> b >> c >> d)
-    testExpr[V](a >>> b >>> c >>> d)
-    testExpr[V](a ^ b ^ c ^ d)
-    testExpr[V](a | b | c | d)
-    testExpr[V](a & b & c & d)
-
-    testExpr[V](a + b - c * d / a % b)
-    testExpr[V](a << b >> c >>> d ^ a | b & ~a)
-  }
-
-  {
-    type V = Float
-    val a: V = 1.1
-    val b: V = 2.2
-    val c: V = 3.3
-    val d: V = 4.4
-    testExpr[V](a + b)
-    testExpr[V](a - b)
-    testExpr[V](a * b)
-    testExpr[V](a / b)
-
-    testExpr[V](a + b + c + d)
-    testExpr[V](a - b - c - d)
-    testExpr[V](a * b * c * d)
-    testExpr[V](a / b / c / d)
-
-    testExpr[V](a + b - c * d / a)
-  }
-
-  {
-    type V = Double
-    val a: V = 1.1
-    val b: V = 2.2
-    val c: V = 3.3
-    val d: V = 4.4
-    testExpr[V](a + b)
-    testExpr[V](a - b)
-    testExpr[V](a * b)
-    testExpr[V](a / b)
-
-    testExpr[V](a + b + c + d)
-    testExpr[V](a - b - c - d)
-    testExpr[V](a * b * c * d)
-    testExpr[V](a / b / c / d)
-
-    testExpr[V](a + b - c * d / a)
-  }
+//  {
+//    type V = Byte
+//    val a: V = 1
+//    val b: V = 2
+//    val c: V = 3
+//    val d: V = 4
+//    testExpr[Int](a + b)
+//    testExpr[Int](a - b)
+//    testExpr[Int](a * b)
+//    testExpr[Int](a / b)
+//    testExpr[Int](~a)
+//
+//    testExpr[Int](a + b + c + d)
+//    testExpr[Int](a - b - c - d)
+//    testExpr[Int](a * b * c * d)
+//    testExpr[Int](a / b / c / d)
+//    testExpr[Int](a % b % c % d)
+//    testExpr[Int](a << b << c << d)
+//    testExpr[Int](a >> b >> c >> d)
+//    testExpr[Int](a >>> b >>> c >>> d)
+//    testExpr[Int](a ^ b ^ c ^ d)
+//    testExpr[Int](a | b | c | d)
+//    testExpr[Int](a & b & c & d)
+//
+//    testExpr[Int](a + b - c * d / a % b)
+//    testExpr[Int](a << b >> c >>> d ^ a | b & ~a)
+//
+//  }
+//
+//  {
+//    type V = Char
+//    val a: V = 1
+//    val b: V = 2
+//    val c: V = 3
+//    val d: V = 4
+//    testExpr[Int](a + b)
+//    testExpr[Int](a - b)
+//    testExpr[Int](a * b)
+//    testExpr[Int](a / b)
+//    testExpr[Int](~a)
+//
+//    testExpr[Int](a + b + c + d)
+//    testExpr[Int](a - b - c - d)
+//    testExpr[Int](a * b * c * d)
+//    testExpr[Int](a / b / c / d)
+//    testExpr[Int](a % b % c % d)
+//    testExpr[Int](a << b << c << d)
+//    testExpr[Int](a >> b >> c >> d)
+//    testExpr[Int](a >>> b >>> c >>> d)
+//    testExpr[Int](a ^ b ^ c ^ d)
+//    testExpr[Int](a | b | c | d)
+//    testExpr[Int](a & b & c & d)
+//
+//    testExpr[Int](a + b - c * d / a % b)
+//    testExpr[Int](a << b >> c >>> d ^ a | b & ~a)
+//
+//  }
+//
+//  {
+//    type V = Int
+//    val a: V = 1
+//    val b: V = 2
+//    val c: V = 3
+//    val d: V = 4
+//    testExpr[V](a + b)
+//    testExpr[V](a - b)
+//    testExpr[V](a * b)
+//    testExpr[V](a / b)
+//    testExpr[V](~a)
+//
+//    testExpr[V](a + b + c + d)
+//    testExpr[V](a - b - c - d)
+//    testExpr[V](a * b * c * d)
+//    testExpr[V](a / b / c / d)
+//    testExpr[V](a % b % c % d)
+//    testExpr[V](a << b << c << d)
+//    testExpr[V](a >> b >> c >> d)
+//    testExpr[V](a >>> b >>> c >>> d)
+//    testExpr[V](a ^ b ^ c ^ d)
+//    testExpr[V](a | b | c | d)
+//    testExpr[V](a & b & c & d)
+//
+//    testExpr[V](a + b - c * d / a % b)
+//    testExpr[V](a << b >> c >>> d ^ a | b & ~a)
+//
+//  }
+//
+//  {
+//    type V = Long
+//    val a: V = 1
+//    val b: V = 2
+//    val c: V = 3
+//    val d: V = 4
+//    testExpr[V](a + b)
+//    testExpr[V](a - b)
+//    testExpr[V](a * b)
+//    testExpr[V](a / b)
+//    testExpr[V](~a)
+//
+//    testExpr[V](a + b + c + d)
+//    testExpr[V](a - b - c - d)
+//    testExpr[V](a * b * c * d)
+//    testExpr[V](a / b / c / d)
+//    testExpr[V](a % b % c % d)
+//    testExpr[V](a << b << c << d)
+//    testExpr[V](a >> b >> c >> d)
+//    testExpr[V](a >>> b >>> c >>> d)
+//    testExpr[V](a ^ b ^ c ^ d)
+//    testExpr[V](a | b | c | d)
+//    testExpr[V](a & b & c & d)
+//
+//    testExpr[V](a + b - c * d / a % b)
+//    testExpr[V](a << b >> c >>> d ^ a | b & ~a)
+//  }
+//
+//  {
+//    type V = Float
+//    val a: V = 1.1
+//    val b: V = 2.2
+//    val c: V = 3.3
+//    val d: V = 4.4
+//    testExpr[V](a + b)
+//    testExpr[V](a - b)
+//    testExpr[V](a * b)
+//    testExpr[V](a / b)
+//
+//    testExpr[V](a + b + c + d)
+//    testExpr[V](a - b - c - d)
+//    testExpr[V](a * b * c * d)
+//    testExpr[V](a / b / c / d)
+//
+//    testExpr[V](a + b - c * d / a)
+//  }
+//
+//  {
+//    type V = Double
+//    val a: V = 1.1
+//    val b: V = 2.2
+//    val c: V = 3.3
+//    val d: V = 4.4
+//    testExpr[V](a + b)
+//    testExpr[V](a - b)
+//    testExpr[V](a * b)
+//    testExpr[V](a / b)
+//
+//    testExpr[V](a + b + c + d)
+//    testExpr[V](a - b - c - d)
+//    testExpr[V](a * b * c * d)
+//    testExpr[V](a / b / c / d)
+//
+//    testExpr[V](a + b - c * d / a)
+//  }
 
 }

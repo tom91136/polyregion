@@ -34,6 +34,16 @@ constexpr bool operator==(const Alternative<T...> &l,const Alternative<T...> &r)
   return unwrap(l) == unwrap(r);
 }
 
+template <typename... T> //
+constexpr bool operator!=(const Alternative<T...> &l,const Alternative<T...> &r) {
+  return unwrap(l) != unwrap(r);
+}
+
+template <typename R, typename... T> //
+constexpr bool holds(const Alternative<T...> &l ) {
+  return std::holds_alternative<R>(unwrap(l));
+}
+
 template <auto member, class... T> //
 constexpr auto select(const Alternative<T...> &a) {
   return std::visit([](auto &&arg) { return *(arg).*member; }, a);

@@ -58,7 +58,7 @@ object FnInlinePass {
                 })
 
                 returnExprs match {
-                  case Nil => throw new AssertionError("no return in function")
+                  case Nil => throw new AssertionError(s"no return in function ${f.signature}, renamed:\n${returnExprs.map(_.repr).mkString("\n")}")
                   case expr :: Nil => // single return, just pass the expr to the call-site
                     val noReturnStmt = argSubstituted.flatMap(_.map {
                       case p.Stmt.Return(e) => Nil
