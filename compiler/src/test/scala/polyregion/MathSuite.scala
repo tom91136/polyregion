@@ -12,12 +12,13 @@ class MathSuite extends BaseSuite {
 
   // XXX Short, Byte, Char ops promote to Int
 
-  {
-    type V = Byte
-    val a: V = 1
-    val b: V = 2
-    val c: V = 3
-    val d: V = 4
+  inline def mk4[A](inline xs: Array[A], inline c: A, inline d: A)(inline f: (A, A, A, A) => Unit): Unit = for {
+    a <- xs
+    b <- xs.reverse
+  } yield f(a, b, c, d)
+
+  // TODO  handle % or / by 0
+  mk4[Byte](Bytes.filter(_ != 0), 1, 2) { (a, b, c, d) =>
     testExpr(+a)
     testExpr(-a)
     testExpr(~a)
@@ -40,12 +41,8 @@ class MathSuite extends BaseSuite {
     testExpr(a << b >> c >>> d ^ a | b & ~a)
   }
 
-  {
-    type V = Char
-    val a: V = 1
-    val b: V = 2
-    val c: V = 3
-    val d: V = 4
+  // TODO  handle % or / by 0
+  mk4[Char](Chars.filter(_ != 0), 1, 2) { (a, b, c, d) =>
     testExpr(+a)
     testExpr(-a)
     testExpr(~a)
@@ -68,12 +65,8 @@ class MathSuite extends BaseSuite {
     testExpr(a << b >> c >>> d ^ a | b & ~a)
   }
 
-  {
-    type V = Short
-    val a: V = 1
-    val b: V = 2
-    val c: V = 3
-    val d: V = 4
+  // TODO  handle % or / by 0
+  mk4[Short](Shorts.filter(_ != 0), 1, 2) { (a, b, c, d) =>
     testExpr(+a)
     testExpr(-a)
     testExpr(~a)
@@ -96,98 +89,81 @@ class MathSuite extends BaseSuite {
     testExpr(a << b >> c >>> d ^ a | b & ~a)
   }
 
-  {
-    type V = Int
-    val a: V = 1
-    val b: V = 2
-    val c: V = 3
-    val d: V = 4
+  // TODO replace with Ints and handle % or / by 0
+  mk4[Int](Array(3, 4), 1, 2) { (a, b, c, d) =>
     testExpr(+a)
     testExpr(-a)
     testExpr(~a)
-    testExpr[V](a + b)
-    testExpr[V](a - b)
-    testExpr[V](a * b)
-    testExpr[V](a / b)
-    testExpr[V](a + b + c + d)
-    testExpr[V](a - b - c - d)
-    testExpr[V](a * b * c * d)
-    testExpr[V](a / b / c / d)
-    testExpr[V](a % b % c % d)
-    testExpr[V](a << b << c << d)
-    testExpr[V](a >> b >> c >> d)
-    testExpr[V](a >>> b >>> c >>> d)
-    testExpr[V](a ^ b ^ c ^ d)
-    testExpr[V](a | b | c | d)
-    testExpr[V](a & b & c & d)
-    testExpr[V](a + b - c * d / a % b)
-    testExpr[V](a << b >> c >>> d ^ a | b & ~a)
+    testExpr(a + b)
+    testExpr(a - b)
+    testExpr(a * b)
+    testExpr(a / b)
+    testExpr(a + b + c + d)
+    testExpr(a - b - c - d)
+    testExpr(a * b * c * d)
+    testExpr(a / b / c / d)
+    testExpr(a % b % c % d)
+    testExpr(a << b << c << d)
+    testExpr(a >> b >> c >> d)
+    testExpr(a >>> b >>> c >>> d)
+    testExpr(a ^ b ^ c ^ d)
+    testExpr(a | b | c | d)
+    testExpr(a & b & c & d)
+    testExpr(a + b - c * d / a % b)
+    testExpr(a << b >> c >>> d ^ a | b & ~a)
   }
 
-  {
-    type V = Long
-    val a: V = 1
-    val b: V = 2
-    val c: V = 3
-    val d: V = 4
+  // TODO replace with Longs and handle % or / by 0
+  mk4[Long](Array(3L, 4L), 1, 2) { (a, b, c, d) =>
     testExpr(+a)
     testExpr(-a)
     testExpr(~a)
-    testExpr[V](a + b)
-    testExpr[V](a - b)
-    testExpr[V](a * b)
-    testExpr[V](a / b)
-    testExpr[V](a + b + c + d)
-    testExpr[V](a - b - c - d)
-    testExpr[V](a * b * c * d)
-    testExpr[V](a / b / c / d)
-    testExpr[V](a % b % c % d)
-    testExpr[V](a << b << c << d)
-    testExpr[V](a >> b >> c >> d)
-    testExpr[V](a >>> b >>> c >>> d)
-    testExpr[V](a ^ b ^ c ^ d)
-    testExpr[V](a | b | c | d)
-    testExpr[V](a & b & c & d)
-    testExpr[V](a + b - c * d / a % b)
-    testExpr[V](a << b >> c >>> d ^ a | b & ~a)
+    testExpr(a + b)
+    testExpr(a - b)
+    testExpr(a * b)
+    testExpr(a / b)
+    testExpr(a + b + c + d)
+    testExpr(a - b - c - d)
+    testExpr(a * b * c * d)
+    testExpr(a / b / c / d)
+    testExpr(a % b % c % d)
+    testExpr(a << b << c << d)
+    testExpr(a >> b >> c >> d)
+    testExpr(a >>> b >>> c >>> d)
+    testExpr(a ^ b ^ c ^ d)
+    testExpr(a | b | c | d)
+    testExpr(a & b & c & d)
+    testExpr(a + b - c * d / a % b)
+    testExpr(a << b >> c >>> d ^ a | b & ~a)
   }
 
-  {
-    type V = Float
-    val a: V = 1.1
-    val b: V = 2.2
-    val c: V = 3.3
-    val d: V = 4.4
+  mk4[Float](Floats, 1f, 2f) { (a, b, c, d) =>
     testExpr(+a)
     testExpr(-a)
-    testExpr[V](a + b)
-    testExpr[V](a - b)
-    testExpr[V](a * b)
-    testExpr[V](a / b)
-    testExpr[V](a + b + c + d)
-    testExpr[V](a - b - c - d)
-    testExpr[V](a * b * c * d)
-    testExpr[V](a / b / c / d)
-    testExpr[V](a + b - c * d / a)
+    testExpr(a + b)
+    testExpr(a - b)
+    testExpr(a * b)
+    testExpr(a / b)
+    testExpr(a + b + c + d)
+    testExpr(a - b - c - d)
+    testExpr(a * b * c * d)
+    testExpr(a / b / c / d)
+    testExpr(a + b - c * d / a)
   }
 
-  {
-    type V = Double
-    val a: V = 1.1
-    val b: V = 2.2
-    val c: V = 3.3
-    val d: V = 4.4
+  // TODO replace with Double
+  mk4[Double](Doubles, 1d, 2d) { (a, b, c, d) =>
     testExpr(+a)
     testExpr(-a)
-    testExpr[V](a + b)
-    testExpr[V](a - b)
-    testExpr[V](a * b)
-    testExpr[V](a / b)
-    testExpr[V](a + b + c + d)
-    testExpr[V](a - b - c - d)
-    testExpr[V](a * b * c * d)
-    testExpr[V](a / b / c / d)
-    testExpr[V](a + b - c * d / a)
+    testExpr(a + b)
+    testExpr(a - b)
+    testExpr(a * b)
+    testExpr(a / b)
+    testExpr(a + b + c + d)
+    testExpr(a - b - c - d)
+    testExpr(a * b * c * d)
+    testExpr(a / b / c / d)
+    testExpr(a + b - c * d / a)
   }
 
 }

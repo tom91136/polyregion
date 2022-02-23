@@ -31,7 +31,7 @@ object Retyper {
       .map(p.StructDef(p.Sym(tpeSym.fullName), _))
   }
 
-  @tailrec private final def resolveSym(using q: Quoted)(ref: q.TypeRepr): Result[(p.Sym, Boolean)] =
+  @tailrec private final def resolveSym(using q: Quoted)(ref: q.TypeRepr): Result[(p.Sym, q.ClassKind)] =
     ref.dealias.simplified match {
       case q.ThisType(tpe) => resolveSym(tpe)
       case tpe: q.NamedType =>
@@ -40,7 +40,7 @@ object Retyper {
           case Some(sym) if sym.name == "<root>" => // discard root package
             resolveSym(tpe.qualifier)
           case Some(sym) =>
-            (p.Sym(sym.fullName), sym.flags.is(q.Flags.Module)).success
+            (p.Sym(sym.fullName), if (sym.flags.is(q.Flags.Module)) q.ClassKind.Object else q.ClassKind.Class).success
         }
       // case NoPrefix()    => None.success
       case invalid => s"Invalid type: ${invalid}".fail
@@ -63,7 +63,8 @@ object Retyper {
       repr.dealias.widenTermRefByName.simplified match {
         case p @ q.PolyType(_, _, q.MethodType(_, _, _)) =>
           // this shows up from type-unapplied methods:  [x, y] =>> methodTpe(_:x, ...):y
-          (None, q.ErasedOpaqueTpe(p), c).success.deferred
+//          (None, q.ErasedOpaqueTpe(p), c).success.deferred
+          ???
         case q.MethodType(_, args, rtn) =>
           for {
             (_, tpe, c) <- c.typer(rtn)
@@ -78,12 +79,12 @@ object Retyper {
             else ???
         case tpe @ q.AppliedType(ctor, args) =>
           for {
-            (name, module) <- resolveSym(ctor).deferred
-            (xs, c)        <- c.typerN(args)
-          } yield (name, module, xs) match {
-            case (Symbols.Buffer, false, (_, comp: p.Type) :: Nil) => (None, p.Type.Array(comp), c)
-            case (Symbols.Array, false, (_, comp: p.Type) :: Nil) => (None, p.Type.Array(comp), c)
-            case (_, _, ys) if tpe.isFunctionType                  => // FunctionN
+            (name, kind) <- resolveSym(ctor).deferred
+            (xs, c)      <- c.typerN(args)
+          } yield (name, kind, xs) match {
+            case (Symbols.Buffer, q.ClassKind.Class, (_, comp: p.Type) :: Nil) => (None, p.Type.Array(comp), c)
+            case (Symbols.Array, q.ClassKind.Class, (_, comp: p.Type) :: Nil)  => (None, p.Type.Array(comp), c)
+            case (_, _, ys) if tpe.isFunctionType                              => // FunctionN
               // TODO make sure this works
               (
                 None,
@@ -94,8 +95,7 @@ object Retyper {
                 },
                 c
               )
-
-            case (n, m, ys) => (None, q.ErasedTpe(n, m, ys.map(_._2)), c)
+            case (n, m, ys) => (None, q.ErasedClsTpe(n, q.ClassKind.Object, ys.map(_._2)), c)
           }
         // widen singletons
         case q.ConstantType(x) =>
@@ -117,18 +117,27 @@ object Retyper {
         case expr =>
           resolveSym(expr)
             .map[q.Tpe] {
-              case (p.Sym(Symbols.Scala :+ "Unit"), false)      => p.Type.Unit
-              case (p.Sym(Symbols.Scala :+ "Boolean"), false)   => p.Type.Bool
-              case (p.Sym(Symbols.Scala :+ "Byte"), false)      => p.Type.Byte
-              case (p.Sym(Symbols.Scala :+ "Short"), false)     => p.Type.Short
-              case (p.Sym(Symbols.Scala :+ "Int"), false)       => p.Type.Int
-              case (p.Sym(Symbols.Scala :+ "Long"), false)      => p.Type.Long
-              case (p.Sym(Symbols.Scala :+ "Float"), false)     => p.Type.Float
-              case (p.Sym(Symbols.Scala :+ "Double"), false)    => p.Type.Double
-              case (p.Sym(Symbols.Scala :+ "Char"), false)      => p.Type.Char
-              case (p.Sym(Symbols.JavaLang :+ "String"), false) => p.Type.String
-              case (sym, false)                                 => p.Type.Struct(sym)
-              case (sym, true)                                  => q.ErasedTpe(sym, true, Nil)
+              case (p.Sym(Symbols.Scala :+ "Unit"), q.ClassKind.Class)      => p.Type.Unit
+              case (p.Sym(Symbols.Scala :+ "Boolean"), q.ClassKind.Class)   => p.Type.Bool
+              case (p.Sym(Symbols.Scala :+ "Byte"), q.ClassKind.Class)      => p.Type.Byte
+              case (p.Sym(Symbols.Scala :+ "Short"), q.ClassKind.Class)     => p.Type.Short
+              case (p.Sym(Symbols.Scala :+ "Int"), q.ClassKind.Class)       => p.Type.Int
+              case (p.Sym(Symbols.Scala :+ "Long"), q.ClassKind.Class)      => p.Type.Long
+              case (p.Sym(Symbols.Scala :+ "Float"), q.ClassKind.Class)     => p.Type.Float
+              case (p.Sym(Symbols.Scala :+ "Double"), q.ClassKind.Class)    => p.Type.Double
+              case (p.Sym(Symbols.Scala :+ "Char"), q.ClassKind.Class)      => p.Type.Char
+              case (p.Sym(Symbols.JavaLang :+ "String"), q.ClassKind.Class) => p.Type.String
+              case (sym, q.ClassKind.Class)                                   =>
+
+                // this could either be a struct or an extension (X extends AnyVal)
+               println(">>>>"+expr.classSymbol.get.tree.show)
+//                q.ErasedTpe(sym, false, Nil) //
+
+
+
+                p.Type.Struct(sym)
+              case (sym, q.ClassKind.Object) =>
+                q.ErasedClsTpe(sym, q.ClassKind.Object, Nil)
             }
             .flatMap {
               case s @ p.Type.Struct(sym) =>

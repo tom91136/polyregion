@@ -86,8 +86,8 @@ object RefOutliner {
     // remove anything we can't use, like ClassTag
     val filteredTypedRefs = typedRefs.map { (xs, c) =>
       val ys = xs.filter {
-        case (_, q.Reference(_, q.ErasedTpe(Symbols.ClassTag, false, _))) => false
-        case _                                                            => true
+        case (_, q.Reference(_, q.ErasedClsTpe(Symbols.ClassTag, q.ClassKind.Class, Nil))) => false
+        case _                                                                             => true
       }
       (ys, c)
     }

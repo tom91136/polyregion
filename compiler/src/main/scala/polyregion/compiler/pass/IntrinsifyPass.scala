@@ -30,20 +30,23 @@ object IntrinsifyPass {
       case x                                        => x
     }
 
+  private def castOrId(x: p.Term, to: p.Type, name : String)  : (p.Term , List[p.Stmt])= {
+  if(x.tpe == to) {
+      (x, Nil)
+    }else{
+      val named = p.Named(name, to)  
+      (p.Term.Select(Nil, named), p.Stmt.Var(named, Some(p.Expr.Cast(x, to))) :: Nil)
+    }}  
+
   private def unaryNumericIntrinsic(x: p.Term, idx: Int, kind: p.UnaryIntrinsicKind) = {
-    val name  = p.Named(s"intr_${idx}", unaryPromote(x.tpe))
-    val stmts = p.Stmt.Var(name, Some(p.Expr.Cast(x, name.tpe))) :: Nil
-    (p.Expr.UnaryIntrinsic(p.Term.Select(Nil, name), kind, name.tpe), stmts)
+    val (xVal, xStmts) = castOrId(x, unaryPromote(x.tpe), s"intr_${idx}")
+    (p.Expr.UnaryIntrinsic(xVal, kind, xVal.tpe), xStmts)
   }
 
   def binaryNumericIntrinsic(x: p.Term, y: p.Term, upper: p.Type, idx: Int, kind: p.BinaryIntrinsicKind) = {
-    val lName = p.Named(s"intr_l${idx}", upper)
-    val rName = p.Named(s"intr_r${idx}", upper)
-    val stmts =
-      p.Stmt.Var(lName, Some(p.Expr.Cast(x, upper)))
-        :: p.Stmt.Var(rName, Some(p.Expr.Cast(y, upper)))
-        :: Nil
-    (p.Expr.BinaryIntrinsic(p.Term.Select(Nil, lName), p.Term.Select(Nil, rName), kind, upper), stmts)
+    val (xVal, xStmts) = castOrId(x, upper, s"intr_l${idx}")
+    val (yVal, yStmts) = castOrId(y, upper, s"intr_r${idx}")
+    (p.Expr.BinaryIntrinsic(xVal, yVal, kind, upper), xStmts ++ yStmts)
   }
 
   private def intrinsifyInstanceApply(s: p.Stmt, idx: Int) = s.mapAccExpr[p.Sym] {

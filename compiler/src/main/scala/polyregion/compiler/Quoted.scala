@@ -24,19 +24,35 @@ class Quoted(val q: Quotes) {
   )
 
   type Val = p.Term | ErasedMethodVal | ErasedModuleSelect
-  type Tpe = p.Type | ErasedTpe | ErasedOpaqueTpe | ErasedFnTpe
+  type Tpe = p.Type | ErasedClsTpe | ErasedFnTpe // ErasedOpaqueTpe
 
   case class ErasedModuleSelect(sym: p.Sym)
 
   case class ErasedMethodVal(receiver: p.Sym | p.Term, sym: p.Sym, tpe: ErasedFnTpe)
 
-  case class ErasedOpaqueTpe(underlying : q.reflect.TypeRepr)
+//  case class ErasedOpaqueTpe(underlying: q.reflect.TypeRepr) // NOT USED
 
-  case class ErasedTpe(name: p.Sym, module: Boolean, args: List[Tpe]) {
-    override def toString =
-      s"<!${if (module) "<module>." else ""}${name.repr}${if (args.isEmpty) "" else args.mkString("[", ", ", "]")}>"
+//  case class ErasedModuleClsTpe()
+//  case class ErasedModuleCls(tpe: ErasedModuleClsTpe)
+
+  // , defs: Map[(p.Sym, ErasedFnTpe), DefDef], vals: Map[p.Sym, ValDef]
+//  case class ErasedExtensionClsTpe(sym: p.Sym)
+//  case class ErasedExtensionCls(tpe: ErasedExtensionClsTpe)
+
+  enum ClassKind {
+    case Object, Class
   }
-  case class ErasedFnTpe(  args: List[Tpe], rtn: Tpe) {
+
+  case class ErasedClsTpe(name: p.Sym, kind: ClassKind, ctor: List[Tpe]) {
+    override def toString: String = {
+      val kindName = kind match {
+        case ClassKind.Object    => "Object"
+        case ClassKind.Class     => "Class"
+      }
+      s"<!<${kindName}>${name.repr}${if (ctor.isEmpty) "" else ctor.mkString("[", ", ", "]")}>"
+    }
+  }
+  case class ErasedFnTpe(args: List[Tpe], rtn: Tpe) {
     override def toString =
       s"!{ (${args.mkString(",")}) => ${rtn} }"
   }

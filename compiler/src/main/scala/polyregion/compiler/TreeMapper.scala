@@ -69,7 +69,7 @@ object TreeMapper {
         val name = i.tpe match {
           // we've encountered a case where the ident's name is different from the TermRef's name
           // this is likely a result of inline where we end up with synthetic names
-          // we use the TermRefs name in this case
+          // we use the TermRef's name in this case
           case q.TermRef(_, name) if name != s => name
           case _                               => s
         }
@@ -81,22 +81,12 @@ object TreeMapper {
           _ = println(s"sel ident $s = ${tpe}")
 
           (term, c) <- tpe match {
-            case q.ErasedTpe(sym, true, Nil) => (q.ErasedModuleSelect(sym), c).success.deferred
             case tpe: p.Type =>
               println(s"in2 = ${tpe} = ${i} = ${i.symbol}")
-
               (p.Term.Select(Nil, p.Named(name, tpe)), c).success.deferred
-            case ect: q.ErasedOpaqueTpe => // (selector...).(x:(X=>Y))
-              val defdef = i.symbol.tree match {
-                case dd: q.DefDef => dd
-                case _            => ???
-              }
-              println(s"->$defdef")
-              // (q.ErasedModuleSelect(defdef), c).success.deferred
-              ???
             case ect: q.ErasedFnTpe =>
               // we may end up here and not Select for functions inside modules, not entirely sure why that is
-              // if this is true, ident's name will be the function name
+              // here ident's name will be the function name
               i.symbol.tree match {
                 case f: q.DefDef => // (Symbol...).(x: X=>Y)
                   val sym      = p.Sym(i.symbol.name)
@@ -108,7 +98,8 @@ object TreeMapper {
                     case None    => c.fail[(q.Val, q.FnContext)](s"Can't find a previous definition of ${i}")
                   }
               }
-            case et: q.ErasedTpe => c.fail[(q.Val, q.FnContext)](s"Saw ${et}")
+            case q.ErasedClsTpe(sym, q.ClassKind.Object, Nil) => (q.ErasedModuleSelect(sym), c).success.deferred
+            case et: q.ErasedClsTpe => c.fail[(q.Val, q.FnContext)](s"Saw ${et}")
           }
         } yield (term, c)
       case (None, s @ q.Select(root, name)) =>
@@ -120,40 +111,12 @@ object TreeMapper {
           _ = println(s"sel $s = ${tpe}")
           // don't resolve root here yet
           (term, c) <- tpe match {
-            case q.ErasedTpe(sym, true, Nil) => // <module>.(...)
+            case q.ErasedClsTpe(sym, q.ClassKind.Object, Nil) => // <module>.(...)
               (q.ErasedModuleSelect(sym), c).success.deferred
             case tpe: p.Type => // (selector...).(x:Term)
               println(s"X=$tpe")
 
-//              s.symbol.tree match {
-//                case dd: q.DefDef if dd.paramss.isEmpty => // no-arg def call (i.e. `object X{ def y :Int = ??? }` )
-//                  c.mapTerm(root).flatMap {
-//                    case (s@p.Term.Select(xs, x), c) =>
-//                      val sym      = p.Sym(dd.symbol.name)
-//                      val receiver = p.Sym(dd.symbol.maybeOwner.fullName)
-//                      (q.ErasedMethodVal(receiver, sym, ect), c.mark(receiver ~ sym, f)).success.deferred
-//
-//                      val fnSym = module :+ name
-//                      val named = c.named(tpe)
-//                      val c1    = c.mark(fnSym, dd) ::= p.Stmt.Var(named, Some(p.Expr.Invoke(fnSym, None, Nil, tpe)))
-//                      (p.Term.Select(Nil, named), c1).success.deferred
-//
-//
-//                      (p.Term.Select(xs :+ x, p.Named(name, tpe)), c).success.deferred
-//                    case (q.ErasedModuleSelect(module), c) =>
-//                      val fnSym = module :+ name
-//                      val named = c.named(tpe)
-//                      val c1    = c.mark(fnSym, dd) ::= p.Stmt.Var(named, Some(p.Expr.Invoke(fnSym, None, Nil, tpe)))
-//                      (p.Term.Select(Nil, named), c1).success.deferred
-//                    case _ => ???
-//                  }
-//                case dd: q.DefDef =>
-//                  c.fail(s"Unexpected arg list ${dd.paramss} for a 0-arg def")
-////                case vd: q.ValDef =>
-////                  c.fail(s"$vd via module ref ${module.repr} was not intercepted by the outliner!?")
-//                case bad =>
-//                  c.fail(s"Unsupported construct $bad")
-//              }
+
 
               c.mapTerm(root).flatMap {
                 case (select @ p.Term.Select(xs, x), c) =>
@@ -202,13 +165,6 @@ object TreeMapper {
                 case (bad  , c) =>
                 c.fail(s"Unexpected root of a select that leads to a non-erased ${tpe} type: ${bad}")
               }
-            case ect: q.ErasedOpaqueTpe => // (selector...).(x:(X=>Y))
-              val defdef = s.symbol.tree match {
-                case dd: q.DefDef => dd
-                case _            => ???
-              }
-              // (q.ErasedModuleSelect(defdef), c).success.deferred
-              ???
             case ect: q.ErasedFnTpe => // (selector...).(x:(X=>Y))
               val defdef = s.symbol.tree match {
                 case dd: q.DefDef => dd
@@ -222,7 +178,7 @@ object TreeMapper {
                   (q.ErasedMethodVal(module, sym, ect), c.mark(module ~ sym, defdef)).success.deferred
                 case (bad, c) => c.fail(s"Unexpected root of a select that leads to an erased ${tpe} type: ${bad}")
               }
-            case et: q.ErasedTpe => c.fail[(q.Val, q.FnContext)](s"Saw ${et}")
+            case et: q.ErasedClsTpe => c.fail[(q.Val, q.FnContext)](s"Saw ${et}")
           }
 
         } yield (term, c)
@@ -309,7 +265,7 @@ object TreeMapper {
 
             // discard application of erased types
             argsNoErasedTpe = argTpes.zip(ap.args).flatMap {
-              case ((_, _: q.ErasedTpe), x) => Nil
+              case ((_, _: q.ErasedClsTpe), x) => Nil
               case ((_, _), x)              => x :: Nil
             }
 
@@ -358,11 +314,18 @@ object TreeMapper {
                 val t = tpe.rtn match {
                   case t: p.Type => t
                   case q.ErasedFnTpe(args, rtn: p.Type) if args.forall {
-                        case _: q.ErasedTpe => true
+                        case _: q.ErasedClsTpe => true
                         case _              => false
                       } =>
                     rtn
-                  case _ => ???
+
+                    //
+                  case x:q.ErasedClsTpe =>
+
+
+
+                  println(x)
+                    ???
                 }
                 mkReturn(p.Expr.Invoke(module ~ sym, None, argTerms, t), c).success.deferred
               case (_, q.ErasedMethodVal(receiver: p.Term, sym, tpe)) => // instance call
