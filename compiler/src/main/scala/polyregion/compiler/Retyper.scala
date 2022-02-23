@@ -34,23 +34,60 @@ object Retyper {
       .map(p.StructDef(p.Sym(tpeSym.fullName), _))
   }
 
-  @tailrec private final def resolveSym(using q: Quoted)(ref: q.TypeRepr): Result[(p.Sym, q.ClassKind)] =
-    ref.dealias.simplified match {
-      case q.ThisType(tpe) => resolveSym(tpe)
-      case tpe: q.NamedType =>
-        tpe.classSymbol match {
-          case None => s"Named type is not a class: ${tpe}".fail
-          case Some(sym) if sym.name == "<root>" => // discard root package
-            resolveSym(tpe.qualifier)
-          case Some(sym) =>
-            println(s"[typer] resolveSym ${sym.fullName} = ${sym.flags.show} ${sym.flags.is(q.Flags.Module)}")
-            (p.Sym(sym.fullName), if (sym.flags.is(q.Flags.Module)) q.ClassKind.Object else q.ClassKind.Class).success
-        }
-      // case NoPrefix()    => None.success
-      case invalid => s"Invalid type: ${invalid}".fail
+  extension (using q: Quoted)(c: q.FnContext) {
+
+    private def resolveClsFromSymbol(clsSym: q.Symbol): Result[(q.Symbol, p.Sym, q.ClassKind)] = {
+      println(s"[typer] resolveSym ${clsSym.fullName} = ${clsSym.flags.show}")
+      if (clsSym.isClassDef) {
+        (
+          clsSym,
+          p.Sym(clsSym.fullName),
+          if (clsSym.flags.is(q.Flags.Module)) q.ClassKind.Object else q.ClassKind.Class
+        ).success
+      } else {
+        s"$clsSym is not a class def".fail
+      }
     }
 
-  extension (using q: Quoted)(c: q.FnContext) {
+    @tailrec private final def resolveClsFromTpeRepr(ref: q.TypeRepr): Result[(q.Symbol, p.Sym, q.ClassKind)] =
+      ref.dealias.simplified match {
+        case q.ThisType(tpe) => c.resolveClsFromTpeRepr(tpe)
+        case tpe: q.NamedType =>
+          tpe.classSymbol match {
+            case None                              => s"Named type is not a class: ${tpe}".fail
+            case Some(sym) if sym.name == "<root>" => c.resolveClsFromTpeRepr(tpe.qualifier) // discard root package
+            case Some(sym)                         => c.resolveClsFromSymbol(sym)
+          }
+        case invalid => s"Invalid type: ${invalid}".fail
+      }
+
+    private def liftClsToTpe(clsSym: q.Symbol, sym: p.Sym, kind: q.ClassKind) = {
+      val t0: q.Tpe = (sym, kind) match {
+        case (p.Sym(Symbols.Scala :+ "Unit"), q.ClassKind.Class)      => p.Type.Unit
+        case (p.Sym(Symbols.Scala :+ "Boolean"), q.ClassKind.Class)   => p.Type.Bool
+        case (p.Sym(Symbols.Scala :+ "Byte"), q.ClassKind.Class)      => p.Type.Byte
+        case (p.Sym(Symbols.Scala :+ "Short"), q.ClassKind.Class)     => p.Type.Short
+        case (p.Sym(Symbols.Scala :+ "Int"), q.ClassKind.Class)       => p.Type.Int
+        case (p.Sym(Symbols.Scala :+ "Long"), q.ClassKind.Class)      => p.Type.Long
+        case (p.Sym(Symbols.Scala :+ "Float"), q.ClassKind.Class)     => p.Type.Float
+        case (p.Sym(Symbols.Scala :+ "Double"), q.ClassKind.Class)    => p.Type.Double
+        case (p.Sym(Symbols.Scala :+ "Char"), q.ClassKind.Class)      => p.Type.Char
+        case (p.Sym(Symbols.JavaLang :+ "String"), q.ClassKind.Class) => p.Type.String
+        case (sym, q.ClassKind.Class)                                 =>
+          // println("[retyper] witness: " + clsSym.tree.show)
+          p.Type.Struct(sym)
+        case (sym, q.ClassKind.Object) =>
+          q.ErasedClsTpe(sym, q.ClassKind.Object, Nil)
+      }
+      t0 match {
+        case s @ p.Type.Struct(sym) =>
+          lowerClassType(clsSym).map(d => (s, c.copy(clss = c.clss + (sym -> d)))).resolve
+        case x => (x, c).success
+      }
+    }
+
+    def clsSymTyper(clsSym: q.Symbol): Result[(q.Tpe, q.FnContext)] =
+      c.resolveClsFromSymbol(clsSym).flatMap(c.liftClsToTpe(_, _, _))
 
     def typerN(xs: List[q.TypeRepr]): Deferred[(List[(Option[p.Term], q.Tpe)], q.FnContext)] = xs match {
       case Nil     => (Nil, c).pure
@@ -83,8 +120,8 @@ object Retyper {
             else ???
         case tpe @ q.AppliedType(ctor, args) =>
           for {
-            (name, kind) <- resolveSym(ctor).deferred
-            (xs, c)      <- c.typerN(args)
+            (_, name, kind) <- c.resolveClsFromTpeRepr(ctor).deferred
+            (xs, c)         <- c.typerN(args)
           } yield (name, kind, xs) match {
             case (Symbols.Buffer, q.ClassKind.Class, (_, comp: p.Type) :: Nil) => (None, p.Type.Array(comp), c)
             case (Symbols.Array, q.ClassKind.Class, (_, comp: p.Type) :: Nil)  => (None, p.Type.Array(comp), c)
@@ -119,33 +156,7 @@ object Retyper {
           }).pure
 
         case expr =>
-          resolveSym(expr)
-            .map[q.Tpe] {
-              case (p.Sym(Symbols.Scala :+ "Unit"), q.ClassKind.Class)      => p.Type.Unit
-              case (p.Sym(Symbols.Scala :+ "Boolean"), q.ClassKind.Class)   => p.Type.Bool
-              case (p.Sym(Symbols.Scala :+ "Byte"), q.ClassKind.Class)      => p.Type.Byte
-              case (p.Sym(Symbols.Scala :+ "Short"), q.ClassKind.Class)     => p.Type.Short
-              case (p.Sym(Symbols.Scala :+ "Int"), q.ClassKind.Class)       => p.Type.Int
-              case (p.Sym(Symbols.Scala :+ "Long"), q.ClassKind.Class)      => p.Type.Long
-              case (p.Sym(Symbols.Scala :+ "Float"), q.ClassKind.Class)     => p.Type.Float
-              case (p.Sym(Symbols.Scala :+ "Double"), q.ClassKind.Class)    => p.Type.Double
-              case (p.Sym(Symbols.Scala :+ "Char"), q.ClassKind.Class)      => p.Type.Char
-              case (p.Sym(Symbols.JavaLang :+ "String"), q.ClassKind.Class) => p.Type.String
-              case (sym, q.ClassKind.Class)                                 =>
-                // this could either be a struct or an extension (X extends AnyVal)
-                println("[retyper] witness: " + expr.classSymbol.get.tree.show)
-//                q.ErasedTpe(sym, false, Nil) //
-
-                p.Type.Struct(sym)
-              case (sym, q.ClassKind.Object) =>
-                q.ErasedClsTpe(sym, q.ClassKind.Object, Nil)
-            }
-            .flatMap {
-              case s @ p.Type.Struct(sym) =>
-                lowerClassType(expr.typeSymbol).map(d => (None, s, c.copy(clss = c.clss + (sym -> d)))).resolve
-              case x => (None, x, c).success
-            }
-            .deferred
+          c.resolveClsFromTpeRepr(expr).flatMap(c.liftClsToTpe(_, _, _)).map((t, c) => (None, t, c)).deferred
       }
   }
 }

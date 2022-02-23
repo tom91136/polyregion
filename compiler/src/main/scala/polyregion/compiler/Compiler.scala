@@ -28,9 +28,11 @@ object Compiler {
 
     (for {
 
-      (fnRtnValue, fnTpe, c) <- q.FnContext().typer(f.returnTpt.tpe)
+      (fnRtnValue, fnRtnTpe, c) <- q.FnContext().typer(f.returnTpt.tpe)
 
-      fnTpe <- fnTpe match {
+      // fn <- c.typer(f.symbol.owner)
+
+      fnRtnTpe <- fnRtnTpe match {
         case tpe: p.Type => tpe.success.deferred
         case bad         => s"bad function return type $bad".fail.deferred
       }
@@ -47,8 +49,18 @@ object Compiler {
         }
       )
 
+      (owningClass, c) <- c.clsSymTyper(f.symbol.owner).deferred
+      _ = println(s"[compiler] found: ${f} = ${owningClass}")
+
+      receiver <- owningClass match {
+        case s: p.Type.Struct        => Some(p.Named("this", s)).success.deferred
+        case q.ErasedClsTpe(_, _, _) => None.success.deferred
+        case x                       => s"Illegal receiver: ${x}".fail.deferred
+      }
+
       body <- fnRtnValue.fold(f.rhs.traverse(c.mapTerm(_)))(x => Some((x, c)).success.deferred)
-      mkFn   = (xs: List[p.Stmt]) => p.Function(p.Sym(f.symbol.fullName), ???, namedArgs, fnTpe, xs)
+      // TODO work out `this` ref
+      mkFn   = (xs: List[p.Stmt]) => p.Function(p.Sym(f.symbol.fullName), receiver, namedArgs, fnRtnTpe, xs)
       runOpt = (c: q.FnContext) => runLocalOptPass(c)
 
     } yield body match {
