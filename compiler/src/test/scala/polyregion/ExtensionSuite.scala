@@ -5,8 +5,11 @@ import polyregion.compiletime.*
 import scala.compiletime.*
 import scala.reflect.ClassTag
 
-implicit class RI(val i: Int) extends AnyVal {
-  def max3(j: Int) = i + j
+ class RI(    i: Int)  {
+  //  private val x : Int = 3
+  //  val y : Int = 2
+  //  println("1")
+  def max3(j: Int) =  i+j
 }
 
 class ExtensionSuite extends BaseSuite {
@@ -36,7 +39,9 @@ class ExtensionSuite extends BaseSuite {
       xs(2) = x+2f
       val y  = math.abs(x)
 //      val z = V3(xs(0), 2f, 3f)
-      a.max3(b)
+      // val m = (1d,2f)
+      new RI(a).max3(b)
+      // V3(1,2,2)
     }
   }
 

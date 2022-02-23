@@ -99,7 +99,7 @@ object TreeMapper {
                   }
               }
             case q.ErasedClsTpe(sym, q.ClassKind.Object, Nil) => (q.ErasedModuleSelect(sym), c).success.deferred
-            case et: q.ErasedClsTpe => c.fail[(q.Val, q.FnContext)](s"Saw ${et}")
+            case et: q.ErasedClsTpe                           => c.fail[(q.Val, q.FnContext)](s"Saw ${et}")
           }
         } yield (term, c)
       case (None, s @ q.Select(root, name)) =>
@@ -116,8 +116,6 @@ object TreeMapper {
             case tpe: p.Type => // (selector...).(x:Term)
               println(s"X=$tpe")
 
-
-
               c.mapTerm(root).flatMap {
                 case (select @ p.Term.Select(xs, x), c) =>
                   s.symbol.tree match {
@@ -125,7 +123,8 @@ object TreeMapper {
                       // no-arg instance def call (i.e. `x.toDouble` )
                       val fnSym = p.Sym(s.symbol.name)
                       val named = c.named(tpe)
-                      val c1    = c.mark(fnSym, dd) ::= p.Stmt.Var(named, Some(p.Expr.Invoke(fnSym, Some(select), Nil, tpe)))
+                      val c1 =
+                        c.mark(fnSym, dd) ::= p.Stmt.Var(named, Some(p.Expr.Invoke(fnSym, Some(select), Nil, tpe)))
                       (p.Term.Select(Nil, named), c1).success.deferred
                     case dd: q.DefDef =>
                       c.fail(s"Unexpected arg list ${dd.paramss} for a 0-arg def via instance ref ${select.repr}")
@@ -152,18 +151,18 @@ object TreeMapper {
                       c.fail(s"$vd via module ref ${module.repr} was not intercepted by the outliner!?")
                     case bad => c.fail(s"Unsupported construct $bad via module ref ${module.repr}")
                   }
-                case (term : p.Term, c) =>
+                case (term: p.Term, c) =>
                   s.symbol.tree match {
                     case dd: q.DefDef if dd.paramss.isEmpty =>
                       // no-arg instance def call (i.e. `1.toDouble` )
                       val fnSym = p.Sym(s.symbol.name)
                       val named = c.named(tpe)
-                      val c1    = c.mark(fnSym, dd) ::= p.Stmt.Var(named, Some(p.Expr.Invoke(fnSym, Some(term), Nil, tpe)))
+                      val c1 = c.mark(fnSym, dd) ::= p.Stmt.Var(named, Some(p.Expr.Invoke(fnSym, Some(term), Nil, tpe)))
                       (p.Term.Select(Nil, named), c1).success.deferred
                     case bad => c.fail(s"Unsupported construct $bad via instance ref ${term.repr}")
                   }
-                case (bad  , c) =>
-                c.fail(s"Unexpected root of a select that leads to a non-erased ${tpe} type: ${bad}")
+                case (bad, c) =>
+                  c.fail(s"Unexpected root of a select that leads to a non-erased ${tpe} type: ${bad}")
               }
             case ect: q.ErasedFnTpe => // (selector...).(x:(X=>Y))
               val defdef = s.symbol.tree match {
@@ -191,7 +190,7 @@ object TreeMapper {
 
       term match {
         case a @ q.TypeApply(term, args) =>
-          val m = for {
+          for {
             (_, tpe, c) <- c.typer(a.tpe)
             (v, c) <- tpe match {
               case ect: q.ErasedFnTpe =>
@@ -199,19 +198,13 @@ object TreeMapper {
                   case f: q.DefDef => // (Symbol...).(x: X=>Y)
                     val sym      = p.Sym(a.symbol.name)
                     val receiver = p.Sym(a.symbol.maybeOwner.fullName)
-                    println(s">>>>${receiver ~ sym}")
+                    println(s"[mapper] type apply of erased fn: ${receiver ~ sym}")
                     (q.ErasedMethodVal(receiver, sym, ect), c.mark(receiver ~ sym, f)).success.deferred // ofDim
                   case _ => ???
                 }
               case bad => c.fail[(q.Val, q.FnContext)](s"Saw ${bad}")
             }
           } yield (v, c)
-
-          // T =>
-          // throw c.mapTerm(term).resolve.left.get
-
-          // println(c.mapTerm(term).resolve)
-          m
         case q.Typed(x, _)                        => (c !! term).mapTerm(x)
         case q.Inlined(call, bindings, expansion) => (c !! term).mapTerm(expansion) // simple-inline
         case q.Literal(q.BooleanConstant(v))      => (p.Term.BoolConst(v), c !! term).pure
@@ -256,7 +249,7 @@ object TreeMapper {
 
           // }
 
-          println(s">>>${ap}")
+          println(s"[mapper] Apply = ${ap}")
           for {
             (_, rtnTpe, c) <- c.typer(ap.tpe)
             (_, funTpe, c) <- c.typer(ap.fun.tpe)
@@ -266,7 +259,7 @@ object TreeMapper {
             // discard application of erased types
             argsNoErasedTpe = argTpes.zip(ap.args).flatMap {
               case ((_, _: q.ErasedClsTpe), x) => Nil
-              case ((_, _), x)              => x :: Nil
+              case ((_, _), x)                 => x :: Nil
             }
 
             // _ = println(s"M=${funVal} (...) ")
@@ -286,6 +279,8 @@ object TreeMapper {
             // _ = println(s"saw apply -> ${ap.symbol.tree.show}")
             // _ = println(s"inner is  -> ${defdef.show}")
             // _ = println(s"inner is  -> ${funVal} AP ${argTerms}")
+
+            _ = println(s"[mapper] apply function value: ${funVal}")
 
             (ref, c) <- (argTerms, funVal) match {
               case (Nil, x) => (x, c).success.deferred
@@ -310,21 +305,19 @@ object TreeMapper {
                     p.Stmt.Mut(p.Term.Select(receiver.init :+ receiver.last, member), p.Expr.Alias(value), copy = false)
                   }
                 } yield (receiver, c.::=(setMemberExprs*))).deferred
-              case (_, q.ErasedMethodVal(module: p.Sym, sym, tpe)) => // module call
+              case (_, m @ q.ErasedMethodVal(module: p.Sym, sym, tpe)) => // module call
                 val t = tpe.rtn match {
                   case t: p.Type => t
                   case q.ErasedFnTpe(args, rtn: p.Type) if args.forall {
                         case _: q.ErasedClsTpe => true
-                        case _              => false
+                        case _                 => false
                       } =>
                     rtn
 
-                    //
-                  case x:q.ErasedClsTpe =>
-
-
-
-                  println(x)
+                  //
+                  case x: q.ErasedClsTpe =>
+                    println(x)
+                    // x
                     ???
                 }
                 mkReturn(p.Expr.Invoke(module ~ sym, None, argTerms, t), c).success.deferred

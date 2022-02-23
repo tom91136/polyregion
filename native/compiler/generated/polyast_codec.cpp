@@ -1253,24 +1253,26 @@ json structdef_to_json(const StructDef& x) {
 
 Function function_from_json(const json& j) { 
   auto name =  sym_from_json(j.at(0));
+  auto receiver = j.at(1).is_null() ? std::nullopt : std::make_optional(named_from_json(j.at(1)));
   std::vector<Named> args;
-  auto args_json = j.at(1);
+  auto args_json = j.at(2);
   std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &named_from_json);
-  auto rtn =  Type::any_from_json(j.at(2));
+  auto rtn =  Type::any_from_json(j.at(3));
   std::vector<Stmt::Any> body;
-  auto body_json = j.at(3);
+  auto body_json = j.at(4);
   std::transform(body_json.begin(), body_json.end(), std::back_inserter(body), &Stmt::any_from_json);
-  return {name, args, rtn, body};
+  return {name, receiver, args, rtn, body};
 }
 
 json function_to_json(const Function& x) { 
   auto name =  sym_to_json(x.name);
+  auto receiver = x.receiver ? named_to_json(*x.receiver) : json{};
   std::vector<json> args;
   std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &named_to_json);
   auto rtn =  Type::any_to_json(x.rtn);
   std::vector<json> body;
   std::transform(x.body.begin(), x.body.end(), std::back_inserter(body), &Stmt::any_to_json);
-  return json::array({name, args, rtn, body});
+  return json::array({name, receiver, args, rtn, body});
 }
 
 Program program_from_json(const json& j) { 
@@ -1295,13 +1297,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "1239f767cde40f268ac665c75d38ddf0") {
-   throw std::runtime_error("Expecting ADT hash to be 1239f767cde40f268ac665c75d38ddf0, but was " + hash);
+  if(hash != "d313cc85d16132b1dc606da6ec37f150") {
+   throw std::runtime_error("Expecting ADT hash to be d313cc85d16132b1dc606da6ec37f150, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"1239f767cde40f268ac665c75d38ddf0", x});
+  return json::array({"d313cc85d16132b1dc606da6ec37f150", x});
 }
 } // namespace polyregion::polyast

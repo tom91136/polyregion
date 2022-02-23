@@ -49,12 +49,12 @@ class Quoted(val q: Quotes) {
         case ClassKind.Object    => "Object"
         case ClassKind.Class     => "Class"
       }
-      s"<!<${kindName}>${name.repr}${if (ctor.isEmpty) "" else ctor.mkString("[", ", ", "]")}>"
+      s"#{ <${kindName}>${name.repr}${if (ctor.isEmpty) "" else ctor.mkString("[", ", ", "]")} }#"
     }
   }
   case class ErasedFnTpe(args: List[Tpe], rtn: Tpe) {
     override def toString =
-      s"!{ (${args.mkString(",")}) => ${rtn} }"
+      s"#{ (${args.mkString(",")}) => ${rtn} }#"
   }
 
   case class FnContext(

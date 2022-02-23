@@ -10,14 +10,17 @@ import simulacrum.typeclass
 
 object Retyper {
 
-  def lowerProductType[A: Type](using q: Quoted): Deferred[p.StructDef] = lowerProductType(q.TypeRepr.of[A].typeSymbol)
-  def lowerProductType(using q: Quoted)(tpeSym: q.Symbol): Deferred[p.StructDef] = {
+  def lowerClassType[A: Type](using q: Quoted): Deferred[p.StructDef] = lowerClassType(q.TypeRepr.of[A].typeSymbol)
+  def lowerClassType(using q: Quoted)(tpeSym: q.Symbol): Deferred[p.StructDef] = {
 
-    if (!tpeSym.flags.is(q.Flags.Case)) {
+    if (tpeSym.flags.is(q.Flags.Module) || tpeSym.flags.is(q.Flags.Abstract)) {
       throw RuntimeException(s"Unsupported combination of flags: ${tpeSym.flags.show} for ${tpeSym}")
     }
 
-    tpeSym.caseFields
+    println(s"Decls = ${tpeSym.declarations.map(_.tree.show)}")
+
+    // TODO workout inherited members
+    tpeSym.fieldMembers
       .traverse(field =>
         (field.tree match {
           case d: q.ValDef =>
@@ -40,6 +43,7 @@ object Retyper {
           case Some(sym) if sym.name == "<root>" => // discard root package
             resolveSym(tpe.qualifier)
           case Some(sym) =>
+            println(s"[typer] resolveSym ${sym.fullName} = ${sym.flags.show} ${sym.flags.is(q.Flags.Module)}")
             (p.Sym(sym.fullName), if (sym.flags.is(q.Flags.Module)) q.ClassKind.Object else q.ClassKind.Class).success
         }
       // case NoPrefix()    => None.success
@@ -95,7 +99,7 @@ object Retyper {
                 },
                 c
               )
-            case (n, m, ys) => (None, q.ErasedClsTpe(n, q.ClassKind.Object, ys.map(_._2)), c)
+            case (n, m, ys) => (None, q.ErasedClsTpe(n, m, ys.map(_._2)), c)
           }
         // widen singletons
         case q.ConstantType(x) =>
@@ -127,13 +131,10 @@ object Retyper {
               case (p.Sym(Symbols.Scala :+ "Double"), q.ClassKind.Class)    => p.Type.Double
               case (p.Sym(Symbols.Scala :+ "Char"), q.ClassKind.Class)      => p.Type.Char
               case (p.Sym(Symbols.JavaLang :+ "String"), q.ClassKind.Class) => p.Type.String
-              case (sym, q.ClassKind.Class)                                   =>
-
+              case (sym, q.ClassKind.Class)                                 =>
                 // this could either be a struct or an extension (X extends AnyVal)
-               println(">>>>"+expr.classSymbol.get.tree.show)
+                println("[retyper] witness: " + expr.classSymbol.get.tree.show)
 //                q.ErasedTpe(sym, false, Nil) //
-
-
 
                 p.Type.Struct(sym)
               case (sym, q.ClassKind.Object) =>
@@ -141,7 +142,7 @@ object Retyper {
             }
             .flatMap {
               case s @ p.Type.Struct(sym) =>
-                lowerProductType(expr.typeSymbol).map(d => (None, s, c.copy(clss = c.clss + (sym -> d)))).resolve
+                lowerClassType(expr.typeSymbol).map(d => (None, s, c.copy(clss = c.clss + (sym -> d)))).resolve
               case x => (None, x, c).success
             }
             .deferred

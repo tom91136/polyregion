@@ -48,7 +48,7 @@ object Compiler {
       )
 
       body <- fnRtnValue.fold(f.rhs.traverse(c.mapTerm(_)))(x => Some((x, c)).success.deferred)
-      mkFn   = (xs: List[p.Stmt]) => p.Function(p.Sym(f.symbol.fullName), namedArgs, fnTpe, xs)
+      mkFn   = (xs: List[p.Stmt]) => p.Function(p.Sym(f.symbol.fullName), ???, namedArgs, fnTpe, xs)
       runOpt = (c: q.FnContext) => runLocalOptPass(c)
 
     } yield body match {
@@ -129,6 +129,7 @@ object Compiler {
 
       closureFn = p.Function(
         p.Sym(closureName :: Nil),
+        None,
         names,
         fnTpe,
         (c.stmts :+ p.Stmt.Return(p.Expr.Alias(returnTerm)))

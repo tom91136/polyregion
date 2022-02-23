@@ -52,7 +52,7 @@ object compiletime {
 
     implicit val Q = compiler.Quoted(q)
 
-    compiler.Retyper.lowerProductType[A].resolve match {
+    compiler.Retyper.lowerClassType[A].resolve match {
       case Left(e) => throw e
       case Right(sdef) =>
         val layout = PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, sdef)))
