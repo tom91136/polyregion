@@ -21,6 +21,7 @@ object Retyper {
 
     // TODO workout inherited members
     tpeSym.fieldMembers
+      .sortBy(_.pos.map(p => (p.startLine, p.startColumn))) // make sure the order follows source code decl. order
       .traverse(field =>
         (field.tree match {
           case d: q.ValDef =>

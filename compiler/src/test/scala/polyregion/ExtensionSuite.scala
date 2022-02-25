@@ -38,7 +38,7 @@ class ExtensionSuite extends BaseSuite {
       xs(1) = x+1f
       xs(2) = x+2f
       val y  = math.abs(x)
-//      val z = V3(xs(0), 2f, 3f)
+      val z = V3(xs(0), 2f, 3f)
       // val m = (1d,2f)
       new RI(a).max3(b)
       // V3(1,2,2)

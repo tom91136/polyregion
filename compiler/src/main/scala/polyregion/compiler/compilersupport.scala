@@ -278,11 +278,17 @@ extension (e: p.Stmt) {
 
 }
 
+case class FnSignature(name: p.Sym, receiver: Option[p.Type], args: List[p.Type], rtn: p.Type)
+
 extension (f: p.Function) {
-  def signature =
+
+  def signature = FnSignature(f.name, f.receiver.map(_.tpe), f.args.map(_.tpe), f.rtn)
+
+  def signatureRepr =
     s"${f.receiver.fold("")(r => r.repr + ".")}${f.name.repr}(${f.args.map(_.repr).mkString(", ")}) : ${f.rtn.repr}"
+
   def repr: String =
-    s"""${f.signature} = {
+    s"""${f.signatureRepr} = {
        |${f.body.map(_.repr).map("  " + _).mkString("\n")}
 		   |}""".stripMargin
 }

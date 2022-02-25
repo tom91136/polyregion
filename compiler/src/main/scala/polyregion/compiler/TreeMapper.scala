@@ -78,12 +78,21 @@ object TreeMapper {
           (_, tpe, c) <- c.typer(i.tpe)
           // Ident is local, so if it is an erased closure type, we check the context first to see if we have a defined suspension
           // for types that are already part of PolyAst, we just use it as is
-          _ = println(s"sel ident $s = ${tpe}")
+
+          // _ = println(  q.Printer.TreeCode)
+          _ = println(s"sel ident $s = ${tpe} = ${i.show(using q.Printer.TreeCode)} ${i.symbol.owner}")
 
           (term, c) <- tpe match {
             case tpe: p.Type =>
-              println(s"in2 = ${tpe} = ${i} = ${i.symbol}")
-              (p.Term.Select(Nil, p.Named(name, tpe)), c).success.deferred
+              // if the owner is a class, then prefix select starting with `this`
+              (if (i.symbol.owner.isClassDef) {
+                 c.clsSymTyper(i.symbol.owner).map {
+                   case (cls: p.Type, c) => p.Named("this", cls) :: Nil
+                   case _                => ???
+                 }
+               } else Nil.success).map { parent =>
+                (p.Term.Select(parent, p.Named(name, tpe)), c)
+              }.deferred
             case ect: q.ErasedFnTpe =>
               // we may end up here and not Select for functions inside modules, not entirely sure why that is
               // here ident's name will be the function name
@@ -122,9 +131,10 @@ object TreeMapper {
                     case dd: q.DefDef if dd.paramss.isEmpty =>
                       // no-arg instance def call (i.e. `x.toDouble` )
                       val fnSym = p.Sym(s.symbol.name)
+
                       val named = c.named(tpe)
-                      val c1 =
-                        c.mark(fnSym, dd) ::= p.Stmt.Var(named, Some(p.Expr.Invoke(fnSym, Some(select), Nil, tpe)))
+                      val c1 = c.down(dd).mark(fnSym, dd) ::= p.Stmt
+                        .Var(named, Some(p.Expr.Invoke(fnSym, Some(select), Nil, tpe)))
                       (p.Term.Select(Nil, named), c1).success.deferred
                     case dd: q.DefDef =>
                       c.fail(s"Unexpected arg list ${dd.paramss} for a 0-arg def via instance ref ${select.repr}")
@@ -142,8 +152,10 @@ object TreeMapper {
                     case dd: q.DefDef if dd.paramss.isEmpty =>
                       // no-arg module def call (i.e. `object X{ def y :Int = ??? }` )
                       val fnSym = module :+ name
+
                       val named = c.named(tpe)
-                      val c1    = c.mark(fnSym, dd) ::= p.Stmt.Var(named, Some(p.Expr.Invoke(fnSym, None, Nil, tpe)))
+                      val c1 =
+                        c.down(dd).mark(fnSym, dd) ::= p.Stmt.Var(named, Some(p.Expr.Invoke(fnSym, None, Nil, tpe)))
                       (p.Term.Select(Nil, named), c1).success.deferred
                     case dd: q.DefDef =>
                       c.fail(s"Unexpected arg list ${dd.paramss} for a 0-arg def via module ref ${module.repr}")
@@ -156,8 +168,10 @@ object TreeMapper {
                     case dd: q.DefDef if dd.paramss.isEmpty =>
                       // no-arg instance def call (i.e. `1.toDouble` )
                       val fnSym = p.Sym(s.symbol.name)
+
                       val named = c.named(tpe)
-                      val c1 = c.mark(fnSym, dd) ::= p.Stmt.Var(named, Some(p.Expr.Invoke(fnSym, Some(term), Nil, tpe)))
+                      val c1 = c.down(dd).down(dd).mark(fnSym, dd) ::= p.Stmt
+                        .Var(named, Some(p.Expr.Invoke(fnSym, Some(term), Nil, tpe)))
                       (p.Term.Select(Nil, named), c1).success.deferred
                     case bad => c.fail(s"Unsupported construct $bad via instance ref ${term.repr}")
                   }
@@ -216,8 +230,10 @@ object TreeMapper {
         case q.Literal(q.ByteConstant(v))         => (p.Term.ByteConst(v), c !! term).pure
         case q.Literal(q.CharConstant(v))         => (p.Term.CharConst(v), c !! term).pure
         case q.Literal(q.UnitConstant())          => (p.Term.UnitConst, c !! term).pure
-        case r: q.Ref                             => (c !! r).mapRef(r)
-        case q.New(tptTree)                       =>
+        case r: q.Ref =>
+          println(s"[mapper] ref @ ${r}")
+          (c !! r).mapRef(r)
+        case q.New(tptTree) =>
           // println(s"New=${term.show}")
 
           (c !! term).typer(tptTree.tpe).map {
@@ -272,8 +288,9 @@ object TreeMapper {
             }
 
             mkReturn = (expr: p.Expr, c: q.FnContext) => {
+
               val name = c.named(expr.tpe)
-              (p.Term.Select(Nil, name), c ::= p.Stmt.Var(name, Some(expr)))
+              (p.Term.Select(Nil, name), c.down(term) ::= p.Stmt.Var(name, Some(expr)))
             }
 
             // _ = println(s"saw apply -> ${ap.symbol.tree.show}")
@@ -327,7 +344,6 @@ object TreeMapper {
                   case _         => ???
                 }
                 mkReturn(p.Expr.Invoke(sym, Some(receiver), argTerms, t), c).success.deferred
-
             }
 
           } yield (ref, c)

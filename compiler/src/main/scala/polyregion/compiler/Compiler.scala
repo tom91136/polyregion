@@ -59,8 +59,9 @@ object Compiler {
       }
 
       body <- fnRtnValue.fold(f.rhs.traverse(c.mapTerm(_)))(x => Some((x, c)).success.deferred)
-      // TODO work out `this` ref
-      mkFn   = (xs: List[p.Stmt]) => p.Function(p.Sym(f.symbol.fullName), receiver, namedArgs, fnRtnTpe, xs)
+
+      mkFn = (xs: List[p.Stmt]) =>
+        p.Function(p.Sym(receiver.fold(f.symbol.fullName)(_ => f.symbol.name)), receiver, namedArgs, fnRtnTpe, xs)
       runOpt = (c: q.FnContext) => runLocalOptPass(c)
 
     } yield body match {
