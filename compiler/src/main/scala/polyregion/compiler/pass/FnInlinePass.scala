@@ -49,7 +49,7 @@ object FnInlinePass {
       f.copy(body = f.body.flatMap { x =>
         x.mapExpr {
           case ivk @ p.Expr.Invoke(name, recv, args, tpe) =>
-            val sig = FnSignature(name, recv.map(_.tpe), args.map(_.tpe), tpe)
+            val sig = p.Signature(name, recv.map(_.tpe), args.map(_.tpe), tpe)
             lut.get(sig) match {
               case None =>
                 println(s"none = ${sig}")

@@ -81,6 +81,12 @@ object Cpp {
             |    return seed;
             |  }
             |};
+            |
+            |template <typename ...T> struct std::hash<$namespace::Alternative<T...>> {
+            |  std::size_t operator()($namespace::Alternative<T...> const &x) const noexcept {
+            |    return std::hash<std::variant<T...>>()($namespace::unwrap(x));
+            |  }
+            |};
             |${xs.flatMap(_.stdSpecialisationsDeclStmts(namespace)).sym("\n", "\n", "\n")}
             |}
             |""".stripMargin
@@ -284,25 +290,36 @@ object Cpp {
         }.unzip
       } else (Nil, Nil)
 
-      val stdSpecialisationsDeclStmts = (ns: String) =>
-        s"template <> struct std::hash<$ns::${clsName(qualified = true)}> {" ::
-          s"  std::size_t operator()(const $ns::${clsName(qualified = true)} &) const noexcept;" ::
-          s"};" :: Nil
+      val (stdSpecialisationsDeclStmts, stdSpecialisationsStmts) =
+        if (tpe.kind == CppType.Kind.Base ) {
+          ((_: String) => Nil, (_: String) => Nil)
+        } else {
 
-      val stdSpecialisationsStmts = (ns: String) =>
-        s"std::size_t std::hash<$ns::${clsName(qualified = true)}>::operator()(const $ns::${clsName(qualified = true)} &x) const noexcept {"
-      ::
-      (members match {
-        case Nil => s"std::size_t seed = std::hash<std::string>()(\"$ns::${clsName(qualified = true)}\");" :: Nil
-        case (n, t) :: xs =>
-          xs.foldLeft[List[String]](
-            s"std::size_t seed = std::hash<decltype(x.${n})>()(x.${n});" :: Nil
-          ) { case (acc, (n, t)) =>
-            acc :+ s"seed ^= std::hash<decltype(x.${n})>()(x.${n}) + 0x9e3779b9 + (seed << 6) + (seed >> 2);"
-          }
-      }).map("  " + _) :::
-        s"  return seed;" ::
-        s"}" :: Nil
+          val stdSpecialisationsDeclStmts = (ns: String) =>
+            s"template <> struct std::hash<$ns::${clsName(qualified = true)}> {" ::
+              s"  std::size_t operator()(const $ns::${clsName(qualified = true)} &) const noexcept;" ::
+              s"};" :: Nil
+
+          val stdSpecialisationsStmts = (ns: String) =>
+            s"std::size_t std::hash<$ns::${clsName(qualified = true)}>::operator()(const $ns::${clsName(qualified = true)} &x) const noexcept {" ::
+          (members match {
+            case Nil => s"std::size_t seed = std::hash<std::string>()(\"$ns::${clsName(qualified = true)}\");" :: Nil
+            case (n, t) :: xs =>
+              def mkHashExpr(member: String, tpe: CppType) = {
+                val wrap =   s"x.${member}"
+                s"std::hash<decltype($wrap)>()($wrap)"
+              }
+              xs.foldLeft[List[String]](
+                s"std::size_t seed = ${mkHashExpr(n, t)};" :: Nil
+              ) { case (acc, (n, t)) =>
+                acc :+ s"seed ^= ${mkHashExpr(n, t)} + 0x9e3779b9 + (seed << 6) + (seed >> 2);"
+              }
+          }).map("  " + _) :::
+            s"  return seed;" ::
+            s"}" :: Nil
+
+          (stdSpecialisationsDeclStmts, stdSpecialisationsStmts)
+        }
 
       val equalitySig =
         s"EXPORT friend bool operator==(const ${clsName(qualified = true)} &, const ${clsName(qualified = true)} &);" :: Nil

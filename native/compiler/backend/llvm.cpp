@@ -39,10 +39,8 @@ static llvm::Value *sizeOf(llvm::IRBuilder<> &B, llvm::LLVMContext &C, llvm::Typ
   return sizeVal;
 }
 
-static llvm::Value *invokeMalloc(llvm::IRBuilder<> &B, llvm::LLVMContext &C, llvm::Module *m, llvm::Value *size) {
-  auto ft = llvm::FunctionType::get(llvm::Type::getInt8Ty(C)->getPointerTo(), {llvm::Type::getInt32Ty(C)}, false);
-  auto f = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, "malloc", m);
-  return B.CreateCall(f, size);
+llvm::Value *LLVMAstTransformer::invokeMalloc(llvm::Function *parent, llvm::Value *size) {
+  return B.CreateCall(mkExternalFn(parent, Type::Array(Type::Byte()), "malloc", {Type::Int()}), size);
 }
 
 static bool isUnsigned(const Type::Any &tpe) {
@@ -172,6 +170,18 @@ llvm::Value *LLVMAstTransformer::mkRef(const Term::Any &ref) {
       [&](const Term::StringConst &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); });
 }
 
+llvm::Function *LLVMAstTransformer::mkExternalFn(llvm::Function *parent, const Type::Any &rtn, const std::string &name,
+                                                 const std::vector<Type::Any> &args) {
+  const Signature s(Sym({name}), {}, args, rtn);
+  if (functions.find(s) == functions.end()) {
+    auto llvmArgs = map_vec<Type::Any, llvm::Type *>(args, [&](auto t) { return mkTpe(t); });
+    auto ft = llvm::FunctionType::get(mkTpe(rtn), llvmArgs, false);
+    auto f = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, name, parent->getParent());
+    functions[s] = f;
+  }
+  return functions[s];
+}
+
 llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Function *fn, const std::string &key) {
 
   using ValPtr = llvm::Value *;
@@ -229,18 +239,13 @@ llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Functi
   };
 
   const auto externUnaryCall = [&](const std::string &name, const Type::Any &tpe, const Term::Any &arg) {
-    auto t = mkTpe(tpe);
-    auto ft = llvm::FunctionType::get(t, {t}, false);
-    auto f = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, name, fn->getParent());
-    return B.CreateCall(f, conditionalLoad(mkRef(arg)));
+    return B.CreateCall(mkExternalFn(fn, tpe, name, {tpe}), conditionalLoad(mkRef(arg)));
   };
 
   const auto externBinaryCall = [&](const std::string &name, const Type::Any &tpe, //
                                     const Term::Any &lhs, const Term::Any &rhs) {
-    auto t = mkTpe(tpe);
-    auto ft = llvm::FunctionType::get(t, {t, t}, false);
-    auto f = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, name, fn->getParent());
-    return B.CreateCall(f, {conditionalLoad(mkRef(lhs)), conditionalLoad(mkRef(rhs))});
+    return B.CreateCall(mkExternalFn(fn, tpe, name, {tpe, tpe}),
+                        {conditionalLoad(mkRef(lhs)), conditionalLoad(mkRef(rhs))});
   };
 
   const auto unaryIntrinsic = [&](llvm::Intrinsic::ID id, const Type::Any &overload, const Term::Any &arg) {
@@ -509,7 +514,7 @@ llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Functi
       [&](const Expr::Alloc &x) -> ValPtr { //
         auto size = mkRef(x.size);
         auto elemSize = sizeOf(B, C, mkTpe(x.witness));
-        auto ptr = invokeMalloc(B, C, fn->getParent(), B.CreateMul(size, elemSize));
+        auto ptr = invokeMalloc(fn, B.CreateMul(size, elemSize));
         return B.CreateBitCast(ptr, mkTpe(x.witness));
       });
 }
@@ -554,7 +559,7 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
                                      " in stmt:" + repr(stmt));
             }
             auto elemSize = sizeOf(B, C, structPtrTy);
-            auto ptr = invokeMalloc(B, C, fn->getParent(), elemSize);
+            auto ptr = invokeMalloc(fn, elemSize);
             lut[x.name.symbol] = {x.name.tpe, B.CreateBitCast(ptr, structPtrTy)};
           }
         } else {

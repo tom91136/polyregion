@@ -117,6 +117,8 @@ object PolyAst {
 
   case class StructDef(name: Sym, members: List[Named]) derives MsgPack.Codec
 
+  case class Signature(name: Sym, receiver: Option[Type], args: List[Type], rtn: Type)
+
   case class Function(         //
       name: Sym,               //
       receiver: Option[Named], //

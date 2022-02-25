@@ -42,6 +42,7 @@ object CppCodeGen {
     :: deriveStruct[Expr]()
     :: deriveStruct[Stmt]()
     :: deriveStruct[StructDef]()
+    :: deriveStruct[Signature]()
     :: deriveStruct[Function]()
     :: deriveStruct[Program]()
     :: Nil

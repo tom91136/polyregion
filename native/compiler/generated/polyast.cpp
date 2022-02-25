@@ -953,6 +953,31 @@ bool operator==(const StructDef &l, const StructDef &r) {
   return l.name == r.name && l.members == r.members;
 }
 
+std::ostream &operator<<(std::ostream &os, const Signature &x) {
+  os << "Signature(";
+  os << x.name;
+  os << ',';
+  os << '{';
+  if (x.receiver) {
+    os << *x.receiver;
+  }
+  os << '}';
+  os << ',';
+  os << '{';
+  if (!x.args.empty()) {
+    std::for_each(x.args.begin(), std::prev(x.args.end()), [&os](auto &&x) { os << x; os << ','; });
+    os << x.args.back();
+  }
+  os << '}';
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool operator==(const Signature &l, const Signature &r) { 
+  return l.name == r.name && l.receiver == r.receiver && std::equal(l.args.begin(), l.args.end(), r.args.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && *l.rtn == *r.rtn;
+}
+
 std::ostream &operator<<(std::ostream &os, const Function &x) {
   os << "Function(";
   os << x.name;
@@ -1016,10 +1041,6 @@ std::size_t std::hash<polyregion::polyast::Sym>::operator()(const polyregion::po
   std::size_t seed = std::hash<decltype(x.fqn)>()(x.fqn);
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::TypeKind::Base>::operator()(const polyregion::polyast::TypeKind::Base &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::TypeKind::Base");
-  return seed;
-}
 std::size_t std::hash<polyregion::polyast::TypeKind::None>::operator()(const polyregion::polyast::TypeKind::None &x) const noexcept {
   std::size_t seed = std::hash<std::string>()("polyregion::polyast::TypeKind::None");
   return seed;
@@ -1034,10 +1055,6 @@ std::size_t std::hash<polyregion::polyast::TypeKind::Integral>::operator()(const
 }
 std::size_t std::hash<polyregion::polyast::TypeKind::Fractional>::operator()(const polyregion::polyast::TypeKind::Fractional &x) const noexcept {
   std::size_t seed = std::hash<std::string>()("polyregion::polyast::TypeKind::Fractional");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::Type::Base>::operator()(const polyregion::polyast::Type::Base &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.kind)>()(x.kind);
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Type::Float>::operator()(const polyregion::polyast::Type::Float &x) const noexcept {
@@ -1099,10 +1116,6 @@ std::size_t std::hash<polyregion::polyast::Position>::operator()(const polyregio
   seed ^= std::hash<decltype(x.col)>()(x.col) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Term::Base>::operator()(const polyregion::polyast::Term::Base &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.tpe)>()(x.tpe);
-  return seed;
-}
 std::size_t std::hash<polyregion::polyast::Term::Select>::operator()(const polyregion::polyast::Term::Select &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.init)>()(x.init);
   seed ^= std::hash<decltype(x.last)>()(x.last) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
@@ -1146,10 +1159,6 @@ std::size_t std::hash<polyregion::polyast::Term::DoubleConst>::operator()(const 
 }
 std::size_t std::hash<polyregion::polyast::Term::StringConst>::operator()(const polyregion::polyast::Term::StringConst &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.value)>()(x.value);
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Base>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Base &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Base");
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Add>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Add &x) const noexcept {
@@ -1214,10 +1223,6 @@ std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::BSR>::operator()
 }
 std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::BZSR>::operator()(const polyregion::polyast::BinaryIntrinsicKind::BZSR &x) const noexcept {
   std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::BZSR");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Base>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Base &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Base");
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Sin>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Sin &x) const noexcept {
@@ -1320,10 +1325,6 @@ std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Neg>::operator()(
   std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Neg");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Base>::operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Base &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryLogicIntrinsicKind::Base");
-  return seed;
-}
 std::size_t std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Eq>::operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Eq &x) const noexcept {
   std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryLogicIntrinsicKind::Eq");
   return seed;
@@ -1356,16 +1357,8 @@ std::size_t std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Gt>::operat
   std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryLogicIntrinsicKind::Gt");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::UnaryLogicIntrinsicKind::Base>::operator()(const polyregion::polyast::UnaryLogicIntrinsicKind::Base &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryLogicIntrinsicKind::Base");
-  return seed;
-}
 std::size_t std::hash<polyregion::polyast::UnaryLogicIntrinsicKind::Not>::operator()(const polyregion::polyast::UnaryLogicIntrinsicKind::Not &x) const noexcept {
   std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryLogicIntrinsicKind::Not");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::Expr::Base>::operator()(const polyregion::polyast::Expr::Base &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.tpe)>()(x.tpe);
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Expr::UnaryIntrinsic>::operator()(const polyregion::polyast::Expr::UnaryIntrinsic &x) const noexcept {
@@ -1419,10 +1412,6 @@ std::size_t std::hash<polyregion::polyast::Expr::Alloc>::operator()(const polyre
   seed ^= std::hash<decltype(x.size)>()(x.size) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Stmt::Base>::operator()(const polyregion::polyast::Stmt::Base &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Stmt::Base");
-  return seed;
-}
 std::size_t std::hash<polyregion::polyast::Stmt::Comment>::operator()(const polyregion::polyast::Stmt::Comment &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.value)>()(x.value);
   return seed;
@@ -1470,6 +1459,13 @@ std::size_t std::hash<polyregion::polyast::Stmt::Return>::operator()(const polyr
 std::size_t std::hash<polyregion::polyast::StructDef>::operator()(const polyregion::polyast::StructDef &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.name)>()(x.name);
   seed ^= std::hash<decltype(x.members)>()(x.members) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Signature>::operator()(const polyregion::polyast::Signature &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.name)>()(x.name);
+  seed ^= std::hash<decltype(x.receiver)>()(x.receiver) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.args)>()(x.args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Function>::operator()(const polyregion::polyast::Function &x) const noexcept {

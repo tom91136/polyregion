@@ -1011,6 +1011,16 @@ struct EXPORT StructDef {
   EXPORT friend bool operator==(const StructDef &, const StructDef &);
 };
 
+struct EXPORT Signature {
+  Sym name;
+  std::optional<Type::Any> receiver;
+  std::vector<Type::Any> args;
+  Type::Any rtn;
+  Signature(Sym name, std::optional<Type::Any> receiver, std::vector<Type::Any> args, Type::Any rtn) noexcept : name(std::move(name)), receiver(std::move(receiver)), args(std::move(args)), rtn(std::move(rtn)) {}
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Signature &);
+  EXPORT friend bool operator==(const Signature &, const Signature &);
+};
+
 struct EXPORT Function {
   Sym name;
   std::optional<Named> receiver;
@@ -1045,11 +1055,14 @@ template <typename T> struct std::hash<std::vector<T>> {
   }
 };
 
+template <typename ...T> struct std::hash<polyregion::polyast::Alternative<T...>> {
+  std::size_t operator()(polyregion::polyast::Alternative<T...> const &x) const noexcept {
+    return std::hash<std::variant<T...>>()(polyregion::polyast::unwrap(x));
+  }
+};
+
 template <> struct std::hash<polyregion::polyast::Sym> {
   std::size_t operator()(const polyregion::polyast::Sym &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::TypeKind::Base> {
-  std::size_t operator()(const polyregion::polyast::TypeKind::Base &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::TypeKind::None> {
   std::size_t operator()(const polyregion::polyast::TypeKind::None &) const noexcept;
@@ -1062,9 +1075,6 @@ template <> struct std::hash<polyregion::polyast::TypeKind::Integral> {
 };
 template <> struct std::hash<polyregion::polyast::TypeKind::Fractional> {
   std::size_t operator()(const polyregion::polyast::TypeKind::Fractional &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::Type::Base> {
-  std::size_t operator()(const polyregion::polyast::Type::Base &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Type::Float> {
   std::size_t operator()(const polyregion::polyast::Type::Float &) const noexcept;
@@ -1108,9 +1118,6 @@ template <> struct std::hash<polyregion::polyast::Named> {
 template <> struct std::hash<polyregion::polyast::Position> {
   std::size_t operator()(const polyregion::polyast::Position &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Term::Base> {
-  std::size_t operator()(const polyregion::polyast::Term::Base &) const noexcept;
-};
 template <> struct std::hash<polyregion::polyast::Term::Select> {
   std::size_t operator()(const polyregion::polyast::Term::Select &) const noexcept;
 };
@@ -1143,9 +1150,6 @@ template <> struct std::hash<polyregion::polyast::Term::DoubleConst> {
 };
 template <> struct std::hash<polyregion::polyast::Term::StringConst> {
   std::size_t operator()(const polyregion::polyast::Term::StringConst &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::Base> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::Base &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::Add> {
   std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::Add &) const noexcept;
@@ -1194,9 +1198,6 @@ template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::BSR> {
 };
 template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::BZSR> {
   std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::BZSR &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Base> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Base &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Sin> {
   std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Sin &) const noexcept;
@@ -1273,9 +1274,6 @@ template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Pos> {
 template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Neg> {
   std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Neg &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Base> {
-  std::size_t operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Base &) const noexcept;
-};
 template <> struct std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Eq> {
   std::size_t operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Eq &) const noexcept;
 };
@@ -1300,14 +1298,8 @@ template <> struct std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Lt> 
 template <> struct std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Gt> {
   std::size_t operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Gt &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::UnaryLogicIntrinsicKind::Base> {
-  std::size_t operator()(const polyregion::polyast::UnaryLogicIntrinsicKind::Base &) const noexcept;
-};
 template <> struct std::hash<polyregion::polyast::UnaryLogicIntrinsicKind::Not> {
   std::size_t operator()(const polyregion::polyast::UnaryLogicIntrinsicKind::Not &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::Expr::Base> {
-  std::size_t operator()(const polyregion::polyast::Expr::Base &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Expr::UnaryIntrinsic> {
   std::size_t operator()(const polyregion::polyast::Expr::UnaryIntrinsic &) const noexcept;
@@ -1335,9 +1327,6 @@ template <> struct std::hash<polyregion::polyast::Expr::Index> {
 };
 template <> struct std::hash<polyregion::polyast::Expr::Alloc> {
   std::size_t operator()(const polyregion::polyast::Expr::Alloc &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::Stmt::Base> {
-  std::size_t operator()(const polyregion::polyast::Stmt::Base &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Stmt::Comment> {
   std::size_t operator()(const polyregion::polyast::Stmt::Comment &) const noexcept;
@@ -1368,6 +1357,9 @@ template <> struct std::hash<polyregion::polyast::Stmt::Return> {
 };
 template <> struct std::hash<polyregion::polyast::StructDef> {
   std::size_t operator()(const polyregion::polyast::StructDef &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Signature> {
+  std::size_t operator()(const polyregion::polyast::Signature &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Function> {
   std::size_t operator()(const polyregion::polyast::Function &) const noexcept;
