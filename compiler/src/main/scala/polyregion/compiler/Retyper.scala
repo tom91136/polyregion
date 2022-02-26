@@ -137,7 +137,9 @@ object Retyper {
                 },
                 c
               )
-            case (n, m, ys) => (None, q.ErasedClsTpe(n, m, ys.map(_._2)), c)
+            case (n, m, ys) =>
+              // lowerClassType(ctor.classSymbol.get).map( s =>  )
+              (None, q.ErasedClsTpe(n, m, ys.map(_._2)), c)
           }
         // widen singletons
         case q.ConstantType(x) =>

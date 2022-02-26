@@ -75,6 +75,18 @@ object Mandelbrot {
     (z, i)
   }
 
+  case class ItResult(c: Complex, i: Int)
+
+  inline def itMandel2(inline c: Complex, inline imax: Int, inline bailout: Int): ItResult = {
+    var z = Complex(0d, 0d)
+    var i = 0
+    while (z.abs <= bailout && i < imax) {
+      z = z * z + c
+      i += 1
+    }
+    ItResult(z, i)
+  }
+
   inline def mkColour(inline z: Complex, inline iter: Int, inline maxIter: Int): Colour =
     if (iter >= maxIter) Colour.Black
     else {
@@ -93,9 +105,16 @@ object Mandelbrot {
       y <- (0 until height)
       x <- 0 until width
     } {
-      val c         = Complex(interpolate(x)(0, width)(xMin, xMax), interpolate(y)(0, height)(yMin, yMax))
-      val (z, iter) = itMandel(c, maxIter, 4)
-      buffer(x)(y) = mkColour(z, iter, maxIter)
+
+      val m2 = polyregion.compiletime.offload {
+        val c = Complex(interpolate(x)(0, width)(xMin, xMax), interpolate(y)(0, height)(yMin, yMax))
+        val t = itMandel2(c, maxIter, 4)
+        ()
+      }
+
+      // val c         =   polyregion.compiletime.offload { Complex(interpolate(x)(0, width)(xMin, xMax), interpolate(y)(0, height)(yMin, yMax))  }
+      // val (z, iter) = itMandel(c, maxIter, 4)
+      // buffer(x)(y) = mkColour(z, iter, maxIter)
     }
   }
 

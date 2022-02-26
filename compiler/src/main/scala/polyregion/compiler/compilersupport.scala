@@ -6,6 +6,12 @@ import java.lang.reflect.Modifier
 import scala.annotation.tailrec
 import scala.reflect.ClassTag
 
+@tailrec def doUntilNotEq[A](x: A)(f: A => A): A = {
+  val y = f(x)
+  if (y == x) y
+  else doUntilNotEq(y)(f)
+}
+
 final class CompilerException(m: String) extends Exception(m)
 
 type Result[A] = Either[Throwable, A]

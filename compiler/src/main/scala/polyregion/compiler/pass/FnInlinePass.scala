@@ -39,7 +39,7 @@ object FnInlinePass {
     p.Function(f.name, f.receiver.map(rename(_)), f.args.map(rename(_)), f.rtn, stmts)
   }
 
-  def inlineAll(fs: List[p.Function]): List[p.Function] = {
+  def inlineAll(fs: List[p.Function]): List[p.Function] = doUntilNotEq(fs) { fs => 
 
     println(s"[inline-pass] fns:\n -> ${fs.map(f => s"${f.signatureRepr} == ${f.signature}").mkString("\n -> ")}")
 
