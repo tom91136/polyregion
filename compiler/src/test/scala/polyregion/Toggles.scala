@@ -11,7 +11,7 @@ object Toggles {
   final inline val InlineArraySuite = false
   final inline val LogicSuite       = false
   final inline val CaptureSuite     = false
-  final inline val ControlFlowSuite = false
+  final inline val ControlFlowSuite = true
   final inline val ValueReturnSuite = false
   final inline val IntrinsicSuite   = false
   final inline val StructSuite      = false
@@ -21,6 +21,6 @@ object Toggles {
 
 
 
-  final inline val ExtensionSuite = true
+  final inline val ExtensionSuite = false
 
 }

@@ -206,12 +206,13 @@ extension (e: p.Stmt) {
           val (y, xs, as) = f(x)
           (xs :+ p.Stmt.Var(name, Some(y)), as)
       }
-    case p.Stmt.Mut(name, expr, copy) => val (y, xs, as) = f(expr); (xs :+ p.Stmt.Mut(name, y, copy), as)
-    case x @ p.Stmt.Update(_, _, _)   => (x :: Nil, Nil)
-    case p.Stmt.While(cond, body) =>
-      val (y, xs, as) = f(cond)
+    case p.Stmt.Mut(name, expr, copy)   => val (y, xs, as) = f(expr); (xs :+ p.Stmt.Mut(name, y, copy), as)
+    case x @ p.Stmt.Update(_, _, _)     => (x :: Nil, Nil)
+    case p.Stmt.While(test, cond, body) =>
+      // val (y, xs, as) = f(cond)
+      val (tss, tass) = test.map(_.mapAccExpr(f)).unzip
       val (bss, bass) = body.map(_.mapAccExpr(f)).unzip
-      (xs :+ p.Stmt.While(y, bss.flatten), (as :: bass).flatten)
+      (p.Stmt.While(tss.flatten, cond, bss.flatten) :: Nil, (tass ::: bass).flatten)
     case x @ p.Stmt.Break => (x :: Nil, Nil)
     case x @ p.Stmt.Cont  => (x :: Nil, Nil)
     case p.Stmt.Cond(cond, trueBr, falseBr) =>
@@ -226,9 +227,10 @@ extension (e: p.Stmt) {
 
   def mapTerm(g: p.Term.Select => p.Term.Select, f: p.Term => p.Term): List[p.Stmt] = e
     .map {
-      case p.Stmt.Mut(name, expr, copy)   => p.Stmt.Mut(g(name), expr, copy) :: Nil
-      case p.Stmt.Update(lhs, idx, value) => p.Stmt.Update(g(lhs), f(idx), f(value)) :: Nil
-      case x                              => x :: Nil
+      case p.Stmt.Mut(name, expr, copy)    => p.Stmt.Mut(g(name), expr, copy) :: Nil
+      case p.Stmt.Update(lhs, idx, value)  => p.Stmt.Update(g(lhs), f(idx), f(value)) :: Nil
+      case p.Stmt.While(tests, cond, body) => p.Stmt.While(tests, f(cond), body) :: Nil
+      case x                               => x :: Nil
     }
     .flatMap(_.mapExpr {
       case p.Expr.UnaryIntrinsic(lhs, kind, rtn)       => (p.Expr.UnaryIntrinsic(f(lhs), kind, rtn), Nil)
@@ -255,10 +257,11 @@ extension (e: p.Stmt) {
     case x @ p.Stmt.Var(_, _)       => f(x)
     case x @ p.Stmt.Mut(_, _, _)    => f(x)
     case x @ p.Stmt.Update(_, _, _) => f(x)
-    case p.Stmt.While(cond, body) =>
-      val (sss0, xss) = body.map(_.mapAcc(f)).unzip
-      val (sss1, yss) = f(p.Stmt.While(cond, sss0.flatten))
-      (sss1, xss.flatten ::: yss)
+    case p.Stmt.While(tests, cond, body) =>
+      val (sss0, xss) = tests.map(_.mapAcc(f)).unzip
+      val (sss1, yss) = body.map(_.mapAcc(f)).unzip
+      val (sss2, zss) = f(p.Stmt.While(sss0.flatten, cond, sss1.flatten))
+      (sss2, xss.flatten ::: yss.flatten ::: zss)
     case x @ p.Stmt.Break => f(x)
     case x @ p.Stmt.Cont  => f(x)
     case p.Stmt.Cond(cond, trueBr, falseBr) =>
@@ -278,10 +281,11 @@ extension (e: p.Stmt) {
     case p.Stmt.Var(name, rhs)          => s"var ${name.repr} = ${rhs.fold("_")(_.repr)}"
     case p.Stmt.Mut(name, expr, copy)   => s"${name.repr} ${if (copy) ":=!" else ":="} ${expr.repr}"
     case p.Stmt.Update(lhs, idx, value) => s"${lhs.repr}[${idx.repr}] := ${value.repr}"
-    case p.Stmt.While(cond, body)       => s"while(${cond.repr}){\n${body.map(_.repr).mkString("\n")}\n}"
-    case p.Stmt.Break                   => s"break;"
-    case p.Stmt.Cont                    => s"continue;"
-    case p.Stmt.Return(expr)            => s"return ${expr.repr}"
+    case p.Stmt.While(tests, cond, body) =>
+      s"while({${(tests.map(_.repr) :+ cond.repr).mkString(";")}}){\n${body.map("  " + _.repr).mkString("\n")}\n}"
+    case p.Stmt.Break        => s"break;"
+    case p.Stmt.Cont         => s"continue;"
+    case p.Stmt.Return(expr) => s"return ${expr.repr}"
     case p.Stmt.Cond(cond, trueBr, falseBr) =>
       s"if(${cond.repr}) {\n${trueBr.map("  " + _.repr).mkString("\n")}\n} else {\n${falseBr.map("  " + _.repr).mkString("\n")}\n}"
   }
@@ -290,6 +294,9 @@ extension (e: p.Stmt) {
 
 extension (f: p.Function) {
 
+  def mangledName = f.receiver.map(_.tpe.repr).getOrElse("") + "!" + f.name.fqn
+    .mkString("_") + "!" + f.args.map(_.tpe.repr).mkString("_") + "!" + f.rtn.repr
+
   def signature = p.Signature(f.name, f.receiver.map(_.tpe), f.args.map(_.tpe), f.rtn)
 
   def signatureRepr =
@@ -297,6 +304,6 @@ extension (f: p.Function) {
 
   def repr: String =
     s"""${f.signatureRepr} = {
-       |${f.body.map(_.repr).map("  " + _).mkString("\n")}
+       |${f.body.map("  " + _.repr).mkString("\n")}
 		   |}""".stripMargin
 }

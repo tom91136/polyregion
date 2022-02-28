@@ -113,8 +113,7 @@ llvm::Value *LLVMAstTransformer::mkSelectPtr(const Term::Select &select) {
       auto [tpe, value] = *x;
       if (named.tpe != tpe) {
         error(__FILE_NAME__, __LINE__,
-              "Named local variable type (" + to_string(named.tpe) + ") is different from located variable type (" +
-                  to_string(tpe) + ")");
+              "Named local variable (" + to_string(named) + ") has different type from LUT (" + to_string(tpe) + ")");
       }
       return value;
     } else {
@@ -571,13 +570,13 @@ llvm::Value *LLVMAstTransformer::conditionalLoad(llvm::Value *rhs) {
              : rhs;
 }
 
-void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<WhileCtx> whileCtx = {}) {
+BlockKind LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<WhileCtx> whileCtx = {}) {
   return variants::total(
       *stmt,
-      [&](const Stmt::Comment &x) { /* discard comments */
-                                    return;
+      [&](const Stmt::Comment &x) -> BlockKind { // discard comments
+        return BlockKind::Normal;
       },
-      [&](const Stmt::Var &x) {
+      [&](const Stmt::Var &x) -> BlockKind {
         // [T : ref] =>> t:T  = _        ; lut += &t
         // [T : ref] =>> t:T* = &(rhs:T) ; lut += t
         // [T : val] =>> t:T  =   rhs:T  ; lut += &t
@@ -616,8 +615,9 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<W
           }
           lut[x.name.symbol] = {x.name.tpe, ptr};
         }
+        return BlockKind::Normal;
       },
-      [&](const Stmt::Mut &x) {
+      [&](const Stmt::Mut &x) -> BlockKind {
         // [T : ref]        =>> t   := &(rhs:T) ; lut += t
         // [T : ref {u: U}] =>> t.u := &(rhs:U)
         // [T : val]        =>> t   :=   rhs:T
@@ -651,8 +651,9 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<W
         } else {
           B.CreateStore(conditionalLoad(rhs), mkSelectPtr(x.name)); // ignore copy
         }
+        return BlockKind::Normal;
       },
-      [&](const Stmt::Update &x) {
+      [&](const Stmt::Update &x) -> BlockKind {
         if (auto arrTpe = get_opt<Type::Array>(x.lhs.tpe); arrTpe) {
           if (arrTpe->component != tpe(x.value)) {
             throw std::logic_error("Semantic error: array component type (" + to_string(arrTpe->component) +
@@ -669,62 +670,74 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<W
           throw std::logic_error("Semantic error: array update not called on array type (" + to_string(x.lhs.tpe) +
                                  ")(" + repr(x) + ")");
         }
+        return BlockKind::Normal;
       },
-      [&](const Stmt::While &x) {
+      [&](const Stmt::While &x) -> BlockKind {
         auto loopTest = llvm::BasicBlock::Create(C, "loop_test", fn);
         auto loopBody = llvm::BasicBlock::Create(C, "loop_body", fn);
         auto loopExit = llvm::BasicBlock::Create(C, "loop_exit", fn);
+        WhileCtx ctx{.exit = loopExit, .test = loopTest};
         B.CreateBr(loopTest);
+
         {
           B.SetInsertPoint(loopTest);
-          auto continue_ = mkExprValue(x.cond, fn, "loop");
-          B.CreateCondBr(conditionalLoad(continue_), loopBody, loopExit);
+          auto kind = BlockKind::Normal;
+          for (auto &test : x.tests)
+            kind = mkStmt(test, fn, {ctx});
+          if (kind != BlockKind::Terminal) {
+            auto continue_ = mkRef(x.cond);
+            B.CreateCondBr(conditionalLoad(continue_), loopBody, loopExit);
+          }
         }
         {
           B.SetInsertPoint(loopBody);
-          WhileCtx ctx{.exit = loopExit, .test = loopTest};
-          for (auto &body : x.body) {
-            mkStmt(body, fn, {ctx});
-          }
-          B.CreateBr(loopTest);
+          auto kind = BlockKind::Normal;
+          for (auto &body : x.body)
+            kind = mkStmt(body, fn, {ctx});
+          if (kind != BlockKind::Terminal) B.CreateBr(loopTest);
         }
         B.SetInsertPoint(loopExit);
+        return BlockKind::Terminal;
       },
-      [&](const Stmt::Break &x) {
+      [&](const Stmt::Break &x) -> BlockKind {
         if (whileCtx) {
           B.CreateBr(whileCtx->exit);
         } else {
           undefined(__FILE_NAME__, __LINE__, "orphaned break!");
         }
+        return BlockKind::Normal;
       }, //
-      [&](const Stmt::Cont &x) {
+      [&](const Stmt::Cont &x) -> BlockKind {
         if (whileCtx) {
           B.CreateBr(whileCtx->test);
         } else {
           undefined(__FILE_NAME__, __LINE__, "orphaned cont!");
         }
+        return BlockKind::Normal;
       }, //
-      [&](const Stmt::Cond &x) {
+      [&](const Stmt::Cond &x) -> BlockKind {
         auto condTrue = llvm::BasicBlock::Create(C, "cond_true", fn);
         auto condFalse = llvm::BasicBlock::Create(C, "cond_false", fn);
         auto condExit = llvm::BasicBlock::Create(C, "cond_exit", fn);
         B.CreateCondBr(conditionalLoad(mkExprValue(x.cond, fn, "cond")), condTrue, condFalse);
         {
           B.SetInsertPoint(condTrue);
+          auto kind = BlockKind::Normal;
           for (auto &body : x.trueBr)
-            mkStmt(body, fn, whileCtx);
-          B.CreateBr(condExit);
+            kind = mkStmt(body, fn, whileCtx);
+          if (kind != BlockKind::Terminal) B.CreateBr(condExit);
         }
         {
           B.SetInsertPoint(condFalse);
+          auto kind = BlockKind::Normal;
           for (auto &body : x.falseBr)
-            mkStmt(body, fn, whileCtx);
-
-//          B.CreateBr(condExit);
+            kind = mkStmt(body, fn, whileCtx);
+          if (kind != BlockKind::Terminal) B.CreateBr(condExit);
         }
         B.SetInsertPoint(condExit);
+        return BlockKind::Terminal;
       },
-      [&](const Stmt::Return &x) {
+      [&](const Stmt::Return &x) -> BlockKind {
         auto rtnTpe = tpe(x.value);
         if (holds<Type::Unit>(rtnTpe)) {
           B.CreateRetVoid();
@@ -735,6 +748,7 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<W
             B.CreateRet(conditionalLoad(mkExprValue(x.value, fn, "return")));
           }
         }
+        return BlockKind::Terminal;
       } //
 
   );

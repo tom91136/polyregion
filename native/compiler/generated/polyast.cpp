@@ -873,6 +873,13 @@ bool Stmt::operator==(const Stmt::Update &l, const Stmt::Update &r) {
 
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::While &x) {
   os << "While(";
+  os << '{';
+  if (!x.tests.empty()) {
+    std::for_each(x.tests.begin(), std::prev(x.tests.end()), [&os](auto &&x) { os << x; os << ','; });
+    os << x.tests.back();
+  }
+  os << '}';
+  os << ',';
   os << x.cond;
   os << ',';
   os << '{';
@@ -885,7 +892,7 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::While &x) {
   return os;
 }
 bool Stmt::operator==(const Stmt::While &l, const Stmt::While &r) { 
-  return *l.cond == *r.cond && std::equal(l.body.begin(), l.body.end(), r.body.begin(), [](auto &&l, auto &&r) { return *l == *r; });
+  return std::equal(l.tests.begin(), l.tests.end(), r.tests.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && *l.cond == *r.cond && std::equal(l.body.begin(), l.body.end(), r.body.begin(), [](auto &&l, auto &&r) { return *l == *r; });
 }
 
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Break &x) {
@@ -1434,7 +1441,8 @@ std::size_t std::hash<polyregion::polyast::Stmt::Update>::operator()(const polyr
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Stmt::While>::operator()(const polyregion::polyast::Stmt::While &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.cond)>()(x.cond);
+  std::size_t seed = std::hash<decltype(x.tests)>()(x.tests);
+  seed ^= std::hash<decltype(x.cond)>()(x.cond) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.body)>()(x.body) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }

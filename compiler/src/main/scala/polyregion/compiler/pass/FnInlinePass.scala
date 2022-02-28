@@ -14,7 +14,7 @@ object FnInlinePass {
   // rename all var and selects to avoid collision
   private def renameAll(f: p.Function): p.Function = {
 
-    def rename(n: p.Named) = p.Named(s"inlined_${n.symbol}", n.tpe)
+    def rename(n: p.Named) = p.Named(s"_inline_${f.mangledName}_${n.symbol}", n.tpe)
 
     val stmts = for {
       s <- f.body

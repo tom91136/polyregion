@@ -86,6 +86,9 @@ object IntrinsifyPass {
               binaryNumericIntrinsic(x, y, binaryPromote(x.tpe, y.tpe), idx, p.BinaryLogicIntrinsicKind.Gt)
             case ">=" =>
               binaryNumericIntrinsic(x, y, binaryPromote(x.tpe, y.tpe), idx, p.BinaryLogicIntrinsicKind.Gte)
+            // rules for eq and neq is different from the general ref equality so we handle them here
+            case "==" => binaryNumericIntrinsic(x, y, binaryPromote(x.tpe, y.tpe), idx, p.BinaryLogicIntrinsicKind.Eq)
+            case "!=" => binaryNumericIntrinsic(x, y, binaryPromote(x.tpe, y.tpe), idx, p.BinaryLogicIntrinsicKind.Neq)
           }
           (expr, stmts, inv.signature :: Nil)
         case (op :: Nil, x, y :: Nil) if x.tpe == y.tpe && rtn == p.Type.Bool =>

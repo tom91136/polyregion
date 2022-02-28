@@ -961,9 +961,10 @@ struct EXPORT Update : Stmt::Base {
 };
 
 struct EXPORT While : Stmt::Base {
-  Expr::Any cond;
+  std::vector<Stmt::Any> tests;
+  Term::Any cond;
   std::vector<Stmt::Any> body;
-  While(Expr::Any cond, std::vector<Stmt::Any> body) noexcept : Stmt::Base(), cond(std::move(cond)), body(std::move(body)) {}
+  While(std::vector<Stmt::Any> tests, Term::Any cond, std::vector<Stmt::Any> body) noexcept : Stmt::Base(), tests(std::move(tests)), cond(std::move(cond)), body(std::move(body)) {}
   EXPORT operator Any() const { return std::make_shared<While>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Stmt::While &);
   EXPORT friend bool operator==(const Stmt::While &, const Stmt::While &);

@@ -158,7 +158,10 @@ using std::string;
       [](const Stmt::Mut &x) { return repr(x.name) + " := " + repr(x.expr); },
       [](const Stmt::Update &x) { return repr(x.lhs) + "[" + repr(x.idx) + "] = " + repr(x.value); },
       [](const Stmt::While &x) {
-        return "while(" + repr(x.cond) + "){\n" +
+        auto tests = mk_string<Stmt::Any>(
+            x.tests, [&](auto x) { return repr(x); }, "\n");
+
+        return "while({" + tests + ";" + repr(x.cond) + "}){\n" +
                mk_string<Stmt::Any>(
                    x.body, [&](auto x) { return repr(x); }, "\n") +
                "}";

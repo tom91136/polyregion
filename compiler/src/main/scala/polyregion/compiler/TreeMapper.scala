@@ -427,32 +427,10 @@ object TreeMapper {
               case partial: q.ErasedMethodVal =>
                 s"condition term of a while expression (${term.show}) is partial ($partial)".fail.deferred
             }
-          } yield {
-            val block = condCtx.stmts match {
-              case Nil                              => ??? // this is illegal, while needs a bool predicate
-              case p.Stmt.Var(_, Some(cond)) :: Nil =>
-                // simple condition:
-                // var cond := true
-                // while(cond) { ...; cond := false }
-                p.Stmt.While(cond, bodyCtx.stmts)
-              case xs =>
-                // complex condition:
-                // while(true) {  stmts...; if(!condRef) break;  }
-                println(">>>>>" + term.show)
-                println(">>>>>" + condRef)
-                println(">>>>>" + xs)
-                // ???
-
-                val body = (xs :+ p.Stmt.Cond(
-                  cond = p.Expr.Alias(condRef),
-                  trueBr = Nil,
-                  falseBr = p.Stmt.Break :: Nil
-                )) ++ bodyCtx.stmts
-
-                p.Stmt.While(p.Expr.Alias(p.Term.BoolConst(true)), body)
-            }
-            (p.Term.UnitConst, bodyCtx.replaceStmts(c.stmts :+ block))
-          }
+          } yield (
+            p.Term.UnitConst,
+            bodyCtx.replaceStmts(c.stmts :+ p.Stmt.While(condCtx.stmts, condRef, bodyCtx.stmts))
+          )
         case _ => c.fail(s"Unhandled: $term\nSymbol:\n${term.symbol}")
       }
     }

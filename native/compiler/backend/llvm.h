@@ -24,6 +24,10 @@ struct WhileCtx {
   llvm::BasicBlock* test;
 };
 
+enum class BlockKind{
+  Terminal, Normal
+};
+
 class LLVMAstTransformer {
 
   llvm::LLVMContext &C;
@@ -38,7 +42,7 @@ private:
   llvm::Value *mkSelectPtr(const Term::Select &select);
   llvm::Value *mkRef(const Term::Any &ref);
   llvm::Value *mkExprValue(const Expr::Any &expr, llvm::Function *overload, const std::string &key);
-  void mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<WhileCtx> whileCtx);
+  BlockKind mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<WhileCtx> whileCtx);
 
   llvm::Function *mkExternalFn(llvm::Function *parent, const Type::Any &rtn, const std::string &name,
                                const std::vector<Type::Any> &args);

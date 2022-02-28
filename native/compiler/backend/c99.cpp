@@ -162,7 +162,10 @@ std::string backend::C99::mkStmt(const Stmt::Any &stmt) {
       [&](const Stmt::While &x) {
         auto body = mk_string<Stmt::Any>(
             x.body, [&](auto &stmt) { return mkStmt(stmt); }, "\n");
-        return "while (" + mkExpr(x.cond, "?") + ") {\n" + body + "\n}";
+
+        auto tests = mk_string<Stmt::Any>(
+            x.tests, [&](auto &stmt) { return mkStmt(stmt); }, "\n");
+        return "while(true) {" + tests + "\nif(!" + mkRef(x.cond) + ") break;" + "\n" + body + "\n}";
       },
       [&](const Stmt::Break &x) { return "break;"s; },   //
       [&](const Stmt::Cont &x) { return "continue;"s; }, //

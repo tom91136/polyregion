@@ -1144,18 +1144,23 @@ json Stmt::update_to_json(const Stmt::Update& x) {
 }
 
 Stmt::While Stmt::while_from_json(const json& j) { 
-  auto cond =  Expr::any_from_json(j.at(0));
+  std::vector<Stmt::Any> tests;
+  auto tests_json = j.at(0);
+  std::transform(tests_json.begin(), tests_json.end(), std::back_inserter(tests), &Stmt::any_from_json);
+  auto cond =  Term::any_from_json(j.at(1));
   std::vector<Stmt::Any> body;
-  auto body_json = j.at(1);
+  auto body_json = j.at(2);
   std::transform(body_json.begin(), body_json.end(), std::back_inserter(body), &Stmt::any_from_json);
-  return {cond, body};
+  return {tests, cond, body};
 }
 
 json Stmt::while_to_json(const Stmt::While& x) { 
-  auto cond =  Expr::any_to_json(x.cond);
+  std::vector<json> tests;
+  std::transform(x.tests.begin(), x.tests.end(), std::back_inserter(tests), &Stmt::any_to_json);
+  auto cond =  Term::any_to_json(x.cond);
   std::vector<json> body;
   std::transform(x.body.begin(), x.body.end(), std::back_inserter(body), &Stmt::any_to_json);
-  return json::array({cond, body});
+  return json::array({tests, cond, body});
 }
 
 Stmt::Break Stmt::break_from_json(const json& j) { 
@@ -1316,13 +1321,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "45927a1c4b95dd345c1f9d7933559388") {
-   throw std::runtime_error("Expecting ADT hash to be 45927a1c4b95dd345c1f9d7933559388, but was " + hash);
+  if(hash != "3e37a67a2540a7f599ac881ccfcee518") {
+   throw std::runtime_error("Expecting ADT hash to be 3e37a67a2540a7f599ac881ccfcee518, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"45927a1c4b95dd345c1f9d7933559388", x});
+  return json::array({"3e37a67a2540a7f599ac881ccfcee518", x});
 }
 } // namespace polyregion::polyast

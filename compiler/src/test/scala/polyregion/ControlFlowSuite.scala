@@ -5,22 +5,22 @@ import scala.compiletime._
 
 class ControlFlowSuite extends BaseSuite {
 
-  inline def testExpr[A](inline name : String)(inline f: => A) = if (Toggles.ControlFlowSuite) {
+  inline def testExpr[A](inline name: String)(inline f: => A) = if (Toggles.ControlFlowSuite) {
     test(name)(assertOffload[A](f))
   }
 
-  testExpr("stmts")  { 1; 2 }
+  testExpr("stmts") { 1; 2 }
 
   testExpr("const-if-true") {
-     (if (true) 42 else 69)
+    (if (true) 42 else 69)
   }
 
   testExpr("ref-if-true") {
     val x = true
-     (if (x) 42 else 69)
+    (if (x) 42 else 69)
   }
 
-  testExpr("while-le-inc")   {
+  testExpr("while-le-inc") {
     val lim = 10
     var i   = 0
     while (i < lim)
@@ -28,14 +28,31 @@ class ControlFlowSuite extends BaseSuite {
     i
   }
 
+  {
+    val externalLim = 10
+    testExpr("while-complex") {
+      val lim = 10
+      var i   = 0
+      var j   = 0
+      while ({
+        i -= 1
+        (i < lim && i != 0) && j < externalLim
+      }) {
+        i += 1
+        j += 1
+      }
+      i+j
+    }
+  }
+
   testExpr("ref-if-if-true") {
     val x = true
     val y = true
-     (if (x) (if (y) 1 else 2) else 3)
+    (if (x) (if (y) 1 else 2) else 3)
   }
 
   testExpr("const-if-if-true") {
-     (if (true) (if (true) 1 else 2) else 3)
+    (if (true) (if (true) 1 else 2) else 3)
   }
 
   // test("const-if-false") {
