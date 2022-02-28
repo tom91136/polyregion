@@ -15,7 +15,7 @@ class Quoted(val q: Quotes) {
 
   case class FnDependencies(
       clss: Map[p.Sym, p.StructDef] = Map.empty, // external class defs
-      defs: Map[p.Sym, DefDef] = Map.empty       // external def defs
+      defs: Map[p.Signature, DefDef] = Map.empty // external def defs
   )
 
   given Monoid[FnDependencies] = Monoid.instance(
@@ -28,7 +28,7 @@ class Quoted(val q: Quotes) {
 
   case class ErasedModuleSelect(sym: p.Sym)
 
-  case class ErasedMethodVal(receiver: p.Sym | p.Term, sym: p.Sym, tpe: ErasedFnTpe)
+  case class ErasedMethodVal(receiver: p.Sym | p.Term, sym: p.Sym, tpe: ErasedFnTpe, underlying : DefDef)
 
 //  case class ErasedOpaqueTpe(underlying: q.reflect.TypeRepr) // NOT USED
 
@@ -46,8 +46,8 @@ class Quoted(val q: Quotes) {
   case class ErasedClsTpe(name: p.Sym, kind: ClassKind, ctor: List[Tpe]) {
     override def toString: String = {
       val kindName = kind match {
-        case ClassKind.Object    => "Object"
-        case ClassKind.Class     => "Class"
+        case ClassKind.Object => "Object"
+        case ClassKind.Class  => "Class"
       }
       s"#{ <${kindName}>${name.repr}${if (ctor.isEmpty) "" else ctor.mkString("[", ", ", "]")} }#"
     }
@@ -63,8 +63,8 @@ class Quoted(val q: Quotes) {
 
       refs: Map[Symbol, Reference] = Map.empty, // ident/select table
 
-      clss: Map[p.Sym, p.StructDef] = Map.empty, // external class defs
-      defs: Map[p.Sym, DefDef] = Map.empty,      // external def defs
+      clss: Map[p.Sym, p.StructDef] = Map.empty,  // external class defs
+      defs: Map[p.Signature, DefDef] = Map.empty, // external def defs
 
       suspended: Map[(String, ErasedFnTpe), ErasedMethodVal] = Map.empty,
       stmts: List[p.Stmt] = List.empty // fn statements
@@ -76,7 +76,7 @@ class Quoted(val q: Quotes) {
 
     def noStmts                                 = copy(stmts = Nil)
     def inject(refs: Map[Symbol, Reference])    = copy(refs = refs ++ refs)
-    def mark(s: p.Sym, d: DefDef)               = copy(defs = defs + (s -> d))
+    def mark(s: p.Signature, d: DefDef)         = copy(defs = defs + (s -> d))
     infix def ::=(xs: p.Stmt*)                  = copy(stmts = stmts ++ xs)
     def replaceStmts(xs: Seq[p.Stmt])           = copy(stmts = xs.toList)
     def mapStmts(f: Seq[p.Stmt] => Seq[p.Stmt]) = copy(stmts = f(stmts).toList)

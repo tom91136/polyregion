@@ -96,7 +96,7 @@ object Retyper {
         // TODO make sure we get the right order back!
         c.typer(x).flatMap { (v, t, c) =>
           xs.foldLeftM(((v, t) :: Nil, c)) { case ((ys, c), x) =>
-            c.typer(x).map((v, t, c) => ((v, t) :: ys, c))
+            c.typer(x).map((v, t, c) => (ys :+ (v, t), c))
           }
         }
     }
@@ -107,7 +107,7 @@ object Retyper {
           // this shows up from type-unapplied methods:  [x, y] =>> methodTpe(_:x, ...):y
 //          (None, q.ErasedOpaqueTpe(p), c).success.deferred
           ???
-        case q.MethodType(_, args, rtn) =>
+        case m @ q.MethodType(_, args, rtn) =>
           for {
             (_, tpe, c) <- c.typer(rtn)
             (xs, c)     <- c.typerN(args)

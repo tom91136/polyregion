@@ -41,7 +41,7 @@ object FnInlinePass {
 
   def inlineAll(fs: List[p.Function]): List[p.Function] = doUntilNotEq(fs) { fs => 
 
-    println(s"[inline-pass] fns:\n -> ${fs.map(f => s"${f.signatureRepr} == ${f.signature}").mkString("\n -> ")}")
+    println(s"[inline-pass] fns:\n -> ${fs.map(f => s"${f.signatureRepr}").mkString("\n -> ")}")
 
     val lut = fs.map(f => f.signature -> f).to(VectorMap)
 

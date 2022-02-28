@@ -6,6 +6,10 @@
 
 namespace polyregion::polyast {
 
+template <typename T> using Opt = std::optional<T>;
+template <typename T, typename U> using Pair = std::pair<T, U>;
+template <typename T, typename U> using Map = std::unordered_map<T, U>;
+
 std::string repr(const Sym &);
 std::string repr(const Type::Any &);
 std::string repr(const Named &);

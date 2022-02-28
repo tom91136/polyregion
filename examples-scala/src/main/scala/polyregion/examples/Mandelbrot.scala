@@ -22,30 +22,28 @@ object Mandelbrot {
   )
 
   case class Complex(real: Double, imag: Double) {
-    inline def inverse: Complex = {
+    def inverse: Complex = {
       val denom = real * real + imag * imag
       Complex(real / denom, -imag / denom)
     }
-    inline def +(b: Complex): Complex = Complex(real + b.real, imag + b.imag)
-    inline def -(b: Complex): Complex = Complex(real - b.real, imag - b.imag)
-    inline def *(b: Complex): Complex = Complex(real * b.real - imag * b.imag, real * b.imag + imag * b.real)
-    inline def /(b: Complex): Complex = this * b.inverse
-    inline def unary_- : Complex      = Complex(-real, -imag)
-    inline def abs: Double            = math.hypot(real, imag)
-    override def toString: String     = s"$real + ${imag}i"
+    def +(b: Complex): Complex    = Complex(real + b.real, imag + b.imag)
+    def -(b: Complex): Complex    = Complex(real - b.real, imag - b.imag)
+    def *(b: Complex): Complex    = Complex(real * b.real - imag * b.imag, real * b.imag + imag * b.real)
+    def /(b: Complex): Complex    = this * b.inverse
+    def unary_- : Complex         = Complex(-real, -imag)
+    def abs: Double               = math.hypot(real, imag)
+    override def toString: String = s"$real + ${imag}i"
   }
 
-  inline def interpolate(input: Double) //
-  (inputMin: Double, inputMax: Double)  //
-  (outputMin: Double, outputMax: Double): Double =
+  def interpolate(input: Double, inputMin: Double, inputMax: Double, outputMin: Double, outputMax: Double): Double =
     ((outputMax - outputMin) * (input - inputMin) / (inputMax - inputMin)) + outputMin
 
   case class Colour(packed: Int) extends AnyVal {
-    inline def a: Int = (packed >> 24) & 0xff
-    inline def r: Int = (packed >> 16) & 0xff
-    inline def g: Int = (packed >> 8) & 0xff
-    inline def b: Int = packed & 0xff
-    inline def mix(that: Colour, x: Double): Colour = Colour(
+    def a: Int = (packed >> 24) & 0xff
+    def r: Int = (packed >> 16) & 0xff
+    def g: Int = (packed >> 8) & 0xff
+    def b: Int = packed & 0xff
+    def mix(that: Colour, x: Double): Colour = Colour(
       r = ((r - that.r) * x + that.r).toInt,
       g = ((g - that.g) * x + that.g).toInt,
       b = ((b - that.b) * x + that.b).toInt,
@@ -57,7 +55,7 @@ object Mandelbrot {
     val Black: Colour                   = Colour(0, 0, 0)
     val White: Colour                   = Colour(255, 255, 255)
     private def clampUInt8(x: Int): Int = x.max(0).min(255)
-    inline def apply(r: Int, g: Int, b: Int, a: Int = 255): Colour = Colour(
+    def apply(r: Int, g: Int, b: Int, a: Int = 255): Colour = Colour(
       (clampUInt8(a) & 0xff) << 24     //
         | (clampUInt8(r) & 0xff) << 16 //
         | (clampUInt8(g) & 0xff) << 8  //
@@ -65,7 +63,7 @@ object Mandelbrot {
     )
   }
 
-  inline def itMandel(inline c: Complex, inline imax: Int, inline bailout: Int): (Complex, Int) = {
+  def itMandel(c: Complex, imax: Int, bailout: Int): (Complex, Int) = {
     var z = Complex(0d, 0d)
     var i = 0
     while (z.abs <= bailout && i < imax) {
@@ -77,7 +75,7 @@ object Mandelbrot {
 
   case class ItResult(c: Complex, i: Int)
 
-  inline def itMandel2(inline c: Complex, inline imax: Int, inline bailout: Int): ItResult = {
+  def itMandel2(c: Complex, imax: Int, bailout: Int): ItResult = {
     var z = Complex(0d, 0d)
     var i = 0
     while (z.abs <= bailout && i < imax) {
@@ -87,7 +85,7 @@ object Mandelbrot {
     ItResult(z, i)
   }
 
-  inline def mkColour(inline z: Complex, inline iter: Int, inline maxIter: Int): Colour =
+  def mkColour(z: Complex, iter: Int, maxIter: Int): Colour =
     if (iter >= maxIter) Colour.Black
     else {
       val logZn = math.log(z.abs) / 2
@@ -107,12 +105,12 @@ object Mandelbrot {
     } {
 
       val m2 = polyregion.compiletime.offload {
-        val c = Complex(interpolate(x)(0, width)(xMin, xMax), interpolate(y)(0, height)(yMin, yMax))
+        val c = Complex(interpolate(x, 0, width, xMin, xMax), interpolate(y, 0, height, yMin, yMax))
         val t = itMandel2(c, maxIter, 4)
         ()
       }
 
-      // val c         =   polyregion.compiletime.offload { Complex(interpolate(x)(0, width)(xMin, xMax), interpolate(y)(0, height)(yMin, yMax))  }
+      // val c         =   polyregion.compiletime.offload { Complex(interpolate(x, 0, width, xMin, xMax), interpolate(y, 0, height, yMin, yMax))  }
       // val (z, iter) = itMandel(c, maxIter, 4)
       // buffer(x)(y) = mkColour(z, iter, maxIter)
     }

@@ -196,6 +196,36 @@ TEST_CASE("struct alloc", "[compiler]") {
   assertCompilationSucceeded(p);
 }
 
+TEST_CASE("nested struct alloc", "[compiler]") {
+  polyregion_initialise();
+
+  Sym myStructSym({"MyStruct"});
+  Sym myStruct2Sym({"MyStruct2"});
+
+  Named defX = Named("x", Type::Int());
+  Named defY = Named("y", Type::Int());
+
+  StructDef def2(myStruct2Sym, {defX});
+  Type::Struct myStruct2(myStruct2Sym);
+  Named defZ = Named("z", myStruct2);
+
+  StructDef def(myStructSym, {defX, defY, defZ});
+  Type::Struct myStruct(myStructSym);
+
+  Function fn(Sym({"foo"}), {}, {}, Type::Int(),
+              {
+                  Var(Named("t", myStruct2), {}),
+                  Var(Named("s", myStruct), {}),
+                  Mut(Select({Named("s", myStruct)}, defX), Alias(IntConst(42)), false),
+                  Mut(Select({Named("s", myStruct)}, defY), Alias(IntConst(43)), false),
+                  Mut(Select({Named("s", myStruct)}, defZ), Alias(Select({}, Named("t", myStruct2))), false),
+                  Return(Alias(IntConst(69))),
+              });
+
+  Program p(fn, {}, {def2, def});
+  assertCompilationSucceeded(p);
+}
+
 TEST_CASE("array alloc", "[compiler]") {
   polyregion_initialise();
 

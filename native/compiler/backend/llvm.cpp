@@ -44,15 +44,13 @@ llvm::Value *LLVMAstTransformer::invokeMalloc(llvm::Function *parent, llvm::Valu
 }
 
 static bool isUnsigned(const Type::Any &tpe) {
-  // the only unsigned type in PolyAst
-  return std::holds_alternative<Type::Char>(*tpe);
+  return holds<Type::Char>(tpe); // the only unsigned type in PolyAst
 }
 
 static constexpr int64_t nIntMin(uint64_t bits) { return -(int64_t(1) << (bits - 1)); }
 static constexpr int64_t nIntMax(uint64_t bits) { return (int64_t(1) << (bits - 1)) - 1; }
 
-std::pair<llvm::StructType *, LLVMAstTransformer::StructMemberTable>
-LLVMAstTransformer::mkStruct(const StructDef &def) {
+Pair<llvm::StructType *, LLVMAstTransformer::StructMemberTable> LLVMAstTransformer::mkStruct(const StructDef &def) {
   std::vector<llvm::Type *> types(def.members.size());
   std::transform(def.members.begin(), def.members.end(), types.begin(),
                  [&](const polyast::Named &n) { return mkTpe(n.tpe); });
@@ -80,7 +78,13 @@ llvm::Type *LLVMAstTransformer::mkTpe(const Type::Any &tpe) {                   
         if (auto def = polyregion::get_opt(structTypes, x.name); def) {
           return def->first->getPointerTo();
         } else {
-          return undefined(__FILE_NAME__, __LINE__, "Unseen struct def: " + to_string(x));
+
+          auto pool = mk_string2<Sym, Pair<llvm::StructType *, StructMemberTable>>(
+              structTypes,
+              [](auto &&p) { return "`" + to_string(p.first) + "`" + " = " + std::to_string(p.second.second.size()); },
+              "\n->");
+
+          return undefined(__FILE_NAME__, __LINE__, "Unseen struct def: " + to_string(x) + ", table=\n" + pool);
         }
       }, //
       [&](const Type::Array &x) -> llvm::Type * {
@@ -94,7 +98,7 @@ llvm::Value *LLVMAstTransformer::mkSelectPtr(const Term::Select &select) {
 
   auto fail = [&]() { return " (part of the select expression " + to_string(select) + ")"; };
 
-  auto structTypeOf = [&](const Type::Any &tpe) -> std::pair<llvm::StructType *, StructMemberTable> {
+  auto structTypeOf = [&](const Type::Any &tpe) -> Pair<llvm::StructType *, StructMemberTable> {
     if (auto s = polyast::get_opt<Type::Struct>(tpe); s) {
       if (auto def = polyregion::get_opt(structTypes, s->name); def) return *def;
       else
@@ -114,7 +118,7 @@ llvm::Value *LLVMAstTransformer::mkSelectPtr(const Term::Select &select) {
       }
       return value;
     } else {
-      auto pool = mk_string2<std::string, std::pair<Type::Any, llvm::Value *>>(
+      auto pool = mk_string2<std::string, Pair<Type::Any, llvm::Value *>>(
           lut,
           [](auto &&p) {
             return "`" + p.first + "` = " + to_string(p.second.first) + "(IR=" + llvm_tostring(p.second.second) + ")";
@@ -422,16 +426,58 @@ llvm::Value *LLVMAstTransformer::mkExprValue(const Expr::Any &expr, llvm::Functi
       [&](const Expr::BinaryLogicIntrinsic &x) -> ValPtr {
         auto lhs = conditionalLoad(mkRef(x.lhs));
         auto rhs = conditionalLoad(mkRef(x.rhs));
+
+        if (tpe(x.lhs) != tpe(x.rhs)) {
+          throw std::logic_error("rhs type" + to_string(tpe(x.lhs)) + " != rhs type" + to_string(tpe(x.rhs)) +
+                                 " for binary logic expr:" + to_string(x));
+        }
+
         return variants::total(
             *x.kind, //
-            [&](const BinaryLogicIntrinsicKind::Eq &) -> ValPtr { return B.CreateICmpEQ(lhs, rhs); },
-            [&](const BinaryLogicIntrinsicKind::Neq &) -> ValPtr { return B.CreateICmpNE(lhs, rhs); },
+            [&](const BinaryLogicIntrinsicKind::Eq &) -> ValPtr {
+              return binaryNumOp(
+                  x.lhs, x.rhs, tpe(x.lhs),                                 //
+                  [&](auto l, auto r) { return B.CreateICmpEQ(lhs, rhs); }, //
+                  [&](auto l, auto r) { return B.CreateFCmpOEQ(lhs, rhs); } //
+              );
+            },
+            [&](const BinaryLogicIntrinsicKind::Neq &) -> ValPtr {
+              return binaryNumOp(
+                  x.lhs, x.rhs, tpe(x.lhs),                                 //
+                  [&](auto l, auto r) { return B.CreateICmpNE(lhs, rhs); }, //
+                  [&](auto l, auto r) { return B.CreateFCmpONE(lhs, rhs); } //
+              );
+            },
             [&](const BinaryLogicIntrinsicKind::And &) -> ValPtr { return B.CreateLogicalAnd(lhs, rhs); },
             [&](const BinaryLogicIntrinsicKind::Or &) -> ValPtr { return B.CreateLogicalOr(lhs, rhs); },
-            [&](const BinaryLogicIntrinsicKind::Lte &) -> ValPtr { return B.CreateICmpSLE(lhs, rhs); },
-            [&](const BinaryLogicIntrinsicKind::Gte &) -> ValPtr { return B.CreateICmpSGE(lhs, rhs); },
-            [&](const BinaryLogicIntrinsicKind::Lt &) -> ValPtr { return B.CreateICmpSLT(lhs, rhs); },
-            [&](const BinaryLogicIntrinsicKind::Gt &x) -> ValPtr { return B.CreateICmpSGT(lhs, rhs); });
+            [&](const BinaryLogicIntrinsicKind::Lte &) -> ValPtr {
+              return binaryNumOp(
+                  x.lhs, x.rhs, tpe(x.lhs),                                  //
+                  [&](auto l, auto r) { return B.CreateICmpSLE(lhs, rhs); }, //
+                  [&](auto l, auto r) { return B.CreateFCmpOLE(lhs, rhs); }  //
+              );
+            },
+            [&](const BinaryLogicIntrinsicKind::Gte &) -> ValPtr {
+              return binaryNumOp(
+                  x.lhs, x.rhs, tpe(x.lhs),                                  //
+                  [&](auto l, auto r) { return B.CreateICmpSGE(lhs, rhs); }, //
+                  [&](auto l, auto r) { return B.CreateFCmpOGE(lhs, rhs); }  //
+              );
+            },
+            [&](const BinaryLogicIntrinsicKind::Lt &) -> ValPtr {
+              return binaryNumOp(
+                  x.lhs, x.rhs, tpe(x.lhs),                                  //
+                  [&](auto l, auto r) { return B.CreateICmpSLT(lhs, rhs); }, //
+                  [&](auto l, auto r) { return B.CreateFCmpOLT(lhs, rhs); }  //
+              );
+            },
+            [&](const BinaryLogicIntrinsicKind::Gt &) -> ValPtr {
+              return binaryNumOp(
+                  x.lhs, x.rhs, tpe(x.lhs),                                  //
+                  [&](auto l, auto r) { return B.CreateICmpSGT(lhs, rhs); }, //
+                  [&](auto l, auto r) { return B.CreateFCmpOGT(lhs, rhs); }  //
+              );
+            });
       },
       [&](const Expr::Cast &x) -> ValPtr {
         // we only allow widening or narrowing of integral and fractional types
@@ -525,7 +571,7 @@ llvm::Value *LLVMAstTransformer::conditionalLoad(llvm::Value *rhs) {
              : rhs;
 }
 
-void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
+void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<WhileCtx> whileCtx = {}) {
   return variants::total(
       *stmt,
       [&](const Stmt::Comment &x) { /* discard comments */
@@ -541,13 +587,13 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
                                  to_string(tpe(*x.expr)) + " mismatch (" + repr(x) + ")");
         }
         auto rhs = map_opt(x.expr, [&](auto &&expr) { return mkExprValue(expr, fn, x.name.symbol + "_var_rhs"); });
-        if (std::holds_alternative<Type::Array>(*x.name.tpe)) {
+        if (holds<Type::Array>(x.name.tpe)) {
           if (rhs) {
             lut[x.name.symbol] = {x.name.tpe, *rhs};
           } else {
             undefined(__FILE_NAME__, __LINE__, "var array with no expr?");
           }
-        } else if (std::holds_alternative<Type::Struct>(*x.name.tpe)) {
+        } else if (holds<Type::Struct>(x.name.tpe)) {
           if (rhs) {
             lut[x.name.symbol] = {x.name.tpe, *rhs};
           } else {
@@ -582,7 +628,7 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
         auto rhs = mkExprValue(x.expr, fn, qualified(x.name) + "_mut");
         auto lhsPtr = mkSelectPtr(x.name);
 
-        if (std::holds_alternative<TypeKind::Ref>(*kind(tpe(x.expr)))) {
+        if (holds<TypeKind::Ref>(kind(tpe(x.expr)))) {
           if (x.name.init.empty()) { // local var, replace entry in lut or memcpy
             if (!rhs->getType()->isPointerTy()) {
               throw std::logic_error("Semantic error: rhs isn't a pointer type (" + repr(x) + ")");
@@ -594,7 +640,13 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
               B.CreateMemCpy(lhsPtr, {}, rhs, {}, sizeOf(B, C, lhsPtr->getType()));
             }
           } else {
-            B.CreateStore(conditionalLoad(rhs), mkSelectPtr(x.name)); // ignore copy, modify struct member
+            // FIXME fix
+
+            if (holds<Type::Struct>(tpe(x.expr))) {
+              B.CreateStore(rhs, mkSelectPtr(x.name)); // ignore copy, modify struct member
+            } else {
+              B.CreateStore(conditionalLoad(rhs), mkSelectPtr(x.name)); // ignore copy, modify struct member
+            }
           }
         } else {
           B.CreateStore(conditionalLoad(rhs), mkSelectPtr(x.name)); // ignore copy
@@ -630,14 +682,28 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
         }
         {
           B.SetInsertPoint(loopBody);
-          for (auto &body : x.body)
-            mkStmt(body, fn);
+          WhileCtx ctx{.exit = loopExit, .test = loopTest};
+          for (auto &body : x.body) {
+            mkStmt(body, fn, {ctx});
+          }
           B.CreateBr(loopTest);
         }
         B.SetInsertPoint(loopExit);
       },
-      [&](const Stmt::Break &x) { undefined(__FILE_NAME__, __LINE__, "break"); }, //
-      [&](const Stmt::Cont &x) { undefined(__FILE_NAME__, __LINE__, "cont"); },   //
+      [&](const Stmt::Break &x) {
+        if (whileCtx) {
+          B.CreateBr(whileCtx->exit);
+        } else {
+          undefined(__FILE_NAME__, __LINE__, "orphaned break!");
+        }
+      }, //
+      [&](const Stmt::Cont &x) {
+        if (whileCtx) {
+          B.CreateBr(whileCtx->test);
+        } else {
+          undefined(__FILE_NAME__, __LINE__, "orphaned cont!");
+        }
+      }, //
       [&](const Stmt::Cond &x) {
         auto condTrue = llvm::BasicBlock::Create(C, "cond_true", fn);
         auto condFalse = llvm::BasicBlock::Create(C, "cond_false", fn);
@@ -646,23 +712,24 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
         {
           B.SetInsertPoint(condTrue);
           for (auto &body : x.trueBr)
-            mkStmt(body, fn);
+            mkStmt(body, fn, whileCtx);
           B.CreateBr(condExit);
         }
         {
           B.SetInsertPoint(condFalse);
           for (auto &body : x.falseBr)
-            mkStmt(body, fn);
-          B.CreateBr(condExit);
+            mkStmt(body, fn, whileCtx);
+
+//          B.CreateBr(condExit);
         }
         B.SetInsertPoint(condExit);
       },
       [&](const Stmt::Return &x) {
         auto rtnTpe = tpe(x.value);
-        if (std::holds_alternative<Type::Unit>(*rtnTpe)) {
+        if (holds<Type::Unit>(rtnTpe)) {
           B.CreateRetVoid();
         } else {
-          if (std::holds_alternative<TypeKind::Ref>(*kind(rtnTpe))) {
+          if (holds<TypeKind::Ref>(kind(rtnTpe))) {
             B.CreateRet((mkExprValue(x.value, fn, "return")));
           } else {
             B.CreateRet(conditionalLoad(mkExprValue(x.value, fn, "return")));
@@ -673,8 +740,8 @@ void LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn) {
   );
 }
 
-std::pair<std::optional<std::string>, std::string>
-LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> &module, const Program &program) {
+Pair<Opt<std::string>, std::string> LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> &module,
+                                                                  const Program &program) {
 
   auto fnTree = program.entry;
 
@@ -682,7 +749,8 @@ LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> &module, const
   std::transform(                                    //
       program.defs.begin(), program.defs.end(),      //
       std::inserter(structTypes, structTypes.end()), //
-      [&](auto &x) -> std::pair<Sym, std::pair<llvm::StructType *, LLVMAstTransformer::StructMemberTable>> {
+      [&](auto &x) -> Pair<Sym, Pair<llvm::StructType *, LLVMAstTransformer::StructMemberTable>> {
+        std::cout << "Witness struct: " << x << " = " << llvm_tostring(mkStruct(x).first) << std::endl;
         return {x.name, mkStruct(x)};
       });
 
@@ -707,10 +775,10 @@ LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> &module, const
   std::transform(                                          //
       fn->arg_begin(), fn->arg_end(), fnTree.args.begin(), //
       std::inserter(lut, lut.end()),                       //
-      [&](auto &arg, const auto &named) -> std::pair<std::string, std::pair<Type::Any, llvm::Value *>> {
+      [&](auto &arg, const auto &named) -> Pair<std::string, Pair<Type::Any, llvm::Value *>> {
         arg.setName(named.symbol);
 
-        if (std::holds_alternative<TypeKind::Ref>(*kind(named.tpe))) {
+        if (holds<TypeKind::Ref>(kind(named.tpe))) {
           return {named.symbol, {named.tpe, &arg}};
         } else {
           auto stack = B.CreateAlloca(mkTpe(named.tpe), nullptr, named.symbol + "_stack_ptr");
@@ -730,14 +798,14 @@ LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> &module, const
   std::string err;
   llvm::raw_string_ostream errOut(err);
   if (llvm::verifyModule(*module, &errOut)) {
+    std::cerr << "Verification failed:\n" << errOut.str() << "\nIR=\n" << irOut.str() << std::endl;
     return {errOut.str(), irOut.str()};
   } else {
     return {{}, irOut.str()};
   }
 }
 
-std::pair<std::optional<std::string>, std::string>
-LLVMAstTransformer::optimise(const std::unique_ptr<llvm::Module> &module) {
+Pair<Opt<std::string>, std::string> LLVMAstTransformer::optimise(const std::unique_ptr<llvm::Module> &module) {
   llvm::PassManagerBuilder builder;
   builder.OptLevel = 3;
   llvm::legacy::PassManager m;
@@ -758,7 +826,7 @@ LLVMAstTransformer::optimise(const std::unique_ptr<llvm::Module> &module) {
   }
 }
 
-std::optional<llvm::StructType *> LLVMAstTransformer::lookup(const Sym &s) {
+Opt<llvm::StructType *> LLVMAstTransformer::lookup(const Sym &s) {
   if (auto x = get_opt(structTypes, s); x) return x->first;
   else
     return {};
@@ -793,16 +861,16 @@ compiler::Compilation backend::LLVM::run(const Program &program) {
 
   auto c = llvmc::compileModule(true, std::move(mod), *ctx);
 
-  // at this point we know the target machine, so we derive the struct layout here
-  for (const auto &def : program.defs) {
-    auto x = xform.lookup(def.name);
-    if (!x) {
-      throw std::logic_error("Missing struct def:" + repr(def));
-    } else {
-      // FIXME this needs to use the same LLVM target machine context as the compiler
-      c.layouts.emplace_back(compiler::layoutOf(def));
-    }
-  }
+  //  // at this point we know the target machine, so we derive the struct layout here
+  //  for (const auto &def : program.defs) {
+  //    auto x = xform.lookup(def.name);
+  //    if (!x) {
+  //      throw std::logic_error("Missing struct def:" + repr(def));
+  //    } else {
+  //      // FIXME this needs to use the same LLVM target machine context as the compiler
+  //      c.layouts.emplace_back(compiler::layoutOf(def));
+  //    }
+  //  }
 
   c.events.emplace_back(ast2IR);
   c.events.emplace_back(astOpt);

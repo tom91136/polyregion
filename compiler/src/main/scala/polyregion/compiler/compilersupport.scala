@@ -62,6 +62,10 @@ extension (e: => p.Sym.type) {
 
 }
 
+extension (e: p.Expr.Invoke) {
+  def signature: p.Signature = p.Signature(e.name, e.receiver.map(_.tpe), e.args.map(_.tpe), e.rtn)
+}
+
 extension (e: p.Sym) {
   def repr: String = e.fqn.mkString(".")
 }

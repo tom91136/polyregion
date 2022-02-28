@@ -19,20 +19,26 @@ namespace polyregion::backend {
 
 using namespace polyregion::polyast;
 
+struct WhileCtx {
+  llvm::BasicBlock* exit;
+  llvm::BasicBlock* test;
+};
+
 class LLVMAstTransformer {
+
   llvm::LLVMContext &C;
 
 private:
-  using StructMemberTable = std::unordered_map<std::string, size_t>;
-  std::unordered_map<std::string, std::pair<Type::Any, llvm::Value *>> lut;
-  std::unordered_map<Sym, std::pair<llvm::StructType *, StructMemberTable>> structTypes;
-  std::unordered_map<Signature, llvm::Function *> functions;
+  using StructMemberTable = Map<std::string, size_t>;
+  Map<std::string, Pair<Type::Any, llvm::Value *>> lut;
+  Map<Sym, Pair<llvm::StructType *, StructMemberTable>> structTypes;
+  Map<Signature, llvm::Function *> functions;
   llvm::IRBuilder<> B;
 
   llvm::Value *mkSelectPtr(const Term::Select &select);
   llvm::Value *mkRef(const Term::Any &ref);
   llvm::Value *mkExprValue(const Expr::Any &expr, llvm::Function *overload, const std::string &key);
-  void mkStmt(const Stmt::Any &stmt, llvm::Function *fn);
+  void mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<WhileCtx> whileCtx);
 
   llvm::Function *mkExternalFn(llvm::Function *parent, const Type::Any &rtn, const std::string &name,
                                const std::vector<Type::Any> &args);
@@ -41,15 +47,14 @@ private:
   llvm::Value *conditionalLoad(llvm::Value *rhs);
 
 public:
-  std::pair<llvm::StructType *, StructMemberTable> mkStruct(const StructDef &def);
+  Pair<llvm::StructType *, StructMemberTable> mkStruct(const StructDef &def);
   llvm::Type *mkTpe(const Type::Any &tpe);
-  std::optional<llvm::StructType *> lookup(const Sym &s);
+  Opt<llvm::StructType *> lookup(const Sym &s);
 
   explicit LLVMAstTransformer(llvm::LLVMContext &c) : C(c), lut(), structTypes(), functions(), B(C) {}
 
-  std::pair<std::optional<std::string>, std::string> transform(const std::unique_ptr<llvm::Module> &module,
-                                                               const Program &);
-  std::pair<std::optional<std::string>, std::string> optimise(const std::unique_ptr<llvm::Module> &module);
+  Pair<Opt<std::string>, std::string> transform(const std::unique_ptr<llvm::Module> &module, const Program &);
+  Pair<Opt<std::string>, std::string> optimise(const std::unique_ptr<llvm::Module> &module);
 };
 
 class LLVM : public Backend {

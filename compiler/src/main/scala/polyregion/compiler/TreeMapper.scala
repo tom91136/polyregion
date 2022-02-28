@@ -100,7 +100,7 @@ object TreeMapper {
                 case f: q.DefDef => // (Symbol...).(x: X=>Y)
                   val sym      = p.Sym(i.symbol.name)
                   val receiver = p.Sym(i.symbol.maybeOwner.fullName)
-                  (q.ErasedMethodVal(receiver, sym, ect), c.mark(receiver ~ sym, f)).success.deferred
+                  (q.ErasedMethodVal(receiver, sym, ect, f), c /*.mark(receiver ~ sym, f)*/ ).success.deferred
                 case _ =>
                   c.suspended.get(name -> ect) match {
                     case Some(x) => (x, c).success.deferred
@@ -130,11 +130,12 @@ object TreeMapper {
                   s.symbol.tree match {
                     case dd: q.DefDef if dd.paramss.isEmpty =>
                       // no-arg instance def call (i.e. `x.toDouble` )
-                      val fnSym = p.Sym(s.symbol.name)
-
-                      val named = c.named(tpe)
-                      val c1 = c.down(dd).mark(fnSym, dd) ::= p.Stmt
-                        .Var(named, Some(p.Expr.Invoke(fnSym, Some(select), Nil, tpe)))
+                      val fnSym              = p.Sym(s.symbol.name)
+                      val named              = c.named(tpe)
+                      val ivk: p.Expr.Invoke = p.Expr.Invoke(fnSym, Some(select), Nil, tpe)
+                      val c1 = c
+                        .down(dd)
+                        .mark(ivk.signature, dd) ::= p.Stmt.Var(named, Some(ivk))
                       (p.Term.Select(Nil, named), c1).success.deferred
                     case dd: q.DefDef =>
                       c.fail(s"Unexpected arg list ${dd.paramss} for a 0-arg def via instance ref ${select.repr}")
@@ -151,11 +152,12 @@ object TreeMapper {
                   s.symbol.tree match {
                     case dd: q.DefDef if dd.paramss.isEmpty =>
                       // no-arg module def call (i.e. `object X{ def y :Int = ??? }` )
-                      val fnSym = module :+ name
-
-                      val named = c.named(tpe)
-                      val c1 =
-                        c.down(dd).mark(fnSym, dd) ::= p.Stmt.Var(named, Some(p.Expr.Invoke(fnSym, None, Nil, tpe)))
+                      val fnSym              = module :+ name
+                      val named              = c.named(tpe)
+                      val ivk: p.Expr.Invoke = p.Expr.Invoke(fnSym, None, Nil, tpe)
+                      val c1 = c
+                        .down(dd)
+                        .mark(ivk.signature, dd) ::= p.Stmt.Var(named, Some(ivk))
                       (p.Term.Select(Nil, named), c1).success.deferred
                     case dd: q.DefDef =>
                       c.fail(s"Unexpected arg list ${dd.paramss} for a 0-arg def via module ref ${module.repr}")
@@ -167,11 +169,10 @@ object TreeMapper {
                   s.symbol.tree match {
                     case dd: q.DefDef if dd.paramss.isEmpty =>
                       // no-arg instance def call (i.e. `1.toDouble` )
-                      val fnSym = p.Sym(s.symbol.name)
-
-                      val named = c.named(tpe)
-                      val c1 = c.down(dd).down(dd).mark(fnSym, dd) ::= p.Stmt
-                        .Var(named, Some(p.Expr.Invoke(fnSym, Some(term), Nil, tpe)))
+                      val fnSym              = p.Sym(s.symbol.name)
+                      val named              = c.named(tpe)
+                      val ivk: p.Expr.Invoke = p.Expr.Invoke(fnSym, Some(term), Nil, tpe)
+                      val c1                 = c.down(dd).mark(ivk.signature, dd) ::= p.Stmt.Var(named, Some(ivk))
                       (p.Term.Select(Nil, named), c1).success.deferred
                     case bad => c.fail(s"Unsupported construct $bad via instance ref ${term.repr}")
                   }
@@ -186,9 +187,9 @@ object TreeMapper {
               val sym = p.Sym(s.symbol.name)
               c.mapTerm(root).flatMap {
                 case (receiver: p.Term, c) => // `val f : X => Y = ??? | def f(x: X): Y = ???`
-                  (q.ErasedMethodVal(receiver, sym, ect), c.mark(sym, defdef)).success.deferred
+                  (q.ErasedMethodVal(receiver, sym, ect, defdef), c /* .mark(sym, defdef) */ ).success.deferred
                 case (q.ErasedModuleSelect(module), c) =>
-                  (q.ErasedMethodVal(module, sym, ect), c.mark(module ~ sym, defdef)).success.deferred
+                  (q.ErasedMethodVal(module, sym, ect, defdef), c /* .mark(module ~ sym, defdef)*/ ).success.deferred
                 case (bad, c) => c.fail(s"Unexpected root of a select that leads to an erased ${tpe} type: ${bad}")
               }
             case et: q.ErasedClsTpe => c.fail[(q.Val, q.FnContext)](s"Saw ${et}")
@@ -213,7 +214,10 @@ object TreeMapper {
                     val sym      = p.Sym(a.symbol.name)
                     val receiver = p.Sym(a.symbol.maybeOwner.fullName)
                     println(s"[mapper] type apply of erased fn: ${receiver ~ sym}")
-                    (q.ErasedMethodVal(receiver, sym, ect), c.mark(receiver ~ sym, f)).success.deferred // ofDim
+                    (
+                      q.ErasedMethodVal(receiver, sym, ect, f),
+                      c                /* .mark(receiver ~ sym, f)*/
+                    ).success.deferred // ofDim
                   case _ => ???
                 }
               case bad => c.fail[(q.Val, q.FnContext)](s"Saw ${bad}")
@@ -301,7 +305,7 @@ object TreeMapper {
 
             (ref, c) <- (argTerms, funVal) match {
               case (Nil, x) => (x, c).success.deferred
-              case (_, q.ErasedMethodVal(receiver: p.Term.Select, p.Sym("<init>" :: Nil), fnTpe)) => // ctor call
+              case (_, q.ErasedMethodVal(receiver: p.Term.Select, p.Sym("<init>" :: Nil), fnTpe, _)) => // ctor call
                 (for {
                   sdef <- (fnTpe.rtn match {
                     case p.Type.Struct(s) => c.clss.get(s)
@@ -316,13 +320,13 @@ object TreeMapper {
                   _ <-
                     if (structTpes == argTpes.map(_._2) && structTpes == ctorArgTpes) ().success
                     else
-                      s"Ctor args mismatch, class expects ${structTpes}, fn expects ${ctorArgTpes} and was applied with ${argTpes}".fail
+                      s"Ctor args mismatch, class ${sdef.name} expects ${structTpes}, fn expects ${ctorArgTpes} and was applied with ${argTpes}".fail
 
                   setMemberExprs = sdef.members.zip(argTerms).map { (member, value) =>
                     p.Stmt.Mut(p.Term.Select(receiver.init :+ receiver.last, member), p.Expr.Alias(value), copy = false)
                   }
                 } yield (receiver, c.::=(setMemberExprs*))).deferred
-              case (_, m @ q.ErasedMethodVal(module: p.Sym, sym, tpe)) => // module call
+              case (_, m @ q.ErasedMethodVal(module: p.Sym, sym, tpe, underlying)) => // module call
                 val t = tpe.rtn match {
                   case t: p.Type => t
                   case q.ErasedFnTpe(args, rtn: p.Type) if args.forall {
@@ -336,14 +340,16 @@ object TreeMapper {
                     println(x)
                     // x
                     ???
-                }
-                mkReturn(p.Expr.Invoke(module ~ sym, None, argTerms, t), c).success.deferred
-              case (_, q.ErasedMethodVal(receiver: p.Term, sym, tpe)) => // instance call
+                } // TODO handle multiple arg list methods
+                val ivk: p.Expr.Invoke = p.Expr.Invoke(module ~ sym, None, argTerms, t)
+                mkReturn(ivk, c.mark(ivk.signature, underlying)).success.deferred
+              case (_, q.ErasedMethodVal(receiver: p.Term, sym, tpe, underlying)) => // instance call
                 val t = tpe.rtn match {
                   case t: p.Type => t
                   case _         => ???
                 }
-                mkReturn(p.Expr.Invoke(sym, Some(receiver), argTerms, t), c).success.deferred
+                val ivk: p.Expr.Invoke = p.Expr.Invoke(sym, Some(receiver), argTerms, t)
+                mkReturn(ivk, c.mark(ivk.signature, underlying)).success.deferred
             }
 
           } yield (ref, c)
@@ -438,9 +444,9 @@ object TreeMapper {
                 // ???
 
                 val body = (xs :+ p.Stmt.Cond(
-                  p.Expr.Alias(condRef),
-                  Nil,
-                  p.Stmt.Break :: Nil
+                  cond = p.Expr.Alias(condRef),
+                  trueBr = Nil,
+                  falseBr = p.Stmt.Break :: Nil
                 )) ++ bodyCtx.stmts
 
                 p.Stmt.While(p.Expr.Alias(p.Term.BoolConst(true)), body)

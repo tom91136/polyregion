@@ -108,7 +108,7 @@ object PolyAst {
     case Var(name: Named, expr: Option[Expr])
     case Mut(name: Term.Select, expr: Expr, copy: Boolean)
     case Update(lhs: Term.Select, idx: Term, value: Term)
-    case While(cond: Expr, body: List[Stmt])
+    case While(tests: List[Stmt], cond: Term, body: List[Stmt])
     case Break
     case Cont
     case Cond(cond: Expr, trueBr: List[Stmt], falseBr: List[Stmt])

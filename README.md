@@ -49,11 +49,14 @@ TODO
 * Instantiation and access of Arrays in offload
 * Offload dynamic memory allocation
 * Numeric conversion (`to<Type>`)
+* General implicit conversions/extensions (e.g `RichInt`, `ArrayOps`, etc)
 
 TODO
 
-* General implicit conversions/extensions (e.g `RichInt`, `ArrayOps`, etc)
+
 * All numeric type overloads for the math libraries
+* While loop with complex conditions (multiple statements)
+* Arbitrary returns (termination) in function
 
 
 * Nested `def`
