@@ -34,14 +34,14 @@ class LLVMAstTransformer {
 
 private:
   using StructMemberTable = Map<std::string, size_t>;
-  Map<std::string, Pair<Type::Any, llvm::Value *>> lut;
+  Map<std::string, Pair<Type::Any, llvm::Value *>> stackVarPtrs;
   Map<Sym, Pair<llvm::StructType *, StructMemberTable>> structTypes;
   Map<Signature, llvm::Function *> functions;
   llvm::IRBuilder<> B;
 
-  llvm::Value *mkSelectPtr(const Term::Select &select);
-  llvm::Value *mkRef(const Term::Any &ref);
-  llvm::Value *mkExprValue(const Expr::Any &expr, llvm::Function *overload, const std::string &key);
+  llvm::Value *mkSelectVal(const Term::Select &select);
+  llvm::Value *mkTermVal(const Term::Any &ref);
+  llvm::Value *mkExprVal(const Expr::Any &expr, llvm::Function *fn, const std::string &key);
   BlockKind mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<WhileCtx> whileCtx);
 
   llvm::Function *mkExternalFn(llvm::Function *parent, const Type::Any &rtn, const std::string &name,
@@ -55,7 +55,7 @@ public:
   llvm::Type *mkTpe(const Type::Any &tpe);
   Opt<llvm::StructType *> lookup(const Sym &s);
 
-  explicit LLVMAstTransformer(llvm::LLVMContext &c) : C(c), lut(), structTypes(), functions(), B(C) {}
+  explicit LLVMAstTransformer(llvm::LLVMContext &c) : C(c), stackVarPtrs(), structTypes(), functions(), B(C) {}
 
   Pair<Opt<std::string>, std::string> transform(const std::unique_ptr<llvm::Module> &module, const Program &);
   Pair<Opt<std::string>, std::string> optimise(const std::unique_ptr<llvm::Module> &module);
