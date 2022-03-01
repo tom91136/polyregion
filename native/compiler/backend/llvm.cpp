@@ -108,7 +108,7 @@ llvm::Value *LLVMAstTransformer::mkSelectPtr(const Term::Select &select) {
   };
 
   auto selectNamed = [&](const Named &named) -> llvm::Value * {
-    //  check the LUT table for known variables brought in scope by parameters
+    //  check the LUT table for known variables defined by var or brought in scope by parameters
     if (auto x = polyregion::get_opt(lut, named.symbol); x) {
       auto [tpe, value] = *x;
       if (named.tpe != tpe) {
@@ -132,7 +132,7 @@ llvm::Value *LLVMAstTransformer::mkSelectPtr(const Term::Select &select) {
   else {
     // we're in a select chain, init elements must return struct type; the head must come from LUT
     auto [head, tail] = uncons(select);
-    auto local = selectNamed(head);
+    auto local = conditionalLoad( selectNamed(head));
     auto [structTy, _] = structTypeOf(head.tpe);
 
     std::vector<llvm::Value *> gepIndices;
@@ -588,13 +588,17 @@ BlockKind LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn, 
         auto rhs = map_opt(x.expr, [&](auto &&expr) { return mkExprValue(expr, fn, x.name.symbol + "_var_rhs"); });
         if (holds<Type::Array>(x.name.tpe)) {
           if (rhs) {
-            lut[x.name.symbol] = {x.name.tpe, *rhs};
+            auto ptr = B.CreateAlloca(mkTpe(x.name.tpe), nullptr, x.name.symbol + "_stack_ptr");
+            B.CreateStore(*rhs, ptr); //
+            lut[x.name.symbol] = {x.name.tpe, ptr};
           } else {
             undefined(__FILE_NAME__, __LINE__, "var array with no expr?");
           }
         } else if (holds<Type::Struct>(x.name.tpe)) {
           if (rhs) {
-            lut[x.name.symbol] = {x.name.tpe, *rhs};
+            auto ptr = B.CreateAlloca(mkTpe(x.name.tpe), nullptr, x.name.symbol + "_stack_ptr");
+            B.CreateStore(*rhs, ptr); //
+            lut[x.name.symbol] = {x.name.tpe, ptr};
           } else {
             // otherwise, heap allocate the struct and return the pointer to that
             llvm::Type *structPtrTy = mkTpe(x.name.tpe);
@@ -605,7 +609,13 @@ BlockKind LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn, 
             }
             auto elemSize = sizeOf(B, C, structPtrTy);
             auto ptr = invokeMalloc(fn, elemSize);
-            lut[x.name.symbol] = {x.name.tpe, B.CreateBitCast(ptr, structPtrTy)};
+
+
+            auto ptr2 = B.CreateAlloca(mkTpe(x.name.tpe), nullptr, x.name.symbol + "_stack_ptr");
+            B.CreateStore(B.CreateBitCast(ptr, structPtrTy), ptr2); //
+            lut[x.name.symbol] = {x.name.tpe, ptr2};
+
+//            lut[x.name.symbol] = {x.name.tpe, B.CreateBitCast(ptr, structPtrTy)};
           }
         } else {
           // plain primitives now
@@ -633,17 +643,18 @@ BlockKind LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn, 
             if (!rhs->getType()->isPointerTy()) {
               throw std::logic_error("Semantic error: rhs isn't a pointer type (" + repr(x) + ")");
             }
-            if (!x.copy) lut[x.name.last.symbol] = {x.name.tpe, rhs};
-            else {
-
+            if (!x.copy) {
+//              lut[x.name.last.symbol] = {x.name.tpe, rhs};
+                // RHS Is a pointer here
+                // lhs IS a pointer here
+                B.CreateStore(conditionalLoad(rhs) , mkSelectPtr(x.name)); // ignore copy
+            } else {
               // XXX CreateMemCpyInline has an immarg size so %size must be a pure constant, this is crazy
               B.CreateMemCpy(lhsPtr, {}, rhs, {}, sizeOf(B, C, lhsPtr->getType()));
             }
           } else {
-            // FIXME fix
-
             if (holds<Type::Struct>(tpe(x.expr))) {
-              B.CreateStore(rhs, mkSelectPtr(x.name)); // ignore copy, modify struct member
+              B.CreateStore(conditionalLoad(rhs), mkSelectPtr(x.name)); // ignore copy, modify struct member
             } else {
               B.CreateStore(conditionalLoad(rhs), mkSelectPtr(x.name)); // ignore copy, modify struct member
             }
@@ -743,7 +754,7 @@ BlockKind LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn, 
           B.CreateRetVoid();
         } else {
           if (holds<TypeKind::Ref>(kind(rtnTpe))) {
-            B.CreateRet((mkExprValue(x.value, fn, "return")));
+            B.CreateRet((conditionalLoad(mkExprValue(x.value, fn, "return"))));
           } else {
             B.CreateRet(conditionalLoad(mkExprValue(x.value, fn, "return")));
           }
@@ -792,7 +803,7 @@ Pair<Opt<std::string>, std::string> LLVMAstTransformer::transform(const std::uni
       [&](auto &arg, const auto &named) -> Pair<std::string, Pair<Type::Any, llvm::Value *>> {
         arg.setName(named.symbol);
 
-        if (holds<TypeKind::Ref>(kind(named.tpe))) {
+        if (holds<TypeKind::Ref>(kind(named.tpe)) && false) {
           return {named.symbol, {named.tpe, &arg}};
         } else {
           auto stack = B.CreateAlloca(mkTpe(named.tpe), nullptr, named.symbol + "_stack_ptr");
