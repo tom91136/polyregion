@@ -1,5 +1,6 @@
 package polyregion
 
+import polyregion.scala.Buffer
 
 class BufferSpec extends munit.FunSuite {
 

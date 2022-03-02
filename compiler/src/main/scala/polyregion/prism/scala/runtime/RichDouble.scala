@@ -50,22 +50,22 @@ final class RichDouble(val self: Double) extends AnyVal with FractionalProxy[Dou
   override def max(that: Double): Double = math.max(self, that)
   override def min(that: Double): Double = math.min(self, that)
   @deprecated("signum does not handle -0.0 or Double.NaN; use `sign` method instead", since = "2.13.0")
-  override def signum: Int               = math.signum(self).toInt
+  override def signum: Int = math.signum(self).toInt
 
   def round: Long   = math.round(self)
   def ceil: Double  = math.ceil(self)
   def floor: Double = math.floor(self)
 
-  /** Converts an angle measured in degrees to an approximately equivalent
-   *  angle measured in radians.
-   *
-   *  @return the measurement of the angle x in radians.
-   */
+  /** Converts an angle measured in degrees to an approximately equivalent angle measured in radians.
+    *
+    * @return
+    *   the measurement of the angle x in radians.
+    */
   def toRadians: Double = math.toRadians(self)
 
-  /** Converts an angle measured in radians to an approximately equivalent
-   *  angle measured in degrees.
-   *  @return the measurement of the angle x in degrees.
-   */
+  /** Converts an angle measured in radians to an approximately equivalent angle measured in degrees.
+    * @return
+    *   the measurement of the angle x in degrees.
+    */
   def toDegrees: Double = math.toDegrees(self)
 }

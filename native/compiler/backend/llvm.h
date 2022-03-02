@@ -39,7 +39,9 @@ private:
   Map<Signature, llvm::Function *> functions;
   llvm::IRBuilder<> B;
 
-  llvm::Value *mkSelectVal(const Term::Select &select);
+  llvm::Value *findStackVar(const Named &named);
+
+  llvm::Value *mkSelectPtr(const Term::Select &select);
   llvm::Value *mkTermVal(const Term::Any &ref);
   llvm::Value *mkExprVal(const Expr::Any &expr, llvm::Function *fn, const std::string &key);
   BlockKind mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<WhileCtx> whileCtx);

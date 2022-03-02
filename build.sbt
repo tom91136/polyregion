@@ -1,3 +1,4 @@
+
 lazy val commonSettings = Seq(
   scalaVersion     := "3.1.1",
   version          := "0.0.1-SNAPSHOT",
@@ -63,6 +64,18 @@ lazy val compiler = project
     javah / target      := bindingsDir / "java-compiler",
     assemblyShadeRules  := loaderShadeRules,
     assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly")),
+    javacOptions ++= Seq(
+      "-Xlint:all",
+      "--add-exports=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED",
+      "--add-exports=jdk.compiler/com.sun.tools.javac.comp=ALL-UNNAMED",
+      "--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED",
+      "--add-exports=jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED",
+      "--add-exports=jdk.compiler/com.sun.tools.javac.model=ALL-UNNAMED",
+      "--add-exports=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED",
+      "--add-exports=jdk.compiler/com.sun.tools.javac.processing=ALL-UNNAMED",
+      "--add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED",
+      "--add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED"
+    ),
     scalacOptions ++= Seq(
       "-Xmax-inlines",
       "64",            // the AST has lots of leaf nodes and we use inline so bump the limit
@@ -71,11 +84,62 @@ lazy val compiler = project
     libraryDependencies ++= Seq(
       "com.lihaoyi"   %% "pprint"    % "0.7.1",
       "com.lihaoyi"   %% "upickle"   % "1.4.4",
-      "org.typelevel" %% "cats-core" % catsVersion,
-      "org.scalameta" %% "munit"     % munitVersion % Test
+      "org.typelevel" %% "cats-core" % catsVersion
     )
   )
   .dependsOn(`runtime-scala`)
+
+lazy val `compiler-testsuite-scala` = project
+  .settings(
+    commonSettings,
+    name := "compiler-testsuite-scala",
+    scalacOptions ++= Seq(
+      "-Yretain-trees" // XXX for the test kernels
+    ),
+    libraryDependencies ++= Seq(
+      "org.scalameta" %% "munit" % munitVersion % Test
+    )
+  )
+  .dependsOn(compiler)
+Global / onChangedBuildSource := ReloadOnSourceChanges
+lazy val `compiler-testsuite-java` = project
+  .settings(
+    commonSettings,
+    autoScalaLibrary    := false,
+    javacOptions ++= Seq("-proc:none"),
+    name := "compiler-testsuite-java",
+//    (Test / compile) := {
+//      val sep = System.getProperty("path.separator")
+//      val javac = file(sys.props("java.home")) / "bin" / "javac"
+//      val logger = streams.value.log
+//      val compilation = (Test / compile).value
+//      val cp = (Test / dependencyClasspath).value
+//      val flags = Seq("-XprintProcessorInfo", "-XprintRounds", "-proc:only") ++ (javacOptions.value.filterNot(_.startsWith("")))
+//
+//      logger.info(s"flags = ${flags.mkString(" ")}")
+//
+//      import scala.jdk.CollectionConverters._
+//
+//      logger.info(compilation.readSourceInfos().getAllSourceInfos.keySet().asScala.map(_.id).toList.toString() )
+//      logger.info(s"Compilation=${compilation.readCompilations().getAllCompilations.length}")
+//      compilation.readCompilations().getAllCompilations.foreach(c => logger.warn(s">>> ${c.getOutput.getMultipleOutput -> c.getOutput.getSingleOutputAsPath}"))
+//
+//
+//      val javacLine = Seq(javac.absolutePath , "-cp" , cp.map(_.data).mkString(sep) ) ++ flags
+////      import scala.sys.process._
+////
+////      Process(javacLine,  baseDirectory.value) ! logger
+//
+//      logger.info(s"Compilation=${compilation.readCompilations()}")
+//
+//      compilation
+//    } ,
+    libraryDependencies ++= Seq(
+      "junit"          % "junit"           % "4.13.1" % Test,
+      "com.github.sbt" % "junit-interface" % "0.13.2" % Test
+    )
+  )
+  .dependsOn(compiler)
 
 lazy val mainCls = Some("polyregion.examples.Stage")
 
@@ -113,4 +177,13 @@ lazy val `benchmarks-scala` = project
 lazy val root = project
   .in(file("."))
   .settings(commonSettings)
-  .aggregate(`loader-jvm`, `runtime-scala`, `runtime-java`, compiler, `examples-scala`, `benchmarks-scala`)
+  .aggregate(
+    `loader-jvm`,
+    `runtime-scala`,
+    `runtime-java`,
+    compiler,
+    `compiler-testsuite-scala`,
+    `compiler-testsuite-java`,
+    `examples-scala`,
+    `benchmarks-scala`
+  )

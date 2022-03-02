@@ -29,7 +29,7 @@ final class RichLong(val self: Long) extends AnyVal with IntegralProxy[Long] {
   override def isValidShort = self.toShort.toLong == self
   override def isValidChar  = self.toChar.toLong == self
   override def isValidInt   = self.toInt.toLong == self
-           def isValidLong  = true
+  def isValidLong           = true
   // override def isValidFloat = self.toFloat.toLong == self && self != Long.MaxValue
   // override def isValidDouble = self.toDouble.toLong == self && self != Long.MaxValue
 
@@ -40,8 +40,13 @@ final class RichLong(val self: Long) extends AnyVal with IntegralProxy[Long] {
   override def max(that: Long): Long = math.max(self, that)
   override def min(that: Long): Long = math.min(self, that)
 
-  /** There is no reason to round a `Long`, but this method is provided to avoid accidental conversion to `Int` through `Float`. */
-  @deprecated("this is an integer type; there is no reason to round it.  Perhaps you meant to call this on a floating-point value?", "2.11.0")
+  /** There is no reason to round a `Long`, but this method is provided to avoid accidental conversion to `Int` through
+    * `Float`.
+    */
+  @deprecated(
+    "this is an integer type; there is no reason to round it.  Perhaps you meant to call this on a floating-point value?",
+    "2.11.0"
+  )
   def round: Long = self
 
   def toBinaryString: String = java.lang.Long.toBinaryString(self)

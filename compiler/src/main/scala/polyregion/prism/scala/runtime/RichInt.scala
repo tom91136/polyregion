@@ -29,13 +29,12 @@ final class RichInt(val self: Int) extends AnyVal with ScalaNumberProxy[Int] wit
   override def byteValue   = self.toByte
   override def shortValue  = self.toShort
 
-  /** Returns `'''true'''` if this number has no decimal component.
-    * Always `'''true'''` for `RichInt`.
+  /** Returns `'''true'''` if this number has no decimal component. Always `'''true'''` for `RichInt`.
     */
   def isWhole = true
 
-  override def isValidInt   = true
-  def isValidLong  = true
+  override def isValidInt = true
+  def isValidLong         = true
 
   // These method are all overridden and redefined to call out to scala.math to avoid 3 allocations:
   // the primitive boxing, the value class boxing and instantiation of the Numeric num.
@@ -44,8 +43,13 @@ final class RichInt(val self: Int) extends AnyVal with ScalaNumberProxy[Int] wit
   override def max(that: Int): Int = math.max(self, that)
   override def min(that: Int): Int = math.min(self, that)
 
-  /** There is no reason to round an `Int`, but this method is provided to avoid accidental loss of precision from a detour through `Float`. */
-  @deprecated("this is an integer type; there is no reason to round it.  Perhaps you meant to call this on a floating-point value?", "2.11.0")
+  /** There is no reason to round an `Int`, but this method is provided to avoid accidental loss of precision from a
+    * detour through `Float`.
+    */
+  @deprecated(
+    "this is an integer type; there is no reason to round it.  Perhaps you meant to call this on a floating-point value?",
+    "2.11.0"
+  )
   def round: Int = self
 
   def toBinaryString: String = java.lang.Integer.toBinaryString(self)
@@ -54,34 +58,36 @@ final class RichInt(val self: Int) extends AnyVal with ScalaNumberProxy[Int] wit
 
   type ResultWithoutStep = Range
 
-  /**
-    * @param end The final bound of the range to make.
-    * @return A [[scala.collection.immutable.Range]] from `this` up to but
-    *         not including `end`.
+  /** @param end
+    *   The final bound of the range to make.
+    * @return
+    *   A [[scala.collection.immutable.Range]] from `this` up to but not including `end`.
     */
   def until(end: Int): Range = Range(self, end)
 
-  /**
-    * @param end The final bound of the range to make.
-    * @param step The number to increase by for each step of the range.
-    * @return A [[scala.collection.immutable.Range]] from `this` up to but
-    *         not including `end`.
+  /** @param end
+    *   The final bound of the range to make.
+    * @param step
+    *   The number to increase by for each step of the range.
+    * @return
+    *   A [[scala.collection.immutable.Range]] from `this` up to but not including `end`.
     */
   def until(end: Int, step: Int): Range = Range(self, end, step)
 
   /** like `until`, but includes the last index */
-  /**
-    * @param end The final bound of the range to make.
-    * @return A [[scala.collection.immutable.Range]] from `'''this'''` up to
-    *         and including `end`.
+  /** @param end
+    *   The final bound of the range to make.
+    * @return
+    *   A [[scala.collection.immutable.Range]] from `'''this'''` up to and including `end`.
     */
   def to(end: Int): Range.Inclusive = Range.inclusive(self, end)
 
-  /**
-    * @param end The final bound of the range to make.
-    * @param step The number to increase by for each step of the range.
-    * @return A [[scala.collection.immutable.Range]] from `'''this'''` up to
-    *         and including `end`.
+  /** @param end
+    *   The final bound of the range to make.
+    * @param step
+    *   The number to increase by for each step of the range.
+    * @return
+    *   A [[scala.collection.immutable.Range]] from `'''this'''` up to and including `end`.
     */
   def to(end: Int, step: Int): Range.Inclusive = Range.inclusive(self, end, step)
 }

@@ -1,5 +1,7 @@
 package polyregion.examples
 
+import polyregion.scala.NativeStruct
+
 object Mandelbrot {
 
   final val Palette = Array[Colour](
@@ -52,8 +54,8 @@ object Mandelbrot {
   }
 
   object Colour {
-    val Black: Colour                   = Colour(0, 0, 0)
-    val White: Colour                   = Colour(255, 255, 255)
+    final val Black: Colour             = Colour(0, 0, 0)
+    final val White: Colour             = Colour(255, 255, 255)
     private def clampUInt8(x: Int): Int = x.max(0).min(255)
     def apply(r: Int, g: Int, b: Int, a: Int = 255): Colour = Colour(
       (clampUInt8(a) & 0xff) << 24     //
@@ -86,12 +88,16 @@ object Mandelbrot {
   }
 
   def mkColour(z: Complex, iter: Int, maxIter: Int): Colour =
-    if (iter >= maxIter) Colour.Black
+    if (iter >= maxIter) Colour(0, 0, 0) // Colour.Black
     else {
       val logZn = math.log(z.abs) / 2
       val nu    = math.log(logZn / math.log(2)) / math.log(2)
-      Palette(iter % Palette.length).mix(Palette((iter + 1) % Palette.length), nu)
+      Colour(0, 0, 0)
+      // Palette(iter % Palette.length).mix(Palette((iter + 1) % Palette.length), nu)
     }
+
+  // given NativeStruct[Complex] = polyregion.compiletime.nativeStructOf
+  // given NativeStruct[ItResult] = polyregion.compiletime.nativeStructOf
 
   def run(buffer: Array[Array[Colour]], width: Int, height: Int, poiX: Double, poiY: Double, scale: Double): Unit = {
     val maxIter      = 500
@@ -104,13 +110,14 @@ object Mandelbrot {
       x <- 0 until width
     } {
 
-      val m2 = polyregion.compiletime.offload {
+      val m2 = polyregion.scala.compiletime.offload {
         val c = Complex(interpolate(x, 0, width, xMin, xMax), interpolate(y, 0, height, yMin, yMax))
         val t = itMandel2(c, maxIter, 4)
+//        val m = mkColour(t.c, t.i, maxIter)
         ()
       }
 
-      // val c         =   polyregion.compiletime.offload { Complex(interpolate(x, 0, width, xMin, xMax), interpolate(y, 0, height, yMin, yMax))  }
+      // val c         =   polyregion.scala.compiletime.offload { Complex(interpolate(x, 0, width, xMin, xMax), interpolate(y, 0, height, yMin, yMax))  }
       // val (z, iter) = itMandel(c, maxIter, 4)
       // buffer(x)(y) = mkColour(z, iter, maxIter)
     }

@@ -24,7 +24,7 @@ public class Loader {
     INSTANCE;
     private final Set<Path> toDelete = new LinkedHashSet<>();
 
-      void deleteSilently(Path p) {
+    void deleteSilently(Path p) {
       try {
         System.out.println(" - " + p);
         Files.deleteIfExists(p);
@@ -32,7 +32,7 @@ public class Loader {
       }
     }
 
-      void deleteAllSilently(Path root) {
+    void deleteAllSilently(Path root) {
       System.out.println("Deleting " + root);
       try (Stream<Path> walk = Files.walk(root)) {
         walk.sorted(Comparator.reverseOrder()).forEach(this::deleteSilently);

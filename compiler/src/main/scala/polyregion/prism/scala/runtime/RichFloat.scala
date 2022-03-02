@@ -50,23 +50,23 @@ final class RichFloat(val self: Float) extends AnyVal with FractionalProxy[Float
   override def max(that: Float): Float = math.max(self, that)
   override def min(that: Float): Float = math.min(self, that)
   @deprecated("signum does not handle -0.0f or Float.NaN; use `sign` method instead", since = "2.13.0")
-  override def signum: Int             = math.signum(self).toInt
+  override def signum: Int = math.signum(self).toInt
 
   def round: Int   = math.round(self)
   def ceil: Float  = math.ceil(self.toDouble).toFloat
   def floor: Float = math.floor(self.toDouble).toFloat
 
-  /** Converts an angle measured in degrees to an approximately equivalent
-   *  angle measured in radians.
-   *
-   *  @return the measurement of the angle `x` in radians.
-   */
+  /** Converts an angle measured in degrees to an approximately equivalent angle measured in radians.
+    *
+    * @return
+    *   the measurement of the angle `x` in radians.
+    */
   def toRadians: Float = math.toRadians(self.toDouble).toFloat
 
-  /** Converts an angle measured in radians to an approximately equivalent
-   *  angle measured in degrees.
-   *
-   *  @return the measurement of the angle `x` in degrees.
-   */
+  /** Converts an angle measured in radians to an approximately equivalent angle measured in degrees.
+    *
+    * @return
+    *   the measurement of the angle `x` in degrees.
+    */
   def toDegrees: Float = math.toDegrees(self.toDouble).toFloat
 }

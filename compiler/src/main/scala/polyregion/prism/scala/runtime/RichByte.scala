@@ -25,7 +25,7 @@ final class RichByte(val self: Byte) extends AnyVal with ScalaWholeNumberProxy[B
   override def byteValue   = self
   override def shortValue  = self.toShort
 
-  override def isValidByte   = true
+  override def isValidByte = true
 
   // These method are all overridden and redefined to call out to scala.math to avoid 3 allocations:
   // the primitive boxing, the value class boxing and instantiation of the Numeric num.

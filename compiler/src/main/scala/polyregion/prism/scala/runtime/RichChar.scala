@@ -25,7 +25,7 @@ final class RichChar(val self: Char) extends AnyVal with IntegralProxy[Char] {
   override def byteValue   = self.toByte
   override def shortValue  = self.toShort
 
-  override def isValidChar   = true
+  override def isValidChar = true
 
   // These method are all overridden and redefined to call out to scala.math to avoid 3 allocations:
   // the primitive boxing, the value class boxing and instantiation of the Numeric num.
@@ -34,7 +34,7 @@ final class RichChar(val self: Char) extends AnyVal with IntegralProxy[Char] {
   override def max(that: Char): Char = math.max(self.toInt, that.toInt).toChar
   override def min(that: Char): Char = math.min(self.toInt, that.toInt).toChar
 
-  def asDigit: Int                      = Character.digit(self, Character.MAX_RADIX)
+  def asDigit: Int = Character.digit(self, Character.MAX_RADIX)
 
   def isControl: Boolean                = Character.isISOControl(self)
   def isDigit: Boolean                  = Character.isDigit(self)
@@ -50,18 +50,18 @@ final class RichChar(val self: Char) extends AnyVal with IntegralProxy[Char] {
   def isIdentifierIgnorable: Boolean    = Character.isIdentifierIgnorable(self)
   def isMirrored: Boolean               = Character.isMirrored(self)
 
-  def isLower: Boolean                  = Character.isLowerCase(self)
-  def isUpper: Boolean                  = Character.isUpperCase(self)
-  def isTitleCase: Boolean              = Character.isTitleCase(self)
+  def isLower: Boolean     = Character.isLowerCase(self)
+  def isUpper: Boolean     = Character.isUpperCase(self)
+  def isTitleCase: Boolean = Character.isTitleCase(self)
 
-  def toLower: Char                     = Character.toLowerCase(self)
-  def toUpper: Char                     = Character.toUpperCase(self)
-  def toTitleCase: Char                 = Character.toTitleCase(self)
+  def toLower: Char     = Character.toLowerCase(self)
+  def toUpper: Char     = Character.toUpperCase(self)
+  def toTitleCase: Char = Character.toTitleCase(self)
 
-  def getType: Int                      = Character.getType(self)
-  def getNumericValue: Int              = Character.getNumericValue(self)
-  def getDirectionality: Byte           = Character.getDirectionality(self)
-  def reverseBytes: Char                = Character.reverseBytes(self)
+  def getType: Int            = Character.getType(self)
+  def getNumericValue: Int    = Character.getNumericValue(self)
+  def getDirectionality: Byte = Character.getDirectionality(self)
+  def reverseBytes: Char      = Character.reverseBytes(self)
 
   // Java 5 Character methods not added:
   //

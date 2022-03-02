@@ -1,9 +1,9 @@
 package polyregion.benchmarks
 
-import org.openjdk.jmh.annotations._
+import org.openjdk.jmh.annotations.*
 import java.util.concurrent.TimeUnit
-import polyregion.compiletime._
-import polyregion._
+import polyregion.scala.compiletime.*
+import polyregion.scala.*
 import concurrent.ExecutionContext.Implicits.global
 import net.openhft.affinity.AffinityLock
 
@@ -19,12 +19,12 @@ import net.openhft.affinity.AffinityLock
   )
   var size: Int = _
 
-@Param(
+  @Param(
     Array(
-    "10"
+      "10"
     )
   )
-  var iter : Int = _ 
+  var iter: Int = _
 
   @Param(
     Array(

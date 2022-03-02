@@ -1,5 +1,7 @@
 package polyregion
 
+import polyregion.scala.Runtime
+
 class RuntimeSuite extends munit.FunSuite {
 
   extension (x: Seq[Range]) {
