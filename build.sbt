@@ -1,6 +1,8 @@
+val scala2Version = "2.13.6"
+val scala3Version = "3.1.1"
 
 lazy val commonSettings = Seq(
-  scalaVersion     := "3.1.1",
+  scalaVersion     := scala3Version,
   version          := "0.0.1-SNAPSHOT",
   organization     := "uk.ac.bristol.uob-hpc",
   organizationName := "University of Bristol",
@@ -105,35 +107,10 @@ Global / onChangedBuildSource := ReloadOnSourceChanges
 lazy val `compiler-testsuite-java` = project
   .settings(
     commonSettings,
-    autoScalaLibrary    := false,
-    javacOptions ++= Seq("-proc:none"),
-    name := "compiler-testsuite-java",
-//    (Test / compile) := {
-//      val sep = System.getProperty("path.separator")
-//      val javac = file(sys.props("java.home")) / "bin" / "javac"
-//      val logger = streams.value.log
-//      val compilation = (Test / compile).value
-//      val cp = (Test / dependencyClasspath).value
-//      val flags = Seq("-XprintProcessorInfo", "-XprintRounds", "-proc:only") ++ (javacOptions.value.filterNot(_.startsWith("")))
-//
-//      logger.info(s"flags = ${flags.mkString(" ")}")
-//
-//      import scala.jdk.CollectionConverters._
-//
-//      logger.info(compilation.readSourceInfos().getAllSourceInfos.keySet().asScala.map(_.id).toList.toString() )
-//      logger.info(s"Compilation=${compilation.readCompilations().getAllCompilations.length}")
-//      compilation.readCompilations().getAllCompilations.foreach(c => logger.warn(s">>> ${c.getOutput.getMultipleOutput -> c.getOutput.getSingleOutputAsPath}"))
-//
-//
-//      val javacLine = Seq(javac.absolutePath , "-cp" , cp.map(_.data).mkString(sep) ) ++ flags
-////      import scala.sys.process._
-////
-////      Process(javacLine,  baseDirectory.value) ! logger
-//
-//      logger.info(s"Compilation=${compilation.readCompilations()}")
-//
-//      compilation
-//    } ,
+    autoScalaLibrary := false,
+    javacOptions ++= Seq("-XprintProcessorInfo", "-XprintRounds"),
+    name              := "compiler-testsuite-java",
+    (Test / javaHome) := Some(file(sys.props("java.home"))),
     libraryDependencies ++= Seq(
       "junit"          % "junit"           % "4.13.1" % Test,
       "com.github.sbt" % "junit-interface" % "0.13.2" % Test

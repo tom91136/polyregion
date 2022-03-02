@@ -1,6 +1,5 @@
 package polyregion.java
 
-
 //import com.google.auto.service.AutoService
 import com.sun.source.util.Trees
 
@@ -163,13 +162,10 @@ class Processor extends AbstractProcessor {
       null
   }
 
-
-
   private[polyregion] var t: Trees = _
 
   override def init(processingEnv: ProcessingEnvironment): Unit = {
     super.init(processingEnv)
-
 
     type JavaCEnv = Any // com.sun.tools.javac.processing.JavacProcessingEnvironment
 
@@ -193,40 +189,11 @@ class Processor extends AbstractProcessor {
       )
       null
     }
-    System.out.println(System.getProperty("java.class.path"))
-    System.out.println(classOf[cats.Functor[?]])
-    System.out.println(scala.collection.immutable.Vector.apply(1))
-
-
-
-    processingEnv.getMessager.printMessage(Kind.WARNING, "A")
-
-
-    val a = getJavacProcessingEnvironment(processingEnv)
+//    val a = getJavacProcessingEnvironment(processingEnv)
     t = Trees.instance(processingEnv)
-    processingEnv.getMessager.printMessage(Kind.WARNING, "Tree= " + t.toString)
+    processingEnv.getMessager.printMessage(Kind.WARNING, s"In processor, tree=$t")
   }
 
-  def handle(annotations: _root_.java.util.Set[_ <: TypeElement], roundEnv: RoundEnvironment): Boolean = {
-
-    System.out.println(System.getProperty("java.class.path"))
-    System.out.println(classOf[cats.Functor[?]])
-    System.out.println(scala.collection.immutable.Vector.apply(1))
-      System.out.println(ArraySeq(1))
-    import _root_.scala.jdk.CollectionConverters.*
-
-    for (annotation <- annotations.asScala) {
-      val annotatedElements = roundEnv.getElementsAnnotatedWith(annotation)
-      for (element <- annotatedElements.asScala) {
-        processingEnv.getMessager.printMessage(Kind.WARNING, "Got elem: " + element.getSimpleName.toString)
-        processingEnv.getMessager.printMessage(Kind.WARNING, element.toString + " -->  " + t.getTree(element))
-      }
-    }
-    true
-  }
-
-  override def process(annotations: _root_.java.util.Set[_ <: TypeElement], roundEnv: RoundEnvironment): Boolean = {
-//    handle(annotations, roundEnv)
-    Normal.handle(annotations, roundEnv, processingEnv)
-  }
+  override def process(annotations: _root_.java.util.Set[_ <: TypeElement], roundEnv: RoundEnvironment): Boolean =
+    Compiler.compile(t, annotations, roundEnv, processingEnv)
 }

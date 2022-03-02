@@ -10,7 +10,7 @@ public class AnnotationTest {
 		@Offload
 		void fn() {
 			int a = 0;
-			System.out.println(" a    " + a);
+			System.out.println(" a   " + a);
 		}
 	}
 
@@ -18,7 +18,7 @@ public class AnnotationTest {
 	@Test
 	public void test1() {
 
-		System.out.println("Hey!! ");
+		System.out.println("Hey!!");
 
 	}
 
