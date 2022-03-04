@@ -2,6 +2,7 @@ package polyregion.java
 
 //import com.google.auto.service.AutoService
 import com.sun.source.util.Trees
+import polyregion.__UnsafeObject
 
 import _root_.java.lang.reflect.AccessibleObject
 import _root_.java.lang.reflect.Field
@@ -84,7 +85,7 @@ object Processor {
   }
 
   private def getFirstFieldOffset(unsafe: Unsafe) = try
-    unsafe.objectFieldOffset(classOf[Nothing].getDeclaredField("first"))
+    unsafe.objectFieldOffset(classOf[__UnsafeObject].getDeclaredField("first"))
   catch {
     case e: NoSuchFieldException =>
       // can't happen.
@@ -124,13 +125,12 @@ object Processor {
       unsafe.putBooleanVolatile(m, firstFieldOffset, true)
       for (p <- allPkgs) m.invoke(jdkCompilerModule, p, ownModule)
     } catch {
-      case ignore: Exception =>
+      case ignore: Exception =>ignore.printStackTrace()
     }
   }
 
 }
 
-@SupportedAnnotationTypes(Array("polyregion.java.Offload"))
 @SupportedSourceVersion(SourceVersion.RELEASE_8)
 class Processor extends AbstractProcessor {
 
@@ -162,6 +162,10 @@ class Processor extends AbstractProcessor {
       null
   }
 
+  override def getSupportedAnnotationTypes: util.Set[String] = java.util.Collections.singleton[String]("*") // "polyregion.java.Offload"
+
+  override def getSupportedSourceVersion: SourceVersion = SourceVersion.RELEASE_8
+
   private[polyregion] var t: Trees = _
 
   override def init(processingEnv: ProcessingEnvironment): Unit = {
@@ -190,6 +194,7 @@ class Processor extends AbstractProcessor {
       null
     }
 //    val a = getJavacProcessingEnvironment(processingEnv)
+    Processor.addOpensForLombok()
     t = Trees.instance(processingEnv)
     processingEnv.getMessager.printMessage(Kind.WARNING, s"In processor, tree=$t")
   }
