@@ -184,6 +184,10 @@ object Compiler {
       override def reduce(r1: String, r2: String) = r1++r2
     }
 
+
+    
+    println(">" + elem.getEnclosedElements.asScala.toList)
+
     x.scan(t, ())
 
   }
@@ -196,6 +200,7 @@ object Compiler {
   ): Boolean = {
 
     println(s"Roots = ${roundEnv.getRootElements.asScala.toList}")
+
 
 
     roundEnv.getRootElements.asScala.foreach{

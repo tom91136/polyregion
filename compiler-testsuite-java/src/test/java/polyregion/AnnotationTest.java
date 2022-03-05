@@ -2,16 +2,12 @@ package polyregion;
 
 import org.junit.Test;
 
-import java.io.Serializable;
-import java.lang.invoke.LambdaMetafactory;
-import java.lang.invoke.SerializedLambda;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
+import java.util.ArrayList;
 
+import polyregion.java.OffloadFunction;
+import polyregion.java.OffloadRunnable;
 
-import polyregion.java.Offload;
+import static polyregion.java.Runtime.offload;
 
 public class AnnotationTest {
 
@@ -39,45 +35,6 @@ public class AnnotationTest {
 	}
 
 
-	private static SerializedLambda getSerializedLambda(Serializable lambda) {
-		for (Class<?> cl = lambda.getClass(); cl != null; cl = cl.getSuperclass()) {
-			try {
-				Method m = cl.getDeclaredMethod("writeReplace");
-				m.setAccessible(true);
-				Object replacement = m.invoke(lambda);
-				if (!(replacement instanceof SerializedLambda))
-					throw new AssertionError("Unexpected writeReplace instance (" + replacement.getClass() + "), lambda object does not implement Serializable");
-				return (SerializedLambda) replacement;
-			} catch (NoSuchMethodException ignored) {
-				// keep going
-			} catch (IllegalAccessException | InvocationTargetException | SecurityException e) {
-				throw new RuntimeException(e);
-			}
-		}
-		throw new AssertionError("Missing writeReplace method for lambda that implements Serializable!");
-	}
-
-	interface F0 extends Serializable {
-		default String ident() {
-			return getClass().getDeclaredMethods()[1]
-					.getName();
-		}
-
-		void call();
-	}
-
-
-	static void offload(F0 f) {
-		System.out.println(StackWalker
-				.getInstance(StackWalker.Option.SHOW_HIDDEN_FRAMES).walk(xs -> xs.map(x -> x.toString()).collect(Collectors.joining("\n"))).toString());
-
-
-		var ctx = getSerializedLambda(f);
-
-		//
-		System.out.println("t1=" + f + " " + ctx.toString() + " === " + ctx.getImplMethodName() + " that = " + f.ident());
-	}
-
 //	public static void main(String[] args) {
 //		Foo ff = new Foo();
 ////		offload(ff::fn);
@@ -88,6 +45,10 @@ public class AnnotationTest {
 //		System.out.println("Hey!!");
 //	}
 
+	static String x = "a";
+	OffloadRunnable f0 = () -> System.out.println(x);
+
+
 	@Test
 	public void test1() {
 
@@ -95,8 +56,29 @@ public class AnnotationTest {
 //		offload(ff::fn);
 
 		int a = new Object().hashCode();
+		int b = 2;
 
 
+		var xs = new ArrayList<Integer>();
+		xs.add(32);
+
+		OffloadRunnable f0 = () -> System.out.println(a + b);
+		OffloadFunction<Integer> f1 = () -> (a + b);
+
+		var str = "b";
+
+		Foo foo = new Foo();
+		offload(foo::fn);
+
+		var r = offload(() -> (a + b));
+
+
+		Runnable rr1 = () -> {
+			System.out.println("AAA");
+		};
+
+		offload((
+				() -> System.out.println(a)));
 		offload((
 				() -> System.out.println(a)));
 //		offload(( () -> System.out.println(a)) );
@@ -105,5 +87,9 @@ public class AnnotationTest {
 		System.out.println("Hey!!");
 
 	}
+
+	OffloadRunnable f1 = () -> System.out.println("aa");
+	OffloadRunnable f11 = () -> System.out.println("b");
+
 
 }

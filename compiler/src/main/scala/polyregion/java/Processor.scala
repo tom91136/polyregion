@@ -1,56 +1,52 @@
 package polyregion.java
 
-//import com.google.auto.service.AutoService
-import com.sun.source.util.Trees
+import com.sun.source.tree.{
+  IdentifierTree,
+  LambdaExpressionTree,
+  MemberSelectTree,
+  MethodInvocationTree,
+  MethodTree,
+  SwitchTree,
+  VariableTree
+}
+import com.sun.source.util.*
 import polyregion.__UnsafeObject
+import polyregion.java.Processor.addOpens
 
-import _root_.java.lang.reflect.AccessibleObject
-import _root_.java.lang.reflect.Field
-import _root_.java.lang.reflect.InvocationHandler
-import _root_.java.lang.reflect.Method
-import _root_.java.lang.reflect.Proxy
+import _root_.java.lang.reflect.*
 import _root_.java.util
-import javax.annotation.processing.AbstractProcessor
-import javax.annotation.processing.ProcessingEnvironment
-import javax.annotation.processing.Processor
-import javax.annotation.processing.RoundEnvironment
-import javax.annotation.processing.SupportedAnnotationTypes
-import javax.annotation.processing.SupportedSourceVersion
+import javax.annotation.processing.*
 import javax.lang.model.SourceVersion
-import javax.lang.model.element.Element
-import javax.lang.model.element.TypeElement
+import javax.lang.model.element.{Element, Modifier, TypeElement}
 import javax.tools.Diagnostic
 import javax.tools.Diagnostic.Kind
-import sun.misc.Unsafe
-
 import scala.annotation.tailrec
 import scala.collection.immutable.ArraySeq
+import scala.jdk.CollectionConverters.*
+import scala.util.{Failure, Success, Try}
 
 object Processor {
 
   private def getUnsafe = try {
-    val theUnsafe = classOf[Unsafe].getDeclaredField("theUnsafe")
+    val theUnsafe = classOf[sun.misc.Unsafe].getDeclaredField("theUnsafe")
     theUnsafe.setAccessible(true)
-    theUnsafe.get(null).asInstanceOf[Unsafe]
+    theUnsafe.get(null).asInstanceOf[sun.misc.Unsafe]
   } catch {
     case e: Exception =>
       null
   }
 
-  def setAccessible[T <: AccessibleObject](accessor: T): T = {
-    accessor.setAccessible(true)
-    accessor
+  @tailrec def traverseUp[A <: AccessibleObject](cls: Class[?])(f: Class[?] => A): Option[A] = cls match {
+    case null => None
+    case x =>
+      try {
+        val ao = Option(f(x))
+        ao.foreach(_.setAccessible(true))
+        ao
+      } catch {
+        case _: ReflectiveOperationException => traverseUp(cls.getSuperclass)(f)
+      }
   }
-
-  @tailrec def traverseUp[A <: AccessibleObject](cls: Class[?])(f: Class[?] => A): Option[A] =
-    cls match {
-      case null => None
-      case x =>
-        try Option(f(x)).map(setAccessible(_))
-        catch {
-          case _: ReflectiveOperationException => traverseUp(cls.getSuperclass)(f)
-        }
-    }
 
   def getMethod(c: Class[_], mName: String, parameterTypes: Class[_]*): Method =
     traverseUp(c)(c => c.getDeclaredMethod(mName, parameterTypes*)).get
@@ -84,7 +80,7 @@ object Processor {
       null
   }
 
-  private def getFirstFieldOffset(unsafe: Unsafe) = try
+  private def getFirstFieldOffset(unsafe: sun.misc.Unsafe) = try
     unsafe.objectFieldOffset(classOf[__UnsafeObject].getDeclaredField("first"))
   catch {
     case e: NoSuchFieldException =>
@@ -96,18 +92,44 @@ object Processor {
   }
 
   def findCls(name: String): Option[Class[_]] =
-    try
-      Option(Class.forName(name))
+    try Option(Class.forName(name))
     catch { case e: ClassNotFoundException => None }
 
-  /** Useful from jdk9 and up; required from jdk16 and up. This code is supposed to gracefully do nothing on jdk8 and
-    * below, as this operation isn't needed there.
-    */
-  def addOpensForLombok(): Unit = findCls("java.lang.Module").foreach { cModule =>
-    val unsafe            = getUnsafe
-    val jdkCompilerModule = getJdkCompilerModule
-    val ownModule         = getOwnModule
-    val allPkgs = Array(
+  def addOpens(packages: Seq[String]): Try[Unit] = findCls("java.lang.Module") match {
+    case None => Success(())
+    case Some(mod) =>
+      val unsafe            = getUnsafe
+      val jdkCompilerModule = getJdkCompilerModule
+      val ownModule         = getOwnModule
+      Try {
+        val m                = mod.getDeclaredMethod("implAddOpens", classOf[String], mod)
+        val firstFieldOffset = getFirstFieldOffset(unsafe)
+        unsafe.putBooleanVolatile(m, firstFieldOffset, true)
+        packages.foreach(m.invoke(jdkCompilerModule, _, ownModule))
+      }
+  }
+
+}
+
+@SupportedSourceVersion(SourceVersion.RELEASE_8)
+class Processor extends AbstractProcessor {
+
+  override def getSupportedAnnotationTypes: util.Set[String] =
+    java.util.Collections.singleton[String]("*") // "polyregion.java.Offload"
+
+  override def getSupportedSourceVersion: SourceVersion = SourceVersion.RELEASE_8
+
+  private[polyregion] var t: Trees = _
+
+  def resolveJavacTools: Try[(JavacTask, Trees)] = Try {
+    JavacTask.instance(processingEnv) ->
+      Trees.instance(processingEnv)
+  }
+
+  override def init(processingEnv: ProcessingEnvironment): Unit = {
+    super.init(processingEnv)
+
+    val allPkgs = Seq(
       "com.sun.tools.javac.code",
       "com.sun.tools.javac.comp",
       "com.sun.tools.javac.file",
@@ -117,88 +139,126 @@ object Processor {
       "com.sun.tools.javac.processing",
       "com.sun.tools.javac.tree",
       "com.sun.tools.javac.util",
-      "com.sun.tools.javac.jvm"
+      "com.sun.tools.javac.jvm",
+      "com.sun.tools.javac.api"
     )
-    try {
-      val m                = cModule.getDeclaredMethod("implAddOpens", classOf[String], cModule)
-      val firstFieldOffset = getFirstFieldOffset(unsafe)
-      unsafe.putBooleanVolatile(m, firstFieldOffset, true)
-      for (p <- allPkgs) m.invoke(jdkCompilerModule, p, ownModule)
-    } catch {
-      case ignore: Exception =>ignore.printStackTrace()
-    }
-  }
 
-}
-
-@SupportedSourceVersion(SourceVersion.RELEASE_8)
-class Processor extends AbstractProcessor {
-
-  /** Gradle incremental processing
-    */
-  private def tryGetDelegateField(delegateClass: Class[_], instance: Any) = try
-    Processor.getField(delegateClass, "delegate").get(instance)
-  catch {
-    case e: Exception =>
-      null
-  }
-
-  /** Kotlin incremental processing
-    */
-  private def tryGetProcessingEnvField(delegateClass: Class[_], instance: Any) = try
-    Processor.getField(delegateClass, "processingEnv").get(instance)
-  catch {
-    case e: Exception =>
-      null
-  }
-
-  /** IntelliJ IDEA >= 2020.3
-    */
-  private def tryGetProxyDelegateToField(delegateClass: Class[_], instance: Any) = try {
-    val handler = Proxy.getInvocationHandler(instance)
-    Processor.getField(handler.getClass, "val$delegateTo").get(handler)
-  } catch {
-    case e: Exception =>
-      null
-  }
-
-  override def getSupportedAnnotationTypes: util.Set[String] = java.util.Collections.singleton[String]("*") // "polyregion.java.Offload"
-
-  override def getSupportedSourceVersion: SourceVersion = SourceVersion.RELEASE_8
-
-  private[polyregion] var t: Trees = _
-
-  override def init(processingEnv: ProcessingEnvironment): Unit = {
-    super.init(processingEnv)
-
-    type JavaCEnv = Any // com.sun.tools.javac.processing.JavacProcessingEnvironment
-
-    def getJavacProcessingEnvironment(procEnv: Any): JavaCEnv = {
-      Processor.addOpensForLombok()
-      if (procEnv.isInstanceOf[JavaCEnv]) return procEnv.asInstanceOf[JavaCEnv]
-      // try to find a "delegate" field in the object, and use this to try to obtain a JavacProcessingEnvironment
-      var procEnvClass = procEnv.getClass
-      while (procEnvClass != null) {
-        var delegate = tryGetDelegateField(procEnvClass, procEnv)
-        if (delegate == null) delegate = tryGetProxyDelegateToField(procEnvClass, procEnv)
-        if (delegate == null) delegate = tryGetProcessingEnvField(procEnvClass, procEnv)
-        if (delegate != null) return getJavacProcessingEnvironment(delegate)
-        // delegate field was not found, try on superclass
-
-        procEnvClass = procEnvClass.getSuperclass
-      }
-      processingEnv.getMessager.printMessage(
-        Kind.WARNING,
-        "Can't get the delegate of the gradle IncrementalProcessingEnvironment. Lombok won't work."
+    (for {
+      _ <- addOpens(allPkgs).recoverWith(e => Failure(new RuntimeException("Unable to add opens at runtime", e)))
+      tasks <- Try(JavacTask.instance(processingEnv)).recoverWith(e =>
+        Failure(new RuntimeException("Unable to obtain an instance of JavacTask", e))
       )
-      null
+      trees <- Try(Trees.instance(processingEnv)).recoverWith(e =>
+        Failure(new RuntimeException("Unable to obtain an instance of Trees", e))
+      )
+    } yield tasks.addTaskListener(new TaskListener {
+      override def started(e: TaskEvent): Unit = () // don't care
+      override def finished(e: TaskEvent): Unit = {
+        println(s"EV, end  =${e}")
+//        println(e.getCompilationUnit)
+        (e.getKind, e.getCompilationUnit) match {
+          case (TaskEvent.Kind.GENERATE, cu) if cu != null =>
+            val x = new TreeScanner[List[MethodTree], Unit] {
+              override def visitMethod(node: MethodTree, p: Unit) = (
+                node.getModifiers.getFlags.asScala.toSet,
+                node.getName.toString,
+                node.getParameters.asScala
+                  .map(_.getType)
+                  .collect {
+                    case i: MemberSelectTree => i.getIdentifier.toString //  general case of unqualified use
+                    case i: IdentifierTree   => i.getName.toString       // in case the call site imports the class
+                  }
+                  .toList
+              ) match {
+                case (modifiers, "$deserializeLambda$", "SerializedLambda" :: Nil)
+                    if modifiers == Set(Modifier.PRIVATE, Modifier.STATIC) =>
+                  node :: Nil
+                case _ => Nil
+              }
+
+              override def reduce(l: List[MethodTree], r: List[MethodTree]) = (l, r) match {
+                case (null, null) => Nil
+                case (null, r)    => r
+                case (l, null)    => l
+                case (l, r)       => l ::: r
+              }
+            }
+            val xs = x.scan(cu, ())
+            println(">>" + xs.map(_.getName))
+
+
+//
+//              println(e.getCompilationUnit)
+//
+//              val x = new TreeScanner[String, Unit] {
+//
+//                override def visitSwitch(node: SwitchTree, p: Unit) = {
+//                  println(s"!!!!!${node}")
+//                  ""
+//                }
+//                override def visitMethodInvocation(node: MethodInvocationTree, p: Unit): String = {
+//                  println(s">>>${node} args=${node.getArguments} ${node.getKind} ${node.getMethodSelect}")
+//
+//                  ""
+//                }
+//
+//                override def reduce(r1: String, r2: String) = r1 ++ r2
+//              }
+//
+//              x.scan(e.getCompilationUnit, ())
+
+          case _ =>
+        }
+
+      }
+    })) match {
+      case Success(()) =>
+      case Failure(e) =>
+        e.printStackTrace()
+        processingEnv.getMessager.printMessage(Diagnostic.Kind.ERROR, e.getMessage)
     }
-//    val a = getJavacProcessingEnvironment(processingEnv)
-    Processor.addOpensForLombok()
-    t = Trees.instance(processingEnv)
-    processingEnv.getMessager.printMessage(Kind.WARNING, s"In processor, tree=$t")
+
+//
+//    JavacTask
+//      .instance(processingEnv)
+//      .addTaskListener(new TaskListener {
+//        override def started(e: TaskEvent) = println(s"EV, Start=${e}")
+//        override def finished(e: TaskEvent) = {
+//
+//          e.getKind match {
+//            case TaskEvent.Kind.GENERATE =>
+////            processingEnv.getFiler.createSourceFile("", null)
+//              println(e.getCompilationUnit)
+//
+//              val x = new TreeScanner[String, Unit] {
+//
+//                override def visitSwitch(node: SwitchTree, p: Unit) = {
+//                  println(s"!!!!!${node}")
+//                  ""
+//                }
+//                override def visitMethodInvocation(node: MethodInvocationTree, p: Unit): String = {
+//                  println(s">>>${node} args=${node.getArguments} ${node.getKind} ${node.getMethodSelect}")
+//
+//                  ""
+//                }
+//
+//                override def reduce(r1: String, r2: String) = r1 ++ r2
+//              }
+//
+//              x.scan(e.getCompilationUnit, ())
+//
+//            case _ =>
+//          }
+//
+//          println(s"EV, end  =${e}")
+//        }
+//      })
+////    println(com.sun.tools.javac.api.MultiTaskListener.instance(a.getContext).add())
+//    t = Trees.instance(processingEnv)
+//    processingEnv.getMessager.printMessage(Kind.WARNING, s"In processor, tree=$t")
   }
 
   override def process(annotations: _root_.java.util.Set[_ <: TypeElement], roundEnv: RoundEnvironment): Boolean =
-    Compiler.compile(t, annotations, roundEnv, processingEnv)
+    true
+//    Compiler.compile(t, annotations, roundEnv, processingEnv)
 }
