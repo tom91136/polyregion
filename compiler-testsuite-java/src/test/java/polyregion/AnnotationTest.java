@@ -2,7 +2,10 @@ package polyregion;
 
 import org.junit.Test;
 
+import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Collectors;
 
 import polyregion.java.OffloadFunction;
 import polyregion.java.OffloadRunnable;
@@ -49,6 +52,10 @@ public class AnnotationTest {
 	OffloadRunnable f0 = () -> System.out.println(x);
 
 
+	interface Bad extends Serializable, Runnable {
+
+	}
+
 	@Test
 	public void test1() {
 
@@ -77,6 +84,11 @@ public class AnnotationTest {
 			System.out.println("AAA");
 		};
 
+		Bad rr2 = () -> {
+			System.out.println("BBB");
+		};
+
+		List.of(1, 2).stream().map(x -> x + 1).collect(Collectors.toList());
 		offload((
 				() -> System.out.println(a)));
 		offload((
