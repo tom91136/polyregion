@@ -1,6 +1,7 @@
 package polyregion.loader;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -56,7 +57,7 @@ public class Loader {
   }
 
   public static void loadResource(String resource, Path destination) throws IOException {
-    var stream = ClassLoader.getSystemResourceAsStream(resource);
+    InputStream stream = ClassLoader.getSystemResourceAsStream(resource);
     Files.copy(stream, destination);
   }
 
@@ -82,7 +83,7 @@ public class Loader {
       } catch (UnsatisfiedLinkError e) {
         System.out.println(e.getMessage());
         if (e.getMessage().endsWith("already loaded in another classloader")) {
-          var link =
+          Path link =
               workDir.resolve(
                   absolute.getFileName()
                       + "."

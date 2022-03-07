@@ -86,9 +86,9 @@ class Quoted(val q: Quotes) {
 		 |[Refs]:
 		 |  -> ${refs.mkString("\n  -> ")}
 		 |[Trace]
-		 |  ->${traces.map(x => s"${x.show} -> $x".indent(1)).mkString("---\n  ->")}
+		 |  ->${traces.map(x => s"${x.show} -> $x".indent_(1)).mkString("---\n  ->")}
 		 |[Stmts]
-		 |  ->${stmts.map(_.repr.indent(1)).mkString("  ->")}""".stripMargin.fail[A].deferred
+		 |  ->${stmts.map(_.repr.indent_(1)).mkString("  ->")}""".stripMargin.fail[A].deferred
 
     def deps = FnDependencies(clss, defs)
 

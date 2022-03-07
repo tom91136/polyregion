@@ -13,13 +13,9 @@ import javax.tools.{JavaFileManager, StandardLocation}
 import scala.collection.immutable.ArraySeq
 import scala.jdk.CollectionConverters.*
 
-
 object Compiler {
 
-
-
-  def visit(elem : Element, trees: Trees,t: Tree, e : ProcessingEnvironment) : String = {
-
+  def visit(elem: Element, trees: Trees, t: Tree, e: ProcessingEnvironment): String = {
 
 
 //    t.accept(new TreeVisitor[String, Unit]{
@@ -149,23 +145,19 @@ object Compiler {
 //      override def visitYield(node: YieldTree, ignore: Unit) = s">> $node"
 //    }, ())
 
-
-
-    val x = new TreeScanner[String, Unit]{
+    val x = new TreeScanner[String, Unit] {
 
       override def visitMethodInvocation(node: MethodInvocationTree, p: Unit): String = {
-        println(">>>"+node)
+        println(">>>" + node)
         val cu = trees.getPath(elem).getCompilationUnit
         println(s">>> at ${trees.getSourcePositions.getStartPosition(cu, node)}")
         println(cu.getLineMap.getLineNumber(trees.getSourcePositions.getStartPosition(cu, node)))
-
 
         ""
       }
 
       override def visitLambdaExpression(node: LambdaExpressionTree, p: Unit) = {
-        println(">>>"+node)
-
+        println(">>>" + node)
 
         val cu = trees.getPath(elem).getCompilationUnit
         println(s">>> at ${trees.getSourcePositions.getStartPosition(cu, node)}")
@@ -175,17 +167,13 @@ object Compiler {
 //        println(trees.getElement(trees.getPath(trees.getPath(elem).getCompilationUnit, node)))
 //        println("tag="+trees.get)
 
-
 //        println(e.getElementUtils.getAllMembers(trees.getElement(trees.getPath(elem)).asInstanceOf ).asScala.toList)
-
 
         node.toString
       }
-      override def reduce(r1: String, r2: String) = r1++r2
+      override def reduce(r1: String, r2: String) = r1 ++ r2
     }
 
-
-    
     println(">" + elem.getEnclosedElements.asScala.toList)
 
     x.scan(t, ())
@@ -201,10 +189,7 @@ object Compiler {
 
     println(s"Roots = ${roundEnv.getRootElements.asScala.toList}")
 
-
-
-    roundEnv.getRootElements.asScala.foreach{
-      e =>
+    roundEnv.getRootElements.asScala.foreach { e =>
       println(visit(e, trees, trees.getTree(e), processingEnv))
     }
 
@@ -215,9 +200,7 @@ object Compiler {
 //      case e : Throwable => e.printStackTrace()
 //    }
 
-
 //    processingEnv.getElementUtils.getBinaryName()
-
 
 //    for (annotation <- annotations.asScala) {
 //      val annotatedElements = roundEnv.getElementsAnnotatedWith(annotation)

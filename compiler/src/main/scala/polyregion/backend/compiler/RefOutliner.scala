@@ -59,13 +59,13 @@ object RefOutliner {
     // free vals             :  Flags.{}
 
     println(
-      s" -> foreign refs:${" " * 9}\n${foreignRefs.map(x => s"${x.show} (${x.symbol}) ~> $x, tpe=${x.tpe.widenTermRefByName.show}").mkString("\n").indent(4)}"
+      s" -> foreign refs:${" " * 9}\n${foreignRefs.map(x => s"${x.show} (${x.symbol}) ~> $x, tpe=${x.tpe.widenTermRefByName.show}").mkString("\n").indent_(4)}"
     )
     println(
-      s" -> filtered  (found):${" " * 9}\n${normalisedForeignValRefs.map(x => s"${x._3.show} (${x._3.symbol}) ~> $x").mkString("\n").indent(4)}"
+      s" -> filtered  (found):${" " * 9}\n${normalisedForeignValRefs.map(x => s"${x._3.show} (${x._3.symbol}) ~> $x").mkString("\n").indent_(4)}"
     )
     println(
-      s" -> collapse  (found):${" " * 9}\n${sharedValRefs.map(x => s"${x.symbol} ~> $x").mkString("\n").indent(4)}"
+      s" -> collapse  (found):${" " * 9}\n${sharedValRefs.map(x => s"${x.symbol} ~> $x").mkString("\n").indent_(4)}"
     )
 
     val typedRefs = sharedValRefs.foldLeftM((Vector.empty[(q.Ref, q.Reference)], q.FnContext())) {
@@ -95,7 +95,7 @@ object RefOutliner {
     val resolved = filteredTypedRefs.resolve
     println(resolved match {
       case Right((xs, c)) =>
-        s" -> typer   (found):${" " * 9}\n${xs.map((r, ref) => s"${r.symbol} ~> $ref").mkString("\n").indent(4)}"
+        s" -> typer   (found):${" " * 9}\n${xs.map((r, ref) => s"${r.symbol} ~> $ref").mkString("\n").indent_(4)}"
       case Left(e) => s" -> typer   (found):${e.getMessage}"
     })
 

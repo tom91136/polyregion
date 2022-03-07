@@ -1,6 +1,7 @@
 package polyregion;
 
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.stream.Collectors;
 
 public final class Event {
@@ -18,7 +19,7 @@ public final class Event {
         + (data == null || data.isEmpty()
             ? ""
             : ":\n"
-                + data.lines().map(l -> " │" + l).collect(Collectors.joining("\n"))
+                + Arrays.stream(data.split("\\n")).map(l -> " │" + l).collect(Collectors.joining("\n"))
                 + "\n ╰───");
   }
 }

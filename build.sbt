@@ -1,4 +1,5 @@
-val scala2Version = "2.13.6"
+Global / onChangedBuildSource := ReloadOnSourceChanges
+
 val scala3Version = "3.1.1"
 
 lazy val commonSettings = Seq(
@@ -7,6 +8,14 @@ lazy val commonSettings = Seq(
   organization     := "uk.ac.bristol.uob-hpc",
   organizationName := "University of Bristol",
   scalacOptions ~= filterConsoleScalacOptions,
+  javacOptions ++=
+    Seq(
+      "-Xlint:all",
+      "-XprintProcessorInfo",
+      "-XprintRounds"
+    ) ++
+      Seq("-source", "1.8") ++
+      Seq("-target", "1.8"),
   scalacOptions ~= { options: Seq[String] =>
     options.filterNot(
       Set(
@@ -15,9 +24,9 @@ lazy val commonSettings = Seq(
       )
     )
   },
-  scalacOptions ++= Seq(                    //
-    "-no-indent",                           //
-    "-Wconf:cat=other-match-analysis:error" //
+  scalacOptions ++= Seq( //
+    "-no-indent"         //
+//    "-Wconf:cat=other-match-analysis:error" //
     // "-language:strictEquality"
   ),
   scalafmtDetailedError := true,
@@ -66,30 +75,27 @@ lazy val compiler = project
     javah / target      := bindingsDir / "java-compiler",
     assemblyShadeRules  := loaderShadeRules,
     assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly")),
-    javacOptions ++= Seq(
-      "-Xlint:all",
-      "--add-exports=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED",
-      "--add-exports=jdk.compiler/com.sun.tools.javac.comp=ALL-UNNAMED",
-      "--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED",
-      "--add-exports=jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED",
-      "--add-exports=jdk.compiler/com.sun.tools.javac.model=ALL-UNNAMED",
-      "--add-exports=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED",
-      "--add-exports=jdk.compiler/com.sun.tools.javac.processing=ALL-UNNAMED",
-      "--add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED",
-      "--add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED",
-      "--add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED"
-
-    ),
-    scalacOptions ++= Seq(
-      "-Xmax-inlines",
-      "64",            // the AST has lots of leaf nodes and we use inline so bump the limit
-      "-Yretain-trees" // XXX we need this so that the AST -> C++ conversion with partial ctors work
-    ),
+    javacOptions ++= Seq("-proc:none"),
+    scalacOptions ++=
+      Seq("-Yretain-trees") ++     // XXX we need this so that the AST -> C++ conversion with partial ctors work
+        Seq("-Xmax-inlines", "64") // the AST has lots of leaf nodes and we use inline so bump the limit
+    ,
     libraryDependencies ++= Seq(
-      "com.lihaoyi"   %% "pprint"    % "0.7.1",
-      "com.lihaoyi"   %% "upickle"   % "1.4.4",
-      "org.typelevel" %% "cats-core" % catsVersion
-    )
+      "net.bytebuddy"  % "byte-buddy" % "1.12.8",
+      "com.lihaoyi"   %% "pprint"            % "0.7.1",
+      "com.lihaoyi"   %% "upickle"           % "1.4.4",
+      "org.typelevel" %% "cats-core"         % catsVersion
+    ),
+    (Compile / unmanagedJars) := {
+      val xs       = (Compile / unmanagedJars).value
+      val log      = streams.value.log
+      val toolsJar = file(sys.props("java.home")).getParentFile / "lib" / "tools.jar"
+      if (!toolsJar.exists()) xs
+      else {
+        log.info(s"Found tools.jar at $toolsJar")
+        Attributed.blank(toolsJar) +: xs
+      }
+    }
   )
   .dependsOn(`runtime-scala`)
 
@@ -105,14 +111,19 @@ lazy val `compiler-testsuite-scala` = project
     )
   )
   .dependsOn(compiler)
-Global / onChangedBuildSource := ReloadOnSourceChanges
+
 lazy val `compiler-testsuite-java` = project
   .settings(
     commonSettings,
     autoScalaLibrary := false,
     javacOptions ++= Seq("-XprintProcessorInfo", "-XprintRounds"),
-    name              := "compiler-testsuite-java",
-    (Test / javaHome) := Some(file(sys.props("java.home"))),
+    name := "compiler-testsuite-java",
+    (Test / javaHome) := {
+      // make sure we get the JDK dir and not the JRE
+      val javaHome = file(sys.props("java.home"))
+      if (!(javaHome.getParentFile / "lib" / "tools.jar").exists()) Some(javaHome)
+      else Some(javaHome.getParentFile)
+    },
     libraryDependencies ++= Seq(
       "junit"          % "junit"           % "4.13.1" % Test,
       "com.github.sbt" % "junit-interface" % "0.13.2" % Test

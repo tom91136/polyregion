@@ -13,9 +13,9 @@ object PolyAst {
   }
   object Sym {
     def apply(raw: String): Sym = {
-      require(!raw.isBlank)
+      require(raw.trim.nonEmpty)
       // normalise dollar
-      Sym(raw.split('.').toList)
+      Sym(raw.trim.split('.').toList)
     }
 
     def unapply(xs: List[String]): Option[(Sym, String)] =

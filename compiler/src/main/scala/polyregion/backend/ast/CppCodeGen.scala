@@ -75,9 +75,9 @@ object CppCodeGen {
 
     Files.createDirectories(target)
 
-    def overwrite(path: Path)(content: String) = Files.writeString(
+    def overwrite(path: Path)(content: String) = Files.write(
       path,
-      content,
+      content.getBytes(StandardCharsets.UTF_8),
       StandardOpenOption.TRUNCATE_EXISTING,
       StandardOpenOption.CREATE,
       StandardOpenOption.WRITE

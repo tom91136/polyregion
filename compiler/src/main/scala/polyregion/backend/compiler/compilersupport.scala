@@ -34,6 +34,7 @@ extension [A](a: A) {
 }
 extension (message: => String) {
   def fail[A]: Result[A] = Left(new CompilerException(message))
+  def indent_(n: Int)    = message.linesIterator.map(x => " " * n + x).mkString("\n")
 }
 extension [A](m: Option[A]) {
   def failIfEmpty(message: => String): Result[A] = m.fold(message.fail[A])(Right(_))
@@ -53,7 +54,7 @@ extension (e: => p.Sym.type) {
     @tailrec def go(cls: Class[_], xs: List[String] = Nil, companion: Boolean = false): List[String] = {
       val name = cls.getSimpleName + (if (companion) "$" else "")
       cls.getEnclosingClass match {
-        case null => cls.getPackageName.split("\\.").toList ::: name :: xs
+        case null => cls.getPackage.getName.split("\\.").toList ::: name :: xs
         case c    => go(c, name :: xs, Modifier.isStatic(cls.getModifiers))
       }
     }
