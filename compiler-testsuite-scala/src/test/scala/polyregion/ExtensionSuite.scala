@@ -45,7 +45,7 @@ class ExtensionSuite extends BaseSuite {
       val aa = z.add(z)
       // val m = (1d,2f)
       a.max3(b) + z.a.toInt
-//      a max a
+      a max a
       // V3(1,2,2)
     }
   }
