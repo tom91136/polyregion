@@ -1,16 +1,16 @@
 package polyregion.java
 
+import cats.syntax.all.*
 import com.sun.source.tree.*
 import com.sun.source.util.Trees
+import polyregion.ast.*
 import polyregion.java.Processor.{asCanonicalName, collectTree, collectTrees}
-import polyregion.backend.compiler.*
 
 import javax.annotation.processing.ProcessingEnvironment
 import javax.lang.model.`type`.{ExecutableType, TypeKind, TypeMirror}
 import javax.lang.model.element.{ExecutableElement, Modifier, TypeElement}
 import javax.lang.model.util.TypeKindVisitor6
 import scala.jdk.CollectionConverters.*
-import cats.syntax.all.*
 
 object LambdaOutliner {
 

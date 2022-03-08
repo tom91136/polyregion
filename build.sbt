@@ -34,7 +34,7 @@ lazy val commonSettings = Seq(
 )
 
 lazy val catsVersion  = "2.7.0"
-lazy val munitVersion = "1.0.0-M1"
+lazy val munitVersion = "1.0.0-M2"
 
 lazy val `loader-jvm` = project.settings(
   commonSettings,
@@ -82,8 +82,8 @@ lazy val compiler = project
     ,
     libraryDependencies ++= Seq(
       "net.bytebuddy"  % "byte-buddy" % "1.12.8",
-      "com.lihaoyi"   %% "pprint"     % "0.7.1",
-      "com.lihaoyi"   %% "upickle"    % "1.4.4",
+      "com.lihaoyi"   %% "pprint"     % "0.7.2",
+      "com.lihaoyi"   %% "upickle"    % "1.5.0",
       "org.typelevel" %% "cats-core"  % catsVersion
     ),
     (Compile / unmanagedJars) := {
@@ -125,8 +125,7 @@ lazy val `compiler-testsuite-java` = project
       else Some(javaHome.getParentFile)
     },
     libraryDependencies ++= Seq(
-      "junit"          % "junit"           % "4.13.1" % Test,
-      "com.github.sbt" % "junit-interface" % "0.13.2" % Test
+      "com.github.sbt" % "junit-interface" % "0.13.3" % Test
     )
   )
   .dependsOn(compiler)

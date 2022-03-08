@@ -1,16 +1,13 @@
-package polyregion.backend.compiler
+package polyregion.scala
 
 import cats.syntax.all.*
-import polyregion.backend.ast.PolyAst as p
-import polyregion.backend.*
+import polyregion.ast.{PolyAst as p, *}
 
 import scala.annotation.tailrec
-import scala.quoted.*
-import simulacrum.typeclass
 
 object Retyper {
 
-  def lowerClassType[A: Type](using q: Quoted): Deferred[p.StructDef] = lowerClassType(q.TypeRepr.of[A].typeSymbol)
+  def lowerClassType[A: scala.quoted.Type](using q: Quoted): Deferred[p.StructDef] = lowerClassType(q.TypeRepr.of[A].typeSymbol)
   def lowerClassType(using q: Quoted)(tpeSym: q.Symbol): Deferred[p.StructDef] = {
 
     if ((tpeSym.flags.is(q.Flags.Module) || tpeSym.flags.is(q.Flags.Abstract)) && tpeSym.fieldMembers.nonEmpty) {

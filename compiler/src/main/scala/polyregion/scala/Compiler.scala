@@ -1,26 +1,24 @@
-package polyregion.backend.compiler
+package polyregion.scala
 
 import cats.syntax.all.*
-import polyregion.backend.ast.PolyAst as p
-import polyregion.backend.*
+import polyregion.ast.pass.{FnInlinePass, UnitExprElisionPass}
+import polyregion.ast.{PolyAst as p, *}
 
 import java.nio.file.Paths
 import scala.quoted.Expr
 
-import polyregion.backend.compiler.pass.*
-
 object Compiler {
 
   import RefOutliner.*
-  import TreeMapper.*
   import Retyper.*
+  import TreeMapper.*
 
   private def runLocalOptPass(using Quoted) = //
-    IntrinsifyPass.intrinsify >>>
-      UnitExprElisionPass.eliminateUnitExpr
+    IntrinsifyPass.intrinsify
+
 
   private val GlobalOptPasses = //
-    FnInlinePass.inlineAll // >>> FnPtrReturnToOutParamPass.transform
+    FnInlinePass.inlineAll >>> UnitExprElisionPass.eliminateUnitExpr// >>> FnPtrReturnToOutParamPass.transform
 
   def compileFn(using q: Quoted)(f: q.DefDef): Result[(q.FnDependencies, p.Function)] = {
     println(s" -> Compile dependent method: ${f.show}")

@@ -1,6 +1,6 @@
-package polyregion.backend.compiler
+package polyregion.ast
 
-import polyregion.backend.ast.PolyAst as p
+import polyregion.ast.PolyAst as p
 
 import java.lang.reflect.Modifier
 import scala.annotation.tailrec

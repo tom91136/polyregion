@@ -1,10 +1,10 @@
-package polyregion.backend.compiler
+package polyregion.scala
+
+import cats.syntax.all.*
+import polyregion.ast.{PolyAst as p, *}
+import polyregion.scala.Retyper.*
 
 import scala.annotation.tailrec
-import cats.syntax.all.*
-import polyregion.backend.*
-import polyregion.backend.ast.PolyAst as p
-import Retyper.*
 
 object RefOutliner {
 

@@ -1,7 +1,7 @@
 package polyregion.prism
 
-import scala.annotation.compileTimeOnly
-import scala.quoted.*
+import _root_.scala.annotation.compileTimeOnly
+import _root_.scala.quoted.*
 
 @compileTimeOnly("This class only exists at compile-time to for internal use")
 object compiletime {
@@ -25,6 +25,9 @@ object compiletime {
       case (Some(sourceSym), Some(mirrorSym)) =>
         println(sourceSym.declaredMethods)
         println(mirrorSym.declaredMethods)
+
+        println(mirrorSym.allOverriddenSymbols.toList)
+        println(mirrorSym.declaredTypes)
     }
 
     // imp[Range, scala.Range]

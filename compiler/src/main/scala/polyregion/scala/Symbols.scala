@@ -1,8 +1,8 @@
-package polyregion.backend.compiler
+package polyregion.scala
 
+import polyregion.ast.{PolyAst as p, *}
 import polyregion.scala.Buffer
-import polyregion.backend.ast.{PolyAst => p}
-import polyregion.backend.*
+
 import scala.reflect.ClassTag
 
 object Symbols {

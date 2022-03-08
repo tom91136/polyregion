@@ -1,10 +1,11 @@
-package polyregion.backend.data
+package polyregion.ast.mirror
 
 import cats.conversions.variance
 import cats.syntax.all.*
 import fansi.Str
-import polyregion.backend.data.Cpp.{StructSource, ToCppType}
-import polyregion.backend.data.compiletime.CtorTermSelect
+import polyregion.ast.mirror.CppStructGen.{StructSource, ToCppType}
+import polyregion.ast.mirror.compiletime.CtorTermSelect
+import polyregion.ast.mirror.compiletime
 
 import java.nio.file.{Files, Paths, StandardOpenOption}
 import scala.annotation.tailrec
@@ -12,7 +13,7 @@ import scala.collection.immutable.LazyList.cons
 import scala.compiletime.{constValue, erasedValue, error, summonInline}
 import scala.deriving.*
 
-object Cpp {
+private[polyregion] object CppStructGen {
 
   extension [A](xs: Seq[A]) {
     def csv: String = xs.mkString(", ")

@@ -1,13 +1,12 @@
-package polyregion.backend.data
+package polyregion.ast.mirror
 
-object compiletime {
+private [polyregion] object compiletime {
 
   import scala.quoted.*
 
   enum MirrorKind { case CaseClass, CaseSum, CaseProduct }
   given ToExpr[MirrorKind] with {
     def apply(x: MirrorKind)(using Quotes) = {
-      import quotes.reflect._
       x match {
         case MirrorKind.CaseClass   => '{ MirrorKind.CaseClass }
         case MirrorKind.CaseSum     => '{ MirrorKind.CaseSum }

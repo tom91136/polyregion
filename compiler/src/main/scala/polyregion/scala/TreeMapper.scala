@@ -1,12 +1,10 @@
-package polyregion.backend.compiler
+package polyregion.scala
 
 import cats.data.EitherT
 import cats.syntax.all.*
-import polyregion.backend.ast.PolyAst as p
-import polyregion.backend.*
+import polyregion.ast.{PolyAst as p, *}
 
 import scala.annotation.tailrec
-import scala.quoted.*
 
 object TreeMapper {
 

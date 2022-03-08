@@ -1,22 +1,11 @@
-package polyregion.backend.compiler.pass
+package polyregion.ast.pass
 
-import cats.data.EitherT
 import cats.syntax.all.*
-import polyregion.backend.ast.PolyAst as p
-import polyregion.backend.compiler.*
+import polyregion.ast.{PolyAst as p, *}
 
-import scala.annotation.tailrec
-import scala.quoted.*
 import scala.collection.immutable.VectorMap
-import cats.Foldable
 
 object FnPtrReturnToOutParamPass {
-
-  @tailrec def doUntilNotEq[A](x: A)(f: A => A): A = {
-    val y = f(x)
-    if (y == x) y
-    else doUntilNotEq(y)(f)
-  }
 
   def transform(xs: List[p.Function]): List[p.Function] = xs // doUntilNotEq(xs)(rewriteOnce(_))
 

@@ -1,8 +1,8 @@
-package polyregion.backend.ast
+package polyregion.ast
 
-import polyregion.backend.data.NlohmannJsonCodec
-import polyregion.backend.data.Cpp.*
-import polyregion.backend.data.MsgPack
+import polyregion.ast.mirror.CppNlohmannJsonCodecGen
+import polyregion.ast.mirror.CppStructGen.*
+import polyregion.ast.PolyAst
 
 import java.nio.file.Paths
 import java.nio.file.Files
@@ -20,7 +20,7 @@ import java.nio.charset.StandardCharsets
 import java.math.BigInteger
 import scala.runtime.RichInt
 
-object CppCodeGen {
+private[polyregion] object CppSourceMirror {
 
   import PolyAst._
 
@@ -53,7 +53,7 @@ object CppCodeGen {
   private val jsonCodecFileName = "polyast_codec"
 
   private val adtSources       = structs.flatMap(_.emit)
-  private val jsonCodecSources = structs.flatMap(NlohmannJsonCodec.emit(_))
+  private val jsonCodecSources = structs.flatMap(CppNlohmannJsonCodecGen.emit(_))
 
   private val adtHeader = StructSource.emitHeader(namespace, adtSources)
   private val adtImpl   = StructSource.emitImpl(namespace, adtFileName, adtSources)

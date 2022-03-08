@@ -1,13 +1,10 @@
-package polyregion.backend.compiler.pass
+package polyregion.scala
 
-import cats.data.EitherT
 import cats.syntax.all.*
-import polyregion.backend.ast.PolyAst as p
-import polyregion.backend.compiler.*
+import polyregion.ast.{PolyAst as p, *}
+import polyregion.scala.{Quoted, Symbols}
+
 import scala.annotation.tailrec
-import scala.quoted.*
-import polyregion.backend.compiler.Symbols
-import polyregion.backend.compiler.Quoted
 
 object IntrinsifyPass {
 

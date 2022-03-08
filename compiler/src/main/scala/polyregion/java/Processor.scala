@@ -6,21 +6,21 @@ import cats.syntax.all.*
 import com.sun.source.tree.*
 import com.sun.source.util.*
 import com.sun.tools.javac.code.Symbol.MethodSymbol
-import net.bytebuddy.description.modifier.{FieldManifestation, ModifierContributor, Ownership, TypeManifestation, Visibility}
+import net.bytebuddy.description.modifier.*
 import net.bytebuddy.implementation.{FieldAccessor, InvocationHandlerAdapter, MethodCall}
 import net.bytebuddy.matcher.ElementMatchers
 import polyregion.__UnsafeObject
+import polyregion.ast.*
 import polyregion.java.Processor.{addOpens, collectTree}
-import polyregion.backend.compiler.*
 
 import _root_.java.lang.reflect.*
 import _root_.java.util
 import java.nio.file.Paths
 import javax.annotation.processing.*
 import javax.lang.model.SourceVersion
-import javax.lang.model.element.{Element, ElementKind, ExecutableElement, Modifier, TypeElement}
-import javax.tools.{Diagnostic, JavaFileManager, JavaFileObject, StandardLocation}
+import javax.lang.model.element.*
 import javax.tools.Diagnostic.Kind
+import javax.tools.{Diagnostic, JavaFileManager, JavaFileObject, StandardLocation}
 import scala.annotation.tailrec
 import scala.collection.immutable.ArraySeq
 import scala.collection.mutable

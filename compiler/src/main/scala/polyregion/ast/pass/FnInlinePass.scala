@@ -1,12 +1,8 @@
-package polyregion.backend.compiler.pass
+package polyregion.ast.pass
 
-import cats.data.EitherT
 import cats.syntax.all.*
-import polyregion.backend.ast.PolyAst as p
-import polyregion.backend.compiler.*
+import polyregion.ast.{PolyAst as p, *}
 
-import scala.annotation.tailrec
-import scala.quoted.*
 import scala.collection.immutable.VectorMap
 
 object FnInlinePass {

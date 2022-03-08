@@ -1,12 +1,10 @@
-package polyregion.backend.compiler
+package polyregion.scala
 
 import cats.kernel.Monoid
-import polyregion.backend.ast.PolyAst as p
+import polyregion.ast.{PolyAst as p, *}
 
-import scala.quoted.*
-import polyregion.backend.*
 
-class Quoted(val q: Quotes) {
+class Quoted(val q: scala.quoted.Quotes) {
 
   import q.reflect.*
   export q.reflect.*

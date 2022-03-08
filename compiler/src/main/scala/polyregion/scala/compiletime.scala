@@ -5,12 +5,9 @@ import cats.data.EitherT
 import cats.syntax.all.*
 import polyregion.PolyregionCompiler
 import polyregion.Member
-import polyregion.backend.ast.{CppCodeGen, PolyAst}
-import polyregion.backend.ast.PolyAst as p
-import polyregion.backend.data.MsgPack
-import polyregion.backend.compiler.*
-import polyregion.backend.compiler.Quoted
-import polyregion.backend.compiler.Retyper
+import polyregion.ast.{CppSourceMirror, MsgPack, PolyAst as p}
+import polyregion.ast.*
+import polyregion.scala.*
 import polyregion.scala.NativeStruct
 
 import java.lang.reflect.Modifier
@@ -59,7 +56,7 @@ object compiletime {
     Retyper.lowerClassType[A].resolve match {
       case Left(e) => throw e
       case Right(sdef) =>
-        val layout = PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, sdef)))
+        val layout = PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, sdef)))
         println(s"layout=${layout}")
 
         val tpeSym = TypeTree.of[A].symbol
@@ -314,7 +311,7 @@ object compiletime {
     implicit val Q = Quoted(q)
     val result = for {
       (captures, prog) <- Compiler.compileExpr(x)
-      serialisedAst    <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, prog)))
+      serialisedAst    <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, prog)))
       // _ <- Either.catchNonFatal(throw new RuntimeException("STOP"))
       // layout <- Either.catchNonFatal(PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, prog.defs))))
       //   _= println(s"layout=${layout}")

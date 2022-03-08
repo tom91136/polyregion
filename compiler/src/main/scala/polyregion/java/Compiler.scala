@@ -1,10 +1,10 @@
 package polyregion.java
 
-import _root_.polyregion.backend.ast.PolyAst as p
 import com.sun.source.tree.*
 import com.sun.source.util.{SimpleTreeVisitor, TreeScanner, Trees}
 import com.sun.tools.javac.tree.JCTree
 import com.sun.tools.javac.tree.JCTree.JCLambda
+import polyregion.ast.PolyAst as p
 
 import javax.annotation.processing.{ProcessingEnvironment, RoundEnvironment}
 import javax.lang.model.element.{Element, TypeElement}

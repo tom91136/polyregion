@@ -1,17 +1,18 @@
-package polyregion.backend.data
+package polyregion.ast.mirror
 
 import cats.conversions.variance
 import polyregion.PolyregionCompiler
-import polyregion.backend.data.Cpp.*
-import polyregion.backend.data.MsgPack
+import polyregion.ast.MsgPack
+import polyregion.ast.mirror.CppStructGen.*
+import polyregion.ast.mirror.CppNlohmannJsonCodecGen
 
 import java.lang.annotation.Target
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import java.nio.{ByteBuffer, ByteOrder}
 import scala.collection.mutable.ArrayBuffer
 
-case class NlohmannJsonCodec(namespace: List[String], decls: List[String], impls: List[String])
-object NlohmannJsonCodec {
+private [polyregion]case class CppNlohmannJsonCodecGen(namespace: List[String], decls: List[String], impls: List[String])
+private [polyregion] object CppNlohmannJsonCodecGen {
 
   def fromJsonFn(t: CppType) = t.ref(qualified = false).toLowerCase + "_from_json"
   def toJsonFn(t: CppType)   = t.ref(qualified = false).toLowerCase + "_to_json"
@@ -87,7 +88,7 @@ object NlohmannJsonCodec {
       Nil
   }
 
-  def emit(s: StructNode): List[NlohmannJsonCodec] = {
+  def emit(s: StructNode): List[CppNlohmannJsonCodecGen] = {
     val fromJsonImpl = "" ::
       s"${s.tpe.ref(qualified = true)} ${s.tpe.ns(fromJsonFn(s.tpe))}(const json& j) { " :: //
       fromJsonBody(s).map("  " + _) :::                                                     //
@@ -104,10 +105,10 @@ object NlohmannJsonCodec {
         Nil
 
     s.variants.flatMap(s => emit(s)) :+
-      NlohmannJsonCodec(s.tpe.namespace, decls, fromJsonImpl ::: toJsonImpl)
+      CppNlohmannJsonCodecGen(s.tpe.namespace, decls, fromJsonImpl ::: toJsonImpl)
   }
 
-  def emitHeader(namespace: String, xs: List[NlohmannJsonCodec]) = {
+  def emitHeader(namespace: String, xs: List[CppNlohmannJsonCodecGen]) = {
     val lines = xs
       .groupMapReduce(_.namespace.mkString("::"))(_.decls)(_ ::: _)
       .toList
@@ -133,7 +134,7 @@ object NlohmannJsonCodec {
           |""".stripMargin
   }
 
-  def emitImpl(namespace: String, headerName: String, hash: String, xs: List[NlohmannJsonCodec]) =
+  def emitImpl(namespace: String, headerName: String, hash: String, xs: List[CppNlohmannJsonCodecGen]) =
     s"""|#include "$headerName.h"
           |
           |template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
