@@ -62,40 +62,35 @@ private[polyregion] object CppSourceMirror {
 
   @main def main(): Unit = {
 
-  //   println("Generating C++ ADT...")
-  //   println(s"Generated ADT=${(adtImpl + adtHeader).count(_ == '\n')} lines")
+    println("Generating C++ mirror...")
+    println(s"Generated ADT=${(adtImpl + adtHeader).count(_ == '\n')} lines")
 
-  //   val jsonCodecHeader = NlohmannJsonCodec.emitHeader(namespace, jsonCodecSources)
-  //   val jsonCodecImpl   = NlohmannJsonCodec.emitImpl(namespace, jsonCodecFileName, AdtHash, jsonCodecSources)
-  //   val target          = Paths.get(".").resolve("native/compiler/generated/").normalize.toAbsolutePath
-  //   println(s"Generated Codec=${(jsonCodecHeader + jsonCodecImpl).count(_ == '\n')} lines")
+    val jsonCodecHeader = CppNlohmannJsonCodecGen.emitHeader(namespace, jsonCodecSources)
+    val jsonCodecImpl   = CppNlohmannJsonCodecGen.emitImpl(namespace, jsonCodecFileName, AdtHash, jsonCodecSources)
+    val target          = Paths.get(".").resolve("native/compiler/generated/").normalize.toAbsolutePath
+    println(s"Generated Codec=${(jsonCodecHeader + jsonCodecImpl).count(_ == '\n')} lines")
 
-  //   println(s"MD5=${AdtHash}")
+    println(s"MD5=${AdtHash}")
 
-  //   println(s"Writing to $target")
+    println(s"Writing to $target")
 
-  //   Files.createDirectories(target)
+    Files.createDirectories(target)
 
-  //   def overwrite(path: Path)(content: String) = Files.write(
-  //     path,
-  //     content.getBytes(StandardCharsets.UTF_8),
-  //     StandardOpenOption.TRUNCATE_EXISTING,
-  //     StandardOpenOption.CREATE,
-  //     StandardOpenOption.WRITE
-  //   )
+    def overwrite(path: Path)(content: String) = Files.write(
+      path,
+      content.getBytes(StandardCharsets.UTF_8),
+      StandardOpenOption.TRUNCATE_EXISTING,
+      StandardOpenOption.CREATE,
+      StandardOpenOption.WRITE
+    )
 
-  //   overwrite(target.resolve("polyast.h"))(adtHeader)
-  //   overwrite(target.resolve("polyast.cpp"))(adtImpl)
+    overwrite(target.resolve("polyast.h"))(adtHeader)
+    overwrite(target.resolve("polyast.cpp"))(adtImpl)
 
-  //   overwrite(target.resolve("polyast_codec.h"))(jsonCodecHeader)
-  //   overwrite(target.resolve("polyast_codec.cpp"))(jsonCodecImpl)
+    overwrite(target.resolve("polyast_codec.h"))(jsonCodecHeader)
+    overwrite(target.resolve("polyast_codec.cpp"))(jsonCodecImpl)
 
-  //   println("Done")
-
-
-    class A
-    polyregion.prism.compiletime.checkPrism[A, RichInt]
-
+    println("Done")
     ()
   }
 

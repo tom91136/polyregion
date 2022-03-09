@@ -1,4 +1,4 @@
--Xmx10240m
+-Xmx2048m
 -Xss8m
 -XX:+UseG1GC
 -Djdk.attach.allowAttachSelf

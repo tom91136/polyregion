@@ -1,23 +1,20 @@
 package polyregion.ast.mirror
 
-private [polyregion] object compiletime {
+private[polyregion] object compiletime {
 
   import scala.quoted.*
 
   enum MirrorKind { case CaseClass, CaseSum, CaseProduct }
   given ToExpr[MirrorKind] with {
-    def apply(x: MirrorKind)(using Quotes) = {
+    def apply(x: MirrorKind)(using Quotes) =
       x match {
         case MirrorKind.CaseClass   => '{ MirrorKind.CaseClass }
         case MirrorKind.CaseSum     => '{ MirrorKind.CaseSum }
         case MirrorKind.CaseProduct => '{ MirrorKind.CaseProduct }
       }
-    }
   }
 
-  inline def mirrorMeta[T] =
-    ${ mirrorMetaImpl[T] }
-
+  inline def mirrorMeta[T] = ${ mirrorMetaImpl[T] }
   def mirrorMetaImpl[T: Type](using quotes: Quotes): Expr[(List[String], MirrorKind)] = {
     import quotes.reflect.*
     val tpe   = TypeRepr.of[T].dealias.simplified
