@@ -64,6 +64,7 @@ object TreeMapper {
         }
         (term, c).pure
       case (None, i @ q.Ident(s)) =>
+        println(s"S=${i.symbol} name=$s")
         val name = i.tpe match {
           // we've encountered a case where the ident's name is different from the TermRef's name
           // this is likely a result of inline where we end up with synthetic names
@@ -112,7 +113,7 @@ object TreeMapper {
           }
         } yield (term, c)
       case (None, s @ q.Select(root, name)) =>
-        println(s"S=${s.symbol}")
+        println(s"S=${s.symbol}, root=${root} name=$name")
         // we must stop at the PolyType boundary as we discard any unapplied type trees
 
         for {
@@ -204,6 +205,11 @@ object TreeMapper {
       // println(s">>${term.show} = ${c.stmts.size} ~ ${term}")
 
       term match {
+        case q.This(_) =>
+          c.typer(term.tpe).subflatMap {
+            case (_, tpe: p.Type, c) => (p.Term.Select(Nil, p.Named("this", tpe)), c).success
+            case (_, bad, c)         => s"Unsupported `this` type: ${bad}".fail
+          }
         case a @ q.TypeApply(term, args) =>
           for {
             (_, tpe, c) <- c.typer(a.tpe)
@@ -431,7 +437,7 @@ object TreeMapper {
             p.Term.UnitConst,
             bodyCtx.replaceStmts(c.stmts :+ p.Stmt.While(condCtx.stmts, condRef, bodyCtx.stmts))
           )
-        case _ => c.fail(s"Unhandled: $term\nSymbol:\n${term.symbol}")
+        case _ => c.fail(s"Unhandled: `$term`, show=`${term.show}`\nSymbol:\n${term.symbol}")
       }
     }
   }

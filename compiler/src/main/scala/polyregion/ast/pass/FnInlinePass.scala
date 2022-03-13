@@ -59,6 +59,8 @@ object FnInlinePass {
                 val substituted =
                   (renamed.receiver ++ renamed.args).zip(recv ++ args).foldLeft(renamed.body) {
                     case (xs, (target, replacement)) =>
+                      
+                      
                       xs.flatMap(
                         _.mapTerm(
                           original => {

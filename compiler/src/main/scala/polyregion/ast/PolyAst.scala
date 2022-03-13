@@ -114,7 +114,11 @@ object PolyAst {
 
   case class StructDef(name: Sym, members: List[Named]) derives MsgPack.Codec
 
-  case class Mirror(source: Sym, struct: StructDef, functions: List[Function]) derives MsgPack.Codec
+  case class Mirror(                         //
+      source: Sym,                           //
+      struct: StructDef,                     //
+      functions: List[ Function] //
+  ) derives MsgPack.Codec
 
   case class Signature(name: Sym, receiver: Option[Type], args: List[Type], rtn: Type)
 

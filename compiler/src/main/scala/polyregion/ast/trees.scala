@@ -63,6 +63,36 @@ extension (e: => p.Sym.type) {
 
 }
 
+object PolyAstToExpr {
+
+  import scala.quoted.*
+
+  given SymToExpr: ToExpr[p.Sym] with { def apply(x: p.Sym)(using Quotes) = '{ p.Sym(${ Expr(x.fqn) }) } }
+  given NamedToExpr: ToExpr[p.Named] with {
+    def apply(x: p.Named)(using Quotes) = '{ p.Named(${ Expr(x.symbol) }, ${ Expr(x.tpe) }) }
+  }
+  given StructDefToExpr: ToExpr[p.StructDef] with {
+    def apply(x: p.StructDef)(using Quotes) = '{ p.StructDef(${ Expr(x.name) }, ${ Expr(x.members) }) }
+  }
+  given TypeToExpr: ToExpr[p.Type] with {
+    def apply(x: p.Type)(using Quotes) = x match {
+      case p.Type.Float            => '{ p.Type.Float }
+      case p.Type.Double           => '{ p.Type.Double }
+      case p.Type.Bool             => '{ p.Type.Bool }
+      case p.Type.Byte             => '{ p.Type.Byte }
+      case p.Type.Char             => '{ p.Type.Char }
+      case p.Type.Short            => '{ p.Type.Short }
+      case p.Type.Int              => '{ p.Type.Int }
+      case p.Type.Long             => '{ p.Type.Long }
+      case p.Type.Unit             => '{ p.Type.Unit }
+      case p.Type.String           => '{ p.Type.String }
+      case p.Type.Struct(name)     => '{ p.Type.Struct(${ Expr(name) }) }
+      case p.Type.Array(component) => '{ p.Type.Array(${ Expr(component) }) }
+    }
+  }
+
+}
+
 extension (e: p.Expr.Invoke) {
   def signature: p.Signature = p.Signature(e.name, e.receiver.map(_.tpe), e.args.map(_.tpe), e.rtn)
 }
@@ -72,7 +102,8 @@ extension (e: p.Sym) {
 }
 
 extension (n: p.Named) {
-  def repr: String = s"(${n.symbol}:${n.tpe.repr})"
+  def repr: String                          = s"(${n.symbol}:${n.tpe.repr})"
+  def mapType(f: p.Type => p.Type): p.Named = p.Named(n.symbol, n.tpe.map(f))
 }
 
 extension (e: p.Term) {
@@ -196,6 +227,24 @@ extension (e: p.Expr) {
   }
 }
 
+extension (t: p.Type) {
+  def map(f: p.Type => p.Type) =
+    t match {
+      case p.Type.Float     => f(t)
+      case p.Type.Double    => f(t)
+      case p.Type.Bool      => f(t)
+      case p.Type.Byte      => f(t)
+      case p.Type.Char      => f(t)
+      case p.Type.Short     => f(t)
+      case p.Type.Int       => f(t)
+      case p.Type.Long      => f(t)
+      case p.Type.Unit      => f(t)
+      case p.Type.String    => f(t)
+      case p.Type.Struct(_) => f(t)
+      case p.Type.Array(c)  => f(p.Type.Array(f(c)))
+    }
+}
+
 extension (e: p.Stmt) {
 
   def mapAccExpr[A](f: p.Expr => (p.Expr, List[p.Stmt], List[A])): (List[p.Stmt], List[A]) = e match {
@@ -226,6 +275,8 @@ extension (e: p.Stmt) {
 
   def mapExpr(f: p.Expr => (p.Expr, List[p.Stmt])): List[p.Stmt] = e.mapAccExpr[Unit](f(_) ++ Nil *: EmptyTuple)._1
 
+  def mapExpr0(f: p.Expr => p.Expr): List[p.Stmt] = mapExpr(e => f(e) -> Nil)
+
   def mapTerm(g: p.Term.Select => p.Term.Select, f: p.Term => p.Term): List[p.Stmt] = e
     .map {
       case p.Stmt.Mut(name, expr, copy)    => p.Stmt.Mut(g(name), expr, copy) :: Nil
@@ -251,6 +302,28 @@ extension (e: p.Stmt) {
       case p.Expr.Index(lhs, idx, component)        => (p.Expr.Index(g(lhs), f(idx), component), Nil)
       case p.Expr.Alloc(witness, term)              => (p.Expr.Alloc(witness, f(term)), Nil)
 
+    })
+
+  def mapType(f: p.Type => p.Type): List[p.Stmt] =
+    e.mapTerm(
+      { case p.Term.Select(xs, x) =>
+        p.Term.Select(xs.map(_.mapType(f)), x.mapType(f))
+      },
+      {
+        case p.Term.Select(xs, x) => p.Term.Select(xs.map(_.mapType(f)), x.mapType(f))
+        case x                    => x
+
+      }
+    ).flatMap(_.mapExpr0 {
+      case p.Expr.UnaryIntrinsic(lhs, kind, rtn)        => p.Expr.UnaryIntrinsic(lhs, kind, rtn.map(f))
+      case p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn)  => p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn.map(f))
+      case e @ p.Expr.UnaryLogicIntrinsic(_, _)         => e
+      case e @ p.Expr.BinaryLogicIntrinsic(_, _, _)     => e
+      case e @ p.Expr.Cast(from, as)                    => p.Expr.Cast(from, as.map(f))
+      case e @ p.Expr.Alias(ref)                        => e
+      case e @ p.Expr.Invoke(name, receiver, args, rtn) => p.Expr.Invoke(name, receiver, args, rtn.map(f))
+      case e @ p.Expr.Index(lhs, idx, component)        => p.Expr.Index(lhs, idx, component.map(f))
+      case e @ p.Expr.Alloc(witness, size)              => p.Expr.Alloc(p.Type.Array(witness.component.map(f)), size)
     })
 
   def mapAcc[A](f: p.Stmt => (List[p.Stmt], List[A])): (List[p.Stmt], List[A]) = e match {

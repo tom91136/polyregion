@@ -3,6 +3,7 @@ package polyregion.scala
 import cats.syntax.all.*
 import polyregion.ast.pass.{FnInlinePass, UnitExprElisionPass}
 import polyregion.ast.{PolyAst as p, *}
+import polyregion.prism.StdLib
 
 import java.nio.file.Paths
 import scala.quoted.Expr
@@ -14,11 +15,46 @@ object Compiler {
   import TreeMapper.*
 
   private def runLocalOptPass(using Quoted) = //
-    IntrinsifyPass.intrinsify
-
+    IntrinsifyPass.intrinsify // >>> MirrorPass.mirror(StdLib.Functions)
 
   private val GlobalOptPasses = //
-    FnInlinePass.inlineAll >>> UnitExprElisionPass.eliminateUnitExpr// >>> FnPtrReturnToOutParamPass.transform
+    FnInlinePass.inlineAll >>> UnitExprElisionPass.eliminateUnitExpr // >>> FnPtrReturnToOutParamPass.transform
+
+  // kind is there for cases where we have `object A extends B; abstract class B {def m = ???}`, B.m has receiver but A.m doesn't
+  def deriveSignature(using q: Quoted)(f: q.DefDef, concreteKind: q.ClassKind): Result[p.Signature] = {
+    def simpleTyper(t: q.TypeRepr) = Retyper.typer0(t).flatMap {
+      case (_, t: p.Type) => t.success
+      case (_, bad)       => s"erased arg type encountered $bad".fail
+    }
+    for {
+      fnRtnTpe <- simpleTyper(f.returnTpt.tpe)
+      fnArgsTpes <- f.paramss
+        .flatMap(_.params)
+        .collect { case d: q.ValDef => d.tpt.tpe }
+        .traverse(simpleTyper(_))
+      owningClass <- Retyper.clsSymTyper0(f.symbol.owner)
+
+      receiver <- (concreteKind, owningClass) match {
+        case (q.ClassKind.Object, q.ErasedClsTpe(_, _, _)) => None.success
+        case (q.ClassKind.Object, s: p.Type.Struct)        => None.success
+        case (q.ClassKind.Class, s: p.Type.Struct)         => Some(s).success
+        case (kind, x)                                     => s"Illegal receiver (concrete kind=${kind}): $x".fail
+      }
+    } yield p.Signature(p.Sym(receiver.fold(f.symbol.fullName)(_ => f.symbol.name)), receiver, fnArgsTpes, fnRtnTpe)
+  }
+
+  def compileFnAndDependencies(using q: Quoted)(f: q.DefDef): Result[(List[p.Function], List[p.StructDef])] =
+    (f :: Nil, List.empty[p.Function], List.empty[p.StructDef])
+      .iterateWhileM { case (remaining, fnAcc, sdefAcc) =>
+        remaining
+          .traverse(compileFn(_))
+          .map { xs =>
+            val (depss, ys) = xs.unzip
+            val deps        = depss.combineAll
+            (deps.defs.values.toList, ys ::: fnAcc, deps.clss.values.toList ::: sdefAcc)
+          }
+      }(_._1.nonEmpty)
+      .map((_, fns, sdefs) => (fns, sdefs))
 
   def compileFn(using q: Quoted)(f: q.DefDef): Result[(q.FnDependencies, p.Function)] = {
     println(s" -> Compile dependent method: ${f.show}")
@@ -165,10 +201,15 @@ object Compiler {
       _ = println(s" -> dependent methods = ${deps.defs.size}")
       _ = println(s" -> dependent structs = ${deps.clss.size}")
 
+
+
+
       // TODO rewrite me, this looks like garbage
       (deps, fns) <- (deps, List.empty[p.Function]).iterateWhileM { case (deps, fs) =>
-        deps.defs.values.toList
-          .traverse(compileFn(_))
+        deps.defs.toList
+          .traverse { case (sig: p.Signature, defdef) =>
+            compileFn(defdef)
+          }
           .map(xs => xs.unzip.bimap(_.combineAll, _ ++ fs))
           .map((d, f) => (d |+| deps.copy(defs = Map()), f))
       }(_._1.defs.nonEmpty)

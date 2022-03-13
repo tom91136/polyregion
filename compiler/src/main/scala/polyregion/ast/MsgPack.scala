@@ -9,6 +9,50 @@ object MsgPack {
   trait Encoder[A] { def encode(a: A): upack.Msg   }
   trait Decoder[A] { def decode(msg: upack.Msg): A }
   trait Codec[A] extends Encoder[A], Decoder[A]
+
+
+  given Codec[Boolean] = Codec(upack.Bool(_), _.bool)
+  given Codec[String]  = Codec(upack.Str(_), _.str)
+  given Codec[Byte]    = Codec(upack.Int32(_), _.int32.toByte)
+  given Codec[Char]    = Codec(upack.Int32(_), _.int32.toChar)
+  given Codec[Short]   = Codec(upack.Int32(_), _.int32.toShort)
+  given Codec[Int]     = Codec(upack.Int32(_), _.int32)
+  given Codec[Long]    = Codec(upack.Int64(_), _.int64)
+  given Codec[Float] = Codec(
+  upack.Float32(_),
+  {
+    case upack.Float32(v)                            => v
+    case upack.Float64(v) if v.toFloat.toDouble == v => v.toFloat
+    case upack.Float64(v) => throw new Exception(s"Float64 to Float32 conversion with loss of precision: $v")
+    case x                => throw new Exception(s"Expected Float32/Float64, got $x")
+  }
+  )
+  given Codec[Double] = Codec(
+  upack.Float64(_),
+  {
+    case upack.Float64(v) => v
+    case x                => throw new Exception(s"Expected Float32/Float64, got $x")
+  }
+  )
+  given [A](using C: Codec[A]): Codec[List[A]] =
+    Codec(xs => upack.Arr(xs.map(C.encode(_))*), _.arr.map(m => C.decode(m)).toList)
+
+  given [A , B ](using C: Codec[(A, B)]): Codec[Map[A, B]] =
+    Codec(
+      xs => upack.Arr(xs.toList.map(C.encode(_))*),
+      _.arr.map(C.decode(_)).toMap
+    )
+
+  given [T0, T1](using C0: Codec[T0], C1: Codec[T1]): Codec[(T0, T1)] =
+    Codec(
+      (t0, t1) => upack.Arr(C0.encode(t0), C1.encode(t1)),
+      x => { val xs = x.arr; (C0.decode(xs(0)), C1.decode(xs(1))) }
+    )
+
+  given [A](using C: Codec[A]): Codec[Option[A]] =
+    Codec(_.fold(upack.Null)(C.encode(_)), x => if (x.isNull) None else Some(C.decode(x)))
+
+
   object Codec {
 
     import upack.*
@@ -17,34 +61,6 @@ object MsgPack {
       def encode(x: A): upack.Msg = f(x)
       def decode(x: upack.Msg): A = g(x)
     }
-
-    given Codec[Boolean] = Codec(upack.Bool(_), _.bool)
-    given Codec[String]  = Codec(upack.Str(_), _.str)
-    given Codec[Byte]    = Codec(upack.Int32(_), _.int32.toByte)
-    given Codec[Char]    = Codec(upack.Int32(_), _.int32.toChar)
-    given Codec[Short]   = Codec(upack.Int32(_), _.int32.toShort)
-    given Codec[Int]     = Codec(upack.Int32(_), _.int32)
-    given Codec[Long]    = Codec(upack.Int64(_), _.int64)
-    given Codec[Float] = Codec(
-      upack.Float32(_),
-      {
-        case upack.Float32(v)                            => v
-        case upack.Float64(v) if v.toFloat.toDouble == v => v.toFloat
-        case upack.Float64(v) => throw new Exception(s"Float64 to Float32 conversion with loss of precision: $v")
-        case x                => throw new Exception(s"Expected Float32/Float64, got $x")
-      }
-    )
-    given Codec[Double] = Codec(
-      upack.Float64(_),
-      {
-        case upack.Float64(v) => v
-        case x                => throw new Exception(s"Expected Float32/Float64, got $x")
-      }
-    )
-    given [A](using C: Codec[A]): Codec[List[A]] =
-      Codec(xs => upack.Arr(xs.map(C.encode(_))*), _.arr.map(m => C.decode(m)).toList)
-    given [A](using C: Codec[A]): Codec[Option[A]] =
-      Codec(_.fold(upack.Null)(C.encode(_)), x => if (x.isNull) None else Some(C.decode(x)))
 
     private inline def summonAll[T <: Tuple, TC[_]]: Vector[TC[Any]] = inline erasedValue[T] match {
       case _: EmptyTuple => Vector()

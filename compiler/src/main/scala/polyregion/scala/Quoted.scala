@@ -4,21 +4,23 @@ import cats.kernel.Monoid
 import polyregion.ast.{PolyAst as p, *}
 
 
-class Quoted(val q: scala.quoted.Quotes) {
+class Quoted(val underlying: scala.quoted.Quotes) {
 
-  import q.reflect.*
-  export q.reflect.*
+  import underlying.reflect.*
+  export underlying.reflect.*
+
 
   case class Reference(value: String | p.Term, tpe: Tpe)
 
   case class FnDependencies(
       clss: Map[p.Sym, p.StructDef] = Map.empty, // external class defs
       defs: Map[p.Signature, DefDef] = Map.empty // external def defs
+//      fns : List[p.Function] = List.empty, // reified def defs
   )
 
   given Monoid[FnDependencies] = Monoid.instance(
     FnDependencies(),                                            //
-    (x, y) => FnDependencies(x.clss ++ y.clss, x.defs ++ y.defs) //
+    (x, y) => FnDependencies(x.clss ++ y.clss, x.defs ++ y.defs ) //
   )
 
   type Val = p.Term | ErasedMethodVal | ErasedModuleSelect
@@ -63,6 +65,8 @@ class Quoted(val q: scala.quoted.Quotes) {
 
       clss: Map[p.Sym, p.StructDef] = Map.empty,  // external class defs
       defs: Map[p.Signature, DefDef] = Map.empty, // external def defs
+
+//      mirrored : List[p.Function] = List.empty, // mirrored def defs
 
       suspended: Map[(String, ErasedFnTpe), ErasedMethodVal] = Map.empty,
       stmts: List[p.Stmt] = List.empty // fn statements

@@ -51,7 +51,7 @@ lazy val `runtime-java` = project
     name                := "runtime-java",
     javah / target      := bindingsDir / "java-runtime",
     autoScalaLibrary    := false,
-    assemblyShadeRules  := loaderShadeRules,
+//    assemblyShadeRules  := loaderShadeRules,
     assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly"))
   )
   .dependsOn(`loader-jvm`)
