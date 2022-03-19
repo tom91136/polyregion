@@ -14,7 +14,8 @@ import scala.reflect.ClassTag
 @compileTimeOnly("This class only exists at compile-time to for internal use")
 object compiletime {
 
-  private final val TopRefs = Set(classOf[Any], classOf[java.lang.Object]).map(_.getName)
+  private final val TopRefs =
+    Set("scala.Any", classOf[java.lang.Object].getName) // classOf[Any].getName gives "java.lang.Object"
 
   private def simplifyTpe(using q: Quoted)(t: q.TypeRepr) = t.dealias.simplified.widenTermRefByName
 
@@ -119,6 +120,10 @@ object compiletime {
               }
           } yield fns.map { (f: p.Function) =>
             f.copy(
+              name = f.name.fqn match {
+                case moduleSym :+ name => typeLUT.getOrElse(p.Sym(moduleSym), p.Sym(moduleSym)) :+ name
+                case xs                => p.Sym(xs)
+              },
               receiver = f.receiver.map(_.mapType(replaceSyms)),
               args = f.args.map(_.mapType(replaceSyms)),
               rtn = f.rtn.map(replaceSyms),

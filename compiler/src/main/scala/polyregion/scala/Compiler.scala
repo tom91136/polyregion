@@ -217,7 +217,7 @@ object Compiler {
       _ = println(s" -> dependent methods compiled")
       _ = println(s" -> dependent structs = ${deps.clss.size}")
 
-      allFns = closureFn :: fns
+      allFns = closureFn :: fns ::: StdLib.Functions
 
       optimised = GlobalOptPasses(allFns)
 

@@ -16,7 +16,7 @@ object StdLib {
     def until(y: Int): Range = new Range(x, y, 1)
   }
 
-  object LowPriorityImplicits {
+  class Predef {
     def intWrapper(i: Int): RichInt = new RichInt(i)
   }
 
@@ -44,7 +44,7 @@ object StdLib {
     (
         S.collection.immutable.Range -> Range,
         S.runtime.RichInt -> RichInt,
-        S.Predef.type -> LowPriorityImplicits.type,
+        S.Predef.type -> Predef ,
 //        AAA -> A_  ,
 //        BBB-> B_  ,
     )
