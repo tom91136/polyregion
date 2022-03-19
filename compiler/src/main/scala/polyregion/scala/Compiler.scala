@@ -61,6 +61,7 @@ object Compiler {
     println(s" -> body(long):\n${f.show(using q.Printer.TreeAnsiCode).indent_(4)}")
 
     (for {
+      _ <- f.rhs.failIfEmpty(s"Function does not contain an implementation: (in ${{f.symbol.maybeOwner}}) ${f.show}").deferred
 
       (fnRtnValue, fnRtnTpe, c) <- q.FnContext().typer(f.returnTpt.tpe)
 
@@ -200,7 +201,6 @@ object Compiler {
 
       _ = println(s" -> dependent methods = ${deps.defs.size}")
       _ = println(s" -> dependent structs = ${deps.clss.size}")
-
 
 
 
