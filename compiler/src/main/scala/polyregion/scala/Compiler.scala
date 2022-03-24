@@ -43,25 +43,32 @@ object Compiler {
     } yield p.Signature(p.Sym(receiver.fold(f.symbol.fullName)(_ => f.symbol.name)), receiver, fnArgsTpes, fnRtnTpe)
   }
 
-  def compileFnAndDependencies(using q: Quoted)(f: q.DefDef): Result[(List[p.Function], List[p.StructDef])] =
-    (f :: Nil, List.empty[p.Function], List.empty[p.StructDef])
-      .iterateWhileM { case (remaining, fnAcc, sdefAcc) =>
-        remaining
-          .traverse(compileFn(_))
-          .map { xs =>
-            val (depss, ys) = xs.unzip
-            val deps        = depss.combineAll
-            (deps.defs.values.toList, ys ::: fnAcc, deps.clss.values.toList ::: sdefAcc)
-          }
-      }(_._1.nonEmpty)
-      .map((_, fns, sdefs) => (fns, sdefs))
+  def compileFnAndDependencies(using
+      q: Quoted
+  )(f: q.DefDef): Result[(p.Function, List[p.Function], List[p.StructDef])] =
+    compileFn(f).flatMap { (deps, fn) =>
+      (deps.defs.values.toList, List.empty[p.Function], List.empty[p.StructDef])
+        .iterateWhileM { case (remaining, fnAcc, sdefAcc) =>
+          remaining
+            .traverse(compileFn(_))
+            .map { xs =>
+              val (depss, ys) = xs.unzip
+              val deps        = depss.combineAll
+              (deps.defs.values.toList, ys ::: fnAcc, deps.clss.values.toList ::: sdefAcc)
+            }
+        }(_._1.nonEmpty)
+        .map((_, fns, sdefs) => (fn, fns, sdefs))
+
+    }
 
   def compileFn(using q: Quoted)(f: q.DefDef): Result[(q.FnDependencies, p.Function)] = {
     println(s" -> Compile dependent method: ${f.show}")
     println(s" -> body(long):\n${f.show(using q.Printer.TreeAnsiCode).indent_(4)}")
 
     (for {
-      _ <- f.rhs.failIfEmpty(s"Function does not contain an implementation: (in ${{f.symbol.maybeOwner}}) ${f.show}").deferred
+      _ <- f.rhs
+        .failIfEmpty(s"Function does not contain an implementation: (in ${f.symbol.maybeOwner}) ${f.show}")
+        .deferred
 
       (fnRtnValue, fnRtnTpe, c) <- q.FnContext().typer(f.returnTpt.tpe)
 
@@ -199,16 +206,18 @@ object Compiler {
       _ = println("=======\nmain closure compiled\n=======")
       _ = println(s"${closureFn.repr}")
 
-      _ = println(s" -> dependent methods = ${deps.defs.size}")
-      _ = println(s" -> dependent structs = ${deps.clss.size}")
+      _ = println(s" -> dependent methods = \n${deps.defs.keys.map("\t" + _.repr).mkString("\n")}")
+      _ = println(s" -> dependent structs = \n${deps.clss.values.map("\t" + _.repr).mkString("\n")}")
 
-
-
+      prism = StdLib.Functions.map(f => f.signature -> f).toMap
       // TODO rewrite me, this looks like garbage
       (deps, fns) <- (deps, List.empty[p.Function]).iterateWhileM { case (deps, fs) =>
         deps.defs.toList
           .traverse { case (sig: p.Signature, defdef) =>
-            compileFn(defdef)
+            prism.get(sig) match {
+              case Some(x) => (q.FnDependencies(), x).success
+              case None    => compileFn(defdef)
+            }
           }
           .map(xs => xs.unzip.bimap(_.combineAll, _ ++ fs))
           .map((d, f) => (d |+| deps.copy(defs = Map()), f))
@@ -217,7 +226,7 @@ object Compiler {
       _ = println(s" -> dependent methods compiled")
       _ = println(s" -> dependent structs = ${deps.clss.size}")
 
-      allFns = closureFn :: fns ::: StdLib.Functions
+      allFns = closureFn :: fns  
 
       optimised = GlobalOptPasses(allFns)
 

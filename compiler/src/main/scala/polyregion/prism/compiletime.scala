@@ -101,11 +101,12 @@ object compiletime {
         case d: q.DefDef => polyregion.scala.Compiler.deriveSignature(d, sourceClassKind)
         case unsupported => s"Unsupported source tree: ${unsupported.show} ".fail
       }
+      _ = println(s"SIG=$sourceSignature")
 
       mirrorMethods <- mirrorMethodSym.tree match {
         case d: q.DefDef =>
           for {
-            (fns, sdefs) <- polyregion.scala.Compiler.compileFnAndDependencies(d)
+            (fn, fns, sdefs) <- polyregion.scala.Compiler.compileFnAndDependencies(d)
 
 //            _ <- sdefs match {
 //              case `expectedStructDef` :: Nil => ().success
@@ -118,18 +119,10 @@ object compiletime {
                 case p.Type.Struct(sym) => p.Type.Struct(typeLUT.getOrElse(sym, sym))
                 case x                  => x
               }
-          } yield fns.map { (f: p.Function) =>
-            f.copy(
-              name = f.name.fqn match {
-                case moduleSym :+ name => typeLUT.getOrElse(p.Sym(moduleSym), p.Sym(moduleSym)) :+ name
-                case xs                => p.Sym(xs)
-              },
-              receiver = f.receiver.map(_.mapType(replaceSyms)),
-              args = f.args.map(_.mapType(replaceSyms)),
-              rtn = f.rtn.map(replaceSyms),
-              body = f.body.flatMap(_.mapType(replaceSyms))
-            )
-          } -> sdefs
+
+          } yield (fn
+            .copy(name = sourceSignature.name, receiver = sourceSignature.receiver.map(p.Named("this", _)))
+            .mapType(replaceSyms) :: fns.map(_.mapType(replaceSyms))) -> sdefs
 
         case unsupported => s"Unsupported mirror tree: ${unsupported.show} ".fail
       }
@@ -159,6 +152,7 @@ object compiletime {
               typeEq(sourceRtn, mirrorRtn)
             } match {
               case (source, _, _) :: Nil =>
+                println(s"S2=$source ${source.maybeOwner.fullName}")
                 mkMirroredMethods(source, sourceClassKind, mirror, mirrorStruct).map(_ :: Nil) // single match
               case Nil => s"Overload resolution for ${fmtName(mirrorSym.fullName)} resulted in no match".fail
               case xs =>

@@ -101,7 +101,6 @@ extension (sd: p.StructDef) {
   def repr: String = s"${sd.name.repr} { ${sd.members.map(_.repr).mkString("; ")} }"
 }
 
-
 extension (e: p.Sym) {
   def repr: String = e.fqn.mkString(".")
 }
@@ -329,7 +328,10 @@ extension (e: p.Stmt) {
       case e @ p.Expr.Invoke(name, receiver, args, rtn) => p.Expr.Invoke(name, receiver, args, rtn.map(f))
       case e @ p.Expr.Index(lhs, idx, component)        => p.Expr.Index(lhs, idx, component.map(f))
       case e @ p.Expr.Alloc(witness, size)              => p.Expr.Alloc(p.Type.Array(witness.component.map(f)), size)
-    })
+    }).map {
+      case p.Stmt.Var(p.Named(name, tpe), x) => p.Stmt.Var(p.Named(name, f(tpe)), x)
+      case x                                 => x
+    }
 
   def mapAcc[A](f: p.Stmt => (List[p.Stmt], List[A])): (List[p.Stmt], List[A]) = e match {
     case x @ p.Stmt.Comment(_)      => f(x)
@@ -381,8 +383,20 @@ extension (f: p.Function) {
   def signatureRepr =
     s"${f.receiver.fold("")(r => r.repr + ".")}${f.name.repr}(${f.args.map(_.repr).mkString(", ")}) : ${f.rtn.repr}"
 
+  def mapType(tf: p.Type => p.Type): p.Function = f.copy(
+    receiver = f.receiver.map(_.mapType(tf)),
+    args = f.args.map(_.mapType(tf)),
+    rtn = f.rtn.map(tf),
+    body = f.body.flatMap(_.mapType(tf))
+  )
+
   def repr: String =
     s"""${f.signatureRepr} = {
        |${f.body.map("  " + _.repr).mkString("\n")}
 		   |}""".stripMargin
+}
+
+extension (f: p.Signature) {
+  def repr: String =
+    s"${f.receiver.fold("")(r => r.repr + ".")}${f.name.repr}(${f.args.map(_.repr).mkString(", ")}) : ${f.rtn.repr}"
 }
