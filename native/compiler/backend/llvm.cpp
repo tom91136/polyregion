@@ -148,8 +148,14 @@ llvm::Value *LLVMAstTransformer::mkSelectPtr(const Term::Select &select) {
         gepIndices.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), *idx));
         tpe = path.tpe;
       } else {
+
+        auto pool = mk_string2<std::string , size_t>(
+            table,
+            [](auto &&p) { return "`" + p.first + "`" + " = " + std::to_string(p.second); },
+            "\n->");
+
         return undefined(__FILE_NAME__, __LINE__,
-                         "Illegal select path with unknown struct member index of name `" + to_string(path) + "`" +
+                         "Illegal select path with unknown struct member index of name `" + to_string(path) + "`, pool=" + pool +
                              fail());
       }
     }

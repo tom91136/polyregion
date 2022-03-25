@@ -126,7 +126,7 @@ object Compiler {
     }).resolve
   }
 
-  def compileClosure(using q: Quoted)(x: Expr[Any]): Result[(q.FnDependencies, List[(q.Ref, p.Type)], p.Function)] = {
+  def compileClosure(using q: Quoted)(x: Expr[Any]): Result[(p.Function, q.FnDependencies, List[(q.Ref, p.Type)])] = {
 
     val term        = x.asTerm
     val pos         = term.pos
@@ -189,7 +189,7 @@ object Compiler {
         fnTpe,
         (c.stmts :+ p.Stmt.Return(p.Expr.Alias(returnTerm)))
       )
-    } yield (c.deps, captures, closureFn)
+    } yield (closureFn, c.deps, captures)
   }
 
   def compileExpr(using q: Quoted)(x: Expr[Any]): Result[
@@ -201,20 +201,22 @@ object Compiler {
   ] =
     for {
 
-      (deps, closureArgs, closureFn) <- compileClosure(x)
+      (closureFn, closuereDeps, closureCaptures ) <- compileClosure(x)
 
       _ = println("=======\nmain closure compiled\n=======")
       _ = println(s"${closureFn.repr}")
 
-      _ = println(s" -> dependent methods = \n${deps.defs.keys.map("\t" + _.repr).mkString("\n")}")
-      _ = println(s" -> dependent structs = \n${deps.clss.values.map("\t" + _.repr).mkString("\n")}")
+      _ = println(s" -> dependent methods = \n${closuereDeps.defs.keys.map("\t" + _.repr).mkString("\n")}")
+      _ = println(s" -> dependent structs = \n${closuereDeps.clss.values.map("\t" + _.repr).mkString("\n")}")
 
-      prism = StdLib.Functions.map(f => f.signature -> f).toMap
+
+
+
       // TODO rewrite me, this looks like garbage
-      (deps, fns) <- (deps, List.empty[p.Function]).iterateWhileM { case (deps, fs) =>
+      (deps, compiledFns) <- (closuereDeps, List.empty[p.Function]).iterateWhileM { case (deps, fs) =>
         deps.defs.toList
           .traverse { case (sig: p.Signature, defdef) =>
-            prism.get(sig) match {
+            StdLib.Functions.get(sig) match {
               case Some(x) => (q.FnDependencies(), x).success
               case None    => compileFn(defdef)
             }
@@ -223,15 +225,19 @@ object Compiler {
           .map((d, f) => (d |+| deps.copy(defs = Map()), f))
       }(_._1.defs.nonEmpty)
 
-      _ = println(s" -> dependent methods compiled")
+      _ = println(s" -> dependent methods - ${deps.defs.size}")
       _ = println(s" -> dependent structs = ${deps.clss.size}")
 
-      allFns = closureFn :: fns  
+      a = StdLib.StructDefs
+
+      allFns = closureFn :: compiledFns
 
       optimised = GlobalOptPasses(allFns)
 
       _       = println(s"PolyAST:\n==>${optimised.map(_.repr).mkString("\n==>")}")
-      clsDefs = deps.clss.values.toList
+      clsDefs = deps.clss.values.toList.map{c =>
+        StdLib.StructDefs.getOrElse(c.name, c)
+      }
       _       = println(s"ClsDefs = ${clsDefs}")
 
       // outReturnParams = optimised.head.args.lastIndexOfSlice(closureFn.args) match {
@@ -241,7 +247,7 @@ object Compiler {
 
     } yield (
       // outReturnParams,
-      closureArgs,
+      closureCaptures,
       p.Program(optimised.head, optimised.tail, clsDefs)
     )
 

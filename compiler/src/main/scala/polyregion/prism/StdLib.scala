@@ -1,6 +1,6 @@
 package polyregion.prism
 
-import polyregion.ast.{PolyAst as p, repr}
+import polyregion.ast.{PolyAst as p, *}
 import polyregion.prism.compiletime.derivePackedMirrors1
 
 object StdLib {
@@ -10,10 +10,10 @@ object StdLib {
     private def mkDef(step: Int): Range = new Range(start, end, step)
   }
 
-  class RichInt(private val self: Int) {
-    def min(y: Int)          = math.min(self, y)
-    def max(y: Int)          = math.max(self, y)
-    def until(y: Int): Range = new Range(self, y, 1)
+  class RichInt(private val x: Int) {
+    def min(y: Int)          = math.min(x, y)
+    def max(y: Int)          = math.max(x, y)
+    def until(y: Int): Range = new Range(x, y, 1)
   }
 
   class Predef {
@@ -50,14 +50,16 @@ object StdLib {
     )
   ]
 
-  final val Functions: List[p.Function]   = Mirrors.values.toList.flatMap(_.functions)
-  final val StructDefs: List[p.StructDef] = Mirrors.values.toList.map(_.struct)
+  final val Functions: Map[p.Signature, p.Function] = Mirrors.values.flatMap(_.functions).map(f => f.signature -> f).toMap
+  final val StructDefs: Map[p.Sym, p.StructDef] =
+    Mirrors.values.map(x => x.source -> x.struct.copy(name = x.source)).toMap
 
   @main def main(): Unit = {
 
-    Functions.foreach { case (fn) =>
+    Functions.values.foreach { fn =>
       println(s"${fn.repr.linesIterator.map("\t" + _).mkString("\n")}")
     }
+    StructDefs.values.foreach(f => println(s"-> $f"))
 
 //    derivePackedMirrors1[ ((1, 2 ) ,(3,4)) ]
 //    derivePackedMirrors1[M]
