@@ -1,6 +1,7 @@
 package polyregion.examples
 
 import polyregion.scala.NativeStruct
+import polyregion.scala.Buffer
 
 object Mandelbrot {
 
@@ -22,6 +23,8 @@ object Mandelbrot {
     Colour(153, 87, 0),
     Colour(106, 52, 3)
   )
+
+  final val Palette2 = Buffer[Colour](Palette*)
 
   case class Complex(real: Double, imag: Double) {
     def inverse: Complex = {
@@ -113,7 +116,18 @@ object Mandelbrot {
       val m2 = polyregion.scala.compiletime.offload {
         val c = Complex(interpolate(x, 0, width, xMin, xMax), interpolate(y, 0, height, yMin, yMax))
         val t = itMandel2(c, maxIter, 4)
-        val m = mkColour(t.c, t.i, maxIter) // TODO struct of struct + tuple specialisation
+
+        if (t.i >= maxIter) Colour(0, 0, 0)
+        else {
+          val logZn = math.log(t.c.abs) / 2
+          val nu    = math.log(logZn / math.log(2)) / math.log(2)
+
+          Palette2(t.i % 16).mix(Palette2((t.i + 1) % 16), nu)
+
+//          Palette2(0)
+        }
+
+
         ()
       }
 
