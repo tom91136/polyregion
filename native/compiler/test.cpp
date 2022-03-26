@@ -331,6 +331,7 @@ TEST_CASE("alloc struct nested", "[compiler]") {
                   Mut(Select({Named("s", myStruct)}, defX), Alias(IntConst(42)), false),
                   Mut(Select({Named("s", myStruct)}, defY), Alias(IntConst(43)), false),
                   Mut(Select({Named("s", myStruct)}, defZ), Alias(Select({}, Named("t", myStruct2))), false),
+                  Mut(Select({Named("s", myStruct), defZ}, defX), Alias(IntConst(42)), false),
                   Return(Alias(IntConst(69))),
               });
 

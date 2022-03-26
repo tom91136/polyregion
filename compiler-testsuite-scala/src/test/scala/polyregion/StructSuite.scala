@@ -6,33 +6,34 @@ import polyregion.scala.compiletime.*
 import _root_.scala.compiletime.*
 import _root_.scala.reflect.ClassTag
 
-
 class StructSuite extends BaseSuite {
 
   // case class T3[A <: AnyVal](val a: A, b: A, c: A)
   // given [A <:AnyVal ]: NativeStruct[T3[A]]    = nativeStructOf
 
-  case class Char3(val a: Char, b: Char, c: Char)
-  case class Byte3(val a: Byte, b: Byte, c: Byte)
-  case class Short3(val a: Short, b: Short, c: Short)
-  case class Int3(val a: Int, b: Int, c: Int)
-  case class Long3(val a: Long, b: Long, c: Long)
-  case class Float3(val a: Float, b: Float, c: Float)
-  case class Double3(val a: Double, b: Double, c: Double)
-  case class Boolean3(val a: Boolean, b: Boolean, c: Boolean)
+  case class Char3(a: Char, b: Char, c: Char)
+  case class Byte3(a: Byte, b: Byte, c: Byte)
+  case class Short3(a: Short, b: Short, c: Short)
+  case class Int3(a: Int, b: Int, c: Int)
+  case class Long3(a: Long, b: Long, c: Long)
+  case class Float3(a: Float, b: Float, c: Float)
+  case class Double3(a: Double, b: Double, c: Double)
+  case class Boolean3(a: Boolean, b: Boolean, c: Boolean)
+  case class Mixture(a: Char, b: Byte, c: Short, d: Int, e: Long, f: Float, g: Double, h: Boolean)
 
-  case class Char3x3(val a: Char3, b: Char3, c: Char3)
-  case class Byte3x3(val a: Byte3, b: Byte3, c: Byte3)
-  case class Short3x3(val a: Short3, b: Short3, c: Short3)
-  case class Int3x3(val a: Int3, b: Int3, c: Int3)
-  case class Long3x3(val a: Long3, b: Long3, c: Long3)
-  case class Float3x3(val a: Float3, b: Float3, c: Float3)
-  case class Double3x3(val a: Double3, b: Double3, c: Double3)
-  case class Boolean3x3(val a: Boolean3, b: Boolean3, c: Boolean3)
+  case class Char3x3(a: Char3, b: Char3, c: Char3)
+  case class Byte3x3(a: Byte3, b: Byte3, c: Byte3)
+  case class Short3x3(a: Short3, b: Short3, c: Short3)
+  case class Int3x3(a: Int3, b: Int3, c: Int3)
+  case class Long3x3(a: Long3, b: Long3, c: Long3)
+  case class Float3x3(a: Float3, b: Float3, c: Float3)
+  case class Double3x3(a: Double3, b: Double3, c: Double3)
+  case class Boolean3x3(a: Boolean3, b: Boolean3, c: Boolean3)
+  case class MixtureMixture(m :Mixture, a: Char3, b: Byte3, c: Short3, d: Int3, e: Long3, f: Float3, g: Double3, h: Boolean3)
 
   inline def dummyNativeStruct[A] = new NativeStruct[A] {
-    def name: String                                                = ""
-    def sizeInBytes: Int                                            = 1
+    def name: String                                                       = ""
+    def sizeInBytes: Int                                                   = 1
     def encode(buffer: _root_.java.nio.ByteBuffer, index: Int, a: A): Unit = ()
     def decode(buffer: _root_.java.nio.ByteBuffer, index: Int): A          = ???
   }
