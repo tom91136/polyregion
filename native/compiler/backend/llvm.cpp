@@ -134,33 +134,33 @@ llvm::Value *LLVMAstTransformer::mkSelectPtr(const Term::Select &select) {
   if (select.init.empty()) return findStackVar(select.last); // local var lookup
   else {
     // we're in a select chain, init elements must return struct type; the head must come from LUT
+    // any nested struct *member* access (through pointer, the struct ) must be on a separate GEP instruction as
+    // memory access via pointer indirections is not part of GEP
+    // & _S -> e
+    // & _S -> S
+    // & _S -> S -> e
+    // & _S -> S -> S
     auto [head, tail] = uncons(select);
-    auto localRoot = load(B, findStackVar(head));
-    auto [structTy, _] = structTypeOf(head.tpe);
-
-    std::vector<llvm::Value *> gepIndices;
-    gepIndices.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0));
-
     auto tpe = head.tpe;
+    auto root = findStackVar(head);
     for (auto &path : tail) {
-      auto [ignore, table] = structTypeOf(tpe);
+      auto [structTy, table] = structTypeOf(tpe);
       if (auto idx = get_opt(table, path.symbol); idx) {
-        gepIndices.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), *idx));
+        root = B.CreateInBoundsGEP(structTy, load(B, root),
+                                   {llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0),
+                                    llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), *idx)},
+                                   qualified(select) + "_ptr");
         tpe = path.tpe;
       } else {
-
-        auto pool = mk_string2<std::string , size_t>(
-            table,
-            [](auto &&p) { return "`" + p.first + "`" + " = " + std::to_string(p.second); },
-            "\n->");
+        auto pool = mk_string2<std::string, size_t>(
+            table, [](auto &&p) { return "`" + p.first + "`" + " = " + std::to_string(p.second); }, "\n->");
 
         return undefined(__FILE_NAME__, __LINE__,
-                         "Illegal select path with unknown struct member index of name `" + to_string(path) + "`, pool=" + pool +
-                             fail());
+                         "Illegal select path with unknown struct member index of name `" + to_string(path) +
+                             "`, pool=" + pool + fail());
       }
     }
-
-    return B.CreateInBoundsGEP(structTy, localRoot, gepIndices, qualified(select) + "_ptr");
+    return root;
   }
 }
 

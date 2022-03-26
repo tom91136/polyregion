@@ -113,7 +113,7 @@ object Mandelbrot {
       val m2 = polyregion.scala.compiletime.offload {
         val c = Complex(interpolate(x, 0, width, xMin, xMax), interpolate(y, 0, height, yMin, yMax))
         val t = itMandel2(c, maxIter, 4)
-        val m = mkColour(c, t.i, maxIter) // TODO struct of struct + tuple specialisation
+        val m = mkColour(t.c, t.i, maxIter) // TODO struct of struct + tuple specialisation
         ()
       }
 
