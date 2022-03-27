@@ -121,10 +121,10 @@ object Mandelbrot {
         else {
           val logZn = math.log(t.c.abs) / 2
           val nu    = math.log(logZn / math.log(2)) / math.log(2)
-
           Palette2(t.i % 16).mix(Palette2((t.i + 1) % 16), nu)
+//          Colour(0, 0, 0)
 
-//          Palette2(0)
+          Palette2(0)
         }
 
 

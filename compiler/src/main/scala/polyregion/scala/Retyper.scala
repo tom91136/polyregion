@@ -4,12 +4,13 @@ import cats.syntax.all.*
 import polyregion.ast.{PolyAst as p, *}
 
 import scala.annotation.tailrec
+import scala.util.Try
 
 object Retyper {
 
   def lowerClassType[A: scala.quoted.Type](using q: Quoted): Deferred[p.StructDef] = lowerClassType(q.TypeRepr.of[A])
 
-  def lowerClassType(using q: Quoted)(repr : q.TypeRepr): Deferred[p.StructDef] = lowerClassType0(repr.typeSymbol)
+  def lowerClassType(using q: Quoted)(repr: q.TypeRepr): Deferred[p.StructDef] = lowerClassType0(repr.typeSymbol)
 
   def lowerClassType0(using q: Quoted)(tpeSym: q.Symbol): Deferred[p.StructDef] = {
 
@@ -21,15 +22,17 @@ object Retyper {
 
     // println(s"Decls = ${tpeSym.declarations.map(_.tree.show)}")
 
-    // TODO workout inherited members
+    // XXX there appears to be a bug where an assertion error is thrown if we call the start/end (but not the pos itself)
+    // of certain type of trees returned from fieldMembers
     tpeSym.fieldMembers
+      .filter(_.maybeOwner == tpeSym) // TODO local members for now, need to workout inherited members
       .sortBy(_.pos.map(p => (p.startLine, p.startColumn))) // make sure the order follows source code decl. order
       .traverse(field =>
         (field.tree match {
           case d: q.ValDef =>
             typer0(d.tpt.tpe).flatMap { // TODO we need to work out nested structs
-              case (_, t: p.Type ) => p.Named(field.name, t).success
-              case (_, bad )       => s"bad erased type $bad".fail
+              case (_, t: p.Type) => p.Named(field.name, t).success
+              case (_, bad)       => s"bad erased type $bad".fail
             }
           case _ => ???
         })
@@ -104,9 +107,13 @@ object Retyper {
         for {
           (leftTerm, leftTpe)   <- typer0(andOr.left)
           (rightTerm, rightTpe) <- typer0(andOr.right)
-        } yield
-          if leftTpe == rightTpe then (leftTerm.orElse(rightTerm), leftTpe)
-          else ???
+          term = leftTerm.orElse(rightTerm)
+          r <-
+            if (leftTpe == rightTpe) (term, leftTpe).success
+//            else if(leftTpe == p.Type.Unit || rightTpe == p.Type.Unit) (term, p.Type.Unit).success
+            else s"Left type `$leftTpe` and right type `$rightTpe` did not unify for ${andOr.simplified.show}".fail
+        } yield r
+
       case tpe @ q.AppliedType(tpeCtor, args) =>
         for {
           // type ctors must be a class

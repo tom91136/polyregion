@@ -46,7 +46,7 @@ object RefOutliner {
 
       // the entire path is not foreign if the root is not foreign
       // TODO see above, need robust owner validation
-      if !root.symbol.maybeOwner.flags.is(q.Flags.Macro)
+//      if !root.symbol.maybeOwner.flags.is(q.Flags.Macro)
 
     } yield (root, path.toVector, s)).sortBy(_._2.length)
 

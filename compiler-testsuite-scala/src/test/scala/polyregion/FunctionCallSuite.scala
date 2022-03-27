@@ -83,26 +83,26 @@ class FunctionCallSuite extends BaseSuite {
   def first(a: Int, b: Int)                              = a
   val x                                                  = 42d
 
-  //    testCapture("module-inline-all-const")(doubleInlineAll(1f))
-  //    testCapture("module-inline-all")(doubleInlineAll(x))
-  //    testCapture("module-inline-all-nest")(doubleInlineAll(doubleInlineAll(doubleInlineAll(x))))
-  //    testCapture("module-inline-all-nest")(doubleInlineAll(doubleInlineAll(doubleInlineAll(1f))))
-  //
-  //    testCapture("module-inline-const")(doubleInline(1f))
-  //    testCapture("module-inline")(doubleInline(x))
-  //    testCapture("module-inline-nest")(doubleInline(doubleInline(doubleInline(x))))
-  //    testCapture("module-inline-nest")(doubleInline(doubleInline(doubleInline(1f))))
-  //
-  //    testCapture("module-inlinemix")(timesInlineMix(x, 2f))
+//      testCapture("module-inline-all-const")(doubleInlineAll(1f))
+//      testCapture("module-inline-all")(doubleInlineAll(x))
+//      testCapture("module-inline-all-nest")(doubleInlineAll(doubleInlineAll(doubleInlineAll(x))))
+//      testCapture("module-inline-all-nest")(doubleInlineAll(doubleInlineAll(doubleInlineAll(1f))))
+//
+//      testCapture("module-inline-const")(doubleInline(1f))
+//      testCapture("module-inline")(doubleInline(x))
+//      testCapture("module-inline-nest")(doubleInline(doubleInline(doubleInline(x))))
+//      testCapture("module-inline-nest")(doubleInline(doubleInline(doubleInline(1f))))
+//
+//      testCapture("module-inlinemix")(timesInlineMix(x, 2f))
 //      testCapture("module-inlinemix-nest")(timesInlineMix(timesInlineMix(timesInlineMix(x, 2f), 3f), 4f))
-  //
-//  testCapture("module-const")(double(1f))
-  //    testCapture("module-const-mix")( double(1f) *  double( x))
-  //    testCapture("module-nest")( double( double( double( x))))
-  //
-  //    testCapture("module-named-first")( first(a = 1, b = 2))
-  //    testCapture("module-named-first-partial")( first(a = 1, 2))
-  //    testCapture("module-named-second")( first(b = 1, a = 2))
-  //    testCapture("module-named-second-partial")( first(1, b = 2))
+
+      testCapture("module-const")(double(x))
+//      testCapture("module-const-mix")( double(1f) *  double( x))
+//      testCapture("module-nest")( double( double( double( x))))
+//
+//      testCapture("module-named-first")( first(a = 1, b = 2))
+//      testCapture("module-named-first-partial")( first(a = 1, 2))
+//      testCapture("module-named-second")( first(b = 1, a = 2))
+//      testCapture("module-named-second-partial")( first(1, b = 2))
 
 }
