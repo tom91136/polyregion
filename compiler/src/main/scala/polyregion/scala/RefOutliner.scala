@@ -28,7 +28,6 @@ object RefOutliner {
 
 
     val foreignRefs = q.collectTree[q.Ref](term) {
-      // FIXME TODO make sure the owner is actually this macro, and not any other macro
 //      case ref: q.Ref if !ref.symbol.maybeOwner.flags.is(q.Flags.Macro) => ref :: Nil
       case ref: q.Ref if !pool.contains(ref.symbol) => ref :: Nil
       case _                                                            => Nil
@@ -45,7 +44,7 @@ object RefOutliner {
       (root, path) <- idents(s)
 
       // the entire path is not foreign if the root is not foreign
-      // TODO see above, need robust owner validation
+      if !pool.contains(root.symbol)
 //      if !root.symbol.maybeOwner.flags.is(q.Flags.Macro)
 
     } yield (root, path.toVector, s)).sortBy(_._2.length)
