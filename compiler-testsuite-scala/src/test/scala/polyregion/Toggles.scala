@@ -4,13 +4,15 @@ object Toggles {
   final inline val NoOffload = false
 
   // need impl
-  final inline val FunctionCallSuite = false
+  final inline val FunctionCallSuite = true
+  final inline val CaptureSuite     = false
+
+
   final inline val ApiSuite          = false
 
   // ok
   final inline val InlineArraySuite = false
   final inline val LogicSuite       = false
-  final inline val CaptureSuite     = true
   final inline val ControlFlowSuite = false
   final inline val ValueReturnSuite = false
   final inline val IntrinsicSuite   = false

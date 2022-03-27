@@ -11,30 +11,15 @@ object StdLib {
   }
 
   class RichInt(private val x: Int) {
-    def min(y: Int)          = math.min(x, y)
-    def max(y: Int)          = math.max(x, y)
-    def until(y: Int): Range = new Range(x, y, 1)
+    def min(that: Int)          = math.min(x, that)
+    def max(that: Int)          = math.max(x, that)
+    def until(end: Int): Range = new Range(x, end, 1)
   }
 
   class Predef {
-    def intWrapper(i: Int): RichInt = new RichInt(i)
+    def intWrapper(x: Int): RichInt = new RichInt(x)
   }
 
-  class AAA {
-    def bbb(): BBB = ???
-  }
-
-  class BBB(i: Int) {
-    def aaa(): AAA = ???
-  }
-
-  class B_(i: Int) {
-    def aaa(): A_ = new A_(1)
-  }
-
-  class A_(i: Int) {
-    def bbb(): B_ = new B_(2)
-  }
 
   type ->[A, B] = (A, B)
 
@@ -45,8 +30,6 @@ object StdLib {
         S.collection.immutable.Range -> Range,
         S.runtime.RichInt -> RichInt,
         S.Predef.type -> Predef
-//        AAA -> A_  ,
-//        BBB-> B_  ,
     )
   ]
 

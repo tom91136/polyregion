@@ -205,6 +205,7 @@ object TreeMapper {
       // println(s">>${term.show} = ${c.stmts.size} ~ ${term}")
 
       term match {
+        case q.NamedArg(name, x) => (c !! term).mapTerm(x).map((v, c) => (q.ErasedNamedArg(name, v), c))
         case q.This(_) =>
           c.typer(term.tpe).subflatMap {
             case (_, tpe: p.Type, c) => (p.Term.Select(Nil, p.Named("this", tpe)), c).success
@@ -230,17 +231,23 @@ object TreeMapper {
             }
           } yield (v, c)
         case q.Typed(x, _)                        => (c !! term).mapTerm(x)
-        case q.Inlined(call, bindings, expansion) => (c !! term).mapTerm(expansion) // simple-inline
-        case q.Literal(q.BooleanConstant(v))      => (p.Term.BoolConst(v), c !! term).pure
-        case q.Literal(q.IntConstant(v))          => (p.Term.IntConst(v), c !! term).pure
-        case q.Literal(q.FloatConstant(v))        => (p.Term.FloatConst(v), c !! term).pure
-        case q.Literal(q.DoubleConstant(v))       => (p.Term.DoubleConst(v), c !! term).pure
-        case q.Literal(q.LongConstant(v))         => (p.Term.LongConst(v), c !! term).pure
-        case q.Literal(q.ShortConstant(v))        => (p.Term.ShortConst(v), c !! term).pure
-        case q.Literal(q.ByteConstant(v))         => (p.Term.ByteConst(v), c !! term).pure
-        case q.Literal(q.CharConstant(v))         => (p.Term.CharConst(v), c !! term).pure
-        case q.Literal(q.UnitConstant())          => (p.Term.UnitConst, c !! term).pure
-        case r: q.Ref                             =>
+        case q.Inlined(call, bindings, expansion) =>
+          // for non-inlined args, bindings will contain all relevant arguments with rhs
+          // TODO I think call is safe to ignore here? It looks like a subtree from the expansion
+          for {
+            (_, c) <- (c !! term).mapTrees(bindings)
+            (v, c) <- (c !! term).mapTerm(expansion) // simple-inline
+          } yield (v, c)
+        case q.Literal(q.BooleanConstant(v)) => (p.Term.BoolConst(v), c !! term).pure
+        case q.Literal(q.IntConstant(v))     => (p.Term.IntConst(v), c !! term).pure
+        case q.Literal(q.FloatConstant(v))   => (p.Term.FloatConst(v), c !! term).pure
+        case q.Literal(q.DoubleConstant(v))  => (p.Term.DoubleConst(v), c !! term).pure
+        case q.Literal(q.LongConstant(v))    => (p.Term.LongConst(v), c !! term).pure
+        case q.Literal(q.ShortConstant(v))   => (p.Term.ShortConst(v), c !! term).pure
+        case q.Literal(q.ByteConstant(v))    => (p.Term.ByteConst(v), c !! term).pure
+        case q.Literal(q.CharConstant(v))    => (p.Term.CharConst(v), c !! term).pure
+        case q.Literal(q.UnitConstant())     => (p.Term.UnitConst, c !! term).pure
+        case r: q.Ref                        =>
           // println(s"[mapper] ref @ ${r}")
           (c !! r).mapRef(r)
         case q.New(tptTree) =>
@@ -287,15 +294,18 @@ object TreeMapper {
               case ((_, _: q.ErasedClsTpe), x) => Nil
               case ((_, _), x)                 => x :: Nil
             }
-
-            // _ = println(s"M=${funVal} (...) ")
+            _ = println(s"M=${funVal} (...) ")
 
             (argVals, c) <- c.down(ap).mapTerms(argsNoErasedTpe)
 
+            // XXX although this behaviour wasn't explicitly documented, it appears that with named args,
+            // the compiler will order the args correctly beforehand so we don't have to deal with it here
             argTerms <- argVals.traverse {
-              case t: p.Term => t.success.deferred
-              case bad       => c.fail(s"Illegal ${bad}")
+              case q.ErasedNamedArg(_, t: p.Term) => t.success.deferred
+              case t: p.Term                      => t.success.deferred
+              case bad                            => c.fail(s"Illegal ${bad}")
             }
+            _ = println("=== " + argTpes)
 
             mkReturn = (expr: p.Expr, c: q.FnContext) => {
 
@@ -323,8 +333,9 @@ object TreeMapper {
                   structTpes  = sdef.members.map(_.tpe)
                   ctorArgTpes = fnTpe.args
 
+//                  a = ctorArgTpes.x
                   _ <-
-                    if (structTpes == argTpes.map(_._2) && structTpes == ctorArgTpes) ().success
+                    if (structTpes == argTpes.map(_._2) && structTpes == ctorArgTpes.map(_._2)) ().success
                     else
                       s"Ctor args mismatch, class ${sdef.name} expects ${structTpes}, fn expects ${ctorArgTpes} and was applied with ${argTpes}".fail
 
@@ -336,8 +347,8 @@ object TreeMapper {
                 val t = tpe.rtn match {
                   case t: p.Type => t
                   case q.ErasedFnTpe(args, rtn: p.Type) if args.forall {
-                        case _: q.ErasedClsTpe => true
-                        case _                 => false
+                        case (_, _: q.ErasedClsTpe) => true
+                        case _                      => false
                       } =>
                     rtn
 

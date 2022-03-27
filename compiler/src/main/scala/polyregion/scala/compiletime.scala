@@ -3,25 +3,21 @@ package polyregion.scala
 import cats.Eval
 import cats.data.EitherT
 import cats.syntax.all.*
-import polyregion.PolyregionCompiler
-import polyregion.Member
-import polyregion.ast.{CppSourceMirror, MsgPack, PolyAst as p}
-import polyregion.ast.*
-import polyregion.scala.*
-import polyregion.scala.NativeStruct
+import polyregion.{Member, PolyregionCompiler}
+import polyregion.ast.{CppSourceMirror, MsgPack, PolyAst as p, *}
+import polyregion.scala.{NativeStruct, *}
 
 import java.lang.reflect.Modifier
 import java.nio.file.{Files, Paths, StandardOpenOption}
 import java.time.Duration
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicReference
-import scala.annotation.tailrec
+import scala.annotation.{compileTimeOnly, tailrec}
+import scala.collection.Factory
 import scala.collection.immutable.ArraySeq
 import scala.concurrent.ExecutionContext
 import scala.quoted.*
 import scala.reflect.ClassTag
-import scala.annotation.compileTimeOnly
-import scala.collection.Factory
 
 @compileTimeOnly("This class only exists at compile-time to expose offload methods")
 object compiletime {

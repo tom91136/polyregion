@@ -95,11 +95,11 @@ object Retyper {
         // this shows up from type-unapplied methods:  [x, y] =>> methodTpe(_:x, ...):y
         //  (None, q.ErasedOpaqueTpe(p), c).success.deferred
         ???
-      case m @ q.MethodType(_, args, rtn) =>
+      case m @ q.MethodType(names, args, rtn) =>
         for {
           (_, tpe) <- typer0(rtn)
           argTpes  <- args.traverse(typer0(_))
-        } yield (None, q.ErasedFnTpe(argTpes.map(_._2), tpe))
+        } yield (None, q.ErasedFnTpe(names.zip(argTpes.map(_._2)), tpe))
       case andOr: q.AndOrType =>
         for {
           (leftTerm, leftTpe)   <- typer0(andOr.left)
@@ -122,7 +122,9 @@ object Retyper {
               ys.map(_._2) match {
                 case Nil      => ???
                 case x :: Nil => q.ErasedFnTpe(Nil, x)
-                case xs :+ x  => q.ErasedFnTpe(xs, x)
+                case xs :+ x  => ???
+//                TODO fn types don't have named args
+//                  q.ErasedFnTpe(xs, x)
               }
             )
           case (n, m, ys) =>

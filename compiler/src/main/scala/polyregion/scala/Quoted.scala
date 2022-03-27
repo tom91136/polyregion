@@ -23,8 +23,10 @@ class Quoted(val underlying: scala.quoted.Quotes) {
     (x, y) => FnDependencies(x.clss ++ y.clss, x.defs ++ y.defs ) //
   )
 
-  type Val = p.Term | ErasedMethodVal | ErasedModuleSelect
+  type Val = p.Term | ErasedMethodVal | ErasedModuleSelect | ErasedNamedArg
   type Tpe = p.Type | ErasedClsTpe | ErasedFnTpe // ErasedOpaqueTpe
+
+  case class ErasedNamedArg(name: String, tpe : Val)
 
   case class ErasedModuleSelect(sym: p.Sym)
 
@@ -52,7 +54,7 @@ class Quoted(val underlying: scala.quoted.Quotes) {
       s"#{ <${kindName}>${name.repr}${if (ctor.isEmpty) "" else ctor.mkString("[", ", ", "]")} }#"
     }
   }
-  case class ErasedFnTpe(args: List[Tpe], rtn: Tpe) {
+  case class ErasedFnTpe(args: List[(String, Tpe)], rtn: Tpe) {
     override def toString =
       s"#{ (${args.mkString(",")}) => ${rtn} }#"
   }

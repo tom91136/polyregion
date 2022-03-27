@@ -1,14 +1,13 @@
 package polyregion.prism
 
-import scala.annotation.{compileTimeOnly, tailrec}
-import scala.quoted.*
-import polyregion.scala.*
 import cats.syntax.all.*
-
-import scala.compiletime.{erasedValue, summonInline}
 import polyregion.ast.{PolyAst as p, *}
+import polyregion.scala.*
 import polyregion.scala.Retyper.{lowerClassType, typer}
 
+import scala.annotation.{compileTimeOnly, tailrec}
+import scala.compiletime.{erasedValue, summonInline}
+import scala.quoted.*
 import scala.reflect.ClassTag
 
 @compileTimeOnly("This class only exists at compile-time to for internal use")
@@ -68,28 +67,36 @@ object compiletime {
     }
   }
 
-  private def extractMethodTypes(using
-      q: Quoted
-  )(clsTpe: q.TypeRepr): Result[(q.Symbol, List[(q.Symbol, List[q.TypeRepr], q.TypeRepr)])] =
-    clsTpe.classSymbol.failIfEmpty(s"No class symbol for ${clsTpe}").map { sym =>
-      sym -> sym.memberMethods
-        .filter { m =>
-          val flags = m.flags
-          flags.is(q.Flags.Method) && !(
-            flags.is(q.Flags.Private) || flags.is(q.Flags.Protected) || flags.is(q.Flags.Synthetic)
-          )
-        }
-        .filterNot(x => TopRefs.contains(x.owner.fullName))
-        .map(m => m -> simplifyTpe(clsTpe.memberType(m)))
-        .collect { case (m, q.MethodType(_, argTpes, rtnTpe)) =>
-          (m, argTpes.map(simplifyTpe(_)), simplifyTpe(rtnTpe))
-        }
-    }
-
   private def derivePackedMirrorsImpl(using q: Quoted) //
   (source: q.TypeRepr, mirror: q.TypeRepr)             //
   (typeEq: (q.TypeRepr, q.TypeRepr) => Boolean)        //
   (typeLUT: Map[p.Sym, p.Sym]): Result[p.Mirror] = {
+
+    case class ReflectedMethodTpe(symbol: q.Symbol, args: List[(String, q.TypeRepr)], rtn: q.TypeRepr) {
+      def =:=(that: ReflectedMethodTpe): Boolean =
+        args.lengthCompare(that.args) == 0 &&
+          args.zip(that.args).forall { case ((lName, lTpe), (rName, rTpe)) =>
+            lName == rName && typeEq(lTpe, rTpe)
+          } &&
+          typeEq(rtn, that.rtn)
+      def show: String = s"${symbol.name}(${args.map((name, tpe) => s"$name:${tpe.show}").mkString(",")}):${rtn.show}"
+    }
+
+    def extractMethodTypes(clsTpe: q.TypeRepr): Result[(q.Symbol, List[ReflectedMethodTpe])] =
+      clsTpe.classSymbol.failIfEmpty(s"No class symbol for ${clsTpe}").map { sym =>
+        sym -> sym.memberMethods
+          .filter { m =>
+            val flags = m.flags
+            flags.is(q.Flags.Method) && !(
+              flags.is(q.Flags.Private) || flags.is(q.Flags.Protected) || flags.is(q.Flags.Synthetic)
+            )
+          }
+          .filterNot(x => TopRefs.contains(x.owner.fullName))
+          .map(m => m -> simplifyTpe(clsTpe.memberType(m)))
+          .collect { case (m, q.MethodType(argNames, argTpes, rtnTpe)) =>
+            ReflectedMethodTpe(m, argNames.zip(argTpes.map(simplifyTpe(_))), simplifyTpe(rtnTpe))
+          }
+      }
 
     def mkMirroredMethods(
         sourceMethodSym: q.Symbol,
@@ -136,27 +143,24 @@ object compiletime {
 
       _ = println(s">>## ${sourceSym.fullName} -> ${mirrorSym.fullName} ")
       mirrorStruct <- Retyper.lowerClassType0(mirrorSym).resolve
-      sourceMethodTable = sourceMethods.groupBy(_._1.name)
+      sourceMethodTable = sourceMethods.groupBy(_.symbol.name)
       _                 = println(s"${sourceMethodTable.mkString("\n\t")}")
-      mirroredMethods <- mirrorMethods.flatTraverse { (mirror, mirrorArgs, mirrorRtn) =>
+      mirroredMethods <- mirrorMethods.flatTraverse { reflectedMirror =>
 
-        def fmtName(source: String) =
-          s"<$source>${mirror.name}(${mirrorArgs.map(_.show).mkString(",")}):${mirrorRtn.show}"
+//        def fmtName(source: String) =
+//          s"<$source>${mirror.name}(${mirrorArgs.map((name, tpe) => s"$name:${tpe.show}").mkString(",")}):${mirrorRtn.show}"
 
-        sourceMethodTable.get(mirror.name) match {
+        sourceMethodTable.get(reflectedMirror.symbol.name) match {
           case None => Nil.success // extra method on mirror
           case Some(xs) => // we got overloads, resolve them
-            xs.filter { (_, sourceArgs, sourceRtn) =>
-              sourceArgs.lengthCompare(mirrorArgs) == 0 &&
-              mirrorArgs.zip(sourceArgs).forall(typeEq(_, _)) &&
-              typeEq(sourceRtn, mirrorRtn)
-            } match {
-              case (source, _, _) :: Nil =>
-                println(s"S2=$source ${source.maybeOwner.fullName}")
-                mkMirroredMethods(source, sourceClassKind, mirror, mirrorStruct).map(_ :: Nil) // single match
-              case Nil => s"Overload resolution for ${fmtName(mirrorSym.fullName)} resulted in no match".fail
+            xs.filter(_ =:= reflectedMirror) match {
+              case sourceMirror  :: Nil =>
+                mkMirroredMethods(sourceMirror.symbol, sourceClassKind, reflectedMirror.symbol, mirrorStruct).map(_ :: Nil) // single match
+              case Nil =>
+                s"Overload resolution for <${mirrorSym.fullName}>${reflectedMirror.show} with named arguments resulted in no match, the following methods were considered:\n\t${xs
+                  .map("\t"+_.show).mkString("\n")}".fail
               case xs =>
-                s"Overload resolution for ${fmtName(mirrorSym.fullName)} resulted in multiple matches: $xs".fail
+                s"Overload resolution for <${mirrorSym.fullName}>${reflectedMirror.show} resulted in multiple matches: $xs".fail
             }
         }
       }

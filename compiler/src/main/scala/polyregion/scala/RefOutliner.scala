@@ -19,9 +19,18 @@ object RefOutliner {
 
   def outline(using q: Quoted)(term: q.Term): Result[(Vector[(q.Ref, q.Reference)], q.FnContext)] = {
 
+    val localDefs = q.collectTree(term) {
+      case b : q.ValDef => b :: Nil
+      case _ => Nil
+    }
+    val pool = localDefs.map(_.symbol).toSet
+    println(s" -> LocalDefs=\n${localDefs.map(x => s"\t$x").mkString("\n")}")
+
+
     val foreignRefs = q.collectTree[q.Ref](term) {
       // FIXME TODO make sure the owner is actually this macro, and not any other macro
-      case ref: q.Ref if !ref.symbol.maybeOwner.flags.is(q.Flags.Macro) => ref :: Nil
+//      case ref: q.Ref if !ref.symbol.maybeOwner.flags.is(q.Flags.Macro) => ref :: Nil
+      case ref: q.Ref if !pool.contains(ref.symbol) => ref :: Nil
       case _                                                            => Nil
     }
 
@@ -42,7 +51,7 @@ object RefOutliner {
     } yield (root, path.toVector, s)).sortBy(_._2.length)
 
     // remove refs if already covered by the same root
-    val sharedValRefs = normalisedForeignValRefs
+    val sharedValRefs =  normalisedForeignValRefs
       .foldLeft(Vector.empty[(q.Ident, Vector[String], q.Ref)]) {
         case (acc, x @ (_, _, q.Ident(_))) => acc :+ x
         case (acc, x @ (root, path, q.Select(i, _))) =>
