@@ -1,9 +1,12 @@
 package polyregion.examples
 
-import polyregion.scala.NativeStruct
-import polyregion.scala.Buffer
+import polyregion.scala.{Buffer, NativeStruct}
 
 object Mandelbrot {
+
+  given NativeStruct[Colour] = polyregion.scala.compiletime.nativeStructOf
+
+  given NativeStruct[Complex] = polyregion.scala.compiletime.nativeStructOf
 
   final val Palette = Array[Colour](
     Colour(66, 30, 15),
@@ -43,7 +46,7 @@ object Mandelbrot {
   def interpolate(input: Double, inputMin: Double, inputMax: Double, outputMin: Double, outputMax: Double): Double =
     ((outputMax - outputMin) * (input - inputMin) / (inputMax - inputMin)) + outputMin
 
-  case class Colour(packed: Int) extends AnyVal {
+  case class Colour(packed: Int) {
     def a: Int = (packed >> 24) & 0xff
     def r: Int = (packed >> 16) & 0xff
     def g: Int = (packed >> 8) & 0xff
@@ -91,12 +94,19 @@ object Mandelbrot {
   }
 
   def mkColour(z: Complex, iter: Int, maxIter: Int): Colour =
-    if (iter >= maxIter) Colour(0, 0, 0) // Colour.Black
+    if (iter >= maxIter) Colour.Black
     else {
       val logZn = math.log(z.abs) / 2
       val nu    = math.log(logZn / math.log(2)) / math.log(2)
-      Colour(0, 0, 0)
-      // Palette(iter % Palette.length).mix(Palette((iter + 1) % Palette.length), nu)
+      Palette(iter % Palette.length).mix(Palette((iter + 1) % Palette.length), nu)
+    }
+
+  def mkColour2(z: Complex, iter: Int, maxIter: Int): Colour =
+    if (iter >= maxIter) Colour(0, 0, 0)
+    else {
+      val logZn = math.log(z.abs) / 2
+      val nu    = math.log(logZn / math.log(2)) / math.log(2)
+      Palette(iter % 16).mix(Palette((iter + 1) % 16), nu)
     }
 
   // given NativeStruct[Complex] = polyregion.compiletime.nativeStructOf
@@ -108,39 +118,70 @@ object Mandelbrot {
     val (xMin, xMax) = (poiX - zoom, poiX + zoom)
     val (yMin, yMax) = (poiY - zoom, poiY + zoom)
     import scala.collection.parallel.CollectionConverters.*
-    for {
-      y <- (0 until height)
-      x <- 0 until width
-    } {
+//    val x = polyregion.scala.compiletime.offload(1 + 1)
 
-      val m2 = polyregion.scala.compiletime.offload {
-        val c = Complex(interpolate(x, 0, width, xMin, xMax), interpolate(y, 0, height, yMin, yMax))
-        val t = itMandel2(c, maxIter, 4)
+//    println(s"Go! ${x} w = ${width} + ${height}")
 
-        if (t.i >= maxIter) Colour(0, 0, 0)
-        else {
-          val logZn = math.log(t.c.abs) / 2
-          val nu    = math.log(logZn / math.log(2)) / math.log(2)
-          Palette2(t.i % 16).mix(Palette2((t.i + 1) % 16), nu)
-//          Colour(0, 0, 0)
+    val image = Buffer.ofZeroed[Colour](width * height)
 
-          Palette2(0)
+    polyregion.scala.compiletime.offload {
+      var y = 0
+      while (y < height) {
+        var x = 0
+        while (x < width) {
+
+          val c  = Complex(interpolate(x, 0, width, xMin, xMax), interpolate(y, 0, height, yMin, yMax))
+          val t  = itMandel2(c, maxIter, 4)
+//          val cc = mkColour2(t.c, t.i, maxIter)
+//          val cc =
+//            if (t.i >= maxIter) Colour.Black
+//            else {
+//              val logZn = math.log(t.c.abs) / 2
+//              val nu    = math.log(logZn / math.log(2)) / math.log(2)
+//              Palette2(t.i % 16).mix(Palette2((t.i + 1) % 16), nu)
+//            }
+//          buffer(x)(y) = cc
+//          image(x + (y * width)) = cc
+          x += 1
         }
-
-
-        ()
+        y += 1
       }
-
-      // val c         =   polyregion.scala.compiletime.offload { Complex(interpolate(x, 0, width, xMin, xMax), interpolate(y, 0, height, yMin, yMax))  }
-      // val (z, iter) = itMandel(c, maxIter, 4)
-      // buffer(x)(y) = mkColour(z, iter, maxIter)
     }
+
+    image.grouped(width).map(_.toArray).toArray.transpose.copyToArray(buffer)
+
+//    println(image.grouped(width).size)
+//    image.grouped(width).map(_.toArray).toArray.transpose.zipWithIndex.foreach { case (xs, i) =>  xs.copyToArray(buffer(i))  }
+
+    println("Stop")
+
+//    for {
+//      y <- (0 until height).par
+//      x <- 0 until width
+//    } {
+//
+////      val m2 = polyregion.scala.compiletime.offload {
+////        val c = Complex(interpolate(x, 0, width, xMin, xMax), interpolate(y, 0, height, yMin, yMax))
+////        val t = itMandel2(c, maxIter, 4)
+////        if (t.i >= maxIter) Colour(0, 0, 0)
+////        else {
+////          val logZn = math.log(t.c.abs) / 2
+////          val nu    = math.log(logZn / math.log(2)) / math.log(2)
+////          Palette2(t.i % 16).mix(Palette2((t.i + 1) % 16), nu)
+////        }
+////      }
+////      buffer(x)(y) = m2
+//
+//      val c         = Complex(interpolate(x, 0, width, xMin, xMax), interpolate(y, 0, height, yMin, yMax))
+//      val (z, iter) = itMandel(c, maxIter, 4)
+//      buffer(x)(y) = mkColour(z, iter, maxIter)
+//    }
+    println("Finish")
+
   }
 
   def showImage(image: java.awt.image.BufferedImage) = {
-    import java.awt.Color
-    import java.awt.BorderLayout
-
+    import java.awt.{BorderLayout, Color}
     import javax.swing.*
 
     val frame: JFrame = new JFrame
@@ -162,7 +203,7 @@ object Mandelbrot {
 
     val data = Array.ofDim[Colour](image.getWidth, image.getHeight)
 
-    val N       = 10
+    val N       = 3
     val elapsed = Array.ofDim[Long](N)
     for (i <- 0 until N) {
       val start = System.nanoTime()

@@ -78,7 +78,7 @@ public:
 
 private:
   uint64_t getSymbolAddress(const std::string &Name) override {
-    std::cout << "External call `" << Name << "`" << std::endl;
+//    std::cout << "External call `" << Name << "`" << std::endl;
     return Name == "malloc" ? (uint64_t)&polyregion::runtime::_malloc : RTDyldMemoryManager::getSymbolAddress(Name);
   }
 };

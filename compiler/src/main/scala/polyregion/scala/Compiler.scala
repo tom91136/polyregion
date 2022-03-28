@@ -1,7 +1,7 @@
 package polyregion.scala
 
 import cats.syntax.all.*
-import polyregion.ast.pass.{FnInlinePass, UnitExprElisionPass}
+import polyregion.ast.pass.{FnInlinePass, UnitExprElisionPass, VerifyPass}
 import polyregion.ast.{PolyAst as p, *}
 import polyregion.prism.StdLib
 
@@ -222,13 +222,17 @@ object Compiler {
             }
           }
           .map(xs => xs.unzip.bimap(_.combineAll, _ ++ fs))
-          .map((d, f) => (d |+| deps.copy(defs = Map()), f))
+          .map { (d, f) =>
+
+            println(s" -> more dependent methods = \n${d.defs.keys.map("\t" + _.repr).mkString("\n")}")
+
+            (d |+| deps.copy(defs = Map()), f)
+          }
       }(_._1.defs.nonEmpty)
 
       _ = println(s" -> dependent methods - ${deps.defs.size}")
       _ = println(s" -> dependent structs = ${deps.clss.size}")
 
-      a = StdLib.StructDefs
 
       allFns = closureFn :: compiledFns
 
@@ -238,6 +242,10 @@ object Compiler {
       clsDefs = deps.clss.values.toList.map{c =>
         StdLib.StructDefs.getOrElse(c.name, c)
       }
+
+      _ = VerifyPass.transform(optimised.take(1), clsDefs)
+
+
       _       = println(s"ClsDefs = ${clsDefs}")
 
       // outReturnParams = optimised.head.args.lastIndexOfSlice(closureFn.args) match {

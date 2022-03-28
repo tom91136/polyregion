@@ -64,7 +64,7 @@ object TreeMapper {
         }
         (term, c).pure
       case (None, i @ q.Ident(s)) =>
-        println(s"S=${i.symbol} name=$s")
+//        println(s"S=${i.symbol} name=$s")
         val name = i.tpe match {
           // we've encountered a case where the ident's name is different from the TermRef's name
           // this is likely a result of inline where we end up with synthetic names
@@ -79,7 +79,7 @@ object TreeMapper {
           // for types that are already part of PolyAst, we just use it as is
 
           // _ = println(  q.Printer.TreeCode)
-          _ = println(s"sel ident $s = ${tpe} = ${i.show(using q.Printer.TreeCode)} ${i.symbol.owner}")
+//          _ = println(s"sel ident $s = ${tpe} = ${i.show(using q.Printer.TreeCode)} ${i.symbol.owner}")
 
           (term, c) <- tpe match {
             case tpe: p.Type =>
@@ -87,6 +87,8 @@ object TreeMapper {
               (if (i.symbol.owner.isClassDef) {
                  c.clsSymTyper(i.symbol.owner).map {
                    case (cls: p.Type, c) => p.Named("this", cls) :: Nil
+                   case (cls : q.ErasedClsTpe, c)  if cls.kind == q.ClassKind.Object => Nil
+
                    case (bad, c) =>
                      println(bad)
                      ???
@@ -113,18 +115,18 @@ object TreeMapper {
           }
         } yield (term, c)
       case (None, s @ q.Select(root, name)) =>
-        println(s"S=${s.symbol}, root=${root} name=$name")
+//        println(s"S=${s.symbol}, root=${root} name=$name")
         // we must stop at the PolyType boundary as we discard any unapplied type trees
 
         for {
           (_, tpe, c) <- c.typer(s.tpe)
-          _ = println(s"sel $s = ${tpe}")
+//          _ = println(s"sel $s = ${tpe}")
           // don't resolve root here yet
           (term, c) <- tpe match {
             case q.ErasedClsTpe(sym, q.ClassKind.Object, Nil) => // <module>.(...)
               (q.ErasedModuleSelect(sym), c).success.deferred
             case tpe: p.Type => // (selector...).(x:Term)
-              println(s"X=$tpe")
+//              println(s"X=$tpe")
 
               c.mapTerm(root).flatMap {
                 case (select @ p.Term.Select(xs, x), c) =>
@@ -282,7 +284,7 @@ object TreeMapper {
 
           // }
 
-          println(s"[mapper] Apply = ${ap}")
+//          println(s"[mapper] Apply = ${ap}")
           for {
             (_, rtnTpe, c) <- c.typer(ap.tpe)
             (_, funTpe, c) <- c.typer(ap.fun.tpe)
@@ -294,7 +296,7 @@ object TreeMapper {
               case ((_, _: q.ErasedClsTpe), x) => Nil
               case ((_, _), x)                 => x :: Nil
             }
-            _ = println(s"M=${funVal} (...) ")
+//            _ = println(s"M=${funVal} (...) ")
 
             (argVals, c) <- c.down(ap).mapTerms(argsNoErasedTpe)
 
@@ -305,7 +307,7 @@ object TreeMapper {
               case t: p.Term                      => t.success.deferred
               case bad                            => c.fail(s"Illegal ${bad}")
             }
-            _ = println("=== " + argTpes)
+//            _ = println("=== " + argTpes)
 
             mkReturn = (expr: p.Expr, c: q.FnContext) => {
 
@@ -317,7 +319,7 @@ object TreeMapper {
             // _ = println(s"inner is  -> ${defdef.show}")
             // _ = println(s"inner is  -> ${funVal} AP ${argTerms}")
 
-            _ = println(s"[mapper] apply function value: ${funVal}")
+//            _ = println(s"[mapper] apply function value: ${funVal}")
 
             (ref, c) <- (argTerms, funVal) match {
               case (Nil, x) => (x, c).success.deferred
@@ -354,7 +356,7 @@ object TreeMapper {
 
                   //
                   case x: q.ErasedClsTpe =>
-                    println(x)
+//                    println(x)
                     // x
                     ???
                 } // TODO handle multiple arg list methods

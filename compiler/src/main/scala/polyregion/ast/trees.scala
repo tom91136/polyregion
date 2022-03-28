@@ -1,6 +1,7 @@
 package polyregion.ast
 
 import polyregion.ast.PolyAst as p
+import polyregion.ast.PolyAst.TypeKind
 
 import java.lang.reflect.Modifier
 import scala.annotation.tailrec
@@ -127,6 +128,10 @@ extension (e: p.Term) {
 }
 
 extension (e: p.Type) {
+  def isNumeric = e.kind match {
+    case TypeKind.Integral | TypeKind.Fractional => true
+    case _                                       => false
+  }
   def repr: String = e match {
     case p.Type.Struct(sym) => s"Struct[${sym.repr}]"
     case p.Type.Array(comp) => s"Array[${comp.repr}]"

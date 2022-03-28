@@ -144,9 +144,12 @@ static R invokePrimitive(JNIEnv *env, //
     runtime::TypedPointer rtn{RT, &rtnData};
 
     auto allocator = [&](size_t size) {
-      std::cerr << "[runtime][primitive] Allocating " << size << "bytes" << std::endl;
-      auto buffer = allocDirect(env, jint(size));
-      auto ptr = env->GetDirectBufferAddress(buffer);
+
+
+//      std::cerr << "[runtime][primitive] Allocating " << size << "bytes" << std::endl;
+//      auto buffer = allocDirect(env, jint(size));
+//      auto ptr = env->GetDirectBufferAddress(buffer);
+      auto ptr = malloc(size);
       return ptr;
     };
 
@@ -175,7 +178,7 @@ static jobject invokeObject(JNIEnv *env, //
 
     // make our allocator store it as well
     auto allocator = [&](size_t size) {
-      std::cerr << "[runtime][obj rtn] Allocating " << size << " bytes" << std::endl;
+//      std::cerr << "[runtime][obj rtn] Allocating " << size << " bytes" << std::endl;
       auto buffer = NIOBuffer(env, allocDirect(env, jint(size)));
       allocations[buffer.ptr] = buffer;
       return buffer.ptr;
