@@ -17,7 +17,7 @@ object RefOutliner {
     case _              => None               // we got a non ref node, give up
   }
 
-  def outline(using q: Quoted)(term: q.Term): Result[(Vector[(q.Ref, q.Reference)], q.FnContext)] = {
+  def outline(using q: Quoted)(term: q.Term, c: q.FnContext = q.FnContext()): Result[(Vector[(q.Ref, q.Reference)], q.FnContext)] = {
 
     val localDefs = q.collectTree(term) {
       case b : q.ValDef => b :: Nil
@@ -76,7 +76,7 @@ object RefOutliner {
       s" -> collapse  (found):${" " * 9}\n${sharedValRefs.map(x => s"${x.symbol} ~> $x").mkString("\n").indent_(4)}"
     )
 
-    val typedRefs = sharedValRefs.foldLeftM((Vector.empty[(q.Ref, q.Reference)], q.FnContext())) {
+    val typedRefs = sharedValRefs.foldLeftM((Vector.empty[(q.Ref, q.Reference)], c)) {
       case ((xs, c), i @ q.Ident(_)) =>
         c.typer(i.tpe).map {
           case (Some(x), tpe, c) => (xs :+ (i, q.Reference(x, tpe)), c)

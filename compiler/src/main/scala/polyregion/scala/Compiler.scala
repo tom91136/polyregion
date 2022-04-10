@@ -66,11 +66,26 @@ object Compiler {
     println(s" -> body(long):\n${f.show(using q.Printer.TreeAnsiCode).indent_(4)}")
 
     (for {
-      _ <- f.rhs
+      rhs <- f.rhs
         .failIfEmpty(s"Function does not contain an implementation: (in ${f.symbol.maybeOwner}) ${f.show}")
         .deferred
 
       (fnRtnValue, fnRtnTpe, c) <- q.FnContext().typer(f.returnTpt.tpe)
+
+      (typedExternalRefs, c0) <- outline(rhs).deferred
+
+      // TODO fuse with compileClosure 
+      capturedNames = typedExternalRefs
+        .collect {
+          case (r, q.Reference(name: String, tpe: p.Type)) if tpe != p.Type.Unit => (p.Named(name, tpe), r)
+          case (r, q.Reference(name: p.Term, tpe: p.Type))                       => ??? // TODO handle default value
+        }
+        .distinctBy(_._2.symbol.pos)
+
+      c = c0
+      .inject(typedExternalRefs.map((tree, ref) => tree.symbol -> ref).toMap)
+      
+      _ = println(s"[] = ${typedExternalRefs}")
 
       // fn <- c.typer(f.symbol.owner)
 
@@ -122,11 +137,13 @@ object Compiler {
         println(s"=====Dependent method ${deptFn.name} ====")
         println(deptFn.repr)
 
-        (c.deps, deptFn)
+        (c.deps.copy(vars = capturedNames.toMap), deptFn)
     }).resolve
   }
 
-  def compileClosure(using q: Quoted)(x: Expr[Any]): Result[(p.Function, q.FnDependencies, List[(q.Ref, p.Type)])] = {
+  def compileClosure(using
+      q: Quoted
+  )(x: Expr[Any]): Result[(p.Function, q.FnDependencies /* , List[(q.Ref, p.Type)] */ )] = {
 
     val term        = x.asTerm
     val pos         = term.pos
@@ -147,14 +164,15 @@ object Compiler {
       // we can discard incoming references here safely iff we also never use them in the resulting p.Function
       capturedNames = typedExternalRefs
         .collect {
-          case (r, q.Reference(name: String, tpe: p.Type)) if tpe != p.Type.Unit => (r, p.Named(name, tpe))
+          case (r, q.Reference(name: String, tpe: p.Type)) if tpe != p.Type.Unit => (p.Named(name, tpe), r)
+          case (r, q.Reference(name: p.Term, tpe: p.Type))                       => ??? // TODO handle default value
         }
-        .distinctBy(_._1.symbol.pos)
+        .distinctBy(_._2.symbol.pos)
 
       _ = println(
         s" -> all refs (typed):         \n${typedExternalRefs.map((tree, ref) => s"$ref => $tree").mkString("\n").indent_(4)}"
       )
-      _ = println(s" -> captured refs:    \n${capturedNames.map(_._2.repr).mkString("\n").indent_(4)}")
+      _ = println(s" -> captured refs:    \n${capturedNames.map(_._1.repr).mkString("\n").indent_(4)}")
 
       (returnTerm, c) <- c
         .inject(typedExternalRefs.map((ref, r) => ref.symbol -> r).toMap)
@@ -178,42 +196,39 @@ object Compiler {
           s"lambda tpe ($fnTpe) != last term tpe (${returnTerm.tpe}), term was $returnTerm".fail
         } else ().success
 
-      (captures, names) = capturedNames.toList.map((r, n) => (r -> n.tpe, n)).unzip
+      // (captures, names) = capturedNames.toList.map((n, r) => (r -> n.tpe, n)).unzip
 
       c = runLocalOptPass(preOptCtx)
 
       closureFn = p.Function(
         p.Sym(closureName :: Nil),
         None,
-        names,
+        Nil, // capturedNames.map(_._1).sortBy(_.symbol).toList,
         fnTpe,
         (c.stmts :+ p.Stmt.Return(p.Expr.Alias(returnTerm)))
       )
-    } yield (closureFn, c.deps, captures)
+    } yield (closureFn, c.deps.copy(vars = capturedNames.toMap))
   }
 
   def compileExpr(using q: Quoted)(x: Expr[Any]): Result[
     (
         // List[p.Type],
-        List[(q.Ref, p.Type)],
+        Map[p.Named, q.Ref],
         p.Program
     )
   ] =
     for {
 
-      (closureFn, closuereDeps, closureCaptures ) <- compileClosure(x)
+      (closureFn, closureDeps) <- compileClosure(x)
 
       _ = println("=======\nmain closure compiled\n=======")
       _ = println(s"${closureFn.repr}")
 
-      _ = println(s" -> dependent methods = \n${closuereDeps.defs.keys.map("\t" + _.repr).mkString("\n")}")
-      _ = println(s" -> dependent structs = \n${closuereDeps.clss.values.map("\t" + _.repr).mkString("\n")}")
-
-
-
+      _ = println(s" -> dependent methods = \n${closureDeps.defs.keys.map("\t" + _.repr).mkString("\n")}")
+      _ = println(s" -> dependent structs = \n${closureDeps.clss.values.map("\t" + _.repr).mkString("\n")}")
 
       // TODO rewrite me, this looks like garbage
-      (deps, compiledFns) <- (closuereDeps, List.empty[p.Function]).iterateWhileM { case (deps, fs) =>
+      (deps, compiledFns) <- (closureDeps, List.empty[p.Function]).iterateWhileM { case (deps, fs) =>
         deps.defs.toList
           .traverse { case (sig: p.Signature, defdef) =>
             StdLib.Functions.get(sig) match {
@@ -230,23 +245,22 @@ object Compiler {
           }
       }(_._1.defs.nonEmpty)
 
-      _ = println(s" -> dependent methods - ${deps.defs.size}")
+      _ = println(s" -> dependent methods = ${deps.defs.size}")
       _ = println(s" -> dependent structs = ${deps.clss.size}")
-
+      _ = println(s" -> dependent vars    = ${deps.vars.size}")
 
       allFns = closureFn :: compiledFns
 
       optimised = GlobalOptPasses(allFns)
 
-      _       = println(s"PolyAST:\n==>${optimised.map(_.repr).mkString("\n==>")}")
-      clsDefs = deps.clss.values.toList.map{c =>
+      _ = println(s"PolyAST:\n==>${optimised.map(_.repr).mkString("\n==>")}")
+      clsDefs = deps.clss.values.toList.map { c =>
         StdLib.StructDefs.getOrElse(c.name, c)
       }
 
       _ = VerifyPass.transform(optimised.take(1), clsDefs)
 
-
-      _       = println(s"ClsDefs = ${clsDefs}")
+      _ = println(s"ClsDefs = ${clsDefs}")
 
       // outReturnParams = optimised.head.args.lastIndexOfSlice(closureFn.args) match {
       //   case -1 => ???
@@ -255,7 +269,7 @@ object Compiler {
 
     } yield (
       // outReturnParams,
-      closureCaptures,
+      closureDeps.vars,
       p.Program(optimised.head, optimised.tail, clsDefs)
     )
 

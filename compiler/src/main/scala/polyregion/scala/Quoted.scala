@@ -3,30 +3,30 @@ package polyregion.scala
 import cats.kernel.Monoid
 import polyregion.ast.{PolyAst as p, *}
 
-
 class Quoted(val underlying: scala.quoted.Quotes) {
 
   import underlying.reflect.*
   export underlying.reflect.*
 
-
+  // Reference = CaptureVarName | DefaultTermValue
   case class Reference(value: String | p.Term, tpe: Tpe)
 
   case class FnDependencies(
-      clss: Map[p.Sym, p.StructDef] = Map.empty, // external class defs
-      defs: Map[p.Signature, DefDef] = Map.empty // external def defs
+      clss: Map[p.Sym, p.StructDef] = Map.empty,  // external class defs
+      defs: Map[p.Signature, DefDef] = Map.empty, // external def defs
+      vars: Map[p.Named, Ref] = Map.empty         // external val defs
 //      fns : List[p.Function] = List.empty, // reified def defs
   )
 
   given Monoid[FnDependencies] = Monoid.instance(
-    FnDependencies(),                                            //
-    (x, y) => FnDependencies(x.clss ++ y.clss, x.defs ++ y.defs ) //
+    FnDependencies(),                                                              //
+    (x, y) => FnDependencies(x.clss ++ y.clss, x.defs ++ y.defs, x.vars ++ y.vars) //
   )
 
   type Val = p.Term | ErasedMethodVal | ErasedModuleSelect | ErasedNamedArg
   type Tpe = p.Type | ErasedClsTpe | ErasedFnTpe // ErasedOpaqueTpe
 
-  case class ErasedNamedArg(name: String, tpe : Val)
+  case class ErasedNamedArg(name: String, tpe: Val)
 
   case class ErasedModuleSelect(sym: p.Sym)
 

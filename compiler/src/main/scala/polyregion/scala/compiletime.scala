@@ -334,9 +334,11 @@ object compiletime {
         case p.Type.Unit   => Type.of[Unit]
       }
 
-      val captureExprs = captures.map { (ident, tpe) =>
+      val orderedCaptures = captures.toList.sortBy(_._1.symbol)
+
+      val captureExprs = orderedCaptures.map { (name, ident) =>
         val expr = ident.asExpr
-        val wrapped = tpe match {
+        val wrapped = name.tpe match {
           case p.Type.Unit   => '{ Buffer.empty[Int] }
           case p.Type.Bool   => '{ Buffer[Boolean](${ expr.asExprOf[Boolean] }) }
           case p.Type.Byte   => '{ Buffer[Byte](${ expr.asExprOf[Byte] }) }
@@ -372,7 +374,7 @@ object compiletime {
           ${ wrapped }.backingBuffer
         }
       }
-      val captureTps = captures.map((_, t) => tpeAsRuntimeTpe(t))
+      val captureTps = orderedCaptures.map((name, _) => tpeAsRuntimeTpe(name.tpe))
 
       def wrap(buffer: Expr[java.nio.ByteBuffer], comp: p.Type) =
         comp match {

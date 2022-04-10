@@ -106,9 +106,18 @@ object Mandelbrot {
     else {
       val logZn = math.log(z.abs) / 2
       val nu    = math.log(logZn / math.log(2)) / math.log(2)
-      Palette(iter % 16).mix(Palette((iter + 1) % 16), nu)
+      Palette2(iter % 16).mix(Palette2((iter + 1) % 16), nu)
+//      Colour(0, 0, 0)
     }
 
+
+  object In{
+    final val B  : Buffer[Int] = Buffer[Int](1,2)
+    def takeOne : Int = {
+      B(0)
+//      1+1
+    }
+  }
   // given NativeStruct[Complex] = polyregion.compiletime.nativeStructOf
   // given NativeStruct[ItResult] = polyregion.compiletime.nativeStructOf
 
@@ -124,15 +133,21 @@ object Mandelbrot {
 
     val image = Buffer.ofZeroed[Colour](width * height)
 
-    polyregion.scala.compiletime.offload {
-      var y = 0
-      while (y < height) {
-        var x = 0
-        while (x < width) {
+    val x = 1
 
-          val c  = Complex(interpolate(x, 0, width, xMin, xMax), interpolate(y, 0, height, yMin, yMax))
-          val t  = itMandel2(c, maxIter, 4)
-//          val cc = mkColour2(t.c, t.i, maxIter)
+    polyregion.scala.compiletime.offload {
+
+      val m = In.takeOne
+      m +x
+
+//      var y = 0
+//      while (y < height) {
+//        var x = 0
+//        while (x < width) {
+//
+//          val c  = Complex(interpolate(x, 0, width, xMin, xMax), interpolate(y, 0, height, yMin, yMax))
+//          val t  = itMandel2(c, maxIter, 4)
+////          val cc = mkColour2(t.c, t.i, maxIter)
 //          val cc =
 //            if (t.i >= maxIter) Colour.Black
 //            else {
@@ -140,12 +155,12 @@ object Mandelbrot {
 //              val nu    = math.log(logZn / math.log(2)) / math.log(2)
 //              Palette2(t.i % 16).mix(Palette2((t.i + 1) % 16), nu)
 //            }
-//          buffer(x)(y) = cc
 //          image(x + (y * width)) = cc
-          x += 1
-        }
-        y += 1
-      }
+//          //          buffer(x)(y) = cc
+//          x += 1
+//        }
+//        y += 1
+//      }
     }
 
     image.grouped(width).map(_.toArray).toArray.transpose.copyToArray(buffer)

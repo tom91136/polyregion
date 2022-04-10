@@ -33,6 +33,11 @@ object TreeMapper {
           (ref, tpe) match {
             case (term: p.Term, tpe: p.Type) => c ::= p.Stmt.Var(p.Named(name, tpe), Some(p.Expr.Alias(term)))
             case (v: q.ErasedMethodVal, tpe: q.ErasedFnTpe) => c.suspend(name -> tpe)(v)
+            case (ref, tpe) =>
+              println(s"tree= ${tree.show}")
+              println(s"ref= $ref")
+              println(s"tpe= $tpe")
+            ???
           }
         )
       case q.ValDef(name, tpe, None) => c.fail(s"Unexpected variable $name:$tpe")

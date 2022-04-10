@@ -5,10 +5,10 @@ import polyregion.ast.{PolyAst as p, *}
 import polyregion.scala.*
 import polyregion.scala.Retyper.{lowerClassType, typer}
 
-import scala.annotation.{compileTimeOnly, tailrec}
-import scala.compiletime.{erasedValue, summonInline}
-import scala.quoted.*
-import scala.reflect.ClassTag
+import _root_.scala.annotation.{compileTimeOnly, tailrec}
+import _root_.scala.compiletime.{erasedValue, summonInline}
+import _root_.scala.quoted.*
+import _root_.scala.reflect.ClassTag
 
 @compileTimeOnly("This class only exists at compile-time to for internal use")
 object compiletime {

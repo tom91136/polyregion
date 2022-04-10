@@ -19,12 +19,18 @@ object VerifyPass {
         type Ctx = (Set[p.Named], List[String])
         val EmptyCtx: Ctx = (Set(), List.empty)
 
+
+        var alloc = 0
+
         extension (x: Ctx) {
           def |+|(y: Ctx): Ctx      = (x._1 ++ y._1, x._2 ::: y._2)
-          def +(n: p.Named): Ctx    = (x._1 + n, x._2)
+          def +(n: p.Named): Ctx    = {
+            println(s"LET $n")
+            (x._1 + n, x._2)
+          }
           def ~(error: String): Ctx = (x._1, error :: x._2)
           def !!(n: p.Named, tree: String): Ctx =
-            if (x._1.contains(n)) x else (x._1, s"$tree uses the unseen variable ${n}" :: x._2)
+            if (x._1.contains(n)) x else (x._1, s"$tree uses the unseen variable ${n}, varaibles defined up to point: \n\t${x._1.mkString("\n\t") }" :: x._2)
         }
 
         def validateTerm(c: Ctx, t: p.Term): Ctx = t match {
@@ -75,7 +81,9 @@ object VerifyPass {
 
         def validateStmt(c: Ctx, s: p.Stmt): Ctx = s match {
           case Stmt.Comment(_)            => c
-          case Stmt.Var(name, expr)       => expr.map(validateExpr(c + name, _)).getOrElse(c)
+          case Stmt.Var(name, expr)       =>
+            alloc+=1
+            expr.map(e => validateExpr(_: Ctx, e)).getOrElse(identity[Ctx])(c + name)
           case Stmt.Mut(name, expr, copy) => (validateTerm(_: Ctx, name)).andThen(validateExpr(_, expr))(c)
           case Stmt.Update(lhs, idx, value) =>
             (validateTerm(_, lhs)).andThen(validateTerm(_, idx)).andThen(validateTerm(_, value))(c)
@@ -90,7 +98,6 @@ object VerifyPass {
             (validateExpr(_, cond))
               .andThen(trueBr.foldLeft(_)(validateStmt(_, _)))
               .andThen(falseBr.foldLeft(_)(validateStmt(_, _)))(c)
-
           case Stmt.Return(value) => validateExpr(c, value)
         }
 
@@ -98,7 +105,7 @@ object VerifyPass {
 
         val (varTable, errors) = xs.foldLeft((names.toSet, Nil): Ctx)(validateStmt(_, _))
 
-        println(s"[Verifier] $varTable")
+        println(s"[Verifier] $alloc ${f.signatureRepr} vars:\n\t${varTable.mkString("\n\t")}")
         if (errors.nonEmpty) {
           throw new RuntimeException(errors.map(e => s"[Verifier] $e").mkString("\n"))
         }
