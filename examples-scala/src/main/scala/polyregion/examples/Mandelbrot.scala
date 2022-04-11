@@ -111,10 +111,14 @@ object Mandelbrot {
     }
 
 
+
   object In{
-    final val B  : Buffer[Int] = Buffer[Int](1,2)
     def takeOne : Int = {
-      B(0)
+//      Colour.Black.packed
+
+      Colour.Black.packed
+
+      1
 //      1+1
     }
   }
@@ -138,6 +142,8 @@ object Mandelbrot {
     polyregion.scala.compiletime.offload {
 
       val m = In.takeOne
+      Colour.Black.packed
+
       m +x
 
 //      var y = 0

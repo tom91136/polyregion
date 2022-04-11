@@ -170,7 +170,7 @@ object TreeMapper {
                     case dd: q.DefDef =>
                       c.fail(s"Unexpected arg list ${dd.paramss} for a 0-arg def via module ref ${module.repr}")
                     case vd: q.ValDef =>
-                      c.fail(s"$vd via module ref ${module.repr} was not intercepted by the outliner!?")
+                      c.fail(s"`${vd.show}` via module ref ${module.repr} was not intercepted by the outliner!? Bindings:${c.refs}")
                     case bad => c.fail(s"Unsupported construct $bad via module ref ${module.repr}")
                   }
                 case (term: p.Term, c) =>

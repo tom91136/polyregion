@@ -86,6 +86,7 @@ object Compiler {
       .inject(typedExternalRefs.map((tree, ref) => tree.symbol -> ref).toMap)
       
       _ = println(s"[] = ${typedExternalRefs}")
+      _ = println(s"c.refs = ${c.refs}")
 
       // fn <- c.typer(f.symbol.owner)
 
@@ -99,12 +100,17 @@ object Compiler {
         .collect { case d: q.ValDef => d }
 
       // TODO handle default value (ValDef.rhs)
+      _ = println(s"Go1 ${c.refs} ${args}")
+
       (namedArgs, c) <- args.foldMapM(arg =>
         c.typer(arg.tpt.tpe).subflatMap {
           case (_, t: p.Type, c) => (p.Named(arg.name, t) :: Nil, c).success
           case (_, bad, c)       => s"erased arg type encountered $bad".fail
         }
       )
+
+      _ = println(s"Go2 ${c.refs}")
+
 
       (owningClass, c) <- c.clsSymTyper(f.symbol.owner).deferred
       _ = println(s"[compiler] found: ${f} = ${owningClass}")
@@ -116,6 +122,7 @@ object Compiler {
       }
 
       body <- fnRtnValue.fold(f.rhs.traverse(c.mapTerm(_)))(x => Some((x, c)).success.deferred)
+      _ = println("Done")
 
       mkFn = (xs: List[p.Stmt]) =>
         p.Function(p.Sym(receiver.fold(f.symbol.fullName)(_ => f.symbol.name)), receiver, namedArgs, fnRtnTpe, xs)
@@ -249,7 +256,7 @@ object Compiler {
       _ = println(s" -> dependent structs = ${deps.clss.size}")
       _ = println(s" -> dependent vars    = ${deps.vars.size}")
 
-      allFns = closureFn :: compiledFns
+      allFns = closureFn.copy(args = closureFn.args ++ deps.vars.keys.toList.sortBy(_.symbol)) :: compiledFns
 
       optimised = GlobalOptPasses(allFns)
 
@@ -258,7 +265,7 @@ object Compiler {
         StdLib.StructDefs.getOrElse(c.name, c)
       }
 
-      _ = VerifyPass.transform(optimised.take(1), clsDefs)
+      // _ = VerifyPass.transform(optimised.take(1), clsDefs)
 
       _ = println(s"ClsDefs = ${clsDefs}")
 
@@ -269,7 +276,7 @@ object Compiler {
 
     } yield (
       // outReturnParams,
-      closureDeps.vars,
+      deps.vars,
       p.Program(optimised.head, optimised.tail, clsDefs)
     )
 

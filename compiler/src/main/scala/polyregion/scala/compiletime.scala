@@ -311,14 +311,16 @@ object compiletime {
       // _ <- Either.catchNonFatal(throw new RuntimeException("STOP"))
       // layout <- Either.catchNonFatal(PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, prog.defs))))
       //   _= println(s"layout=${layout}")
-      c <- Either.catchNonFatal(PolyregionCompiler.compile(serialisedAst, true, PolyregionCompiler.BACKEND_LLVM))
+
+      c <- Right(new polyregion.Compilation())
+      // c <- Either.catchNonFatal(PolyregionCompiler.compile(serialisedAst, true, PolyregionCompiler.BACKEND_LLVM))
     } yield {
 
-      println(s"Program=${c.program.length}")
-      println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
-      println(s"Messages=\n  ${c.messages}")
+      // println(s"Program=${c.program.length}")
+      // println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
+      // println(s"Messages=\n  ${c.messages}")
 
-      val programBytesExpr = Expr(c.program)
+      val programBytesExpr = Expr( /* c.program */ Array[Byte]() )
       val astBytesExpr     = Expr(serialisedAst)
       val fnName           = Expr("lambda")
 
@@ -441,7 +443,9 @@ object compiletime {
 
     result match {
       case Left(e)  => throw e
-      case Right(x) => x
+      case Right(x) =>
+        println("Code=" + x.show) 
+        x
     }
 
   }
