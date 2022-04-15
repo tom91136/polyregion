@@ -29,7 +29,17 @@ class StructSuite extends BaseSuite {
   case class Float3x3(a: Float3, b: Float3, c: Float3)
   case class Double3x3(a: Double3, b: Double3, c: Double3)
   case class Boolean3x3(a: Boolean3, b: Boolean3, c: Boolean3)
-  case class MixtureMixture(m :Mixture, a: Char3, b: Byte3, c: Short3, d: Int3, e: Long3, f: Float3, g: Double3, h: Boolean3)
+  case class MixtureMixture(
+      m: Mixture,
+      a: Char3,
+      b: Byte3,
+      c: Short3,
+      d: Int3,
+      e: Long3,
+      f: Float3,
+      g: Double3,
+      h: Boolean3
+  )
 
   inline def dummyNativeStruct[A] = new NativeStruct[A] {
     def name: String                                                       = ""

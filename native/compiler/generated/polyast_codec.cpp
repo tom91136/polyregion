@@ -1281,11 +1281,14 @@ Function function_from_json(const json& j) {
   std::vector<Named> args;
   auto args_json = j.at(2);
   std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &named_from_json);
-  auto rtn =  Type::any_from_json(j.at(3));
+  std::vector<Named> captures;
+  auto captures_json = j.at(3);
+  std::transform(captures_json.begin(), captures_json.end(), std::back_inserter(captures), &named_from_json);
+  auto rtn =  Type::any_from_json(j.at(4));
   std::vector<Stmt::Any> body;
-  auto body_json = j.at(4);
+  auto body_json = j.at(5);
   std::transform(body_json.begin(), body_json.end(), std::back_inserter(body), &Stmt::any_from_json);
-  return {name, receiver, args, rtn, body};
+  return {name, receiver, args, captures, rtn, body};
 }
 
 json function_to_json(const Function& x) { 
@@ -1293,10 +1296,12 @@ json function_to_json(const Function& x) {
   auto receiver = x.receiver ? named_to_json(*x.receiver) : json{};
   std::vector<json> args;
   std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &named_to_json);
+  std::vector<json> captures;
+  std::transform(x.captures.begin(), x.captures.end(), std::back_inserter(captures), &named_to_json);
   auto rtn =  Type::any_to_json(x.rtn);
   std::vector<json> body;
   std::transform(x.body.begin(), x.body.end(), std::back_inserter(body), &Stmt::any_to_json);
-  return json::array({name, receiver, args, rtn, body});
+  return json::array({name, receiver, args, captures, rtn, body});
 }
 
 Program program_from_json(const json& j) { 
@@ -1321,13 +1326,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "3e37a67a2540a7f599ac881ccfcee518") {
-   throw std::runtime_error("Expecting ADT hash to be 3e37a67a2540a7f599ac881ccfcee518, but was " + hash);
+  if(hash != "418c148ab552ca7823e894f562a7e893") {
+   throw std::runtime_error("Expecting ADT hash to be 418c148ab552ca7823e894f562a7e893, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"3e37a67a2540a7f599ac881ccfcee518", x});
+  return json::array({"418c148ab552ca7823e894f562a7e893", x});
 }
 } // namespace polyregion::polyast

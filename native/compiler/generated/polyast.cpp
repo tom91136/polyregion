@@ -1002,6 +1002,13 @@ std::ostream &operator<<(std::ostream &os, const Function &x) {
   }
   os << '}';
   os << ',';
+  os << '{';
+  if (!x.captures.empty()) {
+    std::for_each(x.captures.begin(), std::prev(x.captures.end()), [&os](auto &&x) { os << x; os << ','; });
+    os << x.captures.back();
+  }
+  os << '}';
+  os << ',';
   os << x.rtn;
   os << ',';
   os << '{';
@@ -1014,7 +1021,7 @@ std::ostream &operator<<(std::ostream &os, const Function &x) {
   return os;
 }
 bool operator==(const Function &l, const Function &r) { 
-  return l.name == r.name && l.receiver == r.receiver && l.args == r.args && *l.rtn == *r.rtn && std::equal(l.body.begin(), l.body.end(), r.body.begin(), [](auto &&l, auto &&r) { return *l == *r; });
+  return l.name == r.name && l.receiver == r.receiver && l.args == r.args && l.captures == r.captures && *l.rtn == *r.rtn && std::equal(l.body.begin(), l.body.end(), r.body.begin(), [](auto &&l, auto &&r) { return *l == *r; });
 }
 
 std::ostream &operator<<(std::ostream &os, const Program &x) {
@@ -1480,6 +1487,7 @@ std::size_t std::hash<polyregion::polyast::Function>::operator()(const polyregio
   std::size_t seed = std::hash<decltype(x.name)>()(x.name);
   seed ^= std::hash<decltype(x.receiver)>()(x.receiver) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.args)>()(x.args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.captures)>()(x.captures) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.body)>()(x.body) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;

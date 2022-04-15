@@ -127,6 +127,7 @@ object PolyAst {
       name: Sym,               //
       receiver: Option[Named], //
       args: List[Named],       //
+      captures: List[Named],   //
       rtn: Type,               //
       body: List[Stmt]         //
   ) derives MsgPack.Codec      //

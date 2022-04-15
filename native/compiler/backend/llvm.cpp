@@ -792,7 +792,13 @@ Pair<Opt<std::string>, std::string> LLVMAstTransformer::transform(const std::uni
         return {x.name, mkStruct(x)};
       });
 
-  auto paramTpes = map_vec<Named, llvm::Type *>(fnTree.args, [&](auto &&named) { return mkTpe(named.tpe); });
+
+  std::vector<Named> allArgs;
+  if(fnTree.receiver) allArgs.insert(allArgs.begin(), *fnTree.receiver);
+  allArgs.insert(allArgs.begin(), fnTree.args.begin(), fnTree.args.end());
+  allArgs.insert(allArgs.begin(), fnTree.captures.begin(), fnTree.captures.end());
+
+  auto paramTpes = map_vec<Named, llvm::Type *>(allArgs, [&](auto &&named) { return mkTpe(named.tpe); });
 
   auto rtnTpe = variants::total(
       *kind(fnTree.rtn),                                                               //
@@ -811,7 +817,7 @@ Pair<Opt<std::string>, std::string> LLVMAstTransformer::transform(const std::uni
 
   // add function params to the lut first as function body will need these at some point
   std::transform(                                          //
-      fn->arg_begin(), fn->arg_end(), fnTree.args.begin(), //
+      fn->arg_begin(), fn->arg_end(), allArgs.begin(), //
       std::inserter(stackVarPtrs, stackVarPtrs.end()),     //
       [&](auto &arg, const auto &named) -> Pair<std::string, Pair<Type::Any, llvm::Value *>> {
         arg.setName(named.symbol);

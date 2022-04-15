@@ -8,11 +8,11 @@ import scala.util.Try
 
 object Retyper {
 
-  def lowerClassType[A: scala.quoted.Type](using q: Quoted): Deferred[p.StructDef] = lowerClassType(q.TypeRepr.of[A])
+  def lowerClassType[A: scala.quoted.Type](using q: Quoted): Result[p.StructDef] = lowerClassType(q.TypeRepr.of[A])
 
-  def lowerClassType(using q: Quoted)(repr: q.TypeRepr): Deferred[p.StructDef] = lowerClassType0(repr.typeSymbol)
+  def lowerClassType(using q: Quoted)(repr: q.TypeRepr): Result[p.StructDef] = lowerClassType0(repr.typeSymbol)
 
-  def lowerClassType0(using q: Quoted)(tpeSym: q.Symbol): Deferred[p.StructDef] = {
+  def lowerClassType0(using q: Quoted)(tpeSym: q.Symbol): Result[p.StructDef] = {
 
     if ((tpeSym.flags.is(q.Flags.Module) || tpeSym.flags.is(q.Flags.Abstract)) && tpeSym.fieldMembers.nonEmpty) {
       throw RuntimeException(
@@ -38,7 +38,7 @@ object Retyper {
         })
       )
       .map(p.StructDef(p.Sym(tpeSym.fullName), _))
-      .deferred
+
   }
 
   private def resolveClsFromSymbol(using q: Quoted)(clsSym: q.Symbol): Result[(p.Sym, q.Symbol, q.ClassKind)] =
@@ -90,13 +90,13 @@ object Retyper {
 
   // def typerN(using
   //     q: Quoted
-  // )(xs: List[q.TypeRepr] ): Deferred[List[(Option[p.Term], q.Tpe)]] = xs.traverse(typer(_))
+  // )(xs: List[q.TypeRepr] ): Result[List[(Option[p.Term], q.Tpe)]] = xs.traverse(typer(_))
 
   def typer0(using q: Quoted)(repr: q.TypeRepr): Result[(Option[p.Term], q.Tpe)] =
     repr.dealias.widenTermRefByName.simplified match {
       case p @ q.PolyType(_, _, q.MethodType(_, _, _)) =>
         // this shows up from type-unapplied methods:  [x, y] =>> methodTpe(_:x, ...):y
-        //  (None, q.ErasedOpaqueTpe(p), c).success.deferred
+        //  (None, q.ErasedOpaqueTpe(p), c).success
         ???
       case m @ q.MethodType(names, args, rtn) =>
         for {
@@ -157,6 +157,25 @@ object Retyper {
       case expr => resolveClsFromTpeRepr(expr).map(liftClsToTpe(_, _, _)).map((None, _))
     }
 
+  def typer1(using q: Quoted)(repr: q.TypeRepr): Result[(Option[p.Term], q.Tpe, q.FnDependencies)] =
+    Retyper.typer0(repr).flatMap {
+      case (value, s @ p.Type.Struct(sym)) =>
+        Retyper
+          .lowerClassType(repr)
+          .map(sdef => (value, s, q.FnDependencies(clss = Map(sym -> sdef))))
+      case (value, tpe) => (value, tpe, q.FnDependencies()).pure
+    }
+
+  def clsSymTyper1(using q: Quoted)(clsSym: q.Symbol): Result[(q.Tpe, q.FnDependencies)] =
+    Retyper.clsSymTyper0(clsSym).flatMap {
+      case s @ p.Type.Struct(sym) =>
+        Retyper
+          .lowerClassType0(clsSym)
+          .map(sdef => (s, q.FnDependencies(Map(sym -> sdef))))
+
+      case tpe => (tpe, q.FnDependencies()).pure
+    }
+
   extension (using q: Quoted)(c: q.FnContext) {
 
     def clsSymTyper(clsSym: q.Symbol): Result[(q.Tpe, q.FnContext)] = Retyper.clsSymTyper0(clsSym).flatMap {
@@ -164,11 +183,11 @@ object Retyper {
         Retyper
           .lowerClassType0(clsSym)
           .map(sdef => (s, c.copy(clss = c.clss + (sym -> sdef))))
-          .resolve
+
       case tpe => (tpe, c).pure
     }
 
-    def typerN(xs: List[q.TypeRepr]): Deferred[(List[(Option[p.Term], q.Tpe)], q.FnContext)] = xs match {
+    def typerN(xs: List[q.TypeRepr]): Result[(List[(Option[p.Term], q.Tpe)], q.FnContext)] = xs match {
       case Nil     => (Nil, c).pure
       case x :: xs =>
         // TODO make sure we get the right order back!
@@ -179,13 +198,10 @@ object Retyper {
         }
     }
 
-    def typer(repr: q.TypeRepr): Deferred[(Option[p.Term], q.Tpe, q.FnContext)] =
-      Retyper.typer0(repr).deferred.flatMap {
-        case (value, s @ p.Type.Struct(sym)) =>
-          Retyper
-            .lowerClassType(repr)
-            .map(sdef => (value, s, c.copy(clss = c.clss + (sym -> sdef))))
-        case (value, tpe) => (value, tpe, c).pure
+    def typer(repr: q.TypeRepr): Result[(Option[p.Term], q.Tpe, q.FnContext)] =
+      Retyper.typer1(repr).map {
+        case (value, t, deps) => (value, t, c.copy(clss = c.clss ++ deps.clss)) // TODO use that map and not a full p.FnDependenccies
+        // case (value, t, None)    => (value, t, c)
       }
 
   }

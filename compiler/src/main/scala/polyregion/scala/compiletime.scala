@@ -49,7 +49,7 @@ object compiletime {
 
     implicit val Q = Quoted(q)
 
-    Retyper.lowerClassType[A].resolve match {
+    Retyper.lowerClassType[A] match {
       case Left(e) => throw e
       case Right(sdef) =>
         val layout = PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, sdef)))
@@ -306,21 +306,22 @@ object compiletime {
   private def offloadImpl[A: Type](x: Expr[Any])(using q: Quotes): Expr[A] = {
     implicit val Q = Quoted(q)
     val result = for {
-      (captures, prog) <- Compiler.compileExpr(x)
+      (captures, prog, log) <- Compiler.compileExpr(x)
+      _ = println(log.render)
       serialisedAst    <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, prog)))
       // _ <- Either.catchNonFatal(throw new RuntimeException("STOP"))
       // layout <- Either.catchNonFatal(PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, prog.defs))))
       //   _= println(s"layout=${layout}")
 
-      c <- Right(new polyregion.Compilation())
-      // c <- Either.catchNonFatal(PolyregionCompiler.compile(serialisedAst, true, PolyregionCompiler.BACKEND_LLVM))
+      // c <- Right(new polyregion.Compilation())
+      c <- Either.catchNonFatal(PolyregionCompiler.compile(serialisedAst, true, PolyregionCompiler.BACKEND_LLVM))
     } yield {
 
-      // println(s"Program=${c.program.length}")
-      // println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
-      // println(s"Messages=\n  ${c.messages}")
+      println(s"Program=${c.program.length}")
+      println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
+      println(s"Messages=\n  ${c.messages}")
 
-      val programBytesExpr = Expr( /* c.program */ Array[Byte]() )
+      val programBytesExpr = Expr(c.program)
       val astBytesExpr     = Expr(serialisedAst)
       val fnName           = Expr("lambda")
 
@@ -442,9 +443,9 @@ object compiletime {
 //    val b = '{ val b = polyregion.Runtime.FFIInvocationBuilder() }
 
     result match {
-      case Left(e)  => throw e
+      case Left(e) => throw e
       case Right(x) =>
-        println("Code=" + x.show) 
+        println("Code=" + x.show)
         x
     }
 

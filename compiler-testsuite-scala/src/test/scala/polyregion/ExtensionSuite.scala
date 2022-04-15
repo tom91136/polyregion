@@ -6,11 +6,20 @@ import polyregion.scala.compiletime.*
 import _root_.scala.compiletime.*
 import _root_.scala.reflect.ClassTag
 
-implicit class RI(i: Int) {
+object OUT{
+  val C = 2
+}
+
+implicit class RI(val i: Int) {
   //  private val x : Int = 3
   //  val y : Int = 2
   //  println("1")
-  def max3(j: Int) = i + j
+
+
+  def max3(j: Int, u: RI) : Int= {
+    val mm = u.i
+    i + j + OUT.C
+  }
 }
 
 class ExtensionSuite extends BaseSuite {
@@ -44,8 +53,8 @@ class ExtensionSuite extends BaseSuite {
       val z  = V3(xs(0), 2f, 3f)
       val aa = z.add(z)
       // val m = (1d,2f)
-      a.max3(b) + z.a.toInt
-      a max a
+      a.max3(b, 2) + z.a.toInt
+      a.max(a)
       // V3(1,2,2)
     }
   }

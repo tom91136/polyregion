@@ -1026,9 +1026,10 @@ struct EXPORT Function {
   Sym name;
   std::optional<Named> receiver;
   std::vector<Named> args;
+  std::vector<Named> captures;
   Type::Any rtn;
   std::vector<Stmt::Any> body;
-  Function(Sym name, std::optional<Named> receiver, std::vector<Named> args, Type::Any rtn, std::vector<Stmt::Any> body) noexcept : name(std::move(name)), receiver(std::move(receiver)), args(std::move(args)), rtn(std::move(rtn)), body(std::move(body)) {}
+  Function(Sym name, std::optional<Named> receiver, std::vector<Named> args, std::vector<Named> captures, Type::Any rtn, std::vector<Stmt::Any> body) noexcept : name(std::move(name)), receiver(std::move(receiver)), args(std::move(args)), captures(std::move(captures)), rtn(std::move(rtn)), body(std::move(body)) {}
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Function &);
   EXPORT friend bool operator==(const Function &, const Function &);
 };

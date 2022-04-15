@@ -6,12 +6,12 @@ import polyregion.ast.{PolyAst as p, *}
 
 import scala.annotation.tailrec
 
-object TreeMapper {
+object Remapper {
 
   import Retyper.*
   extension (using q: Quoted)(c: q.FnContext) {
 
-    def mapTrees(args: List[q.Tree]): Deferred[(q.Val, q.FnContext)] = args match {
+    def mapTrees(args: List[q.Tree]): Result[(q.Val, q.FnContext)] = args match {
       case Nil => (p.Term.UnitConst, c).pure
       case x :: xs =>
         (c ::= p.Stmt.Comment(x.show.replace("\n", " ; ")))
@@ -21,12 +21,12 @@ object TreeMapper {
           })
     }
 
-    def mapTree(tree: q.Tree): Deferred[(q.Val, q.FnContext)] = tree match {
+    def mapTree(tree: q.Tree): Result[(q.Val, q.FnContext)] = tree match {
       case q.ValDef(name, tpeTree, Some(rhs)) =>
         for {
           (term, tpe, c) <- c.typer(tpeTree.tpe)
           // if tpe is singleton, substitute with constant directly
-          (ref, c) <- term.fold((c !! tree).mapTerm(rhs))(x => (x, c).pure)
+          (ref, c) <- term.fold((c !! tree).mapTerm(rhs))(x => (x, c).success)
 
         } yield (
           p.Term.UnitConst,
@@ -37,7 +37,7 @@ object TreeMapper {
               println(s"tree= ${tree.show}")
               println(s"ref= $ref")
               println(s"tpe= $tpe")
-            ???
+              ???
           }
         )
       case q.ValDef(name, tpe, None) => c.fail(s"Unexpected variable $name:$tpe")
@@ -50,7 +50,7 @@ object TreeMapper {
 
     }
 
-    def mapTerms(args: List[q.Term]): Deferred[(List[q.Val], q.FnContext)] = args match {
+    def mapTerms(args: List[q.Term]): Result[(List[q.Val], q.FnContext)] = args match {
       case Nil => (Nil, c).pure
       case x :: xs =>
         c.mapTerm(x)
@@ -60,15 +60,9 @@ object TreeMapper {
           })
     }
 
-    def mapRef(r: q.Ref): Deferred[(q.Val, q.FnContext)] = (c.refs.get(r.symbol), r) match {
-      case (Some(q.Reference(value, tpe)), _) =>
-        val term = (value, tpe) match {
-          case (name: String, tpe: p.Type) => p.Term.Select(Nil, p.Named(name, tpe))
-          case (term: p.Term, _)           => term
-          case _                           => ???
-        }
-        (term, c).pure
-      case (None, i @ q.Ident(s)) =>
+    def mapRef(r: q.Ref): Result[(q.Val, q.FnContext)] = (c.refs.get(r), r) match {
+      case (Some(term ), _)   => (term, c).pure
+      case (None, i @ q.Ident(s))    =>
 //        println(s"S=${i.symbol} name=$s")
         val name = i.tpe match {
           // we've encountered a case where the ident's name is different from the TermRef's name
@@ -91,8 +85,8 @@ object TreeMapper {
               // if the owner is a class, then prefix select starting with `this`
               (if (i.symbol.owner.isClassDef) {
                  c.clsSymTyper(i.symbol.owner).map {
-                   case (cls: p.Type, c) => p.Named("this", cls) :: Nil
-                   case (cls : q.ErasedClsTpe, c)  if cls.kind == q.ClassKind.Object => Nil
+                   case (cls: p.Type, c)                                           => p.Named("this", cls) :: Nil
+                   case (cls: q.ErasedClsTpe, c) if cls.kind == q.ClassKind.Object => Nil
 
                    case (bad, c) =>
                      println(bad)
@@ -100,7 +94,7 @@ object TreeMapper {
                  }
                } else Nil.success).map { parent =>
                 (p.Term.Select(parent, p.Named(name, tpe)), c)
-              }.deferred
+              }
             case ect: q.ErasedFnTpe =>
               // we may end up here and not Select for functions inside modules, not entirely sure why that is
               // here ident's name will be the function name
@@ -108,14 +102,14 @@ object TreeMapper {
                 case f: q.DefDef => // (Symbol...).(x: X=>Y)
                   val sym      = p.Sym(i.symbol.name)
                   val receiver = p.Sym(i.symbol.maybeOwner.fullName)
-                  (q.ErasedMethodVal(receiver, sym, ect, f), c /*.mark(receiver ~ sym, f)*/ ).success.deferred
+                  (q.ErasedMethodVal(receiver, sym, ect, f), c /*.mark(receiver ~ sym, f)*/ ).success
                 case _ =>
                   c.suspended.get(name -> ect) match {
-                    case Some(x) => (x, c).success.deferred
+                    case Some(x) => (x, c).success
                     case None    => c.fail[(q.Val, q.FnContext)](s"Can't find a previous definition of ${i}")
                   }
               }
-            case q.ErasedClsTpe(sym, q.ClassKind.Object, Nil) => (q.ErasedModuleSelect(sym), c).success.deferred
+            case q.ErasedClsTpe(sym, q.ClassKind.Object, Nil) => (q.ErasedModuleSelect(sym), c).success
             case et: q.ErasedClsTpe                           => c.fail[(q.Val, q.FnContext)](s"Saw ${et}")
           }
         } yield (term, c)
@@ -129,7 +123,7 @@ object TreeMapper {
           // don't resolve root here yet
           (term, c) <- tpe match {
             case q.ErasedClsTpe(sym, q.ClassKind.Object, Nil) => // <module>.(...)
-              (q.ErasedModuleSelect(sym), c).success.deferred
+              (q.ErasedModuleSelect(sym), c).success
             case tpe: p.Type => // (selector...).(x:Term)
 //              println(s"X=$tpe")
 
@@ -144,11 +138,11 @@ object TreeMapper {
                       val c1 = c
                         .down(dd)
                         .mark(ivk.signature, dd) ::= p.Stmt.Var(named, Some(ivk))
-                      (p.Term.Select(Nil, named), c1).success.deferred
+                      (p.Term.Select(Nil, named), c1).success
                     case dd: q.DefDef =>
                       c.fail(s"Unexpected arg list ${dd.paramss} for a 0-arg def via instance ref ${select.repr}")
                     case vd: q.ValDef =>
-                      (p.Term.Select(xs :+ x, p.Named(name, tpe)), c).success.deferred
+                      (p.Term.Select(xs :+ x, p.Named(name, tpe)), c).success
 
 //                      c.fail(s"$vd via instance ref ${select.repr} was not intercepted by the outliner!?")
                     case bad => c.fail(s"Unsupported construct $bad via instance ref ${select.repr}")
@@ -166,11 +160,13 @@ object TreeMapper {
                       val c1 = c
                         .down(dd)
                         .mark(ivk.signature, dd) ::= p.Stmt.Var(named, Some(ivk))
-                      (p.Term.Select(Nil, named), c1).success.deferred
+                      (p.Term.Select(Nil, named), c1).success
                     case dd: q.DefDef =>
                       c.fail(s"Unexpected arg list ${dd.paramss} for a 0-arg def via module ref ${module.repr}")
                     case vd: q.ValDef =>
-                      c.fail(s"`${vd.show}` via module ref ${module.repr} was not intercepted by the outliner!? Bindings:${c.refs}")
+                      c.fail(
+                        s"`${vd.show}` via module ref ${module.repr} was not intercepted by the outliner!? Bindings:${c.refs}"
+                      )
                     case bad => c.fail(s"Unsupported construct $bad via module ref ${module.repr}")
                   }
                 case (term: p.Term, c) =>
@@ -181,7 +177,7 @@ object TreeMapper {
                       val named              = c.named(tpe)
                       val ivk: p.Expr.Invoke = p.Expr.Invoke(fnSym, Some(term), Nil, tpe)
                       val c1                 = c.down(dd).mark(ivk.signature, dd) ::= p.Stmt.Var(named, Some(ivk))
-                      (p.Term.Select(Nil, named), c1).success.deferred
+                      (p.Term.Select(Nil, named), c1).success
                     case bad => c.fail(s"Unsupported construct $bad via instance ref ${term.repr}")
                   }
                 case (bad, c) =>
@@ -195,9 +191,9 @@ object TreeMapper {
               val sym = p.Sym(s.symbol.name)
               c.mapTerm(root).flatMap {
                 case (receiver: p.Term, c) => // `val f : X => Y = ??? | def f(x: X): Y = ???`
-                  (q.ErasedMethodVal(receiver, sym, ect, defdef), c /* .mark(sym, defdef) */ ).success.deferred
+                  (q.ErasedMethodVal(receiver, sym, ect, defdef), c /* .mark(sym, defdef) */ ).success
                 case (q.ErasedModuleSelect(module), c) =>
-                  (q.ErasedMethodVal(module, sym, ect, defdef), c /* .mark(module ~ sym, defdef)*/ ).success.deferred
+                  (q.ErasedMethodVal(module, sym, ect, defdef), c /* .mark(module ~ sym, defdef)*/ ).success
                 case (bad, c) => c.fail(s"Unexpected root of a select that leads to an erased ${tpe} type: ${bad}")
               }
             case et: q.ErasedClsTpe => c.fail[(q.Val, q.FnContext)](s"Saw ${et}")
@@ -207,14 +203,14 @@ object TreeMapper {
       case (None, x) => c.fail(s"Ref ${x} with tpe=${x.tpe} was not identified at closure args stage")
     }
 
-    def mapTerm(term: q.Term): Deferred[(q.Val, q.FnContext)] = {
+    def mapTerm(term: q.Term): Result[(q.Val, q.FnContext)] = {
 
       // println(s">>${term.show} = ${c.stmts.size} ~ ${term}")
 
       term match {
         case q.NamedArg(name, x) => (c !! term).mapTerm(x).map((v, c) => (q.ErasedNamedArg(name, v), c))
         case q.This(_) =>
-          c.typer(term.tpe).subflatMap {
+          c.typer(term.tpe).flatMap {
             case (_, tpe: p.Type, c) => (p.Term.Select(Nil, p.Named("this", tpe)), c).success
             case (_, bad, c)         => s"Unsupported `this` type: ${bad}".fail
           }
@@ -230,8 +226,8 @@ object TreeMapper {
                     println(s"[mapper] type apply of erased fn: ${receiver ~ sym}")
                     (
                       q.ErasedMethodVal(receiver, sym, ect, f),
-                      c                /* .mark(receiver ~ sym, f)*/
-                    ).success.deferred // ofDim
+                      c       /* .mark(receiver ~ sym, f)*/
+                    ).success // ofDim
                   case _ => ???
                 }
               case bad => c.fail[(q.Val, q.FnContext)](s"Saw ${bad}")
@@ -308,8 +304,8 @@ object TreeMapper {
             // XXX although this behaviour wasn't explicitly documented, it appears that with named args,
             // the compiler will order the args correctly beforehand so we don't have to deal with it here
             argTerms <- argVals.traverse {
-              case q.ErasedNamedArg(_, t: p.Term) => t.success.deferred
-              case t: p.Term                      => t.success.deferred
+              case q.ErasedNamedArg(_, t: p.Term) => t.success
+              case t: p.Term                      => t.success
               case bad                            => c.fail(s"Illegal ${bad}")
             }
 //            _ = println("=== " + argTpes)
@@ -327,7 +323,7 @@ object TreeMapper {
 //            _ = println(s"[mapper] apply function value: ${funVal}")
 
             (ref, c) <- (argTerms, funVal) match {
-              case (Nil, x) => (x, c).success.deferred
+              case (Nil, x) => (x, c).success
               case (_, q.ErasedMethodVal(receiver: p.Term.Select, p.Sym("<init>" :: Nil), fnTpe, _)) => // ctor call
                 (for {
                   sdef <- (fnTpe.rtn match {
@@ -349,7 +345,7 @@ object TreeMapper {
                   setMemberExprs = sdef.members.zip(argTerms).map { (member, value) =>
                     p.Stmt.Mut(p.Term.Select(receiver.init :+ receiver.last, member), p.Expr.Alias(value), copy = false)
                   }
-                } yield (receiver, c.::=(setMemberExprs*))).deferred
+                } yield (receiver, c.::=(setMemberExprs*)))
               case (_, m @ q.ErasedMethodVal(module: p.Sym, sym, tpe, underlying)) => // module call
                 val t = tpe.rtn match {
                   case t: p.Type => t
@@ -366,14 +362,14 @@ object TreeMapper {
                     ???
                 } // TODO handle multiple arg list methods
                 val ivk: p.Expr.Invoke = p.Expr.Invoke(module ~ sym, None, argTerms, t)
-                mkReturn(ivk, c.mark(ivk.signature, underlying)).success.deferred
+                mkReturn(ivk, c.mark(ivk.signature, underlying)).success
               case (_, q.ErasedMethodVal(receiver: p.Term, sym, tpe, underlying)) => // instance call
                 val t = tpe.rtn match {
                   case t: p.Type => t
                   case _         => ???
                 }
                 val ivk: p.Expr.Invoke = p.Expr.Invoke(sym, Some(receiver), argTerms, t)
-                mkReturn(ivk, c.mark(ivk.signature, underlying)).success.deferred
+                mkReturn(ivk, c.mark(ivk.signature, underlying)).success
             }
 
           } yield (ref, c)
@@ -399,7 +395,7 @@ object TreeMapper {
                     case t: p.Term            => c ::= p.Stmt.Mut(s, p.Expr.Alias(t), copy = false)
                     case p: q.ErasedMethodVal => ??? // c.suspend(s)(p)
                   }
-                ).pure
+                ).success
               case bad => c.fail(s"Illegal assign LHS,RHS: ${bad}")
             }
           } yield r
@@ -413,7 +409,7 @@ object TreeMapper {
             // cond, then, else, must be fully applied here
             failIfPartial = (name: String, v: q.Val) =>
               v match {
-                case t: p.Term => t.success.deferred
+                case t: p.Term => t.success
                 case partial: q.ErasedMethodVal =>
                   c.fail(s"$name term of an if-then-else statement (${term.show}) is partial ($partial)")
               }
@@ -422,12 +418,13 @@ object TreeMapper {
             thenRef <- failIfPartial("then", thenVal)
             elseRef <- failIfPartial("else", elseVal)
             tpe <- tpe match {
-              case tpe: p.Type => tpe.success.deferred
+              case tpe: p.Type => tpe.success
               case bad         => c.fail(s"illegal erased type ${bad}")
             }
 
-            _ <- (if (condRef.tpe != p.Type.Bool) s"Cond must be a Bool ref, got ${condRef}".fail
-                  else ().success).deferred
+            _ <-
+              (if (condRef.tpe != p.Type.Bool) s"Cond must be a Bool ref, got ${condRef}".fail
+               else ().success)
             cond <- (thenRef, elseRef) match {
               case ((thenRef), (elseRef)) if thenRef.tpe == tpe && elseRef.tpe == tpe =>
                 val name   = ifCtx.named(tpe)
@@ -437,9 +434,9 @@ object TreeMapper {
                   thenCtx.stmts :+ p.Stmt.Mut(p.Term.Select(Nil, name), p.Expr.Alias(thenRef), copy = false),
                   elseCtx.stmts :+ p.Stmt.Mut(p.Term.Select(Nil, name), p.Expr.Alias(elseRef), copy = false)
                 )
-                (p.Term.Select(Nil, name), elseCtx.replaceStmts(ifCtx.stmts :+ result :+ cond)).success.deferred
+                (p.Term.Select(Nil, name), elseCtx.replaceStmts(ifCtx.stmts :+ result :+ cond)).success
               case _ =>
-                s"condition unification failure, then=${thenRef} else=${elseRef}, expr tpe=${tpe}".fail.deferred
+                s"condition unification failure, then=${thenRef} else=${elseRef}, expr tpe=${tpe}".fail
             }
           } yield cond
         case q.While(cond, body) =>
@@ -447,9 +444,9 @@ object TreeMapper {
             (condVal, condCtx) <- c.noStmts.down(term).mapTerm(cond)
             (_, bodyCtx)       <- condCtx.noStmts.mapTerm(body)
             condRef <- condVal match {
-              case t: p.Term => t.success.deferred
+              case t: p.Term => t.success
               case partial: q.ErasedMethodVal =>
-                s"condition term of a while expression (${term.show}) is partial ($partial)".fail.deferred
+                s"condition term of a while expression (${term.show}) is partial ($partial)".fail
             }
           } yield (
             p.Term.UnitConst,

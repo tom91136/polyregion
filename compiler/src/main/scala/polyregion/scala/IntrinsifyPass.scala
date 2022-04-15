@@ -8,12 +8,12 @@ import scala.annotation.tailrec
 
 object IntrinsifyPass {
 
-  def intrinsify(using q: Quoted)(c: q.FnContext): q.FnContext = {
-    val (xs, instanceSigs) = c.stmts.zipWithIndex.foldMapM(intrinsifyInstanceApply(_, _))
+  def intrinsify(using q: Quoted)(stmts: List[p.Stmt], dep: q.FnDependencies): (List[p.Stmt], q.FnDependencies) = {
+    val (xs, instanceSigs) = stmts.zipWithIndex.foldMapM(intrinsifyInstanceApply(_, _))
     val (ys, moduleSigs)   = xs.zipWithIndex.foldMapM(intrinsifyModuleApply(_, _))
-    println(s"Elim : ${c.defs.map(_._1)} -  ${(instanceSigs ++ moduleSigs)} ")
-    val eliminated = c.defs -- (instanceSigs ++ moduleSigs)
-    c.replaceStmts(ys).copy(defs = eliminated)
+    println(s"Elim : ${dep.defs.map(_._1)} -  ${(instanceSigs ++ moduleSigs)} ")
+    val eliminated = dep.defs -- (instanceSigs ++ moduleSigs)
+    (ys, dep.copy(defs = eliminated))
   }
 
   private final inline val DegreesToRadians = 0.017453292519943295

@@ -1,24 +1,28 @@
 package polyregion.scala
 
 import cats.syntax.all.*
+import cats.syntax.validated
+import fansi.Str
 import polyregion.ast.pass.{FnInlinePass, UnitExprElisionPass, VerifyPass}
 import polyregion.ast.{PolyAst as p, *}
 import polyregion.prism.StdLib
 
 import java.nio.file.Paths
+import scala.collection.immutable.VectorMap
 import scala.quoted.Expr
 
 object Compiler {
 
-  import RefOutliner.*
+  import Remapper.*
   import Retyper.*
-  import TreeMapper.*
 
-  private def runLocalOptPass(using Quoted) = //
-    IntrinsifyPass.intrinsify // >>> MirrorPass.mirror(StdLib.Functions)
+  private def runLocalOptPass(using Quoted) = IntrinsifyPass.intrinsify
 
-  private val GlobalOptPasses = //
-    FnInlinePass.inlineAll >>> UnitExprElisionPass.eliminateUnitExpr // >>> FnPtrReturnToOutParamPass.transform
+  private def runProgramOptPasses(program: p.Program)(log: Log): Result[(p.Program, Log)] = {
+    val (p0, l0) = FnInlinePass.run(program)(log)
+    val (p1, l1) = UnitExprElisionPass.run(p0)(l0)
+    (p1, l1).success
+  }
 
   // kind is there for cases where we have `object A extends B; abstract class B {def m = ???}`, B.m has receiver but A.m doesn't
   def deriveSignature(using q: Quoted)(f: q.DefDef, concreteKind: q.ClassKind): Result[p.Signature] = {
@@ -43,241 +47,290 @@ object Compiler {
     } yield p.Signature(p.Sym(receiver.fold(f.symbol.fullName)(_ => f.symbol.name)), receiver, fnArgsTpes, fnRtnTpe)
   }
 
-  def compileFnAndDependencies(using
-      q: Quoted
-  )(f: q.DefDef): Result[(p.Function, List[p.Function], List[p.StructDef])] =
-    compileFn(f).flatMap { (deps, fn) =>
-      (deps.defs.values.toList, List.empty[p.Function], List.empty[p.StructDef])
-        .iterateWhileM { case (remaining, fnAcc, sdefAcc) =>
-          remaining
-            .traverse(compileFn(_))
-            .map { xs =>
-              val (depss, ys) = xs.unzip
-              val deps        = depss.combineAll
-              (deps.defs.values.toList, ys ::: fnAcc, deps.clss.values.toList ::: sdefAcc)
-            }
-        }(_._1.nonEmpty)
-        .map((_, fns, sdefs) => (fn, fns, sdefs))
+  def compileAllDependencies(using q: Quoted)(
+      deps: q.FnDependencies,
+      fnLut: Map[p.Signature, p.Function] = Map.empty,
+      clsLut: Map[p.Sym, p.StructDef] = Map.empty
+  )(log: Log): Result[(List[p.Function], q.FnDependencies, Log)] = (deps.defs, List.empty[p.Function], deps, log)
+    .iterateWhileM { case (remaining, fnAcc, depsAcc, log) =>
+      remaining.toList
+        .foldLeftM((fnAcc, depsAcc, log)) { case ((xs, deps, log), (defSig, defDef)) =>
+          fnLut.get(defSig) match {
+            case Some(x) => (x :: xs, deps, log.info_(s"Dependent method replaced: ${defSig}")).success
+            case None    => compileFn(defDef)(log).map { case ((x, deps1), log) => (x :: xs, deps |+| deps1, log) }
+          }
+        }
+        .map((xs, deps, log) =>
+          (deps.defs, xs, deps.copy(defs = Map.empty, clss = deps.clss.map((k, v) => k -> clsLut.getOrElse(k, v))), log)
+        )
+    }(_._1.nonEmpty)
+    .map(_.drop(1))
 
+  def compileFn(using q: Quoted)(f: q.DefDef)(log: Log): Result[((p.Function, q.FnDependencies), Log)] =
+    log.mark(s"Compile DefDef: ${f.name}") { log =>
+      for {
+
+        log <- log.info(s"Body", f.show(using q.Printer.TreeAnsiCode))
+        _ = println(s"Compile DefDef: ${f.name}")
+
+        rhs <- f.rhs.failIfEmpty(s"Function does not contain an implementation: (in ${f.symbol.maybeOwner}) ${f.show}")
+
+        // first we run the typer on the return type to see if we can just return a term based on the type
+        (fnRtnValue, fnRtnTpe, fnRtnDeps) <- Retyper.typer1(f.returnTpt.tpe)
+        // we then validate the return types
+        fnRtnTpe <- fnRtnTpe match {
+          case tpe: p.Type => tpe.success
+          case bad         => s"Bad function return type $bad".fail
+        }
+        // we also run the typer on all the def's arguments
+        // TODO handle default value of args (ValDef.rhs)
+        (fnArgs, fnArgDeps) <- f.paramss.flatMap(_.params).foldMapM {
+          case arg: q.ValDef => // all args should come in the form of a ValDef
+            Retyper.typer1(arg.tpt.tpe).flatMap {
+              case (_, t: p.Type, c) => ((arg, p.Named(arg.name, t)) :: Nil, c).success
+              case (_, bad, c)       => s"Erased arg type encountered $bad".fail
+            }
+          case _ => ???
+        }
+        // and work out whether this def is part a class instance or free-standing
+        // class defs will have a `this` receiver arg with the appropriate type
+        (owningClass, fnReceiverDeps) <- Retyper.clsSymTyper1(f.symbol.owner)
+        log                           <- log.info(s"Method owner: $owningClass")
+        receiver <- owningClass match {
+          case s: p.Type.Struct        => Some(p.Named("this", s)).success
+          case q.ErasedClsTpe(_, _, _) => None.success
+          case x                       => s"Illegal receiver: ${x}".fail
+        }
+
+        log <- log.info("DefDef arguments", fnArgs.map((a, n) => s"${a}(symbol=${a.symbol}) ~> $n")*)
+
+        // finally, we compile the def body like a closure or just return the term if we have one
+        ((rhsStmts, rhsDeps, rhsCaptures), log) <- fnRtnValue match {
+          case Some(t) => ((p.Stmt.Return(p.Expr.Alias(t)) :: Nil, q.FnDependencies(), Nil), log).success
+          case None =>
+            for {
+              // when run the outliner first and then replace any reference to function args or `this`
+              // whatever is left will be module references which needs to be added to FnDep's var table
+              ((captures, captureDeps), log) <- RefOutliner.outline(rhs)(log)
+              (capturedNames, captureScope) <- captures
+                .foldMapM[Result, (List[(p.Named, q.Ref)], List[(q.Ref, p.Term)])] {
+                  case (root, ref, value, tpe: p.Type)
+                      if root == ref && root.symbol.owner == f.symbol.owner && receiver.nonEmpty =>
+                    (Nil, Nil).success // this is a reference to `this`
+                  case (root, ref, value, tpe: p.Type) =>
+                    // this is a generic reference possibly from the function argument
+                    val isArg = fnArgs.exists { (arg, n) =>
+                      arg.symbol == ref.underlying.symbol // || arg.symbol == root.underlying.symbol
+                    }
+                    if (isArg) (Nil, Nil).success
+                    else
+                      value match {
+                        case Some(x) => (Nil, (ref -> x) :: Nil).success
+                        case None =>
+                          val name = ref match {
+                            case s @ q.Select(_, name) => s"_ref_${name}_${s.pos.startLine}_"
+                            case i @ q.Ident(_)        => i.name
+                          }
+                          val named = p.Named(name, tpe)
+                          ((named -> ref) :: Nil, (ref -> p.Term.Select(Nil, named)) :: Nil).success
+                      }
+
+                  case (root, ref, value, bad) => ???
+                }
+
+              // log <- log.info("Captured vars before removal", fnDeps.vars.toList.map(_.toString)*)
+              // log <- log.info("Captured vars after removal", fnDepsWithoutExtraCaptures.vars.toList.map(_.toString)*)
+
+              // we pass an empty var table because
+              ((rhsStmts, rhsTpe, rhsDeps), log) <- compileTerm(rhs, captureScope.toMap)(log)
+              _ = println(s"DDD=${f.name} = ${rhsDeps.defs.values.map(x => x.show).toList}")
+              log <- log.info("External captures", capturedNames.map((n, r) => s"$r(symbol=${r.symbol}) ~> ${n.repr}")*)
+
+            } yield (
+              (
+                rhsStmts,
+                captureDeps |+| rhsDeps |+| q.FnDependencies( /* vars = capturedNames.toMap */ ),
+                capturedNames
+              ),
+              log
+            )
+        }
+
+        fnDeps <- (fnRtnDeps |+| fnArgDeps |+| fnReceiverDeps |+| rhsDeps).success
+
+        compiledFn = p.Function(
+          name = p.Sym(receiver.fold(f.symbol.fullName)(_ => f.symbol.name)),
+          receiver = receiver,
+          args = fnArgs.map(_._2),
+          captures = rhsCaptures.map(_._1),
+          rtn = fnRtnTpe,
+          body = rhsStmts
+        )
+
+        log <- log.info("Result", compiledFn.repr)
+
+      } yield ((compiledFn, fnDeps), log)
     }
 
-  def compileFn(using q: Quoted)(f: q.DefDef): Result[(q.FnDependencies, p.Function)] = {
-    println(s" -> Compile dependent method: ${f.show}")
-    println(s" -> body(long):\n${f.show(using q.Printer.TreeAnsiCode).indent_(4)}")
+  def compileTerm(using q: Quoted)(term: q.Term, scope: Map[q.Ref, p.Term])(
+      log: Log
+  ): Result[((List[p.Stmt], p.Type, q.FnDependencies), Log)] =
+    log.mark(s"Compile term: ${term.pos.sourceFile.name}:${term.pos.startLine}~${term.pos.endLine}") { log =>
+      for {
 
-    (for {
-      rhs <- f.rhs
-        .failIfEmpty(s"Function does not contain an implementation: (in ${f.symbol.maybeOwner}) ${f.show}")
-        .deferred
+        log <- log.info("Body (AST)", pprint.tokenize(term, indent = 1, showFieldNames = true).mkString)
+        log <- log.info("Body (Ascii)", term.show(using q.Printer.TreeAnsiCode))
 
-      (fnRtnValue, fnRtnTpe, c) <- q.FnContext().typer(f.returnTpt.tpe)
+        // first, outline what variables this term captures
+        // ((typedExternalRefs, c), log) <- RefOutliner.outline(term)(log)
+        // Map[q.Ref, p.Named | p.Term]
 
-      (typedExternalRefs, c0) <- outline(rhs).deferred
+        // TODO if we have a reference with an erased closure type, we need to find the
+        // implementation and suspend it to FnContext otherwise we won't find the suspension in mapper
 
-      // TODO fuse with compileClosure 
-      capturedNames = typedExternalRefs
-        .collect {
-          case (r, q.Reference(name: String, tpe: p.Type)) if tpe != p.Type.Unit => (p.Named(name, tpe), r)
-          case (r, q.Reference(name: p.Term, tpe: p.Type))                       => ??? // TODO handle default value
+        // we can discard incoming references here safely iff we also never use them in the resulting p.Function
+        // capturedNames = typedExternalRefs
+        //   .collect {
+        //     case (root, ref, q.Reference(name: String, tpe: p.Type)) if tpe != p.Type.Unit =>
+        //       // p.Named | p.Term
+
+        //       (p.Named(name, tpe), (root, ref))
+        //     case (root, ref, q.Reference(name: p.Term, tpe: p.Type)) => ??? // TODO handle default value
+        //   }
+        // // .distinctBy(_._2.symbol.pos)
+
+        // xx = typedExternalRefs
+        //   .map[(q.Ref, p.Named | p.Term)] { (root, ref, value, tpe) =>
+        //     (value, tpe) match {
+        //       case (Some(x), _) => ref -> x
+        //       case (None, t: p.Type) =>
+        //         val name = ref match {
+        //           case s @ q.Select(_, name) => s"_ref_${name}_${s.pos.startLine}_"
+        //           case i @ q.Ident(_)        => i.name
+        //         }
+        //         ref -> p.Named(name, t)
+        //       case (None, bad) => ???
+        //     }
+        //   }
+        //   .toMap
+
+        (termValue, c) <- q
+          .FnContext()
+          .inject(scope)
+          .mapTerm(term)
+
+        (_, termTpe, c) <- c.typer(term.tpe)
+
+        // validate term type and values
+        termTpe <- termTpe match {
+          case tpe: p.Type => tpe.success
+          case bad         => s"Bad function return type $bad".fail
         }
-        .distinctBy(_._2.symbol.pos)
-
-      c = c0
-      .inject(typedExternalRefs.map((tree, ref) => tree.symbol -> ref).toMap)
-      
-      _ = println(s"[] = ${typedExternalRefs}")
-      _ = println(s"c.refs = ${c.refs}")
-
-      // fn <- c.typer(f.symbol.owner)
-
-      fnRtnTpe <- fnRtnTpe match {
-        case tpe: p.Type => tpe.success.deferred
-        case bad         => s"bad function return type $bad".fail.deferred
-      }
-
-      args = f.paramss
-        .flatMap(_.params)
-        .collect { case d: q.ValDef => d }
-
-      // TODO handle default value (ValDef.rhs)
-      _ = println(s"Go1 ${c.refs} ${args}")
-
-      (namedArgs, c) <- args.foldMapM(arg =>
-        c.typer(arg.tpt.tpe).subflatMap {
-          case (_, t: p.Type, c) => (p.Named(arg.name, t) :: Nil, c).success
-          case (_, bad, c)       => s"erased arg type encountered $bad".fail
+        termValue <- termValue match {
+          case term: p.Term => term.success
+          case bad          => s"Bad function return value $bad".fail
         }
-      )
+        _ <-
+          if (termTpe != termValue.tpe) {
+            s"Term type ($termTpe) is not the same as term value type (${termValue.tpe}), term was $termValue".fail
+          } else ().success
 
-      _ = println(s"Go2 ${c.refs}")
+        // (captures, names) = capturedNames.toList.map((n, r) => (r -> n.tpe, n)).unzip
 
+        statements = c.stmts :+ p.Stmt.Return(p.Expr.Alias(termValue))
 
-      (owningClass, c) <- c.clsSymTyper(f.symbol.owner).deferred
-      _ = println(s"[compiler] found: ${f} = ${owningClass}")
+        (optimisedStmts, optimisedFnDeps) = runLocalOptPass(statements, c.deps)
 
-      receiver <- owningClass match {
-        case s: p.Type.Struct        => Some(p.Named("this", s)).success.deferred
-        case q.ErasedClsTpe(_, _, _) => None.success.deferred
-        case x                       => s"Illegal receiver: ${x}".fail.deferred
-      }
+      } yield ((optimisedStmts, termTpe, optimisedFnDeps), log)
+    }
 
-      body <- fnRtnValue.fold(f.rhs.traverse(c.mapTerm(_)))(x => Some((x, c)).success.deferred)
-      _ = println("Done")
+  def compileExpr(using q: Quoted)(expr: Expr[Any]): Result[(List[(p.Named, q.Ref)], p.Program, Log)] = for {
+    log <- Log("Expr compiler")
+    term = expr.asTerm
+    // generate a name for the expr first
+    exprName = s"${term.pos.sourceFile.name}:${term.pos.startLine}-${term.pos.endLine}"
+    log <- log.info(s"Expr name: `${exprName}`")
 
-      mkFn = (xs: List[p.Stmt]) =>
-        p.Function(p.Sym(receiver.fold(f.symbol.fullName)(_ => f.symbol.name)), receiver, namedArgs, fnRtnTpe, xs)
-      runOpt = (c: q.FnContext) => runLocalOptPass(c)
+    // outline here
 
-    } yield body match {
-      case None =>
-        (runOpt(c).deps, mkFn(Nil))
-      case Some((value, preOptCtx)) =>
-        val term = value match {
-          case t: p.Term => t
-          case _         => ???
-        }
-
-        val c = runOpt(preOptCtx.mapStmts(_ :+ p.Stmt.Return(p.Expr.Alias(term))))
-
-        val deptFn = mkFn((c.stmts))
-
-        println(s"=====Dependent method ${deptFn.name} ====")
-        println(deptFn.repr)
-
-        (c.deps.copy(vars = capturedNames.toMap), deptFn)
-    }).resolve
-  }
-
-  def compileClosure(using
-      q: Quoted
-  )(x: Expr[Any]): Result[(p.Function, q.FnDependencies /* , List[(q.Ref, p.Type)] */ )] = {
-
-    val term        = x.asTerm
-    val pos         = term.pos
-    val closureName = s"${pos.sourceFile.name}:${pos.startLine}-${pos.endLine}"
-
-    println(s"========${closureName}=========")
-    println(Paths.get(".").toAbsolutePath)
-    println(s" -> name:               ${closureName}")
-    println(s" -> body(Quotes):\n")
-    pprint.pprintln(x.asTerm, indent = 2, showFieldNames = true)
-    println(s" -> body(long):\n${x.asTerm.show(using q.Printer.TreeAnsiCode).indent_(4)}")
-
-    for {
-      (typedExternalRefs, c) <- outline(term)
-      // TODO if we have a reference with an erased closure type, we need to find the
-      // implementation and suspend it to FnContext otherwise we won't find the suspension in mapper
-
-      // we can discard incoming references here safely iff we also never use them in the resulting p.Function
-      capturedNames = typedExternalRefs
-        .collect {
-          case (r, q.Reference(name: String, tpe: p.Type)) if tpe != p.Type.Unit => (p.Named(name, tpe), r)
-          case (r, q.Reference(name: p.Term, tpe: p.Type))                       => ??? // TODO handle default value
-        }
-        .distinctBy(_._2.symbol.pos)
-
-      _ = println(
-        s" -> all refs (typed):         \n${typedExternalRefs.map((tree, ref) => s"$ref => $tree").mkString("\n").indent_(4)}"
-      )
-      _ = println(s" -> captured refs:    \n${capturedNames.map(_._1.repr).mkString("\n").indent_(4)}")
-
-      (returnTerm, c) <- c
-        .inject(typedExternalRefs.map((ref, r) => ref.symbol -> r).toMap)
-        .mapTerm(term)
-        .resolve
-
-      (_, fnTpe, preOptCtx) <- c.typer(term.tpe).resolve
-
-      fnTpe <- fnTpe match {
-        case tpe: p.Type => tpe.success
-        case bad         => s"bad function return type $bad".fail
-      }
-
-      returnTerm <- returnTerm match {
-        case term: p.Term => term.success
-        case bad          => s"bad function return value $bad".fail
-      }
-
-      _ <-
-        if (fnTpe != returnTerm.tpe) {
-          s"lambda tpe ($fnTpe) != last term tpe (${returnTerm.tpe}), term was $returnTerm".fail
-        } else ().success
-
-      // (captures, names) = capturedNames.toList.map((n, r) => (r -> n.tpe, n)).unzip
-
-      c = runLocalOptPass(preOptCtx)
-
-      closureFn = p.Function(
-        p.Sym(closureName :: Nil),
-        None,
-        Nil, // capturedNames.map(_._1).sortBy(_.symbol).toList,
-        fnTpe,
-        (c.stmts :+ p.Stmt.Return(p.Expr.Alias(returnTerm)))
-      )
-    } yield (closureFn, c.deps.copy(vars = capturedNames.toMap))
-  }
-
-  def compileExpr(using q: Quoted)(x: Expr[Any]): Result[
-    (
-        // List[p.Type],
-        Map[p.Named, q.Ref],
-        p.Program
-    )
-  ] =
-    for {
-
-      (closureFn, closureDeps) <- compileClosure(x)
-
-      _ = println("=======\nmain closure compiled\n=======")
-      _ = println(s"${closureFn.repr}")
-
-      _ = println(s" -> dependent methods = \n${closureDeps.defs.keys.map("\t" + _.repr).mkString("\n")}")
-      _ = println(s" -> dependent structs = \n${closureDeps.clss.values.map("\t" + _.repr).mkString("\n")}")
-
-      // TODO rewrite me, this looks like garbage
-      (deps, compiledFns) <- (closureDeps, List.empty[p.Function]).iterateWhileM { case (deps, fs) =>
-        deps.defs.toList
-          .traverse { case (sig: p.Signature, defdef) =>
-            StdLib.Functions.get(sig) match {
-              case Some(x) => (q.FnDependencies(), x).success
-              case None    => compileFn(defdef)
+    ((captures, captureDeps), log) <- RefOutliner.outline(term)(log)
+    (capturedNames, captureScope) = captures.foldMap[(List[(p.Named, q.Ref)], List[(q.Ref, p.Term)])] {
+      (root, ref, value, tpe) =>
+        (value, tpe) match {
+          case (Some(x), _) => (Nil, (ref -> x) :: Nil)
+          case (None, t: p.Type) =>
+            val name = ref match {
+              case s @ q.Select(_, _) => s"_capture_${s.show}_${s.pos.startLine}_"
+              case i @ q.Ident(_)     => s"_capture_${i.name}_${i.pos.startLine}_"
             }
-          }
-          .map(xs => xs.unzip.bimap(_.combineAll, _ ++ fs))
-          .map { (d, f) =>
+            val named = p.Named(name, t)
+            ((named -> ref) :: Nil, (ref -> p.Term.Select(Nil, named)) :: Nil)
+          case (None, bad) => ???
+        }
+    }
 
-            println(s" -> more dependent methods = \n${d.defs.keys.map("\t" + _.repr).mkString("\n")}")
+    ((exprStmts, exprTpe, exprDeps), log) <- compileTerm(term, captureScope.toMap)(log)
+    log                                   <- log.info("Expr Stmts", exprStmts.map(_.repr).mkString("\n"))
+    log      <- log.info("External captures", capturedNames.map((n, r) => s"$r(symbol=${r.symbol}) ~> ${n.repr}")*)
+    exprDeps <- (exprDeps |+| captureDeps |+| q.FnDependencies( /* vars = xxx.toMap*/ )).success
 
-            (d |+| deps.copy(defs = Map()), f)
-          }
-      }(_._1.defs.nonEmpty)
+    // we got a compiled term, compile all dependencies as well
+    log <- log.info(s"Expr dependent methods", exprDeps.defs.map(_.toString).toList*)
+    log <- log.info(s"Expr dependent structs", exprDeps.clss.map(_.toString).toList*)
+    // log                 <- log.info(s"Expr dependent vars   ", exprDeps.vars.map(_.toString).toList*)
+    (depFns, deps, log) <- compileAllDependencies(exprDeps, StdLib.Functions, StdLib.StructDefs)(log)
+    log                 <- log.info(s"Expr+Deps Dependent methods", deps.defs.map(_.toString).toList*)
+    log                 <- log.info(s"Expr+Deps Dependent structs", deps.clss.map(_.toString).toList*)
+    // log                 <- log.info(s"Expr+Deps Dependent vars   ", deps.vars.map(_.toString).toList*)
 
-      _ = println(s" -> dependent methods = ${deps.defs.size}")
-      _ = println(s" -> dependent structs = ${deps.clss.size}")
-      _ = println(s" -> dependent vars    = ${deps.vars.size}")
-
-      allFns = closureFn.copy(args = closureFn.args ++ deps.vars.keys.toList.sortBy(_.symbol)) :: compiledFns
-
-      optimised = GlobalOptPasses(allFns)
-
-      _ = println(s"PolyAST:\n==>${optimised.map(_.repr).mkString("\n==>")}")
-      clsDefs = deps.clss.values.toList.map { c =>
-        StdLib.StructDefs.getOrElse(c.name, c)
-      }
-
-      // _ = VerifyPass.transform(optimised.take(1), clsDefs)
-
-      _ = println(s"ClsDefs = ${clsDefs}")
-
-      // outReturnParams = optimised.head.args.lastIndexOfSlice(closureFn.args) match {
-      //   case -1 => ???
-      //   case n  => optimised.head.args.take(n).map(_.tpe)
-      // }
-
-    } yield (
-      // outReturnParams,
-      deps.vars,
-      p.Program(optimised.head, optimised.tail, clsDefs)
+    // sort the captures so that the order is stable for codegen
+    // captures = deps.vars.toList.sortBy(_._1.symbol)
+    captures = capturedNames.toList // .sortBy(_._2.symbol)
+    exprFn = p.Function(
+      name = p.Sym(exprName),
+      receiver = None,
+      args = Nil,
+      captures = captures.map(_._1),
+      rtn = exprTpe,
+      body = exprStmts
     )
+    unoptimisedProgram = p.Program(exprFn, depFns, deps.clss.values.toList)
+    log <- log.info(s"Program compiled, dependencies: ${unoptimisedProgram.functions.size}")
+    log <- log.info(s"Program compiled, structures", unoptimisedProgram.defs.map(_.repr)*)
+
+    // _ = println(log.render().mkString("\n"))
+    // verify before optimisation
+    (unoptimisedVerification, log) <- VerifyPass.run(unoptimisedProgram)(log).success
+    log <- log.info(
+      s"Verification (unopt)",
+      unoptimisedVerification.map((f, xs) => s"${f.signatureRepr}\nE=${xs.map("\t->" + _).mkString("\n")}")*
+    )
+    _ <-
+      if (unoptimisedVerification.exists(_._2.nonEmpty))
+        s"Validation failed (unopt, error=${unoptimisedVerification.map(_._2.size).sum})".fail
+      else ().success
+
+    // _ = println(log.render().mkString("\n"))
+
+    // run the global optimiser
+    (optimisedProgram, log) <- runProgramOptPasses(unoptimisedProgram)(log)
+
+    // verify again after optimisation
+    (optimisedVerification, log) <- VerifyPass.run(optimisedProgram)(log).success
+    log <- log.info(
+      s"Verification(opt)",
+      optimisedVerification.map((f, xs) => s"${f.signatureRepr}\n${xs.map("\t" + _).mkString("\n")}")*
+    )
+    _ <-
+      if (optimisedVerification.exists(_._2.nonEmpty))
+        s"Validation failed (opt, error=${optimisedVerification.map(_._2.size).sum})".fail
+      else ().success
+
+    log <- log.info(s"Program optimised, dependencies", optimisedProgram.functions.map(_.repr)*)
+    log <- log.info(s"Program optimised, entry", optimisedProgram.entry.repr)
+
+    // _ = println(log.render().mkString("\n"))
+
+  } yield (captures, optimisedProgram, log)
 
 }

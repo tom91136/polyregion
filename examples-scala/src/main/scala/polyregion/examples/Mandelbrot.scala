@@ -137,36 +137,22 @@ object Mandelbrot {
 
     val image = Buffer.ofZeroed[Colour](width * height)
 
-    val x = 1
 
     polyregion.scala.compiletime.offload {
 
-      val m = In.takeOne
-      Colour.Black.packed
-
-      m +x
-
-//      var y = 0
-//      while (y < height) {
-//        var x = 0
-//        while (x < width) {
-//
-//          val c  = Complex(interpolate(x, 0, width, xMin, xMax), interpolate(y, 0, height, yMin, yMax))
-//          val t  = itMandel2(c, maxIter, 4)
-////          val cc = mkColour2(t.c, t.i, maxIter)
-//          val cc =
-//            if (t.i >= maxIter) Colour.Black
-//            else {
-//              val logZn = math.log(t.c.abs) / 2
-//              val nu    = math.log(logZn / math.log(2)) / math.log(2)
-//              Palette2(t.i % 16).mix(Palette2((t.i + 1) % 16), nu)
-//            }
+      var y = 0
+      while (y < height) {
+        var x = 0
+        while (x < width) {
+          val c  = Complex(interpolate(x, 0, width, xMin, xMax), interpolate(y, 0, height, yMin, yMax))
+          val t  = itMandel2(c, maxIter, 4)
+          val cc = mkColour2(t.c, t.i, maxIter)
 //          image(x + (y * width)) = cc
-//          //          buffer(x)(y) = cc
-//          x += 1
-//        }
-//        y += 1
-//      }
+          //          buffer(x)(y) = cc
+          x += 1
+        }
+        y += 1
+      }
     }
 
     image.grouped(width).map(_.toArray).toArray.transpose.copyToArray(buffer)
@@ -220,7 +206,7 @@ object Mandelbrot {
     import java.awt.image.BufferedImage
 
     println("Go")
-    val image = new BufferedImage(1024, 1024, BufferedImage.TYPE_INT_ARGB)
+    val image = new BufferedImage(128, 128, BufferedImage.TYPE_INT_ARGB)
 
     val data = Array.ofDim[Colour](image.getWidth, image.getHeight)
 

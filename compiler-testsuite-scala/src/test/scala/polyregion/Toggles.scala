@@ -5,10 +5,9 @@ object Toggles {
 
   // need impl
   final inline val FunctionCallSuite = false
-  final inline val CaptureSuite     = false
+  final inline val CaptureSuite      = false
 
-
-  final inline val ApiSuite          = false
+  final inline val ApiSuite = false
 
   // ok
   final inline val InlineArraySuite = false

@@ -17,97 +17,117 @@ object RefOutliner {
     case _              => None               // we got a non ref node, give up
   }
 
-  def outline(using q: Quoted)(term: q.Term, c: q.FnContext = q.FnContext()): Result[(Vector[(q.Ref, q.Reference)], q.FnContext)] = {
+  def outline       //
+  (using q: Quoted) //
+  (term: q.Term)    //
+  (log: Log)        //
+      : Result[((Vector[(q.Ident, q.Ref, Option[p.Term], q.Tpe)], q.FnDependencies), Log)] = log.mark(s"Outline") {
+    log =>
+      for {
 
-    val localDefs = q.collectTree(term) {
-      case b : q.ValDef => b :: Nil
-      case _ => Nil
-    }
-    val pool = localDefs.map(_.symbol).toSet
-    println(s" -> LocalDefs=\n${localDefs.map(x => s"\t$x").mkString("\n")}")
+        _ <- ().success
 
+        localDefs = q.collectTree(term) {
+          case b: q.ValDef => b :: Nil
+          case _           => Nil
+        }
+        localDefTable = localDefs.map(_.symbol).toSet
 
-    val foreignRefs = q.collectTree[q.Ref](term) {
+        log <- log.info("Local ValDefs", localDefs.map(_.toString)*)
+
+        foreignRefs = q.collectTree[q.Ref](term) {
 //      case ref: q.Ref if !ref.symbol.maybeOwner.flags.is(q.Flags.Macro) => ref :: Nil
-      case ref: q.Ref if !pool.contains(ref.symbol) => ref :: Nil
-      case _                                                            => Nil
-    }
+          case ref: q.Ref if !localDefTable.contains(ref.symbol) => ref :: Nil
+          case _                                                 => Nil
+        }
 
-    // drop anything that isn't a val ref and resolve root ident
-    val normalisedForeignValRefs = (for {
-      s <- foreignRefs.distinctBy(_.symbol)
-      if !s.symbol.flags.is(q.Flags.Module) && (
-        s.symbol.isValDef ||
-          (s.symbol.isDefDef && s.symbol.flags.is(q.Flags.FieldAccessor))
-      )
+        // drop anything that isn't a val ref and resolve root ident
+        normalisedForeignValRefs = (for {
+          s <- foreignRefs // .distinctBy(_.symbol)
+          if !s.symbol.flags.is(q.Flags.Module) && (
+            s.symbol.isValDef ||
+              (s.symbol.isDefDef && s.symbol.flags.is(q.Flags.FieldAccessor))
+          )
 
-      (root, path) <- idents(s)
+          (root, path) <- idents(s) // s === root.$path
 
-      // the entire path is not foreign if the root is not foreign
-      if !pool.contains(root.symbol)
+          // the entire path is not foreign if the root is not foreign
+          if !localDefTable.contains(root.symbol)
 //      if !root.symbol.maybeOwner.flags.is(q.Flags.Macro)
 
-    } yield (root, path.toVector, s)).sortBy(_._2.length)
+        } yield (root, path.toVector, s)).sortBy(_._2.length)
 
-    // remove refs if already covered by the same root
-    val sharedValRefs =  normalisedForeignValRefs
-      .foldLeft(Vector.empty[(q.Ident, Vector[String], q.Ref)]) {
-        case (acc, x @ (_, _, q.Ident(_))) => acc :+ x
-        case (acc, x @ (root, path, q.Select(i, _))) =>
-          println(s"$root->${path}")
-          acc.filterNot((root0, path0, _) => root.symbol == root0.symbol && path.startsWith(path0)) :+ x
-        case (_, (_, _, r)) =>
-          // not recoverable, the API shape is different
-          q.report.errorAndAbort(s"Unexpected val (reference) kind while outlining", r.asExpr)
-      }
-      .map((_, _, ref) => ref)
+        // remove refs if already covered by the same root
+        sharedValRefs = normalisedForeignValRefs
+          .foldLeft(Vector.empty[(q.Ident, Vector[String], q.Ref)]) {
+            case (acc, x @ (_, _, q.Ident(_))) => acc :+ x
+            case (acc, x @ (root, path, q.Select(i, _))) =>
+              acc.filterNot((root0, path0, _) => root.symbol == root0.symbol && path.startsWith(path0)) :+ x
+            case (_, (_, _, r)) =>
+              // not recoverable, the API shape is different
+              q.report.errorAndAbort(s"Unexpected val (reference) kind while outlining", r.asExpr)
+          }
+          .map((root, _, ref) => (root, ref))
 
-    // final vals in stdlib  :  Flags.{FieldAccessor, Final, Method, StableRealizable}
-    // free methods          :  Flags.{Method}
-    // free vals             :  Flags.{}
+        // final vals in stdlib  :  Flags.{FieldAccessor, Final, Method, StableRealizable}
+        // free methods          :  Flags.{Method}
+        // free vals             :  Flags.{}
 
-    println(
-      s" -> foreign refs:${" " * 9}\n${foreignRefs.map(x => s"${x.show} (${x.symbol}) ~> $x, tpe=${x.tpe.widenTermRefByName.show}").mkString("\n").indent_(4)}"
-    )
-    println(
-      s" -> filtered  (found):${" " * 9}\n${normalisedForeignValRefs.map(x => s"${x._3.show} (${x._3.symbol}) ~> $x").mkString("\n").indent_(4)}"
-    )
-    println(
-      s" -> collapse  (found):${" " * 9}\n${sharedValRefs.map(x => s"${x.symbol} ~> $x").mkString("\n").indent_(4)}"
-    )
+        log <- log.info(
+          "Foreign Refs",
+          foreignRefs.map(x =>
+            s"${x.show}(symbol=${x.symbol}, owner=${x.symbol.owner}) ~> $x, tpe=${x.tpe.widenTermRefByName.show}"
+          )*
+        )
+        log <- log.info(
+          "Normalised",
+          normalisedForeignValRefs.map((root, path, x) =>
+            s"${x.show}(symbol=${x.symbol}, root=$root, path=${path.mkString})"
+          )*
+        )
+        log <- log.info(
+          "Root collapsed",
+          sharedValRefs.map((root, x) => s"${x.show}(symbol=${x.symbol}, owner=${x.symbol.owner}, root=$root)")*
+        )
 
-    val typedRefs = sharedValRefs.foldLeftM((Vector.empty[(q.Ref, q.Reference)], c)) {
-      case ((xs, c), i @ q.Ident(_)) =>
-        c.typer(i.tpe).map {
-          case (Some(x), tpe, c) => (xs :+ (i, q.Reference(x, tpe)), c)
-          case (None, tpe, c)    => (xs :+ (i, q.Reference(i.symbol.name, tpe)), c)
+        // Set[(q.Ident, q.Ref, Option[p.Term])]
+
+        (typedRefs, c) <- sharedValRefs.foldLeftM(
+          (Vector.empty[(q.Ident, q.Ref, Option[p.Term], q.Tpe)], q.FnDependencies())
+        ) { case ((xs, c), (root, i: q.Ref)) =>
+          Retyper.typer1(i.tpe).map { case (term, tpe, c0) =>
+            (xs :+ (root, i, term, tpe), c0 |+| c)
+          }
         }
-      case ((xs, c), s @ q.Select(term, name)) =>
-        c.typer(s.tpe).map {
-          case (Some(x), tpe, c) => (xs :+ (s, q.Reference(x, tpe)), c)
-          case (None, tpe, c)    => (xs :+ (s, q.Reference("_ref_" + name + "_" + s.pos.startLine + "_", tpe)), c)
+
+        // (typedRefs, c) <- sharedValRefs.foldLeftM((Vector.empty[(q.Ident, q.Ref, q.Reference)], c)) {
+        //   case ((xs, c), (root, i @ q.Ident(_))) =>
+        //     c.typer(i.tpe).map {
+        //       case (Some(x), tpe, c) => (xs :+ (root, i, q.Reference(x, tpe)), c)
+        //       case (None, tpe, c)    => (xs :+ (root, i, q.Reference(i.name, tpe)), c)
+        //     }
+        //   case ((xs, c), (root, s @ q.Select(term, name))) =>
+        //     c.typer(s.tpe).map {
+        //       case (Some(x), tpe, c) => (xs :+ (root, s, q.Reference(x, tpe)), c)
+        //       case (None, tpe, c) => (xs :+ (root, s, q.Reference("_ref_" + name + "_" + s.pos.startLine + "_", tpe)), c)
+        //     }
+        //   case (_, r) => s"Unexpected val (${r}) kind while outlining".fail
+        // }
+
+        // remove anything we can't use, like ClassTag
+        filteredTypedRefs = typedRefs.filter {
+          case (_, _, _, q.ErasedClsTpe(Symbols.ClassTag, q.ClassKind.Class, Nil)) => false
+          case _                                                                   => true
         }
-      case (_, r) =>
-        q.report.errorAndAbort(s"Unexpected val (reference) kind while outlining", r.asExpr)
-    }
 
-    // remove anything we can't use, like ClassTag
-    val filteredTypedRefs = typedRefs.map { (xs, c) =>
-      val ys = xs.filter {
-        case (_, q.Reference(_, q.ErasedClsTpe(Symbols.ClassTag, q.ClassKind.Class, Nil))) => false
-        case _                                                                             => true
-      }
-      (ys, c)
-    }
+        log <- log.info(
+          s"Typed",
+          filteredTypedRefs.map((root, ref, value, tpe) =>
+            s"${ref.show}(symbol=${ref.symbol}, owner=${ref.symbol.owner}, root=${root}${if (root == ref) ";self"
+            else ""}) : ${tpe} = ${value}"
+          )*
+        )
 
-    val resolved = filteredTypedRefs.resolve
-    println(resolved match {
-      case Right((xs, c)) =>
-        s" -> typer   (found):${" " * 9}\n${xs.map((r, ref) => s"${r.symbol} ~> $ref").mkString("\n").indent_(4)}"
-      case Left(e) => s" -> typer   (found):${e.getMessage}"
-    })
-
-    resolved
+      } yield ((filteredTypedRefs, c), log)
   }
-
 }

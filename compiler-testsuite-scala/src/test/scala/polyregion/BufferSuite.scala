@@ -69,5 +69,4 @@ class BufferSuite extends BaseSuite {
   Doubles.foreach(assertFill[Double](FillN, _))
   Booleans.foreach(assertFill[Boolean](FillN, _))
 
-
 }

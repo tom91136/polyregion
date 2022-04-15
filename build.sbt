@@ -83,6 +83,7 @@ lazy val compiler = project
     libraryDependencies ++= Seq(
       "net.bytebuddy"  % "byte-buddy" % "1.12.8",
       "com.lihaoyi"   %% "pprint"     % "0.7.2",
+      "com.lihaoyi"   %% "fansi"     % "0.3.1",
       "com.lihaoyi"   %% "upickle"    % "1.5.0",
       "org.typelevel" %% "cats-core"  % catsVersion
     ),

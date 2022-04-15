@@ -103,7 +103,10 @@ object compiletime {
         sourceClassKind: q.ClassKind,
         mirrorMethodSym: q.Symbol,
         expectedStructDef: p.StructDef
-    ): Result[(List[p.Function], List[p.StructDef])] = for {
+    ): Result[(List[p.Function], q.FnDependencies)] = for {
+
+      log <- Log(s"Mirror for ${sourceMethodSym} -> ${mirrorMethodSym}")
+
       sourceSignature <- sourceMethodSym.tree match {
         case d: q.DefDef => polyregion.scala.Compiler.deriveSignature(d, sourceClassKind)
         case unsupported => s"Unsupported source tree: ${unsupported.show} ".fail
@@ -113,7 +116,10 @@ object compiletime {
       mirrorMethods <- mirrorMethodSym.tree match {
         case d: q.DefDef =>
           for {
-            (fn, fns, sdefs) <- polyregion.scala.Compiler.compileFnAndDependencies(d)
+
+
+            ((fn, fnDeps), log) <- polyregion.scala.Compiler.compileFn(d)(log)
+            (depFns, depDeps, log) <- polyregion.scala.Compiler.compileAllDependencies(fnDeps)(log)
 
 //            _ <- sdefs match {
 //              case `expectedStructDef` :: Nil => ().success
@@ -129,7 +135,7 @@ object compiletime {
 
           } yield (fn
             .copy(name = sourceSignature.name, receiver = sourceSignature.receiver.map(p.Named("this", _)))
-            .mapType(replaceSyms) :: fns.map(_.mapType(replaceSyms))) -> sdefs
+            .mapType(replaceSyms) :: depFns.map(_.mapType(replaceSyms))) -> depDeps
 
         case unsupported => s"Unsupported mirror tree: ${unsupported.show} ".fail
       }
@@ -142,7 +148,7 @@ object compiletime {
       sourceClassKind = if (sourceSym.flags.is(q.Flags.Module)) q.ClassKind.Object else q.ClassKind.Class
 
       _ = println(s">>## ${sourceSym.fullName} -> ${mirrorSym.fullName} ")
-      mirrorStruct <- Retyper.lowerClassType0(mirrorSym).resolve
+      mirrorStruct <- Retyper.lowerClassType0(mirrorSym)
       sourceMethodTable = sourceMethods.groupBy(_.symbol.name)
       _                 = println(s"${sourceMethodTable.mkString("\n\t")}")
       mirroredMethods <- mirrorMethods.flatTraverse { reflectedMirror =>
@@ -165,7 +171,7 @@ object compiletime {
         }
       }
       (functions, dependencies) = mirroredMethods.combineAll
-    } yield p.Mirror(p.Sym(sourceSym.fullName), mirrorStruct, functions, dependencies)
+    } yield p.Mirror(p.Sym(sourceSym.fullName), mirrorStruct, functions, dependencies.clss.values.toList)
 
     println(">>>" + m)
     m

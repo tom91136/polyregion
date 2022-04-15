@@ -15,10 +15,13 @@ class ControlFlowSuite extends BaseSuite {
     testExpr("ref-struct-if") {
       var foo = Foo(1)
       val x   = true
-      if (x) { foo = Foo(42) 
-      2}
-      else { foo = Foo(49)
-      1 }
+      if (x) {
+        foo = Foo(42)
+        2
+      } else {
+        foo = Foo(49)
+        1
+      }
       foo.x
     }
   }

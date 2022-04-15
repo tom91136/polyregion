@@ -96,7 +96,7 @@ class FunctionCallSuite extends BaseSuite {
 //      testCapture("module-inlinemix")(timesInlineMix(x, 2f))
 //      testCapture("module-inlinemix-nest")(timesInlineMix(timesInlineMix(timesInlineMix(x, 2f), 3f), 4f))
 
-      testCapture("module-const")(double(x))
+  testCapture("module-const")(double(x))
 //      testCapture("module-const-mix")( double(1f) *  double( x))
 //      testCapture("module-nest")( double( double( double( x))))
 //

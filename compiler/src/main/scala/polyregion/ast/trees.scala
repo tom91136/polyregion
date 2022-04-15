@@ -17,21 +17,73 @@ final class CompilerException(m: String) extends Exception(m)
 
 type Result[A] = Either[Throwable, A]
 
-type Deferred[A] = cats.data.EitherT[cats.Eval, Throwable, A]
+// type Deferred[A] = Result[A] //  cats.data.EitherT[cats.Eval, Throwable, A]
 
 extension [A](a: Result[A]) {
-  def deferred: Deferred[A]       = cats.data.EitherT.fromEither[cats.Eval](a)
+//  def deferred: Deferred[A]       = cats.data.EitherT.fromEither[cats.Eval](a)
   def withFilter(p: A => Boolean) = a.flatMap(x => if (p(x)) Right(x) else Left(new MatchError(x)))
 }
 
-extension [A](a: Deferred[A]) {
-  def resolve: Result[A]          = a.value.value
-  def withFilter(p: A => Boolean) = a.subflatMap(x => if (p(x)) Right(x) else Left(new MatchError(x)))
+//
+case class Log(name: String, lines: Vector[(String, Vector[String]) | Log]) {
+  def mark[A](name: String)(f: Log => Result[(A, Log)]): Result[(A, Log)] =
+    f(Log(name, Vector.empty)).map { case (x, l) => (x, copy(lines = lines :+ l)) }
+
+  def info_(message: String, details: String*): Log = copy(lines = lines :+ (message -> details.toVector))
+
+  def info(message: String, details: String*): Result[Log] = info_(message, details*).success
+
+  def render(nesting: Int = 0): Vector[String] = {
+    val colour = Log.Colours(nesting % Log.Colours.size)
+    val attr   = colour ++ fansi.Reversed.On ++ fansi.Bold.On
+    val indent = colour("│")
+
+    (   (colour("┍") ++ attr(s" ${name} ") )  +: lines
+      .flatMap {
+        case (log: Log) => log.render(nesting + 1).map(indent ++ _)
+        case (l, details) =>
+          (indent ++ (colour ++ fansi.Underlined.On)(l)) +: details.flatMap { l =>
+            l.linesIterator.toList match {
+              case x :: xs =>
+                ((indent ++    colour( "╴") ++  s" $x") :: xs.map(x => indent ++ s"  ${x}")).toVector
+              case Nil => Vector()
+            }
+
+          }
+      })
+      .map(_.render)
+  }
+
 }
+object Log {
+  private val Colours: Vector[fansi.Attr] = Vector(
+    // fansi.Color.Red,
+    fansi.Color.Green,
+    fansi.Color.Yellow,
+    fansi.Color.Blue,
+    fansi.Color.Magenta,
+    fansi.Color.Cyan,
+    fansi.Color.LightGray,
+    fansi.Color.DarkGray,
+    fansi.Color.LightRed,
+    fansi.Color.LightGreen,
+    fansi.Color.LightYellow,
+    fansi.Color.LightBlue,
+    fansi.Color.LightMagenta,
+    fansi.Color.LightCyan
+  )
+
+  def apply(name: String): Result[Log] = Log(name, Vector.empty).success
+}
+
+//extension [A](a: Deferred[A]) {
+//  def resolve: Result[A]          = a.value.value
+//  def withFilter(p: A => Boolean) = a.subflatMap(x => if (p(x)) Right(x) else Left(new MatchError(x)))
+//}
 
 extension [A](a: A) {
   def success: Result[A] = Right(a)
-  def pure: Deferred[A]  = Right(a).deferred
+//  def pure: Deferred[A]  = Right(a).deferred
 }
 extension (message: => String) {
   def fail[A]: Result[A] = Left(new CompilerException(message))
@@ -386,7 +438,7 @@ extension (f: p.Function) {
   def signature = p.Signature(f.name, f.receiver.map(_.tpe), f.args.map(_.tpe), f.rtn)
 
   def signatureRepr =
-    s"${f.receiver.fold("")(r => r.repr + ".")}${f.name.repr}(${f.args.map(_.repr).mkString(", ")}) : ${f.rtn.repr}"
+    s"${f.receiver.fold("")(r => r.repr + ".")}${f.name.repr}(${f.args.map(_.repr).mkString(", ")})<${f.captures.map(_.repr).mkString(", ")}> : ${f.rtn.repr}"
 
   def mapType(tf: p.Type => p.Type): p.Function = f.copy(
     receiver = f.receiver.map(_.mapType(tf)),
