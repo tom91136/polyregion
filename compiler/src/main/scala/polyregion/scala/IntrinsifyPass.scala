@@ -11,7 +11,7 @@ object IntrinsifyPass {
   def intrinsify(using q: Quoted)(stmts: List[p.Stmt], dep: q.FnDependencies): (List[p.Stmt], q.FnDependencies) = {
     val (xs, instanceSigs) = stmts.zipWithIndex.foldMapM(intrinsifyInstanceApply(_, _))
     val (ys, moduleSigs)   = xs.zipWithIndex.foldMapM(intrinsifyModuleApply(_, _))
-    println(s"Elim : ${dep.defs.map(_._1)} -  ${(instanceSigs ++ moduleSigs)} ")
+    // println(s"Elim : ${dep.defs.map(_._1)} -  ${(instanceSigs ++ moduleSigs)} ")
     val eliminated = dep.defs -- (instanceSigs ++ moduleSigs)
     (ys, dep.copy(defs = eliminated))
   }

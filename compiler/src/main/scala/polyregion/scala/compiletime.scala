@@ -308,7 +308,7 @@ object compiletime {
     val result = for {
       (captures, prog, log) <- Compiler.compileExpr(x)
       _ = println(log.render)
-      serialisedAst    <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, prog)))
+      serialisedAst <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, prog)))
       // _ <- Either.catchNonFatal(throw new RuntimeException("STOP"))
       // layout <- Either.catchNonFatal(PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, prog.defs))))
       //   _= println(s"layout=${layout}")
@@ -317,9 +317,9 @@ object compiletime {
       c <- Either.catchNonFatal(PolyregionCompiler.compile(serialisedAst, true, PolyregionCompiler.BACKEND_LLVM))
     } yield {
 
-      println(s"Program=${c.program.length}")
-      println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
-      println(s"Messages=\n  ${c.messages}")
+      // println(s"Program=${c.program.length}")
+      // println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
+      // println(s"Messages=\n  ${c.messages}")
 
       val programBytesExpr = Expr(c.program)
       val astBytesExpr     = Expr(serialisedAst)
@@ -337,9 +337,7 @@ object compiletime {
         case p.Type.Unit   => Type.of[Unit]
       }
 
-      val orderedCaptures = captures.toList.sortBy(_._1.symbol)
-
-      val captureExprs = orderedCaptures.map { (name, ident) =>
+      val captureExprs = captures.map { (name, ident) =>
         val expr = ident.asExpr
         val wrapped = name.tpe match {
           case p.Type.Unit   => '{ Buffer.empty[Int] }
@@ -377,7 +375,7 @@ object compiletime {
           ${ wrapped }.backingBuffer
         }
       }
-      val captureTps = orderedCaptures.map((name, _) => tpeAsRuntimeTpe(name.tpe))
+      val captureTps = captures.map((name, _) => tpeAsRuntimeTpe(name.tpe))
 
       def wrap(buffer: Expr[java.nio.ByteBuffer], comp: p.Type) =
         comp match {
@@ -445,7 +443,7 @@ object compiletime {
     result match {
       case Left(e) => throw e
       case Right(x) =>
-        println("Code=" + x.show)
+        // println("Code=" + x.show)
         x
     }
 

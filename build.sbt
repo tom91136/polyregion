@@ -1,6 +1,6 @@
 Global / onChangedBuildSource := ReloadOnSourceChanges
 
-val scala3Version = "3.1.2-RC3"
+val scala3Version = "3.1.2"
 
 lazy val commonSettings = Seq(
   scalaVersion     := scala3Version,
@@ -34,7 +34,7 @@ lazy val commonSettings = Seq(
 )
 
 lazy val catsVersion  = "2.7.0"
-lazy val munitVersion = "1.0.0-M2"
+lazy val munitVersion = "1.0.0-M3"
 
 lazy val `loader-jvm` = project.settings(
   commonSettings,
@@ -48,9 +48,9 @@ lazy val loaderShadeRules = Seq(ShadeRule.rename("polyregion.loader.**" -> "poly
 lazy val `runtime-java` = project
   .settings(
     commonSettings,
-    name                := "runtime-java",
-    javah / target      := bindingsDir / "java-runtime",
-    autoScalaLibrary    := false,
+    name             := "runtime-java",
+    javah / target   := bindingsDir / "java-runtime",
+    autoScalaLibrary := false,
 //    assemblyShadeRules  := loaderShadeRules,
     assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly"))
   )
@@ -81,10 +81,10 @@ lazy val compiler = project
         Seq("-Xmax-inlines", "64") // the AST has lots of leaf nodes and we use inline so bump the limit
     ,
     libraryDependencies ++= Seq(
-      "net.bytebuddy"  % "byte-buddy" % "1.12.8",
-      "com.lihaoyi"   %% "pprint"     % "0.7.2",
-      "com.lihaoyi"   %% "fansi"     % "0.3.1",
-      "com.lihaoyi"   %% "upickle"    % "1.5.0",
+      "net.bytebuddy"  % "byte-buddy" % "1.12.9",
+      "com.lihaoyi"   %% "pprint"     % "0.7.3",
+      "com.lihaoyi"   %% "fansi"      % "0.3.1",
+      "com.lihaoyi"   %% "upickle"    % "1.6.0",
       "org.typelevel" %% "cats-core"  % catsVersion
     ),
     (Compile / unmanagedJars) := {

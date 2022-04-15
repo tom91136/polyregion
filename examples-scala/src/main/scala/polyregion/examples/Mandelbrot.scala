@@ -83,7 +83,7 @@ object Mandelbrot {
 
   case class ItResult(c: Complex, i: Int)
 
-  def itMandel2(c: Complex, imax: Int, bailout: Int): ItResult = {
+  inline def itMandel2(c: Complex, imax: Int, bailout: Int): ItResult = {
     var z = Complex(0d, 0d)
     var i = 0
     while (z.abs <= bailout && i < imax) {
@@ -101,8 +101,8 @@ object Mandelbrot {
       Palette(iter % Palette.length).mix(Palette((iter + 1) % Palette.length), nu)
     }
 
-  def mkColour2(z: Complex, iter: Int, maxIter: Int): Colour =
-    if (iter >= maxIter) Colour(0, 0, 0)
+  inline def mkColour2(z: Complex, iter: Int, maxIter: Int): Colour =
+    if (iter >= maxIter) Colour.Black
     else {
       val logZn = math.log(z.abs) / 2
       val nu    = math.log(logZn / math.log(2)) / math.log(2)
@@ -110,10 +110,8 @@ object Mandelbrot {
 //      Colour(0, 0, 0)
     }
 
-
-
-  object In{
-    def takeOne : Int = {
+  object In {
+    def takeOne: Int = {
 //      Colour.Black.packed
 
       Colour.Black.packed
@@ -137,7 +135,6 @@ object Mandelbrot {
 
     val image = Buffer.ofZeroed[Colour](width * height)
 
-
     polyregion.scala.compiletime.offload {
 
       var y = 0
@@ -146,8 +143,19 @@ object Mandelbrot {
         while (x < width) {
           val c  = Complex(interpolate(x, 0, width, xMin, xMax), interpolate(y, 0, height, yMin, yMax))
           val t  = itMandel2(c, maxIter, 4)
-          val cc = mkColour2(t.c, t.i, maxIter)
-//          image(x + (y * width)) = cc
+//          val cc = mkColour2(t.c, t.i, maxIter)
+
+          val iter = t.i
+          val z = t.c
+          val cc = if (iter >= maxIter) Colour.Black
+          else {
+            val logZn = math.log(z.abs) / 2
+            val nu    = math.log(logZn / math.log(2)) / math.log(2)
+            Palette2(iter % 16).mix(Palette2((iter + 1) % 16), nu)
+            //      Colour(0, 0, 0)
+          }
+
+          image(x + (y * width)) = cc
           //          buffer(x)(y) = cc
           x += 1
         }
@@ -210,7 +218,7 @@ object Mandelbrot {
 
     val data = Array.ofDim[Colour](image.getWidth, image.getHeight)
 
-    val N       = 3
+    val N       = 1
     val elapsed = Array.ofDim[Long](N)
     for (i <- 0 until N) {
       val start = System.nanoTime()

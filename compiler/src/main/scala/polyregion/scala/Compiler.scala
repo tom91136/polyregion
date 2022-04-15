@@ -120,7 +120,7 @@ object Compiler {
                   case (root, ref, value, tpe: p.Type) =>
                     // this is a generic reference possibly from the function argument
                     val isArg = fnArgs.exists { (arg, n) =>
-                      arg.symbol == ref.underlying.symbol // || arg.symbol == root.underlying.symbol
+                      arg.symbol == ref.underlying.symbol || arg.symbol == root.underlying.symbol
                     }
                     if (isArg) (Nil, Nil).success
                     else
@@ -285,7 +285,7 @@ object Compiler {
 
     // sort the captures so that the order is stable for codegen
     // captures = deps.vars.toList.sortBy(_._1.symbol)
-    captures = capturedNames.toList // .sortBy(_._2.symbol)
+    captures = capturedNames.toList.distinctBy(_._2).sortBy((name, ref) => ref.symbol.pos.map(_.start) -> name.symbol)
     exprFn = p.Function(
       name = p.Sym(exprName),
       receiver = None,
@@ -298,7 +298,7 @@ object Compiler {
     log <- log.info(s"Program compiled, dependencies: ${unoptimisedProgram.functions.size}")
     log <- log.info(s"Program compiled, structures", unoptimisedProgram.defs.map(_.repr)*)
 
-    // _ = println(log.render().mkString("\n"))
+     _ = println(log.render().mkString("\n"))
     // verify before optimisation
     (unoptimisedVerification, log) <- VerifyPass.run(unoptimisedProgram)(log).success
     log <- log.info(
