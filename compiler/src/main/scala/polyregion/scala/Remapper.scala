@@ -61,8 +61,8 @@ object Remapper {
     }
 
     def mapRef(r: q.Ref): Result[(q.Val, q.FnContext)] = (c.refs.get(r), r) match {
-      case (Some(term ), _)   => (term, c).pure
-      case (None, i @ q.Ident(s))    =>
+      case (Some(term), _)        => (term, c).pure
+      case (None, i @ q.Ident(s)) =>
 //        println(s"S=${i.symbol} name=$s")
         val name = i.tpe match {
           // we've encountered a case where the ident's name is different from the TermRef's name
@@ -109,8 +109,8 @@ object Remapper {
                     case None    => c.fail[(q.Val, q.FnContext)](s"Can't find a previous definition of ${i}")
                   }
               }
-            case q.ErasedClsTpe(sym, q.ClassKind.Object, Nil) => (q.ErasedModuleSelect(sym), c).success
-            case et: q.ErasedClsTpe                           => c.fail[(q.Val, q.FnContext)](s"Saw ${et}")
+            case q.ErasedClsTpe(sym, _, q.ClassKind.Object, Nil) => (q.ErasedModuleSelect(sym), c).success
+            case et: q.ErasedClsTpe                              => c.fail[(q.Val, q.FnContext)](s"Saw ${et}")
           }
         } yield (term, c)
       case (None, s @ q.Select(root, name)) =>
@@ -122,7 +122,7 @@ object Remapper {
 //          _ = println(s"sel $s = ${tpe}")
           // don't resolve root here yet
           (term, c) <- tpe match {
-            case q.ErasedClsTpe(sym, q.ClassKind.Object, Nil) => // <module>.(...)
+            case q.ErasedClsTpe(sym, _, q.ClassKind.Object, Nil) => // <module>.(...)
               (q.ErasedModuleSelect(sym), c).success
             case tpe: p.Type => // (selector...).(x:Term)
 //              println(s"X=$tpe")
@@ -357,7 +357,7 @@ object Remapper {
 
                   //
                   case x: q.ErasedClsTpe =>
-//                    println(x)
+                   println(x)
                     // x
                     ???
                 } // TODO handle multiple arg list methods

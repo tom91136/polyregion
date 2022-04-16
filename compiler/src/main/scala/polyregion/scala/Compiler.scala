@@ -39,10 +39,10 @@ object Compiler {
       owningClass <- Retyper.clsSymTyper0(f.symbol.owner)
 
       receiver <- (concreteKind, owningClass) match {
-        case (q.ClassKind.Object, q.ErasedClsTpe(_, _, _)) => None.success
-        case (q.ClassKind.Object, s: p.Type.Struct)        => None.success
-        case (q.ClassKind.Class, s: p.Type.Struct)         => Some(s).success
-        case (kind, x)                                     => s"Illegal receiver (concrete kind=${kind}): $x".fail
+        case (q.ClassKind.Object, q.ErasedClsTpe(_, _, _, _)) => None.success
+        case (q.ClassKind.Object, s: p.Type.Struct)           => None.success
+        case (q.ClassKind.Class, s: p.Type.Struct)            => Some(s).success
+        case (kind, x)                                        => s"Illegal receiver (concrete kind=${kind}): $x".fail
       }
     } yield p.Signature(p.Sym(receiver.fold(f.symbol.fullName)(_ => f.symbol.name)), receiver, fnArgsTpes, fnRtnTpe)
   }
@@ -90,16 +90,18 @@ object Compiler {
               case (_, t: p.Type, c) => ((arg, p.Named(arg.name, t)) :: Nil, c).success
               case (_, bad, c)       => s"Erased arg type encountered $bad".fail
             }
-          case _ => ???
+          case bad =>
+            println(bad)
+            (Nil, q.FnDependencies()).success
         }
         // and work out whether this def is part a class instance or free-standing
         // class defs will have a `this` receiver arg with the appropriate type
         (owningClass, fnReceiverDeps) <- Retyper.clsSymTyper1(f.symbol.owner)
         log                           <- log.info(s"Method owner: $owningClass")
         receiver <- owningClass match {
-          case s: p.Type.Struct        => Some(p.Named("this", s)).success
-          case q.ErasedClsTpe(_, _, _) => None.success
-          case x                       => s"Illegal receiver: ${x}".fail
+          case s: p.Type.Struct           => Some(p.Named("this", s)).success
+          case q.ErasedClsTpe(_, _, _, _) => None.success
+          case x                          => s"Illegal receiver: ${x}".fail
         }
 
         log <- log.info("DefDef arguments", fnArgs.map((a, n) => s"${a}(symbol=${a.symbol}) ~> $n")*)
@@ -149,7 +151,7 @@ object Compiler {
             } yield (
               (
                 rhsStmts,
-                captureDeps |+| rhsDeps |+| q.FnDependencies( /* vars = capturedNames.toMap */ ),
+                captureDeps |+| rhsDeps |+| q.FnDependencies(vars = capturedNames.toMap),
                 capturedNames
               ),
               log
@@ -272,7 +274,7 @@ object Compiler {
     ((exprStmts, exprTpe, exprDeps), log) <- compileTerm(term, captureScope.toMap)(log)
     log                                   <- log.info("Expr Stmts", exprStmts.map(_.repr).mkString("\n"))
     log      <- log.info("External captures", capturedNames.map((n, r) => s"$r(symbol=${r.symbol}) ~> ${n.repr}")*)
-    exprDeps <- (exprDeps |+| captureDeps |+| q.FnDependencies( /* vars = xxx.toMap*/ )).success
+    exprDeps <- (exprDeps |+| captureDeps |+| q.FnDependencies(vars = capturedNames.toMap)).success
 
     // we got a compiled term, compile all dependencies as well
     log <- log.info(s"Expr dependent methods", exprDeps.defs.map(_.toString).toList*)
@@ -284,14 +286,14 @@ object Compiler {
 
     // sort the captures so that the order is stable for codegen
     // captures = deps.vars.toList.sortBy(_._1.symbol)
-    captures = capturedNames.toList.distinctBy(_._2).sortBy((name, ref) => ref.symbol.pos.map(_.start) -> name.symbol)
+    // captures = capturedNames.toList.distinctBy(_._2).sortBy((name, ref) => ref.symbol.pos.map(_.start) -> name.symbol)
     // log                 <- log.info(s"Expr+Deps Dependent vars   ", captures.map(_.toString)*)
 
     exprFn = p.Function(
       name = p.Sym(exprName),
       receiver = None,
       args = Nil,
-      captures = captures.map(_._1),
+      captures = capturedNames.map(_._1),
       rtn = exprTpe,
       body = exprStmts
     )
@@ -331,10 +333,8 @@ object Compiler {
     log <- log.info(s"Program optimised, entry", optimisedProgram.entry.repr)
     // log                 <- log.info(s"Program optimised, entry", captures.map(_.toString)*)
 
-
-    capturesLUT = captures.toMap
     _ = println(log.render().mkString("\n"))
 
-  } yield (optimisedProgram.entry.captures.map{ n =>  n -> capturesLUT(n) }, optimisedProgram, log)
+  } yield (optimisedProgram.entry.captures.map(n => n -> deps.vars(n)), optimisedProgram, log)
 
 }

@@ -317,9 +317,9 @@ object compiletime {
       c <- Either.catchNonFatal(PolyregionCompiler.compile(serialisedAst, true, PolyregionCompiler.BACKEND_LLVM))
     } yield {
 
-      // println(s"Program=${c.program.length}")
-      // println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
-      // println(s"Messages=\n  ${c.messages}")
+      println(s"Program=${c.program.length}")
+      println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
+      println(s"Messages=\n  ${c.messages}")
 
       val programBytesExpr = Expr(c.program)
       val astBytesExpr     = Expr(serialisedAst)

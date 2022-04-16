@@ -116,7 +116,7 @@ object RefOutliner {
 
         // remove anything we can't use, like ClassTag
         filteredTypedRefs = typedRefs.filter {
-          case (_, _, _, q.ErasedClsTpe(Symbols.ClassTag, q.ClassKind.Class, Nil)) => false
+          case (_, _, _, q.ErasedClsTpe(Symbols.ClassTag,_, q.ClassKind.Class, Nil)) => false
           case _                                                                   => true
         }
 

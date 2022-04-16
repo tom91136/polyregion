@@ -5,6 +5,8 @@ import polyregion.prism.compiletime.derivePackedMirrors1
 
 object StdLib {
 
+//  class Tuple2[T1, T2](_1: T1, _2: T2)
+
   class Range(start: Int, end: Int, step: Int) {
     def by(step: Int): Range            = mkDef(step) // new Range(start, end, step)
     private def mkDef(step: Int): Range = new Range(start, end, step)
@@ -29,7 +31,8 @@ object StdLib {
     (
         S.collection.immutable.Range -> Range,
         S.runtime.RichInt -> RichInt,
-        S.Predef.type -> Predef
+        S.Predef.type -> Predef,
+//        S.Tuple2 -> Tuple
     )
   ]
 

@@ -32,10 +32,10 @@ static llvm::Value *sizeOf(llvm::IRBuilder<> &B, llvm::LLVMContext &C, llvm::Typ
   auto sizePtr = B.CreateGEP(                                                    //
       ptrTpe->getPointerElementType(),                                           //
       llvm::ConstantPointerNull::get(llvm::dyn_cast<llvm::PointerType>(ptrTpe)), //
-      llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 1),                      //
+      llvm::ConstantInt::get(llvm::Type::getInt64Ty(C), 1),                      //
       "sizePtr"                                                                  //
   );
-  auto sizeVal = B.CreatePtrToInt(sizePtr, llvm::Type::getInt32Ty(C));
+  auto sizeVal = B.CreatePtrToInt(sizePtr, llvm::Type::getInt64Ty(C));
   return sizeVal;
 }
 
@@ -44,7 +44,7 @@ static llvm::Value *load(llvm::IRBuilder<> &B, llvm::Value *rhs) {
 }
 
 llvm::Value *LLVMAstTransformer::invokeMalloc(llvm::Function *parent, llvm::Value *size) {
-  return B.CreateCall(mkExternalFn(parent, Type::Array(Type::Byte()), "malloc", {Type::Int()}), size);
+  return B.CreateCall(mkExternalFn(parent, Type::Array(Type::Byte()), "malloc", {Type::Long()}), size);
 }
 
 static bool isUnsigned(const Type::Any &tpe) {
@@ -571,7 +571,10 @@ llvm::Value *LLVMAstTransformer::mkExprVal(const Expr::Any &expr, llvm::Function
       [&](const Expr::Alloc &x) -> ValPtr { //
         auto size = mkTermVal(x.size);
         auto elemSize = sizeOf(B, C, mkTpe(x.witness));
-        auto ptr = invokeMalloc(fn, B.CreateMul(size, elemSize));
+
+
+
+        auto ptr = invokeMalloc(fn, B.CreateMul(B.CreateIntCast(size, mkTpe(Type::Long()), true), elemSize));
         return B.CreateBitCast(ptr, mkTpe(x.witness));
       });
 }

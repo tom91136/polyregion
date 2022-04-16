@@ -11,18 +11,17 @@ class Quoted(val underlying: scala.quoted.Quotes) {
   // Reference = CaptureVarName | DefaultTermValue
   case class Reference(value: String | p.Term, tpe: Tpe)
 
-
-  //TODO rename to FnScope
+  // TODO rename to FnScope
   case class FnDependencies(
       clss: Map[p.Sym, p.StructDef] = Map.empty,  // external class defs
       defs: Map[p.Signature, DefDef] = Map.empty, // external def defs
-      //vars: Map[p.Named,  Ref] = Map.empty         // external val defs
+      vars: Map[p.Named, Ref] = Map.empty         // external val defs
 //      fns : List[p.Function] = List.empty, // reified def defs
   )
 
   given Monoid[FnDependencies] = Monoid.instance(
     FnDependencies(),                                                              //
-    (x, y) => FnDependencies(x.clss ++ y.clss, x.defs ++ y.defs /*, x.vars ++ y.vars*/ ) //
+    (x, y) => FnDependencies(x.clss ++ y.clss, x.defs ++ y.defs, x.vars ++ y.vars) //
   )
 
   type Val = p.Term | ErasedMethodVal | ErasedModuleSelect | ErasedNamedArg
@@ -47,7 +46,7 @@ class Quoted(val underlying: scala.quoted.Quotes) {
     case Object, Class
   }
 
-  case class ErasedClsTpe(name: p.Sym, kind: ClassKind, ctor: List[Tpe]) {
+  case class ErasedClsTpe(name: p.Sym, symbol: Symbol, kind: ClassKind, ctor: List[Tpe]) {
     override def toString: String = {
       val kindName = kind match {
         case ClassKind.Object => "Object"
@@ -61,12 +60,12 @@ class Quoted(val underlying: scala.quoted.Quotes) {
       s"#{ (${args.mkString(",")}) => ${rtn} }#"
   }
 
-  //TODO rename to RemapContext
+  // TODO rename to RemapContext
   case class FnContext(
       depth: Int = 0,                  // ref depth
       traces: List[Tree] = List.empty, // debug
 
-      refs: Map[Ref,  p.Term] = Map.empty, // ident/select table
+      refs: Map[Ref, p.Term] = Map.empty, // ident/select table
 
       clss: Map[p.Sym, p.StructDef] = Map.empty,  // external class defs
       defs: Map[p.Signature, DefDef] = Map.empty, // external def defs
@@ -81,11 +80,11 @@ class Quoted(val underlying: scala.quoted.Quotes) {
     def named(tpe: p.Type)                                    = p.Named(s"v${depth}", tpe)
     def suspend(k: (String, ErasedFnTpe))(v: ErasedMethodVal) = copy(suspended = suspended + (k -> v))
 
-    def noStmts                                 = copy(stmts = Nil)
-    def inject(refs: Map[Ref,  p.Term])    = copy(refs = refs ++ refs)
-    def mark(s: p.Signature, d: DefDef)         = copy(defs = defs + (s -> d))
-    infix def ::=(xs: p.Stmt*)                  = copy(stmts = stmts ++ xs)
-    def replaceStmts(xs: Seq[p.Stmt])           = copy(stmts = xs.toList)
+    def noStmts                         = copy(stmts = Nil)
+    def inject(refs: Map[Ref, p.Term])  = copy(refs = refs ++ refs)
+    def mark(s: p.Signature, d: DefDef) = copy(defs = defs + (s -> d))
+    infix def ::=(xs: p.Stmt*)          = copy(stmts = stmts ++ xs)
+    def replaceStmts(xs: Seq[p.Stmt])   = copy(stmts = xs.toList)
 //    def mapStmts(f: Seq[p.Stmt] => Seq[p.Stmt]) = copy(stmts = f(stmts).toList)
 
     def fail[A](reason: String) =
@@ -95,7 +94,7 @@ class Quoted(val underlying: scala.quoted.Quotes) {
 		 |[Trace]
 		 |  ->${traces.map(x => s"${x.show} -> $x".indent_(1)).mkString("---\n  ->")}
 		 |[Stmts]
-		 |  ->${stmts.map(_.repr.indent_(1)).mkString("  ->")}""".stripMargin.fail[A] 
+		 |  ->${stmts.map(_.repr.indent_(1)).mkString("  ->")}""".stripMargin.fail[A]
 
     def deps = FnDependencies(clss, defs)
 

@@ -198,6 +198,21 @@ extension (e: p.Type) {
     case p.Type.String      => "String"
     case p.Type.Unit        => "Unit"
   }
+
+  def monomorphicName: String = e match {
+    case p.Type.Struct(sym) => sym.fqn.mkString("_")
+    case p.Type.Array(comp) => s"${comp.monomorphicName}[]"
+    case p.Type.Bool        => "Bool"
+    case p.Type.Byte        => "Byte"
+    case p.Type.Char        => "Char"
+    case p.Type.Short       => "Short"
+    case p.Type.Int         => "Int"
+    case p.Type.Long        => "Long"
+    case p.Type.Float       => "Float"
+    case p.Type.Double      => "Double"
+    case p.Type.String      => "String"
+    case p.Type.Unit        => "Unit"
+  }
 }
 
 extension (e: p.Expr) {

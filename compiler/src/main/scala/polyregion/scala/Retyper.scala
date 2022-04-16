@@ -20,7 +20,11 @@ object Retyper {
       )
     }
 
-    // println(s"Decls = ${tpeSym.declarations.map(_.tree.show)}")
+    if (tpeSym.typeMembers.nonEmpty) {
+      throw RuntimeException(
+        s"Encountered generic class ${tpeSym}, typeCtorArg=${tpeSym.typeMembers}"
+      )
+    }
 
     // XXX there appears to be a bug where an assertion error is thrown if we call the start/end (but not the pos itself)
     // of certain type of trees returned from fieldMembers
@@ -38,6 +42,43 @@ object Retyper {
         })
       )
       .map(p.StructDef(p.Sym(tpeSym.fullName), _))
+
+  }
+
+  def lowerPolymorphicClassType0(using q: Quoted)(tpeSym: q.Symbol, args: List[p.Type]): Result[p.StructDef] = {
+    if ((tpeSym.flags.is(q.Flags.Module) || tpeSym.flags.is(q.Flags.Abstract)) && tpeSym.fieldMembers.nonEmpty) {
+      throw RuntimeException(
+        s"Unsupported combination of flags: ${tpeSym.flags.show} for ${tpeSym}, fields=${tpeSym.fieldMembers}"
+      )
+    }
+
+    if (tpeSym.typeMembers.size != args.size) {
+      throw RuntimeException(s"Bad monomorphic sizes")
+    }
+
+    // TODO make sure Symbol.typeMembers returned is in actual declaration order!
+    val typeVarLut = tpeSym.typeMembers.zip(args).toMap // Symbol -> p.Type
+
+    // XXX there appears to be a bug where an assertion error is thrown if we call the start/end (but not the pos itself)
+    // of certain type of trees returned from fieldMembers
+    tpeSym.fieldMembers
+      .filter(_.maybeOwner == tpeSym) // TODO local members for now, need to workout inherited members
+      // .sortBy(_.pos.map(p => (p.startLine, p.startColumn))) // make sure the order follows source code decl. order
+      .traverse(field =>
+        (field.tree match {
+          case d: q.ValDef =>
+            if (d.tpt.symbol.isTypeParam) {
+              p.Named(field.name, typeVarLut(d.tpt.symbol)).success
+            } else {
+              typer0(d.tpt.tpe).flatMap { // TODO we need to work out nested structs
+                case (_, t: p.Type) => p.Named(field.name, t).success
+                case (_, bad)       => s"bad erased type $bad".fail
+              }
+            }
+          case _ => ???
+        })
+      )
+      .map(p.StructDef(p.Sym(s"${tpeSym.fullName}[${args.map(_.monomorphicName).mkString(",")}]"), _))
 
   }
 
@@ -82,7 +123,7 @@ object Retyper {
         // println("[retyper] witness: " + clsSym.tree.show)
         p.Type.Struct(sym)
       case (sym, q.ClassKind.Object) =>
-        q.ErasedClsTpe(sym, q.ClassKind.Object, Nil)
+        q.ErasedClsTpe(sym, clsSym, q.ClassKind.Object, Nil)
     }
 
   def clsSymTyper0(using q: Quoted)(clsSym: q.Symbol): Result[q.Tpe] =
@@ -117,8 +158,8 @@ object Retyper {
       case tpe @ q.AppliedType(tpeCtor, args) =>
         for {
           // type ctors must be a class
-          (name, _, kind) <- resolveClsFromTpeRepr(tpeCtor)
-          tpeCtorArgs     <- args.traverse(typer0(_))
+          (name, symbol, kind) <- resolveClsFromTpeRepr(tpeCtor)
+          tpeCtorArgs          <- args.traverse(typer0(_))
         } yield (name, kind, tpeCtorArgs) match {
           case (Symbols.Buffer, q.ClassKind.Class, (_, comp: p.Type) :: Nil) => (None, p.Type.Array(comp))
           case (Symbols.Array, q.ClassKind.Class, (_, comp: p.Type) :: Nil)  => (None, p.Type.Array(comp))
@@ -134,9 +175,8 @@ object Retyper {
 //                  q.ErasedFnTpe(xs, x)
               }
             )
-          case (n, m, ys) =>
-            // lowerClassType(ctor.classSymbol.get).map( s =>  )
-            (None, q.ErasedClsTpe(n, m, ys.map(_._2)))
+          case (name, kind, ctorArgs) =>
+            (None, q.ErasedClsTpe(name, symbol, kind, ctorArgs.map(_._2)))
         }
       // widen singletons
       case q.ConstantType(x) =>
@@ -157,14 +197,34 @@ object Retyper {
       case expr => resolveClsFromTpeRepr(expr).map(liftClsToTpe(_, _, _)).map((None, _))
     }
 
-  def typer1(using q: Quoted)(repr: q.TypeRepr): Result[(Option[p.Term], q.Tpe, q.FnDependencies)] =
-    Retyper.typer0(repr).flatMap {
-      case (value, s @ p.Type.Struct(sym)) =>
-        Retyper
-          .lowerClassType(repr)
-          .map(sdef => (value, s, q.FnDependencies(clss = Map(sym -> sdef))))
-      case (value, tpe) => (value, tpe, q.FnDependencies()).pure
-    }
+  def typer1(using q: Quoted)(repr: q.TypeRepr): Result[(Option[p.Term], q.Tpe, q.FnDependencies)] = {
+
+    def flattenCls(value: Option[p.Term], t: q.Tpe): Result[(Option[p.Term], q.Tpe, q.FnDependencies)] =
+      (value, t) match {
+        case (value, q.ErasedFnTpe(args, rtn)) =>
+          flattenCls(None, rtn).map((_, tpe, dep) => (value, q.ErasedFnTpe(args, tpe), dep))
+
+        case (value, e: q.ErasedClsTpe) if e.ctor.nonEmpty =>
+          val s = p.Type.Struct(e.name)
+          val m = lowerPolymorphicClassType0(
+            e.symbol,
+            e.ctor.map {
+              case t: p.Type => t
+              case bad       => ???
+            }
+          )
+          println(s" ${m}")
+          m.map(sdef => (value, s, q.FnDependencies(clss = Map(sdef.name -> sdef))))
+        case (value, s @ p.Type.Struct(sym)) =>
+          Retyper
+            .lowerClassType(repr)
+            .map(sdef => (value, s, q.FnDependencies(clss = Map(sym -> sdef))))
+        case (value, tpe) => (value, tpe, q.FnDependencies()).pure
+      }
+
+      Retyper.typer0(repr).flatMap((value, t) => flattenCls(value, t))
+
+  }
 
   def clsSymTyper1(using q: Quoted)(clsSym: q.Symbol): Result[(q.Tpe, q.FnDependencies)] =
     Retyper.clsSymTyper0(clsSym).flatMap {
@@ -199,9 +259,9 @@ object Retyper {
     }
 
     def typer(repr: q.TypeRepr): Result[(Option[p.Term], q.Tpe, q.FnContext)] =
-      Retyper.typer1(repr).map {
-        case (value, t, deps) => (value, t, c.copy(clss = c.clss ++ deps.clss)) // TODO use that map and not a full p.FnDependenccies
-        // case (value, t, None)    => (value, t, c)
+      Retyper.typer1(repr).map { case (value, t, deps) =>
+        (value, t, c.copy(clss = c.clss ++ deps.clss)) // TODO use that map and not a full p.FnDependenccies
+      // case (value, t, None)    => (value, t, c)
       }
 
   }

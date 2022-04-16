@@ -42,6 +42,9 @@ object Mandelbrot {
     def abs: Double               = math.hypot(real, imag)
     override def toString: String = s"$real + ${imag}i"
   }
+  object Complex {
+    val Zero: Complex = Complex(0.0, 0.0)
+  }
 
   def interpolate(input: Double, inputMin: Double, inputMax: Double, outputMin: Double, outputMax: Double): Double =
     ((outputMax - outputMin) * (input - inputMin) / (inputMax - inputMin)) + outputMin
@@ -72,7 +75,7 @@ object Mandelbrot {
   }
 
   def itMandel(c: Complex, imax: Int, bailout: Int): (Complex, Int) = {
-    var z = Complex(0d, 0d)
+    var z = Complex.Zero
     var i = 0
     while (z.abs <= bailout && i < imax) {
       z = z * z + c
@@ -81,10 +84,10 @@ object Mandelbrot {
     (z, i)
   }
 
-  case class ItResult(c: Complex, i: Int)
+  case class ItResult[A, B](c: A, i: B)
 
-  inline def itMandel2(c: Complex, imax: Int, bailout: Int): ItResult = {
-    var z = Complex(0d, 0d)
+  def itMandel2(c: Complex, imax: Int, bailout: Int): ItResult[Complex, Int] = {
+    var z = Complex.Zero
     var i = 0
     while (z.abs <= bailout && i < imax) {
       z = z * z + c
@@ -101,13 +104,12 @@ object Mandelbrot {
       Palette(iter % Palette.length).mix(Palette((iter + 1) % Palette.length), nu)
     }
 
-    def mkColour2(z: Complex, iter: Int, maxIter: Int): Colour =
+  def mkColour2(z: Complex, iter: Int, maxIter: Int): Colour =
     if (iter >= maxIter) Colour.Black
     else {
       val logZn = math.log(z.abs) / 2
       val nu    = math.log(logZn / math.log(2)) / math.log(2)
       Palette2(iter % 16).mix(Palette2((iter + 1) % 16), nu)
-//      Colour(0, 0, 0)
     }
 
   object In {
@@ -144,17 +146,6 @@ object Mandelbrot {
           val c  = Complex(interpolate(x, 0, width, xMin, xMax), interpolate(y, 0, height, yMin, yMax))
           val t  = itMandel2(c, maxIter, 4)
           val cc = mkColour2(t.c, t.i, maxIter)
-//
-//          val iter = t.i
-//          val z = t.c
-//          val cc = if (iter >= maxIter) Colour.Black
-//          else {
-//            val logZn = math.log(z.abs) / 2
-//            val nu    = math.log(logZn / math.log(2)) / math.log(2)
-//            Palette2(iter % 16).mix(Palette2((iter + 1) % 16), nu)
-//            //      Colour(0, 0, 0)
-//          }
-
           image(x + (y * width)) = cc
           //          buffer(x)(y) = cc
           x += 1
