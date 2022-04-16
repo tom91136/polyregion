@@ -431,7 +431,7 @@ object compiletime {
           }).asExprOf[A]
         }
       }
-      // println("Code=" + code.show)
+      println("Code=" + code.show)
       code
     }
 

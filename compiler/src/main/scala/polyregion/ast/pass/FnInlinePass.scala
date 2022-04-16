@@ -120,7 +120,7 @@ object FnInlinePass {
         }
       }
 
-      f.copy(body = stmts ,captures = f.captures ++ captures)
+      f.copy(body = stmts ,captures = (f.captures ++ captures).distinct)
     }
 
     (p.Program(f, Nil, program.defs), log)

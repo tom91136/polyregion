@@ -281,11 +281,12 @@ object Compiler {
     (depFns, deps, log) <- compileAllDependencies(exprDeps, StdLib.Functions, StdLib.StructDefs)(log)
     log                 <- log.info(s"Expr+Deps Dependent methods", deps.defs.map(_.toString).toList*)
     log                 <- log.info(s"Expr+Deps Dependent structs", deps.clss.map(_.toString).toList*)
-    // log                 <- log.info(s"Expr+Deps Dependent vars   ", deps.vars.map(_.toString).toList*)
 
     // sort the captures so that the order is stable for codegen
     // captures = deps.vars.toList.sortBy(_._1.symbol)
     captures = capturedNames.toList.distinctBy(_._2).sortBy((name, ref) => ref.symbol.pos.map(_.start) -> name.symbol)
+    // log                 <- log.info(s"Expr+Deps Dependent vars   ", captures.map(_.toString)*)
+
     exprFn = p.Function(
       name = p.Sym(exprName),
       receiver = None,
@@ -298,7 +299,7 @@ object Compiler {
     log <- log.info(s"Program compiled, dependencies: ${unoptimisedProgram.functions.size}")
     log <- log.info(s"Program compiled, structures", unoptimisedProgram.defs.map(_.repr)*)
 
-     _ = println(log.render().mkString("\n"))
+    //  _ = println(log.render().mkString("\n"))
     // verify before optimisation
     (unoptimisedVerification, log) <- VerifyPass.run(unoptimisedProgram)(log).success
     log <- log.info(
@@ -328,9 +329,12 @@ object Compiler {
 
     log <- log.info(s"Program optimised, dependencies", optimisedProgram.functions.map(_.repr)*)
     log <- log.info(s"Program optimised, entry", optimisedProgram.entry.repr)
+    // log                 <- log.info(s"Program optimised, entry", captures.map(_.toString)*)
 
-    // _ = println(log.render().mkString("\n"))
 
-  } yield (captures, optimisedProgram, log)
+    capturesLUT = captures.toMap
+    _ = println(log.render().mkString("\n"))
+
+  } yield (optimisedProgram.entry.captures.map{ n =>  n -> capturesLUT(n) }, optimisedProgram, log)
 
 }

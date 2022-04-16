@@ -101,7 +101,7 @@ object Mandelbrot {
       Palette(iter % Palette.length).mix(Palette((iter + 1) % Palette.length), nu)
     }
 
-  inline def mkColour2(z: Complex, iter: Int, maxIter: Int): Colour =
+    def mkColour2(z: Complex, iter: Int, maxIter: Int): Colour =
     if (iter >= maxIter) Colour.Black
     else {
       val logZn = math.log(z.abs) / 2
@@ -143,17 +143,17 @@ object Mandelbrot {
         while (x < width) {
           val c  = Complex(interpolate(x, 0, width, xMin, xMax), interpolate(y, 0, height, yMin, yMax))
           val t  = itMandel2(c, maxIter, 4)
-//          val cc = mkColour2(t.c, t.i, maxIter)
-
-          val iter = t.i
-          val z = t.c
-          val cc = if (iter >= maxIter) Colour.Black
-          else {
-            val logZn = math.log(z.abs) / 2
-            val nu    = math.log(logZn / math.log(2)) / math.log(2)
-            Palette2(iter % 16).mix(Palette2((iter + 1) % 16), nu)
-            //      Colour(0, 0, 0)
-          }
+          val cc = mkColour2(t.c, t.i, maxIter)
+//
+//          val iter = t.i
+//          val z = t.c
+//          val cc = if (iter >= maxIter) Colour.Black
+//          else {
+//            val logZn = math.log(z.abs) / 2
+//            val nu    = math.log(logZn / math.log(2)) / math.log(2)
+//            Palette2(iter % 16).mix(Palette2((iter + 1) % 16), nu)
+//            //      Colour(0, 0, 0)
+//          }
 
           image(x + (y * width)) = cc
           //          buffer(x)(y) = cc
