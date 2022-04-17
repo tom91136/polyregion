@@ -169,6 +169,31 @@ json Type::array_to_json(const Type::Array& x) {
   return json::array({component});
 }
 
+Type::Var Type::var_from_json(const json& j) { 
+  auto name = j.at(0).get<std::string>();
+  return Type::Var(name);
+}
+
+json Type::var_to_json(const Type::Var& x) { 
+  auto name = x.name;
+  return json::array({name});
+}
+
+Type::Suspension Type::suspension_from_json(const json& j) { 
+  std::vector<Type::Any> args;
+  auto args_json = j.at(0);
+  std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &Type::any_from_json);
+  auto rtn =  Type::any_from_json(j.at(1));
+  return {args, rtn};
+}
+
+json Type::suspension_to_json(const Type::Suspension& x) { 
+  std::vector<json> args;
+  std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &Type::any_to_json);
+  auto rtn =  Type::any_to_json(x.rtn);
+  return json::array({args, rtn});
+}
+
 Type::Any Type::any_from_json(const json& j) { 
   size_t ord = j.at(0).get<size_t>();
   const auto t = j.at(1);
@@ -185,6 +210,8 @@ Type::Any Type::any_from_json(const json& j) {
   case 9: return Type::string_from_json(t);
   case 10: return Type::struct_from_json(t);
   case 11: return Type::array_from_json(t);
+  case 12: return Type::var_from_json(t);
+  case 13: return Type::suspension_from_json(t);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
   }
 }
@@ -203,6 +230,8 @@ json Type::any_to_json(const Type::Any& x) {
   [](const Type::String &y) -> json { return {9, Type::string_to_json(y)}; },
   [](const Type::Struct &y) -> json { return {10, Type::struct_to_json(y)}; },
   [](const Type::Array &y) -> json { return {11, Type::array_to_json(y)}; },
+  [](const Type::Var &y) -> json { return {12, Type::var_to_json(y)}; },
+  [](const Type::Suspension &y) -> json { return {13, Type::suspension_to_json(y)}; },
   [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
   }, *x);
 }
@@ -346,6 +375,26 @@ json Term::stringconst_to_json(const Term::StringConst& x) {
   return json::array({value});
 }
 
+Term::Suspension Term::suspension_from_json(const json& j) { 
+  std::vector<Named> args;
+  auto args_json = j.at(0);
+  std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &named_from_json);
+  std::vector<Stmt::Any> stmts;
+  auto stmts_json = j.at(1);
+  std::transform(stmts_json.begin(), stmts_json.end(), std::back_inserter(stmts), &Stmt::any_from_json);
+  auto shape =  Type::suspension_from_json(j.at(2));
+  return {args, stmts, shape};
+}
+
+json Term::suspension_to_json(const Term::Suspension& x) { 
+  std::vector<json> args;
+  std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &named_to_json);
+  std::vector<json> stmts;
+  std::transform(x.stmts.begin(), x.stmts.end(), std::back_inserter(stmts), &Stmt::any_to_json);
+  auto shape =  Type::suspension_to_json(x.shape);
+  return json::array({args, stmts, shape});
+}
+
 Term::Any Term::any_from_json(const json& j) { 
   size_t ord = j.at(0).get<size_t>();
   const auto t = j.at(1);
@@ -361,6 +410,7 @@ Term::Any Term::any_from_json(const json& j) {
   case 8: return Term::floatconst_from_json(t);
   case 9: return Term::doubleconst_from_json(t);
   case 10: return Term::stringconst_from_json(t);
+  case 11: return Term::suspension_from_json(t);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
   }
 }
@@ -378,6 +428,7 @@ json Term::any_to_json(const Term::Any& x) {
   [](const Term::FloatConst &y) -> json { return {8, Term::floatconst_to_json(y)}; },
   [](const Term::DoubleConst &y) -> json { return {9, Term::doubleconst_to_json(y)}; },
   [](const Term::StringConst &y) -> json { return {10, Term::stringconst_to_json(y)}; },
+  [](const Term::Suspension &y) -> json { return {11, Term::suspension_to_json(y)}; },
   [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
   }, *x);
 }
@@ -1326,13 +1377,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "418c148ab552ca7823e894f562a7e893") {
-   throw std::runtime_error("Expecting ADT hash to be 418c148ab552ca7823e894f562a7e893, but was " + hash);
+  if(hash != "a5f9b4c0c9ccad32e4d6fb872a6996b2") {
+   throw std::runtime_error("Expecting ADT hash to be a5f9b4c0c9ccad32e4d6fb872a6996b2, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"418c148ab552ca7823e894f562a7e893", x});
+  return json::array({"a5f9b4c0c9ccad32e4d6fb872a6996b2", x});
 }
 } // namespace polyregion::polyast

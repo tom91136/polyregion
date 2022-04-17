@@ -130,7 +130,9 @@ struct Unit;
 struct String;
 struct Struct;
 struct Array;
-using Any = Alternative<Float, Double, Bool, Byte, Char, Short, Int, Long, Unit, String, Struct, Array>;
+struct Var;
+struct Suspension;
+using Any = Alternative<Float, Double, Bool, Byte, Char, Short, Int, Long, Unit, String, Struct, Array, Var, Suspension>;
 struct EXPORT Base {
   TypeKind::Any kind;
   protected:
@@ -225,6 +227,23 @@ struct EXPORT Array : Type::Base {
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Array &);
   EXPORT friend bool operator==(const Type::Array &, const Type::Array &);
 };
+
+struct EXPORT Var : Type::Base {
+  std::string name;
+  explicit Var(std::string name) noexcept : Type::Base(TypeKind::None()), name(std::move(name)) {}
+  EXPORT operator Any() const { return std::make_shared<Var>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Var &);
+  EXPORT friend bool operator==(const Type::Var &, const Type::Var &);
+};
+
+struct EXPORT Suspension : Type::Base {
+  std::vector<Type::Any> args;
+  Type::Any rtn;
+  Suspension(std::vector<Type::Any> args, Type::Any rtn) noexcept : Type::Base(TypeKind::None()), args(std::move(args)), rtn(std::move(rtn)) {}
+  EXPORT operator Any() const { return std::make_shared<Suspension>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Suspension &);
+  EXPORT friend bool operator==(const Type::Suspension &, const Type::Suspension &);
+};
 } // namespace Type
 
 
@@ -258,7 +277,8 @@ struct LongConst;
 struct FloatConst;
 struct DoubleConst;
 struct StringConst;
-using Any = Alternative<Select, UnitConst, BoolConst, ByteConst, CharConst, ShortConst, IntConst, LongConst, FloatConst, DoubleConst, StringConst>;
+struct Suspension;
+using Any = Alternative<Select, UnitConst, BoolConst, ByteConst, CharConst, ShortConst, IntConst, LongConst, FloatConst, DoubleConst, StringConst, Suspension>;
 struct EXPORT Base {
   Type::Any tpe;
   protected:
@@ -354,6 +374,16 @@ struct EXPORT StringConst : Term::Base {
   EXPORT operator Any() const { return std::make_shared<StringConst>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::StringConst &);
   EXPORT friend bool operator==(const Term::StringConst &, const Term::StringConst &);
+};
+
+struct EXPORT Suspension : Term::Base {
+  std::vector<Named> args;
+  std::vector<Stmt::Any> stmts;
+  Type::Suspension shape;
+  Suspension(std::vector<Named> args, std::vector<Stmt::Any> stmts, Type::Suspension shape) noexcept : Term::Base(shape), args(std::move(args)), stmts(std::move(stmts)), shape(std::move(shape)) {}
+  EXPORT operator Any() const { return std::make_shared<Suspension>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::Suspension &);
+  EXPORT friend bool operator==(const Term::Suspension &, const Term::Suspension &);
 };
 } // namespace Term
 namespace BinaryIntrinsicKind { 
@@ -1114,6 +1144,12 @@ template <> struct std::hash<polyregion::polyast::Type::Struct> {
 template <> struct std::hash<polyregion::polyast::Type::Array> {
   std::size_t operator()(const polyregion::polyast::Type::Array &) const noexcept;
 };
+template <> struct std::hash<polyregion::polyast::Type::Var> {
+  std::size_t operator()(const polyregion::polyast::Type::Var &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Type::Suspension> {
+  std::size_t operator()(const polyregion::polyast::Type::Suspension &) const noexcept;
+};
 template <> struct std::hash<polyregion::polyast::Named> {
   std::size_t operator()(const polyregion::polyast::Named &) const noexcept;
 };
@@ -1152,6 +1188,9 @@ template <> struct std::hash<polyregion::polyast::Term::DoubleConst> {
 };
 template <> struct std::hash<polyregion::polyast::Term::StringConst> {
   std::size_t operator()(const polyregion::polyast::Term::StringConst &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Term::Suspension> {
+  std::size_t operator()(const polyregion::polyast::Term::Suspension &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::Add> {
   std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::Add &) const noexcept;

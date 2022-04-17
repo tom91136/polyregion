@@ -85,8 +85,9 @@ object Mandelbrot {
   }
 
   case class ItResult[A, B](c: A, i: B)
+//  case class ItResult (c: Complex, i: Int)
 
-  def itMandel2(c: Complex, imax: Int, bailout: Int): ItResult[Complex, Int] = {
+  def itMandel2(c: Complex, imax: Int, bailout: Int): ItResult[Complex, Int]  = {
     var z = Complex.Zero
     var i = 0
     while (z.abs <= bailout && i < imax) {
@@ -139,19 +140,21 @@ object Mandelbrot {
 
     polyregion.scala.compiletime.offload {
 
-      var y = 0
-      while (y < height) {
-        var x = 0
-        while (x < width) {
-          val c  = Complex(interpolate(x, 0, width, xMin, xMax), interpolate(y, 0, height, yMin, yMax))
-          val t  = itMandel2(c, maxIter, 4)
-          val cc = mkColour2(t.c, t.i, maxIter)
-          image(x + (y * width)) = cc
-          //          buffer(x)(y) = cc
-          x += 1
-        }
-        y += 1
-      }
+      ItResult(Complex.Zero, 1)
+
+//      var y = 0
+//      while (y < height) {
+//        var x = 0
+//        while (x < width) {
+//          val c  = Complex(interpolate(x, 0, width, xMin, xMax), interpolate(y, 0, height, yMin, yMax))
+//          val t  = itMandel2(c, maxIter, 4)
+//          val cc = mkColour2(t.c, t.i, maxIter)
+//          image(x + (y * width)) = cc
+//          //          buffer(x)(y) = cc
+//          x += 1
+//        }
+//        y += 1
+//      }
     }
 
     image.grouped(width).map(_.toArray).toArray.transpose.copyToArray(buffer)

@@ -26,7 +26,8 @@ object compiletime {
 
   def showExprImpl(x: Expr[Any])(using q: Quotes): Expr[Any] = {
     import quotes.reflect.*
-    given Printer[Tree] = Printer.TreeStructure
+    given Printer[Tree] = Printer.TreeAnsiCode
+    println(x.show)
     pprint.pprintln(x.asTerm) // term => AST
     x
   }
@@ -317,9 +318,9 @@ object compiletime {
       c <- Either.catchNonFatal(PolyregionCompiler.compile(serialisedAst, true, PolyregionCompiler.BACKEND_LLVM))
     } yield {
 
+      println(s"Messages=\n  ${c.messages}")
       println(s"Program=${c.program.length}")
       println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
-      println(s"Messages=\n  ${c.messages}")
 
       val programBytesExpr = Expr(c.program)
       val astBytesExpr     = Expr(serialisedAst)
@@ -441,7 +442,7 @@ object compiletime {
 //    val b = '{ val b = polyregion.Runtime.FFIInvocationBuilder() }
 
     result match {
-      case Left(e) => throw e
+      case Left(e)  => throw e
       case Right(x) =>
         // println("Code=" + x.show)
         x

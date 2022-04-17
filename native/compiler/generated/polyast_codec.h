@@ -166,6 +166,8 @@ namespace Term {
 [[nodiscard]] EXPORT json doubleconst_to_json(const Term::DoubleConst &);
 [[nodiscard]] EXPORT Term::StringConst stringconst_from_json(const json &);
 [[nodiscard]] EXPORT json stringconst_to_json(const Term::StringConst &);
+[[nodiscard]] EXPORT Term::Suspension suspension_from_json(const json &);
+[[nodiscard]] EXPORT json suspension_to_json(const Term::Suspension &);
 [[nodiscard]] EXPORT Term::Any any_from_json(const json &);
 [[nodiscard]] EXPORT json any_to_json(const Term::Any &);
 } // namespace Term
@@ -208,6 +210,10 @@ namespace Type {
 [[nodiscard]] EXPORT json struct_to_json(const Type::Struct &);
 [[nodiscard]] EXPORT Type::Array array_from_json(const json &);
 [[nodiscard]] EXPORT json array_to_json(const Type::Array &);
+[[nodiscard]] EXPORT Type::Var var_from_json(const json &);
+[[nodiscard]] EXPORT json var_to_json(const Type::Var &);
+[[nodiscard]] EXPORT Type::Suspension suspension_from_json(const json &);
+[[nodiscard]] EXPORT json suspension_to_json(const Type::Suspension &);
 [[nodiscard]] EXPORT Type::Any any_from_json(const json &);
 [[nodiscard]] EXPORT json any_to_json(const Type::Any &);
 } // namespace Type

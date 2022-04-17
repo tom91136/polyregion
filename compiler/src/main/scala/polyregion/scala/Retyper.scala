@@ -20,7 +20,7 @@ object Retyper {
       )
     }
 
-    if (tpeSym.typeMembers.nonEmpty) {
+    if (tpeSym.typeMembers.exists(_.isTypeParam)) {
       throw RuntimeException(
         s"Encountered generic class ${tpeSym}, typeCtorArg=${tpeSym.typeMembers}"
       )

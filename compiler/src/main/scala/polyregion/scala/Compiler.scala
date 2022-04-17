@@ -183,6 +183,7 @@ object Compiler {
         log <- log.info("Body (AST)", pprint.tokenize(term, indent = 1, showFieldNames = true).mkString)
         log <- log.info("Body (Ascii)", term.show(using q.Printer.TreeAnsiCode))
 
+        _ = println(log.render().mkString("\n"))
         // first, outline what variables this term captures
         // ((typedExternalRefs, c), log) <- RefOutliner.outline(term)(log)
         // Map[q.Ref, p.Named | p.Term]

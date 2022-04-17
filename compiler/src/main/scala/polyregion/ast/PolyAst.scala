@@ -1,5 +1,7 @@
 package polyregion.ast
 
+import polyregion.ast.PolyAst.Type.Suspension
+
 object PolyAst {
 
   case class Sym(fqn: List[String]) derives MsgPack.Codec {
@@ -41,6 +43,8 @@ object PolyAst {
     case String                 extends Type(TypeKind.Ref)
     case Struct(name: Sym)      extends Type(TypeKind.Ref)
     case Array(component: Type) extends Type(TypeKind.Ref)
+    case Var(name: String)      extends Type(TypeKind.None)
+    case Suspension(args : List[Type], rtn : Type) extends Type(TypeKind.None)
   }
 
   case class Named(symbol: String, tpe: Type) derives MsgPack.Codec
@@ -57,6 +61,8 @@ object PolyAst {
     case FloatConst(value: Float)               extends Term(Type.Float)
     case DoubleConst(value: Double)             extends Term(Type.Double)
     case StringConst(value: String)             extends Term(Type.String)
+
+    case Suspension(args : List[Named],  stmts : List[Stmt], shape : Type.Suspension) extends Term(shape)
   }
 
   case class Position(file: String, line: Int, col: Int) derives MsgPack.Codec
@@ -93,11 +99,11 @@ object PolyAst {
     case UnaryLogicIntrinsic(lhs: Term, kind: UnaryLogicIntrinsicKind)              extends Expr(Type.Bool)
     case BinaryLogicIntrinsic(lhs: Term, rhs: Term, kind: BinaryLogicIntrinsicKind) extends Expr(Type.Bool)
 
-    case Cast(from: Term, as: Type)                                             extends Expr(as)
-    case Alias(ref: Term)                                                       extends Expr(ref.tpe)
-    case Invoke(name: Sym, receiver: Option[Term], args: List[Term], rtn: Type) extends Expr(rtn)
-    case Index(lhs: Term.Select, idx: Term, component: Type)                    extends Expr(component)
-    case Alloc(witness: Type.Array, size: Term)                                 extends Expr(witness)
+    case Cast(from: Term, as: Type) extends Expr(as)
+    case Alias(ref: Term)           extends Expr(ref.tpe)
+    case Invoke(name: Sym, /*typeArgs: List[Type],*/ receiver: Option[Term], args: List[Term], rtn: Type) extends Expr(rtn)
+    case Index(lhs: Term.Select, idx: Term, component: Type) extends Expr(component)
+    case Alloc(witness: Type.Array, size: Term)              extends Expr(witness)
   }
 
   enum Stmt derives MsgPack.Codec {
@@ -125,6 +131,7 @@ object PolyAst {
 
   case class Function(         //
       name: Sym,               //
+      /*typeArgs: List[String],*/  //
       receiver: Option[Named], //
       args: List[Named],       //
       captures: List[Named],   //
