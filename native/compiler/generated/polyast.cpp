@@ -160,8 +160,8 @@ bool Type::operator==(const Type::Var &l, const Type::Var &r) {
   return l.name == r.name;
 }
 
-std::ostream &Type::operator<<(std::ostream &os, const Type::Suspension &x) {
-  os << "Suspension(";
+std::ostream &Type::operator<<(std::ostream &os, const Type::Exec &x) {
+  os << "Exec(";
   os << '{';
   if (!x.args.empty()) {
     std::for_each(x.args.begin(), std::prev(x.args.end()), [&os](auto &&x) { os << x; os << ','; });
@@ -173,7 +173,7 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Suspension &x) {
   os << ')';
   return os;
 }
-bool Type::operator==(const Type::Suspension &l, const Type::Suspension &r) { 
+bool Type::operator==(const Type::Exec &l, const Type::Exec &r) { 
   return std::equal(l.args.begin(), l.args.end(), r.args.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && *l.rtn == *r.rtn;
 }
 
@@ -187,6 +187,30 @@ std::ostream &operator<<(std::ostream &os, const Named &x) {
 }
 bool operator==(const Named &l, const Named &r) { 
   return l.symbol == r.symbol && *l.tpe == *r.tpe;
+}
+
+std::ostream &operator<<(std::ostream &os, const Executable &x) {
+  os << "Executable(";
+  os << '{';
+  if (!x.args.empty()) {
+    std::for_each(x.args.begin(), std::prev(x.args.end()), [&os](auto &&x) { os << x; os << ','; });
+    os << x.args.back();
+  }
+  os << '}';
+  os << ',';
+  os << '{';
+  if (!x.stmts.empty()) {
+    std::for_each(x.stmts.begin(), std::prev(x.stmts.end()), [&os](auto &&x) { os << x; os << ','; });
+    os << x.stmts.back();
+  }
+  os << '}';
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool operator==(const Executable &l, const Executable &r) { 
+  return l.args == r.args && std::equal(l.stmts.begin(), l.stmts.end(), r.stmts.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && *l.rtn == *r.rtn;
 }
 
 std::ostream &operator<<(std::ostream &os, const Position &x) {
@@ -324,30 +348,6 @@ std::ostream &Term::operator<<(std::ostream &os, const Term::StringConst &x) {
 }
 bool Term::operator==(const Term::StringConst &l, const Term::StringConst &r) { 
   return l.value == r.value;
-}
-
-std::ostream &Term::operator<<(std::ostream &os, const Term::Suspension &x) {
-  os << "Suspension(";
-  os << '{';
-  if (!x.args.empty()) {
-    std::for_each(x.args.begin(), std::prev(x.args.end()), [&os](auto &&x) { os << x; os << ','; });
-    os << x.args.back();
-  }
-  os << '}';
-  os << ',';
-  os << '{';
-  if (!x.stmts.empty()) {
-    std::for_each(x.stmts.begin(), std::prev(x.stmts.end()), [&os](auto &&x) { os << x; os << ','; });
-    os << x.stmts.back();
-  }
-  os << '}';
-  os << ',';
-  os << x.shape;
-  os << ')';
-  return os;
-}
-bool Term::operator==(const Term::Suspension &l, const Term::Suspension &r) { 
-  return l.args == r.args && std::equal(l.stmts.begin(), l.stmts.end(), r.stmts.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && l.shape == r.shape;
 }
 
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Any &x) {
@@ -862,6 +862,16 @@ bool Expr::operator==(const Expr::Alloc &l, const Expr::Alloc &r) {
   return l.witness == r.witness && *l.size == *r.size;
 }
 
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::Suspend &x) {
+  os << "Suspend(";
+  os << x.exec;
+  os << ')';
+  return os;
+}
+bool Expr::operator==(const Expr::Suspend &l, const Expr::Suspend &r) { 
+  return l.exec == r.exec;
+}
+
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Any &x) {
   std::visit([&os](auto &&arg) { os << *arg; }, x);
   return os;
@@ -1174,7 +1184,7 @@ std::size_t std::hash<polyregion::polyast::Type::Var>::operator()(const polyregi
   std::size_t seed = std::hash<decltype(x.name)>()(x.name);
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Type::Suspension>::operator()(const polyregion::polyast::Type::Suspension &x) const noexcept {
+std::size_t std::hash<polyregion::polyast::Type::Exec>::operator()(const polyregion::polyast::Type::Exec &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.args)>()(x.args);
   seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
@@ -1182,6 +1192,12 @@ std::size_t std::hash<polyregion::polyast::Type::Suspension>::operator()(const p
 std::size_t std::hash<polyregion::polyast::Named>::operator()(const polyregion::polyast::Named &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.symbol)>()(x.symbol);
   seed ^= std::hash<decltype(x.tpe)>()(x.tpe) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Executable>::operator()(const polyregion::polyast::Executable &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.args)>()(x.args);
+  seed ^= std::hash<decltype(x.stmts)>()(x.stmts) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Position>::operator()(const polyregion::polyast::Position &x) const noexcept {
@@ -1233,12 +1249,6 @@ std::size_t std::hash<polyregion::polyast::Term::DoubleConst>::operator()(const 
 }
 std::size_t std::hash<polyregion::polyast::Term::StringConst>::operator()(const polyregion::polyast::Term::StringConst &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.value)>()(x.value);
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::Term::Suspension>::operator()(const polyregion::polyast::Term::Suspension &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.args)>()(x.args);
-  seed ^= std::hash<decltype(x.stmts)>()(x.stmts) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(x.shape)>()(x.shape) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Add>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Add &x) const noexcept {
@@ -1490,6 +1500,10 @@ std::size_t std::hash<polyregion::polyast::Expr::Index>::operator()(const polyre
 std::size_t std::hash<polyregion::polyast::Expr::Alloc>::operator()(const polyregion::polyast::Expr::Alloc &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.witness)>()(x.witness);
   seed ^= std::hash<decltype(x.size)>()(x.size) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Expr::Suspend>::operator()(const polyregion::polyast::Expr::Suspend &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.exec)>()(x.exec);
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Stmt::Comment>::operator()(const polyregion::polyast::Stmt::Comment &x) const noexcept {

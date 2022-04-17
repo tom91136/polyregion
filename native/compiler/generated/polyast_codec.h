@@ -26,6 +26,8 @@ namespace Expr {
 [[nodiscard]] EXPORT json index_to_json(const Expr::Index &);
 [[nodiscard]] EXPORT Expr::Alloc alloc_from_json(const json &);
 [[nodiscard]] EXPORT json alloc_to_json(const Expr::Alloc &);
+[[nodiscard]] EXPORT Expr::Suspend suspend_from_json(const json &);
+[[nodiscard]] EXPORT json suspend_to_json(const Expr::Suspend &);
 [[nodiscard]] EXPORT Expr::Any any_from_json(const json &);
 [[nodiscard]] EXPORT json any_to_json(const Expr::Any &);
 } // namespace Expr
@@ -166,8 +168,6 @@ namespace Term {
 [[nodiscard]] EXPORT json doubleconst_to_json(const Term::DoubleConst &);
 [[nodiscard]] EXPORT Term::StringConst stringconst_from_json(const json &);
 [[nodiscard]] EXPORT json stringconst_to_json(const Term::StringConst &);
-[[nodiscard]] EXPORT Term::Suspension suspension_from_json(const json &);
-[[nodiscard]] EXPORT json suspension_to_json(const Term::Suspension &);
 [[nodiscard]] EXPORT Term::Any any_from_json(const json &);
 [[nodiscard]] EXPORT json any_to_json(const Term::Any &);
 } // namespace Term
@@ -175,6 +175,8 @@ namespace Term {
 [[nodiscard]] EXPORT json sym_to_json(const Sym &);
 [[nodiscard]] EXPORT Named named_from_json(const json &);
 [[nodiscard]] EXPORT json named_to_json(const Named &);
+[[nodiscard]] EXPORT Executable executable_from_json(const json &);
+[[nodiscard]] EXPORT json executable_to_json(const Executable &);
 [[nodiscard]] EXPORT Position position_from_json(const json &);
 [[nodiscard]] EXPORT json position_to_json(const Position &);
 [[nodiscard]] EXPORT StructDef structdef_from_json(const json &);
@@ -212,8 +214,8 @@ namespace Type {
 [[nodiscard]] EXPORT json array_to_json(const Type::Array &);
 [[nodiscard]] EXPORT Type::Var var_from_json(const json &);
 [[nodiscard]] EXPORT json var_to_json(const Type::Var &);
-[[nodiscard]] EXPORT Type::Suspension suspension_from_json(const json &);
-[[nodiscard]] EXPORT json suspension_to_json(const Type::Suspension &);
+[[nodiscard]] EXPORT Type::Exec exec_from_json(const json &);
+[[nodiscard]] EXPORT json exec_to_json(const Type::Exec &);
 [[nodiscard]] EXPORT Type::Any any_from_json(const json &);
 [[nodiscard]] EXPORT json any_to_json(const Type::Any &);
 } // namespace Type

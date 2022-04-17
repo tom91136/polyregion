@@ -28,7 +28,9 @@ using std::string;
       [](const Type::String &x) { return "String"s; },                        //
       [](const Type::Unit &x) { return "Unit"s; },                            //
       [](const Type::Struct &x) { return "Struct[" + repr(x.name) + "]"; },   //
-      [](const Type::Array &x) { return "Array[" + repr(x.component) + "]"; } //
+      [](const Type::Array &x) { return "Array[" + repr(x.component) + "]"; },//
+      [](const Type::Var &x) { return "Var[" + x.name + "]"; }, //
+      [](const Type::Suspension &x) { return "Suspension[???]"s; } //
   );
 }
 
@@ -53,7 +55,9 @@ using std::string;
       [](const Term::LongConst &x) { return "Long(" + std::to_string(x.value) + ")"; },
       [](const Term::DoubleConst &x) { return "Double(" + std::to_string(x.value) + ")"; },
       [](const Term::FloatConst &x) { return "Float(" + std::to_string(x.value) + ")"; },
-      [](const Term::StringConst &x) { return "String(" + x.value + ")"; });
+      [](const Term::StringConst &x) { return "String(" + x.value + ")"; },
+      [](const Term::Suspension &x) { return "Suspension(???)"s; }
+      );
 }
 
 [[nodiscard]] string polyast::repr(const Expr::Any &expr) {

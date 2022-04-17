@@ -49,6 +49,13 @@ constexpr auto select(const Alternative<T...> &a) {
   return std::visit([](auto &&arg) { return *(arg).*member; }, a);
 }
 
+template <typename T, typename F> //
+auto  map_(const std::vector<T> &xs, const F &f) {
+  std::vector< std::invoke_result_t<F, T&> > ys;
+  for(auto x : xs) ys.push_back(f(x));
+  return ys;
+}
+
 template <typename T> //
 std::string to_string(const T& x) {
   std::ostringstream ss;
@@ -131,8 +138,8 @@ struct String;
 struct Struct;
 struct Array;
 struct Var;
-struct Suspension;
-using Any = Alternative<Float, Double, Bool, Byte, Char, Short, Int, Long, Unit, String, Struct, Array, Var, Suspension>;
+struct Exec;
+using Any = Alternative<Float, Double, Bool, Byte, Char, Short, Int, Long, Unit, String, Struct, Array, Var, Exec>;
 struct EXPORT Base {
   TypeKind::Any kind;
   protected:
@@ -236,13 +243,13 @@ struct EXPORT Var : Type::Base {
   EXPORT friend bool operator==(const Type::Var &, const Type::Var &);
 };
 
-struct EXPORT Suspension : Type::Base {
+struct EXPORT Exec : Type::Base {
   std::vector<Type::Any> args;
   Type::Any rtn;
-  Suspension(std::vector<Type::Any> args, Type::Any rtn) noexcept : Type::Base(TypeKind::None()), args(std::move(args)), rtn(std::move(rtn)) {}
-  EXPORT operator Any() const { return std::make_shared<Suspension>(*this); };
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Suspension &);
-  EXPORT friend bool operator==(const Type::Suspension &, const Type::Suspension &);
+  Exec(std::vector<Type::Any> args, Type::Any rtn) noexcept : Type::Base(TypeKind::None()), args(std::move(args)), rtn(std::move(rtn)) {}
+  EXPORT operator Any() const { return std::make_shared<Exec>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Exec &);
+  EXPORT friend bool operator==(const Type::Exec &, const Type::Exec &);
 };
 } // namespace Type
 
@@ -253,6 +260,15 @@ struct EXPORT Named {
   Named(std::string symbol, Type::Any tpe) noexcept : symbol(std::move(symbol)), tpe(std::move(tpe)) {}
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Named &);
   EXPORT friend bool operator==(const Named &, const Named &);
+};
+
+struct EXPORT Executable {
+  std::vector<Named> args;
+  std::vector<Stmt::Any> stmts;
+  Type::Any rtn;
+  Executable(std::vector<Named> args, std::vector<Stmt::Any> stmts, Type::Any rtn) noexcept : args(std::move(args)), stmts(std::move(stmts)), rtn(std::move(rtn)) {}
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Executable &);
+  EXPORT friend bool operator==(const Executable &, const Executable &);
 };
 
 struct EXPORT Position {
@@ -277,8 +293,7 @@ struct LongConst;
 struct FloatConst;
 struct DoubleConst;
 struct StringConst;
-struct Suspension;
-using Any = Alternative<Select, UnitConst, BoolConst, ByteConst, CharConst, ShortConst, IntConst, LongConst, FloatConst, DoubleConst, StringConst, Suspension>;
+using Any = Alternative<Select, UnitConst, BoolConst, ByteConst, CharConst, ShortConst, IntConst, LongConst, FloatConst, DoubleConst, StringConst>;
 struct EXPORT Base {
   Type::Any tpe;
   protected:
@@ -374,16 +389,6 @@ struct EXPORT StringConst : Term::Base {
   EXPORT operator Any() const { return std::make_shared<StringConst>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::StringConst &);
   EXPORT friend bool operator==(const Term::StringConst &, const Term::StringConst &);
-};
-
-struct EXPORT Suspension : Term::Base {
-  std::vector<Named> args;
-  std::vector<Stmt::Any> stmts;
-  Type::Suspension shape;
-  Suspension(std::vector<Named> args, std::vector<Stmt::Any> stmts, Type::Suspension shape) noexcept : Term::Base(shape), args(std::move(args)), stmts(std::move(stmts)), shape(std::move(shape)) {}
-  EXPORT operator Any() const { return std::make_shared<Suspension>(*this); };
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::Suspension &);
-  EXPORT friend bool operator==(const Term::Suspension &, const Term::Suspension &);
 };
 } // namespace Term
 namespace BinaryIntrinsicKind { 
@@ -837,7 +842,8 @@ struct Alias;
 struct Invoke;
 struct Index;
 struct Alloc;
-using Any = Alternative<UnaryIntrinsic, BinaryIntrinsic, UnaryLogicIntrinsic, BinaryLogicIntrinsic, Cast, Alias, Invoke, Index, Alloc>;
+struct Suspend;
+using Any = Alternative<UnaryIntrinsic, BinaryIntrinsic, UnaryLogicIntrinsic, BinaryLogicIntrinsic, Cast, Alias, Invoke, Index, Alloc, Suspend>;
 struct EXPORT Base {
   Type::Any tpe;
   protected:
@@ -932,6 +938,17 @@ struct EXPORT Alloc : Expr::Base {
   EXPORT operator Any() const { return std::make_shared<Alloc>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Alloc &);
   EXPORT friend bool operator==(const Expr::Alloc &, const Expr::Alloc &);
+};
+
+struct EXPORT Suspend : Expr::Base {
+  Executable exec;
+
+
+
+  explicit Suspend(Executable exec) noexcept : Expr::Base( Type::Exec(map_(exec.args,[](auto & x) {return x.tpe;} ), exec.rtn)), exec(std::move(exec)) {}
+  EXPORT operator Any() const { return std::make_shared<Suspend>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Suspend &);
+  EXPORT friend bool operator==(const Expr::Suspend &, const Expr::Suspend &);
 };
 } // namespace Expr
 namespace Stmt { 
@@ -1147,11 +1164,14 @@ template <> struct std::hash<polyregion::polyast::Type::Array> {
 template <> struct std::hash<polyregion::polyast::Type::Var> {
   std::size_t operator()(const polyregion::polyast::Type::Var &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Type::Suspension> {
-  std::size_t operator()(const polyregion::polyast::Type::Suspension &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Type::Exec> {
+  std::size_t operator()(const polyregion::polyast::Type::Exec &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Named> {
   std::size_t operator()(const polyregion::polyast::Named &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Executable> {
+  std::size_t operator()(const polyregion::polyast::Executable &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Position> {
   std::size_t operator()(const polyregion::polyast::Position &) const noexcept;
@@ -1188,9 +1208,6 @@ template <> struct std::hash<polyregion::polyast::Term::DoubleConst> {
 };
 template <> struct std::hash<polyregion::polyast::Term::StringConst> {
   std::size_t operator()(const polyregion::polyast::Term::StringConst &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::Term::Suspension> {
-  std::size_t operator()(const polyregion::polyast::Term::Suspension &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::Add> {
   std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::Add &) const noexcept;
@@ -1368,6 +1385,9 @@ template <> struct std::hash<polyregion::polyast::Expr::Index> {
 };
 template <> struct std::hash<polyregion::polyast::Expr::Alloc> {
   std::size_t operator()(const polyregion::polyast::Expr::Alloc &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Suspend> {
+  std::size_t operator()(const polyregion::polyast::Expr::Suspend &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Stmt::Comment> {
   std::size_t operator()(const polyregion::polyast::Stmt::Comment &) const noexcept;

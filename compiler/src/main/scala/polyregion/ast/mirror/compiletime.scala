@@ -114,6 +114,9 @@ private[polyregion] object compiletime {
           case Literal(DoubleConstant(x))  => const(x)
           case Literal(CharConstant(x))    => const(x)
           case Literal(StringConstant(x))  => const(x)
+          case bad =>
+                            println(bad.show)
+                            ???
           // case Literal(UnitConstant)       => constTC(())
           // case Literal(NullConstant)       => constTC(null)
           // case Literal(ClassOfConstant(x)) => constTC(x)

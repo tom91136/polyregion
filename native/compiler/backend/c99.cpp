@@ -21,7 +21,9 @@ std::string backend::C99::mkTpe(const Type::Any &tpe) {
       [&](const Type::String &x) { return "char *"s; },              //
       [&](const Type::Unit &x) { return "void"s; },                  //
       [&](const Type::Struct &x) { return qualified(x.name); },      //
-      [&](const Type::Array &x) { return mkTpe(x.component) + "*"; } //
+      [&](const Type::Array &x) { return mkTpe(x.component) + "*"; } ,//
+      [&](const Type::Var &x) { return "/*type var*/"s; }, //
+      [&](const Type::Suspension &x) { return "/*suspension*/"s; } //
   );
 }
 
@@ -38,7 +40,8 @@ std::string backend::C99::mkRef(const Term::Any &ref) {
       [](const Term::LongConst &x) { return std::to_string(x.value); },      //
       [](const Term::DoubleConst &x) { return std::to_string(x.value); },    //
       [](const Term::FloatConst &x) { return std::to_string(x.value); },     //
-      [](const Term::StringConst &x) { return "" + x.value + ""; }           //
+      [](const Term::StringConst &x) { return "" + x.value + ""; },           //
+      [](const Term::Suspension &x) { return "/*suspension*/"s; }           //
   );                                                                         // FIXME escape string
 }
 

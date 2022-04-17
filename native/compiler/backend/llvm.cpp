@@ -94,7 +94,14 @@ llvm::Type *LLVMAstTransformer::mkTpe(const Type::Any &tpe) {                   
       [&](const Type::Array &x) -> llvm::Type * {
         auto comp = mkTpe(x.component);
         return comp->isPointerTy() ? comp : comp->getPointerTo();
-      } //
+      }, //
+      [&](const Type::Var &x) -> llvm::Type * {
+        return undefined(__FILE_NAME__, __LINE__, "type var");
+      }, //
+      [&](const Type::Suspension &x) -> llvm::Type * {
+        return undefined(__FILE_NAME__, __LINE__, "suspension");
+      }
+
   );
 }
 
@@ -179,7 +186,9 @@ llvm::Value *LLVMAstTransformer::mkTermVal(const Term::Any &ref) {
       [&](const Term::LongConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt64Ty(C), x.value); },
       [&](const Term::FloatConst &x) -> llvm::Value * { return ConstantFP::get(llvm::Type::getFloatTy(C), x.value); },
       [&](const Term::DoubleConst &x) -> llvm::Value * { return ConstantFP::get(llvm::Type::getDoubleTy(C), x.value); },
-      [&](const Term::StringConst &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); });
+      [&](const Term::StringConst &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); },
+      [&](const Term::Suspension &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); }
+      );
 }
 
 llvm::Function *LLVMAstTransformer::mkExternalFn(llvm::Function *parent, const Type::Any &rtn, const std::string &name,
