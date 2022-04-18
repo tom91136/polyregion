@@ -22,7 +22,7 @@ object Retyper {
 
     if (tpeSym.typeMembers.exists(_.isTypeParam)) {
       throw RuntimeException(
-        s"Encountered generic class ${tpeSym}, typeCtorArg=${tpeSym.typeMembers}"
+        s"Encountered generic class ${tpeSym.fullName}, typeCtorArg=${tpeSym.typeMembers}"
       )
     }
 
@@ -121,7 +121,7 @@ object Retyper {
       case (p.Sym(Symbols.JavaLang :+ "String"), q.ClassKind.Class) => p.Type.String
       case (sym, q.ClassKind.Class)                                 =>
         // println("[retyper] witness: " + clsSym.tree.show)
-        p.Type.Struct(sym)
+        p.Type.Struct(sym, Nil)
       case (sym, q.ClassKind.Object) =>
         q.ErasedClsTpe(sym, clsSym, q.ClassKind.Object, Nil)
     }
@@ -135,6 +135,7 @@ object Retyper {
 
   def typer0(using q: Quoted)(repr: q.TypeRepr): Result[(Option[p.Term], q.Tpe)] =
     repr.dealias.widenTermRefByName.simplified match {
+      case q.TypeBounds(_, _)                          => (None, p.Type.Nothing).success
       case p @ q.PolyType(_, _, q.MethodType(_, _, _)) =>
         // this shows up from type-unapplied methods:  [x, y] =>> methodTpe(_:x, ...):y
         //  (None, q.ErasedOpaqueTpe(p), c).success
@@ -205,7 +206,7 @@ object Retyper {
           flattenCls(None, rtn).map((_, tpe, dep) => (value, q.ErasedFnTpe(args, tpe), dep))
 
         case (value, e: q.ErasedClsTpe) if e.ctor.nonEmpty =>
-          val s = p.Type.Struct(e.name)
+          val s = p.Type.Struct(e.name, Nil)
           val m = lowerPolymorphicClassType0(
             e.symbol,
             e.ctor.map {
@@ -215,7 +216,7 @@ object Retyper {
           )
           println(s" ${m}")
           m.map(sdef => (value, s, q.FnDependencies(clss = Map(sdef.name -> sdef))))
-        case (value, s @ p.Type.Struct(sym)) =>
+        case (value, s @ p.Type.Struct(sym, _)) =>
           Retyper
             .lowerClassType(repr)
             .map(sdef => (value, s, q.FnDependencies(clss = Map(sym -> sdef))))
@@ -228,7 +229,7 @@ object Retyper {
 
   def clsSymTyper1(using q: Quoted)(clsSym: q.Symbol): Result[(q.Tpe, q.FnDependencies)] =
     Retyper.clsSymTyper0(clsSym).flatMap {
-      case s @ p.Type.Struct(sym) =>
+      case s @ p.Type.Struct(sym, _) =>
         Retyper
           .lowerClassType0(clsSym)
           .map(sdef => (s, q.FnDependencies(Map(sym -> sdef))))
@@ -239,7 +240,7 @@ object Retyper {
   extension (using q: Quoted)(c: q.FnContext) {
 
     def clsSymTyper(clsSym: q.Symbol): Result[(q.Tpe, q.FnContext)] = Retyper.clsSymTyper0(clsSym).flatMap {
-      case s @ p.Type.Struct(sym) =>
+      case s @ p.Type.Struct(sym, _) =>
         Retyper
           .lowerClassType0(clsSym)
           .map(sdef => (s, c.copy(clss = c.clss + (sym -> sdef))))

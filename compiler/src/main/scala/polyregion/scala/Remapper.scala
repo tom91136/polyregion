@@ -327,7 +327,7 @@ object Remapper {
               case (_, q.ErasedMethodVal(receiver: p.Term.Select, p.Sym("<init>" :: Nil), fnTpe, _)) => // ctor call
                 (for {
                   sdef <- (fnTpe.rtn match {
-                    case p.Type.Struct(s) => c.clss.get(s)
+                    case p.Type.Struct(s, _) => c.clss.get(s)
                     case _                => None
                   }).failIfEmpty(s"No StructDef found for type ${fnTpe.rtn}")
 

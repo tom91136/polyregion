@@ -79,10 +79,10 @@ object compiletime {
             case p.Type.Int   => '{ ${ buffer }.putInt(${ byteOffset }, ${ value.asExprOf[Int] }); () }
             case p.Type.Long  => '{ ${ buffer }.putLong(${ byteOffset }, ${ value.asExprOf[Long] }); () }
 
-            case p.Type.String           => ???
-            case p.Type.Unit             => ???
-            case p.Type.Struct(name)     => ???
-            case p.Type.Array(component) => ???
+            case p.Type.String             => ???
+            case p.Type.Unit               => ???
+            case p.Type.Struct(name, args) => ???
+            case p.Type.Array(component)   => ???
           }
 
         }
@@ -100,10 +100,10 @@ object compiletime {
             case p.Type.Int   => '{ ${ buffer }.getInt(${ byteOffset }) }
             case p.Type.Long  => '{ ${ buffer }.getLong(${ byteOffset }) }
 
-            case p.Type.String           => ???
-            case p.Type.Unit             => ???
-            case p.Type.Struct(name)     => ???
-            case p.Type.Array(component) => ???
+            case p.Type.String             => ???
+            case p.Type.Unit               => ???
+            case p.Type.Struct(name, args) => ???
+            case p.Type.Array(component)   => ???
           }
 
         }
@@ -283,17 +283,17 @@ object compiletime {
   inline def offload[A](inline x: => A): A = ${ offloadImpl[A]('x) }
 
   private def tpeAsRuntimeTpe(t: p.Type)(using Quotes) = t match {
-    case p.Type.Bool      => '{ polyregion.PolyregionRuntime.TYPE_BOOL }
-    case p.Type.Byte      => '{ polyregion.PolyregionRuntime.TYPE_BYTE }
-    case p.Type.Char      => '{ polyregion.PolyregionRuntime.TYPE_CHAR }
-    case p.Type.Short     => '{ polyregion.PolyregionRuntime.TYPE_SHORT }
-    case p.Type.Int       => '{ polyregion.PolyregionRuntime.TYPE_INT }
-    case p.Type.Long      => '{ polyregion.PolyregionRuntime.TYPE_LONG }
-    case p.Type.Float     => '{ polyregion.PolyregionRuntime.TYPE_FLOAT }
-    case p.Type.Double    => '{ polyregion.PolyregionRuntime.TYPE_DOUBLE }
-    case p.Type.Array(_)  => '{ polyregion.PolyregionRuntime.TYPE_PTR }
-    case p.Type.Struct(_) => '{ polyregion.PolyregionRuntime.TYPE_PTR }
-    case p.Type.Unit      => '{ polyregion.PolyregionRuntime.TYPE_VOID }
+    case p.Type.Bool         => '{ polyregion.PolyregionRuntime.TYPE_BOOL }
+    case p.Type.Byte         => '{ polyregion.PolyregionRuntime.TYPE_BYTE }
+    case p.Type.Char         => '{ polyregion.PolyregionRuntime.TYPE_CHAR }
+    case p.Type.Short        => '{ polyregion.PolyregionRuntime.TYPE_SHORT }
+    case p.Type.Int          => '{ polyregion.PolyregionRuntime.TYPE_INT }
+    case p.Type.Long         => '{ polyregion.PolyregionRuntime.TYPE_LONG }
+    case p.Type.Float        => '{ polyregion.PolyregionRuntime.TYPE_FLOAT }
+    case p.Type.Double       => '{ polyregion.PolyregionRuntime.TYPE_DOUBLE }
+    case p.Type.Array(_)     => '{ polyregion.PolyregionRuntime.TYPE_PTR }
+    case p.Type.Struct(_, _) => '{ polyregion.PolyregionRuntime.TYPE_PTR }
+    case p.Type.Unit         => '{ polyregion.PolyregionRuntime.TYPE_VOID }
     case unknown =>
       println(s"tpeAsRuntimeTpe ??? = $unknown ")
       ???
@@ -350,23 +350,23 @@ object compiletime {
           case p.Type.Long   => '{ Buffer[Long](${ expr.asExprOf[Long] }) }
           case p.Type.Float  => '{ Buffer[Float](${ expr.asExprOf[Float] }) }
           case p.Type.Double => '{ Buffer[Double](${ expr.asExprOf[Double] }) }
-          case p.Type.Struct(_) =>
+          case p.Type.Struct(_, _) =>
             val tc = Q.TypeRepr.of[NativeStruct].appliedTo(ident.tpe.widenTermRefByName)
             val imp = Q.Implicits.search(tc) match {
               case ok: Q.ImplicitSearchSuccess   => ok.tree.asExpr
               case fail: Q.ImplicitSearchFailure => Q.report.errorAndAbort(fail.explanation, ident.asExpr)
             }
             '{ Buffer.refAny(${ expr.asExprOf[Any] })(using $imp.asInstanceOf[NativeStruct[Any]]) }
-          case p.Type.Array(p.Type.Bool)      => expr.asExprOf[Buffer[Boolean]]
-          case p.Type.Array(p.Type.Char)      => expr.asExprOf[Buffer[Char]]
-          case p.Type.Array(p.Type.Byte)      => expr.asExprOf[Buffer[Byte]]
-          case p.Type.Array(p.Type.Short)     => expr.asExprOf[Buffer[Short]]
-          case p.Type.Array(p.Type.Int)       => expr.asExprOf[Buffer[Int]]
-          case p.Type.Array(p.Type.Long)      => expr.asExprOf[Buffer[Long]]
-          case p.Type.Array(p.Type.Float)     => expr.asExprOf[Buffer[Float]]
-          case p.Type.Array(p.Type.Double)    => expr.asExprOf[Buffer[Double]]
-          case p.Type.Array(p.Type.Unit)      => expr.asExprOf[Buffer[Int]] // TODO test me
-          case p.Type.Array(p.Type.Struct(s)) => expr.asExprOf[Buffer[_]]
+          case p.Type.Array(p.Type.Bool)         => expr.asExprOf[Buffer[Boolean]]
+          case p.Type.Array(p.Type.Char)         => expr.asExprOf[Buffer[Char]]
+          case p.Type.Array(p.Type.Byte)         => expr.asExprOf[Buffer[Byte]]
+          case p.Type.Array(p.Type.Short)        => expr.asExprOf[Buffer[Short]]
+          case p.Type.Array(p.Type.Int)          => expr.asExprOf[Buffer[Int]]
+          case p.Type.Array(p.Type.Long)         => expr.asExprOf[Buffer[Long]]
+          case p.Type.Array(p.Type.Float)        => expr.asExprOf[Buffer[Float]]
+          case p.Type.Array(p.Type.Double)       => expr.asExprOf[Buffer[Double]]
+          case p.Type.Array(p.Type.Unit)         => expr.asExprOf[Buffer[Int]] // TODO test me
+          case p.Type.Array(p.Type.Struct(_, _)) => expr.asExprOf[Buffer[_]]
           case unknown =>
             println(s"???= $unknown ")
             ???
@@ -409,7 +409,7 @@ object compiletime {
             case p.Type.Short  => '{ polyregion.PolyregionRuntime.invokeShort(bytes, $fnName, argTypes, argBuffers) }
             case p.Type.Int    => '{ polyregion.PolyregionRuntime.invokeInt(bytes, $fnName, argTypes, argBuffers) }
             case p.Type.Long   => '{ polyregion.PolyregionRuntime.invokeLong(bytes, $fnName, argTypes, argBuffers) }
-            case x @ p.Type.Struct(_) =>
+            case x @ p.Type.Struct(_, _) =>
               val imp = Expr.summon[NativeStruct[A]] match {
                 case None    => Q.report.errorAndAbort(s"Cannot find NativeStruct for type ${Type.of[A]}")
                 case Some(x) => x

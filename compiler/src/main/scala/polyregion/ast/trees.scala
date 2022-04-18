@@ -129,18 +129,18 @@ object PolyAstToExpr {
   }
   given TypeToExpr: ToExpr[p.Type] with {
     def apply(x: p.Type)(using Quotes) = x match {
-      case p.Type.Float            => '{ p.Type.Float }
-      case p.Type.Double           => '{ p.Type.Double }
-      case p.Type.Bool             => '{ p.Type.Bool }
-      case p.Type.Byte             => '{ p.Type.Byte }
-      case p.Type.Char             => '{ p.Type.Char }
-      case p.Type.Short            => '{ p.Type.Short }
-      case p.Type.Int              => '{ p.Type.Int }
-      case p.Type.Long             => '{ p.Type.Long }
-      case p.Type.Unit             => '{ p.Type.Unit }
-      case p.Type.String           => '{ p.Type.String }
-      case p.Type.Struct(name)     => '{ p.Type.Struct(${ Expr(name) }) }
-      case p.Type.Array(component) => '{ p.Type.Array(${ Expr(component) }) }
+      case p.Type.Float              => '{ p.Type.Float }
+      case p.Type.Double             => '{ p.Type.Double }
+      case p.Type.Bool               => '{ p.Type.Bool }
+      case p.Type.Byte               => '{ p.Type.Byte }
+      case p.Type.Char               => '{ p.Type.Char }
+      case p.Type.Short              => '{ p.Type.Short }
+      case p.Type.Int                => '{ p.Type.Int }
+      case p.Type.Long               => '{ p.Type.Long }
+      case p.Type.Unit               => '{ p.Type.Unit }
+      case p.Type.String             => '{ p.Type.String }
+      case p.Type.Struct(name, args) => '{ p.Type.Struct(${ Expr(name) }, ${ Expr(args) }) }
+      case p.Type.Array(component)   => '{ p.Type.Array(${ Expr(component) }) }
     }
   }
 
@@ -185,33 +185,33 @@ extension (e: p.Type) {
     case _                                       => false
   }
   def repr: String = e match {
-    case p.Type.Struct(sym) => s"Struct[${sym.repr}]"
-    case p.Type.Array(comp) => s"Array[${comp.repr}]"
-    case p.Type.Bool        => "Bool"
-    case p.Type.Byte        => "Byte"
-    case p.Type.Char        => "Char"
-    case p.Type.Short       => "Short"
-    case p.Type.Int         => "Int"
-    case p.Type.Long        => "Long"
-    case p.Type.Float       => "Float"
-    case p.Type.Double      => "Double"
-    case p.Type.String      => "String"
-    case p.Type.Unit        => "Unit"
+    case p.Type.Struct(sym, args) => s"Struct[${sym.repr}${args.mkString("<", ",", ">")}]"
+    case p.Type.Array(comp)       => s"Array[${comp.repr}]"
+    case p.Type.Bool              => "Bool"
+    case p.Type.Byte              => "Byte"
+    case p.Type.Char              => "Char"
+    case p.Type.Short             => "Short"
+    case p.Type.Int               => "Int"
+    case p.Type.Long              => "Long"
+    case p.Type.Float             => "Float"
+    case p.Type.Double            => "Double"
+    case p.Type.String            => "String"
+    case p.Type.Unit              => "Unit"
   }
 
   def monomorphicName: String = e match {
-    case p.Type.Struct(sym) => sym.fqn.mkString("_")
-    case p.Type.Array(comp) => s"${comp.monomorphicName}[]"
-    case p.Type.Bool        => "Bool"
-    case p.Type.Byte        => "Byte"
-    case p.Type.Char        => "Char"
-    case p.Type.Short       => "Short"
-    case p.Type.Int         => "Int"
-    case p.Type.Long        => "Long"
-    case p.Type.Float       => "Float"
-    case p.Type.Double      => "Double"
-    case p.Type.String      => "String"
-    case p.Type.Unit        => "Unit"
+    case p.Type.Struct(sym, args) => sym.fqn.mkString("_") + args.mkString("<", ",", ">")
+    case p.Type.Array(comp)       => s"${comp.monomorphicName}[]"
+    case p.Type.Bool              => "Bool"
+    case p.Type.Byte              => "Byte"
+    case p.Type.Char              => "Char"
+    case p.Type.Short             => "Short"
+    case p.Type.Int               => "Int"
+    case p.Type.Long              => "Long"
+    case p.Type.Float             => "Float"
+    case p.Type.Double            => "Double"
+    case p.Type.String            => "String"
+    case p.Type.Unit              => "Unit"
   }
 }
 
@@ -306,18 +306,18 @@ extension (e: p.Expr) {
 extension (t: p.Type) {
   def map(f: p.Type => p.Type) =
     t match {
-      case p.Type.Float     => f(t)
-      case p.Type.Double    => f(t)
-      case p.Type.Bool      => f(t)
-      case p.Type.Byte      => f(t)
-      case p.Type.Char      => f(t)
-      case p.Type.Short     => f(t)
-      case p.Type.Int       => f(t)
-      case p.Type.Long      => f(t)
-      case p.Type.Unit      => f(t)
-      case p.Type.String    => f(t)
-      case p.Type.Struct(_) => f(t)
-      case p.Type.Array(c)  => f(p.Type.Array(f(c)))
+      case p.Type.Float        => f(t)
+      case p.Type.Double       => f(t)
+      case p.Type.Bool         => f(t)
+      case p.Type.Byte         => f(t)
+      case p.Type.Char         => f(t)
+      case p.Type.Short        => f(t)
+      case p.Type.Int          => f(t)
+      case p.Type.Long         => f(t)
+      case p.Type.Unit         => f(t)
+      case p.Type.String       => f(t)
+      case p.Type.Struct(_, _) => f(t)
+      case p.Type.Array(c)     => f(p.Type.Array(f(c)))
     }
 }
 

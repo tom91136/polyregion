@@ -5,7 +5,7 @@ import polyregion.prism.compiletime.derivePackedMirrors1
 
 object StdLib {
 
-//  class Tuple2[T1, T2](_1: T1, _2: T2)
+  case class Tuple2[T1, T2](_1: T1, _2: T2)
 
   class Range(start: Int, end: Int, step: Int) {
     def by(step: Int): Range            = mkDef(step) // new Range(start, end, step)
@@ -13,8 +13,8 @@ object StdLib {
   }
 
   class RichInt(private val x: Int) {
-    def min(that: Int)          = math.min(x, that)
-    def max(that: Int)          = math.max(x, that)
+    def min(that: Int)         = math.min(x, that)
+    def max(that: Int)         = math.max(x, that)
     def until(end: Int): Range = new Range(x, end, 1)
   }
 
@@ -22,8 +22,7 @@ object StdLib {
     def intWrapper(x: Int): RichInt = new RichInt(x)
   }
 
-
-  type ->[A, B] = (A, B)
+  private type ->[A, B] = (A, B)
 
   import _root_.scala as S
 
@@ -32,11 +31,12 @@ object StdLib {
         S.collection.immutable.Range -> Range,
         S.runtime.RichInt -> RichInt,
         S.Predef.type -> Predef,
-//        S.Tuple2 -> Tuple
+        S.Tuple2[_, _] -> Tuple2[_, _]
     )
   ]
 
-  final val Functions: Map[p.Signature, p.Function] = Mirrors.values.flatMap(_.functions).map(f => f.signature -> f).toMap
+  final val Functions: Map[p.Signature, p.Function] =
+    Mirrors.values.flatMap(_.functions).map(f => f.signature -> f).toMap
   final val StructDefs: Map[p.Sym, p.StructDef] =
     Mirrors.values.map(x => x.source -> x.struct.copy(name = x.source)).toMap
 

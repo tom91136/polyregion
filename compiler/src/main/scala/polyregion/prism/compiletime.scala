@@ -30,14 +30,14 @@ object compiletime {
           (_, st) <- Retyper.typer0(s)
           (_, mt) <- Retyper.typer0(m)
           st <- st match {
-            case p.Type.Struct(sym)        => sym.success
+            case p.Type.Struct(sym, _)        => sym.success
             case q.ErasedClsTpe(sym, _, _, _) => sym.success
-            case bad                       => s"source class $s is not a class type, got $bad".fail
+            case bad                          => s"source class $s is not a class type, got $bad".fail
           }
           mt <- mt match {
-            case p.Type.Struct(sym)        => sym.success
+            case p.Type.Struct(sym, _)        => sym.success
             case q.ErasedClsTpe(sym, _, _, _) => sym.success
-            case bad                       => s"mirror class $m is not a class type, got $bad".fail
+            case bad                          => s"mirror class $m is not a class type, got $bad".fail
           }
         } yield mt -> st
       }
@@ -117,8 +117,7 @@ object compiletime {
         case d: q.DefDef =>
           for {
 
-
-            ((fn, fnDeps), log) <- polyregion.scala.Compiler.compileFn(d)(log)
+            ((fn, fnDeps), log)    <- polyregion.scala.Compiler.compileFn(d)(log)
             (depFns, depDeps, log) <- polyregion.scala.Compiler.compileAllDependencies(fnDeps)(log)
 
 //            _ <- sdefs match {
@@ -129,8 +128,8 @@ object compiletime {
 
             replaceSyms = (t: p.Type) =>
               t.map {
-                case p.Type.Struct(sym) => p.Type.Struct(typeLUT.getOrElse(sym, sym))
-                case x                  => x
+                case p.Type.Struct(sym, args) => p.Type.Struct(typeLUT.getOrElse(sym, sym), args)
+                case x                        => x
               }
 
           } yield (fn
@@ -152,7 +151,6 @@ object compiletime {
       sourceMethodTable = sourceMethods.groupBy(_.symbol.name)
       _                 = println(s"${sourceMethodTable.mkString("\n\t")}")
       mirroredMethods <- mirrorMethods.flatTraverse { reflectedMirror =>
-
 //        def fmtName(source: String) =
 //          s"<$source>${mirror.name}(${mirrorArgs.map((name, tpe) => s"$name:${tpe.show}").mkString(",")}):${mirrorRtn.show}"
 
@@ -160,11 +158,14 @@ object compiletime {
           case None => Nil.success // extra method on mirror
           case Some(xs) => // we got overloads, resolve them
             xs.filter(_ =:= reflectedMirror) match {
-              case sourceMirror  :: Nil =>
-                mkMirroredMethods(sourceMirror.symbol, sourceClassKind, reflectedMirror.symbol, mirrorStruct).map(_ :: Nil) // single match
+              case sourceMirror :: Nil =>
+                mkMirroredMethods(sourceMirror.symbol, sourceClassKind, reflectedMirror.symbol, mirrorStruct).map(
+                  _ :: Nil
+                ) // single match
               case Nil =>
                 s"Overload resolution for <${mirrorSym.fullName}>${reflectedMirror.show} with named arguments resulted in no match, the following methods were considered:\n\t${xs
-                  .map("\t"+_.show).mkString("\n")}".fail
+                  .map("\t" + _.show)
+                  .mkString("\n")}".fail
               case xs =>
                 s"Overload resolution for <${mirrorSym.fullName}>${reflectedMirror.show} resulted in multiple matches: $xs".fail
             }
