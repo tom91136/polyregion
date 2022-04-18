@@ -162,6 +162,7 @@ object Compiler {
 
         compiledFn = p.Function(
           name = p.Sym(receiver.fold(f.symbol.fullName)(_ => f.symbol.name)),
+          typeArgs = Nil,
           receiver = receiver,
           args = fnArgs.map(_._2),
           captures = rhsCaptures.map(_._1),
@@ -292,6 +293,7 @@ object Compiler {
 
     exprFn = p.Function(
       name = p.Sym(exprName),
+      typeArgs = Nil,
       receiver = None,
       args = Nil,
       captures = capturedNames.map(_._1),

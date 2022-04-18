@@ -77,7 +77,7 @@ object VerifyPass {
               (validateTerm(_: Ctx, lhs)).andThen(validateTerm(_, rhs))(c)
             case p.Expr.Cast(from, as) => validateTerm(c, from)
             case p.Expr.Alias(ref)     => validateTerm(c, ref)
-            case p.Expr.Invoke(name, receiver, args, rtn) =>
+            case p.Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
               args.foldLeft(receiver.map(validateTerm(c, _)).getOrElse(c))(validateTerm(_, _))
             case p.Expr.Index(lhs, idx, component) => (validateTerm(_: Ctx, lhs)).andThen(validateTerm(_, idx))(c)
             case p.Expr.Alloc(witness, size)       => validateTerm(c, size)
@@ -111,7 +111,8 @@ object VerifyPass {
 
           // println(s"[Verifier] $alloc ${f.signatureRepr} vars:\n\t${varTable.mkString("\n\t")}")
           if (errors.nonEmpty) {
-            throw new RuntimeException(s"[Verifier] alloc=${alloc} vars:\n\t${varTable.mkString("\n\t")} \n${f.repr}\n${errors.map(e => s"  -> $e").mkString("\n")}")
+            throw new RuntimeException(s"[Verifier] alloc=${alloc} vars:\n\t${varTable
+              .mkString("\n\t")} \n${f.repr}\n${errors.map(e => s"  -> $e").mkString("\n")}")
           }
 
           xs.flatMap(x =>

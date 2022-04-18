@@ -49,13 +49,6 @@ constexpr auto select(const Alternative<T...> &a) {
   return std::visit([](auto &&arg) { return *(arg).*member; }, a);
 }
 
-template <typename T, typename F> //
-auto  map_(const std::vector<T> &xs, const F &f) {
-  std::vector< std::invoke_result_t<F, T&> > ys;
-  for(auto x : xs) ys.push_back(f(x));
-  return ys;
-}
-
 template <typename T> //
 std::string to_string(const T& x) {
   std::ostringstream ss;
@@ -74,6 +67,138 @@ constexpr std::optional<T> get_opt(const Alternative<Ts...> &a) {
 
 
 
+namespace TypeKind { 
+struct None;
+struct Ref;
+struct Integral;
+struct Fractional;
+using Any = Alternative<None, Ref, Integral, Fractional>;
+} // namespace TypeKind
+namespace Type { 
+struct Float;
+struct Double;
+struct Bool;
+struct Byte;
+struct Char;
+struct Short;
+struct Int;
+struct Long;
+struct Unit;
+struct String;
+struct Struct;
+struct Array;
+struct Var;
+struct Exec;
+using Any = Alternative<Float, Double, Bool, Byte, Char, Short, Int, Long, Unit, String, Struct, Array, Var, Exec>;
+} // namespace Type
+
+
+namespace Term { 
+struct Select;
+struct UnitConst;
+struct BoolConst;
+struct ByteConst;
+struct CharConst;
+struct ShortConst;
+struct IntConst;
+struct LongConst;
+struct FloatConst;
+struct DoubleConst;
+struct StringConst;
+using Any = Alternative<Select, UnitConst, BoolConst, ByteConst, CharConst, ShortConst, IntConst, LongConst, FloatConst, DoubleConst, StringConst>;
+} // namespace Term
+namespace BinaryIntrinsicKind { 
+struct Add;
+struct Sub;
+struct Mul;
+struct Div;
+struct Rem;
+struct Pow;
+struct Min;
+struct Max;
+struct Atan2;
+struct Hypot;
+struct BAnd;
+struct BOr;
+struct BXor;
+struct BSL;
+struct BSR;
+struct BZSR;
+using Any = Alternative<Add, Sub, Mul, Div, Rem, Pow, Min, Max, Atan2, Hypot, BAnd, BOr, BXor, BSL, BSR, BZSR>;
+} // namespace BinaryIntrinsicKind
+namespace UnaryIntrinsicKind { 
+struct Sin;
+struct Cos;
+struct Tan;
+struct Asin;
+struct Acos;
+struct Atan;
+struct Sinh;
+struct Cosh;
+struct Tanh;
+struct Signum;
+struct Abs;
+struct Round;
+struct Ceil;
+struct Floor;
+struct Rint;
+struct Sqrt;
+struct Cbrt;
+struct Exp;
+struct Expm1;
+struct Log;
+struct Log1p;
+struct Log10;
+struct BNot;
+struct Pos;
+struct Neg;
+using Any = Alternative<Sin, Cos, Tan, Asin, Acos, Atan, Sinh, Cosh, Tanh, Signum, Abs, Round, Ceil, Floor, Rint, Sqrt, Cbrt, Exp, Expm1, Log, Log1p, Log10, BNot, Pos, Neg>;
+} // namespace UnaryIntrinsicKind
+namespace BinaryLogicIntrinsicKind { 
+struct Eq;
+struct Neq;
+struct And;
+struct Or;
+struct Lte;
+struct Gte;
+struct Lt;
+struct Gt;
+using Any = Alternative<Eq, Neq, And, Or, Lte, Gte, Lt, Gt>;
+} // namespace BinaryLogicIntrinsicKind
+namespace UnaryLogicIntrinsicKind { 
+struct Not;
+using Any = Alternative<Not>;
+} // namespace UnaryLogicIntrinsicKind
+namespace Expr { 
+struct UnaryIntrinsic;
+struct BinaryIntrinsic;
+struct UnaryLogicIntrinsic;
+struct BinaryLogicIntrinsic;
+struct Cast;
+struct Alias;
+struct Invoke;
+struct Index;
+struct Alloc;
+struct Suspend;
+using Any = Alternative<UnaryIntrinsic, BinaryIntrinsic, UnaryLogicIntrinsic, BinaryLogicIntrinsic, Cast, Alias, Invoke, Index, Alloc, Suspend>;
+} // namespace Expr
+namespace Stmt { 
+struct Comment;
+struct Var;
+struct Mut;
+struct Update;
+struct While;
+struct Break;
+struct Cont;
+struct Cond;
+struct Return;
+using Any = Alternative<Comment, Var, Mut, Update, While, Break, Cont, Cond, Return>;
+} // namespace Stmt
+
+
+
+
+
 struct EXPORT Sym {
   std::vector<std::string> fqn;
   explicit Sym(std::vector<std::string> fqn) noexcept : fqn(std::move(fqn)) {}
@@ -83,11 +208,6 @@ struct EXPORT Sym {
 
 namespace TypeKind { 
 
-struct None;
-struct Ref;
-struct Integral;
-struct Fractional;
-using Any = Alternative<None, Ref, Integral, Fractional>;
 struct EXPORT Base {
   protected:
   Base() = default;
@@ -125,21 +245,6 @@ struct EXPORT Fractional : TypeKind::Base {
 } // namespace TypeKind
 namespace Type { 
 
-struct Float;
-struct Double;
-struct Bool;
-struct Byte;
-struct Char;
-struct Short;
-struct Int;
-struct Long;
-struct Unit;
-struct String;
-struct Struct;
-struct Array;
-struct Var;
-struct Exec;
-using Any = Alternative<Float, Double, Bool, Byte, Char, Short, Int, Long, Unit, String, Struct, Array, Var, Exec>;
 struct EXPORT Base {
   TypeKind::Any kind;
   protected:
@@ -244,9 +349,10 @@ struct EXPORT Var : Type::Base {
 };
 
 struct EXPORT Exec : Type::Base {
+  std::vector<std::string> typeArgs;
   std::vector<Type::Any> args;
   Type::Any rtn;
-  Exec(std::vector<Type::Any> args, Type::Any rtn) noexcept : Type::Base(TypeKind::None()), args(std::move(args)), rtn(std::move(rtn)) {}
+  Exec(std::vector<std::string> typeArgs, std::vector<Type::Any> args, Type::Any rtn) noexcept : Type::Base(TypeKind::None()), typeArgs(std::move(typeArgs)), args(std::move(args)), rtn(std::move(rtn)) {}
   EXPORT operator Any() const { return std::make_shared<Exec>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Exec &);
   EXPORT friend bool operator==(const Type::Exec &, const Type::Exec &);
@@ -262,15 +368,6 @@ struct EXPORT Named {
   EXPORT friend bool operator==(const Named &, const Named &);
 };
 
-struct EXPORT Executable {
-  std::vector<Named> args;
-  std::vector<Stmt::Any> stmts;
-  Type::Any rtn;
-  Executable(std::vector<Named> args, std::vector<Stmt::Any> stmts, Type::Any rtn) noexcept : args(std::move(args)), stmts(std::move(stmts)), rtn(std::move(rtn)) {}
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Executable &);
-  EXPORT friend bool operator==(const Executable &, const Executable &);
-};
-
 struct EXPORT Position {
   std::string file;
   int32_t line;
@@ -282,18 +379,6 @@ struct EXPORT Position {
 
 namespace Term { 
 
-struct Select;
-struct UnitConst;
-struct BoolConst;
-struct ByteConst;
-struct CharConst;
-struct ShortConst;
-struct IntConst;
-struct LongConst;
-struct FloatConst;
-struct DoubleConst;
-struct StringConst;
-using Any = Alternative<Select, UnitConst, BoolConst, ByteConst, CharConst, ShortConst, IntConst, LongConst, FloatConst, DoubleConst, StringConst>;
 struct EXPORT Base {
   Type::Any tpe;
   protected:
@@ -393,23 +478,6 @@ struct EXPORT StringConst : Term::Base {
 } // namespace Term
 namespace BinaryIntrinsicKind { 
 
-struct Add;
-struct Sub;
-struct Mul;
-struct Div;
-struct Rem;
-struct Pow;
-struct Min;
-struct Max;
-struct Atan2;
-struct Hypot;
-struct BAnd;
-struct BOr;
-struct BXor;
-struct BSL;
-struct BSR;
-struct BZSR;
-using Any = Alternative<Add, Sub, Mul, Div, Rem, Pow, Min, Max, Atan2, Hypot, BAnd, BOr, BXor, BSL, BSR, BZSR>;
 struct EXPORT Base {
   protected:
   Base() = default;
@@ -531,32 +599,6 @@ struct EXPORT BZSR : BinaryIntrinsicKind::Base {
 } // namespace BinaryIntrinsicKind
 namespace UnaryIntrinsicKind { 
 
-struct Sin;
-struct Cos;
-struct Tan;
-struct Asin;
-struct Acos;
-struct Atan;
-struct Sinh;
-struct Cosh;
-struct Tanh;
-struct Signum;
-struct Abs;
-struct Round;
-struct Ceil;
-struct Floor;
-struct Rint;
-struct Sqrt;
-struct Cbrt;
-struct Exp;
-struct Expm1;
-struct Log;
-struct Log1p;
-struct Log10;
-struct BNot;
-struct Pos;
-struct Neg;
-using Any = Alternative<Sin, Cos, Tan, Asin, Acos, Atan, Sinh, Cosh, Tanh, Signum, Abs, Round, Ceil, Floor, Rint, Sqrt, Cbrt, Exp, Expm1, Log, Log1p, Log10, BNot, Pos, Neg>;
 struct EXPORT Base {
   protected:
   Base() = default;
@@ -741,15 +783,6 @@ struct EXPORT Neg : UnaryIntrinsicKind::Base {
 } // namespace UnaryIntrinsicKind
 namespace BinaryLogicIntrinsicKind { 
 
-struct Eq;
-struct Neq;
-struct And;
-struct Or;
-struct Lte;
-struct Gte;
-struct Lt;
-struct Gt;
-using Any = Alternative<Eq, Neq, And, Or, Lte, Gte, Lt, Gt>;
 struct EXPORT Base {
   protected:
   Base() = default;
@@ -815,8 +848,6 @@ struct EXPORT Gt : BinaryLogicIntrinsicKind::Base {
 } // namespace BinaryLogicIntrinsicKind
 namespace UnaryLogicIntrinsicKind { 
 
-struct Not;
-using Any = Alternative<Not>;
 struct EXPORT Base {
   protected:
   Base() = default;
@@ -833,17 +864,6 @@ struct EXPORT Not : UnaryLogicIntrinsicKind::Base {
 } // namespace UnaryLogicIntrinsicKind
 namespace Expr { 
 
-struct UnaryIntrinsic;
-struct BinaryIntrinsic;
-struct UnaryLogicIntrinsic;
-struct BinaryLogicIntrinsic;
-struct Cast;
-struct Alias;
-struct Invoke;
-struct Index;
-struct Alloc;
-struct Suspend;
-using Any = Alternative<UnaryIntrinsic, BinaryIntrinsic, UnaryLogicIntrinsic, BinaryLogicIntrinsic, Cast, Alias, Invoke, Index, Alloc, Suspend>;
 struct EXPORT Base {
   Type::Any tpe;
   protected:
@@ -912,10 +932,11 @@ struct EXPORT Alias : Expr::Base {
 
 struct EXPORT Invoke : Expr::Base {
   Sym name;
+  std::vector<Type::Any> typeArgs;
   std::optional<Term::Any> receiver;
   std::vector<Term::Any> args;
   Type::Any rtn;
-  Invoke(Sym name, std::optional<Term::Any> receiver, std::vector<Term::Any> args, Type::Any rtn) noexcept : Expr::Base(rtn), name(std::move(name)), receiver(std::move(receiver)), args(std::move(args)), rtn(std::move(rtn)) {}
+  Invoke(Sym name, std::vector<Type::Any> typeArgs, std::optional<Term::Any> receiver, std::vector<Term::Any> args, Type::Any rtn) noexcept : Expr::Base(rtn), name(std::move(name)), typeArgs(std::move(typeArgs)), receiver(std::move(receiver)), args(std::move(args)), rtn(std::move(rtn)) {}
   EXPORT operator Any() const { return std::make_shared<Invoke>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Invoke &);
   EXPORT friend bool operator==(const Expr::Invoke &, const Expr::Invoke &);
@@ -941,11 +962,11 @@ struct EXPORT Alloc : Expr::Base {
 };
 
 struct EXPORT Suspend : Expr::Base {
-  Executable exec;
-
-
-
-  explicit Suspend(Executable exec) noexcept : Expr::Base( Type::Exec(map_(exec.args,[](auto & x) {return x.tpe;} ), exec.rtn)), exec(std::move(exec)) {}
+  std::vector<Named> args;
+  std::vector<Stmt::Any> stmts;
+  Type::Any rtn;
+  Type::Exec shape;
+  Suspend(std::vector<Named> args, std::vector<Stmt::Any> stmts, Type::Any rtn, Type::Exec shape) noexcept : Expr::Base(shape), args(std::move(args)), stmts(std::move(stmts)), rtn(std::move(rtn)), shape(std::move(shape)) {}
   EXPORT operator Any() const { return std::make_shared<Suspend>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Suspend &);
   EXPORT friend bool operator==(const Expr::Suspend &, const Expr::Suspend &);
@@ -953,16 +974,6 @@ struct EXPORT Suspend : Expr::Base {
 } // namespace Expr
 namespace Stmt { 
 
-struct Comment;
-struct Var;
-struct Mut;
-struct Update;
-struct While;
-struct Break;
-struct Cont;
-struct Cond;
-struct Return;
-using Any = Alternative<Comment, Var, Mut, Update, While, Break, Cont, Cond, Return>;
 struct EXPORT Base {
   protected:
   Base() = default;
@@ -1071,12 +1082,13 @@ struct EXPORT Signature {
 
 struct EXPORT Function {
   Sym name;
+  std::vector<std::string> typeArgs;
   std::optional<Named> receiver;
   std::vector<Named> args;
   std::vector<Named> captures;
   Type::Any rtn;
   std::vector<Stmt::Any> body;
-  Function(Sym name, std::optional<Named> receiver, std::vector<Named> args, std::vector<Named> captures, Type::Any rtn, std::vector<Stmt::Any> body) noexcept : name(std::move(name)), receiver(std::move(receiver)), args(std::move(args)), captures(std::move(captures)), rtn(std::move(rtn)), body(std::move(body)) {}
+  Function(Sym name, std::vector<std::string> typeArgs, std::optional<Named> receiver, std::vector<Named> args, std::vector<Named> captures, Type::Any rtn, std::vector<Stmt::Any> body) noexcept : name(std::move(name)), typeArgs(std::move(typeArgs)), receiver(std::move(receiver)), args(std::move(args)), captures(std::move(captures)), rtn(std::move(rtn)), body(std::move(body)) {}
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Function &);
   EXPORT friend bool operator==(const Function &, const Function &);
 };
@@ -1169,9 +1181,6 @@ template <> struct std::hash<polyregion::polyast::Type::Exec> {
 };
 template <> struct std::hash<polyregion::polyast::Named> {
   std::size_t operator()(const polyregion::polyast::Named &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::Executable> {
-  std::size_t operator()(const polyregion::polyast::Executable &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Position> {
   std::size_t operator()(const polyregion::polyast::Position &) const noexcept;

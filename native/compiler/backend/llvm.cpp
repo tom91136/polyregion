@@ -94,13 +94,9 @@ llvm::Type *LLVMAstTransformer::mkTpe(const Type::Any &tpe) {                   
       [&](const Type::Array &x) -> llvm::Type * {
         auto comp = mkTpe(x.component);
         return comp->isPointerTy() ? comp : comp->getPointerTo();
-      }, //
-      [&](const Type::Var &x) -> llvm::Type * {
-        return undefined(__FILE_NAME__, __LINE__, "type var");
-      }, //
-      [&](const Type::Suspension &x) -> llvm::Type * {
-        return undefined(__FILE_NAME__, __LINE__, "suspension");
-      }
+      },                                                                                                  //
+      [&](const Type::Var &x) -> llvm::Type * { return undefined(__FILE_NAME__, __LINE__, "type var"); }, //
+      [&](const Type::Exec &x) -> llvm::Type * { return undefined(__FILE_NAME__, __LINE__, "exec"); }
 
   );
 }
@@ -186,9 +182,7 @@ llvm::Value *LLVMAstTransformer::mkTermVal(const Term::Any &ref) {
       [&](const Term::LongConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt64Ty(C), x.value); },
       [&](const Term::FloatConst &x) -> llvm::Value * { return ConstantFP::get(llvm::Type::getFloatTy(C), x.value); },
       [&](const Term::DoubleConst &x) -> llvm::Value * { return ConstantFP::get(llvm::Type::getDoubleTy(C), x.value); },
-      [&](const Term::StringConst &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); },
-      [&](const Term::Suspension &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); }
-      );
+      [&](const Term::StringConst &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); });
 }
 
 llvm::Function *LLVMAstTransformer::mkExternalFn(llvm::Function *parent, const Type::Any &rtn, const std::string &name,
@@ -581,11 +575,10 @@ llvm::Value *LLVMAstTransformer::mkExprVal(const Expr::Any &expr, llvm::Function
         auto size = mkTermVal(x.size);
         auto elemSize = sizeOf(B, C, mkTpe(x.witness));
 
-
-
         auto ptr = invokeMalloc(fn, B.CreateMul(B.CreateIntCast(size, mkTpe(Type::Long()), true), elemSize));
         return B.CreateBitCast(ptr, mkTpe(x.witness));
-      });
+      },
+      [&](const Expr::Suspend &x) -> ValPtr { return undefined(__FILE_NAME__, __LINE__); });
 }
 
 llvm::Value *LLVMAstTransformer::conditionalLoad(llvm::Value *rhs) {
@@ -804,9 +797,8 @@ Pair<Opt<std::string>, std::string> LLVMAstTransformer::transform(const std::uni
         return {x.name, mkStruct(x)};
       });
 
-
   std::vector<Named> allArgs;
-  if(fnTree.receiver) allArgs.insert(allArgs.begin(), *fnTree.receiver);
+  if (fnTree.receiver) allArgs.insert(allArgs.begin(), *fnTree.receiver);
   allArgs.insert(allArgs.begin(), fnTree.args.begin(), fnTree.args.end());
   allArgs.insert(allArgs.begin(), fnTree.captures.begin(), fnTree.captures.end());
 
@@ -828,9 +820,9 @@ Pair<Opt<std::string>, std::string> LLVMAstTransformer::transform(const std::uni
   B.SetInsertPoint(entry);
 
   // add function params to the lut first as function body will need these at some point
-  std::transform(                                          //
+  std::transform(                                      //
       fn->arg_begin(), fn->arg_end(), allArgs.begin(), //
-      std::inserter(stackVarPtrs, stackVarPtrs.end()),     //
+      std::inserter(stackVarPtrs, stackVarPtrs.end()), //
       [&](auto &arg, const auto &named) -> Pair<std::string, Pair<Type::Any, llvm::Value *>> {
         arg.setName(named.symbol);
 

@@ -36,7 +36,7 @@ object FnInlinePass {
         case x                   => x :: Nil
       }
     } yield s
-    p.Function(f.name, f.receiver.map(rename(_)), f.args.map(rename(_)), f.captures, f.rtn, stmts)
+    p.Function(f.name, f.typeArgs, f.receiver.map(rename(_)), f.args.map(rename(_)), f.captures, f.rtn, stmts)
   }
 
   def run(program: p.Program)(log: Log): (p.Program, Log) = {
@@ -45,7 +45,7 @@ object FnInlinePass {
 
       val (stmts, captures) = f.body.foldMap { x =>
         x.mapAccExpr {
-          case ivk @ p.Expr.Invoke(name, recv, args, tpe) =>
+          case ivk @ p.Expr.Invoke(name, tpeArgs, recv, args, tpe) =>
             val sig = p.Signature(name, recv.map(_.tpe), args.map(_.tpe), tpe)
             lut.get(sig) match {
               case None =>
@@ -58,8 +58,7 @@ object FnInlinePass {
                     case (xs, (target, replacement)) =>
                       xs.flatMap(
                         _.mapTerm(
-                          original => {
-
+                          original =>
                             // println(s"substitute  ${original} contains ${target} => ${replacement}")
 
                             (original, replacement) match {
@@ -71,8 +70,8 @@ object FnInlinePass {
                             }
 
                             // if (original == target) replacement.asInstanceOf[p.Term.Select] else original
-                          },
-                          original => {
+                          ,
+                          original =>
                             // println(s"substitute  ${original} ??? ${target}")
 
                             (original, replacement) match {
@@ -84,7 +83,6 @@ object FnInlinePass {
                             }
 
                             // if (original == target) replacement else original
-                          }
                         )
                       )
                   }
@@ -120,7 +118,7 @@ object FnInlinePass {
         }
       }
 
-      f.copy(body = stmts ,captures = (f.captures ++ captures).distinct)
+      f.copy(body = stmts, captures = (f.captures ++ captures).distinct)
     }
 
     (p.Program(f, Nil, program.defs), log)

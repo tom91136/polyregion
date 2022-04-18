@@ -23,7 +23,7 @@ std::string backend::C99::mkTpe(const Type::Any &tpe) {
       [&](const Type::Struct &x) { return qualified(x.name); },      //
       [&](const Type::Array &x) { return mkTpe(x.component) + "*"; } ,//
       [&](const Type::Var &x) { return "/*type var*/"s; }, //
-      [&](const Type::Suspension &x) { return "/*suspension*/"s; } //
+      [&](const Type::Exec &x) { return "/*exec*/"s; } //
   );
 }
 
@@ -40,8 +40,7 @@ std::string backend::C99::mkRef(const Term::Any &ref) {
       [](const Term::LongConst &x) { return std::to_string(x.value); },      //
       [](const Term::DoubleConst &x) { return std::to_string(x.value); },    //
       [](const Term::FloatConst &x) { return std::to_string(x.value); },     //
-      [](const Term::StringConst &x) { return "" + x.value + ""; },           //
-      [](const Term::Suspension &x) { return "/*suspension*/"s; }           //
+      [](const Term::StringConst &x) { return "" + x.value + ""; }           //
   );                                                                         // FIXME escape string
 }
 
@@ -131,7 +130,8 @@ std::string backend::C99::mkExpr(const Expr::Any &expr, const std::string &key) 
       [&](const Expr::Alias &x) { return mkRef(x.ref); },                                //
       [&](const Expr::Invoke &x) { return "???"s; },                                     //
       [&](const Expr::Index &x) { return qualified(x.lhs) + "[" + mkRef(x.idx) + "]"; }, //
-      [&](const Expr::Alloc &x) { return "{/*" + to_string(x) + "*/}"; }                 //
+      [&](const Expr::Alloc &x) { return "{/*" + to_string(x) + "*/}"; },                 //
+      [&](const Expr::Suspend &x) { return "{/*suspend*/}"s; }
   );
 }
 

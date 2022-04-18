@@ -38,14 +38,14 @@ case class Log(name: String, lines: Vector[(String, Vector[String]) | Log]) {
     val attr   = colour ++ fansi.Reversed.On ++ fansi.Bold.On
     val indent = colour("│")
 
-    (   (colour("┍") ++ attr(s" ${name} ") )  +: lines
+    ((colour("┍") ++ attr(s" ${name} ")) +: lines
       .flatMap {
         case (log: Log) => log.render(nesting + 1).map(indent ++ _)
         case (l, details) =>
           (indent ++ (colour ++ fansi.Underlined.On)(l)) +: details.flatMap { l =>
             l.linesIterator.toList match {
               case x :: xs =>
-                ((indent ++    colour( "╴") ++  s" $x") :: xs.map(x => indent ++ s"  ${x}")).toVector
+                ((indent ++ colour("╴") ++ s" $x") :: xs.map(x => indent ++ s"  ${x}")).toVector
               case Nil => Vector()
             }
 
@@ -296,7 +296,7 @@ extension (e: p.Expr) {
     case p.Expr.Cast(from, to) => s"${from.repr}.to[${to.repr}]"
     case p.Expr.Alias(ref)     => s"(~>${ref.repr})"
 
-    case p.Expr.Invoke(name, recv, args, tpe) =>
+    case p.Expr.Invoke(name, tpeArgs, recv, args, tpe) =>
       s"${recv.map(_.repr).getOrElse("<module>")}.${name.repr}(${args.map(_.repr).mkString(",")}) : ${tpe.repr}"
     case p.Expr.Index(lhs, idx, tpe) => s"${lhs.repr}[${idx.repr}] : ${tpe.repr}"
     case p.Expr.Alloc(tpe, size)     => s"new [${tpe.component.repr}*${size.repr}]"
@@ -374,9 +374,10 @@ extension (e: p.Stmt) {
           case x => f(x)
         }
         (p.Expr.Alias(h), Nil)
-      case p.Expr.Invoke(name, receiver, args, rtn) => (p.Expr.Invoke(name, receiver.map(f), args.map(f), rtn), Nil)
-      case p.Expr.Index(lhs, idx, component)        => (p.Expr.Index(g(lhs), f(idx), component), Nil)
-      case p.Expr.Alloc(witness, term)              => (p.Expr.Alloc(witness, f(term)), Nil)
+      case p.Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
+        (p.Expr.Invoke(name, tpeArgs, receiver.map(f), args.map(f), rtn), Nil)
+      case p.Expr.Index(lhs, idx, component) => (p.Expr.Index(g(lhs), f(idx), component), Nil)
+      case p.Expr.Alloc(witness, term)       => (p.Expr.Alloc(witness, f(term)), Nil)
 
     })
 
@@ -391,15 +392,16 @@ extension (e: p.Stmt) {
 
       }
     ).flatMap(_.mapExpr0 {
-      case p.Expr.UnaryIntrinsic(lhs, kind, rtn)        => p.Expr.UnaryIntrinsic(lhs, kind, rtn.map(f))
-      case p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn)  => p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn.map(f))
-      case e @ p.Expr.UnaryLogicIntrinsic(_, _)         => e
-      case e @ p.Expr.BinaryLogicIntrinsic(_, _, _)     => e
-      case e @ p.Expr.Cast(from, as)                    => p.Expr.Cast(from, as.map(f))
-      case e @ p.Expr.Alias(ref)                        => e
-      case e @ p.Expr.Invoke(name, receiver, args, rtn) => p.Expr.Invoke(name, receiver, args, rtn.map(f))
-      case e @ p.Expr.Index(lhs, idx, component)        => p.Expr.Index(lhs, idx, component.map(f))
-      case e @ p.Expr.Alloc(witness, size)              => p.Expr.Alloc(p.Type.Array(witness.component.map(f)), size)
+      case p.Expr.UnaryIntrinsic(lhs, kind, rtn)       => p.Expr.UnaryIntrinsic(lhs, kind, rtn.map(f))
+      case p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn) => p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn.map(f))
+      case e @ p.Expr.UnaryLogicIntrinsic(_, _)        => e
+      case e @ p.Expr.BinaryLogicIntrinsic(_, _, _)    => e
+      case e @ p.Expr.Cast(from, as)                   => p.Expr.Cast(from, as.map(f))
+      case e @ p.Expr.Alias(ref)                       => e
+      case e @ p.Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
+        p.Expr.Invoke(name, tpeArgs.map(f), receiver, args, rtn.map(f))
+      case e @ p.Expr.Index(lhs, idx, component) => p.Expr.Index(lhs, idx, component.map(f))
+      case e @ p.Expr.Alloc(witness, size)       => p.Expr.Alloc(p.Type.Array(witness.component.map(f)), size)
     }).map {
       case p.Stmt.Var(p.Named(name, tpe), x) => p.Stmt.Var(p.Named(name, f(tpe)), x)
       case x                                 => x
@@ -453,7 +455,9 @@ extension (f: p.Function) {
   def signature = p.Signature(f.name, f.receiver.map(_.tpe), f.args.map(_.tpe), f.rtn)
 
   def signatureRepr =
-    s"${f.receiver.fold("")(r => r.repr + ".")}${f.name.repr}(${f.args.map(_.repr).mkString(", ")})<${f.captures.map(_.repr).mkString(", ")}> : ${f.rtn.repr}"
+    s"${f.receiver.fold("")(r => r.repr + ".")}${f.name.repr}(${f.args.map(_.repr).mkString(", ")})<${f.captures
+      .map(_.repr)
+      .mkString(", ")}> : ${f.rtn.repr}"
 
   def mapType(tf: p.Type => p.Type): p.Function = f.copy(
     receiver = f.receiver.map(_.mapType(tf)),

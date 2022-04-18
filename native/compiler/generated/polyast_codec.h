@@ -175,8 +175,6 @@ namespace Term {
 [[nodiscard]] EXPORT json sym_to_json(const Sym &);
 [[nodiscard]] EXPORT Named named_from_json(const json &);
 [[nodiscard]] EXPORT json named_to_json(const Named &);
-[[nodiscard]] EXPORT Executable executable_from_json(const json &);
-[[nodiscard]] EXPORT json executable_to_json(const Executable &);
 [[nodiscard]] EXPORT Position position_from_json(const json &);
 [[nodiscard]] EXPORT json position_to_json(const Position &);
 [[nodiscard]] EXPORT StructDef structdef_from_json(const json &);

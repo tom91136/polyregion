@@ -4,8 +4,8 @@ import cats.conversions.variance
 import cats.syntax.all.*
 import fansi.Str
 import polyregion.ast.mirror.CppStructGen.{StructSource, ToCppType}
-import polyregion.ast.mirror.compiletime.CtorTermSelect
 import polyregion.ast.mirror.compiletime
+import polyregion.ast.mirror.compiletime.CtorTermSelect
 
 import java.nio.file.{Files, Paths, StandardOpenOption}
 import scala.annotation.tailrec
@@ -50,19 +50,29 @@ private[polyregion] object CppStructGen {
       def nsStart(n: String) = if (n.isEmpty) "" else s"namespace $n { "
       def nsEnd(n: String)   = if (n.isEmpty) "" else s"} // namespace $n"
 
-      val (_, stmts) = xs.foldLeft[(Option[String], List[String])]((None, Nil)) { case ((ns, stmts), cls) =>
-        val moreStmts = "" ::
-          cls.forwardDeclStmts :::                                               //
-          s"struct EXPORT ${cls.parent.fold(cls.name)(s"${cls.name} : " + _)} {" //
-          :: cls.stmts.map("  " + _) :::                                         //
-          "};" ::                                                                //
-          cls.nsDeclStmts                                                        //
-        val nsName = cls.namespaces.mkString("::")
-        ns match {
-          case None                   => (Some(nsName), stmts ::: nsStart(nsName) :: moreStmts)
-          case Some(x) if x != nsName => (Some(nsName), stmts ::: nsEnd(x) :: nsStart(nsName) :: moreStmts)
-          case Some(x)                => (Some(x), stmts ::: moreStmts)
-        }
+      val (_, stmts, forwardDeclStmts) = xs.foldLeft[(Option[String], List[String], List[String])]((None, Nil, Nil)) {
+        case ((ns, implStmts, forwardDeclStmts), cls) =>
+          val moreImplStmts = "" ::
+            s"struct EXPORT ${cls.parent.fold(cls.name)(s"${cls.name} : " + _)} {" //
+            :: cls.stmts.map("  " + _) :::                                         //
+            "};" ::                                                                //
+            cls.nsDeclStmts                                                        //
+          val nsName = cls.namespaces.mkString("::")
+          ns match {
+            case None =>
+              (
+                Some(nsName),
+                implStmts ::: nsStart(nsName) :: moreImplStmts,
+                forwardDeclStmts ::: nsStart(nsName) :: cls.forwardDeclStmts
+              )
+            case Some(x) if x != nsName =>
+              (
+                Some(nsName),
+                implStmts ::: nsEnd(x) :: nsStart(nsName) :: moreImplStmts,
+                forwardDeclStmts ::: nsEnd(x) :: nsStart(nsName) :: cls.forwardDeclStmts
+              )
+            case Some(x) => (Some(x), implStmts ::: moreImplStmts, forwardDeclStmts ::: cls.forwardDeclStmts)
+          }
       }
 
       val includes = (RequiredIncludes ::: xs.flatMap(_.includes)) //
@@ -153,6 +163,7 @@ private[polyregion] object CppStructGen {
           |$shared
           |#pragma clang diagnostic push
           |#pragma ide diagnostic ignored "google-explicit-constructor"
+		  |${forwardDeclStmts.sym("\n", "\n", "\n")}
           |${stmts.sym("\n", "\n", "\n")}
           |} // namespace $namespace
           |#pragma clang diagnostic pop // ide google-explicit-constructor

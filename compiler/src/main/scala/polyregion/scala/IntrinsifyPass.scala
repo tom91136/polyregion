@@ -60,7 +60,7 @@ object IntrinsifyPass {
   }
 
   private def intrinsifyInstanceApply(s: p.Stmt, idx: Int) = s.mapAccExpr[p.Signature] {
-    case inv @ p.Expr.Invoke(sym, Some(recv), args, rtn) =>
+    case inv @ p.Expr.Invoke(sym, tpeArgs, Some(recv), args, rtn) =>
       (sym.fqn, recv, args) match {
         case (op :: Nil, x, y :: Nil) if x.tpe == p.Type.Bool && y.tpe == p.Type.Bool && rtn == p.Type.Bool =>
           val (expr, stmts) = op match {
@@ -167,7 +167,7 @@ object IntrinsifyPass {
   }
 
   private def intrinsifyModuleApply(s: p.Stmt, idx: Int) = s.mapAccExpr[p.Signature] {
-    case inv @ p.Expr.Invoke(sym, None, args, rtn) =>
+    case inv @ p.Expr.Invoke(sym, tpeArgs, None, args, rtn) =>
       (sym.fqn, args) match {
 
         case ("scala" :: "Int$" :: "int2double" :: Nil, x :: Nil) if x.tpe == p.Type.Int =>

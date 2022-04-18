@@ -134,7 +134,7 @@ object Remapper {
                       // no-arg instance def call (i.e. `x.toDouble` )
                       val fnSym              = p.Sym(s.symbol.name)
                       val named              = c.named(tpe)
-                      val ivk: p.Expr.Invoke = p.Expr.Invoke(fnSym, Some(select), Nil, tpe)
+                      val ivk: p.Expr.Invoke = p.Expr.Invoke(fnSym, Nil, Some(select), Nil, tpe)
                       val c1 = c
                         .down(dd)
                         .mark(ivk.signature, dd) ::= p.Stmt.Var(named, Some(ivk))
@@ -156,7 +156,7 @@ object Remapper {
                       // no-arg module def call (i.e. `object X{ def y :Int = ??? }` )
                       val fnSym              = module :+ name
                       val named              = c.named(tpe)
-                      val ivk: p.Expr.Invoke = p.Expr.Invoke(fnSym, None, Nil, tpe)
+                      val ivk: p.Expr.Invoke = p.Expr.Invoke(fnSym, Nil, None, Nil, tpe)
                       val c1 = c
                         .down(dd)
                         .mark(ivk.signature, dd) ::= p.Stmt.Var(named, Some(ivk))
@@ -175,7 +175,7 @@ object Remapper {
                       // no-arg instance def call (i.e. `1.toDouble` )
                       val fnSym              = p.Sym(s.symbol.name)
                       val named              = c.named(tpe)
-                      val ivk: p.Expr.Invoke = p.Expr.Invoke(fnSym, Some(term), Nil, tpe)
+                      val ivk: p.Expr.Invoke = p.Expr.Invoke(fnSym, Nil, Some(term), Nil, tpe)
                       val c1                 = c.down(dd).mark(ivk.signature, dd) ::= p.Stmt.Var(named, Some(ivk))
                       (p.Term.Select(Nil, named), c1).success
                     case bad => c.fail(s"Unsupported construct $bad via instance ref ${term.repr}")
@@ -357,18 +357,18 @@ object Remapper {
 
                   //
                   case x: q.ErasedClsTpe =>
-                   println(x)
+                    println(x)
                     // x
                     ???
                 } // TODO handle multiple arg list methods
-                val ivk: p.Expr.Invoke = p.Expr.Invoke(module ~ sym, None, argTerms, t)
+                val ivk: p.Expr.Invoke = p.Expr.Invoke(module ~ sym, Nil, None, argTerms, t)
                 mkReturn(ivk, c.mark(ivk.signature, underlying)).success
               case (_, q.ErasedMethodVal(receiver: p.Term, sym, tpe, underlying)) => // instance call
                 val t = tpe.rtn match {
                   case t: p.Type => t
                   case _         => ???
                 }
-                val ivk: p.Expr.Invoke = p.Expr.Invoke(sym, Some(receiver), argTerms, t)
+                val ivk: p.Expr.Invoke = p.Expr.Invoke(sym, Nil, Some(receiver), argTerms, t)
                 mkReturn(ivk, c.mark(ivk.signature, underlying)).success
             }
 

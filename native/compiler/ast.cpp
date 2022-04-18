@@ -16,21 +16,21 @@ using std::string;
 
 [[nodiscard]] string polyast::repr(const Type::Any &type) {
   return variants::total(
-      *type,                                                                  //
-      [](const Type::Float &x) { return "Float"s; },                          //
-      [](const Type::Double &x) { return "Double"s; },                        //
-      [](const Type::Bool &x) { return "Bool"s; },                            //
-      [](const Type::Byte &x) { return "Byte"s; },                            //
-      [](const Type::Char &x) { return "Char"s; },                            //
-      [](const Type::Short &x) { return "Short"s; },                          //
-      [](const Type::Int &x) { return "Int"s; },                              //
-      [](const Type::Long &x) { return "Long"s; },                            //
-      [](const Type::String &x) { return "String"s; },                        //
-      [](const Type::Unit &x) { return "Unit"s; },                            //
-      [](const Type::Struct &x) { return "Struct[" + repr(x.name) + "]"; },   //
-      [](const Type::Array &x) { return "Array[" + repr(x.component) + "]"; },//
-      [](const Type::Var &x) { return "Var[" + x.name + "]"; }, //
-      [](const Type::Suspension &x) { return "Suspension[???]"s; } //
+      *type,                                                                   //
+      [](const Type::Float &x) { return "Float"s; },                           //
+      [](const Type::Double &x) { return "Double"s; },                         //
+      [](const Type::Bool &x) { return "Bool"s; },                             //
+      [](const Type::Byte &x) { return "Byte"s; },                             //
+      [](const Type::Char &x) { return "Char"s; },                             //
+      [](const Type::Short &x) { return "Short"s; },                           //
+      [](const Type::Int &x) { return "Int"s; },                               //
+      [](const Type::Long &x) { return "Long"s; },                             //
+      [](const Type::String &x) { return "String"s; },                         //
+      [](const Type::Unit &x) { return "Unit"s; },                             //
+      [](const Type::Struct &x) { return "Struct[" + repr(x.name) + "]"; },    //
+      [](const Type::Array &x) { return "Array[" + repr(x.component) + "]"; }, //
+      [](const Type::Var &x) { return "Var[" + x.name + "]"; },                //
+      [](const Type::Exec &x) { return "Exec[???]"s; }                         //
   );
 }
 
@@ -55,9 +55,7 @@ using std::string;
       [](const Term::LongConst &x) { return "Long(" + std::to_string(x.value) + ")"; },
       [](const Term::DoubleConst &x) { return "Double(" + std::to_string(x.value) + ")"; },
       [](const Term::FloatConst &x) { return "Float(" + std::to_string(x.value) + ")"; },
-      [](const Term::StringConst &x) { return "String(" + x.value + ")"; },
-      [](const Term::Suspension &x) { return "Suspension(???)"s; }
-      );
+      [](const Term::StringConst &x) { return "String(" + x.value + ")"; });
 }
 
 [[nodiscard]] string polyast::repr(const Expr::Any &expr) {
@@ -151,7 +149,9 @@ using std::string;
                ")" + ":" + repr(x.tpe);
       },
       [](const Expr::Index &x) { return repr(x.lhs) + "[" + repr(x.idx) + "]"; },
-      [](const Expr::Alloc &x) { return "new [" + repr(x.witness.component) + "*" + repr(x.size) + "]"; });
+      [](const Expr::Alloc &x) { return "new [" + repr(x.witness.component) + "*" + repr(x.size) + "]"; },
+      [](const Expr::Suspend &x) { return "Suspend(???)"s; } //
+  );
 }
 
 [[nodiscard]] string polyast::repr(const Stmt::Any &stmt) {

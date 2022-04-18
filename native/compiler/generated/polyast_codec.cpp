@@ -180,18 +180,20 @@ json Type::var_to_json(const Type::Var& x) {
 }
 
 Type::Exec Type::exec_from_json(const json& j) { 
+  auto typeArgs = j.at(0).get<std::vector<std::string>>();
   std::vector<Type::Any> args;
-  auto args_json = j.at(0);
+  auto args_json = j.at(1);
   std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &Type::any_from_json);
-  auto rtn =  Type::any_from_json(j.at(1));
-  return {args, rtn};
+  auto rtn =  Type::any_from_json(j.at(2));
+  return {typeArgs, args, rtn};
 }
 
 json Type::exec_to_json(const Type::Exec& x) { 
+  auto typeArgs = x.typeArgs;
   std::vector<json> args;
   std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &Type::any_to_json);
   auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({args, rtn});
+  return json::array({typeArgs, args, rtn});
 }
 
 Type::Any Type::any_from_json(const json& j) { 
@@ -246,26 +248,6 @@ json named_to_json(const Named& x) {
   auto symbol = x.symbol;
   auto tpe =  Type::any_to_json(x.tpe);
   return json::array({symbol, tpe});
-}
-
-Executable executable_from_json(const json& j) { 
-  std::vector<Named> args;
-  auto args_json = j.at(0);
-  std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &named_from_json);
-  std::vector<Stmt::Any> stmts;
-  auto stmts_json = j.at(1);
-  std::transform(stmts_json.begin(), stmts_json.end(), std::back_inserter(stmts), &Stmt::any_from_json);
-  auto rtn =  Type::any_from_json(j.at(2));
-  return {args, stmts, rtn};
-}
-
-json executable_to_json(const Executable& x) { 
-  std::vector<json> args;
-  std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &named_to_json);
-  std::vector<json> stmts;
-  std::transform(x.stmts.begin(), x.stmts.end(), std::back_inserter(stmts), &Stmt::any_to_json);
-  auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({args, stmts, rtn});
 }
 
 Position position_from_json(const json& j) { 
@@ -1067,21 +1049,26 @@ json Expr::alias_to_json(const Expr::Alias& x) {
 
 Expr::Invoke Expr::invoke_from_json(const json& j) { 
   auto name =  sym_from_json(j.at(0));
-  auto receiver = j.at(1).is_null() ? std::nullopt : std::make_optional(Term::any_from_json(j.at(1)));
+  std::vector<Type::Any> typeArgs;
+  auto typeArgs_json = j.at(1);
+  std::transform(typeArgs_json.begin(), typeArgs_json.end(), std::back_inserter(typeArgs), &Type::any_from_json);
+  auto receiver = j.at(2).is_null() ? std::nullopt : std::make_optional(Term::any_from_json(j.at(2)));
   std::vector<Term::Any> args;
-  auto args_json = j.at(2);
+  auto args_json = j.at(3);
   std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &Term::any_from_json);
-  auto rtn =  Type::any_from_json(j.at(3));
-  return {name, receiver, args, rtn};
+  auto rtn =  Type::any_from_json(j.at(4));
+  return {name, typeArgs, receiver, args, rtn};
 }
 
 json Expr::invoke_to_json(const Expr::Invoke& x) { 
   auto name =  sym_to_json(x.name);
+  std::vector<json> typeArgs;
+  std::transform(x.typeArgs.begin(), x.typeArgs.end(), std::back_inserter(typeArgs), &Type::any_to_json);
   auto receiver = x.receiver ? Term::any_to_json(*x.receiver) : json{};
   std::vector<json> args;
   std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &Term::any_to_json);
   auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({name, receiver, args, rtn});
+  return json::array({name, typeArgs, receiver, args, rtn});
 }
 
 Expr::Index Expr::index_from_json(const json& j) { 
@@ -1111,13 +1098,25 @@ json Expr::alloc_to_json(const Expr::Alloc& x) {
 }
 
 Expr::Suspend Expr::suspend_from_json(const json& j) { 
-  auto exec =  executable_from_json(j.at(0));
-  return Expr::Suspend(exec);
+  std::vector<Named> args;
+  auto args_json = j.at(0);
+  std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &named_from_json);
+  std::vector<Stmt::Any> stmts;
+  auto stmts_json = j.at(1);
+  std::transform(stmts_json.begin(), stmts_json.end(), std::back_inserter(stmts), &Stmt::any_from_json);
+  auto rtn =  Type::any_from_json(j.at(2));
+  auto shape =  Type::exec_from_json(j.at(3));
+  return {args, stmts, rtn, shape};
 }
 
 json Expr::suspend_to_json(const Expr::Suspend& x) { 
-  auto exec =  executable_to_json(x.exec);
-  return json::array({exec});
+  std::vector<json> args;
+  std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &named_to_json);
+  std::vector<json> stmts;
+  std::transform(x.stmts.begin(), x.stmts.end(), std::back_inserter(stmts), &Stmt::any_to_json);
+  auto rtn =  Type::any_to_json(x.rtn);
+  auto shape =  Type::exec_to_json(x.shape);
+  return json::array({args, stmts, rtn, shape});
 }
 
 Expr::Any Expr::any_from_json(const json& j) { 
@@ -1338,22 +1337,24 @@ json signature_to_json(const Signature& x) {
 
 Function function_from_json(const json& j) { 
   auto name =  sym_from_json(j.at(0));
-  auto receiver = j.at(1).is_null() ? std::nullopt : std::make_optional(named_from_json(j.at(1)));
+  auto typeArgs = j.at(1).get<std::vector<std::string>>();
+  auto receiver = j.at(2).is_null() ? std::nullopt : std::make_optional(named_from_json(j.at(2)));
   std::vector<Named> args;
-  auto args_json = j.at(2);
+  auto args_json = j.at(3);
   std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &named_from_json);
   std::vector<Named> captures;
-  auto captures_json = j.at(3);
+  auto captures_json = j.at(4);
   std::transform(captures_json.begin(), captures_json.end(), std::back_inserter(captures), &named_from_json);
-  auto rtn =  Type::any_from_json(j.at(4));
+  auto rtn =  Type::any_from_json(j.at(5));
   std::vector<Stmt::Any> body;
-  auto body_json = j.at(5);
+  auto body_json = j.at(6);
   std::transform(body_json.begin(), body_json.end(), std::back_inserter(body), &Stmt::any_from_json);
-  return {name, receiver, args, captures, rtn, body};
+  return {name, typeArgs, receiver, args, captures, rtn, body};
 }
 
 json function_to_json(const Function& x) { 
   auto name =  sym_to_json(x.name);
+  auto typeArgs = x.typeArgs;
   auto receiver = x.receiver ? named_to_json(*x.receiver) : json{};
   std::vector<json> args;
   std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &named_to_json);
@@ -1362,7 +1363,7 @@ json function_to_json(const Function& x) {
   auto rtn =  Type::any_to_json(x.rtn);
   std::vector<json> body;
   std::transform(x.body.begin(), x.body.end(), std::back_inserter(body), &Stmt::any_to_json);
-  return json::array({name, receiver, args, captures, rtn, body});
+  return json::array({name, typeArgs, receiver, args, captures, rtn, body});
 }
 
 Program program_from_json(const json& j) { 
@@ -1387,13 +1388,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "6862c5aac4d6731c27a25c9b5dbb141e") {
-   throw std::runtime_error("Expecting ADT hash to be 6862c5aac4d6731c27a25c9b5dbb141e, but was " + hash);
+  if(hash != "1cb9412099f7069fda6374e934068b91") {
+   throw std::runtime_error("Expecting ADT hash to be 1cb9412099f7069fda6374e934068b91, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"6862c5aac4d6731c27a25c9b5dbb141e", x});
+  return json::array({"1cb9412099f7069fda6374e934068b91", x});
 }
 } // namespace polyregion::polyast

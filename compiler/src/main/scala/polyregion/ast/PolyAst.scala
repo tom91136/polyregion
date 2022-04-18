@@ -38,11 +38,11 @@ object PolyAst {
     case Unit extends Type(TypeKind.None)
 
     // specialisations
-    case String                            extends Type(TypeKind.Ref)
-    case Struct(name: Sym)                 extends Type(TypeKind.Ref)
-    case Array(component: Type)            extends Type(TypeKind.Ref)
-    case Var(name: String)                 extends Type(TypeKind.None)
-    case Exec(args: List[Type], rtn: Type) extends Type(TypeKind.None)
+    case String                                                    extends Type(TypeKind.Ref)
+    case Struct(name: Sym)                                         extends Type(TypeKind.Ref)
+    case Array(component: Type)                                    extends Type(TypeKind.Ref)
+    case Var(name: String)                                         extends Type(TypeKind.None)
+    case Exec(typeArgs: List[String], args: List[Type], rtn: Type) extends Type(TypeKind.None)
   }
 
   case class Named(symbol: String, tpe: Type) derives MsgPack.Codec
@@ -97,11 +97,10 @@ object PolyAst {
 
     case Cast(from: Term, as: Type) extends Expr(as)
     case Alias(ref: Term)           extends Expr(ref.tpe)
-    case Invoke(name: Sym, /*typeArgs: List[Type],*/ receiver: Option[Term], args: List[Term], rtn: Type)
-        extends Expr(rtn)
-    case Index(lhs: Term.Select, idx: Term, component: Type)      extends Expr(component)
-    case Alloc(witness: Type.Array, size: Term)                   extends Expr(witness)
-    case Suspend(args: List[Named], stmts: List[Stmt], rtn: Type) extends Expr(Type.Exec(args.map(_.tpe), rtn))
+    case Invoke(name: Sym, typeArgs: List[Type], receiver: Option[Term], args: List[Term], rtn: Type) extends Expr(rtn)
+    case Index(lhs: Term.Select, idx: Term, component: Type)                        extends Expr(component)
+    case Alloc(witness: Type.Array, size: Term)                                     extends Expr(witness)
+    case Suspend(args: List[Named], stmts: List[Stmt], rtn: Type, shape: Type.Exec) extends Expr(shape)
   }
 
   enum Stmt derives MsgPack.Codec {
@@ -127,15 +126,15 @@ object PolyAst {
 
   case class Signature(name: Sym, receiver: Option[Type], args: List[Type], rtn: Type)
 
-  case class Function(            //
-      name: Sym,                  //
-      /*typeArgs: List[String],*/ //
-      receiver: Option[Named],    //
-      args: List[Named],          //
-      captures: List[Named],      //
-      rtn: Type,                  //
-      body: List[Stmt]            //
-  ) derives MsgPack.Codec         //
+  case class Function(         //
+      name: Sym,               //
+      typeArgs: List[String],  //
+      receiver: Option[Named], //
+      args: List[Named],       //
+      captures: List[Named],   //
+      rtn: Type,               //
+      body: List[Stmt]         //
+  ) derives MsgPack.Codec      //
 
   case class Program(
       entry: Function,

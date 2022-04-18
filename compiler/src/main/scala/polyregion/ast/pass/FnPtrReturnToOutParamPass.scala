@@ -52,7 +52,7 @@ object FnPtrReturnToOutParamPass {
     functions.values.map { (_, f) =>
       f.copy(body = f.body.flatMap { x =>
         x.mapExpr {
-          case ivk @ p.Expr.Invoke(name, recv, args, tpe) =>
+          case ivk @ p.Expr.Invoke(name, tpeArgs, recv, args, tpe) =>
             functions.get(name) match {
               case Some((None, _)) | None => (ivk, Nil)
               case Some((Some(outParam), _)) =>
