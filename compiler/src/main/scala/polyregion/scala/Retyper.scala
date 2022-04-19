@@ -37,8 +37,6 @@ object Retyper {
       .traverse(field =>
         (field.tree match {
           case d: q.ValDef =>
-            println(s"Tpe=${d.tpt.tpe} ")
-
             typer0(d.tpt.tpe).flatMap { // TODO we need to work out nested structs
               case (_, t: p.Type) => p.Named(field.name, t).success
               case (_, bad)       => s"bad erased type $bad".fail
@@ -46,7 +44,7 @@ object Retyper {
           case _ => ???
         })
       )
-      .map(p.StructDef(p.Sym(tpeSym.fullName), _))
+      .map(p.StructDef(p.Sym(tpeSym.fullName), Nil,_))
 
   }
 
@@ -83,7 +81,7 @@ object Retyper {
           case _ => ???
         })
       )
-      .map(p.StructDef(p.Sym(s"${tpeSym.fullName}[${args.map(_.monomorphicName).mkString(",")}]"), _))
+      .map(p.StructDef(p.Sym(s"${tpeSym.fullName}[${args.map(_.monomorphicName).mkString(",")}]"),Nil, _))
 
   }
 
@@ -100,7 +98,7 @@ object Retyper {
 
   @tailrec private final def resolveClsFromTpeRepr(using
       q: Quoted
-  )(r: q.TypeRepr): Result[(p.Sym, q.Symbol, q.ClassKind)] =
+  )(r: q.TypeRepr): Result[(p.Sym, q.Symbol, q.ClassKind)] = {
     r.dealias.simplified match {
       case q.ThisType(tpe) => resolveClsFromTpeRepr(tpe)
       case tpe: q.NamedType =>
@@ -111,6 +109,7 @@ object Retyper {
         }
       case invalid => s"Not a class TypeRepr: ${invalid}".fail
     }
+  }
 
   private def liftClsToTpe(using q: Quoted)(sym: p.Sym, clsSym: q.Symbol, kind: q.ClassKind): q.Tpe =
     (sym, kind) match {
@@ -139,12 +138,10 @@ object Retyper {
   // )(xs: List[q.TypeRepr] ): Result[List[(Option[p.Term], q.Tpe)]] = xs.traverse(typer(_))
 
   def typer0(using q: Quoted)(repr: q.TypeRepr): Result[(Option[p.Term], q.Tpe)] = {
-
-    println(s"W=${repr.dealias.widenTermRefByName.simplified}")
     repr.dealias.widenTermRefByName.simplified match {
-      case tpe @ q.TypeRef(_, n)                       => (None, p.Type.Var(n)).success
-      case q.TypeBounds(_, _)                          => (None, p.Type.Nothing).success
-      case p @ q.PolyType(_, _, q.MethodType(_, _, _)) =>
+      case tpe @ q.TypeRef(_, name) if tpe.typeSymbol.isAbstractType => (None, p.Type.Var(name)).success
+      case q.TypeBounds(_, _)                                        => (None, p.Type.Nothing).success
+      case p @ q.PolyType(_, _, q.MethodType(_, _, _))               =>
         // this shows up from type-unapplied methods:  [x, y] =>> methodTpe(_:x, ...):y
         //  (None, q.ErasedOpaqueTpe(p), c).success
         ???
@@ -185,6 +182,12 @@ object Retyper {
               }
             )
           case (name, kind, ctorArgs) =>
+            val tpeArgs = ctorArgs.map{
+              case (_, t : p.Type) =>  t
+              case  _ => ???
+            }
+
+            (None, p.Type.Struct(name, Nil))
             (None, q.ErasedClsTpe(name, symbol, kind, ctorArgs.map(_._2)))
         }
       // widen singletons
@@ -203,7 +206,8 @@ object Retyper {
           case q.NullConstant       => ???
           case q.ClassOfConstant(r) => ???
         }).pure
-      case expr => resolveClsFromTpeRepr(expr).map(liftClsToTpe(_, _, _)).map((None, _))
+      case expr =>
+        resolveClsFromTpeRepr(expr).map(liftClsToTpe(_, _, _)).map((None, _))
     }
   }
 
@@ -223,7 +227,6 @@ object Retyper {
               case bad       => ???
             }
           )
-          println(s" ${m}")
           m.map(sdef => (value, s, q.FnDependencies(clss = Map(sdef.name -> sdef))))
         case (value, s @ p.Type.Struct(sym, _)) =>
           Retyper

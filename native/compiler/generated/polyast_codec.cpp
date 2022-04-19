@@ -15,6 +15,18 @@ json sym_to_json(const Sym& x) {
   return json::array({fqn});
 }
 
+Named named_from_json(const json& j) { 
+  auto symbol = j.at(0).get<std::string>();
+  auto tpe =  Type::any_from_json(j.at(1));
+  return {symbol, tpe};
+}
+
+json named_to_json(const Named& x) { 
+  auto symbol = x.symbol;
+  auto tpe =  Type::any_to_json(x.tpe);
+  return json::array({symbol, tpe});
+}
+
 TypeKind::None TypeKind::none_from_json(const json& j) { 
   return {};
 }
@@ -251,18 +263,6 @@ json Type::any_to_json(const Type::Any& x) {
   [](const Type::Exec &y) -> json { return {14, Type::exec_to_json(y)}; },
   [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
   }, *x);
-}
-
-Named named_from_json(const json& j) { 
-  auto symbol = j.at(0).get<std::string>();
-  auto tpe =  Type::any_from_json(j.at(1));
-  return {symbol, tpe};
-}
-
-json named_to_json(const Named& x) { 
-  auto symbol = x.symbol;
-  auto tpe =  Type::any_to_json(x.tpe);
-  return json::array({symbol, tpe});
 }
 
 Position position_from_json(const json& j) { 
@@ -1403,13 +1403,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "f42ecdb458f5c2858244738ae9e1b706") {
-   throw std::runtime_error("Expecting ADT hash to be f42ecdb458f5c2858244738ae9e1b706, but was " + hash);
+  if(hash != "c29f1764b272fcd5b889d08efe282d8a") {
+   throw std::runtime_error("Expecting ADT hash to be c29f1764b272fcd5b889d08efe282d8a, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"f42ecdb458f5c2858244738ae9e1b706", x});
+  return json::array({"c29f1764b272fcd5b889d08efe282d8a", x});
 }
 } // namespace polyregion::polyast

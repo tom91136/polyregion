@@ -9,21 +9,22 @@ using namespace std::string_literals;
 
 std::string backend::C99::mkTpe(const Type::Any &tpe) {
   return variants::total(
-      *tpe,                                                          //
-      [&](const Type::Float &x) { return "float"s; },                //
-      [&](const Type::Double &x) { return "double"s; },              //
-      [&](const Type::Bool &x) { return "bool"s; },                  //
-      [&](const Type::Byte &x) { return "int8_t"s; },                //
-      [&](const Type::Char &x) { return "uint16_t"s; },              //
-      [&](const Type::Short &x) { return "int16_t"s; },              //
-      [&](const Type::Int &x) { return "int32_t"s; },                //
-      [&](const Type::Long &x) { return "int64_t"s; },               //
-      [&](const Type::String &x) { return "char *"s; },              //
-      [&](const Type::Unit &x) { return "void"s; },                  //
-      [&](const Type::Struct &x) { return qualified(x.name); },      //
-      [&](const Type::Array &x) { return mkTpe(x.component) + "*"; } ,//
-      [&](const Type::Var &x) { return "/*type var*/"s; }, //
-      [&](const Type::Exec &x) { return "/*exec*/"s; } //
+      *tpe,                                                           //
+      [&](const Type::Float &x) { return "float"s; },                 //
+      [&](const Type::Double &x) { return "double"s; },               //
+      [&](const Type::Bool &x) { return "bool"s; },                   //
+      [&](const Type::Byte &x) { return "int8_t"s; },                 //
+      [&](const Type::Char &x) { return "uint16_t"s; },               //
+      [&](const Type::Short &x) { return "int16_t"s; },               //
+      [&](const Type::Int &x) { return "int32_t"s; },                 //
+      [&](const Type::Long &x) { return "int64_t"s; },                //
+      [&](const Type::String &x) { return "char *"s; },               //
+      [&](const Type::Unit &x) { return "void"s; },                   //
+      [&](const Type::Nothing &x) { return "/*nothing*/"s; },         //
+      [&](const Type::Struct &x) { return qualified(x.name); },       //
+      [&](const Type::Array &x) { return mkTpe(x.component) + "*"; }, //
+      [&](const Type::Var &x) { return "/*type var*/"s; },            //
+      [&](const Type::Exec &x) { return "/*exec*/"s; }                //
   );
 }
 
@@ -130,9 +131,8 @@ std::string backend::C99::mkExpr(const Expr::Any &expr, const std::string &key) 
       [&](const Expr::Alias &x) { return mkRef(x.ref); },                                //
       [&](const Expr::Invoke &x) { return "???"s; },                                     //
       [&](const Expr::Index &x) { return qualified(x.lhs) + "[" + mkRef(x.idx) + "]"; }, //
-      [&](const Expr::Alloc &x) { return "{/*" + to_string(x) + "*/}"; },                 //
-      [&](const Expr::Suspend &x) { return "{/*suspend*/}"s; }
-  );
+      [&](const Expr::Alloc &x) { return "{/*" + to_string(x) + "*/}"; },                //
+      [&](const Expr::Suspend &x) { return "{/*suspend*/}"s; });
 }
 
 std::string backend::C99::mkStmt(const Stmt::Any &stmt) {

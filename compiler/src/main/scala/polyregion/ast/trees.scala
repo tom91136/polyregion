@@ -125,7 +125,9 @@ object PolyAstToExpr {
     def apply(x: p.Named)(using Quotes) = '{ p.Named(${ Expr(x.symbol) }, ${ Expr(x.tpe) }) }
   }
   given StructDefToExpr: ToExpr[p.StructDef] with {
-    def apply(x: p.StructDef)(using Quotes) = '{ p.StructDef(${ Expr(x.name) }, ${ Expr(x.members) }) }
+    def apply(x: p.StructDef)(using Quotes) = '{
+      p.StructDef(${ Expr(x.name) }, ${ Expr(x.typeArgs) }, ${ Expr(x.members) })
+    }
   }
   given TypeToExpr: ToExpr[p.Type] with {
     def apply(x: p.Type)(using Quotes) = x match {

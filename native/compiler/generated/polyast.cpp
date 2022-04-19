@@ -17,6 +17,18 @@ bool operator==(const Sym &l, const Sym &r) {
   return l.fqn == r.fqn;
 }
 
+std::ostream &operator<<(std::ostream &os, const Named &x) {
+  os << "Named(";
+  os << '"' << x.symbol << '"';
+  os << ',';
+  os << x.tpe;
+  os << ')';
+  return os;
+}
+bool operator==(const Named &l, const Named &r) { 
+  return l.symbol == r.symbol && *l.tpe == *r.tpe;
+}
+
 std::ostream &TypeKind::operator<<(std::ostream &os, const TypeKind::Any &x) {
   std::visit([&os](auto &&arg) { os << *arg; }, x);
   return os;
@@ -196,18 +208,6 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Exec &x) {
 }
 bool Type::operator==(const Type::Exec &l, const Type::Exec &r) { 
   return l.typeArgs == r.typeArgs && std::equal(l.args.begin(), l.args.end(), r.args.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && *l.rtn == *r.rtn;
-}
-
-std::ostream &operator<<(std::ostream &os, const Named &x) {
-  os << "Named(";
-  os << '"' << x.symbol << '"';
-  os << ',';
-  os << x.tpe;
-  os << ')';
-  return os;
-}
-bool operator==(const Named &l, const Named &r) { 
-  return l.symbol == r.symbol && *l.tpe == *r.tpe;
 }
 
 std::ostream &operator<<(std::ostream &os, const Position &x) {
@@ -1143,6 +1143,11 @@ std::size_t std::hash<polyregion::polyast::Sym>::operator()(const polyregion::po
   std::size_t seed = std::hash<decltype(x.fqn)>()(x.fqn);
   return seed;
 }
+std::size_t std::hash<polyregion::polyast::Named>::operator()(const polyregion::polyast::Named &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.symbol)>()(x.symbol);
+  seed ^= std::hash<decltype(x.tpe)>()(x.tpe) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
 std::size_t std::hash<polyregion::polyast::TypeKind::None>::operator()(const polyregion::polyast::TypeKind::None &x) const noexcept {
   std::size_t seed = std::hash<std::string>()("polyregion::polyast::TypeKind::None");
   return seed;
@@ -1220,11 +1225,6 @@ std::size_t std::hash<polyregion::polyast::Type::Exec>::operator()(const polyreg
   std::size_t seed = std::hash<decltype(x.typeArgs)>()(x.typeArgs);
   seed ^= std::hash<decltype(x.args)>()(x.args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::Named>::operator()(const polyregion::polyast::Named &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.symbol)>()(x.symbol);
-  seed ^= std::hash<decltype(x.tpe)>()(x.tpe) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Position>::operator()(const polyregion::polyast::Position &x) const noexcept {

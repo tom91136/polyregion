@@ -35,12 +35,12 @@ object PolyAst {
     case Int   extends Type(TypeKind.Integral)
     case Long  extends Type(TypeKind.Integral)
 
-    case Unit extends Type(TypeKind.None)
+    case Unit    extends Type(TypeKind.None)
     case Nothing extends Type(TypeKind.None)
 
     // specialisations
     case String                                                    extends Type(TypeKind.Ref)
-    case Struct(name: Sym, args: List[Named])                      extends Type(TypeKind.Ref)
+    case Struct(name: Sym, args: List[Type])                      extends Type(TypeKind.Ref)
     case Array(component: Type)                                    extends Type(TypeKind.Ref)
     case Var(name: String)                                         extends Type(TypeKind.None)
     case Exec(typeArgs: List[String], args: List[Type], rtn: Type) extends Type(TypeKind.None)
@@ -116,7 +116,7 @@ object PolyAst {
     case Return(value: Expr)
   }
 
-  case class StructDef(name: Sym, members: List[Named]) derives MsgPack.Codec
+  case class StructDef(name: Sym, typeArgs: List[String], members: List[Named]) derives MsgPack.Codec
 
   case class Mirror(                //
       source: Sym,                  //

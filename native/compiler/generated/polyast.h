@@ -207,6 +207,14 @@ struct EXPORT Sym {
   EXPORT friend bool operator==(const Sym &, const Sym &);
 };
 
+struct EXPORT Named {
+  std::string symbol;
+  Type::Any tpe;
+  Named(std::string symbol, Type::Any tpe) noexcept : symbol(std::move(symbol)), tpe(std::move(tpe)) {}
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Named &);
+  EXPORT friend bool operator==(const Named &, const Named &);
+};
+
 namespace TypeKind { 
 
 struct EXPORT Base {
@@ -368,14 +376,6 @@ struct EXPORT Exec : Type::Base {
 };
 } // namespace Type
 
-
-struct EXPORT Named {
-  std::string symbol;
-  Type::Any tpe;
-  Named(std::string symbol, Type::Any tpe) noexcept : symbol(std::move(symbol)), tpe(std::move(tpe)) {}
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Named &);
-  EXPORT friend bool operator==(const Named &, const Named &);
-};
 
 struct EXPORT Position {
   std::string file;
@@ -1134,6 +1134,9 @@ template <typename ...T> struct std::hash<polyregion::polyast::Alternative<T...>
 template <> struct std::hash<polyregion::polyast::Sym> {
   std::size_t operator()(const polyregion::polyast::Sym &) const noexcept;
 };
+template <> struct std::hash<polyregion::polyast::Named> {
+  std::size_t operator()(const polyregion::polyast::Named &) const noexcept;
+};
 template <> struct std::hash<polyregion::polyast::TypeKind::None> {
   std::size_t operator()(const polyregion::polyast::TypeKind::None &) const noexcept;
 };
@@ -1190,9 +1193,6 @@ template <> struct std::hash<polyregion::polyast::Type::Var> {
 };
 template <> struct std::hash<polyregion::polyast::Type::Exec> {
   std::size_t operator()(const polyregion::polyast::Type::Exec &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::Named> {
-  std::size_t operator()(const polyregion::polyast::Named &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Position> {
   std::size_t operator()(const polyregion::polyast::Position &) const noexcept;

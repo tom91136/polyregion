@@ -65,19 +65,20 @@ Pair<llvm::StructType *, LLVMAstTransformer::StructMemberTable> LLVMAstTransform
   return {llvm::StructType::create(C, types, qualified(def.name)), table};
 }
 
-llvm::Type *LLVMAstTransformer::mkTpe(const Type::Any &tpe) {                                    //
-  return variants::total(                                                                        //
-      *tpe,                                                                                      //
-      [&](const Type::Float &x) -> llvm::Type * { return llvm::Type::getFloatTy(C); },           //
-      [&](const Type::Double &x) -> llvm::Type * { return llvm::Type::getDoubleTy(C); },         //
-      [&](const Type::Bool &x) -> llvm::Type * { return llvm::Type::getInt1Ty(C); },             //
-      [&](const Type::Byte &x) -> llvm::Type * { return llvm::Type::getInt8Ty(C); },             //
-      [&](const Type::Char &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },            //
-      [&](const Type::Short &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },           //
-      [&](const Type::Int &x) -> llvm::Type * { return llvm::Type::getInt32Ty(C); },             //
-      [&](const Type::Long &x) -> llvm::Type * { return llvm::Type::getInt64Ty(C); },            //
-      [&](const Type::String &x) -> llvm::Type * { return undefined(__FILE_NAME__, __LINE__); }, //
-      [&](const Type::Unit &x) -> llvm::Type * { return llvm::Type::getVoidTy(C); },             //
+llvm::Type *LLVMAstTransformer::mkTpe(const Type::Any &tpe) {                                     //
+  return variants::total(                                                                         //
+      *tpe,                                                                                       //
+      [&](const Type::Float &x) -> llvm::Type * { return llvm::Type::getFloatTy(C); },            //
+      [&](const Type::Double &x) -> llvm::Type * { return llvm::Type::getDoubleTy(C); },          //
+      [&](const Type::Bool &x) -> llvm::Type * { return llvm::Type::getInt1Ty(C); },              //
+      [&](const Type::Byte &x) -> llvm::Type * { return llvm::Type::getInt8Ty(C); },              //
+      [&](const Type::Char &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },             //
+      [&](const Type::Short &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },            //
+      [&](const Type::Int &x) -> llvm::Type * { return llvm::Type::getInt32Ty(C); },              //
+      [&](const Type::Long &x) -> llvm::Type * { return llvm::Type::getInt64Ty(C); },             //
+      [&](const Type::String &x) -> llvm::Type * { return undefined(__FILE_NAME__, __LINE__); },  //
+      [&](const Type::Unit &x) -> llvm::Type * { return llvm::Type::getVoidTy(C); },              //
+      [&](const Type::Nothing &x) -> llvm::Type * { return undefined(__FILE_NAME__, __LINE__); }, //
       [&](const Type::Struct &x) -> llvm::Type * {
         if (auto def = polyregion::get_opt(structTypes, x.name); def) {
           return def->first->getPointerTo();

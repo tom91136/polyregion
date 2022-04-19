@@ -27,6 +27,7 @@ using std::string;
       [](const Type::Long &x) { return "Long"s; },                             //
       [](const Type::String &x) { return "String"s; },                         //
       [](const Type::Unit &x) { return "Unit"s; },                             //
+      [](const Type::Nothing &x) { return "Nothing"s; },                       //
       [](const Type::Struct &x) { return "Struct[" + repr(x.name) + "]"; },    //
       [](const Type::Array &x) { return "Array[" + repr(x.component) + "]"; }, //
       [](const Type::Var &x) { return "Var[" + x.name + "]"; },                //

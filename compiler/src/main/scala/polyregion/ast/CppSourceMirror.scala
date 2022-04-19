@@ -31,9 +31,9 @@ private[polyregion] object CppSourceMirror {
   }
 
   private val structs = deriveStruct[Sym]() //
+    :: deriveStruct[Named]()
     :: deriveStruct[TypeKind]()
     :: deriveStruct[Type]()
-    :: deriveStruct[Named]()
     :: deriveStruct[Position]()
     :: deriveStruct[Term]()
     :: deriveStruct[BinaryIntrinsicKind]()
