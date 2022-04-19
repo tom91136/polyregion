@@ -20,11 +20,14 @@ object Retyper {
       )
     }
 
-    if (tpeSym.typeMembers.exists(_.isTypeParam)) {
-      throw RuntimeException(
-        s"Encountered generic class ${tpeSym.fullName}, typeCtorArg=${tpeSym.typeMembers}"
-      )
-    }
+    //  isTypeParam  &&  isAbstractType => class C[A]
+    // !isTypeParam  &&  isAbstractType => class C{ type A }
+    // !isTypeParam  && !isAbstractType => class C{ type A = Concrete }
+//    if (tpeSym.typeMembers.exists(_.isTypeParam)) {
+//      throw RuntimeException(
+//        s"Encountered generic class ${tpeSym.fullName}, typeCtorArg=${tpeSym.typeMembers.map(t => s"$t(param=${t.isAbstractType} ${t.isType})")}"
+//      )
+//    }
 
     // XXX there appears to be a bug where an assertion error is thrown if we call the start/end (but not the pos itself)
     // of certain type of trees returned from fieldMembers
@@ -34,6 +37,8 @@ object Retyper {
       .traverse(field =>
         (field.tree match {
           case d: q.ValDef =>
+            println(s"Tpe=${d.tpt.tpe} ")
+
             typer0(d.tpt.tpe).flatMap { // TODO we need to work out nested structs
               case (_, t: p.Type) => p.Named(field.name, t).success
               case (_, bad)       => s"bad erased type $bad".fail
@@ -133,8 +138,11 @@ object Retyper {
   //     q: Quoted
   // )(xs: List[q.TypeRepr] ): Result[List[(Option[p.Term], q.Tpe)]] = xs.traverse(typer(_))
 
-  def typer0(using q: Quoted)(repr: q.TypeRepr): Result[(Option[p.Term], q.Tpe)] =
+  def typer0(using q: Quoted)(repr: q.TypeRepr): Result[(Option[p.Term], q.Tpe)] = {
+
+    println(s"W=${repr.dealias.widenTermRefByName.simplified}")
     repr.dealias.widenTermRefByName.simplified match {
+      case tpe @ q.TypeRef(_, n)                       => (None, p.Type.Var(n)).success
       case q.TypeBounds(_, _)                          => (None, p.Type.Nothing).success
       case p @ q.PolyType(_, _, q.MethodType(_, _, _)) =>
         // this shows up from type-unapplied methods:  [x, y] =>> methodTpe(_:x, ...):y
@@ -197,6 +205,7 @@ object Retyper {
         }).pure
       case expr => resolveClsFromTpeRepr(expr).map(liftClsToTpe(_, _, _)).map((None, _))
     }
+  }
 
   def typer1(using q: Quoted)(repr: q.TypeRepr): Result[(Option[p.Term], q.Tpe, q.FnDependencies)] = {
 

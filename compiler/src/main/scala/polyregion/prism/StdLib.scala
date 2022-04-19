@@ -29,8 +29,8 @@ object StdLib {
   final val Mirrors: Map[p.Sym, p.Mirror] = derivePackedMirrors1[
     (
         S.collection.immutable.Range -> Range,
-        S.runtime.RichInt -> RichInt,
-        S.Predef.type -> Predef,
+//        S.runtime.RichInt -> RichInt,
+//        S.Predef.type -> Predef,
         S.Tuple2[_, _] -> Tuple2[_, _]
     )
   ]

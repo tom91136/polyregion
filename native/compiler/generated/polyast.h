@@ -84,12 +84,13 @@ struct Short;
 struct Int;
 struct Long;
 struct Unit;
+struct Nothing;
 struct String;
 struct Struct;
 struct Array;
 struct Var;
 struct Exec;
-using Any = Alternative<Float, Double, Bool, Byte, Char, Short, Int, Long, Unit, String, Struct, Array, Var, Exec>;
+using Any = Alternative<Float, Double, Bool, Byte, Char, Short, Int, Long, Unit, Nothing, String, Struct, Array, Var, Exec>;
 } // namespace Type
 
 
@@ -317,6 +318,13 @@ struct EXPORT Unit : Type::Base {
   EXPORT friend bool operator==(const Type::Unit &, const Type::Unit &);
 };
 
+struct EXPORT Nothing : Type::Base {
+  Nothing() noexcept : Type::Base(TypeKind::None()) {}
+  EXPORT operator Any() const { return std::make_shared<Nothing>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Nothing &);
+  EXPORT friend bool operator==(const Type::Nothing &, const Type::Nothing &);
+};
+
 struct EXPORT String : Type::Base {
   String() noexcept : Type::Base(TypeKind::Ref()) {}
   EXPORT operator Any() const { return std::make_shared<String>(*this); };
@@ -326,7 +334,8 @@ struct EXPORT String : Type::Base {
 
 struct EXPORT Struct : Type::Base {
   Sym name;
-  explicit Struct(Sym name) noexcept : Type::Base(TypeKind::Ref()), name(std::move(name)) {}
+  std::vector<Named> args;
+  Struct(Sym name, std::vector<Named> args) noexcept : Type::Base(TypeKind::Ref()), name(std::move(name)), args(std::move(args)) {}
   EXPORT operator Any() const { return std::make_shared<Struct>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Struct &);
   EXPORT friend bool operator==(const Type::Struct &, const Type::Struct &);
@@ -1163,6 +1172,9 @@ template <> struct std::hash<polyregion::polyast::Type::Long> {
 };
 template <> struct std::hash<polyregion::polyast::Type::Unit> {
   std::size_t operator()(const polyregion::polyast::Type::Unit &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Type::Nothing> {
+  std::size_t operator()(const polyregion::polyast::Type::Nothing &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Type::String> {
   std::size_t operator()(const polyregion::polyast::Type::String &) const noexcept;

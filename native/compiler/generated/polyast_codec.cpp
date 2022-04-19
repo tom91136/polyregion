@@ -141,6 +141,14 @@ json Type::unit_to_json(const Type::Unit& x) {
   return json::array({});
 }
 
+Type::Nothing Type::nothing_from_json(const json& j) { 
+  return {};
+}
+
+json Type::nothing_to_json(const Type::Nothing& x) { 
+  return json::array({});
+}
+
 Type::String Type::string_from_json(const json& j) { 
   return {};
 }
@@ -151,12 +159,17 @@ json Type::string_to_json(const Type::String& x) {
 
 Type::Struct Type::struct_from_json(const json& j) { 
   auto name =  sym_from_json(j.at(0));
-  return Type::Struct(name);
+  std::vector<Named> args;
+  auto args_json = j.at(1);
+  std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &named_from_json);
+  return {name, args};
 }
 
 json Type::struct_to_json(const Type::Struct& x) { 
   auto name =  sym_to_json(x.name);
-  return json::array({name});
+  std::vector<json> args;
+  std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &named_to_json);
+  return json::array({name, args});
 }
 
 Type::Array Type::array_from_json(const json& j) { 
@@ -209,11 +222,12 @@ Type::Any Type::any_from_json(const json& j) {
   case 6: return Type::int_from_json(t);
   case 7: return Type::long_from_json(t);
   case 8: return Type::unit_from_json(t);
-  case 9: return Type::string_from_json(t);
-  case 10: return Type::struct_from_json(t);
-  case 11: return Type::array_from_json(t);
-  case 12: return Type::var_from_json(t);
-  case 13: return Type::exec_from_json(t);
+  case 9: return Type::nothing_from_json(t);
+  case 10: return Type::string_from_json(t);
+  case 11: return Type::struct_from_json(t);
+  case 12: return Type::array_from_json(t);
+  case 13: return Type::var_from_json(t);
+  case 14: return Type::exec_from_json(t);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
   }
 }
@@ -229,11 +243,12 @@ json Type::any_to_json(const Type::Any& x) {
   [](const Type::Int &y) -> json { return {6, Type::int_to_json(y)}; },
   [](const Type::Long &y) -> json { return {7, Type::long_to_json(y)}; },
   [](const Type::Unit &y) -> json { return {8, Type::unit_to_json(y)}; },
-  [](const Type::String &y) -> json { return {9, Type::string_to_json(y)}; },
-  [](const Type::Struct &y) -> json { return {10, Type::struct_to_json(y)}; },
-  [](const Type::Array &y) -> json { return {11, Type::array_to_json(y)}; },
-  [](const Type::Var &y) -> json { return {12, Type::var_to_json(y)}; },
-  [](const Type::Exec &y) -> json { return {13, Type::exec_to_json(y)}; },
+  [](const Type::Nothing &y) -> json { return {9, Type::nothing_to_json(y)}; },
+  [](const Type::String &y) -> json { return {10, Type::string_to_json(y)}; },
+  [](const Type::Struct &y) -> json { return {11, Type::struct_to_json(y)}; },
+  [](const Type::Array &y) -> json { return {12, Type::array_to_json(y)}; },
+  [](const Type::Var &y) -> json { return {13, Type::var_to_json(y)}; },
+  [](const Type::Exec &y) -> json { return {14, Type::exec_to_json(y)}; },
   [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
   }, *x);
 }
@@ -1388,13 +1403,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "1cb9412099f7069fda6374e934068b91") {
-   throw std::runtime_error("Expecting ADT hash to be 1cb9412099f7069fda6374e934068b91, but was " + hash);
+  if(hash != "f42ecdb458f5c2858244738ae9e1b706") {
+   throw std::runtime_error("Expecting ADT hash to be f42ecdb458f5c2858244738ae9e1b706, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"1cb9412099f7069fda6374e934068b91", x});
+  return json::array({"f42ecdb458f5c2858244738ae9e1b706", x});
 }
 } // namespace polyregion::polyast

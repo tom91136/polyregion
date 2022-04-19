@@ -204,6 +204,8 @@ namespace Type {
 [[nodiscard]] EXPORT json long_to_json(const Type::Long &);
 [[nodiscard]] EXPORT Type::Unit unit_from_json(const json &);
 [[nodiscard]] EXPORT json unit_to_json(const Type::Unit &);
+[[nodiscard]] EXPORT Type::Nothing nothing_from_json(const json &);
+[[nodiscard]] EXPORT json nothing_to_json(const Type::Nothing &);
 [[nodiscard]] EXPORT Type::String string_from_json(const json &);
 [[nodiscard]] EXPORT json string_to_json(const Type::String &);
 [[nodiscard]] EXPORT Type::Struct struct_from_json(const json &);
