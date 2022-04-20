@@ -171,16 +171,16 @@ json Type::string_to_json(const Type::String& x) {
 
 Type::Struct Type::struct_from_json(const json& j) { 
   auto name =  sym_from_json(j.at(0));
-  std::vector<Named> args;
+  std::vector<Type::Any> args;
   auto args_json = j.at(1);
-  std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &named_from_json);
+  std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &Type::any_from_json);
   return {name, args};
 }
 
 json Type::struct_to_json(const Type::Struct& x) { 
   auto name =  sym_to_json(x.name);
   std::vector<json> args;
-  std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &named_to_json);
+  std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &Type::any_to_json);
   return json::array({name, args});
 }
 
@@ -1318,17 +1318,19 @@ json Stmt::any_to_json(const Stmt::Any& x) {
 
 StructDef structdef_from_json(const json& j) { 
   auto name =  sym_from_json(j.at(0));
+  auto typeArgs = j.at(1).get<std::vector<std::string>>();
   std::vector<Named> members;
-  auto members_json = j.at(1);
+  auto members_json = j.at(2);
   std::transform(members_json.begin(), members_json.end(), std::back_inserter(members), &named_from_json);
-  return {name, members};
+  return {name, typeArgs, members};
 }
 
 json structdef_to_json(const StructDef& x) { 
   auto name =  sym_to_json(x.name);
+  auto typeArgs = x.typeArgs;
   std::vector<json> members;
   std::transform(x.members.begin(), x.members.end(), std::back_inserter(members), &named_to_json);
-  return json::array({name, members});
+  return json::array({name, typeArgs, members});
 }
 
 Signature signature_from_json(const json& j) { 
@@ -1403,13 +1405,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "c29f1764b272fcd5b889d08efe282d8a") {
-   throw std::runtime_error("Expecting ADT hash to be c29f1764b272fcd5b889d08efe282d8a, but was " + hash);
+  if(hash != "d8147b80dd6883370e5d96a45e1c7b5a") {
+   throw std::runtime_error("Expecting ADT hash to be d8147b80dd6883370e5d96a45e1c7b5a, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"c29f1764b272fcd5b889d08efe282d8a", x});
+  return json::array({"d8147b80dd6883370e5d96a45e1c7b5a", x});
 }
 } // namespace polyregion::polyast

@@ -114,7 +114,7 @@ object Remapper {
           }
         } yield (term, c)
       case (None, s @ q.Select(root, name)) =>
-//        println(s"S=${s.symbol}, root=${root} name=$name")
+        println(s"S=${s.symbol}, root=${root} name=$name")
         // we must stop at the PolyType boundary as we discard any unapplied type trees
 
         for {
@@ -254,7 +254,7 @@ object Remapper {
           // println(s"[mapper] ref @ ${r}")
           (c !! r).mapRef(r)
         case q.New(tptTree) =>
-          // println(s"New=${term.show}")
+           println(s"New=${term.show}")
 
           (c !! term).typer(tptTree.tpe).map {
             case (_, tpe: p.Type, c) =>
@@ -268,8 +268,9 @@ object Remapper {
           val receiverOwner      = ap.fun.symbol.maybeOwner
           val receiverOwnerFlags = receiverOwner.flags
 
+
           //
-          // println(s"A=${ap.args}")
+          println(s"A=${ap.args} ${ap.show}")
 
           // ap.args(0) match {
           //   case q.Block(dd::Nil, _) =>
@@ -320,7 +321,7 @@ object Remapper {
             // _ = println(s"inner is  -> ${defdef.show}")
             // _ = println(s"inner is  -> ${funVal} AP ${argTerms}")
 
-//            _ = println(s"[mapper] apply function value: ${funVal}")
+           _ = println(s"[mapper] apply function value: ${funVal}")
 
             (ref, c) <- (argTerms, funVal) match {
               case (Nil, x) => (x, c).success
@@ -330,6 +331,7 @@ object Remapper {
                     case p.Type.Struct(s, _) => c.clss.get(s)
                     case _                => None
                   }).failIfEmpty(s"No StructDef found for type ${fnTpe.rtn}")
+                  _ = println(s"[mapper] Ctor !")
 
                   // we need to also make sure the ctor has no impl here
                   // that would mean it's in the form of `class X(val field : Y)`

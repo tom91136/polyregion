@@ -85,7 +85,7 @@ object Mandelbrot {
   }
 
   case class ItResult[A, B](c: A, i: B)
-//  case class ItResult (c: Complex, i: Int)
+  case class ItResultFA (c: Complex, i: Int)
 
   def itMandel2(c: Complex, imax: Int, bailout: Int): ItResult[Complex, Int]  = {
     var z = Complex.Zero
@@ -140,6 +140,7 @@ object Mandelbrot {
 
     polyregion.scala.compiletime.offload {
 
+      ItResultFA(Complex(1.0, 1.0), 1)
       ItResult(Complex.Zero, 1)
 
 //      var y = 0

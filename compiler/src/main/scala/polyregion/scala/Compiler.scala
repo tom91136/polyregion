@@ -145,7 +145,9 @@ object Compiler {
 
               // we pass an empty var table because
               ((rhsStmts, rhsTpe, rhsDeps), log) <- compileTerm(rhs, captureScope.toMap)(log)
-              _ = println(s"DDD=${f.name} = ${rhsDeps.defs.values.map(x => x.show).toList}")
+        _                                 = println(log.render().mkString("\n"))
+
+              
               log <- log.info("External captures", capturedNames.map((n, r) => s"$r(symbol=${r.symbol}) ~> ${n.repr}")*)
 
             } yield (
@@ -184,7 +186,6 @@ object Compiler {
         log <- log.info("Body (AST)", pprint.tokenize(term, indent = 1, showFieldNames = true).mkString)
         log <- log.info("Body (Ascii)", term.show(using q.Printer.TreeAnsiCode))
 
-        _ = println(log.render().mkString("\n"))
         // first, outline what variables this term captures
         // ((typedExternalRefs, c), log) <- RefOutliner.outline(term)(log)
         // Map[q.Ref, p.Named | p.Term]
@@ -244,7 +245,6 @@ object Compiler {
         statements = c.stmts :+ p.Stmt.Return(p.Expr.Alias(termValue))
 
         (optimisedStmts, optimisedFnDeps) = runLocalOptPass(statements, c.deps)
-
       } yield ((optimisedStmts, termTpe, optimisedFnDeps), log)
     }
 

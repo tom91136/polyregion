@@ -187,8 +187,8 @@ object Retyper {
               case  _ => ???
             }
 
-            (None, p.Type.Struct(name, Nil))
-            (None, q.ErasedClsTpe(name, symbol, kind, ctorArgs.map(_._2)))
+            (None, p.Type.Struct(name, tpeArgs))
+            // (None, q.ErasedClsTpe(name, symbol, kind, ctorArgs.map(_._2)))
         }
       // widen singletons
       case q.ConstantType(x) =>

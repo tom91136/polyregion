@@ -342,8 +342,8 @@ struct EXPORT String : Type::Base {
 
 struct EXPORT Struct : Type::Base {
   Sym name;
-  std::vector<Named> args;
-  Struct(Sym name, std::vector<Named> args) noexcept : Type::Base(TypeKind::Ref()), name(std::move(name)), args(std::move(args)) {}
+  std::vector<Type::Any> args;
+  Struct(Sym name, std::vector<Type::Any> args) noexcept : Type::Base(TypeKind::Ref()), name(std::move(name)), args(std::move(args)) {}
   EXPORT operator Any() const { return std::make_shared<Struct>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Struct &);
   EXPORT friend bool operator==(const Type::Struct &, const Type::Struct &);
@@ -1073,8 +1073,9 @@ struct EXPORT Return : Stmt::Base {
 
 struct EXPORT StructDef {
   Sym name;
+  std::vector<std::string> typeArgs;
   std::vector<Named> members;
-  StructDef(Sym name, std::vector<Named> members) noexcept : name(std::move(name)), members(std::move(members)) {}
+  StructDef(Sym name, std::vector<std::string> typeArgs, std::vector<Named> members) noexcept : name(std::move(name)), typeArgs(std::move(typeArgs)), members(std::move(members)) {}
   EXPORT friend std::ostream &operator<<(std::ostream &os, const StructDef &);
   EXPORT friend bool operator==(const StructDef &, const StructDef &);
 };

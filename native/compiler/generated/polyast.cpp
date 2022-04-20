@@ -163,7 +163,7 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Struct &x) {
   return os;
 }
 bool Type::operator==(const Type::Struct &l, const Type::Struct &r) { 
-  return l.name == r.name && l.args == r.args;
+  return l.name == r.name && std::equal(l.args.begin(), l.args.end(), r.args.begin(), [](auto &&l, auto &&r) { return *l == *r; });
 }
 
 std::ostream &Type::operator<<(std::ostream &os, const Type::Array &x) {
@@ -1029,6 +1029,13 @@ std::ostream &operator<<(std::ostream &os, const StructDef &x) {
   os << x.name;
   os << ',';
   os << '{';
+  if (!x.typeArgs.empty()) {
+    std::for_each(x.typeArgs.begin(), std::prev(x.typeArgs.end()), [&os](auto &&x) { os << '"' << x << '"'; os << ','; });
+    os << '"' << x.typeArgs.back() << '"';
+  }
+  os << '}';
+  os << ',';
+  os << '{';
   if (!x.members.empty()) {
     std::for_each(x.members.begin(), std::prev(x.members.end()), [&os](auto &&x) { os << x; os << ','; });
     os << x.members.back();
@@ -1038,7 +1045,7 @@ std::ostream &operator<<(std::ostream &os, const StructDef &x) {
   return os;
 }
 bool operator==(const StructDef &l, const StructDef &r) { 
-  return l.name == r.name && l.members == r.members;
+  return l.name == r.name && l.typeArgs == r.typeArgs && l.members == r.members;
 }
 
 std::ostream &operator<<(std::ostream &os, const Signature &x) {
@@ -1584,6 +1591,7 @@ std::size_t std::hash<polyregion::polyast::Stmt::Return>::operator()(const polyr
 }
 std::size_t std::hash<polyregion::polyast::StructDef>::operator()(const polyregion::polyast::StructDef &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.name)>()(x.name);
+  seed ^= std::hash<decltype(x.typeArgs)>()(x.typeArgs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.members)>()(x.members) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
