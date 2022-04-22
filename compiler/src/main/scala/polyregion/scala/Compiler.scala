@@ -39,7 +39,7 @@ object Compiler {
       owningClass <- Retyper.clsSymTyper0(f.symbol.owner)
 
       receiver <- (concreteKind, owningClass) match {
-        case (q.ClassKind.Object, q.ErasedClsTpe(_, _, _, _)) => None.success
+        // case (q.ClassKind.Object, q.ErasedClsTpe(_, _, _, _)) => None.success
         case (q.ClassKind.Object, s: p.Type.Struct)           => None.success
         case (q.ClassKind.Class, s: p.Type.Struct)            => Some(s).success
         case (kind, x)                                        => s"Illegal receiver (concrete kind=${kind}): $x".fail
@@ -100,7 +100,7 @@ object Compiler {
         log                           <- log.info(s"Method owner: $owningClass")
         receiver <- owningClass match {
           case s: p.Type.Struct           => Some(p.Named("this", s)).success
-          case q.ErasedClsTpe(_, _, _, _) => None.success
+          // case q.ErasedClsTpe(_, _, _, _) => None.success
           case x                          => s"Illegal receiver: ${x}".fail
         }
 

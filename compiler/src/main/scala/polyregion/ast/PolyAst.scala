@@ -38,10 +38,14 @@ object PolyAst {
     case Unit    extends Type(TypeKind.None)
     case Nothing extends Type(TypeKind.None)
 
+    // TODO remove
+    case String                                                    extends Type(TypeKind.Ref) 
+
     // specialisations
-    case String                                                    extends Type(TypeKind.Ref)
     case Struct(name: Sym, args: List[Type])                      extends Type(TypeKind.Ref)
     case Array(component: Type)                                    extends Type(TypeKind.Ref)
+    
+    // 
     case Var(name: String)                                         extends Type(TypeKind.None)
     case Exec(typeArgs: List[String], args: List[Type], rtn: Type) extends Type(TypeKind.None)
   }

@@ -111,7 +111,7 @@ object Retyper {
     }
   }
 
-  private def liftClsToTpe(using q: Quoted)(sym: p.Sym, clsSym: q.Symbol, kind: q.ClassKind): q.Tpe =
+  private def liftClsToTpe(using q: Quoted)(sym: p.Sym, clsSym: q.Symbol, kind: q.ClassKind): p.Type =
     (sym, kind) match {
       case (p.Sym(Symbols.Scala :+ "Unit"), q.ClassKind.Class)      => p.Type.Unit
       case (p.Sym(Symbols.Scala :+ "Boolean"), q.ClassKind.Class)   => p.Type.Bool
@@ -127,29 +127,33 @@ object Retyper {
         // println("[retyper] witness: " + clsSym.tree.show)
         p.Type.Struct(sym, Nil)
       case (sym, q.ClassKind.Object) =>
-        q.ErasedClsTpe(sym, clsSym, q.ClassKind.Object, Nil)
+        p.Type.Struct(sym, Nil)
+        // q.ErasedClsTpe(sym, clsSym, q.ClassKind.Object, Nil)
+        // ???
     }
 
-  def clsSymTyper0(using q: Quoted)(clsSym: q.Symbol): Result[q.Tpe] =
+  def clsSymTyper0(using q: Quoted)(clsSym: q.Symbol): Result[p.Type] =
     resolveClsFromSymbol(clsSym).map(liftClsToTpe(_, _, _))
 
   // def typerN(using
   //     q: Quoted
-  // )(xs: List[q.TypeRepr] ): Result[List[(Option[p.Term], q.Tpe)]] = xs.traverse(typer(_))
+  // )(xs: List[q.TypeRepr] ): Result[List[(Option[p.Term], p.Type)]] = xs.traverse(typer(_))
 
-  def typer0(using q: Quoted)(repr: q.TypeRepr): Result[(Option[p.Term], q.Tpe)] = {
+  def typer0(using q: Quoted)(repr: q.TypeRepr): Result[(Option[p.Term], p.Type)] = {
     repr.dealias.widenTermRefByName.simplified match {
-      case tpe @ q.TypeRef(_, name) if tpe.typeSymbol.isAbstractType => (None, p.Type.Var(name)).success
       case q.TypeBounds(_, _)                                        => (None, p.Type.Nothing).success
-      case p @ q.PolyType(_, _, q.MethodType(_, _, _))               =>
-        // this shows up from type-unapplied methods:  [x, y] =>> methodTpe(_:x, ...):y
-        //  (None, q.ErasedOpaqueTpe(p), c).success
-        ???
+      case ref @ q.TypeRef(_, name) if ref.typeSymbol.isAbstractType => (None, p.Type.Var(name)).success
+      case   q.PolyType(vars, _, method @ q.MethodType(_, _, _))               =>
+        // this shows up from reference to generic methods
+        typer0(method).flatMap{
+          case (term, e @ p.Type.Exec(Nil, args, rtn)) => (term, p.Type.Exec(vars, args, rtn)).success
+          case (_, bad) => ???
+        }
       case m @ q.MethodType(names, args, rtn) =>
         for {
-          (_, tpe) <- typer0(rtn)
+          (_, rtnTpe) <- typer0(rtn)
           argTpes  <- args.traverse(typer0(_))
-        } yield (None, q.ErasedFnTpe(names.zip(argTpes.map(_._2)), tpe))
+        } yield (None,  p.Type.Exec(Nil, argTpes.map(_._2), rtnTpe ) )
       case andOr: q.AndOrType =>
         for {
           (leftTerm, leftTpe)   <- typer0(andOr.left)
@@ -160,7 +164,6 @@ object Retyper {
 //            else if(leftTpe == p.Type.Unit || rightTpe == p.Type.Unit) (term, p.Type.Unit).success
             else s"Left type `$leftTpe` and right type `$rightTpe` did not unify for ${andOr.simplified.show}".fail
         } yield r
-
       case tpe @ q.AppliedType(tpeCtor, args) =>
         for {
           // type ctors must be a class
@@ -173,13 +176,15 @@ object Retyper {
             // TODO make sure this works
             (
               None,
-              ys.map(_._2) match {
-                case Nil      => ???
-                case x :: Nil => q.ErasedFnTpe(Nil, x)
-                case xs :+ x  => ???
-//                TODO fn types don't have named args
-//                  q.ErasedFnTpe(xs, x)
-              }
+
+//               ys.map(_._2) match {
+//                 case Nil      => ???
+//                 case x :: Nil => q.ErasedFnTpe(Nil, x)
+//                 case xs :+ x  => ???
+// //                TODO fn types don't have named args
+// //                  q.ErasedFnTpe(xs, x)
+//               }
+???
             )
           case (name, kind, ctorArgs) =>
             val tpeArgs = ctorArgs.map{
@@ -211,35 +216,36 @@ object Retyper {
     }
   }
 
-  def typer1(using q: Quoted)(repr: q.TypeRepr): Result[(Option[p.Term], q.Tpe, q.FnDependencies)] = {
+  def typer1(using q: Quoted)(repr: q.TypeRepr): Result[(Option[p.Term], p.Type, q.FnDependencies)] = {
 
-    def flattenCls(value: Option[p.Term], t: q.Tpe): Result[(Option[p.Term], q.Tpe, q.FnDependencies)] =
-      (value, t) match {
-        case (value, q.ErasedFnTpe(args, rtn)) =>
-          flattenCls(None, rtn).map((_, tpe, dep) => (value, q.ErasedFnTpe(args, tpe), dep))
+    // def flattenCls(value: Option[p.Term], t: p.Type): Result[(Option[p.Term], p.Type, q.FnDependencies)] =
+    //   (value, t) match {
+    //     case (value, q.ErasedFnTpe(args, rtn)) =>
+    //       flattenCls(None, rtn).map((_, tpe, dep) => (value, q.ErasedFnTpe(args, tpe), dep))
 
-        case (value, e: q.ErasedClsTpe) if e.ctor.nonEmpty =>
-          val s = p.Type.Struct(e.name, Nil)
-          val m = lowerPolymorphicClassType0(
-            e.symbol,
-            e.ctor.map {
-              case t: p.Type => t
-              case bad       => ???
-            }
-          )
-          m.map(sdef => (value, s, q.FnDependencies(clss = Map(sdef.name -> sdef))))
-        case (value, s @ p.Type.Struct(sym, _)) =>
-          Retyper
-            .lowerClassType(repr)
-            .map(sdef => (value, s, q.FnDependencies(clss = Map(sym -> sdef))))
-        case (value, tpe) => (value, tpe, q.FnDependencies()).pure
-      }
+    //     case (value, e: q.ErasedClsTpe) if e.ctor.nonEmpty =>
+    //       val s = p.Type.Struct(e.name, Nil)
+    //       val m = lowerPolymorphicClassType0(
+    //         e.symbol,
+    //         e.ctor.map {
+    //           case t: p.Type => t
+    //           case bad       => ???
+    //         }
+    //       )
+    //       m.map(sdef => (value, s, q.FnDependencies(clss = Map(sdef.name -> sdef))))
+    //     case (value, s @ p.Type.Struct(sym, _)) =>
+    //       Retyper
+    //         .lowerClassType(repr)
+    //         .map(sdef => (value, s, q.FnDependencies(clss = Map(sym -> sdef))))
+    //     case (value, tpe) => (value, tpe, q.FnDependencies()).pure
+    //   }
 
-      Retyper.typer0(repr).flatMap((value, t) => flattenCls(value, t))
+    //   Retyper.typer0(repr).flatMap((value, t) => flattenCls(value, t))
+      Retyper.typer0(repr).map( ( term, tpe ) => (term, tpe, q.FnDependencies()))
 
   }
 
-  def clsSymTyper1(using q: Quoted)(clsSym: q.Symbol): Result[(q.Tpe, q.FnDependencies)] =
+  def clsSymTyper1(using q: Quoted)(clsSym: q.Symbol): Result[(p.Type, q.FnDependencies)] =
     Retyper.clsSymTyper0(clsSym).flatMap {
       case s @ p.Type.Struct(sym, _) =>
         Retyper
@@ -251,7 +257,7 @@ object Retyper {
 
   extension (using q: Quoted)(c: q.FnContext) {
 
-    def clsSymTyper(clsSym: q.Symbol): Result[(q.Tpe, q.FnContext)] = Retyper.clsSymTyper0(clsSym).flatMap {
+    def clsSymTyper(clsSym: q.Symbol): Result[(p.Type, q.FnContext)] = Retyper.clsSymTyper0(clsSym).flatMap {
       case s @ p.Type.Struct(sym, _) =>
         Retyper
           .lowerClassType0(clsSym)
@@ -260,7 +266,7 @@ object Retyper {
       case tpe => (tpe, c).pure
     }
 
-    def typerN(xs: List[q.TypeRepr]): Result[(List[(Option[p.Term], q.Tpe)], q.FnContext)] = xs match {
+    def typerN(xs: List[q.TypeRepr]): Result[(List[(Option[p.Term], p.Type)], q.FnContext)] = xs match {
       case Nil     => (Nil, c).pure
       case x :: xs =>
         // TODO make sure we get the right order back!
@@ -271,7 +277,7 @@ object Retyper {
         }
     }
 
-    def typer(repr: q.TypeRepr): Result[(Option[p.Term], q.Tpe, q.FnContext)] =
+    def typer(repr: q.TypeRepr): Result[(Option[p.Term], p.Type, q.FnContext)] =
       Retyper.typer1(repr).map { case (value, t, deps) =>
         (value, t, c.copy(clss = c.clss ++ deps.clss)) // TODO use that map and not a full p.FnDependenccies
       // case (value, t, None)    => (value, t, c)

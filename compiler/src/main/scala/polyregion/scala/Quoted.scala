@@ -9,7 +9,7 @@ class Quoted(val underlying: scala.quoted.Quotes) {
   export underlying.reflect.*
 
   // Reference = CaptureVarName | DefaultTermValue
-  case class Reference(value: String | p.Term, tpe: Tpe)
+  case class Reference(value: String | p.Term, tpe: p.Type)
 
   // TODO rename to FnScope
   case class FnDependencies(
@@ -24,14 +24,14 @@ class Quoted(val underlying: scala.quoted.Quotes) {
     (x, y) => FnDependencies(x.clss ++ y.clss, x.defs ++ y.defs, x.vars ++ y.vars) //
   )
 
-  type Val = p.Term | ErasedMethodVal | ErasedModuleSelect | ErasedNamedArg
-  type Tpe = p.Type | ErasedClsTpe | ErasedFnTpe // ErasedOpaqueTpe
+//  type Val = p.Term | ErasedMethodVal | ErasedModuleSelect  // | ErasedNamedArg
+//  type Tpe = p.Type | ErasedClsTpe | ErasedFnTpe // ErasedOpaqueTpe
 
-  case class ErasedNamedArg(name: String, tpe: Val)
+  // case class ErasedNamedArg(name: String, tpe: Val)
 
-  case class ErasedModuleSelect(sym: p.Sym)
+//  case class ErasedModuleSelect(sym: p.Sym)
 
-  case class ErasedMethodVal(receiver: p.Sym | p.Term, sym: p.Sym, tpe: ErasedFnTpe, underlying: DefDef)
+//  case class ErasedMethodVal(receiver: p.Sym | p.Term, sym: p.Sym, tpe: ErasedFnTpe, underlying: DefDef)
 
 //  case class ErasedOpaqueTpe(underlying: q.reflect.TypeRepr) // NOT USED
 
@@ -46,19 +46,19 @@ class Quoted(val underlying: scala.quoted.Quotes) {
     case Object, Class
   }
 
-  case class ErasedClsTpe(name: p.Sym, symbol: Symbol, kind: ClassKind, ctor: List[Tpe]) {
-    override def toString: String = {
-      val kindName = kind match {
-        case ClassKind.Object => "Object"
-        case ClassKind.Class  => "Class"
-      }
-      s"#{ <${kindName}>${name.repr}${if (ctor.isEmpty) "" else ctor.mkString("[", ", ", "]")} }#"
-    }
-  }
-  case class ErasedFnTpe(args: List[(String, Tpe)], rtn: Tpe) {
-    override def toString =
-      s"#{ (${args.mkString(",")}) => ${rtn} }#"
-  }
+//  case class ErasedClsTpe(name: p.Sym, symbol: Symbol, kind: ClassKind, ctor: List[Tpe]) {
+//    override def toString: String = {
+//      val kindName = kind match {
+//        case ClassKind.Object => "Object"
+//        case ClassKind.Class  => "Class"
+//      }
+//      s"#{ <${kindName}>${name.repr}${if (ctor.isEmpty) "" else ctor.mkString("[", ", ", "]")} }#"
+//    }
+//  }
+//  case class ErasedFnTpe(args: List[(String, Tpe)], rtn: Tpe) {
+//    override def toString =
+//      s"#{ (${args.mkString(",")}) => ${rtn} }#"
+//  }
 
   // TODO rename to RemapContext
   case class FnContext(
@@ -72,13 +72,13 @@ class Quoted(val underlying: scala.quoted.Quotes) {
 
 //      mirrored : List[p.Function] = List.empty, // mirrored def defs
 
-      suspended: Map[(String, ErasedFnTpe), ErasedMethodVal] = Map.empty,
+//      suspended: Map[(String, ErasedFnTpe), ErasedMethodVal] = Map.empty,
       stmts: List[p.Stmt] = List.empty // fn statements
   ) {
     infix def !!(t: Tree)                                     = copy(traces = t :: traces)
     def down(t: Tree)                                         = !!(t).copy(depth = depth + 1)
     def named(tpe: p.Type)                                    = p.Named(s"v${depth}", tpe)
-    def suspend(k: (String, ErasedFnTpe))(v: ErasedMethodVal) = copy(suspended = suspended + (k -> v))
+//    def suspend(k: (String, ErasedFnTpe))(v: ErasedMethodVal) = copy(suspended = suspended + (k -> v))
 
     def noStmts                         = copy(stmts = Nil)
     def inject(refs: Map[Ref, p.Term])  = copy(refs = refs ++ refs)
@@ -109,7 +109,7 @@ class Quoted(val underlying: scala.quoted.Quotes) {
         x.refs ++ y.refs,
         x.clss ++ y.clss,
         x.defs ++ y.defs,
-        x.suspended ++ y.suspended,
+//        x.suspended ++ y.suspended,
         x.stmts ::: y.stmts
       )
   )

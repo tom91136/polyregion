@@ -29,6 +29,16 @@ object compiletime {
     given Printer[Tree] = Printer.TreeAnsiCode
     println(x.show)
     pprint.pprintln(x.asTerm) // term => AST
+
+    implicit val Q = Quoted(q)
+    val is = Q.collectTree(x.asTerm){
+      case s: Q.Select => s  :: Nil
+      case s: Q.Ident => s  :: Nil
+      case _ => Nil
+    }
+    println("===")
+    println(s"IS=${is.filter(x => x.symbol.isDefDef || true).reverse.map(x => x -> x.tpe.dealias.widenTermRefByName.simplified).map((x, tpe) => s"-> $x : ${x.show} `${x.symbol.fullName}` : ${tpe.show}\n\t${tpe}").mkString("\n")}")
+  println("===")
     x
   }
 

@@ -2,6 +2,8 @@ package polyregion.examples
 
 import polyregion.scala.{Buffer, NativeStruct}
 
+import scala.reflect.ClassTag
+
 object Mandelbrot {
 
   given NativeStruct[Colour] = polyregion.scala.compiletime.nativeStructOf
@@ -138,7 +140,91 @@ object Mandelbrot {
 
     val image = Buffer.ofZeroed[Colour](width * height)
 
+
+
+    object A{
+      final val Const : Int = ???
+      def getter : Int = ???
+      def genGetter[A] : Int = ???
+      def genGetter2[A] : A = ???
+      def arg0() : Unit= ???
+      def arg1(i: Int) : Unit= ???
+      def gen[A](i: Int) :A = ???
+      def genImplicit[A :ClassTag] :A = ???
+      def curry(a: Int)(b: Int) : Unit= ???
+      def genCurry[A, B](a: Int)(b: Int): Unit = ???
+      def curryFn() : (a: Int, b: Int) => () => Unit = ???
+      val f : (Int, Int) => Unit = ???
+    }
+
+    object B {
+      def apply() : Unit= ???
+    }
+
+    class C{
+      final val Field : Int = ???
+
+      def clsFn() : Unit = ???
+    }
+
+
+    def localFn0 : Unit = ???
+    def localFn() : Unit = ???
+
+    val  localF : () => Unit = ???
+
+
+    // ap @ Apply(fun : q.Term, args : q.Terms)
+    //
+
+    val c = new C
+    val f1 : (Int, Int) => Unit = ???
+
+
+    val m = System.getProperty("a")
+    polyregion.scala.compiletime.showExpr{
+
+      import A._
+      arg0()
+
+      c.clsFn()
+      localFn0
+      localFn()
+      localF()
+
+
+      // : Exec
+
+      c.Field
+      A.Const
+
+
+      B()
+      scala.math.max(1,2)
+      scala.math.max(x = 1,2)
+      A.getter
+      A.genGetter[String]
+      A.arg0()
+      A.arg1(1)
+      A.arg1.apply(1)
+      A.gen[String](2)
+      A.genImplicit[String]
+      A.curry(1)(2) // A.curry (1) >>> (2)
+      A.genCurry[String, Int](1)(2) // A.genCurry[String, Int] (1) >>> (2)
+      A.curryFn().apply(1, 2).apply()
+      A.curryFn()(1, 2) // A.curryFn: MethodType
+      A.f(1,2)    // A.f      : AppliedType
+      f1(1,2)    // A.f      : AppliedType
+
+      "".length
+      m.length
+      ()
+
+    }
+
     polyregion.scala.compiletime.offload {
+
+
 
       ItResultFA(Complex(1.0, 1.0), 1)
       ItResult(Complex.Zero, 1)

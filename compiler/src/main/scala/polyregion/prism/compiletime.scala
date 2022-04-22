@@ -31,12 +31,12 @@ object compiletime {
           (_, mt) <- Retyper.typer0(m)
           st <- st match {
             case p.Type.Struct(sym, _)        => sym.success
-            case q.ErasedClsTpe(sym, _, _, _) => sym.success
+            // case q.ErasedClsTpe(sym, _, _, _) => sym.success
             case bad                          => s"source class $s is not a class type, got $bad".fail
           }
           mt <- mt match {
             case p.Type.Struct(sym, _)        => sym.success
-            case q.ErasedClsTpe(sym, _, _, _) => sym.success
+            // case q.ErasedClsTpe(sym, _, _, _) => sym.success
             case bad                          => s"mirror class $m is not a class type, got $bad".fail
           }
         } yield mt -> st

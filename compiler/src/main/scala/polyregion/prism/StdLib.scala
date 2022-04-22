@@ -26,14 +26,16 @@ object StdLib {
 
   import _root_.scala as S
 
-  final val Mirrors: Map[p.Sym, p.Mirror] = derivePackedMirrors1[
-    (
-        S.collection.immutable.Range -> Range,
-        S.runtime.RichInt -> RichInt,
-        S.Predef.type -> Predef,
-        S.Tuple2[_, _] -> Tuple2[_, _]
-    )
-  ]
+  // final val Mirrors: Map[p.Sym, p.Mirror] = derivePackedMirrors1[
+  //   (
+  //       S.collection.immutable.Range -> Range,
+  //       S.runtime.RichInt -> RichInt,
+  //       S.Predef.type -> Predef,
+  //       S.Tuple2[_, _] -> Tuple2[_, _]
+  //   )
+  // ]
+
+  final val Mirrors: Map[p.Sym, p.Mirror] = Map.empty
 
   final val Functions: Map[p.Signature, p.Function] =
     Mirrors.values.flatMap(_.functions).map(f => f.signature -> f).toMap

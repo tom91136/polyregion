@@ -21,7 +21,7 @@ object RefOutliner {
   (using q: Quoted) //
   (term: q.Term)    //
   (log: Log)        //
-      : Result[((Vector[(q.Ident, q.Ref, Option[p.Term], q.Tpe)], q.FnDependencies), Log)] = log.mark(s"Outline") {
+      : Result[((Vector[(q.Ident, q.Ref, Option[p.Term], p.Type)], q.FnDependencies), Log)] = log.mark(s"Outline") {
     log =>
       for {
 
@@ -93,7 +93,7 @@ object RefOutliner {
         // Set[(q.Ident, q.Ref, Option[p.Term])]
 
         (typedRefs, c) <- sharedValRefs.foldLeftM(
-          (Vector.empty[(q.Ident, q.Ref, Option[p.Term], q.Tpe)], q.FnDependencies())
+          (Vector.empty[(q.Ident, q.Ref, Option[p.Term], p.Type)], q.FnDependencies())
         ) { case ((xs, c), (root, i: q.Ref)) =>
           Retyper.typer1(i.tpe).map { case (term, tpe, c0) =>
             (xs :+ (root, i, term, tpe), c0 |+| c)
@@ -116,7 +116,8 @@ object RefOutliner {
 
         // remove anything we can't use, like ClassTag
         filteredTypedRefs = typedRefs.filter {
-          case (_, _, _, q.ErasedClsTpe(Symbols.ClassTag,_, q.ClassKind.Class, Nil)) => false
+          // case (_, _, _, q.ErasedClsTpe(Symbols.ClassTag,_, q.ClassKind.Class, Nil)) => false
+          case (_, _, _, p.Type.Struct(Symbols.ClassTag, p.Type.Var(_) :: Nil)) => false
           case _                                                                   => true
         }
 
