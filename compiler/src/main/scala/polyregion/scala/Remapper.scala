@@ -67,9 +67,16 @@ object Remapper {
         def invokeNoArg(sym: q.Symbol, receiver: Option[p.Term], c: q.FnContext): Option[(p.Term, q.FnContext)] =
           sym.tree match {
             case fn: q.DefDef
-                if fn.paramss.isEmpty => // no-arg def call (i.e. `x.toDouble` or just `def fn = ???; fn` )
-              val ivk: p.Expr.Invoke = p.Expr.Invoke(p.Sym(sym.fullName), Nil, receiver, Nil, tpe)
-              val named              = c.named(tpe)
+                if fn.termParamss.isEmpty => // no-arg def call (i.e. `x.toDouble` or just `def fn = ???; fn` )
+
+              val (tpeArgs, rtnTpe) = tpe match {
+                case p.Type.Exec(tpeArgs, Nil, rtn) => (tpeArgs.map(p.Type.Var(_)), rtn)
+                case p.Type.Exec(_, xs, _)          => ???
+                case x                              => (Nil, x)
+              }
+
+              val ivk: p.Expr.Invoke = p.Expr.Invoke(p.Sym(sym.fullName), tpeArgs, receiver, Nil, rtnTpe)
+              val named              = c.named(rtnTpe)
               val c0 = c
                 .down(fn)
                 .mark(ivk.signature, fn) ::= p.Stmt.Var(named, Some(ivk))
@@ -88,6 +95,7 @@ object Remapper {
               case _                               => s
             }
             val local = p.Named(name, tpe)
+
             // When an ident is owned by a class/object (i.e. not owned by a DefDef) we add an implicit `this` reference;
             // this is valid because the current scope (we're probably a class method) of this ident permits such access.
             // In any other case, we're probably referencing a local ValDef that appeared before before this.
@@ -115,7 +123,7 @@ object Remapper {
     }
 
     def mapTerm(term: q.Term): Result[(p.Term, q.FnContext)] = {
-      // println(s">>${term.show} = ${c.stmts.size} ~ ${term}")
+      println(s">>${term.show} = ${c.stmts.size} ~ ${term}")
       term match {
         case q.Typed(x, _)                        => (c !! term).mapTerm(x) // type ascription: `value : T`
         case q.Inlined(call, bindings, expansion) =>
@@ -140,6 +148,19 @@ object Remapper {
             case (None, tpe, c)        => (p.Term.Select(Nil, p.Named("this", tpe)), c).success
           }
         case a @ q.TypeApply(term, args) =>
+          // Apply(TypeApply(select, Ts), args...)
+          // TypeApply(select, Ts)
+          // println("@ "+a.tpe.widenTermRefByName)
+
+          // TODO replace all Type.Var in context subtree with concrete type
+          // then, replace all Type.Exec
+          c.mapTerm(term).foreach { (term, c) =>
+
+            println("@ " + term)
+            println(s"args=${c.stmts.map(_.repr).mkString("\n")}")
+            println(s"args=${c.defs.keys}")
+          }
+
           // for {
           //   (_, tpe, c) <- c.typer(a.tpe)
           //   (v, c) <- tpe match {
@@ -161,7 +182,7 @@ object Remapper {
           ???
 
         case r: q.Ref =>
-          // println(s"[mapper] ref @ ${r}")
+          println(s"[mapper] ref @ ${r}")
           (c.refs.get(r)) match {
             case Some(term) => (term, (c !! r)).success
             case None       => (c !! r).mapRef0(r)
@@ -226,6 +247,9 @@ object Remapper {
               val name = c.named(expr.tpe)
               (p.Term.Select(Nil, name), c.down(term) ::= p.Stmt.Var(name, Some(expr)))
             }
+
+            //  val ivk: p.Expr.Invoke = p.Expr.Invoke(sym, Nil, Some(receiver), argTerms, t)
+            // mkReturn(ivk, c.mark(ivk.signature, underlying)).success
 
             // _ = println(s"saw apply -> ${ap.symbol.tree.show}")
             // _ = println(s"inner is  -> ${defdef.show}")
@@ -305,7 +329,7 @@ object Remapper {
           } yield r
         case q.If(cond, thenTerm, elseTerm) => // conditional: `if($cond) then { $thenTerm } else { $elseTerm }`
           for {
-            (_, tpe, c)        <- c.typer(term.tpe) // TODO just return the value if result is known at type level
+            (_, tpe, c)         <- c.typer(term.tpe) // TODO just return the value if result is known at type level
             (condTerm, ifCtx)   <- c.down(term).mapTerm(cond)
             (thenTerm, thenCtx) <- ifCtx.noStmts.mapTerm(thenTerm)
             (elseTerm, elseCtx) <- thenCtx.noStmts.mapTerm(elseTerm)

@@ -306,7 +306,7 @@ extension (e: p.Expr) {
     case p.Expr.Alias(ref)     => s"(~>${ref.repr})"
 
     case p.Expr.Invoke(name, tpeArgs, recv, args, tpe) =>
-      s"${recv.map(_.repr).getOrElse("<module>")}.${name.repr}(${args.map(_.repr).mkString(",")}) : ${tpe.repr}"
+      s"${recv.map(_.repr).getOrElse("<module>")}.${name.repr}<${tpeArgs.map(_.repr).mkString(",")}>(${args.map(_.repr).mkString(",")}) : ${tpe.repr}"
     case p.Expr.Index(lhs, idx, tpe) => s"${lhs.repr}[${idx.repr}] : ${tpe.repr}"
     case p.Expr.Alloc(tpe, size)     => s"new [${tpe.component.repr}*${size.repr}]"
   }

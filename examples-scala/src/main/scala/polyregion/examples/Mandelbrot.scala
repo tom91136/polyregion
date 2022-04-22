@@ -145,7 +145,9 @@ object Mandelbrot {
     object A{
       final val Const : Int = ???
       def getter : Int = ???
-      def genGetter[A] : Int = ???
+      def genGetter[GenTpe] : GenTpe = ???
+      def genGetter2[GenTpe1, GenTpe2] : GenTpe1 = ???
+
       def genGetter2[A] : A = ???
       def arg0() : Unit= ???
       def arg1(i: Int) : Unit= ???
@@ -180,6 +182,8 @@ object Mandelbrot {
     val c = new C
     val f1 : (Int, Int) => Unit = ???
 
+
+    // Exec(A, Nil, Var(V))
 
     val m = System.getProperty("a")
     polyregion.scala.compiletime.showExpr{
@@ -222,12 +226,15 @@ object Mandelbrot {
 
     }
 
+    val a = 1
     polyregion.scala.compiletime.offload {
 
 
+//      A.gen[Int](2)
+      A.genGetter2[Int, Short]
 
-      ItResultFA(Complex(1.0, 1.0), 1)
-      ItResult(Complex.Zero, 1)
+//      ItResultFA(Complex(1.0, 1.0), 1)
+//      ItResult(Complex.Zero, 1)
 
 //      var y = 0
 //      while (y < height) {
