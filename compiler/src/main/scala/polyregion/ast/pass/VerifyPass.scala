@@ -43,7 +43,7 @@ object VerifyPass {
                   val c0 = tpe match {
                     case p.Type.Struct(name, args) =>
                       sdefLUT.get(name) match {
-                        case None => acc ~ s"Unknown struct type ${name} in `${t.repr}`"
+                        case None => acc ~ s"Unknown struct type ${name} in `${t.repr}`, known structs: \n${sdefLUT.map(_._2).map(_.repr).mkString("\n")}"
                         case Some(sdef) =>
                           sdef.members.filter(_ == n) match {
                             case _ :: Nil => acc

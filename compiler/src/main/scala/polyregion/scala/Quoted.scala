@@ -16,7 +16,6 @@ class Quoted(val underlying: scala.quoted.Quotes) {
       clss: Map[p.Sym, p.StructDef] = Map.empty,  // external class defs
       defs: Map[p.Signature, DefDef] = Map.empty, // external def defs
       vars: Map[p.Named, Ref] = Map.empty         // external val defs
-//      fns : List[p.Function] = List.empty, // reified def defs
   )
 
   given Monoid[FnDependencies] = Monoid.instance(
@@ -24,41 +23,20 @@ class Quoted(val underlying: scala.quoted.Quotes) {
     (x, y) => FnDependencies(x.clss ++ y.clss, x.defs ++ y.defs, x.vars ++ y.vars) //
   )
 
-//  type Val = p.Term | ErasedMethodVal | ErasedModuleSelect  // | ErasedNamedArg
-//  type Tpe = p.Type | ErasedClsTpe | ErasedFnTpe // ErasedOpaqueTpe
-
-  // case class ErasedNamedArg(name: String, tpe: Val)
-
-//  case class ErasedModuleSelect(sym: p.Sym)
-
-//  case class ErasedMethodVal(receiver: p.Sym | p.Term, sym: p.Sym, tpe: ErasedFnTpe, underlying: DefDef)
-
-//  case class ErasedOpaqueTpe(underlying: q.reflect.TypeRepr) // NOT USED
-
-//  case class ErasedModuleClsTpe()
-//  case class ErasedModuleCls(tpe: ErasedModuleClsTpe)
-
-  // , defs: Map[(p.Sym, ErasedFnTpe), DefDef], vals: Map[p.Sym, ValDef]
-//  case class ErasedExtensionClsTpe(sym: p.Sym)
-//  case class ErasedExtensionCls(tpe: ErasedExtensionClsTpe)
-
   enum ClassKind {
     case Object, Class
   }
 
-//  case class ErasedClsTpe(name: p.Sym, symbol: Symbol, kind: ClassKind, ctor: List[Tpe]) {
-//    override def toString: String = {
-//      val kindName = kind match {
-//        case ClassKind.Object => "Object"
-//        case ClassKind.Class  => "Class"
-//      }
-//      s"#{ <${kindName}>${name.repr}${if (ctor.isEmpty) "" else ctor.mkString("[", ", ", "]")} }#"
-//    }
-//  }
-//  case class ErasedFnTpe(args: List[(String, Tpe)], rtn: Tpe) {
-//    override def toString =
-//      s"#{ (${args.mkString(",")}) => ${rtn} }#"
-//  }
+  case class Witnesses(
+      variables: Map[p.Named, Ref],
+      classes: Map[ClassDef, Set[p.Type.Struct]] = Map.empty,
+      functions: Map[DefDef, Set[p.Expr.Invoke]] = Map.empty
+  ) {
+    def witness(x: ClassDef, application: p.Type.Struct) =
+      copy(classes = classes.updatedWith(x)(x => Some(x.getOrElse(Set.empty) + application)))
+    def witness(x: DefDef, application: p.Expr.Invoke) =
+      copy(functions = functions.updatedWith(x)(x => Some(x.getOrElse(Set.empty) + application)))
+  }
 
   // TODO rename to RemapContext
   case class FnContext(
@@ -70,22 +48,22 @@ class Quoted(val underlying: scala.quoted.Quotes) {
       clss: Map[p.Sym, p.StructDef] = Map.empty,  // external class defs
       defs: Map[p.Signature, DefDef] = Map.empty, // external def defs
 
-//      mirrored : List[p.Function] = List.empty, // mirrored def defs
+      // captures : Map[p.Named, Ref]
 
-//      suspended: Map[(String, ErasedFnTpe), ErasedMethodVal] = Map.empty,
+      // clsWitnesses : Map[ClassDef, Set[p.Type.Struct]]
+      // defWitnesses : Map[DefDef, Set[p.Expr.Invoke]]
+
       stmts: List[p.Stmt] = List.empty // fn statements
   ) {
-    infix def !!(t: Tree)                                     = copy(traces = t :: traces)
-    def down(t: Tree)                                         = !!(t).copy(depth = depth + 1)
-    def named(tpe: p.Type)                                    = p.Named(s"v${depth}", tpe)
-//    def suspend(k: (String, ErasedFnTpe))(v: ErasedMethodVal) = copy(suspended = suspended + (k -> v))
+    infix def !!(t: Tree)  = copy(traces = t :: traces)
+    def down(t: Tree)      = !!(t).copy(depth = depth + 1)
+    def named(tpe: p.Type) = p.Named(s"v${depth}", tpe)
 
     def noStmts                         = copy(stmts = Nil)
     def inject(refs: Map[Ref, p.Term])  = copy(refs = refs ++ refs)
     def mark(s: p.Signature, d: DefDef) = copy(defs = defs + (s -> d))
     infix def ::=(xs: p.Stmt*)          = copy(stmts = stmts ++ xs)
     def replaceStmts(xs: Seq[p.Stmt])   = copy(stmts = xs.toList)
-//    def mapStmts(f: Seq[p.Stmt] => Seq[p.Stmt]) = copy(stmts = f(stmts).toList)
 
     def fail[A](reason: String) =
       s"""[depth=$depth] $reason
@@ -109,7 +87,6 @@ class Quoted(val underlying: scala.quoted.Quotes) {
         x.refs ++ y.refs,
         x.clss ++ y.clss,
         x.defs ++ y.defs,
-//        x.suspended ++ y.suspended,
         x.stmts ::: y.stmts
       )
   )

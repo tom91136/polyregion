@@ -26,10 +26,7 @@ object Compiler {
 
   // kind is there for cases where we have `object A extends B; abstract class B {def m = ???}`, B.m has receiver but A.m doesn't
   def deriveSignature(using q: Quoted)(f: q.DefDef, concreteKind: q.ClassKind): Result[p.Signature] = {
-    def simpleTyper(t: q.TypeRepr) = Retyper.typer0(t).flatMap {
-      case (_, t: p.Type) => t.success
-      case (_, bad)       => s"erased arg type encountered $bad".fail
-    }
+    def simpleTyper(t: q.TypeRepr) = Retyper.typer0(t).map((_, t) => t)
     for {
       fnRtnTpe <- simpleTyper(f.returnTpt.tpe)
       fnArgsTpes <- f.paramss
@@ -40,9 +37,9 @@ object Compiler {
 
       receiver <- (concreteKind, owningClass) match {
         // case (q.ClassKind.Object, q.ErasedClsTpe(_, _, _, _)) => None.success
-        case (q.ClassKind.Object, s: p.Type.Struct)           => None.success
-        case (q.ClassKind.Class, s: p.Type.Struct)            => Some(s).success
-        case (kind, x)                                        => s"Illegal receiver (concrete kind=${kind}): $x".fail
+        case (q.ClassKind.Object, s: p.Type.Struct) => None.success
+        case (q.ClassKind.Class, s: p.Type.Struct)  => Some(s).success
+        case (kind, x)                              => s"Illegal receiver (concrete kind=${kind}): $x".fail
       }
     } yield p.Signature(p.Sym(receiver.fold(f.symbol.fullName)(_ => f.symbol.name)), receiver, fnArgsTpes, fnRtnTpe)
   }
@@ -77,18 +74,13 @@ object Compiler {
 
         // first we run the typer on the return type to see if we can just return a term based on the type
         (fnRtnValue, fnRtnTpe, fnRtnDeps) <- Retyper.typer1(f.returnTpt.tpe)
-        // we then validate the return types
-        fnRtnTpe <- fnRtnTpe match {
-          case tpe: p.Type => tpe.success
-          case bad         => s"Bad function return type $bad".fail
-        }
+
         // we also run the typer on all the def's arguments
         // TODO handle default value of args (ValDef.rhs)
         (fnArgs, fnArgDeps) <- f.paramss.flatMap(_.params).foldMapM {
           case arg: q.ValDef => // all args should come in the form of a ValDef
-            Retyper.typer1(arg.tpt.tpe).flatMap {
-              case (_, t: p.Type, c) => ((arg, p.Named(arg.name, t)) :: Nil, c).success
-              case (_, bad, c)       => s"Erased arg type encountered $bad".fail
+            Retyper.typer1(arg.tpt.tpe).flatMap { case (_, t, c) =>
+              ((arg, p.Named(arg.name, t)) :: Nil, c).success
             }
           case bad =>
             println(bad)
@@ -99,9 +91,8 @@ object Compiler {
         (owningClass, fnReceiverDeps) <- Retyper.clsSymTyper1(f.symbol.owner)
         log                           <- log.info(s"Method owner: $owningClass")
         receiver <- owningClass match {
-          case s: p.Type.Struct           => Some(p.Named("this", s)).success
-          // case q.ErasedClsTpe(_, _, _, _) => None.success
-          case x                          => s"Illegal receiver: ${x}".fail
+          case s: p.Type.Struct => Some(p.Named("this", s)).success
+          case x                => s"Illegal receiver: ${x}".fail
         }
 
         log <- log.info("DefDef arguments", fnArgs.map((a, n) => s"${a}(symbol=${a.symbol}) ~> $n")*)
@@ -116,10 +107,10 @@ object Compiler {
               ((captures, captureDeps), log) <- RefOutliner.outline(rhs)(log)
               (capturedNames, captureScope) <- captures
                 .foldMapM[Result, (List[(p.Named, q.Ref)], List[(q.Ref, p.Term)])] {
-                  case (root, ref, value, tpe: p.Type)
+                  case (root, ref, value, tpe)
                       if root == ref && root.symbol.owner == f.symbol.owner && receiver.nonEmpty =>
                     (Nil, Nil).success // this is a reference to `this`
-                  case (root, ref, value, tpe: p.Type) =>
+                  case (root, ref, value, tpe) =>
                     // this is a generic reference possibly from the function argument
                     val isArg = fnArgs.exists { (arg, n) =>
                       arg.symbol == ref.underlying.symbol || arg.symbol == root.underlying.symbol
@@ -136,8 +127,6 @@ object Compiler {
                           val named = p.Named(name, tpe)
                           ((named -> ref) :: Nil, (ref -> p.Term.Select(Nil, named)) :: Nil).success
                       }
-
-                  case (root, ref, value, bad) => ???
                 }
 
               // log <- log.info("Captured vars before removal", fnDeps.vars.toList.map(_.toString)*)
@@ -145,9 +134,8 @@ object Compiler {
 
               // we pass an empty var table because
               ((rhsStmts, rhsTpe, rhsDeps), log) <- compileTerm(rhs, captureScope.toMap)(log)
-        _                                 = println(log.render().mkString("\n"))
+              _ = println(log.render().mkString("\n"))
 
-              
               log <- log.info("External captures", capturedNames.map((n, r) => s"$r(symbol=${r.symbol}) ~> ${n.repr}")*)
 
             } yield (
@@ -226,15 +214,8 @@ object Compiler {
 
         (_, termTpe, c) <- c.typer(term.tpe)
 
-        // validate term type and values
-        termTpe <- termTpe match {
-          case tpe: p.Type => tpe.success
-          case bad         => s"Bad function return type $bad".fail
-        }
-        termValue <- termValue match {
-          case term: p.Term => term.success
-          case bad          => s"Bad function return value $bad".fail
-        }
+        _ = println(s"|> ${c.refs} ${c.clss} ${c.defs}")
+
         _ <-
           if (termTpe != termValue.tpe) {
             s"Term type ($termTpe) is not the same as term value type (${termValue.tpe}), term was $termValue".fail
@@ -262,31 +243,28 @@ object Compiler {
       (root, ref, value, tpe) =>
         (value, tpe) match {
           case (Some(x), _) => (Nil, (ref -> x) :: Nil)
-          case (None, t: p.Type) =>
+          case (None, t) =>
             val name = ref match {
               case s @ q.Select(_, _) => s"_capture_${s.show}_${s.pos.startLine}_"
               case i @ q.Ident(_)     => s"_capture_${i.name}_${i.pos.startLine}_"
             }
             val named = p.Named(name, t)
             ((named -> ref) :: Nil, (ref -> p.Term.Select(Nil, named)) :: Nil)
-          case (None, bad) => ???
         }
     }
 
     ((exprStmts, exprTpe, exprDeps), log) <- compileTerm(term, captureScope.toMap)(log)
 
-
-    
-    log                                   <- log.info("Expr Stmts", exprStmts.map(_.repr).mkString("\n"))
+    log      <- log.info("Expr Stmts", exprStmts.map(_.repr).mkString("\n"))
     log      <- log.info("External captures", capturedNames.map((n, r) => s"$r(symbol=${r.symbol}) ~> ${n.repr}")*)
     exprDeps <- (exprDeps |+| captureDeps |+| q.FnDependencies(vars = capturedNames.toMap)).success
-
-        _ = println(log.render().mkString("\n"))
-
 
     // we got a compiled term, compile all dependencies as well
     log <- log.info(s"Expr dependent methods", exprDeps.defs.map(_.toString).toList*)
     log <- log.info(s"Expr dependent structs", exprDeps.clss.map(_.toString).toList*)
+
+    _ = println(log.render().mkString("\n"))
+
     // log                 <- log.info(s"Expr dependent vars   ", exprDeps.vars.map(_.toString).toList*)
     (depFns, deps, log) <- compileAllDependencies(exprDeps, StdLib.Functions, StdLib.StructDefs)(log)
     log                 <- log.info(s"Expr+Deps Dependent methods", deps.defs.map(_.toString).toList*)
