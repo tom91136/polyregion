@@ -164,7 +164,7 @@ object Compiler {
 
         compiledFn = p.Function(
           name = p.Sym(receiver.fold(f.symbol.fullName)(_ => f.symbol.name)),
-          typeArgs = Nil,
+          tpeVars = Nil,
           receiver = receiver,
           args = fnArgs.map(_._2),
           captures = rhsCaptures.map(_._1),
@@ -274,9 +274,15 @@ object Compiler {
     }
 
     ((exprStmts, exprTpe, exprDeps), log) <- compileTerm(term, captureScope.toMap)(log)
+
+
+    
     log                                   <- log.info("Expr Stmts", exprStmts.map(_.repr).mkString("\n"))
     log      <- log.info("External captures", capturedNames.map((n, r) => s"$r(symbol=${r.symbol}) ~> ${n.repr}")*)
     exprDeps <- (exprDeps |+| captureDeps |+| q.FnDependencies(vars = capturedNames.toMap)).success
+
+        _ = println(log.render().mkString("\n"))
+
 
     // we got a compiled term, compile all dependencies as well
     log <- log.info(s"Expr dependent methods", exprDeps.defs.map(_.toString).toList*)
@@ -293,7 +299,7 @@ object Compiler {
 
     exprFn = p.Function(
       name = p.Sym(exprName),
-      typeArgs = Nil,
+      tpeVars = Nil,
       receiver = None,
       args = Nil,
       captures = capturedNames.map(_._1),

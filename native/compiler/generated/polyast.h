@@ -366,10 +366,10 @@ struct EXPORT Var : Type::Base {
 };
 
 struct EXPORT Exec : Type::Base {
-  std::vector<std::string> typeArgs;
+  std::vector<std::string> tpeVars;
   std::vector<Type::Any> args;
   Type::Any rtn;
-  Exec(std::vector<std::string> typeArgs, std::vector<Type::Any> args, Type::Any rtn) noexcept : Type::Base(TypeKind::None()), typeArgs(std::move(typeArgs)), args(std::move(args)), rtn(std::move(rtn)) {}
+  Exec(std::vector<std::string> tpeVars, std::vector<Type::Any> args, Type::Any rtn) noexcept : Type::Base(TypeKind::None()), tpeVars(std::move(tpeVars)), args(std::move(args)), rtn(std::move(rtn)) {}
   EXPORT operator Any() const { return std::make_shared<Exec>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Exec &);
   EXPORT friend bool operator==(const Type::Exec &, const Type::Exec &);
@@ -1073,9 +1073,9 @@ struct EXPORT Return : Stmt::Base {
 
 struct EXPORT StructDef {
   Sym name;
-  std::vector<std::string> typeArgs;
+  std::vector<std::string> tpeVars;
   std::vector<Named> members;
-  StructDef(Sym name, std::vector<std::string> typeArgs, std::vector<Named> members) noexcept : name(std::move(name)), typeArgs(std::move(typeArgs)), members(std::move(members)) {}
+  StructDef(Sym name, std::vector<std::string> tpeVars, std::vector<Named> members) noexcept : name(std::move(name)), tpeVars(std::move(tpeVars)), members(std::move(members)) {}
   EXPORT friend std::ostream &operator<<(std::ostream &os, const StructDef &);
   EXPORT friend bool operator==(const StructDef &, const StructDef &);
 };
@@ -1092,13 +1092,13 @@ struct EXPORT Signature {
 
 struct EXPORT Function {
   Sym name;
-  std::vector<std::string> typeArgs;
+  std::vector<std::string> tpeVars;
   std::optional<Named> receiver;
   std::vector<Named> args;
   std::vector<Named> captures;
   Type::Any rtn;
   std::vector<Stmt::Any> body;
-  Function(Sym name, std::vector<std::string> typeArgs, std::optional<Named> receiver, std::vector<Named> args, std::vector<Named> captures, Type::Any rtn, std::vector<Stmt::Any> body) noexcept : name(std::move(name)), typeArgs(std::move(typeArgs)), receiver(std::move(receiver)), args(std::move(args)), captures(std::move(captures)), rtn(std::move(rtn)), body(std::move(body)) {}
+  Function(Sym name, std::vector<std::string> tpeVars, std::optional<Named> receiver, std::vector<Named> args, std::vector<Named> captures, Type::Any rtn, std::vector<Stmt::Any> body) noexcept : name(std::move(name)), tpeVars(std::move(tpeVars)), receiver(std::move(receiver)), args(std::move(args)), captures(std::move(captures)), rtn(std::move(rtn)), body(std::move(body)) {}
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Function &);
   EXPORT friend bool operator==(const Function &, const Function &);
 };

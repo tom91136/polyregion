@@ -92,7 +92,7 @@ object IntrinsifyPass {
             case "!=" => (p.Expr.BinaryLogicIntrinsic(x, y, p.BinaryLogicIntrinsicKind.Neq), Nil)
           }
           (expr, stmts, inv.signature :: Nil)
-        case (op :: Nil, x, Nil) if x.tpe.isNumeric =>
+        case ("scala" :: ("Double" | "Float" | "Long" | "Int" | "Short" | "Char" | "Byte") :: op :: Nil, x, Nil) if x.tpe.isNumeric =>
           // xxx bool is integral
           val (expr, stmts) = op match {
             case "toDouble" => (p.Expr.Cast(recv, p.Type.Double), Nil)
@@ -134,7 +134,8 @@ object IntrinsifyPass {
           }
           (expr, stmts, inv.signature :: Nil)
 
-        case (op :: Nil, x, y :: Nil) if x.tpe.isNumeric && y.tpe.isNumeric && rtn.isNumeric =>
+        case ("scala" :: ("Double" | "Float" | "Long" | "Int" | "Short" | "Char" | "Byte") :: op :: Nil, x, y :: Nil)
+            if x.tpe.isNumeric && y.tpe.isNumeric && rtn.isNumeric =>
           val (expr, stmts) = op match {
             // JLS 5.6.2. Binary Numeric Promotion
             case "+" => binaryNumericIntrinsic(x, y, rtn, idx, p.BinaryIntrinsicKind.Add)
@@ -159,7 +160,7 @@ object IntrinsifyPass {
             if idx.tpe.kind == p.TypeKind.Integral =>
           (p.Expr.Alias(p.Term.UnitConst), p.Stmt.Update(xs, idx, x) :: Nil, inv.signature :: Nil)
         case (unknownSym, recv, args) =>
-          println(s"No instance intrinsic for call: (($recv<${recv.tpe.kind}>) : ${unknownSym.mkString(".")})(${args
+          println(s"No instance intrinsic for call: $recv.`${unknownSym.mkString(".")}`(${args
             .mkString(",")}), rtn=${rtn}, argn=${args.size}")
           (inv, Nil, Nil)
       }

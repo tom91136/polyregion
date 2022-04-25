@@ -14,11 +14,11 @@ object Retyper {
 
   def lowerClassType0(using q: Quoted)(tpeSym: q.Symbol): Result[p.StructDef] = {
 
-    if ((tpeSym.flags.is(q.Flags.Module) || tpeSym.flags.is(q.Flags.Abstract)) && tpeSym.fieldMembers.nonEmpty) {
-      throw RuntimeException(
-        s"Unsupported combination of flags: ${tpeSym.flags.show} for ${tpeSym}, fields=${tpeSym.fieldMembers}"
-      )
-    }
+    // if ((tpeSym.flags.is(q.Flags.Module) || tpeSym.flags.is(q.Flags.Abstract)) && tpeSym.fieldMembers.nonEmpty) {
+    //   throw RuntimeException(
+    //     s"Unsupported combination of flags: ${tpeSym.flags.show} for ${tpeSym}, fields=${tpeSym.fieldMembers}"
+    //   )
+    // }
 
     //  isTypeParam  &&  isAbstractType => class C[A]
     // !isTypeParam  &&  isAbstractType => class C{ type A }

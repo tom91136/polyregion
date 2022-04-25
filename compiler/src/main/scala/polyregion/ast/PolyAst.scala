@@ -39,15 +39,15 @@ object PolyAst {
     case Nothing extends Type(TypeKind.None)
 
     // TODO remove
-    case String                                                    extends Type(TypeKind.Ref) 
+    case String extends Type(TypeKind.Ref)
 
     // specialisations
-    case Struct(name: Sym, args: List[Type])                      extends Type(TypeKind.Ref)
-    case Array(component: Type)                                    extends Type(TypeKind.Ref)
-    
-    // 
+    case Struct(name: Sym, args: List[Type]) extends Type(TypeKind.Ref)
+    case Array(component: Type)              extends Type(TypeKind.Ref)
+
+    //
     case Var(name: String)                                         extends Type(TypeKind.None)
-    case Exec(typeArgs: List[String], args: List[Type], rtn: Type) extends Type(TypeKind.None)
+    case Exec(tpeVars: List[String], args: List[Type], rtn: Type) extends Type(TypeKind.None)
   }
 
   case class Named(symbol: String, tpe: Type) derives MsgPack.Codec
@@ -120,7 +120,7 @@ object PolyAst {
     case Return(value: Expr)
   }
 
-  case class StructDef(name: Sym, typeArgs: List[String], members: List[Named]) derives MsgPack.Codec
+  case class StructDef(name: Sym, tpeVars: List[String], members: List[Named]) derives MsgPack.Codec
 
   case class Mirror(                //
       source: Sym,                  //
@@ -133,7 +133,7 @@ object PolyAst {
 
   case class Function(         //
       name: Sym,               //
-      typeArgs: List[String],  //
+      tpeVars: List[String],  //
       receiver: Option[Named], //
       args: List[Named],       //
       captures: List[Named],   //

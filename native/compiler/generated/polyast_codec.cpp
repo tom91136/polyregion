@@ -205,20 +205,20 @@ json Type::var_to_json(const Type::Var& x) {
 }
 
 Type::Exec Type::exec_from_json(const json& j) { 
-  auto typeArgs = j.at(0).get<std::vector<std::string>>();
+  auto tpeVars = j.at(0).get<std::vector<std::string>>();
   std::vector<Type::Any> args;
   auto args_json = j.at(1);
   std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &Type::any_from_json);
   auto rtn =  Type::any_from_json(j.at(2));
-  return {typeArgs, args, rtn};
+  return {tpeVars, args, rtn};
 }
 
 json Type::exec_to_json(const Type::Exec& x) { 
-  auto typeArgs = x.typeArgs;
+  auto tpeVars = x.tpeVars;
   std::vector<json> args;
   std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &Type::any_to_json);
   auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({typeArgs, args, rtn});
+  return json::array({tpeVars, args, rtn});
 }
 
 Type::Any Type::any_from_json(const json& j) { 
@@ -1318,19 +1318,19 @@ json Stmt::any_to_json(const Stmt::Any& x) {
 
 StructDef structdef_from_json(const json& j) { 
   auto name =  sym_from_json(j.at(0));
-  auto typeArgs = j.at(1).get<std::vector<std::string>>();
+  auto tpeVars = j.at(1).get<std::vector<std::string>>();
   std::vector<Named> members;
   auto members_json = j.at(2);
   std::transform(members_json.begin(), members_json.end(), std::back_inserter(members), &named_from_json);
-  return {name, typeArgs, members};
+  return {name, tpeVars, members};
 }
 
 json structdef_to_json(const StructDef& x) { 
   auto name =  sym_to_json(x.name);
-  auto typeArgs = x.typeArgs;
+  auto tpeVars = x.tpeVars;
   std::vector<json> members;
   std::transform(x.members.begin(), x.members.end(), std::back_inserter(members), &named_to_json);
-  return json::array({name, typeArgs, members});
+  return json::array({name, tpeVars, members});
 }
 
 Signature signature_from_json(const json& j) { 
@@ -1354,7 +1354,7 @@ json signature_to_json(const Signature& x) {
 
 Function function_from_json(const json& j) { 
   auto name =  sym_from_json(j.at(0));
-  auto typeArgs = j.at(1).get<std::vector<std::string>>();
+  auto tpeVars = j.at(1).get<std::vector<std::string>>();
   auto receiver = j.at(2).is_null() ? std::nullopt : std::make_optional(named_from_json(j.at(2)));
   std::vector<Named> args;
   auto args_json = j.at(3);
@@ -1366,12 +1366,12 @@ Function function_from_json(const json& j) {
   std::vector<Stmt::Any> body;
   auto body_json = j.at(6);
   std::transform(body_json.begin(), body_json.end(), std::back_inserter(body), &Stmt::any_from_json);
-  return {name, typeArgs, receiver, args, captures, rtn, body};
+  return {name, tpeVars, receiver, args, captures, rtn, body};
 }
 
 json function_to_json(const Function& x) { 
   auto name =  sym_to_json(x.name);
-  auto typeArgs = x.typeArgs;
+  auto tpeVars = x.tpeVars;
   auto receiver = x.receiver ? named_to_json(*x.receiver) : json{};
   std::vector<json> args;
   std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &named_to_json);
@@ -1380,7 +1380,7 @@ json function_to_json(const Function& x) {
   auto rtn =  Type::any_to_json(x.rtn);
   std::vector<json> body;
   std::transform(x.body.begin(), x.body.end(), std::back_inserter(body), &Stmt::any_to_json);
-  return json::array({name, typeArgs, receiver, args, captures, rtn, body});
+  return json::array({name, tpeVars, receiver, args, captures, rtn, body});
 }
 
 Program program_from_json(const json& j) { 
@@ -1405,13 +1405,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "d8147b80dd6883370e5d96a45e1c7b5a") {
-   throw std::runtime_error("Expecting ADT hash to be d8147b80dd6883370e5d96a45e1c7b5a, but was " + hash);
+  if(hash != "f4ec6f290f24b498d24167585484c739") {
+   throw std::runtime_error("Expecting ADT hash to be f4ec6f290f24b498d24167585484c739, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"d8147b80dd6883370e5d96a45e1c7b5a", x});
+  return json::array({"f4ec6f290f24b498d24167585484c739", x});
 }
 } // namespace polyregion::polyast

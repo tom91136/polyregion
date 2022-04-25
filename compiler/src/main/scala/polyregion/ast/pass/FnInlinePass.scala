@@ -36,7 +36,7 @@ object FnInlinePass {
         case x                   => x :: Nil
       }
     } yield s
-    p.Function(f.name, f.typeArgs, f.receiver.map(rename(_)), f.args.map(rename(_)), f.captures, f.rtn, stmts)
+    p.Function(f.name, f.tpeVars, f.receiver.map(rename(_)), f.args.map(rename(_)), f.captures, f.rtn, stmts)
   }
 
   def run(program: p.Program)(log: Log): (p.Program, Log) = {

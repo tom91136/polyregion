@@ -126,11 +126,12 @@ object PolyAstToExpr {
   }
   given StructDefToExpr: ToExpr[p.StructDef] with {
     def apply(x: p.StructDef)(using Quotes) = '{
-      p.StructDef(${ Expr(x.name) }, ${ Expr(x.typeArgs) }, ${ Expr(x.members) })
+      p.StructDef(${ Expr(x.name) }, ${ Expr(x.tpeVars) }, ${ Expr(x.members) })
     }
   }
   given TypeToExpr: ToExpr[p.Type] with {
     def apply(x: p.Type)(using Quotes) = x match {
+      case p.Type.Var(_)             => ???
       case p.Type.Float              => '{ p.Type.Float }
       case p.Type.Double             => '{ p.Type.Double }
       case p.Type.Bool               => '{ p.Type.Bool }
@@ -315,18 +316,10 @@ extension (e: p.Expr) {
 extension (t: p.Type) {
   def map(f: p.Type => p.Type) =
     t match {
-      case p.Type.Float        => f(t)
-      case p.Type.Double       => f(t)
-      case p.Type.Bool         => f(t)
-      case p.Type.Byte         => f(t)
-      case p.Type.Char         => f(t)
-      case p.Type.Short        => f(t)
-      case p.Type.Int          => f(t)
-      case p.Type.Long         => f(t)
-      case p.Type.Unit         => f(t)
-      case p.Type.String       => f(t)
-      case p.Type.Struct(_, _) => f(t)
-      case p.Type.Array(c)     => f(p.Type.Array(f(c)))
+      case p.Type.Array(c)                 => f(p.Type.Array(f(c)))
+      case p.Type.Struct(name, args)       => p.Type.Struct(name, args.map(f))
+      case p.Type.Exec(tpeVars, args, rtn) => p.Type.Exec(tpeVars, args.map(f), f(rtn))
+      case x                               => f(x)
     }
 }
 
