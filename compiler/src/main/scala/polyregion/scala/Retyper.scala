@@ -138,6 +138,8 @@ object Retyper {
   //     q: Quoted
   // )(xs: List[q.TypeRepr] ): Result[List[(Option[p.Term], p.Type)]] = xs.traverse(typer(_))
 
+  def typer0N(using q: Quoted)(repr: List[q.TypeRepr]): Result[List[(Option[p.Term], p.Type)]] = repr.traverse(typer0(_))
+
   def typer0(using q: Quoted)(repr: q.TypeRepr): Result[(Option[p.Term], p.Type)] =
     repr.dealias.widenTermRefByName.simplified match {
       case ref @ q.TypeRef(_, name) if ref.typeSymbol.isAbstractType => (None, p.Type.Var(name)).success
@@ -265,33 +267,33 @@ object Retyper {
       case tpe => (tpe, q.FnDependencies()).pure
     }
 
-  extension (using q: Quoted)(c: q.FnContext) {
+  // extension (using q: Quoted)(c: q.FnContext) {
 
-    def clsSymTyper(clsSym: q.Symbol): Result[(p.Type, q.FnContext)] = Retyper.clsSymTyper0(clsSym).flatMap {
-      case s @ p.Type.Struct(sym, _) =>
-        Retyper
-          .lowerClassType0(clsSym)
-          .map(sdef => (s, c.copy(clss = c.clss + (sym -> sdef))))
+  //   def clsSymTyper(clsSym: q.Symbol): Result[(p.Type, q.FnContext)] = Retyper.clsSymTyper0(clsSym).flatMap {
+  //     case s @ p.Type.Struct(sym, _) =>
+  //       Retyper
+  //         .lowerClassType0(clsSym)
+  //         .map(sdef => (s, c.copy(clss = c.clss + (sym -> sdef))))
 
-      case tpe => (tpe, c).pure
-    }
+  //     case tpe => (tpe, c).pure
+  //   }
 
-    def typerN(xs: List[q.TypeRepr]): Result[(List[(Option[p.Term], p.Type)], q.FnContext)] = xs match {
-      case Nil     => (Nil, c).pure
-      case x :: xs =>
-        // TODO make sure we get the right order back!
-        c.typer(x).flatMap { (v, t, c) =>
-          xs.foldLeftM(((v, t) :: Nil, c)) { case ((ys, c), x) =>
-            c.typer(x).map((v, t, c) => (ys :+ (v, t), c))
-          }
-        }
-    }
+  //   def typerN(xs: List[q.TypeRepr]): Result[(List[(Option[p.Term], p.Type)], q.FnContext)] = xs match {
+  //     case Nil     => (Nil, c).pure
+  //     case x :: xs =>
+  //       // TODO make sure we get the right order back!
+  //       c.typer(x).flatMap { (v, t, c) =>
+  //         xs.foldLeftM(((v, t) :: Nil, c)) { case ((ys, c), x) =>
+  //           c.typer(x).map((v, t, c) => (ys :+ (v, t), c))
+  //         }
+  //       }
+  //   }
 
-    def typer(repr: q.TypeRepr): Result[(Option[p.Term], p.Type, q.FnContext)] =
-      Retyper.typer1(repr).map { case (value, t, deps) =>
-        (value, t, c.copy(clss = c.clss ++ deps.clss)) // TODO use that map and not a full p.FnDependenccies
-      // case (value, t, None)    => (value, t, c)
-      }
+  //   def typer(repr: q.TypeRepr): Result[(Option[p.Term], p.Type, q.FnContext)] =
+  //     Retyper.typer1(repr).map { case (value, t, deps) =>
+  //       (value, t, c.copy(clss = c.clss ++ deps.clss)) // TODO use that map and not a full p.FnDependenccies
+  //     // case (value, t, None)    => (value, t, c)
+  //     }
 
-  }
+  // }
 }

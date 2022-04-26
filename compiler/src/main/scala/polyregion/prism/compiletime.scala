@@ -3,7 +3,6 @@ package polyregion.prism
 import cats.syntax.all.*
 import polyregion.ast.{PolyAst as p, *}
 import polyregion.scala.*
-import polyregion.scala.Retyper.{lowerClassType, typer}
 
 import _root_.scala.annotation.{compileTimeOnly, tailrec}
 import _root_.scala.compiletime.{erasedValue, summonInline}
@@ -30,14 +29,14 @@ object compiletime {
           (_, st) <- Retyper.typer0(s)
           (_, mt) <- Retyper.typer0(m)
           st <- st match {
-            case p.Type.Struct(sym, _)        => sym.success
+            case p.Type.Struct(sym, _) => sym.success
             // case q.ErasedClsTpe(sym, _, _, _) => sym.success
-            case bad                          => s"source class $s is not a class type, got $bad".fail
+            case bad => s"source class $s is not a class type, got $bad".fail
           }
           mt <- mt match {
-            case p.Type.Struct(sym, _)        => sym.success
+            case p.Type.Struct(sym, _) => sym.success
             // case q.ErasedClsTpe(sym, _, _, _) => sym.success
-            case bad                          => s"mirror class $m is not a class type, got $bad".fail
+            case bad => s"mirror class $m is not a class type, got $bad".fail
           }
         } yield mt -> st
       }

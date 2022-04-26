@@ -179,7 +179,7 @@ object Compiler {
         // Map[q.Ref, p.Named | p.Term]
 
         // TODO if we have a reference with an erased closure type, we need to find the
-        // implementation and suspend it to FnContext otherwise we won't find the suspension in mapper
+        // implementation and suspend it to RemapContext otherwise we won't find the suspension in mapper
 
         // we can discard incoming references here safely iff we also never use them in the resulting p.Function
         // capturedNames = typedExternalRefs
@@ -208,11 +208,10 @@ object Compiler {
         //   .toMap
 
         (termValue, c) <- q
-          .FnContext()
-          .inject(scope)
+          .RemapContext(refs = scope)
           .mapTerm(term)
 
-        (_, termTpe, c) <- c.typer(term.tpe)
+        (_, termTpe) <- Retyper.typer0(term.tpe)
 
         _ = println(s"|> ${c.refs} ${c.clss} ${c.defs}")
 
