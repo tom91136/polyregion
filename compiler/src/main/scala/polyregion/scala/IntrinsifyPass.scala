@@ -8,12 +8,16 @@ import scala.annotation.tailrec
 
 object IntrinsifyPass {
 
-  def intrinsify(using q: Quoted)(stmts: List[p.Stmt], dep: q.FnDependencies): (List[p.Stmt], q.FnDependencies) = {
-    val (xs, instanceSigs) = stmts.zipWithIndex.foldMapM(intrinsifyInstanceApply(_, _))
-    val (ys, moduleSigs)   = xs.zipWithIndex.foldMapM(intrinsifyModuleApply(_, _))
-    // println(s"Elim : ${dep.defs.map(_._1)} -  ${(instanceSigs ++ moduleSigs)} ")
-    val eliminated = dep.defs -- (instanceSigs ++ moduleSigs)
-    (ys, dep.copy(defs = eliminated))
+  def intrinsify(using q: Quoted)(stmts: List[p.Stmt], dep: q.Dependencies): (List[p.Stmt], q.Dependencies) = {
+    val (xs, instanceInvokes) = stmts.zipWithIndex.foldMapM(intrinsifyInstanceApply(_, _))
+    val (ys, moduleInvokes)   = xs.zipWithIndex.foldMapM(intrinsifyModuleApply(_, _))
+    // println(s"Elim : ${dep.defs.map(_._1)} -  ${(instanceInvokes ++ moduleInvokes)} ")
+    val intrinsified = instanceInvokes ++ moduleInvokes
+    val eliminated = dep.functions.flatMap { (fn, ivks) =>
+      val xs = ivks.filterNot(intrinsified.contains(_))
+      if (xs.isEmpty) Map() else Map(fn -> xs)
+    }
+    (ys, dep.copy(functions = eliminated))
   }
 
   private final inline val DegreesToRadians = 0.017453292519943295
@@ -59,7 +63,7 @@ object IntrinsifyPass {
     (p.Expr.BinaryLogicIntrinsic(xVal, yVal, kind), xStmts ++ yStmts)
   }
 
-  private def intrinsifyInstanceApply(s: p.Stmt, idx: Int) = s.mapAccExpr[p.Signature] {
+  private def intrinsifyInstanceApply(s: p.Stmt, idx: Int) = s.mapAccExpr[p.Expr.Invoke] {
     case inv @ p.Expr.Invoke(sym, tpeArgs, Some(recv), args, rtn) =>
       (sym.fqn, recv, args) match {
         case (op :: Nil, x, y :: Nil) if x.tpe == p.Type.Bool && y.tpe == p.Type.Bool && rtn == p.Type.Bool =>
@@ -69,7 +73,7 @@ object IntrinsifyPass {
             case "==" => (p.Expr.BinaryLogicIntrinsic(x, y, p.BinaryLogicIntrinsicKind.Eq), Nil)
             case "!=" => (p.Expr.BinaryLogicIntrinsic(x, y, p.BinaryLogicIntrinsicKind.Neq), Nil)
           }
-          (expr, stmts, inv.signature :: Nil)
+          (expr, stmts, inv :: Nil)
 
         case (op :: Nil, x, y :: Nil) if x.tpe.isNumeric && y.tpe.isNumeric && rtn == p.Type.Bool =>
           val (expr, stmts) = op match {
@@ -85,14 +89,15 @@ object IntrinsifyPass {
             case "==" => binaryNumericIntrinsic(x, y, binaryPromote(x.tpe, y.tpe), idx, p.BinaryLogicIntrinsicKind.Eq)
             case "!=" => binaryNumericIntrinsic(x, y, binaryPromote(x.tpe, y.tpe), idx, p.BinaryLogicIntrinsicKind.Neq)
           }
-          (expr, stmts, inv.signature :: Nil)
+          (expr, stmts, inv :: Nil)
         case (op :: Nil, x, y :: Nil) if x.tpe == y.tpe && rtn == p.Type.Bool =>
           val (expr, stmts) = op match {
             case "==" => (p.Expr.BinaryLogicIntrinsic(x, y, p.BinaryLogicIntrinsicKind.Eq), Nil)
             case "!=" => (p.Expr.BinaryLogicIntrinsic(x, y, p.BinaryLogicIntrinsicKind.Neq), Nil)
           }
-          (expr, stmts, inv.signature :: Nil)
-        case ("scala" :: ("Double" | "Float" | "Long" | "Int" | "Short" | "Char" | "Byte") :: op :: Nil, x, Nil) if x.tpe.isNumeric =>
+          (expr, stmts, inv :: Nil)
+        case ("scala" :: ("Double" | "Float" | "Long" | "Int" | "Short" | "Char" | "Byte") :: op :: Nil, x, Nil)
+            if x.tpe.isNumeric =>
           // xxx bool is integral
           val (expr, stmts) = op match {
             case "toDouble" => (p.Expr.Cast(recv, p.Type.Double), Nil)
@@ -132,7 +137,7 @@ object IntrinsifyPass {
             case "unary_-" => unaryNumericIntrinsic(x, idx, p.UnaryIntrinsicKind.Neg)
 
           }
-          (expr, stmts, inv.signature :: Nil)
+          (expr, stmts, inv :: Nil)
 
         case ("scala" :: ("Double" | "Float" | "Long" | "Int" | "Short" | "Char" | "Byte") :: op :: Nil, x, y :: Nil)
             if x.tpe.isNumeric && y.tpe.isNumeric && rtn.isNumeric =>
@@ -152,13 +157,13 @@ object IntrinsifyPass {
             case ">>"  => binaryNumericIntrinsic(x, y, rtn, idx, p.BinaryIntrinsicKind.BSR)
             case ">>>" => binaryNumericIntrinsic(x, y, rtn, idx, p.BinaryIntrinsicKind.BZSR)
           }
-          (expr, stmts, inv.signature :: Nil)
+          (expr, stmts, inv :: Nil)
         case ("apply" :: Nil, (xs @ p.Term.Select(_, p.Named(_, p.Type.Array(_)))), idx :: Nil)
             if idx.tpe.kind == p.TypeKind.Integral =>
-          (p.Expr.Index(xs, idx, rtn), Nil, inv.signature :: Nil)
+          (p.Expr.Index(xs, idx, rtn), Nil, inv :: Nil)
         case ("update" :: Nil, (xs @ p.Term.Select(_, p.Named(_, p.Type.Array(_)))), idx :: x :: Nil)
             if idx.tpe.kind == p.TypeKind.Integral =>
-          (p.Expr.Alias(p.Term.UnitConst), p.Stmt.Update(xs, idx, x) :: Nil, inv.signature :: Nil)
+          (p.Expr.Alias(p.Term.UnitConst), p.Stmt.Update(xs, idx, x) :: Nil, inv :: Nil)
         case (unknownSym, recv, args) =>
           println(s"No instance intrinsic for call: $recv.`${unknownSym.mkString(".")}`(${args
             .mkString(",")}), rtn=${rtn}, argn=${args.size}")
@@ -167,26 +172,26 @@ object IntrinsifyPass {
     case x => (x, Nil, Nil)
   }
 
-  private def intrinsifyModuleApply(s: p.Stmt, idx: Int) = s.mapAccExpr[p.Signature] {
+  private def intrinsifyModuleApply(s: p.Stmt, idx: Int) = s.mapAccExpr[p.Expr.Invoke] {
     case inv @ p.Expr.Invoke(sym, tpeArgs, None, args, rtn) =>
       (sym.fqn, args) match {
 
         case ("scala" :: "Int$" :: "int2double" :: Nil, x :: Nil) if x.tpe == p.Type.Int =>
-          (p.Expr.Cast(x, p.Type.Double), Nil, inv.signature :: Nil)
+          (p.Expr.Cast(x, p.Type.Double), Nil, inv :: Nil)
 
         case ("scala" :: "Short$" :: "short2int" :: Nil, x :: Nil) if x.tpe == p.Type.Short =>
-          (p.Expr.Cast(x, p.Type.Int), Nil, inv.signature :: Nil)
+          (p.Expr.Cast(x, p.Type.Int), Nil, inv :: Nil)
 
         case ("scala" :: "Char$" :: "char2int" :: Nil, x :: Nil) if x.tpe == p.Type.Char =>
-          (p.Expr.Cast(x, p.Type.Int), Nil, inv.signature :: Nil)
+          (p.Expr.Cast(x, p.Type.Int), Nil, inv :: Nil)
 
         case ("scala" :: "Byte$" :: "byte2int" :: Nil, x :: Nil) if x.tpe == p.Type.Byte =>
-          (p.Expr.Cast(x, p.Type.Int), Nil, inv.signature :: Nil)
+          (p.Expr.Cast(x, p.Type.Int), Nil, inv :: Nil)
 
         case (Symbols.ArrayModule :+ "ofDim", x :: Nil) =>
           rtn match {
             case arr: p.Type.Array =>
-              (p.Expr.Alloc(arr, x), Nil, inv.signature :: Nil)
+              (p.Expr.Alloc(arr, x), Nil, inv :: Nil)
             case _ => ???
           }
         case ((Symbols.ScalaMath | Symbols.JavaMath) :+ op, x :: y :: Nil) => // scala.math binary
@@ -199,7 +204,7 @@ object IntrinsifyPass {
             case "atan2" => p.BinaryIntrinsicKind.Atan2
             case "hypot" => p.BinaryIntrinsicKind.Hypot
           }
-          (p.Expr.BinaryIntrinsic(x, y, kind, rtn), Nil, inv.signature :: Nil)
+          (p.Expr.BinaryIntrinsic(x, y, kind, rtn), Nil, inv :: Nil)
         case ((Symbols.ScalaMath | Symbols.JavaMath) :+ op, x :: Nil) => // scala.math unary
           val expr = op match {
             case "toDegrees" =>
@@ -241,7 +246,7 @@ object IntrinsifyPass {
             case "log1p" => p.Expr.UnaryIntrinsic(x, p.UnaryIntrinsicKind.Log1p, rtn)
             case "log10" => p.Expr.UnaryIntrinsic(x, p.UnaryIntrinsicKind.Log10, rtn)
           }
-          (expr, Nil, inv.signature :: Nil)
+          (expr, Nil, inv :: Nil)
         case (unknownSym, args) =>
           println(s"No module intrinsic for: ${unknownSym.mkString(".")}(${args.map(_.repr).mkString(",")}) ")
           (inv, Nil, Nil)

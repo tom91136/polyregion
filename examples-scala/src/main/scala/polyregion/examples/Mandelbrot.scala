@@ -86,7 +86,9 @@ object Mandelbrot {
     (z, i)
   }
 
-  case class ItResult[A, B](c: A, i: B)
+  case class ItResult[A, B](c: B, i: A){
+    def read[C] : A = i
+  }
   case class ItResultFA (c: Complex, i: Int)
 
   def itMandel2(c: Complex, imax: Int, bailout: Int): ItResult[Complex, Int]  = {
@@ -96,7 +98,7 @@ object Mandelbrot {
       z = z * z + c
       i += 1
     }
-    ItResult(z, i)
+    ItResult(i, z)
   }
 
   def mkColour(z: Complex, iter: Int, maxIter: Int): Colour =
@@ -237,10 +239,12 @@ object Mandelbrot {
 
 
 
+
     val a = 1
+
     polyregion.scala.compiletime.offload {
 
-//      val x = 1+1.toDouble
+      val x = 1+1.toDouble
 
 //      B()
 //      c.clsFn()
@@ -254,7 +258,12 @@ object Mandelbrot {
 ////      A.curryA(1)
 //      A.genCurry[Int, Int](1,2)(3)
 
-      new Complex(1,2)
+//      new Complex(1,2)\
+      val s = 1.0f
+      val m = new ItResult[Int, Float](s,2)
+      val out1 = m.read[Int]
+      val out2 = m.read[Float]
+
 //      ItResultFA(Complex(1.0, 1.0), 1)
 //      ItResult(Complex.Zero, 1)
 

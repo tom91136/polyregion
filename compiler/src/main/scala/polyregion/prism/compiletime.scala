@@ -29,12 +29,12 @@ object compiletime {
           (_, st) <- Retyper.typer0(s)
           (_, mt) <- Retyper.typer0(m)
           st <- st match {
-            case p.Type.Struct(sym, _) => sym.success
+            case p.Type.Struct(sym, _, _) => sym.success
             // case q.ErasedClsTpe(sym, _, _, _) => sym.success
             case bad => s"source class $s is not a class type, got $bad".fail
           }
           mt <- mt match {
-            case p.Type.Struct(sym, _) => sym.success
+            case p.Type.Struct(sym, _, _) => sym.success
             // case q.ErasedClsTpe(sym, _, _, _) => sym.success
             case bad => s"mirror class $m is not a class type, got $bad".fail
           }
@@ -102,7 +102,7 @@ object compiletime {
         sourceClassKind: q.ClassKind,
         mirrorMethodSym: q.Symbol,
         expectedStructDef: p.StructDef
-    ): Result[(List[p.Function], q.FnDependencies)] = for {
+    ): Result[(List[p.Function], q.Dependencies)] = for {
 
       log <- Log(s"Mirror for ${sourceMethodSym} -> ${mirrorMethodSym}")
 
@@ -127,8 +127,8 @@ object compiletime {
 
             replaceSyms = (t: p.Type) =>
               t.map {
-                case p.Type.Struct(sym, args) => p.Type.Struct(typeLUT.getOrElse(sym, sym), args)
-                case x                        => x
+                case p.Type.Struct(sym, tpeVars, args) => p.Type.Struct(typeLUT.getOrElse(sym, sym), tpeVars, args)
+                case x                                 => x
               }
 
           } yield (fn
@@ -171,7 +171,7 @@ object compiletime {
         }
       }
       (functions, dependencies) = mirroredMethods.combineAll
-    } yield p.Mirror(p.Sym(sourceSym.fullName), mirrorStruct, functions, dependencies.clss.values.toList)
+    } yield p.Mirror(p.Sym(sourceSym.fullName), mirrorStruct, functions, /*dependencies.clss.values.toList */ Nil)
 
     println(">>>" + m)
     m

@@ -61,7 +61,6 @@ object Remapper {
       // def f(x...) : A = ??? === val f : x... => A = ???
 
       case tree => c.fail(s"Unhandled: $tree\nSymbol:\n${tree.symbol}")
-
     }
 
     def mapTerms(args: List[q.Term]): Result[(List[p.Term], q.RemapContext)] = args match {
@@ -80,33 +79,51 @@ object Remapper {
         receiver: Option[p.Term],
         args: List[p.Term],
         rtnTpe: p.Type
-    ) = (fn.symbol, fn.rhs, receiver) match {
+    ): Result[(p.Term, q.RemapContext)] = (fn.symbol, fn.rhs, receiver) match {
       // We handle synthesis of the primary ctor here: primary ctors have the following invariant:
       //  * `fn.name` == "<init>"
       //  * `fn.rhs` is empty
       //  * `receiver` is not an non-empty select and matches the owning class
       case (sym, None, Some(instance)) if sym.maybeOwner.primaryConstructor == sym && sym.name == "<init>" =>
         // For primary ctors, we synthesise the assignment of ctor args to the corresponding fields
-        val fields = fn.termParamss.flatMap(_.params)
+        val ctorArgs = fn.termParamss.flatMap(_.params)
         for {
-          (fieldTpes) <- typer0N(fields.map(_.tpt.tpe))
-          fieldNames = fields.map(_.name)
-          _ <- if (args.map(_.tpe) != fieldTpes.map(_._2)) "Ctor application type mismatch".fail else ().success
+          ctorArgTpes <- typer0N(ctorArgs.map(_.tpt.tpe)).map(_.map(_._2))
+          fieldNames = ctorArgs.map(_.name) // args in primary ctor are fields
+
+          // Make sure we're requested a struct type here, the class may have generic types so we create a LUT of
+          // type vars to type args so we can resolve the concrete field types later.
+          tpeVarTable <- rtnTpe match {
+            case p.Type.Struct(_, tpeVars, `tpeArgs`) =>
+              if (tpeVars.length != tpeArgs.length) {
+                s"Requested a ctor with different type arg length: vars=$tpeVars, args=${tpeArgs}".fail
+              } else {
+                tpeVars.zip(tpeArgs).toMap.success
+              }
+            case p.Type.Struct(_, _, bad) =>
+              s"Requested a ctor with different type args, ctor=${bad}, requested=${tpeArgs}".fail
+            case bad => s"Requested a ctor with a non-struct type: ${bad.repr}".fail
+          }
+
           instancePath <- instance match {
             case p.Term.Select(xs, x) => (xs :+ x).success
             case _                    => "Ctor invocation on instance must be a Select term".fail
           }
+
           stmts = fieldNames.zip(args).map { (name, rhs) =>
-            p.Stmt.Mut(p.Term.Select(instancePath, p.Named(name, rhs.tpe)), p.Expr.Alias(rhs), copy = false)
+            val appliedTpe = rhs.tpe.map {
+              case p.Type.Var(name) => tpeVarTable(name)
+              case x                => x
+            }
+            p.Stmt.Mut(p.Term.Select(instancePath, p.Named(name, appliedTpe)), p.Expr.Alias(rhs), copy = false)
           }
         } yield (instance, c.::=(stmts*))
       case (sym, _, _) => // Anything else is a normal invoke.
         val ivk: p.Expr.Invoke = p.Expr.Invoke(p.Sym(sym.fullName), tpeArgs, receiver, args, rtnTpe)
         val named              = c.named(rtnTpe)
         val c0 = c
-          .down(fn) ::= p.Stmt.Var(named, Some(ivk))
-          /* .mark(ivk.signature, fn) */
-          
+          .down(fn)
+          .updateDeps(_.witness(fn, ivk)) ::= p.Stmt.Var(named, Some(ivk))
         (p.Term.Select(Nil, named), c0).success
     }
 
@@ -124,22 +141,45 @@ object Remapper {
           case exec: p.Type.Exec => fullyApplyGenExec(exec, tpeArgs)
           case x                 => x
         }
-        // call no-arg functions (i.e. `x.toDouble` or just `def fn = ???; fn` ) directly or pass-through if not no-arg
-        def invoke(sym: q.Symbol, receiver: Option[p.Term], c: q.RemapContext) = sym.tree match {
-          case fn: q.DefDef =>
-            // Assert that the term list matches Exec's nested (recursive) types.
-            // Note that Exec treats both empty args `()` and no-args as `Nil` where as the collected arg lists through
-            // `Apply` will give empty args as `Nil` and not collect no-args at all because no no application took place.
-            val termTpess = termArgss.map(_.map(_.tpe))
-            val execTpess = collectExecArgLists(tpe)
-            (fn.termParamss.isEmpty, termTpess, execTpess) match {
-              case (true, Nil, (Nil :: Nil) | Nil) => ()  // no-ap, no-arg Exec (`Nil::Nil`) or no Exec at all (`Nil`)
-              case (false, ts, es) if ts == es     => ()  // everything else, do the assertion
-              case (ap, ts, es)                    => ??? // TODO raise failure
-            }
-            c.mkInvoke(fn, tpeArgs, receiver, termArgss.flatten, resolveExecRtnTpe(tpe)).map(Some(_))
-          case _ => None.success
+
+        def witnessClassTpe(c: q.RemapContext)(sym: q.Symbol, tpe: p.Type) = (sym.tree, tpe) match {
+          case (cls: q.ClassDef, s @ p.Type.Struct(_, _, _)) => c.updateDeps(_.witness(cls, s)).success
+          case (_, _)                                        => c.success
         }
+
+        // call no-arg functions (i.e. `x.toDouble` or just `def fn = ???; fn` ) directly or pass-through if not no-arg
+        def invokeOrSelect(
+            c: q.RemapContext
+        )(sym: q.Symbol, receiver: Option[p.Term])(select: => Result[p.Term.Select]) = {
+
+          println(s"R0 ${tpe.repr} cls=${sym.maybeOwner.isClassDef}")
+          sym.tree match {
+            case fn: q.DefDef =>
+              // Assert that the term list matches Exec's nested (recursive) types.
+              // Note that Exec treats both empty args `()` and no-args as `Nil` where as the collected arg lists through
+              // `Apply` will give empty args as `Nil` and not collect no-args at all because no no application took place.
+              val termTpess = termArgss.map(_.map(_.tpe))
+              val execTpess = collectExecArgLists(tpe)
+              for {
+                _ <- (fn.termParamss.isEmpty, termTpess, execTpess) match {
+                  case (true, Nil, (Nil :: Nil) | Nil) =>
+                    ().success // no-ap, no-arg Exec (`Nil::Nil`) or no Exec (`Nil`)
+                  case (false, ts, es) if ts == es => ().success // everything else, do the assertion
+                  case (ap, ts, es)                => ???        // TODO raise failure
+                }
+                rtnTpe = resolveExecRtnTpe(tpe)
+                c   <- witnessClassTpe(c)(sym.maybeOwner, rtnTpe)
+                ivk <- c.mkInvoke(fn, tpeArgs, receiver, termArgss.flatten, rtnTpe)
+              } yield ivk
+            case _ =>
+              println(s" $select")
+              for {
+                s <- select
+                c <- witnessClassTpe(c)(sym.maybeOwner, s.tpe)
+              } yield (s -> c)
+          }
+        }
+
         ref match {
           case ident @ q.Ident(s) => // this is the root of q.Select, it can appear at top-level as well
             // We've encountered a case where the ident's name is different from the TermRef's name.
@@ -154,24 +194,32 @@ object Remapper {
             // In any other case, we're probably referencing a local ValDef that appeared before before this.
             if (ident.symbol.maybeOwner.isClassDef) {
               for {
-                (tpe) <- clsSymTyper0(ident.symbol.owner)
+                tpe <- clsSymTyper0(ident.symbol.owner) //TODO what about generics???
                 cls = p.Named("this", tpe)
-                invoke <- invoke(ident.symbol, Some(p.Term.Select(Nil, cls)), c)
-              } yield invoke.getOrElse((p.Term.Select(cls :: Nil, local), c))
-            } else invoke(ident.symbol, None, c).map(_.getOrElse((p.Term.Select(Nil, local), c)))
+                (invoke, c) <- invokeOrSelect(c)(ident.symbol, Some(p.Term.Select(Nil, cls)))(
+                  p.Term.Select(cls :: Nil, local).success
+                )
+              } yield (invoke, c)
+            } else invokeOrSelect(c)(ident.symbol, None)(p.Term.Select(Nil, local).success)
           case select @ q.Select(qualifierTerm, name) =>
             c.mapTerm(qualifierTerm).flatMap {
               case (recv @ p.Term.Select(xs, x), c) => // fuse with previous select if we got one
-                invoke(select.symbol, Some(recv), c).map(_.getOrElse((p.Term.Select(xs :+ x, p.Named(name, tpe)), c)))
+                invokeOrSelect(c)(select.symbol, Some(recv))(p.Term.Select(xs :+ x, p.Named(name, tpe)).success)
               case (term, c) => // or simply return whatever it's referring to
                 // `$qualifierTerm.$name` becomes `$term.${select.symbol}()` so we don't need the `$name` here
-                invoke(select.symbol, Some(term), c).flatMap {
-                  case Some(x) => x.success
-                  case None =>
-                    "illegal selection of a non DefDef symbol from a primitive term (i.e `{ 1.$name }` )".fail
-                }
+                invokeOrSelect(c)(select.symbol, Some(term))(
+                  "illegal selection of a non DefDef symbol from a primitive term (i.e `{ 1.$name }` )".fail
+                )
             }
         }
+    }
+
+    def witnessTpe(tpe: q.TypeRepr) = (tpe.classSymbol) match {
+      case Some(clsSym) if !clsSym.isNoSymbol =>
+        println(s" D=${clsSym.tree}")
+      // c.updateDeps(_.witness())
+      case bad =>
+        println(s" D=${bad}")
     }
 
     def mapTerm(

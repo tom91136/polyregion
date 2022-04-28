@@ -42,11 +42,11 @@ object PolyAst {
     case String extends Type(TypeKind.Ref)
 
     // specialisations
-    case Struct(name: Sym, args: List[Type]) extends Type(TypeKind.Ref)
-    case Array(component: Type)              extends Type(TypeKind.Ref)
+    case Struct(name: Sym, tpeVars: List[String], args: List[Type]) extends Type(TypeKind.Ref)
+    case Array(component: Type)                                     extends Type(TypeKind.Ref)
 
     //
-    case Var(name: String)                                         extends Type(TypeKind.None)
+    case Var(name: String)                                        extends Type(TypeKind.None)
     case Exec(tpeVars: List[String], args: List[Type], rtn: Type) extends Type(TypeKind.None)
   }
 
@@ -102,7 +102,7 @@ object PolyAst {
 
     case Cast(from: Term, as: Type) extends Expr(as)
     case Alias(ref: Term)           extends Expr(ref.tpe)
-    case Invoke(name: Sym, typeArgs: List[Type], receiver: Option[Term], args: List[Term], rtn: Type) extends Expr(rtn)
+    case Invoke(name: Sym, tpeArgs: List[Type], receiver: Option[Term], args: List[Term], rtn: Type) extends Expr(rtn)
     case Index(lhs: Term.Select, idx: Term, component: Type)                        extends Expr(component)
     case Alloc(witness: Type.Array, size: Term)                                     extends Expr(witness)
     case Suspend(args: List[Named], stmts: List[Stmt], rtn: Type, shape: Type.Exec) extends Expr(shape)
@@ -129,11 +129,11 @@ object PolyAst {
       dependencies: List[StructDef] //
   ) derives MsgPack.Codec
 
-  case class Signature(name: Sym, receiver: Option[Type], args: List[Type], rtn: Type)
+  case class Signature(name: Sym, tpeArgs: List[Type], receiver: Option[Type], args: List[Type], rtn: Type)
 
   case class Function(         //
       name: Sym,               //
-      tpeVars: List[String],  //
+      tpeVars: List[String],   //
       receiver: Option[Named], //
       args: List[Named],       //
       captures: List[Named],   //

@@ -41,70 +41,79 @@ object Compiler {
         case (q.ClassKind.Class, s: p.Type.Struct)  => Some(s).success
         case (kind, x)                              => s"Illegal receiver (concrete kind=${kind}): $x".fail
       }
-    } yield p.Signature(p.Sym(receiver.fold(f.symbol.fullName)(_ => f.symbol.name)), receiver, fnArgsTpes, fnRtnTpe)
+      argTpes = receiver.map(s => s.tpeVars.map(p.Type.Var(_))).getOrElse(Nil) ::: fnArgsTpes
+    } yield p.Signature(p.Sym(f.symbol.fullName), ???, receiver, argTpes, fnRtnTpe)
   }
 
   def compileAllDependencies(using q: Quoted)(
-      deps: q.FnDependencies,
+      deps: q.Dependencies,
       fnLut: Map[p.Signature, p.Function] = Map.empty,
       clsLut: Map[p.Sym, p.StructDef] = Map.empty
-  )(log: Log): Result[(List[p.Function], q.FnDependencies, Log)] = (deps.defs, List.empty[p.Function], deps, log)
+  )(log: Log): Result[(List[p.Function], q.Dependencies, Log)] = (deps.functions, List.empty[p.Function], deps, log)
     .iterateWhileM { case (remaining, fnAcc, depsAcc, log) =>
       remaining.toList
-        .foldLeftM((fnAcc, depsAcc, log)) { case ((xs, deps, log), (defSig, defDef)) =>
-          fnLut.get(defSig) match {
-            case Some(x) => (x :: xs, deps, log.info_(s"Dependent method replaced: ${defSig}")).success
-            case None    => compileFn(defDef)(log).map { case ((x, deps1), log) => (x :: xs, deps |+| deps1, log) }
-          }
+        .foldLeftM((fnAcc, depsAcc, log)) { case ((xs, deps, log), (defDef, invoke)) =>
+          // specialise for invoke
+          // fnLut.get(defSig) match {
+          //   case Some(x) => (x :: xs, deps, log.info_(s"Dependent method replaced: ${defSig}")).success
+          //   case None    => compileFn(defDef)(log).map { case ((x, deps1), log) => (x :: xs, deps |+| deps1, log) }
+          // }
+
+          compileFn(defDef)(log).map { case ((x, deps1), log) => (x :: xs, deps |+| deps1, log) }
         }
         .map((xs, deps, log) =>
-          (deps.defs, xs, deps.copy(defs = Map.empty, clss = deps.clss.map((k, v) => k -> clsLut.getOrElse(k, v))), log)
+          (
+            deps.functions,
+            xs,
+            deps.copy(functions = Map.empty /*clss = deps.classes.map((k, v) => k -> clsLut.getOrElse(k, v))*/ ),
+            log
+          )
         )
     }(_._1.nonEmpty)
     .map(_.drop(1))
 
-  def compileFn(using q: Quoted)(f: q.DefDef)(log: Log): Result[((p.Function, q.FnDependencies), Log)] =
+  def compileFn(using q: Quoted)(f: q.DefDef)(log: Log): Result[((p.Function, q.Dependencies), Log)] =
     log.mark(s"Compile DefDef: ${f.name}") { log =>
       for {
 
         log <- log.info(s"Body", f.show(using q.Printer.TreeAnsiCode))
-        _ = println(s"Compile DefDef: ${f.name}")
 
         rhs <- f.rhs.failIfEmpty(s"Function does not contain an implementation: (in ${f.symbol.maybeOwner}) ${f.show}")
 
-        // first we run the typer on the return type to see if we can just return a term based on the type
-        (fnRtnValue, fnRtnTpe, fnRtnDeps) <- Retyper.typer1(f.returnTpt.tpe)
+        // First we run the typer on the return type to see if we can just return a term based on the type.
+        (fnRtnTerm, fnRtnTpe) <- Retyper.typer0(f.returnTpt.tpe)
 
-        // we also run the typer on all the def's arguments
+        // We also run the typer on all the def's arguments.
         // TODO handle default value of args (ValDef.rhs)
-        (fnArgs, fnArgDeps) <- f.paramss.flatMap(_.params).foldMapM {
+        fnArgs <- f.termParamss.foldMapM {
           case arg: q.ValDef => // all args should come in the form of a ValDef
-            Retyper.typer1(arg.tpt.tpe).flatMap { case (_, t, c) =>
-              ((arg, p.Named(arg.name, t)) :: Nil, c).success
+            Retyper.typer0(arg.tpt.tpe).flatMap { case (_, t) =>
+              ((arg, p.Named(arg.name, t)) :: Nil).success
             }
-          case bad =>
-            println(bad)
-            (Nil, q.FnDependencies()).success
+          case bad => ???
         }
-        // and work out whether this def is part a class instance or free-standing
-        // class defs will have a `this` receiver arg with the appropriate type
-        (owningClass, fnReceiverDeps) <- Retyper.clsSymTyper1(f.symbol.owner)
-        log                           <- log.info(s"Method owner: $owningClass")
-        receiver <- owningClass match {
-          case s: p.Type.Struct => Some(p.Named("this", s)).success
-          case x                => s"Illegal receiver: ${x}".fail
+
+        fnTypeVars = f.paramss.flatMap(_.params).collect { case q.TypeDef(name, _) => name }
+
+        // And then work out whether this def is part of a class/object instance or free-standing (e.g. local methods),
+        // class defs will have a `this` receiver arg with the appropriate type.
+        owningClass <- Retyper.clsSymTyper0(f.symbol.owner)
+        log         <- log.info(s"Method owner: $owningClass")
+        (receiver, receiverTpeVars) <- owningClass match {
+          case t @ p.Type.Struct(_, tpeVars, _) => (Some(p.Named("this", t)), tpeVars).success
+          case x                                => s"Illegal receiver: ${x}".fail
         }
 
         log <- log.info("DefDef arguments", fnArgs.map((a, n) => s"${a}(symbol=${a.symbol}) ~> $n")*)
 
-        // finally, we compile the def body like a closure or just return the term if we have one
-        ((rhsStmts, rhsDeps, rhsCaptures), log) <- fnRtnValue match {
-          case Some(t) => ((p.Stmt.Return(p.Expr.Alias(t)) :: Nil, q.FnDependencies(), Nil), log).success
+        // Finally, we compile the def body like a closure or just return the term if we have one.
+        ((rhsStmts, rhsDeps, rhsCaptures), log) <- fnRtnTerm match {
+          case Some(t) => ((p.Stmt.Return(p.Expr.Alias(t)) :: Nil, q.Dependencies(), Nil), log).success
           case None =>
             for {
               // when run the outliner first and then replace any reference to function args or `this`
               // whatever is left will be module references which needs to be added to FnDep's var table
-              ((captures, captureDeps), log) <- RefOutliner.outline(rhs)(log)
+              (captures, log) <- RefOutliner.outline(rhs)(log)
               (capturedNames, captureScope) <- captures
                 .foldMapM[Result, (List[(p.Named, q.Ref)], List[(q.Ref, p.Term)])] {
                   case (root, ref, value, tpe)
@@ -134,25 +143,15 @@ object Compiler {
 
               // we pass an empty var table because
               ((rhsStmts, rhsTpe, rhsDeps), log) <- compileTerm(rhs, captureScope.toMap)(log)
-              _ = println(log.render().mkString("\n"))
 
               log <- log.info("External captures", capturedNames.map((n, r) => s"$r(symbol=${r.symbol}) ~> ${n.repr}")*)
 
-            } yield (
-              (
-                rhsStmts,
-                captureDeps |+| rhsDeps |+| q.FnDependencies(vars = capturedNames.toMap),
-                capturedNames
-              ),
-              log
-            )
+            } yield ((rhsStmts, rhsDeps, capturedNames), log)
         }
 
-        fnDeps <- (fnRtnDeps |+| fnArgDeps |+| fnReceiverDeps |+| rhsDeps).success
-
         compiledFn = p.Function(
-          name = p.Sym(receiver.fold(f.symbol.fullName)(_ => f.symbol.name)),
-          tpeVars = Nil,
+          name = p.Sym(f.symbol.fullName),
+          tpeVars = receiverTpeVars ::: fnTypeVars,
           receiver = receiver,
           args = fnArgs.map(_._2),
           captures = rhsCaptures.map(_._1),
@@ -161,69 +160,25 @@ object Compiler {
         )
 
         log <- log.info("Result", compiledFn.repr)
+        _ = println(log.render().mkString("\n"))
 
-      } yield ((compiledFn, fnDeps), log)
+      } yield ((compiledFn, rhsDeps), log)
     }
 
-  def compileTerm(using q: Quoted)(term: q.Term, scope: Map[q.Ref, p.Term])(
-      log: Log
-  ): Result[((List[p.Stmt], p.Type, q.FnDependencies), Log)] =
+  def compileTerm(using q: Quoted)(term: q.Term, scope: Map[q.Ref, p.Term])(log: Log) //
+      : Result[((List[p.Stmt], p.Type, q.Dependencies), Log)] =
     log.mark(s"Compile term: ${term.pos.sourceFile.name}:${term.pos.startLine}~${term.pos.endLine}") { log =>
       for {
-
-        log <- log.info("Body (AST)", pprint.tokenize(term, indent = 1, showFieldNames = true).mkString)
-        log <- log.info("Body (Ascii)", term.show(using q.Printer.TreeAnsiCode))
-
-        // first, outline what variables this term captures
-        // ((typedExternalRefs, c), log) <- RefOutliner.outline(term)(log)
-        // Map[q.Ref, p.Named | p.Term]
-
-        // TODO if we have a reference with an erased closure type, we need to find the
-        // implementation and suspend it to RemapContext otherwise we won't find the suspension in mapper
-
-        // we can discard incoming references here safely iff we also never use them in the resulting p.Function
-        // capturedNames = typedExternalRefs
-        //   .collect {
-        //     case (root, ref, q.Reference(name: String, tpe: p.Type)) if tpe != p.Type.Unit =>
-        //       // p.Named | p.Term
-
-        //       (p.Named(name, tpe), (root, ref))
-        //     case (root, ref, q.Reference(name: p.Term, tpe: p.Type)) => ??? // TODO handle default value
-        //   }
-        // // .distinctBy(_._2.symbol.pos)
-
-        // xx = typedExternalRefs
-        //   .map[(q.Ref, p.Named | p.Term)] { (root, ref, value, tpe) =>
-        //     (value, tpe) match {
-        //       case (Some(x), _) => ref -> x
-        //       case (None, t: p.Type) =>
-        //         val name = ref match {
-        //           case s @ q.Select(_, name) => s"_ref_${name}_${s.pos.startLine}_"
-        //           case i @ q.Ident(_)        => i.name
-        //         }
-        //         ref -> p.Named(name, t)
-        //       case (None, bad) => ???
-        //     }
-        //   }
-        //   .toMap
-
-        (termValue, c) <- q
-          .RemapContext(refs = scope)
-          .mapTerm(term)
-
-        (_, termTpe) <- Retyper.typer0(term.tpe)
-
-        _ = println(s"|> ${c.refs} ${c.clss} ${c.defs}")
-
+        log            <- log.info("Body (AST)", pprint.tokenize(term, indent = 1, showFieldNames = true).mkString)
+        log            <- log.info("Body (Ascii)", term.show(using q.Printer.TreeAnsiCode))
+        (termValue, c) <- q.RemapContext(refs = scope).mapTerm(term)
+        (_, termTpe)   <- Retyper.typer0(term.tpe)
         _ <-
           if (termTpe != termValue.tpe) {
             s"Term type ($termTpe) is not the same as term value type (${termValue.tpe}), term was $termValue".fail
           } else ().success
-
-        // (captures, names) = capturedNames.toList.map((n, r) => (r -> n.tpe, n)).unzip
-
-        statements = c.stmts :+ p.Stmt.Return(p.Expr.Alias(termValue))
-
+        statements                        = c.stmts :+ p.Stmt.Return(p.Expr.Alias(termValue))
+        _                                 = println(s"Deps1 = ${c.deps.classes.values} ${c.deps.functions.values}")
         (optimisedStmts, optimisedFnDeps) = runLocalOptPass(statements, c.deps)
       } yield ((optimisedStmts, termTpe, optimisedFnDeps), log)
     }
@@ -237,7 +192,7 @@ object Compiler {
 
     // outline here
 
-    ((captures, captureDeps), log) <- RefOutliner.outline(term)(log)
+    (captures, log) <- RefOutliner.outline(term)(log)
     (capturedNames, captureScope) = captures.foldMap[(List[(p.Named, q.Ref)], List[(q.Ref, p.Term)])] {
       (root, ref, value, tpe) =>
         (value, tpe) match {
@@ -254,20 +209,19 @@ object Compiler {
 
     ((exprStmts, exprTpe, exprDeps), log) <- compileTerm(term, captureScope.toMap)(log)
 
-    log      <- log.info("Expr Stmts", exprStmts.map(_.repr).mkString("\n"))
-    log      <- log.info("External captures", capturedNames.map((n, r) => s"$r(symbol=${r.symbol}) ~> ${n.repr}")*)
-    exprDeps <- (exprDeps |+| captureDeps |+| q.FnDependencies(vars = capturedNames.toMap)).success
+    log <- log.info("Expr Stmts", exprStmts.map(_.repr).mkString("\n"))
+    log <- log.info("External captures", capturedNames.map((n, r) => s"$r(symbol=${r.symbol}) ~> ${n.repr}")*)
 
     // we got a compiled term, compile all dependencies as well
-    log <- log.info(s"Expr dependent methods", exprDeps.defs.map(_.toString).toList*)
-    log <- log.info(s"Expr dependent structs", exprDeps.clss.map(_.toString).toList*)
+    log <- log.info(s"Expr dependent methods", exprDeps.functions.values.map(_.toString).toList*)
+    log <- log.info(s"Expr dependent structs", exprDeps.classes.values.map(_.toString).toList*)
 
     _ = println(log.render().mkString("\n"))
 
     // log                 <- log.info(s"Expr dependent vars   ", exprDeps.vars.map(_.toString).toList*)
     (depFns, deps, log) <- compileAllDependencies(exprDeps, StdLib.Functions, StdLib.StructDefs)(log)
-    log                 <- log.info(s"Expr+Deps Dependent methods", deps.defs.map(_.toString).toList*)
-    log                 <- log.info(s"Expr+Deps Dependent structs", deps.clss.map(_.toString).toList*)
+    log                 <- log.info(s"Expr+Deps Dependent methods", deps.functions.values.map(_.toString).toList*)
+    log                 <- log.info(s"Expr+Deps Dependent structs", deps.classes.values.map(_.toString).toList*)
 
     // sort the captures so that the order is stable for codegen
     // captures = deps.vars.toList.sortBy(_._1.symbol)
@@ -283,7 +237,11 @@ object Compiler {
       rtn = exprTpe,
       body = exprStmts
     )
-    unoptimisedProgram = p.Program(exprFn, depFns, deps.clss.values.toList)
+    capturedNameTable = capturedNames.toMap
+
+    sdefs <- exprDeps.classes.toList.traverse((clsDef, aps) => structDef0(clsDef.symbol))
+
+    unoptimisedProgram = p.Program(exprFn, depFns, sdefs)
     log <- log.info(s"Program compiled, dependencies: ${unoptimisedProgram.functions.size}")
     log <- log.info(s"Program compiled, structures", unoptimisedProgram.defs.map(_.repr)*)
 
@@ -321,6 +279,6 @@ object Compiler {
 
     _ = println(log.render().mkString("\n"))
 
-  } yield (optimisedProgram.entry.captures.map(n => n -> deps.vars(n)), optimisedProgram, log)
+  } yield (optimisedProgram.entry.captures.map(n => n -> capturedNameTable(n)), optimisedProgram, log)
 
 }

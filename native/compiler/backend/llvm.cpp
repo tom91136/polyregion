@@ -188,7 +188,7 @@ llvm::Value *LLVMAstTransformer::mkTermVal(const Term::Any &ref) {
 
 llvm::Function *LLVMAstTransformer::mkExternalFn(llvm::Function *parent, const Type::Any &rtn, const std::string &name,
                                                  const std::vector<Type::Any> &args) {
-  const Signature s(Sym({name}), {}, args, rtn);
+  const Signature s(Sym({name}),{} ,{}, args, rtn);
   if (functions.find(s) == functions.end()) {
     auto llvmArgs = map_vec<Type::Any, llvm::Type *>(args, [&](auto t) { return mkTpe(t); });
     auto ft = llvm::FunctionType::get(mkTpe(rtn), llvmArgs, false);

@@ -41,14 +41,28 @@ object VerifyPass {
               (rest :+ last)
                 .foldLeft((c !! (local, t.repr), local.tpe)) { case ((acc, tpe), n) =>
                   val c0 = tpe match {
-                    case p.Type.Struct(name, args) =>
+                    case s @ p.Type.Struct(name, tpeVars, args) =>
                       sdefLUT.get(name) match {
-                        case None => acc ~ s"Unknown struct type ${name} in `${t.repr}`, known structs: \n${sdefLUT.map(_._2).map(_.repr).mkString("\n")}"
+                        case None =>
+                          acc ~ s"Unknown struct type ${name} in `${t.repr}`, known structs: \n${sdefLUT.map(_._2).map(_.repr).mkString("\n")}"
                         case Some(sdef) =>
-                          sdef.members.filter(_ == n) match {
-                            case _ :: Nil => acc
-                            case Nil => acc ~ s"Struct type ${sdef.repr} does not contain member ${n} in `${t.repr}`"
-                            case _   => acc ~ s"Struct type ${sdef.repr} contains multiple members of $n in `${t.repr}`"
+                          if (sdef.tpeVars != tpeVars) {
+                            acc ~ s"Struct def ${sdef.repr} and struct type ${s.repr} has different type variables"
+                          } else {
+
+                            val apTable = tpeVars.zip(args).toMap
+
+
+                            println(apTable.toString + " " + sdef.repr + " " + s.repr) 
+
+                            sdef.members.map(x =>  x.mapType{
+                              case p.Type.Var(name) => apTable(name)
+                              case x => x
+                            } ).filter(_ == n) match {
+                              case _ :: Nil => acc
+                              case Nil => acc ~ s"Struct type ${sdef.repr} does not contain member ${n} in `${t.repr}`"
+                              case _ => acc ~ s"Struct type ${sdef.repr} contains multiple members of $n in `${t.repr}`"
+                            }
                           }
                       }
                     case illegal => acc ~ s"Cannot select member ${n} from a non-struct type $illegal in `${t.repr}`"

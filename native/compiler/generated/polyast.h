@@ -342,8 +342,9 @@ struct EXPORT String : Type::Base {
 
 struct EXPORT Struct : Type::Base {
   Sym name;
+  std::vector<std::string> tpeVars;
   std::vector<Type::Any> args;
-  Struct(Sym name, std::vector<Type::Any> args) noexcept : Type::Base(TypeKind::Ref()), name(std::move(name)), args(std::move(args)) {}
+  Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args) noexcept : Type::Base(TypeKind::Ref()), name(std::move(name)), tpeVars(std::move(tpeVars)), args(std::move(args)) {}
   EXPORT operator Any() const { return std::make_shared<Struct>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Struct &);
   EXPORT friend bool operator==(const Type::Struct &, const Type::Struct &);
@@ -941,11 +942,11 @@ struct EXPORT Alias : Expr::Base {
 
 struct EXPORT Invoke : Expr::Base {
   Sym name;
-  std::vector<Type::Any> typeArgs;
+  std::vector<Type::Any> tpeArgs;
   std::optional<Term::Any> receiver;
   std::vector<Term::Any> args;
   Type::Any rtn;
-  Invoke(Sym name, std::vector<Type::Any> typeArgs, std::optional<Term::Any> receiver, std::vector<Term::Any> args, Type::Any rtn) noexcept : Expr::Base(rtn), name(std::move(name)), typeArgs(std::move(typeArgs)), receiver(std::move(receiver)), args(std::move(args)), rtn(std::move(rtn)) {}
+  Invoke(Sym name, std::vector<Type::Any> tpeArgs, std::optional<Term::Any> receiver, std::vector<Term::Any> args, Type::Any rtn) noexcept : Expr::Base(rtn), name(std::move(name)), tpeArgs(std::move(tpeArgs)), receiver(std::move(receiver)), args(std::move(args)), rtn(std::move(rtn)) {}
   EXPORT operator Any() const { return std::make_shared<Invoke>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Invoke &);
   EXPORT friend bool operator==(const Expr::Invoke &, const Expr::Invoke &);
@@ -1082,10 +1083,11 @@ struct EXPORT StructDef {
 
 struct EXPORT Signature {
   Sym name;
+  std::vector<Type::Any> tpeArgs;
   std::optional<Type::Any> receiver;
   std::vector<Type::Any> args;
   Type::Any rtn;
-  Signature(Sym name, std::optional<Type::Any> receiver, std::vector<Type::Any> args, Type::Any rtn) noexcept : name(std::move(name)), receiver(std::move(receiver)), args(std::move(args)), rtn(std::move(rtn)) {}
+  Signature(Sym name, std::vector<Type::Any> tpeArgs, std::optional<Type::Any> receiver, std::vector<Type::Any> args, Type::Any rtn) noexcept : name(std::move(name)), tpeArgs(std::move(tpeArgs)), receiver(std::move(receiver)), args(std::move(args)), rtn(std::move(rtn)) {}
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Signature &);
   EXPORT friend bool operator==(const Signature &, const Signature &);
 };

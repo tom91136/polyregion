@@ -42,13 +42,15 @@ object FnInlinePass {
   def run(program: p.Program)(log: Log): (p.Program, Log) = {
     val lut = program.functions.map(f => f.signature -> f).toMap
     val f = doUntilNotEq(program.entry) { f =>
+      println(s"-> LUT=${lut.keys.toList}")
 
       val (stmts, captures) = f.body.foldMap { x =>
         x.mapAccExpr {
           case ivk @ p.Expr.Invoke(name, tpeArgs, recv, args, tpe) =>
-            val sig = p.Signature(name, recv.map(_.tpe), args.map(_.tpe), tpe)
+            val sig = p.Signature(name, tpeArgs, recv.map(_.tpe), args.map(_.tpe), tpe)
             lut.get(sig) match {
               case None =>
+                println(s"-> Keep ${sig}")
                 (ivk, Nil, Nil) // can't find fn, keep it for now
               case Some(f) =>
                 val renamed = renameAll(f)
