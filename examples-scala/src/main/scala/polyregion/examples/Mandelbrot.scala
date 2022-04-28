@@ -86,12 +86,12 @@ object Mandelbrot {
     (z, i)
   }
 
-  case class ItResult[A, B](c: B, i: A){
-    def read[C] : A = i
+  case class ItResult[A, B](c: B, i: A) {
+    def read[C]: A = i
   }
-  case class ItResultFA (c: Complex, i: Int)
+  case class ItResultFA(c: Complex, i: Int)
 
-  def itMandel2(c: Complex, imax: Int, bailout: Int): ItResult[Complex, Int]  = {
+  def itMandel2(c: Complex, imax: Int, bailout: Int): ItResult[Complex, Int] = {
     var z = Complex.Zero
     var i = 0
     while (z.abs <= bailout && i < imax) {
@@ -142,48 +142,43 @@ object Mandelbrot {
 
     val image = Buffer.ofZeroed[Colour](width * height)
 
+    object A {
+      final val Const: Int                      = ???
+      def getter: Int                           = ???
+      def genGetter[GenTpe]: GenTpe             = ???
+      def genGetter2[GenTpe1, GenTpe2]: GenTpe1 = ???
 
-
-    object A{
-      final val Const : Int = ???
-      def getter : Int = ???
-      def genGetter[GenTpe] : GenTpe = ???
-      def genGetter2[GenTpe1, GenTpe2] : GenTpe1 = ???
-
-      def arg0() : Unit= ???
-      def arg1(i: Int) : Unit= ???
-      def gen[A](i: Int) :A = ???
-      def genImplicit[A :ClassTag] :A = ???
-      def curry(a: Int)(b: Int) : Unit= ???
-      def genCurry[A, B](a: Int, b: B)(c: B): Unit = ???
-      def curryA(a: Int) : Int => String => Unit = ???
-      def curryFn() : (a: Int, b: Int) => () => Unit = ???
-      val f : (Int, Int) => Unit = ???
+      def arg0(): Unit                              = ???
+      def arg1(i: Int): Unit                        = ???
+      def gen[A](i: Int): A                         = ???
+      def genImplicit[A: ClassTag]: A               = ???
+      def curry(a: Int)(b: Int): Unit               = ???
+      def genCurry[A, B](a: Int, b: B)(c: B): Unit  = ???
+      def curryA(a: Int): Int => String => Unit     = ???
+      def curryFn(): (a: Int, b: Int) => () => Unit = ???
+      val f: (Int, Int) => Unit                     = ???
     }
 
     object B {
-      def apply() : Unit= ???
+      def apply(): Unit = ???
     }
 
-    class C{
-      final val Field : Int = ???
+    class C {
+      final val Field: Int = ???
 
-      def clsFn() : Unit = ???
+      def clsFn(): Unit = ???
     }
 
+    def localFn0: Unit  = ???
+    def localFn(): Unit = ???
 
-    def localFn0 : Unit = ???
-    def localFn() : Unit = ???
-
-    val  localF : () => Unit = ???
-
+    val localF: () => Unit = ???
 
     // ap @ Apply(fun : q.Term, args : q.Terms)
     //
 
-    val c = new C
-    val f1 : (Int, Int) => Unit = ???
-
+    val c                      = new C
+    val f1: (Int, Int) => Unit = ???
 
     // Exec(A, Nil, Var(V))
 
@@ -229,22 +224,18 @@ object Mandelbrot {
 //
 //    }
 
-    object Foo{
-      var m : Int =1
+    object Foo {
+      var m: Int = 1
     }
 
-    def takeIt(foo : Foo.type): Unit = {
-      foo.m +=1
-    }
-
-
-
+    def takeIt(foo: Foo.type): Unit =
+      foo.m += 1
 
     val a = 1
 
     polyregion.scala.compiletime.offload {
 
-      val x = 1+1.toDouble
+      val x = 1 + 1.toDouble
 
 //      B()
 //      c.clsFn()
@@ -259,10 +250,12 @@ object Mandelbrot {
 //      A.genCurry[Int, Int](1,2)(3)
 
 //      new Complex(1,2)\
-      val s = 1.0f
-      val m = new ItResult[Int, Float](s,2)
+      val s    = 1.0f
+      val m    = new ItResult[Int, Float](s, 2)
       val out1 = m.read[Int]
       val out2 = m.read[Float]
+
+      val m2 = new ItResult[Float, Int](2, 1.0f)
 
 //      ItResultFA(Complex(1.0, 1.0), 1)
 //      ItResult(Complex.Zero, 1)

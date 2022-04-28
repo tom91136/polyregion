@@ -317,13 +317,13 @@ extension (e: p.Expr) {
 }
 
 extension (t: p.Type) {
-  def map(f: p.Type => p.Type) =
-    t match {
-      case p.Type.Array(c)                    => f(p.Type.Array(f(c)))
-      case p.Type.Struct(name, tpeVars, args) => p.Type.Struct(name, tpeVars, args.map(f))
-      case p.Type.Exec(tpeVars, args, rtn)    => p.Type.Exec(tpeVars, args.map(f), f(rtn))
-      case x                                  => f(x)
-    }
+  def map(f: p.Type => p.Type) = t match {
+    case p.Type.Array(c)                    => f(p.Type.Array(f(c)))
+    case p.Type.Struct(name, tpeVars, args) => p.Type.Struct(name, tpeVars, args.map(f))
+    case p.Type.Exec(tpeVars, args, rtn)    => p.Type.Exec(tpeVars, args.map(f), f(rtn))
+    case x                                  => f(x)
+  }
+
 }
 
 extension (e: p.Stmt) {
