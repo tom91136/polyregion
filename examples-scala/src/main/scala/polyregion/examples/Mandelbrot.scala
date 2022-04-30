@@ -130,6 +130,10 @@ object Mandelbrot {
   // given NativeStruct[Complex] = polyregion.compiletime.nativeStructOf
   // given NativeStruct[ItResult] = polyregion.compiletime.nativeStructOf
 
+  object FooProper{
+    def bar = 1+1
+  }
+
   def run(buffer: Array[Array[Colour]], width: Int, height: Int, poiX: Double, poiY: Double, scale: Double): Unit = {
     val maxIter      = 500
     val zoom         = 1d / scale
@@ -224,6 +228,11 @@ object Mandelbrot {
 //
 //    }
 
+    polyregion.scala.compiletime.showExpr {
+      math.max(1, 2)
+      Math.max(1, 2)
+    }
+
     object Foo {
       var m: Int = 1
     }
@@ -235,29 +244,31 @@ object Mandelbrot {
 
     polyregion.scala.compiletime.offload {
 
-      val u = math.max(1,2)
+      FooProper.bar
+      val u  = math.max(1, 2)
+      val u2 = Math.max(1, 2)
 
-      val x = 1 + 1.toDouble
+//       val x = 1 + 1.toDouble
 
-//      B()
-//      c.clsFn()
-//      A.getter
-//      A.gen[Int](2)
-//      A.genGetter2[Int, Short]
-//      localFn0
-//      localFn()
-////      A.gen[Int](2)
-//
-////      A.curryA(1)
-//      A.genCurry[Int, Int](1,2)(3)
+// //      B()
+// //      c.clsFn()
+// //      A.getter
+// //      A.gen[Int](2)
+// //      A.genGetter2[Int, Short]
+// //      localFn0
+// //      localFn()
+// ////      A.gen[Int](2)
+// //
+// ////      A.curryA(1)
+// //      A.genCurry[Int, Int](1,2)(3)
 
-//      new Complex(1,2)\
-      val s    = 1.0f
-      val m    = new ItResult[Int, Float](s, 2)
-      val out1 = m.read[Int]
-      val out2 = m.read[Float]
+// //      new Complex(1,2)\
+//       val s    = 1.0f
+//       val m    = new ItResult[Int, Float](s, 2)
+//       val out1 = m.read[Int]
+//       val out2 = m.read[Float]
 
-      val m2 = new ItResult[Float, Int](2, 1.0f)
+//       val m2 = new ItResult[Float, Int](2, 1.0f)
 
 //      ItResultFA(Complex(1.0, 1.0), 1)
 //      ItResult(Complex.Zero, 1)

@@ -142,6 +142,8 @@ object Remapper {
           case x                 => x
         }
 
+        println(s"[mapRef0] tpe=${tpe.repr} ${ref.symbol.fullName}=${ref.symbol.flags.show} ")
+
         def witnessClassTpe(c: q.RemapContext)(sym: q.Symbol, tpe: p.Type) =
           if (sym.isPackageDef) c.success
           else
@@ -154,8 +156,6 @@ object Remapper {
         def invokeOrSelect(
             c: q.RemapContext
         )(sym: q.Symbol, receiver: Option[p.Term])(select: => Result[p.Term.Select]) = {
-
-          println(s"R0 ${tpe.repr} cls=${sym.maybeOwner.isClassDef} ${sym} ${sym.isClassDef}   ${sym.flags.show} ")
 
           def mkSelect = for {
             s <- select

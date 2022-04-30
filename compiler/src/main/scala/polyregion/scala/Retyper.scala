@@ -203,7 +203,7 @@ object Retyper {
         println(s"C => ${r} ${i}")
         ???
       case expr =>
-        println(s"[fallthrough typer] ${expr} => ${expr.show} ${expr.getClass}")
+        // println(s"[fallthrough typer] ${expr} => ${expr.show} ${expr.getClass}")
 
         resolveClsFromTpeRepr(expr).map(liftClsToTpe(_, _, _, _)).map((None, _))
     }
