@@ -36,10 +36,8 @@ object Retyper {
       .traverse(field =>
         (field.tree match {
           case d: q.ValDef =>
-            typer0(d.tpt.tpe).flatMap { // TODO we need to work out nested structs
-              case (_, t: p.Type) => p.Named(field.name, t).success
-              case (_, bad)       => s"bad erased type $bad".fail
-            }
+            // TODO we need to work out nested structs
+            typer0(d.tpt.tpe).flatMap((_, t) => p.Named(field.name, t).success)
           case _ => ???
         })
       )

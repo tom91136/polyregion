@@ -142,42 +142,49 @@ object Remapper {
           case x                 => x
         }
 
-        def witnessClassTpe(c: q.RemapContext)(sym: q.Symbol, tpe: p.Type) = (sym.tree, tpe) match {
-          case (cls: q.ClassDef, s @ p.Type.Struct(_, _, _)) => c.updateDeps(_.witness(cls, s)).success
-          case (_, _)                                        => c.success
-        }
+        def witnessClassTpe(c: q.RemapContext)(sym: q.Symbol, tpe: p.Type) =
+          if (sym.isPackageDef) c.success
+          else
+            (sym.tree, tpe) match {
+              case (cls: q.ClassDef, s @ p.Type.Struct(_, _, _)) => c.updateDeps(_.witness(cls, s)).success
+              case (_, _)                                        => c.success
+            }
 
         // call no-arg functions (i.e. `x.toDouble` or just `def fn = ???; fn` ) directly or pass-through if not no-arg
         def invokeOrSelect(
             c: q.RemapContext
         )(sym: q.Symbol, receiver: Option[p.Term])(select: => Result[p.Term.Select]) = {
 
-          println(s"R0 ${tpe.repr} cls=${sym.maybeOwner.isClassDef}")
-          sym.tree match {
-            case fn: q.DefDef =>
-              // Assert that the term list matches Exec's nested (recursive) types.
-              // Note that Exec treats both empty args `()` and no-args as `Nil` where as the collected arg lists through
-              // `Apply` will give empty args as `Nil` and not collect no-args at all because no no application took place.
-              val termTpess = termArgss.map(_.map(_.tpe))
-              val execTpess = collectExecArgLists(tpe)
-              for {
-                _ <- (fn.termParamss.isEmpty, termTpess, execTpess) match {
-                  case (true, Nil, (Nil :: Nil) | Nil) =>
-                    ().success // no-ap, no-arg Exec (`Nil::Nil`) or no Exec (`Nil`)
-                  case (false, ts, es) if ts == es => ().success // everything else, do the assertion
-                  case (ap, ts, es)                => ???        // TODO raise failure
-                }
-                rtnTpe = resolveExecRtnTpe(tpe)
-                c   <- witnessClassTpe(c)(sym.maybeOwner, rtnTpe)
-                ivk <- c.mkInvoke(fn, tpeArgs, receiver, termArgss.flatten, rtnTpe)
-              } yield ivk
-            case _ =>
-              println(s" $select")
-              for {
-                s <- select
-                c <- witnessClassTpe(c)(sym.maybeOwner, s.tpe)
-              } yield (s -> c)
-          }
+          println(s"R0 ${tpe.repr} cls=${sym.maybeOwner.isClassDef} ${sym} ${sym.isClassDef}   ${sym.flags.show} ")
+
+          def mkSelect = for {
+            s <- select
+            c <- witnessClassTpe(c)(sym.maybeOwner, s.tpe)
+          } yield (s -> c)
+
+          if (sym.isPackageDef) mkSelect
+          else
+            sym.tree match {
+              case fn: q.DefDef =>
+                // Assert that the term list matches Exec's nested (recursive) types.
+                // Note that Exec treats both empty args `()` and no-args as `Nil` where as the collected arg lists through
+                // `Apply` will give empty args as `Nil` and not collect no-args at all because no no application took place.
+                val termTpess = termArgss.map(_.map(_.tpe))
+                val execTpess = collectExecArgLists(tpe)
+                for {
+                  _ <- (fn.termParamss.isEmpty, termTpess, execTpess) match {
+                    case (true, Nil, (Nil :: Nil) | Nil) =>
+                      ().success // no-ap, no-arg Exec (`Nil::Nil`) or no Exec (`Nil`)
+                    case (false, ts, es) if ts == es => ().success // everything else, do the assertion
+                    case (ap, ts, es)                => ???        // TODO raise failure
+                  }
+                  rtnTpe = resolveExecRtnTpe(tpe)
+                  c   <- witnessClassTpe(c)(sym.maybeOwner, rtnTpe)
+                  ivk <- c.mkInvoke(fn, tpeArgs, receiver, termArgss.flatten, rtnTpe)
+                } yield ivk
+              case _ => mkSelect
+            }
+
         }
 
         ref match {
@@ -194,7 +201,7 @@ object Remapper {
             // In any other case, we're probably referencing a local ValDef that appeared before before this.
             if (ident.symbol.maybeOwner.isClassDef) {
               for {
-                tpe <- clsSymTyper0(ident.symbol.owner) //TODO what about generics???
+                tpe <- clsSymTyper0(ident.symbol.owner) // TODO what about generics???
                 cls = p.Named("this", tpe)
                 (invoke, c) <- invokeOrSelect(c)(ident.symbol, Some(p.Term.Select(Nil, cls)))(
                   p.Term.Select(cls :: Nil, local).success
@@ -258,7 +265,9 @@ object Remapper {
             (term, c) <- c.mapTerm(term, tpeArgs = args.map(_._2), termArgss = termArgss)
           } yield (term, c)
         case (tpeArgs, termArgs, r: q.Ref) =>
-          println(s"[mapper] ref = `${r.show}` <${tpeArgs.map(_.repr).mkString(",")}>")
+          println(
+            s"[mapper] ref = `${r.show}` termArgs={${termArgs.flatten.map(_.repr).mkString(",")}} tpeArgs=<${tpeArgs.map(_.repr).mkString(",")}>"
+          )
           (c.refs.get(r)) match {
             case Some(term) => (term, (c !! r)).success
             case None       => (c !! r).mapRef0(r, tpeArgs, termArgs)

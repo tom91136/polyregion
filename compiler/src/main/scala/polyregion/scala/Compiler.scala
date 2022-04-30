@@ -10,6 +10,7 @@ import polyregion.prism.StdLib
 import java.nio.file.Paths
 import scala.collection.immutable.VectorMap
 import scala.quoted.Expr
+import polyregion.ast.pass.MonoStructPass
 
 object Compiler {
 
@@ -21,7 +22,8 @@ object Compiler {
   private def runProgramOptPasses(program: p.Program)(log: Log): Result[(p.Program, Log)] = {
     val (p0, l0) = FnInlinePass.run(program)(log)
     val (p1, l1) = UnitExprElisionPass.run(p0)(l0)
-    (p1, l1).success
+    val (p2, l2) = MonoStructPass.run(p1)(l1)
+    (p2, l2).success
   }
 
   // kind is there for cases where we have `object A extends B; abstract class B {def m = ???}`, B.m has receiver but A.m doesn't
@@ -34,7 +36,8 @@ object Compiler {
         .collect { case d: q.ValDef => d.tpt.tpe }
         .traverse(simpleTyper(_))
       owningClass <- Retyper.clsSymTyper0(f.symbol.owner)
-
+      // We're processing an unapplied defdef, so all names become type vars
+      fnTypeVars = f.paramss.flatMap(_.params).collect { case q.TypeDef(name, _) => p.Type.Var(name) }
       receiver <- (concreteKind, owningClass) match {
         // case (q.ClassKind.Object, q.ErasedClsTpe(_, _, _, _)) => None.success
         case (q.ClassKind.Object, s: p.Type.Struct) => None.success
@@ -42,7 +45,7 @@ object Compiler {
         case (kind, x)                              => s"Illegal receiver (concrete kind=${kind}): $x".fail
       }
       argTpes = receiver.map(s => s.tpeVars.map(p.Type.Var(_))).getOrElse(Nil) ::: fnArgsTpes
-    } yield p.Signature(p.Sym(f.symbol.fullName), ???, receiver, argTpes, fnRtnTpe)
+    } yield p.Signature(p.Sym(f.symbol.fullName), fnTypeVars, receiver, argTpes, fnRtnTpe)
   }
 
   def compileAllDependencies(using q: Quoted)(
@@ -85,12 +88,11 @@ object Compiler {
 
         // We also run the typer on all the def's arguments.
         // TODO handle default value of args (ValDef.rhs)
-        fnArgs <- f.termParamss.foldMapM {
-          case arg: q.ValDef => // all args should come in the form of a ValDef
-            Retyper.typer0(arg.tpt.tpe).flatMap { case (_, t) =>
-              ((arg, p.Named(arg.name, t)) :: Nil).success
-            }
-          case bad => ???
+
+        // q.TermParamClause()
+
+        fnArgs <- f.termParamss.flatMap(_.params).foldMapM { arg => // all args should come in the form of a ValDef
+          Retyper.typer0(arg.tpt.tpe).map((_, t) => ((arg, p.Named(arg.name, t)) :: Nil))
         }
 
         fnTypeVars = f.paramss.flatMap(_.params).collect { case q.TypeDef(name, _) => name }
@@ -239,9 +241,11 @@ object Compiler {
     )
     capturedNameTable = capturedNames.toMap
 
-    sdefs <- exprDeps.classes.toList.traverse((clsDef, aps) => structDef0(clsDef.symbol))
+    sdefs <- exprDeps.classes.toList.traverse { (clsDef, aps) =>
+      structDef0(clsDef.symbol).map(_ -> aps)
+    }
 
-    unoptimisedProgram = p.Program(exprFn, depFns, sdefs)
+    unoptimisedProgram = p.Program(exprFn, depFns, sdefs.map(_._1))
     log <- log.info(s"Program compiled, dependencies: ${unoptimisedProgram.functions.size}")
     log <- log.info(s"Program compiled, structures", unoptimisedProgram.defs.map(_.repr)*)
 

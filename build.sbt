@@ -18,15 +18,14 @@ lazy val commonSettings = Seq(
       Seq("-target", "1.8"),
   scalacOptions ~= { options: Seq[String] =>
     options.filterNot(
-      Set(
-        "-explain-types",
-        "-explain"
-      )
+      Set("-explain-types", "-explain")
     )
   },
-  scalacOptions ++= Seq( //
-    "-no-indent"         //
-//    "-Wconf:cat=other-match-analysis:error" //
+  scalacOptions ++= Seq(                     //
+    "-no-indent",                            //
+    "-Wconf:cat=unchecked:error",            //
+    "-Wconf:name=MatchCaseUnreachable:error" //
+    // "-Wconf:name=PatternMatchExhaustivity:error" // TODO enable later
     // "-language:strictEquality"
   ),
   scalafmtDetailedError := true,

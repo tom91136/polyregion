@@ -14,6 +14,9 @@ object IntrinsifyPass {
     // println(s"Elim : ${dep.defs.map(_._1)} -  ${(instanceInvokes ++ moduleInvokes)} ")
     val intrinsified = instanceInvokes ++ moduleInvokes
     val eliminated = dep.functions.flatMap { (fn, ivks) =>
+
+        
+
       val xs = ivks.filterNot(intrinsified.contains(_))
       if (xs.isEmpty) Map() else Map(fn -> xs)
     }

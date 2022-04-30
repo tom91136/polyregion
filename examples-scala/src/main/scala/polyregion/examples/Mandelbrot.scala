@@ -235,6 +235,8 @@ object Mandelbrot {
 
     polyregion.scala.compiletime.offload {
 
+      val u = math.max(1,2)
+
       val x = 1 + 1.toDouble
 
 //      B()

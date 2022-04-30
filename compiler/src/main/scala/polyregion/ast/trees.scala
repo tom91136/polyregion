@@ -76,11 +76,6 @@ object Log {
   def apply(name: String): Result[Log] = Log(name, Vector.empty).success
 }
 
-//extension [A](a: Deferred[A]) {
-//  def resolve: Result[A]          = a.value.value
-//  def withFilter(p: A => Boolean) = a.subflatMap(x => if (p(x)) Right(x) else Left(new MatchError(x)))
-//}
-
 extension [A](a: A) {
   def success: Result[A] = Right(a)
 //  def pure: Deferred[A]  = Right(a).deferred
@@ -155,7 +150,7 @@ extension (e: p.Expr.Invoke) {
 }
 
 extension (sd: p.StructDef) {
-  def repr: String = s"${sd.name.repr} { ${sd.members.map(_.repr).mkString("; ")} }"
+  def repr: String = s"${sd.name.repr}<${sd.tpeVars.mkString(",")}> { ${sd.members.map(_.repr).mkString("; ")} }"
 }
 
 extension (e: p.Sym) {
@@ -165,25 +160,50 @@ extension (e: p.Sym) {
 extension (n: p.Named) {
   def repr: String                          = s"(${n.symbol}:${n.tpe.repr})"
   def mapType(f: p.Type => p.Type): p.Named = p.Named(n.symbol, n.tpe.map(f))
+  def mapAccType[A](f: p.Type => (p.Type, List[A])): (p.Named, List[A]) = {
+    val (tpe, as) = n.tpe.mapAcc[A](f)
+    (p.Named(n.symbol, tpe), as)
+  }
 }
 
 extension (e: p.Term) {
   def repr: String = e match {
-    case p.Term.Select(init, last) => (init :+ last).map(_.repr).mkString(".")
-    case p.Term.UnitConst          => s"Unit()"
-    case p.Term.BoolConst(value)   => s"Bool($value)"
-    case p.Term.ByteConst(value)   => s"Byte($value)"
-    case p.Term.CharConst(value)   => s"Char($value)"
-    case p.Term.ShortConst(value)  => s"Short($value)"
-    case p.Term.IntConst(value)    => s"Int($value)"
-    case p.Term.LongConst(value)   => s"Long($value)"
-    case p.Term.FloatConst(value)  => s"Float($value)"
-    case p.Term.DoubleConst(value) => s"Double($value)"
-    case p.Term.StringConst(value) => s"String($value)"
+    case p.Term.Select(xs, x)  => (xs :+ x).map(_.repr).mkString(".")
+    case p.Term.UnitConst      => s"Unit()"
+    case p.Term.BoolConst(x)   => s"Bool($x)"
+    case p.Term.ByteConst(x)   => s"Byte($x)"
+    case p.Term.CharConst(x)   => s"Char($x)"
+    case p.Term.ShortConst(x)  => s"Short($x)"
+    case p.Term.IntConst(x)    => s"Int($x)"
+    case p.Term.LongConst(x)   => s"Long($x)"
+    case p.Term.FloatConst(x)  => s"Float($x)"
+    case p.Term.DoubleConst(x) => s"Double($x)"
+    case p.Term.StringConst(x) => s"String($x)"
   }
 }
 
 extension (e: p.Type) {
+
+  def mapAcc[A](f: p.Type => (p.Type, List[A])): (p.Type, List[A]) = e match {
+    case p.Type.Array(c) =>
+      val (c0, as0) = f(c)
+      val (t0, as1) = f(p.Type.Array(c0))
+      (t0, as0 ::: as1)
+    case p.Type.Struct(name, tpeVars, args) =>
+      val (args0, as0) = args.map(f).unzip
+      val (t0, as1)    = f(p.Type.Struct(name, tpeVars, args0))
+      (t0, as0.flatten ::: as1)
+    case p.Type.Exec(tpeVars, args, rtn) =>
+      val (args0, as0) = args.map(f).unzip
+      val (rtn0, as1)  = f(rtn)
+      val (t0, as2)    = f(p.Type.Exec(tpeVars, args0, rtn0))
+      (t0, as0.flatten ::: as1 ::: as2)
+    case x => f(x)
+  }
+
+  def map(f: p.Type => p.Type): p.Type      = mapAcc[Unit](x => f(x) -> Nil)._1
+  def acc[A](f: p.Type => List[A]): List[A] = mapAcc[A](x => x -> f(x))._2
+
   def isNumeric = e.kind match {
     case TypeKind.Integral | TypeKind.Fractional => true
     case _                                       => false
@@ -210,21 +230,21 @@ extension (e: p.Type) {
 
   // TODO remove
   def monomorphicName: String = e match {
-    case p.Type.Struct(sym, tpeVars, args) => sym.fqn.mkString("_") + args.mkString("<", ",", ">")
-    case p.Type.Array(comp)                => s"${comp.monomorphicName}[]"
-    case p.Type.Bool                       => "Bool"
-    case p.Type.Byte                       => "Byte"
-    case p.Type.Char                       => "Char"
-    case p.Type.Short                      => "Short"
-    case p.Type.Int                        => "Int"
-    case p.Type.Long                       => "Long"
-    case p.Type.Float                      => "Float"
-    case p.Type.Double                     => "Double"
-    case p.Type.String                     => "String"
-    case p.Type.Unit                       => "Unit"
-    case p.Type.Nothing                    => "Nothing"
-    case p.Type.Var(name)                  => s"#$name"
-    case p.Type.Exec(tpeArgs, args, rtn)   => ???
+    case p.Type.Struct(sym, _, args)     => sym.fqn.mkString("_") + args.map(_.monomorphicName).mkString("_", "_", "_")
+    case p.Type.Array(comp)              => s"${comp.monomorphicName}[]"
+    case p.Type.Bool                     => "Bool"
+    case p.Type.Byte                     => "Byte"
+    case p.Type.Char                     => "Char"
+    case p.Type.Short                    => "Short"
+    case p.Type.Int                      => "Int"
+    case p.Type.Long                     => "Long"
+    case p.Type.Float                    => "Float"
+    case p.Type.Double                   => "Double"
+    case p.Type.String                   => "String"
+    case p.Type.Unit                     => "Unit"
+    case p.Type.Nothing                  => "Nothing"
+    case p.Type.Var(name)                => s"#$name"
+    case p.Type.Exec(tpeArgs, args, rtn) => ???
   }
 }
 
@@ -316,18 +336,32 @@ extension (e: p.Expr) {
   }
 }
 
-extension (t: p.Type) {
-  def map(f: p.Type => p.Type) = t match {
-    case p.Type.Array(c)                    => f(p.Type.Array(f(c)))
-    case p.Type.Struct(name, tpeVars, args) => p.Type.Struct(name, tpeVars, args.map(f))
-    case p.Type.Exec(tpeVars, args, rtn)    => p.Type.Exec(tpeVars, args.map(f), f(rtn))
-    case x                                  => f(x)
-  }
-
-}
-
 extension (e: p.Stmt) {
 
+  def acc[A](f: p.Stmt => List[A]): List[A]        = e.mapAcc[A](x => (x :: Nil, f(x)))._2
+  def map(f: p.Stmt => List[p.Stmt]): List[p.Stmt] = e.mapAcc[Unit](x => (f(x), Nil))._1
+  def mapAcc[A](f: p.Stmt => (List[p.Stmt], List[A])): (List[p.Stmt], List[A]) = e match {
+    case x @ p.Stmt.Comment(_)      => f(x)
+    case x @ p.Stmt.Var(_, _)       => f(x)
+    case x @ p.Stmt.Mut(_, _, _)    => f(x)
+    case x @ p.Stmt.Update(_, _, _) => f(x)
+    case p.Stmt.While(tests, cond, body) =>
+      val (sss0, xss) = tests.map(_.mapAcc(f)).unzip
+      val (sss1, yss) = body.map(_.mapAcc(f)).unzip
+      val (sss2, zss) = f(p.Stmt.While(sss0.flatten, cond, sss1.flatten))
+      (sss2, xss.flatten ::: yss.flatten ::: zss)
+    case x @ p.Stmt.Break => f(x)
+    case x @ p.Stmt.Cont  => f(x)
+    case p.Stmt.Cond(cond, trueBr, falseBr) =>
+      val (tss, tass) = trueBr.map(_.mapAcc(f)).unzip
+      val (fss, fass) = falseBr.map(_.mapAcc(f)).unzip
+      val (ss, ass)   = f(p.Stmt.Cond(cond, tss.flatten, fss.flatten))
+      (ss, (tass ::: fass).flatten ::: ass)
+    case x @ p.Stmt.Return(_) => f(x)
+  }
+
+  def accExpr[A](f: p.Expr => List[A]): List[A]                  = e.mapAccExpr(e => (e, Nil, f(e)))._2
+  def mapExpr(f: p.Expr => (p.Expr, List[p.Stmt])): List[p.Stmt] = e.mapAccExpr(f(_) ++ Nil *: EmptyTuple)._1
   def mapAccExpr[A](f: p.Expr => (p.Expr, List[p.Stmt], List[A])): (List[p.Stmt], List[A]) = e match {
     case x @ p.Stmt.Comment(_) => (x :: Nil, Nil)
     case p.Stmt.Var(name, rhs) =>
@@ -354,87 +388,125 @@ extension (e: p.Stmt) {
     case p.Stmt.Return(expr) => val (y, xs, as) = f(expr); (xs :+ p.Stmt.Return(y), as)
   }
 
-  def mapExpr(f: p.Expr => (p.Expr, List[p.Stmt])): List[p.Stmt] = e.mapAccExpr[Unit](f(_) ++ Nil *: EmptyTuple)._1
-
-  def mapExpr0(f: p.Expr => p.Expr): List[p.Stmt] = mapExpr(e => f(e) -> Nil)
-
-  def mapTerm(g: p.Term.Select => p.Term.Select, f: p.Term => p.Term): List[p.Stmt] = e
-    .map {
-      case p.Stmt.Mut(name, expr, copy)    => p.Stmt.Mut(g(name), expr, copy) :: Nil
-      case p.Stmt.Update(lhs, idx, value)  => p.Stmt.Update(g(lhs), f(idx), f(value)) :: Nil
-      case p.Stmt.While(tests, cond, body) => p.Stmt.While(tests, f(cond), body) :: Nil
-      case x                               => x :: Nil
+  def accTerm[A](g: p.Term.Select => List[A], f: p.Term => List[A]): List[A] =
+    e.mapAccTerm(s => s -> g(s), t => t -> f(t))._2
+  def mapTerm(g: p.Term.Select => p.Term.Select, f: p.Term => p.Term): List[p.Stmt] =
+    e.mapAccTerm(s => g(s) -> Nil, t => f(t) -> Nil)._1
+  def mapAccTerm[A](
+      g: p.Term.Select => (p.Term.Select, List[A]),
+      f: p.Term => (p.Term, List[A])
+  ): (List[p.Stmt], List[A]) = {
+    val (stmts0, as0) = e.mapAcc {
+      case p.Stmt.Mut(name, expr, copy) =>
+        val (name0, as) = g(name)
+        (p.Stmt.Mut(name0, expr, copy) :: Nil, as)
+      case p.Stmt.Update(lhs, idx, value) =>
+        val (lhs0, as0)   = g(lhs)
+        val (idx0, as1)   = f(idx)
+        val (value0, as2) = f(value)
+        (p.Stmt.Update(lhs0, idx0, value0) :: Nil, as0 ::: as1 ::: as2)
+      case p.Stmt.While(tests, cond, body) =>
+        val (cond0, as) = f(cond)
+        (p.Stmt.While(tests, cond0, body) :: Nil, as)
+      case x => (x :: Nil, Nil)
     }
-    .flatMap(_.mapExpr {
-      case p.Expr.UnaryIntrinsic(lhs, kind, rtn)       => (p.Expr.UnaryIntrinsic(f(lhs), kind, rtn), Nil)
-      case p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn) => (p.Expr.BinaryIntrinsic(f(lhs), f(rhs), kind, rtn), Nil)
+    val (stmts1, as1) = stmts0
+      .map(_.mapAccExpr {
+        case p.Expr.UnaryIntrinsic(lhs, kind, rtn) =>
+          val (lhs0, as) = f(lhs)
+          (p.Expr.UnaryIntrinsic(lhs0, kind, rtn), Nil, as)
+        case p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn) =>
+          val (lhs0, as0) = f(lhs)
+          val (rhs0, as1) = f(rhs)
+          (p.Expr.BinaryIntrinsic(lhs0, rhs0, kind, rtn), Nil, as0 ::: as1)
+        case p.Expr.UnaryLogicIntrinsic(lhs, kind) =>
+          val (lhs0, as0) = f(lhs)
+          (p.Expr.UnaryLogicIntrinsic(lhs0, kind), Nil, as0)
+        case p.Expr.BinaryLogicIntrinsic(lhs, rhs, kind) =>
+          val (lhs0, as0) = f(lhs)
+          val (rhs0, as1) = f(rhs)
+          (p.Expr.BinaryLogicIntrinsic(lhs0, rhs0, kind), Nil, as0 ::: as1)
+        case p.Expr.Cast(from, to) =>
+          val (from0, as0) = f(from)
+          (p.Expr.Cast(from0, to), Nil, as0)
+        case p.Expr.Alias(ref) =>
+          val (ref0, as0) = f(ref)
+          (p.Expr.Alias(ref0), Nil, as0)
+        case p.Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
+          val (receiver0, as0) = receiver.map(f).fold((None, Nil))((x, as) => (Some(x), as))
+          val (args0, as1)     = args.map(f).unzip
+          (p.Expr.Invoke(name, tpeArgs, receiver0, args0, rtn), Nil, (as0 :: as1).flatten)
+        case p.Expr.Index(lhs, idx, component) =>
+          val (lhs0, as0) = g(lhs)
+          val (idx0, as1) = f(idx)
+          (p.Expr.Index(lhs0, idx0, component), Nil, as0 ::: as1)
+        case p.Expr.Alloc(witness, term) =>
+          val (term0, as0) = f(term)
+          (p.Expr.Alloc(witness, term0), Nil, as0)
+      })
+      .unzip //
 
-      case p.Expr.UnaryLogicIntrinsic(lhs, kind)       => (p.Expr.UnaryLogicIntrinsic(f(lhs), kind), Nil)
-      case p.Expr.BinaryLogicIntrinsic(lhs, rhs, kind) => (p.Expr.BinaryLogicIntrinsic(f(lhs), f(rhs), kind), Nil)
-
-      case p.Expr.Cast(from, to) => (p.Expr.Cast(f(from), to), Nil)
-      case p.Expr.Alias(ref) =>
-        val h = ref match {
-          // case x @ p.Term.Select(_, _) => g(x)
-          case x => f(x)
-        }
-        (p.Expr.Alias(h), Nil)
-      case p.Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
-        (p.Expr.Invoke(name, tpeArgs, receiver.map(f), args.map(f), rtn), Nil)
-      case p.Expr.Index(lhs, idx, component) => (p.Expr.Index(g(lhs), f(idx), component), Nil)
-      case p.Expr.Alloc(witness, term)       => (p.Expr.Alloc(witness, f(term)), Nil)
-
-    })
-
-  def mapType(f: p.Type => p.Type): List[p.Stmt] =
-    e.mapTerm(
-      { case p.Term.Select(xs, x) =>
-        p.Term.Select(xs.map(_.mapType(f)), x.mapType(f))
-      },
-      {
-        case p.Term.Select(xs, x) => p.Term.Select(xs.map(_.mapType(f)), x.mapType(f))
-        case x                    => x
-
-      }
-    ).flatMap(_.mapExpr0 {
-      case p.Expr.UnaryIntrinsic(lhs, kind, rtn)       => p.Expr.UnaryIntrinsic(lhs, kind, rtn.map(f))
-      case p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn) => p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn.map(f))
-      case e @ p.Expr.UnaryLogicIntrinsic(_, _)        => e
-      case e @ p.Expr.BinaryLogicIntrinsic(_, _, _)    => e
-      case e @ p.Expr.Cast(from, as)                   => p.Expr.Cast(from, as.map(f))
-      case e @ p.Expr.Alias(ref)                       => e
-      case e @ p.Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
-        p.Expr.Invoke(name, tpeArgs.map(f), receiver, args, rtn.map(f))
-      case e @ p.Expr.Index(lhs, idx, component) => p.Expr.Index(lhs, idx, component.map(f))
-      case e @ p.Expr.Alloc(witness, size)       => p.Expr.Alloc(p.Type.Array(witness.component.map(f)), size)
-    }).map {
-      case p.Stmt.Var(p.Named(name, tpe), x) => p.Stmt.Var(p.Named(name, f(tpe)), x)
-      case x                                 => x
-    }
-
-  def mapAcc[A](f: p.Stmt => (List[p.Stmt], List[A])): (List[p.Stmt], List[A]) = e match {
-    case x @ p.Stmt.Comment(_)      => f(x)
-    case x @ p.Stmt.Var(_, _)       => f(x)
-    case x @ p.Stmt.Mut(_, _, _)    => f(x)
-    case x @ p.Stmt.Update(_, _, _) => f(x)
-    case p.Stmt.While(tests, cond, body) =>
-      val (sss0, xss) = tests.map(_.mapAcc(f)).unzip
-      val (sss1, yss) = body.map(_.mapAcc(f)).unzip
-      val (sss2, zss) = f(p.Stmt.While(sss0.flatten, cond, sss1.flatten))
-      (sss2, xss.flatten ::: yss.flatten ::: zss)
-    case x @ p.Stmt.Break => f(x)
-    case x @ p.Stmt.Cont  => f(x)
-    case p.Stmt.Cond(cond, trueBr, falseBr) =>
-      val (tss, tass) = trueBr.map(_.mapAcc(f)).unzip
-      val (fss, fass) = falseBr.map(_.mapAcc(f)).unzip
-      val (ss, ass)   = f(p.Stmt.Cond(cond, tss.flatten, fss.flatten))
-      (ss, (tass ::: fass).flatten ::: ass)
-    case x @ p.Stmt.Return(_) => f(x)
+    (stmts1.flatten, (as0 :: as1).flatten)
   }
 
-  def acc[A](f: p.Stmt => List[A]): List[A] = e.mapAcc[A](x => (x :: Nil, f(x)))._2
+  def accType[A](f: p.Type => List[A]): List[A]  = mapAccType(x => x -> f(x))._2
+  def mapType(f: p.Type => p.Type): List[p.Stmt] = mapAccType(x => f(x) -> Nil)._1
+  def mapAccType[A](f: p.Type => (p.Type, List[A])): (List[p.Stmt], List[A]) = {
+    val (stmts0, as0) = e.mapAccTerm(
+      { case p.Term.Select(xs, x) =>
+        val (xs0, as0) = xs.map(_.mapAccType(f)).unzip
+        val (x0, as1)  = x.mapAccType(f)
+        (p.Term.Select(xs0, x0), as0.flatten ::: as1)
+      },
+      {
+        case p.Term.Select(xs, x) =>
+          val (xs0, as0) = xs.map(_.mapAccType(f)).unzip
+          val (x0, as1)  = x.mapAccType(f)
+          (p.Term.Select(xs0, x0), as0.flatten ::: as1)
+        case x => (x, Nil)
+      }
+    )
+    val (stmts1, as1) = stmts0
+      .map(_.mapAccExpr {
+        case p.Expr.UnaryIntrinsic(lhs, kind, rtn) =>
+          val (rtn0, as0) = f(rtn)
+          (p.Expr.UnaryIntrinsic(lhs, kind, rtn0), Nil, as0)
+        case p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn) =>
+          val (rtn0, as0) = f(rtn)
+          (p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn0), Nil, as0)
+        case e @ p.Expr.UnaryLogicIntrinsic(_, _) =>
+          (e, Nil, Nil)
+        case e @ p.Expr.BinaryLogicIntrinsic(_, _, _) =>
+          (e, Nil, Nil)
+        case e @ p.Expr.Cast(from, as) =>
+          val (as0, as0_) = f(as)
+          (p.Expr.Cast(from, as0), Nil, as0_)
+        case e @ p.Expr.Alias(ref) =>
+          (e, Nil, Nil)
+        case e @ p.Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
+          val (tpeArgs0, as0) = tpeArgs.map(f).unzip
+          val (rtn0, as1)     = f(rtn)
+          (p.Expr.Invoke(name, tpeArgs0, receiver, args, rtn0), Nil, as0.flatten ::: as1)
+        case e @ p.Expr.Index(lhs, idx, component) =>
+          val (component0, as0) = f(component)
+          (p.Expr.Index(lhs, idx, component0), Nil, as0)
+        case e @ p.Expr.Alloc(witness, size) =>
+          val (component0, as0) = f(witness.component)
+          (p.Expr.Alloc(p.Type.Array(component0), size), Nil, as0)
+      })
+      .unzip
 
-  def map(f: p.Stmt => List[p.Stmt]): List[p.Stmt] = e.mapAcc[Unit](x => (f(x), Nil))._1
+    val (stmts2, as2) = stmts1.flatten
+      .map(_.mapAcc {
+        case p.Stmt.Var(named, x) =>
+          val (tpe0, as) = named.mapAccType(f) //
+          (p.Stmt.Var(tpe0, x) :: Nil, as)
+        case x => (x :: Nil, Nil)
+      })
+      .unzip
+
+    (stmts2.flatten, (as0 :: as1 ::: as2).flatten)
+  }
 
   def repr: String = e match {
     case p.Stmt.Comment(value)          => s" /* $value */"

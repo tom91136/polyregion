@@ -104,7 +104,10 @@ object compiletime {
         expectedStructDef: p.StructDef
     ): Result[(List[p.Function], q.Dependencies)] = for {
 
+
       log <- Log(s"Mirror for ${sourceMethodSym} -> ${mirrorMethodSym}")
+      _ = println(s"Do ${sourceMethodSym}")
+
 
       sourceSignature <- sourceMethodSym.tree match {
         case d: q.DefDef => polyregion.scala.Compiler.deriveSignature(d, sourceClassKind)
@@ -114,6 +117,7 @@ object compiletime {
 
       mirrorMethods <- mirrorMethodSym.tree match {
         case d: q.DefDef =>
+          println(d.show)
           for {
 
             ((fn, fnDeps), log)    <- polyregion.scala.Compiler.compileFn(d)(log)
