@@ -162,28 +162,26 @@ object Remapper {
             c <- witnessClassTpe(c)(sym.maybeOwner, s.tpe)
           } yield (s -> c)
 
-          if (sym.isPackageDef) mkSelect
-          else
-            sym.tree match {
-              case fn: q.DefDef =>
-                // Assert that the term list matches Exec's nested (recursive) types.
-                // Note that Exec treats both empty args `()` and no-args as `Nil` where as the collected arg lists through
-                // `Apply` will give empty args as `Nil` and not collect no-args at all because no no application took place.
-                val termTpess = termArgss.map(_.map(_.tpe))
-                val execTpess = collectExecArgLists(tpe)
-                for {
-                  _ <- (fn.termParamss.isEmpty, termTpess, execTpess) match {
-                    case (true, Nil, (Nil :: Nil) | Nil) =>
-                      ().success // no-ap, no-arg Exec (`Nil::Nil`) or no Exec (`Nil`)
-                    case (false, ts, es) if ts == es => ().success // everything else, do the assertion
-                    case (ap, ts, es)                => ???        // TODO raise failure
-                  }
-                  rtnTpe = resolveExecRtnTpe(tpe)
-                  c   <- witnessClassTpe(c)(sym.maybeOwner, rtnTpe)
-                  ivk <- c.mkInvoke(fn, tpeArgs, receiver, termArgss.flatten, rtnTpe)
-                } yield ivk
-              case _ => mkSelect
-            }
+          sym.tree match {
+            case fn: q.DefDef =>
+              // Assert that the term list matches Exec's nested (recursive) types.
+              // Note that Exec treats both empty args `()` and no-args as `Nil` where as the collected arg lists through
+              // `Apply` will give empty args as `Nil` and not collect no-args at all because no no application took place.
+              val termTpess = termArgss.map(_.map(_.tpe))
+              val execTpess = collectExecArgLists(tpe)
+              for {
+                _ <- (fn.termParamss.isEmpty, termTpess, execTpess) match {
+                  case (true, Nil, (Nil :: Nil) | Nil) =>
+                    ().success // no-ap, no-arg Exec (`Nil::Nil`) or no Exec (`Nil`)
+                  case (false, ts, es) if ts == es => ().success // everything else, do the assertion
+                  case (ap, ts, es)                => ???        // TODO raise failure
+                }
+                rtnTpe = resolveExecRtnTpe(tpe)
+                c   <- witnessClassTpe(c)(sym.maybeOwner, rtnTpe)
+                ivk <- c.mkInvoke(fn, tpeArgs, receiver, termArgss.flatten, rtnTpe)
+              } yield ivk
+            case _ => mkSelect
+          }
 
         }
 
@@ -209,17 +207,42 @@ object Remapper {
               } yield (invoke, c)
             } else invokeOrSelect(c)(ident.symbol, None)(p.Term.Select(Nil, local).success)
           case select @ q.Select(qualifierTerm, name) =>
-            c.mapTerm(qualifierTerm).flatMap {
-              case (recv @ p.Term.Select(xs, x), c) => // fuse with previous select if we got one
-                invokeOrSelect(c)(select.symbol, Some(recv))(p.Term.Select(xs :+ x, p.Named(name, tpe)).success)
-              case (term, c) => // or simply return whatever it's referring to
-                // `$qualifierTerm.$name` becomes `$term.${select.symbol}()` so we don't need the `$name` here
-                invokeOrSelect(c)(select.symbol, Some(term))(
-                  "illegal selection of a non DefDef symbol from a primitive term (i.e `{ 1.$name }` )".fail
-                )
+            val allOwnersAreModules = c.ownersList(select.symbol).forall(_.flags.is(q.Flags.Module))
+            if (allOwnersAreModules) {
+              // We handle any reference to objects (can be nested in more objects) directly because
+              // they are singleton (e.g. can appear anywhere with no dependencies, even the owner).
+              // We must do this early because once we hit ident we will get a reference to `this` of the wrong type.
+              val rootSymbol = select.symbol.maybeOwner
+              for {
+                tpe <- clsSymTyper0(rootSymbol)
+                c   <- witnessClassTpe(c)(rootSymbol, tpe)
+                (term, c) <- tpe match {
+                  case s @ p.Type.Struct(rootName, Nil, Nil) =>
+                    val directRoot = p.Named(rootName.fqn.mkString("_"), s)
+                    invokeOrSelect(c)(select.symbol, Some(p.Term.Select(Nil, directRoot)))(
+                      p.Term.Select(directRoot :: Nil, p.Named(name, tpe)).success
+                    )
+                  case bad =>
+                    s"Illegal type ($bad) derived for owner of $name :$tpe, expecting an object class with no generics and type vars".fail
+                }
+              } yield (term, c)
+            } else {
+              // Otherwise we go through the usual path of resolution (nested classes where each instance has an `this` reference to the owning class)
+              c.mapTerm(qualifierTerm).flatMap {
+                case (recv @ p.Term.Select(xs, x), c) => // fuse with previous select if we got one
+                  invokeOrSelect(c)(select.symbol, Some(recv))(p.Term.Select(xs :+ x, p.Named(name, tpe)).success)
+                case (term, c) => // or simply return whatever it's referring to
+                  // `$qualifierTerm.$name` becomes `$term.${select.symbol}()` so we don't need the `$name` here
+                  invokeOrSelect(c)(select.symbol, Some(term))(
+                    "illegal selection of a non DefDef symbol from a primitive term (i.e `{ 1.$name }` )".fail
+                  )
+              }
             }
         }
     }
+
+    private def ownersList(sym: q.Symbol): LazyList[q.Symbol] =
+      LazyList.unfold(sym.maybeOwner)(s => if (s.isNoSymbol) None else Some(s, s.maybeOwner))
 
     def witnessTpe(tpe: q.TypeRepr) = (tpe.classSymbol) match {
       case Some(clsSym) if !clsSym.isNoSymbol =>
@@ -294,12 +317,12 @@ object Remapper {
             (lhsRef, c) <- c.down(term).mapTerm(lhs) // go down here
             (rhsRef, c) <- (c !! term).mapTerm(rhs)
             r <- (lhsRef, rhsRef) match {
-              case (s @ p.Term.Select(Nil, _), rhs) =>
+              case (s @ p.Term.Select(_, _), rhs) =>
                 (
                   p.Term.UnitConst,
                   c ::= p.Stmt.Mut(s, p.Expr.Alias(rhs), copy = false)
                 ).success
-              case bad => c.fail(s"Illegal assign LHS,RHS: ${bad}")
+              case (lhs, rhs) => c.fail(s"Illegal assign LHS,RHS: lhs=${lhs.repr} rhs=$rhs")
             }
           } yield r
         case (Nil, Nil, q.If(cond, thenTerm, elseTerm)) => // conditional: `if($cond) then $thenTerm else $elseTerm`

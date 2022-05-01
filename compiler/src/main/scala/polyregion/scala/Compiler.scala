@@ -109,46 +109,46 @@ object Compiler {
         log <- log.info("DefDef arguments", fnArgs.map((a, n) => s"${a}(symbol=${a.symbol}) ~> $n")*)
 
         // Finally, we compile the def body like a closure or just return the term if we have one.
-        ((rhsStmts, rhsDeps, rhsCaptures), log) <- fnRtnTerm match {
-          case Some(t) => ((p.Stmt.Return(p.Expr.Alias(t)) :: Nil, q.Dependencies(), Nil), log).success
+        ((rhsStmts, rhsDeps), log) <- fnRtnTerm match {
+          case Some(t) => ((p.Stmt.Return(p.Expr.Alias(t)) :: Nil, q.Dependencies()), log).success
           case None =>
             for {
               // when run the outliner first and then replace any reference to function args or `this`
               // whatever is left will be module references which needs to be added to FnDep's var table
-              (captures, log) <- RefOutliner.outline(rhs)(log)
-              (capturedNames, captureScope) <- captures
-                .foldMapM[Result, (List[(p.Named, q.Ref)], List[(q.Ref, p.Term)])] {
-                  case (root, ref, value, tpe)
-                      if root == ref && root.symbol.owner == f.symbol.owner && receiver.nonEmpty =>
-                    (Nil, Nil).success // this is a reference to `this`
-                  case (root, ref, value, tpe) =>
-                    // this is a generic reference possibly from the function argument
-                    val isArg = fnArgs.exists { (arg, n) =>
-                      arg.symbol == ref.underlying.symbol || arg.symbol == root.underlying.symbol
-                    }
-                    if (isArg) (Nil, Nil).success
-                    else
-                      value match {
-                        case Some(x) => (Nil, (ref -> x) :: Nil).success
-                        case None =>
-                          val name = ref match {
-                            case s @ q.Select(_, name) => s"_ref_${name}_${s.pos.startLine}_"
-                            case i @ q.Ident(_)        => i.name
-                          }
-                          val named = p.Named(name, tpe)
-                          ((named -> ref) :: Nil, (ref -> p.Term.Select(Nil, named)) :: Nil).success
-                      }
-                }
+              // (captures, log) <- RefOutliner.outline(rhs)(log)
+              // (capturedNames, captureScope) <- captures
+              //   .foldMapM[Result, (List[(p.Named, q.Ref)], List[(q.Ref, p.Term)])] {
+              //     case (root, ref, value, tpe)
+              //         if root == ref && root.symbol.owner == f.symbol.owner && receiver.nonEmpty =>
+              //       (Nil, Nil).success // this is a reference to `this`
+              //     case (root, ref, value, tpe) =>
+              //       // this is a generic reference possibly from the function argument
+              //       val isArg = fnArgs.exists { (arg, n) =>
+              //         arg.symbol == ref.underlying.symbol || arg.symbol == root.underlying.symbol
+              //       }
+              //       if (isArg) (Nil, Nil).success
+              //       else
+              //         value match {
+              //           case Some(x) => (Nil, (ref -> x) :: Nil).success
+              //           case None =>
+              //             val name = ref match {
+              //               case s @ q.Select(_, name) => s"_ref_${name}_${s.pos.startLine}_"
+              //               case i @ q.Ident(_)        => i.name
+              //             }
+              //             val named = p.Named(name, tpe)
+              //             ((named -> ref) :: Nil, (ref -> p.Term.Select(Nil, named)) :: Nil).success
+              //         }
+              //   }
 
               // log <- log.info("Captured vars before removal", fnDeps.vars.toList.map(_.toString)*)
               // log <- log.info("Captured vars after removal", fnDepsWithoutExtraCaptures.vars.toList.map(_.toString)*)
 
               // we pass an empty var table because
-              ((rhsStmts, rhsTpe, rhsDeps), log) <- compileTerm(rhs, captureScope.toMap)(log)
+              ((rhsStmts, rhsTpe, rhsDeps), log) <- compileTerm(rhs, Map.empty)(log)
 
-              log <- log.info("External captures", capturedNames.map((n, r) => s"$r(symbol=${r.symbol}) ~> ${n.repr}")*)
+              // log <- log.info("External captures", capturedNames.map((n, r) => s"$r(symbol=${r.symbol}) ~> ${n.repr}")*)
 
-            } yield ((rhsStmts, rhsDeps, capturedNames), log)
+            } yield ((rhsStmts, rhsDeps), log)
         }
 
         compiledFn = p.Function(
@@ -156,7 +156,9 @@ object Compiler {
           tpeVars = receiverTpeVars ::: fnTypeVars,
           receiver = receiver,
           args = fnArgs.map(_._2),
-          captures = rhsCaptures.map(_._1),
+          captures =  rhsDeps.classes.collect {  
+            case (c, ts) if c.symbol.flags.is(q.Flags.Module)  && ts.size == 1 => ts.head
+          }.map(t => p.Named(t.name.fqn.mkString("_"), t) ).toList  ,
           rtn = fnRtnTpe,
           body = rhsStmts
         )
@@ -235,7 +237,9 @@ object Compiler {
       tpeVars = Nil,
       receiver = None,
       args = Nil,
-      captures = capturedNames.map(_._1),
+      captures = capturedNames.map(_._1) ++ exprDeps.classes.collect {  
+            case (c, ts) if c.symbol.flags.is(q.Flags.Module)  && ts.size == 1 => ts.head
+          }.map(t => p.Named(t.name.fqn.mkString("_"), t) ).toList ,
       rtn = exprTpe,
       body = exprStmts
     )

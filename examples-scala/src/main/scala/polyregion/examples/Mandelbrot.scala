@@ -130,8 +130,13 @@ object Mandelbrot {
   // given NativeStruct[Complex] = polyregion.compiletime.nativeStructOf
   // given NativeStruct[ItResult] = polyregion.compiletime.nativeStructOf
 
-  object FooProper{
-    def bar = 1+1
+  val out = 1
+  object FooProper {
+    var out1 = 1
+    def bar = {
+      out1 += 1
+      1 + out + out1
+    }
   }
 
   def run(buffer: Array[Array[Colour]], width: Int, height: Int, poiX: Double, poiY: Double, scale: Double): Unit = {
@@ -245,8 +250,9 @@ object Mandelbrot {
     polyregion.scala.compiletime.offload {
 
       FooProper.bar
-      val u  = math.max(1, 2)
-      val u2 = Math.max(1, 2)
+      val m = 1+1
+//      val u  = math.max(1, 2)
+//      val u2 = Math.max(1, 2)
 
 //       val x = 1 + 1.toDouble
 
