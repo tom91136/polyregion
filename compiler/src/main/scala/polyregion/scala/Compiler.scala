@@ -144,7 +144,7 @@ object Compiler {
               // log <- log.info("Captured vars after removal", fnDepsWithoutExtraCaptures.vars.toList.map(_.toString)*)
 
               // we pass an empty var table because
-              ((rhsStmts, rhsTpe, rhsDeps), log) <- compileTerm(rhs, Map.empty)(log)
+              ((rhsStmts, rhsTpe, rhsDeps), log) <- compileTerm(term = rhs, root = f.symbol, scope = Map.empty)(log)
 
               // log <- log.info("External captures", capturedNames.map((n, r) => s"$r(symbol=${r.symbol}) ~> ${n.repr}")*)
 
@@ -156,9 +156,12 @@ object Compiler {
           tpeVars = receiverTpeVars ::: fnTypeVars,
           receiver = receiver,
           args = fnArgs.map(_._2),
-          captures =  rhsDeps.classes.collect {  
-            case (c, ts) if c.symbol.flags.is(q.Flags.Module)  && ts.size == 1 => ts.head
-          }.map(t => p.Named(t.name.fqn.mkString("_"), t) ).toList  ,
+          captures = rhsDeps.classes
+            .collect {
+              case (c, ts) if c.symbol.flags.is(q.Flags.Module) && ts.size == 1 => ts.head
+            }
+            .map(t => p.Named(t.name.fqn.mkString("_"), t))
+            .toList,
           rtn = fnRtnTpe,
           body = rhsStmts
         )
@@ -169,13 +172,14 @@ object Compiler {
       } yield ((compiledFn, rhsDeps), log)
     }
 
-  def compileTerm(using q: Quoted)(term: q.Term, scope: Map[q.Ref, p.Term])(log: Log) //
+  def compileTerm(using q: Quoted)(term: q.Term, root: q.Symbol, scope: Map[q.Ref, p.Term])(log: Log) //
       : Result[((List[p.Stmt], p.Type, q.Dependencies), Log)] =
     log.mark(s"Compile term: ${term.pos.sourceFile.name}:${term.pos.startLine}~${term.pos.endLine}") { log =>
       for {
-        log            <- log.info("Body (AST)", pprint.tokenize(term, indent = 1, showFieldNames = true).mkString)
-        log            <- log.info("Body (Ascii)", term.show(using q.Printer.TreeAnsiCode))
-        (termValue, c) <- q.RemapContext(refs = scope).mapTerm(term)
+        log <- log.info("Body (AST)", pprint.tokenize(term, indent = 1, showFieldNames = true).mkString)
+        log <- log.info("Body (Ascii)", term.show(using q.Printer.TreeAnsiCode))
+        _ = println(s">T=${root}")
+        (termValue, c) <- q.RemapContext(root = root, refs = scope).mapTerm(term)
         (_, termTpe)   <- Retyper.typer0(term.tpe)
         _ <-
           if (termTpe != termValue.tpe) {
@@ -211,7 +215,11 @@ object Compiler {
         }
     }
 
-    ((exprStmts, exprTpe, exprDeps), log) <- compileTerm(term, captureScope.toMap)(log)
+    ((exprStmts, exprTpe, exprDeps), log) <- compileTerm(
+      term = term,
+      root = q.Symbol.spliceOwner,
+      scope = captureScope.toMap
+    )(log)
 
     log <- log.info("Expr Stmts", exprStmts.map(_.repr).mkString("\n"))
     log <- log.info("External captures", capturedNames.map((n, r) => s"$r(symbol=${r.symbol}) ~> ${n.repr}")*)
@@ -237,9 +245,12 @@ object Compiler {
       tpeVars = Nil,
       receiver = None,
       args = Nil,
-      captures = capturedNames.map(_._1) ++ exprDeps.classes.collect {  
-            case (c, ts) if c.symbol.flags.is(q.Flags.Module)  && ts.size == 1 => ts.head
-          }.map(t => p.Named(t.name.fqn.mkString("_"), t) ).toList ,
+      captures = capturedNames.map(_._1) ++ exprDeps.classes
+        .collect {
+          case (c, ts) if c.symbol.flags.is(q.Flags.Module) && ts.size == 1 => ts.head
+        }
+        .map(t => p.Named(t.name.fqn.mkString("_"), t))
+        .toList,
       rtn = exprTpe,
       body = exprStmts
     )

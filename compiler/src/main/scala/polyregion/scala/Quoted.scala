@@ -39,6 +39,7 @@ class Quoted(val underlying: scala.quoted.Quotes) {
 
   // TODO rename to RemapContext
   case class RemapContext(
+      root : Symbol,
       depth: Int = 0,                  // ref depth
       traces: List[Tree] = List.empty, // debug
 

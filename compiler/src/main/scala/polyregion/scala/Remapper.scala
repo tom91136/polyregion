@@ -32,6 +32,11 @@ object Remapper {
 
   extension (using q: Quoted)(c: q.RemapContext) {
 
+    private def ownersList(sym: q.Symbol): LazyList[q.Symbol] =
+      LazyList.unfold(sym.maybeOwner)(s => if (s.isNoSymbol) None else Some(s, s.maybeOwner))
+
+    private def owningClassSymbol(sym: q.Symbol): Option[q.Symbol] = c.ownersList(sym).find(_.isClassDef)
+
     def mapTrees(args: List[q.Tree]): Result[(p.Term, q.RemapContext)] = args match {
       case Nil => (p.Term.UnitConst, c).pure
       case x :: xs =>
@@ -182,8 +187,39 @@ object Remapper {
               } yield ivk
             case _ => mkSelect
           }
-
         }
+
+        def handleNestedObjectSelect(ref: q.Ref, named: p.Named) =
+          if (c.ownersList(ref.symbol).forall(_.flags.is(q.Flags.Module))) {
+            // We handle any reference to arbitrarily nested objects (and object only) directly because they are singletons
+            // (e.g. can appear anywhere with no dependencies, even the owner).
+            val selectOwner = ref.symbol.maybeOwner
+            Some(for {
+              tpe <- clsSymTyper0(selectOwner)
+              c   <- witnessClassTpe(c)(selectOwner, tpe)
+              (term, c) <- tpe match {
+                case s @ p.Type.Struct(rootName, Nil, Nil) =>
+                  val directRoot = p.Named(rootName.fqn.mkString("_"), s)
+                  invokeOrSelect(c)(ref.symbol, Some(p.Term.Select(Nil, directRoot)))(
+                    p.Term.Select(directRoot :: Nil, named).success
+                  )
+                case bad =>
+                  s"Illegal type ($bad) derived for owner of ${named.repr}, expecting an object class with no generics and type vars".fail
+              }
+            } yield (term, c))
+          } else None
+
+        def handleThisIdent(ident: q.Ident, named: p.Named) =
+          if (c.owningClassSymbol(c.root).contains(ident.symbol.maybeOwner)) {
+            // When an ident is owned by the current class/object (i.e. `c.root`), we add an implicit `this` reference.
+            Some(for {
+              tpe <- clsSymTyper0(ident.symbol.owner) // TODO what about generics???
+              cls = p.Named("this", tpe)
+              (invoke, c) <- invokeOrSelect(c)(ident.symbol, Some(p.Term.Select(Nil, cls)))(
+                p.Term.Select(cls :: Nil, named).success
+              )
+            } yield (invoke, c))
+          } else None
 
         ref match {
           case ident @ q.Ident(s) => // this is the root of q.Select, it can appear at top-level as well
@@ -194,43 +230,19 @@ object Remapper {
               case _                               => s
             }
             val local = p.Named(name, tpe)
-            // When an ident is owned by a class/object (i.e. not owned by a DefDef) we add an implicit `this` reference;
-            // this is valid because the current scope (we're probably a class method) of this ident permits such access.
-            // In any other case, we're probably referencing a local ValDef that appeared before before this.
-            if (ident.symbol.maybeOwner.isClassDef) {
-              for {
-                tpe <- clsSymTyper0(ident.symbol.owner) // TODO what about generics???
-                cls = p.Named("this", tpe)
-                (invoke, c) <- invokeOrSelect(c)(ident.symbol, Some(p.Term.Select(Nil, cls)))(
-                  p.Term.Select(cls :: Nil, local).success
-                )
-              } yield (invoke, c)
-            } else invokeOrSelect(c)(ident.symbol, None)(p.Term.Select(Nil, local).success)
-          case select @ q.Select(qualifierTerm, name) =>
-            val allOwnersAreModules = c.ownersList(select.symbol).forall(_.flags.is(q.Flags.Module))
-            if (allOwnersAreModules) {
-              // We handle any reference to objects (can be nested in more objects) directly because
-              // they are singleton (e.g. can appear anywhere with no dependencies, even the owner).
-              // We must do this early because once we hit ident we will get a reference to `this` of the wrong type.
-              val rootSymbol = select.symbol.maybeOwner
-              for {
-                tpe <- clsSymTyper0(rootSymbol)
-                c   <- witnessClassTpe(c)(rootSymbol, tpe)
-                (term, c) <- tpe match {
-                  case s @ p.Type.Struct(rootName, Nil, Nil) =>
-                    val directRoot = p.Named(rootName.fqn.mkString("_"), s)
-                    invokeOrSelect(c)(select.symbol, Some(p.Term.Select(Nil, directRoot)))(
-                      p.Term.Select(directRoot :: Nil, p.Named(name, tpe)).success
-                    )
-                  case bad =>
-                    s"Illegal type ($bad) derived for owner of $name :$tpe, expecting an object class with no generics and type vars".fail
-                }
-              } yield (term, c)
-            } else {
+            handleThisIdent(ident, local)
+              .orElse(handleNestedObjectSelect(ident, local))
+              .getOrElse {
+                // In any other case, we're probably referencing a local ValDef that appeared before before this.
+                invokeOrSelect(c)(ident.symbol, None)(p.Term.Select(Nil, local).success)
+              }
+          case select @ q.Select(qualifierTerm, name) => // we have qualifiers before the actual name
+            val named = p.Named(name, tpe)
+            handleNestedObjectSelect(select, named).getOrElse {
               // Otherwise we go through the usual path of resolution (nested classes where each instance has an `this` reference to the owning class)
               c.mapTerm(qualifierTerm).flatMap {
                 case (recv @ p.Term.Select(xs, x), c) => // fuse with previous select if we got one
-                  invokeOrSelect(c)(select.symbol, Some(recv))(p.Term.Select(xs :+ x, p.Named(name, tpe)).success)
+                  invokeOrSelect(c)(select.symbol, Some(recv))(p.Term.Select(xs :+ x, named).success)
                 case (term, c) => // or simply return whatever it's referring to
                   // `$qualifierTerm.$name` becomes `$term.${select.symbol}()` so we don't need the `$name` here
                   invokeOrSelect(c)(select.symbol, Some(term))(
@@ -240,9 +252,6 @@ object Remapper {
             }
         }
     }
-
-    private def ownersList(sym: q.Symbol): LazyList[q.Symbol] =
-      LazyList.unfold(sym.maybeOwner)(s => if (s.isNoSymbol) None else Some(s, s.maybeOwner))
 
     def witnessTpe(tpe: q.TypeRepr) = (tpe.classSymbol) match {
       case Some(clsSym) if !clsSym.isNoSymbol =>
