@@ -75,6 +75,14 @@ object Compiler {
     }(_._1.nonEmpty)
     .map(_.drop(1))
 
+  private def deriveModuleStructCaptures(using q: Quoted)(d: q.Dependencies): List[p.Named] =
+    d.classes
+      .collect {
+        case (c, ts) if c.symbol.flags.is(q.Flags.Module) && ts.size == 1 => ts.head
+      }
+      .map(t => p.Named(t.name.fqn.mkString("_"), t))
+      .toList
+
   def compileFn(using q: Quoted)(f: q.DefDef)(log: Log): Result[((p.Function, q.Dependencies), Log)] =
     log.mark(s"Compile DefDef: ${f.name}") { log =>
       for {
@@ -156,12 +164,7 @@ object Compiler {
           tpeVars = receiverTpeVars ::: fnTypeVars,
           receiver = receiver,
           args = fnArgs.map(_._2),
-          captures = rhsDeps.classes
-            .collect {
-              case (c, ts) if c.symbol.flags.is(q.Flags.Module) && ts.size == 1 => ts.head
-            }
-            .map(t => p.Named(t.name.fqn.mkString("_"), t))
-            .toList,
+          captures = deriveModuleStructCaptures(rhsDeps),
           rtn = fnRtnTpe,
           body = rhsStmts
         )
@@ -176,9 +179,8 @@ object Compiler {
       : Result[((List[p.Stmt], p.Type, q.Dependencies), Log)] =
     log.mark(s"Compile term: ${term.pos.sourceFile.name}:${term.pos.startLine}~${term.pos.endLine}") { log =>
       for {
-        log <- log.info("Body (AST)", pprint.tokenize(term, indent = 1, showFieldNames = true).mkString)
-        log <- log.info("Body (Ascii)", term.show(using q.Printer.TreeAnsiCode))
-        _ = println(s">T=${root}")
+        log            <- log.info("Body (AST)", pprint.tokenize(term, indent = 1, showFieldNames = true).mkString)
+        log            <- log.info("Body (Ascii)", term.show(using q.Printer.TreeAnsiCode))
         (termValue, c) <- q.RemapContext(root = root, refs = scope).mapTerm(term)
         (_, termTpe)   <- Retyper.typer0(term.tpe)
         _ <-
@@ -217,7 +219,7 @@ object Compiler {
 
     ((exprStmts, exprTpe, exprDeps), log) <- compileTerm(
       term = term,
-      root = q.Symbol.spliceOwner,
+      root = q.Symbol.noSymbol, // XXX not `spliceOwner` for now to avoid `this` captures
       scope = captureScope.toMap
     )(log)
 
@@ -245,20 +247,19 @@ object Compiler {
       tpeVars = Nil,
       receiver = None,
       args = Nil,
-      captures = capturedNames.map(_._1) ++ exprDeps.classes
-        .collect {
-          case (c, ts) if c.symbol.flags.is(q.Flags.Module) && ts.size == 1 => ts.head
-        }
-        .map(t => p.Named(t.name.fqn.mkString("_"), t))
-        .toList,
+      captures = capturedNames.map(_._1) ++ deriveModuleStructCaptures(deps),
       rtn = exprTpe,
       body = exprStmts
     )
-    capturedNameTable = capturedNames.toMap
 
-    sdefs <- exprDeps.classes.toList.traverse { (clsDef, aps) =>
+    sdefs <- deps.classes.toList.traverse { (clsDef, aps) =>
       structDef0(clsDef.symbol).map(_ -> aps)
     }
+
+    captureNameToModuleRefTable = deps.classes.collect {
+      case (c, ts) if c.symbol.flags.is(q.Flags.Module) && ts.size == 1 =>
+        ts.head.name.fqn.mkString("_") -> selectObject(c.symbol)
+    }.toMap
 
     unoptimisedProgram = p.Program(exprFn, depFns, sdefs.map(_._1))
     log <- log.info(s"Program compiled, dependencies: ${unoptimisedProgram.functions.size}")
@@ -294,10 +295,20 @@ object Compiler {
 
     log <- log.info(s"Program optimised, dependencies", optimisedProgram.functions.map(_.repr)*)
     log <- log.info(s"Program optimised, entry", optimisedProgram.entry.repr)
-    // log                 <- log.info(s"Program optimised, entry", captures.map(_.toString)*)
-
     _ = println(log.render().mkString("\n"))
 
-  } yield (optimisedProgram.entry.captures.map(n => n -> capturedNameTable(n)), optimisedProgram, log)
+    capturedNameTable = capturedNames.map((name, ref) => name.symbol -> (name.tpe, ref)).toMap
+    captured <- optimisedProgram.entry.captures.traverse { n =>
+      // Struct type of symbols may have been modified through specialisation so we just validate whether it's still a struct for now
+      capturedNameTable.get(n.symbol) match {
+        case None                                       => (n -> captureNameToModuleRefTable(n.symbol)).success
+        case Some((tpe, ref)) if tpe.kind == n.tpe.kind => (n -> ref).success
+        case Some((tpe, ref)) =>
+          s"Unexpected type conversion, capture was ${tpe.repr} for ${ref} but function expected ${n.repr}".fail
+
+      }
+    }
+
+  } yield (captured, optimisedProgram, log)
 
 }

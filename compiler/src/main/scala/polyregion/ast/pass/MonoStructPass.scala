@@ -29,14 +29,29 @@ object MonoStructPass {
 
     val replacementTable = monoStructDefs.toMap
 
-    val body = program.entry.body.flatMap(s =>
-      s.mapType {
-        case s: p.Type.Struct => replacementTable.get(s).map(x => p.Type.Struct(x.name, Nil, Nil)).getOrElse(s)
-        case x                => x
-      }
-    )
+    def doReplacement(t: p.Type) = t match {
+      case s: p.Type.Struct => replacementTable.get(s).map(x => p.Type.Struct(x.name, Nil, Nil)).getOrElse(s)
+      case x                => x
+    }
 
-    (p.Program(program.entry.copy(body = body), Nil, monoStructDefs.map(_._2)), log)
+    val body     = program.entry.body.flatMap(_.mapType(doReplacement(_)))
+    val args     = program.entry.args.map(_.mapType(doReplacement(_)))
+    val receiver = program.entry.receiver.map(_.mapType(doReplacement(_)))
+    val captures = program.entry.captures.map(_.mapType(doReplacement(_)))
+    
+
+    (
+      p.Program(
+        entry = program.entry.copy(
+          body = body,
+          // receiver = receiver,
+          captures = captures
+        ),
+        functions = Nil,
+        defs = monoStructDefs.map(_._2)
+      ),
+      log
+    )
 
   }
 

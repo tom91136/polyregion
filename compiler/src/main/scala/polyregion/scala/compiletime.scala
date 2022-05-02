@@ -68,6 +68,7 @@ object compiletime {
     Retyper.lowerClassType[A] match {
       case Left(e) => throw e
       case Right(sdef) =>
+        println(s"Do sdef=${sdef.repr}")
         val layout = PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, sdef)))
         println(s"layout=${layout}")
 
@@ -136,11 +137,19 @@ object compiletime {
 
             override def decode(buffer: java.nio.ByteBuffer, index: Int): A = {
               val offset = sizeInBytes * index
+
               ${
-                Select
-                  .unique(New(TypeTree.of[A]), "<init>")
-                  .appliedToArgs(fields.map((named, member) => decodeField('buffer, 'offset, named, member).asTerm))
+                val tpeTree  = Q.TypeTree.of[A]
+                val isObject = tpeTree.tpe.typeSymbol.flags.is(Q.Flags.Module)
+                if (isObject) {
+                  // Remapper.selectObject(tpeTree.tpe.typeSymbol)
+                   '{ ??? }.asExprOf[A]
+                } else {
+                  Q.Select
+                  .unique(Q.New(tpeTree), "<init>")
+                   .appliedToArgs(fields.map((named, member) => decodeField('buffer, 'offset, named, member).asTerm))
                   .asExprOf[A]
+                }
               }
             }
           }
@@ -356,17 +365,18 @@ object compiletime {
       val captureExprs = captures.map { (name, ident) =>
         val expr = ident.asExpr
         val wrapped = name.tpe match {
-          case p.Type.Unit   => '{ Buffer.empty[Int] }
-          case p.Type.Bool   => '{ Buffer[Boolean](${ expr.asExprOf[Boolean] }) }
-          case p.Type.Byte   => '{ Buffer[Byte](${ expr.asExprOf[Byte] }) }
-          case p.Type.Char   => '{ Buffer[Char](${ expr.asExprOf[Char] }) }
-          case p.Type.Short  => '{ Buffer[Short](${ expr.asExprOf[Short] }) }
-          case p.Type.Int    => '{ Buffer[Int](${ expr.asExprOf[Int] }) }
-          case p.Type.Long   => '{ Buffer[Long](${ expr.asExprOf[Long] }) }
-          case p.Type.Float  => '{ Buffer[Float](${ expr.asExprOf[Float] }) }
-          case p.Type.Double => '{ Buffer[Double](${ expr.asExprOf[Double] }) }
+          case p.Type.Unit            => '{ Buffer.empty[Int] }
+          case p.Type.Bool            => '{ Buffer[Boolean](${ expr.asExprOf[Boolean] }) }
+          case p.Type.Byte            => '{ Buffer[Byte](${ expr.asExprOf[Byte] }) }
+          case p.Type.Char            => '{ Buffer[Char](${ expr.asExprOf[Char] }) }
+          case p.Type.Short           => '{ Buffer[Short](${ expr.asExprOf[Short] }) }
+          case p.Type.Int             => '{ Buffer[Int](${ expr.asExprOf[Int] }) }
+          case p.Type.Long            => '{ Buffer[Long](${ expr.asExprOf[Long] }) }
+          case p.Type.Float           => '{ Buffer[Float](${ expr.asExprOf[Float] }) }
+          case p.Type.Double          => '{ Buffer[Double](${ expr.asExprOf[Double] }) }
           case p.Type.Struct(_, _, _) =>
-            val tc = Q.TypeRepr.of[NativeStruct].appliedTo(ident.tpe.widenTermRefByName)
+            // println(s"Do NS: ${ident.tpe}")
+            val tc = Q.TypeRepr.of[NativeStruct].appliedTo(ident.tpe)
             val imp = Q.Implicits.search(tc) match {
               case ok: Q.ImplicitSearchSuccess   => ok.tree.asExpr
               case fail: Q.ImplicitSearchFailure => Q.report.errorAndAbort(fail.explanation, ident.asExpr)

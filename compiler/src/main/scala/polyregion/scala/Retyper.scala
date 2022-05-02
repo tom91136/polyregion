@@ -31,6 +31,7 @@ object Retyper {
     // XXX there appears to be a bug where an assertion error is thrown if we call the start/end (but not the pos itself)
     // of certain type of trees returned from fieldMembers
     tpeSym.fieldMembers
+      .filterNot(_.flags.is(q.Flags.Module))
       .filter(_.maybeOwner == tpeSym) // TODO local members for now, need to workout inherited members
       .sortBy(_.pos.map(p => (p.startLine, p.startColumn))) // make sure the order follows source code decl. order
       .traverse(field =>
@@ -53,7 +54,8 @@ object Retyper {
     // XXX there appears to be a bug where an assertion error is thrown if we call the start/end (but not the pos itself)
     // of certain type of trees returned from fieldMembers
     clsSym.fieldMembers
-      .filter(_.maybeOwner == clsSym) // TODO local members for now, need to workout inherited members
+      .filterNot(_.flags.is(q.Flags.Module)) // exclude objects for now
+      .filter(_.maybeOwner == clsSym)        // TODO local members for now, need to workout inherited members
       .sortBy(_.pos.map(p => (p.startLine, p.startColumn))) // make sure the order follows source code decl. order
       .traverse(field =>
         (field.tree match { // TODO we need to work out nested structs

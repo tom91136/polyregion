@@ -30,12 +30,17 @@ object Remapper {
     case x                      => x
   }
 
+  def ownersList(using q: Quoted)(sym: q.Symbol): LazyList[q.Symbol] =
+    LazyList.unfold(sym.maybeOwner)(s => if (s.isNoSymbol) None else Some(s, s.maybeOwner))
+
+  def owningClassSymbol(using q: Quoted)(sym: q.Symbol): Option[q.Symbol] = ownersList(sym).find(_.isClassDef)
+
+  def selectObject(using q: Quoted)(objectSymbol: q.Symbol) =
+    // XXX There's an `q.Ref.apply(q.Symbol)` but that expects a *term* symbol.
+    // There really should be an API for `q.TermRef` that is constructable from a plain class symbol
+    q.Ref.term(q.TermRef(q.TypeIdent(objectSymbol.maybeOwner).tpe, objectSymbol.name))
+
   extension (using q: Quoted)(c: q.RemapContext) {
-
-    private def ownersList(sym: q.Symbol): LazyList[q.Symbol] =
-      LazyList.unfold(sym.maybeOwner)(s => if (s.isNoSymbol) None else Some(s, s.maybeOwner))
-
-    private def owningClassSymbol(sym: q.Symbol): Option[q.Symbol] = c.ownersList(sym).find(_.isClassDef)
 
     def mapTrees(args: List[q.Tree]): Result[(p.Term, q.RemapContext)] = args match {
       case Nil => (p.Term.UnitConst, c).pure
@@ -190,7 +195,7 @@ object Remapper {
         }
 
         def handleNestedObjectSelect(ref: q.Ref, named: p.Named) =
-          if (c.ownersList(ref.symbol).forall(_.flags.is(q.Flags.Module))) {
+          if (ownersList(ref.symbol).forall(_.flags.is(q.Flags.Module))) {
             // We handle any reference to arbitrarily nested objects (and object only) directly because they are singletons
             // (e.g. can appear anywhere with no dependencies, even the owner).
             val selectOwner = ref.symbol.maybeOwner
@@ -209,13 +214,13 @@ object Remapper {
             } yield (term, c))
           } else None
 
-        def handleThisIdent(ident: q.Ident, named: p.Named) =
-          if (c.owningClassSymbol(c.root).contains(ident.symbol.maybeOwner)) {
-            // When an ident is owned by the current class/object (i.e. `c.root`), we add an implicit `this` reference.
+        def handleThisRef(ref: q.Ref, named: p.Named) =
+          if (owningClassSymbol(c.root).contains(ref.symbol.maybeOwner)) {
+            // When an ref is owned by the current class/object (i.e. `c.root`), we add an implicit `this` reference.
             Some(for {
-              tpe <- clsSymTyper0(ident.symbol.owner) // TODO what about generics???
+              tpe <- clsSymTyper0(ref.symbol.owner) // TODO what about generics???
               cls = p.Named("this", tpe)
-              (invoke, c) <- invokeOrSelect(c)(ident.symbol, Some(p.Term.Select(Nil, cls)))(
+              (invoke, c) <- invokeOrSelect(c)(ref.symbol, Some(p.Term.Select(Nil, cls)))(
                 p.Term.Select(cls :: Nil, named).success
               )
             } yield (invoke, c))
@@ -230,7 +235,7 @@ object Remapper {
               case _                               => s
             }
             val local = p.Named(name, tpe)
-            handleThisIdent(ident, local)
+            handleThisRef(ident, local)
               .orElse(handleNestedObjectSelect(ident, local))
               .getOrElse {
                 // In any other case, we're probably referencing a local ValDef that appeared before before this.
@@ -238,7 +243,9 @@ object Remapper {
               }
           case select @ q.Select(qualifierTerm, name) => // we have qualifiers before the actual name
             val named = p.Named(name, tpe)
-            handleNestedObjectSelect(select, named).getOrElse {
+            handleThisRef(select, named)
+            .orElse(handleNestedObjectSelect(select, named))
+            .getOrElse {
               // Otherwise we go through the usual path of resolution (nested classes where each instance has an `this` reference to the owning class)
               c.mapTerm(qualifierTerm).flatMap {
                 case (recv @ p.Term.Select(xs, x), c) => // fuse with previous select if we got one

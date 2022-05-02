@@ -247,52 +247,52 @@ object Mandelbrot {
 
     val a = 1
 
-    polyregion.scala.compiletime.offload {
-
-      FooProper.bar
-      val m = 1+1
-//      val u  = math.max(1, 2)
-//      val u2 = Math.max(1, 2)
-
-//       val x = 1 + 1.toDouble
-
-// //      B()
-// //      c.clsFn()
-// //      A.getter
-// //      A.gen[Int](2)
-// //      A.genGetter2[Int, Short]
-// //      localFn0
-// //      localFn()
-// ////      A.gen[Int](2)
-// //
-// ////      A.curryA(1)
-// //      A.genCurry[Int, Int](1,2)(3)
-
-// //      new Complex(1,2)\
-//       val s    = 1.0f
-//       val m    = new ItResult[Int, Float](s, 2)
-//       val out1 = m.read[Int]
-//       val out2 = m.read[Float]
-
-//       val m2 = new ItResult[Float, Int](2, 1.0f)
-
-//      ItResultFA(Complex(1.0, 1.0), 1)
-//      ItResult(Complex.Zero, 1)
-
-//      var y = 0
-//      while (y < height) {
-//        var x = 0
-//        while (x < width) {
-//          val c  = Complex(interpolate(x, 0, width, xMin, xMax), interpolate(y, 0, height, yMin, yMax))
-//          val t  = itMandel2(c, maxIter, 4)
-//          val cc = mkColour2(t.c, t.i, maxIter)
-//          image(x + (y * width)) = cc
-//          //          buffer(x)(y) = cc
-//          x += 1
-//        }
-//        y += 1
-//      }
-    }
+//    polyregion.scala.compiletime.offload {
+//
+//      FooProper.bar
+//      val m = 1+1
+////      val u  = math.max(1, 2)
+////      val u2 = Math.max(1, 2)
+//
+////       val x = 1 + 1.toDouble
+//
+//// //      B()
+//// //      c.clsFn()
+//// //      A.getter
+//// //      A.gen[Int](2)
+//// //      A.genGetter2[Int, Short]
+//// //      localFn0
+//// //      localFn()
+//// ////      A.gen[Int](2)
+//// //
+//// ////      A.curryA(1)
+//// //      A.genCurry[Int, Int](1,2)(3)
+//
+//// //      new Complex(1,2)\
+////       val s    = 1.0f
+////       val m    = new ItResult[Int, Float](s, 2)
+////       val out1 = m.read[Int]
+////       val out2 = m.read[Float]
+//
+////       val m2 = new ItResult[Float, Int](2, 1.0f)
+//
+////      ItResultFA(Complex(1.0, 1.0), 1)
+////      ItResult(Complex.Zero, 1)
+//
+////      var y = 0
+////      while (y < height) {
+////        var x = 0
+////        while (x < width) {
+////          val c  = Complex(interpolate(x, 0, width, xMin, xMax), interpolate(y, 0, height, yMin, yMax))
+////          val t  = itMandel2(c, maxIter, 4)
+////          val cc = mkColour2(t.c, t.i, maxIter)
+////          image(x + (y * width)) = cc
+////          //          buffer(x)(y) = cc
+////          x += 1
+////        }
+////        y += 1
+////      }
+//    }
 
     image.grouped(width).map(_.toArray).toArray.transpose.copyToArray(buffer)
 
