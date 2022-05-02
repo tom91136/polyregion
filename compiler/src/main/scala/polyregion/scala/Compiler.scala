@@ -258,7 +258,12 @@ object Compiler {
 
     captureNameToModuleRefTable = deps.classes.collect {
       case (c, ts) if c.symbol.flags.is(q.Flags.Module) && ts.size == 1 =>
-        ts.head.name.fqn.mkString("_") -> selectObject(c.symbol)
+
+      println(s" @@@  ${c.symbol}")
+      println(s" @@@  ${c.symbol.moduleClass}")
+      println(s" @@@  ${c.symbol.companionClass}")
+
+        ts.head.name.fqn.mkString("_") -> selectObject(c.symbol.moduleClass)
     }.toMap
 
     unoptimisedProgram = p.Program(exprFn, depFns, sdefs.map(_._1))

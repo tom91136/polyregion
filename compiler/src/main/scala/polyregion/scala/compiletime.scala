@@ -362,8 +362,8 @@ object compiletime {
         case p.Type.Unit   => Type.of[Unit]
       }
 
-      val captureExprs = captures.map { (name, ident) =>
-        val expr = ident.asExpr
+      val captureExprs = captures.map { (name, ref) =>
+        val expr = ref.asExpr
         val wrapped = name.tpe match {
           case p.Type.Unit            => '{ Buffer.empty[Int] }
           case p.Type.Bool            => '{ Buffer[Boolean](${ expr.asExprOf[Boolean] }) }
@@ -375,11 +375,18 @@ object compiletime {
           case p.Type.Float           => '{ Buffer[Float](${ expr.asExprOf[Float] }) }
           case p.Type.Double          => '{ Buffer[Double](${ expr.asExprOf[Double] }) }
           case p.Type.Struct(_, _, _) =>
-            // println(s"Do NS: ${ident.tpe}")
-            val tc = Q.TypeRepr.of[NativeStruct].appliedTo(ident.tpe)
+            
+            // Q.TypeIdent(Q.Symbol.classSymbol())
+            println(s"Do NS: ${(ref.tpe.typeSymbol)}")
+            
+            val tc = Q.TypeRepr.of[NativeStruct].appliedTo(ref.tpe.simplified.dealias)
+            println(s"Do NS: ${tc}")
+
             val imp = Q.Implicits.search(tc) match {
               case ok: Q.ImplicitSearchSuccess   => ok.tree.asExpr
-              case fail: Q.ImplicitSearchFailure => Q.report.errorAndAbort(fail.explanation, ident.asExpr)
+              case fail: Q.ImplicitSearchFailure =>
+
+                Q.report.errorAndAbort(fail.explanation, expr)
             }
             '{ Buffer.refAny(${ expr.asExprOf[Any] })(using $imp.asInstanceOf[NativeStruct[Any]]) }
           case p.Type.Array(p.Type.Bool)            => expr.asExprOf[Buffer[Boolean]]

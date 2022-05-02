@@ -35,10 +35,20 @@ object Remapper {
 
   def owningClassSymbol(using q: Quoted)(sym: q.Symbol): Option[q.Symbol] = ownersList(sym).find(_.isClassDef)
 
-  def selectObject(using q: Quoted)(objectSymbol: q.Symbol) =
+  def selectObject(using q: Quoted)(objectSymbol: q.Symbol) ={
     // XXX There's an `q.Ref.apply(q.Symbol)` but that expects a *term* symbol.
     // There really should be an API for `q.TermRef` that is constructable from a plain class symbol
-    q.Ref.term(q.TermRef(q.TypeIdent(objectSymbol.maybeOwner).tpe, objectSymbol.name))
+
+
+    println(s"N=${objectSymbol.name}")
+    println(s"N=${q.TypeIdent(objectSymbol).show}")
+    println(s"N=${q.TermRef(q.TypeIdent(objectSymbol.maybeOwner).tpe, s"object ${objectSymbol.name.dropRight(1)}").name}")
+
+    val t = q.Ref.term(q.TermRef(q.TypeIdent(objectSymbol.maybeOwner).tpe, s"object ${objectSymbol.name.dropRight(1)}"))
+    println(s"N=${t.tpe}")
+
+    t
+  }
 
   extension (using q: Quoted)(c: q.RemapContext) {
 
@@ -65,7 +75,8 @@ object Remapper {
           // case (v: q.ErasedMethodVal, tpe: q.ErasedFnTpe) => c.suspend(name -> tpe)(v)
         )
       case q.ValDef(name, tpe, None) => c.fail(s"Unexpected variable $name:$tpe")
-      // DefDef here comes from general closures ( (a:A) => ??? )
+      // TODO DefDef here comes from general closures ( (a:A) => ??? )
+      case q.Import(_, _) => (p.Term.UnitConst, c).success // ignore
       case t: q.Term => (c !! tree).mapTerm(t)
 
       // def f(x...) : A = ??? === val f : x... => A = ???
@@ -244,19 +255,19 @@ object Remapper {
           case select @ q.Select(qualifierTerm, name) => // we have qualifiers before the actual name
             val named = p.Named(name, tpe)
             handleThisRef(select, named)
-            .orElse(handleNestedObjectSelect(select, named))
-            .getOrElse {
-              // Otherwise we go through the usual path of resolution (nested classes where each instance has an `this` reference to the owning class)
-              c.mapTerm(qualifierTerm).flatMap {
-                case (recv @ p.Term.Select(xs, x), c) => // fuse with previous select if we got one
-                  invokeOrSelect(c)(select.symbol, Some(recv))(p.Term.Select(xs :+ x, named).success)
-                case (term, c) => // or simply return whatever it's referring to
-                  // `$qualifierTerm.$name` becomes `$term.${select.symbol}()` so we don't need the `$name` here
-                  invokeOrSelect(c)(select.symbol, Some(term))(
-                    "illegal selection of a non DefDef symbol from a primitive term (i.e `{ 1.$name }` )".fail
-                  )
+              .orElse(handleNestedObjectSelect(select, named))
+              .getOrElse {
+                // Otherwise we go through the usual path of resolution (nested classes where each instance has an `this` reference to the owning class)
+                c.mapTerm(qualifierTerm).flatMap {
+                  case (recv @ p.Term.Select(xs, x), c) => // fuse with previous select if we got one
+                    invokeOrSelect(c)(select.symbol, Some(recv))(p.Term.Select(xs :+ x, named).success)
+                  case (term, c) => // or simply return whatever it's referring to
+                    // `$qualifierTerm.$name` becomes `$term.${select.symbol}()` so we don't need the `$name` here
+                    invokeOrSelect(c)(select.symbol, Some(term))(
+                      "illegal selection of a non DefDef symbol from a primitive term (i.e `{ 1.$name }` )".fail
+                    )
+                }
               }
-            }
         }
     }
 
