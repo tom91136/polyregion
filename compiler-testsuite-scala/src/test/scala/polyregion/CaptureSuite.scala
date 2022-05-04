@@ -21,7 +21,7 @@ class CaptureSuite extends BaseSuite {
       final val FooConst = Foo(42, 43)
     }
 
-    given NativeStruct[Foo] = nativeStructOf
+//    given NativeStruct[Foo] = nativeStructOf
 
     testCapture("constant-of-struct") {
       val u = NotFooCompanion.FooConst
@@ -63,8 +63,8 @@ class CaptureSuite extends BaseSuite {
       val x = new Foo
       case class Node(elem: Int, next: Option[Node])
       case class A(b: Int, c: Int)
-      given NativeStruct[A] = nativeStructOf
-      val bufferOfA         = Buffer(A(1, 2), A(3, 4))
+//      given NativeStruct[A] = nativeStructOf
+      val bufferOfA         = Array(A(1, 2), A(3, 4))
       val node              = Node(1, Some(Node(2, None)))
       val (t1, t2)          = (1, 2)
       testCapture("complex-captures") {

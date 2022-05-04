@@ -80,10 +80,10 @@ lazy val compiler = project
         Seq("-Xmax-inlines", "64") // the AST has lots of leaf nodes and we use inline so bump the limit
     ,
     libraryDependencies ++= Seq(
-      "net.bytebuddy"  % "byte-buddy" % "1.12.9",
+      "net.bytebuddy"  % "byte-buddy" % "1.12.10",
       "com.lihaoyi"   %% "pprint"     % "0.7.3",
       "com.lihaoyi"   %% "fansi"      % "0.3.1",
-      "com.lihaoyi"   %% "upickle"    % "1.6.0",
+      "com.lihaoyi"   %% "upickle"    % "2.0.0",
       "org.typelevel" %% "cats-core"  % catsVersion
     ),
     (Compile / unmanagedJars) := {

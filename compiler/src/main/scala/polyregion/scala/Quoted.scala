@@ -7,6 +7,7 @@ class Quoted(val underlying: scala.quoted.Quotes) {
 
   import underlying.reflect.*
   export underlying.reflect.*
+  given quotes : scala.quoted.Quotes  = underlying
 
   // Reference = CaptureVarName | DefaultTermValue
   case class Reference(value: String | p.Term, tpe: p.Type)

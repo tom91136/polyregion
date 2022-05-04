@@ -38,7 +38,7 @@ class ExtensionSuite extends BaseSuite {
     infix def add(that: V3) = V3(a + that.a, b + that.b, c + that.c)
   }
 
-  inline given NativeStruct[V3] = nativeStructOf
+//  inline given NativeStruct[V3] = nativeStructOf
 
   {
     val a = 1

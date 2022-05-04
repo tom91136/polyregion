@@ -48,14 +48,14 @@ class StructSuite extends BaseSuite {
     def decode(buffer: _root_.java.nio.ByteBuffer, index: Int): A          = ???
   }
 
-  inline given NativeStruct[Char3]    = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
-  inline given NativeStruct[Byte3]    = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
-  inline given NativeStruct[Short3]   = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
-  inline given NativeStruct[Int3]     = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
-  inline given NativeStruct[Long3]    = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
-  inline given NativeStruct[Float3]   = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
-  inline given NativeStruct[Double3]  = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
-  inline given NativeStruct[Boolean3] = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
+//  inline given NativeStruct[Char3]    = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
+//  inline given NativeStruct[Byte3]    = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
+//  inline given NativeStruct[Short3]   = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
+//  inline given NativeStruct[Int3]     = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
+//  inline given NativeStruct[Long3]    = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
+//  inline given NativeStruct[Float3]   = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
+//  inline given NativeStruct[Double3]  = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
+//  inline given NativeStruct[Boolean3] = if (Toggles.StructSuite) nativeStructOf else dummyNativeStruct
 
   inline def testExpr[A](inline name: String)(inline r: => A) = if (Toggles.StructSuite) {
     test(name)(assertOffload(r))
@@ -117,7 +117,7 @@ class StructSuite extends BaseSuite {
   // }
 
   {
-    val xs = Buffer.tabulate(10)(x =>
+    val xs = Array.tabulate(10)(x =>
       Float3(
         x * math.Pi.toFloat * 1, //
         x * math.Pi.toFloat * 2, //

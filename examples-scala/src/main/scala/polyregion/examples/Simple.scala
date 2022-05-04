@@ -2,9 +2,9 @@ package polyregion.examples
 import polyregion.scala.{Buffer, NativeStruct}
 
 object A {
-  given NativeStruct[Simple.type]    = polyregion.scala.compiletime.nativeStructOf
-  given NativeStruct[Simple]    = polyregion.scala.compiletime.nativeStructOf
-  given NativeStruct[FooProper.type] = polyregion.scala.compiletime.nativeStructOf
+//  given NativeStruct[Simple.type]    = polyregion.scala.compiletime.nativeStructOf
+//  given NativeStruct[Simple]    = polyregion.scala.compiletime.nativeStructOf
+//  given NativeStruct[FooProper.type] = polyregion.scala.compiletime.nativeStructOf
 }
 
 object FooProper {
@@ -19,31 +19,30 @@ class Simple(val a: Int)
 object Simple {
   import A.{given, *}
 
+
+  scala.collection.immutable.Seq
+
   val out = 1
 
   def say = 2 + 1 + out
 
   def main(args: Array[String]): Unit = {
 
-    summon[NativeStruct[FooProper.type]]
+//    summon[NativeStruct[FooProper.type]]
 //    summon[NativeStruct[FooProper.type ]]
 
 
     polyregion.scala.compiletime.showExpr{
-      summon[NativeStruct[polyregion.examples.FooProper.type]]
+      1+1
     }
     println("Enter")
     val aa = Simple(2)
 
-    val a = polyregion.scala.compiletime.offload {
-      import A.{given, *}
-
-//      val x = FooProper.bar
-      // val y = say
-      val y = FooProper.bar
+    val a = /*polyregion.scala.compiletime.offload */{
+//      val y = FooProper.bar
+      val y = 1
       y
-//      val y = 1
-//      val m = 1 + 1 + out + y
+      //      val m = 1 + 1 + out + y
 //      m
     }
 

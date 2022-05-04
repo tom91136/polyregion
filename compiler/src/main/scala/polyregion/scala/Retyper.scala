@@ -8,41 +8,38 @@ import scala.util.Try
 
 object Retyper {
 
-  def lowerClassType[A: scala.quoted.Type](using q: Quoted): Result[p.StructDef] = lowerClassType(q.TypeRepr.of[A])
+//   def lowerClassType[A: scala.quoted.Type](using q: Quoted): Result[p.StructDef] = lowerClassType(q.TypeRepr.of[A])
 
-  def lowerClassType(using q: Quoted)(repr: q.TypeRepr): Result[p.StructDef] = lowerClassType0(repr.typeSymbol)
+//   def lowerClassType(using q: Quoted)(repr: q.TypeRepr): Result[p.StructDef] = lowerClassType0(repr.typeSymbol)
 
-  def lowerClassType0(using q: Quoted)(tpeSym: q.Symbol): Result[p.StructDef] =
-    // if ((tpeSym.flags.is(q.Flags.Module) || tpeSym.flags.is(q.Flags.Abstract)) && tpeSym.fieldMembers.nonEmpty) {
-    //   throw RuntimeException(
-    //     s"Unsupported combination of flags: ${tpeSym.flags.show} for ${tpeSym}, fields=${tpeSym.fieldMembers}"
-    //   )
-    // }
+//   def lowerClassType0(using q: Quoted)(tpeSym: q.Symbol): Result[p.StructDef] =
+//     // if ((tpeSym.flags.is(q.Flags.Module) || tpeSym.flags.is(q.Flags.Abstract)) && tpeSym.fieldMembers.nonEmpty) {
+//     //   throw RuntimeException(
+//     //     s"Unsupported combination of flags: ${tpeSym.flags.show} for ${tpeSym}, fields=${tpeSym.fieldMembers}"
+//     //   )
+//     // }
 
-    //  isTypeParam  &&  isAbstractType => class C[A]
-    // !isTypeParam  &&  isAbstractType => class C{ type A }
-    // !isTypeParam  && !isAbstractType => class C{ type A = Concrete }
-//    if (tpeSym.typeMembers.exists(_.isTypeParam)) {
-//      throw RuntimeException(
-//        s"Encountered generic class ${tpeSym.fullName}, typeCtorArg=${tpeSym.typeMembers.map(t => s"$t(param=${t.isAbstractType} ${t.isType})")}"
-//      )
-//    }
+// //    if (tpeSym.typeMembers.exists(_.isTypeParam)) {
+// //      throw RuntimeException(
+// //        s"Encountered generic class ${tpeSym.fullName}, typeCtorArg=${tpeSym.typeMembers.map(t => s"$t(param=${t.isAbstractType} ${t.isType})")}"
+// //      )
+// //    }
 
-    // XXX there appears to be a bug where an assertion error is thrown if we call the start/end (but not the pos itself)
-    // of certain type of trees returned from fieldMembers
-    tpeSym.fieldMembers
-      .filterNot(_.flags.is(q.Flags.Module))
-      .filter(_.maybeOwner == tpeSym) // TODO local members for now, need to workout inherited members
-      .sortBy(_.pos.map(p => (p.startLine, p.startColumn))) // make sure the order follows source code decl. order
-      .traverse(field =>
-        (field.tree match {
-          case d: q.ValDef =>
-            // TODO we need to work out nested structs
-            typer0(d.tpt.tpe).flatMap((_, t) => p.Named(field.name, t).success)
-          case _ => ???
-        })
-      )
-      .map(p.StructDef(p.Sym(tpeSym.fullName), Nil, _))
+//     // XXX there appears to be a bug where an assertion error is thrown if we call the start/end (but not the pos itself)
+//     // of certain type of trees returned from fieldMembers
+//     tpeSym.fieldMembers
+//       .filterNot(_.flags.is(q.Flags.Module))
+//       .filter(_.maybeOwner == tpeSym) // TODO local members for now, need to workout inherited members
+//       .sortBy(_.pos.map(p => (p.startLine, p.startColumn))) // make sure the order follows source code decl. order
+//       .traverse(field =>
+//         (field.tree match {
+//           case d: q.ValDef =>
+//             // TODO we need to work out nested structs
+//             typer0(d.tpt.tpe).flatMap((_, t) => p.Named(field.name, t).success)
+//           case _ => ???
+//         })
+//       )
+//       .map(p.StructDef(p.Sym(tpeSym.fullName), Nil, _))
 
   def structDef0(using q: Quoted)(clsSym: q.Symbol): Result[p.StructDef] = {
     if (clsSym.flags.is(q.Flags.Abstract)) {
@@ -66,6 +63,10 @@ object Retyper {
       .map(p.StructDef(p.Sym(clsSym.fullName), clsTypeCtorNames(clsSym), _))
   }
 
+  // Ctor rules
+  //  isTypeParam  &&  isAbstractType => class C[A]
+  // !isTypeParam  &&  isAbstractType => class C{ type A }
+  // !isTypeParam  && !isAbstractType => class C{ type A = Concrete }
   private def clsTypeCtorNames(using q: Quoted)(clsSym: q.Symbol): List[String] = clsSym.typeMembers
     .filter(t => t.isAbstractType && t.isTypeParam)
     .map(_.tree)

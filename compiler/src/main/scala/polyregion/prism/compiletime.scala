@@ -104,10 +104,8 @@ object compiletime {
         expectedStructDef: p.StructDef
     ): Result[(List[p.Function], q.Dependencies)] = for {
 
-
       log <- Log(s"Mirror for ${sourceMethodSym} -> ${mirrorMethodSym}")
       _ = println(s"Do ${sourceMethodSym}")
-
 
       sourceSignature <- sourceMethodSym.tree match {
         case d: q.DefDef => polyregion.scala.Compiler.deriveSignature(d, sourceClassKind)
@@ -150,7 +148,7 @@ object compiletime {
       sourceClassKind = if (sourceSym.flags.is(q.Flags.Module)) q.ClassKind.Object else q.ClassKind.Class
 
       _ = println(s">>## ${sourceSym.fullName} -> ${mirrorSym.fullName} ")
-      mirrorStruct <- Retyper.lowerClassType0(mirrorSym)
+      mirrorStruct <- Retyper.structDef0(mirrorSym)
       sourceMethodTable = sourceMethods.groupBy(_.symbol.name)
       _                 = println(s"${sourceMethodTable.mkString("\n\t")}")
       mirroredMethods <- mirrorMethods.flatTraverse { reflectedMirror =>

@@ -29,4 +29,15 @@ object Runtime {
       }
     }
 
+
+  new Array[Int](2)
+  enum BufferState{
+    case Async, Sync
+  }
+
+  // val buffer = Buffer[Foo] // derive...
+  //
+
+  // Map[AnyRef, ByteBuffer]
+
 }
