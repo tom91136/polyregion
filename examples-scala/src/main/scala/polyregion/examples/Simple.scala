@@ -1,5 +1,6 @@
 package polyregion.examples
 import polyregion.scala.{Buffer, NativeStruct}
+import scala.collection.mutable.ArrayBuffer
 
 object A {
 //  given NativeStruct[Simple.type]    = polyregion.scala.compiletime.nativeStructOf
@@ -19,7 +20,6 @@ class Simple(val a: Int)
 object Simple {
   import A.{given, *}
 
-
   scala.collection.immutable.Seq
 
   val out = 1
@@ -31,22 +31,33 @@ object Simple {
 //    summon[NativeStruct[FooProper.type]]
 //    summon[NativeStruct[FooProper.type ]]
 
-
-    polyregion.scala.compiletime.showExpr{
-      1+1
-    }
+    // polyregion.scala.compiletime.showExpr{
+    //   1+1
+    // }
     println("Enter")
     val aa = Simple(2)
 
-    val a = /*polyregion.scala.compiletime.offload */{
+    val x = 42
+    val y = 10
+
+    val xs = Array[Int](1, 2)
+    println(s"in=${xs.toList}")
+
+
+    val a = polyregion.scala.compiletime.offload {
 //      val y = FooProper.bar
-      val y = 1
-      y
+      val z = 42 + x + y
+      
+      xs(0) = 42
+      ()
       //      val m = 1 + 1 + out + y
 //      m
     }
+    val b = x + y
 
-    println(s"result = $a")
+    println(s"in=${xs.toList}")
+
+    println(s"result = $a $b")
     println("Done!")
   }
 

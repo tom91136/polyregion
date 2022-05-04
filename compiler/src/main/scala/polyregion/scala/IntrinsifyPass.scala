@@ -15,8 +15,6 @@ object IntrinsifyPass {
     val intrinsified = instanceInvokes ++ moduleInvokes
     val eliminated = dep.functions.flatMap { (fn, ivks) =>
 
-        
-
       val xs = ivks.filterNot(intrinsified.contains(_))
       if (xs.isEmpty) Map() else Map(fn -> xs)
     }
@@ -161,11 +159,14 @@ object IntrinsifyPass {
             case ">>>" => binaryNumericIntrinsic(x, y, rtn, idx, p.BinaryIntrinsicKind.BZSR)
           }
           (expr, stmts, inv :: Nil)
-        case ("apply" :: Nil, (xs @ p.Term.Select(_, p.Named(_, p.Type.Array(_)))), idx :: Nil)
+        case ("scala" :: "Array" :: "apply" :: Nil, (xs @ p.Term.Select(_, p.Named(_, p.Type.Array(_)))), idx :: Nil)
             if idx.tpe.kind == p.TypeKind.Integral =>
           (p.Expr.Index(xs, idx, rtn), Nil, inv :: Nil)
-        case ("update" :: Nil, (xs @ p.Term.Select(_, p.Named(_, p.Type.Array(_)))), idx :: x :: Nil)
-            if idx.tpe.kind == p.TypeKind.Integral =>
+        case (
+              "scala" :: "Array" :: "update" :: Nil,
+              (xs @ p.Term.Select(_, p.Named(_, p.Type.Array(_)))),
+              idx :: x :: Nil
+            ) if idx.tpe.kind == p.TypeKind.Integral =>
           (p.Expr.Alias(p.Term.UnitConst), p.Stmt.Update(xs, idx, x) :: Nil, inv :: Nil)
         case (unknownSym, recv, args) =>
           println(s"No instance intrinsic for call: $recv.`${unknownSym.mkString(".")}`(${args
