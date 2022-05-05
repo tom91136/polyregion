@@ -6,10 +6,8 @@ import polyregion.scala.{NativeStruct, *}
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.{compileTimeOnly, tailrec}
-import scala.annotation.experimental
 import scala.quoted.*
 import scala.util.Try
-import net.bytebuddy.agent.builder.AgentBuilder.Default.NativeMethodStrategy
 
 @compileTimeOnly("This class only exists at compile-time to expose offload methods")
 object compiletime {
@@ -211,6 +209,7 @@ object compiletime {
       val fnName           = Expr("lambda")
 
       val captureExprs = captures.map { (name, ref) =>
+        println(s"Capture ${name.repr} : ${ref}")
         (name.tpe, ref.tpe.asType) match {
           case (p.Type.Array(comp), x @ '[polyregion.scala.Buffer[a]]) =>
             '{ ${ ref.asExprOf[x.Underlying] }.backingBuffer }
@@ -237,7 +236,7 @@ object compiletime {
               val buffer = java.nio.ByteBuffer
                 .allocateDirect(${ Expr(Pickler.sizeOf(name.tpe, ref.tpe)) })
                 .order(java.nio.ByteOrder.nativeOrder)
-              ${ Pickler.writeUniform('buffer, '{ 0 }, name.tpe, ref.tpe, ref.asExpr) }
+              // ${ Pickler.writeUniform('buffer, '{ 0 }, name.tpe, ref.tpe, ref.asExpr) }
               buffer
             }
         }

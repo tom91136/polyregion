@@ -1,6 +1,6 @@
 Global / onChangedBuildSource := ReloadOnSourceChanges
 
-val scala3Version = "3.1.3-RC2"
+val scala3Version = "3.1.2"
 
 lazy val commonSettings = Seq(
   scalaVersion     := scala3Version,

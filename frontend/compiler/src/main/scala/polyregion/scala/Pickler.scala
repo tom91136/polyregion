@@ -1,7 +1,7 @@
 package polyregion.scala
 
 import polyregion.{Member, PolyregionCompiler}
-import polyregion.ast.{PolyAst as p, *}
+import polyregion.ast.{CppSourceMirror, MsgPack, PolyAst as p, *}
 import polyregion.scala.{NativeStruct, *}
 
 import scala.quoted.*
@@ -40,11 +40,20 @@ object Pickler {
   }
 
   inline def layoutOf(using q: Quoted)(repr: q.TypeRepr): polyregion.Layout = {
+
     val sdef = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
-    PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, sdef)))
+    
+    println(s"A=${sdef} ${repr.widenTermRefByName}")
+
+    // MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, sdef))
+    println(Check.H)
+
+    // println(CppSourceMirror.AdtHash)
+    // PolyregionCompiler.layoutOf(MsgPack.encode("a", sdef))
+    new polyregion.Layout()
   }
 
-  inline def sizeOf(using q: Quoted)(tpe: p.Type, repr: q.TypeRepr): Int = tpe match {
+   inline def sizeOf(using q: Quoted)(tpe: p.Type, repr: q.TypeRepr): Int = tpe match {
     case p.Type.Float           => java.lang.Float.BYTES
     case p.Type.Double          => java.lang.Double.BYTES
     case p.Type.Bool            => java.lang.Byte.BYTES
@@ -132,7 +141,7 @@ object Pickler {
     }
   }
 
-  def writeStruct(using
+  inline def writeStruct(using
       q: Quoted
   )(buffer: Expr[java.nio.ByteBuffer], index: Expr[Int], repr: q.TypeRepr, value: Expr[Any]) = {
     import q.given
@@ -157,9 +166,11 @@ object Pickler {
   (using q: Quoted) //
   (buffer: Expr[java.nio.ByteBuffer], index: Expr[Int], tpe: p.Type, repr: q.TypeRepr, value: Expr[Any]): Expr[Unit] = {
     import q.given
+    println(s"Write s=${repr} ${tpe}")
     tpe match {
-      case p.Type.Struct(name, tpeVars, args) => writeStruct(buffer, index, repr, value)
-      case p.Type.Array(comp)                 =>
+      case p.Type.Struct(name, tpeVars, args) =>
+        writeStruct(buffer, index, repr, value)
+      case p.Type.Array(comp) =>
         // TODO handle special case for where value == wrapped buffers; just unwrap it here
         repr.asType match {
           case x @ '[scala.Array[t]] =>
@@ -182,7 +193,8 @@ object Pickler {
         }
 
       case p.Type.String => ???
-      case t             => writePrimitiveAtOffset(buffer, '{ $index * ${ Expr(sizeOf(t, repr)) } }, t, value)
+      case t             => 
+        writePrimitiveAtOffset(buffer, '{ $index * ${ Expr(sizeOf(t, repr)) } }, t, value)
     }
   }
 

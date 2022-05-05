@@ -10,7 +10,6 @@ object MsgPack {
   trait Decoder[A] { def decode(msg: upack.Msg): A }
   trait Codec[A] extends Encoder[A], Decoder[A]
 
-
   given Codec[Boolean] = Codec(upack.Bool(_), _.bool)
   given Codec[String]  = Codec(upack.Str(_), _.str)
   given Codec[Byte]    = Codec(upack.Int32(_), _.int32.toByte)
@@ -19,25 +18,25 @@ object MsgPack {
   given Codec[Int]     = Codec(upack.Int32(_), _.int32)
   given Codec[Long]    = Codec(upack.Int64(_), _.int64)
   given Codec[Float] = Codec(
-  upack.Float32(_),
-  {
-    case upack.Float32(v)                            => v
-    case upack.Float64(v) if v.toFloat.toDouble == v => v.toFloat
-    case upack.Float64(v) => throw new Exception(s"Float64 to Float32 conversion with loss of precision: $v")
-    case x                => throw new Exception(s"Expected Float32/Float64, got $x")
-  }
+    upack.Float32(_),
+    {
+      case upack.Float32(v)                            => v
+      case upack.Float64(v) if v.toFloat.toDouble == v => v.toFloat
+      case upack.Float64(v) => throw new Exception(s"Float64 to Float32 conversion with loss of precision: $v")
+      case x                => throw new Exception(s"Expected Float32/Float64, got $x")
+    }
   )
   given Codec[Double] = Codec(
-  upack.Float64(_),
-  {
-    case upack.Float64(v) => v
-    case x                => throw new Exception(s"Expected Float32/Float64, got $x")
-  }
+    upack.Float64(_),
+    {
+      case upack.Float64(v) => v
+      case x                => throw new Exception(s"Expected Float32/Float64, got $x")
+    }
   )
   given [A](using C: Codec[A]): Codec[List[A]] =
     Codec(xs => upack.Arr(xs.map(C.encode(_))*), _.arr.map(m => C.decode(m)).toList)
 
-  given [A , B ](using C: Codec[(A, B)]): Codec[Map[A, B]] =
+  given [A, B](using C: Codec[(A, B)]): Codec[Map[A, B]] =
     Codec(
       xs => upack.Arr(xs.toList.map(C.encode(_))*),
       _.arr.map(C.decode(_)).toMap
@@ -51,7 +50,6 @@ object MsgPack {
 
   given [A](using C: Codec[A]): Codec[Option[A]] =
     Codec(_.fold(upack.Null)(C.encode(_)), x => if (x.isNull) None else Some(C.decode(x)))
-
 
   object Codec {
 

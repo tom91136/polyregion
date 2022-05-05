@@ -11,8 +11,9 @@ object A {
 object FooProper {
   var out1 = 1
   def bar = {
-    out1 += 1
-    1 + Simple.out + out1
+    // out1 += 1
+    // 1 + Simple.out + out1
+    1
   }
 }
 
@@ -22,46 +23,32 @@ object Simple {
 
   scala.collection.immutable.Seq
 
-  val out = 1
+  val out = 10
 
   def say = 2 + 1 + out
 
   def main(args: Array[String]): Unit = {
 
-
 //    summon[NativeStruct[FooProper.type]]
 //    summon[NativeStruct[FooProper.type ]]
 
     // polyregion.scala.compiletime.showExpr{
-    //   1+1
+    //   val m = FooProper
+    //   val n = m.out1
     // }
     println("Enter")
     val aa = Simple(2)
 
-    val x = 42
-    val y = 10
-
-    val xs = Buffer[Int](12, 2, 3)
-    println(s"in=${xs.toList}")
-
+      val x = 1
 
     val a = polyregion.scala.compiletime.offload {
-//      val y = FooProper.bar
+      val y = Simple.out
       val z = 42 + x + y
-
-      xs(0) = 43
-      xs(1) = 43
-//      xs(2) = 43
-
-      xs(0)
-      //      val m = 1 + 1 + out + y
-//      m
+      z
     }
-    val b = x + y
 
-    println(s"in=${xs.toList}")
 
-    println(s"result = $a $b")
+    println(s"result = $a")
     println("Done!")
   }
 

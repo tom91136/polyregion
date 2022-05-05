@@ -35,19 +35,11 @@ object Remapper {
 
   def owningClassSymbol(using q: Quoted)(sym: q.Symbol): Option[q.Symbol] = ownersList(sym).find(_.isClassDef)
 
-  def selectObject(using q: Quoted)(objectSymbol: q.Symbol) ={
-    // XXX There's an `q.Ref.apply(q.Symbol)` but that expects a *term* symbol.
-    // There really should be an API for `q.TermRef` that is constructable from a plain class symbol
-
-
-    println(s"N=${objectSymbol.name}")
-    println(s"N=${q.TypeIdent(objectSymbol).show}")
-    println(s"N=${q.TermRef(q.TypeIdent(objectSymbol.maybeOwner).tpe, s"object ${objectSymbol.name.dropRight(1)}").name}")
-
-    val t = q.Ref.term(q.TermRef(q.TypeIdent(objectSymbol.maybeOwner).tpe, s"object ${objectSymbol.name.dropRight(1)}"))
-    println(s"N=${t.tpe}")
-
-    t
+  def selectObject(using q: Quoted)(objectSymbol: q.Symbol): q.Ref = {
+    if (!objectSymbol.flags.is(q.Flags.Module)) {
+      q.report.error(s"Cannot select Ref from non-object type: ${objectSymbol}")
+    }
+    q.Ref.apply(objectSymbol.companionModule)
   }
 
   extension (using q: Quoted)(c: q.RemapContext) {
@@ -77,7 +69,7 @@ object Remapper {
       case q.ValDef(name, tpe, None) => c.fail(s"Unexpected variable $name:$tpe")
       // TODO DefDef here comes from general closures ( (a:A) => ??? )
       case q.Import(_, _) => (p.Term.UnitConst, c).success // ignore
-      case t: q.Term => (c !! tree).mapTerm(t)
+      case t: q.Term      => (c !! tree).mapTerm(t)
 
       // def f(x...) : A = ??? === val f : x... => A = ???
 

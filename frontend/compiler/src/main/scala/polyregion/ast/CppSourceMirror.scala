@@ -24,13 +24,13 @@ private[polyregion] object CppSourceMirror {
 
   import PolyAst._
 
-  private def md5(s: String): String = {
+  private inline def md5(s: String): String = {
     val md5 = MessageDigest.getInstance("MD5");
     md5.update(StandardCharsets.UTF_8.encode(s));
     String.format("%032x", new BigInteger(1, md5.digest()));
   }
 
-  private val structs = deriveStruct[Sym]() //
+  private final val structs = deriveStruct[Sym]() //
     :: deriveStruct[Named]()
     :: deriveStruct[TypeKind]()
     :: deriveStruct[Type]()
@@ -48,15 +48,15 @@ private[polyregion] object CppSourceMirror {
     :: deriveStruct[Program]()
     :: Nil
 
-  private val namespace         = "polyregion::polyast"
-  private val adtFileName       = "polyast"
-  private val jsonCodecFileName = "polyast_codec"
+  private final val namespace         = "polyregion::polyast"
+  private final val adtFileName       = "polyast"
+  private final val jsonCodecFileName = "polyast_codec"
 
-  private val adtSources       = structs.flatMap(_.emit)
-  private val jsonCodecSources = structs.flatMap(CppNlohmannJsonCodecGen.emit(_))
+  private final val adtSources       = structs.flatMap(_.emit)
+  private final val jsonCodecSources = structs.flatMap(CppNlohmannJsonCodecGen.emit(_))
 
-  private val adtHeader = StructSource.emitHeader(namespace, adtSources)
-  private val adtImpl   = StructSource.emitImpl(namespace, adtFileName, adtSources)
+  private final val adtHeader = StructSource.emitHeader(namespace, adtSources)
+  private final val adtImpl   = StructSource.emitImpl(namespace, adtFileName, adtSources)
 
   final val AdtHash = md5(adtHeader + adtImpl)
 
