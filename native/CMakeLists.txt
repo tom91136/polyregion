@@ -23,73 +23,33 @@ else ()
     set(CMAKE_CXX_COMPILE_OPTIONS_IPO -flto=thin)
 endif ()
 
+set(LLVM_SRC_VERSION 14.0.3)
+set(LLVM_SRC_DIR_IN_RELEASE llvm-${LLVM_SRC_VERSION}.src)
 
 FetchContent_Declare(
         llvm
-        URL https://github.com/llvm/llvm-project/releases/download/llvmorg-13.0.0/llvm-13.0.0.src.tar.xz
-        URL_HASH MD5=8c24626dce3ee9d87d1079ebf0897db5
-)
-
-FetchContent_Declare(
-        capstone
-        URL https://github.com/capstone-engine/capstone/archive/refs/tags/4.0.2.tar.gz
-        URL_HASH MD5=8894344c966a948f1248e66c91b53e2c
+        URL https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_SRC_VERSION}/llvm-${LLVM_SRC_VERSION}.src.tar.xz
+        URL_HASH SHA256=1e09e8c26e1b67bc94a128b62e9b9c24b70c697a2436a479c9e5eedc4ae29654
 )
 
 FetchContent_Declare(
         json
-        URL https://github.com/nlohmann/json/releases/download/v3.10.4/json.hpp
-        URL_HASH MD5=c55ff53aa6aa8b87b8313bc2fdcd032a
+        URL https://github.com/nlohmann/json/releases/download/v3.10.5/json.hpp
+        URL_HASH SHA256=e832d339d9e0c042e7dff807754769d778cf5d6ae9730ce21eed56de99cb5e86
         DOWNLOAD_NO_EXTRACT YES # this is a header only lib, so don't anything else
 )
 
 FetchContent_Declare(
         catch2
-        URL https://github.com/catchorg/Catch2/releases/download/v2.13.8/catch.hpp
-        URL_HASH MD5=e45f70693208dca2b6813a078e3e64eb
+        URL https://github.com/catchorg/Catch2/releases/download/v2.13.9/catch.hpp
+        URL_HASH SHA256=27da57c7a06d09be8dd81fab7246b79e7892b6ae7e4e49ba8631f1d5a955e3fc
         DOWNLOAD_NO_EXTRACT YES # this is a header only lib, so don't anything else
 )
-
-
-# FetchContent_MakeAvailable was introduced in 3.14
-# there also isn't a version that accepts extra args at the end for add_subdirectory
-# hence we write one ourselves
-macro(FetchContent_MakeAvailable_Args NAME ARGS)
-    FetchContent_GetProperties(${NAME})
-    if (NOT ${NAME}_POPULATED)
-        FetchContent_Populate(${NAME})
-        add_subdirectory(${${NAME}_SOURCE_DIR} ${${NAME}_BINARY_DIR} ${ARGS})
-    endif ()
-endmacro()
 
 
 # use new behaviour for IPO here (e.g enable where possible)
 cmake_policy(SET CMP0069 NEW)
 set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
-
-
-#### capstone ###
-#set(CAPSTONE_BUILD_TESTS OFF CACHE BOOL "Disable Capstone tests")
-#set(CAPSTONE_BUILD_SHARED OFF CACHE BOOL "Disable Capstone shared library")
-#set(CAPSTONE_BUILD_CSTOOL OFF CACHE BOOL "Disable cstool build")
-#
-#set(CAPSTONE_MIPS_SUPPORT OFF CACHE BOOL "")
-#set(CAPSTONE_PPC_SUPPORT OFF CACHE BOOL "")
-#set(CAPSTONE_SPARC_SUPPORT OFF CACHE BOOL "")
-#set(CAPSTONE_SYSZ_SUPPORT OFF CACHE BOOL "")
-#set(CAPSTONE_XCORE_SUPPORT OFF CACHE BOOL "")
-#set(CAPSTONE_M68K_SUPPORT OFF CACHE BOOL "")
-#set(CAPSTONE_TMS320C64X_SUPPORT OFF CACHE BOOL "")
-#set(CAPSTONE_M680X_SUPPORT OFF CACHE BOOL "")
-#set(CAPSTONE_EVM_SUPPORT OFF CACHE BOOL "")
-#set(CAPSTONE_OSXKERNEL_SUPPORT OFF CACHE BOOL "")
-#
-#set(CAPSTONE_ARM_SUPPORT ON CACHE BOOL "")
-#set(CAPSTONE_ARM64_SUPPORT ON CACHE BOOL "")
-#set(CAPSTONE_X86_SUPPORT ON CACHE BOOL "")
-#FetchContent_MakeAvailable_Args(capstone EXCLUDE_FROM_ALL)
-#include_directories("${capstone_BINARY_DIR}/include" "${capstone_SOURCE_DIR}/include")
-#### capstone ###
 
 
 set(USE_EXTERNAL_LLVM OFF)
@@ -149,16 +109,29 @@ else ()
     set(LLVM_INSTALL_UTILS OFF CACHE BOOL "")
 
     set(LLVM_ENABLE_BINDINGS OFF CACHE BOOL "")
-    set(LLVM_USE_HOST_TOOLS ON CACHE BOOL "")
-
+    set(LLVM_USE_HOST_TOOLS OFF CACHE BOOL "")
+    # XXX there appears to be a bug in llvm_create_cross_target where LLVM_INCLUDE_BENCHMARKS isn't honoured
+    # so we set LLVM_USE_HOST_TOOLS to off
 
     cmake_policy(SET CMP0116 OLD)
     set(CMAKE_POLICY_DEFAULT_CMP0116 OLD)
 
 
     # XXX all LLVM specific cmake variables must be set BEFORE FetchContent_MakeAvailable otherwise they have no effect
-    FetchContent_MakeAvailable_Args(llvm EXCLUDE_FROM_ALL)
+    # FetchContent_MakeAvailable was introduced in 3.14 but there isn't a version that accepts extra args at the end
+    # for add_subdirectory hence we write one ourselves for llvm only
+    FetchContent_GetProperties(llvm)
+    if (NOT llvm_POPULATED)
+        FetchContent_Populate(llvm)
+        # XXX as we are doing our custom FetchContent_MakeAvailable, SOURCE_SUBDIR isn't available so we do it manually here
+        set(llvm_SOURCE_DIR "${llvm_SOURCE_DIR}/${LLVM_SRC_DIR_IN_RELEASE}")
+        set(llvm_BINARY_DIR "${llvm_BINARY_DIR}/${LLVM_SRC_DIR_IN_RELEASE}")
+        add_subdirectory(${llvm_SOURCE_DIR} ${llvm_BINARY_DIR} EXCLUDE_FROM_ALL)
+    endif ()
+
+
     #list (APPEND CMAKE_MODULE_PATH "${llvm_SOURCE_DIR}/cmake/modules")
+    message(STATUS "${llvm_BINARY_DIR}/lib/cmake/llvm")
     find_package(LLVM REQUIRED CONFIG NO_DEFAULT_PATH
             PATHS "${llvm_BINARY_DIR}/lib/cmake/llvm")
     include_directories("${llvm_BINARY_DIR}/include" "${llvm_SOURCE_DIR}/include")

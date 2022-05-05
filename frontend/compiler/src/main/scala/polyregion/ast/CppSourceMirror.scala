@@ -67,7 +67,8 @@ private[polyregion] object CppSourceMirror {
 
     val jsonCodecHeader = CppNlohmannJsonCodecGen.emitHeader(namespace, jsonCodecSources)
     val jsonCodecImpl   = CppNlohmannJsonCodecGen.emitImpl(namespace, jsonCodecFileName, AdtHash, jsonCodecSources)
-    val target          = Paths.get(".").resolve("native/compiler/generated/").normalize.toAbsolutePath
+
+    val target          = Paths.get("../native/compiler/generated/").toAbsolutePath.normalize 
     println(s"Generated Codec=${(jsonCodecHeader + jsonCodecImpl).count(_ == '\n')} lines")
 
     println(s"MD5=${AdtHash}")

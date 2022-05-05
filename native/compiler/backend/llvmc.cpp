@@ -19,7 +19,7 @@
 #include "llvm/Pass.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Host.h"
-#include "llvm/Support/TargetRegistry.h"
+#include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
@@ -115,7 +115,7 @@ const llvm::TargetMachine &llvmc::targetMachine() { return *LLVMCurrentMachine; 
 static void setFunctionAttributes(llvm::StringRef CPU, llvm::StringRef Features, llvm::Function &F) {
   auto &Ctx = F.getContext();
   llvm::AttributeList Attrs = F.getAttributes();
-  llvm::AttrBuilder NewAttrs;
+  llvm::AttrBuilder NewAttrs(Ctx);
 
   if (!CPU.empty() && !F.hasFnAttribute("target-cpu")) NewAttrs.addAttribute("target-cpu", CPU);
   if (!Features.empty()) {
@@ -181,7 +181,7 @@ static void setFunctionAttributes(llvm::StringRef CPU, llvm::StringRef Features,
   //                  llvm::Attribute::get(Ctx, "trap-func-name", getTrapFuncName()));
 
   // Let NewAttrs override Attrs.
-  F.setAttributes(Attrs.addAttributes(Ctx, llvm::AttributeList::FunctionIndex, NewAttrs));
+  F.setAttributes(Attrs.addAttributesAtIndex(Ctx, llvm::AttributeList::FunctionIndex, NewAttrs));
 }
 
 polyregion::compiler::Compilation llvmc::compileModule(bool emitDisassembly,            //
