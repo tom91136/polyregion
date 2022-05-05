@@ -17,7 +17,7 @@ object MonoStructPass {
       struct <- structs.distinct
       if struct.name == sdef.name
       table = struct.tpeVars.zip(struct.args).toMap
-      name  = p.Sym(struct.monomorphicName),
+      name  = p.Sym(struct.monomorphicName)
     } yield struct -> p.StructDef(
       name = name,
       tpeVars = Nil,

@@ -39,20 +39,22 @@ object Pickler {
       ???
   }
 
+  inline def layoutOf(using q: Quoted)(repr: q.TypeRepr): polyregion.Layout = {
+    val sdef = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
+    PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, sdef)))
+  }
+
   inline def sizeOf(using q: Quoted)(tpe: p.Type, repr: q.TypeRepr): Int = tpe match {
-    case p.Type.Float  => java.lang.Float.BYTES
-    case p.Type.Double => java.lang.Double.BYTES
-    case p.Type.Bool   => java.lang.Byte.BYTES
-    case p.Type.Byte   => java.lang.Byte.BYTES
-    case p.Type.Char   => java.lang.Character.BYTES
-    case p.Type.Short  => java.lang.Short.BYTES
-    case p.Type.Int    => java.lang.Integer.BYTES
-    case p.Type.Long   => java.lang.Long.BYTES
-    case p.Type.Unit   => java.lang.Byte.BYTES
-    case p.Type.Struct(_, _, _) =>
-      val sdef   = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
-      val layout = PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, sdef)))
-      layout.sizeInBytes.toInt
+    case p.Type.Float           => java.lang.Float.BYTES
+    case p.Type.Double          => java.lang.Double.BYTES
+    case p.Type.Bool            => java.lang.Byte.BYTES
+    case p.Type.Byte            => java.lang.Byte.BYTES
+    case p.Type.Char            => java.lang.Character.BYTES
+    case p.Type.Short           => java.lang.Short.BYTES
+    case p.Type.Int             => java.lang.Integer.BYTES
+    case p.Type.Long            => java.lang.Long.BYTES
+    case p.Type.Unit            => java.lang.Byte.BYTES
+    case p.Type.Struct(_, _, _) => layoutOf(repr).sizeInBytes.toInt
   }
 
   inline def readPrimitiveAtOffset //
@@ -87,27 +89,32 @@ object Pickler {
       case _             => ???
     }
 
+  def readStruct(using
+      q: Quoted
+  )(buffer: Expr[java.nio.ByteBuffer], index: Expr[Int], repr: q.TypeRepr) = {
+    import q.given
+    // find out the total size of this struct first, it could be nested arbitrarily but the top level's size must
+    // reflect the total size; this is consistent with C's `sizeof(struct T)`
+    val sdef       = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
+    val layout     = PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, sdef)))
+    val byteOffset = '{ ${ Expr(layout.sizeInBytes.toInt) } * $index }
+    val fields     = sdef.members.zip(layout.members)
+    val terms = fields.map { (named, m) =>
+      readPrimitiveAtOffset(buffer, '{ $byteOffset + ${ Expr(m.offsetInBytes.toInt) } }, named.tpe).asTerm
+    }
+    q.Select
+      .unique(q.New(q.TypeIdent(repr.typeSymbol)), "<init>")
+      .appliedToArgs(terms)
+      .asExpr
+  }
+
   def readUniform   //
   (using q: Quoted) //
   (buffer: Expr[java.nio.ByteBuffer], index: Expr[Int], tpe: p.Type, repr: q.TypeRepr): Expr[Any] = {
     import q.given
     tpe match {
-      case p.Type.Struct(name, tpeVars, args) =>
-        // find out the total size of this struct first, it could be nested arbitrarily but the top level's size must
-        // reflect the total size; this is consistent with C's `sizeof(struct T)`
-        val sdef       = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
-        val layout     = PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, sdef)))
-        val byteOffset = '{ ${ Expr(layout.sizeInBytes.toInt) } * $index }
-        val fields     = sdef.members.zip(layout.members)
-        val terms = fields.map { (named, m) =>
-          readPrimitiveAtOffset(buffer, '{ $byteOffset + ${ Expr(m.offsetInBytes.toInt) } }, named.tpe).asTerm
-        }
-        q.Select
-          .unique(q.New(q.TypeIdent(repr.typeSymbol)), "<init>")
-          .appliedToArgs(terms)
-          .asExpr
+      case p.Type.Struct(name, tpeVars, args) => readStruct(buffer, index, repr)
       case p.Type.Array(component) =>
-        // TODO handle special case for where value == wrapped buffers; just unwrap it here
         repr.asType match {
           case '[scala.collection.immutable.Seq[t]] => ??? // make a new one
           case '[scala.collection.mutable.Seq[t]]   => ??? // write to existing if exists or make a new one
@@ -120,10 +127,30 @@ object Pickler {
       //       while (i < xs.size) {  xs(i) =  ${ readUniform(buffer, '{ i }, tpe, compRepr,  ) }; i += 1 }
       //       ()
       //     }
-
       case p.Type.String => ???
       case t             => readPrimitiveAtOffset(buffer, '{ $index * ${ Expr(sizeOf(t, repr)) } }, t)
     }
+  }
+
+  def writeStruct(using
+      q: Quoted
+  )(buffer: Expr[java.nio.ByteBuffer], index: Expr[Int], repr: q.TypeRepr, value: Expr[Any]) = {
+    import q.given
+    // find out the total size of this struct first, it could be nested arbitrarily but the top level's size must
+    // reflect the total size; this is consistent with C's `sizeof(struct T)`
+    val sdef       = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
+    val layout     = PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, sdef)))
+    val byteOffset = '{ ${ Expr(layout.sizeInBytes.toInt) } * $index }
+    val fields     = sdef.members.zip(layout.members)
+    val terms = fields.map { (named, m) =>
+      writePrimitiveAtOffset(
+        buffer,
+        '{ $byteOffset + ${ Expr(m.offsetInBytes.toInt) } },
+        named.tpe,
+        q.Select.unique(value.asTerm, named.symbol).asExpr
+      )
+    }
+    Expr.block(terms, '{ () })
   }
 
   def writeUniform  //
@@ -131,23 +158,8 @@ object Pickler {
   (buffer: Expr[java.nio.ByteBuffer], index: Expr[Int], tpe: p.Type, repr: q.TypeRepr, value: Expr[Any]): Expr[Unit] = {
     import q.given
     tpe match {
-      case p.Type.Struct(name, tpeVars, args) =>
-        // find out the total size of this struct first, it could be nested arbitrarily but the top level's size must
-        // reflect the total size; this is consistent with C's `sizeof(struct T)`
-        val sdef       = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
-        val layout     = PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, sdef)))
-        val byteOffset = '{ ${ Expr(layout.sizeInBytes.toInt) } * $index }
-        val fields     = sdef.members.zip(layout.members)
-        val terms = fields.map { (named, m) =>
-          writePrimitiveAtOffset(
-            buffer,
-            '{ $byteOffset + ${ Expr(m.offsetInBytes.toInt) } },
-            named.tpe,
-            q.Select.unique(value.asTerm, named.symbol).asExpr
-          )
-        }
-        Expr.block(terms, '{ () })
-      case p.Type.Array(comp) =>
+      case p.Type.Struct(name, tpeVars, args) => writeStruct(buffer, index, repr, value)
+      case p.Type.Array(comp)                 =>
         // TODO handle special case for where value == wrapped buffers; just unwrap it here
         repr.asType match {
           case x @ '[scala.Array[t]] =>
@@ -165,6 +177,7 @@ object Pickler {
               while (i < xs.length) { ${ writeUniform(buffer, 'i, comp, q.TypeRepr.of[t], '{ xs(i) }) }; i += 1 }
               ()
             }
+
           case illegal => q.report.errorAndAbort(s"Unsupported type for writing ${repr.show}")
         }
 

@@ -6,8 +6,10 @@ import polyregion.scala.{NativeStruct, *}
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.{compileTimeOnly, tailrec}
+import scala.annotation.experimental
 import scala.quoted.*
 import scala.util.Try
+import net.bytebuddy.agent.builder.AgentBuilder.Default.NativeMethodStrategy
 
 @compileTimeOnly("This class only exists at compile-time to expose offload methods")
 object compiletime {
@@ -158,6 +160,33 @@ object compiletime {
     acc.get()
   }
 
+  inline def deriveNativeStruct[A]: NativeStruct[A] = ${ deriveNativeStructImpl[A] }
+
+  def deriveNativeStructImpl[A: Type](using q: Quotes): Expr[NativeStruct[A]] = {
+    given Q: Quoted = Quoted(q)
+    mkNativeStruct(Q.TypeRepr.of[A]).asExprOf[NativeStruct[A]]
+  }
+
+  def mkNativeStruct(using q: Quoted)(repr: q.TypeRepr): Expr[NativeStruct[Any]] = {
+    import q.given
+    repr.asType match {
+      case '[a] =>
+        val layout = Pickler.layoutOf(repr)
+
+        '{
+          new NativeStruct[a] {
+            override val name        = ${ Expr(repr.typeSymbol.fullName) }
+            override val sizeInBytes = ${ Expr(layout.sizeInBytes.toInt) }
+            override def encode(buffer: java.nio.ByteBuffer, index: Int, a: a): Unit =
+              ${ Pickler.writeStruct('buffer, 'index, repr, 'a) }
+
+            override def decode(buffer: java.nio.ByteBuffer, index: Int): a =
+              ${ Pickler.readStruct('buffer, 'index, repr).asExprOf[a] }
+          }
+        }.asExprOf[NativeStruct[Any]]
+    }
+  }
+
   inline def offload[A](inline x: => A): A = ${ offloadImpl[A]('x) }
   private def offloadImpl[A: Type](x: Expr[Any])(using q: Quotes): Expr[A] = {
     implicit val Q = Quoted(q)
@@ -182,37 +211,37 @@ object compiletime {
       val fnName           = Expr("lambda")
 
       val captureExprs = captures.map { (name, ref) =>
-        val allocated = name.tpe match {
-          case p.Type.Array(comp) =>
-            ref.tpe.asType match {
-              case x @ '[scala.Array[t]] =>
-                '{
-                  val xs = ${ ref.asExprOf[x.Underlying] }
-                  java.nio.ByteBuffer
-                    .allocateDirect(${ Expr(Pickler.sizeOf(comp, Q.TypeRepr.of[t])) } * xs.size)
-                    .order(java.nio.ByteOrder.nativeOrder)
-                }
-              case x @ '[scala.collection.Seq[t]] =>
-                '{
-                  val xs = ${ ref.asExprOf[x.Underlying] }
-                  java.nio.ByteBuffer
-                    .allocateDirect(${ Expr(Pickler.sizeOf(comp, Q.TypeRepr.of[t])) } * xs.size)
-                    .order(java.nio.ByteOrder.nativeOrder)
-                }
-              case illegal => ???
-            }
-          case _ =>
+        (name.tpe, ref.tpe.asType) match {
+          case (p.Type.Array(comp), x @ '[polyregion.scala.Buffer[a]]) =>
+            '{ ${ ref.asExprOf[x.Underlying] }.backingBuffer }
+          case (p.Type.Array(comp), x @ '[scala.Array[t]]) =>
             '{
-              java.nio.ByteBuffer
+              val xs = ${ ref.asExprOf[x.Underlying] }
+              val buffer = java.nio.ByteBuffer
+                .allocateDirect(${ Expr(Pickler.sizeOf(comp, Q.TypeRepr.of[t])) } * xs.size)
+                .order(java.nio.ByteOrder.nativeOrder)
+              ${ Pickler.writeUniform('buffer, '{ 0 }, name.tpe, ref.tpe, ref.asExpr) }
+              buffer
+            }
+          case (p.Type.Array(comp), x @ '[scala.collection.Seq[t]]) =>
+            '{
+              val xs = ${ ref.asExprOf[x.Underlying] }
+              val buffer = java.nio.ByteBuffer
+                .allocateDirect(${ Expr(Pickler.sizeOf(comp, Q.TypeRepr.of[t])) } * xs.size)
+                .order(java.nio.ByteOrder.nativeOrder)
+              ${ Pickler.writeUniform('buffer, '{ 0 }, name.tpe, ref.tpe, ref.asExpr) }
+              buffer
+            }
+          case (_, _) =>
+            '{
+              val buffer = java.nio.ByteBuffer
                 .allocateDirect(${ Expr(Pickler.sizeOf(name.tpe, ref.tpe)) })
                 .order(java.nio.ByteOrder.nativeOrder)
+              ${ Pickler.writeUniform('buffer, '{ 0 }, name.tpe, ref.tpe, ref.asExpr) }
+              buffer
             }
         }
-        '{
-          val buffer = $allocated
-          ${ Pickler.writeUniform('buffer, '{ 0 }, name.tpe, ref.tpe, ref.asExpr) }
-          buffer
-        }
+
       }
       val captureTps = captures.map((name, _) => Pickler.tpeAsRuntimeTpe(name.tpe))
 
@@ -234,7 +263,7 @@ object compiletime {
 
         val bytes    = $programBytesExpr
         val argTypes = new Array[Byte](${ Expr(captureTps.size) })
-        ${ Varargs(captureTps.zipWithIndex.map((e, i) => '{ argTypes(${ Expr(i) }) = ${ Expr(e) } })) }
+        ${ Expr.block(captureTps.zipWithIndex.map((e, i) => '{ argTypes(${ Expr(i) }) = ${ Expr(e) } }), '{ () }) }
 
         val argBuffers = new Array[java.nio.ByteBuffer](${ Expr(captureExprs.size) })
         ${ Expr.block(captureExprs.zipWithIndex.map((e, i) => '{ argBuffers(${ Expr(i) }) = $e }), '{ () }) }

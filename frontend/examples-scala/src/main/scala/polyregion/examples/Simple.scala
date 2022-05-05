@@ -28,6 +28,7 @@ object Simple {
 
   def main(args: Array[String]): Unit = {
 
+
 //    summon[NativeStruct[FooProper.type]]
 //    summon[NativeStruct[FooProper.type ]]
 
@@ -40,16 +41,19 @@ object Simple {
     val x = 42
     val y = 10
 
-    val xs = Array[Int](1, 2)
+    val xs = Buffer[Int](12, 2, 3)
     println(s"in=${xs.toList}")
 
 
     val a = polyregion.scala.compiletime.offload {
 //      val y = FooProper.bar
       val z = 42 + x + y
-      
-      xs(0) = 42
-      ()
+
+      xs(0) = 43
+      xs(1) = 43
+//      xs(2) = 43
+
+      xs(0)
       //      val m = 1 + 1 + out + y
 //      m
     }

@@ -159,11 +159,20 @@ object IntrinsifyPass {
             case ">>>" => binaryNumericIntrinsic(x, y, rtn, idx, p.BinaryIntrinsicKind.BZSR)
           }
           (expr, stmts, inv :: Nil)
-        case ("scala" :: "Array" :: "apply" :: Nil, (xs @ p.Term.Select(_, p.Named(_, p.Type.Array(_)))), idx :: Nil)
-            if idx.tpe.kind == p.TypeKind.Integral =>
+        case (
+              ("scala" :: "Array" :: "apply" :: Nil) |                              //
+              ("polyregion" :: "scala" :: "Buffer" :: "apply" :: Nil) |             //
+              ("scala" :: "collection" :: "SeqOps" :: "apply" :: Nil) |             //
+              ("scala" :: "collection" :: "mutable" :: "SeqOps" :: "apply" :: Nil), //
+              (xs @ p.Term.Select(_, p.Named(_, p.Type.Array(_)))),
+              idx :: Nil
+            ) if idx.tpe.kind == p.TypeKind.Integral =>
           (p.Expr.Index(xs, idx, rtn), Nil, inv :: Nil)
         case (
-              "scala" :: "Array" :: "update" :: Nil,
+              ("scala" :: "Array" :: "update" :: Nil) |                             //
+              ("polyregion" :: "scala" :: "Buffer" :: "update" :: Nil) |            //
+              ("scala" :: "collection" :: "mutable" :: "SeqOps" :: "update" :: Nil) //
+              ,
               (xs @ p.Term.Select(_, p.Named(_, p.Type.Array(_)))),
               idx :: x :: Nil
             ) if idx.tpe.kind == p.TypeKind.Integral =>

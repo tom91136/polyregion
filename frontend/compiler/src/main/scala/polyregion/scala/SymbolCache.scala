@@ -1,0 +1,8 @@
+package polyregion.scala
+import polyregion.ast.{PolyAst as p, *}
+
+object SymbolCache {
+
+  val StructDefTable = collection.mutable.Map.empty[p.Sym, (p.StructDef, polyregion.Layout)]
+
+}

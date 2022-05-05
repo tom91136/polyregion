@@ -2,50 +2,23 @@ package polyregion.scala
 
 import scala.reflect.ClassTag
 import scala.math.Integral
-import scala.collection.immutable.ArraySeq
+import scala.collection.immutable.NumericRange
 import scala.collection.mutable
+import java.{lang => jl}
+import java.{nio => nio}
 
-trait Buffer[A] extends mutable.IndexedSeq[A] {
+sealed trait Buffer[A] extends mutable.IndexedSeq[A] {
   def name: String
-  def buffer: java.nio.Buffer
-  def backingBuffer: java.nio.ByteBuffer
+  def buffer: nio.Buffer
+  def backingBuffer: nio.ByteBuffer
   def putAll(xs: A*): this.type
-  def foreach2(f: Int => Int): Int = {
-    var i   = 0
-    var out = 0
-    while (i < 10) {
-      out = f(i)
-      i += 1
-    }
-    out
-  }
   def copyToArray: Array[A]
   override def toString: String = s"Buffer[$name](${mkString(", ")})"
 }
 
 object Buffer {
 
-//    inline private def unsafe = {
-//      import java.lang.reflect.Field
-//      val f = classOf[sun.misc.Unsafe].getDeclaredField("theUnsafe")
-//      f.setAccessible(true)
-//      val unsafe = f.get(null).asInstanceOf[sun.misc.Unsafe]
-//    }
-
-//  inline private def ptr(b: java.nio.Buffer): Option[Long] =
-//    if (b.isDirect) Some(b.asInstanceOf[sun.nio.ch.DirectBuffer].address) else None
-
-  inline private def alloc(elemSize: Int, n: Int): java.nio.ByteBuffer = {
-    val bytes =
-      try math.multiplyExact(elemSize, n)
-      catch {
-        case e: Throwable =>
-          throw new IllegalArgumentException(s"Cannot allocated buffer of size ${elemSize * n} (overflow?)", e)
-      }
-    java.nio.ByteBuffer.allocateDirect(bytes).order(java.nio.ByteOrder.nativeOrder())
-  }
-
-  class DoubleBuffer(val backingBuffer: java.nio.ByteBuffer, val buffer: java.nio.DoubleBuffer) extends Buffer[Double] {
+  class DoubleBuffer(val backingBuffer: nio.ByteBuffer, val buffer: nio.DoubleBuffer) extends Buffer[Double] {
     override val name                                 = "Double"
     override def update(idx: Int, elem: Double): Unit = buffer.put(idx, elem)
     override def apply(i: Int): Double                = buffer.get(i)
@@ -60,7 +33,7 @@ object Buffer {
         xs
       }
   }
-  class FloatBuffer(val backingBuffer: java.nio.ByteBuffer, val buffer: java.nio.FloatBuffer) extends Buffer[Float] {
+  class FloatBuffer(val backingBuffer: nio.ByteBuffer, val buffer: nio.FloatBuffer) extends Buffer[Float] {
     override val name                                = "Float"
     override def update(idx: Int, elem: Float): Unit = buffer.put(idx, elem)
     override def apply(i: Int): Float                = buffer.get(i)
@@ -74,7 +47,7 @@ object Buffer {
         xs
       }
   }
-  class LongBuffer(val backingBuffer: java.nio.ByteBuffer, val buffer: java.nio.LongBuffer) extends Buffer[Long] {
+  class LongBuffer(val backingBuffer: nio.ByteBuffer, val buffer: nio.LongBuffer) extends Buffer[Long] {
     override val name                               = "Long"
     override def update(idx: Int, elem: Long): Unit = buffer.put(idx, elem)
     override def apply(i: Int): Long                = buffer.get(i)
@@ -88,7 +61,7 @@ object Buffer {
         xs
       }
   }
-  class IntBuffer(val backingBuffer: java.nio.ByteBuffer, val buffer: java.nio.IntBuffer) extends Buffer[Int] {
+  class IntBuffer(val backingBuffer: nio.ByteBuffer, val buffer: nio.IntBuffer) extends Buffer[Int] {
     override val name                              = "Int"
     override def update(idx: Int, elem: Int): Unit = buffer.put(idx, elem)
     override def apply(i: Int): Int                = buffer.get(i)
@@ -102,7 +75,7 @@ object Buffer {
         xs
       }
   }
-  class ShortBuffer(val backingBuffer: java.nio.ByteBuffer, val buffer: java.nio.ShortBuffer) extends Buffer[Short] {
+  class ShortBuffer(val backingBuffer: nio.ByteBuffer, val buffer: nio.ShortBuffer) extends Buffer[Short] {
     override val name                                = "Short"
     override def update(idx: Int, elem: Short): Unit = buffer.put(idx, elem)
     override def apply(i: Int): Short                = buffer.get(i)
@@ -116,7 +89,7 @@ object Buffer {
         xs
       }
   }
-  class ByteBuffer(val backingBuffer: java.nio.ByteBuffer, val buffer: java.nio.ByteBuffer) extends Buffer[Byte] {
+  class ByteBuffer(val backingBuffer: nio.ByteBuffer, val buffer: nio.ByteBuffer) extends Buffer[Byte] {
     override val name                               = "Byte"
     override def update(idx: Int, elem: Byte): Unit = buffer.put(idx, elem)
     override def apply(i: Int): Byte                = buffer.get(i)
@@ -130,7 +103,7 @@ object Buffer {
         xs
       }
   }
-  class CharBuffer(val backingBuffer: java.nio.ByteBuffer, val buffer: java.nio.CharBuffer) extends Buffer[Char] {
+  class CharBuffer(val backingBuffer: nio.ByteBuffer, val buffer: nio.CharBuffer) extends Buffer[Char] {
     override val name                               = "Char"
     override def update(idx: Int, elem: Char): Unit = buffer.put(idx, elem)
     override def apply(i: Int): Char                = buffer.get(i)
@@ -144,7 +117,7 @@ object Buffer {
         xs
       }
   }
-  class BoolBuffer(val backingBuffer: java.nio.ByteBuffer, val buffer: java.nio.ByteBuffer) extends Buffer[Boolean] {
+  class BoolBuffer(val backingBuffer: nio.ByteBuffer, val buffer: nio.ByteBuffer) extends Buffer[Boolean] {
     override val name                                  = "Boolean"
     override def update(idx: Int, elem: Boolean): Unit = buffer.put(idx, (if (elem) 1 else 0).toByte)
     override def apply(i: Int): Boolean                = buffer.get(i) != 0
@@ -156,11 +129,24 @@ object Buffer {
       this
     }
     override def copyToArray: Array[Boolean] = this.toArray
-
   }
-  class StructBuffer[A](val backingBuffer: java.nio.ByteBuffer, val buffer: java.nio.ByteBuffer)(using
-      S: NativeStruct[A]
-  ) extends Buffer[A] {
+
+  class UnitBuffer(val backingBuffer: nio.ByteBuffer, val buffer: nio.ByteBuffer) extends Buffer[Unit] {
+    override val name                               = "Unit"
+    override def update(idx: Int, elem: Unit): Unit = buffer.put(idx, 0.toByte)
+    override def apply(i: Int): Unit                = { buffer.get(i); () }
+    override def length: Int                        = buffer.capacity()
+    override def putAll(xs: Unit*): this.type = {
+      var i = 0
+      val n = length
+      while (i < n) { update(i, xs(i)); i += 1 }
+      this
+    }
+    override def copyToArray: Array[Unit] = this.toArray
+  }
+
+  class StructBuffer[A](val backingBuffer: nio.ByteBuffer, val buffer: nio.ByteBuffer)(using S: NativeStruct[A])
+      extends Buffer[A] {
     override val name                            = "Struct"
     override def update(idx: Int, elem: A): Unit = S.encode(buffer, idx, elem)
     override def apply(i: Int): A                = S.decode(buffer, i)
@@ -175,8 +161,8 @@ object Buffer {
 
   }
 
-  def view[A <: AnyVal](actual: java.nio.ByteBuffer)(using tag: ClassTag[A]): Buffer[A] = {
-    actual.order(java.nio.ByteOrder.nativeOrder())
+  inline def view[A <: AnyVal](inline actual: nio.ByteBuffer)(using inline tag: ClassTag[A]): Buffer[A] = {
+    actual.order(nio.ByteOrder.nativeOrder())
     (tag.runtimeClass match {
       case x if x.equals(java.lang.Double.TYPE)    => DoubleBuffer(actual, actual.asDoubleBuffer())
       case x if x.equals(java.lang.Float.TYPE)     => FloatBuffer(actual, actual.asFloatBuffer())
@@ -186,89 +172,87 @@ object Buffer {
       case x if x.equals(java.lang.Character.TYPE) => CharBuffer(actual, actual.asCharBuffer())
       case x if x.equals(java.lang.Boolean.TYPE)   => BoolBuffer(actual, actual)
       case x if x.equals(java.lang.Byte.TYPE)      => ByteBuffer(actual, actual)
-      case x if x.equals(java.lang.Void.TYPE)      => ByteBuffer(actual, actual)
+      case x if x.equals(java.lang.Void.TYPE)      => UnitBuffer(actual, actual)
     }).asInstanceOf[Buffer[A]]
   }
 
-  def structViewAny[A](actual: java.nio.ByteBuffer)(using S: NativeStruct[A]): Buffer[A] = {
-    actual.order(java.nio.ByteOrder.nativeOrder())
-    StructBuffer[A](actual, actual) // zeros by default
+  inline def view[A <: AnyRef](inline actual: nio.ByteBuffer)(using inline S: NativeStruct[A]): Buffer[A] = {
+    actual.order(nio.ByteOrder.nativeOrder())
+    StructBuffer[A](actual, actual)
   }
 
-  def ofDim[A <: AnyVal](dim: Int)(using tag: ClassTag[A]): Buffer[A] = (tag.runtimeClass match {
-    case x if x.equals(java.lang.Double.TYPE) =>
-      val buffer = alloc(java.lang.Double.BYTES, dim)
-      DoubleBuffer(buffer, buffer.asDoubleBuffer())
-    case x if x.equals(java.lang.Float.TYPE) =>
-      val buffer = alloc(java.lang.Float.BYTES, dim)
-      FloatBuffer(buffer, buffer.asFloatBuffer())
-    case x if x.equals(java.lang.Long.TYPE) =>
-      val buffer = alloc(java.lang.Long.BYTES, dim)
-      LongBuffer(buffer, buffer.asLongBuffer())
-    case x if x.equals(java.lang.Integer.TYPE) =>
-      val buffer = alloc(java.lang.Integer.BYTES, dim)
-      IntBuffer(buffer, buffer.asIntBuffer())
-    case x if x.equals(java.lang.Short.TYPE) =>
-      val buffer = alloc(java.lang.Short.BYTES, dim)
-      ShortBuffer(buffer, buffer.asShortBuffer())
-    case x if x.equals(java.lang.Character.TYPE) =>
-      val buffer = alloc(java.lang.Character.BYTES, dim)
-      CharBuffer(buffer, buffer.asCharBuffer())
-    case x if x.equals(java.lang.Boolean.TYPE) =>
-      val buffer = alloc(java.lang.Byte.BYTES, dim)
-      BoolBuffer(buffer, buffer)
-    case x if x.equals(java.lang.Byte.TYPE) =>
-      val buffer = alloc(java.lang.Byte.BYTES, dim)
-      ByteBuffer(buffer, buffer)
-    case x if x.equals(java.lang.Void.TYPE) =>
-      val buffer = alloc(0, dim)
-      ByteBuffer(buffer, buffer)
+  private inline def checkedAlloc(inline elemSize: Int, inline n: Int): nio.ByteBuffer = {
+    val bytes =
+      try math.multiplyExact(elemSize, n)
+      catch {
+        case e: Throwable =>
+          throw new IllegalArgumentException(
+            s"Cannot allocated buffer of size ${elemSize * n} (overflow or negative size?)",
+            e
+          )
+      }
+    nio.ByteBuffer.allocateDirect(bytes).order(nio.ByteOrder.nativeOrder())
+  }
+
+  private inline def mkBuffer[A, X, B](
+      inline size: Int,
+      inline dim: Int,
+      inline mkSpecific: nio.ByteBuffer => A,
+      inline mkCol: (nio.ByteBuffer, A) => B
+  ) = {
+    val buffer = checkedAlloc(size, dim)
+    mkCol(buffer, mkSpecific(buffer))
+  }
+
+  inline def ofDim[A <: AnyVal](inline dim: Int)(using inline tag: ClassTag[A]): Buffer[A] = (tag.runtimeClass match {
+    // case x if x equals jl.Double.TYPE    => mkBuffer(jl.Double.BYTES, dim, _.asDoubleBuffer(), DoubleBuffer(_, _))
+    // case x if x equals jl.Float.TYPE     => mkBuffer(jl.Float.BYTES, dim, _.asFloatBuffer(), FloatBuffer(_, _))
+    // case x if x equals jl.Long.TYPE      => mkBuffer(jl.Long.BYTES, dim, _.asLongBuffer(), LongBuffer(_, _))
+    case x if x.equals(jl.Integer.TYPE)   => mkBuffer(jl.Integer.BYTES, dim, _.asIntBuffer(), IntBuffer(_, _))
+    case x if x.equals(jl.Short.TYPE)     => mkBuffer(jl.Short.BYTES, dim, _.asShortBuffer(), ShortBuffer(_, _))
+    case x if x.equals(jl.Character.TYPE) => mkBuffer(jl.Character.BYTES, dim, _.asCharBuffer(), CharBuffer(_, _))
+    case x if x.equals(jl.Boolean.TYPE)   => mkBuffer(1, dim, identity, BoolBuffer(_, _))
+    case x if x.equals(jl.Byte.TYPE)      => mkBuffer(1, dim, identity, ByteBuffer(_, _))
+    case x if x.equals(jl.Void.TYPE)      => mkBuffer(1, dim, identity, UnitBuffer(_, _))
   }).asInstanceOf[Buffer[A]]
 
-  // AnyVals
+  // zeros by default
+  inline def ofDim[A <: AnyRef](inline dim: Int)(using inline S: NativeStruct[A]): Buffer[A] =
+    mkBuffer(S.sizeInBytes, dim, identity, StructBuffer(_, _))
 
-  def apply[A <: AnyVal: ClassTag](xs: A*): Buffer[A] = ofDim[A](xs.size).putAll(xs*)
-  def ref[A <: AnyVal: ClassTag]: Buffer[A]           = ofDim[A](1)
-  def empty[A <: AnyVal: ClassTag]: Buffer[A]         = ofDim[A](0)
-  def fill[A <: AnyVal: ClassTag](n: Int)(elem: => A): Buffer[A] =
-    ofDim[A](n).putAll(ArraySeq.fill(n)(elem)*)
-  def range[A <: AnyVal: Integral: ClassTag](start: A, end: A, step: A): Buffer[A] = {
-    val xs = ArraySeq.range[A](start, end, step)
-    ofDim[A](xs.size).putAll(xs*)
-  }
-  def range[A <: AnyVal: Integral: ClassTag](start: A, end: A): Buffer[A] = {
-    val xs = ArraySeq.range[A](start, end)
-    ofDim[A](xs.size).putAll(xs*)
-  }
-  def tabulate[A <: AnyVal: ClassTag](n: Int)(f: Int => A): Buffer[A] =
-    ofDim[A](n).putAll(ArraySeq.tabulate(n)(f)*)
-
-  // AnyRefs
-
-  def ofZeroed[A <: AnyRef](dim: Int)(using S: NativeStruct[A]): Buffer[A] = {
-    val buffer = alloc(S.sizeInBytes, dim)
-    StructBuffer[A](buffer, buffer) // zeros by default
+  private inline def eachN[A](inline n: Int, a: A)(inline f: (A, Int) => Unit): A = {
+    var i = 0
+    while (i < n) { f(a, i); i += 1 }
+    a
   }
 
-  def ofZeroedAny(dim: Int)(using S: NativeStruct[Any]): Buffer[Any] = {
-    val buffer = alloc(S.sizeInBytes, dim)
-    StructBuffer[Any](buffer, buffer) // zeros by default
+  // == AnyVals ==
+
+  inline def apply[A <: AnyVal: ClassTag](inline ys: A*): Buffer[A] = ofDim[A](ys.size).putAll(ys*)
+  inline def empty[A <: AnyVal: ClassTag]: Buffer[A]                = ofDim[A](0)
+  inline def from[A <: AnyVal: ClassTag](inline ys: scala.collection.Seq[A]): Buffer[A] =
+    eachN(ys.size, ofDim[A](ys.size))((xs, i) => xs(i) = ys(i))
+  inline def fill[A <: AnyVal: ClassTag](inline n: Int)(a: => A): Buffer[A] =
+    eachN(n, ofDim[A](n))((xs, i) => xs(i) = a)
+  inline def tabulate[A <: AnyVal: ClassTag](inline n: Int)(inline f: Int => A): Buffer[A] =
+    eachN(n, ofDim[A](n))((xs, i) => xs(i) = f(i))
+
+  inline def range[A <: AnyVal: ClassTag](using inline num: Integral[A])(start: A, end: A, step: A): Buffer[A] = {
+    val range = NumericRange[A](start, end, step)
+    eachN(range.size, ofDim[A](range.size))((xs, i) => xs(i) = range(i))
   }
+  inline def range[A <: AnyVal: ClassTag](using inline num: Integral[A])(start: A, end: A): Buffer[A] =
+    range[A](start, end, num.one)
 
-  def refAny(x: Any)(using S: NativeStruct[Any]): Buffer[Any] =
-    ofZeroedAny(1).putAll(x)
+  // == AnyRefs ==
 
-  def apply[A <: AnyRef](xs: A*)(using S: NativeStruct[A]): Buffer[A] =
-    ofZeroed(xs.size).putAll(xs*)
-
-  def empty[A <: AnyRef: NativeStruct]: Buffer[A] = //
-    apply[A]()
-  def fill[A <: AnyRef: ClassTag: NativeStruct](n: Int)(elem: => A): Buffer[A] = apply[A](ArraySeq.fill(n)(elem)*)
-  def range[A <: AnyRef: Integral: ClassTag: NativeStruct](start: A, end: A, step: A): Buffer[A] =
-    apply[A](ArraySeq.range[A](start, end, step)*)
-  def range[A <: AnyRef: Integral: ClassTag: NativeStruct](start: A, end: A): Buffer[A] =
-    apply[A](ArraySeq.range[A](start, end)*)
-  def tabulate[A <: AnyRef: ClassTag: NativeStruct](n: Int)(f: Int => A): Buffer[A] =
-    apply[A](ArraySeq.tabulate(n)(f)*)
+  inline def apply[A <: AnyRef: NativeStruct](inline xs: A*): Buffer[A] = ofDim[A](xs.size).putAll(xs*)
+  inline def empty[A <: AnyRef: NativeStruct]: Buffer[A]                = ofDim[A](0)
+  inline def from[A <: AnyRef: NativeStruct](inline ys: scala.collection.Seq[A]): Buffer[A] =
+    eachN(ys.size, ofDim[A](ys.size))((xs, i) => xs(i) = ys(i))
+  inline def fill[A <: AnyRef: NativeStruct](inline n: Int)(inline a: => A): Buffer[A] =
+    eachN(n, ofDim[A](n))((xs, i) => xs(i) = a)
+  inline def tabulate[A <: AnyRef: NativeStruct](inline n: Int)(inline f: Int => A): Buffer[A] =
+    eachN(n, ofDim[A](n))((xs, i) => xs(i) = f(i))
 
 }
