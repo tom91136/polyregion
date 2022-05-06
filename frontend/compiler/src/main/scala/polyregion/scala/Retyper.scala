@@ -41,6 +41,8 @@ object Retyper {
 //       )
 //       .map(p.StructDef(p.Sym(tpeSym.fullName), Nil, _))
 
+  def isModuleClass(using q: Quoted)(s: q.Symbol) = !s.isPackageDef && s.flags.is(q.Flags.Module)
+
   def structDef0(using q: Quoted)(clsSym: q.Symbol): Result[p.StructDef] = {
     if (clsSym.flags.is(q.Flags.Abstract)) {
       throw RuntimeException(
@@ -51,13 +53,18 @@ object Retyper {
     // XXX there appears to be a bug where an assertion error is thrown if we call the start/end (but not the pos itself)
     // of certain type of trees returned from fieldMembers
     clsSym.fieldMembers
-      .filterNot(_.flags.is(q.Flags.Module)) // exclude objects for now
+      .filterNot(_.flags.is(q.Flags.Module)) // TODO exclude objects for now, need to implement this later
       .filter(_.maybeOwner == clsSym)        // TODO local members for now, need to workout inherited members
       .sortBy(_.pos.map(p => (p.startLine, p.startColumn))) // make sure the order follows source code decl. order
-      .traverse(field =>
+      .traverseFilter(field =>
         (field.tree match { // TODO we need to work out nested structs
-          case d: q.ValDef => typer0(d.tpt.tpe).map((_, t) => p.Named(field.name, t))
-          case _           => ???
+          case d: q.ValDef =>
+            val tpe = d.tpt.tpe
+            // Skip references to objects as those are singletons and should be identified and lifted by the Remapper.
+            if (isModuleClass(tpe.typeSymbol)) {
+              None.success
+            } else typer0(tpe).map((_, t) => p.Named(field.name, t)).map(Some(_))
+          case _ => ???
         })
       )
       .map(p.StructDef(p.Sym(clsSym.fullName), clsTypeCtorNames(clsSym), _))

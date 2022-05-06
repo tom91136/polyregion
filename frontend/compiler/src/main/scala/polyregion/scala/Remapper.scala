@@ -39,6 +39,16 @@ object Remapper {
     if (!objectSymbol.flags.is(q.Flags.Module)) {
       q.report.error(s"Cannot select Ref from non-object type: ${objectSymbol}")
     }
+    println(
+      s"chain ${objectSymbol} ${objectSymbol.companionModule} = ${ownersList(objectSymbol.companionModule).toList}"
+    )
+
+    //  def removeThisRef(r : q.Ref) =
+    //    r match {
+    //      case q.Select(q.This(x), y) => q.Select(removeThisRef(x), y)
+    //      case x => x
+    //    }
+
     q.Ref.apply(objectSymbol.companionModule)
   }
 
@@ -159,117 +169,140 @@ object Remapper {
 
         def witnessClassTpe(c: q.RemapContext)(sym: q.Symbol, tpe: p.Type) =
           if (sym.isPackageDef) c.success
-          else
+          else {
             (sym.tree, tpe) match {
-              case (cls: q.ClassDef, s @ p.Type.Struct(_, _, _)) => c.updateDeps(_.witness(cls, s)).success
-              case (_, _)                                        => c.success
+              case (cls: q.ClassDef, s @ p.Type.Struct(_, _, _)) =>
+                c.updateDeps(_.witness(cls, s)).success
+              case (x, s) =>
+                c.success
             }
+          }
 
-        // call no-arg functions (i.e. `x.toDouble` or just `def fn = ???; fn` ) directly or pass-through if not no-arg
+        // Call no-arg functions (i.e. `x.toDouble` or just `def fn = ???; fn` ) directly or pass-through if not no-arg
         def invokeOrSelect(
             c: q.RemapContext
-        )(sym: q.Symbol, receiver: Option[p.Term])(select: => Result[p.Term.Select]) = {
-
-          def mkSelect = for {
-            s <- select
-            c <- witnessClassTpe(c)(sym.maybeOwner, s.tpe)
-          } yield (s -> c)
-
-          sym.tree match {
-            case fn: q.DefDef =>
-              // Assert that the term list matches Exec's nested (recursive) types.
-              // Note that Exec treats both empty args `()` and no-args as `Nil` where as the collected arg lists through
-              // `Apply` will give empty args as `Nil` and not collect no-args at all because no no application took place.
-              val termTpess = termArgss.map(_.map(_.tpe))
-              val execTpess = collectExecArgLists(tpe)
-              for {
-                _ <- (fn.termParamss.isEmpty, termTpess, execTpess) match {
-                  case (true, Nil, (Nil :: Nil) | Nil) =>
-                    ().success // no-ap, no-arg Exec (`Nil::Nil`) or no Exec (`Nil`)
-                  case (false, ts, es) if ts == es => ().success // everything else, do the assertion
-                  case (ap, ts, es)                => ???        // TODO raise failure
-                }
-                rtnTpe = resolveExecRtnTpe(tpe)
-                c   <- witnessClassTpe(c)(sym.maybeOwner, rtnTpe)
-                ivk <- c.mkInvoke(fn, tpeArgs, receiver, termArgss.flatten, rtnTpe)
-              } yield ivk
-            case _ => mkSelect
-          }
+        )(sym: q.Symbol, receiver: Option[p.Term])(select: => Result[p.Term.Select]) = sym.tree match {
+          case fn: q.DefDef => // `sym.$fn`
+            // Assert that the term list matches Exec's nested (recursive) types.
+            // Note that Exec treats both empty args `()` and no-args as `Nil` where as the collected arg lists through
+            // `Apply` will give empty args as `Nil` and not collect no-args at all because no no application took place.
+            val termTpess = termArgss.map(_.map(_.tpe))
+            val execTpess = collectExecArgLists(tpe)
+            println(s"Invoke ${receiver} . ${fn}")
+            for {
+              _ <- (fn.termParamss.isEmpty, termTpess, execTpess) match {
+                case (true, Nil, (Nil :: Nil) | Nil) => ().success // no-ap; no-arg Exec (`Nil::Nil`) or no Exec (`Nil`)
+                case (false, ts, es) if ts == es     => ().success // everything else, do the assertion
+                case (ap, ts, es)                    => ???        // TODO raise failure
+              }
+              rtnTpe = resolveExecRtnTpe(tpe)
+              c   <- witnessClassTpe(c)(sym.maybeOwner, rtnTpe) // TODO this won't work right?
+              ivk <- c.mkInvoke(fn, tpeArgs, receiver, termArgss.flatten, rtnTpe)
+            } yield ivk
+          case _ => // sym.$select
+            for {
+              s <- select
+              c <- witnessClassTpe(c)(sym.maybeOwner, s.tpe)
+            } yield (s -> c)
         }
 
-        def handleNestedObjectSelect(ref: q.Ref, named: p.Named) =
-          if (ownersList(ref.symbol).forall(_.flags.is(q.Flags.Module))) {
-            // We handle any reference to arbitrarily nested objects (and object only) directly because they are singletons
-            // (e.g. can appear anywhere with no dependencies, even the owner).
-            val selectOwner = ref.symbol.maybeOwner
+        // We handle any reference to arbitrarily nested objects/modules (including direct indent with no nesting, as produced by `inline` calls)
+        // directly because they are singletons (i.e. can appear anywhere with no dependencies, even the owner).
+        // We traverse owners closes to the ref first (inside out) until we hit a method/package and work out the nesting.
+        def handleObjectSelect(ref: q.Ref, named: p.Named) = ownersList(ref.symbol)
+          .takeWhile(Retyper.isModuleClass(_))
+          .toList match {
+          case Nil => None // not nested
+          case xs @ (owner :: _) => // owner would be the closes symbol to ref.symbol here
             Some(for {
-              tpe <- clsSymTyper0(selectOwner)
-              c   <- witnessClassTpe(c)(selectOwner, tpe)
+              tpe <- clsSymTyper0(owner)
               (term, c) <- tpe match {
                 case s @ p.Type.Struct(rootName, Nil, Nil) =>
-                  val directRoot = p.Named(rootName.fqn.mkString("_"), s)
-                  invokeOrSelect(c)(ref.symbol, Some(p.Term.Select(Nil, directRoot)))(
-                    p.Term.Select(directRoot :: Nil, named).success
-                  )
+                  for {
+                    c <- ref match {
+                      case q.Select(qualifier, _) => c.updateDeps(_.witness(qualifier.tpe.typeSymbol, s)).success
+                      case q.Ident(_)             => c.updateDeps(_.witness(owner, s)).success
+                    }
+                    directRoot = p.Named(rootName.fqn.mkString("_"), s)
+                    result <- invokeOrSelect(c)(ref.symbol, Some(p.Term.Select(Nil, directRoot)))(
+                      p.Term.Select(directRoot :: Nil, named).success
+                    )
+                  } yield result
+
                 case bad =>
                   s"Illegal type ($bad) derived for owner of ${named.repr}, expecting an object class with no generics and type vars".fail
               }
             } yield (term, c))
-          } else None
-
-        def handleThisRef(ref: q.Ref, named: p.Named) =
-          if (owningClassSymbol(c.root).contains(ref.symbol.maybeOwner)) {
-            // When an ref is owned by the current class/object (i.e. `c.root`), we add an implicit `this` reference.
-            Some(for {
-              tpe <- clsSymTyper0(ref.symbol.owner) // TODO what about generics???
-              cls = p.Named("this", tpe)
-              (invoke, c) <- invokeOrSelect(c)(ref.symbol, Some(p.Term.Select(Nil, cls)))(
-                p.Term.Select(cls :: Nil, named).success
-              )
-            } yield (invoke, c))
-          } else None
-
-        ref match {
-          case ident @ q.Ident(s) => // this is the root of q.Select, it can appear at top-level as well
-            // We've encountered a case where the ident's name is different from the TermRef's name.
-            // This is likely a result of inline where we end up with synthetic names, we use the TermRef's name in this case.
-            val name = ident.tpe match {
-              case q.TermRef(_, name) if name != s => name
-              case _                               => s
-            }
-            val local = p.Named(name, tpe)
-            handleThisRef(ident, local)
-              .orElse(handleNestedObjectSelect(ident, local))
-              .getOrElse {
-                // In any other case, we're probably referencing a local ValDef that appeared before before this.
-                invokeOrSelect(c)(ident.symbol, None)(p.Term.Select(Nil, local).success)
-              }
-          case select @ q.Select(qualifierTerm, name) => // we have qualifiers before the actual name
-            val named = p.Named(name, tpe)
-            handleThisRef(select, named)
-              .orElse(handleNestedObjectSelect(select, named))
-              .getOrElse {
-                // Otherwise we go through the usual path of resolution (nested classes where each instance has an `this` reference to the owning class)
-                c.mapTerm(qualifierTerm).flatMap {
-                  case (recv @ p.Term.Select(xs, x), c) => // fuse with previous select if we got one
-                    invokeOrSelect(c)(select.symbol, Some(recv))(p.Term.Select(xs :+ x, named).success)
-                  case (term, c) => // or simply return whatever it's referring to
-                    // `$qualifierTerm.$name` becomes `$term.${select.symbol}()` so we don't need the `$name` here
-                    invokeOrSelect(c)(select.symbol, Some(term))(
-                      "illegal selection of a non DefDef symbol from a primitive term (i.e `{ 1.$name }` )".fail
-                    )
-                }
-              }
         }
+
+        // When an ref is owned by the current class/object (i.e. `c.root`), we add an implicit `this` reference.
+        def handleThisRef(ref: q.Ref, named: p.Named) = if (owningClassSymbol(c.root).contains(ref.symbol.maybeOwner)) {
+          Some(for {
+            tpe <- clsSymTyper0(ref.symbol.owner) // TODO what about generics???
+            cls = p.Named("this", tpe)
+            (invoke, c) <- invokeOrSelect(c)(ref.symbol, Some(p.Term.Select(Nil, cls)))(
+              p.Term.Select(cls :: Nil, named).success
+            )
+          } yield (invoke, c))
+        } else None
+
+        // First, we check if the ident's symbol is an object.
+        // This handle cases like `ObjA.ObjB` or `($x: ObjA).ObjB`, both should resolve to `ObjB` directly
+        if (Retyper.isModuleClass(ref.tpe.typeSymbol)) {
+          tpe match { // Object references regardless of nesting can be direct so we use the generated reference name here.
+            case s @ p.Type.Struct(name, _, _) =>
+              (
+                p.Term.Select(Nil, p.Named(name.fqn.mkString("_"), tpe)),
+                c.updateDeps(_.witness(ref.tpe.typeSymbol, s))
+              ).success
+            case bad =>
+              s"Type assertion failed; ref `${ref.show}` is a module but typer disagrees (tpe = ${bad.repr})".fail
+          }
+        } else
+          ref match {
+            case ident @ q.Ident(s) => // this is the root of q.Select, it can appear at top-level as well
+              // We may encounter a case where the ident's name is different from the TermRef's name.
+              // This is likely a result of inline where we end up with synthetic names, we use the TermRef's name in this case.
+              val name = ident.tpe match {
+                case q.TermRef(_, name) if name != s => name
+                case _                               => s
+              }
+              val local = p.Named(name, tpe)
+
+              handleThisRef(ident, local)
+                .orElse(handleObjectSelect(ident, local))
+                .getOrElse {
+                  // In any other case, we're probably referencing a local ValDef that appeared before before this.
+                  invokeOrSelect(c)(ident.symbol, None)(p.Term.Select(Nil, local).success)
+                }
+
+            case select @ q.Select(root, name) => // we have qualifiers before the actual name
+              val named = p.Named(name, tpe)
+              handleThisRef(select, named)
+                .orElse(handleObjectSelect(select, named))
+                .getOrElse {
+                  // Otherwise we go through the usual path of resolution  (nested classes where each
+                  // instance has an `this` reference to the owning class)
+                  c.mapTerm(root).flatMap {
+                    case (root @ p.Term.Select(xs, x), c) => // fuse with previous select if we got one
+                      invokeOrSelect(c)(select.symbol, Some(root))(p.Term.Select(xs :+ x, named).success)
+                    case (root, c) => // or simply return whatever it's referring to
+                      // `$root.$name` becomes `$root.${select.symbol}()` so we don't need the `$name` here
+                      invokeOrSelect(c)(select.symbol, Some(root))(
+                        "illegal selection of a non DefDef symbol from a primitive term (i.e `{ 1.$name }` )".fail
+                      )
+                  }
+                }
+          }
     }
 
-    def witnessTpe(tpe: q.TypeRepr) = (tpe.classSymbol) match {
-      case Some(clsSym) if !clsSym.isNoSymbol =>
-        println(s" D=${clsSym.tree}")
-      // c.updateDeps(_.witness())
-      case bad =>
-        println(s" D=${bad}")
-    }
+    // def witnessTpe(tpe: q.TypeRepr) = (tpe.classSymbol) match {
+    //   case Some(clsSym) if !clsSym.isNoSymbol =>
+    //     println(s" D=${clsSym.tree}")
+    //   // c.updateDeps(_.witness())
+    //   case bad =>
+    //     println(s" D=${bad}")
+    // }
 
     def mapTerm(
         term: q.Term,
@@ -308,9 +341,9 @@ object Remapper {
           } yield (term, c)
         case (tpeArgs, termArgs, r: q.Ref) =>
           println(
-            s"[mapper] ref = `${r.show}` termArgs={${termArgs.flatten.map(_.repr).mkString(",")}} tpeArgs=<${tpeArgs.map(_.repr).mkString(",")}>"
+            s"[mapper] ref = `${r}` termArgs={${termArgs.flatten.map(_.repr).mkString(",")}} tpeArgs=<${tpeArgs.map(_.repr).mkString(",")}>"
           )
-          (c.refs.get(r)) match {
+          (c.refs.get(r.symbol)) match {
             case Some(term) => (term, (c !! r)).success
             case None       => (c !! r).mapRef0(r, tpeArgs, termArgs)
           }

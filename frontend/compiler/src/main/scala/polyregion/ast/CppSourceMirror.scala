@@ -3,6 +3,7 @@ package polyregion.ast
 import polyregion.ast.mirror.CppNlohmannJsonCodecGen
 import polyregion.ast.mirror.CppStructGen.*
 import polyregion.ast.PolyAst
+import polyregion.ast.MsgPack
 
 import java.nio.file.Paths
 import java.nio.file.Files
@@ -59,6 +60,10 @@ private[polyregion] object CppSourceMirror {
   private final val adtImpl   = StructSource.emitImpl(namespace, adtFileName, adtSources)
 
   final val AdtHash = md5(adtHeader + adtImpl)
+
+  inline def encode[A : MsgPack.Codec](x : A) : Array[Byte] = {
+    MsgPack.encode(MsgPack.Versioned(AdtHash, x))
+  }
 
   @main def main(): Unit = {
 

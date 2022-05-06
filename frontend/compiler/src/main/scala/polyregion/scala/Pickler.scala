@@ -40,20 +40,12 @@ object Pickler {
   }
 
   inline def layoutOf(using q: Quoted)(repr: q.TypeRepr): polyregion.Layout = {
-
     val sdef = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
-    
     println(s"A=${sdef} ${repr.widenTermRefByName}")
-
-    // MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, sdef))
-    println(Check.H)
-
-    // println(CppSourceMirror.AdtHash)
-    // PolyregionCompiler.layoutOf(MsgPack.encode("a", sdef))
-    new polyregion.Layout()
+    PolyregionCompiler.layoutOf(CppSourceMirror.encode(  sdef))
   }
 
-   inline def sizeOf(using q: Quoted)(tpe: p.Type, repr: q.TypeRepr): Int = tpe match {
+  inline def sizeOf(using q: Quoted)(tpe: p.Type, repr: q.TypeRepr): Int = tpe match {
     case p.Type.Float           => java.lang.Float.BYTES
     case p.Type.Double          => java.lang.Double.BYTES
     case p.Type.Bool            => java.lang.Byte.BYTES
@@ -105,7 +97,7 @@ object Pickler {
     // find out the total size of this struct first, it could be nested arbitrarily but the top level's size must
     // reflect the total size; this is consistent with C's `sizeof(struct T)`
     val sdef       = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
-    val layout     = PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, sdef)))
+    val layout     = PolyregionCompiler.layoutOf(CppSourceMirror.encode(sdef))
     val byteOffset = '{ ${ Expr(layout.sizeInBytes.toInt) } * $index }
     val fields     = sdef.members.zip(layout.members)
     val terms = fields.map { (named, m) =>
@@ -148,7 +140,7 @@ object Pickler {
     // find out the total size of this struct first, it could be nested arbitrarily but the top level's size must
     // reflect the total size; this is consistent with C's `sizeof(struct T)`
     val sdef       = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
-    val layout     = PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, sdef)))
+    val layout     = PolyregionCompiler.layoutOf(CppSourceMirror.encode(sdef))
     val byteOffset = '{ ${ Expr(layout.sizeInBytes.toInt) } * $index }
     val fields     = sdef.members.zip(layout.members)
     val terms = fields.map { (named, m) =>
@@ -193,7 +185,7 @@ object Pickler {
         }
 
       case p.Type.String => ???
-      case t             => 
+      case t =>
         writePrimitiveAtOffset(buffer, '{ $index * ${ Expr(sizeOf(t, repr)) } }, t, value)
     }
   }

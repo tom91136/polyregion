@@ -2,12 +2,13 @@ package polyregion.scala
 
 import cats.kernel.Monoid
 import polyregion.ast.{PolyAst as p, *}
+import scala.annotation.targetName
 
 class Quoted(val underlying: scala.quoted.Quotes) {
 
   import underlying.reflect.*
   export underlying.reflect.*
-  given quotes : scala.quoted.Quotes  = underlying
+  given quotes: scala.quoted.Quotes = underlying
 
   // Reference = CaptureVarName | DefaultTermValue
   case class Reference(value: String | p.Term, tpe: p.Type)
@@ -24,27 +25,36 @@ class Quoted(val underlying: scala.quoted.Quotes) {
   }
 
   case class Dependencies(
+      modules: Map[Symbol, p.Type.Struct] = Map.empty,
       classes: Map[ClassDef, Set[p.Type.Struct]] = Map.empty,
       functions: Map[DefDef, Set[p.Expr.Invoke]] = Map.empty
   ) {
+    @targetName("witness_module")
+    def witness(x: Symbol, tpe: p.Type.Struct) =
+      copy(modules = modules + (x -> tpe))
     def witness(x: ClassDef, application: p.Type.Struct) =
-      copy(classes = classes.updatedWith(x)(x => Some(x.getOrElse(Set.empty) + application)))
+      if (x.symbol.flags.is(Flags.Module)) {
+        report.errorAndAbort(s"Witness illegal module ClassDef ${x.symbol}")
+      } else {
+        copy(classes = classes.updatedWith(x)(x => Some(x.getOrElse(Set.empty) + application)))
+      }
+
     def witness(x: DefDef, application: p.Expr.Invoke) =
       copy(functions = functions.updatedWith(x)(x => Some(x.getOrElse(Set.empty) + application)))
   }
 
   given Monoid[Dependencies] = Monoid.instance(
     Dependencies(),
-    (x, y) => Dependencies(x.classes ++ y.classes, x.functions ++ y.functions)
+    (x, y) => Dependencies(x.modules ++ y.modules, x.classes ++ y.classes, x.functions ++ y.functions)
   )
 
   // TODO rename to RemapContext
   case class RemapContext(
-      root : Symbol,
+      root: Symbol,
       depth: Int = 0,                  // ref depth
       traces: List[Tree] = List.empty, // debug
 
-      refs: Map[Ref, p.Term] = Map.empty, // ident/select table
+      refs: Map[Symbol, p.Term] = Map.empty, // ident/select table
 
       // clss: Map[p.Sym, p.StructDef] = Map.empty,  // external class defs
       // defs: Map[p.Signature, DefDef] = Map.empty, // external def defs

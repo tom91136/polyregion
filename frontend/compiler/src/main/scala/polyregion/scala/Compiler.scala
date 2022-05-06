@@ -76,12 +76,7 @@ object Compiler {
     .map(_.drop(1))
 
   private def deriveModuleStructCaptures(using q: Quoted)(d: q.Dependencies): List[p.Named] =
-    d.classes
-      .collect {
-        case (c, ts) if c.symbol.flags.is(q.Flags.Module) && ts.size == 1 => ts.head
-      }
-      .map(t => p.Named(t.name.fqn.mkString("_"), t))
-      .toList
+    d.modules.map(_._2).toList.distinct.map(t => p.Named(t.name.fqn.mkString("_"), t))
 
   def compileFn(using q: Quoted)(f: q.DefDef)(log: Log): Result[((p.Function, q.Dependencies), Log)] =
     log.mark(s"Compile DefDef: ${f.name}") { log =>
@@ -175,7 +170,7 @@ object Compiler {
       } yield ((compiledFn, rhsDeps), log)
     }
 
-  def compileTerm(using q: Quoted)(term: q.Term, root: q.Symbol, scope: Map[q.Ref, p.Term])(log: Log) //
+  def compileTerm(using q: Quoted)(term: q.Term, root: q.Symbol, scope: Map[q.Symbol, p.Term])(log: Log) //
       : Result[((List[p.Stmt], p.Type, q.Dependencies), Log)] =
     log.mark(s"Compile term: ${term.pos.sourceFile.name}:${term.pos.startLine}~${term.pos.endLine}") { log =>
       for {
@@ -193,7 +188,7 @@ object Compiler {
       } yield ((optimisedStmts, termTpe, optimisedFnDeps), log)
     }
 
-  def compileExpr(using q: Quoted)(expr: Expr[Any]): Result[(List[(p.Named, q.Ref)], p.Program, Log)] = for {
+  def compileExpr(using q: Quoted)(expr: Expr[Any]): Result[(List[(p.Named, q.Term)], p.Program, Log)] = for {
     log <- Log("Expr compiler")
     term = expr.asTerm
     // generate a name for the expr first
@@ -203,17 +198,17 @@ object Compiler {
     // outline here
 
     (captures, log) <- RefOutliner.outline(term)(log)
-    (capturedNames, captureScope) = captures.foldMap[(List[(p.Named, q.Ref)], List[(q.Ref, p.Term)])] {
+    (capturedNames, captureScope) = captures.foldMap[(List[(p.Named, q.Ref)], List[(q.Symbol, p.Term)])] {
       (root, ref, value, tpe) =>
         (value, tpe) match {
-          case (Some(x), _) => (Nil, (ref -> x) :: Nil)
+          case (Some(x), _) => (Nil, (ref.symbol -> x) :: Nil)
           case (None, t) =>
             val name = ref match {
               case s @ q.Select(_, _) => s"_capture_${s.show}_${s.pos.startLine}_"
               case i @ q.Ident(_)     => s"_capture_${i.name}_${i.pos.startLine}_"
             }
             val named = p.Named(name, t)
-            ((named -> ref) :: Nil, (ref -> p.Term.Select(Nil, named)) :: Nil)
+            ((named -> ref) :: Nil, (ref.symbol -> p.Term.Select(Nil, named)) :: Nil)
         }
     }
 
@@ -224,7 +219,7 @@ object Compiler {
     )(log)
 
     log <- log.info("Expr Stmts", exprStmts.map(_.repr).mkString("\n"))
-    log <- log.info("External captures", capturedNames.map((n, r) => s"$r(symbol=${r.symbol}) ~> ${n.repr}")*)
+    log <- log.info("External captures", capturedNames.map((n, r) => s"$r(symbol=${r.symbol}, ${r.symbol.pos}) ~> ${n.repr}")*)
 
     // we got a compiled term, compile all dependencies as well
     log <- log.info(s"Expr dependent methods", exprDeps.functions.values.map(_.toString).toList*)
@@ -252,18 +247,24 @@ object Compiler {
       body = exprStmts
     )
 
-    sdefs <- deps.classes.toList.traverse { (clsDef, aps) =>
+    classSdefs <- deps.classes.toList.traverse { (clsDef, aps) =>
       structDef0(clsDef.symbol).map(_ -> aps)
     }
+    moduleSdef <- deps.modules.toList.distinct.traverse { (symbol, tpe) =>
+      structDef0(symbol).map(_ -> Set(tpe))
+    }
+    sdefs = classSdefs ::: moduleSdef
 
-    captureNameToModuleRefTable = deps.classes.collect {
-      case (c, ts) if c.symbol.flags.is(q.Flags.Module) && ts.size == 1 =>
-        println(s" @@@  ${c.symbol}")
-        println(s" @@@  ${c.symbol.moduleClass}")
-        println(s" @@@  ${c.symbol.companionClass}")
-
-        ts.head.name.fqn.mkString("_") -> selectObject(c.symbol.moduleClass)
-    }.toMap
+    captureNameToModuleRefTable = deps.modules
+      .map { (symbol, struct) =>
+        // It appears that `q.Ref.apply` prepends a `q.This(Some("this"))` at the root of the select if
+        // the object is local to the scope, not really sure why it does that but we need to remove it.
+        def removeThisFromRef(t: q.Symbol): q.Ref = q.Ref(t.companionModule) match {
+          case select @ q.Select(root @ q.This(_), n) => removeThisFromRef(root.symbol).select(select.symbol)
+          case x                                   => x
+        }
+        struct.name.fqn.mkString("_") -> removeThisFromRef(symbol)
+      }
 
     unoptimisedProgram = p.Program(exprFn, depFns, sdefs.map(_._1))
     log <- log.info(s"Program compiled, dependencies: ${unoptimisedProgram.functions.size}")

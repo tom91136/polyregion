@@ -236,7 +236,7 @@ object compiletime {
               val buffer = java.nio.ByteBuffer
                 .allocateDirect(${ Expr(Pickler.sizeOf(name.tpe, ref.tpe)) })
                 .order(java.nio.ByteOrder.nativeOrder)
-              // ${ Pickler.writeUniform('buffer, '{ 0 }, name.tpe, ref.tpe, ref.asExpr) }
+              ${ Pickler.writeUniform('buffer, '{ 0 }, name.tpe, ref.tpe, ref.asExpr) }
               buffer
             }
         }
