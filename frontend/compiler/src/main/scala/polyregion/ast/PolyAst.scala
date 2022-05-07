@@ -129,7 +129,7 @@ object PolyAst {
       dependencies: List[StructDef] //
   ) derives MsgPack.Codec
 
-  case class Signature(name: Sym, tpeArgs: List[Type], receiver: Option[Type], args: List[Type], rtn: Type)
+  case class Signature(name: Sym, tpeVars: List[String], receiver: Option[Type], args: List[Type], rtn: Type)
 
   case class Function(         //
       name: Sym,               //

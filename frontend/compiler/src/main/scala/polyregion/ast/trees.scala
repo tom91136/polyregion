@@ -6,6 +6,7 @@ import polyregion.ast.PolyAst.TypeKind
 import java.lang.reflect.Modifier
 import scala.annotation.tailrec
 import scala.reflect.ClassTag
+import cats.kernel.Semigroup
 
 @tailrec def doUntilNotEq[A](x: A)(f: A => A): A = {
   val y = f(x)
@@ -26,8 +27,13 @@ extension [A](a: Result[A]) {
 
 //
 case class Log(name: String, lines: Vector[(String, Vector[String]) | Log]) {
-  def mark[A](name: String)(f: Log => Result[(A, Log)]): Result[(A, Log)] =
-    f(Log(name, Vector.empty)).map { case (x, l) => (x, copy(lines = lines :+ l)) }
+
+  // def mark[A](name: String)(f: Log => Result[(A, Log)]): Result[(A, Log)] =
+  //   f(Log(name, Vector.empty)).map { case (x, l) => (x, copy(lines = lines :+ l)) }
+
+  infix def +(log: Log): Log = copy(lines = lines :+ log)
+
+  infix def ++(log: Seq[Log]): Log = copy(lines = lines ++ log)
 
   def info_(message: String, details: String*): Log = copy(lines = lines :+ (message -> details.toVector))
 
@@ -74,6 +80,7 @@ object Log {
   )
 
   def apply(name: String): Result[Log] = Log(name, Vector.empty).success
+
 }
 
 extension [A](a: A) {
@@ -145,9 +152,9 @@ object PolyAstToExpr {
 
 }
 
-extension (e: p.Expr.Invoke) {
-  def signature: p.Signature = p.Signature(e.name, e.tpeArgs, e.receiver.map(_.tpe), e.args.map(_.tpe), e.rtn)
-}
+// extension (e: p.Expr.Invoke) {
+//   def signature: p.Signature = p.Signature(e.name, e.tpeArgs, e.receiver.map(_.tpe), e.args.map(_.tpe), e.rtn)
+// }
 
 extension (sd: p.StructDef) {
   def repr: String = s"${sd.name.repr}<${sd.tpeVars.mkString(",")}> { ${sd.members.map(_.repr).mkString("; ")} }"
@@ -289,7 +296,7 @@ extension (e: p.Expr) {
         case p.UnaryLogicIntrinsicKind.Not => "!"
       }
       s"$fn(${lhs.repr})"
-    case p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn) =>
+    case p.Expr.BinaryIntrinsic(lhs, rhs, kind, _) =>
       val op = kind match {
         case p.BinaryIntrinsicKind.Add => "+"
         case p.BinaryIntrinsicKind.Sub => "-"
@@ -478,19 +485,19 @@ extension (e: p.Stmt) {
           (e, Nil, Nil)
         case e @ p.Expr.BinaryLogicIntrinsic(_, _, _) =>
           (e, Nil, Nil)
-        case e @ p.Expr.Cast(from, as) =>
+        case p.Expr.Cast(from, as) =>
           val (as0, as0_) = f(as)
           (p.Expr.Cast(from, as0), Nil, as0_)
-        case e @ p.Expr.Alias(ref) =>
+        case e @ p.Expr.Alias(_) =>
           (e, Nil, Nil)
-        case e @ p.Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
+        case  p.Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
           val (tpeArgs0, as0) = tpeArgs.map(f).unzip
           val (rtn0, as1)     = f(rtn)
           (p.Expr.Invoke(name, tpeArgs0, receiver, args, rtn0), Nil, as0.flatten ::: as1)
-        case e @ p.Expr.Index(lhs, idx, component) =>
+        case  p.Expr.Index(lhs, idx, component) =>
           val (component0, as0) = f(component)
           (p.Expr.Index(lhs, idx, component0), Nil, as0)
-        case e @ p.Expr.Alloc(witness, size) =>
+        case  p.Expr.Alloc(witness, size) =>
           val (component0, as0) = f(witness.component)
           (p.Expr.Alloc(p.Type.Array(component0), size), Nil, as0)
       })
@@ -529,11 +536,11 @@ extension (f: p.Function) {
   def mangledName = f.receiver.map(_.tpe.repr).getOrElse("") + "!" + f.name.fqn
     .mkString("_") + "!" + f.args.map(_.tpe.repr).mkString("_") + "!" + f.rtn.repr
 
-  def signature = p.Signature(f.name, f.tpeVars.map(p.Type.Var(_)), f.receiver.map(_.tpe), f.args.map(_.tpe), f.rtn)
+  def signature = p.Signature(f.name, f.tpeVars, f.receiver.map(_.tpe), f.args.map(_.tpe), f.rtn)
 
   def signatureRepr = {
     val captures = f.captures.map(_.repr).mkString(",")
-    val tpeVars  = f.tpeVars.map(_.repr).mkString(",")
+    val tpeVars  = f.tpeVars.mkString(",")
     val args     = f.args.map(_.repr).mkString(",")
     s"${f.receiver.fold("")(r => r.repr + ".")}${f.name.repr}<$tpeVars>($args)[$captures] : ${f.rtn.repr}"
   }

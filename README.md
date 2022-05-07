@@ -4,7 +4,6 @@
 Polyregion is a macro **library** that compiles normal and idiomatic Scala code fragments to machine code, targeting both CPUs and GPUs. 
 
 
-
 ## Supported target
 
 * CPU
@@ -35,44 +34,48 @@ TODO
 * Java
 * Kotlin
 
-## Supported constructs
+## Supported constructs in offload region
 
 * All Scala/Java's primitive types, including `Unit`.
-* All primitive control flows (e.g `if else` , `while`, `return`).
-* Arbitrary case classes via derivation of the `NativeStruct` typeclass.
+* All primitive control flows (e.g. `if then else` , `while`, `return`).
+* Arbitrary function calls to definitions outside of the offload region, regardless of whether marked with `inline`.
+* Generics and arbitrary classes/objects, including tuples, enums, and case classes.
+* Dynamic memory allocation/deallocation for supported targets (e.g. instances allocated via `new`)
+* Calls to `scala.math`/`java.lang.Math` methods replaced with calls to intrinsic where possible or `libm` as fallback.
+* Instantiation and access of `Array[A]`
+* Numeric conversions (e.g. `42.toByte`, `0.3f.toDouble`)
+* Implicit conversions/extensions (e.g. `RichInt`, `ArrayOps`, etc)
+
 * Heap memory access via `polyregion.Buffer`,
   where `trait polyregion.Buffer[A] extends scala.collection.mutable.IndexedSeq[A]`.
-* Delegation of all `scala.math`/`java.lang.Math` calls to `libm` or intrinsic.
-* Inline functions work as expected.
-* Math calls on primitives work as expected.
-* General constant propagation (e.g `Int.MaxValue`)
-* Instantiation and access of Arrays in offload
-* Offload dynamic memory allocation
-* Numeric conversion (`to<Type>`)
-* General implicit conversions/extensions (e.g `RichInt`, `ArrayOps`, etc)
 
 TODO
-
-
-* All numeric type overloads for the math libraries
-* While loop with complex conditions (multiple statements)
-* Arbitrary returns (termination) in function
-
 
 * Nested `def`
 * `lazy val`
 * `try catch` & `throw`
-* Instantiation and access of Arrays as parameter (direct copy)
-* Case class construction
 * Pattern matching
 * Delegation of `Console.println` to `print` in the runtime
-* Generics
 * String
 * Tuples
-* Arbitrary method calls
 * Casting (`asInstanceOf`)
 
 # FAQ
+
+## Is this some kind of DSL library that generates C-like source (e.g. CUDA/OpenCL)?
+
+No, Polyregion transparently compiles annotated code blocks containing normal Scala code to high-performance machine code.
+The generated code is then directly embedded in-place at call site where possible along with support for captures (e.g. class fields, local variables, and functions).
+At runtime, calls to the code block will invoke the embedded code through JNI and serialise any captures and deserialise any return values or side effects.
+
+## Does Polyregion use reflection?
+
+Only compile-time reflection (i.e. macros) in Scala 3.
+
+## Is is fast?
+
+Boundary-crossing (i.e. FFI into native code and back) performance at runtime should be equivalent to hand written JNI bindings.
+The actual performance of the code block is dependent on the generated machine code by LLVM for the selected platform.
 
 ## Doesn't Scala Native already exists? How does this compare to Scala Native?
 
@@ -95,9 +98,9 @@ operates on the Java Bytecode directly and has limited support for advanced cons
 also only supports OpenCL which may be a limiting factor.
 
 TornadoVM also operates on the Bytecode but introduces advanced optimisation passes by modifying the JVM itself.
-This is a significant restriction as TornadoVM will only work with specific versions of the JVM 
+This is a significant restriction as TornadoVM will only work with specific versions of the JVM.
 
-Polyregion only uses features supported under the JavaSE specification (e.g JNI) and does not use
+Polyregion only uses features supported under the JavaSE specification such as JNI and does not use
 any VM specific features. Currently, we have verified correct operation on common OpenJDK builds,
 GraalVM CE/EE, and also Eclipse OpenJ9.
 

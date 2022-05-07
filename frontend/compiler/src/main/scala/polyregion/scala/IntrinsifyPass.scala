@@ -186,7 +186,7 @@ object IntrinsifyPass {
   }
 
   private def intrinsifyModuleApply(s: p.Stmt, idx: Int) = s.mapAccExpr[p.Expr.Invoke] {
-    case inv @ p.Expr.Invoke(sym, tpeArgs, None, args, rtn) =>
+    case inv @ p.Expr.Invoke(sym, tpeArgs, Some(_), args, rtn) =>
       (sym.fqn, args) match {
 
         case ("scala" :: "Int$" :: "int2double" :: Nil, x :: Nil) if x.tpe == p.Type.Int =>

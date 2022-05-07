@@ -30,13 +30,11 @@ object compiletime {
           (_, mt) <- Retyper.typer0(m)
           st <- st match {
             case p.Type.Struct(sym, _, _) => sym.success
-            // case q.ErasedClsTpe(sym, _, _, _) => sym.success
-            case bad => s"source class $s is not a class type, got $bad".fail
+            case bad                      => s"source class $s is not a class type, got $bad".fail
           }
           mt <- mt match {
             case p.Type.Struct(sym, _, _) => sym.success
-            // case q.ErasedClsTpe(sym, _, _, _) => sym.success
-            case bad => s"mirror class $m is not a class type, got $bad".fail
+            case bad                      => s"mirror class $m is not a class type, got $bad".fail
           }
         } yield mt -> st
       }
@@ -83,7 +81,7 @@ object compiletime {
 
     def extractMethodTypes(clsTpe: q.TypeRepr): Result[(q.Symbol, List[ReflectedMethodTpe])] =
       clsTpe.classSymbol.failIfEmpty(s"No class symbol for ${clsTpe}").map { sym =>
-        sym -> sym.memberMethods
+        sym -> sym.methodMembers
           .filter { m =>
             val flags = m.flags
             flags.is(q.Flags.Method) && !(
@@ -97,18 +95,13 @@ object compiletime {
           }
       }
 
-    def mkMirroredMethods(
-        sourceMethodSym: q.Symbol,
-        sourceClassKind: q.ClassKind,
-        mirrorMethodSym: q.Symbol,
-        expectedStructDef: p.StructDef
-    ): Result[(List[p.Function], q.Dependencies)] = for {
+    def mirrorMethod(sourceMethodSym: q.Symbol, mirrorMethodSym: q.Symbol): Result[(p.Function, q.Dependencies)] = for {
 
       log <- Log(s"Mirror for ${sourceMethodSym} -> ${mirrorMethodSym}")
       _ = println(s"Do ${sourceMethodSym}")
 
       sourceSignature <- sourceMethodSym.tree match {
-        case d: q.DefDef => polyregion.scala.Compiler.deriveSignature(d, sourceClassKind)
+        case d: q.DefDef => polyregion.scala.Compiler.deriveSignature(d)
         case unsupported => s"Unsupported source tree: ${unsupported.show} ".fail
       }
       _ = println(s"SIG=$sourceSignature")
@@ -118,24 +111,15 @@ object compiletime {
           println(d.show)
           for {
 
-            ((fn, fnDeps), log)    <- polyregion.scala.Compiler.compileFn(d)(log)
-            (depFns, depDeps, log) <- polyregion.scala.Compiler.compileAllDependencies(fnDeps)(log)
+            ((fn, fnDeps), fnLog) <- polyregion.scala.Compiler.compileFn(d)
 
-//            _ <- sdefs match {
-//              case `expectedStructDef` :: Nil => ().success
-//              case bad =>
-//                s"Unexpected struct dependencies for ${d.symbol}, expecting ${expectedStructDef.repr} but got ${bad.map(_.repr).mkString(",")}".fail
-//            }
-
-            replaceSyms = (t: p.Type) =>
-              t.map {
-                case p.Type.Struct(sym, tpeVars, args) => p.Type.Struct(typeLUT.getOrElse(sym, sym), tpeVars, args)
-                case x                                 => x
-              }
-
-          } yield (fn
-            .copy(name = sourceSignature.name, receiver = sourceSignature.receiver.map(p.Named("this", _)))
-            .mapType(replaceSyms) :: depFns.map(_.mapType(replaceSyms))) -> depDeps
+            rewrittenMirror =
+              fn.copy(name = sourceSignature.name, receiver = sourceSignature.receiver.map(p.Named("this", _)))
+                .mapType(_.map {
+                  case p.Type.Struct(sym, tpeVars, args) => p.Type.Struct(typeLUT.getOrElse(sym, sym), tpeVars, args)
+                  case x                                 => x
+                })
+          } yield rewrittenMirror -> fnDeps
 
         case unsupported => s"Unsupported mirror tree: ${unsupported.show} ".fail
       }
@@ -144,8 +128,6 @@ object compiletime {
     val m = for {
       (sourceSym, sourceMethods) <- extractMethodTypes(source)
       (mirrorSym, mirrorMethods) <- extractMethodTypes(mirror)
-
-      sourceClassKind = if (sourceSym.flags.is(q.Flags.Module)) q.ClassKind.Object else q.ClassKind.Class
 
       _ = println(s">>## ${sourceSym.fullName} -> ${mirrorSym.fullName} ")
       mirrorStruct <- Retyper.structDef0(mirrorSym)
@@ -159,10 +141,8 @@ object compiletime {
           case None => Nil.success // extra method on mirror
           case Some(xs) => // we got overloads, resolve them
             xs.filter(_ =:= reflectedMirror) match {
-              case sourceMirror :: Nil =>
-                mkMirroredMethods(sourceMirror.symbol, sourceClassKind, reflectedMirror.symbol, mirrorStruct).map(
-                  _ :: Nil
-                ) // single match
+              case sourceMirror :: Nil => // single match
+                mirrorMethod(sourceMirror.symbol, reflectedMirror.symbol).map((f, deps) => (f :: Nil, deps) :: Nil)
               case Nil =>
                 s"Overload resolution for <${mirrorSym.fullName}>${reflectedMirror.show} with named arguments resulted in no match, the following methods were considered:\n\t${xs
                   .map("\t" + _.show)
@@ -172,8 +152,21 @@ object compiletime {
             }
         }
       }
-      (functions, dependencies) = mirroredMethods.combineAll
-    } yield p.Mirror(p.Sym(sourceSym.fullName), mirrorStruct, functions, /*dependencies.clss.values.toList */ Nil)
+      // We reject any mirror that require dependent functions as those would have to go through mirror substitution first,
+      // thus making this process recursive, which is quite error prone for in a macro context.
+      // The workaround is to mark dependent functions as inline in the mirror.
+      (functions, deps) = mirroredMethods.combineAll
+      _ <-
+        if (deps.functions.nonEmpty)
+          (s"$sourceSym -> $mirrorSym contains call to dependent functions: ${deps.functions.map(_._1.symbol)}, " +
+            s"this is not allowed and dependent methods should be marked inline to avoid this").fail
+        else ().success
+      // deps.classes
+      // deps.modules
+      _ = println(deps.classes.keys.toList)
+      _ = println(deps.modules.keys.map(_.fullName).toList)
+      sdefs <- Compiler.deriveStructDefs(deps)
+    } yield p.Mirror(source = p.Sym(sourceSym.fullName), struct = mirrorStruct, functions = functions, sdefs.map(_._1))
 
     println(">>>" + m)
     m

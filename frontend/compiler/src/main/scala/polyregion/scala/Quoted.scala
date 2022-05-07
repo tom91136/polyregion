@@ -24,6 +24,7 @@ class Quoted(val underlying: scala.quoted.Quotes) {
     case Object, Class
   }
 
+  // TODO everything here can be a Set as we don't need the rhs
   case class Dependencies(
       modules: Map[Symbol, p.Type.Struct] = Map.empty,
       classes: Map[ClassDef, Set[p.Type.Struct]] = Map.empty,
