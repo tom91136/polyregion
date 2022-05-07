@@ -158,7 +158,7 @@ object compiletime {
       (functions, deps) = mirroredMethods.combineAll
       _ <-
         if (deps.functions.nonEmpty)
-          (s"$sourceSym -> $mirrorSym contains call to dependent functions: ${deps.functions.map(_._1.symbol)}, " +
+          (s"${sourceSym.fullName} -> ${mirrorSym.fullName} contains call to dependent functions: ${deps.functions.map(_._1.symbol)}, " +
             s"this is not allowed and dependent methods should be marked inline to avoid this").fail
         else ().success
       // deps.classes

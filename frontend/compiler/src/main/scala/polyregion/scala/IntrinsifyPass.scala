@@ -140,6 +140,11 @@ object IntrinsifyPass {
           }
           (expr, stmts, inv :: Nil)
 
+        case ("polyregion" :: "scala" :: "compiletime" :: "intrinsics$" :: op :: Nil, x, y :: Nil) =>
+          println(s"$op $x $y")
+
+          ???
+
         case ("scala" :: ("Double" | "Float" | "Long" | "Int" | "Short" | "Char" | "Byte") :: op :: Nil, x, y :: Nil)
             if x.tpe.isNumeric && y.tpe.isNumeric && rtn.isNumeric =>
           val (expr, stmts) = op match {

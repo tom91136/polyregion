@@ -45,6 +45,9 @@ object compiletime {
     '{}
   }
 
+  private[polyregion] inline def symbolNameOf[B]: String       = ${ symbolNameOfImpl[B] }
+  private def symbolNameOfImpl[B: Type](using q: Quotes): Expr[String] = Expr(q.reflect.TypeRepr.of[B].typeSymbol.fullName)
+
   inline def foreachJVMPar(inline range: Range, inline n: Int = java.lang.Runtime.getRuntime.availableProcessors())(
       inline x: Int => Unit
   )(using ec: scala.concurrent.ExecutionContext): Unit = {
@@ -156,6 +159,17 @@ object compiletime {
     }
     latch.await()
     acc.get()
+  }
+
+  object intrinsics {
+
+    private def intrinsic: Nothing = throw new AssertionError("illegal")
+
+    def mul[A, B](l: A, r: B): Nothing = intrinsic
+    def add[A, B](l: A, r: B): Nothing = intrinsic
+    def sub[A, B](l: A, r: B): Nothing = intrinsic
+    def div[A, B](l: A, r: B): Nothing = intrinsic
+
   }
 
   inline def deriveNativeStruct[A]: NativeStruct[A] = ${ deriveNativeStructImpl[A] }
