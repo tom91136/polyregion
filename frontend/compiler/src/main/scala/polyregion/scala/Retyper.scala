@@ -55,7 +55,7 @@ object Retyper {
     clsSym.fieldMembers
       .filterNot(_.flags.is(q.Flags.Module)) // TODO exclude objects for now, need to implement this later
       .filter(_.maybeOwner == clsSym)        // TODO local members for now, need to workout inherited members
-      .sortBy(_.pos.map(p => (p.startLine, p.startColumn))) // make sure the order follows source code decl. order
+      .sortBy(_.pos.map(p => Try((p.startLine, p.startColumn)).getOrElse((0,0)) )) // make sure the order follows source code decl. order
       .traverseFilter(field =>
         (field.tree match { // TODO we need to work out nested structs
           case d: q.ValDef =>

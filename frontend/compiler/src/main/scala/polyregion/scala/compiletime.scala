@@ -161,17 +161,6 @@ object compiletime {
     acc.get()
   }
 
-  object intrinsics {
-
-    private def intrinsic: Nothing = throw new AssertionError("illegal")
-
-    def mul[A, B](l: A, r: B): Nothing = intrinsic
-    def add[A, B](l: A, r: B): Nothing = intrinsic
-    def sub[A, B](l: A, r: B): Nothing = intrinsic
-    def div[A, B](l: A, r: B): Nothing = intrinsic
-
-  }
-
   inline def deriveNativeStruct[A]: NativeStruct[A] = ${ deriveNativeStructImpl[A] }
 
   def deriveNativeStructImpl[A: Type](using q: Quotes): Expr[NativeStruct[A]] = {

@@ -67,6 +67,50 @@ object IntrinsifyPass {
   private def intrinsifyInstanceApply(s: p.Stmt, idx: Int) = s.mapAccExpr[p.Expr.Invoke] {
     case inv @ p.Expr.Invoke(sym, tpeArgs, Some(recv), args, rtn) =>
       (sym.fqn, recv, args) match {
+        case ("polyregion" :: "scala" :: "intrinsics$" :: op :: Nil, x, xs) =>
+          println(s"$op $x $xs")
+          val expr = xs match {
+            case x :: Nil =>
+              val kind = op match {
+                case "sin"  => p.UnaryIntrinsicKind.Sin
+                case "cos"  => p.UnaryIntrinsicKind.Cos
+                case "tan"  => p.UnaryIntrinsicKind.Tan
+                case "asin" => p.UnaryIntrinsicKind.Asin
+                case "acos" => p.UnaryIntrinsicKind.Acos
+                case "atan" => p.UnaryIntrinsicKind.Atan
+                case "sinh" => p.UnaryIntrinsicKind.Sinh
+                case "cosh" => p.UnaryIntrinsicKind.Cosh
+                case "tanh" => p.UnaryIntrinsicKind.Tanh
+
+                case "signum" => p.UnaryIntrinsicKind.Signum
+                case "abs"    => p.UnaryIntrinsicKind.Abs
+                case "round"  => p.UnaryIntrinsicKind.Round
+                case "ceil"   => p.UnaryIntrinsicKind.Ceil
+                case "floor"  => p.UnaryIntrinsicKind.Floor
+                case "rint"   => p.UnaryIntrinsicKind.Rint
+
+                case "sqrt"  => p.UnaryIntrinsicKind.Sqrt
+                case "cbrt"  => p.UnaryIntrinsicKind.Cbrt
+                case "exp"   => p.UnaryIntrinsicKind.Exp
+                case "expm1" => p.UnaryIntrinsicKind.Expm1
+                case "log"   => p.UnaryIntrinsicKind.Log
+                case "log1p" => p.UnaryIntrinsicKind.Log1p
+                case "log10" => p.UnaryIntrinsicKind.Log10
+              }
+              p.Expr.UnaryIntrinsic(x, kind, rtn)
+            case x :: y :: Nil =>
+              val kind = op match {
+                case "pow" => p.BinaryIntrinsicKind.Pow
+
+                case "min" => p.BinaryIntrinsicKind.Min
+                case "max" => p.BinaryIntrinsicKind.Max
+
+                case "atan2" => p.BinaryIntrinsicKind.Atan2
+                case "hypot" => p.BinaryIntrinsicKind.Hypot
+              }
+              p.Expr.BinaryIntrinsic(x, y, kind, rtn)
+          }
+          (expr, Nil, inv :: Nil)
         case (op :: Nil, x, y :: Nil) if x.tpe == p.Type.Bool && y.tpe == p.Type.Bool && rtn == p.Type.Bool =>
           val (expr, stmts) = op match {
             case "&&" => (p.Expr.BinaryLogicIntrinsic(x, y, p.BinaryLogicIntrinsicKind.And), Nil)
@@ -75,8 +119,7 @@ object IntrinsifyPass {
             case "!=" => (p.Expr.BinaryLogicIntrinsic(x, y, p.BinaryLogicIntrinsicKind.Neq), Nil)
           }
           (expr, stmts, inv :: Nil)
-
-        case (op :: Nil, x, y :: Nil) if x.tpe.isNumeric && y.tpe.isNumeric && rtn == p.Type.Bool =>
+        case (_ :+ op, x, y :: Nil) if x.tpe.isNumeric && y.tpe.isNumeric && rtn == p.Type.Bool =>
           val (expr, stmts) = op match {
             case "<" =>
               binaryNumericIntrinsic(x, y, binaryPromote(x.tpe, y.tpe), idx, p.BinaryLogicIntrinsicKind.Lt)
@@ -139,12 +182,6 @@ object IntrinsifyPass {
 
           }
           (expr, stmts, inv :: Nil)
-
-        case ("polyregion" :: "scala" :: "compiletime" :: "intrinsics$" :: op :: Nil, x, y :: Nil) =>
-          println(s"$op $x $y")
-
-          ???
-
         case ("scala" :: ("Double" | "Float" | "Long" | "Int" | "Short" | "Char" | "Byte") :: op :: Nil, x, y :: Nil)
             if x.tpe.isNumeric && y.tpe.isNumeric && rtn.isNumeric =>
           val (expr, stmts) = op match {

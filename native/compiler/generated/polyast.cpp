@@ -1060,9 +1060,9 @@ std::ostream &operator<<(std::ostream &os, const Signature &x) {
   os << x.name;
   os << ',';
   os << '{';
-  if (!x.tpeArgs.empty()) {
-    std::for_each(x.tpeArgs.begin(), std::prev(x.tpeArgs.end()), [&os](auto &&x) { os << x; os << ','; });
-    os << x.tpeArgs.back();
+  if (!x.tpeVars.empty()) {
+    std::for_each(x.tpeVars.begin(), std::prev(x.tpeVars.end()), [&os](auto &&x) { os << '"' << x << '"'; os << ','; });
+    os << '"' << x.tpeVars.back() << '"';
   }
   os << '}';
   os << ',';
@@ -1084,7 +1084,7 @@ std::ostream &operator<<(std::ostream &os, const Signature &x) {
   return os;
 }
 bool operator==(const Signature &l, const Signature &r) { 
-  return l.name == r.name && std::equal(l.tpeArgs.begin(), l.tpeArgs.end(), r.tpeArgs.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && l.receiver == r.receiver && std::equal(l.args.begin(), l.args.end(), r.args.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && *l.rtn == *r.rtn;
+  return l.name == r.name && l.tpeVars == r.tpeVars && l.receiver == r.receiver && std::equal(l.args.begin(), l.args.end(), r.args.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && *l.rtn == *r.rtn;
 }
 
 std::ostream &operator<<(std::ostream &os, const Function &x) {
@@ -1612,7 +1612,7 @@ std::size_t std::hash<polyregion::polyast::StructDef>::operator()(const polyregi
 }
 std::size_t std::hash<polyregion::polyast::Signature>::operator()(const polyregion::polyast::Signature &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.name)>()(x.name);
-  seed ^= std::hash<decltype(x.tpeArgs)>()(x.tpeArgs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.tpeVars)>()(x.tpeVars) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.receiver)>()(x.receiver) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.args)>()(x.args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);

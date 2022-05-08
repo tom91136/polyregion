@@ -8,6 +8,7 @@ import _root_.scala.annotation.{compileTimeOnly, tailrec}
 import _root_.scala.compiletime.{erasedValue, summonInline}
 import _root_.scala.quoted.*
 import _root_.scala.reflect.ClassTag
+import scala.collection.mutable.ListBuffer
 
 @compileTimeOnly("This class only exists at compile-time to for internal use")
 object compiletime {
@@ -47,10 +48,26 @@ object compiletime {
         })
       }(typeTable))
     } yield data) match {
-      case Left(e) => throw e
+      case Left(e)                   => throw e
       case Right(xs: List[p.Mirror]) =>
-        val enc = Expr(MsgPack.encode(xs.map(m => m.source -> m).toMap))
-        '{ MsgPack.decode[Map[p.Sym, p.Mirror]]($enc).fold(throw _, x => x) }
+        // XXX JVM bytecode limit is 64k per method, make sure we're under that by using 1k per constant
+        // we also generate lazy vals (could be defs if this becomes a problem) which transforms to a separate synthetic method
+        val packs = MsgPack.encode(xs).grouped(1024).toList
+        println(s"packs = ${packs.size}")
+        type PickleType = Array[Byte]
+        val (vals, refs) = packs.zipWithIndex.map { (pack, i) =>
+          val symbol =
+            q.Symbol.newVal(q.Symbol.spliceOwner, s"pack$i", q.TypeRepr.of[PickleType], q.Flags.Lazy, q.Symbol.noSymbol)
+          (
+            q.ValDef(symbol, Some(Expr(pack).asTerm)),
+            q.Ref(symbol).asExprOf[PickleType]
+          )
+        }.unzip
+        val decodeExpr = '{
+          val data = Array.concat(${ Varargs(refs) }*)
+          MsgPack.decode[List[p.Mirror]](data).fold(throw _, x => x).map(m => m.source -> m).toMap
+        }
+        q.Block(vals, decodeExpr.asTerm).asExprOf[Map[p.Sym, p.Mirror]]
     }
   }
 
@@ -165,8 +182,8 @@ object compiletime {
       // deps.modules
       _ = println(deps.classes.keys.toList)
       _ = println(deps.modules.keys.map(_.fullName).toList)
-      sdefs <- Compiler.deriveStructDefs(deps)
-    } yield p.Mirror(source = p.Sym(sourceSym.fullName), struct = mirrorStruct, functions = functions, sdefs.map(_._1))
+      (sdefs, sdefLogs) <- Compiler.deriveAllStructs(deps)()
+    } yield p.Mirror(source = p.Sym(sourceSym.fullName), struct = mirrorStruct, functions = functions, sdefs )
 
     println(">>>" + m)
     m

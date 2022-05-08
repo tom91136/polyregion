@@ -41,8 +41,7 @@ object Compiler {
   } yield p.Signature(p.Sym(f.symbol.fullName), receiverTpeVars ::: fnTypeVars, receiver, fnArgsTpes, fnRtnTpe)
 
   def compileAllDependencies(using q: Quoted)(deps: q.Dependencies)(
-      fnLut: Map[p.Signature, p.Function] = Map.empty,
-      clsLut: Map[p.Sym, p.StructDef] = Map.empty
+      fnLut: Map[p.Signature, p.Function] = Map.empty
   ): Result[(List[p.Function], q.Dependencies, Log)] =
     for {
       log <- Log(s"Compile dependent functions")
@@ -72,6 +71,27 @@ object Compiler {
             )
       }(_._1.nonEmpty)
     } yield (fns, deps, log)
+
+  def deriveAllStructs(using q: Quoted)(deps: q.Dependencies)(
+      clsLut: Map[p.Sym, p.StructDef] = Map.empty
+  ): Result[(List[p.StructDef], Log)] = for {
+    log <- Log(s"Compile dependent structs")
+    classSdefs <- deps.classes.toList.traverse { (clsDef, aps) =>
+      structDef0(clsDef.symbol).map(_ -> aps)
+    }
+    log <- log.info("Classes", classSdefs.map(_._1.repr)*)
+    moduleSdef <- deps.modules.toList.distinct.traverse { (symbol, tpe) =>
+      log.info(symbol.fullName) *>
+        structDef0(symbol).map(_ -> Set(tpe))
+    }
+    log <- log.info("Modules", moduleSdef.map(_._1.repr)*)
+
+    sdefs = (classSdefs ::: moduleSdef).map(_._1)
+    log <- log.info(
+      "Replacements",
+      sdefs.map(sd => s"${sd.repr} => ${clsLut.get(sd.name).map(_.repr).getOrElse("(keep)")}")*
+    )
+  } yield (sdefs.map(sd => clsLut.getOrElse(sd.name, sd)), log)
 
   private def deriveModuleStructCaptures(using q: Quoted)(d: q.Dependencies): List[p.Named] =
     d.modules.map(_._2).toList.map(t => p.Named(t.name.fqn.mkString("_"), t))
@@ -161,16 +181,6 @@ object Compiler {
 
   } yield ((compiledFn, rhsDeps), log)
 
-
-  def deriveStructDefs(using q: Quoted)(deps: q.Dependencies) = for {
-    classSdefs <- deps.classes.toList.traverse { (clsDef, aps) =>
-      structDef0(clsDef.symbol).map(_ -> aps)
-    }
-    moduleSdef <- deps.modules.toList.traverse { (symbol, tpe) =>
-      structDef0(symbol).map(_ -> Set(tpe))
-    }
-  } yield (classSdefs ::: moduleSdef)
-
   def compileTerm(using q: Quoted)(
       term: q.Term,
       root: q.Symbol,
@@ -234,9 +244,11 @@ object Compiler {
     _ = println(log.render().mkString("\n"))
 
     // log                 <- log.info(s"Expr dependent vars   ", exprDeps.vars.map(_.toString).toList*)
-    (depFns, deps, depLog) <- compileAllDependencies(exprDeps)( StdLib.Functions, StdLib.StructDefs)
-    log                 <- log.info(s"Expr+Deps Dependent methods", deps.functions.values.map(_.toString).toList*)
-    log                 <- log.info(s"Expr+Deps Dependent structs", deps.classes.values.map(_.toString).toList*)
+    (depFns, deps, depLog) <- compileAllDependencies(exprDeps)(StdLib.Functions)
+    log                    <- log ~+ depLog
+
+    log <- log.info(s"Expr+Deps Dependent methods", deps.functions.values.map(_.toString).toList*)
+    log <- log.info(s"Expr+Deps Dependent structs", deps.classes.values.map(_.toString).toList*)
 
     // sort the captures so that the order is stable for codegen
     // captures = deps.vars.toList.sortBy(_._1.symbol)
@@ -253,13 +265,8 @@ object Compiler {
       body = exprStmts
     )
 
-    classSdefs <- deps.classes.toList.traverse { (clsDef, aps) =>
-      structDef0(clsDef.symbol).map(_ -> aps)
-    }
-    moduleSdef <- deps.modules.toList.distinct.traverse { (symbol, tpe) =>
-      structDef0(symbol).map(_ -> Set(tpe))
-    }
-    sdefs = classSdefs ::: moduleSdef
+    (sdefs, sdefLog) <- deriveAllStructs(deps)(StdLib.StructDefs)
+    log              <- log ~+ sdefLog
 
     captureNameToModuleRefTable = deps.modules
       .map { (symbol, struct) =>
@@ -272,54 +279,61 @@ object Compiler {
         struct.name.fqn.mkString("_") -> removeThisFromRef(symbol)
       }
 
-    unoptimisedProgram = p.Program(exprFn, depFns, sdefs.map(_._1))
-    log <- log.info(s"Program compiled, dependencies: ${unoptimisedProgram.functions.size}")
-    log <- log.info(s"Program compiled, structures", unoptimisedProgram.defs.map(_.repr)*)
-
-    //  _ = println(log.render().mkString("\n"))
-    // verify before optimisation
-    (unoptimisedVerification, log) <- VerifyPass.run(unoptimisedProgram)(log).success
+    unopt = p.Program(exprFn, depFns, sdefs)
     log <- log.info(
-      s"Verification (unopt)",
-      unoptimisedVerification.map((f, xs) => s"${f.signatureRepr}\nE=${xs.map("\t->" + _).mkString("\n")}")*
+      s"Program compiled (unpot), structures = ${unopt.defs.size}, functions = ${unopt.functions.size}"
+    )
+    unoptLog <- Log("Unopt")
+    unoptLog <- unoptLog.info(s"Structures = ${unopt.defs.size}", unopt.defs.map(_.repr)*)
+    unoptLog <- unoptLog.info(s"Functions  = ${unopt.functions.size}", unopt.functions.map(_.signatureRepr)*)
+    unoptLog <- unoptLog.info(s"Entry", unopt.entry.repr)
+
+    // verify before optimisation
+    (unoptVerification, unoptLog) <- VerifyPass.run(unopt)(unoptLog).success
+    unoptLog <- unoptLog.info(
+      s"Verifier",
+      unoptVerification.map((f, xs) => s"${f.signatureRepr}\nError = ${xs.map("\t->" + _).mkString("\n")}")*
     )
     _ <-
-      if (unoptimisedVerification.exists(_._2.nonEmpty))
-        s"Validation failed (unopt, error=${unoptimisedVerification.map(_._2.size).sum})".fail
+      if (unoptVerification.exists(_._2.nonEmpty))
+        s"Validation failed (error=${unoptVerification.map(_._2.size).sum})".fail
       else ().success
-
-    // _ = println(log.render().mkString("\n"))
+    log <- log ~+ unoptLog
 
     // run the global optimiser
-    (optimisedProgram, log) <- runProgramOptPasses(unoptimisedProgram)(log)
+    (opt, log) <- runProgramOptPasses(unopt)(log)
 
     // verify again after optimisation
-    (optimisedVerification, log) <- VerifyPass.run(optimisedProgram)(log).success
-    log <- log.info(
-      s"Verification(opt)",
-      optimisedVerification.map((f, xs) => s"${f.signatureRepr}\n${xs.map("\t" + _).mkString("\n")}")*
+    optLog                    <- Log("Opt")
+    (optVerification, optLog) <- VerifyPass.run(opt)(optLog).success
+
+    optLog <- optLog.info(s"Structures = ${opt.defs.size}", opt.defs.map(_.repr)*)
+    optLog <- optLog.info(s"Functions  = ${opt.functions.size}", opt.functions.map(_.signatureRepr)*)
+    optLog <- optLog.info(s"Entry", opt.entry.repr)
+
+    optLog <- optLog.info(
+      s"Verifier",
+      optVerification.map((f, xs) => s"${f.signatureRepr}\nError = ${xs.map("\t->" + _).mkString("\n")}")*
     )
     _ <-
-      if (optimisedVerification.exists(_._2.nonEmpty))
-        s"Validation failed (opt, error=${optimisedVerification.map(_._2.size).sum})".fail
+      if (optVerification.exists(_._2.nonEmpty))
+        s"Validation failed (error=${optVerification.map(_._2.size).sum})".fail
       else ().success
-
-    log <- log.info(s"Program optimised, dependencies", optimisedProgram.functions.map(_.repr)*)
-    log <- log.info(s"Program optimised, entry", optimisedProgram.entry.repr)
-    _ = println(log.render().mkString("\n"))
+    log <- log ~+ optLog
 
     capturedNameTable = capturedNames.map((name, ref) => name.symbol -> (name.tpe, ref)).toMap
-    captured <- optimisedProgram.entry.captures.traverse { n =>
+    captured <- opt.entry.captures.traverse { n =>
       // Struct type of symbols may have been modified through specialisation so we just validate whether it's still a struct for now
       capturedNameTable.get(n.symbol) match {
         case None                                       => (n -> captureNameToModuleRefTable(n.symbol)).success
         case Some((tpe, ref)) if tpe.kind == n.tpe.kind => (n -> ref).success
         case Some((tpe, ref)) =>
           s"Unexpected type conversion, capture was ${tpe.repr} for ${ref} but function expected ${n.repr}".fail
-
       }
     }
+    log <- log.info(s"Final captures", captured.map((name, ref) => s"${name.repr} = ${ref.show}")*)
+    _ = println(log.render().mkString("\n"))
 
-  } yield (captured, optimisedProgram, log)
+  } yield (captured, opt, log)
 
 }

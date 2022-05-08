@@ -33,6 +33,8 @@ case class Log(name: String, lines: Vector[(String, Vector[String]) | Log]) {
 
   infix def +(log: Log): Log = copy(lines = lines :+ log)
 
+  infix def ~+(log: Log): Result[Log] = copy(lines = lines :+ log).success
+
   infix def ++(log: Seq[Log]): Log = copy(lines = lines ++ log)
 
   def info_(message: String, details: String*): Log = copy(lines = lines :+ (message -> details.toVector))
@@ -42,21 +44,21 @@ case class Log(name: String, lines: Vector[(String, Vector[String]) | Log]) {
   def render(nesting: Int = 0): Vector[String] = {
     val colour = Log.Colours(nesting % Log.Colours.size)
     val attr   = colour ++ fansi.Reversed.On ++ fansi.Bold.On
-    val indent = colour("│")
+    val indent = colour("┃ ")
 
-    ((colour("┍") ++ attr(s" ${name} ")) +: lines
+    ((colour("┏━") ++ attr(s" ${name} ") ++ colour("")) +: lines
       .flatMap {
         case (log: Log) => log.render(nesting + 1).map(indent ++ _)
         case (l, details) =>
-          (indent ++ (colour ++ fansi.Underlined.On)(l)) +: details.flatMap { l =>
+          (  (colour ++ fansi.Underlined.On)(s"▓ $l ▓")) +: details.flatMap { l =>
             l.linesIterator.toList match {
               case x :: xs =>
-                ((indent ++ colour("╴") ++ s" $x") :: xs.map(x => indent ++ s"  ${x}")).toVector
+                ((  colour("┃ ╰ ") ++ s"$x") :: xs.map(x => indent ++ s"  ${x}")).toVector
               case Nil => Vector()
             }
 
           }
-      })
+      } :+ colour(s"┗━${"━"* (name.size +2) }"))
       .map(_.render)
   }
 
@@ -165,7 +167,7 @@ extension (e: p.Sym) {
 }
 
 extension (n: p.Named) {
-  def repr: String                          = s"(${n.symbol}:${n.tpe.repr})"
+  def repr: String                          = s"${n.symbol}: ${n.tpe.repr}"
   def mapType(f: p.Type => p.Type): p.Named = p.Named(n.symbol, n.tpe.map(f))
   def mapAccType[A](f: p.Type => (p.Type, List[A])): (p.Named, List[A]) = {
     val (tpe, as) = n.tpe.mapAcc[A](f)
@@ -217,7 +219,7 @@ extension (e: p.Type) {
   }
   def repr: String = e match {
     case p.Type.Struct(sym, tpeVars, args) =>
-      s"Struct[${sym.repr}${tpeVars.zipAll(args, "???", p.Type.Var("???")).map((v, a) => s"$v=${a.repr}").mkString("<", ",", ">")}]"
+      s"@${sym.repr}${tpeVars.zipAll(args, "???", p.Type.Var("???")).map((v, a) => s"$v=${a.repr}").mkString("<", ",", ">")}"
     case p.Type.Array(comp) => s"Array[${comp.repr}]"
     case p.Type.Bool        => "Bool"
     case p.Type.Byte        => "Byte"
@@ -290,12 +292,12 @@ extension (e: p.Expr) {
         case p.UnaryIntrinsicKind.Neg => "-"
 
       }
-      s"$fn(${lhs.repr})"
+      s"$fn'(${lhs.repr})"
     case p.Expr.UnaryLogicIntrinsic(lhs, kind) =>
       val fn = kind match {
         case p.UnaryLogicIntrinsicKind.Not => "!"
       }
-      s"$fn(${lhs.repr})"
+      s"$fn'(${lhs.repr})"
     case p.Expr.BinaryIntrinsic(lhs, rhs, kind, _) =>
       val op = kind match {
         case p.BinaryIntrinsicKind.Add => "+"
@@ -332,7 +334,7 @@ extension (e: p.Expr) {
         case p.BinaryLogicIntrinsicKind.Lt  => "<"
         case p.BinaryLogicIntrinsicKind.Gt  => ">"
       }
-      s"${lhs.repr} $op ${rhs.repr}"
+      s"${lhs.repr} $op' ${rhs.repr}"
     case p.Expr.Cast(from, to) => s"${from.repr}.to[${to.repr}]"
     case p.Expr.Alias(ref)     => s"(~>${ref.repr})"
 

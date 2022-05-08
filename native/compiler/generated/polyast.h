@@ -1083,11 +1083,11 @@ struct EXPORT StructDef {
 
 struct EXPORT Signature {
   Sym name;
-  std::vector<Type::Any> tpeArgs;
+  std::vector<std::string> tpeVars;
   std::optional<Type::Any> receiver;
   std::vector<Type::Any> args;
   Type::Any rtn;
-  Signature(Sym name, std::vector<Type::Any> tpeArgs, std::optional<Type::Any> receiver, std::vector<Type::Any> args, Type::Any rtn) noexcept : name(std::move(name)), tpeArgs(std::move(tpeArgs)), receiver(std::move(receiver)), args(std::move(args)), rtn(std::move(rtn)) {}
+  Signature(Sym name, std::vector<std::string> tpeVars, std::optional<Type::Any> receiver, std::vector<Type::Any> args, Type::Any rtn) noexcept : name(std::move(name)), tpeVars(std::move(tpeVars)), receiver(std::move(receiver)), args(std::move(args)), rtn(std::move(rtn)) {}
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Signature &);
   EXPORT friend bool operator==(const Signature &, const Signature &);
 };

@@ -18,10 +18,10 @@ object RefOutliner {
   }
 
   def outline(using q: Quoted)(term: q.Term)(log: Log) //
-      : Result[((Vector[(q.Ident, q.Ref, Option[p.Term], p.Type)]), Log)] = log.mark(s"Outline") { log =>
+      : Result[((Vector[(q.Ident, q.Ref, Option[p.Term], p.Type)]), Log)] =
     for {
 
-      _ <- ().success
+      log <- Log(s"Outline")
 
       localDefs = q.collectTree(term) {
         case b: q.ValDef => b :: Nil
@@ -120,5 +120,4 @@ object RefOutliner {
       )
 
     } yield (filteredTypedRefs, log)
-  }
 }

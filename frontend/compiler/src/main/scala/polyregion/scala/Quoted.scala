@@ -33,16 +33,14 @@ class Quoted(val underlying: scala.quoted.Quotes) {
     @targetName("witness_module")
     def witness(x: Symbol, tpe: p.Type.Struct) =
       copy(modules = modules + (x -> tpe))
-    def witness(x: ClassDef, application: p.Type.Struct) ={
-      
-      if(TypeRepr.of[polyregion.scala.compiletime.intrinsics.type].typeSymbol.fullName == x.symbol.fullName){
+    def witness(x: ClassDef, application: p.Type.Struct) =
+      if (TypeRepr.of[polyregion.scala.intrinsics.type].typeSymbol.fullName == x.symbol.fullName) {
         this
-      }else  if (x.symbol.flags.is(Flags.Module)) {
-        report.errorAndAbort(s"Witness illegal module ClassDef ${x.symbol} (${x.symbol.fullName}  ${classOf[polyregion.scala.compiletime.intrinsics.type].getName})")
+      } else if (x.symbol.flags.is(Flags.Module)) {
+        report.errorAndAbort(s"Witness illegal module ClassDef ${x.symbol} (${x.symbol.fullName})")
       } else {
         copy(classes = classes.updatedWith(x)(x => Some(x.getOrElse(Set.empty) + application)))
       }
-    }
 
     def witness(x: DefDef, application: p.Expr.Invoke) =
       copy(functions = functions.updatedWith(x)(x => Some(x.getOrElse(Set.empty) + application)))
