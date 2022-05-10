@@ -13,6 +13,13 @@ using namespace polyregion;
 
 void polyregion::runtime::init() { polyregion::libm::exportAll(); }
 
+void polyregion::runtime::run() {
+
+
+
+}
+
+
 struct runtime::Data {
   std::unique_ptr<llvm::object::ObjectFile> file;
   explicit Data(std::unique_ptr<llvm::object::ObjectFile> file) : file(std::move(file)) {}

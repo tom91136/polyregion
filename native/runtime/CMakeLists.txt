@@ -1,14 +1,23 @@
-
-add_library(runtime-lib STATIC libm.cpp runtime.cpp polyregion_runtime.cpp)
+add_library(runtime-lib STATIC
+        libm.cpp runtime.cpp polyregion_runtime.cpp
+        thirdparty/Orochi/Orochi.cpp
+        thirdparty/contrib/cuew/src/cuew.c
+        thirdparty/contrib/hipew/src/hipew.c
+        thirdparty/clew/src/clew.c
+        )
 add_dependencies(runtime-lib intrinsics_gen) # for LLVM tblgen
 
 add_executable(runtime-tests test.cpp test-main.cpp)
 add_executable(runtime-drv driver.cpp)
 #add_library(runtime-dylib SHARED polyregion_runtime.cpp)
 
-target_include_directories(runtime-lib PUBLIC ../include ${LIBFFI_HEADER_PATH})
-target_include_directories(runtime-drv PUBLIC ../include)
-target_include_directories(runtime-tests PUBLIC ../include)
+target_include_directories(runtime-lib PRIVATE ../include
+        ${LIBFFI_HEADER_PATH}
+        thirdparty/
+        thirdparty/clew/include
+        )
+target_include_directories(runtime-drv PRIVATE ../include)
+target_include_directories(runtime-tests PRIVATE ../include)
 #target_include_directories(runtime-dylib PRIVATE ../include)
 
 set(LLVM_LIBS

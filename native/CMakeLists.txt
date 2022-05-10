@@ -151,8 +151,10 @@ include_directories(${LLVM_INCLUDE_DIRS})
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# FIXME adjust for CUDA stuff for now
+#set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan)
+set(COMMON_DEBUG_OPTIONS  )
 
-set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan)
 set(COMMON_COMPILE_OPTIONS
         -ffunction-sections       # keep functions in its own section for better --gc-sections results
         -fdata-sections           # same as above
@@ -175,6 +177,9 @@ if (DEBUG)
     set(COMMON_COMPILE_OPTIONS ${COMMON_COMPILE_OPTIONS})
 else ()
     set(COMMON_LINKER_OPTIONS
+            LINKER:--no-allow-shlib-undefined
+            LINKER:--no-undefined-version
+            LINKER:--no-undefined
             LINKER:--exclude-libs=ALL # ld/lld exports all object symbols by default, don't do that
             LINKER:--gc-sections      # remove unused sections
             LINKER:-s                 # strip symbols not used for DSO
