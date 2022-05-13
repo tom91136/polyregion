@@ -105,14 +105,14 @@ static R invokeGeneric(JNIEnv *env, jbyteArray object, jbyteArray argTypes, jobj
       pointers[i] = env->GetDirectBufferAddress(env->GetObjectArrayElement(argPtrs, i));
       params[i].first = static_cast<runtime::Type>(argTypes_[i]);
       switch (params[i].first) {
-      case runtime::Type::Bool:
-      case runtime::Type::Byte:
-      case runtime::Type::Char:
-      case runtime::Type::Short:
-      case runtime::Type::Int:
-      case runtime::Type::Long:
-      case runtime::Type::Float:
-      case runtime::Type::Double:
+      case runtime::Type::Bool8:
+      case runtime::Type::Byte8:
+      case runtime::Type::CharU16:
+      case runtime::Type::Short16:
+      case runtime::Type::Int32:
+      case runtime::Type::Long64:
+      case runtime::Type::Float32:
+      case runtime::Type::Double64:
       case runtime::Type::Void: {
         params[i].second = pointers[i]; // XXX no indirection
         break;
@@ -220,35 +220,35 @@ static jobject invokeObject(JNIEnv *env, //
 }
 [[maybe_unused]] JNIEXPORT jboolean JNICALL Java_polyregion_PolyregionRuntime_invokeBool( //
     JNIEnv *env, jclass, jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs) {
-  return invokePrimitive<jboolean, runtime::Type::Byte>(env, object, symbol, argTypes, argPtrs);
+  return invokePrimitive<jboolean, runtime::Type::Byte8>(env, object, symbol, argTypes, argPtrs);
 }
 [[maybe_unused]] JNIEXPORT jbyte JNICALL Java_polyregion_PolyregionRuntime_invokeByte( //
     JNIEnv *env, jclass, jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs) {
-  return invokePrimitive<jbyte, runtime::Type::Byte>(env, object, symbol, argTypes, argPtrs);
+  return invokePrimitive<jbyte, runtime::Type::Byte8>(env, object, symbol, argTypes, argPtrs);
 }
 [[maybe_unused]] JNIEXPORT jchar JNICALL Java_polyregion_PolyregionRuntime_invokeChar( //
     JNIEnv *env, jclass, jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs) {
-  return invokePrimitive<jchar, runtime::Type::Char>(env, object, symbol, argTypes, argPtrs);
+  return invokePrimitive<jchar, runtime::Type::CharU16>(env, object, symbol, argTypes, argPtrs);
 }
 [[maybe_unused]] JNIEXPORT jshort JNICALL Java_polyregion_PolyregionRuntime_invokeShort( //
     JNIEnv *env, jclass, jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs) {
-  return invokePrimitive<jshort, runtime::Type::Short>(env, object, symbol, argTypes, argPtrs);
+  return invokePrimitive<jshort, runtime::Type::Short16>(env, object, symbol, argTypes, argPtrs);
 }
 [[maybe_unused]] JNIEXPORT jint JNICALL Java_polyregion_PolyregionRuntime_invokeInt( //
     JNIEnv *env, jclass, jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs) {
-  return invokePrimitive<jint, runtime::Type::Int>(env, object, symbol, argTypes, argPtrs);
+  return invokePrimitive<jint, runtime::Type::Int32>(env, object, symbol, argTypes, argPtrs);
 }
 [[maybe_unused]] JNIEXPORT jlong JNICALL Java_polyregion_PolyregionRuntime_invokeLong( //
     JNIEnv *env, jclass, jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs) {
-  return invokePrimitive<jlong, runtime::Type::Long>(env, object, symbol, argTypes, argPtrs);
+  return invokePrimitive<jlong, runtime::Type::Long64>(env, object, symbol, argTypes, argPtrs);
 }
 [[maybe_unused]] JNIEXPORT jfloat JNICALL Java_polyregion_PolyregionRuntime_invokeFloat( //
     JNIEnv *env, jclass, jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs) {
-  return invokePrimitive<jfloat, runtime::Type::Float>(env, object, symbol, argTypes, argPtrs);
+  return invokePrimitive<jfloat, runtime::Type::Float32>(env, object, symbol, argTypes, argPtrs);
 }
 [[maybe_unused]] JNIEXPORT jdouble JNICALL Java_polyregion_PolyregionRuntime_invokeDouble( //
     JNIEnv *env, jclass, jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs) {
-  return invokePrimitive<jdouble, runtime::Type::Double>(env, object, symbol, argTypes, argPtrs);
+  return invokePrimitive<jdouble, runtime::Type::Double64>(env, object, symbol, argTypes, argPtrs);
 }
 [[maybe_unused]] JNIEXPORT jobject JNICALL Java_polyregion_PolyregionRuntime_invokeObject( //
     JNIEnv *env, jclass, jbyteArray object, jstring symbol, jbyteArray argTypes, jobjectArray argPtrs, jint rtnBytes) {

@@ -1,5 +1,7 @@
 package polyregion.examples
 
+import java.util.concurrent.Future
+
 object Foo {
   var x                         = 10
   def bar                       = x + 1

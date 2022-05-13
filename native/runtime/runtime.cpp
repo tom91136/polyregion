@@ -3,6 +3,10 @@
 #include <iostream>
 #include <utility>
 
+#include "cl_runtime.h"
+#include "cuda_runtime.h"
+#include "hip_runtime.h"
+
 #include "ffi.h"
 #include "libm.h"
 #include "utils.hpp"
@@ -13,12 +17,131 @@ using namespace polyregion;
 
 void polyregion::runtime::init() { polyregion::libm::exportAll(); }
 
-void polyregion::runtime::run() {
+static const char *clKernelSource{R"CLC(
+__kernel void _Z6squarePii(__global int* array, int x){
+  int tid = get_global_id(0);
+  array[tid] = array[tid] + tid + x;
+}
+)CLC"};
+
+static const char *ptxKernelSource{R"PTX(
+.version 7.4
+.target sm_61
+.address_size 64
+
+        // .globl       _Z6squarePii
+
+.visible .entry _Z6squarePii(
+        .param .u64 _Z6squarePii_param_0,
+        .param .u32 _Z6squarePii_param_1
+)
+{
+        .reg .b32       %r<6>;
+        .reg .b64       %rd<5>;
 
 
+        ld.param.u64    %rd1, [_Z6squarePii_param_0];
+        ld.param.u32    %r1, [_Z6squarePii_param_1];
+        cvta.to.global.u64      %rd2, %rd1;
+        mov.u32         %r2, %ctaid.x;
+        mul.wide.s32    %rd3, %r2, 4;
+        add.s64         %rd4, %rd2, %rd3;
+        ld.global.u32   %r3, [%rd4];
+        add.s32         %r4, %r2, %r1;
+        add.s32         %r5, %r4, %r3;
+        st.global.u32   [%rd4], %r5;
+        ret;
 
 }
+)PTX"};
 
+static const char *hsacoKernelSource{R"PTX(
+
+)PTX"};
+
+void polyregion::runtime::run() {
+
+  using namespace runtime::cuda;
+  using namespace runtime::hip;
+  using namespace runtime::cl;
+
+  std::vector<std::unique_ptr<Runtime>> rts;
+
+  try {
+    rts.push_back(std::make_unique<CudaRuntime>());
+  } catch (const std::exception &e) {
+    std::cerr << "[CUDA] " << e.what() << std::endl;
+  }
+
+  try {
+    rts.push_back(std::make_unique<ClRuntime>());
+  } catch (const std::exception &e) {
+    std::cerr << "[OCL] " << e.what() << std::endl;
+  }
+
+  try {
+    rts.push_back(std::make_unique<HipRuntime>());
+  } catch (const std::exception &e) {
+    std::cerr << "[HIP] " << e.what() << std::endl;
+  }
+
+  static std::vector<int> xs;
+
+  for (auto &rt : rts) {
+    std::cout << "RT=" << rt->name() << std::endl;
+    auto devices = rt->enumerate();
+    std::cout << "Found " << devices.size() << " devices" << std::endl;
+
+    for (auto &d : devices) {
+      std::cout << d->id() << " = " << d->name() << std::endl;
+
+      if (d->name().find("TITAN") != std::string::npos) {
+        //        continue ;
+      }
+
+      xs = {1, 2, 3, 4};
+
+      auto size = sizeof(decltype(xs)::value_type) * xs.size();
+      auto ptr = d->malloc(size, Access::RW);
+
+      std::string src;
+      if (rt->name() == "CUDA") {
+        src = ptxKernelSource;
+      } else if (rt->name() == "OpenCL") {
+        src = clKernelSource;
+      } else if (rt->name() == "HIP") {
+        src = hsacoKernelSource;
+      } else {
+        throw std::logic_error("?");
+      }
+
+      d->loadKernel(src);
+
+      d->enqueueHostToDeviceAsync(xs.data(), ptr, size, []() { std::cout << "  H->D ok" << std::endl; });
+
+      int32_t x = 4;
+      d->enqueueKernelAsync("_Z6squarePii", {{Type::Ptr, &ptr}, {Type::Int32, &x}}, {xs.size(), 1, 1}, {1, 1, 1},
+                            []() { std::cout << "  K 1 ok" << std::endl; });
+
+      x = 5;
+
+      d->enqueueKernelAsync("_Z6squarePii", {{Type::Ptr, &ptr}, {Type::Int32, &x}}, {xs.size(), 1, 1}, {1, 1, 1},
+                            []() { std::cout << "  K 2 ok" << std::endl; });
+      d->enqueueDeviceToHostAsync(ptr, xs.data(), size, [&]() {
+        std::cout << "  D->H ok, r= "
+                  << polyregion::mk_string<int>(
+                         xs, [](auto x) { return std::to_string(x); }, ",")
+                  << std::endl;
+      });
+
+      std::cout << d->id() << " = Done" << std::endl;
+
+      d->free(ptr);
+    }
+  }
+
+  std::cout << "Done" << std::endl;
+}
 
 struct runtime::Data {
   std::unique_ptr<llvm::object::ObjectFile> file;
@@ -50,21 +173,20 @@ std::vector<std::pair<std::string, uint64_t>> polyregion::runtime::Object::enume
 
 constexpr static ffi_type *toFFITpe(const runtime::Type &tpe) {
   switch (tpe) {
-  case polyregion::runtime::Type::Bool:
+  case polyregion::runtime::Type::Bool8:
+  case polyregion::runtime::Type::Byte8:
     return &ffi_type_sint8;
-  case polyregion::runtime::Type::Byte:
-    return &ffi_type_sint8;
-  case polyregion::runtime::Type::Char:
+  case polyregion::runtime::Type::CharU16:
     return &ffi_type_uint16;
-  case polyregion::runtime::Type::Short:
+  case polyregion::runtime::Type::Short16:
     return &ffi_type_sint16;
-  case polyregion::runtime::Type::Int:
+  case polyregion::runtime::Type::Int32:
     return &ffi_type_sint32;
-  case polyregion::runtime::Type::Long:
+  case polyregion::runtime::Type::Long64:
     return &ffi_type_sint64;
-  case polyregion::runtime::Type::Float:
+  case polyregion::runtime::Type::Float32:
     return &ffi_type_float;
-  case polyregion::runtime::Type::Double:
+  case polyregion::runtime::Type::Double64:
     return &ffi_type_double;
   case polyregion::runtime::Type::Ptr:
     return &ffi_type_pointer;
@@ -85,7 +207,7 @@ public:
 
 private:
   uint64_t getSymbolAddress(const std::string &Name) override {
-//    std::cout << "External call `" << Name << "`" << std::endl;
+    //    std::cout << "External call `" << Name << "`" << std::endl;
     return Name == "malloc" ? (uint64_t)&polyregion::runtime::_malloc : RTDyldMemoryManager::getSymbolAddress(Name);
   }
 };
@@ -149,3 +271,19 @@ void polyregion::runtime::Object::invoke(const std::string &symbol,             
     throw std::logic_error("ffi_prep_cif: unknown error (" + std::to_string(status) + ")");
   }
 }
+void *polyregion::runtime::CountedCallbackHandler::createHandle(const runtime::Callback &cb) {
+  auto eventId = eventCounter++;
+  auto f = [=, this]() {
+    cb();
+    callbacks.erase(eventId);
+  };
+  auto pos = callbacks.emplace(eventId, f).first;
+  // just to be sure
+  static_assert(std::is_same<EntryPtr, decltype(&(*pos))>());
+  return &(*pos);
+}
+void polyregion::runtime::CountedCallbackHandler::consume(void *data) {
+  auto dev = static_cast<EntryPtr>(data);
+  if (dev) dev->second();
+}
+void polyregion::runtime::CountedCallbackHandler::clear() { callbacks.clear(); }

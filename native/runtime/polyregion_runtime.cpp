@@ -1,6 +1,4 @@
 #include "polyregion_runtime.h"
-#include "Orochi/Orochi.h"
-#include "contrib/cuew/include/cuew.h"
 #include "runtime.h"
 #include "utils.hpp"
 #include <iostream>
@@ -13,14 +11,14 @@ static_assert(                                //
         std::underlying_type_t<runtime::Type> //
         >);
 
-const polyregion_type POLYREGION_BOOL = {to_underlying(runtime::Type::Bool)};
-const polyregion_type POLYREGION_BYTE = {to_underlying(runtime::Type::Byte)};
-const polyregion_type POLYREGION_CHAR = {to_underlying(runtime::Type::Char)};
-const polyregion_type POLYREGION_SHORT = {to_underlying(runtime::Type::Short)};
-const polyregion_type POLYREGION_INT = {to_underlying(runtime::Type::Int)};
-const polyregion_type POLYREGION_LONG = {to_underlying(runtime::Type::Long)};
-const polyregion_type POLYREGION_FLOAT = {to_underlying(runtime::Type::Float)};
-const polyregion_type POLYREGION_DOUBLE = {to_underlying(runtime::Type::Double)};
+const polyregion_type POLYREGION_BOOL = {to_underlying(runtime::Type::Bool8)};
+const polyregion_type POLYREGION_BYTE = {to_underlying(runtime::Type::Byte8)};
+const polyregion_type POLYREGION_CHAR = {to_underlying(runtime::Type::CharU16)};
+const polyregion_type POLYREGION_SHORT = {to_underlying(runtime::Type::Short16)};
+const polyregion_type POLYREGION_INT = {to_underlying(runtime::Type::Int32)};
+const polyregion_type POLYREGION_LONG = {to_underlying(runtime::Type::Long64)};
+const polyregion_type POLYREGION_FLOAT = {to_underlying(runtime::Type::Float32)};
+const polyregion_type POLYREGION_DOUBLE = {to_underlying(runtime::Type::Double64)};
 const polyregion_type POLYREGION_PTR = {to_underlying(runtime::Type::Ptr)};
 const polyregion_type POLYREGION_VOID = {to_underlying(runtime::Type::Void)};
 
@@ -72,104 +70,108 @@ void polyregion_release_invoke(char *err) { polyregion::free_str(err); }
 
 int runit(  )
 {
-  auto api = ( oroApi )( ORO_API_CUDA   );
+
+  runtime::run();
 
 
-  auto check = [](oroError & e)  {
-    if(e != oroSuccess){
-      const char* pStr;
-      oroGetErrorString( e, &pStr );
-      printf("error %d: %s\n", e, pStr);
-    }
-  };
-
-  int a = oroInitialize( api, 0 );
-  if( a != 0 )
-  {
-    printf("initialization failed\n");
-    return 0;
-  }
-  printf( ">> executing on %s\n", ( api == ORO_API_HIP )? "hip":"cuda" );
-
-  printf(">> testing initialization\n");
-  oroError e;
-
-  e = oroInit( 0 );
-  check(e);
-  oroDevice device;
-  e = oroDeviceGet( &device, 0 );
-  check(e);
-  oroCtx ctx;
-  e = oroCtxCreate( &ctx, 0, device );
-  check(e);
-
-  printf(">> testing device props\n");
-  {
-    oroDeviceProp props;
-    oroGetDeviceProperties( &props, device );
-    printf("executing on %s (%s)\n", props.name, props.gcnArchName );
-  }
-  printf(">> testing kernel execution\n");
-  {
-    oroFunction function;
-    {
-      const char* code = "extern \"C\" __global__ void testKernel(float c, float *out) { int a = threadIdx.x; out[a] = c; }";
-      const char* funcName = "testKernel";
-      orortcProgram prog;
-      orortcResult e;
-      e = orortcCreateProgram( &prog, code, funcName, 0, 0, 0 );
-      std::vector<const char*> opts;
-      opts.push_back( "-I ../ -arch=sm_61" );
-
-      e = orortcCompileProgram( prog, opts.size(), opts.data() );
-      if( e != ORORTC_SUCCESS )
-      {
-        size_t logSize;
-        orortcGetProgramLogSize(prog, &logSize);
-        if (logSize)
-        {
-          std::string log(logSize, '\0');
-          orortcGetProgramLog(prog, &log[0]);
-          std::cout << log << '\n';
-        };
-      }
-      size_t codeSize;
-      e = orortcGetCodeSize(prog, &codeSize);
-
-      std::vector<char> codec(codeSize);
-      e = orortcGetCode(prog, codec.data());
-      e = orortcDestroyProgram(&prog);
-      oroModule module;
-      oroError ee = oroModuleLoadData(&module, codec.data());
-      check(ee);
-      ee = oroModuleGetFunction(&function, module, funcName);
-      check(ee);
-      printf("Compiled\n");
-    }
-
-    auto* a  = static_cast<float *>(std::malloc(sizeof(float) * 10));
-    oroDeviceptr d_a  ;
-    auto v = oroMalloc( &d_a, sizeof(float) * 10);
-
-
-    float ans = 42;
-    void* args[] = {
-        &ans,
-        &d_a
-    };
-    oroError e = oroModuleLaunchKernel( function, 1,1,1, 10,1,1, 0, nullptr, args, nullptr );
-    check(e);
-
-
-
-    oroMemcpyDtoH(a,d_a, sizeof(float) * 10 );
-    oroDeviceSynchronize();
-
-    for (int i = 0; i < 10; ++i) {
-      printf("[%d] = %f\n", i, a[i]);
-    }
-  }
-  printf(">> done\n");
+//  auto api = ( oroApi )( ORO_API_CUDA   );
+//
+//
+//  auto check = [](oroError & e)  {
+//    if(e != oroSuccess){
+//      const char* pStr;
+//      oroGetErrorString( e, &pStr );
+//      printf("error %d: %s\n", e, pStr);
+//    }
+//  };
+//
+//  int a = oroInitialize( api, 0 );
+//  if( a != 0 )
+//  {
+//    printf("initialization failed\n");
+//    return 0;
+//  }
+//  printf( ">> executing on %s\n", ( api == ORO_API_HIP )? "hip":"cuda" );
+//
+//  printf(">> testing initialization\n");
+//  oroError e;
+//
+//  e = oroInit( 0 );
+//  check(e);
+//  oroDevice device;
+//  e = oroDeviceGet( &device, 0 );
+//  check(e);
+//  oroCtx ctx;
+//  e = oroCtxCreate( &ctx, 0, device );
+//  check(e);
+//
+//  printf(">> testing device props\n");
+//  {
+//    oroDeviceProp props;
+//    oroGetDeviceProperties( &props, device );
+//    printf("executing on %s (%s)\n", props.name, props.gcnArchName );
+//  }
+//  printf(">> testing kernel execution\n");
+//  {
+//    oroFunction function;
+//    {
+//      const char* code = "extern \"C\" __global__ void testKernel(float c, float *out) { int a = threadIdx.x; out[a] = c; }";
+//      const char* funcName = "testKernel";
+//      orortcProgram prog;
+//      orortcResult e;
+//      e = orortcCreateProgram( &prog, code, funcName, 0, 0, 0 );
+//      std::vector<const char*> opts;
+//      opts.push_back( "-I ../ -arch=sm_61" );
+//
+//      e = orortcCompileProgram( prog, opts.size(), opts.data() );
+//      if( e != ORORTC_SUCCESS )
+//      {
+//        size_t logSize;
+//        orortcGetProgramLogSize(prog, &logSize);
+//        if (logSize)
+//        {
+//          std::string log(logSize, '\0');
+//          orortcGetProgramLog(prog, &log[0]);
+//          std::cout << log << '\n';
+//        };
+//      }
+//      size_t codeSize;
+//      e = orortcGetCodeSize(prog, &codeSize);
+//
+//      std::vector<char> codec(codeSize);
+//      e = orortcGetCode(prog, codec.data());
+//      e = orortcDestroyProgram(&prog);
+//      oroModule module;
+//      oroError ee = oroModuleLoadData(&module, codec.data());
+//      check(ee);
+//      ee = oroModuleGetFunction(&function, module, funcName);
+//      check(ee);
+//      printf("Compiled\n");
+//    }
+//
+//    auto* a  = static_cast<float *>(std::malloc(sizeof(float) * 10));
+//    oroDeviceptr d_a  ;
+//    auto v = oroMalloc( &d_a, sizeof(float) * 10);
+//
+//
+//    float ans = 42;
+//    void* args[] = {
+//        &ans,
+//        &d_a
+//    };
+//    oroError e = oroModuleLaunchKernel( function, 1,1,1, 10,1,1, 0, nullptr, args, nullptr );
+//    check(e);
+//
+//
+//
+//    oroMemcpyDtoH(a,d_a, sizeof(float) * 10 );
+//    oroDeviceSynchronize();
+//
+//    for (int i = 0; i < 10; ++i) {
+//      printf("[%d] = %f\n", i, a[i]);
+//    }
+//  }
+//  printf(">> done\n");
   return 0;
 }
 

@@ -22,7 +22,7 @@
 #  define _CRT_SECURE_NO_WARNINGS
 #endif
 
-#include <contrib/hipew/include/hipew.h>
+#include "hipew.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

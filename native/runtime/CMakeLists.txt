@@ -1,8 +1,12 @@
 add_library(runtime-lib STATIC
-        libm.cpp runtime.cpp polyregion_runtime.cpp
-        thirdparty/Orochi/Orochi.cpp
-        thirdparty/contrib/cuew/src/cuew.c
-        thirdparty/contrib/hipew/src/hipew.c
+        libm.cpp
+        runtime.cpp
+        cuda_runtime.cpp
+        hip_runtime.cpp
+        cl_runtime.cpp
+        polyregion_runtime.cpp
+        thirdparty/cuew/src/cuew.c
+        thirdparty/hipew/src/hipew.c
         thirdparty/clew/src/clew.c
         )
 add_dependencies(runtime-lib intrinsics_gen) # for LLVM tblgen
@@ -15,6 +19,8 @@ target_include_directories(runtime-lib PRIVATE ../include
         ${LIBFFI_HEADER_PATH}
         thirdparty/
         thirdparty/clew/include
+        thirdparty/hipew/include
+        thirdparty/cuew/include
         )
 target_include_directories(runtime-drv PRIVATE ../include)
 target_include_directories(runtime-tests PRIVATE ../include)
