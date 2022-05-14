@@ -53,7 +53,7 @@ static void setupTargetMachine() {
 
   //  std::string WantedTriple = Triple::normalize("x86_64-pc-linux-gnu"); // TODO fix this
   std::string SysDefaultTriple = sys::getDefaultTargetTriple();
-  Triple TheTriple = Triple(SysDefaultTriple);
+  Triple TheTriple = Triple("nvptx64-nvidia-cuda");
 
   std::string targetError;
   const Target *TheTarget = TargetRegistry::lookupTarget("", TheTriple, targetError);
@@ -254,7 +254,7 @@ polyregion::compiler::Compilation llvmc::compileModule(bool emitDisassembly,    
   llvm::SmallVector<char, 0> objBuffer;
   llvm::raw_svector_ostream objStream(objBuffer);
   doCodegen(*llvm::CloneModule(*M), [&](auto &tm, auto &pm, auto &ctx) {
-    tm.addAsmPrinter(pm, objStream, nullptr, llvm::CodeGenFileType::CGFT_ObjectFile, ctx);
+//    tm.addAsmPrinter(pm, objStream, nullptr, llvm::CodeGenFileType::CGFT_ObjectFile, ctx);
   });
 
   //  for (auto &&f : MMIWP->getMMI().getModule()->functions()) {
