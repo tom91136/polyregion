@@ -66,7 +66,7 @@ static jobject mkLayout(JNIEnv *env, const polyregion::compiler::Layout &l) {
 JNIEXPORT jobject JNICALL Java_polyregion_PolyregionCompiler_layoutOf(JNIEnv *env, jclass thisCls,
                                                                       jbyteArray structDef) {
   auto l = transformByteArray<polyregion::compiler::Layout>(
-      env, structDef, [&](auto &&xs) { return polyregion::compiler::layoutOf(xs); });
+      env, structDef, [&](auto &&xs) { return polyregion::compiler::layoutOf(xs, <#initializer #>); });
   return mkLayout(env, l);
 }
 

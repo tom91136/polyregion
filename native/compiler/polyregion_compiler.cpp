@@ -5,15 +5,20 @@
 #include "polyregion_compiler.h"
 #include "utils.hpp"
 
-static_assert(                                                //
-    std::is_same_v<                                           //
-        decltype(polyregion_backend::ordinal),                //
-        std::underlying_type_t<polyregion::compiler::Backend> //
+static_assert(                                               //
+    std::is_same_v<                                          //
+        decltype(polyregion_backend::ordinal),               //
+        std::underlying_type_t<polyregion::compiler::Target> //
         >);
 
-const polyregion_backend POLYREGION_BACKEND_LLVM = {polyregion::to_underlying(polyregion::compiler::Backend::LLVM)};
-const polyregion_backend POLYREGION_BACKEND_OPENCL = {polyregion::to_underlying(polyregion::compiler::Backend::OpenCL)};
-const polyregion_backend POLYREGION_BACKEND_CUDA = {polyregion::to_underlying(polyregion::compiler::Backend::CUDA)};
+using polyregion::compiler::Target;
+
+const polyregion_backend OBJECT_LLVM_X86 = {polyregion::to_underlying(Target::Object_LLVM_x86_64)};
+const polyregion_backend OBJECT_LLVM_AArch64 = {polyregion::to_underlying(Target::Object_LLVM_AArch64)};
+const polyregion_backend OBJECT_LLVM_NVPTX64 = {polyregion::to_underlying(Target::Object_LLVM_NVPTX64)};
+const polyregion_backend OBJECT_LLVM_AMDGCN = {polyregion::to_underlying(Target::Object_LLVM_AMDGCN)};
+const polyregion_backend SOURCE_C_OPENCL1_1 = {polyregion::to_underlying(Target::Source_C_OpenCL1_1)};
+const polyregion_backend SOURCE_C_C11 = {polyregion::to_underlying(Target::Source_C_C11)};
 
 void polyregion_initialise() { polyregion::compiler::initialise(); }
 
@@ -22,7 +27,9 @@ static_assert(sizeof(bool) == 1);
 polyregion_compilation *polyregion_compile(const polyregion_buffer *ast, bool emitDisassembly,
                                            polyregion_backend backend) {
 
-  auto compilation = polyregion::compiler::compile(std::vector<uint8_t>(ast->data, ast->data + ast->size));
+  // FIXME update signature
+  auto compilation = polyregion::compiler::compile(std::vector<uint8_t>(ast->data, ast->data + ast->size),
+                                                   polyregion::compiler::Options{Target::Object_LLVM_x86_64});
   auto bin = compilation.binary ? polyregion_buffer{compilation.binary->data(), compilation.binary->size()}
                                 : polyregion_buffer{nullptr, 0};
 

@@ -15,7 +15,8 @@ using namespace Expr;
 
 template <typename P> static void assertCompilationSucceeded(const P &p) {
   INFO(repr(p))
-  auto c = polyregion::compiler::compile(p);
+  auto c =
+      polyregion::compiler::compile(p, polyregion::compiler::Options{polyregion::compiler::Target::Object_LLVM_x86_64});
   std::cout << c << std::endl;
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);
@@ -76,8 +77,8 @@ TEST_CASE("index struct array member", "[compiler]") {
   Sym myStructSym({"MyStruct"});
   Named defX = Named("x", Type::Int());
   Named defY = Named("y", Type::Int());
-  StructDef def(myStructSym,{}, {defX, defY});
-  Type::Struct myStruct(myStructSym,{}, {});
+  StructDef def(myStructSym, {}, {defX, defY});
+  Type::Struct myStruct(myStructSym, {}, {});
 
   Function fn(
       Sym({"foo"}), {}, {}, {Named("s", Type::Array(myStruct))}, {}, Type::Int(),
@@ -101,8 +102,8 @@ TEST_CASE("array update struct elem member", "[compiler]") {
   Sym myStructSym({"MyStruct"});
   Named defX = Named("x", Type::Int());
   Named defY = Named("y", Type::Int());
-  StructDef def(myStructSym, {},{defX, defY});
-  Type::Struct myStruct(myStructSym,{}, {});
+  StructDef def(myStructSym, {}, {defX, defY});
+  Type::Struct myStruct(myStructSym, {}, {});
 
   Function fn(
       Sym({"foo"}), {}, {}, {Named("xs", Type::Array(myStruct))}, {}, Type::Int(),
@@ -121,8 +122,8 @@ TEST_CASE("array update struct elem", "[compiler]") {
   Sym myStructSym({"MyStruct"});
   Named defX = Named("x", Type::Int());
   Named defY = Named("y", Type::Int());
-  StructDef def(myStructSym,{}, {defX, defY});
-  Type::Struct myStruct(myStructSym,{}, {});
+  StructDef def(myStructSym, {}, {defX, defY});
+  Type::Struct myStruct(myStructSym, {}, {});
 
   Function fn(
       Sym({"foo"}), {}, {}, {Named("xs", Type::Array(myStruct))}, {}, Type::Int(),
@@ -155,7 +156,7 @@ TEST_CASE("alias struct", "[compiler]") {
   Named defX = Named("x", Type::Int());
   Named defY = Named("y", Type::Int());
   StructDef def(myStructSym, {}, {defX, defY});
-  Type::Struct myStruct(myStructSym,{}, {});
+  Type::Struct myStruct(myStructSym, {}, {});
 
   Function fn(Sym({"foo"}), {}, {}, {Named("out", myStruct)}, {}, Type::Int(),
               {
@@ -173,7 +174,7 @@ TEST_CASE("alias struct member", "[compiler]") {
 
   Sym sdef({"a", "b"});
   StructDef def(sdef, {}, {Named("x", Type::Int()), Named("y", Type::Int())});
-  Named arg("in", Type::Struct(sdef,{}, {}));
+  Named arg("in", Type::Struct(sdef, {}, {}));
   Function fn(Sym({"foo"}), {}, {}, {arg}, {}, Type::Unit(),
               {
                   Var(                          //
@@ -227,7 +228,7 @@ TEST_CASE("mut struct", "[compiler]") {
   Named defX = Named("x", Type::Int());
   Named defY = Named("y", Type::Int());
   StructDef def(myStructSym, {}, {defX, defY});
-  Type::Struct myStruct(myStructSym,{}, {});
+  Type::Struct myStruct(myStructSym, {}, {});
 
   Function fn(Sym({"foo"}), {}, {}, {Named("out", myStruct)}, {}, Type::Int(),
               {
@@ -288,9 +289,9 @@ TEST_CASE("alloc struct", "[compiler]") {
   Named defX = Named("x", Type::Int());
   Named defY = Named("y", Type::Int());
   StructDef def(myStructSym, {}, {defX, defY});
-  Type::Struct myStruct(myStructSym,{}, {});
+  Type::Struct myStruct(myStructSym, {}, {});
   StructDef def2(myStruct2Sym, {}, {defX});
-  Type::Struct myStruct2(myStruct2Sym,{}, {});
+  Type::Struct myStruct2(myStruct2Sym, {}, {});
 
   Function fn(Sym({"foo"}), {}, {}, {Named("out", myStruct)}, {}, Type::Int(),
               {
@@ -318,11 +319,11 @@ TEST_CASE("alloc struct nested", "[compiler]") {
   Named defY = Named("y", Type::Int());
 
   StructDef def2(myStruct2Sym, {}, {defX});
-  Type::Struct myStruct2(myStruct2Sym,{}, {});
+  Type::Struct myStruct2(myStruct2Sym, {}, {});
   Named defZ = Named("z", myStruct2);
 
   StructDef def(myStructSym, {}, {defX, defY, defZ});
-  Type::Struct myStruct(myStructSym,{}, {});
+  Type::Struct myStruct(myStructSym, {}, {});
 
   Function fn(Sym({"foo"}), {}, {}, {}, {}, Type::Int(),
               {

@@ -13,9 +13,13 @@ typedef struct EXPORT {
   uint8_t ordinal;
 } polyregion_backend;
 
-EXPORT extern const polyregion_backend POLYREGION_BACKEND_LLVM;
-EXPORT extern const polyregion_backend POLYREGION_BACKEND_OPENCL;
-EXPORT extern const polyregion_backend POLYREGION_BACKEND_CUDA;
+EXPORT extern const polyregion_backend OBJECT_LLVM_X86;
+EXPORT extern const polyregion_backend OBJECT_LLVM_AArch64;
+EXPORT extern const polyregion_backend OBJECT_LLVM_NVPTX64;
+EXPORT extern const polyregion_backend OBJECT_LLVM_AMDGCN;
+
+EXPORT extern const polyregion_backend SOURCE_C_OPENCL1_1;
+EXPORT extern const polyregion_backend SOURCE_C_C11;
 
 typedef struct EXPORT {
   uint8_t *data;

@@ -87,7 +87,7 @@ else ()
     #    set(CMAKE_CXX_FLAGS "-fvisibility=hidden  -ffunction-sections -fdata-sections" CACHE INTERNAL "")
 
 
-    set(LLVM_ENABLE_RTTI OFF CACHE BOOL "") # so we get typeinfo
+    set(LLVM_ENABLE_RTTI OFF CACHE BOOL "")
 
     set(LLVM_BUILD_RUNTIME OFF CACHE BOOL "")
 

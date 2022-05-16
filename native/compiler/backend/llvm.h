@@ -9,6 +9,7 @@
 #include "llvm/ExecutionEngine/ObjectCache.h"
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
 
+#include "llvmc.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
@@ -19,53 +20,64 @@ namespace polyregion::backend {
 
 using namespace polyregion::polyast;
 
-struct WhileCtx {
-  llvm::BasicBlock* exit;
-  llvm::BasicBlock* test;
-};
+class LLVM : public Backend {
 
-enum class BlockKind{
-  Terminal, Normal
-};
-
-class LLVMAstTransformer {
-
-  llvm::LLVMContext &C;
+public:
+  enum class Target { x86_64, AArch64, NVPTX64, AMDGCN };
+  struct Options {
+    Target target;
+    Opt<std::string> arch;
+    [[nodiscard]] llvmc::TargetInfo toTargetInfo() const;
+  };
 
 private:
-  using StructMemberTable = Map<std::string, size_t>;
-  Map<std::string, Pair<Type::Any, llvm::Value *>> stackVarPtrs;
-  Map<Sym, Pair<llvm::StructType *, StructMemberTable>> structTypes;
-  Map<Signature, llvm::Function *> functions;
-  llvm::IRBuilder<> B;
+  struct WhileCtx {
+    llvm::BasicBlock *exit;
+    llvm::BasicBlock *test;
+  };
 
-  llvm::Value *findStackVar(const Named &named);
-
-  llvm::Value *mkSelectPtr(const Term::Select &select);
-  llvm::Value *mkTermVal(const Term::Any &ref);
-  llvm::Value *mkExprVal(const Expr::Any &expr, llvm::Function *fn, const std::string &key);
-  BlockKind mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<WhileCtx> whileCtx);
-
-  llvm::Function *mkExternalFn(llvm::Function *parent, const Type::Any &rtn, const std::string &name,
-                               const std::vector<Type::Any> &args);
-  llvm::Value *invokeMalloc(llvm::Function *parent, llvm::Value *size);
-
-  llvm::Value *conditionalLoad(llvm::Value *rhs);
+  enum class BlockKind { Terminal, Normal };
 
 public:
-  Pair<llvm::StructType *, StructMemberTable> mkStruct(const StructDef &def);
-  llvm::Type *mkTpe(const Type::Any &tpe);
-  Opt<llvm::StructType *> lookup(const Sym &s);
+  class AstTransformer {
 
-  explicit LLVMAstTransformer(llvm::LLVMContext &c) : C(c), stackVarPtrs(), structTypes(), functions(), B(C) {}
+    Options options;
+    llvm::LLVMContext &C;
 
-  Pair<Opt<std::string>, std::string> transform(const std::unique_ptr<llvm::Module> &module, const Program &);
-  Pair<Opt<std::string>, std::string> optimise(const std::unique_ptr<llvm::Module> &module);
-};
+  private:
+    using StructMemberTable = Map<std::string, size_t>;
+    Map<std::string, Pair<Type::Any, llvm::Value *>> stackVarPtrs;
+    Map<Sym, Pair<llvm::StructType *, StructMemberTable>> structTypes;
+    Map<Signature, llvm::Function *> functions;
+    llvm::IRBuilder<> B;
 
-class LLVM : public Backend {
+    llvm::Value *findStackVar(const Named &named);
+
+    llvm::Value *mkSelectPtr(const Term::Select &select);
+    llvm::Value *mkTermVal(const Term::Any &ref);
+    llvm::Value *mkExprVal(const Expr::Any &expr, llvm::Function *fn, const std::string &key);
+    BlockKind mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<WhileCtx> whileCtx);
+
+    llvm::Function *mkExternalFn(llvm::Function *parent, const Type::Any &rtn, const std::string &name,
+                                 const std::vector<Type::Any> &args);
+    llvm::Value *invokeMalloc(llvm::Function *parent, llvm::Value *size);
+
+    llvm::Value *conditionalLoad(llvm::Value *rhs);
+
+  public:
+    AstTransformer(Options options, llvm::LLVMContext &c)
+        : options(std::move(options)), C(c), stackVarPtrs(), structTypes(), functions(), B(C) {}
+
+    Pair<llvm::StructType *, StructMemberTable> mkStruct(const StructDef &def);
+    llvm::Type *mkTpe(const Type::Any &tpe);
+    Opt<llvm::StructType *> lookup(const Sym &s);
+    Pair<Opt<std::string>, std::string> transform(const std::unique_ptr<llvm::Module> &module, const Program &);
+    Pair<Opt<std::string>, std::string> optimise(const std::unique_ptr<llvm::Module> &module);
+  };
+
 public:
-  explicit LLVM();
+  Options options;
+  explicit LLVM(Options options) : options(std::move(options)){};
   compiler::Compilation run(const Program &) override;
 };
 

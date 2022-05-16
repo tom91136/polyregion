@@ -8,14 +8,12 @@ using json = nlohmann::json;
 
 namespace polyregion::polyast { 
 namespace Expr { 
+[[nodiscard]] EXPORT Expr::NullaryIntrinsic nullaryintrinsic_from_json(const json &);
+[[nodiscard]] EXPORT json nullaryintrinsic_to_json(const Expr::NullaryIntrinsic &);
 [[nodiscard]] EXPORT Expr::UnaryIntrinsic unaryintrinsic_from_json(const json &);
 [[nodiscard]] EXPORT json unaryintrinsic_to_json(const Expr::UnaryIntrinsic &);
 [[nodiscard]] EXPORT Expr::BinaryIntrinsic binaryintrinsic_from_json(const json &);
 [[nodiscard]] EXPORT json binaryintrinsic_to_json(const Expr::BinaryIntrinsic &);
-[[nodiscard]] EXPORT Expr::UnaryLogicIntrinsic unarylogicintrinsic_from_json(const json &);
-[[nodiscard]] EXPORT json unarylogicintrinsic_to_json(const Expr::UnaryLogicIntrinsic &);
-[[nodiscard]] EXPORT Expr::BinaryLogicIntrinsic binarylogicintrinsic_from_json(const json &);
-[[nodiscard]] EXPORT json binarylogicintrinsic_to_json(const Expr::BinaryLogicIntrinsic &);
 [[nodiscard]] EXPORT Expr::Cast cast_from_json(const json &);
 [[nodiscard]] EXPORT json cast_to_json(const Expr::Cast &);
 [[nodiscard]] EXPORT Expr::Alias alias_from_json(const json &);
@@ -31,26 +29,50 @@ namespace Expr {
 [[nodiscard]] EXPORT Expr::Any any_from_json(const json &);
 [[nodiscard]] EXPORT json any_to_json(const Expr::Any &);
 } // namespace Expr
-namespace BinaryLogicIntrinsicKind { 
-[[nodiscard]] EXPORT BinaryLogicIntrinsicKind::Eq eq_from_json(const json &);
-[[nodiscard]] EXPORT json eq_to_json(const BinaryLogicIntrinsicKind::Eq &);
-[[nodiscard]] EXPORT BinaryLogicIntrinsicKind::Neq neq_from_json(const json &);
-[[nodiscard]] EXPORT json neq_to_json(const BinaryLogicIntrinsicKind::Neq &);
-[[nodiscard]] EXPORT BinaryLogicIntrinsicKind::And and_from_json(const json &);
-[[nodiscard]] EXPORT json and_to_json(const BinaryLogicIntrinsicKind::And &);
-[[nodiscard]] EXPORT BinaryLogicIntrinsicKind::Or or_from_json(const json &);
-[[nodiscard]] EXPORT json or_to_json(const BinaryLogicIntrinsicKind::Or &);
-[[nodiscard]] EXPORT BinaryLogicIntrinsicKind::Lte lte_from_json(const json &);
-[[nodiscard]] EXPORT json lte_to_json(const BinaryLogicIntrinsicKind::Lte &);
-[[nodiscard]] EXPORT BinaryLogicIntrinsicKind::Gte gte_from_json(const json &);
-[[nodiscard]] EXPORT json gte_to_json(const BinaryLogicIntrinsicKind::Gte &);
-[[nodiscard]] EXPORT BinaryLogicIntrinsicKind::Lt lt_from_json(const json &);
-[[nodiscard]] EXPORT json lt_to_json(const BinaryLogicIntrinsicKind::Lt &);
-[[nodiscard]] EXPORT BinaryLogicIntrinsicKind::Gt gt_from_json(const json &);
-[[nodiscard]] EXPORT json gt_to_json(const BinaryLogicIntrinsicKind::Gt &);
-[[nodiscard]] EXPORT BinaryLogicIntrinsicKind::Any any_from_json(const json &);
-[[nodiscard]] EXPORT json any_to_json(const BinaryLogicIntrinsicKind::Any &);
-} // namespace BinaryLogicIntrinsicKind
+namespace NullaryIntrinsicKind { 
+[[nodiscard]] EXPORT NullaryIntrinsicKind::GpuGlobalIdxX gpuglobalidxx_from_json(const json &);
+[[nodiscard]] EXPORT json gpuglobalidxx_to_json(const NullaryIntrinsicKind::GpuGlobalIdxX &);
+[[nodiscard]] EXPORT NullaryIntrinsicKind::GpuGlobalIdxY gpuglobalidxy_from_json(const json &);
+[[nodiscard]] EXPORT json gpuglobalidxy_to_json(const NullaryIntrinsicKind::GpuGlobalIdxY &);
+[[nodiscard]] EXPORT NullaryIntrinsicKind::GpuGlobalIdxZ gpuglobalidxz_from_json(const json &);
+[[nodiscard]] EXPORT json gpuglobalidxz_to_json(const NullaryIntrinsicKind::GpuGlobalIdxZ &);
+[[nodiscard]] EXPORT NullaryIntrinsicKind::GpuGlobalSizeX gpuglobalsizex_from_json(const json &);
+[[nodiscard]] EXPORT json gpuglobalsizex_to_json(const NullaryIntrinsicKind::GpuGlobalSizeX &);
+[[nodiscard]] EXPORT NullaryIntrinsicKind::GpuGlobalSizeY gpuglobalsizey_from_json(const json &);
+[[nodiscard]] EXPORT json gpuglobalsizey_to_json(const NullaryIntrinsicKind::GpuGlobalSizeY &);
+[[nodiscard]] EXPORT NullaryIntrinsicKind::GpuGlobalSizeZ gpuglobalsizez_from_json(const json &);
+[[nodiscard]] EXPORT json gpuglobalsizez_to_json(const NullaryIntrinsicKind::GpuGlobalSizeZ &);
+[[nodiscard]] EXPORT NullaryIntrinsicKind::GpuGroupIdxX gpugroupidxx_from_json(const json &);
+[[nodiscard]] EXPORT json gpugroupidxx_to_json(const NullaryIntrinsicKind::GpuGroupIdxX &);
+[[nodiscard]] EXPORT NullaryIntrinsicKind::GpuGroupIdxY gpugroupidxy_from_json(const json &);
+[[nodiscard]] EXPORT json gpugroupidxy_to_json(const NullaryIntrinsicKind::GpuGroupIdxY &);
+[[nodiscard]] EXPORT NullaryIntrinsicKind::GpuGroupIdxZ gpugroupidxz_from_json(const json &);
+[[nodiscard]] EXPORT json gpugroupidxz_to_json(const NullaryIntrinsicKind::GpuGroupIdxZ &);
+[[nodiscard]] EXPORT NullaryIntrinsicKind::GpuGroupSizeX gpugroupsizex_from_json(const json &);
+[[nodiscard]] EXPORT json gpugroupsizex_to_json(const NullaryIntrinsicKind::GpuGroupSizeX &);
+[[nodiscard]] EXPORT NullaryIntrinsicKind::GpuGroupSizeY gpugroupsizey_from_json(const json &);
+[[nodiscard]] EXPORT json gpugroupsizey_to_json(const NullaryIntrinsicKind::GpuGroupSizeY &);
+[[nodiscard]] EXPORT NullaryIntrinsicKind::GpuGroupSizeZ gpugroupsizez_from_json(const json &);
+[[nodiscard]] EXPORT json gpugroupsizez_to_json(const NullaryIntrinsicKind::GpuGroupSizeZ &);
+[[nodiscard]] EXPORT NullaryIntrinsicKind::GpuLocalIdxX gpulocalidxx_from_json(const json &);
+[[nodiscard]] EXPORT json gpulocalidxx_to_json(const NullaryIntrinsicKind::GpuLocalIdxX &);
+[[nodiscard]] EXPORT NullaryIntrinsicKind::GpuLocalIdxY gpulocalidxy_from_json(const json &);
+[[nodiscard]] EXPORT json gpulocalidxy_to_json(const NullaryIntrinsicKind::GpuLocalIdxY &);
+[[nodiscard]] EXPORT NullaryIntrinsicKind::GpuLocalIdxZ gpulocalidxz_from_json(const json &);
+[[nodiscard]] EXPORT json gpulocalidxz_to_json(const NullaryIntrinsicKind::GpuLocalIdxZ &);
+[[nodiscard]] EXPORT NullaryIntrinsicKind::GpuLocalSizeX gpulocalsizex_from_json(const json &);
+[[nodiscard]] EXPORT json gpulocalsizex_to_json(const NullaryIntrinsicKind::GpuLocalSizeX &);
+[[nodiscard]] EXPORT NullaryIntrinsicKind::GpuLocalSizeY gpulocalsizey_from_json(const json &);
+[[nodiscard]] EXPORT json gpulocalsizey_to_json(const NullaryIntrinsicKind::GpuLocalSizeY &);
+[[nodiscard]] EXPORT NullaryIntrinsicKind::GpuLocalSizeZ gpulocalsizez_from_json(const json &);
+[[nodiscard]] EXPORT json gpulocalsizez_to_json(const NullaryIntrinsicKind::GpuLocalSizeZ &);
+[[nodiscard]] EXPORT NullaryIntrinsicKind::GpuGroupBarrier gpugroupbarrier_from_json(const json &);
+[[nodiscard]] EXPORT json gpugroupbarrier_to_json(const NullaryIntrinsicKind::GpuGroupBarrier &);
+[[nodiscard]] EXPORT NullaryIntrinsicKind::GpuGroupFence gpugroupfence_from_json(const json &);
+[[nodiscard]] EXPORT json gpugroupfence_to_json(const NullaryIntrinsicKind::GpuGroupFence &);
+[[nodiscard]] EXPORT NullaryIntrinsicKind::Any any_from_json(const json &);
+[[nodiscard]] EXPORT json any_to_json(const NullaryIntrinsicKind::Any &);
+} // namespace NullaryIntrinsicKind
 namespace Stmt { 
 [[nodiscard]] EXPORT Stmt::Comment comment_from_json(const json &);
 [[nodiscard]] EXPORT json comment_to_json(const Stmt::Comment &);
@@ -124,15 +146,11 @@ namespace UnaryIntrinsicKind {
 [[nodiscard]] EXPORT json pos_to_json(const UnaryIntrinsicKind::Pos &);
 [[nodiscard]] EXPORT UnaryIntrinsicKind::Neg neg_from_json(const json &);
 [[nodiscard]] EXPORT json neg_to_json(const UnaryIntrinsicKind::Neg &);
+[[nodiscard]] EXPORT UnaryIntrinsicKind::LogicNot logicnot_from_json(const json &);
+[[nodiscard]] EXPORT json logicnot_to_json(const UnaryIntrinsicKind::LogicNot &);
 [[nodiscard]] EXPORT UnaryIntrinsicKind::Any any_from_json(const json &);
 [[nodiscard]] EXPORT json any_to_json(const UnaryIntrinsicKind::Any &);
 } // namespace UnaryIntrinsicKind
-namespace UnaryLogicIntrinsicKind { 
-[[nodiscard]] EXPORT UnaryLogicIntrinsicKind::Not not_from_json(const json &);
-[[nodiscard]] EXPORT json not_to_json(const UnaryLogicIntrinsicKind::Not &);
-[[nodiscard]] EXPORT UnaryLogicIntrinsicKind::Any any_from_json(const json &);
-[[nodiscard]] EXPORT json any_to_json(const UnaryLogicIntrinsicKind::Any &);
-} // namespace UnaryLogicIntrinsicKind
 namespace TypeKind { 
 [[nodiscard]] EXPORT TypeKind::None none_from_json(const json &);
 [[nodiscard]] EXPORT json none_to_json(const TypeKind::None &);
@@ -252,6 +270,22 @@ namespace BinaryIntrinsicKind {
 [[nodiscard]] EXPORT json bsr_to_json(const BinaryIntrinsicKind::BSR &);
 [[nodiscard]] EXPORT BinaryIntrinsicKind::BZSR bzsr_from_json(const json &);
 [[nodiscard]] EXPORT json bzsr_to_json(const BinaryIntrinsicKind::BZSR &);
+[[nodiscard]] EXPORT BinaryIntrinsicKind::LogicEq logiceq_from_json(const json &);
+[[nodiscard]] EXPORT json logiceq_to_json(const BinaryIntrinsicKind::LogicEq &);
+[[nodiscard]] EXPORT BinaryIntrinsicKind::LogicNeq logicneq_from_json(const json &);
+[[nodiscard]] EXPORT json logicneq_to_json(const BinaryIntrinsicKind::LogicNeq &);
+[[nodiscard]] EXPORT BinaryIntrinsicKind::LogicAnd logicand_from_json(const json &);
+[[nodiscard]] EXPORT json logicand_to_json(const BinaryIntrinsicKind::LogicAnd &);
+[[nodiscard]] EXPORT BinaryIntrinsicKind::LogicOr logicor_from_json(const json &);
+[[nodiscard]] EXPORT json logicor_to_json(const BinaryIntrinsicKind::LogicOr &);
+[[nodiscard]] EXPORT BinaryIntrinsicKind::LogicLte logiclte_from_json(const json &);
+[[nodiscard]] EXPORT json logiclte_to_json(const BinaryIntrinsicKind::LogicLte &);
+[[nodiscard]] EXPORT BinaryIntrinsicKind::LogicGte logicgte_from_json(const json &);
+[[nodiscard]] EXPORT json logicgte_to_json(const BinaryIntrinsicKind::LogicGte &);
+[[nodiscard]] EXPORT BinaryIntrinsicKind::LogicLt logiclt_from_json(const json &);
+[[nodiscard]] EXPORT json logiclt_to_json(const BinaryIntrinsicKind::LogicLt &);
+[[nodiscard]] EXPORT BinaryIntrinsicKind::LogicGt logicgt_from_json(const json &);
+[[nodiscard]] EXPORT json logicgt_to_json(const BinaryIntrinsicKind::LogicGt &);
 [[nodiscard]] EXPORT BinaryIntrinsicKind::Any any_from_json(const json &);
 [[nodiscard]] EXPORT json any_to_json(const BinaryIntrinsicKind::Any &);
 } // namespace BinaryIntrinsicKind

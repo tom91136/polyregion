@@ -430,176 +430,216 @@ json Term::any_to_json(const Term::Any& x) {
   }, *x);
 }
 
-BinaryIntrinsicKind::Add BinaryIntrinsicKind::add_from_json(const json& j) { 
+NullaryIntrinsicKind::GpuGlobalIdxX NullaryIntrinsicKind::gpuglobalidxx_from_json(const json& j) { 
   return {};
 }
 
-json BinaryIntrinsicKind::add_to_json(const BinaryIntrinsicKind::Add& x) { 
+json NullaryIntrinsicKind::gpuglobalidxx_to_json(const NullaryIntrinsicKind::GpuGlobalIdxX& x) { 
   return json::array({});
 }
 
-BinaryIntrinsicKind::Sub BinaryIntrinsicKind::sub_from_json(const json& j) { 
+NullaryIntrinsicKind::GpuGlobalIdxY NullaryIntrinsicKind::gpuglobalidxy_from_json(const json& j) { 
   return {};
 }
 
-json BinaryIntrinsicKind::sub_to_json(const BinaryIntrinsicKind::Sub& x) { 
+json NullaryIntrinsicKind::gpuglobalidxy_to_json(const NullaryIntrinsicKind::GpuGlobalIdxY& x) { 
   return json::array({});
 }
 
-BinaryIntrinsicKind::Mul BinaryIntrinsicKind::mul_from_json(const json& j) { 
+NullaryIntrinsicKind::GpuGlobalIdxZ NullaryIntrinsicKind::gpuglobalidxz_from_json(const json& j) { 
   return {};
 }
 
-json BinaryIntrinsicKind::mul_to_json(const BinaryIntrinsicKind::Mul& x) { 
+json NullaryIntrinsicKind::gpuglobalidxz_to_json(const NullaryIntrinsicKind::GpuGlobalIdxZ& x) { 
   return json::array({});
 }
 
-BinaryIntrinsicKind::Div BinaryIntrinsicKind::div_from_json(const json& j) { 
+NullaryIntrinsicKind::GpuGlobalSizeX NullaryIntrinsicKind::gpuglobalsizex_from_json(const json& j) { 
   return {};
 }
 
-json BinaryIntrinsicKind::div_to_json(const BinaryIntrinsicKind::Div& x) { 
+json NullaryIntrinsicKind::gpuglobalsizex_to_json(const NullaryIntrinsicKind::GpuGlobalSizeX& x) { 
   return json::array({});
 }
 
-BinaryIntrinsicKind::Rem BinaryIntrinsicKind::rem_from_json(const json& j) { 
+NullaryIntrinsicKind::GpuGlobalSizeY NullaryIntrinsicKind::gpuglobalsizey_from_json(const json& j) { 
   return {};
 }
 
-json BinaryIntrinsicKind::rem_to_json(const BinaryIntrinsicKind::Rem& x) { 
+json NullaryIntrinsicKind::gpuglobalsizey_to_json(const NullaryIntrinsicKind::GpuGlobalSizeY& x) { 
   return json::array({});
 }
 
-BinaryIntrinsicKind::Pow BinaryIntrinsicKind::pow_from_json(const json& j) { 
+NullaryIntrinsicKind::GpuGlobalSizeZ NullaryIntrinsicKind::gpuglobalsizez_from_json(const json& j) { 
   return {};
 }
 
-json BinaryIntrinsicKind::pow_to_json(const BinaryIntrinsicKind::Pow& x) { 
+json NullaryIntrinsicKind::gpuglobalsizez_to_json(const NullaryIntrinsicKind::GpuGlobalSizeZ& x) { 
   return json::array({});
 }
 
-BinaryIntrinsicKind::Min BinaryIntrinsicKind::min_from_json(const json& j) { 
+NullaryIntrinsicKind::GpuGroupIdxX NullaryIntrinsicKind::gpugroupidxx_from_json(const json& j) { 
   return {};
 }
 
-json BinaryIntrinsicKind::min_to_json(const BinaryIntrinsicKind::Min& x) { 
+json NullaryIntrinsicKind::gpugroupidxx_to_json(const NullaryIntrinsicKind::GpuGroupIdxX& x) { 
   return json::array({});
 }
 
-BinaryIntrinsicKind::Max BinaryIntrinsicKind::max_from_json(const json& j) { 
+NullaryIntrinsicKind::GpuGroupIdxY NullaryIntrinsicKind::gpugroupidxy_from_json(const json& j) { 
   return {};
 }
 
-json BinaryIntrinsicKind::max_to_json(const BinaryIntrinsicKind::Max& x) { 
+json NullaryIntrinsicKind::gpugroupidxy_to_json(const NullaryIntrinsicKind::GpuGroupIdxY& x) { 
   return json::array({});
 }
 
-BinaryIntrinsicKind::Atan2 BinaryIntrinsicKind::atan2_from_json(const json& j) { 
+NullaryIntrinsicKind::GpuGroupIdxZ NullaryIntrinsicKind::gpugroupidxz_from_json(const json& j) { 
   return {};
 }
 
-json BinaryIntrinsicKind::atan2_to_json(const BinaryIntrinsicKind::Atan2& x) { 
+json NullaryIntrinsicKind::gpugroupidxz_to_json(const NullaryIntrinsicKind::GpuGroupIdxZ& x) { 
   return json::array({});
 }
 
-BinaryIntrinsicKind::Hypot BinaryIntrinsicKind::hypot_from_json(const json& j) { 
+NullaryIntrinsicKind::GpuGroupSizeX NullaryIntrinsicKind::gpugroupsizex_from_json(const json& j) { 
   return {};
 }
 
-json BinaryIntrinsicKind::hypot_to_json(const BinaryIntrinsicKind::Hypot& x) { 
+json NullaryIntrinsicKind::gpugroupsizex_to_json(const NullaryIntrinsicKind::GpuGroupSizeX& x) { 
   return json::array({});
 }
 
-BinaryIntrinsicKind::BAnd BinaryIntrinsicKind::band_from_json(const json& j) { 
+NullaryIntrinsicKind::GpuGroupSizeY NullaryIntrinsicKind::gpugroupsizey_from_json(const json& j) { 
   return {};
 }
 
-json BinaryIntrinsicKind::band_to_json(const BinaryIntrinsicKind::BAnd& x) { 
+json NullaryIntrinsicKind::gpugroupsizey_to_json(const NullaryIntrinsicKind::GpuGroupSizeY& x) { 
   return json::array({});
 }
 
-BinaryIntrinsicKind::BOr BinaryIntrinsicKind::bor_from_json(const json& j) { 
+NullaryIntrinsicKind::GpuGroupSizeZ NullaryIntrinsicKind::gpugroupsizez_from_json(const json& j) { 
   return {};
 }
 
-json BinaryIntrinsicKind::bor_to_json(const BinaryIntrinsicKind::BOr& x) { 
+json NullaryIntrinsicKind::gpugroupsizez_to_json(const NullaryIntrinsicKind::GpuGroupSizeZ& x) { 
   return json::array({});
 }
 
-BinaryIntrinsicKind::BXor BinaryIntrinsicKind::bxor_from_json(const json& j) { 
+NullaryIntrinsicKind::GpuLocalIdxX NullaryIntrinsicKind::gpulocalidxx_from_json(const json& j) { 
   return {};
 }
 
-json BinaryIntrinsicKind::bxor_to_json(const BinaryIntrinsicKind::BXor& x) { 
+json NullaryIntrinsicKind::gpulocalidxx_to_json(const NullaryIntrinsicKind::GpuLocalIdxX& x) { 
   return json::array({});
 }
 
-BinaryIntrinsicKind::BSL BinaryIntrinsicKind::bsl_from_json(const json& j) { 
+NullaryIntrinsicKind::GpuLocalIdxY NullaryIntrinsicKind::gpulocalidxy_from_json(const json& j) { 
   return {};
 }
 
-json BinaryIntrinsicKind::bsl_to_json(const BinaryIntrinsicKind::BSL& x) { 
+json NullaryIntrinsicKind::gpulocalidxy_to_json(const NullaryIntrinsicKind::GpuLocalIdxY& x) { 
   return json::array({});
 }
 
-BinaryIntrinsicKind::BSR BinaryIntrinsicKind::bsr_from_json(const json& j) { 
+NullaryIntrinsicKind::GpuLocalIdxZ NullaryIntrinsicKind::gpulocalidxz_from_json(const json& j) { 
   return {};
 }
 
-json BinaryIntrinsicKind::bsr_to_json(const BinaryIntrinsicKind::BSR& x) { 
+json NullaryIntrinsicKind::gpulocalidxz_to_json(const NullaryIntrinsicKind::GpuLocalIdxZ& x) { 
   return json::array({});
 }
 
-BinaryIntrinsicKind::BZSR BinaryIntrinsicKind::bzsr_from_json(const json& j) { 
+NullaryIntrinsicKind::GpuLocalSizeX NullaryIntrinsicKind::gpulocalsizex_from_json(const json& j) { 
   return {};
 }
 
-json BinaryIntrinsicKind::bzsr_to_json(const BinaryIntrinsicKind::BZSR& x) { 
+json NullaryIntrinsicKind::gpulocalsizex_to_json(const NullaryIntrinsicKind::GpuLocalSizeX& x) { 
   return json::array({});
 }
 
-BinaryIntrinsicKind::Any BinaryIntrinsicKind::any_from_json(const json& j) { 
+NullaryIntrinsicKind::GpuLocalSizeY NullaryIntrinsicKind::gpulocalsizey_from_json(const json& j) { 
+  return {};
+}
+
+json NullaryIntrinsicKind::gpulocalsizey_to_json(const NullaryIntrinsicKind::GpuLocalSizeY& x) { 
+  return json::array({});
+}
+
+NullaryIntrinsicKind::GpuLocalSizeZ NullaryIntrinsicKind::gpulocalsizez_from_json(const json& j) { 
+  return {};
+}
+
+json NullaryIntrinsicKind::gpulocalsizez_to_json(const NullaryIntrinsicKind::GpuLocalSizeZ& x) { 
+  return json::array({});
+}
+
+NullaryIntrinsicKind::GpuGroupBarrier NullaryIntrinsicKind::gpugroupbarrier_from_json(const json& j) { 
+  return {};
+}
+
+json NullaryIntrinsicKind::gpugroupbarrier_to_json(const NullaryIntrinsicKind::GpuGroupBarrier& x) { 
+  return json::array({});
+}
+
+NullaryIntrinsicKind::GpuGroupFence NullaryIntrinsicKind::gpugroupfence_from_json(const json& j) { 
+  return {};
+}
+
+json NullaryIntrinsicKind::gpugroupfence_to_json(const NullaryIntrinsicKind::GpuGroupFence& x) { 
+  return json::array({});
+}
+
+NullaryIntrinsicKind::Any NullaryIntrinsicKind::any_from_json(const json& j) { 
   size_t ord = j.at(0).get<size_t>();
   const auto t = j.at(1);
   switch (ord) {
-  case 0: return BinaryIntrinsicKind::add_from_json(t);
-  case 1: return BinaryIntrinsicKind::sub_from_json(t);
-  case 2: return BinaryIntrinsicKind::mul_from_json(t);
-  case 3: return BinaryIntrinsicKind::div_from_json(t);
-  case 4: return BinaryIntrinsicKind::rem_from_json(t);
-  case 5: return BinaryIntrinsicKind::pow_from_json(t);
-  case 6: return BinaryIntrinsicKind::min_from_json(t);
-  case 7: return BinaryIntrinsicKind::max_from_json(t);
-  case 8: return BinaryIntrinsicKind::atan2_from_json(t);
-  case 9: return BinaryIntrinsicKind::hypot_from_json(t);
-  case 10: return BinaryIntrinsicKind::band_from_json(t);
-  case 11: return BinaryIntrinsicKind::bor_from_json(t);
-  case 12: return BinaryIntrinsicKind::bxor_from_json(t);
-  case 13: return BinaryIntrinsicKind::bsl_from_json(t);
-  case 14: return BinaryIntrinsicKind::bsr_from_json(t);
-  case 15: return BinaryIntrinsicKind::bzsr_from_json(t);
+  case 0: return NullaryIntrinsicKind::gpuglobalidxx_from_json(t);
+  case 1: return NullaryIntrinsicKind::gpuglobalidxy_from_json(t);
+  case 2: return NullaryIntrinsicKind::gpuglobalidxz_from_json(t);
+  case 3: return NullaryIntrinsicKind::gpuglobalsizex_from_json(t);
+  case 4: return NullaryIntrinsicKind::gpuglobalsizey_from_json(t);
+  case 5: return NullaryIntrinsicKind::gpuglobalsizez_from_json(t);
+  case 6: return NullaryIntrinsicKind::gpugroupidxx_from_json(t);
+  case 7: return NullaryIntrinsicKind::gpugroupidxy_from_json(t);
+  case 8: return NullaryIntrinsicKind::gpugroupidxz_from_json(t);
+  case 9: return NullaryIntrinsicKind::gpugroupsizex_from_json(t);
+  case 10: return NullaryIntrinsicKind::gpugroupsizey_from_json(t);
+  case 11: return NullaryIntrinsicKind::gpugroupsizez_from_json(t);
+  case 12: return NullaryIntrinsicKind::gpulocalidxx_from_json(t);
+  case 13: return NullaryIntrinsicKind::gpulocalidxy_from_json(t);
+  case 14: return NullaryIntrinsicKind::gpulocalidxz_from_json(t);
+  case 15: return NullaryIntrinsicKind::gpulocalsizex_from_json(t);
+  case 16: return NullaryIntrinsicKind::gpulocalsizey_from_json(t);
+  case 17: return NullaryIntrinsicKind::gpulocalsizez_from_json(t);
+  case 18: return NullaryIntrinsicKind::gpugroupbarrier_from_json(t);
+  case 19: return NullaryIntrinsicKind::gpugroupfence_from_json(t);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
   }
 }
 
-json BinaryIntrinsicKind::any_to_json(const BinaryIntrinsicKind::Any& x) { 
+json NullaryIntrinsicKind::any_to_json(const NullaryIntrinsicKind::Any& x) { 
   return std::visit(overloaded{
-  [](const BinaryIntrinsicKind::Add &y) -> json { return {0, BinaryIntrinsicKind::add_to_json(y)}; },
-  [](const BinaryIntrinsicKind::Sub &y) -> json { return {1, BinaryIntrinsicKind::sub_to_json(y)}; },
-  [](const BinaryIntrinsicKind::Mul &y) -> json { return {2, BinaryIntrinsicKind::mul_to_json(y)}; },
-  [](const BinaryIntrinsicKind::Div &y) -> json { return {3, BinaryIntrinsicKind::div_to_json(y)}; },
-  [](const BinaryIntrinsicKind::Rem &y) -> json { return {4, BinaryIntrinsicKind::rem_to_json(y)}; },
-  [](const BinaryIntrinsicKind::Pow &y) -> json { return {5, BinaryIntrinsicKind::pow_to_json(y)}; },
-  [](const BinaryIntrinsicKind::Min &y) -> json { return {6, BinaryIntrinsicKind::min_to_json(y)}; },
-  [](const BinaryIntrinsicKind::Max &y) -> json { return {7, BinaryIntrinsicKind::max_to_json(y)}; },
-  [](const BinaryIntrinsicKind::Atan2 &y) -> json { return {8, BinaryIntrinsicKind::atan2_to_json(y)}; },
-  [](const BinaryIntrinsicKind::Hypot &y) -> json { return {9, BinaryIntrinsicKind::hypot_to_json(y)}; },
-  [](const BinaryIntrinsicKind::BAnd &y) -> json { return {10, BinaryIntrinsicKind::band_to_json(y)}; },
-  [](const BinaryIntrinsicKind::BOr &y) -> json { return {11, BinaryIntrinsicKind::bor_to_json(y)}; },
-  [](const BinaryIntrinsicKind::BXor &y) -> json { return {12, BinaryIntrinsicKind::bxor_to_json(y)}; },
-  [](const BinaryIntrinsicKind::BSL &y) -> json { return {13, BinaryIntrinsicKind::bsl_to_json(y)}; },
-  [](const BinaryIntrinsicKind::BSR &y) -> json { return {14, BinaryIntrinsicKind::bsr_to_json(y)}; },
-  [](const BinaryIntrinsicKind::BZSR &y) -> json { return {15, BinaryIntrinsicKind::bzsr_to_json(y)}; },
+  [](const NullaryIntrinsicKind::GpuGlobalIdxX &y) -> json { return {0, NullaryIntrinsicKind::gpuglobalidxx_to_json(y)}; },
+  [](const NullaryIntrinsicKind::GpuGlobalIdxY &y) -> json { return {1, NullaryIntrinsicKind::gpuglobalidxy_to_json(y)}; },
+  [](const NullaryIntrinsicKind::GpuGlobalIdxZ &y) -> json { return {2, NullaryIntrinsicKind::gpuglobalidxz_to_json(y)}; },
+  [](const NullaryIntrinsicKind::GpuGlobalSizeX &y) -> json { return {3, NullaryIntrinsicKind::gpuglobalsizex_to_json(y)}; },
+  [](const NullaryIntrinsicKind::GpuGlobalSizeY &y) -> json { return {4, NullaryIntrinsicKind::gpuglobalsizey_to_json(y)}; },
+  [](const NullaryIntrinsicKind::GpuGlobalSizeZ &y) -> json { return {5, NullaryIntrinsicKind::gpuglobalsizez_to_json(y)}; },
+  [](const NullaryIntrinsicKind::GpuGroupIdxX &y) -> json { return {6, NullaryIntrinsicKind::gpugroupidxx_to_json(y)}; },
+  [](const NullaryIntrinsicKind::GpuGroupIdxY &y) -> json { return {7, NullaryIntrinsicKind::gpugroupidxy_to_json(y)}; },
+  [](const NullaryIntrinsicKind::GpuGroupIdxZ &y) -> json { return {8, NullaryIntrinsicKind::gpugroupidxz_to_json(y)}; },
+  [](const NullaryIntrinsicKind::GpuGroupSizeX &y) -> json { return {9, NullaryIntrinsicKind::gpugroupsizex_to_json(y)}; },
+  [](const NullaryIntrinsicKind::GpuGroupSizeY &y) -> json { return {10, NullaryIntrinsicKind::gpugroupsizey_to_json(y)}; },
+  [](const NullaryIntrinsicKind::GpuGroupSizeZ &y) -> json { return {11, NullaryIntrinsicKind::gpugroupsizez_to_json(y)}; },
+  [](const NullaryIntrinsicKind::GpuLocalIdxX &y) -> json { return {12, NullaryIntrinsicKind::gpulocalidxx_to_json(y)}; },
+  [](const NullaryIntrinsicKind::GpuLocalIdxY &y) -> json { return {13, NullaryIntrinsicKind::gpulocalidxy_to_json(y)}; },
+  [](const NullaryIntrinsicKind::GpuLocalIdxZ &y) -> json { return {14, NullaryIntrinsicKind::gpulocalidxz_to_json(y)}; },
+  [](const NullaryIntrinsicKind::GpuLocalSizeX &y) -> json { return {15, NullaryIntrinsicKind::gpulocalsizex_to_json(y)}; },
+  [](const NullaryIntrinsicKind::GpuLocalSizeY &y) -> json { return {16, NullaryIntrinsicKind::gpulocalsizey_to_json(y)}; },
+  [](const NullaryIntrinsicKind::GpuLocalSizeZ &y) -> json { return {17, NullaryIntrinsicKind::gpulocalsizez_to_json(y)}; },
+  [](const NullaryIntrinsicKind::GpuGroupBarrier &y) -> json { return {18, NullaryIntrinsicKind::gpugroupbarrier_to_json(y)}; },
+  [](const NullaryIntrinsicKind::GpuGroupFence &y) -> json { return {19, NullaryIntrinsicKind::gpugroupfence_to_json(y)}; },
   [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
   }, *x);
 }
@@ -804,6 +844,14 @@ json UnaryIntrinsicKind::neg_to_json(const UnaryIntrinsicKind::Neg& x) {
   return json::array({});
 }
 
+UnaryIntrinsicKind::LogicNot UnaryIntrinsicKind::logicnot_from_json(const json& j) { 
+  return {};
+}
+
+json UnaryIntrinsicKind::logicnot_to_json(const UnaryIntrinsicKind::LogicNot& x) { 
+  return json::array({});
+}
+
 UnaryIntrinsicKind::Any UnaryIntrinsicKind::any_from_json(const json& j) { 
   size_t ord = j.at(0).get<size_t>();
   const auto t = j.at(1);
@@ -833,6 +881,7 @@ UnaryIntrinsicKind::Any UnaryIntrinsicKind::any_from_json(const json& j) {
   case 22: return UnaryIntrinsicKind::bnot_from_json(t);
   case 23: return UnaryIntrinsicKind::pos_from_json(t);
   case 24: return UnaryIntrinsicKind::neg_from_json(t);
+  case 25: return UnaryIntrinsicKind::logicnot_from_json(t);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
   }
 }
@@ -864,126 +913,275 @@ json UnaryIntrinsicKind::any_to_json(const UnaryIntrinsicKind::Any& x) {
   [](const UnaryIntrinsicKind::BNot &y) -> json { return {22, UnaryIntrinsicKind::bnot_to_json(y)}; },
   [](const UnaryIntrinsicKind::Pos &y) -> json { return {23, UnaryIntrinsicKind::pos_to_json(y)}; },
   [](const UnaryIntrinsicKind::Neg &y) -> json { return {24, UnaryIntrinsicKind::neg_to_json(y)}; },
+  [](const UnaryIntrinsicKind::LogicNot &y) -> json { return {25, UnaryIntrinsicKind::logicnot_to_json(y)}; },
   [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
   }, *x);
 }
 
-BinaryLogicIntrinsicKind::Eq BinaryLogicIntrinsicKind::eq_from_json(const json& j) { 
+BinaryIntrinsicKind::Add BinaryIntrinsicKind::add_from_json(const json& j) { 
   return {};
 }
 
-json BinaryLogicIntrinsicKind::eq_to_json(const BinaryLogicIntrinsicKind::Eq& x) { 
+json BinaryIntrinsicKind::add_to_json(const BinaryIntrinsicKind::Add& x) { 
   return json::array({});
 }
 
-BinaryLogicIntrinsicKind::Neq BinaryLogicIntrinsicKind::neq_from_json(const json& j) { 
+BinaryIntrinsicKind::Sub BinaryIntrinsicKind::sub_from_json(const json& j) { 
   return {};
 }
 
-json BinaryLogicIntrinsicKind::neq_to_json(const BinaryLogicIntrinsicKind::Neq& x) { 
+json BinaryIntrinsicKind::sub_to_json(const BinaryIntrinsicKind::Sub& x) { 
   return json::array({});
 }
 
-BinaryLogicIntrinsicKind::And BinaryLogicIntrinsicKind::and_from_json(const json& j) { 
+BinaryIntrinsicKind::Mul BinaryIntrinsicKind::mul_from_json(const json& j) { 
   return {};
 }
 
-json BinaryLogicIntrinsicKind::and_to_json(const BinaryLogicIntrinsicKind::And& x) { 
+json BinaryIntrinsicKind::mul_to_json(const BinaryIntrinsicKind::Mul& x) { 
   return json::array({});
 }
 
-BinaryLogicIntrinsicKind::Or BinaryLogicIntrinsicKind::or_from_json(const json& j) { 
+BinaryIntrinsicKind::Div BinaryIntrinsicKind::div_from_json(const json& j) { 
   return {};
 }
 
-json BinaryLogicIntrinsicKind::or_to_json(const BinaryLogicIntrinsicKind::Or& x) { 
+json BinaryIntrinsicKind::div_to_json(const BinaryIntrinsicKind::Div& x) { 
   return json::array({});
 }
 
-BinaryLogicIntrinsicKind::Lte BinaryLogicIntrinsicKind::lte_from_json(const json& j) { 
+BinaryIntrinsicKind::Rem BinaryIntrinsicKind::rem_from_json(const json& j) { 
   return {};
 }
 
-json BinaryLogicIntrinsicKind::lte_to_json(const BinaryLogicIntrinsicKind::Lte& x) { 
+json BinaryIntrinsicKind::rem_to_json(const BinaryIntrinsicKind::Rem& x) { 
   return json::array({});
 }
 
-BinaryLogicIntrinsicKind::Gte BinaryLogicIntrinsicKind::gte_from_json(const json& j) { 
+BinaryIntrinsicKind::Pow BinaryIntrinsicKind::pow_from_json(const json& j) { 
   return {};
 }
 
-json BinaryLogicIntrinsicKind::gte_to_json(const BinaryLogicIntrinsicKind::Gte& x) { 
+json BinaryIntrinsicKind::pow_to_json(const BinaryIntrinsicKind::Pow& x) { 
   return json::array({});
 }
 
-BinaryLogicIntrinsicKind::Lt BinaryLogicIntrinsicKind::lt_from_json(const json& j) { 
+BinaryIntrinsicKind::Min BinaryIntrinsicKind::min_from_json(const json& j) { 
   return {};
 }
 
-json BinaryLogicIntrinsicKind::lt_to_json(const BinaryLogicIntrinsicKind::Lt& x) { 
+json BinaryIntrinsicKind::min_to_json(const BinaryIntrinsicKind::Min& x) { 
   return json::array({});
 }
 
-BinaryLogicIntrinsicKind::Gt BinaryLogicIntrinsicKind::gt_from_json(const json& j) { 
+BinaryIntrinsicKind::Max BinaryIntrinsicKind::max_from_json(const json& j) { 
   return {};
 }
 
-json BinaryLogicIntrinsicKind::gt_to_json(const BinaryLogicIntrinsicKind::Gt& x) { 
+json BinaryIntrinsicKind::max_to_json(const BinaryIntrinsicKind::Max& x) { 
   return json::array({});
 }
 
-BinaryLogicIntrinsicKind::Any BinaryLogicIntrinsicKind::any_from_json(const json& j) { 
+BinaryIntrinsicKind::Atan2 BinaryIntrinsicKind::atan2_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::atan2_to_json(const BinaryIntrinsicKind::Atan2& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::Hypot BinaryIntrinsicKind::hypot_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::hypot_to_json(const BinaryIntrinsicKind::Hypot& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::BAnd BinaryIntrinsicKind::band_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::band_to_json(const BinaryIntrinsicKind::BAnd& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::BOr BinaryIntrinsicKind::bor_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::bor_to_json(const BinaryIntrinsicKind::BOr& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::BXor BinaryIntrinsicKind::bxor_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::bxor_to_json(const BinaryIntrinsicKind::BXor& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::BSL BinaryIntrinsicKind::bsl_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::bsl_to_json(const BinaryIntrinsicKind::BSL& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::BSR BinaryIntrinsicKind::bsr_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::bsr_to_json(const BinaryIntrinsicKind::BSR& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::BZSR BinaryIntrinsicKind::bzsr_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::bzsr_to_json(const BinaryIntrinsicKind::BZSR& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::LogicEq BinaryIntrinsicKind::logiceq_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::logiceq_to_json(const BinaryIntrinsicKind::LogicEq& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::LogicNeq BinaryIntrinsicKind::logicneq_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::logicneq_to_json(const BinaryIntrinsicKind::LogicNeq& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::LogicAnd BinaryIntrinsicKind::logicand_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::logicand_to_json(const BinaryIntrinsicKind::LogicAnd& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::LogicOr BinaryIntrinsicKind::logicor_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::logicor_to_json(const BinaryIntrinsicKind::LogicOr& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::LogicLte BinaryIntrinsicKind::logiclte_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::logiclte_to_json(const BinaryIntrinsicKind::LogicLte& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::LogicGte BinaryIntrinsicKind::logicgte_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::logicgte_to_json(const BinaryIntrinsicKind::LogicGte& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::LogicLt BinaryIntrinsicKind::logiclt_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::logiclt_to_json(const BinaryIntrinsicKind::LogicLt& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::LogicGt BinaryIntrinsicKind::logicgt_from_json(const json& j) { 
+  return {};
+}
+
+json BinaryIntrinsicKind::logicgt_to_json(const BinaryIntrinsicKind::LogicGt& x) { 
+  return json::array({});
+}
+
+BinaryIntrinsicKind::Any BinaryIntrinsicKind::any_from_json(const json& j) { 
   size_t ord = j.at(0).get<size_t>();
   const auto t = j.at(1);
   switch (ord) {
-  case 0: return BinaryLogicIntrinsicKind::eq_from_json(t);
-  case 1: return BinaryLogicIntrinsicKind::neq_from_json(t);
-  case 2: return BinaryLogicIntrinsicKind::and_from_json(t);
-  case 3: return BinaryLogicIntrinsicKind::or_from_json(t);
-  case 4: return BinaryLogicIntrinsicKind::lte_from_json(t);
-  case 5: return BinaryLogicIntrinsicKind::gte_from_json(t);
-  case 6: return BinaryLogicIntrinsicKind::lt_from_json(t);
-  case 7: return BinaryLogicIntrinsicKind::gt_from_json(t);
+  case 0: return BinaryIntrinsicKind::add_from_json(t);
+  case 1: return BinaryIntrinsicKind::sub_from_json(t);
+  case 2: return BinaryIntrinsicKind::mul_from_json(t);
+  case 3: return BinaryIntrinsicKind::div_from_json(t);
+  case 4: return BinaryIntrinsicKind::rem_from_json(t);
+  case 5: return BinaryIntrinsicKind::pow_from_json(t);
+  case 6: return BinaryIntrinsicKind::min_from_json(t);
+  case 7: return BinaryIntrinsicKind::max_from_json(t);
+  case 8: return BinaryIntrinsicKind::atan2_from_json(t);
+  case 9: return BinaryIntrinsicKind::hypot_from_json(t);
+  case 10: return BinaryIntrinsicKind::band_from_json(t);
+  case 11: return BinaryIntrinsicKind::bor_from_json(t);
+  case 12: return BinaryIntrinsicKind::bxor_from_json(t);
+  case 13: return BinaryIntrinsicKind::bsl_from_json(t);
+  case 14: return BinaryIntrinsicKind::bsr_from_json(t);
+  case 15: return BinaryIntrinsicKind::bzsr_from_json(t);
+  case 16: return BinaryIntrinsicKind::logiceq_from_json(t);
+  case 17: return BinaryIntrinsicKind::logicneq_from_json(t);
+  case 18: return BinaryIntrinsicKind::logicand_from_json(t);
+  case 19: return BinaryIntrinsicKind::logicor_from_json(t);
+  case 20: return BinaryIntrinsicKind::logiclte_from_json(t);
+  case 21: return BinaryIntrinsicKind::logicgte_from_json(t);
+  case 22: return BinaryIntrinsicKind::logiclt_from_json(t);
+  case 23: return BinaryIntrinsicKind::logicgt_from_json(t);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
   }
 }
 
-json BinaryLogicIntrinsicKind::any_to_json(const BinaryLogicIntrinsicKind::Any& x) { 
+json BinaryIntrinsicKind::any_to_json(const BinaryIntrinsicKind::Any& x) { 
   return std::visit(overloaded{
-  [](const BinaryLogicIntrinsicKind::Eq &y) -> json { return {0, BinaryLogicIntrinsicKind::eq_to_json(y)}; },
-  [](const BinaryLogicIntrinsicKind::Neq &y) -> json { return {1, BinaryLogicIntrinsicKind::neq_to_json(y)}; },
-  [](const BinaryLogicIntrinsicKind::And &y) -> json { return {2, BinaryLogicIntrinsicKind::and_to_json(y)}; },
-  [](const BinaryLogicIntrinsicKind::Or &y) -> json { return {3, BinaryLogicIntrinsicKind::or_to_json(y)}; },
-  [](const BinaryLogicIntrinsicKind::Lte &y) -> json { return {4, BinaryLogicIntrinsicKind::lte_to_json(y)}; },
-  [](const BinaryLogicIntrinsicKind::Gte &y) -> json { return {5, BinaryLogicIntrinsicKind::gte_to_json(y)}; },
-  [](const BinaryLogicIntrinsicKind::Lt &y) -> json { return {6, BinaryLogicIntrinsicKind::lt_to_json(y)}; },
-  [](const BinaryLogicIntrinsicKind::Gt &y) -> json { return {7, BinaryLogicIntrinsicKind::gt_to_json(y)}; },
+  [](const BinaryIntrinsicKind::Add &y) -> json { return {0, BinaryIntrinsicKind::add_to_json(y)}; },
+  [](const BinaryIntrinsicKind::Sub &y) -> json { return {1, BinaryIntrinsicKind::sub_to_json(y)}; },
+  [](const BinaryIntrinsicKind::Mul &y) -> json { return {2, BinaryIntrinsicKind::mul_to_json(y)}; },
+  [](const BinaryIntrinsicKind::Div &y) -> json { return {3, BinaryIntrinsicKind::div_to_json(y)}; },
+  [](const BinaryIntrinsicKind::Rem &y) -> json { return {4, BinaryIntrinsicKind::rem_to_json(y)}; },
+  [](const BinaryIntrinsicKind::Pow &y) -> json { return {5, BinaryIntrinsicKind::pow_to_json(y)}; },
+  [](const BinaryIntrinsicKind::Min &y) -> json { return {6, BinaryIntrinsicKind::min_to_json(y)}; },
+  [](const BinaryIntrinsicKind::Max &y) -> json { return {7, BinaryIntrinsicKind::max_to_json(y)}; },
+  [](const BinaryIntrinsicKind::Atan2 &y) -> json { return {8, BinaryIntrinsicKind::atan2_to_json(y)}; },
+  [](const BinaryIntrinsicKind::Hypot &y) -> json { return {9, BinaryIntrinsicKind::hypot_to_json(y)}; },
+  [](const BinaryIntrinsicKind::BAnd &y) -> json { return {10, BinaryIntrinsicKind::band_to_json(y)}; },
+  [](const BinaryIntrinsicKind::BOr &y) -> json { return {11, BinaryIntrinsicKind::bor_to_json(y)}; },
+  [](const BinaryIntrinsicKind::BXor &y) -> json { return {12, BinaryIntrinsicKind::bxor_to_json(y)}; },
+  [](const BinaryIntrinsicKind::BSL &y) -> json { return {13, BinaryIntrinsicKind::bsl_to_json(y)}; },
+  [](const BinaryIntrinsicKind::BSR &y) -> json { return {14, BinaryIntrinsicKind::bsr_to_json(y)}; },
+  [](const BinaryIntrinsicKind::BZSR &y) -> json { return {15, BinaryIntrinsicKind::bzsr_to_json(y)}; },
+  [](const BinaryIntrinsicKind::LogicEq &y) -> json { return {16, BinaryIntrinsicKind::logiceq_to_json(y)}; },
+  [](const BinaryIntrinsicKind::LogicNeq &y) -> json { return {17, BinaryIntrinsicKind::logicneq_to_json(y)}; },
+  [](const BinaryIntrinsicKind::LogicAnd &y) -> json { return {18, BinaryIntrinsicKind::logicand_to_json(y)}; },
+  [](const BinaryIntrinsicKind::LogicOr &y) -> json { return {19, BinaryIntrinsicKind::logicor_to_json(y)}; },
+  [](const BinaryIntrinsicKind::LogicLte &y) -> json { return {20, BinaryIntrinsicKind::logiclte_to_json(y)}; },
+  [](const BinaryIntrinsicKind::LogicGte &y) -> json { return {21, BinaryIntrinsicKind::logicgte_to_json(y)}; },
+  [](const BinaryIntrinsicKind::LogicLt &y) -> json { return {22, BinaryIntrinsicKind::logiclt_to_json(y)}; },
+  [](const BinaryIntrinsicKind::LogicGt &y) -> json { return {23, BinaryIntrinsicKind::logicgt_to_json(y)}; },
   [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
   }, *x);
 }
 
-UnaryLogicIntrinsicKind::Not UnaryLogicIntrinsicKind::not_from_json(const json& j) { 
-  return {};
+Expr::NullaryIntrinsic Expr::nullaryintrinsic_from_json(const json& j) { 
+  auto kind =  NullaryIntrinsicKind::any_from_json(j.at(0));
+  auto rtn =  Type::any_from_json(j.at(1));
+  return {kind, rtn};
 }
 
-json UnaryLogicIntrinsicKind::not_to_json(const UnaryLogicIntrinsicKind::Not& x) { 
-  return json::array({});
-}
-
-UnaryLogicIntrinsicKind::Any UnaryLogicIntrinsicKind::any_from_json(const json& j) { 
-  size_t ord = j.at(0).get<size_t>();
-  const auto t = j.at(1);
-  switch (ord) {
-  case 0: return UnaryLogicIntrinsicKind::not_from_json(t);
-  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
-  }
-}
-
-json UnaryLogicIntrinsicKind::any_to_json(const UnaryLogicIntrinsicKind::Any& x) { 
-  return std::visit(overloaded{
-  [](const UnaryLogicIntrinsicKind::Not &y) -> json { return {0, UnaryLogicIntrinsicKind::not_to_json(y)}; },
-  [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
-  }, *x);
+json Expr::nullaryintrinsic_to_json(const Expr::NullaryIntrinsic& x) { 
+  auto kind =  NullaryIntrinsicKind::any_to_json(x.kind);
+  auto rtn =  Type::any_to_json(x.rtn);
+  return json::array({kind, rtn});
 }
 
 Expr::UnaryIntrinsic Expr::unaryintrinsic_from_json(const json& j) { 
@@ -1014,32 +1212,6 @@ json Expr::binaryintrinsic_to_json(const Expr::BinaryIntrinsic& x) {
   auto kind =  BinaryIntrinsicKind::any_to_json(x.kind);
   auto rtn =  Type::any_to_json(x.rtn);
   return json::array({lhs, rhs, kind, rtn});
-}
-
-Expr::UnaryLogicIntrinsic Expr::unarylogicintrinsic_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto kind =  UnaryLogicIntrinsicKind::any_from_json(j.at(1));
-  return {lhs, kind};
-}
-
-json Expr::unarylogicintrinsic_to_json(const Expr::UnaryLogicIntrinsic& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto kind =  UnaryLogicIntrinsicKind::any_to_json(x.kind);
-  return json::array({lhs, kind});
-}
-
-Expr::BinaryLogicIntrinsic Expr::binarylogicintrinsic_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto rhs =  Term::any_from_json(j.at(1));
-  auto kind =  BinaryLogicIntrinsicKind::any_from_json(j.at(2));
-  return {lhs, rhs, kind};
-}
-
-json Expr::binarylogicintrinsic_to_json(const Expr::BinaryLogicIntrinsic& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto rhs =  Term::any_to_json(x.rhs);
-  auto kind =  BinaryLogicIntrinsicKind::any_to_json(x.kind);
-  return json::array({lhs, rhs, kind});
 }
 
 Expr::Cast Expr::cast_from_json(const json& j) { 
@@ -1140,32 +1312,30 @@ Expr::Any Expr::any_from_json(const json& j) {
   size_t ord = j.at(0).get<size_t>();
   const auto t = j.at(1);
   switch (ord) {
-  case 0: return Expr::unaryintrinsic_from_json(t);
-  case 1: return Expr::binaryintrinsic_from_json(t);
-  case 2: return Expr::unarylogicintrinsic_from_json(t);
-  case 3: return Expr::binarylogicintrinsic_from_json(t);
-  case 4: return Expr::cast_from_json(t);
-  case 5: return Expr::alias_from_json(t);
-  case 6: return Expr::invoke_from_json(t);
-  case 7: return Expr::index_from_json(t);
-  case 8: return Expr::alloc_from_json(t);
-  case 9: return Expr::suspend_from_json(t);
+  case 0: return Expr::nullaryintrinsic_from_json(t);
+  case 1: return Expr::unaryintrinsic_from_json(t);
+  case 2: return Expr::binaryintrinsic_from_json(t);
+  case 3: return Expr::cast_from_json(t);
+  case 4: return Expr::alias_from_json(t);
+  case 5: return Expr::invoke_from_json(t);
+  case 6: return Expr::index_from_json(t);
+  case 7: return Expr::alloc_from_json(t);
+  case 8: return Expr::suspend_from_json(t);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
   }
 }
 
 json Expr::any_to_json(const Expr::Any& x) { 
   return std::visit(overloaded{
-  [](const Expr::UnaryIntrinsic &y) -> json { return {0, Expr::unaryintrinsic_to_json(y)}; },
-  [](const Expr::BinaryIntrinsic &y) -> json { return {1, Expr::binaryintrinsic_to_json(y)}; },
-  [](const Expr::UnaryLogicIntrinsic &y) -> json { return {2, Expr::unarylogicintrinsic_to_json(y)}; },
-  [](const Expr::BinaryLogicIntrinsic &y) -> json { return {3, Expr::binarylogicintrinsic_to_json(y)}; },
-  [](const Expr::Cast &y) -> json { return {4, Expr::cast_to_json(y)}; },
-  [](const Expr::Alias &y) -> json { return {5, Expr::alias_to_json(y)}; },
-  [](const Expr::Invoke &y) -> json { return {6, Expr::invoke_to_json(y)}; },
-  [](const Expr::Index &y) -> json { return {7, Expr::index_to_json(y)}; },
-  [](const Expr::Alloc &y) -> json { return {8, Expr::alloc_to_json(y)}; },
-  [](const Expr::Suspend &y) -> json { return {9, Expr::suspend_to_json(y)}; },
+  [](const Expr::NullaryIntrinsic &y) -> json { return {0, Expr::nullaryintrinsic_to_json(y)}; },
+  [](const Expr::UnaryIntrinsic &y) -> json { return {1, Expr::unaryintrinsic_to_json(y)}; },
+  [](const Expr::BinaryIntrinsic &y) -> json { return {2, Expr::binaryintrinsic_to_json(y)}; },
+  [](const Expr::Cast &y) -> json { return {3, Expr::cast_to_json(y)}; },
+  [](const Expr::Alias &y) -> json { return {4, Expr::alias_to_json(y)}; },
+  [](const Expr::Invoke &y) -> json { return {5, Expr::invoke_to_json(y)}; },
+  [](const Expr::Index &y) -> json { return {6, Expr::index_to_json(y)}; },
+  [](const Expr::Alloc &y) -> json { return {7, Expr::alloc_to_json(y)}; },
+  [](const Expr::Suspend &y) -> json { return {8, Expr::suspend_to_json(y)}; },
   [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
   }, *x);
 }
@@ -1409,13 +1579,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "9d1ba9462c2a1eafead2a196dda2a318") {
-   throw std::runtime_error("Expecting ADT hash to be 9d1ba9462c2a1eafead2a196dda2a318, but was " + hash);
+  if(hash != "dfd6e3739db4a5ac15e372627d3a3186") {
+   throw std::runtime_error("Expecting ADT hash to be dfd6e3739db4a5ac15e372627d3a3186, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"9d1ba9462c2a1eafead2a196dda2a318", x});
+  return json::array({"dfd6e3739db4a5ac15e372627d3a3186", x});
 }
 } // namespace polyregion::polyast

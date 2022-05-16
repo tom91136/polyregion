@@ -1,5 +1,6 @@
 #include "llvmc.h"
 
+#include "compiler.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
@@ -16,10 +17,10 @@
 #include "llvm/InitializePasses.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/SubtargetFeature.h"
+#include "llvm/MC/TargetRegistry.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Host.h"
-#include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
@@ -28,53 +29,46 @@
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 
+// /home/tom/polyregion/native/cmake-build-debug-clang/_deps/llvm-src/llvm-14.0.3.src/lib/Target/AMDGPU/Utils/AMDGPUBaseInfo.h
+
 #include <iostream>
 
 using namespace polyregion::backend;
 
-// FIXME this is horrible, NOT THREAD SAFE
-static std::unique_ptr<llvm::TargetMachine> LLVMCurrentMachine;
-static std::string LLVMFeaturesStr;
-static std::string LLVMCPUStr;
+llvm::Triple llvmc::defaultHostTriple() { return llvm::Triple(llvm::sys::getProcessTriple()); }
 
-static void setupTargetMachine() {
-  using namespace llvm;
-
-  std::string CPUStr = sys::getHostCPUName().str();
-
-  StringMap<bool> HostFeatures;
-  SubtargetFeatures Features;
-  if (sys::getHostCPUFeatures(HostFeatures))
-    for (auto &F : HostFeatures)
-      Features.AddFeature(F.first(), F.second);
-  std::string FeaturesStr = Features.getString();
-
-  CodeGenOpt::Level OLvl = CodeGenOpt::Aggressive;
-
-  //  std::string WantedTriple = Triple::normalize("x86_64-pc-linux-gnu"); // TODO fix this
-  std::string SysDefaultTriple = sys::getDefaultTargetTriple();
-  Triple TheTriple = Triple("nvptx64-nvidia-cuda");
-
+const llvm::Target &llvmc::targetFromTriple(const llvm::Triple &triple) {
+  llvm::Triple triple0 = triple; // XXX lookup might modify triple (!?)
   std::string targetError;
-  const Target *TheTarget = TargetRegistry::lookupTarget("", TheTriple, targetError);
+  auto TheTarget = llvm::TargetRegistry::lookupTarget("", triple0, targetError);
   if (!targetError.empty()) {
     throw std::logic_error("Target lookup failed: " + targetError);
   }
+  assert(TheTarget && "NULL target");
+  return *TheTarget;
+}
 
-  TargetOptions Options;
-  Options.AllowFPOpFusion = FPOpFusion::Fast;
-  Options.UnsafeFPMath = true;
+const llvmc::CpuInfo &llvmc::hostCpuInfo() {
+  // XXX This is cached because host CPU can never change (hopefully!) at runtime.
+  static std::optional<llvmc::CpuInfo> hostCpuInfo = {};
+  if (!hostCpuInfo) {
+    llvm::StringMap<bool> HostFeatures;
+    llvm::SubtargetFeatures Features;
+    if (llvm::sys::getHostCPUFeatures(HostFeatures))
+      for (auto &F : HostFeatures)
+        Features.AddFeature(F.first(), F.second);
+    hostCpuInfo = {.uArch = llvm::sys::getHostCPUName().str(), .features = Features.getString()};
+  }
+  assert(hostCpuInfo && "Host CPU info not valid");
+  return *hostCpuInfo;
+}
 
-  std::cout << TheTriple.getTriple() << " : " << CPUStr << " = " << FeaturesStr << std::endl;
-  std::unique_ptr<TargetMachine> TM(TheTarget->createTargetMachine( //
-      TheTriple.getTriple(),                                        //
-      CPUStr,                                                       //
-      FeaturesStr,                                                  //
-      Options, Reloc::Model::PIC_, llvm::CodeModel::Large, OLvl));
-
-  LLVMCurrentMachine = std::move(TM);
-  LLVMFeaturesStr = FeaturesStr;
-  LLVMCPUStr = CPUStr;
+std::unique_ptr<llvm::TargetMachine> llvmc::targetMachineFromTarget(const TargetInfo &info) {
+  return std::unique_ptr<llvm::TargetMachine>(info.target.createTargetMachine( //
+      info.triple.str(),                                                       //
+      info.cpu.uArch,                                                          //
+      info.cpu.features,                                                       //
+      {}, {}));
 }
 
 void llvmc::initialise() {
@@ -104,11 +98,9 @@ void llvmc::initialise() {
   initializeHardwareLoopsPass(*r);
   initializeTransformUtils(*r);
   initializeReplaceWithVeclibLegacyPass(*r);
-
-  setupTargetMachine();
 }
 
-const llvm::TargetMachine &llvmc::targetMachine() { return *LLVMCurrentMachine; }
+// const llvm::TargetMachine &llvmc::targetMachine() { return *LLVMCurrentMachine; }
 
 /// Set function attributes of function \p F based on CPU, Features, and command
 /// line flags.
@@ -130,69 +122,43 @@ static void setFunctionAttributes(llvm::StringRef CPU, llvm::StringRef Features,
     }
   }
 
-  //  if (FramePointerUsageView->getNumOccurrences() > 0 &&
-  //      !F.hasFnAttribute("frame-pointer")) {
-  //    if (getFramePointerUsage() == FramePointerKind::All)
-  //      NewAttrs.addAttribute("frame-pointer", "all");
-  //    else if (getFramePointerUsage() == FramePointerKind::NonLeaf)
-  //      NewAttrs.addAttribute("frame-pointer", "non-leaf");
-  //    else if (getFramePointerUsage() == FramePointerKind::None)
-  //      NewAttrs.addAttribute("frame-pointer", "none");
-  //  }
-  //  if (DisableTailCallsView->getNumOccurrences() > 0)
-  //    NewAttrs.addAttribute("disable-tail-calls",
-  //                          toStringRef(getDisableTailCalls()));
-  //  if (getStackRealign())
-  //    NewAttrs.addAttribute("stackrealign");
-  //
-  //  HANDLE_BOOL_ATTR(EnableUnsafeFPMathView, "unsafe-fp-math");
-  //  HANDLE_BOOL_ATTR(EnableNoInfsFPMathView, "no-infs-fp-math");
-  //  HANDLE_BOOL_ATTR(EnableNoNaNsFPMathView, "no-nans-fp-math");
-  //  HANDLE_BOOL_ATTR(EnableNoSignedZerosFPMathView, "no-signed-zeros-fp-math");
+  llvm::DenormalMode::DenormalModeKind DenormKind = llvm::DenormalMode::DenormalModeKind::IEEE;
+  NewAttrs.addAttribute("denormal-fp-math", llvm::DenormalMode(DenormKind, DenormKind).str());
+  llvm::DenormalMode::DenormalModeKind DenormKindF32 = llvm::DenormalMode::DenormalModeKind::Invalid;
+  NewAttrs.addAttribute("denormal-fp-math-f32", llvm::DenormalMode(DenormKind, DenormKind).str());
 
-  //  if (DenormalFPMathView->getNumOccurrences() > 0 &&
-  //      !F.hasFnAttribute("denormal-fp-math")) {
-  //    llvm::DenormalMode::DenormalModeKind DenormKind = getDenormalFPMath();
-  //
-  //    // FIXME: Command line flag should expose separate input/output modes.
-  //    NewAttrs.addAttribute("denormal-fp-math",
-  //                          llvm::DenormalMode(DenormKind, DenormKind).str());
-  //  }
-  //
-  //  if (DenormalFP32MathView->getNumOccurrences() > 0 &&
-  //      !F.hasFnAttribute("denormal-fp-math-f32")) {
-  //    // FIXME: Command line flag should expose separate input/output modes.
-  //    llvm::DenormalMode::DenormalModeKind DenormKind = getDenormalFP32Math();
-  //
-  //    NewAttrs.addAttribute(
-  //        "denormal-fp-math-f32",
-  //        llvm::DenormalMode(DenormKind, DenormKind).str());
-  //  }
-  //
-  //  if (TrapFuncNameView->getNumOccurrences() > 0)
-  //    for (auto &B : F)
-  //      for (auto &I : B)
-  //        if (auto *Call = dyn_cast<llvm::CallInst>(&I))
-  //          if (const auto *F = Call->getCalledFunction())
-  //            if (F->getIntrinsicID() == llvm::Intrinsic::debugtrap ||
-  //                F->getIntrinsicID() == llvm::Intrinsic::trap)
-  //              Call->addAttribute(
-  //                  llvm::AttributeList::FunctionIndex,
-  //                  llvm::Attribute::get(Ctx, "trap-func-name", getTrapFuncName()));
+  NewAttrs.addAttribute("unsafe-fp-math", "true");
+  NewAttrs.addAttribute("no-infs-fp-math", "true");
+  NewAttrs.addAttribute("no-signed-zeros-fp-math", "true");
+  NewAttrs.addAttribute("amdgpu-early-inline-all", "true");
+  NewAttrs.addAttribute("amdgpu-function-calls", "true");
 
   // Let NewAttrs override Attrs.
-  F.setAttributes(Attrs.addAttributesAtIndex(Ctx, llvm::AttributeList::FunctionIndex, NewAttrs));
+  F.setAttributes(Attrs.addFnAttributes(Ctx, NewAttrs));
 }
 
-polyregion::compiler::Compilation llvmc::compileModule(bool emitDisassembly,            //
-                                                       std::unique_ptr<llvm::Module> M, //
-                                                       llvm::LLVMContext &Context) {
+polyregion::compiler::Compilation llvmc::compileModule(const TargetInfo &info, bool emitDisassembly,
+                                                       std::unique_ptr<llvm::Module> M, llvm::LLVMContext &Context) {
   auto start = compiler::nowMono();
 
-  M->setDataLayout(LLVMCurrentMachine->createDataLayout());
+  llvm::TargetOptions Options;
+  Options.AllowFPOpFusion = llvm::FPOpFusion::Fast;
+  Options.UnsafeFPMath = true;
+
+  llvm::CodeGenOpt::Level OLvl = llvm::CodeGenOpt::Aggressive;
+
+  std::unique_ptr<llvm::TargetMachine> TM(info.target.createTargetMachine( //
+      info.triple.str(),                                                   //
+      info.cpu.uArch,                                                      //
+      info.cpu.features,                                                   //
+      Options, llvm::Reloc::Model::PIC_, llvm::CodeModel::Large, OLvl));
+
+  if (M->getDataLayout().isDefault()) {
+    M->setDataLayout(TM->createDataLayout());
+  }
 
   for (llvm::Function &F : M->functions())
-    setFunctionAttributes(LLVMCPUStr, LLVMFeaturesStr, F);
+    setFunctionAttributes(info.cpu.uArch, info.cpu.features, F);
 
   // AddOptimizationPasses
   llvm::PassManagerBuilder B;
@@ -211,21 +177,20 @@ polyregion::compiler::Compilation llvmc::compileModule(bool emitDisassembly,    
         // XXX we have no rtti here so no dynamic cast
         auto &LLVMTM =
             static_cast<llvm::LLVMTargetMachine &>( // NOLINT(cppcoreguidelines-pro-type-static-cast-downcast)
-                *LLVMCurrentMachine);
+                *TM);
         auto *MMIWP = new llvm::MachineModuleInfoWrapperPass(&LLVMTM); // pass manager takes owner of this
         PM.add(MMIWP);
-        PM.add(createTargetTransformInfoWrapperPass(LLVMCurrentMachine->getTargetIRAnalysis()));
+        PM.add(createTargetTransformInfoWrapperPass(TM->getTargetIRAnalysis()));
         llvm::TargetPassConfig *PassConfig = LLVMTM.createPassConfig(PM);
         // Set PassConfig options provided by TargetMachine.
         PassConfig->setDisableVerify(true);
         PM.add(PassConfig);
-
         // PM done
 
         llvm::legacy::FunctionPassManager FNP(&m);
-        FNP.add(createTargetTransformInfoWrapperPass(LLVMCurrentMachine->getTargetIRAnalysis()));
+        FNP.add(createTargetTransformInfoWrapperPass(TM->getTargetIRAnalysis()));
 
-        LLVMCurrentMachine->adjustPassManager(B);
+        TM->adjustPassManager(B);
         B.populateFunctionPassManager(FNP);
         B.populateModulePassManager(PM);
 
@@ -254,7 +219,7 @@ polyregion::compiler::Compilation llvmc::compileModule(bool emitDisassembly,    
   llvm::SmallVector<char, 0> objBuffer;
   llvm::raw_svector_ostream objStream(objBuffer);
   doCodegen(*llvm::CloneModule(*M), [&](auto &tm, auto &pm, auto &ctx) {
-//    tm.addAsmPrinter(pm, objStream, nullptr, llvm::CodeGenFileType::CGFT_ObjectFile, ctx);
+    //    tm.addAsmPrinter(pm, objStream, nullptr, llvm::CodeGenFileType::CGFT_ObjectFile, ctx);
   });
 
   //  for (auto &&f : MMIWP->getMMI().getModule()->functions()) {

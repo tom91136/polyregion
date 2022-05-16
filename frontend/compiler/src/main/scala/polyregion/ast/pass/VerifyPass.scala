@@ -52,13 +52,16 @@ object VerifyPass {
 
                             val apTable = tpeVars.zip(args).toMap
 
+                            println(apTable.toString + " " + sdef.repr + " " + s.repr)
 
-                            println(apTable.toString + " " + sdef.repr + " " + s.repr) 
-
-                            sdef.members.map(x =>  x.mapType{
-                              case p.Type.Var(name) => apTable(name)
-                              case x => x
-                            } ).filter(_ == n) match {
+                            sdef.members
+                              .map(x =>
+                                x.mapType {
+                                  case p.Type.Var(name) => apTable(name)
+                                  case x                => x
+                                }
+                              )
+                              .filter(_ == n) match {
                               case _ :: Nil => acc
                               case Nil => acc ~ s"Struct type ${sdef.repr} does not contain member ${n} in `${t.repr}`"
                               case _ => acc ~ s"Struct type ${sdef.repr} contains multiple members of $n in `${t.repr}`"
@@ -83,11 +86,9 @@ object VerifyPass {
           }
 
           def validateExpr(c: Ctx, e: p.Expr): Ctx = e match {
+            case p.Expr.NullaryIntrinsic(kind, rtn)    => c
             case p.Expr.UnaryIntrinsic(lhs, kind, rtn) => validateTerm(c, lhs)
             case p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn) =>
-              (validateTerm(_: Ctx, lhs)).andThen(validateTerm(_, rhs))(c)
-            case p.Expr.UnaryLogicIntrinsic(lhs, kind) => validateTerm(c, lhs)
-            case p.Expr.BinaryLogicIntrinsic(lhs, rhs, kind) =>
               (validateTerm(_: Ctx, lhs)).andThen(validateTerm(_, rhs))(c)
             case p.Expr.Cast(from, as) => validateTerm(c, from)
             case p.Expr.Alias(ref)     => validateTerm(c, ref)

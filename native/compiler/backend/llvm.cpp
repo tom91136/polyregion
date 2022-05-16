@@ -6,9 +6,15 @@
 #include "utils.hpp"
 #include "variants.hpp"
 
+#include "Utils/AMDGPUBaseInfo.h"
+
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/IntrinsicsAMDGPU.h"
+#include "llvm/IR/IntrinsicsNVPTX.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/Support/Host.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Scalar.h"
@@ -43,7 +49,7 @@ static llvm::Value *load(llvm::IRBuilder<> &B, llvm::Value *rhs) {
   return B.CreateLoad(rhs->getType()->getPointerElementType(), rhs);
 }
 
-llvm::Value *LLVMAstTransformer::invokeMalloc(llvm::Function *parent, llvm::Value *size) {
+llvm::Value *LLVM::AstTransformer::invokeMalloc(llvm::Function *parent, llvm::Value *size) {
   return B.CreateCall(mkExternalFn(parent, Type::Array(Type::Byte()), "malloc", {Type::Long()}), size);
 }
 
@@ -54,18 +60,18 @@ static bool isUnsigned(const Type::Any &tpe) {
 static constexpr int64_t nIntMin(uint64_t bits) { return -(int64_t(1) << (bits - 1)); }
 static constexpr int64_t nIntMax(uint64_t bits) { return (int64_t(1) << (bits - 1)) - 1; }
 
-Pair<llvm::StructType *, LLVMAstTransformer::StructMemberTable> LLVMAstTransformer::mkStruct(const StructDef &def) {
+Pair<llvm::StructType *, LLVM::AstTransformer::StructMemberTable> LLVM::AstTransformer::mkStruct(const StructDef &def) {
   std::vector<llvm::Type *> types(def.members.size());
   std::transform(def.members.begin(), def.members.end(), types.begin(),
                  [&](const polyast::Named &n) { return mkTpe(n.tpe); });
-  LLVMAstTransformer::StructMemberTable table;
+  LLVM::AstTransformer::StructMemberTable table;
   for (size_t i = 0; i < def.members.size(); ++i) {
     table[def.members[i].symbol] = i;
   }
   return {llvm::StructType::create(C, types, qualified(def.name)), table};
 }
 
-llvm::Type *LLVMAstTransformer::mkTpe(const Type::Any &tpe) {                                     //
+llvm::Type *LLVM::AstTransformer::mkTpe(const Type::Any &tpe) {                                   //
   return variants::total(                                                                         //
       *tpe,                                                                                       //
       [&](const Type::Float &x) -> llvm::Type * { return llvm::Type::getFloatTy(C); },            //
@@ -102,7 +108,7 @@ llvm::Type *LLVMAstTransformer::mkTpe(const Type::Any &tpe) {                   
   );
 }
 
-llvm::Value *LLVMAstTransformer::findStackVar(const Named &named) {
+llvm::Value *LLVM::AstTransformer::findStackVar(const Named &named) {
   //  check the LUT table for known variables defined by var or brought in scope by parameters
   if (auto x = polyregion::get_opt(stackVarPtrs, named.symbol); x) {
     auto [tpe, value] = *x;
@@ -122,7 +128,7 @@ llvm::Value *LLVMAstTransformer::findStackVar(const Named &named) {
   }
 }
 
-llvm::Value *LLVMAstTransformer::mkSelectPtr(const Term::Select &select) {
+llvm::Value *LLVM::AstTransformer::mkSelectPtr(const Term::Select &select) {
 
   auto fail = [&]() { return " (part of the select expression " + to_string(select) + ")"; };
 
@@ -168,7 +174,7 @@ llvm::Value *LLVMAstTransformer::mkSelectPtr(const Term::Select &select) {
   }
 }
 
-llvm::Value *LLVMAstTransformer::mkTermVal(const Term::Any &ref) {
+llvm::Value *LLVM::AstTransformer::mkTermVal(const Term::Any &ref) {
   using llvm::ConstantFP;
   using llvm::ConstantInt;
   return variants::total(
@@ -186,9 +192,9 @@ llvm::Value *LLVMAstTransformer::mkTermVal(const Term::Any &ref) {
       [&](const Term::StringConst &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); });
 }
 
-llvm::Function *LLVMAstTransformer::mkExternalFn(llvm::Function *parent, const Type::Any &rtn, const std::string &name,
-                                                 const std::vector<Type::Any> &args) {
-  const Signature s(Sym({name}),{} ,{}, args, rtn);
+llvm::Function *LLVM::AstTransformer::mkExternalFn(llvm::Function *parent, const Type::Any &rtn,
+                                                   const std::string &name, const std::vector<Type::Any> &args) {
+  const Signature s(Sym({name}), {}, {}, args, rtn);
   if (functions.find(s) == functions.end()) {
     auto llvmArgs = map_vec<Type::Any, llvm::Type *>(args, [&](auto t) { return mkTpe(t); });
     auto ft = llvm::FunctionType::get(mkTpe(rtn), llvmArgs, false);
@@ -198,7 +204,7 @@ llvm::Function *LLVMAstTransformer::mkExternalFn(llvm::Function *parent, const T
   return functions[s];
 }
 
-llvm::Value *LLVMAstTransformer::mkExprVal(const Expr::Any &expr, llvm::Function *fn, const std::string &key) {
+llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Function *fn, const std::string &key) {
 
   using ValPtr = llvm::Value *;
   namespace Intr = llvm::Intrinsic;
@@ -254,25 +260,30 @@ llvm::Value *LLVMAstTransformer::mkExprVal(const Expr::Any &expr, llvm::Function
     });
   };
 
-  const auto externUnaryCall = [&](const std::string &name, const Type::Any &tpe, const Term::Any &arg) {
+  const auto ext1 = [&](const std::string &name, const Type::Any &tpe, const Term::Any &arg) -> ValPtr {
     return B.CreateCall(mkExternalFn(fn, tpe, name, {tpe}), mkTermVal(arg));
   };
 
   const auto externBinaryCall = [&](const std::string &name, const Type::Any &tpe, //
-                                    const Term::Any &lhs, const Term::Any &rhs) {
+                                    const Term::Any &lhs, const Term::Any &rhs) -> ValPtr {
     return B.CreateCall(mkExternalFn(fn, tpe, name, {tpe, tpe}), {mkTermVal(lhs), mkTermVal(rhs)});
   };
 
-  const auto unaryIntrinsic = [&](llvm::Intrinsic::ID id, const Type::Any &overload, const Term::Any &arg) {
-    auto callee = llvm::Intrinsic::getDeclaration(fn->getParent(), id, mkTpe(overload));
+  const auto intr0 = [&](Intr::ID id) -> ValPtr {
+    auto callee = Intr::getDeclaration(fn->getParent(), id, {});
+    return B.CreateCall(callee);
+  };
+
+  const auto intr1 = [&](Intr::ID id, const Type::Any &overload, const Term::Any &arg) -> ValPtr {
+    auto callee = Intr::getDeclaration(fn->getParent(), id, mkTpe(overload));
     return B.CreateCall(callee, mkTermVal(arg));
   };
 
-  const auto binaryIntrinsic = [&](llvm::Intrinsic::ID id, const Type::Any &overload, //
-                                   const Term::Any &lhs, const Term::Any &rhs) {
+  const auto intr2 = [&](Intr::ID id, const Type::Any &overload, //
+                         const Term::Any &lhs, const Term::Any &rhs) -> ValPtr {
     // XXX the overload type here is about the overloading of intrinsic names, not about the parameter types
     // i.e. f32 is for foo.f32(float %a, float %b, float %c)
-    auto callee = llvm::Intrinsic::getDeclaration(fn->getParent(), id, mkTpe(overload));
+    auto callee = Intr::getDeclaration(fn->getParent(), id, mkTpe(overload));
     return B.CreateCall(callee, {mkTermVal(lhs), mkTermVal(rhs)});
   };
 
@@ -282,19 +293,19 @@ llvm::Value *LLVMAstTransformer::mkExprVal(const Expr::Any &expr, llvm::Function
         auto tpe = x.rtn;
         auto arg = x.lhs;
         return variants::total(
-            *x.kind,                                                                                        //
-            [&](const UnaryIntrinsicKind::Sin &) -> ValPtr { return unaryIntrinsic(Intr::sin, tpe, arg); }, //
-            [&](const UnaryIntrinsicKind::Cos &) -> ValPtr { return unaryIntrinsic(Intr::cos, tpe, arg); }, //
-            [&](const UnaryIntrinsicKind::Tan &) -> ValPtr { return externUnaryCall("tan", tpe, arg); },    //
+            *x.kind,                                                                     //
+            [&](const UnaryIntrinsicKind::Sin &) { return intr1(Intr::sin, tpe, arg); }, //
+            [&](const UnaryIntrinsicKind::Cos &) { return intr1(Intr::cos, tpe, arg); }, //
+            [&](const UnaryIntrinsicKind::Tan &) { return ext1("tan", tpe, arg); },      //
 
-            [&](const UnaryIntrinsicKind::Asin &) -> ValPtr { return externUnaryCall("asin", tpe, arg); }, //
-            [&](const UnaryIntrinsicKind::Acos &) -> ValPtr { return externUnaryCall("acos", tpe, arg); }, //
-            [&](const UnaryIntrinsicKind::Atan &) -> ValPtr { return externUnaryCall("atan", tpe, arg); }, //
-            [&](const UnaryIntrinsicKind::Sinh &) -> ValPtr { return externUnaryCall("sinh", tpe, arg); }, //
-            [&](const UnaryIntrinsicKind::Cosh &) -> ValPtr { return externUnaryCall("cosh", tpe, arg); }, //
-            [&](const UnaryIntrinsicKind::Tanh &) -> ValPtr { return externUnaryCall("tanh", tpe, arg); }, //
+            [&](const UnaryIntrinsicKind::Asin &) { return ext1("asin", tpe, arg); }, //
+            [&](const UnaryIntrinsicKind::Acos &) { return ext1("acos", tpe, arg); }, //
+            [&](const UnaryIntrinsicKind::Atan &) { return ext1("atan", tpe, arg); }, //
+            [&](const UnaryIntrinsicKind::Sinh &) { return ext1("sinh", tpe, arg); }, //
+            [&](const UnaryIntrinsicKind::Cosh &) { return ext1("cosh", tpe, arg); }, //
+            [&](const UnaryIntrinsicKind::Tanh &) { return ext1("tanh", tpe, arg); }, //
 
-            [&](const UnaryIntrinsicKind::Signum &) -> ValPtr {
+            [&](const UnaryIntrinsicKind::Signum &) {
               return unaryNumOp(
                   arg, tpe, //
                   [&](auto x) {
@@ -311,44 +322,212 @@ llvm::Value *LLVMAstTransformer::mkExprVal(const Expr::Any &expr, llvm::Function
                       magnitude = Term::DoubleConst(1); //
                     else
                       error(__FILE_NAME__, __LINE__);
-                    return B.CreateSelect(B.CreateLogicalOr(nan, zero), x,
-                                          binaryIntrinsic(Intr::copysign, tpe, magnitude, arg));
+                    return B.CreateSelect(B.CreateLogicalOr(nan, zero), x, intr2(Intr::copysign, tpe, magnitude, arg));
                   });
             }, //
-            [&](const UnaryIntrinsicKind::Abs &) -> ValPtr {
+            [&](const UnaryIntrinsicKind::Abs &) {
               return unaryNumOp(
                   arg, tpe, //
-                  [&](auto x) { return unaryIntrinsic(Intr::abs, tpe, arg); },
-                  [&](auto x) { return unaryIntrinsic(Intr::fabs, tpe, arg); });
-            },                                                                                                  //
-            [&](const UnaryIntrinsicKind::Round &) -> ValPtr { return unaryIntrinsic(Intr::round, tpe, arg); }, //
-            [&](const UnaryIntrinsicKind::Ceil &) -> ValPtr { return unaryIntrinsic(Intr::ceil, tpe, arg); },   //
-            [&](const UnaryIntrinsicKind::Floor &) -> ValPtr { return unaryIntrinsic(Intr::floor, tpe, arg); }, //
-            [&](const UnaryIntrinsicKind::Rint &) -> ValPtr { return unaryIntrinsic(Intr::rint, tpe, arg); },   //
+                  [&](auto x) { return intr1(Intr::abs, tpe, arg); },
+                  [&](auto x) { return intr1(Intr::fabs, tpe, arg); });
+            },                                                                               //
+            [&](const UnaryIntrinsicKind::Round &) { return intr1(Intr::round, tpe, arg); }, //
+            [&](const UnaryIntrinsicKind::Ceil &) { return intr1(Intr::ceil, tpe, arg); },   //
+            [&](const UnaryIntrinsicKind::Floor &) { return intr1(Intr::floor, tpe, arg); }, //
+            [&](const UnaryIntrinsicKind::Rint &) { return intr1(Intr::rint, tpe, arg); },   //
 
-            [&](const UnaryIntrinsicKind::Sqrt &) -> ValPtr { return unaryIntrinsic(Intr::sqrt, tpe, arg); },   //
-            [&](const UnaryIntrinsicKind::Cbrt &) -> ValPtr { return externUnaryCall("cbrt", tpe, arg); },      //
-            [&](const UnaryIntrinsicKind::Exp &) -> ValPtr { return unaryIntrinsic(Intr::exp, tpe, arg); },     //
-            [&](const UnaryIntrinsicKind::Expm1 &) -> ValPtr { return externUnaryCall("expm1", tpe, arg); },    //
-            [&](const UnaryIntrinsicKind::Log &) -> ValPtr { return unaryIntrinsic(Intr::log, tpe, arg); },     //
-            [&](const UnaryIntrinsicKind::Log1p &) -> ValPtr { return externUnaryCall("log1p", tpe, arg); },    //
-            [&](const UnaryIntrinsicKind::Log10 &) -> ValPtr { return unaryIntrinsic(Intr::log10, tpe, arg); }, //
+            [&](const UnaryIntrinsicKind::Sqrt &) { return intr1(Intr::sqrt, tpe, arg); },   //
+            [&](const UnaryIntrinsicKind::Cbrt &) { return ext1("cbrt", tpe, arg); },        //
+            [&](const UnaryIntrinsicKind::Exp &) { return intr1(Intr::exp, tpe, arg); },     //
+            [&](const UnaryIntrinsicKind::Expm1 &) { return ext1("expm1", tpe, arg); },      //
+            [&](const UnaryIntrinsicKind::Log &) { return intr1(Intr::log, tpe, arg); },     //
+            [&](const UnaryIntrinsicKind::Log1p &) { return ext1("log1p", tpe, arg); },      //
+            [&](const UnaryIntrinsicKind::Log10 &) { return intr1(Intr::log10, tpe, arg); }, //
 
-            [&](const UnaryIntrinsicKind::BNot &) -> ValPtr {
+            [&](const UnaryIntrinsicKind::BNot &) {
               return unaryExpr(arg, tpe, [&](auto x) { return B.CreateNot(x); });
             },
-            [&](const UnaryIntrinsicKind::Pos &) -> ValPtr {
+            [&](const UnaryIntrinsicKind::Pos &) {
               return unaryNumOp(
                   arg, tpe,                  //
                   [&](auto x) { return x; }, //
                   [&](auto x) { return x; });
             },
-            [&](const UnaryIntrinsicKind::Neg &) -> ValPtr {
+            [&](const UnaryIntrinsicKind::Neg &) {
               return unaryNumOp(
                   arg, tpe,                               //
                   [&](auto x) { return B.CreateNeg(x); }, //
                   [&](auto x) { return B.CreateFNeg(x); });
-            });
+            },
+            [&](const UnaryIntrinsicKind::LogicNot &) { return B.CreateNot(mkTermVal(x.lhs), key); });
+      },
+      [&](const Expr::NullaryIntrinsic &x) -> ValPtr {
+        switch (options.target) {
+          case Target::x86_64:
+          case Target::AArch64: return undefined(__FILE_NAME__, __LINE__);
+          case Target::NVPTX64: {
+            // threadId  @llvm.nvvm.read.ptx.sreg.tid.*
+            // blockIdx  @llvm.nvvm.read.ptx.sreg.ctaid.*
+            // blockDim  @llvm.nvvm.read.ptx.sreg.ntid.*
+            // gridDim   @llvm.nvvm.read.ptx.sreg.nctaid.*
+            auto globalSize = [&](Intr::ID nctaid, Intr::ID ntid) -> ValPtr {
+              return B.CreateMul(intr0(nctaid), intr0(ntid));
+            };
+            auto globalId = [&](Intr::ID ctaid, Intr::ID ntid, Intr::ID tid) -> ValPtr {
+              return B.CreateAdd(B.CreateMul(intr0(ctaid), intr0(ntid)), intr0(tid));
+            };
+            return variants::total(
+                *x.kind, //
+                [&](const NullaryIntrinsicKind::GpuGlobalIdxX &) {
+                  return globalId(Intr::nvvm_read_ptx_sreg_ctaid_x, Intr::nvvm_read_ptx_sreg_ntid_x,
+                                  Intr::nvvm_read_ptx_sreg_tid_x);
+                },
+                [&](const NullaryIntrinsicKind::GpuGlobalIdxY &) {
+                  return globalId(Intr::nvvm_read_ptx_sreg_ctaid_y, Intr::nvvm_read_ptx_sreg_ntid_y,
+                                  Intr::nvvm_read_ptx_sreg_tid_y);
+                },
+                [&](const NullaryIntrinsicKind::GpuGlobalIdxZ &) {
+                  return globalId(Intr::nvvm_read_ptx_sreg_ctaid_z, Intr::nvvm_read_ptx_sreg_ntid_z,
+                                  Intr::nvvm_read_ptx_sreg_tid_z);
+                },
+                [&](const NullaryIntrinsicKind::GpuGlobalSizeX &) {
+                  return globalSize(Intr::nvvm_read_ptx_sreg_nctaid_x, Intr::nvvm_read_ptx_sreg_ntid_x);
+                },
+                [&](const NullaryIntrinsicKind::GpuGlobalSizeY &) {
+                  return globalSize(Intr::nvvm_read_ptx_sreg_nctaid_y, Intr::nvvm_read_ptx_sreg_ntid_y);
+                },
+                [&](const NullaryIntrinsicKind::GpuGlobalSizeZ &) {
+                  return globalSize(Intr::nvvm_read_ptx_sreg_nctaid_z, Intr::nvvm_read_ptx_sreg_ntid_z);
+                },
+                [&](const NullaryIntrinsicKind::GpuGroupIdxX &) { return intr0(Intr::nvvm_read_ptx_sreg_ctaid_x); },
+                [&](const NullaryIntrinsicKind::GpuGroupIdxY &) { return intr0(Intr::nvvm_read_ptx_sreg_ctaid_y); },
+                [&](const NullaryIntrinsicKind::GpuGroupIdxZ &) { return intr0(Intr::nvvm_read_ptx_sreg_ctaid_z); },
+                [&](const NullaryIntrinsicKind::GpuGroupSizeX &) { return intr0(Intr::nvvm_read_ptx_sreg_nctaid_x); },
+                [&](const NullaryIntrinsicKind::GpuGroupSizeY &) { return intr0(Intr::nvvm_read_ptx_sreg_nctaid_y); },
+                [&](const NullaryIntrinsicKind::GpuGroupSizeZ &) { return intr0(Intr::nvvm_read_ptx_sreg_nctaid_z); },
+                [&](const NullaryIntrinsicKind::GpuLocalIdxX &) { return intr0(Intr::nvvm_read_ptx_sreg_ntid_x); },
+                [&](const NullaryIntrinsicKind::GpuLocalIdxY &) { return intr0(Intr::nvvm_read_ptx_sreg_ntid_y); },
+                [&](const NullaryIntrinsicKind::GpuLocalIdxZ &) { return intr0(Intr::nvvm_read_ptx_sreg_ntid_z); },
+                [&](const NullaryIntrinsicKind::GpuLocalSizeX &) { return intr0(Intr::nvvm_read_ptx_sreg_tid_x); },
+                [&](const NullaryIntrinsicKind::GpuLocalSizeY &) { return intr0(Intr::nvvm_read_ptx_sreg_tid_y); },
+                [&](const NullaryIntrinsicKind::GpuLocalSizeZ &) { return intr0(Intr::nvvm_read_ptx_sreg_tid_z); },
+                [&](const NullaryIntrinsicKind::GpuGroupBarrier &) { return intr0(Intr::nvvm_barrier0); },
+                [&](const NullaryIntrinsicKind::GpuGroupFence &) { return intr0(Intr::nvvm_membar_cta); });
+          }
+          case Target::AMDGCN:
+
+            // # dispatch ptr (r600)
+            // ?         uint16_t
+            // localDim0 uint16_t
+            // localDim1 uint16_t
+            // localDim2 uint16_t
+            // globalDim0 uint32_t
+            // globalDim1 uint32_t
+            // globalDim2 uint32_t
+
+            // # implicit args
+            //            uint32_t
+            // globalDim0 uint32_t
+            // globalDim1 uint32_t
+            // globalDim2 uint32_t
+            // localDim0 uint16_t
+            // localDim1 uint16_t
+            // localDim2 uint16_t
+            // rem0 uint16_t
+            // rem1 uint16_t
+            // rem2 uint16_t
+            // offset0 uint64_t
+            // offset1 uint64_t
+            // offset2 uint64_t
+            // workDim? uint64_t
+
+            // HSA Sys Arch 1.2:  2.9.6 Kernel Dispatch Packet format:
+            //  15:0    header Packet header, see 2.9.1 Packet header (on page 25).
+            //  17:16   dimensions Number of dimensions specified in gridSize. Valid values are 1, 2, or 3.
+            //  31:18   Reserved, must be 0.
+            //  47:32   workgroup_size_x x dimension of work-group (measured in work-items).
+            //  63:48   workgroup_size_y y dimension of work-group (measured in work-items).
+            //  79:64   workgroup_size_z z dimension of work-group (measured in work-items).
+            //  95:80   Reserved, must be 0.
+            //  127:96  grid_size_x x dimension of grid (measured in work-items).
+            //  159:128 grid_size_y y dimension of grid (measured in work-items).
+            //  191:160 grid_size_z z dimension of grid (measured in work-items).
+            //  223:192 private_segment_size_bytes Total size in bytes of private memory allocation request (per
+            //          work-item).
+            //  255:224 group_segment_size_bytes Total size in bytes of group memory allocation request (per
+            //          work-group).
+            //  319:256 kernel_object Handle for an object in memory that includes an
+            //          implementation-defined executable ISA image for the kernel.
+            //  383:320 kernarg_address Address of memory containing kernel arguments.
+            //  447:384 Reserved, must be 0. 511:448 completion_signal HSA signaling object handle used to indicate
+            //          completion of the job
+
+            // see llvm/libclc/amdgcn-amdhsa/lib/workitem/get_global_size.cl
+            auto grid_size_u32 = [&](size_t dim) -> ValPtr {
+              if (dim >= 3) throw std::logic_error("Dim >= 3");
+              auto i32Ty = llvm::Type::getInt32Ty(C);
+              auto i32ptr = B.CreatePointerCast(intr0(Intr::amdgcn_dispatch_ptr), i32Ty->getPointerTo());
+              // 127:96   grid_size_x;  (32*3+(0*32)==96)
+              // 159:128  grid_size_y;  (32*3+(1*32)==128)
+              // 191:160  grid_size_z;  (32*3+(2*32)==160)
+              return load(B, B.CreateInBoundsGEP(i32Ty, i32ptr, llvm::ConstantInt::get(i32Ty, 3 + dim)));
+            };
+
+            // see llvm/libclc/amdgcn-amdhsa/lib/workitem/get_local_size.cl
+            auto group_size_u32 = [&](size_t dim) -> ValPtr {
+              if (dim >= 3) throw std::logic_error("Dim >= 3");
+              auto i16Ty = llvm::Type::getInt16Ty(C);
+              auto i16ptr = B.CreatePointerCast(intr0(Intr::amdgcn_dispatch_ptr), i16Ty->getPointerTo());
+              // 47:32   workgroup_size_x (16*2+(0*16)==32)
+              // 63:48   workgroup_size_y (16*2+(1*16)==48)
+              // 79:64   workgroup_size_z (16*2+(2*16)==64)
+              auto size = B.CreateInBoundsGEP(i16Ty, i16ptr, llvm::ConstantInt::get(i16Ty, 2 + dim));
+              return B.CreateIntCast(load(B, size), llvm::Type::getInt32Ty(C), false);
+            };
+
+            auto global_size = [&](size_t dim) -> ValPtr {
+              return B.CreateMul(grid_size_u32(dim), group_size_u32(dim));
+            };
+
+            // see llvm/libclc/amdgcn-amdhsa/lib/workitem/get_num_groups.cl
+            auto group_id_u32 = [&](size_t dim) -> ValPtr {
+              auto n = grid_size_u32(dim);
+              auto d = group_size_u32(dim);
+              auto q = B.CreateUDiv(grid_size_u32(dim), group_size_u32(dim));               // q = n / d
+              auto rem = B.CreateZExt(B.CreateICmpUGT(n, B.CreateMul(q, d)), n->getType()); // ( (uint32t) (n > q*d) )
+              return B.CreateAdd(q, rem);                                                   // q + rem
+            };
+
+            return variants::total(
+                *x.kind, //
+                [&](const NullaryIntrinsicKind::GpuGlobalIdxX &) { return group_id_u32(0); },
+                [&](const NullaryIntrinsicKind::GpuGlobalIdxY &) { return group_id_u32(1); },
+                [&](const NullaryIntrinsicKind::GpuGlobalIdxZ &) { return group_id_u32(2); },
+                [&](const NullaryIntrinsicKind::GpuGlobalSizeX &) { return global_size(0); },
+                [&](const NullaryIntrinsicKind::GpuGlobalSizeY &) { return global_size(1); },
+                [&](const NullaryIntrinsicKind::GpuGlobalSizeZ &) { return global_size(2); },
+                [&](const NullaryIntrinsicKind::GpuGroupIdxX &) { return intr0(Intr::amdgcn_workgroup_id_x); },
+                [&](const NullaryIntrinsicKind::GpuGroupIdxY &) { return intr0(Intr::amdgcn_workgroup_id_y); },
+                [&](const NullaryIntrinsicKind::GpuGroupIdxZ &) { return intr0(Intr::amdgcn_workgroup_id_z); },
+                [&](const NullaryIntrinsicKind::GpuGroupSizeX &) { return grid_size_u32(0); },
+                [&](const NullaryIntrinsicKind::GpuGroupSizeY &) { return grid_size_u32(1); },
+                [&](const NullaryIntrinsicKind::GpuGroupSizeZ &) { return grid_size_u32(2); },
+                [&](const NullaryIntrinsicKind::GpuLocalIdxX &) { return intr0(Intr::amdgcn_workitem_id_x); },
+                [&](const NullaryIntrinsicKind::GpuLocalIdxY &) { return intr0(Intr::amdgcn_workitem_id_y); },
+                [&](const NullaryIntrinsicKind::GpuLocalIdxZ &) { return intr0(Intr::amdgcn_workitem_id_z); },
+                [&](const NullaryIntrinsicKind::GpuLocalSizeX &) { return group_size_u32(0); },
+                [&](const NullaryIntrinsicKind::GpuLocalSizeY &) { return group_size_u32(1); },
+                [&](const NullaryIntrinsicKind::GpuLocalSizeZ &) { return group_size_u32(2); },
+
+                [&](const NullaryIntrinsicKind::GpuGroupBarrier &) -> ValPtr {
+                  // work_group_barrier (__memory_scope, 1, 1)
+                  return undefined(__FILE__, __LINE__);
+                },
+                [&](const NullaryIntrinsicKind::GpuGroupFence &) -> ValPtr {
+                  // atomic_work_item_fence(0, 5, 1)
+                  return undefined(__FILE__, __LINE__);
+                });
+        }
       },
       [&](const Expr::BinaryIntrinsic &x) {
         return variants::total(
@@ -384,7 +563,7 @@ llvm::Value *LLVMAstTransformer::mkExprVal(const Expr::Any &expr, llvm::Function
                   [&](auto l, auto r) { return B.CreateFRem(l, r, key); });
             },
             [&](const BinaryIntrinsicKind::Pow &) -> ValPtr {
-              return binaryIntrinsic(Intr::pow, x.rtn, x.lhs, x.rhs); //
+              return intr2(Intr::pow, x.rtn, x.lhs, x.rhs); //
             },
 
             [&](const BinaryIntrinsicKind::Min &) -> ValPtr {
@@ -406,7 +585,6 @@ llvm::Value *LLVMAstTransformer::mkExprVal(const Expr::Any &expr, llvm::Function
             [&](const BinaryIntrinsicKind::Hypot &) -> ValPtr {
               return externBinaryCall("hypot", x.rtn, x.lhs, x.rhs);
             }, //
-
             [&](const BinaryIntrinsicKind::BAnd &) -> ValPtr {
               return binaryExpr(x.lhs, x.rhs, x.rtn, [&](auto l, auto r) { return B.CreateAnd(l, r); });
             },
@@ -424,67 +602,53 @@ llvm::Value *LLVMAstTransformer::mkExprVal(const Expr::Any &expr, llvm::Function
             },
             [&](const BinaryIntrinsicKind::BZSR &) -> ValPtr {
               return binaryExpr(x.lhs, x.rhs, x.rtn, [&](auto l, auto r) { return B.CreateLShr(l, r); });
-            } //
-        );
-      },
-      [&](const Expr::UnaryLogicIntrinsic &x) -> ValPtr {
-        return variants::total( //
-            *x.kind,            //
-            [&](const UnaryLogicIntrinsicKind::Not &) -> ValPtr { return B.CreateNot(mkTermVal(x.lhs), key); });
-      },
-      [&](const Expr::BinaryLogicIntrinsic &x) -> ValPtr {
-        auto lhs = mkTermVal(x.lhs);
-        auto rhs = mkTermVal(x.rhs);
-
-        if (tpe(x.lhs) != tpe(x.rhs)) {
-          throw std::logic_error("rhs type" + to_string(tpe(x.lhs)) + " != rhs type" + to_string(tpe(x.rhs)) +
-                                 " for binary logic expr:" + to_string(x));
-        }
-
-        return variants::total(
-            *x.kind, //
-            [&](const BinaryLogicIntrinsicKind::Eq &) -> ValPtr {
+            },
+            [&](const BinaryIntrinsicKind::LogicEq &) -> ValPtr {
               return binaryNumOp(
-                  x.lhs, x.rhs, tpe(x.lhs),                                 //
-                  [&](auto l, auto r) { return B.CreateICmpEQ(lhs, rhs); }, //
-                  [&](auto l, auto r) { return B.CreateFCmpOEQ(lhs, rhs); } //
+                  x.lhs, x.rhs, tpe(x.lhs),                             //
+                  [&](auto l, auto r) { return B.CreateICmpEQ(l, r); }, //
+                  [&](auto l, auto r) { return B.CreateFCmpOEQ(l, r); } //
               );
             },
-            [&](const BinaryLogicIntrinsicKind::Neq &) -> ValPtr {
+            [&](const BinaryIntrinsicKind::LogicNeq &) -> ValPtr {
               return binaryNumOp(
-                  x.lhs, x.rhs, tpe(x.lhs),                                 //
-                  [&](auto l, auto r) { return B.CreateICmpNE(lhs, rhs); }, //
-                  [&](auto l, auto r) { return B.CreateFCmpONE(lhs, rhs); } //
+                  x.lhs, x.rhs, tpe(x.lhs),                             //
+                  [&](auto l, auto r) { return B.CreateICmpNE(l, r); }, //
+                  [&](auto l, auto r) { return B.CreateFCmpONE(l, r); } //
               );
             },
-            [&](const BinaryLogicIntrinsicKind::And &) -> ValPtr { return B.CreateLogicalAnd(lhs, rhs); },
-            [&](const BinaryLogicIntrinsicKind::Or &) -> ValPtr { return B.CreateLogicalOr(lhs, rhs); },
-            [&](const BinaryLogicIntrinsicKind::Lte &) -> ValPtr {
+            [&](const BinaryIntrinsicKind::LogicAnd &) -> ValPtr {
+              return B.CreateLogicalAnd(mkTermVal(x.lhs), mkTermVal(x.rhs));
+            },
+            [&](const BinaryIntrinsicKind::LogicOr &) -> ValPtr {
+              return B.CreateLogicalOr(mkTermVal(x.lhs), mkTermVal(x.rhs));
+            },
+            [&](const BinaryIntrinsicKind::LogicLte &) -> ValPtr {
               return binaryNumOp(
-                  x.lhs, x.rhs, tpe(x.lhs),                                  //
-                  [&](auto l, auto r) { return B.CreateICmpSLE(lhs, rhs); }, //
-                  [&](auto l, auto r) { return B.CreateFCmpOLE(lhs, rhs); }  //
+                  x.lhs, x.rhs, tpe(x.lhs),                              //
+                  [&](auto l, auto r) { return B.CreateICmpSLE(l, r); }, //
+                  [&](auto l, auto r) { return B.CreateFCmpOLE(l, r); }  //
               );
             },
-            [&](const BinaryLogicIntrinsicKind::Gte &) -> ValPtr {
+            [&](const BinaryIntrinsicKind::LogicGte &) -> ValPtr {
               return binaryNumOp(
-                  x.lhs, x.rhs, tpe(x.lhs),                                  //
-                  [&](auto l, auto r) { return B.CreateICmpSGE(lhs, rhs); }, //
-                  [&](auto l, auto r) { return B.CreateFCmpOGE(lhs, rhs); }  //
+                  x.lhs, x.rhs, tpe(x.lhs),                              //
+                  [&](auto l, auto r) { return B.CreateICmpSGE(l, r); }, //
+                  [&](auto l, auto r) { return B.CreateFCmpOGE(l, r); }  //
               );
             },
-            [&](const BinaryLogicIntrinsicKind::Lt &) -> ValPtr {
+            [&](const BinaryIntrinsicKind::LogicLt &) -> ValPtr {
               return binaryNumOp(
-                  x.lhs, x.rhs, tpe(x.lhs),                                  //
-                  [&](auto l, auto r) { return B.CreateICmpSLT(lhs, rhs); }, //
-                  [&](auto l, auto r) { return B.CreateFCmpOLT(lhs, rhs); }  //
+                  x.lhs, x.rhs, tpe(x.lhs),                              //
+                  [&](auto l, auto r) { return B.CreateICmpSLT(l, r); }, //
+                  [&](auto l, auto r) { return B.CreateFCmpOLT(l, r); }  //
               );
             },
-            [&](const BinaryLogicIntrinsicKind::Gt &) -> ValPtr {
+            [&](const BinaryIntrinsicKind::LogicGt &) -> ValPtr {
               return binaryNumOp(
-                  x.lhs, x.rhs, tpe(x.lhs),                                  //
-                  [&](auto l, auto r) { return B.CreateICmpSGT(lhs, rhs); }, //
-                  [&](auto l, auto r) { return B.CreateFCmpOGT(lhs, rhs); }  //
+                  x.lhs, x.rhs, tpe(x.lhs),                              //
+                  [&](auto l, auto r) { return B.CreateICmpSGT(l, r); }, //
+                  [&](auto l, auto r) { return B.CreateFCmpOGT(l, r); }  //
               );
             });
       },
@@ -582,13 +746,13 @@ llvm::Value *LLVMAstTransformer::mkExprVal(const Expr::Any &expr, llvm::Function
       [&](const Expr::Suspend &x) -> ValPtr { return undefined(__FILE_NAME__, __LINE__); });
 }
 
-llvm::Value *LLVMAstTransformer::conditionalLoad(llvm::Value *rhs) {
+llvm::Value *LLVM::AstTransformer::conditionalLoad(llvm::Value *rhs) {
   return rhs->getType()->isPointerTy() // deref the rhs if it's a pointer
              ? B.CreateLoad(rhs->getType()->getPointerElementType(), rhs)
              : rhs;
 }
 
-BlockKind LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<WhileCtx> whileCtx = {}) {
+LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<WhileCtx> whileCtx = {}) {
   return variants::total(
       *stmt,
       [&](const Stmt::Comment &x) -> BlockKind { // discard comments
@@ -785,8 +949,8 @@ BlockKind LLVMAstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn, 
   );
 }
 
-Pair<Opt<std::string>, std::string> LLVMAstTransformer::transform(const std::unique_ptr<llvm::Module> &module,
-                                                                  const Program &program) {
+Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform(const std::unique_ptr<llvm::Module> &module,
+                                                                    const Program &program) {
 
   auto fnTree = program.entry;
 
@@ -794,7 +958,7 @@ Pair<Opt<std::string>, std::string> LLVMAstTransformer::transform(const std::uni
   std::transform(                                    //
       program.defs.begin(), program.defs.end(),      //
       std::inserter(structTypes, structTypes.end()), //
-      [&](auto &x) -> Pair<Sym, Pair<llvm::StructType *, LLVMAstTransformer::StructMemberTable>> {
+      [&](auto &x) -> Pair<Sym, Pair<llvm::StructType *, LLVM::AstTransformer::StructMemberTable>> {
         return {x.name, mkStruct(x)};
       });
 
@@ -854,7 +1018,7 @@ Pair<Opt<std::string>, std::string> LLVMAstTransformer::transform(const std::uni
   }
 }
 
-Pair<Opt<std::string>, std::string> LLVMAstTransformer::optimise(const std::unique_ptr<llvm::Module> &module) {
+Pair<Opt<std::string>, std::string> LLVM::AstTransformer::optimise(const std::unique_ptr<llvm::Module> &module) {
   llvm::PassManagerBuilder builder;
   builder.OptLevel = 3;
   llvm::legacy::PassManager m;
@@ -875,13 +1039,49 @@ Pair<Opt<std::string>, std::string> LLVMAstTransformer::optimise(const std::uniq
   }
 }
 
-Opt<llvm::StructType *> LLVMAstTransformer::lookup(const Sym &s) {
+Opt<llvm::StructType *> LLVM::AstTransformer::lookup(const Sym &s) {
   if (auto x = get_opt(structTypes, s); x) return x->first;
   else
     return {};
 }
 
-backend::LLVM::LLVM() = default; // cache(), jit(mkJit(cache)) {}
+llvmc::TargetInfo LLVM::Options::toTargetInfo() const {
+  using llvm::Triple;
+  const auto bindGpuArch = [&](Triple::ArchType archTpe, Triple::VendorType vendor, Triple::OSType os) {
+    Triple triple(Triple::getArchTypeName(archTpe), Triple::getVendorTypeName(vendor), Triple::getOSTypeName(os));
+    if (!archTpe) throw std::logic_error("Arch must be specified for " + triple.str());
+    return llvmc::TargetInfo{
+        .triple = triple,
+        .target = backend::llvmc::targetFromTriple(triple),
+        .cpu = {.uArch = *arch, .features = {}},
+    };
+  };
+
+  const auto bindCpuArch = [&](Triple::ArchType archTpe) {
+    const Triple defaultTriple = backend::llvmc::defaultHostTriple();
+    if (!arch && defaultTriple.getArch() != archTpe) // when detecting host arch, the host triple's arch must match
+      throw std::logic_error("Requested arch detection with " + Triple::getArchTypeName(archTpe).str() +
+                             " but the host arch is different (" +
+                             Triple::getArchTypeName(defaultTriple.getArch()).str() + ")");
+
+    Triple triple = defaultTriple;
+    triple.setArch(archTpe);
+    return llvmc::TargetInfo{
+        .triple = triple,
+        .target = backend::llvmc::targetFromTriple(triple),
+        .cpu = arch ? llvmc::CpuInfo{.uArch = *arch, .features = {}} : llvmc::hostCpuInfo(),
+    };
+  };
+
+  switch (target) {
+    case LLVM::Target::x86_64: return bindCpuArch(Triple::ArchType::x86_64);
+    case LLVM::Target::AArch64: return bindCpuArch(Triple::ArchType::aarch64);
+    case LLVM::Target::NVPTX64:
+      return bindGpuArch(Triple::ArchType::nvptx64, Triple::VendorType::NVIDIA, Triple::OSType::CUDA);
+    case LLVM::Target::AMDGCN:
+      return bindGpuArch(Triple::ArchType::amdgcn, Triple::VendorType::AMD, Triple::OSType::AMDHSA);
+  }
+}
 
 compiler::Compilation backend::LLVM::run(const Program &program) {
   using namespace llvm;
@@ -889,7 +1089,7 @@ compiler::Compilation backend::LLVM::run(const Program &program) {
   auto ctx = std::make_unique<llvm::LLVMContext>();
   auto mod = std::make_unique<llvm::Module>("test", *ctx);
 
-  LLVMAstTransformer xform(*ctx);
+  LLVM::AstTransformer xform(options, *ctx);
 
   auto rawXform = compiler::nowMono();
   auto [rawError, rawIR] = xform.transform(mod, program);
@@ -908,7 +1108,24 @@ compiler::Compilation backend::LLVM::run(const Program &program) {
                                      {rawError.value_or(""), optError.value_or("")}, [](auto &&x) { return x; }, "\n"));
   }
 
-  auto c = llvmc::compileModule(true, std::move(mod), *ctx);
+  auto info = options.toTargetInfo();
+
+  switch (options.target) {
+    case LLVM::Target::AMDGCN: {
+      // XXX We validate AMDGCN's Code Object version here as the definition for the dispatch pointer is different in
+      // each version; dispatch pointer controls critical values such as global/local size and id in the kernel.
+      auto TM = llvmc::targetMachineFromTarget(info);
+      auto hsaAbi = llvm::AMDGPU::getHsaAbiVersion(TM->getMCSubtargetInfo());
+      if (!hsaAbi.hasValue()) throw std::logic_error("AMDGPU target selected but HSA ABI is empty!?");
+      if (*hsaAbi != llvm::ELF::ELFABIVERSION_AMDGPU_HSA_V4) {
+        throw std::logic_error("AMDGPU target must conform to Code Object V4 as the definition for "
+                               "@llvm.amdgcn.dispatch.ptr change across versions");
+      }
+    }
+    default: break;
+  }
+
+  auto c = llvmc::compileModule(info, true, std::move(mod), *ctx);
 
   //  // at this point we know the target machine, so we derive the struct layout here
   //  for (const auto &def : program.defs) {

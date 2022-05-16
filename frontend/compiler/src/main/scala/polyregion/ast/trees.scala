@@ -1,12 +1,12 @@
 package polyregion.ast
 
+import cats.kernel.Semigroup
 import polyregion.ast.PolyAst as p
 import polyregion.ast.PolyAst.TypeKind
 
 import java.lang.reflect.Modifier
 import scala.annotation.tailrec
 import scala.reflect.ClassTag
-import cats.kernel.Semigroup
 
 @tailrec def doUntilNotEq[A](x: A)(f: A => A): A = {
   val y = f(x)
@@ -50,15 +50,15 @@ case class Log(name: String, lines: Vector[(String, Vector[String]) | Log]) {
       .flatMap {
         case (log: Log) => log.render(nesting + 1).map(indent ++ _)
         case (l, details) =>
-          (  (colour ++ fansi.Underlined.On)(s"▓ $l ▓")) +: details.flatMap { l =>
+          ((colour ++ fansi.Underlined.On)(s"▓ $l ▓")) +: details.flatMap { l =>
             l.linesIterator.toList match {
               case x :: xs =>
-                ((  colour("┃ ╰ ") ++ s"$x") :: xs.map(x => indent ++ s"  ${x}")).toVector
+                ((colour("┃ ╰ ") ++ s"$x") :: xs.map(x => indent ++ s"  ${x}")).toVector
               case Nil => Vector()
             }
 
           }
-      } :+ colour(s"┗━${"━"* (name.size +2) }"))
+      } :+ colour(s"┗━${"━" * (name.size + 2)}"))
       .map(_.render)
   }
 
@@ -259,6 +259,31 @@ extension (e: p.Type) {
 
 extension (e: p.Expr) {
   def repr: String = e match {
+    case p.Expr.NullaryIntrinsic(kind, rtn) =>
+      val fn = kind match {
+        case p.NullaryIntrinsicKind.GpuGlobalIdxX  => "GlobalIdxX"
+        case p.NullaryIntrinsicKind.GpuGlobalIdxY  => "GlobalIdxY"
+        case p.NullaryIntrinsicKind.GpuGlobalIdxZ  => "GlobalIdxZ"
+        case p.NullaryIntrinsicKind.GpuGlobalSizeX => "GlobalSizeX"
+        case p.NullaryIntrinsicKind.GpuGlobalSizeY => "GlobalSizeY"
+        case p.NullaryIntrinsicKind.GpuGlobalSizeZ => "GlobalSizeZ"
+        case p.NullaryIntrinsicKind.GpuGroupIdxX   => "GroupIdxX"
+        case p.NullaryIntrinsicKind.GpuGroupIdxY   => "GroupIdxY"
+        case p.NullaryIntrinsicKind.GpuGroupIdxZ   => "GroupIdxZ"
+        case p.NullaryIntrinsicKind.GpuGroupSizeX  => "GroupSizeX"
+        case p.NullaryIntrinsicKind.GpuGroupSizeY  => "GroupSizeY"
+        case p.NullaryIntrinsicKind.GpuGroupSizeZ  => "GroupSizeZ"
+        case p.NullaryIntrinsicKind.GpuLocalIdxX   => "LocalIdxX"
+        case p.NullaryIntrinsicKind.GpuLocalIdxY   => "LocalIdxY"
+        case p.NullaryIntrinsicKind.GpuLocalIdxZ   => "LocalIdxZ"
+        case p.NullaryIntrinsicKind.GpuLocalSizeX  => "LocalSizeX"
+        case p.NullaryIntrinsicKind.GpuLocalSizeY  => "LocalSizeY"
+        case p.NullaryIntrinsicKind.GpuLocalSizeZ  => "LocalSizeZ"
+
+        case p.NullaryIntrinsicKind.GpuGroupBarrier => "GroupBarrier"
+        case p.NullaryIntrinsicKind.GpuGroupFence   => "GroupFence"
+      }
+      s"$fn'"
     case p.Expr.UnaryIntrinsic(lhs, kind, rtn) =>
       val fn = kind match {
         case p.UnaryIntrinsicKind.Sin  => "sin"
@@ -291,11 +316,8 @@ extension (e: p.Expr) {
         case p.UnaryIntrinsicKind.Pos => "+"
         case p.UnaryIntrinsicKind.Neg => "-"
 
-      }
-      s"$fn'(${lhs.repr})"
-    case p.Expr.UnaryLogicIntrinsic(lhs, kind) =>
-      val fn = kind match {
-        case p.UnaryLogicIntrinsicKind.Not => "!"
+        case p.UnaryIntrinsicKind.LogicNot => "!"
+
       }
       s"$fn'(${lhs.repr})"
     case p.Expr.BinaryIntrinsic(lhs, rhs, kind, _) =>
@@ -320,21 +342,19 @@ extension (e: p.Expr) {
         case p.BinaryIntrinsicKind.BSL  => "<<"
         case p.BinaryIntrinsicKind.BSR  => ">>"
         case p.BinaryIntrinsicKind.BZSR => ">>>"
-      }
-      s"${lhs.repr} $op ${rhs.repr}"
 
-    case p.Expr.BinaryLogicIntrinsic(lhs, rhs, kind) =>
-      val op = kind match {
-        case p.BinaryLogicIntrinsicKind.Eq  => "=="
-        case p.BinaryLogicIntrinsicKind.Neq => "!="
-        case p.BinaryLogicIntrinsicKind.And => "&&"
-        case p.BinaryLogicIntrinsicKind.Or  => "||"
-        case p.BinaryLogicIntrinsicKind.Lte => "<="
-        case p.BinaryLogicIntrinsicKind.Gte => ">="
-        case p.BinaryLogicIntrinsicKind.Lt  => "<"
-        case p.BinaryLogicIntrinsicKind.Gt  => ">"
+        case p.BinaryIntrinsicKind.LogicEq  => "=="
+        case p.BinaryIntrinsicKind.LogicNeq => "!="
+        case p.BinaryIntrinsicKind.LogicAnd => "&&"
+        case p.BinaryIntrinsicKind.LogicOr  => "||"
+        case p.BinaryIntrinsicKind.LogicLte => "<="
+        case p.BinaryIntrinsicKind.LogicGte => ">="
+        case p.BinaryIntrinsicKind.LogicLt  => "<"
+        case p.BinaryIntrinsicKind.LogicGt  => ">"
+
       }
       s"${lhs.repr} $op' ${rhs.repr}"
+
     case p.Expr.Cast(from, to) => s"${from.repr}.to[${to.repr}]"
     case p.Expr.Alias(ref)     => s"(~>${ref.repr})"
 
@@ -421,6 +441,8 @@ extension (e: p.Stmt) {
     }
     val (stmts1, as1) = stmts0
       .map(_.mapAccExpr {
+        case x @ p.Expr.NullaryIntrinsic(_, _) =>
+          (x, Nil, Nil)
         case p.Expr.UnaryIntrinsic(lhs, kind, rtn) =>
           val (lhs0, as) = f(lhs)
           (p.Expr.UnaryIntrinsic(lhs0, kind, rtn), Nil, as)
@@ -428,13 +450,6 @@ extension (e: p.Stmt) {
           val (lhs0, as0) = f(lhs)
           val (rhs0, as1) = f(rhs)
           (p.Expr.BinaryIntrinsic(lhs0, rhs0, kind, rtn), Nil, as0 ::: as1)
-        case p.Expr.UnaryLogicIntrinsic(lhs, kind) =>
-          val (lhs0, as0) = f(lhs)
-          (p.Expr.UnaryLogicIntrinsic(lhs0, kind), Nil, as0)
-        case p.Expr.BinaryLogicIntrinsic(lhs, rhs, kind) =>
-          val (lhs0, as0) = f(lhs)
-          val (rhs0, as1) = f(rhs)
-          (p.Expr.BinaryLogicIntrinsic(lhs0, rhs0, kind), Nil, as0 ::: as1)
         case p.Expr.Cast(from, to) =>
           val (from0, as0) = f(from)
           (p.Expr.Cast(from0, to), Nil, as0)
@@ -477,29 +492,28 @@ extension (e: p.Stmt) {
     )
     val (stmts1, as1) = stmts0
       .map(_.mapAccExpr {
+        case p.Expr.NullaryIntrinsic(kind, rtn) =>
+          val (rtn0, as0) = f(rtn)
+          (p.Expr.NullaryIntrinsic(kind, rtn0), Nil, as0)
         case p.Expr.UnaryIntrinsic(lhs, kind, rtn) =>
           val (rtn0, as0) = f(rtn)
           (p.Expr.UnaryIntrinsic(lhs, kind, rtn0), Nil, as0)
         case p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn) =>
           val (rtn0, as0) = f(rtn)
           (p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn0), Nil, as0)
-        case e @ p.Expr.UnaryLogicIntrinsic(_, _) =>
-          (e, Nil, Nil)
-        case e @ p.Expr.BinaryLogicIntrinsic(_, _, _) =>
-          (e, Nil, Nil)
         case p.Expr.Cast(from, as) =>
           val (as0, as0_) = f(as)
           (p.Expr.Cast(from, as0), Nil, as0_)
         case e @ p.Expr.Alias(_) =>
           (e, Nil, Nil)
-        case  p.Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
+        case p.Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
           val (tpeArgs0, as0) = tpeArgs.map(f).unzip
           val (rtn0, as1)     = f(rtn)
           (p.Expr.Invoke(name, tpeArgs0, receiver, args, rtn0), Nil, as0.flatten ::: as1)
-        case  p.Expr.Index(lhs, idx, component) =>
+        case p.Expr.Index(lhs, idx, component) =>
           val (component0, as0) = f(component)
           (p.Expr.Index(lhs, idx, component0), Nil, as0)
-        case  p.Expr.Alloc(witness, size) =>
+        case p.Expr.Alloc(witness, size) =>
           val (component0, as0) = f(witness.component)
           (p.Expr.Alloc(p.Type.Array(component0), size), Nil, as0)
       })

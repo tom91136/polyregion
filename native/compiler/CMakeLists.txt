@@ -4,7 +4,7 @@ set(LIB_SOURCES
 
         backend/llvm.cpp
         backend/llvmc.cpp
-        backend/c99.cpp
+        backend/c_source.cpp
 
         ast.cpp
         dis.cpp
@@ -16,7 +16,7 @@ set(LIB_SOURCES
 add_library(compiler-lib ${LIB_SOURCES})
 add_dependencies(compiler-lib intrinsics_gen runtime-lib)
 
-add_executable(compiler-tests test.cpp test-main.cpp)
+add_executable(compiler-tests test/ast_codegen.cpp test/backend.cpp test/test-main.cpp)
 add_executable(compiler-drv driver.cpp)
 
 target_include_directories(compiler-tests PUBLIC . ../include)
@@ -78,7 +78,16 @@ llvm_map_components_to_libnames(LLVM_LIBS
         vectorize
 
         )
-message(STATUS "[compiler] Adding LLVM libs = ${LLVM_LIBS}")
+message(STATUS "[compiler] Adding LLVM libs = ${LLVM_LIBS} ")
+
+set(LLVM_TARGETS_SOURCE_HEADERS ${LLVM_TARGETS_TO_BUILD})
+set(LLVM_TARGETS_BINARY_HEADERS ${LLVM_TARGETS_TO_BUILD})
+list(TRANSFORM LLVM_TARGETS_SOURCE_HEADERS PREPEND ${llvm_SOURCE_DIR}/lib/Target/)
+list(TRANSFORM LLVM_TARGETS_BINARY_HEADERS PREPEND ${llvm_BINARY_DIR}/lib/Target/)
+
+message(STATUS "[compiler] Target source headers = ${LLVM_TARGETS_SOURCE_HEADERS} ")
+message(STATUS "[compiler] Target binary headers = ${LLVM_TARGETS_BINARY_HEADERS} ")
+target_include_directories(compiler-lib PRIVATE ${LLVM_TARGETS_SOURCE_HEADERS} ${LLVM_TARGETS_BINARY_HEADERS})
 
 
 target_link_libraries(compiler-lib PRIVATE

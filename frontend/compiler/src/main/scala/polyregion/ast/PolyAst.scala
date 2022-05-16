@@ -74,10 +74,7 @@ object PolyAst {
     case Min, Max
     case Atan2, Hypot
     case BAnd, BOr, BXor, BSL, BSR, BZSR
-  }
-
-  enum BinaryLogicIntrinsicKind {
-    case Eq, Neq, And, Or, Lte, Gte, Lt, Gt
+    case LogicEq, LogicNeq, LogicAnd, LogicOr, LogicLte, LogicGte, LogicLt, LogicGt
   }
 
   enum UnaryIntrinsicKind {
@@ -86,19 +83,28 @@ object PolyAst {
     case Sqrt, Cbrt, Exp, Expm1, Log, Log1p, Log10
     case BNot
     case Pos, Neg
+    case LogicNot
   }
 
-  enum UnaryLogicIntrinsicKind {
-    case Not
+  enum NullaryIntrinsicKind {
+    // Int
+    case GpuGlobalIdxX, GpuGlobalIdxY, GpuGlobalIdxZ
+    case GpuGlobalSizeX, GpuGlobalSizeY, GpuGlobalSizeZ
+    case GpuGroupIdxX, GpuGroupIdxY, GpuGroupIdxZ
+    case GpuGroupSizeX, GpuGroupSizeY, GpuGroupSizeZ
+    case GpuLocalIdxX, GpuLocalIdxY, GpuLocalIdxZ
+    case GpuLocalSizeX, GpuLocalSizeY, GpuLocalSizeZ
+
+    // Unit
+    case GpuGroupBarrier // __syncthreads() or barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE)
+    case GpuGroupFence   // __threadfence_block() or mem_fence(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE)
   }
 
   enum Expr(val tpe: Type) derives MsgPack.Codec {
 
+    case NullaryIntrinsic(kind: NullaryIntrinsicKind, rtn: Type)                     extends Expr(rtn)
     case UnaryIntrinsic(lhs: Term, kind: UnaryIntrinsicKind, rtn: Type)              extends Expr(rtn)
     case BinaryIntrinsic(lhs: Term, rhs: Term, kind: BinaryIntrinsicKind, rtn: Type) extends Expr(rtn)
-
-    case UnaryLogicIntrinsic(lhs: Term, kind: UnaryLogicIntrinsicKind)              extends Expr(Type.Bool)
-    case BinaryLogicIntrinsic(lhs: Term, rhs: Term, kind: BinaryLogicIntrinsicKind) extends Expr(Type.Bool)
 
     case Cast(from: Term, as: Type) extends Expr(as)
     case Alias(ref: Term)           extends Expr(ref.tpe)

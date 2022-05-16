@@ -62,6 +62,31 @@ using std::string;
 [[nodiscard]] string polyast::repr(const Expr::Any &expr) {
   return variants::total(
       *expr, //
+      [](const Expr::NullaryIntrinsic &x) {
+        auto op = variants::total(
+            *x.kind, //
+            [](const NullaryIntrinsicKind::GpuGlobalIdxX &) { return "GpuGlobalIdxX"; },
+            [](const NullaryIntrinsicKind::GpuGlobalIdxY &) { return "GpuGlobalIdxY"; },
+            [](const NullaryIntrinsicKind::GpuGlobalIdxZ &) { return "GpuGlobalIdxZ"; },
+            [](const NullaryIntrinsicKind::GpuGlobalSizeX &) { return "GpuGlobalSizeX"; },
+            [](const NullaryIntrinsicKind::GpuGlobalSizeY &) { return "GpuGlobalSizeY"; },
+            [](const NullaryIntrinsicKind::GpuGlobalSizeZ &) { return "GpuGlobalSizeZ"; },
+            [](const NullaryIntrinsicKind::GpuGroupIdxX &) { return "GpuGroupIdxX"; },
+            [](const NullaryIntrinsicKind::GpuGroupIdxY &) { return "GpuGroupIdxY"; },
+            [](const NullaryIntrinsicKind::GpuGroupIdxZ &) { return "GpuGroupIdxZ"; },
+            [](const NullaryIntrinsicKind::GpuGroupSizeX &) { return "GpuGroupSizeX"; },
+            [](const NullaryIntrinsicKind::GpuGroupSizeY &) { return "GpuGroupSizeY"; },
+            [](const NullaryIntrinsicKind::GpuGroupSizeZ &) { return "GpuGroupSizeZ"; },
+            [](const NullaryIntrinsicKind::GpuLocalIdxX &) { return "GpuLocalIdxX"; },
+            [](const NullaryIntrinsicKind::GpuLocalIdxY &) { return "GpuLocalIdxY"; },
+            [](const NullaryIntrinsicKind::GpuLocalIdxZ &) { return "GpuLocalIdxZ"; },
+            [](const NullaryIntrinsicKind::GpuLocalSizeX &) { return "GpuLocalSizeX"; },
+            [](const NullaryIntrinsicKind::GpuLocalSizeY &) { return "GpuLocalSizeY"; },
+            [](const NullaryIntrinsicKind::GpuLocalSizeZ &) { return "GpuLocalSizeZ"; },
+            [](const NullaryIntrinsicKind::GpuGroupBarrier &) { return "GpuGroupBarrier"; },
+            [](const NullaryIntrinsicKind::GpuGroupFence &) { return "GpuGroupFence"; });
+        return std::string(op) + "()";
+      },
       [](const Expr::UnaryIntrinsic &x) {
         auto op = variants::total(
             *x.kind,                                                 //
@@ -91,7 +116,9 @@ using std::string;
             [](const UnaryIntrinsicKind::Log10 &) { return "log10"; }, //
             [](const UnaryIntrinsicKind::BNot &) { return "~"; },      //
             [](const UnaryIntrinsicKind::Pos &) { return "+"; },       //
-            [](const UnaryIntrinsicKind::Neg &) { return "-"; }        //
+            [](const UnaryIntrinsicKind::Neg &) { return "-"; },       //
+
+            [](const UnaryIntrinsicKind::LogicNot &x) { return "!"; } //
         );
         return std::string(op) + "(" + repr(x.lhs) + ")";
       },
@@ -112,32 +139,21 @@ using std::string;
             [](const BinaryIntrinsicKind::Atan2 &) { return "atan2"; }, //
             [](const BinaryIntrinsicKind::Hypot &) { return "hypot"; }, //
 
-            [](const BinaryIntrinsicKind::BAnd &) { return "&"; },  //
-            [](const BinaryIntrinsicKind::BOr &) { return "|"; },   //
-            [](const BinaryIntrinsicKind::BXor &) { return "^"; },  //
-            [](const BinaryIntrinsicKind::BSL &) { return "<<"; },  //
-            [](const BinaryIntrinsicKind::BSR &) { return ">>"; },  //
-            [](const BinaryIntrinsicKind::BZSR &) { return ">>>"; } //
-        );
-        return repr(x.lhs) + " " + std::string(op) + " " + repr(x.rhs);
-      },
-      [](const Expr::UnaryLogicIntrinsic &x) {
-        auto op = variants::total( //
-            *x.kind,               //
-            [](const UnaryLogicIntrinsicKind::Not &x) { return "!"; });
-        return std::string(op) + "(" + repr(x.lhs) + ")";
-      },
-      [](const Expr::BinaryLogicIntrinsic &x) {
-        auto op = variants::total(
-            *x.kind,                                                    //
-            [](const BinaryLogicIntrinsicKind::Eq &) { return "=="; },  //
-            [](const BinaryLogicIntrinsicKind::Neq &) { return "!="; }, //
-            [](const BinaryLogicIntrinsicKind::And &) { return "&&"; }, //
-            [](const BinaryLogicIntrinsicKind::Or &) { return "||"; },  //
-            [](const BinaryLogicIntrinsicKind::Lte &) { return "<="; }, //
-            [](const BinaryLogicIntrinsicKind::Gte &) { return ">="; }, //
-            [](const BinaryLogicIntrinsicKind::Lt &) { return "<"; },   //
-            [](const BinaryLogicIntrinsicKind::Gt &) { return ">"; }    //
+            [](const BinaryIntrinsicKind::BAnd &) { return "&"; },   //
+            [](const BinaryIntrinsicKind::BOr &) { return "|"; },    //
+            [](const BinaryIntrinsicKind::BXor &) { return "^"; },   //
+            [](const BinaryIntrinsicKind::BSL &) { return "<<"; },   //
+            [](const BinaryIntrinsicKind::BSR &) { return ">>"; },   //
+            [](const BinaryIntrinsicKind::BZSR &) { return ">>>"; }, //
+
+            [](const BinaryIntrinsicKind::LogicEq &) { return "=="; },  //
+            [](const BinaryIntrinsicKind::LogicNeq &) { return "!="; }, //
+            [](const BinaryIntrinsicKind::LogicAnd &) { return "&&"; }, //
+            [](const BinaryIntrinsicKind::LogicOr &) { return "||"; },  //
+            [](const BinaryIntrinsicKind::LogicLte &) { return "<="; }, //
+            [](const BinaryIntrinsicKind::LogicGte &) { return ">="; }, //
+            [](const BinaryIntrinsicKind::LogicLt &) { return "<"; },   //
+            [](const BinaryIntrinsicKind::LogicGt &) { return ">"; }    //
         );
         return repr(x.lhs) + " " + std::string(op) + " " + repr(x.rhs);
       },

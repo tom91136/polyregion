@@ -354,123 +354,151 @@ bool Term::operator==(const Term::StringConst &l, const Term::StringConst &r) {
   return l.value == r.value;
 }
 
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Any &x) {
+std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::Any &x) {
   std::visit([&os](auto &&arg) { os << *arg; }, x);
   return os;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Base &, const BinaryIntrinsicKind::Base &) { return true; }
+bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::Base &, const NullaryIntrinsicKind::Base &) { return true; }
 
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Add &x) {
-  os << "Add(";
+std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGlobalIdxX &x) {
+  os << "GpuGlobalIdxX(";
   os << ')';
   return os;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Add &, const BinaryIntrinsicKind::Add &) { return true; }
+bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGlobalIdxX &, const NullaryIntrinsicKind::GpuGlobalIdxX &) { return true; }
 
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Sub &x) {
-  os << "Sub(";
+std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGlobalIdxY &x) {
+  os << "GpuGlobalIdxY(";
   os << ')';
   return os;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Sub &, const BinaryIntrinsicKind::Sub &) { return true; }
+bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGlobalIdxY &, const NullaryIntrinsicKind::GpuGlobalIdxY &) { return true; }
 
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Mul &x) {
-  os << "Mul(";
+std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGlobalIdxZ &x) {
+  os << "GpuGlobalIdxZ(";
   os << ')';
   return os;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Mul &, const BinaryIntrinsicKind::Mul &) { return true; }
+bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGlobalIdxZ &, const NullaryIntrinsicKind::GpuGlobalIdxZ &) { return true; }
 
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Div &x) {
-  os << "Div(";
+std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGlobalSizeX &x) {
+  os << "GpuGlobalSizeX(";
   os << ')';
   return os;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Div &, const BinaryIntrinsicKind::Div &) { return true; }
+bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGlobalSizeX &, const NullaryIntrinsicKind::GpuGlobalSizeX &) { return true; }
 
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Rem &x) {
-  os << "Rem(";
+std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGlobalSizeY &x) {
+  os << "GpuGlobalSizeY(";
   os << ')';
   return os;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Rem &, const BinaryIntrinsicKind::Rem &) { return true; }
+bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGlobalSizeY &, const NullaryIntrinsicKind::GpuGlobalSizeY &) { return true; }
 
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Pow &x) {
-  os << "Pow(";
+std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGlobalSizeZ &x) {
+  os << "GpuGlobalSizeZ(";
   os << ')';
   return os;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Pow &, const BinaryIntrinsicKind::Pow &) { return true; }
+bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGlobalSizeZ &, const NullaryIntrinsicKind::GpuGlobalSizeZ &) { return true; }
 
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Min &x) {
-  os << "Min(";
+std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupIdxX &x) {
+  os << "GpuGroupIdxX(";
   os << ')';
   return os;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Min &, const BinaryIntrinsicKind::Min &) { return true; }
+bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupIdxX &, const NullaryIntrinsicKind::GpuGroupIdxX &) { return true; }
 
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Max &x) {
-  os << "Max(";
+std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupIdxY &x) {
+  os << "GpuGroupIdxY(";
   os << ')';
   return os;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Max &, const BinaryIntrinsicKind::Max &) { return true; }
+bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupIdxY &, const NullaryIntrinsicKind::GpuGroupIdxY &) { return true; }
 
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Atan2 &x) {
-  os << "Atan2(";
+std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupIdxZ &x) {
+  os << "GpuGroupIdxZ(";
   os << ')';
   return os;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Atan2 &, const BinaryIntrinsicKind::Atan2 &) { return true; }
+bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupIdxZ &, const NullaryIntrinsicKind::GpuGroupIdxZ &) { return true; }
 
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Hypot &x) {
-  os << "Hypot(";
+std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupSizeX &x) {
+  os << "GpuGroupSizeX(";
   os << ')';
   return os;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Hypot &, const BinaryIntrinsicKind::Hypot &) { return true; }
+bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupSizeX &, const NullaryIntrinsicKind::GpuGroupSizeX &) { return true; }
 
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::BAnd &x) {
-  os << "BAnd(";
+std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupSizeY &x) {
+  os << "GpuGroupSizeY(";
   os << ')';
   return os;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::BAnd &, const BinaryIntrinsicKind::BAnd &) { return true; }
+bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupSizeY &, const NullaryIntrinsicKind::GpuGroupSizeY &) { return true; }
 
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::BOr &x) {
-  os << "BOr(";
+std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupSizeZ &x) {
+  os << "GpuGroupSizeZ(";
   os << ')';
   return os;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::BOr &, const BinaryIntrinsicKind::BOr &) { return true; }
+bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupSizeZ &, const NullaryIntrinsicKind::GpuGroupSizeZ &) { return true; }
 
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::BXor &x) {
-  os << "BXor(";
+std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuLocalIdxX &x) {
+  os << "GpuLocalIdxX(";
   os << ')';
   return os;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::BXor &, const BinaryIntrinsicKind::BXor &) { return true; }
+bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuLocalIdxX &, const NullaryIntrinsicKind::GpuLocalIdxX &) { return true; }
 
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::BSL &x) {
-  os << "BSL(";
+std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuLocalIdxY &x) {
+  os << "GpuLocalIdxY(";
   os << ')';
   return os;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::BSL &, const BinaryIntrinsicKind::BSL &) { return true; }
+bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuLocalIdxY &, const NullaryIntrinsicKind::GpuLocalIdxY &) { return true; }
 
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::BSR &x) {
-  os << "BSR(";
+std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuLocalIdxZ &x) {
+  os << "GpuLocalIdxZ(";
   os << ')';
   return os;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::BSR &, const BinaryIntrinsicKind::BSR &) { return true; }
+bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuLocalIdxZ &, const NullaryIntrinsicKind::GpuLocalIdxZ &) { return true; }
 
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::BZSR &x) {
-  os << "BZSR(";
+std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuLocalSizeX &x) {
+  os << "GpuLocalSizeX(";
   os << ')';
   return os;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::BZSR &, const BinaryIntrinsicKind::BZSR &) { return true; }
+bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuLocalSizeX &, const NullaryIntrinsicKind::GpuLocalSizeX &) { return true; }
+
+std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuLocalSizeY &x) {
+  os << "GpuLocalSizeY(";
+  os << ')';
+  return os;
+}
+bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuLocalSizeY &, const NullaryIntrinsicKind::GpuLocalSizeY &) { return true; }
+
+std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuLocalSizeZ &x) {
+  os << "GpuLocalSizeZ(";
+  os << ')';
+  return os;
+}
+bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuLocalSizeZ &, const NullaryIntrinsicKind::GpuLocalSizeZ &) { return true; }
+
+std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupBarrier &x) {
+  os << "GpuGroupBarrier(";
+  os << ')';
+  return os;
+}
+bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupBarrier &, const NullaryIntrinsicKind::GpuGroupBarrier &) { return true; }
+
+std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupFence &x) {
+  os << "GpuGroupFence(";
+  os << ')';
+  return os;
+}
+bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupFence &, const NullaryIntrinsicKind::GpuGroupFence &) { return true; }
 
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Any &x) {
   std::visit([&os](auto &&arg) { os << *arg; }, x);
@@ -653,80 +681,186 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Neg &, const UnaryIntrinsicKind::Neg &) { return true; }
 
-std::ostream &BinaryLogicIntrinsicKind::operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Any &x) {
+std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::LogicNot &x) {
+  os << "LogicNot(";
+  os << ')';
+  return os;
+}
+bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::LogicNot &, const UnaryIntrinsicKind::LogicNot &) { return true; }
+
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Any &x) {
   std::visit([&os](auto &&arg) { os << *arg; }, x);
   return os;
 }
-bool BinaryLogicIntrinsicKind::operator==(const BinaryLogicIntrinsicKind::Base &, const BinaryLogicIntrinsicKind::Base &) { return true; }
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Base &, const BinaryIntrinsicKind::Base &) { return true; }
 
-std::ostream &BinaryLogicIntrinsicKind::operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Eq &x) {
-  os << "Eq(";
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Add &x) {
+  os << "Add(";
   os << ')';
   return os;
 }
-bool BinaryLogicIntrinsicKind::operator==(const BinaryLogicIntrinsicKind::Eq &, const BinaryLogicIntrinsicKind::Eq &) { return true; }
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Add &, const BinaryIntrinsicKind::Add &) { return true; }
 
-std::ostream &BinaryLogicIntrinsicKind::operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Neq &x) {
-  os << "Neq(";
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Sub &x) {
+  os << "Sub(";
   os << ')';
   return os;
 }
-bool BinaryLogicIntrinsicKind::operator==(const BinaryLogicIntrinsicKind::Neq &, const BinaryLogicIntrinsicKind::Neq &) { return true; }
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Sub &, const BinaryIntrinsicKind::Sub &) { return true; }
 
-std::ostream &BinaryLogicIntrinsicKind::operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::And &x) {
-  os << "And(";
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Mul &x) {
+  os << "Mul(";
   os << ')';
   return os;
 }
-bool BinaryLogicIntrinsicKind::operator==(const BinaryLogicIntrinsicKind::And &, const BinaryLogicIntrinsicKind::And &) { return true; }
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Mul &, const BinaryIntrinsicKind::Mul &) { return true; }
 
-std::ostream &BinaryLogicIntrinsicKind::operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Or &x) {
-  os << "Or(";
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Div &x) {
+  os << "Div(";
   os << ')';
   return os;
 }
-bool BinaryLogicIntrinsicKind::operator==(const BinaryLogicIntrinsicKind::Or &, const BinaryLogicIntrinsicKind::Or &) { return true; }
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Div &, const BinaryIntrinsicKind::Div &) { return true; }
 
-std::ostream &BinaryLogicIntrinsicKind::operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Lte &x) {
-  os << "Lte(";
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Rem &x) {
+  os << "Rem(";
   os << ')';
   return os;
 }
-bool BinaryLogicIntrinsicKind::operator==(const BinaryLogicIntrinsicKind::Lte &, const BinaryLogicIntrinsicKind::Lte &) { return true; }
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Rem &, const BinaryIntrinsicKind::Rem &) { return true; }
 
-std::ostream &BinaryLogicIntrinsicKind::operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Gte &x) {
-  os << "Gte(";
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Pow &x) {
+  os << "Pow(";
   os << ')';
   return os;
 }
-bool BinaryLogicIntrinsicKind::operator==(const BinaryLogicIntrinsicKind::Gte &, const BinaryLogicIntrinsicKind::Gte &) { return true; }
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Pow &, const BinaryIntrinsicKind::Pow &) { return true; }
 
-std::ostream &BinaryLogicIntrinsicKind::operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Lt &x) {
-  os << "Lt(";
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Min &x) {
+  os << "Min(";
   os << ')';
   return os;
 }
-bool BinaryLogicIntrinsicKind::operator==(const BinaryLogicIntrinsicKind::Lt &, const BinaryLogicIntrinsicKind::Lt &) { return true; }
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Min &, const BinaryIntrinsicKind::Min &) { return true; }
 
-std::ostream &BinaryLogicIntrinsicKind::operator<<(std::ostream &os, const BinaryLogicIntrinsicKind::Gt &x) {
-  os << "Gt(";
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Max &x) {
+  os << "Max(";
   os << ')';
   return os;
 }
-bool BinaryLogicIntrinsicKind::operator==(const BinaryLogicIntrinsicKind::Gt &, const BinaryLogicIntrinsicKind::Gt &) { return true; }
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Max &, const BinaryIntrinsicKind::Max &) { return true; }
 
-std::ostream &UnaryLogicIntrinsicKind::operator<<(std::ostream &os, const UnaryLogicIntrinsicKind::Any &x) {
-  std::visit([&os](auto &&arg) { os << *arg; }, x);
-  return os;
-}
-bool UnaryLogicIntrinsicKind::operator==(const UnaryLogicIntrinsicKind::Base &, const UnaryLogicIntrinsicKind::Base &) { return true; }
-
-std::ostream &UnaryLogicIntrinsicKind::operator<<(std::ostream &os, const UnaryLogicIntrinsicKind::Not &x) {
-  os << "Not(";
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Atan2 &x) {
+  os << "Atan2(";
   os << ')';
   return os;
 }
-bool UnaryLogicIntrinsicKind::operator==(const UnaryLogicIntrinsicKind::Not &, const UnaryLogicIntrinsicKind::Not &) { return true; }
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Atan2 &, const BinaryIntrinsicKind::Atan2 &) { return true; }
+
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Hypot &x) {
+  os << "Hypot(";
+  os << ')';
+  return os;
+}
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Hypot &, const BinaryIntrinsicKind::Hypot &) { return true; }
+
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::BAnd &x) {
+  os << "BAnd(";
+  os << ')';
+  return os;
+}
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::BAnd &, const BinaryIntrinsicKind::BAnd &) { return true; }
+
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::BOr &x) {
+  os << "BOr(";
+  os << ')';
+  return os;
+}
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::BOr &, const BinaryIntrinsicKind::BOr &) { return true; }
+
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::BXor &x) {
+  os << "BXor(";
+  os << ')';
+  return os;
+}
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::BXor &, const BinaryIntrinsicKind::BXor &) { return true; }
+
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::BSL &x) {
+  os << "BSL(";
+  os << ')';
+  return os;
+}
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::BSL &, const BinaryIntrinsicKind::BSL &) { return true; }
+
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::BSR &x) {
+  os << "BSR(";
+  os << ')';
+  return os;
+}
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::BSR &, const BinaryIntrinsicKind::BSR &) { return true; }
+
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::BZSR &x) {
+  os << "BZSR(";
+  os << ')';
+  return os;
+}
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::BZSR &, const BinaryIntrinsicKind::BZSR &) { return true; }
+
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicEq &x) {
+  os << "LogicEq(";
+  os << ')';
+  return os;
+}
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicEq &, const BinaryIntrinsicKind::LogicEq &) { return true; }
+
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicNeq &x) {
+  os << "LogicNeq(";
+  os << ')';
+  return os;
+}
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicNeq &, const BinaryIntrinsicKind::LogicNeq &) { return true; }
+
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicAnd &x) {
+  os << "LogicAnd(";
+  os << ')';
+  return os;
+}
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicAnd &, const BinaryIntrinsicKind::LogicAnd &) { return true; }
+
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicOr &x) {
+  os << "LogicOr(";
+  os << ')';
+  return os;
+}
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicOr &, const BinaryIntrinsicKind::LogicOr &) { return true; }
+
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicLte &x) {
+  os << "LogicLte(";
+  os << ')';
+  return os;
+}
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicLte &, const BinaryIntrinsicKind::LogicLte &) { return true; }
+
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicGte &x) {
+  os << "LogicGte(";
+  os << ')';
+  return os;
+}
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicGte &, const BinaryIntrinsicKind::LogicGte &) { return true; }
+
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicLt &x) {
+  os << "LogicLt(";
+  os << ')';
+  return os;
+}
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicLt &, const BinaryIntrinsicKind::LogicLt &) { return true; }
+
+std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicGt &x) {
+  os << "LogicGt(";
+  os << ')';
+  return os;
+}
+bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicGt &, const BinaryIntrinsicKind::LogicGt &) { return true; }
 
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Any &x) {
   std::visit([&os](auto &&arg) { os << *arg; }, x);
@@ -736,6 +870,18 @@ bool Expr::operator==(const Expr::Base &l, const Expr::Base &r) {
   return *l.tpe == *r.tpe;
 }
 Type::Any Expr::tpe(const Expr::Any& x){ return select<&Expr::Base::tpe>(x); }
+
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::NullaryIntrinsic &x) {
+  os << "NullaryIntrinsic(";
+  os << x.kind;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Expr::operator==(const Expr::NullaryIntrinsic &l, const Expr::NullaryIntrinsic &r) { 
+  return *l.kind == *r.kind && *l.rtn == *r.rtn;
+}
 
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::UnaryIntrinsic &x) {
   os << "UnaryIntrinsic(";
@@ -765,32 +911,6 @@ std::ostream &Expr::operator<<(std::ostream &os, const Expr::BinaryIntrinsic &x)
 }
 bool Expr::operator==(const Expr::BinaryIntrinsic &l, const Expr::BinaryIntrinsic &r) { 
   return *l.lhs == *r.lhs && *l.rhs == *r.rhs && *l.kind == *r.kind && *l.rtn == *r.rtn;
-}
-
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::UnaryLogicIntrinsic &x) {
-  os << "UnaryLogicIntrinsic(";
-  os << x.lhs;
-  os << ',';
-  os << x.kind;
-  os << ')';
-  return os;
-}
-bool Expr::operator==(const Expr::UnaryLogicIntrinsic &l, const Expr::UnaryLogicIntrinsic &r) { 
-  return *l.lhs == *r.lhs && *l.kind == *r.kind;
-}
-
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::BinaryLogicIntrinsic &x) {
-  os << "BinaryLogicIntrinsic(";
-  os << x.lhs;
-  os << ',';
-  os << x.rhs;
-  os << ',';
-  os << x.kind;
-  os << ')';
-  return os;
-}
-bool Expr::operator==(const Expr::BinaryLogicIntrinsic &l, const Expr::BinaryLogicIntrinsic &r) { 
-  return *l.lhs == *r.lhs && *l.rhs == *r.rhs && *l.kind == *r.kind;
 }
 
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Cast &x) {
@@ -1300,68 +1420,84 @@ std::size_t std::hash<polyregion::polyast::Term::StringConst>::operator()(const 
   std::size_t seed = std::hash<decltype(x.value)>()(x.value);
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Add>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Add &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Add");
+std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxX>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxX &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxX");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Sub>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Sub &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Sub");
+std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxY>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxY &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxY");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Mul>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Mul &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Mul");
+std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxZ>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxZ &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxZ");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Div>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Div &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Div");
+std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGlobalSizeX>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGlobalSizeX &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGlobalSizeX");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Rem>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Rem &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Rem");
+std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGlobalSizeY>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGlobalSizeY &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGlobalSizeY");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Pow>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Pow &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Pow");
+std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGlobalSizeZ>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGlobalSizeZ &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGlobalSizeZ");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Min>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Min &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Min");
+std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupIdxX>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupIdxX &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGroupIdxX");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Max>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Max &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Max");
+std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupIdxY>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupIdxY &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGroupIdxY");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Atan2>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Atan2 &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Atan2");
+std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupIdxZ>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupIdxZ &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGroupIdxZ");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Hypot>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Hypot &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Hypot");
+std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupSizeX>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupSizeX &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGroupSizeX");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::BAnd>::operator()(const polyregion::polyast::BinaryIntrinsicKind::BAnd &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::BAnd");
+std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupSizeY>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupSizeY &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGroupSizeY");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::BOr>::operator()(const polyregion::polyast::BinaryIntrinsicKind::BOr &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::BOr");
+std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupSizeZ>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupSizeZ &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGroupSizeZ");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::BXor>::operator()(const polyregion::polyast::BinaryIntrinsicKind::BXor &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::BXor");
+std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuLocalIdxX>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuLocalIdxX &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuLocalIdxX");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::BSL>::operator()(const polyregion::polyast::BinaryIntrinsicKind::BSL &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::BSL");
+std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuLocalIdxY>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuLocalIdxY &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuLocalIdxY");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::BSR>::operator()(const polyregion::polyast::BinaryIntrinsicKind::BSR &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::BSR");
+std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuLocalIdxZ>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuLocalIdxZ &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuLocalIdxZ");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::BZSR>::operator()(const polyregion::polyast::BinaryIntrinsicKind::BZSR &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::BZSR");
+std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuLocalSizeX>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuLocalSizeX &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuLocalSizeX");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuLocalSizeY>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuLocalSizeY &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuLocalSizeY");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuLocalSizeZ>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuLocalSizeZ &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuLocalSizeZ");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupBarrier>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupBarrier &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGroupBarrier");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupFence>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupFence &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGroupFence");
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Sin>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Sin &x) const noexcept {
@@ -1464,40 +1600,109 @@ std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Neg>::operator()(
   std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Neg");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Eq>::operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Eq &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryLogicIntrinsicKind::Eq");
+std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::LogicNot>::operator()(const polyregion::polyast::UnaryIntrinsicKind::LogicNot &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::LogicNot");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Neq>::operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Neq &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryLogicIntrinsicKind::Neq");
+std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Add>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Add &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Add");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::And>::operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::And &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryLogicIntrinsicKind::And");
+std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Sub>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Sub &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Sub");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Or>::operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Or &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryLogicIntrinsicKind::Or");
+std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Mul>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Mul &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Mul");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Lte>::operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Lte &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryLogicIntrinsicKind::Lte");
+std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Div>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Div &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Div");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Gte>::operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Gte &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryLogicIntrinsicKind::Gte");
+std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Rem>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Rem &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Rem");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Lt>::operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Lt &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryLogicIntrinsicKind::Lt");
+std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Pow>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Pow &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Pow");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::BinaryLogicIntrinsicKind::Gt>::operator()(const polyregion::polyast::BinaryLogicIntrinsicKind::Gt &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryLogicIntrinsicKind::Gt");
+std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Min>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Min &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Min");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::UnaryLogicIntrinsicKind::Not>::operator()(const polyregion::polyast::UnaryLogicIntrinsicKind::Not &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryLogicIntrinsicKind::Not");
+std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Max>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Max &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Max");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Atan2>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Atan2 &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Atan2");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Hypot>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Hypot &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Hypot");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::BAnd>::operator()(const polyregion::polyast::BinaryIntrinsicKind::BAnd &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::BAnd");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::BOr>::operator()(const polyregion::polyast::BinaryIntrinsicKind::BOr &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::BOr");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::BXor>::operator()(const polyregion::polyast::BinaryIntrinsicKind::BXor &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::BXor");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::BSL>::operator()(const polyregion::polyast::BinaryIntrinsicKind::BSL &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::BSL");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::BSR>::operator()(const polyregion::polyast::BinaryIntrinsicKind::BSR &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::BSR");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::BZSR>::operator()(const polyregion::polyast::BinaryIntrinsicKind::BZSR &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::BZSR");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicEq>::operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicEq &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::LogicEq");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicNeq>::operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicNeq &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::LogicNeq");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicAnd>::operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicAnd &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::LogicAnd");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicOr>::operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicOr &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::LogicOr");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicLte>::operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicLte &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::LogicLte");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicGte>::operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicGte &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::LogicGte");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicLt>::operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicLt &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::LogicLt");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicGt>::operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicGt &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::LogicGt");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Expr::NullaryIntrinsic>::operator()(const polyregion::polyast::Expr::NullaryIntrinsic &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.kind)>()(x.kind);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Expr::UnaryIntrinsic>::operator()(const polyregion::polyast::Expr::UnaryIntrinsic &x) const noexcept {
@@ -1511,17 +1716,6 @@ std::size_t std::hash<polyregion::polyast::Expr::BinaryIntrinsic>::operator()(co
   seed ^= std::hash<decltype(x.rhs)>()(x.rhs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.kind)>()(x.kind) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::Expr::UnaryLogicIntrinsic>::operator()(const polyregion::polyast::Expr::UnaryLogicIntrinsic &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.lhs)>()(x.lhs);
-  seed ^= std::hash<decltype(x.kind)>()(x.kind) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::Expr::BinaryLogicIntrinsic>::operator()(const polyregion::polyast::Expr::BinaryLogicIntrinsic &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.lhs)>()(x.lhs);
-  seed ^= std::hash<decltype(x.rhs)>()(x.rhs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(x.kind)>()(x.kind) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Expr::Cast>::operator()(const polyregion::polyast::Expr::Cast &x) const noexcept {

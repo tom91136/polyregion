@@ -58,12 +58,6 @@ object IntrinsifyPass {
     (p.Expr.BinaryIntrinsic(xVal, yVal, kind, upper), xStmts ++ yStmts)
   }
 
-  def binaryNumericIntrinsic(x: p.Term, y: p.Term, upper: p.Type, idx: Int, kind: p.BinaryLogicIntrinsicKind) = {
-    val (xVal, xStmts) = castOrId(x, upper, s"intr_l${idx}")
-    val (yVal, yStmts) = castOrId(y, upper, s"intr_r${idx}")
-    (p.Expr.BinaryLogicIntrinsic(xVal, yVal, kind), xStmts ++ yStmts)
-  }
-
   private def intrinsifyInstanceApply(s: p.Stmt, idx: Int) = s.mapAccExpr[p.Expr.Invoke] {
     case inv @ p.Expr.Invoke(sym, tpeArgs, Some(recv), args, rtn) =>
       (sym.fqn, recv, args) match {
@@ -113,31 +107,31 @@ object IntrinsifyPass {
           (expr, Nil, inv :: Nil)
         case (op :: Nil, x, y :: Nil) if x.tpe == p.Type.Bool && y.tpe == p.Type.Bool && rtn == p.Type.Bool =>
           val (expr, stmts) = op match {
-            case "&&" => (p.Expr.BinaryLogicIntrinsic(x, y, p.BinaryLogicIntrinsicKind.And), Nil)
-            case "||" => (p.Expr.BinaryLogicIntrinsic(x, y, p.BinaryLogicIntrinsicKind.Or), Nil)
-            case "==" => (p.Expr.BinaryLogicIntrinsic(x, y, p.BinaryLogicIntrinsicKind.Eq), Nil)
-            case "!=" => (p.Expr.BinaryLogicIntrinsic(x, y, p.BinaryLogicIntrinsicKind.Neq), Nil)
+            case "&&" => (p.Expr.BinaryIntrinsic(x, y, p.BinaryIntrinsicKind.LogicAnd, p.Type.Bool), Nil)
+            case "||" => (p.Expr.BinaryIntrinsic(x, y, p.BinaryIntrinsicKind.LogicOr, p.Type.Bool), Nil)
+            case "==" => (p.Expr.BinaryIntrinsic(x, y, p.BinaryIntrinsicKind.LogicEq, p.Type.Bool), Nil)
+            case "!=" => (p.Expr.BinaryIntrinsic(x, y, p.BinaryIntrinsicKind.LogicNeq, p.Type.Bool), Nil)
           }
           (expr, stmts, inv :: Nil)
         case (_ :+ op, x, y :: Nil) if x.tpe.isNumeric && y.tpe.isNumeric && rtn == p.Type.Bool =>
           val (expr, stmts) = op match {
             case "<" =>
-              binaryNumericIntrinsic(x, y, binaryPromote(x.tpe, y.tpe), idx, p.BinaryLogicIntrinsicKind.Lt)
+              binaryNumericIntrinsic(x, y, binaryPromote(x.tpe, y.tpe), idx, p.BinaryIntrinsicKind.LogicLt)
             case "<=" =>
-              binaryNumericIntrinsic(x, y, binaryPromote(x.tpe, y.tpe), idx, p.BinaryLogicIntrinsicKind.Lte)
+              binaryNumericIntrinsic(x, y, binaryPromote(x.tpe, y.tpe), idx, p.BinaryIntrinsicKind.LogicLte)
             case ">" =>
-              binaryNumericIntrinsic(x, y, binaryPromote(x.tpe, y.tpe), idx, p.BinaryLogicIntrinsicKind.Gt)
+              binaryNumericIntrinsic(x, y, binaryPromote(x.tpe, y.tpe), idx, p.BinaryIntrinsicKind.LogicGt)
             case ">=" =>
-              binaryNumericIntrinsic(x, y, binaryPromote(x.tpe, y.tpe), idx, p.BinaryLogicIntrinsicKind.Gte)
+              binaryNumericIntrinsic(x, y, binaryPromote(x.tpe, y.tpe), idx, p.BinaryIntrinsicKind.LogicGte)
             // rules for eq and neq is different from the general ref equality so we handle them here
-            case "==" => binaryNumericIntrinsic(x, y, binaryPromote(x.tpe, y.tpe), idx, p.BinaryLogicIntrinsicKind.Eq)
-            case "!=" => binaryNumericIntrinsic(x, y, binaryPromote(x.tpe, y.tpe), idx, p.BinaryLogicIntrinsicKind.Neq)
+            case "==" => binaryNumericIntrinsic(x, y, binaryPromote(x.tpe, y.tpe), idx, p.BinaryIntrinsicKind.LogicEq)
+            case "!=" => binaryNumericIntrinsic(x, y, binaryPromote(x.tpe, y.tpe), idx, p.BinaryIntrinsicKind.LogicNeq)
           }
           (expr, stmts, inv :: Nil)
         case (op :: Nil, x, y :: Nil) if x.tpe == y.tpe && rtn == p.Type.Bool =>
           val (expr, stmts) = op match {
-            case "==" => (p.Expr.BinaryLogicIntrinsic(x, y, p.BinaryLogicIntrinsicKind.Eq), Nil)
-            case "!=" => (p.Expr.BinaryLogicIntrinsic(x, y, p.BinaryLogicIntrinsicKind.Neq), Nil)
+            case "==" => (p.Expr.BinaryIntrinsic(x, y, p.BinaryIntrinsicKind.LogicEq, p.Type.Bool), Nil)
+            case "!=" => (p.Expr.BinaryIntrinsic(x, y, p.BinaryIntrinsicKind.LogicNeq, p.Type.Bool), Nil)
           }
           (expr, stmts, inv :: Nil)
         case ("scala" :: ("Double" | "Float" | "Long" | "Int" | "Short" | "Char" | "Byte") :: op :: Nil, x, Nil)
@@ -173,7 +167,7 @@ object IntrinsifyPass {
                 Nil
               )
             case "unary_!" if x.tpe == p.Type.Bool =>
-              (p.Expr.UnaryLogicIntrinsic(recv, p.UnaryLogicIntrinsicKind.Not), Nil)
+              (p.Expr.UnaryIntrinsic(recv, p.UnaryIntrinsicKind.LogicNot, p.Type.Bool), Nil)
 
             // JLS 5.6.1. Unary Numeric Promotion
             case "unary_~" => unaryNumericIntrinsic(x, idx, p.UnaryIntrinsicKind.BNot)
