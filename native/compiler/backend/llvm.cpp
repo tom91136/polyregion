@@ -71,7 +71,7 @@ Pair<llvm::StructType *, LLVM::AstTransformer::StructMemberTable> LLVM::AstTrans
   return {llvm::StructType::create(C, types, qualified(def.name)), table};
 }
 
-llvm::Type *LLVM::AstTransformer::mkTpe(const Type::Any &tpe) {                                   //
+llvm::Type *LLVM::AstTransformer::mkTpe(const Type::Any &tpe, unsigned AS) {                      //
   return variants::total(                                                                         //
       *tpe,                                                                                       //
       [&](const Type::Float &x) -> llvm::Type * { return llvm::Type::getFloatTy(C); },            //
@@ -87,7 +87,7 @@ llvm::Type *LLVM::AstTransformer::mkTpe(const Type::Any &tpe) {                 
       [&](const Type::Nothing &x) -> llvm::Type * { return undefined(__FILE_NAME__, __LINE__); }, //
       [&](const Type::Struct &x) -> llvm::Type * {
         if (auto def = polyregion::get_opt(structTypes, x.name); def) {
-          return def->first->getPointerTo();
+          return def->first->getPointerTo(AS);
         } else {
 
           auto pool = mk_string2<Sym, Pair<llvm::StructType *, StructMemberTable>>(
@@ -100,7 +100,7 @@ llvm::Type *LLVM::AstTransformer::mkTpe(const Type::Any &tpe) {                 
       }, //
       [&](const Type::Array &x) -> llvm::Type * {
         auto comp = mkTpe(x.component);
-        return comp->isPointerTy() ? comp : comp->getPointerTo();
+        return comp->isPointerTy() ? comp : comp->getPointerTo(AS);
       },                                                                                                  //
       [&](const Type::Var &x) -> llvm::Type * { return undefined(__FILE_NAME__, __LINE__, "type var"); }, //
       [&](const Type::Exec &x) -> llvm::Type * { return undefined(__FILE_NAME__, __LINE__, "exec"); }
@@ -952,6 +952,24 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
 Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform(const std::unique_ptr<llvm::Module> &module,
                                                                     const Program &program) {
 
+  // Work out what address space we're using for arguments
+  unsigned GlobalAS = 0;
+  switch (options.target) {
+    case Target::x86_64:
+    case Target::AArch64:
+      break; // CPUs default to generic so nothing to do here.
+      // For GPUs, any pointer passed in as args should be annotated global AS.
+      //             AMDGPU   |   NVVM
+      //      Generic (code)  0  Generic (code)
+      //       Global (Host)  1  Global
+      //        Region (GDS)  2  Internal Use
+      //         Local (LDS)  3  Shared
+      // Constant (Internal)  4  Constant
+      //             Private  5  Local
+    case Target::NVPTX64: GlobalAS = 1; break;
+    case Target::AMDGCN: GlobalAS = 2; break;
+  }
+
   auto fnTree = program.entry;
 
   // set up the struct defs first so that structs in params work
@@ -967,19 +985,29 @@ Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform(const std::u
   allArgs.insert(allArgs.begin(), fnTree.args.begin(), fnTree.args.end());
   allArgs.insert(allArgs.begin(), fnTree.captures.begin(), fnTree.captures.end());
 
-  auto paramTpes = map_vec<Named, llvm::Type *>(allArgs, [&](auto &&named) { return mkTpe(named.tpe); });
+  auto paramTpes = map_vec<Named, llvm::Type *>(allArgs, [&](auto &&named) { return mkTpe(named.tpe, GlobalAS); });
 
-  auto rtnTpe = variants::total(
-      *kind(fnTree.rtn),                                                               //
-      [&](const TypeKind::Fractional &) -> llvm::Type * { return mkTpe(fnTree.rtn); }, //
-      [&](const TypeKind::Integral &) -> llvm::Type * { return mkTpe(fnTree.rtn); },   //
-      [&](const TypeKind::None &) -> llvm::Type * { return mkTpe(fnTree.rtn); },       //
-      [&](const TypeKind::Ref &) -> llvm::Type * { return mkTpe(fnTree.rtn); }         //
-  );
+  auto rtnTpe = mkTpe(fnTree.rtn);
 
   auto fnTpe = llvm::FunctionType::get(rtnTpe, {paramTpes}, false);
 
   auto *fn = llvm::Function::Create(fnTpe, llvm::Function::ExternalLinkage, "lambda", *module);
+
+  // setup function conventions for targets
+  switch (options.target) {
+    case Target::x86_64:
+    case Target::AArch64:
+      // nothing to do for CPUs
+      break;
+    case Target::NVPTX64:
+      module->getOrInsertNamedMetadata("nvvm.annotations")
+          ->addOperand(
+              llvm::MDNode::get(C, //
+                                {llvm::ValueAsMetadata::get(fn), llvm::MDString::get(C, fn->getName()),
+                                 llvm::ValueAsMetadata::get(llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 1))}));
+      break;
+    case Target::AMDGCN: fn->setCallingConv(llvm::CallingConv::AMDGPU_KERNEL); break;
+  }
 
   auto *entry = llvm::BasicBlock::Create(C, "entry", fn);
   B.SetInsertPoint(entry);
@@ -990,14 +1018,9 @@ Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform(const std::u
       std::inserter(stackVarPtrs, stackVarPtrs.end()), //
       [&](auto &arg, const auto &named) -> Pair<std::string, Pair<Type::Any, llvm::Value *>> {
         arg.setName(named.symbol);
-
-        if (holds<TypeKind::Ref>(kind(named.tpe)) && false) {
-          return {named.symbol, {named.tpe, &arg}};
-        } else {
-          auto stack = B.CreateAlloca(mkTpe(named.tpe), nullptr, named.symbol + "_stack_ptr");
-          B.CreateStore(&arg, stack);
-          return {named.symbol, {named.tpe, stack}};
-        }
+        auto stack = B.CreateAlloca(mkTpe(named.tpe, GlobalAS), nullptr, named.symbol + "_stack_ptr");
+        B.CreateStore(&arg, stack);
+        return {named.symbol, {named.tpe, stack}};
       });
 
   for (auto &stmt : fnTree.body) {

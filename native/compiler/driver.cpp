@@ -63,8 +63,8 @@ int main(int argc, char *argv[]) {
 
   Program p(fn, {}, {});
   std::cout << repr(p) << std::endl;
-  polyregion::compiler::Options opt{polyregion::compiler::Target::Object_LLVM_AMDGCN, "gfx906"};
-  //  polyregion::compiler::Options opt{polyregion::compiler::Target::Object_LLVM_NVPTX64, "sm_61"};
+//  polyregion::compiler::Options opt{polyregion::compiler::Target::Object_LLVM_AMDGCN, "gfx906"};
+    polyregion::compiler::Options opt{polyregion::compiler::Target::Object_LLVM_NVPTX64, "sm_61"};
   auto c = polyregion::compiler::compile(p, opt);
   std::cout << c << std::endl;
 

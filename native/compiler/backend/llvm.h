@@ -69,7 +69,7 @@ public:
         : options(std::move(options)), C(c), stackVarPtrs(), structTypes(), functions(), B(C) {}
 
     Pair<llvm::StructType *, StructMemberTable> mkStruct(const StructDef &def);
-    llvm::Type *mkTpe(const Type::Any &tpe);
+    llvm::Type *mkTpe(const Type::Any &tpe, unsigned AS = 0);
     Opt<llvm::StructType *> lookup(const Sym &s);
     Pair<Opt<std::string>, std::string> transform(const std::unique_ptr<llvm::Module> &module, const Program &);
     Pair<Opt<std::string>, std::string> optimise(const std::unique_ptr<llvm::Module> &module);
