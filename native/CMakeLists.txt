@@ -25,11 +25,18 @@ endif ()
 
 set(LLVM_SRC_VERSION 14.0.3)
 set(LLVM_SRC_DIR_IN_RELEASE llvm-${LLVM_SRC_VERSION}.src)
+set(LLD_SRC_DIR_IN_RELEASE lld-${LLVM_SRC_VERSION}.src)
 
 FetchContent_Declare(
         llvm
         URL https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_SRC_VERSION}/llvm-${LLVM_SRC_VERSION}.src.tar.xz
         URL_HASH SHA256=1e09e8c26e1b67bc94a128b62e9b9c24b70c697a2436a479c9e5eedc4ae29654
+)
+
+FetchContent_Declare(
+        lld
+        URL https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_SRC_VERSION}/lld-${LLVM_SRC_VERSION}.src.tar.xz
+        URL_HASH SHA256=a91716f59f8e78018246a7ab6cad1bfdddec270c4db6d3d2a394844ee8799c8f
 )
 
 FetchContent_Declare(
@@ -87,7 +94,7 @@ else ()
     #    set(CMAKE_CXX_FLAGS "-fvisibility=hidden  -ffunction-sections -fdata-sections" CACHE INTERNAL "")
 
 
-    set(LLVM_ENABLE_RTTI OFF CACHE BOOL "")
+    set(LLVM_ENABLE_RTTI ON CACHE BOOL "")
 
     set(LLVM_BUILD_RUNTIME OFF CACHE BOOL "")
 
@@ -138,6 +145,54 @@ else ()
     include_directories("${llvm_BINARY_DIR}/include" "${llvm_SOURCE_DIR}/include")
     message(STATUS "Using LLVM: ${LLVM_PACKAGE_VERSION} (${llvm_SOURCE_DIR})")
 
+
+    FetchContent_GetProperties(lld)
+    if (NOT lld_POPULATED)
+        FetchContent_Populate(lld)
+        # XXX as we are doing our custom FetchContent_MakeAvailable, SOURCE_SUBDIR isn't available so we do it manually here
+        set(lld_SOURCE_DIR "${lld_SOURCE_DIR}/${LLD_SRC_DIR_IN_RELEASE}")
+        set(lld_BINARY_DIR "${lld_BINARY_DIR}/${LLD_SRC_DIR_IN_RELEASE}")
+
+        set(LLVM_TABLEGEN_EXE ${llvm_BINARY_DIR}/bin/llvm-tblgen)
+        set(LLD_VERSION ${LLVM_SRC_VERSION})
+
+        #        configure_file(
+        #                ${lld_SOURCE_DIR}/include/lld/Common/Version.inc.in
+        #                ${lld_BINARY_DIR}/include/lld/Common/Version.inc)
+
+
+        macro(add_lld_library name)
+            cmake_parse_arguments(ARG
+                    "SHARED"
+                    ""
+                    ""
+                    ${ARGN})
+            if (ARG_SHARED)
+                set(ARG_ENABLE_SHARED SHARED)
+            endif ()
+            llvm_add_library(${name} ${ARG_ENABLE_SHARED} ${ARG_UNPARSED_ARGUMENTS})
+            set_target_properties(${name} PROPERTIES FOLDER "lld libraries")
+        endmacro(add_lld_library)
+
+        add_subdirectory(${lld_SOURCE_DIR}/Common ${lld_BINARY_DIR}/Common)
+        target_include_directories(lldCommon
+                PUBLIC ${lld_SOURCE_DIR}/include ${lld_BINARY_DIR}/include
+                PUBLIC ${lld_BINARY_DIR}/Common)
+
+        add_subdirectory(${lld_SOURCE_DIR}/ELF ${lld_BINARY_DIR}/ELF)
+
+        target_include_directories(lldELF
+                PUBLIC ${lld_SOURCE_DIR}/include ${lld_BINARY_DIR}/include
+                PUBLIC ${lld_BINARY_DIR}/ELF
+                PUBLIC ${lld_SOURCE_DIR}/ELF)
+        #        add_subdirectory(COFF)
+        #        add_subdirectory(MachO)
+        #        add_subdirectory(MinGW)
+        #        add_subdirectory(wasm)
+
+    endif ()
+
+
 endif ()
 
 
@@ -153,8 +208,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # FIXME adjust for CUDA stuff for now
-#set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan)
-set(COMMON_DEBUG_OPTIONS  )
+set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan)
+#set(COMMON_DEBUG_OPTIONS  )
 
 set(COMMON_COMPILE_OPTIONS
         -ffunction-sections       # keep functions in its own section for better --gc-sections results

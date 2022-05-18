@@ -271,7 +271,7 @@ compiler::Compilation backend::CSource::run(const Program &program) {
 
   auto def = structDefs + "\n" + prototype + " {\n" + body + "\n}";
   //  std::cout << def << std::endl;
-  std::vector<uint8_t> data(def.c_str(), def.c_str() + def.length() + 1);
+  std::vector<char> data(def.c_str(), def.c_str() + def.length() + 1);
 
   std::string dialectName;
   switch (dialect) {

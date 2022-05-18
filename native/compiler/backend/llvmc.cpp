@@ -1,6 +1,8 @@
 #include "llvmc.h"
 
 #include "compiler.h"
+#include "lld_lite.h"
+
 #include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
@@ -13,13 +15,12 @@
 #include "llvm/IR/LLVMRemarkStreamer.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
-#include "llvm/IR/Verifier.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/SubtargetFeature.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/Object/ELF.h"
 #include "llvm/Pass.h"
-#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/ToolOutputFile.h"
@@ -28,8 +29,6 @@
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Utils/Cloning.h"
-
-// /home/tom/polyregion/native/cmake-build-debug-clang/_deps/llvm-src/llvm-14.0.3.src/lib/Target/AMDGPU/Utils/AMDGPUBaseInfo.h
 
 #include <iostream>
 
@@ -99,8 +98,6 @@ void llvmc::initialise() {
   initializeTransformUtils(*r);
   initializeReplaceWithVeclibLegacyPass(*r);
 }
-
-// const llvm::TargetMachine &llvmc::targetMachine() { return *LLVMCurrentMachine; }
 
 /// Set function attributes of function \p F based on CPU, Features, and command
 /// line flags.
@@ -219,30 +216,48 @@ polyregion::compiler::Compilation llvmc::compileModule(const TargetInfo &info, b
   llvm::SmallVector<char, 0> objBuffer;
   llvm::raw_svector_ostream objStream(objBuffer);
   doCodegen(*llvm::CloneModule(*M), [&](auto &tm, auto &pm, auto &ctx) {
-    //    tm.addAsmPrinter(pm, objStream, nullptr, llvm::CodeGenFileType::CGFT_ObjectFile, ctx);
+    tm.addAsmPrinter(pm, objStream, nullptr, llvm::CodeGenFileType::CGFT_ObjectFile, ctx);
   });
 
-  //  for (auto &&f : MMIWP->getMMI().getModule()->functions()) {
-  //    std::cout << f.getName().str() << std::endl;
-  //    auto mf = MMIWP->getMMI().getMachineFunction(f);
-  //    std::for_each(mf->begin(), mf->end(), [&](MachineBasicBlock &b) {
-  //      std::cout << "[F] BB=" << b.getName().str() << "\n";
-  //      std::for_each(b.begin(), b.end(), [&](MachineInstr &ins) {
-  //        auto mnem = TM->getMCInstrInfo()->getName(ins.getOpcode());
-  //        std::cout << "    " << mnem.str() << "\n";
-  //      });
-  //    });
-  //  }
-
-  //  std::cout << "Done = "
-  //            << " b=" << asmBuffer.size() << std::endl;
+  //  llvm::legacy::PassManager pass;
+  //  llvm::SmallString<8> dataObj;
+  //  llvm::raw_svector_ostream destObj(dataObj);
+  //  TM->addPassesToEmitFile(pass, destObj, nullptr, llvm::CGFT_ObjectFile);
+  //  pass.run(*llvm::CloneModule(*M));
+  //  std::string obj(dataObj.begin(), dataObj.end());
 
   auto elapsed = compiler::elapsedNs(start);
-  polyregion::compiler::Compilation c(                                                                //
-      std::vector<uint8_t>(objBuffer.begin(), objBuffer.end()),                                       //
-      {{compiler::nowMs(), elapsed, "llvm_to_obj", std::string(asmBuffer.begin(), asmBuffer.end())}}, //
-      ""                                                                                              //
-  );
+  compiler::Event llvmToObjectEvent{compiler::nowMs(), elapsed, "llvm_to_obj",
+                                    std::string(asmBuffer.begin(), asmBuffer.end())};
 
-  return c;
+  if (info.triple.getOS() == llvm::Triple::AMDHSA) {
+    // we need to link the object file for AMDGPu
+    auto linkerStart = compiler::nowMono();
+    lld::elf::ObjFile<llvm::object::ELF64LE> kernelObject(llvm::MemoryBufferRef(objStream.str(), ""), "kernel.hsaco");
+    // XXX Don't strip AMDGCN ELFs as hipModuleLoad will report "Invalid ptx". GC and optimisation is fine.
+    auto [err, result] = backend::lld_lite::link({"-shared", "--gc-sections", "-O3"}, {&kernelObject});
+    auto linkerElapsed = compiler::elapsedNs(linkerStart);
+    compiler::Event lldLinkAMDGPUEvent{compiler::nowMs(), linkerElapsed, "lld_link_amdgpu", ""};
+    if (!result) {
+      // linker failed
+      return polyregion::compiler::Compilation(                                      //
+          {},                                                                        //
+          {llvmToObjectEvent, lldLinkAMDGPUEvent},                                   //
+          "Linker did not finish normally: " + err.value_or("(no message reported)") //
+      );
+    } else {
+      // linker succeeded, still report any stdout to as message
+      return polyregion::compiler::Compilation(              //
+          std::vector<char>(result->begin(), result->end()), //
+          {llvmToObjectEvent, lldLinkAMDGPUEvent},           //
+          err.value_or("")                                   //
+      );
+    }
+  } else {
+    return polyregion::compiler::Compilation(                                                           //
+        std::vector<char>(objBuffer.begin(), objBuffer.end()),                                          //
+        {{compiler::nowMs(), elapsed, "llvm_to_obj", std::string(asmBuffer.begin(), asmBuffer.end())}}, //
+        ""                                                                                              //
+    );
+  }
 }

@@ -5,6 +5,7 @@ set(LIB_SOURCES
         backend/llvm.cpp
         backend/llvmc.cpp
         backend/c_source.cpp
+        backend/lld_lite.cpp
 
         ast.cpp
         dis.cpp
@@ -78,7 +79,12 @@ llvm_map_components_to_libnames(LLVM_LIBS
         vectorize
 
         )
+
+set(LLD_LIBS lldCommon lldELF)
+
 message(STATUS "[compiler] Adding LLVM libs = ${LLVM_LIBS} ")
+message(STATUS "[compiler] Adding LLD libs = ${LLD_LIBS} ")
+
 
 set(LLVM_TARGETS_SOURCE_HEADERS ${LLVM_TARGETS_TO_BUILD})
 set(LLVM_TARGETS_BINARY_HEADERS ${LLVM_TARGETS_TO_BUILD})
@@ -91,13 +97,14 @@ target_include_directories(compiler-lib PRIVATE ${LLVM_TARGETS_SOURCE_HEADERS} $
 
 
 target_link_libraries(compiler-lib PRIVATE
-        "$<$<CONFIG:RELEASE>:${LLVM_LIBS}>"
-        "$<$<CONFIG:DEBUG>:${LLVM_LIBS}>"
+
+        "$<$<CONFIG:RELEASE>:${LLVM_LIBS};${LLD_LIBS}>"
+        "$<$<CONFIG:DEBUG>:${LLVM_LIBS};${LLD_LIBS}>"
         #        "$<$<CONFIG:DEBUG>:LLVM>"  # linking all the static libs is too slow for dev
         #        capstone-static
         )
 target_link_libraries(compiler-tests PRIVATE compiler-lib)
-target_link_libraries(compiler-drv PRIVATE compiler-lib ${LLVM_LIBS})
+target_link_libraries(compiler-drv PRIVATE compiler-lib ${LLVM_LIBS} ${LLD_LIBS})
 
 set(COMPILE_OPTIONS
         ${COMMON_COMPILE_OPTIONS}

@@ -22,7 +22,7 @@ EXPORT extern const polyregion_backend SOURCE_C_OPENCL1_1;
 EXPORT extern const polyregion_backend SOURCE_C_C11;
 
 typedef struct EXPORT {
-  uint8_t *data;
+  char *data;
   size_t size;
 } polyregion_buffer;
 

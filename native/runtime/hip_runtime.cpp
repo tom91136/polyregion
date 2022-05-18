@@ -7,9 +7,11 @@ using namespace polyregion::runtime::hip;
 
 #define CHECKED(f) checked((f), __FILE__, __LINE__)
 
+static constexpr const char *ERROR_PREFIX = "[HIP error] ";
+
 static void checked(hipError_t result, const std::string &file, int line) {
   if (result != hipSuccess) {
-    throw std::logic_error(std::string("[HIP error] " + file + ":" + std::to_string(line) + ": ") +
+    throw std::logic_error(std::string(ERROR_PREFIX + file + ":" + std::to_string(line) + ": ") +
                            hipewErrorString(result));
   }
 }
@@ -76,11 +78,12 @@ void HipDevice::loadKernel(const std::string &image) {
     CHECKED(hipModuleUnload(module));
   }
 
-  CHECKED(hipModuleLoad(&module, "vecAdd-hip-amdgcn-amd-amdhsa-gfx906.bc"));
-//  CHECKED(hipModuleLoadData(&module, image.data()));
+  CHECKED(hipModuleLoad(&module, "./bin_gfx906.so"));
+  //  CHECKED(hipModuleLoadData(&module, image.data()));
 }
 
 uintptr_t HipDevice::malloc(size_t size, Access access) {
+  if (size == 0) throw std::logic_error(std::string(ERROR_PREFIX) + "size is 0");
   hipDeviceptr_t ptr = {};
   CHECKED(hipMalloc(&ptr, size));
   return ptr;
@@ -100,7 +103,7 @@ void HipDevice::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, 
 
 void HipDevice::enqueueKernelAsync(const std::string &name, std::vector<TypedPointer> args, Dim gridDim, Dim blockDim,
                                    const std::function<void()> &cb) {
-  if (!module) throw std::logic_error("No module loaded");
+  if (!module) throw std::logic_error(std::string(ERROR_PREFIX) + "No module loaded");
 
   auto it = symbols.find(name);
   hipFunction_t fn = nullptr;

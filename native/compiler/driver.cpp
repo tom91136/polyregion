@@ -6,6 +6,7 @@
 #include "ast.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/Support/SourceMgr.h"
+//#include "lld"
 
 int main(int argc, char *argv[]) {
 
@@ -32,41 +33,47 @@ int main(int argc, char *argv[]) {
   using namespace polyregion::polyast::Expr;
 
   Function fn(
-      Sym({"foo"}), {}, {}, {Named("xs", Type::Array(Type::Int()))}, {}, Type::Unit(),
+      Sym({"foo"}), {}, {}, {Named("xs", Type::Array(Type::Int())), Named("x", Type::Int())}, {}, Type::Unit(),
       {
 
           Var(Named("gid", Type::Int()), {NullaryIntrinsic(NullaryIntrinsicKind::GpuGlobalIdxX(), Type::Int())}),
 
-          Var(Named("a", Type::Int()), {Alias(IntConst(42))}),
-          Var(Named("b", Type::Int()), {Alias(IntConst(42))}),
-          Var(Named("c", Type::Int()),                                //
-              BinaryIntrinsic(Select({}, Named("a", Type::Int())),    //
-                              Select({}, Named("b", Type::Int())),    //
-                              BinaryIntrinsicKind::Add(), Type::Int() //
-                              )                                       //
-              ),
+          Var(Named("xs@gid", Type::Int()), //
+              {Index(Select({}, Named("xs", Type::Array(Type::Int()))), Select({}, Named("gid", Type::Int())),
+                     Type::Int())}),
 
-          Var(Named("xs0", Type::Int()), //
-              {Index(Select({}, Named("xs", Type::Array(Type::Int()))), IntConst(0), Type::Int())}),
-
-          Var(Named("xs0a", Type::Int()), //
+          Var(Named("result", Type::Int()), //
               {
-                  BinaryIntrinsic(Select({}, Named("xs0", Type::Int())),   //
-                                  Select({}, Named("c", Type::Int())),     //
-                                  BinaryIntrinsicKind::Add(), Type::Int()) //
+                  BinaryIntrinsic(Select({}, Named("xs@gid", Type::Int())), //
+                                  Select({}, Named("gid", Type::Int())),    //
+                                  BinaryIntrinsicKind::Add(), Type::Int())  //
               }),
 
-          Update(Select({}, Named("xs", Type::Array(Type::Int()))), IntConst(0),
-                 Select({}, Named("xs0a", Type::Int()))),
+          Var(Named("resultX2", Type::Int()), //
+              {
+                  BinaryIntrinsic(Select({}, Named("result", Type::Int())), //
+                                  Select({}, Named("x", Type::Int())),      //
+                                  BinaryIntrinsicKind::Mul(), Type::Int())  //
+              }),
+
+          Update(Select({}, Named("xs", Type::Array(Type::Int()))), Select({}, Named("gid", Type::Int())),
+                 Select({}, Named("resultX2", Type::Int()))),
           Return(Alias(UnitConst())),
       });
 
   Program p(fn, {}, {});
   std::cout << repr(p) << std::endl;
-//  polyregion::compiler::Options opt{polyregion::compiler::Target::Object_LLVM_AMDGCN, "gfx906"};
-    polyregion::compiler::Options opt{polyregion::compiler::Target::Object_LLVM_NVPTX64, "sm_61"};
+  polyregion::compiler::Options opt{polyregion::compiler::Target::Object_LLVM_AMDGCN, "gfx906"};
+  //  polyregion::compiler::Options opt{polyregion::compiler::Target::Object_LLVM_NVPTX64, "sm_61"};
   auto c = polyregion::compiler::compile(p, opt);
-  std::cout << c << std::endl;
+//  std::cout << c << std::endl;
+
+  if (c.binary) {
+    std::ofstream outfile("bin_" + opt.arch.value_or("no_arch") + ".so",
+                          std::ios::out | std::ios::binary | std::ios::trunc);
+    outfile.write(c.binary->data(), c.binary->size());
+    outfile.close();
+  }
 
   //  using namespace polyregion;
   //
@@ -80,8 +87,10 @@ int main(int argc, char *argv[]) {
   //  };
   //  auto c = polyregion::backend::llvmc::compileModule(info, true, std::move(modExt), *ctx);
   //
-  //  std::cout << c << std::endl;
+    std::cout << c << std::endl;
 
-  std::cout << "Done" << std::endl;
+//  lld::elf
+
+  std::cout << "Done!" << std::endl;
   return EXIT_SUCCESS;
 }

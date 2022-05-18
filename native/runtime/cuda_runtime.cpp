@@ -7,9 +7,11 @@ using namespace polyregion::runtime::cuda;
 
 #define CHECKED(f) checked((f), __FILE__, __LINE__)
 
+static constexpr const char *ERROR_PREFIX = "[CUDA error] ";
+
 static void checked(CUresult result, const std::string &file, int line) {
   if (result != CUDA_SUCCESS) {
-    throw std::logic_error(std::string("[CUDA error] " + file + ":" + std::to_string(line) + ": ") +
+    throw std::logic_error(std::string(ERROR_PREFIX + file + ":" + std::to_string(line) + ": ") +
                            cuewErrorString(result));
   }
 }
@@ -83,6 +85,7 @@ void CudaDevice::loadKernel(const std::string &image) {
 }
 
 uintptr_t CudaDevice::malloc(size_t size, Access access) {
+  if (size == 0) throw std::logic_error(std::string(ERROR_PREFIX) + "size is 0");
   CUdeviceptr ptr = {};
   CHECKED(cuMemAlloc(&ptr, size));
   return ptr;
@@ -102,7 +105,7 @@ void CudaDevice::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size,
 
 void CudaDevice::enqueueKernelAsync(const std::string &name, std::vector<TypedPointer> args, Dim gridDim, Dim blockDim,
                                     const std::function<void()> &cb) {
-  if (!module) throw std::logic_error("No module loaded");
+  if (!module) throw std::logic_error(std::string(ERROR_PREFIX) + "No module loaded");
 
   auto it = symbols.find(name);
   CUfunction fn = nullptr;

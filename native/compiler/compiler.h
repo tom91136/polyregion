@@ -229,7 +229,7 @@ struct EXPORT Event {
       : epochMillis(epochMillis), elapsedNanos(elapsedNanos), name(std::move(name)), data(std::move(data)) {}
 };
 
-using Bytes = std::vector<uint8_t>;
+using Bytes = std::vector<char>;
 
 struct EXPORT Compilation {
   EXPORT std::vector<Layout> layouts;

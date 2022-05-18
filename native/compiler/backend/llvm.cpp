@@ -405,41 +405,17 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
                 [&](const NullaryIntrinsicKind::GpuGroupSizeX &) { return intr0(Intr::nvvm_read_ptx_sreg_nctaid_x); },
                 [&](const NullaryIntrinsicKind::GpuGroupSizeY &) { return intr0(Intr::nvvm_read_ptx_sreg_nctaid_y); },
                 [&](const NullaryIntrinsicKind::GpuGroupSizeZ &) { return intr0(Intr::nvvm_read_ptx_sreg_nctaid_z); },
-                [&](const NullaryIntrinsicKind::GpuLocalIdxX &) { return intr0(Intr::nvvm_read_ptx_sreg_ntid_x); },
-                [&](const NullaryIntrinsicKind::GpuLocalIdxY &) { return intr0(Intr::nvvm_read_ptx_sreg_ntid_y); },
-                [&](const NullaryIntrinsicKind::GpuLocalIdxZ &) { return intr0(Intr::nvvm_read_ptx_sreg_ntid_z); },
-                [&](const NullaryIntrinsicKind::GpuLocalSizeX &) { return intr0(Intr::nvvm_read_ptx_sreg_tid_x); },
-                [&](const NullaryIntrinsicKind::GpuLocalSizeY &) { return intr0(Intr::nvvm_read_ptx_sreg_tid_y); },
-                [&](const NullaryIntrinsicKind::GpuLocalSizeZ &) { return intr0(Intr::nvvm_read_ptx_sreg_tid_z); },
+                [&](const NullaryIntrinsicKind::GpuLocalIdxX &) { return intr0(Intr::nvvm_read_ptx_sreg_tid_x); },
+                [&](const NullaryIntrinsicKind::GpuLocalIdxY &) { return intr0(Intr::nvvm_read_ptx_sreg_tid_y); },
+                [&](const NullaryIntrinsicKind::GpuLocalIdxZ &) { return intr0(Intr::nvvm_read_ptx_sreg_tid_z); },
+                [&](const NullaryIntrinsicKind::GpuLocalSizeX &) { return intr0(Intr::nvvm_read_ptx_sreg_ntid_x); },
+                [&](const NullaryIntrinsicKind::GpuLocalSizeY &) { return intr0(Intr::nvvm_read_ptx_sreg_ntid_y); },
+                [&](const NullaryIntrinsicKind::GpuLocalSizeZ &) { return intr0(Intr::nvvm_read_ptx_sreg_ntid_z); },
+
                 [&](const NullaryIntrinsicKind::GpuGroupBarrier &) { return intr0(Intr::nvvm_barrier0); },
                 [&](const NullaryIntrinsicKind::GpuGroupFence &) { return intr0(Intr::nvvm_membar_cta); });
           }
           case Target::AMDGCN:
-
-            // # dispatch ptr (r600)
-            // ?         uint16_t
-            // localDim0 uint16_t
-            // localDim1 uint16_t
-            // localDim2 uint16_t
-            // globalDim0 uint32_t
-            // globalDim1 uint32_t
-            // globalDim2 uint32_t
-
-            // # implicit args
-            //            uint32_t
-            // globalDim0 uint32_t
-            // globalDim1 uint32_t
-            // globalDim2 uint32_t
-            // localDim0 uint16_t
-            // localDim1 uint16_t
-            // localDim2 uint16_t
-            // rem0 uint16_t
-            // rem1 uint16_t
-            // rem2 uint16_t
-            // offset0 uint64_t
-            // offset1 uint64_t
-            // offset2 uint64_t
-            // workDim? uint64_t
 
             // HSA Sys Arch 1.2:  2.9.6 Kernel Dispatch Packet format:
             //  15:0    header Packet header, see 2.9.1 Packet header (on page 25).
@@ -463,7 +439,7 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
             //          completion of the job
 
             // see llvm/libclc/amdgcn-amdhsa/lib/workitem/get_global_size.cl
-            auto grid_size_u32 = [&](size_t dim) -> ValPtr {
+            auto globalSizeU32 = [&](size_t dim) -> ValPtr {
               if (dim >= 3) throw std::logic_error("Dim >= 3");
               auto i32Ty = llvm::Type::getInt32Ty(C);
               auto i32ptr = B.CreatePointerCast(intr0(Intr::amdgcn_dispatch_ptr), i32Ty->getPointerTo());
@@ -474,7 +450,7 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
             };
 
             // see llvm/libclc/amdgcn-amdhsa/lib/workitem/get_local_size.cl
-            auto group_size_u32 = [&](size_t dim) -> ValPtr {
+            auto localSizeU32 = [&](size_t dim) -> ValPtr {
               if (dim >= 3) throw std::logic_error("Dim >= 3");
               auto i16Ty = llvm::Type::getInt16Ty(C);
               auto i16ptr = B.CreatePointerCast(intr0(Intr::amdgcn_dispatch_ptr), i16Ty->getPointerTo());
@@ -485,39 +461,47 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
               return B.CreateIntCast(load(B, size), llvm::Type::getInt32Ty(C), false);
             };
 
-            auto global_size = [&](size_t dim) -> ValPtr {
-              return B.CreateMul(grid_size_u32(dim), group_size_u32(dim));
+            auto globalIdU32 = [&](Intr::ID workgroupId, Intr::ID workitemId, size_t dim) -> ValPtr {
+              return B.CreateAdd(B.CreateMul(intr0(workgroupId), localSizeU32(dim)), intr0(workitemId));
             };
 
-            // see llvm/libclc/amdgcn-amdhsa/lib/workitem/get_num_groups.cl
-            auto group_id_u32 = [&](size_t dim) -> ValPtr {
-              auto n = grid_size_u32(dim);
-              auto d = group_size_u32(dim);
-              auto q = B.CreateUDiv(grid_size_u32(dim), group_size_u32(dim));               // q = n / d
+            //            // see llvm/libclc/amdgcn-amdhsa/lib/workitem/get_num_groups.cl
+            auto numGroupsU32 = [&](size_t dim) -> ValPtr {
+              auto n = globalSizeU32(dim);
+              auto d = localSizeU32(dim);
+              auto q = B.CreateUDiv(globalSizeU32(dim), localSizeU32(dim));                 // q = n / d
               auto rem = B.CreateZExt(B.CreateICmpUGT(n, B.CreateMul(q, d)), n->getType()); // ( (uint32t) (n > q*d) )
               return B.CreateAdd(q, rem);                                                   // q + rem
             };
 
             return variants::total(
                 *x.kind, //
-                [&](const NullaryIntrinsicKind::GpuGlobalIdxX &) { return group_id_u32(0); },
-                [&](const NullaryIntrinsicKind::GpuGlobalIdxY &) { return group_id_u32(1); },
-                [&](const NullaryIntrinsicKind::GpuGlobalIdxZ &) { return group_id_u32(2); },
-                [&](const NullaryIntrinsicKind::GpuGlobalSizeX &) { return global_size(0); },
-                [&](const NullaryIntrinsicKind::GpuGlobalSizeY &) { return global_size(1); },
-                [&](const NullaryIntrinsicKind::GpuGlobalSizeZ &) { return global_size(2); },
+                [&](const NullaryIntrinsicKind::GpuGlobalIdxX &) {
+                  return globalIdU32(Intr::amdgcn_workgroup_id_x, Intr::amdgcn_workitem_id_x, 0);
+                },
+                [&](const NullaryIntrinsicKind::GpuGlobalIdxY &) {
+                  return globalIdU32(Intr::amdgcn_workgroup_id_y, Intr::amdgcn_workitem_id_y, 1);
+                },
+                [&](const NullaryIntrinsicKind::GpuGlobalIdxZ &) {
+                  return globalIdU32(Intr::amdgcn_workgroup_id_z, Intr::amdgcn_workitem_id_z, 2);
+                },
+                [&](const NullaryIntrinsicKind::GpuGlobalSizeX &) { return globalSizeU32(0); },
+                [&](const NullaryIntrinsicKind::GpuGlobalSizeY &) { return globalSizeU32(1); },
+                [&](const NullaryIntrinsicKind::GpuGlobalSizeZ &) { return globalSizeU32(2); },
+
                 [&](const NullaryIntrinsicKind::GpuGroupIdxX &) { return intr0(Intr::amdgcn_workgroup_id_x); },
                 [&](const NullaryIntrinsicKind::GpuGroupIdxY &) { return intr0(Intr::amdgcn_workgroup_id_y); },
                 [&](const NullaryIntrinsicKind::GpuGroupIdxZ &) { return intr0(Intr::amdgcn_workgroup_id_z); },
-                [&](const NullaryIntrinsicKind::GpuGroupSizeX &) { return grid_size_u32(0); },
-                [&](const NullaryIntrinsicKind::GpuGroupSizeY &) { return grid_size_u32(1); },
-                [&](const NullaryIntrinsicKind::GpuGroupSizeZ &) { return grid_size_u32(2); },
+                [&](const NullaryIntrinsicKind::GpuGroupSizeX &) { return numGroupsU32(0); },
+                [&](const NullaryIntrinsicKind::GpuGroupSizeY &) { return numGroupsU32(1); },
+                [&](const NullaryIntrinsicKind::GpuGroupSizeZ &) { return numGroupsU32(2); },
+
                 [&](const NullaryIntrinsicKind::GpuLocalIdxX &) { return intr0(Intr::amdgcn_workitem_id_x); },
                 [&](const NullaryIntrinsicKind::GpuLocalIdxY &) { return intr0(Intr::amdgcn_workitem_id_y); },
                 [&](const NullaryIntrinsicKind::GpuLocalIdxZ &) { return intr0(Intr::amdgcn_workitem_id_z); },
-                [&](const NullaryIntrinsicKind::GpuLocalSizeX &) { return group_size_u32(0); },
-                [&](const NullaryIntrinsicKind::GpuLocalSizeY &) { return group_size_u32(1); },
-                [&](const NullaryIntrinsicKind::GpuLocalSizeZ &) { return group_size_u32(2); },
+                [&](const NullaryIntrinsicKind::GpuLocalSizeX &) { return localSizeU32(0); },
+                [&](const NullaryIntrinsicKind::GpuLocalSizeY &) { return localSizeU32(1); },
+                [&](const NullaryIntrinsicKind::GpuLocalSizeZ &) { return localSizeU32(2); },
 
                 [&](const NullaryIntrinsicKind::GpuGroupBarrier &) -> ValPtr {
                   // work_group_barrier (__memory_scope, 1, 1)
@@ -769,7 +753,7 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
         }
 
         auto tpe = mkTpe(x.name.tpe);
-        auto stackPtr = B.CreateAlloca(tpe, nullptr, x.name.symbol + "_stack_ptr");
+        auto stackPtr = B.CreateAlloca(tpe, AllocaAS, nullptr, x.name.symbol + "_stack_ptr");
         auto rhs = map_opt(x.expr, [&](auto &&expr) { return mkExprVal(expr, fn, x.name.symbol + "_var_rhs"); });
 
         stackVarPtrs[x.name.symbol] = {x.name.tpe, stackPtr};
@@ -966,8 +950,15 @@ Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform(const std::u
       //         Local (LDS)  3  Shared
       // Constant (Internal)  4  Constant
       //             Private  5  Local
-    case Target::NVPTX64: GlobalAS = 1; break;
-    case Target::AMDGCN: GlobalAS = 2; break;
+    case Target::NVPTX64:
+      GlobalAS = 1;
+      AllocaAS = 0;
+      break;
+
+    case Target::AMDGCN:
+      GlobalAS = 1;
+      AllocaAS = 5;
+      break;
   }
 
   auto fnTree = program.entry;
@@ -1018,7 +1009,7 @@ Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform(const std::u
       std::inserter(stackVarPtrs, stackVarPtrs.end()), //
       [&](auto &arg, const auto &named) -> Pair<std::string, Pair<Type::Any, llvm::Value *>> {
         arg.setName(named.symbol);
-        auto stack = B.CreateAlloca(mkTpe(named.tpe, GlobalAS), nullptr, named.symbol + "_stack_ptr");
+        auto stack = B.CreateAlloca(mkTpe(named.tpe, GlobalAS), AllocaAS, nullptr, named.symbol + "_stack_ptr");
         B.CreateStore(&arg, stack);
         return {named.symbol, {named.tpe, stack}};
       });

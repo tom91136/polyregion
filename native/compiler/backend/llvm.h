@@ -43,6 +43,7 @@ public:
 
     Options options;
     llvm::LLVMContext &C;
+    unsigned int AllocaAS = 0;
 
   private:
     using StructMemberTable = Map<std::string, size_t>;

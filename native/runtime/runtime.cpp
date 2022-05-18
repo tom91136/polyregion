@@ -73,11 +73,11 @@ void polyregion::runtime::run() {
     std::cerr << "[CUDA] " << e.what() << std::endl;
   }
 
-  try {
-    rts.push_back(std::make_unique<ClRuntime>());
-  } catch (const std::exception &e) {
-    std::cerr << "[OCL] " << e.what() << std::endl;
-  }
+//  try {
+//    rts.push_back(std::make_unique<ClRuntime>());
+//  } catch (const std::exception &e) {
+//    std::cerr << "[OCL] " << e.what() << std::endl;
+//  }
 
   try {
     rts.push_back(std::make_unique<HipRuntime>());
@@ -99,7 +99,8 @@ void polyregion::runtime::run() {
         //        continue ;
       }
 
-      xs = {1, 2, 3, 4};
+      xs.resize(4);
+      std::fill(xs.begin(), xs.end(), 7);
 
       auto size = sizeof(decltype(xs)::value_type) * xs.size();
       auto ptr = d->malloc(size, Access::RW);
@@ -110,7 +111,7 @@ void polyregion::runtime::run() {
       } else if (rt->name() == "OpenCL") {
         src = clKernelSource;
       } else if (rt->name() == "HIP") {
-        src = hsacoKernelSource;
+        src = ptxKernelSource;
       } else {
         throw std::logic_error("?");
       }
@@ -120,12 +121,12 @@ void polyregion::runtime::run() {
       d->enqueueHostToDeviceAsync(xs.data(), ptr, size, []() { std::cout << "  H->D ok" << std::endl; });
 
       int32_t x = 4;
-      d->enqueueKernelAsync("_Z6squarePii", {{Type::Ptr, &ptr}, {Type::Int32, &x}}, {xs.size(), 1, 1}, {1, 1, 1},
+      d->enqueueKernelAsync("lambda", {{Type::Ptr, &ptr}, {Type::Int32, &x}}, {xs.size(), 1, 1}, {1, 1, 1},
                             []() { std::cout << "  K 1 ok" << std::endl; });
 
       x = 5;
 
-      d->enqueueKernelAsync("_Z6squarePii", {{Type::Ptr, &ptr}, {Type::Int32, &x}}, {xs.size(), 1, 1}, {1, 1, 1},
+      d->enqueueKernelAsync("lambda", {{Type::Ptr, &ptr}, {Type::Int32, &x}}, {xs.size(), 1, 1}, {1, 1, 1},
                             []() { std::cout << "  K 2 ok" << std::endl; });
       d->enqueueDeviceToHostAsync(ptr, xs.data(), size, [&]() {
         std::cout << "  D->H ok, r= "
