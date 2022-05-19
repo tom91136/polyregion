@@ -45,8 +45,10 @@ object compiletime {
     '{}
   }
 
-  private[polyregion] inline def symbolNameOf[B]: String       = ${ symbolNameOfImpl[B] }
-  private def symbolNameOfImpl[B: Type](using q: Quotes): Expr[String] = Expr(q.reflect.TypeRepr.of[B].typeSymbol.fullName)
+  private[polyregion] inline def symbolNameOf[B]: String = ${ symbolNameOfImpl[B] }
+  private def symbolNameOfImpl[B: Type](using q: Quotes): Expr[String] = Expr(
+    q.reflect.TypeRepr.of[B].typeSymbol.fullName
+  )
 
   inline def foreachJVMPar(inline range: Range, inline n: Int = java.lang.Runtime.getRuntime.availableProcessors())(
       inline x: Int => Unit
@@ -200,7 +202,7 @@ object compiletime {
       //   _= println(s"layout=${layout}")
 
       // c <- Right(new polyregion.Compilation())
-      c <- Try((PolyregionCompiler.compile(serialisedAst, true, PolyregionCompiler.BACKEND_LLVM))).toEither
+      c <- Try((PolyregionCompiler.compile(serialisedAst, true, ???))).toEither
     } yield {
 
       println(s"Messages=\n  ${c.messages}")

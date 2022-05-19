@@ -19,7 +19,9 @@ public final class Event {
         + (data == null || data.isEmpty()
             ? ""
             : ":\n"
-                + Arrays.stream(data.split("\\n")).map(l -> " │" + l).collect(Collectors.joining("\n"))
+                + Arrays.stream(data.split("\\n"))
+                    .map(l -> " │" + l)
+                    .collect(Collectors.joining("\n"))
                 + "\n ╰───");
   }
 }

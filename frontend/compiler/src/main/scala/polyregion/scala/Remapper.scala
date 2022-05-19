@@ -193,10 +193,9 @@ object Remapper {
               _ <- (fn.termParamss.isEmpty, termTpess, execTpess) match {
                 case (true, Nil, (Nil :: Nil) | Nil) => ().success // no-ap; no-arg Exec (`Nil::Nil`) or no Exec (`Nil`)
                 case (false, ts, es) if ts == es     => ().success // everything else, do the assertion
-                case (ap, ts, es)                    => 
-                  
+                case (ap, ts, es) =>
                   println(s"$ap $ts $es")
-                  ???        // TODO raise failure
+                  ??? // TODO raise failure
               }
               rtnTpe = resolveExecRtnTpe(tpe)
               c   <- witnessClassTpe(c)(sym.maybeOwner, rtnTpe) // TODO this won't work right?

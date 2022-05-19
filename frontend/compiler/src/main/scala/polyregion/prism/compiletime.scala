@@ -183,7 +183,7 @@ object compiletime {
       _ = println(deps.classes.keys.toList)
       _ = println(deps.modules.keys.map(_.fullName).toList)
       (sdefs, sdefLogs) <- Compiler.deriveAllStructs(deps)()
-    } yield p.Mirror(source = p.Sym(sourceSym.fullName), struct = mirrorStruct, functions = functions, sdefs )
+    } yield p.Mirror(source = p.Sym(sourceSym.fullName), struct = mirrorStruct, functions = functions, sdefs)
 
     println(">>>" + m)
     m

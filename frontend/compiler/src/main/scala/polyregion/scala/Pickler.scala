@@ -42,7 +42,7 @@ object Pickler {
   inline def layoutOf(using q: Quoted)(repr: q.TypeRepr): polyregion.Layout = {
     val sdef = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
     println(s"A=${sdef} ${repr.widenTermRefByName}")
-    PolyregionCompiler.layoutOf(CppSourceMirror.encode(  sdef))
+    PolyregionCompiler.layoutOf(CppSourceMirror.encode(sdef), ???)
   }
 
   inline def sizeOf(using q: Quoted)(tpe: p.Type, repr: q.TypeRepr): Int = tpe match {
@@ -97,7 +97,7 @@ object Pickler {
     // find out the total size of this struct first, it could be nested arbitrarily but the top level's size must
     // reflect the total size; this is consistent with C's `sizeof(struct T)`
     val sdef       = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
-    val layout     = PolyregionCompiler.layoutOf(CppSourceMirror.encode(sdef))
+    val layout     = PolyregionCompiler.layoutOf(CppSourceMirror.encode(sdef), ???)
     val byteOffset = '{ ${ Expr(layout.sizeInBytes.toInt) } * $index }
     val fields     = sdef.members.zip(layout.members)
     val terms = fields.map { (named, m) =>
@@ -140,7 +140,7 @@ object Pickler {
     // find out the total size of this struct first, it could be nested arbitrarily but the top level's size must
     // reflect the total size; this is consistent with C's `sizeof(struct T)`
     val sdef       = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
-    val layout     = PolyregionCompiler.layoutOf(CppSourceMirror.encode(sdef))
+    val layout     = PolyregionCompiler.layoutOf(CppSourceMirror.encode(sdef), ???)
     val byteOffset = '{ ${ Expr(layout.sizeInBytes.toInt) } * $index }
     val fields     = sdef.members.zip(layout.members)
     val terms = fields.map { (named, m) =>

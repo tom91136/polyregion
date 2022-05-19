@@ -41,7 +41,7 @@ lazy val `loader-jvm` = project.settings(
   autoScalaLibrary := false
 )
 
-lazy val bindingsDir      = file(".") / "native" / "bindings"
+lazy val bindingsDir      = (file(".") / ".." / "native" / "bindings").getAbsoluteFile
 lazy val loaderShadeRules = Seq(ShadeRule.rename("polyregion.loader.**" -> "polyregion.shaded.loader.@1").inProject)
 
 lazy val `runtime-java` = project

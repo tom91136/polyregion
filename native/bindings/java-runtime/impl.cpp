@@ -1,25 +1,23 @@
 #include <cassert>
-#include <iostream>
 #include <string>
 #include <vector>
 
+#include "jni_utils.h"
 #include "polyregion_PolyregionRuntime.h"
 #include "runtime.h"
 #include "utils.hpp"
 
 using namespace polyregion;
-static void throwGeneric(JNIEnv *env, const std::string &message) {
-  if (auto exClass = env->FindClass("polyregion/PolyregionRuntimeException"); exClass) {
-    env->ThrowNew(exClass, message.c_str());
-  }
+
+[[noreturn]] static void throwGeneric(JNIEnv *env, const std::string &message) {
+  throwGeneric("polyregion/PolyregionRuntimeException", env, message);
 }
 
 static jclass ByteBuffer;
 static jmethodID ByteBuffer_allocateDirect;
 
 static jclass bindGlobalClassRef(JNIEnv *env, const std::string &name) {
-  jclass localClsRef;
-  localClsRef = env->FindClass(name.c_str());
+  jclass localClsRef = env->FindClass(name.c_str());
   auto ref = (jclass)env->NewGlobalRef(localClsRef);
   env->DeleteLocalRef(localClsRef);
   return ref;
@@ -48,13 +46,6 @@ static jclass bindGlobalClassRef(JNIEnv *env, const std::string &name) {
   JNIEnv *env;
   vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_1);
   env->DeleteGlobalRef(ByteBuffer);
-}
-
-static std::string copyString(JNIEnv *env, jstring str) {
-  auto data = env->GetStringUTFChars(str, nullptr);
-  std::string out(data);
-  env->ReleaseStringUTFChars(str, data);
-  return out;
 }
 
 struct NIOBuffer {
@@ -105,24 +96,23 @@ static R invokeGeneric(JNIEnv *env, jbyteArray object, jbyteArray argTypes, jobj
       pointers[i] = env->GetDirectBufferAddress(env->GetObjectArrayElement(argPtrs, i));
       params[i].first = static_cast<runtime::Type>(argTypes_[i]);
       switch (params[i].first) {
-      case runtime::Type::Bool8:
-      case runtime::Type::Byte8:
-      case runtime::Type::CharU16:
-      case runtime::Type::Short16:
-      case runtime::Type::Int32:
-      case runtime::Type::Long64:
-      case runtime::Type::Float32:
-      case runtime::Type::Double64:
-      case runtime::Type::Void: {
-        params[i].second = pointers[i]; // XXX no indirection
-        break;
-      }
-      case runtime::Type::Ptr: {
-        params[i].second = &pointers[i]; // XXX pointer indirection
-        break;
-      }
-      default:
-        throwGeneric(env, "Unimplemented parameter type " + std::to_string(to_underlying(params[i].first)));
+        case runtime::Type::Bool8:
+        case runtime::Type::Byte8:
+        case runtime::Type::CharU16:
+        case runtime::Type::Short16:
+        case runtime::Type::Int32:
+        case runtime::Type::Long64:
+        case runtime::Type::Float32:
+        case runtime::Type::Double64:
+        case runtime::Type::Void: {
+          params[i].second = pointers[i]; // XXX no indirection
+          break;
+        }
+        case runtime::Type::Ptr: {
+          params[i].second = &pointers[i]; // XXX pointer indirection
+          break;
+        }
+        default: throwGeneric(env, "Unimplemented parameter type " + std::to_string(to_underlying(params[i].first)));
       }
     }
     env->ReleaseByteArrayElements(argTypes, argTypes_, JNI_ABORT);
@@ -144,11 +134,9 @@ static R invokePrimitive(JNIEnv *env, //
     runtime::TypedPointer rtn{RT, &rtnData};
 
     auto allocator = [&](size_t size) {
-
-
-//      std::cerr << "[runtime][primitive] Allocating " << size << "bytes" << std::endl;
-//      auto buffer = allocDirect(env, jint(size));
-//      auto ptr = env->GetDirectBufferAddress(buffer);
+      //      std::cerr << "[runtime][primitive] Allocating " << size << "bytes" << std::endl;
+      //      auto buffer = allocDirect(env, jint(size));
+      //      auto ptr = env->GetDirectBufferAddress(buffer);
       auto ptr = malloc(size);
       return ptr;
     };
@@ -178,7 +166,7 @@ static jobject invokeObject(JNIEnv *env, //
 
     // make our allocator store it as well
     auto allocator = [&](size_t size) {
-//      std::cerr << "[runtime][obj rtn] Allocating " << size << " bytes" << std::endl;
+      //      std::cerr << "[runtime][obj rtn] Allocating " << size << " bytes" << std::endl;
       auto buffer = NIOBuffer(env, allocDirect(env, jint(size)));
       allocations[buffer.ptr] = buffer;
       return buffer.ptr;

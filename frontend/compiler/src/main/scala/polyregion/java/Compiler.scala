@@ -17,7 +17,6 @@ object Compiler {
 
   def visit(elem: Element, trees: Trees, t: Tree, e: ProcessingEnvironment): String = {
 
-
 //    t.accept(new TreeVisitor[String, Unit]{
 //      override def visitAnnotatedType(node: AnnotatedTypeTree, ignore: Unit) = s">> $node"
 //      override def visitAnnotation(node: AnnotationTree, ignore: Unit) = s">> $node"

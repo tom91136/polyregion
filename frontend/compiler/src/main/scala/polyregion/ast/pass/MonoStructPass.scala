@@ -42,8 +42,8 @@ object MonoStructPass {
     val body = program.entry.body.flatMap(_.mapType(doReplacement(_)))
 
     val args     = program.entry.args.map(_.mapType(doReplacement(_))).filter(x => typeIsNotDeleted(x.tpe))
-    val receiver = program.entry.receiver.map(_.mapType(doReplacement(_)))filter(x => typeIsNotDeleted(x.tpe))
-    val captures = program.entry.captures.map(_.mapType(doReplacement(_)))filter(x => typeIsNotDeleted(x.tpe))
+    val receiver = program.entry.receiver.map(_.mapType(doReplacement(_))).filter(x => typeIsNotDeleted(x.tpe))
+    val captures = program.entry.captures.map(_.mapType(doReplacement(_))).filter(x => typeIsNotDeleted(x.tpe))
 
     (
       p.Program(

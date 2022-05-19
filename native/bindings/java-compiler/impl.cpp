@@ -2,22 +2,11 @@
 #include <vector>
 
 #include "compiler.h"
+#include "jni_utils.h"
 #include "polyregion_PolyregionCompiler.h"
-#include "polyregion_compiler.h"
 
-static constexpr const char *StringArraySignature = "[Ljava/lang/String;";
-static constexpr const char *StringSignature = "Ljava/lang/String;";
-static constexpr const char *LongSignature = "J";
-
-static void throwGeneric(JNIEnv *env, const std::string &message) {
-  if (auto exClass = env->FindClass("polyregion/PolyregionCompilerException"); exClass) {
-    env->ThrowNew(exClass, message.c_str());
-  }
-}
-
-static jobject newNoArgObject(JNIEnv *env, jclass clazz) {
-  auto ctor = env->GetMethodID(clazz, "<init>", "()V"); // no parameters
-  return env->NewObject(clazz, ctor);
+[[noreturn]] static void throwGeneric(JNIEnv *env, const std::string &message) {
+  throwGeneric("polyregion/PolyregionCompilerException", env, message);
 }
 
 template <typename T>
@@ -63,22 +52,40 @@ static jobject mkLayout(JNIEnv *env, const polyregion::compiler::Layout &l) {
   return layout;
 }
 
-JNIEXPORT jobject JNICALL Java_polyregion_PolyregionCompiler_layoutOf(JNIEnv *env, jclass thisCls,
-                                                                      jbyteArray structDef) {
+static polyregion::compiler::Options mkOptions(JNIEnv *env, jobject options) {
+  auto optionsCls = env->FindClass("polyregion/Options");
+  auto optionsField = env->GetFieldID(optionsCls, "target", ByteSignature);
+  auto archField = env->GetFieldID(optionsCls, "arch", StringSignature);
+
+  auto targetOrdinal = env->GetByteField(options, optionsField);
+  if (auto target = polyregion::compiler::targetFromOrdinal(targetOrdinal); target) {
+    auto archStr = static_cast<jstring>(
+        env->GetObjectField(optionsCls, archField)); // NOLINT(cppcoreguidelines-pro-type-static-cast-downcast)
+    auto arch = copyString(env, archStr);
+    return {.target = *target, .arch = arch.empty() ? std::nullopt : std::make_optional(arch)};
+  } else {
+    throwGeneric(env, "Unknown target value: " + std::to_string(targetOrdinal));
+  }
+}
+
+[[maybe_unused]] JNIEXPORT jobject JNICALL Java_polyregion_PolyregionCompiler_layoutOf(JNIEnv *env, jclass thisCls,
+                                                                                       jbyteArray structDef,
+                                                                                       jobject options) {
+
   auto l = transformByteArray<polyregion::compiler::Layout>(
-      env, structDef, [&](auto &&xs) { return polyregion::compiler::layoutOf(xs, <#initializer #>); });
+      env, structDef, [opt = mkOptions(env, options)](auto &&xs) { return polyregion::compiler::layoutOf(xs, opt); });
   return mkLayout(env, l);
 }
 
-jobject Java_polyregion_PolyregionCompiler_compile(JNIEnv *env, jclass thisCls, jbyteArray function,
-                                                   jboolean emitDisassembly, jshort backend) {
+[[maybe_unused]] jobject Java_polyregion_PolyregionCompiler_compile(JNIEnv *env, jclass thisCls, jbyteArray function,
+                                                                    jboolean emitDisassembly, jobject options) {
 
   auto c = transformByteArray<polyregion::compiler::Compilation>(
-      env, function, [](auto &&xs) { return polyregion::compiler::compile(xs); });
+      env, function, [opt = mkOptions(env, options)](auto &&xs) { return polyregion::compiler::compile(xs, opt); });
 
   auto compilationCls = env->FindClass("polyregion/Compilation");
   auto compilation = newNoArgObject(env, compilationCls);
-  auto programField = env->GetFieldID(compilationCls, "program", "[B");
+  auto programField = env->GetFieldID(compilationCls, "program", ByteArraySignature);
   auto messagesField = env->GetFieldID(compilationCls, "messages", StringSignature);
   auto eventsField = env->GetFieldID(compilationCls, "events", "[Lpolyregion/Event;");
   auto layoutsField = env->GetFieldID(compilationCls, "layouts", "[Lpolyregion/Layout;");
@@ -119,7 +126,7 @@ jobject Java_polyregion_PolyregionCompiler_compile(JNIEnv *env, jclass thisCls, 
   return compilation;
 }
 
-jint JNI_OnLoad(JavaVM *vm, void *reserved) {
+[[maybe_unused]] jint JNI_OnLoad(JavaVM *vm, void *reserved) {
   polyregion::compiler::initialise();
   return JNI_VERSION_1_1;
 }

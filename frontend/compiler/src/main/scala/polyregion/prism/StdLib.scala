@@ -14,8 +14,8 @@ object StdLib {
   }
 
   class RichInt(private val x: Int) {
-    def min(that: Int) = intrinsics.min(x, that)
-    def max(that: Int) = intrinsics.max(x, that)
+    def min(that: Int)         = intrinsics.min(x, that)
+    def max(that: Int)         = intrinsics.max(x, that)
     def until(end: Int): Range = new Range(x, end, 1)
   }
 

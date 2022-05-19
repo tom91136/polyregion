@@ -25,6 +25,19 @@ int64_t compiler::nowMs() {
       .count();
 }
 
+std::optional<compiler::Target> compiler::targetFromOrdinal(std::underlying_type_t<compiler::Target> ordinal) {
+  auto target = static_cast<Target>(ordinal);
+  switch (target) {
+    case Target::Object_LLVM_x86_64:
+    case Target::Object_LLVM_AArch64:
+    case Target::Object_LLVM_NVPTX64:
+    case Target::Object_LLVM_AMDGCN:
+    case Target::Source_C_OpenCL1_1:
+    case Target::Source_C_C11: return target;
+    default: return {};
+  }
+}
+
 std::ostream &compiler::operator<<(std::ostream &os, const compiler::Compilation &compilation) {
   os << "Compilation {"                                                                                            //
      << "\n  binary: " << (compilation.binary ? std::to_string(compilation.binary->size()) + " bytes" : "(empty)") //

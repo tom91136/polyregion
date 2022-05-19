@@ -1,17 +1,24 @@
 package polyregion;
 
-import polyregion.loader.Loader;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import polyregion.loader.Loader;
+
 public class PolyregionCompiler {
 
-  public static final short BACKEND_LLVM = 0;
+  public static final byte TargetObjectLLVM_x86_64 = 0;
+  public static final byte TargetObjectLLVM_AArch64 = 1;
+  public static final byte TargetObjectLLVM_ARM = 2;
+  public static final byte TargetObjectLLVM_NVPTX64 = 3;
+  public static final byte TargetObjectLLVM_AMDGCN = 4;
+  public static final byte TargetSourceC_OpenCL1_1 = 5;
+  public static final byte TargetSourceC_C11 = 6;
 
-  public static native Compilation compile(byte[] function, boolean emitAssembly, short backend);
+  public static native Compilation compile(byte[] function, boolean emitAssembly, Options options);
 
-  public static native Layout layoutOf(byte[] structDef);
+  public static native Layout layoutOf(byte[] structDef, Options options);
 
   private static AtomicBoolean loaded = new AtomicBoolean();
 

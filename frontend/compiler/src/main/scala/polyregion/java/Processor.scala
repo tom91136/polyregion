@@ -274,7 +274,8 @@ class Processor extends AbstractProcessor {
       "com.sun.tools.javac.api"
     )
 
-    val markerClosures = Set(classOf[_root_.polyregion.java.OffloadRunnable], classOf[_root_.polyregion.java.OffloadFunction[_]])
+    val markerClosures =
+      Set(classOf[_root_.polyregion.java.OffloadRunnable], classOf[_root_.polyregion.java.OffloadFunction[_]])
 
     (for {
       _ <- addOpens(allPkgs).adaptError(e => new RuntimeException("Unable to add opens at runtime", e))
@@ -301,8 +302,7 @@ class Processor extends AbstractProcessor {
           println(s"[STARTED]  =>  ${e} ${visited}")
           (e.getKind, e.getCompilationUnit, e.getSourceFile) match {
 
-            case (TaskEvent.Kind.GENERATE, cu, file)
-                if cu != null && !visited.contains(file)   =>
+            case (TaskEvent.Kind.GENERATE, cu, file) if cu != null && !visited.contains(file) =>
               // we do any compilation BEFORE (at the start) GENERATE kicks in as the tree is gone (probably gc'd) after GENERATE
               visited += file
 
@@ -314,56 +314,60 @@ class Processor extends AbstractProcessor {
                 cu
               )
 
-
-
               val s = r.flatMap { xs =>
-                xs.traverse((invokeFn, meta) => LambdaOutliner.findMethod(reflector, cu, invokeFn, meta).map(m => meta.implCls -> m))
+                xs.traverse((invokeFn, meta) =>
+                  LambdaOutliner.findMethod(reflector, cu, invokeFn, meta).map(m => meta.implCls -> m)
+                )
               }
 
               val xs = s match {
-                case Left(x) => throw x
-                case Right(value) =>value
+                case Left(x)      => throw x
+                case Right(value) => value
               }
 
+              println(
+                s">>>> Closures for ${e.getTypeElement}\n" + xs
+                  .map { case (cls, m) => s"  ->  ${m.getName.toString.padTo(30, ' ')} @ $cls${m.toString.indent(5)}" }
+                  .mkString("\n")
+              )
 
-                println(s">>>> Closures for ${e.getTypeElement}\n" + xs.map{case (cls, m) => s"  ->  ${m.getName.toString.padTo(30, ' ')} @ $cls${m.toString.indent(5)}"}.mkString("\n"))
+              xs.filterNot(x => pool.contains(x._2)).foreach { case (cls: String, x: MethodTree) =>
+                pool += x
 
-                xs.filterNot(x => pool.contains(x._2)).foreach {case (cls : String, x: MethodTree) =>
-                  pool += x
+                val pkg  = s"polyregion.$$gen$$"
+                val name = s"${cls.replace('.', '$')}$$${x.getName}"
+                val fqcn = s"$pkg.$name"
+                println(s"Write ${fqcn}")
+                if (!generated.contains(fqcn)) {
+                  val gen =
+                    processingEnv.getFiler.createResource(StandardLocation.CLASS_OUTPUT, pkg, s"$name.class", null)
+                  val os = gen.openOutputStream()
 
+                  val bytes = new net.bytebuddy.ByteBuddy()
+                    .subclass(classOf[_root_.polyregion.java.BinaryOffloadExecutable])
+                    .name(fqcn)
+                    .modifiers(Visibility.PUBLIC, TypeManifestation.FINAL)
+                    .defineField(
+                      "$BINARY$",
+                      classOf[Byte].arrayType,
+                      Visibility.PUBLIC,
+                      Ownership.STATIC,
+                      FieldManifestation.FINAL
+                    )
+                    .method(ElementMatchers.named("binary"))
+                    .intercept(FieldAccessor.ofField("$BINARY$"))
+                    .make()
+                    .getBytes
 
-                  val pkg = s"polyregion.$$gen$$"
-                  val name = s"${cls.replace('.', '$')}$$${x.getName}"
-                  val fqcn = s"$pkg.$name"
-                  println(s"Write ${fqcn}")
-                  if(!generated.contains(fqcn)){
-                    val gen = processingEnv.getFiler.createResource(StandardLocation.CLASS_OUTPUT,pkg, s"$name.class", null)
-                    val os  = gen.openOutputStream()
-
-                    val bytes = new net.bytebuddy.ByteBuddy()
-                      .subclass(classOf[_root_.polyregion.java.BinaryOffloadExecutable])
-                      .name(fqcn)
-                      .modifiers(Visibility.PUBLIC, TypeManifestation.FINAL)
-                      .defineField("$BINARY$", classOf[Byte].arrayType, Visibility.PUBLIC, Ownership.STATIC, FieldManifestation.FINAL)
-                      .method(ElementMatchers.named("binary"))
-                      .intercept(FieldAccessor.ofField("$BINARY$"))
-                      .make()
-                      .getBytes
-
-                    os.write(bytes)
-                    os.flush()
-                    os.close()
-                    generated += fqcn
-                  }else {
-                    println(s"OVERWRITE ${fqcn}")
-                  }
-
-
-
-
+                  os.write(bytes)
+                  os.flush()
+                  os.close()
+                  generated += fqcn
+                } else {
+                  println(s"OVERWRITE ${fqcn}")
                 }
 
-
+              }
 
             case _ =>
           }

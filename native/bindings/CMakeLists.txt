@@ -4,6 +4,7 @@ add_library(java-compiler SHARED java-compiler/impl.cpp)
 target_include_directories(java-compiler PRIVATE
         ../compiler
         ../include
+        ./
         java-compiler
         ${JNI_INCLUDE_DIRS})
 target_link_libraries(java-compiler PRIVATE compiler-lib)
@@ -12,6 +13,7 @@ add_library(java-runtime SHARED java-runtime/impl.cpp)
 target_include_directories(java-runtime PRIVATE
         ../runtime
         ../include
+        ./
         java-runtime
         ${JNI_INCLUDE_DIRS})
 target_link_libraries(java-runtime PRIVATE runtime-lib)

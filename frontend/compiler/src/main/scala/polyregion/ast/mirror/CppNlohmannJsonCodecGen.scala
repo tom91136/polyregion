@@ -11,8 +11,12 @@ import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import java.nio.{ByteBuffer, ByteOrder}
 import scala.collection.mutable.ArrayBuffer
 
-private [polyregion]case class CppNlohmannJsonCodecGen(namespace: List[String], decls: List[String], impls: List[String])
-private [polyregion] object CppNlohmannJsonCodecGen {
+private[polyregion] case class CppNlohmannJsonCodecGen(
+    namespace: List[String],
+    decls: List[String],
+    impls: List[String]
+)
+private[polyregion] object CppNlohmannJsonCodecGen {
 
   def fromJsonFn(t: CppType) = t.ref(qualified = false).toLowerCase + "_from_json"
   def toJsonFn(t: CppType)   = t.ref(qualified = false).toLowerCase + "_to_json"

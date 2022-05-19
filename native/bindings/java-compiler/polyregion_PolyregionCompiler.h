@@ -7,23 +7,35 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-#undef polyregion_PolyregionCompiler_BACKEND_1LLVM
-#define polyregion_PolyregionCompiler_BACKEND_1LLVM 0L
+#undef polyregion_PolyregionCompiler_TargetObjectLLVM_1x86_164
+#define polyregion_PolyregionCompiler_TargetObjectLLVM_1x86_164 0L
+#undef polyregion_PolyregionCompiler_TargetObjectLLVM_1AArch64
+#define polyregion_PolyregionCompiler_TargetObjectLLVM_1AArch64 1L
+#undef polyregion_PolyregionCompiler_TargetObjectLLVM_1ARM
+#define polyregion_PolyregionCompiler_TargetObjectLLVM_1ARM 2L
+#undef polyregion_PolyregionCompiler_TargetObjectLLVM_1NVPTX64
+#define polyregion_PolyregionCompiler_TargetObjectLLVM_1NVPTX64 3L
+#undef polyregion_PolyregionCompiler_TargetObjectLLVM_1AMDGCN
+#define polyregion_PolyregionCompiler_TargetObjectLLVM_1AMDGCN 4L
+#undef polyregion_PolyregionCompiler_TargetSourceC_1OpenCL1_11
+#define polyregion_PolyregionCompiler_TargetSourceC_1OpenCL1_11 5L
+#undef polyregion_PolyregionCompiler_TargetSourceC_1C11
+#define polyregion_PolyregionCompiler_TargetSourceC_1C11 6L
 /*
  * Class:      polyregion_PolyregionCompiler
  * Method:     compile
- * Signature:  ([BZS)Lpolyregion/Compilation;
+ * Signature:  ([BZLpolyregion/Options;)Lpolyregion/Compilation;
  */
 JNIEXPORT jobject JNICALL Java_polyregion_PolyregionCompiler_compile
-  (JNIEnv *, jclass, jbyteArray, jboolean, jshort);
+  (JNIEnv *, jclass, jbyteArray, jboolean, jobject);
 
 /*
  * Class:      polyregion_PolyregionCompiler
  * Method:     layoutOf
- * Signature:  ([B)Lpolyregion/Layout;
+ * Signature:  ([BLpolyregion/Options;)Lpolyregion/Layout;
  */
-JNIEXPORT jobject JNICALL Java_polyregion_PolyregionCompiler_layoutOf
-  (JNIEnv *, jclass, jbyteArray);
+[[maybe_unused]] JNIEXPORT jobject JNICALL Java_polyregion_PolyregionCompiler_layoutOf
+  (JNIEnv *, jclass, jbyteArray, jobject);
 
 #ifdef __cplusplus
 }

@@ -44,8 +44,6 @@ struct EXPORT Dim {
 
 enum class Access { RO, WO, RW };
 
-struct Memory;
-
 struct EXPORT Device {
 
 public:

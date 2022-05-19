@@ -4,6 +4,7 @@ add_library(runtime-lib STATIC
         cuda_runtime.cpp
         hip_runtime.cpp
         cl_runtime.cpp
+        object_runtime.cpp
         polyregion_runtime.cpp
         thirdparty/cuew/src/cuew.c
         thirdparty/hipew/src/hipew.c
