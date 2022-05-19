@@ -38,16 +38,9 @@ set(LLVM_LIBS
 
 message(STATUS "[runtime] Adding LLVM libs = ${LLVM_LIBS}")
 
-if (LIBFFI_LIBRARY_PATH)
-    set(LIBFFI_STATIC_LIBRARY ${LIBFFI_LIBRARY_PATH}/libffi.a)
-else ()
-    set(LIBFFI_STATIC_LIBRARY libffi.a)
-endif ()
-
-
 target_link_libraries(runtime-lib PRIVATE
         ${LLVM_LIBS}
-        ${LIBFFI_STATIC_LIBRARY}
+        libffi.a
         pthread
         dl
         )
@@ -56,7 +49,7 @@ target_link_libraries(runtime-drv PRIVATE runtime-lib)
 target_link_libraries(runtime-tests PRIVATE runtime-lib)
 
 set(COMPILE_OPTIONS
-#        -fvisibility-global-new-delete-hidden
+        #        -fvisibility-global-new-delete-hidden
         ${COMMON_COMPILE_OPTIONS}
         "$<$<CONFIG:RELEASE>:${COMMON_RELEASE_OPTIONS}>"
         "$<$<CONFIG:DEBUG>:${COMMON_DEBUG_OPTIONS}>"

@@ -5,8 +5,6 @@ project(polyregion-native)
 
 set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON" FORCE)
 
-set(LIBFFI_LIBRARY_PATH "" CACHE INTERNAL "libffi library path")
-set(LIBFFI_HEADER_PATH "" CACHE INTERNAL "libffi header path")
 set(LINKER "" CACHE INTERNAL "Path to custom linker")
 set(POLYREGION_SHARED_LIB OFF CACHE BOOL "")
 
@@ -18,8 +16,8 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(DEBUG ON)
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
 else ()
-    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
     set(DEBUG OFF)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
     set(CMAKE_CXX_COMPILE_OPTIONS_IPO -flto=thin)
 endif ()
 
@@ -40,17 +38,23 @@ FetchContent_Declare(
 )
 
 FetchContent_Declare(
+        libffi
+        URL https://github.com/libffi/libffi/releases/download/v3.4.2/libffi-3.4.2.tar.gz
+        URL_HASH SHA256=540fb721619a6aba3bdeef7d940d8e9e0e6d2c193595bc243241b77ff9e93620
+)
+
+FetchContent_Declare(
         json
         URL https://github.com/nlohmann/json/releases/download/v3.10.5/json.hpp
         URL_HASH SHA256=e832d339d9e0c042e7dff807754769d778cf5d6ae9730ce21eed56de99cb5e86
-        DOWNLOAD_NO_EXTRACT YES # this is a header only lib, so don't anything else
+        DOWNLOAD_NO_EXTRACT YES # this is a header only lib, so don't do anything else
 )
 
 FetchContent_Declare(
         catch2
         URL https://github.com/catchorg/Catch2/releases/download/v2.13.9/catch.hpp
         URL_HASH SHA256=27da57c7a06d09be8dd81fab7246b79e7892b6ae7e4e49ba8631f1d5a955e3fc
-        DOWNLOAD_NO_EXTRACT YES # this is a header only lib, so don't anything else
+        DOWNLOAD_NO_EXTRACT YES # this is a header only lib, so don't do anything else
 )
 
 
@@ -156,9 +160,9 @@ else ()
         set(LLVM_TABLEGEN_EXE ${llvm_BINARY_DIR}/bin/llvm-tblgen)
         set(LLD_VERSION ${LLVM_SRC_VERSION})
 
-        #        configure_file(
-        #                ${lld_SOURCE_DIR}/include/lld/Common/Version.inc.in
-        #                ${lld_BINARY_DIR}/include/lld/Common/Version.inc)
+        configure_file(
+                ${lld_SOURCE_DIR}/include/lld/Common/Version.inc.in
+                ${lld_BINARY_DIR}/include/lld/Common/Version.inc)
 
 
         macro(add_lld_library name)
@@ -189,15 +193,25 @@ else ()
         #        add_subdirectory(MachO)
         #        add_subdirectory(MinGW)
         #        add_subdirectory(wasm)
-
     endif ()
-
-
 endif ()
 
 
 FetchContent_MakeAvailable(json)
 FetchContent_MakeAvailable(catch2)
+
+# libffi does not use CMake so we inject one manually from VCPKG
+# See https://github.com/microsoft/vcpkg/blob/2f0872b7d592635e8e4919d178650d549c211464/ports/libffi/CMakeLists.txt
+# and related configurations in <ROOT>/libffi
+FetchContent_GetProperties(libffi)
+if (NOT libffi_POPULATED)
+    FetchContent_Populate(libffi)
+    file(COPY ${CMAKE_SOURCE_DIR}/libffi/CMakeLists.txt DESTINATION "${libffi_SOURCE_DIR}")
+    file(COPY ${CMAKE_SOURCE_DIR}/libffi/libffiConfig.cmake.in DESTINATION "${libffi_SOURCE_DIR}")
+    file(COPY ${CMAKE_SOURCE_DIR}/libffi/fficonfig.h DESTINATION "${libffi_SOURCE_DIR}/include")
+    add_subdirectory(${libffi_SOURCE_DIR} ${libffi_BINARY_DIR} EXCLUDE_FROM_ALL)
+    include_directories(${libffi_SOURCE_DIR}/include)
+endif ()
 
 include_directories("${json_SOURCE_DIR}")
 include_directories("${catch2_SOURCE_DIR}")
