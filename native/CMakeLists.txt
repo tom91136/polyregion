@@ -228,7 +228,7 @@ set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame
 set(COMMON_COMPILE_OPTIONS
         -ffunction-sections       # keep functions in its own section for better --gc-sections results
         -fdata-sections           # same as above
-        -fno-rtti                 # don't use RTTI for space
+#        -fno-rtti                 # don't use RTTI for space
         -pedantic
         -Wall
         -Wextra

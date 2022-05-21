@@ -37,15 +37,55 @@ object Simple {
 
     println(xs)
 
-    case class Runtime()
-    // Task API  (multiple async dispatch supported; CPU=pooled, GPU=multiple command queue)
+    enum Optimisation {
+      case O0, O1, O2, O3, Ofast
+    }
+    case class Options(arch: String, opt: Optimisation)
+
+    trait Runtime {
+      def name: String
+      def properties(): Map[String, String]
+      def devices(): Vector[Device]
+    }
+
+    trait Device {
+      def name: String
+      def properties(): Map[String, String]
+      def task[A](f: => A): A
+      def foreach(x: Range)(using o: Options)(f: Int => Unit): Unit
+      def foreach(x: Range, y: Range)(using o: Options)(f: (Int, Int) => Unit): Unit
+      def foreach(x: Range, y: Range, z: Range)(using o: Options)(f: (Int, Int, Int) => Unit): Unit
+      def reduce[A](x: Range)(using o: Options)(g: (A, A) => A)(f: Int => A): A
+      def reduce[A](x: Range, y: Range)(using o: Options)(g: (A, A) => A)(f: (Int, Int) => A): A
+      def reduce[A](x: Range, y: Range, z: Range)(using o: Options)(g: (A, A) => A)(f: (Int, Int, Int) => A): A
+    }
+
+    val Native: Device = ???
+    val Host: Device   = ???
+
+    val opt       = Options("", Optimisation.Ofast)
+    given Options = opt
+
+    Native.foreach(1 to 3)(x => ())
+    Native.foreach(1 to 3)(using opt)(x => ())
+
+    Native.foreach(1 to 3, 10 to 20, 3 to 3)((x, y, z) => ())
+    Native.foreach(1 to 3, 10 to 20, 3 to 3)(using opt)((x, y, z) => ())
+
+    trait Offload[A] extends scala.collection.Seq[A] {}
+
+    extension [A](xs: Seq[A]) {
+      def offload: Offload[A] = ???
+    }
+
+    // Task API +JIT (multiple async dispatch supported; CPU=pooled, GPU=multiple command queue)
+    // import polyregion.scala.backends.{Host: Device, JVM: Device, GPU: Runtime}
+    //
     // singular : device.task[A](a: => A)
     // parallel :
     //    device.foreach(x: Range)(f: Int => Unit)
     //    device.foreachND(x: Range, l : Range)(f: Int => Unit)
-
-
-    //    device.foreach(x: Range, y: Range)(f: (Int, Int) => Unit)
+    //    device.foreach(Intel.Haswell, AMD.Znver2)(x: Range, y: Range)(f: (Int, Int) => Unit)
     //    device.foreach(x: Range, y: Range, z: Range)(f: (Int, Int, Int) => Unit)
     //    device.reduce[A](x: Range)(c: (A, A) => A)(f: Int => A)
     //    device.reduce[A](x: Range, y: Range)(c: (A, A) => A)(f: (Int, Int) => A)
@@ -56,6 +96,10 @@ object Simple {
     //    device.reduce[A](combine : (A, A) => A)(x: Int, y: Int, z: Int)(f : (Int, Int, Int) => A)
 
     //  collection extensions: extension (xs : Seq[T]) {  def offload(d: Device) ...  }
+
+    //  Task API AOT
+
+    //  singular :
 
     val l = Local
     val result = polyregion.scala.compiletime.offload {
