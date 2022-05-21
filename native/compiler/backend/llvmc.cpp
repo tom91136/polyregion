@@ -127,8 +127,8 @@ static void setFunctionAttributes(llvm::StringRef CPU, llvm::StringRef Features,
   NewAttrs.addAttribute("unsafe-fp-math", "true");
   NewAttrs.addAttribute("no-infs-fp-math", "true");
   NewAttrs.addAttribute("no-signed-zeros-fp-math", "true");
-  NewAttrs.addAttribute("amdgpu-early-inline-all", "true");
-  NewAttrs.addAttribute("amdgpu-function-calls", "true");
+//  NewAttrs.addAttribute("amdgpu-early-inline-all", "true");
+//  NewAttrs.addAttribute("amdgpu-function-calls", "true");
 
   // Let NewAttrs override Attrs.
   F.setAttributes(Attrs.addFnAttributes(Ctx, NewAttrs));

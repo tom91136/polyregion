@@ -202,7 +202,10 @@ object compiletime {
       //   _= println(s"layout=${layout}")
 
       // c <- Right(new polyregion.Compilation())
-      c <- Try((PolyregionCompiler.compile(serialisedAst, true, ???))).toEither
+
+
+      options = polyregion.Options(PolyregionCompiler.TargetObjectLLVM_x86_64, "")
+      c <- Try((PolyregionCompiler.compile(serialisedAst, true, options))).toEither
     } yield {
 
       println(s"Messages=\n  ${c.messages}")

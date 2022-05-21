@@ -128,6 +128,6 @@ constexpr uint32_t hash(const char *data, size_t const size) noexcept {
 
 constexpr uint32_t hash(const std::string_view &str) noexcept { return hash(str.data(), str.length()); }
 
-constexpr inline unsigned int operator"" _(char const *p, size_t s) { return hash(p, s); }
+//constexpr inline unsigned int operator"" _(char const *p, size_t s) { return hash(p, s); }
 
 } // namespace polyregion

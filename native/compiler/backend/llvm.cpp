@@ -8,7 +8,6 @@
 
 #include "Utils/AMDGPUBaseInfo.h"
 
-#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/IntrinsicsAMDGPU.h"
 #include "llvm/IR/IntrinsicsNVPTX.h"
@@ -1067,13 +1066,14 @@ llvmc::TargetInfo LLVM::Options::toTargetInfo() const {
     return llvmc::TargetInfo{
         .triple = triple,
         .target = backend::llvmc::targetFromTriple(triple),
-        .cpu = {.uArch = *arch, .features = {}},
+        .cpu = {.uArch = arch, .features = {}},
     };
   };
 
   const auto bindCpuArch = [&](Triple::ArchType archTpe) {
     const Triple defaultTriple = backend::llvmc::defaultHostTriple();
-    if (!arch && defaultTriple.getArch() != archTpe) // when detecting host arch, the host triple's arch must match
+    if (arch.empty() &&
+        defaultTriple.getArch() != archTpe) // when detecting host arch, the host triple's arch must match
       throw std::logic_error("Requested arch detection with " + Triple::getArchTypeName(archTpe).str() +
                              " but the host arch is different (" +
                              Triple::getArchTypeName(defaultTriple.getArch()).str() + ")");
@@ -1083,7 +1083,7 @@ llvmc::TargetInfo LLVM::Options::toTargetInfo() const {
     return llvmc::TargetInfo{
         .triple = triple,
         .target = backend::llvmc::targetFromTriple(triple),
-        .cpu = arch ? llvmc::CpuInfo{.uArch = *arch, .features = {}} : llvmc::hostCpuInfo(),
+        .cpu = !arch.empty() ? llvmc::CpuInfo{.uArch = arch, .features = {}} : llvmc::hostCpuInfo(),
     };
   };
 
@@ -1122,24 +1122,7 @@ compiler::Compilation backend::LLVM::run(const Program &program) {
                                      {rawError.value_or(""), optError.value_or("")}, [](auto &&x) { return x; }, "\n"));
   }
 
-  auto info = options.toTargetInfo();
-
-  switch (options.target) {
-    case LLVM::Target::AMDGCN: {
-      // XXX We validate AMDGCN's Code Object version here as the definition for the dispatch pointer is different in
-      // each version; dispatch pointer controls critical values such as global/local size and id in the kernel.
-      auto TM = llvmc::targetMachineFromTarget(info);
-      auto hsaAbi = llvm::AMDGPU::getHsaAbiVersion(TM->getMCSubtargetInfo());
-      if (!hsaAbi.hasValue()) throw std::logic_error("AMDGPU target selected but HSA ABI is empty!?");
-      if (*hsaAbi != llvm::ELF::ELFABIVERSION_AMDGPU_HSA_V4) {
-        throw std::logic_error("AMDGPU target must conform to Code Object V4 as the definition for "
-                               "@llvm.amdgcn.dispatch.ptr change across versions");
-      }
-    }
-    default: break;
-  }
-
-  auto c = llvmc::compileModule(info, true, std::move(mod), *ctx);
+  auto c = llvmc::compileModule(options.toTargetInfo(), true, std::move(mod), *ctx);
 
   //  // at this point we know the target machine, so we derive the struct layout here
   //  for (const auto &def : program.defs) {

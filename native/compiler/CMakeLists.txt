@@ -19,9 +19,10 @@ add_dependencies(compiler-lib intrinsics_gen runtime-lib)
 
 add_executable(compiler-tests test/ast_codegen.cpp test/backend.cpp test/test-main.cpp)
 add_executable(compiler-drv driver.cpp)
+add_dependencies(compiler-drv runtime-lib)
 
 target_include_directories(compiler-tests PUBLIC . ../include)
-target_include_directories(compiler-drv PUBLIC . ../include)
+target_include_directories(compiler-drv PUBLIC . ../include PRIVATE ../runtime)
 target_include_directories(compiler-lib PUBLIC . ../include)
 
 
@@ -104,7 +105,7 @@ target_link_libraries(compiler-lib PRIVATE
         #        capstone-static
         )
 target_link_libraries(compiler-tests PRIVATE compiler-lib)
-target_link_libraries(compiler-drv PRIVATE compiler-lib ${LLVM_LIBS} ${LLD_LIBS})
+target_link_libraries(compiler-drv PRIVATE compiler-lib runtime-lib  ${LLVM_LIBS} ${LLD_LIBS})
 
 set(COMPILE_OPTIONS
         ${COMMON_COMPILE_OPTIONS}

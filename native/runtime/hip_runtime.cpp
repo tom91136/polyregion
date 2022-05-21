@@ -1,6 +1,4 @@
-
 #include "hip_runtime.h"
-#include <iostream>
 
 using namespace polyregion::runtime;
 using namespace polyregion::runtime::hip;
@@ -29,23 +27,22 @@ std::vector<Property> HipRuntime::properties() { return {}; }
 
 std::vector<std::unique_ptr<Device>> HipRuntime::enumerate() {
   int count = 0;
-
   CHECKED(hipGetDeviceCount(&count));
   std::vector<std::unique_ptr<Device>> devices(count);
-  for (int i = 0; i < count; i++) {
+  for (int i = 0; i < count; i++)
     devices[i] = std::make_unique<HipDevice>(i);
-  }
   return devices;
 }
 
-void HipDevice::enqueueCallback(const Callback &cb) {
+void HipDevice::enqueueCallback(const std::optional<Callback> &cb) {
+  if (!cb) return;
   CHECKED(hipStreamAddCallback(
       stream,
       [](hipStream_t s, hipError_t e, void *data) {
         CHECKED(e);
-        CountedCallbackHandler::consume(data);
+        detail::CountedCallbackHandler::consume(data);
       },
-      handler.createHandle(cb), 0));
+      detail::CountedCallbackHandler::createHandle(*cb), 0));
 }
 
 HipDevice::HipDevice(int ordinal) {
@@ -59,11 +56,9 @@ HipDevice::HipDevice(int ordinal) {
 }
 
 HipDevice::~HipDevice() {
-  if (module) {
-    CHECKED(hipModuleUnload(module));
-  }
+  for (auto &[_, p] : modules)
+    CHECKED(hipModuleUnload(p.first));
   CHECKED(hipDevicePrimaryCtxRelease(device));
-  handler.clear();
 }
 
 int64_t HipDevice::id() { return device; }
@@ -72,18 +67,18 @@ std::string HipDevice::name() { return deviceName; }
 
 std::vector<Property> HipDevice::properties() { return {}; }
 
-void HipDevice::loadKernel(const std::string &image) {
-  if (module) {
-    symbols.clear();
-    CHECKED(hipModuleUnload(module));
+void HipDevice::loadModule(const std::string &name, const std::string &image) {
+  if (auto it = modules.find(name); it != modules.end()) {
+    throw std::logic_error(std::string(ERROR_PREFIX) + "Module named " + name + " was already loaded");
+  } else {
+    hipModule_t module;
+    CHECKED(hipModuleLoadData(&module, image.data()));
+    modules.emplace_hint(it, name, LoadedModule{module, {}});
   }
-
-  CHECKED(hipModuleLoad(&module, "./bin_gfx906.so"));
-  //  CHECKED(hipModuleLoadData(&module, image.data()));
 }
 
 uintptr_t HipDevice::malloc(size_t size, Access access) {
-  if (size == 0) throw std::logic_error(std::string(ERROR_PREFIX) + "size is 0");
+  if (size == 0) throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot malloc size of 0");
   hipDeviceptr_t ptr = {};
   CHECKED(hipMalloc(&ptr, size));
   return ptr;
@@ -91,38 +86,45 @@ uintptr_t HipDevice::malloc(size_t size, Access access) {
 
 void HipDevice::free(uintptr_t ptr) { CHECKED(hipFree(ptr)); }
 
-void HipDevice::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const Callback &cb) {
+void HipDevice::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size,
+                                         const std::optional<Callback> &cb) {
   CHECKED(hipMemcpyHtoDAsync(dst, src, size, stream));
   enqueueCallback(cb);
 }
 
-void HipDevice::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const Callback &cb) {
+void HipDevice::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const std::optional<Callback> &cb) {
   CHECKED(hipMemcpyDtoHAsync(dst, src, size, stream));
   enqueueCallback(cb);
 }
 
-void HipDevice::enqueueKernelAsync(const std::string &name, std::vector<TypedPointer> args, Dim gridDim, Dim blockDim,
-                                   const std::function<void()> &cb) {
-  if (!module) throw std::logic_error(std::string(ERROR_PREFIX) + "No module loaded");
+void HipDevice::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
+                                   const std::vector<TypedPointer> &args, TypedPointer rtn, const Policy &policy,
+                                   const std::optional<Callback> &cb) {
 
-  auto it = symbols.find(name);
+  auto moduleIt = modules.find(moduleName);
+  if (moduleIt == modules.end())
+    throw std::logic_error(std::string(ERROR_PREFIX) + "No module named " + moduleName + " was loaded");
+
+  auto &[m, fnTable] = moduleIt->second;
   hipFunction_t fn = nullptr;
-  if (!(it == symbols.end())) fn = it->second;
+  if (auto it = fnTable.find(symbol); it != fnTable.end()) fn = it->second;
   else {
-    CHECKED(hipModuleGetFunction(&fn, module, name.c_str()));
-    symbols.emplace(name, fn);
+    CHECKED(hipModuleGetFunction(&fn, m, symbol.c_str()));
+    fnTable.emplace_hint(it, symbol, fn);
   }
-
   std::vector<void *> ptrs(args.size());
   for (size_t i = 0; i < args.size(); ++i)
     ptrs[i] = args[i].second;
 
+  auto grid = policy.global;
+  auto block = policy.local.value_or(Dim{});
+
   int sharedMem = 0;
-  CHECKED(hipModuleLaunchKernel(fn,                                 //
-                                gridDim.x, gridDim.y, gridDim.z,    //
-                                blockDim.x, blockDim.y, blockDim.z, //
-                                sharedMem,                          //
-                                stream, ptrs.data(),                //
+  CHECKED(hipModuleLaunchKernel(fn,                        //
+                                grid.x, grid.y, grid.z,    //
+                                block.x, block.y, block.z, //
+                                sharedMem,                 //
+                                stream, ptrs.data(),       //
                                 nullptr));
   enqueueCallback(cb);
 }

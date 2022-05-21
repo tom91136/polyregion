@@ -1,22 +1,17 @@
+#include "ast.h"
 #include "backend/llvmc.h"
 #include "compiler.h"
+#include "object_runtime.h"
 #include "utils.hpp"
-#include <iostream>
+#include "variants.hpp"
 
-#include "ast.h"
-#include "llvm/IRReader/IRReader.h"
-#include "llvm/Support/SourceMgr.h"
-//#include "lld"
+#include <iostream>
 
 int main(int argc, char *argv[]) {
 
-  polyregion::compiler::initialise();
+  using namespace polyregion;
 
-  //  std::vector<uint8_t> xs = polyregion::read_struct<uint8_t>("../ast.bin");
-
-  auto ctx = std::make_unique<llvm::LLVMContext>();
-
-  llvm::SMDiagnostic Err;
+  compiler::initialise();
 
   // "/home/tom/Nextcloud/vecAdd-cuda-nvptx64-nvidia-cuda-sm_61.ll"
   //"/home/tom/Nextcloud/vecAdd-cuda-nvptx64-nvidia-cuda-sm_61.ll"
@@ -27,69 +22,49 @@ int main(int argc, char *argv[]) {
   //                                  });
   //
   //
-  using namespace polyregion::polyast;
-  using namespace polyregion::polyast::Stmt;
-  using namespace polyregion::polyast::Term;
-  using namespace polyregion::polyast::Expr;
 
-  Function fn(
-      Sym({"foo"}), {}, {}, {Named("xs", Type::Array(Type::Int())), Named("x", Type::Int())}, {}, Type::Unit(),
-      {
+  using namespace polyast::dsl;
+  auto fn = function("foo", {"xs"_(Array(Int)), "x"_(Int)}, Unit)({
+      let("gid") = invoke(Fn0::GpuGlobalIdxX(), Int),
+      let("xs@gid") = "xs"_(Array(Int))["gid"_(Int)],
+      let("result") = invoke(Fn2::Add(), "xs@gid"_(Int), "gid"_(Int), Int),
+      let("resultX2") = invoke(Fn2::Mul(), "result"_(Int), "x"_(Int), Int),
+      "xs"_(Array(Int))["gid"_(Int)] = "resultX2"_(Int),
+      ret(),
+  });
 
-          Var(Named("gid", Type::Int()), {NullaryIntrinsic(NullaryIntrinsicKind::GpuGlobalIdxX(), Type::Int())}),
-
-          Var(Named("xs@gid", Type::Int()), //
-              {Index(Select({}, Named("xs", Type::Array(Type::Int()))), Select({}, Named("gid", Type::Int())),
-                     Type::Int())}),
-
-          Var(Named("result", Type::Int()), //
-              {
-                  BinaryIntrinsic(Select({}, Named("xs@gid", Type::Int())), //
-                                  Select({}, Named("gid", Type::Int())),    //
-                                  BinaryIntrinsicKind::Add(), Type::Int())  //
-              }),
-
-          Var(Named("resultX2", Type::Int()), //
-              {
-                  BinaryIntrinsic(Select({}, Named("result", Type::Int())), //
-                                  Select({}, Named("x", Type::Int())),      //
-                                  BinaryIntrinsicKind::Mul(), Type::Int())  //
-              }),
-
-          Update(Select({}, Named("xs", Type::Array(Type::Int()))), Select({}, Named("gid", Type::Int())),
-                 Select({}, Named("resultX2", Type::Int()))),
-          Return(Alias(UnitConst())),
-      });
-
-  Program p(fn, {}, {});
+  auto p = program(fn, {}, {});
   std::cout << repr(p) << std::endl;
-  polyregion::compiler::Options opt{polyregion::compiler::Target::Object_LLVM_AMDGCN, "gfx906"};
-  //  polyregion::compiler::Options opt{polyregion::compiler::Target::Object_LLVM_NVPTX64, "sm_61"};
-  auto c = polyregion::compiler::compile(p, opt);
-//  std::cout << c << std::endl;
+  compiler::Options opt{compiler::Target::Object_LLVM_AMDGCN, "gfx906"};
+  //  compiler::Options opt{compiler::Target::Object_LLVM_NVPTX64, "sm_61"};
+  auto c = compiler::compile(p, opt);
+  std::cout << c << std::endl;
 
   if (c.binary) {
-    std::ofstream outfile("bin_" + opt.arch.value_or("no_arch") + ".so",
+    std::ofstream outfile("bin_" + (opt.arch.empty() ? "no_arch" : opt.arch) + ".so",
                           std::ios::out | std::ios::binary | std::ios::trunc);
     outfile.write(c.binary->data(), c.binary->size());
     outfile.close();
   }
 
-  //  using namespace polyregion;
-  //
-  ////  auto triple = backend::llvmc::NVIDIA_NVPTX64;
-  //  auto triple = llvm::Triple("amdgcn-amd-amdhsa");
-  //
-  //  backend::llvmc::TargetInfo info {
-  //      .triple = triple,
-  //      .target = backend::llvmc::targetFromTriple(triple),
-  //      .cpu = {.uArch = "gfx906"}
-  //  };
-  //  auto c = polyregion::backend::llvmc::compileModule(info, true, std::move(modExt), *ctx);
-  //
-    std::cout << c << std::endl;
+  auto simple =
+      program(function("twice", {"x"_(Int)}, Int)({ret(invoke(Fn2::Mul(), "x"_(Int), 2_(Int), Int))}), {}, {});
+  std::cout << repr(simple) << std::endl;
+  auto c2 = compiler::compile(simple, {compiler::Target::Object_LLVM_x86_64, {}});
+  std::cout << c2 << std::endl;
+  if (c2.binary) {
+    runtime::object::RelocatableObjectDevice d;
+    auto str = std::string(c2.binary->begin(), c2.binary->end());
+    d.loadModule("", str);
 
-//  lld::elf
+    int a = 42;
+    int actual = 0;
+    std::vector<runtime::TypedPointer> args = {{runtime::Type::Int32, &a}};
+    runtime::TypedPointer rtn{runtime::Type::Int32, &actual};
+    d.enqueueInvokeAsync("", "lambda", args, rtn, {}, {});
+
+    std::cout << actual << "\n";
+  }
 
   std::cout << "Done!" << std::endl;
   return EXIT_SUCCESS;

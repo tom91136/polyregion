@@ -1,6 +1,7 @@
 #pragma once
 
 #include "generated/polyast.h"
+#include "variants.hpp"
 #include <ostream>
 #include <utility>
 
@@ -28,5 +29,70 @@ std::vector<Named> tail(const Term::Select &);
 
 std::pair<Named, std::vector<Named>> uncons(const Term::Select &);
 
+namespace dsl {
+
+using namespace Stmt;
+using namespace Term;
+using namespace Expr;
+namespace Tpe = Type;
+namespace Fn0 = NullaryIntrinsicKind;
+namespace Fn2 = BinaryIntrinsicKind;
+namespace Fn1 = UnaryIntrinsicKind;
+
+const static Tpe::Float Float = Tpe::Float();
+const static Tpe::Double Double = Tpe::Double();
+const static Tpe::Bool Bool = Tpe::Bool();
+const static Tpe::Byte Byte = Tpe::Byte();
+const static Tpe::Char Char = Tpe::Char();
+const static Tpe::Short Short = Tpe::Short();
+const static Tpe::Int Int = Tpe::Int();
+const static Tpe::Long Long = Tpe::Long();
+const static Tpe::Unit Unit = Tpe::Unit();
+const static Tpe::Nothing Nothing = Tpe::Nothing();
+const static Tpe::String String = Tpe::String();
+
+Tpe::Array Array(Tpe::Any t);
+Tpe::Struct Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args);
+
+template <typename T, typename U> struct AssignmentBuilder {
+  std::function<T(U)> f;
+  T operator=(U u) const { return f(u); }; // NOLINT(misc-unconventional-assign-operator)
+};
+
+struct IndexBuilder {
+  Index index;
+  explicit IndexBuilder(Index index);
+  operator const Expr::Any() const; // NOLINT(google-explicit-constructor)
+  Update operator=(const Term::Any &term) const;
+};
+
+struct NamedBuilder {
+  Named named;
+  explicit NamedBuilder(Named named);
+  operator const Term::Any() const; // NOLINT(google-explicit-constructor)
+  operator const Named() const;     // NOLINT(google-explicit-constructor)
+  IndexBuilder operator[](const Term::Any &idx) const;
+};
+
+std::function<NamedBuilder(Type::Any)> operator"" _(const char *name, size_t);
+std::function<Term::Any(Type::Any)> operator"" _(long double x);
+std::function<Term::Any(Type::Any)> operator"" _(unsigned long long int x);
+
+Stmt::Any let(const std::string &name, const Type::Any &tpe);
+AssignmentBuilder<Stmt::Any, Expr::Any> let(const std::string &name);
+BinaryIntrinsic invoke(const BinaryIntrinsicKind::Any &kind, const Term::Any &lhs, const Term::Any &rhs,
+                       const Type::Any &rtn);
+
+UnaryIntrinsic invoke(const UnaryIntrinsicKind::Any &kind, const Term::Any &lhs, const Type::Any &rtn);
+
+NullaryIntrinsic invoke(const NullaryIntrinsicKind::Any &kind, const Type::Any &rtn);
+
+std::function<Function(std::vector<Stmt::Any>)> function(const std::string &name, const std::vector<Named> &args,
+                                                         const Type::Any &rtn);
+Program program(Function entry, std::vector<Function> functions, std::vector<StructDef> defs);
+
+Return ret(const Expr::Any &expr = Alias(UnitConst()));
+
+} // namespace dsl
 
 } // namespace polyregion::polyast

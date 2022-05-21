@@ -61,8 +61,7 @@ static polyregion::compiler::Options mkOptions(JNIEnv *env, jobject options) {
   if (auto target = polyregion::compiler::targetFromOrdinal(targetOrdinal); target) {
     auto archStr = static_cast<jstring>(
         env->GetObjectField(optionsCls, archField)); // NOLINT(cppcoreguidelines-pro-type-static-cast-downcast)
-    auto arch = copyString(env, archStr);
-    return {.target = *target, .arch = arch.empty() ? std::nullopt : std::make_optional(arch)};
+    return {.target = *target, .arch = copyString(env, archStr)};
   } else {
     throwGeneric(env, "Unknown target value: " + std::to_string(targetOrdinal));
   }

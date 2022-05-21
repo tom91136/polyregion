@@ -26,7 +26,7 @@ public:
   enum class Target { x86_64, AArch64, NVPTX64, AMDGCN };
   struct Options {
     Target target;
-    Opt<std::string> arch;
+    std::string arch;
     [[nodiscard]] llvmc::TargetInfo toTargetInfo() const;
   };
 

@@ -6,6 +6,7 @@
 namespace polyregion::runtime {
 
 enum class EXPORT Type : uint8_t {
+  Void = 0,
   Bool8 = 1,
   Byte8,
   CharU16,
@@ -15,7 +16,6 @@ enum class EXPORT Type : uint8_t {
   Float32,
   Double64,
   Ptr,
-  Void,
 };
 
 using TypedPointer = std::pair<Type, void *>;

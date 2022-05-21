@@ -5,7 +5,6 @@ add_library(runtime-lib STATIC
         hip_runtime.cpp
         cl_runtime.cpp
         object_runtime.cpp
-        polyregion_runtime.cpp
         thirdparty/cuew/src/cuew.c
         thirdparty/hipew/src/hipew.c
         thirdparty/clew/src/clew.c
@@ -16,7 +15,7 @@ add_executable(runtime-tests test.cpp test-main.cpp)
 add_executable(runtime-drv driver.cpp)
 #add_library(runtime-dylib SHARED polyregion_runtime.cpp)
 
-target_include_directories(runtime-lib PRIVATE ../include
+target_include_directories(runtime-lib PUBLIC ../include
         ${LIBFFI_HEADER_PATH}
         thirdparty/
         thirdparty/clew/include

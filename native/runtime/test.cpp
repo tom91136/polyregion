@@ -1,5 +1,5 @@
 #include "catch.hpp"
-#include "polyregion_runtime.h"
+#include "object_runtime.h"
 #include <iostream>
 
 // x86_64-pc-windows-msvc
@@ -124,58 +124,37 @@ const static uint8_t X86_FMA__MACH_O[] = {
     0x00, 0x00, 0x06, 0x01, 0x00, 0x00, 0x00, 0x0f, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x5f, 0x66, 0x6d, 0x61, 0x5f, 0x00, 0x00};
 
+using namespace polyregion::runtime;
+using namespace polyregion::runtime::object;
+
 TEST_CASE("NULL object file is an error") {
-  auto o = polyregion_load_object(nullptr, 0);
-  CHECK_THAT(o->message, Catch::Contains("object file"));
-  CHECK(o->object == nullptr);
-  polyregion_release_object(o);
+  RelocatableObjectDevice d;
+  REQUIRE_THROWS_WITH(d.loadModule("", ""), Catch::Contains("object file"));
 }
 
-TEST_CASE("x86 enumerate fma") {
+TEST_CASE("x86 ELF invoke int(int, int, int)") {
 
   auto [name, expected, obj, len] =
       GENERATE(std::make_tuple("X86_FMA__ELF", "fma_", X86_FMA__ELF, sizeof(X86_FMA__ELF)),
                std::make_tuple("X86_FMA__COFF", "fma_", X86_FMA__COFF, sizeof(X86_FMA__COFF)),
                std::make_tuple("X86_FMA__MACH_O", "_fma_", X86_FMA__MACH_O, sizeof(X86_FMA__MACH_O)));
 
-  SECTION(name, expected) {
-    const auto o = polyregion_load_object(obj, len);
-    auto table = polyregion_enumerate(o->object);
-
-    REQUIRE(table->size >= 1);
-    CHECK_THAT(table->symbols[table->size - 1].name, Catch::Equals(expected));
-
-    for (size_t i = 0; i < table->size; ++i) {
-      INFO("[" << i << "]" << table->symbols[i].name);
-    }
-    //    std::cout << table->symbols[0].name << std::endl;
-
-    polyregion_release_enumerate(table);
-    polyregion_release_object(o);
-  }
-}
-
-TEST_CASE("x86 ELF invoke int(int, int, int)") {
-
-  auto [name, obj, len] = GENERATE(std::make_tuple("X86_FMA__ELF", X86_FMA__ELF, sizeof(X86_FMA__ELF)),
-                                   std::make_tuple("X86_FMA__COFF", X86_FMA__COFF, sizeof(X86_FMA__COFF)),
-                                   std::make_tuple("X86_FMA__MACH_O", X86_FMA__MACH_O, sizeof(X86_FMA__MACH_O)));
-
   SECTION(name) {
     const int a = 1, b = 2, c = 3;
     int actual = -1;
 
-    std::vector<polyregion_data> args = {{ POLYREGION_INT, (void *)(&a)},
-                                         { POLYREGION_INT, (void *)(&b)},
-                                         { POLYREGION_INT, (void *)(&c)}};
-    polyregion_data return_{ POLYREGION_INT, &actual};
-    const auto o = polyregion_load_object(obj, len);
-    auto error = polyregion_invoke(o->object, "fma_", args.data(), args.size(), &return_);
-    //  char* error = nullptr;
-    REQUIRE(error == nullptr);
-    CHECK(actual == (a * b + c));
+    RelocatableObjectDevice d;
 
-    polyregion_release_invoke(error);
-    polyregion_release_object(o);
+    d.loadModule("", std::string(reinterpret_cast<const char *>(obj)));
+
+    std::vector<TypedPointer> args = {
+        {Type::Int32, (void *)(&a)},
+        {Type::Int32, (void *)(&b)},
+        {Type::Int32, (void *)(&c)},
+    };
+    TypedPointer rtn{Type::Int32, &actual};
+    d.enqueueInvokeAsync("", "fma_", args, rtn, {}, []() {});
+
+    CHECK(actual == (a * b + c));
   }
 }

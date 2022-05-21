@@ -29,7 +29,7 @@ polyregion_compilation *polyregion_compile(const polyregion_buffer *ast, bool em
 
   // FIXME update signature
   auto compilation = polyregion::compiler::compile(std::vector<char>(ast->data, ast->data + ast->size),
-                                                   polyregion::compiler::Options{Target::Object_LLVM_x86_64});
+                                                   polyregion::compiler::Options{Target::Object_LLVM_x86_64, {}});
   auto bin = compilation.binary ? polyregion_buffer{compilation.binary->data(), compilation.binary->size()}
                                 : polyregion_buffer{nullptr, 0};
 

@@ -1,18 +1,19 @@
 
 #include "cl_runtime.h"
-#include <iostream>
 
 using namespace polyregion::runtime;
 using namespace polyregion::runtime::cl;
 
 #define CHECKED(f) checked((f), __FILE__, __LINE__)
 
+static constexpr const char *ERROR_PREFIX = "[OpenCL error] ";
+
 #define OUT_ERR __err
 #define OUT_CHECKED(f) checked([&](auto &&OUT_ERR) { return (f); }, __FILE__, __LINE__)
 
 static void checked(cl_int result, const std::string &file, int line) {
   if (result != CL_SUCCESS) {
-    throw std::logic_error(std::string("[OpenCL error] " + file + ":" + std::to_string(line) + ": ") +
+    throw std::logic_error(std::string(ERROR_PREFIX + file + ":" + std::to_string(line) + ": ") +
                            clewErrorString(result));
   }
 }
@@ -22,8 +23,7 @@ template <typename F> static auto checked(F &&f, const std::string &file, int li
   auto y = f(&err);
   if (err == CL_SUCCESS) return y;
   else {
-    throw std::logic_error(std::string("[OpenCL error] " + file + ":" + std::to_string(line) + ": ") +
-                           clewErrorString(err));
+    throw std::logic_error(std::string(ERROR_PREFIX + file + ":" + std::to_string(line) + ": ") + clewErrorString(err));
   }
 }
 
@@ -67,31 +67,22 @@ std::vector<std::unique_ptr<Device>> ClRuntime::enumerate() {
   return clDevices;
 }
 
-void ClDevice::enqueueCallback(const Callback &cb, cl_event event) {
+void ClDevice::enqueueCallback(const std::optional<Callback> &cb, cl_event event) {
+  if (!cb) return;
   CHECKED(clSetEventCallback(
       event, CL_COMPLETE,
       [](cl_event e, cl_int status, void *data) {
         CHECKED(status);
-        CountedCallbackHandler::consume(data);
+        detail::CountedCallbackHandler::consume(data);
       },
-      handler.createHandle(cb)));
+      detail::CountedCallbackHandler::createHandle(*cb)));
   CHECKED(clFlush(queue));
 }
 
 cl_mem ClDevice::queryMemObject(uintptr_t ptr) const {
   if (auto it = allocations.find(ptr); it != allocations.end()) return it->second;
   else
-    throw std::logic_error(std::string("[OpenCL error] illegal memory object: " + std::to_string(ptr)));
-}
-
-void ClDevice::releaseProgram() {
-  if (program) {
-    for (auto &[_, v] : kernels)
-      CHECKED(clReleaseKernel(v));
-    kernels.clear();
-    CHECKED(clReleaseProgram(program));
-    program = nullptr;
-  }
+    throw std::logic_error(std::string(ERROR_PREFIX) + "Illegal memory object: " + std::to_string(ptr));
 }
 
 ClDevice::ClDevice(cl_device_id device) : device(device) {
@@ -103,12 +94,16 @@ ClDevice::ClDevice(cl_device_id device) : device(device) {
 }
 
 ClDevice::~ClDevice() {
-  std::cout << "CL exit" << std::endl;
   CHECKED(clFinish(queue));
-  releaseProgram();
+  for (auto &[_, lm] : modules) {
+    auto &[p, fnTable] = lm;
+    for (auto [name, fn] : fnTable)
+      CHECKED(clReleaseKernel(fn));
+    CHECKED(clReleaseProgram(p));
+  }
+  modules.clear();
   CHECKED(clReleaseCommandQueue(queue));
   CHECKED(clReleaseContext(context));
-  handler.clear();
   if (__clewReleaseDevice) // clReleaseDevice requires OpenCL >= 1.2
     CHECKED(__clewReleaseDevice(device));
 }
@@ -119,39 +114,37 @@ std::string ClDevice::name() { return deviceName; }
 
 std::vector<Property> ClDevice::properties() { return {}; }
 
-void ClDevice::loadKernel(const std::string &image) {
-  releaseProgram();
-  auto imageData = image.data();
-  auto imageLen = image.size();
-  program = OUT_CHECKED(clCreateProgramWithSource(context, 1, &imageData, &imageLen, OUT_ERR));
-
-  const std::string compilerArgs = "-Werror";
-  cl_int result = clBuildProgram(program, 1, &device, compilerArgs.data(), nullptr, nullptr);
-  if (result != CL_SUCCESS) {
-    size_t len;
-    clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, 0, nullptr, &len);
-    std::string buildLog(len, '\0');
-    clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, len, buildLog.data(), nullptr);
-
-    throw std::logic_error("[OpenCL error] Program failed to compile with " + std::string(clewErrorString(result)) +
-                           ")\n[OpenCL error] Program source:\n" + image + "\n[OpenCL error] Diagnostics:\n" +
-                           buildLog);
+void ClDevice::loadModule(const std::string &name, const std::string &image) {
+  if (auto it = modules.find(name); it != modules.end()) {
+    throw std::logic_error(std::string(ERROR_PREFIX) + "Module named " + name + " was already loaded");
+  } else {
+    auto imageData = image.data();
+    auto imageLen = image.size();
+    auto program = OUT_CHECKED(clCreateProgramWithSource(context, 1, &imageData, &imageLen, OUT_ERR));
+    const std::string compilerArgs = "-Werror";
+    cl_int result = clBuildProgram(program, 1, &device, compilerArgs.data(), nullptr, nullptr);
+    if (result != CL_SUCCESS) {
+      size_t len;
+      CHECKED(clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, 0, nullptr, &len));
+      std::string buildLog(len, '\0');
+      CHECKED(clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, len, buildLog.data(), nullptr));
+      auto compilerMessage = std::string(clewErrorString(result));
+      throw std::logic_error(std::string(ERROR_PREFIX) + "Program failed to compile with " + compilerMessage +
+                             ")\n" +                                                          //
+                             std::string(ERROR_PREFIX) + "Program source:\n" + image + "\n" + //
+                             std::string(ERROR_PREFIX) + "Diagnostics:\n" + buildLog);        //
+    }
+    modules.emplace_hint(it, name, LoadedModule{program, {}});
   }
 }
 
 uintptr_t ClDevice::malloc(size_t size, Access access) {
   cl_mem_flags flags = {};
   switch (access) {
-  case Access::RO:
-    flags = CL_MEM_READ_ONLY;
-    break;
-  case Access::WO:
-    flags = CL_MEM_WRITE_ONLY;
-    break;
-  case Access::RW:
-  default:
-    flags = CL_MEM_READ_WRITE;
-    break;
+    case Access::RO: flags = CL_MEM_READ_ONLY; break;
+    case Access::WO: flags = CL_MEM_WRITE_ONLY; break;
+    case Access::RW:
+    default: flags = CL_MEM_READ_WRITE; break;
   }
   auto id = this->bufferCounter++;
   allocations[id] = OUT_CHECKED(clCreateBuffer(context, flags, size, nullptr, OUT_ERR));
@@ -160,50 +153,48 @@ uintptr_t ClDevice::malloc(size_t size, Access access) {
 
 void ClDevice::free(uintptr_t ptr) { CHECKED(clReleaseMemObject(queryMemObject(ptr))); }
 
-void ClDevice::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const std::function<void()> &cb) {
+void ClDevice::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size,
+                                        const std::optional<Callback> &cb) {
   cl_event event = {};
   CHECKED(clEnqueueWriteBuffer(queue, queryMemObject(dst), CL_FALSE, 0, size, src, 0, nullptr, &event));
   enqueueCallback(cb, event);
 }
 
-void ClDevice::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const std::function<void()> &cb) {
+void ClDevice::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const std::optional<Callback> &cb) {
   cl_event event = {};
   CHECKED(clEnqueueReadBuffer(queue, queryMemObject(src), CL_FALSE, 0, size, dst, 0, nullptr, &event));
   enqueueCallback(cb, event);
 }
 
-void ClDevice::enqueueKernelAsync(const std::string &name, std::vector<TypedPointer> args, Dim gridDim, Dim blockDim,
-                                  const std::function<void()> &cb) {
-  if (!program) throw std::logic_error("No program loaded");
+void ClDevice::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
+                                  const std::vector<TypedPointer> &args, TypedPointer rtn, const Policy &policy,
+                                  const std::optional<Callback> &cb) {
 
-  auto it = kernels.find(name);
+  auto moduleIt = modules.find(moduleName);
+  if (moduleIt == modules.end())
+    throw std::logic_error(std::string(ERROR_PREFIX) + "No module named " + moduleName + " was loaded");
+
+  auto &[m, fnTable] = moduleIt->second;
   cl_kernel kernel = nullptr;
-  if (!(it == kernels.end())) kernel = it->second;
+  if (auto it = fnTable.find(symbol); it != fnTable.end()) kernel = it->second;
   else {
-    kernel = OUT_CHECKED(clCreateKernel(program, name.c_str(), OUT_ERR));
-    kernels.emplace(name, kernel);
+    auto &&m0 = m; // XXX we need this crap because OUT_CHECKED internally uses a lambda (can't use bindings in those)
+    kernel = OUT_CHECKED(clCreateKernel(m0, symbol.c_str(), OUT_ERR));
+    fnTable.emplace_hint(it, symbol, kernel);
   }
 
   auto toSize = [](Type t) -> size_t {
     switch (t) {
-    case Type::Bool8:
-    case Type::Byte8:
-      return 8 / 8;
-    case Type::CharU16:
-    case Type::Short16:
-      return 16 / 8;
-    case Type::Int32:
-      return 32 / 8;
-    case Type::Long64:
-      return 64 / 8;
-    case Type::Float32:
-      return 32 / 8;
-    case Type::Double64:
-      return 64 / 8;
-    case Type::Ptr:
-      return sizeof(cl_mem);
-    case Type::Void:
-      throw std::logic_error("Illegal argument type: void");
+      case Type::Bool8: // fallthrough
+      case Type::Byte8: return 8 / 8;
+      case Type::CharU16: // fallthrough
+      case Type::Short16: return 16 / 8;
+      case Type::Int32: return 32 / 8;
+      case Type::Long64: return 64 / 8;
+      case Type::Float32: return 32 / 8;
+      case Type::Double64: return 64 / 8;
+      case Type::Ptr: return sizeof(cl_mem);
+      case Type::Void: throw std::logic_error("Illegal argument type: void");
     }
   };
 
@@ -216,12 +207,15 @@ void ClDevice::enqueueKernelAsync(const std::string &name, std::vector<TypedPoin
       CHECKED(clSetKernelArg(kernel, i, toSize(tpe), rawPtr));
   }
 
+  auto global = policy.global;
+  auto local = policy.local.value_or(Dim{});
+
   cl_event event = {};
-  CHECKED(clEnqueueNDRangeKernel(queue, kernel,           //
-                                 3,                       //
-                                 nullptr,                 //
-                                 gridDim.sizes().data(),  //
-                                 blockDim.sizes().data(), //
+  CHECKED(clEnqueueNDRangeKernel(queue, kernel,         //
+                                 3,                     //
+                                 nullptr,               //
+                                 global.sizes().data(), //
+                                 local.sizes().data(),  //
                                  0, nullptr, &event));
   enqueueCallback(cb, event);
   CHECKED(clFlush(queue));

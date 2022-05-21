@@ -251,7 +251,7 @@ EXPORT void initialise();
 
 struct EXPORT Options {
   EXPORT Target target;
-  EXPORT std::optional<std::string> arch;
+  EXPORT std::string arch;
 };
 
 EXPORT Layout layoutOf(const polyast::StructDef &sdef, const Options &options);

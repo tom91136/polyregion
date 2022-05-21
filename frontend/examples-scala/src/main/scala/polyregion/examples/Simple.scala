@@ -22,7 +22,6 @@ object Simple {
     val x = 1
     val z = 1
 
-
     object Local {
       val g      = Foo.bar + Foo.baz + a + b + c + x
       val levelB = LevelA.LevelB
@@ -37,6 +36,26 @@ object Simple {
     val xs = polyregion.scala.Buffer.range[Int](0, n)
 
     println(xs)
+
+    case class Runtime()
+    // Task API  (multiple async dispatch supported; CPU=pooled, GPU=multiple command queue)
+    // singular : device.task[A](a: => A)
+    // parallel :
+    //    device.foreach(x: Range)(f: Int => Unit)
+    //    device.foreachND(x: Range, l : Range)(f: Int => Unit)
+
+
+    //    device.foreach(x: Range, y: Range)(f: (Int, Int) => Unit)
+    //    device.foreach(x: Range, y: Range, z: Range)(f: (Int, Int, Int) => Unit)
+    //    device.reduce[A](x: Range)(c: (A, A) => A)(f: Int => A)
+    //    device.reduce[A](x: Range, y: Range)(c: (A, A) => A)(f: (Int, Int) => A)
+    //    device.reduce[A](x: Range, y: Range, z: Range)(c: (A, A) => A)(f: (Int, Int, Int) => A)
+
+    //    device.reduce[A](combine : (A, A) => A)(x: Int)(f : Int => A)
+    //    device.reduce[A](combine : (A, A) => A)(x: Int, y: Int)(f : (Int, Int) => A)
+    //    device.reduce[A](combine : (A, A) => A)(x: Int, y: Int, z: Int)(f : (Int, Int, Int) => A)
+
+    //  collection extensions: extension (xs : Seq[T]) {  def offload(d: Device) ...  }
 
     val l = Local
     val result = polyregion.scala.compiletime.offload {
@@ -72,14 +91,14 @@ object Simple {
 //      Foo.bar + out + Foo.nBarInline(m)
 
       var max = 0
-      var i = 0
-      while (i < n){
+      var i   = 0
+      while (i < n) {
         max = math.max(max, xs(i))
 //        max = if(i < y) max*2 else max
 //        xs(i) = i // i-1
-        i+=1
+        i += 1
       }
-       max
+      max
     }
     println(xs)
 

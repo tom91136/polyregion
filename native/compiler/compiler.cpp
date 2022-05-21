@@ -139,7 +139,7 @@ compiler::Layout compiler::layoutOf(const polyast::StructDef &def, const Options
                               .members = members};
     }
     case Target::Source_C_OpenCL1_1:
-    case Target::Source_C_C11: throw std::logic_error("Not availabe for source targets");
+    case Target::Source_C_C11: throw std::logic_error("Not available for source targets");
   }
 }
 

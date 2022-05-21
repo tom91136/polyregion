@@ -85,6 +85,7 @@ static R invokeGeneric(JNIEnv *env, jbyteArray object, jbyteArray argTypes, jobj
   try {
     auto data = reinterpret_cast<const uint8_t *>(objData);
     std::vector<uint8_t> bytes(data, data + env->GetArrayLength(object));
+
     runtime::Object obj(bytes);
 
     std::vector<runtime::TypedPointer> params(env->GetArrayLength(argPtrs));

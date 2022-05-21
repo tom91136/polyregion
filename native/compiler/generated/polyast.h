@@ -268,7 +268,7 @@ struct EXPORT Fractional : TypeKind::Base {
   EXPORT friend bool operator==(const TypeKind::Fractional &, const TypeKind::Fractional &);
 };
 } // namespace TypeKind
-namespace Type { 
+namespace Type {
 
 struct EXPORT Base {
   TypeKind::Any kind;

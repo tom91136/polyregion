@@ -1,7 +1,7 @@
 #include "libm.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/DynamicLibrary.h"
-#include <cmath> // we can't use <cmath> here because of the overloads
+#include <cmath>
 
 template <typename T> static void sym(const std::string &name, T (*f)(T)) {
   llvm::sys::DynamicLibrary::AddSymbol(name, (void *)f);
