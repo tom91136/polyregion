@@ -1,6 +1,7 @@
 package polyregion.examples
 
 import java.util.concurrent.Future
+import scala.collection.IterableOnceOps
 
 object Foo {
   var x                         = 10
@@ -40,34 +41,67 @@ object Simple {
     enum Optimisation {
       case O0, O1, O2, O3, Ofast
     }
-    case class Options(arch: String, opt: Optimisation)
+    case class RuntimeOptions(arch: String, opt: Optimisation)
+
 
     trait Runtime {
       def name: String
       def properties(): Map[String, String]
-      def devices(): Vector[Device]
+      def devices(): Vector[Device[RuntimeOptions]]
     }
 
-    trait Device {
+    trait Device[O] {
       def name: String
       def properties(): Map[String, String]
       def task[A](f: => A): A
-      def foreach(x: Range)(using o: Options)(f: Int => Unit): Unit
-      def foreach(x: Range, y: Range)(using o: Options)(f: (Int, Int) => Unit): Unit
-      def foreach(x: Range, y: Range, z: Range)(using o: Options)(f: (Int, Int, Int) => Unit): Unit
-      def reduce[A](x: Range)(using o: Options)(g: (A, A) => A)(f: Int => A): A
-      def reduce[A](x: Range, y: Range)(using o: Options)(g: (A, A) => A)(f: (Int, Int) => A): A
-      def reduce[A](x: Range, y: Range, z: Range)(using o: Options)(g: (A, A) => A)(f: (Int, Int, Int) => A): A
+
+      def foreach(x: Range)(using o: O)(f: Int => Unit): Unit
+      def foreach(x: Range, y: Range)(using o: O)(f: (Int, Int) => Unit): Unit
+      def foreach(x: Range, y: Range, z: Range)(using o: O)(f: (Int, Int, Int) => Unit): Unit
+
+      def reduce[A](x: Range)(using o: O)(g: (A, A) => A)(f: Int => A): A
+      def reduce[A](x: Range, y: Range)(using o: O)(g: (A, A) => A)(f: (Int, Int) => A): A
+      def reduce[A](x: Range, y: Range, z: Range)(using o: O)(g: (A, A) => A)(f: (Int, Int, Int) => A): A
+
+      inline def foreach(x: Int)(using o: O)(f: Int => Unit): Unit =
+        foreach(0 until x)(f)
+      inline def foreach(x: Int, y: Int)(using o: O)(f: (Int, Int) => Unit): Unit =
+        foreach(0 until x, 0 until y)(f)
+      inline def foreach(x: Int, y: Int, z: Int)(using o: O)(f: (Int, Int, Int) => Unit): Unit =
+        foreach(0 until x, 0 until y, 0 until z)(f)
+
+      inline def reduce[A](x: Int)(using o: O)(g: (A, A) => A)(f: Int => A): A =
+        reduce[A](0 until x)(g)(f)
+      inline def reduce[A](x: Int, y: Int)(using o: O)(g: (A, A) => A)(f: (Int, Int) => A): A =
+        reduce[A](0 until x, 0 until y)(g)(f)
+      inline def reduce[A](x: Int, y: Int, z: Int)(using o: O)(g: (A, A) => A)(f: (Int, Int, Int) => A): A =
+        reduce[A](0 until x, 0 until y, 0 until z)(g)(f)
+
     }
 
-    val Native: Device = ???
-    val Host: Device   = ???
+    trait CompileTimeOption
+    given CompileTimeOption = new CompileTimeOption
 
-    val opt       = Options("", Optimisation.Ofast)
-    given Options = opt
+    val HostRuntime: Device[RuntimeOptions]   = ???
+
+    val Native: Device[RuntimeOptions] = ???
+
+
+
+    val opt       = RuntimeOptions("", Optimisation.Ofast)
+    given RuntimeOptions = opt
 
     Native.foreach(1 to 3)(x => ())
     Native.foreach(1 to 3)(using opt)(x => ())
+
+
+
+    def aotDevice(s : String*) : Device[Unit]  = ???
+
+
+    aotDevice("").foreach(1 to 2){1+1}
+
+
 
     Native.foreach(1 to 3, 10 to 20, 3 to 3)((x, y, z) => ())
     Native.foreach(1 to 3, 10 to 20, 3 to 3)(using opt)((x, y, z) => ())
@@ -77,6 +111,8 @@ object Simple {
     extension [A](xs: Seq[A]) {
       def offload: Offload[A] = ???
     }
+
+    // offload("-O3") { 1+1 }
 
     // Task API +JIT (multiple async dispatch supported; CPU=pooled, GPU=multiple command queue)
     // import polyregion.scala.backends.{Host: Device, JVM: Device, GPU: Runtime}

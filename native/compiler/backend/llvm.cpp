@@ -6,7 +6,7 @@
 #include "utils.hpp"
 #include "variants.hpp"
 
-#include "Utils/AMDGPUBaseInfo.h"
+//#include "Utils/AMDGPUBaseInfo.h"
 
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/IntrinsicsAMDGPU.h"

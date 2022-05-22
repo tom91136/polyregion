@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.18)
 include(FetchContent)
+include(ProcessorCount)
 
 project(polyregion-native)
 
@@ -7,19 +8,76 @@ set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON" FORCE)
 
 set(LINKER "" CACHE INTERNAL "Path to custom linker")
 set(POLYREGION_SHARED_LIB OFF CACHE BOOL "")
-
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+ProcessorCount(NPROC)
+
+if (LINKER)
+    set(COMMON_LINK_OPTIONS --ld-path=${LINKER} ${COMMON_LINK_OPTIONS})
+endif ()
+
+# FIXME adjust for CUDA stuff for now
+set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan)
+#set(COMMON_DEBUG_OPTIONS  )
+
+set(COMMON_COMPILE_OPTIONS
+        -ffunction-sections       # keep functions in its own section for better --gc-sections results
+        -fdata-sections           # same as above
+        -fno-rtti                 # don't use RTTI for space
+        -pedantic
+        -Wall
+        -Wextra
+        # -Wshadow         # too prevalent in LLVM
+        # -Wold-style-cast # too prevalent in LLVM
+        -Wcast-align
+        -Werror=return-type
+        -Wno-unused-parameter
+        -Wno-unused-function
+        -Wno-unused-variable
+        )
 
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    message(STATUS "LTO disabled in Debug mode")
+    # --exclude-libs=ALL kills -fsanitize=*
+    # keep sections for debug!
+    set(POLYREGION_SHARED_LIB ON)
     set(DEBUG ON)
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
+    message(STATUS "LTO disabled in Debug mode")
+    set(COMMON_COMPILE_OPTIONS ${COMMON_COMPILE_OPTIONS})
 else ()
+    set(POLYREGION_SHARED_LIB OFF)
     set(DEBUG OFF)
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
     set(CMAKE_CXX_COMPILE_OPTIONS_IPO -flto=thin)
+
+    set(COMMON_COMPILE_OPTIONS
+            ${COMMON_COMPILE_OPTIONS}
+            -fvisibility=hidden       # don't export anything by default
+            -fvisibility-inlines-hidden
+            )
+
+    set(COMMON_LINKER_OPTIONS
+            LINKER:--lto-O3
+            LINKER:--icf=all
+            LINKER:--threads=${NPROC}
+            LINKER:--no-allow-shlib-undefined
+            LINKER:--no-undefined-version
+            LINKER:--no-undefined
+            LINKER:--exclude-libs=ALL # ld/lld exports all object symbols by default, don't do that
+            LINKER:--gc-sections      # remove unused sections
+            LINKER:--strip-all        # strip symbols not used for DSO
+            LINKER:-O3                # O3 for linker means optimise for space
+            )
 endif ()
+
+set(COMMON_LINK_OPTIONS
+        ${COMMON_LINK_OPTIONS}
+        -static-libgcc
+        -static-libstdc++
+        ${COMMON_COMPILE_OPTIONS}
+        ${COMMON_LINKER_OPTIONS})
+
 
 set(LLVM_SRC_VERSION 14.0.3)
 set(LLVM_SRC_DIR_IN_RELEASE llvm-${LLVM_SRC_VERSION}.src)
@@ -75,6 +133,7 @@ else ()
     # X86;AArch64;ARM;NVPTX;AMDGPU;WebAssembly
     set(LLVM_TARGETS_TO_BUILD "X86;AArch64;ARM;NVPTX;AMDGPU" CACHE INTERNAL "")
     #    set(LLVM_TARGETS_TO_BUILD "X86" CACHE INTERNAL "")
+    #    set(LLVM_TARGETS_TO_BUILD "" CACHE INTERNAL "")
     set(LLVM_ENABLE_IDE ON CACHE BOOL "")
     set(LLVM_ENABLE_THREADS ON CACHE BOOL "")
     if (CMAKE_INTERPROCEDURAL_OPTIMIZATION)
@@ -98,7 +157,7 @@ else ()
     #    set(CMAKE_CXX_FLAGS "-fvisibility=hidden  -ffunction-sections -fdata-sections" CACHE INTERNAL "")
 
 
-    set(LLVM_ENABLE_RTTI ON CACHE BOOL "")
+    set(LLVM_ENABLE_RTTI OFF CACHE BOOL "")
 
     set(LLVM_BUILD_RUNTIME OFF CACHE BOOL "")
 
@@ -176,6 +235,9 @@ else ()
             endif ()
             llvm_add_library(${name} ${ARG_ENABLE_SHARED} ${ARG_UNPARSED_ARGUMENTS})
             set_target_properties(${name} PROPERTIES FOLDER "lld libraries")
+
+            target_compile_options(${name} PRIVATE ${COMMON_COMPILE_OPTIONS})
+
         endmacro(add_lld_library)
 
         add_subdirectory(${lld_SOURCE_DIR}/Common ${lld_BINARY_DIR}/Common)
@@ -221,55 +283,6 @@ include_directories(${LLVM_INCLUDE_DIRS})
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# FIXME adjust for CUDA stuff for now
-set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan)
-#set(COMMON_DEBUG_OPTIONS  )
-
-set(COMMON_COMPILE_OPTIONS
-        -ffunction-sections       # keep functions in its own section for better --gc-sections results
-        -fdata-sections           # same as above
-#        -fno-rtti                 # don't use RTTI for space
-        -pedantic
-        -Wall
-        -Wextra
-        # -Wshadow         # too prevalent in LLVM
-        # -Wold-style-cast # too prevalent in LLVM
-        -Wcast-align
-        -Werror=return-type
-        -Wno-unused-parameter
-        -Wno-unused-function
-        -Wno-unused-variable
-        )
-
-if (DEBUG)
-    # --exclude-libs=ALL kills -fsanitize=*
-    # keep sections for debug!
-    set(COMMON_COMPILE_OPTIONS ${COMMON_COMPILE_OPTIONS})
-else ()
-    set(COMMON_LINKER_OPTIONS
-            LINKER:--no-allow-shlib-undefined
-            LINKER:--no-undefined-version
-            LINKER:--no-undefined
-            LINKER:--exclude-libs=ALL # ld/lld exports all object symbols by default, don't do that
-            LINKER:--gc-sections      # remove unused sections
-            LINKER:-s                 # strip symbols not used for DSO
-            LINKER:-O3                # O3 for linker means optimise for space
-            )
-    set(COMMON_COMPILE_OPTIONS ${COMMON_COMPILE_OPTIONS}
-            -fvisibility=hidden       # don't export anything by default
-            -fvisibility-inlines-hidden
-            )
-endif ()
-
-set(COMMON_LINK_OPTIONS
-        -static-libgcc
-        -static-libstdc++
-        ${COMMON_COMPILE_OPTIONS}
-        ${COMMON_LINKER_OPTIONS})
-
-if (LINKER)
-    set(COMMON_LINK_OPTIONS --ld-path=${LINKER} ${COMMON_LINK_OPTIONS})
-endif ()
 
 add_subdirectory(compiler)
 add_subdirectory(runtime)

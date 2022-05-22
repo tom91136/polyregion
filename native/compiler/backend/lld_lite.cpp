@@ -8,9 +8,7 @@
 #include "SyntheticSections.h"
 #include "Target.h"
 #include "suppress_fd.h"
-#include <cstdio>
 #include <iostream>
-#include <unistd.h>
 
 // XXX see https://gist.github.com/dabrahams/1528856
 template <class Tag> struct stowed { static typename Tag::type value; };
@@ -24,7 +22,8 @@ template <class Tag, typename Tag::type x> struct stow_private {
   stow_private() { stowed<Tag>::value = x; }
   static stow_private instance;
 };
-template <class Tag, typename Tag::type x> stow_private<Tag, x> stow_private<Tag, x>::instance;
+template <class Tag, typename Tag::type x>
+stow_private<Tag, x> stow_private<Tag, x>::instance; // NOLINT(cert-err58-cpp)
 
 // ====
 
@@ -94,7 +93,7 @@ polyregion::backend::lld_lite::link(const std::vector<std::string> &args,
   // LLD uses FileOutputBuffer which delegates to InMemoryBuffer which dumps data to llvm::outs().
   // There isn't an easy to way to avoid this as everything is function local, so we just mask the actual STDOUT FD for
   // now and restore it when linking is done.
-  suppress_fd::Suppressor<suppress_fd::STDOUT> suppressor; // supress STDOUT
+  suppress_fd::Suppressor<suppress_fd::STDOUT> suppressor; // suppress STDOUT
 
   lld::elf::driver->linkerMain(lldArgs);
 
