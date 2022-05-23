@@ -1,8 +1,7 @@
 package polyregion.examples
 
 import scala.collection.IterableOnceOps
-import scala.concurrent.Future
-import scala.concurrent.Promise
+import scala.concurrent.{Await, Future, Promise}
 import scala.util.Try
 
 object Foo {
@@ -49,85 +48,108 @@ object Simple {
       case SM51, SM80
     }
 
-    // unknown => Option[A]
-    // known, AOT => A
+
 
     sealed trait CompileOptions
     object CompileOptions {
       case class JIT(opt: Optimisation, archHint: Option[Arch] = None) extends CompileOptions
       case class AOT[A <: Arch](arch: A, opt: Optimisation)            extends CompileOptions
-      case class EC()(using val ec: scala.concurrent.ExecutionContext)                                                   extends CompileOptions
-
     }
 
-    trait Runtime[O <: CompileOptions] {
+    trait Runtime[F[_], O] {
       def name: String
       def properties: Map[String, String]
-      def devices: Vector[Device[O]]
-
-      def jit: Runtime[CompileOptions.JIT]
+      def devices: Vector[Device[F, O]]
+      def jit: Runtime[F, CompileOptions.JIT]
     }
 
-    trait Device[O] {
+    trait SuspendedRuntime[F[_], O](f: [A] => ((Either[Throwable, A] => Unit) => Unit) => F[A]) extends Runtime[F, O] {
 
-      def jit: Device[CompileOptions.JIT] = ???
+      val nn = f[Int](cb => cb(Right(1)))
+
+      override def devices: Vector[Device[F, O]] = ???
+    }
+
+
+    abstract class F2[O]
+        extends SuspendedRuntime[Future, O](
+          [A] => { (cb: (Either[Throwable, A] => Unit) => Unit) =>
+            val p = Promise[A]
+            cb((e: Either[Throwable, A]) => p.tryComplete(e.toTry): Unit)
+            p.future
+          }
+        ) {}
+
+    trait Device[F[_], O] {
+
+      def jit: Device[F, CompileOptions.JIT] = ???
 
       def name: String
       def properties(): Map[String, String]
-      def task[A](using o: O)(f: => A): A
+      def task[A](using o: O)(f: => A): F[A]
 
-      def foreach(x: Range)(using o: O)(f: Int => Unit): Unit
-      def foreach(x: Range, y: Range)(using o: O)(f: (Int, Int) => Unit): Unit
-      def foreach(x: Range, y: Range, z: Range)(using o: O)(f: (Int, Int, Int) => Unit): Unit
+      def foreach(x: Range)(using o: O)(f: Int => Unit): F[Unit]
+      def foreach(x: Range, y: Range)(using o: O)(f: (Int, Int) => Unit): F[Unit]
+      def foreach(x: Range, y: Range, z: Range)(using o: O)(f: (Int, Int, Int) => Unit): F[Unit]
 
-      def reduce[A](x: Range)(using o: O)(g: (A, A) => A)(f: Int => A): A
-      def reduce[A](x: Range, y: Range)(using o: O)(g: (A, A) => A)(f: (Int, Int) => A): A
-      def reduce[A](x: Range, y: Range, z: Range)(using o: O)(g: (A, A) => A)(f: (Int, Int, Int) => A): A
+      def reduce[A](x: Range)(using o: O)(g: (A, A) => A)(f: Int => A): F[A]
+      def reduce[A](x: Range, y: Range)(using o: O)(g: (A, A) => A)(f: (Int, Int) => A): F[A]
+      def reduce[A](x: Range, y: Range, z: Range)(using o: O)(g: (A, A) => A)(f: (Int, Int, Int) => A): F[A]
 
-      inline def foreach(x: Int)(using o: O)(f: Int => Unit): Unit =
+      inline def foreach(x: Int)(using o: O)(f: Int => Unit): F[Unit] =
         foreach(0 until x)(f)
-      inline def foreach(x: Int, y: Int)(using o: O)(f: (Int, Int) => Unit): Unit =
+      inline def foreach(x: Int, y: Int)(using o: O)(f: (Int, Int) => Unit): F[Unit] =
         foreach(0 until x, 0 until y)(f)
-      inline def foreach(x: Int, y: Int, z: Int)(using o: O)(f: (Int, Int, Int) => Unit): Unit =
+      inline def foreach(x: Int, y: Int, z: Int)(using o: O)(f: (Int, Int, Int) => Unit): F[Unit] =
         foreach(0 until x, 0 until y, 0 until z)(f)
 
-      inline def reduce[A](x: Int)(using o: O)(g: (A, A) => A)(f: Int => A): A =
+      inline def reduce[A](x: Int)(using o: O)(g: (A, A) => A)(f: Int => A): F[A] =
         reduce[A](0 until x)(g)(f)
-      inline def reduce[A](x: Int, y: Int)(using o: O)(g: (A, A) => A)(f: (Int, Int) => A): A =
+      inline def reduce[A](x: Int, y: Int)(using o: O)(g: (A, A) => A)(f: (Int, Int) => A): F[A] =
         reduce[A](0 until x, 0 until y)(g)(f)
-      inline def reduce[A](x: Int, y: Int, z: Int)(using o: O)(g: (A, A) => A)(f: (Int, Int, Int) => A): A =
+      inline def reduce[A](x: Int, y: Int, z: Int)(using o: O)(g: (A, A) => A)(f: (Int, Int, Int) => A): F[A] =
         reduce[A](0 until x, 0 until y, 0 until z)(g)(f)
 
     }
 
-    trait CUDADevice extends Device[CompileOptions.AOT[CUDAArch]]
 
-    class CUDARuntime extends Runtime[CompileOptions.AOT[CUDAArch]] {
-      override def name: String                    = "CUDA"
+
+    trait CUDADevice[F[_]] extends Device[F, CompileOptions.AOT[CUDAArch]]
+
+    class CUDARuntime[F[_]] extends Runtime[F, CompileOptions.AOT[CUDAArch]] {
+      override inline def name: String                    = "CUDA"
       override def properties: Map[String, String] = Map.empty
-      override def devices: Vector[CUDADevice]     = Vector.empty
-      def jit: Runtime[CompileOptions.JIT]         = ???
-
+      override def devices: Vector[CUDADevice[F]]  = Vector.empty
+      def jit: Runtime[F, CompileOptions.JIT]      = ???
     }
 
-    val HostRuntime: Device[scala.concurrent.ExecutionContext] = ???
-    val Native: Device[CompileOptions]                         = ???
+
+    //
+
+    val HostRuntime: Device[Future, CompileOptions.JIT] = ???
+    val Native: Device[Future, CompileOptions]                         = ???
 
     // val HIP: Runtime    = ???
-    val CUDA: CUDARuntime = ???
+    val CUDA: CUDARuntime[Future] = ???
     // val OpenCL: Runtime = ???
+
+    implicit val ec: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
 
     CUDA.devices(0).task(using CompileOptions.AOT(CUDAArch.SM80, Optimisation.Ofast))(1 + 1)
     CUDA.jit.devices(0).task(using CompileOptions.JIT(Optimisation.Ofast))(1 + 1)
 
-    val p = Promise[Int]
-    p.complete(Try(1))
-    p.future
+    CUDA.devices(0).queue
+
+    def runM[A](d:  Device[Future, CompileOptions.JIT])  =
+      d.task(1 + 1)
+
 
     // Native.task(1+1)
 
-    implicit val ec: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
-    HostRuntime.task(1 + 1)
+    HostRuntime.task(1 + 1).map(x => x * 2)
+    runM(HostRuntime)
+
+    Promise[Int]().tryComplete(Try(1))
 
     given CompileOptions.JIT = CompileOptions.JIT(Optimisation.O3)
 

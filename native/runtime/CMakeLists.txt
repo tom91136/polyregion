@@ -11,7 +11,7 @@ add_library(runtime-lib STATIC
         )
 add_dependencies(runtime-lib intrinsics_gen) # for LLVM tblgen
 
-add_executable(runtime-tests test.cpp test-main.cpp)
+add_executable(runtime-tests test/test.cpp test/test-main.cpp)
 add_executable(runtime-drv driver.cpp)
 #add_library(runtime-dylib SHARED polyregion_runtime.cpp)
 
@@ -23,7 +23,7 @@ target_include_directories(runtime-lib PUBLIC ../include
         thirdparty/cuew/include
         )
 target_include_directories(runtime-drv PRIVATE ../include)
-target_include_directories(runtime-tests PRIVATE ../include)
+target_include_directories(runtime-tests PRIVATE . ../include)
 #target_include_directories(runtime-dylib PRIVATE ../include)
 
 set(LLVM_LIBS

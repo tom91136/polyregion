@@ -3,7 +3,7 @@
 using namespace polyregion::runtime;
 using namespace polyregion::runtime::cuda;
 
-#define CHECKED(f) checked((f), __FILE__, __LINE__)
+#define CHECKED(f) checked((f), __FILE__, __LINE__);
 
 static constexpr const char *ERROR_PREFIX = "[CUDA error] ";
 
@@ -20,22 +20,73 @@ CudaRuntime::CudaRuntime() {
   }
   CHECKED(cuInit(0));
 }
-
 std::string CudaRuntime::name() { return "CUDA"; }
-
 std::vector<Property> CudaRuntime::properties() { return {}; }
-
 std::vector<std::unique_ptr<Device>> CudaRuntime::enumerate() {
   int count = 0;
   CHECKED(cuDeviceGetCount(&count));
   std::vector<std::unique_ptr<Device>> devices(count);
-  for (int i = 0; i < count; i++) {
+  for (int i = 0; i < count; i++)
     devices[i] = std::make_unique<CudaDevice>(i);
-  }
   return devices;
 }
 
-void CudaDevice::enqueueCallback(const std::optional<Callback> &cb) {
+// ---
+
+CudaDevice::CudaDevice(int ordinal)
+    : context(
+          [&]() {
+            CUcontext c;
+            CHECKED(cuDevicePrimaryCtxRetain(&c, device));
+            CHECKED(cuCtxPushCurrent(c));
+            return c;
+          },
+          [&](auto) {
+            if (device) CHECKED(cuDevicePrimaryCtxRelease(device));
+          }),
+      store(
+          ERROR_PREFIX,
+          [&](auto &&s) {
+            context.touch();
+            CUmodule module;
+            CHECKED(cuModuleLoadData(&module, s.data()));
+            return module;
+          },
+          [&](auto &&m, auto &&name) {
+            context.touch();
+            CUfunction fn;
+            CHECKED(cuModuleGetFunction(&fn, m, name.c_str()));
+            return fn;
+          },
+          [](auto &&m) { CHECKED(cuModuleUnload(m)); }, [](auto &&f) {}) {
+  CHECKED(cuDeviceGet(&device, ordinal));
+  deviceName = detail::allocateAndTruncate(
+      [&](auto &&data, auto &&length) { CHECKED(cuDeviceGetName(data, static_cast<int>(length), device)); });
+}
+int64_t CudaDevice::id() { return device; }
+std::string CudaDevice::name() { return deviceName; }
+std::vector<Property> CudaDevice::properties() { return {}; }
+void CudaDevice::loadModule(const std::string &name, const std::string &image) { store.loadModule(name, image); }
+uintptr_t CudaDevice::malloc(size_t size, Access access) {
+  context.touch();
+  if (size == 0) throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot malloc size of 0");
+  CUdeviceptr ptr = {};
+  CHECKED(cuMemAlloc(&ptr, size));
+  return ptr;
+}
+void CudaDevice::free(uintptr_t ptr) {
+  context.touch();
+  CHECKED(cuMemFree(ptr));
+}
+std::unique_ptr<DeviceQueue> CudaDevice::createQueue() { return std::make_unique<CudaDeviceQueue>(store); }
+
+// ---
+
+CudaDeviceQueue::CudaDeviceQueue(decltype(store) store) : store(store) {
+  CHECKED(cuStreamCreate(&stream, CU_STREAM_DEFAULT));
+}
+CudaDeviceQueue::~CudaDeviceQueue() { CHECKED(cuStreamDestroy(stream)); }
+void CudaDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
   if (!cb) return;
 
   if (cuLaunchHostFunc) { // >= CUDA 10
@@ -53,78 +104,21 @@ void CudaDevice::enqueueCallback(const std::optional<Callback> &cb) {
   }
 }
 
-CudaDevice::CudaDevice(int ordinal) {
-  CHECKED(cuDeviceGet(&device, ordinal));
-  deviceName = std::string(512, '\0');
-  CHECKED(cuDeviceGetName(deviceName.data(), static_cast<int>(deviceName.length() - 1), device));
-  deviceName.erase(deviceName.find('\0'));
-  CHECKED(cuDevicePrimaryCtxRetain(&context, device));
-  CHECKED(cuCtxPushCurrent(context));
-  CHECKED(cuStreamCreate(&stream, CU_STREAM_DEFAULT));
-}
-
-CudaDevice::~CudaDevice() {
-  for (auto &[_, p] : modules)
-    CHECKED(cuModuleUnload(p.first));
-  CHECKED(cuDevicePrimaryCtxRelease(device));
-}
-
-int64_t CudaDevice::id() { return device; }
-
-std::string CudaDevice::name() { return deviceName; }
-
-std::vector<Property> CudaDevice::properties() { return {}; }
-
-void CudaDevice::loadModule(const std::string &name, const std::string &image) {
-  if (auto it = modules.find(name); it != modules.end()) {
-    throw std::logic_error(std::string(ERROR_PREFIX) + "Module named " + name + " was already loaded");
-  } else {
-    CUmodule module;
-    CHECKED(cuModuleLoadData(&module, image.data()));
-    modules.emplace_hint(it, name, LoadedModule{module, {}});
-  }
-}
-
-uintptr_t CudaDevice::malloc(size_t size, Access access) {
-  if (size == 0) throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot malloc size of 0");
-  CUdeviceptr ptr = {};
-  CHECKED(cuMemAlloc(&ptr, size));
-  return ptr;
-}
-
-void CudaDevice::free(uintptr_t ptr) { CHECKED(cuMemFree(ptr)); }
-
-void CudaDevice::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size,
-                                          const std::optional<Callback> &cb) {
+void CudaDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
   CHECKED(cuMemcpyHtoDAsync(dst, src, size, stream));
   enqueueCallback(cb);
 }
-
-void CudaDevice::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const std::optional<Callback> &cb) {
+void CudaDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) {
   CHECKED(cuMemcpyDtoHAsync(dst, src, size, stream));
   enqueueCallback(cb);
 }
-
-void CudaDevice::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                    const std::vector<TypedPointer> &args, TypedPointer rtn, const Policy &policy,
-                                    const std::optional<Callback> &cb) {
-  auto moduleIt = modules.find(moduleName);
-  if (moduleIt == modules.end())
-    throw std::logic_error(std::string(ERROR_PREFIX) + "No module named " + moduleName + " was loaded");
-
-  auto &[m, fnTable] = moduleIt->second;
-  CUfunction fn = nullptr;
-  if (auto it = fnTable.find(symbol); it != fnTable.end()) fn = it->second;
-  else {
-    CHECKED(cuModuleGetFunction(&fn, m, symbol.c_str()));
-    fnTable.emplace_hint(it, symbol, fn);
-  }
-  std::vector<void *> ptrs(args.size());
-  for (size_t i = 0; i < args.size(); ++i)
-    ptrs[i] = args[i].second;
+void CudaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
+                                         const std::vector<TypedPointer> &args, TypedPointer rtn, const Policy &policy,
+                                         const MaybeCallback &cb) {
+  auto fn = store.resolveFunction(moduleName, symbol);
+  auto ptrs = detail::pointers(args);
   auto grid = policy.global;
   auto block = policy.local.value_or(Dim{});
-
   int sharedMem = 0;
   CHECKED(cuLaunchKernel(fn,                        //
                          grid.x, grid.y, grid.z,    //

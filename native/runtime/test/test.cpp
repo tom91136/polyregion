@@ -8,6 +8,11 @@
 
 // echo "void set_(int a*, int b) { return a[0] = b; }"
 
+void lambda(int *array, int x) {
+  int tid = 0;
+  array[tid] = array[tid] + tid + x;
+}
+
 // echo "int fma_(int a, int b, int c) { return a*b+c; }" |
 // clang -target x86_64-pc-linux-gnu -fPIC -Os -c -o- -xc - |
 // xxd -i
@@ -134,10 +139,12 @@ TEST_CASE("NULL object file is an error") {
 
 TEST_CASE("x86 ELF invoke int(int, int, int)") {
 
-  auto [name, expected, obj, len] =
-      GENERATE(std::make_tuple("X86_FMA__ELF", "fma_", X86_FMA__ELF, sizeof(X86_FMA__ELF)),
-               std::make_tuple("X86_FMA__COFF", "fma_", X86_FMA__COFF, sizeof(X86_FMA__COFF)),
-               std::make_tuple("X86_FMA__MACH_O", "_fma_", X86_FMA__MACH_O, sizeof(X86_FMA__MACH_O)));
+  auto [name, expected, obj, len] = GENERATE(
+      std::make_tuple("X86_FMA__ELF", "fma_", std::string(X86_FMA__ELF, std::end(X86_FMA__ELF)), sizeof(X86_FMA__ELF)),
+      std::make_tuple("X86_FMA__COFF", "fma_", std::string(X86_FMA__COFF, std::end(X86_FMA__COFF)),
+                      sizeof(X86_FMA__COFF)),
+      std::make_tuple("X86_FMA__MACH_O", "_fma_", std::string(X86_FMA__MACH_O, std::end(X86_FMA__MACH_O)),
+                      sizeof(X86_FMA__MACH_O)));
 
   SECTION(name) {
     const int a = 1, b = 2, c = 3;
@@ -145,7 +152,7 @@ TEST_CASE("x86 ELF invoke int(int, int, int)") {
 
     RelocatableObjectDevice d;
 
-    d.loadModule("", std::string(reinterpret_cast<const char *>(obj)));
+    d.loadModule("", obj);
 
     std::vector<TypedPointer> args = {
         {Type::Int32, (void *)(&a)},
@@ -153,7 +160,8 @@ TEST_CASE("x86 ELF invoke int(int, int, int)") {
         {Type::Int32, (void *)(&c)},
     };
     TypedPointer rtn{Type::Int32, &actual};
-    d.enqueueInvokeAsync("", "fma_", args, rtn, {}, []() {});
+
+    d.createQueue()->enqueueInvokeAsync("", "fma_", args, rtn, {}, []() {});
 
     CHECK(actual == (a * b + c));
   }

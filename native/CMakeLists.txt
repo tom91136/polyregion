@@ -17,8 +17,8 @@ if (LINKER)
 endif ()
 
 # FIXME adjust for CUDA stuff for now
-set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan)
-#set(COMMON_DEBUG_OPTIONS  )
+#set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan)
+set(COMMON_DEBUG_OPTIONS  )
 
 set(COMMON_COMPILE_OPTIONS
         -ffunction-sections       # keep functions in its own section for better --gc-sections results

@@ -20,6 +20,20 @@ public class PolyregionRuntime {
   public static final byte TYPE_PTR = 9;
   public static final byte TYPE_VOID = 10;
 
+  static class Property{
+    String key;
+    String value;
+  }
+
+  static class Device{
+    long id;
+    String name;
+    Property[] properties;
+
+    void invoke(byte[] xs, String sym, byte[] argTys, ByteBuffer[] argPtrs);
+
+  }
+
   public static native void invoke( //
       byte[] xs, String sym, byte[] argTys, ByteBuffer[] argPtrs);
 

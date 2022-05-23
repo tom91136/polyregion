@@ -2,7 +2,6 @@
 
 #include "cuew.h"
 #include "runtime.h"
-#include <atomic>
 
 namespace polyregion::runtime::cuda {
 
@@ -15,33 +14,43 @@ public:
   EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;
 };
 
+namespace {
+using CudaModuleStore = detail::ModuleStore<CUmodule, CUfunction>;
+}
+
 class EXPORT CudaDevice : public Device {
 
   CUdevice device = {};
-  CUcontext context = nullptr;
-  CUstream stream = nullptr;
+  detail::LazyDroppable<CUcontext> context;
   std::string deviceName;
-  using LoadedModule = std::pair<CUmodule, std::unordered_map<std::string, CUfunction>>;
-  std::unordered_map<std::string, LoadedModule> modules;
-
-  void enqueueCallback(const std::optional<Callback> &cb);
+  CudaModuleStore store;
 
 public:
   EXPORT explicit CudaDevice(int ordinal);
-  EXPORT ~CudaDevice() override;
   EXPORT int64_t id() override;
   EXPORT std::string name() override;
   EXPORT std::vector<Property> properties() override;
   EXPORT void loadModule(const std::string &name, const std::string &image) override;
   EXPORT uintptr_t malloc(size_t size, Access access) override;
   EXPORT void free(uintptr_t ptr) override;
-  EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size,
-                                       const std::optional<Callback> &cb) override;
-  EXPORT void enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size,
-                                       const std::optional<Callback> &cb) override;
+  EXPORT std::unique_ptr<DeviceQueue> createQueue() override;
+};
+
+class EXPORT CudaDeviceQueue : public DeviceQueue {
+
+  CudaModuleStore &store;
+  CUstream stream{};
+
+  void enqueueCallback(const MaybeCallback &cb);
+
+public:
+  EXPORT explicit CudaDeviceQueue(decltype(store) store);
+  EXPORT ~CudaDeviceQueue() override;
+  EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) override;
+  EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, void *dst, size_t size, const MaybeCallback &cb) override;
   EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
                                  const std::vector<TypedPointer> &args, TypedPointer rtn, const Policy &policy,
-                                 const std::optional<Callback> &cb) override;
+                                 const MaybeCallback &cb) override;
 };
 
 } // namespace polyregion::runtime::cuda

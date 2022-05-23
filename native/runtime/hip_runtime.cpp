@@ -20,11 +20,8 @@ HipRuntime::HipRuntime() {
   }
   CHECKED(hipInit(0));
 }
-
 std::string HipRuntime::name() { return "HIP"; }
-
 std::vector<Property> HipRuntime::properties() { return {}; }
-
 std::vector<std::unique_ptr<Device>> HipRuntime::enumerate() {
   int count = 0;
   CHECKED(hipGetDeviceCount(&count));
@@ -34,7 +31,61 @@ std::vector<std::unique_ptr<Device>> HipRuntime::enumerate() {
   return devices;
 }
 
-void HipDevice::enqueueCallback(const std::optional<Callback> &cb) {
+// ---
+
+HipDevice::HipDevice(int ordinal)
+    : context(
+          [this]() {
+            hipCtx_t c;
+            CHECKED(hipDevicePrimaryCtxRetain(&c, device));
+            CHECKED(hipCtxPushCurrent(c));
+            return c;
+          },
+          [this](auto) {
+            if (device) CHECKED(hipDevicePrimaryCtxRelease(device));
+          }),
+      store(
+          ERROR_PREFIX,
+          [this](auto &&s) {
+            hipModule_t module;
+            context.touch();
+            CHECKED(hipModuleLoadData(&module, s.data()));
+            return module;
+          },
+          [this](auto &&m, auto &&name) {
+            hipFunction_t fn;
+            context.touch();
+            CHECKED(hipModuleGetFunction(&fn, m, name.c_str()));
+            return fn;
+          },
+          [](auto &&m) { CHECKED(hipModuleUnload(m)); }, [](auto &&f) {}) {
+  CHECKED(hipDeviceGet(&device, ordinal));
+  deviceName = detail::allocateAndTruncate(
+      [&](auto &&data, auto &&length) { CHECKED(hipDeviceGetName(data, static_cast<int>(length), device)); });
+}
+HipDevice::~HipDevice() { CHECKED(hipDevicePrimaryCtxRelease(device)); }
+int64_t HipDevice::id() { return device; }
+std::string HipDevice::name() { return deviceName; }
+std::vector<Property> HipDevice::properties() { return {}; }
+void HipDevice::loadModule(const std::string &name, const std::string &image) { store.loadModule(name, image); }
+uintptr_t HipDevice::malloc(size_t size, Access access) {
+  context.touch();
+  if (size == 0) throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot malloc size of 0");
+  hipDeviceptr_t ptr = {};
+  CHECKED(hipMalloc(&ptr, size));
+  return ptr;
+}
+void HipDevice::free(uintptr_t ptr) {
+  context.touch();
+  CHECKED(hipFree(ptr));
+}
+std::unique_ptr<DeviceQueue> HipDevice::createQueue() { return std::make_unique<HipDeviceQueue>(store); }
+
+// ---
+
+HipDeviceQueue::HipDeviceQueue(decltype(store) store) : store(store) { CHECKED(hipStreamCreate(&stream)); }
+HipDeviceQueue::~HipDeviceQueue() { CHECKED(hipStreamDestroy(stream)); }
+void HipDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
   if (!cb) return;
   CHECKED(hipStreamAddCallback(
       stream,
@@ -44,81 +95,21 @@ void HipDevice::enqueueCallback(const std::optional<Callback> &cb) {
       },
       detail::CountedCallbackHandler::createHandle(*cb), 0));
 }
-
-HipDevice::HipDevice(int ordinal) {
-  CHECKED(hipDeviceGet(&device, ordinal));
-  deviceName = std::string(512, '\0');
-  CHECKED(hipDeviceGetName(deviceName.data(), static_cast<int>(deviceName.length() - 1), device));
-  deviceName.erase(deviceName.find('\0'));
-  CHECKED(hipDevicePrimaryCtxRetain(&context, device));
-  CHECKED(hipCtxPushCurrent(context));
-  CHECKED(hipStreamCreate(&stream));
-}
-
-HipDevice::~HipDevice() {
-  for (auto &[_, p] : modules)
-    CHECKED(hipModuleUnload(p.first));
-  CHECKED(hipDevicePrimaryCtxRelease(device));
-}
-
-int64_t HipDevice::id() { return device; }
-
-std::string HipDevice::name() { return deviceName; }
-
-std::vector<Property> HipDevice::properties() { return {}; }
-
-void HipDevice::loadModule(const std::string &name, const std::string &image) {
-  if (auto it = modules.find(name); it != modules.end()) {
-    throw std::logic_error(std::string(ERROR_PREFIX) + "Module named " + name + " was already loaded");
-  } else {
-    hipModule_t module;
-    CHECKED(hipModuleLoadData(&module, image.data()));
-    modules.emplace_hint(it, name, LoadedModule{module, {}});
-  }
-}
-
-uintptr_t HipDevice::malloc(size_t size, Access access) {
-  if (size == 0) throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot malloc size of 0");
-  hipDeviceptr_t ptr = {};
-  CHECKED(hipMalloc(&ptr, size));
-  return ptr;
-}
-
-void HipDevice::free(uintptr_t ptr) { CHECKED(hipFree(ptr)); }
-
-void HipDevice::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size,
-                                         const std::optional<Callback> &cb) {
+void HipDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
   CHECKED(hipMemcpyHtoDAsync(dst, src, size, stream));
   enqueueCallback(cb);
 }
-
-void HipDevice::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const std::optional<Callback> &cb) {
+void HipDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) {
   CHECKED(hipMemcpyDtoHAsync(dst, src, size, stream));
   enqueueCallback(cb);
 }
-
-void HipDevice::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                   const std::vector<TypedPointer> &args, TypedPointer rtn, const Policy &policy,
-                                   const std::optional<Callback> &cb) {
-
-  auto moduleIt = modules.find(moduleName);
-  if (moduleIt == modules.end())
-    throw std::logic_error(std::string(ERROR_PREFIX) + "No module named " + moduleName + " was loaded");
-
-  auto &[m, fnTable] = moduleIt->second;
-  hipFunction_t fn = nullptr;
-  if (auto it = fnTable.find(symbol); it != fnTable.end()) fn = it->second;
-  else {
-    CHECKED(hipModuleGetFunction(&fn, m, symbol.c_str()));
-    fnTable.emplace_hint(it, symbol, fn);
-  }
-  std::vector<void *> ptrs(args.size());
-  for (size_t i = 0; i < args.size(); ++i)
-    ptrs[i] = args[i].second;
-
+void HipDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
+                                        const std::vector<TypedPointer> &args, TypedPointer rtn, const Policy &policy,
+                                        const MaybeCallback &cb) {
+  auto fn = store.resolveFunction(moduleName, symbol);
+  auto ptrs = detail::pointers(args);
   auto grid = policy.global;
   auto block = policy.local.value_or(Dim{});
-
   int sharedMem = 0;
   CHECKED(hipModuleLaunchKernel(fn,                        //
                                 grid.x, grid.y, grid.z,    //

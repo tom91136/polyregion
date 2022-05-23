@@ -10,14 +10,20 @@ namespace polyregion::runtime::object {
 class EXPORT ObjectDevice : public Device {
 public:
   EXPORT int64_t id() override;
+
   EXPORT std::vector<Property> properties() override;
   EXPORT uintptr_t malloc(size_t size, Access access) override;
   EXPORT void free(uintptr_t ptr) override;
-  EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size,
-                                       const std::optional<Callback> &cb) override;
-  EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, void *dst, size_t size,
-                                       const std::optional<Callback> &cb) override;
 };
+
+class EXPORT ObjectDeviceQueue : public DeviceQueue {
+public:
+  EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) override;
+  EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, void *dst, size_t size, const MaybeCallback &cb) override;
+};
+namespace {
+using ObjectModules = std::unordered_map<std::string, std::unique_ptr<llvm::object::ObjectFile>>;
+}
 
 class EXPORT RelocatableObjectRuntime : public Runtime {
 public:
@@ -29,19 +35,32 @@ public:
 };
 
 class EXPORT RelocatableObjectDevice : public ObjectDevice, private llvm::SectionMemoryManager {
-  std::unordered_map<std::string, std::unique_ptr<llvm::object::ObjectFile>> objects = {};
+  ObjectModules objects = {};
   llvm::RuntimeDyld ld;
   uint64_t getSymbolAddress(const std::string &Name) override;
 
 public:
-  RelocatableObjectDevice();
-  std::string name() override;
-  void loadModule(const std::string &name, const std::string &image) override;
-  void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                          const std::vector<TypedPointer> &args, TypedPointer rtn, const Policy &policy,
-                          const std::optional<Callback> &cb) override;
+  EXPORT RelocatableObjectDevice();
+  EXPORT std::string name() override;
+  EXPORT void loadModule(const std::string &name, const std::string &image) override;
+  EXPORT std::unique_ptr<DeviceQueue> createQueue() override;
 };
 
+class EXPORT RelocatableObjectDeviceQueue : public ObjectDeviceQueue {
+  ObjectModules &objects;
+  llvm::RuntimeDyld &ld;
+
+public:
+  RelocatableObjectDeviceQueue(decltype(objects) objects, decltype(ld) ld);
+  EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
+                                 const std::vector<TypedPointer> &args, TypedPointer rtn, const Policy &policy,
+                                 const MaybeCallback &cb) override;
+};
+
+namespace {
+using LoadedModule = std::tuple<std::string, void *, std::unordered_map<std::string, void *>>;
+using DynamicModules = std::unordered_map<std::string, LoadedModule>;
+} // namespace
 class EXPORT SharedObjectRuntime : public Runtime {
 public:
   EXPORT explicit SharedObjectRuntime();
@@ -52,16 +71,23 @@ public:
 };
 
 class EXPORT SharedObjectDevice : public ObjectDevice {
-  using LoadedModule = std::tuple<std::string, void*, std::unordered_map<std::string, void *>>;
-  std::unordered_map<std::string, LoadedModule> objects = {};
+  DynamicModules modules;
 
 public:
-  virtual ~SharedObjectDevice();
-  std::string name() override;
-  void loadModule(const std::string &name, const std::string &image) override;
-  void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                          const std::vector<TypedPointer> &args, TypedPointer rtn, const Policy &policy,
-                          const std::optional<Callback> &cb) override;
+  ~SharedObjectDevice() override;
+  EXPORT std::string name() override;
+  EXPORT void loadModule(const std::string &name, const std::string &image) override;
+  EXPORT std::unique_ptr<DeviceQueue> createQueue() override;
+};
+
+class EXPORT SharedObjectDeviceQueue : public ObjectDeviceQueue {
+  DynamicModules &modules;
+
+public:
+  explicit SharedObjectDeviceQueue(decltype(modules) modules);
+  EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
+                                 const std::vector<TypedPointer> &args, TypedPointer rtn, const Policy &policy,
+                                 const MaybeCallback &cb) override;
 };
 
 } // namespace polyregion::runtime::object

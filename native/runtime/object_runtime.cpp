@@ -1,4 +1,5 @@
 #include <system_error>
+#include <utility>
 
 #include "ffi.h"
 #include "object_runtime.h"
@@ -57,14 +58,16 @@ int64_t ObjectDevice::id() { return 0; }
 std::vector<Property> ObjectDevice::properties() { return {}; }
 uintptr_t ObjectDevice::malloc(size_t size, Access access) { return reinterpret_cast<uintptr_t>(std::malloc(size)); }
 void ObjectDevice::free(uintptr_t ptr) { std::free(reinterpret_cast<void *>(ptr)); }
-void ObjectDevice::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size,
-                                            const std::optional<Callback> &cb) {
-  // no-op for CPUs
-  if (cb) (*cb)();
+
+// ---
+
+void ObjectDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
+  std::memcpy(reinterpret_cast<void *>(dst), src, size);
+  if (cb) (*cb)(); // no-op for CPUs
 }
-void ObjectDevice::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const std::optional<Callback> &cb) {
-  // no-op for CPUs
-  if (cb) (*cb)();
+void ObjectDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) {
+  std::memcpy(dst, reinterpret_cast<void *>(src), size);
+  if (cb) (*cb)(); // no-op for CPUs
 }
 
 RelocatableObjectRuntime::RelocatableObjectRuntime() = default;
@@ -77,32 +80,36 @@ std::vector<std::unique_ptr<Device>> RelocatableObjectRuntime::enumerate() {
 }
 
 static constexpr const char *RELOBJ_ERROR_PREFIX = "[RelocatableObject error] ";
-RelocatableObjectDevice::RelocatableObjectDevice() : SectionMemoryManager(nullptr), ld(*this, *this) {}
+RelocatableObjectDevice::RelocatableObjectDevice() : llvm::SectionMemoryManager(nullptr), ld(*this, *this) {}
 uint64_t RelocatableObjectDevice::getSymbolAddress(const std::string &Name) {
   auto self = this;
   thread_local static std::function<void *(size_t)> threadLocalMallocFn = [&self](size_t size) {
     return self ? reinterpret_cast<void *>(self->malloc(size, Access::RW)) : nullptr;
   };
-  return Name == "malloc" ? (uint64_t)&threadLocalMallocFn : RTDyldMemoryManager::getSymbolAddress(Name);
+  return Name == "malloc" ? (uint64_t)&threadLocalMallocFn : llvm::RTDyldMemoryManager::getSymbolAddress(Name);
 }
 std::string RelocatableObjectDevice::name() { return "RelocatableObjectDevice(llvm::RuntimeDyld)"; }
 void RelocatableObjectDevice::loadModule(const std::string &name, const std::string &image) {
   if (auto it = objects.find(name); it != objects.end()) {
     throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Module named " + name + " was already loaded");
   } else {
-
     auto ref = llvm::MemoryBufferRef{llvm::StringRef(image), ""};
-    printf("n=%d  %d\n", ref.getBufferSize(), image.length());
-    if (auto object = llvm::object::ObjectFile::createObjectFile(llvm::MemoryBufferRef{llvm::StringRef(image), ""});
+    if (auto object = llvm::object::ObjectFile::createObjectFile(llvm::MemoryBufferRef(llvm::StringRef(image), ""));
         auto e = object.takeError()) {
       throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Cannot load module: " + toString(std::move(e)));
     } else
       objects.emplace_hint(it, name, std::move(*object));
   }
 }
-void RelocatableObjectDevice::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                                 const std::vector<TypedPointer> &args, TypedPointer rtn,
-                                                 const Policy &policy, const std::optional<Callback> &cb) {
+std::unique_ptr<DeviceQueue> RelocatableObjectDevice::createQueue() {
+  return std::make_unique<RelocatableObjectDeviceQueue>(objects, ld);
+}
+
+RelocatableObjectDeviceQueue::RelocatableObjectDeviceQueue(decltype(objects) objects, decltype(ld) ld)
+    : objects(objects), ld(ld) {}
+void RelocatableObjectDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
+                                                      const std::vector<TypedPointer> &args, TypedPointer rtn,
+                                                      const Policy &policy, const MaybeCallback &cb) {
   auto moduleIt = objects.find(moduleName);
   if (moduleIt == objects.end())
     throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "No module named " + moduleName + " was loaded");
@@ -129,7 +136,6 @@ void RelocatableObjectDevice::enqueueInvokeAsync(const std::string &moduleName, 
 }
 
 static constexpr const char *SHOBJ_ERROR_PREFIX = "[RelocatableObject error] ";
-
 SharedObjectRuntime::SharedObjectRuntime() = default;
 std::string SharedObjectRuntime::name() { return "CPU (SharedObjectR)"; }
 std::vector<Property> SharedObjectRuntime::properties() { return {}; }
@@ -138,9 +144,6 @@ std::vector<std::unique_ptr<Device>> SharedObjectRuntime::enumerate() {
   xs[0] = std::make_unique<RelocatableObjectDevice>();
   return xs;
 }
-
-std::string SharedObjectDevice::name() { return "SharedObjectDevice(dlopen/dlsym)"; }
-
 #ifdef _WIN32
   #define WIN32_LEAN_AND_MEAN
   #define VC_EXTRALEAN
@@ -158,23 +161,36 @@ std::string SharedObjectDevice::name() { return "SharedObjectDevice(dlopen/dlsym
   #define dynamic_library_close(lib) dlclose(lib)
   #define dynamic_library_find(lib, symbol) dlsym(lib, symbol)
 #endif
-
+SharedObjectDevice::~SharedObjectDevice() {
+  for (auto &[_, m] : modules) {
+    auto &[path, handle, symbols] = m;
+    if (auto code = dynamic_library_close(handle); code != 0) {
+      std::fprintf(stderr, "%s Cannot unload module, code %d: %s\n", SHOBJ_ERROR_PREFIX, code, dynamic_library_error());
+    }
+  }
+}
+std::string SharedObjectDevice::name() { return "SharedObjectDevice(dlopen/dlsym)"; }
 void SharedObjectDevice::loadModule(const std::string &name, const std::string &image) {
-  if (auto it = objects.find(name); it != objects.end()) {
+  if (auto it = modules.find(name); it != modules.end()) {
     throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) + "Module named " + name + " was already loaded");
   } else {
     if (auto dylib = dynamic_library_open(image.c_str()); !dylib) {
       throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) +
                              "Cannot load module: " + std::string(dynamic_library_error()));
     } else
-      objects.emplace_hint(it, name, LoadedModule{image, dylib, {}});
+      modules.emplace_hint(it, name, LoadedModule{image, dylib, {}});
   }
 }
-void SharedObjectDevice::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                            const std::vector<TypedPointer> &args, TypedPointer rtn,
-                                            const Policy &policy, const std::optional<Callback> &cb) {
-  auto moduleIt = objects.find(moduleName);
-  if (moduleIt == objects.end())
+std::unique_ptr<DeviceQueue> SharedObjectDevice::createQueue() {
+  return std::make_unique<SharedObjectDeviceQueue>(modules);
+}
+
+SharedObjectDeviceQueue::SharedObjectDeviceQueue(decltype(modules) modules) : modules(modules) {}
+void SharedObjectDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
+                                                 const std::vector<TypedPointer> &args, TypedPointer rtn,
+                                                 const Policy &policy, const MaybeCallback &cb) {
+  auto moduleIt = modules.find(moduleName);
+  if (moduleIt == modules.end())
     throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) + "No module named " + moduleName + " was loaded");
 
   auto &[path, handle, symbolTable] = moduleIt->second;
@@ -193,17 +209,6 @@ void SharedObjectDevice::enqueueInvokeAsync(const std::string &moduleName, const
   invoke(reinterpret_cast<uint64_t>(address), args, rtn);
   if (cb) (*cb)();
 }
-
-SharedObjectDevice::~SharedObjectDevice() {
-
-  for (auto &[_, m] : objects) {
-    auto &[path, handle, symbols] = m;
-    if (auto code = dynamic_library_close(handle); code != 0) {
-      std::fprintf(stderr, "%s Cannot unload module, code %d: %s\n", SHOBJ_ERROR_PREFIX, code, dynamic_library_error());
-    }
-  }
-}
-
 #undef dynamic_library_open
 #undef dynamic_library_close
 #undef dynamic_library_find
