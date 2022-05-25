@@ -7,9 +7,18 @@
 
 using namespace polyregion;
 
-void polyregion::runtime::init() { polyregion::libm::exportAll(); }
+void runtime::init() { libm::exportAll(); }
+std::optional<runtime::Access> runtime::fromUnderlying(uint8_t v) {
+  auto x = static_cast<Access>(v);
+  switch (x) {
+    case Access::RW:
+    case Access::RO:
+    case Access::WO: return x;
+    default: return {};
+  }
+}
 
-void *polyregion::runtime::detail::CountedCallbackHandler::createHandle(const runtime::Callback &cb) {
+void *runtime::detail::CountedCallbackHandler::createHandle(const runtime::Callback &cb) {
 
   // XXX We're storing the callbacks statically to extend lifetime because the callback behaviour on different runtimes
   // is not predictable, some may transfer control back even after destruction of all related context.
@@ -30,7 +39,7 @@ void *polyregion::runtime::detail::CountedCallbackHandler::createHandle(const ru
   static_assert(std::is_same<EntryPtr, decltype(&(*pos))>());
   return &(*pos);
 }
-void polyregion::runtime::detail::CountedCallbackHandler::consume(void *data) {
+void runtime::detail::CountedCallbackHandler::consume(void *data) {
   auto dev = static_cast<EntryPtr>(data);
   if (dev) dev->second();
 }

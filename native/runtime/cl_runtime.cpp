@@ -168,6 +168,7 @@ void ClDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t si
 void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
                                        const std::vector<TypedPointer> &args, TypedPointer rtn, const Policy &policy,
                                        const MaybeCallback &cb) {
+  if (rtn.first != Type::Void) throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported");
   auto kernel = store.resolveFunction(moduleName, symbol);
   auto toSize = [](Type t) -> size_t {
     switch (t) {
@@ -193,7 +194,7 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
   }
 
   auto global = policy.global;
-  auto local = policy.local.value_or(Dim{});
+  auto local = policy.local.value_or(Dim3{});
 
   cl_event event = {};
   CHECKED(clEnqueueNDRangeKernel(queue, kernel,         //

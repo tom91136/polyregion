@@ -1,6 +1,6 @@
 package polyregion.scala
 
-import polyregion.{Member, PolyregionCompiler}
+import polyregion.jvm.compiler.{Member, Compiler}
 import polyregion.ast.{CppSourceMirror, MsgPack, PolyAst as p, *}
 import polyregion.scala.{NativeStruct, *}
 
@@ -23,26 +23,26 @@ object Pickler {
   }
 
   inline def tpeAsRuntimeTpe(t: p.Type): Byte = t match {
-    case p.Type.Bool            => polyregion.PolyregionRuntime.TYPE_BOOL
-    case p.Type.Byte            => polyregion.PolyregionRuntime.TYPE_BYTE
-    case p.Type.Char            => polyregion.PolyregionRuntime.TYPE_CHAR
-    case p.Type.Short           => polyregion.PolyregionRuntime.TYPE_SHORT
-    case p.Type.Int             => polyregion.PolyregionRuntime.TYPE_INT
-    case p.Type.Long            => polyregion.PolyregionRuntime.TYPE_LONG
-    case p.Type.Float           => polyregion.PolyregionRuntime.TYPE_FLOAT
-    case p.Type.Double          => polyregion.PolyregionRuntime.TYPE_DOUBLE
-    case p.Type.Array(_)        => polyregion.PolyregionRuntime.TYPE_PTR
-    case p.Type.Struct(_, _, _) => polyregion.PolyregionRuntime.TYPE_PTR
-    case p.Type.Unit            => polyregion.PolyregionRuntime.TYPE_VOID
+    case p.Type.Bool            => polyregion.jvm.runtime.Type.BOOL.value
+    case p.Type.Byte            => polyregion.jvm.runtime.Type.BYTE.value
+    case p.Type.Char            => polyregion.jvm.runtime.Type.CHAR.value
+    case p.Type.Short           => polyregion.jvm.runtime.Type.SHORT.value
+    case p.Type.Int             => polyregion.jvm.runtime.Type.INT.value
+    case p.Type.Long            => polyregion.jvm.runtime.Type.LONG.value
+    case p.Type.Float           => polyregion.jvm.runtime.Type.FLOAT.value
+    case p.Type.Double          => polyregion.jvm.runtime.Type.DOUBLE.value
+    case p.Type.Array(_)        => polyregion.jvm.runtime.Type.PTR.value
+    case p.Type.Struct(_, _, _) => polyregion.jvm.runtime.Type.PTR.value
+    case p.Type.Unit            => polyregion.jvm.runtime.Type.VOID.value
     case unknown =>
       println(s"tpeAsRuntimeTpe ??? = $unknown ")
       ???
   }
 
-  inline def layoutOf(using q: Quoted)(repr: q.TypeRepr): polyregion.Layout = {
+  inline def layoutOf(using q: Quoted)(repr: q.TypeRepr): polyregion.jvm.compiler.Layout = {
     val sdef = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
     println(s"A=${sdef} ${repr.widenTermRefByName}")
-    PolyregionCompiler.layoutOf(CppSourceMirror.encode(sdef), ???)
+    polyregion.jvm.compiler.Compiler.layoutOf(CppSourceMirror.encode(sdef), ???)
   }
 
   inline def sizeOf(using q: Quoted)(tpe: p.Type, repr: q.TypeRepr): Int = tpe match {
@@ -97,7 +97,7 @@ object Pickler {
     // find out the total size of this struct first, it could be nested arbitrarily but the top level's size must
     // reflect the total size; this is consistent with C's `sizeof(struct T)`
     val sdef       = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
-    val layout     = PolyregionCompiler.layoutOf(CppSourceMirror.encode(sdef), ???)
+    val layout     = polyregion.jvm.compiler.Compiler.layoutOf(CppSourceMirror.encode(sdef), ???)
     val byteOffset = '{ ${ Expr(layout.sizeInBytes.toInt) } * $index }
     val fields     = sdef.members.zip(layout.members)
     val terms = fields.map { (named, m) =>
@@ -140,7 +140,7 @@ object Pickler {
     // find out the total size of this struct first, it could be nested arbitrarily but the top level's size must
     // reflect the total size; this is consistent with C's `sizeof(struct T)`
     val sdef       = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
-    val layout     = PolyregionCompiler.layoutOf(CppSourceMirror.encode(sdef), ???)
+    val layout     = polyregion.jvm.compiler.Compiler.layoutOf(CppSourceMirror.encode(sdef), ???)
     val byteOffset = '{ ${ Expr(layout.sizeInBytes.toInt) } * $index }
     val fields     = sdef.members.zip(layout.members)
     val terms = fields.map { (named, m) =>

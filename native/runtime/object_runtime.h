@@ -25,33 +25,33 @@ namespace {
 using ObjectModules = std::unordered_map<std::string, std::unique_ptr<llvm::object::ObjectFile>>;
 }
 
-class EXPORT RelocatableObjectRuntime : public Runtime {
+class EXPORT RelocatableRuntime : public Runtime {
 public:
-  EXPORT explicit RelocatableObjectRuntime();
-  EXPORT ~RelocatableObjectRuntime() override = default;
+  EXPORT explicit RelocatableRuntime();
+  EXPORT ~RelocatableRuntime() override = default;
   EXPORT std::string name() override;
   EXPORT std::vector<Property> properties() override;
   EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;
 };
 
-class EXPORT RelocatableObjectDevice : public ObjectDevice, private llvm::SectionMemoryManager {
+class EXPORT RelocatableDevice : public ObjectDevice, private llvm::SectionMemoryManager {
   ObjectModules objects = {};
   llvm::RuntimeDyld ld;
   uint64_t getSymbolAddress(const std::string &Name) override;
 
 public:
-  EXPORT RelocatableObjectDevice();
+  EXPORT RelocatableDevice();
   EXPORT std::string name() override;
   EXPORT void loadModule(const std::string &name, const std::string &image) override;
   EXPORT std::unique_ptr<DeviceQueue> createQueue() override;
 };
 
-class EXPORT RelocatableObjectDeviceQueue : public ObjectDeviceQueue {
+class EXPORT RelocatableDeviceQueue : public ObjectDeviceQueue {
   ObjectModules &objects;
   llvm::RuntimeDyld &ld;
 
 public:
-  RelocatableObjectDeviceQueue(decltype(objects) objects, decltype(ld) ld);
+  RelocatableDeviceQueue(decltype(objects) objects, decltype(ld) ld);
   EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
                                  const std::vector<TypedPointer> &args, TypedPointer rtn, const Policy &policy,
                                  const MaybeCallback &cb) override;
@@ -61,30 +61,30 @@ namespace {
 using LoadedModule = std::tuple<std::string, void *, std::unordered_map<std::string, void *>>;
 using DynamicModules = std::unordered_map<std::string, LoadedModule>;
 } // namespace
-class EXPORT SharedObjectRuntime : public Runtime {
+class EXPORT SharedRuntime : public Runtime {
 public:
-  EXPORT explicit SharedObjectRuntime();
-  EXPORT ~SharedObjectRuntime() override = default;
+  EXPORT explicit SharedRuntime();
+  EXPORT ~SharedRuntime() override = default;
   EXPORT std::string name() override;
   EXPORT std::vector<Property> properties() override;
   EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;
 };
 
-class EXPORT SharedObjectDevice : public ObjectDevice {
+class EXPORT SharedDevice : public ObjectDevice {
   DynamicModules modules;
 
 public:
-  ~SharedObjectDevice() override;
+  ~SharedDevice() override;
   EXPORT std::string name() override;
   EXPORT void loadModule(const std::string &name, const std::string &image) override;
   EXPORT std::unique_ptr<DeviceQueue> createQueue() override;
 };
 
-class EXPORT SharedObjectDeviceQueue : public ObjectDeviceQueue {
+class EXPORT SharedDeviceQueue : public ObjectDeviceQueue {
   DynamicModules &modules;
 
 public:
-  explicit SharedObjectDeviceQueue(decltype(modules) modules);
+  explicit SharedDeviceQueue(decltype(modules) modules);
   EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
                                  const std::vector<TypedPointer> &args, TypedPointer rtn, const Policy &policy,
                                  const MaybeCallback &cb) override;

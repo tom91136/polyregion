@@ -70,26 +70,26 @@ void ObjectDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_
   if (cb) (*cb)(); // no-op for CPUs
 }
 
-RelocatableObjectRuntime::RelocatableObjectRuntime() = default;
-std::string RelocatableObjectRuntime::name() { return "CPU (RelocatableObject)"; }
-std::vector<Property> RelocatableObjectRuntime::properties() { return {}; }
-std::vector<std::unique_ptr<Device>> RelocatableObjectRuntime::enumerate() {
+RelocatableRuntime::RelocatableRuntime() = default;
+std::string RelocatableRuntime::name() { return "CPU (RelocatableObject)"; }
+std::vector<Property> RelocatableRuntime::properties() { return {}; }
+std::vector<std::unique_ptr<Device>> RelocatableRuntime::enumerate() {
   std::vector<std::unique_ptr<Device>> xs(1);
-  xs[0] = std::make_unique<RelocatableObjectDevice>();
+  xs[0] = std::make_unique<RelocatableDevice>();
   return xs;
 }
 
 static constexpr const char *RELOBJ_ERROR_PREFIX = "[RelocatableObject error] ";
-RelocatableObjectDevice::RelocatableObjectDevice() : llvm::SectionMemoryManager(nullptr), ld(*this, *this) {}
-uint64_t RelocatableObjectDevice::getSymbolAddress(const std::string &Name) {
+RelocatableDevice::RelocatableDevice() : llvm::SectionMemoryManager(nullptr), ld(*this, *this) {}
+uint64_t RelocatableDevice::getSymbolAddress(const std::string &Name) {
   auto self = this;
   thread_local static std::function<void *(size_t)> threadLocalMallocFn = [&self](size_t size) {
     return self ? reinterpret_cast<void *>(self->malloc(size, Access::RW)) : nullptr;
   };
   return Name == "malloc" ? (uint64_t)&threadLocalMallocFn : llvm::RTDyldMemoryManager::getSymbolAddress(Name);
 }
-std::string RelocatableObjectDevice::name() { return "RelocatableObjectDevice(llvm::RuntimeDyld)"; }
-void RelocatableObjectDevice::loadModule(const std::string &name, const std::string &image) {
+std::string RelocatableDevice::name() { return "RelocatableObjectDevice(llvm::RuntimeDyld)"; }
+void RelocatableDevice::loadModule(const std::string &name, const std::string &image) {
   if (auto it = objects.find(name); it != objects.end()) {
     throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Module named " + name + " was already loaded");
   } else {
@@ -101,15 +101,14 @@ void RelocatableObjectDevice::loadModule(const std::string &name, const std::str
       objects.emplace_hint(it, name, std::move(*object));
   }
 }
-std::unique_ptr<DeviceQueue> RelocatableObjectDevice::createQueue() {
-  return std::make_unique<RelocatableObjectDeviceQueue>(objects, ld);
+std::unique_ptr<DeviceQueue> RelocatableDevice::createQueue() {
+  return std::make_unique<RelocatableDeviceQueue>(objects, ld);
 }
 
-RelocatableObjectDeviceQueue::RelocatableObjectDeviceQueue(decltype(objects) objects, decltype(ld) ld)
-    : objects(objects), ld(ld) {}
-void RelocatableObjectDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                                      const std::vector<TypedPointer> &args, TypedPointer rtn,
-                                                      const Policy &policy, const MaybeCallback &cb) {
+RelocatableDeviceQueue::RelocatableDeviceQueue(decltype(objects) objects, decltype(ld) ld) : objects(objects), ld(ld) {}
+void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
+                                                const std::vector<TypedPointer> &args, TypedPointer rtn,
+                                                const Policy &policy, const MaybeCallback &cb) {
   auto moduleIt = objects.find(moduleName);
   if (moduleIt == objects.end())
     throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "No module named " + moduleName + " was loaded");
@@ -136,12 +135,12 @@ void RelocatableObjectDeviceQueue::enqueueInvokeAsync(const std::string &moduleN
 }
 
 static constexpr const char *SHOBJ_ERROR_PREFIX = "[RelocatableObject error] ";
-SharedObjectRuntime::SharedObjectRuntime() = default;
-std::string SharedObjectRuntime::name() { return "CPU (SharedObjectR)"; }
-std::vector<Property> SharedObjectRuntime::properties() { return {}; }
-std::vector<std::unique_ptr<Device>> SharedObjectRuntime::enumerate() {
+SharedRuntime::SharedRuntime() = default;
+std::string SharedRuntime::name() { return "CPU (SharedObjectR)"; }
+std::vector<Property> SharedRuntime::properties() { return {}; }
+std::vector<std::unique_ptr<Device>> SharedRuntime::enumerate() {
   std::vector<std::unique_ptr<Device>> xs(1);
-  xs[0] = std::make_unique<RelocatableObjectDevice>();
+  xs[0] = std::make_unique<RelocatableDevice>();
   return xs;
 }
 #ifdef _WIN32
@@ -161,7 +160,7 @@ std::vector<std::unique_ptr<Device>> SharedObjectRuntime::enumerate() {
   #define dynamic_library_close(lib) dlclose(lib)
   #define dynamic_library_find(lib, symbol) dlsym(lib, symbol)
 #endif
-SharedObjectDevice::~SharedObjectDevice() {
+SharedDevice::~SharedDevice() {
   for (auto &[_, m] : modules) {
     auto &[path, handle, symbols] = m;
     if (auto code = dynamic_library_close(handle); code != 0) {
@@ -169,8 +168,8 @@ SharedObjectDevice::~SharedObjectDevice() {
     }
   }
 }
-std::string SharedObjectDevice::name() { return "SharedObjectDevice(dlopen/dlsym)"; }
-void SharedObjectDevice::loadModule(const std::string &name, const std::string &image) {
+std::string SharedDevice::name() { return "SharedObjectDevice(dlopen/dlsym)"; }
+void SharedDevice::loadModule(const std::string &name, const std::string &image) {
   if (auto it = modules.find(name); it != modules.end()) {
     throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) + "Module named " + name + " was already loaded");
   } else {
@@ -181,14 +180,12 @@ void SharedObjectDevice::loadModule(const std::string &name, const std::string &
       modules.emplace_hint(it, name, LoadedModule{image, dylib, {}});
   }
 }
-std::unique_ptr<DeviceQueue> SharedObjectDevice::createQueue() {
-  return std::make_unique<SharedObjectDeviceQueue>(modules);
-}
+std::unique_ptr<DeviceQueue> SharedDevice::createQueue() { return std::make_unique<SharedDeviceQueue>(modules); }
 
-SharedObjectDeviceQueue::SharedObjectDeviceQueue(decltype(modules) modules) : modules(modules) {}
-void SharedObjectDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                                 const std::vector<TypedPointer> &args, TypedPointer rtn,
-                                                 const Policy &policy, const MaybeCallback &cb) {
+SharedDeviceQueue::SharedDeviceQueue(decltype(modules) modules) : modules(modules) {}
+void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
+                                           const std::vector<TypedPointer> &args, TypedPointer rtn,
+                                           const Policy &policy, const MaybeCallback &cb) {
   auto moduleIt = modules.find(moduleName);
   if (moduleIt == modules.end())
     throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) + "No module named " + moduleName + " was loaded");

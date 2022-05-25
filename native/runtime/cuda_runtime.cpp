@@ -115,10 +115,11 @@ void CudaDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t 
 void CudaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
                                          const std::vector<TypedPointer> &args, TypedPointer rtn, const Policy &policy,
                                          const MaybeCallback &cb) {
+  if (rtn.first != Type::Void) throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported");
   auto fn = store.resolveFunction(moduleName, symbol);
   auto ptrs = detail::pointers(args);
   auto grid = policy.global;
-  auto block = policy.local.value_or(Dim{});
+  auto block = policy.local.value_or(Dim3{});
   int sharedMem = 0;
   CHECKED(cuLaunchKernel(fn,                        //
                          grid.x, grid.y, grid.z,    //

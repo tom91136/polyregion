@@ -131,17 +131,19 @@ public:
 
 } // namespace detail
 
-struct EXPORT Dim {
+struct EXPORT Dim3 {
   EXPORT size_t x = 1, y = 1, z = 1;
   [[nodiscard]] std::array<size_t, 3> sizes() const { return {x, y, z}; }
 };
 
 struct EXPORT Policy {
-  EXPORT Dim global;
-  EXPORT std::optional<Dim> local;
+  EXPORT Dim3 global;
+  EXPORT std::optional<Dim3> local;
 };
 
-enum class Access { RO, WO, RW };
+enum class Access : uint8_t { RW = 1, RO, WO };
+
+std::optional<Access> fromUnderlying(uint8_t v);
 
 struct EXPORT DeviceQueue {
 

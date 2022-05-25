@@ -1,4 +1,4 @@
-package polyregion.loader;
+package polyregion.jvm;
 
 import java.io.IOException;
 import java.io.InputStream;

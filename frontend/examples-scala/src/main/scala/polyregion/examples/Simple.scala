@@ -138,7 +138,7 @@ object Simple {
     CUDA.devices(0).task(using CompileOptions.AOT(CUDAArch.SM80, Optimisation.Ofast))(1 + 1)
     CUDA.jit.devices(0).task(using CompileOptions.JIT(Optimisation.Ofast))(1 + 1)
 
-    CUDA.devices(0).queue
+//    CUDA.devices(0).queue
 
     def runM[A](d:  Device[Future, CompileOptions.JIT])  =
       d.task(1 + 1)

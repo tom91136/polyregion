@@ -53,7 +53,7 @@ int main(int argc, char *argv[]) {
   auto c2 = compiler::compile(simple, {compiler::Target::Object_LLVM_x86_64, {}});
   std::cout << c2 << std::endl;
   if (c2.binary) {
-    runtime::object::RelocatableObjectDevice d;
+    runtime::object::RelocatableDevice d;
     auto str = std::string(c2.binary->begin(), c2.binary->end());
     d.loadModule("", str);
 
@@ -61,7 +61,7 @@ int main(int argc, char *argv[]) {
     int actual = 0;
     std::vector<runtime::TypedPointer> args = {{runtime::Type::Int32, &a}};
     runtime::TypedPointer rtn{runtime::Type::Int32, &actual};
-    d.enqueueInvokeAsync("", "lambda", args, rtn, {}, {});
+    d.createQueue()->enqueueInvokeAsync("", "lambda", args, rtn, {}, {});
 
     std::cout << actual << "\n";
   }

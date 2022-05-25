@@ -1,7 +1,6 @@
 package polyregion.ast
 
 import cats.conversions.variance
-import polyregion.PolyregionCompiler
 import polyregion.ast.{MsgPack, PolyAst}
 import polyregion.ast.mirror.CppNlohmannJsonCodecGen
 import polyregion.ast.mirror.CppStructGen.*

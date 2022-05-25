@@ -1,12 +1,12 @@
-package polyregion;
+package polyregion.jvm.compiler;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import polyregion.loader.Loader;
+import polyregion.jvm.Loader;
 
-public class PolyregionCompiler {
+public final class Compiler {
 
   public static final byte TargetObjectLLVM_x86_64 = 0;
   public static final byte TargetObjectLLVM_AArch64 = 1;

@@ -116,7 +116,7 @@ void run() {
   std::vector<std::unique_ptr<Runtime>> rts;
 
   try {
-    rts.push_back(std::make_unique<RelocatableObjectRuntime>());
+    rts.push_back(std::make_unique<RelocatableRuntime>());
   } catch (const std::exception &e) {
     std::cerr << "[REL] " << e.what() << std::endl;
   }

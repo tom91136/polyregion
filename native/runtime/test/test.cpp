@@ -133,7 +133,7 @@ using namespace polyregion::runtime;
 using namespace polyregion::runtime::object;
 
 TEST_CASE("NULL object file is an error") {
-  RelocatableObjectDevice d;
+  RelocatableDevice d;
   REQUIRE_THROWS_WITH(d.loadModule("", ""), Catch::Contains("object file"));
 }
 
@@ -150,7 +150,7 @@ TEST_CASE("x86 ELF invoke int(int, int, int)") {
     const int a = 1, b = 2, c = 3;
     int actual = -1;
 
-    RelocatableObjectDevice d;
+    RelocatableDevice d;
 
     d.loadModule("", obj);
 

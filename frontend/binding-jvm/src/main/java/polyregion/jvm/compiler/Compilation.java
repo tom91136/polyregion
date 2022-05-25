@@ -1,12 +1,20 @@
-package polyregion;
+package polyregion.jvm.compiler;
 
 import java.util.Arrays;
 
 public final class Compilation {
-  public byte[] program;
-  public Event[] events;
-  public Layout[] layouts;
-  public String messages;
+
+  public final byte[] program;
+  public final Event[] events;
+  public final Layout[] layouts;
+  public final String messages;
+
+  Compilation(byte[] program, Event[] events, Layout[] layouts, String messages) {
+    this.program = program;
+    this.events = events;
+    this.layouts = layouts;
+    this.messages = messages;
+  }
 
   @Override
   public String toString() {
@@ -20,7 +28,7 @@ public final class Compilation {
         + Arrays.toString(layouts)
         + ", messages='"
         + messages
-        + "\'"
+        + "'"
         + '}';
   }
 }

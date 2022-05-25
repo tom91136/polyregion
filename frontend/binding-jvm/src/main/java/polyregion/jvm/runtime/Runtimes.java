@@ -1,0 +1,86 @@
+package polyregion.jvm.runtime;
+
+import java.nio.ByteBuffer;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import polyregion.jvm.Loader;
+import polyregion.jvm.runtime.Device.Queue;
+
+@SuppressWarnings("unused")
+public final class Runtimes {
+
+  public static native Runtime CUDA();
+
+  public static native Runtime HIP();
+
+  public static native Runtime OpenCL();
+
+  public static native Runtime Relocatable();
+
+  public static native Runtime Dynamic();
+
+  static final byte //
+      TYPE_BOOL = 1,
+      TYPE_BYTE = 2,
+      TYPE_CHAR = 3,
+      TYPE_SHORT = 4,
+      TYPE_INT = 5,
+      TYPE_LONG = 6,
+      TYPE_FLOAT = 7,
+      TYPE_DOUBLE = 8,
+      TYPE_PTR = 9,
+      TYPE_VOID = 10;
+  static final byte ACCESS_RW = 1, ACCESS_R0 = 2, ACCESS_WO = 3;
+
+  static native void deletePeer(long nativePeer);
+
+  static native Device[] devices0(long nativePeer);
+
+  static native void loadModule0(long nativePeer, String name, byte[] image);
+
+  static native long malloc0(long nativePeer, long size, byte access);
+
+  static native void free0(long nativePeer, long handle);
+
+  static native Queue createQueue0(long nativePeer);
+
+  static native void enqueueHostToDeviceAsync0(
+      long nativePeer, ByteBuffer src, long dst, int size, Runnable cb);
+
+  static native void enqueueDeviceToHostAsync0(
+      long nativePeer, long src, ByteBuffer dst, int size, Runnable cb);
+
+  static native void enqueueInvokeAsync0(
+      long nativePeer,
+      String moduleName,
+      String symbol,
+      byte[] argTys,
+      ByteBuffer[] argBuffers,
+      byte rtnTy,
+      ByteBuffer rtnBuffer,
+      Policy policy,
+      Runnable cb);
+
+  private static final Path RESOURCE_DIR = Loader.HOME_DIR.resolve(".polyregion");
+  private static final AtomicBoolean loaded = new AtomicBoolean();
+
+  static {
+    if (!Boolean.getBoolean("polyregion.runtime.noautoload")) {
+      load();
+    }
+  }
+
+  public static void load() {
+    if (!loaded.getAndSet(true)) {
+      Loader.loadDirect(
+          Paths.get(
+              //
+              "/home/tom/polyregion/native/cmake-build-debug-clang/bindings/libjava-runtime.so"
+              // "/home/tom/polyregion/native/cmake-build-release-clang/bindings/libjava-runtime.so"
+              ),
+          RESOURCE_DIR);
+    }
+  }
+}

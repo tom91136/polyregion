@@ -10,6 +10,7 @@ lazy val commonSettings = Seq(
   scalacOptions ~= filterConsoleScalacOptions,
   javacOptions ++=
     Seq(
+      "-parameters",
       "-Xlint:all",
       "-XprintProcessorInfo",
       "-XprintRounds"
@@ -32,28 +33,34 @@ lazy val commonSettings = Seq(
   scalafmtFailOnErrors  := true
 )
 
+// bindings-jvm (incl looder)
+// runtime-scala (SBuffers)
+// runtime-java  (JBuffers)
+// compiler
+// examples-scala
+// examples-java
+
 lazy val catsVersion  = "2.7.0"
 lazy val munitVersion = "1.0.0-M3"
 
-lazy val `loader-jvm` = project.settings(
+lazy val bindingsDir      = (file(".") / ".." / "native" / "bindings" / "jvm").getAbsoluteFile
+
+
+lazy val `binding-jvm` = project.settings(
   commonSettings,
-  name             := "loader-jvm",
+  name             := "binding-jvm",
+  javah / target   := bindingsDir / "generated",
   autoScalaLibrary := false
 )
-
-lazy val bindingsDir      = (file(".") / ".." / "native" / "bindings").getAbsoluteFile
-lazy val loaderShadeRules = Seq(ShadeRule.rename("polyregion.loader.**" -> "polyregion.shaded.loader.@1").inProject)
 
 lazy val `runtime-java` = project
   .settings(
     commonSettings,
     name             := "runtime-java",
-    javah / target   := bindingsDir / "java-runtime",
     autoScalaLibrary := false,
-//    assemblyShadeRules  := loaderShadeRules,
     assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly"))
   )
-  .dependsOn(`loader-jvm`)
+  .dependsOn(`binding-jvm`)
 
 lazy val `runtime-scala` = project
   .settings(
@@ -62,17 +69,15 @@ lazy val `runtime-scala` = project
     libraryDependencies ++= Seq(
       "org.scalameta" %% "munit" % munitVersion % Test
     ),
-    assemblyShadeRules  := loaderShadeRules,
     assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly"))
   )
-  .dependsOn(`runtime-java`)
+  .dependsOn(`binding-jvm`)
 
 lazy val compiler = project
   .settings(
     commonSettings,
     name                := "compiler",
-    javah / target      := bindingsDir / "java-compiler",
-    assemblyShadeRules  := loaderShadeRules,
+    javah / target      := bindingsDir / "jvm-compiler",
     assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly")),
     javacOptions ++= Seq("-proc:none"),
     scalacOptions ++=
@@ -97,7 +102,7 @@ lazy val compiler = project
       }
     }
   )
-  .dependsOn(`runtime-scala`)
+  .dependsOn(`runtime-scala`, `runtime-java`)
 
 lazy val `compiler-testsuite-scala` = project
   .settings(
@@ -167,7 +172,7 @@ lazy val root = project
   .in(file("."))
   .settings(commonSettings)
   .aggregate(
-    `loader-jvm`,
+    `binding-jvm`,
     `runtime-scala`,
     `runtime-java`,
     compiler,

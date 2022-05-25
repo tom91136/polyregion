@@ -1,6 +1,6 @@
 package polyregion.scala
 
-import polyregion.PolyregionCompiler
+import polyregion.{jvm}
 import polyregion.ast.{CppSourceMirror, MsgPack, PolyAst as p, *}
 import polyregion.scala.{NativeStruct, *}
 
@@ -204,8 +204,8 @@ object compiletime {
       // c <- Right(new polyregion.Compilation())
 
 
-      options = polyregion.Options(PolyregionCompiler.TargetObjectLLVM_x86_64, "")
-      c <- Try((PolyregionCompiler.compile(serialisedAst, true, options))).toEither
+      options = polyregion.jvm.compiler.Options(polyregion.jvm.compiler.Compiler.TargetObjectLLVM_x86_64, "")
+      c <- Try((polyregion.jvm.compiler.Compiler.compile(serialisedAst, true, options))).toEither
     } yield {
 
       println(s"Messages=\n  ${c.messages}")
@@ -276,39 +276,40 @@ object compiletime {
         ${ Expr.block(captureExprs.zipWithIndex.map((e, i) => '{ argBuffers(${ Expr(i) }) = $e }), '{ () }) }
 
         ${
-          (prog.entry.rtn match {
-            case p.Type.Unit   => '{ polyregion.PolyregionRuntime.invoke(bytes, $fnName, argTypes, argBuffers) }
-            case p.Type.Float  => '{ polyregion.PolyregionRuntime.invokeFloat(bytes, $fnName, argTypes, argBuffers) }
-            case p.Type.Double => '{ polyregion.PolyregionRuntime.invokeDouble(bytes, $fnName, argTypes, argBuffers) }
-            case p.Type.Bool   => '{ polyregion.PolyregionRuntime.invokeBool(bytes, $fnName, argTypes, argBuffers) }
-            case p.Type.Byte   => '{ polyregion.PolyregionRuntime.invokeByte(bytes, $fnName, argTypes, argBuffers) }
-            case p.Type.Char   => '{ polyregion.PolyregionRuntime.invokeChar(bytes, $fnName, argTypes, argBuffers) }
-            case p.Type.Short  => '{ polyregion.PolyregionRuntime.invokeShort(bytes, $fnName, argTypes, argBuffers) }
-            case p.Type.Int    => '{ polyregion.PolyregionRuntime.invokeInt(bytes, $fnName, argTypes, argBuffers) }
-            case p.Type.Long   => '{ polyregion.PolyregionRuntime.invokeLong(bytes, $fnName, argTypes, argBuffers) }
-            case x @ p.Type.Struct(_, _, _) =>
-              // val imp = Expr.summon[NativeStruct[A]] match {
-              //   case None    => Q.report.errorAndAbort(s"Cannot find NativeStruct for type ${Type.of[A]}")
-              //   case Some(x) => x
-              // }
-              '{
-                var buffer = polyregion.PolyregionRuntime.invokeObject(bytes, $fnName, argTypes, argBuffers, -1)
-                ${ Pickler.readUniform('buffer, '{ 0 }, x, Q.TypeRepr.of[A]) }
-                // Buffer.structViewAny[A](buffer)(using $imp)(0)
-              }
-            case x @ p.Type.Array(comp) =>
-              //  ${
-              //   Type.of[A] match {
-              //     case '[Buffer[a]] => wrap('{ buffer }, comp) // passthrough
-              //     case '[Array[a]]  => '{ ${ wrap('{ buffer }, comp) }.copyToArray }
-              //     case m            => ???
-              //   }
-              // }
-              '{
-                var buffer = polyregion.PolyregionRuntime.invokeObject(bytes, $fnName, argTypes, argBuffers, -1)
-                ${ Pickler.readUniform('buffer, '{ 0 }, x, Q.TypeRepr.of[A]) }
-              }
-          }).asExprOf[A]
+//          (prog.entry.rtn match {
+//            case p.Type.Unit   => '{ PolyregionRuntime.invoke(bytes, $fnName, argTypes, argBuffers) }
+//            case p.Type.Float  => '{ jvm.PolyregionRuntime.invokeFloat(bytes, $fnName, argTypes, argBuffers) }
+//            case p.Type.Double => '{ jvm.PolyregionRuntime.invokeDouble(bytes, $fnName, argTypes, argBuffers) }
+//            case p.Type.Bool   => '{ jvm.PolyregionRuntime.invokeBool(bytes, $fnName, argTypes, argBuffers) }
+//            case p.Type.Byte   => '{ jvm.PolyregionRuntime.invokeByte(bytes, $fnName, argTypes, argBuffers) }
+//            case p.Type.Char   => '{ jvm.PolyregionRuntime.invokeChar(bytes, $fnName, argTypes, argBuffers) }
+//            case p.Type.Short  => '{ jvm.PolyregionRuntime.invokeShort(bytes, $fnName, argTypes, argBuffers) }
+//            case p.Type.Int    => '{ jvm.PolyregionRuntime.invokeInt(bytes, $fnName, argTypes, argBuffers) }
+//            case p.Type.Long   => '{ jvm.PolyregionRuntime.invokeLong(bytes, $fnName, argTypes, argBuffers) }
+//            case x @ p.Type.Struct(_, _, _) =>
+//              // val imp = Expr.summon[NativeStruct[A]] match {
+//              //   case None    => Q.report.errorAndAbort(s"Cannot find NativeStruct for type ${Type.of[A]}")
+//              //   case Some(x) => x
+//              // }
+//              '{
+//                var buffer = jvm.PolyregionRuntime.invokeObject(bytes, $fnName, argTypes, argBuffers, -1)
+//                ${ Pickler.readUniform('buffer, '{ 0 }, x, Q.TypeRepr.of[A]) }
+//                // Buffer.structViewAny[A](buffer)(using $imp)(0)
+//              }
+//            case x @ p.Type.Array(comp) =>
+//              //  ${
+//              //   Type.of[A] match {
+//              //     case '[Buffer[a]] => wrap('{ buffer }, comp) // passthrough
+//              //     case '[Array[a]]  => '{ ${ wrap('{ buffer }, comp) }.copyToArray }
+//              //     case m            => ???
+//              //   }
+//              // }
+//              '{
+//                var buffer = jvm.PolyregionRuntime.invokeObject(bytes, $fnName, argTypes, argBuffers, -1)
+//                ${ Pickler.readUniform('buffer, '{ 0 }, x, Q.TypeRepr.of[A]) }
+//              }
+//          }).asExprOf[A]
+        ???
         }
       }
       println("Code=" + code.show)
