@@ -5,7 +5,7 @@
 using namespace polyregion::runtime;
 using namespace polyregion::runtime::cl;
 
-#define CHECKED(f) checked((f), __FILE__, __LINE__);
+#define CHECKED(f) checked((f), __FILE__, __LINE__)
 
 static constexpr const char *ERROR_PREFIX = "[OpenCL error] ";
 
@@ -142,7 +142,8 @@ ClDevice::ClDevice(cl_device_id device)
           [&](auto &&f) {
             TRACE();
             CHECKED(clReleaseKernel(f));
-          }) {
+          }),
+      bufferCounter(), allocations() {
   TRACE();
 }
 cl_mem ClDevice::queryMemObject(uintptr_t ptr) const {
@@ -234,27 +235,22 @@ void ClDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t si
   enqueueCallback(cb, event);
 }
 void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                       const std::vector<TypedPointer> &args, TypedPointer rtn, const Policy &policy,
+                                       const std::vector<Type> &types, std::vector<void *> &args, const Policy &policy,
                                        const MaybeCallback &cb) {
   TRACE();
-  if (rtn.first != Type::Void) throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported");
+  if (types.back() != Type::Void)
+    throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported");
   auto kernel = store.resolveFunction(moduleName, symbol);
   auto toSize = [](Type t) -> size_t {
     switch (t) {
-      case Type::Bool8: // fallthrough
-      case Type::Byte8: return 8 / 8;
-      case Type::CharU16: // fallthrough
-      case Type::Short16: return 16 / 8;
-      case Type::Int32: return 32 / 8;
-      case Type::Long64: return 64 / 8;
-      case Type::Float32: return 32 / 8;
-      case Type::Double64: return 64 / 8;
       case Type::Ptr: return sizeof(cl_mem);
       case Type::Void: throw std::logic_error("Illegal argument type: void");
+      default: return ::byteOfType(t);
     }
   };
   for (cl_uint i = 0; i < args.size(); ++i) {
-    auto [tpe, rawPtr] = args[i];
+    auto rawPtr = args[i];
+    auto tpe = types[i];
     if (tpe == Type::Ptr) {
       cl_mem mem = queryMemObject(*static_cast<uintptr_t *>(rawPtr));
       CHECKED(clSetKernelArg(kernel, i, toSize(tpe), &mem));

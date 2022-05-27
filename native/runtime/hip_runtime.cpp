@@ -150,12 +150,12 @@ void HipDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t s
   enqueueCallback(cb);
 }
 void HipDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                        const std::vector<TypedPointer> &args, TypedPointer rtn, const Policy &policy,
+                                        const std::vector<Type> &types, std::vector<void *> &args, const Policy &policy,
                                         const MaybeCallback &cb) {
   TRACE();
-  if (rtn.first != Type::Void) throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported");
+  if (types.back() != Type::Void)
+    throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported");
   auto fn = store.resolveFunction(moduleName, symbol);
-  auto ptrs = detail::pointers(args);
   auto grid = policy.global;
   auto block = policy.local.value_or(Dim3{});
   int sharedMem = 0;
@@ -163,7 +163,7 @@ void HipDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
                                 grid.x, grid.y, grid.z,    //
                                 block.x, block.y, block.z, //
                                 sharedMem,                 //
-                                stream, ptrs.data(),       //
+                                stream, args.data(),       //
                                 nullptr));
   enqueueCallback(cb);
 }

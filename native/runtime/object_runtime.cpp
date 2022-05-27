@@ -11,8 +11,7 @@
 using namespace polyregion::runtime;
 using namespace polyregion::runtime::object;
 
-static void invoke(uint64_t symbolAddress, const std::vector<TypedPointer> &args, TypedPointer rtn) {
-
+static void invoke(uint64_t symbolAddress, const std::vector<Type> &types, std::vector<void *> &args) {
   const auto toFFITpe = [](const Type &tpe) -> ffi_type * {
     switch (tpe) {
       case polyregion::runtime::Type::Bool8:
@@ -25,29 +24,18 @@ static void invoke(uint64_t symbolAddress, const std::vector<TypedPointer> &args
       case polyregion::runtime::Type::Double64: return &ffi_type_double;
       case polyregion::runtime::Type::Ptr: return &ffi_type_pointer;
       case polyregion::runtime::Type::Void: return &ffi_type_void;
-      default: return nullptr;
+      default: throw std::logic_error("Illegal ffi type " + std::to_string(polyregion::to_underlying(tpe)));
     }
   };
+  if (types.size() != args.size()) throw std::logic_error("types size  != args size");
 
-  auto rtnFFIType = toFFITpe(rtn.first);
-  if (!rtnFFIType) {
-    throw std::logic_error("Illegal return type " + std::to_string(polyregion::to_underlying(rtn.first)));
-  }
-
-  std::vector<void *> argPointers(args.size());
-  std::vector<ffi_type *> argsFFIType(args.size());
-  for (size_t i = 0; i < args.size(); i++) {
-    argPointers[i] = args[i].second;
-    argsFFIType[i] = toFFITpe(args[i].first);
-    if (!argsFFIType[i])
-      throw std::logic_error("Illegal parameter type on arg " + std::to_string(i) + ": " +
-                             std::to_string(polyregion::to_underlying(args[i].first)));
-  }
-
+  std::vector<ffi_type *> ffiTypes(args.size());
+  for (size_t i = 0; i < args.size(); i++)
+    ffiTypes[i] = toFFITpe(types[i]);
   ffi_cif cif{};
-  ffi_status status = ffi_prep_cif(&cif, FFI_DEFAULT_ABI, args.size(), rtnFFIType, argsFFIType.data());
+  ffi_status status = ffi_prep_cif(&cif, FFI_DEFAULT_ABI, args.size() - 1, ffiTypes.back(), ffiTypes.data());
   switch (status) {
-    case FFI_OK: ffi_call(&cif, FFI_FN(symbolAddress), rtn.second, argPointers.data()); break;
+    case FFI_OK: ffi_call(&cif, FFI_FN(symbolAddress), args.back(), args.data()); break;
     case FFI_BAD_TYPEDEF: throw std::logic_error("ffi_prep_cif: FFI_BAD_TYPEDEF");
     case FFI_BAD_ABI: throw std::logic_error("ffi_prep_cif: FFI_BAD_ABI");
     default: throw std::logic_error("ffi_prep_cif: unknown error (" + std::to_string(status) + ")");
@@ -84,7 +72,7 @@ void ObjectDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_
   if (cb) (*cb)(); // no-op for CPUs
 }
 
-RelocatableRuntime::RelocatableRuntime() { TRACE(); };
+RelocatableRuntime::RelocatableRuntime() { TRACE(); }
 std::string RelocatableRuntime::name() {
   TRACE();
   return "CPU (RelocatableObject)";
@@ -118,7 +106,6 @@ void RelocatableDevice::loadModule(const std::string &name, const std::string &i
   if (auto it = objects.find(name); it != objects.end()) {
     throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Module named " + name + " was already loaded");
   } else {
-    auto ref = llvm::MemoryBufferRef{llvm::StringRef(image), ""};
     if (auto object = llvm::object::ObjectFile::createObjectFile(llvm::MemoryBufferRef(llvm::StringRef(image), ""));
         auto e = object.takeError()) {
       throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Cannot load module: " + toString(std::move(e)));
@@ -133,7 +120,7 @@ std::unique_ptr<DeviceQueue> RelocatableDevice::createQueue() {
 
 RelocatableDeviceQueue::RelocatableDeviceQueue(decltype(objects) objects, decltype(ld) ld) : objects(objects), ld(ld) {}
 void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                                const std::vector<TypedPointer> &args, TypedPointer rtn,
+                                                const std::vector<Type> &types, std::vector<void *> &args,
                                                 const Policy &policy, const MaybeCallback &cb) {
   TRACE();
   auto moduleIt = objects.find(moduleName);
@@ -156,13 +143,13 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
       throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Symbol `" + std::string(symbol) +
                              "` failed to finalise for execution: " + ld.getErrorString().str());
     }
-    invoke(sym.getAddress(), args, rtn);
+    invoke(sym.getAddress(), types, args);
     if (cb) (*cb)();
   }
 }
 
 static constexpr const char *SHOBJ_ERROR_PREFIX = "[RelocatableObject error] ";
-SharedRuntime::SharedRuntime() { TRACE(); };
+SharedRuntime::SharedRuntime() { TRACE(); }
 std::string SharedRuntime::name() {
   TRACE();
   return "CPU (SharedObjectR)";
@@ -226,7 +213,7 @@ std::unique_ptr<DeviceQueue> SharedDevice::createQueue() {
 
 SharedDeviceQueue::SharedDeviceQueue(decltype(modules) modules) : modules(modules) { TRACE(); }
 void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                           const std::vector<TypedPointer> &args, TypedPointer rtn,
+                                           const std::vector<Type> &types, std::vector<void *> &args,
                                            const Policy &policy, const MaybeCallback &cb) {
   TRACE();
   auto moduleIt = modules.find(moduleName);
@@ -246,7 +233,7 @@ void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
     }
     symbolTable.emplace_hint(it, symbol, address);
   }
-  invoke(reinterpret_cast<uint64_t>(address), args, rtn);
+  invoke(reinterpret_cast<uint64_t>(address), types, args);
   if (cb) (*cb)();
 }
 #undef dynamic_library_open

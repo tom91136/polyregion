@@ -53,7 +53,7 @@ class EXPORT RelocatableDeviceQueue : public ObjectDeviceQueue {
 public:
   RelocatableDeviceQueue(decltype(objects) objects, decltype(ld) ld);
   EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                 const std::vector<TypedPointer> &args, TypedPointer rtn, const Policy &policy,
+                                 const std::vector<Type> &types, std::vector<void *> &args, const Policy &policy,
                                  const MaybeCallback &cb) override;
 };
 
@@ -86,7 +86,7 @@ class EXPORT SharedDeviceQueue : public ObjectDeviceQueue {
 public:
   explicit SharedDeviceQueue(decltype(modules) modules);
   EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                 const std::vector<TypedPointer> &args, TypedPointer rtn, const Policy &policy,
+                                 const std::vector<Type> &types, std::vector<void *> &args, const Policy &policy,
                                  const MaybeCallback &cb) override;
 };
 

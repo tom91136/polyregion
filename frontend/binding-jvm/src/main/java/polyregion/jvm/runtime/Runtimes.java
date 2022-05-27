@@ -66,10 +66,8 @@ public final class Runtimes {
       long nativePeer,
       String moduleName,
       String symbol,
-      byte[] argTys,
-      long[] argPtrs,
-      byte rtnTy,
-      long rtnPtr,
+      byte[] argTypes,
+      byte[] argData,
       Policy policy,
       Runnable cb);
 

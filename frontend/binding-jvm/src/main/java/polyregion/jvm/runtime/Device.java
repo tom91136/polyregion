@@ -1,6 +1,7 @@
 package polyregion.jvm.runtime;
 
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
@@ -24,28 +25,38 @@ public final class Device implements AutoCloseable {
     }
 
     public void enqueueInvokeAsync(
-        String moduleName, String symbol, List<Arg> args, Arg rtn, Policy policy, Runnable cb) {
-      byte[] argTys = new byte[args.size()];
-      long[] argPtrs = new long[args.size()];
-      for (int i = 0; i < args.size(); i++) {
+        String moduleName,
+        String symbol,
+        List<Arg<?>> args,
+        Arg<?> rtn,
+        Policy policy,
+        Runnable cb) {
+
+      int bytes = 0;
+      byte[] argTys = new byte[args.size() + 1];
+      for (int i = 0; i < args.size(); ++i) {
+        bytes += args.get(i).type.sizeInBytes;
         argTys[i] = args.get(i).type.value;
-        argPtrs[i] = args.get(i).data;
       }
+      bytes += rtn.type.sizeInBytes;
+      argTys[args.size()] = rtn.type.value;
+
+      ByteBuffer buffer = ByteBuffer.allocate(bytes).order(ByteOrder.nativeOrder());
+      for (Arg<?> arg : args) arg.drainTo(buffer);
+      rtn.drainTo(buffer);
+
       Runtimes.enqueueInvokeAsync0(
-          nativePeer, moduleName, symbol, argTys, argPtrs, rtn.type.value, rtn.data, policy, cb);
+          nativePeer, moduleName, symbol, argTys, buffer.array(), policy, cb);
     }
 
     public void enqueueInvokeAsync(
         String moduleName,
         String symbol,
-        byte[] argTys,
-        long[] argPtrs,
-        byte rtnTy,
-        long rtnPtr,
+        byte[] argTypes,
+        byte[] argData,
         Policy policy,
         Runnable cb) {
-      Runtimes.enqueueInvokeAsync0(
-          nativePeer, moduleName, symbol, argTys, argPtrs, rtnTy, rtnPtr, policy, cb);
+      Runtimes.enqueueInvokeAsync0(nativePeer, moduleName, symbol, argTypes, argData, policy, cb);
     }
 
     @Override

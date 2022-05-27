@@ -14,7 +14,7 @@
   #error Trace already defined
 #else
 
-  #define TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void*)this, __PRETTY_FUNCTION__)
+  #define TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this, __PRETTY_FUNCTION__)
 //  #define TRACE()
 
 #endif
@@ -162,8 +162,8 @@ public:
                                                const MaybeCallback &cb) = 0;
   virtual EXPORT void enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) = 0;
   virtual EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                         const std::vector<TypedPointer> &args, TypedPointer rtn, const Policy &policy,
-                                         const MaybeCallback &cb) = 0;
+                                         const std::vector<Type> &types, std::vector<void *> &args,
+                                         const Policy &policy, const MaybeCallback &cb) = 0;
 };
 
 struct EXPORT Device {

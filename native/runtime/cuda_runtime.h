@@ -34,7 +34,7 @@ public:
   EXPORT uintptr_t malloc(size_t size, Access access) override;
   EXPORT void free(uintptr_t ptr) override;
   EXPORT std::unique_ptr<DeviceQueue> createQueue() override;
-  ~CudaDevice() override ;
+  ~CudaDevice() override;
 };
 
 class EXPORT CudaDeviceQueue : public DeviceQueue {
@@ -50,7 +50,7 @@ public:
   EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) override;
   EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, void *dst, size_t size, const MaybeCallback &cb) override;
   EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                 const std::vector<TypedPointer> &args, TypedPointer rtn, const Policy &policy,
+                                 const std::vector<Type> &types, std::vector<void *> &args, const Policy &policy,
                                  const MaybeCallback &cb) override;
 };
 

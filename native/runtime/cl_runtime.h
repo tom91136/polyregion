@@ -9,7 +9,7 @@ namespace polyregion::runtime::cl {
 class EXPORT ClRuntime : public Runtime {
 public:
   EXPORT explicit ClRuntime();
-  EXPORT ~ClRuntime() override ;
+  EXPORT ~ClRuntime() override;
   EXPORT std::string name() override;
   EXPORT std::vector<Property> properties() override;
   EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;
@@ -33,7 +33,7 @@ class EXPORT ClDevice : public Device {
 
 public:
   EXPORT explicit ClDevice(cl_device_id device);
-  virtual ~ClDevice();
+  ~ClDevice() override;
   EXPORT int64_t id() override;
   EXPORT std::string name() override;
   EXPORT std::vector<Property> properties() override;
@@ -57,7 +57,7 @@ public:
   EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) override;
   EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, void *dst, size_t size, const MaybeCallback &cb) override;
   EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                 const std::vector<TypedPointer> &args, TypedPointer rtn, const Policy &policy,
+                                 const std::vector<Type> &types, std::vector<void *> &args, const Policy &policy,
                                  const MaybeCallback &cb) override;
 };
 

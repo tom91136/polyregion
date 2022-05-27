@@ -180,10 +180,10 @@ JNIEXPORT void JNICALL Java_polyregion_jvm_runtime_Runtimes_enqueueDeviceToHostA
 /*
  * Class:      polyregion_jvm_runtime_Runtimes
  * Method:     enqueueInvokeAsync0
- * Signature:  (JLjava/lang/String;Ljava/lang/String;[B[JBJLpolyregion/jvm/runtime/Policy;Ljava/lang/Runnable;)V
+ * Signature:  (JLjava/lang/String;Ljava/lang/String;[B[BLpolyregion/jvm/runtime/Policy;Ljava/lang/Runnable;)V
  */
 JNIEXPORT void JNICALL Java_polyregion_jvm_runtime_Runtimes_enqueueInvokeAsync0
-  (JNIEnv *, jclass, jlong, jstring, jstring, jbyteArray, jlongArray, jbyte, jlong, jobject, jobject);
+  (JNIEnv *, jclass, jlong, jstring, jstring, jbyteArray, jbyteArray, jobject, jobject);
 
 #ifdef __cplusplus
 }

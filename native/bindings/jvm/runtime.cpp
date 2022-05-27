@@ -19,6 +19,17 @@ namespace gen = ::generated;
 
 static constexpr const char *EX = "polyregion/PolyregionRuntimeException";
 
+static_assert(polyregion::to_underlying(rt::Type::Void) == polyregion_jvm_runtime_Runtimes_TYPE_1VOID);
+static_assert(polyregion::to_underlying(rt::Type::Bool8) == polyregion_jvm_runtime_Runtimes_TYPE_1BOOL);
+static_assert(polyregion::to_underlying(rt::Type::Byte8) == polyregion_jvm_runtime_Runtimes_TYPE_1BYTE);
+static_assert(polyregion::to_underlying(rt::Type::CharU16) == polyregion_jvm_runtime_Runtimes_TYPE_1CHAR);
+static_assert(polyregion::to_underlying(rt::Type::Short16) == polyregion_jvm_runtime_Runtimes_TYPE_1SHORT);
+static_assert(polyregion::to_underlying(rt::Type::Int32) == polyregion_jvm_runtime_Runtimes_TYPE_1INT);
+static_assert(polyregion::to_underlying(rt::Type::Long64) == polyregion_jvm_runtime_Runtimes_TYPE_1LONG);
+static_assert(polyregion::to_underlying(rt::Type::Float32) == polyregion_jvm_runtime_Runtimes_TYPE_1FLOAT);
+static_assert(polyregion::to_underlying(rt::Type::Double64) == polyregion_jvm_runtime_Runtimes_TYPE_1DOUBLE);
+static_assert(polyregion::to_underlying(rt::Type::Ptr) == polyregion_jvm_runtime_Runtimes_TYPE_1PTR);
+
 [[maybe_unused]] jint JNI_OnLoad(JavaVM *vm, void *) {
   fprintf(stderr, "JVM enter\n");
   JNIEnv *env = getEnv(vm);
@@ -212,62 +223,52 @@ static rt::Dim3 fromJni(JNIEnv *env, const generated::Dim3::Instance &d3) {
 [[maybe_unused]] void Java_polyregion_jvm_runtime_Runtimes_enqueueInvokeAsync0(JNIEnv *env, jclass, jlong nativePeer, //
                                                                                jstring moduleName, jstring symbol,    //
                                                                                jbyteArray argTypes,                   //
-                                                                               jlongArray argPtrs,                  //
-                                                                               jbyte rtnType,                         //
-                                                                               jlong rtnPtr,                        //
+                                                                               jbyteArray argData,                    //
                                                                                jobject policy, jobject cb) {
 
-  if (env->GetArrayLength(argTypes) != env->GetArrayLength(argPtrs)) {
-    throwGeneric(env, EX, "argPtrs size !=  argTypes size");
+
+
+
+  auto argCount = env->GetArrayLength(argTypes) ;
+                      if (argCount == 0) {
+    throwGeneric(env, EX, "empty argTypes, expecting at >= 1 for return type");
     return;
   }
 
-  auto bind = [&](jlong argBuffer, jbyte argTy, void **argPtrStore) -> rt::TypedPointer {
-    *argPtrStore = reinterpret_cast<void*>(argBuffer);
-    auto tpe = static_cast<rt::Type>(argTy);
-    switch (tpe) {
-      case rt::Type::Bool8:
-      case rt::Type::Byte8:
-      case rt::Type::CharU16:
-      case rt::Type::Short16:
-      case rt::Type::Int32:
-      case rt::Type::Long64:
-      case rt::Type::Float32:
-      case rt::Type::Double64:
-      case rt::Type::Void: {
-        return std::make_pair(tpe, *argPtrStore); // XXX no indirection needed, dereference now
-      }
-      case rt::Type::Ptr: {
-        return std::make_pair(tpe, argPtrStore); // XXX pointer indirection, don't dereference
-      }
-      default: throw std::logic_error("Unimplemented parameter type " + std::to_string(to_underlying(tpe)));
-    }
-  };
+
+
+
+
 
   wrapException(env, EX, [&]() {
-    std::vector<rt::TypedPointer> args(env->GetArrayLength(argPtrs));
 
-    // XXX we MUST hold on to the vector of pointers in the same block as invoke even if we don't use it
-    std::vector<void *> argsPtrStore(args.size());
 
     auto argTs = fromJni<jbyte>(env, argTypes);
-    auto argPs = fromJni(env, argPtrs);
+    auto argPs = fromJni<jbyte>(env, argData);
+    auto argsPtr = argPs.data();
+    std::vector<void *> argsPtrStore(argPs.size());
+    std::vector<rt::Type> argTpeStore(argPs.size());
+    for (int i = 0; i < argCount; ++i) {
+      auto tpe = static_cast<rt::Type>(argTs[i]);
+      argsPtrStore[i] = tpe == rt::Type::Void ? nullptr : argsPtr;
+      argTpeStore[i] = tpe;
+      argsPtr += rt::byteOfType(tpe);
+    }
 
-    for (jsize i = 0; i < jsize(args.size()); ++i)
-      bind(argPs[i], argTs[i], &argsPtrStore[i]);
+
+
 
     // XXX we MUST hold on to the return pointer in the same block as invoke even if we don't use it
     void *rtnPtrStore = {};
-    rt::TypedPointer rtn = bind(rtnPtr, rtnType, &rtnPtrStore);
     auto p = gen::Policy::of(env).wrap(env, policy);
     auto global = fromJni(env, p.global(env, gen::Dim3::of(env)));
     auto local = p.local(env, gen::Dim3::of(env)).map<rt::Dim3>([&](auto x) { return fromJni(env, x); });
 
     findRef(env, DeviceQueues, nativePeer)
-        ->enqueueInvokeAsync(fromJni(env, moduleName), fromJni(env, symbol), args, rtn, {global, local},
+        ->enqueueInvokeAsync(fromJni(env, moduleName), fromJni(env, symbol), argTpeStore, argsPtrStore, {global, local},
                              fromJni(env, cb));
 
-    if (rtn.first == rt::Type::Ptr) {
+    if (argTpeStore[argPs.size()-1]  == rt::Type::Ptr) {
       // we got four possible cases when a function return pointers:
       //  1. Pointer to one of the argument   (LUT[ptr]==Some) => passthrough
       //  2. Pointer to malloc'd memory       (LUT[ptr]==Some) => passthrough
@@ -277,7 +278,7 @@ static rt::Dim3 fromJni(JNIEnv *env, const generated::Dim3::Instance &d3) {
       throwGeneric(env, EX, "Returning pointers is unimplemented");
       //      std::unordered_map<void *, std::pair<jobject, jsize>> allocations;
       //
-      //      // save all args in the alloc LUT first so that we can identify them later
+      //      // save all argPs in the alloc LUT first so that we can identify them later
       //      for (jsize i = 0; i < env->GetArrayLength(argPtrs); ++i) {
       //        auto buffer = env->GetObjectArrayElement(argPtrs, i);
       //        allocations.emplace(env->GetDirectBufferAddress(buffer),

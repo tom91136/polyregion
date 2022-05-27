@@ -3,54 +3,65 @@ package polyregion.jvm.runtime;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Objects;
+import java.util.function.Consumer;
 
-public final class Arg {
+public final class Arg<T> {
   public final Type type;
-  public final long data;
+  public final T value;
+  final Consumer<ByteBuffer> drain;
 
-  public Arg(Type type, long data) {
+  Arg(Type type, T value, Consumer<ByteBuffer> drain) {
     this.type = Objects.requireNonNull(type);
-    this.data = data;
+    this.value = value;
+    this.drain = Objects.requireNonNull(drain);
+  }
+
+  void drainTo(ByteBuffer b) {
+    drain.accept(b);
   }
 
   @Override
   public String toString() {
-    return "Arg{" + "type=" + type + ", data=" + Long.toHexString(data) + '}';
+    return "Arg{" + "type=" + type + ", value=" + value + '}';
   }
 
-  //  private static ByteBuffer allocate(int byteSize) {
-  //    return ByteBuffer.allocate(byteSize).order(ByteOrder.nativeOrder());
-  //  }
-  //
-  //  public static Arg of(boolean x) {
-  //    return new Arg(Type.BOOL, allocate(Byte.BYTES).put((byte) (x ? 1 : 0)));
-  //  }
-  //
-  //  public static Arg of(byte x) {
-  //    return new Arg(Type.BYTE, allocate(Byte.BYTES).put(x));
-  //  }
-  //
-  //  public static Arg of(char x) {
-  //    return new Arg(Type.CHAR, allocate(Byte.BYTES).putChar(x));
-  //  }
-  //
-  //  public static Arg of(short x) {
-  //    return new Arg(Type.SHORT, allocate(Short.BYTES).putShort(x));
-  //  }
-  //
-  //  public static Arg of(int x) {
-  //    return new Arg(Type.INT, allocate(Integer.BYTES).putInt(x));
-  //  }
-  //
-  //  public static Arg of(long x) {
-  //    return new Arg(Type.LONG, allocate(Long.BYTES).putLong(x));
-  //  }
-  //
-  //  public static Arg of(float x) {
-  //    return new Arg(Type.FLOAT, allocate(Float.BYTES).putFloat(x));
-  //  }
-  //
-  //  public static Arg of(double x) {
-  //    return new Arg(Type.DOUBLE, allocate(Double.BYTES).putDouble(x));
-  //  }
+  public static Arg<Void> of() {
+    return new Arg<>(Type.VOID, null, b -> {});
+  }
+
+  public static Arg<Boolean> of(boolean x) {
+    return new Arg<>(Type.BOOL, x, bb -> bb.put(x ? (byte) 1 : (byte) 0));
+  }
+
+  public static Arg<Byte> of(byte x) {
+    return new Arg<>(Type.BYTE, x, bb -> bb.put(x));
+  }
+
+  public static Arg<Character> of(char x) {
+    return new Arg<>(Type.CHAR, x, bb -> bb.putChar(x));
+  }
+
+  public static Arg<Short> of(short x) {
+    return new Arg<>(Type.SHORT, x, bb -> bb.putShort(x));
+  }
+
+  public static Arg<Integer> of(int x) {
+    return new Arg<>(Type.INT, x, bb -> bb.putInt(x));
+  }
+
+  public static Arg<Long> of(long x) {
+    return new Arg<>(Type.LONG, x, bb -> bb.putLong(x));
+  }
+
+  public static Arg<Float> of(float x) {
+    return new Arg<>(Type.FLOAT, x, bb -> bb.putFloat(x));
+  }
+
+  public static Arg<Double> of(double x) {
+    return new Arg<>(Type.DOUBLE, x, bb -> bb.putDouble(x));
+  }
+
+  public static Arg<Long> ptr(long x) {
+    return new Arg<>(Type.PTR, x, bb -> bb.putLong(x));
+  }
 }
