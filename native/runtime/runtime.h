@@ -10,6 +10,15 @@
 #include <string>
 #include <vector>
 
+#ifdef TRACE
+  #error Trace already defined
+#else
+
+  #define TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void*)this, __PRETTY_FUNCTION__)
+//  #define TRACE()
+
+#endif
+
 namespace polyregion::runtime {
 
 using TypedPointer = std::pair<Type, void *>;

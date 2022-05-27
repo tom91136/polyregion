@@ -7,26 +7,26 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-#undef polyregion_jvm_runtime_Runtimes_TYPE_1BOOL
-#define polyregion_jvm_runtime_Runtimes_TYPE_1BOOL 1L
-#undef polyregion_jvm_runtime_Runtimes_TYPE_1BYTE
-#define polyregion_jvm_runtime_Runtimes_TYPE_1BYTE 2L
-#undef polyregion_jvm_runtime_Runtimes_TYPE_1CHAR
-#define polyregion_jvm_runtime_Runtimes_TYPE_1CHAR 3L
-#undef polyregion_jvm_runtime_Runtimes_TYPE_1SHORT
-#define polyregion_jvm_runtime_Runtimes_TYPE_1SHORT 4L
-#undef polyregion_jvm_runtime_Runtimes_TYPE_1INT
-#define polyregion_jvm_runtime_Runtimes_TYPE_1INT 5L
-#undef polyregion_jvm_runtime_Runtimes_TYPE_1LONG
-#define polyregion_jvm_runtime_Runtimes_TYPE_1LONG 6L
-#undef polyregion_jvm_runtime_Runtimes_TYPE_1FLOAT
-#define polyregion_jvm_runtime_Runtimes_TYPE_1FLOAT 7L
-#undef polyregion_jvm_runtime_Runtimes_TYPE_1DOUBLE
-#define polyregion_jvm_runtime_Runtimes_TYPE_1DOUBLE 8L
-#undef polyregion_jvm_runtime_Runtimes_TYPE_1PTR
-#define polyregion_jvm_runtime_Runtimes_TYPE_1PTR 9L
 #undef polyregion_jvm_runtime_Runtimes_TYPE_1VOID
-#define polyregion_jvm_runtime_Runtimes_TYPE_1VOID 10L
+#define polyregion_jvm_runtime_Runtimes_TYPE_1VOID 1L
+#undef polyregion_jvm_runtime_Runtimes_TYPE_1BOOL
+#define polyregion_jvm_runtime_Runtimes_TYPE_1BOOL 2L
+#undef polyregion_jvm_runtime_Runtimes_TYPE_1BYTE
+#define polyregion_jvm_runtime_Runtimes_TYPE_1BYTE 3L
+#undef polyregion_jvm_runtime_Runtimes_TYPE_1CHAR
+#define polyregion_jvm_runtime_Runtimes_TYPE_1CHAR 4L
+#undef polyregion_jvm_runtime_Runtimes_TYPE_1SHORT
+#define polyregion_jvm_runtime_Runtimes_TYPE_1SHORT 5L
+#undef polyregion_jvm_runtime_Runtimes_TYPE_1INT
+#define polyregion_jvm_runtime_Runtimes_TYPE_1INT 6L
+#undef polyregion_jvm_runtime_Runtimes_TYPE_1LONG
+#define polyregion_jvm_runtime_Runtimes_TYPE_1LONG 7L
+#undef polyregion_jvm_runtime_Runtimes_TYPE_1FLOAT
+#define polyregion_jvm_runtime_Runtimes_TYPE_1FLOAT 8L
+#undef polyregion_jvm_runtime_Runtimes_TYPE_1DOUBLE
+#define polyregion_jvm_runtime_Runtimes_TYPE_1DOUBLE 9L
+#undef polyregion_jvm_runtime_Runtimes_TYPE_1PTR
+#define polyregion_jvm_runtime_Runtimes_TYPE_1PTR 10L
 #undef polyregion_jvm_runtime_Runtimes_ACCESS_1RW
 #define polyregion_jvm_runtime_Runtimes_ACCESS_1RW 1L
 #undef polyregion_jvm_runtime_Runtimes_ACCESS_1R0
@@ -75,10 +75,42 @@ JNIEXPORT jobject JNICALL Java_polyregion_jvm_runtime_Runtimes_Dynamic
 
 /*
  * Class:      polyregion_jvm_runtime_Runtimes
- * Method:     deletePeer
+ * Method:     deleteAllPeer
+ * Signature:  ()V
+ */
+JNIEXPORT void JNICALL Java_polyregion_jvm_runtime_Runtimes_deleteAllPeer
+  (JNIEnv *, jclass);
+
+/*
+ * Class:      polyregion_jvm_runtime_Runtimes
+ * Method:     deleteDevicePeer
  * Signature:  (J)V
  */
-JNIEXPORT void JNICALL Java_polyregion_jvm_runtime_Runtimes_deletePeer
+JNIEXPORT void JNICALL Java_polyregion_jvm_runtime_Runtimes_deleteDevicePeer
+  (JNIEnv *, jclass, jlong);
+
+/*
+ * Class:      polyregion_jvm_runtime_Runtimes
+ * Method:     deleteQueuePeer
+ * Signature:  (J)V
+ */
+JNIEXPORT void JNICALL Java_polyregion_jvm_runtime_Runtimes_deleteQueuePeer
+  (JNIEnv *, jclass, jlong);
+
+/*
+ * Class:      polyregion_jvm_runtime_Runtimes
+ * Method:     deleteRuntimePeer
+ * Signature:  (J)V
+ */
+JNIEXPORT void JNICALL Java_polyregion_jvm_runtime_Runtimes_deleteRuntimePeer
+  (JNIEnv *, jclass, jlong);
+
+/*
+ * Class:      polyregion_jvm_runtime_Runtimes
+ * Method:     runtimeProperties
+ * Signature:  (J)[Lpolyregion/jvm/runtime/Property;
+ */
+JNIEXPORT jobjectArray JNICALL Java_polyregion_jvm_runtime_Runtimes_runtimeProperties
   (JNIEnv *, jclass, jlong);
 
 /*
@@ -87,6 +119,14 @@ JNIEXPORT void JNICALL Java_polyregion_jvm_runtime_Runtimes_deletePeer
  * Signature:  (J)[Lpolyregion/jvm/runtime/Device;
  */
 JNIEXPORT jobjectArray JNICALL Java_polyregion_jvm_runtime_Runtimes_devices0
+  (JNIEnv *, jclass, jlong);
+
+/*
+ * Class:      polyregion_jvm_runtime_Runtimes
+ * Method:     deviceProperties
+ * Signature:  (J)[Lpolyregion/jvm/runtime/Property;
+ */
+JNIEXPORT jobjectArray JNICALL Java_polyregion_jvm_runtime_Runtimes_deviceProperties
   (JNIEnv *, jclass, jlong);
 
 /*
@@ -140,10 +180,10 @@ JNIEXPORT void JNICALL Java_polyregion_jvm_runtime_Runtimes_enqueueDeviceToHostA
 /*
  * Class:      polyregion_jvm_runtime_Runtimes
  * Method:     enqueueInvokeAsync0
- * Signature:  (JLjava/lang/String;Ljava/lang/String;[B[Ljava/nio/ByteBuffer;BLjava/nio/ByteBuffer;Lpolyregion/jvm/runtime/Policy;Ljava/lang/Runnable;)V
+ * Signature:  (JLjava/lang/String;Ljava/lang/String;[B[JBJLpolyregion/jvm/runtime/Policy;Ljava/lang/Runnable;)V
  */
 JNIEXPORT void JNICALL Java_polyregion_jvm_runtime_Runtimes_enqueueInvokeAsync0
-  (JNIEnv *, jclass, jlong, jstring, jstring, jbyteArray, jobjectArray, jbyte, jobject, jobject, jobject);
+  (JNIEnv *, jclass, jlong, jstring, jstring, jbyteArray, jlongArray, jbyte, jlong, jobject, jobject);
 
 #ifdef __cplusplus
 }

@@ -1,6 +1,7 @@
 
 #include "cl_runtime.h"
-
+#include <chrono>
+#include <thread>
 using namespace polyregion::runtime;
 using namespace polyregion::runtime::cl;
 
@@ -11,9 +12,9 @@ static constexpr const char *ERROR_PREFIX = "[OpenCL error] ";
 #define OUT_ERR __err
 #define OUT_CHECKED(f) checked([&](auto &&OUT_ERR) { return (f); }, __FILE__, __LINE__)
 
-static void checked(cl_int result, const std::string &file, int line) {
+static void checked(cl_int result, const char *file, int line) {
   if (result != CL_SUCCESS) {
-    throw std::logic_error(std::string(ERROR_PREFIX + file + ":" + std::to_string(line) + ": ") +
+    throw std::logic_error(std::string(ERROR_PREFIX) + file + ":" + std::to_string(line) + ": " +
                            clewErrorString(result));
   }
 }
@@ -36,13 +37,21 @@ static std::string queryDeviceInfo(cl_device_id device, cl_device_info info) {
 }
 
 ClRuntime::ClRuntime() {
+  TRACE();
   if (clewInit() != CLEW_SUCCESS) {
     throw std::logic_error("CLEW initialisation failed, no OpenCL library present?");
   }
 }
-std::string ClRuntime::name() { return "OpenCL"; }
-std::vector<Property> ClRuntime::properties() { return {}; }
+std::string ClRuntime::name() {
+  TRACE();
+  return "OpenCL";
+}
+std::vector<Property> ClRuntime::properties() {
+  TRACE();
+  return {};
+}
 std::vector<std::unique_ptr<Device>> ClRuntime::enumerate() {
+  TRACE();
   cl_uint numPlatforms = 0;
   CHECKED(clGetPlatformIDs(0, nullptr, &numPlatforms));
   std::vector<cl_platform_id> platforms(numPlatforms);
@@ -63,27 +72,41 @@ std::vector<std::unique_ptr<Device>> ClRuntime::enumerate() {
   }
   return clDevices;
 }
+ClRuntime::~ClRuntime() { TRACE(); }
 
 // ---
 
 ClDevice::ClDevice(cl_device_id device)
     : device(
-          [device]() {
-            if (__clewRetainDevice) // clRetainDevice requires OpenCL >= 1.2
-              CHECKED(__clewRetainDevice(device));
+          [&, device]() {
+            TRACE();
+            // XXX clReleaseDevice there appears to crash various CL implementation regardless of version, skip retain
+            // as well
+            //            if (__clewRetainDevice && __clewReleaseDevice) { // clRetainDevice requires OpenCL >= 1.2
+            //              CHECKED(__clewRetainDevice(device));
+            //            }
             return device;
           },
-          [](auto &&d) {
-            if (__clewReleaseDevice) // clReleaseDevice requires OpenCL >= 1.2
-              CHECKED(__clewReleaseDevice(d));
+          [&](auto &&d) {
+            TRACE();
+            // XX see above
+            //            if (__clewRetainDevice && __clewReleaseDevice) // clReleaseDevice requires OpenCL >= 1.2
+            //              CHECKED(__clewReleaseDevice(d));
           }),
       context(
-          [this]() { return OUT_CHECKED(clCreateContext(nullptr, 1, &(*this->device), nullptr, nullptr, OUT_ERR)); },
-          [](auto &&c) { CHECKED(clReleaseContext(c)); }),
+          [this]() {
+            TRACE();
+            return OUT_CHECKED(clCreateContext(nullptr, 1, &(*this->device), nullptr, nullptr, OUT_ERR));
+          },
+          [&](auto &&c) {
+            TRACE();
+            CHECKED(clReleaseContext(c));
+          }),
       deviceName(queryDeviceInfo(device, CL_DEVICE_NAME)),
       store(
           ERROR_PREFIX,
           [this](auto &&image) {
+            TRACE();
             auto imageData = image.data();
             auto imageLen = image.size();
             auto program = OUT_CHECKED(clCreateProgramWithSource(*context, 1, &imageData, &imageLen, OUT_ERR));
@@ -96,28 +119,61 @@ ClDevice::ClDevice(cl_device_id device)
               CHECKED(
                   clGetProgramBuildInfo(program, *this->device, CL_PROGRAM_BUILD_LOG, len, buildLog.data(), nullptr));
               auto compilerMessage = std::string(clewErrorString(result));
-              throw std::logic_error(std::string(ERROR_PREFIX) + "Program failed to compile with " + compilerMessage +
-                                     ")\n" +                                                          //
-                                     std::string(ERROR_PREFIX) + "Program source:\n" + image + "\n" + //
-                                     std::string(ERROR_PREFIX) + "Diagnostics:\n" + buildLog);        //
+              const static auto P = std::string(ERROR_PREFIX);
+              throw std::logic_error(std::string("Program failed to compile with ") + compilerMessage +
+                                     std::string(")\n") +                              //
+                                     std::string("Diagnostics:\n") + buildLog + "\n" + //
+                                     std::string("Program source:\n") + image + "\n"   //
+              );                                                                       //
             }
+            TRACE();
             return program;
           },
           [this](auto &&m, auto &&name) {
+            TRACE();
             context.touch();
+            TRACE();
             return OUT_CHECKED(clCreateKernel(m, name.c_str(), OUT_ERR));
           },
-          [](auto &&m) { CHECKED(clReleaseProgram(m)); }, [](auto &&f) { CHECKED(clReleaseKernel(f)); }) {}
+          [&](auto &&m) {
+            TRACE();
+            CHECKED(clReleaseProgram(m));
+          },
+          [&](auto &&f) {
+            TRACE();
+            CHECKED(clReleaseKernel(f));
+          }) {
+  TRACE();
+}
 cl_mem ClDevice::queryMemObject(uintptr_t ptr) const {
   if (auto it = allocations.find(ptr); it != allocations.end()) return it->second;
   else
     throw std::logic_error(std::string(ERROR_PREFIX) + "Illegal memory object: " + std::to_string(ptr));
 }
-int64_t ClDevice::id() { return reinterpret_cast<int64_t>(*device); }
-std::string ClDevice::name() { return deviceName; }
-std::vector<Property> ClDevice::properties() { return {}; }
-void ClDevice::loadModule(const std::string &name, const std::string &image) { store.loadModule(name, image); }
+int64_t ClDevice::id() {
+  TRACE();
+  return reinterpret_cast<int64_t>(*device);
+}
+std::string ClDevice::name() {
+  TRACE();
+  return deviceName;
+}
+std::vector<Property> ClDevice::properties() {
+  TRACE();
+  return {
+      {"CL_DEVICE_PROFILE", queryDeviceInfo(*device, CL_DEVICE_PROFILE)},
+      {"CL_DRIVER_VERSION", queryDeviceInfo(*device, CL_DRIVER_VERSION)},
+      {"CL_DEVICE_VENDOR", queryDeviceInfo(*device, CL_DEVICE_VENDOR)},
+      {"CL_DEVICE_VERSION", queryDeviceInfo(*device, CL_DEVICE_VERSION)},
+      {"CL_DEVICE_EXTENSIONS", queryDeviceInfo(*device, CL_DEVICE_EXTENSIONS)},
+  };
+}
+void ClDevice::loadModule(const std::string &name, const std::string &image) {
+  TRACE();
+  store.loadModule(name, image);
+}
 uintptr_t ClDevice::malloc(size_t size, Access access) {
+  TRACE();
   context.touch();
   cl_mem_flags flags = {};
   switch (access) {
@@ -131,20 +187,30 @@ uintptr_t ClDevice::malloc(size_t size, Access access) {
   return id;
 }
 void ClDevice::free(uintptr_t ptr) {
+  TRACE();
   context.touch();
   CHECKED(clReleaseMemObject(queryMemObject(ptr)));
 }
 std::unique_ptr<DeviceQueue> ClDevice::createQueue() {
+  TRACE();
   return std::make_unique<ClDeviceQueue>(store, OUT_CHECKED(clCreateCommandQueue(*context, *device, 0, OUT_ERR)),
                                          [this](auto &&ptr) { return queryMemObject(ptr); });
 }
+ClDevice::~ClDevice() { TRACE(); }
 
 // ---
 
 ClDeviceQueue::ClDeviceQueue(decltype(store) store, decltype(queue) queue, decltype(queryMemObject) queryMemObject)
-    : queue(queue), store(store), queryMemObject(queryMemObject) {}
-ClDeviceQueue::~ClDeviceQueue() { CHECKED(clReleaseCommandQueue(queue)); }
+    : store(store), queue(queue), queryMemObject(std::move(queryMemObject)) {
+  TRACE();
+}
+ClDeviceQueue::~ClDeviceQueue() {
+  TRACE();
+  CHECKED(clReleaseCommandQueue(queue));
+}
 void ClDeviceQueue::enqueueCallback(const MaybeCallback &cb, cl_event event) {
+  TRACE();
+  TRACE();
   if (!cb) return;
   CHECKED(clSetEventCallback(
       event, CL_COMPLETE,
@@ -156,11 +222,13 @@ void ClDeviceQueue::enqueueCallback(const MaybeCallback &cb, cl_event event) {
   CHECKED(clFlush(queue));
 }
 void ClDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
+  TRACE();
   cl_event event = {};
   CHECKED(clEnqueueWriteBuffer(queue, queryMemObject(dst), CL_FALSE, 0, size, src, 0, nullptr, &event));
   enqueueCallback(cb, event);
 }
 void ClDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) {
+  TRACE();
   cl_event event = {};
   CHECKED(clEnqueueReadBuffer(queue, queryMemObject(src), CL_FALSE, 0, size, dst, 0, nullptr, &event));
   enqueueCallback(cb, event);
@@ -168,6 +236,7 @@ void ClDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t si
 void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
                                        const std::vector<TypedPointer> &args, TypedPointer rtn, const Policy &policy,
                                        const MaybeCallback &cb) {
+  TRACE();
   if (rtn.first != Type::Void) throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported");
   auto kernel = store.resolveFunction(moduleName, symbol);
   auto toSize = [](Type t) -> size_t {
@@ -196,6 +265,7 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
   auto global = policy.global;
   auto local = policy.local.value_or(Dim3{});
 
+  TRACE();
   cl_event event = {};
   CHECKED(clEnqueueNDRangeKernel(queue, kernel,         //
                                  3,                     //

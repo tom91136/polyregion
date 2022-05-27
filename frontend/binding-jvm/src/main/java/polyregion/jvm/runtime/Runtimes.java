@@ -22,21 +22,31 @@ public final class Runtimes {
   public static native Runtime Dynamic();
 
   static final byte //
-      TYPE_BOOL = 1,
-      TYPE_BYTE = 2,
-      TYPE_CHAR = 3,
-      TYPE_SHORT = 4,
-      TYPE_INT = 5,
-      TYPE_LONG = 6,
-      TYPE_FLOAT = 7,
-      TYPE_DOUBLE = 8,
-      TYPE_PTR = 9,
-      TYPE_VOID = 10;
+      TYPE_VOID = 1,
+      TYPE_BOOL = 2,
+      TYPE_BYTE = 3,
+      TYPE_CHAR = 4,
+      TYPE_SHORT = 5,
+      TYPE_INT = 6,
+      TYPE_LONG = 7,
+      TYPE_FLOAT = 8,
+      TYPE_DOUBLE = 9,
+      TYPE_PTR = 10;
   static final byte ACCESS_RW = 1, ACCESS_R0 = 2, ACCESS_WO = 3;
 
-  static native void deletePeer(long nativePeer);
+  static native void deleteAllPeer();
+
+  static native void deleteDevicePeer(long nativePeer);
+
+  static native void deleteQueuePeer(long nativePeer);
+
+  static native void deleteRuntimePeer(long nativePeer);
+
+  static native Property[] runtimeProperties(long nativePeer);
 
   static native Device[] devices0(long nativePeer);
+
+  static native Property[] deviceProperties(long nativePeer);
 
   static native void loadModule0(long nativePeer, String name, byte[] image);
 
@@ -57,9 +67,9 @@ public final class Runtimes {
       String moduleName,
       String symbol,
       byte[] argTys,
-      ByteBuffer[] argBuffers,
+      long[] argPtrs,
       byte rtnTy,
-      ByteBuffer rtnBuffer,
+      long rtnPtr,
       Policy policy,
       Runnable cb);
 
@@ -73,14 +83,16 @@ public final class Runtimes {
   }
 
   public static void load() {
+
     if (!loaded.getAndSet(true)) {
       Loader.loadDirect(
           Paths.get(
               //
-              "/home/tom/polyregion/native/cmake-build-debug-clang/bindings/libjava-runtime.so"
+              "/home/tom/polyregion/native/cmake-build-release-clang/bindings/jvm/libpolyregion-runtime-jvm.so"
               // "/home/tom/polyregion/native/cmake-build-release-clang/bindings/libjava-runtime.so"
               ),
           RESOURCE_DIR);
+      java.lang.Runtime.getRuntime().addShutdownHook(new Thread(Runtimes::deleteAllPeer));
     }
   }
 }

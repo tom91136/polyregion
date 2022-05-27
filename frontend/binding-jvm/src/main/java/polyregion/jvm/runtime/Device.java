@@ -5,9 +5,9 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
-public final class Device {
+public final class Device implements AutoCloseable {
 
-  public static class Queue {
+  public static class Queue implements AutoCloseable {
 
     final long nativePeer;
 
@@ -26,39 +26,46 @@ public final class Device {
     public void enqueueInvokeAsync(
         String moduleName, String symbol, List<Arg> args, Arg rtn, Policy policy, Runnable cb) {
       byte[] argTys = new byte[args.size()];
-      ByteBuffer[] argBuffers = new ByteBuffer[args.size()];
+      long[] argPtrs = new long[args.size()];
       for (int i = 0; i < args.size(); i++) {
         argTys[i] = args.get(i).type.value;
-        argBuffers[i] = args.get(i).data;
+        argPtrs[i] = args.get(i).data;
       }
       Runtimes.enqueueInvokeAsync0(
-          nativePeer, moduleName, symbol, argTys, argBuffers, rtn.type.value, rtn.data, policy, cb);
+          nativePeer, moduleName, symbol, argTys, argPtrs, rtn.type.value, rtn.data, policy, cb);
     }
 
-    void enqueueInvokeAsync(
+    public void enqueueInvokeAsync(
         String moduleName,
         String symbol,
         byte[] argTys,
-        ByteBuffer[] argBuffers,
+        long[] argPtrs,
         byte rtnTy,
-        ByteBuffer rtnBuffer,
+        long rtnPtr,
         Policy policy,
         Runnable cb) {
       Runtimes.enqueueInvokeAsync0(
-          nativePeer, moduleName, symbol, argTys, argBuffers, rtnTy, rtnBuffer, policy, cb);
+          nativePeer, moduleName, symbol, argTys, argPtrs, rtnTy, rtnPtr, policy, cb);
+    }
+
+    @Override
+    public void close() {
+      Runtimes.deleteQueuePeer(nativePeer);
     }
   }
 
   final long nativePeer;
   public final long id;
   public final String name;
-  public final Property[] properties;
 
-  Device(long nativePeer, long id, String name, Property[] properties) {
+  Device(long nativePeer, long id, String name) {
     this.nativePeer = nativePeer;
     this.id = id;
     this.name = Objects.requireNonNull(name);
-    this.properties = Objects.requireNonNull(properties);
+  }
+
+  public Property[] properties() {
+    return Runtimes.deviceProperties(nativePeer);
   }
 
   public Queue createQueue() {
@@ -78,15 +85,12 @@ public final class Device {
   }
 
   @Override
+  public void close() {
+    Runtimes.deleteDevicePeer(nativePeer);
+  }
+
+  @Override
   public String toString() {
-    return "Device{"
-        + "id="
-        + id
-        + ", name='"
-        + name
-        + '\''
-        + ", properties="
-        + Arrays.toString(properties)
-        + '}';
+    return "Device{" + "nativePeer=" + nativePeer + ", id=" + id + ", name='" + name + '\'' + '}';
   }
 }

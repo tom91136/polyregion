@@ -3,16 +3,18 @@ package polyregion.jvm.runtime;
 import java.util.Arrays;
 import java.util.Objects;
 
-public final class Runtime {
+public final class Runtime implements AutoCloseable {
 
   final long nativePeer;
   public final String name;
-  public final Property[] properties;
 
-  Runtime(long nativePeer, String name, Property[] properties) {
+  Runtime(long nativePeer, String name) {
     this.nativePeer = nativePeer;
     this.name = Objects.requireNonNull(name);
-    this.properties = Objects.requireNonNull(properties);
+  }
+
+  public Property[] properties() {
+    return Runtimes.runtimeProperties(nativePeer);
   }
 
   public Device[] devices() {
@@ -20,15 +22,12 @@ public final class Runtime {
   }
 
   @Override
+  public void close() {
+    Runtimes.deleteRuntimePeer(nativePeer);
+  }
+
+  @Override
   public String toString() {
-    return "Runtime{"
-        + "nativePeer="
-        + nativePeer
-        + ", name='"
-        + name
-        + '\''
-        + ", properties="
-        + Arrays.toString(properties)
-        + '}';
+    return "Runtime{" + "nativePeer=" + nativePeer + ", name='" + name + '\'' + '}';
   }
 }

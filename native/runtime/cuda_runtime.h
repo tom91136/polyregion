@@ -34,6 +34,7 @@ public:
   EXPORT uintptr_t malloc(size_t size, Access access) override;
   EXPORT void free(uintptr_t ptr) override;
   EXPORT std::unique_ptr<DeviceQueue> createQueue() override;
+  ~CudaDevice() override ;
 };
 
 class EXPORT CudaDeviceQueue : public DeviceQueue {

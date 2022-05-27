@@ -1,6 +1,6 @@
 package polyregion.jni
 
-import java.lang.reflect.{Constructor, Method, Modifier}
+import java.lang.reflect.{Constructor, Field, Method, Modifier}
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import scala.collection.immutable.Set
@@ -74,7 +74,9 @@ object JniSourceMirror {
   private def reflectJniSource(
       knownClasses: Set[String],
       cls: Class[_],
-      predicate: Method => Boolean
+      fp: Field => Boolean,
+      cp: Constructor[_] => Boolean,
+      mp: Method => Boolean
   ): (String, String) = {
 
     val publicFields =
@@ -83,6 +85,7 @@ object JniSourceMirror {
           val mod = m.getModifiers
           Modifier.isPrivate(mod) || Modifier.isProtected(mod) || Modifier.isNative(mod) || m.isSynthetic
         }
+        .filter(fp)
         .map(f => f.getName -> f.getType)
         .toList
 
@@ -92,13 +95,16 @@ object JniSourceMirror {
         Modifier.isPrivate(mod) || Modifier.isProtected(mod) || Modifier.isNative(mod) || m.isSynthetic
       }
       .filterNot(m => ObjectClassMethodsSignatures.contains(signature(m)))
-      .filter(predicate)
+      .filter(mp)
       .toList
 
-    val ctors = cls.getDeclaredConstructors.filter { m =>
-      //        val mod = m.getModifiers
-      !m.isSynthetic
-    }.toList
+    val ctors = cls.getDeclaredConstructors
+      .filter { m =>
+        //        val mod = m.getModifiers
+        !m.isSynthetic
+      }
+      .filter(cp)
+      .toList
 
     publicFields.map { case (name, tpe) =>
       s"""static jfieldID $name = env->GetFieldID(clazz, "$name", "${descriptor(tpe)}");"""
@@ -114,7 +120,7 @@ object JniSourceMirror {
         ::: publicMethods.map(f => s"jmethodID" -> s"${descriptorSafe(f)}Method")
 
     val metaStructMemberInits =
-      ("clazz", s"""env->FindClass("$jniName")""", cls.getName)
+      ("clazz", s"""reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("$jniName")))""", cls.getName)
         :: publicFields.map { case (name, tpe) =>
           (s"${name}Field", s"""env->GetFieldID(clazz, "$name", "${descriptor(tpe)}")""", tpe.getName)
         }
@@ -140,11 +146,14 @@ object JniSourceMirror {
             "JNIEnv *env" :: m.getParameters
               .map(p => s"${jniTypeName(p.getType)} ${p.getName}")
               .toList
+
+          val implArgAps = ("clazz" :: s"${descriptorSafe(m)}Method" ::  m.getParameters.map(_.getName).toList).mkString(", ")
+
           val proto  = s"${jniTypeName(m.getReturnType)} $name(${args.mkString(", ")}) const;"
           val rtnMod = jniTypedFunctionName(m.getReturnType)
           val rtn    = if (isVoid(m.getReturnType)) "" else "return "
           val impl =
-            s"${jniTypeName(m.getReturnType)} $clsName::$name(${args.mkString(", ")}) const { ${rtn}env->CallStatic${rtnMod}Method(clazz, ${descriptorSafe(m)}Method); }"
+            s"${jniTypeName(m.getReturnType)} $clsName::$name(${args.mkString(", ")}) const { ${rtn}env->CallStatic${rtnMod}Method($implArgAps); }"
           proto -> impl
         }
         .unzip
@@ -241,8 +250,13 @@ object JniSourceMirror {
          |    ${(instStructFieldGetterFns ++ instStructMethodFns).mkString("\n    ")}
          |  };
          |${metaStructMembers.map((t, n) => s"  $t $n;").mkString("\n")}
+		 |private:
          |  explicit $clsName(JNIEnv *env);
-		 |  Instance wrap (JNIEnv *env, jobject instance);
+		 |  static std::unique_ptr<$clsName> cached;
+		 |public:
+         |  static $clsName& of(JNIEnv *env);
+         |  static void drop(JNIEnv *env);
+         |  Instance wrap (JNIEnv *env, jobject instance);
          |  ${(metaStructStaticMethodFns ++ instStructCtorFactoryFns).mkString("\n  ")}
          |};""".stripMargin
 
@@ -252,7 +266,18 @@ object JniSourceMirror {
          |$clsName::$clsName(JNIEnv *env)
          |    : ${metaStructMemberInits
         .map { case (m, v, comment) => s"$m($v)" }
-        .mkString(s",\n      ")} {};
+        .mkString(s",\n      ")} { };
+		 |std::unique_ptr<$clsName> $clsName::cached = {};
+		 |$clsName& $clsName::of(JNIEnv *env) {
+         |  if(!cached) cached = std::unique_ptr<$clsName>(new $clsName(env));
+		 |  return *cached;
+         |}
+		 |void $clsName::drop(JNIEnv *env){
+		 |  if(cached) {
+		 |    env->DeleteGlobalRef(cached->clazz);
+		 |    cached.reset();
+		 |  }
+		 |}
 		 |$clsName::Instance $clsName::wrap(JNIEnv *env, jobject instance) { return {*this, instance}; }
          |${(metaStructStaticMethodFnImpls ++ instStructCtorFactoryFnImpls).mkString("\n")}
          |""".stripMargin
@@ -266,30 +291,37 @@ object JniSourceMirror {
 
     println("Generating C++ mirror for JNI...")
 
-    val pending: List[(Class[_], Method => Boolean)] =
+    val pending: List[(Class[_], Field => Boolean, Constructor[_] => Boolean, Method => Boolean)] =
       List(
-        (classOf[java.nio.ByteBuffer], m => Set("allocate", "allocateDirect").contains(m.getName)),
-        (classOf[polyregion.jvm.runtime.Property], _ => true),
-        (classOf[polyregion.jvm.runtime.Dim3], _ => true),
-        (classOf[polyregion.jvm.runtime.Policy], _ => true),
-        (classOf[polyregion.jvm.runtime.Device.Queue], _ => true),
-        (classOf[polyregion.jvm.runtime.Device], _ => true),
-        (classOf[polyregion.jvm.runtime.Runtime], _ => true),
-        (classOf[polyregion.jvm.compiler.Event], _ => true),
-        (classOf[polyregion.jvm.compiler.Layout], _ => true),
-        (classOf[polyregion.jvm.compiler.Member], _ => true),
-        (classOf[polyregion.jvm.compiler.Options], _ => true),
-        (classOf[polyregion.jvm.compiler.Compilation], _ => true),
-        (classOf[java.lang.Runnable], _ => true)
+        (
+          classOf[java.nio.ByteBuffer],
+          _ => false,
+          _ => false,
+          m => Set("allocate", "allocateDirect").contains(m.getName)
+        ),
+        (classOf[polyregion.jvm.runtime.Property], _ => true, _ => true, _ => true),
+        (classOf[polyregion.jvm.runtime.Dim3], _ => true, _ => true, _ => true),
+        (classOf[polyregion.jvm.runtime.Policy], _ => true, _ => true, _ => true),
+        (classOf[polyregion.jvm.runtime.Device.Queue], _ => true, _ => true, _ => true),
+        (classOf[polyregion.jvm.runtime.Device], _ => true, _ => true, _ => true),
+        (classOf[polyregion.jvm.runtime.Runtime], _ => true, _ => true, _ => true),
+        (classOf[polyregion.jvm.compiler.Event], _ => true, _ => true, _ => true),
+        (classOf[polyregion.jvm.compiler.Layout], _ => true, _ => true, _ => true),
+        (classOf[polyregion.jvm.compiler.Member], _ => true, _ => true, _ => true),
+        (classOf[polyregion.jvm.compiler.Options], _ => true, _ => true, _ => true),
+        (classOf[polyregion.jvm.compiler.Compilation], _ => true, _ => true, _ => true),
+        (classOf[java.lang.String], _ => false, _ => false, _ => false),
+        (classOf[java.lang.Runnable], _ => true, _ => true, _ => true)
       )
 
     val knownClasses: Set[String] = pending.map(_._1.getName).toSet
 
-    val (headers, impls) = pending.map(reflectJniSource(knownClasses, _, _)).unzip
+    val (headers, impls) = pending.map(reflectJniSource(knownClasses, _, _, _, _)).unzip
 
     val header =
       s"""#include <jni.h>
 		 |#include <optional>
+		 |#include <memory>
 		 |namespace polyregion::generated {
 	     |${headers.mkString("\n")}
          |}// polyregion::generated""".stripMargin

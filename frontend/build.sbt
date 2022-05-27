@@ -135,7 +135,7 @@ lazy val `compiler-testsuite-java` = project
   )
   .dependsOn(compiler)
 
-lazy val mainCls = Some("polyregion.examples.Stage")
+lazy val mainCls = Some("polyregion.examples.CheckApi")
 
 lazy val `examples-scala` = project
   .settings(

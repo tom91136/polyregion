@@ -6,12 +6,6 @@
 #include <string>
 #include <type_traits>
 
-static constexpr const char *StringArraySignature = "[Ljava/lang/String;";
-static constexpr const char *StringSignature = "Ljava/lang/String;";
-static constexpr const char *LongSignature = "J";
-static constexpr const char *ByteSignature = "B";
-static constexpr const char *ByteArraySignature = "[B";
-
 static JNIEnv *getEnv(JavaVM *vm) {
   JNIEnv *env{};
   if (vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_1) != JNI_OK) {
@@ -22,11 +16,10 @@ static JNIEnv *getEnv(JavaVM *vm) {
 
 static jstring toJni(JNIEnv *env, const std::string &s) { return env->NewStringUTF(s.c_str()); }
 
-
-template <typename T, typename F>
-static jobjectArray toJni(JNIEnv *env, const std::vector<T> &xs, jclass clazz, const F && f) {
+template <typename C, typename F> static jobjectArray toJni(JNIEnv *env, C &xs, jclass clazz, F &&f) {
+  // XXX xs is non-const because it may hold things that we std::move from
   auto ys = env->NewObjectArray(jsize(xs.size()), clazz, nullptr);
-  for (size_t i = 0; i < xs.size(); ++i)
+  for (jsize i = 0; i < jsize(xs.size()); ++i)
     env->SetObjectArrayElement(ys, i, f(xs[i]));
   return ys;
 }
@@ -37,7 +30,7 @@ static std::string fromJni(JNIEnv *env, const jstring &s) {
   env->ReleaseStringUTFChars(s, data);
   return out;
 }
- template <typename  T, typename = typename  std::enable_if<std::is_convertible_v<T, char>> >
+template <typename T, typename = typename std::enable_if<std::is_convertible_v<T, char>>>
 static std::vector<T> fromJni(JNIEnv *env, jbyteArray xs) {
   auto xsData = env->GetByteArrayElements(xs, nullptr);
   auto bytes = std::vector<T>(xsData, xsData + env->GetArrayLength(xs));
@@ -45,14 +38,29 @@ static std::vector<T> fromJni(JNIEnv *env, jbyteArray xs) {
   return bytes;
 }
 
-[[noreturn]] static void throwGeneric(const std::string &exceptionClass, JNIEnv *env, const std::string &message) {
+static std::vector<jlong> fromJni(JNIEnv *env, jlongArray xs) {
+  std::vector<jlong> ys(env->GetArrayLength(xs));
+  env->GetLongArrayRegion(xs, 0, jsize(ys.size()), ys.data());
+  return ys;
+}
+
+template <typename T = std::nullptr_t>
+static T throwGeneric(JNIEnv *env, const std::string &exceptionClass, const std::string &message) {
   if (auto exClass = env->FindClass(exceptionClass.c_str()); exClass) {
     if (env->ThrowNew(exClass, message.c_str()) != JNI_OK) {
       throw std::logic_error("Cannot throw exception of class " + exceptionClass + ", message was: " + message);
     } else {
-      // no return, control transferred back to JVM
+      return T();
     }
   } else {
     throw std::logic_error("Cannot throw exception of unknown class " + exceptionClass + ", message was: " + message);
+  }
+}
+
+template <typename F> static auto wrapException(JNIEnv *env, const std::string &exceptionClass, F &&f) {
+  try {
+    return f();
+  } catch (const std::exception &e) {
+    return throwGeneric<std::invoke_result_t<F>>(env, exceptionClass, e.what());
   }
 }

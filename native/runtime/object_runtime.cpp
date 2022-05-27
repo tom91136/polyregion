@@ -54,33 +54,54 @@ static void invoke(uint64_t symbolAddress, const std::vector<TypedPointer> &args
   }
 }
 
-int64_t ObjectDevice::id() { return 0; }
-std::vector<Property> ObjectDevice::properties() { return {}; }
-uintptr_t ObjectDevice::malloc(size_t size, Access access) { return reinterpret_cast<uintptr_t>(std::malloc(size)); }
-void ObjectDevice::free(uintptr_t ptr) { std::free(reinterpret_cast<void *>(ptr)); }
+int64_t ObjectDevice::id() {
+  TRACE();
+  return 0;
+}
+std::vector<Property> ObjectDevice::properties() {
+  TRACE();
+  return {};
+}
+uintptr_t ObjectDevice::malloc(size_t size, Access access) {
+  TRACE();
+  return reinterpret_cast<uintptr_t>(std::malloc(size));
+}
+void ObjectDevice::free(uintptr_t ptr) {
+  TRACE();
+  std::free(reinterpret_cast<void *>(ptr));
+}
 
 // ---
 
 void ObjectDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
+  TRACE();
   std::memcpy(reinterpret_cast<void *>(dst), src, size);
   if (cb) (*cb)(); // no-op for CPUs
 }
 void ObjectDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) {
+  TRACE();
   std::memcpy(dst, reinterpret_cast<void *>(src), size);
   if (cb) (*cb)(); // no-op for CPUs
 }
 
-RelocatableRuntime::RelocatableRuntime() = default;
-std::string RelocatableRuntime::name() { return "CPU (RelocatableObject)"; }
-std::vector<Property> RelocatableRuntime::properties() { return {}; }
+RelocatableRuntime::RelocatableRuntime() { TRACE(); };
+std::string RelocatableRuntime::name() {
+  TRACE();
+  return "CPU (RelocatableObject)";
+}
+std::vector<Property> RelocatableRuntime::properties() {
+  TRACE();
+  return {};
+}
 std::vector<std::unique_ptr<Device>> RelocatableRuntime::enumerate() {
+  TRACE();
   std::vector<std::unique_ptr<Device>> xs(1);
   xs[0] = std::make_unique<RelocatableDevice>();
   return xs;
 }
 
 static constexpr const char *RELOBJ_ERROR_PREFIX = "[RelocatableObject error] ";
-RelocatableDevice::RelocatableDevice() : llvm::SectionMemoryManager(nullptr), ld(*this, *this) {}
+RelocatableDevice::RelocatableDevice() : llvm::SectionMemoryManager(nullptr), ld(*this, *this) { TRACE(); }
 uint64_t RelocatableDevice::getSymbolAddress(const std::string &Name) {
   auto self = this;
   thread_local static std::function<void *(size_t)> threadLocalMallocFn = [&self](size_t size) {
@@ -88,8 +109,12 @@ uint64_t RelocatableDevice::getSymbolAddress(const std::string &Name) {
   };
   return Name == "malloc" ? (uint64_t)&threadLocalMallocFn : llvm::RTDyldMemoryManager::getSymbolAddress(Name);
 }
-std::string RelocatableDevice::name() { return "RelocatableObjectDevice(llvm::RuntimeDyld)"; }
+std::string RelocatableDevice::name() {
+  TRACE();
+  return "RelocatableObjectDevice(llvm::RuntimeDyld)";
+}
 void RelocatableDevice::loadModule(const std::string &name, const std::string &image) {
+  TRACE();
   if (auto it = objects.find(name); it != objects.end()) {
     throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Module named " + name + " was already loaded");
   } else {
@@ -102,6 +127,7 @@ void RelocatableDevice::loadModule(const std::string &name, const std::string &i
   }
 }
 std::unique_ptr<DeviceQueue> RelocatableDevice::createQueue() {
+  TRACE();
   return std::make_unique<RelocatableDeviceQueue>(objects, ld);
 }
 
@@ -109,6 +135,7 @@ RelocatableDeviceQueue::RelocatableDeviceQueue(decltype(objects) objects, declty
 void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
                                                 const std::vector<TypedPointer> &args, TypedPointer rtn,
                                                 const Policy &policy, const MaybeCallback &cb) {
+  TRACE();
   auto moduleIt = objects.find(moduleName);
   if (moduleIt == objects.end())
     throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "No module named " + moduleName + " was loaded");
@@ -135,10 +162,17 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
 }
 
 static constexpr const char *SHOBJ_ERROR_PREFIX = "[RelocatableObject error] ";
-SharedRuntime::SharedRuntime() = default;
-std::string SharedRuntime::name() { return "CPU (SharedObjectR)"; }
-std::vector<Property> SharedRuntime::properties() { return {}; }
+SharedRuntime::SharedRuntime() { TRACE(); };
+std::string SharedRuntime::name() {
+  TRACE();
+  return "CPU (SharedObjectR)";
+}
+std::vector<Property> SharedRuntime::properties() {
+  TRACE();
+  return {};
+}
 std::vector<std::unique_ptr<Device>> SharedRuntime::enumerate() {
+  TRACE();
   std::vector<std::unique_ptr<Device>> xs(1);
   xs[0] = std::make_unique<RelocatableDevice>();
   return xs;
@@ -161,6 +195,7 @@ std::vector<std::unique_ptr<Device>> SharedRuntime::enumerate() {
   #define dynamic_library_find(lib, symbol) dlsym(lib, symbol)
 #endif
 SharedDevice::~SharedDevice() {
+  TRACE();
   for (auto &[_, m] : modules) {
     auto &[path, handle, symbols] = m;
     if (auto code = dynamic_library_close(handle); code != 0) {
@@ -168,8 +203,12 @@ SharedDevice::~SharedDevice() {
     }
   }
 }
-std::string SharedDevice::name() { return "SharedObjectDevice(dlopen/dlsym)"; }
+std::string SharedDevice::name() {
+  TRACE();
+  return "SharedObjectDevice(dlopen/dlsym)";
+}
 void SharedDevice::loadModule(const std::string &name, const std::string &image) {
+  TRACE();
   if (auto it = modules.find(name); it != modules.end()) {
     throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) + "Module named " + name + " was already loaded");
   } else {
@@ -180,12 +219,16 @@ void SharedDevice::loadModule(const std::string &name, const std::string &image)
       modules.emplace_hint(it, name, LoadedModule{image, dylib, {}});
   }
 }
-std::unique_ptr<DeviceQueue> SharedDevice::createQueue() { return std::make_unique<SharedDeviceQueue>(modules); }
+std::unique_ptr<DeviceQueue> SharedDevice::createQueue() {
+  TRACE();
+  return std::make_unique<SharedDeviceQueue>(modules);
+}
 
-SharedDeviceQueue::SharedDeviceQueue(decltype(modules) modules) : modules(modules) {}
+SharedDeviceQueue::SharedDeviceQueue(decltype(modules) modules) : modules(modules) { TRACE(); }
 void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
                                            const std::vector<TypedPointer> &args, TypedPointer rtn,
                                            const Policy &policy, const MaybeCallback &cb) {
+  TRACE();
   auto moduleIt = modules.find(moduleName);
   if (moduleIt == modules.end())
     throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) + "No module named " + moduleName + " was loaded");

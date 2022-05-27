@@ -6,8 +6,8 @@
 namespace polyregion::runtime {
 
 enum class EXPORT Type : uint8_t {
-  Void = 0,
-  Bool8 = 1,
+  Void = 1,
+  Bool8 ,
   Byte8,
   CharU16,
   Short16,

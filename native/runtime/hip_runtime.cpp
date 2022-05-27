@@ -7,22 +7,30 @@ using namespace polyregion::runtime::hip;
 
 static constexpr const char *ERROR_PREFIX = "[HIP error] ";
 
-static void checked(hipError_t result, const std::string &file, int line) {
+static void checked(hipError_t result, const char *file, int line) {
   if (result != hipSuccess) {
-    throw std::logic_error(std::string(ERROR_PREFIX + file + ":" + std::to_string(line) + ": ") +
+    throw std::logic_error(std::string(ERROR_PREFIX) + file + ":" + std::to_string(line) + ": " +
                            hipewErrorString(result));
   }
 }
 
 HipRuntime::HipRuntime() {
+  TRACE();
   if (hipewInit(HIPEW_INIT_HIP) != HIPEW_SUCCESS) {
     throw std::logic_error("HIPEW initialisation failed, no HIP driver present?");
   }
   CHECKED(hipInit(0));
 }
-std::string HipRuntime::name() { return "HIP"; }
-std::vector<Property> HipRuntime::properties() { return {}; }
+std::string HipRuntime::name() {
+  TRACE();
+  return "HIP";
+}
+std::vector<Property> HipRuntime::properties() {
+  TRACE();
+  return {};
+}
 std::vector<std::unique_ptr<Device>> HipRuntime::enumerate() {
+  TRACE();
   int count = 0;
   CHECKED(hipGetDeviceCount(&count));
   std::vector<std::unique_ptr<Device>> devices(count);
@@ -36,39 +44,64 @@ std::vector<std::unique_ptr<Device>> HipRuntime::enumerate() {
 HipDevice::HipDevice(int ordinal)
     : context(
           [this]() {
+            TRACE();
             hipCtx_t c;
             CHECKED(hipDevicePrimaryCtxRetain(&c, device));
             CHECKED(hipCtxPushCurrent(c));
             return c;
           },
           [this](auto) {
+            TRACE();
             if (device) CHECKED(hipDevicePrimaryCtxRelease(device));
           }),
       store(
           ERROR_PREFIX,
           [this](auto &&s) {
+            TRACE();
             hipModule_t module;
             context.touch();
             CHECKED(hipModuleLoadData(&module, s.data()));
             return module;
           },
           [this](auto &&m, auto &&name) {
+            TRACE();
             hipFunction_t fn;
             context.touch();
             CHECKED(hipModuleGetFunction(&fn, m, name.c_str()));
             return fn;
           },
-          [](auto &&m) { CHECKED(hipModuleUnload(m)); }, [](auto &&f) {}) {
+          [&](auto &&m) {
+            TRACE();
+            CHECKED(hipModuleUnload(m));
+          },
+          [&](auto &&f) { TRACE(); }) {
+  TRACE();
   CHECKED(hipDeviceGet(&device, ordinal));
   deviceName = detail::allocateAndTruncate(
       [&](auto &&data, auto &&length) { CHECKED(hipDeviceGetName(data, static_cast<int>(length), device)); });
 }
-HipDevice::~HipDevice() { CHECKED(hipDevicePrimaryCtxRelease(device)); }
-int64_t HipDevice::id() { return device; }
-std::string HipDevice::name() { return deviceName; }
-std::vector<Property> HipDevice::properties() { return {}; }
-void HipDevice::loadModule(const std::string &name, const std::string &image) { store.loadModule(name, image); }
+HipDevice::~HipDevice() {
+  TRACE();
+  CHECKED(hipDevicePrimaryCtxRelease(device));
+}
+int64_t HipDevice::id() {
+  TRACE();
+  return device;
+}
+std::string HipDevice::name() {
+  TRACE();
+  return deviceName;
+}
+std::vector<Property> HipDevice::properties() {
+  TRACE();
+  return {};
+}
+void HipDevice::loadModule(const std::string &name, const std::string &image) {
+  TRACE();
+  store.loadModule(name, image);
+}
 uintptr_t HipDevice::malloc(size_t size, Access access) {
+  TRACE();
   context.touch();
   if (size == 0) throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot malloc size of 0");
   hipDeviceptr_t ptr = {};
@@ -76,16 +109,27 @@ uintptr_t HipDevice::malloc(size_t size, Access access) {
   return ptr;
 }
 void HipDevice::free(uintptr_t ptr) {
+  TRACE();
   context.touch();
   CHECKED(hipFree(ptr));
 }
-std::unique_ptr<DeviceQueue> HipDevice::createQueue() { return std::make_unique<HipDeviceQueue>(store); }
+std::unique_ptr<DeviceQueue> HipDevice::createQueue() {
+  TRACE();
+  return std::make_unique<HipDeviceQueue>(store);
+}
 
 // ---
 
-HipDeviceQueue::HipDeviceQueue(decltype(store) store) : store(store) { CHECKED(hipStreamCreate(&stream)); }
-HipDeviceQueue::~HipDeviceQueue() { CHECKED(hipStreamDestroy(stream)); }
+HipDeviceQueue::HipDeviceQueue(decltype(store) store) : store(store) {
+  TRACE();
+  CHECKED(hipStreamCreate(&stream));
+}
+HipDeviceQueue::~HipDeviceQueue() {
+  TRACE();
+  CHECKED(hipStreamDestroy(stream));
+}
 void HipDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
+  TRACE();
   if (!cb) return;
   CHECKED(hipStreamAddCallback(
       stream,
@@ -96,16 +140,19 @@ void HipDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
       detail::CountedCallbackHandler::createHandle(*cb), 0));
 }
 void HipDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
+  TRACE();
   CHECKED(hipMemcpyHtoDAsync(dst, src, size, stream));
   enqueueCallback(cb);
 }
 void HipDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) {
+  TRACE();
   CHECKED(hipMemcpyDtoHAsync(dst, src, size, stream));
   enqueueCallback(cb);
 }
 void HipDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
                                         const std::vector<TypedPointer> &args, TypedPointer rtn, const Policy &policy,
                                         const MaybeCallback &cb) {
+  TRACE();
   if (rtn.first != Type::Void) throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported");
   auto fn = store.resolveFunction(moduleName, symbol);
   auto ptrs = detail::pointers(args);

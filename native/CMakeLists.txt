@@ -10,6 +10,8 @@ set(LINKER "" CACHE INTERNAL "Path to custom linker")
 set(POLYREGION_SHARED_LIB OFF CACHE BOOL "")
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+set(JAVA_HOME /usr/lib/jvm/java-1.8.0-openjdk-amd64)
+
 ProcessorCount(NPROC)
 
 if (LINKER)
@@ -17,8 +19,8 @@ if (LINKER)
 endif ()
 
 # FIXME adjust for CUDA stuff for now
-#set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan)
-set(COMMON_DEBUG_OPTIONS  )
+set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan -O1)
+#set(COMMON_DEBUG_OPTIONS  )
 
 set(COMMON_COMPILE_OPTIONS
         -ffunction-sections       # keep functions in its own section for better --gc-sections results
@@ -55,6 +57,7 @@ else ()
             ${COMMON_COMPILE_OPTIONS}
             -fvisibility=hidden       # don't export anything by default
             -fvisibility-inlines-hidden
+            -g3
             )
 
     set(COMMON_LINKER_OPTIONS
@@ -66,7 +69,7 @@ else ()
             LINKER:--no-undefined
             LINKER:--exclude-libs=ALL # ld/lld exports all object symbols by default, don't do that
             LINKER:--gc-sections      # remove unused sections
-            LINKER:--strip-all        # strip symbols not used for DSO
+#            LINKER:--strip-all        # strip symbols not used for DSO
             LINKER:-O3                # O3 for linker means optimise for space
             )
 endif ()
