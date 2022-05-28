@@ -34,6 +34,21 @@ static constexpr size_t byteOfType(Type t) {
   }
 }
 
+static constexpr const char * typeName(Type t) {
+  switch (t) {
+    case Type::Void: return "Void";
+    case Type::Bool8: return "Bool8";
+    case Type::Byte8: return "Byte8";
+    case Type::CharU16: return "Char";
+    case Type::Short16: return "Short16";
+    case Type::Int32: return "Int32";
+    case Type::Long64: return "Long64";
+    case Type::Float32: return "Float32";
+    case Type::Double64: return "Double64";
+    case Type::Ptr:return "Ptr";
+  }
+}
+
 using TypedPointer = std::pair<Type, void *>;
 
 } // namespace polyregion::runtime

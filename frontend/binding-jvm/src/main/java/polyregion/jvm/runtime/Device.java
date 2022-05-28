@@ -17,7 +17,14 @@ public final class Device implements AutoCloseable {
     }
 
     public void enqueueHostToDeviceAsync(ByteBuffer src, long dst, int size, Runnable cb) {
-      Runtimes.enqueueHostToDeviceAsync0(nativePeer, src, dst, size, cb);
+      try {
+
+        Runtimes.enqueueHostToDeviceAsync0(nativePeer, src, dst, size,  cb);
+      }catch (Throwable t){
+
+        throw t;
+      }
+
     }
 
     public void enqueueDeviceToHostAsync(long src, ByteBuffer dst, int size, Runnable cb) {
@@ -56,7 +63,8 @@ public final class Device implements AutoCloseable {
         byte[] argData,
         Policy policy,
         Runnable cb) {
-      Runtimes.enqueueInvokeAsync0(nativePeer, moduleName, symbol, argTypes, argData, policy, cb);
+      Runtimes.enqueueInvokeAsync0(
+          nativePeer, moduleName, symbol, argTypes, argData, policy, cb);
     }
 
     @Override

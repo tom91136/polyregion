@@ -14,8 +14,9 @@
   #error Trace already defined
 #else
 
-  #define TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this, __PRETTY_FUNCTION__)
-//  #define TRACE()
+//  #define TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this,
+//  __PRETTY_FUNCTION__)
+  #define TRACE()
 
 #endif
 
@@ -23,11 +24,6 @@ namespace polyregion::runtime {
 
 using TypedPointer = std::pair<Type, void *>;
 
-struct Data;
-
-EXPORT void init();
-
-EXPORT void run();
 
 using Property = std::pair<std::string, std::string>;
 using Callback = std::function<void()>;
@@ -69,8 +65,6 @@ public:
   }
 };
 
-std::vector<void *> pointers(const std::vector<TypedPointer> &args);
-
 std::string allocateAndTruncate(const std::function<void(char *, size_t)> &f, size_t length = 512);
 
 class CountedCallbackHandler {
@@ -104,20 +98,17 @@ public:
         load(load), resolve(resolve), dropModule(dropModule), dropFunction(dropFunction) {}
 
   ~ModuleStore() {
-    printf("~ModuleStore\n");
     for (auto &[moduleName, loaded] : modules) {
       auto &[m, fns] = loaded;
-      for (auto &[fnName, fn] : fns) {
+      for (auto &[fnName, fn] : fns)
         dropFunction(fn);
-      }
-      printf("Drop module %s\n", moduleName.c_str());
       dropModule(m);
     }
   }
 
   void loadModule(const std::string &name, const std::string &image) {
     if (auto it = modules.find(name); it != modules.end()) {
-      throw std::logic_error(std::string(errorPrefix) + "Module named " + name + " was already loaded");
+      throw std::logic_error(std::string(errorPrefix) + "Module named `" + name + "` was already loaded");
     } else {
       modules.emplace_hint(it, name, LoadedModule{load(image), {}});
     }
@@ -126,7 +117,7 @@ public:
   F resolveFunction(const std::string &moduleName, const std::string &symbol) {
     auto moduleIt = modules.find(moduleName);
     if (moduleIt == modules.end())
-      throw std::logic_error(errorPrefix + "No module named " + moduleName + " was loaded");
+      throw std::logic_error(errorPrefix + "No module named `" + moduleName + "` was loaded");
     auto &[m, fnTable] = moduleIt->second;
     if (auto it = fnTable.find(symbol); it != fnTable.end()) return it->second;
     else {
@@ -139,6 +130,8 @@ public:
 };
 
 } // namespace detail
+
+EXPORT void init();
 
 struct EXPORT Dim3 {
   EXPORT size_t x = 1, y = 1, z = 1;

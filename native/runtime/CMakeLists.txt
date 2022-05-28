@@ -30,7 +30,6 @@ set(LLVM_LIBS
         LLVMExecutionEngine
         LLVMRuntimeDyld
         LLVMObject
-        LLVMMC
         LLVMCore
         LLVMBinaryFormat
         LLVMSupport
@@ -41,8 +40,8 @@ message(STATUS "[runtime] Adding LLVM libs = ${LLVM_LIBS}")
 target_link_libraries(runtime-lib PRIVATE
         ${LLVM_LIBS}
         libffi.a
-        pthread
-        dl
+#        pthread
+#        dl
         )
 
 target_link_libraries(runtime-drv PRIVATE runtime-lib)

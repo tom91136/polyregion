@@ -1,6 +1,7 @@
 #include <cassert>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -30,17 +31,17 @@ static_assert(polyregion::to_underlying(rt::Type::Float32) == polyregion_jvm_run
 static_assert(polyregion::to_underlying(rt::Type::Double64) == polyregion_jvm_runtime_Runtimes_TYPE_1DOUBLE);
 static_assert(polyregion::to_underlying(rt::Type::Ptr) == polyregion_jvm_runtime_Runtimes_TYPE_1PTR);
 
+static JavaVM *CurrentVM;
+
 [[maybe_unused]] jint JNI_OnLoad(JavaVM *vm, void *) {
-  fprintf(stderr, "JVM enter\n");
+  CurrentVM = vm;
   JNIEnv *env = getEnv(vm);
   if (!env) return JNI_ERR;
   rt::init();
-  fprintf(stderr, "JVM enter complete\n");
   return JNI_VERSION_1_1;
 }
 
 [[maybe_unused]] void JNI_OnUnload(JavaVM *vm, void *) {
-  fprintf(stderr, "JVM exit\n");
   JNIEnv *env = getEnv(vm);
   gen::Runtime::drop(env);
   gen::Property::drop(env);
@@ -52,31 +53,10 @@ static_assert(polyregion::to_underlying(rt::Type::Ptr) == polyregion_jvm_runtime
   gen::String::drop(env);
 }
 
-// struct NIOBuffer {
-//   jobject buffer;
-//   void *ptr;
-//   size_t sizeInBytes;
-//   NIOBuffer() = default;
-//   NIOBuffer(JNIEnv *env, jobject buffer)
-//       : buffer(buffer), ptr(env->GetDirectBufferAddress(buffer)), sizeInBytes(env->GetDirectBufferCapacity(buffer))
-//       {}
-// };
-
-// static jobject allocDirect(JNIEnv *env, jint bytes) {
-//   auto buffer = env->CallStaticObjectMethod(ByteBuffer, ByteBuffer_allocateDirect, bytes);
-//   if (env->ExceptionCheck()) {
-//     env->Throw(env->ExceptionOccurred());
-//   }
-//   if (!buffer) {
-//     throwGeneric(env, "JNI ByteBuffer allocation of " + std::to_string(bytes) + " bytes returned NULL");
-//     return nullptr;
-//   }
-//   return buffer;
-// }
-
 static std::atomic<jlong> peerCounter = 0;
 static std::unordered_map<jlong, std::shared_ptr<rt::Runtime>> Runtimes;
 static std::unordered_map<jlong, std::shared_ptr<rt::Device>> Devices;
+static std::unordered_map<jlong, std::vector<std::unique_ptr<std::string>>> DeviceModuleImages;
 static std::unordered_map<jlong, std::shared_ptr<rt::DeviceQueue>> DeviceQueues;
 static std::mutex lock;
 
@@ -106,6 +86,7 @@ static jobjectArray toJni(JNIEnv *env, const std::vector<rt::Property> &xs) {
   std::lock_guard l(lock);
   DeviceQueues.clear();
   Devices.clear();
+  DeviceModuleImages.clear();
   Runtimes.clear();
 }
 
@@ -120,6 +101,7 @@ static jobjectArray toJni(JNIEnv *env, const std::vector<rt::Property> &xs) {
 [[maybe_unused]] void Java_polyregion_jvm_runtime_Runtimes_deleteDevicePeer(JNIEnv *env, jclass, jlong nativePeer) {
   std::lock_guard l(lock);
   Devices.erase(nativePeer);
+  DeviceModuleImages.erase(nativePeer);
 }
 
 template <typename R> static jobject toJni(JNIEnv *env) {
@@ -165,9 +147,17 @@ template <typename R> static jobject toJni(JNIEnv *env) {
 
 [[maybe_unused]] void Java_polyregion_jvm_runtime_Runtimes_loadModule0(JNIEnv *env, jclass, jlong nativePeer,
                                                                        jstring name, jbyteArray image) {
-  std::string data(env->GetArrayLength(image), '\0');
-  env->GetByteArrayRegion(image, 0, env->GetArrayLength(image), reinterpret_cast<jbyte *>(data.data()));
-  wrapException(env, EX, [&]() { findRef(env, Devices, nativePeer)->loadModule(fromJni(env, name), data); });
+
+  wrapException(env, EX, [&]() {
+    auto dev = findRef(env, Devices, nativePeer);
+    // We need to hold on to our copied image here before passing it on, this is later destroyed with the device.
+    auto data = std::make_unique<std::string>(env->GetArrayLength(image), '\0');
+    env->GetByteArrayRegion(image, 0, env->GetArrayLength(image), reinterpret_cast<jbyte *>(data->data()));
+    std::lock_guard l(lock);
+    auto &&[it, _] = DeviceModuleImages.try_emplace(nativePeer, decltype(DeviceModuleImages)::mapped_type{});
+    it->second.push_back(std::move(data));
+    dev->loadModule(fromJni(env, name), *it->second.back());
+  });
 }
 
 [[maybe_unused]] jlong Java_polyregion_jvm_runtime_Runtimes_malloc0(JNIEnv *env, jclass, jlong nativePeer, jlong size,
@@ -191,8 +181,23 @@ template <typename R> static jobject toJni(JNIEnv *env) {
 }
 
 static rt::MaybeCallback fromJni(JNIEnv *env, jobject cb) {
-  return !cb ? std::nullopt : std::make_optional([&]() {
-    if (cb) gen::Runnable::of(env).wrap(env, cb).run(env);
+  return !cb ? std::nullopt : std::make_optional([cbRef = env->NewGlobalRef(cb)]() {
+    JNIEnv *attachedEnv{};
+    if (CurrentVM->AttachCurrentThread(reinterpret_cast<void **>(&attachedEnv), nullptr) != JNI_OK) {
+      // Can't attach here so just send the error to stderr.
+      fprintf(stderr, "Unable to attach thread <%zx> to JVM from a callback passed to enqueueInvokeAsync\n",
+              std::hash<std::thread::id>()(std::this_thread::get_id()));
+    }
+    if (!cbRef)
+      throwGeneric(attachedEnv, EX, "Unable to retrieve reference to the callback passed to enqueueInvokeAsync");
+    else {
+      gen::Runnable::of(attachedEnv).wrap(attachedEnv, cbRef).run(attachedEnv);
+      if (attachedEnv->ExceptionCheck()) attachedEnv->ExceptionClear();
+      attachedEnv->DeleteGlobalRef(cbRef);
+      gen::Runnable::drop(attachedEnv);
+    }
+
+    CurrentVM->DetachCurrentThread();
   });
 }
 
@@ -200,19 +205,21 @@ static rt::MaybeCallback fromJni(JNIEnv *env, jobject cb) {
                                                                                      jlong nativePeer,    //
                                                                                      jobject src, jlong dst, jint size,
                                                                                      jobject cb) {
+  auto srcPtr = env->GetDirectBufferAddress(src);
+  if (!srcPtr) throwGeneric(env, EX, "The source ByteBuffer is not backed by an direct allocation.");
+
   return wrapException(env, EX, [&]() {
-    findRef(env, DeviceQueues, nativePeer)
-        ->enqueueHostToDeviceAsync(env->GetDirectBufferAddress(src), dst, size, fromJni(env, cb));
+    findRef(env, DeviceQueues, nativePeer)->enqueueHostToDeviceAsync(srcPtr, dst, size, fromJni(env, cb));
   });
 }
 [[maybe_unused]] void Java_polyregion_jvm_runtime_Runtimes_enqueueDeviceToHostAsync0(JNIEnv *env, jclass, //
                                                                                      jlong nativePeer,    //
                                                                                      jlong src, jobject dst, jint size,
                                                                                      jobject cb) {
-
+  auto dstPtr = env->GetDirectBufferAddress(dst);
+  if (!dstPtr) throwGeneric(env, EX, "The destination ByteBuffer is not backed by an direct allocation.");
   return wrapException(env, EX, [&]() {
-    findRef(env, DeviceQueues, nativePeer)
-        ->enqueueDeviceToHostAsync(src, env->GetDirectBufferAddress(dst), size, fromJni(env, cb));
+    findRef(env, DeviceQueues, nativePeer)->enqueueDeviceToHostAsync(src, dstPtr, size, fromJni(env, cb));
   });
 }
 
@@ -226,37 +233,27 @@ static rt::Dim3 fromJni(JNIEnv *env, const generated::Dim3::Instance &d3) {
                                                                                jbyteArray argData,                    //
                                                                                jobject policy, jobject cb) {
 
+  JNIEnv *e2;
+  CurrentVM->AttachCurrentThread(reinterpret_cast<void **>(&e2), nullptr);
 
-
-
-  auto argCount = env->GetArrayLength(argTypes) ;
-                      if (argCount == 0) {
+  auto argCount = env->GetArrayLength(argTypes);
+  if (argCount == 0) {
     throwGeneric(env, EX, "empty argTypes, expecting at >= 1 for return type");
     return;
   }
 
-
-
-
-
-
   wrapException(env, EX, [&]() {
-
-
     auto argTs = fromJni<jbyte>(env, argTypes);
     auto argPs = fromJni<jbyte>(env, argData);
     auto argsPtr = argPs.data();
-    std::vector<void *> argsPtrStore(argPs.size());
-    std::vector<rt::Type> argTpeStore(argPs.size());
-    for (int i = 0; i < argCount; ++i) {
+    std::vector<void *> argsPtrStore(argCount);
+    std::vector<rt::Type> argTpeStore(argCount);
+    for (jsize i = 0; i < argCount; ++i) {
       auto tpe = static_cast<rt::Type>(argTs[i]);
       argsPtrStore[i] = tpe == rt::Type::Void ? nullptr : argsPtr;
       argTpeStore[i] = tpe;
       argsPtr += rt::byteOfType(tpe);
     }
-
-
-
 
     // XXX we MUST hold on to the return pointer in the same block as invoke even if we don't use it
     void *rtnPtrStore = {};
@@ -268,7 +265,7 @@ static rt::Dim3 fromJni(JNIEnv *env, const generated::Dim3::Instance &d3) {
         ->enqueueInvokeAsync(fromJni(env, moduleName), fromJni(env, symbol), argTpeStore, argsPtrStore, {global, local},
                              fromJni(env, cb));
 
-    if (argTpeStore[argPs.size()-1]  == rt::Type::Ptr) {
+    if (argTpeStore[argPs.size() - 1] == rt::Type::Ptr) {
       // we got four possible cases when a function return pointers:
       //  1. Pointer to one of the argument   (LUT[ptr]==Some) => passthrough
       //  2. Pointer to malloc'd memory       (LUT[ptr]==Some) => passthrough

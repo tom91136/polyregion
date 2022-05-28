@@ -3,7 +3,13 @@ package polyregion.jvm.runtime;
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 import polyregion.jvm.Loader;
 import polyregion.jvm.runtime.Device.Queue;
@@ -55,6 +61,37 @@ public final class Runtimes {
   static native void free0(long nativePeer, long handle);
 
   static native Queue createQueue0(long nativePeer);
+
+//  private static final AtomicLong PENDING_CALLBACKS = new AtomicLong(0);
+//
+//  static {
+//    java.lang.Runtime.getRuntime()
+//        .addShutdownHook(
+//            new Thread(
+//                () -> {
+//                  while (PENDING_CALLBACKS.get() > 0) {
+//                    System.out.println("Waiting on " + PENDING_CALLBACKS.get());
+//                    synchronized (PENDING_CALLBACKS) {
+//                      try {
+//                        PENDING_CALLBACKS.wait();
+//                      } catch (InterruptedException ignored) {
+//                      }
+//                    }
+//                  }
+//                }));
+//  }
+//
+//
+//  static Runnable nonDaemon(Runnable r) {
+//    PENDING_CALLBACKS.incrementAndGet();
+//    return () -> {
+//      r.run();
+//      PENDING_CALLBACKS.decrementAndGet();
+//      synchronized (PENDING_CALLBACKS) {
+//        PENDING_CALLBACKS.notifyAll();
+//      }
+//    };
+//  }
 
   static native void enqueueHostToDeviceAsync0(
       long nativePeer, ByteBuffer src, long dst, int size, Runnable cb);

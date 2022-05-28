@@ -19,12 +19,13 @@ static void checked(cl_int result, const char *file, int line) {
   }
 }
 
-template <typename F> static auto checked(F &&f, const std::string &file, int line) {
-  cl_int err = CL_SUCCESS;
-  auto y = f(&err);
-  if (err == CL_SUCCESS) return y;
+template <typename F> static auto checked(F &&f, const char *file, int line) {
+  cl_int result = CL_SUCCESS;
+  auto y = f(&result);
+  if (result == CL_SUCCESS) return y;
   else {
-    throw std::logic_error(std::string(ERROR_PREFIX + file + ":" + std::to_string(line) + ": ") + clewErrorString(err));
+    throw std::logic_error(std::string(ERROR_PREFIX) + file + ":" + std::to_string(line) + ": " +
+                           clewErrorString(result));
   }
 }
 
@@ -89,7 +90,7 @@ ClDevice::ClDevice(cl_device_id device)
           },
           [&](auto &&d) {
             TRACE();
-            // XX see above
+            // XXX see above
             //            if (__clewRetainDevice && __clewReleaseDevice) // clReleaseDevice requires OpenCL >= 1.2
             //              CHECKED(__clewReleaseDevice(d));
           }),
@@ -225,12 +226,14 @@ void ClDeviceQueue::enqueueCallback(const MaybeCallback &cb, cl_event event) {
 void ClDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
   TRACE();
   cl_event event = {};
+  if (!src) throw std::logic_error("Source pointer is NULL");
   CHECKED(clEnqueueWriteBuffer(queue, queryMemObject(dst), CL_FALSE, 0, size, src, 0, nullptr, &event));
   enqueueCallback(cb, event);
 }
 void ClDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) {
   TRACE();
   cl_event event = {};
+  if (!dst) throw std::logic_error("Destination pointer is NULL");
   CHECKED(clEnqueueReadBuffer(queue, queryMemObject(src), CL_FALSE, 0, size, dst, 0, nullptr, &event));
   enqueueCallback(cb, event);
 }
@@ -239,7 +242,8 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
                                        const MaybeCallback &cb) {
   TRACE();
   if (types.back() != Type::Void)
-    throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported");
+    throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported, was " +
+                           runtime::typeName(types.back()));
   auto kernel = store.resolveFunction(moduleName, symbol);
   auto toSize = [](Type t) -> size_t {
     switch (t) {
@@ -248,7 +252,8 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
       default: return ::byteOfType(t);
     }
   };
-  for (cl_uint i = 0; i < args.size(); ++i) {
+  // last arg is the return, void assertion should have been done before this
+  for (cl_uint i = 0; i < args.size() - 1; ++i) {
     auto rawPtr = args[i];
     auto tpe = types[i];
     if (tpe == Type::Ptr) {

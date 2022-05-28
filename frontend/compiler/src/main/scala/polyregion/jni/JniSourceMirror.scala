@@ -252,7 +252,7 @@ object JniSourceMirror {
          |${metaStructMembers.map((t, n) => s"  $t $n;").mkString("\n")}
 		 |private:
          |  explicit $clsName(JNIEnv *env);
-		 |  static std::unique_ptr<$clsName> cached;
+		 |  static thread_local std::unique_ptr<$clsName> cached;
 		 |public:
          |  static $clsName& of(JNIEnv *env);
          |  static void drop(JNIEnv *env);
@@ -267,7 +267,7 @@ object JniSourceMirror {
          |    : ${metaStructMemberInits
         .map { case (m, v, comment) => s"$m($v)" }
         .mkString(s",\n      ")} { };
-		 |std::unique_ptr<$clsName> $clsName::cached = {};
+		 |thread_local std::unique_ptr<$clsName> $clsName::cached = {};
 		 |$clsName& $clsName::of(JNIEnv *env) {
          |  if(!cached) cached = std::unique_ptr<$clsName>(new $clsName(env));
 		 |  return *cached;

@@ -6,7 +6,7 @@ ByteBuffer::ByteBuffer(JNIEnv *env)
     : clazz(reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("java/nio/ByteBuffer")))),
       allocate_ILjava_nio_ByteBuffer_Method(env->GetStaticMethodID(clazz, "allocate", "(I)Ljava/nio/ByteBuffer;")),
       allocateDirect_ILjava_nio_ByteBuffer_Method(env->GetStaticMethodID(clazz, "allocateDirect", "(I)Ljava/nio/ByteBuffer;")) { };
-std::unique_ptr<ByteBuffer> ByteBuffer::cached = {};
+thread_local std::unique_ptr<ByteBuffer> ByteBuffer::cached = {};
 ByteBuffer& ByteBuffer::of(JNIEnv *env) {
   if(!cached) cached = std::unique_ptr<ByteBuffer>(new ByteBuffer(env));
   return *cached;
@@ -29,7 +29,7 @@ Property::Property(JNIEnv *env)
       keyField(env->GetFieldID(clazz, "key", "Ljava/lang/String;")),
       valueField(env->GetFieldID(clazz, "value", "Ljava/lang/String;")),
       ctor0Method(env->GetMethodID(clazz, "<init>", "(Ljava/lang/String;Ljava/lang/String;)V")) { };
-std::unique_ptr<Property> Property::cached = {};
+thread_local std::unique_ptr<Property> Property::cached = {};
 Property& Property::of(JNIEnv *env) {
   if(!cached) cached = std::unique_ptr<Property>(new Property(env));
   return *cached;
@@ -55,7 +55,7 @@ Dim3::Dim3(JNIEnv *env)
       yField(env->GetFieldID(clazz, "y", "J")),
       zField(env->GetFieldID(clazz, "z", "J")),
       ctor0Method(env->GetMethodID(clazz, "<init>", "(JJJ)V")) { };
-std::unique_ptr<Dim3> Dim3::cached = {};
+thread_local std::unique_ptr<Dim3> Dim3::cached = {};
 Dim3& Dim3::of(JNIEnv *env) {
   if(!cached) cached = std::unique_ptr<Dim3>(new Dim3(env));
   return *cached;
@@ -81,7 +81,7 @@ Policy::Policy(JNIEnv *env)
       localField(env->GetFieldID(clazz, "local", "Lpolyregion/jvm/runtime/Dim3;")),
       ctor0Method(env->GetMethodID(clazz, "<init>", "(Lpolyregion/jvm/runtime/Dim3;)V")),
       local_Ljava_util_Optional_Method(env->GetMethodID(clazz, "local", "()Ljava/util/Optional;")) { };
-std::unique_ptr<Policy> Policy::cached = {};
+thread_local std::unique_ptr<Policy> Policy::cached = {};
 Policy& Policy::of(JNIEnv *env) {
   if(!cached) cached = std::unique_ptr<Policy>(new Policy(env));
   return *cached;
@@ -99,21 +99,21 @@ Policy::Instance Policy::operator()(JNIEnv *env, jobject global) const {
 
 Queue::Instance::Instance(const Queue &meta, jobject instance) : meta(meta), instance(instance) {}
 jlong Queue::Instance::nativePeer(JNIEnv *env) const { return env->GetLongField(instance, meta.nativePeerField); }
-void Queue::Instance::close(JNIEnv *env) const { env->CallVoidMethod(instance, meta.close_VMethod); }
 void Queue::Instance::enqueueHostToDeviceAsync(JNIEnv *env, jobject src, jlong dst, jint size, jobject cb) const { env->CallVoidMethod(instance, meta.enqueueHostToDeviceAsync_Ljava_nio_ByteBuffer_JILjava_lang_Runnable_VMethod); }
-void Queue::Instance::enqueueDeviceToHostAsync(JNIEnv *env, jlong src, jobject dst, jint size, jobject cb) const { env->CallVoidMethod(instance, meta.enqueueDeviceToHostAsync_JLjava_nio_ByteBuffer_ILjava_lang_Runnable_VMethod); }
+void Queue::Instance::enqueueInvokeAsync(JNIEnv *env, jstring moduleName, jstring symbol, jbyteArray argTypes, jbyteArray argData, jobject policy, jobject cb) const { env->CallVoidMethod(instance, meta.enqueueInvokeAsync_Ljava_lang_String_Ljava_lang_String_aBaBLpolyregion_jvm_runtime_Policy_Ljava_lang_Runnable_VMethod); }
 void Queue::Instance::enqueueInvokeAsync(JNIEnv *env, jstring moduleName, jstring symbol, jobject args, jobject rtn, jobject policy, jobject cb) const { env->CallVoidMethod(instance, meta.enqueueInvokeAsync_Ljava_lang_String_Ljava_lang_String_Ljava_util_List_Lpolyregion_jvm_runtime_Arg_Lpolyregion_jvm_runtime_Policy_Ljava_lang_Runnable_VMethod); }
-void Queue::Instance::enqueueInvokeAsync(JNIEnv *env, jstring moduleName, jstring symbol, jbyteArray argTys, jobjectArray argBuffers, jbyte rtnTy, jobject rtnBuffer, jobject policy, jobject cb) const { env->CallVoidMethod(instance, meta.enqueueInvokeAsync_Ljava_lang_String_Ljava_lang_String_aBaLjava_nio_ByteBuffer_BLjava_nio_ByteBuffer_Lpolyregion_jvm_runtime_Policy_Ljava_lang_Runnable_VMethod); }
+void Queue::Instance::enqueueDeviceToHostAsync(JNIEnv *env, jlong src, jobject dst, jint size, jobject cb) const { env->CallVoidMethod(instance, meta.enqueueDeviceToHostAsync_JLjava_nio_ByteBuffer_ILjava_lang_Runnable_VMethod); }
+void Queue::Instance::close(JNIEnv *env) const { env->CallVoidMethod(instance, meta.close_VMethod); }
 Queue::Queue(JNIEnv *env)
     : clazz(reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/runtime/Device$Queue")))),
       nativePeerField(env->GetFieldID(clazz, "nativePeer", "J")),
       ctor0Method(env->GetMethodID(clazz, "<init>", "(J)V")),
-      close_VMethod(env->GetMethodID(clazz, "close", "()V")),
       enqueueHostToDeviceAsync_Ljava_nio_ByteBuffer_JILjava_lang_Runnable_VMethod(env->GetMethodID(clazz, "enqueueHostToDeviceAsync", "(Ljava/nio/ByteBuffer;JILjava/lang/Runnable;)V")),
-      enqueueDeviceToHostAsync_JLjava_nio_ByteBuffer_ILjava_lang_Runnable_VMethod(env->GetMethodID(clazz, "enqueueDeviceToHostAsync", "(JLjava/nio/ByteBuffer;ILjava/lang/Runnable;)V")),
+      enqueueInvokeAsync_Ljava_lang_String_Ljava_lang_String_aBaBLpolyregion_jvm_runtime_Policy_Ljava_lang_Runnable_VMethod(env->GetMethodID(clazz, "enqueueInvokeAsync", "(Ljava/lang/String;Ljava/lang/String;[B[BLpolyregion/jvm/runtime/Policy;Ljava/lang/Runnable;)V")),
       enqueueInvokeAsync_Ljava_lang_String_Ljava_lang_String_Ljava_util_List_Lpolyregion_jvm_runtime_Arg_Lpolyregion_jvm_runtime_Policy_Ljava_lang_Runnable_VMethod(env->GetMethodID(clazz, "enqueueInvokeAsync", "(Ljava/lang/String;Ljava/lang/String;Ljava/util/List;Lpolyregion/jvm/runtime/Arg;Lpolyregion/jvm/runtime/Policy;Ljava/lang/Runnable;)V")),
-      enqueueInvokeAsync_Ljava_lang_String_Ljava_lang_String_aBaLjava_nio_ByteBuffer_BLjava_nio_ByteBuffer_Lpolyregion_jvm_runtime_Policy_Ljava_lang_Runnable_VMethod(env->GetMethodID(clazz, "enqueueInvokeAsync", "(Ljava/lang/String;Ljava/lang/String;[B[Ljava/nio/ByteBuffer;BLjava/nio/ByteBuffer;Lpolyregion/jvm/runtime/Policy;Ljava/lang/Runnable;)V")) { };
-std::unique_ptr<Queue> Queue::cached = {};
+      enqueueDeviceToHostAsync_JLjava_nio_ByteBuffer_ILjava_lang_Runnable_VMethod(env->GetMethodID(clazz, "enqueueDeviceToHostAsync", "(JLjava/nio/ByteBuffer;ILjava/lang/Runnable;)V")),
+      close_VMethod(env->GetMethodID(clazz, "close", "()V")) { };
+thread_local std::unique_ptr<Queue> Queue::cached = {};
 Queue& Queue::of(JNIEnv *env) {
   if(!cached) cached = std::unique_ptr<Queue>(new Queue(env));
   return *cached;
@@ -133,25 +133,25 @@ Device::Instance::Instance(const Device &meta, jobject instance) : meta(meta), i
 jlong Device::Instance::nativePeer(JNIEnv *env) const { return env->GetLongField(instance, meta.nativePeerField); }
 jlong Device::Instance::id(JNIEnv *env) const { return env->GetLongField(instance, meta.idField); }
 jstring Device::Instance::name(JNIEnv *env) const { return reinterpret_cast<jstring>(env->GetObjectField(instance, meta.nameField)); }
+jlong Device::Instance::malloc(JNIEnv *env, jlong size, jobject access) const { return env->CallLongMethod(instance, meta.malloc_JLpolyregion_jvm_runtime_Access_JMethod); }
+Queue::Instance Device::Instance::createQueue(JNIEnv *env, const Queue& clazz_) const { return {clazz_, env->CallObjectMethod(instance, meta.createQueue_Lpolyregion_jvm_runtime_Device_Queue_Method)}; }
 void Device::Instance::loadModule(JNIEnv *env, jstring name, jbyteArray image) const { env->CallVoidMethod(instance, meta.loadModule_Ljava_lang_String_aBVMethod); }
 jobjectArray Device::Instance::properties(JNIEnv *env) const { return reinterpret_cast<jobjectArray>(env->CallObjectMethod(instance, meta.properties_aLpolyregion_jvm_runtime_Property_Method)); }
 void Device::Instance::close(JNIEnv *env) const { env->CallVoidMethod(instance, meta.close_VMethod); }
 void Device::Instance::free(JNIEnv *env, jlong data) const { env->CallVoidMethod(instance, meta.free_JVMethod); }
-Queue::Instance Device::Instance::createQueue(JNIEnv *env, const Queue& clazz_) const { return {clazz_, env->CallObjectMethod(instance, meta.createQueue_Lpolyregion_jvm_runtime_Device_Queue_Method)}; }
-jlong Device::Instance::malloc(JNIEnv *env, jlong size, jobject access) const { return env->CallLongMethod(instance, meta.malloc_JLpolyregion_jvm_runtime_Access_JMethod); }
 Device::Device(JNIEnv *env)
     : clazz(reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/runtime/Device")))),
       nativePeerField(env->GetFieldID(clazz, "nativePeer", "J")),
       idField(env->GetFieldID(clazz, "id", "J")),
       nameField(env->GetFieldID(clazz, "name", "Ljava/lang/String;")),
       ctor0Method(env->GetMethodID(clazz, "<init>", "(JJLjava/lang/String;)V")),
+      malloc_JLpolyregion_jvm_runtime_Access_JMethod(env->GetMethodID(clazz, "malloc", "(JLpolyregion/jvm/runtime/Access;)J")),
+      createQueue_Lpolyregion_jvm_runtime_Device_Queue_Method(env->GetMethodID(clazz, "createQueue", "()Lpolyregion/jvm/runtime/Device$Queue;")),
       loadModule_Ljava_lang_String_aBVMethod(env->GetMethodID(clazz, "loadModule", "(Ljava/lang/String;[B)V")),
       properties_aLpolyregion_jvm_runtime_Property_Method(env->GetMethodID(clazz, "properties", "()[Lpolyregion/jvm/runtime/Property;")),
       close_VMethod(env->GetMethodID(clazz, "close", "()V")),
-      free_JVMethod(env->GetMethodID(clazz, "free", "(J)V")),
-      createQueue_Lpolyregion_jvm_runtime_Device_Queue_Method(env->GetMethodID(clazz, "createQueue", "()Lpolyregion/jvm/runtime/Device$Queue;")),
-      malloc_JLpolyregion_jvm_runtime_Access_JMethod(env->GetMethodID(clazz, "malloc", "(JLpolyregion/jvm/runtime/Access;)J")) { };
-std::unique_ptr<Device> Device::cached = {};
+      free_JVMethod(env->GetMethodID(clazz, "free", "(J)V")) { };
+thread_local std::unique_ptr<Device> Device::cached = {};
 Device& Device::of(JNIEnv *env) {
   if(!cached) cached = std::unique_ptr<Device>(new Device(env));
   return *cached;
@@ -170,18 +170,18 @@ Device::Instance Device::operator()(JNIEnv *env, jlong nativePeer, jlong id, jst
 Runtime::Instance::Instance(const Runtime &meta, jobject instance) : meta(meta), instance(instance) {}
 jlong Runtime::Instance::nativePeer(JNIEnv *env) const { return env->GetLongField(instance, meta.nativePeerField); }
 jstring Runtime::Instance::name(JNIEnv *env) const { return reinterpret_cast<jstring>(env->GetObjectField(instance, meta.nameField)); }
+jobjectArray Runtime::Instance::devices(JNIEnv *env) const { return reinterpret_cast<jobjectArray>(env->CallObjectMethod(instance, meta.devices_aLpolyregion_jvm_runtime_Device_Method)); }
 jobjectArray Runtime::Instance::properties(JNIEnv *env) const { return reinterpret_cast<jobjectArray>(env->CallObjectMethod(instance, meta.properties_aLpolyregion_jvm_runtime_Property_Method)); }
 void Runtime::Instance::close(JNIEnv *env) const { env->CallVoidMethod(instance, meta.close_VMethod); }
-jobjectArray Runtime::Instance::devices(JNIEnv *env) const { return reinterpret_cast<jobjectArray>(env->CallObjectMethod(instance, meta.devices_aLpolyregion_jvm_runtime_Device_Method)); }
 Runtime::Runtime(JNIEnv *env)
     : clazz(reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/runtime/Runtime")))),
       nativePeerField(env->GetFieldID(clazz, "nativePeer", "J")),
       nameField(env->GetFieldID(clazz, "name", "Ljava/lang/String;")),
       ctor0Method(env->GetMethodID(clazz, "<init>", "(JLjava/lang/String;)V")),
+      devices_aLpolyregion_jvm_runtime_Device_Method(env->GetMethodID(clazz, "devices", "()[Lpolyregion/jvm/runtime/Device;")),
       properties_aLpolyregion_jvm_runtime_Property_Method(env->GetMethodID(clazz, "properties", "()[Lpolyregion/jvm/runtime/Property;")),
-      close_VMethod(env->GetMethodID(clazz, "close", "()V")),
-      devices_aLpolyregion_jvm_runtime_Device_Method(env->GetMethodID(clazz, "devices", "()[Lpolyregion/jvm/runtime/Device;")) { };
-std::unique_ptr<Runtime> Runtime::cached = {};
+      close_VMethod(env->GetMethodID(clazz, "close", "()V")) { };
+thread_local std::unique_ptr<Runtime> Runtime::cached = {};
 Runtime& Runtime::of(JNIEnv *env) {
   if(!cached) cached = std::unique_ptr<Runtime>(new Runtime(env));
   return *cached;
@@ -209,7 +209,7 @@ Event::Event(JNIEnv *env)
       nameField(env->GetFieldID(clazz, "name", "Ljava/lang/String;")),
       dataField(env->GetFieldID(clazz, "data", "Ljava/lang/String;")),
       ctor0Method(env->GetMethodID(clazz, "<init>", "(JJLjava/lang/String;Ljava/lang/String;)V")) { };
-std::unique_ptr<Event> Event::cached = {};
+thread_local std::unique_ptr<Event> Event::cached = {};
 Event& Event::of(JNIEnv *env) {
   if(!cached) cached = std::unique_ptr<Event>(new Event(env));
   return *cached;
@@ -237,7 +237,7 @@ Layout::Layout(JNIEnv *env)
       alignmentField(env->GetFieldID(clazz, "alignment", "J")),
       membersField(env->GetFieldID(clazz, "members", "[Lpolyregion/jvm/compiler/Member;")),
       ctor0Method(env->GetMethodID(clazz, "<init>", "([Ljava/lang/String;JJ[Lpolyregion/jvm/compiler/Member;)V")) { };
-std::unique_ptr<Layout> Layout::cached = {};
+thread_local std::unique_ptr<Layout> Layout::cached = {};
 Layout& Layout::of(JNIEnv *env) {
   if(!cached) cached = std::unique_ptr<Layout>(new Layout(env));
   return *cached;
@@ -263,7 +263,7 @@ Member::Member(JNIEnv *env)
       offsetInBytesField(env->GetFieldID(clazz, "offsetInBytes", "J")),
       sizeInBytesField(env->GetFieldID(clazz, "sizeInBytes", "J")),
       ctor0Method(env->GetMethodID(clazz, "<init>", "(Ljava/lang/String;JJ)V")) { };
-std::unique_ptr<Member> Member::cached = {};
+thread_local std::unique_ptr<Member> Member::cached = {};
 Member& Member::of(JNIEnv *env) {
   if(!cached) cached = std::unique_ptr<Member>(new Member(env));
   return *cached;
@@ -287,7 +287,7 @@ Options::Options(JNIEnv *env)
       targetField(env->GetFieldID(clazz, "target", "B")),
       archField(env->GetFieldID(clazz, "arch", "Ljava/lang/String;")),
       ctor0Method(env->GetMethodID(clazz, "<init>", "(BLjava/lang/String;)V")) { };
-std::unique_ptr<Options> Options::cached = {};
+thread_local std::unique_ptr<Options> Options::cached = {};
 Options& Options::of(JNIEnv *env) {
   if(!cached) cached = std::unique_ptr<Options>(new Options(env));
   return *cached;
@@ -315,7 +315,7 @@ Compilation::Compilation(JNIEnv *env)
       layoutsField(env->GetFieldID(clazz, "layouts", "[Lpolyregion/jvm/compiler/Layout;")),
       messagesField(env->GetFieldID(clazz, "messages", "Ljava/lang/String;")),
       ctor0Method(env->GetMethodID(clazz, "<init>", "([B[Lpolyregion/jvm/compiler/Event;[Lpolyregion/jvm/compiler/Layout;Ljava/lang/String;)V")) { };
-std::unique_ptr<Compilation> Compilation::cached = {};
+thread_local std::unique_ptr<Compilation> Compilation::cached = {};
 Compilation& Compilation::of(JNIEnv *env) {
   if(!cached) cached = std::unique_ptr<Compilation>(new Compilation(env));
   return *cached;
@@ -335,7 +335,7 @@ String::Instance::Instance(const String &meta, jobject instance) : meta(meta), i
 
 String::String(JNIEnv *env)
     : clazz(reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("java/lang/String")))) { };
-std::unique_ptr<String> String::cached = {};
+thread_local std::unique_ptr<String> String::cached = {};
 String& String::of(JNIEnv *env) {
   if(!cached) cached = std::unique_ptr<String>(new String(env));
   return *cached;
@@ -350,11 +350,15 @@ String::Instance String::wrap(JNIEnv *env, jobject instance) { return {*this, in
 
 
 Runnable::Instance::Instance(const Runnable &meta, jobject instance) : meta(meta), instance(instance) {}
-void Runnable::Instance::run(JNIEnv *env) const { env->CallVoidMethod(instance, meta.run_VMethod); }
+void Runnable::Instance::run(JNIEnv *env) const {
+  env->CallVoidMethod(instance, meta.run_VMethod);
+  if(env->ExceptionCheck())  env->ExceptionClear();
+
+}
 Runnable::Runnable(JNIEnv *env)
     : clazz(reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("java/lang/Runnable")))),
       run_VMethod(env->GetMethodID(clazz, "run", "()V")) { };
-std::unique_ptr<Runnable> Runnable::cached = {};
+thread_local std::unique_ptr<Runnable> Runnable::cached = {};
 Runnable& Runnable::of(JNIEnv *env) {
   if(!cached) cached = std::unique_ptr<Runnable>(new Runnable(env));
   return *cached;

@@ -15,7 +15,7 @@ struct ByteBuffer {
   jmethodID allocateDirect_ILjava_nio_ByteBuffer_Method;
 private:
   explicit ByteBuffer(JNIEnv *env);
-  static std::unique_ptr<ByteBuffer> cached;
+  static thread_local std::unique_ptr<ByteBuffer> cached;
 public:
   static ByteBuffer& of(JNIEnv *env);
   static void drop(JNIEnv *env);
@@ -38,7 +38,7 @@ struct Property {
   jmethodID ctor0Method;
 private:
   explicit Property(JNIEnv *env);
-  static std::unique_ptr<Property> cached;
+  static thread_local std::unique_ptr<Property> cached;
 public:
   static Property& of(JNIEnv *env);
   static void drop(JNIEnv *env);
@@ -62,7 +62,7 @@ struct Dim3 {
   jmethodID ctor0Method;
 private:
   explicit Dim3(JNIEnv *env);
-  static std::unique_ptr<Dim3> cached;
+  static thread_local std::unique_ptr<Dim3> cached;
 public:
   static Dim3& of(JNIEnv *env);
   static void drop(JNIEnv *env);
@@ -86,7 +86,7 @@ struct Policy {
   jmethodID local_Ljava_util_Optional_Method;
 private:
   explicit Policy(JNIEnv *env);
-  static std::unique_ptr<Policy> cached;
+  static thread_local std::unique_ptr<Policy> cached;
 public:
   static Policy& of(JNIEnv *env);
   static void drop(JNIEnv *env);
@@ -100,23 +100,23 @@ struct Queue {
     Instance(const Queue &meta, jobject instance);
     template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
     jlong nativePeer(JNIEnv *env) const;
-    void close(JNIEnv *env) const;
     void enqueueHostToDeviceAsync(JNIEnv *env, jobject src, jlong dst, jint size, jobject cb) const;
-    void enqueueDeviceToHostAsync(JNIEnv *env, jlong src, jobject dst, jint size, jobject cb) const;
+    void enqueueInvokeAsync(JNIEnv *env, jstring moduleName, jstring symbol, jbyteArray argTypes, jbyteArray argData, jobject policy, jobject cb) const;
     void enqueueInvokeAsync(JNIEnv *env, jstring moduleName, jstring symbol, jobject args, jobject rtn, jobject policy, jobject cb) const;
-    void enqueueInvokeAsync(JNIEnv *env, jstring moduleName, jstring symbol, jbyteArray argTys, jobjectArray argBuffers, jbyte rtnTy, jobject rtnBuffer, jobject policy, jobject cb) const;
+    void enqueueDeviceToHostAsync(JNIEnv *env, jlong src, jobject dst, jint size, jobject cb) const;
+    void close(JNIEnv *env) const;
   };
   jclass clazz;
   jfieldID nativePeerField;
   jmethodID ctor0Method;
-  jmethodID close_VMethod;
   jmethodID enqueueHostToDeviceAsync_Ljava_nio_ByteBuffer_JILjava_lang_Runnable_VMethod;
-  jmethodID enqueueDeviceToHostAsync_JLjava_nio_ByteBuffer_ILjava_lang_Runnable_VMethod;
+  jmethodID enqueueInvokeAsync_Ljava_lang_String_Ljava_lang_String_aBaBLpolyregion_jvm_runtime_Policy_Ljava_lang_Runnable_VMethod;
   jmethodID enqueueInvokeAsync_Ljava_lang_String_Ljava_lang_String_Ljava_util_List_Lpolyregion_jvm_runtime_Arg_Lpolyregion_jvm_runtime_Policy_Ljava_lang_Runnable_VMethod;
-  jmethodID enqueueInvokeAsync_Ljava_lang_String_Ljava_lang_String_aBaLjava_nio_ByteBuffer_BLjava_nio_ByteBuffer_Lpolyregion_jvm_runtime_Policy_Ljava_lang_Runnable_VMethod;
+  jmethodID enqueueDeviceToHostAsync_JLjava_nio_ByteBuffer_ILjava_lang_Runnable_VMethod;
+  jmethodID close_VMethod;
 private:
   explicit Queue(JNIEnv *env);
-  static std::unique_ptr<Queue> cached;
+  static thread_local std::unique_ptr<Queue> cached;
 public:
   static Queue& of(JNIEnv *env);
   static void drop(JNIEnv *env);
@@ -132,27 +132,27 @@ struct Device {
     jlong nativePeer(JNIEnv *env) const;
     jlong id(JNIEnv *env) const;
     jstring name(JNIEnv *env) const;
+    jlong malloc(JNIEnv *env, jlong size, jobject access) const;
+    Queue::Instance createQueue(JNIEnv *env, const Queue& clazz_) const;
     void loadModule(JNIEnv *env, jstring name, jbyteArray image) const;
     jobjectArray properties(JNIEnv *env) const;
     void close(JNIEnv *env) const;
     void free(JNIEnv *env, jlong data) const;
-    Queue::Instance createQueue(JNIEnv *env, const Queue& clazz_) const;
-    jlong malloc(JNIEnv *env, jlong size, jobject access) const;
   };
   jclass clazz;
   jfieldID nativePeerField;
   jfieldID idField;
   jfieldID nameField;
   jmethodID ctor0Method;
+  jmethodID malloc_JLpolyregion_jvm_runtime_Access_JMethod;
+  jmethodID createQueue_Lpolyregion_jvm_runtime_Device_Queue_Method;
   jmethodID loadModule_Ljava_lang_String_aBVMethod;
   jmethodID properties_aLpolyregion_jvm_runtime_Property_Method;
   jmethodID close_VMethod;
   jmethodID free_JVMethod;
-  jmethodID createQueue_Lpolyregion_jvm_runtime_Device_Queue_Method;
-  jmethodID malloc_JLpolyregion_jvm_runtime_Access_JMethod;
 private:
   explicit Device(JNIEnv *env);
-  static std::unique_ptr<Device> cached;
+  static thread_local std::unique_ptr<Device> cached;
 public:
   static Device& of(JNIEnv *env);
   static void drop(JNIEnv *env);
@@ -167,20 +167,20 @@ struct Runtime {
     template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
     jlong nativePeer(JNIEnv *env) const;
     jstring name(JNIEnv *env) const;
+    jobjectArray devices(JNIEnv *env) const;
     jobjectArray properties(JNIEnv *env) const;
     void close(JNIEnv *env) const;
-    jobjectArray devices(JNIEnv *env) const;
   };
   jclass clazz;
   jfieldID nativePeerField;
   jfieldID nameField;
   jmethodID ctor0Method;
+  jmethodID devices_aLpolyregion_jvm_runtime_Device_Method;
   jmethodID properties_aLpolyregion_jvm_runtime_Property_Method;
   jmethodID close_VMethod;
-  jmethodID devices_aLpolyregion_jvm_runtime_Device_Method;
 private:
   explicit Runtime(JNIEnv *env);
-  static std::unique_ptr<Runtime> cached;
+  static thread_local std::unique_ptr<Runtime> cached;
 public:
   static Runtime& of(JNIEnv *env);
   static void drop(JNIEnv *env);
@@ -206,7 +206,7 @@ struct Event {
   jmethodID ctor0Method;
 private:
   explicit Event(JNIEnv *env);
-  static std::unique_ptr<Event> cached;
+  static thread_local std::unique_ptr<Event> cached;
 public:
   static Event& of(JNIEnv *env);
   static void drop(JNIEnv *env);
@@ -232,7 +232,7 @@ struct Layout {
   jmethodID ctor0Method;
 private:
   explicit Layout(JNIEnv *env);
-  static std::unique_ptr<Layout> cached;
+  static thread_local std::unique_ptr<Layout> cached;
 public:
   static Layout& of(JNIEnv *env);
   static void drop(JNIEnv *env);
@@ -256,7 +256,7 @@ struct Member {
   jmethodID ctor0Method;
 private:
   explicit Member(JNIEnv *env);
-  static std::unique_ptr<Member> cached;
+  static thread_local std::unique_ptr<Member> cached;
 public:
   static Member& of(JNIEnv *env);
   static void drop(JNIEnv *env);
@@ -278,7 +278,7 @@ struct Options {
   jmethodID ctor0Method;
 private:
   explicit Options(JNIEnv *env);
-  static std::unique_ptr<Options> cached;
+  static thread_local std::unique_ptr<Options> cached;
 public:
   static Options& of(JNIEnv *env);
   static void drop(JNIEnv *env);
@@ -304,7 +304,7 @@ struct Compilation {
   jmethodID ctor0Method;
 private:
   explicit Compilation(JNIEnv *env);
-  static std::unique_ptr<Compilation> cached;
+  static thread_local std::unique_ptr<Compilation> cached;
 public:
   static Compilation& of(JNIEnv *env);
   static void drop(JNIEnv *env);
@@ -322,7 +322,7 @@ struct String {
   jclass clazz;
 private:
   explicit String(JNIEnv *env);
-  static std::unique_ptr<String> cached;
+  static thread_local std::unique_ptr<String> cached;
 public:
   static String& of(JNIEnv *env);
   static void drop(JNIEnv *env);
@@ -341,7 +341,7 @@ struct Runnable {
   jmethodID run_VMethod;
 private:
   explicit Runnable(JNIEnv *env);
-  static std::unique_ptr<Runnable> cached;
+  static thread_local std::unique_ptr<Runnable> cached;
 public:
   static Runnable& of(JNIEnv *env);
   static void drop(JNIEnv *env);

@@ -44,12 +44,6 @@ void runtime::detail::CountedCallbackHandler::consume(void *data) {
   if (dev) dev->second();
 }
 
-std::vector<void *> runtime::detail::pointers(const std::vector<TypedPointer> &args) {
-  std::vector<void *> ptrs(args.size());
-  for (size_t i = 0; i < args.size(); ++i)
-    ptrs[i] = args[i].second;
-  return ptrs;
-}
 
 std::string runtime::detail::allocateAndTruncate(const std::function<void(char *, size_t)> &f, size_t length) {
   std::string xs(length, '\0');
