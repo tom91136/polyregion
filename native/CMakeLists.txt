@@ -31,6 +31,7 @@ set(COMMON_COMPILE_OPTIONS
         # -Wold-style-cast # too prevalent in LLVM
         -Wcast-align
         -Werror=return-type
+        -Werror=switch
         -Wno-unused-parameter
         -Wno-unused-function
         -Wno-unused-variable

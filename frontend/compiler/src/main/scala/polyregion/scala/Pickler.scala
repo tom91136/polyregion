@@ -2,13 +2,11 @@ package polyregion.scala
 
 import polyregion.jvm.compiler.{Member, Compiler}
 import polyregion.ast.{CppSourceMirror, MsgPack, PolyAst as p, *}
-import polyregion.scala.{NativeStruct, *}
 
 import scala.quoted.*
 
 object Pickler {
 
-  // inline def nativeStructOf[A]: NativeStruct[A] = ${ nativeStructOfImpl[A] }
 
   transparent inline def liftTpe(using q: Quotes)(t: p.Type) = t match {
     case p.Type.Bool   => Type.of[Boolean]

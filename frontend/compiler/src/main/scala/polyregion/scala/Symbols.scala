@@ -1,7 +1,7 @@
 package polyregion.scala
 
 import polyregion.ast.{PolyAst as p, *}
-import polyregion.scala.Buffer
+//import polyregion.scala.Buffer
 
 import scala.reflect.ClassTag
 
@@ -13,7 +13,7 @@ object Symbols {
   val SeqMutableOps = "scala" :: "collection" :: "mutable" :: "SeqOps" :: Nil
   val SeqOps        = "scala" :: "collection" :: "SeqOps" :: Nil
 
-  val Buffer   = p.Sym[Buffer[_]]
+//  val Buffer   = p.Sym[Buffer[_]]
   val ClassTag = p.Sym[ClassTag[_]]
 
   val Array       = p.Sym("scala" :: "Array" :: Nil)

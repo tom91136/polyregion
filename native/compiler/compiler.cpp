@@ -30,6 +30,7 @@ std::optional<compiler::Target> compiler::targetFromOrdinal(std::underlying_type
   switch (target) {
     case Target::Object_LLVM_x86_64:
     case Target::Object_LLVM_AArch64:
+    case Target::Object_LLVM_ARM:
     case Target::Object_LLVM_NVPTX64:
     case Target::Object_LLVM_AMDGCN:
     case Target::Source_C_OpenCL1_1:
@@ -101,6 +102,7 @@ static backend::LLVM::Options toLLVMBackendOptions(const compiler::Options &opti
   switch (options.target) {
     case compiler::Target::Object_LLVM_x86_64: return {.target = backend::LLVM::Target::x86_64, .arch = options.arch};
     case compiler::Target::Object_LLVM_AArch64: return {.target = backend::LLVM::Target::AArch64, .arch = options.arch};
+    case compiler::Target::Object_LLVM_ARM: return {.target = backend::LLVM::Target::ARM, .arch = options.arch};
     case compiler::Target::Object_LLVM_NVPTX64: return {.target = backend::LLVM::Target::NVPTX64, .arch = options.arch};
     case compiler::Target::Object_LLVM_AMDGCN: return {.target = backend::LLVM::Target::AMDGCN, .arch = options.arch};
     case compiler::Target::Source_C_OpenCL1_1: //
@@ -114,6 +116,7 @@ compiler::Layout compiler::layoutOf(const polyast::StructDef &def, const Options
   switch (options.target) {
     case Target::Object_LLVM_x86_64:
     case Target::Object_LLVM_AArch64:
+    case Target::Object_LLVM_ARM:
     case Target::Object_LLVM_NVPTX64:
     case Target::Object_LLVM_AMDGCN: {
       auto llvmOptions = toLLVMBackendOptions(options);
@@ -163,6 +166,7 @@ compiler::Compilation compiler::compile(const polyast::Program &program, const O
     switch (options.target) {
       case Target::Object_LLVM_x86_64:
       case Target::Object_LLVM_AArch64:
+      case Target::Object_LLVM_ARM:
       case Target::Object_LLVM_NVPTX64:
       case Target::Object_LLVM_AMDGCN:                                                   //
         return std::make_unique<backend::LLVM>(toLLVMBackendOptions(options));           //

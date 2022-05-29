@@ -1,7 +1,7 @@
 package polyregion.scala
 
-import polyregion.{jvm}
 import polyregion.ast.{CppSourceMirror, MsgPack, PolyAst as p, *}
+import polyregion.jvm
 import polyregion.scala.{NativeStruct, *}
 
 import java.util.concurrent.atomic.AtomicReference
@@ -12,189 +12,197 @@ import scala.util.Try
 @compileTimeOnly("This class only exists at compile-time to expose offload methods")
 object compiletime {
 
-  inline def showExpr(inline x: Any): Any = ${ showExprImpl('x) }
-  def showExprImpl(x: Expr[Any])(using q: Quotes): Expr[Any] = {
-    import quotes.reflect.*
-    given Printer[Tree] = Printer.TreeAnsiCode
-    println(x.show)
-    pprint.pprintln(x.asTerm) // term => AST
+//  inline def showExpr(inline x: Any): Any = ${ showExprImpl('x) }
+//  def showExprImpl(x: Expr[Any])(using q: Quotes): Expr[Any] = {
+//    import q.reflect.*
+//    given Printer[Tree] = Printer.TreeAnsiCode
+//    println(x.show)
+//    pprint.pprintln(x.asTerm) // term => AST
+//
+//    implicit val Q = Quoted(q)
+//    val is = Q.collectTree(x.asTerm) {
+//      case s: Q.Select => s :: Nil
+//      case s: Q.Ident  => s :: Nil
+//      case _           => Nil
+//    }
+//    println("===")
+//    println(s"IS=${is
+//      .filter(x => x.symbol.isDefDef || true)
+//      .reverse
+//      .map(x => x -> x.tpe.dealias.widenTermRefByName.simplified)
+//      .map((x, tpe) => s"-> $x : ${x.show} `${x.symbol.fullName}` : ${tpe.show}\n\t${tpe}")
+//      .mkString("\n")}")
+//    println("===")
+//    x
+//  }
+//
+//  inline def showTpe[B]: Unit = ${ showTpeImpl[B] }
+//  def showTpeImpl[B: Type](using q: Quotes): Expr[Unit] = {
+//    import q.reflect.*
+//    println(TypeRepr.of[B].typeSymbol.tree.show)
+//    import pprint.*
+//    pprint.pprintln(TypeRepr.of[B].typeSymbol)
+//    '{}
+//  }
+//
+//  private[polyregion] inline def symbolNameOf[B]: String = ${ symbolNameOfImpl[B] }
+//  private def symbolNameOfImpl[B: Type](using q: Quotes): Expr[String] = Expr(
+//    q.reflect.TypeRepr.of[B].typeSymbol.fullName
+//  )
 
-    implicit val Q = Quoted(q)
-    val is = Q.collectTree(x.asTerm) {
-      case s: Q.Select => s :: Nil
-      case s: Q.Ident  => s :: Nil
-      case _           => Nil
-    }
-    println("===")
-    println(s"IS=${is
-      .filter(x => x.symbol.isDefDef || true)
-      .reverse
-      .map(x => x -> x.tpe.dealias.widenTermRefByName.simplified)
-      .map((x, tpe) => s"-> $x : ${x.show} `${x.symbol.fullName}` : ${tpe.show}\n\t${tpe}")
-      .mkString("\n")}")
-    println("===")
-    x
-  }
+//  inline def foreachJVMPar(inline range: Range, inline n: Int = java.lang.Runtime.getRuntime.availableProcessors())(
+//      inline x: Int => Unit
+//  )(using ec: scala.concurrent.ExecutionContext): Unit = {
+//    val latch = new java.util.concurrent.CountDownLatch(n)
+//    Runtime.splitStatic(range)(n).foreach { r =>
+//      ec.execute { () =>
+//        try foreachJVM(r)(x)
+//        finally latch.countDown()
+//      }
+//    }
+//    latch.await()
+//  }
+//
+//  inline def foreachJVM(inline range: Range)(inline x: Int => Unit): Unit = {
+//    val start = range.start
+//    val bound = if (range.isInclusive) range.end - 1 else range.end
+//    val step  = range.step
+//    var i     = start
+//    while (i < bound) {
+//      x(i)
+//      i += step
+//    }
+//  }
+//
+//  inline def reduceJVM[A](inline range: Range) //
+//  (inline empty: A, inline f: Int => A)(inline g: (A, A) => A): A = {
+//    val start = range.start
+//    val bound = if (range.isInclusive) range.end - 1 else range.end
+//    val step  = range.step
+//    var i     = start
+//    var acc   = empty
+//    while (i < bound) {
+//      acc = g(f(i), acc)
+//      i += step
+//    }
+//    acc
+//  }
+//
+//  inline def reduceJVMPar[A](
+//      inline range: Range,
+//      inline n: Int = java.lang.Runtime.getRuntime.availableProcessors()
+//  ) //
+//  (inline empty: A, inline f: Int => A)(inline g: (A, A) => A)(using ec: scala.concurrent.ExecutionContext): A = {
+//    val latch = new java.util.concurrent.CountDownLatch(n)
+//    val acc   = new AtomicReference[A](empty)
+//    Runtime.splitStatic(range)(n).foreach { r =>
+//      ec.execute { () =>
+//        val x = reduceJVM(r)(empty, f)(g)
+//        try acc.getAndUpdate(g(_, x))
+//        finally latch.countDown()
+//      }
+//    }
+//    latch.await()
+//    acc.get()
+//  }
+//
+//  inline def foreach(inline range: Range)(inline x: Int => Unit): Unit = {
+//    val start = range.start
+//    val bound = if (range.isInclusive) range.end - 1 else range.end
+//    val step  = range.step
+//    offload {
+//      var i = start
+//      while (i < bound) {
+//        x(i)
+//        i += step
+//      }
+//    }
+//  }
+//
+//  inline def foreachPar(inline range: Range, inline n: Int = java.lang.Runtime.getRuntime.availableProcessors())(
+//      inline x: Int => Unit
+//  )(using ec: scala.concurrent.ExecutionContext): Unit = {
+//    val latch = new java.util.concurrent.CountDownLatch(n)
+//    Runtime.splitStatic(range)(n).foreach { r =>
+//      ec.execute { () =>
+//        try foreach(r)(x)
+//        finally latch.countDown()
+//      }
+//    }
+//    latch.await()
+//  }
+//
+//  inline def reduce[A](inline range: Range) //
+//  (inline empty: A, inline f: Int => A)(inline g: (A, A) => A): A = {
+//    val start = range.start
+//    val bound = if (range.isInclusive) range.end - 1 else range.end
+//    val step  = range.step
+//    offload {
+//      var i   = start
+//      var acc = empty
+//      while (i < bound) {
+//        acc = g(f(i), acc)
+//        i += step
+//      }
+//      acc
+//    }
+//  }
+//
+//  inline def reducePar[A](inline range: Range, inline n: Int = java.lang.Runtime.getRuntime.availableProcessors()) //
+//  (inline empty: A, inline f: Int => A)(inline g: (A, A) => A)(using ec: scala.concurrent.ExecutionContext): A = {
+//    val latch = new java.util.concurrent.CountDownLatch(n)
+//    val acc   = new AtomicReference[A](empty)
+//    Runtime.splitStatic(range)(n).foreach { r =>
+//      ec.execute { () =>
+//        val x = reduce(r)(empty, f)(g)
+//        try acc.getAndUpdate(g(_, x))
+//        finally latch.countDown()
+//      }
+//    }
+//    latch.await()
+//    acc.get()
+//  }
 
-  inline def showTpe[B]: Unit = ${ showTpeImpl[B] }
-  def showTpeImpl[B: Type](using Quotes): Expr[Unit] = {
-    import quotes.reflect.*
-    println(TypeRepr.of[B].typeSymbol.tree.show)
-    import pprint.*
-    pprint.pprintln(TypeRepr.of[B].typeSymbol)
-    '{}
-  }
+//  inline def deriveNativeStruct[A]: NativeStruct[A] = ${ deriveNativeStructImpl[A] }
+//
+//  def deriveNativeStructImpl[A: Type](using q: Quotes): Expr[NativeStruct[A]] = {
+//    given Q: Quoted = Quoted(q)
+//    mkNativeStruct(Q.TypeRepr.of[A]).asExprOf[NativeStruct[A]]
+//  }
+//
+//  def mkNativeStruct(using q: Quoted)(repr: q.TypeRepr): Expr[NativeStruct[Any]] = {
+//    import q.given
+//    repr.asType match {
+//      case '[a] =>
+//        val layout = Pickler.layoutOf(repr)
+//
+//        '{
+//          new NativeStruct[a] {
+//            override val name        = ${ Expr(repr.typeSymbol.fullName) }
+//            override val sizeInBytes = ${ Expr(layout.sizeInBytes.toInt) }
+//            override def encode(buffer: java.nio.ByteBuffer, index: Int, a: a): Unit =
+//              ${ Pickler.writeStruct('buffer, 'index, repr, 'a) }
+//
+//            override def decode(buffer: java.nio.ByteBuffer, index: Int): a =
+//              ${ Pickler.readStruct('buffer, 'index, repr).asExprOf[a] }
+//          }
+//        }.asExprOf[NativeStruct[Any]]
+//    }
+//  }
 
-  private[polyregion] inline def symbolNameOf[B]: String = ${ symbolNameOfImpl[B] }
-  private def symbolNameOfImpl[B: Type](using q: Quotes): Expr[String] = Expr(
-    q.reflect.TypeRepr.of[B].typeSymbol.fullName
-  )
+  type Device = polyregion.jvm.runtime.Device
+//  inline def offload[A](inline x: => A): A = ${ offloadImpl[A]('x) }
 
-  inline def foreachJVMPar(inline range: Range, inline n: Int = java.lang.Runtime.getRuntime.availableProcessors())(
-      inline x: Int => Unit
-  )(using ec: scala.concurrent.ExecutionContext): Unit = {
-    val latch = new java.util.concurrent.CountDownLatch(n)
-    Runtime.splitStatic(range)(n).foreach { r =>
-      ec.execute { () =>
-        try foreachJVM(r)(x)
-        finally latch.countDown()
-      }
-    }
-    latch.await()
-  }
 
-  inline def foreachJVM(inline range: Range)(inline x: Int => Unit): Unit = {
-    val start = range.start
-    val bound = if (range.isInclusive) range.end - 1 else range.end
-    val step  = range.step
-    var i     = start
-    while (i < bound) {
-      x(i)
-      i += step
-    }
-  }
+  inline def offload[A](inline d: Device)(inline f: => A): A = ${ offloadImpl[A]('d, 'f) }
 
-  inline def reduceJVM[A](inline range: Range) //
-  (inline empty: A, inline f: Int => A)(inline g: (A, A) => A): A = {
-    val start = range.start
-    val bound = if (range.isInclusive) range.end - 1 else range.end
-    val step  = range.step
-    var i     = start
-    var acc   = empty
-    while (i < bound) {
-      acc = g(f(i), acc)
-      i += step
-    }
-    acc
-  }
+//  inline def offload(inline d: Device, inline x: Range, inline y: Range = Range(0, 0), inline z: Range = Range(0, 0))
+//  /*             */ (inline f: => (Int, Int, Int) => Unit): Unit = ${ offloadImpl[Unit](d, 'x, 'y, 'z, 'f) }
 
-  inline def reduceJVMPar[A](
-      inline range: Range,
-      inline n: Int = java.lang.Runtime.getRuntime.availableProcessors()
-  ) //
-  (inline empty: A, inline f: Int => A)(inline g: (A, A) => A)(using ec: scala.concurrent.ExecutionContext): A = {
-    val latch = new java.util.concurrent.CountDownLatch(n)
-    val acc   = new AtomicReference[A](empty)
-    Runtime.splitStatic(range)(n).foreach { r =>
-      ec.execute { () =>
-        val x = reduceJVM(r)(empty, f)(g)
-        try acc.getAndUpdate(g(_, x))
-        finally latch.countDown()
-      }
-    }
-    latch.await()
-    acc.get()
-  }
-
-  inline def foreach(inline range: Range)(inline x: Int => Unit): Unit = {
-    val start = range.start
-    val bound = if (range.isInclusive) range.end - 1 else range.end
-    val step  = range.step
-    offload {
-      var i = start
-      while (i < bound) {
-        x(i)
-        i += step
-      }
-    }
-  }
-
-  inline def foreachPar(inline range: Range, inline n: Int = java.lang.Runtime.getRuntime.availableProcessors())(
-      inline x: Int => Unit
-  )(using ec: scala.concurrent.ExecutionContext): Unit = {
-    val latch = new java.util.concurrent.CountDownLatch(n)
-    Runtime.splitStatic(range)(n).foreach { r =>
-      ec.execute { () =>
-        try foreach(r)(x)
-        finally latch.countDown()
-      }
-    }
-    latch.await()
-  }
-
-  inline def reduce[A](inline range: Range) //
-  (inline empty: A, inline f: Int => A)(inline g: (A, A) => A): A = {
-    val start = range.start
-    val bound = if (range.isInclusive) range.end - 1 else range.end
-    val step  = range.step
-    offload {
-      var i   = start
-      var acc = empty
-      while (i < bound) {
-        acc = g(f(i), acc)
-        i += step
-      }
-      acc
-    }
-  }
-
-  inline def reducePar[A](inline range: Range, inline n: Int = java.lang.Runtime.getRuntime.availableProcessors()) //
-  (inline empty: A, inline f: Int => A)(inline g: (A, A) => A)(using ec: scala.concurrent.ExecutionContext): A = {
-    val latch = new java.util.concurrent.CountDownLatch(n)
-    val acc   = new AtomicReference[A](empty)
-    Runtime.splitStatic(range)(n).foreach { r =>
-      ec.execute { () =>
-        val x = reduce(r)(empty, f)(g)
-        try acc.getAndUpdate(g(_, x))
-        finally latch.countDown()
-      }
-    }
-    latch.await()
-    acc.get()
-  }
-
-  inline def deriveNativeStruct[A]: NativeStruct[A] = ${ deriveNativeStructImpl[A] }
-
-  def deriveNativeStructImpl[A: Type](using q: Quotes): Expr[NativeStruct[A]] = {
-    given Q: Quoted = Quoted(q)
-    mkNativeStruct(Q.TypeRepr.of[A]).asExprOf[NativeStruct[A]]
-  }
-
-  def mkNativeStruct(using q: Quoted)(repr: q.TypeRepr): Expr[NativeStruct[Any]] = {
-    import q.given
-    repr.asType match {
-      case '[a] =>
-        val layout = Pickler.layoutOf(repr)
-
-        '{
-          new NativeStruct[a] {
-            override val name        = ${ Expr(repr.typeSymbol.fullName) }
-            override val sizeInBytes = ${ Expr(layout.sizeInBytes.toInt) }
-            override def encode(buffer: java.nio.ByteBuffer, index: Int, a: a): Unit =
-              ${ Pickler.writeStruct('buffer, 'index, repr, 'a) }
-
-            override def decode(buffer: java.nio.ByteBuffer, index: Int): a =
-              ${ Pickler.readStruct('buffer, 'index, repr).asExprOf[a] }
-          }
-        }.asExprOf[NativeStruct[Any]]
-    }
-  }
-
-  inline def offload[A](inline x: => A): A = ${ offloadImpl[A]('x) }
-  private def offloadImpl[A: Type](x: Expr[Any])(using q: Quotes): Expr[A] = {
+  private def offloadImpl[A: Type](d: Expr[Device],  f: Expr[Any]) (using q: Quotes): Expr[A] = {
     implicit val Q = Quoted(q)
     val result = for {
-      (captures, prog, log) <- Compiler.compileExpr(x)
+      (captures, prog, log) <- Compiler.compileExpr(f)
       _ = println(log.render)
       serialisedAst <- Try(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, prog))).toEither
       // _ <- Either.catchNonFatal(throw new RuntimeException("STOP"))
@@ -202,7 +210,6 @@ object compiletime {
       //   _= println(s"layout=${layout}")
 
       // c <- Right(new polyregion.Compilation())
-
 
       options = polyregion.jvm.compiler.Options(polyregion.jvm.compiler.Compiler.TargetObjectLLVM_x86_64, "")
       c <- Try((polyregion.jvm.compiler.Compiler.compile(serialisedAst, true, options))).toEither
@@ -215,6 +222,10 @@ object compiletime {
       val programBytesExpr = Expr(c.program)
       val astBytesExpr     = Expr(serialisedAst)
       val fnName           = Expr("lambda")
+
+      val d0 : Device = ???
+      val queue = d0.createQueue()
+      queue.enqueueInvokeAsync()
 
       val captureExprs = captures.map { (name, ref) =>
         println(s"Capture ${name.repr} : ${ref}")
@@ -266,6 +277,8 @@ object compiletime {
       //     case _             => ???
       //   }
 
+
+
       val code = '{
 
         val bytes    = $programBytesExpr
@@ -309,7 +322,7 @@ object compiletime {
 //                ${ Pickler.readUniform('buffer, '{ 0 }, x, Q.TypeRepr.of[A]) }
 //              }
 //          }).asExprOf[A]
-        ???
+          ???
         }
       }
       println("Code=" + code.show)

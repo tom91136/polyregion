@@ -23,7 +23,7 @@ using namespace polyregion::polyast;
 class LLVM : public Backend {
 
 public:
-  enum class Target { x86_64, AArch64, NVPTX64, AMDGCN };
+  enum class Target { x86_64, AArch64, ARM, NVPTX64, AMDGCN };
   struct Options {
     Target target;
     std::string arch;

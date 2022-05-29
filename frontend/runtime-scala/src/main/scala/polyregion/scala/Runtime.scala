@@ -5,7 +5,7 @@ import scala.math.Integral
 import scala.collection.immutable.ArraySeq
 import scala.collection.mutable
 
-object Runtime {
+object Runtime2 {
 
   inline def splitStatic(inline range: Range)(inline n: Int): Seq[Range] =
     if (range.isEmpty) Seq()

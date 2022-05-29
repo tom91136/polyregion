@@ -1,11 +1,10 @@
 package polyregion.scala
 
-import scala.reflect.ClassTag
-import scala.math.Integral
+import java.{lang as jl, nio}
 import scala.collection.immutable.NumericRange
 import scala.collection.mutable
-import java.{lang => jl}
-import java.{nio => nio}
+import scala.math.Integral
+import scala.reflect.ClassTag
 
 sealed trait Buffer[A] extends mutable.IndexedSeq[A] {
   def name: String
@@ -205,15 +204,15 @@ object Buffer {
   }
 
   inline def ofDim[A <: AnyVal](inline dim: Int)(using inline tag: ClassTag[A]): Buffer[A] = (tag.runtimeClass match {
-    // case x if x equals jl.Double.TYPE    => mkBuffer(jl.Double.BYTES, dim, _.asDoubleBuffer(), DoubleBuffer(_, _))
-    // case x if x equals jl.Float.TYPE     => mkBuffer(jl.Float.BYTES, dim, _.asFloatBuffer(), FloatBuffer(_, _))
-    // case x if x equals jl.Long.TYPE      => mkBuffer(jl.Long.BYTES, dim, _.asLongBuffer(), LongBuffer(_, _))
+    case x if x.equals(jl.Double.TYPE)    => mkBuffer(jl.Double.BYTES, dim, _.asDoubleBuffer(), DoubleBuffer(_, _))
+    case x if x.equals(jl.Float.TYPE)     => mkBuffer(jl.Float.BYTES, dim, _.asFloatBuffer(), FloatBuffer(_, _))
+    case x if x.equals(jl.Long.TYPE)      => mkBuffer(jl.Long.BYTES, dim, _.asLongBuffer(), LongBuffer(_, _))
     case x if x.equals(jl.Integer.TYPE)   => mkBuffer(jl.Integer.BYTES, dim, _.asIntBuffer(), IntBuffer(_, _))
     case x if x.equals(jl.Short.TYPE)     => mkBuffer(jl.Short.BYTES, dim, _.asShortBuffer(), ShortBuffer(_, _))
     case x if x.equals(jl.Character.TYPE) => mkBuffer(jl.Character.BYTES, dim, _.asCharBuffer(), CharBuffer(_, _))
-    case x if x.equals(jl.Boolean.TYPE)   => mkBuffer(1, dim, identity, BoolBuffer(_, _))
-    case x if x.equals(jl.Byte.TYPE)      => mkBuffer(1, dim, identity, ByteBuffer(_, _))
-    case x if x.equals(jl.Void.TYPE)      => mkBuffer(1, dim, identity, UnitBuffer(_, _))
+    case x if x.equals(jl.Boolean.TYPE)   => mkBuffer(jl.Byte.BYTES, dim, identity, BoolBuffer(_, _))
+    case x if x.equals(jl.Byte.TYPE)      => mkBuffer(jl.Byte.BYTES, dim, identity, ByteBuffer(_, _))
+    case x if x.equals(jl.Void.TYPE)      => mkBuffer(jl.Byte.BYTES, dim, identity, UnitBuffer(_, _))
   }).asInstanceOf[Buffer[A]]
 
   // zeros by default

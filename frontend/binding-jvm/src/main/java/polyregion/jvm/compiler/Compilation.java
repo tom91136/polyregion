@@ -1,6 +1,7 @@
 package polyregion.jvm.compiler;
 
 import java.util.Arrays;
+import java.util.Objects;
 
 public final class Compilation {
 
@@ -10,10 +11,10 @@ public final class Compilation {
   public final String messages;
 
   Compilation(byte[] program, Event[] events, Layout[] layouts, String messages) {
-    this.program = program;
-    this.events = events;
-    this.layouts = layouts;
-    this.messages = messages;
+    this.program = Objects.requireNonNull(program);
+    this.events = Objects.requireNonNull(events);
+    this.layouts = Objects.requireNonNull(layouts);
+    this.messages = Objects.requireNonNull(messages);
   }
 
   @Override

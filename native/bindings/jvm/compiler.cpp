@@ -5,17 +5,34 @@
 #include "jni_utils.h"
 #include "mirror.h"
 #include "polyregion_jvm_compiler_Compiler.h"
+#include "utils.hpp"
 
 static constexpr const char *EX = "polyregion/PolyregionCompilerException";
 
 using namespace polyregion;
+namespace cp = ::compiler;
 namespace gen = ::generated;
+
+static_assert(polyregion::to_underlying(cp::Target::Object_LLVM_x86_64) ==
+              polyregion_jvm_compiler_Compiler_TargetObjectLLVM_1x86_164);
+static_assert(polyregion::to_underlying(cp::Target::Object_LLVM_AArch64) ==
+              polyregion_jvm_compiler_Compiler_TargetObjectLLVM_1AArch64);
+static_assert(polyregion::to_underlying(cp::Target::Object_LLVM_ARM) ==
+              polyregion_jvm_compiler_Compiler_TargetObjectLLVM_1ARM);
+static_assert(polyregion::to_underlying(cp::Target::Object_LLVM_NVPTX64) ==
+              polyregion_jvm_compiler_Compiler_TargetObjectLLVM_1NVPTX64);
+static_assert(polyregion::to_underlying(cp::Target::Object_LLVM_AMDGCN) ==
+              polyregion_jvm_compiler_Compiler_TargetObjectLLVM_1AMDGCN);
+static_assert(polyregion::to_underlying(cp::Target::Source_C_OpenCL1_1) ==
+              polyregion_jvm_compiler_Compiler_TargetSourceC_1OpenCL1_11);
+static_assert(polyregion::to_underlying(cp::Target::Source_C_C11) ==
+              polyregion_jvm_compiler_Compiler_TargetSourceC_1C11);
 
 [[maybe_unused]] jint JNI_OnLoad(JavaVM *vm, void *) {
   fprintf(stderr, "JVM enter\n");
   JNIEnv *env = getEnv(vm);
   if (!env) return JNI_ERR;
-  compiler::initialise();
+  cp::initialise();
   return JNI_VERSION_1_1;
 }
 
@@ -30,7 +47,7 @@ namespace gen = ::generated;
   gen::String::drop(env);
 }
 
-static generated::Layout::Instance toJni(JNIEnv *env, const compiler::Layout &l) {
+static generated::Layout::Instance toJni(JNIEnv *env, const cp::Layout &l) {
   return gen::Layout::of(env)(
       env,                                                                                        //
       toJni(env, l.name.fqn, gen::String::of(env).clazz, [&](auto &x) { return toJni(env, x); }), //
@@ -47,14 +64,14 @@ static generated::Layout::Instance toJni(JNIEnv *env, const compiler::Layout &l)
   );                                                                                              //
 }
 
-static generated::Event::Instance toJni(JNIEnv *env, const compiler::Event &e) {
+static generated::Event::Instance toJni(JNIEnv *env, const cp::Event &e) {
   return gen::Event::of(env)(env, e.epochMillis, e.elapsedNanos, toJni(env, e.name), toJni(env, e.data));
 }
 
-static compiler::Options fromJni(JNIEnv *env, jobject options) {
+static cp::Options fromJni(JNIEnv *env, jobject options) {
   auto opt = gen::Options::of(env).wrap(env, options);
   auto targetOrdinal = opt.target(env);
-  if (auto target = polyregion::compiler::targetFromOrdinal(targetOrdinal); target) {
+  if (auto target = cp::targetFromOrdinal(targetOrdinal); target) {
     return {.target = *target, .arch = fromJni(env, opt.arch(env))};
   } else
     throw std::logic_error("Unknown target value: " + std::to_string(targetOrdinal));
@@ -63,7 +80,7 @@ static compiler::Options fromJni(JNIEnv *env, jobject options) {
 [[maybe_unused]] jobject Java_polyregion_jvm_compiler_Compiler_layoutOf(JNIEnv *env, jclass, //
                                                                         jbyteArray structDef, jobject options) {
   return wrapException(env, EX, [&]() {
-    return toJni(env, compiler::layoutOf(fromJni<char>(env, structDef), fromJni(env, options))).instance;
+    return toJni(env, cp::layoutOf(fromJni<char>(env, structDef), fromJni(env, options))).instance;
   });
 }
 
@@ -71,7 +88,7 @@ static compiler::Options fromJni(JNIEnv *env, jobject options) {
                                                                        jbyteArray function, jboolean emitDisassembly,
                                                                        jobject options) {
   return wrapException(env, EX, [&]() {
-    auto c = compiler::compile(fromJni<char>(env, function), fromJni(env, options));
+    auto c = cp::compile(fromJni<char>(env, function), fromJni(env, options));
     if (!c.binary) throw std::logic_error(c.messages);
     auto bin = env->NewByteArray(jsize(c.binary->size()));
     env->SetByteArrayRegion(bin, 0, jsize(c.binary->size()), reinterpret_cast<jbyte *>(c.binary->data()));

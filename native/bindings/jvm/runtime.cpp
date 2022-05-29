@@ -11,7 +11,7 @@
 #include "jni_utils.h"
 #include "mirror.h"
 #include "object_runtime.h"
-#include "polyregion_jvm_runtime_Runtimes.h"
+#include "polyregion_jvm_runtime_Runtime.h"
 #include "runtime.h"
 #include "utils.hpp"
 using namespace polyregion;
@@ -20,16 +20,16 @@ namespace gen = ::generated;
 
 static constexpr const char *EX = "polyregion/PolyregionRuntimeException";
 
-static_assert(polyregion::to_underlying(rt::Type::Void) == polyregion_jvm_runtime_Runtimes_TYPE_1VOID);
-static_assert(polyregion::to_underlying(rt::Type::Bool8) == polyregion_jvm_runtime_Runtimes_TYPE_1BOOL);
-static_assert(polyregion::to_underlying(rt::Type::Byte8) == polyregion_jvm_runtime_Runtimes_TYPE_1BYTE);
-static_assert(polyregion::to_underlying(rt::Type::CharU16) == polyregion_jvm_runtime_Runtimes_TYPE_1CHAR);
-static_assert(polyregion::to_underlying(rt::Type::Short16) == polyregion_jvm_runtime_Runtimes_TYPE_1SHORT);
-static_assert(polyregion::to_underlying(rt::Type::Int32) == polyregion_jvm_runtime_Runtimes_TYPE_1INT);
-static_assert(polyregion::to_underlying(rt::Type::Long64) == polyregion_jvm_runtime_Runtimes_TYPE_1LONG);
-static_assert(polyregion::to_underlying(rt::Type::Float32) == polyregion_jvm_runtime_Runtimes_TYPE_1FLOAT);
-static_assert(polyregion::to_underlying(rt::Type::Double64) == polyregion_jvm_runtime_Runtimes_TYPE_1DOUBLE);
-static_assert(polyregion::to_underlying(rt::Type::Ptr) == polyregion_jvm_runtime_Runtimes_TYPE_1PTR);
+static_assert(polyregion::to_underlying(rt::Type::Void) == polyregion_jvm_runtime_Runtime_TYPE_1VOID);
+static_assert(polyregion::to_underlying(rt::Type::Bool8) == polyregion_jvm_runtime_Runtime_TYPE_1BOOL);
+static_assert(polyregion::to_underlying(rt::Type::Byte8) == polyregion_jvm_runtime_Runtime_TYPE_1BYTE);
+static_assert(polyregion::to_underlying(rt::Type::CharU16) == polyregion_jvm_runtime_Runtime_TYPE_1CHAR);
+static_assert(polyregion::to_underlying(rt::Type::Short16) == polyregion_jvm_runtime_Runtime_TYPE_1SHORT);
+static_assert(polyregion::to_underlying(rt::Type::Int32) == polyregion_jvm_runtime_Runtime_TYPE_1INT);
+static_assert(polyregion::to_underlying(rt::Type::Long64) == polyregion_jvm_runtime_Runtime_TYPE_1LONG);
+static_assert(polyregion::to_underlying(rt::Type::Float32) == polyregion_jvm_runtime_Runtime_TYPE_1FLOAT);
+static_assert(polyregion::to_underlying(rt::Type::Double64) == polyregion_jvm_runtime_Runtime_TYPE_1DOUBLE);
+static_assert(polyregion::to_underlying(rt::Type::Ptr) == polyregion_jvm_runtime_Runtime_TYPE_1PTR);
 
 static JavaVM *CurrentVM;
 
@@ -82,7 +82,7 @@ static jobjectArray toJni(JNIEnv *env, const std::vector<rt::Property> &xs) {
   });
 }
 
-[[maybe_unused]] void Java_polyregion_jvm_runtime_Runtimes_deleteAllPeer(JNIEnv *env, jclass) {
+[[maybe_unused]] void Java_polyregion_jvm_runtime_Runtime_deleteAllPeer0(JNIEnv *env, jclass) {
   std::lock_guard l(lock);
   DeviceQueues.clear();
   Devices.clear();
@@ -90,15 +90,15 @@ static jobjectArray toJni(JNIEnv *env, const std::vector<rt::Property> &xs) {
   Runtimes.clear();
 }
 
-[[maybe_unused]] void Java_polyregion_jvm_runtime_Runtimes_deleteRuntimePeer(JNIEnv *env, jclass, jlong nativePeer) {
+[[maybe_unused]] void Java_polyregion_jvm_runtime_Runtime_deleteRuntimePeer0(JNIEnv *env, jclass, jlong nativePeer) {
   std::lock_guard l(lock);
   Runtimes.erase(nativePeer);
 }
-[[maybe_unused]] void Java_polyregion_jvm_runtime_Runtimes_deleteQueuePeer(JNIEnv *env, jclass, jlong nativePeer) {
+[[maybe_unused]] void Java_polyregion_jvm_runtime_Runtime_deleteQueuePeer0(JNIEnv *env, jclass, jlong nativePeer) {
   std::lock_guard l(lock);
   DeviceQueues.erase(nativePeer);
 }
-[[maybe_unused]] void Java_polyregion_jvm_runtime_Runtimes_deleteDevicePeer(JNIEnv *env, jclass, jlong nativePeer) {
+[[maybe_unused]] void Java_polyregion_jvm_runtime_Runtime_deleteDevicePeer0(JNIEnv *env, jclass, jlong nativePeer) {
   std::lock_guard l(lock);
   Devices.erase(nativePeer);
   DeviceModuleImages.erase(nativePeer);
@@ -111,26 +111,26 @@ template <typename R> static jobject toJni(JNIEnv *env) {
   });
 }
 
-[[maybe_unused]] jobject Java_polyregion_jvm_runtime_Runtimes_CUDA(JNIEnv *env, jclass) {
+[[maybe_unused]] jobject Java_polyregion_jvm_runtime_Runtime_CUDA0(JNIEnv *env, jclass) {
   return toJni<rt::cuda::CudaRuntime>(env);
 }
-[[maybe_unused]] jobject Java_polyregion_jvm_runtime_Runtimes_HIP(JNIEnv *env, jclass) {
+[[maybe_unused]] jobject Java_polyregion_jvm_runtime_Runtime_HIP0(JNIEnv *env, jclass) {
   return toJni<rt::hip::HipRuntime>(env);
 }
-[[maybe_unused]] jobject Java_polyregion_jvm_runtime_Runtimes_OpenCL(JNIEnv *env, jclass) {
+[[maybe_unused]] jobject Java_polyregion_jvm_runtime_Runtime_OpenCL0(JNIEnv *env, jclass) {
   return toJni<rt::cl::ClRuntime>(env);
 }
-[[maybe_unused]] jobject Java_polyregion_jvm_runtime_Runtimes_Relocatable(JNIEnv *env, jclass) {
+[[maybe_unused]] jobject Java_polyregion_jvm_runtime_Runtime_Relocatable0(JNIEnv *env, jclass) {
   return toJni<rt::object::RelocatableRuntime>(env);
 }
-[[maybe_unused]] jobject Java_polyregion_jvm_runtime_Runtimes_Dynamic(JNIEnv *env, jclass) {
+[[maybe_unused]] jobject Java_polyregion_jvm_runtime_Runtime_Dynamic0(JNIEnv *env, jclass) {
   return toJni<rt::object::SharedRuntime>(env);
 }
-[[maybe_unused]] jobjectArray Java_polyregion_jvm_runtime_Runtimes_runtimeProperties(JNIEnv *env, jclass,
+[[maybe_unused]] jobjectArray Java_polyregion_jvm_runtime_Runtime_runtimeProperties0(JNIEnv *env, jclass,
                                                                                      jlong nativePeer) {
   return toJni(env, findRef(env, Runtimes, nativePeer)->properties());
 }
-[[maybe_unused]] jobjectArray Java_polyregion_jvm_runtime_Runtimes_devices0(JNIEnv *env, jclass, jlong nativePeer) {
+[[maybe_unused]] jobjectArray Java_polyregion_jvm_runtime_Runtime_devices0(JNIEnv *env, jclass, jlong nativePeer) {
   return wrapException(env, EX, [&]() {
     auto devices = findRef(env, Runtimes, nativePeer)->enumerate();
     return toJni(env, devices, gen::Device::of(env).clazz, [&](auto &device) {
@@ -140,12 +140,12 @@ template <typename R> static jobject toJni(JNIEnv *env) {
   });
 }
 
-[[maybe_unused]] jobjectArray Java_polyregion_jvm_runtime_Runtimes_deviceProperties(JNIEnv *env, jclass,
+[[maybe_unused]] jobjectArray Java_polyregion_jvm_runtime_Runtime_deviceProperties0(JNIEnv *env, jclass,
                                                                                     jlong nativePeer) {
   return wrapException(env, EX, [&]() { return toJni(env, findRef(env, Devices, nativePeer)->properties()); });
 }
 
-[[maybe_unused]] void Java_polyregion_jvm_runtime_Runtimes_loadModule0(JNIEnv *env, jclass, jlong nativePeer,
+[[maybe_unused]] void Java_polyregion_jvm_runtime_Runtime_loadModule0(JNIEnv *env, jclass, jlong nativePeer,
                                                                        jstring name, jbyteArray image) {
 
   wrapException(env, EX, [&]() {
@@ -160,7 +160,7 @@ template <typename R> static jobject toJni(JNIEnv *env) {
   });
 }
 
-[[maybe_unused]] jlong Java_polyregion_jvm_runtime_Runtimes_malloc0(JNIEnv *env, jclass, jlong nativePeer, jlong size,
+[[maybe_unused]] jlong Java_polyregion_jvm_runtime_Runtime_malloc0(JNIEnv *env, jclass, jlong nativePeer, jlong size,
                                                                     jbyte access) {
   if (auto a = rt::fromUnderlying(access); a) {
     return wrapException(env, EX,
@@ -169,10 +169,10 @@ template <typename R> static jobject toJni(JNIEnv *env) {
     return throwGeneric<jlong>(env, EX, "Illegal access type " + std::to_string(access));
 }
 
-[[maybe_unused]] void Java_polyregion_jvm_runtime_Runtimes_free0(JNIEnv *env, jclass, jlong nativePeer, jlong handle) {
+[[maybe_unused]] void Java_polyregion_jvm_runtime_Runtime_free0(JNIEnv *env, jclass, jlong nativePeer, jlong handle) {
   wrapException(env, EX, [&]() { findRef(env, Devices, nativePeer)->free(static_cast<jlong>(handle)); });
 }
-[[maybe_unused]] jobject Java_polyregion_jvm_runtime_Runtimes_createQueue0(JNIEnv *env, jclass, jlong nativePeer) {
+[[maybe_unused]] jobject Java_polyregion_jvm_runtime_Runtime_createQueue0(JNIEnv *env, jclass, jlong nativePeer) {
   return wrapException(env, EX, [&]() {
     auto queue = findRef(env, Devices, nativePeer)->createQueue();
     auto [peer, _] = emplaceRef(DeviceQueues, std::shared_ptr(std::move(queue)));
@@ -201,7 +201,7 @@ static rt::MaybeCallback fromJni(JNIEnv *env, jobject cb) {
   });
 }
 
-[[maybe_unused]] void Java_polyregion_jvm_runtime_Runtimes_enqueueHostToDeviceAsync0(JNIEnv *env, jclass, //
+[[maybe_unused]] void Java_polyregion_jvm_runtime_Runtime_enqueueHostToDeviceAsync0(JNIEnv *env, jclass, //
                                                                                      jlong nativePeer,    //
                                                                                      jobject src, jlong dst, jint size,
                                                                                      jobject cb) {
@@ -212,7 +212,7 @@ static rt::MaybeCallback fromJni(JNIEnv *env, jobject cb) {
     findRef(env, DeviceQueues, nativePeer)->enqueueHostToDeviceAsync(srcPtr, dst, size, fromJni(env, cb));
   });
 }
-[[maybe_unused]] void Java_polyregion_jvm_runtime_Runtimes_enqueueDeviceToHostAsync0(JNIEnv *env, jclass, //
+[[maybe_unused]] void Java_polyregion_jvm_runtime_Runtime_enqueueDeviceToHostAsync0(JNIEnv *env, jclass, //
                                                                                      jlong nativePeer,    //
                                                                                      jlong src, jobject dst, jint size,
                                                                                      jobject cb) {
@@ -227,7 +227,7 @@ static rt::Dim3 fromJni(JNIEnv *env, const generated::Dim3::Instance &d3) {
   return {static_cast<size_t>(d3.x(env)), static_cast<size_t>(d3.y(env)), static_cast<size_t>(d3.z(env))};
 }
 
-[[maybe_unused]] void Java_polyregion_jvm_runtime_Runtimes_enqueueInvokeAsync0(JNIEnv *env, jclass, jlong nativePeer, //
+[[maybe_unused]] void Java_polyregion_jvm_runtime_Runtime_enqueueInvokeAsync0(JNIEnv *env, jclass, jlong nativePeer, //
                                                                                jstring moduleName, jstring symbol,    //
                                                                                jbyteArray argTypes,                   //
                                                                                jbyteArray argData,                    //

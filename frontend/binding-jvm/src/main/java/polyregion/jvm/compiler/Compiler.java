@@ -8,13 +8,13 @@ import polyregion.jvm.Loader;
 
 public final class Compiler {
 
-  public static final byte TargetObjectLLVM_x86_64 = 0;
-  public static final byte TargetObjectLLVM_AArch64 = 1;
-  public static final byte TargetObjectLLVM_ARM = 2;
-  public static final byte TargetObjectLLVM_NVPTX64 = 3;
-  public static final byte TargetObjectLLVM_AMDGCN = 4;
-  public static final byte TargetSourceC_OpenCL1_1 = 5;
-  public static final byte TargetSourceC_C11 = 6;
+  public static final byte TargetObjectLLVM_x86_64 = 1;
+  public static final byte TargetObjectLLVM_AArch64 = 2;
+  public static final byte TargetObjectLLVM_ARM = 3;
+  public static final byte TargetObjectLLVM_NVPTX64 = 4;
+  public static final byte TargetObjectLLVM_AMDGCN = 5;
+  public static final byte TargetSourceC_OpenCL1_1 = 6;
+  public static final byte TargetSourceC_C11 = 7;
 
   public static native Compilation compile(byte[] function, boolean emitAssembly, Options options);
 

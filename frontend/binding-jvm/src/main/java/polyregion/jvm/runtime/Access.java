@@ -1,9 +1,9 @@
 package polyregion.jvm.runtime;
 
 public enum Access implements ByteEnum {
-  RW(Runtimes.ACCESS_RW),
-  RO(Runtimes.ACCESS_R0),
-  WO(Runtimes.ACCESS_WO);
+  RW(Runtime.ACCESS_RW),
+  RO(Runtime.ACCESS_R0),
+  WO(Runtime.ACCESS_WO);
 
   final byte value;
 

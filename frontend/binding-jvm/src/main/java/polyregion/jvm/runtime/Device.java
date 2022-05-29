@@ -2,7 +2,6 @@ package polyregion.jvm.runtime;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
@@ -17,18 +16,11 @@ public final class Device implements AutoCloseable {
     }
 
     public void enqueueHostToDeviceAsync(ByteBuffer src, long dst, int size, Runnable cb) {
-      try {
-
-        Runtimes.enqueueHostToDeviceAsync0(nativePeer, src, dst, size,  cb);
-      }catch (Throwable t){
-
-        throw t;
-      }
-
+      Runtime.enqueueHostToDeviceAsync0(nativePeer, src, dst, size, cb);
     }
 
     public void enqueueDeviceToHostAsync(long src, ByteBuffer dst, int size, Runnable cb) {
-      Runtimes.enqueueDeviceToHostAsync0(nativePeer, src, dst, size, cb);
+      Runtime.enqueueDeviceToHostAsync0(nativePeer, src, dst, size, cb);
     }
 
     public void enqueueInvokeAsync(
@@ -52,7 +44,7 @@ public final class Device implements AutoCloseable {
       for (Arg<?> arg : args) arg.drainTo(buffer);
       rtn.drainTo(buffer);
 
-      Runtimes.enqueueInvokeAsync0(
+      Runtime.enqueueInvokeAsync0(
           nativePeer, moduleName, symbol, argTys, buffer.array(), policy, cb);
     }
 
@@ -63,13 +55,12 @@ public final class Device implements AutoCloseable {
         byte[] argData,
         Policy policy,
         Runnable cb) {
-      Runtimes.enqueueInvokeAsync0(
-          nativePeer, moduleName, symbol, argTypes, argData, policy, cb);
+      Runtime.enqueueInvokeAsync0(nativePeer, moduleName, symbol, argTypes, argData, policy, cb);
     }
 
     @Override
     public void close() {
-      Runtimes.deleteQueuePeer(nativePeer);
+      Runtime.deleteQueuePeer0(nativePeer);
     }
   }
 
@@ -84,28 +75,28 @@ public final class Device implements AutoCloseable {
   }
 
   public Property[] properties() {
-    return Runtimes.deviceProperties(nativePeer);
+    return Runtime.deviceProperties0(nativePeer);
   }
 
   public Queue createQueue() {
-    return Runtimes.createQueue0(nativePeer);
+    return Runtime.createQueue0(nativePeer);
   }
 
   public void loadModule(String name, byte[] image) {
-    Runtimes.loadModule0(nativePeer, name, image);
+    Runtime.loadModule0(nativePeer, name, image);
   }
 
   public long malloc(long size, Access access) {
-    return Runtimes.malloc0(nativePeer, size, access.value);
+    return Runtime.malloc0(nativePeer, size, access.value);
   }
 
   public void free(long data) {
-    Runtimes.free0(nativePeer, data);
+    Runtime.free0(nativePeer, data);
   }
 
   @Override
   public void close() {
-    Runtimes.deleteDevicePeer(nativePeer);
+    Runtime.deleteDevicePeer0(nativePeer);
   }
 
   @Override

@@ -96,9 +96,9 @@ object CheckApi {
 
     import polyregion.jvm.runtime.*
 
-    Runtimes.load()
+    Runtime.load()
 
-    val rs = Array(Runtimes.Relocatable(), Runtimes.OpenCL(), Runtimes.CUDA())
+    val rs = Array(Runtime.Relocatable(), Runtime.OpenCL(), Runtime.CUDA())
 
 
     rs.foreach { r =>

@@ -1,6 +1,7 @@
 package polyregion.jvm.compiler;
 
 import java.util.Arrays;
+import java.util.Objects;
 
 public final class Layout {
 
@@ -10,10 +11,10 @@ public final class Layout {
   public final Member[] members;
 
   Layout(String[] name, long sizeInBytes, long alignment, Member[] members) {
-    this.name = name;
+    this.name = Objects.requireNonNull(name);
     this.sizeInBytes = sizeInBytes;
     this.alignment = alignment;
-    this.members = members;
+    this.members = Objects.requireNonNull(members);
   }
 
   @Override

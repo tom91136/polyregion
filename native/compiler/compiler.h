@@ -21,12 +21,13 @@ using TimePoint = std::chrono::steady_clock::time_point;
 [[nodiscard]] int64_t nowMs();
 
 enum class EXPORT Target : uint8_t {
-  Object_LLVM_x86_64 = 0,
-  Object_LLVM_AArch64 = 1,
-  Object_LLVM_NVPTX64 = 2,
-  Object_LLVM_AMDGCN = 3,
-  Source_C_OpenCL1_1 = 4,
-  Source_C_C11 = 5
+  Object_LLVM_x86_64 = 1,
+  Object_LLVM_AArch64,
+  Object_LLVM_ARM,
+  Object_LLVM_NVPTX64,
+  Object_LLVM_AMDGCN,
+  Source_C_OpenCL1_1,
+  Source_C_C11
 };
 
 EXPORT std::optional<Target> targetFromOrdinal(std::underlying_type_t<Target> ordinal);

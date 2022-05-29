@@ -1,6 +1,10 @@
 Global / onChangedBuildSource := ReloadOnSourceChanges
 
-val scala3Version = "3.1.2"
+lazy val bindingsDir = (file(".") / ".." / "native" / "bindings" / "jvm").getAbsoluteFile
+
+lazy val scala3Version = "3.1.2"
+lazy val catsVersion   = "2.7.0"
+lazy val munitVersion  = "1.0.0-M4"
 
 lazy val commonSettings = Seq(
   scalaVersion     := scala3Version,
@@ -33,19 +37,6 @@ lazy val commonSettings = Seq(
   scalafmtFailOnErrors  := true
 )
 
-// bindings-jvm (incl looder)
-// runtime-scala (SBuffers)
-// runtime-java  (JBuffers)
-// compiler
-// examples-scala
-// examples-java
-
-lazy val catsVersion  = "2.7.0"
-lazy val munitVersion = "1.0.0-M3"
-
-lazy val bindingsDir      = (file(".") / ".." / "native" / "bindings" / "jvm").getAbsoluteFile
-
-
 lazy val `binding-jvm` = project.settings(
   commonSettings,
   name             := "binding-jvm",
@@ -56,11 +47,11 @@ lazy val `binding-jvm` = project.settings(
 lazy val `runtime-java` = project
   .settings(
     commonSettings,
-    name             := "runtime-java",
-    autoScalaLibrary := false,
+    name                := "runtime-java",
+    autoScalaLibrary    := false,
     assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly"))
   )
-  .dependsOn(`binding-jvm`)
+  .dependsOn(`binding-jvm`, compiler % Compile)
 
 lazy val `runtime-scala` = project
   .settings(
@@ -71,13 +62,12 @@ lazy val `runtime-scala` = project
     ),
     assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly"))
   )
-  .dependsOn(`binding-jvm`)
+  .dependsOn(`binding-jvm`, compiler % Compile)
 
 lazy val compiler = project
   .settings(
     commonSettings,
     name                := "compiler",
-    javah / target      := bindingsDir / "jvm-compiler",
     assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly")),
     javacOptions ++= Seq("-proc:none"),
     scalacOptions ++=
@@ -95,6 +85,7 @@ lazy val compiler = project
       val xs       = (Compile / unmanagedJars).value
       val log      = streams.value.log
       val toolsJar = file(sys.props("java.home")).getParentFile / "lib" / "tools.jar"
+      // XXX This is only for Java 8's classpath, Java 9+ uses JPMS so it's OK to not find anything.
       if (!toolsJar.exists()) xs
       else {
         log.info(s"Found tools.jar at $toolsJar")
@@ -102,7 +93,7 @@ lazy val compiler = project
       }
     }
   )
-  .dependsOn(`runtime-scala`, `runtime-java`)
+  .dependsOn(`binding-jvm`)
 
 lazy val `compiler-testsuite-scala` = project
   .settings(
@@ -150,7 +141,7 @@ lazy val `examples-scala` = project
       "org.scala-lang.modules" %% "scala-parallel-collections" % "1.0.4"
     )
   )
-  .dependsOn(compiler % Provided, `runtime-scala`)
+  .dependsOn(`runtime-scala`)
 
 lazy val `benchmarks-scala` = project
   .enablePlugins(JmhPlugin)
@@ -166,7 +157,7 @@ lazy val `benchmarks-scala` = project
       // "org.scala-lang.modules" %% "scala-parallel-collections" % "1.0.4"
     )
   )
-  .dependsOn(compiler % Provided, `runtime-scala`)
+  .dependsOn(`runtime-scala`)
 
 lazy val root = project
   .in(file("."))

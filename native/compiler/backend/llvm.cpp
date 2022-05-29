@@ -363,7 +363,8 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
       [&](const Expr::NullaryIntrinsic &x) -> ValPtr {
         switch (options.target) {
           case Target::x86_64:
-          case Target::AArch64: return undefined(__FILE_NAME__, __LINE__);
+          case Target::AArch64:
+          case Target::ARM: return undefined(__FILE_NAME__, __LINE__);
           case Target::NVPTX64: {
             // threadId  @llvm.nvvm.read.ptx.sreg.tid.*
             // blockIdx  @llvm.nvvm.read.ptx.sreg.ctaid.*
@@ -940,6 +941,7 @@ Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform(const std::u
   switch (options.target) {
     case Target::x86_64:
     case Target::AArch64:
+    case Target::ARM:
       break; // CPUs default to generic so nothing to do here.
       // For GPUs, any pointer passed in as args should be annotated global AS.
       //             AMDGPU   |   NVVM
@@ -987,6 +989,7 @@ Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform(const std::u
   switch (options.target) {
     case Target::x86_64:
     case Target::AArch64:
+    case Target::ARM:
       // nothing to do for CPUs
       break;
     case Target::NVPTX64:
@@ -1090,6 +1093,7 @@ llvmc::TargetInfo LLVM::Options::toTargetInfo() const {
   switch (target) {
     case LLVM::Target::x86_64: return bindCpuArch(Triple::ArchType::x86_64);
     case LLVM::Target::AArch64: return bindCpuArch(Triple::ArchType::aarch64);
+    case LLVM::Target::ARM: return bindCpuArch(Triple::ArchType::arm);
     case LLVM::Target::NVPTX64:
       return bindGpuArch(Triple::ArchType::nvptx64, Triple::VendorType::NVIDIA, Triple::OSType::CUDA);
     case LLVM::Target::AMDGCN:

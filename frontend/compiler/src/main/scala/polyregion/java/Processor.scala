@@ -275,7 +275,7 @@ class Processor extends AbstractProcessor {
     )
 
     val markerClosures =
-      Set(classOf[_root_.polyregion.java.OffloadRunnable], classOf[_root_.polyregion.java.OffloadFunction[_]])
+      Set("polyregion.java.OffloadRunnable", "polyregion.java.OffloadFunction")
 
     (for {
       _ <- addOpens(allPkgs).adaptError(e => new RuntimeException("Unable to add opens at runtime", e))
@@ -310,7 +310,7 @@ class Processor extends AbstractProcessor {
 
               val r = LambdaOutliner.extractDeserializeLambdaMethods(
                 reflector,
-                markerClosures.map(_.getCanonicalName),
+                markerClosures,
                 cu
               )
 
@@ -343,8 +343,10 @@ class Processor extends AbstractProcessor {
                     processingEnv.getFiler.createResource(StandardLocation.CLASS_OUTPUT, pkg, s"$name.class", null)
                   val os = gen.openOutputStream()
 
+
+
                   val bytes = new net.bytebuddy.ByteBuddy()
-                    .subclass(classOf[_root_.polyregion.java.BinaryOffloadExecutable])
+                    .subclass(classOf[ /* _root_.polyregion.java.BinaryOffloadExecutable */ Nothing])
                     .name(fqcn)
                     .modifiers(Visibility.PUBLIC, TypeManifestation.FINAL)
                     .defineField(

@@ -174,7 +174,7 @@ object Retyper {
           (name, tpeVars, symbol, kind) <- resolveClsFromTpeRepr(tpeCtor)
           tpeCtorArgs                   <- args.traverse(typer0(_))
         } yield (name, kind, tpeCtorArgs) match {
-          case (Symbols.Buffer, q.ClassKind.Class, (_, comp: p.Type) :: Nil) => (None, p.Type.Array(comp))
+//          case (Symbols.Buffer, q.ClassKind.Class, (_, comp: p.Type) :: Nil) => (None, p.Type.Array(comp))
           case (Symbols.Array, q.ClassKind.Class, (_, comp: p.Type) :: Nil)  => (None, p.Type.Array(comp))
           case (_, _, ys) if tpe.isFunctionType                              => // FunctionN
             // TODO make sure this works
