@@ -79,6 +79,7 @@ struct Policy {
   jfieldID globalField;
   jfieldID localField;
   jmethodID ctor0Method;
+  jmethodID ctor1Method;
 private:
   explicit Policy(JNIEnv *env);
   static thread_local std::unique_ptr<Policy> cached;
@@ -87,6 +88,7 @@ public:
   static void drop(JNIEnv *env);
   Instance wrap (JNIEnv *env, jobject instance);
   Instance operator()(JNIEnv *env, jobject global) const;
+  Instance operator()(JNIEnv *env, jobject global, jobject local) const;
 };
 struct Queue {
   struct Instance {
@@ -105,7 +107,7 @@ public:
   static Queue& of(JNIEnv *env);
   static void drop(JNIEnv *env);
   Instance wrap (JNIEnv *env, jobject instance);
-  Instance operator()(JNIEnv *env, jlong nativePeer) const;
+  Instance operator()(JNIEnv *env, jlong nativePeer, jobject device) const;
 };
 struct Device {
   struct Instance {

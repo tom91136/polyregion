@@ -101,7 +101,7 @@ public final class Runtime implements AutoCloseable {
 
   static native void free0(long nativePeer, long handle);
 
-  static native Queue createQueue0(long nativePeer);
+  static native Queue createQueue0(long nativePeer, Device owner);
 
   static native void enqueueHostToDeviceAsync0(
       long nativePeer, ByteBuffer src, long dst, int size, Runnable cb);

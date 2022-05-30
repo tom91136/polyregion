@@ -2,17 +2,36 @@ package polyregion.jvm.runtime;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.WeakHashMap;
+import java.util.Map;
+
 
 public final class Device implements AutoCloseable {
 
   public static class Queue implements AutoCloseable {
 
     final long nativePeer;
+    public final Device device;
+    public final Map<Object, ByteBuffer> references = Collections.synchronizedMap(new WeakHashMap<>());
 
-    Queue(long nativePeer) {
+    Queue(long nativePeer, Device device) {
       this.nativePeer = nativePeer;
+      this.device = Objects.requireNonNull(device);
+    }
+
+    public void retainReference(Object object, ByteBuffer buffer){
+      references.put(Objects.requireNonNull(object), Objects.requireNonNull(buffer));
+    }
+
+    public boolean hasReference(Object object){
+      return references.containsKey(object);
+    }
+
+    public void releaseReferences(){
+      references.clear();
     }
 
     public void enqueueHostToDeviceAsync(ByteBuffer src, long dst, int size, Runnable cb) {
@@ -81,7 +100,10 @@ public final class Device implements AutoCloseable {
   }
 
   public Queue createQueue() {
-    return Runtime.createQueue0(nativePeer);
+    Queue q = Runtime.createQueue0(nativePeer, this);
+    if (q.device != this)
+      throw new AssertionError("Invalid device associated with Queue, check JNI implementation.");
+    return q;
   }
 
   public void loadModule(String name, byte[] image) {

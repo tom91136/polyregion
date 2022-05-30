@@ -75,7 +75,8 @@ Policy::Policy(JNIEnv *env)
     : clazz(reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/runtime/Policy")))),
       globalField(env->GetFieldID(clazz, "global", "Lpolyregion/jvm/runtime/Dim3;")),
       localField(env->GetFieldID(clazz, "local", "Lpolyregion/jvm/runtime/Dim3;")),
-      ctor0Method(env->GetMethodID(clazz, "<init>", "(Lpolyregion/jvm/runtime/Dim3;)V")) { };
+      ctor0Method(env->GetMethodID(clazz, "<init>", "(Lpolyregion/jvm/runtime/Dim3;)V")),
+      ctor1Method(env->GetMethodID(clazz, "<init>", "(Lpolyregion/jvm/runtime/Dim3;Lpolyregion/jvm/runtime/Dim3;)V")) { };
 thread_local std::unique_ptr<Policy> Policy::cached = {};
 Policy& Policy::of(JNIEnv *env) {
   if(!cached) cached = std::unique_ptr<Policy>(new Policy(env));
@@ -91,12 +92,15 @@ Policy::Instance Policy::wrap(JNIEnv *env, jobject instance) { return {*this, in
 Policy::Instance Policy::operator()(JNIEnv *env, jobject global) const {
   return {*this, env->NewObject(clazz, ctor0Method, global)};
 }
+Policy::Instance Policy::operator()(JNIEnv *env, jobject global, jobject local) const {
+  return {*this, env->NewObject(clazz, ctor1Method, global, local)};
+}
 
 Queue::Instance::Instance(const Queue &meta, jobject instance) : meta(meta), instance(instance) {}
 
 Queue::Queue(JNIEnv *env)
     : clazz(reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/runtime/Device$Queue")))),
-      ctor0Method(env->GetMethodID(clazz, "<init>", "(J)V")) { };
+      ctor0Method(env->GetMethodID(clazz, "<init>", "(JLpolyregion/jvm/runtime/Device;)V")) { };
 thread_local std::unique_ptr<Queue> Queue::cached = {};
 Queue& Queue::of(JNIEnv *env) {
   if(!cached) cached = std::unique_ptr<Queue>(new Queue(env));
@@ -109,8 +113,8 @@ void Queue::drop(JNIEnv *env){
   }
 }
 Queue::Instance Queue::wrap(JNIEnv *env, jobject instance) { return {*this, instance}; }
-Queue::Instance Queue::operator()(JNIEnv *env, jlong nativePeer) const {
-  return {*this, env->NewObject(clazz, ctor0Method, nativePeer)};
+Queue::Instance Queue::operator()(JNIEnv *env, jlong nativePeer, jobject device) const {
+  return {*this, env->NewObject(clazz, ctor0Method, nativePeer, device)};
 }
 
 Device::Instance::Instance(const Device &meta, jobject instance) : meta(meta), instance(instance) {}

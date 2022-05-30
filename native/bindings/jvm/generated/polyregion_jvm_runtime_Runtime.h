@@ -140,10 +140,10 @@ JNIEXPORT void JNICALL Java_polyregion_jvm_runtime_Runtime_free0
 /*
  * Class:      polyregion_jvm_runtime_Runtime
  * Method:     createQueue0
- * Signature:  (J)Lpolyregion/jvm/runtime/Device$Queue;
+ * Signature:  (JLpolyregion/jvm/runtime/Device;)Lpolyregion/jvm/runtime/Device$Queue;
  */
 JNIEXPORT jobject JNICALL Java_polyregion_jvm_runtime_Runtime_createQueue0
-  (JNIEnv *, jclass, jlong);
+  (JNIEnv *, jclass, jlong, jobject);
 
 /*
  * Class:      polyregion_jvm_runtime_Runtime

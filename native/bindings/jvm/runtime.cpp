@@ -194,11 +194,12 @@ template <typename R> static jobject toJni(JNIEnv *env) {
                                                                 jlong handle) {
   wrapException(env, EX, [&]() { findRef(env, Devices, nativePeer)->free(static_cast<jlong>(handle)); });
 }
-[[maybe_unused]] jobject Java_polyregion_jvm_runtime_Runtime_createQueue0(JNIEnv *env, jclass, jlong nativePeer) {
+
+[[maybe_unused]] jobject Java_polyregion_jvm_runtime_Runtime_createQueue0(JNIEnv *env, jclass, jlong nativePeer, jobject device) {
   return wrapException(env, EX, [&]() {
     auto queue = findRef(env, Devices, nativePeer)->createQueue();
     auto [peer, _] = emplaceRef(DeviceQueues, std::shared_ptr(std::move(queue)));
-    return gen::Queue::of(env)(env, peer).instance;
+    return gen::Queue::of(env)(env, peer, device).instance;
   });
 }
 

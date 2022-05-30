@@ -71,7 +71,7 @@ object Simple {
     val rel = polyregion.jvm.runtime.Runtime.Relocatable()
     val dev = rel.devices()(0)
 
-     val result = polyregion.scala.compiletime.offload (dev, dev.createQueue(), () => {
+     val result = polyregion.scala.compiletime.offload ( dev.createQueue(), () => {
        println("Done!")
      }){
  //      val objRef = Foo

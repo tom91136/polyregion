@@ -1,7 +1,9 @@
 package polyregion.scala
 
 import polyregion.ast.{CppSourceMirror, MsgPack, PolyAst as p, *}
-import polyregion.{jvm, scala as srt}
+import polyregion.scala as srt
+import polyregion.jvm.{runtime => rt}
+import polyregion.jvm.{compiler => ct}
 
 import java.nio.ByteBuffer
 import java.nio.file.Paths
@@ -192,19 +194,19 @@ object compiletime {
 //    }
 //  }
 
-  type Device = jvm.runtime.Device
-  type Queue  = jvm.runtime.Device.Queue
+  type Device = rt.Device
+  type Queue  = rt.Device.Queue
 
 //  inline def offload[A](inline x: => A): A = ${ offloadImpl[A]('x) }
 
-  inline def offload[A](inline device: Device, inline queue: Queue, inline cb: Runnable)(inline f: => A): A = ${
-    offloadImpl[A]('device, 'queue, 'f, 'cb)
+  inline def offload[A](inline queue: Queue, inline cb: Runnable)(inline f: => A): A = ${
+    offloadImpl[A]('queue, 'f, 'cb)
   }
 
 //  inline def offload(inline d: Device, inline x: Range, inline y: Range = Range(0, 0), inline z: Range = Range(0, 0))
 //  /*             */ (inline f: => (Int, Int, Int) => Unit): Unit = ${ offloadImpl[Unit](d, 'x, 'y, 'z, 'f) }
 
-  private def offloadImpl[A: Type](device: Expr[Device], queue: Expr[Queue], f: Expr[Any], cb: Expr[Runnable])(using
+  private def offloadImpl[A: Type](queue: Expr[Queue], f: Expr[Any], cb: Expr[Runnable])(using
       q: Quotes
   ): Expr[A] = {
     implicit val Q = Quoted(q)
@@ -212,59 +214,27 @@ object compiletime {
       (captures, prog, log) <- Compiler.compileExpr(f)
       _ = println(log.render)
       serialisedAst <- Try(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, prog))).toEither
-      // _ <- Either.catchNonFatal(throw new RuntimeException("STOP"))
-      // layout <- Either.catchNonFatal(PolyregionCompiler.layoutOf(MsgPack.encode(MsgPack.Versioned(CppCodeGen.AdtHash, prog.defs))))
-      //   _= println(s"layout=${layout}")
-
-      // c <- Right(new polyregion.Compilation())
-
-      options = jvm.compiler.Options(jvm.compiler.Compiler.TargetObjectLLVM_x86_64, "")
-      c <- Try((jvm.compiler.Compiler.compile(serialisedAst, true, options))).toEither
+      options = ct.Options(ct.Compiler.TargetObjectLLVM_x86_64, "")
+      c <- Try((ct.Compiler.compile(serialisedAst, true, options))).toEither
     } yield {
 
       println(s"Messages=\n  ${c.messages}")
       println(s"Program=${c.program.length}")
       println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
 
-      val programBytesExpr = Expr(c.program)
-      val astBytesExpr     = Expr(serialisedAst)
-      val fnName           = Expr("lambda")
-
-      //
-      // if (d0.sharedAddressSpace) {
-      //   jvm.runtime.Runtime.directBufferPointers()
-      // }
-      // d0.createQueue().enqueueHostToDeviceAsync(???)
-
-      // uniform address space
-
-      // val buffers = Array[ByteBuffer]($...)
-      // val pointers = jvm.runtime.Runtime.directBufferPointers(buffers)
-
-      // val params = ByteBuffer.alloc()
-      // params.put($AnyVal...)
-      // params.putLong(pointers[0])
-      // params.put($AnyVal...)
-      // params.putLong(pointers[n])
-
-      //
-      // params.array()
-
-      val indexedCaptures = captures.zipWithIndex
-
-      val paramTypes = captures.map((name, _) => Pickler.tpeAsRuntimeTpe(name.tpe))
-
-      val paramTotalSizeInBytes = paramTypes.map(_.sizeInBytes).sum
-
-      val captureTps = captures.map((name, _) => Pickler.tpeAsRuntimeTpe(name.tpe).value)
-
+      val fnName     = Expr("lambda")
       val moduleName = Expr(prog.entry.name.repr)
+
+      val (captureTpeOrdinal, captureTpeSizes) = captures.map { (name, _) =>
+        val tpe = Pickler.tpeAsRuntimeTpe(name.tpe)
+        tpe.value -> tpe.sizeInBytes
+      }.unzip
 
       def allocBuffer(size: Expr[Int]) = '{
         java.nio.ByteBuffer.allocateDirect($size).order(java.nio.ByteOrder.nativeOrder)
       }
 
-      val bufferExprs = indexedCaptures.foldLeft(VectorMap.empty[Int, (Int, Expr[ByteBuffer])]) {
+      val bufferExprs = captures.zipWithIndex.foldLeft(VectorMap.empty[Int, (Int, Expr[ByteBuffer])]) {
         case (acc, ((name, ref), idx)) =>
           (name.tpe, ref.tpe.asType) match {
             case (p.Type.Array(comp), x @ '[srt.Buffer[a]]) =>
@@ -295,32 +265,28 @@ object compiletime {
 
       val code = '{
 
-        if (! $device.moduleLoaded($moduleName)) {
-          $device.loadModule($moduleName, ${ Expr(c.program) })
+        if (! $queue.device.moduleLoaded($moduleName)) {
+          $queue.device.loadModule($moduleName, ${ Expr(c.program) })
         }
 
-        val paramTypes = ${ Expr(captureTps.toArray) } :+ 1.toByte /*1 = void*/
+        val captureTpeOrdinals = ${ Expr(captureTpeOrdinal.toArray) } :+ 1.toByte /*1 = void*/
+        val captureValues = ByteBuffer.allocate(${ Expr(captureTpeSizes.sum) }).order(java.nio.ByteOrder.nativeOrder)
 
-        println(s"Tpes:${paramTypes.toList}")
+        if ($queue.device.sharedAddressSpace) {
 
-        val paramBuffer =
-          java.nio.ByteBuffer.allocate(${ Expr(paramTotalSizeInBytes) }).order(java.nio.ByteOrder.nativeOrder)
-
-        if ($device.sharedAddressSpace) {
-
-          val pointers = jvm.runtime.Runtime.directBufferPointers(Array(${
+          val capturePointers = rt.Runtime.directBufferPointers(Array(${
             Varargs(bufferExprs.values.map(_._2).toSeq)
           }: _*))
 
-          println(s"Ptrs:${pointers.toList}")
+          println(s"Ptrs:${capturePointers.toList}")
 
           ${
             val (_, stmts) = captures.zipWithIndex.foldLeft((0, List.empty[Expr[Any]])) {
               case ((byteOffset, exprs), ((name, ref), idx)) =>
                 val expr = bufferExprs.get(idx) match {
-                  case Some((ptrArrayIdx, _)) =>
-                    '{ paramBuffer.putLong(${ Expr(byteOffset) }, pointers(${ Expr(ptrArrayIdx) })) }
-                  case None => Pickler.writePrimitiveAtOffset('paramBuffer, Expr(byteOffset), name.tpe, ref.asExpr)
+                  case Some((capturePointerIdx, _)) =>
+                    '{ captureValues.putLong(${ Expr(byteOffset) }, capturePointers(${ Expr(capturePointerIdx) })) }
+                  case None => Pickler.writePrimitiveAtOffset('captureValues, Expr(byteOffset), name.tpe, ref.asExpr)
                 }
                 (byteOffset + Pickler.tpeAsRuntimeTpe(name.tpe).sizeInBytes, exprs :+ expr)
             }
@@ -330,34 +296,34 @@ object compiletime {
           $queue.enqueueInvokeAsync(
             $moduleName,
             $fnName,
-            paramTypes,
-            paramBuffer.array,
-            jvm.runtime.Policy(jvm.runtime.Dim3(1, 1, 1)),
+            captureTpeOrdinals,
+            captureValues.array,
+            rt.Policy(rt.Dim3(1, 1, 1)),
             $cb
           )
 
         } else {
 
-          val p = $device.malloc(0, jvm.runtime.Access.RW)
+          val p = $queue.device.malloc(0, rt.Access.RW)
 
           $queue.enqueueHostToDeviceAsync(???, p, 0, null)
 
-          val pointers = jvm.runtime.Runtime.directBufferPointers(Array(${
+          val pointers = rt.Runtime.directBufferPointers(Array(${
             Varargs(bufferExprs.values.map(_._2).toSeq)
           }: _*))
 
           $queue.enqueueInvokeAsync(
             $moduleName,
             $fnName,
-            paramTypes,
-            paramBuffer.array,
-            jvm.runtime.Policy(jvm.runtime.Dim3(1, 1, 1)),
+            captureTpeOrdinals,
+            captureValues.array,
+            rt.Policy(rt.Dim3(1, 1, 1)),
             $cb
           )
 
           $queue.enqueueDeviceToHostAsync(p, ???, 0, null)
 
-          $device.free(p)
+          $queue.device.free(p)
 
           ???
         }
