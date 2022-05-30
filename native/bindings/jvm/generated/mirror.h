@@ -29,12 +29,9 @@ struct Property {
     jobject instance;
     Instance(const Property &meta, jobject instance);
     template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
-    jstring key(JNIEnv *env) const;
-    jstring value(JNIEnv *env) const;
+    
   };
   jclass clazz;
-  jfieldID keyField;
-  jfieldID valueField;
   jmethodID ctor0Method;
 private:
   explicit Property(JNIEnv *env);
@@ -77,13 +74,11 @@ struct Policy {
     template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
     Dim3::Instance global(JNIEnv *env, const Dim3& clazz) const;
     Dim3::Instance local(JNIEnv *env, const Dim3& clazz) const;
-    jobject local(JNIEnv *env) const;
   };
   jclass clazz;
   jfieldID globalField;
   jfieldID localField;
   jmethodID ctor0Method;
-  jmethodID local_Ljava_util_Optional_Method;
 private:
   explicit Policy(JNIEnv *env);
   static thread_local std::unique_ptr<Policy> cached;
@@ -99,21 +94,10 @@ struct Queue {
     jobject instance;
     Instance(const Queue &meta, jobject instance);
     template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
-    jlong nativePeer(JNIEnv *env) const;
-    void enqueueHostToDeviceAsync(JNIEnv *env, jobject src, jlong dst, jint size, jobject cb) const;
-    void enqueueInvokeAsync(JNIEnv *env, jstring moduleName, jstring symbol, jbyteArray argTypes, jbyteArray argData, jobject policy, jobject cb) const;
-    void enqueueInvokeAsync(JNIEnv *env, jstring moduleName, jstring symbol, jobject args, jobject rtn, jobject policy, jobject cb) const;
-    void enqueueDeviceToHostAsync(JNIEnv *env, jlong src, jobject dst, jint size, jobject cb) const;
-    void close(JNIEnv *env) const;
+    
   };
   jclass clazz;
-  jfieldID nativePeerField;
   jmethodID ctor0Method;
-  jmethodID enqueueHostToDeviceAsync_Ljava_nio_ByteBuffer_JILjava_lang_Runnable_VMethod;
-  jmethodID enqueueInvokeAsync_Ljava_lang_String_Ljava_lang_String_aBaBLpolyregion_jvm_runtime_Policy_Ljava_lang_Runnable_VMethod;
-  jmethodID enqueueInvokeAsync_Ljava_lang_String_Ljava_lang_String_Ljava_util_List_Lpolyregion_jvm_runtime_Arg_Lpolyregion_jvm_runtime_Policy_Ljava_lang_Runnable_VMethod;
-  jmethodID enqueueDeviceToHostAsync_JLjava_nio_ByteBuffer_ILjava_lang_Runnable_VMethod;
-  jmethodID close_VMethod;
 private:
   explicit Queue(JNIEnv *env);
   static thread_local std::unique_ptr<Queue> cached;
@@ -129,27 +113,10 @@ struct Device {
     jobject instance;
     Instance(const Device &meta, jobject instance);
     template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
-    jlong nativePeer(JNIEnv *env) const;
-    jlong id(JNIEnv *env) const;
-    jstring name(JNIEnv *env) const;
-    jlong malloc(JNIEnv *env, jlong size, jobject access) const;
-    Queue::Instance createQueue(JNIEnv *env, const Queue& clazz_) const;
-    void loadModule(JNIEnv *env, jstring name, jbyteArray image) const;
-    jobjectArray properties(JNIEnv *env) const;
-    void close(JNIEnv *env) const;
-    void free(JNIEnv *env, jlong data) const;
+    
   };
   jclass clazz;
-  jfieldID nativePeerField;
-  jfieldID idField;
-  jfieldID nameField;
   jmethodID ctor0Method;
-  jmethodID malloc_JLpolyregion_jvm_runtime_Access_JMethod;
-  jmethodID createQueue_Lpolyregion_jvm_runtime_Device_Queue_Method;
-  jmethodID loadModule_Ljava_lang_String_aBVMethod;
-  jmethodID properties_aLpolyregion_jvm_runtime_Property_Method;
-  jmethodID close_VMethod;
-  jmethodID free_JVMethod;
 private:
   explicit Device(JNIEnv *env);
   static thread_local std::unique_ptr<Device> cached;
@@ -157,7 +124,7 @@ public:
   static Device& of(JNIEnv *env);
   static void drop(JNIEnv *env);
   Instance wrap (JNIEnv *env, jobject instance);
-  Instance operator()(JNIEnv *env, jlong nativePeer, jlong id, jstring name) const;
+  Instance operator()(JNIEnv *env, jlong nativePeer, jlong id, jstring name, jboolean sharedAddressSpace) const;
 };
 struct Runtime {
   struct Instance {
@@ -165,19 +132,10 @@ struct Runtime {
     jobject instance;
     Instance(const Runtime &meta, jobject instance);
     template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
-    jlong nativePeer(JNIEnv *env) const;
-    jstring name(JNIEnv *env) const;
-    jobjectArray devices(JNIEnv *env) const;
-    jobjectArray properties(JNIEnv *env) const;
-    void close(JNIEnv *env) const;
+    
   };
   jclass clazz;
-  jfieldID nativePeerField;
-  jfieldID nameField;
   jmethodID ctor0Method;
-  jmethodID devices_aLpolyregion_jvm_runtime_Device_Method;
-  jmethodID properties_aLpolyregion_jvm_runtime_Property_Method;
-  jmethodID close_VMethod;
 private:
   explicit Runtime(JNIEnv *env);
   static thread_local std::unique_ptr<Runtime> cached;
@@ -193,16 +151,9 @@ struct Event {
     jobject instance;
     Instance(const Event &meta, jobject instance);
     template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
-    jlong epochMillis(JNIEnv *env) const;
-    jlong elapsedNanos(JNIEnv *env) const;
-    jstring name(JNIEnv *env) const;
-    jstring data(JNIEnv *env) const;
+    
   };
   jclass clazz;
-  jfieldID epochMillisField;
-  jfieldID elapsedNanosField;
-  jfieldID nameField;
-  jfieldID dataField;
   jmethodID ctor0Method;
 private:
   explicit Event(JNIEnv *env);
@@ -219,16 +170,9 @@ struct Layout {
     jobject instance;
     Instance(const Layout &meta, jobject instance);
     template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
-    jobjectArray name(JNIEnv *env) const;
-    jlong sizeInBytes(JNIEnv *env) const;
-    jlong alignment(JNIEnv *env) const;
-    jobjectArray members(JNIEnv *env) const;
+    
   };
   jclass clazz;
-  jfieldID nameField;
-  jfieldID sizeInBytesField;
-  jfieldID alignmentField;
-  jfieldID membersField;
   jmethodID ctor0Method;
 private:
   explicit Layout(JNIEnv *env);
@@ -245,14 +189,9 @@ struct Member {
     jobject instance;
     Instance(const Member &meta, jobject instance);
     template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
-    jstring name(JNIEnv *env) const;
-    jlong offsetInBytes(JNIEnv *env) const;
-    jlong sizeInBytes(JNIEnv *env) const;
+    
   };
   jclass clazz;
-  jfieldID nameField;
-  jfieldID offsetInBytesField;
-  jfieldID sizeInBytesField;
   jmethodID ctor0Method;
 private:
   explicit Member(JNIEnv *env);
@@ -291,16 +230,9 @@ struct Compilation {
     jobject instance;
     Instance(const Compilation &meta, jobject instance);
     template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
-    jbyteArray program(JNIEnv *env) const;
-    jobjectArray events(JNIEnv *env) const;
-    jobjectArray layouts(JNIEnv *env) const;
-    jstring messages(JNIEnv *env) const;
+    
   };
   jclass clazz;
-  jfieldID programField;
-  jfieldID eventsField;
-  jfieldID layoutsField;
-  jfieldID messagesField;
   jmethodID ctor0Method;
 private:
   explicit Compilation(JNIEnv *env);

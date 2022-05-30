@@ -89,6 +89,10 @@ std::string CudaDevice::name() {
   TRACE();
   return deviceName;
 }
+bool CudaDevice::sharedAddressSpace() {
+  TRACE();
+  return false;
+}
 std::vector<Property> CudaDevice::properties() {
   TRACE();
   return {};
@@ -97,6 +101,7 @@ void CudaDevice::loadModule(const std::string &name, const std::string &image) {
   TRACE();
   store.loadModule(name, image);
 }
+bool CudaDevice::moduleLoaded(const std::string &name) { return store.moduleLoaded(name); }
 uintptr_t CudaDevice::malloc(size_t size, Access access) {
   TRACE();
   context.touch();

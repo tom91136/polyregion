@@ -46,6 +46,10 @@ int64_t ObjectDevice::id() {
   TRACE();
   return 0;
 }
+bool ObjectDevice::sharedAddressSpace() {
+  TRACE();
+  return true;
+}
 std::vector<Property> ObjectDevice::properties() {
   TRACE();
   return {};
@@ -64,12 +68,12 @@ void ObjectDevice::free(uintptr_t ptr) {
 void ObjectDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
   TRACE();
   std::memcpy(reinterpret_cast<void *>(dst), src, size);
-  if (cb) (*cb)(); // no-op for CPUs
+  if (cb) (*cb)();
 }
 void ObjectDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) {
   TRACE();
   std::memcpy(dst, reinterpret_cast<void *>(src), size);
-  if (cb) (*cb)(); // no-op for CPUs
+  if (cb) (*cb)();
 }
 
 RelocatableRuntime::RelocatableRuntime() { TRACE(); }
@@ -113,6 +117,7 @@ void RelocatableDevice::loadModule(const std::string &name, const std::string &i
       objects.emplace_hint(it, name, std::move(*object));
   }
 }
+bool RelocatableDevice::moduleLoaded(const std::string &name) { return objects.find(name) != objects.end(); }
 std::unique_ptr<DeviceQueue> RelocatableDevice::createQueue() {
   TRACE();
   return std::make_unique<RelocatableDeviceQueue>(objects, ld);
@@ -206,6 +211,7 @@ void SharedDevice::loadModule(const std::string &name, const std::string &image)
       modules.emplace_hint(it, name, LoadedModule{image, dylib, {}});
   }
 }
+bool SharedDevice::moduleLoaded(const std::string &name) { return modules.find(name) != modules.end(); }
 std::unique_ptr<DeviceQueue> SharedDevice::createQueue() {
   TRACE();
   return std::make_unique<SharedDeviceQueue>(modules);

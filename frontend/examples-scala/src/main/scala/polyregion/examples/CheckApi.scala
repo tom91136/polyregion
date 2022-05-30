@@ -98,8 +98,7 @@ object CheckApi {
 
     Runtime.load()
 
-    val rs = Array(Runtime.Relocatable(), Runtime.OpenCL(), Runtime.CUDA())
-
+    val rs = Array(Runtime.Relocatable() /*, Runtime.OpenCL(), Runtime.CUDA() */ )
 
     rs.foreach { r =>
       println(r)
@@ -121,54 +120,60 @@ object CheckApi {
 
         d0.loadModule("a", image)
 
-        val xs = d0.malloc(java.lang.Integer.BYTES * 4, Access.RW)
+//        val xs = d0.malloc(java.lang.Integer.BYTES * 4, Access.RW)
 
         val data = ByteBuffer.allocateDirect(java.lang.Integer.BYTES * 4).order(ByteOrder.nativeOrder())
         (data.putInt(7).putInt(7).putInt(7).putInt(7): Buffer).position(0)
 
+        val Array(ptr) = polyregion.jvm.runtime.Runtime.directBufferPointers(Array(data))
 
         val q0 = d0.createQueue();
 
-        for(_ <- 0 to 1){
+        for (_ <- 0 to 1) {
 
+//          q0.enqueueHostToDeviceAsync(
+//            data,
+//            xs,
+//            data.capacity(),
+//            () => println("H ==> D id=" + Thread.currentThread().getId)
+//          )
+          q0.enqueueInvokeAsync(
+            "a",
+            "lambda",
+            java.util.Arrays.asList(
+              Arg.ptr(ptr),
+              Arg.of(42)
+            ),
+            Arg.of(),
+            new Policy(new Dim3(1, 1, 1)),
+            () => {
+              println("  K done! id=" + Thread.currentThread().getId)
+              val x = Array.ofDim[Int](4)
+                            data.asIntBuffer().get(x)
+                            println(">>> " + x.toList)
 
-          q0.enqueueHostToDeviceAsync(
-          data,
-          xs,
-          data.capacity(),
-          () => println("H ==> D id=" + Thread.currentThread().getId)
-        )
-        q0.enqueueInvokeAsync(
-          "a",
-          "lambda",
-          java.util.Arrays.asList(
-            Arg.ptr(xs),
-            Arg.of(42)
-          ),
-          Arg.of(),
-          new Policy(new Dim3(1, 1, 1)),
-          () => println("  K done! id=" + Thread.currentThread().getId)
-        )
-        q0.enqueueDeviceToHostAsync(
-          xs,
-          data,
-          data.capacity(),
-          () => {
-            println("H <== D id=" + Thread.currentThread().getId)
-            val x = Array.ofDim[Int](4)
-            data.asIntBuffer().get(x)
-            println(">>> " + x.toList)
-          }
-        )
+            }
+          )
+//          q0.enqueueDeviceToHostAsync(
+//            xs,
+//            data,
+//            data.capacity(),
+//            () => {
+//              println("H <== D id=" + Thread.currentThread().getId)
+//              val x = Array.ofDim[Int](4)
+//              data.asIntBuffer().get(x)
+//              println(">>> " + x.toList)
+//            }
+//          )
 
 //        q0.close();
 //        d0.close();
 //          r.close()
-      }
+        }
 
 //      r.close()
-    }    }
-
+      }
+    }
 
     //    Thread.sleep(1000)
 

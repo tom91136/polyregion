@@ -167,7 +167,7 @@ extension (e: p.Sym) {
 }
 
 extension (n: p.Named) {
-  def repr: String                          = s"${n.symbol}: ${n.tpe.repr}"
+  def repr: String                          = s"(${n.symbol}: ${n.tpe.repr})"
   def mapType(f: p.Type => p.Type): p.Named = p.Named(n.symbol, n.tpe.map(f))
   def mapAccType[A](f: p.Type => (p.Type, List[A])): (p.Named, List[A]) = {
     val (tpe, as) = n.tpe.mapAcc[A](f)
@@ -570,8 +570,8 @@ extension (f: p.Function) {
 
   def repr: String =
     s"""${f.signatureRepr} = {
-       |${f.body.map("  " + _.repr).mkString("\n")}
-		   |}""".stripMargin
+       |${f.body.flatMap(_.repr.linesIterator.map("  " + _)).mkString("\n")}
+	   |}""".stripMargin
 }
 
 extension (f: p.Signature) {

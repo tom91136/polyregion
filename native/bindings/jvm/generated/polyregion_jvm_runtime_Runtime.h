@@ -35,6 +35,14 @@ extern "C" {
 #define polyregion_jvm_runtime_Runtime_ACCESS_1WO 3L
 /*
  * Class:      polyregion_jvm_runtime_Runtime
+ * Method:     pointers
+ * Signature:  ([Ljava/nio/Buffer;)[J
+ */
+JNIEXPORT jlongArray JNICALL Java_polyregion_jvm_runtime_Runtime_pointers
+  (JNIEnv *, jclass, jobjectArray);
+
+/*
+ * Class:      polyregion_jvm_runtime_Runtime
  * Method:     CUDA0
  * Signature:  ()Lpolyregion/jvm/runtime/Runtime;
  */
@@ -104,6 +112,14 @@ JNIEXPORT jobjectArray JNICALL Java_polyregion_jvm_runtime_Runtime_devicePropert
  */
 JNIEXPORT void JNICALL Java_polyregion_jvm_runtime_Runtime_loadModule0
   (JNIEnv *, jclass, jlong, jstring, jbyteArray);
+
+/*
+ * Class:      polyregion_jvm_runtime_Runtime
+ * Method:     moduleLoaded0
+ * Signature:  (JLjava/lang/String;)Z
+ */
+JNIEXPORT jboolean JNICALL Java_polyregion_jvm_runtime_Runtime_moduleLoaded0
+  (JNIEnv *, jclass, jlong, jstring);
 
 /*
  * Class:      polyregion_jvm_runtime_Runtime

@@ -1,11 +1,13 @@
 package polyregion.scala
 
 import polyregion.ast.{CppSourceMirror, MsgPack, PolyAst as p, *}
-import polyregion.jvm
-import polyregion.scala.{NativeStruct, *}
+import polyregion.{jvm, scala as srt}
 
+import java.nio.ByteBuffer
+import java.nio.file.Paths
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.{compileTimeOnly, tailrec}
+import scala.collection.immutable.VectorMap
 import scala.quoted.*
 import scala.util.Try
 
@@ -190,16 +192,21 @@ object compiletime {
 //    }
 //  }
 
-  type Device = polyregion.jvm.runtime.Device
+  type Device = jvm.runtime.Device
+  type Queue  = jvm.runtime.Device.Queue
+
 //  inline def offload[A](inline x: => A): A = ${ offloadImpl[A]('x) }
 
-
-  inline def offload[A](inline d: Device)(inline f: => A): A = ${ offloadImpl[A]('d, 'f) }
+  inline def offload[A](inline device: Device, inline queue: Queue, inline cb: Runnable)(inline f: => A): A = ${
+    offloadImpl[A]('device, 'queue, 'f, 'cb)
+  }
 
 //  inline def offload(inline d: Device, inline x: Range, inline y: Range = Range(0, 0), inline z: Range = Range(0, 0))
 //  /*             */ (inline f: => (Int, Int, Int) => Unit): Unit = ${ offloadImpl[Unit](d, 'x, 'y, 'z, 'f) }
 
-  private def offloadImpl[A: Type](d: Expr[Device],  f: Expr[Any]) (using q: Quotes): Expr[A] = {
+  private def offloadImpl[A: Type](device: Expr[Device], queue: Expr[Queue], f: Expr[Any], cb: Expr[Runnable])(using
+      q: Quotes
+  ): Expr[A] = {
     implicit val Q = Quoted(q)
     val result = for {
       (captures, prog, log) <- Compiler.compileExpr(f)
@@ -211,8 +218,8 @@ object compiletime {
 
       // c <- Right(new polyregion.Compilation())
 
-      options = polyregion.jvm.compiler.Options(polyregion.jvm.compiler.Compiler.TargetObjectLLVM_x86_64, "")
-      c <- Try((polyregion.jvm.compiler.Compiler.compile(serialisedAst, true, options))).toEither
+      options = jvm.compiler.Options(jvm.compiler.Compiler.TargetObjectLLVM_x86_64, "")
+      c <- Try((jvm.compiler.Compiler.compile(serialisedAst, true, options))).toEither
     } yield {
 
       println(s"Messages=\n  ${c.messages}")
@@ -223,45 +230,143 @@ object compiletime {
       val astBytesExpr     = Expr(serialisedAst)
       val fnName           = Expr("lambda")
 
-      val d0 : Device = ???
-      val queue = d0.createQueue()
-      queue.enqueueInvokeAsync()
+      //
+      // if (d0.sharedAddressSpace) {
+      //   jvm.runtime.Runtime.directBufferPointers()
+      // }
+      // d0.createQueue().enqueueHostToDeviceAsync(???)
 
-      val captureExprs = captures.map { (name, ref) =>
-        println(s"Capture ${name.repr} : ${ref}")
-        (name.tpe, ref.tpe.asType) match {
-          case (p.Type.Array(comp), x @ '[polyregion.scala.Buffer[a]]) =>
-            '{ ${ ref.asExprOf[x.Underlying] }.backingBuffer }
-          case (p.Type.Array(comp), x @ '[scala.Array[t]]) =>
-            '{
-              val xs = ${ ref.asExprOf[x.Underlying] }
-              val buffer = java.nio.ByteBuffer
-                .allocateDirect(${ Expr(Pickler.sizeOf(comp, Q.TypeRepr.of[t])) } * xs.size)
-                .order(java.nio.ByteOrder.nativeOrder)
-              ${ Pickler.writeUniform('buffer, '{ 0 }, name.tpe, ref.tpe, ref.asExpr) }
-              buffer
-            }
-          case (p.Type.Array(comp), x @ '[scala.collection.Seq[t]]) =>
-            '{
-              val xs = ${ ref.asExprOf[x.Underlying] }
-              val buffer = java.nio.ByteBuffer
-                .allocateDirect(${ Expr(Pickler.sizeOf(comp, Q.TypeRepr.of[t])) } * xs.size)
-                .order(java.nio.ByteOrder.nativeOrder)
-              ${ Pickler.writeUniform('buffer, '{ 0 }, name.tpe, ref.tpe, ref.asExpr) }
-              buffer
-            }
-          case (_, _) =>
-            '{
-              val buffer = java.nio.ByteBuffer
-                .allocateDirect(${ Expr(Pickler.sizeOf(name.tpe, ref.tpe)) })
-                .order(java.nio.ByteOrder.nativeOrder)
-              ${ Pickler.writeUniform('buffer, '{ 0 }, name.tpe, ref.tpe, ref.asExpr) }
-              buffer
-            }
+      // uniform address space
+
+      // val buffers = Array[ByteBuffer]($...)
+      // val pointers = jvm.runtime.Runtime.directBufferPointers(buffers)
+
+      // val params = ByteBuffer.alloc()
+      // params.put($AnyVal...)
+      // params.putLong(pointers[0])
+      // params.put($AnyVal...)
+      // params.putLong(pointers[n])
+
+      //
+      // params.array()
+
+      val indexedCaptures = captures.zipWithIndex
+
+      val paramTypes = captures.map((name, _) => Pickler.tpeAsRuntimeTpe(name.tpe))
+
+      val paramTotalSizeInBytes = paramTypes.map(_.sizeInBytes).sum
+
+      val captureTps = captures.map((name, _) => Pickler.tpeAsRuntimeTpe(name.tpe).value)
+
+      val moduleName = Expr(prog.entry.name.repr)
+
+      def allocBuffer(size: Expr[Int]) = '{
+        java.nio.ByteBuffer.allocateDirect($size).order(java.nio.ByteOrder.nativeOrder)
+      }
+
+      val bufferExprs = indexedCaptures.foldLeft(VectorMap.empty[Int, (Int, Expr[ByteBuffer])]) {
+        case (acc, ((name, ref), idx)) =>
+          (name.tpe, ref.tpe.asType) match {
+            case (p.Type.Array(comp), x @ '[srt.Buffer[a]]) =>
+              acc + (idx -> (acc.size, '{ ${ ref.asExprOf[x.Underlying] }.backingBuffer }))
+            case (p.Type.Array(comp), x @ '[scala.Array[t]]) =>
+              acc + (
+                idx ->
+                  (acc.size, '{
+                    val xs     = ${ ref.asExprOf[x.Underlying] }
+                    val buffer = ${ allocBuffer('{ ${ Expr(Pickler.sizeOf(comp, Q.TypeRepr.of[t])) } * xs.size }) }
+                    ${ Pickler.writeUniform('buffer, '{ 0 }, name.tpe, ref.tpe, ref.asExpr) }
+                    buffer
+                  })
+              )
+            case (p.Type.Array(comp), x @ '[scala.collection.Seq[t]]) =>
+              acc + (
+                idx ->
+                  (acc.size, '{
+                    val xs     = ${ ref.asExprOf[x.Underlying] }
+                    val buffer = ${ allocBuffer('{ ${ Expr(Pickler.sizeOf(comp, Q.TypeRepr.of[t])) } * xs.size }) }
+                    ${ Pickler.writeUniform('buffer, '{ 0 }, name.tpe, ref.tpe, ref.asExpr) }
+                    buffer
+                  })
+              )
+            case _ => acc
+          }
+      }
+
+      val code = '{
+
+        if (! $device.moduleLoaded($moduleName)) {
+          $device.loadModule($moduleName, ${ Expr(c.program) })
         }
 
+        val paramTypes = ${ Expr(captureTps.toArray) } :+ 1.toByte /*1 = void*/
+
+        println(s"Tpes:${paramTypes.toList}")
+
+        val paramBuffer =
+          java.nio.ByteBuffer.allocate(${ Expr(paramTotalSizeInBytes) }).order(java.nio.ByteOrder.nativeOrder)
+
+        if ($device.sharedAddressSpace) {
+
+          val pointers = jvm.runtime.Runtime.directBufferPointers(Array(${
+            Varargs(bufferExprs.values.map(_._2).toSeq)
+          }: _*))
+
+          println(s"Ptrs:${pointers.toList}")
+
+          ${
+            val (_, stmts) = captures.zipWithIndex.foldLeft((0, List.empty[Expr[Any]])) {
+              case ((byteOffset, exprs), ((name, ref), idx)) =>
+                val expr = bufferExprs.get(idx) match {
+                  case Some((ptrArrayIdx, _)) =>
+                    '{ paramBuffer.putLong(${ Expr(byteOffset) }, pointers(${ Expr(ptrArrayIdx) })) }
+                  case None => Pickler.writePrimitiveAtOffset('paramBuffer, Expr(byteOffset), name.tpe, ref.asExpr)
+                }
+                (byteOffset + Pickler.tpeAsRuntimeTpe(name.tpe).sizeInBytes, exprs :+ expr)
+            }
+            Expr.block(stmts, '{ () })
+          }
+
+          $queue.enqueueInvokeAsync(
+            $moduleName,
+            $fnName,
+            paramTypes,
+            paramBuffer.array,
+            jvm.runtime.Policy(jvm.runtime.Dim3(1, 1, 1)),
+            $cb
+          )
+
+        } else {
+
+          val p = $device.malloc(0, jvm.runtime.Access.RW)
+
+          $queue.enqueueHostToDeviceAsync(???, p, 0, null)
+
+          val pointers = jvm.runtime.Runtime.directBufferPointers(Array(${
+            Varargs(bufferExprs.values.map(_._2).toSeq)
+          }: _*))
+
+          $queue.enqueueInvokeAsync(
+            $moduleName,
+            $fnName,
+            paramTypes,
+            paramBuffer.array,
+            jvm.runtime.Policy(jvm.runtime.Dim3(1, 1, 1)),
+            $cb
+          )
+
+          $queue.enqueueDeviceToHostAsync(p, ???, 0, null)
+
+          $device.free(p)
+
+          ???
+        }
+
+        null.asInstanceOf[A]
+
       }
-      val captureTps = captures.map((name, _) => Pickler.tpeAsRuntimeTpe(name.tpe))
+
+      // val captureTps = captures.map((name, _) => Pickler.tpeAsRuntimeTpe(name.tpe).value)
 
       // def wrap(buffer: Expr[java.nio.ByteBuffer], comp: p.Type) =
       //   comp match {
@@ -277,54 +382,14 @@ object compiletime {
       //     case _             => ???
       //   }
 
+      java.nio.file.Files.write(
+        Paths.get(".").toAbsolutePath.resolve("program.o"),
+        c.program,
+        java.nio.file.StandardOpenOption.CREATE,
+        java.nio.file.StandardOpenOption.TRUNCATE_EXISTING
+      )
+      // println()
 
-
-      val code = '{
-
-        val bytes    = $programBytesExpr
-        val argTypes = new Array[Byte](${ Expr(captureTps.size) })
-        ${ Expr.block(captureTps.zipWithIndex.map((e, i) => '{ argTypes(${ Expr(i) }) = ${ Expr(e) } }), '{ () }) }
-
-        val argBuffers = new Array[java.nio.ByteBuffer](${ Expr(captureExprs.size) })
-        ${ Expr.block(captureExprs.zipWithIndex.map((e, i) => '{ argBuffers(${ Expr(i) }) = $e }), '{ () }) }
-
-        ${
-//          (prog.entry.rtn match {
-//            case p.Type.Unit   => '{ PolyregionRuntime.invoke(bytes, $fnName, argTypes, argBuffers) }
-//            case p.Type.Float  => '{ jvm.PolyregionRuntime.invokeFloat(bytes, $fnName, argTypes, argBuffers) }
-//            case p.Type.Double => '{ jvm.PolyregionRuntime.invokeDouble(bytes, $fnName, argTypes, argBuffers) }
-//            case p.Type.Bool   => '{ jvm.PolyregionRuntime.invokeBool(bytes, $fnName, argTypes, argBuffers) }
-//            case p.Type.Byte   => '{ jvm.PolyregionRuntime.invokeByte(bytes, $fnName, argTypes, argBuffers) }
-//            case p.Type.Char   => '{ jvm.PolyregionRuntime.invokeChar(bytes, $fnName, argTypes, argBuffers) }
-//            case p.Type.Short  => '{ jvm.PolyregionRuntime.invokeShort(bytes, $fnName, argTypes, argBuffers) }
-//            case p.Type.Int    => '{ jvm.PolyregionRuntime.invokeInt(bytes, $fnName, argTypes, argBuffers) }
-//            case p.Type.Long   => '{ jvm.PolyregionRuntime.invokeLong(bytes, $fnName, argTypes, argBuffers) }
-//            case x @ p.Type.Struct(_, _, _) =>
-//              // val imp = Expr.summon[NativeStruct[A]] match {
-//              //   case None    => Q.report.errorAndAbort(s"Cannot find NativeStruct for type ${Type.of[A]}")
-//              //   case Some(x) => x
-//              // }
-//              '{
-//                var buffer = jvm.PolyregionRuntime.invokeObject(bytes, $fnName, argTypes, argBuffers, -1)
-//                ${ Pickler.readUniform('buffer, '{ 0 }, x, Q.TypeRepr.of[A]) }
-//                // Buffer.structViewAny[A](buffer)(using $imp)(0)
-//              }
-//            case x @ p.Type.Array(comp) =>
-//              //  ${
-//              //   Type.of[A] match {
-//              //     case '[Buffer[a]] => wrap('{ buffer }, comp) // passthrough
-//              //     case '[Array[a]]  => '{ ${ wrap('{ buffer }, comp) }.copyToArray }
-//              //     case m            => ???
-//              //   }
-//              // }
-//              '{
-//                var buffer = jvm.PolyregionRuntime.invokeObject(bytes, $fnName, argTypes, argBuffers, -1)
-//                ${ Pickler.readUniform('buffer, '{ 0 }, x, Q.TypeRepr.of[A]) }
-//              }
-//          }).asExprOf[A]
-          ???
-        }
-      }
       println("Code=" + code.show)
       code
     }

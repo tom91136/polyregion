@@ -1,6 +1,7 @@
 package polyregion.scala
 
 import cats.syntax.all.*
+import polyregion.ast.PolyAst.BinaryIntrinsicKind
 import polyregion.ast.{PolyAst as p, *}
 import polyregion.scala.{Quoted, Symbols}
 
@@ -55,7 +56,14 @@ object IntrinsifyPass {
   def binaryNumericIntrinsic(x: p.Term, y: p.Term, upper: p.Type, idx: Int, kind: p.BinaryIntrinsicKind) = {
     val (xVal, xStmts) = castOrId(x, upper, s"intr_l${idx}")
     val (yVal, yStmts) = castOrId(y, upper, s"intr_r${idx}")
-    (p.Expr.BinaryIntrinsic(xVal, yVal, kind, upper), xStmts ++ yStmts)
+    val tpe = kind match {
+      case BinaryIntrinsicKind.LogicEq | BinaryIntrinsicKind.LogicNeq | BinaryIntrinsicKind.LogicAnd |
+          BinaryIntrinsicKind.LogicOr | BinaryIntrinsicKind.LogicLte | BinaryIntrinsicKind.LogicGte |
+          BinaryIntrinsicKind.LogicLt | BinaryIntrinsicKind.LogicGt =>
+        p.Type.Bool
+      case _ => upper
+    }
+    (p.Expr.BinaryIntrinsic(xVal, yVal, kind, tpe), xStmts ++ yStmts)
   }
 
   private def intrinsifyInstanceApply(s: p.Stmt, idx: Int) = s.mapAccExpr[p.Expr.Invoke] {

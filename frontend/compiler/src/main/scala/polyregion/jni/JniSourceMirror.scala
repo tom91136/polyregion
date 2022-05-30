@@ -147,7 +147,8 @@ object JniSourceMirror {
               .map(p => s"${jniTypeName(p.getType)} ${p.getName}")
               .toList
 
-          val implArgAps = ("clazz" :: s"${descriptorSafe(m)}Method" ::  m.getParameters.map(_.getName).toList).mkString(", ")
+          val implArgAps =
+            ("clazz" :: s"${descriptorSafe(m)}Method" :: m.getParameters.map(_.getName).toList).mkString(", ")
 
           val proto  = s"${jniTypeName(m.getReturnType)} $name(${args.mkString(", ")}) const;"
           val rtnMod = jniTypedFunctionName(m.getReturnType)
@@ -299,17 +300,17 @@ object JniSourceMirror {
           _ => false,
           m => Set("allocate", "allocateDirect").contains(m.getName)
         ),
-        (classOf[polyregion.jvm.runtime.Property], _ => true, _ => true, _ => true),
-        (classOf[polyregion.jvm.runtime.Dim3], _ => true, _ => true, _ => true),
-        (classOf[polyregion.jvm.runtime.Policy], _ => true, _ => true, _ => true),
-        (classOf[polyregion.jvm.runtime.Device.Queue], _ => true, _ => true, _ => true),
-        (classOf[polyregion.jvm.runtime.Device], _ => true, _ => true, _ => true),
-        (classOf[polyregion.jvm.runtime.Runtime], _ => true, _ => true, _ => true),
-        (classOf[polyregion.jvm.compiler.Event], _ => true, _ => true, _ => true),
-        (classOf[polyregion.jvm.compiler.Layout], _ => true, _ => true, _ => true),
-        (classOf[polyregion.jvm.compiler.Member], _ => true, _ => true, _ => true),
-        (classOf[polyregion.jvm.compiler.Options], _ => true, _ => true, _ => true),
-        (classOf[polyregion.jvm.compiler.Compilation], _ => true, _ => true, _ => true),
+        (classOf[polyregion.jvm.runtime.Property], _ => false, _ => true, _ => false),
+        (classOf[polyregion.jvm.runtime.Dim3], _ => true, _ => true, _ => false),
+        (classOf[polyregion.jvm.runtime.Policy], _ => true, _ => true, _ => false),
+        (classOf[polyregion.jvm.runtime.Device.Queue], _ => false, _ => true, _ => false),
+        (classOf[polyregion.jvm.runtime.Device], _ => false, _ => true, _ => false),
+        (classOf[polyregion.jvm.runtime.Runtime], _ => false, _ => true, _ => false),
+        (classOf[polyregion.jvm.compiler.Event], _ => false, _ => true, _ => false),
+        (classOf[polyregion.jvm.compiler.Layout], _ => false, _ => true, _ => false),
+        (classOf[polyregion.jvm.compiler.Member], _ => false, _ => true, _ => false),
+        (classOf[polyregion.jvm.compiler.Options], _ => true, _ => true, _ => false),
+        (classOf[polyregion.jvm.compiler.Compilation], _ => false, _ => true, _ => false),
         (classOf[java.lang.String], _ => false, _ => false, _ => false),
         (classOf[java.lang.Runnable], _ => true, _ => true, _ => true)
       )

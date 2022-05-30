@@ -30,8 +30,10 @@ public:
   EXPORT ~HipDevice() override;
   EXPORT int64_t id() override;
   EXPORT std::string name() override;
+  EXPORT bool sharedAddressSpace() override;
   EXPORT std::vector<Property> properties() override;
   EXPORT void loadModule(const std::string &name, const std::string &image) override;
+  EXPORT bool moduleLoaded(const std::string &name) override;
   EXPORT uintptr_t malloc(size_t size, Access access) override;
   EXPORT void free(uintptr_t ptr) override;
   EXPORT std::unique_ptr<DeviceQueue> createQueue() override;

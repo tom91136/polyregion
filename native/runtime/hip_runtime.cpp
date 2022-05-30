@@ -92,6 +92,10 @@ std::string HipDevice::name() {
   TRACE();
   return deviceName;
 }
+bool HipDevice::sharedAddressSpace() {
+  TRACE();
+  return false;
+}
 std::vector<Property> HipDevice::properties() {
   TRACE();
   return {};
@@ -100,6 +104,7 @@ void HipDevice::loadModule(const std::string &name, const std::string &image) {
   TRACE();
   store.loadModule(name, image);
 }
+bool HipDevice::moduleLoaded(const std::string &name) { return store.moduleLoaded(name); }
 uintptr_t HipDevice::malloc(size_t size, Access access) {
   TRACE();
   context.touch();

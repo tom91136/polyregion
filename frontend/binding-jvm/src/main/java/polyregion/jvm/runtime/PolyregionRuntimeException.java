@@ -1,4 +1,4 @@
-package polyregion;
+package polyregion.jvm.runtime;
 
 import java.util.Objects;
 

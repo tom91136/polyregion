@@ -1,5 +1,6 @@
 package polyregion.jvm.runtime;
 
+import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -57,6 +58,10 @@ public final class Runtime implements AutoCloseable {
     return Dynamic0();
   }
 
+  public static long[] directBufferPointers(Buffer[] buffers) {
+    return pointers(buffers);
+  }
+
   static final byte //
       TYPE_VOID = 1,
       TYPE_BOOL = 2,
@@ -69,6 +74,8 @@ public final class Runtime implements AutoCloseable {
       TYPE_DOUBLE = 9,
       TYPE_PTR = 10;
   static final byte ACCESS_RW = 1, ACCESS_R0 = 2, ACCESS_WO = 3;
+
+  static native long[] pointers(Buffer[] buffers);
 
   static native Runtime CUDA0();
 
@@ -87,6 +94,8 @@ public final class Runtime implements AutoCloseable {
   static native Property[] deviceProperties0(long nativePeer);
 
   static native void loadModule0(long nativePeer, String name, byte[] image);
+
+  static native boolean moduleLoaded0(long nativePeer, String name);
 
   static native long malloc0(long nativePeer, long size, byte access);
 

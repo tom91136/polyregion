@@ -1,15 +1,15 @@
 package polyregion.jvm.runtime;
 
 public enum Type implements ByteEnum {
-  BOOL(Runtime.TYPE_BOOL, Byte.SIZE),
-  BYTE(Runtime.TYPE_BYTE, Byte.SIZE),
-  CHAR(Runtime.TYPE_CHAR, Character.SIZE),
-  SHORT(Runtime.TYPE_SHORT, Short.SIZE),
-  INT(Runtime.TYPE_INT, Integer.SIZE),
-  LONG(Runtime.TYPE_LONG, Long.SIZE),
-  FLOAT(Runtime.TYPE_FLOAT, Float.SIZE),
-  DOUBLE(Runtime.TYPE_DOUBLE, Double.SIZE),
-  PTR(Runtime.TYPE_PTR, Long.SIZE),
+  BOOL(Runtime.TYPE_BOOL, Byte.BYTES),
+  BYTE(Runtime.TYPE_BYTE, Byte.BYTES),
+  CHAR(Runtime.TYPE_CHAR, Character.BYTES),
+  SHORT(Runtime.TYPE_SHORT, Short.BYTES),
+  INT(Runtime.TYPE_INT, Integer.BYTES),
+  LONG(Runtime.TYPE_LONG, Long.BYTES),
+  FLOAT(Runtime.TYPE_FLOAT, Float.BYTES),
+  DOUBLE(Runtime.TYPE_DOUBLE, Double.BYTES),
+  PTR(Runtime.TYPE_PTR, Long.BYTES),
   VOID(Runtime.TYPE_VOID, 0);
 
   final byte value;
@@ -23,5 +23,9 @@ public enum Type implements ByteEnum {
   @Override
   public byte value() {
     return value;
+  }
+
+  public int sizeInBytes() {
+    return sizeInBytes;
   }
 }

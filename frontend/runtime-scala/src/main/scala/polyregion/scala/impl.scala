@@ -1,5 +1,8 @@
 package polyregion.scala
 
+import polyregion.jvm.compiler.Options
+
+import scala.collection.mutable
 import scala.concurrent.{Future, Promise}
 
 enum Optimisation {
@@ -33,12 +36,22 @@ class Runtime[F[_], O <: CompileOptions](r: polyregion.jvm.runtime.Runtime)(f: S
   def devices: Vector[Device[F, O]]   = r.devices.map(d => new Device[F, O](d)(f)).toVector
 }
 
-class Device[F[_], O <: CompileOptions](d: polyregion.jvm.runtime.Device)(f: Suspend[F]) {
-  def jit: Device[F, CompileOptions.JIT] = ???
+class VarWitness(val xs : mutable.WeakHashMap[AnyRef, Buffer[Any]]){
+  
+  
+  
+}
 
-  def name: String                      = d.name
-  def properties(): Map[String, String] = d.properties.map(p => p.key -> p.value).toMap
+class DeviceQueue[F[_], O <: CompileOptions]( //
+    d: polyregion.jvm.runtime.Device,         //
+    q: polyregion.jvm.runtime.Device.Queue    //
+)(f: Suspend[F]) {
+  
+  
+  inline def sync  : F[Unit] = ???
 
+  inline def use(xs : AnyRef*) : F[Unit] = ???
+  
   inline def task[A](using inline o: O)(inline f: => A): F[A] = ???
 
   inline def foreach(inline x: Range)
@@ -90,6 +103,16 @@ class Device[F[_], O <: CompileOptions](d: polyregion.jvm.runtime.Device)(f: Sus
   /*               */ (using inline o: O)
   /*               */ (inline g: (A, A) => A)
   /*               */ (inline f: (Int, Int, Int) => A): F[A] = reduce[A](0 until x, 0 until y, 0 until z)(g)(f)
+}
+
+class Device[F[_], O <: CompileOptions](d: polyregion.jvm.runtime.Device)(f: Suspend[F])
+    extends DeviceQueue[F, O](d, d.createQueue())(f) {
+  def jit: Device[F, CompileOptions.JIT] = ???
+
+  def name: String                      = d.name
+  def properties(): Map[String, String] = d.properties.map(p => p.key -> p.value).toMap
+
+  def queue: DeviceQueue[F, O] = ???
 
 }
 
@@ -110,3 +133,12 @@ class FutureDevice[O <: CompileOptions](d: polyregion.jvm.runtime.Device)   exte
 
 val HostRuntime: Device[Future, CompileOptions] = ???
 val Native: Device[Future, CompileOptions]      = ???
+def a = {
+  given CompileOptions = ???
+
+  Native.foreach(2)(i => ())
+
+  val q = Native.queue
+
+  q.foreach(2)(i => ())
+}

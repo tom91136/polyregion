@@ -24,7 +24,6 @@ namespace polyregion::runtime {
 
 using TypedPointer = std::pair<Type, void *>;
 
-
 using Property = std::pair<std::string, std::string>;
 using Callback = std::function<void()>;
 using MaybeCallback = std::optional<Callback>;
@@ -114,6 +113,8 @@ public:
     }
   }
 
+  bool moduleLoaded(const std::string &name) { return modules.find(name) != modules.end(); }
+
   F resolveFunction(const std::string &moduleName, const std::string &symbol) {
     auto moduleIt = modules.find(moduleName);
     if (moduleIt == modules.end())
@@ -164,8 +165,10 @@ public:
   virtual EXPORT ~Device() = default;
   [[nodiscard]] virtual EXPORT int64_t id() = 0;
   [[nodiscard]] virtual EXPORT std::string name() = 0;
+  [[nodiscard]] virtual EXPORT bool sharedAddressSpace() = 0;
   [[nodiscard]] virtual EXPORT std::vector<Property> properties() = 0;
   virtual EXPORT void loadModule(const std::string &name, const std::string &image) = 0;
+  virtual EXPORT bool moduleLoaded(const std::string &name) = 0;
   [[nodiscard]] virtual EXPORT uintptr_t malloc(size_t size, Access access) = 0;
   virtual EXPORT void free(uintptr_t ptr) = 0;
   [[nodiscard]] virtual EXPORT std::unique_ptr<DeviceQueue> createQueue() = 0;

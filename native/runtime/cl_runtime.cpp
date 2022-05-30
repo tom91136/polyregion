@@ -160,6 +160,10 @@ std::string ClDevice::name() {
   TRACE();
   return deviceName;
 }
+bool ClDevice::sharedAddressSpace() {
+  TRACE();
+  return false;
+}
 std::vector<Property> ClDevice::properties() {
   TRACE();
   return {
@@ -174,6 +178,7 @@ void ClDevice::loadModule(const std::string &name, const std::string &image) {
   TRACE();
   store.loadModule(name, image);
 }
+bool ClDevice::moduleLoaded(const std::string &name) { return store.moduleLoaded(name); }
 uintptr_t ClDevice::malloc(size_t size, Access access) {
   TRACE();
   context.touch();

@@ -18,7 +18,7 @@ using namespace polyregion;
 namespace rt = ::runtime;
 namespace gen = ::generated;
 
-static constexpr const char *EX = "polyregion/PolyregionRuntimeException";
+static constexpr const char *EX = "polyregion/jvm/runtime/PolyregionRuntimeException";
 
 static_assert(polyregion::to_underlying(rt::Type::Void) == polyregion_jvm_runtime_Runtime_TYPE_1VOID);
 static_assert(polyregion::to_underlying(rt::Type::Bool8) == polyregion_jvm_runtime_Runtime_TYPE_1BOOL);
@@ -82,6 +82,22 @@ static jobjectArray toJni(JNIEnv *env, const std::vector<rt::Property> &xs) {
   });
 }
 
+[[maybe_unused]] jlongArray Java_polyregion_jvm_runtime_Runtime_pointers(JNIEnv *env, jclass,
+                                                                         jobjectArray byteBuffers) {
+  jsize n = env->GetArrayLength(byteBuffers);
+  auto array = env->NewLongArray(n);
+  auto ptrs = env->GetLongArrayElements(array, nullptr);
+  for (jsize i = 0; i < n; ++i) {
+    if (auto ptr = env->GetDirectBufferAddress(env->GetObjectArrayElement(byteBuffers, i)); ptr)
+      ptrs[i] = reinterpret_cast<jlong>(ptr);
+    else
+      return throwGeneric(env, EX,
+                          "Object at " + std::to_string(i) + " is either not a direct Buffer or not a Buffer at all.");
+  }
+  env->ReleaseLongArrayElements(array, ptrs, 0);
+  return array;
+}
+
 [[maybe_unused]] void Java_polyregion_jvm_runtime_Runtime_deleteAllPeer0(JNIEnv *env, jclass) {
   std::lock_guard l(lock);
   DeviceQueues.clear();
@@ -135,7 +151,7 @@ template <typename R> static jobject toJni(JNIEnv *env) {
     auto devices = findRef(env, Runtimes, nativePeer)->enumerate();
     return toJni(env, devices, gen::Device::of(env).clazz, [&](auto &device) {
       auto [peer, d] = emplaceRef(Devices, std::shared_ptr(std::move(device)));
-      return gen::Device::of(env)(env, peer, d->id(), toJni(env, d->name())).instance;
+      return gen::Device::of(env)(env, peer, d->id(), toJni(env, d->name()), d->sharedAddressSpace()).instance;
     });
   });
 }
@@ -145,8 +161,8 @@ template <typename R> static jobject toJni(JNIEnv *env) {
   return wrapException(env, EX, [&]() { return toJni(env, findRef(env, Devices, nativePeer)->properties()); });
 }
 
-[[maybe_unused]] void Java_polyregion_jvm_runtime_Runtime_loadModule0(JNIEnv *env, jclass, jlong nativePeer,
-                                                                       jstring name, jbyteArray image) {
+[[maybe_unused]] void Java_polyregion_jvm_runtime_Runtime_loadModule0(JNIEnv *env, jclass, jlong nativePeer, //
+                                                                      jstring name, jbyteArray image) {
 
   wrapException(env, EX, [&]() {
     auto dev = findRef(env, Devices, nativePeer);
@@ -160,8 +176,13 @@ template <typename R> static jobject toJni(JNIEnv *env) {
   });
 }
 
+[[maybe_unused]] jboolean Java_polyregion_jvm_runtime_Runtime_moduleLoaded0(JNIEnv *env, jclass, jlong nativePeer, //
+                                                                            jstring name) {
+  return wrapException(env, EX, [&]() { return findRef(env, Devices, nativePeer)->moduleLoaded(fromJni(env, name)); });
+}
+
 [[maybe_unused]] jlong Java_polyregion_jvm_runtime_Runtime_malloc0(JNIEnv *env, jclass, jlong nativePeer, jlong size,
-                                                                    jbyte access) {
+                                                                   jbyte access) {
   if (auto a = rt::fromUnderlying(access); a) {
     return wrapException(env, EX,
                          [&]() { return static_cast<jlong>(findRef(env, Devices, nativePeer)->malloc(size, *a)); });
@@ -169,7 +190,8 @@ template <typename R> static jobject toJni(JNIEnv *env) {
     return throwGeneric<jlong>(env, EX, "Illegal access type " + std::to_string(access));
 }
 
-[[maybe_unused]] void Java_polyregion_jvm_runtime_Runtime_free0(JNIEnv *env, jclass, jlong nativePeer, jlong handle) {
+[[maybe_unused]] void Java_polyregion_jvm_runtime_Runtime_free0(JNIEnv *env, jclass, jlong nativePeer, //
+                                                                jlong handle) {
   wrapException(env, EX, [&]() { findRef(env, Devices, nativePeer)->free(static_cast<jlong>(handle)); });
 }
 [[maybe_unused]] jobject Java_polyregion_jvm_runtime_Runtime_createQueue0(JNIEnv *env, jclass, jlong nativePeer) {
@@ -202,9 +224,9 @@ static rt::MaybeCallback fromJni(JNIEnv *env, jobject cb) {
 }
 
 [[maybe_unused]] void Java_polyregion_jvm_runtime_Runtime_enqueueHostToDeviceAsync0(JNIEnv *env, jclass, //
-                                                                                     jlong nativePeer,    //
-                                                                                     jobject src, jlong dst, jint size,
-                                                                                     jobject cb) {
+                                                                                    jlong nativePeer,    //
+                                                                                    jobject src, jlong dst, jint size,
+                                                                                    jobject cb) {
   auto srcPtr = env->GetDirectBufferAddress(src);
   if (!srcPtr) throwGeneric(env, EX, "The source ByteBuffer is not backed by an direct allocation.");
 
@@ -213,9 +235,9 @@ static rt::MaybeCallback fromJni(JNIEnv *env, jobject cb) {
   });
 }
 [[maybe_unused]] void Java_polyregion_jvm_runtime_Runtime_enqueueDeviceToHostAsync0(JNIEnv *env, jclass, //
-                                                                                     jlong nativePeer,    //
-                                                                                     jlong src, jobject dst, jint size,
-                                                                                     jobject cb) {
+                                                                                    jlong nativePeer,    //
+                                                                                    jlong src, jobject dst, jint size,
+                                                                                    jobject cb) {
   auto dstPtr = env->GetDirectBufferAddress(dst);
   if (!dstPtr) throwGeneric(env, EX, "The destination ByteBuffer is not backed by an direct allocation.");
   return wrapException(env, EX, [&]() {
@@ -228,10 +250,10 @@ static rt::Dim3 fromJni(JNIEnv *env, const generated::Dim3::Instance &d3) {
 }
 
 [[maybe_unused]] void Java_polyregion_jvm_runtime_Runtime_enqueueInvokeAsync0(JNIEnv *env, jclass, jlong nativePeer, //
-                                                                               jstring moduleName, jstring symbol,    //
-                                                                               jbyteArray argTypes,                   //
-                                                                               jbyteArray argData,                    //
-                                                                               jobject policy, jobject cb) {
+                                                                              jstring moduleName, jstring symbol,    //
+                                                                              jbyteArray argTypes,                   //
+                                                                              jbyteArray argData,                    //
+                                                                              jobject policy, jobject cb) {
 
   JNIEnv *e2;
   CurrentVM->AttachCurrentThread(reinterpret_cast<void **>(&e2), nullptr);

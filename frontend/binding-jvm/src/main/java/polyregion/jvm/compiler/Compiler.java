@@ -38,7 +38,7 @@ public final class Compiler {
       //	Loader.loadDirect(Paths.get("/usr/lib/llvm-12/lib/clang/12.0.0/lib/linux/libclang_rt.asan-x86_64.so"), RESOURCE_DIR);
       Loader.loadDirect(
           Paths.get(
-              "/home/tom/polyregion/native/cmake-build-debug-clang/bindings/libjava-compiler.so"
+              "/home/tom/polyregion/native/cmake-build-debug-clang/bindings/jvm/libpolyregion-compiler-jvm.so"
               // "/home/tom/polyregion/native/cmake-build-release-clang/bindings/libjava-compiler.so"
               ),
           RESOURCE_DIR);

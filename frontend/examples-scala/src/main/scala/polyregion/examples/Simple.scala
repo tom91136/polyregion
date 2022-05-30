@@ -4,36 +4,36 @@ import scala.collection.IterableOnceOps
 import scala.concurrent.{Await, Future, Promise}
 import scala.util.Try
 
-object Foo {
-  var x                         = 10
-  def bar                       = x + 1
-  def baz                       = bar + 1
-  def nBar(n: Int)              = n * bar + baz
-  inline def nBarInline(n: Int) = n * bar + baz + nBar(baz)
-  object Bar { object Baz }
-}
+//object Foo {
+//  var x                         = 10
+//  def bar                       = x + 1
+//  def baz                       = bar + 1
+//  def nBar(n: Int)              = n * bar + baz
+//  inline def nBarInline(n: Int) = n * bar + baz + nBar(baz)
+//  object Bar { object Baz }
+//}
 
 object Simple {
-  object Bar { val y = Foo.bar }
-  val a         = 10
-  val b         = 20
-  private def c = (a + b) * 2
+  //  object Bar { val y = Foo.bar }
+//  val a         = 10
+//  val b         = 20
+//  private def c = (a + b) * 2
 
   def main(args: Array[String]): Unit = {
     println("Start")
     val x = 1
     val z = 1
 
-    object Local {
-      val g      = Foo.bar + Foo.baz + a + b + c + x
-      val levelB = LevelA.LevelB
-      object LevelA {
-        val a1 = Foo.bar
-        object LevelB { val a2 = g + a1 + x }
-      }
-    }
+//    object Local {
+//      val g      = Foo.bar + Foo.baz + a + b + c + x
+//      val levelB = LevelA.LevelB
+//      object LevelA {
+//        val a1 = Foo.bar
+//        object LevelB { val a2 = g + a1 + x }
+//      }
+//    }
     val y = 50
-    val n = 100
+    val n = 10
 
     val xs = polyregion.scala.Buffer.range[Int](0, n)
 
@@ -64,8 +64,16 @@ object Simple {
 
     //  singular :
 
-    val l = Local
-     val result = polyregion.scala.compiletime.offload (???){
+//    val l = Local
+
+    println(xs)
+
+    val rel = polyregion.jvm.runtime.Runtime.Relocatable()
+    val dev = rel.devices()(0)
+
+     val result = polyregion.scala.compiletime.offload (dev, dev.createQueue(), () => {
+       println("Done!")
+     }){
  //      val objRef = Foo
  //      val c      = Local.LevelA.LevelB
  //      val c2     = Foo.Bar.Baz
@@ -102,10 +110,14 @@ object Simple {
        while (i < n) {
          max = math.max(max, xs(i))
  //        max = if(i < y) max*2 else max
- //        xs(i) = i // i-1
+//         xs(i) = 42 // i-1
          i += 1
        }
-       max
+       xs(0) = max
+
+//       val x = n
+       ()
+//       max
      }
     println(xs)
 

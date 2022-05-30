@@ -67,11 +67,13 @@ public final class Device implements AutoCloseable {
   final long nativePeer;
   public final long id;
   public final String name;
+  public final boolean sharedAddressSpace;
 
-  Device(long nativePeer, long id, String name) {
+  Device(long nativePeer, long id, String name, boolean sharedAddressSpace) {
     this.nativePeer = nativePeer;
     this.id = id;
     this.name = Objects.requireNonNull(name);
+    this.sharedAddressSpace = sharedAddressSpace;
   }
 
   public Property[] properties() {
@@ -84,6 +86,10 @@ public final class Device implements AutoCloseable {
 
   public void loadModule(String name, byte[] image) {
     Runtime.loadModule0(nativePeer, name, image);
+  }
+
+  public boolean moduleLoaded(String name) {
+    return Runtime.moduleLoaded0(nativePeer, name);
   }
 
   public long malloc(long size, Access access) {

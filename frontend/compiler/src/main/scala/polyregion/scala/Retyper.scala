@@ -173,10 +173,17 @@ object Retyper {
           // type ctors must be a class
           (name, tpeVars, symbol, kind) <- resolveClsFromTpeRepr(tpeCtor)
           tpeCtorArgs                   <- args.traverse(typer0(_))
+
+          // _ = println(s"##### $name $kind $tpeCtorArgs ${tpe <:< q.TypeRepr.typeConstructorOf(classOf[scala.collection.mutable.IndexedSeq[_]]).appliedTo(args) }")
+
+          argAppliedSeqTpe = q.TypeRepr.typeConstructorOf(classOf[scala.collection.mutable.Seq[_]]).appliedTo(args)
+
         } yield (name, kind, tpeCtorArgs) match {
-//          case (Symbols.Buffer, q.ClassKind.Class, (_, comp: p.Type) :: Nil) => (None, p.Type.Array(comp))
-          case (Symbols.Array, q.ClassKind.Class, (_, comp: p.Type) :: Nil)  => (None, p.Type.Array(comp))
-          case (_, _, ys) if tpe.isFunctionType                              => // FunctionN
+          // case (Symbols.Array, q.ClassKind.Class, (_, comp: p.Type) :: Nil)  => (None, p.Type.Array(comp))
+          // case (Symbols.Buffer, q.ClassKind.Class, (_, comp: p.Type) :: Nil) => (None, p.Type.Array(comp))
+          case (_, q.ClassKind.Class, (_, comp: p.Type) :: Nil) if tpe <:< argAppliedSeqTpe =>
+            (None, p.Type.Array(comp))
+          case (_, _, ys) if tpe.isFunctionType => // FunctionN
             // TODO make sure this works
             (
               None,

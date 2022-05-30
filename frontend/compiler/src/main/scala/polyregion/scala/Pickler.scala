@@ -20,18 +20,18 @@ object Pickler {
     case p.Type.Unit   => Type.of[Unit]
   }
 
-  inline def tpeAsRuntimeTpe(t: p.Type): Byte = t match {
-    case p.Type.Bool            => polyregion.jvm.runtime.Type.BOOL.value
-    case p.Type.Byte            => polyregion.jvm.runtime.Type.BYTE.value
-    case p.Type.Char            => polyregion.jvm.runtime.Type.CHAR.value
-    case p.Type.Short           => polyregion.jvm.runtime.Type.SHORT.value
-    case p.Type.Int             => polyregion.jvm.runtime.Type.INT.value
-    case p.Type.Long            => polyregion.jvm.runtime.Type.LONG.value
-    case p.Type.Float           => polyregion.jvm.runtime.Type.FLOAT.value
-    case p.Type.Double          => polyregion.jvm.runtime.Type.DOUBLE.value
-    case p.Type.Array(_)        => polyregion.jvm.runtime.Type.PTR.value
-    case p.Type.Struct(_, _, _) => polyregion.jvm.runtime.Type.PTR.value
-    case p.Type.Unit            => polyregion.jvm.runtime.Type.VOID.value
+  inline def tpeAsRuntimeTpe(t: p.Type): polyregion.jvm.runtime.Type = t match {
+    case p.Type.Bool            => polyregion.jvm.runtime.Type.BOOL
+    case p.Type.Byte            => polyregion.jvm.runtime.Type.BYTE
+    case p.Type.Char            => polyregion.jvm.runtime.Type.CHAR
+    case p.Type.Short           => polyregion.jvm.runtime.Type.SHORT
+    case p.Type.Int             => polyregion.jvm.runtime.Type.INT
+    case p.Type.Long            => polyregion.jvm.runtime.Type.LONG
+    case p.Type.Float           => polyregion.jvm.runtime.Type.FLOAT
+    case p.Type.Double          => polyregion.jvm.runtime.Type.DOUBLE
+    case p.Type.Array(_)        => polyregion.jvm.runtime.Type.PTR
+    case p.Type.Struct(_, _, _) => polyregion.jvm.runtime.Type.PTR
+    case p.Type.Unit            => polyregion.jvm.runtime.Type.VOID
     case unknown =>
       println(s"tpeAsRuntimeTpe ??? = $unknown ")
       ???

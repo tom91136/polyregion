@@ -7,7 +7,7 @@
 #include "polyregion_jvm_compiler_Compiler.h"
 #include "utils.hpp"
 
-static constexpr const char *EX = "polyregion/PolyregionCompilerException";
+static constexpr const char *EX = "polyregion/jvm/compiler/PolyregionCompilerException";
 
 using namespace polyregion;
 namespace cp = ::compiler;

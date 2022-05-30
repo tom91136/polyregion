@@ -12,6 +12,11 @@ public final class Policy {
     this.local = null;
   }
 
+  public Policy(Dim3 global, Dim3 local) {
+    this.global = Objects.requireNonNull(global);
+    this.local = Objects.requireNonNull(local);
+  }
+
   public Optional<Dim3> local() {
     return Optional.ofNullable(local);
   }
@@ -31,6 +36,6 @@ public final class Policy {
 
   @Override
   public String toString() {
-    return "Policy{" + "global=" + global + ", local=" + local + '}';
+    return "Policy{" + "global=" + global + ", local=" + (local == null ? "(none)" : local) + '}';
   }
 }
