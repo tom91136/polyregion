@@ -171,7 +171,7 @@ public final class Device implements AutoCloseable {
         }
       }
       if (xs.isEmpty()) {
-        if(cb != null) cb.run();
+        if (cb != null) cb.run();
         return;
       }
       AtomicInteger pending = new AtomicInteger(xs.size());

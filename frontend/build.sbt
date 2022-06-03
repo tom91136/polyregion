@@ -1,6 +1,9 @@
 Global / onChangedBuildSource := ReloadOnSourceChanges
 
-lazy val bindingsDir = (file(".") / ".." / "native" / "bindings" / "jvm").getAbsoluteFile
+lazy val nativeDir   = (file(".") / ".." / "native").getAbsoluteFile
+lazy val bindingsDir = (nativeDir / "bindings" / "jvm").getAbsoluteFile
+
+// /home/tom/polyregion/native/cmake-build-debug-clang/bindings/jvm/libpolyregion-compiler-jvm.so
 
 lazy val scala3Version = "3.1.2"
 lazy val catsVersion   = "2.7.0"
@@ -35,6 +38,19 @@ lazy val commonSettings = Seq(
   ),
   scalafmtDetailedError := true,
   scalafmtFailOnErrors  := true
+)
+
+lazy val nativeLibSettings =
+  commonSettings ++ Seq(autoScalaLibrary := false, unmanagedResources / includeFilter := "*.so" || "*.dll" || "*.dylib")
+
+lazy val `native-compiler-x86` = project.settings(
+  nativeLibSettings,
+  Compile / unmanagedResourceDirectories += nativeDir / "cmake-build-release-clang" / "bindings" / "jvm"
+)
+
+lazy val `native-runtime-x86` = project.settings(
+  nativeLibSettings,
+  Compile / unmanagedResourceDirectories += nativeDir / "cmake-build-release-clang" / "bindings" / "jvm"
 )
 
 lazy val `binding-jvm` = project.settings(
