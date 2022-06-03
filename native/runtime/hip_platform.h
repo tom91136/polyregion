@@ -5,10 +5,10 @@
 
 namespace polyregion::runtime::hip {
 
-class EXPORT HipRuntime : public Runtime {
+class EXPORT HipPlatform : public Platform {
 public:
-  EXPORT explicit HipRuntime();
-  EXPORT ~HipRuntime() override = default;
+  EXPORT explicit HipPlatform();
+  EXPORT ~HipPlatform() override = default;
   EXPORT std::string name() override;
   EXPORT std::vector<Property> properties() override;
   EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;

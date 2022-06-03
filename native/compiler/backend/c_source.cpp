@@ -32,14 +32,14 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
     case Dialect::OpenCL1_1:
       return variants::total(
           *tpe,                                                           //
-          [&](const Type::Float &x) { return "cl_float"s; },              //
-          [&](const Type::Double &x) { return "cl_double"s; },            //
-          [&](const Type::Bool &x) { return "cl_char"s; },                //
-          [&](const Type::Byte &x) { return "ch_char"s; },                //
-          [&](const Type::Char &x) { return "cl_ushort"s; },              //
-          [&](const Type::Short &x) { return "cl_short"s; },              //
-          [&](const Type::Int &x) { return "cl_int"s; },                  //
-          [&](const Type::Long &x) { return "cl_long"s; },                //
+          [&](const Type::Float &x) { return "float"s; },              //
+          [&](const Type::Double &x) { return "double"s; },            //
+          [&](const Type::Bool &x) { return "char"s; },                //
+          [&](const Type::Byte &x) { return "char"s; },                //
+          [&](const Type::Char &x) { return "ushort"s; },              //
+          [&](const Type::Short &x) { return "short"s; },              //
+          [&](const Type::Int &x) { return "int"s; },                  //
+          [&](const Type::Long &x) { return "long"s; },                //
           [&](const Type::String &x) { return "char *"s; },               //
           [&](const Type::Unit &x) { return "void"s; },                   //
           [&](const Type::Nothing &x) { return "/*nothing*/"s; },         //
@@ -225,13 +225,17 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
   );
 }
 
-compiler::Compilation backend::CSource::run(const Program &program) {
+compiler::Compilation backend::CSource::run(const Program &program, const compiler::Opt &opt) {
   auto fnTree = program.entry;
 
   auto start = compiler::nowMono();
+  std::vector<Named> allArgs;
+  if (fnTree.receiver) allArgs.insert(allArgs.begin(), *fnTree.receiver);
+  allArgs.insert(allArgs.begin(), fnTree.args.begin(), fnTree.args.end());
+  allArgs.insert(allArgs.begin(), fnTree.captures.begin(), fnTree.captures.end());
 
   auto args = mk_string<Named>(
-      fnTree.args, [&](auto x) { return mkTpe(x.tpe) + " " + x.symbol; }, ", ");
+      allArgs, [&](auto x) { return "global " + mkTpe(x.tpe) + " " + x.symbol; }, ", ");
 
   std::string fnPrefix;
   switch (dialect) {
@@ -271,7 +275,7 @@ compiler::Compilation backend::CSource::run(const Program &program) {
 
   auto def = structDefs + "\n" + prototype + " {\n" + body + "\n}";
   //  std::cout << def << std::endl;
-  std::vector<char> data(def.c_str(), def.c_str() + def.length() + 1);
+  std::vector<char> data(def.begin(), def.end()  );
 
   std::string dialectName;
   switch (dialect) {
@@ -280,9 +284,5 @@ compiler::Compilation backend::CSource::run(const Program &program) {
     default: dialectName = "unknown";
   }
 
-  return compiler::Compilation(                                                                   //
-      data,                                                                                       //
-      {{compiler::nowMs(), compiler::elapsedNs(start), "polyast_to_" + dialectName + "_c", def}}, //
-      ""                                                                                          //
-  );
+  return {data, {{compiler::nowMs(), compiler::elapsedNs(start), "polyast_to_" + dialectName + "_c", def}}};
 }

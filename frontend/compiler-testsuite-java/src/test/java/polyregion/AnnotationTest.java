@@ -1,15 +1,20 @@
 package polyregion;
 
+import org.graalvm.compiler.nodes.calc.IntegerDivRemNode.Op;
 import org.junit.Test;
 
 import java.io.Serializable;
+import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
+import polyregion.AnnotationTest.CUDAArch.Config;
 import polyregion.java.OffloadFunction;
 import polyregion.java.OffloadRunnable;
 
@@ -18,6 +23,7 @@ import static polyregion.java.Runtime.offload;
 public class AnnotationTest {
 
 	@Retention(RetentionPolicy.RUNTIME)
+	@Target(ElementType.TYPE_USE)
 	@interface X {
 
 	}
@@ -64,8 +70,67 @@ public class AnnotationTest {
 
 	}
 
+	interface Arch{}
+	interface X86Arch extends Arch{}
+	static class Haswell implements X86Arch {}
+
+	interface CUDAArch extends Arch{
+		@Target(ElementType.TYPE_USE)
+		@interface Config{
+			Class<? extends CUDAArch> value();
+			OptA opt() default OptA.O1;
+			String flags() default "A";
+		}
+	}
+	static class SM51 implements CUDAArch {}
+	static class Many implements CUDAArch {
+		@Target(ElementType.TYPE_USE)
+		@interface Support{
+			CUDAArch.Config[] value();
+		}
+
+
+
+
+
+	}
+
+	interface Opt{
+		interface O1 extends Opt	{}
+		interface O2 extends Opt	{}
+		interface O3 extends Opt	{}
+	}
+
+
+	interface Config<A extends Arch, O extends Opt>{}
+
+	interface Device<A extends Arch>{
+		<C  extends A > void offload( OffloadRunnable r);
+	}
+
+	enum OptA{
+		O1, O2, O3
+	}
+
+	@Retention(RetentionPolicy.RUNTIME)
+	@Target(ElementType.TYPE_USE)
+	@interface ConfigA{
+		 OptA opt();
+	}
+
+
+
 	@Test
 	public void test1() {
+
+		Device<CUDAArch> d = null;
+
+//		new Config<@X SM51, Opt.O1>(){}
+		d.<@Many.Support(SM51.class) Many>offload(  () -> System.out.println("A"));
+		d.<@CUDAArch.Config(SM51.class) SM51>offload(  () -> System.out.println("A"));
+
+//		d.<Config<Haswell, Opt.O1>>offload(() -> System.out.println("A"));
+
 
 //		Foo ff = new Foo();
 //		offload(ff::fn);
@@ -119,6 +184,9 @@ public class AnnotationTest {
 //			int x = offload(() -> finalI);
 
 		}
+
+		// d.aot.task(opt, )
+
 		int x = offload(() -> 0);
 		int y = offload(() -> 10);
 		int z = offload(() -> 5);

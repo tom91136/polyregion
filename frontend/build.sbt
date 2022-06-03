@@ -124,7 +124,7 @@ lazy val `compiler-testsuite-java` = project
       "com.github.sbt" % "junit-interface" % "0.13.3" % Test
     )
   )
-  .dependsOn(compiler)
+  .dependsOn(compiler, `runtime-java`)
 
 lazy val mainCls = Some("polyregion.examples.CheckApi")
 

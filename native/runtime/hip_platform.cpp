@@ -1,4 +1,4 @@
-#include "hip_runtime.h"
+#include "hip_platform.h"
 
 using namespace polyregion::runtime;
 using namespace polyregion::runtime::hip;
@@ -14,22 +14,22 @@ static void checked(hipError_t result, const char *file, int line) {
   }
 }
 
-HipRuntime::HipRuntime() {
+HipPlatform::HipPlatform() {
   TRACE();
   if (hipewInit(HIPEW_INIT_HIP) != HIPEW_SUCCESS) {
     throw std::logic_error("HIPEW initialisation failed, no HIP driver present?");
   }
   CHECKED(hipInit(0));
 }
-std::string HipRuntime::name() {
+std::string HipPlatform::name() {
   TRACE();
   return "HIP";
 }
-std::vector<Property> HipRuntime::properties() {
+std::vector<Property> HipPlatform::properties() {
   TRACE();
   return {};
 }
-std::vector<std::unique_ptr<Device>> HipRuntime::enumerate() {
+std::vector<std::unique_ptr<Device>> HipPlatform::enumerate() {
   TRACE();
   int count = 0;
   CHECKED(hipGetDeviceCount(&count));
@@ -104,7 +104,10 @@ void HipDevice::loadModule(const std::string &name, const std::string &image) {
   TRACE();
   store.loadModule(name, image);
 }
-bool HipDevice::moduleLoaded(const std::string &name) { return store.moduleLoaded(name); }
+bool HipDevice::moduleLoaded(const std::string &name) {
+  TRACE();
+  return store.moduleLoaded(name);
+}
 uintptr_t HipDevice::malloc(size_t size, Access access) {
   TRACE();
   context.touch();
@@ -120,6 +123,7 @@ void HipDevice::free(uintptr_t ptr) {
 }
 std::unique_ptr<DeviceQueue> HipDevice::createQueue() {
   TRACE();
+  context.touch();
   return std::make_unique<HipDeviceQueue>(store);
 }
 

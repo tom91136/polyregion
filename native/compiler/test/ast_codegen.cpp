@@ -15,8 +15,8 @@ using namespace Expr;
 
 template <typename P> static void assertCompilationSucceeded(const P &p) {
   INFO(repr(p))
-  auto c =
-      polyregion::compiler::compile(p, polyregion::compiler::Options{polyregion::compiler::Target::Object_LLVM_x86_64});
+  auto c = polyregion::compiler::compile(
+      p, polyregion::compiler::Options{polyregion::compiler::Target::Object_LLVM_x86_64}, <#initializer #>);
   std::cout << c << std::endl;
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);

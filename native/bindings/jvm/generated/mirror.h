@@ -128,21 +128,21 @@ public:
   Instance wrap (JNIEnv *env, jobject instance);
   Instance operator()(JNIEnv *env, jlong nativePeer, jlong id, jstring name, jboolean sharedAddressSpace) const;
 };
-struct Runtime {
+struct Platform {
   struct Instance {
-    const Runtime &meta;
+    const Platform &meta;
     jobject instance;
-    Instance(const Runtime &meta, jobject instance);
+    Instance(const Platform &meta, jobject instance);
     template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
     
   };
   jclass clazz;
   jmethodID ctor0Method;
 private:
-  explicit Runtime(JNIEnv *env);
-  static thread_local std::unique_ptr<Runtime> cached;
+  explicit Platform(JNIEnv *env);
+  static thread_local std::unique_ptr<Platform> cached;
 public:
-  static Runtime& of(JNIEnv *env);
+  static Platform& of(JNIEnv *env);
   static void drop(JNIEnv *env);
   Instance wrap (JNIEnv *env, jobject instance);
   Instance operator()(JNIEnv *env, jlong nativePeer, jstring name) const;

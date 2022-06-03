@@ -1,8 +1,9 @@
 #include <system_error>
 #include <utility>
 
+#include "cpuinfo.h"
 #include "ffi.h"
-#include "object_runtime.h"
+#include "object_platform.h"
 #include "utils.hpp"
 
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
@@ -76,16 +77,16 @@ void ObjectDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_
   if (cb) (*cb)();
 }
 
-RelocatableRuntime::RelocatableRuntime() { TRACE(); }
-std::string RelocatableRuntime::name() {
+RelocatablePlatform::RelocatablePlatform() { TRACE(); }
+std::string RelocatablePlatform::name() {
   TRACE();
   return "CPU (RelocatableObject)";
 }
-std::vector<Property> RelocatableRuntime::properties() {
+std::vector<Property> RelocatablePlatform::properties() {
   TRACE();
   return {};
 }
-std::vector<std::unique_ptr<Device>> RelocatableRuntime::enumerate() {
+std::vector<std::unique_ptr<Device>> RelocatablePlatform::enumerate() {
   TRACE();
   std::vector<std::unique_ptr<Device>> xs(1);
   xs[0] = std::make_unique<RelocatableDevice>();
@@ -117,7 +118,10 @@ void RelocatableDevice::loadModule(const std::string &name, const std::string &i
       objects.emplace_hint(it, name, std::move(*object));
   }
 }
-bool RelocatableDevice::moduleLoaded(const std::string &name) { return objects.find(name) != objects.end(); }
+bool RelocatableDevice::moduleLoaded(const std::string &name) {
+  TRACE();
+  return objects.find(name) != objects.end();
+}
 std::unique_ptr<DeviceQueue> RelocatableDevice::createQueue() {
   TRACE();
   return std::make_unique<RelocatableDeviceQueue>(objects, ld);
@@ -154,16 +158,16 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
 }
 
 static constexpr const char *SHOBJ_ERROR_PREFIX = "[RelocatableObject error] ";
-SharedRuntime::SharedRuntime() { TRACE(); }
-std::string SharedRuntime::name() {
+SharedPlatform::SharedPlatform() { TRACE(); }
+std::string SharedPlatform::name() {
   TRACE();
   return "CPU (SharedObjectR)";
 }
-std::vector<Property> SharedRuntime::properties() {
+std::vector<Property> SharedPlatform::properties() {
   TRACE();
   return {};
 }
-std::vector<std::unique_ptr<Device>> SharedRuntime::enumerate() {
+std::vector<std::unique_ptr<Device>> SharedPlatform::enumerate() {
   TRACE();
   std::vector<std::unique_ptr<Device>> xs(1);
   xs[0] = std::make_unique<RelocatableDevice>();
@@ -211,7 +215,10 @@ void SharedDevice::loadModule(const std::string &name, const std::string &image)
       modules.emplace_hint(it, name, LoadedModule{image, dylib, {}});
   }
 }
-bool SharedDevice::moduleLoaded(const std::string &name) { return modules.find(name) != modules.end(); }
+bool SharedDevice::moduleLoaded(const std::string &name) {
+  TRACE();
+  return modules.find(name) != modules.end();
+}
 std::unique_ptr<DeviceQueue> SharedDevice::createQueue() {
   TRACE();
   return std::make_unique<SharedDeviceQueue>(modules);

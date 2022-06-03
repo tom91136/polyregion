@@ -26,7 +26,7 @@ EXPORT const llvm::Target &targetFromTriple(const llvm::Triple &tripleName);
 
 EXPORT std::unique_ptr<llvm::TargetMachine> targetMachineFromTarget(const TargetInfo &info);
 
-EXPORT compiler::Compilation compileModule(const TargetInfo &info, bool emitDisassembly,
+EXPORT compiler::Compilation compileModule(const TargetInfo &info, const compiler::Opt &opt, bool emitDisassembly,
                                            std::unique_ptr<llvm::Module> M, llvm::LLVMContext &Context);
 
 } // namespace polyregion::backend::llvmc

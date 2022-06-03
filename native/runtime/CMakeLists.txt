@@ -1,10 +1,10 @@
 add_library(runtime-lib STATIC
         libm.cpp
         runtime.cpp
-        cuda_runtime.cpp
-        hip_runtime.cpp
-        cl_runtime.cpp
-        object_runtime.cpp
+        cuda_platform.cpp
+        hip_platform.cpp
+        cl_platform.cpp
+        object_platform.cpp
         thirdparty/cuew/src/cuew.c
         thirdparty/hipew/src/hipew.c
         thirdparty/clew/src/clew.c
@@ -36,10 +36,10 @@ set(LLVM_LIBS
         )
 
 message(STATUS "[runtime] Adding LLVM libs = ${LLVM_LIBS}")
-
 target_link_libraries(runtime-lib PRIVATE
         ${LLVM_LIBS}
         libffi.a
+        cpuinfo
 #        pthread
 #        dl
         )

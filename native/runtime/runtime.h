@@ -14,9 +14,8 @@
   #error Trace already defined
 #else
 
-//  #define TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this,
-//  __PRETTY_FUNCTION__)
-  #define TRACE()
+  #define TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this, __PRETTY_FUNCTION__)
+//  #define TRACE()
 
 #endif
 
@@ -174,9 +173,9 @@ public:
   [[nodiscard]] virtual EXPORT std::unique_ptr<DeviceQueue> createQueue() = 0;
 };
 
-class Runtime {
+class Platform {
 public:
-  virtual EXPORT ~Runtime() = default;
+  virtual EXPORT ~Platform() = default;
   [[nodiscard]] EXPORT virtual std::string name() = 0;
   [[nodiscard]] EXPORT virtual std::vector<Property> properties() = 0;
   [[nodiscard]] EXPORT virtual std::vector<std::unique_ptr<Device>> enumerate() = 0;

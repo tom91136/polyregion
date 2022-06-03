@@ -1,5 +1,8 @@
 package polyregion.jni
 
+import polyregion.jvm.compiler.Layout.Member
+import polyregion.jvm.runtime.Platform
+
 import java.lang.reflect.{Constructor, Field, Method, Modifier}
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
@@ -305,10 +308,10 @@ object JniSourceMirror {
         (classOf[polyregion.jvm.runtime.Policy], _ => true, _ => true, _ => false),
         (classOf[polyregion.jvm.runtime.Device.Queue], _ => false, _ => true, _ => false),
         (classOf[polyregion.jvm.runtime.Device], _ => false, _ => true, _ => false),
-        (classOf[polyregion.jvm.runtime.Runtime], _ => false, _ => true, _ => false),
+        (classOf[Platform], _ => false, _ => true, _ => false),
         (classOf[polyregion.jvm.compiler.Event], _ => false, _ => true, _ => false),
         (classOf[polyregion.jvm.compiler.Layout], _ => false, _ => true, _ => false),
-        (classOf[polyregion.jvm.compiler.Member], _ => false, _ => true, _ => false),
+        (classOf[Member], _ => false, _ => true, _ => false),
         (classOf[polyregion.jvm.compiler.Options], _ => true, _ => true, _ => false),
         (classOf[polyregion.jvm.compiler.Compilation], _ => false, _ => true, _ => false),
         (classOf[java.lang.String], _ => false, _ => false, _ => false),

@@ -26,7 +26,7 @@ private:
 public:
   explicit CSource(const Dialect &dialect) : dialect(dialect) {}
 
-  compiler::Compilation run(const Program &) override;
+  compiler::Compilation run(const Program &, const compiler::Opt& opt) override;
 };
 
 } // namespace polyregion::backend

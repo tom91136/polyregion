@@ -21,16 +21,30 @@ using TimePoint = std::chrono::steady_clock::time_point;
 [[nodiscard]] int64_t nowMs();
 
 enum class EXPORT Target : uint8_t {
-  Object_LLVM_x86_64 = 1,
+  Object_LLVM_HOST = 10,
+  Object_LLVM_x86_64,
   Object_LLVM_AArch64,
   Object_LLVM_ARM,
-  Object_LLVM_NVPTX64,
+
+  Object_LLVM_NVPTX64 = 20,
   Object_LLVM_AMDGCN,
+  Object_LLVM_SPIRV64,
+
+  Source_C_C11 = 30,
   Source_C_OpenCL1_1,
-  Source_C_C11
+};
+
+enum class EXPORT Opt : uint8_t {
+  O0 = 10,
+  O1,
+  O2,
+  O3,
+  Ofast,
 };
 
 EXPORT std::optional<Target> targetFromOrdinal(std::underlying_type_t<Target> ordinal);
+
+EXPORT std::optional<Opt> optFromOrdinal(std::underlying_type_t<Opt> ordinal);
 
 enum class EXPORT CpuArch : uint32_t {
 
@@ -243,7 +257,7 @@ struct EXPORT Compilation {
   EXPORT explicit Compilation(decltype(messages) messages) : messages(std::move(messages)) {}
   EXPORT Compilation(decltype(binary) binary, //
                      decltype(events) events, //
-                     decltype(messages) messages)
+                     decltype(messages) messages = "")
       : binary(std::move(binary)), events(std::move(events)), messages(std::move(messages)) {}
   EXPORT friend std::ostream &operator<<(std::ostream &, const Compilation &);
 };
@@ -258,7 +272,7 @@ struct EXPORT Options {
 EXPORT Layout layoutOf(const polyast::StructDef &sdef, const Options &options);
 EXPORT Layout layoutOf(const Bytes &bytes, const Options &backend);
 
-EXPORT Compilation compile(const polyast::Program &program, const Options &backend);
-EXPORT Compilation compile(const Bytes &bytes, const Options &backend);
+EXPORT Compilation compile(const polyast::Program &program, const Options &options, const Opt &opt);
+EXPORT Compilation compile(const Bytes &astBytes, const Options &options, const Opt &opt);
 
 } // namespace polyregion::compiler

@@ -2,10 +2,10 @@
 #include <string>
 #include <vector>
 
-#include "cl_runtime.h"
-#include "cuda_runtime.h"
-#include "hip_runtime.h"
-#include "object_runtime.h"
+#include "cl_platform.h"
+#include "cuda_platform.h"
+#include "hip_platform.h"
+#include "object_platform.h"
 #include "runtime.h"
 #include "utils.hpp"
 
@@ -113,25 +113,25 @@ void run() {
   using namespace polyregion::runtime::hip;
   using namespace polyregion::runtime::cl;
 
-  std::vector<std::unique_ptr<Runtime>> rts;
+  std::vector<std::unique_ptr<Platform>> rts;
+
+//  try {
+//    rts.push_back(std::make_unique<RelocatableRuntime>());
+//  } catch (const std::exception &e) {
+//    std::cerr << "[REL] " << e.what() << std::endl;
+//  }
 
   try {
-    rts.push_back(std::make_unique<RelocatableRuntime>());
-  } catch (const std::exception &e) {
-    std::cerr << "[REL] " << e.what() << std::endl;
-  }
-
-  try {
-    rts.push_back(std::make_unique<CudaRuntime>());
+    rts.push_back(std::make_unique<CudaPlatform>());
   } catch (const std::exception &e) {
     std::cerr << "[CUDA] " << e.what() << std::endl;
   }
 
-  try {
-    rts.push_back(std::make_unique<ClRuntime>());
-  } catch (const std::exception &e) {
-    std::cerr << "[OCL] " << e.what() << std::endl;
-  }
+//  try {
+//    rts.push_back(std::make_unique<ClRuntime>());
+//  } catch (const std::exception &e) {
+//    std::cerr << "[OCL] " << e.what() << std::endl;
+//  }
 
   //  try {
   //    rts.push_back(std::make_unique<HipRuntime>());
@@ -169,13 +169,17 @@ void run() {
         throw std::logic_error("?");
       }
 
-      d->loadModule("a", src);
 
-      auto size = sizeof(decltype(xs)::value_type) * xs.size();
-      auto ptr = d->malloc(size, Access::RW);
+
+
 
       for (int i = 0; i < 2; i++) {
         auto q1 = d->createQueue();
+        if(!d->moduleLoaded("a")){
+          d->loadModule("a", src);
+        }
+        auto size = sizeof(decltype(xs)::value_type) * xs.size();
+        auto ptr = d->malloc(size, Access::RW);
         q1->enqueueHostToDeviceAsync(xs.data(), ptr, size,
                                      [&]() { std::cout << "[" << i << "]  H->D ok" << std::endl; });
 
@@ -191,16 +195,19 @@ void run() {
         q1->enqueueInvokeAsync("a", "lambda", types, args, {},
                                [&]() { std::cout << "[" << i << "]  K 2 ok" << std::endl; });
         q1->enqueueDeviceToHostAsync(ptr, xs.data(), size, [&]() {
+
           std::cout << "[" << i << "]  D->H ok, r= "
                     << polyregion::mk_string<int>(
                            xs, [](auto x) { return std::to_string(x); }, ",")
                     << std::endl;
+
         });
+        d->free(ptr);
+
       }
 
       std::cout << d->id() << " = Done" << std::endl;
 
-      d->free(ptr);
     }
   }
 

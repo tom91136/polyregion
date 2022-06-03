@@ -1,7 +1,7 @@
 #include "ast.h"
 #include "backend/llvmc.h"
 #include "compiler.h"
-#include "object_runtime.h"
+#include "object_platform.h"
 #include "utils.hpp"
 #include "variants.hpp"
 
@@ -35,13 +35,13 @@ int main(int argc, char *argv[]) {
 
   auto p = program(fn, {}, {});
   std::cout << repr(p) << std::endl;
-  compiler::Options opt{compiler::Target::Object_LLVM_AMDGCN, "gfx906"};
-  //  compiler::Options opt{compiler::Target::Object_LLVM_NVPTX64, "sm_61"};
-  auto c = compiler::compile(p, opt);
+//  compiler::Options options{compiler::Target::Object_LLVM_AMDGCN, "gfx906"};
+    compiler::Options options{compiler::Target::Object_LLVM_NVPTX64, "sm_61"};
+  auto c = compiler::compile(p, options, compiler::Opt::O3);
   std::cout << c << std::endl;
 
   if (c.binary) {
-    std::ofstream outfile("bin_" + (opt.arch.empty() ? "no_arch" : opt.arch) + ".so",
+    std::ofstream outfile("bin_" + (options.arch.empty() ? "no_arch" : options.arch) + ".so",
                           std::ios::out | std::ios::binary | std::ios::trunc);
     outfile.write(c.binary->data(), c.binary->size());
     outfile.close();
@@ -50,7 +50,7 @@ int main(int argc, char *argv[]) {
   auto simple =
       program(function("twice", {"x"_(Int)}, Int)({ret(invoke(Fn2::Mul(), "x"_(Int), 2_(Int), Int))}), {}, {});
   std::cout << repr(simple) << std::endl;
-  auto c2 = compiler::compile(simple, {compiler::Target::Object_LLVM_x86_64, {}});
+  auto c2 = compiler::compile(simple, {compiler::Target::Object_LLVM_x86_64, {}}, compiler::Opt::O3);
   std::cout << c2 << std::endl;
   if (c2.binary) {
     runtime::object::RelocatableDevice d;
@@ -59,9 +59,15 @@ int main(int argc, char *argv[]) {
 
     int a = 42;
     int actual = 0;
-    std::vector<runtime::TypedPointer> args = {{runtime::Type::Int32, &a}};
-    runtime::TypedPointer rtn{runtime::Type::Int32, &actual};
-    d.createQueue()->enqueueInvokeAsync("", "lambda", args, rtn, {}, {});
+    std::vector<runtime::TypedPointer> args = {{runtime::Type::Int32, &a}, {runtime::Type::Int32, &actual}};
+    std::vector<runtime::Type> types(args.size());
+    std::vector<void *> pointers(args.size());
+    for (size_t i = 0; i < args.size(); ++i) {
+      types[i] = args[i].first;
+      pointers[i] = args[i].second;
+    }
+
+    d.createQueue()->enqueueInvokeAsync("", "twice", types, pointers, {}, {});
 
     std::cout << actual << "\n";
   }

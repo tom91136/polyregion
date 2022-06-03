@@ -5,10 +5,10 @@
 
 namespace polyregion::runtime::cuda {
 
-class EXPORT CudaRuntime : public Runtime {
+class EXPORT CudaPlatform : public Platform {
 public:
-  EXPORT explicit CudaRuntime();
-  EXPORT ~CudaRuntime() override = default;
+  EXPORT explicit CudaPlatform();
+  EXPORT ~CudaPlatform() override = default;
   EXPORT std::string name() override;
   EXPORT std::vector<Property> properties() override;
   EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;

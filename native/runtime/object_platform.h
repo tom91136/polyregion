@@ -25,10 +25,10 @@ namespace {
 using ObjectModules = std::unordered_map<std::string, std::unique_ptr<llvm::object::ObjectFile>>;
 }
 
-class EXPORT RelocatableRuntime : public Runtime {
+class EXPORT RelocatablePlatform : public Platform {
 public:
-  EXPORT explicit RelocatableRuntime();
-  EXPORT ~RelocatableRuntime() override = default;
+  EXPORT explicit RelocatablePlatform();
+  EXPORT ~RelocatablePlatform() override = default;
   EXPORT std::string name() override;
   EXPORT std::vector<Property> properties() override;
   EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;
@@ -62,10 +62,10 @@ namespace {
 using LoadedModule = std::tuple<std::string, void *, std::unordered_map<std::string, void *>>;
 using DynamicModules = std::unordered_map<std::string, LoadedModule>;
 } // namespace
-class EXPORT SharedRuntime : public Runtime {
+class EXPORT SharedPlatform : public Platform {
 public:
-  EXPORT explicit SharedRuntime();
-  EXPORT ~SharedRuntime() override = default;
+  EXPORT explicit SharedPlatform();
+  EXPORT ~SharedPlatform() override = default;
   EXPORT std::string name() override;
   EXPORT std::vector<Property> properties() override;
   EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;

@@ -1,5 +1,5 @@
 
-#include "cl_runtime.h"
+#include "cl_platform.h"
 #include <chrono>
 #include <thread>
 using namespace polyregion::runtime;
@@ -37,21 +37,21 @@ static std::string queryDeviceInfo(cl_device_id device, cl_device_info info) {
   return data;
 }
 
-ClRuntime::ClRuntime() {
+ClPlatform::ClPlatform() {
   TRACE();
   if (clewInit() != CLEW_SUCCESS) {
     throw std::logic_error("CLEW initialisation failed, no OpenCL library present?");
   }
 }
-std::string ClRuntime::name() {
+std::string ClPlatform::name() {
   TRACE();
   return "OpenCL";
 }
-std::vector<Property> ClRuntime::properties() {
+std::vector<Property> ClPlatform::properties() {
   TRACE();
   return {};
 }
-std::vector<std::unique_ptr<Device>> ClRuntime::enumerate() {
+std::vector<std::unique_ptr<Device>> ClPlatform::enumerate() {
   TRACE();
   cl_uint numPlatforms = 0;
   CHECKED(clGetPlatformIDs(0, nullptr, &numPlatforms));
@@ -73,7 +73,7 @@ std::vector<std::unique_ptr<Device>> ClRuntime::enumerate() {
   }
   return clDevices;
 }
-ClRuntime::~ClRuntime() { TRACE(); }
+ClPlatform::~ClPlatform() { TRACE(); }
 
 // ---
 
@@ -178,7 +178,10 @@ void ClDevice::loadModule(const std::string &name, const std::string &image) {
   TRACE();
   store.loadModule(name, image);
 }
-bool ClDevice::moduleLoaded(const std::string &name) { return store.moduleLoaded(name); }
+bool ClDevice::moduleLoaded(const std::string &name) {
+  TRACE();
+  return store.moduleLoaded(name);
+}
 uintptr_t ClDevice::malloc(size_t size, Access access) {
   TRACE();
   context.touch();
@@ -216,7 +219,6 @@ ClDeviceQueue::~ClDeviceQueue() {
   CHECKED(clReleaseCommandQueue(queue));
 }
 void ClDeviceQueue::enqueueCallback(const MaybeCallback &cb, cl_event event) {
-  TRACE();
   TRACE();
   if (!cb) return;
   CHECKED(clSetEventCallback(

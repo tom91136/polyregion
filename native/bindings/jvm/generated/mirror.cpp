@@ -138,24 +138,24 @@ Device::Instance Device::operator()(JNIEnv *env, jlong nativePeer, jlong id, jst
   return {*this, env->NewObject(clazz, ctor0Method, nativePeer, id, name, sharedAddressSpace)};
 }
 
-Runtime::Instance::Instance(const Runtime &meta, jobject instance) : meta(meta), instance(instance) {}
+Platform::Instance::Instance(const Platform &meta, jobject instance) : meta(meta), instance(instance) {}
 
-Runtime::Runtime(JNIEnv *env)
-    : clazz(reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/runtime/Runtime")))),
+Platform::Platform(JNIEnv *env)
+    : clazz(reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/runtime/Platform")))),
       ctor0Method(env->GetMethodID(clazz, "<init>", "(JLjava/lang/String;)V")) { };
-thread_local std::unique_ptr<Runtime> Runtime::cached = {};
-Runtime& Runtime::of(JNIEnv *env) {
-  if(!cached) cached = std::unique_ptr<Runtime>(new Runtime(env));
+thread_local std::unique_ptr<Platform> Platform::cached = {};
+Platform& Platform::of(JNIEnv *env) {
+  if(!cached) cached = std::unique_ptr<Platform>(new Platform(env));
   return *cached;
 }
-void Runtime::drop(JNIEnv *env){
+void Platform::drop(JNIEnv *env){
   if(cached) {
     env->DeleteGlobalRef(cached->clazz);
     cached.reset();
   }
 }
-Runtime::Instance Runtime::wrap(JNIEnv *env, jobject instance) { return {*this, instance}; }
-Runtime::Instance Runtime::operator()(JNIEnv *env, jlong nativePeer, jstring name) const {
+Platform::Instance Platform::wrap(JNIEnv *env, jobject instance) { return {*this, instance}; }
+Platform::Instance Platform::operator()(JNIEnv *env, jlong nativePeer, jstring name) const {
   return {*this, env->NewObject(clazz, ctor0Method, nativePeer, name)};
 }
 
@@ -184,7 +184,7 @@ Layout::Instance::Instance(const Layout &meta, jobject instance) : meta(meta), i
 
 Layout::Layout(JNIEnv *env)
     : clazz(reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/compiler/Layout")))),
-      ctor0Method(env->GetMethodID(clazz, "<init>", "([Ljava/lang/String;JJ[Lpolyregion/jvm/compiler/Member;)V")) { };
+      ctor0Method(env->GetMethodID(clazz, "<init>", "([Ljava/lang/String;JJ[Lpolyregion/jvm/compiler/Layout$Member;)V")) { };
 thread_local std::unique_ptr<Layout> Layout::cached = {};
 Layout& Layout::of(JNIEnv *env) {
   if(!cached) cached = std::unique_ptr<Layout>(new Layout(env));
@@ -204,7 +204,7 @@ Layout::Instance Layout::operator()(JNIEnv *env, jobjectArray name, jlong sizeIn
 Member::Instance::Instance(const Member &meta, jobject instance) : meta(meta), instance(instance) {}
 
 Member::Member(JNIEnv *env)
-    : clazz(reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/compiler/Member")))),
+    : clazz(reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/compiler/Layout$Member")))),
       ctor0Method(env->GetMethodID(clazz, "<init>", "(Ljava/lang/String;JJ)V")) { };
 thread_local std::unique_ptr<Member> Member::cached = {};
 Member& Member::of(JNIEnv *env) {

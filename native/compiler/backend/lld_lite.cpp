@@ -91,7 +91,7 @@ polyregion::backend::lld_lite::link(const std::vector<std::string> &args,
 
   // XXX Horrible hack, see if this improves when newer LLD comes out.
   // LLD uses FileOutputBuffer which delegates to InMemoryBuffer which dumps data to llvm::outs().
-  // There isn't an easy to way to avoid this as everything is function local, so we just mask the actual STDOUT FD for
+  // There isn't an easy way to avoid this as everything is function local, so we just mask the actual STDOUT FD for
   // now and restore it when linking is done.
   suppress_fd::Suppressor<suppress_fd::STDOUT> suppressor; // suppress STDOUT
 

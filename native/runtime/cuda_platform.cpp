@@ -1,4 +1,4 @@
-#include "cuda_runtime.h"
+#include "cuda_platform.h"
 
 using namespace polyregion::runtime;
 using namespace polyregion::runtime::cuda;
@@ -14,22 +14,22 @@ static void checked(CUresult result, const char *file, int line) {
   }
 }
 
-CudaRuntime::CudaRuntime() {
+CudaPlatform::CudaPlatform() {
   TRACE();
   if (cuewInit(CUEW_INIT_CUDA) != CUEW_SUCCESS) {
     throw std::logic_error("CUEW initialisation failed, no CUDA driver present?");
   }
   CHECKED(cuInit(0));
 }
-std::string CudaRuntime::name() {
+std::string CudaPlatform::name() {
   TRACE();
   return "CUDA";
 }
-std::vector<Property> CudaRuntime::properties() {
+std::vector<Property> CudaPlatform::properties() {
   TRACE();
   return {};
 }
-std::vector<std::unique_ptr<Device>> CudaRuntime::enumerate() {
+std::vector<std::unique_ptr<Device>> CudaPlatform::enumerate() {
   TRACE();
   int count = 0;
   CHECKED(cuDeviceGetCount(&count));
@@ -101,7 +101,10 @@ void CudaDevice::loadModule(const std::string &name, const std::string &image) {
   TRACE();
   store.loadModule(name, image);
 }
-bool CudaDevice::moduleLoaded(const std::string &name) { return store.moduleLoaded(name); }
+bool CudaDevice::moduleLoaded(const std::string &name) {
+  TRACE();
+  return store.moduleLoaded(name);
+}
 uintptr_t CudaDevice::malloc(size_t size, Access access) {
   TRACE();
   context.touch();
@@ -118,6 +121,7 @@ void CudaDevice::free(uintptr_t ptr) {
 
 std::unique_ptr<DeviceQueue> CudaDevice::createQueue() {
   TRACE();
+  context.touch();
   return std::make_unique<CudaDeviceQueue>(store);
 }
 CudaDevice::~CudaDevice() { TRACE(); }

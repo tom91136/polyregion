@@ -28,14 +28,30 @@ int64_t compiler::nowMs() {
 std::optional<compiler::Target> compiler::targetFromOrdinal(std::underlying_type_t<compiler::Target> ordinal) {
   auto target = static_cast<Target>(ordinal);
   switch (target) {
+    case Target::Object_LLVM_HOST:
     case Target::Object_LLVM_x86_64:
     case Target::Object_LLVM_AArch64:
     case Target::Object_LLVM_ARM:
     case Target::Object_LLVM_NVPTX64:
     case Target::Object_LLVM_AMDGCN:
     case Target::Source_C_OpenCL1_1:
-    case Target::Source_C_C11: return target;
-    default: return {};
+    case Target::Source_C_C11:
+    case Target::Object_LLVM_SPIRV64:
+      return target;
+      // XXX do not add default here, see  -Werror=switch
+  }
+}
+
+std::optional<compiler::Opt> compiler::optFromOrdinal(std::underlying_type_t<compiler::Opt> ordinal) {
+  auto target = static_cast<Opt>(ordinal);
+  switch (target) {
+    case Opt::O0:
+    case Opt::O1:
+    case Opt::O2:
+    case Opt::O3:
+    case Opt::Ofast:
+      return target;
+      // XXX do not add default here, see  -Werror=switch
   }
 }
 
@@ -100,11 +116,21 @@ static json deserialiseAst(const compiler::Bytes &astBytes) {
 
 static backend::LLVM::Options toLLVMBackendOptions(const compiler::Options &options) {
   switch (options.target) {
+    case compiler::Target::Object_LLVM_HOST: {
+      auto host = backend::llvmc::defaultHostTriple();
+      switch (host.getArch()) {
+        case llvm::Triple::ArchType::x86_64: return {.target = backend::LLVM::Target::x86_64, .arch = options.arch};
+        case llvm::Triple::ArchType::aarch64: return {.target = backend::LLVM::Target::AArch64, .arch = options.arch};
+        case llvm::Triple::ArchType::arm: return {.target = backend::LLVM::Target::ARM, .arch = options.arch};
+        default: throw std::logic_error("Unsupported host triplet: " + host.str());
+      }
+    }
     case compiler::Target::Object_LLVM_x86_64: return {.target = backend::LLVM::Target::x86_64, .arch = options.arch};
     case compiler::Target::Object_LLVM_AArch64: return {.target = backend::LLVM::Target::AArch64, .arch = options.arch};
     case compiler::Target::Object_LLVM_ARM: return {.target = backend::LLVM::Target::ARM, .arch = options.arch};
     case compiler::Target::Object_LLVM_NVPTX64: return {.target = backend::LLVM::Target::NVPTX64, .arch = options.arch};
     case compiler::Target::Object_LLVM_AMDGCN: return {.target = backend::LLVM::Target::AMDGCN, .arch = options.arch};
+    case compiler::Target::Object_LLVM_SPIRV64: return {.target = backend::LLVM::Target::SPIRV64, .arch = options.arch};
     case compiler::Target::Source_C_OpenCL1_1: //
     case compiler::Target::Source_C_C11:       //
       throw std::logic_error("Not an object target");
@@ -114,11 +140,13 @@ static backend::LLVM::Options toLLVMBackendOptions(const compiler::Options &opti
 compiler::Layout compiler::layoutOf(const polyast::StructDef &def, const Options &options) {
 
   switch (options.target) {
+    case Target::Object_LLVM_HOST:
     case Target::Object_LLVM_x86_64:
     case Target::Object_LLVM_AArch64:
     case Target::Object_LLVM_ARM:
     case Target::Object_LLVM_NVPTX64:
-    case Target::Object_LLVM_AMDGCN: {
+    case Target::Object_LLVM_AMDGCN:
+    case Target::Object_LLVM_SPIRV64: {
       auto llvmOptions = toLLVMBackendOptions(options);
       auto dataLayout = backend::llvmc::targetMachineFromTarget(llvmOptions.toTargetInfo())->createDataLayout();
       ;
@@ -135,14 +163,13 @@ compiler::Layout compiler::layoutOf(const polyast::StructDef &def, const Options
                              dataLayout.getTypeAllocSize(structTy->getElementType(i)) //
         );
       }
-
       return compiler::Layout{.name = def.name,
                               .sizeInBytes = layout->getSizeInBytes(),
                               .alignment = layout->getAlignment().value(),
                               .members = members};
     }
-    case Target::Source_C_OpenCL1_1:
-    case Target::Source_C_C11: throw std::logic_error("Not available for source targets");
+    case Target::Source_C_C11:
+    case Target::Source_C_OpenCL1_1: throw std::logic_error("Not available for source targets");
   }
 }
 
@@ -157,18 +184,20 @@ static void sortEvents(compiler::Compilation &c) {
             [](const auto &l, const auto &r) { return l.epochMillis < r.epochMillis; });
 }
 
-compiler::Compilation compiler::compile(const polyast::Program &program, const Options &options) {
+compiler::Compilation compiler::compile(const polyast::Program &program, const Options &options, const Opt &opt) {
   if (!init) {
     return Compilation{"initialise was not called before"};
   }
 
   auto mkBackend = [&]() -> std::unique_ptr<backend::Backend> {
     switch (options.target) {
+      case Target::Object_LLVM_HOST:
       case Target::Object_LLVM_x86_64:
       case Target::Object_LLVM_AArch64:
       case Target::Object_LLVM_ARM:
       case Target::Object_LLVM_NVPTX64:
-      case Target::Object_LLVM_AMDGCN:                                                   //
+      case Target::Object_LLVM_AMDGCN:
+      case Target::Object_LLVM_SPIRV64:                                                  //
         return std::make_unique<backend::LLVM>(toLLVMBackendOptions(options));           //
       case Target::Source_C_OpenCL1_1:                                                   //
         return std::make_unique<backend::CSource>(backend::CSource::Dialect::OpenCL1_1); //
@@ -179,7 +208,7 @@ compiler::Compilation compiler::compile(const polyast::Program &program, const O
 
   Compilation c;
   try {
-    c = mkBackend()->run(program);
+    c = mkBackend()->run(program, opt);
   } catch (const std::exception &e) {
     c.messages = e.what();
   }
@@ -187,7 +216,7 @@ compiler::Compilation compiler::compile(const polyast::Program &program, const O
   return c;
 }
 
-compiler::Compilation compiler::compile(const Bytes &astBytes, const Options &options) {
+compiler::Compilation compiler::compile(const Bytes &astBytes, const Options &options, const Opt &opt) {
 
   std::vector<Event> events;
 
@@ -204,7 +233,7 @@ compiler::Compilation compiler::compile(const Bytes &astBytes, const Options &op
   //  std::cout << "[polyregion-native] AST  :" << program << std::endl;
   //  std::cout << "[polyregion-native] Repr :" << polyast::repr(program) << std::endl;
 
-  auto c = compile(program, options);
+  auto c = compile(program, options, opt);
   c.events.insert(c.events.end(), events.begin(), events.end());
   sortEvents(c);
   return c;

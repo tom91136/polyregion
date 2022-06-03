@@ -103,6 +103,12 @@ FetchContent_Declare(
 )
 
 FetchContent_Declare(
+        cpuinfo
+        GIT_REPOSITORY https://github.com/pytorch/cpuinfo.git
+        GIT_TAG        9fa621933fc6080b96fa0f037cdc7cd2c69ab272 # head as of 01/06/2022 (DD/MM/YYYY)
+)
+
+FetchContent_Declare(
         json
         URL https://github.com/nlohmann/json/releases/download/v3.10.5/json.hpp
         URL_HASH SHA256=e832d339d9e0c042e7dff807754769d778cf5d6ae9730ce21eed56de99cb5e86
@@ -133,6 +139,7 @@ if (USE_EXTERNAL_LLVM)
 else ()
     # X86;AArch64;ARM;NVPTX;AMDGPU;WebAssembly
     set(LLVM_TARGETS_TO_BUILD "X86;AArch64;ARM;NVPTX;AMDGPU" CACHE INTERNAL "")
+#    set(LLVM_EXPERIMENTAL_TARGETS_TO_BUILD "SPIR" CACHE INTERNAL "")
     #    set(LLVM_TARGETS_TO_BUILD "X86" CACHE INTERNAL "")
     #    set(LLVM_TARGETS_TO_BUILD "" CACHE INTERNAL "")
     set(LLVM_ENABLE_IDE ON CACHE BOOL "")
@@ -262,6 +269,15 @@ endif ()
 
 FetchContent_MakeAvailable(json)
 FetchContent_MakeAvailable(catch2)
+
+
+set(CPUINFO_BUILD_TOOLS OFF CACHE BOOL "")
+set(CPUINFO_BUILD_UNIT_TESTS OFF CACHE BOOL "")
+set(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "")
+set(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "")
+set(CPUINFO_BUILD_PKG_CONFIG OFF CACHE BOOL "")
+
+FetchContent_MakeAvailable(cpuinfo)
 
 # libffi does not use CMake so we inject one manually from VCPKG
 # See https://github.com/microsoft/vcpkg/blob/2f0872b7d592635e8e4919d178650d549c211464/ports/libffi/CMakeLists.txt

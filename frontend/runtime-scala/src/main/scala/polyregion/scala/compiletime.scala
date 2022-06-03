@@ -3,7 +3,7 @@ package polyregion.scala
 import polyregion.ast.{CppSourceMirror, MsgPack, PolyAst as p, *}
 import polyregion.scala as srt
 import polyregion.jvm.{runtime => rt}
-import polyregion.jvm.{compiler => ct}
+import polyregion.jvm.{compiler => cp}
 
 import java.nio.ByteBuffer
 import java.nio.file.Paths
@@ -12,42 +12,44 @@ import scala.annotation.{compileTimeOnly, tailrec}
 import scala.collection.immutable.VectorMap
 import scala.quoted.*
 import scala.util.Try
+import java.nio.ByteOrder
 
 @compileTimeOnly("This class only exists at compile-time to expose offload methods")
 object compiletime {
 
-//  inline def showExpr(inline x: Any): Any = ${ showExprImpl('x) }
-//  def showExprImpl(x: Expr[Any])(using q: Quotes): Expr[Any] = {
-//    import q.reflect.*
-//    given Printer[Tree] = Printer.TreeAnsiCode
-//    println(x.show)
-//    pprint.pprintln(x.asTerm) // term => AST
+  inline def showExpr(inline x: Any): Any = ${ showExprImpl('x) }
+  def showExprImpl(x: Expr[Any])(using q: Quotes): Expr[Any] = {
+    import q.reflect.*
+    given Printer[Tree] = Printer.TreeAnsiCode
+    println(x.show)
+    pprint.pprintln(x.asTerm) // term => AST
+
+    implicit val Q = Quoted(q)
+    val is = Q.collectTree(x.asTerm) {
+      case s: Q.Select => s :: Nil
+      case s: Q.Ident  => s :: Nil
+      case _           => Nil
+    }
+    println("===")
+    println(s"IS=${is
+      .filter(x => x.symbol.isDefDef || true)
+      .reverse
+      .map(x => x -> x.tpe.dealias.widenTermRefByName.simplified)
+      .map((x, tpe) => s"-> $x : ${x.show} `${x.symbol.fullName}` : ${tpe.show}\n\t${tpe}")
+      .mkString("\n")}")
+    println("===")
+    x
+  }
 //
-//    implicit val Q = Quoted(q)
-//    val is = Q.collectTree(x.asTerm) {
-//      case s: Q.Select => s :: Nil
-//      case s: Q.Ident  => s :: Nil
-//      case _           => Nil
-//    }
-//    println("===")
-//    println(s"IS=${is
-//      .filter(x => x.symbol.isDefDef || true)
-//      .reverse
-//      .map(x => x -> x.tpe.dealias.widenTermRefByName.simplified)
-//      .map((x, tpe) => s"-> $x : ${x.show} `${x.symbol.fullName}` : ${tpe.show}\n\t${tpe}")
-//      .mkString("\n")}")
-//    println("===")
-//    x
-//  }
-//
-//  inline def showTpe[B]: Unit = ${ showTpeImpl[B] }
-//  def showTpeImpl[B: Type](using q: Quotes): Expr[Unit] = {
-//    import q.reflect.*
-//    println(TypeRepr.of[B].typeSymbol.tree.show)
-//    import pprint.*
-//    pprint.pprintln(TypeRepr.of[B].typeSymbol)
-//    '{}
-//  }
+  inline def showTpe[B]: Unit = ${ showTpeImpl[B] }
+  def showTpeImpl[B: Type](using q: Quotes): Expr[Unit] = {
+    import q.reflect.*
+    println(">>" + TypeRepr.of[B].typeSymbol.tree.show)
+    println(">>" + TypeRepr.of[B].widenTermRefByName.dealias.typeSymbol.tree.show)
+    import pprint.*
+    pprint.pprintln(TypeRepr.of[B].typeSymbol)
+    '{}
+  }
 //
 //  private[polyregion] inline def symbolNameOf[B]: String = ${ symbolNameOfImpl[B] }
 //  private def symbolNameOfImpl[B: Type](using q: Quotes): Expr[String] = Expr(
@@ -194,73 +196,132 @@ object compiletime {
 //    }
 //  }
 
-  type Device = rt.Device
-  type Queue  = rt.Device.Queue
-
 //  inline def offload[A](inline x: => A): A = ${ offloadImpl[A]('x) }
 
-  inline def offload[A](inline queue: Queue, inline cb: Runnable)(inline f: => A): A = ${
-    offloadImpl[A]('queue, 'f, 'cb)
+  case class ReifiedConfig(target: cp.Target, arch: String, opt: cp.Opt)
+
+  def reifyConfig(x: srt.Config[_, _]): List[ReifiedConfig] =
+    x.targets.map((t, o) => ReifiedConfig(t.arch, t.uarch, o.value))
+
+  def reifyConfigFromTpe[C: Type](c: List[ReifiedConfig] = Nil)(using q: Quotes): Result[List[ReifiedConfig]] = {
+    import q.reflect.*
+    Type.of[C] match {
+      case '[srt.Config[target, opt]] =>
+        TypeRepr.of[target].widenTermRefByName.dealias.simplified match {
+          case Refinement(target, xs, TypeBounds(l @ ConstantType(StringConstant(arch)), h)) if l == h =>
+            val vendorTpe   = target.select(TypeRepr.of[polyregion.scala.Target#Arch].typeSymbol).dealias
+            val cpTargetTpe = TypeRepr.of[cp.Target]
+            if (vendorTpe <:< cpTargetTpe) {
+              (ReifiedConfig(
+                target = cp.Target.valueOf(vendorTpe.termSymbol.name),
+                arch = arch,
+                opt = Opt.valueOf(TypeRepr.of[opt].termSymbol.name).value
+              ) :: Nil).success
+            } else s"Target type `${vendorTpe}` != ${cpTargetTpe} ".fail
+          case bad => s"Target type `${bad}` does not contain a String constant refinement or has illegal bounds".fail
+        }
+      case '[x *: xs] =>
+        for {
+          x  <- reifyConfigFromTpe[x](c)
+          xs <- reifyConfigFromTpe[xs](c)
+        } yield x ::: xs
+      case '[EmptyTuple] => Nil.success
+      case '[illegal] =>
+        s"The type `${TypeRepr.of[illegal].show}` cannot be used as a configuration, it must be either a ${TypeRepr.of[srt.Config].show} or a tuple of such type.".fail
+    }
+  }
+
+  inline def offload[C, A](inline queue: rt.Device.Queue, inline cb: Runnable)(
+      inline f: => A
+  ): A = ${
+    offloadImpl[C, A]('queue, 'f, 'cb)
   }
 
 //  inline def offload(inline d: Device, inline x: Range, inline y: Range = Range(0, 0), inline z: Range = Range(0, 0))
 //  /*             */ (inline f: => (Int, Int, Int) => Unit): Unit = ${ offloadImpl[Unit](d, 'x, 'y, 'z, 'f) }
 
-  private def offloadImpl[A: Type](queue: Expr[Queue], f: Expr[Any], cb: Expr[Runnable])(using
+  private def offloadImpl[C: Type, A: Type](
+      queue: Expr[rt.Device.Queue],
+      f: Expr[Any],
+      cb: Expr[Runnable]
+  )(using
       q: Quotes
   ): Expr[A] = {
     implicit val Q = Quoted(q)
+
+ 
+
     val result = for {
-      (captures, prog, log) <- Compiler.compileExpr(f)
+      configs <- reifyConfigFromTpe[C]()
+      (captures, prog0, log) <- Compiler.compileExpr(f)
+      prog = prog0.copy(entry = prog0.entry.copy(name = p.Sym("lambda")))
       _ = println(log.render)
+      _ =     println("Configs = "+configs)
       serialisedAst <- Try(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, prog))).toEither
-      options = ct.Options(ct.Compiler.TargetObjectLLVM_x86_64, "")
-      c <- Try((ct.Compiler.compile(serialisedAst, true, options))).toEither
+       
+      c <- Try((cp.Compiler.compile(serialisedAst, true, polyregion.jvm.compiler.Options.of(configs(0).target, configs(0).arch), configs(0).opt.value))).toEither
     } yield {
 
       println(s"Messages=\n  ${c.messages}")
       println(s"Program=${c.program.length}")
       println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
 
-      val fnName     = Expr("lambda")
-      val moduleName = Expr(prog.entry.name.repr)
+      val fnName     = Expr(prog.entry.name.repr)
+      val moduleName = Expr(prog0.entry.name.repr)
 
-      val (captureTpeOrdinal, captureTpeSizes) = captures.map { (name, _) =>
+      val (captureTpeOrdinals, captureTpeSizes) = captures.map { (name, _) =>
         val tpe = Pickler.tpeAsRuntimeTpe(name.tpe)
         tpe.value -> tpe.sizeInBytes
       }.unzip
+      val returnTpeOrdinal = Pickler.tpeAsRuntimeTpe(prog.entry.rtn).value
+      val returnTpeSize    = Pickler.tpeAsRuntimeTpe(prog.entry.rtn).sizeInBytes
 
-      def allocBuffer(size: Expr[Int]) = '{
-        java.nio.ByteBuffer.allocateDirect($size).order(java.nio.ByteOrder.nativeOrder)
-      }
+      def bindFnValues(target: Expr[ByteBuffer]) = {
+        val (_, stmts) = captures.zipWithIndex.foldLeft((0, List.empty[Expr[Any]])) {
+          case ((byteOffset, exprs), ((name, ref), idx)) =>
+            inline def register[ts: Type, t: Type](arr: p.Type.Array, mutable: Boolean, size: Expr[ts] => Expr[Int]) =
+              '{
+                $target.putLong(
+                  ${ Expr(byteOffset) },
+                  $queue.registerAndInvalidateIfAbsent[ts](
+                    ${ ref.asExprOf[ts] },
+                    xs => ${ Expr(Pickler.sizeOf(arr.component, Q.TypeRepr.of[t])) } * ${ size('xs) },
+                    (xs, bb) => ${ Pickler.putAll('bb, arr, Q.TypeRepr.of[ts], 'xs) },
+                    ${
+                      if (!mutable) null
+                      else '{ (bb, xs) => ${ Pickler.getAllMutable('bb, arr, Q.TypeRepr.of[ts], 'xs) } }
+                    },
+                    null
+                  )
+                )
+              }
 
-      val bufferExprs = captures.zipWithIndex.foldLeft(VectorMap.empty[Int, (Int, Expr[ByteBuffer])]) {
-        case (acc, ((name, ref), idx)) =>
-          (name.tpe, ref.tpe.asType) match {
-            case (p.Type.Array(comp), x @ '[srt.Buffer[a]]) =>
-              acc + (idx -> (acc.size, '{ ${ ref.asExprOf[x.Underlying] }.backingBuffer }))
-            case (p.Type.Array(comp), x @ '[scala.Array[t]]) =>
-              acc + (
-                idx ->
-                  (acc.size, '{
-                    val xs     = ${ ref.asExprOf[x.Underlying] }
-                    val buffer = ${ allocBuffer('{ ${ Expr(Pickler.sizeOf(comp, Q.TypeRepr.of[t])) } * xs.size }) }
-                    ${ Pickler.writeUniform('buffer, '{ 0 }, name.tpe, ref.tpe, ref.asExpr) }
-                    buffer
-                  })
-              )
-            case (p.Type.Array(comp), x @ '[scala.collection.Seq[t]]) =>
-              acc + (
-                idx ->
-                  (acc.size, '{
-                    val xs     = ${ ref.asExprOf[x.Underlying] }
-                    val buffer = ${ allocBuffer('{ ${ Expr(Pickler.sizeOf(comp, Q.TypeRepr.of[t])) } * xs.size }) }
-                    ${ Pickler.writeUniform('buffer, '{ 0 }, name.tpe, ref.tpe, ref.asExpr) }
-                    buffer
-                  })
-              )
-            case _ => acc
-          }
+            val expr = (name.tpe, ref.tpe.asType) match {
+              case (p.Type.Array(comp), x @ '[srt.Buffer[_]]) =>
+                '{
+                  $target.putLong(
+                    ${ Expr(byteOffset) },
+                    $queue.registerAndInvalidateIfAbsent(
+                      ${ ref.asExprOf[x.Underlying] },
+                      ${ ref.asExprOf[x.Underlying] }.backingBuffer,
+                      null
+                    )
+                  )
+                }
+              case (arr @ p.Type.Array(_), ts @ '[Array[t]]) =>
+                register[ts.Underlying, t](arr, mutable = true, x => '{ $x.length })
+              case (arr @ p.Type.Array(_), ts @ '[scala.collection.mutable.Seq[t]]) =>
+                register[ts.Underlying, t](arr, mutable = true, x => '{ $x.length })
+              case (arr @ p.Type.Array(_), ts @ '[java.util.List[t]]) =>
+                register[ts.Underlying, t](arr, mutable = true, x => '{ $x.size })
+              case (arr @ p.Type.Array(_), ts @ '[scala.collection.immutable.Seq[t]]) =>
+                register[ts.Underlying, t](arr, mutable = false, x => '{ $x.length })
+              case (t, _) =>
+                Pickler.putPrimitive(target, Expr(byteOffset), t, ref.asExpr)
+            }
+            (byteOffset + Pickler.tpeAsRuntimeTpe(name.tpe).sizeInBytes, exprs :+ expr)
+        }
+        Expr.block(stmts, '{ () })
       }
 
       val code = '{
@@ -269,64 +330,28 @@ object compiletime {
           $queue.device.loadModule($moduleName, ${ Expr(c.program) })
         }
 
-        val captureTpeOrdinals = ${ Expr(captureTpeOrdinal.toArray) } :+ 1.toByte /*1 = void*/
-        val captureValues = ByteBuffer.allocate(${ Expr(captureTpeSizes.sum) }).order(java.nio.ByteOrder.nativeOrder)
+        val fnTpeOrdinals = ${ Expr((captureTpeOrdinals :+ returnTpeOrdinal).toArray) }
+        val fnValues = ByteBuffer.allocate(${ Expr(captureTpeSizes.sum + returnTpeSize) }).order(ByteOrder.nativeOrder)
 
-        if ($queue.device.sharedAddressSpace) {
+        ${ bindFnValues('fnValues) }
 
-          val capturePointers = rt.Runtime.directBufferPointers(Array(${
-            Varargs(bufferExprs.values.map(_._2).toSeq)
-          }: _*))
+        // $queue.enqueueHostToDeviceAsync(???, p, 0, null)
 
-          println(s"Ptrs:${capturePointers.toList}")
+        $queue.enqueueInvokeAsync(
+          $moduleName,
+          $fnName,
+          fnTpeOrdinals,
+          fnValues.array,
+          rt.Policy(rt.Dim3(1, 1, 1)),
+          if($queue.device.sharedAddressSpace) $cb else null
+        )
 
-          ${
-            val (_, stmts) = captures.zipWithIndex.foldLeft((0, List.empty[Expr[Any]])) {
-              case ((byteOffset, exprs), ((name, ref), idx)) =>
-                val expr = bufferExprs.get(idx) match {
-                  case Some((capturePointerIdx, _)) =>
-                    '{ captureValues.putLong(${ Expr(byteOffset) }, capturePointers(${ Expr(capturePointerIdx) })) }
-                  case None => Pickler.writePrimitiveAtOffset('captureValues, Expr(byteOffset), name.tpe, ref.asExpr)
-                }
-                (byteOffset + Pickler.tpeAsRuntimeTpe(name.tpe).sizeInBytes, exprs :+ expr)
-            }
-            Expr.block(stmts, '{ () })
-          }
+        
+        $queue.syncAll(if(!$queue.device.sharedAddressSpace) $cb else null)
 
-          $queue.enqueueInvokeAsync(
-            $moduleName,
-            $fnName,
-            captureTpeOrdinals,
-            captureValues.array,
-            rt.Policy(rt.Dim3(1, 1, 1)),
-            $cb
-          )
+        // $queue.enqueueDeviceToHostAsync(p, ???, 0, null)
 
-        } else {
-
-          val p = $queue.device.malloc(0, rt.Access.RW)
-
-          $queue.enqueueHostToDeviceAsync(???, p, 0, null)
-
-          val pointers = rt.Runtime.directBufferPointers(Array(${
-            Varargs(bufferExprs.values.map(_._2).toSeq)
-          }: _*))
-
-          $queue.enqueueInvokeAsync(
-            $moduleName,
-            $fnName,
-            captureTpeOrdinals,
-            captureValues.array,
-            rt.Policy(rt.Dim3(1, 1, 1)),
-            $cb
-          )
-
-          $queue.enqueueDeviceToHostAsync(p, ???, 0, null)
-
-          $queue.device.free(p)
-
-          ???
-        }
+        // $queue.device.free(p)
 
         null.asInstanceOf[A]
 

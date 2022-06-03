@@ -32,7 +32,8 @@
 
 #include <iostream>
 
-using namespace polyregion::backend;
+using namespace polyregion;
+using namespace ::backend;
 
 llvm::Triple llvmc::defaultHostTriple() { return llvm::Triple(llvm::sys::getProcessTriple()); }
 
@@ -127,20 +128,25 @@ static void setFunctionAttributes(llvm::StringRef CPU, llvm::StringRef Features,
   NewAttrs.addAttribute("unsafe-fp-math", "true");
   NewAttrs.addAttribute("no-infs-fp-math", "true");
   NewAttrs.addAttribute("no-signed-zeros-fp-math", "true");
-//  NewAttrs.addAttribute("amdgpu-early-inline-all", "true");
-//  NewAttrs.addAttribute("amdgpu-function-calls", "true");
+  //  NewAttrs.addAttribute("amdgpu-early-inline-all", "true");
+  //  NewAttrs.addAttribute("amdgpu-function-calls", "true");
 
   // Let NewAttrs override Attrs.
   F.setAttributes(Attrs.addFnAttributes(Ctx, NewAttrs));
 }
 
-polyregion::compiler::Compilation llvmc::compileModule(const TargetInfo &info, bool emitDisassembly,
-                                                       std::unique_ptr<llvm::Module> M, llvm::LLVMContext &Context) {
+compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compiler::Opt &opt, bool emitDisassembly,
+                                           std::unique_ptr<llvm::Module> M, llvm::LLVMContext &Context) {
   auto start = compiler::nowMono();
 
-  llvm::TargetOptions Options;
-  Options.AllowFPOpFusion = llvm::FPOpFusion::Fast;
-  Options.UnsafeFPMath = true;
+  auto useUnsafeMath = opt == compiler::Opt::Ofast;
+  llvm::TargetOptions options;
+  options.AllowFPOpFusion = useUnsafeMath ? llvm::FPOpFusion::Fast : llvm::FPOpFusion::Standard;
+  options.UnsafeFPMath = useUnsafeMath;
+  options.NoInfsFPMath = useUnsafeMath;
+  options.NoNaNsFPMath = useUnsafeMath;
+  options.NoTrappingFPMath = useUnsafeMath;
+  options.NoSignedZerosFPMath = useUnsafeMath;
 
   llvm::CodeGenOpt::Level OLvl = llvm::CodeGenOpt::Aggressive;
 
@@ -148,7 +154,7 @@ polyregion::compiler::Compilation llvmc::compileModule(const TargetInfo &info, b
       info.triple.str(),                                                   //
       info.cpu.uArch,                                                      //
       info.cpu.features,                                                   //
-      Options, llvm::Reloc::Model::PIC_, llvm::CodeModel::Large, OLvl));
+      options, llvm::Reloc::Model::PIC_, llvm::CodeModel::Large, OLvl));
 
   if (M->getDataLayout().isDefault()) {
     M->setDataLayout(TM->createDataLayout());
@@ -159,11 +165,19 @@ polyregion::compiler::Compilation llvmc::compileModule(const TargetInfo &info, b
 
   // AddOptimizationPasses
   llvm::PassManagerBuilder B;
+
+  switch (opt) {
+    case compiler::Opt::O0: B.OptLevel = 0; break;
+    case compiler::Opt::O1: B.OptLevel = 1; break;
+    case compiler::Opt::O2: B.OptLevel = 2; break;
+    case compiler::Opt::O3: // fallthrough
+    case compiler::Opt::Ofast: B.OptLevel = 3; break;
+  }
+
   B.NewGVN = true;
   B.SizeLevel = 0;
-  B.OptLevel = 3;
-  B.LoopVectorize = true;
-  B.SLPVectorize = true;
+  B.LoopVectorize = B.OptLevel >= 2;
+  B.SLPVectorize = B.OptLevel >= 2;
   //  B.RerollLoops = true;
   //  B.LoopsInterleaved = true;
 
@@ -207,17 +221,15 @@ polyregion::compiler::Compilation llvmc::compileModule(const TargetInfo &info, b
         PM.run(m);
       };
 
-  llvm::SmallVector<char, 0> asmBuffer;
-  llvm::raw_svector_ostream asmStream(asmBuffer);
-  doCodegen(*llvm::CloneModule(*M), [&](auto &tm, auto &pm, auto &ctx) {
-    tm.addAsmPrinter(pm, asmStream, nullptr, llvm::CodeGenFileType::CGFT_AssemblyFile, ctx);
-  });
-
-  llvm::SmallVector<char, 0> objBuffer;
-  llvm::raw_svector_ostream objStream(objBuffer);
-  doCodegen(*llvm::CloneModule(*M), [&](auto &tm, auto &pm, auto &ctx) {
-    tm.addAsmPrinter(pm, objStream, nullptr, llvm::CodeGenFileType::CGFT_ObjectFile, ctx);
-  });
+  auto mkArtefact = [&](const llvm::CodeGenFileType &tpe) {
+    auto start = compiler::nowMono();
+    auto timestamp = compiler::nowMs();
+    llvm::SmallVector<char, 0> objBuffer;
+    llvm::raw_svector_ostream objStream(objBuffer);
+    doCodegen(*llvm::CloneModule(*M),
+              [&](auto &tm, auto &pm, auto &ctx) { tm.addAsmPrinter(pm, objStream, nullptr, tpe, ctx); });
+    return std::make_tuple(objBuffer, timestamp, compiler::elapsedNs(start));
+  };
 
   //  llvm::legacy::PassManager pass;
   //  llvm::SmallString<8> dataObj;
@@ -226,38 +238,55 @@ polyregion::compiler::Compilation llvmc::compileModule(const TargetInfo &info, b
   //  pass.run(*llvm::CloneModule(*M));
   //  std::string obj(dataObj.begin(), dataObj.end());
 
-  auto elapsed = compiler::elapsedNs(start);
-  compiler::Event llvmToObjectEvent{compiler::nowMs(), elapsed, "llvm_to_obj",
-                                    std::string(asmBuffer.begin(), asmBuffer.end())};
+  auto objectSize = [](const llvm::SmallVector<char, 0> &xs) {
+    return std::to_string(static_cast<float>(xs.size_in_bytes()) / 1024) + "KiB";
+  };
 
-  if (info.triple.getOS() == llvm::Triple::AMDHSA) {
-    // we need to link the object file for AMDGPu
-    auto linkerStart = compiler::nowMono();
-    lld::elf::ObjFile<llvm::object::ELF64LE> kernelObject(llvm::MemoryBufferRef(objStream.str(), ""), "kernel.hsaco");
-    // XXX Don't strip AMDGCN ELFs as hipModuleLoad will report "Invalid ptx". GC and optimisation is fine.
-    auto [err, result] = backend::lld_lite::link({"-shared", "--gc-sections", "-O3"}, {&kernelObject});
-    auto linkerElapsed = compiler::elapsedNs(linkerStart);
-    compiler::Event lldLinkAMDGPUEvent{compiler::nowMs(), linkerElapsed, "lld_link_amdgpu", ""};
-    if (!result) {
-      // linker failed
-      return polyregion::compiler::Compilation(                                      //
-          {},                                                                        //
-          {llvmToObjectEvent, lldLinkAMDGPUEvent},                                   //
-          "Linker did not finish normally: " + err.value_or("(no message reported)") //
-      );
-    } else {
-      // linker succeeded, still report any stdout to as message
-      return polyregion::compiler::Compilation(              //
-          std::vector<char>(result->begin(), result->end()), //
-          {llvmToObjectEvent, lldLinkAMDGPUEvent},           //
-          err.value_or("")                                   //
-      );
+  switch (info.triple.getOS()) {
+    case llvm::Triple::AMDHSA: {
+      // We need to link the object file for AMDGPU at this stage to get a working ELF binary.
+      // This can only be done with LLD so just do it here after compiling.
+
+      std::vector<compiler::Event> events;
+
+      auto [object, objectStart, objectElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_ObjectFile);
+      events.emplace_back(objectStart, objectElapsed, "llvm_to_obj", objectSize(object));
+      if (emitDisassembly) {
+        auto [assembly, assemblyStart, assemblyElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_AssemblyFile);
+        events.emplace_back(assemblyStart, assemblyElapsed, "llvm_to_asm",
+                            std::string(assembly.begin(), assembly.end()));
+      }
+
+      llvm::StringRef objectString(object.begin(), object.size());
+      lld::elf::ObjFile<llvm::object::ELF64LE> kernelObject(llvm::MemoryBufferRef(objectString, ""), "kernel.hsaco");
+      // XXX Don't strip AMDGCN ELFs as hipModuleLoad will report "Invalid ptx". GC and optimisation is fine.
+      auto linkerStart = compiler::nowMono();
+      auto [err, result] = backend::lld_lite::link({"-shared", "--gc-sections", "-O3"}, {&kernelObject});
+      auto linkerElapsed = compiler::elapsedNs(linkerStart);
+      events.emplace_back(compiler::nowMs(), linkerElapsed, "lld_link_amdgpu", "");
+      if (!result) { // linker failed
+        return {{}, events, "Linker did not finish normally: " + err.value_or("(no message reported)")};
+      } else { // linker succeeded, still report any stdout to as message
+        return {std::vector<char>(result->begin(), result->end()), events, err.value_or("")};
+      }
     }
-  } else {
-    return polyregion::compiler::Compilation(                                                           //
-        std::vector<char>(objBuffer.begin(), objBuffer.end()),                                          //
-        {{compiler::nowMs(), elapsed, "llvm_to_obj", std::string(asmBuffer.begin(), asmBuffer.end())}}, //
-        ""                                                                                              //
-    );
+    case llvm::Triple::CUDA: {
+      // NVIDIA's documentation only supports up-to PTX generation and ingestion via the CUDA driver API, so we can't
+      // assemble the PTX to a CUBIN (SASS). Given that PTX ingestion is supported, we just generate that for now.
+      // XXX ignore emitDisassembly here as PTX *is* the binary
+      auto [ptx, ptxStart, ptxElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_AssemblyFile);
+      return {std::vector<char>(ptx.begin(), ptx.end()),
+              {{ptxStart, ptxElapsed, "llvm_to_ptx", std::string(ptx.begin(), ptx.end())}}};
+    }
+    default:
+      auto [object, objectStart, objectElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_ObjectFile);
+      std::vector<char> binary(object.begin(), object.end());
+      if (emitDisassembly) {
+        auto [assembly, assemblyStart, assemblyElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_AssemblyFile);
+        return {binary,
+                {{objectStart, objectElapsed, "llvm_to_obj", objectSize(object)},
+                 {assemblyStart, assemblyElapsed, "llvm_to_asm", std::string(assembly.begin(), assembly.end())}}};
+      } else
+        return {binary, {{objectStart, objectElapsed, "llvm_to_obj", objectSize(object)}}};
   }
 }

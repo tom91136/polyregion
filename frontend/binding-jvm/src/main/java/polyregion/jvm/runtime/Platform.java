@@ -10,27 +10,27 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import polyregion.jvm.Loader;
 import polyregion.jvm.runtime.Device.Queue;
 
-public final class Runtime implements AutoCloseable {
+public final class Platform implements AutoCloseable {
 
   final long nativePeer;
   public final String name;
 
-  Runtime(long nativePeer, String name) {
+  Platform(long nativePeer, String name) {
     this.nativePeer = nativePeer;
     this.name = Objects.requireNonNull(name);
   }
 
   public Property[] properties() {
-    return Runtime.runtimeProperties0(nativePeer);
+    return Platform.runtimeProperties0(nativePeer);
   }
 
   public Device[] devices() {
-    return Runtime.devices0(nativePeer);
+    return Platform.devices0(nativePeer);
   }
 
   @Override
   public void close() {
-    Runtime.deleteRuntimePeer0(nativePeer);
+    Platform.deleteRuntimePeer0(nativePeer);
   }
 
   @Override
@@ -38,28 +38,32 @@ public final class Runtime implements AutoCloseable {
     return "Runtime{" + "nativePeer=" + nativePeer + ", name='" + name + '\'' + '}';
   }
 
-  public static Runtime CUDA() {
+  public static Platform CUDA() {
     return CUDA0();
   }
 
-  public static Runtime HIP() {
+  public static Platform HIP() {
     return HIP0();
   }
 
-  public static Runtime OpenCL() {
+  public static Platform OpenCL() {
     return OpenCL0();
   }
 
-  public static Runtime Relocatable() {
+  public static Platform Relocatable() {
     return Relocatable0();
   }
 
-  public static Runtime Dynamic() {
+  public static Platform Dynamic() {
     return Dynamic0();
   }
 
-  public static long[] directBufferPointers(Buffer[] buffers) {
-    return pointers(buffers);
+  public static long[] pointerOfDirectBuffers(Buffer[] buffers) {
+    return pointerOfDirectBuffers0(buffers);
+  }
+
+  public static long pointerOfDirectBuffer(Buffer buffers) {
+    return pointerOfDirectBuffer0(buffers);
   }
 
   static final byte //
@@ -73,19 +77,24 @@ public final class Runtime implements AutoCloseable {
       TYPE_FLOAT = 8,
       TYPE_DOUBLE = 9,
       TYPE_PTR = 10;
-  static final byte ACCESS_RW = 1, ACCESS_R0 = 2, ACCESS_WO = 3;
+  static final byte //
+      ACCESS_RW = 1,
+      ACCESS_RO = 2,
+      ACCESS_WO = 3;
 
-  static native long[] pointers(Buffer[] buffers);
+  static native long[] pointerOfDirectBuffers0(Buffer[] buffers);
 
-  static native Runtime CUDA0();
+  static native long pointerOfDirectBuffer0(Buffer buffer);
 
-  static native Runtime HIP0();
+  static native Platform CUDA0();
 
-  static native Runtime OpenCL0();
+  static native Platform HIP0();
 
-  static native Runtime Relocatable0();
+  static native Platform OpenCL0();
 
-  static native Runtime Dynamic0();
+  static native Platform Relocatable0();
+
+  static native Platform Dynamic0();
 
   static native Property[] runtimeProperties0(long nativePeer);
 
@@ -176,7 +185,7 @@ public final class Runtime implements AutoCloseable {
               // "/home/tom/polyregion/native/cmake-build-release-clang/bindings/libjava-runtime.so"
               ),
           RESOURCE_DIR);
-      java.lang.Runtime.getRuntime().addShutdownHook(new Thread(Runtime::deleteAllPeer0));
+      java.lang.Runtime.getRuntime().addShutdownHook(new Thread(Platform::deleteAllPeer0));
     }
   }
 }

@@ -179,7 +179,7 @@ object Retyper {
           argAppliedSeqTpe = q.TypeRepr.typeConstructorOf(classOf[scala.collection.mutable.Seq[_]]).appliedTo(args)
 
         } yield (name, kind, tpeCtorArgs) match {
-          // case (Symbols.Array, q.ClassKind.Class, (_, comp: p.Type) :: Nil)  => (None, p.Type.Array(comp))
+          case (Symbols.Array, q.ClassKind.Class, (_, comp: p.Type) :: Nil)  => (None, p.Type.Array(comp))
           // case (Symbols.Buffer, q.ClassKind.Class, (_, comp: p.Type) :: Nil) => (None, p.Type.Array(comp))
           case (_, q.ClassKind.Class, (_, comp: p.Type) :: Nil) if tpe <:< argAppliedSeqTpe =>
             (None, p.Type.Array(comp))

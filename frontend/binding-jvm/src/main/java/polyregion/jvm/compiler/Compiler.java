@@ -2,21 +2,51 @@ package polyregion.jvm.compiler;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import polyregion.jvm.Loader;
 
 public final class Compiler {
 
-  public static final byte TargetObjectLLVM_x86_64 = 1;
-  public static final byte TargetObjectLLVM_AArch64 = 2;
-  public static final byte TargetObjectLLVM_ARM = 3;
-  public static final byte TargetObjectLLVM_NVPTX64 = 4;
-  public static final byte TargetObjectLLVM_AMDGCN = 5;
-  public static final byte TargetSourceC_OpenCL1_1 = 6;
-  public static final byte TargetSourceC_C11 = 7;
+  static final byte //
+      Opt_O0 = 10,
+      Opt_O1 = 11,
+      Opt_O2 = 12,
+      Opt_O3 = 13,
+      Opt_Ofast = 14;
 
-  public static native Compilation compile(byte[] function, boolean emitAssembly, Options options);
+  static final byte //
+      Target_UNSUPPORTED = 1;
+
+  static final byte //
+      Target_Object_LLVM_HOST = 10,
+      Target_Object_LLVM_x86_64 = 11,
+      Target_Object_LLVM_AArch64 = 12,
+      Target_Object_LLVM_ARM = 13;
+  static final byte //
+      Target_Object_LLVM_NVPTX64 = 20,
+      Target_Object_LLVM_AMDGCN = 21,
+      Target_Object_LLVM_SPIRV64 = 22;
+  static final byte //
+      Target_Source_C_C11 = 30,
+      Target_Source_C_OpenCL1_1 = 31;
+
+  public static native String hostTriplet();
+
+  static native byte hostTarget0();
+
+  private static byte cachedTarget = 0;
+
+  public Optional<Target> hostTarget() {
+    if (cachedTarget == 0) cachedTarget = hostTarget0();
+    if (cachedTarget == Target_UNSUPPORTED) return Optional.empty();
+    for (Target t : Target.VALUES) if (t.value == cachedTarget) return Optional.of(t);
+    throw new AssertionError("Target enum not implemented in Java:" + cachedTarget);
+  }
+
+  public static native Compilation compile(
+      byte[] function, boolean emitAssembly, Options options, byte opt);
 
   public static native Layout layoutOf(byte[] structDef, Options options);
 

@@ -6,10 +6,10 @@
 
 namespace polyregion::runtime::cl {
 
-class EXPORT ClRuntime : public Runtime {
+class EXPORT ClPlatform : public Platform {
 public:
-  EXPORT explicit ClRuntime();
-  EXPORT ~ClRuntime() override;
+  EXPORT explicit ClPlatform();
+  EXPORT ~ClPlatform() override;
   EXPORT std::string name() override;
   EXPORT std::vector<Property> properties() override;
   EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;

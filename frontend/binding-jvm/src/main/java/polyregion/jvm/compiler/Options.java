@@ -7,7 +7,11 @@ public final class Options {
   public final byte target;
   public final String arch;
 
-  public Options(byte target, String arch) {
+  public static Options of(Target target, String arch) {
+    return new Options(target.value, arch);
+  }
+
+  Options(byte target, String arch) {
     this.target = target;
     this.arch = Objects.requireNonNull(arch);
   }

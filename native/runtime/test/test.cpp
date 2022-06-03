@@ -1,5 +1,5 @@
 #include "catch.hpp"
-#include "object_runtime.h"
+#include "object_platform.h"
 #include <iostream>
 
 // x86_64-pc-windows-msvc

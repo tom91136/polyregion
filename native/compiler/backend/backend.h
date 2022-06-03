@@ -7,7 +7,7 @@ using namespace polyregion;
 
 class Backend {
 public:
-  virtual compiler::Compilation run(const polyast::Program &program) = 0;
+  virtual compiler::Compilation run(const polyast::Program &program, const compiler::Opt& opt) = 0;
   virtual ~Backend() = default;
 };
 

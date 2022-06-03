@@ -365,6 +365,7 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
           case Target::x86_64:
           case Target::AArch64:
           case Target::ARM: return undefined(__FILE_NAME__, __LINE__);
+          case Target::SPIRV64: return undefined(__FILE_NAME__, __LINE__);
           case Target::NVPTX64: {
             // threadId  @llvm.nvvm.read.ptx.sreg.tid.*
             // blockIdx  @llvm.nvvm.read.ptx.sreg.ctaid.*
@@ -960,6 +961,7 @@ Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform(const std::u
       GlobalAS = 1;
       AllocaAS = 5;
       break;
+    case Target::SPIRV64: undefined(__FILE_NAME__, __LINE__); break;
   }
 
   auto fnTree = program.entry;
@@ -983,7 +985,7 @@ Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform(const std::u
 
   auto fnTpe = llvm::FunctionType::get(rtnTpe, {paramTpes}, false);
 
-  auto *fn = llvm::Function::Create(fnTpe, llvm::Function::ExternalLinkage, "lambda", *module);
+  auto *fn = llvm::Function::Create(fnTpe, llvm::Function::ExternalLinkage, qualified(fnTree.name), *module);
 
   // setup function conventions for targets
   switch (options.target) {
@@ -995,11 +997,12 @@ Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform(const std::u
     case Target::NVPTX64:
       module->getOrInsertNamedMetadata("nvvm.annotations")
           ->addOperand(
-              llvm::MDNode::get(C, //
-                                {llvm::ValueAsMetadata::get(fn), llvm::MDString::get(C, fn->getName()),
+              llvm::MDNode::get(C, // XXX the attribute name must be "kernel" here and not the function name!
+                                {llvm::ValueAsMetadata::get(fn), llvm::MDString::get(C, "kernel"),
                                  llvm::ValueAsMetadata::get(llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 1))}));
       break;
     case Target::AMDGCN: fn->setCallingConv(llvm::CallingConv::AMDGPU_KERNEL); break;
+    case Target::SPIRV64: undefined(__FILE_NAME__, __LINE__); break;
   }
 
   auto *entry = llvm::BasicBlock::Create(C, "entry", fn);
@@ -1086,7 +1089,7 @@ llvmc::TargetInfo LLVM::Options::toTargetInfo() const {
     return llvmc::TargetInfo{
         .triple = triple,
         .target = backend::llvmc::targetFromTriple(triple),
-        .cpu = !arch.empty() ? llvmc::CpuInfo{.uArch = arch, .features = {}} : llvmc::hostCpuInfo(),
+        .cpu = arch.empty() || arch == "native" ? llvmc::hostCpuInfo() : llvmc::CpuInfo{.uArch = arch, .features = {}},
     };
   };
 
@@ -1098,10 +1101,14 @@ llvmc::TargetInfo LLVM::Options::toTargetInfo() const {
       return bindGpuArch(Triple::ArchType::nvptx64, Triple::VendorType::NVIDIA, Triple::OSType::CUDA);
     case LLVM::Target::AMDGCN:
       return bindGpuArch(Triple::ArchType::amdgcn, Triple::VendorType::AMD, Triple::OSType::AMDHSA);
+    case Target::SPIRV64:
+      // TODO implement this properly
+      auto os = backend::llvmc::defaultHostTriple().getOS();
+      return bindGpuArch(Triple::ArchType::spirv64, Triple::VendorType::UnknownVendor, os);
   }
 }
 
-compiler::Compilation backend::LLVM::run(const Program &program) {
+compiler::Compilation backend::LLVM::run(const Program &program, const compiler::Opt &opt) {
   using namespace llvm;
 
   auto ctx = std::make_unique<llvm::LLVMContext>();
@@ -1126,7 +1133,7 @@ compiler::Compilation backend::LLVM::run(const Program &program) {
                                      {rawError.value_or(""), optError.value_or("")}, [](auto &&x) { return x; }, "\n"));
   }
 
-  auto c = llvmc::compileModule(options.toTargetInfo(), true, std::move(mod), *ctx);
+  auto c = llvmc::compileModule(options.toTargetInfo(), opt, true, std::move(mod), *ctx);
 
   //  // at this point we know the target machine, so we derive the struct layout here
   //  for (const auto &def : program.defs) {

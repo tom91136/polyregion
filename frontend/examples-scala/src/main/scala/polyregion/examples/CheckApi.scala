@@ -96,9 +96,9 @@ object CheckApi {
 
     import polyregion.jvm.runtime.*
 
-    Runtime.load()
+    Platform.load()
 
-    val rs = Array(Runtime.Relocatable() /*, Runtime.OpenCL(), Runtime.CUDA() */ )
+    val rs = Array(Platform.CUDA() /*, Runtime.OpenCL(), Runtime.CUDA() */ )
 
     rs.foreach { r =>
       println(r)
@@ -125,7 +125,7 @@ object CheckApi {
         val data = ByteBuffer.allocateDirect(java.lang.Integer.BYTES * 4).order(ByteOrder.nativeOrder())
         (data.putInt(7).putInt(7).putInt(7).putInt(7): Buffer).position(0)
 
-        val Array(ptr) = polyregion.jvm.runtime.Runtime.directBufferPointers(Array(data))
+        val ptr = polyregion.jvm.runtime.Platform.pointerOfDirectBuffer(data)
 
         val q0 = d0.createQueue();
 
@@ -175,7 +175,7 @@ object CheckApi {
       }
     }
 
-    //    Thread.sleep(1000)
+       Thread.sleep(1000)
 
 //    val q = d0.createQueue()
 //    d0.createQueue()

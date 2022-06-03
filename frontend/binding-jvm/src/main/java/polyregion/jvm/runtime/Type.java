@@ -1,16 +1,21 @@
 package polyregion.jvm.runtime;
 
+import polyregion.jvm.ByteEnum;
+import polyregion.jvm.compiler.Target;
+
 public enum Type implements ByteEnum {
-  BOOL(Runtime.TYPE_BOOL, Byte.BYTES),
-  BYTE(Runtime.TYPE_BYTE, Byte.BYTES),
-  CHAR(Runtime.TYPE_CHAR, Character.BYTES),
-  SHORT(Runtime.TYPE_SHORT, Short.BYTES),
-  INT(Runtime.TYPE_INT, Integer.BYTES),
-  LONG(Runtime.TYPE_LONG, Long.BYTES),
-  FLOAT(Runtime.TYPE_FLOAT, Float.BYTES),
-  DOUBLE(Runtime.TYPE_DOUBLE, Double.BYTES),
-  PTR(Runtime.TYPE_PTR, Long.BYTES),
-  VOID(Runtime.TYPE_VOID, 0);
+  BOOL(Platform.TYPE_BOOL, Byte.BYTES),
+  BYTE(Platform.TYPE_BYTE, Byte.BYTES),
+  CHAR(Platform.TYPE_CHAR, Character.BYTES),
+  SHORT(Platform.TYPE_SHORT, Short.BYTES),
+  INT(Platform.TYPE_INT, Integer.BYTES),
+  LONG(Platform.TYPE_LONG, Long.BYTES),
+  FLOAT(Platform.TYPE_FLOAT, Float.BYTES),
+  DOUBLE(Platform.TYPE_DOUBLE, Double.BYTES),
+  PTR(Platform.TYPE_PTR, Long.BYTES),
+  VOID(Platform.TYPE_VOID, 0);
+
+  public static final Type[] VALUES = values();
 
   final byte value;
   final int sizeInBytes;
