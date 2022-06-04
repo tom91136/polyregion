@@ -16,9 +16,8 @@ if (LINKER)
     if(MSVC)
         set(CMAKE_LINKER "${LINKER}")
     else()
-        set(COMMON_LINK_OPTIONS "--ld-path=${LINKER} ${COMMON_LINK_OPTIONS}")
+        set(COMMON_LINK_OPTIONS --ld-path=${LINKER} ${COMMON_LINK_OPTIONS})
     endif()
-
 endif ()
 
 

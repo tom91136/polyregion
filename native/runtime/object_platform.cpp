@@ -182,8 +182,8 @@ SharedDevice::~SharedDevice() {
   TRACE();
   for (auto &[_, m] : modules) {
     auto &[path, handle, symbols] = m;
-    if (auto code = dynamic_library_close(handle); code != 0) {
-      std::fprintf(stderr, "%s Cannot unload module, code %d: %s\n", SHOBJ_ERROR_PREFIX, code, dynamic_library_error());
+    if (auto code = polyregion_dl_close(handle); code != 0) {
+      std::fprintf(stderr, "%s Cannot unload module, code %d: %s\n", SHOBJ_ERROR_PREFIX, code, polyregion_dl_error());
     }
   }
 }
@@ -196,9 +196,9 @@ void SharedDevice::loadModule(const std::string &name, const std::string &image)
   if (auto it = modules.find(name); it != modules.end()) {
     throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) + "Module named " + name + " was already loaded");
   } else {
-    if (auto dylib = dynamic_library_open(image.c_str()); !dylib) {
+    if (auto dylib = polyregion_dl_open(image.c_str()); !dylib) {
       throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) +
-                             "Cannot load module: " + std::string(dynamic_library_error()));
+                             "Cannot load module: " + std::string(polyregion_dl_error()));
     } else
       modules.emplace_hint(it, name, LoadedModule{image, dylib, {}});
   }
@@ -226,8 +226,8 @@ void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
   void *address = nullptr;
   if (auto it = symbolTable.find(symbol); it != symbolTable.end()) address = it->second;
   else {
-    address = dynamic_library_find(handle, moduleName.c_str());
-    auto err = dynamic_library_error();
+    address = polyregion_dl_find(handle, moduleName.c_str());
+    auto err = polyregion_dl_error();
     if (err) {
       throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) + "Cannot load symbol " + symbol + " from module " +
                              moduleName + " (" + path + "): " + std::string(err));
@@ -237,6 +237,3 @@ void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
   invoke(reinterpret_cast<uint64_t>(address), types, args);
   if (cb) (*cb)();
 }
-#undef dynamic_library_open
-#undef dynamic_library_close
-#undef dynamic_library_find

@@ -1,4 +1,14 @@
-find_package(JNI REQUIRED)
+if (NOT JAVA_HOME)
+    set(JAVA_HOME $ENV{JAVA_HOME})
+endif ()
+
+set(JNI_INCLUDE_DIRS "${JAVA_HOME}/include/")
+if (NOT EXISTS "${JNI_INCLUDE_DIRS}")
+    message(FATAL_ERROR "`${JNI_INCLUDE_DIRS}` is not a valid directory to JNI headers")
+endif ()
+
+set(JNI_INCLUDE_DIRS ${JNI_INCLUDE_DIRS};${JNI_INCLUDE_DIRS}/linux)
+
 
 add_library(polyregion-compiler-jvm SHARED generated/mirror.cpp compiler.cpp)
 target_include_directories(polyregion-compiler-jvm PRIVATE
