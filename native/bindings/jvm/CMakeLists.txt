@@ -6,8 +6,15 @@ set(JNI_INCLUDE_DIRS "${JAVA_HOME}/include/")
 if (NOT EXISTS "${JNI_INCLUDE_DIRS}")
     message(FATAL_ERROR "`${JNI_INCLUDE_DIRS}` is not a valid directory to JNI headers")
 endif ()
-
-set(JNI_INCLUDE_DIRS ${JNI_INCLUDE_DIRS};${JNI_INCLUDE_DIRS}/linux)
+if (WIN32)
+    set(JNI_INCLUDE_DIRS ${JNI_INCLUDE_DIRS};${JNI_INCLUDE_DIRS}/win32)
+elseif (UNIX)
+    if (APPLE)
+        # no change
+    else()
+        set(JNI_INCLUDE_DIRS ${JNI_INCLUDE_DIRS};${JNI_INCLUDE_DIRS}/linux)
+    endif ()
+endif ()
 
 
 add_library(polyregion-compiler-jvm SHARED generated/mirror.cpp compiler.cpp)
