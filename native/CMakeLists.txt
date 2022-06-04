@@ -6,18 +6,18 @@ project(polyregion-native)
 
 set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON" FORCE)
 
-set(LINKER "" CACHE INTERNAL "Path to custom linker")
+set(USE_LINKER "" CACHE INTERNAL "Path to custom linker")
 set(POLYREGION_SHARED_LIB OFF CACHE BOOL "")
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 ProcessorCount(NPROC)
 
-if (LINKER)
-    if(MSVC)
-        set(CMAKE_LINKER "${LINKER}")
-    else()
-        set(COMMON_LINK_OPTIONS --ld-path=${LINKER} ${COMMON_LINK_OPTIONS})
-    endif()
+if (USE_LINKER)
+    if (MSVC)
+        set(CMAKE_LINKER "${USE_LINKER}")
+    else ()
+        set(COMMON_LINK_OPTIONS --ld-path=${USE_LINKER} ${COMMON_LINK_OPTIONS})
+    endif ()
 endif ()
 
 
@@ -25,7 +25,7 @@ if (MSVC)
     # TODO Enable Asan on Windows if possible
     set(COMMON_DEBUG_OPTIONS -fno-omit-frame-pointer)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-#    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Release>:Release>")
+    #    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Release>:Release>")
 else ()
     # FIXME adjust for CUDA stuff for now
     set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan)
@@ -60,11 +60,11 @@ endif ()
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     # --exclude-libs=ALL kills -fsanitize=*
     # keep sections for debug!
-    if(WIN32)
+    if (WIN32)
         set(POLYREGION_SHARED_LIB OFF)
-    else()
+    else ()
         set(POLYREGION_SHARED_LIB ON)
-    endif()
+    endif ()
     set(DEBUG ON)
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
     message(STATUS "LTO disabled in Debug mode")
@@ -73,10 +73,10 @@ else ()
     set(POLYREGION_SHARED_LIB OFF)
     set(DEBUG OFF)
 
-    if(NOT MSVC)
+    if (NOT MSVC)
         set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
         set(CMAKE_CXX_COMPILE_OPTIONS_IPO -flto=thin)
-    endif()
+    endif ()
 
     set(COMMON_COMPILE_OPTIONS
             ${COMMON_COMPILE_OPTIONS}
@@ -98,14 +98,15 @@ else ()
             )
 endif ()
 
-set(COMMON_LINK_OPTIONS
-        ${COMMON_LINK_OPTIONS}
-        -static-libgcc
-        -static-libstdc++
-#        ${COMMON_COMPILE_OPTIONS}
-        ${COMMON_LINKER_OPTIONS}
-        )
 
+set(COMMON_LINK_OPTIONS ${COMMON_LINK_OPTIONS}
+        -static-libstdc++
+        ${COMMON_LINKER_OPTIONS})
+
+if (UNIX AND NOT APPLE)
+    set(COMMON_LINK_OPTIONS ${COMMON_LINK_OPTIONS}
+            -static-libgcc)
+endif ()
 
 set(LLVM_SRC_VERSION 14.0.3)
 set(LLVM_SRC_DIR_IN_RELEASE llvm-${LLVM_SRC_VERSION}.src)
@@ -183,11 +184,11 @@ else ()
     set(LLVM_ENABLE_TERMINFO OFF CACHE BOOL "")
 
     set(LLVM_ENABLE_UNWIND_TABLES OFF CACHE BOOL "")
-    if(WIN32)
-#        set(LLVM_USE_CRT_RELEASE MT CACHE STRING "")
-    else()
+    if (WIN32)
+        #        set(LLVM_USE_CRT_RELEASE MT CACHE STRING "")
+    else ()
         set(LLVM_STATIC_LINK_CXX_STDLIB ON CACHE BOOL "")
-    endif()
+    endif ()
 
     #    set(LLVM_ENABLE_LLD ON CACHE BOOL "")
 
@@ -325,9 +326,9 @@ if (NOT libffi_POPULATED)
     file(COPY ${CMAKE_SOURCE_DIR}/libffi/CMakeLists.txt DESTINATION "${libffi_SOURCE_DIR}")
     file(COPY ${CMAKE_SOURCE_DIR}/libffi/libffiConfig.cmake.in DESTINATION "${libffi_SOURCE_DIR}")
     file(COPY ${CMAKE_SOURCE_DIR}/libffi/fficonfig.h DESTINATION "${libffi_SOURCE_DIR}/include")
-    if(WIN32)
+    if (WIN32)
         set(VCPKG_TARGET_ARCHITECTURE x64)
-    endif()
+    endif ()
     add_definitions(-DFFI_BUILDING)
 
     add_subdirectory(${libffi_SOURCE_DIR} ${libffi_BINARY_DIR} EXCLUDE_FROM_ALL)

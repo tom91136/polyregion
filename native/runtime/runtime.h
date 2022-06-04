@@ -9,6 +9,7 @@
 #include <vector>
 #include <array>
 #include <stdexcept>
+#include <unordered_map>
 
 #include "export.h"
 #include "types.h"
