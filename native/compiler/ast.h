@@ -4,7 +4,8 @@
 #include "variants.hpp"
 #include <ostream>
 #include <utility>
-
+#include <unordered_map>
+#include <optional>
 namespace polyregion::polyast {
 
 template <typename T> using Opt = std::optional<T>;

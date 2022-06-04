@@ -1,9 +1,29 @@
 #pragma once
 
+#include <atomic>
+
 #include "runtime.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/Object/ObjectFile.h"
-#include <atomic>
+
+#ifdef _WIN32
+  #define WIN32_LEAN_AND_MEAN
+  #define VC_EXTRALEAN
+  #define NOMINMAX
+  #include <Windows.h>
+
+  #define dynamic_library_open(path) LoadLibraryA(path)
+  #define dynamic_library_error() std::system_category().message(::GetLastError()).c_str()
+  #define dynamic_library_close(lib) FreeLibrary(lib)
+  #define dynamic_library_find(lib, symbol) GetProcAddress(lib, symbol)
+#else
+  #include <dlfcn.h>
+
+  #define dynamic_library_open(path) dlopen(path, RTLD_NOW)
+  #define dynamic_library_error() dlerror()
+  #define dynamic_library_close(lib) dlclose(lib)
+  #define dynamic_library_find(lib, symbol) dlsym(lib, symbol)
+#endif
 
 namespace polyregion::runtime::object {
 
@@ -59,7 +79,7 @@ public:
 };
 
 namespace {
-using LoadedModule = std::tuple<std::string, void *, std::unordered_map<std::string, void *>>;
+using LoadedModule = std::tuple<std::string, HMODULE , std::unordered_map<std::string, void *>>;
 using DynamicModules = std::unordered_map<std::string, LoadedModule>;
 } // namespace
 class EXPORT SharedPlatform : public Platform {

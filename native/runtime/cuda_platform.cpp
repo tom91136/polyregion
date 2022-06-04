@@ -16,8 +16,8 @@ static void checked(CUresult result, const char *file, int line) {
 
 CudaPlatform::CudaPlatform() {
   TRACE();
-  if (cuewInit(CUEW_INIT_CUDA) != CUEW_SUCCESS) {
-    throw std::logic_error("CUEW initialisation failed, no CUDA driver present?");
+  if (auto result = cuewInit(CUEW_INIT_CUDA); result != CUEW_SUCCESS) {
+    throw std::logic_error("CUEW initialisation failed (" + std::to_string(result) + ") ,no CUDA driver present?");
   }
   CHECKED(cuInit(0));
 }
@@ -74,7 +74,7 @@ CudaDevice::CudaDevice(int ordinal)
             TRACE();
             CHECKED(cuModuleUnload(m));
           },
-          [&](auto &&f) { TRACE(); }) {
+          [&](auto &&) { TRACE(); }) {
   TRACE();
   CHECKED(cuDeviceGet(&device, ordinal));
   deviceName = detail::allocateAndTruncate(
@@ -105,7 +105,7 @@ bool CudaDevice::moduleLoaded(const std::string &name) {
   TRACE();
   return store.moduleLoaded(name);
 }
-uintptr_t CudaDevice::malloc(size_t size, Access access) {
+uintptr_t CudaDevice::malloc(size_t size, Access) {
   TRACE();
   context.touch();
   if (size == 0) throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot malloc size of 0");
@@ -146,7 +146,7 @@ void CudaDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
   } else {
     CHECKED(cuStreamAddCallback(
         stream,
-        [](CUstream s, CUresult e, void *data) {
+        [](CUstream, CUresult e, void *data) {
           CHECKED(e);
           detail::CountedCallbackHandler::consume(data);
         },

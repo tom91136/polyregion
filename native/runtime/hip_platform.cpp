@@ -16,8 +16,16 @@ static void checked(hipError_t result, const char *file, int line) {
 
 HipPlatform::HipPlatform() {
   TRACE();
-  if (hipewInit(HIPEW_INIT_HIP) != HIPEW_SUCCESS) {
-    throw std::logic_error("HIPEW initialisation failed, no HIP driver present?");
+  if (auto result = hipewInit(HIPEW_INIT_HIP); result != HIPEW_SUCCESS) {
+    std::string description;
+    switch (result) {
+      case HIPEW_ERROR_OPEN_FAILED: description = "Error opening amdhip64 dynamic library, no HIP driver present?";
+      case HIPEW_ERROR_ATEXIT_FAILED: description = "Error setting up atexit() handler!";
+      case HIPEW_ERROR_OLD_DRIVER: // see https://developer.blender.org/D13324
+        description = "Driver version too old, requires AMD Radeon Pro 21.Q4 driver or newer";
+      default: description = "Unknown error(" + std::to_string(result) + ")";
+    }
+    throw std::logic_error("HIPEW initialisation failed:" + description);
   }
   CHECKED(hipInit(0));
 }
@@ -74,7 +82,7 @@ HipDevice::HipDevice(int ordinal)
             TRACE();
             CHECKED(hipModuleUnload(m));
           },
-          [&](auto &&f) { TRACE(); }) {
+          [&](auto &&) { TRACE(); }) {
   TRACE();
   CHECKED(hipDeviceGet(&device, ordinal));
   deviceName = detail::allocateAndTruncate(
@@ -108,7 +116,7 @@ bool HipDevice::moduleLoaded(const std::string &name) {
   TRACE();
   return store.moduleLoaded(name);
 }
-uintptr_t HipDevice::malloc(size_t size, Access access) {
+uintptr_t HipDevice::malloc(size_t size, Access) {
   TRACE();
   context.touch();
   if (size == 0) throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot malloc size of 0");
@@ -142,7 +150,7 @@ void HipDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
   if (!cb) return;
   CHECKED(hipStreamAddCallback(
       stream,
-      [](hipStream_t s, hipError_t e, void *data) {
+      [](hipStream_t, hipError_t e, void *data) {
         CHECKED(e);
         detail::CountedCallbackHandler::consume(data);
       },

@@ -8,6 +8,10 @@
 #include <string>
 #include <type_traits>
 #include <vector>
+#include <unordered_map>
+#include <optional>
+#include <algorithm>
+#include <limits>
 
 namespace polyregion {
 
@@ -20,8 +24,8 @@ constexpr T undefined(const std::string &file, size_t line, const std::string &m
   throw std::logic_error(file + ":" + std::to_string(line) + ": " + message);
 }
 
-template <typename T, template <typename...> typename Container = std::vector>
-std::string mk_string(const Container<T> &xs,
+template <typename T>
+std::string mk_string(const std::vector<T> &xs,
                       const std::function<std::string(const T &)> &f, //
                       const std::string &delim) {
   return std::empty(xs) ? ""
@@ -30,9 +34,9 @@ std::string mk_string(const Container<T> &xs,
                               [delim](auto &&a, auto &&b) -> std::string { return a + delim + b; }, f);
 }
 
-template <typename K, typename V, template <typename...> typename Container>
-std::string mk_string2(const Container<K, V> &xs,
-                       const std::function<std::string(const typename Container<K, V>::value_type &)> &f, //
+template <typename K, typename V>
+std::string mk_string2(const std::unordered_map<K, V> &xs,
+                       const std::function<std::string(const typename std::unordered_map<K, V>::value_type &)> &f, //
                        const std::string &delim) {
   return std::empty(xs) ? ""
                         : std::transform_reduce(
@@ -40,22 +44,22 @@ std::string mk_string2(const Container<K, V> &xs,
                               [delim](auto &&a, auto &&b) -> std::string { return a + delim + b; }, f);
 }
 
-template <typename T, typename U, template <typename...> typename Container>
-Container<U> map_vec(const Container<T> &xs, const std::function<U(const T &)> &f) {
-  Container<U> ys(std::size(xs));
+template <typename T, typename U>
+std::vector<U> map_vec(const std::vector<T> &xs, const std::function<U(const T &)> &f) {
+  std::vector<U> ys(std::size(xs));
   std::transform(std::begin(xs), std::end(xs), ys.begin(), f);
   return ys;
 }
 
 template <typename T, typename F> //
-std::optional<std::result_of_t<F(T)>> map_opt(const std::optional<T> &maybe, F &&f) {
+std::optional<std::invoke_result_t<F(T)>> map_opt(const std::optional<T> &maybe, F &&f) {
   if (maybe) return std::forward<F>(f)(*maybe);
   else
     return std::nullopt;
 }
 
 template <typename T, typename F> //
-std::result_of_t<F(T)> bind_opt(const std::optional<T> &maybe, F &&f) {
+std::invoke_result_t<F(T)> bind_opt(const std::optional<T> &maybe, F &&f) {
   if (maybe) return std::forward<F>(f)(*maybe);
   else
     return std::nullopt;

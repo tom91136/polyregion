@@ -13,35 +13,59 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 ProcessorCount(NPROC)
 
 if (LINKER)
-    set(COMMON_LINK_OPTIONS --ld-path=${LINKER} ${COMMON_LINK_OPTIONS})
+    if(MSVC)
+        set(CMAKE_LINKER "${LINKER}")
+    else()
+        set(COMMON_LINK_OPTIONS "--ld-path=${LINKER} ${COMMON_LINK_OPTIONS}")
+    endif()
+
 endif ()
 
-# FIXME adjust for CUDA stuff for now
-set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan -O1)
-#set(COMMON_DEBUG_OPTIONS  )
 
-set(COMMON_COMPILE_OPTIONS
-        -ffunction-sections       # keep functions in its own section for better --gc-sections results
-        -fdata-sections           # same as above
-        -fno-rtti                 # don't use RTTI for space
-        -pedantic
-        -Wall
-        -Wextra
-        # -Wshadow         # too prevalent in LLVM
-        # -Wold-style-cast # too prevalent in LLVM
-        -Wcast-align
-        -Werror=return-type
-        -Werror=switch
-        -Wno-unused-parameter
-        -Wno-unused-function
-        -Wno-unused-variable
-        )
+if (MSVC)
+    # TODO Enable Asan on Windows if possible
+    set(COMMON_DEBUG_OPTIONS -fno-omit-frame-pointer)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+#    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Release>:Release>")
+else ()
+    # FIXME adjust for CUDA stuff for now
+    set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan)
+    #set(COMMON_DEBUG_OPTIONS  )
+endif ()
 
+if (MSVC)
+    set(COMMON_COMPILE_OPTIONS
+            /W4
+            /nologo
+            )
+else ()
+
+    set(COMMON_COMPILE_OPTIONS
+            -ffunction-sections       # keep functions in its own section for better --gc-sections results
+            -fdata-sections           # same as above
+            -fno-rtti                 # don't use RTTI for space
+            -pedantic
+            -Wall
+            -Wextra
+            # -Wshadow         # too prevalent in LLVM
+            # -Wold-style-cast # too prevalent in LLVM
+            -Wcast-align
+            -Werror=return-type
+            -Werror=switch
+            -Wno-unused-parameter
+            -Wno-unused-function
+            -Wno-unused-variable
+            )
+endif ()
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     # --exclude-libs=ALL kills -fsanitize=*
     # keep sections for debug!
-    set(POLYREGION_SHARED_LIB ON)
+    if(WIN32)
+        set(POLYREGION_SHARED_LIB OFF)
+    else()
+        set(POLYREGION_SHARED_LIB ON)
+    endif()
     set(DEBUG ON)
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
     message(STATUS "LTO disabled in Debug mode")
@@ -49,8 +73,11 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
 else ()
     set(POLYREGION_SHARED_LIB OFF)
     set(DEBUG OFF)
-    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
-    set(CMAKE_CXX_COMPILE_OPTIONS_IPO -flto=thin)
+
+    if(NOT MSVC)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+        set(CMAKE_CXX_COMPILE_OPTIONS_IPO -flto=thin)
+    endif()
 
     set(COMMON_COMPILE_OPTIONS
             ${COMMON_COMPILE_OPTIONS}
@@ -76,8 +103,9 @@ set(COMMON_LINK_OPTIONS
         ${COMMON_LINK_OPTIONS}
         -static-libgcc
         -static-libstdc++
-        ${COMMON_COMPILE_OPTIONS}
-        ${COMMON_LINKER_OPTIONS})
+#        ${COMMON_COMPILE_OPTIONS}
+        ${COMMON_LINKER_OPTIONS}
+        )
 
 
 set(LLVM_SRC_VERSION 14.0.3)
@@ -105,7 +133,7 @@ FetchContent_Declare(
 FetchContent_Declare(
         cpuinfo
         GIT_REPOSITORY https://github.com/pytorch/cpuinfo.git
-        GIT_TAG        9fa621933fc6080b96fa0f037cdc7cd2c69ab272 # head as of 01/06/2022 (DD/MM/YYYY)
+        GIT_TAG 9fa621933fc6080b96fa0f037cdc7cd2c69ab272 # head as of 01/06/2022 (DD/MM/YYYY)
 )
 
 FetchContent_Declare(
@@ -137,9 +165,11 @@ if (USE_EXTERNAL_LLVM)
     find_package(LLD REQUIRED CONFIG)
 
 else ()
+    set(BUILD_SHARED_LIBS ${POLYREGION_SHARED_LIB} CACHE BOOL "")
+
     # X86;AArch64;ARM;NVPTX;AMDGPU;WebAssembly
     set(LLVM_TARGETS_TO_BUILD "X86;AArch64;ARM;NVPTX;AMDGPU" CACHE INTERNAL "")
-#    set(LLVM_EXPERIMENTAL_TARGETS_TO_BUILD "SPIR" CACHE INTERNAL "")
+    #    set(LLVM_EXPERIMENTAL_TARGETS_TO_BUILD "SPIR" CACHE INTERNAL "")
     #    set(LLVM_TARGETS_TO_BUILD "X86" CACHE INTERNAL "")
     #    set(LLVM_TARGETS_TO_BUILD "" CACHE INTERNAL "")
     set(LLVM_ENABLE_IDE ON CACHE BOOL "")
@@ -154,8 +184,11 @@ else ()
     set(LLVM_ENABLE_TERMINFO OFF CACHE BOOL "")
 
     set(LLVM_ENABLE_UNWIND_TABLES OFF CACHE BOOL "")
-    set(LLVM_STATIC_LINK_CXX_STDLIB ON CACHE BOOL "")
-    set(BUILD_SHARED_LIBS ${POLYREGION_SHARED_LIB} CACHE BOOL "")
+    if(WIN32)
+#        set(LLVM_USE_CRT_RELEASE MT CACHE STRING "")
+    else()
+        set(LLVM_STATIC_LINK_CXX_STDLIB ON CACHE BOOL "")
+    endif()
 
     #    set(LLVM_ENABLE_LLD ON CACHE BOOL "")
 
@@ -248,6 +281,11 @@ else ()
 
         endmacro(add_lld_library)
 
+        if (MSVC)
+            set(HAVE_CXX_ATOMICS64_WITHOUT_LIB ON)
+            set(HAVE_CXX_ATOMICS_WITHOUT_LIB ON)
+        endif ()
+
         add_subdirectory(${lld_SOURCE_DIR}/Common ${lld_BINARY_DIR}/Common)
         target_include_directories(lldCommon
                 PUBLIC ${lld_SOURCE_DIR}/include ${lld_BINARY_DIR}/include
@@ -288,8 +326,13 @@ if (NOT libffi_POPULATED)
     file(COPY ${CMAKE_SOURCE_DIR}/libffi/CMakeLists.txt DESTINATION "${libffi_SOURCE_DIR}")
     file(COPY ${CMAKE_SOURCE_DIR}/libffi/libffiConfig.cmake.in DESTINATION "${libffi_SOURCE_DIR}")
     file(COPY ${CMAKE_SOURCE_DIR}/libffi/fficonfig.h DESTINATION "${libffi_SOURCE_DIR}/include")
+    if(WIN32)
+        set(VCPKG_TARGET_ARCHITECTURE x64)
+    endif()
+    add_definitions(-DFFI_BUILDING)
+
     add_subdirectory(${libffi_SOURCE_DIR} ${libffi_BINARY_DIR} EXCLUDE_FROM_ALL)
-    include_directories(${libffi_SOURCE_DIR}/include)
+    include_directories(${libffi_BINARY_DIR}/include)
 endif ()
 
 include_directories("${json_SOURCE_DIR}")

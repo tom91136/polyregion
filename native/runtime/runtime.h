@@ -1,7 +1,5 @@
 #pragma once
 
-#include "export.h"
-#include "types.h"
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -9,10 +7,19 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <array>
+#include <stdexcept>
+
+#include "export.h"
+#include "types.h"
 
 #ifdef TRACE
   #error Trace already defined
 #else
+
+  #if !defined(__PRETTY_FUNCTION__) && !defined(__GNUC__)
+    #define __PRETTY_FUNCTION__ __FUNCSIG__
+  #endif
 
   #define TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this, __PRETTY_FUNCTION__)
 //  #define TRACE()

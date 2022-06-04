@@ -116,28 +116,28 @@ void run() {
   std::vector<std::unique_ptr<Platform>> rts;
 
 //  try {
-//    rts.push_back(std::make_unique<RelocatableRuntime>());
+//    rts.push_back(std::make_unique<RelocatablePlatform>());
 //  } catch (const std::exception &e) {
 //    std::cerr << "[REL] " << e.what() << std::endl;
 //  }
 
-  try {
-    rts.push_back(std::make_unique<CudaPlatform>());
-  } catch (const std::exception &e) {
-    std::cerr << "[CUDA] " << e.what() << std::endl;
-  }
+//  try {
+//    rts.push_back(std::make_unique<CudaPlatform>());
+//  } catch (const std::exception &e) {
+//    std::cerr << "[CUDA] " << e.what() << std::endl;
+//  }
 
 //  try {
-//    rts.push_back(std::make_unique<ClRuntime>());
+//    rts.push_back(std::make_unique<ClPlatform>());
 //  } catch (const std::exception &e) {
 //    std::cerr << "[OCL] " << e.what() << std::endl;
 //  }
 
-  //  try {
-  //    rts.push_back(std::make_unique<HipRuntime>());
-  //  } catch (const std::exception &e) {
-  //    std::cerr << "[HIP] " << e.what() << std::endl;
-  //  }
+    try {
+      rts.push_back(std::make_unique<HipPlatform>());
+    } catch (const std::exception &e) {
+      std::cerr << "[HIP] " << e.what() << std::endl;
+    }
 
   static std::vector<int> xs;
 

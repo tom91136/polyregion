@@ -1,5 +1,7 @@
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunknown-pragmas"
+#ifndef _MSC_VER
+  #pragma clang diagnostic push
+  #pragma clang diagnostic ignored "-Wunknown-pragmas"
+#endif
 
 #pragma once
 
@@ -62,8 +64,10 @@ constexpr std::optional<T> get_opt(const Alternative<Ts...> &a) {
   else
     return {};
 }
-#pragma clang diagnostic push
-#pragma ide diagnostic ignored "google-explicit-constructor"
+#ifndef _MSC_VER
+  #pragma clang diagnostic push
+  #pragma ide diagnostic ignored "google-explicit-constructor"
+#endif
 
 
 
@@ -268,7 +272,7 @@ struct EXPORT Fractional : TypeKind::Base {
   EXPORT friend bool operator==(const TypeKind::Fractional &, const TypeKind::Fractional &);
 };
 } // namespace TypeKind
-namespace Type {
+namespace Type { 
 
 struct EXPORT Base {
   TypeKind::Any kind;
@@ -1252,7 +1256,9 @@ struct EXPORT Program {
 };
 
 } // namespace polyregion::polyast
-#pragma clang diagnostic pop // ide google-explicit-constructor
+#ifndef _MSC_VER
+  #pragma clang diagnostic pop // ide google-explicit-constructor
+#endif
 namespace std {
 
 template <typename T> struct std::hash<std::vector<T>> {
@@ -1649,4 +1655,6 @@ template <> struct std::hash<polyregion::polyast::Program> {
 
 }
 
-#pragma clang diagnostic pop // -Wunknown-pragmas
+#ifndef _MSC_VER
+  #pragma clang diagnostic pop // -Wunknown-pragmas
+#endif

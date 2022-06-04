@@ -151,8 +151,10 @@ private[polyregion] object CppStructGen {
             |    return {};
             |}""".stripMargin
 
-      s"""|#pragma clang diagnostic push
-          |#pragma clang diagnostic ignored "-Wunknown-pragmas"
+      s"""|#ifndef _MSC_VER
+          |  #pragma clang diagnostic push
+          |  #pragma clang diagnostic ignored "-Wunknown-pragmas"
+          |#endif
           |
           |#pragma once
           |
@@ -161,14 +163,20 @@ private[polyregion] object CppStructGen {
           |
           |namespace $namespace {
           |$shared
-          |#pragma clang diagnostic push
-          |#pragma ide diagnostic ignored "google-explicit-constructor"
-		  |${forwardDeclStmts.sym("\n", "\n", "\n")}
+          |#ifndef _MSC_VER
+          |  #pragma clang diagnostic push
+          |  #pragma ide diagnostic ignored "google-explicit-constructor"
+          |#endif
+          |${forwardDeclStmts.sym("\n", "\n", "\n")}
           |${stmts.sym("\n", "\n", "\n")}
           |} // namespace $namespace
-          |#pragma clang diagnostic pop // ide google-explicit-constructor
+          |#ifndef _MSC_VER
+          |  #pragma clang diagnostic pop // ide google-explicit-constructor
+          |#endif
           |$stdSpecialisationDecl
-          |#pragma clang diagnostic pop // -Wunknown-pragmas
+          |#ifndef _MSC_VER
+          |  #pragma clang diagnostic pop // -Wunknown-pragmas
+          |#endif
           |""".stripMargin
     }
     def emitImpl(namespace: String, headerName: String, xs: List[StructSource]) =

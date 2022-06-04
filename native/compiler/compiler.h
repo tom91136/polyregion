@@ -3,10 +3,10 @@
 #include <chrono>
 #include <cstdint>
 #include <optional>
-#include <ostream>
 #include <string>
 #include <utility>
 #include <vector>
+#include <iostream>
 
 #include "export.h"
 #include "generated/polyast.h"
@@ -227,7 +227,7 @@ struct EXPORT Member {
   EXPORT uint64_t offsetInBytes, sizeInBytes;
   EXPORT Member(decltype(name) name, decltype(offsetInBytes) offsetInBytes, decltype(sizeInBytes) sizeInBytes)
       : name(std::move(name)), offsetInBytes(offsetInBytes), sizeInBytes(sizeInBytes) {}
-  EXPORT friend std::ostream &operator<<(std::ostream &, const Member &);
+
 };
 
 struct EXPORT Layout {
@@ -235,7 +235,6 @@ struct EXPORT Layout {
   EXPORT uint64_t sizeInBytes, alignment;
   EXPORT std::vector<Member> members;
 
-  EXPORT friend std::ostream &operator<<(std::ostream &, const Layout &);
 };
 
 struct EXPORT Event {
@@ -259,8 +258,11 @@ struct EXPORT Compilation {
                      decltype(events) events, //
                      decltype(messages) messages = "")
       : binary(std::move(binary)), events(std::move(events)), messages(std::move(messages)) {}
-  EXPORT friend std::ostream &operator<<(std::ostream &, const Compilation &);
 };
+
+EXPORT std::ostream &operator<<(std::ostream &, const Member &);
+EXPORT std::ostream &operator<<(std::ostream &, const Layout &);
+EXPORT std::ostream &operator<<(std::ostream &, const Compilation &);
 
 EXPORT void initialise();
 

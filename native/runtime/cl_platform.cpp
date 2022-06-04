@@ -88,7 +88,7 @@ ClDevice::ClDevice(cl_device_id device)
             //            }
             return device;
           },
-          [&](auto &&d) {
+          [&](auto &&) {
             TRACE();
             // XXX see above
             //            if (__clewRetainDevice && __clewReleaseDevice) // clReleaseDevice requires OpenCL >= 1.2
@@ -223,7 +223,7 @@ void ClDeviceQueue::enqueueCallback(const MaybeCallback &cb, cl_event event) {
   if (!cb) return;
   CHECKED(clSetEventCallback(
       event, CL_COMPLETE,
-      [](cl_event e, cl_int status, void *data) {
+      [](cl_event, cl_int status, void *data) {
         CHECKED(status);
         detail::CountedCallbackHandler::consume(data);
       },

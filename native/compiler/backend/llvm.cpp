@@ -81,9 +81,9 @@ llvm::Type *LLVM::AstTransformer::mkTpe(const Type::Any &tpe, unsigned AS) {    
       [&](const Type::Short &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },            //
       [&](const Type::Int &x) -> llvm::Type * { return llvm::Type::getInt32Ty(C); },              //
       [&](const Type::Long &x) -> llvm::Type * { return llvm::Type::getInt64Ty(C); },             //
-      [&](const Type::String &x) -> llvm::Type * { return undefined(__FILE_NAME__, __LINE__); },  //
+      [&](const Type::String &x) -> llvm::Type * { return undefined(__FILE__, __LINE__); },  //
       [&](const Type::Unit &x) -> llvm::Type * { return llvm::Type::getVoidTy(C); },              //
-      [&](const Type::Nothing &x) -> llvm::Type * { return undefined(__FILE_NAME__, __LINE__); }, //
+      [&](const Type::Nothing &x) -> llvm::Type * { return undefined(__FILE__, __LINE__); }, //
       [&](const Type::Struct &x) -> llvm::Type * {
         if (auto def = polyregion::get_opt(structTypes, x.name); def) {
           return def->first->getPointerTo(AS);
@@ -94,15 +94,15 @@ llvm::Type *LLVM::AstTransformer::mkTpe(const Type::Any &tpe, unsigned AS) {    
               [](auto &&p) { return "`" + to_string(p.first) + "`" + " = " + std::to_string(p.second.second.size()); },
               "\n->");
 
-          return undefined(__FILE_NAME__, __LINE__, "Unseen struct def: " + to_string(x) + ", table=\n" + pool);
+          return undefined(__FILE__, __LINE__, "Unseen struct def: " + to_string(x) + ", table=\n" + pool);
         }
       }, //
       [&](const Type::Array &x) -> llvm::Type * {
         auto comp = mkTpe(x.component);
         return comp->isPointerTy() ? comp : comp->getPointerTo(AS);
       },                                                                                                  //
-      [&](const Type::Var &x) -> llvm::Type * { return undefined(__FILE_NAME__, __LINE__, "type var"); }, //
-      [&](const Type::Exec &x) -> llvm::Type * { return undefined(__FILE_NAME__, __LINE__, "exec"); }
+      [&](const Type::Var &x) -> llvm::Type * { return undefined(__FILE__, __LINE__, "type var"); }, //
+      [&](const Type::Exec &x) -> llvm::Type * { return undefined(__FILE__, __LINE__, "exec"); }
 
   );
 }
@@ -112,7 +112,7 @@ llvm::Value *LLVM::AstTransformer::findStackVar(const Named &named) {
   if (auto x = polyregion::get_opt(stackVarPtrs, named.symbol); x) {
     auto [tpe, value] = *x;
     if (named.tpe != tpe) {
-      error(__FILE_NAME__, __LINE__,
+      error(__FILE__, __LINE__,
             "Named local variable (" + to_string(named) + ") has different type from LUT (" + to_string(tpe) + ")");
     }
     return value;
@@ -123,7 +123,7 @@ llvm::Value *LLVM::AstTransformer::findStackVar(const Named &named) {
           return "`" + p.first + "` = " + to_string(p.second.first) + "(IR=" + llvm_tostring(p.second.second) + ")";
         },
         "\n->");
-    return undefined(__FILE_NAME__, __LINE__, "Unseen variable: " + to_string(named) + ", variable table=\n->" + pool);
+    return undefined(__FILE__, __LINE__, "Unseen variable: " + to_string(named) + ", variable table=\n->" + pool);
   }
 }
 
@@ -135,9 +135,9 @@ llvm::Value *LLVM::AstTransformer::mkSelectPtr(const Term::Select &select) {
     if (auto s = polyast::get_opt<Type::Struct>(tpe); s) {
       if (auto def = polyregion::get_opt(structTypes, s->name); def) return *def;
       else
-        error(__FILE_NAME__, __LINE__, "Unseen struct type " + to_string(s->name) + " in select path" + fail());
+        error(__FILE__, __LINE__, "Unseen struct type " + to_string(s->name) + " in select path" + fail());
     } else
-      error(__FILE_NAME__, __LINE__, "Illegal select path involving non-struct type " + to_string(tpe) + fail());
+      error(__FILE__, __LINE__, "Illegal select path involving non-struct type " + to_string(tpe) + fail());
   };
 
   if (select.init.empty()) return findStackVar(select.last); // local var lookup
@@ -164,7 +164,7 @@ llvm::Value *LLVM::AstTransformer::mkSelectPtr(const Term::Select &select) {
         auto pool = mk_string2<std::string, size_t>(
             table, [](auto &&p) { return "`" + p.first + "`" + " = " + std::to_string(p.second); }, "\n->");
 
-        return undefined(__FILE_NAME__, __LINE__,
+        return undefined(__FILE__, __LINE__,
                          "Illegal select path with unknown struct member index of name `" + to_string(path) +
                              "`, pool=" + pool + fail());
       }
@@ -188,7 +188,7 @@ llvm::Value *LLVM::AstTransformer::mkTermVal(const Term::Any &ref) {
       [&](const Term::LongConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt64Ty(C), x.value); },
       [&](const Term::FloatConst &x) -> llvm::Value * { return ConstantFP::get(llvm::Type::getFloatTy(C), x.value); },
       [&](const Term::DoubleConst &x) -> llvm::Value * { return ConstantFP::get(llvm::Type::getDoubleTy(C), x.value); },
-      [&](const Term::StringConst &x) -> llvm::Value * { return undefined(__FILE_NAME__, __LINE__); });
+      [&](const Term::StringConst &x) -> llvm::Value * { return undefined(__FILE__, __LINE__); });
 }
 
 llvm::Function *LLVM::AstTransformer::mkExternalFn(llvm::Function *parent, const Type::Any &rtn,
@@ -240,7 +240,7 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
       } else if (holds<TypeKind::Fractional>(kind(rtn))) {
         return fractionalFn(lhs);
       } else {
-        return undefined(__FILE_NAME__, __LINE__);
+        return undefined(__FILE__, __LINE__);
       }
     });
   };
@@ -254,7 +254,7 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
       } else if (holds<TypeKind::Fractional>(kind(rtn))) {
         return fractionalFn(lhs, rhs);
       } else {
-        return undefined(__FILE_NAME__, __LINE__);
+        return undefined(__FILE__, __LINE__);
       }
     });
   };
@@ -320,7 +320,7 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
                     else if (holds<Type::Double>(tpe))  //
                       magnitude = Term::DoubleConst(1); //
                     else
-                      error(__FILE_NAME__, __LINE__);
+                      error(__FILE__, __LINE__);
                     return B.CreateSelect(B.CreateLogicalOr(nan, zero), x, intr2(Intr::copysign, tpe, magnitude, arg));
                   });
             }, //
@@ -364,8 +364,8 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
         switch (options.target) {
           case Target::x86_64:
           case Target::AArch64:
-          case Target::ARM: return undefined(__FILE_NAME__, __LINE__);
-          case Target::SPIRV64: return undefined(__FILE_NAME__, __LINE__);
+          case Target::ARM: return undefined(__FILE__, __LINE__);
+          case Target::SPIRV64: return undefined(__FILE__, __LINE__);
           case Target::NVPTX64: {
             // threadId  @llvm.nvvm.read.ptx.sreg.tid.*
             // blockIdx  @llvm.nvvm.read.ptx.sreg.ctaid.*
@@ -652,7 +652,7 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
               throw std::logic_error("Semantic error: conversion from ref type (" + to_string(fromTpe) +
                                      ") is not allowed");
             },
-            [&](const TypeKind::None &) -> NumKind { error(__FILE_NAME__, __LINE__, "none!?"); });
+            [&](const TypeKind::None &) -> NumKind { error(__FILE__, __LINE__, "none!?"); });
 
         auto toKind = variants::total(
             *kind(x.as), //
@@ -662,7 +662,7 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
               throw std::logic_error("Semantic error: conversion to ref type (" + to_string(fromTpe) +
                                      ") is not allowed");
             },
-            [&](const TypeKind::None &) -> NumKind { error(__FILE_NAME__, __LINE__, "none!?"); });
+            [&](const TypeKind::None &) -> NumKind { error(__FILE__, __LINE__, "none!?"); });
 
         if (fromKind == NumKind::Fractional && toKind == NumKind::Integral) {
 
@@ -697,12 +697,12 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
         } else if (fromKind == NumKind::Fractional && toKind == NumKind::Fractional) {
           return B.CreateFPCast(from, toTpe, "fractional_cast");
         } else
-          error(__FILE_NAME__, __LINE__, "unhandled cast");
+          error(__FILE__, __LINE__, "unhandled cast");
       },
       [&](const Expr::Alias &x) -> ValPtr { return mkTermVal(x.ref); },
       [&](const Expr::Invoke &x) -> ValPtr {
         //        auto lhs = mkTermVal(x.lhs );
-        return undefined(__FILE_NAME__, __LINE__, "Unimplemented invoke:`" + repr(x) + "`");
+        return undefined(__FILE__, __LINE__, "Unimplemented invoke:`" + repr(x) + "`");
       },
       [&](const Expr::Index &x) -> ValPtr {
         if (auto arrTpe = get_opt<Type::Array>(x.lhs.tpe); arrTpe) {
@@ -728,7 +728,7 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
         auto ptr = invokeMalloc(fn, B.CreateMul(B.CreateIntCast(size, mkTpe(Type::Long()), true), elemSize));
         return B.CreateBitCast(ptr, mkTpe(x.witness));
       },
-      [&](const Expr::Suspend &x) -> ValPtr { return undefined(__FILE_NAME__, __LINE__); });
+      [&](const Expr::Suspend &x) -> ValPtr { return undefined(__FILE__, __LINE__); });
 }
 
 llvm::Value *LLVM::AstTransformer::conditionalLoad(llvm::Value *rhs) {
@@ -755,7 +755,7 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
 
         auto tpe = mkTpe(x.name.tpe);
         auto stackPtr = B.CreateAlloca(tpe, AllocaAS, nullptr, x.name.symbol + "_stack_ptr");
-        auto rhs = map_opt(x.expr, [&](auto &&expr) { return mkExprVal(expr, fn, x.name.symbol + "_var_rhs"); });
+        auto rhs = x.expr ? std::make_optional(mkExprVal(*x.expr, fn, x.name.symbol + "_var_rhs")) : std::nullopt;
 
         stackVarPtrs[x.name.symbol] = {x.name.tpe, stackPtr};
 
@@ -763,7 +763,7 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
           if (rhs) {
             B.CreateStore(*rhs, stackPtr);
           } else
-            undefined(__FILE_NAME__, __LINE__, "var array with no expr?");
+            undefined(__FILE__, __LINE__, "var array with no expr?");
         } else if (holds<Type::Struct>(x.name.tpe)) {
           if (rhs) {
             B.CreateStore(*rhs, stackPtr);
@@ -883,7 +883,7 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
         if (whileCtx) {
           B.CreateBr(whileCtx->exit);
         } else {
-          undefined(__FILE_NAME__, __LINE__, "orphaned break!");
+          undefined(__FILE__, __LINE__, "orphaned break!");
         }
         return BlockKind::Normal;
       }, //
@@ -891,7 +891,7 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
         if (whileCtx) {
           B.CreateBr(whileCtx->test);
         } else {
-          undefined(__FILE_NAME__, __LINE__, "orphaned cont!");
+          undefined(__FILE__, __LINE__, "orphaned cont!");
         }
         return BlockKind::Normal;
       }, //
@@ -961,7 +961,7 @@ Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform(const std::u
       GlobalAS = 1;
       AllocaAS = 5;
       break;
-    case Target::SPIRV64: undefined(__FILE_NAME__, __LINE__); break;
+    case Target::SPIRV64: undefined(__FILE__, __LINE__); break;
   }
 
   auto fnTree = program.entry;
@@ -1002,7 +1002,7 @@ Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform(const std::u
                                  llvm::ValueAsMetadata::get(llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 1))}));
       break;
     case Target::AMDGCN: fn->setCallingConv(llvm::CallingConv::AMDGPU_KERNEL); break;
-    case Target::SPIRV64: undefined(__FILE_NAME__, __LINE__); break;
+    case Target::SPIRV64: undefined(__FILE__, __LINE__); break;
   }
 
   auto *entry = llvm::BasicBlock::Create(C, "entry", fn);

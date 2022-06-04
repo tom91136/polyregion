@@ -51,19 +51,19 @@ endif()
 set(FFI_EXEC_TRAMPOLINE_TABLE 0)
 
 # mimic layout of original buildsystem
-configure_file(include/ffi.h.in ${CMAKE_BINARY_DIR}/include/ffi.h)
-file(COPY ${FFI_CONFIG_FILE} DESTINATION ${CMAKE_BINARY_DIR})
+configure_file(include/ffi.h.in ${CMAKE_CURRENT_BINARY_DIR}/include/ffi.h)
+file(COPY ${FFI_CONFIG_FILE} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 
 if ("${TARGET}" STREQUAL "ARM_WIN64" OR "${TARGET}" STREQUAL "ARM64")
-    file(COPY src/aarch64/ffitarget.h DESTINATION ${CMAKE_BINARY_DIR}/include)
+    file(COPY src/aarch64/ffitarget.h DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/include)
 elseif ("${TARGET}" STREQUAL "ARM_WIN32" OR "${TARGET}" STREQUAL "ARM")
-    file(COPY src/arm/ffitarget.h DESTINATION ${CMAKE_BINARY_DIR}/include)
+    file(COPY src/arm/ffitarget.h DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/include)
 else()
-    file(COPY src/x86/ffitarget.h DESTINATION ${CMAKE_BINARY_DIR}/include)
+    file(COPY src/x86/ffitarget.h DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/include)
 endif()
 
-include_directories(${CMAKE_BINARY_DIR}/include)
-include_directories(${CMAKE_BINARY_DIR})
+include_directories(${CMAKE_CURRENT_BINARY_DIR}/include)
+include_directories(${CMAKE_CURRENT_BINARY_DIR})
 include_directories(include)
 
 add_definitions(-DFFI_BUILDING)
@@ -123,7 +123,7 @@ macro(add_assembly ASMFILE)
 
         execute_process(
                 COMMAND ${CMAKE_C_COMPILER} /nologo /EP /I. /Iinclude /I${CMAKE_CURRENT_SOURCE_DIR}/include "${ASMFILE_FULL}"
-                WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                 OUTPUT_FILE ${ARCH_ASM_NAME}.asm
                 RESULT_VARIABLE retcode
         )
@@ -138,7 +138,7 @@ macro(add_assembly ASMFILE)
         # which in turn causes MSBUILD to stop.
         execute_process(
                 COMMAND ${ARCH_ASSEMBLER} ${ARCH_ASM_NAME}.asm
-                WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
                 RESULT_VARIABLE retcode
         )
 
@@ -146,7 +146,7 @@ macro(add_assembly ASMFILE)
             message(FATAL_ERROR "Unable to compile assembly, exit code: '${retcode}'.")
         endif()
 
-        list(APPEND FFI_SOURCES ${CMAKE_BINARY_DIR}/${ARCH_ASM_NAME}.obj)
+        list(APPEND FFI_SOURCES ${CMAKE_CURRENT_BINARY_DIR}/${ARCH_ASM_NAME}.obj)
     else()
         list(APPEND FFI_SOURCES ${ASMFILE})
     endif()
@@ -223,7 +223,7 @@ install(EXPORT ${PROJECT_NAME}Targets
 
 if(NOT FFI_SKIP_HEADERS)
     install(FILES
-            ${CMAKE_BINARY_DIR}/include/ffi.h
-            ${CMAKE_BINARY_DIR}/include/ffitarget.h
+            ${CMAKE_CURRENT_BINARY_DIR}/include/ffi.h
+            ${CMAKE_CURRENT_BINARY_DIR}/include/ffitarget.h
             DESTINATION include)
 endif()

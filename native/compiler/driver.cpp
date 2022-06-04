@@ -35,8 +35,8 @@ int main(int argc, char *argv[]) {
 
   auto p = program(fn, {}, {});
   std::cout << repr(p) << std::endl;
-//  compiler::Options options{compiler::Target::Object_LLVM_AMDGCN, "gfx906"};
-    compiler::Options options{compiler::Target::Object_LLVM_NVPTX64, "sm_61"};
+  compiler::Options options{compiler::Target::Object_LLVM_AMDGCN, "gfx906"};
+//    compiler::Options options{compiler::Target::Object_LLVM_NVPTX64, "sm_61"};
   auto c = compiler::compile(p, options, compiler::Opt::O3);
   std::cout << c << std::endl;
 
@@ -48,17 +48,18 @@ int main(int argc, char *argv[]) {
   }
 
   auto simple =
-      program(function("twice", {"x"_(Int)}, Int)({ret(invoke(Fn2::Mul(), "x"_(Int), 2_(Int), Int))}), {}, {});
+      program(function("twice", {"x"_(Int)}, Int)({ret(invoke(Fn2::Add(), "x"_(Int), 100_(Int), Int))}), {}, {});
   std::cout << repr(simple) << std::endl;
-  auto c2 = compiler::compile(simple, {compiler::Target::Object_LLVM_x86_64, {}}, compiler::Opt::O3);
+  auto c2 = compiler::compile(simple, {compiler::Target::Object_LLVM_x86_64, {}}, compiler::Opt::O0);
   std::cout << c2 << std::endl;
   if (c2.binary) {
     runtime::object::RelocatableDevice d;
     auto str = std::string(c2.binary->begin(), c2.binary->end());
     d.loadModule("", str);
 
-    int a = 42;
-    int actual = 0;
+    int32_t a = 42;
+    int32_t actual = 0;
+    int32_t spill = 0;
     std::vector<runtime::TypedPointer> args = {{runtime::Type::Int32, &a}, {runtime::Type::Int32, &actual}};
     std::vector<runtime::Type> types(args.size());
     std::vector<void *> pointers(args.size());
@@ -69,7 +70,7 @@ int main(int argc, char *argv[]) {
 
     d.createQueue()->enqueueInvokeAsync("", "twice", types, pointers, {}, {});
 
-    std::cout << actual << "\n";
+    std::cout << actual  << " spill=" << spill << "\n";
   }
 
   std::cout << "Done!" << std::endl;

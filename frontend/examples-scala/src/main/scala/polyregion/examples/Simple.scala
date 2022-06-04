@@ -79,9 +79,9 @@ object Simple {
 
     type M = Config[Target.NVPTX64.SM61.type, Opt.O0]
 
-    val result = CUDA.devices(0).aot.task[Config[Target.NVPTX64.SM61.type, Opt.O0], Int](43 )
+    // val result = CUDA.devices(0).aot.task[Config[Target.NVPTX64.SM61.type, Opt.O0], Int](43 )
     // val result = OpenCL.devices(0).aot.task[Config[Target.OpenCL_C.type, Opt.O0], Int](42)
-    // val result = Host.aot.task[Config[Target.Host.type , Opt.O0], Int](   42)
+    val result = Host.aot.task[Config[Target.Host.type , Opt.O0], Int](   42)
     println("   R  =" + result)
 
     // val Const  = scala.compiletime.constValue[Target.X86.Znver.Arch]

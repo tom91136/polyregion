@@ -181,7 +181,8 @@ public final class Platform implements AutoCloseable {
       Loader.loadDirect(
           Paths.get(
               //
-              "/home/tom/polyregion/native/cmake-build-release-clang/bindings/jvm/libpolyregion-runtime-jvm.so"
+              // "/home/tom/polyregion/native/cmake-build-release-clang/bindings/jvm/libpolyregion-runtime-jvm.so"
+              "D:/polyregion/native/cmake-build-release-msvc/bindings/jvm/polyregion-runtime-jvm.dll"
               // "/home/tom/polyregion/native/cmake-build-release-clang/bindings/libjava-runtime.so"
               ),
           RESOURCE_DIR);

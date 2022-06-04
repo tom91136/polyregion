@@ -8,6 +8,9 @@
 const char *nulFileName = "NUL";
   #define CROSS_DUP(fd) _dup(fd)
   #define CROSS_DUP2(fd, newfd) _dup2(fd, newfd)
+  #define STDIN_FILENO 0
+  #define STDOUT_FILENO 1
+  #define STDERR_FILENO 2
 #else
   #include <unistd.h>
   #define CROSS_DUP(fd) dup(fd)

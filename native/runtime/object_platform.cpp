@@ -55,7 +55,7 @@ std::vector<Property> ObjectDevice::properties() {
   TRACE();
   return {};
 }
-uintptr_t ObjectDevice::malloc(size_t size, Access access) {
+uintptr_t ObjectDevice::malloc(size_t size, Access) {
   TRACE();
   return reinterpret_cast<uintptr_t>(std::malloc(size));
 }
@@ -142,11 +142,15 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
 
   if (auto sym = ld.getSymbol(fnName); !sym) {
     auto table = ld.getSymbolTable();
-    auto symbols = polyregion::mk_string2<llvm::StringRef, llvm::JITEvaluatedSymbol>(
-        table, [](auto &x) { return "[`" + x.first.str() + "`@" + polyregion::hex(x.second.getAddress()) + "]"; }, ",");
+
+    std::vector<std::string> symbols;
+    for (auto &[k, v] : table)
+      symbols.emplace_back("[`" + k.str() + "`@" + polyregion::hex(v.getAddress()) + "]");
     throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Symbol `" + std::string(fnName) +
                            "` not found in the given object, available symbols (" + std::to_string(table.size()) +
-                           ") = " + symbols);
+                           ") = " +
+                           polyregion::mk_string<std::string>(
+                               symbols, [](auto &x) { return x; }, ","));
   } else {
     if (ld.finalizeWithMemoryManagerLocking(); ld.hasError()) {
       throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Symbol `" + std::string(symbol) +
@@ -173,23 +177,7 @@ std::vector<std::unique_ptr<Device>> SharedPlatform::enumerate() {
   xs[0] = std::make_unique<RelocatableDevice>();
   return xs;
 }
-#ifdef _WIN32
-  #define WIN32_LEAN_AND_MEAN
-  #define VC_EXTRALEAN
-  #include <windows.h>
 
-  #define dynamic_library_open(path) LoadLibraryA(path)
-  #define dynamic_library_error() std::system_category().message(::GetLastError())
-  #define dynamic_library_close(lib) FreeLibrary(lib)
-  #define dynamic_library_find(lib, symbol) GetProcAddress(lib, symbol)
-#else
-  #include <dlfcn.h>
-//
-  #define dynamic_library_open(path) dlopen(path, RTLD_NOW)
-  #define dynamic_library_error() dlerror()
-  #define dynamic_library_close(lib) dlclose(lib)
-  #define dynamic_library_find(lib, symbol) dlsym(lib, symbol)
-#endif
 SharedDevice::~SharedDevice() {
   TRACE();
   for (auto &[_, m] : modules) {
