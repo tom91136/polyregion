@@ -23,8 +23,8 @@ configure)
   CC="$(which clang)"
 
   case "$OSTYPE" in
-  darwin*) echo LINKER="$(which ld)" ;; # no LLD on macOS for now
-  *) echo LINKER="$(which ld.lld)" ;;
+  darwin*) LINKER="$(which ld)" ;; # no LLD on macOS for now
+  *) LINKER="$(which ld.lld)" ;;
   esac
 
   cmake "-B$BUILD" -H. \
