@@ -21,7 +21,12 @@ case "$ACTION" in
 configure)
   CXX="$(which clang++)"
   CC="$(which clang)"
-  LINKER="$(which ld.lld)"
+
+  case "$OSTYPE" in
+  darwin*) echo LINKER="$(which ld)" ;; # no LLD on macOS for now
+  *) echo LINKER="$(which ld.lld)" ;;
+  esac
+
   cmake "-B$BUILD" -H. \
     -DCMAKE_C_COMPILER="${CC}" \
     -DCMAKE_CXX_COMPILER="${CXX}" \
