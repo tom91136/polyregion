@@ -31,7 +31,7 @@ configure)
   ;;
 build)
   TARGET=${2:?}
-  cmake --build "$BUILD" --target "$TARGET" -j "$(nproc)"
+  cmake --build "$BUILD" --target "$TARGET"
   ;;
 *)
   echo "Unknown action $ACTION"
