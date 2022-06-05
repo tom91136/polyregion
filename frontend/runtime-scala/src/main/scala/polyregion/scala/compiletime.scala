@@ -249,17 +249,17 @@ object compiletime {
   ): Expr[A] = {
     implicit val Q = Quoted(q)
 
- 
-
     val result = for {
-      configs <- reifyConfigFromTpe[C]()
+      configs                <- reifyConfigFromTpe[C]()
       (captures, prog0, log) <- Compiler.compileExpr(f)
       prog = prog0.copy(entry = prog0.entry.copy(name = p.Sym("lambda")))
-      _ = println(log.render)
-      _ =     println("Configs = "+configs)
+      _    = println(log.render)
+      _    = println("Configs = " + configs)
       serialisedAst <- Try(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, prog))).toEither
-       
-      c <- Try((cp.Compiler.compile(serialisedAst, true, polyregion.jvm.compiler.Options.of(configs(0).target, configs(0).arch), configs(0).opt.value))).toEither
+      compiler = cp.Compiler.create()
+      c <- Try(
+        (compiler.compile(serialisedAst, true, cp.Options.of(configs(0).target, configs(0).arch), configs(0).opt.value))
+      ).toEither
     } yield {
 
       println(s"Messages=\n  ${c.messages}")
@@ -285,11 +285,11 @@ object compiletime {
                   ${ Expr(byteOffset) },
                   $queue.registerAndInvalidateIfAbsent[ts](
                     ${ ref.asExprOf[ts] },
-                    xs => ${ Expr(Pickler.sizeOf(arr.component, Q.TypeRepr.of[t])) } * ${ size('xs) },
-                    (xs, bb) => ${ Pickler.putAll('bb, arr, Q.TypeRepr.of[ts], 'xs) },
+                    xs => ${ Expr(Pickler.sizeOf(compiler, arr.component, Q.TypeRepr.of[t])) } * ${ size('xs) },
+                    (xs, bb) => ${ Pickler.putAll(compiler, 'bb, arr, Q.TypeRepr.of[ts], 'xs) },
                     ${
                       if (!mutable) null
-                      else '{ (bb, xs) => ${ Pickler.getAllMutable('bb, arr, Q.TypeRepr.of[ts], 'xs) } }
+                      else '{ (bb, xs) => ${ Pickler.getAllMutable(compiler, 'bb, arr, Q.TypeRepr.of[ts], 'xs) } }
                     },
                     null
                   )
@@ -343,11 +343,10 @@ object compiletime {
           fnTpeOrdinals,
           fnValues.array,
           rt.Policy(rt.Dim3(1, 1, 1)),
-          if($queue.device.sharedAddressSpace) $cb else null
+          if ($queue.device.sharedAddressSpace) $cb else null
         )
 
-        
-        $queue.syncAll(if(!$queue.device.sharedAddressSpace) $cb else null)
+        $queue.syncAll(if (! $queue.device.sharedAddressSpace) $cb else null)
 
         // $queue.enqueueDeviceToHostAsync(p, ???, 0, null)
 
@@ -382,6 +381,7 @@ object compiletime {
       // println()
 
       println("Code=" + code.show)
+      compiler.close()
       code
     }
 

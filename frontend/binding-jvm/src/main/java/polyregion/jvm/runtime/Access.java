@@ -1,12 +1,12 @@
 package polyregion.jvm.runtime;
 
 import polyregion.jvm.ByteEnum;
-import polyregion.jvm.compiler.Target;
 
+@SuppressWarnings("unused")
 public enum Access implements ByteEnum {
-  RW(Platform.ACCESS_RW),
-  RO(Platform.ACCESS_RO),
-  WO(Platform.ACCESS_WO);
+  RW(Platforms.ACCESS_RW),
+  RO(Platforms.ACCESS_RO),
+  WO(Platforms.ACCESS_WO);
 
   public static final Access[] VALUES = values();
 

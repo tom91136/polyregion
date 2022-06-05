@@ -15,6 +15,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.ToIntFunction;
 
+import polyregion.jvm.Natives;
+
 @SuppressWarnings("unused")
 public final class Device implements AutoCloseable {
 
@@ -59,7 +61,7 @@ public final class Device implements AutoCloseable {
 
         encode.accept(Objects.requireNonNull(object), buffer.rewind());
         if (device.sharedAddressSpace) {
-          devicePtr = Platform.pointerOfDirectBuffer(buffer);
+          devicePtr = Natives.pointerOfDirectBuffer(buffer);
           if (cb != null) cb.run();
         } else {
           enqueueHostToDeviceAsync(buffer, devicePtr, buffer.capacity(), cb);

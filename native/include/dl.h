@@ -17,10 +17,9 @@
   #ifdef _AIX
     #define polyregion_dl_open(path) dlopen(path, RTLD_MEMBER | RTLD_LAZY | RTLD_GLOBAL)
   #else
-    #define polyregion_dl_open(path) dlopen(path, RTLD_LAZY | RTLD_GLOBAL)
+    #define polyregion_dl_open(path) dlopen(path, RTLD_LAZY)
   #endif
 
-  #define polyregion_dl_open(path) dlopen(path, RTLD_LAZY | RTLD_GLOBAL)
   #define polyregion_dl_error() dlerror()
   #define polyregion_dl_close(lib) dlclose(lib)
   #define polyregion_dl_find(lib, symbol) dlsym(lib, symbol)

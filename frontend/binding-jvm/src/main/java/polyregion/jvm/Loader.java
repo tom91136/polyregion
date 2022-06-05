@@ -1,25 +1,35 @@
 package polyregion.jvm;
 
 import java.io.IOException;
-import java.io.InputStream;
+import java.net.URL;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
-import java.util.Comparator;
-import java.util.concurrent.atomic.AtomicBoolean;
 
-public class Loader {
+@SuppressWarnings("unused")
+public final class Loader {
 
   private Loader() {
     throw new AssertionError();
   }
 
-  public static final Path HOME_DIR = Paths.get(System.getProperty("user.home")).toAbsolutePath();
-  private static final int LOAD_DIRECT_MAX_LINK_ATTEMPT = 10;
+  static final Path HOME_DIR = Paths.get(System.getProperty("user.home")).toAbsolutePath();
+  static final Path RESOURCE_DIR = HOME_DIR.resolve(".polyregion");
+
+  public static void touch() {
+    try {
+      Class.forName("polyregion.jvm.Loader");
+    } catch (ClassNotFoundException e) {
+      throw new AssertionError(e);
+    }
+  }
 
   enum UnlinkOnVmExitHook {
     INSTANCE;
@@ -43,12 +53,8 @@ public class Loader {
     }
 
     {
-      java.lang.Runtime.getRuntime()
-          .addShutdownHook(
-              new Thread(
-                  () -> {
-                    toDelete.forEach(this::deleteAllSilently);
-                  }));
+      Runtime.getRuntime()
+          .addShutdownHook(new Thread(() -> toDelete.forEach(this::deleteAllSilently)));
     }
 
     void mark(Path path) {
@@ -56,7 +62,8 @@ public class Loader {
     }
   }
 
-  // Taken from https://github.com/bytedeco/javacpp/blob/3d0256c2cea4e931b655b2dc90c9f5f0d2100eeb/src/main/java/org/bytedeco/javacpp/Loader.java#L97-L136
+  // Taken from
+  // https://github.com/bytedeco/javacpp/blob/3d0256c2cea4e931b655b2dc90c9f5f0d2100eeb/src/main/java/org/bytedeco/javacpp/Loader.java#L97-L136
   static String resolvePlatform() {
     String jvmName = System.getProperty("java.vm.name", "").toLowerCase();
     String osName = System.getProperty("os.name", "").toLowerCase();
@@ -96,58 +103,114 @@ public class Loader {
     return osName + "-" + osArch;
   }
 
-  public static void loadResource(String resource, Path destination) throws IOException {
-    InputStream stream = ClassLoader.getSystemResourceAsStream(resource);
-    Files.copy(stream, destination);
+  public static Optional<Path> searchAndCopyResourceIfNeeded(String filename, Path pwd) {
+
+    String platform = resolvePlatform();
+
+    // TODO remove for prod
+    Path[] paths = {
+      Paths.get("../native/build-" + platform + "/bindings/jvm/"),
+      Paths.get("../native/cmake-build-release-clang/bindings/jvm/"),
+      Paths.get("../native/cmake-build-debug-clang/bindings/jvm/"),
+      Paths.get("../../native/build-" + platform + "/bindings/jvm/"),
+      Paths.get("../../native/cmake-build-release-clang/bindings/jvm/"),
+      Paths.get("../../native/cmake-build-debug-clang/bindings/jvm/"),
+    };
+
+    String[] resourcePaths = {
+      platform + "/", "",
+    };
+
+    for (Path p : paths) {
+      Path name = pwd.resolve(p).resolve(filename);
+      if (Files.isRegularFile(name)) {
+        return Optional.of(name.normalize().toAbsolutePath());
+      }
+    }
+    try {
+      for (String resourcePath : resourcePaths) {
+        String resource = resourcePath + filename;
+        URL url = ClassLoader.getSystemResource(resource);
+        if (url != null) {
+          Path destination =
+              Files.createDirectories(RESOURCE_DIR).resolve(filename).normalize().toAbsolutePath();
+          Files.copy(url.openStream(), destination, StandardCopyOption.REPLACE_EXISTING);
+          return Optional.of(destination);
+        }
+      }
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+    return Optional.empty();
   }
 
-  public static void loadDirect(Path path, Path workDir) {
-    System.out.println(">>" + Loader.class);
-    try {
-      Files.createDirectories(workDir);
-    } catch (IOException ioe) {
-      throw new RuntimeException(
-          "Cannot create work directory " + workDir + " to extract native libraries", ioe);
-    }
-
+  // This is needed for incremental *compile* environments like SBT where VM don't exit after
+  // compilation but instead loads all the classes again with a new ClassLoader.
+  // When a new ClassLoader is used, we get a UnsatisfiedLinkError if old ClassLoader has not been
+  // GC'ed.
+  static Path loadLibrary(Path path) {
+    // XXX We need to suggest the VM to GC here because it increases the chance JNI_OnUnload
+    // gets called.
+    System.gc();
     Path absolute = path.toAbsolutePath();
-    int attempt = 0;
-
     Path libPath = absolute;
-    while (attempt < LOAD_DIRECT_MAX_LINK_ATTEMPT) {
+    int attempt = 0;
+    while (attempt < 10) {
       try {
         System.out.println("load native:" + libPath);
         System.load(libPath.toString());
         System.out.println("load native OK");
-        return;
+        return libPath;
       } catch (UnsatisfiedLinkError e) {
-        System.out.println(e.getMessage());
-        if (e.getMessage().endsWith("already loaded in another classloader")) {
-          Path link =
-              workDir.resolve(
-                  absolute.getFileName()
-                      + "."
-                      + System.currentTimeMillis()
-                      + ".hardlink."
-                      + attempt);
+        if (!e.getMessage().endsWith("already loaded in another classloader")) throw e;
+
+        Path link =
+            RESOURCE_DIR.resolve(
+                absolute.getFileName() + "." + System.currentTimeMillis() + ".hardlink." + attempt);
+        try {
           try {
-            link = Files.createLink(link, absolute);
-          } catch (FileAlreadyExistsException ignored) {
-            attempt++;
-            continue;
-          } catch (IOException ioe) {
-            throw new RuntimeException("Cannot load native library " + path, ioe);
+            // This could fail if link and absolute is on different FS/drives.
+            Files.createLink(link, absolute);
+          } catch (IOException ignored) {
+            // If it does fail, we just create a copy instead.
+            Files.copy(absolute, link, StandardCopyOption.REPLACE_EXISTING);
           }
-          UnlinkOnVmExitHook.INSTANCE.mark(link);
-          System.out.println("creating symlink: " + link);
-          libPath = link;
-        } else {
-          throw e;
+        } catch (FileAlreadyExistsException ignored) {
+          attempt++;
+          continue;
+        } catch (IOException ioe) {
+          throw new RuntimeException(
+              "Cannot load native library even with hardlink workaround " + path, ioe);
         }
+        UnlinkOnVmExitHook.INSTANCE.mark(link);
+        System.out.println("Created symlink: " + link);
+        libPath = link;
         attempt++;
       }
     }
     throw new RuntimeException(
         "Unable to load native library " + path + " after " + attempt + " attempts");
+  }
+
+  static {
+    // Load the basic dl native library first so that we can load and unload other native libraries.
+    String name = "libpolyregion-shim-jvm.so";
+    Path pwd = Paths.get(".").toAbsolutePath();
+    Path path =
+        searchAndCopyResourceIfNeeded(name, pwd)
+            .orElseThrow(
+                () ->
+                    new RuntimeException(
+                        "Cannot load library "
+                            + name
+                            + ", search paths exhausted, working directory is "
+                            + pwd));
+
+    Path actualPath = loadLibrary(path);
+    if (path != actualPath) {
+      Natives.registerFilesToDropOnUnload0(actualPath.toFile());
+    }
+
+    System.out.println(name + " loaded (" + path + ")");
   }
 }

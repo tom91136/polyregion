@@ -5,6 +5,7 @@ import polyregion.jvm.{runtime => rt}
 import polyregion.jvm.{compiler => cp}
 import scala.compiletime.constValue
 import scala.reflect.ClassTag
+import polyregion.jvm.Loader
 
 type Suspend[F[_]] = [A] => ((Either[Throwable, A] => Unit) => Unit) => F[A]
 
@@ -242,10 +243,16 @@ object Config {
   def apply[T <: Target](target: T*): Config[T, Opt]                 = Config(Opt.O3, target: _*)
 }
 
-inline def liftCUDA[F[_]](lift: Suspend[F]): Platform[F, Target.NVPTX64]    = Platform(rt.Platform.CUDA, lift)
-inline def liftHIP[F[_]](lift: Suspend[F]): Platform[F, Target.AMDGCN]      = Platform(rt.Platform.HIP, lift)
-inline def liftOpenCL[F[_]](lift: Suspend[F]): Platform[F, Target.OpenCL_C] = Platform(rt.Platform.OpenCL, lift)
-inline def liftHost[F[_]](lift: Suspend[F]): Device[F, Target.CPU] = Device(rt.Platform.Relocatable.devices()(0), lift)
+private[scala] object Platforms {
+  val platforms = rt.Platforms.create()
+  sys.addShutdownHook(platforms.close())
+  export platforms.*
+}
+
+inline def liftCUDA[F[_]](lift: Suspend[F]): Platform[F, Target.NVPTX64]    = Platform(Platforms.CUDA(), lift)
+inline def liftHIP[F[_]](lift: Suspend[F]): Platform[F, Target.AMDGCN]      = Platform(Platforms.HIP(), lift)
+inline def liftOpenCL[F[_]](lift: Suspend[F]): Platform[F, Target.OpenCL_C] = Platform(Platforms.OpenCL(), lift)
+inline def liftHost[F[_]](lift: Suspend[F]): Device[F, Target.CPU] = Device(Platforms.Relocatable().devices()(0), lift)
 
 object blocking {
 

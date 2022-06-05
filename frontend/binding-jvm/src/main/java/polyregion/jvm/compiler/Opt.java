@@ -2,6 +2,7 @@ package polyregion.jvm.compiler;
 
 import polyregion.jvm.ByteEnum;
 
+@SuppressWarnings("unused")
 public enum Opt implements ByteEnum {
   O0(Compiler.Opt_O0),
   O1(Compiler.Opt_O1),

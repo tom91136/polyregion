@@ -68,11 +68,7 @@ object Simple {
 
     println(xs)
     println(cow.toList)
-
-    val rel = polyregion.jvm.runtime.Platform.Relocatable()
-    val dev = rel.devices()(0)
-
-    val q = dev.createQueue()
+ 
 
     import polyregion.scala.blocking.*
     import polyregion.scala.*

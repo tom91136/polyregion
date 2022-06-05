@@ -282,4 +282,23 @@ public:
   Instance wrap (JNIEnv *env, jobject instance);
   
 };
+struct File {
+  struct Instance {
+    const File &meta;
+    jobject instance;
+    Instance(const File &meta, jobject instance);
+    template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
+    jboolean delete_(JNIEnv *env) const;
+  };
+  jclass clazz;
+  jmethodID delete_ZMethod;
+private:
+  explicit File(JNIEnv *env);
+  static thread_local std::unique_ptr<File> cached;
+public:
+  static File& of(JNIEnv *env);
+  static void drop(JNIEnv *env);
+  Instance wrap (JNIEnv *env, jobject instance);
+  
+};
 }// polyregion::generated

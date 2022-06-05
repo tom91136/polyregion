@@ -2,6 +2,7 @@ package polyregion.jvm.runtime;
 
 import java.util.Objects;
 
+@SuppressWarnings("unused")
 public final class Dim3 {
   public final long x, y, z;
 

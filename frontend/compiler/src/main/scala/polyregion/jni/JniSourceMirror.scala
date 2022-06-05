@@ -1,8 +1,5 @@
 package polyregion.jni
 
-import polyregion.jvm.compiler.Layout.Member
-import polyregion.jvm.runtime.Platform
-
 import java.lang.reflect.{Constructor, Field, Method, Modifier}
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
@@ -71,6 +68,13 @@ object JniSourceMirror {
     case _                                       => "Object" // even string needs a upcast
   }
 
+  def safeCppNames(name: String): String = name match {
+    case x @ ("delete" | "new") => s"${x}_" // TODO add more as they show up
+    case x                      => x
+  }
+
+  def jniClassName(c: Class[_]): String = c.getName.replace('.', '/')
+
   private final val StringClass                  = classOf[String].getName
   private final val ObjectClassMethodsSignatures = classOf[AnyRef].getDeclaredMethods.map(m => signature(m)).toSet
 
@@ -113,7 +117,7 @@ object JniSourceMirror {
       s"""static jfieldID $name = env->GetFieldID(clazz, "$name", "${descriptor(tpe)}");"""
     }
 
-    val jniName = cls.getName.replace('.', '/')
+    val jniName = jniClassName(cls)
     val clsName = cls.getSimpleName
 
     val metaStructMembers =
@@ -144,7 +148,7 @@ object JniSourceMirror {
       publicMethods
         .filter(m => Modifier.isStatic(m.getModifiers))
         .map { m =>
-          val name = m.getName
+          val name = safeCppNames(m.getName)
           val args =
             "JNIEnv *env" :: m.getParameters
               .map(p => s"${jniTypeName(p.getType)} ${p.getName}")
@@ -212,7 +216,7 @@ object JniSourceMirror {
       publicMethods
         .filterNot(m => Modifier.isStatic(m.getModifiers))
         .map { m =>
-          val name = m.getName
+          val name = safeCppNames(m.getName)
           val tpe  = m.getReturnType
           val args =
             "JNIEnv *env" :: m.getParameters
@@ -291,6 +295,63 @@ object JniSourceMirror {
     structPrototype -> structImpl
   }
 
+  def generateRegisterNative(cls: Class[_]) = {
+
+    val nativeMethods = cls.getDeclaredMethods.filter(m => Modifier.isNative(m.getModifiers))
+
+    val registerEntries = nativeMethods.map(m =>
+      s"""{(char *)"${m.getName}", (char *)"${descriptor(m)}", (void *)&${safeCppNames(m.getName)}}"""
+    )
+
+    val constants = cls.getDeclaredFields
+      .filter(f => Modifier.isStatic(f.getModifiers) && Modifier.isFinal(f.getModifiers))
+      .filter(_.getType.isPrimitive)
+      .map { f =>
+        f.setAccessible(true)
+        val rhs = f.getType match {
+          case x if x.equals(java.lang.Double.TYPE)    => s"${f.getDouble(null)}"
+          case x if x.equals(java.lang.Float.TYPE)     => s"${f.getFloat(null)}"
+          case x if x.equals(java.lang.Long.TYPE)      => s"${f.getLong(null)}"
+          case x if x.equals(java.lang.Integer.TYPE)   => s"${f.getInt(null)}"
+          case x if x.equals(java.lang.Short.TYPE)     => s"${f.getShort(null)}"
+          case x if x.equals(java.lang.Character.TYPE) => s"'${f.getChar(null)}'"
+          case x if x.equals(java.lang.Boolean.TYPE)   => if (f.getBoolean(null)) "true" else "false"
+          case x if x.equals(java.lang.Byte.TYPE)      => s"${f.getByte(null)}"
+          case _                                       => ???
+        }
+        s"static constexpr ${jniTypeName(f.getType)} ${safeCppNames(f.getName)} = $rhs"
+      }
+
+    val prototypes = nativeMethods.map { m =>
+      val self = if (Modifier.isStatic(m.getModifiers)) "jclass" else "jobject"
+      ("JNIEnv *env" :: self :: m.getParameters.map(p => s"${jniTypeName(p.getType)} ${p.getName}").toList)
+        .mkString(s"${jniTypeName(m.getReturnType)} ${safeCppNames(m.getName)}(", ", ", ")")
+    }
+
+    val jniName = jniClassName(cls)
+    val clsName = cls.getSimpleName
+
+    val header =
+      s"""#pragma once
+		 |#include <jni.h>
+         |namespace polyregion::generated::registry::$clsName {
+		 |${constants.map(c => s"$c;").mkString("\n")}
+         |${prototypes.map(p => s"[[maybe_unused]] $p;").mkString("\n")}
+		 |
+         |static void registerMethods(JNIEnv *env) {
+         |  auto clazz = env->FindClass("$jniName");
+         |  static JNINativeMethod methods[] = {
+         |${registerEntries.map("      " + _).mkString(",\n")}};
+         |  env->RegisterNatives(clazz, methods, ${registerEntries.length});
+         |}
+		 |
+		 |static void unregisterMethods(JNIEnv *env) { env->UnregisterNatives(env->FindClass("$jniName")); }
+         |} // namespace polyregion::generated::registry::$clsName""".stripMargin
+
+    clsName -> header
+
+  }
+
   @main def main(): Unit = {
 
     println("Generating C++ mirror for JNI...")
@@ -308,14 +369,15 @@ object JniSourceMirror {
         (classOf[polyregion.jvm.runtime.Policy], _ => true, _ => true, _ => false),
         (classOf[polyregion.jvm.runtime.Device.Queue], _ => false, _ => true, _ => false),
         (classOf[polyregion.jvm.runtime.Device], _ => false, _ => true, _ => false),
-        (classOf[Platform], _ => false, _ => true, _ => false),
+        (classOf[polyregion.jvm.runtime.Platform], _ => false, _ => true, _ => false),
         (classOf[polyregion.jvm.compiler.Event], _ => false, _ => true, _ => false),
         (classOf[polyregion.jvm.compiler.Layout], _ => false, _ => true, _ => false),
-        (classOf[Member], _ => false, _ => true, _ => false),
+        (classOf[polyregion.jvm.compiler.Layout.Member], _ => false, _ => true, _ => false),
         (classOf[polyregion.jvm.compiler.Options], _ => true, _ => true, _ => false),
         (classOf[polyregion.jvm.compiler.Compilation], _ => false, _ => true, _ => false),
         (classOf[java.lang.String], _ => false, _ => false, _ => false),
-        (classOf[java.lang.Runnable], _ => true, _ => true, _ => true)
+        (classOf[java.lang.Runnable], _ => true, _ => true, _ => true),
+        (classOf[java.io.File], _ => false, _ => false, m => m.getName == "delete")
       )
 
     val knownClasses: Set[String] = pending.map(_._1.getName).toSet
@@ -354,6 +416,18 @@ object JniSourceMirror {
 
     overwrite(target.resolve("mirror.h"))(header)
     overwrite(target.resolve("mirror.cpp"))(impl)
+
+    val registries = List(
+      classOf[polyregion.jvm.compiler.Compiler],
+      classOf[polyregion.jvm.runtime.Platforms],
+      classOf[polyregion.jvm.runtime.Platform],
+      classOf[polyregion.jvm.Natives]
+    )
+
+    registries.foreach { r =>
+      val (name, header) = generateRegisterNative(r)
+      overwrite(target.resolve(s"${name.toLowerCase}.h"))(header)
+    }
 
     println("Done")
     ()

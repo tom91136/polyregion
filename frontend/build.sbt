@@ -56,7 +56,6 @@ lazy val `native-runtime-x86` = project.settings(
 lazy val `binding-jvm` = project.settings(
   commonSettings,
   name             := "binding-jvm",
-  javah / target   := bindingsDir / "generated",
   autoScalaLibrary := false
 )
 

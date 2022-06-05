@@ -15,8 +15,10 @@ add_executable(runtime-tests test/test.cpp test/test-main.cpp)
 add_executable(runtime-drv driver.cpp)
 #add_library(runtime-dylib SHARED polyregion_runtime.cpp)
 
+target_compile_definitions(runtime-lib PRIVATE ${libffi_DEFINITIONS})
 target_include_directories(runtime-lib PUBLIC ../include
-        ${LIBFFI_HEADER_PATH}
+        ${libffi_INCLUDE_DIRS}
+        ${LLVM_INCLUDE_DIRS}
         thirdparty/
         thirdparty/clew/include
         thirdparty/hipew/include
@@ -40,6 +42,7 @@ message(STATUS "[runtime] Adding LLVM libs = ${LLVM_LIBS}")
 if(WIN32)
     set(WINDOWS_LIBS Version) # we need Version.lib for stuff like GetFileVersionInfoSizeA
 endif()
+
 
 target_link_libraries(runtime-lib PRIVATE
         ${LLVM_LIBS}

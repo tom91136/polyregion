@@ -2,6 +2,7 @@ package polyregion.jvm.runtime;
 
 import java.util.Objects;
 
+@SuppressWarnings("unused")
 public final class Property {
   public final String key;
   public final String value;

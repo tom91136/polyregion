@@ -1,13 +1,14 @@
 package polyregion.jvm.compiler;
 
-import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import polyregion.jvm.Loader;
+import polyregion.jvm.NativeLibrary;
 
-public final class Compiler {
+@SuppressWarnings("unused")
+public final class Compiler implements AutoCloseable {
 
   static final byte //
       Opt_O0 = 10,
@@ -32,9 +33,31 @@ public final class Compiler {
       Target_Source_C_C11 = 30,
       Target_Source_C_OpenCL1_1 = 31;
 
-  public static native String hostTriplet();
+  private static native String hostTriplet0();
 
-  static native byte hostTarget0();
+  private static native byte hostTarget0();
+
+  private static native Compilation compile0(
+      byte[] function, boolean emitAssembly, Options options, byte opt);
+
+  private static native Layout layoutOf0(byte[] structDef, Options options);
+
+  private final NativeLibrary library;
+
+  private Compiler(NativeLibrary library) {
+    this.library = Objects.requireNonNull(library);
+  }
+
+  public static Compiler create() {
+    Loader.touch();
+    String name = "libpolyregion-compiler-jvm.so";
+    return new Compiler(
+        NativeLibrary.load(
+            Loader.searchAndCopyResourceIfNeeded(name, Paths.get("."))
+                .orElseThrow(() -> new RuntimeException("Cannot find library: " + name))
+                .toAbsolutePath()
+                .toString()));
+  }
 
   private static byte cachedTarget = 0;
 
@@ -45,34 +68,20 @@ public final class Compiler {
     throw new AssertionError("Target enum not implemented in Java:" + cachedTarget);
   }
 
-  public static native Compilation compile(
-      byte[] function, boolean emitAssembly, Options options, byte opt);
-
-  public static native Layout layoutOf(byte[] structDef, Options options);
-
-  private static AtomicBoolean loaded = new AtomicBoolean();
-
-  private static final Path RESOURCE_DIR = Loader.HOME_DIR.resolve(".polyregion");
-
-  static {
-    if (!Boolean.getBoolean("polyregion.compiler.noautoload")) {
-      load();
-    }
+  public String hostTriplet() {
+    return hostTriplet0();
   }
 
-  public static void load() {
-    if (!loaded.getAndSet(true)) {
-      //			System.setProperty("ASAN_OPTIONS", "verify_asan_link_order=0,verbosity=2");
-      //
-      //
-      //	Loader.loadDirect(Paths.get("/usr/lib/llvm-12/lib/clang/12.0.0/lib/linux/libclang_rt.asan-x86_64.so"), RESOURCE_DIR);
-      Loader.loadDirect(
-          Paths.get(
-              // "/home/tom/polyregion/native/cmake-build-debug-clang/bindings/jvm/libpolyregion-compiler-jvm.so"
-              "D:/polyregion/native/cmake-build-release-msvc/bindings/jvm/polyregion-compiler-jvm.dll"
-              // "/home/tom/polyregion/native/cmake-build-release-clang/bindings/libjava-compiler.so"
-              ),
-          RESOURCE_DIR);
-    }
+  public Compilation compile(byte[] function, boolean emitAssembly, Options options, byte opt) {
+    return compile0(function, emitAssembly, options, opt);
+  }
+
+  public Layout layoutOf(byte[] structDef, Options options) {
+    return layoutOf0(structDef, options);
+  }
+
+  @Override
+  public void close() {
+    library.close();
   }
 }

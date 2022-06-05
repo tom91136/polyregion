@@ -1,6 +1,7 @@
 package polyregion.examples
 
 import java.nio.{Buffer, ByteBuffer, ByteOrder}
+import polyregion.jvm.Natives
 
 object CheckApi {
 
@@ -96,9 +97,9 @@ object CheckApi {
 
     import polyregion.jvm.runtime.*
 
-    Platform.load()
+    val p = Platforms.create()
 
-    val rs = Array(Platform.CUDA() /*, Runtime.OpenCL(), Runtime.CUDA() */ )
+    val rs = Array(p.CUDA() /*, Runtime.OpenCL(), Runtime.CUDA() */ )
 
     rs.foreach { r =>
       println(r)
@@ -125,7 +126,7 @@ object CheckApi {
         val data = ByteBuffer.allocateDirect(java.lang.Integer.BYTES * 4).order(ByteOrder.nativeOrder())
         (data.putInt(7).putInt(7).putInt(7).putInt(7): Buffer).position(0)
 
-        val ptr = polyregion.jvm.runtime.Platform.pointerOfDirectBuffer(data)
+        val ptr = Natives.pointerOfDirectBuffer(data)
 
         val q0 = d0.createQueue();
 

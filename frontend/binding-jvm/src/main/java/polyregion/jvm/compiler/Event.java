@@ -1,10 +1,10 @@
 package polyregion.jvm.compiler;
 
-import java.time.Duration;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
+@SuppressWarnings("unused")
 public final class Event {
 
   public final long epochMillis, elapsedNanos;

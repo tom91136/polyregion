@@ -304,3 +304,22 @@ void Runnable::drop(JNIEnv *env){
 Runnable::Instance Runnable::wrap(JNIEnv *env, jobject instance) { return {*this, instance}; }
 
 
+File::Instance::Instance(const File &meta, jobject instance) : meta(meta), instance(instance) {}
+jboolean File::Instance::delete_(JNIEnv *env) const { return env->CallBooleanMethod(instance, meta.delete_ZMethod); }
+File::File(JNIEnv *env)
+    : clazz(reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("java/io/File")))),
+      delete_ZMethod(env->GetMethodID(clazz, "delete", "()Z")) { };
+thread_local std::unique_ptr<File> File::cached = {};
+File& File::of(JNIEnv *env) {
+  if(!cached) cached = std::unique_ptr<File>(new File(env));
+  return *cached;
+}
+void File::drop(JNIEnv *env){
+  if(cached) {
+    env->DeleteGlobalRef(cached->clazz);
+    cached.reset();
+  }
+}
+File::Instance File::wrap(JNIEnv *env, jobject instance) { return {*this, instance}; }
+
+

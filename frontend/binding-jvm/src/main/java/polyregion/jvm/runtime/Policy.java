@@ -3,6 +3,7 @@ package polyregion.jvm.runtime;
 import java.util.Objects;
 import java.util.Optional;
 
+@SuppressWarnings("unused")
 public final class Policy {
   public final Dim3 global;
   final Dim3 local;

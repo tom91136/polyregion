@@ -1,10 +1,10 @@
 package polyregion.jvm.runtime;
 
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.Objects;
 import java.util.function.Consumer;
 
+@SuppressWarnings("unused")
 public final class Arg<T> {
   public final Type type;
   public final T value;

@@ -1,15 +1,11 @@
 package polyregion.jvm.runtime;
 
-import java.nio.Buffer;
 import java.nio.ByteBuffer;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicBoolean;
 
-import polyregion.jvm.Loader;
 import polyregion.jvm.runtime.Device.Queue;
 
+@SuppressWarnings("unused")
 public final class Platform implements AutoCloseable {
 
   final long nativePeer;
@@ -30,71 +26,13 @@ public final class Platform implements AutoCloseable {
 
   @Override
   public void close() {
-    Platform.deleteRuntimePeer0(nativePeer);
+    Platform.deletePlatformPeer0(nativePeer);
   }
 
   @Override
   public String toString() {
     return "Runtime{" + "nativePeer=" + nativePeer + ", name='" + name + '\'' + '}';
   }
-
-  public static Platform CUDA() {
-    return CUDA0();
-  }
-
-  public static Platform HIP() {
-    return HIP0();
-  }
-
-  public static Platform OpenCL() {
-    return OpenCL0();
-  }
-
-  public static Platform Relocatable() {
-    return Relocatable0();
-  }
-
-  public static Platform Dynamic() {
-    return Dynamic0();
-  }
-
-  public static long[] pointerOfDirectBuffers(Buffer[] buffers) {
-    return pointerOfDirectBuffers0(buffers);
-  }
-
-  public static long pointerOfDirectBuffer(Buffer buffers) {
-    return pointerOfDirectBuffer0(buffers);
-  }
-
-  static final byte //
-      TYPE_VOID = 1,
-      TYPE_BOOL = 2,
-      TYPE_BYTE = 3,
-      TYPE_CHAR = 4,
-      TYPE_SHORT = 5,
-      TYPE_INT = 6,
-      TYPE_LONG = 7,
-      TYPE_FLOAT = 8,
-      TYPE_DOUBLE = 9,
-      TYPE_PTR = 10;
-  static final byte //
-      ACCESS_RW = 1,
-      ACCESS_RO = 2,
-      ACCESS_WO = 3;
-
-  static native long[] pointerOfDirectBuffers0(Buffer[] buffers);
-
-  static native long pointerOfDirectBuffer0(Buffer buffer);
-
-  static native Platform CUDA0();
-
-  static native Platform HIP0();
-
-  static native Platform OpenCL0();
-
-  static native Platform Relocatable0();
-
-  static native Platform Dynamic0();
 
   static native Property[] runtimeProperties0(long nativePeer);
 
@@ -127,13 +65,11 @@ public final class Platform implements AutoCloseable {
       Policy policy,
       Runnable cb);
 
-  static native void deleteAllPeer0();
-
   static native void deleteDevicePeer0(long nativePeer);
 
   static native void deleteQueuePeer0(long nativePeer);
 
-  static native void deleteRuntimePeer0(long nativePeer);
+  static native void deletePlatformPeer0(long nativePeer);
 
   //  private static final AtomicLong PENDING_CALLBACKS = new AtomicLong(0);
   //
@@ -166,27 +102,4 @@ public final class Platform implements AutoCloseable {
   //    };
   //  }
 
-  private static final Path RESOURCE_DIR = Loader.HOME_DIR.resolve(".polyregion");
-  private static final AtomicBoolean loaded = new AtomicBoolean();
-
-  static {
-    if (!Boolean.getBoolean("polyregion.runtime.noautoload")) {
-      load();
-    }
-  }
-
-  public static void load() {
-
-    if (!loaded.getAndSet(true)) {
-      Loader.loadDirect(
-          Paths.get(
-              //
-              // "/home/tom/polyregion/native/cmake-build-release-clang/bindings/jvm/libpolyregion-runtime-jvm.so"
-              "D:/polyregion/native/cmake-build-release-msvc/bindings/jvm/polyregion-runtime-jvm.dll"
-              // "/home/tom/polyregion/native/cmake-build-release-clang/bindings/libjava-runtime.so"
-              ),
-          RESOURCE_DIR);
-      java.lang.Runtime.getRuntime().addShutdownHook(new Thread(Platform::deleteAllPeer0));
-    }
-  }
 }

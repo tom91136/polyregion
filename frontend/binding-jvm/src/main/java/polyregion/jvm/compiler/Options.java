@@ -2,6 +2,7 @@ package polyregion.jvm.compiler;
 
 import java.util.Objects;
 
+@SuppressWarnings("unused")
 public final class Options {
 
   public final byte target;

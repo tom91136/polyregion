@@ -1,10 +1,10 @@
 #pragma once
 #include "jni.h"
 
-#include "variants.hpp"
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <vector>
 
 static JNIEnv *getEnv(JavaVM *vm) {
   JNIEnv *env{};

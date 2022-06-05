@@ -3,6 +3,7 @@ package polyregion.jvm.compiler;
 import java.util.Arrays;
 import java.util.Objects;
 
+@SuppressWarnings("unused")
 public final class Layout {
 
   public static final class Member {

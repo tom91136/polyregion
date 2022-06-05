@@ -246,7 +246,6 @@ else ()
     message(STATUS "${llvm_BINARY_DIR}/lib/cmake/llvm")
     find_package(LLVM REQUIRED CONFIG NO_DEFAULT_PATH
             PATHS "${llvm_BINARY_DIR}/lib/cmake/llvm")
-    include_directories("${llvm_BINARY_DIR}/include" "${llvm_SOURCE_DIR}/include")
     message(STATUS "Using LLVM: ${LLVM_PACKAGE_VERSION} (${llvm_SOURCE_DIR})")
 
 
@@ -259,6 +258,7 @@ else ()
 
         set(LLVM_TABLEGEN_EXE ${llvm_BINARY_DIR}/bin/llvm-tblgen)
         set(LLD_VERSION ${LLVM_SRC_VERSION})
+
 
         configure_file(
                 ${lld_SOURCE_DIR}/include/lld/Common/Version.inc.in
@@ -286,21 +286,29 @@ else ()
             set(HAVE_CXX_ATOMICS_WITHOUT_LIB ON)
         endif ()
 
+
+        set(LLVM_TABLEGEN_FLAGS "${LLVM_INCLUDE_DIRS}")
+        list(TRANSFORM LLVM_TABLEGEN_FLAGS PREPEND -I)
+
         add_subdirectory(${lld_SOURCE_DIR}/Common ${lld_BINARY_DIR}/Common)
-        target_include_directories(lldCommon
-                PUBLIC ${lld_SOURCE_DIR}/include ${lld_BINARY_DIR}/include
-                PUBLIC ${lld_BINARY_DIR}/Common)
+        target_include_directories(lldCommon PUBLIC
+                ${lld_SOURCE_DIR}/include ${lld_BINARY_DIR}/include
+                ${lld_BINARY_DIR}/Common
+                "${LLVM_INCLUDE_DIRS}"
+                )
 
         add_subdirectory(${lld_SOURCE_DIR}/ELF ${lld_BINARY_DIR}/ELF)
-
-        target_include_directories(lldELF
-                PUBLIC ${lld_SOURCE_DIR}/include ${lld_BINARY_DIR}/include
-                PUBLIC ${lld_BINARY_DIR}/ELF
-                PUBLIC ${lld_SOURCE_DIR}/ELF)
+        target_include_directories(lldELF BEFORE PUBLIC
+                ${lld_SOURCE_DIR}/include ${lld_BINARY_DIR}/include
+                ${lld_BINARY_DIR}/ELF ${lld_SOURCE_DIR}/ELF
+                "${LLVM_INCLUDE_DIRS}"
+                )
         #        add_subdirectory(COFF)
         #        add_subdirectory(MachO)
         #        add_subdirectory(MinGW)
         #        add_subdirectory(wasm)
+
+        unset(LLVM_TABLEGEN_FLAGS)
     endif ()
 endif ()
 
@@ -329,15 +337,12 @@ if (NOT libffi_POPULATED)
     if (WIN32)
         set(VCPKG_TARGET_ARCHITECTURE x64)
     endif ()
-    add_definitions(-DFFI_BUILDING)
+    set(libffi_DEFINITIONS FFI_BUILDING NO_JAVA_RAW_API)
 
     add_subdirectory(${libffi_SOURCE_DIR} ${libffi_BINARY_DIR} EXCLUDE_FROM_ALL)
-    include_directories(${libffi_BINARY_DIR}/include)
-endif ()
+    set(libffi_INCLUDE_DIRS "${libffi_BINARY_DIR}/include")
 
-include_directories("${json_SOURCE_DIR}")
-include_directories("${catch2_SOURCE_DIR}")
-include_directories(${LLVM_INCLUDE_DIRS})
+endif ()
 
 # set CXX stuff here in case LLVM overwrites it
 set(CMAKE_CXX_STANDARD 20)

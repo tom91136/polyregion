@@ -65,13 +65,13 @@ object Pickler {
     case x             => q.reflect.report.errorAndAbort(s"Type $x is not a primitive type", value)
   }
 
-  inline def layoutOf(using q: Quoted)(repr: q.TypeRepr): polyregion.jvm.compiler.Layout = {
+  inline def layoutOf(using q: Quoted)(compiler: Compiler, repr: q.TypeRepr): polyregion.jvm.compiler.Layout = {
     val sdef = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
     println(s"A=${sdef} ${repr.widenTermRefByName}")
-    polyregion.jvm.compiler.Compiler.layoutOf(CppSourceMirror.encode(sdef), ???)
+    compiler.layoutOf(CppSourceMirror.encode(sdef), ???)
   }
 
-  inline def sizeOf(using q: Quoted)(tpe: p.Type, repr: q.TypeRepr): Int = tpe match {
+  inline def sizeOf(using q: Quoted)(compiler: Compiler,tpe: p.Type, repr: q.TypeRepr): Int = tpe match {
     case p.Type.Float           => polyregion.jvm.runtime.Type.FLOAT.sizeInBytes
     case p.Type.Double          => polyregion.jvm.runtime.Type.DOUBLE.sizeInBytes
     case p.Type.Bool            => polyregion.jvm.runtime.Type.BYTE.sizeInBytes
@@ -82,17 +82,17 @@ object Pickler {
     case p.Type.Long            => polyregion.jvm.runtime.Type.LONG.sizeInBytes
     case p.Type.Unit            => polyregion.jvm.runtime.Type.VOID.sizeInBytes
     case p.Type.Array(_)        => polyregion.jvm.runtime.Type.PTR.sizeInBytes
-    case p.Type.Struct(_, _, _) => layoutOf(repr).sizeInBytes.toInt
+    case p.Type.Struct(_, _, _) => layoutOf(compiler, repr).sizeInBytes.toInt
     case x                      => q.quotes.reflect.report.errorAndAbort(s"Cannot get size of type $x")
   }
 
   def readStruct(using q: Quoted) //
-  (buffer: Expr[java.nio.ByteBuffer], index: Expr[Int], repr: q.TypeRepr) = {
+  (compiler: Compiler, buffer: Expr[java.nio.ByteBuffer], index: Expr[Int], repr: q.TypeRepr) = {
     import q.given
     // Find out the total size of this struct first, it could be nested arbitrarily but the top level's size must
     // reflect the total size; this is consistent with C's `sizeof(struct T)`.
     val sdef       = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
-    val layout     = polyregion.jvm.compiler.Compiler.layoutOf(CppSourceMirror.encode(sdef), ???)
+    val layout     = compiler.layoutOf(CppSourceMirror.encode(sdef), ???)
     val byteOffset = '{ ${ Expr(layout.sizeInBytes.toInt) } * $index }
     val fields     = sdef.members.zip(layout.members)
     val terms = fields.map { (named, m) =>
@@ -105,12 +105,12 @@ object Pickler {
   }
 
   inline def writeStruct(using q: Quoted) //
-  (buffer: Expr[java.nio.ByteBuffer], index: Expr[Int], repr: q.TypeRepr, value: Expr[Any]) = {
+  (compiler: Compiler,buffer: Expr[java.nio.ByteBuffer], index: Expr[Int], repr: q.TypeRepr, value: Expr[Any]) = {
     import q.given
     // Find out the total size of this struct first, it could be nested arbitrarily but the top level's size must
     // reflect the total size; this is consistent with C's `sizeof(struct T)`.
     val sdef       = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
-    val layout     = polyregion.jvm.compiler.Compiler.layoutOf(CppSourceMirror.encode(sdef), ???)
+    val layout     = compiler.layoutOf(CppSourceMirror.encode(sdef), ???)
     val byteOffset = '{ ${ Expr(layout.sizeInBytes.toInt) } * $index }
     val fields     = sdef.members.zip(layout.members)
     val terms = fields.map { (named, m) =>
@@ -126,13 +126,13 @@ object Pickler {
 
 
   def putAll(using q: Quoted) //
-  (b: Expr[java.nio.ByteBuffer], tpe: p.Type, repr: q.TypeRepr, v: Expr[Any]): Expr[Unit] = {
+  (compiler: Compiler, b: Expr[java.nio.ByteBuffer], tpe: p.Type, repr: q.TypeRepr, v: Expr[Any]): Expr[Unit] = {
     import q.given
     import p.{Type => PT}
 
     inline def put[t: Type](comp: PT, i: Expr[Int], v: Expr[Any]) = comp match {
-      case p.Type.Struct(_, _, _) => writeStruct(b, i, q.TypeRepr.of[t], v)
-      case c                      => putPrimitive(b, '{ $i * ${ Expr(sizeOf(comp, q.TypeRepr.of[t])) } }, c, v)
+      case p.Type.Struct(_, _, _) => writeStruct(compiler, b, i, q.TypeRepr.of[t], v)
+      case c                      => putPrimitive(b, '{ $i * ${ Expr(sizeOf(compiler, comp, q.TypeRepr.of[t])) } }, c, v)
     }
 
     (tpe, repr.asType) match {
@@ -169,13 +169,13 @@ object Pickler {
   }
 
   def getAllMutable(using q: Quoted) //
-  (b: Expr[java.nio.ByteBuffer], tpe: p.Type, repr: q.TypeRepr, v: Expr[Any]): Expr[Unit] = {
+  (compiler: Compiler,b: Expr[java.nio.ByteBuffer], tpe: p.Type, repr: q.TypeRepr, v: Expr[Any]): Expr[Unit] = {
     import q.given
     import p.{Type => PT}
 
     inline def get[t: Type](comp: PT, i: Expr[Int]) = (comp match {
-      case p.Type.Struct(_, _, _) => readStruct(b, i, q.TypeRepr.of[t])
-      case c                      => getPrimitive(b, '{ $i * ${ Expr(sizeOf(comp, q.TypeRepr.of[t])) } }, c)
+      case p.Type.Struct(_, _, _) => readStruct(compiler, b, i, q.TypeRepr.of[t])
+      case c                      => getPrimitive(b, '{ $i * ${ Expr(sizeOf(compiler, comp, q.TypeRepr.of[t])) } }, c)
     }).asExprOf[t]
 
     (tpe, repr.asType) match {
