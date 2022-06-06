@@ -12,6 +12,17 @@ fi
 
 ACTION=${1:?}
 
+CMAKE_BIN="cmake"
+if ! command -v cmake &>/dev/null; then
+  echo "cmake not found, trying cmake3..."
+  if ! command -v cmake3 &>/dev/null; then
+    echo "cmake3 not found, cmake not available for build"
+    exit 1
+  else
+    CMAKE_BIN="cmake3"
+  fi
+fi
+
 OS=$(uname | tr '[:upper:]' '[:lower:]')
 ARCH="${OS}-$(uname -m)"
 BUILD="build-$ARCH"
@@ -19,6 +30,7 @@ echo "Using build name \"$BUILD\""
 
 case "$ACTION" in
 configure)
+  SOURCE=${2:?}
   CXX="$(which clang++)"
   CC="$(which clang)"
 
@@ -27,7 +39,7 @@ configure)
   *) LINKER="$(which ld.lld)" ;;
   esac
 
-  cmake "-B$BUILD" -H. \
+  "$CMAKE_BIN" "-B$BUILD" -S "$SOURCE" \
     -DCMAKE_C_COMPILER="${CC}" \
     -DCMAKE_CXX_COMPILER="${CXX}" \
     -DUSE_LINKER="${LINKER}" \
@@ -36,7 +48,7 @@ configure)
   ;;
 build)
   TARGET=${2:?}
-  cmake --build "$BUILD" --target "$TARGET"
+  "$CMAKE_BIN" --build "$BUILD" --target "$TARGET"
   ;;
 *)
   echo "Unknown action $ACTION"

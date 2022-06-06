@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.18) # XXX FetchContent_Declare DOWNLOAD_NO_EXTRACT is >= 3.18
 include(FetchContent)
 include(ProcessorCount)
 
@@ -13,6 +13,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 ProcessorCount(NPROC)
 
 if (USE_LINKER)
+    message(STATUS "Using custom linker: ${USE_LINKER}")
     if (MSVC)
         set(CMAKE_LINKER "${USE_LINKER}")
     else ()
@@ -110,13 +111,11 @@ else ()
 endif ()
 
 
-set(COMMON_LINK_OPTIONS ${COMMON_LINK_OPTIONS}
-        -static-libstdc++
-        ${COMMON_LINKER_OPTIONS})
+set(COMMON_LINK_OPTIONS ${COMMON_LINK_OPTIONS} ${COMMON_LINKER_OPTIONS})
 
 if (UNIX AND NOT APPLE)
     set(COMMON_LINK_OPTIONS ${COMMON_LINK_OPTIONS}
-            -static-libgcc)
+            -static-libgcc -static-libstdc++)
 endif ()
 
 set(LLVM_SRC_VERSION 14.0.3)
@@ -203,9 +202,9 @@ else ()
 
     #    set(LLVM_ENABLE_LLD ON CACHE BOOL "")
 
-    #    if (LINKER)
-    #        set(LLVM_USE_LINKER "${LINKER}" CACHE INTERNAL "")
-    #    endif ()
+    if (USE_LINKER)
+        set(LLVM_USE_LINKER "${USE_LINKER}" CACHE INTERNAL "")
+    endif ()
     #    set(CMAKE_CXX_FLAGS "-fvisibility=hidden  -ffunction-sections -fdata-sections" CACHE INTERNAL "")
 
 
@@ -236,8 +235,10 @@ else ()
     # XXX there appears to be a bug in llvm_create_cross_target where LLVM_INCLUDE_BENCHMARKS isn't honoured
     # so we set LLVM_USE_HOST_TOOLS to off
 
-    cmake_policy(SET CMP0116 OLD)
-    set(CMAKE_POLICY_DEFAULT_CMP0116 OLD)
+    if (${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.20.0")
+        cmake_policy(SET CMP0116 OLD)
+        set(CMAKE_POLICY_DEFAULT_CMP0116 OLD)
+    endif ()
 
 
     # XXX all LLVM specific cmake variables must be set BEFORE FetchContent_MakeAvailable otherwise they have no effect
