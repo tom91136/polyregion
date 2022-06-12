@@ -10,30 +10,13 @@ jobs:
   build:
     runs-on: [ ubuntu-latest ]
     container:
-      image: centos:7
+      image: tom91136/centos7-llvm14:latest
     steps:
       - uses: actions/checkout@v2
 
-      - name: Cache compiler
-        if: ${{ !env.ACT }}
-        id: prepare-compilers
-        uses: actions/cache@v2
-        with:
-          path: ~/
-          key: ${{ runner.os }}-${{ hashFiles('native/centos7-setup-llvm.sh') }}
-
-      - name: Check build
+      - name: Setup env
         shell: bash
-        run: echo "REPO_DIR=${PWD}" >>"$GITHUB_ENV"
-
-      - name: Prepare build
-        shell: bash
-        run: cd; source ${REPO_DIR}/native/centos7-setup-llvm.sh setup-build || true
-
-      - name: Prepare compilers
-        if: steps.prepare-compilers.outputs.cache-hit != 'true'
-        shell: bash
-        run: cd; source ${REPO_DIR}/native/centos7-setup-llvm.sh setup-llvm || true
+        run: source /centos7-setup-llvm.sh env || true
 
       - name: Configure release build
         shell: bash
