@@ -16,7 +16,7 @@ jobs:
 
       - name: Setup env
         shell: bash
-        run: cd; source /centos7-setup-llvm.sh env || true
+        run: cd /root; source /centos7-setup-llvm.sh env || true
 
       - name: Configure release build
         shell: bash
