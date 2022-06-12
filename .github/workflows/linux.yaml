@@ -17,19 +17,25 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Build environment setup
+        shell: bash
         run: source centos7-setup-llvm.sh || true
 
       - name: Configure release build
+        shell: bash
         run: ./build.sh configure .
 
       - name: Release build shim
+        shell: bash
         run: ./build.sh build polyregion-shim-jvm
 
       - name: Release build runtime
+        shell: bash
         run: ./build.sh build polyregion-runtime-jvm
 
       - name: Release build compiler
+        shell: bash
         run: ./build.sh build polyregion-compiler-jvm
 
       - name: Check artefact
+        shell: bash
         run: file build-linux-x86_64/bindings/jvm/*
