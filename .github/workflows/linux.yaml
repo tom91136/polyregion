@@ -15,10 +15,23 @@ jobs:
     container:
       image: centos:7
     steps:
-      - uses: actions/checkout@v2
-      - name: Build environment setup
+
+      - name: Cache compiler
+        if: ${{ !env.ACT }}
+        id: prepare-compilers
+        uses: actions/cache@v2
+        with:
+          path: ./compilers
+          key: ${{ runner.os }}-${{ hashFiles('./native-centos7-setup-llvm.sh') }}
+
+      - name: Prepare build
         shell: bash
-        run: source centos7-setup-llvm.sh || true
+        run: cd compilers; source ./native-centos7-setup-llvm.sh setup-build || true
+
+      - name: Prepare compilers
+        if: steps.prepare-compilers.outputs.cache-hit != 'true'
+        shell: bash
+        run: cd compilers; source ./native-centos7-setup-llvm.sh setup-llvm || true
 
       - name: Configure release build
         shell: bash
