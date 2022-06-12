@@ -1,5 +1,6 @@
 #include "hsa_platform.h"
 #include "utils.hpp"
+#include <atomic>
 #include <cstring>
 
 using namespace polyregion::runtime;
