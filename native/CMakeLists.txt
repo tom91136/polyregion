@@ -123,7 +123,9 @@ set(LLVM_SRC_DIR_IN_RELEASE llvm-${LLVM_SRC_VERSION}.src)
 set(LLD_SRC_DIR_IN_RELEASE lld-${LLVM_SRC_VERSION}.src)
 
 if(WIN32)
-    set(WINDOWS_LIBS Version) # we need Version.lib for stuff like GetFileVersionInfoSizeA
+    set(DL_LIB Version) # we need Version.lib for stuff like GetFileVersionInfoSizeA
+else()
+    set(DL_LIB dl)
 endif()
 
 

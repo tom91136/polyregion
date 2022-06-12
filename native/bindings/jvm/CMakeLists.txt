@@ -37,7 +37,7 @@ target_include_directories(polyregion-runtime-jvm PRIVATE
 
         ${JNI_INCLUDE_DIRS})
 
-target_link_libraries(polyregion-shim-jvm PRIVATE ${WINDOWS_LIBS})
+target_link_libraries(polyregion-shim-jvm PRIVATE ${DL_LIB})
 target_link_libraries(polyregion-compiler-jvm PRIVATE compiler-lib)
 target_link_libraries(polyregion-runtime-jvm PRIVATE runtime-lib)
 

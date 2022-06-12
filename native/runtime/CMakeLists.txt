@@ -45,7 +45,7 @@ message(STATUS "[runtime] Adding LLVM libs = ${LLVM_LIBS}")
 
 target_link_libraries(runtime-lib PRIVATE
         ${LLVM_LIBS}
-        ${WINDOWS_LIBS}
+        ${DL_LIB}
         libffi
         cpuinfo
 #        pthread
