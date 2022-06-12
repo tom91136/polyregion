@@ -6,8 +6,8 @@ set ARCH=windows-x86_64
 set BUILD=build-%ARCH%
 rem Using build name %BUILD%
 
-if "%GITHUB_ENV%"=="" set VC="C:\Program Files\Microsoft Visual Studio\2022\Community"
-else                  set VC="C:\Program Files\Microsoft Visual Studio\2022\Enterprise"
+if "%GITHUB_ENV%"=="" (set VC="C:\Program Files\Microsoft Visual Studio\2022\Community")
+else                  (set VC="C:\Program Files\Microsoft Visual Studio\2022\Enterprise")
 
 echo "Using VC=%VC%"
 
@@ -16,7 +16,7 @@ set NINJA="%VC%\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe"
 call "%VC%\VC\Auxiliary\Build\vcvarsall.bat" x64
 
 if "%ACTION%"=="configure" (call :configure) 
-if "%ACTION%"=="build" (call :build %2) 
+if "%ACTION%"=="build"     (call :build %2) 
 rem Unknown action %ACTION%
 
 goto:eof

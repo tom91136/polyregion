@@ -16,6 +16,9 @@ jobs:
       - name: Install dependencies
         run: brew install llvm cmake ninja
 
+      - name: Export JAVA_HOME
+        run: echo "JAVA_HOME=${JAVA_HOME_8_X64}" >> "$GITHUB_ENV"
+
       - name: Configure release build
         shell: bash
         working-directory: ./native
