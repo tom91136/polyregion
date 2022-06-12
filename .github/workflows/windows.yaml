@@ -1,0 +1,41 @@
+name: Windows
+
+on:
+  pull_request:
+  push:
+  release:
+    types: published
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Configure release build
+      working-directory: ./native
+      run: ./build.bat configure
+
+    - name: Release build shim
+      shell: bash
+      working-directory: ./native
+      run: ./build.bat build polyregion-shim-jvm
+
+    - name: Release build runtime
+      shell: bash
+      working-directory: ./native
+      run: ./build.bat build polyregion-runtime-jvm
+
+    - name: Release build compiler
+      shell: bash
+      working-directory: ./native
+      run: ./build.bat build polyregion-compiler-jvm
+
+    - name: Check artefact
+      shell: bash
+      working-directory: ./native
+      run: dir build-linux-x86_64/bindings/jvm
+
+
+ 
