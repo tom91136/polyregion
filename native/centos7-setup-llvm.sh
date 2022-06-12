@@ -20,12 +20,14 @@ export_var() {
 {
   curl -LO "https://github.com/llvm/llvm-project/releases/download/llvmorg-$LLVM_VERSION/llvm-project-$LLVM_VERSION.src.tar.xz"
   tar -xf "llvm-project-$LLVM_VERSION.src.tar.xz"
-} & {
+} &
+{
   curl -L "https://github.com/Kitware/CMake/releases/download/v3.18.6/cmake-3.18.6-Linux-x86_64.sh" -o "cmake-3.18.sh"
   chmod +x "./cmake-3.18.sh"
   "./cmake-3.18.sh" --skip-license --include-subdir
 
-} & wait
+} &
+wait
 
 export_var PATH "$PWD/cmake-3.18.6-Linux-x86_64/bin/:$PATH"
 
@@ -38,13 +40,13 @@ cd "llvm-project-$LLVM_VERSION.src"
 
 echo "Preparing LLVM build"
 
-cmake3 -S llvm -B build \
+cmake -S llvm -B build \
   -DLLVM_ENABLE_PROJECTS="clang;lld" \
   -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi" \
   -DCMAKE_BUILD_TYPE=Release \
   -GNinja
 
-cmake3 --build build
+cmake --build build
 
 echo "LLVM build complete"
 
