@@ -21,17 +21,17 @@ jobs:
         id: prepare-compilers
         uses: actions/cache@v2
         with:
-          path: ./compilers
+          path: ~/
           key: ${{ runner.os }}-${{ hashFiles('./centos7-setup-llvm.sh') }}
 
       - name: Prepare build
         shell: bash
-        run: cd compilers; source ./centos7-setup-llvm.sh setup-build || true
+        run: cd; source ./centos7-setup-llvm.sh setup-build || true
 
       - name: Prepare compilers
         if: steps.prepare-compilers.outputs.cache-hit != 'true'
         shell: bash
-        run: cd compilers; source ./centos7-setup-llvm.sh setup-llvm || true
+        run: cd; source ./centos7-setup-llvm.sh setup-llvm || true
 
       - name: Configure release build
         shell: bash
