@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstring>
-#include <fstream>
+//#include <fstream>
 #include <functional>
 #include <numeric>
 #include <sstream>
@@ -74,20 +74,20 @@ static std::vector<std::string> split(const std::string &str, char delim) {
   return xs;
 }
 
-template <typename T> std::vector<T> read_struct(const std::string &path) {
-  std::fstream s(path, std::ios::binary | std::ios::in);
-  if (!s.good()) {
-    throw std::invalid_argument("Cannot open binary file for reading: " + path);
-  }
-  s.ignore(std::numeric_limits<std::streamsize>::max());
-  auto len = s.gcount();
-  s.clear();
-  s.seekg(0, std::ios::beg);
-  std::vector<T> xs(len / sizeof(T));
-  s.read(reinterpret_cast<char *>(xs.data()), len);
-  s.close();
-  return xs;
-}
+//template <typename T> std::vector<T> read_struct(const std::string &path) {
+//  std::fstream s(path, std::ios::binary | std::ios::in);
+//  if (!s.good()) {
+//    throw std::invalid_argument("Cannot open binary file for reading: " + path);
+//  }
+//  s.ignore(std::numeric_limits<std::streamsize>::max());
+//  auto len = s.gcount();
+//  s.clear();
+//  s.seekg(0, std::ios::beg);
+//  std::vector<T> xs(len / sizeof(T));
+//  s.read(reinterpret_cast<char *>(xs.data()), len);
+//  s.close();
+//  return xs;
+//}
 
 template <typename T, template <typename...> typename Container>
 constexpr std::optional<T> get_opt(const Container<T> &xs, size_t i) {
@@ -131,6 +131,38 @@ constexpr uint32_t hash(const char *data, size_t const size) noexcept {
 }
 
 constexpr uint32_t hash(const std::string_view &str) noexcept { return hash(str.data(), str.length()); }
+
+template <typename I, typename J>
+static typename std::enable_if<std::is_signed<I>::value && std::is_signed<J>::value, I>::type int_cast(J value) {
+  if (value < std::numeric_limits<I>::min() || value > std::numeric_limits<I>::max()) {
+    throw std::out_of_range("out of range");
+  }
+  return static_cast<I>(value);
+}
+
+template <typename I, typename J>
+static typename std::enable_if<std::is_signed<I>::value && std::is_unsigned<J>::value, I>::type int_cast(J value) {
+  if (value > static_cast<typename std::make_unsigned<I>::type>(std::numeric_limits<I>::max())) {
+    throw std::out_of_range("out of range");
+  }
+  return static_cast<I>(value);
+}
+
+template <typename I, typename J>
+static typename std::enable_if<std::is_unsigned<I>::value && std::is_signed<J>::value, I>::type int_cast(J value) {
+  if (value < 0 || static_cast<typename std::make_unsigned<J>::type>(value) > std::numeric_limits<I>::max()) {
+    throw std::out_of_range("out of range");
+  }
+  return static_cast<I>(value);
+}
+
+template <typename I, typename J>
+static typename std::enable_if<std::is_unsigned<I>::value && std::is_unsigned<J>::value, I>::type int_cast(J value) {
+  if (value > std::numeric_limits<I>::max()) {
+    throw std::out_of_range("out of range");
+  }
+  return static_cast<I>(value);
+}
 
 //constexpr inline unsigned int operator"" _(char const *p, size_t s) { return hash(p, s); }
 

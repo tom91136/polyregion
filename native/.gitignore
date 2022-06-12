@@ -252,3 +252,5 @@ $RECYCLE.BIN/
 .vscode/
 
 /build-*
+
+venv

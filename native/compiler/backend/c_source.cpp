@@ -32,14 +32,14 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
     case Dialect::OpenCL1_1:
       return variants::total(
           *tpe,                                                           //
-          [&](const Type::Float &x) { return "float"s; },              //
-          [&](const Type::Double &x) { return "double"s; },            //
-          [&](const Type::Bool &x) { return "char"s; },                //
-          [&](const Type::Byte &x) { return "char"s; },                //
-          [&](const Type::Char &x) { return "ushort"s; },              //
-          [&](const Type::Short &x) { return "short"s; },              //
-          [&](const Type::Int &x) { return "int"s; },                  //
-          [&](const Type::Long &x) { return "long"s; },                //
+          [&](const Type::Float &x) { return "float"s; },                 //
+          [&](const Type::Double &x) { return "double"s; },               //
+          [&](const Type::Bool &x) { return "char"s; },                   //
+          [&](const Type::Byte &x) { return "char"s; },                   //
+          [&](const Type::Char &x) { return "ushort"s; },                 //
+          [&](const Type::Short &x) { return "short"s; },                 //
+          [&](const Type::Int &x) { return "int"s; },                     //
+          [&](const Type::Long &x) { return "long"s; },                   //
           [&](const Type::String &x) { return "char *"s; },               //
           [&](const Type::Unit &x) { return "void"s; },                   //
           [&](const Type::Nothing &x) { return "/*nothing*/"s; },         //
@@ -235,7 +235,12 @@ compiler::Compilation backend::CSource::run(const Program &program, const compil
   allArgs.insert(allArgs.begin(), fnTree.captures.begin(), fnTree.captures.end());
 
   auto args = mk_string<Named>(
-      allArgs, [&](auto x) { return "global " + mkTpe(x.tpe) + " " + x.symbol; }, ", ");
+      allArgs,
+      [&](auto x) {
+        return holds<Type::Array>(x.tpe) ? ("global " + mkTpe(x.tpe) + " " + x.symbol)
+                                         : (mkTpe(x.tpe) + " " + x.symbol);
+      },
+      ", ");
 
   std::string fnPrefix;
   switch (dialect) {
@@ -275,7 +280,7 @@ compiler::Compilation backend::CSource::run(const Program &program, const compil
 
   auto def = structDefs + "\n" + prototype + " {\n" + body + "\n}";
   //  std::cout << def << std::endl;
-  std::vector<char> data(def.begin(), def.end()  );
+  std::vector<char> data(def.begin(), def.end());
 
   std::string dialectName;
   switch (dialect) {

@@ -1,4 +1,5 @@
 #include "hip_platform.h"
+#include "utils.hpp"
 
 using namespace polyregion::runtime;
 using namespace polyregion::runtime::hip;
@@ -86,7 +87,7 @@ HipDevice::HipDevice(int ordinal)
   TRACE();
   CHECKED(hipDeviceGet(&device, ordinal));
   deviceName = detail::allocateAndTruncate(
-      [&](auto &&data, auto &&length) { CHECKED(hipDeviceGetName(data, static_cast<int>(length), device)); });
+      [&](auto &&data, auto &&length) { CHECKED(hipDeviceGetName(data, int_cast<int>(length), device)); });
 }
 HipDevice::~HipDevice() {
   TRACE();

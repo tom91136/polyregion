@@ -1,15 +1,15 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
-#include <string>
-#include <vector>
-#include <array>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "export.h"
 #include "types.h"
@@ -22,8 +22,8 @@
     #define __PRETTY_FUNCTION__ __FUNCSIG__
   #endif
 
-  #define TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this, __PRETTY_FUNCTION__)
-//  #define TRACE()
+//  #define TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this, __PRETTY_FUNCTION__)
+  #define TRACE()
 
 #endif
 
@@ -142,13 +142,19 @@ public:
 EXPORT void init();
 
 struct EXPORT Dim3 {
-  EXPORT size_t x = 1, y = 1, z = 1;
+  EXPORT size_t x, y, z;
   [[nodiscard]] std::array<size_t, 3> sizes() const { return {x, y, z}; }
+  Dim3(size_t x, size_t y, size_t z) : x(x), y(y), z(z) {
+    if (x < 1) throw std::logic_error("x < 1");
+    if (y < 1) throw std::logic_error("y < 1");
+    if (z < 1) throw std::logic_error("z < 1");
+  }
+  Dim3() : Dim3(1, 1, 1) {}
 };
 
 struct EXPORT Policy {
-  EXPORT Dim3 global;
-  EXPORT std::optional<Dim3> local;
+  EXPORT Dim3 global{};
+  EXPORT std::optional<Dim3> local{};
 };
 
 enum class Access : uint8_t { RW = 1, RO, WO };

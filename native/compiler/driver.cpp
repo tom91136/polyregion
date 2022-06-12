@@ -1,78 +1,166 @@
-#include "ast.h"
-#include "backend/llvmc.h"
-#include "compiler.h"
-#include "object_platform.h"
-#include "utils.hpp"
-#include "variants.hpp"
-
 #include <iostream>
+#include <string>
+#include <vector>
 
-int main(int argc, char *argv[]) {
+#include "ast.h"
+#include "cl_platform.h"
+#include "cuda_platform.h"
+#include "hip_platform.h"
+#include "hsa_platform.h"
+#include "object_platform.h"
+#include "runtime.h"
+#include "compiler.h"
+#include <fstream>
+#include "utils.hpp"
+
+void run() {
 
   using namespace polyregion;
-
-  compiler::initialise();
-
-  // "/home/tom/Nextcloud/vecAdd-cuda-nvptx64-nvidia-cuda-sm_61.ll"
-  //"/home/tom/Nextcloud/vecAdd-cuda-nvptx64-nvidia-cuda-sm_61.ll"
-  //  auto modExt = llvm::parseIRFile("/home/tom/Nextcloud/vecAdd-hip-amdgcn-amd-amdhsa-gfx906.ll", Err, *ctx,
-  //                                  [&](llvm::StringRef DataLayoutTargetTriple) -> llvm::Optional<std::string> {
-  //                                    std::cout << DataLayoutTargetTriple.str() << std::endl;
-  //                                    return {};
-  //                                  });
-  //
-  //
-
   using namespace polyast::dsl;
   auto fn = function("foo", {"xs"_(Array(Int)), "x"_(Int)}, Unit)({
       let("gid") = invoke(Fn0::GpuGlobalIdxX(), Int),
-      let("xs@gid") = "xs"_(Array(Int))["gid"_(Int)],
-      let("result") = invoke(Fn2::Add(), "xs@gid"_(Int), "gid"_(Int), Int),
+      let("xs_gid") = "xs"_(Array(Int))["gid"_(Int)],
+      let("result") = invoke(Fn2::Add(), "xs_gid"_(Int), "gid"_(Int), Int),
       let("resultX2") = invoke(Fn2::Mul(), "result"_(Int), "x"_(Int), Int),
       "xs"_(Array(Int))["gid"_(Int)] = "resultX2"_(Int),
       ret(),
   });
 
-  auto p = program(fn, {}, {});
-  std::cout << repr(p) << std::endl;
-  compiler::Options options{compiler::Target::Object_LLVM_AMDGCN, "gfx906"};
-//    compiler::Options options{compiler::Target::Object_LLVM_NVPTX64, "sm_61"};
-  auto c = compiler::compile(p, options, compiler::Opt::O3);
-  std::cout << c << std::endl;
+  auto prog = program(fn, {}, {});
+  compiler::initialise();
 
-  if (c.binary) {
-    std::ofstream outfile("bin_" + (options.arch.empty() ? "no_arch" : options.arch) + ".so",
-                          std::ios::out | std::ios::binary | std::ios::trunc);
-    outfile.write(c.binary->data(), c.binary->size());
-    outfile.close();
-  }
+  using namespace polyregion::runtime;
+  using namespace polyregion::runtime::object;
+  using namespace polyregion::runtime::cuda;
+  using namespace polyregion::runtime::hip;
+  using namespace polyregion::runtime::hsa;
+  using namespace polyregion::runtime::cl;
 
-  auto simple =
-      program(function("twice", {"x"_(Int)}, Int)({ret(invoke(Fn2::Add(), "x"_(Int), 100_(Int), Int))}), {}, {});
-  std::cout << repr(simple) << std::endl;
-  auto c2 = compiler::compile(simple, {compiler::Target::Object_LLVM_x86_64, {}}, compiler::Opt::O0);
-  std::cout << c2 << std::endl;
-  if (c2.binary) {
-    runtime::object::RelocatableDevice d;
-    auto str = std::string(c2.binary->begin(), c2.binary->end());
-    d.loadModule("", str);
+  std::vector<std::unique_ptr<Platform>> rts;
 
-    int32_t a = 42;
-    int32_t actual = 0;
-    int32_t spill = 0;
-    std::vector<runtime::TypedPointer> args = {{runtime::Type::Int32, &a}, {runtime::Type::Int32, &actual}};
-    std::vector<runtime::Type> types(args.size());
-    std::vector<void *> pointers(args.size());
-    for (size_t i = 0; i < args.size(); ++i) {
-      types[i] = args[i].first;
-      pointers[i] = args[i].second;
+//    try {
+//      rts.push_back(std::make_unique<RelocatablePlatform>());
+//    } catch (const std::exception &e) {
+//      std::cerr << "[REL] " << e.what() << std::endl;
+//    }
+
+    try {
+      rts.push_back(std::make_unique<CudaPlatform>());
+    } catch (const std::exception &e) {
+      std::cerr << "[CUDA] " << e.what() << std::endl;
     }
 
-    d.createQueue()->enqueueInvokeAsync("", "twice", types, pointers, {}, {});
+    try {
+      rts.push_back(std::make_unique<ClPlatform>());
+    } catch (const std::exception &e) {
+      std::cerr << "[OCL] " << e.what() << std::endl;
+    }
 
-    std::cout << actual  << " spill=" << spill << "\n";
+//  try {
+//    rts.push_back(std::make_unique<HsaPlatform>());
+//  } catch (const std::exception &e) {
+//    std::cerr << "[HSA] " << e.what() << std::endl;
+//  }
+
+
+      try {
+        rts.push_back(std::make_unique<HipPlatform>());
+      } catch (const std::exception &e) {
+        std::cerr << "[HIP] " << e.what() << std::endl;
+      }
+
+  static std::vector<int> xs;
+
+  for (auto &rt : rts) {
+    std::cout << "RT=" << rt->name() << std::endl;
+    auto devices = rt->enumerate();
+    std::cout << "Found " << devices.size() << " devices" << std::endl;
+
+    for (auto &d : devices) {
+      std::cout << d->id() << " = " << d->name() << std::endl;
+
+
+      xs.resize(4);
+      std::fill(xs.begin(), xs.end(), 7);
+
+      compiler::Options options;
+      if (rt->name() == "CUDA") {
+         options = {compiler::Target::Object_LLVM_NVPTX64, "sm_61"};
+      } else if (rt->name() == "OpenCL") {
+         options = {compiler::Target::Source_C_OpenCL1_1, {}};
+      } else if (rt->name() == "HIP") {
+         options = {compiler::Target::Object_LLVM_AMDGCN, "gfx803"};
+      } else if (rt->name() == "CPU (RelocatableObject)") {
+        options = {compiler::Target::Object_LLVM_HOST, {}};
+      } else {
+        throw std::logic_error("?");
+      }
+
+      auto c = compiler::compile(prog, options, compiler::Opt::O3);
+      std::cout << c << std::endl;
+      if (c.binary) {
+
+
+        if(options.target == compiler::Target::Source_C_OpenCL1_1){
+          std::ofstream outfile("bin_" + (options.arch.empty() ? "no_arch" : options.arch) + ".cl",
+                                std::ios::out | std::ios::trunc);
+          outfile.write(c.binary->data(), c.binary->size());
+          outfile.close();
+        }else{
+          std::ofstream outfile("bin_" + (options.arch.empty() ? "no_arch" : options.arch) + ".so",
+                                std::ios::out | std::ios::binary | std::ios::trunc);
+          outfile.write(c.binary->data(), c.binary->size());
+          outfile.close();
+        }
+      }else{
+        std::cout << "No bin!" <<std::endl;
+      }
+
+
+      for (int i = 0; i < 2; i++) {
+        auto q1 = d->createQueue();
+        if(!d->moduleLoaded("a")){
+          d->loadModule("a", std::string(c.binary->data(), c.binary->size()));
+        }
+        auto size = sizeof(decltype(xs)::value_type) * xs.size();
+        auto ptr = d->malloc(size, Access::RW);
+        q1->enqueueHostToDeviceAsync(xs.data(), ptr, size,
+                                     [&]() { std::cout << "[" << i << "]  H->D ok" << std::endl; });
+
+        int32_t x = 4;
+
+        std::vector<Type> types{Type::Ptr, Type::Int32, Type::Void};
+        std::vector<void *> args{&ptr, &x, nullptr};
+        q1->enqueueInvokeAsync("a", "foo", types, args, {},
+                               [&]() { std::cout << "[" << i << "]  K 1 ok" << std::endl; });
+
+        x = 5;
+
+        q1->enqueueInvokeAsync("a", "foo", types, args, {},
+                               [&]() { std::cout << "[" << i << "]  K 2 ok" << std::endl; });
+        q1->enqueueDeviceToHostAsync(ptr, xs.data(), size, [&]() {
+
+          std::cout << "[" << i << "]  D->H ok, r= "
+                    << polyregion::mk_string<int>(
+                           xs, [](auto x) { return std::to_string(x); }, ",")
+                    << std::endl;
+
+        });
+        d->free(ptr);
+
+      }
+
+      std::cout << d->id() << " = Done" << std::endl;
+
+    }
   }
 
-  std::cout << "Done!" << std::endl;
+  std::cout << "Done" << std::endl;
+}
+
+int main(int argc, char *argv[]) {
+
+  run();
+
   return EXIT_SUCCESS;
 }

@@ -1,6 +1,7 @@
 add_library(runtime-lib STATIC
         libm.cpp
         runtime.cpp
+        hsa_platform.cpp
         cuda_platform.cpp
         hip_platform.cpp
         cl_platform.cpp
@@ -8,6 +9,7 @@ add_library(runtime-lib STATIC
         thirdparty/cuew/src/cuew.c
         thirdparty/hipew/src/hipew.c
         thirdparty/clew/src/clew.c
+        thirdparty/hsaew/src/hsaew.c
         )
 add_dependencies(runtime-lib intrinsics_gen) # for LLVM tblgen
 
@@ -23,6 +25,7 @@ target_include_directories(runtime-lib PUBLIC ../include
         thirdparty/clew/include
         thirdparty/hipew/include
         thirdparty/cuew/include
+        thirdparty/hsaew/include
         )
 target_include_directories(runtime-drv PRIVATE ../include)
 target_include_directories(runtime-tests PRIVATE . ../include)

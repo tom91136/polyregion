@@ -1,4 +1,5 @@
 #include "cuda_platform.h"
+#include "utils.hpp"
 
 using namespace polyregion::runtime;
 using namespace polyregion::runtime::cuda;
@@ -78,7 +79,7 @@ CudaDevice::CudaDevice(int ordinal)
   TRACE();
   CHECKED(cuDeviceGet(&device, ordinal));
   deviceName = detail::allocateAndTruncate(
-      [&](auto &&data, auto &&length) { CHECKED(cuDeviceGetName(data, static_cast<int>(length), device)); });
+      [&](auto &&data, auto &&length) { CHECKED(cuDeviceGetName(data, int_cast<int>(length), device)); });
 }
 
 int64_t CudaDevice::id() {
