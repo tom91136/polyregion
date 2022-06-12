@@ -57,3 +57,15 @@ target_compile_options(polyregion-runtime-jvm PRIVATE ${COMPILE_OPTIONS})
 target_link_options(polyregion-shim-jvm PRIVATE ${LINK_OPTIONS})
 target_link_options(polyregion-compiler-jvm PRIVATE ${LINK_OPTIONS})
 target_link_options(polyregion-runtime-jvm PRIVATE ${LINK_OPTIONS})
+
+# Running `strip` on macOS drops even more stuff than just compiling with -dead_strip.
+if(APPLE)
+    add_custom_command(
+      TARGET polyregion-runtime-jvm POST_BUILD
+      COMMAND strip
+      ARGS -SXx $<TARGET_FILE:polyregion-runtime-jvm>)
+    add_custom_command(
+      TARGET polyregion-compiler-jvm POST_BUILD
+      COMMAND strip
+      ARGS -SXx $<TARGET_FILE:polyregion-compiler-jvm>)
+endif()
