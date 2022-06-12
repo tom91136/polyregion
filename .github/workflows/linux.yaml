@@ -13,7 +13,7 @@ jobs:
       image: centos:7
     steps:
       - uses: actions/checkout@v2
-      
+
       - name: Cache compiler
         if: ${{ !env.ACT }}
         id: prepare-compilers
@@ -24,16 +24,16 @@ jobs:
 
       - name: Check build
         shell: bash
-        run: pwd && ls -lah
+        run: echo "REPO_DIR=${PWD}" >>"$GITHUB_ENV"
 
       - name: Prepare build
         shell: bash
-        run: cd; source polyregion/native/centos7-setup-llvm.sh setup-build || true
+        run: cd; source ${REPO_DIR}/native/centos7-setup-llvm.sh setup-build || true
 
       - name: Prepare compilers
         if: steps.prepare-compilers.outputs.cache-hit != 'true'
         shell: bash
-        run: cd; source polyregion/native/centos7-setup-llvm.sh setup-llvm || true
+        run: cd; source ${REPO_DIR}/native/centos7-setup-llvm.sh setup-llvm || true
 
       - name: Configure release build
         shell: bash
