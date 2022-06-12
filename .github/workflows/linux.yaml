@@ -9,9 +9,6 @@ on:
 jobs:
   build:
     runs-on: [ ubuntu-latest ]
-    defaults:
-      run:
-        working-directory: ./native
     container:
       image: centos:7
     steps:
@@ -22,33 +19,42 @@ jobs:
         uses: actions/cache@v2
         with:
           path: ~/
-          key: ${{ runner.os }}-${{ hashFiles('./centos7-setup-llvm.sh') }}
+          key: ${{ runner.os }}-${{ hashFiles('native/centos7-setup-llvm.sh') }}
+
+      - name: Check build
+        shell: bash
+        run: pwd && ls -lah
 
       - name: Prepare build
         shell: bash
-        run: cd; source ./centos7-setup-llvm.sh setup-build || true
+        run: cd; source polyregion/native/centos7-setup-llvm.sh setup-build || true
 
       - name: Prepare compilers
         if: steps.prepare-compilers.outputs.cache-hit != 'true'
         shell: bash
-        run: cd; source ./centos7-setup-llvm.sh setup-llvm || true
+        run: cd; source polyregion/native/centos7-setup-llvm.sh setup-llvm || true
 
       - name: Configure release build
         shell: bash
+        working-directory: ./native
         run: ./build.sh configure .
 
       - name: Release build shim
         shell: bash
+        working-directory: ./native
         run: ./build.sh build polyregion-shim-jvm
 
       - name: Release build runtime
         shell: bash
+        working-directory: ./native
         run: ./build.sh build polyregion-runtime-jvm
 
       - name: Release build compiler
         shell: bash
+        working-directory: ./native
         run: ./build.sh build polyregion-compiler-jvm
 
       - name: Check artefact
         shell: bash
+        working-directory: ./native
         run: file build-linux-x86_64/bindings/jvm/*
