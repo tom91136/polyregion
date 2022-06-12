@@ -42,4 +42,4 @@ jobs:
       - name: Check artefact
         shell: bash
         working-directory: ./native
-        run: file build-linux-x86_64/bindings/jvm/*
+        run: ls -lah build-linux-x86_64/bindings/jvm
