@@ -9,7 +9,10 @@ endif ()
 if (WIN32)
     set(JNI_INCLUDE_DIRS ${JNI_INCLUDE_DIRS};${JNI_INCLUDE_DIRS}/win32)
 elseif (UNIX)
-    # use linux for Apple as well
+    if (APPLE)
+        set(JNI_INCLUDE_DIRS ${JNI_INCLUDE_DIRS};${JNI_INCLUDE_DIRS}/darwin)
+    endif ()
+    # JDK8 uses darwin, newer ones use linux in certain cases, so we append both
     set(JNI_INCLUDE_DIRS ${JNI_INCLUDE_DIRS};${JNI_INCLUDE_DIRS}/linux)
 endif ()
 
