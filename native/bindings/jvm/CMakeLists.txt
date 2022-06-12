@@ -9,11 +9,8 @@ endif ()
 if (WIN32)
     set(JNI_INCLUDE_DIRS ${JNI_INCLUDE_DIRS};${JNI_INCLUDE_DIRS}/win32)
 elseif (UNIX)
-    if (APPLE)
-        # no change
-    else ()
-        set(JNI_INCLUDE_DIRS ${JNI_INCLUDE_DIRS};${JNI_INCLUDE_DIRS}/linux)
-    endif ()
+    # use linux for Apple as well
+    set(JNI_INCLUDE_DIRS ${JNI_INCLUDE_DIRS};${JNI_INCLUDE_DIRS}/linux)
 endif ()
 
 
@@ -59,13 +56,13 @@ target_link_options(polyregion-compiler-jvm PRIVATE ${LINK_OPTIONS})
 target_link_options(polyregion-runtime-jvm PRIVATE ${LINK_OPTIONS})
 
 # Running `strip` on macOS drops even more stuff than just compiling with -dead_strip.
-if(APPLE)
+if (APPLE)
     add_custom_command(
-      TARGET polyregion-runtime-jvm POST_BUILD
-      COMMAND strip
-      ARGS -SXx $<TARGET_FILE:polyregion-runtime-jvm>)
+            TARGET polyregion-runtime-jvm POST_BUILD
+            COMMAND strip
+            ARGS -SXx $<TARGET_FILE:polyregion-runtime-jvm>)
     add_custom_command(
-      TARGET polyregion-compiler-jvm POST_BUILD
-      COMMAND strip
-      ARGS -SXx $<TARGET_FILE:polyregion-compiler-jvm>)
-endif()
+            TARGET polyregion-compiler-jvm POST_BUILD
+            COMMAND strip
+            ARGS -SXx $<TARGET_FILE:polyregion-compiler-jvm>)
+endif ()
