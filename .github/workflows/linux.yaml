@@ -1,0 +1,35 @@
+name: Linux
+
+on:
+  pull_request:
+  push:
+  release:
+    types: published
+
+jobs:
+  build:
+    runs-on: [ ubuntu-latest ]
+    defaults:
+      run:
+        working-directory: ./native
+    container:
+      image: centos:7
+    steps:
+      - uses: actions/checkout@v2
+      - name: Build environment setup
+        run: source centos7-setup-llvm.sh || true
+
+      - name: Configure release build
+        run: ./build.sh configure .
+
+      - name: Release build shim
+        run: ./build.sh build polyregion-shim-jvm
+
+      - name: Release build runtime
+        run: ./build.sh build polyregion-runtime-jvm
+
+      - name: Release build compiler
+        run: ./build.sh build polyregion-compiler-jvm
+
+      - name: Check artefact
+        run: file build-linux-x86_64/bindings/jvm/*
