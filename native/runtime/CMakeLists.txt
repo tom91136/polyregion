@@ -42,10 +42,6 @@ set(LLVM_LIBS
 
 message(STATUS "[runtime] Adding LLVM libs = ${LLVM_LIBS}")
 
-if(WIN32)
-    set(WINDOWS_LIBS Version) # we need Version.lib for stuff like GetFileVersionInfoSizeA
-endif()
-
 
 target_link_libraries(runtime-lib PRIVATE
         ${LLVM_LIBS}

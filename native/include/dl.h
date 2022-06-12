@@ -5,6 +5,7 @@
   #define VC_EXTRALEAN
   #define NOMINMAX
   #include <Windows.h>
+  #include <system_error>
 
   #define polyregion_dl_open(path) LoadLibraryA(path)
   #define polyregion_dl_error() std::system_category().message(::GetLastError()).c_str()

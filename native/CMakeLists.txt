@@ -122,6 +122,11 @@ set(LLVM_SRC_VERSION 14.0.3)
 set(LLVM_SRC_DIR_IN_RELEASE llvm-${LLVM_SRC_VERSION}.src)
 set(LLD_SRC_DIR_IN_RELEASE lld-${LLVM_SRC_VERSION}.src)
 
+if(WIN32)
+    set(WINDOWS_LIBS Version) # we need Version.lib for stuff like GetFileVersionInfoSizeA
+endif()
+
+
 FetchContent_Declare(
         llvm
         URL https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_SRC_VERSION}/llvm-${LLVM_SRC_VERSION}.src.tar.xz
