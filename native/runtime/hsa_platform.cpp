@@ -374,12 +374,10 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
   header |= HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
 
   // XXX not entirely sure why the header needs to be done like this but not anything else
-  // See
+  // See:
   // https://github.com/HSAFoundation/HSA-Runtime-AMD/blob/0579a4f41cc21a76eff8f1050833ef1602290fcc/sample/vector_copy.c#L323
-  //  std::atomic headerRef(dispatch->header);
-  //  std::atomic_store_explicit<uint16_t>(&headerRef, header, std::memory_order_release);
-
-  __atomic_store_n((uint16_t *)(&dispatch->header), header, __ATOMIC_RELEASE);
+  std::atomic_ref<uint16_t> headerRef(header);
+  headerRef.store(header, std::memory_order_release);
 
   hsa_queue_store_write_index_relaxed(queue, index + 1);
   hsa_signal_store_relaxed(queue->doorbell_signal, static_cast<hsa_signal_value_t>(index));

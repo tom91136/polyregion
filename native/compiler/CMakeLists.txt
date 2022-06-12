@@ -15,7 +15,7 @@ set(LIB_SOURCES
         )
 
 add_library(compiler-lib ${LIB_SOURCES})
-add_dependencies(compiler-lib intrinsics_gen runtime-lib)
+add_dependencies(compiler-lib intrinsics_gen)
 
 add_executable(compiler-tests test/ast_codegen.cpp test/backend.cpp test/test-main.cpp)
 add_executable(compiler-drv driver.cpp)
