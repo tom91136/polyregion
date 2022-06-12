@@ -1,0 +1,42 @@
+name: macOS
+
+on:
+  pull_request:
+  push:
+  release:
+    types: published
+
+jobs:
+  build:
+    runs-on: macos-11.0
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Install dependencies
+        run: brew install llvm cmake ninja
+
+      - name: Configure release build
+        shell: bash
+        working-directory: ./native
+        run: ./build.sh configure .
+
+      - name: Release build shim
+        shell: bash
+        working-directory: ./native
+        run: ./build.sh build polyregion-shim-jvm
+
+      - name: Release build runtime
+        shell: bash
+        working-directory: ./native
+        run: ./build.sh build polyregion-runtime-jvm
+
+      - name: Release build compiler
+        shell: bash
+        working-directory: ./native
+        run: ./build.sh build polyregion-compiler-jvm
+
+      - name: Check artefact
+        shell: bash
+        working-directory: ./native
+        run: file build-linux-x86_64/bindings/jvm/*
