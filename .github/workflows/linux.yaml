@@ -12,7 +12,8 @@ jobs:
     container:
       image: centos:7
     steps:
-
+      - uses: actions/checkout@v2
+      
       - name: Cache compiler
         if: ${{ !env.ACT }}
         id: prepare-compilers
