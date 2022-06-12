@@ -15,7 +15,7 @@ export_var() {
 
 {
   yum -y install centos-release-scl epel-release
-  yum -y install devtoolset-10 ninja-build git java-1.8.0-openjdk-devel
+  yum -y install devtoolset-10 ninja-build git java-1.8.0-openjdk-devel python3
 } &
 {
   curl -LO "https://github.com/llvm/llvm-project/releases/download/llvmorg-$LLVM_VERSION/llvm-project-$LLVM_VERSION.src.tar.xz"
