@@ -13,36 +13,31 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-          - name: Cache LLVM
-            if: ${{ !env.ACT }}
-            id: prepare-llvm
-            uses: actions/cache@v3
-            with:
-              path: ./native/llvm
-              key: ${{ runner.os }}-${{ hashFiles('./native/build_llvm.cmake') }}
+      - name: Cache LLVM
+        if: ${{ !env.ACT }}
+        id: prepare-llvm
+        uses: actions/cache@v3
+        with:
+          path: ./native/llvm
+          key: ${{ runner.os }}-${{ hashFiles('./native/build_llvm.cmake') }}
 
       - name: Configure release build
-        shell: bash
         working-directory: ./native
         run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=CONFIGURE -P build.cmake
 
       - name: Release build shim
-        shell: bash
         working-directory: ./native
         run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-shim-jvm -P build.cmake
 
       - name: Release build runtime
-        shell: bash
         working-directory: ./native
         run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-runtime-jvm -P build.cmake
 
       - name: Release build compiler
-        shell: bash
         working-directory: ./native
         run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-compiler-jvm -P build.cmake
 
       - name: Check artefact
-        shell: bash
         working-directory: ./native
         run: ls -lah build-windows-x86_64/bindings/jvm
 
