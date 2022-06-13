@@ -39,6 +39,13 @@ configure)
   *) LINKER="$(which ld.lld)" ;;
   esac
 
+  "$CMAKE_BIN" \
+    -DCMAKE_CXX_COMPILER="${CXX}" \
+    -DCMAKE_C_COMPILER="${CC}" \
+    -DUSE_LINKER="${LINKER}" \
+    -DBUILD_SHARED_LIBS=OFF \
+    -P build_llvm.cmake
+
   "$CMAKE_BIN" "-B$BUILD" -S "$SOURCE" \
     -DCMAKE_C_COMPILER="${CC}" \
     -DCMAKE_CXX_COMPILER="${CXX}" \

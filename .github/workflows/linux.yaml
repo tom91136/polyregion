@@ -18,6 +18,14 @@ jobs:
         shell: bash
         run: cd /root; source /centos7-setup-llvm.sh env || true
 
+      - name: Cache LLVM
+        if: ${{ !env.ACT }}
+        id: prepare-llvm
+        uses: actions/cache@v2
+        with:
+          path: ./native/llvm
+          key: ${{ runner.os }}-${{ hashFiles('./native/build_llvm.cmake') }}
+
       - name: Configure release build
         shell: bash
         working-directory: ./native

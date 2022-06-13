@@ -1,0 +1,92 @@
+include(ProjectConfig.cmake)
+
+set(LLVM_BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/llvm)
+
+file(DOWNLOAD
+        ${LLVM_SOURCE_URL}
+        ${LLVM_BUILD_DIR}/llvm-${LLVM_SRC_VERSION}.src.tar.xz
+        EXPECTED_HASH SHA256=${LLVM_SOURCE_SHA256}
+        )
+
+file(ARCHIVE_EXTRACT INPUT ${LLVM_BUILD_DIR}/llvm-${LLVM_SRC_VERSION}.src.tar.xz DESTINATION "${LLVM_BUILD_DIR}")
+
+if (UNIX AND NOT APPLE)
+    set(USE_LTO Thin)
+    set(USE_STATIC_CXX_STDLIB ON)
+else ()
+    set(USE_LTO OFF)
+    set(USE_STATIC_CXX_STDLIB OFF)
+endif ()
+
+
+set(LLVM_OPTIONS
+
+        -DLLVM_BUILD_DOCS=OFF
+        -DLLVM_BUILD_TOOLS=OFF
+        -DLLVM_BUILD_TESTS=OFF
+        -DLLVM_BUILD_RUNTIME=OFF
+        -DLLVM_BUILD_EXAMPLES=OFF
+        -DLLVM_BUILD_BENCHMARKS=OFF
+
+        -DLLVM_INCLUDE_DOCS=OFF
+        -DLLVM_INCLUDE_TOOLS=OFF
+        -DLLVM_INCLUDE_TESTS=OFF
+        -DLLVM_INCLUDE_EXAMPLES=OFF
+        -DLLVM_INCLUDE_BENCHMARKS=OFF
+
+        -DLLVM_ENABLE_RTTI=OFF
+        -DLLVM_ENABLE_BINDINGS=OFF
+        -DLLVM_ENABLE_ZLIB=OFF
+        -DLLVM_ENABLE_LIBXML2=OFF
+        -DLLVM_ENABLE_LIBPFM=OFF
+        -DLLVM_ENABLE_TERMINFO=OFF
+        -DLLVM_ENABLE_UNWIND_TABLES=OFF
+        -DLLVM_ENABLE_IDE=ON
+        -DLLVM_ENABLE_THREADS=ON
+        -DLLVM_ENABLE_LTO=${USE_LTO}
+        -DLLVM_USE_LINKER=${USE_LINKER}
+
+        -DLLVM_INSTALL_UTILS=OFF
+        -DLLVM_USE_HOST_TOOLS=OFF
+        -DLLVM_STATIC_LINK_CXX_STDLIB=${USE_STATIC_CXX_STDLIB}
+
+        "-DLLVM_TARGETS_TO_BUILD=X86\;AArch64\;ARM\;NVPTX\;AMDGPU" # quote this because of the semicolons
+        )
+
+message(STATUS "${CONFIGURE_COMMAND}")
+
+execute_process(
+        COMMAND ${CMAKE_COMMAND}
+        -S ${LLVM_BUILD_DIR}/llvm-${LLVM_SRC_VERSION}.src
+        -B ${LLVM_BUILD_DIR}
+        ${LLVM_OPTIONS}
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+        -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+        -DCMAKE_VERBOSE_MAKEFILE=ON
+        -DBUILD_SHARED_LIBS=${BUILD_SHARED_LIBS}
+        -GNinja
+
+        WORKING_DIRECTORY ${LLVM_BUILD_DIR}
+        COMMAND_ECHO STDERR
+        RESULT_VARIABLE SUCCESS)
+
+if (NOT SUCCESS EQUAL "0")
+    message(FATAL_ERROR "LLVM configure did not succeed")
+else ()
+    message(STATUS "LLVm configuration complete, starting build...")
+endif ()
+
+
+execute_process(
+        COMMAND ${CMAKE_COMMAND} --build ${LLVM_BUILD_DIR}
+        WORKING_DIRECTORY ${LLVM_BUILD_DIR}
+        RESULT_VARIABLE SUCCESS)
+
+if (NOT SUCCESS EQUAL "0")
+    message(FATAL_ERROR "LLVM build did not succeed")
+else ()
+    message(STATUS "LLVM build complete!")
+endif ()
+
+

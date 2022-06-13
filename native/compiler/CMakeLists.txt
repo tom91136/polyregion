@@ -25,32 +25,10 @@ target_include_directories(compiler-tests PUBLIC . ../include)
 target_include_directories(compiler-drv PUBLIC . ../include PRIVATE ../runtime)
 target_include_directories(compiler-lib PUBLIC
         ${LLVM_INCLUDE_DIRS}
+        ${LLD_INCLUDE_DIRS}
         ${json_SOURCE_DIR}
         . ../include
         )
-
-
-#target_precompile_headers(compiler
-#        PRIVATE
-#        generated/polyast.h
-#        variants.hpp
-#        utils.hpp
-#        llc.cpp
-#        ${json_SOURCE_DIR}/json.hpp
-#        <cstdint>
-#        <iterator>
-#        <memory>
-#        <string>
-#        <variant>
-#        <vector>
-#        <fstream>
-#        <functional>
-#        <iostream>
-#        <numeric>
-#        <sstream>
-#        <stdexcept>
-#        )
-
 
 llvm_map_components_to_libnames(LLVM_LIBS
         #        core
