@@ -24,22 +24,30 @@ jobs:
       - name: Configure release build
         shell: cmd
         working-directory: ./native
-        run: call setup_msvc_env.bat && cmake -DCMAKE_BUILD_TYPE=Release -DACTION=CONFIGURE -P build.cmake
+        run: |
+          call setup_msvc_env.bat 
+          cmake -DCMAKE_BUILD_TYPE=Release -DACTION=CONFIGURE -P build.cmake
 
       - name: Release build shim
         shell: cmd
         working-directory: ./native
-        run: call setup_msvc_env.bat && cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-shim-jvm -P build.cmake
+        run: |
+          call setup_msvc_env.bat 
+          cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-shim-jvm -P build.cmake
 
       - name: Release build runtime
         shell: cmd
         working-directory: ./native
-        run: call setup_msvc_env.bat && cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-runtime-jvm -P build.cmake
+        run: |
+          call setup_msvc_env.bat 
+          cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-runtime-jvm -P build.cmake
 
       - name: Release build compiler
         shell: cmd
         working-directory: ./native
-        run: call setup_msvc_env.bat && cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-compiler-jvm -P build.cmake
+        run: |
+          call setup_msvc_env.bat 
+          cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-compiler-jvm -P build.cmake
 
       - name: Check artefact
         shell: cmd
