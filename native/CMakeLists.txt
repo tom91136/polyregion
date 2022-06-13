@@ -69,8 +69,8 @@ endif ()
 if (MSVC)
     # TODO Enable Asan on Windows if possible
     set(COMMON_DEBUG_OPTIONS -fno-omit-frame-pointer)
-#    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-    #    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Release>:Release>")
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Release>:Release>")
 else ()
     # FIXME adjust for CUDA stuff for now
     #    set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan)
@@ -227,11 +227,11 @@ if (NOT lld_POPULATED)
 
     endmacro(add_lld_library)
 
-#    if (MSVC)
+    #    if (MSVC)
     # Windows have atomics without lib
-        set(HAVE_CXX_ATOMICS64_WITHOUT_LIB ON)
-        set(HAVE_CXX_ATOMICS_WITHOUT_LIB ON)
-#    endif ()
+    set(HAVE_CXX_ATOMICS64_WITHOUT_LIB ON)
+    set(HAVE_CXX_ATOMICS_WITHOUT_LIB ON)
+    #    endif ()
 
 
     set(LLVM_TABLEGEN_FLAGS "${LLVM_INCLUDE_DIRS}")
