@@ -1,5 +1,5 @@
 @echo off
-setlocal enabledelayedexpansion
+::setlocal enabledelayedexpansion
 
 if "%GITHUB_ENV%"=="" (
   set "VC=C:\Program Files\Microsoft Visual Studio\2022\Community"
