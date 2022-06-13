@@ -69,7 +69,7 @@ endif ()
 if (MSVC)
     # TODO Enable Asan on Windows if possible
     set(COMMON_DEBUG_OPTIONS -fno-omit-frame-pointer)
-    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+#    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     #    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Release>:Release>")
 else ()
     # FIXME adjust for CUDA stuff for now
@@ -227,10 +227,11 @@ if (NOT lld_POPULATED)
 
     endmacro(add_lld_library)
 
-    if (MSVC)
+#    if (MSVC)
+    # Windows have atomics without lib
         set(HAVE_CXX_ATOMICS64_WITHOUT_LIB ON)
         set(HAVE_CXX_ATOMICS_WITHOUT_LIB ON)
-    endif ()
+#    endif ()
 
 
     set(LLVM_TABLEGEN_FLAGS "${LLVM_INCLUDE_DIRS}")
@@ -242,6 +243,10 @@ if (NOT lld_POPULATED)
             ${lld_BINARY_DIR}/Common
             "${LLVM_INCLUDE_DIRS}"
             )
+    if (UNIX AND NOT APPLE)
+        target_link_libraries(lldCommon PUBLIC atomic.a)
+    endif ()
+
 
     add_subdirectory(${lld_SOURCE_DIR}/ELF ${lld_BINARY_DIR}/ELF)
     target_include_directories(lldELF BEFORE PUBLIC

@@ -27,7 +27,7 @@ setup_env() {
 
 setup_build() {
   yum -y install centos-release-scl epel-release
-  yum -y install devtoolset-10 ninja-build git java-1.8.0-openjdk-devel python3
+  yum -y install devtoolset-10 ninja-build git java-1.8.0-openjdk-devel python3 libatomic-static
 }
 
 ACTION=${1:?}
