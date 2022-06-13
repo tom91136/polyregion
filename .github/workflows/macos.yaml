@@ -14,10 +14,12 @@ jobs:
       - uses: actions/checkout@v2
 
       - name: Install dependencies
-        run: brew install llvm cmake ninja
-
-      - name: Export JAVA_HOME
-        run: echo "JAVA_HOME=${JAVA_HOME_8_X64}" >> "$GITHUB_ENV"
+        run: |
+          brew install llvm cmake ninja
+          echo "JAVA_HOME=${JAVA_HOME_8_X64}" >> "$GITHUB_ENV"
+          echo "CXX=clang++" >> $GITHUB_ENV
+          echo "CC=clang"    >> $GITHUB_ENV
+          echo "LINKER=ld64" >> $GITHUB_ENV
 
       - name: Cache LLVM
         if: ${{ !env.ACT }}

@@ -16,7 +16,11 @@ jobs:
 
       - name: Setup env
         shell: bash
-        run: cd /root; source /centos7-setup-llvm.sh env || true
+        run: |
+          cd /root; source /centos7-setup-llvm.sh env || true
+          echo "CXX=clang++" >> $GITHUB_ENV
+          echo "CC=clang"    >> $GITHUB_ENV
+          echo "LINKER=lld"  >> $GITHUB_ENV
 
       - name: Cache LLVM
         if: ${{ !env.ACT }}
