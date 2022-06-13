@@ -17,9 +17,9 @@ jobs:
         run: |
           brew install llvm cmake ninja
           echo "JAVA_HOME=${JAVA_HOME_8_X64}" >> "$GITHUB_ENV"
-          echo "CXX=clang++" >> $GITHUB_ENV
-          echo "CC=clang"    >> $GITHUB_ENV
-          echo "LINKER=ld64" >> $GITHUB_ENV
+          echo "CXX=/usr/local/opt/llvm/bin/clang++" >> $GITHUB_ENV
+          echo "CC=/usr/local/opt/llvm/bin/clang"    >> $GITHUB_ENV
+          echo "LINKER=$(which ld)"                  >> $GITHUB_ENV
 
       - name: Cache LLVM
         if: ${{ !env.ACT }}

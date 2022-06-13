@@ -22,18 +22,25 @@ function(check_process_return VALUE NAME)
     endif ()
 endfunction()
 
+if (DEFINED ENV{CXX})
+    SET(BUILD_OPTIONS ${BUILD_OPTIONS} -DCMAKE_CXX_COMPILER=$ENV{CXX})
+endif ()
+if (DEFINED ENV{CC})
+    SET(BUILD_OPTIONS ${BUILD_OPTIONS} -DCMAKE_C_COMPILER=$ENV{CC})
+endif ()
+if (DEFINED ENV{LINKER})
+    SET(BUILD_OPTIONS ${BUILD_OPTIONS} -DUSE_LINKER=$ENV{LINKER})
+endif ()
+
+
 if (ACTION STREQUAL "CONFIGURE")
     message(STATUS "Starting configuration...")
-
 
     message(STATUS "Starting LLVM build...")
     execute_process(
             COMMAND ${CMAKE_COMMAND}
-            -DCMAKE_CXX_COMPILER=$ENV{CXX}
-            -DCMAKE_C_COMPILER=$ENV{CC}
+            ${BUILD_OPTIONS}
             -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-            -DUSE_LINKER=$ENV{LINKER}
-            -DBUILD_SHARED_LIBS=OFF
             -P build_llvm.cmake
             COMMAND_ECHO STDERR
             RESULT_VARIABLE SUCCESS)
@@ -44,10 +51,8 @@ if (ACTION STREQUAL "CONFIGURE")
             COMMAND ${CMAKE_COMMAND}
             -B "${BUILD_NAME}"
             -S .
-            -DCMAKE_CXX_COMPILER=$ENV{CXX}
-            -DCMAKE_C_COMPILER=$ENV{CC}
+            ${BUILD_OPTIONS}
             -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-            -DUSE_LINKER=$ENV{LINKER}
             -GNinja
 
             COMMAND_ECHO STDERR

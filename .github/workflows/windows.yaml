@@ -21,14 +21,6 @@ jobs:
           path: ./native/llvm
           key: ${{ runner.os }}-${{ hashFiles('./native/build_llvm.cmake') }}
 
-      - name: Setup env
-        working-directory: ./native
-        shell: pwsh
-        run: |
-          echo "CXX=cl.exe"    | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
-          echo "CC=cl.exe"     | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
-          echo "LINKER=cl.exe" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
-
       - name: Configure release build
         working-directory: ./native
         run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=CONFIGURE -P build.cmake

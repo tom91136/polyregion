@@ -60,7 +60,6 @@ set(LLVM_OPTIONS
         -DLLVM_ENABLE_IDE=ON
         -DLLVM_ENABLE_THREADS=ON
         -DLLVM_ENABLE_LTO=${USE_LTO}
-        -DLLVM_USE_LINKER=${USE_LINKER}
 
         -DLLVM_INSTALL_UTILS=OFF
         -DLLVM_USE_HOST_TOOLS=OFF
@@ -69,7 +68,15 @@ set(LLVM_OPTIONS
         "-DLLVM_TARGETS_TO_BUILD=X86\;AArch64\;ARM\;NVPTX\;AMDGPU" # quote this because of the semicolons
         )
 
-message(STATUS "${CONFIGURE_COMMAND}")
+if (CMAKE_CXX_COMPILER)
+    SET(BUILD_OPTIONS ${BUILD_OPTIONS} -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER})
+endif ()
+if (CMAKE_C_COMPILER)
+    SET(BUILD_OPTIONS ${BUILD_OPTIONS} -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER})
+endif ()
+if (USE_LINKER)
+    SET(BUILD_OPTIONS ${BUILD_OPTIONS} -DLLVM_USE_LINKER=${USE_LINKER})
+endif ()
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(BUILD_SHARED_LIBS ON)
@@ -82,9 +89,8 @@ execute_process(
         -S ${LLVM_BUILD_DIR}/llvm-${LLVM_SRC_VERSION}.src
         -B ${LLVM_BUILD_DIR}
         ${LLVM_OPTIONS}
+        ${BUILD_OPTIONS}
         -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-        -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-        -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
         -DCMAKE_VERBOSE_MAKEFILE=ON
         -DBUILD_SHARED_LIBS=${BUILD_SHARED_LIBS}
         -GNinja
@@ -96,7 +102,7 @@ execute_process(
 if (NOT SUCCESS EQUAL "0")
     message(FATAL_ERROR "LLVM configure did not succeed")
 else ()
-    message(STATUS "LLVm configuration complete, starting build...")
+    message(STATUS "LLVM configuration complete, starting build...")
 endif ()
 
 
