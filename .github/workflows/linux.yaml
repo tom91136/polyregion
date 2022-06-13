@@ -12,7 +12,7 @@ jobs:
     container:
       image: tom91136/centos7-llvm14:latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
 
       - name: Setup env
         shell: bash
@@ -21,7 +21,7 @@ jobs:
       - name: Cache LLVM
         if: ${{ !env.ACT }}
         id: prepare-llvm
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: ./native/llvm
           key: ${{ runner.os }}-${{ hashFiles('./native/build_llvm.cmake') }}
@@ -29,22 +29,22 @@ jobs:
       - name: Configure release build
         shell: bash
         working-directory: ./native
-        run: ./build.sh configure .
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=CONFIGURE -P build.cmake
 
       - name: Release build shim
         shell: bash
         working-directory: ./native
-        run: ./build.sh build polyregion-shim-jvm
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-shim-jvm -P build.cmake
 
       - name: Release build runtime
         shell: bash
         working-directory: ./native
-        run: ./build.sh build polyregion-runtime-jvm
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-runtime-jvm -P build.cmake
 
       - name: Release build compiler
         shell: bash
         working-directory: ./native
-        run: ./build.sh build polyregion-compiler-jvm
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-compiler-jvm -P build.cmake
 
       - name: Check artefact
         shell: bash

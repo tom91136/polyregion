@@ -2,13 +2,29 @@ include(ProjectConfig.cmake)
 
 set(LLVM_BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/llvm)
 
-file(DOWNLOAD
-        ${LLVM_SOURCE_URL}
-        ${LLVM_BUILD_DIR}/llvm-${LLVM_SRC_VERSION}.src.tar.xz
-        EXPECTED_HASH SHA256=${LLVM_SOURCE_SHA256}
-        )
 
-file(ARCHIVE_EXTRACT INPUT ${LLVM_BUILD_DIR}/llvm-${LLVM_SRC_VERSION}.src.tar.xz DESTINATION "${LLVM_BUILD_DIR}")
+set(DOWNLOAD_LLVM OFF)
+if (EXISTS ${LLVM_BUILD_DIR}/llvm-${LLVM_SRC_VERSION}.src.tar.xz)
+    file(SHA256 ${LLVM_BUILD_DIR}/llvm-${LLVM_SRC_VERSION}.src.tar.xz EXISTING_HASH)
+    if (NOT "${EXISTING_HASH}" STREQUAL "${LLVM_SOURCE_SHA256}")
+        message(STATUS "LLVM source hash did not match, downloading a fresh copy...")
+        set(DOWNLOAD_LLVM ON)
+    endif ()
+else ()
+    set(DOWNLOAD_LLVM ON)
+endif ()
+
+
+if (DOWNLOAD_LLVM)
+    message(STATUS "Downloading LLVM source...")
+    file(DOWNLOAD
+            ${LLVM_SOURCE_URL}
+            ${LLVM_BUILD_DIR}/llvm-${LLVM_SRC_VERSION}.src.tar.xz
+            EXPECTED_HASH SHA256=${LLVM_SOURCE_SHA256}
+            )
+    file(ARCHIVE_EXTRACT INPUT ${LLVM_BUILD_DIR}/llvm-${LLVM_SRC_VERSION}.src.tar.xz DESTINATION "${LLVM_BUILD_DIR}")
+endif ()
+
 
 if (UNIX AND NOT APPLE)
     set(USE_LTO Thin)
@@ -55,12 +71,18 @@ set(LLVM_OPTIONS
 
 message(STATUS "${CONFIGURE_COMMAND}")
 
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(BUILD_SHARED_LIBS ON)
+else ()
+    set(BUILD_SHARED_LIBS OFF)
+endif ()
+
 execute_process(
         COMMAND ${CMAKE_COMMAND}
         -S ${LLVM_BUILD_DIR}/llvm-${LLVM_SRC_VERSION}.src
         -B ${LLVM_BUILD_DIR}
         ${LLVM_OPTIONS}
-        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
         -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
         -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
         -DCMAKE_VERBOSE_MAKEFILE=ON

@@ -19,27 +19,35 @@ jobs:
       - name: Export JAVA_HOME
         run: echo "JAVA_HOME=${JAVA_HOME_8_X64}" >> "$GITHUB_ENV"
 
+      - name: Cache LLVM
+        if: ${{ !env.ACT }}
+        id: prepare-llvm
+        uses: actions/cache@v2
+        with:
+          path: ./native/llvm
+          key: ${{ runner.os }}-${{ hashFiles('./native/build_llvm.cmake') }}
+
       - name: Configure release build
         shell: bash
         working-directory: ./native
-        run: ./build.sh configure .
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=CONFIGURE -P build.cmake
 
       - name: Release build shim
         shell: bash
         working-directory: ./native
-        run: ./build.sh build polyregion-shim-jvm
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-shim-jvm -P build.cmake
 
       - name: Release build runtime
         shell: bash
         working-directory: ./native
-        run: ./build.sh build polyregion-runtime-jvm
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-runtime-jvm -P build.cmake
 
       - name: Release build compiler
         shell: bash
         working-directory: ./native
-        run: ./build.sh build polyregion-compiler-jvm
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-compiler-jvm -P build.cmake
 
       - name: Check artefact
         shell: bash
         working-directory: ./native
-        run: ls -lah build-linux-x86_64/bindings/jvm
+        run: ls -lah build-darwin-x86_64/bindings/jvm

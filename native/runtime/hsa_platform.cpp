@@ -377,12 +377,12 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
 // XXX not entirely sure why the header needs to be done like this but not anything else
 // See:
 // https://github.com/HSAFoundation/HSA-Runtime-AMD/blob/0579a4f41cc21a76eff8f1050833ef1602290fcc/sample/vector_copy.c#L323
-#ifdef __APPLE__
-  // XXX Apple doesn't implement atomic_ref yet, remove this in the future
-  __atomic_store_n((uint16_t *)(&dispatch->header), header, __ATOMIC_RELEASE);
-#else
+#ifdef _MSC_VER
   std::atomic_ref<uint16_t> headerRef(dispatch->header);
   headerRef.store(header, std::memory_order_release);
+#else
+  // XXX Many *nix systems doesn't implement atomic_ref yet, remove this in the future
+  __atomic_store_n((uint16_t *)(&dispatch->header), header, __ATOMIC_RELEASE);
 #endif
 
   hsa_queue_store_write_index_relaxed(queue, index + 1);
