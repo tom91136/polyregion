@@ -50,8 +50,8 @@ jobs:
           cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-compiler-jvm -P build.cmake
 
       - name: Check artefact
-        shell: cmd
+        shell: pwsh
         working-directory: ./native
-        run: dir build-windows-x86_64/bindings/jvm
+        run: ls .\build-windows-x86_64\bindings\jvm\ | Select-Object Name, @{Name="MegaBytes";Expression={$_.Length / 1MB}}
 
  
