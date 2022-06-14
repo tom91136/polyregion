@@ -243,10 +243,6 @@ if (NOT lld_POPULATED)
             ${lld_BINARY_DIR}/Common
             "${LLVM_INCLUDE_DIRS}"
             )
-    if (UNIX AND NOT APPLE)
-        target_link_libraries(lldCommon PUBLIC atomic.a)
-    endif ()
-
 
     add_subdirectory(${lld_SOURCE_DIR}/ELF ${lld_BINARY_DIR}/ELF)
     target_include_directories(lldELF BEFORE PUBLIC
