@@ -51,7 +51,6 @@ static std::string resolveDlError() {
 
 jlong Natives::dynamicLibraryLoad0(JNIEnv *env, jclass, jstring name) {
   auto str = fromJni(env, name);
-  fprintf(stdout, "dlopen %s\n", str.c_str());
   if (auto dylib = polyregion_dl_open(str.c_str()); !dylib) {
     throwGeneric(env, EX, "Cannot load library `" + str + "` :" + resolveDlError());
     return {};
@@ -60,21 +59,16 @@ jlong Natives::dynamicLibraryLoad0(JNIEnv *env, jclass, jstring name) {
     if (f) {
       ((jint(*)(JavaVM *, void *))(f))(CurrentVM, nullptr);
     }
-    fprintf(stdout, "h = %p\n", f);
-
     return reinterpret_cast<jlong>(dylib);
   }
 }
 
 void Natives::dynamicLibraryRelease0(JNIEnv *env, jclass, jlong handle) {
-
   auto typedHandle = reinterpret_cast<polyregion_dl_handle>(handle);
-
   void *f = polyregion_dl_find(typedHandle, "JNI_OnUnload");
   if (f) {
     ((void (*)(JavaVM *, void *))(f))(CurrentVM, nullptr);
   }
-
   if (auto code = polyregion_dl_close(typedHandle); code != 0) {
     throwGeneric(env, EX, "Cannot unload module:" + resolveDlError());
   }

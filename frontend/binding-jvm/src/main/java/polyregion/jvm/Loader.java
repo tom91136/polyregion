@@ -109,7 +109,7 @@ public final class Loader {
 
     // TODO remove for prod
     Path[] paths = {
-      Paths.get("../native/build-" + platform + "/bindings/jvm/"),
+//      Paths.get("../native/build-" + platform + "/bindings/jvm/"),
       Paths.get("../native/cmake-build-release-clang/bindings/jvm/"),
       Paths.get("../native/cmake-build-debug-clang/bindings/jvm/"),
       Paths.get("../../native/build-" + platform + "/bindings/jvm/"),

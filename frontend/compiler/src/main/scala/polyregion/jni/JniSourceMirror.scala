@@ -338,14 +338,23 @@ object JniSourceMirror {
 		 |${constants.map(c => s"$c;").mkString("\n")}
          |${prototypes.map(p => s"[[maybe_unused]] $p;").mkString("\n")}
 		 |
+		 |static jclass clazz{};
+		 |
+         |static void unregisterMethods(JNIEnv *env) {
+         |  if (!clazz) return;
+         |  env->UnregisterNatives(clazz);
+         |  env->DeleteGlobalRef(clazz);
+         |  clazz = nullptr;
+         |}
+		 |
          |static void registerMethods(JNIEnv *env) {
-         |  auto clazz = env->FindClass("$jniName");
+         |  if (clazz) unregisterMethods(env);
+         |  clazz = reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("$jniName")));
          |  static JNINativeMethod methods[] = {
          |${registerEntries.map("      " + _).mkString(",\n")}};
          |  env->RegisterNatives(clazz, methods, ${registerEntries.length});
          |}
-		 |
-		 |static void unregisterMethods(JNIEnv *env) { env->UnregisterNatives(env->FindClass("$jniName")); }
+         |
          |} // namespace polyregion::generated::registry::$clsName""".stripMargin
 
     clsName -> header

@@ -221,10 +221,12 @@ object Target {
   object NVPTX64 {
     inline def apply[A <: SString](inline uarch: A) = new NVPTX64(uarch) { override type UArch = A }
     final val SM61                                  = NVPTX64("sm_61")
+    final val SM80                                  = NVPTX64("sm_80")
   }
   object AMDGCN {
     inline def apply[A <: SString](inline uarch: A) = new AMDGCN(uarch) { override type UArch = A }
     final val gfx906                                = AMDGCN("gfx906")
+    final val gfx803                                = AMDGCN("gfx803")
   }
   object SPIRV64 {
     inline def apply[A <: SString](inline uarch: A) = new SPIRV64(uarch) { override type UArch = A }
@@ -251,6 +253,7 @@ private[scala] object Platforms {
 
 inline def liftCUDA[F[_]](lift: Suspend[F]): Platform[F, Target.NVPTX64]    = Platform(Platforms.CUDA(), lift)
 inline def liftHIP[F[_]](lift: Suspend[F]): Platform[F, Target.AMDGCN]      = Platform(Platforms.HIP(), lift)
+inline def liftHSA[F[_]](lift: Suspend[F]): Platform[F, Target.AMDGCN]      = Platform(Platforms.HSA(), lift)
 inline def liftOpenCL[F[_]](lift: Suspend[F]): Platform[F, Target.OpenCL_C] = Platform(Platforms.OpenCL(), lift)
 inline def liftHost[F[_]](lift: Suspend[F]): Device[F, Target.CPU] = Device(Platforms.Relocatable().devices()(0), lift)
 
@@ -273,6 +276,7 @@ object blocking {
 
   lazy val CUDA: Platform[Id, Target.NVPTX64]    = liftCUDA(Latched)
   lazy val HIP: Platform[Id, Target.AMDGCN]      = liftHIP(Latched)
+  lazy val HSA: Platform[Id, Target.AMDGCN]      = liftHSA(Latched)
   lazy val OpenCL: Platform[Id, Target.OpenCL_C] = liftOpenCL(Latched)
   lazy val Host: Device[Id, Target.CPU]          = liftHost(Latched)
 

@@ -119,7 +119,6 @@ void CudaDevice::free(uintptr_t ptr) {
   context.touch();
   CHECKED(cuMemFree(ptr));
 }
-
 std::unique_ptr<DeviceQueue> CudaDevice::createQueue() {
   TRACE();
   context.touch();

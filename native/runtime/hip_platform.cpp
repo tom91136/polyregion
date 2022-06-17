@@ -67,15 +67,15 @@ HipDevice::HipDevice(int ordinal)
           ERROR_PREFIX,
           [this](auto &&s) {
             TRACE();
-            hipModule_t module;
             context.touch();
+            hipModule_t module;
             CHECKED(hipModuleLoadData(&module, s.data()));
             return module;
           },
           [this](auto &&m, auto &&name) {
             TRACE();
-            hipFunction_t fn;
             context.touch();
+            hipFunction_t fn;
             CHECKED(hipModuleGetFunction(&fn, m, name.c_str()));
             return fn;
           },
@@ -89,10 +89,7 @@ HipDevice::HipDevice(int ordinal)
   deviceName = detail::allocateAndTruncate(
       [&](auto &&data, auto &&length) { CHECKED(hipDeviceGetName(data, int_cast<int>(length), device)); });
 }
-HipDevice::~HipDevice() {
-  TRACE();
-  CHECKED(hipDevicePrimaryCtxRelease(device));
-}
+
 int64_t HipDevice::id() {
   TRACE();
   return device;
@@ -135,6 +132,7 @@ std::unique_ptr<DeviceQueue> HipDevice::createQueue() {
   context.touch();
   return std::make_unique<HipDeviceQueue>(store);
 }
+HipDevice::~HipDevice() { TRACE(); }
 
 // ---
 
@@ -157,6 +155,7 @@ void HipDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
       },
       detail::CountedCallbackHandler::createHandle(*cb), 0));
 }
+
 void HipDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
   TRACE();
   CHECKED(hipMemcpyHtoDAsync(dst, src, size, stream));

@@ -273,11 +273,11 @@ void run() {
   //    std::cerr << "[OCL] " << e.what() << std::endl;
   //  }
 
-  try {
-    rts.push_back(std::make_unique<HsaPlatform>());
-  } catch (const std::exception &e) {
-    std::cerr << "[HSA] " << e.what() << std::endl;
-  }
+//  try {
+//    rts.push_back(std::make_unique<HsaPlatform>());
+//  } catch (const std::exception &e) {
+//    std::cerr << "[HSA] " << e.what() << std::endl;
+//  }
 
       try {
         rts.push_back(std::make_unique<HipPlatform>());

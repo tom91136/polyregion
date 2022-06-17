@@ -28,6 +28,8 @@ public final class Platforms implements AutoCloseable {
 
   static native Platform HIP0();
 
+  static native Platform HSA0();
+
   static native Platform OpenCL0();
 
   static native Platform Relocatable0();
@@ -60,6 +62,10 @@ public final class Platforms implements AutoCloseable {
   public Platform HIP() {
     return HIP0();
   }
+
+  public Platform HSA() {
+		return HSA0();
+	}
 
   public Platform OpenCL() {
     return OpenCL0();

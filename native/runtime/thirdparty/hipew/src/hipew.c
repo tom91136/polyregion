@@ -283,11 +283,11 @@ static int hipewHipInit(void) {
 
   initialized = 1;
 
-  error = atexit(hipewHipExit);
-  if (error) {
-    result = HIPEW_ERROR_ATEXIT_FAILED;
-    return result;
-  }
+//  error = atexit(hipewHipExit);
+//  if (error) {
+//    result = HIPEW_ERROR_ATEXIT_FAILED;
+//    return result;
+//  }
 
 #ifdef _WIN32
   /* Test for driver version. */

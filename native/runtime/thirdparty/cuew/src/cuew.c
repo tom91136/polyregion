@@ -353,11 +353,11 @@ static int cuewCudaInit(void) {
 
  initialized = 1;
 
- error = atexit(cuewCudaExit);
- if (error) {
-   result = CUEW_ERROR_ATEXIT_FAILED;
-   return result;
- }
+// error = atexit(cuewCudaExit);
+// if (error) {
+//   result = CUEW_ERROR_ATEXIT_FAILED;
+//   return result;
+// }
 
  /* Load library. */
  cuda_lib = dynamic_library_open_find(cuda_paths);

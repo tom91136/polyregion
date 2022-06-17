@@ -190,17 +190,17 @@ int clewInit()
         return CLEW_ERROR_OPEN_FAILED;
     }
 
-    //  Set unloading
-    error = atexit(clewExit);
-
-    if (error)
-    {
-        //  Failure queuing atexit, shutdown with error
-        CLEW_DYNLIB_CLOSE(module);
-        module = NULL;
-
-        return CLEW_ERROR_ATEXIT_FAILED;
-    }
+//    //  Set unloading
+//    error = atexit(clewExit);
+//
+//    if (error)
+//    {
+//        //  Failure queuing atexit, shutdown with error
+//        CLEW_DYNLIB_CLOSE(module);
+//        module = NULL;
+//
+//        return CLEW_ERROR_ATEXIT_FAILED;
+//    }
 
     //  Determine function entry-points
     __clewGetPlatformIDs                = (PFNCLGETPLATFORMIDS              )CLEW_DYNLIB_IMPORT(module, "clGetPlatformIDs");

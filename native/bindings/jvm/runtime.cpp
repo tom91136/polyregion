@@ -6,6 +6,7 @@
 
 #include "cl_platform.h"
 #include "cuda_platform.h"
+#include "hsa_platform.h"
 #include "generated/mirror.h"
 #include "generated/platform.h"
 #include "generated/platforms.h"
@@ -119,6 +120,7 @@ template <typename R> static jobject toJni(JNIEnv *env) {
 
 jobject Platforms::CUDA0(JNIEnv *env, jclass) { return toJni<rt::cuda::CudaPlatform>(env); }
 jobject Platforms::HIP0(JNIEnv *env, jclass) { return toJni<rt::hip::HipPlatform>(env); }
+jobject Platforms::HSA0(JNIEnv *env, jclass) { return toJni<rt::hsa::HsaPlatform>(env); }
 jobject Platforms::OpenCL0(JNIEnv *env, jclass) { return toJni<rt::cl::ClPlatform>(env); }
 jobject Platforms::Relocatable0(JNIEnv *env, jclass) { return toJni<rt::object::RelocatablePlatform>(env); }
 jobject Platforms::Dynamic0(JNIEnv *env, jclass) { return toJni<rt::object::SharedPlatform>(env); }

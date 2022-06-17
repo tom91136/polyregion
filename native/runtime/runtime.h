@@ -22,8 +22,8 @@
     #define __PRETTY_FUNCTION__ __FUNCSIG__
   #endif
 
-//  #define TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this, __PRETTY_FUNCTION__)
-  #define TRACE()
+  #define TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this, __PRETTY_FUNCTION__)
+//  #define TRACE()
 
 #endif
 
