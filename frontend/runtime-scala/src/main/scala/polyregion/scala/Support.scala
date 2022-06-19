@@ -5,7 +5,7 @@ import scala.math.Integral
 import scala.collection.immutable.ArraySeq
 import scala.collection.mutable
 
-object Runtime2 {
+object Support {
 
   inline def splitStatic(inline range: Range)(inline n: Int): Seq[Range] =
     if (range.isEmpty) Seq()
@@ -29,15 +29,7 @@ object Runtime2 {
       }
     }
 
+  inline def linearise(inline start: Int, inline step: Int)(inline index: Int) = start + (index * step)
 
-  new Array[Int](2)
-  enum BufferState{
-    case Async, Sync
-  }
-
-  // val buffer = Buffer[Foo] // derive...
-  //
-
-  // Map[AnyRef, ByteBuffer]
 
 }

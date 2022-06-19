@@ -101,15 +101,52 @@ object compiletime {
     expr <- generate(using Quoted(q))(cs, queue, f, '{ rt.Dim3(1, 1, 1) }, cb)
   } yield expr)
 
-  inline def offload1[C](inline queue: rt.Device.Queue, inline range: Range, inline cb: Callback[Unit])(
+  inline def offload1[C](inline queue: rt.Device.Queue, inline rangeX: Range, inline cb: Callback[Unit])(
       inline f: Any
-  ): Unit = ${ generate1[C]('queue, 'f, 'range, 'cb) }
+  ): Unit = ${ generate1[C]('queue, 'f, 'rangeX, 'cb) }
 
   private def generate1[C: Type](using
       q: Quotes
-  )(queue: Expr[rt.Device.Queue], f: Expr[Any], range: Expr[Range], cb: Expr[Callback[Unit]]) = checked(for {
+  )(queue: Expr[rt.Device.Queue], f: Expr[Any], rangeX: Expr[Range], cb: Expr[Callback[Unit]]) = checked(for {
     cs   <- reifyConfigFromTpe[C]()
-    expr <- generate(using Quoted(q))(cs, queue, f, '{ rt.Dim3(${ range }.size, 1, 1) }, cb)
+    expr <- generate(using Quoted(q))(cs, queue, f, '{ rt.Dim3($rangeX.size, 1, 1) }, cb)
+  } yield expr)
+
+  inline def offload2[C](
+      inline queue: rt.Device.Queue,
+      inline rangeX: Range,
+      inline rangeY: Range,
+      inline cb: Callback[Unit]
+  )(inline f: Any): Unit = ${ generate2[C]('queue, 'f, 'rangeX, 'rangeY, 'cb) }
+
+  private def generate2[C: Type](using
+      q: Quotes
+  )(queue: Expr[rt.Device.Queue], f: Expr[Any], rangeX: Expr[Range], rangeY: Expr[Range], cb: Expr[Callback[Unit]]) =
+    checked(for {
+      cs   <- reifyConfigFromTpe[C]()
+      expr <- generate(using Quoted(q))(cs, queue, f, '{ rt.Dim3($rangeX.size, $rangeY.size, 1) }, cb)
+    } yield expr)
+
+  inline def offload3[C](
+      inline queue: rt.Device.Queue,
+      inline rangeX: Range,
+      inline rangeY: Range,
+      inline rangeZ: Range,
+      inline cb: Callback[Unit]
+  )(inline f: Any): Unit = ${ generate3[C]('queue, 'f, 'rangeX, 'rangeY, 'rangeZ, 'cb) }
+
+  private def generate3[C: Type](using
+      q: Quotes
+  )(
+      queue: Expr[rt.Device.Queue],
+      f: Expr[Any],
+      rangeX: Expr[Range],
+      rangeY: Expr[Range],
+      rangeZ: Expr[Range],
+      cb: Expr[Callback[Unit]]
+  ) = checked(for {
+    cs   <- reifyConfigFromTpe[C]()
+    expr <- generate(using Quoted(q))(cs, queue, f, '{ rt.Dim3($rangeX.size, $rangeY.size, $rangeZ.size) }, cb)
   } yield expr)
 
   private def generate(using q: Quoted)(
@@ -135,10 +172,12 @@ object compiletime {
 
   } yield {
 
-    // println(s"Messages=\n  ${c.messages}")
-    // println(s"Features=\n  ${c.features.toList}")
-    // println(s"Program=${c.program.length}")
-    // println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
+    compilations.foreach { (config, c) =>
+      println(s"Program=${c.program.length}")
+      println(s"Messages=\n  ${c.messages}")
+      println(s"Features=\n  ${c.features.toList}")
+      println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
+    }
 
     given Quotes   = q.underlying
     val fnName     = Expr(prog.entry.name.repr)

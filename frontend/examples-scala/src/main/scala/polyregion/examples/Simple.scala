@@ -39,29 +39,6 @@ object Simple {
 
     val cow = Array(42, 100)
 
-    // offload("-O3") { 1+1 }
-
-    // Task API +JIT (multiple async dispatch supported; CPU=pooled, GPU=multiple command queue)
-    // import polyregion.scala.backends.{Host: Device, JVM: Device, GPU: Runtime}
-    //
-    // singular : device.task[A](a: => A)
-    // parallel :
-    //    device.foreach(x: Range)(f: Int => Unit)
-    //    device.foreachND(x: Range, l : Range)(f: Int => Unit)
-    //    device.foreach(Intel.Haswell, AMD.Znver2)(x: Range, y: Range)(f: (Int, Int) => Unit)
-    //    device.foreach(x: Range, y: Range, z: Range)(f: (Int, Int, Int) => Unit)
-    //    device.reduce[A](x: Range)(c: (A, A) => A)(f: Int => A)
-    //    device.reduce[A](x: Range, y: Range)(c: (A, A) => A)(f: (Int, Int) => A)
-    //    device.reduce[A](x: Range, y: Range, z: Range)(c: (A, A) => A)(f: (Int, Int, Int) => A)
-
-    //    device.reduce[A](combine : (A, A) => A)(x: Int)(f : Int => A)
-    //    device.reduce[A](combine : (A, A) => A)(x: Int, y: Int)(f : (Int, Int) => A)
-    //    device.reduce[A](combine : (A, A) => A)(x: Int, y: Int, z: Int)(f : (Int, Int, Int) => A)
-
-    //  collection extensions: extension (xs : Seq[T]) {  def offload(d: Device) ...  }
-
-    //  Task API AOT
-
     //  singular :
 
 //    val l = Local
@@ -75,15 +52,14 @@ object Simple {
     type M = Config[Target.NVPTX64.SM61.type, Opt.O0]
     type C = Config[Target.OpenCL_C.type, Opt.O0]
 
-    val result = CUDA.devices(0).aot.foreach[M](0 to n)(i => xs(i) = 42)  
+    val result = OpenCL.devices(0).aot.foreach[C](0 to n)(i => xs(i) = 42)
 
     // val result = OpenCL.devices(0).aot.task[Config[Target.OpenCL_C.type, Opt.O0], Int](42)
 
     // val result = HSA.devices(0).aot.task[Config[Target.AMDGCN.gfx803.type, Opt.O3], Int](42)
     // val result = HIP.devices(0).aot.task[Config[Target.AMDGCN.gfx803.type, Opt.O0], Int](42)
 
-    // val IL = Target.X86("generic")
-    // val result = Host.aot.task[Config[IL.type, Opt.O0], Int](42)
+    // val result = Host.aot.task[Config[Target.Host.type, Opt.O0], Int](42)
     println("     R  =" + result)
 
     // val Const  = scala.compiletime.constValue[Target.X86.Znver.Arch]

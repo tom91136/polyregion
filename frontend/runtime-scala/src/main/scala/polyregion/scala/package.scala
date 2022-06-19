@@ -80,13 +80,46 @@ trait AotOps[F[_], B](q: rt.Device.Queue, suspend: Suspend[F]) {
 
   inline def foreach[O <: B](inline x: Range)
   /*                     */ (inline f: Int => Unit): F[Unit] = suspend { cb =>
-    polyregion.scala.compiletime.offload1[O](q, x, cb) { f(polyregion.scala.intrinsics.gpuGlobalIdxX); () }
+    val startX = x.start
+    val stepX  = x.step
+    polyregion.scala.compiletime.offload1[O](q, x, cb) {
+      f(Support.linearise(startX, stepX)(polyregion.scala.intrinsics.gpuGlobalIdxX)) //
+      ()
+    }
   }
 
   inline def foreach[O <: B](inline x: Range, inline y: Range)
-  /*                     */ (inline f: (Int, Int) => Unit): this.type = ???
+  /*                     */ (inline f: (Int, Int) => Unit): F[Unit] = suspend { cb =>
+    val startX = x.start
+    val stepX  = x.step
+    val startY = y.start
+    val stepY  = y.step
+    polyregion.scala.compiletime.offload2[O](q, x, y, cb) {
+      f(
+        Support.linearise(startX, stepX)(polyregion.scala.intrinsics.gpuGlobalIdxX),
+        Support.linearise(startY, stepY)(polyregion.scala.intrinsics.gpuGlobalIdxY)
+      ) //
+      ()
+    }
+  }
+
   inline def foreach[O <: B](inline x: Range, inline y: Range, inline z: Range)
-  /*                     */ (inline f: (Int, Int, Int) => Unit): this.type = ???
+  /*                     */ (inline f: (Int, Int, Int) => Unit): F[Unit] = suspend { cb =>
+    val startX = x.start
+    val stepX  = x.step
+    val startY = y.start
+    val stepY  = y.step
+    val startZ = z.start
+    val stepZ  = z.step
+    polyregion.scala.compiletime.offload3[O](q, x, y, z, cb) {
+      f(
+        Support.linearise(startX, stepX)(polyregion.scala.intrinsics.gpuGlobalIdxX),
+        Support.linearise(startY, stepY)(polyregion.scala.intrinsics.gpuGlobalIdxY),
+        Support.linearise(startZ, stepZ)(polyregion.scala.intrinsics.gpuGlobalIdxZ)
+      ) //
+      ()
+    }
+  }
 
   inline def reduce[O <: B, A](inline x: Range)
   /*                       */ (inline f: Int => A)
