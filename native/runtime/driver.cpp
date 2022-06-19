@@ -67,7 +67,7 @@ const static uint8_t x86KernelSource[]{
     0x00, 0x00, 0x00, 0x00, 0x00};
 
 static const char *clKernelSource{R"CLC(
-__kernel void lambda(__global int* array, int x){
+__kernel void foo(__global int* array, int x){
   int tid = get_global_id(0);
   array[tid] = array[tid] + tid + x;
 }
@@ -267,23 +267,23 @@ void run() {
   //    std::cerr << "[CUDA] " << e.what() << std::endl;
   //  }
 
-  //  try {
-  //    rts.push_back(std::make_unique<ClPlatform>());
-  //  } catch (const std::exception &e) {
-  //    std::cerr << "[OCL] " << e.what() << std::endl;
-  //  }
+  try {
+    rts.push_back(std::make_unique<ClPlatform>());
+  } catch (const std::exception &e) {
+    std::cerr << "[OCL] " << e.what() << std::endl;
+  }
 
-//  try {
-//    rts.push_back(std::make_unique<HsaPlatform>());
-//  } catch (const std::exception &e) {
-//    std::cerr << "[HSA] " << e.what() << std::endl;
-//  }
+  try {
+    rts.push_back(std::make_unique<HsaPlatform>());
+  } catch (const std::exception &e) {
+    std::cerr << "[HSA] " << e.what() << std::endl;
+  }
 
-      try {
-        rts.push_back(std::make_unique<HipPlatform>());
-      } catch (const std::exception &e) {
-        std::cerr << "[HIP] " << e.what() << std::endl;
-      }
+  try {
+    rts.push_back(std::make_unique<HipPlatform>());
+  } catch (const std::exception &e) {
+    std::cerr << "[HIP] " << e.what() << std::endl;
+  }
 
   static std::vector<int> xs;
 
@@ -293,11 +293,12 @@ void run() {
     std::cout << "Found " << devices.size() << " devices" << std::endl;
 
     for (auto &d : devices) {
-      std::cout << d->id() << " = " << d->name() << std::endl;
 
-      if (d->name().find("TITAN") != std::string::npos) {
-        //        continue ;
-      }
+      auto features = polyregion::mk_string<std::string>(
+          d->features(), [](auto &&s) { return s; }, ",");
+
+      std::cout << "[Device " << d->id() << "]"
+                << "name: `" << d->name() << "`; features: " << features << std::endl;
 
       xs.resize(4);
       std::fill(xs.begin(), xs.end(), 7);
@@ -346,7 +347,6 @@ void run() {
         });
         d->free(ptr);
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-
       }
 
       std::cout << d->id() << " = Done" << std::endl;
@@ -360,5 +360,5 @@ int main(int argc, char *argv[]) {
 
   run();
 
-      return EXIT_SUCCESS;
+  return EXIT_SUCCESS;
 }

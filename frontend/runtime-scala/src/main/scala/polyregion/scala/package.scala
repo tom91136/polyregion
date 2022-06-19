@@ -6,8 +6,10 @@ import polyregion.jvm.{compiler => cp}
 import scala.compiletime.constValue
 import scala.reflect.ClassTag
 import polyregion.jvm.Loader
+import fansi.ErrorMode.Throw
 
-type Suspend[F[_]] = [A] => ((Either[Throwable, A] => Unit) => Unit) => F[A]
+type Callback[A]   = Either[Throwable, A] => Unit
+type Suspend[F[_]] = [A] => (Callback[A] => Unit) => F[A]
 
 class Platform[F[_], T <: Target](r: rt.Platform, f: Suspend[F]) {
   lazy val name: String                    = r.name
@@ -50,14 +52,31 @@ trait JitOps[F[_], O](d: rt.Device.Queue, f: Suspend[F]) {
 
 trait AotOps[F[_], B](q: rt.Device.Queue, suspend: Suspend[F]) {
 
-  inline def task[O <: B, A <: AnyVal: ClassTag](inline f: => A): F[A] = suspend { cb =>
+  inline def task[O <: B, A <: AnyVal: ClassTag](inline f: => A): F[A] = suspend { (cb : Callback[A]) =>
     val result = Buffer.ofDim[A](1)
-    polyregion.scala.compiletime.offload[O, Unit](q, () => cb(Right(result(0)))) { result(0) = f; () }
+    polyregion.scala.compiletime.offload[O](
+      q,
+      { (x: Either[Throwable, Unit]) => 
+         val z :  Either[Throwable, Unit] = x
+        z match {
+          case Left(e)   => cb(Left(e))
+          case Right(()) => cb(Right(result(0)))
+        }
+      }
+         
+    ) { result(0) = f; () }
   }
 
   inline def task[O <: B, A <: AnyRef](using inline S: NativeStruct[A])(inline f: => A): F[A] = suspend { cb =>
     val result = Buffer.ofDim[A](1)
-    polyregion.scala.compiletime.offload[O, Unit](q, () => cb(Right(result(0)))) { result(0) = f; () }
+    polyregion.scala.compiletime.offload[O](
+      q,
+      (x: Either[Throwable, Unit]) =>
+        x match {
+          case Left(e)   => cb(Left(e))
+          case Right(()) => cb(Right(result(0)))
+        }
+    ) { result(0) = f; () }
   }
 
   inline def foreach[O <: B](inline x: Range)
@@ -264,7 +283,7 @@ object blocking {
 
   type Id[A] = A
 
-  private val Latched: Suspend[Id] = [A] => { (cb: (Either[Throwable, A] => Unit) => Unit) =>
+  private val Latched: Suspend[Id] = [A] => { (cb: Callback[A] => Unit) =>
     val latch = CountDownLatch(1)
     val ref   = AtomicReference[Either[Throwable, A]]()
     cb { e =>
@@ -285,7 +304,7 @@ object blocking {
 object future {
 
   import scala.concurrent.{Future, Promise}
-  private val SuspendFuture: Suspend[Future] = [A] => { (cb: (Either[Throwable, A] => Unit) => Unit) =>
+  private val SuspendFuture: Suspend[Future] = [A] => { (cb: Callback[A] => Unit) =>
     val p = Promise[A]
     cb(e => p.tryComplete(e.toTry))
     p.future

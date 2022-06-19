@@ -18,7 +18,7 @@ void run() {
   using namespace polyregion;
   using namespace polyast::dsl;
   auto fn = function("foo", {"xs"_(Array(Int)), "x"_(Int)}, Unit)({
-      let("gid") = invoke(Fn0::GpuGlobalIdxX(), Int),
+      let("gid") = Alias("x"_(Int)) ,//  invoke(Fn0::GpuGlobalIdxX(), Int),
       let("xs_gid") = "xs"_(Array(Int))["gid"_(Int)],
       let("result") = invoke(Fn2::Add(), "xs_gid"_(Int), "gid"_(Int), Int),
       let("resultX2") = invoke(Fn2::Mul(), "result"_(Int), "x"_(Int), Int),
@@ -38,35 +38,35 @@ void run() {
 
   std::vector<std::unique_ptr<Platform>> rts;
 
-  //    try {
-  //      rts.push_back(std::make_unique<RelocatablePlatform>());
-  //    } catch (const std::exception &e) {
-  //      std::cerr << "[REL] " << e.what() << std::endl;
-  //    }
+      try {
+        rts.push_back(std::make_unique<RelocatablePlatform>());
+      } catch (const std::exception &e) {
+        std::cerr << "[REL] " << e.what() << std::endl;
+      }
 
-  //    try {
-  //      rts.push_back(std::make_unique<CudaPlatform>());
-  //    } catch (const std::exception &e) {
-  //      std::cerr << "[CUDA] " << e.what() << std::endl;
-  //    }
-  //
-  //    try {
-  //      rts.push_back(std::make_unique<ClPlatform>());
-  //    } catch (const std::exception &e) {
-  //      std::cerr << "[OCL] " << e.what() << std::endl;
-  //    }
-
-  //  try {
-  //    rts.push_back(std::make_unique<HsaPlatform>());
-  //  } catch (const std::exception &e) {
-  //    std::cerr << "[HSA] " << e.what() << std::endl;
-  //  }
-
-  try {
-    rts.push_back(std::make_unique<HipPlatform>());
-  } catch (const std::exception &e) {
-    std::cerr << "[HIP] " << e.what() << std::endl;
-  }
+//      try {
+//        rts.push_back(std::make_unique<CudaPlatform>());
+//      } catch (const std::exception &e) {
+//        std::cerr << "[CUDA] " << e.what() << std::endl;
+//      }
+//
+//      try {
+//        rts.push_back(std::make_unique<ClPlatform>());
+//      } catch (const std::exception &e) {
+//        std::cerr << "[OCL] " << e.what() << std::endl;
+//      }
+//
+//    try {
+//      rts.push_back(std::make_unique<HsaPlatform>());
+//    } catch (const std::exception &e) {
+//      std::cerr << "[HSA] " << e.what() << std::endl;
+//    }
+//
+//  try {
+//    rts.push_back(std::make_unique<HipPlatform>());
+//  } catch (const std::exception &e) {
+//    std::cerr << "[HIP] " << e.what() << std::endl;
+//  }
 
   static std::vector<int> xs;
 
@@ -76,7 +76,11 @@ void run() {
     std::cout << "Found " << devices.size() << " devices" << std::endl;
 
     for (auto &d : devices) {
-      std::cout << d->id() << " = " << d->name() << std::endl;
+      auto features = polyregion::mk_string<std::string>(
+          d->features(), [](auto &&s) { return s; }, ",");
+
+      std::cout << "[Device " << d->id() << "]"
+                << "name: `" << d->name() << "`; features: " << features << std::endl;
 
       xs.resize(4);
       std::fill(xs.begin(), xs.end(), 7);
@@ -87,9 +91,9 @@ void run() {
       } else if (rt->name() == "OpenCL") {
         options = {compiler::Target::Source_C_OpenCL1_1, {}};
       } else if (rt->name() == "HIP") {
-        options = {compiler::Target::Object_LLVM_AMDGCN, "gfx906"};
+        options = {compiler::Target::Object_LLVM_AMDGCN, "gfx803"};
       } else if (rt->name() == "CPU (RelocatableObject)") {
-        options = {compiler::Target::Object_LLVM_HOST, {}};
+        options = {compiler::Target::Object_LLVM_HOST, {"generic"}};
       } else {
         throw std::logic_error("?");
       }

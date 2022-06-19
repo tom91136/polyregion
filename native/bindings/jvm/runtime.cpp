@@ -6,14 +6,13 @@
 
 #include "cl_platform.h"
 #include "cuda_platform.h"
-#include "hsa_platform.h"
 #include "generated/mirror.h"
 #include "generated/platform.h"
 #include "generated/platforms.h"
 #include "hip_platform.h"
+#include "hsa_platform.h"
 #include "jni_utils.h"
 #include "object_platform.h"
-#include "runtime.h"
 #include "utils.hpp"
 
 using namespace polyregion;
@@ -139,6 +138,13 @@ jobjectArray Platform::devices0(JNIEnv *env, jclass, jlong nativePeer) {
 
 jobjectArray Platform::deviceProperties0(JNIEnv *env, jclass, jlong nativePeer) {
   return wrapException(env, EX, [&]() { return toJni(env, findRef(env, devices, nativePeer)->properties()); });
+}
+
+jobjectArray Platform::deviceFeatures0(JNIEnv *env, jclass, jlong nativePeer) {
+  return wrapException(env, EX, [&]() {
+    auto xs = findRef(env, devices, nativePeer)->features();
+    return toJni(env, xs, gen::String::of(env).clazz, [&](auto &x) { return toJni(env, x); });
+  });
 }
 
 void Platform::loadModule0(JNIEnv *env, jclass, jlong nativePeer, jstring name, jbyteArray image) {

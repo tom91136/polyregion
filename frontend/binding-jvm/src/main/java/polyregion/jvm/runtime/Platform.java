@@ -40,6 +40,8 @@ public final class Platform implements AutoCloseable {
 
   static native Property[] deviceProperties0(long nativePeer);
 
+  static native String[] deviceFeatures0(long nativePeer);
+
   static native void loadModule0(long nativePeer, String name, byte[] image);
 
   static native boolean moduleLoaded0(long nativePeer, String name);

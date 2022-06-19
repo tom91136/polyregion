@@ -94,6 +94,7 @@ object JniSourceMirror {
         }
         .filter(fp)
         .map(f => f.getName -> f.getType)
+        .sortBy(_._1)
         .toList
 
     val publicMethods = cls.getDeclaredMethods
@@ -103,6 +104,7 @@ object JniSourceMirror {
       }
       .filterNot(m => ObjectClassMethodsSignatures.contains(signature(m)))
       .filter(mp)
+      .sortBy(m => descriptor(m))
       .toList
 
     val ctors = cls.getDeclaredConstructors
@@ -111,6 +113,7 @@ object JniSourceMirror {
         !m.isSynthetic
       }
       .filter(cp)
+      .sortBy(_.getParameterCount)
       .toList
 
     publicFields.map { case (name, tpe) =>

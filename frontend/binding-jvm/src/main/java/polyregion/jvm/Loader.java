@@ -7,8 +7,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
@@ -108,14 +111,20 @@ public final class Loader {
     String platform = resolvePlatform();
 
     // TODO remove for prod
-    Path[] paths = {
-//      Paths.get("../native/build-" + platform + "/bindings/jvm/"),
-      Paths.get("../native/cmake-build-release-clang/bindings/jvm/"),
-      Paths.get("../native/cmake-build-debug-clang/bindings/jvm/"),
-      Paths.get("../../native/build-" + platform + "/bindings/jvm/"),
-      Paths.get("../../native/cmake-build-release-clang/bindings/jvm/"),
-      Paths.get("../../native/cmake-build-debug-clang/bindings/jvm/"),
-    };
+    List<Path> paths = new ArrayList<>(Arrays.asList(
+            //      Paths.get("../native/build-" + platform + "/bindings/jvm/"),
+            Paths.get("../native/cmake-build-release-clang/bindings/jvm/"),
+            Paths.get("../native/cmake-build-debug-clang/bindings/jvm/"),
+            Paths.get("../../native/build-" + platform + "/bindings/jvm/"),
+            Paths.get("../../native/cmake-build-release-clang/bindings/jvm/"),
+            Paths.get("../../native/cmake-build-debug-clang/bindings/jvm/")
+    ));
+
+    // TODO remove for prod; use debug first for compiler
+    if(filename.contains("compiler")){
+      paths.add(0, Paths.get("../native/cmake-build-debug-clang/bindings/jvm/"));
+    }
+
 
     String[] resourcePaths = {
       platform + "/", "",

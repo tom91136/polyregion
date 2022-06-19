@@ -174,6 +174,10 @@ std::vector<Property> ClDevice::properties() {
       {"CL_DEVICE_EXTENSIONS", queryDeviceInfo(*device, CL_DEVICE_EXTENSIONS)},
   };
 }
+std::vector<std::string> ClDevice::features() {
+  TRACE();
+  return {};
+}
 void ClDevice::loadModule(const std::string &name, const std::string &image) {
   TRACE();
   store.loadModule(name, image);

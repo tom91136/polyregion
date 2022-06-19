@@ -3,6 +3,7 @@ package polyregion.jvm.runtime;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.AbstractMap.SimpleImmutableEntry;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -254,16 +255,23 @@ public final class Device implements AutoCloseable {
   public final long id;
   public final String name;
   public final boolean sharedAddressSpace;
+  private final ValueCache<Set<String>> cachedFeatures;
 
   Device(long nativePeer, long id, String name, boolean sharedAddressSpace) {
     this.nativePeer = nativePeer;
     this.id = id;
     this.name = Objects.requireNonNull(name);
     this.sharedAddressSpace = sharedAddressSpace;
+    this.cachedFeatures =
+            new ValueCache<>(() -> Collections.unmodifiableSet(new HashSet<>(Arrays.asList(Platform.deviceFeatures0(nativePeer)))));
   }
 
   public Property[] properties() {
     return Platform.deviceProperties0(nativePeer);
+  }
+
+  public Set<String> features() {
+    return cachedFeatures.getCached();
   }
 
   public Queue createQueue() {

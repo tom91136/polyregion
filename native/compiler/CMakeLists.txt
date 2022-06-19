@@ -8,8 +8,6 @@ set(LIB_SOURCES
         backend/lld_lite.cpp
 
         ast.cpp
-        dis.cpp
-
         compiler.cpp
         polyregion_compiler.cpp
         )

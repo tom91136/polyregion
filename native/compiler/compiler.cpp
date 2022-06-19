@@ -8,6 +8,7 @@
 #include "compiler.h"
 #include "generated/polyast_codec.h"
 #include "json.hpp"
+#include "llvm_utils.hpp"
 #include "utils.hpp"
 
 using namespace polyregion;
@@ -115,9 +116,18 @@ static json deserialiseAst(const compiler::Bytes &astBytes) {
 }
 
 static backend::LLVM::Options toLLVMBackendOptions(const compiler::Options &options) {
+
+  auto validate = [&](llvm::Triple::ArchType arch) {
+    if (!llvm_shared::isCPUTargetSupported(options.arch, arch)) {
+      throw std::logic_error("Unsupported target CPU `" + options.arch + "` on `" +
+                             llvm::Triple::getArchTypeName(arch).str() + "`");
+    }
+  };
+
   switch (options.target) {
     case compiler::Target::Object_LLVM_HOST: {
       auto host = backend::llvmc::defaultHostTriple();
+      validate(host.getArch());
       switch (host.getArch()) {
         case llvm::Triple::ArchType::x86_64: return {.target = backend::LLVM::Target::x86_64, .arch = options.arch};
         case llvm::Triple::ArchType::aarch64: return {.target = backend::LLVM::Target::AArch64, .arch = options.arch};
@@ -125,12 +135,24 @@ static backend::LLVM::Options toLLVMBackendOptions(const compiler::Options &opti
         default: throw std::logic_error("Unsupported host triplet: " + host.str());
       }
     }
-    case compiler::Target::Object_LLVM_x86_64: return {.target = backend::LLVM::Target::x86_64, .arch = options.arch};
-    case compiler::Target::Object_LLVM_AArch64: return {.target = backend::LLVM::Target::AArch64, .arch = options.arch};
-    case compiler::Target::Object_LLVM_ARM: return {.target = backend::LLVM::Target::ARM, .arch = options.arch};
-    case compiler::Target::Object_LLVM_NVPTX64: return {.target = backend::LLVM::Target::NVPTX64, .arch = options.arch};
-    case compiler::Target::Object_LLVM_AMDGCN: return {.target = backend::LLVM::Target::AMDGCN, .arch = options.arch};
-    case compiler::Target::Object_LLVM_SPIRV64: return {.target = backend::LLVM::Target::SPIRV64, .arch = options.arch};
+    case compiler::Target::Object_LLVM_x86_64:
+      validate(llvm::Triple::ArchType::x86_64);
+      return {.target = backend::LLVM::Target::x86_64, .arch = options.arch};
+    case compiler::Target::Object_LLVM_AArch64:
+      validate(llvm::Triple::ArchType::aarch64);
+      return {.target = backend::LLVM::Target::AArch64, .arch = options.arch};
+    case compiler::Target::Object_LLVM_ARM:
+      validate(llvm::Triple::ArchType::arm);
+      return {.target = backend::LLVM::Target::ARM, .arch = options.arch};
+    case compiler::Target::Object_LLVM_NVPTX64:
+      validate(llvm::Triple::ArchType::nvptx64);
+      return {.target = backend::LLVM::Target::NVPTX64, .arch = options.arch};
+    case compiler::Target::Object_LLVM_AMDGCN:
+      validate(llvm::Triple::ArchType::amdgcn);
+      return {.target = backend::LLVM::Target::AMDGCN, .arch = options.arch};
+    case compiler::Target::Object_LLVM_SPIRV64:
+      // XXX SPIR is target independent, probably
+      return {.target = backend::LLVM::Target::SPIRV64, .arch = options.arch};
     case compiler::Target::Source_C_OpenCL1_1: //
     case compiler::Target::Source_C_C11:       //
       throw std::logic_error("Not an object target");
@@ -197,8 +219,9 @@ compiler::Compilation compiler::compile(const polyast::Program &program, const O
       case Target::Object_LLVM_ARM:
       case Target::Object_LLVM_NVPTX64:
       case Target::Object_LLVM_AMDGCN:
-      case Target::Object_LLVM_SPIRV64:                                                  //
-        return std::make_unique<backend::LLVM>(toLLVMBackendOptions(options));           //
+      case Target::Object_LLVM_SPIRV64: {
+        return std::make_unique<backend::LLVM>(toLLVMBackendOptions(options));
+      }                                                                                  //
       case Target::Source_C_OpenCL1_1:                                                   //
         return std::make_unique<backend::CSource>(backend::CSource::Dialect::OpenCL1_1); //
       case Target::Source_C_C11:                                                         //

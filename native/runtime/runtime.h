@@ -22,8 +22,8 @@
     #define __PRETTY_FUNCTION__ __FUNCSIG__
   #endif
 
-  #define TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this, __PRETTY_FUNCTION__)
-//  #define TRACE()
+//  #define TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this, __PRETTY_FUNCTION__)
+  #define TRACE()
 
 #endif
 
@@ -180,6 +180,7 @@ public:
   [[nodiscard]] virtual EXPORT std::string name() = 0;
   [[nodiscard]] virtual EXPORT bool sharedAddressSpace() = 0;
   [[nodiscard]] virtual EXPORT std::vector<Property> properties() = 0;
+  [[nodiscard]] virtual EXPORT std::vector<std::string > features() = 0;
   virtual EXPORT void loadModule(const std::string &name, const std::string &image) = 0;
   virtual EXPORT bool moduleLoaded(const std::string &name) = 0;
   [[nodiscard]] virtual EXPORT uintptr_t malloc(size_t size, Access access) = 0;

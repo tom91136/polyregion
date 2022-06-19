@@ -223,12 +223,12 @@ Member::Instance Member::operator()(JNIEnv *env, jstring name, jlong offsetInByt
 }
 
 Options::Instance::Instance(const Options &meta, jobject instance) : meta(meta), instance(instance) {}
-jbyte Options::Instance::target(JNIEnv *env) const { return env->GetByteField(instance, meta.targetField); }
 jstring Options::Instance::arch(JNIEnv *env) const { return reinterpret_cast<jstring>(env->GetObjectField(instance, meta.archField)); }
+jbyte Options::Instance::target(JNIEnv *env) const { return env->GetByteField(instance, meta.targetField); }
 Options::Options(JNIEnv *env)
     : clazz(reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/compiler/Options")))),
-      targetField(env->GetFieldID(clazz, "target", "B")),
       archField(env->GetFieldID(clazz, "arch", "Ljava/lang/String;")),
+      targetField(env->GetFieldID(clazz, "target", "B")),
       ctor0Method(env->GetMethodID(clazz, "<init>", "(BLjava/lang/String;)V")) { };
 thread_local std::unique_ptr<Options> Options::cached = {};
 Options& Options::of(JNIEnv *env) {
@@ -250,7 +250,7 @@ Compilation::Instance::Instance(const Compilation &meta, jobject instance) : met
 
 Compilation::Compilation(JNIEnv *env)
     : clazz(reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/compiler/Compilation")))),
-      ctor0Method(env->GetMethodID(clazz, "<init>", "([B[Lpolyregion/jvm/compiler/Event;[Lpolyregion/jvm/compiler/Layout;Ljava/lang/String;)V")) { };
+      ctor0Method(env->GetMethodID(clazz, "<init>", "([B[Ljava/lang/String;[Lpolyregion/jvm/compiler/Event;[Lpolyregion/jvm/compiler/Layout;Ljava/lang/String;)V")) { };
 thread_local std::unique_ptr<Compilation> Compilation::cached = {};
 Compilation& Compilation::of(JNIEnv *env) {
   if(!cached) cached = std::unique_ptr<Compilation>(new Compilation(env));
@@ -263,8 +263,8 @@ void Compilation::drop(JNIEnv *env){
   }
 }
 Compilation::Instance Compilation::wrap(JNIEnv *env, jobject instance) { return {*this, instance}; }
-Compilation::Instance Compilation::operator()(JNIEnv *env, jbyteArray program, jobjectArray events, jobjectArray layouts, jstring messages) const {
-  return {*this, env->NewObject(clazz, ctor0Method, program, events, layouts, messages)};
+Compilation::Instance Compilation::operator()(JNIEnv *env, jbyteArray program, jobjectArray features, jobjectArray events, jobjectArray layouts, jstring messages) const {
+  return {*this, env->NewObject(clazz, ctor0Method, program, features, events, layouts, messages)};
 }
 
 String::Instance::Instance(const String &meta, jobject instance) : meta(meta), instance(instance) {}

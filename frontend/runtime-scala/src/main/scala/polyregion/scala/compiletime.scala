@@ -231,22 +231,18 @@ object compiletime {
     }
   }
 
-  inline def offload[C, A](inline queue: rt.Device.Queue, inline cb: Runnable)(
-      inline f: => A
-  ): A = ${
-    offloadImpl[C, A]('queue, 'f, 'cb)
+  inline def offload[C](inline queue: rt.Device.Queue, inline cb: Callback[Unit])(inline f: => Unit): Unit = ${
+    offloadImpl[C]('queue, 'f, 'cb)
   }
 
 //  inline def offload(inline d: Device, inline x: Range, inline y: Range = Range(0, 0), inline z: Range = Range(0, 0))
 //  /*             */ (inline f: => (Int, Int, Int) => Unit): Unit = ${ offloadImpl[Unit](d, 'x, 'y, 'z, 'f) }
 
-  private def offloadImpl[C: Type, A: Type](
+  private def offloadImpl[C: Type](
       queue: Expr[rt.Device.Queue],
       f: Expr[Any],
-      cb: Expr[Runnable]
-  )(using
-      q: Quotes
-  ): Expr[A] = {
+      cb: Expr[Callback[Unit]]
+  )(using q: Quotes): Expr[Unit] = {
     implicit val Q = Quoted(q)
 
     val result = for {
@@ -263,6 +259,7 @@ object compiletime {
     } yield {
 
       println(s"Messages=\n  ${c.messages}")
+      println(s"Features=\n  ${c.features.toList}")
       println(s"Program=${c.program.length}")
       println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
 
@@ -326,33 +323,47 @@ object compiletime {
 
       val code = '{
 
-        if (! $queue.device.moduleLoaded($moduleName)) {
-          $queue.device.loadModule($moduleName, ${ Expr(c.program) })
+        val available = $queue.device.features()
+        val missing   = scala.collection.mutable.Set[String]()
+        ${ Expr.block(c.features.map(f => '{ if (!available.contains(${ Expr(f) })) missing += ${ Expr(f) } }).toList, '{()}) }
+
+        if (missing.nonEmpty) {
+          ${ cb }(
+            Left(
+              new java.lang.RuntimeException(
+                s"Device (${$queue.device.name}) does not have the required feature(s): ${missing.mkString(",")}, this device has/have ${available}"
+              )
+            )
+          )
+        } else {
+          // We got everything
+          if (! $queue.device.moduleLoaded($moduleName)) {
+            $queue.device.loadModule($moduleName, ${ Expr(c.program) })
+          }
+
+          val fnTpeOrdinals = ${ Expr((captureTpeOrdinals :+ returnTpeOrdinal).toArray) }
+          val fnValues =
+            ByteBuffer.allocate(${ Expr(captureTpeSizes.sum + returnTpeSize) }).order(ByteOrder.nativeOrder)
+
+          ${ bindFnValues('fnValues) }
+
+          // $queue.enqueueHostToDeviceAsync(???, p, 0, null)
+
+          $queue.enqueueInvokeAsync(
+            $moduleName,
+            $fnName,
+            fnTpeOrdinals,
+            fnValues.array,
+            rt.Policy(rt.Dim3(1, 1, 1)),
+            if ($queue.device.sharedAddressSpace) (() => ${ cb }(Right(()))): Runnable else null
+          )
+
+          $queue.syncAll(if (! $queue.device.sharedAddressSpace) (() => ${ cb }(Right(()))): Runnable else null)
         }
-
-        val fnTpeOrdinals = ${ Expr((captureTpeOrdinals :+ returnTpeOrdinal).toArray) }
-        val fnValues = ByteBuffer.allocate(${ Expr(captureTpeSizes.sum + returnTpeSize) }).order(ByteOrder.nativeOrder)
-
-        ${ bindFnValues('fnValues) }
-
-        // $queue.enqueueHostToDeviceAsync(???, p, 0, null)
-
-        $queue.enqueueInvokeAsync(
-          $moduleName,
-          $fnName,
-          fnTpeOrdinals,
-          fnValues.array,
-          rt.Policy(rt.Dim3(1, 1, 1)),
-          if ($queue.device.sharedAddressSpace) $cb else null
-        )
-
-        $queue.syncAll(if (! $queue.device.sharedAddressSpace) $cb else null)
 
         // $queue.enqueueDeviceToHostAsync(p, ???, 0, null)
 
         // $queue.device.free(p)
-
-        null.asInstanceOf[A]
 
       }
 

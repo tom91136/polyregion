@@ -4,9 +4,6 @@
 #include "llvm.h"
 #include "llvmc.h"
 #include "utils.hpp"
-#include "variants.hpp"
-
-//#include "Utils/AMDGPUBaseInfo.h"
 
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/IntrinsicsAMDGPU.h"
@@ -70,19 +67,19 @@ Pair<llvm::StructType *, LLVM::AstTransformer::StructMemberTable> LLVM::AstTrans
   return {llvm::StructType::create(C, types, qualified(def.name)), table};
 }
 
-llvm::Type *LLVM::AstTransformer::mkTpe(const Type::Any &tpe, unsigned AS) {                      //
-  return variants::total(                                                                         //
-      *tpe,                                                                                       //
-      [&](const Type::Float &x) -> llvm::Type * { return llvm::Type::getFloatTy(C); },            //
-      [&](const Type::Double &x) -> llvm::Type * { return llvm::Type::getDoubleTy(C); },          //
-      [&](const Type::Bool &x) -> llvm::Type * { return llvm::Type::getInt1Ty(C); },              //
-      [&](const Type::Byte &x) -> llvm::Type * { return llvm::Type::getInt8Ty(C); },              //
-      [&](const Type::Char &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },             //
-      [&](const Type::Short &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },            //
-      [&](const Type::Int &x) -> llvm::Type * { return llvm::Type::getInt32Ty(C); },              //
-      [&](const Type::Long &x) -> llvm::Type * { return llvm::Type::getInt64Ty(C); },             //
+llvm::Type *LLVM::AstTransformer::mkTpe(const Type::Any &tpe, unsigned AS) {                 //
+  return variants::total(                                                                    //
+      *tpe,                                                                                  //
+      [&](const Type::Float &x) -> llvm::Type * { return llvm::Type::getFloatTy(C); },       //
+      [&](const Type::Double &x) -> llvm::Type * { return llvm::Type::getDoubleTy(C); },     //
+      [&](const Type::Bool &x) -> llvm::Type * { return llvm::Type::getInt1Ty(C); },         //
+      [&](const Type::Byte &x) -> llvm::Type * { return llvm::Type::getInt8Ty(C); },         //
+      [&](const Type::Char &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },        //
+      [&](const Type::Short &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },       //
+      [&](const Type::Int &x) -> llvm::Type * { return llvm::Type::getInt32Ty(C); },         //
+      [&](const Type::Long &x) -> llvm::Type * { return llvm::Type::getInt64Ty(C); },        //
       [&](const Type::String &x) -> llvm::Type * { return undefined(__FILE__, __LINE__); },  //
-      [&](const Type::Unit &x) -> llvm::Type * { return llvm::Type::getVoidTy(C); },              //
+      [&](const Type::Unit &x) -> llvm::Type * { return llvm::Type::getVoidTy(C); },         //
       [&](const Type::Nothing &x) -> llvm::Type * { return undefined(__FILE__, __LINE__); }, //
       [&](const Type::Struct &x) -> llvm::Type * {
         if (auto def = polyregion::get_opt(structTypes, x.name); def) {
@@ -100,7 +97,7 @@ llvm::Type *LLVM::AstTransformer::mkTpe(const Type::Any &tpe, unsigned AS) {    
       [&](const Type::Array &x) -> llvm::Type * {
         auto comp = mkTpe(x.component);
         return comp->isPointerTy() ? comp : comp->getPointerTo(AS);
-      },                                                                                                  //
+      },                                                                                             //
       [&](const Type::Var &x) -> llvm::Type * { return undefined(__FILE__, __LINE__, "type var"); }, //
       [&](const Type::Exec &x) -> llvm::Type * { return undefined(__FILE__, __LINE__, "exec"); }
 
@@ -1127,10 +1124,11 @@ compiler::Compilation backend::LLVM::run(const Program &program, const compiler:
   compiler::Event astOpt(compiler::nowMs(), optXformElapsed, "llvm_ir_opt", optIR);
 
   if (rawError || optError) {
-    return compiler::Compilation({},               //
-                                 {ast2IR, astOpt}, //
-                                 mk_string<std::string>(
-                                     {rawError.value_or(""), optError.value_or("")}, [](auto &&x) { return x; }, "\n"));
+    return {{},
+            {},               //
+            {ast2IR, astOpt}, //
+            mk_string<std::string>(
+                {rawError.value_or(""), optError.value_or("")}, [](auto &&x) { return x; }, "\n")};
   }
 
   auto c = llvmc::compileModule(options.toTargetInfo(), opt, true, std::move(mod), *ctx);

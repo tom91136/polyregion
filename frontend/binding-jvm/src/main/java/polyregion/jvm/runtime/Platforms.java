@@ -64,8 +64,8 @@ public final class Platforms implements AutoCloseable {
   }
 
   public Platform HSA() {
-		return HSA0();
-	}
+    return HSA0();
+  }
 
   public Platform OpenCL() {
     return OpenCL0();

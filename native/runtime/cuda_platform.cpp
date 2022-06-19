@@ -98,6 +98,13 @@ std::vector<Property> CudaDevice::properties() {
   TRACE();
   return {};
 }
+std::vector<std::string> CudaDevice::features() {
+  TRACE();
+  int ccMajor = 0, ccMinor = 0;
+  CHECKED(cuDeviceGetAttribute(&ccMajor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device));
+  CHECKED(cuDeviceGetAttribute(&ccMinor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device));
+  return { "sm_" + std::to_string((ccMajor * 10) + ccMinor) };
+}
 void CudaDevice::loadModule(const std::string &name, const std::string &image) {
   TRACE();
   store.loadModule(name, image);

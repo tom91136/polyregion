@@ -2,11 +2,11 @@
 
 #include <chrono>
 #include <cstdint>
+#include <iostream>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
-#include <iostream>
 
 #include "export.h"
 #include "generated/polyast.h"
@@ -227,14 +227,12 @@ struct EXPORT Member {
   EXPORT uint64_t offsetInBytes, sizeInBytes;
   EXPORT Member(decltype(name) name, decltype(offsetInBytes) offsetInBytes, decltype(sizeInBytes) sizeInBytes)
       : name(std::move(name)), offsetInBytes(offsetInBytes), sizeInBytes(sizeInBytes) {}
-
 };
 
 struct EXPORT Layout {
   EXPORT polyast::Sym name;
   EXPORT uint64_t sizeInBytes, alignment;
   EXPORT std::vector<Member> members;
-
 };
 
 struct EXPORT Event {
@@ -250,14 +248,17 @@ using Bytes = std::vector<char>;
 struct EXPORT Compilation {
   EXPORT std::vector<Layout> layouts;
   EXPORT std::optional<Bytes> binary;
+  EXPORT std::vector<std::string> features;
   EXPORT std::vector<Event> events;
   EXPORT std::string messages;
   EXPORT Compilation() = default;
   EXPORT explicit Compilation(decltype(messages) messages) : messages(std::move(messages)) {}
-  EXPORT Compilation(decltype(binary) binary, //
-                     decltype(events) events, //
+  EXPORT Compilation(decltype(binary) binary,     //
+                     decltype(features) features, //
+                     decltype(events) events,     //
                      decltype(messages) messages = "")
-      : binary(std::move(binary)), events(std::move(events)), messages(std::move(messages)) {}
+      : binary(std::move(binary)), features(std::move(features)), events(std::move(events)),
+        messages(std::move(messages)) {}
 };
 
 EXPORT std::ostream &operator<<(std::ostream &, const Member &);

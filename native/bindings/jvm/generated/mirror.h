@@ -210,12 +210,12 @@ struct Options {
     jobject instance;
     Instance(const Options &meta, jobject instance);
     template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
-    jbyte target(JNIEnv *env) const;
     jstring arch(JNIEnv *env) const;
+    jbyte target(JNIEnv *env) const;
   };
   jclass clazz;
-  jfieldID targetField;
   jfieldID archField;
+  jfieldID targetField;
   jmethodID ctor0Method;
 private:
   explicit Options(JNIEnv *env);
@@ -243,7 +243,7 @@ public:
   static Compilation& of(JNIEnv *env);
   static void drop(JNIEnv *env);
   Instance wrap (JNIEnv *env, jobject instance);
-  Instance operator()(JNIEnv *env, jbyteArray program, jobjectArray events, jobjectArray layouts, jstring messages) const;
+  Instance operator()(JNIEnv *env, jbyteArray program, jobjectArray features, jobjectArray events, jobjectArray layouts, jstring messages) const;
 };
 struct String {
   struct Instance {

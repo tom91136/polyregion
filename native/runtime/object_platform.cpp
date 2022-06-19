@@ -6,8 +6,12 @@
 #include "object_platform.h"
 #include "utils.hpp"
 
+#include "llvm/ADT/StringMap.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/Support/DynamicLibrary.h"
+#include "llvm/Support/Host.h"
+
+#include "llvm_utils.hpp"
 
 using namespace polyregion::runtime;
 using namespace polyregion::runtime::object;
@@ -54,6 +58,22 @@ bool ObjectDevice::sharedAddressSpace() {
 std::vector<Property> ObjectDevice::properties() {
   TRACE();
   return {};
+}
+std::vector<std::string> ObjectDevice::features() {
+  TRACE();
+
+  std::vector<std::string> features;
+
+  llvm::StringMap<bool> Features;
+  llvm::sys::getHostCPUFeatures(Features);
+  for (auto &F : Features) {
+    if (F.second) features.push_back(F.first().str());
+  }
+
+  polyregion::llvm_shared::collectCPUFeatures(llvm::sys::getHostCPUName().str(),
+                                              llvm::Triple(llvm::sys::getDefaultTargetTriple()).getArch(), features);
+
+  return features;
 }
 uintptr_t ObjectDevice::malloc(size_t size, Access) {
   TRACE();

@@ -140,8 +140,15 @@ HsaDevice::HsaDevice(uint32_t queueSize, hsa_agent_t hostAgent, hsa_agent_t agen
           [&](auto &&) { TRACE(); }) {
   TRACE();
   // As per HSA_AGENT_INFO_NAME, name must be <= 63 chars
-  deviceName =
+
+  auto marketingName = detail::allocateAndTruncate(
+      [&](auto &&data, auto) {
+        hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PRODUCT_NAME), data);
+      },
+      64);
+  auto gfxArch =
       detail::allocateAndTruncate([&](auto &&data, auto) { hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, data); }, 64);
+  deviceName = marketingName + "(" + gfxArch + ")";
 
   CHECKED("Enumerate HSA agent regions", //
           hsa_agent_iterate_regions(
@@ -205,6 +212,12 @@ bool HsaDevice::sharedAddressSpace() {
 std::vector<Property> HsaDevice::properties() {
   TRACE();
   return {};
+}
+std::vector<std::string> HsaDevice::features() {
+  TRACE();
+  auto gfxArch =
+      detail::allocateAndTruncate([&](auto &&data, auto) { hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, data); }, 64);
+  return {gfxArch};
 }
 void HsaDevice::loadModule(const std::string &name, const std::string &image) {
   TRACE();

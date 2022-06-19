@@ -112,8 +112,9 @@ jobject Compiler::compile0(JNIEnv *env, jclass, //
     return gen::Compilation::of(env)(
                env,
                bin,                                                                                                //
+               toJni(env, c.features, gen::String::of(env).clazz, [&](auto &s) { return toJni(env, s); }),         //
                toJni(env, c.events, gen::Event::of(env).clazz, [&](auto &e) { return toJni(env, e).instance; }),   //
-               toJni(env, c.layouts, gen::Layout::of(env).clazz, [&](auto &e) { return toJni(env, e).instance; }), //
+               toJni(env, c.layouts, gen::Layout::of(env).clazz, [&](auto &l) { return toJni(env, l).instance; }), //
                toJni(env, c.messages))                                                                             //
         .instance;
   });

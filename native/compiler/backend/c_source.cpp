@@ -289,5 +289,5 @@ compiler::Compilation backend::CSource::run(const Program &program, const compil
     default: dialectName = "unknown";
   }
 
-  return {data, {{compiler::nowMs(), compiler::elapsedNs(start), "polyast_to_" + dialectName + "_c", def}}};
+  return {data, {}, {{compiler::nowMs(), compiler::elapsedNs(start), "polyast_to_" + dialectName + "_c", def}}};
 }

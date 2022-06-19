@@ -103,8 +103,18 @@ bool HipDevice::sharedAddressSpace() {
   return false;
 }
 std::vector<Property> HipDevice::properties() {
+  // XXX Do not use hipDeviceGetAttribute and hipDeviceAttribute_t. AMD "reordered" the enums in ROCm 5.0
+  // See https://docs.amd.com/bundle/ROCm_Release_Notes_v5.0/page/Breaking_Changes.html
   TRACE();
   return {};
+}
+std::vector<std::string> HipDevice::features() {
+  TRACE();
+  // XXX Do not use hipDeviceGetAttribute and hipDeviceAttribute_t. AMD "reordered" the enums in ROCm 5.0
+  // See https://docs.amd.com/bundle/ROCm_Release_Notes_v5.0/page/Breaking_Changes.html
+  hipDeviceProp_t prop;
+  CHECKED(hipGetDeviceProperties(&prop, device));
+  return {"gfx" + std::to_string(prop.gcnArch)};
 }
 void HipDevice::loadModule(const std::string &name, const std::string &image) {
   TRACE();

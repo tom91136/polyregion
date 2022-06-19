@@ -13,6 +13,7 @@ class EXPORT ObjectDevice : public Device {
 public:
   EXPORT int64_t id() override;
   EXPORT std::vector<Property> properties() override;
+  EXPORT std::vector<std::string> features() override;
   EXPORT bool sharedAddressSpace() override;
   EXPORT uintptr_t malloc(size_t size, Access access) override;
   EXPORT void free(uintptr_t ptr) override;

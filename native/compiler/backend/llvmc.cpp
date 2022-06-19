@@ -2,6 +2,7 @@
 
 #include "compiler.h"
 #include "lld_lite.h"
+#include "utils.hpp"
 
 #include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
@@ -29,6 +30,8 @@
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Utils/Cloning.h"
+
+#include "llvm_utils.hpp"
 
 #include <iostream>
 
@@ -265,9 +268,10 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
       auto linkerElapsed = compiler::elapsedNs(linkerStart);
       events.emplace_back(compiler::nowMs(), linkerElapsed, "lld_link_amdgpu", "");
       if (!result) { // linker failed
-        return {{}, events, "Linker did not finish normally: " + err.value_or("(no message reported)")};
+        return {
+            {}, {info.cpu.uArch}, events, "Linker did not complete normally: " + err.value_or("(no message reported)")};
       } else { // linker succeeded, still report any stdout to as message
-        return {std::vector<char>(result->begin(), result->end()), events, err.value_or("")};
+        return {std::vector<char>(result->begin(), result->end()), {info.cpu.uArch}, events, err.value_or("")};
       }
     }
     case llvm::Triple::CUDA: {
@@ -276,17 +280,24 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
       // XXX ignore emitDisassembly here as PTX *is* the binary
       auto [ptx, ptxStart, ptxElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_AssemblyFile);
       return {std::vector<char>(ptx.begin(), ptx.end()),
+              {info.cpu.uArch},
               {{ptxStart, ptxElapsed, "llvm_to_ptx", std::string(ptx.begin(), ptx.end())}}};
     }
     default:
+
+
+      auto features = polyregion::split(info.cpu.features, ',');
+      polyregion::llvm_shared::collectCPUFeatures(info.cpu.uArch, info.triple.getArch(), features);
+
       auto [object, objectStart, objectElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_ObjectFile);
       std::vector<char> binary(object.begin(), object.end());
       if (emitDisassembly) {
         auto [assembly, assemblyStart, assemblyElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_AssemblyFile);
         return {binary,
+                features,
                 {{objectStart, objectElapsed, "llvm_to_obj", objectSize(object)},
                  {assemblyStart, assemblyElapsed, "llvm_to_asm", std::string(assembly.begin(), assembly.end())}}};
       } else
-        return {binary, {{objectStart, objectElapsed, "llvm_to_obj", objectSize(object)}}};
+        return {binary, features, {{objectStart, objectElapsed, "llvm_to_obj", objectSize(object)}}};
   }
 }
