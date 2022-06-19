@@ -73,18 +73,17 @@ object Simple {
     import polyregion.scala.*
 
     type M = Config[Target.NVPTX64.SM61.type, Opt.O0]
+    type C = Config[Target.OpenCL_C.type, Opt.O0]
 
+    val result = CUDA.devices(0).aot.foreach[M](0 to n)(i => xs(i) = 42)  
 
-    // val Bad = Target.NVPTX64("sm_61")
-    // val result = CUDA.devices(0).aot.task[Config[Bad.type, Opt.O0], Int](43 )
     // val result = OpenCL.devices(0).aot.task[Config[Target.OpenCL_C.type, Opt.O0], Int](42)
 
     // val result = HSA.devices(0).aot.task[Config[Target.AMDGCN.gfx803.type, Opt.O3], Int](42)
-    val result = HIP.devices(0).aot.task[Config[Target.AMDGCN.gfx803.type, Opt.O0], Int](42)
-
+    // val result = HIP.devices(0).aot.task[Config[Target.AMDGCN.gfx803.type, Opt.O0], Int](42)
 
     // val IL = Target.X86("generic")
-    // val result = Host.aot.task[Config[IL.type, Opt.O0], Int](42)  
+    // val result = Host.aot.task[Config[IL.type, Opt.O0], Int](42)
     println("     R  =" + result)
 
     // val Const  = scala.compiletime.constValue[Target.X86.Znver.Arch]

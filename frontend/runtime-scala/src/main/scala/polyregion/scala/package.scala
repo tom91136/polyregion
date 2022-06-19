@@ -52,24 +52,23 @@ trait JitOps[F[_], O](d: rt.Device.Queue, f: Suspend[F]) {
 
 trait AotOps[F[_], B](q: rt.Device.Queue, suspend: Suspend[F]) {
 
-  inline def task[O <: B, A <: AnyVal: ClassTag](inline f: => A): F[A] = suspend { (cb : Callback[A]) =>
+  inline def task[O <: B, A <: AnyVal: ClassTag](inline f: => A): F[A] = suspend { (cb: Callback[A]) =>
     val result = Buffer.ofDim[A](1)
-    polyregion.scala.compiletime.offload[O](
-      q,
-      { (x: Either[Throwable, Unit]) => 
-         val z :  Either[Throwable, Unit] = x
+    polyregion.scala.compiletime.offload0[O](
+      q, {
+        (x: Either[Throwable, Unit]) =>
+          val z: Either[Throwable, Unit] = x
         z match {
           case Left(e)   => cb(Left(e))
           case Right(()) => cb(Right(result(0)))
         }
       }
-         
     ) { result(0) = f; () }
   }
 
   inline def task[O <: B, A <: AnyRef](using inline S: NativeStruct[A])(inline f: => A): F[A] = suspend { cb =>
     val result = Buffer.ofDim[A](1)
-    polyregion.scala.compiletime.offload[O](
+    polyregion.scala.compiletime.offload0[O](
       q,
       (x: Either[Throwable, Unit]) =>
         x match {
@@ -80,7 +79,10 @@ trait AotOps[F[_], B](q: rt.Device.Queue, suspend: Suspend[F]) {
   }
 
   inline def foreach[O <: B](inline x: Range)
-  /*                     */ (inline f: Int => Unit): F[Unit] = ???
+  /*                     */ (inline f: Int => Unit): F[Unit] = suspend { cb =>
+    polyregion.scala.compiletime.offload1[O](q, x, cb) { f(polyregion.scala.intrinsics.gpuGlobalIdxX); () }
+  }
+
   inline def foreach[O <: B](inline x: Range, inline y: Range)
   /*                     */ (inline f: (Int, Int) => Unit): this.type = ???
   inline def foreach[O <: B](inline x: Range, inline y: Range, inline z: Range)
@@ -226,7 +228,7 @@ object Target {
 
   object X86 {
     inline def apply[A <: SString](inline uarch: A) = new X86(uarch) { override type UArch = A }
-    final val Znver                                 = X86("znver")
+    final val Znver2                                = X86("znver2")
   }
   object AArch64 {
     inline def apply[A <: SString](inline uarch: A) = new AArch64(uarch) { override type UArch = A }

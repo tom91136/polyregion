@@ -7,12 +7,14 @@ import polyregion.jvm.{compiler => cp}
 
 import java.nio.ByteBuffer
 import java.nio.file.Paths
+import cats.syntax.all.*
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.{compileTimeOnly, tailrec}
 import scala.collection.immutable.VectorMap
 import scala.quoted.*
 import scala.util.Try
 import java.nio.ByteOrder
+import scala.collection.mutable.ArrayBuffer
 
 @compileTimeOnly("This class only exists at compile-time to expose offload methods")
 object compiletime {
@@ -40,7 +42,7 @@ object compiletime {
     println("===")
     x
   }
-//
+
   inline def showTpe[B]: Unit = ${ showTpeImpl[B] }
   def showTpeImpl[B: Type](using q: Quotes): Expr[Unit] = {
     import q.reflect.*
@@ -50,160 +52,13 @@ object compiletime {
     pprint.pprintln(TypeRepr.of[B].typeSymbol)
     '{}
   }
-//
-//  private[polyregion] inline def symbolNameOf[B]: String = ${ symbolNameOfImpl[B] }
-//  private def symbolNameOfImpl[B: Type](using q: Quotes): Expr[String] = Expr(
-//    q.reflect.TypeRepr.of[B].typeSymbol.fullName
-//  )
-
-//  inline def foreachJVMPar(inline range: Range, inline n: Int = java.lang.Runtime.getRuntime.availableProcessors())(
-//      inline x: Int => Unit
-//  )(using ec: scala.concurrent.ExecutionContext): Unit = {
-//    val latch = new java.util.concurrent.CountDownLatch(n)
-//    Runtime.splitStatic(range)(n).foreach { r =>
-//      ec.execute { () =>
-//        try foreachJVM(r)(x)
-//        finally latch.countDown()
-//      }
-//    }
-//    latch.await()
-//  }
-//
-//  inline def foreachJVM(inline range: Range)(inline x: Int => Unit): Unit = {
-//    val start = range.start
-//    val bound = if (range.isInclusive) range.end - 1 else range.end
-//    val step  = range.step
-//    var i     = start
-//    while (i < bound) {
-//      x(i)
-//      i += step
-//    }
-//  }
-//
-//  inline def reduceJVM[A](inline range: Range) //
-//  (inline empty: A, inline f: Int => A)(inline g: (A, A) => A): A = {
-//    val start = range.start
-//    val bound = if (range.isInclusive) range.end - 1 else range.end
-//    val step  = range.step
-//    var i     = start
-//    var acc   = empty
-//    while (i < bound) {
-//      acc = g(f(i), acc)
-//      i += step
-//    }
-//    acc
-//  }
-//
-//  inline def reduceJVMPar[A](
-//      inline range: Range,
-//      inline n: Int = java.lang.Runtime.getRuntime.availableProcessors()
-//  ) //
-//  (inline empty: A, inline f: Int => A)(inline g: (A, A) => A)(using ec: scala.concurrent.ExecutionContext): A = {
-//    val latch = new java.util.concurrent.CountDownLatch(n)
-//    val acc   = new AtomicReference[A](empty)
-//    Runtime.splitStatic(range)(n).foreach { r =>
-//      ec.execute { () =>
-//        val x = reduceJVM(r)(empty, f)(g)
-//        try acc.getAndUpdate(g(_, x))
-//        finally latch.countDown()
-//      }
-//    }
-//    latch.await()
-//    acc.get()
-//  }
-//
-//  inline def foreach(inline range: Range)(inline x: Int => Unit): Unit = {
-//    val start = range.start
-//    val bound = if (range.isInclusive) range.end - 1 else range.end
-//    val step  = range.step
-//    offload {
-//      var i = start
-//      while (i < bound) {
-//        x(i)
-//        i += step
-//      }
-//    }
-//  }
-//
-//  inline def foreachPar(inline range: Range, inline n: Int = java.lang.Runtime.getRuntime.availableProcessors())(
-//      inline x: Int => Unit
-//  )(using ec: scala.concurrent.ExecutionContext): Unit = {
-//    val latch = new java.util.concurrent.CountDownLatch(n)
-//    Runtime.splitStatic(range)(n).foreach { r =>
-//      ec.execute { () =>
-//        try foreach(r)(x)
-//        finally latch.countDown()
-//      }
-//    }
-//    latch.await()
-//  }
-//
-//  inline def reduce[A](inline range: Range) //
-//  (inline empty: A, inline f: Int => A)(inline g: (A, A) => A): A = {
-//    val start = range.start
-//    val bound = if (range.isInclusive) range.end - 1 else range.end
-//    val step  = range.step
-//    offload {
-//      var i   = start
-//      var acc = empty
-//      while (i < bound) {
-//        acc = g(f(i), acc)
-//        i += step
-//      }
-//      acc
-//    }
-//  }
-//
-//  inline def reducePar[A](inline range: Range, inline n: Int = java.lang.Runtime.getRuntime.availableProcessors()) //
-//  (inline empty: A, inline f: Int => A)(inline g: (A, A) => A)(using ec: scala.concurrent.ExecutionContext): A = {
-//    val latch = new java.util.concurrent.CountDownLatch(n)
-//    val acc   = new AtomicReference[A](empty)
-//    Runtime.splitStatic(range)(n).foreach { r =>
-//      ec.execute { () =>
-//        val x = reduce(r)(empty, f)(g)
-//        try acc.getAndUpdate(g(_, x))
-//        finally latch.countDown()
-//      }
-//    }
-//    latch.await()
-//    acc.get()
-//  }
-
-//  inline def deriveNativeStruct[A]: NativeStruct[A] = ${ deriveNativeStructImpl[A] }
-//
-//  def deriveNativeStructImpl[A: Type](using q: Quotes): Expr[NativeStruct[A]] = {
-//    given Q: Quoted = Quoted(q)
-//    mkNativeStruct(Q.TypeRepr.of[A]).asExprOf[NativeStruct[A]]
-//  }
-//
-//  def mkNativeStruct(using q: Quoted)(repr: q.TypeRepr): Expr[NativeStruct[Any]] = {
-//    import q.given
-//    repr.asType match {
-//      case '[a] =>
-//        val layout = Pickler.layoutOf(repr)
-//
-//        '{
-//          new NativeStruct[a] {
-//            override val name        = ${ Expr(repr.typeSymbol.fullName) }
-//            override val sizeInBytes = ${ Expr(layout.sizeInBytes.toInt) }
-//            override def encode(buffer: java.nio.ByteBuffer, index: Int, a: a): Unit =
-//              ${ Pickler.writeStruct('buffer, 'index, repr, 'a) }
-//
-//            override def decode(buffer: java.nio.ByteBuffer, index: Int): a =
-//              ${ Pickler.readStruct('buffer, 'index, repr).asExprOf[a] }
-//          }
-//        }.asExprOf[NativeStruct[Any]]
-//    }
-//  }
-
-//  inline def offload[A](inline x: => A): A = ${ offloadImpl[A]('x) }
 
   case class ReifiedConfig(target: cp.Target, arch: String, opt: cp.Opt)
 
   def reifyConfig(x: srt.Config[_, _]): List[ReifiedConfig] =
     x.targets.map((t, o) => ReifiedConfig(t.arch, t.uarch, o.value))
 
-  def reifyConfigFromTpe[C: Type](c: List[ReifiedConfig] = Nil)(using q: Quotes): Result[List[ReifiedConfig]] = {
+  def reifyConfigFromTpe[C: Type](using q: Quotes)(c: List[ReifiedConfig] = Nil): Result[List[ReifiedConfig]] = {
     import q.reflect.*
     Type.of[C] match {
       case '[srt.Config[target, opt]] =>
@@ -231,183 +86,185 @@ object compiletime {
     }
   }
 
-  inline def offload[C](inline queue: rt.Device.Queue, inline cb: Callback[Unit])(inline f: => Unit): Unit = ${
-    offloadImpl[C]('queue, 'f, 'cb)
+  private inline def checked[A](using q: Quotes)(e: Result[A]): A = e match {
+    case Left(e)  => throw e
+    case Right(x) => x
   }
 
-//  inline def offload(inline d: Device, inline x: Range, inline y: Range = Range(0, 0), inline z: Range = Range(0, 0))
-//  /*             */ (inline f: => (Int, Int, Int) => Unit): Unit = ${ offloadImpl[Unit](d, 'x, 'y, 'z, 'f) }
+  inline def offload0[C](inline queue: rt.Device.Queue, inline cb: Callback[Unit])(inline f: => Unit): Unit = ${
+    generate0[C]('queue, 'f, 'cb)
+  }
+  private def generate0[C: Type](using
+      q: Quotes
+  )(queue: Expr[rt.Device.Queue], f: Expr[Any], cb: Expr[Callback[Unit]]) = checked(for {
+    cs   <- reifyConfigFromTpe[C]()
+    expr <- generate(using Quoted(q))(cs, queue, f, '{ rt.Dim3(1, 1, 1) }, cb)
+  } yield expr)
 
-  private def offloadImpl[C: Type](
+  inline def offload1[C](inline queue: rt.Device.Queue, inline range: Range, inline cb: Callback[Unit])(
+      inline f: Any
+  ): Unit = ${ generate1[C]('queue, 'f, 'range, 'cb) }
+
+  private def generate1[C: Type](using
+      q: Quotes
+  )(queue: Expr[rt.Device.Queue], f: Expr[Any], range: Expr[Range], cb: Expr[Callback[Unit]]) = checked(for {
+    cs   <- reifyConfigFromTpe[C]()
+    expr <- generate(using Quoted(q))(cs, queue, f, '{ rt.Dim3(${ range }.size, 1, 1) }, cb)
+  } yield expr)
+
+  private def generate(using q: Quoted)(
+      configs: List[ReifiedConfig],
       queue: Expr[rt.Device.Queue],
       f: Expr[Any],
+      dim: Expr[rt.Dim3],
       cb: Expr[Callback[Unit]]
-  )(using q: Quotes): Expr[Unit] = {
-    implicit val Q = Quoted(q)
+  ) = for {
+    // configs               <- reifyConfigFromTpe[C](using q.underlying)()
+    (captures, prog0, log) <- Compiler.compileExpr(f)
+    prog = prog0.copy(entry = prog0.entry.copy(name = p.Sym("lambda")))
+    _    = println(log.render)
 
-    val result = for {
-      configs                <- reifyConfigFromTpe[C]()
-      (captures, prog0, log) <- Compiler.compileExpr(f)
-      prog = prog0.copy(entry = prog0.entry.copy(name = p.Sym("lambda")))
-      _    = println(log.render)
-      _    = println("Configs = " + configs)
-      serialisedAst <- Try(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, prog))).toEither
-      compiler = cp.Compiler.create()
-      c <- Try(
-        (compiler.compile(serialisedAst, true, cp.Options.of(configs(0).target, configs(0).arch), configs(0).opt.value))
-      ).toEither
-    } yield {
+    serialisedAst <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, prog)))
+    compiler = cp.Compiler.create()
 
-      println(s"Messages=\n  ${c.messages}")
-      println(s"Features=\n  ${c.features.toList}")
-      println(s"Program=${c.program.length}")
-      println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
+    compilations <- configs.traverse(c =>
+      Either
+        .catchNonFatal(compiler.compile(serialisedAst, true, cp.Options.of(c.target, c.arch), c.opt.value))
+        .map(c -> _)
+    )
 
-      val fnName     = Expr(prog.entry.name.repr)
-      val moduleName = Expr(prog0.entry.name.repr)
+  } yield {
 
-      val (captureTpeOrdinals, captureTpeSizes) = captures.map { (name, _) =>
-        val tpe = Pickler.tpeAsRuntimeTpe(name.tpe)
-        tpe.value -> tpe.sizeInBytes
-      }.unzip
-      val returnTpeOrdinal = Pickler.tpeAsRuntimeTpe(prog.entry.rtn).value
-      val returnTpeSize    = Pickler.tpeAsRuntimeTpe(prog.entry.rtn).sizeInBytes
+    // println(s"Messages=\n  ${c.messages}")
+    // println(s"Features=\n  ${c.features.toList}")
+    // println(s"Program=${c.program.length}")
+    // println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
 
-      def bindFnValues(target: Expr[ByteBuffer]) = {
-        val (_, stmts) = captures.zipWithIndex.foldLeft((0, List.empty[Expr[Any]])) {
-          case ((byteOffset, exprs), ((name, ref), idx)) =>
-            inline def register[ts: Type, t: Type](arr: p.Type.Array, mutable: Boolean, size: Expr[ts] => Expr[Int]) =
-              '{
-                $target.putLong(
-                  ${ Expr(byteOffset) },
-                  $queue.registerAndInvalidateIfAbsent[ts](
-                    ${ ref.asExprOf[ts] },
-                    xs => ${ Expr(Pickler.sizeOf(compiler, arr.component, Q.TypeRepr.of[t])) } * ${ size('xs) },
-                    (xs, bb) => ${ Pickler.putAll(compiler, 'bb, arr, Q.TypeRepr.of[ts], 'xs) },
-                    ${
-                      if (!mutable) null
-                      else '{ (bb, xs) => ${ Pickler.getAllMutable(compiler, 'bb, arr, Q.TypeRepr.of[ts], 'xs) } }
-                    },
-                    null
-                  )
-                )
-              }
+    given Quotes   = q.underlying
+    val fnName     = Expr(prog.entry.name.repr)
+    val moduleName = Expr(prog.entry.name.repr)
+    val (captureTpeOrdinals, captureTpeSizes) = captures.map { (name, _) =>
+      val tpe = Pickler.tpeAsRuntimeTpe(name.tpe)
+      tpe.value -> tpe.sizeInBytes
+    }.unzip
+    val returnTpeOrdinal = Pickler.tpeAsRuntimeTpe(prog.entry.rtn).value
+    val returnTpeSize    = Pickler.tpeAsRuntimeTpe(prog.entry.rtn).sizeInBytes
 
-            val expr = (name.tpe, ref.tpe.asType) match {
-              case (p.Type.Array(comp), x @ '[srt.Buffer[_]]) =>
-                '{
-                  $target.putLong(
-                    ${ Expr(byteOffset) },
-                    $queue.registerAndInvalidateIfAbsent(
-                      ${ ref.asExprOf[x.Underlying] },
-                      ${ ref.asExprOf[x.Underlying] }.backingBuffer,
-                      null
-                    )
-                  )
-                }
-              case (arr @ p.Type.Array(_), ts @ '[Array[t]]) =>
-                register[ts.Underlying, t](arr, mutable = true, x => '{ $x.length })
-              case (arr @ p.Type.Array(_), ts @ '[scala.collection.mutable.Seq[t]]) =>
-                register[ts.Underlying, t](arr, mutable = true, x => '{ $x.length })
-              case (arr @ p.Type.Array(_), ts @ '[java.util.List[t]]) =>
-                register[ts.Underlying, t](arr, mutable = true, x => '{ $x.size })
-              case (arr @ p.Type.Array(_), ts @ '[scala.collection.immutable.Seq[t]]) =>
-                register[ts.Underlying, t](arr, mutable = false, x => '{ $x.length })
-              case (t, _) =>
-                Pickler.putPrimitive(target, Expr(byteOffset), t, ref.asExpr)
-            }
-            (byteOffset + Pickler.tpeAsRuntimeTpe(name.tpe).sizeInBytes, exprs :+ expr)
-        }
-        Expr.block(stmts, '{ () })
+    val code = '{
+
+      // Validate device feature set can support this code object.
+      val miss      = ArrayBuffer[(String, Set[String])]()
+      val available = Set($queue.device.features(): _*)
+
+      lazy val modules = Array[(String, Set[String], Array[Byte])](${
+        Varargs(compilations.map { (config, compilation) =>
+          Expr((s"${config.arch}@${config.opt}(${config.target})", Set(compilation.features: _*), compilation.program))
+
+        })
+      }: _*)
+
+      var found = -1
+      var i     = 0
+      while (i < modules.size && found == -1) {
+        val (name, required, _) = modules(i)
+        val missing             = required -- available
+        if (missing.isEmpty) found = i
+        else miss += ((name, missing))
+        i += 1
       }
-
-      val code = '{
-
-        val available = $queue.device.features()
-        val missing   = scala.collection.mutable.Set[String]()
-        ${ Expr.block(c.features.map(f => '{ if (!available.contains(${ Expr(f) })) missing += ${ Expr(f) } }).toList, '{()}) }
-
-        if (missing.nonEmpty) {
-          ${ cb }(
-            Left(
-              new java.lang.RuntimeException(
-                s"Device (${$queue.device.name}) does not have the required feature(s): ${missing.mkString(",")}, this device has/have ${available}"
-              )
+      if (found == -1) {
+        ${ cb }(
+          Left(
+            new java.lang.RuntimeException(
+              s"Device (${$queue.device.name}) with features `${available.mkString(",")}` does not meet the requirement for any of the following binaries: ${miss
+                .map((config, missing) => s"$config (missing ${missing.mkString(",")})")
+                .mkString(",")} "
             )
           )
-        } else {
-          // We got everything
-          if (! $queue.device.moduleLoaded($moduleName)) {
-            $queue.device.loadModule($moduleName, ${ Expr(c.program) })
-          }
+        )
+      } else {
 
-          val fnTpeOrdinals = ${ Expr((captureTpeOrdinals :+ returnTpeOrdinal).toArray) }
-          val fnValues =
-            ByteBuffer.allocate(${ Expr(captureTpeSizes.sum + returnTpeSize) }).order(ByteOrder.nativeOrder)
-
-          ${ bindFnValues('fnValues) }
-
-          // $queue.enqueueHostToDeviceAsync(???, p, 0, null)
-
-          $queue.enqueueInvokeAsync(
-            $moduleName,
-            $fnName,
-            fnTpeOrdinals,
-            fnValues.array,
-            rt.Policy(rt.Dim3(1, 1, 1)),
-            if ($queue.device.sharedAddressSpace) (() => ${ cb }(Right(()))): Runnable else null
-          )
-
-          $queue.syncAll(if (! $queue.device.sharedAddressSpace) (() => ${ cb }(Right(()))): Runnable else null)
+        // We got everything, load the code object
+        if (! $queue.device.moduleLoaded($moduleName)) {
+          $queue.device.loadModule($moduleName, modules(found)._3)
         }
 
-        // $queue.enqueueDeviceToHostAsync(p, ???, 0, null)
+        // Allocate parameter and return type ordinals/buffers/
+        val fnTpeOrdinals = ${ Expr((captureTpeOrdinals :+ returnTpeOrdinal).toArray) }
+        val fnValues =
+          ByteBuffer.allocate(${ Expr(captureTpeSizes.sum + returnTpeSize) }).order(ByteOrder.nativeOrder)
 
-        // $queue.device.free(p)
+        ${ bindCapturesToBuffer('fnValues, queue, captures, compiler) }
 
+        // Dispatch.
+        $queue.enqueueInvokeAsync(
+          $moduleName,
+          $fnName,
+          fnTpeOrdinals,
+          fnValues.array,
+          rt.Policy($dim),
+          if ($queue.device.sharedAddressSpace) (() => ${ cb }(Right(()))): Runnable else null
+        )
+
+        // Sync.
+        $queue.syncAll(if (! $queue.device.sharedAddressSpace) (() => ${ cb }(Right(()))): Runnable else null)
       }
-
-      // val captureTps = captures.map((name, _) => Pickler.tpeAsRuntimeTpe(name.tpe).value)
-
-      // def wrap(buffer: Expr[java.nio.ByteBuffer], comp: p.Type) =
-      //   comp match {
-      //     case p.Type.Unit   => '{ Buffer.view[Unit](${ buffer }) }
-      //     case p.Type.Float  => '{ Buffer.view[Float](${ buffer }) }
-      //     case p.Type.Double => '{ Buffer.view[Double](${ buffer }) }
-      //     case p.Type.Bool   => '{ Buffer.view[Boolean](${ buffer }) }
-      //     case p.Type.Byte   => '{ Buffer.view[Byte](${ buffer }) }
-      //     case p.Type.Char   => '{ Buffer.view[Char](${ buffer }) }
-      //     case p.Type.Short  => '{ Buffer.view[Short](${ buffer }) }
-      //     case p.Type.Int    => '{ Buffer.view[Int](${ buffer }) }
-      //     case p.Type.Long   => '{ Buffer.view[Long](${ buffer }) }
-      //     case _             => ???
-      //   }
-
-      java.nio.file.Files.write(
-        Paths.get(".").toAbsolutePath.resolve("program.o"),
-        c.program,
-        java.nio.file.StandardOpenOption.CREATE,
-        java.nio.file.StandardOpenOption.TRUNCATE_EXISTING
-      )
-      // println()
-
-      println("Code=" + code.show)
-      compiler.close()
-      code
     }
+    println("Code=" + code.show)
+    compiler.close()
+    code
+  }
 
-//    println(prog.toByteArray.mkString(" "))
-//    println(Program.parseFrom(prog.toByteArray).toProtoString)
-
-//    val b = '{ val b = polyregion.Runtime.FFIInvocationBuilder() }
-
-    result match {
-      case Left(e)  => throw e
-      case Right(x) =>
-        // println("Code=" + x.show)
-        x
+  def bindCapturesToBuffer(using q: Quoted)(
+      target: Expr[ByteBuffer],
+      queue: Expr[rt.Device.Queue],
+      captures: List[(p.Named, q.Term)],
+      compiler: cp.Compiler
+  ) = {
+    given Quotes = q.underlying
+    val (_, stmts) = captures.zipWithIndex.foldLeft((0, List.empty[Expr[Any]])) {
+      case ((byteOffset, exprs), ((name, ref), idx)) =>
+        inline def register[ts: Type, t: Type](arr: p.Type.Array, mutable: Boolean, size: Expr[ts] => Expr[Int]) = '{
+          $target.putLong(
+            ${ Expr(byteOffset) },
+            $queue.registerAndInvalidateIfAbsent[ts](
+              ${ ref.asExprOf[ts] },
+              xs => ${ Expr(Pickler.sizeOf(compiler, arr.component, q.TypeRepr.of[t])) } * ${ size('xs) },
+              (xs, bb) => ${ Pickler.putAll(compiler, 'bb, arr, q.TypeRepr.of[ts], 'xs) },
+              ${
+                if (!mutable) null
+                else '{ (bb, xs) => ${ Pickler.getAllMutable(compiler, 'bb, arr, q.TypeRepr.of[ts], 'xs) } }
+              },
+              null
+            )
+          )
+        }
+        val expr = (name.tpe, ref.tpe.asType) match {
+          case (p.Type.Array(comp), x @ '[srt.Buffer[_]]) =>
+            '{
+              $target.putLong(
+                ${ Expr(byteOffset) },
+                $queue.registerAndInvalidateIfAbsent(
+                  ${ ref.asExprOf[x.Underlying] },
+                  ${ ref.asExprOf[x.Underlying] }.backingBuffer,
+                  null
+                )
+              )
+            }
+          case (arr @ p.Type.Array(_), ts @ '[Array[t]]) =>
+            register[ts.Underlying, t](arr, mutable = true, x => '{ $x.length })
+          case (arr @ p.Type.Array(_), ts @ '[scala.collection.mutable.Seq[t]]) =>
+            register[ts.Underlying, t](arr, mutable = true, x => '{ $x.length })
+          case (arr @ p.Type.Array(_), ts @ '[java.util.List[t]]) =>
+            register[ts.Underlying, t](arr, mutable = true, x => '{ $x.size })
+          case (arr @ p.Type.Array(_), ts @ '[scala.collection.immutable.Seq[t]]) =>
+            register[ts.Underlying, t](arr, mutable = false, x => '{ $x.length })
+          case (t, _) =>
+            Pickler.putPrimitive(target, Expr(byteOffset), t, ref.asExpr)
+        }
+        (byteOffset + Pickler.tpeAsRuntimeTpe(name.tpe).sizeInBytes, exprs :+ expr)
     }
-
+    Expr.block(stmts, '{ () })
   }
 
 }

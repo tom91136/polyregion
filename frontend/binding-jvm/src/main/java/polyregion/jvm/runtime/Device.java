@@ -255,22 +255,21 @@ public final class Device implements AutoCloseable {
   public final long id;
   public final String name;
   public final boolean sharedAddressSpace;
-  private final ValueCache<Set<String>> cachedFeatures;
+  private final ValueCache<String[]> cachedFeatures;
 
   Device(long nativePeer, long id, String name, boolean sharedAddressSpace) {
     this.nativePeer = nativePeer;
     this.id = id;
     this.name = Objects.requireNonNull(name);
     this.sharedAddressSpace = sharedAddressSpace;
-    this.cachedFeatures =
-            new ValueCache<>(() -> Collections.unmodifiableSet(new HashSet<>(Arrays.asList(Platform.deviceFeatures0(nativePeer)))));
+    this.cachedFeatures = new ValueCache<>(() -> Platform.deviceFeatures0(nativePeer));
   }
 
   public Property[] properties() {
     return Platform.deviceProperties0(nativePeer);
   }
 
-  public Set<String> features() {
+  public String[] features() {
     return cachedFeatures.getCached();
   }
 

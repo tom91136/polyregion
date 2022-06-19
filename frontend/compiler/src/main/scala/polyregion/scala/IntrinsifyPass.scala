@@ -72,6 +72,30 @@ object IntrinsifyPass {
         case ("polyregion" :: "scala" :: "intrinsics$" :: op :: Nil, x, xs) =>
           println(s"$op $x $xs")
           val expr = xs match {
+            case Nil =>
+              val kind = op match {
+                case "gpuGlobalIdxX"   => p.NullaryIntrinsicKind.GpuGlobalIdxX
+                case "gpuGlobalIdxY"   => p.NullaryIntrinsicKind.GpuGlobalIdxY
+                case "gpuGlobalIdxZ"   => p.NullaryIntrinsicKind.GpuGlobalIdxZ
+                case "gpuGlobalSizeX"  => p.NullaryIntrinsicKind.GpuGlobalSizeX
+                case "gpuGlobalSizeY"  => p.NullaryIntrinsicKind.GpuGlobalSizeY
+                case "gpuGlobalSizeZ"  => p.NullaryIntrinsicKind.GpuGlobalSizeZ
+                case "gpuGroupIdxX"    => p.NullaryIntrinsicKind.GpuGroupIdxX
+                case "gpuGroupIdxY"    => p.NullaryIntrinsicKind.GpuGroupIdxY
+                case "gpuGroupIdxZ"    => p.NullaryIntrinsicKind.GpuGroupIdxZ
+                case "gpuGroupSizeX"   => p.NullaryIntrinsicKind.GpuGroupSizeX
+                case "gpuGroupSizeY"   => p.NullaryIntrinsicKind.GpuGroupSizeY
+                case "gpuGroupSizeZ"   => p.NullaryIntrinsicKind.GpuGroupSizeZ
+                case "gpuLocalIdxX"    => p.NullaryIntrinsicKind.GpuLocalIdxX
+                case "gpuLocalIdxY"    => p.NullaryIntrinsicKind.GpuLocalIdxY
+                case "gpuLocalIdxZ"    => p.NullaryIntrinsicKind.GpuLocalIdxZ
+                case "gpuLocalSizeX"   => p.NullaryIntrinsicKind.GpuLocalSizeX
+                case "gpuLocalSizeY"   => p.NullaryIntrinsicKind.GpuLocalSizeY
+                case "gpuLocalSizeZ"   => p.NullaryIntrinsicKind.GpuLocalSizeZ
+                case "gpuGroupBarrier" => p.NullaryIntrinsicKind.GpuGroupBarrier
+                case "gpuGroupFence"   => p.NullaryIntrinsicKind.GpuGroupFence
+              }
+              p.Expr.NullaryIntrinsic(  kind, rtn)
             case x :: Nil =>
               val kind = op match {
                 case "sin"  => p.UnaryIntrinsicKind.Sin

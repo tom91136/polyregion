@@ -16,7 +16,7 @@ static bool isCPUTargetSupported(const std::string &CPU, //
                                  const llvm::Triple::ArchType &arch) {
   using namespace llvm;
   switch (arch) {
-    case Triple::x86_64: return llvm::X86::parseArchX86(CPU) != llvm::X86::CPUKind::CK_None;
+    case Triple::x86_64: return CPU == "native" || (llvm::X86::parseArchX86(CPU) != llvm::X86::CPUKind::CK_None);
     case Triple::arm: return llvm::ARM::parseCPUArch(CPU) != llvm::ARM::ArchKind::INVALID;
     case Triple::aarch64: return llvm::AArch64::parseCPUArch(CPU) != llvm::AArch64::ArchKind::INVALID;
 
@@ -63,15 +63,13 @@ static void collectCPUFeatures(const std::string &CPU,             //
     }
     case Triple::arm: {
       std::vector<StringRef> extensions;
-      auto ext = ARM::getDefaultExtensions(CPU, ARM::parseCPUArch(CPU));
-      ARM::getExtensionFeatures(ext, extensions);
+      ARM::getExtensionFeatures(ARM::getDefaultExtensions(CPU, ARM::parseCPUArch(CPU)), extensions);
       normaliseFeature(extensions, drain);
       break;
     }
     case Triple::aarch64: {
       std::vector<StringRef> extensions;
-      auto ext = AArch64::getDefaultExtensions(CPU, AArch64::parseCPUArch(CPU));
-      AArch64::getExtensionFeatures(ext, extensions);
+      AArch64::getExtensionFeatures(AArch64::getDefaultExtensions(CPU, AArch64::parseCPUArch(CPU)), extensions);
       normaliseFeature(extensions, drain);
       break;
     }

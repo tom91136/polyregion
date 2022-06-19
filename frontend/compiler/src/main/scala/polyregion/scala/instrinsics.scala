@@ -4,6 +4,28 @@ object intrinsics {
 
   private def intrinsic: Nothing = throw new AssertionError("illegal")
 
+  def gpuGlobalIdxX: Int  = intrinsic
+  def gpuGlobalIdxY: Int  = intrinsic
+  def gpuGlobalIdxZ: Int  = intrinsic
+  def gpuGlobalSizeX: Int = intrinsic
+  def gpuGlobalSizeY: Int = intrinsic
+  def gpuGlobalSizeZ: Int = intrinsic
+  def gpuGroupIdxX: Int   = intrinsic
+  def gpuGroupIdxY: Int   = intrinsic
+  def gpuGroupIdxZ: Int   = intrinsic
+  def gpuGroupSizeX: Int  = intrinsic
+  def gpuGroupSizeY: Int  = intrinsic
+  def gpuGroupSizeZ: Int  = intrinsic
+  def gpuLocalIdxX: Int   = intrinsic
+  def gpuLocalIdxY: Int   = intrinsic
+  def gpuLocalIdxZ: Int   = intrinsic
+  def gpuLocalSizeX: Int  = intrinsic
+  def gpuLocalSizeY: Int  = intrinsic
+  def gpuLocalSizeZ: Int  = intrinsic
+
+  def gpuGroupBarrier(): Unit = intrinsic
+  def gpuGroupFence(): Unit   = intrinsic
+
   def apply[A](a: A, index: Int)           = intrinsic
   def update[A, B](a: A, index: Int, b: B) = intrinsic
 
