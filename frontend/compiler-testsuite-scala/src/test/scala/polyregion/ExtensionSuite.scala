@@ -6,7 +6,7 @@ import polyregion.scala.compiletime.*
 import _root_.scala.compiletime.*
 import _root_.scala.reflect.ClassTag
 
-object OUT{
+object OUT {
   val C = 2
 }
 
@@ -15,8 +15,7 @@ implicit class RI(val i: Int) {
   //  val y : Int = 2
   //  println("1")
 
-
-  def max3(j: Int, u: RI) : Int= {
+  def max3(j: Int, u: RI): Int = {
     val mm = u.i
     i + j + OUT.C
   }
@@ -24,7 +23,7 @@ implicit class RI(val i: Int) {
 
 class ExtensionSuite extends BaseSuite {
 
-  inline def testExpr[A](inline r: A)(using C: ClassTag[A]) = if (Toggles.ExtensionSuite) {
+  inline def testExpr[A <: AnyVal](inline r: A)(using C: ClassTag[A]) = if (Toggles.ExtensionSuite) {
     test(s"${C.runtimeClass}=${codeOf(r)}=${r}")(assertOffload[A](r))
   }
 

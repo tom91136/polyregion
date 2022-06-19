@@ -23,17 +23,17 @@ class BufferSuite extends BaseSuite {
       )
       xs.foreach(assertValEquals(_, expected))
     }
-    test(s"${C.runtimeClass}-fill-x-return$n=$expected") {
-      val xs = Buffer.ofDim[A](n)
-      // make sure we get the same backing buffer instance back
-      assert(
-        doOffload {
-          unrollInclusive(n - 1)(i => xs(i) = expected)
-          xs
-        }.backingBuffer eq xs.backingBuffer
-      )
-      xs.foreach(assertValEquals(_, expected))
-    }
+    // test(s"${C.runtimeClass}-fill-x-return$n=$expected") {
+    //   val xs = Buffer.ofDim[A](n)
+    //   // make sure we get the same backing buffer instance back
+    //   assert(
+    //     doOffload {
+    //       unrollInclusive(n - 1)(i => xs(i) = expected)
+    //       xs
+    //     }.backingBuffer eq xs.backingBuffer
+    //   )
+    //   xs.foreach(assertValEquals(_, expected))
+    // }
 
     if (n != 0) {
       test(s"${C.runtimeClass}-fill-x-return-at-0$n=$expected") {

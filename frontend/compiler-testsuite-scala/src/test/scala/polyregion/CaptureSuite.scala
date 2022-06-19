@@ -4,10 +4,11 @@ import polyregion.scala.*
 import polyregion.scala.compiletime.*
 
 import _root_.scala.compiletime.*
+import _root_.scala.reflect.ClassTag
 
 class CaptureSuite extends BaseSuite {
 
-  inline def testCapture[A](inline name: String)(inline r: => A) = if (Toggles.CaptureSuite) {
+  inline def testCapture[A <: AnyVal: ClassTag](inline name: String)(inline r: => A) = if (Toggles.CaptureSuite) {
     test(name)(assertOffload(r))
   }
 
@@ -64,9 +65,9 @@ class CaptureSuite extends BaseSuite {
       case class Node(elem: Int, next: Option[Node])
       case class A(b: Int, c: Int)
 //      given NativeStruct[A] = nativeStructOf
-      val bufferOfA         = Array(A(1, 2), A(3, 4))
-      val node              = Node(1, Some(Node(2, None)))
-      val (t1, t2)          = (1, 2)
+      val bufferOfA = Array(A(1, 2), A(3, 4))
+      val node      = Node(1, Some(Node(2, None)))
+      val (t1, t2)  = (1, 2)
       testCapture("complex-captures") {
         val u = MyConstantA
         val v = ConstB.MyConstantB

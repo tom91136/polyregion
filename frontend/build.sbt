@@ -121,7 +121,7 @@ lazy val `compiler-testsuite-scala` = project
       "org.scalameta" %% "munit" % munitVersion % Test
     )
   )
-  .dependsOn(compiler)
+  .dependsOn(compiler, `runtime-scala`)
 
 lazy val `compiler-testsuite-java` = project
   .settings(

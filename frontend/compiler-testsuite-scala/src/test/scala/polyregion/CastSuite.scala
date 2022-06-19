@@ -10,7 +10,7 @@ import _root_.scala.reflect.ClassTag
 
 class CastSuite extends BaseSuite {
 
-  inline def testExpr(inline name: String)(inline r: Any) = if (Toggles.CastSuite) {
+  inline def testExpr(inline name: String)(inline r: AnyVal) = if (Toggles.CastSuite) {
     test(name)(assertOffload(r))
   }
 

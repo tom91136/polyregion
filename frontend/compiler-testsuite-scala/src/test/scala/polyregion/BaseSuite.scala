@@ -1,10 +1,24 @@
 package polyregion
 
 import _root_.scala.compiletime.*
+import _root_.scala.reflect.ClassTag
+import polyregion.scala.NativeStruct
 
 trait BaseSuite extends munit.FunSuite {
 
-  inline def doOffload[A](inline x: => A): A = if (Toggles.NoOffload) x else polyregion.scala.compiletime.offload[A](x)
+  inline def doOffload[A <: AnyVal: ClassTag](inline x: => A): A = if (Toggles.NoOffload) x
+  else {
+    import polyregion.scala.blocking.*
+    import polyregion.scala.*
+    Host.aot.task[Config[Target.Host.type, Opt.O0], A](x)
+  }
+
+  inline def doOffload[A <: AnyRef: NativeStruct](inline x: => A): A = if (Toggles.NoOffload) x
+  else {
+    import polyregion.scala.blocking.*
+    import polyregion.scala.*
+    Host.aot.task[Config[Target.Host.type, Opt.O0], A](x)
+  }
 
   def assertValEquals[A](actual: A, expected: A): Unit = (actual.asMatchable, expected.asMatchable) match {
     case (a: Float, e: Float) => //
@@ -32,7 +46,17 @@ trait BaseSuite extends munit.FunSuite {
     unrollGen[A](2, xs)(f)
   }
 
-  inline def assertOffload[A](inline f: => A) = {
+  inline def assertOffload[A <: AnyVal: ClassTag](inline f: => A) = {
+    val expected =
+      try
+        f
+      catch {
+        case e: Throwable => throw new AssertionError(s"offload reference expression ${codeOf(f)} failed to execute", e)
+      }
+    assertValEquals(doOffload[A](f), expected)
+  }
+
+  inline def assertOffload[A <: AnyRef: NativeStruct](inline f: => A) = {
     val expected =
       try
         f
