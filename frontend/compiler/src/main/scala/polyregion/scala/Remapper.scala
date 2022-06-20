@@ -189,6 +189,7 @@ object Remapper {
             val termTpess = termArgss.map(_.map(_.tpe))
             val execTpess = collectExecArgLists(tpe)
             println(s"Invoke ${receiver} . ${fn}")
+            println(s"-> ${ref}")
             for {
               _ <- (fn.termParamss.isEmpty, termTpess, execTpess) match {
                 case (true, Nil, (Nil :: Nil) | Nil) => ().success // no-ap; no-arg Exec (`Nil::Nil`) or no Exec (`Nil`)

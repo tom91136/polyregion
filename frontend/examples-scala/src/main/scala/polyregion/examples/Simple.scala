@@ -46,21 +46,28 @@ object Simple {
     println(xs)
     println(cow.toList)
 
-    import polyregion.scala.blocking.*
     import polyregion.scala.*
+    import polyregion.scala.blocking.*
 
     type M = Config[Target.NVPTX64.SM61.type, Opt.O0]
     type C = Config[Target.OpenCL_C.type, Opt.O0]
 
-    val result = OpenCL.devices(0).aot.foreach[C](0 to n)(i => xs(i) = 42)
+//    val result = OpenCL.devices(0).aot.foreach[C](0 to n)(i => xs(i) = 42)
 
     // val result = OpenCL.devices(0).aot.task[Config[Target.OpenCL_C.type, Opt.O0], Int](42)
 
     // val result = HSA.devices(0).aot.task[Config[Target.AMDGCN.gfx803.type, Opt.O3], Int](42)
     // val result = HIP.devices(0).aot.task[Config[Target.AMDGCN.gfx803.type, Opt.O0], Int](42)
 
-    // val result = Host.aot.task[Config[Target.Host.type, Opt.O0], Int](42)
-    println("     R  =" + result)
+    List(1,2,3,0,42,44).foreach{i =>
+      val resultS = Host.aot.task[Config[Target.Host.type, Opt.O0], Double]{ math.tanh(i.toDouble) }
+      val result = Host.aot.task[Config[Target.Host.type, Opt.O0], Double]{ val x = i; x+x }
+      println(s"     R  =$result s=$resultS==${math.tanh(i.toDouble)}")
+
+    }
+    Platforms.platforms.close()
+
+
 
     // val Const  = scala.compiletime.constValue[Target.X86.Znver.Arch]
     // val Const1 = scala.compiletime.constValue[c.Target#Arch]

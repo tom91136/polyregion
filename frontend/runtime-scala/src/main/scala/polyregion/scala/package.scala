@@ -1,12 +1,11 @@
 package polyregion.scala
 
+import fansi.ErrorMode.Throw
 import polyregion.jvm.compiler.Options
-import polyregion.jvm.{runtime => rt}
-import polyregion.jvm.{compiler => cp}
+import polyregion.jvm.{Loader, compiler as cp, runtime as rt}
+
 import scala.compiletime.constValue
 import scala.reflect.ClassTag
-import polyregion.jvm.Loader
-import fansi.ErrorMode.Throw
 
 type Callback[A]   = Either[Throwable, A] => Unit
 type Suspend[F[_]] = [A] => (Callback[A] => Unit) => F[A]
@@ -234,7 +233,7 @@ object Target {
 
   // val code = scala.compiletime.codeOf(Aux.deriveArchNames[Target])
 
-  import cp.{Target => cpt}
+  import cp.Target as cpt
   private transparent inline def valueOf[T <: Singleton: ValueOf] = summon[ValueOf[T]].value
 
   type OpenCL_C = OpenCL_C.type
@@ -299,7 +298,7 @@ object Config {
   def apply[T <: Target](target: T*): Config[T, Opt]                 = Config(Opt.O3, target: _*)
 }
 
-private[scala] object Platforms {
+ object Platforms {
   val platforms = rt.Platforms.create()
   sys.addShutdownHook(platforms.close())
   export platforms.*

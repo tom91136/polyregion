@@ -19,7 +19,9 @@ add_executable(compiler-tests test/ast_codegen.cpp test/backend.cpp test/test-ma
 add_executable(compiler-drv driver.cpp)
 add_dependencies(compiler-drv runtime-lib)
 
-target_include_directories(compiler-tests PUBLIC . ../include)
+target_include_directories(compiler-tests PUBLIC
+        ${catch2_SOURCE_DIR}
+        . ../include)
 target_include_directories(compiler-drv PUBLIC . ../include PRIVATE ../runtime)
 target_include_directories(compiler-lib PUBLIC
         ${LLVM_INCLUDE_DIRS}

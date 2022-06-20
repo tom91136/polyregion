@@ -268,14 +268,16 @@ void Platform::enqueueInvokeAsync0(JNIEnv *env, jclass, jlong nativePeer, //
         ->enqueueInvokeAsync(fromJni(env, moduleName), fromJni(env, symbol), argTpeStore, argsPtrStore, {global, local},
                              fromJni(env, cb));
 
-    if (argTpeStore[argPs.size() - 1] == rt::Type::Ptr) {
+    if (argTpeStore[argCount - 1] == rt::Type::Ptr) {
       // we got four possible cases when a function return pointers:
       //  1. Pointer to one of the argument   (LUT[ptr]==Some) => passthrough
       //  2. Pointer to malloc'd memory       (LUT[ptr]==Some) => passthrough
       //  3. Pointer within a malloc'd region (LUT[ptr]==None) => copy
       //  4. Pointer to stack allocated data  (LUT[ptr]==None) => undefined, should not happen
 
-      throwGeneric(env, EX, "Returning pointers is unimplemented");
+      auto args = mk_string<rt::Type>(
+          argTpeStore, [](auto &tpe) { return typeName(tpe); }, ",");
+      throwGeneric(env, EX, "Returning pointers is unimplemented, args (return at the end): " + args);
       //      std::unordered_map<void *, std::pair<jobject, jsize>> allocations;
       //
       //      // save all argPs in the alloc LUT first so that we can identify them later

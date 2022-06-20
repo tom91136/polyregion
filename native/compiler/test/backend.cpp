@@ -15,7 +15,9 @@ using namespace Expr;
 
 template <typename P> static void assertCompilationSucceeded(const P &p) {
   INFO(repr(p))
-  auto c = polyregion::compiler::compile(p, <#initializer #>, <#initializer #>);
+  auto c = polyregion::compiler::compile(
+      p, polyregion::compiler::Options{polyregion::compiler::Target::Object_LLVM_x86_64, "native"},
+      polyregion::compiler::Opt::O3);
   std::cout << c << std::endl;
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);
@@ -42,8 +44,8 @@ TEST_CASE("run", "[backend]") {
 
   Program p(fn, {}, {});
   INFO(repr(p))
-  auto c =
-      polyregion::compiler::compile(p, {polyregion::compiler::Target::Object_LLVM_AMDGCN, "sm_61"}, <#initializer #>);
+  auto c = polyregion::compiler::compile(p, {polyregion::compiler::Target::Object_LLVM_AMDGCN, "sm_61"},
+                                         polyregion::compiler::Opt::O3);
   std::cout << c << std::endl;
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);

@@ -79,7 +79,7 @@ llvm::Type *LLVM::AstTransformer::mkTpe(const Type::Any &tpe, unsigned AS) {    
       [&](const Type::Int &x) -> llvm::Type * { return llvm::Type::getInt32Ty(C); },         //
       [&](const Type::Long &x) -> llvm::Type * { return llvm::Type::getInt64Ty(C); },        //
       [&](const Type::String &x) -> llvm::Type * { return undefined(__FILE__, __LINE__); },  //
-      [&](const Type::Unit &x) -> llvm::Type * { return llvm::Type::getVoidTy(C); },         //
+      [&](const Type::Unit &x) -> llvm::Type * { return llvm::Type::getInt8Ty(C); },         //
       [&](const Type::Nothing &x) -> llvm::Type * { return undefined(__FILE__, __LINE__); }, //
       [&](const Type::Struct &x) -> llvm::Type * {
         if (auto def = polyregion::get_opt(structTypes, x.name); def) {
@@ -176,8 +176,8 @@ llvm::Value *LLVM::AstTransformer::mkTermVal(const Term::Any &ref) {
   return variants::total(
       *ref, //
       [&](const Term::Select &x) -> llvm::Value * { return load(B, mkSelectPtr(x)); },
-      [&](const Term::UnitConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt1Ty(C), 0); },
-      [&](const Term::BoolConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt1Ty(C), x.value); },
+      [&](const Term::UnitConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt8Ty(C), 0); },
+      [&](const Term::BoolConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt8Ty(C), x.value); },
       [&](const Term::ByteConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt8Ty(C), x.value); },
       [&](const Term::CharConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt16Ty(C), x.value); },
       [&](const Term::ShortConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt16Ty(C), x.value); },
@@ -978,7 +978,9 @@ Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform(const std::u
 
   auto paramTpes = map_vec<Named, llvm::Type *>(allArgs, [&](auto &&named) { return mkTpe(named.tpe, GlobalAS); });
 
-  auto rtnTpe = mkTpe(fnTree.rtn);
+  // Unit type at function return type position is void
+  // Any other location, Unit is a singleton value
+  auto rtnTpe = holds<Type::Unit>(fnTree.rtn) ? llvm::Type::getVoidTy(C) : mkTpe(fnTree.rtn);
 
   auto fnTpe = llvm::FunctionType::get(rtnTpe, {paramTpes}, false);
 

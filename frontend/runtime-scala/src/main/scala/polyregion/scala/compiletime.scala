@@ -1,20 +1,18 @@
 package polyregion.scala
 
-import polyregion.ast.{CppSourceMirror, MsgPack, PolyAst as p, *}
-import polyregion.scala as srt
-import polyregion.jvm.{runtime => rt}
-import polyregion.jvm.{compiler => cp}
-
-import java.nio.ByteBuffer
-import java.nio.file.Paths
 import cats.syntax.all.*
-import java.util.concurrent.atomic.AtomicReference
+import polyregion.ast.{CppSourceMirror, MsgPack, PolyAst as p, *}
+import polyregion.jvm.{compiler as cp, runtime as rt}
+import polyregion.scala as srt
+
+import java.nio.file.Paths
+import java.nio.{ByteBuffer, ByteOrder}
+import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 import scala.annotation.{compileTimeOnly, tailrec}
 import scala.collection.immutable.VectorMap
+import scala.collection.mutable.ArrayBuffer
 import scala.quoted.*
 import scala.util.Try
-import java.nio.ByteOrder
-import scala.collection.mutable.ArrayBuffer
 
 @compileTimeOnly("This class only exists at compile-time to expose offload methods")
 object compiletime {
@@ -91,9 +89,8 @@ object compiletime {
     case Right(x) => x
   }
 
-  inline def offload0[C](inline queue: rt.Device.Queue, inline cb: Callback[Unit])(inline f: => Unit): Unit = ${
-    generate0[C]('queue, 'f, 'cb)
-  }
+  inline def offload0[C](inline queue: rt.Device.Queue, inline cb: Callback[Unit])(inline f: Any): Unit =
+    ${ generate0[C]('queue, 'f, 'cb) }
   private def generate0[C: Type](using
       q: Quotes
   )(queue: Expr[rt.Device.Queue], f: Expr[Any], cb: Expr[Callback[Unit]]) = checked(for {
@@ -104,7 +101,6 @@ object compiletime {
   inline def offload1[C](inline queue: rt.Device.Queue, inline rangeX: Range, inline cb: Callback[Unit])(
       inline f: Any
   ): Unit = ${ generate1[C]('queue, 'f, 'rangeX, 'cb) }
-
   private def generate1[C: Type](using
       q: Quotes
   )(queue: Expr[rt.Device.Queue], f: Expr[Any], rangeX: Expr[Range], cb: Expr[Callback[Unit]]) = checked(for {
@@ -118,7 +114,6 @@ object compiletime {
       inline rangeY: Range,
       inline cb: Callback[Unit]
   )(inline f: Any): Unit = ${ generate2[C]('queue, 'f, 'rangeX, 'rangeY, 'cb) }
-
   private def generate2[C: Type](using
       q: Quotes
   )(queue: Expr[rt.Device.Queue], f: Expr[Any], rangeX: Expr[Range], rangeY: Expr[Range], cb: Expr[Callback[Unit]]) =
@@ -134,7 +129,6 @@ object compiletime {
       inline rangeZ: Range,
       inline cb: Callback[Unit]
   )(inline f: Any): Unit = ${ generate3[C]('queue, 'f, 'rangeX, 'rangeY, 'rangeZ, 'cb) }
-
   private def generate3[C: Type](using
       q: Quotes
   )(
@@ -149,6 +143,7 @@ object compiletime {
     expr <- generate(using Quoted(q))(cs, queue, f, '{ rt.Dim3($rangeX.size, $rangeY.size, $rangeZ.size) }, cb)
   } yield expr)
 
+  private val ProgramCounter = AtomicLong(0)
   private def generate(using q: Quoted)(
       configs: List[ReifiedConfig],
       queue: Expr[rt.Device.Queue],
@@ -159,7 +154,7 @@ object compiletime {
     // configs               <- reifyConfigFromTpe[C](using q.underlying)()
     (captures, prog0, log) <- Compiler.compileExpr(f)
     prog = prog0.copy(entry = prog0.entry.copy(name = p.Sym("lambda")))
-    _    = println(log.render)
+//    _    = println(log.render)
 
     serialisedAst <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, prog)))
     compiler = cp.Compiler.create()
@@ -181,7 +176,7 @@ object compiletime {
 
     given Quotes   = q.underlying
     val fnName     = Expr(prog.entry.name.repr)
-    val moduleName = Expr(prog.entry.name.repr)
+    val moduleName = Expr(s"${prog0.entry.name.repr}@${ProgramCounter.getAndIncrement()}")
     val (captureTpeOrdinals, captureTpeSizes) = captures.map { (name, _) =>
       val tpe = Pickler.tpeAsRuntimeTpe(name.tpe)
       tpe.value -> tpe.sizeInBytes

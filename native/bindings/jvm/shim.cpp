@@ -13,7 +13,7 @@ static std::vector<jobject> files;
 static JavaVM *CurrentVM = {};
 
 [[maybe_unused]] jint JNI_OnLoad(JavaVM *vm, void *) {
-  fprintf(stdout, "Loaded JNI\n");
+  fprintf(stdout, "Shim JNI_OnLoad\n");
   files.clear(); // In case OnUnload didn't finish normally
   CurrentVM = vm;
 
@@ -23,10 +23,10 @@ static JavaVM *CurrentVM = {};
 }
 
 [[maybe_unused]] void JNI_OnUnload(JavaVM *vm, void *) {
+  fprintf(stdout, "Shim JNI_OnUnload\n");
   JNIEnv *env = getEnv(vm);
   Natives::unregisterMethods(env);
 
-  fprintf(stdout, "Unloaded JNI\n");
   if (!files.empty()) {
     fprintf(stdout, "Registered files: %ld\n", files.size());
     auto File = polyregion::generated::File::of(env);
@@ -41,7 +41,7 @@ static JavaVM *CurrentVM = {};
 }
 
 void Natives::registerFilesToDropOnUnload0(JNIEnv *env, jclass, jobject file) {
-  files.push_back(env->NewGlobalRef(file));
+//  files.push_back(env->NewGlobalRef(file));
 }
 
 static std::string resolveDlError() {

@@ -113,6 +113,9 @@ lazy val compiler = project
 lazy val `compiler-testsuite-scala` = project
   .settings(
     commonSettings,
+    fork := true,
+//    Test / parallelExecution := false,
+    Test / testForkedParallel := false,
     name := "compiler-testsuite-scala",
     scalacOptions ++= Seq(
       "-Yretain-trees" // XXX for the test kernels

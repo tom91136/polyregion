@@ -151,13 +151,21 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
   options.NoTrappingFPMath = useUnsafeMath;
   options.NoSignedZerosFPMath = useUnsafeMath;
 
-  llvm::CodeGenOpt::Level OLvl = llvm::CodeGenOpt::Aggressive;
+  llvm::CodeGenOpt::Level genOpt;
+  switch (opt) {
+    case compiler::Opt::O0: genOpt = llvm::CodeGenOpt::None; break;
+    case compiler::Opt::O1: genOpt = llvm::CodeGenOpt::Less; break;
+    case compiler::Opt::O2: genOpt = llvm::CodeGenOpt::Default; break;
+    case compiler::Opt::O3: // fallthrough
+    case compiler::Opt::Ofast: genOpt = llvm::CodeGenOpt::Aggressive; break;
+  }
+
 
   std::unique_ptr<llvm::TargetMachine> TM(info.target.createTargetMachine( //
       info.triple.str(),                                                   //
       info.cpu.uArch,                                                      //
       info.cpu.features,                                                   //
-      options, llvm::Reloc::Model::PIC_, llvm::CodeModel::Large, OLvl));
+      options, llvm::Reloc::Model::PIC_, llvm::CodeModel::Small, genOpt));
 
   if (M->getDataLayout().isDefault()) {
     M->setDataLayout(TM->createDataLayout());

@@ -19,8 +19,11 @@ static jstring toJni(JNIEnv *env, const std::string &s) { return env->NewStringU
 template <typename C, typename F> static jobjectArray toJni(JNIEnv *env, C &xs, jclass clazz, F &&f) {
   // XXX xs is non-const because it may hold things that we std::move from
   auto ys = env->NewObjectArray(jsize(xs.size()), clazz, nullptr);
-  for (jsize i = 0; i < jsize(xs.size()); ++i)
-    env->SetObjectArrayElement(ys, i, f(xs[i]));
+  for (jsize i = 0; i < jsize(xs.size()); ++i){
+    jobject local = f(xs[i]);
+    env->SetObjectArrayElement(ys, i, local);
+    env->DeleteLocalRef(local);
+  }
   return ys;
 }
 

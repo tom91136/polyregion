@@ -16,7 +16,8 @@ using namespace Expr;
 template <typename P> static void assertCompilationSucceeded(const P &p) {
   INFO(repr(p))
   auto c = polyregion::compiler::compile(
-      p, polyregion::compiler::Options{polyregion::compiler::Target::Object_LLVM_x86_64}, <#initializer #>);
+      p, polyregion::compiler::Options{polyregion::compiler::Target::Object_LLVM_x86_64, "native"},
+      polyregion::compiler::Opt::O3);
   std::cout << c << std::endl;
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);
@@ -43,21 +44,21 @@ TEST_CASE("json round-trip", "[ast]") {
 }
 
 TEST_CASE("initialise more than once", "[compiler]") {
-  polyregion_initialise();
-  polyregion_initialise();
-  polyregion_initialise();
-  polyregion_initialise();
+  polyregion::compiler::initialise();
+  polyregion::compiler::initialise();
+  polyregion::compiler::initialise();
+  polyregion::compiler::initialise();
 }
 
 // TEST_CASE("empty function should compile", "[compiler]") {
-//   polyregion_initialise();
+//   polyregion::compiler::initialise();
 //   Function fn(Sym({"foo"}), {}, Type::Unit(), {});
 //   Program p(fn, {}, {});
 //   assertCompilationSucceeded(p);
 // }
 
 TEST_CASE("index prim array", "[compiler]") {
-  polyregion_initialise();
+  polyregion::compiler::initialise();
 
   auto arr = Type::Array(Type::Int());
 
@@ -72,7 +73,7 @@ TEST_CASE("index prim array", "[compiler]") {
 }
 
 TEST_CASE("index struct array member", "[compiler]") {
-  polyregion_initialise();
+  polyregion::compiler::initialise();
 
   Sym myStructSym({"MyStruct"});
   Named defX = Named("x", Type::Int());
@@ -97,7 +98,7 @@ TEST_CASE("index struct array member", "[compiler]") {
 }
 
 TEST_CASE("array update struct elem member", "[compiler]") {
-  polyregion_initialise();
+  polyregion::compiler::initialise();
 
   Sym myStructSym({"MyStruct"});
   Named defX = Named("x", Type::Int());
@@ -117,7 +118,7 @@ TEST_CASE("array update struct elem member", "[compiler]") {
 }
 
 TEST_CASE("array update struct elem", "[compiler]") {
-  polyregion_initialise();
+  polyregion::compiler::initialise();
 
   Sym myStructSym({"MyStruct"});
   Named defX = Named("x", Type::Int());
@@ -136,8 +137,19 @@ TEST_CASE("array update struct elem", "[compiler]") {
   assertCompilationSucceeded(p);
 }
 
+TEST_CASE("array update unit ", "[compiler]") {
+  polyregion::compiler::initialise();
+  Function fn(Sym({"foo"}), {}, {}, {Named("s", Type::Array(Type::Unit()))}, {}, Type::Int(),
+              {
+                  Update(Select({}, Named("s", Type::Array(Type::Unit()))), IntConst(7), (UnitConst())),
+                  Return(Alias(IntConst(69))),
+              });
+  Program p(fn, {}, {});
+  assertCompilationSucceeded(p);
+}
+
 TEST_CASE("array update prim ", "[compiler]") {
-  polyregion_initialise();
+  polyregion::compiler::initialise();
   Function fn(Sym({"foo"}), {}, {}, {Named("s", Type::Array(Type::Int()))}, {}, Type::Int(),
               {
                   Update(Select({}, Named("s", Type::Array(Type::Int()))), IntConst(7), (IntConst(42))),
@@ -148,7 +160,7 @@ TEST_CASE("array update prim ", "[compiler]") {
 }
 
 TEST_CASE("alias struct", "[compiler]") {
-  polyregion_initialise();
+  polyregion::compiler::initialise();
 
   Sym myStructSym({"MyStruct"});
   Sym myStruct2Sym({"MyStruct2"});
@@ -170,7 +182,7 @@ TEST_CASE("alias struct", "[compiler]") {
 }
 
 TEST_CASE("alias struct member", "[compiler]") {
-  polyregion_initialise();
+  polyregion::compiler::initialise();
 
   Sym sdef({"a", "b"});
   StructDef def(sdef, {}, {Named("x", Type::Int()), Named("y", Type::Int())});
@@ -191,7 +203,7 @@ TEST_CASE("alias struct member", "[compiler]") {
 }
 
 TEST_CASE("alias array", "[compiler]") {
-  polyregion_initialise();
+  polyregion::compiler::initialise();
 
   auto arr = Type::Array(Type::Int());
 
@@ -207,7 +219,7 @@ TEST_CASE("alias array", "[compiler]") {
 }
 
 TEST_CASE("alias prim", "[compiler]") {
-  polyregion_initialise();
+  polyregion::compiler::initialise();
 
   Function fn(Sym({"foo"}), {}, {}, {}, {}, Type::Int(),
               {
@@ -221,7 +233,7 @@ TEST_CASE("alias prim", "[compiler]") {
 }
 
 TEST_CASE("mut struct", "[compiler]") {
-  polyregion_initialise();
+  polyregion::compiler::initialise();
 
   Sym myStructSym({"MyStruct"});
 
@@ -247,7 +259,7 @@ TEST_CASE("mut struct", "[compiler]") {
 }
 
 TEST_CASE("mut array", "[compiler]") {
-  polyregion_initialise();
+  polyregion::compiler::initialise();
 
   auto arr = Type::Array(Type::Int());
 
@@ -267,7 +279,7 @@ TEST_CASE("mut array", "[compiler]") {
 }
 
 TEST_CASE("mut prim", "[compiler]") {
-  polyregion_initialise();
+  polyregion::compiler::initialise();
 
   Function fn(Sym({"foo"}), {}, {}, {}, {}, Type::Int(),
               {
@@ -281,7 +293,7 @@ TEST_CASE("mut prim", "[compiler]") {
 }
 
 TEST_CASE("alloc struct", "[compiler]") {
-  polyregion_initialise();
+  polyregion::compiler::initialise();
 
   Sym myStructSym({"MyStruct"});
   Sym myStruct2Sym({"MyStruct2"});
@@ -310,7 +322,7 @@ TEST_CASE("alloc struct", "[compiler]") {
 }
 
 TEST_CASE("alloc struct nested", "[compiler]") {
-  polyregion_initialise();
+  polyregion::compiler::initialise();
 
   Sym myStructSym({"MyStruct"});
   Sym myStruct2Sym({"MyStruct2"});
@@ -341,7 +353,7 @@ TEST_CASE("alloc struct nested", "[compiler]") {
 }
 
 TEST_CASE("alloc array", "[compiler]") {
-  polyregion_initialise();
+  polyregion::compiler::initialise();
 
   auto arr = Type::Array(Type::Int());
 
@@ -358,7 +370,7 @@ TEST_CASE("alloc array", "[compiler]") {
 }
 
 TEST_CASE("cast expr", "[compiler]") {
-  polyregion_initialise();
+  polyregion::compiler::initialise();
 
   Function fn(Sym({"foo"}), {}, {}, {}, {}, Type::Int(),
               {
@@ -373,7 +385,7 @@ TEST_CASE("cast expr", "[compiler]") {
 }
 
 TEST_CASE("cast fp to int expr", "[compiler]") {
-  polyregion_initialise();
+  polyregion::compiler::initialise();
 
   //  auto from  = DoubleConst(0x1.fffffffffffffP+1023);
   auto from = FloatConst(0x1.fffffeP+127f);

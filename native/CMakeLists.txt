@@ -73,8 +73,8 @@ if (MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Release>:>")
 else ()
     # FIXME adjust for CUDA stuff for now
-    #    set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan)
-    set(COMMON_DEBUG_OPTIONS)
+    set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan -g3)
+#    set(COMMON_DEBUG_OPTIONS)
 endif ()
 
 if (MSVC)

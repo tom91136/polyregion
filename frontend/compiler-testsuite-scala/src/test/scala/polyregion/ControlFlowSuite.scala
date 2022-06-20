@@ -11,21 +11,21 @@ class ControlFlowSuite extends BaseSuite {
     test(name)(assertOffload[A](f))
   }
 
-  {
-    case class Foo(x: Int)
-    testExpr("ref-struct-if") {
-      var foo = Foo(1)
-      val x   = true
-      if (x) {
-        foo = Foo(42)
-        2
-      } else {
-        foo = Foo(49)
-        1
-      }
-      foo.x
-    }
-  }
+//  {
+//    case class Foo(x: Int)
+//    testExpr("ref-struct-if") {
+//      var foo = Foo(1)
+//      val x   = true
+//      if (x) {
+//        foo = Foo(42)
+//        2
+//      } else {
+//        foo = Foo(49)
+//        1
+//      }
+//      foo.x
+//    }
+//  }
 
   // testExpr("stmts") { 1; 2 }
 

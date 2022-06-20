@@ -255,11 +255,11 @@ void run() {
 
   std::vector<std::unique_ptr<Platform>> rts;
 
-  //  try {
-  //    rts.push_back(std::make_unique<RelocatablePlatform>());
-  //  } catch (const std::exception &e) {
-  //    std::cerr << "[REL] " << e.what() << std::endl;
-  //  }
+    try {
+      rts.push_back(std::make_unique<RelocatablePlatform>());
+    } catch (const std::exception &e) {
+      std::cerr << "[REL] " << e.what() << std::endl;
+    }
 
   //  try {
   //    rts.push_back(std::make_unique<CudaPlatform>());
@@ -267,23 +267,23 @@ void run() {
   //    std::cerr << "[CUDA] " << e.what() << std::endl;
   //  }
 
-  try {
-    rts.push_back(std::make_unique<ClPlatform>());
-  } catch (const std::exception &e) {
-    std::cerr << "[OCL] " << e.what() << std::endl;
-  }
-
-  try {
-    rts.push_back(std::make_unique<HsaPlatform>());
-  } catch (const std::exception &e) {
-    std::cerr << "[HSA] " << e.what() << std::endl;
-  }
-
-  try {
-    rts.push_back(std::make_unique<HipPlatform>());
-  } catch (const std::exception &e) {
-    std::cerr << "[HIP] " << e.what() << std::endl;
-  }
+//  try {
+//    rts.push_back(std::make_unique<ClPlatform>());
+//  } catch (const std::exception &e) {
+//    std::cerr << "[OCL] " << e.what() << std::endl;
+//  }
+//
+//  try {
+//    rts.push_back(std::make_unique<HsaPlatform>());
+//  } catch (const std::exception &e) {
+//    std::cerr << "[HSA] " << e.what() << std::endl;
+//  }
+//
+//  try {
+//    rts.push_back(std::make_unique<HipPlatform>());
+//  } catch (const std::exception &e) {
+//    std::cerr << "[HIP] " << e.what() << std::endl;
+//  }
 
   static std::vector<int> xs;
 
@@ -332,12 +332,12 @@ void run() {
 
         std::vector<Type> types{Type::Ptr, Type::Int32, Type::Void};
         std::vector<void *> args{&ptr, &x, nullptr};
-        q1->enqueueInvokeAsync("a", "foo", types, args, {},
+        q1->enqueueInvokeAsync("a", "lambda", types, args, {},
                                [&]() { std::cout << "[" << i << "]  K 1 ok" << std::endl; });
 
         x = 5;
 
-        q1->enqueueInvokeAsync("a", "foo", types, args, {},
+        q1->enqueueInvokeAsync("a", "lambda", types, args, {},
                                [&]() { std::cout << "[" << i << "]  K 2 ok" << std::endl; });
         q1->enqueueDeviceToHostAsync(ptr, xs.data(), size, [&]() {
           std::cout << "[" << i << "]  D->H ok, r= "

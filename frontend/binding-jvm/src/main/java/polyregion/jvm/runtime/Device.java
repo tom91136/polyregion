@@ -6,6 +6,7 @@ import java.util.AbstractMap.SimpleImmutableEntry;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -57,14 +58,14 @@ public final class Device implements AutoCloseable {
         if (buffer == null)
           buffer = ByteBuffer.allocateDirect(byteSize).order(ByteOrder.nativeOrder());
 
-        if (devicePtr == 0)
-          devicePtr = device.malloc(byteSize, decode == null ? Access.RO : Access.RW);
-
         encode.accept(Objects.requireNonNull(object), buffer.rewind());
+
         if (device.sharedAddressSpace) {
           devicePtr = Natives.pointerOfDirectBuffer(buffer);
           if (cb != null) cb.run();
         } else {
+          if (devicePtr == 0)
+            devicePtr = device.malloc(byteSize, decode == null ? Access.RO : Access.RW);
           enqueueHostToDeviceAsync(buffer, devicePtr, buffer.capacity(), cb);
         }
 

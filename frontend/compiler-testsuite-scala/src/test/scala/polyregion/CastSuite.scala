@@ -10,8 +10,8 @@ import _root_.scala.reflect.ClassTag
 
 class CastSuite extends BaseSuite {
 
-  inline def testExpr(inline name: String)(inline r: AnyVal) = if (Toggles.CastSuite) {
-    test(name)(assertOffload(r))
+  inline def testExpr[A <: AnyVal: ClassTag](inline name: String)(inline r: => A) = if (Toggles.CastSuite) {
+    test(name)(assertOffload[A](r))
   }
 
   inline def testCastDouble(inline x: Double): Unit = {
@@ -114,15 +114,15 @@ class CastSuite extends BaseSuite {
     val long2Short  = 42L.toShort
     val long2Char   = 42L.toChar
     val long2Byte   = 42L.toByte
+    ()
   }
 
   Ints.foreach(testCastInt(_))
   Bytes.foreach(testCastByte(_))
   Chars.foreach(testCastChar(_))
   Shorts.foreach(testCastShort(_))
-  Ints.foreach(testCastInt(_))
   Longs.foreach(testCastLong(_))
-  Floats.foreach(testCastFloat(_))
-  Doubles.foreach(testCastDouble(_))
+//  Floats.foreach(testCastFloat(_))
+//  Doubles.foreach(testCastDouble(_))
 
 }
