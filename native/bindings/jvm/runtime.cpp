@@ -36,6 +36,7 @@ static_assert(polyregion::to_underlying(rt::Type::Ptr) == Platforms::TYPE_PTR);
 static JavaVM *CurrentVM;
 
 [[maybe_unused]] jint JNI_OnLoad(JavaVM *vm, void *) {
+  fprintf(stderr, "Onload runtime\n");
   CurrentVM = vm;
   JNIEnv *env = getEnv(vm);
   if (!env) return JNI_ERR;
@@ -46,6 +47,7 @@ static JavaVM *CurrentVM;
 }
 
 [[maybe_unused]] void JNI_OnUnload(JavaVM *vm, void *) {
+  fprintf(stderr, "OnUnload runtime\n");
   JNIEnv *env = getEnv(vm);
   gen::Platform::drop(env);
   gen::Property::drop(env);
@@ -235,9 +237,6 @@ void Platform::enqueueInvokeAsync0(JNIEnv *env, jclass, jlong nativePeer, //
                                    jbyteArray argTypes,                   //
                                    jbyteArray argData,                    //
                                    jobject policy, jobject cb) {
-
-  JNIEnv *e2;
-  CurrentVM->AttachCurrentThread(reinterpret_cast<void **>(&e2), nullptr);
 
   auto argCount = env->GetArrayLength(argTypes);
   if (argCount == 0) {

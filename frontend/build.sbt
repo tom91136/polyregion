@@ -5,9 +5,9 @@ lazy val bindingsDir = (nativeDir / "bindings" / "jvm").getAbsoluteFile
 
 // /home/tom/polyregion/native/cmake-build-debug-clang/bindings/jvm/libpolyregion-compiler-jvm.so
 
-lazy val scala3Version = "3.1.2"
-lazy val catsVersion   = "2.7.0"
-lazy val munitVersion  = "1.0.0-M4"
+lazy val scala3Version = "3.1.3"
+lazy val catsVersion   = "2.8.0"
+lazy val munitVersion  = "1.0.0-M5"
 
 lazy val commonSettings = Seq(
   scalaVersion     := scala3Version,
@@ -110,12 +110,16 @@ lazy val compiler = project
   )
   .dependsOn(`binding-jvm`)
 
+
 lazy val `compiler-testsuite-scala` = project
   .settings(
     commonSettings,
-    fork := true,
-//    Test / parallelExecution := false,
+    fork                      := false,
+    Test / parallelExecution  := false,
     Test / testForkedParallel := false,
+    commands += Command.command("testUntilFailed") { state =>
+      "test" :: "testUntilFailed" :: state
+    },
     name := "compiler-testsuite-scala",
     scalacOptions ++= Seq(
       "-Yretain-trees" // XXX for the test kernels

@@ -15,7 +15,7 @@ FetchContent_Declare(
 FetchContent_Declare(
         lld
         URL https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_SRC_VERSION}/lld-${LLVM_SRC_VERSION}.src.tar.xz
-        URL_HASH SHA256=a91716f59f8e78018246a7ab6cad1bfdddec270c4db6d3d2a394844ee8799c8f
+        URL_HASH SHA256=8aa7be03500a37d8a1ff838f27c801648e2cb41828e7a8bc436d8d6e404224d8
 )
 
 FetchContent_Declare(
@@ -96,6 +96,7 @@ else ()
             -Wcast-align
             -Werror=return-type
             -Werror=switch
+            -Wthread-safety
             -Wno-unused-parameter
             -Wno-unused-function
             -Wno-unused-variable

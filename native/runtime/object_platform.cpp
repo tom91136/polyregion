@@ -1,3 +1,4 @@
+#include <mutex>
 #include <system_error>
 #include <utility>
 
@@ -114,20 +115,24 @@ std::vector<std::unique_ptr<Device>> RelocatablePlatform::enumerate() {
 }
 
 static constexpr const char *RELOBJ_ERROR_PREFIX = "[RelocatableObject error] ";
-RelocatableDevice::RelocatableDevice() : llvm::SectionMemoryManager(nullptr), ld(*this, *this) { TRACE(); }
-uint64_t RelocatableDevice::getSymbolAddress(const std::string &Name) {
-  auto self = this;
-  thread_local static std::function<void *(size_t)> threadLocalMallocFn = [&self](size_t size) {
-    return self ? reinterpret_cast<void *>(self->malloc(size, Access::RW)) : nullptr;
-  };
-  return Name == "malloc" ? (uint64_t)&threadLocalMallocFn : llvm::RTDyldMemoryManager::getSymbolAddress(Name);
+
+MemoryManager::MemoryManager() : SectionMemoryManager(nullptr) {}
+uint64_t MemoryManager::getSymbolAddress(const std::string &Name) {
+  return Name == "malloc" ? (uint64_t)&std::malloc : llvm::RTDyldMemoryManager::getSymbolAddress(Name);
 }
+
+// uint64_t RelocatableDevice::getSymbolAddress(const std::string &Name) {
+//   return Name == "malloc" ? (uint64_t)&std::malloc : llvm::RTDyldMemoryManager::getSymbolAddress(Name);
+// }
+RelocatableDevice::RelocatableDevice() /* : llvm::SectionMemoryManager(nullptr), ld(*this, *this) */ { TRACE(); }
+
 std::string RelocatableDevice::name() {
   TRACE();
   return "RelocatableObjectDevice(llvm::RuntimeDyld)";
 }
 void RelocatableDevice::loadModule(const std::string &name, const std::string &image) {
   TRACE();
+  WriteLock rw(lock);
   if (auto it = objects.find(name); it != objects.end()) {
     throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Module named " + name + " was already loaded");
   } else {
@@ -140,23 +145,33 @@ void RelocatableDevice::loadModule(const std::string &name, const std::string &i
 }
 bool RelocatableDevice::moduleLoaded(const std::string &name) {
   TRACE();
+  ReadLock r(lock);
   return objects.find(name) != objects.end();
 }
 std::unique_ptr<DeviceQueue> RelocatableDevice::createQueue() {
   TRACE();
-  return std::make_unique<RelocatableDeviceQueue>(objects, ld);
+  return std::make_unique<RelocatableDeviceQueue>(objects, lock);
 }
 
-RelocatableDeviceQueue::RelocatableDeviceQueue(decltype(objects) objects, decltype(ld) ld) : objects(objects), ld(ld) {}
+//static int c = 0;
+RelocatableDeviceQueue::RelocatableDeviceQueue(decltype(objects) objects, decltype(lock) lock)
+    : objects(objects), lock(lock) {}
 void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
                                                 const std::vector<Type> &types, std::vector<void *> &args,
                                                 const Policy &policy, const MaybeCallback &cb) {
+
+  RelocatableDevice::ReadLock r(lock);
+
+  static MemoryManager mm;
+  static llvm::RuntimeDyld ld(mm, mm);
+
   TRACE();
-  auto moduleIt = objects.find(moduleName);
+  const auto moduleIt = objects.find(moduleName);
   if (moduleIt == objects.end())
     throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "No module named " + moduleName + " was loaded");
 
-  auto &obj = moduleIt->second;
+  const auto &obj = moduleIt->second;
+
   ld.loadObject(*obj);
   auto fnName = (obj->isMachO() || obj->isMachOUniversalBinary()) ? std::string("_") + symbol : symbol;
 
@@ -172,6 +187,16 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
                            polyregion::mk_string<std::string>(
                                symbols, [](auto &x) { return x; }, ","));
   } else {
+//    c++;
+//    fprintf(stderr, "Do %s @ %d\n", moduleName.c_str(), c);
+
+//    llvm::DebugFlag = true;
+    //    ld.resolveRelocations();
+    //    if(ld.hasError()){
+    //      throw std::logic_error("e");
+    //    }
+    //    mm.finalizeMemory();
+
     if (ld.finalizeWithMemoryManagerLocking(); ld.hasError()) {
       throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Symbol `" + std::string(symbol) +
                              "` failed to finalise for execution: " + ld.getErrorString().str());

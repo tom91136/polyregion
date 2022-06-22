@@ -41,7 +41,7 @@ static JavaVM *CurrentVM = {};
 }
 
 void Natives::registerFilesToDropOnUnload0(JNIEnv *env, jclass, jobject file) {
-//  files.push_back(env->NewGlobalRef(file));
+  files.push_back(env->NewGlobalRef(file));
 }
 
 static std::string resolveDlError() {

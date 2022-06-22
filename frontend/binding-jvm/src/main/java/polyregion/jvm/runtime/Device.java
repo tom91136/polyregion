@@ -100,8 +100,9 @@ public final class Device implements AutoCloseable {
       }
     }
 
-    public final Map<Object, MemoryProxy<Object>> references =
-        Collections.synchronizedMap(new WeakHashMap<>());
+
+    public final ThreadLocal<Map<Object, MemoryProxy<Object>>> references =
+            ThreadLocal.withInitial(() -> Collections.synchronizedMap(new WeakHashMap<>()));
 
     Queue(long nativePeer, Device device) {
       this.nativePeer = nativePeer;
@@ -115,7 +116,7 @@ public final class Device implements AutoCloseable {
         BiConsumer<T, ByteBuffer> write,
         BiConsumer<ByteBuffer, T> read,
         Runnable cb) {
-      return references.computeIfAbsent(
+      return references.get().computeIfAbsent(
               Objects.requireNonNull(object),
               key ->
                   ((MemoryProxy<Object>) new MemoryProxy<>(sizeInBytes, write, read))
@@ -124,7 +125,7 @@ public final class Device implements AutoCloseable {
     }
 
     public long registerAndInvalidateIfAbsent(Object object, ByteBuffer buffer, Runnable cb) {
-      return references.computeIfAbsent(
+      return references.get().computeIfAbsent(
               Objects.requireNonNull(object),
               key ->
                   new MemoryProxy<>(ignored -> buffer.capacity(), (s, d) -> {}, (d, s) -> {})
@@ -134,7 +135,7 @@ public final class Device implements AutoCloseable {
     }
 
     public void invalidate(Object o, Runnable cb) {
-      MemoryProxy<Object> proxy = references.get(Objects.requireNonNull(o));
+      MemoryProxy<Object> proxy = references.get().get(Objects.requireNonNull(o));
       if (proxy != null) proxy.invalidate(o, cb);
       else
         throw new IllegalArgumentException(
@@ -142,7 +143,7 @@ public final class Device implements AutoCloseable {
     }
 
     public void sync(Object o, Runnable cb) {
-      MemoryProxy<Object> proxy = references.get(Objects.requireNonNull(o));
+      MemoryProxy<Object> proxy = references.get().get(Objects.requireNonNull(o));
       if (proxy != null) proxy.sync(o, cb);
       else
         throw new IllegalArgumentException(
@@ -150,7 +151,7 @@ public final class Device implements AutoCloseable {
     }
 
     public void release(Object o) {
-      MemoryProxy<?> orphan = references.remove(Objects.requireNonNull(o));
+      MemoryProxy<?> orphan = references.get().remove(Objects.requireNonNull(o));
       if (orphan != null) orphan.release();
       else
         throw new IllegalArgumentException(
@@ -163,11 +164,11 @@ public final class Device implements AutoCloseable {
         Runnable cb,
         Object... objects) {
       final Set<Entry<Object, MemoryProxy<Object>>> xs;
-      if (objects.length == 0) xs = references.entrySet();
+      if (objects.length == 0) xs = references.get().entrySet();
       else {
         xs = new HashSet<>(objects.length);
         for (Object o : objects) {
-          MemoryProxy<Object> proxy = references.get(o);
+          MemoryProxy<Object> proxy = references.get().get(o);
           if (proxy == null)
             throw new IllegalArgumentException(
                 "Object " + o + " is not currently registered for " + action + ".");
@@ -199,7 +200,7 @@ public final class Device implements AutoCloseable {
 
     public void releaseAll(Object... objects) {
       if (objects.length != 0) for (Object o : objects) release(o);
-      else for (MemoryProxy<?> e : references.values()) release(e);
+      else for (MemoryProxy<?> e : references.get().values()) release(e);
     }
 
     public void enqueueHostToDeviceAsync(ByteBuffer src, long dst, int size, Runnable cb) {

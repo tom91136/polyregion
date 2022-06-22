@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <shared_mutex>
 
 #include "dl.h"
 #include "runtime.h"
@@ -37,12 +38,14 @@ public:
   EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;
 };
 
-class EXPORT RelocatableDevice : public ObjectDevice, private llvm::SectionMemoryManager {
+class EXPORT RelocatableDevice : public ObjectDevice { //, private llvm::SectionMemoryManager {
   ObjectModules objects = {};
-  llvm::RuntimeDyld ld;
-  uint64_t getSymbolAddress(const std::string &Name) override;
-
+//  llvm::RuntimeDyld ld;
+  std::shared_mutex lock;
+//  uint64_t getSymbolAddress(const std::string &Name) override;
 public:
+  using WriteLock = std::unique_lock<decltype(lock)>;
+  using ReadLock = std::shared_lock<decltype(lock)>;
   EXPORT RelocatableDevice();
   EXPORT std::string name() override;
   EXPORT void loadModule(const std::string &name, const std::string &image) override;
@@ -50,12 +53,25 @@ public:
   EXPORT std::unique_ptr<DeviceQueue> createQueue() override;
 };
 
+namespace {
+
+class MemoryManager : public llvm::SectionMemoryManager {
+public:
+  MemoryManager();
+
+private:
+  uint64_t getSymbolAddress(const std::string &Name) override;
+};
+
+} // namespace
+
 class EXPORT RelocatableDeviceQueue : public ObjectDeviceQueue {
   ObjectModules &objects;
-  llvm::RuntimeDyld &ld;
+  std::shared_mutex &lock;
+//  llvm::RuntimeDyld &ld;
 
 public:
-  RelocatableDeviceQueue(decltype(objects) objects, decltype(ld) ld);
+  RelocatableDeviceQueue(decltype(objects) objects, decltype(lock) lock );
   EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
                                  const std::vector<Type> &types, std::vector<void *> &args, const Policy &policy,
                                  const MaybeCallback &cb) override;

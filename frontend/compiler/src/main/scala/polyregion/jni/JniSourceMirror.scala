@@ -300,7 +300,9 @@ object JniSourceMirror {
 
   def generateRegisterNative(cls: Class[_]) = {
 
-    val nativeMethods = cls.getDeclaredMethods.filter(m => Modifier.isNative(m.getModifiers))
+    val nativeMethods = cls.getDeclaredMethods
+      .filter(m => Modifier.isNative(m.getModifiers))
+      .sortBy(m => descriptor(m))
 
     val registerEntries = nativeMethods.map(m =>
       s"""{(char *)"${m.getName}", (char *)"${descriptor(m)}", (void *)&${safeCppNames(m.getName)}}"""
@@ -309,6 +311,7 @@ object JniSourceMirror {
     val constants = cls.getDeclaredFields
       .filter(f => Modifier.isStatic(f.getModifiers) && Modifier.isFinal(f.getModifiers))
       .filter(_.getType.isPrimitive)
+      .sortBy(_.getName)
       .map { f =>
         f.setAccessible(true)
         val rhs = f.getType match {
@@ -337,6 +340,7 @@ object JniSourceMirror {
     val header =
       s"""#pragma once
 		 |#include <jni.h>
+		 |#include <stdexcept>
          |namespace polyregion::generated::registry::$clsName {
 		 |${constants.map(c => s"$c;").mkString("\n")}
          |${prototypes.map(p => s"[[maybe_unused]] $p;").mkString("\n")}
@@ -345,7 +349,9 @@ object JniSourceMirror {
 		 |
          |static void unregisterMethods(JNIEnv *env) {
          |  if (!clazz) return;
-         |  env->UnregisterNatives(clazz);
+		 |  if(env->UnregisterNatives(clazz) != 0){
+         |    throw std::logic_error("UnregisterNatives returned non-zero for $jniName");
+         |  }
          |  env->DeleteGlobalRef(clazz);
          |  clazz = nullptr;
          |}
@@ -353,9 +359,11 @@ object JniSourceMirror {
          |static void registerMethods(JNIEnv *env) {
          |  if (clazz) unregisterMethods(env);
          |  clazz = reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("$jniName")));
-         |  static JNINativeMethod methods[] = {
+         |  const static JNINativeMethod methods[${registerEntries.length}] = {
          |${registerEntries.map("      " + _).mkString(",\n")}};
-         |  env->RegisterNatives(clazz, methods, ${registerEntries.length});
+         |  if(env->RegisterNatives(clazz, methods, ${registerEntries.length}) != 0){
+		 |    throw std::logic_error("RegisterNatives returned non-zero for $jniName");
+		 |  }
          |}
          |
          |} // namespace polyregion::generated::registry::$clsName""".stripMargin

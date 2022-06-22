@@ -12,7 +12,7 @@ object Toggles {
   // ok
   final inline val InlineArraySuite = false
   final inline val LogicSuite       = false // Compiler SEGV
-  final inline val ControlFlowSuite = true
+  final inline val ControlFlowSuite = false
   final inline val ValueReturnSuite = false // Compiler SEGV
 
   final inline val StructSuite      = false
