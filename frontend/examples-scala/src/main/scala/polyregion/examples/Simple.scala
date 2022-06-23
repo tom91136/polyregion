@@ -65,7 +65,7 @@ object Simple {
       println(s"     R  =$result s=$resultS==${math.tanh(i.toDouble)}")
 
     }
-    Platforms.platforms.close()
+//    Platforms.platforms.close()
 
 
 

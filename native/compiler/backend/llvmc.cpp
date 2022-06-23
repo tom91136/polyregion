@@ -160,12 +160,14 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
     case compiler::Opt::Ofast: genOpt = llvm::CodeGenOpt::Aggressive; break;
   }
 
-
+  // XXX We *MUST* use the large code model as we will be ingesting the object later with RuntimeDyld
+  // The code model here has nothing to do with the actual object code size, it's about controlling the relocation.
+  // See https://stackoverflow.com/questions/40493448/what-does-the-codemodel-in-clang-llvm-refer-to
   std::unique_ptr<llvm::TargetMachine> TM(info.target.createTargetMachine( //
       info.triple.str(),                                                   //
       info.cpu.uArch,                                                      //
       info.cpu.features,                                                   //
-      options, llvm::Reloc::Model::PIC_, llvm::CodeModel::Small, genOpt));
+      options, llvm::Reloc::Model::PIC_, llvm::CodeModel::Large, genOpt));
 
   if (M->getDataLayout().isDefault()) {
     M->setDataLayout(TM->createDataLayout());

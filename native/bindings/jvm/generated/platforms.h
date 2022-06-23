@@ -16,17 +16,18 @@ static constexpr jbyte TYPE_PTR = 10;
 static constexpr jbyte TYPE_SHORT = 5;
 static constexpr jbyte TYPE_VOID = 1;
 [[maybe_unused]] jobject CUDA0(JNIEnv *env, jclass);
+[[maybe_unused]] jobject Dynamic0(JNIEnv *env, jclass);
 [[maybe_unused]] jobject HIP0(JNIEnv *env, jclass);
 [[maybe_unused]] jobject HSA0(JNIEnv *env, jclass);
 [[maybe_unused]] jobject OpenCL0(JNIEnv *env, jclass);
-[[maybe_unused]] jobject Dynamic0(JNIEnv *env, jclass);
 [[maybe_unused]] jobject Relocatable0(JNIEnv *env, jclass);
-[[maybe_unused]] void deleteAllPeer0(JNIEnv *env, jclass);
+[[maybe_unused]] void deleteAllPeers0(JNIEnv *env, jclass);
+[[maybe_unused]] jlong pointerOfDirectBuffer0(JNIEnv *env, jclass, jobject buffer);
+[[maybe_unused]] jlongArray pointerOfDirectBuffers0(JNIEnv *env, jclass, jobjectArray buffers);
 
-static jclass clazz{};
+thread_local jclass clazz = nullptr;
 
 static void unregisterMethods(JNIEnv *env) {
-  fprintf(stderr, "Drop Platforms\n");
   if (!clazz) return;
   if(env->UnregisterNatives(clazz) != 0){
     throw std::logic_error("UnregisterNatives returned non-zero for polyregion/jvm/runtime/Platforms");
@@ -36,17 +37,19 @@ static void unregisterMethods(JNIEnv *env) {
 }
 
 static void registerMethods(JNIEnv *env) {
-  if (clazz) unregisterMethods(env);
+  if (clazz) return;
   clazz = reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/runtime/Platforms")));
-  const static JNINativeMethod methods[7] = {
+  const static JNINativeMethod methods[9] = {
       {(char *)"CUDA0", (char *)"()Lpolyregion/jvm/runtime/Platform;", (void *)&CUDA0},
+      {(char *)"Dynamic0", (char *)"()Lpolyregion/jvm/runtime/Platform;", (void *)&Dynamic0},
       {(char *)"HIP0", (char *)"()Lpolyregion/jvm/runtime/Platform;", (void *)&HIP0},
       {(char *)"HSA0", (char *)"()Lpolyregion/jvm/runtime/Platform;", (void *)&HSA0},
       {(char *)"OpenCL0", (char *)"()Lpolyregion/jvm/runtime/Platform;", (void *)&OpenCL0},
-      {(char *)"Dynamic0", (char *)"()Lpolyregion/jvm/runtime/Platform;", (void *)&Dynamic0},
       {(char *)"Relocatable0", (char *)"()Lpolyregion/jvm/runtime/Platform;", (void *)&Relocatable0},
-      {(char *)"deleteAllPeer0", (char *)"()V", (void *)&deleteAllPeer0}};
-  if(env->RegisterNatives(clazz, methods, 7) != 0){
+      {(char *)"deleteAllPeers0", (char *)"()V", (void *)&deleteAllPeers0},
+      {(char *)"pointerOfDirectBuffer0", (char *)"(Ljava/nio/Buffer;)J", (void *)&pointerOfDirectBuffer0},
+      {(char *)"pointerOfDirectBuffers0", (char *)"([Ljava/nio/Buffer;)[J", (void *)&pointerOfDirectBuffers0}};
+  if(env->RegisterNatives(clazz, methods, 9) != 0){
     throw std::logic_error("RegisterNatives returned non-zero for polyregion/jvm/runtime/Platforms");
   }
 }

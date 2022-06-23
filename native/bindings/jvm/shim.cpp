@@ -74,23 +74,3 @@ void Natives::dynamicLibraryRelease0(JNIEnv *env, jclass, jlong handle) {
   }
 }
 
-jlongArray Natives::pointerOfDirectBuffers0(JNIEnv *env, jclass, jobjectArray buffers) {
-  jsize n = env->GetArrayLength(buffers);
-  auto array = env->NewLongArray(n);
-  auto ptrs = env->GetLongArrayElements(array, nullptr);
-  for (jsize i = 0; i < n; ++i) {
-    if (auto ptr = env->GetDirectBufferAddress(env->GetObjectArrayElement(buffers, i)); ptr)
-      ptrs[i] = reinterpret_cast<jlong>(ptr);
-    else
-      return throwGeneric(env, EX,
-                          "Object at " + std::to_string(i) + " is either not a direct Buffer or not a Buffer at all.");
-  }
-  env->ReleaseLongArrayElements(array, ptrs, 0);
-  return array;
-}
-
-jlong Natives::pointerOfDirectBuffer0(JNIEnv *env, jclass, jobject buffer) {
-  if (auto ptr = env->GetDirectBufferAddress(buffer); ptr) return reinterpret_cast<jlong>(ptr);
-  else
-    return throwGeneric<jlong>(env, EX, "Object is either not a direct Buffer or not a Buffer at all.");
-}

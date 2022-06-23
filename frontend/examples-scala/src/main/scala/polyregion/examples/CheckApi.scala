@@ -126,7 +126,7 @@ object CheckApi {
         val data = ByteBuffer.allocateDirect(java.lang.Integer.BYTES * 4).order(ByteOrder.nativeOrder())
         (data.putInt(7).putInt(7).putInt(7).putInt(7): Buffer).position(0)
 
-        val ptr = Natives.pointerOfDirectBuffer(data)
+        val ptr = polyregion.jvm.runtime.Platforms.create().pointerOfDirectBuffer(data)
 
         val q0 = d0.createQueue();
 

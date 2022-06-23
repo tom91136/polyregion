@@ -177,15 +177,6 @@ object compiletime {
     given Quotes   = q.underlying
     val fnName     = Expr(prog.entry.name.repr)
     val moduleName = Expr(s"${prog0.entry.name.repr}@${ProgramCounter.getAndIncrement()}")
-    if(ProgramCounter.get() == 140){
-
-      java.nio.file.Files.write(
-        Paths.get(".").toAbsolutePath.resolve(s"${prog0.entry.name.repr}@${ProgramCounter.getAndIncrement()}.o"),
-        compilations(0)._2.program,
-        java.nio.file.StandardOpenOption.CREATE,
-        java.nio.file.StandardOpenOption.TRUNCATE_EXISTING
-      )
-    }
     val (captureTpeOrdinals, captureTpeSizes) = captures.map { (name, _) =>
       val tpe = Pickler.tpeAsRuntimeTpe(name.tpe)
       tpe.value -> tpe.sizeInBytes

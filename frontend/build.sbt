@@ -114,7 +114,7 @@ lazy val compiler = project
 lazy val `compiler-testsuite-scala` = project
   .settings(
     commonSettings,
-    fork                      := false,
+    fork                      := true,
     Test / parallelExecution  := false,
     Test / testForkedParallel := false,
     commands += Command.command("testUntilFailed") { state =>

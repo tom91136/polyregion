@@ -125,8 +125,8 @@ class CastSuite extends BaseSuite {
   Floats.foreach(testCastFloat(_))
   Doubles.foreach(testCastDouble(_))
 
-//  (0 to 1000).foreach { x =>
-//    val out = 3;
+//  (0 to 10).foreach { x =>
+//    val out = 3
 //    testExpr(s"${x.getClass}-$x") { val y = out; y.toDouble }
 //  }
 //  {

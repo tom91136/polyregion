@@ -22,5 +22,4 @@ public class ValueCache<V> {
     }
     return result;
   }
-
 }

@@ -111,20 +111,20 @@ public final class Loader {
     String platform = resolvePlatform();
 
     // TODO remove for prod
-    List<Path> paths = new ArrayList<>(Arrays.asList(
-            //      Paths.get("../native/build-" + platform + "/bindings/jvm/"),
-            Paths.get("../native/cmake-build-debug-clang/bindings/jvm/"),
-            Paths.get("../native/cmake-build-release-clang/bindings/jvm/"),
-            Paths.get("../../native/build-" + platform + "/bindings/jvm/"),
-            Paths.get("../../native/cmake-build-release-clang/bindings/jvm/"),
-            Paths.get("../../native/cmake-build-debug-clang/bindings/jvm/")
-    ));
+    List<Path> paths =
+        new ArrayList<>(
+            Arrays.asList(
+                //      Paths.get("../native/build-" + platform + "/bindings/jvm/"),
+                Paths.get("../native/cmake-build-debug-clang/bindings/jvm/"),
+                Paths.get("../native/cmake-build-release-clang/bindings/jvm/"),
+                Paths.get("../../native/build-" + platform + "/bindings/jvm/"),
+                Paths.get("../../native/cmake-build-release-clang/bindings/jvm/"),
+                Paths.get("../../native/cmake-build-debug-clang/bindings/jvm/")));
 
     // TODO remove for prod; use debug first for compiler
-    if(filename.contains("compiler")){
+    if (filename.contains("compiler")) {
       paths.add(0, Paths.get("../native/cmake-build-debug-clang/bindings/jvm/"));
     }
-
 
     String[] resourcePaths = {
       platform + "/", "",
@@ -166,9 +166,9 @@ public final class Loader {
     int attempt = 0;
     while (attempt < 10) {
       try {
-        System.out.println("load native:" + libPath);
+        System.out.println("[Loader] Load native:" + libPath);
         System.load(libPath.toString());
-        System.out.println("load native OK");
+        System.out.println("[Loader] Loaded native:" + libPath);
         return libPath;
       } catch (UnsatisfiedLinkError e) {
         if (!e.getMessage().endsWith("already loaded in another classloader")) throw e;

@@ -153,7 +153,7 @@ std::unique_ptr<DeviceQueue> RelocatableDevice::createQueue() {
   return std::make_unique<RelocatableDeviceQueue>(objects, lock);
 }
 
-//static int c = 0;
+// static int c = 0;
 RelocatableDeviceQueue::RelocatableDeviceQueue(decltype(objects) objects, decltype(lock) lock)
     : objects(objects), lock(lock) {}
 void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
@@ -162,8 +162,8 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
 
   RelocatableDevice::ReadLock r(lock);
 
-  static MemoryManager mm;
-  static llvm::RuntimeDyld ld(mm, mm);
+    MemoryManager mm;
+    llvm::RuntimeDyld ld(mm, mm);
 
   TRACE();
   const auto moduleIt = objects.find(moduleName);
@@ -187,10 +187,10 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
                            polyregion::mk_string<std::string>(
                                symbols, [](auto &x) { return x; }, ","));
   } else {
-//    c++;
-//    fprintf(stderr, "Do %s @ %d\n", moduleName.c_str(), c);
+    //    c++;
+    //    fprintf(stderr, "Do %s @ %d\n", moduleName.c_str(), c);
 
-//    llvm::DebugFlag = true;
+//        llvm::DebugFlag = true;
     //    ld.resolveRelocations();
     //    if(ld.hasError()){
     //      throw std::logic_error("e");

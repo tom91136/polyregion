@@ -1,12 +1,11 @@
 package polyregion.jvm.runtime;
 
+import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.AbstractMap.SimpleImmutableEntry;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -16,8 +15,6 @@ import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.ToIntFunction;
-
-import polyregion.jvm.Natives;
 
 @SuppressWarnings("unused")
 public final class Device implements AutoCloseable {
@@ -44,8 +41,16 @@ public final class Device implements AutoCloseable {
         this.decode = decode; // null decode for write-only
       }
 
+      private ByteBuffer rewind() {
+        // XXX JDK 8+ breaks binary compatibility by overriding rewind in ByteBuffer,
+        //   so we cast it to prevent that
+        ((Buffer) buffer).rewind();
+        return buffer;
+      }
+
       MemoryProxy<T> attachBuffer(ByteBuffer buffer) {
-        this.buffer = buffer.rewind();
+        this.buffer = buffer;
+        rewind();
         return this;
       }
 
@@ -58,10 +63,10 @@ public final class Device implements AutoCloseable {
         if (buffer == null)
           buffer = ByteBuffer.allocateDirect(byteSize).order(ByteOrder.nativeOrder());
 
-        encode.accept(Objects.requireNonNull(object), buffer.rewind());
+        encode.accept(Objects.requireNonNull(object), rewind());
 
         if (device.sharedAddressSpace) {
-          devicePtr = Natives.pointerOfDirectBuffer(buffer);
+          devicePtr = Platforms.pointerOfDirectBuffer0(buffer);
           if (cb != null) cb.run();
         } else {
           if (devicePtr == 0)
@@ -79,7 +84,7 @@ public final class Device implements AutoCloseable {
               "Buffer was already released or not previously invalidated.");
         }
         if (device.sharedAddressSpace) {
-          decode.accept(buffer.rewind(), Objects.requireNonNull(object));
+          decode.accept(rewind(), Objects.requireNonNull(object));
           if (cb != null) cb.run();
           return;
         }
@@ -88,7 +93,7 @@ public final class Device implements AutoCloseable {
             buffer,
             buffer.capacity(),
             () -> {
-              decode.accept(buffer.rewind(), Objects.requireNonNull(object));
+              decode.accept(rewind(), Objects.requireNonNull(object));
               if (cb != null) cb.run();
             });
       }
@@ -100,9 +105,8 @@ public final class Device implements AutoCloseable {
       }
     }
 
-
     public final ThreadLocal<Map<Object, MemoryProxy<Object>>> references =
-            ThreadLocal.withInitial(() -> Collections.synchronizedMap(new WeakHashMap<>()));
+        ThreadLocal.withInitial(() -> Collections.synchronizedMap(new WeakHashMap<>()));
 
     Queue(long nativePeer, Device device) {
       this.nativePeer = nativePeer;
@@ -116,7 +120,9 @@ public final class Device implements AutoCloseable {
         BiConsumer<T, ByteBuffer> write,
         BiConsumer<ByteBuffer, T> read,
         Runnable cb) {
-      return references.get().computeIfAbsent(
+      return references
+          .get()
+          .computeIfAbsent(
               Objects.requireNonNull(object),
               key ->
                   ((MemoryProxy<Object>) new MemoryProxy<>(sizeInBytes, write, read))
@@ -125,7 +131,9 @@ public final class Device implements AutoCloseable {
     }
 
     public long registerAndInvalidateIfAbsent(Object object, ByteBuffer buffer, Runnable cb) {
-      return references.get().computeIfAbsent(
+      return references
+          .get()
+          .computeIfAbsent(
               Objects.requireNonNull(object),
               key ->
                   new MemoryProxy<>(ignored -> buffer.capacity(), (s, d) -> {}, (d, s) -> {})

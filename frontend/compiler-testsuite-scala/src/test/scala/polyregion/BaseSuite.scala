@@ -10,14 +10,14 @@ trait BaseSuite extends munit.FunSuite {
   else {
     import polyregion.scala.blocking.*
     import polyregion.scala.*
-    Host.aot.task[Config[Target.Host.type, Opt.O3], A](x)
+    Host.aot.task[Config[Target.Host.type, Opt.O2], A](x)
   }
 
   inline def doOffload[A <: AnyRef: NativeStruct](inline x: => A): A = if (Toggles.NoOffload) x
   else {
     import polyregion.scala.blocking.*
     import polyregion.scala.*
-    Host.aot.task[Config[Target.Host.type, Opt.O3], A](x)
+    Host.aot.task[Config[Target.Host.type, Opt.O2], A](x)
   }
 
   def assertValEquals[A](actual: A, expected: A): Unit = (actual.asMatchable, expected.asMatchable) match {

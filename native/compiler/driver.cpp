@@ -17,7 +17,7 @@ void run() {
 
   using namespace polyregion;
   using namespace polyast::dsl;
-  auto fn = function("foo", {"xs"_(Array(Int)), "x"_(Int)}, Unit)({
+  auto fn0 = function("lambda", {"xs"_(Array(Int)), "x"_(Int)}, Unit)({
       let("gid") = Alias("x"_(Int)) ,//  invoke(Fn0::GpuGlobalIdxX(), Int),
       let("xs_gid") = "xs"_(Array(Int))["gid"_(Int)],
       let("result") = invoke(Fn2::Add(), "xs_gid"_(Int), "gid"_(Int), Int),
@@ -26,8 +26,19 @@ void run() {
       ret(),
   });
 
-  auto prog = program(fn, {}, {});
+  auto fn1 = function("lambda", {"xs"_(Array(Int)), "x"_(Int)}, Unit)({
+      let("gid") = Alias("x"_(Int)) ,//  invoke(Fn0::GpuGlobalIdxX(), Int),
+      let("xs_gid") = "xs"_(Array(Int))["gid"_(Int)],
+      let("resultX2_tan") = invoke(Fn1::Tanh(), "xs_gid"_(Int) , Int),
+      "xs"_(Array(Int))["gid"_(Int)] = "resultX2_tan"_(Int),
+      ret(),
+  });
+
+  auto prog0 = program(fn0, {}, {});
+  auto prog1 = program(fn1, {}, {});
+
   compiler::initialise();
+  runtime::init();
 
   using namespace polyregion::runtime;
   using namespace polyregion::runtime::object;
@@ -93,51 +104,86 @@ void run() {
       } else if (rt->name() == "HIP") {
         options = {compiler::Target::Object_LLVM_AMDGCN, "gfx803"};
       } else if (rt->name() == "CPU (RelocatableObject)") {
-        options = {compiler::Target::Object_LLVM_HOST, {"generic"}};
+        options = {compiler::Target::Object_LLVM_HOST, {"native"}};
       } else {
         throw std::logic_error("?");
       }
 
-      auto c = compiler::compile(prog, options, compiler::Opt::O3);
-      std::cout << c << std::endl;
-      if (c.binary) {
+      auto c0 = compiler::compile(prog0, options, compiler::Opt::O1);
+      auto c1 = compiler::compile(prog1, options, compiler::Opt::O1);
+      std::cout << c0 << std::endl;
+      std::cout << c1 << std::endl;
+      if (c0.binary) {
 
         if (options.target == compiler::Target::Source_C_OpenCL1_1) {
           std::ofstream outfile("bin_" + (options.arch.empty() ? "no_arch" : options.arch) + ".cl",
                                 std::ios::out | std::ios::trunc);
-          outfile.write(c.binary->data(), c.binary->size());
+          outfile.write(c0.binary->data(), c0.binary->size());
           outfile.close();
         } else {
           std::ofstream outfile("bin_" + (options.arch.empty() ? "no_arch" : options.arch) + ".so",
                                 std::ios::out | std::ios::binary | std::ios::trunc);
-          outfile.write(c.binary->data(), c.binary->size());
+          outfile.write(c0.binary->data(), c0.binary->size());
           outfile.close();
         }
       } else {
         std::cout << "No bin!" << std::endl;
       }
 
+      std::string bin0(c0.binary->data(), c0.binary->size());
+      std::string bin1(c1.binary->data(), c1.binary->size());
       try {
-        for (int i = 0; i < 2; i++) {
+        for (int i = 0; i < 40000; i++) {
           auto q1 = d->createQueue();
-          if (!d->moduleLoaded("a")) {
-            d->loadModule("a", std::string(c.binary->data(), c.binary->size()));
+
+          if (!d->moduleLoaded("0")) {
+            d->loadModule("0", bin0);
+          }
+
+          auto size = sizeof(decltype(xs)::value_type) * xs.size();
+          auto ptr = d->malloc(size, Access::RW);
+          q1->enqueueHostToDeviceAsync(xs.data(), ptr, size,
+                                       [&]() { std::cout << "[" << i << "]  H->D ok" << std::endl; });
+
+          int32_t x = 3;
+
+          std::vector<Type> types{Type::Ptr, Type::Int32, Type::Void};
+          std::vector<void *> args{&ptr, &x, nullptr};
+          q1->enqueueInvokeAsync("0", "lambda", types, args, {},
+                                 [&]() { std::cout << "[" << i << "]  K 1 ok" << std::endl; });
+
+          q1->enqueueDeviceToHostAsync(ptr, xs.data(), size, [&]() {
+            std::cout << "[" << i << "]  D->H ok, r= "
+                      << polyregion::mk_string<int>(
+                             xs, [](auto x) { return std::to_string(x); }, ",")
+                      << std::endl;
+          });
+
+          d->free(ptr);
+        }
+
+
+        for (int i = 0; i < 40000; i++) {
+          auto q1 = d->createQueue();
+
+
+          if (!d->moduleLoaded("1")) {
+            d->loadModule("1", bin1);
           }
           auto size = sizeof(decltype(xs)::value_type) * xs.size();
           auto ptr = d->malloc(size, Access::RW);
           q1->enqueueHostToDeviceAsync(xs.data(), ptr, size,
                                        [&]() { std::cout << "[" << i << "]  H->D ok" << std::endl; });
 
-          int32_t x = 4;
+          int32_t x = 3;
 
           std::vector<Type> types{Type::Ptr, Type::Int32, Type::Void};
           std::vector<void *> args{&ptr, &x, nullptr};
-          q1->enqueueInvokeAsync("a", "foo", types, args, {},
-                                 [&]() { std::cout << "[" << i << "]  K 1 ok" << std::endl; });
 
-          x = 5;
 
-          q1->enqueueInvokeAsync("a", "foo", types, args, {},
+          x = 0;
+
+          q1->enqueueInvokeAsync("1", "lambda", types, args, {},
                                  [&]() { std::cout << "[" << i << "]  K 2 ok" << std::endl; });
           q1->enqueueDeviceToHostAsync(ptr, xs.data(), size, [&]() {
             std::cout << "[" << i << "]  D->H ok, r= "
@@ -147,6 +193,7 @@ void run() {
           });
           d->free(ptr);
         }
+
       } catch (const std::exception &e) {
         std::cerr << e.what() << std::endl;
       }

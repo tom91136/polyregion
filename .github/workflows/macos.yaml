@@ -27,7 +27,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ./native/llvm
-          key: ${{ runner.os }}-${{ hashFiles('./native/build_llvm.cmake') }}
+          key: ${{ runner.os }}-${{ hashFiles('./native/build_llvm.cmake') }}-${{ hashFiles('./native/ProjectConfig.cmake') }}
 
       - name: Configure release build
         shell: bash

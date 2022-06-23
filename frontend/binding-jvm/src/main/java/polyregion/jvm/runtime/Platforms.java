@@ -36,7 +36,11 @@ public final class Platforms implements AutoCloseable {
 
   static native Platform Dynamic0();
 
-  static native void deleteAllPeer0();
+  static native void deleteAllPeers0();
+
+  static native long[] pointerOfDirectBuffers0(Buffer[] buffers);
+
+  static native long pointerOfDirectBuffer0(Buffer buffer);
 
   private final NativeLibrary library;
 
@@ -79,9 +83,17 @@ public final class Platforms implements AutoCloseable {
     return Dynamic0();
   }
 
+  public long[] pointerOfDirectBuffers(Buffer[] buffers) {
+    return pointerOfDirectBuffers0(buffers);
+  }
+
+  public long pointerOfDirectBuffer(Buffer buffers) {
+    return pointerOfDirectBuffer0(buffers);
+  }
+
   @Override
   public void close() {
-    Platforms.deleteAllPeer0();
+    Platforms.deleteAllPeers0();
     library.close();
   }
 }

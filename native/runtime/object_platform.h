@@ -40,9 +40,9 @@ public:
 
 class EXPORT RelocatableDevice : public ObjectDevice { //, private llvm::SectionMemoryManager {
   ObjectModules objects = {};
-//  llvm::RuntimeDyld ld;
+  //  llvm::RuntimeDyld ld;
   std::shared_mutex lock;
-//  uint64_t getSymbolAddress(const std::string &Name) override;
+  //  uint64_t getSymbolAddress(const std::string &Name) override;
 public:
   using WriteLock = std::unique_lock<decltype(lock)>;
   using ReadLock = std::shared_lock<decltype(lock)>;
@@ -68,10 +68,10 @@ private:
 class EXPORT RelocatableDeviceQueue : public ObjectDeviceQueue {
   ObjectModules &objects;
   std::shared_mutex &lock;
-//  llvm::RuntimeDyld &ld;
+  //  llvm::RuntimeDyld &ld;
 
 public:
-  RelocatableDeviceQueue(decltype(objects) objects, decltype(lock) lock );
+  RelocatableDeviceQueue(decltype(objects) objects, decltype(lock) lock);
   EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
                                  const std::vector<Type> &types, std::vector<void *> &args, const Policy &policy,
                                  const MaybeCallback &cb) override;

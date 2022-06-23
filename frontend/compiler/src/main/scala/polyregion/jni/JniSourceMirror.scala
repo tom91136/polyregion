@@ -40,19 +40,19 @@ object JniSourceMirror {
       .replace('$', '_')
 
   private def jniTypeName(t: Class[_]): String = t match {
-    case x if x.equals(java.lang.Double.TYPE)                     => "jdouble"
-    case x if x.equals(java.lang.Float.TYPE)                      => "jfloat"
-    case x if x.equals(java.lang.Long.TYPE)                       => "jlong"
-    case x if x.equals(java.lang.Integer.TYPE)                    => "jint"
-    case x if x.equals(java.lang.Short.TYPE)                      => "jshort"
-    case x if x.equals(java.lang.Character.TYPE)                  => "jcharacter"
-    case x if x.equals(java.lang.Boolean.TYPE)                    => "jboolean"
-    case x if x.equals(java.lang.Byte.TYPE)                       => "jbyte"
-    case x if x.equals(java.lang.Void.TYPE)                       => "void"
-    case x if x.isArray && x.componentType.getName == StringClass => s"jobjectArray" // jstringArray is not a thing
-    case x if x.isArray                                           => s"${jniTypeName(x.getComponentType)}Array"
-    case x if x.getName == StringClass                            => "jstring"
-    case _                                                        => "jobject"
+    case x if x.equals(java.lang.Double.TYPE)                        => "jdouble"
+    case x if x.equals(java.lang.Float.TYPE)                         => "jfloat"
+    case x if x.equals(java.lang.Long.TYPE)                          => "jlong"
+    case x if x.equals(java.lang.Integer.TYPE)                       => "jint"
+    case x if x.equals(java.lang.Short.TYPE)                         => "jshort"
+    case x if x.equals(java.lang.Character.TYPE)                     => "jcharacter"
+    case x if x.equals(java.lang.Boolean.TYPE)                       => "jboolean"
+    case x if x.equals(java.lang.Byte.TYPE)                          => "jbyte"
+    case x if x.equals(java.lang.Void.TYPE)                          => "void"
+    case x if x.isArray && x.getComponentType.getName == StringClass => s"jobjectArray" // jstringArray is not a thing
+    case x if x.isArray                                              => s"${jniTypeName(x.getComponentType)}Array"
+    case x if x.getName == StringClass                               => "jstring"
+    case _                                                           => "jobject"
   }
 
   private def jniTypedFunctionName(t: Class[_]): String = t match {
@@ -104,7 +104,7 @@ object JniSourceMirror {
       }
       .filterNot(m => ObjectClassMethodsSignatures.contains(signature(m)))
       .filter(mp)
-      .sortBy(m => descriptor(m))
+      .sortBy(m => descriptorSafe(m))
       .toList
 
     val ctors = cls.getDeclaredConstructors
@@ -302,7 +302,7 @@ object JniSourceMirror {
 
     val nativeMethods = cls.getDeclaredMethods
       .filter(m => Modifier.isNative(m.getModifiers))
-      .sortBy(m => descriptor(m))
+      .sortBy(m => descriptorSafe(m))
 
     val registerEntries = nativeMethods.map(m =>
       s"""{(char *)"${m.getName}", (char *)"${descriptor(m)}", (void *)&${safeCppNames(m.getName)}}"""
@@ -345,7 +345,7 @@ object JniSourceMirror {
 		 |${constants.map(c => s"$c;").mkString("\n")}
          |${prototypes.map(p => s"[[maybe_unused]] $p;").mkString("\n")}
 		 |
-		 |static jclass clazz{};
+		 |thread_local jclass clazz = nullptr;
 		 |
          |static void unregisterMethods(JNIEnv *env) {
          |  if (!clazz) return;
@@ -357,7 +357,7 @@ object JniSourceMirror {
          |}
 		 |
          |static void registerMethods(JNIEnv *env) {
-         |  if (clazz) unregisterMethods(env);
+         |  if (clazz) return;
          |  clazz = reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("$jniName")));
          |  const static JNINativeMethod methods[${registerEntries.length}] = {
          |${registerEntries.map("      " + _).mkString(",\n")}};

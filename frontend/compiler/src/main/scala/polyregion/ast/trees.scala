@@ -7,6 +7,7 @@ import polyregion.ast.PolyAst.TypeKind
 import java.lang.reflect.Modifier
 import scala.annotation.tailrec
 import scala.reflect.ClassTag
+import scala.util.{Success, Try}
 
 @tailrec def doUntilNotEq[A](x: A)(f: A => A): A = {
   val y = f(x)
@@ -41,26 +42,30 @@ case class Log(name: String, lines: Vector[(String, Vector[String]) | Log]) {
 
   def info(message: String, details: String*): Result[Log] = info_(message, details*).success
 
-  def render(nesting: Int = 0): Vector[String] = {
-    val colour = Log.Colours(nesting % Log.Colours.size)
-    val attr   = colour ++ fansi.Reversed.On ++ fansi.Bold.On
-    val indent = colour("┃ ")
+  def render(nesting: Int = 0): Vector[String] =
+    Try {
 
-    ((colour("┏━") ++ attr(s" ${name} ") ++ colour("")) +: lines
-      .flatMap {
-        case (log: Log) => log.render(nesting + 1).map(indent ++ _)
-        case (l, details) =>
-          ((colour ++ fansi.Underlined.On)(s"▓ $l ▓")) +: details.flatMap { l =>
-            l.linesIterator.toList match {
-              case x :: xs =>
-                ((colour("┃ ╰ ") ++ s"$x") :: xs.map(x => indent ++ s"  ${x}")).toVector
-              case Nil => Vector()
+      val colour = Log.Colours(nesting % Log.Colours.size)
+      val attr   = colour ++ fansi.Reversed.On ++ fansi.Bold.On
+      val indent = colour("┃ ")
+
+      ((colour("┏━") ++ attr(s" ${name} ") ++ colour("")) +: lines
+        .flatMap {
+          case (log: Log) => log.render(nesting + 1).map(indent ++ _)
+          case (l, details) =>
+            ((colour ++ fansi.Underlined.On)(s"▓ $l ▓")) +: details.flatMap { l =>
+              l.linesIterator.toList match {
+                case x :: xs =>
+                  ((colour("┃ ╰ ") ++ s"$x") :: xs.map(x => indent ++ s"  ${x}")).toVector
+                case Nil => Vector()
+              }
+
             }
-
-          }
-      } :+ colour(s"┗━${"━" * (name.size + 2)}"))
-      .map(_.render)
-  }
+        } :+ colour(s"┗━${"━" * (name.size + 2)}"))
+        .map(_.render)
+    }.recover { case e: Exception =>
+      Vector(s"Cannot render:${e}")
+    }.get
 
 }
 object Log {

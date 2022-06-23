@@ -36,7 +36,7 @@ static_assert(polyregion::to_underlying(rt::Type::Ptr) == Platforms::TYPE_PTR);
 static JavaVM *CurrentVM;
 
 [[maybe_unused]] jint JNI_OnLoad(JavaVM *vm, void *) {
-  fprintf(stderr, "Onload runtime\n");
+  fprintf(stderr, "OnLoad runtime\n");
   CurrentVM = vm;
   JNIEnv *env = getEnv(vm);
   if (!env) return JNI_ERR;
@@ -90,7 +90,7 @@ static jobjectArray toJni(JNIEnv *env, const std::vector<rt::Property> &xs) {
   });
 }
 
-void Platforms::deleteAllPeer0(JNIEnv *env, jclass) {
+void Platforms::deleteAllPeers0(JNIEnv *env, jclass) {
   std::lock_guard l(lock);
   deviceQueues.clear();
   devices.clear();
@@ -111,6 +111,28 @@ void Platform::deleteDevicePeer0(JNIEnv *env, jclass, jlong nativePeer) {
   devices.erase(nativePeer);
   deviceModuleImages.erase(nativePeer);
 }
+
+jlongArray Platforms::pointerOfDirectBuffers0(JNIEnv *env, jclass, jobjectArray buffers) {
+  jsize n = env->GetArrayLength(buffers);
+  auto array = env->NewLongArray(n);
+  auto ptrs = env->GetLongArrayElements(array, nullptr);
+  for (jsize i = 0; i < n; ++i) {
+    if (auto ptr = env->GetDirectBufferAddress(env->GetObjectArrayElement(buffers, i)); ptr)
+      ptrs[i] = reinterpret_cast<jlong>(ptr);
+    else
+      return throwGeneric(env, EX,
+                          "Object at " + std::to_string(i) + " is either not a direct Buffer or not a Buffer at all.");
+  }
+  env->ReleaseLongArrayElements(array, ptrs, 0);
+  return array;
+}
+
+jlong Platforms::pointerOfDirectBuffer0(JNIEnv *env, jclass, jobject buffer) {
+  if (auto ptr = env->GetDirectBufferAddress(buffer); ptr) return reinterpret_cast<jlong>(ptr);
+  else
+    return throwGeneric<jlong>(env, EX, "Object is either not a direct Buffer or not a Buffer at all.");
+}
+
 
 template <typename R> static jobject toJni(JNIEnv *env) {
   return wrapException(env, EX, [&]() {

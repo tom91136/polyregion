@@ -327,7 +327,7 @@ class Processor extends AbstractProcessor {
 
               println(
                 s">>>> Closures for ${e.getTypeElement}\n" + xs
-                  .map { case (cls, m) => s"  ->  ${m.getName.toString.padTo(30, ' ')} @ $cls${m.toString.indent(5)}" }
+                  .map { case (cls, m) => s"  ->  ${m.getName.toString.padTo(30, ' ')} @ $cls${m.toString}" }
                   .mkString("\n")
               )
 
@@ -351,7 +351,7 @@ class Processor extends AbstractProcessor {
                     .modifiers(Visibility.PUBLIC, TypeManifestation.FINAL)
                     .defineField(
                       "$BINARY$",
-                      classOf[Byte].arrayType,
+                      classOf[scala.Array[Byte]] ,
                       Visibility.PUBLIC,
                       Ownership.STATIC,
                       FieldManifestation.FINAL

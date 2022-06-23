@@ -17,12 +17,12 @@ static constexpr jbyte Target_Object_LLVM_x86_64 = 11;
 static constexpr jbyte Target_Source_C_C11 = 30;
 static constexpr jbyte Target_Source_C_OpenCL1_1 = 31;
 static constexpr jbyte Target_UNSUPPORTED = 1;
+[[maybe_unused]] jobject compile0(JNIEnv *env, jclass, jbyteArray function, jboolean emitAssembly, jobject options, jbyte opt);
 [[maybe_unused]] jbyte hostTarget0(JNIEnv *env, jclass);
 [[maybe_unused]] jstring hostTriplet0(JNIEnv *env, jclass);
 [[maybe_unused]] jobject layoutOf0(JNIEnv *env, jclass, jbyteArray structDef, jobject options);
-[[maybe_unused]] jobject compile0(JNIEnv *env, jclass, jbyteArray function, jboolean emitAssembly, jobject options, jbyte opt);
 
-static jclass clazz{};
+thread_local jclass clazz = nullptr;
 
 static void unregisterMethods(JNIEnv *env) {
   if (!clazz) return;
@@ -34,13 +34,13 @@ static void unregisterMethods(JNIEnv *env) {
 }
 
 static void registerMethods(JNIEnv *env) {
-  if (clazz) unregisterMethods(env);
+  if (clazz) return;
   clazz = reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/compiler/Compiler")));
   const static JNINativeMethod methods[4] = {
+      {(char *)"compile0", (char *)"([BZLpolyregion/jvm/compiler/Options;B)Lpolyregion/jvm/compiler/Compilation;", (void *)&compile0},
       {(char *)"hostTarget0", (char *)"()B", (void *)&hostTarget0},
       {(char *)"hostTriplet0", (char *)"()Ljava/lang/String;", (void *)&hostTriplet0},
-      {(char *)"layoutOf0", (char *)"([BLpolyregion/jvm/compiler/Options;)Lpolyregion/jvm/compiler/Layout;", (void *)&layoutOf0},
-      {(char *)"compile0", (char *)"([BZLpolyregion/jvm/compiler/Options;B)Lpolyregion/jvm/compiler/Compilation;", (void *)&compile0}};
+      {(char *)"layoutOf0", (char *)"([BLpolyregion/jvm/compiler/Options;)Lpolyregion/jvm/compiler/Layout;", (void *)&layoutOf0}};
   if(env->RegisterNatives(clazz, methods, 4) != 0){
     throw std::logic_error("RegisterNatives returned non-zero for polyregion/jvm/compiler/Compiler");
   }
