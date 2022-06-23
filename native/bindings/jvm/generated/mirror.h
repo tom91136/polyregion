@@ -11,8 +11,8 @@ struct ByteBuffer {
     
   };
   jclass clazz;
-  jmethodID allocate_ILjava_nio_ByteBuffer_Method;
   jmethodID allocateDirect_ILjava_nio_ByteBuffer_Method;
+  jmethodID allocate_ILjava_nio_ByteBuffer_Method;
 private:
   explicit ByteBuffer(JNIEnv *env);
   static thread_local std::unique_ptr<ByteBuffer> cached;
@@ -20,8 +20,8 @@ public:
   static ByteBuffer& of(JNIEnv *env);
   static void drop(JNIEnv *env);
   Instance wrap (JNIEnv *env, jobject instance);
-  jobject allocate(JNIEnv *env, jint arg0) const;
   jobject allocateDirect(JNIEnv *env, jint arg0) const;
+  jobject allocate(JNIEnv *env, jint arg0) const;
 };
 struct Property {
   struct Instance {

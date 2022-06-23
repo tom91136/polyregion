@@ -4,8 +4,8 @@ ByteBuffer::Instance::Instance(const ByteBuffer &meta, jobject instance) : meta(
 
 ByteBuffer::ByteBuffer(JNIEnv *env)
     : clazz(reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("java/nio/ByteBuffer")))),
-      allocate_ILjava_nio_ByteBuffer_Method(env->GetStaticMethodID(clazz, "allocate", "(I)Ljava/nio/ByteBuffer;")),
-      allocateDirect_ILjava_nio_ByteBuffer_Method(env->GetStaticMethodID(clazz, "allocateDirect", "(I)Ljava/nio/ByteBuffer;")) { };
+      allocateDirect_ILjava_nio_ByteBuffer_Method(env->GetStaticMethodID(clazz, "allocateDirect", "(I)Ljava/nio/ByteBuffer;")),
+      allocate_ILjava_nio_ByteBuffer_Method(env->GetStaticMethodID(clazz, "allocate", "(I)Ljava/nio/ByteBuffer;")) { };
 thread_local std::unique_ptr<ByteBuffer> ByteBuffer::cached = {};
 ByteBuffer& ByteBuffer::of(JNIEnv *env) {
   if(!cached) cached = std::unique_ptr<ByteBuffer>(new ByteBuffer(env));
@@ -18,8 +18,8 @@ void ByteBuffer::drop(JNIEnv *env){
   }
 }
 ByteBuffer::Instance ByteBuffer::wrap(JNIEnv *env, jobject instance) { return {*this, instance}; }
-jobject ByteBuffer::allocate(JNIEnv *env, jint arg0) const { return env->CallStaticObjectMethod(clazz, allocate_ILjava_nio_ByteBuffer_Method, arg0); }
 jobject ByteBuffer::allocateDirect(JNIEnv *env, jint arg0) const { return env->CallStaticObjectMethod(clazz, allocateDirect_ILjava_nio_ByteBuffer_Method, arg0); }
+jobject ByteBuffer::allocate(JNIEnv *env, jint arg0) const { return env->CallStaticObjectMethod(clazz, allocate_ILjava_nio_ByteBuffer_Method, arg0); }
 
 Property::Instance::Instance(const Property &meta, jobject instance) : meta(meta), instance(instance) {}
 
