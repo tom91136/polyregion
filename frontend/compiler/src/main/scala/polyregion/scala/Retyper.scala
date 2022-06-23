@@ -94,8 +94,13 @@ object Retyper {
         clsSym,
         if (clsSym.flags.is(q.Flags.Module)) q.ClassKind.Object else q.ClassKind.Class
       ).success
+    } else if (clsSym.isLocalDummy) {
+      // Handle cases like :
+      // class X{ { def a = ??? } }
+      // Where the owner of `a` is a local dummy that is owned by class X
+      resolveClsFromSymbol(clsSym.owner)
     } else {
-      s"$clsSym is not a class def".fail
+      s"$clsSym is not a class def, the symbol is owned by ${clsSym.maybeOwner}".fail
     }
 
   @tailrec private final def resolveClsFromTpeRepr(using
@@ -179,7 +184,7 @@ object Retyper {
           argAppliedSeqTpe = q.TypeRepr.typeConstructorOf(classOf[scala.collection.mutable.Seq[_]]).appliedTo(args)
 
         } yield (name, kind, tpeCtorArgs) match {
-          case (Symbols.Array, q.ClassKind.Class, (_, comp: p.Type) :: Nil)  => (None, p.Type.Array(comp))
+          case (Symbols.Array, q.ClassKind.Class, (_, comp: p.Type) :: Nil) => (None, p.Type.Array(comp))
           // case (Symbols.Buffer, q.ClassKind.Class, (_, comp: p.Type) :: Nil) => (None, p.Type.Array(comp))
           case (_, q.ClassKind.Class, (_, comp: p.Type) :: Nil) if tpe <:< argAppliedSeqTpe =>
             (None, p.Type.Array(comp))

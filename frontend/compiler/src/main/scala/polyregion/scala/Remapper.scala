@@ -314,7 +314,8 @@ object Remapper {
     ): Result[(p.Term, q.RemapContext)] = {
       println(s">>${term.show} = ${c.stmts.size} ~ ${term}")
       (tpeArgs, termArgss, term) match {
-        case (Nil, Nil, q.Typed(x, _)) => (c !! term).mapTerm(x) // type ascription: `value : T`
+        case (Nil, Nil, q.NamedArg(name, rhs)) => (c !! term).mapTerm(rhs) // named argument: `$name = $rhs`
+        case (Nil, Nil, q.Typed(x, _))         => (c !! term).mapTerm(x)   // type ascription: `value : T`
         case (Nil, Nil, q.Inlined(call, bindings, expansion)) => // inlined DefDef
           for {
             // for non-inlined args, bindings will contain all relevant arguments with rhs

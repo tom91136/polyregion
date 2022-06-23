@@ -117,9 +117,9 @@ public final class Loader {
                 //      Paths.get("../native/build-" + platform + "/bindings/jvm/"),
                 Paths.get("../native/cmake-build-debug-clang/bindings/jvm/"),
                 Paths.get("../native/cmake-build-release-clang/bindings/jvm/"),
-                Paths.get("../../native/build-" + platform + "/bindings/jvm/"),
+                Paths.get("../../native/cmake-build-debug-clang/bindings/jvm/"),
                 Paths.get("../../native/cmake-build-release-clang/bindings/jvm/"),
-                Paths.get("../../native/cmake-build-debug-clang/bindings/jvm/")));
+                Paths.get("../../native/build-" + platform + "/bindings/jvm/")));
 
     // TODO remove for prod; use debug first for compiler
     if (filename.contains("compiler")) {

@@ -298,7 +298,7 @@ object Config {
   def apply[T <: Target](target: T*): Config[T, Opt]                 = Config(Opt.O3, target: _*)
 }
 
- object Platforms {
+object Platforms {
   val platforms = rt.Platforms.create()
   sys.addShutdownHook(platforms.close())
   export platforms.*

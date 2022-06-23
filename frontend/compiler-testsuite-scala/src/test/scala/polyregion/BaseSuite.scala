@@ -10,14 +10,26 @@ trait BaseSuite extends munit.FunSuite {
   else {
     import polyregion.scala.blocking.*
     import polyregion.scala.*
-    Host.aot.task[Config[Target.Host.type, Opt.O2], A](x)
+    try
+      Host.aot.task[Config[Target.Host.type, Opt.O2], A](x)
+    catch {
+      case e: AssertionError => throw e
+      case e: Error =>
+        throw new AssertionError(e)
+    }
   }
 
   inline def doOffload[A <: AnyRef: NativeStruct](inline x: => A): A = if (Toggles.NoOffload) x
   else {
     import polyregion.scala.blocking.*
     import polyregion.scala.*
-    Host.aot.task[Config[Target.Host.type, Opt.O2], A](x)
+    try
+      Host.aot.task[Config[Target.Host.type, Opt.O2], A](x)
+    catch {
+      case e: AssertionError => throw e
+      case e: Error =>
+        throw new AssertionError(e)
+    }
   }
 
   def assertValEquals[A](actual: A, expected: A): Unit = (actual.asMatchable, expected.asMatchable) match {
@@ -48,8 +60,7 @@ trait BaseSuite extends munit.FunSuite {
 
   inline def assertOffload[A <: AnyVal: ClassTag](inline f: => A) = {
     val expected =
-      try
-        f
+      try f
       catch {
         case e: Throwable => throw new AssertionError(s"offload reference expression ${codeOf(f)} failed to execute", e)
       }

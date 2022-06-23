@@ -154,7 +154,7 @@ object compiletime {
     // configs               <- reifyConfigFromTpe[C](using q.underlying)()
     (captures, prog0, log) <- Compiler.compileExpr(f)
     prog = prog0.copy(entry = prog0.entry.copy(name = p.Sym("lambda")))
-//    _    = println(log.render)
+   _    = println(log.render)
 
     serialisedAst <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, prog)))
     compiler = cp.Compiler.create()
@@ -168,6 +168,7 @@ object compiletime {
   } yield {
 
     compilations.foreach { (config, c) =>
+      println(s"Config=${config}")
       println(s"Program=${c.program.length}")
       println(s"Messages=\n  ${c.messages}")
       println(s"Features=\n  ${c.features.toList}")
@@ -190,7 +191,7 @@ object compiletime {
       val miss      = ArrayBuffer[(String, Set[String])]()
       val available = Set($queue.device.features(): _*)
 
-        val modules = Array[(String, Set[String], Array[Byte])](${
+      lazy val modules = Array[(String, Set[String], Array[Byte])](${
         Varargs(compilations.map { (config, compilation) =>
           Expr((s"${config.arch}@${config.opt}(${config.target})", Set(compilation.features: _*), compilation.program))
 

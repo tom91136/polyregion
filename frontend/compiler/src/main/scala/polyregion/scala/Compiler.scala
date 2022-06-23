@@ -287,6 +287,9 @@ object Compiler {
     unoptLog <- unoptLog.info(s"Functions  = ${unopt.functions.size}", unopt.functions.map(_.signatureRepr)*)
     unoptLog <- unoptLog.info(s"Entry", unopt.entry.repr)
 
+    _ = println(log.render().mkString("\n"))
+
+
     // verify before optimisation
     (unoptVerification, unoptLog) <- VerifyPass.run(unopt)(unoptLog).success
     unoptLog <- unoptLog.info(
