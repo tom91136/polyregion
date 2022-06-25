@@ -110,6 +110,8 @@ object FnInlinePass {
       case x                => Nil
     })
 
+    println("## "+ivk.repr)
+
     returnExprs match {
       case Nil =>
         throw new AssertionError(

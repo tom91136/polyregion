@@ -125,12 +125,14 @@ object VerifyPass {
           val (varTable, errors) = xs.foldLeft((names.toSet, Nil): Ctx)(validateStmt(_, _))
 
           // println(s"[Verifier] $alloc ${f.signatureRepr} vars:\n\t${varTable.mkString("\n\t")}")
-          if (errors.nonEmpty) {
-            throw new RuntimeException(s"[Verifier] alloc=${alloc} vars:\n\t${varTable
-              .mkString("\n\t")} \n${f.repr}\n${errors.map(e => s"  -> $e").mkString("\n")}")
-          }
+//          if (errors.nonEmpty) {
+//            throw new RuntimeException(s"[Verifier] alloc=${alloc} vars:\n\t${varTable
+//              .mkString("\n\t")} \n${f.repr}\n${errors.map(e => s"  -> $e").mkString("\n")}")
+//          }
 
-          xs.flatMap(x =>
+
+
+          errors ++ (xs.flatMap(x =>
             x.acc[p.Type] {
               case p.Stmt.Return(e) => e.tpe :: Nil
               case x                => Nil
@@ -142,7 +144,7 @@ object VerifyPass {
                 s"Not all return stmts return the function return type, expected ${f.rtn.repr}, got ${ts.map(_.repr).mkString(",")}"
               )
             case _ => Nil
-          }
+          })
       })
     } -> log
 }

@@ -1,16 +1,12 @@
 package polyregion.scala
 
 import cats.syntax.all.*
-import cats.syntax.validated
-import fansi.Str
-import polyregion.ast.pass.{FnInlinePass, UnitExprElisionPass, VerifyPass}
+import polyregion.ast.pass.{FnInlinePass, MonoStructPass, UnitExprElisionPass, VerifyPass}
 import polyregion.ast.{PolyAst as p, *}
 import polyregion.prism.StdLib
 
 import java.nio.file.Paths
-import scala.collection.immutable.VectorMap
 import scala.quoted.Expr
-import polyregion.ast.pass.MonoStructPass
 
 object Compiler {
 
@@ -36,7 +32,7 @@ object Compiler {
     fnTypeVars = f.paramss.flatMap(_.params).collect { case q.TypeDef(name, _) => name }
     (receiver, receiverTpeVars) <- owningClass match {
       case t @ p.Type.Struct(_, tpeVars, _) => (Some(t), tpeVars).success
-      case x                                => s"Illegal receiver: ${x}".fail
+      case x                                => s"Illegal receiver: $x".fail
     }
   } yield p.Signature(p.Sym(f.symbol.fullName), receiverTpeVars ::: fnTypeVars, receiver, fnArgsTpes, fnRtnTpe)
 
@@ -55,7 +51,7 @@ object Compiler {
               // XXX Generic specialisation on invoke is done in a pass later so we can ignore it for now
               deriveSignature(defDef).flatMap { s =>
                 fnLut.get(s) match {
-                  case Some(x) => Log(s"Replaced: ${s}").map(l => (x :: xs, deps, l :: logs))
+                  case Some(x) => Log(s"Replaced: $s").map(l => (x :: xs, deps, l :: logs))
                   case None =>
                     compileFn(defDef).map { case ((x, deps), log0) => (x :: xs, deps |+| depss, log :: logs) }
                 }
@@ -94,7 +90,7 @@ object Compiler {
   } yield (sdefs.map(sd => clsLut.getOrElse(sd.name, sd)), log)
 
   private def deriveModuleStructCaptures(using q: Quoted)(d: q.Dependencies): List[p.Named] =
-    d.modules.map(_._2).toList.map(t => p.Named(t.name.fqn.mkString("_"), t))
+    d.modules.values.toList.map(t => p.Named(t.name.fqn.mkString("_"), t))
 
   def compileFn(using q: Quoted)(f: q.DefDef): Result[((p.Function, q.Dependencies), Log)] = for {
     log <- Log(s"Compile DefDef: ${f.name}")
@@ -118,53 +114,29 @@ object Compiler {
     log         <- log.info(s"Method owner: $owningClass")
     (receiver, receiverTpeVars) <- owningClass match {
       case t @ p.Type.Struct(_, tpeVars, _) => (Some(p.Named("this", t)), tpeVars).success
-      case x                                => s"Illegal receiver: ${x}".fail
+      case x                                => s"Illegal receiver: $x".fail
     }
 
-    log <- log.info("DefDef arguments", fnArgs.map((a, n) => s"${a}(symbol=${a.symbol}) ~> $n")*)
+    log <- log.info("DefDef arguments", fnArgs.map((a, n) => s"$a(symbol=${a.symbol}) ~> $n")*)
 
     // Finally, we compile the def body like a closure or just return the term if we have one.
-    ((rhsStmts, rhsDeps), log) <- fnRtnTerm match {
-      case Some(t) => ((p.Stmt.Return(p.Expr.Alias(t)) :: Nil, q.Dependencies()), log).success
+    ((rhsStmts, rhsDeps, rhsThisCls), log) <- fnRtnTerm match {
+      case Some(t) =>
+        ((p.Stmt.Return(p.Expr.Alias(t)) :: Nil, q.Dependencies(), None), log).success
       case None =>
-        for {
-          // when run the outliner first and then replace any reference to function args or `this`
-          // whatever is left will be module references which needs to be added to FnDep's var table
-          // (captures, log) <- RefOutliner.outline(rhs)(log)
-          // (capturedNames, captureScope) <- captures
-          //   .foldMapM[Result, (List[(p.Named, q.Ref)], List[(q.Ref, p.Term)])] {
-          //     case (root, ref, value, tpe)
-          //         if root == ref && root.symbol.owner == f.symbol.owner && receiver.nonEmpty =>
-          //       (Nil, Nil).success // this is a reference to `this`
-          //     case (root, ref, value, tpe) =>
-          //       // this is a generic reference possibly from the function argument
-          //       val isArg = fnArgs.exists { (arg, n) =>
-          //         arg.symbol == ref.underlying.symbol || arg.symbol == root.underlying.symbol
-          //       }
-          //       if (isArg) (Nil, Nil).success
-          //       else
-          //         value match {
-          //           case Some(x) => (Nil, (ref -> x) :: Nil).success
-          //           case None =>
-          //             val name = ref match {
-          //               case s @ q.Select(_, name) => s"_ref_${name}_${s.pos.startLine}_"
-          //               case i @ q.Ident(_)        => i.name
-          //             }
-          //             val named = p.Named(name, tpe)
-          //             ((named -> ref) :: Nil, (ref -> p.Term.Select(Nil, named)) :: Nil).success
-          //         }
-          //   }
-
-          // log <- log.info("Captured vars before removal", fnDeps.vars.toList.map(_.toString)*)
-          // log <- log.info("Captured vars after removal", fnDepsWithoutExtraCaptures.vars.toList.map(_.toString)*)
-
-          // we pass an empty var table because
-          ((rhsStmts, rhsTpe, rhsDeps), rhsLog) <- compileTerm(term = rhs, root = f.symbol, scope = Map.empty)
-
-          // log <- log.info("External captures", capturedNames.map((n, r) => s"$r(symbol=${r.symbol}) ~> ${n.repr}")*)
-
-        } yield ((rhsStmts, rhsDeps), log + rhsLog)
+        compileTerm(
+          term = rhs,
+          root = f.symbol,
+          scope = Map.empty // We pass an empty scope table as we are compiling an independent fn.
+        ).map { case ((stmts, _, deps, thisCls), rhsLog) => ((stmts, deps, thisCls), log + rhsLog) }
     }
+
+    // The rhs terms *may* contain a `this` reference, we check that it matches the receiver we computed previously
+    // if such a reference exists at all.
+    _ <-
+      if (rhsThisCls.exists { case (_, tpe) => tpe != owningClass })
+        s"This type mismatch ($rhsThisCls != $owningClass)".fail
+      else ().success
 
     compiledFn = p.Function(
       name = p.Sym(f.symbol.fullName),
@@ -185,7 +157,7 @@ object Compiler {
       term: q.Term,
       root: q.Symbol,
       scope: Map[q.Symbol, p.Term]
-  ): Result[((List[p.Stmt], p.Type, q.Dependencies), Log)] = for {
+  ): Result[((List[p.Stmt], p.Type, q.Dependencies, Option[(q.ClassDef, p.Type.Struct)]), Log)] = for {
     log            <- Log(s"Compile term: ${term.pos.sourceFile.name}:${term.pos.startLine}~${term.pos.endLine}")
     log            <- log.info("Body (AST)", pprint.tokenize(term, indent = 1, showFieldNames = true).mkString)
     log            <- log.info("Body (Ascii)", term.show(using q.Printer.TreeAnsiCode))
@@ -199,17 +171,16 @@ object Compiler {
     _          = println(s"Deps1 = ${c.deps.classes.values} ${c.deps.functions.values}")
 
     (optStmts, optDeps) = runLocalOptPass(statements, c.deps)
-  } yield ((optStmts, termTpe, optDeps), log)
+  } yield ((optStmts, termTpe, optDeps, c.thisCls), log)
 
   def compileExpr(using q: Quoted)(expr: Expr[Any]): Result[(List[(p.Named, q.Term)], p.Program, Log)] = for {
     log <- Log("Expr compiler")
     term = expr.asTerm
     // generate a name for the expr first
     exprName = s"${term.pos.sourceFile.name}:${term.pos.startLine}-${term.pos.endLine}"
-    log <- log.info(s"Expr name: `${exprName}`")
+    log <- log.info(s"Expr name: `$exprName`")
 
     // outline here
-
     (captures, log) <- RefOutliner.outline(term)(log)
     (capturedNames, captureScope) = captures.foldMap[(List[(p.Named, q.Ref)], List[(q.Symbol, p.Term)])] {
       (root, ref, value, tpe) =>
@@ -225,7 +196,7 @@ object Compiler {
         }
     }
 
-    ((exprStmts, exprTpe, exprDeps), termLog) <- compileTerm(
+    ((exprStmts, exprTpe, exprDeps, exprThisCls), termLog) <- compileTerm(
       term = term,
       root = q.Symbol.noSymbol, // XXX not `spliceOwner` for now to avoid `this` captures
       scope = captureScope.toMap
@@ -241,13 +212,14 @@ object Compiler {
     log <- log.info(s"Expr dependent methods", exprDeps.functions.values.map(_.toString).toList*)
     log <- log.info(s"Expr dependent structs", exprDeps.classes.values.map(_.toString).toList*)
 
-
     // log                 <- log.info(s"Expr dependent vars   ", exprDeps.vars.map(_.toString).toList*)
     (depFns, deps, depLog) <- compileAllDependencies(exprDeps)(StdLib.Functions)
     log                    <- log ~+ depLog
 
     log <- log.info(s"Expr+Deps Dependent methods", deps.functions.values.map(_.toString).toList*)
     log <- log.info(s"Expr+Deps Dependent structs", deps.classes.values.map(_.toString).toList*)
+
+    log <- log.info("This instance", exprThisCls.map((s, tpe) => s"$s ~> ${tpe.repr}").toList*)
 
     // sort the captures so that the order is stable for codegen
     // captures = deps.vars.toList.sortBy(_._1.symbol)
@@ -259,7 +231,9 @@ object Compiler {
       tpeVars = Nil,
       receiver = None,
       args = Nil,
-      captures = capturedNames.map(_._1) ++ deriveModuleStructCaptures(deps),
+      captures = capturedNames.map(_._1) ++
+        deriveModuleStructCaptures(deps) ++
+        exprThisCls.map((_, tpe) => p.Named("this", tpe)),
       rtn = exprTpe,
       body = exprStmts
     )
@@ -267,16 +241,15 @@ object Compiler {
     (sdefs, sdefLog) <- deriveAllStructs(deps)(StdLib.StructDefs)
     log              <- log ~+ sdefLog
 
-    captureNameToModuleRefTable = deps.modules
-      .map { (symbol, struct) =>
-        // It appears that `q.Ref.apply` prepends a `q.This(Some("this"))` at the root of the select if
-        // the object is local to the scope, not really sure why it does that but we need to remove it.
-        def removeThisFromRef(t: q.Symbol): q.Ref = q.Ref(t.companionModule) match {
-          case select @ q.Select(root @ q.This(_), n) => removeThisFromRef(root.symbol).select(select.symbol)
-          case x                                      => x
-        }
-        struct.name.fqn.mkString("_") -> removeThisFromRef(symbol)
+    captureNameToModuleRefTable = deps.modules.map { (symbol, struct) =>
+      // It appears that `q.Ref.apply` prepends a `q.This(Some("this"))` at the root of the select if
+      // the object is local to the scope, not really sure why it does that but we need to remove it.
+      def removeThisFromRef(t: q.Symbol): q.Ref = q.Ref(t.companionModule) match {
+        case select @ q.Select(root @ q.This(_), n) => removeThisFromRef(root.symbol).select(select.symbol)
+        case x                                      => x
       }
+      struct.name.fqn.mkString("_") -> removeThisFromRef(symbol)
+    } ++ exprThisCls.map((clsDef, _) => "this" -> q.This(clsDef.symbol)).toMap
 
     unopt = p.Program(exprFn, depFns, sdefs)
     log <- log.info(
@@ -289,7 +262,6 @@ object Compiler {
 
     _ = println(log.render().mkString("\n"))
 
-
     // verify before optimisation
     (unoptVerification, unoptLog) <- VerifyPass.run(unopt)(unoptLog).success
     unoptLog <- unoptLog.info(
@@ -298,9 +270,15 @@ object Compiler {
     )
     _ <-
       if (unoptVerification.exists(_._2.nonEmpty))
-        s"Validation failed (error=${unoptVerification.map(_._2.size).sum})".fail
+        s"Unopt validation failed (error=${unoptVerification.map(_._2.size).sum})\n${unoptVerification
+          .map { case (f, es) =>
+            s"${f.repr.linesIterator.map("\t|" + _).mkString("\n")}\n\t[Errors]\n${es.map("\t -> " + _).mkString("\n")}"
+          }
+          .mkString("\n")}".fail
       else ().success
     log <- log ~+ unoptLog
+
+    _ = println(log.render().mkString("\n"))
 
     // run the global optimiser
     (opt, log) <- runProgramOptPasses(unopt)(log)
@@ -319,7 +297,11 @@ object Compiler {
     )
     _ <-
       if (optVerification.exists(_._2.nonEmpty))
-        s"Validation failed (error=${optVerification.map(_._2.size).sum})".fail
+        s"Opt validation failed (error=${optVerification.map(_._2.size).sum})\n${optVerification
+          .map { case (f, es) =>
+            s"${f.repr.linesIterator.map("\t|" + _).mkString("\n")}\n\t[Errors]\n${es.map("\t -> " + _).mkString("\n")}"
+          }
+          .mkString("\n")}".fail
       else ().success
     log <- log ~+ optLog
 
@@ -330,7 +312,7 @@ object Compiler {
         case None                                       => (n -> captureNameToModuleRefTable(n.symbol)).success
         case Some((tpe, ref)) if tpe.kind == n.tpe.kind => (n -> ref).success
         case Some((tpe, ref)) =>
-          s"Unexpected type conversion, capture was ${tpe.repr} for ${ref} but function expected ${n.repr}".fail
+          s"Unexpected type conversion, capture was ${tpe.repr} for $ref but function expected ${n.repr}".fail
       }
     }
     log <- log.info(s"Final captures", captured.map((name, ref) => s"${name.repr} = ${ref.show}")*)

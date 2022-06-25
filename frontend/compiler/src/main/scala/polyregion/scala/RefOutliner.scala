@@ -32,12 +32,12 @@ object RefOutliner {
       log <- log.info("Local ValDefs", localDefs.map(_.toString)*)
 
       foreignRefs = q.collectTree[q.Ref](term) {
-//      case ref: q.Ref if !ref.symbol.maybeOwner.flags.is(q.Flags.Macro) => ref :: Nil
+        // case ref: q.Ref if !ref.symbol.maybeOwner.flags.is(q.Flags.Macro) => ref :: Nil
         case ref: q.Ref if !localDefTable.contains(ref.symbol) => ref :: Nil
         case _                                                 => Nil
       }
 
-      // drop anything that isn't a val ref and resolve root ident
+      // Drop anything that isn't a val ref and resolve root ident.
       normalisedForeignValRefs = (for {
         s <- foreignRefs // .distinctBy(_.symbol)
         if !s.symbol.flags.is(q.Flags.Module) && (
@@ -47,9 +47,9 @@ object RefOutliner {
 
         (root, path) <- idents(s) // s === root.$path
 
-        // the entire path is not foreign if the root is not foreign
+        // The entire path is not foreign if the root is not foreign.
         if !localDefTable.contains(root.symbol)
-//      if !root.symbol.maybeOwner.flags.is(q.Flags.Macro)
+        // if !root.symbol.maybeOwner.flags.is(q.Flags.Macro)
 
       } yield (root, path.toVector, s)).sortBy(_._2.length)
 

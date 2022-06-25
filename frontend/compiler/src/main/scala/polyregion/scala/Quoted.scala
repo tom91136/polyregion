@@ -2,6 +2,7 @@ package polyregion.scala
 
 import cats.kernel.Monoid
 import polyregion.ast.{PolyAst as p, *}
+
 import scala.annotation.targetName
 
 class Quoted(val underlying: scala.quoted.Quotes) {
@@ -31,8 +32,7 @@ class Quoted(val underlying: scala.quoted.Quotes) {
       functions: Map[DefDef, Set[p.Expr.Invoke]] = Map.empty
   ) {
     @targetName("witness_module")
-    def witness(x: Symbol, tpe: p.Type.Struct) =
-      copy(modules = modules + (x -> tpe))
+    def witness(x: Symbol, tpe: p.Type.Struct) = copy(modules = modules + (x -> tpe))
     def witness(x: ClassDef, application: p.Type.Struct) =
       if (TypeRepr.of[polyregion.scala.intrinsics.type].typeSymbol.fullName == x.symbol.fullName) {
         this
@@ -63,17 +63,24 @@ class Quoted(val underlying: scala.quoted.Quotes) {
       // defs: Map[p.Signature, DefDef] = Map.empty, // external def defs
 
       deps: Dependencies = Dependencies(),
-      stmts: List[p.Stmt] = List.empty // fn statements
+      stmts: List[p.Stmt] = List.empty, // fn statements
+      thisCls: Option[(ClassDef, p.Type.Struct)] = None
   ) {
-    infix def !!(t: Tree)  = copy(traces = t :: traces)
-    def down(t: Tree)      = !!(t).copy(depth = depth + 1)
-    def named(tpe: p.Type) = p.Named(s"v${depth}", tpe)
+    infix def !!(t: Tree): RemapContext = copy(traces = t :: traces)
+    def down(t: Tree): RemapContext     = !!(t).copy(depth = depth + 1)
+    def named(tpe: p.Type): p.Named     = p.Named(s"v${depth}", tpe)
 
-    def noStmts = copy(stmts = Nil)
+    def noStmts: RemapContext = copy(stmts = Nil)
     // def mark(s: p.Signature, d: DefDef) = copy(defs = defs + (s -> d))
-    infix def ::=(xs: p.Stmt*)                      = copy(stmts = stmts ++ xs)
-    def replaceStmts(xs: Seq[p.Stmt])               = copy(stmts = xs.toList)
-    def updateDeps(f: Dependencies => Dependencies) = copy(deps = f(deps))
+    infix def ::=(xs: p.Stmt*): RemapContext                      = copy(stmts = stmts ++ xs)
+    def replaceStmts(xs: Seq[p.Stmt]): RemapContext               = copy(stmts = xs.toList)
+    def updateDeps(f: Dependencies => Dependencies): RemapContext = copy(deps = f(deps))
+
+    def bindThis(x: ClassDef, tpe: p.Type.Struct): Result[RemapContext] = thisCls match {
+      case None => updateDeps(_.witness(x, tpe)).copy(thisCls = Some((x -> tpe))).success
+      case Some((oldSym, oldTpe)) if oldSym == x && oldTpe == tpe => this.success
+      case Some((oldSym, oldTpe)) => s"Cannot witness different this type: $oldSym != $x ($oldTpe != $tpe)".fail
+    }
 
     def fail[A](reason: String) =
       s"""[depth=$depth] $reason

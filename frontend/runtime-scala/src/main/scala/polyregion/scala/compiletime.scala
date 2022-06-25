@@ -2,7 +2,7 @@ package polyregion.scala
 
 import cats.syntax.all.*
 import polyregion.ast.{CppSourceMirror, MsgPack, PolyAst as p, *}
-import polyregion.jvm.{compiler as cp, runtime as rt}
+import polyregion.jvm.{compiler as ct, runtime as rt}
 import polyregion.scala as srt
 
 import java.nio.file.Paths
@@ -51,7 +51,7 @@ object compiletime {
     '{}
   }
 
-  case class ReifiedConfig(target: cp.Target, arch: String, opt: cp.Opt)
+  case class ReifiedConfig(target: ct.Target, arch: String, opt: ct.Opt)
 
   def reifyConfig(x: srt.Config[_, _]): List[ReifiedConfig] =
     x.targets.map((t, o) => ReifiedConfig(t.arch, t.uarch, o.value))
@@ -63,10 +63,10 @@ object compiletime {
         TypeRepr.of[target].widenTermRefByName.dealias.simplified match {
           case Refinement(target, xs, TypeBounds(l @ ConstantType(StringConstant(arch)), h)) if l == h =>
             val vendorTpe   = target.select(TypeRepr.of[polyregion.scala.Target#Arch].typeSymbol).dealias
-            val cpTargetTpe = TypeRepr.of[cp.Target]
+            val cpTargetTpe = TypeRepr.of[ct.Target]
             if (vendorTpe <:< cpTargetTpe) {
               (ReifiedConfig(
-                target = cp.Target.valueOf(vendorTpe.termSymbol.name),
+                target = ct.Target.valueOf(vendorTpe.termSymbol.name),
                 arch = arch,
                 opt = Opt.valueOf(TypeRepr.of[opt].termSymbol.name).value
               ) :: Nil).success
@@ -154,14 +154,14 @@ object compiletime {
     // configs               <- reifyConfigFromTpe[C](using q.underlying)()
     (captures, prog0, log) <- Compiler.compileExpr(f)
     prog = prog0.copy(entry = prog0.entry.copy(name = p.Sym("lambda")))
-   _    = println(log.render)
+    _    = println(log.render)
 
     serialisedAst <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, prog)))
-    compiler = cp.Compiler.create()
+    compiler = ct.Compiler.create()
 
     compilations <- configs.traverse(c =>
       Either
-        .catchNonFatal(compiler.compile(serialisedAst, true, cp.Options.of(c.target, c.arch), c.opt.value))
+        .catchNonFatal(compiler.compile(serialisedAst, true, ct.Options.of(c.target, c.arch), c.opt.value))
         .map(c -> _)
     )
 
@@ -173,9 +173,11 @@ object compiletime {
       println(s"Messages=\n  ${c.messages}")
       println(s"Features=\n  ${c.features.toList}")
       println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
+      println(s"Captures=\n${captures}")
     }
 
-    given Quotes   = q.underlying
+    given Quotes = q.underlying
+
     val fnName     = Expr(prog.entry.name.repr)
     val moduleName = Expr(s"${prog0.entry.name.repr}@${ProgramCounter.getAndIncrement()}")
     val (captureTpeOrdinals, captureTpeSizes) = captures.map { (name, _) =>
@@ -187,7 +189,7 @@ object compiletime {
 
     val code = '{
 
-      // Validate device feature set can support this code object.
+      // Validate device features support this code object.
       val miss      = ArrayBuffer[(String, Set[String])]()
       val available = Set($queue.device.features(): _*)
 
@@ -224,12 +226,25 @@ object compiletime {
           $queue.device.loadModule($moduleName, modules(found)._3)
         }
 
-        // Allocate parameter and return type ordinals/buffers/
+        // Allocate parameter and return type ordinals and value buffers
         val fnTpeOrdinals = ${ Expr((captureTpeOrdinals :+ returnTpeOrdinal).toArray) }
         val fnValues =
           ByteBuffer.allocate(${ Expr(captureTpeSizes.sum + returnTpeSize) }).order(ByteOrder.nativeOrder)
 
-        ${ bindCapturesToBuffer('fnValues, queue, captures, compiler) }
+        ${
+          q.Match(
+            'found.asTerm,
+            compilations.zipWithIndex.map { case ((c, _), i) =>
+              q.CaseDef(
+                q.Literal(q.IntConstant(i)),
+                None,
+                bindCapturesToBuffer(compiler, ct.Options.of(c.target, c.arch), 'fnValues, queue, captures).asTerm
+              )
+            }
+          ).asExprOf[Unit]
+        }
+
+        // ${ bindCapturesToBuffer(compiler, ???, 'fnValues, queue, captures) }
 
         // Dispatch.
         $queue.enqueueInvokeAsync(
@@ -245,35 +260,56 @@ object compiletime {
         $queue.syncAll(if (! $queue.device.sharedAddressSpace) (() => ${ cb }(Right(()))): Runnable else null)
       }
     }
-    println("Code=" + code.show)
+    given q.Printer[q.Tree] = q.Printer.TreeAnsiCode
+    println("Code=" + code.asTerm.show)
     compiler.close()
     code
   }
 
   def bindCapturesToBuffer(using q: Quoted)(
+      compiler: ct.Compiler,
+      opt: ct.Options,
       target: Expr[ByteBuffer],
       queue: Expr[rt.Device.Queue],
-      captures: List[(p.Named, q.Term)],
-      compiler: cp.Compiler
+      captures: List[(p.Named, q.Term)]
   ) = {
     given Quotes = q.underlying
+
     val (_, stmts) = captures.zipWithIndex.foldLeft((0, List.empty[Expr[Any]])) {
       case ((byteOffset, exprs), ((name, ref), idx)) =>
-        inline def register[ts: Type, t: Type](arr: p.Type.Array, mutable: Boolean, size: Expr[ts] => Expr[Int]) = '{
-          $target.putLong(
-            ${ Expr(byteOffset) },
-            $queue.registerAndInvalidateIfAbsent[ts](
-              ${ ref.asExprOf[ts] },
-              xs => ${ Expr(Pickler.sizeOf(compiler, arr.component, q.TypeRepr.of[t])) } * ${ size('xs) },
-              (xs, bb) => ${ Pickler.putAll(compiler, 'bb, arr, q.TypeRepr.of[ts], 'xs) },
-              ${
-                if (!mutable) null
-                else '{ (bb, xs) => ${ Pickler.getAllMutable(compiler, 'bb, arr, q.TypeRepr.of[ts], 'xs) } }
-              },
-              null
-            )
+        inline def bindArray[ts: Type, t: Type](arr: p.Type.Array, mutable: Boolean, size: Expr[ts] => Expr[Int]) = '{
+          val pointer = $queue.registerAndInvalidateIfAbsent[ts](
+            /*object*/ ${ ref.asExprOf[ts] },
+            /*sizeOf*/ xs => ${ Expr(Pickler.sizeOf(compiler, opt, arr.component, q.TypeRepr.of[t])) } * ${ size('xs) },
+            /*write */ (xs, bb) => ${ Pickler.putAll(compiler, opt, 'bb, arr, q.TypeRepr.of[ts], 'xs) },
+            /*read  */ ${
+              // TODO what about var?
+              if (!mutable) '{ (bb, xs) =>
+                throw new AssertionError(s"No writeback for immutable type " + ${ Expr(arr.repr) })
+              }
+              else '{ (bb, xs) => ${ Pickler.getAllMutable(compiler, opt, 'bb, arr, q.TypeRepr.of[ts], 'xs) } }
+            },
+            null
           )
+
+          $target.putLong(${ Expr(byteOffset) }, pointer)
+          ()
         }
+
+        inline def bindStruct[t: Type](struct: p.Type.Struct) = '{
+
+          val pointer = $queue.registerAndInvalidateIfAbsent[t](
+            /*object*/ ${ ref.asExprOf[t] },
+            /*sizeOf*/ x => ${ Expr(Pickler.sizeOf(compiler, opt, struct, q.TypeRepr.of[t])) },
+            /*write */ (x, bb) => ${ Pickler.putAll(compiler, opt, 'bb, struct, q.TypeRepr.of[t], 'x) },
+            /*read  */ null, // (bb, x) => throw new AssertionError(s"No write-back for struct type " + ${ Expr(struct.repr) }),
+            null
+          )
+
+          $target.putLong(${ Expr(byteOffset) }, pointer)
+          ()
+        }
+
         val expr = (name.tpe, ref.tpe.asType) match {
           case (p.Type.Array(comp), x @ '[srt.Buffer[_]]) =>
             '{
@@ -287,14 +323,19 @@ object compiletime {
               )
             }
           case (arr @ p.Type.Array(_), ts @ '[Array[t]]) =>
-            register[ts.Underlying, t](arr, mutable = true, x => '{ $x.length })
+            bindArray[ts.Underlying, t](arr, mutable = true, x => '{ $x.length })
           case (arr @ p.Type.Array(_), ts @ '[scala.collection.mutable.Seq[t]]) =>
-            register[ts.Underlying, t](arr, mutable = true, x => '{ $x.length })
+            bindArray[ts.Underlying, t](arr, mutable = true, x => '{ $x.length })
           case (arr @ p.Type.Array(_), ts @ '[java.util.List[t]]) =>
-            register[ts.Underlying, t](arr, mutable = true, x => '{ $x.size })
+            bindArray[ts.Underlying, t](arr, mutable = true, x => '{ $x.size })
           case (arr @ p.Type.Array(_), ts @ '[scala.collection.immutable.Seq[t]]) =>
-            register[ts.Underlying, t](arr, mutable = false, x => '{ $x.length })
+            bindArray[ts.Underlying, t](arr, mutable = false, x => '{ $x.length })
+          case (s @ p.Type.Struct(_, _, _), '[t]) =>
+            // bindArray[ts.Underlying, t](arr, mutable = false, x => '{ $x.length })
+            // Pickler.writeStruct(compiler, opt, target, Expr(byteOffset), Expr(0), ref.tpe, ref.asExpr)
+            bindStruct[t](s)
           case (t, _) =>
+            // Pickler.putAll(compiler, opt, target, t, ref.tpe, ref.asExpr)
             Pickler.putPrimitive(target, Expr(byteOffset), t, ref.asExpr)
         }
         (byteOffset + Pickler.tpeAsRuntimeTpe(name.tpe).sizeInBytes, exprs :+ expr)

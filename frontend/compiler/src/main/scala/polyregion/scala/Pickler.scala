@@ -1,14 +1,14 @@
 package polyregion.scala
 
-import polyregion.jvm.compiler.Compiler
 import polyregion.ast.{PolyAst as p, *}
-import polyregion.jvm.compiler.Layout.Member
+import polyregion.jvm.{compiler => ct}
+import polyregion.jvm.{runtime => rt}
 
 import scala.quoted.*
 
 object Pickler {
 
-  transparent inline def liftTpe(using q: Quotes)(t: p.Type) = t match {
+  def liftTpe(using q: Quotes)(t: p.Type) = t match {
     case p.Type.Bool   => Type.of[Boolean]
     case p.Type.Char   => Type.of[Char]
     case p.Type.Byte   => Type.of[Byte]
@@ -18,85 +18,98 @@ object Pickler {
     case p.Type.Float  => Type.of[Float]
     case p.Type.Double => Type.of[Double]
     case p.Type.Unit   => Type.of[Unit]
+    case illegal       => throw new RuntimeException(s"liftTpe: Cannot lift $illegal")
   }
 
-  inline def tpeAsRuntimeTpe(t: p.Type): polyregion.jvm.runtime.Type = t match {
-    case p.Type.Bool            => polyregion.jvm.runtime.Type.BOOL
-    case p.Type.Byte            => polyregion.jvm.runtime.Type.BYTE
-    case p.Type.Char            => polyregion.jvm.runtime.Type.CHAR
-    case p.Type.Short           => polyregion.jvm.runtime.Type.SHORT
-    case p.Type.Int             => polyregion.jvm.runtime.Type.INT
-    case p.Type.Long            => polyregion.jvm.runtime.Type.LONG
-    case p.Type.Float           => polyregion.jvm.runtime.Type.FLOAT
-    case p.Type.Double          => polyregion.jvm.runtime.Type.DOUBLE
-    case p.Type.Array(_)        => polyregion.jvm.runtime.Type.PTR
-    case p.Type.Struct(_, _, _) => polyregion.jvm.runtime.Type.PTR
-    case p.Type.Unit            => polyregion.jvm.runtime.Type.VOID
-    case unknown =>
-      println(s"tpeAsRuntimeTpe ??? = $unknown ")
-      ???
+  def tpeAsRuntimeTpe(t: p.Type): rt.Type = t match {
+    case p.Type.Bool            => rt.Type.BOOL
+    case p.Type.Byte            => rt.Type.BYTE
+    case p.Type.Char            => rt.Type.CHAR
+    case p.Type.Short           => rt.Type.SHORT
+    case p.Type.Int             => rt.Type.INT
+    case p.Type.Long            => rt.Type.LONG
+    case p.Type.Float           => rt.Type.FLOAT
+    case p.Type.Double          => rt.Type.DOUBLE
+    case p.Type.Array(_)        => rt.Type.PTR
+    case p.Type.Struct(_, _, _) => rt.Type.PTR
+    case p.Type.Unit            => rt.Type.VOID
+    case illegal                => throw new RuntimeException(s"tpeAsRuntimeTpe: Illegal $illegal")
   }
 
-  inline def getPrimitive(using q: Quotes) //
-  (buffer: Expr[java.nio.ByteBuffer], byteOffset: Expr[Int], tpe: p.Type): Expr[Any] = tpe match {
-    case p.Type.Float  => '{ $buffer.getFloat($byteOffset) }
-    case p.Type.Double => '{ $buffer.getDouble($byteOffset) }
-    case p.Type.Bool   => '{ if ($buffer.get($byteOffset) == 0) false else true }
-    case p.Type.Byte   => '{ $buffer.get($byteOffset) }
-    case p.Type.Char   => '{ $buffer.getChar($byteOffset) }
-    case p.Type.Short  => '{ $buffer.getShort($byteOffset) }
-    case p.Type.Int    => '{ $buffer.getInt($byteOffset) }
-    case p.Type.Long   => '{ $buffer.getLong($byteOffset) }
-    case p.Type.Unit   => '{ $buffer.get($byteOffset); () }
-    case x             => q.reflect.report.errorAndAbort(s"Type $x is not a primitive type")
-  }
-
-  inline def putPrimitive(using q: Quotes) //
-  (buffer: Expr[java.nio.ByteBuffer], byteOffset: Expr[Int], tpe: p.Type, value: Expr[Any]): Expr[Unit] = tpe match {
-    case p.Type.Float  => '{ $buffer.putFloat($byteOffset, ${ value.asExprOf[Float] }) }
-    case p.Type.Double => '{ $buffer.putDouble($byteOffset, ${ value.asExprOf[Double] }) }
-    case p.Type.Bool   => '{ $buffer.put($byteOffset, if (!${ value.asExprOf[Boolean] }) 0.toByte else 1.toByte) }
-    case p.Type.Byte   => '{ $buffer.put($byteOffset, ${ value.asExprOf[Byte] }) }
-    case p.Type.Char   => '{ $buffer.putChar($byteOffset, ${ value.asExprOf[Char] }) }
-    case p.Type.Short  => '{ $buffer.putShort($byteOffset, ${ value.asExprOf[Short] }) }
-    case p.Type.Int    => '{ $buffer.putInt($byteOffset, ${ value.asExprOf[Int] }) }
-    case p.Type.Long   => '{ $buffer.putLong($byteOffset, ${ value.asExprOf[Long] }) }
-    case p.Type.Unit   => '{ $buffer.put($byteOffset, 0.toByte) }
-    case x             => q.reflect.report.errorAndAbort(s"Type $x is not a primitive type", value)
-  }
-
-  inline def layoutOf(using q: Quoted)(compiler: Compiler, repr: q.TypeRepr): polyregion.jvm.compiler.Layout = {
+  def layoutOf(using q: Quoted) //
+  (compiler: ct.Compiler, opt: ct.Options, repr: q.TypeRepr): ct.Layout = {
     val sdef = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
-    println(s"A=${sdef} ${repr.widenTermRefByName}")
-    compiler.layoutOf(CppSourceMirror.encode(sdef), ???)
+    println(s"layoutOf=${sdef} ${repr.widenTermRefByName}")
+    compiler.layoutOf(CppSourceMirror.encode(sdef), opt)
   }
 
-  inline def sizeOf(using q: Quoted)(compiler: Compiler,tpe: p.Type, repr: q.TypeRepr): Int = tpe match {
-    case p.Type.Float           => polyregion.jvm.runtime.Type.FLOAT.sizeInBytes
-    case p.Type.Double          => polyregion.jvm.runtime.Type.DOUBLE.sizeInBytes
-    case p.Type.Bool            => polyregion.jvm.runtime.Type.BYTE.sizeInBytes
-    case p.Type.Byte            => polyregion.jvm.runtime.Type.BYTE.sizeInBytes
-    case p.Type.Char            => polyregion.jvm.runtime.Type.CHAR.sizeInBytes
-    case p.Type.Short           => polyregion.jvm.runtime.Type.SHORT.sizeInBytes
-    case p.Type.Int             => polyregion.jvm.runtime.Type.INT.sizeInBytes
-    case p.Type.Long            => polyregion.jvm.runtime.Type.LONG.sizeInBytes
-    case p.Type.Unit            => polyregion.jvm.runtime.Type.VOID.sizeInBytes
-    case p.Type.Array(_)        => polyregion.jvm.runtime.Type.PTR.sizeInBytes
-    case p.Type.Struct(_, _, _) => layoutOf(compiler, repr).sizeInBytes.toInt
-    case x                      => q.quotes.reflect.report.errorAndAbort(s"Cannot get size of type $x")
+  def sizeOf(using q: Quoted)(compiler: ct.Compiler, opt: ct.Options, tpe: p.Type, repr: q.TypeRepr): Int =
+    tpe match {
+      case p.Type.Float           => rt.Type.FLOAT.sizeInBytes
+      case p.Type.Double          => rt.Type.DOUBLE.sizeInBytes
+      case p.Type.Bool            => rt.Type.BYTE.sizeInBytes
+      case p.Type.Byte            => rt.Type.BYTE.sizeInBytes
+      case p.Type.Char            => rt.Type.CHAR.sizeInBytes
+      case p.Type.Short           => rt.Type.SHORT.sizeInBytes
+      case p.Type.Int             => rt.Type.INT.sizeInBytes
+      case p.Type.Long            => rt.Type.LONG.sizeInBytes
+      case p.Type.Unit            => rt.Type.VOID.sizeInBytes
+      case p.Type.Array(_)        => rt.Type.PTR.sizeInBytes
+      case p.Type.Struct(_, _, _) => layoutOf(compiler, opt, repr).sizeInBytes.toInt
+      case x                      => q.quotes.reflect.report.errorAndAbort(s"Cannot get size of type $x")
+    }
+
+  def getPrimitive(using q: Quotes) //
+  (source: Expr[java.nio.ByteBuffer], byteOffset: Expr[Int], tpe: p.Type): Expr[Any] = tpe match {
+    case p.Type.Float  => '{ $source.getFloat($byteOffset) }
+    case p.Type.Double => '{ $source.getDouble($byteOffset) }
+    case p.Type.Bool   => '{ if ($source.get($byteOffset) == 0) false else true }
+    case p.Type.Byte   => '{ $source.get($byteOffset) }
+    case p.Type.Char   => '{ $source.getChar($byteOffset) }
+    case p.Type.Short  => '{ $source.getShort($byteOffset) }
+    case p.Type.Int    => '{ $source.getInt($byteOffset) }
+    case p.Type.Long   => '{ $source.getLong($byteOffset) }
+    case p.Type.Unit   => '{ $source.get($byteOffset); () }
+    case x =>
+      throw new RuntimeException(s"Cannot get ${x.repr} from buffer, it is not a primitive type")
+
   }
 
-  def readStruct(using q: Quoted) //
-  (compiler: Compiler, buffer: Expr[java.nio.ByteBuffer], index: Expr[Int], repr: q.TypeRepr) = {
+  def putPrimitive(using q: Quotes) //
+  (target: Expr[java.nio.ByteBuffer], byteOffset: Expr[Int], tpe: p.Type, value: Expr[Any]): Expr[Unit] = tpe match {
+    case p.Type.Float  => '{ $target.putFloat($byteOffset, ${ value.asExprOf[Float] }) }
+    case p.Type.Double => '{ $target.putDouble($byteOffset, ${ value.asExprOf[Double] }) }
+    case p.Type.Bool   => '{ $target.put($byteOffset, if (!${ value.asExprOf[Boolean] }) 0.toByte else 1.toByte) }
+    case p.Type.Byte   => '{ $target.put($byteOffset, ${ value.asExprOf[Byte] }) }
+    case p.Type.Char   => '{ $target.putChar($byteOffset, ${ value.asExprOf[Char] }) }
+    case p.Type.Short  => '{ $target.putShort($byteOffset, ${ value.asExprOf[Short] }) }
+    case p.Type.Int    => '{ $target.putInt($byteOffset, ${ value.asExprOf[Int] }) }
+    case p.Type.Long   => '{ $target.putLong($byteOffset, ${ value.asExprOf[Long] }) }
+    case p.Type.Unit   => '{ $target.put($byteOffset, 0.toByte) }
+    case x =>
+      throw new RuntimeException(
+        s"Cannot put ${x.repr} into buffer, it is not a primitive type (source is `${value.show}`)"
+      )
+
+  }
+
+  def getStruct(using q: Quoted)(
+      compiler: ct.Compiler,
+      opt: ct.Options,
+      source: Expr[java.nio.ByteBuffer],
+      byteOffset: Expr[Int],
+      indexOffset: Expr[Int],
+      repr: q.TypeRepr
+  ) = {
     import q.given
     // Find out the total size of this struct first, it could be nested arbitrarily but the top level's size must
     // reflect the total size; this is consistent with C's `sizeof(struct T)`.
-    val sdef       = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
-    val layout     = compiler.layoutOf(CppSourceMirror.encode(sdef), ???)
-    val byteOffset = '{ ${ Expr(layout.sizeInBytes.toInt) } * $index }
-    val fields     = sdef.members.zip(layout.members)
+    val sdef           = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
+    val layout         = compiler.layoutOf(CppSourceMirror.encode(sdef), opt)
+    val baseByteOffset = '{ ${ byteOffset } + (${ Expr(layout.sizeInBytes.toInt) } * $indexOffset) }
+    val fields         = sdef.members.zip(layout.members)
     val terms = fields.map { (named, m) =>
-      getPrimitive(buffer, '{ $byteOffset + ${ Expr(m.offsetInBytes.toInt) } }, named.tpe).asTerm
+      getPrimitive(source, '{ $baseByteOffset + ${ Expr(m.offsetInBytes.toInt) } }, named.tpe).asTerm
     }
     q.Select
       .unique(q.New(q.TypeIdent(repr.typeSymbol)), "<init>")
@@ -104,19 +117,26 @@ object Pickler {
       .asExpr
   }
 
-  inline def writeStruct(using q: Quoted) //
-  (compiler: Compiler,buffer: Expr[java.nio.ByteBuffer], index: Expr[Int], repr: q.TypeRepr, value: Expr[Any]) = {
+  def putStruct(using q: Quoted)(
+      compiler: ct.Compiler,
+      opt: ct.Options,
+      target: Expr[java.nio.ByteBuffer],
+      byteOffset: Expr[Int],
+      indexOffset: Expr[Int],
+      repr: q.TypeRepr,
+      value: Expr[Any]
+  ) = {
     import q.given
     // Find out the total size of this struct first, it could be nested arbitrarily but the top level's size must
     // reflect the total size; this is consistent with C's `sizeof(struct T)`.
-    val sdef       = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
-    val layout     = compiler.layoutOf(CppSourceMirror.encode(sdef), ???)
-    val byteOffset = '{ ${ Expr(layout.sizeInBytes.toInt) } * $index }
-    val fields     = sdef.members.zip(layout.members)
+    val sdef           = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
+    val layout         = compiler.layoutOf(CppSourceMirror.encode(sdef), opt)
+    val baseByteOffset = '{ ${ byteOffset } + (${ Expr(layout.sizeInBytes.toInt) } * $indexOffset) }
+    val fields         = sdef.members.zip(layout.members)
     val terms = fields.map { (named, m) =>
       putPrimitive(
-        buffer,
-        '{ $byteOffset + ${ Expr(m.offsetInBytes.toInt) } },
+        target,
+        '{ $baseByteOffset + ${ Expr(m.offsetInBytes.toInt) } },
         named.tpe,
         q.Select.unique(value.asTerm, named.symbol).asExpr
       )
@@ -124,15 +144,20 @@ object Pickler {
     Expr.block(terms, '{ () })
   }
 
-
-  def putAll(using q: Quoted) //
-  (compiler: Compiler, b: Expr[java.nio.ByteBuffer], tpe: p.Type, repr: q.TypeRepr, v: Expr[Any]): Expr[Unit] = {
+  def putAll(using q: Quoted)(
+      compiler: ct.Compiler,
+      opt: ct.Options,
+      b: Expr[java.nio.ByteBuffer],
+      tpe: p.Type,
+      repr: q.TypeRepr,
+      v: Expr[Any]
+  ): Expr[Unit] = {
+    import p.Type as PT
     import q.given
-    import p.{Type => PT}
 
     inline def put[t: Type](comp: PT, i: Expr[Int], v: Expr[Any]) = comp match {
-      case p.Type.Struct(_, _, _) => writeStruct(compiler, b, i, q.TypeRepr.of[t], v)
-      case c                      => putPrimitive(b, '{ $i * ${ Expr(sizeOf(compiler, comp, q.TypeRepr.of[t])) } }, c, v)
+      case p.Type.Struct(_, _, _) => putStruct(compiler, opt, b, i, Expr(0), q.TypeRepr.of[t], v)
+      case c => putPrimitive(b, '{ $i * ${ Expr(sizeOf(compiler, opt, comp, q.TypeRepr.of[t])) } }, c, v)
     }
 
     (tpe, repr.asType) match {
@@ -145,37 +170,47 @@ object Pickler {
       case (PT.Array(PT.Long), x @ '[Array[Long]])     => '{ $b.asLongBuffer.put(${ v.asExprOf[x.Underlying] }) }
       case (PT.Array(PT.Float), x @ '[Array[Float]])   => '{ $b.asFloatBuffer.put(${ v.asExprOf[x.Underlying] }) }
       case (PT.Array(PT.Double), x @ '[Array[Double]]) => '{ $b.asDoubleBuffer.put(${ v.asExprOf[x.Underlying] }) }
+      case (PT.Array(comp), x @ '[java.util.List[t]]) =>
+        '{
+          val xs = ${ v.asExprOf[x.Underlying] }
+          var i  = 0; while (i < xs.size) { ${ put(comp, 'i, '{ xs.get(i) }) }; i += 1 }
+        }
+      case (PT.Array(comp), x @ '[java.lang.Iterable[t]]) =>
+        '{
+          val it = ${ v.asExprOf[x.Underlying] }.iterator()
+          var i  = 0; while (it.hasNext()) { ${ put(comp, 'i, '{ it.next() }) }; i += 1 }
+        }
       case (PT.Array(comp), x @ '[scala.Array[t]]) =>
         '{
           val xs = ${ v.asExprOf[x.Underlying] }
           var i  = 0; while (i < xs.length) { ${ put(comp, 'i, '{ xs(i) }) }; i += 1 }
         }
-      case (p.Type.Array(comp), x @ '[scala.collection.Seq[t]]) =>
-        // Readonly, so whether collection is mutable or not doesn't matter.
-        '{
+      case (PT.Array(comp), x @ '[scala.collection.Seq[t]]) =>
+        '{ // We're reading only, so whether collection is mutable or not doesn't matter.
           val xs = ${ v.asExprOf[x.Underlying] }
           var i  = 0; while (i < xs.length) { ${ put(comp, 'i, '{ xs(i) }) }; i += 1 }
         }
-      case (p.Type.Array(comp), x @ '[java.util.List[t]]) =>
-        '{
-          val xs = ${ v.asExprOf[x.Underlying] }
-          var i  = 0; while (i < xs.size) { ${ put(comp, 'i, '{ xs.get(i) }) }; i += 1 }
-        }
-      case (t @ p.Type.Array(_), illegal) =>
+      case (t @ PT.Array(_), illegal) =>
         q.report.errorAndAbort(s"Unsupported type ${t.repr} (${v.show}:${repr.show}) for writing to ByteBuffer.", v)
       case (t, '[x]) => put[x](t, '{ 0 }, v)
       case (t, _)    => q.report.errorAndAbort(s"Type information unavailable for ${t.repr}")
     }
   }
 
-  def getAllMutable(using q: Quoted) //
-  (compiler: Compiler,b: Expr[java.nio.ByteBuffer], tpe: p.Type, repr: q.TypeRepr, v: Expr[Any]): Expr[Unit] = {
+  def getAllMutable(using q: Quoted)(
+      compiler: ct.Compiler,
+      opt: ct.Options,
+      b: Expr[java.nio.ByteBuffer],
+      tpe: p.Type,
+      repr: q.TypeRepr,
+      v: Expr[Any]
+  ): Expr[Unit] = {
+    import p.Type as PT
     import q.given
-    import p.{Type => PT}
 
     inline def get[t: Type](comp: PT, i: Expr[Int]) = (comp match {
-      case p.Type.Struct(_, _, _) => readStruct(compiler, b, i, q.TypeRepr.of[t])
-      case c                      => getPrimitive(b, '{ $i * ${ Expr(sizeOf(compiler, comp, q.TypeRepr.of[t])) } }, c)
+      case p.Type.Struct(_, _, _) => getStruct(compiler, opt, b, i, Expr(0), q.TypeRepr.of[t])
+      case c => getPrimitive(b, '{ $i * ${ Expr(sizeOf(compiler, opt, comp, q.TypeRepr.of[t])) } }, c)
     }).asExprOf[t]
 
     (tpe, repr.asType) match {
@@ -206,19 +241,18 @@ object Pickler {
         }
       case (t @ p.Type.Array(_), illegal) =>
         q.report.errorAndAbort(s"Unsupported non-mutable type ${t.repr} for reading from ByteBuffer: ${repr.show}")
-      // case (t, '[x]) => get[x](t, '{ 0 }).asExprOf[Unit]
-      case (t, _)    => q.report.errorAndAbort(s"Type information unavailable for ${t.repr}")
+      // case (t, '[x]) => // get[x](t, '{ 0 }).asExprOf[Unit]
+      case (t, _) => q.report.errorAndAbort(s"Type information unavailable for ${t.repr}")
     }
   }
 
-  // TODO 
-  // Array[Solid]        = ( S[N]... )
-  // Solid               = ( S )
-  // RefA{RefB}          = ( RefA{*T, N:Int, RefB{*U, N':Int}}, T[N]..., U[N']... )
-  // Ref                 = ( Ref{*T, N:Int, *U, N':Int ...}, T[N]..., U[N']... )
-  // Array[Ref] xs       = ( Ref{*T, N:Int, *U, N':Int ...}[xs.size]..., T[N * xs.size]..., U[N' * xs.size]...  )
-  // Array[Array[Solid]] = (Ref{*T, N1}[N0]..., T[N0*N1]...)
-
+  // TODO
+  // Array[Solid]        = [  S[N]...                                                                            ]
+  // Solid               = [  S                                                                                  ]
+  // RefA{RefB}          = [  RefA {*T, N:Int, RefB {*U, N':Int} }, T[N]..., U[N']...                            ]
+  // Ref                 = [  Ref {*T, N:Int, *U, N':Int ...}, T[N]..., U[N']...                                 ]
+  // Array[Ref] xs       = [  Ref {*T, N:Int, *U, N':Int ...}[xs.size]..., T[N * xs.size]..., U[N' * xs.size]... ]
+  // Array[Array[Solid]] = [  Ref {*T, N1}[N0]..., T[N0*N1]...                                                   ]
 
   // def writeUniform  //
   // (using q: Quoted) //
@@ -228,7 +262,7 @@ object Pickler {
 
   //   tpe match {
   //     case p.Type.Struct(name, tpeVars, args) =>
-  //       writeStruct(buffer, index, repr, value)
+  //       putStruct(buffer, index, repr, value)
   //     case p.Type.Array(comp) =>
   //       // TODO handle special case for where value == wrapped buffers; just unwrap it here
   //       repr.asType match {
@@ -255,7 +289,6 @@ object Pickler {
   //       putPrimitive(buffer, '{ $index * ${ Expr(sizeOf(t, repr)) } }, t, value)
   //   }
   // }
-
 
   // def readUniform(using q: Quoted) //
   // (buffer: Expr[java.nio.ByteBuffer], index: Expr[Int], tpe: p.Type, repr: q.TypeRepr): Expr[Any] = {

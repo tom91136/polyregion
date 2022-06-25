@@ -238,11 +238,13 @@ object Remapper {
             } yield (term, c))
         }
 
-        // When an ref is owned by the current class/object (i.e. `c.root`), we add an implicit `this` reference.
+        // When an ref is owned by a class/object (i.e. `c.root`), we add an implicit `this` reference.
         def handleThisRef(ref: q.Ref, named: p.Named) = if (owningClassSymbol(c.root).contains(ref.symbol.maybeOwner)) {
           Some(for {
             tpe <- clsSymTyper0(ref.symbol.owner) // TODO what about generics???
             cls = p.Named("this", tpe)
+            // c1 = c.updateDeps(_.witness(ref.tpe.typeSymbol, tpe.asInstanceOf[p.Type.Struct]))
+            // c1 = c
             (invoke, c) <- invokeOrSelect(c)(ref.symbol, Some(p.Term.Select(Nil, cls)))(
               p.Term.Select(cls :: Nil, named).success
             )
@@ -334,8 +336,18 @@ object Remapper {
         case (Nil, Nil, q.Literal(q.UnitConstant()))     => (p.Term.UnitConst, c !! term).pure
         case (Nil, Nil, q.This(_)) => // reference to the current class: `this.???`
           typer0(term.tpe).flatMap {
-            case (Some(value), tpe) => (value, c).success
-            case (None, tpe)        => (p.Term.Select(Nil, p.Named("this", tpe)), c).success
+            case (None, s @ p.Type.Struct(_, _, _)) =>
+
+              term.tpe.classSymbol.map(_.tree) match {
+                case Some(clsDef : q.ClassDef) =>  c.bindThis(clsDef, s).map((p.Term.Select(Nil, p.Named("this", s)), _))
+                case Some(bad) => s"`this` type symbol points to a non-ClassDef tree: $bad".fail  
+                case None => "`this` does not contain a class symbol".fail
+              }
+
+
+              
+            case (Some(value), tpe) => "`this` isn't supposed to have a value".fail /*(value, c).success*/
+            case (None, illegal)    => "`this` isn't typed as a struct type".fail
           }
         case (Nil, termArgss, q.TypeApply(term, args)) => // *single* application of some types: `$term[$args...]`
           println(s"[mapper] tpeAp = `${term.show}`")
