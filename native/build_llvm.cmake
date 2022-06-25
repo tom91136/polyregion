@@ -14,6 +14,8 @@ else ()
     set(DOWNLOAD_LLVM ON)
 endif ()
 
+# See https://github.com/llvm/llvm-project/issues/54941
+file(WRITE ${LLVM_BUILD_DIR}/third-party/benchmark/CMakeLists.txt "")
 
 if (DOWNLOAD_LLVM)
     message(STATUS "Downloading LLVM source...")
@@ -65,6 +67,15 @@ set(LLVM_OPTIONS
         -DLLVM_INSTALL_UTILS=OFF
         -DLLVM_USE_HOST_TOOLS=OFF
         -DLLVM_STATIC_LINK_CXX_STDLIB=${USE_STATIC_CXX_STDLIB}
+
+#        TODO setup cross
+#        -DCMAKE_SYSTEM_NAME=Linux
+#        -DLLVM_TARGET_ARCH=ARM
+#        -DLLVM_TABLEGEN=llvm-tblgen
+#        -DCLANG_TABLEGEN=clang-tblgen
+#        -DLLVM_DEFAULT_TARGET_TRIPLE=arm-linux-gnueabihf
+#        "-DCMAKE_CXX_FLAGS=-march=armv7-a -mcpu=cortex-a9 -mfloat-abi=hard --target=arm-linux-gnueabihf"
+
 
         "-DLLVM_TARGETS_TO_BUILD=X86\;AArch64\;ARM\;NVPTX\;AMDGPU" # quote this because of the semicolons
         )

@@ -6,5 +6,6 @@ set -eu
 
 TAG="tom91136/centos7-llvm14:latest"
 
-docker build . -t "$TAG" -t "$TAG"
+# --platform linux/amd64,linux/arm64
+docker buildx build --platform linux/arm64 -t "$TAG" -t "$TAG" .
 docker push "$TAG"
