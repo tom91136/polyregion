@@ -18,10 +18,10 @@ object Toggles {
 
   final inline val StructSuite      = false
 
-  final inline val CastSuite        = false
-  final inline val BufferSuite      = false
+  final inline val CastSuite        = true
+  final inline val BufferSuite      = true
   final inline val MathSuite        = false
-  final inline val IntrinsicSuite   = false
+  final inline val IntrinsicSuite   = true
 
   final inline val ExtensionSuite = false
 

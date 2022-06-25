@@ -219,7 +219,7 @@ object Compiler {
     log <- log.info(s"Expr+Deps Dependent methods", deps.functions.values.map(_.toString).toList*)
     log <- log.info(s"Expr+Deps Dependent structs", deps.classes.values.map(_.toString).toList*)
 
-    log <- log.info("This instance", exprThisCls.map((s, tpe) => s"$s ~> ${tpe.repr}").toList*)
+    log <- log.info("This instance", exprThisCls.map((cls, tpe) => s"${cls.symbol} ~> ${tpe.repr}").toList*)
 
     // sort the captures so that the order is stable for codegen
     // captures = deps.vars.toList.sortBy(_._1.symbol)

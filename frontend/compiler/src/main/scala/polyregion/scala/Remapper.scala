@@ -209,7 +209,7 @@ object Remapper {
             } yield (s -> c)
         }
 
-        // We handle any reference to arbitrarily nested objects/modules (including direct indent with no nesting, as produced by `inline` calls)
+        // We handle any reference to arbitrarily nested objects/modules (including direct ident with no nesting, as produced by `inline` calls)
         // directly because they are singletons (i.e. can appear anywhere with no dependencies, even the owner).
         // We traverse owners closes to the ref first (inside out) until we hit a method/package and work out the nesting.
         def handleObjectSelect(ref: q.Ref, named: p.Named) = ownersList(ref.symbol)
@@ -277,17 +277,37 @@ object Remapper {
               handleThisRef(ident, local)
                 .orElse(handleObjectSelect(ident, local))
                 .getOrElse {
-                  // In any other case, we're probably referencing a local ValDef that appeared before before this.
-                  invokeOrSelect(c)(ident.symbol, None)(p.Term.Select(Nil, local).success)
-                }
+                  val sym = ident.symbol
 
+                  println(s"Gen1 ${ident} ${ident.symbol} ${sym.maybeOwner.isLocalDummy}")
+                  if (sym.maybeOwner.isLocalDummy) {
+                    // We're seeing a def/val defined in the class scope: `class X{ { def a()  } }`.
+                    // Method (or any kind of Def) `a` in this case is owned by a local dummy where the parent is `X`.
+                    // We happen to be referring to `a`  locally (i.e. via ident, and not select) so we're in the same scope as `a`.
+                    // As local dummy don't exists, we need to synthesize the receiver for this invoke to be the owning class of the local dummy, which is `X`.
+                    val classSym = sym.maybeOwner.maybeOwner // Up two levels to skip over the local dummy.
+                    Retyper.clsSymTyper0(classSym).map(classSym.tree -> _).flatMap {
+                      case (clsDef: q.ClassDef, s @ p.Type.Struct(_, _, _)) =>
+                        c.bindThis(clsDef, s).flatMap { c =>
+
+                          val self = p.Named("this", s)
+                          invokeOrSelect(c)(sym, Some(p.Term.Select(Nil, self)))(
+                            p.Term.Select(self :: Nil, local).success
+                          )
+                        }
+                      case (illegal, tpe) => s"Unexpected tree $illegal with type $tpe when resolving local dummy".fail
+                    }
+                  } else {
+                    // In any other case, we're probably referencing a local ValDef that appeared before before this.
+                    invokeOrSelect(c)(sym, None)(p.Term.Select(Nil, local).success)
+                  }
+                }
             case select @ q.Select(root, name) => // we have qualifiers before the actual name
               val named = p.Named(name, tpe)
               handleThisRef(select, named)
                 .orElse(handleObjectSelect(select, named))
                 .getOrElse {
-                  // Otherwise we go through the usual path of resolution  (nested classes where each
-                  // instance has an `this` reference to the owning class)
+                  // Otherwise we go through the usual path of resolution  (nested classes where each instance has an `this` reference to the owning class)
                   c.mapTerm(root).flatMap {
                     case (root @ p.Term.Select(xs, x), c) => // fuse with previous select if we got one
                       invokeOrSelect(c)(select.symbol, Some(root))(p.Term.Select(xs :+ x, named).success)
@@ -337,15 +357,11 @@ object Remapper {
         case (Nil, Nil, q.This(_)) => // reference to the current class: `this.???`
           typer0(term.tpe).flatMap {
             case (None, s @ p.Type.Struct(_, _, _)) =>
-
               term.tpe.classSymbol.map(_.tree) match {
-                case Some(clsDef : q.ClassDef) =>  c.bindThis(clsDef, s).map((p.Term.Select(Nil, p.Named("this", s)), _))
-                case Some(bad) => s"`this` type symbol points to a non-ClassDef tree: $bad".fail  
-                case None => "`this` does not contain a class symbol".fail
+                case Some(clsDef: q.ClassDef) => c.bindThis(clsDef, s).map((p.Term.Select(Nil, p.Named("this", s)), _))
+                case Some(bad)                => s"`this` type symbol points to a non-ClassDef tree: $bad".fail
+                case None                     => "`this` does not contain a class symbol".fail
               }
-
-
-              
             case (Some(value), tpe) => "`this` isn't supposed to have a value".fail /*(value, c).success*/
             case (None, illegal)    => "`this` isn't typed as a struct type".fail
           }
