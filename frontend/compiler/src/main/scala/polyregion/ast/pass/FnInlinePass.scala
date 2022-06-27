@@ -6,7 +6,7 @@ import polyregion.ast.{PolyAst as p, *}
 import scala.collection.immutable.VectorMap
 
 // inline all calls originating from entry
-object FnInlinePass {
+object FnInlinePass extends ProgramPass {
 
   // rename all var and selects to avoid collision
   private def renameAll(f: p.Function): p.Function = {
@@ -110,7 +110,7 @@ object FnInlinePass {
       case x                => Nil
     })
 
-    println("## "+ivk.repr)
+    println("## " + ivk.repr)
 
     returnExprs match {
       case Nil =>
@@ -134,7 +134,7 @@ object FnInlinePass {
     }
   }
 
-  def run(program: p.Program)(log: Log): (p.Program, Log) = {
+  override def apply(program: p.Program, log: Log): (p.Program, Log) = {
 
     val f = doUntilNotEq(program.entry) { f =>
 

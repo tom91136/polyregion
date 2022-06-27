@@ -75,7 +75,7 @@ class ValueReturnSuite extends BaseSuite {
 
   testValueReturn(true)
   testValueReturn(false)
-//
-//  testValueReturn[Unit](())
+
+  testValueReturn[Unit](())
 
 }

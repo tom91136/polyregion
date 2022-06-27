@@ -6,7 +6,7 @@ import polyregion.ast.{PolyAst as p, *}
 
 import scala.annotation.tailrec
 
-object VerifyPass {
+object VerifyPass   {
 
   def run(program: p.Program)(log: Log): (List[(p.Function, List[String])], Log) =
     (program.entry :: program.functions).map { f =>
@@ -129,8 +129,6 @@ object VerifyPass {
 //            throw new RuntimeException(s"[Verifier] alloc=${alloc} vars:\n\t${varTable
 //              .mkString("\n\t")} \n${f.repr}\n${errors.map(e => s"  -> $e").mkString("\n")}")
 //          }
-
-
 
           errors ++ (xs.flatMap(x =>
             x.acc[p.Type] {

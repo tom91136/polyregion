@@ -13,29 +13,6 @@ class CaptureSuite extends BaseSuite {
   }
 
   {
-    case class Foo(x: Int, y: Int)
-    object Foo {
-      final val FooConst = new Foo(41, 42)
-    }
-
-    object NotFooCompanion {
-      final val FooConst = Foo(42, 43)
-    }
-
-//    given NativeStruct[Foo] = nativeStructOf
-
-    testCapture("constant-of-struct") {
-      val u = NotFooCompanion.FooConst
-      u.x + u.y
-    }
-
-    testCapture("constant-of-struct-companion") {
-      val u = Foo.FooConst
-      u.x + u.y
-    }
-  }
-
-  {
 
     object ConstA {
       final val MyConstantA = 42
@@ -63,21 +40,42 @@ class CaptureSuite extends BaseSuite {
       }
       val x = new Foo
       case class Node(elem: Int, next: Option[Node])
-      case class A(b: Int, c: Int)
+      case class CaseClassA(b: Int, c: Int)
 //      given NativeStruct[A] = nativeStructOf
-      val bufferOfA = Array(A(1, 2), A(3, 4))
-      val node      = Node(1, Some(Node(2, None)))
-      val (t1, t2)  = (1, 2)
+      val as       = Array(CaseClassA(1, 2), CaseClassA(3, 4))
+      val node     = Node(1, Some(Node(2, None)))
+      val (t1, t2) = (1, 2)
       testCapture("complex-captures") {
         val u = MyConstantA
         val v = ConstB.MyConstantB
         val e = node.elem
-        val b = bufferOfA(0).b
-        val c = bufferOfA(1).c
+        val b = as(0).b
+        val c = as(1).c
         val m = x.d.e
         val y = t1
         u + v + e + b + c + m + y
       }
+    }
+  }
+
+  {
+    case class Foo(x: Int, y: Int)
+    object Foo {
+      final val FooConst = new Foo(41, 42)
+    }
+
+    object NotFooCompanion {
+      final val FooConst = Foo(42, 43)
+    }
+
+    testCapture("constant-of-struct") {
+      val u = NotFooCompanion.FooConst
+      u.x + u.y
+    }
+
+    testCapture("constant-of-struct-companion") {
+      val u = Foo.FooConst
+      u.x + u.y
     }
   }
 

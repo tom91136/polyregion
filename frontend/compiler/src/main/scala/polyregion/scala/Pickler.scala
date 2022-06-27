@@ -1,8 +1,7 @@
 package polyregion.scala
 
 import polyregion.ast.{PolyAst as p, *}
-import polyregion.jvm.{compiler => ct}
-import polyregion.jvm.{runtime => rt}
+import polyregion.jvm.{compiler as ct, runtime as rt}
 
 import scala.quoted.*
 
@@ -156,8 +155,9 @@ object Pickler {
     import q.given
 
     inline def put[t: Type](comp: PT, i: Expr[Int], v: Expr[Any]) = comp match {
-      case p.Type.Struct(_, _, _) => putStruct(compiler, opt, b, i, Expr(0), q.TypeRepr.of[t], v)
-      case c => putPrimitive(b, '{ $i * ${ Expr(sizeOf(compiler, opt, comp, q.TypeRepr.of[t])) } }, c, v)
+      case p.Type.Struct(_, _, _) =>
+        putStruct(compiler, opt, b, byteOffset = Expr(0), indexOffset = i, q.TypeRepr.of[t], v)
+      case c => putPrimitive(b, byteOffset = '{ $i * ${ Expr(sizeOf(compiler, opt, comp, q.TypeRepr.of[t])) } }, c, v)
     }
 
     (tpe, repr.asType) match {
@@ -173,22 +173,22 @@ object Pickler {
       case (PT.Array(comp), x @ '[java.util.List[t]]) =>
         '{
           val xs = ${ v.asExprOf[x.Underlying] }
-          var i  = 0; while (i < xs.size) { ${ put(comp, 'i, '{ xs.get(i) }) }; i += 1 }
+          var i  = 0; while (i < xs.size) { ${ put[t](comp, 'i, '{ xs.get(i) }) }; i += 1 }
         }
       case (PT.Array(comp), x @ '[java.lang.Iterable[t]]) =>
         '{
           val it = ${ v.asExprOf[x.Underlying] }.iterator()
-          var i  = 0; while (it.hasNext()) { ${ put(comp, 'i, '{ it.next() }) }; i += 1 }
+          var i  = 0; while (it.hasNext()) { ${ put[t](comp, 'i, '{ it.next() }) }; i += 1 }
         }
       case (PT.Array(comp), x @ '[scala.Array[t]]) =>
         '{
           val xs = ${ v.asExprOf[x.Underlying] }
-          var i  = 0; while (i < xs.length) { ${ put(comp, 'i, '{ xs(i) }) }; i += 1 }
+          var i  = 0; while (i < xs.length) { ${ put[t](comp, 'i, '{ xs(i) }) }; i += 1 }
         }
       case (PT.Array(comp), x @ '[scala.collection.Seq[t]]) =>
         '{ // We're reading only, so whether collection is mutable or not doesn't matter.
           val xs = ${ v.asExprOf[x.Underlying] }
-          var i  = 0; while (i < xs.length) { ${ put(comp, 'i, '{ xs(i) }) }; i += 1 }
+          var i  = 0; while (i < xs.length) { ${ put[t](comp, 'i, '{ xs(i) }) }; i += 1 }
         }
       case (t @ PT.Array(_), illegal) =>
         q.report.errorAndAbort(s"Unsupported type ${t.repr} (${v.show}:${repr.show}) for writing to ByteBuffer.", v)

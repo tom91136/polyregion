@@ -57,14 +57,25 @@ object Simple {
     // val result = OpenCL.devices(0).aot.task[Config[Target.OpenCL_C.type, Opt.O0], Int](42)
 
     // val result = HSA.devices(0).aot.task[Config[Target.AMDGCN.gfx803.type, Opt.O3], Int](42)
+
     // val result = HIP.devices(0).aot.task[Config[Target.AMDGCN.gfx803.type, Opt.O0], Int](42)
 
-    List(1,2,3,0,42,44).foreach{i =>
-      val resultS = Host.aot.task[Config[Target.Host.type, Opt.O0], Double]{ math.tanh(i.toDouble) }
-      val result = Host.aot.task[Config[Target.Host.type, Opt.O0], Double]{ val x = i; x+x }
-      println(s"     R  =$result s=$resultS==${math.tanh(i.toDouble)}")
 
+    val a = 1
+    object M{
+      val x = 1
+      def a = x+1
     }
+
+    val bb = Buffer[Boolean](true)
+
+    Host.aot.task[Config[Target.Host.type, Opt.O0], Double]{ bb(0) = bb(0) && true; 3.0}
+//    List(1,2,3,0,42,44).foreach{i =>
+//      val resultS = Host.aot.task[Config[Target.Host.type, Opt.O0], Double]{ math.tanh(i.toDouble) }
+//      val result = Host.aot.task[Config[Target.Host.type, Opt.O0], Double]{ val x = i; x+x }
+//      println(s"     R  =$result s=$resultS==${math.tanh(i.toDouble)}")
+//
+//    }
 //    Platforms.platforms.close()
 
 

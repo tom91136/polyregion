@@ -72,6 +72,36 @@ TEST_CASE("index prim array", "[compiler]") {
   assertCompilationSucceeded(p);
 }
 
+TEST_CASE("index bool array", "[compiler]") {
+  polyregion::compiler::initialise();
+
+  auto arr = Type::Array(Type::Bool());
+
+  Function fn(Sym({"foo"}), {}, {}, {}, {}, Type::Bool(),
+              {
+                  Var(Named("xs", arr), {Alloc(arr, IntConst(10))}),
+                  Var(Named("x", Type::Bool()), {Index(Select({}, Named("xs", arr)), IntConst(0), Type::Bool())}),
+                  Return(Alias(Select({}, Named("x", Type::Bool())))),
+              });
+  Program p(fn, {}, {});
+  assertCompilationSucceeded(p);
+}
+
+TEST_CASE("index unit array", "[compiler]") {
+  polyregion::compiler::initialise();
+
+  auto arr = Type::Array(Type::Unit());
+
+  Function fn(Sym({"foo"}), {}, {}, {}, {}, Type::Unit(),
+              {
+                  Var(Named("xs", arr), {Alloc(arr, IntConst(10))}),
+                  Var(Named("x", Type::Unit()), {Index(Select({}, Named("xs", arr)), IntConst(0), Type::Unit())}),
+                  Return(Alias(Select({}, Named("x", Type::Unit())))),
+              });
+  Program p(fn, {}, {});
+  assertCompilationSucceeded(p);
+}
+
 TEST_CASE("index struct array member", "[compiler]") {
   polyregion::compiler::initialise();
 
@@ -139,10 +169,21 @@ TEST_CASE("array update struct elem", "[compiler]") {
 
 TEST_CASE("array update unit ", "[compiler]") {
   polyregion::compiler::initialise();
-  Function fn(Sym({"foo"}), {}, {}, {Named("s", Type::Array(Type::Unit()))}, {}, Type::Int(),
+  Function fn(Sym({"foo"}), {}, {}, {Named("s", Type::Array(Type::Unit()))}, {}, Type::Unit(),
               {
                   Update(Select({}, Named("s", Type::Array(Type::Unit()))), IntConst(7), (UnitConst())),
-                  Return(Alias(IntConst(69))),
+                  Return(Alias(UnitConst())),
+              });
+  Program p(fn, {}, {});
+  assertCompilationSucceeded(p);
+}
+
+TEST_CASE("array update bool ", "[compiler]") {
+  polyregion::compiler::initialise();
+  Function fn(Sym({"foo"}), {}, {}, {Named("s", Type::Array(Type::Bool()))}, {}, Type::Unit(),
+              {
+                  Update(Select({}, Named("s", Type::Array(Type::Bool()))), IntConst(7), (BoolConst(true))),
+                  Return(Alias(UnitConst())),
               });
   Program p(fn, {}, {});
   assertCompilationSucceeded(p);
@@ -150,11 +191,47 @@ TEST_CASE("array update unit ", "[compiler]") {
 
 TEST_CASE("array update prim ", "[compiler]") {
   polyregion::compiler::initialise();
-  Function fn(Sym({"foo"}), {}, {}, {Named("s", Type::Array(Type::Int()))}, {}, Type::Int(),
+  Function fn(Sym({"foo"}), {}, {}, {Named("s", Type::Array(Type::Int()))}, {}, Type::Unit(),
               {
                   Update(Select({}, Named("s", Type::Array(Type::Int()))), IntConst(7), (IntConst(42))),
-                  Return(Alias(IntConst(69))),
+                  Return(Alias(UnitConst())),
               });
+  Program p(fn, {}, {});
+  assertCompilationSucceeded(p);
+}
+
+TEST_CASE("array update unit from arg ", "[compiler]") {
+  polyregion::compiler::initialise();
+  Function fn(
+      Sym({"foo"}), {}, {}, {Named("s", Type::Array(Type::Unit())), Named("x", Type::Unit())}, {}, Type::Unit(),
+      {
+          Update(Select({}, Named("s", Type::Array(Type::Unit()))), IntConst(7), Select({}, Named("x", Type::Unit()))),
+          Return(Alias(UnitConst())),
+      });
+  Program p(fn, {}, {});
+  assertCompilationSucceeded(p);
+}
+
+TEST_CASE("array update bool from arg ", "[compiler]") {
+  polyregion::compiler::initialise();
+  Function fn(
+      Sym({"foo"}), {}, {}, {Named("s", Type::Array(Type::Bool())), Named("x", Type::Bool())}, {}, Type::Unit(),
+      {
+          Update(Select({}, Named("s", Type::Array(Type::Bool()))), IntConst(7), Select({}, Named("x", Type::Bool()))),
+          Return(Alias(UnitConst())),
+      });
+  Program p(fn, {}, {});
+  assertCompilationSucceeded(p);
+}
+
+TEST_CASE("array update prim from arg ", "[compiler]") {
+  polyregion::compiler::initialise();
+  Function fn(
+      Sym({"foo"}), {}, {}, {Named("s", Type::Array(Type::Int())), Named("x", Type::Int())}, {}, Type::Unit(),
+      {
+          Update(Select({}, Named("s", Type::Array(Type::Int()))), IntConst(7), Select({}, Named("x", Type::Int()))),
+          Return(Alias(UnitConst())),
+      });
   Program p(fn, {}, {});
   assertCompilationSucceeded(p);
 }
@@ -399,6 +476,38 @@ TEST_CASE("cast fp to int expr", "[compiler]") {
                   Var(Named("d", to), {Cast(Select({}, Named("i", from.tpe)), to)}),
 
                   Return(Alias(Select({}, Named("d", to)))),
+              });
+
+  Program p(fn, {}, {});
+  assertCompilationSucceeded(p);
+}
+
+TEST_CASE("cond", "[compiler]") {
+  polyregion::compiler::initialise();
+
+  Function fn(Sym({"foo"}), {}, {}, {}, {}, Type::Int(),
+              {
+                  Var(Named("out", Type::Int()), {}),
+                  Cond(Alias(BoolConst(true)),                                                   //
+                       {Mut(Select({}, Named("out", Type::Int())), Alias(IntConst(42)), false)}, //
+                       {Mut(Select({}, Named("out", Type::Int())), Alias(IntConst(43)), false)}  //
+                       ),
+
+                  Return(Alias(Select({}, Named("out", Type::Int())))),
+              });
+
+  Program p(fn, {}, {});
+  assertCompilationSucceeded(p);
+}
+
+TEST_CASE("while false", "[compiler]") {
+  polyregion::compiler::initialise();
+
+  Function fn(Sym({"foo"}), {}, {}, {}, {}, Type::Unit(),
+              {
+                  While({}, BoolConst(false), {}),
+
+                  Return(Alias(UnitConst())),
               });
 
   Program p(fn, {}, {});

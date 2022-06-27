@@ -1,5 +1,6 @@
 package polyregion.scala
 
+import cats.kernel.Monoid
 import cats.syntax.all.*
 import polyregion.ast.{PolyAst as p, *}
 
@@ -65,7 +66,7 @@ object Retyper {
             // Skip references to objects as those are singletons and should be identified and lifted by the Remapper.
             if (isModuleClass(tpe.typeSymbol)) {
               None.success
-            } else typer0(tpe).map((_, t) => p.Named(field.name, t)).map(Some(_))
+            } else typer0(tpe).map { case (_ -> t, wit) => p.Named(field.name, t) }.map(Some(_))
           case _ => ???
         })
       )
@@ -138,88 +139,81 @@ object Retyper {
   def clsSymTyper0(using q: Quoted)(clsSym: q.Symbol): Result[p.Type] =
     resolveClsFromSymbol(clsSym).map(liftClsToTpe(_, _, _, _))
 
-  def typer0N(using q: Quoted)(repr: List[q.TypeRepr]): Result[List[(Option[p.Term], p.Type)]] =
-    repr.traverse(typer0(_))
+  def typer0N(using q: Quoted)(repr: List[q.TypeRepr]): Result[(List[q.Retyped], q.ClsWitnesses)] =
+    repr.foldMapM(typer0(_).map((t, c) => (t :: Nil, c)))
 
-  def typer0(using q: Quoted)(repr: q.TypeRepr): Result[(Option[p.Term], p.Type)] =
+  def typer0(using q: Quoted)(repr: q.TypeRepr): Result[(q.Retyped, q.ClsWitnesses)] =
     repr.dealias.widenTermRefByName.simplified match {
-      case ref @ q.TypeRef(_, name) if ref.typeSymbol.isAbstractType => (None, p.Type.Var(name)).success
-      case q.ParamRef(q.PolyType(args, _, _), argIdx)                => (None, p.Type.Var(args(argIdx))).success
-      case q.TypeBounds(_, _)                                        => (None, p.Type.Nothing).success
-      case q.PolyType(vars, _, method @ q.MethodType(_, _, _))       =>
+      case ref @ q.TypeRef(_, name) if ref.typeSymbol.isAbstractType => (None -> p.Type.Var(name), Map.empty).success
+      case q.ParamRef(q.PolyType(args, _, _), argIdx)          => (None -> p.Type.Var(args(argIdx)), Map.empty).success
+      case q.TypeBounds(_, _)                                  => (None -> p.Type.Nothing, Map.empty).success
+      case q.PolyType(vars, _, method @ q.MethodType(_, _, _)) =>
         // this shows up from reference to generic methods
         typer0(method).flatMap {
-          case (term, e @ p.Type.Exec(Nil, args, rtn)) => (term, p.Type.Exec(vars, args, rtn)).success
-          case (_, bad)                                => ???
+          case (term -> (e @ p.Type.Exec(Nil, args, rtn)), wit) => (term -> p.Type.Exec(vars, args, rtn), wit).success
+          case (_ -> bad, wit)                                  => ???
         }
       case poly @ q.PolyType(vars, _, tpe) =>
         // this shows up from reference to generic no-arg methods (i.e. getters)
-        typer0(tpe).flatMap { (term, rtn) =>
-          (term, p.Type.Exec(vars, Nil, rtn)).success
+        typer0(tpe).flatMap { case (term -> rtn, wit) =>
+          (term -> p.Type.Exec(vars, Nil, rtn), wit).success
         }
 
       case m @ q.MethodType(names, args, rtn) =>
         for {
-          (_, rtnTpe) <- typer0(rtn)
-          argTpes     <- args.traverse(typer0(_))
-        } yield (None, p.Type.Exec(Nil, argTpes.map(_._2), rtnTpe))
+          (_ -> rtnTpe, wit0) <- typer0(rtn)
+          (argTpes, wit1)     <- typer0N(args) //  args.traverse(typer0(_))
+        } yield (None -> p.Type.Exec(Nil, argTpes.map(_._2), rtnTpe), wit0 |+| wit1)
       case andOr: q.AndOrType =>
         for {
-          (leftTerm, leftTpe)   <- typer0(andOr.left)
-          (rightTerm, rightTpe) <- typer0(andOr.right)
+          (leftTerm -> leftTpe, leftWit)    <- typer0(andOr.left)
+          (rightTerm -> rightTpe, rightWit) <- typer0(andOr.right)
           term = leftTerm.orElse(rightTerm)
           r <-
-            if (leftTpe == rightTpe) (term, leftTpe).success
+            if (leftTpe == rightTpe) (term -> leftTpe, leftWit |+| rightWit).success
 //            else if(leftTpe == p.Type.Unit || rightTpe == p.Type.Unit) (term, p.Type.Unit).success
             else s"Left type `$leftTpe` and right type `$rightTpe` did not unify for ${andOr.simplified.show}".fail
         } yield r
       case tpe @ q.AppliedType(tpeCtor, args) =>
         for {
-          // type ctors must be a class
-          (name, tpeVars, symbol, kind) <- resolveClsFromTpeRepr(tpeCtor)
-          tpeCtorArgs                   <- args.traverse(typer0(_))
+
+          (name, tpeVars, symbol, kind) <- resolveClsFromTpeRepr(tpeCtor) // type ctors must be a class
+          (tpeCtorArgs, wit)            <- typer0N(args)
 
           // _ = println(s"##### $name $kind $tpeCtorArgs ${tpe <:< q.TypeRepr.typeConstructorOf(classOf[scala.collection.mutable.IndexedSeq[_]]).appliedTo(args) }")
 
-          argAppliedSeqTpe = q.TypeRepr.typeConstructorOf(classOf[scala.collection.mutable.Seq[_]]).appliedTo(args)
+          argAppliedSeqLikeTpe = q.TypeRepr.typeConstructorOf(classOf[scala.collection.mutable.Seq[_]]).appliedTo(args)
 
-        } yield (name, kind, tpeCtorArgs) match {
-          case (Symbols.Array, q.ClassKind.Class, (_, comp: p.Type) :: Nil) => (None, p.Type.Array(comp))
-          // case (Symbols.Buffer, q.ClassKind.Class, (_, comp: p.Type) :: Nil) => (None, p.Type.Array(comp))
-          case (_, q.ClassKind.Class, (_, comp: p.Type) :: Nil) if tpe <:< argAppliedSeqTpe =>
-            (None, p.Type.Array(comp))
-          case (_, _, ys) if tpe.isFunctionType => // FunctionN
-            // TODO make sure this works
-            (
-              None,
-
-//               ys.map(_._2) match {
-//                 case Nil      => ???
-//                 case x :: Nil => q.ErasedFnTpe(Nil, x)
-//                 case xs :+ x  => ???
-// //                TODO fn types don't have named args
-// //                  q.ErasedFnTpe(xs, x)
-//               }
+          retyped <- (name, kind, tpeCtorArgs) match {
+            case (Symbols.Array, q.ClassKind.Class, (_, comp: p.Type) :: Nil) =>
+              (None -> p.Type.Array(comp), wit).success
+            case (_, q.ClassKind.Class, (_, comp: p.Type) :: Nil) if tpe <:< argAppliedSeqLikeTpe =>
+              (None -> p.Type.Array(comp), wit).success
+            case (_, _, ys) if tpe.isFunctionType => // FunctionN
+              // TODO make sure this works
               ???
-            )
-          case (name, kind, ctorArgs) =>
-            // p.Type.Char
-            (None, p.Type.Struct(name, tpeVars, ctorArgs.map(_._2)))
-          // (None, q.ErasedClsTpe(name, symbol, kind, ctorArgs.map(_._2)))
-        }
+            case (name, kind, ctorArgs) =>
+              symbol.tree match {
+                case clsDef: q.ClassDef =>
+                  val appliedTpe: p.Type.Struct = p.Type.Struct(name, tpeVars, ctorArgs.map(_._2))
+                  (None -> appliedTpe, wit |+| Map(clsDef -> Set(appliedTpe))).success
+                case _ => s"$symbol is not a ClassDef".fail
+              }
+          }
+        } yield retyped
       // widen singletons
       case q.ConstantType(x) =>
         (x match {
-          case q.BooleanConstant(v) => (Some(p.Term.BoolConst(v)), p.Type.Bool)
-          case q.ByteConstant(v)    => (Some(p.Term.ByteConst(v)), p.Type.Byte)
-          case q.ShortConstant(v)   => (Some(p.Term.ShortConst(v)), p.Type.Short)
-          case q.IntConstant(v)     => (Some(p.Term.IntConst(v)), p.Type.Int)
-          case q.LongConstant(v)    => (Some(p.Term.LongConst(v)), p.Type.Long)
-          case q.FloatConstant(v)   => (Some(p.Term.FloatConst(v)), p.Type.Float)
-          case q.DoubleConstant(v)  => (Some(p.Term.DoubleConst(v)), p.Type.Double)
-          case q.CharConstant(v)    => (Some(p.Term.CharConst(v)), p.Type.Char)
+          case q.BooleanConstant(v) => (Some(p.Term.BoolConst(v)) -> p.Type.Bool, Map.empty)
+          case q.ByteConstant(v)    => (Some(p.Term.ByteConst(v)) -> p.Type.Byte, Map.empty)
+          case q.ShortConstant(v)   => (Some(p.Term.ShortConst(v)) -> p.Type.Short, Map.empty)
+          case q.IntConstant(v)     => (Some(p.Term.IntConst(v)) -> p.Type.Int, Map.empty)
+          case q.LongConstant(v)    => (Some(p.Term.LongConst(v)) -> p.Type.Long, Map.empty)
+          case q.FloatConstant(v)   => (Some(p.Term.FloatConst(v)) -> p.Type.Float, Map.empty)
+          case q.DoubleConstant(v)  => (Some(p.Term.DoubleConst(v)) -> p.Type.Double, Map.empty)
+          case q.CharConstant(v)    => (Some(p.Term.CharConst(v)) -> p.Type.Char, Map.empty)
           case q.StringConstant(v)  => ???
-          case q.UnitConstant       => (Some(p.Term.UnitConst), p.Type.Unit)
+          case q.UnitConstant       => (Some(p.Term.UnitConst) -> p.Type.Unit, Map.empty)
           case q.NullConstant       => ???
           case q.ClassOfConstant(r) => ???
         }).pure
@@ -228,8 +222,18 @@ object Retyper {
         ???
       case expr =>
         // println(s"[fallthrough typer] ${expr} => ${expr.show} ${expr.getClass}")
+        resolveClsFromTpeRepr(expr).flatMap { (sym, tpeVars, symbol, kind) =>
+          liftClsToTpe(sym, tpeVars, symbol, kind) match {
+            case s @ p.Type.Struct(_, _, _) =>
+              symbol.tree match {
+                case clsDef: q.ClassDef => (None -> s, Map(clsDef -> Set(s))).success
+                case _                  => s"$symbol is not a ClassDef".fail
+              }
+            case tpe => (None -> tpe, Map.empty).success
+          }
 
-        resolveClsFromTpeRepr(expr).map(liftClsToTpe(_, _, _, _)).map((None, _))
+        }
+
     }
 
 }

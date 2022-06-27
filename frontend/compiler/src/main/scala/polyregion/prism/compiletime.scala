@@ -27,8 +27,8 @@ object compiletime {
     (for {
       typeLUT <- witnesses.traverse { (s, m) =>
         for {
-          (_, st) <- Retyper.typer0(s)
-          (_, mt) <- Retyper.typer0(m)
+          (_ -> st, _) <- Retyper.typer0(s)
+          (_ -> mt, _) <- Retyper.typer0(m)
           st <- st match {
             case p.Type.Struct(sym, _, _) => sym.success
             case bad                      => s"source class $s is not a class type, got $bad".fail

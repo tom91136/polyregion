@@ -11,47 +11,54 @@ class LogicSuite extends BaseSuite {
   inline def testExpr[A <: AnyVal: ClassTag](inline r: => A) = if (Toggles.LogicSuite) {
     test(s"${codeOf(r)}=${r}")(assertOffload[A](r))
   }
+
+  // Test both normal and inverse of any expr to weed out any false negatives
+  inline def testExprNormalAndInv(inline r: => Boolean) = {
+    testExpr(r)
+    testExpr(!r)
+  }
+
   {
 
     val a = true
     val b = false
 
-    testExpr(a)
-    testExpr(b)
-    testExpr(a && b)
-    testExpr(a || b)
-    testExpr(a == b)
-    testExpr(a != b)
-    testExpr(!b)
-    testExpr(a && !b)
-    testExpr(a || !b)
-    testExpr(!(!(!b)))
+    testExprNormalAndInv(a)
+    testExprNormalAndInv(b)
+    testExprNormalAndInv(a && b)
+    testExprNormalAndInv(a || b)
+    testExprNormalAndInv(a == b)
+    testExprNormalAndInv(a != b)
+    testExprNormalAndInv(!b)
+    testExprNormalAndInv(a && !b)
+    testExprNormalAndInv(a || !b)
+    testExprNormalAndInv(!(!(!b)))
   }
 
   // delay constant folding
   inline def repr(inline x: Boolean): Boolean = x
 
-  testExpr(repr(true))
-  testExpr(repr(false))
-  testExpr(repr(true) && repr(false))
-  testExpr(repr(true) || repr(false))
-  testExpr(repr(true) == repr(false))
-  testExpr(repr(true) != repr(false))
-  testExpr(!repr(false))
-  testExpr(repr(true) && !repr(false))
-  testExpr(repr(true) || !repr(false))
-  testExpr(!(!(!repr(false))))
+  testExprNormalAndInv(repr(true))
+  testExprNormalAndInv(repr(false))
+  testExprNormalAndInv(repr(true) && repr(false))
+  testExprNormalAndInv(repr(true) || repr(false))
+  testExprNormalAndInv(repr(true) == repr(false))
+  testExprNormalAndInv(repr(true) != repr(false))
+  testExprNormalAndInv(!repr(false))
+  testExprNormalAndInv(repr(true) && !repr(false))
+  testExprNormalAndInv(repr(true) || !repr(false))
+  testExprNormalAndInv(!(!(!repr(false))))
 
   {
 
     val a = 1
     val b = 2
-    testExpr(a > b)
-    testExpr(a >= b)
-    testExpr(a <= b)
-    testExpr(a < b)
-    testExpr(a == b)
-    testExpr(a != b)
+    testExprNormalAndInv(a > b)
+    testExprNormalAndInv(a >= b)
+    testExprNormalAndInv(a <= b)
+    testExprNormalAndInv(a < b)
+    testExprNormalAndInv(a == b)
+    testExprNormalAndInv(a != b)
   }
 
 }

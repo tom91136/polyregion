@@ -264,6 +264,46 @@ std::pair<Named, std::vector<Named>> polyast::uncons(const Term::Select &select)
   }
 }
 
+std::string dsl::dslRepr(const Function &fn) {
+  if (fn.name.fqn.size() != 1) {
+    throw std::logic_error("Name fragments is not supported");
+  }
+
+  auto nameRepr = [](const Named &n) { return "\"" + n.symbol + "\"_(" + repr(n.tpe) + ")"; };
+
+  auto proto =
+      "function(\"" + fn.name.fqn[0] + "\",{" + mk_string<Named>(fn.args, nameRepr, ", ") + "}, " + repr(fn.rtn) + ")";
+
+  auto body = mk_string<Stmt::Any>(
+      fn.body,
+      [&](const Stmt::Any &stmt) {
+        return variants::total(
+            *stmt, //
+            [](const Stmt::Comment &x) { return to_string(x); },
+            [](const Stmt::Var &x) {
+              if (x.expr) return "let(\"" + x.name.symbol + "\") = " + to_string(*(x.expr));
+              else
+                return to_string(x);
+            },
+            [&](const Stmt::Mut &x) {
+              if (x.name.init.empty()) return nameRepr(x.name.last) + " = " + to_string(x.expr);
+              else
+                return to_string(x);
+            },
+            [&](const Stmt::Update &x) {
+              if (x.lhs.init.empty())
+                return nameRepr(x.lhs.last) + "[" + to_string(x.idx) + "] = " + to_string(x.value);
+              else
+                return to_string(x);
+            },
+            [](const Stmt::While &x) { return to_string(x); }, [](const Stmt::Break &x) { return to_string(x); },
+            [](const Stmt::Cont &x) { return to_string(x); }, [](const Stmt::Cond &x) { return to_string(x); },
+            [](const Stmt::Return &x) { return to_string(x); });
+      },
+      ",\n");
+  return proto + "({" + body + "})";
+}
+
 Type::Array dsl::Array(Type::Any t) { return Tpe::Array(t); }
 Type::Struct dsl::Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args) {
   return {name, tpeVars, args};
@@ -309,9 +349,7 @@ std::function<Term::Any(Type::Any)> dsl::operator""_(long double x) {
 }
 
 Stmt::Any dsl::let(const string &name, const Type::Any &tpe) { return Var(Named(name, tpe), {}); }
-dsl::AssignmentBuilder<Stmt::Any, Expr::Any> dsl::let(const string &name) {
-  return {[=](auto &&rhs) { return Var(Named(name, tpe(rhs)), {rhs}); }};
-}
+dsl::AssignmentBuilder dsl::let(const string &name) { return AssignmentBuilder{name}; }
 Expr::BinaryIntrinsic dsl::invoke(const BinaryIntrinsicKind::Any &kind, const Term::Any &lhs, const Term::Any &rhs,
                                   const Type::Any &rtn) {
   return {lhs, rhs, kind, rtn};
@@ -328,10 +366,10 @@ Stmt::Return dsl::ret(const Expr::Any &expr) { return Return(expr); }
 Program dsl::program(Function entry, std::vector<Function> functions, std::vector<StructDef> defs) {
   return Program(entry, functions, defs);
 }
-dsl::IndexBuilder::IndexBuilder(Expr::Index index) : index(std::move(index)) {}
+dsl::IndexBuilder::IndexBuilder(const Expr::Index &index) : index(index) {}
 dsl::IndexBuilder::operator const Expr::Any() const { return index; }
 Stmt::Update dsl::IndexBuilder::operator=(const Term::Any &term) const { return {index.lhs, index.idx, term}; }
-dsl::NamedBuilder::NamedBuilder(Named named) : named(std::move(named)) {}
+dsl::NamedBuilder::NamedBuilder(const Named &named) : named(named) {}
 dsl::NamedBuilder::operator const Term::Any() const { return Select({}, named); }
 dsl::NamedBuilder::operator const Named() const { return named; }
 dsl::IndexBuilder dsl::NamedBuilder::operator[](const Term::Any &idx) const {
@@ -341,3 +379,7 @@ dsl::IndexBuilder dsl::NamedBuilder::operator[](const Term::Any &idx) const {
     throw std::logic_error("Cannot index a reference to non-array type" + to_string(named));
   }
 }
+
+dsl::AssignmentBuilder::AssignmentBuilder(const std::string &name) : name(name) {}
+Stmt::Any dsl::AssignmentBuilder::operator=(Expr::Any rhs) const { return Var(Named(name, tpe(rhs)), {rhs}); }
+Stmt::Any dsl::AssignmentBuilder::operator=(Term::Any rhs) const { return Var(Named(name, tpe(rhs)), {Alias(rhs)}); }

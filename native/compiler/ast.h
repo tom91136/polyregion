@@ -2,10 +2,11 @@
 
 #include "generated/polyast.h"
 #include "variants.hpp"
-#include <ostream>
-#include <utility>
-#include <unordered_map>
 #include <optional>
+#include <ostream>
+#include <unordered_map>
+#include <utility>
+
 namespace polyregion::polyast {
 
 template <typename T> using Opt = std::optional<T>;
@@ -52,24 +53,28 @@ const static Tpe::Unit Unit = Tpe::Unit();
 const static Tpe::Nothing Nothing = Tpe::Nothing();
 const static Tpe::String String = Tpe::String();
 
+std::string dslRepr(const Function &fn);
+
 Tpe::Array Array(Tpe::Any t);
 Tpe::Struct Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args);
 
-template <typename T, typename U> struct AssignmentBuilder {
-  std::function<T(U)> f;
-  T operator=(U u) const { return f(u); }; // NOLINT(misc-unconventional-assign-operator)
+struct AssignmentBuilder {
+  std::string name;
+  explicit AssignmentBuilder(const std::string &name);
+  Stmt::Any operator=(Expr::Any u) const; // NOLINT(misc-unconventional-assign-operator)
+  Stmt::Any operator=(Term::Any u) const; // NOLINT(misc-unconventional-assign-operator)
 };
 
 struct IndexBuilder {
   Index index;
-  explicit IndexBuilder(Index index);
+  explicit IndexBuilder(const Index &index);
   operator const Expr::Any() const; // NOLINT(google-explicit-constructor)
   Update operator=(const Term::Any &term) const;
 };
 
 struct NamedBuilder {
   Named named;
-  explicit NamedBuilder(Named named);
+  explicit NamedBuilder(const Named &named);
   operator const Term::Any() const; // NOLINT(google-explicit-constructor)
   operator const Named() const;     // NOLINT(google-explicit-constructor)
   IndexBuilder operator[](const Term::Any &idx) const;
@@ -80,7 +85,7 @@ std::function<Term::Any(Type::Any)> operator"" _(long double x);
 std::function<Term::Any(Type::Any)> operator"" _(unsigned long long int x);
 
 Stmt::Any let(const std::string &name, const Type::Any &tpe);
-AssignmentBuilder<Stmt::Any, Expr::Any> let(const std::string &name);
+AssignmentBuilder let(const std::string &name);
 BinaryIntrinsic invoke(const BinaryIntrinsicKind::Any &kind, const Term::Any &lhs, const Term::Any &rhs,
                        const Type::Any &rtn);
 

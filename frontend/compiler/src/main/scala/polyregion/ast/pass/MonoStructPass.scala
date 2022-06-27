@@ -3,9 +3,9 @@ package polyregion.ast.pass
 import cats.syntax.all.*
 import polyregion.ast.{PolyAst as p, *}
 
-object MonoStructPass {
+object MonoStructPass extends ProgramPass {
 
-  def run(program: p.Program)(log: Log): (p.Program, Log) = {
+  override def apply(program: p.Program, log: Log): (p.Program, Log) = {
 
     val structInSignature =
       (program.entry.receiver.toList ::: program.entry.captures ::: program.entry.args).map(_.tpe).collect {

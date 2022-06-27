@@ -58,7 +58,7 @@ object Buffer {
       }
 
     override def equals(other: Any): Boolean = other match {
-      case that: DoubleBuffer => super.equals(that) && that.canEqual(this) && id == that.id
+      case that: FloatBuffer => super.equals(that) && that.canEqual(this) && id == that.id
       case _                  => false
     }
     override def hashCode(): Int = Objects.hashCode(id)
@@ -78,7 +78,7 @@ object Buffer {
       }
 
     override def equals(other: Any): Boolean = other match {
-      case that: DoubleBuffer => super.equals(that) && that.canEqual(this) && id == that.id
+      case that: LongBuffer => super.equals(that) && that.canEqual(this) && id == that.id
       case _                  => false
     }
     override def hashCode(): Int = Objects.hashCode(id)
@@ -118,7 +118,7 @@ object Buffer {
         xs
       }
     override def equals(other: Any): Boolean = other match {
-      case that: DoubleBuffer => super.equals(that) && that.canEqual(this) && id == that.id
+      case that: ShortBuffer => super.equals(that) && that.canEqual(this) && id == that.id
       case _                  => false
     }
     override def hashCode(): Int = Objects.hashCode(id)
@@ -138,7 +138,7 @@ object Buffer {
         xs
       }
     override def equals(other: Any): Boolean = other match {
-      case that: DoubleBuffer => super.equals(that) && that.canEqual(this) && id == that.id
+      case that: ByteBuffer => super.equals(that) && that.canEqual(this) && id == that.id
       case _                  => false
     }
     override def hashCode(): Int = Objects.hashCode(id)
@@ -158,7 +158,7 @@ object Buffer {
         xs
       }
     override def equals(other: Any): Boolean = other match {
-      case that: DoubleBuffer => super.equals(that) && that.canEqual(this) && id == that.id
+      case that: CharBuffer => super.equals(that) && that.canEqual(this) && id == that.id
       case _                  => false
     }
     override def hashCode(): Int = Objects.hashCode(id)
@@ -177,6 +177,11 @@ object Buffer {
       this
     }
     override def copyToArray: Array[Boolean] = this.toArray
+    override def equals(other: Any): Boolean = other match {
+      case that: BoolBuffer => super.equals(that) && that.canEqual(this) && id == that.id
+      case _                  => false
+    }
+    override def hashCode(): Int = Objects.hashCode(id)
   }
 
   class UnitBuffer(val backingBuffer: nio.ByteBuffer, val buffer: nio.ByteBuffer, val id: Long) extends Buffer[Unit] {
@@ -192,7 +197,7 @@ object Buffer {
     }
     override def copyToArray: Array[Unit] = this.toArray
     override def equals(other: Any): Boolean = other match {
-      case that: DoubleBuffer => super.equals(that) && that.canEqual(this) && id == that.id
+      case that: UnitBuffer => super.equals(that) && that.canEqual(this) && id == that.id
       case _                  => false
     }
     override def hashCode(): Int = Objects.hashCode(id)
@@ -213,7 +218,7 @@ object Buffer {
     }
     override def copyToArray: Array[A] = ???
     override def equals(other: Any): Boolean = other match {
-      case that: DoubleBuffer => super.equals(that) && that.canEqual(this) && id == that.id
+      case that: StructBuffer[_] => super.equals(that) && that.canEqual(this) && id == that.id
       case _                  => false
     }
     override def hashCode(): Int = Objects.hashCode(id)

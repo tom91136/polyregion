@@ -67,20 +67,20 @@ Pair<llvm::StructType *, LLVM::AstTransformer::StructMemberTable> LLVM::AstTrans
   return {llvm::StructType::create(C, types, qualified(def.name)), table};
 }
 
-llvm::Type *LLVM::AstTransformer::mkTpe(const Type::Any &tpe, unsigned AS) {                 //
-  return variants::total(                                                                    //
-      *tpe,                                                                                  //
-      [&](const Type::Float &x) -> llvm::Type * { return llvm::Type::getFloatTy(C); },       //
-      [&](const Type::Double &x) -> llvm::Type * { return llvm::Type::getDoubleTy(C); },     //
-      [&](const Type::Bool &x) -> llvm::Type * { return llvm::Type::getInt1Ty(C); },         //
-      [&](const Type::Byte &x) -> llvm::Type * { return llvm::Type::getInt8Ty(C); },         //
-      [&](const Type::Char &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },        //
-      [&](const Type::Short &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },       //
-      [&](const Type::Int &x) -> llvm::Type * { return llvm::Type::getInt32Ty(C); },         //
-      [&](const Type::Long &x) -> llvm::Type * { return llvm::Type::getInt64Ty(C); },        //
-      [&](const Type::String &x) -> llvm::Type * { return undefined(__FILE__, __LINE__); },  //
-      [&](const Type::Unit &x) -> llvm::Type * { return llvm::Type::getInt8Ty(C); },         //
-      [&](const Type::Nothing &x) -> llvm::Type * { return undefined(__FILE__, __LINE__); }, //
+llvm::Type *LLVM::AstTransformer::mkTpe(const Type::Any &tpe, unsigned AS, bool functionBoundary) {               //
+  return variants::total(                                                                                         //
+      *tpe,                                                                                                       //
+      [&](const Type::Float &x) -> llvm::Type * { return llvm::Type::getFloatTy(C); },                            //
+      [&](const Type::Double &x) -> llvm::Type * { return llvm::Type::getDoubleTy(C); },                          //
+      [&](const Type::Bool &x) -> llvm::Type * { return llvm::Type::getIntNTy(C, functionBoundary ? 8 : 1); }, //
+      [&](const Type::Byte &x) -> llvm::Type * { return llvm::Type::getInt8Ty(C); },                              //
+      [&](const Type::Char &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },                             //
+      [&](const Type::Short &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },                            //
+      [&](const Type::Int &x) -> llvm::Type * { return llvm::Type::getInt32Ty(C); },                              //
+      [&](const Type::Long &x) -> llvm::Type * { return llvm::Type::getInt64Ty(C); },                             //
+      [&](const Type::String &x) -> llvm::Type * { return undefined(__FILE__, __LINE__); },                       //
+      [&](const Type::Unit &x) -> llvm::Type * { return llvm::Type::getIntNTy(C, functionBoundary ? 8 : 1); },    //
+      [&](const Type::Nothing &x) -> llvm::Type * { return undefined(__FILE__, __LINE__); },                      //
       [&](const Type::Struct &x) -> llvm::Type * {
         if (auto def = polyregion::get_opt(structTypes, x.name); def) {
           return def->first->getPointerTo(AS);
@@ -95,8 +95,13 @@ llvm::Type *LLVM::AstTransformer::mkTpe(const Type::Any &tpe, unsigned AS) {    
         }
       }, //
       [&](const Type::Array &x) -> llvm::Type * {
-        auto comp = mkTpe(x.component);
-        return comp->isPointerTy() ? comp : comp->getPointerTo(AS);
+        // These two types promote to a byte when stored in an array
+        if (holds<Type::Bool>(x.component) || holds<Type::Unit>(x.component)) {
+          return llvm::Type::getInt8Ty(C)->getPointerTo(AS);
+        } else {
+          auto comp = mkTpe(x.component);
+          return comp->isPointerTy() ? comp : comp->getPointerTo(AS);
+        }
       },                                                                                             //
       [&](const Type::Var &x) -> llvm::Type * { return undefined(__FILE__, __LINE__, "type var"); }, //
       [&](const Type::Exec &x) -> llvm::Type * { return undefined(__FILE__, __LINE__, "exec"); }
@@ -176,8 +181,8 @@ llvm::Value *LLVM::AstTransformer::mkTermVal(const Term::Any &ref) {
   return variants::total(
       *ref, //
       [&](const Term::Select &x) -> llvm::Value * { return load(B, mkSelectPtr(x)); },
-      [&](const Term::UnitConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt8Ty(C), 0); },
-      [&](const Term::BoolConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt8Ty(C), x.value); },
+      [&](const Term::UnitConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt1Ty(C), 0); },
+      [&](const Term::BoolConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt1Ty(C), x.value); },
       [&](const Term::ByteConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt8Ty(C), x.value); },
       [&](const Term::CharConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt16Ty(C), x.value); },
       [&](const Term::ShortConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt16Ty(C), x.value); },
@@ -703,13 +708,16 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
       },
       [&](const Expr::Index &x) -> ValPtr {
         if (auto arrTpe = get_opt<Type::Array>(x.lhs.tpe); arrTpe) {
-          auto ty = mkTpe(arrTpe->component);
+          auto ty = mkTpe(*arrTpe )->getPointerElementType();
 
           auto ptr = B.CreateInBoundsGEP(ty->isPointerTy() ? ty->getPointerElementType() : ty, //
                                          mkTermVal(x.lhs),                                     //
                                          mkTermVal(x.idx), key + "_ptr");
           if (holds<TypeKind::Ref>(kind(arrTpe->component))) {
             return ptr;
+          } else if (holds<Type::Bool>(arrTpe->component) || holds<Type::Unit>(arrTpe->component)) {
+            // Narrow from i8 to i1
+            return B.CreateICmpNE(load(B, ptr), llvm::ConstantInt::get(llvm::Type::getInt8Ty(C), 0, true));
           } else {
             return load(B, ptr);
           }
@@ -735,6 +743,15 @@ llvm::Value *LLVM::AstTransformer::conditionalLoad(llvm::Value *rhs) {
 }
 
 LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<WhileCtx> whileCtx = {}) {
+
+  //  // XXX bool is i8 where non-zero values are true,
+  //  //   `br` only takes i1 as the first arg, so we do the appropriate comparison now
+  //  auto boolToi8 = [&](llvm::Value *cond) {
+  //    return cond->getType()->isIntegerTy(1)
+  //               ? cond // as-is if we're already i1
+  //               : B.CreateICmpNE(cond, llvm::ConstantInt::get(llvm::Type::getInt8Ty(C), 0, true));
+  //  };
+
   return variants::total(
       *stmt,
       [&](const Stmt::Comment &x) -> BlockKind { // discard comments
@@ -839,6 +856,10 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
 
             if (holds<Type::Struct>(tpe(x.value))) {
               B.CreateStore(load(B, mkTermVal(x.value)), ptr);
+            } else if (holds<Type::Bool>(tpe(x.value)) || holds<Type::Unit>(tpe(x.value))) {
+              // Extend from i1 to i8
+              auto b = mkTermVal(x.value);
+              B.CreateStore(B.CreateIntCast(b, llvm::Type::getInt8Ty(C), true), ptr);
             } else {
               B.CreateStore(mkTermVal(x.value), ptr);
             }
@@ -863,7 +884,7 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
             kind = mkStmt(test, fn, {ctx});
           if (kind != BlockKind::Terminal) {
             auto continue_ = mkTermVal(x.cond);
-            B.CreateCondBr((continue_), loopBody, loopExit);
+            B.CreateCondBr(continue_, loopBody, loopExit);
           }
         }
         {
@@ -896,7 +917,7 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
         auto condTrue = llvm::BasicBlock::Create(C, "cond_true", fn);
         auto condFalse = llvm::BasicBlock::Create(C, "cond_false", fn);
         auto condExit = llvm::BasicBlock::Create(C, "cond_exit", fn);
-        B.CreateCondBr((mkExprVal(x.cond, fn, "cond")), condTrue, condFalse);
+        B.CreateCondBr(mkExprVal(x.cond, fn, "cond"), condTrue, condFalse);
         {
           B.SetInsertPoint(condTrue);
           auto kind = BlockKind::Normal;
@@ -918,12 +939,12 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
         auto rtnTpe = tpe(x.value);
         if (holds<Type::Unit>(rtnTpe)) {
           B.CreateRetVoid();
+        } else if (holds<Type::Bool>(rtnTpe)) {
+          // Extend from i1 to i8
+          auto b = mkExprVal(x.value, fn, "return");
+          B.CreateRet(B.CreateIntCast(b, llvm::Type::getInt8Ty(C), true));
         } else {
-          if (holds<TypeKind::Ref>(kind(rtnTpe))) {
-            B.CreateRet(((mkExprVal(x.value, fn, "return"))));
-          } else {
-            B.CreateRet((mkExprVal(x.value, fn, "return")));
-          }
+          B.CreateRet(mkExprVal(x.value, fn, "return"));
         }
         return BlockKind::Terminal;
       } //
@@ -976,11 +997,12 @@ Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform(const std::u
   allArgs.insert(allArgs.begin(), fnTree.args.begin(), fnTree.args.end());
   allArgs.insert(allArgs.begin(), fnTree.captures.begin(), fnTree.captures.end());
 
-  auto paramTpes = map_vec<Named, llvm::Type *>(allArgs, [&](auto &&named) { return mkTpe(named.tpe, GlobalAS); });
+  auto paramTpes =
+      map_vec<Named, llvm::Type *>(allArgs, [&](auto &&named) { return mkTpe(named.tpe, GlobalAS, true); });
 
   // Unit type at function return type position is void
   // Any other location, Unit is a singleton value
-  auto rtnTpe = holds<Type::Unit>(fnTree.rtn) ? llvm::Type::getVoidTy(C) : mkTpe(fnTree.rtn);
+  auto rtnTpe = holds<Type::Unit>(fnTree.rtn) ? llvm::Type::getVoidTy(C) : mkTpe(fnTree.rtn, 0, true);
 
   auto fnTpe = llvm::FunctionType::get(rtnTpe, {paramTpes}, false);
 
@@ -1013,8 +1035,13 @@ Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform(const std::u
       std::inserter(stackVarPtrs, stackVarPtrs.end()), //
       [&](auto &arg, const auto &named) -> Pair<std::string, Pair<Type::Any, llvm::Value *>> {
         arg.setName(named.symbol);
+
+        auto argValue = holds<Type::Bool>(named.tpe) || holds<Type::Unit>(named.tpe)
+                            ? B.CreateICmpNE(&arg, llvm::ConstantInt::get(llvm::Type::getInt8Ty(C), 0, true))
+                            : &arg;
+
         auto stack = B.CreateAlloca(mkTpe(named.tpe, GlobalAS), AllocaAS, nullptr, named.symbol + "_stack_ptr");
-        B.CreateStore(&arg, stack);
+        B.CreateStore(argValue, stack);
         return {named.symbol, {named.tpe, stack}};
       });
 

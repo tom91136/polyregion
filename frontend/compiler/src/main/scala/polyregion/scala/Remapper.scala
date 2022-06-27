@@ -8,8 +8,6 @@ import scala.annotation.tailrec
 
 object Remapper {
 
-  import Retyper.{clsSymTyper0, typer0, typer0N}
-
   private def fullyApplyGenExec(exec: p.Type.Exec, tpeArgs: List[p.Type]): p.Type.Exec = {
     val tpeTable = exec.tpeVars.zip(tpeArgs).toMap
     def resolve(t: p.Type) = t.map {
@@ -30,29 +28,18 @@ object Remapper {
     case x                      => x
   }
 
-  def ownersList(using q: Quoted)(sym: q.Symbol): LazyList[q.Symbol] =
+  private def ownersList(using q: Quoted)(sym: q.Symbol): LazyList[q.Symbol] =
     LazyList.unfold(sym.maybeOwner)(s => if (s.isNoSymbol) None else Some(s, s.maybeOwner))
 
-  def owningClassSymbol(using q: Quoted)(sym: q.Symbol): Option[q.Symbol] = ownersList(sym).find(_.isClassDef)
-
-  def selectObject(using q: Quoted)(objectSymbol: q.Symbol): q.Ref = {
-    if (!objectSymbol.flags.is(q.Flags.Module)) {
-      q.report.error(s"Cannot select Ref from non-object type: ${objectSymbol}")
-    }
-    println(
-      s"chain ${objectSymbol} ${objectSymbol.companionModule} = ${ownersList(objectSymbol.companionModule).toList}"
-    )
-
-    //  def removeThisRef(r : q.Ref) =
-    //    r match {
-    //      case q.Select(q.This(x), y) => q.Select(removeThisRef(x), y)
-    //      case x => x
-    //    }
-
-    q.Ref.apply(objectSymbol.companionModule)
-  }
+  private def owningClassSymbol(using q: Quoted)(sym: q.Symbol): Option[q.Symbol] = ownersList(sym).find(_.isClassDef)
 
   extension (using q: Quoted)(c: q.RemapContext) {
+
+    private def typerAndWitness(repr: q.TypeRepr): Result[(q.Retyped, q.RemapContext)] =
+      Retyper.typer0(repr).map((x, wit) => (x, c.updateDeps(d => d.copy(classes = d.classes |+| wit))))
+
+    private def typerNAndWitness(reprs: List[q.TypeRepr]): Result[(List[(q.Retyped)], q.RemapContext)] =
+      Retyper.typer0N(reprs).map((xs, wit) => (xs, c.updateDeps(d => d.copy(classes = d.classes |+| wit))))
 
     def mapTrees(args: List[q.Tree]): Result[(p.Term, q.RemapContext)] = args match {
       case Nil => (p.Term.UnitConst, c).pure
@@ -67,7 +54,7 @@ object Remapper {
     def mapTree(tree: q.Tree): Result[(p.Term, q.RemapContext)] = tree match {
       case q.ValDef(name, tpeTree, Some(rhs)) =>
         for {
-          (term, tpe) <- typer0(tpeTree.tpe)
+          (term -> tpe, c) <- c.typerAndWitness(tpeTree.tpe)
           // if tpe is singleton, substitute with constant directly
           (ref, c) <- term.fold((c !! tree).mapTerm(rhs))(x => (x, c).success)
           // term
@@ -111,7 +98,7 @@ object Remapper {
         // For primary ctors, we synthesise the assignment of ctor args to the corresponding fields
         val ctorArgs = fn.termParamss.flatMap(_.params)
         for {
-          ctorArgTpes <- typer0N(ctorArgs.map(_.tpt.tpe)).map(_.map(_._2))
+          (ctorArgTpes, c) <- c.typerNAndWitness(ctorArgs.map(_.tpt.tpe))
           fieldNames = ctorArgs.map(_.name) // args in primary ctor are fields
 
           // Make sure we're requested a struct type here, the class may have generic types so we create a LUT of
@@ -156,9 +143,9 @@ object Remapper {
         ref: q.Ref,
         tpeArgs: List[p.Type],
         termArgss: List[List[p.Term]]
-    ): Result[(p.Term, q.RemapContext)] = typer0(ref.tpe).flatMap {
-      case (Some(term), tpe) => (term, c).success
-      case (None, tpe0)      =>
+    ): Result[(p.Term, q.RemapContext)] = c.typerAndWitness(ref.tpe).flatMap {
+      case (Some(term) -> tpe, c) => (term, c).success
+      case (None -> tpe0, c)      =>
         // Apply any unresolved type vars first.
         val tpe = tpe0 match {
           case exec: p.Type.Exec => fullyApplyGenExec(exec, tpeArgs)
@@ -167,22 +154,11 @@ object Remapper {
 
         println(s"[mapRef0] tpe=${tpe.repr} ${ref.symbol.fullName}=${ref.symbol.flags.show} ")
 
-        def witnessClassTpe(c: q.RemapContext)(sym: q.Symbol, tpe: p.Type) =
-          if (sym.isPackageDef) c.success
-          else {
-            (sym.tree, tpe) match {
-              case (cls: q.ClassDef, s @ p.Type.Struct(_, _, _)) =>
-                c.updateDeps(_.witness(cls, s)).success
-              case (x, s) =>
-                c.success
-            }
-          }
-
         // Call no-arg functions (i.e. `x.toDouble` or just `def fn = ???; fn` ) directly or pass-through if not no-arg
         def invokeOrSelect(
             c: q.RemapContext
         )(sym: q.Symbol, receiver: Option[p.Term])(select: => Result[p.Term.Select]) = sym.tree match {
-          case fn: q.DefDef => // `sym.$fn`
+          case fn: q.DefDef => // `receiver?.$fn`
             // Assert that the term list matches Exec's nested (recursive) types.
             // Note that Exec treats both empty args `()` and no-args as `Nil` where as the collected arg lists through
             // `Apply` will give empty args as `Nil` and not collect no-args at all because no no application took place.
@@ -199,14 +175,11 @@ object Remapper {
                   ??? // TODO raise failure
               }
               rtnTpe = resolveExecRtnTpe(tpe)
-              c   <- witnessClassTpe(c)(sym.maybeOwner, rtnTpe) // TODO this won't work right?
               ivk <- c.mkInvoke(fn, tpeArgs, receiver, termArgss.flatten, rtnTpe)
             } yield ivk
-          case _ => // sym.$select
-            for {
-              s <- select
-              c <- witnessClassTpe(c)(sym.maybeOwner, s.tpe)
-            } yield (s -> c)
+          case local: q.ValDef => // sym.$local
+            for (s <- select) yield s -> c
+          case illegal => s"unexpected invoke/select receiver ${illegal}".fail
         }
 
         // We handle any reference to arbitrarily nested objects/modules (including direct ident with no nesting, as produced by `inline` calls)
@@ -218,7 +191,7 @@ object Remapper {
           case Nil => None // not nested
           case xs @ (owner :: _) => // owner would be the closes symbol to ref.symbol here
             Some(for {
-              tpe <- clsSymTyper0(owner)
+              tpe <- Retyper.clsSymTyper0(owner)
               (term, c) <- tpe match {
                 case s @ p.Type.Struct(rootName, Nil, Nil) =>
                   for {
@@ -238,10 +211,10 @@ object Remapper {
             } yield (term, c))
         }
 
-        // When an ref is owned by a class/object (i.e. `c.root`), we add an implicit `this` reference.
+        // When a ref is owned by a class/object (i.e. `c.root`), we add an implicit `this` reference.
         def handleThisRef(ref: q.Ref, named: p.Named) = if (owningClassSymbol(c.root).contains(ref.symbol.maybeOwner)) {
           Some(for {
-            tpe <- clsSymTyper0(ref.symbol.owner) // TODO what about generics???
+            tpe <- Retyper.clsSymTyper0(ref.symbol.owner) // TODO what about generics???
             cls = p.Named("this", tpe)
             // c1 = c.updateDeps(_.witness(ref.tpe.typeSymbol, tpe.asInstanceOf[p.Type.Struct]))
             // c1 = c
@@ -321,14 +294,6 @@ object Remapper {
           }
     }
 
-    // def witnessTpe(tpe: q.TypeRepr) = (tpe.classSymbol) match {
-    //   case Some(clsSym) if !clsSym.isNoSymbol =>
-    //     println(s" D=${clsSym.tree}")
-    //   // c.updateDeps(_.witness())
-    //   case bad =>
-    //     println(s" D=${bad}")
-    // }
-
     def mapTerm(
         term: q.Term,
         tpeArgs: List[p.Type] = Nil,
@@ -340,8 +305,8 @@ object Remapper {
         case (Nil, Nil, q.Typed(x, _))         => (c !! term).mapTerm(x)   // type ascription: `value : T`
         case (Nil, Nil, q.Inlined(call, bindings, expansion)) => // inlined DefDef
           for {
-            // for non-inlined args, bindings will contain all relevant arguments with rhs
-            // TODO I think call is safe to ignore here? It looks like a subtree from the expansion
+            // For non-inlined args, bindings will contain all relevant arguments with rhs.
+            // TODO I think call is safe to ignore here? It looks like a subtree from the expansion...
             (_, c) <- (c !! term).mapTrees(bindings)
             (v, c) <- (c !! term).mapTerm(expansion)
           } yield (v, c)
@@ -354,21 +319,24 @@ object Remapper {
         case (Nil, Nil, q.Literal(q.ByteConstant(v)))    => (p.Term.ByteConst(v), c !! term).pure
         case (Nil, Nil, q.Literal(q.CharConstant(v)))    => (p.Term.CharConst(v), c !! term).pure
         case (Nil, Nil, q.Literal(q.UnitConstant()))     => (p.Term.UnitConst, c !! term).pure
-        case (Nil, Nil, q.This(_)) => // reference to the current class: `this.???`
-          typer0(term.tpe).flatMap {
-            case (None, s @ p.Type.Struct(_, _, _)) =>
+        case (Nil, Nil, q.This(_))                       => // reference to the current class: `this.???`
+          // XXX Don't use typerAndWitness here, we need to record the witnessing of `this` separately.
+          c.typerAndWitness(term.tpe).flatMap {
+            case (None -> (s @ p.Type.Struct(_, _, _)), c) =>
+              // There may be more than one
               term.tpe.classSymbol.map(_.tree) match {
-                case Some(clsDef: q.ClassDef) => c.bindThis(clsDef, s).map((p.Term.Select(Nil, p.Named("this", s)), _))
-                case Some(bad)                => s"`this` type symbol points to a non-ClassDef tree: $bad".fail
-                case None                     => "`this` does not contain a class symbol".fail
+                case Some(clsDef: q.ClassDef) =>
+                  c.bindThis(clsDef, s).map((p.Term.Select(Nil, p.Named("this", s)), _))
+                case Some(bad) => s"`this` type symbol points to a non-ClassDef tree: $bad".fail
+                case None      => "`this` does not contain a class symbol".fail
               }
-            case (Some(value), tpe) => "`this` isn't supposed to have a value".fail /*(value, c).success*/
-            case (None, illegal)    => "`this` isn't typed as a struct type".fail
+            case (Some(value) -> tpe, _) => "`this` isn't supposed to have a value".fail /*(value, c).success*/
+            case (None -> illegal, _)    => "`this` isn't typed as a struct type".fail
           }
         case (Nil, termArgss, q.TypeApply(term, args)) => // *single* application of some types: `$term[$args...]`
           println(s"[mapper] tpeAp = `${term.show}`")
           for {
-            (args)    <- typer0N(args.map(_.tpe))
+            (args, c) <- c.typerNAndWitness(args.map(_.tpe))
             (term, c) <- c.mapTerm(term, tpeArgs = args.map(_._2), termArgss = termArgss)
           } yield (term, c)
         case (tpeArgs, termArgs, r: q.Ref) =>
@@ -376,12 +344,18 @@ object Remapper {
             s"[mapper] ref = `${r}` termArgs={${termArgs.flatten.map(_.repr).mkString(",")}} tpeArgs=<${tpeArgs.map(_.repr).mkString(",")}>"
           )
           (c.refs.get(r.symbol)) match {
-            case Some(term) => (term, (c !! r)).success
-            case None       => (c !! r).mapRef0(r, tpeArgs, termArgs)
+            case Some(term) =>
+              c.typerAndWitness(r.tpe).flatMap { case (_ -> tpe, c) =>
+                println("~~~ " + tpe)
+
+                if (term.tpe != tpe) s"Ref type mismatch (${term.tpe} != $tpe)".fail
+                else (term, (c !! r)).success
+              }
+            case None => (c !! r).mapRef0(r, tpeArgs, termArgs)
           }
         case (Nil, Nil, q.New(tpt)) => // new instance *without* arg application: `new $tpt`
           println(s"[mapper] new = `${term.show}`")
-          typer0(tpt.tpe).map { (_, tpe) =>
+          c.typerAndWitness(tpt.tpe).map { case (_ -> tpe, c) =>
             val name = c.named(tpe)
             (p.Term.Select(Nil, name), (c !! term) ::= p.Stmt.Var(name, None))
           }
@@ -411,7 +385,7 @@ object Remapper {
           } yield r
         case (Nil, Nil, q.If(cond, thenTerm, elseTerm)) => // conditional: `if($cond) then $thenTerm else $elseTerm`
           for {
-            (_, tpe)            <- typer0(term.tpe) // TODO just return the value if result is known at type level
+            (_ -> tpe, c)       <- c.typerAndWitness(term.tpe) // TODO  return term value if already known at type-level
             (condTerm, ifCtx)   <- c.down(term).mapTerm(cond)
             (thenTerm, thenCtx) <- ifCtx.noStmts.mapTerm(thenTerm)
             (elseTerm, elseCtx) <- thenCtx.noStmts.mapTerm(elseTerm)

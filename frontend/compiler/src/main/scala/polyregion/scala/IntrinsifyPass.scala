@@ -95,7 +95,7 @@ object IntrinsifyPass {
                 case "gpuGroupBarrier" => p.NullaryIntrinsicKind.GpuGroupBarrier
                 case "gpuGroupFence"   => p.NullaryIntrinsicKind.GpuGroupFence
               }
-              p.Expr.NullaryIntrinsic(  kind, rtn)
+              p.Expr.NullaryIntrinsic(kind, rtn)
             case x :: Nil =>
               val kind = op match {
                 case "sin"  => p.UnaryIntrinsicKind.Sin
@@ -137,7 +137,7 @@ object IntrinsifyPass {
               p.Expr.BinaryIntrinsic(x, y, kind, rtn)
           }
           (expr, Nil, inv :: Nil)
-        case (op :: Nil, x, y :: Nil) if x.tpe == p.Type.Bool && y.tpe == p.Type.Bool && rtn == p.Type.Bool =>
+        case (_ :+ op, x, y :: Nil) if x.tpe == p.Type.Bool && y.tpe == p.Type.Bool && rtn == p.Type.Bool =>
           val (expr, stmts) = op match {
             case "&&" => (p.Expr.BinaryIntrinsic(x, y, p.BinaryIntrinsicKind.LogicAnd, p.Type.Bool), Nil)
             case "||" => (p.Expr.BinaryIntrinsic(x, y, p.BinaryIntrinsicKind.LogicOr, p.Type.Bool), Nil)
@@ -164,6 +164,12 @@ object IntrinsifyPass {
           val (expr, stmts) = op match {
             case "==" => (p.Expr.BinaryIntrinsic(x, y, p.BinaryIntrinsicKind.LogicEq, p.Type.Bool), Nil)
             case "!=" => (p.Expr.BinaryIntrinsic(x, y, p.BinaryIntrinsicKind.LogicNeq, p.Type.Bool), Nil)
+          }
+          (expr, stmts, inv :: Nil)
+        case ("scala" :: "Boolean" :: op :: Nil, x, Nil) =>
+          val (expr, stmts) = op match {
+            case "unary_!" if x.tpe == p.Type.Bool =>
+              (p.Expr.UnaryIntrinsic(recv, p.UnaryIntrinsicKind.LogicNot, p.Type.Bool), Nil)
           }
           (expr, stmts, inv :: Nil)
         case ("scala" :: ("Double" | "Float" | "Long" | "Int" | "Short" | "Char" | "Byte") :: op :: Nil, x, Nil)
@@ -198,8 +204,6 @@ object IntrinsifyPass {
                 ),
                 Nil
               )
-            case "unary_!" if x.tpe == p.Type.Bool =>
-              (p.Expr.UnaryIntrinsic(recv, p.UnaryIntrinsicKind.LogicNot, p.Type.Bool), Nil)
 
             // JLS 5.6.1. Unary Numeric Promotion
             case "unary_~" => unaryNumericIntrinsic(x, idx, p.UnaryIntrinsicKind.BNot)

@@ -87,10 +87,6 @@ class FunctionCallSuite extends BaseSuite {
     testCapture("class-init-named-second-partial")(first(1, b = 2))
   }
 
-  object M {
-    val x = 1
-  }
-
   // class-scope defs, part of this test class
   val x                     = 42d
   def double(x: Double)     = x * 2.0

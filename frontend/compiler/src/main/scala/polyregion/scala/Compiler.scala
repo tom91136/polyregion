@@ -1,7 +1,7 @@
 package polyregion.scala
 
 import cats.syntax.all.*
-import polyregion.ast.pass.{FnInlinePass, MonoStructPass, UnitExprElisionPass, VerifyPass}
+import polyregion.ast.pass.*
 import polyregion.ast.{PolyAst as p, *}
 import polyregion.prism.StdLib
 
@@ -15,20 +15,21 @@ object Compiler {
 
   private def runLocalOptPass(using Quoted) = IntrinsifyPass.intrinsify
 
-  private def runProgramOptPasses(program: p.Program)(log: Log): Result[(p.Program, Log)] = {
-    val (p0, l0) = FnInlinePass.run(program)(log)
-    val (p1, l1) = UnitExprElisionPass.run(p0)(l0)
-    val (p2, l2) = MonoStructPass.run(p1)(l1)
-    (p2, l2).success
-  }
+  private val ProgramPasses: List[ProgramPass] = List(
+    FnInlinePass,           //
+    UnitExprElisionPass,    //
+    DeadArgEliminationPass, //
+    MonoStructPass          //
+  )
+
+  private def runProgramOptPasses(program: p.Program)(log: Log): Result[(p.Program, Log)] =
+    Function.chain(ProgramPasses.map(_.tupled))((program, log)).success
 
   def deriveSignature(using q: Quoted)(f: q.DefDef): Result[p.Signature] = for {
-    (_, fnRtnTpe) <- typer0(f.returnTpt.tpe)
-    fnArgsTpes <- f.paramss
-      .flatMap(_.params)
-      .collect { case d: q.ValDef => d.tpt.tpe }
-      .traverse(typer0(_).map(_._2))
-    owningClass <- clsSymTyper0(f.symbol.owner)
+    (_ -> fnRtnTpe, _)      <- typer0(f.returnTpt.tpe) // Ignore the class witness as we're deriving the signature.
+    (fnArgsTpeWithTerms, _) <- typer0N(f.paramss.flatMap(_.params).collect { case d: q.ValDef => d.tpt.tpe })
+    owningClass             <- clsSymTyper0(f.symbol.owner)
+    fnArgsTpes = fnArgsTpeWithTerms.map(_._2)
     fnTypeVars = f.paramss.flatMap(_.params).collect { case q.TypeDef(name, _) => name }
     (receiver, receiverTpeVars) <- owningClass match {
       case t @ p.Type.Struct(_, tpeVars, _) => (Some(t), tpeVars).success
@@ -36,37 +37,36 @@ object Compiler {
     }
   } yield p.Signature(p.Sym(f.symbol.fullName), receiverTpeVars ::: fnTypeVars, receiver, fnArgsTpes, fnRtnTpe)
 
-  def compileAllDependencies(using q: Quoted)(deps: q.Dependencies)(
-      fnLut: Map[p.Signature, p.Function] = Map.empty
-  ): Result[(List[p.Function], q.Dependencies, Log)] =
-    for {
-      log <- Log(s"Compile dependent functions")
-      log <- deps.functions.toList.foldLeftM(log) { case (log, (fn, ivks)) =>
-        log.info(q.DefDef(fn.symbol, rhsFn = _ => None).show, ivks.map(_.repr).toList.sorted*)
-      }
-      (_, fns, deps, logs) <- (deps.functions, List.empty[p.Function], deps, List.empty[Log]).iterateWhileM {
-        (remaining, fnAcc, depsAcc, logs) =>
-          remaining.toList
-            .foldLeftM((fnAcc, depsAcc, logs)) { case ((xs, depss, logs), (defDef, invoke)) =>
-              // XXX Generic specialisation on invoke is done in a pass later so we can ignore it for now
-              deriveSignature(defDef).flatMap { s =>
-                fnLut.get(s) match {
-                  case Some(x) => Log(s"Replaced: $s").map(l => (x :: xs, deps, l :: logs))
-                  case None =>
-                    compileFn(defDef).map { case ((x, deps), log0) => (x :: xs, deps |+| depss, log :: logs) }
-                }
+  def compileAllDependencies(using q: Quoted)(
+      deps: q.Dependencies
+  )(fnLut: Map[p.Signature, p.Function] = Map.empty): Result[(List[p.Function], q.Dependencies, Log)] = for {
+    log <- Log(s"Compile dependent functions")
+    log <- deps.functions.toList.foldLeftM(log) { case (log, (fn, ivks)) =>
+      log.info(q.DefDef(fn.symbol, rhsFn = _ => None).show, ivks.map(_.repr).toList.sorted*)
+    }
+    (_, fns, deps, logs) <- (deps.functions, List.empty[p.Function], deps, List.empty[Log]).iterateWhileM {
+      (remaining, fnAcc, depsAcc, logs) =>
+        remaining.toList
+          .foldLeftM((fnAcc, depsAcc, logs)) { case ((xs, depss, logs), (defDef, invoke)) =>
+            // XXX Generic specialisation on invoke is done in a pass later so we can ignore it for now
+            deriveSignature(defDef).flatMap { s =>
+              fnLut.get(s) match {
+                case Some(x) => Log(s"Replaced: $s").map(l => (x :: xs, deps, l :: logs))
+                case None =>
+                  compileFn(defDef).map { case ((x, deps), log0) => (x :: xs, deps |+| depss, log :: logs) }
               }
             }
-            .map((xs, deps, log) =>
-              (
-                deps.functions,
-                xs,
-                deps.copy(functions = Map.empty),
-                log
-              )
+          }
+          .map((xs, deps, log) =>
+            (
+              deps.functions,
+              xs,
+              deps.copy(functions = Map.empty),
+              log
             )
-      }(_._1.nonEmpty)
-    } yield (fns, deps, log)
+          )
+    }(_._1.nonEmpty)
+  } yield (fns, deps, log)
 
   def deriveAllStructs(using q: Quoted)(deps: q.Dependencies)(
       clsLut: Map[p.Sym, p.StructDef] = Map.empty
@@ -98,12 +98,12 @@ object Compiler {
     rhs <- f.rhs.failIfEmpty(s"Function does not contain an implementation: (in ${f.symbol.maybeOwner}) ${f.show}")
 
     // First we run the typer on the return type to see if we can just return a term based on the type.
-    (fnRtnTerm, fnRtnTpe) <- Retyper.typer0(f.returnTpt.tpe)
+    (fnRtnTerm -> fnRtnTpe, fnRtnWit) <- Retyper.typer0(f.returnTpt.tpe)
 
-    // We also run the typer on all the def's arguments.
+    // We also run the typer on all the def's arguments, all of which should come in the form of a ValDef.
     // TODO handle default value of args (ValDef.rhs)
-    fnArgs <- f.termParamss.flatMap(_.params).foldMapM { arg => // all args should come in the form of a ValDef
-      Retyper.typer0(arg.tpt.tpe).map((_, t) => ((arg, p.Named(arg.name, t)) :: Nil))
+    (fnArgs, fnArgsWit) <- f.termParamss.flatMap(_.params).foldMapM { arg =>
+      Retyper.typer0(arg.tpt.tpe).map { case (_ -> t, wit) => ((arg, p.Named(arg.name, t)) :: Nil, wit) }
     }
 
     fnTypeVars = f.paramss.flatMap(_.params).collect { case q.TypeDef(name, _) => name }
@@ -138,12 +138,15 @@ object Compiler {
         s"This type mismatch ($rhsThisCls != $owningClass)".fail
       else ().success
 
+    // Make sure we record any class witnessed from the params and return type together with rhs.
+    deps = rhsDeps.copy(classes = rhsDeps.classes |+| fnRtnWit |+| fnArgsWit)
+
     compiledFn = p.Function(
       name = p.Sym(f.symbol.fullName),
       tpeVars = receiverTpeVars ::: fnTypeVars,
       receiver = receiver,
       args = fnArgs.map(_._2),
-      captures = deriveModuleStructCaptures(rhsDeps),
+      captures = deriveModuleStructCaptures(deps),
       rtn = fnRtnTpe,
       body = rhsStmts
     )
@@ -151,18 +154,18 @@ object Compiler {
     log <- log.info("Result", compiledFn.repr)
     _ = println(log.render().mkString("\n"))
 
-  } yield ((compiledFn, rhsDeps), log)
+  } yield ((compiledFn, deps), log)
 
   def compileTerm(using q: Quoted)(
       term: q.Term,
       root: q.Symbol,
       scope: Map[q.Symbol, p.Term]
   ): Result[((List[p.Stmt], p.Type, q.Dependencies, Option[(q.ClassDef, p.Type.Struct)]), Log)] = for {
-    log            <- Log(s"Compile term: ${term.pos.sourceFile.name}:${term.pos.startLine}~${term.pos.endLine}")
-    log            <- log.info("Body (AST)", pprint.tokenize(term, indent = 1, showFieldNames = true).mkString)
-    log            <- log.info("Body (Ascii)", term.show(using q.Printer.TreeAnsiCode))
-    (termValue, c) <- q.RemapContext(root = root, refs = scope).mapTerm(term)
-    (_, termTpe)   <- Retyper.typer0(term.tpe)
+    log                 <- Log(s"Compile term: ${term.pos.sourceFile.name}:${term.pos.startLine}~${term.pos.endLine}")
+    log                 <- log.info("Body (AST)", pprint.tokenize(term, indent = 1, showFieldNames = true).mkString)
+    log                 <- log.info("Body (Ascii)", term.show(using q.Printer.TreeAnsiCode))
+    (termValue, c)      <- q.RemapContext(root = root, refs = scope).mapTerm(term)
+    (_ -> termTpe, wit) <- Retyper.typer0(term.tpe)
     _ <-
       if (termTpe != termValue.tpe) {
         s"Term type ($termTpe) is not the same as term value type (${termValue.tpe}), term was $termValue".fail
@@ -181,9 +184,9 @@ object Compiler {
     log <- log.info(s"Expr name: `$exprName`")
 
     // outline here
-    (captures, log) <- RefOutliner.outline(term)(log)
+    (captures, wit, log) <- RefOutliner.outline(term)(log)
     (capturedNames, captureScope) = captures.foldMap[(List[(p.Named, q.Ref)], List[(q.Symbol, p.Term)])] {
-      (root, ref, value, tpe) =>
+      case (root, ref, value -> tpe) =>
         (value, tpe) match {
           case (Some(x), _) => (Nil, (ref.symbol -> x) :: Nil)
           case (None, t) =>
@@ -202,6 +205,7 @@ object Compiler {
       scope = captureScope.toMap
     )
 
+    log <- log ~+ termLog
     log <- log.info("Expr Stmts", exprStmts.map(_.repr).mkString("\n"))
     log <- log.info(
       "External captures",
@@ -255,6 +259,7 @@ object Compiler {
     log <- log.info(
       s"Program compiled (unpot), structures = ${unopt.defs.size}, functions = ${unopt.functions.size}"
     )
+
     unoptLog <- Log("Unopt")
     unoptLog <- unoptLog.info(s"Structures = ${unopt.defs.size}", unopt.defs.map(_.repr)*)
     unoptLog <- unoptLog.info(s"Functions  = ${unopt.functions.size}", unopt.functions.map(_.signatureRepr)*)

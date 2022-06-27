@@ -25,11 +25,16 @@ class Quoted(val underlying: scala.quoted.Quotes) {
     case Object, Class
   }
 
+
+  type ClsWitnesses = Map[ClassDef, Set[p.Type.Struct]]
+  type FnWitnesses = Map[DefDef, Set[p.Expr.Invoke]]
+  type Retyped          = (Option[p.Term], p.Type)
+
   // TODO everything here can be a Set as we don't need the rhs
   case class Dependencies(
       modules: Map[Symbol, p.Type.Struct] = Map.empty,
-      classes: Map[ClassDef, Set[p.Type.Struct]] = Map.empty,
-      functions: Map[DefDef, Set[p.Expr.Invoke]] = Map.empty
+      classes: ClsWitnesses = Map.empty,
+      functions: FnWitnesses = Map.empty
   ) {
     @targetName("witness_module")
     def witness(x: Symbol, tpe: p.Type.Struct) = copy(modules = modules + (x -> tpe))
