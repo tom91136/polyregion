@@ -4,6 +4,7 @@ import fansi.ErrorMode.Throw
 import polyregion.jvm.compiler.Options
 import polyregion.jvm.{Loader, compiler as cp, runtime as rt}
 
+import java.util.concurrent.TimeUnit
 import scala.compiletime.constValue
 import scala.reflect.ClassTag
 
@@ -51,29 +52,16 @@ trait JitOps[F[_], O](d: rt.Device.Queue, f: Suspend[F]) {
 
 trait AotOps[F[_], B](q: rt.Device.Queue, suspend: Suspend[F]) {
 
-  inline def task[O <: B, A <: AnyVal: ClassTag](inline f: => A): F[A] = suspend { (cb: Callback[A]) =>
-    val result = Buffer.ofDim[A](1)
-    polyregion.scala.compiletime.offload0[O](
-      q, {
-        (x: Either[Throwable, Unit]) =>
-          val z: Either[Throwable, Unit] = x
-        z match {
-          case Left(e)   => cb(Left(e))
-          case Right(()) => cb(Right(result(0)))
-        }
-      }
-    ) { result(0) = f; () }
-  }
-
-  inline def task[O <: B, A <: AnyRef](using inline S: NativeStruct[A])(inline f: => A): F[A] = suspend { cb =>
+  inline def task[O <: B, A](inline f: => A): F[A] = suspend { cb =>
     val result = Buffer.ofDim[A](1)
     polyregion.scala.compiletime.offload0[O](
       q,
-      (x: Either[Throwable, Unit]) =>
-        x match {
-          case Left(e)   => cb(Left(e))
-          case Right(()) => cb(Right(result(0)))
-        }
+      {
+        case Left(e) => cb(Left(e))
+        case Right(()) =>
+          try cb(Right(result(0)))
+          catch { case e: Throwable => cb(Left(e)) }
+      }
     ) { result(0) = f; () }
   }
 

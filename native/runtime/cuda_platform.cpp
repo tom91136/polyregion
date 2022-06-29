@@ -172,7 +172,7 @@ void CudaDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t 
   enqueueCallback(cb);
 }
 void CudaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                         const std::vector<Type> &types, std::vector<void *> &args,
+                                         std::vector<Type> types, std::vector<std::byte> argData,
                                          const Policy &policy, const MaybeCallback &cb) {
   TRACE();
   if (types.back() != Type::Void)
@@ -181,6 +181,7 @@ void CudaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const st
   auto grid = policy.global;
   auto block = policy.local.value_or(Dim3{});
   int sharedMem = 0;
+  auto args = detail::argDataAsPointers(types, argData);
   CHECKED(cuLaunchKernel(fn,                        //
                          grid.x, grid.y, grid.z,    //
                          block.x, block.y, block.z, //

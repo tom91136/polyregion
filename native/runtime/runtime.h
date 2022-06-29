@@ -22,8 +22,8 @@
     #define __PRETTY_FUNCTION__ __FUNCSIG__
   #endif
 
-//  #define TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this, __PRETTY_FUNCTION__)
-  #define TRACE()
+  #define TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this, __PRETTY_FUNCTION__)
+//  #define TRACE()
 
 #endif
 
@@ -34,6 +34,14 @@ using TypedPointer = std::pair<Type, void *>;
 using Property = std::pair<std::string, std::string>;
 using Callback = std::function<void()>;
 using MaybeCallback = std::optional<Callback>;
+
+struct ArgBuffer {
+  std::vector<Type> types;
+  std::vector<std::byte> data;
+  ArgBuffer(std::initializer_list<TypedPointer> args = {});
+  void put(Type tpe, void *ptr);
+  void put(std::initializer_list<TypedPointer> args);
+};
 
 // non-public APIs
 namespace detail {
@@ -72,6 +80,7 @@ public:
 };
 
 std::string allocateAndTruncate(const std::function<void(char *, size_t)> &f, size_t length = 512);
+std::vector<void *> argDataAsPointers(const std::vector<Type> &types, std::vector<std::byte> &argData);
 
 class CountedCallbackHandler {
   using Storage = std::unordered_map<uint64_t, Callback>;
@@ -169,8 +178,8 @@ public:
                                                const MaybeCallback &cb) = 0;
   virtual EXPORT void enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) = 0;
   virtual EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                         const std::vector<Type> &types, std::vector<void *> &args,
-                                         const Policy &policy, const MaybeCallback &cb) = 0;
+                                         std::vector<Type> types, std::vector<std::byte> argData, const Policy &policy,
+                                         const MaybeCallback &cb) = 0;
 };
 
 struct EXPORT Device {
@@ -180,7 +189,7 @@ public:
   [[nodiscard]] virtual EXPORT std::string name() = 0;
   [[nodiscard]] virtual EXPORT bool sharedAddressSpace() = 0;
   [[nodiscard]] virtual EXPORT std::vector<Property> properties() = 0;
-  [[nodiscard]] virtual EXPORT std::vector<std::string > features() = 0;
+  [[nodiscard]] virtual EXPORT std::vector<std::string> features() = 0;
   virtual EXPORT void loadModule(const std::string &name, const std::string &image) = 0;
   virtual EXPORT bool moduleLoaded(const std::string &name) = 0;
   [[nodiscard]] virtual EXPORT uintptr_t malloc(size_t size, Access access) = 0;

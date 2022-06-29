@@ -315,7 +315,7 @@ void HsaDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t s
   //  if (cb) (*cb)();
 }
 void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                        const std::vector<Type> &types, std::vector<void *> &args, const Policy &policy,
+                                        std::vector<Type> types, std::vector<std::byte> argData, const Policy &policy,
                                         const MaybeCallback &cb) {
   TRACE();
   if (types.back() != Type::Void)
@@ -343,7 +343,8 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
 
   CHECKED("Allocate kernel arg memory",
           hsa_memory_allocate(device.kernelArgRegion, kernargSegmentSize, &kernargAddress));
-  // Just to make sure future factors don't break things.
+  auto args = detail::argDataAsPointers(types, argData);
+  // Just to make sure future refactors don't break things.
   static_assert(std::is_same_v<std::decay_t<decltype(args)>::value_type, void *>);
   auto *data = reinterpret_cast<uint8_t *>(kernargAddress);
   // Last arg is the return, void assertion should have been done before this.

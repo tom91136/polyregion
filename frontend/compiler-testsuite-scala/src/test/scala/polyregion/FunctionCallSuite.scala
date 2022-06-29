@@ -7,7 +7,7 @@ import _root_.scala.reflect.ClassTag
 
 class FunctionCallSuite extends BaseSuite {
 
-  inline def testCapture[A <: AnyVal: ClassTag](inline name: String)(inline r: => A) = if (Toggles.FunctionCallSuite) {
+  inline def testCapture[A](inline name: String)(inline r: => A) = if (Toggles.FunctionCallSuite) {
     test(name)(assertOffload(r))
   }
 

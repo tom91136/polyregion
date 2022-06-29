@@ -51,12 +51,43 @@ object compiletime {
     '{}
   }
 
-  case class ReifiedConfig(target: ct.Target, arch: String, opt: ct.Opt)
+  inline def deriveNativeStruct[A]: NativeStruct[A] = ${ deriveNativeStructImpl[A] }
+  def deriveNativeStructImpl[A: Type](using q: Quotes): Expr[NativeStruct[A]] = {
+    import q.reflect.*
+    val Q = Quoted(q)
 
-  def reifyConfig(x: srt.Config[_, _]): List[ReifiedConfig] =
+    val compiler = ct.Compiler.create()
+
+    val repr   = Q.TypeRepr.of[A]
+    val opt    = ct.Options.of(ct.Target.LLVM_HOST, "native")
+    val layout = Pickler.layoutOf(using Q)(compiler, opt, repr)
+
+    val code = '{
+      new NativeStruct[A] {
+        override def sizeInBytes: Int = ${ Expr(layout.sizeInBytes.toInt) }
+        override def decode(buffer: ByteBuffer, index: Int): A = ${
+          Pickler.getStruct(using Q)(compiler, opt, 'buffer, '{ 0 }, 'index, repr).asExprOf[A]
+        }
+        override def encode(buffer: ByteBuffer, index: Int, a: A): Unit = ${
+          Pickler.putStruct(using Q)(compiler, opt, 'buffer, '{ 0 }, 'index, repr, 'a)
+        }
+      }
+    }
+
+    compiler.close()
+    given Q.Printer[Q.Tree] = Q.Printer.TreeAnsiCode
+    println("Code=" + code.asTerm.show)
+    code
+  }
+
+  private case class ReifiedConfig(target: ct.Target, arch: String, opt: ct.Opt)
+
+  private def reifyConfig(x: srt.Config[_, _]): List[ReifiedConfig] =
     x.targets.map((t, o) => ReifiedConfig(t.arch, t.uarch, o.value))
 
-  def reifyConfigFromTpe[C: Type](using q: Quotes)(c: List[ReifiedConfig] = Nil): Result[List[ReifiedConfig]] = {
+  private def reifyConfigFromTpe[C: Type](using
+      q: Quotes
+  )(c: List[ReifiedConfig] = Nil): Result[List[ReifiedConfig]] = {
     import q.reflect.*
     Type.of[C] match {
       case '[srt.Config[target, opt]] =>
@@ -84,7 +115,7 @@ object compiletime {
     }
   }
 
-  private inline def checked[A](using q: Quotes)(e: Result[A]): A = e match {
+  private inline def checked[A](e: Result[A]): A = e match {
     case Left(e)  => throw e
     case Right(x) => x
   }
@@ -189,6 +220,8 @@ object compiletime {
 
     val code = '{
 
+      val cb_ : Callback[Unit] = $cb
+
       // Validate device features support this code object.
       val miss      = ArrayBuffer[(String, Set[String])]()
       val available = Set($queue.device.features(): _*)
@@ -210,7 +243,7 @@ object compiletime {
         i += 1
       }
       if (found == -1) {
-        ${ cb }(
+        cb_(
           Left(
             new java.lang.RuntimeException(
               s"Device (${$queue.device.name}) with features `${available.mkString(",")}` does not meet the requirement for any of the following binaries: ${miss
@@ -246,6 +279,7 @@ object compiletime {
 
         // ${ bindCapturesToBuffer(compiler, ???, 'fnValues, queue, captures) }
 
+        println("Dispatch tid=" + Thread.currentThread.getId)
         // Dispatch.
         $queue.enqueueInvokeAsync(
           $moduleName,
@@ -253,11 +287,15 @@ object compiletime {
           fnTpeOrdinals,
           fnValues.array,
           rt.Policy($dim),
-          if ($queue.device.sharedAddressSpace) (() => ${ cb }(Right(()))): Runnable else null
+          if ($queue.device.sharedAddressSpace) { () =>
+            println("Done s tid=" + Thread.currentThread.getId + " cb" + cb_)
+            cb_(Right(()))
+          }: Runnable
+          else null
         )
 
         // Sync.
-        $queue.syncAll(if (! $queue.device.sharedAddressSpace) (() => ${ cb }(Right(()))): Runnable else null)
+        $queue.syncAll(if (! $queue.device.sharedAddressSpace) (() => cb_(Right(()))): Runnable else null)
       }
     }
     given q.Printer[q.Tree] = q.Printer.TreeAnsiCode
@@ -317,7 +355,7 @@ object compiletime {
                 ${ Expr(byteOffset) },
                 $queue.registerAndInvalidateIfAbsent(
                   ${ ref.asExprOf[x.Underlying] },
-                  ${ ref.asExprOf[x.Underlying] }.backingBuffer,
+                  ${ ref.asExprOf[x.Underlying] }.backing,
                   null
                 )
               )

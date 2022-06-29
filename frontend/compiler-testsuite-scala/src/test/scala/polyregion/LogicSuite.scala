@@ -8,7 +8,7 @@ import _root_.scala.reflect.ClassTag
 //noinspection DoubleNegationScala,SimplifyBoolean
 class LogicSuite extends BaseSuite {
 
-  inline def testExpr[A <: AnyVal: ClassTag](inline r: => A) = if (Toggles.LogicSuite) {
+  inline def testExpr[A](inline r: => A) = if (Toggles.LogicSuite) {
     test(s"${codeOf(r)}=${r}")(assertOffload[A](r))
   }
 

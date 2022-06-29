@@ -8,7 +8,7 @@ import _root_.scala.reflect.ClassTag
 
 class CaptureSuite extends BaseSuite {
 
-  inline def testCapture[A <: AnyVal: ClassTag](inline name: String)(inline r: => A) = if (Toggles.CaptureSuite) {
+  inline def testCapture[A](inline name: String)(inline r: => A) = if (Toggles.CaptureSuite) {
     test(name)(assertOffload(r))
   }
 

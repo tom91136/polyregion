@@ -249,7 +249,7 @@ void ClDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t si
   enqueueCallback(cb, event);
 }
 void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                       const std::vector<Type> &types, std::vector<void *> &args, const Policy &policy,
+                                       std::vector<Type> types, std::vector<std::byte> argData, const Policy &policy,
                                        const MaybeCallback &cb) {
   TRACE();
   if (types.back() != Type::Void)
@@ -263,8 +263,11 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
       default: return ::byteOfType(t);
     }
   };
+
+  auto args = detail::argDataAsPointers(types, argData);
+
   // last arg is the return, void assertion should have been done before this
-  for (cl_uint i = 0; i < args.size() - 1; ++i) {
+  for (cl_uint i = 0; i < types.size() - 1; ++i) {
     auto rawPtr = args[i];
     auto tpe = types[i];
     if (tpe == Type::Ptr) {

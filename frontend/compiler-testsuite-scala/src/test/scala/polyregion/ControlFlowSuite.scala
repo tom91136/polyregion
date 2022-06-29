@@ -7,7 +7,7 @@ import _root_.scala.reflect.ClassTag
 
 class ControlFlowSuite extends BaseSuite {
 
-  inline def testExpr[A <: AnyVal: ClassTag](inline name: String)(inline f: => A) = if (Toggles.ControlFlowSuite) {
+  inline def testExpr[A](inline name: String)(inline f: => A) = if (Toggles.ControlFlowSuite) {
     test(name)(assertOffload[A](f))
   }
 

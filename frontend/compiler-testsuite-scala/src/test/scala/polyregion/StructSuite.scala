@@ -48,20 +48,20 @@ class StructSuite extends BaseSuite {
     def decode(buffer: _root_.java.nio.ByteBuffer, index: Int): A          = ???
   }
 
- inline given NativeStruct[Char3]    = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
- inline given NativeStruct[Byte3]    = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
- inline given NativeStruct[Short3]   = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
- inline given NativeStruct[Int3]     = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
- inline given NativeStruct[Long3]    = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
- inline given NativeStruct[Float3]   = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
- inline given NativeStruct[Double3]  = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
- inline given NativeStruct[Boolean3] = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
+  inline given NativeStruct[Char3]    = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
+  inline given NativeStruct[Byte3]    = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
+  inline given NativeStruct[Short3]   = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
+  inline given NativeStruct[Int3]     = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
+  inline given NativeStruct[Long3]    = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
+  inline given NativeStruct[Float3]   = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
+  inline given NativeStruct[Double3]  = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
+  inline given NativeStruct[Boolean3] = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
 
   inline def testExpr[A <: AnyRef: NativeStruct](inline name: String)(inline r: => A) = if (Toggles.StructSuite) {
     test(name)(assertOffload(r))
   }
 
-  inline def testExpr[A <: AnyVal: ClassTag](inline name: String)(inline r: => A) = if (Toggles.StructSuite) {
+  inline def testExpr[A](inline name: String)(inline r: => A) = if (Toggles.StructSuite) {
     test(name)(assertOffload(r))
   }
 
@@ -120,56 +120,61 @@ class StructSuite extends BaseSuite {
 
   // }
 
-  {
-    val xs = Array.tabulate(10)(x =>
-      Float3(
-        x * math.Pi.toFloat * 1, //
-        x * math.Pi.toFloat * 2, //
-        x * math.Pi.toFloat * 3  //
-      )
-    )
-    testExpr("buffer-param")(xs(1).a + xs(3).b + xs(5).c)
-  }
+//  {
+//    val xs = Array.tabulate(10)(x =>
+//      Float3(
+//        x * math.Pi.toFloat * 1, //
+//        x * math.Pi.toFloat * 2, //
+//        x * math.Pi.toFloat * 3  //
+//      )
+//    )
+//    testExpr("buffer-param")(xs(1).a + xs(3).b + xs(5).c)
+//  }
+//
+//  {
+//    val x = Float3(42.0, 1.0, 2.0)
+//    testExpr("arg-deref-member") {
+//      val y = x // ref elision
+//      y.c
+//    }
+//  }
+//
+//  {
+//    val x = Float3(42.0, 1.0, 2.0)
+//    testExpr("arg-deref-member-mix") {
+//      val y = x // ref elision
+//      y.a + y.b + y.c
+//    }
+//  }
 
-  {
-    val x = Float3(42.0, 1.0, 2.0)
-    testExpr("passthrough") {
-      val y = x
-      val z = y
-      z
+//  testExpr("deref-member-mix") {
+//    val x = Float3(42.0, 1.0, 2.0)
+//    x.a + x.b + x.c
+//  }
+
+//
+//  testExpr("deref-member") {
+//    val x = Float3(42.0, 1.0, 2.0)
+//    x.c
+//  }
+//
+//  testExpr("deref-member-direct") {
+//    Float3(42.0, 1.0, 2.0).c
+//  }
+
+  // ---
+
+    {
+      val x = Float3(42.0, 1.0, 2.0)
+      testExpr("passthrough") {
+        val y = x
+        val z = y
+        z
+      }
     }
-  }
 
-  {
-    val x = Float3(42.0, 1.0, 2.0)
-    testExpr("arg-deref-member-mix") {
-      val y = x // ref elision
-      y.a + y.b + y.c
-    }
-  }
 
-  testExpr("deref-member-mix") {
-    val x = Float3(42.0, 1.0, 2.0)
-    x.a + x.b + x.c
-  }
-
-  {
-    val x = Float3(42.0, 1.0, 2.0)
-    testExpr("arg-deref-member") {
-      val y = x // ref elision
-      y.c
-    }
-  }
-
-  testExpr("deref-member") {
-    val x = Float3(42.0, 1.0, 2.0)
-    x.c
-  }
-
-  testExpr("deref-member-direct") {
-    Float3(42.0, 1.0, 2.0).c
-  }
-
+//
   testExpr("return")(Float3(42.0, 1.0, 2.0))
 
   {
@@ -186,30 +191,30 @@ class StructSuite extends BaseSuite {
     Float3(a, b, c)
   }
 
-  // testExpr("nested-buffer-param") {
-  //   val xs = Buffer.tabulate(10)(x =>
-  //     Vec33(
-  //       Vec3(
-  //         x * math.Pi.toFloat * 1, //
-  //         x * math.Pi.toFloat * 2, //
-  //         x * math.Pi.toFloat * 3  //
-  //       ),
-  //       Vec3(
-  //         x * math.Pi.toFloat * 4, //
-  //         x * math.Pi.toFloat * 5, //
-  //         x * math.Pi.toFloat * 6  //
-  //       ),
-  //       Vec3(
-  //         x * math.Pi.toFloat * 7, //
-  //         x * math.Pi.toFloat * 8, //
-  //         x * math.Pi.toFloat * 9  //
-  //       )
-  //     )
-  //   )
-  //   assertOffload {
-  //     xs(0).a.a + xs(0).b.b + xs(0).c.c
-  //   }
-  // }
+//   testExpr("nested-buffer-param") {
+//     val xs = Buffer.tabulate(10)(x =>
+//       Vec33(
+//         Vec3(
+//           x * math.Pi.toFloat * 1, //
+//           x * math.Pi.toFloat * 2, //
+//           x * math.Pi.toFloat * 3  //
+//         ),
+//         Vec3(
+//           x * math.Pi.toFloat * 4, //
+//           x * math.Pi.toFloat * 5, //
+//           x * math.Pi.toFloat * 6  //
+//         ),
+//         Vec3(
+//           x * math.Pi.toFloat * 7, //
+//           x * math.Pi.toFloat * 8, //
+//           x * math.Pi.toFloat * 9  //
+//         )
+//       )
+//     )
+//     assertOffload {
+//       xs(0).a.a + xs(0).b.b + xs(0).c.c
+//     }
+//   }
 
   // testExpr("nested-return") {
   //   assertOffload(Vec33(Vec3(0.0, 1.0, 2.0), Vec3(3.0, 4.0, 5.0), Vec3(6.0, 7.0, 8.0)))

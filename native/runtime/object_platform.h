@@ -53,27 +53,16 @@ public:
   EXPORT std::unique_ptr<DeviceQueue> createQueue() override;
 };
 
-namespace {
-
-class MemoryManager : public llvm::SectionMemoryManager {
-public:
-  MemoryManager();
-
-private:
-  uint64_t getSymbolAddress(const std::string &Name) override;
-};
-
-} // namespace
-
-class EXPORT RelocatableDeviceQueue : public ObjectDeviceQueue {
+class EXPORT RelocatableDeviceQueue : public ObjectDeviceQueue, llvm::SectionMemoryManager {
   ObjectModules &objects;
   std::shared_mutex &lock;
-  //  llvm::RuntimeDyld &ld;
+  llvm::RuntimeDyld ld;
+  uint64_t getSymbolAddress(const std::string &Name) override;
 
 public:
   RelocatableDeviceQueue(decltype(objects) objects, decltype(lock) lock);
-  EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                 const std::vector<Type> &types, std::vector<void *> &args, const Policy &policy,
+  EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, std::vector<Type> types,
+                                 std::vector<std::byte> argData, const Policy &policy,
                                  const MaybeCallback &cb) override;
 };
 
@@ -106,8 +95,8 @@ class EXPORT SharedDeviceQueue : public ObjectDeviceQueue {
 
 public:
   explicit SharedDeviceQueue(decltype(modules) modules);
-  EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                 const std::vector<Type> &types, std::vector<void *> &args, const Policy &policy,
+  EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, std::vector<Type> types,
+                                 std::vector<std::byte> argData, const Policy &policy,
                                  const MaybeCallback &cb) override;
 };
 

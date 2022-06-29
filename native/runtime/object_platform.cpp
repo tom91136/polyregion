@@ -1,5 +1,6 @@
 #include <mutex>
 #include <system_error>
+#include <thread>
 #include <utility>
 
 #include "cpuinfo.h"
@@ -116,15 +117,7 @@ std::vector<std::unique_ptr<Device>> RelocatablePlatform::enumerate() {
 
 static constexpr const char *RELOBJ_ERROR_PREFIX = "[RelocatableObject error] ";
 
-MemoryManager::MemoryManager() : SectionMemoryManager(nullptr) {}
-uint64_t MemoryManager::getSymbolAddress(const std::string &Name) {
-  return Name == "malloc" ? (uint64_t)&std::malloc : llvm::RTDyldMemoryManager::getSymbolAddress(Name);
-}
-
-// uint64_t RelocatableDevice::getSymbolAddress(const std::string &Name) {
-//   return Name == "malloc" ? (uint64_t)&std::malloc : llvm::RTDyldMemoryManager::getSymbolAddress(Name);
-// }
-RelocatableDevice::RelocatableDevice() /* : llvm::SectionMemoryManager(nullptr), ld(*this, *this) */ { TRACE(); }
+RelocatableDevice::RelocatableDevice() { TRACE(); }
 
 std::string RelocatableDevice::name() {
   TRACE();
@@ -153,19 +146,22 @@ std::unique_ptr<DeviceQueue> RelocatableDevice::createQueue() {
   return std::make_unique<RelocatableDeviceQueue>(objects, lock);
 }
 
-// static int c = 0;
 RelocatableDeviceQueue::RelocatableDeviceQueue(decltype(objects) objects, decltype(lock) lock)
-    : objects(objects), lock(lock) {}
+    : llvm::SectionMemoryManager(), objects(objects), lock(lock), ld(*this, *this) {
+  TRACE();
+}
+
+uint64_t RelocatableDeviceQueue::getSymbolAddress(const std::string &Name) {
+  TRACE();
+  return Name == "malloc" ? (uint64_t)&std::malloc : llvm::RTDyldMemoryManager::getSymbolAddress(Name);
+}
+
 void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                                const std::vector<Type> &types, std::vector<void *> &args,
+                                                std::vector<Type> types, std::vector<std::byte> argData,
                                                 const Policy &policy, const MaybeCallback &cb) {
+  TRACE();
 
   RelocatableDevice::ReadLock r(lock);
-
-    MemoryManager mm;
-    llvm::RuntimeDyld ld(mm, mm);
-
-  TRACE();
   const auto moduleIt = objects.find(moduleName);
   if (moduleIt == objects.end())
     throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "No module named " + moduleName + " was loaded");
@@ -177,8 +173,8 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
 
   if (auto sym = ld.getSymbol(fnName); !sym) {
     auto table = ld.getSymbolTable();
-
     std::vector<std::string> symbols;
+    symbols.reserve(table.size());
     for (auto &[k, v] : table)
       symbols.emplace_back("[`" + k.str() + "`@" + polyregion::hex(v.getAddress()) + "]");
     throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Symbol `" + std::string(fnName) +
@@ -187,22 +183,18 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
                            polyregion::mk_string<std::string>(
                                symbols, [](auto &x) { return x; }, ","));
   } else {
-    //    c++;
-    //    fprintf(stderr, "Do %s @ %d\n", moduleName.c_str(), c);
-
-//        llvm::DebugFlag = true;
-    //    ld.resolveRelocations();
-    //    if(ld.hasError()){
-    //      throw std::logic_error("e");
-    //    }
-    //    mm.finalizeMemory();
 
     if (ld.finalizeWithMemoryManagerLocking(); ld.hasError()) {
       throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Symbol `" + std::string(symbol) +
                              "` failed to finalise for execution: " + ld.getErrorString().str());
     }
-    invoke(sym.getAddress(), types, args);
-    if (cb) (*cb)();
+
+    std::thread([addr = sym.getAddress(), types, argData, cb]() {
+      auto argData_ = argData;
+      auto argPtrs = detail::argDataAsPointers(types, argData_);
+      invoke(addr, types, argPtrs);
+      if (cb) (*cb)();
+    }).detach();
   }
 }
 
@@ -259,7 +251,7 @@ std::unique_ptr<DeviceQueue> SharedDevice::createQueue() {
 
 SharedDeviceQueue::SharedDeviceQueue(decltype(modules) modules) : modules(modules) { TRACE(); }
 void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                           const std::vector<Type> &types, std::vector<void *> &args,
+                                           std::vector<Type> types, std::vector<std::byte> argData,
                                            const Policy &policy, const MaybeCallback &cb) {
   TRACE();
   auto moduleIt = modules.find(moduleName);
@@ -279,6 +271,7 @@ void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
     }
     symbolTable.emplace_hint(it, symbol, address);
   }
+  auto args = detail::argDataAsPointers(types, argData);
   invoke(reinterpret_cast<uint64_t>(address), types, args);
   if (cb) (*cb)();
 }

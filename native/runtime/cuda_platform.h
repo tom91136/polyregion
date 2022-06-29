@@ -52,8 +52,8 @@ public:
   EXPORT ~CudaDeviceQueue() override;
   EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) override;
   EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, void *dst, size_t size, const MaybeCallback &cb) override;
-  EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                 const std::vector<Type> &types, std::vector<void *> &args, const Policy &policy,
+  EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, std::vector<Type> types,
+                                 std::vector<std::byte> argData, const Policy &policy,
                                  const MaybeCallback &cb) override;
 };
 

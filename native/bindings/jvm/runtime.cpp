@@ -133,7 +133,6 @@ jlong Platforms::pointerOfDirectBuffer0(JNIEnv *env, jclass, jobject buffer) {
     return throwGeneric<jlong>(env, EX, "Object is either not a direct Buffer or not a Buffer at all.");
 }
 
-
 template <typename R> static jobject toJni(JNIEnv *env) {
   return wrapException(env, EX, [&]() {
     auto [peer, platform] = emplaceRef(platforms, std::make_shared<R>());
@@ -220,6 +219,7 @@ static rt::MaybeCallback fromJni(JNIEnv *env, jobject cb) {
     if (!cbRef)
       throwGeneric(attachedEnv, EX, "Unable to retrieve reference to the callback passed to enqueueInvokeAsync");
     else {
+      fprintf(stderr, "JNI thread attached\n");
       gen::Runnable::of(attachedEnv).wrap(attachedEnv, cbRef).run(attachedEnv);
       if (attachedEnv->ExceptionCheck()) attachedEnv->ExceptionClear();
       attachedEnv->DeleteGlobalRef(cbRef);
@@ -267,29 +267,23 @@ void Platform::enqueueInvokeAsync0(JNIEnv *env, jclass, jlong nativePeer, //
   }
 
   wrapException(env, EX, [&]() {
-    auto argTs = fromJni<jbyte>(env, argTypes);
-    auto argPs = fromJni<jbyte>(env, argData);
-    auto argsPtr = argPs.data();
-    std::vector<void *> argsPtrStore(argCount);
-    std::vector<rt::Type> argTpeStore(argCount);
-    for (jsize i = 0; i < argCount; ++i) {
-      auto tpe = static_cast<rt::Type>(argTs[i]);
-      argsPtrStore[i] = tpe == rt::Type::Void ? nullptr : argsPtr;
-      argTpeStore[i] = tpe;
-      argsPtr += rt::byteOfType(tpe);
-    }
+    static_assert(sizeof(jbyte) == sizeof(std::byte));
+    static_assert(sizeof(jbyte) == sizeof(rt::Type));
 
-    // XXX we MUST hold on to the return pointer in the same block as invoke even if we don't use it
-    void *rtnPtrStore = {};
+    auto argTs =
+        map_vec<jbyte, rt::Type>(fromJni<jbyte>(env, argTypes), [](auto &t) { return static_cast<rt::Type>(t); });
+    auto argPs =
+        map_vec<jbyte, std::byte>(fromJni<jbyte>(env, argData), [](auto &t) { return static_cast<std::byte>(t); });
+
     auto p = gen::Policy::of(env).wrap(env, policy);
     auto global = fromJni(env, p.global(env, gen::Dim3::of(env)));
     auto local = p.local(env, gen::Dim3::of(env)).map<rt::Dim3>([&](auto x) { return fromJni(env, x); });
 
     findRef(env, deviceQueues, nativePeer)
-        ->enqueueInvokeAsync(fromJni(env, moduleName), fromJni(env, symbol), argTpeStore, argsPtrStore, {global, local},
+        ->enqueueInvokeAsync(fromJni(env, moduleName), fromJni(env, symbol), argTs, argPs, {global, local},
                              fromJni(env, cb));
 
-    if (argTpeStore[argCount - 1] == rt::Type::Ptr) {
+    if (argTs[argCount - 1] == rt::Type::Ptr) {
       // we got four possible cases when a function return pointers:
       //  1. Pointer to one of the argument   (LUT[ptr]==Some) => passthrough
       //  2. Pointer to malloc'd memory       (LUT[ptr]==Some) => passthrough
@@ -297,7 +291,7 @@ void Platform::enqueueInvokeAsync0(JNIEnv *env, jclass, jlong nativePeer, //
       //  4. Pointer to stack allocated data  (LUT[ptr]==None) => undefined, should not happen
 
       auto args = mk_string<rt::Type>(
-          argTpeStore, [](auto &tpe) { return typeName(tpe); }, ",");
+          argTs, [](auto &tpe) { return typeName(tpe); }, ",");
       throwGeneric(env, EX, "Returning pointers is unimplemented, args (return at the end): " + args);
       //      std::unordered_map<void *, std::pair<jobject, jsize>> allocations;
       //

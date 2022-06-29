@@ -19,14 +19,14 @@ class InlineArraySuite extends BaseSuite {
       test(s"${C.runtimeClass}-fill-x$n=$expected") {
 
 
-        val actual = Buffer.ofDim[A](n) 
+        val actual = Buffer.ofDim[A](n)
         doOffload {
           val xs = Array.ofDim[A](n)
           unrollInclusive(n - 1)(i => xs(i) = expected)
           unrollInclusive(n - 1)(i =>  actual(i) = xs(i) )
           ()
         }
-        
+
         actual.foreach(x => assertValEquals(x, expected))
       }
     }

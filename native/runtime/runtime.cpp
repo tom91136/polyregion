@@ -7,6 +7,18 @@
 
 using namespace polyregion;
 
+runtime::ArgBuffer::ArgBuffer(std::initializer_list<TypedPointer> args) { put(args); }
+void runtime::ArgBuffer::put(runtime::Type tpe, void *ptr) { put({{tpe, ptr}}); }
+void runtime::ArgBuffer::put(std::initializer_list<runtime::TypedPointer> args) {
+  for (auto &[tpe, ptr] : args) {
+    types.push_back(tpe);
+    if (auto size = byteOfType(tpe); size != 0) {
+      auto begin = static_cast<std::byte *>(ptr);
+      data.insert(data.end(), begin, begin + size);
+    }
+  }
+}
+
 void runtime::init() { libm::exportAll(); }
 std::optional<runtime::Access> runtime::fromUnderlying(uint8_t v) {
   auto x = static_cast<Access>(v);
@@ -44,10 +56,20 @@ void runtime::detail::CountedCallbackHandler::consume(void *data) {
   if (dev) dev->second();
 }
 
-
 std::string runtime::detail::allocateAndTruncate(const std::function<void(char *, size_t)> &f, size_t length) {
   std::string xs(length, '\0');
   f(xs.data(), xs.length() - 1);
   xs.erase(xs.find('\0'));
   return xs;
+}
+
+std::vector<void *> runtime::detail::argDataAsPointers(const std::vector<Type> &types,
+                                                       std::vector<std::byte> &argData) {
+  std::byte *argsPtr = argData.data();
+  std::vector<void *> argsPtrStore(types.size());
+  for (size_t i = 0; i < types.size(); ++i) {
+    argsPtrStore[i] = types[i] == Type::Void ? nullptr : argsPtr;
+    argsPtr += byteOfType((types[i]));
+  }
+  return argsPtrStore;
 }

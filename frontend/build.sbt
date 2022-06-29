@@ -24,11 +24,11 @@ lazy val commonSettings = Seq(
     ) ++
       Seq("-source", "1.8") ++
       Seq("-target", "1.8"),
-  scalacOptions ~= { options: Seq[String] =>
-    options.filterNot(
-      Set("-explain-types", "-explain")
-    )
-  },
+//  scalacOptions ~= { options: Seq[String] =>
+//    options.filterNot(
+//      Set("-explain-types", "-explain")
+//    )
+//  },
   scalacOptions ++= Seq(                     //
     "-no-indent",                            //
     "-Wconf:cat=unchecked:error",            //

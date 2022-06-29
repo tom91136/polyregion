@@ -177,7 +177,7 @@ void HipDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t s
   enqueueCallback(cb);
 }
 void HipDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                        const std::vector<Type> &types, std::vector<void *> &args, const Policy &policy,
+                                        std::vector<Type> types, std::vector<std::byte> argData, const Policy &policy,
                                         const MaybeCallback &cb) {
   TRACE();
   if (types.back() != Type::Void)
@@ -186,6 +186,7 @@ void HipDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
   auto grid = policy.global;
   auto block = policy.local.value_or(Dim3{});
   int sharedMem = 0;
+  auto args = detail::argDataAsPointers(types, argData);
   CHECKED(hipModuleLaunchKernel(fn,                        //
                                 grid.x, grid.y, grid.z,    //
                                 block.x, block.y, block.z, //
