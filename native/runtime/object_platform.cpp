@@ -147,12 +147,12 @@ std::unique_ptr<DeviceQueue> RelocatableDevice::createQueue() {
 }
 
 RelocatableDeviceQueue::RelocatableDeviceQueue(decltype(objects) objects, decltype(lock) lock)
-    : llvm::SectionMemoryManager(), objects(objects), lock(lock), ld(*this, *this) {
+    : objects(objects), lock(lock) {
   TRACE();
 }
 
-uint64_t RelocatableDeviceQueue::getSymbolAddress(const std::string &Name) {
-  TRACE();
+MemoryManager::MemoryManager() : SectionMemoryManager(nullptr) {}
+uint64_t MemoryManager::getSymbolAddress(const std::string &Name) {
   return Name == "malloc" ? (uint64_t)&std::malloc : llvm::RTDyldMemoryManager::getSymbolAddress(Name);
 }
 
@@ -166,36 +166,37 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
   if (moduleIt == objects.end())
     throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "No module named " + moduleName + " was loaded");
 
-  const auto &obj = moduleIt->second;
+  std::thread([symbol, types, argData, cb, &obj = moduleIt->second]() {
+    MemoryManager mm;
+    llvm::RuntimeDyld ld(mm, mm);
 
-  ld.loadObject(*obj);
-  auto fnName = (obj->isMachO() || obj->isMachOUniversalBinary()) ? std::string("_") + symbol : symbol;
+    ld.loadObject(*obj);
+    auto fnName = (obj->isMachO() || obj->isMachOUniversalBinary()) ? std::string("_") + symbol : symbol;
 
-  if (auto sym = ld.getSymbol(fnName); !sym) {
-    auto table = ld.getSymbolTable();
-    std::vector<std::string> symbols;
-    symbols.reserve(table.size());
-    for (auto &[k, v] : table)
-      symbols.emplace_back("[`" + k.str() + "`@" + polyregion::hex(v.getAddress()) + "]");
-    throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Symbol `" + std::string(fnName) +
-                           "` not found in the given object, available symbols (" + std::to_string(table.size()) +
-                           ") = " +
-                           polyregion::mk_string<std::string>(
-                               symbols, [](auto &x) { return x; }, ","));
-  } else {
+    if (auto sym = ld.getSymbol(fnName); !sym) {
+      auto table = ld.getSymbolTable();
+      std::vector<std::string> symbols;
+      symbols.reserve(table.size());
+      for (auto &[k, v] : table)
+        symbols.emplace_back("[`" + k.str() + "`@" + polyregion::hex(v.getAddress()) + "]");
+      throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Symbol `" + std::string(fnName) +
+                             "` not found in the given object, available symbols (" + std::to_string(table.size()) +
+                             ") = " +
+                             polyregion::mk_string<std::string>(
+                                 symbols, [](auto &x) { return x; }, ","));
+    } else {
 
-    if (ld.finalizeWithMemoryManagerLocking(); ld.hasError()) {
-      throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Symbol `" + std::string(symbol) +
-                             "` failed to finalise for execution: " + ld.getErrorString().str());
-    }
+      if (ld.finalizeWithMemoryManagerLocking(); ld.hasError()) {
+        throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Symbol `" + std::string(symbol) +
+                               "` failed to finalise for execution: " + ld.getErrorString().str());
+      }
 
-    std::thread([addr = sym.getAddress(), types, argData, cb]() {
       auto argData_ = argData;
       auto argPtrs = detail::argDataAsPointers(types, argData_);
-      invoke(addr, types, argPtrs);
+      invoke(sym.getAddress(), types, argPtrs);
       if (cb) (*cb)();
-    }).detach();
-  }
+    }
+  }).detach();
 }
 
 static constexpr const char *SHOBJ_ERROR_PREFIX = "[RelocatableObject error] ";

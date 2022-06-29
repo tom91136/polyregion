@@ -184,7 +184,7 @@ object compiletime {
   ) = for {
     // configs               <- reifyConfigFromTpe[C](using q.underlying)()
     (captures, prog0, log) <- Compiler.compileExpr(f)
-    prog = prog0.copy(entry = prog0.entry.copy(name = p.Sym("lambda")))
+    prog = prog0.copy(entry = prog0.entry.copy(name = p.Sym(s"lambda${ProgramCounter.getAndIncrement()}")))
     _    = println(log.render)
 
     serialisedAst <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, prog)))
