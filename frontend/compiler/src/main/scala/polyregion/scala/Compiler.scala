@@ -246,11 +246,15 @@ object Compiler {
     log              <- log ~+ sdefLog
 
     captureNameToModuleRefTable = deps.modules.map { (symbol, struct) =>
-      // It appears that `q.Ref.apply` prepends a `q.This(Some("this"))` at the root of the select if
-      // the object is local to the scope, not really sure why it does that but we need to remove it.
+      // It appears that `q.Ref.apply` prepends a `q.This(Some("this"))` at the root of the
+      // select if the object is local to the scope regardless of the actual ownership type
+      // (i.e. nested modules are not path-dependent, where as modules nested in classes are not),
+      // not really sure why it does that but we need to remove it otherwise it's essentially a
+      // syntax error at splice site.
       def removeThisFromRef(t: q.Symbol): q.Ref = q.Ref(t.companionModule) match {
-        case select @ q.Select(root @ q.This(_), n) => removeThisFromRef(root.symbol).select(select.symbol)
-        case x                                      => x
+        case select @ q.Select(root @ q.This(_), _) if t.companionModule.maybeOwner.flags.is(q.Flags.Module) =>
+          removeThisFromRef(root.symbol).select(select.symbol)
+        case x => x
       }
       struct.name.fqn.mkString("_") -> removeThisFromRef(symbol)
     } ++ exprThisCls.map((clsDef, _) => "this" -> q.This(clsDef.symbol)).toMap

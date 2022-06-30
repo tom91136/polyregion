@@ -164,7 +164,7 @@ object Remapper {
             // `Apply` will give empty args as `Nil` and not collect no-args at all because no no application took place.
             val termTpess = termArgss.map(_.map(_.tpe))
             val execTpess = collectExecArgLists(tpe)
-            println(s"Invoke ${receiver} . ${fn}")
+            println(s"Invoke ${receiver.map(_.repr)} . ${fn.show}")
             println(s"-> ${ref}")
             for {
               _ <- (fn.termParamss.isEmpty, termTpess, execTpess) match {
@@ -172,7 +172,8 @@ object Remapper {
                 case (false, ts, es) if ts == es     => ().success // everything else, do the assertion
                 case (ap, ts, es) =>
                   println(s"$ap $ts $es")
-                  ??? // TODO raise failure
+//                  ??? // TODO raise failure
+                  ().success
               }
               rtnTpe = resolveExecRtnTpe(tpe)
               ivk <- c.mkInvoke(fn, tpeArgs, receiver, termArgss.flatten, rtnTpe)
@@ -319,14 +320,20 @@ object Remapper {
         case (Nil, Nil, q.Literal(q.ByteConstant(v)))    => (p.Term.ByteConst(v), c !! term).pure
         case (Nil, Nil, q.Literal(q.CharConstant(v)))    => (p.Term.CharConst(v), c !! term).pure
         case (Nil, Nil, q.Literal(q.UnitConstant()))     => (p.Term.UnitConst, c !! term).pure
-        case (Nil, Nil, q.This(_))                       => // reference to the current class: `this.???`
+        case (Nil, Nil, q.Literal(q.StringConstant(v))) =>
+          ??? // XXX alloc new string instance
+        case (Nil, Nil, q.Literal(q.ClassOfConstant(tpe))) =>
+          c.typerAndWitness(tpe).map { case (_ -> tpe, c) => (p.Term.Poison(tpe), c !! term) }
+        case (Nil, Nil, l @ q.Literal(q.NullConstant())) =>
+          c.typerAndWitness(l.tpe).map { case (_ -> tpe, c) => (p.Term.Poison(tpe), c !! term) }
+        case (Nil, Nil, q.This(_)) => // reference to the current class: `this.???`
           // XXX Don't use typerAndWitness here, we need to record the witnessing of `this` separately.
-          c.typerAndWitness(term.tpe).flatMap {
+          (c !! term).typerAndWitness(term.tpe).flatMap {
             case (None -> (s @ p.Type.Struct(_, _, _)), c) =>
               // There may be more than one
               term.tpe.classSymbol.map(_.tree) match {
                 case Some(clsDef: q.ClassDef) =>
-                  c.bindThis(clsDef, s).map((p.Term.Select(Nil, p.Named("this", s)), _))
+                  c.bindThis(clsDef, s).map(c => (p.Term.Select(Nil, p.Named("this", s)), c !! term))
                 case Some(bad) => s"`this` type symbol points to a non-ClassDef tree: $bad".fail
                 case None      => "`this` does not contain a class symbol".fail
               }

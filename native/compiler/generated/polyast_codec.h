@@ -166,6 +166,8 @@ namespace TypeKind {
 namespace Term { 
 [[nodiscard]] EXPORT Term::Select select_from_json(const json &);
 [[nodiscard]] EXPORT json select_to_json(const Term::Select &);
+[[nodiscard]] EXPORT Term::Poison poison_from_json(const json &);
+[[nodiscard]] EXPORT json poison_to_json(const Term::Poison &);
 [[nodiscard]] EXPORT Term::UnitConst unitconst_from_json(const json &);
 [[nodiscard]] EXPORT json unitconst_to_json(const Term::UnitConst &);
 [[nodiscard]] EXPORT Term::BoolConst boolconst_from_json(const json &);

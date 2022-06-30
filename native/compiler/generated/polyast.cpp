@@ -257,6 +257,16 @@ bool Term::operator==(const Term::Select &l, const Term::Select &r) {
   return l.init == r.init && l.last == r.last;
 }
 
+std::ostream &Term::operator<<(std::ostream &os, const Term::Poison &x) {
+  os << "Poison(";
+  os << x.t;
+  os << ')';
+  return os;
+}
+bool Term::operator==(const Term::Poison &l, const Term::Poison &r) { 
+  return *l.t == *r.t;
+}
+
 std::ostream &Term::operator<<(std::ostream &os, const Term::UnitConst &x) {
   os << "UnitConst(";
   os << ')';
@@ -1378,6 +1388,10 @@ std::size_t std::hash<polyregion::polyast::Position>::operator()(const polyregio
 std::size_t std::hash<polyregion::polyast::Term::Select>::operator()(const polyregion::polyast::Term::Select &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.init)>()(x.init);
   seed ^= std::hash<decltype(x.last)>()(x.last) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Term::Poison>::operator()(const polyregion::polyast::Term::Poison &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.t)>()(x.t);
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Term::UnitConst>::operator()(const polyregion::polyast::Term::UnitConst &x) const noexcept {

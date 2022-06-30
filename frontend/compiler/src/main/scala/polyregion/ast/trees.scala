@@ -183,6 +183,7 @@ extension (n: p.Named) {
 extension (e: p.Term) {
   def repr: String = e match {
     case p.Term.Select(xs, x)  => (xs :+ x).map(_.repr).mkString(".")
+    case p.Term.Poison(t)      => s"Poison($t)"
     case p.Term.UnitConst      => s"Unit()"
     case p.Term.BoolConst(x)   => s"Bool($x)"
     case p.Term.ByteConst(x)   => s"Byte($x)"

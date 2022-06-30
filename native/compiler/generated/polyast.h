@@ -100,6 +100,7 @@ using Any = Alternative<Float, Double, Bool, Byte, Char, Short, Int, Long, Unit,
 
 namespace Term { 
 struct Select;
+struct Poison;
 struct UnitConst;
 struct BoolConst;
 struct ByteConst;
@@ -110,7 +111,7 @@ struct LongConst;
 struct FloatConst;
 struct DoubleConst;
 struct StringConst;
-using Any = Alternative<Select, UnitConst, BoolConst, ByteConst, CharConst, ShortConst, IntConst, LongConst, FloatConst, DoubleConst, StringConst>;
+using Any = Alternative<Select, Poison, UnitConst, BoolConst, ByteConst, CharConst, ShortConst, IntConst, LongConst, FloatConst, DoubleConst, StringConst>;
 } // namespace Term
 namespace NullaryIntrinsicKind { 
 struct GpuGlobalIdxX;
@@ -425,6 +426,14 @@ struct EXPORT Select : Term::Base {
   EXPORT operator Any() const { return std::make_shared<Select>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::Select &);
   EXPORT friend bool operator==(const Term::Select &, const Term::Select &);
+};
+
+struct EXPORT Poison : Term::Base {
+  Type::Any t;
+  explicit Poison(Type::Any t) noexcept : Term::Base(t), t(std::move(t)) {}
+  EXPORT operator Any() const { return std::make_shared<Poison>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::Poison &);
+  EXPORT friend bool operator==(const Term::Poison &, const Term::Poison &);
 };
 
 struct EXPORT UnitConst : Term::Base {
@@ -1345,6 +1354,9 @@ template <> struct std::hash<polyregion::polyast::Position> {
 };
 template <> struct std::hash<polyregion::polyast::Term::Select> {
   std::size_t operator()(const polyregion::polyast::Term::Select &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Term::Poison> {
+  std::size_t operator()(const polyregion::polyast::Term::Poison &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Term::UnitConst> {
   std::size_t operator()(const polyregion::polyast::Term::UnitConst &) const noexcept;

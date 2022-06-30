@@ -261,6 +261,7 @@ object Target {
 
   object NVPTX64 {
     inline def apply[A <: SString](inline uarch: A) = new NVPTX64(uarch) { override type UArch = A }
+    final val SM52                                  = NVPTX64("sm_52")
     final val SM61                                  = NVPTX64("sm_61")
     final val SM80                                  = NVPTX64("sm_80")
   }

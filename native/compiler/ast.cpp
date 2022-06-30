@@ -47,6 +47,7 @@ using std::string;
                          x.init, [&](auto x) { return repr(x); }, ".") +
                          "." + repr(x.last);
       },
+      [](const Term::Poison &x) { return "Null(" + repr(x.tpe) + ")"s; },
       [](const Term::UnitConst &x) { return "Unit()"s; },
       [](const Term::BoolConst &x) { return "Bool(" + std::to_string(x.value) + ")"; },
       [](const Term::ByteConst &x) { return "Byte(" + std::to_string(x.value) + ")"; },

@@ -73,6 +73,7 @@ object VerifyPass   {
                   (c0, n.tpe)
                 }
                 ._1
+            case p.Term.Poison(_)      => c
             case p.Term.UnitConst      => c
             case p.Term.BoolConst(_)   => c
             case p.Term.ByteConst(_)   => c

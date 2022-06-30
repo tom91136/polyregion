@@ -12,6 +12,7 @@ trait BaseSuite extends munit.FunSuite {
     import polyregion.scala.*
     import polyregion.scala.blocking.*
     try
+//      CUDA.devices(0).aot.task[Config[Target.NVPTX64.SM52.type, Opt.O2], A](x)
       Host.aot.task[Config[Target.Host.type, Opt.O2], A](x)
     catch {
       case e: AssertionError => throw e

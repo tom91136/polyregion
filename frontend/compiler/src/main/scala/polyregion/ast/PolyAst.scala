@@ -54,6 +54,7 @@ object PolyAst {
 
   enum Term(val tpe: Type) derives MsgPack.Codec {
     case Select(init: List[Named], last: Named) extends Term(last.tpe)
+    case Poison(t : Type)                       extends Term(t)
     case UnitConst                              extends Term(Type.Unit)
     case BoolConst(value: Boolean)              extends Term(Type.Bool)
     case ByteConst(value: Byte)                 extends Term(Type.Byte)

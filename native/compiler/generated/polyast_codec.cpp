@@ -296,6 +296,16 @@ json Term::select_to_json(const Term::Select& x) {
   return json::array({init, last});
 }
 
+Term::Poison Term::poison_from_json(const json& j) { 
+  auto t =  Type::any_from_json(j.at(0));
+  return Term::Poison(t);
+}
+
+json Term::poison_to_json(const Term::Poison& x) { 
+  auto t =  Type::any_to_json(x.t);
+  return json::array({t});
+}
+
 Term::UnitConst Term::unitconst_from_json(const json& j) { 
   return {};
 }
@@ -399,16 +409,17 @@ Term::Any Term::any_from_json(const json& j) {
   const auto t = j.at(1);
   switch (ord) {
   case 0: return Term::select_from_json(t);
-  case 1: return Term::unitconst_from_json(t);
-  case 2: return Term::boolconst_from_json(t);
-  case 3: return Term::byteconst_from_json(t);
-  case 4: return Term::charconst_from_json(t);
-  case 5: return Term::shortconst_from_json(t);
-  case 6: return Term::intconst_from_json(t);
-  case 7: return Term::longconst_from_json(t);
-  case 8: return Term::floatconst_from_json(t);
-  case 9: return Term::doubleconst_from_json(t);
-  case 10: return Term::stringconst_from_json(t);
+  case 1: return Term::poison_from_json(t);
+  case 2: return Term::unitconst_from_json(t);
+  case 3: return Term::boolconst_from_json(t);
+  case 4: return Term::byteconst_from_json(t);
+  case 5: return Term::charconst_from_json(t);
+  case 6: return Term::shortconst_from_json(t);
+  case 7: return Term::intconst_from_json(t);
+  case 8: return Term::longconst_from_json(t);
+  case 9: return Term::floatconst_from_json(t);
+  case 10: return Term::doubleconst_from_json(t);
+  case 11: return Term::stringconst_from_json(t);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
   }
 }
@@ -416,16 +427,17 @@ Term::Any Term::any_from_json(const json& j) {
 json Term::any_to_json(const Term::Any& x) { 
   return std::visit(overloaded{
   [](const Term::Select &y) -> json { return {0, Term::select_to_json(y)}; },
-  [](const Term::UnitConst &y) -> json { return {1, Term::unitconst_to_json(y)}; },
-  [](const Term::BoolConst &y) -> json { return {2, Term::boolconst_to_json(y)}; },
-  [](const Term::ByteConst &y) -> json { return {3, Term::byteconst_to_json(y)}; },
-  [](const Term::CharConst &y) -> json { return {4, Term::charconst_to_json(y)}; },
-  [](const Term::ShortConst &y) -> json { return {5, Term::shortconst_to_json(y)}; },
-  [](const Term::IntConst &y) -> json { return {6, Term::intconst_to_json(y)}; },
-  [](const Term::LongConst &y) -> json { return {7, Term::longconst_to_json(y)}; },
-  [](const Term::FloatConst &y) -> json { return {8, Term::floatconst_to_json(y)}; },
-  [](const Term::DoubleConst &y) -> json { return {9, Term::doubleconst_to_json(y)}; },
-  [](const Term::StringConst &y) -> json { return {10, Term::stringconst_to_json(y)}; },
+  [](const Term::Poison &y) -> json { return {1, Term::poison_to_json(y)}; },
+  [](const Term::UnitConst &y) -> json { return {2, Term::unitconst_to_json(y)}; },
+  [](const Term::BoolConst &y) -> json { return {3, Term::boolconst_to_json(y)}; },
+  [](const Term::ByteConst &y) -> json { return {4, Term::byteconst_to_json(y)}; },
+  [](const Term::CharConst &y) -> json { return {5, Term::charconst_to_json(y)}; },
+  [](const Term::ShortConst &y) -> json { return {6, Term::shortconst_to_json(y)}; },
+  [](const Term::IntConst &y) -> json { return {7, Term::intconst_to_json(y)}; },
+  [](const Term::LongConst &y) -> json { return {8, Term::longconst_to_json(y)}; },
+  [](const Term::FloatConst &y) -> json { return {9, Term::floatconst_to_json(y)}; },
+  [](const Term::DoubleConst &y) -> json { return {10, Term::doubleconst_to_json(y)}; },
+  [](const Term::StringConst &y) -> json { return {11, Term::stringconst_to_json(y)}; },
   [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
   }, *x);
 }
@@ -1579,13 +1591,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "eb2ff39bd24f2432c88b33e9994af2c1") {
-   throw std::runtime_error("Expecting ADT hash to be eb2ff39bd24f2432c88b33e9994af2c1, but was " + hash);
+  if(hash != "33b481d1f47c8f8265d9fb4ae4e41285") {
+   throw std::runtime_error("Expecting ADT hash to be 33b481d1f47c8f8265d9fb4ae4e41285, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"eb2ff39bd24f2432c88b33e9994af2c1", x});
+  return json::array({"33b481d1f47c8f8265d9fb4ae4e41285", x});
 }
 } // namespace polyregion::polyast

@@ -53,19 +53,20 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
 
 std::string backend::CSource::mkRef(const Term::Any &ref) {
   return variants::total(
-      *ref,                                                                  //
-      [](const Term::Select &x) { return polyast::qualified(x); },           //
-      [](const Term::UnitConst &x) { return "/*void*/"s; },                  //
-      [](const Term::BoolConst &x) { return x.value ? "true"s : "false"s; }, //
-      [](const Term::ByteConst &x) { return std::to_string(x.value); },      //
-      [](const Term::CharConst &x) { return std::to_string(x.value); },      //
-      [](const Term::ShortConst &x) { return std::to_string(x.value); },     //
-      [](const Term::IntConst &x) { return std::to_string(x.value); },       //
-      [](const Term::LongConst &x) { return std::to_string(x.value); },      //
-      [](const Term::DoubleConst &x) { return std::to_string(x.value); },    //
-      [](const Term::FloatConst &x) { return std::to_string(x.value); },     //
-      [](const Term::StringConst &x) { return "" + x.value + ""; }           //
-  );                                                                         // FIXME escape string
+      *ref,                                                                    //
+      [](const Term::Select &x) { return polyast::qualified(x); },             //
+      [](const Term::Poison &x) { return "NULL /* " + repr(x.tpe) + " */"s; }, //
+      [](const Term::UnitConst &x) { return "/*void*/"s; },                    //
+      [](const Term::BoolConst &x) { return x.value ? "true"s : "false"s; },   //
+      [](const Term::ByteConst &x) { return std::to_string(x.value); },        //
+      [](const Term::CharConst &x) { return std::to_string(x.value); },        //
+      [](const Term::ShortConst &x) { return std::to_string(x.value); },       //
+      [](const Term::IntConst &x) { return std::to_string(x.value); },         //
+      [](const Term::LongConst &x) { return std::to_string(x.value); },        //
+      [](const Term::DoubleConst &x) { return std::to_string(x.value); },      //
+      [](const Term::FloatConst &x) { return std::to_string(x.value); },       //
+      [](const Term::StringConst &x) { return "" + x.value + ""; }             //
+  );                                                                           // FIXME escape string
 }
 
 std::string backend::CSource::mkExpr(const Expr::Any &expr, const std::string &key) {
