@@ -15,7 +15,9 @@ import scala.util.{Success, Try}
   else doUntilNotEq(y)(f)
 }
 
-final class CompilerException(m: String) extends Exception(m)
+final class CompilerException(m: String, e: Throwable) extends Exception(m, e) {
+  def this(s: String) = this(s, null)
+}
 
 type Result[A] = Either[Throwable, A]
 
@@ -100,6 +102,12 @@ extension (message: => String) {
 }
 extension [A](m: Option[A]) {
   def failIfEmpty(message: => String): Result[A] = m.fold(message.fail[A])(Right(_))
+}
+extension [A](m: List[A]) {
+  def failIfNotSingleton(message: => String): Result[A] = m match {
+    case x :: Nil => Right(x)
+    case xs       => message.fail[A]
+  }
 }
 extension (e: => Throwable) {
   def failE[A]: Result[A] = Left(e)
@@ -201,16 +209,16 @@ extension (e: p.Type) {
 
   def mapAcc[A](f: p.Type => (p.Type, List[A])): (p.Type, List[A]) = e match {
     case p.Type.Array(c) =>
-      val (c0, as0) = f(c)
+      val (c0, as0) = c.mapAcc(f)
       val (t0, as1) = f(p.Type.Array(c0))
       (t0, as0 ::: as1)
     case p.Type.Struct(name, tpeVars, args) =>
-      val (args0, as0) = args.map(f).unzip
+      val (args0, as0) = args.map(_.mapAcc(f)).unzip
       val (t0, as1)    = f(p.Type.Struct(name, tpeVars, args0))
       (t0, as0.flatten ::: as1)
     case p.Type.Exec(tpeVars, args, rtn) =>
-      val (args0, as0) = args.map(f).unzip
-      val (rtn0, as1)  = f(rtn)
+      val (args0, as0) = args.map(_.mapAcc(f)).unzip
+      val (rtn0, as1)  = rtn.mapAcc(f)
       val (t0, as2)    = f(p.Type.Exec(tpeVars, args0, rtn0))
       (t0, as0.flatten ::: as1 ::: as2)
     case x => f(x)
@@ -581,6 +589,13 @@ extension (f: p.Function) {
 }
 
 extension (f: p.Signature) {
+
+  def mapType(tf: p.Type => p.Type): p.Signature = f.copy(
+    receiver = f.receiver.map(_.map(tf)),
+    args = f.args.map(_.map(tf)),
+    rtn = f.rtn.map(tf)
+  )
+
   def repr: String =
     s"${f.receiver.fold("")(r => r.repr + ".")}${f.name.repr}(${f.args.map(_.repr).mkString(", ")}) : ${f.rtn.repr}"
 }

@@ -5,12 +5,9 @@ import polyregion.ast.{PolyAst as p, *}
 import polyregion.scala.*
 
 import _root_.scala.annotation.{compileTimeOnly, tailrec}
-import _root_.scala.compiletime.{erasedValue, summonInline}
 import _root_.scala.quoted.*
-import _root_.scala.reflect.ClassTag
-import scala.collection.mutable.ListBuffer
 
-@compileTimeOnly("This class only exists at compile-time to for internal use")
+@compileTimeOnly("This class only exists at compile-time for internal use")
 object compiletime {
 
   private final val TopRefs =
@@ -18,12 +15,20 @@ object compiletime {
 
   private def simplifyTpe(using q: Quoted)(t: q.TypeRepr) = t.dealias.simplified.widenTermRefByName
 
-  inline def derivePackedMirrors1[T <: Tuple]: Map[p.Sym, p.Mirror] = ${ derivePackedMirrors1Impl[T] }
+  @tailrec private def collectWitnesses[T <: Tuple](using q: Quoted, t: Type[T])(
+      xs: List[(q.TypeRepr, q.TypeRepr)] = Nil
+  ): List[(q.TypeRepr, q.TypeRepr)] = {
+    given Quotes = q.underlying
+    t match {
+      case '[EmptyTuple]   => xs
+      case '[(s, m) *: ts] => collectWitnesses[ts]((q.TypeRepr.of[s], q.TypeRepr.of[m]) :: xs)
+    }
+  }
 
+  inline def derivePackedMirrors1[T <: Tuple]: Map[p.Sym, p.Mirror] = ${ derivePackedMirrors1Impl[T] }
   private def derivePackedMirrors1Impl[T <: Tuple](using Q: Quotes, t: Type[T]): Expr[Map[p.Sym, p.Mirror]] = {
     implicit val q = Quoted(Q)
     val witnesses  = collectWitnesses[T]().map((a, b) => (simplifyTpe(a), simplifyTpe(b)))
-
     (for {
       typeLUT <- witnesses.traverse { (s, m) =>
         for {
@@ -39,19 +44,13 @@ object compiletime {
           }
         } yield mt -> st
       }
-      typeTable = typeLUT.toMap
-      data <- witnesses.traverse(derivePackedMirrorsImpl(_, _) { (source, mirror) =>
-        (source =:= mirror) ||
-        (witnesses.filter((k, v) => k =:= source && v =:= mirror) match {
-          case _ :: Nil => true
-          case _        => false
-        })
-      }(typeTable))
+      mirrorToSourceTable = typeLUT.toMap
+      data <- witnesses.traverse(derivePackedMirrorsImpl(_, _)(mirrorToSourceTable))
     } yield data) match {
       case Left(e)                   => throw e
       case Right(xs: List[p.Mirror]) =>
-        // XXX JVM bytecode limit is 64k per method, make sure we're under that by using 1k per constant
-        // we also generate lazy vals (could be defs if this becomes a problem) which transforms to a separate synthetic method
+        // XXX JVM bytecode limit is 64k per method, make sure we're under that by using 1k per constant,
+        // we also generate lazy vals (could be defs if this becomes a problem) which transforms to a separate synthetic method.
         val packs = MsgPack.encode(xs).grouped(1024).toList
         println(s"packs = ${packs.size}")
         type PickleType = Array[Byte]
@@ -71,106 +70,123 @@ object compiletime {
     }
   }
 
-  @tailrec private def collectWitnesses[T <: Tuple](using q: Quoted, t: Type[T])(
-      xs: List[(q.TypeRepr, q.TypeRepr)] = Nil
-  ): List[(q.TypeRepr, q.TypeRepr)] = {
-    given Quotes = q.underlying
-    t match {
-      case '[EmptyTuple]   => xs
-      case '[(s, m) *: ts] => collectWitnesses[ts]((q.TypeRepr.of[s], q.TypeRepr.of[m]) :: xs)
+  private def extractMethodTypes(using q: Quoted) //
+  (clsTpe: q.TypeRepr): Result[(q.Symbol, List[(q.Symbol, p.Signature)])] =
+    clsTpe.classSymbol.failIfEmpty(s"No class symbol for ${clsTpe}").flatMap { sym =>
+      println(s"$sym ${sym.methodMembers.toList}")
+      sym.methodMembers
+        .filter { m =>
+          val flags = m.flags
+          flags.is(q.Flags.Method) && !(
+            flags.is(q.Flags.Private) || flags.is(q.Flags.Protected) || flags.is(q.Flags.Synthetic)
+          )
+        }
+        .filterNot(x => TopRefs.contains(x.owner.fullName))
+        .traverseFilter { s =>
+          s.tree match {
+            case d: q.DefDef => 
+              println(s"> $d")
+              Compiler.deriveSignature(d).map(sig => Some(s -> sig))
+            case _           => None.success
+          }
+        }
+        .map { xs =>
+          println("\t>>" + xs)
+          sym -> xs
+        }
     }
-  }
+
+  private def mirrorMethod(using q: Quoted)              //
+  (sourceMethodSym: q.Symbol, mirrorMethodSym: q.Symbol) //
+  (mirrorToSourceTable: Map[p.Sym, p.Sym]): Result[(p.Function, q.Dependencies)] = for {
+
+    log <- Log(s"Mirror for ${sourceMethodSym} -> ${mirrorMethodSym}")
+    _ = println(s"Do ${sourceMethodSym}")
+
+    sourceSignature <- sourceMethodSym.tree match {
+      case d: q.DefDef => polyregion.scala.Compiler.deriveSignature(d)
+      case unsupported => s"Unsupported source tree: ${unsupported.show} ".fail
+    }
+    _ = println(s"SIG=$sourceSignature")
+
+    mirrorMethods <- mirrorMethodSym.tree match {
+      case d: q.DefDef =>
+        println(d.show)
+        for {
+
+          ((fn, fnDeps), fnLog) <- polyregion.scala.Compiler.compileFn(d)
+
+          rewrittenMirror =
+            fn.copy(name = sourceSignature.name, receiver = sourceSignature.receiver.map(p.Named("this", _)))
+              .mapType(_.map {
+                case p.Type.Struct(sym, tpeVars, args) =>
+                  p.Type.Struct(mirrorToSourceTable.getOrElse(sym, sym), tpeVars, args)
+                case x => x
+              })
+        } yield rewrittenMirror -> fnDeps
+
+      case unsupported => s"Unsupported mirror tree: ${unsupported.show} ".fail
+    }
+  } yield mirrorMethods
 
   private def derivePackedMirrorsImpl(using q: Quoted) //
   (source: q.TypeRepr, mirror: q.TypeRepr)             //
-  (typeEq: (q.TypeRepr, q.TypeRepr) => Boolean)        //
-  (typeLUT: Map[p.Sym, p.Sym]): Result[p.Mirror] = {
-
-    case class ReflectedMethodTpe(symbol: q.Symbol, args: List[(String, q.TypeRepr)], rtn: q.TypeRepr) {
-      def =:=(that: ReflectedMethodTpe): Boolean =
-        args.lengthCompare(that.args) == 0 &&
-          args.zip(that.args).forall { case ((lName, lTpe), (rName, rTpe)) =>
-            lName == rName && typeEq(lTpe, rTpe)
-          } &&
-          typeEq(rtn, that.rtn)
-      def show: String = s"${symbol.name}(${args.map((name, tpe) => s"$name:${tpe.show}").mkString(",")}):${rtn.show}"
-    }
-
-    def extractMethodTypes(clsTpe: q.TypeRepr): Result[(q.Symbol, List[ReflectedMethodTpe])] =
-      clsTpe.classSymbol.failIfEmpty(s"No class symbol for ${clsTpe}").map { sym =>
-        sym -> sym.methodMembers
-          .filter { m =>
-            val flags = m.flags
-            flags.is(q.Flags.Method) && !(
-              flags.is(q.Flags.Private) || flags.is(q.Flags.Protected) || flags.is(q.Flags.Synthetic)
-            )
-          }
-          .filterNot(x => TopRefs.contains(x.owner.fullName))
-          .map(m => m -> simplifyTpe(clsTpe.memberType(m)))
-          .collect { case (m, q.MethodType(argNames, argTpes, rtnTpe)) =>
-            ReflectedMethodTpe(m, argNames.zip(argTpes.map(simplifyTpe(_))), simplifyTpe(rtnTpe))
-          }
-      }
-
-    def mirrorMethod(sourceMethodSym: q.Symbol, mirrorMethodSym: q.Symbol): Result[(p.Function, q.Dependencies)] = for {
-
-      log <- Log(s"Mirror for ${sourceMethodSym} -> ${mirrorMethodSym}")
-      _ = println(s"Do ${sourceMethodSym}")
-
-      sourceSignature <- sourceMethodSym.tree match {
-        case d: q.DefDef => polyregion.scala.Compiler.deriveSignature(d)
-        case unsupported => s"Unsupported source tree: ${unsupported.show} ".fail
-      }
-      _ = println(s"SIG=$sourceSignature")
-
-      mirrorMethods <- mirrorMethodSym.tree match {
-        case d: q.DefDef =>
-          println(d.show)
-          for {
-
-            ((fn, fnDeps), fnLog) <- polyregion.scala.Compiler.compileFn(d)
-
-            rewrittenMirror =
-              fn.copy(name = sourceSignature.name, receiver = sourceSignature.receiver.map(p.Named("this", _)))
-                .mapType(_.map {
-                  case p.Type.Struct(sym, tpeVars, args) => p.Type.Struct(typeLUT.getOrElse(sym, sym), tpeVars, args)
-                  case x                                 => x
-                })
-          } yield rewrittenMirror -> fnDeps
-
-        case unsupported => s"Unsupported mirror tree: ${unsupported.show} ".fail
-      }
-    } yield mirrorMethods
+  (mirrorToSourceTable: Map[p.Sym, p.Sym]): Result[p.Mirror] = {
 
     val m = for {
       (sourceSym, sourceMethods) <- extractMethodTypes(source)
       (mirrorSym, mirrorMethods) <- extractMethodTypes(mirror)
 
-      _ = println(s">>## ${sourceSym.fullName} -> ${mirrorSym.fullName} ")
+      _ = println(
+        s">>## ${sourceSym.fullName}(m=${sourceMethods.size})  -> ${mirrorSym.fullName}(m=${mirrorMethods.size}) "
+      )
       mirrorStruct <- Retyper.structDef0(mirrorSym)
-      sourceMethodTable = sourceMethods.groupBy(_.symbol.name)
-      _                 = println(s"${sourceMethodTable.mkString("\n\t")}")
-      mirroredMethods <- mirrorMethods.flatTraverse { reflectedMirror =>
-//        def fmtName(source: String) =
-//          s"<$source>${mirror.name}(${mirrorArgs.map((name, tpe) => s"$name:${tpe.show}").mkString(",")}):${mirrorRtn.show}"
+      sourceMethodTable = sourceMethods.groupBy(_._1.name)
+      _                 = println(s"Source Symbols:\n${sourceMethodTable.mkString("\n\t")}")
+      mirroredMethods <- mirrorMethods.flatTraverse { case (reflectedSym, reflectedSig) =>
+        sourceMethodTable.get(reflectedSym.name) match {
+          case None => // Extra method on mirror, check that it's private.
+            if (reflectedSym.flags.is(q.Flags.Private)) Nil.success
+            else
+              s"Method ${reflectedSig.repr} from ${mirrorSym} does not exists in source (${sourceSym}) and is not marked private".fail
+          case Some(xs) => // We got matches with potential overloads, resolve them.
+            for {
+              sourceName <- xs
+                .map(_._2.name)
+                .distinct
+                .failIfNotSingleton(
+                  s"Expected all method name matching ${reflectedSym.name} from ${sourceSym} to be the same"
+                )
+              // Map the mirrored method to use the source types first, otherwise we're comparing different classes entirely.
+              reflectedSigWithSourceTpes = reflectedSig
+                .copy(name = sourceName) // We also replace the name to use the source ones.
+                .mapType(_.map {
+                  case p.Type.Struct(sym, tpeVars, args) =>
+                    p.Type.Struct(mirrorToSourceTable.getOrElse(sym, sym), tpeVars, args)
+                  case x => x
+                })
 
-        sourceMethodTable.get(reflectedMirror.symbol.name) match {
-          case None => Nil.success // extra method on mirror
-          case Some(xs) => // we got overloads, resolve them
-            xs.filter(_ =:= reflectedMirror) match {
-              case sourceMirror :: Nil => // single match
-                mirrorMethod(sourceMirror.symbol, reflectedMirror.symbol).map((f, deps) => (f :: Nil, deps) :: Nil)
-              case Nil =>
-                s"Overload resolution for <${mirrorSym.fullName}>${reflectedMirror.show} with named arguments resulted in no match, the following methods were considered:\n\t${xs
-                  .map("\t" + _.show)
-                  .mkString("\n")}".fail
-              case xs =>
-                s"Overload resolution for <${mirrorSym.fullName}>${reflectedMirror.show} resulted in multiple matches: $xs".fail
-            }
+              r <- xs.filter { x =>
+                // match up reciever types
+
+                x._2 == reflectedSigWithSourceTpes
+              } match {
+                case sourceMirror :: Nil => // single match
+                  mirrorMethod(sourceMirror._1, reflectedSym)(mirrorToSourceTable).map((f, deps) =>
+                    (f :: Nil, deps) :: Nil
+                  )
+                case Nil =>
+                  val considered = xs.map("\t(failed) " + _._2.repr).mkString("\n")
+                  s"Overload resolution for ${reflectedSym} with resulted in no match, the following signatures were considered (mirror is the requirement):\n\t(mirror) ${reflectedSigWithSourceTpes.repr}\n${considered}".fail
+                case xs =>
+                  s"Overload resolution for ${reflectedSym} resulted in multiple matches (the program should not compile): $xs".fail
+              }
+            } yield r
+
         }
       }
       // We reject any mirror that require dependent functions as those would have to go through mirror substitution first,
-      // thus making this process recursive, which is quite error prone for in a macro context.
+      // thus making this process recursive, which is quite error prone in a macro context.
       // The workaround is to mark dependent functions as inline in the mirror.
       (functions, deps) = mirroredMethods.combineAll
       _ <-
@@ -180,8 +196,8 @@ object compiletime {
         else ().success
       // deps.classes
       // deps.modules
-      _ = println(deps.classes.keys.toList)
-      _ = println(deps.modules.keys.map(_.fullName).toList)
+      _ = println("Dependent Classes = " + deps.classes.keys.toList)
+      _ = println("Dependent Modules = " + deps.modules.keys.map(_.fullName).toList)
       (sdefs, sdefLogs) <- Compiler.deriveAllStructs(deps)()
     } yield p.Mirror(source = p.Sym(sourceSym.fullName), struct = mirrorStruct, functions = functions, sdefs)
 

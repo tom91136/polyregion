@@ -1,8 +1,8 @@
 package polyregion.prism
 
 import polyregion.ast.{PolyAst as p, *}
-import polyregion.scala.intrinsics
 import polyregion.prism.compiletime.derivePackedMirrors1
+import polyregion.scala.intrinsics
 
 object StdLib {
 
@@ -11,6 +11,13 @@ object StdLib {
   class Range(start: Int, end: Int, step: Int) {
     // def by(step: Int): Range            = mkDef(step) // new Range(start, end, step)
     // private inline def mkDef(step: Int): Range = new Range(start, end, step)
+  }
+
+  class ClassTag[T]{
+    // TODO
+  }
+  object ClassTag {
+    def apply[T](runtimeClass1: java.lang.Class[_]): ClassTag[T] = new ClassTag[T]
   }
 
   class RichInt(private val x: Int) {
@@ -123,11 +130,13 @@ object StdLib {
 
   final def Mirrors: Map[p.Sym, p.Mirror] = derivePackedMirrors1[
     (
-        S.collection.immutable.Range -> Range,
-        S.runtime.RichInt -> RichInt,
-        S.Predef.type -> Predef,
+//       S.collection.immutable.Range -> Range,
+      //  S.runtime.RichInt -> RichInt,
+      //  S.Predef.type -> Predef,
         S.Tuple2[_, _] -> Tuple2[_, _],
-        S.math.package$ -> math.type
+       S.math.package$ -> math.type,
+        S.reflect.ClassTag[_] -> ClassTag[_],
+        S.reflect.ClassTag.type -> ClassTag.type
     )
   ]
 

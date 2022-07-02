@@ -215,6 +215,8 @@ object Compiler {
     // we got a compiled term, compile all dependencies as well
     log <- log.info(s"Expr dependent methods", exprDeps.functions.values.map(_.toString).toList*)
     log <- log.info(s"Expr dependent structs", exprDeps.classes.values.map(_.toString).toList*)
+    _ = println(log.render().mkString("\n"))
+
 
     // log                 <- log.info(s"Expr dependent vars   ", exprDeps.vars.map(_.toString).toList*)
     (depFns, deps, depLog) <- compileAllDependencies(exprDeps)(StdLib.Functions)

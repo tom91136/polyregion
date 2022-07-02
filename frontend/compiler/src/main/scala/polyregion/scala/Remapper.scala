@@ -152,7 +152,7 @@ object Remapper {
           case x                 => x
         }
 
-        println(s"[mapRef0] tpe=${tpe.repr} ${ref.symbol.fullName}=${ref.symbol.flags.show} ")
+        println(s"[mapRef0] tpe=`${tpe.repr}` ua=`${tpe0.repr}` // rtn=${resolveExecRtnTpe(tpe)} ~ ${termArgss}")
 
         // Call no-arg functions (i.e. `x.toDouble` or just `def fn = ???; fn` ) directly or pass-through if not no-arg
         def invokeOrSelect(
@@ -161,19 +161,31 @@ object Remapper {
           case fn: q.DefDef => // `receiver?.$fn`
             // Assert that the term list matches Exec's nested (recursive) types.
             // Note that Exec treats both empty args `()` and no-args as `Nil` where as the collected arg lists through
-            // `Apply` will give empty args as `Nil` and not collect no-args at all because no no application took place.
-            val termTpess = termArgss.map(_.map(_.tpe))
+            // `Apply` will give empty args as `Nil` and not collect no-args at all because no application took place.
+            val termTpess = termArgss.map(_.map(_.tpe)) // Poison type???
             val execTpess = collectExecArgLists(tpe)
             println(s"Invoke ${receiver.map(_.repr)} . ${fn.show}")
-            println(s"-> ${ref}")
+            println(s"-> r=${ref} t=${termTpess} e=${execTpess}")
             for {
+              // First we validate the application by checking whether types of the positional arguments line up.
               _ <- (fn.termParamss.isEmpty, termTpess, execTpess) match {
                 case (true, Nil, (Nil :: Nil) | Nil) => ().success // no-ap; no-arg Exec (`Nil::Nil`) or no Exec (`Nil`)
-                case (false, ts, es) if ts == es     => ().success // everything else, do the assertion
-                case (ap, ts, es) =>
-                  println(s"$ap $ts $es")
-//                  ??? // TODO raise failure
-                  ().success
+                case (false, tss, ess) if tss == ess => ().success // everything else, do the assertion
+                case (ap, tss, ess) => // we may have unapplied generic types from the exec side
+                  (tss.flatten, ess.flatten) match {
+                    case (ts, es) if ts.size == es.size =>
+                      ts.zip(es).traverse {
+                        case (t, e) if t == e   => t.success // same type
+                        case (t, p.Type.Var(_)) => t.success // applied type
+                        case (p.Type.Struct(termSym, termVars, _), p.Type.Struct(execSym, execVars, _)) =>
+                          if (termSym != execSym) s"Class type mismatch: $termSym != $execSym ".fail
+                          else if (termVars != execVars)
+                            s"Class generic type arity mismatch: $termVars != $execVars ".fail
+                          else ().success
+                        case (t, u) => "Cannot match $t with $u".fail
+                      }
+                    case (ts, es) => s"Argument size mismatch $ts != $es".fail
+                  }
               }
               rtnTpe = resolveExecRtnTpe(tpe)
               ivk <- c.mkInvoke(fn, tpeArgs, receiver, termArgss.flatten, rtnTpe)
@@ -322,8 +334,8 @@ object Remapper {
         case (Nil, Nil, q.Literal(q.UnitConstant()))     => (p.Term.UnitConst, c !! term).pure
         case (Nil, Nil, q.Literal(q.StringConstant(v))) =>
           ??? // XXX alloc new string instance
-        case (Nil, Nil, q.Literal(q.ClassOfConstant(tpe))) =>
-          c.typerAndWitness(tpe).map { case (_ -> tpe, c) => (p.Term.Poison(tpe), c !! term) }
+        case (Nil, Nil, q.Literal(q.ClassOfConstant(_))) =>
+          c.typerAndWitness(term.tpe).map { case (_ -> tpe, c) => (p.Term.Poison(tpe), c !! term) }
         case (Nil, Nil, l @ q.Literal(q.NullConstant())) =>
           c.typerAndWitness(l.tpe).map { case (_ -> tpe, c) => (p.Term.Poison(tpe), c !! term) }
         case (Nil, Nil, q.This(_)) => // reference to the current class: `this.???`

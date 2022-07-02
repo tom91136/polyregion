@@ -143,7 +143,7 @@ object Retyper {
     repr.foldMapM(typer0(_).map((t, c) => (t :: Nil, c)))
 
   def typer0(using q: Quoted)(repr: q.TypeRepr): Result[(q.Retyped, q.ClsWitnesses)] =
-    repr.dealias.widenTermRefByName.simplified match {
+    (repr.dealias.widenTermRefByName.simplified match {
       case ref @ q.TypeRef(_, name) if ref.typeSymbol.isAbstractType => (None -> p.Type.Var(name), Map.empty).success
       case q.ParamRef(q.PolyType(args, _, _), argIdx)          => (None -> p.Type.Var(args(argIdx)), Map.empty).success
       case q.TypeBounds(_, _)                                  => (None -> p.Type.Nothing, Map.empty).success
@@ -191,7 +191,7 @@ object Retyper {
               (None -> p.Type.Array(comp), wit).success
             case (_, _, ys) if tpe.isFunctionType => // FunctionN
               // TODO make sure this works
-              ???
+               "impl".fail
             case (name, kind, ctorArgs) =>
               symbol.tree match {
                 case clsDef: q.ClassDef =>
@@ -203,20 +203,24 @@ object Retyper {
         } yield retyped
       // widen singletons
       case q.ConstantType(x) =>
-        (x match {
-          case q.BooleanConstant(v) => (Some(p.Term.BoolConst(v)) -> p.Type.Bool, Map.empty)
-          case q.ByteConstant(v)    => (Some(p.Term.ByteConst(v)) -> p.Type.Byte, Map.empty)
-          case q.ShortConstant(v)   => (Some(p.Term.ShortConst(v)) -> p.Type.Short, Map.empty)
-          case q.IntConstant(v)     => (Some(p.Term.IntConst(v)) -> p.Type.Int, Map.empty)
-          case q.LongConstant(v)    => (Some(p.Term.LongConst(v)) -> p.Type.Long, Map.empty)
-          case q.FloatConstant(v)   => (Some(p.Term.FloatConst(v)) -> p.Type.Float, Map.empty)
-          case q.DoubleConstant(v)  => (Some(p.Term.DoubleConst(v)) -> p.Type.Double, Map.empty)
-          case q.CharConstant(v)    => (Some(p.Term.CharConst(v)) -> p.Type.Char, Map.empty)
+        x match {
+          case q.BooleanConstant(v) => (Some(p.Term.BoolConst(v)) -> p.Type.Bool, Map.empty).success
+          case q.ByteConstant(v)    => (Some(p.Term.ByteConst(v)) -> p.Type.Byte, Map.empty).success
+          case q.ShortConstant(v)   => (Some(p.Term.ShortConst(v)) -> p.Type.Short, Map.empty).success
+          case q.IntConstant(v)     => (Some(p.Term.IntConst(v)) -> p.Type.Int, Map.empty).success
+          case q.LongConstant(v)    => (Some(p.Term.LongConst(v)) -> p.Type.Long, Map.empty).success
+          case q.FloatConstant(v)   => (Some(p.Term.FloatConst(v)) -> p.Type.Float, Map.empty).success
+          case q.DoubleConstant(v)  => (Some(p.Term.DoubleConst(v)) -> p.Type.Double, Map.empty).success
+          case q.CharConstant(v)    => (Some(p.Term.CharConst(v)) -> p.Type.Char, Map.empty).success
           case q.StringConstant(v)  => ???
-          case q.UnitConstant       => (Some(p.Term.UnitConst) -> p.Type.Unit, Map.empty)
+          case q.UnitConstant       => (Some(p.Term.UnitConst) -> p.Type.Unit, Map.empty).success
           case q.NullConstant       => ???
-          case q.ClassOfConstant(r) => ???
-        }).pure
+          case q.ClassOfConstant(cls) =>
+            val reifiedTpe = q.TypeRepr.typeConstructorOf(classOf[Class[_]]).appliedTo(cls)
+            typer0(reifiedTpe).map { case (_ -> tpe, wit) =>
+              (Some(p.Term.Poison(tpe)) -> tpe, wit)
+            }
+        }
       case q.ParamRef(r, i) =>
         println(s"C => ${r} ${i}")
         ???
@@ -234,6 +238,8 @@ object Retyper {
 
         }
 
+    }).recoverWith { case e =>
+      new CompilerException(s"Retyper failed while typing `${repr.show}`", e).asLeft
     }
 
 }
