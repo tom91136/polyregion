@@ -71,7 +71,7 @@ object compiletime {
   }
 
   private def extractMethodTypes(using q: Quoted) //
-  (clsTpe: q.TypeRepr): Result[(q.Symbol, List[(q.Symbol, p.Signature)])] =
+  (clsTpe: q.TypeRepr): Result[(q.Symbol, List[(q.Symbol, q.DefDef)])] =
     clsTpe.classSymbol.failIfEmpty(s"No class symbol for ${clsTpe}").flatMap { sym =>
       println(s"$sym ${sym.methodMembers.toList}")
       sym.methodMembers
@@ -84,16 +84,11 @@ object compiletime {
         .filterNot(x => TopRefs.contains(x.owner.fullName))
         .traverseFilter { s =>
           s.tree match {
-            case d: q.DefDef => 
-              println(s"> $d")
-              Compiler.deriveSignature(d).map(sig => Some(s -> sig))
+            case d: q.DefDef => Some(s -> d).success
             case _           => None.success
           }
         }
-        .map { xs =>
-          println("\t>>" + xs)
-          sym -> xs
-        }
+        .map(sym -> _)
     }
 
   private def mirrorMethod(using q: Quoted)              //
@@ -101,7 +96,7 @@ object compiletime {
   (mirrorToSourceTable: Map[p.Sym, p.Sym]): Result[(p.Function, q.Dependencies)] = for {
 
     log <- Log(s"Mirror for ${sourceMethodSym} -> ${mirrorMethodSym}")
-    _ = println(s"Do ${sourceMethodSym}")
+    _ = println(s"Do ${sourceMethodSym} -> ${mirrorMethodSym}")
 
     sourceSignature <- sourceMethodSym.tree match {
       case d: q.DefDef => polyregion.scala.Compiler.deriveSignature(d)
@@ -143,41 +138,49 @@ object compiletime {
       mirrorStruct <- Retyper.structDef0(mirrorSym)
       sourceMethodTable = sourceMethods.groupBy(_._1.name)
       _                 = println(s"Source Symbols:\n${sourceMethodTable.mkString("\n\t")}")
-      mirroredMethods <- mirrorMethods.flatTraverse { case (reflectedSym, reflectedSig) =>
+      mirroredMethods <- mirrorMethods.flatTraverse { case (reflectedSym, reflectedDef) =>
         sourceMethodTable.get(reflectedSym.name) match {
           case None => // Extra method on mirror, check that it's private.
             if (reflectedSym.flags.is(q.Flags.Private)) Nil.success
             else
-              s"Method ${reflectedSig.repr} from ${mirrorSym} does not exists in source (${sourceSym}) and is not marked private".fail
-          case Some(xs) => // We got matches with potential overloads, resolve them.
+              s"Method ${reflectedSym} from ${mirrorSym} does not exists in source (${sourceSym}) and is not marked private".fail
+          case Some(sources) => // We got matches with potential overloads, resolve them.
             for {
-              sourceName <- xs
-                .map(_._2.name)
+              sourceName <- sources
+                .map(_._1.fullName)
                 .distinct
                 .failIfNotSingleton(
                   s"Expected all method name matching ${reflectedSym.name} from ${sourceSym} to be the same"
                 )
+              reflectedSig <- Compiler.deriveSignature(reflectedDef)
               // Map the mirrored method to use the source types first, otherwise we're comparing different classes entirely.
               reflectedSigWithSourceTpes = reflectedSig
-                .copy(name = sourceName) // We also replace the name to use the source ones.
+                .copy(name = p.Sym(sourceName)) // We also replace the name to use the source ones.
                 .mapType(_.map {
                   case p.Type.Struct(sym, tpeVars, args) =>
                     p.Type.Struct(mirrorToSourceTable.getOrElse(sym, sym), tpeVars, args)
                   case x => x
                 })
 
-              r <- xs.filter { x =>
-                // match up reciever types
+              sourceSigs <- sources.traverse((sourceSym, sourceDef) =>
+                Compiler.deriveSignature(sourceDef).map(sourceSym -> _)
+              )
 
-                x._2 == reflectedSigWithSourceTpes
+              r <- sourceSigs.filter { case (_, sourceSig) =>
+                // FIXME Removing the receiver for now because it may be impossible to mirror a private type.
+                // Doing this may make the overload resolution less accurate.
+                sourceSig.copy(receiver = None) == reflectedSigWithSourceTpes.copy(receiver = None)
               } match {
                 case sourceMirror :: Nil => // single match
                   mirrorMethod(sourceMirror._1, reflectedSym)(mirrorToSourceTable).map((f, deps) =>
                     (f :: Nil, deps) :: Nil
                   )
                 case Nil =>
-                  val considered = xs.map("\t(failed) " + _._2.repr).mkString("\n")
-                  s"Overload resolution for ${reflectedSym} with resulted in no match, the following signatures were considered (mirror is the requirement):\n\t(mirror) ${reflectedSigWithSourceTpes.repr}\n${considered}".fail
+                  val considered = sourceSigs.map("\t(failed)    " + _._2.repr).mkString("\n")
+                  (s"Overload resolution for ${reflectedSym} with resulted in no match, the following signatures were considered (mirror is the requirement):" +
+                    s"\n\t(mirror)    ${reflectedSig.repr}" +
+                    s"\n\t(reflected) ${reflectedSigWithSourceTpes.repr}" +
+                    s"\n${considered}").fail
                 case xs =>
                   s"Overload resolution for ${reflectedSym} resulted in multiple matches (the program should not compile): $xs".fail
               }

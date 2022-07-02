@@ -123,20 +123,20 @@ class FunctionCallSuite extends BaseSuite {
   testExpr("class-named-second-partial")(first(1, b = 2))
 
   // overloading
+  def fn(a: Int)    = a + a
+  def fn(a: Double) = a * a
   {
-    def fn(a: Int)    = a + a
-    def fn(a: Double) = a * a
-    val x             = 2
-    val y             = 5.0
+    val x = 2
+    val y = 5.0
     testExpr("overload")(fn(x).toDouble + fn(y))
     testExpr("overload-const")(fn(x).toDouble + fn(y))
   }
 
   // multiple args
+  def a(a: Int)(b: Int) = a + b
   {
-    def a(a: Int)(b: Int) = a + b
-    val x                 = 1
-    val y                 = 2
+    val x = 1
+    val y = 2
     testExpr("multiple-args")(a(x)(y))
     testExpr("multiple-args-const")(a(1)(2))
   }

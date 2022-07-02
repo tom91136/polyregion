@@ -6,14 +6,14 @@ import polyregion.scala.intrinsics
 
 object StdLib {
 
-  case class Tuple2[T1, T2](_1: T1, _2: T2)
+  class Tuple2[T1, T2](_1: T1, _2: T2)
 
   class Range(start: Int, end: Int, step: Int) {
     // def by(step: Int): Range            = mkDef(step) // new Range(start, end, step)
     // private inline def mkDef(step: Int): Range = new Range(start, end, step)
   }
 
-  class ClassTag[T]{
+  class ClassTag[T] {
     // TODO
   }
   object ClassTag {
@@ -124,17 +124,22 @@ object StdLib {
 
   }
 
+  object Array {
+    def ofDim[T](n1: Int)(implicit ev: ClassTag[T]): scala.Array[T] = intrinsics.array[T](n1)
+  }
+
   private type ->[A, B] = (A, B)
 
   import _root_.scala as S
 
   final def Mirrors: Map[p.Sym, p.Mirror] = derivePackedMirrors1[
     (
-//       S.collection.immutable.Range -> Range,
-      //  S.runtime.RichInt -> RichInt,
-      //  S.Predef.type -> Predef,
+        S.collection.immutable.Range -> Range,
+        S.Array.type -> Array.type,
+        S.runtime.RichInt -> RichInt,
+        S.Predef.type -> Predef,
         S.Tuple2[_, _] -> Tuple2[_, _],
-       S.math.package$ -> math.type,
+        S.math.package$ -> math.type,
         S.reflect.ClassTag[_] -> ClassTag[_],
         S.reflect.ClassTag.type -> ClassTag.type
     )

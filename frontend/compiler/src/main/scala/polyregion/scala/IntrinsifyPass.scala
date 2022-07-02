@@ -70,7 +70,7 @@ object IntrinsifyPass {
     case inv @ p.Expr.Invoke(sym, tpeArgs, Some(recv), args, rtn) =>
       (sym.fqn, recv, args) match {
         case ("polyregion" :: "scala" :: "intrinsics$" :: op :: Nil, x, xs) =>
-          println(s"$op $x $xs")
+          println(s">>> ${recv} $op $x $xs tpe=${tpeArgs}")
           val expr = xs match {
             case Nil =>
               val kind = op match {
@@ -97,33 +97,42 @@ object IntrinsifyPass {
               }
               p.Expr.NullaryIntrinsic(kind, rtn)
             case x :: Nil =>
-              val kind = op match {
-                case "sin"  => p.UnaryIntrinsicKind.Sin
-                case "cos"  => p.UnaryIntrinsicKind.Cos
-                case "tan"  => p.UnaryIntrinsicKind.Tan
-                case "asin" => p.UnaryIntrinsicKind.Asin
-                case "acos" => p.UnaryIntrinsicKind.Acos
-                case "atan" => p.UnaryIntrinsicKind.Atan
-                case "sinh" => p.UnaryIntrinsicKind.Sinh
-                case "cosh" => p.UnaryIntrinsicKind.Cosh
-                case "tanh" => p.UnaryIntrinsicKind.Tanh
+              def unaryIntr(k: p.UnaryIntrinsicKind) = p.Expr.UnaryIntrinsic(x, k, rtn)
 
-                case "signum" => p.UnaryIntrinsicKind.Signum
-                case "abs"    => p.UnaryIntrinsicKind.Abs
-                case "round"  => p.UnaryIntrinsicKind.Round
-                case "ceil"   => p.UnaryIntrinsicKind.Ceil
-                case "floor"  => p.UnaryIntrinsicKind.Floor
-                case "rint"   => p.UnaryIntrinsicKind.Rint
+              op match {
+                case "sin"  => unaryIntr(p.UnaryIntrinsicKind.Sin)
+                case "cos"  => unaryIntr(p.UnaryIntrinsicKind.Cos)
+                case "tan"  => unaryIntr(p.UnaryIntrinsicKind.Tan)
+                case "asin" => unaryIntr(p.UnaryIntrinsicKind.Asin)
+                case "acos" => unaryIntr(p.UnaryIntrinsicKind.Acos)
+                case "atan" => unaryIntr(p.UnaryIntrinsicKind.Atan)
+                case "sinh" => unaryIntr(p.UnaryIntrinsicKind.Sinh)
+                case "cosh" => unaryIntr(p.UnaryIntrinsicKind.Cosh)
+                case "tanh" => unaryIntr(p.UnaryIntrinsicKind.Tanh)
 
-                case "sqrt"  => p.UnaryIntrinsicKind.Sqrt
-                case "cbrt"  => p.UnaryIntrinsicKind.Cbrt
-                case "exp"   => p.UnaryIntrinsicKind.Exp
-                case "expm1" => p.UnaryIntrinsicKind.Expm1
-                case "log"   => p.UnaryIntrinsicKind.Log
-                case "log1p" => p.UnaryIntrinsicKind.Log1p
-                case "log10" => p.UnaryIntrinsicKind.Log10
+                case "signum" => unaryIntr(p.UnaryIntrinsicKind.Signum)
+                case "abs"    => unaryIntr(p.UnaryIntrinsicKind.Abs)
+                case "round"  => unaryIntr(p.UnaryIntrinsicKind.Round)
+                case "ceil"   => unaryIntr(p.UnaryIntrinsicKind.Ceil)
+                case "floor"  => unaryIntr(p.UnaryIntrinsicKind.Floor)
+                case "rint"   => unaryIntr(p.UnaryIntrinsicKind.Rint)
+
+                case "sqrt"  => unaryIntr(p.UnaryIntrinsicKind.Sqrt)
+                case "cbrt"  => unaryIntr(p.UnaryIntrinsicKind.Cbrt)
+                case "exp"   => unaryIntr(p.UnaryIntrinsicKind.Exp)
+                case "expm1" => unaryIntr(p.UnaryIntrinsicKind.Expm1)
+                case "log"   => unaryIntr(p.UnaryIntrinsicKind.Log)
+                case "log1p" => unaryIntr(p.UnaryIntrinsicKind.Log1p)
+                case "log10" => unaryIntr(p.UnaryIntrinsicKind.Log10)
+
+                case "array" => 
+
+                  
+
+                  p.Expr.Alloc(p.Type.Array(tpeArgs.head), x)
+                  
               }
-              p.Expr.UnaryIntrinsic(x, kind, rtn)
+
             case x :: y :: Nil =>
               val kind = op match {
                 case "pow" => p.BinaryIntrinsicKind.Pow
