@@ -25,6 +25,8 @@ object Compiler {
   private def runProgramOptPasses(program: p.Program)(log: Log): Result[(p.Program, Log)] =
     Function.chain(ProgramPasses.map(_.tupled))((program, log)).success
 
+  // This derives the signature based on the *owning* symbol only!
+  // This means, for cases where the method's direct root can be different, the actual owner(i.e. the context of the definition site) is used.
   def deriveSignature(using q: Quoted)(f: q.DefDef): Result[p.Signature] = for {
     (_ -> fnRtnTpe, _)      <- typer0(f.returnTpt.tpe) // Ignore the class witness as we're deriving the signature.
     (fnArgsTpeWithTerms, _) <- typer0N(f.paramss.flatMap(_.params).collect { case d: q.ValDef => d.tpt.tpe })
@@ -40,54 +42,70 @@ object Compiler {
   def compileAllDependencies(using q: Quoted)(
       deps: q.Dependencies
   )(fnLut: Map[p.Signature, p.Function] = Map.empty): Result[(List[p.Function], q.Dependencies, Log)] = for {
-    log <- Log(s"Compile dependent functions")
+    log <- Log(s"Compile ${deps.functions.size} dependent function(s)")
     log <- deps.functions.toList.foldLeftM(log) { case (log, (fn, ivks)) =>
       log.info(q.DefDef(fn.symbol, rhsFn = _ => None).show, ivks.map(_.repr).toList.sorted*)
     }
-    (_, fns, deps, logs) <- (deps.functions, List.empty[p.Function], deps, List.empty[Log]).iterateWhileM {
-      (remaining, fnAcc, depsAcc, logs) =>
-        remaining.toList
-          .foldLeftM((fnAcc, depsAcc, logs)) { case ((xs, depss, logs), (defDef, invoke)) =>
-            // XXX Generic specialisation on invoke is done in a pass later so we can ignore it for now
-            deriveSignature(defDef).flatMap { s =>
-              fnLut.get(s) match {
-                case Some(x) => Log(s"Replaced: $s").map(l => (x :: xs, deps, l :: logs))
-                case None =>
-                  compileFn(defDef).map { case ((x, deps), log0) => (x :: xs, deps |+| depss, log :: logs) }
-              }
+    (_ /*input*/, fns, deps, logs) <- (
+      deps.functions,
+      List.empty[p.Function],
+      deps.copy(functions = Map.empty),
+      List.empty[Log]
+    ).iterateWhileM { (remaining, fnAcc, depsAcc, logs) =>
+      remaining.toList
+        .foldLeftM((fnAcc, depsAcc, logs)) { case ((xs, depss, logs), (defDef, invoke)) =>
+          // XXX Generic specialisation on invoke is done in a pass later so we can ignore it for now
+          deriveSignature(defDef).flatMap { s =>
+            fnLut.get(s) match {
+              case Some(x) =>
+                Log(s"${s.repr}")
+                  .map(
+                    _.info_("Callsites", invoke.map(_.repr).toList: _*)
+                      .info_("Replacing with impl:", x.repr)
+                  )
+                  .map(l => (x :: xs, depss, l :: logs))
+              case None =>
+                for {
+                  l                 <- Log(s"Compile (no replacement): ${s.repr}")
+                  ((x, deps), log0) <- compileFn(defDef)
+                } yield (x :: xs, deps |+| depss, (l + log0) :: logs)
             }
           }
-          .map((xs, deps, log) =>
-            (
-              deps.functions,
-              xs,
-              deps.copy(functions = Map.empty),
-              log
-            )
+        }
+        .map((xs, deps, log) =>
+          (
+            deps.functions,
+            xs,
+            deps.copy(functions = Map.empty),
+            log
           )
+        )
+
     }(_._1.nonEmpty)
-  } yield (fns, deps, log)
+
+  } yield (fns, deps, log + Log("Replacements", logs.toVector))
 
   def deriveAllStructs(using q: Quoted)(deps: q.Dependencies)(
       clsLut: Map[p.Sym, p.StructDef] = Map.empty
   ): Result[(List[p.StructDef], Log)] = for {
     log <- Log(s"Compile dependent structs")
-    classSdefs <- deps.classes.toList.traverse { (clsDef, aps) =>
-      structDef0(clsDef.symbol).map(_ -> aps)
+    (replacedClasses, classes) <- deps.classes.toList.partitionEitherM { case (clsDef, aps) =>
+      clsLut.get(structName0(clsDef.symbol)) match {
+        case Some(x) => Left(x).success
+        case None    => structDef0(clsDef.symbol).map(Right(_))
+      }
     }
-    log <- log.info("Classes", classSdefs.map(_._1.repr)*)
-    moduleSdef <- deps.modules.toList.distinct.traverse { (symbol, tpe) =>
-      log.info(symbol.fullName) *>
-        structDef0(symbol).map(_ -> Set(tpe))
+    (replacedModules, modules) <- deps.modules.toList.partitionEitherM { case (symbol, tpe) =>
+      clsLut.get(structName0(symbol)) match {
+        case Some(x) => Left(x).success
+        case None    => structDef0(symbol).map(Right(_))
+      }
     }
-    log <- log.info("Modules", moduleSdef.map(_._1.repr)*)
-
-    sdefs = (classSdefs ::: moduleSdef).map(_._1)
-    log <- log.info(
-      "Replacements",
-      sdefs.map(sd => s"${sd.repr} => ${clsLut.get(sd.name).map(_.repr).getOrElse("(keep)")}")*
-    )
-  } yield (sdefs.map(sd => clsLut.getOrElse(sd.name, sd)), log)
+    log <- log.info("Replaced classes ", replacedClasses.map(_.repr)*)
+    log <- log.info("Replaced modules ", replacedModules.map(_.repr)*)
+    log <- log.info("Reflected classes", classes.map(_.repr)*)
+    log <- log.info("Reflected modules", modules.map(_.repr)*)
+  } yield (replacedModules ::: modules ::: replacedClasses ::: classes, log)
 
   private def deriveModuleStructCaptures(using q: Quoted)(d: q.Dependencies): List[p.Named] =
     d.modules.values.toList.map(t => p.Named(t.name.fqn.mkString("_"), t))
@@ -201,7 +219,7 @@ object Compiler {
 
     ((exprStmts, exprTpe, exprDeps, exprThisCls), termLog) <- compileTerm(
       term = term,
-      root = q.Symbol.noSymbol, // XXX not `spliceOwner` for now to avoid `this` captures
+      root = q.Symbol.spliceOwner, // XXX not `spliceOwner` for now to avoid `this` captures
       scope = captureScope.toMap
     )
 
@@ -216,7 +234,6 @@ object Compiler {
     log <- log.info(s"Expr dependent methods", exprDeps.functions.values.map(_.toString).toList*)
     log <- log.info(s"Expr dependent structs", exprDeps.classes.values.map(_.toString).toList*)
     _ = println(log.render().mkString("\n"))
-
 
     // log                 <- log.info(s"Expr dependent vars   ", exprDeps.vars.map(_.toString).toList*)
     (depFns, deps, depLog) <- compileAllDependencies(exprDeps)(StdLib.Functions)

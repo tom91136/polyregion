@@ -129,6 +129,8 @@ object Remapper {
           }
         } yield (instance, c.::=(stmts*))
       case (sym, _, _) => // Anything else is a normal invoke.
+        if (receiver.isEmpty)
+          throw new RuntimeException("Why is recv empty???")
         val ivk: p.Expr.Invoke = p.Expr.Invoke(p.Sym(sym.fullName), tpeArgs, receiver, args, rtnTpe)
         val named              = c.named(rtnTpe)
         val c0 = c
@@ -152,7 +154,9 @@ object Remapper {
           case x                 => x
         }
 
-        println(s"[mapRef0] tpe=`${tpe.repr}` ua=`${tpe0.repr}` // rtn=${resolveExecRtnTpe(tpe)} ~ ${termArgss}")
+        println(
+          s"[mapRef0] tpe=`${tpe.repr}` ua=`${tpe0.repr}` ;  rtn=${resolveExecRtnTpe(tpe)} ~ ${termArgss} ${ref.show}"
+        )
 
         // Call no-arg functions (i.e. `x.toDouble` or just `def fn = ???; fn` ) directly or pass-through if not no-arg
         def invokeOrSelect(
@@ -198,37 +202,72 @@ object Remapper {
         // We handle any reference to arbitrarily nested objects/modules (including direct ident with no nesting, as produced by `inline` calls)
         // directly because they are singletons (i.e. can appear anywhere with no dependencies, even the owner).
         // We traverse owners closes to the ref first (inside out) until we hit a method/package and work out the nesting.
-        def handleObjectSelect(ref: q.Ref, named: p.Named) = ownersList(ref.symbol)
-          .takeWhile(Retyper.isModuleClass(_))
-          .toList match {
-          case Nil => None // not nested
-          case xs @ (owner :: _) => // owner would be the closes symbol to ref.symbol here
-            Some(for {
-              tpe <- Retyper.clsSymTyper0(owner)
-              (term, c) <- tpe match {
-                case s @ p.Type.Struct(rootName, Nil, Nil) =>
-                  for {
-                    c <- ref match {
-                      case q.Select(qualifier, _) => c.updateDeps(_.witness(qualifier.tpe.typeSymbol, s)).success
-                      case q.Ident(_)             => c.updateDeps(_.witness(owner, s)).success
-                    }
-                    directRoot = p.Named(rootName.fqn.mkString("_"), s)
-                    result <- invokeOrSelect(c)(ref.symbol, Some(p.Term.Select(Nil, directRoot)))(
-                      p.Term.Select(directRoot :: Nil, named).success
-                    )
-                  } yield result
+        def handleObjectSelect(ref: q.Ref, named: p.Named) = {
 
-                case bad =>
-                  s"Illegal type ($bad) derived for owner of ${named.repr}, expecting an object class with no generics and type vars".fail
+          def mkSelect(owner: q.Symbol) = for {
+            tpe <- Retyper.clsSymTyper0(owner)
+            (term, c) <- tpe match {
+              case s @ p.Type.Struct(rootName, Nil, Nil) =>
+                for {
+                  c <- ref match {
+                    case q.Select(qualifier, _) => c.updateDeps(_.witness(qualifier.tpe.typeSymbol, s)).success
+                    case q.Ident(_)             => c.updateDeps(_.witness(owner, s)).success
+                  }
+                  directRoot = p.Named(rootName.fqn.mkString("_"), s)
+                  result <- invokeOrSelect(c)(ref.symbol, Some(p.Term.Select(Nil, directRoot)))(
+                    p.Term.Select(directRoot :: Nil, named).success
+                  )
+                } yield result
+
+              case bad =>
+                s"Illegal type ($bad) derived for owner of ${named.repr}, expecting an object class with no generics and type vars".fail
+            }
+          } yield (term, c)
+
+          ownersList(ref.symbol)
+            .takeWhile(Retyper.isModuleClass(_))
+            .toList match {
+            case Nil =>
+              // Here, an object select can still original from a class, for example:
+              //   `class  X { def foo: Unit }` // `foo` is owned by `X` which is a class and not object
+              //   `object Y extends X`
+              //   `Y.foo`
+              // The only way to tell is to check the type of the ref, which should be a TermRef such that the receiver is an object.
+
+              // ref.tpe => MethodType
+              // scala.Predef
+              // RichInt
+
+              println(
+                s"Test fail :${ownersList(ref.symbol).toList} ${ref.tpe} => ${named.tpe} ; ${Retyper.typer0(ref.tpe).map(_._1._2)}"
+              )
+
+              ref.tpe match {
+                case q.TermRef(root, _)  =>
+                  root.classSymbol.filter(_.flags.is(q.Flags.Module)).map( mkSelect(_) )
+                case _ => // Not nested, we're not dealing with an object select after all.
+                  None
               }
-            } yield (term, c))
+
+            case owner :: _ => Some(mkSelect(owner)) // Owner would be the closes symbol (head) to ref.symbol here.
+          }
         }
 
         // When a ref is owned by a class/object (i.e. `c.root`), we add an implicit `this` reference.
         def handleThisRef(ref: q.Ref, named: p.Named) = if (owningClassSymbol(c.root).contains(ref.symbol.maybeOwner)) {
+
+          val ownerSym = ref.symbol.owner
           Some(for {
-            tpe <- Retyper.clsSymTyper0(ref.symbol.owner) // TODO what about generics???
+            tpe <- Retyper.clsSymTyper0(ownerSym) // TODO what about generics???
+
+            c <- (ownerSym.tree, tpe) match {
+              case (clsDef: q.ClassDef, s @ p.Type.Struct(_, _, _)) if !ownerSym.flags.is(q.Flags.Module) =>
+                c.bindThis(clsDef, s)
+              case _ => c.success
+            }
             cls = p.Named("this", tpe)
+
+            _ = println(s"ACCEPT ${tpe}")
             // c1 = c.updateDeps(_.witness(ref.tpe.typeSymbol, tpe.asInstanceOf[p.Type.Struct]))
             // c1 = c
             (invoke, c) <- invokeOrSelect(c)(ref.symbol, Some(p.Term.Select(Nil, cls)))(
@@ -284,6 +323,7 @@ object Remapper {
                       case (illegal, tpe) => s"Unexpected tree $illegal with type $tpe when resolving local dummy".fail
                     }
                   } else {
+                    println("~@@" + ownersList(sym).toList + s" rr=${c.root.owner}")
                     // In any other case, we're probably referencing a local ValDef that appeared before before this.
                     invokeOrSelect(c)(sym, None)(p.Term.Select(Nil, local).success)
                   }
@@ -335,9 +375,14 @@ object Remapper {
         case (Nil, Nil, q.Literal(q.StringConstant(v))) =>
           ??? // XXX alloc new string instance
         case (Nil, Nil, q.Literal(q.ClassOfConstant(_))) =>
-          c.typerAndWitness(term.tpe).map { case (_ -> tpe, c) => (p.Term.Poison(tpe), c !! term) }
+          c.typerAndWitness(term.tpe).map { case (_ -> tpe, c) =>
+            val name = c.named(tpe)
+            (p.Term.Select(Nil, name), (c.down(term)) ::= p.Stmt.Var(name, None))
+          }
         case (Nil, Nil, l @ q.Literal(q.NullConstant())) =>
-          c.typerAndWitness(l.tpe).map { case (_ -> tpe, c) => (p.Term.Poison(tpe), c !! term) }
+          c.typerAndWitness(l.tpe).map { case (_ -> tpe, c) =>
+            (p.Term.Poison(tpe), c !! term)
+          }
         case (Nil, Nil, q.This(_)) => // reference to the current class: `this.???`
           // XXX Don't use typerAndWitness here, we need to record the witnessing of `this` separately.
           (c !! term).typerAndWitness(term.tpe).flatMap {
@@ -376,7 +421,7 @@ object Remapper {
           println(s"[mapper] new = `${term.show}`")
           c.typerAndWitness(tpt.tpe).map { case (_ -> tpe, c) =>
             val name = c.named(tpe)
-            (p.Term.Select(Nil, name), (c !! term) ::= p.Stmt.Var(name, None))
+            (p.Term.Select(Nil, name), (c.down(term)) ::= p.Stmt.Var(name, None))
           }
         case (Nil, termArgs0, ap @ q.Apply(fun, args)) => // *single* application of some terms: `$fun($args...)`
           println(s"[mapper] ap = `${ap.show}`")

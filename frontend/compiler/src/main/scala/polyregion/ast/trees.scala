@@ -207,6 +207,18 @@ extension (e: p.Term) {
 
 extension (e: p.Type) {
 
+  def =:=(that: p.Type): Boolean =
+    (e, that) match {
+      case (p.Type.Struct(xSym, xVars, xTpes), p.Type.Struct(ySym, yVars, yTpes)) =>
+        xSym == ySym && xVars == yVars && xTpes.zip(yTpes).forall(_ =:= _)
+      case (p.Type.Nothing, p.Type.Nothing) => true
+      case (p.Type.Nothing, _)              => true
+      case (_, p.Type.Nothing)              => true
+      case (p.Type.Array(xs), p.Type.Array(ys))         => xs =:= ys
+      case (p.Type.Exec(_, _, _), p.Type.Exec(_, _, _)) => ??? // TODO impl exec
+      case (x, y)                                       => x == y
+    }
+
   def mapAcc[A](f: p.Type => (p.Type, List[A])): (p.Type, List[A]) = e match {
     case p.Type.Array(c) =>
       val (c0, as0) = c.mapAcc(f)

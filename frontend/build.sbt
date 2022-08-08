@@ -7,7 +7,7 @@ lazy val bindingsDir = (nativeDir / "bindings" / "jvm").getAbsoluteFile
 
 lazy val scala3Version = "3.1.3"
 lazy val catsVersion   = "2.8.0"
-lazy val munitVersion  = "1.0.0-M5"
+lazy val munitVersion  = "1.0.0-M6"
 
 lazy val commonSettings = Seq(
   scalaVersion     := scala3Version,
@@ -90,9 +90,9 @@ lazy val compiler = project
         Seq("-Xmax-inlines", "64") // the AST has lots of leaf nodes and we use inline so bump the limit
     ,
     libraryDependencies ++= Seq(
-      "net.bytebuddy"  % "byte-buddy" % "1.12.10",
+      "net.bytebuddy"  % "byte-buddy" % "1.12.13",
       "com.lihaoyi"   %% "pprint"     % "0.7.3",
-      "com.lihaoyi"   %% "fansi"      % "0.3.1",
+      "com.lihaoyi"   %% "fansi"      % "0.4.0",
       "com.lihaoyi"   %% "upickle"    % "2.0.0",
       "org.typelevel" %% "cats-core"  % catsVersion
     ),
@@ -109,7 +109,6 @@ lazy val compiler = project
     }
   )
   .dependsOn(`binding-jvm`)
-
 
 lazy val `compiler-testsuite-scala` = project
   .settings(

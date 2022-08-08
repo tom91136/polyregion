@@ -13,6 +13,8 @@ object StdLib {
     // private inline def mkDef(step: Int): Range = new Range(start, end, step)
   }
 
+  class Class[T] {}
+
   class ClassTag[T] {
     // TODO
   }
@@ -131,6 +133,7 @@ object StdLib {
   private type ->[A, B] = (A, B)
 
   import _root_.scala as S
+  import _root_.java as J
 
   final def Mirrors: Map[p.Sym, p.Mirror] = derivePackedMirrors1[
     (
@@ -141,7 +144,8 @@ object StdLib {
         S.Tuple2[_, _] -> Tuple2[_, _],
         S.math.package$ -> math.type,
         S.reflect.ClassTag[_] -> ClassTag[_],
-        S.reflect.ClassTag.type -> ClassTag.type
+        S.reflect.ClassTag.type -> ClassTag.type,
+        J.lang.Class[_] -> Class[_]
     )
   ]
 

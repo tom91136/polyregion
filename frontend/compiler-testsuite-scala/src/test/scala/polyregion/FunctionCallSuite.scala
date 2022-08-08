@@ -15,7 +15,7 @@ class FunctionCallSuite extends BaseSuite {
     object A {
       val x                     = 42d
       def double(x: Double)     = x * 2.0
-      def double2(y: Double)    = x * x * 2.0
+      def double2(y: Double)    = x * y * 2.0
       def first(a: Int, b: Int) = a
 
       inline def doubleInline(x: Double)                     = x * 2.0

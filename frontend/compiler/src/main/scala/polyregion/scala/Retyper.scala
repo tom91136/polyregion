@@ -44,6 +44,8 @@ object Retyper {
 
   def isModuleClass(using q: Quoted)(s: q.Symbol) = !s.isPackageDef && s.flags.is(q.Flags.Module)
 
+  def structName0(using q: Quoted)(clsSym: q.Symbol): p.Sym = p.Sym(clsSym.fullName)
+
   def structDef0(using q: Quoted)(clsSym: q.Symbol): Result[p.StructDef] = {
     if (clsSym.flags.is(q.Flags.Abstract)) {
       throw RuntimeException(
@@ -101,7 +103,7 @@ object Retyper {
       // Where the owner of `a` is a local dummy that is owned by class X
       resolveClsFromSymbol(clsSym.owner)
     } else {
-      s"$clsSym is not a class def, the symbol is owned by ${clsSym.maybeOwner}".fail
+      s"`$clsSym` is not a class def, the symbol is owned by `${clsSym.maybeOwner}`".fail
     }
 
   @tailrec private final def resolveClsFromTpeRepr(using
@@ -191,7 +193,7 @@ object Retyper {
               (None -> p.Type.Array(comp), wit).success
             case (_, _, ys) if tpe.isFunctionType => // FunctionN
               // TODO make sure this works
-               "impl".fail
+              "impl".fail
             case (name, kind, ctorArgs) =>
               symbol.tree match {
                 case clsDef: q.ClassDef =>

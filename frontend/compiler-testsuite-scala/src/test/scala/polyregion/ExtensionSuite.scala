@@ -23,7 +23,7 @@ implicit class RI(val i: Int) {
 
 class ExtensionSuite extends BaseSuite {
 
-  inline def testExpr[A <: AnyVal](inline r: A)(using C: ClassTag[A]) = if (Toggles.ExtensionSuite) {
+  inline def testExpr[A](inline r: A)(using C: ClassTag[A]) = if (Toggles.ExtensionSuite) {
     test(s"${C.runtimeClass}=${codeOf(r)}=${r}")(assertOffload[A](r))
   }
 
