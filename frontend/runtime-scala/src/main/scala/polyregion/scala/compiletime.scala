@@ -13,9 +13,19 @@ import scala.collection.immutable.VectorMap
 import scala.collection.mutable.ArrayBuffer
 import scala.quoted.*
 import scala.util.Try
+import cats.Eval
+import polyregion.ast.PolyAst.Sym
 
 @compileTimeOnly("This class only exists at compile-time to expose offload methods")
 object compiletime {
+
+  def time[R](block: => R): R = {
+    val t0     = System.nanoTime()
+    val result = block // call-by-name
+    val t1     = System.nanoTime()
+    println("Elapsed time: " + ((t1 - t0) / 1.0e6) + "ms")
+    result
+  }
 
   inline def showExpr(inline x: Any): Any = ${ showExprImpl('x) }
   def showExprImpl(x: Expr[Any])(using q: Quotes): Expr[Any] = {
@@ -30,12 +40,128 @@ object compiletime {
       case s: Q.Ident  => s :: Nil
       case _           => Nil
     }
+
+    val ignore = Set(
+      "module-info",
+      "module-info$"
+    )
+
+    inline def declarationsFast(x: Symbol)(inline effect: Symbol => Unit) = {
+      var current: List[Symbol] = x :: Nil
+      while (current != Nil) {
+        var next: List[Symbol] = Nil
+        current.foreach { c =>
+          if (
+            (
+              c.isPackageDef && !ignore.contains(c.fullName)
+            ) || (c.isClassDef && !ignore.contains(c.fullName) && c.exists && !c.isNoSymbol)
+          ) {
+
+            def doIt =
+              try {
+                effect(c)
+                next =
+                  try c.declarations ::: next
+                  catch { case u => next }
+              } catch {
+                case x => () // x.printStackTrace()
+              }
+
+            c.name.lastIndexOf("$") match {
+
+              case -1 =>
+                doIt
+
+              case n =>
+                val id = c.name.substring(n + 1)
+                if (id.nonEmpty && id.forall(_.isDigit)) println(s"## ${id} => ${c.fullName}")
+                else doIt // println("miss = "+c.fullName)
+
+            }
+
+          }
+        }
+        current = next
+      }
+    }
+    object C {
+      var acc = ArrayBuffer[Symbol]()
+    }
+
+    // def declarations(x: Symbol) = LazyList
+    //   .unfold(LazyList(x)) { xs =>
+    //     // println(s"Read ${xs.toList}")
+    //     val ys = xs
+    //       .filter(x => x.isClassDef || x.isPackageDef)
+    //       .filterNot(x => x == defn.ScalaPackage)
+    //       .filterNot(x => x == defn.JavaLangPackage)
+    //     // .filterNot(x => x.isPackageDef && x.name == "sun")
+    //     // .filterNot(x => x.isPackageDef && x.name == "java")
+    //     // .filterNot(x => x.isPackageDef && x.name == "javax")
+    //     // .filterNot(x => x.isPackageDef && x.name == "jdk")
+    //     // .filterNot(x => x.isPackageDef && x.name == "netscape")
+    //     // .filterNot(x => x.isPackageDef && x.name == "scala")
+    //     // .filterNot(x => x.isPackageDef && x.name == "org")
+    //     // .filterNot(x => x.isPackageDef && x.name == "com")
+
+    //     val zs = ys.flatMap(c =>
+    //       try c.declarations
+    //       catch { case u => LazyList.empty }
+    //     )
+    //     if (ys.isEmpty) None else Some((ys, zs))
+    //   }
+    //   .flatten
+
+    println(s"Prev=${C.acc.size}")
+
+    // println(s"C=${Class.forName("com.google.common.io.BaseEncoding")}")
+
+    // println(this.getClass.getResourceAsStream("com/google/common/io/BaseEncoding.class"))
+
+    // println("~~~ "+Symbol.requiredClass("com.google.common.io.BaseEncoding") )
+
+    // declarationsFast(Symbol.requiredPackage("polyregion.foo"))(x => println(">>"+x.fullName))
+    // println("~~~ "+Symbol.requiredClass("polyregion.foo.WeakIdentityHashMap$").declarations)
+    // println("~~~ "+declarationsFast(Symbol.requiredClass("sun.awt.WeakIdentityHashMap$1"))(c => ()))
+
+    // ???
+    //   var N   = 0
+    val acc = ArrayBuffer[Symbol]()
+    //   try
+    //     // println(defn.RootPackage.declarations.flatMap(x => x.declarations))
+    // time(declarationsFast(defn.RootPackage)(c => acc += c))
+
+    //   catch {
+    //     case _ => ()
+    //   }
+
+    println(s"N=${acc.size}")
+
+    // declarationsFast(Symbol.requiredClass("java.util.concurrent.LinkedTransferQueue"))(x => println("~~~"+x.fullName))
+    // println(Symbol.requiredClass("java.util.concurrent").declarations.map(x => x -> x.istyp))
+    println(Symbol.requiredClass("polyregion.foo.C").declarations)
+
+    declarationsFast(Symbol.requiredPackage("polyregion.foo"))(x => println(x))
+
+    //   C.acc = acc
+
+    //   scala.sys.runtime.gc()
+
+    // println(time(acc.find(_.name == "a?")))
+    report.info("hey!")
+
+    println(">> " + x.asTerm.symbol.children)
+    // println("~ " + time(declarations(defn.RootPackage).filter(_.isClassDef).size))
+    // println("~ " + time(declarations(defn.RootPackage).filter(_.isClassDef).size))
+    // println("~ " + time(declarations(defn.RootPackage).filter(_.isClassDef).size))
+    println(System.getProperty("java.class.path"))
+
     println("===")
     println(s"IS=${is
       .filter(x => x.symbol.isDefDef || true)
       .reverse
       .map(x => x -> x.tpe.dealias.widenTermRefByName.simplified)
-      .map((x, tpe) => s"-> $x : ${x.show} `${x.symbol.fullName}` : ${tpe.show}\n\t${tpe}")
+      .map((x, tpe) => s"-> $x : ${x.show} `${x.symbol.fullName}` : ${tpe.show}\n\t${tpe}\n\t${x.symbol.tree.show}")
       .mkString("\n")}")
     println("===")
     x

@@ -32,7 +32,8 @@ lazy val commonSettings = Seq(
   scalacOptions ++= Seq(                     //
     "-no-indent",                            //
     "-Wconf:cat=unchecked:error",            //
-    "-Wconf:name=MatchCaseUnreachable:error" //
+    "-Wconf:name=MatchCaseUnreachable:error", //
+    "-Ydebug",
     // "-Wconf:name=PatternMatchExhaustivity:error" // TODO enable later
     // "-language:strictEquality"
   ),
@@ -120,6 +121,7 @@ lazy val `compiler-testsuite-scala` = project
       "test" :: "testUntilFailed" :: state
     },
     name := "compiler-testsuite-scala",
+    javacOptions ++= Seq("-proc:none"),
     scalacOptions ++= Seq(
       "-Yretain-trees" // XXX for the test kernels
     ),
@@ -142,7 +144,8 @@ lazy val `compiler-testsuite-java` = project
       else Some(javaHome.getParentFile)
     },
     libraryDependencies ++= Seq(
-      "com.github.sbt" % "junit-interface" % "0.13.3" % Test
+      "com.github.sbt" % "junit-interface" % "0.13.3" % Test,
+      "com.google.guava" % "guava" % "31.1-jre" // extra stuff on the classpath
     )
   )
   .dependsOn(compiler, `runtime-java`)
