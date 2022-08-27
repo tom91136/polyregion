@@ -164,10 +164,10 @@ object compiletime {
 //                  if fn.receiver.exists(_.tpe == tpe)
 
 
-                  println(fn.receiver)
-                  println(tpe)
-                  if(sourceSignature.name.toString.contains("length"))
-                    ???
+                  // println(fn.receiver)
+                  // println(tpe)
+                  // if(sourceSignature.name.toString.contains("length"))
+                  //   ???
 
                   sourceSignature.receiver match {
                     case Some(x) => p.Term.Select(p.Named("this", x) :: xs, y)

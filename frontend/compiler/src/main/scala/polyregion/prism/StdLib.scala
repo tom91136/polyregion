@@ -179,14 +179,14 @@ object StdLib {
 
   // final val Mirrors: Map[p.Sym, p.Mirror] = Map.empty
 
-  final def Functions: Map[p.Signature, p.Function] =
-    Mirrors.values.flatMap(_.functions).map(f => f.signature -> f).toMap
+  final def Functions: Map[p.Signature, (p.Function, List[p.StructDef]) ]  =
+    Mirrors.values.flatMap(m => m.functions.map(f => f -> (m.struct.copy(name = m.source) :: Nil) )).map { case (f, clsDeps) => f.signature -> (f, clsDeps) }.toMap
   final def StructDefs: Map[p.Sym, p.StructDef] =
     Mirrors.values.map(x => x.source -> x.struct.copy(name = x.source)).toMap
 
   @main def main(): Unit = {
 
-    Functions.values.foreach { fn =>
+    Functions.values.foreach { case (fn, deps) =>
       println(s"${fn.repr.linesIterator.map("\t" + _).mkString("\n")}")
     }
     StructDefs.values.foreach(f => println(s"-> $f"))
