@@ -26,9 +26,10 @@ object intrinsics {
   def gpuGroupBarrier(): Unit = intrinsic
   def gpuGroupFence(): Unit   = intrinsic
 
-  def apply[A](xs: Array[A], index: Int): A           = intrinsic
-  def update[A](xs: Array[A], index: Int, x: A): Unit = intrinsic
-  def array[A](size: Int): Array[A]                   = intrinsic
+  def array[A](size: Int): scala.Array[A]                   = intrinsic
+  def apply[A](xs: scala.Array[A], index: Int): A           = intrinsic
+  def update[A](xs: scala.Array[A], index: Int, x: A): Unit = intrinsic
+  def length[A](xs: scala.Array[A]): Int                    = intrinsic
 
   def pow[A](a: A, b: A): A   = intrinsic
   def min[A](a: A, b: A): A   = intrinsic

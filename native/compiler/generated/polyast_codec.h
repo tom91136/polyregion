@@ -22,6 +22,8 @@ namespace Expr {
 [[nodiscard]] EXPORT json invoke_to_json(const Expr::Invoke &);
 [[nodiscard]] EXPORT Expr::Index index_from_json(const json &);
 [[nodiscard]] EXPORT json index_to_json(const Expr::Index &);
+[[nodiscard]] EXPORT Expr::Length length_from_json(const json &);
+[[nodiscard]] EXPORT json length_to_json(const Expr::Length &);
 [[nodiscard]] EXPORT Expr::Alloc alloc_from_json(const json &);
 [[nodiscard]] EXPORT json alloc_to_json(const Expr::Alloc &);
 [[nodiscard]] EXPORT Expr::Suspend suspend_from_json(const json &);

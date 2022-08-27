@@ -1,7 +1,6 @@
 package polyregion.scala
 
 import cats.syntax.all.*
-import polyregion.ast.PolyAst.BinaryIntrinsicKind
 import polyregion.ast.{PolyAst as p, *}
 import polyregion.scala.{Quoted, Symbols}
 
@@ -57,95 +56,134 @@ object IntrinsifyPass {
     val (xVal, xStmts) = castOrId(x, upper, s"intr_l${idx}")
     val (yVal, yStmts) = castOrId(y, upper, s"intr_r${idx}")
     val tpe = kind match {
-      case BinaryIntrinsicKind.LogicEq | BinaryIntrinsicKind.LogicNeq | BinaryIntrinsicKind.LogicAnd |
-          BinaryIntrinsicKind.LogicOr | BinaryIntrinsicKind.LogicLte | BinaryIntrinsicKind.LogicGte |
-          BinaryIntrinsicKind.LogicLt | BinaryIntrinsicKind.LogicGt =>
+      case p.BinaryIntrinsicKind.LogicEq | p.BinaryIntrinsicKind.LogicNeq | p.BinaryIntrinsicKind.LogicAnd |
+          p.BinaryIntrinsicKind.LogicOr | p.BinaryIntrinsicKind.LogicLte | p.BinaryIntrinsicKind.LogicGte |
+          p.BinaryIntrinsicKind.LogicLt | p.BinaryIntrinsicKind.LogicGt =>
         p.Type.Bool
       case _ => upper
     }
     (p.Expr.BinaryIntrinsic(xVal, yVal, kind, tpe), xStmts ++ yStmts)
   }
 
+  private def intrinsifyNamed(
+      op: String,
+      args: List[p.Term],
+      tpeArgs: List[p.Type],
+      rtn: p.Type
+  ): (p.Expr, List[p.Stmt]) = {
+
+    def nullaryIntr(k: p.NullaryIntrinsicKind)        = p.Expr.NullaryIntrinsic(k, rtn)  -> List.empty[p.Stmt]
+    def unaryIntr(x: p.Term, k: p.UnaryIntrinsicKind) = p.Expr.UnaryIntrinsic(x, k, rtn) -> List.empty[p.Stmt]
+    def binaryIntr(x: p.Term, y: p.Term, k: p.BinaryIntrinsicKind) =
+      p.Expr.BinaryIntrinsic(x, y, k, rtn) -> List.empty[p.Stmt]
+
+    (op, args) match {
+      case "gpuGlobalIdxX" -> Nil   => nullaryIntr(p.NullaryIntrinsicKind.GpuGlobalIdxX)
+      case "gpuGlobalIdxY" -> Nil   => nullaryIntr(p.NullaryIntrinsicKind.GpuGlobalIdxY)
+      case "gpuGlobalIdxZ" -> Nil   => nullaryIntr(p.NullaryIntrinsicKind.GpuGlobalIdxZ)
+      case "gpuGlobalSizeX" -> Nil  => nullaryIntr(p.NullaryIntrinsicKind.GpuGlobalSizeX)
+      case "gpuGlobalSizeY" -> Nil  => nullaryIntr(p.NullaryIntrinsicKind.GpuGlobalSizeY)
+      case "gpuGlobalSizeZ" -> Nil  => nullaryIntr(p.NullaryIntrinsicKind.GpuGlobalSizeZ)
+      case "gpuGroupIdxX" -> Nil    => nullaryIntr(p.NullaryIntrinsicKind.GpuGroupIdxX)
+      case "gpuGroupIdxY" -> Nil    => nullaryIntr(p.NullaryIntrinsicKind.GpuGroupIdxY)
+      case "gpuGroupIdxZ" -> Nil    => nullaryIntr(p.NullaryIntrinsicKind.GpuGroupIdxZ)
+      case "gpuGroupSizeX" -> Nil   => nullaryIntr(p.NullaryIntrinsicKind.GpuGroupSizeX)
+      case "gpuGroupSizeY" -> Nil   => nullaryIntr(p.NullaryIntrinsicKind.GpuGroupSizeY)
+      case "gpuGroupSizeZ" -> Nil   => nullaryIntr(p.NullaryIntrinsicKind.GpuGroupSizeZ)
+      case "gpuLocalIdxX" -> Nil    => nullaryIntr(p.NullaryIntrinsicKind.GpuLocalIdxX)
+      case "gpuLocalIdxY" -> Nil    => nullaryIntr(p.NullaryIntrinsicKind.GpuLocalIdxY)
+      case "gpuLocalIdxZ" -> Nil    => nullaryIntr(p.NullaryIntrinsicKind.GpuLocalIdxZ)
+      case "gpuLocalSizeX" -> Nil   => nullaryIntr(p.NullaryIntrinsicKind.GpuLocalSizeX)
+      case "gpuLocalSizeY" -> Nil   => nullaryIntr(p.NullaryIntrinsicKind.GpuLocalSizeY)
+      case "gpuLocalSizeZ" -> Nil   => nullaryIntr(p.NullaryIntrinsicKind.GpuLocalSizeZ)
+      case "gpuGroupBarrier" -> Nil => nullaryIntr(p.NullaryIntrinsicKind.GpuGroupBarrier)
+      case "gpuGroupFence" -> Nil   => nullaryIntr(p.NullaryIntrinsicKind.GpuGroupFence)
+
+      case "sin" -> (x :: Nil)  => unaryIntr(x, p.UnaryIntrinsicKind.Sin)
+      case "cos" -> (x :: Nil)  => unaryIntr(x, p.UnaryIntrinsicKind.Cos)
+      case "tan" -> (x :: Nil)  => unaryIntr(x, p.UnaryIntrinsicKind.Tan)
+      case "asin" -> (x :: Nil) => unaryIntr(x, p.UnaryIntrinsicKind.Asin)
+      case "acos" -> (x :: Nil) => unaryIntr(x, p.UnaryIntrinsicKind.Acos)
+      case "atan" -> (x :: Nil) => unaryIntr(x, p.UnaryIntrinsicKind.Atan)
+      case "sinh" -> (x :: Nil) => unaryIntr(x, p.UnaryIntrinsicKind.Sinh)
+      case "cosh" -> (x :: Nil) => unaryIntr(x, p.UnaryIntrinsicKind.Cosh)
+      case "tanh" -> (x :: Nil) => unaryIntr(x, p.UnaryIntrinsicKind.Tanh)
+
+      case "signum" -> (x :: Nil) => unaryIntr(x, p.UnaryIntrinsicKind.Signum)
+      case "abs" -> (x :: Nil)    => unaryIntr(x, p.UnaryIntrinsicKind.Abs)
+      case "round" -> (x :: Nil)  => unaryIntr(x, p.UnaryIntrinsicKind.Round)
+      case "ceil" -> (x :: Nil)   => unaryIntr(x, p.UnaryIntrinsicKind.Ceil)
+      case "floor" -> (x :: Nil)  => unaryIntr(x, p.UnaryIntrinsicKind.Floor)
+      case "rint" -> (x :: Nil)   => unaryIntr(x, p.UnaryIntrinsicKind.Rint)
+
+      case "sqrt" -> (x :: Nil)  => unaryIntr(x, p.UnaryIntrinsicKind.Sqrt)
+      case "cbrt" -> (x :: Nil)  => unaryIntr(x, p.UnaryIntrinsicKind.Cbrt)
+      case "exp" -> (x :: Nil)   => unaryIntr(x, p.UnaryIntrinsicKind.Exp)
+      case "expm1" -> (x :: Nil) => unaryIntr(x, p.UnaryIntrinsicKind.Expm1)
+      case "log" -> (x :: Nil)   => unaryIntr(x, p.UnaryIntrinsicKind.Log)
+      case "log1p" -> (x :: Nil) => unaryIntr(x, p.UnaryIntrinsicKind.Log1p)
+      case "log10" -> (x :: Nil) => unaryIntr(x, p.UnaryIntrinsicKind.Log10)
+
+      case "pow" -> (x :: y :: Nil)   => binaryIntr(x, y, p.BinaryIntrinsicKind.Pow)
+      case "min" -> (x :: y :: Nil)   => binaryIntr(x, y, p.BinaryIntrinsicKind.Min)
+      case "max" -> (x :: y :: Nil)   => binaryIntr(x, y, p.BinaryIntrinsicKind.Max)
+      case "atan2" -> (x :: y :: Nil) => binaryIntr(x, y, p.BinaryIntrinsicKind.Atan2)
+      case "hypot" -> (x :: y :: Nil) => binaryIntr(x, y, p.BinaryIntrinsicKind.Hypot)
+
+      case "array" -> (x :: Nil) if x.tpe == p.Type.Int =>
+        p.Expr.Alloc(p.Type.Array(tpeArgs.head), x) -> Nil
+      case "length" -> ((s @ p.Term.Select(_, p.Named(_, t @ p.Type.Array(_)))) :: Nil) =>
+        p.Expr.Length(s, t) -> Nil
+      case "apply" -> ((s @ p.Term.Select(_, p.Named(_, p.Type.Array(`rtn`)))) :: i :: Nil) if i.tpe == p.Type.Int =>
+        p.Expr.Index(s, i, rtn) -> Nil
+      case "update" -> ((s @ p.Term.Select(_, p.Named(_, p.Type.Array(c)))) :: i :: x :: Nil)
+          if i.tpe == p.Type.Int && x.tpe == c && rtn == p.Type.Unit =>
+        p.Expr.Alias(p.Term.UnitConst) -> (p.Stmt.Update(s, i, x) :: Nil)
+
+      case _ =>
+        ???
+//      case "length" =>
+//        (x, x.tpe) match {
+//          case (s@Term.Select(_, _), t@p.Type.Array(_)) => p.Expr.Length(s, t) -> Nil
+//          case _                                        =>
+//            println(x.repr)
+//            println(x.tpe.repr)
+//            ???
+//        }
+//      case "apply"  => // x[y]
+//        (x -> x.tpe, y.tpe) match {
+//          case ((s@p.Term.Select(_, _)) -> p.Type.Array(_), p.Type.Int) => p.Expr.Index(s, y, rtn)
+//          case _                                                        => ???
+//        }
+//
+//      case "update" => // x[y] = z
+//
+//        (x, x.tpe, y, y.tpe) match {
+//          case ((s@p.Term.Select(_, _) -> p.Type.Array(_)), p.Type.Int) =>
+//
+//
+//
+//            p.Expr.Alias(p.Term.UnitConst), p.Stmt.Update (xs, idx, x)
+//          case _ => ???
+//
+//        }
+    }
+
+  }
+
   private def intrinsifyInstanceApply(s: p.Stmt, idx: Int) = s.mapAccExpr[p.Expr.Invoke] {
     case inv @ p.Expr.Invoke(sym, tpeArgs, Some(recv), args, rtn) =>
       (sym.fqn, recv, args) match {
-        case ("polyregion" :: "scala" :: "intrinsics$" :: op :: Nil, x, xs) =>
-          println(s">>> ${recv} $op $x $xs tpe=${tpeArgs}")
-          val expr = xs match {
-            case Nil =>
-              val kind = op match {
-                case "gpuGlobalIdxX"   => p.NullaryIntrinsicKind.GpuGlobalIdxX
-                case "gpuGlobalIdxY"   => p.NullaryIntrinsicKind.GpuGlobalIdxY
-                case "gpuGlobalIdxZ"   => p.NullaryIntrinsicKind.GpuGlobalIdxZ
-                case "gpuGlobalSizeX"  => p.NullaryIntrinsicKind.GpuGlobalSizeX
-                case "gpuGlobalSizeY"  => p.NullaryIntrinsicKind.GpuGlobalSizeY
-                case "gpuGlobalSizeZ"  => p.NullaryIntrinsicKind.GpuGlobalSizeZ
-                case "gpuGroupIdxX"    => p.NullaryIntrinsicKind.GpuGroupIdxX
-                case "gpuGroupIdxY"    => p.NullaryIntrinsicKind.GpuGroupIdxY
-                case "gpuGroupIdxZ"    => p.NullaryIntrinsicKind.GpuGroupIdxZ
-                case "gpuGroupSizeX"   => p.NullaryIntrinsicKind.GpuGroupSizeX
-                case "gpuGroupSizeY"   => p.NullaryIntrinsicKind.GpuGroupSizeY
-                case "gpuGroupSizeZ"   => p.NullaryIntrinsicKind.GpuGroupSizeZ
-                case "gpuLocalIdxX"    => p.NullaryIntrinsicKind.GpuLocalIdxX
-                case "gpuLocalIdxY"    => p.NullaryIntrinsicKind.GpuLocalIdxY
-                case "gpuLocalIdxZ"    => p.NullaryIntrinsicKind.GpuLocalIdxZ
-                case "gpuLocalSizeX"   => p.NullaryIntrinsicKind.GpuLocalSizeX
-                case "gpuLocalSizeY"   => p.NullaryIntrinsicKind.GpuLocalSizeY
-                case "gpuLocalSizeZ"   => p.NullaryIntrinsicKind.GpuLocalSizeZ
-                case "gpuGroupBarrier" => p.NullaryIntrinsicKind.GpuGroupBarrier
-                case "gpuGroupFence"   => p.NullaryIntrinsicKind.GpuGroupFence
-              }
-              p.Expr.NullaryIntrinsic(kind, rtn)
-            case x :: Nil =>
-              def unaryIntr(k: p.UnaryIntrinsicKind) = p.Expr.UnaryIntrinsic(x, k, rtn)
+        case (
+              "polyregion" :: "scala" :: "intrinsics$" :: op :: Nil,
+              p.Term
+                .Select(Nil, p.Named(_, p.Type.Struct(p.Sym("polyregion" :: "scala" :: "intrinsics$" :: Nil), _, _))),
+              xs
+            ) =>
+          println(s">>> ${recv} $op[${tpeArgs.map(_.repr)}](${xs.map(_.repr)}) : $rtn")
 
-              op match {
-                case "sin"  => unaryIntr(p.UnaryIntrinsicKind.Sin)
-                case "cos"  => unaryIntr(p.UnaryIntrinsicKind.Cos)
-                case "tan"  => unaryIntr(p.UnaryIntrinsicKind.Tan)
-                case "asin" => unaryIntr(p.UnaryIntrinsicKind.Asin)
-                case "acos" => unaryIntr(p.UnaryIntrinsicKind.Acos)
-                case "atan" => unaryIntr(p.UnaryIntrinsicKind.Atan)
-                case "sinh" => unaryIntr(p.UnaryIntrinsicKind.Sinh)
-                case "cosh" => unaryIntr(p.UnaryIntrinsicKind.Cosh)
-                case "tanh" => unaryIntr(p.UnaryIntrinsicKind.Tanh)
-
-                case "signum" => unaryIntr(p.UnaryIntrinsicKind.Signum)
-                case "abs"    => unaryIntr(p.UnaryIntrinsicKind.Abs)
-                case "round"  => unaryIntr(p.UnaryIntrinsicKind.Round)
-                case "ceil"   => unaryIntr(p.UnaryIntrinsicKind.Ceil)
-                case "floor"  => unaryIntr(p.UnaryIntrinsicKind.Floor)
-                case "rint"   => unaryIntr(p.UnaryIntrinsicKind.Rint)
-
-                case "sqrt"  => unaryIntr(p.UnaryIntrinsicKind.Sqrt)
-                case "cbrt"  => unaryIntr(p.UnaryIntrinsicKind.Cbrt)
-                case "exp"   => unaryIntr(p.UnaryIntrinsicKind.Exp)
-                case "expm1" => unaryIntr(p.UnaryIntrinsicKind.Expm1)
-                case "log"   => unaryIntr(p.UnaryIntrinsicKind.Log)
-                case "log1p" => unaryIntr(p.UnaryIntrinsicKind.Log1p)
-                case "log10" => unaryIntr(p.UnaryIntrinsicKind.Log10)
-
-                case "array" => 
-
-                  
-
-                  p.Expr.Alloc(p.Type.Array(tpeArgs.head), x)
-                  
-              }
-
-            case x :: y :: Nil =>
-              val kind = op match {
-                case "pow" => p.BinaryIntrinsicKind.Pow
-
-                case "min" => p.BinaryIntrinsicKind.Min
-                case "max" => p.BinaryIntrinsicKind.Max
-
-                case "atan2" => p.BinaryIntrinsicKind.Atan2
-                case "hypot" => p.BinaryIntrinsicKind.Hypot
-              }
-              p.Expr.BinaryIntrinsic(x, y, kind, rtn)
-          }
-          (expr, Nil, inv :: Nil)
+          val (expr, stmts) = intrinsifyNamed(op, args, tpeArgs, rtn)
+          (expr, stmts, inv :: Nil)
         case (_ :+ op, x, y :: Nil) if x.tpe == p.Type.Bool && y.tpe == p.Type.Bool && rtn == p.Type.Bool =>
           val (expr, stmts) = op match {
             case "&&" => (p.Expr.BinaryIntrinsic(x, y, p.BinaryIntrinsicKind.LogicAnd, p.Type.Bool), Nil)

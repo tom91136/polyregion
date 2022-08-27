@@ -189,8 +189,8 @@ object Retyper {
           retyped <- (name, kind, tpeCtorArgs) match {
             case (Symbols.Array, q.ClassKind.Class, (_, comp: p.Type) :: Nil) =>
               (None -> p.Type.Array(comp), wit).success
-            case (_, q.ClassKind.Class, (_, comp: p.Type) :: Nil) if tpe <:< argAppliedSeqLikeTpe =>
-              (None -> p.Type.Array(comp), wit).success
+//            case (_, q.ClassKind.Class, (_, comp: p.Type) :: Nil) if tpe <:< argAppliedSeqLikeTpe =>
+//              (None -> p.Type.Array(comp), wit).success
             case (_, _, ys) if tpe.isFunctionType => // FunctionN
               // TODO make sure this works
               "impl".fail

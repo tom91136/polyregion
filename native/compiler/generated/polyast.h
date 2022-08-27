@@ -200,9 +200,10 @@ struct Cast;
 struct Alias;
 struct Invoke;
 struct Index;
+struct Length;
 struct Alloc;
 struct Suspend;
-using Any = Alternative<NullaryIntrinsic, UnaryIntrinsic, BinaryIntrinsic, Cast, Alias, Invoke, Index, Alloc, Suspend>;
+using Any = Alternative<NullaryIntrinsic, UnaryIntrinsic, BinaryIntrinsic, Cast, Alias, Invoke, Index, Length, Alloc, Suspend>;
 } // namespace Expr
 namespace Stmt { 
 struct Comment;
@@ -1112,6 +1113,15 @@ struct EXPORT Index : Expr::Base {
   EXPORT friend bool operator==(const Expr::Index &, const Expr::Index &);
 };
 
+struct EXPORT Length : Expr::Base {
+  Term::Select ref;
+  Type::Array witness;
+  Length(Term::Select ref, Type::Array witness) noexcept : Expr::Base(witness), ref(std::move(ref)), witness(std::move(witness)) {}
+  EXPORT operator Any() const { return std::make_shared<Length>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Length &);
+  EXPORT friend bool operator==(const Expr::Length &, const Expr::Length &);
+};
+
 struct EXPORT Alloc : Expr::Base {
   Type::Array witness;
   Term::Any size;
@@ -1618,6 +1628,9 @@ template <> struct std::hash<polyregion::polyast::Expr::Invoke> {
 };
 template <> struct std::hash<polyregion::polyast::Expr::Index> {
   std::size_t operator()(const polyregion::polyast::Expr::Index &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::Length> {
+  std::size_t operator()(const polyregion::polyast::Expr::Length &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Expr::Alloc> {
   std::size_t operator()(const polyregion::polyast::Expr::Alloc &) const noexcept;

@@ -32,8 +32,8 @@ lazy val commonSettings = Seq(
   scalacOptions ++= Seq(                     //
     "-no-indent",                            //
     "-Wconf:cat=unchecked:error",            //
-    "-Wconf:name=MatchCaseUnreachable:error" //
-    // "-Wconf:name=PatternMatchExhaustivity:error" // TODO enable later
+    "-Wconf:name=MatchCaseUnreachable:error", //
+    "-Wconf:name=PatternMatchExhaustivity:error" // TODO enable later
     // "-language:strictEquality"
   ),
   scalafmtDetailedError := true,

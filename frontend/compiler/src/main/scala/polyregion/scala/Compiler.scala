@@ -58,6 +58,7 @@ object Compiler {
           deriveSignature(defDef).flatMap { s =>
             fnLut.get(s) match {
               case Some(x) =>
+                println(s"Replace: replace ${s.repr}")
                 Log(s"${s.repr}")
                   .map(
                     _.info_("Callsites", invoke.map(_.repr).toList: _*)
@@ -65,6 +66,10 @@ object Compiler {
                   )
                   .map(l => (x :: xs, depss, l :: logs))
               case None =>
+
+
+
+                println(s"Replace: cannot replace ${s.repr}\n${fnLut.keySet.toList.map(x => s"\t${x.repr}").sorted.mkString("\n")} \n ${fnLut.keySet.map(_.copy(tpeVars = Nil) ).contains(s.copy(tpeVars = Nil))}")
                 for {
                   l                 <- Log(s"Compile (no replacement): ${s.repr}")
                   ((x, deps), log0) <- compileFn(defDef)
@@ -110,74 +115,77 @@ object Compiler {
   private def deriveModuleStructCaptures(using q: Quoted)(d: q.Dependencies): List[p.Named] =
     d.modules.values.toList.map(t => p.Named(t.name.fqn.mkString("_"), t))
 
-  def compileFn(using q: Quoted)(f: q.DefDef): Result[((p.Function, q.Dependencies), Log)] = for {
-    log <- Log(s"Compile DefDef: ${f.name}")
-    log <- log.info(s"Body", f.show(using q.Printer.TreeAnsiCode))
-    rhs <- f.rhs.failIfEmpty(s"Function does not contain an implementation: (in ${f.symbol.maybeOwner}) ${f.show}")
+  def compileFn(using q: Quoted)(f: q.DefDef, intrinsify: Boolean = true): Result[((p.Function, q.Dependencies), Log)] =
+    for {
+      log <- Log(s"Compile DefDef: ${f.name}")
+      log <- log.info(s"Body", f.show(using q.Printer.TreeAnsiCode))
+      rhs <- f.rhs.failIfEmpty(s"Function does not contain an implementation: (in ${f.symbol.maybeOwner}) ${f.show}")
 
-    // First we run the typer on the return type to see if we can just return a term based on the type.
-    (fnRtnTerm -> fnRtnTpe, fnRtnWit) <- Retyper.typer0(f.returnTpt.tpe)
+      // First we run the typer on the return type to see if we can just return a term based on the type.
+      (fnRtnTerm -> fnRtnTpe, fnRtnWit) <- Retyper.typer0(f.returnTpt.tpe)
 
-    // We also run the typer on all the def's arguments, all of which should come in the form of a ValDef.
-    // TODO handle default value of args (ValDef.rhs)
-    (fnArgs, fnArgsWit) <- f.termParamss.flatMap(_.params).foldMapM { arg =>
-      Retyper.typer0(arg.tpt.tpe).map { case (_ -> t, wit) => ((arg, p.Named(arg.name, t)) :: Nil, wit) }
-    }
+      // We also run the typer on all the def's arguments, all of which should come in the form of a ValDef.
+      // TODO handle default value of args (ValDef.rhs)
+      (fnArgs, fnArgsWit) <- f.termParamss.flatMap(_.params).foldMapM { arg =>
+        Retyper.typer0(arg.tpt.tpe).map { case (_ -> t, wit) => ((arg, p.Named(arg.name, t)) :: Nil, wit) }
+      }
 
-    fnTypeVars = f.paramss.flatMap(_.params).collect { case q.TypeDef(name, _) => name }
+      fnTypeVars = f.paramss.flatMap(_.params).collect { case q.TypeDef(name, _) => name }
 
-    // And then work out whether this def is part of a class/object instance or free-standing (e.g. local methods),
-    // class defs will have a `this` receiver arg with the appropriate type.
-    owningClass <- Retyper.clsSymTyper0(f.symbol.owner)
-    log         <- log.info(s"Method owner: $owningClass")
-    (receiver, receiverTpeVars) <- owningClass match {
-      case t @ p.Type.Struct(_, tpeVars, _) => (Some(p.Named("this", t)), tpeVars).success
-      case x                                => s"Illegal receiver: $x".fail
-    }
+      // And then work out whether this def is part of a class/object instance or free-standing (e.g. local methods),
+      // class defs will have a `this` receiver arg with the appropriate type.
+      owningClass <- Retyper.clsSymTyper0(f.symbol.owner)
+      log         <- log.info(s"Method owner: $owningClass")
+      (receiver, receiverTpeVars) <- owningClass match {
+        case t @ p.Type.Struct(_, tpeVars, _) => (Some(p.Named("this", t)), tpeVars).success
+        case x                                => s"Illegal receiver: $x".fail
+      }
 
-    log <- log.info("DefDef arguments", fnArgs.map((a, n) => s"$a(symbol=${a.symbol}) ~> $n")*)
+      log <- log.info("DefDef arguments", fnArgs.map((a, n) => s"$a(symbol=${a.symbol}) ~> $n")*)
 
-    // Finally, we compile the def body like a closure or just return the term if we have one.
-    ((rhsStmts, rhsDeps, rhsThisCls), log) <- fnRtnTerm match {
-      case Some(t) =>
-        ((p.Stmt.Return(p.Expr.Alias(t)) :: Nil, q.Dependencies(), None), log).success
-      case None =>
-        compileTerm(
-          term = rhs,
-          root = f.symbol,
-          scope = Map.empty // We pass an empty scope table as we are compiling an independent fn.
-        ).map { case ((stmts, _, deps, thisCls), rhsLog) => ((stmts, deps, thisCls), log + rhsLog) }
-    }
+      // Finally, we compile the def body like a closure or just return the term if we have one.
+      ((rhsStmts, rhsDeps, rhsThisCls), log) <- fnRtnTerm match {
+        case Some(t) =>
+          ((p.Stmt.Return(p.Expr.Alias(t)) :: Nil, q.Dependencies(), None), log).success
+        case None =>
+          compileTerm(
+            term = rhs,
+            root = f.symbol,
+            scope = Map.empty, // We pass an empty scope table as we are compiling an independent fn.
+            intrinsify = intrinsify
+          ).map { case ((stmts, _, deps, thisCls), rhsLog) => ((stmts, deps, thisCls), log + rhsLog) }
+      }
 
-    // The rhs terms *may* contain a `this` reference, we check that it matches the receiver we computed previously
-    // if such a reference exists at all.
-    _ <-
-      if (rhsThisCls.exists { case (_, tpe) => tpe != owningClass })
-        s"This type mismatch ($rhsThisCls != $owningClass)".fail
-      else ().success
+      // The rhs terms *may* contain a `this` reference, we check that it matches the receiver we computed previously
+      // if such a reference exists at all.
+      _ <-
+        if (rhsThisCls.exists { case (_, tpe) => tpe != owningClass })
+          s"This type mismatch ($rhsThisCls != $owningClass)".fail
+        else ().success
 
-    // Make sure we record any class witnessed from the params and return type together with rhs.
-    deps = rhsDeps.copy(classes = rhsDeps.classes |+| fnRtnWit |+| fnArgsWit)
+      // Make sure we record any class witnessed from the params and return type together with rhs.
+      deps = rhsDeps.copy(classes = rhsDeps.classes |+| fnRtnWit |+| fnArgsWit)
 
-    compiledFn = p.Function(
-      name = p.Sym(f.symbol.fullName),
-      tpeVars = receiverTpeVars ::: fnTypeVars,
-      receiver = receiver,
-      args = fnArgs.map(_._2),
-      captures = deriveModuleStructCaptures(deps),
-      rtn = fnRtnTpe,
-      body = rhsStmts
-    )
+      compiledFn = p.Function(
+        name = p.Sym(f.symbol.fullName),
+        tpeVars = receiverTpeVars ::: fnTypeVars,
+        receiver = receiver,
+        args = fnArgs.map(_._2),
+        captures = deriveModuleStructCaptures(deps),
+        rtn = fnRtnTpe,
+        body = rhsStmts
+      )
 
-    log <- log.info("Result", compiledFn.repr)
-    _ = println(log.render().mkString("\n"))
+      log <- log.info("Result", compiledFn.repr)
+      _ = println(log.render().mkString("\n"))
 
-  } yield ((compiledFn, deps), log)
+    } yield ((compiledFn, deps), log)
 
   def compileTerm(using q: Quoted)(
       term: q.Term,
       root: q.Symbol,
-      scope: Map[q.Symbol, p.Term]
+      scope: Map[q.Symbol, p.Term],
+      intrinsify: Boolean = true
   ): Result[((List[p.Stmt], p.Type, q.Dependencies, Option[(q.ClassDef, p.Type.Struct)]), Log)] = for {
     log                 <- Log(s"Compile term: ${term.pos.sourceFile.name}:${term.pos.startLine}~${term.pos.endLine}")
     log                 <- log.info("Body (AST)", pprint.tokenize(term, indent = 1, showFieldNames = true).mkString)
@@ -191,7 +199,9 @@ object Compiler {
     statements = c.stmts :+ p.Stmt.Return(p.Expr.Alias(termValue))
     _          = println(s"Deps1 = ${c.deps.classes.values} ${c.deps.functions.values}")
 
-    (optStmts, optDeps) = runLocalOptPass(statements, c.deps)
+    (optStmts, optDeps) =
+      if (intrinsify) runLocalOptPass(statements, c.deps)
+      else (statements, c.deps)
   } yield ((optStmts, termTpe, optDeps, c.thisCls), log)
 
   def compileExpr(using q: Quoted)(expr: Expr[Any]): Result[(List[(p.Named, q.Term)], p.Program, Log)] = for {

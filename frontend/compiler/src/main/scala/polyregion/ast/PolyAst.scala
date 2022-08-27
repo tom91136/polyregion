@@ -101,6 +101,8 @@ object PolyAst {
     case GpuGroupFence   // __threadfence_block() or mem_fence(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE)
   }
 
+
+
   enum Expr(val tpe: Type) derives MsgPack.Codec {
 
     case NullaryIntrinsic(kind: NullaryIntrinsicKind, rtn: Type)                     extends Expr(rtn)
@@ -111,6 +113,7 @@ object PolyAst {
     case Alias(ref: Term)           extends Expr(ref.tpe)
     case Invoke(name: Sym, tpeArgs: List[Type], receiver: Option[Term], args: List[Term], rtn: Type) extends Expr(rtn)
     case Index(lhs: Term.Select, idx: Term, component: Type)                        extends Expr(component)
+    case Length(ref: Term.Select, witness: Type.Array)                              extends Expr(witness)
     case Alloc(witness: Type.Array, size: Term)                                     extends Expr(witness)
     case Suspend(args: List[Named], stmts: List[Stmt], rtn: Type, shape: Type.Exec) extends Expr(shape)
   }

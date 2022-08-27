@@ -97,6 +97,8 @@ object VerifyPass   {
               args.foldLeft(receiver.map(validateTerm(c, _)).getOrElse(c))(validateTerm(_, _))
             case p.Expr.Index(lhs, idx, component) => (validateTerm(_: Ctx, lhs)).andThen(validateTerm(_, idx))(c)
             case p.Expr.Alloc(witness, size)       => validateTerm(c, size)
+            case p.Expr.Length(ref, witness) => validateTerm(c, ref)
+            case p.Expr.Suspend(args, stmts, rtn, shape) => ???
           }
 
           def validateStmt(c: Ctx, s: p.Stmt): Ctx = s match {

@@ -11,7 +11,12 @@ object Remapper {
   private def fullyApplyGenExec(exec: p.Type.Exec, tpeArgs: List[p.Type]): p.Type.Exec = {
     val tpeTable = exec.tpeVars.zip(tpeArgs).toMap
     def resolve(t: p.Type) = t.map {
-      case p.Type.Var(name) => tpeTable(name)
+      case p.Type.Var(name) => tpeTable.get(name) match {
+        case Some(value) => value
+        case None        =>
+          println(s"Ap gen ${exec} is missing gen arg $name, gen args = ${tpeArgs}")
+          ???
+      }
       case x                => x
     }
     p.Type.Exec(Nil, exec.args.map(resolve(_)), resolve(exec.rtn))
@@ -425,6 +430,9 @@ object Remapper {
           }
         case (Nil, termArgs0, ap @ q.Apply(fun, args)) => // *single* application of some terms: `$fun($args...)`
           println(s"[mapper] ap = `${ap.show}`")
+          
+          
+          
           for {
             (args, c) <- c.down(ap).mapTerms(args)
             (fun, c)  <- (c !! ap).mapTerm(fun, termArgss = args :: termArgs0)

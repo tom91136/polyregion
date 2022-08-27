@@ -7,6 +7,8 @@ object Toggles {
   // need impl
   final inline val ApiSuite   = false
   final inline val GivenSuite = false
+  
+  final inline val LengthSuite = true
 
   // works
 

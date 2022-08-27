@@ -22,14 +22,19 @@ object StdLib {
     def apply[T](runtimeClass1: java.lang.Class[_]): ClassTag[T] = new ClassTag[T]
   }
 
-  class RichInt(private val x: Int) {
+  class RichInt(val x: Int) {
     def min(that: Int)         = intrinsics.min(x, that)
     def max(that: Int)         = intrinsics.max(x, that)
     def until(end: Int): Range = new Range(x, end, 1)
   }
 
+  class ArrayOps[A](val xs: scala.Array[A]) {
+    def size: Int = intrinsics.length[A](xs)
+  }
+
   class Predef {
-    def intWrapper(x: Int): RichInt = new RichInt(x)
+    def intWrapper(x: Int): RichInt                      = new RichInt(x)
+    def intArrayOps(xs: scala.Array[Int]): ArrayOps[Int] = new ArrayOps[Int](xs)
   }
 
   object math {
@@ -127,7 +132,22 @@ object StdLib {
   }
 
   object Array {
-    def ofDim[T](n1: Int)(implicit ev: ClassTag[T]): scala.Array[T] = intrinsics.array[T](n1)
+    def ofDim[T](n1: Int)(implicit ev: ClassTag[T]): Array[T] = intrinsics.array[T](n1)
+  }
+//  class Array[T](val actual: scala.Array[T]) {
+//    def length: Int                = intrinsics.length[T](actual)
+//    def apply(i: Int): T           = intrinsics.apply[T](actual, i)
+//    def update(i: Int, x: T): Unit = intrinsics.update[T](actual, i, x)
+//  }
+
+  object MutableSequence {
+    def onDim[T](N: Int): MutableSequence[T] = new MutableSequence[T](intrinsics.array[T](N))
+  }
+  class MutableSequence[A](data: scala.Array[A]) {
+    def length: Int                = intrinsics.length[A](data)       // data.length
+    def apply(i: Int): A           = intrinsics.apply[A](data, i)     // data.apply(i)
+    def update(i: Int, x: A): Unit = intrinsics.update[A](data, i, x) //  data.update(i, x)
+//    def a = 1
   }
 
   private type ->[A, B] = (A, B)
@@ -138,13 +158,21 @@ object StdLib {
   final def Mirrors: Map[p.Sym, p.Mirror] = derivePackedMirrors1[
     (
         S.collection.immutable.Range -> Range,
+        //
         S.Array.type -> Array.type,
+        S.collection.ArrayOps[_] -> ArrayOps[_],
+        //
+//        S.collection.mutable.Seq.type -> MutableSequence.type,
+        S.collection.mutable.Seq[_] -> MutableSequence[_],
+        //
         S.runtime.RichInt -> RichInt,
         S.Predef.type -> Predef,
         S.Tuple2[_, _] -> Tuple2[_, _],
         S.math.package$ -> math.type,
+        //
         S.reflect.ClassTag[_] -> ClassTag[_],
         S.reflect.ClassTag.type -> ClassTag.type,
+        //
         J.lang.Class[_] -> Class[_]
     )
   ]

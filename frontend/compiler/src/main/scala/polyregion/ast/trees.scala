@@ -161,7 +161,9 @@ object PolyAstToExpr {
       case p.Type.String => '{ p.Type.String }
       case p.Type.Struct(name, tpeVars, args) =>
         '{ p.Type.Struct(${ Expr(name) }, ${ Expr(tpeVars) }, ${ Expr(args) }) }
-      case p.Type.Array(component) => '{ p.Type.Array(${ Expr(component) }) }
+      case p.Type.Array(component)         => '{ p.Type.Array(${ Expr(component) }) }
+      case p.Type.Exec(tpeVars, args, rtn) => ???
+      case p.Type.Nothing                  => ???
     }
   }
 
@@ -211,9 +213,9 @@ extension (e: p.Type) {
     (e, that) match {
       case (p.Type.Struct(xSym, xVars, xTpes), p.Type.Struct(ySym, yVars, yTpes)) =>
         xSym == ySym && xVars == yVars && xTpes.zip(yTpes).forall(_ =:= _)
-      case (p.Type.Nothing, p.Type.Nothing) => true
-      case (p.Type.Nothing, _)              => true
-      case (_, p.Type.Nothing)              => true
+      case (p.Type.Nothing, p.Type.Nothing)             => true
+      case (p.Type.Nothing, _)                          => true
+      case (_, p.Type.Nothing)                          => true
       case (p.Type.Array(xs), p.Type.Array(ys))         => xs =:= ys
       case (p.Type.Exec(_, _, _), p.Type.Exec(_, _, _)) => ??? // TODO impl exec
       case (x, y)                                       => x == y
@@ -386,8 +388,10 @@ extension (e: p.Expr) {
 
     case p.Expr.Invoke(name, tpeArgs, recv, args, tpe) =>
       s"${recv.map(_.repr).getOrElse("<module>")}.${name.repr}<${tpeArgs.map(_.repr).mkString(",")}>(${args.map(_.repr).mkString(",")}) : ${tpe.repr}"
-    case p.Expr.Index(lhs, idx, tpe) => s"${lhs.repr}[${idx.repr}] : ${tpe.repr}"
-    case p.Expr.Alloc(tpe, size)     => s"new [${tpe.component.repr}*${size.repr}]"
+    case p.Expr.Index(lhs, idx, tpe)             => s"${lhs.repr}[${idx.repr}] : ${tpe.repr}"
+    case p.Expr.Alloc(tpe, size)                 => s"new [${tpe.component.repr}*${size.repr}]"
+    case p.Expr.Length(ref, witness)             => s"(${ref.repr} : ${witness.repr}).length"
+    case p.Expr.Suspend(args, stmts, rtn, shape) => ???
   }
 }
 
@@ -445,8 +449,19 @@ extension (e: p.Stmt) {
 
   def accTerm[A](g: p.Term.Select => List[A], f: p.Term => List[A]): List[A] =
     e.mapAccTerm(s => s -> g(s), t => t -> f(t))._2
+
   def mapTerm(g: p.Term.Select => p.Term.Select, f: p.Term => p.Term): List[p.Stmt] =
     e.mapAccTerm(s => g(s) -> Nil, t => f(t) -> Nil)._1
+
+  def mapTerm(f: p.Term => p.Term): List[p.Stmt] =
+    e.mapAccTerm(
+      f(_) match {
+        case s @ p.Term.Select(_, _) => s -> Nil
+        case x => throw new IllegalArgumentException(s"Select must be mapped to a select, got $x")
+      },
+      t => f(t) -> Nil
+    )._1
+
   def mapAccTerm[A](
       g: p.Term.Select => (p.Term.Select, List[A]),
       f: p.Term => (p.Term, List[A])
@@ -490,9 +505,14 @@ extension (e: p.Stmt) {
           val (lhs0, as0) = g(lhs)
           val (idx0, as1) = f(idx)
           (p.Expr.Index(lhs0, idx0, component), Nil, as0 ::: as1)
+        case p.Expr.Length(ref, witness) =>
+          val (ref0, as0) = g(ref)
+          (p.Expr.Length(ref0, witness), Nil, as0)
         case p.Expr.Alloc(witness, term) =>
           val (term0, as0) = f(term)
           (p.Expr.Alloc(witness, term0), Nil, as0)
+        case p.Expr.Suspend(args, stmts, rtn, shape) =>
+          ???
       })
       .unzip //
 
@@ -539,9 +559,13 @@ extension (e: p.Stmt) {
         case p.Expr.Index(lhs, idx, component) =>
           val (component0, as0) = f(component)
           (p.Expr.Index(lhs, idx, component0), Nil, as0)
+        case p.Expr.Length(ref, witness) =>
+          val (component0, as0) = f(witness.component)
+          (p.Expr.Length(ref, p.Type.Array(component0)), Nil, as0)
         case p.Expr.Alloc(witness, size) =>
           val (component0, as0) = f(witness.component)
           (p.Expr.Alloc(p.Type.Array(component0), size), Nil, as0)
+        case p.Expr.Suspend(args, stmts, rtn, shape) => ???
       })
       .unzip
 
@@ -609,5 +633,6 @@ extension (f: p.Signature) {
   )
 
   def repr: String =
-    s"${f.receiver.fold("")(r => r.repr + ".")}${f.name.repr}(${f.args.map(_.repr).mkString(", ")}) : ${f.rtn.repr}"
+    s"<${f.tpeVars.mkString(",")}>${f.receiver
+      .fold("")(r => r.repr + "!")}${f.name.repr}(${f.args.map(_.repr).mkString(", ")}) : ${f.rtn.repr}"
 }
