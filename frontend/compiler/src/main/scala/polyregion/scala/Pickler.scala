@@ -247,12 +247,12 @@ object Pickler {
   }
 
   // TODO
-  // Array[Solid]        = [  S[N]...                                                                            ]
-  // Solid               = [  S                                                                                  ]
-  // RefA{RefB}          = [  RefA {*T, N:Int, RefB {*U, N':Int} }, T[N]..., U[N']...                            ]
-  // Ref                 = [  Ref {*T, N:Int, *U, N':Int ...}, T[N]..., U[N']...                                 ]
-  // Array[Ref] xs       = [  Ref {*T, N:Int, *U, N':Int ...}[xs.size]..., T[N * xs.size]..., U[N' * xs.size]... ]
-  // Array[Array[Solid]] = [  Ref {*T, N1}[N0]..., T[N0*N1]...                                                   ]
+  // Array[Solid]        = [  { N, S[N]... }                                                                           ]
+  // Solid               = [  S                                                                                        ]
+  // RefA{RefB}          = [  RefA { {N:Int, *T}, RefB { {N':Int, *U} } }, T[N]..., U[N']...                           ]
+  // Ref                 = [  Ref  { {N:Int, *T}, {N':Int, *U} ... }, T[N]..., U[N']...                                ]
+  // Array[Ref] xs       = [  Ref  { {N:Int, *T}, {N':Int, *U}... }[xs.size]..., T[N * xs.size]..., U[N' * xs.size]... ]
+  // Array[Array[Solid]] = [  { N0:Int, *U { {N1, *T} } , U[N0]..., T[N0*N1]...                                        ]
 
   // def writeUniform  //
   // (using q: Quoted) //

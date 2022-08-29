@@ -54,7 +54,7 @@ object PolyAst {
 
   enum Term(val tpe: Type) derives MsgPack.Codec {
     case Select(init: List[Named], last: Named) extends Term(last.tpe)
-    case Poison(t : Type)                       extends Term(t)
+    case Poison(t: Type)                        extends Term(t)
     case UnitConst                              extends Term(Type.Unit)
     case BoolConst(value: Boolean)              extends Term(Type.Bool)
     case ByteConst(value: Byte)                 extends Term(Type.Byte)
@@ -101,8 +101,6 @@ object PolyAst {
     case GpuGroupFence   // __threadfence_block() or mem_fence(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE)
   }
 
-
-
   enum Expr(val tpe: Type) derives MsgPack.Codec {
 
     case NullaryIntrinsic(kind: NullaryIntrinsicKind, rtn: Type)                     extends Expr(rtn)
@@ -134,6 +132,7 @@ object PolyAst {
 
   case class Mirror(                //
       source: Sym,                  //
+      sourceParents: List[Sym],     //
       struct: StructDef,            //
       functions: List[Function],    //
       dependencies: List[StructDef] //

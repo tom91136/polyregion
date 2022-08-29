@@ -136,7 +136,13 @@ object Remapper {
       case (sym, _, _) => // Anything else is a normal invoke.
         if (receiver.isEmpty)
           throw new RuntimeException("Why is recv empty???")
-        val ivk: p.Expr.Invoke = p.Expr.Invoke(p.Sym(sym.fullName), tpeArgs, receiver, args, rtnTpe)
+
+        val receiverTpeArgs = receiver.map(_.tpe).fold(Nil) {
+          case p.Type.Struct(_, _, tpeArgs) => tpeArgs
+          case _                            => Nil
+        }
+
+        val ivk: p.Expr.Invoke = p.Expr.Invoke(p.Sym(sym.fullName), receiverTpeArgs ::: tpeArgs, receiver, args, rtnTpe)
         val named              = c.named(rtnTpe)
         val c0 = c
           .down(fn)

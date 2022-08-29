@@ -13,6 +13,8 @@ object compiletime {
   private final val TopRefs =
     Set("scala.Any", classOf[java.lang.Object].getName) // classOf[Any].getName gives "java.lang.Object"
 
+  private val IntrinsicName = classOf[polyregion.scala.intrinsics$].getName
+
   private def simplifyTpe(using q: Quoted)(t: q.TypeRepr) = t.dealias.simplified.widenTermRefByName
 
   @tailrec private def collectWitnesses[T <: Tuple](using q: Quoted, t: Type[T])(
@@ -129,55 +131,54 @@ object compiletime {
 
           ((fn, fnDeps), fnLog) <- polyregion.scala.Compiler.compileFn(d, intrinsify = true)
 
-
-
-          // Original => MutableSequence
-          // Mirror => mutable.Seq
-          // actual => SeqOp
-
-          // need => Buffer
-
-          // XXX swap out the receiver as well, since we might be using a different one
           rewrittenMirror =
             fn.copy(
               name = sourceSignature.name,
-              receiver = sourceSignature.receiver.map(p.Named("this", _)),
-              tpeVars = sourceSignature.tpeVars
+              // Get rid of the intrinsic$ capture introduced by calling stubs in that object.
+              captures = fn.captures.filter(_.tpe match {
+                case p.Type.Struct(sym, _, _) => sym != p.Sym(IntrinsicName)
+                case _                        => true
+              })
+//              receiver = sourceSignature.receiver.map(p.Named("this", _)),
+//              tpeVars = fn.tpeVars
+//                        ++ fn.receiver.map(_.tpe).fold(Nil){
+//                case p.Type.Struct(_, vars, _) => vars
+//                case _ => Nil
+//              }
 
             ).mapType(_.map(replaceTypes(mirrorToSourceTable)(_)))
 
-
           _ = pprint.pprintln(rewrittenMirror)
 
-          rewrittenMirror2 = rewrittenMirror.copy(
-              body = rewrittenMirror.body.flatMap(_.mapTerm({
+//          rewrittenMirror2 = rewrittenMirror.copy(
+//              body = rewrittenMirror.body.flatMap(_.mapTerm({
+//
+//                case s @ p.Term.Select(Nil, p.Named("this", tpe))    if fn.receiver.exists(_.tpe == tpe) =>
+//
+//                  sourceSignature.receiver match {
+//                    case Some(x) => p.Term.Select(Nil, p.Named("this", x))
+//                    case None    => ??? // replacement doesn't have a receiver!?
+//                  }
+//
+//                case s @ p.Term.Select(p.Named("this", tpe) :: xs, y)  => // if fn.receiver.exists(_.tpe == tpe) =>
+//
+////                  if fn.receiver.exists(_.tpe == tpe)
+//
+//
+//                  // println(fn.receiver)
+//                  // println(tpe)
+//                  // if(sourceSignature.name.toString.contains("length"))
+//                  //   ???
+//
+//                  sourceSignature.receiver match {
+//                    case Some(x) => p.Term.Select(p.Named("this", x) :: xs, y)
+//                    case None    => ??? // replacement doesn't have a receiver!?
+//                  }
+//                case x =>                   x
+//              }))
+//            )
 
-                case s @ p.Term.Select(Nil, p.Named("this", tpe))    if fn.receiver.exists(_.tpe == tpe) =>
-
-                  sourceSignature.receiver match {
-                    case Some(x) => p.Term.Select(Nil, p.Named("this", x))
-                    case None    => ??? // replacement doesn't have a receiver!?
-                  }
-
-                case s @ p.Term.Select(p.Named("this", tpe) :: xs, y)  => // if fn.receiver.exists(_.tpe == tpe) =>
-
-//                  if fn.receiver.exists(_.tpe == tpe)
-
-
-                  // println(fn.receiver)
-                  // println(tpe)
-                  // if(sourceSignature.name.toString.contains("length"))
-                  //   ???
-
-                  sourceSignature.receiver match {
-                    case Some(x) => p.Term.Select(p.Named("this", x) :: xs, y)
-                    case None    => ??? // replacement doesn't have a receiver!?
-                  }
-                case x =>                   x
-              }))
-            )
-
-        } yield rewrittenMirror2 -> fnDeps
+        } yield rewrittenMirror -> fnDeps
 
       case unsupported => s"Unsupported mirror tree: ${unsupported.show} ".fail
     }
@@ -263,8 +264,26 @@ object compiletime {
       // deps.modules
       _ = println("Dependent Classes = " + deps.classes.keys.toList)
       _ = println("Dependent Modules = " + deps.modules.keys.map(_.fullName).toList)
-      (sdefs, sdefLogs) <- Compiler.deriveAllStructs(deps)()
-    } yield p.Mirror(source = p.Sym(sourceSym.fullName), struct = mirrorStruct, functions = functions, sdefs)
+
+      // FIXME we're creating a dummy function so that the replacement works,
+      //  shouldn't have to do this really.
+      (_, _, dependentStructs, _, dependentLog) <-
+        Compiler.compileAndReplaceStructDependencies(
+          p.Function(p.Sym("_"), Nil, None, Nil, Nil, p.Type.Nothing, Nil),
+          deps
+        )(Map.empty)
+
+      _ = println(dependentLog.render())
+
+      parents = source.baseClasses.map(c => p.Sym(c.fullName))
+
+    } yield p.Mirror(
+      source = p.Sym(sourceSym.fullName),
+      sourceParents = parents,
+      struct = mirrorStruct,
+      functions = functions,
+      dependencies = dependentStructs.toList
+    )
 
     println(">>>" + m)
     m

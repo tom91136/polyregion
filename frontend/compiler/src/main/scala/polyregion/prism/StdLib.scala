@@ -140,20 +140,28 @@ object StdLib {
 //    def update(i: Int, x: T): Unit = intrinsics.update[T](actual, i, x)
 //  }
 
-  object MutableSequence {
-    def onDim[T](N: Int): MutableSequence[T] = new MutableSequence[T](intrinsics.array[T](N))
+  object MutableSeq {
+    def onDim[T](N: Int): MutableSeq[T] = new MutableSeq[T](intrinsics.array[T](N))
   }
-  class MutableSequence[A](data: scala.Array[A]) {
+  class MutableSeq[A](data: scala.Array[A]) {
     def length: Int                = intrinsics.length[A](data)       // data.length
     def apply(i: Int): A           = intrinsics.apply[A](data, i)     // data.apply(i)
     def update(i: Int, x: A): Unit = intrinsics.update[A](data, i, x) //  data.update(i, x)
-//    def a = 1
   }
+  
+  
 
   private type ->[A, B] = (A, B)
 
   import _root_.scala as S
   import _root_.java as J
+
+
+  def m[A](a: S.collection.mutable.Seq[A]): MutableSeq[A] = {
+    a.length
+    
+    ???
+  }
 
   final def Mirrors: Map[p.Sym, p.Mirror] = derivePackedMirrors1[
     (
@@ -162,8 +170,8 @@ object StdLib {
         S.Array.type -> Array.type,
         S.collection.ArrayOps[_] -> ArrayOps[_],
         //
-//        S.collection.mutable.Seq.type -> MutableSequence.type,
-        S.collection.mutable.Seq[_] -> MutableSequence[_],
+//        S.collection.mutable.Seq.type -> MutableSeq.type,
+        S.collection.mutable.Seq[_] -> MutableSeq[_],
         //
         S.runtime.RichInt -> RichInt,
         S.Predef.type -> Predef,
@@ -179,17 +187,32 @@ object StdLib {
 
   // final val Mirrors: Map[p.Sym, p.Mirror] = Map.empty
 
-  final def Functions: Map[p.Signature, (p.Function, List[p.StructDef]) ]  =
-    Mirrors.values.flatMap(m => m.functions.map(f => f -> (m.struct.copy(name = m.source) :: Nil) )).map { case (f, clsDeps) => f.signature -> (f, clsDeps) }.toMap
+  final def Functions: Map[p.Signature, (p.Function, Set[p.StructDef]) ]  =
+    Mirrors.values.flatMap(m => m.functions.map(f => f -> Set(m.struct.copy(name = m.source)) )).map { case (f, clsDeps) => f.signature -> (f, clsDeps) }.toMap
   final def StructDefs: Map[p.Sym, p.StructDef] =
-    Mirrors.values.map(x => x.source -> x.struct.copy(name = x.source)).toMap
+    Mirrors.values.map { x =>
+      x.source -> x.struct.copy(name = x.source)
+    }.toMap
+
+
+  final def StructDefs2: Map[p.Sym, (p.StructDef, List[p.Sym])] =
+    Mirrors.values.map { x =>
+
+
+      x.source -> ( x.struct.copy(name = x.source), x.sourceParents)
+    }.toMap
 
   @main def main(): Unit = {
 
     Functions.values.foreach { case (fn, deps) =>
       println(s"${fn.repr.linesIterator.map("\t" + _).mkString("\n")}")
     }
-    StructDefs.values.foreach(f => println(s"-> $f"))
+    StructDefs2.values.toList.map { case (d, xs) =>
+      s"-> ${d.repr}\n${xs.map(x => s"\t${x.repr}").mkString("\n")}"
+    }.sorted.foreach(println(_))
+
+
+
 
 //    derivePackedMirrors1[ ((1, 2 ) ,(3,4)) ]
 //    derivePackedMirrors1[M]
