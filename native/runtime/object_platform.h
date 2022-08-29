@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <shared_mutex>
+#include <mutex>
 
 #include "dl.h"
 #include "runtime.h"

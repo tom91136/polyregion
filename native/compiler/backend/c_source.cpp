@@ -173,7 +173,8 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr, const std::string &k
       [&](const Expr::Invoke &x) { return "???"s; },                                     //
       [&](const Expr::Index &x) { return qualified(x.lhs) + "[" + mkRef(x.idx) + "]"; }, //
       [&](const Expr::Alloc &x) { return "{/*" + to_string(x) + "*/}"; },                //
-      [&](const Expr::Suspend &x) { return "{/*suspend*/}"s; });
+      [&](const Expr::Suspend &x) { return "{/*suspend*/}"s; },                          //
+      [&](const Expr::Length &x) { return "{/*length*/}"s; });
 }
 
 std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {

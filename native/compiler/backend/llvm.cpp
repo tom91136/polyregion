@@ -740,7 +740,9 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
         auto ptr = invokeMalloc(fn, B.CreateMul(B.CreateIntCast(size, mkTpe(Type::Long()), true), elemSize));
         return B.CreateBitCast(ptr, mkTpe(x.witness));
       },
-      [&](const Expr::Suspend &x) -> ValPtr { return undefined(__FILE__, __LINE__); });
+      [&](const Expr::Suspend &x) -> ValPtr { return undefined(__FILE__, __LINE__); },
+      [&](const Expr::Length &x) -> ValPtr { return undefined(__FILE__, __LINE__); }
+      );
 }
 
 llvm::Value *LLVM::AstTransformer::conditionalLoad(llvm::Value *rhs) {

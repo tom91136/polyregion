@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include "InputFiles.h"
 #include "lld/Common/DWARF.h"
 #include "lld/Common/Driver.h"

@@ -168,7 +168,8 @@ using std::string;
       },
       [](const Expr::Index &x) { return repr(x.lhs) + "[" + repr(x.idx) + "]"; },
       [](const Expr::Alloc &x) { return "new [" + repr(x.witness.component) + "*" + repr(x.size) + "]"; },
-      [](const Expr::Suspend &x) { return "Suspend(???)"s; } //
+      [](const Expr::Suspend &x) { return "Suspend(???)"s; }, //
+      [](const Expr::Length &x) { return "Length(???)"s; } //
   );
 }
 
