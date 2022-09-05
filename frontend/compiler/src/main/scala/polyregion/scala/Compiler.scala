@@ -144,7 +144,10 @@ object Compiler {
         case x                                => s"Illegal receiver: $x".fail
       }
 
+      allTypeVars = (receiverTpeVars ::: fnTypeVars).distinct
+
       log <- log.info("DefDef arguments", fnArgs.map((a, n) => s"$a(symbol=${a.symbol}) ~> $n")*)
+      log <- log.info("DefDef tpe vars (recv+fn)", allTypeVars*)
 
       // Finally, we compile the def body like a closure or just return the term if we have one.
       ((rhsStmts, rhsDeps, rhsThisCls), log) <- fnRtnTerm match {
@@ -155,6 +158,7 @@ object Compiler {
             term = rhs,
             root = f.symbol,
             scope = Map.empty, // We pass an empty scope table as we are compiling an independent fn.
+            tpeArgs = allTypeVars.map(p.Type.Var(_)),
             intrinsify = intrinsify
           ).map { case ((stmts, _, deps, thisCls), rhsLog) => ((stmts, deps, thisCls), log + rhsLog) }
       }
@@ -171,7 +175,7 @@ object Compiler {
 
       compiledFn = p.Function(
         name = p.Sym(f.symbol.fullName),
-        tpeVars = receiverTpeVars ::: fnTypeVars,
+        tpeVars = allTypeVars,
         receiver = receiver,
         args = fnArgs.map(_._2),
         captures = deriveModuleStructCaptures(deps),
@@ -188,12 +192,19 @@ object Compiler {
       term: q.Term,
       root: q.Symbol,
       scope: Map[q.Symbol, p.Term],
+      tpeArgs : List[p.Type],
       intrinsify: Boolean = true
   ): Result[((List[p.Stmt], p.Type, q.Dependencies, Option[(q.ClassDef, p.Type.Struct)]), Log)] = for {
     log                 <- Log(s"Compile term: ${term.pos.sourceFile.name}:${term.pos.startLine}~${term.pos.endLine}")
     log                 <- log.info("Body (AST)", pprint.tokenize(term, indent = 1, showFieldNames = true).mkString)
     log                 <- log.info("Body (Ascii)", term.show(using q.Printer.TreeAnsiCode))
-    (termValue, c)      <- q.RemapContext(root = root, refs = scope).mapTerm(term)
+
+
+    // FILL TERM ARGS here
+
+    _ = println(log.render().mkString("\n"))
+
+    (termValue, c)      <- q.RemapContext(root = root, refs = scope).mapTerm(term, tpeArgs)
     (_ -> termTpe, wit) <- Retyper.typer0(term.tpe)
     _ <-
       if (termTpe != termValue.tpe) {
@@ -295,7 +306,8 @@ object Compiler {
     ((exprStmts, exprTpe, exprDeps, exprThisCls), termLog) <- compileTerm(
       term = term,
       root = q.Symbol.spliceOwner, // XXX not `spliceOwner` for now to avoid `this` captures
-      scope = captureScope.toMap
+      scope = captureScope.toMap,
+      tpeArgs = Nil // TODO work out how to get the owner's tpe vars
     )
 
     exprFn = p.Function(

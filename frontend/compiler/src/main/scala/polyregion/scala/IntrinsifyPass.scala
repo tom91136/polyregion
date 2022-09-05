@@ -184,6 +184,24 @@ object IntrinsifyPass {
 
           val (expr, stmts) = intrinsifyNamed(op, args, tpeArgs, rtn)
           (expr, stmts, inv :: Nil)
+
+        case (
+              "polyregion" :: "scala" :: "intrinsics$" :: "Arr" :: op :: Nil,
+              xs @ p.Term
+                .Select(
+                  _,_
+                ),
+              args
+            ) =>
+          (op, args) match {
+            case "update" -> (i :: x :: Nil) if i.tpe.kind == p.TypeKind.Integral =>
+              (p.Expr.Alias(p.Term.UnitConst), p.Stmt.Update(xs, i, x) :: Nil, inv :: Nil)
+            case "apply" -> (i :: Nil) if i.tpe.kind == p.TypeKind.Integral =>
+              (p.Expr.Index(xs, i, rtn), Nil, inv :: Nil)
+            case (op, args) =>
+              println(s"$op $$args")
+              ???
+          }
         case (_ :+ op, x, y :: Nil) if x.tpe == p.Type.Bool && y.tpe == p.Type.Bool && rtn == p.Type.Bool =>
           val (expr, stmts) = op match {
             case "&&" => (p.Expr.BinaryIntrinsic(x, y, p.BinaryIntrinsicKind.LogicAnd, p.Type.Bool), Nil)

@@ -161,11 +161,32 @@ object Retyper {
           (term -> p.Type.Exec(vars, Nil, rtn), wit).success
         }
 
-      case m @ q.MethodType(names, args, rtn) =>
+      case m @ q.MethodType(argNames, argTpes, rtn) =>
         for {
+          // If this method belongs to a class, the method type needs to prepend the receiver's tpe argTpes.
+          // XXX Currently, the owner symbol of the method can be found only *before* widening from a term ref,
+          //   so passing an already widened TypeRepr will end up with an NoDenotation error with the
+          //   `repr.termSymbol` call
           (_ -> rtnTpe, wit0) <- typer0(rtn)
-          (argTpes, wit1)     <- typer0N(args) //  args.traverse(typer0(_))
-        } yield (None -> p.Type.Exec(Nil, argTpes.map(_._2), rtnTpe), wit0 |+| wit1)
+          (argTpes, wit1)     <- typer0N(argTpes) //  args.traverse(typer0(_))
+
+          (receiverCtorTpes, wit2) <- repr match {
+            case q.TermRef(receiverTpe, _) =>
+              typer0(receiverTpe).map {
+                case (_ -> p.Type.Struct(_, _, args), wit) => args         -> wit
+                case (_ -> p.Type.Array(arg), wit)         => (arg :: Nil) -> wit
+                case (_ -> _, wit)                         => Nil          -> wit
+              }
+            case _ => (Nil, Map.empty).success
+          }
+
+          receiverCtorTpeVars = receiverCtorTpes.collect { case  p.Type.Var(name) => name }
+
+          // receiverTpes = clsTypeCtorNames(repr.termSymbol.maybeOwner) // XXX use the not yet widened `repr`, not `m`!
+        } yield {
+          println(s"Exec ${repr.termSymbol.maybeOwner}.${repr} ${receiverCtorTpes} => ${receiverCtorTpeVars}")
+          (None -> p.Type.Exec(receiverCtorTpeVars, argTpes.map(_._2), rtnTpe), wit0 |+| wit1 |+| wit2)
+        }
       case andOr: q.AndOrType =>
         for {
           (leftTerm -> leftTpe, leftWit)    <- typer0(andOr.left)
@@ -187,7 +208,8 @@ object Retyper {
           argAppliedSeqLikeTpe = q.TypeRepr.typeConstructorOf(classOf[scala.collection.mutable.Seq[_]]).appliedTo(args)
 
           retyped <- (name, kind, tpeCtorArgs) match {
-            case (Symbols.Array, q.ClassKind.Class, (_, comp: p.Type) :: Nil) =>
+            case (Symbols.ArrayMirror, q.ClassKind.Class, (_, comp: p.Type) :: Nil) =>
+              // case (Symbols.Array, q.ClassKind.Class, (_, comp: p.Type) :: Nil) =>
               (None -> p.Type.Array(comp), wit).success
 //            case (_, q.ClassKind.Class, (_, comp: p.Type) :: Nil) if tpe <:< argAppliedSeqLikeTpe =>
 //              (None -> p.Type.Array(comp), wit).success

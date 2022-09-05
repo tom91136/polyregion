@@ -29,7 +29,7 @@ object StdLib {
   }
 
   class ArrayOps[A](val xs: scala.Array[A]) {
-    def size: Int = intrinsics.length[A](xs)
+    def size: Int = xs.length
   }
 
   class Predef {
@@ -132,35 +132,37 @@ object StdLib {
   }
 
   object Array {
-    def ofDim[T](n1: Int)(implicit ev: ClassTag[T]): Array[T] = intrinsics.array[T](n1)
+    def ofDim[T](n1: Int)(implicit ev: ClassTag[T]): Array[T] = new Array[T](n1, intrinsics.array[T](n1))
   }
-//  class Array[T](val actual: scala.Array[T]) {
-//    def length: Int                = intrinsics.length[T](actual)
-//    def apply(i: Int): T           = intrinsics.apply[T](actual, i)
-//    def update(i: Int, x: T): Unit = intrinsics.update[T](actual, i, x)
-//  }
+  class Array[T](_length: Int, val data: intrinsics.Arr[T]) {
+    def length: Int                = _length
+    def apply(i: Int): T           = data.apply(i)
+    def update(i: Int, x: T): Unit = data.update(i, x)
+  }
 
   object MutableSeq {
-    def onDim[T](N: Int): MutableSeq[T] = new MutableSeq[T](intrinsics.array[T](N))
+    def onDim[T](N: Int): MutableSeq[T] = new MutableSeq[T](N, intrinsics.array[T](N))
   }
-  class MutableSeq[A](data: scala.Array[A]) {
-    def length: Int                = intrinsics.length[A](data)       // data.length
-    def apply(i: Int): A           = intrinsics.apply[A](data, i)     // data.apply(i)
-    def update(i: Int, x: A): Unit = intrinsics.update[A](data, i, x) //  data.update(i, x)
+  class MutableSeq[A](_length: Int, data: intrinsics.Arr[A]) {
+    def length: Int                = _length
+    def apply(i: Int): A           = data.apply(i)
+    def update(i: Int, x: A): Unit = data.update(i, x)
   }
-  
-  
 
   private type ->[A, B] = (A, B)
 
   import _root_.scala as S
   import _root_.java as J
 
-
   def m[A](a: S.collection.mutable.Seq[A]): MutableSeq[A] = {
     a.length
-    
+
     ???
+  }
+
+
+  trait Lift[A, B]{
+    def lift
   }
 
   final def Mirrors: Map[p.Sym, p.Mirror] = derivePackedMirrors1[
@@ -168,6 +170,7 @@ object StdLib {
         S.collection.immutable.Range -> Range,
         //
         S.Array.type -> Array.type,
+        S.Array[_] -> Array[_],
         S.collection.ArrayOps[_] -> ArrayOps[_],
         //
 //        S.collection.mutable.Seq.type -> MutableSeq.type,
@@ -187,19 +190,19 @@ object StdLib {
 
   // final val Mirrors: Map[p.Sym, p.Mirror] = Map.empty
 
-  final def Functions: Map[p.Signature, (p.Function, Set[p.StructDef]) ]  =
-    Mirrors.values.flatMap(m => m.functions.map(f => f -> Set(m.struct.copy(name = m.source)) )).map { case (f, clsDeps) => f.signature -> (f, clsDeps) }.toMap
+  final def Functions: Map[p.Signature, (p.Function, Set[p.StructDef])] =
+    Mirrors.values
+      .flatMap(m => m.functions.map(f => f -> Set(m.struct.copy(name = m.source))))
+      .map { case (f, clsDeps) => f.signature -> (f, clsDeps) }
+      .toMap
   final def StructDefs: Map[p.Sym, p.StructDef] =
     Mirrors.values.map { x =>
       x.source -> x.struct.copy(name = x.source)
     }.toMap
 
-
   final def StructDefs2: Map[p.Sym, (p.StructDef, List[p.Sym])] =
     Mirrors.values.map { x =>
-
-
-      x.source -> ( x.struct.copy(name = x.source), x.sourceParents)
+      x.source -> (x.struct.copy(name = x.source), x.sourceParents)
     }.toMap
 
   @main def main(): Unit = {
@@ -207,12 +210,12 @@ object StdLib {
     Functions.values.foreach { case (fn, deps) =>
       println(s"${fn.repr.linesIterator.map("\t" + _).mkString("\n")}")
     }
-    StructDefs2.values.toList.map { case (d, xs) =>
-      s"-> ${d.repr}\n${xs.map(x => s"\t${x.repr}").mkString("\n")}"
-    }.sorted.foreach(println(_))
-
-
-
+    StructDefs2.values.toList
+      .map { case (d, xs) =>
+        s"-> ${d.repr}\n${xs.map(x => s"\t${x.repr}").mkString("\n")}"
+      }
+      .sorted
+      .foreach(println(_))
 
 //    derivePackedMirrors1[ ((1, 2 ) ,(3,4)) ]
 //    derivePackedMirrors1[M]

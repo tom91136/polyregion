@@ -19,6 +19,8 @@ object Symbols {
   val Array       = p.Sym("scala" :: "Array" :: Nil)
   val ArrayModule = "scala" :: "Array$" :: Nil
 
+  val ArrayMirror = p.Sym("polyregion" :: "scala" :: "intrinsics$" :: "Arr" :: Nil)
+
   // Array don't delegate to aneeds a ClassTag which it can't have for *
 
   // val Array         = p.Sym(classOf[Array[Int]])

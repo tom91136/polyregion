@@ -13,7 +13,7 @@ object compiletime {
   private final val TopRefs =
     Set("scala.Any", classOf[java.lang.Object].getName) // classOf[Any].getName gives "java.lang.Object"
 
-  private val IntrinsicName = classOf[polyregion.scala.intrinsics$].getName
+  private val IntrinsicName = polyregion.scala.intrinsics.getClass.getName
 
   private def simplifyTpe(using q: Quoted)(t: q.TypeRepr) = t.dealias.simplified.widenTermRefByName
 
@@ -41,14 +41,14 @@ object compiletime {
               println(s"Go ${sym} ==  ${m.show}")
               sym.success
             case p.Type.Array(_) =>
-              val sym = p.Sym("scala" :: "Array" :: Nil)
+              val sym = Symbols.ArrayMirror
               println(s"Go ${sym} ==  ${m.show}")
               sym.success
             case bad => s"source class ${s.show} (mirror is ${m.show}) is not a class type, got repr: ${bad.repr}".fail
           }
           mt <- mt match {
             case p.Type.Struct(sym, _, _) => sym.success
-            case p.Type.Array(_)          => p.Sym("scala" :: "Array" :: Nil).success
+            case p.Type.Array(_)          => Symbols.ArrayMirror.success
             case bad => s"mirror class ${m.show} (source is ${s.show}) is not a class type, got repr: ${bad.repr}".fail
           }
         } yield mt -> st
@@ -103,7 +103,7 @@ object compiletime {
   private def replaceTypes(mirrorToSourceTable: Map[p.Sym, p.Sym])(t: p.Type) = t match {
     case p.Type.Struct(sym, tpeVars, args) =>
       p.Type.Struct(mirrorToSourceTable.getOrElse(sym, sym), tpeVars, args) match {
-        case p.Type.Struct(p.Sym("scala" :: "Array" :: Nil), _, x :: Nil) =>
+        case p.Type.Struct(Symbols.ArrayMirror, _, x :: Nil) =>
           // XXX restore @scala.Array back to the proper array type if needed
           p.Type.Array(x)
         case x => x
@@ -255,11 +255,11 @@ object compiletime {
       // thus making this process recursive, which is quite error prone in a macro context.
       // The workaround is to mark dependent functions as inline in the mirror.
       (functions, deps) = mirroredMethods.combineAll
-      _ <-
-        if (deps.functions.nonEmpty)
-          (s"${sourceSym.fullName} -> ${mirrorSym.fullName} contains call to dependent functions: ${deps.functions.map(_._1.symbol)}, " +
-            s"this is not allowed and dependent methods should be marked inline to avoid this").fail
-        else ().success
+      // _ <-
+      //   if (deps.functions.nonEmpty)
+      //     (s"${sourceSym.fullName} -> ${mirrorSym.fullName} contains call to dependent functions: ${deps.functions.map(_._1.symbol)}, " +
+      //       s"this is not allowed and dependent methods should be marked inline to avoid this").fail
+      //   else ().success
       // deps.classes
       // deps.modules
       _ = println("Dependent Classes = " + deps.classes.keys.toList)
@@ -269,7 +269,7 @@ object compiletime {
       //  shouldn't have to do this really.
       (_, _, dependentStructs, _, dependentLog) <-
         Compiler.compileAndReplaceStructDependencies(
-          p.Function(p.Sym("_"), Nil, None, Nil, Nil, p.Type.Nothing, Nil),
+          p.Function(p.Sym("_dummy_"), Nil, None, Nil, Nil, p.Type.Nothing, Nil),
           deps
         )(Map.empty)
 

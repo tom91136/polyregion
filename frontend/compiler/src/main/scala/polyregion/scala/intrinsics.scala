@@ -4,6 +4,16 @@ object intrinsics {
 
   private def intrinsic: Nothing = throw new AssertionError("illegal")
 
+  trait Arr[A] {
+    def apply(i: Int): A
+    def update(i: Int, x: A): Unit
+  }
+
+  def array[A](size: Int): Arr[A]                   = intrinsic
+  def apply[A](xs: Arr[A], index: Int): A           = intrinsic
+  def update[A](xs: Arr[A], index: Int, x: A): Unit = intrinsic
+  def length[A](xs: Arr[A]): Int                    = intrinsic
+
   def gpuGlobalIdxX: Int  = intrinsic
   def gpuGlobalIdxY: Int  = intrinsic
   def gpuGlobalIdxZ: Int  = intrinsic
@@ -25,11 +35,6 @@ object intrinsics {
 
   def gpuGroupBarrier(): Unit = intrinsic
   def gpuGroupFence(): Unit   = intrinsic
-
-  def array[A](size: Int): scala.Array[A]                   = intrinsic
-  def apply[A](xs: scala.Array[A], index: Int): A           = intrinsic
-  def update[A](xs: scala.Array[A], index: Int, x: A): Unit = intrinsic
-  def length[A](xs: scala.Array[A]): Int                    = intrinsic
 
   def pow[A](a: A, b: A): A   = intrinsic
   def min[A](a: A, b: A): A   = intrinsic

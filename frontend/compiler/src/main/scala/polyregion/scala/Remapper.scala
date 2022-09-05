@@ -11,13 +11,14 @@ object Remapper {
   private def fullyApplyGenExec(exec: p.Type.Exec, tpeArgs: List[p.Type]): p.Type.Exec = {
     val tpeTable = exec.tpeVars.zip(tpeArgs).toMap
     def resolve(t: p.Type) = t.map {
-      case p.Type.Var(name) => tpeTable.get(name) match {
-        case Some(value) => value
-        case None        =>
-          println(s"Ap gen ${exec} is missing gen arg $name, gen args = ${tpeArgs}")
-          ???
-      }
-      case x                => x
+      case p.Type.Var(name) =>
+        tpeTable.get(name) match {
+          case Some(value) => value
+          case None =>
+            println(s"Ap gen ${exec} is missing required gen arg $name, exec need = ${exec.tpeVars}, given = ${tpeArgs}")
+            ???
+        }
+      case x => x
     }
     p.Type.Exec(Nil, exec.args.map(resolve(_)), resolve(exec.rtn))
   }
@@ -254,8 +255,8 @@ object Remapper {
               )
 
               ref.tpe match {
-                case q.TermRef(root, _)  =>
-                  root.classSymbol.filter(_.flags.is(q.Flags.Module)).map( mkSelect(_) )
+                case q.TermRef(root, _) =>
+                  root.classSymbol.filter(_.flags.is(q.Flags.Module)).map(mkSelect(_))
                 case _ => // Not nested, we're not dealing with an object select after all.
                   None
               }
@@ -408,8 +409,8 @@ object Remapper {
             case (Some(value) -> tpe, _) => "`this` isn't supposed to have a value".fail /*(value, c).success*/
             case (None -> illegal, _)    => "`this` isn't typed as a struct type".fail
           }
-        case (Nil, termArgss, q.TypeApply(term, args)) => // *single* application of some types: `$term[$args...]`
-          println(s"[mapper] tpeAp = `${term.show}`")
+        case (tpeArgs, termArgss, q.TypeApply(term, args)) => // *single* application of some types: `$term[$args...]`
+          println(s"[mapper] <${tpeArgs.map(_.repr)}> tpeAp = `${term.show}`")
           for {
             (args, c) <- c.typerNAndWitness(args.map(_.tpe))
             (term, c) <- c.mapTerm(term, tpeArgs = args.map(_._2), termArgss = termArgss)
@@ -434,14 +435,15 @@ object Remapper {
             val name = c.named(tpe)
             (p.Term.Select(Nil, name), (c.down(term)) ::= p.Stmt.Var(name, None))
           }
-        case (Nil, termArgs0, ap @ q.Apply(fun, args)) => // *single* application of some terms: `$fun($args...)`
-          println(s"[mapper] ap = `${ap.show}`")
-          
-          
-          
+        case (tpeArgs, termArgs0, ap @ q.Apply(fun, args)) => // *single* application of some terms: `$fun($args...)`
+          println(s"[mapper] <${tpeArgs.map(_.repr)}> ap = `${ap.show}` <${tpeArgs.map(_.repr)}>")
+          // if (ap.toString().contains("apply")) {
+          //   ???
+          // }
+
           for {
             (args, c) <- c.down(ap).mapTerms(args)
-            (fun, c)  <- (c !! ap).mapTerm(fun, termArgss = args :: termArgs0)
+            (fun, c)  <- (c !! ap).mapTerm(fun, tpeArgs = tpeArgs, termArgss = args :: termArgs0)
           } yield (fun, c)
         case (Nil, Nil, q.Block(stat, expr)) => // block expression: `{ $stmts...; $expr }`
           for {
@@ -493,7 +495,10 @@ object Remapper {
             p.Term.UnitConst,
             bodyCtx.replaceStmts(c.stmts :+ p.Stmt.While(condCtx.stmts, condTerm, bodyCtx.stmts))
           )
-        case _ => c.fail(s"Unhandled: `$term`, show=`${term.show}`\nSymbol:\n${term.symbol}")
+        case _ =>
+          c.fail(
+            s"Unhandled: <${tpeArgs.map(_.repr)}>`$term`(${termArgss}), show=`${term.show}`\nSymbol:\n${term.symbol}"
+          )
       }
     }
   }
