@@ -5,14 +5,18 @@ object intrinsics {
   private def intrinsic: Nothing = throw new AssertionError("illegal")
 
   trait Arr[A] {
+//    def length: Int
     def apply(i: Int): A
     def update(i: Int, x: A): Unit
+  }
+  
+  trait MutArr{
+    
   }
 
   def array[A](size: Int): Arr[A]                   = intrinsic
   def apply[A](xs: Arr[A], index: Int): A           = intrinsic
   def update[A](xs: Arr[A], index: Int, x: A): Unit = intrinsic
-  def length[A](xs: Arr[A]): Int                    = intrinsic
 
   def gpuGlobalIdxX: Int  = intrinsic
   def gpuGlobalIdxY: Int  = intrinsic

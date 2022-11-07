@@ -132,8 +132,6 @@ object IntrinsifyPass {
 
       case "array" -> (x :: Nil) if x.tpe == p.Type.Int =>
         p.Expr.Alloc(p.Type.Array(tpeArgs.head), x) -> Nil
-      case "length" -> ((s @ p.Term.Select(_, p.Named(_, t @ p.Type.Array(_)))) :: Nil) =>
-        p.Expr.Length(s, t) -> Nil
       case "apply" -> ((s @ p.Term.Select(_, p.Named(_, p.Type.Array(`rtn`)))) :: i :: Nil) if i.tpe == p.Type.Int =>
         p.Expr.Index(s, i, rtn) -> Nil
       case "update" -> ((s @ p.Term.Select(_, p.Named(_, p.Type.Array(c)))) :: i :: x :: Nil)
@@ -199,6 +197,7 @@ object IntrinsifyPass {
             case "apply" -> (i :: Nil) if i.tpe.kind == p.TypeKind.Integral =>
               (p.Expr.Index(xs, i, rtn), Nil, inv :: Nil)
             case (op, args) =>
+              
               println(s"$op $$args")
               ???
           }

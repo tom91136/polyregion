@@ -10,27 +10,48 @@ import _root_.scala.quoted.*
 @compileTimeOnly("This class only exists at compile-time for internal use")
 object compiletime {
 
+  inline def derivePackedMirrors[T <: Tuple](xs: T) = {
+    // XXX We are not in a macro context yet  so we don't have a quote context.
+    //  Everything we do here must be either a proper term/type and not a quoted q.Expr/q.Type.
+
+    // We first extract the term propositions from the witness.
+    val termPrisms = xs.toList.map { case (w: WitnessK[_, _]) => w.unsafePrism }
+
+    // We then extract the type witnesses of the source and mirror type and map them into a tuple again at the type level
+    type Witnesses[Xs <: Tuple, Ys <: Tuple] <: Tuple = Xs match {
+      case (WitnessK[x, y] *: ts) => Witnesses[ts, (x, y) *: Ys]
+      case EmptyTuple             => Ys
+    }
+
+    derivePackedTypeMirrors[Witnesses[T, EmptyTuple]](termPrisms)
+  }
+
   private final val TopRefs =
     Set("scala.Any", classOf[java.lang.Object].getName) // classOf[Any].getName gives "java.lang.Object"
 
-  private val IntrinsicName = polyregion.scala.intrinsics.getClass.getName
+  private final val IntrinsicName = polyregion.scala.intrinsics.getClass.getName
 
-  private def simplifyTpe(using q: Quoted)(t: q.TypeRepr) = t.dealias.simplified.widenTermRefByName
+  private inline def simplifyTpe(using q: Quoted)(t: q.TypeRepr) = t.dealias.simplified.widenTermRefByName
 
-  @tailrec private def collectWitnesses[T <: Tuple](using q: Quoted, t: Type[T])(
-      xs: List[(q.TypeRepr, q.TypeRepr)] = Nil
-  ): List[(q.TypeRepr, q.TypeRepr)] = {
-    given Quotes = q.underlying
-    t match {
-      case '[EmptyTuple]   => xs
-      case '[(s, m) *: ts] => collectWitnesses[ts]((q.TypeRepr.of[s], q.TypeRepr.of[m]) :: xs)
-    }
-  }
+  private inline def derivePackedTypeMirrors[T <: Tuple](
+      inline termPrisms: List[TermPrism[Any, Any]]
+  ): List[Prism] = ${ derivePackedTypeMirrorsImpl[T]('termPrisms) }
 
-  inline def derivePackedMirrors1[T <: Tuple]: Map[p.Sym, p.Mirror] = ${ derivePackedMirrors1Impl[T] }
-  private def derivePackedMirrors1Impl[T <: Tuple](using Q: Quotes, t: Type[T]): Expr[Map[p.Sym, p.Mirror]] = {
+  private def derivePackedTypeMirrorsImpl[T <: Tuple](using Q: Quotes, t: Type[T])(
+      termPrisms: Expr[List[TermPrism[Any, Any]]]
+  ): Expr[List[Prism]] = {
     implicit val q = Quoted(Q)
-    val witnesses  = collectWitnesses[T]().map((a, b) => (simplifyTpe(a), simplifyTpe(b)))
+
+    @tailrec def collectWitnesses[T <: Tuple: Type](
+        xs: List[(q.TypeRepr, q.TypeRepr)] = Nil
+    ): List[(q.TypeRepr, q.TypeRepr)] =
+      Type.of[T] match {
+        case '[EmptyTuple]   => xs
+        case '[(s, m) *: ts] => collectWitnesses[ts]((q.TypeRepr.of[s], q.TypeRepr.of[m]) :: xs)
+      }
+
+    val witnesses = collectWitnesses[T]().map((a, b) => (simplifyTpe(a), simplifyTpe(b)))
+
     (for {
       typeLUT <- witnesses.traverse { (s, m) =>
         for {
@@ -38,17 +59,12 @@ object compiletime {
           (_ -> mt, _) <- Retyper.typer0(m)
           st <- st match {
             case p.Type.Struct(sym, _, _) =>
-              println(s"Go ${sym} ==  ${m.show}")
-              sym.success
-            case p.Type.Array(_) =>
-              val sym = Symbols.ArrayMirror
-              println(s"Go ${sym} ==  ${m.show}")
+              println(s"???> Go ${sym} ==  ${m.show}")
               sym.success
             case bad => s"source class ${s.show} (mirror is ${m.show}) is not a class type, got repr: ${bad.repr}".fail
           }
           mt <- mt match {
             case p.Type.Struct(sym, _, _) => sym.success
-            case p.Type.Array(_)          => Symbols.ArrayMirror.success
             case bad => s"mirror class ${m.show} (source is ${s.show}) is not a class type, got repr: ${bad.repr}".fail
           }
         } yield mt -> st
@@ -72,10 +88,13 @@ object compiletime {
           )
         }.unzip
         val decodeExpr = '{
-          val data = Array.concat(${ Varargs(refs) }*)
-          MsgPack.decode[List[p.Mirror]](data).fold(throw _, x => x).map(m => m.source -> m).toMap
+          val data    = Array.concat(${ Varargs(refs) }*)
+          val mirrors = MsgPack.decode[List[p.Mirror]](data).fold(throw _, x => x)
+          val terms   = $termPrisms
+          assert(terms.size == mirrors.size, "Term prism size and mirror size mismatch")
+          mirrors.zip(terms)
         }
-        q.Block(vals, decodeExpr.asTerm).asExprOf[Map[p.Sym, p.Mirror]]
+        q.Block(vals, decodeExpr.asTerm).asExprOf[List[Prism]]
     }
   }
 
@@ -243,7 +262,9 @@ object compiletime {
                   (s"Overload resolution for ${reflectedSym} with resulted in no match, the following signatures were considered (mirror is the requirement):" +
                     s"\n\t(mirror)    ${reflectedSig.repr}" +
                     s"\n\t(reflected) ${reflectedSigWithSourceTpes.repr}" +
-                    s"\n${considered}").fail
+                    s"\n${considered}" +
+                    s"\n == Available struct mappings == " +
+                    s"\n${mirrorToSourceTable.map((m, s) => s"${m.repr} => ${s.repr}").mkString("\n")}").fail
                 case xs =>
                   s"Overload resolution for ${reflectedSym} resulted in multiple matches (the program should not compile): $xs".fail
               }
@@ -273,7 +294,7 @@ object compiletime {
           deps
         )(Map.empty)
 
-      _ = println(dependentLog.render())
+      _ = println(dependentLog.render(1).mkString("\n"))
 
       parents = source.baseClasses.map(c => p.Sym(c.fullName))
 

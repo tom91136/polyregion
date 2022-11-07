@@ -6,7 +6,7 @@ import polyregion.ast.{PolyAst as p, *}
 
 import scala.annotation.tailrec
 
-object VerifyPass   {
+object VerifyPass {
 
   def run(program: p.Program)(log: Log): (List[(p.Function, List[String])], Log) =
     (program.entry :: program.functions).map { f =>
@@ -95,9 +95,8 @@ object VerifyPass   {
             case p.Expr.Alias(ref)     => validateTerm(c, ref)
             case p.Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
               args.foldLeft(receiver.map(validateTerm(c, _)).getOrElse(c))(validateTerm(_, _))
-            case p.Expr.Index(lhs, idx, component) => (validateTerm(_: Ctx, lhs)).andThen(validateTerm(_, idx))(c)
-            case p.Expr.Alloc(witness, size)       => validateTerm(c, size)
-            case p.Expr.Length(ref, witness) => validateTerm(c, ref)
+            case p.Expr.Index(lhs, idx, component)       => (validateTerm(_: Ctx, lhs)).andThen(validateTerm(_, idx))(c)
+            case p.Expr.Alloc(witness, size)             => validateTerm(c, size)
             case p.Expr.Suspend(args, stmts, rtn, shape) => ???
           }
 

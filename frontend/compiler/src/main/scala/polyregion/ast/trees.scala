@@ -312,9 +312,6 @@ extension (e: p.Expr) {
       case p.Expr.Index(lhs, idx, component) =>
         val (component0, as0) = f(component)
         (p.Expr.Index(lhs, idx, component0), as0)
-      case p.Expr.Length(ref, witness) =>
-        val (component0, as0) = f(witness.component)
-        (p.Expr.Length(ref, p.Type.Array(component0)), as0)
       case p.Expr.Alloc(witness, size) =>
         val (component0, as0) = f(witness.component)
         (p.Expr.Alloc(p.Type.Array(component0), size), as0)
@@ -425,7 +422,6 @@ extension (e: p.Expr) {
       s"${recv.map(_.repr).getOrElse("<module>")}.${name.repr}<${tpeArgs.map(_.repr).mkString(",")}>(${args.map(_.repr).mkString(",")}) : ${tpe.repr}"
     case p.Expr.Index(lhs, idx, tpe)             => s"${lhs.repr}[${idx.repr}] : ${tpe.repr}"
     case p.Expr.Alloc(tpe, size)                 => s"new [${tpe.component.repr}*${size.repr}]"
-    case p.Expr.Length(ref, witness)             => s"(${ref.repr} : ${witness.repr}).length"
     case p.Expr.Suspend(args, stmts, rtn, shape) => ???
   }
 }
@@ -542,9 +538,6 @@ extension (stmt: p.Stmt) {
           val (lhs0, as0) = g(lhs)
           val (idx0, as1) = f(idx)
           (p.Expr.Index(lhs0, idx0, component), Nil, as0 ::: as1)
-        case p.Expr.Length(ref, witness) =>
-          val (ref0, as0) = g(ref)
-          (p.Expr.Length(ref0, witness), Nil, as0)
         case p.Expr.Alloc(witness, term) =>
           val (term0, as0) = f(term)
           (p.Expr.Alloc(witness, term0), Nil, as0)

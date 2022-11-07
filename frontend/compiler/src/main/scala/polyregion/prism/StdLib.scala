@@ -1,14 +1,18 @@
 package polyregion.prism
 
 import polyregion.ast.{PolyAst as p, *}
-import polyregion.prism.compiletime.derivePackedMirrors1
+import polyregion.prism.compiletime.*
 import polyregion.scala.intrinsics
+import scala.{Predef => _}
 
 object StdLib {
 
+  import _root_.scala as S
+  import _root_.java as J
+
   class Tuple2[T1, T2](_1: T1, _2: T2)
 
-  class Range(start: Int, end: Int, step: Int) {
+  class Range(val start: Int, val end: Int, val step: Int) {
     // def by(step: Int): Range            = mkDef(step) // new Range(start, end, step)
     // private inline def mkDef(step: Int): Range = new Range(start, end, step)
   }
@@ -28,18 +32,22 @@ object StdLib {
     def until(end: Int): Range = new Range(x, end, 1)
   }
 
-  class ArrayOps[A](val xs: scala.Array[A]) {
+  class ArrayOps[A](val xs: S.Array[A]) {
     def size: Int = xs.length
   }
 
   class Predef {
-    def intWrapper(x: Int): RichInt                      = new RichInt(x)
-    def intArrayOps(xs: scala.Array[Int]): ArrayOps[Int] = new ArrayOps[Int](xs)
+    def intWrapper(x: Int): RichInt                  = new RichInt(x)
+    def intArrayOps(xs: S.Array[Int]): ArrayOps[Int] = new ArrayOps[Int](xs)
   }
+
+  scala.math.Pi
 
   object math {
 
-    val Pi = 3.14
+    // TODO mirror fields as well
+    val E: Double  = 2.7182818284590452354
+    val Pi: Double = 3.14159265358979323846
 
     def sin(x: Double): Double  = intrinsics.cos(x)
     def cos(x: Double): Double  = intrinsics.cos(x)
@@ -132,78 +140,99 @@ object StdLib {
   }
 
   object Array {
-    def ofDim[T](n1: Int)(implicit ev: ClassTag[T]): Array[T] = new Array[T](n1, intrinsics.array[T](n1))
+    def ofDim[T](n1: Int)(implicit ev: ClassTag[T]): Array[T] = new Array[T](intrinsics.array[T](n1), n1)
   }
-  class Array[T](_length: Int, val data: intrinsics.Arr[T]) {
-    def length: Int                = _length
+  class Array[T](val data: intrinsics.Arr[T], val length: Int) {
+//    def length: Int                = data.length
     def apply(i: Int): T           = data.apply(i)
     def update(i: Int, x: T): Unit = data.update(i, x)
   }
 
   object MutableSeq {
-    def onDim[T](N: Int): MutableSeq[T] = new MutableSeq[T](N, intrinsics.array[T](N))
+    def onDim[T](N: Int): MutableSeq[T] = new MutableSeq[T](intrinsics.array[T](N), N)
   }
-  class MutableSeq[A](_length: Int, data: intrinsics.Arr[A]) {
-    def length: Int                = _length
+  class MutableSeq[A](val data: intrinsics.Arr[A], val length: Int) {
+//    def length: Int                = data.length
     def apply(i: Int): A           = data.apply(i)
     def update(i: Int, x: A): Unit = data.update(i, x)
   }
 
-  private type ->[A, B] = (A, B)
-
-  import _root_.scala as S
-  import _root_.java as J
-
-  def m[A](a: S.collection.mutable.Seq[A]): MutableSeq[A] = {
-    a.length
-
-    ???
-  }
-
-
-  trait Lift[A, B]{
-    def lift
-  }
-
-  final def Mirrors: Map[p.Sym, p.Mirror] = derivePackedMirrors1[
+  final def Mirrors: List[Prism] = derivePackedMirrors(
     (
-        S.collection.immutable.Range -> Range,
-        //
-        S.Array.type -> Array.type,
-        S.Array[_] -> Array[_],
-        S.collection.ArrayOps[_] -> ArrayOps[_],
-        //
-//        S.collection.mutable.Seq.type -> MutableSeq.type,
-        S.collection.mutable.Seq[_] -> MutableSeq[_],
-        //
-        S.runtime.RichInt -> RichInt,
-        S.Predef.type -> Predef,
-        S.Tuple2[_, _] -> Tuple2[_, _],
-        S.math.package$ -> math.type,
-        //
-        S.reflect.ClassTag[_] -> ClassTag[_],
-        S.reflect.ClassTag.type -> ClassTag.type,
-        //
-        J.lang.Class[_] -> Class[_]
-    )
-  ]
+      // Unsupported
+      witness[S.collection.ArrayOps, ArrayOps](
+        [X] => (xs: S.collection.ArrayOps[X]) => throw J.lang.AssertionError("No"),
+        [X] => (ys: S.collection.ArrayOps[X], xs: ArrayOps[X]) => throw J.lang.AssertionError("No")
+      ),
 
-  // final val Mirrors: Map[p.Sym, p.Mirror] = Map.empty
+      // Mutable collections
+      witness[S.Array.type, Array.type](_ => Array, (_, _) => S.Array),
+      witness[S.Array, Array](
+        [X] =>
+          (xs: S.Array[X]) =>
+            Array[X](new intrinsics.Arr[X] {
+//              override def length: Int                    = xs.length
+              override def apply(i: S.Int): X             = xs(i)
+              override def update(i: S.Int, x: X): S.Unit = xs(i) = x
+            }, xs.length),
+        [X] =>
+          (ys: S.Array[X], xs: Array[X]) => {
+            var i = 0; while (i < xs.length) ys(i) = xs(i); ys
+        }
+      ),
+      // witness[S.collection.mutable.Seq.type, MutableSeq.type](_ => MutableSeq, (_, _) => S.collection.mutable.Seq),
+      witness[S.collection.mutable.Seq, MutableSeq](
+        [X] =>
+          (xs: S.collection.mutable.Seq[X]) =>
+            new MutableSeq(new intrinsics.Arr[X] {
+//              override def length: Int                    = xs.length
+              override def apply(i: S.Int): X             = xs(i)
+              override def update(i: S.Int, x: X): S.Unit = xs(i) = x
+            }, xs.length),
+        [X] =>
+          (ys: S.collection.mutable.Seq[X], xs: MutableSeq[X]) => {
+            var i = 0; while (i < xs.length) ys(i) = xs(i); ys
+        }
+      ),
+
+      // Immutable types, restore simply uses the original instance
+      witness[S.reflect.ClassTag, ClassTag](
+        [X] => (xs: S.reflect.ClassTag[X]) => new ClassTag[X](),
+        [X] => (ys: S.reflect.ClassTag[X], _: ClassTag[X]) => ys
+      ),
+      witness[J.lang.Class, Class](
+        [X] => (xs: J.lang.Class[X]) => new Class[X](),
+        [X] => (ys: J.lang.Class[X], _: Class[X]) => ys
+      ),
+      witness[S.collection.immutable.Range, Range](r => new Range(r.start, r.end, r.step), (x, _) => x),
+      witness[S.reflect.ClassTag.type, ClassTag.type](_ => ClassTag, (_, _) => S.reflect.ClassTag),
+      witness[S.runtime.RichInt, RichInt](x => new RichInt(x.self), (x, _) => x),
+      witness[S.Predef.type, Predef](x => new Predef(), (x, _) => x),
+      witness[S.math.package$, math.type](x => math, (x, _) => x)
+    )
+  )
 
   final def Functions: Map[p.Signature, (p.Function, Set[p.StructDef])] =
-    Mirrors.values
+    Mirrors
+      .map(_._1)
       .flatMap(m => m.functions.map(f => f -> Set(m.struct.copy(name = m.source))))
       .map { case (f, clsDeps) => f.signature -> (f, clsDeps) }
       .toMap
   final def StructDefs: Map[p.Sym, p.StructDef] =
-    Mirrors.values.map { x =>
-      x.source -> x.struct.copy(name = x.source)
-    }.toMap
+    Mirrors
+      .map(_._1)
+      .map { x =>
+        x.source -> x.struct.copy(name = x.source)
+      }
+      .toMap
 
   final def StructDefs2: Map[p.Sym, (p.StructDef, List[p.Sym])] =
-    Mirrors.values.map { x =>
-      x.source -> (x.struct.copy(name = x.source), x.sourceParents)
-    }.toMap
+    Mirrors
+      .map(_._1)
+      .map { x =>
+        x.source -> (x.struct.copy(name = x.source), x.sourceParents)
+      }
+      .toMap
 
   @main def main(): Unit = {
 
@@ -216,9 +245,6 @@ object StdLib {
       }
       .sorted
       .foreach(println(_))
-
-//    derivePackedMirrors1[ ((1, 2 ) ,(3,4)) ]
-//    derivePackedMirrors1[M]
 
     ()
   }

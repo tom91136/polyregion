@@ -170,6 +170,14 @@ object Pickler {
       case (PT.Array(PT.Long), x @ '[Array[Long]])     => '{ $b.asLongBuffer.put(${ v.asExprOf[x.Underlying] }) }
       case (PT.Array(PT.Float), x @ '[Array[Float]])   => '{ $b.asFloatBuffer.put(${ v.asExprOf[x.Underlying] }) }
       case (PT.Array(PT.Double), x @ '[Array[Double]]) => '{ $b.asDoubleBuffer.put(${ v.asExprOf[x.Underlying] }) }
+
+   case (PT.Array(comp), x @ '[intrinsics.Arr[t]]) =>
+        '{
+          val xs = ${ v.asExprOf[x.Underlying] }
+        ???
+//          var i  = 0; while (i < xs.length) { ${ put[t](comp, 'i, '{ xs(i) }) }; i += 1 }
+        }
+
       case (PT.Array(comp), x @ '[java.util.List[t]]) =>
         '{
           val xs = ${ v.asExprOf[x.Underlying] }
