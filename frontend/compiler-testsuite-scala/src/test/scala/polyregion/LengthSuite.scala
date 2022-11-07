@@ -14,7 +14,7 @@ class LengthSuite extends BaseSuite {
 
   {
     val xs = Buffer[Int](1, 2, 3)
-    testExpr{ 2 max 2; xs(0) + xs.length }
+    testExpr{ 2 max 2; xs(0) + xs(2) + xs.length }
 //    testExpr(xs.length)
 //    testExpr(xs.length + xs.size + 10)
 //    testExpr {

@@ -3,7 +3,9 @@ package polyregion.prism
 import polyregion.ast.{PolyAst as p, *}
 import polyregion.prism.compiletime.*
 import polyregion.scala.intrinsics
-import scala.{Predef => _}
+import polyregion.scala.intrinsics.SizedArr
+
+import scala.Predef as _
 
 object StdLib {
 
@@ -140,19 +142,19 @@ object StdLib {
   }
 
   object Array {
-    def ofDim[T](n1: Int)(implicit ev: ClassTag[T]): Array[T] = new Array[T](intrinsics.array[T](n1), n1)
+    def ofDim[T](n1: Int)(implicit ev: ClassTag[T]): Array[T] = new Array[T](n1, intrinsics.array[T](n1))
   }
-  class Array[T](val data: intrinsics.Arr[T], val length: Int) {
+  class Array[T](val length: Int, val data: intrinsics.Arr[T]) extends SizedArr[T] {
 //    def length: Int                = data.length
     def apply(i: Int): T           = data.apply(i)
     def update(i: Int, x: T): Unit = data.update(i, x)
   }
 
   object MutableSeq {
-    def onDim[T](N: Int): MutableSeq[T] = new MutableSeq[T](intrinsics.array[T](N), N)
+    def onDim[T](N: Int): MutableSeq[T] = new MutableSeq[T](N, intrinsics.array[T](N))
   }
-  class MutableSeq[A](val data: intrinsics.Arr[A], val length: Int) {
-//    def length: Int                = data.length
+  class MutableSeq[A](val length_ : Int, val data: intrinsics.Arr[A]) extends SizedArr[A] {
+    def length: Int                = length_
     def apply(i: Int): A           = data.apply(i)
     def update(i: Int, x: A): Unit = data.update(i, x)
   }
@@ -170,11 +172,14 @@ object StdLib {
       witness[S.Array, Array](
         [X] =>
           (xs: S.Array[X]) =>
-            Array[X](new intrinsics.Arr[X] {
+            Array[X](
+              xs.length,
+              new intrinsics.Arr[X] {
 //              override def length: Int                    = xs.length
-              override def apply(i: S.Int): X             = xs(i)
-              override def update(i: S.Int, x: X): S.Unit = xs(i) = x
-            }, xs.length),
+                override def apply(i: S.Int): X             = xs(i)
+                override def update(i: S.Int, x: X): S.Unit = xs(i) = x
+              }
+          ),
         [X] =>
           (ys: S.Array[X], xs: Array[X]) => {
             var i = 0; while (i < xs.length) ys(i) = xs(i); ys
@@ -184,11 +189,14 @@ object StdLib {
       witness[S.collection.mutable.Seq, MutableSeq](
         [X] =>
           (xs: S.collection.mutable.Seq[X]) =>
-            new MutableSeq(new intrinsics.Arr[X] {
+            new MutableSeq(
+              xs.length,
+              new intrinsics.Arr[X] {
 //              override def length: Int                    = xs.length
-              override def apply(i: S.Int): X             = xs(i)
-              override def update(i: S.Int, x: X): S.Unit = xs(i) = x
-            }, xs.length),
+                override def apply(i: S.Int): X             = xs(i)
+                override def update(i: S.Int, x: X): S.Unit = xs(i) = x
+              }
+          ),
         [X] =>
           (ys: S.collection.mutable.Seq[X], xs: MutableSeq[X]) => {
             var i = 0; while (i < xs.length) ys(i) = xs(i); ys

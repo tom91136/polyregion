@@ -125,6 +125,8 @@ object Pickler {
       repr: q.TypeRepr,
       value: Expr[Any]
   ) = {
+
+    println(s"PUT STRUCT ${repr}")
     import q.given
     // Find out the total size of this struct first, it could be nested arbitrarily but the top level's size must
     // reflect the total size; this is consistent with C's `sizeof(struct T)`.
@@ -171,10 +173,10 @@ object Pickler {
       case (PT.Array(PT.Float), x @ '[Array[Float]])   => '{ $b.asFloatBuffer.put(${ v.asExprOf[x.Underlying] }) }
       case (PT.Array(PT.Double), x @ '[Array[Double]]) => '{ $b.asDoubleBuffer.put(${ v.asExprOf[x.Underlying] }) }
 
-   case (PT.Array(comp), x @ '[intrinsics.Arr[t]]) =>
+      case (PT.Array(comp), x @ '[intrinsics.Arr[t]]) =>
         '{
           val xs = ${ v.asExprOf[x.Underlying] }
-        ???
+          ???
 //          var i  = 0; while (i < xs.length) { ${ put[t](comp, 'i, '{ xs(i) }) }; i += 1 }
         }
 

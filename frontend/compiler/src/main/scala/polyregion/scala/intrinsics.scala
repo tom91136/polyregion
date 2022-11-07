@@ -10,8 +10,9 @@ object intrinsics {
     def update(i: Int, x: A): Unit
   }
   
-  trait MutArr{
-    
+  trait  SizedArr[A] { 
+    def length: Int
+    def data : Arr[A]
   }
 
   def array[A](size: Int): Arr[A]                   = intrinsic
