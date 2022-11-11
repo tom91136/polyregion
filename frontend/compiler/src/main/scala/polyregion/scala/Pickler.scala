@@ -2,8 +2,10 @@ package polyregion.scala
 
 import polyregion.ast.{PolyAst as p, *}
 import polyregion.jvm.{compiler as ct, runtime as rt}
+import polyregion.prism.StdLib
 
 import scala.quoted.*
+import polyregion.ast.PolyAst
 
 object Pickler {
 
@@ -126,8 +128,29 @@ object Pickler {
       value: Expr[Any]
   ) = {
 
-    println(s"PUT STRUCT ${repr}")
     import q.given
+
+    val sourceLUT =  StdLib.Mirrors.map(p => p._1.source -> p).toMap
+
+
+    Compiler.findMatchingClassInHierarchy(repr.typeSymbol, sourceLUT) match {
+      case None =>  value.asTerm
+      case Some(a@(m, (from, _))) =>      
+        
+        
+
+        
+      // ???
+          // '{  ${Expr(from)} ($value) }.asTerm
+
+          ???
+    }
+
+
+    println(s"PUT STRUCT ${Retyper.structName0(repr.typeSymbol)} ${Compiler.findMatchingClassInHierarchy(repr.typeSymbol, sourceLUT)}")
+
+    println(StdLib.Mirrors.map(_._1.source))
+
     // Find out the total size of this struct first, it could be nested arbitrarily but the top level's size must
     // reflect the total size; this is consistent with C's `sizeof(struct T)`.
     val sdef           = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
@@ -142,7 +165,7 @@ object Pickler {
         q.Select.unique(value.asTerm, named.symbol).asExpr
       )
     }
-    Expr.block(terms, '{ () })
+    Expr.block(terms, '{  })
   }
 
   def putAll(using q: Quoted)(

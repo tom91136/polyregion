@@ -192,13 +192,12 @@ object Compiler {
       term: q.Term,
       root: q.Symbol,
       scope: Map[q.Symbol, p.Term],
-      tpeArgs : List[p.Type],
+      tpeArgs: List[p.Type],
       intrinsify: Boolean = true
   ): Result[((List[p.Stmt], p.Type, q.Dependencies, Option[(q.ClassDef, p.Type.Struct)]), Log)] = for {
-    log                 <- Log(s"Compile term: ${term.pos.sourceFile.name}:${term.pos.startLine}~${term.pos.endLine}")
-    log                 <- log.info("Body (AST)", pprint.tokenize(term, indent = 1, showFieldNames = true).mkString)
-    log                 <- log.info("Body (Ascii)", term.show(using q.Printer.TreeAnsiCode))
-
+    log <- Log(s"Compile term: ${term.pos.sourceFile.name}:${term.pos.startLine}~${term.pos.endLine}")
+    log <- log.info("Body (AST)", pprint.tokenize(term, indent = 1, showFieldNames = true).mkString)
+    log <- log.info("Body (Ascii)", term.show(using q.Printer.TreeAnsiCode))
 
     // FILL TERM ARGS here
 
@@ -218,6 +217,14 @@ object Compiler {
       else (statements, c.deps)
   } yield ((optStmts, termTpe, optDeps, c.thisCls), log)
 
+  def findMatchingClassInHierarchy[A, B](using
+      q: Quoted
+  )(symbol: q.Symbol, clsLut: Map[p.Sym, B]): Option[B] = {
+    val hierarchy: List[p.Sym] = structName0(symbol) ::
+      q.TypeIdent(symbol).tpe.baseClasses.map(structName0(_))
+    hierarchy.collectFirst(Function.unlift(clsLut.get(_)))
+  }
+
   def compileAndReplaceStructDependencies(using q: Quoted)(
       fn: p.Function,
       deps: q.Dependencies
@@ -225,20 +232,30 @@ object Compiler {
     for {
       log <- Log(s"Compile dependent structs & apply replacements")
       (replacedClasses, classes) <- deps.classes.toList.partitionEitherM { case (clsDef, tpeAps) =>
-        val hierarchy: List[p.Sym] = structName0(clsDef.symbol) ::
-          q.TypeIdent(clsDef.symbol).tpe.baseClasses.map(structName0(_))
-        hierarchy.collectFirst(Function.unlift(clsLut.get(_))) match {
+        findMatchingClassInHierarchy(clsDef.symbol, clsLut) match {
           case Some(x) => Left(tpeAps -> x).success
           case None    => structDef0(clsDef.symbol).map(x => Right(tpeAps -> x))
         }
+
+      // val hierarchy: List[p.Sym] = structName0(clsDef.symbol) ::
+      //   q.TypeIdent(clsDef.symbol).tpe.baseClasses.map(structName0(_))
+      // hierarchy.collectFirst(Function.unlift(clsLut.get(_))) match {
+      //   case Some(x) => Left(tpeAps -> x).success
+      //   case None    => structDef0(clsDef.symbol).map(x => Right(tpeAps -> x))
+      // }
       }
       (replacedModules, modules) <- deps.modules.toList.partitionEitherM { case (symbol, tpe) =>
-        val hierarchy: List[p.Sym] = structName0(symbol) ::
-          q.TypeIdent(symbol).tpe.baseClasses.map(structName0(_))
-        hierarchy.collectFirst(Function.unlift(clsLut.get(_))) match {
+        findMatchingClassInHierarchy(symbol, clsLut) match {
           case Some(x) => Left(tpe -> x).success
           case None    => structDef0(symbol).map(x => Right(tpe -> x))
         }
+
+      // val hierarchy: List[p.Sym] = structName0(symbol) ::
+      //   q.TypeIdent(symbol).tpe.baseClasses.map(structName0(_))
+      // hierarchy.collectFirst(Function.unlift(clsLut.get(_))) match {
+      //   case Some(x) => Left(tpe -> x).success
+      //   case None    => structDef0(symbol).map(x => Right(tpe -> x))
+      // }
       }
 
       log <- log.info("Replaced modules", replacedModules.map { case (x, y) => s"${x.repr} => ${y.repr}" }.toList*)
@@ -438,7 +455,10 @@ object Compiler {
           s"Unexpected type conversion, capture was ${tpe.repr} for $ref but function expected ${n.repr}".fail
       }
     }
-    log <- log.info(s"Final captures", captured.map((name, ref) => s"${name.repr} <== ${ref.symbol}: ${ref.tpe.widenTermRefByName.show}")*)
+    log <- log.info(
+      s"Final captures",
+      captured.map((name, ref) => s"${name.repr} <== ${ref.symbol}: ${ref.tpe.widenTermRefByName.show}")*
+    )
     _ = println(log.render().mkString("\n"))
 
   } yield (captured, opt, log)

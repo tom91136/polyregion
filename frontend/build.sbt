@@ -5,7 +5,7 @@ lazy val bindingsDir = (nativeDir / "bindings" / "jvm").getAbsoluteFile
 
 // /home/tom/polyregion/native/cmake-build-debug-clang/bindings/jvm/libpolyregion-compiler-jvm.so
 
-lazy val scala3Version = "3.1.3"
+lazy val scala3Version = "3.2.1"
 lazy val catsVersion   = "2.8.0"
 lazy val munitVersion  = "1.0.0-M6"
 
@@ -127,7 +127,7 @@ lazy val `compiler-testsuite-scala` = project
       "org.scalameta" %% "munit" % munitVersion % Test
     )
   )
-  .dependsOn(compiler, `runtime-scala`)
+  .dependsOn( `runtime-scala`)
 
 lazy val `compiler-testsuite-java` = project
   .settings(
@@ -145,7 +145,7 @@ lazy val `compiler-testsuite-java` = project
       "com.github.sbt" % "junit-interface" % "0.13.3" % Test
     )
   )
-  .dependsOn(compiler, `runtime-java`)
+  .dependsOn( `runtime-java`)
 
 lazy val mainCls = Some("polyregion.examples.CheckApi")
 

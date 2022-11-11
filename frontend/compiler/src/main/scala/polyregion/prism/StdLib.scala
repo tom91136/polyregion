@@ -6,6 +6,9 @@ import polyregion.scala.intrinsics
 import polyregion.scala.intrinsics.SizedArr
 
 import scala.Predef as _
+import scala.quoted.Quotes
+import scala.quoted.Expr
+import scala.quoted.Type
 
 object StdLib {
 
@@ -162,61 +165,133 @@ object StdLib {
   final def Mirrors: List[Prism] = derivePackedMirrors(
     (
       // Unsupported
-      witness[S.collection.ArrayOps, ArrayOps](
-        [X] => (xs: S.collection.ArrayOps[X]) => throw J.lang.AssertionError("No"),
-        [X] => (ys: S.collection.ArrayOps[X], xs: ArrayOps[X]) => throw J.lang.AssertionError("No")
+      witness[S.collection.ArrayOps, ArrayOps]( //
+        [X] => { (q: Quotes, xs: Expr[S.collection.ArrayOps[X]]) =>
+          throw J.lang.AssertionError("No")
+        },
+        [X] => { (_: Quotes, ys: Expr[S.collection.ArrayOps[X]], _: Expr[ArrayOps[X]]) =>
+          throw J.lang.AssertionError("No")
+        }
       ),
 
-      // Mutable collections
-      witness[S.Array.type, Array.type](_ => Array, (_, _) => S.Array),
-      witness[S.Array, Array](
-        [X] =>
-          (xs: S.Array[X]) =>
-            Array[X](
-              xs.length,
-              new intrinsics.Arr[X] {
-//              override def length: Int                    = xs.length
-                override def apply(i: S.Int): X             = xs(i)
-                override def update(i: S.Int, x: X): S.Unit = xs(i) = x
-              }
-          ),
-        [X] =>
-          (ys: S.Array[X], xs: Array[X]) => {
-            var i = 0; while (i < xs.length) ys(i) = xs(i); ys
-        }
-      ),
+//       // Mutable collections
+//       witness[S.Array.type, Array.type](_ => Array, (_, _) => S.Array),
+//       witness[S.Array, Array](
+//         [X] =>
+//           (xs: S.Array[X]) =>
+//             Array[X](
+//               xs.length,
+//               new intrinsics.Arr[X] {
+// //              override def length: Int                    = xs.length
+//                 override def apply(i: S.Int): X             = xs(i)
+//                 override def update(i: S.Int, x: X): S.Unit = xs(i) = x
+//               }
+//           ),
+//         [X] =>
+//           (ys: S.Array[X], xs: Array[X]) => {
+//             var i = 0; while (i < xs.length) ys(i) = xs(i); ys
+//         }
+//       ),
       // witness[S.collection.mutable.Seq.type, MutableSeq.type](_ => MutableSeq, (_, _) => S.collection.mutable.Seq),
-      witness[S.collection.mutable.Seq, MutableSeq](
-        [X] =>
-          (xs: S.collection.mutable.Seq[X]) =>
-            new MutableSeq(
-              xs.length,
-              new intrinsics.Arr[X] {
-//              override def length: Int                    = xs.length
-                override def apply(i: S.Int): X             = xs(i)
-                override def update(i: S.Int, x: X): S.Unit = xs(i) = x
+      witness[S.collection.mutable.Seq[_], MutableSeq[_]](
+        { (q: Quotes, xs: Expr[S.collection.mutable.Seq[_]]) =>
+          given Quotes = q
+
+          // val a =  Type.of[X ]
+
+          xs match {
+            case '{ $xs: S.collection.mutable.Seq[x0] } =>
+              '{
+                new MutableSeq[x0](
+                  $xs.length,
+                  new intrinsics.Arr[x0] {
+                    override def apply(i: S.Int): x0             = $xs(i)
+                    override def update(i: S.Int, x: x0): S.Unit = $xs(i) = x
+                  }
+                )
               }
-          ),
-        [X] =>
-          (ys: S.collection.mutable.Seq[X], xs: MutableSeq[X]) => {
-            var i = 0; while (i < xs.length) ys(i) = xs(i); ys
+          }
+
+          // '{
+          //   new MutableSeq[X](
+          //     $xs.length,
+          //     new intrinsics.Arr[X] {
+          //       override def apply(i: S.Int): X             = $xs(i)
+          //       override def update(i: S.Int, x: X): S.Unit = $xs(i) = x
+          //     }
+          //   )
+          // }
+          ???
+        },
+        { (q: Quotes, ys: Expr[S.collection.mutable.Seq[_]], xs: Expr[MutableSeq[_]]) =>
+          given Quotes = q // ; given Type[X] = Type.of
+
+
+          import scala.compiletime.ops.any.==
+          (ys, xs) match {
+            case ('{ $ys: S.collection.mutable.Seq[x0] }, '{ $xs: MutableSeq[x1] }) if x0 == x1 =>
+              '{
+                summon[x0 =:= x1]
+                var i = 0; while (i < $xs.length) $ys(i) = $xs(i); $ys
+              }
+          }
+
+          // '{
+          //   var i = 0; while (i < $xs.length) $ys(i) = $xs(i); $ys
+
+          // }
         }
+//         [X] =>
+//           (xs: S.collection.mutable.Seq[X]) =>
+//             new MutableSeq(
+//               xs.length,
+//               new intrinsics.Arr[X] {
+// //              override def length: Int                    = xs.length
+//                 override def apply(i: S.Int): X             = xs(i)
+//                 override def update(i: S.Int, x: X): S.Unit = xs(i) = x
+//               }
+//           ),
+//         [X] =>
+//           (ys: S.collection.mutable.Seq[X], xs: MutableSeq[X]) => {
+//             var i = 0; while (i < xs.length) ys(i) = xs(i); ys
+//         }
       ),
 
       // Immutable types, restore simply uses the original instance
-      witness[S.reflect.ClassTag, ClassTag](
-        [X] => (xs: S.reflect.ClassTag[X]) => new ClassTag[X](),
-        [X] => (ys: S.reflect.ClassTag[X], _: ClassTag[X]) => ys
+      witness[S.reflect.ClassTag, ClassTag]( //
+        [X] => { (q: Quotes, xs: Expr[S.reflect.ClassTag[X]]) =>
+          given Quotes = q; given Type[X] = Type.of
+          '{ new ClassTag[X]() }
+        },
+        [X] => { (_: Quotes, ys: Expr[S.reflect.ClassTag[X]], _: Expr[ClassTag[X]]) => ys }
       ),
-      witness[J.lang.Class, Class](
-        [X] => (xs: J.lang.Class[X]) => new Class[X](),
-        [X] => (ys: J.lang.Class[X], _: Class[X]) => ys
+      witness[J.lang.Class, Class]( //
+        [X] => { (q: Quotes, xs: Expr[J.lang.Class[X]]) =>
+          given Quotes = q; given Type[X] = Type.of
+          '{ new Class[X]() }
+        },
+        [X] => { (_: Quotes, ys: Expr[J.lang.Class[X]], _: Expr[Class[X]]) => ys }
       ),
-      witness[S.collection.immutable.Range, Range](r => new Range(r.start, r.end, r.step), (x, _) => x),
-      witness[S.reflect.ClassTag.type, ClassTag.type](_ => ClassTag, (_, _) => S.reflect.ClassTag),
-      witness[S.runtime.RichInt, RichInt](x => new RichInt(x.self), (x, _) => x),
-      witness[S.Predef.type, Predef](x => new Predef(), (x, _) => x),
-      witness[S.math.package$, math.type](x => math, (x, _) => x)
+      witness[S.collection.immutable.Range, Range](
+        { case (_ @ given Quotes, r) => '{ new Range($r.start, $r.end, $r.step) } },
+        { case (_ @ given Quotes, x, _) => x }
+      ),
+      witness[S.reflect.ClassTag.type, ClassTag.type](
+        { case (_ @ given Quotes, _) => '{ ClassTag } },
+        { case (_ @ given Quotes, _, _) => '{ S.reflect.ClassTag } }
+      ),
+      witness[S.runtime.RichInt, RichInt](
+        { case (_ @ given Quotes, x) => '{ new RichInt($x.self) } },
+        { case (_ @ given Quotes, x, _) => x }
+      ),
+      witness[S.Predef.type, Predef](
+        { case (_ @ given Quotes, _) => '{ new Predef() } },
+        { case (_ @ given Quotes, x, _) => x }
+      ),
+      witness[S.math.package$, math.type](
+        { case (_ @ given Quotes, _) => '{ math } },
+        { case (_ @ given Quotes, x, _) => x }
+      )
     )
   )
 
