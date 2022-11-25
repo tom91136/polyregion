@@ -165,15 +165,11 @@ object StdLib {
   final def Mirrors: List[Prism] = derivePackedMirrors(
     (
       // Unsupported
-      witness[S.collection.ArrayOps, ArrayOps]( //
-        [X] => { (q: Quotes, xs: Expr[S.collection.ArrayOps[X]]) =>
-          throw J.lang.AssertionError("No")
-        },
-        [X] => { (_: Quotes, ys: Expr[S.collection.ArrayOps[X]], _: Expr[ArrayOps[X]]) =>
-          throw J.lang.AssertionError("No")
-        }
-      ),
 
+      witness[S.collection.ArrayOps[_], ArrayOps[_]]( //
+        { case (+ @ given Quotes, _) => throw J.lang.AssertionError("No") },
+        { case (+ @ given Quotes, ys, _) => throw J.lang.AssertionError("No") }
+      ),
 //       // Mutable collections
 //       witness[S.Array.type, Array.type](_ => Array, (_, _) => S.Array),
 //       witness[S.Array, Array](
@@ -194,83 +190,36 @@ object StdLib {
 //       ),
       // witness[S.collection.mutable.Seq.type, MutableSeq.type](_ => MutableSeq, (_, _) => S.collection.mutable.Seq),
       witness[S.collection.mutable.Seq[_], MutableSeq[_]](
-        { (q: Quotes, xs: Expr[S.collection.mutable.Seq[_]]) =>
-          given Quotes = q
-
-          // val a =  Type.of[X ]
-
+        { case (q @ given Quotes, xs) =>
           xs match {
-            case '{ $xs: S.collection.mutable.Seq[x0] } =>
+            case '{ $xs: S.collection.mutable.Seq[a] } =>
               '{
-                new MutableSeq[x0](
+                new MutableSeq[a](
                   $xs.length,
-                  new intrinsics.Arr[x0] {
-                    override def apply(i: S.Int): x0             = $xs(i)
-                    override def update(i: S.Int, x: x0): S.Unit = $xs(i) = x
+                  new intrinsics.Arr[a] {
+                    override def apply(i: S.Int): a             = $xs(i)
+                    override def update(i: S.Int, x: a): S.Unit = $xs(i) = x
                   }
                 )
               }
           }
-
-          // '{
-          //   new MutableSeq[X](
-          //     $xs.length,
-          //     new intrinsics.Arr[X] {
-          //       override def apply(i: S.Int): X             = $xs(i)
-          //       override def update(i: S.Int, x: X): S.Unit = $xs(i) = x
-          //     }
-          //   )
-          // }
-          ???
         },
-        { (q: Quotes, ys: Expr[S.collection.mutable.Seq[_]], xs: Expr[MutableSeq[_]]) =>
-          given Quotes = q // ; given Type[X] = Type.of
-
-
-          import scala.compiletime.ops.any.==
+        { case (q @ given Quotes, ys, xs) =>
           (ys, xs) match {
-            case ('{ $ys: S.collection.mutable.Seq[x0] }, '{ $xs: MutableSeq[x1] }) if x0 == x1 =>
-              '{
-                summon[x0 =:= x1]
-                var i = 0; while (i < $xs.length) $ys(i) = $xs(i); $ys
-              }
+            case ('{ $ys: S.collection.mutable.Seq[Any] }, '{ $xs: MutableSeq[Any] }) =>
+              '{ var i = 0; while (i < $xs.length) $ys(i) = $xs(i); $ys }
           }
-
-          // '{
-          //   var i = 0; while (i < $xs.length) $ys(i) = $xs(i); $ys
-
-          // }
         }
-//         [X] =>
-//           (xs: S.collection.mutable.Seq[X]) =>
-//             new MutableSeq(
-//               xs.length,
-//               new intrinsics.Arr[X] {
-// //              override def length: Int                    = xs.length
-//                 override def apply(i: S.Int): X             = xs(i)
-//                 override def update(i: S.Int, x: X): S.Unit = xs(i) = x
-//               }
-//           ),
-//         [X] =>
-//           (ys: S.collection.mutable.Seq[X], xs: MutableSeq[X]) => {
-//             var i = 0; while (i < xs.length) ys(i) = xs(i); ys
-//         }
       ),
 
       // Immutable types, restore simply uses the original instance
-      witness[S.reflect.ClassTag, ClassTag]( //
-        [X] => { (q: Quotes, xs: Expr[S.reflect.ClassTag[X]]) =>
-          given Quotes = q; given Type[X] = Type.of
-          '{ new ClassTag[X]() }
-        },
-        [X] => { (_: Quotes, ys: Expr[S.reflect.ClassTag[X]], _: Expr[ClassTag[X]]) => ys }
+      witness[S.reflect.ClassTag[_], ClassTag[_]]( //
+        { case (+ @ given Quotes, _) => '{ new ClassTag[Any]() } },
+        { case (+ @ given Quotes, ys, _) => ys }
       ),
-      witness[J.lang.Class, Class]( //
-        [X] => { (q: Quotes, xs: Expr[J.lang.Class[X]]) =>
-          given Quotes = q; given Type[X] = Type.of
-          '{ new Class[X]() }
-        },
-        [X] => { (_: Quotes, ys: Expr[J.lang.Class[X]], _: Expr[Class[X]]) => ys }
+      witness[J.lang.Class[_], Class[_]]( //
+        { case (+ @ given Quotes, _) => '{ new Class[Any]() } },
+        { case (+ @ given Quotes, ys, _) => ys }
       ),
       witness[S.collection.immutable.Range, Range](
         { case (_ @ given Quotes, r) => '{ new Range($r.start, $r.end, $r.step) } },

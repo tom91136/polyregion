@@ -69,7 +69,7 @@ object compiletime {
           Pickler.getStruct(using Q)(compiler, opt, 'buffer, '{ 0 }, 'index, repr).asExprOf[A]
         }
         override def encode(buffer: ByteBuffer, index: Int, a: A): Unit = ${
-          Pickler.putStruct(using Q)(compiler, opt, 'buffer, '{ 0 }, 'index, repr, 'a)
+          Pickler.putStruct(using Q)(compiler, opt, 'buffer, '{ 0 }, 'index, ???, repr, 'a)
         }
       }
     }
@@ -182,8 +182,21 @@ object compiletime {
       dim: Expr[rt.Dim3],
       cb: Expr[Callback[Unit]]
   ) = for {
+
+    // Name actual => type actual
     // configs               <- reifyConfigFromTpe[C](using q.underlying)()
     (captures, prog0, log) <- Compiler.compileExpr(f)
+
+    // Match up the struct types from the capture args so that we know how to copy the structs during argument pickling.
+    capturesWithStructDefs <- captures.traverse {
+      case (n @ p.Named(_, p.Type.Struct(name, _, _)), term) =>
+        prog0.defs
+          .find(_.name == name)
+          .failIfEmpty(s"Missing structure def from capture args ${n.repr}")
+          .map(d => (n, Some(d), term))
+      case (n @ p.Named(_, tpe), term) => (n, None, term).success
+    }
+
     prog = prog0.copy(entry = prog0.entry.copy(name = p.Sym(s"lambda${ProgramCounter.getAndIncrement()}")))
     _    = println(log.render)
 
@@ -204,14 +217,14 @@ object compiletime {
       println(s"Messages=\n  ${c.messages}")
       println(s"Features=\n  ${c.features.toList}")
       println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
-      println(s"Captures=\n${captures}")
+      println(s"Captures=\n${capturesWithStructDefs}")
     }
 
     given Quotes = q.underlying
 
     val fnName     = Expr(prog.entry.name.repr)
     val moduleName = Expr(s"${prog0.entry.name.repr}@${ProgramCounter.getAndIncrement()}")
-    val (captureTpeOrdinals, captureTpeSizes) = captures.map { (name, _) =>
+    val (captureTpeOrdinals, captureTpeSizes) = capturesWithStructDefs.map { (name, _, _) =>
       val tpe = Pickler.tpeAsRuntimeTpe(name.tpe)
       tpe.value -> tpe.sizeInBytes
     }.unzip
@@ -271,7 +284,13 @@ object compiletime {
               q.CaseDef(
                 q.Literal(q.IntConstant(i)),
                 None,
-                bindCapturesToBuffer(compiler, ct.Options.of(c.target, c.arch), 'fnValues, queue, captures).asTerm
+                bindCapturesToBuffer(
+                  compiler,
+                  ct.Options.of(c.target, c.arch),
+                  'fnValues,
+                  queue,
+                  capturesWithStructDefs
+                ).asTerm
               )
             }
           ).asExprOf[Unit]
@@ -309,37 +328,39 @@ object compiletime {
       opt: ct.Options,
       target: Expr[ByteBuffer],
       queue: Expr[rt.Device.Queue],
-      captures: List[(p.Named, q.Term)]
+      capturesWithStructDefs: List[(p.Named, Option[p.StructDef], q.Term)]
   ) = {
     given Quotes = q.underlying
 
-    val (_, stmts) = captures.zipWithIndex.foldLeft((0, List.empty[Expr[Any]])) {
-      case ((byteOffset, exprs), ((name, ref), idx)) =>
-        inline def bindArray[ts: Type, t: Type](arr: p.Type.Array, mutable: Boolean, size: Expr[ts] => Expr[Int]) = '{
-          val pointer = $queue.registerAndInvalidateIfAbsent[ts](
-            /*object*/ ${ ref.asExprOf[ts] },
-            /*sizeOf*/ xs => ${ Expr(Pickler.sizeOf(compiler, opt, arr.component, q.TypeRepr.of[t])) } * ${ size('xs) },
-            /*write */ (xs, bb) => ${ Pickler.putAll(compiler, opt, 'bb, arr, q.TypeRepr.of[ts], 'xs) },
-            /*read  */ ${
-              // TODO what about var?
-              if (!mutable) '{ (bb, xs) =>
-                throw new AssertionError(s"No writeback for immutable type " + ${ Expr(arr.repr) })
-              }
-              else '{ (bb, xs) => ${ Pickler.getAllMutable(compiler, opt, 'bb, arr, q.TypeRepr.of[ts], 'xs) } }
-            },
-            null
-          )
+    val (_, stmts) = capturesWithStructDefs.zipWithIndex.foldLeft((0, List.empty[Expr[Any]])) {
+      case ((byteOffset, exprs), ((name, structDef, ref), idx)) =>
+        println(s"Bind => ${name} ${structDef}")
+        // inline def bindArray[ts: Type, t: Type](arr: p.Type.Array, mutable: Boolean, size: Expr[ts] => Expr[Int]) = '{
+        //   val pointer = $queue.registerAndInvalidateIfAbsent[ts](
+        //     /*object*/ ${ ref.asExprOf[ts] },
+        //     /*sizeOf*/ xs => ${ Expr(Pickler.sizeOf(compiler, opt, arr.component, q.TypeRepr.of[t])) } * ${ size('xs) },
+        //     /*write */ (xs, bb) => ${ Pickler.putAll(compiler, opt, 'bb, arr, q.TypeRepr.of[ts], 'xs) },
+        //     /*read  */ ${
+        //       // TODO what about var?
+        //       if (!mutable) '{ (bb, xs) =>
+        //         throw new AssertionError(s"No writeback for immutable type " + ${ Expr(arr.repr) })
+        //       }
+        //       else '{ (bb, xs) => ${ Pickler.getAllMutable(compiler, opt, 'bb, arr, q.TypeRepr.of[ts], 'xs) } }
+        //     },
+        //     null
+        //   )
 
-          $target.putLong(${ Expr(byteOffset) }, pointer)
-          ()
-        }
+        //   $target.putLong(${ Expr(byteOffset) }, pointer)
+        //   ()
+        // }
 
-        inline def bindStruct[t: Type](struct: p.Type.Struct) = '{
+        inline def bindStruct[t: Type](struct: p.StructDef) = '{
 
           val pointer = $queue.registerAndInvalidateIfAbsent[t](
             /*object*/ ${ ref.asExprOf[t] },
-            /*sizeOf*/ x => ${ Expr(Pickler.sizeOf(compiler, opt, struct, q.TypeRepr.of[t])) },
-            /*write */ (x, bb) => ${ Pickler.putAll(compiler, opt, 'bb, struct, q.TypeRepr.of[t], 'x) },
+            /*sizeOf*/ x => ${ Expr(Pickler.sizeOf(compiler, opt, struct)) },
+            /*write */ (x, bb) =>
+              ${ Pickler.putStruct(compiler, opt, 'bb, '{ 0 }, '{ 0 }, struct, q.TypeRepr.of[t], 'x) },
             /*read  */ null, // (bb, x) => throw new AssertionError(s"No write-back for struct type " + ${ Expr(struct.repr) }),
             null
           )
@@ -348,8 +369,8 @@ object compiletime {
           ()
         }
 
-        val expr = (name.tpe, ref.tpe.asType) match {
-          case (p.Type.Array(comp), x @ '[srt.Buffer[_]]) =>
+        val expr = (name.tpe, structDef, ref.tpe.asType) match {
+          case (p.Type.Array(comp), None, x @ '[srt.Buffer[_]]) =>
             '{
               $target.putLong(
                 ${ Expr(byteOffset) },
@@ -360,21 +381,24 @@ object compiletime {
                 )
               )
             }
-          case (arr @ p.Type.Array(_), ts @ '[Array[t]]) =>
-            bindArray[ts.Underlying, t](arr, mutable = true, x => '{ $x.length })
-          case (arr @ p.Type.Array(_), ts @ '[scala.collection.mutable.Seq[t]]) =>
-            bindArray[ts.Underlying, t](arr, mutable = true, x => '{ $x.length })
-          case (arr @ p.Type.Array(_), ts @ '[java.util.List[t]]) =>
-            bindArray[ts.Underlying, t](arr, mutable = true, x => '{ $x.size })
-          case (arr @ p.Type.Array(_), ts @ '[scala.collection.immutable.Seq[t]]) =>
-            bindArray[ts.Underlying, t](arr, mutable = false, x => '{ $x.length })
-          case (s @ p.Type.Struct(_, _, _), '[t]) =>
+          // case (arr @ p.Type.Array(_),None, ts @ '[Array[t]]) =>
+          //   bindArray[ts.Underlying, t](arr, mutable = true, x => '{ $x.length })
+          // case (arr @ p.Type.Array(_),None, ts @ '[scala.collection.mutable.Seq[t]]) =>
+          //   bindArray[ts.Underlying, t](arr, mutable = true, x => '{ $x.length })
+          // case (arr @ p.Type.Array(_),None, ts @ '[java.util.List[t]]) =>
+          //   bindArray[ts.Underlying, t](arr, mutable = true, x => '{ $x.size })
+          // case (arr @ p.Type.Array(_),None, ts @ '[scala.collection.immutable.Seq[t]]) =>
+          //   bindArray[ts.Underlying, t](arr, mutable = false, x => '{ $x.length })
+          case (s @ p.Type.Struct(_, _, _), None, '[t])       => ???
+          case (s @ p.Type.Struct(_, _, _), Some(sdef), '[t]) =>
             // bindArray[ts.Underlying, t](arr, mutable = false, x => '{ $x.length })
             // Pickler.writeStruct(compiler, opt, target, Expr(byteOffset), Expr(0), ref.tpe, ref.asExpr)
-            bindStruct[t](s)
-          case (t, _) =>
+            bindStruct[t](sdef)
+          case (t, None, _) =>
             // Pickler.putAll(compiler, opt, target, t, ref.tpe, ref.asExpr)
             Pickler.putPrimitive(target, Expr(byteOffset), t, ref.asExpr)
+
+          case (t, Some(_), _) => ???
         }
         (byteOffset + Pickler.tpeAsRuntimeTpe(name.tpe).sizeInBytes, exprs :+ expr)
     }
