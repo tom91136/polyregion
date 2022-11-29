@@ -63,7 +63,7 @@ public:
                                  const std::vector<Type::Any> &args);
     llvm::Value *invokeMalloc(llvm::Function *parent, llvm::Value *size);
 
-    llvm::Value *conditionalLoad(llvm::Value *rhs);
+//    llvm::Value *conditionalLoad(llvm::Value *rhs);
 
   public:
     AstTransformer(Options options, llvm::LLVMContext &c)
@@ -73,7 +73,7 @@ public:
     llvm::Type *mkTpe(const Type::Any &tpe, unsigned AS = 0, bool functionBoundary = false);
     Opt<llvm::StructType *> lookup(const Sym &s);
     Pair<Opt<std::string>, std::string> transform(const std::unique_ptr<llvm::Module> &module, const Program &);
-    Pair<Opt<std::string>, std::string> optimise(const std::unique_ptr<llvm::Module> &module);
+    static Pair<Opt<std::string>, std::string> optimise(const std::unique_ptr<llvm::Module> &module);
   };
 
 public:

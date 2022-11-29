@@ -31,27 +31,24 @@ static llvm::Value *sizeOf(llvm::IRBuilder<> &B, llvm::LLVMContext &C, llvm::Typ
   // we want
   // %SizePtr = getelementptr %T, %T* null, i32 1
   // %Size = ptrtoint %T* %SizePtr to i32
-  auto sizePtr = B.CreateGEP(                                                    //
-      ptrTpe->getPointerElementType(),                                           //
-      llvm::ConstantPointerNull::get(llvm::dyn_cast<llvm::PointerType>(ptrTpe)), //
-      llvm::ConstantInt::get(llvm::Type::getInt64Ty(C), 1),                      //
-      "sizePtr"                                                                  //
+  auto sizePtr = B.CreateGEP(                                          //
+      ptrTpe,                                                          //
+      llvm::ConstantPointerNull::get(llvm::PointerType::getUnqual(C)), //
+      llvm::ConstantInt::get(llvm::Type::getInt64Ty(C), 1),            //
+      "sizePtr"                                                        //
   );
   auto sizeVal = B.CreatePtrToInt(sizePtr, llvm::Type::getInt64Ty(C));
   return sizeVal;
 }
 
-static llvm::Value *load(llvm::IRBuilder<> &B, llvm::Value *rhs) {
-  return B.CreateLoad(rhs->getType()->getPointerElementType(), rhs);
-}
+static llvm::Value *load(llvm::IRBuilder<> &B, llvm::Value *rhs, llvm::Type *ty) { return B.CreateLoad(ty, rhs); }
 
 llvm::Value *LLVM::AstTransformer::invokeMalloc(llvm::Function *parent, llvm::Value *size) {
   return B.CreateCall(mkExternalFn(parent, Type::Array(Type::Byte()), "malloc", {Type::Long()}), size);
 }
 
-static bool isUnsigned(const Type::Any &tpe) {
-  return holds<Type::Char>(tpe); // the only unsigned type in PolyAst
-}
+// the only unsigned type in PolyAst
+static bool isUnsigned(const Type::Any &tpe) { return holds<Type::Char>(tpe); }
 
 static constexpr int64_t nIntMin(uint64_t bits) { return -(int64_t(1) << (bits - 1)); }
 static constexpr int64_t nIntMax(uint64_t bits) { return (int64_t(1) << (bits - 1)) - 1; }
@@ -82,10 +79,8 @@ llvm::Type *LLVM::AstTransformer::mkTpe(const Type::Any &tpe, unsigned AS, bool 
       [&](const Type::Unit &x) -> llvm::Type * { return llvm::Type::getIntNTy(C, functionBoundary ? 8 : 1); }, //
       [&](const Type::Nothing &x) -> llvm::Type * { return undefined(__FILE__, __LINE__); },                   //
       [&](const Type::Struct &x) -> llvm::Type * {
-        if (auto def = polyregion::get_opt(structTypes, x.name); def) {
-          return def->first->getPointerTo(AS);
-        } else {
-
+        if (auto def = polyregion::get_opt(structTypes, x.name); def) return def->first;
+        else {
           auto pool = mk_string2<Sym, Pair<llvm::StructType *, StructMemberTable>>(
               structTypes,
               [](auto &&p) { return "`" + to_string(p.first) + "`" + " = " + std::to_string(p.second.second.size()); },
@@ -95,13 +90,14 @@ llvm::Type *LLVM::AstTransformer::mkTpe(const Type::Any &tpe, unsigned AS, bool 
         }
       }, //
       [&](const Type::Array &x) -> llvm::Type * {
-        // These two types promote to a byte when stored in an array
-        if (holds<Type::Bool>(x.component) || holds<Type::Unit>(x.component)) {
-          return llvm::Type::getInt8Ty(C)->getPointerTo(AS);
-        } else {
-          auto comp = mkTpe(x.component);
-          return comp->isPointerTy() ? comp : comp->getPointerTo(AS);
-        }
+        return B.getPtrTy(AS);
+        //        // These two types promote to a byte when stored in an array
+        //        if (holds<Type::Bool>(x.component) || holds<Type::Unit>(x.component)) {
+        //          return llvm::Type::getInt8Ty(C)->getPointerTo(AS);
+        //        } else {
+        //          auto comp = mkTpe(x.component);
+        //          return comp->isPointerTy() ? comp : comp->getPointerTo(AS);
+        //        }
       },                                                                                             //
       [&](const Type::Var &x) -> llvm::Type * { return undefined(__FILE__, __LINE__, "type var"); }, //
       [&](const Type::Exec &x) -> llvm::Type * { return undefined(__FILE__, __LINE__, "exec"); }
@@ -157,7 +153,7 @@ llvm::Value *LLVM::AstTransformer::mkSelectPtr(const Term::Select &select) {
     for (auto &path : tail) {
       auto [structTy, table] = structTypeOf(tpe);
       if (auto idx = get_opt(table, path.symbol); idx) {
-        root = B.CreateInBoundsGEP(structTy, load(B, root),
+        root = B.CreateInBoundsGEP(structTy, root,
                                    {llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0),
                                     llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), *idx)},
                                    qualified(select) + "_ptr");
@@ -180,7 +176,7 @@ llvm::Value *LLVM::AstTransformer::mkTermVal(const Term::Any &ref) {
   using llvm::ConstantInt;
   return variants::total(
       *ref, //
-      [&](const Term::Select &x) -> llvm::Value * { return load(B, mkSelectPtr(x)); },
+      [&](const Term::Select &x) -> llvm::Value * { return load(B, mkSelectPtr(x), mkTpe(x.tpe)); },
       [&](const Term::Poison &x) -> llvm::Value * {
         if (auto tpe = mkTpe(x.tpe); llvm::isa<llvm::PointerType>(tpe)) {
           return llvm::ConstantPointerNull::get(static_cast<llvm::PointerType *>(tpe));
@@ -456,7 +452,8 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
               // 127:96   grid_size_x;  (32*3+(0*32)==96)
               // 159:128  grid_size_y;  (32*3+(1*32)==128)
               // 191:160  grid_size_z;  (32*3+(2*32)==160)
-              return load(B, B.CreateInBoundsGEP(i32Ty, i32ptr, llvm::ConstantInt::get(i32Ty, 3 + dim)));
+              auto size = B.CreateInBoundsGEP(i32Ty, i32ptr, llvm::ConstantInt::get(i32Ty, 3 + dim));
+              return load(B, size, i32Ty);
             };
 
             // see llvm/libclc/amdgcn-amdhsa/lib/workitem/get_local_size.cl
@@ -468,7 +465,7 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
               // 63:48   workgroup_size_y (16*2+(1*16)==48)
               // 79:64   workgroup_size_z (16*2+(2*16)==64)
               auto size = B.CreateInBoundsGEP(i16Ty, i16ptr, llvm::ConstantInt::get(i16Ty, 2 + dim));
-              return B.CreateIntCast(load(B, size), llvm::Type::getInt32Ty(C), false);
+              return B.CreateIntCast(load(B, size, i16Ty), llvm::Type::getInt32Ty(C), false);
             };
 
             auto globalIdU32 = [&](Intr::ID workgroupId, Intr::ID workitemId, size_t dim) -> ValPtr {
@@ -715,18 +712,18 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
       },
       [&](const Expr::Index &x) -> ValPtr {
         if (auto arrTpe = get_opt<Type::Array>(x.lhs.tpe); arrTpe) {
-          auto ty = mkTpe(*arrTpe)->getPointerElementType();
+          auto ty = mkTpe(arrTpe->component);
 
-          auto ptr = B.CreateInBoundsGEP(ty->isPointerTy() ? ty->getPointerElementType() : ty, //
-                                         mkTermVal(x.lhs),                                     //
+          auto ptr = B.CreateInBoundsGEP(ty,               //
+                                         mkTermVal(x.lhs), //
                                          mkTermVal(x.idx), key + "_ptr");
           if (holds<TypeKind::Ref>(kind(arrTpe->component))) {
             return ptr;
           } else if (holds<Type::Bool>(arrTpe->component) || holds<Type::Unit>(arrTpe->component)) {
             // Narrow from i8 to i1
-            return B.CreateICmpNE(load(B, ptr), llvm::ConstantInt::get(llvm::Type::getInt8Ty(C), 0, true));
+            return B.CreateICmpNE(load(B, ptr, ty), llvm::ConstantInt::get(llvm::Type::getInt1Ty(C), 0, true));
           } else {
-            return load(B, ptr);
+            return load(B, ptr, ty);
           }
         } else {
           throw std::logic_error("Semantic error: array index not called on array type (" + to_string(x.lhs.tpe) +
@@ -741,15 +738,14 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
         return B.CreateBitCast(ptr, mkTpe(x.witness));
       },
       [&](const Expr::Suspend &x) -> ValPtr { return undefined(__FILE__, __LINE__); },
-      [&](const Expr::Length &x) -> ValPtr { return undefined(__FILE__, __LINE__); }
-      );
+      [&](const Expr::Length &x) -> ValPtr { return undefined(__FILE__, __LINE__); });
 }
 
-llvm::Value *LLVM::AstTransformer::conditionalLoad(llvm::Value *rhs) {
-  return rhs->getType()->isPointerTy() // deref the rhs if it's a pointer
-             ? B.CreateLoad(rhs->getType()->getPointerElementType(), rhs)
-             : rhs;
-}
+// llvm::Value *LLVM::AstTransformer::conditionalLoad(llvm::Value *rhs) {
+//   return rhs->getType()->isPointerTy() // deref the rhs if it's a pointer
+//              ? B.CreateLoad(rhs->getType()->getPointerElementType(), rhs)
+//              : rhs;
+// }
 
 LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<WhileCtx> whileCtx = {}) {
 
@@ -777,7 +773,9 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
         }
 
         auto tpe = mkTpe(x.name.tpe);
-        auto stackPtr = B.CreateAlloca(tpe, AllocaAS, nullptr, x.name.symbol + "_stack_ptr");
+
+        auto stackPtr = B.CreateAlloca(tpe->isStructTy() ? B.getPtrTy(AllocaAS) : tpe, AllocaAS, nullptr,
+                                       x.name.symbol + "_stack_ptr");
         auto rhs = x.expr ? std::make_optional(mkExprVal(*x.expr, fn, x.name.symbol + "_var_rhs")) : std::nullopt;
 
         stackVarPtrs[x.name.symbol] = {x.name.tpe, stackPtr};
@@ -791,14 +789,14 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
           if (rhs) {
             B.CreateStore(*rhs, stackPtr);
           } else { // otherwise, heap allocate the struct and return the pointer to that
-            if (!tpe->isPointerTy()) {
-              throw std::logic_error("The LLVM struct type `" + llvm_tostring(tpe) +
-                                     "` was not a pointer to the struct " + repr(x.name.tpe) +
-                                     " in stmt:" + repr(stmt));
-            }
+                   //            if (!tpe->isPointerTy()) {
+                   //              throw std::logic_error("The LLVM struct type `" + llvm_tostring(tpe) +
+                   //                                     "` was not a pointer to the struct " + repr(x.name.tpe) +
+                   //                                     " in stmt:" + repr(stmt));
+                   //            }
             auto elemSize = sizeOf(B, C, tpe);
             auto ptr = invokeMalloc(fn, elemSize);
-            B.CreateStore(B.CreateBitCast(ptr, tpe), stackPtr); //
+            B.CreateStore(ptr, stackPtr); //
           }
         } else { // any other primitives
           if (rhs) {
@@ -858,13 +856,13 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
                                    ") and rhs expr (" + to_string(tpe(x.value)) + ") mismatch (" + repr(x) + ")");
           } else {
             auto dest = mkTermVal(x.lhs);
-            auto ptr = B.CreateInBoundsGEP(                     //
-                dest->getType()->getPointerElementType(), dest, //
-                mkTermVal(x.idx), qualified(x.lhs) + "_ptr"     //
-            );                                                  //
+            auto ptr = B.CreateInBoundsGEP(                 //
+                mkTpe(tpe(x.value)), dest,                  //
+                mkTermVal(x.idx), qualified(x.lhs) + "_ptr" //
+            );                                              //
 
             if (holds<Type::Struct>(tpe(x.value))) {
-              B.CreateStore(load(B, mkTermVal(x.value)), ptr);
+              B.CreateStore(mkTermVal(x.value), ptr);
             } else if (holds<Type::Bool>(tpe(x.value)) || holds<Type::Unit>(tpe(x.value))) {
               // Extend from i1 to i8
               auto b = mkTermVal(x.value);

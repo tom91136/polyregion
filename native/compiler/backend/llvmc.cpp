@@ -89,8 +89,8 @@ void llvmc::initialise() {
   initializeCodeGen(*r);
   initializeLoopStrengthReducePass(*r);
   initializeLowerIntrinsicsPass(*r);
-  initializeEntryExitInstrumenterPass(*r);
-  initializePostInlineEntryExitInstrumenterPass(*r);
+//  initializeEntryExitInstrumenterPass(*r);
+//  initializePostInlineEntryExitInstrumenterPass(*r);
   initializeUnreachableBlockElimLegacyPassPass(*r);
   initializeConstantHoistingLegacyPassPass(*r);
   initializeScalarOpts(*r);

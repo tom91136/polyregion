@@ -6,16 +6,16 @@ include(ProjectConfig.cmake)
 
 project(polyregion-native)
 
-FetchContent_Declare(
-        llvm
-        URL https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_SRC_VERSION}/llvm-${LLVM_SRC_VERSION}.src.tar.xz
-        URL_HASH SHA256=1e09e8c26e1b67bc94a128b62e9b9c24b70c697a2436a479c9e5eedc4ae29654
-)
+#FetchContent_Declare(
+#        llvm
+#        URL https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_SRC_VERSION}/llvm-${LLVM_SRC_VERSION}.src.tar.xz
+#        URL_HASH SHA256=1e09e8c26e1b67bc94a128b62e9b9c24b70c697a2436a479c9e5eedc4ae29654
+#)
 
 FetchContent_Declare(
         lld
         URL https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_SRC_VERSION}/lld-${LLVM_SRC_VERSION}.src.tar.xz
-        URL_HASH SHA256=8aa7be03500a37d8a1ff838f27c801648e2cb41828e7a8bc436d8d6e404224d8
+        URL_HASH SHA256=cd5d0894a74b957ce78d62212c1df0b3876a7297593aaece6b0512285e3b8732
 )
 
 FetchContent_Declare(
@@ -202,8 +202,8 @@ FetchContent_GetProperties(lld)
 if (NOT lld_POPULATED)
     FetchContent_Populate(lld)
     # XXX as we are doing our custom FetchContent_MakeAvailable, SOURCE_SUBDIR isn't available so we do it manually here
-    set(lld_SOURCE_DIR "${lld_SOURCE_DIR}/${LLD_SRC_DIR_IN_RELEASE}")
-    set(lld_BINARY_DIR "${lld_BINARY_DIR}/${LLD_SRC_DIR_IN_RELEASE}")
+    set(lld_SOURCE_DIR "${lld_SOURCE_DIR}/")
+    set(lld_BINARY_DIR "${lld_BINARY_DIR}/")
 
     set(LLVM_TABLEGEN_EXE ${LLVM_TOOLS_BINARY_DIR}/llvm-tblgen)
 

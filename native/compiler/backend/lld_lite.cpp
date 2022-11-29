@@ -52,16 +52,17 @@ polyregion::backend::lld_lite::link(const std::vector<std::string> &args,
   ctx.e.cleanupCallback = []() {
     lld::elf::inputSections.clear();
     lld::elf::outputSections.clear();
-    lld::elf::memoryBuffers.clear();
-    lld::elf::archiveFiles.clear();
-    lld::elf::binaryFiles.clear();
-    lld::elf::bitcodeFiles.clear();
-    lld::elf::lazyBitcodeFiles.clear();
-    lld::elf::objectFiles.clear();
-    lld::elf::sharedFiles.clear();
-    lld::elf::backwardReferences.clear();
-    lld::elf::whyExtract.clear();
+//    lld::elf::memoryBuffers->clear();
+//    lld::elf::archiveFiles.clear();
+//    lld::elf::binaryFiles.clear();
+//    lld::elf::bitcodeFiles.clear();
+//    lld::elf::lazyBitcodeFiles.clear();
+//    lld::elf::objectFiles.clear();
+//    lld::elf::sharedFiles.clear();
+//    lld::elf::backwardReferences.clear();
+//    lld::elf::whyExtract.clear();
     lld::elf::symAux.clear();
+    lld::elf::in.reset();
     lld::elf::partitions.clear();
     lld::elf::partitions.emplace_back();
     lld::elf::SharedFile::vernauxNum = 0;
@@ -70,7 +71,7 @@ polyregion::backend::lld_lite::link(const std::vector<std::string> &args,
   lld::elf::config = std::make_unique<lld::elf::Configuration>();
   lld::elf::driver = std::make_unique<lld::elf::LinkerDriver>();
   lld::elf::script = std::make_unique<lld::elf::LinkerScript>();
-  lld::elf::symtab = std::make_unique<lld::elf::SymbolTable>();
+//  lld::elf::symtab = std::make_unique<lld::elf::SymbolTable>();
 
   lld::elf::partitions.clear();
   lld::elf::partitions.emplace_back();

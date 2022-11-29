@@ -14,7 +14,7 @@ using namespace Term;
 using namespace Expr;
 
 template <typename P> static void assertCompilationSucceeded(const P &p) {
-  INFO(repr(p))
+  std::cout << (repr(p)) <<std::endl;
   auto c = polyregion::compiler::compile(
       p, polyregion::compiler::Options{polyregion::compiler::Target::Object_LLVM_x86_64, "native"},
       polyregion::compiler::Opt::O3);

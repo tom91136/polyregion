@@ -4,8 +4,8 @@ set(LLVM_BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/llvm)
 
 
 set(DOWNLOAD_LLVM OFF)
-if (EXISTS ${LLVM_BUILD_DIR}/llvm-${LLVM_SRC_VERSION}.src.tar.xz)
-    file(SHA256 ${LLVM_BUILD_DIR}/llvm-${LLVM_SRC_VERSION}.src.tar.xz EXISTING_HASH)
+if (EXISTS ${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src.tar.xz)
+    file(SHA256 ${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src.tar.xz EXISTING_HASH)
     if (NOT "${EXISTING_HASH}" STREQUAL "${LLVM_SOURCE_SHA256}")
         message(STATUS "LLVM source hash did not match, downloading a fresh copy...")
         set(DOWNLOAD_LLVM ON)
@@ -21,10 +21,10 @@ if (DOWNLOAD_LLVM)
     message(STATUS "Downloading LLVM source...")
     file(DOWNLOAD
             ${LLVM_SOURCE_URL}
-            ${LLVM_BUILD_DIR}/llvm-${LLVM_SRC_VERSION}.src.tar.xz
+            ${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src.tar.xz
             EXPECTED_HASH SHA256=${LLVM_SOURCE_SHA256}
             )
-    file(ARCHIVE_EXTRACT INPUT ${LLVM_BUILD_DIR}/llvm-${LLVM_SRC_VERSION}.src.tar.xz DESTINATION "${LLVM_BUILD_DIR}")
+    file(ARCHIVE_EXTRACT INPUT ${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src.tar.xz DESTINATION "${LLVM_BUILD_DIR}")
 endif ()
 
 
@@ -61,6 +61,7 @@ set(LLVM_OPTIONS
         -DLLVM_ENABLE_UNWIND_TABLES=OFF
         -DLLVM_ENABLE_IDE=ON
         -DLLVM_ENABLE_THREADS=ON
+        -DLLVM_ENABLE_ASSERTIONS=ON
         -DLLVM_ENABLE_LTO=${USE_LTO}
 
         -DLLVM_USE_CRT_RELEASE=MT
@@ -98,7 +99,7 @@ endif ()
 
 execute_process(
         COMMAND ${CMAKE_COMMAND}
-        -S ${LLVM_BUILD_DIR}/llvm-${LLVM_SRC_VERSION}.src
+        -S ${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src/llvm
         -B ${LLVM_BUILD_DIR}
         ${LLVM_OPTIONS}
         ${BUILD_OPTIONS}
