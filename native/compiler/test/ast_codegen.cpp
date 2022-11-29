@@ -1,5 +1,5 @@
 #include "ast.h"
-#include "catch.hpp"
+#include "catch2/catch_all.hpp"
 #include "compiler.h"
 #include "generated/polyast.h"
 #include "generated/polyast_codec.h"
@@ -14,7 +14,7 @@ using namespace Term;
 using namespace Expr;
 
 template <typename P> static void assertCompilationSucceeded(const P &p) {
-  std::cout << (repr(p)) <<std::endl;
+  std::cout << (repr(p)) << std::endl;
   auto c = polyregion::compiler::compile(
       p, polyregion::compiler::Options{polyregion::compiler::Target::Object_LLVM_x86_64, "native"},
       polyregion::compiler::Opt::O3);

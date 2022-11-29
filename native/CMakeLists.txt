@@ -4,6 +4,18 @@ include(FetchContent)
 include(ProcessorCount)
 include(ProjectConfig.cmake)
 
+
+if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.24.0")
+    cmake_policy(SET CMP0135 NEW)
+endif ()
+
+set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON" FORCE)
+set(USE_LINKER "" CACHE INTERNAL "Path to custom linker")
+set(POLYREGION_SHARED_LIB OFF CACHE BOOL "")
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+ProcessorCount(NPROC)
+
+
 project(polyregion-native)
 
 #FetchContent_Declare(
@@ -38,18 +50,10 @@ FetchContent_Declare(
 )
 
 FetchContent_Declare(
-        catch2
-        URL https://github.com/catchorg/Catch2/releases/download/v2.13.9/catch.hpp
-        URL_HASH SHA256=27da57c7a06d09be8dd81fab7246b79e7892b6ae7e4e49ba8631f1d5a955e3fc
-        DOWNLOAD_NO_EXTRACT YES # this is a header only lib, so don't do anything else
+        Catch2
+        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+        GIT_TAG v3.2.0
 )
-
-
-set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON" FORCE)
-set(USE_LINKER "" CACHE INTERNAL "Path to custom linker")
-set(POLYREGION_SHARED_LIB OFF CACHE BOOL "")
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-ProcessorCount(NPROC)
 
 
 if (USE_LINKER)
@@ -261,7 +265,7 @@ endif ()
 
 
 FetchContent_MakeAvailable(json)
-FetchContent_MakeAvailable(catch2)
+FetchContent_MakeAvailable(Catch2)
 
 set(CPUINFO_BUILD_TOOLS OFF CACHE BOOL "")
 set(CPUINFO_BUILD_UNIT_TESTS OFF CACHE BOOL "")

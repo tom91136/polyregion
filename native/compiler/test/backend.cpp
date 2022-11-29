@@ -1,5 +1,5 @@
 #include "ast.h"
-#include "catch.hpp"
+#include "catch2/catch_all.hpp"
 #include "compiler.h"
 #include "generated/polyast.h"
 #include "generated/polyast_codec.h"
@@ -14,7 +14,7 @@ using namespace Term;
 using namespace Expr;
 
 template <typename P> static void assertCompilationSucceeded(const P &p) {
-  INFO(repr(p))
+  INFO(repr(p));
   auto c = polyregion::compiler::compile(
       p, polyregion::compiler::Options{polyregion::compiler::Target::Object_LLVM_x86_64, "native"},
       polyregion::compiler::Opt::O3);
@@ -29,8 +29,6 @@ TEST_CASE("run", "[backend]") {
   Function fn(Sym({"foo"}), {}, {}, {}, {}, Type::Unit(),
               {
 
-                  //          Var(Named("gid", Type::Int()), {NullaryIntrinsic(NullaryIntrinsicKind::GpuGlobalIdxX(),
-                  //          Type::Int())}),
                   Var(Named("a", Type::Int()), {Alias(IntConst(42))}),
                   Var(Named("b", Type::Int()), {Alias(IntConst(42))}),
                   Var(Named("c", Type::Int()),                                //
@@ -43,9 +41,21 @@ TEST_CASE("run", "[backend]") {
               });
 
   Program p(fn, {}, {});
-  INFO(repr(p))
-  auto c = polyregion::compiler::compile(p, {polyregion::compiler::Target::Object_LLVM_AMDGCN, "sm_61"},
+  INFO(repr(p));
+  auto c = polyregion::compiler::compile(p, {polyregion::compiler::Target::Object_LLVM_AMDGCN, "gfx906"},
                                          polyregion::compiler::Opt::O3);
+  std::cout << c << std::endl;
+  CHECK(c.messages == "");
+  CHECK(c.binary != std::nullopt);
+
+  c = polyregion::compiler::compile(p, {polyregion::compiler::Target::Object_LLVM_AMDGCN, "gfx803"},
+                                    polyregion::compiler::Opt::O3);
+  std::cout << c << std::endl;
+  CHECK(c.messages == "");
+  CHECK(c.binary != std::nullopt);
+
+  c = polyregion::compiler::compile(p, {polyregion::compiler::Target::Object_LLVM_NVPTX64, "sm_35"},
+                                    polyregion::compiler::Opt::O3);
   std::cout << c << std::endl;
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);

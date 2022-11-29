@@ -13,7 +13,7 @@ add_library(runtime-lib STATIC
         )
 add_dependencies(runtime-lib intrinsics_gen) # for LLVM tblgen
 
-add_executable(runtime-tests test/test.cpp test/test-main.cpp)
+add_executable(runtime-tests test/test.cpp)
 add_executable(runtime-drv driver.cpp)
 #add_library(runtime-dylib SHARED polyregion_runtime.cpp)
 
@@ -53,7 +53,7 @@ target_link_libraries(runtime-lib PRIVATE
         )
 
 target_link_libraries(runtime-drv PRIVATE runtime-lib)
-target_link_libraries(runtime-tests PRIVATE runtime-lib)
+target_link_libraries(runtime-tests PRIVATE runtime-lib Catch2::Catch2WithMain)
 
 set(COMPILE_OPTIONS
         #        -fvisibility-global-new-delete-hidden

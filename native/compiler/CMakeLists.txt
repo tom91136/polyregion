@@ -15,13 +15,11 @@ set(LIB_SOURCES
 add_library(compiler-lib ${LIB_SOURCES})
 add_dependencies(compiler-lib intrinsics_gen)
 
-add_executable(compiler-tests test/ast_codegen.cpp test/backend.cpp test/test-main.cpp)
+add_executable(compiler-tests test/ast_codegen.cpp test/backend.cpp)
 add_executable(compiler-drv driver.cpp)
 add_dependencies(compiler-drv runtime-lib)
 
-target_include_directories(compiler-tests PUBLIC
-        ${catch2_SOURCE_DIR}
-        . ../include)
+target_include_directories(compiler-tests PUBLIC . ../include)
 target_include_directories(compiler-drv PUBLIC . ../include PRIVATE ../runtime)
 target_include_directories(compiler-lib PUBLIC
         ${LLVM_INCLUDE_DIRS}
@@ -87,8 +85,8 @@ target_link_libraries(compiler-lib PRIVATE
         #        "$<$<CONFIG:DEBUG>:LLVM>"  # linking all the static libs is too slow for dev
         #        capstone-static
         )
-target_link_libraries(compiler-tests PRIVATE compiler-lib)
-target_link_libraries(compiler-drv PRIVATE compiler-lib runtime-lib  ${LLVM_LIBS} ${LLD_LIBS})
+target_link_libraries(compiler-tests PRIVATE compiler-lib Catch2::Catch2WithMain)
+target_link_libraries(compiler-drv PRIVATE compiler-lib runtime-lib ${LLVM_LIBS} ${LLD_LIBS})
 
 set(COMPILE_OPTIONS
         ${COMMON_COMPILE_OPTIONS}

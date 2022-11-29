@@ -147,9 +147,13 @@ void run() {
 
           int32_t x = 3;
 
-          std::vector<Type> types{Type::Ptr, Type::Int32, Type::Void};
-          std::vector<void *> args{&ptr, &x, nullptr};
-          q1->enqueueInvokeAsync("0", "lambda", types, args, {},
+          ArgBuffer buffer({
+              {Type::Ptr, &ptr},
+              {Type::Int32, &x},
+              {Type::Void, nullptr},
+          });
+
+          q1->enqueueInvokeAsync("0", "lambda", buffer.types, buffer.data, {},
                                  [&]() { std::cout << "[" << i << "]  K 1 ok" << std::endl; });
 
           q1->enqueueDeviceToHostAsync(ptr, xs.data(), size, [&]() {
@@ -175,12 +179,16 @@ void run() {
 
           int32_t x = 3;
 
-          std::vector<Type> types{Type::Ptr, Type::Int32, Type::Void};
-          std::vector<void *> args{&ptr, &x, nullptr};
+
+          ArgBuffer buffer({
+              {Type::Ptr, &ptr},
+              {Type::Int32, &x},
+              {Type::Void, nullptr},
+          });
 
           x = 0;
 
-          q1->enqueueInvokeAsync("1", "lambda", types, args, {},
+          q1->enqueueInvokeAsync("1", "lambda", buffer.types, buffer.data, {},
                                  [&]() { std::cout << "[" << i << "]  K 2 ok" << std::endl; });
           q1->enqueueDeviceToHostAsync(ptr, xs.data(), size, [&]() {
             std::cout << "[" << i << "]  D->H ok, r= "
