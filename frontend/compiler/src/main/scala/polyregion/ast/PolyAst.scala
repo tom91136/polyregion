@@ -38,9 +38,6 @@ object PolyAst {
     case Unit    extends Type(TypeKind.None)
     case Nothing extends Type(TypeKind.None)
 
-    // TODO remove
-    case String extends Type(TypeKind.Ref)
-
     // specialisations
     case Struct(name: Sym, tpeVars: List[String], args: List[Type]) extends Type(TypeKind.Ref)
     case Array(component: Type)                                     extends Type(TypeKind.Ref)
@@ -64,7 +61,6 @@ object PolyAst {
     case LongConst(value: Long)                 extends Term(Type.Long)
     case FloatConst(value: Float)               extends Term(Type.Float)
     case DoubleConst(value: Double)             extends Term(Type.Double)
-    case StringConst(value: String)             extends Term(Type.String)
   }
 
   case class Position(file: String, line: Int, col: Int) derives MsgPack.Codec

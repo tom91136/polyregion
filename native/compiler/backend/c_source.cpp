@@ -21,7 +21,6 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
           [&](const Type::Short &x) { return "int16_t"s; },               //
           [&](const Type::Int &x) { return "int32_t"s; },                 //
           [&](const Type::Long &x) { return "int64_t"s; },                //
-          [&](const Type::String &x) { return "char *"s; },               //
           [&](const Type::Unit &x) { return "void"s; },                   //
           [&](const Type::Nothing &x) { return "/*nothing*/"s; },         //
           [&](const Type::Struct &x) { return qualified(x.name); },       //
@@ -40,7 +39,6 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
           [&](const Type::Short &x) { return "short"s; },                 //
           [&](const Type::Int &x) { return "int"s; },                     //
           [&](const Type::Long &x) { return "long"s; },                   //
-          [&](const Type::String &x) { return "char *"s; },               //
           [&](const Type::Unit &x) { return "void"s; },                   //
           [&](const Type::Nothing &x) { return "/*nothing*/"s; },         //
           [&](const Type::Struct &x) { return qualified(x.name); },       //
@@ -64,8 +62,7 @@ std::string backend::CSource::mkRef(const Term::Any &ref) {
       [](const Term::IntConst &x) { return std::to_string(x.value); },         //
       [](const Term::LongConst &x) { return std::to_string(x.value); },        //
       [](const Term::DoubleConst &x) { return std::to_string(x.value); },      //
-      [](const Term::FloatConst &x) { return std::to_string(x.value); },       //
-      [](const Term::StringConst &x) { return "" + x.value + ""; }             //
+      [](const Term::FloatConst &x) { return std::to_string(x.value); }        //
   );                                                                           // FIXME escape string
 }
 
@@ -173,8 +170,8 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr, const std::string &k
       [&](const Expr::Invoke &x) { return "???"s; },                                     //
       [&](const Expr::Index &x) { return qualified(x.lhs) + "[" + mkRef(x.idx) + "]"; }, //
       [&](const Expr::Alloc &x) { return "{/*" + to_string(x) + "*/}"; },                //
-      [&](const Expr::Suspend &x) { return "{/*suspend*/}"s; },                          //
-      [&](const Expr::Length &x) { return "{/*length*/}"s; });
+      [&](const Expr::Suspend &x) { return "{/*suspend*/}"s; }                           //
+  );
 }
 
 std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {

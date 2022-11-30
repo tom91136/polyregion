@@ -253,4 +253,6 @@ $RECYCLE.BIN/
 
 /build-*
 
+/llvm
+
 venv

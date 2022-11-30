@@ -142,13 +142,6 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Nothing &x) {
 }
 bool Type::operator==(const Type::Nothing &, const Type::Nothing &) { return true; }
 
-std::ostream &Type::operator<<(std::ostream &os, const Type::String &x) {
-  os << "String(";
-  os << ')';
-  return os;
-}
-bool Type::operator==(const Type::String &, const Type::String &) { return true; }
-
 std::ostream &Type::operator<<(std::ostream &os, const Type::Struct &x) {
   os << "Struct(";
   os << x.name;
@@ -351,16 +344,6 @@ std::ostream &Term::operator<<(std::ostream &os, const Term::DoubleConst &x) {
   return os;
 }
 bool Term::operator==(const Term::DoubleConst &l, const Term::DoubleConst &r) { 
-  return l.value == r.value;
-}
-
-std::ostream &Term::operator<<(std::ostream &os, const Term::StringConst &x) {
-  os << "StringConst(";
-  os << '"' << x.value << '"';
-  os << ')';
-  return os;
-}
-bool Term::operator==(const Term::StringConst &l, const Term::StringConst &r) { 
   return l.value == r.value;
 }
 
@@ -991,18 +974,6 @@ bool Expr::operator==(const Expr::Index &l, const Expr::Index &r) {
   return l.lhs == r.lhs && *l.idx == *r.idx && *l.component == *r.component;
 }
 
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::Length &x) {
-  os << "Length(";
-  os << x.ref;
-  os << ',';
-  os << x.witness;
-  os << ')';
-  return os;
-}
-bool Expr::operator==(const Expr::Length &l, const Expr::Length &r) { 
-  return l.ref == r.ref && l.witness == r.witness;
-}
-
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Alloc &x) {
   os << "Alloc(";
   os << x.witness;
@@ -1367,10 +1338,6 @@ std::size_t std::hash<polyregion::polyast::Type::Nothing>::operator()(const poly
   std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::Nothing");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Type::String>::operator()(const polyregion::polyast::Type::String &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::String");
-  return seed;
-}
 std::size_t std::hash<polyregion::polyast::Type::Struct>::operator()(const polyregion::polyast::Type::Struct &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.name)>()(x.name);
   seed ^= std::hash<decltype(x.tpeVars)>()(x.tpeVars) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
@@ -1439,10 +1406,6 @@ std::size_t std::hash<polyregion::polyast::Term::FloatConst>::operator()(const p
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Term::DoubleConst>::operator()(const polyregion::polyast::Term::DoubleConst &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.value)>()(x.value);
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::Term::StringConst>::operator()(const polyregion::polyast::Term::StringConst &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.value)>()(x.value);
   return seed;
 }
@@ -1765,11 +1728,6 @@ std::size_t std::hash<polyregion::polyast::Expr::Index>::operator()(const polyre
   std::size_t seed = std::hash<decltype(x.lhs)>()(x.lhs);
   seed ^= std::hash<decltype(x.idx)>()(x.idx) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.component)>()(x.component) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::Expr::Length>::operator()(const polyregion::polyast::Expr::Length &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.ref)>()(x.ref);
-  seed ^= std::hash<decltype(x.witness)>()(x.witness) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Expr::Alloc>::operator()(const polyregion::polyast::Expr::Alloc &x) const noexcept {

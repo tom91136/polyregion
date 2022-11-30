@@ -25,7 +25,6 @@ using std::string;
       [](const Type::Short &x) { return "Short"s; },                           //
       [](const Type::Int &x) { return "Int"s; },                               //
       [](const Type::Long &x) { return "Long"s; },                             //
-      [](const Type::String &x) { return "String"s; },                         //
       [](const Type::Unit &x) { return "Unit"s; },                             //
       [](const Type::Nothing &x) { return "Nothing"s; },                       //
       [](const Type::Struct &x) { return "Struct[" + repr(x.name) + "]"; },    //
@@ -56,8 +55,7 @@ using std::string;
       [](const Term::IntConst &x) { return "Int(" + std::to_string(x.value) + ")"; },
       [](const Term::LongConst &x) { return "Long(" + std::to_string(x.value) + ")"; },
       [](const Term::DoubleConst &x) { return "Double(" + std::to_string(x.value) + ")"; },
-      [](const Term::FloatConst &x) { return "Float(" + std::to_string(x.value) + ")"; },
-      [](const Term::StringConst &x) { return "String(" + x.value + ")"; });
+      [](const Term::FloatConst &x) { return "Float(" + std::to_string(x.value) + ")"; });
 }
 
 [[nodiscard]] string polyast::repr(const Expr::Any &expr) {
@@ -168,8 +166,7 @@ using std::string;
       },
       [](const Expr::Index &x) { return repr(x.lhs) + "[" + repr(x.idx) + "]"; },
       [](const Expr::Alloc &x) { return "new [" + repr(x.witness.component) + "*" + repr(x.size) + "]"; },
-      [](const Expr::Suspend &x) { return "Suspend(???)"s; }, //
-      [](const Expr::Length &x) { return "Length(???)"s; } //
+      [](const Expr::Suspend &x) { return "Suspend(???)"s; } //
   );
 }
 
@@ -330,7 +327,6 @@ std::function<Term::Any(Type::Any)> dsl::operator""_(unsigned long long int x) {
         [&](const Type::Short &) -> Term::Any { return Term::ShortConst(x); },   //
         [&](const Type::Int &) -> Term::Any { return Term::IntConst(x); },       //
         [&](const Type::Long &) -> Term::Any { return Term::LongConst(x); },     //
-        [&](const Type::String &t) -> Term::Any { return unsupported(t, x); },   //
         [&](const Type::Unit &t) -> Term::Any { return unsupported(t, x); },     //
         [&](const Type::Nothing &t) -> Term::Any { return unsupported(t, x); },  //
         [&](const Type::Struct &t) -> Term::Any { return unsupported(t, x); },   //

@@ -22,8 +22,6 @@ namespace Expr {
 [[nodiscard]] EXPORT json invoke_to_json(const Expr::Invoke &);
 [[nodiscard]] EXPORT Expr::Index index_from_json(const json &);
 [[nodiscard]] EXPORT json index_to_json(const Expr::Index &);
-[[nodiscard]] EXPORT Expr::Length length_from_json(const json &);
-[[nodiscard]] EXPORT json length_to_json(const Expr::Length &);
 [[nodiscard]] EXPORT Expr::Alloc alloc_from_json(const json &);
 [[nodiscard]] EXPORT json alloc_to_json(const Expr::Alloc &);
 [[nodiscard]] EXPORT Expr::Suspend suspend_from_json(const json &);
@@ -188,8 +186,6 @@ namespace Term {
 [[nodiscard]] EXPORT json floatconst_to_json(const Term::FloatConst &);
 [[nodiscard]] EXPORT Term::DoubleConst doubleconst_from_json(const json &);
 [[nodiscard]] EXPORT json doubleconst_to_json(const Term::DoubleConst &);
-[[nodiscard]] EXPORT Term::StringConst stringconst_from_json(const json &);
-[[nodiscard]] EXPORT json stringconst_to_json(const Term::StringConst &);
 [[nodiscard]] EXPORT Term::Any any_from_json(const json &);
 [[nodiscard]] EXPORT json any_to_json(const Term::Any &);
 } // namespace Term
@@ -228,8 +224,6 @@ namespace Type {
 [[nodiscard]] EXPORT json unit_to_json(const Type::Unit &);
 [[nodiscard]] EXPORT Type::Nothing nothing_from_json(const json &);
 [[nodiscard]] EXPORT json nothing_to_json(const Type::Nothing &);
-[[nodiscard]] EXPORT Type::String string_from_json(const json &);
-[[nodiscard]] EXPORT json string_to_json(const Type::String &);
 [[nodiscard]] EXPORT Type::Struct struct_from_json(const json &);
 [[nodiscard]] EXPORT json struct_to_json(const Type::Struct &);
 [[nodiscard]] EXPORT Type::Array array_from_json(const json &);

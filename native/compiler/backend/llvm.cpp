@@ -75,7 +75,6 @@ llvm::Type *LLVM::AstTransformer::mkTpe(const Type::Any &tpe, unsigned AS, bool 
       [&](const Type::Short &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },                         //
       [&](const Type::Int &x) -> llvm::Type * { return llvm::Type::getInt32Ty(C); },                           //
       [&](const Type::Long &x) -> llvm::Type * { return llvm::Type::getInt64Ty(C); },                          //
-      [&](const Type::String &x) -> llvm::Type * { return undefined(__FILE__, __LINE__); },                    //
       [&](const Type::Unit &x) -> llvm::Type * { return llvm::Type::getIntNTy(C, functionBoundary ? 8 : 1); }, //
       [&](const Type::Nothing &x) -> llvm::Type * { return undefined(__FILE__, __LINE__); },                   //
       [&](const Type::Struct &x) -> llvm::Type * {
@@ -192,8 +191,9 @@ llvm::Value *LLVM::AstTransformer::mkTermVal(const Term::Any &ref) {
       [&](const Term::IntConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt32Ty(C), x.value); },
       [&](const Term::LongConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt64Ty(C), x.value); },
       [&](const Term::FloatConst &x) -> llvm::Value * { return ConstantFP::get(llvm::Type::getFloatTy(C), x.value); },
-      [&](const Term::DoubleConst &x) -> llvm::Value * { return ConstantFP::get(llvm::Type::getDoubleTy(C), x.value); },
-      [&](const Term::StringConst &x) -> llvm::Value * { return undefined(__FILE__, __LINE__); });
+      [&](const Term::DoubleConst &x) -> llvm::Value * {
+        return ConstantFP::get(llvm::Type::getDoubleTy(C), x.value);
+      });
 }
 
 llvm::Function *LLVM::AstTransformer::mkExternalFn(llvm::Function *parent, const Type::Any &rtn,
@@ -737,8 +737,7 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
         auto ptr = invokeMalloc(fn, B.CreateMul(B.CreateIntCast(size, mkTpe(Type::Long()), true), elemSize));
         return B.CreateBitCast(ptr, mkTpe(x.witness));
       },
-      [&](const Expr::Suspend &x) -> ValPtr { return undefined(__FILE__, __LINE__); },
-      [&](const Expr::Length &x) -> ValPtr { return undefined(__FILE__, __LINE__); });
+      [&](const Expr::Suspend &x) -> ValPtr { return undefined(__FILE__, __LINE__); });
 }
 
 // llvm::Value *LLVM::AstTransformer::conditionalLoad(llvm::Value *rhs) {

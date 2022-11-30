@@ -83,7 +83,6 @@ object VerifyPass {
             case p.Term.LongConst(_)   => c
             case p.Term.FloatConst(_)  => c
             case p.Term.DoubleConst(_) => c
-            case p.Term.StringConst(_) => c
           }
 
           def validateExpr(c: Ctx, e: p.Expr): Ctx = e match {

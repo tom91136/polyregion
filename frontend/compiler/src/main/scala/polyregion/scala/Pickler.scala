@@ -191,7 +191,6 @@ object Pickler {
     // }
 
     (tpe, repr.asType) match {
-      case (PT.String, _) => ???
 //       case (PT.Array(PT.Array(_)), _)                  => ??? // TODO handle nested arrays
 //       case (PT.Array(PT.Byte), x @ '[Array[Byte]])     => '{ $b.put(${ v.asExprOf[x.Underlying] }) }
 //       case (PT.Array(PT.Char), x @ '[Array[Char]])     => '{ $b.asCharBuffer.put(${ v.asExprOf[x.Underlying] }) }
@@ -260,7 +259,6 @@ object Pickler {
   //   }).asExprOf[t]
 
   //   (tpe, repr.asType) match {
-  //     case (PT.String, _)                              => ???
   //     case (PT.Array(PT.Array(_)), _)                  => ??? // TODO handle nested arrays
   //     case (PT.Array(PT.Byte), x @ '[Array[Byte]])     => '{ $b.get(${ v.asExprOf[x.Underlying] }) }
   //     case (PT.Array(PT.Char), x @ '[Array[Char]])     => '{ $b.asCharBuffer.get(${ v.asExprOf[x.Underlying] }) }
@@ -354,7 +352,6 @@ object Pickler {
   //     //       while (i < xs.size) {  xs(i) =  ${ readUniform(buffer, '{ i }, tpe, compRepr,  ) }; i += 1 }
   //     //       ()
   //     //     }
-  //     case p.Type.String => ???
   //     case t             => getPrimitive(buffer, '{ $index * ${ Expr(sizeOf(t, repr)) } }, t)
   //   }
   // }

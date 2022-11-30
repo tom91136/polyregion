@@ -51,7 +51,6 @@ const static Tpe::Int Int = Tpe::Int();
 const static Tpe::Long Long = Tpe::Long();
 const static Tpe::Unit Unit = Tpe::Unit();
 const static Tpe::Nothing Nothing = Tpe::Nothing();
-const static Tpe::String String = Tpe::String();
 
 std::string dslRepr(const Function &fn);
 

@@ -161,14 +161,6 @@ json Type::nothing_to_json(const Type::Nothing& x) {
   return json::array({});
 }
 
-Type::String Type::string_from_json(const json& j) { 
-  return {};
-}
-
-json Type::string_to_json(const Type::String& x) { 
-  return json::array({});
-}
-
 Type::Struct Type::struct_from_json(const json& j) { 
   auto name =  sym_from_json(j.at(0));
   auto tpeVars = j.at(1).get<std::vector<std::string>>();
@@ -237,11 +229,10 @@ Type::Any Type::any_from_json(const json& j) {
   case 7: return Type::long_from_json(t);
   case 8: return Type::unit_from_json(t);
   case 9: return Type::nothing_from_json(t);
-  case 10: return Type::string_from_json(t);
-  case 11: return Type::struct_from_json(t);
-  case 12: return Type::array_from_json(t);
-  case 13: return Type::var_from_json(t);
-  case 14: return Type::exec_from_json(t);
+  case 10: return Type::struct_from_json(t);
+  case 11: return Type::array_from_json(t);
+  case 12: return Type::var_from_json(t);
+  case 13: return Type::exec_from_json(t);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
   }
 }
@@ -258,11 +249,10 @@ json Type::any_to_json(const Type::Any& x) {
   [](const Type::Long &y) -> json { return {7, Type::long_to_json(y)}; },
   [](const Type::Unit &y) -> json { return {8, Type::unit_to_json(y)}; },
   [](const Type::Nothing &y) -> json { return {9, Type::nothing_to_json(y)}; },
-  [](const Type::String &y) -> json { return {10, Type::string_to_json(y)}; },
-  [](const Type::Struct &y) -> json { return {11, Type::struct_to_json(y)}; },
-  [](const Type::Array &y) -> json { return {12, Type::array_to_json(y)}; },
-  [](const Type::Var &y) -> json { return {13, Type::var_to_json(y)}; },
-  [](const Type::Exec &y) -> json { return {14, Type::exec_to_json(y)}; },
+  [](const Type::Struct &y) -> json { return {10, Type::struct_to_json(y)}; },
+  [](const Type::Array &y) -> json { return {11, Type::array_to_json(y)}; },
+  [](const Type::Var &y) -> json { return {12, Type::var_to_json(y)}; },
+  [](const Type::Exec &y) -> json { return {13, Type::exec_to_json(y)}; },
   [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
   }, *x);
 }
@@ -394,16 +384,6 @@ json Term::doubleconst_to_json(const Term::DoubleConst& x) {
   return json::array({value});
 }
 
-Term::StringConst Term::stringconst_from_json(const json& j) { 
-  auto value = j.at(0).get<std::string>();
-  return Term::StringConst(value);
-}
-
-json Term::stringconst_to_json(const Term::StringConst& x) { 
-  auto value = x.value;
-  return json::array({value});
-}
-
 Term::Any Term::any_from_json(const json& j) { 
   size_t ord = j.at(0).get<size_t>();
   const auto t = j.at(1);
@@ -419,7 +399,6 @@ Term::Any Term::any_from_json(const json& j) {
   case 8: return Term::longconst_from_json(t);
   case 9: return Term::floatconst_from_json(t);
   case 10: return Term::doubleconst_from_json(t);
-  case 11: return Term::stringconst_from_json(t);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
   }
 }
@@ -437,7 +416,6 @@ json Term::any_to_json(const Term::Any& x) {
   [](const Term::LongConst &y) -> json { return {8, Term::longconst_to_json(y)}; },
   [](const Term::FloatConst &y) -> json { return {9, Term::floatconst_to_json(y)}; },
   [](const Term::DoubleConst &y) -> json { return {10, Term::doubleconst_to_json(y)}; },
-  [](const Term::StringConst &y) -> json { return {11, Term::stringconst_to_json(y)}; },
   [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
   }, *x);
 }
@@ -1286,18 +1264,6 @@ json Expr::index_to_json(const Expr::Index& x) {
   return json::array({lhs, idx, component});
 }
 
-Expr::Length Expr::length_from_json(const json& j) { 
-  auto ref =  Term::select_from_json(j.at(0));
-  auto witness =  Type::array_from_json(j.at(1));
-  return {ref, witness};
-}
-
-json Expr::length_to_json(const Expr::Length& x) { 
-  auto ref =  Term::select_to_json(x.ref);
-  auto witness =  Type::array_to_json(x.witness);
-  return json::array({ref, witness});
-}
-
 Expr::Alloc Expr::alloc_from_json(const json& j) { 
   auto witness =  Type::array_from_json(j.at(0));
   auto size =  Term::any_from_json(j.at(1));
@@ -1343,9 +1309,8 @@ Expr::Any Expr::any_from_json(const json& j) {
   case 4: return Expr::alias_from_json(t);
   case 5: return Expr::invoke_from_json(t);
   case 6: return Expr::index_from_json(t);
-  case 7: return Expr::length_from_json(t);
-  case 8: return Expr::alloc_from_json(t);
-  case 9: return Expr::suspend_from_json(t);
+  case 7: return Expr::alloc_from_json(t);
+  case 8: return Expr::suspend_from_json(t);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
   }
 }
@@ -1359,9 +1324,8 @@ json Expr::any_to_json(const Expr::Any& x) {
   [](const Expr::Alias &y) -> json { return {4, Expr::alias_to_json(y)}; },
   [](const Expr::Invoke &y) -> json { return {5, Expr::invoke_to_json(y)}; },
   [](const Expr::Index &y) -> json { return {6, Expr::index_to_json(y)}; },
-  [](const Expr::Length &y) -> json { return {7, Expr::length_to_json(y)}; },
-  [](const Expr::Alloc &y) -> json { return {8, Expr::alloc_to_json(y)}; },
-  [](const Expr::Suspend &y) -> json { return {9, Expr::suspend_to_json(y)}; },
+  [](const Expr::Alloc &y) -> json { return {7, Expr::alloc_to_json(y)}; },
+  [](const Expr::Suspend &y) -> json { return {8, Expr::suspend_to_json(y)}; },
   [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
   }, *x);
 }
@@ -1605,13 +1569,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "25771e4f5c722a64e2c282fe8ae2cf80") {
-   throw std::runtime_error("Expecting ADT hash to be 25771e4f5c722a64e2c282fe8ae2cf80, but was " + hash);
+  if(hash != "cdc266ed46f80cfb9ee4427b05ed4072") {
+   throw std::runtime_error("Expecting ADT hash to be cdc266ed46f80cfb9ee4427b05ed4072, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"25771e4f5c722a64e2c282fe8ae2cf80", x});
+  return json::array({"cdc266ed46f80cfb9ee4427b05ed4072", x});
 }
 } // namespace polyregion::polyast

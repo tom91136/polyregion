@@ -89,12 +89,11 @@ struct Int;
 struct Long;
 struct Unit;
 struct Nothing;
-struct String;
 struct Struct;
 struct Array;
 struct Var;
 struct Exec;
-using Any = Alternative<Float, Double, Bool, Byte, Char, Short, Int, Long, Unit, Nothing, String, Struct, Array, Var, Exec>;
+using Any = Alternative<Float, Double, Bool, Byte, Char, Short, Int, Long, Unit, Nothing, Struct, Array, Var, Exec>;
 } // namespace Type
 
 
@@ -110,8 +109,7 @@ struct IntConst;
 struct LongConst;
 struct FloatConst;
 struct DoubleConst;
-struct StringConst;
-using Any = Alternative<Select, Poison, UnitConst, BoolConst, ByteConst, CharConst, ShortConst, IntConst, LongConst, FloatConst, DoubleConst, StringConst>;
+using Any = Alternative<Select, Poison, UnitConst, BoolConst, ByteConst, CharConst, ShortConst, IntConst, LongConst, FloatConst, DoubleConst>;
 } // namespace Term
 namespace NullaryIntrinsicKind { 
 struct GpuGlobalIdxX;
@@ -200,10 +198,9 @@ struct Cast;
 struct Alias;
 struct Invoke;
 struct Index;
-struct Length;
 struct Alloc;
 struct Suspend;
-using Any = Alternative<NullaryIntrinsic, UnaryIntrinsic, BinaryIntrinsic, Cast, Alias, Invoke, Index, Length, Alloc, Suspend>;
+using Any = Alternative<NullaryIntrinsic, UnaryIntrinsic, BinaryIntrinsic, Cast, Alias, Invoke, Index, Alloc, Suspend>;
 } // namespace Expr
 namespace Stmt { 
 struct Comment;
@@ -355,13 +352,6 @@ struct EXPORT Nothing : Type::Base {
   EXPORT friend bool operator==(const Type::Nothing &, const Type::Nothing &);
 };
 
-struct EXPORT String : Type::Base {
-  String() noexcept : Type::Base(TypeKind::Ref()) {}
-  EXPORT operator Any() const { return std::make_shared<String>(*this); };
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::String &);
-  EXPORT friend bool operator==(const Type::String &, const Type::String &);
-};
-
 struct EXPORT Struct : Type::Base {
   Sym name;
   std::vector<std::string> tpeVars;
@@ -506,14 +496,6 @@ struct EXPORT DoubleConst : Term::Base {
   EXPORT operator Any() const { return std::make_shared<DoubleConst>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::DoubleConst &);
   EXPORT friend bool operator==(const Term::DoubleConst &, const Term::DoubleConst &);
-};
-
-struct EXPORT StringConst : Term::Base {
-  std::string value;
-  explicit StringConst(std::string value) noexcept : Term::Base(Type::String()), value(std::move(value)) {}
-  EXPORT operator Any() const { return std::make_shared<StringConst>(*this); };
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::StringConst &);
-  EXPORT friend bool operator==(const Term::StringConst &, const Term::StringConst &);
 };
 } // namespace Term
 namespace NullaryIntrinsicKind { 
@@ -1113,15 +1095,6 @@ struct EXPORT Index : Expr::Base {
   EXPORT friend bool operator==(const Expr::Index &, const Expr::Index &);
 };
 
-struct EXPORT Length : Expr::Base {
-  Term::Select ref;
-  Type::Array witness;
-  Length(Term::Select ref, Type::Array witness) noexcept : Expr::Base(witness), ref(std::move(ref)), witness(std::move(witness)) {}
-  EXPORT operator Any() const { return std::make_shared<Length>(*this); };
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Length &);
-  EXPORT friend bool operator==(const Expr::Length &, const Expr::Length &);
-};
-
 struct EXPORT Alloc : Expr::Base {
   Type::Array witness;
   Term::Any size;
@@ -1344,9 +1317,6 @@ template <> struct std::hash<polyregion::polyast::Type::Unit> {
 template <> struct std::hash<polyregion::polyast::Type::Nothing> {
   std::size_t operator()(const polyregion::polyast::Type::Nothing &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Type::String> {
-  std::size_t operator()(const polyregion::polyast::Type::String &) const noexcept;
-};
 template <> struct std::hash<polyregion::polyast::Type::Struct> {
   std::size_t operator()(const polyregion::polyast::Type::Struct &) const noexcept;
 };
@@ -1394,9 +1364,6 @@ template <> struct std::hash<polyregion::polyast::Term::FloatConst> {
 };
 template <> struct std::hash<polyregion::polyast::Term::DoubleConst> {
   std::size_t operator()(const polyregion::polyast::Term::DoubleConst &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::Term::StringConst> {
-  std::size_t operator()(const polyregion::polyast::Term::StringConst &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxX> {
   std::size_t operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxX &) const noexcept;
@@ -1628,9 +1595,6 @@ template <> struct std::hash<polyregion::polyast::Expr::Invoke> {
 };
 template <> struct std::hash<polyregion::polyast::Expr::Index> {
   std::size_t operator()(const polyregion::polyast::Expr::Index &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::Expr::Length> {
-  std::size_t operator()(const polyregion::polyast::Expr::Length &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Expr::Alloc> {
   std::size_t operator()(const polyregion::polyast::Expr::Alloc &) const noexcept;

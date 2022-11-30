@@ -158,7 +158,6 @@ object PolyAstToExpr {
       case p.Type.Int    => '{ p.Type.Int }
       case p.Type.Long   => '{ p.Type.Long }
       case p.Type.Unit   => '{ p.Type.Unit }
-      case p.Type.String => '{ p.Type.String }
       case p.Type.Struct(name, tpeVars, args) =>
         '{ p.Type.Struct(${ Expr(name) }, ${ Expr(tpeVars) }, ${ Expr(args) }) }
       case p.Type.Array(component)         => '{ p.Type.Array(${ Expr(component) }) }
@@ -204,7 +203,6 @@ extension (e: p.Term) {
     case p.Term.LongConst(x)   => s"Long($x)"
     case p.Term.FloatConst(x)  => s"Float($x)"
     case p.Term.DoubleConst(x) => s"Double($x)"
-    case p.Term.StringConst(x) => s"String($x)"
   }
 }
 
@@ -258,7 +256,6 @@ extension (e: p.Type) {
     case p.Type.Long        => "Long"
     case p.Type.Float       => "Float"
     case p.Type.Double      => "Double"
-    case p.Type.String      => "String"
     case p.Type.Unit        => "Unit"
     case p.Type.Nothing     => "Nothing"
     case p.Type.Var(name)   => s"#$name"
@@ -278,7 +275,6 @@ extension (e: p.Type) {
     case p.Type.Long                     => "Long"
     case p.Type.Float                    => "Float"
     case p.Type.Double                   => "Double"
-    case p.Type.String                   => "String"
     case p.Type.Unit                     => "Unit"
     case p.Type.Nothing                  => "Nothing"
     case p.Type.Var(name)                => s"#$name"
