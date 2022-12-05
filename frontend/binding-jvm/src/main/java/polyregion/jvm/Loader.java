@@ -161,9 +161,16 @@ public final class Loader {
     // XXX We need to suggest the VM to GC here because it increases the chance JNI_OnUnload
     // gets called.
     System.gc();
-    Path absolute = path.toAbsolutePath();
+    final Path resourceDir;
+    try {
+      resourceDir = Files.createDirectories(RESOURCE_DIR);
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+    final Path absolute = path.toAbsolutePath();
     Path libPath = absolute;
     int attempt = 0;
+    
     while (attempt < 10) {
       try {
         System.out.println("[Loader] Load native:" + libPath);
@@ -174,7 +181,7 @@ public final class Loader {
         if (!e.getMessage().endsWith("already loaded in another classloader")) throw e;
 
         Path link =
-            RESOURCE_DIR.resolve(
+            resourceDir.resolve(
                 absolute.getFileName() + "." + System.currentTimeMillis() + ".hardlink." + attempt);
         try {
           try {

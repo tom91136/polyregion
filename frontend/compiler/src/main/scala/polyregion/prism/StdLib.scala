@@ -144,14 +144,14 @@ object StdLib {
 
   }
 
-  object Array {
-    def ofDim[T](n1: Int)(implicit ev: ClassTag[T]): Array[T] = new Array[T](n1, intrinsics.array[T](n1))
-  }
-  class Array[T](val length: Int, val data: intrinsics.Arr[T]) extends SizedArr[T] {
-//    def length: Int                = data.length
-    def apply(i: Int): T           = data.apply(i)
-    def update(i: Int, x: T): Unit = data.update(i, x)
-  }
+//   object Array {
+//     def ofDim[T](n1: Int)(implicit ev: ClassTag[T]): Array[T] = new Array[T](n1, intrinsics.array[T](n1))
+//   }
+//   class Array[T](val length: Int, val data: intrinsics.Arr[T]) extends SizedArr[T] {
+// //    def length: Int                = data.length
+//     def apply(i: Int): T           = data.apply(i)
+//     def update(i: Int, x: T): Unit = data.update(i, x)
+//   }
 
   object MutableSeq {
     def onDim[T](N: Int): MutableSeq[T] = new MutableSeq[T](N, intrinsics.array[T](N))

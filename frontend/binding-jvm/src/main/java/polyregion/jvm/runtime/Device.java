@@ -54,6 +54,14 @@ public final class Device implements AutoCloseable {
         return this;
       }
 
+
+
+public byte[] longToBytes(long x) {
+    ByteBuffer buffer = ByteBuffer.allocate(Long.BYTES).order(ByteOrder.nativeOrder());
+    buffer.putLong(x);
+    return buffer.array();
+}
+
       MemoryProxy<T> invalidate(T object, Runnable cb) {
         int byteSize = sizeInBytes.applyAsInt(object);
         if (buffer != null && buffer.capacity() != byteSize) {
@@ -66,7 +74,12 @@ public final class Device implements AutoCloseable {
         encode.accept(Objects.requireNonNull(object), rewind());
 
         if (device.sharedAddressSpace) {
+
+          byte[] xs = new byte[byteSize];
+          buffer.get(xs);
+
           devicePtr = Platforms.pointerOfDirectBuffer0(buffer);
+          System.out.println("New ptr data " + devicePtr  + " i.e " + java.util.Arrays.toString(longToBytes(devicePtr)) + " =" + java.util.Arrays.toString(xs));
           if (cb != null) cb.run();
         } else {
           if (devicePtr == 0)

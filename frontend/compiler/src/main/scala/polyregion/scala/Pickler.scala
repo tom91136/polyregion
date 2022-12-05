@@ -5,7 +5,7 @@ import polyregion.jvm.{compiler as ct, runtime as rt}
 import polyregion.prism.StdLib
 
 import scala.quoted.*
-import polyregion.ast.PolyAst
+import java.nio.ByteBuffer
 
 object Pickler {
 
@@ -80,23 +80,24 @@ object Pickler {
   }
 
   def putPrimitive(using q: Quotes) //
-  (target: Expr[java.nio.ByteBuffer], byteOffset: Expr[Int], tpe: p.Type, value: Expr[Any]): Expr[Unit] = tpe match {
-    case p.Type.Float    => '{ $target.putFloat($byteOffset, ${ value.asExprOf[Float] }) }
-    case p.Type.Double   => '{ $target.putDouble($byteOffset, ${ value.asExprOf[Double] }) }
-    case p.Type.Bool     => '{ $target.put($byteOffset, if (!${ value.asExprOf[Boolean] }) 0.toByte else 1.toByte) }
-    case p.Type.Byte     => '{ $target.put($byteOffset, ${ value.asExprOf[Byte] }) }
-    case p.Type.Char     => '{ $target.putChar($byteOffset, ${ value.asExprOf[Char] }) }
-    case p.Type.Short    => '{ $target.putShort($byteOffset, ${ value.asExprOf[Short] }) }
-    case p.Type.Int      => '{ $target.putInt($byteOffset, ${ value.asExprOf[Int] }) }
-    case p.Type.Long     => '{ $target.putLong($byteOffset, ${ value.asExprOf[Long] }) }
-    case p.Type.Unit     => '{ $target.put($byteOffset, 0.toByte) }
-    case p.Type.Array(_) => '{ $target.putLong($byteOffset, 0.toByte) }
+  (target: Expr[java.nio.ByteBuffer], byteOffset: Expr[Int], tpe: p.Type, value: Expr[Any]): Expr[Unit] = { 
+    tpe match {
+    case p.Type.Float  => '{ val x_ = ${value.asExprOf[Float]}; println(s"Write ${x_}(${  ${Expr(tpe.repr) }  }) to ${$target}"); $target.putFloat($byteOffset, x_) }
+    case p.Type.Double => '{ val x_ = ${value.asExprOf[Double]}; println(s"Write ${x_}(${  ${Expr(tpe.repr) }  }) to ${$target}"); $target.putDouble($byteOffset, x_) }
+    case p.Type.Bool   => '{ val x_ = ${value.asExprOf[Boolean]}; println(s"Write ${x_}(${  ${Expr(tpe.repr) }  }) to ${$target}"); $target.put($byteOffset, if (!x_) 0.toByte else 1.toByte) }
+    case p.Type.Byte   => '{ val x_ = ${value.asExprOf[Byte]}; println(s"Write ${x_}(${  ${Expr(tpe.repr) }  }) to ${$target}"); $target.put($byteOffset, x_) }
+    case p.Type.Char   => '{ val x_ = ${value.asExprOf[Char]}; println(s"Write ${x_}(${  ${Expr(tpe.repr) }  }) to ${$target}"); $target.putChar($byteOffset, x_) }
+    case p.Type.Short  => '{ val x_ = ${value.asExprOf[Short]}; println(s"Write ${x_}(${  ${Expr(tpe.repr) }  }) to ${$target}"); $target.putShort($byteOffset, x_) }
+    case p.Type.Int    => '{ val x_ = ${value.asExprOf[Int]}; println(s"Write ${x_}(${  ${Expr(tpe.repr) }  }) to ${$target}"); $target.putInt($byteOffset, x_) }
+    case p.Type.Long   => '{ val x_ = ${value.asExprOf[Long]}; println(s"Write ${x_}(${  ${Expr(tpe.repr) }  }) to ${$target}"); $target.putLong($byteOffset, x_) }
+    case p.Type.Unit   => '{ val x_ = $value; println(s"Write ${x_}(${  ${Expr(tpe.repr) }  }) to ${$target}"); $target.put($byteOffset, 0.toByte) }
     case x =>
       throw new RuntimeException(
         s"Cannot put ${x.repr} into buffer, it is not a primitive type (source is `${value.show}`)"
       )
 
   }
+}
 
   def getStruct(using q: Quoted)(
       compiler: ct.Compiler,
@@ -127,50 +128,66 @@ object Pickler {
       opt: ct.Options,
       target: Expr[java.nio.ByteBuffer],
       byteOffset: Expr[Int],
-      indexOffset: Expr[Int],
       sdef: p.StructDef,
       repr: q.TypeRepr,
-      value: Expr[Any]
+      value: Expr[Any],
+      mkStruct: (p.Type.Struct, Expr[Any]) => Expr[Long],
+      mkArray: (p.Type, Expr[StdLib.MutableSeq[?]]) => Expr[Long]
   ) = {
 
     import q.given
 
     val sourceLUT = StdLib.Mirrors.map(p => p._1.source -> p).toMap
-    val (sdef2, term) = Compiler.findMatchingClassInHierarchy(repr.typeSymbol, sourceLUT) match {
-      case None =>
-        sdef ->
-          // Retyper.structDef0(repr.typeSymbol).getOrElse(???) ->
-          value.asTerm
-      case Some(a @ (m, (from, _))) =>
-        sdef ->
-          from(q.underlying, value).asTerm
+    val (mirroredSDef, term) = Compiler.findMatchingClassInHierarchy(repr.typeSymbol, sourceLUT) match {
+      case None                 => sdef     -> value.asTerm
+      case Some((m, (from, _))) => m.struct -> from(q.underlying, value).asTerm //
     }
 
-    // println(
-    //   s"PUT STRUCT ${Retyper.structName0(repr.typeSymbol)} ${Compiler.findMatchingClassInHierarchy(repr.typeSymbol, sourceLUT)}"
-    // )
+    println(s"[putStruct]     repr sdef: ${Retyper.structDef0(repr.typeSymbol).getOrElse(???).repr}")
+    println(s"[putStruct]   source sdef: ${sdef.repr}")
+    println(s"[putStruct] mirrored sdef: ${sdef.repr}")
+    println(term.tpe)
 
-    println("~> " + Retyper.structDef0(repr.typeSymbol).getOrElse(???).repr)
-    println("~~ " + sdef.repr)
-    println("~~ " + sdef2.repr)
-    // println("~~ " + tpe.repr)
+    val layout = compiler.layoutOf(CppSourceMirror.encode(sdef), opt)
+    val fields = sdef.members.zip(layout.members)
 
-    // Find out the total size of this struct first, it could be nested arbitrarily but the top level's size must
-    // reflect the total size; this is consistent with C's `sizeof(struct T)`.
-    val layout         = compiler.layoutOf(CppSourceMirror.encode(sdef), opt)
-    val baseByteOffset = '{ ${ byteOffset } + (${ Expr(layout.sizeInBytes.toInt) } * $indexOffset) }
-    val fields         = sdef.members.zip(layout.members)
-    val terms = fields.map { (named, m) =>
-      putPrimitive(
-        target,
-        '{ $baseByteOffset + ${ Expr(m.offsetInBytes.toInt) } },
-        named.tpe,
-        q.Select.unique(term, named.symbol).asExpr
-      )
+    println(s"[putStruct] Fields: ${fields}")
+
+    val primitiveTuples = (term.asExpr, fields) match {
+      case (
+            '{ $expr: StdLib.MutableSeq[t] },
+            (length @ p.Named(_, p.Type.Int), lengthMember) :: (
+              array @ p.Named(_, p.Type.Array(comp)),
+              arrayMember
+            ) :: Nil
+          ) =>
+        println(s"Found MutableSeq, component = ${Type.show[t]}, tpe=${tpe}, expr = ${expr.show}")
+        List(
+          (lengthMember, length.tpe, q.Select.unique(term, length.symbol).asExpr),
+          (arrayMember, p.Type.Long, mkArray(comp, expr))
+        )
+      case _ =>
+        fields.map { (named, m) =>
+          named.tpe match {
+            case p.Type.Array(comp) =>
+              ??? // Compiler emitted an illegal Array type (from intrinsic.Arr) which cannot appear on it's own!
+            case s @ p.Type.Struct(_, _, _) => (m, p.Type.Long, mkStruct(s, q.Select.unique(term, named.symbol).asExpr))
+            case _                          => (m, named.tpe, q.Select.unique(term, named.symbol).asExpr)
+          }
+        }
     }
-    println(s"Fields: ${fields}")
 
-    Expr.block(terms, '{})
+    Expr.block(
+      primitiveTuples.map((member, tpe, expr) =>
+        putPrimitive(
+          target,
+          '{ $byteOffset + ${ Expr(member.offsetInBytes.toInt) } },
+          tpe,
+          expr
+        )
+      ),
+      '{}
+    )
   }
 
   def putAll(using q: Quoted)(

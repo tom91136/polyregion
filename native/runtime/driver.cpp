@@ -67,7 +67,7 @@ const static uint8_t x86KernelSource[]{
     0x00, 0x00, 0x00, 0x00, 0x00};
 
 static const char *clKernelSource{R"CLC(
-__kernel void foo(__global int* array, int x){
+__kernel void lambda(__global int* array, int x){
   int tid = get_global_id(0);
   array[tid] = array[tid] + tid + x;
 }
@@ -260,18 +260,18 @@ void run() {
   } catch (const std::exception &e) {
     std::cerr << "[REL] " << e.what() << std::endl;
   }
+//
+//    try {
+//      rts.push_back(std::make_unique<CudaPlatform>());
+//    } catch (const std::exception &e) {
+//      std::cerr << "[CUDA] " << e.what() << std::endl;
+//    }
 
-  //  try {
-  //    rts.push_back(std::make_unique<CudaPlatform>());
-  //  } catch (const std::exception &e) {
-  //    std::cerr << "[CUDA] " << e.what() << std::endl;
-  //  }
-
-  //  try {
-  //    rts.push_back(std::make_unique<ClPlatform>());
-  //  } catch (const std::exception &e) {
-  //    std::cerr << "[OCL] " << e.what() << std::endl;
-  //  }
+//    try {
+//      rts.push_back(std::make_unique<ClPlatform>());
+//    } catch (const std::exception &e) {
+//      std::cerr << "[OCL] " << e.what() << std::endl;
+//    }
   //
   //  try {
   //    rts.push_back(std::make_unique<HsaPlatform>());
