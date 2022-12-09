@@ -3,7 +3,7 @@ package polyregion.prism
 import polyregion.ast.{PolyAst as p, *}
 import polyregion.prism.compiletime.*
 import polyregion.scala.intrinsics
-import polyregion.scala.intrinsics.SizedArr
+import polyregion.scala.intrinsics.TypedBuffer
 
 import scala.Predef as _
 import scala.quoted.Quotes
@@ -156,7 +156,7 @@ object StdLib {
   object MutableSeq {
     def onDim[T](N: Int): MutableSeq[T] = new MutableSeq[T](N, intrinsics.array[T](N))
   }
-  class MutableSeq[A](val length_ : Int, val data: intrinsics.Arr[A]) extends SizedArr[A] {
+  class MutableSeq[A](val length_ : Int, val data: intrinsics.TypedBuffer[A]) {
     def length: Int                = length_
     def apply(i: Int): A           = data.apply(i)
     def update(i: Int, x: A): Unit = data.update(i, x)
@@ -196,7 +196,7 @@ object StdLib {
               '{
                 new MutableSeq[a](
                   $xs.length,
-                  new intrinsics.Arr[a] {
+                  new intrinsics.TypedBuffer[a] {
                     override def apply(i: S.Int): a             = $xs(i)
                     override def update(i: S.Int, x: a): S.Unit = $xs(i) = x
                   }

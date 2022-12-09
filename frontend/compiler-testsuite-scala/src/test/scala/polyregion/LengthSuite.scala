@@ -14,8 +14,8 @@ class LengthSuite extends BaseSuite {
 
   {
     val xs = Buffer[Float](41, 42, 43)
-    val n = 2.toShort
-    testExpr{ n }
+    val n = 42.toShort
+    testExpr{ xs(0)+1 }
 //    testExpr(xs.length)
 //    testExpr(xs.length + xs.size + 10)
 //    testExpr {

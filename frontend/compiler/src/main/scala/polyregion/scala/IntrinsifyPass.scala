@@ -184,7 +184,7 @@ object IntrinsifyPass {
           (expr, stmts, inv :: Nil)
 
         case (
-              "polyregion" :: "scala" :: "intrinsics$" :: "Arr" :: op :: Nil,
+              "polyregion" :: "scala" :: "intrinsics$" :: "TypedBuffer" :: op :: Nil,
               xs @ p.Term
                 .Select(
                   _,_

@@ -161,12 +161,22 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
                                                 const Policy &policy, const MaybeCallback &cb) {
   TRACE();
 
+//  // Short,
+//  //
+//
+//  ArgBuffer buffer({
+//      {Type::Ptr, &ptr},
+//      {Type::Int32, &x},
+//      {Type::Void, nullptr},
+//  });
+
   RelocatableDevice::ReadLock r(lock);
   const auto moduleIt = objects.find(moduleName);
   if (moduleIt == objects.end())
     throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "No module named " + moduleName + " was loaded");
 
-  std::thread([symbol, types, argData, cb, &obj = moduleIt->second]() {
+  auto &obj = moduleIt->second;
+//  std::thread([symbol, types, argData, cb, &obj = moduleIt->second]() {
     MemoryManager mm;
     llvm::RuntimeDyld ld(mm, mm);
 
@@ -193,10 +203,12 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
 
       auto argData_ = argData;
       auto argPtrs = detail::argDataAsPointers(types, argData_);
+      TRACE();
       invoke(sym.getAddress(), types, argPtrs);
       if (cb) (*cb)();
+      TRACE();
     }
-  }).detach();
+//  }).detach();
 }
 
 static constexpr const char *SHOBJ_ERROR_PREFIX = "[RelocatableObject error] ";

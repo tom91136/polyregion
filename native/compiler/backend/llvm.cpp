@@ -152,7 +152,7 @@ llvm::Value *LLVM::AstTransformer::mkSelectPtr(const Term::Select &select) {
     for (auto &path : tail) {
       auto [structTy, table] = structTypeOf(tpe);
       if (auto idx = get_opt(table, path.symbol); idx) {
-        root = B.CreateInBoundsGEP(structTy, root,
+        root = B.CreateInBoundsGEP(structTy, load(B, root, B.getPtrTy(AllocaAS)),
                                    {llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0),
                                     llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), *idx)},
                                    qualified(select) + "_ptr");
@@ -1004,7 +1004,10 @@ Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform(const std::u
   allArgs.insert(allArgs.begin(), fnTree.captures.begin(), fnTree.captures.end());
 
   auto paramTpes =
-      map_vec<Named, llvm::Type *>(allArgs, [&](auto &&named) { return mkTpe(named.tpe, GlobalAS, true); });
+      map_vec<Named, llvm::Type *>(allArgs, [&](auto &&named) {
+        auto tpe= mkTpe(named.tpe, GlobalAS, true);
+        return  tpe->isStructTy() ? B.getPtrTy(GlobalAS) : tpe;
+      });
 
   // Unit type at function return type position is void
   // Any other location, Unit is a singleton value
@@ -1046,7 +1049,8 @@ Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform(const std::u
                             ? B.CreateICmpNE(&arg, llvm::ConstantInt::get(llvm::Type::getInt8Ty(C), 0, true))
                             : &arg;
 
-        auto stack = B.CreateAlloca(mkTpe(named.tpe, GlobalAS), AllocaAS, nullptr, named.symbol + "_stack_ptr");
+        auto tpe = mkTpe(named.tpe, GlobalAS);
+        auto stack = B.CreateAlloca(tpe->isStructTy() ? B.getPtrTy(GlobalAS) : tpe , AllocaAS, nullptr, named.symbol + "_stack_ptr");
         B.CreateStore(argValue, stack);
         return {named.symbol, {named.tpe, stack}};
       });

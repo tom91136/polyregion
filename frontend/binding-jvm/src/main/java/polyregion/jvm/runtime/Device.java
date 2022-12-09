@@ -196,6 +196,7 @@ public byte[] longToBytes(long x) {
           xs.add(new SimpleImmutableEntry<>(o, proxy));
         }
       }
+      System.out.println("Restore "+ xs);
       if (xs.isEmpty()) {
         if (cb != null) cb.run();
         return;

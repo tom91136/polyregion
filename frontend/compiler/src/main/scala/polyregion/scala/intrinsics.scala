@@ -4,20 +4,14 @@ object intrinsics {
 
   private def intrinsic: Nothing = throw new AssertionError("illegal")
 
-  trait Arr[A] {
-//    def length: Int
+  trait TypedBuffer[A] {
     def apply(i: Int): A
     def update(i: Int, x: A): Unit
   }
-  
-  trait  SizedArr[A] { 
-    def length: Int
-    def data : Arr[A]
-  }
 
-  def array[A](size: Int): Arr[A]                   = intrinsic
-  def apply[A](xs: Arr[A], index: Int): A           = intrinsic
-  def update[A](xs: Arr[A], index: Int, x: A): Unit = intrinsic
+  def array[A](size: Int): TypedBuffer[A]                   = intrinsic
+  def apply[A](xs: TypedBuffer[A], index: Int): A           = intrinsic
+  def update[A](xs: TypedBuffer[A], index: Int, x: A): Unit = intrinsic
 
   def gpuGlobalIdxX: Int  = intrinsic
   def gpuGlobalIdxY: Int  = intrinsic

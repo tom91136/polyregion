@@ -319,16 +319,19 @@ TEST_CASE("mut struct", "[compiler]") {
   StructDef def(myStructSym, {}, {defX, defY});
   Type::Struct myStruct(myStructSym, {}, {});
 
-  Function fn(Sym({"foo"}), {}, {}, {Named("out", myStruct)}, {}, Type::Int(),
+  Function fn(Sym({"foo"}), {}, {}, {Named("out", myStruct)}, {}, Type::Unit(),
               {
-                  Var(Named("s", myStruct), {}),
-                  Var(Named("t", myStruct), {}),
-                  Mut(Select({Named("s", myStruct)}, defX), Alias(IntConst(42)), false),
-                  Mut(Select({Named("s", myStruct)}, defY), Alias(IntConst(43)), false),
-                  Mut(Select({}, Named("s", myStruct)), Alias(Select({}, Named("t", myStruct))), false),
+//                  Var(Named("s", myStruct), {}),
+//                  Var(Named("t", myStruct), {}),
+
+//                  Mut(Select({}, Named("t", myStruct)), Alias(Select({}, Named("out", myStruct))), false),
+
+                  Mut(Select({Named("out", myStruct)}, defX), Alias(IntConst(42)), false),
+                  Mut(Select({Named("out", myStruct)}, defY), Alias(IntConst(43)), false),
+//                  Mut(Select({}, Named("s", myStruct)), Alias(Select({}, Named("t", myStruct))), false),
 
                   //                  Return(Alias(UnitConst())),
-                  Return(Alias(IntConst(69))),
+                  Return(Alias(UnitConst())),
               });
 
   Program p(fn, {}, {def});

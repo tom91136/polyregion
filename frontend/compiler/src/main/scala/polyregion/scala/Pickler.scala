@@ -80,42 +80,56 @@ object Pickler {
   }
 
   def putPrimitive(using q: Quotes) //
-  (target: Expr[java.nio.ByteBuffer], byteOffset: Expr[Int], tpe: p.Type, value: Expr[Any]): Expr[Unit] = { 
-    tpe match {
-    case p.Type.Float  => '{ val x_ = ${value.asExprOf[Float]}; println(s"Write ${x_}(${  ${Expr(tpe.repr) }  }) to ${$target}"); $target.putFloat($byteOffset, x_) }
-    case p.Type.Double => '{ val x_ = ${value.asExprOf[Double]}; println(s"Write ${x_}(${  ${Expr(tpe.repr) }  }) to ${$target}"); $target.putDouble($byteOffset, x_) }
-    case p.Type.Bool   => '{ val x_ = ${value.asExprOf[Boolean]}; println(s"Write ${x_}(${  ${Expr(tpe.repr) }  }) to ${$target}"); $target.put($byteOffset, if (!x_) 0.toByte else 1.toByte) }
-    case p.Type.Byte   => '{ val x_ = ${value.asExprOf[Byte]}; println(s"Write ${x_}(${  ${Expr(tpe.repr) }  }) to ${$target}"); $target.put($byteOffset, x_) }
-    case p.Type.Char   => '{ val x_ = ${value.asExprOf[Char]}; println(s"Write ${x_}(${  ${Expr(tpe.repr) }  }) to ${$target}"); $target.putChar($byteOffset, x_) }
-    case p.Type.Short  => '{ val x_ = ${value.asExprOf[Short]}; println(s"Write ${x_}(${  ${Expr(tpe.repr) }  }) to ${$target}"); $target.putShort($byteOffset, x_) }
-    case p.Type.Int    => '{ val x_ = ${value.asExprOf[Int]}; println(s"Write ${x_}(${  ${Expr(tpe.repr) }  }) to ${$target}"); $target.putInt($byteOffset, x_) }
-    case p.Type.Long   => '{ val x_ = ${value.asExprOf[Long]}; println(s"Write ${x_}(${  ${Expr(tpe.repr) }  }) to ${$target}"); $target.putLong($byteOffset, x_) }
-    case p.Type.Unit   => '{ val x_ = $value; println(s"Write ${x_}(${  ${Expr(tpe.repr) }  }) to ${$target}"); $target.put($byteOffset, 0.toByte) }
+  (target: Expr[java.nio.ByteBuffer], byteOffset: Expr[Int], tpe: p.Type, value: Expr[Any]): Expr[Unit] = tpe match {
+    case p.Type.Float  => '{ $target.putFloat($byteOffset, ${ value.asExprOf[Float] }) }
+    case p.Type.Double => '{ $target.putDouble($byteOffset, ${ value.asExprOf[Double] }) }
+    case p.Type.Bool   => '{ $target.put($byteOffset, if (!${ value.asExprOf[Boolean] }) 0.toByte else 1.toByte) }
+    case p.Type.Byte   => '{ $target.put($byteOffset, ${ value.asExprOf[Byte] }) }
+    case p.Type.Char   => '{ $target.putChar($byteOffset, ${ value.asExprOf[Char] }) }
+    case p.Type.Short  => '{ $target.putShort($byteOffset, ${ value.asExprOf[Short] }) }
+    case p.Type.Int    => '{ $target.putInt($byteOffset, ${ value.asExprOf[Int] }) }
+    case p.Type.Long   => '{ $target.putLong($byteOffset, ${ value.asExprOf[Long] }) }
+    case p.Type.Unit   => '{ $target.put($byteOffset, 0.toByte) }
     case x =>
       throw new RuntimeException(
         s"Cannot put ${x.repr} into buffer, it is not a primitive type (source is `${value.show}`)"
       )
-
   }
-}
 
   def getStruct(using q: Quoted)(
       compiler: ct.Compiler,
       opt: ct.Options,
       source: Expr[java.nio.ByteBuffer],
       byteOffset: Expr[Int],
-      indexOffset: Expr[Int],
-      repr: q.TypeRepr
+      repr: q.TypeRepr,
+      value: Expr[Any]
   ) = {
     import q.given
+
+
+//  val sourceLUT = StdLib.Mirrors.map(p => p._1.source -> p).toMap
+//     val (mirroredSDef, term) = Compiler.findMatchingClassInHierarchy(repr.typeSymbol, sourceLUT) match {
+//       case None                 => sdef     -> value.asTerm
+//       case Some((m, (_, to))) => m.struct -> to(q.underlying, value, ???).asTerm //
+//     }
+
+//     println(s"[putStruct]     repr sdef: ${Retyper.structDef0(repr.typeSymbol).getOrElse(???).repr}")
+//     println(s"[putStruct]   source sdef: ${sdef.repr}")
+//     println(s"[putStruct] mirrored sdef: ${sdef.repr}")
+//     println(term.tpe)
+
+
+    // if( mutableseq)
+    // val length_ = source.getInt
+    // val data = source.getLong => Ptr, 
+
     // Find out the total size of this struct first, it could be nested arbitrarily but the top level's size must
     // reflect the total size; this is consistent with C's `sizeof(struct T)`.
-    val sdef           = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
-    val layout         = compiler.layoutOf(CppSourceMirror.encode(sdef), opt)
-    val baseByteOffset = '{ ${ byteOffset } + (${ Expr(layout.sizeInBytes.toInt) } * $indexOffset) }
-    val fields         = sdef.members.zip(layout.members)
+    val sdef   = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
+    val layout = compiler.layoutOf(CppSourceMirror.encode(sdef), opt)
+    val fields = sdef.members.zip(layout.members)
     val terms = fields.map { (named, m) =>
-      getPrimitive(source, '{ $baseByteOffset + ${ Expr(m.offsetInBytes.toInt) } }, named.tpe).asTerm
+      getPrimitive(source, '{ $byteOffset + ${ Expr(m.offsetInBytes.toInt) } }, named.tpe).asTerm
     }
     q.Select
       .unique(q.New(q.TypeIdent(repr.typeSymbol)), "<init>")
