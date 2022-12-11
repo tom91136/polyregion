@@ -315,15 +315,12 @@ object compiletime {
           fnTpeOrdinals,
           fnValues.array,
           rt.Policy($dim),
-          if ($queue.device.sharedAddressSpace) { () =>
-            println("Done s tid=" + Thread.currentThread.getId + " cb" + cb_)
-            cb_(Right(()))
-          }: Runnable
-          else null
+          { () =>
+            println("Kernel completed, tid=" + Thread.currentThread.getId + " cb" + cb_)
+            $queue.syncAll(() => cb_(Right(())))  
+          }
         )
 
-        // Sync.
-        $queue.syncAll(if (! $queue.device.sharedAddressSpace) (() => cb_(Right(()))): Runnable else null)
       }
     }
     given q.Printer[q.Tree] = q.Printer.TreeAnsiCode
@@ -363,7 +360,7 @@ object compiletime {
               'x,
               (s, expr) => ???, // bindStruct(compiler, opt, lut, queue, expr.asTerm, lut(s.name)),
               (s, expr) => {
-                println(s"Serialise array ${s} = ${expr}")
+                // println(s"Serialise array ${s} = ${expr}")
                 expr match {
                   case '{ $xs: StdLib.MutableSeq[v] } => bindArray[v](compiler, opt, lut, queue, xs, s)
                 }
@@ -372,7 +369,6 @@ object compiletime {
             )
           },
         /* read   */ (bb, x) => {
-          Thread.dumpStack();
 
           // x : Seq
           // to(x : seq, y : deserialise()  )
@@ -381,7 +377,8 @@ object compiletime {
           //   Pickler.getStruct(compiler, opt, 'bb, '{ 0 }, 'x , q.TypeRepr.of[t])
           // }
 
-          println(s"Deserialise array ${x} = ${bb}"); ()
+          // println(s"Deserialise array ${x} = ${bb}"); 
+          ()
         }, // throw new AssertionError(s"No write-back for struct type " + ${ Expr(struct.repr) }),
         /* cb     */ null
       )
@@ -444,7 +441,7 @@ object compiletime {
         /* object */ xs,
         /* sizeOf */ x => ${ Expr(Pickler.tpeAsRuntimeTpe(component).sizeInBytes) } * x.length_,
         /* write  */ { (xss, bb) =>
-          println(s"Write bb = ${xss} ==> ${bb}")
+          // println(s"Write bb = ${xss} ==> ${bb}")
           var i = 0
           while (i < xss.length_) {
             ${ storeElem('bb, 'xss, 'i) }
@@ -452,7 +449,7 @@ object compiletime {
           }
         },
         /* read   */ (bb, x) => {
-          println(s"Read bb = ${x} <== ${bb}")
+          // println(s"Read bb = ${x} <== ${bb}")
           var i = 0
           while (i < x.length_) {
             ${ restoreElem('bb, 'x, 'i) }

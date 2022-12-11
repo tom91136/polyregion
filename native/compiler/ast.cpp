@@ -303,47 +303,49 @@ std::string dsl::dslRepr(const Function &fn) {
   return proto + "({" + body + "})";
 }
 
-Type::Array dsl::Array(Type::Any t) { return Tpe::Array(t); }
+Type::Array dsl::Array(const Type::Any &t) { return Tpe::Array(t); }
 Type::Struct dsl::Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args) {
   return {name, tpeVars, args};
+}
+Term::Any dsl::integral(const Type::Any &tpe, unsigned long long int x) {
+  auto unsupported = [](auto &&t, auto &&v) -> Term::Any {
+    throw std::logic_error("Cannot create integral constant of type " + to_string(t) + " for value" +
+                           std::to_string(v));
+  };
+  return variants::total(                                                      //
+      *tpe,                                                                    //
+      [&](const Type::Float &) -> Term::Any { return Term::FloatConst(x); },   //
+      [&](const Type::Double &) -> Term::Any { return Term::DoubleConst(x); }, //
+      [&](const Type::Bool &) -> Term::Any { return Term::BoolConst(x); },     //
+      [&](const Type::Byte &) -> Term::Any { return Term::ByteConst(x); },     //
+      [&](const Type::Char &) -> Term::Any { return Term::CharConst(x); },     //
+      [&](const Type::Short &) -> Term::Any { return Term::ShortConst(x); },   //
+      [&](const Type::Int &) -> Term::Any { return Term::IntConst(x); },       //
+      [&](const Type::Long &) -> Term::Any { return Term::LongConst(x); },     //
+      [&](const Type::Unit &t) -> Term::Any { return unsupported(t, x); },     //
+      [&](const Type::Nothing &t) -> Term::Any { return unsupported(t, x); },  //
+      [&](const Type::Struct &t) -> Term::Any { return unsupported(t, x); },   //
+      [&](const Type::Array &t) -> Term::Any { return unsupported(t, x); },    //
+      [&](const Type::Var &t) -> Term::Any { return unsupported(t, x); },      //
+      [&](const Type::Exec &t) -> Term::Any { return unsupported(t, x); }      //
+
+  );
+}
+Term::Any dsl::fractional(const Type::Any &tpe,   long double x) {
+  if (holds<Type::Double>(tpe)) return Term::DoubleConst(static_cast<double>(x));
+  if (holds<Type::Float>(tpe)) return Term::FloatConst(static_cast<float>(x));
+  throw std::logic_error("Cannot create fractional constant of type " + to_string(tpe) + " for value" +
+                         std::to_string(x));
+}
+std::function<Term::Any(Type::Any)> dsl::operator""_(unsigned long long int x) {
+  return [=](const Type::Any &t) { return integral(t, x); };
+}
+std::function<Term::Any(Type::Any)> dsl::operator""_(long double x) {
+  return [=](const Type::Any &t) { return fractional(t, x); };
 }
 std::function<dsl::NamedBuilder(Type::Any)> dsl::operator""_(const char *name, size_t) {
   std::string name_(name);
   return [=](auto &&tpe) { return NamedBuilder{Named(name_, tpe)}; };
-}
-std::function<Term::Any(Type::Any)> dsl::operator""_(unsigned long long int x) {
-  return [=](const Type::Any &t) {
-    auto unsupported = [](auto &&t, auto &&v) -> Term::Any {
-      throw std::logic_error("Cannot create integral constant of type " + to_string(t) + " for value" +
-                             std::to_string(v));
-    };
-    return variants::total(                                                      //
-        *t,                                                                      //
-        [&](const Type::Float &) -> Term::Any { return Term::FloatConst(x); },   //
-        [&](const Type::Double &) -> Term::Any { return Term::DoubleConst(x); }, //
-        [&](const Type::Bool &) -> Term::Any { return Term::BoolConst(x); },     //
-        [&](const Type::Byte &) -> Term::Any { return Term::ByteConst(x); },     //
-        [&](const Type::Char &) -> Term::Any { return Term::CharConst(x); },     //
-        [&](const Type::Short &) -> Term::Any { return Term::ShortConst(x); },   //
-        [&](const Type::Int &) -> Term::Any { return Term::IntConst(x); },       //
-        [&](const Type::Long &) -> Term::Any { return Term::LongConst(x); },     //
-        [&](const Type::Unit &t) -> Term::Any { return unsupported(t, x); },     //
-        [&](const Type::Nothing &t) -> Term::Any { return unsupported(t, x); },  //
-        [&](const Type::Struct &t) -> Term::Any { return unsupported(t, x); },   //
-        [&](const Type::Array &t) -> Term::Any { return unsupported(t, x); },    //
-        [&](const Type::Var &t) -> Term::Any { return unsupported(t, x); },      //
-        [&](const Type::Exec &t) -> Term::Any { return unsupported(t, x); }      //
-
-    );
-  };
-}
-std::function<Term::Any(Type::Any)> dsl::operator""_(long double x) {
-  return [=](const Type::Any &t) -> Term::Any {
-    if (holds<Type::Double>(t)) return Term::DoubleConst(static_cast<double>(x));
-    if (holds<Type::Float>(t)) return Term::FloatConst(static_cast<float>(x));
-    throw std::logic_error("Cannot create fractional constant of type " + to_string(t) + " for value" +
-                           std::to_string(x));
-  };
 }
 
 Stmt::Any dsl::let(const string &name, const Type::Any &tpe) { return Var(Named(name, tpe), {}); }
@@ -361,7 +363,8 @@ std::function<Function(std::vector<Stmt::Any>)> dsl::function(const string &name
   return [=](auto &&stmts) { return Function(Sym({name}), {}, {}, args, {}, rtn, stmts); };
 }
 Stmt::Return dsl::ret(const Expr::Any &expr) { return Return(expr); }
-Program dsl::program(Function entry, std::vector<Function> functions, std::vector<StructDef> defs) {
+Stmt::Return dsl::ret(const Term::Any &term) { return Return(Alias(term)); }
+Program dsl::program(Function entry, std::vector<StructDef> defs, std::vector<Function> functions) {
   return Program(entry, functions, defs);
 }
 dsl::IndexBuilder::IndexBuilder(const Expr::Index &index) : index(index) {}
@@ -369,6 +372,7 @@ dsl::IndexBuilder::operator const Expr::Any() const { return index; }
 Stmt::Update dsl::IndexBuilder::operator=(const Term::Any &term) const { return {index.lhs, index.idx, term}; }
 dsl::NamedBuilder::NamedBuilder(const Named &named) : named(named) {}
 dsl::NamedBuilder::operator const Term::Any() const { return Select({}, named); }
+//dsl::NamedBuilder::operator const Expr::Any() const { return Alias(Select({}, named)); }
 dsl::NamedBuilder::operator const Named() const { return named; }
 dsl::IndexBuilder dsl::NamedBuilder::operator[](const Term::Any &idx) const {
   if (auto arr = get_opt<Type::Array>(named.tpe); arr) {

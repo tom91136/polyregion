@@ -13,7 +13,7 @@ object Toggles {
   // works
 
   final inline val InlineArraySuite = false
-  final inline val BufferSuite      = false
+  final inline val BufferSuite      = true
   final inline val CaptureSuite     = false
   final inline val CastSuite        = false
   final inline val MathSuite        = false
@@ -24,7 +24,7 @@ object Toggles {
   final inline val StructSuite      = false
 
   final inline val FunctionCallSuite = false
-  final inline val ExtensionSuite    = false
+  final inline val ExtensionSuite    = false // assertion failed: Cannot get tree of package symbol
 
   final inline val CompoundOpsSuite     = false
   final inline val CompoundCaptureSuite = false

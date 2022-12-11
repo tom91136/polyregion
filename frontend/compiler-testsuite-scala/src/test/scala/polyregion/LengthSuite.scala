@@ -12,10 +12,20 @@ class LengthSuite extends BaseSuite {
     test(s"${codeOf(r)}=${r}")(assertOffload[A](r))
   }
 
+  case class U(a: Int)
+  case class V(a: Int, u : U)
+
+
   {
     val xs = Buffer[Float](41, 42, 43)
-    val n = 42.toShort
-    testExpr{ xs(0)+1 }
+    // val n = 42.toShort
+
+
+    val v =V(1, U(2))
+    // testExpr{ 
+    //   val x = v
+    //   x.a+x.a + x.u.a
+    //  }
 //    testExpr(xs.length)
 //    testExpr(xs.length + xs.size + 10)
 //    testExpr {

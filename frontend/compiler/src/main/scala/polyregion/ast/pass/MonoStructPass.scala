@@ -50,7 +50,10 @@ object MonoStructPass extends ProgramPass {
 
     val args     = program.entry.args.map(_.mapType(doReplacement(_)))     // .filter(x => typeIsNotDeleted(x.tpe))
     val receiver = program.entry.receiver.map(_.mapType(doReplacement(_))) // .filter(x => typeIsNotDeleted(x.tpe))
-    val captures = program.entry.captures.map(_.mapType(doReplacement(_))) // .filter(x => typeIsNotDeleted(x.tpe))
+    val captures = program.entry.captures.map(_.mapType(doReplacement(_)))
+    val defs = monoStructDefs
+      .map(_._2)                                                              // make sure we handle nested structs
+      .map(s => s.copy(members = s.members.map(_.mapType(doReplacement(_))))) // .filter(x => typeIsNotDeleted(x.tpe))
 
     (
       p.Program(
@@ -61,7 +64,7 @@ object MonoStructPass extends ProgramPass {
           captures = captures
         ),
         functions = Nil,
-        defs = monoStructDefs.map(_._2)
+        defs = defs
       ),
       log
     )

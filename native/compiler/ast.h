@@ -54,7 +54,7 @@ const static Tpe::Nothing Nothing = Tpe::Nothing();
 
 std::string dslRepr(const Function &fn);
 
-Tpe::Array Array(Tpe::Any t);
+Tpe::Array Array(const Tpe::Any &t);
 Tpe::Struct Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args);
 
 struct AssignmentBuilder {
@@ -75,13 +75,17 @@ struct NamedBuilder {
   Named named;
   explicit NamedBuilder(const Named &named);
   operator const Term::Any() const; // NOLINT(google-explicit-constructor)
+//  operator const Expr::Any() const; // NOLINT(google-explicit-constructor)
   operator const Named() const;     // NOLINT(google-explicit-constructor)
   IndexBuilder operator[](const Term::Any &idx) const;
 };
 
-std::function<NamedBuilder(Type::Any)> operator"" _(const char *name, size_t);
+Term::Any integral(const Type::Any &tpe, unsigned long long int x);
+Term::Any fractional(const Type::Any &tpe, long double x);
+
 std::function<Term::Any(Type::Any)> operator"" _(long double x);
 std::function<Term::Any(Type::Any)> operator"" _(unsigned long long int x);
+std::function<NamedBuilder(Type::Any)> operator"" _(const char *name, size_t);
 
 Stmt::Any let(const std::string &name, const Type::Any &tpe);
 AssignmentBuilder let(const std::string &name);
@@ -94,9 +98,10 @@ NullaryIntrinsic invoke(const NullaryIntrinsicKind::Any &kind, const Type::Any &
 
 std::function<Function(std::vector<Stmt::Any>)> function(const std::string &name, const std::vector<Named> &args,
                                                          const Type::Any &rtn);
-Program program(Function entry, std::vector<Function> functions, std::vector<StructDef> defs);
+Program program(Function entry, std::vector<StructDef> defs = {}, std::vector<Function> functions = {});
 
 Return ret(const Expr::Any &expr = Alias(UnitConst()));
+Return ret(const Term::Any &term);
 
 } // namespace dsl
 

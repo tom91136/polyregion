@@ -63,7 +63,7 @@ object VerifyPass {
                               )
                               .filter(_ == n) match {
                               case _ :: Nil => acc
-                              case Nil => acc ~ s"Struct type ${sdef.repr} does not contain member ${n} in `${t.repr}`"
+                              case Nil => acc ~ s"Struct type ${sdef.repr} does not contain member ${n.repr} in `${t.repr} r={${program.defs}}`"
                               case _ => acc ~ s"Struct type ${sdef.repr} contains multiple members of $n in `${t.repr}`"
                             }
                           }

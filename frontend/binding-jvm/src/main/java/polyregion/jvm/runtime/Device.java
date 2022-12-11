@@ -54,14 +54,6 @@ public final class Device implements AutoCloseable {
         return this;
       }
 
-
-
-public byte[] longToBytes(long x) {
-    ByteBuffer buffer = ByteBuffer.allocate(Long.BYTES).order(ByteOrder.nativeOrder());
-    buffer.putLong(x);
-    return buffer.array();
-}
-
       MemoryProxy<T> invalidate(T object, Runnable cb) {
         int byteSize = sizeInBytes.applyAsInt(object);
         if (buffer != null && buffer.capacity() != byteSize) {
@@ -79,7 +71,6 @@ public byte[] longToBytes(long x) {
           buffer.get(xs);
 
           devicePtr = Platforms.pointerOfDirectBuffer0(buffer);
-          System.out.println("New ptr data " + devicePtr  + " i.e " + java.util.Arrays.toString(longToBytes(devicePtr)) + " =" + java.util.Arrays.toString(xs));
           if (cb != null) cb.run();
         } else {
           if (devicePtr == 0)
@@ -196,7 +187,6 @@ public byte[] longToBytes(long x) {
           xs.add(new SimpleImmutableEntry<>(o, proxy));
         }
       }
-      System.out.println("Restore "+ xs);
       if (xs.isEmpty()) {
         if (cb != null) cb.run();
         return;

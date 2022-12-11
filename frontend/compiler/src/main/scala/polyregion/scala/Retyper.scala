@@ -117,7 +117,7 @@ object Retyper {
           case Some(sym) if sym.name == "<root>" => resolveClsFromTpeRepr(tpe.qualifier) // discard root package
           case Some(sym)                         => resolveClsFromSymbol(sym)
         }
-      case invalid => s"Not a class TypeRepr: ${invalid.show}".fail
+      case invalid => s"Not a class TypeRepr: ${Try(invalid.show)}".fail
     }
 
   private def liftClsToTpe(using
@@ -262,7 +262,7 @@ object Retyper {
         }
 
     }).recoverWith { case e =>
-      new CompilerException(s"Retyper failed while typing `${repr.show}`", e).asLeft
+      new CompilerException(s"Retyper failed while typing `${Try(repr.show)}`", e).asLeft
     }
 
 }

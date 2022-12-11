@@ -435,6 +435,7 @@ object Compiler {
       s"Verifier",
       optVerification.map((f, xs) => s"${f.signatureRepr}\nError = ${xs.map("\t->" + _).mkString("\n")}")*
     )
+    _ = println(optLog.render().mkString("\n"))
     _ <-
       if (optVerification.exists(_._2.nonEmpty))
         s"Opt validation failed (error=${optVerification.map(_._2.size).sum})\n${optVerification

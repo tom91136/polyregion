@@ -13,12 +13,36 @@ using namespace Stmt;
 using namespace Term;
 using namespace Expr;
 
-template <typename P> static void assertCompilationSucceeded(const P &p) {
-  std::cout << (repr(p)) << std::endl;
+using namespace polyregion;
+using namespace polyast::dsl;
+
+static std::vector<Tpe::Any> PrimitiveTypes = {Float, Double, Bool, Byte, Char, Short, Int, Long, Unit};
+
+Term::Any generateConstValue(Tpe::Any t) {
+  auto unsupported = [&]() -> Term::Any { throw std::logic_error("No constant for type " + to_string(t)); };
+  return variants::total(
+      *t, [&](const Type::Float &) -> Term::Any { return 42.0_(t); },     //
+      [&](const Type::Double &) -> Term::Any { return 42.0_(t); },        //
+      [&](const Type::Bool &) -> Term::Any { return BoolConst(true); },   //
+      [&](const Type::Byte &) -> Term::Any { return 0xFF_(t); },          //
+      [&](const Type::Char &) -> Term::Any { return 42_(t); },            //
+      [&](const Type::Short &) -> Term::Any { return 42_(t); },           //
+      [&](const Type::Int &) -> Term::Any { return 42_(t); },             //
+      [&](const Type::Long &) -> Term::Any { return 0xDEADBEEF_(t); },    //
+      [&](const Type::Unit &t) -> Term::Any { return UnitConst(); },      //
+      [&](const Type::Nothing &t) -> Term::Any { return unsupported(); }, //
+      [&](const Type::Struct &t) -> Term::Any { return unsupported(); },  //
+      [&](const Type::Array &t) -> Term::Any { return unsupported(); },   //
+      [&](const Type::Var &t) -> Term::Any { return unsupported(); },     //
+      [&](const Type::Exec &t) -> Term::Any { return unsupported(); });
+}
+
+template <typename P> static void assertCompile(const P &p) {
+  CAPTURE(repr(p));
   auto c = polyregion::compiler::compile(
       p, polyregion::compiler::Options{polyregion::compiler::Target::Object_LLVM_x86_64, "native"},
       polyregion::compiler::Opt::O3);
-  std::cout << c << std::endl;
+  CAPTURE(c);
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);
 }
@@ -50,56 +74,84 @@ TEST_CASE("initialise more than once", "[compiler]") {
   polyregion::compiler::initialise();
 }
 
-// TEST_CASE("empty function should compile", "[compiler]") {
-//   polyregion::compiler::initialise();
-//   Function fn(Sym({"foo"}), {}, Type::Unit(), {});
-//   Program p(fn, {}, {});
-//   assertCompilationSucceeded(p);
-// }
+TEST_CASE("constant return", "[compiler]") {
+  polyregion::compiler::initialise();
+  auto tpe = GENERATE(from_range(PrimitiveTypes));
+  DYNAMIC_SECTION(tpe) {
+    CAPTURE(tpe);
+    assertCompile(program(function("foo", {}, tpe)({
+        ret(generateConstValue(tpe)) //
+    })));
+  }
+}
+
+TEST_CASE("alias prim", "[compiler]") {
+  polyregion::compiler::initialise();
+  auto tpe = GENERATE(from_range(PrimitiveTypes));
+  DYNAMIC_SECTION(tpe << "(local)") {
+    CAPTURE(tpe);
+    assertCompile(program(function("foo", {}, tpe)({
+        let("v1") = generateConstValue(tpe), //
+        let("v2") = "v1"_(tpe),              //
+        let("v3") = "v2"_(tpe),              //
+        let("v4") = "v3"_(tpe),              //
+        ret("v4"_(tpe))                      //
+    })));
+  }
+  DYNAMIC_SECTION(tpe << "(arg)") {
+    CAPTURE(tpe);
+    assertCompile(program(function("foo", {"in"_(tpe)}, tpe)({
+        let("v1") = "in"_(tpe), //
+        let("v2") = "v1"_(tpe), //
+        let("v3") = "v2"_(tpe), //
+        let("v4") = "v3"_(tpe), //
+        ret("v4"_(tpe))         //
+    })));
+  }
+}
 
 TEST_CASE("index prim array", "[compiler]") {
   polyregion::compiler::initialise();
-
-  auto arr = Type::Array(Type::Int());
-
-  Function fn(Sym({"foo"}), {}, {}, {}, {}, Type::Int(),
-              {
-                  Var(Named("xs", arr), {Alloc(arr, IntConst(10))}),
-                  Var(Named("x", Type::Int()), {Index(Select({}, Named("xs", arr)), IntConst(0), Type::Int())}),
-                  Return(Alias(Select({}, Named("x", Type::Int())))),
-              });
-  Program p(fn, {}, {});
-  assertCompilationSucceeded(p);
+  auto tpe = GENERATE(from_range(PrimitiveTypes));
+  auto idx = GENERATE(0, 1, 3, 7, 10);
+  DYNAMIC_SECTION("xs[" << idx << "]:" << tpe << " (local)") {
+    CAPTURE(tpe, idx);
+    assertCompile(program(function("foo", {}, tpe)({
+        let("xs") = Alloc(Array(tpe), 42_(Int)),          //
+        let("x") = "xs"_(Array(tpe))[integral(Int, idx)], //
+        ret("x"_(tpe))                                    //
+    })));
+  }
+  DYNAMIC_SECTION("xs[" << idx << "]:" << tpe << " (args)") {
+    CAPTURE(tpe, idx);
+    assertCompile(program(function("foo", {"xs"_(Array(tpe))}, tpe)({
+        let("x") = "xs"_(Array(tpe))[integral(Int, idx)], //
+        ret("x"_(tpe))                                    //
+    })));
+  }
 }
 
-TEST_CASE("index bool array", "[compiler]") {
+TEST_CASE("update prim array", "[compiler]") {
   polyregion::compiler::initialise();
-
-  auto arr = Type::Array(Type::Bool());
-
-  Function fn(Sym({"foo"}), {}, {}, {}, {}, Type::Bool(),
-              {
-                  Var(Named("xs", arr), {Alloc(arr, IntConst(10))}),
-                  Var(Named("x", Type::Bool()), {Index(Select({}, Named("xs", arr)), IntConst(0), Type::Bool())}),
-                  Return(Alias(Select({}, Named("x", Type::Bool())))),
-              });
-  Program p(fn, {}, {});
-  assertCompilationSucceeded(p);
-}
-
-TEST_CASE("index unit array", "[compiler]") {
-  polyregion::compiler::initialise();
-
-  auto arr = Type::Array(Type::Unit());
-
-  Function fn(Sym({"foo"}), {}, {}, {}, {}, Type::Unit(),
-              {
-                  Var(Named("xs", arr), {Alloc(arr, IntConst(10))}),
-                  Var(Named("x", Type::Unit()), {Index(Select({}, Named("xs", arr)), IntConst(0), Type::Unit())}),
-                  Return(Alias(Select({}, Named("x", Type::Unit())))),
-              });
-  Program p(fn, {}, {});
-  assertCompilationSucceeded(p);
+  auto tpe = GENERATE(from_range(PrimitiveTypes));
+  auto idx = GENERATE(0, 1, 3, 7, 10);
+  auto val = generateConstValue(tpe);
+  DYNAMIC_SECTION("(xs[" << idx << "]:" << tpe << ") = " << val << " (local)") {
+    CAPTURE(tpe, idx, val);
+    assertCompile(program(function("foo", {}, tpe)({
+        let("xs") = Alloc(Array(tpe), 42_(Int)),     //
+        "xs"_(Array(tpe))[integral(Int, idx)] = val, //
+        ret("xs"_(Array(tpe))[integral(Int, idx)])   //
+    })));
+  }
+  invoke(Fn0::GpuGlobalIdxX(), Int);
+  DYNAMIC_SECTION("(xs[" << idx << "]:" << tpe << ") = " << val << " (args)") {
+    CAPTURE(tpe, idx, val);
+    assertCompile(program(function("foo", {"xs"_(Array(tpe))}, tpe)({
+        "xs"_(Array(tpe))[integral(Int, idx)] = val, //
+        ret("xs"_(Array(tpe))[integral(Int, idx)])   //
+    })));
+  }
 }
 
 TEST_CASE("index struct array member", "[compiler]") {
@@ -124,7 +176,7 @@ TEST_CASE("index struct array member", "[compiler]") {
           Return(Alias(IntConst(69))),
       });
   Program p(fn, {}, {def});
-  assertCompilationSucceeded(p);
+  assertCompile(p);
 }
 
 TEST_CASE("array update struct elem member", "[compiler]") {
@@ -144,7 +196,7 @@ TEST_CASE("array update struct elem member", "[compiler]") {
           Return(Alias(IntConst(69))),
       });
   Program p(fn, {}, {def});
-  assertCompilationSucceeded(p);
+  assertCompile(p);
 }
 
 TEST_CASE("array update struct elem", "[compiler]") {
@@ -164,76 +216,7 @@ TEST_CASE("array update struct elem", "[compiler]") {
           Return(Alias(IntConst(69))),
       });
   Program p(fn, {}, {def});
-  assertCompilationSucceeded(p);
-}
-
-TEST_CASE("array update unit ", "[compiler]") {
-  polyregion::compiler::initialise();
-  Function fn(Sym({"foo"}), {}, {}, {Named("s", Type::Array(Type::Unit()))}, {}, Type::Unit(),
-              {
-                  Update(Select({}, Named("s", Type::Array(Type::Unit()))), IntConst(7), (UnitConst())),
-                  Return(Alias(UnitConst())),
-              });
-  Program p(fn, {}, {});
-  assertCompilationSucceeded(p);
-}
-
-TEST_CASE("array update bool ", "[compiler]") {
-  polyregion::compiler::initialise();
-  Function fn(Sym({"foo"}), {}, {}, {Named("s", Type::Array(Type::Bool()))}, {}, Type::Unit(),
-              {
-                  Update(Select({}, Named("s", Type::Array(Type::Bool()))), IntConst(7), (BoolConst(true))),
-                  Return(Alias(UnitConst())),
-              });
-  Program p(fn, {}, {});
-  assertCompilationSucceeded(p);
-}
-
-TEST_CASE("array update prim ", "[compiler]") {
-  polyregion::compiler::initialise();
-  Function fn(Sym({"foo"}), {}, {}, {Named("s", Type::Array(Type::Int()))}, {}, Type::Unit(),
-              {
-                  Update(Select({}, Named("s", Type::Array(Type::Int()))), IntConst(7), (IntConst(42))),
-                  Return(Alias(UnitConst())),
-              });
-  Program p(fn, {}, {});
-  assertCompilationSucceeded(p);
-}
-
-TEST_CASE("array update unit from arg ", "[compiler]") {
-  polyregion::compiler::initialise();
-  Function fn(
-      Sym({"foo"}), {}, {}, {Named("s", Type::Array(Type::Unit())), Named("x", Type::Unit())}, {}, Type::Unit(),
-      {
-          Update(Select({}, Named("s", Type::Array(Type::Unit()))), IntConst(7), Select({}, Named("x", Type::Unit()))),
-          Return(Alias(UnitConst())),
-      });
-  Program p(fn, {}, {});
-  assertCompilationSucceeded(p);
-}
-
-TEST_CASE("array update bool from arg ", "[compiler]") {
-  polyregion::compiler::initialise();
-  Function fn(
-      Sym({"foo"}), {}, {}, {Named("s", Type::Array(Type::Bool())), Named("x", Type::Bool())}, {}, Type::Unit(),
-      {
-          Update(Select({}, Named("s", Type::Array(Type::Bool()))), IntConst(7), Select({}, Named("x", Type::Bool()))),
-          Return(Alias(UnitConst())),
-      });
-  Program p(fn, {}, {});
-  assertCompilationSucceeded(p);
-}
-
-TEST_CASE("array update prim from arg ", "[compiler]") {
-  polyregion::compiler::initialise();
-  Function fn(
-      Sym({"foo"}), {}, {}, {Named("s", Type::Array(Type::Int())), Named("x", Type::Int())}, {}, Type::Unit(),
-      {
-          Update(Select({}, Named("s", Type::Array(Type::Int()))), IntConst(7), Select({}, Named("x", Type::Int()))),
-          Return(Alias(UnitConst())),
-      });
-  Program p(fn, {}, {});
-  assertCompilationSucceeded(p);
+  assertCompile(p);
 }
 
 TEST_CASE("alias struct", "[compiler]") {
@@ -255,7 +238,7 @@ TEST_CASE("alias struct", "[compiler]") {
               });
 
   Program p(fn, {}, {def});
-  assertCompilationSucceeded(p);
+  assertCompile(p);
 }
 
 TEST_CASE("alias struct member", "[compiler]") {
@@ -276,7 +259,7 @@ TEST_CASE("alias struct member", "[compiler]") {
               });
 
   Program p(fn, {}, {def});
-  assertCompilationSucceeded(p);
+  assertCompile(p);
 }
 
 TEST_CASE("alias array", "[compiler]") {
@@ -292,21 +275,7 @@ TEST_CASE("alias array", "[compiler]") {
               });
 
   Program p(fn, {}, {});
-  assertCompilationSucceeded(p);
-}
-
-TEST_CASE("alias prim", "[compiler]") {
-  polyregion::compiler::initialise();
-
-  Function fn(Sym({"foo"}), {}, {}, {}, {}, Type::Int(),
-              {
-                  Var(Named("s", Type::Int()), {Alias(IntConst(10))}),
-                  Var(Named("t", Type::Int()), {Alias(Select({}, Named("s", Type::Int())))}),
-                  Return(Alias(Select({}, Named("t", Type::Int())))),
-              });
-
-  Program p(fn, {}, {});
-  assertCompilationSucceeded(p);
+  assertCompile(p);
 }
 
 TEST_CASE("mut struct", "[compiler]") {
@@ -319,23 +288,24 @@ TEST_CASE("mut struct", "[compiler]") {
   StructDef def(myStructSym, {}, {defX, defY});
   Type::Struct myStruct(myStructSym, {}, {});
 
-  Function fn(Sym({"foo"}), {}, {}, {Named("out", myStruct)}, {}, Type::Unit(),
-              {
-//                  Var(Named("s", myStruct), {}),
-//                  Var(Named("t", myStruct), {}),
+  Function fn(
+      Sym({"foo"}), {}, {}, {Named("out", myStruct)}, {}, Type::Unit(),
+      {
+          //                  Var(Named("s", myStruct), {}),
+          //                  Var(Named("t", myStruct), {}),
 
-//                  Mut(Select({}, Named("t", myStruct)), Alias(Select({}, Named("out", myStruct))), false),
+          //                  Mut(Select({}, Named("t", myStruct)), Alias(Select({}, Named("out", myStruct))), false),
 
-                  Mut(Select({Named("out", myStruct)}, defX), Alias(IntConst(42)), false),
-                  Mut(Select({Named("out", myStruct)}, defY), Alias(IntConst(43)), false),
-//                  Mut(Select({}, Named("s", myStruct)), Alias(Select({}, Named("t", myStruct))), false),
+          Mut(Select({Named("out", myStruct)}, defX), Alias(IntConst(42)), false),
+          Mut(Select({Named("out", myStruct)}, defY), Alias(IntConst(43)), false),
+          //                  Mut(Select({}, Named("s", myStruct)), Alias(Select({}, Named("t", myStruct))), false),
 
-                  //                  Return(Alias(UnitConst())),
-                  Return(Alias(UnitConst())),
-              });
+          //                  Return(Alias(UnitConst())),
+          Return(Alias(UnitConst())),
+      });
 
   Program p(fn, {}, {def});
-  assertCompilationSucceeded(p);
+  assertCompile(p);
 }
 
 TEST_CASE("mut array", "[compiler]") {
@@ -355,7 +325,7 @@ TEST_CASE("mut array", "[compiler]") {
               });
 
   Program p(fn, {}, {});
-  assertCompilationSucceeded(p);
+  assertCompile(p);
 }
 
 TEST_CASE("mut prim", "[compiler]") {
@@ -369,7 +339,7 @@ TEST_CASE("mut prim", "[compiler]") {
               });
 
   Program p(fn, {}, {});
-  assertCompilationSucceeded(p);
+  assertCompile(p);
 }
 
 TEST_CASE("alloc struct", "[compiler]") {
@@ -398,7 +368,7 @@ TEST_CASE("alloc struct", "[compiler]") {
               });
 
   Program p(fn, {}, {def, def2});
-  assertCompilationSucceeded(p);
+  assertCompile(p);
 }
 
 TEST_CASE("alloc struct nested", "[compiler]") {
@@ -429,7 +399,7 @@ TEST_CASE("alloc struct nested", "[compiler]") {
               });
 
   Program p(fn, {}, {def2, def});
-  assertCompilationSucceeded(p);
+  assertCompile(p);
 }
 
 TEST_CASE("alloc array", "[compiler]") {
@@ -446,7 +416,7 @@ TEST_CASE("alloc array", "[compiler]") {
               });
 
   Program p(fn, {}, {});
-  assertCompilationSucceeded(p);
+  assertCompile(p);
 }
 
 TEST_CASE("cast expr", "[compiler]") {
@@ -461,7 +431,7 @@ TEST_CASE("cast expr", "[compiler]") {
               });
 
   Program p(fn, {}, {});
-  assertCompilationSucceeded(p);
+  assertCompile(p);
 }
 
 TEST_CASE("cast fp to int expr", "[compiler]") {
@@ -482,7 +452,7 @@ TEST_CASE("cast fp to int expr", "[compiler]") {
               });
 
   Program p(fn, {}, {});
-  assertCompilationSucceeded(p);
+  assertCompile(p);
 }
 
 TEST_CASE("cond", "[compiler]") {
@@ -500,7 +470,7 @@ TEST_CASE("cond", "[compiler]") {
               });
 
   Program p(fn, {}, {});
-  assertCompilationSucceeded(p);
+  assertCompile(p);
 }
 
 TEST_CASE("while false", "[compiler]") {
@@ -514,5 +484,5 @@ TEST_CASE("while false", "[compiler]") {
               });
 
   Program p(fn, {}, {});
-  assertCompilationSucceeded(p);
+  assertCompile(p);
 }
