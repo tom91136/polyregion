@@ -5,6 +5,12 @@
 
 #include "libm.h"
 
+#include "cl_platform.h"
+#include "cuda_platform.h"
+#include "hip_platform.h"
+#include "hsa_platform.h"
+#include "object_platform.h"
+
 using namespace polyregion;
 
 runtime::ArgBuffer::ArgBuffer(std::initializer_list<TypedPointer> args) { put(args); }
@@ -27,6 +33,18 @@ std::optional<runtime::Access> runtime::fromUnderlying(uint8_t v) {
     case Access::RO:
     case Access::WO: return x;
     default: return {};
+  }
+}
+
+std::unique_ptr<runtime::Platform> runtime::Platform::of(const runtime::Backend &b) {
+  using namespace polyregion::runtime;
+  switch (b) {
+    case Backend::CUDA: return std::make_unique<cuda::CudaPlatform>();
+    case Backend::HIP: return std::make_unique<hip::HipPlatform>();
+    case Backend::HSA: return std::make_unique<hsa::HsaPlatform>();
+    case Backend::OpenCL: return std::make_unique<cl::ClPlatform>();
+    case Backend::SHARED_OBJ: return std::make_unique<object::SharedPlatform>();
+    case Backend::RELOCATABLE_OBJ: return std::make_unique<object::RelocatablePlatform>();
   }
 }
 

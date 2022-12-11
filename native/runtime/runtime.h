@@ -170,6 +170,15 @@ enum class Access : uint8_t { RW = 1, RO, WO };
 
 std::optional<Access> fromUnderlying(uint8_t v);
 
+enum class EXPORT Backend {
+  CUDA,
+  HIP,
+  HSA,
+  OpenCL,
+  SHARED_OBJ,
+  RELOCATABLE_OBJ,
+};
+
 struct EXPORT DeviceQueue {
 
 public:
@@ -203,6 +212,7 @@ public:
   [[nodiscard]] EXPORT virtual std::string name() = 0;
   [[nodiscard]] EXPORT virtual std::vector<Property> properties() = 0;
   [[nodiscard]] EXPORT virtual std::vector<std::unique_ptr<Device>> enumerate() = 0;
+  static std::unique_ptr<Platform> of(const Backend &b);
 };
 
 } // namespace polyregion::runtime

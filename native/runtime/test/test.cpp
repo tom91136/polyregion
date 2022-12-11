@@ -2,6 +2,13 @@
 #include "object_platform.h"
 #include <iostream>
 
+#include "cl_platform.h"
+#include "cuda_platform.h"
+#include "hip_platform.h"
+#include "hsa_platform.h"
+#include "object_platform.h"
+#include <condition_variable>
+
 // x86_64-pc-windows-msvc
 // x86_64-pc-linux-gnu
 // x86_64-apple-darwin
@@ -133,8 +140,8 @@ using namespace polyregion::runtime;
 using namespace polyregion::runtime::object;
 
 TEST_CASE("NULL object file is an error") {
-//  RelocatableDevice d;
-//  REQUIRE_THROWS_WITH(d.loadModule("", ""), Catch::Matchers::Contains("object file"));
+  //  RelocatableDevice d;
+  //  REQUIRE_THROWS_WITH(d.loadModule("", ""), Catch::Matchers::Contains("object file"));
 }
 
 TEST_CASE("x86 ELF invoke int(int, int, int)") {
@@ -164,5 +171,82 @@ TEST_CASE("x86 ELF invoke int(int, int, int)") {
     d.createQueue()->enqueueInvokeAsync("", "fma_", args.types, args.data, {}, []() {});
 
     CHECK(actual == (a * b + c));
+  }
+}
+
+std::map<Backend, const char *> AddKernel = //
+    {{Backend::OpenCL, R"CLC(
+__kernel void add(__global float* xs, __global float* ys, __global float* zs) {
+  int i = get_global_id(0);
+  zs[i] = xs[i] + ys[i];
+}
+)CLC"},
+     {Backend::CUDA, R"CLC(
+__kernel void add(__global float* xs, __global float* ys, __global float* zs) {
+  int i = get_global_id(0);
+  zs[i] = xs[i] + ys[i];
+}
+)CLC"}};
+
+// clang -target nvptx64-nvidia-nvcl -xcl square.cl -S -o test.ptx
+
+TEST_CASE("gpu vector add") {
+
+  //  auto backend = GENERATE(Backend::CUDA, Backend::OpenCL, Backend::HIP, Backend::HSA);
+  auto backend = GENERATE(Backend::OpenCL);
+
+  auto size = GENERATE(as<size_t>{}, 1, 2, 3, 10);
+
+  DYNAMIC_SECTION("" << size) {
+    auto platform = Platform::of(backend);
+
+    std::vector<float> xs(size);
+    std::vector<float> ys(size);
+    std::vector<float> zs(size, -1);
+
+    std::iota(xs.begin(), xs.end(), 0);
+    std::transform(xs.begin(), xs.end(), ys.begin(), [](auto x) { return x * 2; });
+
+    auto devices = platform->enumerate();
+    for (auto &x : devices)
+      std::cout << x->name() << std::endl;
+
+    auto &device0 = devices[0];
+    device0->loadModule("module", AddKernel.find(backend)->second);
+    auto xs_d = device0->malloc(size, Access::RO);
+    auto ys_d = device0->malloc(size, Access::RO);
+    auto zs_d = device0->malloc(size, Access::WO);
+
+    auto queue0 = device0->createQueue();
+    queue0->enqueueHostToDeviceAsync(xs.data(), xs_d, size * sizeof(float), {});
+    queue0->enqueueHostToDeviceAsync(ys.data(), ys_d, size * sizeof(float), {});
+    queue0->enqueueHostToDeviceAsync(zs.data(), zs_d, size * sizeof(float), {});
+
+    std::mutex lock;
+    std::condition_variable cv;
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    ArgBuffer buffer({
+        {Type::Ptr, &xs_d},
+        {Type::Ptr, &ys_d},
+        {Type::Ptr, &zs_d},
+        {Type::Void, nullptr},
+    });
+    queue0->enqueueInvokeAsync("module", "add", buffer.types, buffer.data, {{size, 1, 1}}, [&]() {
+      queue0->enqueueDeviceToHostAsync(zs_d, zs.data(), size * sizeof(float), [&]() {
+        std::unique_lock<std::mutex> lck(lock);
+        cv.notify_all();
+        std::cout << "Done" << std::endl;
+      });
+    });
+
+    std::unique_lock<std::mutex> lck(lock);
+    cv.wait(lck);
+
+    std::vector<float> expected(size, -1);
+    std::transform(xs.begin(), xs.end(), ys.begin(), expected.begin(), std::plus<>());
+    CHECK(expected == zs);
+    std::cout << "Checked" << std::endl;
   }
 }

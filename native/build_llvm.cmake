@@ -36,6 +36,13 @@ else ()
     set(USE_STATIC_CXX_STDLIB OFF)
 endif ()
 
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(BUILD_SHARED_LIBS ON)
+    set(USE_STATIC_CXX_STDLIB OFF)
+else ()
+    set(BUILD_SHARED_LIBS OFF)
+endif ()
+
 
 set(LLVM_OPTIONS
 
@@ -89,12 +96,6 @@ if (CMAKE_C_COMPILER)
 endif ()
 if (USE_LINKER)
     SET(BUILD_OPTIONS ${BUILD_OPTIONS} -DLLVM_USE_LINKER=${USE_LINKER})
-endif ()
-
-if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(BUILD_SHARED_LIBS ON)
-else ()
-    set(BUILD_SHARED_LIBS OFF)
 endif ()
 
 execute_process(
