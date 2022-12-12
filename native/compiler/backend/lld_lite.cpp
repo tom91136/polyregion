@@ -7,8 +7,8 @@
 #include "OutputSections.h"
 #include "SyntheticSections.h"
 #include "Target.h"
+#include "SymbolTable.h"
 #include "suppress_fd.h"
-#include <iostream>
 
 // XXX see https://gist.github.com/dabrahams/1528856
 template <class Tag> struct stowed { static typename Tag::type value; };
@@ -71,7 +71,8 @@ polyregion::backend::lld_lite::link(const std::vector<std::string> &args,
   lld::elf::config = std::make_unique<lld::elf::Configuration>();
   lld::elf::driver = std::make_unique<lld::elf::LinkerDriver>();
   lld::elf::script = std::make_unique<lld::elf::LinkerScript>();
-//  lld::elf::symtab = std::make_unique<lld::elf::SymbolTable>();
+  lld::elf::ctx = std::make_unique<lld::elf::Ctx>();
+  lld::elf::symtab = std::make_unique<lld::elf::SymbolTable>();
 
   lld::elf::partitions.clear();
   lld::elf::partitions.emplace_back();

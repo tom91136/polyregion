@@ -1,5 +1,6 @@
 #include "catch2/catch_all.hpp"
 #include "object_platform.h"
+#include <fstream>
 #include <iostream>
 
 #include "cl_platform.h"
@@ -174,26 +175,27 @@ TEST_CASE("x86 ELF invoke int(int, int, int)") {
   }
 }
 
-std::map<Backend, const char *> AddKernel = //
+std::ifstream fin("/home/tom/Desktop/add.so", std::ios::binary);
+std::string data2 = std::string(std::istreambuf_iterator<char>(fin), std::istreambuf_iterator<char>());
+
+std::map<Backend, std::string> AddKernel = //
     {{Backend::OpenCL, R"CLC(
 __kernel void add(__global float* xs, __global float* ys, __global float* zs) {
   int i = get_global_id(0);
   zs[i] = xs[i] + ys[i];
 }
 )CLC"},
-     {Backend::CUDA, R"CLC(
-__kernel void add(__global float* xs, __global float* ys, __global float* zs) {
-  int i = get_global_id(0);
-  zs[i] = xs[i] + ys[i];
-}
-)CLC"}};
+     {Backend::HSA, data2},
+     {Backend::HIP, data2}};
 
 // clang -target nvptx64-nvidia-nvcl -xcl square.cl -S -o test.ptx
+
+// clang -target amdgcn-amd-amdhsa -mcpu=gfx1012 -nogpulib -xcl add.cl  -o add.so
 
 TEST_CASE("gpu vector add") {
 
   //  auto backend = GENERATE(Backend::CUDA, Backend::OpenCL, Backend::HIP, Backend::HSA);
-  auto backend = GENERATE(Backend::OpenCL);
+  auto backend = GENERATE(Backend::HIP);
 
   auto size = GENERATE(as<size_t>{}, 1, 2, 3, 10);
 
@@ -204,7 +206,7 @@ TEST_CASE("gpu vector add") {
     std::vector<float> ys(size);
     std::vector<float> zs(size, -1);
 
-    std::iota(xs.begin(), xs.end(), 0);
+    std::iota(xs.begin(), xs.end(), 1);
     std::transform(xs.begin(), xs.end(), ys.begin(), [](auto x) { return x * 2; });
 
     auto devices = platform->enumerate();
@@ -213,19 +215,14 @@ TEST_CASE("gpu vector add") {
 
     auto &device0 = devices[0];
     device0->loadModule("module", AddKernel.find(backend)->second);
-    auto xs_d = device0->malloc(size, Access::RO);
-    auto ys_d = device0->malloc(size, Access::RO);
-    auto zs_d = device0->malloc(size, Access::WO);
+    auto xs_d = device0->mallocTyped<float>(size, Access::RO);
+    auto ys_d = device0->mallocTyped<float>(size, Access::RO);
+    auto zs_d = device0->mallocTyped<float>(size, Access::WO);
 
     auto queue0 = device0->createQueue();
-    queue0->enqueueHostToDeviceAsync(xs.data(), xs_d, size * sizeof(float), {});
-    queue0->enqueueHostToDeviceAsync(ys.data(), ys_d, size * sizeof(float), {});
-    queue0->enqueueHostToDeviceAsync(zs.data(), zs_d, size * sizeof(float), {});
-
-    std::mutex lock;
-    std::condition_variable cv;
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    queue0->enqueueHostToDeviceAsyncTyped(xs.data(), xs_d, size);
+    queue0->enqueueHostToDeviceAsyncTyped(ys.data(), ys_d, size);
+    queue0->enqueueHostToDeviceAsyncTyped(zs.data(), zs_d, size);
 
     ArgBuffer buffer({
         {Type::Ptr, &xs_d},
@@ -233,20 +230,19 @@ TEST_CASE("gpu vector add") {
         {Type::Ptr, &zs_d},
         {Type::Void, nullptr},
     });
-    queue0->enqueueInvokeAsync("module", "add", buffer.types, buffer.data, {{size, 1, 1}}, [&]() {
-      queue0->enqueueDeviceToHostAsync(zs_d, zs.data(), size * sizeof(float), [&]() {
-        std::unique_lock<std::mutex> lck(lock);
-        cv.notify_all();
-        std::cout << "Done" << std::endl;
-      });
-    });
+    queue0->enqueueInvokeAsync("module", "add", buffer.types, buffer.data, {{size, 1, 1}}, {});
 
+    std::mutex lock;
+    std::condition_variable cv;
+    queue0->enqueueDeviceToHostAsyncTyped(zs_d, zs.data(), size, [&]() {
+      std::unique_lock<std::mutex> lck(lock);
+      cv.notify_all();
+      std::cout << "Done" << std::endl;
+    });
     std::unique_lock<std::mutex> lck(lock);
     cv.wait(lck);
-
     std::vector<float> expected(size, -1);
     std::transform(xs.begin(), xs.end(), ys.begin(), expected.begin(), std::plus<>());
     CHECK(expected == zs);
-    std::cout << "Checked" << std::endl;
   }
 }

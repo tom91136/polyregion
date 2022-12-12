@@ -56,6 +56,7 @@ FetchContent_Declare(
 )
 
 
+
 if (USE_LINKER)
     message(STATUS "Using custom linker: ${USE_LINKER}")
     if (MSVC)
@@ -130,6 +131,7 @@ else ()
 
     set(COMMON_COMPILE_OPTIONS
             ${COMMON_COMPILE_OPTIONS}
+            -g3
             -fvisibility=hidden       # don't export anything by default
             -fvisibility-inlines-hidden
             )
@@ -143,16 +145,16 @@ else ()
                 )
     else ()
         set(COMMON_LINKER_OPTIONS
-                LINKER:--lto-O3
-                LINKER:--icf=all
+#                LINKER:--lto-O3
+#                LINKER:--icf=all
                 LINKER:--threads=${NPROC}
-                LINKER:--no-allow-shlib-undefined
-                LINKER:--no-undefined-version
-                LINKER:--no-undefined
-                LINKER:--exclude-libs=ALL # ld/lld exports all object symbols by default, don't do that
-                LINKER:--gc-sections      # remove unused sections
-                LINKER:--strip-all        # strip symbols not used for DSO
-                LINKER:-O3                # O3 for linker means optimise for space
+#                LINKER:--no-allow-shlib-undefined
+#                LINKER:--no-undefined-version
+#                LINKER:--no-undefined
+#                LINKER:--exclude-libs=ALL # ld/lld exports all object symbols by default, don't do that
+#                LINKER:--gc-sections      # remove unused sections
+#                LINKER:--strip-all        # strip symbols not used for DSO
+#                LINKER:-O3                # O3 for linker means optimise for space
                 )
     endif ()
 endif ()
@@ -187,7 +189,7 @@ endif ()
 #    set(LLD_DIR /lib/llvm-14/lib/cmake/lld)
 find_package(LLVM REQUIRED
         CONFIG NO_DEFAULT_PATH
-        PATHS "${CMAKE_CURRENT_SOURCE_DIR}/llvm"
+        PATHS "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}"
         )
 #    find_package(LLD REQUIRED CONFIG)
 

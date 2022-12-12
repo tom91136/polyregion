@@ -183,9 +183,23 @@ struct EXPORT DeviceQueue {
 
 public:
   virtual EXPORT ~DeviceQueue() = default;
-  virtual EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size,
+  virtual EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t bytes,
                                                const MaybeCallback &cb) = 0;
+
+  template <typename T>
+  EXPORT void enqueueHostToDeviceAsyncTyped(const T *src, uintptr_t dst, size_t count, const MaybeCallback &cb = {}) {
+    static_assert(sizeof(T) != 0);
+    enqueueHostToDeviceAsync(src, dst, count * sizeof(T), cb);
+  };
+
   virtual EXPORT void enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) = 0;
+
+  template <typename T>
+  EXPORT void enqueueDeviceToHostAsyncTyped(uintptr_t src, T *dst, size_t count, const MaybeCallback &cb = {}) {
+    static_assert(sizeof(T) != 0);
+    enqueueDeviceToHostAsync(src, dst, count * sizeof(T), cb);
+  };
+
   virtual EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
                                          std::vector<Type> types, std::vector<std::byte> argData, const Policy &policy,
                                          const MaybeCallback &cb) = 0;
@@ -202,6 +216,12 @@ public:
   virtual EXPORT void loadModule(const std::string &name, const std::string &image) = 0;
   virtual EXPORT bool moduleLoaded(const std::string &name) = 0;
   [[nodiscard]] virtual EXPORT uintptr_t malloc(size_t size, Access access) = 0;
+
+  template <typename T> [[nodiscard]] EXPORT uintptr_t mallocTyped(size_t count, Access access) {
+    static_assert(sizeof(T) != 0);
+    return malloc(count * sizeof(T), access);
+  };
+
   virtual EXPORT void free(uintptr_t ptr) = 0;
   [[nodiscard]] virtual EXPORT std::unique_ptr<DeviceQueue> createQueue() = 0;
 };

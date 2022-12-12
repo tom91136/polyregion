@@ -1,6 +1,6 @@
 include(ProjectConfig.cmake)
 
-set(LLVM_BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/llvm)
+set(LLVM_BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/llvm-${CMAKE_BUILD_TYPE})
 
 
 set(DOWNLOAD_LLVM OFF)

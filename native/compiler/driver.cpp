@@ -29,8 +29,8 @@ void run() {
   auto fn1 = function("lambda", {"xs"_(Array(Int)), "x"_(Int)}, Unit)({
       let("gid") = "x"_(Int), //  invoke(Fn0::GpuGlobalIdxX(), Int),
       let("xs_gid") = "xs"_(Array(Int))["gid"_(Int)],
-      let("resultX2_tan") = invoke(Fn1::Tanh(), "xs_gid"_(Int), Int),
-      "xs"_(Array(Int))["gid"_(Int)] = "resultX2_tan"_(Int),
+//      let("resultX2_tan") = invoke(Fn1::Tanh(), "xs_gid"_(Int), Int),
+      "xs"_(Array(Int))["gid"_(Int)] = "xs_gid"_(Int),
       ret(),
   });
 
@@ -67,17 +67,17 @@ void run() {
   //        std::cerr << "[OCL] " << e.what() << std::endl;
   //      }
   //
-  //    try {
-  //      rts.push_back(std::make_unique<HsaPlatform>());
-  //    } catch (const std::exception &e) {
-  //      std::cerr << "[HSA] " << e.what() << std::endl;
-  //    }
+      try {
+        rts.push_back(std::make_unique<HsaPlatform>());
+      } catch (const std::exception &e) {
+        std::cerr << "[HSA] " << e.what() << std::endl;
+      }
   //
-  //  try {
-  //    rts.push_back(std::make_unique<HipPlatform>());
-  //  } catch (const std::exception &e) {
-  //    std::cerr << "[HIP] " << e.what() << std::endl;
-  //  }
+    try {
+      rts.push_back(std::make_unique<HipPlatform>());
+    } catch (const std::exception &e) {
+      std::cerr << "[HIP] " << e.what() << std::endl;
+    }
 
   static std::vector<int> xs;
 
@@ -102,7 +102,9 @@ void run() {
       } else if (rt->name() == "OpenCL") {
         options = {compiler::Target::Source_C_OpenCL1_1, {}};
       } else if (rt->name() == "HIP") {
-        options = {compiler::Target::Object_LLVM_AMDGCN, "gfx803"};
+        options = {compiler::Target::Object_LLVM_AMDGCN, "gfx1012"};
+      } else if (rt->name() == "HSA") {
+        options = {compiler::Target::Object_LLVM_AMDGCN, "gfx1012"};
       } else if (rt->name() == "CPU (RelocatableObject)") {
         options = {compiler::Target::Object_LLVM_HOST, {"native"}};
       } else {
@@ -133,7 +135,7 @@ void run() {
       std::string bin0(c0.binary->data(), c0.binary->size());
       std::string bin1(c1.binary->data(), c1.binary->size());
       try {
-        for (int i = 0; i < 40000; i++) {
+        for (int i = 0; i < 4; i++) {
           auto q1 = d->createQueue();
 
           if (!d->moduleLoaded("0")) {
@@ -166,7 +168,7 @@ void run() {
           d->free(ptr);
         }
 
-        for (int i = 0; i < 40000; i++) {
+        for (int i = 0; i < 4; i++) {
           auto q1 = d->createQueue();
 
           if (!d->moduleLoaded("1")) {

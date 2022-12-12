@@ -21,7 +21,7 @@ static void checked(hsa_status_t result, const char *msg, const char *file, int 
 
 HsaPlatform::HsaPlatform() {
   TRACE();
-  hsaew_open("/opt/rocm/hsa/lib/libhsa-runtime64.so");
+  hsaew_open("libhsa-runtime64.so.1");
   CHECKED("HSA_initialisation", hsa_init());
 
   hsa_amd_register_system_event_handler(
