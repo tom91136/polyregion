@@ -58,7 +58,7 @@ class LazyDroppable {
   static_assert(std::is_invocable_r<void, Drop, T &>());
 
 public:
-  explicit LazyDroppable(Lift lift, Drop drop) : lift(lift), drop(drop) {}
+  constexpr explicit LazyDroppable(Lift lift, Drop drop) : lift(lift), drop(drop) {}
   LazyDroppable &operator=(const T &t) {
     value = t;
     return *this;
@@ -153,12 +153,12 @@ EXPORT void init();
 struct EXPORT Dim3 {
   EXPORT size_t x, y, z;
   [[nodiscard]] std::array<size_t, 3> sizes() const { return {x, y, z}; }
-  Dim3(size_t x, size_t y, size_t z) : x(x), y(y), z(z) {
+  constexpr Dim3(size_t x, size_t y, size_t z) : x(x), y(y), z(z) {
     if (x < 1) throw std::logic_error("x < 1");
     if (y < 1) throw std::logic_error("y < 1");
     if (z < 1) throw std::logic_error("z < 1");
   }
-  Dim3() : Dim3(1, 1, 1) {}
+  constexpr Dim3() : Dim3(1, 1, 1) {}
 };
 
 struct EXPORT Policy {
@@ -168,7 +168,7 @@ struct EXPORT Policy {
 
 enum class Access : uint8_t { RW = 1, RO, WO };
 
-std::optional<Access> fromUnderlying(uint8_t v);
+constexpr std::optional<Access> EXPORT fromUnderlying(uint8_t v);
 
 enum class EXPORT Backend {
   CUDA,
@@ -178,6 +178,17 @@ enum class EXPORT Backend {
   SHARED_OBJ,
   RELOCATABLE_OBJ,
 };
+
+constexpr std::string EXPORT nameOfBackend(const Backend &b) {
+  switch (b) {
+    case Backend::CUDA: return "CUDA";
+    case Backend::HIP: return "HIP";
+    case Backend::HSA: return "HSA";
+    case Backend::OpenCL: return "OpenCL";
+    case Backend::SHARED_OBJ: return "SHARED_OBJ";
+    case Backend::RELOCATABLE_OBJ: return "RELOCATABLE_OBJ";
+  }
+}
 
 struct EXPORT DeviceQueue {
 

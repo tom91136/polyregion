@@ -7,7 +7,9 @@
 #include "cuda_platform.h"
 #include "hip_platform.h"
 #include "hsa_platform.h"
+#include "kernels/add.hpp"
 #include "object_platform.h"
+#include "utils.hpp"
 #include <condition_variable>
 
 // x86_64-pc-windows-msvc
@@ -189,60 +191,86 @@ __kernel void add(__global float* xs, __global float* ys, __global float* zs) {
      {Backend::HIP, data2}};
 
 // clang -target nvptx64-nvidia-nvcl -xcl square.cl -S -o test.ptx
-
 // clang -target amdgcn-amd-amdhsa -mcpu=gfx1012 -nogpulib -xcl add.cl  -o add.so
+
+std::optional<std::string>
+findTestImage(const std::unordered_map<std::string, std::unordered_map<std::string, std::vector<uint8_t>>> &images,
+              const Backend &backend, const std::vector<std::string> &features) {
+  if (auto it = images.find(nameOfBackend(backend)); it != images.end()) {
+    auto entries = it->second;
+
+    if (features.empty() && entries.size() == 1) { // for things like OpenCL which is arch independent
+      auto head = entries.begin()->second;
+      return std::string(head.begin(), head.end());
+    } else {
+      for (auto &f : features) {
+        if (auto archAndCode = entries.find(f); archAndCode != entries.end()) {
+          return std::string(archAndCode->second.begin(), archAndCode->second.end());
+        }
+      }
+    }
+  }
+  return {};
+}
 
 TEST_CASE("gpu vector add") {
 
-  //  auto backend = GENERATE(Backend::CUDA, Backend::OpenCL, Backend::HIP, Backend::HSA);
-  auto backend = GENERATE(Backend::HIP);
-
+  auto backend = GENERATE(Backend::CUDA, Backend::OpenCL, Backend::HIP, Backend::HSA);
   auto size = GENERATE(as<size_t>{}, 1, 2, 3, 10);
 
-  DYNAMIC_SECTION("" << size) {
-    auto platform = Platform::of(backend);
+  DYNAMIC_SECTION("" << nameOfBackend(backend)) {
+    DYNAMIC_SECTION("" << size) {
+      auto platform = Platform::of(backend);
 
-    std::vector<float> xs(size);
-    std::vector<float> ys(size);
-    std::vector<float> zs(size, -1);
+      std::vector<float> xs(size);
+      std::vector<float> ys(size);
+      std::vector<float> zs(size, -1);
 
-    std::iota(xs.begin(), xs.end(), 1);
-    std::transform(xs.begin(), xs.end(), ys.begin(), [](auto x) { return x * 2; });
+      std::iota(xs.begin(), xs.end(), 1);
+      std::transform(xs.begin(), xs.end(), ys.begin(), [](auto x) { return x * 2; });
 
-    auto devices = platform->enumerate();
-    for (auto &x : devices)
-      std::cout << x->name() << std::endl;
+      for (auto &d : platform->enumerate()) {
+        DYNAMIC_SECTION("Device " << d->name()) {
+          if (auto image = findTestImage(generated::add, backend, d->features()); image) {
 
-    auto &device0 = devices[0];
-    device0->loadModule("module", AddKernel.find(backend)->second);
-    auto xs_d = device0->mallocTyped<float>(size, Access::RO);
-    auto ys_d = device0->mallocTyped<float>(size, Access::RO);
-    auto zs_d = device0->mallocTyped<float>(size, Access::WO);
+            d->loadModule("module", *image);
+            auto xs_d = d->mallocTyped<float>(size, Access::RO);
+            auto ys_d = d->mallocTyped<float>(size, Access::RO);
+            auto zs_d = d->mallocTyped<float>(size, Access::WO);
 
-    auto queue0 = device0->createQueue();
-    queue0->enqueueHostToDeviceAsyncTyped(xs.data(), xs_d, size);
-    queue0->enqueueHostToDeviceAsyncTyped(ys.data(), ys_d, size);
-    queue0->enqueueHostToDeviceAsyncTyped(zs.data(), zs_d, size);
+            auto q = d->createQueue();
+            q->enqueueHostToDeviceAsyncTyped(xs.data(), xs_d, size);
+            q->enqueueHostToDeviceAsyncTyped(ys.data(), ys_d, size);
+            q->enqueueHostToDeviceAsyncTyped(zs.data(), zs_d, size);
 
-    ArgBuffer buffer({
-        {Type::Ptr, &xs_d},
-        {Type::Ptr, &ys_d},
-        {Type::Ptr, &zs_d},
-        {Type::Void, nullptr},
-    });
-    queue0->enqueueInvokeAsync("module", "add", buffer.types, buffer.data, {{size, 1, 1}}, {});
+            ArgBuffer buffer({
+                {Type::Ptr, &xs_d},
+                {Type::Ptr, &ys_d},
+                {Type::Ptr, &zs_d},
+                {Type::Void, nullptr},
+            });
+            q->enqueueInvokeAsync("module", "add", buffer.types, buffer.data, {{size, 1, 1}}, {});
 
-    std::mutex lock;
-    std::condition_variable cv;
-    queue0->enqueueDeviceToHostAsyncTyped(zs_d, zs.data(), size, [&]() {
-      std::unique_lock<std::mutex> lck(lock);
-      cv.notify_all();
-      std::cout << "Done" << std::endl;
-    });
-    std::unique_lock<std::mutex> lck(lock);
-    cv.wait(lck);
-    std::vector<float> expected(size, -1);
-    std::transform(xs.begin(), xs.end(), ys.begin(), expected.begin(), std::plus<>());
-    CHECK(expected == zs);
+            std::mutex lock;
+            std::condition_variable cv;
+            q->enqueueDeviceToHostAsyncTyped(zs_d, zs.data(), size, [&]() {
+              std::unique_lock<std::mutex> lck(lock);
+              cv.notify_all();
+              std::cout << "Done" << std::endl;
+            });
+            std::unique_lock<std::mutex> lck(lock);
+            cv.wait(lck);
+            std::vector<float> expected(size, -1);
+            std::transform(xs.begin(), xs.end(), ys.begin(), expected.begin(), std::plus<>());
+            CHECK(expected == zs);
+
+          } else {
+            WARN("No kernel test image found for device `"
+                 << d->name() << "`(backend=" << nameOfBackend(backend)
+                 << ", features=" << polyregion::mk_string<std::string>(d->features(), std::identity(), ",") << ")");
+          }
+        }
+      }
+    }
   }
 }

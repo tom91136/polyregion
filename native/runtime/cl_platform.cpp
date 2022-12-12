@@ -122,10 +122,10 @@ ClDevice::ClDevice(cl_device_id device)
               auto compilerMessage = std::string(clewErrorString(result));
               const static auto P = std::string(ERROR_PREFIX);
               throw std::logic_error(std::string("Program failed to compile with ") + compilerMessage +
-                                     std::string(")\n") +                              //
-                                     std::string("Diagnostics:\n") + buildLog + "\n" + //
-                                     std::string("Program source:\n") + image + "\n"   //
-              );                                                                       //
+                                     std::string(")\n") +                                      //
+                                     std::string("Diagnostics:\n") + buildLog + "\n" +         //
+                                     std::string("Program source:=====\n") + std::string(image) + "\n=====" //
+              );                                                                               //
             }
             TRACE();
             return program;

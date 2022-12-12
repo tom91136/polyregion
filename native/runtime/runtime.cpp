@@ -26,7 +26,7 @@ void runtime::ArgBuffer::put(std::initializer_list<runtime::TypedPointer> args) 
 }
 
 void runtime::init() { libm::exportAll(); }
-std::optional<runtime::Access> runtime::fromUnderlying(uint8_t v) {
+constexpr std::optional<runtime::Access> runtime::fromUnderlying(uint8_t v) {
   auto x = static_cast<Access>(v);
   switch (x) {
     case Access::RW:

@@ -1,0 +1,12 @@
+#pragma once
+
+#include <cstddef>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+namespace generated {
+const static std::unordered_map<std::string, std::unordered_map<std::string, std::vector<uint8_t>>> @PROGRAM_NAME@ = {
+@PROGRAM_ENTRIES@
+  };
+}
