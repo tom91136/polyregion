@@ -22,7 +22,7 @@ __kernel void stream_dot(__global float *a, __global float *b, __global float *c
                          __local float *wg_sum, int array_size) {
   int i = get_global_id(0);
   const int local_i = get_local_id(0);
-  wg_sum[local_i] = 0.0;
+  wg_sum[local_i] = 0;
   for (; i < array_size; i += get_global_size(0))
     wg_sum[local_i] += a[i] * b[i];
   for (int offset = get_local_size(0) / 2; offset > 0; offset /= 2) {
