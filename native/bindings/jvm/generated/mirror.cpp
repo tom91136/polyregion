@@ -71,12 +71,15 @@ Dim3::Instance Dim3::operator()(JNIEnv *env, jlong x, jlong y, jlong z) const {
 Policy::Instance::Instance(const Policy &meta, jobject instance) : meta(meta), instance(instance) {}
 Dim3::Instance Policy::Instance::global(JNIEnv *env, const Dim3& clazz_) const { return {clazz_, env->GetObjectField(instance, meta.globalField)}; }
 Dim3::Instance Policy::Instance::local(JNIEnv *env, const Dim3& clazz_) const { return {clazz_, env->GetObjectField(instance, meta.localField)}; }
+jint Policy::Instance::localMemoryBytes(JNIEnv *env) const { return env->GetIntField(instance, meta.localMemoryBytesField); }
 Policy::Policy(JNIEnv *env)
     : clazz(reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/runtime/Policy")))),
       globalField(env->GetFieldID(clazz, "global", "Lpolyregion/jvm/runtime/Dim3;")),
       localField(env->GetFieldID(clazz, "local", "Lpolyregion/jvm/runtime/Dim3;")),
+      localMemoryBytesField(env->GetFieldID(clazz, "localMemoryBytes", "I")),
       ctor0Method(env->GetMethodID(clazz, "<init>", "(Lpolyregion/jvm/runtime/Dim3;)V")),
-      ctor1Method(env->GetMethodID(clazz, "<init>", "(Lpolyregion/jvm/runtime/Dim3;Lpolyregion/jvm/runtime/Dim3;)V")) { };
+      ctor1Method(env->GetMethodID(clazz, "<init>", "(Lpolyregion/jvm/runtime/Dim3;Lpolyregion/jvm/runtime/Dim3;)V")),
+      ctor2Method(env->GetMethodID(clazz, "<init>", "(Lpolyregion/jvm/runtime/Dim3;Lpolyregion/jvm/runtime/Dim3;I)V")) { };
 thread_local std::unique_ptr<Policy> Policy::cached = {};
 Policy& Policy::of(JNIEnv *env) {
   if(!cached) cached = std::unique_ptr<Policy>(new Policy(env));
@@ -94,6 +97,9 @@ Policy::Instance Policy::operator()(JNIEnv *env, jobject global) const {
 }
 Policy::Instance Policy::operator()(JNIEnv *env, jobject global, jobject local) const {
   return {*this, env->NewObject(clazz, ctor1Method, global, local)};
+}
+Policy::Instance Policy::operator()(JNIEnv *env, jobject global, jobject local, jint localMemoryBytes) const {
+  return {*this, env->NewObject(clazz, ctor2Method, global, local, localMemoryBytes)};
 }
 
 Queue::Instance::Instance(const Queue &meta, jobject instance) : meta(meta), instance(instance) {}

@@ -103,7 +103,7 @@ std::vector<std::string> CudaDevice::features() {
   int ccMajor = 0, ccMinor = 0;
   CHECKED(cuDeviceGetAttribute(&ccMajor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device));
   CHECKED(cuDeviceGetAttribute(&ccMinor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device));
-  return { "sm_" + std::to_string((ccMajor * 10) + ccMinor) };
+  return {"sm_" + std::to_string((ccMajor * 10) + ccMinor)};
 }
 void CudaDevice::loadModule(const std::string &name, const std::string &image) {
   TRACE();
@@ -144,12 +144,16 @@ CudaDeviceQueue::~CudaDeviceQueue() {
   CHECKED(cuStreamDestroy(stream));
 }
 void CudaDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
-  if (!cb) return;
+  auto f = [cb, token = latch.acquire()]() {
+    if (cb) (*cb)();
+  };
 
-  if (cuLaunchHostFunc) { // >= CUDA 10
+  if (cuLaunchHostFunc && false) { // >= CUDA 10
+    // FIXME cuLaunchHostFunc does not retain errors from previous launches, use the deprecated cuStreamAddCallback
+    //  for now. See https://stackoverflow.com/a/58173486
     CHECKED(cuLaunchHostFunc(
         stream, [](void *data) { return detail::CountedCallbackHandler::consume(data); },
-        detail::CountedCallbackHandler::createHandle(*cb)));
+        detail::CountedCallbackHandler::createHandle(f)));
   } else {
     CHECKED(cuStreamAddCallback(
         stream,
@@ -157,7 +161,7 @@ void CudaDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
           CHECKED(e);
           detail::CountedCallbackHandler::consume(data);
         },
-        detail::CountedCallbackHandler::createHandle(*cb), 0));
+        detail::CountedCallbackHandler::createHandle(f), 0));
   }
 }
 
@@ -172,15 +176,14 @@ void CudaDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t 
   enqueueCallback(cb);
 }
 void CudaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                         std::vector<Type> types, std::vector<std::byte> argData,
-                                         const Policy &policy, const MaybeCallback &cb) {
+                                         std::vector<Type> types, std::vector<std::byte> argData, const Policy &policy,
+                                         const MaybeCallback &cb) {
   TRACE();
   if (types.back() != Type::Void)
     throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported");
   auto fn = store.resolveFunction(moduleName, symbol);
   auto grid = policy.global;
-  auto block = policy.local.value_or(Dim3{});
-  int sharedMem = 0;
+  auto [block, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});
   auto args = detail::argDataAsPointers(types, argData);
   CHECKED(cuLaunchKernel(fn,                        //
                          grid.x, grid.y, grid.z,    //

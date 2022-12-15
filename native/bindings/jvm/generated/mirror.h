@@ -74,12 +74,15 @@ struct Policy {
     template <typename T, typename F> std::optional<T> map(F && f) { return instance ? std::make_optional(f(*this)) : std::nullopt; };
     Dim3::Instance global(JNIEnv *env, const Dim3& clazz) const;
     Dim3::Instance local(JNIEnv *env, const Dim3& clazz) const;
+    jint localMemoryBytes(JNIEnv *env) const;
   };
   jclass clazz;
   jfieldID globalField;
   jfieldID localField;
+  jfieldID localMemoryBytesField;
   jmethodID ctor0Method;
   jmethodID ctor1Method;
+  jmethodID ctor2Method;
 private:
   explicit Policy(JNIEnv *env);
   static thread_local std::unique_ptr<Policy> cached;
@@ -89,6 +92,7 @@ public:
   Instance wrap (JNIEnv *env, jobject instance);
   Instance operator()(JNIEnv *env, jobject global) const;
   Instance operator()(JNIEnv *env, jobject global, jobject local) const;
+  Instance operator()(JNIEnv *env, jobject global, jobject local, jint localMemoryBytes) const;
 };
 struct Queue {
   struct Instance {

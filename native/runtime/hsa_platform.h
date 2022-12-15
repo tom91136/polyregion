@@ -2,6 +2,8 @@
 
 #include "hsaew.h"
 #include "runtime.h"
+#include <condition_variable>
+#include <mutex>
 
 namespace polyregion::runtime::hsa {
 
@@ -15,8 +17,12 @@ public:
 };
 
 namespace {
-using HsaModuleStore = detail::ModuleStore<hsa_executable_t, hsa_executable_symbol_t>;
-}
+using SymbolArgOffsetTable = std::unordered_map<std::string, std::vector<size_t>>;
+using HsaModuleStore = detail::ModuleStore<                              //
+    std::pair<hsa_executable_t, SymbolArgOffsetTable>,                   //
+    std::pair<hsa_executable_symbol_t, SymbolArgOffsetTable::mapped_type> //
+    >;
+} // namespace
 
 class EXPORT HsaDeviceQueue;
 
@@ -51,13 +57,14 @@ public:
 
 class EXPORT HsaDeviceQueue : public DeviceQueue {
 
+  detail::CountingLatch latch;
+
   HsaDevice &device;
   hsa_queue_t *queue;
-  hsa_signal_t kernelSignal{};
-  hsa_signal_t hostToDeviceSignal{};
-  hsa_signal_t deviceToHostSignal{};
 
-  void enqueueCallback(hsa_signal_t &signal, const Callback &cb);
+  static hsa_signal_t createSignal(const char *message);
+  static void destroySignal(const char *message, hsa_signal_t signal);
+  static void enqueueCallback(hsa_signal_t signal, const Callback &cb);
 
 public:
   EXPORT explicit HsaDeviceQueue(decltype(device) device, decltype(queue) queue);

@@ -7,15 +7,22 @@ import java.util.Optional;
 public final class Policy {
   public final Dim3 global;
   final Dim3 local;
+  public final int localMemoryBytes;
+
+  public Policy(Dim3 global, Dim3 local, int localMemoryBytes) {
+    this.global = Objects.requireNonNull(global);
+    this.local = Objects.requireNonNull(local);
+    this.localMemoryBytes = localMemoryBytes;
+  }
+
+  public Policy(Dim3 global, Dim3 local ) {
+    this(global, local, 0);
+  }
 
   public Policy(Dim3 global) {
     this.global = Objects.requireNonNull(global);
     this.local = null;
-  }
-
-  public Policy(Dim3 global, Dim3 local) {
-    this.global = Objects.requireNonNull(global);
-    this.local = Objects.requireNonNull(local);
+    this.localMemoryBytes = 0;
   }
 
   public Optional<Dim3> local() {
@@ -37,6 +44,13 @@ public final class Policy {
 
   @Override
   public String toString() {
-    return "Policy{" + "global=" + global + ", local=" + (local == null ? "(none)" : local) + '}';
+    return "Policy{"
+        + "global="
+        + global
+        + ", local="
+        + (local == null ? "(none)" : local)
+        + ", localMemoryBytes="
+        + localMemoryBytes
+        + '}';
   }
 }

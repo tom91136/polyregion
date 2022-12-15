@@ -13,7 +13,7 @@ add_library(runtime-lib STATIC
         )
 add_dependencies(runtime-lib intrinsics_gen) # for LLVM tblgen
 
-add_executable(runtime-tests test/test.cpp)
+add_executable(runtime-tests test/test_utils.cpp test/fma.cpp test/args.cpp test/stream.cpp )
 add_executable(runtime-drv driver.cpp)
 #add_library(runtime-dylib SHARED polyregion_runtime.cpp)
 
@@ -21,6 +21,7 @@ target_compile_definitions(runtime-lib PRIVATE ${libffi_DEFINITIONS})
 target_include_directories(runtime-lib PUBLIC ../include
         ${libffi_INCLUDE_DIRS}
         ${LLVM_INCLUDE_DIRS}
+        ${json_SOURCE_DIR}
         thirdparty/
         thirdparty/clew/include
         thirdparty/hipew/include

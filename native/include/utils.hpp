@@ -51,18 +51,12 @@ std::vector<U> map_vec(const std::vector<T> &xs, const std::function<U(const T &
   return ys;
 }
 
-template <typename T, typename F> //
-std::optional<std::invoke_result_t<F(T)>> map_opt(const std::optional<T> &maybe, F &&f) {
-  if (maybe) return std::forward<F>(f)(*maybe);
-  else
-    return std::nullopt;
-}
-
-template <typename T, typename F> //
-std::invoke_result_t<F(T)> bind_opt(const std::optional<T> &maybe, F &&f) {
-  if (maybe) return std::forward<F>(f)(*maybe);
-  else
-    return std::nullopt;
+// See https://stackoverflow.com/a/64500326
+template <typename O, typename F> auto map_opt(O &&o, F &&f) -> std::optional<decltype(f(*std::forward<O>(o)))> {
+  if (!o.has_value()) {
+    return {std::nullopt};
+  }
+  return {f(*std::forward<O>(o))};
 }
 
 static std::vector<std::string> split(const std::string &str, char delim) {

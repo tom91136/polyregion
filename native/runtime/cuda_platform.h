@@ -42,6 +42,8 @@ public:
 
 class EXPORT CudaDeviceQueue : public DeviceQueue {
 
+  detail::CountingLatch latch;
+
   CudaModuleStore &store;
   CUstream stream{};
 

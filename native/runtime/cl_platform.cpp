@@ -81,18 +81,17 @@ ClDevice::ClDevice(cl_device_id device)
     : device(
           [&, device]() {
             TRACE();
-            // XXX clReleaseDevice there appears to crash various CL implementation regardless of version, skip retain
-            // as well
+            // XXX clReleaseDevice appears to crash various CL implementation regardless of version, skip retain as well
             //            if (__clewRetainDevice && __clewReleaseDevice) { // clRetainDevice requires OpenCL >= 1.2
             //              CHECKED(__clewRetainDevice(device));
             //            }
             return device;
           },
-          [&](auto &&) {
+          [&](auto &&device) {
             TRACE();
             // XXX see above
             //            if (__clewRetainDevice && __clewReleaseDevice) // clReleaseDevice requires OpenCL >= 1.2
-            //              CHECKED(__clewReleaseDevice(d));
+            //              CHECKED(__clewReleaseDevice(device));
           }),
       context(
           [this]() {
@@ -122,10 +121,10 @@ ClDevice::ClDevice(cl_device_id device)
               auto compilerMessage = std::string(clewErrorString(result));
               const static auto P = std::string(ERROR_PREFIX);
               throw std::logic_error(std::string("Program failed to compile with ") + compilerMessage +
-                                     std::string(")\n") +                                      //
-                                     std::string("Diagnostics:\n") + buildLog + "\n" +         //
+                                     std::string(")\n") +                                                   //
+                                     std::string("Diagnostics:\n") + buildLog + "\n" +                      //
                                      std::string("Program source:=====\n") + std::string(image) + "\n=====" //
-              );                                                                               //
+              );                                                                                            //
             }
             TRACE();
             return program;
@@ -227,11 +226,14 @@ void ClDeviceQueue::enqueueCallback(const MaybeCallback &cb, cl_event event) {
   if (!cb) return;
   CHECKED(clSetEventCallback(
       event, CL_COMPLETE,
-      [](cl_event, cl_int status, void *data) {
+      [](cl_event e, cl_int status, void *data) {
+        CHECKED(clReleaseEvent(e));
         CHECKED(status);
         detail::CountedCallbackHandler::consume(data);
       },
-      detail::CountedCallbackHandler::createHandle(*cb)));
+      detail::CountedCallbackHandler::createHandle([cb, token = latch.acquire()]() {
+        if (cb) (*cb)();
+      })));
   CHECKED(clFlush(queue));
 }
 void ClDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
@@ -265,20 +267,28 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
   };
 
   auto args = detail::argDataAsPointers(types, argData);
+  auto global = policy.global;
+  auto [local, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});
 
   // last arg is the return, void assertion should have been done before this
   for (cl_uint i = 0; i < types.size() - 1; ++i) {
     auto rawPtr = args[i];
     auto tpe = types[i];
-    if (tpe == Type::Ptr) {
-      cl_mem mem = queryMemObject(*static_cast<uintptr_t *>(rawPtr));
-      CHECKED(clSetKernelArg(kernel, i, toSize(tpe), &mem));
-    } else
-      CHECKED(clSetKernelArg(kernel, i, toSize(tpe), rawPtr));
+    switch (tpe) {
+      case Type::Ptr: {
+        cl_mem mem = queryMemObject(*static_cast<uintptr_t *>(rawPtr));
+        CHECKED(clSetKernelArg(kernel, i, toSize(tpe), &mem));
+      } break;
+      case Type::Scratch: {
+        CHECKED(clSetKernelArg(kernel, i, sharedMem, nullptr));
+        break;
+      }
+      default: {
+        CHECKED(clSetKernelArg(kernel, i, toSize(tpe), rawPtr));
+        break;
+      }
+    }
   }
-
-  auto global = policy.global;
-  auto local = policy.local.value_or(Dim3{});
 
   TRACE();
   cl_event event = {};

@@ -2,6 +2,7 @@
 
 #include <array>
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -22,8 +23,8 @@
     #define __PRETTY_FUNCTION__ __FUNCSIG__
   #endif
 
-  #define TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this, __PRETTY_FUNCTION__)
-//  #define TRACE()
+//  #define TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this, __PRETTY_FUNCTION__)
+  #define TRACE()
 
 #endif
 
@@ -81,6 +82,24 @@ public:
 
 std::string allocateAndTruncate(const std::function<void(char *, size_t)> &f, size_t length = 512);
 std::vector<void *> argDataAsPointers(const std::vector<Type> &types, std::vector<std::byte> &argData);
+
+class CountingLatch {
+  std::condition_variable cv;
+  std::mutex mutex;
+  std::atomic_long pending{};
+
+  class Token {
+    CountingLatch &latch;
+
+  public:
+    explicit Token(CountingLatch &latch);
+    virtual ~Token();
+  };
+
+public:
+  virtual ~CountingLatch();
+  std::shared_ptr<Token> acquire();
+};
 
 class CountedCallbackHandler {
   using Storage = std::unordered_map<uint64_t, Callback>;
@@ -163,12 +182,20 @@ struct EXPORT Dim3 {
 
 struct EXPORT Policy {
   EXPORT Dim3 global{};
-  EXPORT std::optional<Dim3> local{};
+  EXPORT std::optional<std::pair<Dim3, size_t>> local{};
 };
 
 enum class Access : uint8_t { RW = 1, RO, WO };
 
-constexpr std::optional<Access> EXPORT fromUnderlying(uint8_t v);
+constexpr std::optional<Access> EXPORT fromUnderlying(uint8_t v) {
+  auto x = static_cast<Access>(v);
+  switch (x) {
+    case Access::RW:
+    case Access::RO:
+    case Access::WO: return x;
+    default: return {};
+  }
+}
 
 enum class EXPORT Backend {
   CUDA,
@@ -214,6 +241,11 @@ public:
   virtual EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
                                          std::vector<Type> types, std::vector<std::byte> argData, const Policy &policy,
                                          const MaybeCallback &cb) = 0;
+
+  virtual EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
+                                         const ArgBuffer &buffer, const Policy &policy, const MaybeCallback &cb) {
+    enqueueInvokeAsync(moduleName, symbol, buffer.types, buffer.data, policy, cb);
+  };
 };
 
 struct EXPORT Device {
@@ -234,6 +266,9 @@ public:
   };
 
   virtual EXPORT void free(uintptr_t ptr) = 0;
+  template <typename... T> EXPORT void freeAll(T... ptrs) {
+    ([&]() { free(ptrs); }(), ...);
+  };
   [[nodiscard]] virtual EXPORT std::unique_ptr<DeviceQueue> createQueue() = 0;
 };
 

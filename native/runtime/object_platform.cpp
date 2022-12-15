@@ -161,14 +161,10 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
                                                 const Policy &policy, const MaybeCallback &cb) {
   TRACE();
 
-//  // Short,
-//  //
-//
-//  ArgBuffer buffer({
-//      {Type::Ptr, &ptr},
-//      {Type::Int32, &x},
-//      {Type::Void, nullptr},
-//  });
+  if (auto scratchCount = std::count(types.begin(), types.end(), Type::Scratch); scratchCount != 0) {
+    throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Scratch types are not supported on the CPU, found" +
+                           std::to_string(scratchCount) + " arg(s)");
+  }
 
   RelocatableDevice::ReadLock r(lock);
   const auto moduleIt = objects.find(moduleName);
@@ -176,46 +172,46 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
     throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "No module named " + moduleName + " was loaded");
 
   auto &obj = moduleIt->second;
-//  std::thread([symbol, types, argData, cb, &obj = moduleIt->second]() {
-    MemoryManager mm;
-    llvm::RuntimeDyld ld(mm, mm);
+  //  std::thread([symbol, types, argData, cb, &obj = moduleIt->second]() {
+  MemoryManager mm;
+  llvm::RuntimeDyld ld(mm, mm);
 
-    ld.loadObject(*obj);
-    auto fnName = (obj->isMachO() || obj->isMachOUniversalBinary()) ? std::string("_") + symbol : symbol;
+  ld.loadObject(*obj);
+  auto fnName = (obj->isMachO() || obj->isMachOUniversalBinary()) ? std::string("_") + symbol : symbol;
 
-    if (auto sym = ld.getSymbol(fnName); !sym) {
-      auto table = ld.getSymbolTable();
-      std::vector<std::string> symbols;
-      symbols.reserve(table.size());
-      for (auto &[k, v] : table)
-        symbols.emplace_back("[`" + k.str() + "`@" + polyregion::hex(v.getAddress()) + "]");
-      throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Symbol `" + std::string(fnName) +
-                             "` not found in the given object, available symbols (" + std::to_string(table.size()) +
-                             ") = " +
-                             polyregion::mk_string<std::string>(
-                                 symbols, [](auto &x) { return x; }, ","));
-    } else {
+  if (auto sym = ld.getSymbol(fnName); !sym) {
+    auto table = ld.getSymbolTable();
+    std::vector<std::string> symbols;
+    symbols.reserve(table.size());
+    for (auto &[k, v] : table)
+      symbols.emplace_back("[`" + k.str() + "`@" + polyregion::hex(v.getAddress()) + "]");
+    throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Symbol `" + std::string(fnName) +
+                           "` not found in the given object, available symbols (" + std::to_string(table.size()) +
+                           ") = " +
+                           polyregion::mk_string<std::string>(
+                               symbols, [](auto &x) { return x; }, ","));
+  } else {
 
-      if (ld.finalizeWithMemoryManagerLocking(); ld.hasError()) {
-        throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Symbol `" + std::string(symbol) +
-                               "` failed to finalise for execution: " + ld.getErrorString().str());
-      }
-
-      auto argData_ = argData;
-      auto argPtrs = detail::argDataAsPointers(types, argData_);
-      TRACE();
-      invoke(sym.getAddress(), types, argPtrs);
-      if (cb) (*cb)();
-      TRACE();
+    if (ld.finalizeWithMemoryManagerLocking(); ld.hasError()) {
+      throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Symbol `" + std::string(symbol) +
+                             "` failed to finalise for execution: " + ld.getErrorString().str());
     }
-//  }).detach();
+
+    auto argData_ = argData;
+    auto argPtrs = detail::argDataAsPointers(types, argData_);
+    TRACE();
+    invoke(sym.getAddress(), types, argPtrs);
+    if (cb) (*cb)();
+    TRACE();
+  }
+  //  }).detach();
 }
 
-static constexpr const char *SHOBJ_ERROR_PREFIX = "[RelocatableObject error] ";
+static constexpr const char *SHOBJ_ERROR_PREFIX = "[SharedObject error] ";
 SharedPlatform::SharedPlatform() { TRACE(); }
 std::string SharedPlatform::name() {
   TRACE();
-  return "CPU (SharedObjectR)";
+  return "CPU (SharedObject)";
 }
 std::vector<Property> SharedPlatform::properties() {
   TRACE();
@@ -224,7 +220,7 @@ std::vector<Property> SharedPlatform::properties() {
 std::vector<std::unique_ptr<Device>> SharedPlatform::enumerate() {
   TRACE();
   std::vector<std::unique_ptr<Device>> xs(1);
-  xs[0] = std::make_unique<RelocatableDevice>();
+  xs[0] = std::make_unique<SharedDevice>();
   return xs;
 }
 
@@ -246,7 +242,40 @@ void SharedDevice::loadModule(const std::string &name, const std::string &image)
   if (auto it = modules.find(name); it != modules.end()) {
     throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) + "Module named " + name + " was already loaded");
   } else {
-    if (auto dylib = polyregion_dl_open(image.c_str()); !dylib) {
+
+    // TODO implement Linux: https://x-c3ll.github.io/posts/fileless-memfd_create/
+    // TODO implement Windows: https://github.com/fancycode/MemoryModule
+
+    // dlopen must open from a file :(
+    auto tmpPath = std::tmpnam(nullptr);
+    if (!tmpPath) {
+      throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) +
+                             "Unable to buffer image to file, tmpfile creation failed: cannot synthesise temp path");
+    }
+    std::FILE *objectFile = std::fopen(tmpPath, "wb");
+    if (!objectFile) {
+      throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) +
+                             "Unable to buffer image to file, tmpfile creation failed: " + std::strerror(errno));
+    }
+    std::fwrite(image.data(), image.size(), 1, objectFile);
+    std::fflush(objectFile);
+    std::fclose(objectFile);
+    static std::vector<std::string> tmpImagePaths;
+    tmpImagePaths.emplace_back(tmpPath);
+    static std::mutex mutex;
+    static auto cleanUp = []() {
+      std::unique_lock<std::mutex> lock(mutex);
+      for (auto &path : tmpImagePaths) {
+        if (std::remove(path.c_str()) != 0) {
+          fprintf(stderr, "Warning: cannot remove temporary image file %s\n", path.c_str());
+        }
+      }
+      tmpImagePaths.clear();
+    };
+    std::atexit(cleanUp);
+    std::set_terminate(cleanUp);
+
+    if (auto dylib = polyregion_dl_open(tmpPath); !dylib) {
       throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) +
                              "Cannot load module: " + std::string(polyregion_dl_error()));
     } else
@@ -267,23 +296,30 @@ void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
                                            std::vector<Type> types, std::vector<std::byte> argData,
                                            const Policy &policy, const MaybeCallback &cb) {
   TRACE();
+
+  if (auto scratchCount = std::count(types.begin(), types.end(), Type::Scratch); scratchCount != 0) {
+    throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) + "Scratch types are not supported on the CPU, found" +
+                           std::to_string(scratchCount) + " arg(s)");
+  }
+
   auto moduleIt = modules.find(moduleName);
   if (moduleIt == modules.end())
     throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) + "No module named " + moduleName + " was loaded");
 
-  auto &[path, handle, symbolTable] = moduleIt->second;
+  auto &[image, handle, symbolTable] = moduleIt->second;
 
   void *address = nullptr;
   if (auto it = symbolTable.find(symbol); it != symbolTable.end()) address = it->second;
   else {
-    address = polyregion_dl_find(handle, moduleName.c_str());
+    address = polyregion_dl_find(handle, symbol.c_str());
     auto err = polyregion_dl_error();
     if (err) {
       throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) + "Cannot load symbol " + symbol + " from module " +
-                             moduleName + " (" + path + "): " + std::string(err));
+                             moduleName + " (" + std::to_string(image.size()) + " bytes): " + std::string(err));
     }
     symbolTable.emplace_hint(it, symbol, address);
   }
+
   auto args = detail::argDataAsPointers(types, argData);
   invoke(reinterpret_cast<uint64_t>(address), types, args);
   if (cb) (*cb)();

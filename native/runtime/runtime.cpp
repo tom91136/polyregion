@@ -19,22 +19,17 @@ void runtime::ArgBuffer::put(std::initializer_list<runtime::TypedPointer> args) 
   for (auto &[tpe, ptr] : args) {
     types.push_back(tpe);
     if (auto size = byteOfType(tpe); size != 0) {
-      auto begin = static_cast<std::byte *>(ptr);
-      data.insert(data.end(), begin, begin + size);
+      if (tpe == Type::Scratch || !ptr) {
+        data.insert(data.end(), size, std::byte(0));
+      } else {
+        auto begin = static_cast<std::byte *>(ptr);
+        data.insert(data.end(), begin, begin + size);
+      }
     }
   }
 }
 
 void runtime::init() { libm::exportAll(); }
-constexpr std::optional<runtime::Access> runtime::fromUnderlying(uint8_t v) {
-  auto x = static_cast<Access>(v);
-  switch (x) {
-    case Access::RW:
-    case Access::RO:
-    case Access::WO: return x;
-    default: return {};
-  }
-}
 
 std::unique_ptr<runtime::Platform> runtime::Platform::of(const runtime::Backend &b) {
   using namespace polyregion::runtime;
@@ -45,6 +40,27 @@ std::unique_ptr<runtime::Platform> runtime::Platform::of(const runtime::Backend 
     case Backend::OpenCL: return std::make_unique<cl::ClPlatform>();
     case Backend::SHARED_OBJ: return std::make_unique<object::SharedPlatform>();
     case Backend::RELOCATABLE_OBJ: return std::make_unique<object::RelocatablePlatform>();
+  }
+}
+
+runtime::detail::CountingLatch::Token::Token(runtime::detail::CountingLatch &latch) : latch(latch) { TRACE(); }
+runtime::detail::CountingLatch::Token::~Token() {
+  TRACE();
+  latch.pending--;
+  latch.cv.notify_all();
+}
+std::shared_ptr<runtime::detail::CountingLatch::Token> runtime::detail::CountingLatch::acquire() {
+  TRACE();
+  pending++;
+  cv.notify_all();
+  return std::make_shared<Token>(*this);
+}
+runtime::detail::CountingLatch::~CountingLatch() {
+  TRACE();
+  auto now = std::chrono::system_clock::now();
+  std::unique_lock<std::mutex> lock(mutex);
+  if (!cv.wait_until(lock, now + std::chrono::seconds(10), [&]() { return pending == 0; })) {
+    throw std::logic_error("Timed out with " + std::to_string(pending) + " pending latches");
   }
 }
 

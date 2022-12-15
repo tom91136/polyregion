@@ -42,6 +42,8 @@ public:
 
 class EXPORT HipDeviceQueue : public DeviceQueue {
 
+  detail::CountingLatch latch;
+
   HipModuleStore &store;
   hipStream_t stream{};
 

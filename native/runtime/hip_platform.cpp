@@ -156,14 +156,16 @@ HipDeviceQueue::~HipDeviceQueue() {
 }
 void HipDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
   TRACE();
-  if (!cb) return;
   CHECKED(hipStreamAddCallback(
       stream,
       [](hipStream_t, hipError_t e, void *data) {
         CHECKED(e);
         detail::CountedCallbackHandler::consume(data);
       },
-      detail::CountedCallbackHandler::createHandle(*cb), 0));
+      detail::CountedCallbackHandler::createHandle([cb, token = latch.acquire()]() {
+        if (cb) (*cb)();
+      }),
+      0));
 }
 
 void HipDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
@@ -184,8 +186,7 @@ void HipDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
     throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported");
   auto fn = store.resolveFunction(moduleName, symbol);
   auto grid = policy.global;
-  auto block = policy.local.value_or(Dim3{});
-  int sharedMem = 0;
+  auto [block, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});
   auto args = detail::argDataAsPointers(types, argData);
   CHECKED(hipModuleLaunchKernel(fn,                        //
                                 grid.x, grid.y, grid.z,    //

@@ -48,6 +48,8 @@ public:
 
 class EXPORT ClDeviceQueue : public DeviceQueue {
 
+  detail::CountingLatch latch;
+
   ClModuleStore &store;
   cl_command_queue queue = {};
   std::function<cl_mem(uintptr_t)> queryMemObject;

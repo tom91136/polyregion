@@ -170,7 +170,7 @@ public final class Loader {
     final Path absolute = path.toAbsolutePath();
     Path libPath = absolute;
     int attempt = 0;
-    
+
     while (attempt < 10) {
       try {
         System.out.println("[Loader] Load native:" + libPath);

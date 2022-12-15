@@ -1,7 +1,13 @@
 #include "hsa_platform.h"
+#include "json.hpp"
 #include "utils.hpp"
 #include <atomic>
 #include <cstring>
+
+#include "llvm/Object/ELFObjectFile.h"
+#include "llvm/Object/ELFTypes.h"
+#include "llvm/Object/Error.h"
+#include "llvm/Object/ObjectFile.h"
 
 using namespace polyregion::runtime;
 using namespace polyregion::runtime::hsa;
@@ -14,8 +20,9 @@ static void checked(hsa_status_t result, const char *msg, const char *file, int 
   if (result != HSA_STATUS_SUCCESS) {
     const char *string = nullptr;
     hsa_status_string(result, &string);
-    throw std::logic_error(std::string(ERROR_PREFIX) + file + ":" + std::to_string(line) + ": " +
-                           (string ? std::string(string) : "(hsa_status_string returned NULL)"));
+    throw std::logic_error(
+        std::string(ERROR_PREFIX) + file + ":" + std::to_string(line) + ": " +
+        (string ? std::string(string) : "(hsa_status_string returned NULL, code=" + std::to_string(result) + ")"));
   }
 }
 
@@ -101,6 +108,58 @@ std::vector<std::unique_ptr<Device>> HsaPlatform::enumerate() {
 
 // ---
 
+static SymbolArgOffsetTable extractSymbolArgOffsetTable(const std::string &image) {
+  using namespace llvm::object;
+
+  const auto extractGeneric = []<typename ELFT>(const ELFObjectFile<ELFT> &obj) {
+    using ELFT_Note = typename ELFT::Note;
+    const auto &file = obj.getELFFile();
+    if (auto sections = file.sections(); auto e = sections.takeError())
+      throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot read ELF sections: " + toString(std::move(e)));
+    else {
+      for (const auto s : *sections) {
+        if (s.sh_type != llvm::ELF::SHT_NOTE) continue;
+        auto Err = llvm::Error::success();
+        for (ELFT_Note note : file.notes(s, Err)) {
+          if (note.getName() != "AMDGPU" || note.getType() != llvm::ELF::NT_AMDGPU_METADATA) continue;
+          try {
+            using namespace nlohmann;
+            auto kernels =
+                nlohmann::json::from_msgpack(note.getDesc().begin(), note.getDesc().end()).at("amdhsa.kernels");
+            SymbolArgOffsetTable offsetTable(kernels.size());
+            for (auto &kernel : kernels) {
+              auto kernelName = kernel.at(".name").template get<std::string>();
+              auto args = kernel.at(".args");
+              std::vector<size_t> offsets(args.size());
+              for (size_t i = 0; i < offsets.size(); ++i)
+                offsets[i] = args.at(i).at(".offset");
+              offsetTable.emplace(kernelName, offsets);
+            }
+            return offsetTable;
+          } catch (const std::exception &e) {
+            throw std::logic_error("Illegal AMDGPU METADATA in .note section (" + std::string(e.what()) + ")");
+          }
+        }
+      }
+      throw std::logic_error("ELF image does not contains AMDGPU METADATA in the .note section");
+    }
+  };
+  if (auto object = ObjectFile::createObjectFile(llvm::MemoryBufferRef(llvm::StringRef(image), ""));
+      auto e = object.takeError()) {
+    throw std::logic_error("Cannot load module: " + toString(std::move(e)));
+  } else {
+    if (const ELFObjectFileBase *elfObj = llvm::dyn_cast<ELFObjectFileBase>(object->get())) {
+      if (auto obj = llvm::dyn_cast<ELF32LEObjectFile>(elfObj)) return extractGeneric(*obj);
+      if (auto obj = llvm::dyn_cast<ELF32BEObjectFile>(elfObj)) return extractGeneric(*obj);
+      if (auto obj = llvm::dyn_cast<ELF64LEObjectFile>(elfObj)) return extractGeneric(*obj);
+      if (auto obj = llvm::dyn_cast<ELF64BEObjectFile>(elfObj)) return extractGeneric(*obj);
+      throw std::logic_error("Unrecognised ELF variant");
+    } else
+      throw std::logic_error("Object image TypeID " + std::to_string(object->get()->getType()) +
+                             " is not in the ELF range");
+  }
+}
+
 HsaDevice::HsaDevice(uint32_t queueSize, hsa_agent_t hostAgent, hsa_agent_t agent)
     : queueSize(queueSize), hostAgent(hostAgent), agent(agent),
       store(
@@ -123,19 +182,30 @@ HsaDevice::HsaDevice(uint32_t queueSize, hsa_agent_t hostAgent, hsa_agent_t agen
               throw std::logic_error(std::string(ERROR_PREFIX) +
                                      "Cannot validate executable: " + std::to_string(validationResult));
             CHECKED("Release code object reader", hsa_code_object_reader_destroy(reader));
-            return executable;
+
+            try {
+              return std::make_pair(executable, extractSymbolArgOffsetTable(s));
+            } catch (const std::exception &e) {
+              throw std::logic_error(std::string(ERROR_PREFIX) +
+                                     "Cannot to extract AMDGPU METADATA from image: " + e.what());
+            }
           },
           [this](auto &&m, auto &&name) {
             TRACE();
+            auto [exec, offsets] = m;
             hsa_executable_symbol_t symbol;
             // HSA suffixes the entry with .kd, e.g. `theKernel` is `theKernel.kd`
             CHECKED("Resolve symbol",
-                    hsa_executable_get_symbol_by_name(m, (name + ".kd").c_str(), &this->agent, &symbol));
-            return symbol;
+                    hsa_executable_get_symbol_by_name(exec, (name + ".kd").c_str(), &this->agent, &symbol));
+            if (auto it = offsets.find(name); it != offsets.end()) return std::make_pair(symbol, it->second);
+            else
+              throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot argument offset table for symbol `" + name +
+                                     "`");
           },
           [&](auto &&m) {
             TRACE();
-            CHECKED("Release executable", hsa_executable_destroy(m));
+            auto [exec, offsets] = m;
+            CHECKED("Release executable", hsa_executable_destroy(exec));
           },
           [&](auto &&) { TRACE(); }) {
   TRACE();
@@ -150,15 +220,17 @@ HsaDevice::HsaDevice(uint32_t queueSize, hsa_agent_t hostAgent, hsa_agent_t agen
       detail::allocateAndTruncate([&](auto &&data, auto) { hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, data); }, 64);
   deviceName = marketingName + "(" + gfxArch + ")";
 
-  CHECKED("Enumerate HSA agent regions", //
+  CHECKED("Enumerate HSA agent kernarg region", //
           hsa_agent_iterate_regions(
               agent,
               [](hsa_region_t region, void *data) {
                 hsa_region_segment_t segment;
-                hsa_region_get_info(region, HSA_REGION_INFO_SEGMENT, &segment);
+                CHECKED("Get region info (HSA_REGION_INFO_SEGMENT)",
+                        hsa_region_get_info(region, HSA_REGION_INFO_SEGMENT, &segment));
                 if (segment != HSA_REGION_SEGMENT_GLOBAL) return HSA_STATUS_SUCCESS;
                 hsa_region_global_flag_t flags;
-                hsa_region_get_info(region, HSA_REGION_INFO_GLOBAL_FLAGS, &flags);
+                CHECKED("Get region info (HSA_REGION_INFO_GLOBAL_FLAGS)",
+                        hsa_region_get_info(region, HSA_REGION_INFO_GLOBAL_FLAGS, &flags));
                 if (flags & HSA_REGION_GLOBAL_FLAG_KERNARG) {
                   static_cast<decltype(this)>(data)->kernelArgRegion = region;
                 }
@@ -240,7 +312,6 @@ void HsaDevice::free(uintptr_t ptr) {
 }
 std::unique_ptr<DeviceQueue> HsaDevice::createQueue() {
   TRACE();
-  //  context.touch();
   hsa_queue_t *queue;
   CHECKED("Allocate agent queue", hsa_queue_create(agent, queueSize, HSA_QUEUE_TYPE_SINGLE, //
                                                    nullptr, nullptr,                        //
@@ -254,30 +325,33 @@ std::unique_ptr<DeviceQueue> HsaDevice::createQueue() {
 
 HsaDeviceQueue::HsaDeviceQueue(decltype(device) device, decltype(queue) queue) : device(device), queue(queue) {
   TRACE();
-  CHECKED("Allocate kernel signal", hsa_signal_create(1, 0, nullptr, &kernelSignal));
-  CHECKED("Allocate H2D signal", hsa_signal_create(1, 0, nullptr, &hostToDeviceSignal));
-  CHECKED("Allocate D2H signal", hsa_signal_create(1, 0, nullptr, &deviceToHostSignal));
 }
 HsaDeviceQueue::~HsaDeviceQueue() {
   TRACE();
-  CHECKED("Release kernel signal", hsa_signal_destroy(kernelSignal));
-  CHECKED("Release H2D signal", hsa_signal_destroy(hostToDeviceSignal));
-  CHECKED("Release D2H signal", hsa_signal_destroy(deviceToHostSignal));
   CHECKED("Release agent queue", hsa_queue_destroy(queue));
 }
-void HsaDeviceQueue::enqueueCallback(hsa_signal_t &signal, const Callback &cb) {
-  TRACE();
-  CHECKED("Attach async handler to singnal", hsa_amd_signal_async_handler(
-                                                 signal, HSA_SIGNAL_CONDITION_LT, 1,
-                                                 [](hsa_signal_value_t value, void *data) -> bool {
-                                                   // Signals trigger when value is set to 0 or less, anything not 0 is
-                                                   // an error.
-                                                   CHECKED("Validate async signal value",
-                                                           static_cast<hsa_status_t>(value));
-                                                   detail::CountedCallbackHandler::consume(data);
-                                                   return false;
-                                                 },
-                                                 detail::CountedCallbackHandler::createHandle(cb)));
+
+hsa_signal_t HsaDeviceQueue::createSignal(const char *message) {
+  hsa_signal_t signal;
+  CHECKED(message, hsa_signal_create(1, 0, nullptr, &signal));
+  return signal;
+}
+
+void HsaDeviceQueue::destroySignal(const char *message, hsa_signal_t signal) {
+  CHECKED(message, hsa_signal_destroy(signal));
+}
+
+void HsaDeviceQueue::enqueueCallback(hsa_signal_t signal, const Callback &cb) {
+  CHECKED("Attach async handler to signal", //
+          hsa_amd_signal_async_handler(
+              signal, HSA_SIGNAL_CONDITION_LT, 1,
+              [](hsa_signal_value_t value, void *data) -> bool {
+                // Signals trigger when value is set to 0 or less, anything not 0 is an error.
+                CHECKED("Validate async signal value", static_cast<hsa_status_t>(value));
+                detail::CountedCallbackHandler::consume(data);
+                return false;
+              },
+              detail::CountedCallbackHandler::createHandle(cb)));
 }
 
 void HsaDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
@@ -285,34 +359,31 @@ void HsaDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, si
   void *lockedHostSrcPtr;
   CHECKED("Lock host memory", hsa_amd_memory_lock(const_cast<void *>(src), size, nullptr, 0, &lockedHostSrcPtr));
 
-  hsa_signal_store_relaxed(hostToDeviceSignal, 1);
+  hsa_signal_t signal = createSignal("Allocate H2D signal");
   CHECKED("Copy memory async (H2D)",
           hsa_amd_memory_async_copy(reinterpret_cast<void *>(dst), device.agent, lockedHostSrcPtr, device.hostAgent, //
-                                    size, 0, nullptr, hostToDeviceSignal));
-  enqueueCallback(hostToDeviceSignal, [cb, lockedHostSrcPtr]() {
+                                    size, 0, nullptr, signal));
+  enqueueCallback(signal, [cb, lockedHostSrcPtr, signal, token = latch.acquire()]() {
     CHECKED("Unlock host memory", hsa_amd_memory_unlock(lockedHostSrcPtr));
+    destroySignal("Release H2D signal", signal);
     if (cb) (*cb)();
   });
-
-  //  CHECKED(hsa_memory_copy(reinterpret_cast<void *>(dst), src, size));
-  //  if (cb) (*cb)();
 }
+
 void HsaDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) {
   TRACE();
   void *lockedHostDstPtr;
   CHECKED("Lock host memory", hsa_amd_memory_lock(dst, size, nullptr, 0, &lockedHostDstPtr));
 
-  hsa_signal_store_relaxed(deviceToHostSignal, 1);
+  hsa_signal_t signal = createSignal("Allocate D2H signal");
   CHECKED("Copy memory async (D2H)",
           hsa_amd_memory_async_copy(lockedHostDstPtr, device.hostAgent, reinterpret_cast<void *>(src), device.agent, //
-                                    size, 0, nullptr, deviceToHostSignal));
-  enqueueCallback(deviceToHostSignal, [cb, lockedHostDstPtr]() {
+                                    size, 0, nullptr, signal));
+  enqueueCallback(signal, [cb, lockedHostDstPtr, signal, token = latch.acquire()]() {
     CHECKED("Unlock host memory", hsa_amd_memory_unlock(lockedHostDstPtr));
+    destroySignal("Release H2D2H signal", signal);
     if (cb) (*cb)();
   });
-
-  //  CHECKED(hsa_memory_copy(dst, reinterpret_cast<void *>(src), size));
-  //  if (cb) (*cb)();
 }
 void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
                                         std::vector<Type> types, std::vector<std::byte> argData, const Policy &policy,
@@ -321,7 +392,14 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
   if (types.back() != Type::Void)
     throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported");
 
-  auto fn = device.store.resolveFunction(moduleName, symbol);
+  auto [fn, argOffsets] = device.store.resolveFunction(moduleName, symbol);
+
+  if (argOffsets.size() < types.size() - 1) {
+    throw std::logic_error(std::string(ERROR_PREFIX) + "Symbol `" + symbol + "` expects at least " +
+                           std::to_string(argOffsets.size()) + " arguments (excluding launch metadata) , " +
+                           std::to_string(types.size()) + " given.");
+  }
+
   uint64_t kernelObject;
   uint32_t kernargSegmentSize;
   uint32_t groupSegmentSize;
@@ -341,30 +419,41 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
 
   void *kernargAddress{};
 
-  CHECKED("Allocate kernel arg memory",
-          hsa_memory_allocate(device.kernelArgRegion, kernargSegmentSize, &kernargAddress));
+  if (kernargSegmentSize != 0) {
+    CHECKED("Allocate kernel arg memory",
+            hsa_memory_allocate(device.kernelArgRegion, kernargSegmentSize, &kernargAddress));
+  }
+
   auto args = detail::argDataAsPointers(types, argData);
   // Just to make sure future refactors don't break things.
   static_assert(std::is_same_v<std::decay_t<decltype(args)>::value_type, void *>);
+
+  if (!kernargAddress && args.size() - 1 != 0) {
+    throw std::logic_error(std::string(ERROR_PREFIX) + "Kernarg address is NULL but we got " +
+                           std::to_string(args.size() - 1) + " args to write");
+  }
   auto *data = reinterpret_cast<uint8_t *>(kernargAddress);
   // Last arg is the return, void assertion should have been done before this.
-  size_t byteOffset = 0;
   for (size_t i = 0; i < args.size() - 1; ++i) {
-    if (byteOffset >= kernargSegmentSize) {
+    if (argOffsets[i] >= kernargSegmentSize) {
       throw std::logic_error(std::string(ERROR_PREFIX) + "Argument size out of bound, kernel expects " +
                              std::to_string(kernargSegmentSize) + " bytes, argument " + std::to_string(i) +
                              " leads to overflow");
     }
     if (types[i] == Type::Void) throw std::logic_error(std::string(ERROR_PREFIX) + "Illegal argument type: void");
-    size_t size = byteOfType(types[i]);
-    std::memcpy(data + byteOffset, args[i], size);
-    byteOffset += size;
+    // XXX scratch (local) in HSA is a pointer of 4 bytes with the dynamic_shared_pointer kind
+    size_t size = types[i] == Type::Scratch ? 4 : byteOfType(types[i]);
+    if (types[i] == Type::Scratch) {
+      // XXX In AMD ROCclr, the implementation of KernelBlitManager::setArgument writes the local memory size as an
+      // argument here, but writing zero appears to have the same effect.
+      std::memset(data + argOffsets[i], 0, size);
+    } else {
+      std::memcpy(data + argOffsets[i], args[i], size);
+    }
   }
-
+  auto [block, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});
   auto grid = policy.global;
-  auto block = policy.local.value_or(Dim3{});
-
-  hsa_signal_store_relaxed(kernelSignal, 1);
+  hsa_signal_t signal = createSignal("Allocate kernel signal");
   uint64_t index = hsa_queue_load_write_index_relaxed(queue);
   const uint32_t queueMask = queue->size - 1;
   hsa_kernel_dispatch_packet_t *dispatch =
@@ -377,11 +466,11 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
   dispatch->grid_size_x = int_cast<uint32_t>(grid.x);
   dispatch->grid_size_y = int_cast<uint32_t>(grid.y);
   dispatch->grid_size_z = int_cast<uint32_t>(grid.z);
-  dispatch->completion_signal = kernelSignal;
+  dispatch->completion_signal = signal;
   dispatch->kernel_object = kernelObject;
   dispatch->kernarg_address = kernargAddress;
   dispatch->private_segment_size = privateSegmentSize;
-  dispatch->group_segment_size = groupSegmentSize;
+  dispatch->group_segment_size = std::max(groupSegmentSize, int_cast<uint32_t>(sharedMem));
 
   uint16_t header = 0;
   header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
@@ -401,10 +490,11 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
 
   hsa_queue_store_write_index_relaxed(queue, index + 1);
   hsa_signal_store_relaxed(queue->doorbell_signal, static_cast<hsa_signal_value_t>(index));
-
-  enqueueCallback(kernelSignal, [cb, kernargAddress]() {
-    if (cb) (*cb)();
+  TRACE();
+  enqueueCallback(signal, [cb, kernargAddress, signal, token = latch.acquire()]() {
     CHECKED("Release kernel arg memory", hsa_memory_free(kernargAddress));
+    destroySignal("Release kernel signal", signal);
+    if (cb) (*cb)();
   });
 }
 

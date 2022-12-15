@@ -145,16 +145,16 @@ else ()
                 )
     else ()
         set(COMMON_LINKER_OPTIONS
-#                LINKER:--lto-O3
-#                LINKER:--icf=all
+                LINKER:--lto-O3
+                LINKER:--icf=all
                 LINKER:--threads=${NPROC}
-#                LINKER:--no-allow-shlib-undefined
-#                LINKER:--no-undefined-version
-#                LINKER:--no-undefined
-#                LINKER:--exclude-libs=ALL # ld/lld exports all object symbols by default, don't do that
-#                LINKER:--gc-sections      # remove unused sections
-#                LINKER:--strip-all        # strip symbols not used for DSO
-#                LINKER:-O3                # O3 for linker means optimise for space
+                LINKER:--no-allow-shlib-undefined
+                LINKER:--no-undefined-version
+                LINKER:--no-undefined
+                LINKER:--exclude-libs=ALL # ld/lld exports all object symbols by default, don't do that
+                LINKER:--gc-sections      # remove unused sections
+                LINKER:--strip-all        # strip symbols not used for DSO
+                LINKER:-O3                # O3 for linker means optimise for space
                 )
     endif ()
 endif ()

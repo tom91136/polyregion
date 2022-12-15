@@ -17,6 +17,7 @@ enum class EXPORT Type : uint8_t {
   Float32,
   Double64,
   Ptr,
+  Scratch,
 };
 
 static constexpr size_t byteOfType(Type t) {
@@ -30,6 +31,7 @@ static constexpr size_t byteOfType(Type t) {
     case Type::Long64: return 64 / 8;
     case Type::Float32: return 32 / 8;
     case Type::Double64: return 64 / 8;
+    case Type::Scratch:
     case Type::Ptr: static_assert(sizeof(ptrdiff_t) == 8); return 64 / 8;
   }
 }
@@ -46,6 +48,7 @@ static constexpr const char * typeName(Type t) {
     case Type::Float32: return "Float32";
     case Type::Double64: return "Double64";
     case Type::Ptr:return "Ptr";
+    case Type::Scratch:return "Scratch";
   }
 }
 

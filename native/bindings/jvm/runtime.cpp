@@ -277,11 +277,17 @@ void Platform::enqueueInvokeAsync0(JNIEnv *env, jclass, jlong nativePeer, //
 
     auto p = gen::Policy::of(env).wrap(env, policy);
     auto global = fromJni(env, p.global(env, gen::Dim3::of(env)));
+    auto localMemoryBytes = p.localMemoryBytes(env);
     auto local = p.local(env, gen::Dim3::of(env)).map<rt::Dim3>([&](auto x) { return fromJni(env, x); });
+    if (!local && localMemoryBytes) {
+      throwGeneric(env, EX, "Launch configured with no local dims but with local memory");
+    }
 
     findRef(env, deviceQueues, nativePeer)
-        ->enqueueInvokeAsync(fromJni(env, moduleName), fromJni(env, symbol), argTs, argPs, {global, local},
-                             fromJni(env, cb));
+        ->enqueueInvokeAsync(
+            fromJni(env, moduleName), fromJni(env, symbol), argTs, argPs,
+            rt::Policy{global, {map_opt(local, [&](auto &&d) { return std::make_pair(d, localMemoryBytes); })}},
+            fromJni(env, cb));
 
     if (argTs[argCount - 1] == rt::Type::Ptr) {
       // we got four possible cases when a function return pointers:
