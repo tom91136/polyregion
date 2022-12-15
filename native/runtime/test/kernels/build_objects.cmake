@@ -27,6 +27,8 @@ file(GLOB C_SRC_FILES ${CMAKE_SOURCE_DIR}/*.c)
 
 # clang  -target nvptx64--nvidiacl -cl-std=CL1.2 -march=sm_80 -O3 -xcl stream.cl -Xclang -mlink-bitcode-file -Xclang /usr/lib64/clc/nvptx64--nvidiacl.bc -S -o-
 # clang  -target amdgcn--amdhsa -nogpulib -cl-std=CL1.2 -mcpu=gfx1012 -O3 -xcl stream.cl -Xclang -mlink-bitcode-file -Xclang /usr/lib64/clc/amdgcn--amdhsa.bc -S -o-
+# clang  -target x86_64-pc-linux-gnu -Os -std=c11 -march=x86_64 -xc fma.c -shared -S -o
+# clang  -target x86_64-pc-linux-gnu -Os -std=c11 -march=x86_64 -xc fma.c -fPIC -S -o
 
 function(to_hex_array HEX_STRING OUT)
     string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," HEX_STRING ${HEX_STRING})

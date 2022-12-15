@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    runs-on: [ ubuntu-latest ]
+    runs-on: [ ubuntu-22.04 ]
     container:
       image: tom91136/centos7-llvm14:latest
     steps:
