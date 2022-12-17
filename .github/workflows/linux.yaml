@@ -14,7 +14,9 @@ jobs:
 
       - name: Set arch
         shell: bash
-        run: echo "TARGET_ARCH=x86_64" >> $GITHUB_ENV
+        run: |
+          sudo apt-get install ninja-build
+          echo "TARGET_ARCH=x86_64" >> $GITHUB_ENV
 
       - name: Cache sysroot
         if: ${{ !env.ACT }}
@@ -28,9 +30,9 @@ jobs:
         shell: bash
         if: steps.cache-sysroot.outputs.cache-hit != 'true'
         working-directory: ./native/sysroot-image-creator
-        run: | 
-          ./sysroot-creator-bullseye.sh ${{ env.TARGET_ARCH }} 
-          file ./out/bullseye/Packages.bullseye_main_${{ env.TARGET_ARCH }}.xz
+        run: |
+          ./sysroot-creator-bullseye.sh ${{ env.TARGET_ARCH }}
+          file ./out/bullseye/Packages.bullseye_main_${{ env.TARGET_ARCH }}.tar.xz
 
       - name: Extract sysroot
         shell: bash
