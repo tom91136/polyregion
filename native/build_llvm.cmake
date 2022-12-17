@@ -1,7 +1,14 @@
 include(ProjectConfig.cmake)
 
-set(LLVM_BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/llvm-${CMAKE_BUILD_TYPE})
+if (NOT CMAKE_SYSTEM_PROCESSOR)
+    message(FATAL_ERROR "Expecting CMAKE_SYSTEM_PROCESSOR")
+endif ()
 
+if (NOT CMAKE_BUILD_TYPE)
+    message(FATAL_ERROR "Expecting CMAKE_BUILD_TYPE")
+endif ()
+
+set(LLVM_BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR})
 
 set(DOWNLOAD_LLVM OFF)
 if (EXISTS ${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src.tar.xz)
@@ -75,29 +82,25 @@ set(LLVM_OPTIONS
 
         -DLLVM_USE_CRT_RELEASE=MT
         -DLLVM_INSTALL_UTILS=OFF
-        -DLLVM_USE_HOST_TOOLS=OFF
+        -DLLVM_USE_HOST_TOOLS=ON
         -DLLVM_STATIC_LINK_CXX_STDLIB=${USE_STATIC_CXX_STDLIB}
-
-#        TODO setup cross
-#        -DCMAKE_SYSTEM_NAME=Linux
-#        -DLLVM_TARGET_ARCH=ARM
-#        -DLLVM_TABLEGEN=llvm-tblgen
-#        -DCLANG_TABLEGEN=clang-tblgen
-#        -DLLVM_DEFAULT_TARGET_TRIPLE=arm-linux-gnueabihf
-#        "-DCMAKE_CXX_FLAGS=-march=armv7-a -mcpu=cortex-a9 -mfloat-abi=hard --target=arm-linux-gnueabihf"
-
-
         "-DLLVM_TARGETS_TO_BUILD=X86\;AArch64\;ARM\;NVPTX\;AMDGPU" # quote this because of the semicolons
         )
 
 if (CMAKE_CXX_COMPILER)
-    SET(BUILD_OPTIONS ${BUILD_OPTIONS} -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER})
+    list(APPEND BUILD_OPTIONS -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER})
 endif ()
 if (CMAKE_C_COMPILER)
-    SET(BUILD_OPTIONS ${BUILD_OPTIONS} -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER})
+    list(APPEND BUILD_OPTIONS -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER})
+endif ()
+if (CMAKE_SYSROOT)
+    list(APPEND BUILD_OPTIONS -DCMAKE_SYSROOT=${CMAKE_SYSROOT})
+endif ()
+if (CMAKE_TOOLCHAIN_FILE)
+    list(APPEND BUILD_OPTIONS -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE})
 endif ()
 if (USE_LINKER)
-    SET(BUILD_OPTIONS ${BUILD_OPTIONS} -DLLVM_USE_LINKER=${USE_LINKER})
+    list(APPEND BUILD_OPTIONS -DLLVM_USE_LINKER=${USE_LINKER})
 endif ()
 
 execute_process(
@@ -109,6 +112,7 @@ execute_process(
         -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
         -DCMAKE_VERBOSE_MAKEFILE=ON
         -DBUILD_SHARED_LIBS=${BUILD_SHARED_LIBS}
+        -DLLVM_TABLEGEN=llvm-tblgen
         -GNinja
 
         WORKING_DIRECTORY ${LLVM_BUILD_DIR}
@@ -123,7 +127,7 @@ endif ()
 
 
 execute_process(
-        COMMAND ${CMAKE_COMMAND} --build ${LLVM_BUILD_DIR}
+        COMMAND ${CMAKE_COMMAND} --build ${LLVM_BUILD_DIR} -- -k 0 # keep going even with error
         WORKING_DIRECTORY ${LLVM_BUILD_DIR}
         RESULT_VARIABLE SUCCESS)
 

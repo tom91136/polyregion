@@ -1,18 +1,41 @@
 
 if (UNIX)
-    execute_process(COMMAND uname -m OUTPUT_VARIABLE ARCH RESULT_VARIABLE SUCCESS OUTPUT_STRIP_TRAILING_WHITESPACE)
-    if (NOT SUCCESS EQUAL "0")
-        message(FATAL_ERROR "Cannot determine arch, " uname -m" returned ${SUCCESS}")
+    if (NOT ARCH)
+        message(STATUS "ARCH not set detecting host arch")
+        execute_process(COMMAND uname -m OUTPUT_VARIABLE ARCH RESULT_VARIABLE SUCCESS OUTPUT_STRIP_TRAILING_WHITESPACE)
+        if (NOT SUCCESS EQUAL "0")
+            message(FATAL_ERROR "Cannot determine arch, `uname -m` returned ${SUCCESS}")
+        endif ()
     endif ()
 elseif (WIN32)
     # we only support 64 bit on windows
+    if (ARCH)
+        message(STATUS "Setting ARCH is not supported on Windows")
+    endif ()
     set(ARCH x86_64)
 else ()
-    message(FATAL_ERROR "Unknown arch")
+    message(FATAL_ERROR "Unknown platform (not Unix-like or Windows)")
 endif ()
 
+
 string(TOLOWER "build-${CMAKE_HOST_SYSTEM_NAME}-${ARCH}" BUILD_NAME)
-message(STATUS "Using build name `${BUILD_NAME}`")
+
+message(STATUS "Architecture = `${ARCH}`")
+message(STATUS "Build name   = `${BUILD_NAME}`")
+if (CMAKE_SYSROOT)
+    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/toolchain_clang_${ARCH}.cmake")
+    if (NOT EXISTS "${CMAKE_TOOLCHAIN_FILE}")
+        message(FATAL_ERROR "Cannot find toolchain ${CMAKE_TOOLCHAIN_FILE} for ${ARCH}")
+    endif ()
+    if (NOT EXISTS "${CMAKE_SYSROOT}")
+        message(FATAL_ERROR "Cannot find sysroot ${CMAKE_SYSROOT} for ${ARCH}")
+    endif ()
+    message(STATUS "Toolchain    = `${CMAKE_TOOLCHAIN_FILE}`")
+    message(STATUS "Sysroot      = `${CMAKE_SYSROOT}`")
+else ()
+    message(STATUS "No sysroot specified, not cross building...")
+endif ()
+
 
 function(check_process_return VALUE NAME)
     if (NOT VALUE EQUAL "0")
@@ -22,14 +45,11 @@ function(check_process_return VALUE NAME)
     endif ()
 endfunction()
 
-if (DEFINED ENV{CXX})
-    SET(BUILD_OPTIONS ${BUILD_OPTIONS} -DCMAKE_CXX_COMPILER=$ENV{CXX})
+if (CMAKE_SYSROOT)
+    list(APPEND BUILD_OPTIONS -DCMAKE_SYSROOT=${CMAKE_SYSROOT})
 endif ()
-if (DEFINED ENV{CC})
-    SET(BUILD_OPTIONS ${BUILD_OPTIONS} -DCMAKE_C_COMPILER=$ENV{CC})
-endif ()
-if (DEFINED ENV{LINKER})
-    SET(BUILD_OPTIONS ${BUILD_OPTIONS} -DUSE_LINKER=$ENV{LINKER})
+if (CMAKE_TOOLCHAIN_FILE)
+    list(APPEND BUILD_OPTIONS -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE})
 endif ()
 
 
@@ -41,7 +61,9 @@ if (ACTION STREQUAL "CONFIGURE")
             COMMAND ${CMAKE_COMMAND}
             ${BUILD_OPTIONS}
             -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+            -DCMAKE_SYSTEM_PROCESSOR=${ARCH}
             -P build_llvm.cmake
+
             COMMAND_ECHO STDERR
             RESULT_VARIABLE SUCCESS)
     check_process_return(${SUCCESS} "LLVM build")
@@ -49,9 +71,9 @@ if (ACTION STREQUAL "CONFIGURE")
     message(STATUS "Starting configuration...")
     execute_process(
             COMMAND ${CMAKE_COMMAND}
+            ${BUILD_OPTIONS}
             -B "${BUILD_NAME}"
             -S .
-            ${BUILD_OPTIONS}
             -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
             -GNinja
 
@@ -71,5 +93,5 @@ elseif (ACTION STREQUAL "BUILD")
     check_process_return(${SUCCESS} "${TARGET} build")
 
 else ()
-    message(FATAL_ERROR "Unknown action ${ACTION}")
+    message(FATAL_ERROR "Unknown action: ${ACTION}")
 endif ()

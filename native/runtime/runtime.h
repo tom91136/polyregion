@@ -206,7 +206,7 @@ enum class EXPORT Backend {
   RELOCATABLE_OBJ,
 };
 
-constexpr std::string EXPORT nameOfBackend(const Backend &b) {
+constexpr std::string_view EXPORT nameOfBackend(const Backend &b) {
   switch (b) {
     case Backend::CUDA: return "CUDA";
     case Backend::HIP: return "HIP";

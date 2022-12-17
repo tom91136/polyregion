@@ -56,7 +56,6 @@ FetchContent_Declare(
 )
 
 
-
 if (USE_LINKER)
     message(STATUS "Using custom linker: ${USE_LINKER}")
     if (MSVC)
@@ -79,7 +78,7 @@ if (MSVC)
 else ()
     # FIXME adjust for CUDA stuff for now
     set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan -g3)
-#    set(COMMON_DEBUG_OPTIONS)
+    #    set(COMMON_DEBUG_OPTIONS)
 endif ()
 
 if (MSVC)
@@ -131,19 +130,15 @@ else ()
 
     set(COMMON_COMPILE_OPTIONS
             ${COMMON_COMPILE_OPTIONS}
-            -g3
             -fvisibility=hidden       # don't export anything by default
             -fvisibility-inlines-hidden
             )
+
+    # Setup link options
     if (APPLE)
-        # LLD support for macOS is not there yet, these flags are for ld64.
-        set(COMMON_LINKER_OPTIONS
-                LINKER:-dead_strip
-                LINKER:-dead_strip_dylibs
-                LINKER:-S # No debug symbols
-                LINKER:-x # No local symbols
-                )
+        # LLD support for macOS is not there yet, flags are for ld64.
     else ()
+        # For lld, we setup LTO, ICF, and threading
         set(COMMON_LINKER_OPTIONS
                 LINKER:--lto-O3
                 LINKER:--icf=all
@@ -151,11 +146,26 @@ else ()
                 LINKER:--no-allow-shlib-undefined
                 LINKER:--no-undefined-version
                 LINKER:--no-undefined
-                LINKER:--exclude-libs=ALL # ld/lld exports all object symbols by default, don't do that
-                LINKER:--gc-sections      # remove unused sections
-                LINKER:--strip-all        # strip symbols not used for DSO
                 LINKER:-O3                # O3 for linker means optimise for space
                 )
+    endif ()
+    if (CMAKE_BUILD_TYPE STREQUAL "Release")
+        # For Release, we also strip everything out
+        if (APPLE)
+            set(COMMON_LINKER_OPTIONS
+                    ${COMMON_LINKER_OPTIONS}
+                    LINKER:-dead_strip
+                    LINKER:-dead_strip_dylibs
+                    LINKER:-S # No debug symbols
+                    LINKER:-x # No local symbols
+                    )
+        else ()
+            set(COMMON_LINKER_OPTIONS
+                    ${COMMON_LINKER_OPTIONS}
+                    LINKER:--gc-sections      # remove unused sections
+                    LINKER:--strip-all        # strip symbols not used for DSO
+                    )
+        endif ()
     endif ()
 endif ()
 
@@ -185,20 +195,11 @@ if (${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.20.0")
     set(CMAKE_POLICY_DEFAULT_CMP0116 OLD)
 endif ()
 
-#set(LLVM_DIR /lib/llvm-14/cmake)
-#    set(LLD_DIR /lib/llvm-14/lib/cmake/lld)
-find_package(LLVM REQUIRED
-        CONFIG NO_DEFAULT_PATH
-        PATHS "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}"
-        )
-#    find_package(LLD REQUIRED CONFIG)
-
+set(LLVM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/llvm")
+find_package(LLVM REQUIRED)
 include("${LLVM_CMAKE_DIR}/AddLLVM.cmake")
 include("${LLVM_CMAKE_DIR}/TableGen.cmake")
 
-#message(STATUS "${llvm_BINARY_DIR}/lib/cmake/llvm")
-#find_package(LLVM REQUIRED CONFIG NO_DEFAULT_PATH
-#        PATHS "${llvm_BINARY_DIR}/lib/cmake/llvm")
 message(STATUS "Using LLVM: ${LLVM_PACKAGE_VERSION} tools")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
