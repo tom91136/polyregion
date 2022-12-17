@@ -11,5 +11,5 @@ jobs:
     uses: ./.github/workflows/linux-shared.yaml
     secrets: inherit
     with:
-      arch: arm
-      type: Release
+      build_arch: arm
+      build_type: Release

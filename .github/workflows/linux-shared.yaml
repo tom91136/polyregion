@@ -3,10 +3,10 @@ name: Linux build
 on:
   workflow_call:
     inputs:
-      arch:
+      build_arch:
         required: true
         type: string
-      type:
+      build_type:
         required: true
         type: string
 
@@ -29,29 +29,29 @@ jobs:
         id: restore-sysroot
         uses: actions/cache/restore@v3.2.0-beta.1
         with:
-          path: ./native/sysroot-image-creator/out/bullseye/debian_bullseye_${{ inputs.arch }}_sysroot.tar.xz
-          key: ${{ runner.os }}-${{ inputs.arch }}-${{ hashFiles('./native/sysroot-image-creator/*.sh') }}
+          path: ./native/sysroot-image-creator/out/bullseye/debian_bullseye_${{ inputs.build_arch }}_sysroot.tar.xz
+          key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/sysroot-image-creator/*.sh') }}
 
       - name: Build sysroot
         id: build-sysroot
         if: steps.restore-sysroot.outputs.cache-hit != 'true'
         working-directory: ./native/sysroot-image-creator
-        run: ./sysroot-creator-bullseye.sh ${{ inputs.arch }}
+        run: ./sysroot-creator-bullseye.sh ${{ inputs.build_arch }}
 
       - name: Save sysroot cache
         if: steps.build-sysroot.outcome == 'success'
         uses: actions/cache/save@v3.2.0-beta.1
         id: save-sysroot
         with:
-          path: ./native/sysroot-image-creator/out/bullseye/debian_bullseye_${{ inputs.arch }}_sysroot.tar.xz
-          key: ${{ runner.os }}-${{ inputs.arch }}-${{ hashFiles('./native/sysroot-image-creator/*.sh') }}
+          path: ./native/sysroot-image-creator/out/bullseye/debian_bullseye_${{ inputs.build_arch }}_sysroot.tar.xz
+          key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/sysroot-image-creator/*.sh') }}
 
       - name: Prepare sysroot
         working-directory: ./native/sysroot-image-creator
         run: |
-          mkdir -p "sysroot_${{ inputs.arch }}"
-          tar xf out/bullseye/debian_bullseye_${{ inputs.arch }}_sysroot.tar.xz  -C ./sysroot_${{ inputs.arch }}
-          echo "SYSROOT_PATH=$PWD/sysroot_${{ inputs.arch }}" >> $GITHUB_ENV
+          mkdir -p "sysroot_${{ inputs.build_arch }}"
+          tar xf out/bullseye/debian_bullseye_${{ inputs.build_arch }}_sysroot.tar.xz  -C ./sysroot_${{ inputs.build_arch }}
+          echo "SYSROOT_PATH=$PWD/sysroot_${{ inputs.build_arch }}" >> $GITHUB_ENV
 
       - name: Restore LLVM cache
         if: ${{ !env.ACT }}
@@ -64,7 +64,7 @@ jobs:
       - name: Build LLVM
         id: build-llvm
         working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.type }} -DACTION=LLVM -DARCH=${{ inputs.arch }} -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DACTION=LLVM -DARCH=${{ inputs.build_arch }} -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
 
       - name: Save LLVM cache
         if: steps.build-llvm.outcome == 'success'
@@ -76,22 +76,22 @@ jobs:
 
       - name: Configure release build
         working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.type }} -DACTION=CONFIGURE -DARCH=${{ inputs.arch }} -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DACTION=CONFIGURE -DARCH=${{ inputs.build_arch }} -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
 
       - name: Release build shim
         working-directory: ./native
         if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.type }} -DACTION=BUILD -DARCH=${{ inputs.arch }} -DTARGET=polyregion-shim-jvm -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DACTION=BUILD -DARCH=${{ inputs.build_arch }} -DTARGET=polyregion-shim-jvm -P build.cmake
 
       - name: Release build runtime
         working-directory: ./native
         if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.type }} -DACTION=BUILD -DARCH=${{ inputs.arch }} -DTARGET=polyregion-runtime-jvm -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DACTION=BUILD -DARCH=${{ inputs.build_arch }} -DTARGET=polyregion-runtime-jvm -P build.cmake
 
       - name: Release build compiler
         working-directory: ./native
         if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.type }} -DACTION=BUILD -DARCH=${{ inputs.arch }} -DTARGET=polyregion-compiler-jvm -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DACTION=BUILD -DARCH=${{ inputs.build_arch }} -DTARGET=polyregion-compiler-jvm -P build.cmake
 
       - name: Check artefact
         working-directory: ./native
