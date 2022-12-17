@@ -1,0 +1,63 @@
+name: Linux build
+
+on:
+  workflow_call:
+    inputs:
+      arch:
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: [ubuntu-22.04]
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup env
+        run: |
+          sudo apt-get install ninja-build
+
+      - name: Cache sysroot
+        if: ${{ !env.ACT }}
+        id: cache-sysroot
+        uses: actions/cache@v3
+        with:
+          path: ./native/sysroot-image-creator/out/bullseye/Packages.bullseye_main_${{ input.arch }}.xz
+          key: ${{ runner.os }}-${{ input.arch }}-${{ hashFiles('./native/sysroot-image-creator/**') }}
+
+      - name: Create sysroot
+        if: steps.cache-sysroot.outputs.cache-hit != 'true'
+        working-directory: ./native/sysroot-image-creator
+        run: .|
+          /sysroot-creator-bullseye.sh ${{ input.arch }}
+          mkdir -p "sysroot_${{ input.arch }}"
+          tar xf out/bullseye/debian_bullseye_${{ input.arch }}_sysroot.tar.xz  -C ./sysroot_${{ input.arch }}
+          echo "SYSROOT_PATH=$PWD/sysroot_${{ input.arch }}" >> $GITHUB_ENV
+
+      - name: Cache LLVM
+        if: ${{ !env.ACT }}
+        id: cache-llvm
+        uses: actions/cache@v3
+        with:
+          path: ./native/llvm
+          key: ${{ runner.os }}-${{ hashFiles('./native/build_llvm.cmake') }}-${{ hashFiles('./native/ProjectConfig.cmake') }}
+
+      - name: Configure release build
+        working-directory: ./native
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=CONFIGURE -DARCH=${{ input.arch }} -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
+
+      - name: Release build shim
+        working-directory: ./native
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DARCH=${{ input.arch }} -DTARGET=polyregion-shim-jvm -P build.cmake
+
+      - name: Release build runtime
+        working-directory: ./native
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DARCH=${{ input.arch }} -DTARGET=polyregion-runtime-jvm -P build.cmake
+
+      - name: Release build compiler
+        working-directory: ./native
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DARCH=${{ input.arch }} -DTARGET=polyregion-compiler-jvm -P build.cmake
+
+      - name: Check artefact
+        working-directory: ./native
+        run: ls -lah build-linux-x86_64/bindings/jvm

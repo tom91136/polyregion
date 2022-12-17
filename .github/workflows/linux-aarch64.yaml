@@ -1,0 +1,14 @@
+name: Linux aarch64 build
+
+on:
+  pull_request:
+  push:
+  release:
+    types: published
+
+jobs:
+  llvm:
+    uses: ./.github/workflows/linux-shared.yaml
+    secrets: inherit
+    with:
+      arch: aarch64
