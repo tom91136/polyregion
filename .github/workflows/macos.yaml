@@ -6,6 +6,10 @@ on:
   release:
     types: published
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   build:
     runs-on: macos-12
@@ -21,35 +25,43 @@ jobs:
           echo "CC=/usr/local/opt/llvm/bin/clang"    >> $GITHUB_ENV
           echo "LINKER=$(which ld)"                  >> $GITHUB_ENV
 
-      - name: Cache LLVM
+      - name: Restore LLVM cache
         if: ${{ !env.ACT }}
-        id: prepare-llvm
-        uses: actions/cache@v3
+        id: restore-llvm
+        uses: actions/cache/restore@v3.2.0-beta.1
         with:
-          path: ./native/llvm
-          key: ${{ runner.os }}-${{ hashFiles('./native/build_llvm.cmake') }}-${{ hashFiles('./native/ProjectConfig.cmake') }}
+          path: ./native/llvm-*
+          key: ${{ runner.os }}-${{ hashFiles('./native/*.cmake') }}
 
       - name: Configure release build
-        shell: bash
+        id: build-llvm
         working-directory: ./native
         run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=CONFIGURE -P build.cmake
 
+      - name: Save LLVM cache
+        if: steps.build-llvm.outcome == 'success'
+        uses: actions/cache/save@v3.2.0-beta.1
+        id: save-llvm
+        with:
+          path: ./native/llvm-*
+          key: ${{ runner.os }}-${{ hashFiles('./native/*.cmake') }}
+
       - name: Release build shim
-        shell: bash
         working-directory: ./native
+        if: always()
         run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-shim-jvm -P build.cmake
 
       - name: Release build runtime
-        shell: bash
         working-directory: ./native
+        if: always()
         run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-runtime-jvm -P build.cmake
 
       - name: Release build compiler
-        shell: bash
         working-directory: ./native
+        if: always()
         run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-compiler-jvm -P build.cmake
 
       - name: Check artefact
-        shell: bash
+        if: always()
         working-directory: ./native
         run: ls -lah build-darwin-x86_64/bindings/jvm

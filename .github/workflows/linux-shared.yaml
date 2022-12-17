@@ -7,57 +7,86 @@ on:
         required: true
         type: string
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   build:
-    runs-on: [ubuntu-22.04]
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v3
 
-      - name: Setup env
+      - name: Install dependencies
         run: |
           sudo apt-get install ninja-build
 
-      - name: Cache sysroot
+      - name: Restore sysroot cache
         if: ${{ !env.ACT }}
-        id: cache-sysroot
-        uses: actions/cache@v3
+        id: restore-sysroot
+        uses: actions/cache/restore@v3.2.0-beta.1
         with:
           path: ./native/sysroot-image-creator/out/bullseye/Packages.bullseye_main_${{ inputs.arch }}.xz
           key: ${{ runner.os }}-${{ inputs.arch }}-${{ hashFiles('./native/sysroot-image-creator/**') }}
 
-      - name: Create sysroot
-        if: steps.cache-sysroot.outputs.cache-hit != 'true'
+      - name: Build sysroot
+        id: build-sysroot
+        if: steps.restore-sysroot.outputs.cache-hit != 'true'
+        working-directory: ./native/sysroot-image-creator
+        run: ./sysroot-creator-bullseye.sh ${{ inputs.arch }}
+
+      - name: Save sysroot cache
+        if: steps.build-sysroot.outcome == 'success'
+        uses: actions/cache/save@v3.2.0-beta.1
+        id: save-sysroot
+        with:
+          path: ./native/sysroot-image-creator/out/bullseye/Packages.bullseye_main_${{ inputs.arch }}.xz
+          key: ${{ runner.os }}-${{ inputs.arch }}-${{ hashFiles('./native/sysroot-image-creator/**') }}
+
+      - name: Prepare sysroot
         working-directory: ./native/sysroot-image-creator
         run: |
-          ./sysroot-creator-bullseye.sh ${{ inputs.arch }}
           mkdir -p "sysroot_${{ inputs.arch }}"
           tar xf out/bullseye/debian_bullseye_${{ inputs.arch }}_sysroot.tar.xz  -C ./sysroot_${{ inputs.arch }}
           echo "SYSROOT_PATH=$PWD/sysroot_${{ inputs.arch }}" >> $GITHUB_ENV
 
-      - name: Cache LLVM
+      - name: Restore LLVM cache
         if: ${{ !env.ACT }}
-        id: cache-llvm
-        uses: actions/cache@v3
+        id: restore-llvm
+        uses: actions/cache/restore@v3.2.0-beta.1
         with:
-          path: ./native/llvm
-          key: ${{ runner.os }}-${{ hashFiles('./native/build_llvm.cmake') }}-${{ hashFiles('./native/ProjectConfig.cmake') }}
+          path: ./native/llvm-*
+          key: ${{ runner.os }}-${{ hashFiles('./native/*.cmake') }}
 
       - name: Configure release build
+        id: build-llvm
         working-directory: ./native
         run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=CONFIGURE -DARCH=${{ inputs.arch }} -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
 
+      - name: Save LLVM cache
+        if: steps.build-llvm.outcome == 'success'
+        uses: actions/cache/save@v3.2.0-beta.1
+        id: save-llvm
+        with:
+          path: ./native/llvm-*
+          key: ${{ runner.os }}-${{ hashFiles('./native/*.cmake') }}
+
       - name: Release build shim
         working-directory: ./native
+        if: always()
         run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DARCH=${{ inputs.arch }} -DTARGET=polyregion-shim-jvm -P build.cmake
 
       - name: Release build runtime
         working-directory: ./native
+        if: always()
         run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DARCH=${{ inputs.arch }} -DTARGET=polyregion-runtime-jvm -P build.cmake
 
       - name: Release build compiler
         working-directory: ./native
+        if: always()
         run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DARCH=${{ inputs.arch }} -DTARGET=polyregion-compiler-jvm -P build.cmake
 
       - name: Check artefact
         working-directory: ./native
+        if: always()
         run: ls -lah build-linux-x86_64/bindings/jvm
