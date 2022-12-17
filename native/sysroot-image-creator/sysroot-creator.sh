@@ -54,10 +54,10 @@ readonly PACKAGES_EXT=xz
 readonly RELEASE_FILE="Release"
 readonly RELEASE_FILE_GPG="Release.gpg"
 
-readonly DEBIAN_DEP_LIST_X86_64="generated_package_lists/${DIST}.x86_64"
-readonly DEBIAN_DEP_LIST_I386="generated_package_lists/${DIST}.i386"
-readonly DEBIAN_DEP_LIST_ARM="generated_package_lists/${DIST}.arm"
-readonly DEBIAN_DEP_LIST_AARCH64="generated_package_lists/${DIST}.aarch64"
+readonly DEBIAN_DEP_LIST_X86_64="package_lists_${DIST}_x86_64"
+readonly DEBIAN_DEP_LIST_I386="package_lists_${DIST}_i386"
+readonly DEBIAN_DEP_LIST_ARM="package_lists_${DIST}_arm"
+readonly DEBIAN_DEP_LIST_AARCH64="package_lists_${DIST}_aarch64"
 
 Banner() { echo "[$*]"; }
 
