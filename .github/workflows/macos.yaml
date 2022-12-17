@@ -36,7 +36,7 @@ jobs:
       - name: Build LLVM
         id: build-llvm
         working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=CONFIGURE -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=LLVM -P build.cmake
 
       - name: Save LLVM cache
         if: steps.build-llvm.outcome == 'success'

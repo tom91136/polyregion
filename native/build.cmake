@@ -65,7 +65,7 @@ if (ACTION STREQUAL "LLVM")
             COMMAND_ECHO STDERR
             RESULT_VARIABLE SUCCESS)
     check_process_return(${SUCCESS} "LLVM build")
-elseif (ACTION STREQUAL "CONFIGURATION")
+elseif (ACTION STREQUAL "CONFIGURE")
     message(STATUS "Starting configuration...")
     execute_process(
             COMMAND ${CMAKE_COMMAND}
