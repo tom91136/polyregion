@@ -6,6 +6,9 @@ on:
       arch:
         required: true
         type: string
+      type:
+        required: true
+        type: string
 
 defaults:
   run:
@@ -61,7 +64,7 @@ jobs:
       - name: Build LLVM
         id: build-llvm
         working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=LLVM -DARCH=${{ inputs.arch }} -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.type }} -DACTION=LLVM -DARCH=${{ inputs.arch }} -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
 
       - name: Save LLVM cache
         if: steps.build-llvm.outcome == 'success'
@@ -73,22 +76,22 @@ jobs:
 
       - name: Configure release build
         working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=CONFIGURE -DARCH=${{ inputs.arch }} -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.type }} -DACTION=CONFIGURE -DARCH=${{ inputs.arch }} -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
 
       - name: Release build shim
         working-directory: ./native
         if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DARCH=${{ inputs.arch }} -DTARGET=polyregion-shim-jvm -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.type }} -DACTION=BUILD -DARCH=${{ inputs.arch }} -DTARGET=polyregion-shim-jvm -P build.cmake
 
       - name: Release build runtime
         working-directory: ./native
         if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DARCH=${{ inputs.arch }} -DTARGET=polyregion-runtime-jvm -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.type }} -DACTION=BUILD -DARCH=${{ inputs.arch }} -DTARGET=polyregion-runtime-jvm -P build.cmake
 
       - name: Release build compiler
         working-directory: ./native
         if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DARCH=${{ inputs.arch }} -DTARGET=polyregion-compiler-jvm -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.type }} -DACTION=BUILD -DARCH=${{ inputs.arch }} -DTARGET=polyregion-compiler-jvm -P build.cmake
 
       - name: Check artefact
         working-directory: ./native
