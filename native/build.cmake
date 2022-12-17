@@ -53,9 +53,7 @@ if (CMAKE_TOOLCHAIN_FILE)
 endif ()
 
 
-if (ACTION STREQUAL "CONFIGURE")
-    message(STATUS "Starting configuration...")
-
+if (ACTION STREQUAL "LLVM")
     message(STATUS "Starting LLVM build...")
     execute_process(
             COMMAND ${CMAKE_COMMAND}
@@ -67,7 +65,7 @@ if (ACTION STREQUAL "CONFIGURE")
             COMMAND_ECHO STDERR
             RESULT_VARIABLE SUCCESS)
     check_process_return(${SUCCESS} "LLVM build")
-
+elseif (ACTION STREQUAL "CONFIGURATION")
     message(STATUS "Starting configuration...")
     execute_process(
             COMMAND ${CMAKE_COMMAND}
@@ -80,10 +78,8 @@ if (ACTION STREQUAL "CONFIGURE")
             COMMAND_ECHO STDERR
             RESULT_VARIABLE SUCCESS)
     check_process_return(${SUCCESS} "Configuration")
-
 elseif (ACTION STREQUAL "BUILD")
     message(STATUS "Starting build for target ${TARGET} ...")
-
     execute_process(
             COMMAND ${CMAKE_COMMAND}
             --build ${BUILD_NAME}
@@ -91,7 +87,6 @@ elseif (ACTION STREQUAL "BUILD")
             COMMAND_ECHO STDERR
             RESULT_VARIABLE SUCCESS)
     check_process_return(${SUCCESS} "${TARGET} build")
-
 else ()
     message(FATAL_ERROR "Unknown action: ${ACTION}")
 endif ()

@@ -26,8 +26,8 @@ jobs:
         id: restore-sysroot
         uses: actions/cache/restore@v3.2.0-beta.1
         with:
-          path: ./native/sysroot-image-creator/out/bullseye/Packages.bullseye_main_${{ inputs.arch }}.xz
-          key: ${{ runner.os }}-${{ inputs.arch }}-${{ hashFiles('./native/sysroot-image-creator/**') }}
+          path: ./native/sysroot-image-creator/out/bullseye/debian_bullseye_${{ inputs.arch }}_sysroot.tar.xz
+          key: ${{ runner.os }}-${{ inputs.arch }}-${{ hashFiles('./native/sysroot-image-creator/*.sh') }}
 
       - name: Build sysroot
         id: build-sysroot
@@ -40,8 +40,8 @@ jobs:
         uses: actions/cache/save@v3.2.0-beta.1
         id: save-sysroot
         with:
-          path: ./native/sysroot-image-creator/out/bullseye/Packages.bullseye_main_${{ inputs.arch }}.xz
-          key: ${{ runner.os }}-${{ inputs.arch }}-${{ hashFiles('./native/sysroot-image-creator/**') }}
+          path: ./native/sysroot-image-creator/out/bullseye/debian_bullseye_${{ inputs.arch }}_sysroot.tar.xz
+          key: ${{ runner.os }}-${{ inputs.arch }}-${{ hashFiles('./native/sysroot-image-creator/*.sh') }}
 
       - name: Prepare sysroot
         working-directory: ./native/sysroot-image-creator
@@ -58,10 +58,10 @@ jobs:
           path: ./native/llvm-*
           key: ${{ runner.os }}-${{ hashFiles('./native/*.cmake') }}
 
-      - name: Configure release build
+      - name: Build LLVM
         id: build-llvm
         working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=CONFIGURE -DARCH=${{ inputs.arch }} -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=LLVM -DARCH=${{ inputs.arch }} -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
 
       - name: Save LLVM cache
         if: steps.build-llvm.outcome == 'success'
@@ -70,6 +70,10 @@ jobs:
         with:
           path: ./native/llvm-*
           key: ${{ runner.os }}-${{ hashFiles('./native/*.cmake') }}
+
+      - name: Configure release build
+        working-directory: ./native
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=CONFIGURE -DARCH=${{ inputs.arch }} -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
 
       - name: Release build shim
         working-directory: ./native
@@ -89,4 +93,6 @@ jobs:
       - name: Check artefact
         working-directory: ./native
         if: always()
-        run: ls -lah build-linux-x86_64/bindings/jvm
+        run: |
+          ls -lah build-linux-x86_64/bindings/jvm
+          lld build-linux-x86_64/bindings/jvm/*.so

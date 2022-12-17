@@ -25,12 +25,12 @@ jobs:
           path: ./native/llvm-*
           key: ${{ runner.os }}-${{ hashFiles('./native/*.cmake') }}
 
-      - name: Configure release build
+      - name: Build LLVM
         id: build-llvm
         working-directory: ./native
         run: |
           call setup_msvc_env.bat 
-          cmake -DCMAKE_BUILD_TYPE=Release -DACTION=CONFIGURE -P build.cmake
+          cmake -DCMAKE_BUILD_TYPE=Release -DACTION=LLVM -P build.cmake
 
       - name: Save LLVM cache
         if: steps.build-llvm.outcome == 'success'
@@ -39,6 +39,12 @@ jobs:
         with:
           path: ./native/llvm-*
           key: ${{ runner.os }}-${{ hashFiles('./native/*.cmake') }}
+
+      - name: Configure release build
+        working-directory: ./native
+        run: |
+          call setup_msvc_env.bat 
+          cmake -DCMAKE_BUILD_TYPE=Release -DACTION=CONFIGURE -P build.cmake
 
       - name: Release build shim
         working-directory: ./native
