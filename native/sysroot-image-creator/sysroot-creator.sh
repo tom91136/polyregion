@@ -155,6 +155,8 @@ SanityCheck() {
 CreateTarBall() {
   Banner "Creating tarball ${TARBALL}"
   tar -I "xz -2 -T0" -cf ${TARBALL} -C ${INSTALL_ROOT} .
+  echo "Tarball created:"
+  ls -lh "${TARBALL}"
 }
 
 ExtractPackageXz() {

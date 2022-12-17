@@ -32,7 +32,7 @@ jobs:
         working-directory: ./native/sysroot-image-creator
         run: |
           ./sysroot-creator-bullseye.sh ${{ env.TARGET_ARCH }}
-          file ./out/bullseye/Packages.bullseye_main_${{ env.TARGET_ARCH }}.tar.xz
+          file ./out/bullseye/debian_bullseye_${{ env.TARGET_ARCH }}.tar.xz
 
       - name: Extract sysroot
         shell: bash
@@ -41,6 +41,7 @@ jobs:
           mkdir -p "sysroot_${{ env.TARGET_ARCH }}" 
           tar xf out/bullseye/debian_bullseye_${{ env.TARGET_ARCH }}_sysroot.tar.xz  -C ./sysroot_${{ env.TARGET_ARCH }}
           echo "SYSROOT_PATH=$PWD/sysroot_${{ env.TARGET_ARCH }}" >> $GITHUB_ENV
+          ls -lah ${{ env.SYSROOT_PATH }}
 
       - name: Cache LLVM
         if: ${{ !env.ACT }}
