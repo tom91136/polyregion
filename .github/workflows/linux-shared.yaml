@@ -28,8 +28,8 @@ jobs:
       - name: Create sysroot
         if: steps.cache-sysroot.outputs.cache-hit != 'true'
         working-directory: ./native/sysroot-image-creator
-        run: .|
-          /sysroot-creator-bullseye.sh ${{ inputs.arch }}
+        run: |
+          ./sysroot-creator-bullseye.sh ${{ inputs.arch }}
           mkdir -p "sysroot_${{ inputs.arch }}"
           tar xf out/bullseye/debian_bullseye_${{ inputs.arch }}_sysroot.tar.xz  -C ./sysroot_${{ inputs.arch }}
           echo "SYSROOT_PATH=$PWD/sysroot_${{ inputs.arch }}" >> $GITHUB_ENV
