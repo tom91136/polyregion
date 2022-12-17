@@ -22,17 +22,17 @@ jobs:
         id: cache-sysroot
         uses: actions/cache@v3
         with:
-          path: ./native/sysroot-image-creator/out/bullseye/Packages.bullseye_main_${{ input.arch }}.xz
-          key: ${{ runner.os }}-${{ input.arch }}-${{ hashFiles('./native/sysroot-image-creator/**') }}
+          path: ./native/sysroot-image-creator/out/bullseye/Packages.bullseye_main_${{ inputs.arch }}.xz
+          key: ${{ runner.os }}-${{ inputs.arch }}-${{ hashFiles('./native/sysroot-image-creator/**') }}
 
       - name: Create sysroot
         if: steps.cache-sysroot.outputs.cache-hit != 'true'
         working-directory: ./native/sysroot-image-creator
         run: .|
-          /sysroot-creator-bullseye.sh ${{ input.arch }}
-          mkdir -p "sysroot_${{ input.arch }}"
-          tar xf out/bullseye/debian_bullseye_${{ input.arch }}_sysroot.tar.xz  -C ./sysroot_${{ input.arch }}
-          echo "SYSROOT_PATH=$PWD/sysroot_${{ input.arch }}" >> $GITHUB_ENV
+          /sysroot-creator-bullseye.sh ${{ inputs.arch }}
+          mkdir -p "sysroot_${{ inputs.arch }}"
+          tar xf out/bullseye/debian_bullseye_${{ inputs.arch }}_sysroot.tar.xz  -C ./sysroot_${{ inputs.arch }}
+          echo "SYSROOT_PATH=$PWD/sysroot_${{ inputs.arch }}" >> $GITHUB_ENV
 
       - name: Cache LLVM
         if: ${{ !env.ACT }}
@@ -44,19 +44,19 @@ jobs:
 
       - name: Configure release build
         working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=CONFIGURE -DARCH=${{ input.arch }} -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=CONFIGURE -DARCH=${{ inputs.arch }} -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
 
       - name: Release build shim
         working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DARCH=${{ input.arch }} -DTARGET=polyregion-shim-jvm -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DARCH=${{ inputs.arch }} -DTARGET=polyregion-shim-jvm -P build.cmake
 
       - name: Release build runtime
         working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DARCH=${{ input.arch }} -DTARGET=polyregion-runtime-jvm -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DARCH=${{ inputs.arch }} -DTARGET=polyregion-runtime-jvm -P build.cmake
 
       - name: Release build compiler
         working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DARCH=${{ input.arch }} -DTARGET=polyregion-compiler-jvm -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DARCH=${{ inputs.arch }} -DTARGET=polyregion-compiler-jvm -P build.cmake
 
       - name: Check artefact
         working-directory: ./native

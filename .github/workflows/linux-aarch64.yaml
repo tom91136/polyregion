@@ -7,7 +7,7 @@ on:
     types: published
 
 jobs:
-  llvm:
+  build:
     uses: ./.github/workflows/linux-shared.yaml
     secrets: inherit
     with:
