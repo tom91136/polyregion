@@ -32,7 +32,7 @@ jobs:
         working-directory: ./native/sysroot-image-creator
         run: |
           ./sysroot-creator-bullseye.sh ${{ env.TARGET_ARCH }}
-          file ./out/bullseye/debian_bullseye_${{ env.TARGET_ARCH }}.tar.xz
+          file ./out/bullseye/debian_bullseye_${{ env.TARGET_ARCH }}_sysroot.tar.xz
 
       - name: Extract sysroot
         shell: bash
@@ -41,7 +41,6 @@ jobs:
           mkdir -p "sysroot_${{ env.TARGET_ARCH }}" 
           tar xf out/bullseye/debian_bullseye_${{ env.TARGET_ARCH }}_sysroot.tar.xz  -C ./sysroot_${{ env.TARGET_ARCH }}
           echo "SYSROOT_PATH=$PWD/sysroot_${{ env.TARGET_ARCH }}" >> $GITHUB_ENV
-          ls -lah ${{ env.SYSROOT_PATH }}
 
       - name: Cache LLVM
         if: ${{ !env.ACT }}
@@ -54,7 +53,9 @@ jobs:
       - name: Configure release build
         shell: bash
         working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=CONFIGURE -DARCH=${{ env.TARGET_ARCH }} -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
+        run: |
+          ls -lah ${{ env.SYSROOT_PATH }}
+          cmake -DCMAKE_BUILD_TYPE=Release -DACTION=CONFIGURE -DARCH=${{ env.TARGET_ARCH }} -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
 
       - name: Release build shim
         shell: bash

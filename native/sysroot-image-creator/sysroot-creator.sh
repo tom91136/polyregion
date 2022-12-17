@@ -296,7 +296,7 @@ CleanupJailSymlinks() {
 
   SAVEDPWD=$(pwd)
   cd ${INSTALL_ROOT}
-  local libdirs="lib usr/lib"
+  local libdirs="lib64 lib usr/lib"
 
   find $libdirs -type l -printf '%p %l\n' | while read link target; do
     # skip links with non-absolute paths
