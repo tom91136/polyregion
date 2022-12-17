@@ -8,20 +8,37 @@ on:
 
 jobs:
   build:
-    runs-on: [ ubuntu-22.04 ]
-    container:
-      image: tom91136/centos7-llvm14:latest
+    runs-on: [ubuntu-22.04]
     steps:
       - uses: actions/checkout@v3
 
-      - name: Setup env
+      - name: Set arch
         shell: bash
+        run: echo "TARGET_ARCH=x86_64" >> $GITHUB_ENV
+
+      - name: Cache sysroot
+        if: ${{ !env.ACT }}
+        id: cache-sysroot
+        uses: actions/cache@v3
+        with:
+          path: ./native/sysroot-image-creator/out/bullseye/Packages.bullseye_main_${{ env.TARGET_ARCH }}.xz
+          key: ${{ runner.os }}-${{ hashFiles('./native/sysroot-image-creator/**') }}
+
+      - name: Create sysroot
+        shell: bash
+        if: steps.cache-sysroot.outputs.cache-hit != 'true'
+        working-directory: ./native/sysroot-image-creator
+        run: | 
+          ./sysroot-creator-bullseye.sh ${{ env.TARGET_ARCH }} 
+          file ./out/bullseye/Packages.bullseye_main_${{ env.TARGET_ARCH }}.xz
+
+      - name: Extract sysroot
+        shell: bash
+        working-directory: ./native/sysroot-image-creator
         run: |
-          cd /root; source /centos7-setup-llvm.sh setup-build || true
-          cd /root; source /centos7-setup-llvm.sh env         || true
-          echo "CXX=clang++" >> $GITHUB_ENV
-          echo "CC=clang"    >> $GITHUB_ENV
-          echo "LINKER=lld"  >> $GITHUB_ENV
+          mkdir -p "sysroot_${{ env.TARGET_ARCH }}" 
+          tar xf out/bullseye/debian_bullseye_${{ env.TARGET_ARCH }}_sysroot.tar.xz  -C ./sysroot_${{ env.TARGET_ARCH }}
+          echo "SYSROOT_PATH=$PWD/sysroot_${{ env.TARGET_ARCH }}" >> $GITHUB_ENV
 
       - name: Cache LLVM
         if: ${{ !env.ACT }}
@@ -34,22 +51,22 @@ jobs:
       - name: Configure release build
         shell: bash
         working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=CONFIGURE -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=CONFIGURE -DARCH=${{ env.TARGET_ARCH }} -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
 
       - name: Release build shim
         shell: bash
         working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-shim-jvm -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DARCH=${{ env.TARGET_ARCH }} -DTARGET=polyregion-shim-jvm -P build.cmake
 
       - name: Release build runtime
         shell: bash
         working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-runtime-jvm -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DARCH=${{ env.TARGET_ARCH }} -DTARGET=polyregion-runtime-jvm -P build.cmake
 
       - name: Release build compiler
         shell: bash
         working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-compiler-jvm -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DARCH=${{ env.TARGET_ARCH }} -DTARGET=polyregion-compiler-jvm -P build.cmake
 
       - name: Check artefact
         shell: bash
