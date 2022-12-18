@@ -59,7 +59,7 @@ jobs:
         uses: actions/cache/restore@v3.2.0-beta.1
         with:
           path: ./native/llvm-*
-          key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build-llvm.cmake') }}-${{ hashFiles('./native/toolchain*.cmake') }}
+          key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake') }}-${{ hashFiles('./native/toolchain*.cmake') }}
 
       - name: Build LLVM
         id: build-llvm
@@ -72,7 +72,7 @@ jobs:
         id: save-llvm
         with:
           path: ./native/llvm-*
-          key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build-llvm.cmake') }}-${{ hashFiles('./native/toolchain*.cmake') }}
+          key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake') }}-${{ hashFiles('./native/toolchain*.cmake') }}
 
       - name: Configure release build
         working-directory: ./native
@@ -109,3 +109,7 @@ jobs:
         run: |
           ls -lah build-linux-x86_64/bindings/jvm
           lld build-linux-x86_64/bindings/jvm/*.so
+          ls -lah build-linux-x86_64/compiler/
+          lld build-linux-x86_64/compiler/compiler-drv
+          ls -lah build-linux-x86_64/runtime/
+          lld build-linux-x86_64/runtime/runtime-drv

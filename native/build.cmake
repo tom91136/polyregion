@@ -1,10 +1,10 @@
 
 if (UNIX)
-    if (NOT CMAKE_SYSTEM_PROCESSOR)
-        message(STATUS "CMAKE_SYSTEM_PROCESSOR not set, detecting host CMAKE_SYSTEM_PROCESSOR")
-        execute_process(COMMAND uname -m OUTPUT_VARIABLE CMAKE_SYSTEM_PROCESSOR RESULT_VARIABLE SUCCESS OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if (NOT ARCH)
+        message(STATUS "ARCH not set, detecting host arch")
+        execute_process(COMMAND uname -m OUTPUT_VARIABLE ARCH RESULT_VARIABLE SUCCESS OUTPUT_STRIP_TRAILING_WHITESPACE)
         if (NOT SUCCESS EQUAL "0")
-            message(FATAL_ERROR "Cannot determine CMAKE_SYSTEM_PROCESSOR, `uname -m` returned ${SUCCESS}")
+            message(FATAL_ERROR "Cannot determine host arch, `uname -m` returned ${SUCCESS}")
         endif ()
     endif ()
 elseif (WIN32)
@@ -21,15 +21,15 @@ endif ()
 
 string(TOLOWER "build-${CMAKE_HOST_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}" BUILD_NAME)
 
-message(STATUS "CMAKE_SYSTEM_PROCESSOR = `${CMAKE_SYSTEM_PROCESSOR}`")
+message(STATUS "Architecture = `${ARCH}`")
 message(STATUS "Build name   = `${BUILD_NAME}`")
 if (CMAKE_SYSROOT)
-    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/toolchain_${CMAKE_HOST_SYSTEM_NAME}_clang_${CMAKE_SYSTEM_PROCESSOR}.cmake")
+    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/toolchain_${CMAKE_HOST_SYSTEM_NAME}_clang_${ARCH}.cmake")
     if (NOT EXISTS "${CMAKE_TOOLCHAIN_FILE}")
-        message(FATAL_ERROR "Cannot find toolchain ${CMAKE_TOOLCHAIN_FILE} for ${CMAKE_SYSTEM_PROCESSOR}")
+        message(FATAL_ERROR "Cannot find toolchain ${CMAKE_TOOLCHAIN_FILE} for ${ARCH}")
     endif ()
     if (NOT EXISTS "${CMAKE_SYSROOT}")
-        message(FATAL_ERROR "Cannot find sysroot ${CMAKE_SYSROOT} for ${CMAKE_SYSTEM_PROCESSOR}")
+        message(FATAL_ERROR "Cannot find sysroot ${CMAKE_SYSROOT} for ${ARCH}")
     endif ()
     message(STATUS "Toolchain    = `${CMAKE_TOOLCHAIN_FILE}`")
     message(STATUS "Sysroot      = `${CMAKE_SYSROOT}`")
@@ -60,7 +60,7 @@ if (ACTION STREQUAL "LLVM")
             COMMAND ${CMAKE_COMMAND}
             ${BUILD_OPTIONS}
             -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-            -DCMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR}
+            -DCMAKE_SYSTEM_PROCESSOR=${ARCH}
             -P build_llvm.cmake
 
             COMMAND_ECHO STDERR

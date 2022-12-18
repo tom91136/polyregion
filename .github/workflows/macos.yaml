@@ -31,7 +31,7 @@ jobs:
         uses: actions/cache/restore@v3.2.0-beta.1
         with:
           path: ./native/llvm-*
-          key: ${{ runner.os }}-${{ hashFiles('./native/*.cmake') }}
+          key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake') }}-${{ hashFiles('./native/toolchain*.cmake') }}
 
       - name: Build LLVM
         id: build-llvm
@@ -44,7 +44,7 @@ jobs:
         id: save-llvm
         with:
           path: ./native/llvm-*
-          key: ${{ runner.os }}-${{ hashFiles('./native/*.cmake') }}
+          key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake') }}-${{ hashFiles('./native/toolchain*.cmake') }}
 
       - name: Configure release build
         working-directory: ./native
