@@ -1,7 +1,7 @@
 #pragma once
 
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 #include <utility>
 
 namespace polyregion::runtime {
@@ -20,7 +20,7 @@ enum class EXPORT Type : uint8_t {
   Scratch,
 };
 
-static constexpr size_t byteOfType(Type t) {
+static constexpr EXPORT size_t byteOfType(Type t) {
   switch (t) {
     case Type::Void: return 0;
     case Type::Bool8:
@@ -32,11 +32,11 @@ static constexpr size_t byteOfType(Type t) {
     case Type::Float32: return 32 / 8;
     case Type::Double64: return 64 / 8;
     case Type::Scratch:
-    case Type::Ptr: static_assert(sizeof(ptrdiff_t) == 8); return 64 / 8;
+    case Type::Ptr: return sizeof(void *) / 8;
   }
 }
 
-static constexpr const char * typeName(Type t) {
+static constexpr EXPORT const char *typeName(Type t) {
   switch (t) {
     case Type::Void: return "Void";
     case Type::Bool8: return "Bool8";
@@ -47,8 +47,8 @@ static constexpr const char * typeName(Type t) {
     case Type::Long64: return "Long64";
     case Type::Float32: return "Float32";
     case Type::Double64: return "Double64";
-    case Type::Ptr:return "Ptr";
-    case Type::Scratch:return "Scratch";
+    case Type::Ptr: return "Ptr";
+    case Type::Scratch: return "Scratch";
   }
 }
 
