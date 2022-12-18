@@ -21,9 +21,9 @@ jobs:
       - uses: actions/checkout@v3
 
       - name: Install dependencies
+        # llvm-tblgen is in llvm
         run: |
-          sudo apt-get install ninja-build
-
+          sudo apt-get install ninja-build llvm
       - name: Restore sysroot cache
         if: ${{ !env.ACT }}
         id: restore-sysroot
@@ -59,7 +59,7 @@ jobs:
         uses: actions/cache/restore@v3.2.0-beta.1
         with:
           path: ./native/llvm-*
-          key: ${{ runner.os }}-${{ hashFiles('./native/*.cmake') }}
+          key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build-llvm.cmake') }}-${{ hashFiles('./native/toolchain*.cmake') }}
 
       - name: Build LLVM
         id: build-llvm
@@ -72,23 +72,33 @@ jobs:
         id: save-llvm
         with:
           path: ./native/llvm-*
-          key: ${{ runner.os }}-${{ hashFiles('./native/*.cmake') }}
+          key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build-llvm.cmake') }}-${{ hashFiles('./native/toolchain*.cmake') }}
 
       - name: Configure release build
         working-directory: ./native
         run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DACTION=CONFIGURE -DARCH=${{ inputs.build_arch }} -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
 
-      - name: Release build shim
+      - name: Release build runtime-drv
+        working-directory: ./native
+        if: always()
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DACTION=BUILD -DARCH=${{ inputs.build_arch }} -DTARGET=runtime-drv -P build.cmake
+
+      - name: Release build compiler-drv
+        working-directory: ./native
+        if: always()
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DACTION=BUILD -DARCH=${{ inputs.build_arch }} -DTARGET=compiler-drv -P build.cmake
+
+      - name: Release build JVM shim
         working-directory: ./native
         if: always()
         run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DACTION=BUILD -DARCH=${{ inputs.build_arch }} -DTARGET=polyregion-shim-jvm -P build.cmake
 
-      - name: Release build runtime
+      - name: Release build JVM runtime
         working-directory: ./native
         if: always()
         run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DACTION=BUILD -DARCH=${{ inputs.build_arch }} -DTARGET=polyregion-runtime-jvm -P build.cmake
 
-      - name: Release build compiler
+      - name: Release build JVM compiler
         working-directory: ./native
         if: always()
         run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DACTION=BUILD -DARCH=${{ inputs.build_arch }} -DTARGET=polyregion-compiler-jvm -P build.cmake

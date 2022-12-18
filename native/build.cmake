@@ -1,34 +1,35 @@
 
 if (UNIX)
-    if (NOT ARCH)
-        message(STATUS "ARCH not set detecting host arch")
-        execute_process(COMMAND uname -m OUTPUT_VARIABLE ARCH RESULT_VARIABLE SUCCESS OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if (NOT CMAKE_SYSTEM_PROCESSOR)
+        message(STATUS "CMAKE_SYSTEM_PROCESSOR not set, detecting host CMAKE_SYSTEM_PROCESSOR")
+        execute_process(COMMAND uname -m OUTPUT_VARIABLE CMAKE_SYSTEM_PROCESSOR RESULT_VARIABLE SUCCESS OUTPUT_STRIP_TRAILING_WHITESPACE)
         if (NOT SUCCESS EQUAL "0")
-            message(FATAL_ERROR "Cannot determine arch, `uname -m` returned ${SUCCESS}")
+            message(FATAL_ERROR "Cannot determine CMAKE_SYSTEM_PROCESSOR, `uname -m` returned ${SUCCESS}")
         endif ()
     endif ()
 elseif (WIN32)
+    # FIXME W32
     # we only support 64 bit on windows
-    if (ARCH)
-        message(STATUS "Setting ARCH is not supported on Windows")
+    if (CMAKE_SYSTEM_PROCESSOR)
+        message(STATUS "Setting CMAKE_SYSTEM_PROCESSOR is not supported on Windows")
     endif ()
-    set(ARCH x86_64)
+    set(CMAKE_SYSTEM_PROCESSOR x86_64)
 else ()
     message(FATAL_ERROR "Unknown platform (not Unix-like or Windows)")
 endif ()
 
 
-string(TOLOWER "build-${CMAKE_HOST_SYSTEM_NAME}-${ARCH}" BUILD_NAME)
+string(TOLOWER "build-${CMAKE_HOST_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}" BUILD_NAME)
 
-message(STATUS "Architecture = `${ARCH}`")
+message(STATUS "CMAKE_SYSTEM_PROCESSOR = `${CMAKE_SYSTEM_PROCESSOR}`")
 message(STATUS "Build name   = `${BUILD_NAME}`")
 if (CMAKE_SYSROOT)
-    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/toolchain_clang_${ARCH}.cmake")
+    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/toolchain_{$CMAKE_HOST_SYSTEM_NAME}_clang_${CMAKE_SYSTEM_PROCESSOR}.cmake")
     if (NOT EXISTS "${CMAKE_TOOLCHAIN_FILE}")
-        message(FATAL_ERROR "Cannot find toolchain ${CMAKE_TOOLCHAIN_FILE} for ${ARCH}")
+        message(FATAL_ERROR "Cannot find toolchain ${CMAKE_TOOLCHAIN_FILE} for ${CMAKE_SYSTEM_PROCESSOR}")
     endif ()
     if (NOT EXISTS "${CMAKE_SYSROOT}")
-        message(FATAL_ERROR "Cannot find sysroot ${CMAKE_SYSROOT} for ${ARCH}")
+        message(FATAL_ERROR "Cannot find sysroot ${CMAKE_SYSROOT} for ${CMAKE_SYSTEM_PROCESSOR}")
     endif ()
     message(STATUS "Toolchain    = `${CMAKE_TOOLCHAIN_FILE}`")
     message(STATUS "Sysroot      = `${CMAKE_SYSROOT}`")
@@ -59,7 +60,7 @@ if (ACTION STREQUAL "LLVM")
             COMMAND ${CMAKE_COMMAND}
             ${BUILD_OPTIONS}
             -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-            -DCMAKE_SYSTEM_PROCESSOR=${ARCH}
+            -DCMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR}
             -P build_llvm.cmake
 
             COMMAND_ECHO STDERR
