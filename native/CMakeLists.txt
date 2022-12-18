@@ -32,8 +32,8 @@ FetchContent_Declare(
 
 FetchContent_Declare(
         libffi
-        URL https://github.com/libffi/libffi/releases/download/v3.4.2/libffi-3.4.2.tar.gz
-        URL_HASH SHA256=540fb721619a6aba3bdeef7d940d8e9e0e6d2c193595bc243241b77ff9e93620
+        URL https://github.com/libffi/libffi/releases/download/v3.4.4/libffi-3.4.4.tar.gz
+        URL_HASH SHA256=d66c56ad259a82cf2a9dfc408b32bf5da52371500b84745f7fb8b645712df676
 )
 
 FetchContent_Declare(
@@ -212,7 +212,9 @@ if (NOT lld_POPULATED)
     set(lld_SOURCE_DIR "${lld_SOURCE_DIR}/")
     set(lld_BINARY_DIR "${lld_BINARY_DIR}/")
 
-    set(LLVM_TABLEGEN_EXE ${LLVM_TOOLS_BINARY_DIR}/llvm-tblgen)
+    # Make sure we find it here before LLVM tries;
+    #  we want to use the host tblgen and not the platform dependent one for cross builds.
+    find_program(LLVM_TABLEGEN_EXE "llvm-tblgen")
 
     configure_file(
             ${lld_SOURCE_DIR}/include/lld/Common/Version.inc.in
