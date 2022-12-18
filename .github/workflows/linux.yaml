@@ -1,0 +1,33 @@
+name: Linux builds
+
+on:
+  pull_request:
+  push:
+  release:
+    types: published
+
+jobs:
+  i386-release:
+    uses: ./.github/workflows/linux-shared.yaml
+    secrets: inherit
+    with:
+      build_arch: i386
+      build_type: Release
+  x86_64-release:
+    uses: ./.github/workflows/linux-shared.yaml
+    secrets: inherit
+    with:
+      build_arch: x86_64
+      build_type: release
+  arm-release:
+    uses: ./.github/workflows/linux-shared.yaml
+    secrets: inherit
+    with:
+      build_arch: arm
+      build_type: Release
+  aarch64-release:
+    uses: ./.github/workflows/linux-shared.yaml
+    secrets: inherit
+    with:
+      build_arch: aarch64
+      build_type: Release

@@ -10,16 +10,17 @@ if (UNIX)
 elseif (WIN32)
     # FIXME W32
     # we only support 64 bit on windows
-    if (CMAKE_SYSTEM_PROCESSOR)
-        message(STATUS "Setting CMAKE_SYSTEM_PROCESSOR is not supported on Windows")
+    if (ARCH)
+        message(STATUS "Setting ARCH is not supported on Windows")
     endif ()
-    set(CMAKE_SYSTEM_PROCESSOR x86_64)
+    set(ARCH x86_64)
 else ()
     message(FATAL_ERROR "Unknown platform (not Unix-like or Windows)")
 endif ()
 
 
-string(TOLOWER "build-${CMAKE_HOST_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}" BUILD_NAME)
+string(TOLOWER ${CMAKE_HOST_SYSTEM_NAME} CMAKE_HOST_SYSTEM_NAME)
+string(TOLOWER "build-${CMAKE_HOST_SYSTEM_NAME}-${ARCH}" BUILD_NAME)
 
 message(STATUS "Architecture = `${ARCH}`")
 message(STATUS "Build name   = `${BUILD_NAME}`")
