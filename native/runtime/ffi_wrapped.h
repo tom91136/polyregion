@@ -7,3 +7,8 @@
 
 #undef X86_64
 #undef X86
+
+// Same thing for ARM/aarch64
+
+#undef ARM64
+#undef ARM

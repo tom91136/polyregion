@@ -1,4 +1,4 @@
-name: macOS
+name: macOS builds
 
 on:
   pull_request:
@@ -6,64 +6,16 @@ on:
   release:
     types: published
 
-defaults:
-  run:
-    shell: bash
-
 jobs:
-  build:
-    runs-on: macos-12
-
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Install dependencies
-        run: |
-          brew install llvm cmake ninja
-          echo "JAVA_HOME=${JAVA_HOME_8_X64}"       >> $GITHUB_ENV
-          echo "PATH=/usr/local/opt/llvm/bin:$PATH" >> $GITHUB_PATH
-
-      - name: Restore LLVM cache
-        if: ${{ !env.ACT }}
-        id: restore-llvm
-        uses: actions/cache/restore@v3.2.0-beta.1
-        with:
-          path: ./native/llvm-*
-          key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake') }}-${{ hashFiles('./native/toolchain*.cmake') }}
-
-      - name: Build LLVM
-        id: build-llvm
-        working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=LLVM -P build.cmake
-
-      - name: Save LLVM cache
-        if: steps.build-llvm.outcome == 'success'
-        uses: actions/cache/save@v3.2.0-beta.1
-        id: save-llvm
-        with:
-          path: ./native/llvm-*
-          key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake') }}-${{ hashFiles('./native/toolchain*.cmake') }}
-
-      - name: Configure release build
-        working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=CONFIGURE -P build.cmake
-
-      - name: Release build shim
-        working-directory: ./native
-        if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-shim-jvm -P build.cmake
-
-      - name: Release build runtime
-        working-directory: ./native
-        if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-runtime-jvm -P build.cmake
-
-      - name: Release build compiler
-        working-directory: ./native
-        if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DACTION=BUILD -DTARGET=polyregion-compiler-jvm -P build.cmake
-
-      - name: Check artefact
-        if: always()
-        working-directory: ./native
-        run: ls -lah build-darwin-x86_64/bindings/jvm
+  arm64-release:
+    uses: ./.github/workflows/macos-shared.yaml
+    secrets: inherit
+    with:
+      build_arch: arm64
+      build_type: Release
+  x86_64-release:
+    uses: ./.github/workflows/macos-shared.yaml
+    secrets: inherit
+    with:
+      build_arch: x86_64
+      build_type: release

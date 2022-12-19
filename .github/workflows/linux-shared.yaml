@@ -24,6 +24,13 @@ jobs:
         # llvm-tblgen is in llvm
         run: |
           sudo apt-get install ninja-build llvm
+
+      - name: Check environment
+        run: |
+          clang --version
+          llvm-tblgen --version
+          echo "JAVA_HOME=$JAVA_HOME"
+
       - name: Restore sysroot cache
         if: ${{ !env.ACT }}
         id: restore-sysroot
@@ -64,7 +71,7 @@ jobs:
       - name: Build LLVM
         id: build-llvm
         working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DACTION=LLVM -DARCH=${{ inputs.build_arch }} -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=LLVM -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
 
       - name: Save LLVM cache
         if: steps.build-llvm.outcome == 'success'
@@ -76,32 +83,32 @@ jobs:
 
       - name: Configure release build
         working-directory: ./native
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DACTION=CONFIGURE -DARCH=${{ inputs.build_arch }} -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=CONFIGURE -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
 
       - name: Release build runtime-drv
         working-directory: ./native
         if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DACTION=BUILD -DARCH=${{ inputs.build_arch }} -DTARGET=runtime-drv -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=runtime-drv -P build.cmake
 
       - name: Release build compiler-drv
         working-directory: ./native
         if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DACTION=BUILD -DARCH=${{ inputs.build_arch }} -DTARGET=compiler-drv -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=compiler-drv -P build.cmake
 
       - name: Release build JVM shim
         working-directory: ./native
         if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DACTION=BUILD -DARCH=${{ inputs.build_arch }} -DTARGET=polyregion-shim-jvm -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyregion-shim-jvm -P build.cmake
 
       - name: Release build JVM runtime
         working-directory: ./native
         if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DACTION=BUILD -DARCH=${{ inputs.build_arch }} -DTARGET=polyregion-runtime-jvm -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyregion-runtime-jvm -P build.cmake
 
       - name: Release build JVM compiler
         working-directory: ./native
         if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DACTION=BUILD -DARCH=${{ inputs.build_arch }} -DTARGET=polyregion-compiler-jvm -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyregion-compiler-jvm -P build.cmake
 
       - name: Check artefact
         working-directory: ./native
@@ -110,6 +117,13 @@ jobs:
           ls -lah build-linux-${{ inputs.build_arch }}/bindings/jvm
           ls -lah build-linux-${{ inputs.build_arch }}/compiler/
           ls -lah build-linux-${{ inputs.build_arch }}/runtime/
-          ldd build-linux-${{ inputs.build_arch }}/bindings/jvm/*.so
-          ldd build-linux-${{ inputs.build_arch }}/compiler/compiler-drv
-          ldd build-linux-${{ inputs.build_arch }}/runtime/runtime-drv
+          show_libs () {
+             for arg in $@; do
+               file "$1"
+               objdump -x "$1" | grep NEEDED
+               echo "======"
+             done
+          }
+          show_libs build-linux-${{ inputs.build_arch }}/bindings/jvm/*.so 
+          show_libs build-linux-${{ inputs.build_arch }}/compiler/compiler-drv 
+          show_libs build-linux-${{ inputs.build_arch }}/runtime/runtime-drv
