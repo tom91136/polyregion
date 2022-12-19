@@ -23,8 +23,8 @@ jobs:
       - name: Install dependencies
         run: |
           brew install llvm cmake ninja
-          echo "JAVA_HOME=${JAVA_HOME_8_X64}"       >> $GITHUB_ENV
-          echo "PATH=/usr/local/opt/llvm/bin:$PATH" >> $GITHUB_PATH
+          echo "JAVA_HOME=$JAVA_HOME_8_X64" >> $GITHUB_ENV
+          echo "/usr/local/opt/llvm/bin"    >> $GITHUB_PATH
 
       - name: Check environment
         run: |
