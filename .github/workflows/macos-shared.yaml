@@ -89,6 +89,13 @@ jobs:
           ls -lah build-darwin-${{ inputs.build_arch }}/bindings/jvm
           ls -lah build-darwin-${{ inputs.build_arch }}/compiler/
           ls -lah build-darwin-${{ inputs.build_arch }}/runtime/
-          ldd build-darwin-${{ inputs.build_arch }}/bindings/jvm/*.so
-          ldd build-darwin-${{ inputs.build_arch }}/compiler/compiler-drv
-          ldd build-darwin-${{ inputs.build_arch }}/runtime/runtime-drv
+          show_libs () {
+             for arg in $@; do
+               file "$1"
+               objdump -x "$1" | grep NEEDED
+               echo "======"
+             done
+          }
+          show_libs build-darwin-${{ inputs.build_arch }}/bindings/jvm/*.so 
+          show_libs build-darwin-${{ inputs.build_arch }}/compiler/compiler-drv 
+          show_libs build-darwin-${{ inputs.build_arch }}/runtime/runtime-drv
