@@ -20,10 +20,8 @@ jobs:
       - name: Install dependencies
         run: |
           brew install llvm cmake ninja
-          echo "JAVA_HOME=${JAVA_HOME_8_X64}" >> "$GITHUB_ENV"
-          echo "CXX=/usr/local/opt/llvm/bin/clang++" >> $GITHUB_ENV
-          echo "CC=/usr/local/opt/llvm/bin/clang"    >> $GITHUB_ENV
-          echo "LINKER=$(which ld)"                  >> $GITHUB_ENV
+          echo "JAVA_HOME=${JAVA_HOME_8_X64}"       >> $GITHUB_ENV
+          echo "PATH=/usr/local/opt/llvm/bin:$PATH" >> $GITHUB_PATH
 
       - name: Restore LLVM cache
         if: ${{ !env.ACT }}
