@@ -50,6 +50,9 @@ else ()
     set(BUILD_SHARED_LIBS OFF)
 endif ()
 
+if (NOT DEFINED LLVM_USE_HOST_TOOLS)
+    set(LLVM_USE_HOST_TOOLS ON)
+endif ()
 
 set(LLVM_OPTIONS
 
@@ -82,7 +85,7 @@ set(LLVM_OPTIONS
 
         -DLLVM_USE_CRT_RELEASE=MT
         -DLLVM_INSTALL_UTILS=OFF
-        -DLLVM_USE_HOST_TOOLS=ON
+        -DLLVM_USE_HOST_TOOLS=${LLVM_USE_HOST_TOOLS}
         -DLLVM_STATIC_LINK_CXX_STDLIB=${USE_STATIC_CXX_STDLIB}
         "-DLLVM_TARGETS_TO_BUILD=X86\;AArch64\;ARM\;NVPTX\;AMDGPU" # quote this because of the semicolons
         )
