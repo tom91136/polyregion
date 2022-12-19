@@ -1,0 +1,91 @@
+name: Windows
+
+on:
+  workflow_call:
+    inputs:
+      build_arch:
+        required: true
+        type: string
+      build_type:
+        required: true
+        type: string
+defaults:
+  run:
+    shell: cmd
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Restore LLVM cache
+        if: ${{ !env.ACT }}
+        id: restore-llvm
+        uses: actions/cache/restore@v3.2.0-beta.1
+        with:
+          path: ./native/llvm-*
+          key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake') }}-${{ hashFiles('./native/toolchain*.cmake') }}
+
+      - name: Build LLVM
+        id: build-llvm
+        working-directory: ./native
+        run: |
+          call setup_msvc_env.bat 
+          cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=LLVM -P build.cmake
+
+      - name: Save LLVM cache
+        if: steps.build-llvm.outcome == 'success'
+        uses: actions/cache/save@v3.2.0-beta.1
+        id: save-llvm
+        with:
+          path: ./native/llvm-*
+          key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake') }}-${{ hashFiles('./native/toolchain*.cmake') }}
+
+      - name: Configure release build
+        working-directory: ./native
+        run: |
+          call setup_msvc_env.bat 
+          cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=CONFIGURE -P build.cmake
+
+      - name: Release build runtime-drv
+        working-directory: ./native
+        if: always()
+        run: |
+          call setup_msvc_env.bat 
+          cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=runtime-drv -P build.cmake
+
+      - name: Release build compiler-drv
+        working-directory: ./native
+        if: always()
+        run: |
+          call setup_msvc_env.bat 
+          cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=compiler-drv -P build.cmake
+
+      - name: Release build shim
+        working-directory: ./native
+        if: always()
+        run: |
+          call setup_msvc_env.bat 
+          cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyregion-shim-jvm -P build.cmake
+
+      - name: Release build runtime
+        working-directory: ./native
+        if: always()
+        run: |
+          call setup_msvc_env.bat 
+          cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyregion-runtime-jvm -P build.cmake
+
+      - name: Release build compiler
+        working-directory: ./native
+        if: always()
+        run: |
+          call setup_msvc_env.bat 
+          cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyregion-compiler-jvm -P build.cmake
+
+      - name: Check artefact
+        if: always()
+        shell: pwsh
+        working-directory: ./native
+        run: ls .\build-windows-x86_64\bindings\jvm\ | Select-Object Name, @{Name="MegaBytes";Expression={$_.Length / 1MB}}
