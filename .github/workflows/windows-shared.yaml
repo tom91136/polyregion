@@ -30,6 +30,7 @@ jobs:
 
       - name: Build LLVM
         id: build-llvm
+        if: steps.restore-llvm.outputs.cache-hit != 'true'
         working-directory: ./native
         run: |
           call setup_msvc_env.bat 

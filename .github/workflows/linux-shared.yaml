@@ -70,6 +70,7 @@ jobs:
 
       - name: Build LLVM
         id: build-llvm
+        if: steps.restore-llvm.outputs.cache-hit != 'true'
         working-directory: ./native
         run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=LLVM -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
 
