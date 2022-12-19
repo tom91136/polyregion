@@ -11,6 +11,7 @@ echo Using VC=%VC%
 
 set "PATH=%VC%\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe;%PATH%"
 :: See https://docs.microsoft.com/en-us/cpp/build/building-on-the-command-line?view=msvc-170
-call "%VC%\VC\Auxiliary\Build\vcvarsall.bat" x64
+call "%VC%\VC\Auxiliary\Build\vcvarsall.bat" %1
+:: X86 | AMD64
 
 echo Done

@@ -35,7 +35,7 @@ jobs:
         run: |
           # Don't use host tools on Windows as it's not present, but them from scratch 
           # FIXME this needs revisiting if ARM64 on Windows takes off 
-          call setup_msvc_env.bat 
+          call setup_msvc_env.bat ${{ inputs.build_arch }} 
           cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DLLVM_USE_HOST_TOOLS=OFF -DARCH=${{ inputs.build_arch }} -DACTION=LLVM -P build.cmake
 
       - name: Save LLVM cache
@@ -49,46 +49,49 @@ jobs:
       - name: Configure release build
         working-directory: ./native
         run: |
-          call setup_msvc_env.bat 
+          call setup_msvc_env.bat ${{ inputs.build_arch }} 
           cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=CONFIGURE -P build.cmake
 
       - name: Release build runtime-drv
         working-directory: ./native
         if: always()
         run: |
-          call setup_msvc_env.bat 
+          call setup_msvc_env.bat ${{ inputs.build_arch }} 
           cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=runtime-drv -P build.cmake
 
       - name: Release build compiler-drv
         working-directory: ./native
         if: always()
         run: |
-          call setup_msvc_env.bat 
+          call setup_msvc_env.bat ${{ inputs.build_arch }} 
           cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=compiler-drv -P build.cmake
 
       - name: Release build shim
         working-directory: ./native
         if: always()
         run: |
-          call setup_msvc_env.bat 
+          call setup_msvc_env.bat ${{ inputs.build_arch }} 
           cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyregion-shim-jvm -P build.cmake
 
       - name: Release build runtime
         working-directory: ./native
         if: always()
         run: |
-          call setup_msvc_env.bat 
+          call setup_msvc_env.bat ${{ inputs.build_arch }} 
           cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyregion-runtime-jvm -P build.cmake
 
       - name: Release build compiler
         working-directory: ./native
         if: always()
         run: |
-          call setup_msvc_env.bat 
+          call setup_msvc_env.bat ${{ inputs.build_arch }} 
           cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyregion-compiler-jvm -P build.cmake
 
       - name: Check artefact
         if: always()
         shell: pwsh
         working-directory: ./native
-        run: ls .\build-windows-x86_64\bindings\jvm\ | Select-Object Name, @{Name="MegaBytes";Expression={$_.Length / 1MB}}
+        run: |
+          ls .\build-windows-${{ inputs.build_arch }}\bindings\jvm\ | Select-Object Name, @{Name="MegaBytes";Expression={$_.Length / 1MB}}
+          ls .\build-windows-${{ inputs.build_arch }}\compiler      | Select-Object Name, @{Name="MegaBytes";Expression={$_.Length / 1MB}}
+          ls .\build-windows-${{ inputs.build_arch }}\runtime       | Select-Object Name, @{Name="MegaBytes";Expression={$_.Length / 1MB}}
