@@ -32,7 +32,7 @@ static constexpr EXPORT size_t byteOfType(Type t) {
     case Type::Float32: return 32 / 8;
     case Type::Double64: return 64 / 8;
     case Type::Scratch:
-    case Type::Ptr: return sizeof(void *) / 8;
+    case Type::Ptr: return sizeof(void *);
   }
 }
 

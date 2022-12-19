@@ -146,7 +146,8 @@ ClDevice::ClDevice(cl_device_id device)
       bufferCounter(), allocations() {
   TRACE();
 }
-cl_mem ClDevice::queryMemObject(uintptr_t ptr) const {
+cl_mem ClDevice::queryMemObject(uintptr_t ptr) {
+  std::shared_lock readLock(mutex);
   if (auto it = allocations.find(ptr); it != allocations.end()) return it->second;
   else
     throw std::logic_error(std::string(ERROR_PREFIX) + "Illegal memory object: " + std::to_string(ptr));
@@ -195,14 +196,22 @@ uintptr_t ClDevice::malloc(size_t size, Access access) {
     case Access::RW:
     default: flags = CL_MEM_READ_WRITE; break;
   }
-  auto id = this->bufferCounter++;
-  allocations[id] = OUT_CHECKED(clCreateBuffer(*context, flags, size, nullptr, OUT_ERR));
-  return id;
+  std::unique_lock writeLock(mutex);
+  while (true) {
+    auto id = this->bufferCounter++;
+    if (auto it = allocations.find(id); it != allocations.end()) continue;
+    else {
+      allocations.emplace_hint(it, id, OUT_CHECKED(clCreateBuffer(*context, flags, size, nullptr, OUT_ERR)));
+      return id;
+    }
+  }
 }
 void ClDevice::free(uintptr_t ptr) {
   TRACE();
   context.touch();
   CHECKED(clReleaseMemObject(queryMemObject(ptr)));
+  std::unique_lock writeLock(mutex);
+  allocations.erase(ptr);
 }
 std::unique_ptr<DeviceQueue> ClDevice::createQueue() {
   TRACE();

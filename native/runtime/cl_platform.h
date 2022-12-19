@@ -3,6 +3,7 @@
 #include "clew.h"
 #include "runtime.h"
 #include <atomic>
+#include <shared_mutex>
 
 namespace polyregion::runtime::cl {
 
@@ -26,10 +27,11 @@ class EXPORT ClDevice : public Device {
   std::string deviceName;
   ClModuleStore store; // store needs to be dropped before dropping device
 
+  std::shared_mutex mutex;
   std::atomic_uintptr_t bufferCounter;
   std::unordered_map<uintptr_t, cl_mem> allocations;
 
-  cl_mem queryMemObject(uintptr_t handle) const;
+  cl_mem queryMemObject(uintptr_t handle);
 
 public:
   EXPORT explicit ClDevice(cl_device_id device);
