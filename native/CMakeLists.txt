@@ -196,7 +196,7 @@ if (${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.20.0")
 endif ()
 
 set(LLVM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/llvm")
-find_package(LLVM REQUIRED)
+find_package(LLVM REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
 include("${LLVM_CMAKE_DIR}/AddLLVM.cmake")
 include("${LLVM_CMAKE_DIR}/TableGen.cmake")
 

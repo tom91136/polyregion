@@ -107,9 +107,9 @@ jobs:
         working-directory: ./native
         if: always()
         run: |
-          ls -lah build-linux-x86_64/bindings/jvm
-          lld build-linux-x86_64/bindings/jvm/*.so
-          ls -lah build-linux-x86_64/compiler/
-          lld build-linux-x86_64/compiler/compiler-drv
-          ls -lah build-linux-x86_64/runtime/
-          lld build-linux-x86_64/runtime/runtime-drv
+          ls -lah build-linux-${{ inputs.build_arch }}/bindings/jvm
+          ls -lah build-linux-${{ inputs.build_arch }}/compiler/
+          ls -lah build-linux-${{ inputs.build_arch }}/runtime/
+          ldd build-linux-${{ inputs.build_arch }}/bindings/jvm/*.so
+          ldd build-linux-${{ inputs.build_arch }}/compiler/compiler-drv
+          ldd build-linux-${{ inputs.build_arch }}/runtime/runtime-drv

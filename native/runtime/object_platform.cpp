@@ -4,7 +4,7 @@
 #include <utility>
 
 #include "cpuinfo.h"
-#include "ffi.h"
+#include "ffi_wrapped.h"
 #include "object_platform.h"
 #include "utils.hpp"
 
