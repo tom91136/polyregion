@@ -97,6 +97,6 @@ jobs:
                echo "======"
              done
           }
-          show_libs build-darwin-${{ inputs.build_arch }}/bindings/jvm/*.so 
+          show_libs build-darwin-${{ inputs.build_arch }}/bindings/jvm/*.dylib
           show_libs build-darwin-${{ inputs.build_arch }}/compiler/compiler-drv 
           show_libs build-darwin-${{ inputs.build_arch }}/runtime/runtime-drv

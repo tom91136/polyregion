@@ -215,6 +215,7 @@ if (NOT lld_POPULATED)
     # Make sure we find it here before LLVM tries;
     #  we want to use the host tblgen and not the platform dependent one for cross builds.
     find_program(LLVM_TABLEGEN_EXE "llvm-tblgen")
+    set(LLVM_ENABLE_ZLIB OFF)
 
     configure_file(
             ${lld_SOURCE_DIR}/include/lld/Common/Version.inc.in
