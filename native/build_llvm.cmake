@@ -34,7 +34,6 @@ if (DOWNLOAD_LLVM)
     file(ARCHIVE_EXTRACT INPUT ${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src.tar.xz DESTINATION "${LLVM_BUILD_DIR}")
 endif ()
 
-
 if (UNIX AND NOT APPLE)
     set(USE_LTO Thin)
     set(USE_STATIC_CXX_STDLIB ON)
@@ -126,7 +125,6 @@ if (NOT SUCCESS EQUAL "0")
 else ()
     message(STATUS "LLVM configuration complete, starting build...")
 endif ()
-
 
 execute_process(
         COMMAND ${CMAKE_COMMAND} --build ${LLVM_BUILD_DIR} -- -k 0 # keep going even with error
