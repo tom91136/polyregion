@@ -25,7 +25,7 @@ elseif(CMAKE_SYSTEM_NAME MATCHES "Windows" AND lower_system_processor STREQUAL "
     set(TARGET ARM_WIN64)
 elseif(CMAKE_SYSTEM_NAME MATCHES "Windows" AND lower_system_processor STREQUAL "x86")
     set(TARGET X86_WIN32)
-elseif(CMAKE_SYSTEM_NAME MATCHES "Windows" AND lower_system_processor STREQUAL "x64")
+elseif(CMAKE_SYSTEM_NAME MATCHES "Windows" AND lower_system_processor MATCHES "x64|amd64")
     set(TARGET X86_WIN64)
 elseif(lower_system_processor MATCHES "arm64|aarch64")
     set(TARGET ARM64)
