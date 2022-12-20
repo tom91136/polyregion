@@ -18,12 +18,6 @@ ProcessorCount(NPROC)
 
 project(polyregion-native)
 
-#FetchContent_Declare(
-#        llvm
-#        URL https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_SRC_VERSION}/llvm-${LLVM_SRC_VERSION}.src.tar.xz
-#        URL_HASH SHA256=1e09e8c26e1b67bc94a128b62e9b9c24b70c697a2436a479c9e5eedc4ae29654
-#)
-
 FetchContent_Declare(
         lld
         URL https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_SRC_VERSION}/lld-${LLVM_SRC_VERSION}.src.tar.xz
@@ -34,12 +28,6 @@ FetchContent_Declare(
         libffi
         URL https://github.com/libffi/libffi/releases/download/v3.4.4/libffi-3.4.4.tar.gz
         URL_HASH SHA256=d66c56ad259a82cf2a9dfc408b32bf5da52371500b84745f7fb8b645712df676
-)
-
-FetchContent_Declare(
-        cpuinfo
-        GIT_REPOSITORY https://github.com/pytorch/cpuinfo.git
-        GIT_TAG 9fa621933fc6080b96fa0f037cdc7cd2c69ab272 # head as of 01/06/2022 (DD/MM/YYYY)
 )
 
 FetchContent_Declare(
@@ -281,13 +269,6 @@ endif ()
 
 FetchContent_MakeAvailable(json)
 FetchContent_MakeAvailable(Catch2)
-
-set(CPUINFO_BUILD_TOOLS OFF CACHE BOOL "")
-set(CPUINFO_BUILD_UNIT_TESTS OFF CACHE BOOL "")
-set(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "")
-set(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "")
-set(CPUINFO_BUILD_PKG_CONFIG OFF CACHE BOOL "")
-FetchContent_MakeAvailable(cpuinfo)
 
 # libffi does not use CMake so we inject one manually from VCPKG
 # See https://github.com/microsoft/vcpkg/blob/2f0872b7d592635e8e4919d178650d549c211464/ports/libffi/CMakeLists.txt

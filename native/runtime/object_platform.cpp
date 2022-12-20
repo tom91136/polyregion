@@ -3,7 +3,6 @@
 #include <thread>
 #include <utility>
 
-#include "cpuinfo.h"
 #include "ffi_wrapped.h"
 #include "object_platform.h"
 #include "utils.hpp"

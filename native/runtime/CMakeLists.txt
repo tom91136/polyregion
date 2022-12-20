@@ -48,7 +48,6 @@ target_link_libraries(runtime-lib PRIVATE
         ${LLVM_LIBS}
         ${DL_LIB}
         libffi
-        cpuinfo
 #        pthread
 #        dl
         )
