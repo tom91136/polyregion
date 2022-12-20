@@ -196,16 +196,17 @@ if (${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.20.0")
 endif ()
 
 set(LLVM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/llvm")
-find_package(LLVM REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
 
 # Make sure we find it here before LLVM tries;
 #  we want to use the host tblgen and not the platform dependent one for cross builds.
 find_program(LLVM_TABLEGEN_EXE "llvm-tblgen")
 
 if (NOT DEFINED LLVM_TABLEGEN_EXE)
-    message(STATUS "No host llvm-tblgen found, attempting to use the binary version from ${LLVM_TOOLS_BINARY_DIR}")
-    set(LLVM_TABLEGEN_EXE ${LLVM_TOOLS_BINARY_DIR}/llvm-tblgen)
+    message(STATUS "No host llvm-tblgen found, attempting to use the binary version from ${LLVM_DIR}")
+    set(LLVM_TABLEGEN_EXE ${LLVM_DIR}/bin/llvm-tblgen)
 endif ()
+
+find_package(LLVM REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
 
 include("${LLVM_CMAKE_DIR}/AddLLVM.cmake")
 include("${LLVM_CMAKE_DIR}/TableGen.cmake")
