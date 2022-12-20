@@ -93,7 +93,7 @@ jobs:
           show_libs () {
              for arg in $@; do
                file "$1"
-               objdump -x "$1" | grep NEEDED
+               otool -L "$1"
                echo "======"
              done
           }
