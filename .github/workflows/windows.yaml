@@ -18,4 +18,4 @@ jobs:
     secrets: inherit
     with:
       build_arch: X86
-      build_type: release
+      build_type: Release
