@@ -223,6 +223,15 @@ if (NOT lld_POPULATED)
     set(lld_SOURCE_DIR "${lld_SOURCE_DIR}/")
     set(lld_BINARY_DIR "${lld_BINARY_DIR}/")
 
+    # Make sure we find it here before LLVM tries;
+    #  we want to use the host tblgen and not the platform dependent one for cross builds.
+    find_program(LLVM_TABLEGEN_EXE "llvm-tblgen")
+
+    if (NOT DEFINED LLVM_TABLEGEN_EXE)
+        message(STATUS "No host llvm-tblgen found, attempting to use the binary version from ${LLVM_TOOLS_BINARY_DIR}")
+        set(LLVM_TABLEGEN_EXE ${LLVM_TOOLS_BINARY_DIR}/llvm-tblgen)
+    endif ()
+
     configure_file(
             ${lld_SOURCE_DIR}/include/lld/Common/Version.inc.in
             ${lld_BINARY_DIR}/include/lld/Common/Version.inc)
@@ -260,6 +269,8 @@ if (NOT lld_POPULATED)
             ${lld_BINARY_DIR}/Common
             "${LLVM_INCLUDE_DIRS}"
             )
+
+    message(STATUS "Using `${LLVM_TABLEGEN_EXE}` for llvm-tblgen")
 
     add_subdirectory(${lld_SOURCE_DIR}/ELF ${lld_BINARY_DIR}/ELF)
     target_include_directories(lldELF BEFORE PUBLIC
