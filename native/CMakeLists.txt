@@ -21,7 +21,7 @@ project(polyregion-native)
 FetchContent_Declare(
         lld
         URL https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_SRC_VERSION}/lld-${LLVM_SRC_VERSION}.src.tar.xz
-        URL_HASH SHA256=cd5d0894a74b957ce78d62212c1df0b3876a7297593aaece6b0512285e3b8732
+        URL_HASH SHA256=29fd83b61a1171c6bd51963ca54d0d7b577255e77fcd5ff03c0548fcc5b27b4f
 )
 
 FetchContent_Declare(
@@ -32,15 +32,15 @@ FetchContent_Declare(
 
 FetchContent_Declare(
         json
-        URL https://github.com/nlohmann/json/releases/download/v3.10.5/json.hpp
-        URL_HASH SHA256=e832d339d9e0c042e7dff807754769d778cf5d6ae9730ce21eed56de99cb5e86
+        URL https://github.com/nlohmann/json/releases/download/v3.11.2/json.hpp
+        URL_HASH SHA256=665fa14b8af3837966949e8eb0052d583e2ac105d3438baba9951785512cf921
         DOWNLOAD_NO_EXTRACT YES # this is a header only lib, so don't do anything else
 )
 
 FetchContent_Declare(
         Catch2
         GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-        GIT_TAG v3.1.1
+        GIT_TAG v3.2.1
 )
 
 
