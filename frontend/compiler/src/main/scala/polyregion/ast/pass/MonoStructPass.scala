@@ -36,8 +36,16 @@ object MonoStructPass extends ProgramPass {
 
     val replacementTable = monoStructDefs.toMap
 
+    println(s"[Rep] Table:\n${replacementTable.map((k,v) => s"\t${k.repr} => ${v.repr}").mkString("\n")}")
+
     def doReplacement(t: p.Type) = t match {
-      case s: p.Type.Struct => replacementTable.get(s).map(x => p.Type.Struct(x.name, Nil, Nil)).getOrElse(s)
+      case s: p.Type.Struct => 
+        
+      println(s"[Rep] ${s.repr} => ${replacementTable.get(s)}")
+
+        
+        
+        replacementTable.get(s).map(x => p.Type.Struct(x.name, Nil, Nil)).getOrElse(s)
       case x                => x
     }
 

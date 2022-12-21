@@ -53,7 +53,9 @@ trait JitOps[F[_], O](d: rt.Device.Queue, f: Suspend[F]) {
 trait AotOps[F[_], B](q: rt.Device.Queue, suspend: Suspend[F]) {
 
   inline def task[O <: B, A](inline f: => A): F[A] = suspend { cb =>
-    val result = Buffer.ofDim[A](1)
+    // val result = Buffer.ofDim[A](1)
+    val result = scala.collection.mutable.ListBuffer.empty[A]
+    // val result = Array.ofDim[A](1)
     polyregion.scala.compiletime.offload0[O](
       q,
       {

@@ -79,7 +79,7 @@ object Compiler {
                 case None =>
                   if (defDef.rhs.isEmpty) {
                     println(
-                      s"Replace: cannot replace ${s.repr} (${s.name})\n${fnLut.keySet.toList
+                      s"Replace: cannot replace ${s.repr} (name=${s.name})\n${fnLut.keySet.toList
                         .map(x => s"\t${x.repr} (${x.name})")
                         .sorted
                         .mkString("\n")}"
@@ -217,11 +217,14 @@ object Compiler {
       else (statements, c.deps)
   } yield ((optStmts, termTpe, optDeps, c.thisCls), log)
 
-  def findMatchingClassInHierarchy[A, B](using
-      q: Quoted
-  )(symbol: q.Symbol, clsLut: Map[p.Sym, B]): Option[B] = {
+  def findMatchingClassInHierarchy[A, B](using q: Quoted)(symbol: q.Symbol, clsLut: Map[p.Sym, B]): Option[B] = {
     val hierarchy: List[p.Sym] = structName0(symbol) ::
       q.TypeIdent(symbol).tpe.baseClasses.map(structName0(_))
+
+    println(s"[CC] in=${symbol}")
+    println(s"[CC] =>${hierarchy.mkString("\n[CC]   ")}")
+    println(s"[CC] =>[k]${clsLut.keys.mkString("\n[CC]   [k]")}")
+
     hierarchy.collectFirst(Function.unlift(clsLut.get(_)))
   }
 
@@ -236,26 +239,12 @@ object Compiler {
           case Some(x) => Left(tpeAps -> x).success
           case None    => structDef0(clsDef.symbol).map(x => Right(tpeAps -> x))
         }
-
-      // val hierarchy: List[p.Sym] = structName0(clsDef.symbol) ::
-      //   q.TypeIdent(clsDef.symbol).tpe.baseClasses.map(structName0(_))
-      // hierarchy.collectFirst(Function.unlift(clsLut.get(_))) match {
-      //   case Some(x) => Left(tpeAps -> x).success
-      //   case None    => structDef0(clsDef.symbol).map(x => Right(tpeAps -> x))
-      // }
       }
       (replacedModules, modules) <- deps.modules.toList.partitionEitherM { case (symbol, tpe) =>
         findMatchingClassInHierarchy(symbol, clsLut) match {
           case Some(x) => Left(tpe -> x).success
           case None    => structDef0(symbol).map(x => Right(tpe -> x))
         }
-
-      // val hierarchy: List[p.Sym] = structName0(symbol) ::
-      //   q.TypeIdent(symbol).tpe.baseClasses.map(structName0(_))
-      // hierarchy.collectFirst(Function.unlift(clsLut.get(_))) match {
-      //   case Some(x) => Left(tpe -> x).success
-      //   case None    => structDef0(symbol).map(x => Right(tpe -> x))
-      // }
       }
 
       log <- log.info("Replaced modules", replacedModules.map { case (x, y) => s"${x.repr} => ${y.repr}" }.toList*)
@@ -285,14 +274,20 @@ object Compiler {
 
       mappedFn = fn.mapType(replaceTpe(_))
 
-      log <- log.info("Type replacements", typeLut.map((a, b) => s"${a.repr} => ${b.repr}").toList.sorted*)
-      log <- log.info("All struct defs", structDefs.toList.map(_.repr).sorted*)
-      log <- log.info("Replaced Fn", mappedFn.repr)
-
       // FIXME  asInstanceOf bad
       mappedFnDeps = deps.functions.map((defdef, ivks) =>
         defdef -> ivks.map(_.mapType(replaceTpe(_)).asInstanceOf[p.Expr.Invoke])
       )
+
+      log <- log.info("Type replacements", typeLut.map((a, b) => s"${a.repr} => ${b.repr}").toList.sorted*)
+      log <- log.info("All struct defs", structDefs.toList.map(_.repr).sorted*)
+      log <- log.info(
+        "Dependent defs",
+        mappedFnDeps.map((f, ivks) => s"${f.show} \ncallsites: \n${ivks.map(_.repr).mkString("\n")}").toList*
+      )
+      log <- log.info("Fn after replacements", mappedFn.repr)
+
+      _ = println(log.render(1).mkString("\n"))
 
     } yield (mappedFn, mappedFnDeps, structDefs, deps.modules.keySet, log)
 
@@ -355,12 +350,12 @@ object Compiler {
       compileAndReplaceStructDependencies(exprFn, exprDeps)(StdLib.StructDefs)
     log <- log ~+ rootLog
 
+    _ = println(log.render().mkString("\n"))
+
     // We got a compiled fn now, now compile all dependencies as well.
     (allRootDependentFns, allRootDependentStructs, allRootDependentModuleSymbols, allRootLogs) <-
       compileAllDependencies(rootDependentFns)(StdLib.Functions)
     log <- log ~+ allRootLogs
-
-    _ = println(log.render().mkString("\n"))
 
     //    log <- log.info(s"Expr+Deps Dependent methods", deps.functions.values.map(_.toString).toList*)
 //    log <- log.info(s"Expr+Deps Dependent structs", deps.classes.values.map(_.toString).toList*)

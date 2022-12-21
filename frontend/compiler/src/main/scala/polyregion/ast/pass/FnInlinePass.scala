@@ -140,53 +140,55 @@ object FnInlinePass extends ProgramPass {
 
   override def apply(program: p.Program, log: Log): (p.Program, Log) = {
 
-    val f = doUntilNotEq(program.entry) { f =>
+    val (n, f) = doUntilNotEq(program.entry, limit = 10) { (i, f) =>
+      println(s"[Inline ${i}]\n${f.repr}")
 
-      val (stmts, captures) = f.body.foldMap { x =>
-        x.mapAccExpr {
-          case ivk @ p.Expr.Invoke(name, tpeArgs, recv, args, rtn) =>
-            // Find all viable overloads (same name and same arg count) first.
-            val overloads = program.functions.distinct.filter(f => f.name == name && f.args.size == args.size)
+    val (stmts, captures) = f.body.foldMap { x =>
+      x.mapAccExpr {
+        case ivk @ p.Expr.Invoke(name, tpeArgs, recv, args, rtn) =>
+          // Find all viable overloads (same name and same arg count) first.
+          val overloads = program.functions.distinct.filter(f => f.name == name && f.args.size == args.size)
 
-            overloads.filter { f =>
-              // For each overload candidate, we substitute any type variables with the actual invocation.
-              // As we're resolving overloads, failures are expected so unresolvable variables are kept as-is.
+          overloads.filter { f =>
+            // For each overload candidate, we substitute any type variables with the actual invocation.
+            // As we're resolving overloads, failures are expected so unresolvable variables are kept as-is.
 
-              // We can still inline if method name and argument type resolution succeed but types don't match for the receiver.
-              // This is because receivers could have *different* types in the inheritance tree.
-              // `scalac` would have rejected bad receivers before this so it should be relatively safe.
+            // We can still inline if method name and argument type resolution succeed but types don't match for the receiver.
+            // This is because receivers could have *different* types in the inheritance tree.
+            // `scalac` would have rejected bad receivers before this so it should be relatively safe.
 
-              val varToTpeLut = f.tpeVars.zip(tpeArgs).toMap
-              val sig = f.signature.mapType {
-                case v @ p.Type.Var(n) => varToTpeLut.getOrElse(n, v)
-                case x                 => x
-              }
-              sig.receiver.size == recv.size && // make sure receivers are both Some or None
-//              sig.receiver.zip(recv.map(_.tpe)).forall(_ =:= _) &&
-              sig.args.zip(args.map(_.tpe)).forall(_ =:= _) &&
-              sig.rtn =:= rtn
-            } match {
-              case Nil =>
-                println(s"-> Keep ${ivk.repr}")
-                println(s"Overloads:\n${overloads.map(_.repr).mkString("\n")}")
-
-                ???
-
-                (ivk, Nil, Nil) // can't find fn, keep it for now
-              case f :: Nil =>
-                println(s"Overloads:\n${f.repr}")
-                val (expr, stmts, names) = inlineOne(ivk, f)
-                println(s"Outcome:\n${stmts.map(_.repr).mkString("\n")}")
-                (expr, stmts, names)
-              case xs =>
-                println(xs.mkString("\n"))
-                ??? // more than one, ambiguous
+            val varToTpeLut = f.tpeVars.zip(tpeArgs).toMap
+            val sig = f.signature.mapType {
+              case v @ p.Type.Var(n) => varToTpeLut.getOrElse(n, v)
+              case x                 => x
             }
+            sig.receiver.size == recv.size && // make sure receivers are both Some or None
+//              sig.receiver.zip(recv.map(_.tpe)).forall(_ =:= _) &&
+            sig.args.zip(args.map(_.tpe)).forall(_ =:= _) &&
+            sig.rtn =:= rtn
+          } match {
+            case Nil =>
+              println(s"-> Keep ${ivk.repr}")
+              println(s"Everything:\n${program.functions.map(_.repr).mkString("\n")}")
+              println(s"Overloads:\n${overloads.map(_.repr).mkString("\n")}")
 
-          case x => (x, Nil, Nil)
-        }
+              ???
+
+              (ivk, Nil, Nil) // can't find fn, keep it for now
+            case f :: Nil =>
+              println(s"Overloads:\n${f.repr}")
+              val (expr, stmts, names) = inlineOne(ivk, f)
+              println(s"Outcome:\n${stmts.map(_.repr).mkString("\n")}")
+              (expr, stmts, names)
+            case xs =>
+              println(xs.mkString("\n"))
+              ??? // more than one, ambiguous
+          }
+
+        case x => (x, Nil, Nil)
       }
-      f.copy(body = stmts, captures = (f.captures ++ captures).distinct)
+    }
+    f.copy(body = stmts, captures = (f.captures ++ captures).distinct)
     }
 
     (p.Program(f, Nil, program.defs), log)

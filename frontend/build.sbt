@@ -5,9 +5,9 @@ lazy val bindingsDir = (nativeDir / "bindings" / "jvm").getAbsoluteFile
 
 // /home/tom/polyregion/native/cmake-build-debug-clang/bindings/jvm/libpolyregion-compiler-jvm.so
 
-lazy val scala3Version = "3.2.1"
-lazy val catsVersion   = "2.8.0"
-lazy val munitVersion  = "1.0.0-M6"
+lazy val scala3Version = "3.2.2-RC1"
+lazy val catsVersion   = "2.9.0"
+lazy val munitVersion  = "1.0.0-M7"
 
 lazy val commonSettings = Seq(
   scalaVersion     := scala3Version,
@@ -90,8 +90,8 @@ lazy val compiler = project
         Seq("-Xmax-inlines", "64") // the AST has lots of leaf nodes and we use inline so bump the limit
     ,
     libraryDependencies ++= Seq(
-      "net.bytebuddy"  % "byte-buddy" % "1.12.13",
-      "com.lihaoyi"   %% "pprint"     % "0.7.3",
+      "net.bytebuddy"  % "byte-buddy" % "1.12.20",
+      "com.lihaoyi"   %% "pprint"     % "0.8.1",
       "com.lihaoyi"   %% "fansi"      % "0.4.0",
       "com.lihaoyi"   %% "upickle"    % "2.0.0",
       "org.typelevel" %% "cats-core"  % catsVersion

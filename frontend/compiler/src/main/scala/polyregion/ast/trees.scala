@@ -9,10 +9,10 @@ import scala.annotation.tailrec
 import scala.reflect.ClassTag
 import scala.util.{Success, Try}
 
-@tailrec def doUntilNotEq[A](x: A)(f: A => A): A = {
-  val y = f(x)
-  if (y == x) y
-  else doUntilNotEq(y)(f)
+@tailrec def doUntilNotEq[A](x: A, n: Int = 0, limit: Int = Int.MaxValue)(f: (Int, A) => A): (Int, A) = {
+  val y = f(n, x)
+  if (y == x || n >= limit) (n, y)
+  else doUntilNotEq(y, n + 1, limit)(f)
 }
 
 final class CompilerException(m: String, e: Throwable) extends Exception(m, e) {

@@ -158,8 +158,8 @@ object StdLib {
   }
   class MutableSeq[A](val length_ : Int, val data: intrinsics.TypedBuffer[A]) {
     def length: Int                = length_
-    def apply(i: Int): A           = data.apply(i)
-    def update(i: Int, x: A): Unit = data.update(i, x)
+    def apply(i: Int): A           = intrinsics.apply(data, i)     //  data.apply(i)
+    def update(i: Int, x: A): Unit = intrinsics.update(data, i, x) // data.update(i, x)
   }
 
   final def Mirrors: List[Prism] = derivePackedMirrors(
