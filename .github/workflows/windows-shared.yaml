@@ -35,6 +35,7 @@ jobs:
           $url = "https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u352-b08/OpenJDK8U-jdk_${jdk_arch}_windows_hotspot_8u352b08.zip"
           Invoke-WebRequest -Uri $url -OutFile jdk_${jdk_arch}.zip
           Expand-Archive -Path .\jdk_${jdk_arch}.zip -DestinationPath .\jdk_${jdk_arch}
+          Get-ChildItem -Name -Recurse .
           echo "JAVA_HOME=${PWD}\jdk_${jdk_arch}" >> $env:GITHUB_ENV
 
       - name: Check environment
