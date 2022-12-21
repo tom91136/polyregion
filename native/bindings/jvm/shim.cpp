@@ -12,7 +12,7 @@ static std::vector<jobject> files;
 
 static JavaVM *CurrentVM = {};
 
-[[maybe_unused]] jint JNI_OnLoad(JavaVM *vm, void *) {
+[[maybe_unused]] JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
   fprintf(stdout, "Shim JNI_OnLoad\n");
   files.clear(); // In case OnUnload didn't finish normally
   CurrentVM = vm;
@@ -22,7 +22,7 @@ static JavaVM *CurrentVM = {};
   return JNI_VERSION_1_1;
 }
 
-[[maybe_unused]] void JNI_OnUnload(JavaVM *vm, void *) {
+[[maybe_unused]] JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *) {
   fprintf(stdout, "Shim JNI_OnUnload\n");
   JNIEnv *env = getEnv(vm);
   Natives::unregisterMethods(env);
@@ -73,4 +73,3 @@ void Natives::dynamicLibraryRelease0(JNIEnv *env, jclass, jlong handle) {
     throwGeneric(env, EX, "Cannot unload module:" + resolveDlError());
   }
 }
-

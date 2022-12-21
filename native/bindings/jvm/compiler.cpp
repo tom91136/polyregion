@@ -26,7 +26,7 @@ static_assert(polyregion::to_underlying(cp::Target::Object_LLVM_SPIRV64) == Comp
 static_assert(polyregion::to_underlying(cp::Target::Source_C_OpenCL1_1) == Compiler::Target_Source_C_OpenCL1_1);
 static_assert(polyregion::to_underlying(cp::Target::Source_C_C11) == Compiler::Target_Source_C_C11);
 
-[[maybe_unused]] jint JNI_OnLoad(JavaVM *vm, void *) {
+[[maybe_unused]] JNIEXPORT jint JNICALL  JNI_OnLoad(JavaVM *vm, void *) {
   fprintf(stderr, "JVM enter\n");
   JNIEnv *env = getEnv(vm);
   if (!env) return JNI_ERR;
@@ -35,7 +35,7 @@ static_assert(polyregion::to_underlying(cp::Target::Source_C_C11) == Compiler::T
   return JNI_VERSION_1_1;
 }
 
-[[maybe_unused]] void JNI_OnUnload(JavaVM *vm, void *) {
+[[maybe_unused]] JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *) {
   fprintf(stderr, "JVM exit\n");
   JNIEnv *env = getEnv(vm);
   gen::Layout::drop(env);

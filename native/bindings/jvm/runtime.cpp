@@ -35,7 +35,7 @@ static_assert(polyregion::to_underlying(rt::Type::Ptr) == Platforms::TYPE_PTR);
 
 static JavaVM *CurrentVM;
 
-[[maybe_unused]] jint JNI_OnLoad(JavaVM *vm, void *) {
+[[maybe_unused]] JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
   fprintf(stderr, "OnLoad runtime\n");
   CurrentVM = vm;
   JNIEnv *env = getEnv(vm);
@@ -46,7 +46,7 @@ static JavaVM *CurrentVM;
   return JNI_VERSION_1_1;
 }
 
-[[maybe_unused]] void JNI_OnUnload(JavaVM *vm, void *) {
+[[maybe_unused]] JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *) {
   fprintf(stderr, "OnUnload runtime\n");
   JNIEnv *env = getEnv(vm);
   gen::Platform::drop(env);
