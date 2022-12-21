@@ -38,6 +38,7 @@ jobs:
           echo "JAVA_HOME=${PWD}\jdk_${jdk_arch}" >> $env:GITHUB_ENV
 
       - name: Check environment
+        shell: pwsh
         run: |
           Write-Output $env:JAVA_HOME
           "$env:JAVA_HOME\bin\java.exe" "-version"
