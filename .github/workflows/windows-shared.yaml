@@ -33,7 +33,9 @@ jobs:
             }
           }
           $version = "jdk8u352-b08"
-          $url = "https://github.com/adoptium/temurin8-binaries/releases/download/${version}/OpenJDK8U-jdk_${jdk_arch}_windows_hotspot_${version.replace("-", "")}.zip"
+          $version_short = $version
+          $version_short.replace("-", "")
+          $url = "https://github.com/adoptium/temurin8-binaries/releases/download/${version}/OpenJDK8U-jdk_${jdk_arch}_windows_hotspot_${version_short}.zip"
           Write-Output "Downloading JDK from $url"
           Invoke-WebRequest -Uri $url -OutFile jdk_${jdk_arch}.zip
           Expand-Archive -Path .\jdk_${jdk_arch}.zip -DestinationPath .\jdk_${jdk_arch}
