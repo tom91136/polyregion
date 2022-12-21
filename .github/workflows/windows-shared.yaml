@@ -20,6 +20,29 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      - name: Setup JDK (${{ inputs.build_arch }})
+        shell: pwsh
+        working-directory: ./native
+        run: |
+          switch ("${{ inputs.build_arch }}".ToLower()) {
+             "x86" { $jdk_arch = "x86-32" }
+             "amd64" { $jdk_arch = "x64" }
+             default {
+               Write-Error "Invalid architecture for JDK: $input"
+               break
+             }
+           }
+          $url = "https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u352-b08/OpenJDK8U-jdk_${jdk_arch}_windows_hotspot_8u352b08.zip"
+          Invoke-WebRequest -Uri $url -OutFile jdk_${jdk_arch}.zip
+          Expand-Archive -Path .\jdk_${jdk_arch}.zip -DestinationPath .\jdk_${jdk_arch}
+          echo "JAVA_HOME=${PWD}\jdk_${jdk_arch}" >> $env:GITHUB_ENV
+
+      - name: Check environment
+        run: |
+          Write-Output $env:JAVA_HOME
+          "$env:JAVA_HOME\bin\java.exe" "-version"
+          Write-Output $env:PROCESSOR_ARCHITECTURE
+
       - name: Restore LLVM cache
         if: ${{ !env.ACT }}
         id: restore-llvm
