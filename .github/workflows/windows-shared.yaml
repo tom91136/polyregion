@@ -41,7 +41,7 @@ jobs:
         shell: pwsh
         run: |
           Write-Output $env:JAVA_HOME
-          "$env:JAVA_HOME\bin\java.exe" "-version"
+          & "$env:JAVA_HOME\bin\java.exe" -version
           Write-Output $env:PROCESSOR_ARCHITECTURE
 
       - name: Restore LLVM cache
