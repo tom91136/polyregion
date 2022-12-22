@@ -5,7 +5,7 @@ import polyregion.ast.PolyAst as p
 import polyregion.ast.PolyAst.TypeKind
 
 import java.lang.reflect.Modifier
-import scala.annotation.tailrec
+import scala.annotation.{tailrec, targetName}
 import scala.reflect.ClassTag
 import scala.util.{Success, Try}
 
@@ -190,6 +190,17 @@ extension (n: p.Named) {
   }
 }
 
+extension (s: p.Term.Select) {
+  def mapTypeAcc[A](f: p.Type => (p.Type, List[A])): (p.Term.Select, List[A]) = s match {
+    case p.Term.Select(init, last) =>
+      val (l0, as0) = last.mapAccType(f)
+      val (i0, as1) = init.map(_.mapAccType(f)).unzip
+      (p.Term.Select(i0, l0), as1.flatten ::: as0)
+  }
+
+  def mapType(f: p.Type => p.Type): p.Term.Select = s.mapTypeAcc(t => (f(t), Nil))._1
+}
+
 extension (e: p.Term) {
   def repr: String = e match {
     case p.Term.Select(xs, x)  => (xs :+ x).map(_.repr).mkString(".")
@@ -204,10 +215,21 @@ extension (e: p.Term) {
     case p.Term.FloatConst(x)  => s"Float($x)"
     case p.Term.DoubleConst(x) => s"Double($x)"
   }
+
+  def mapTypeAcc[A](f: p.Type => (p.Type, List[A])): (p.Term, List[A]) = e match {
+    case s @ p.Term.Select(_, _) => s.mapTypeAcc(f)
+    case p.Term.Poison(t) =>
+      val (c0, as0) = t.mapAcc(f)
+      (p.Term.Poison(c0), as0)
+    case x => (x, Nil)
+  }
+
+  def mapType(f: p.Type => p.Type): p.Term = e.mapTypeAcc(t => (f(t), Nil))._1
 }
 
 extension (e: p.Type) {
 
+  @targetName("tpeEquals")
   def =:=(that: p.Type): Boolean =
     (e, that) match {
       case (p.Type.Struct(xSym, xVars, xTpes), p.Type.Struct(ySym, yVars, yTpes)) =>
@@ -240,7 +262,7 @@ extension (e: p.Type) {
   def map(f: p.Type => p.Type): p.Type      = mapAcc[Unit](x => f(x) -> Nil)._1
   def acc[A](f: p.Type => List[A]): List[A] = mapAcc[A](x => x -> f(x))._2
 
-  def isNumeric = e.kind match {
+  def isNumeric: Boolean = e.kind match {
     case TypeKind.Integral | TypeKind.Fractional => true
     case _                                       => false
   }
@@ -285,34 +307,50 @@ extension (e: p.Type) {
 extension (e: p.Expr) {
 
   def mapType(f: p.Type => p.Type): p.Expr = mapAccType(x => f(x) -> Nil)._1
-  def mapAccType[A](f: p.Type => (p.Type, List[A])): (p.Expr, List[A]) =
-    e match {
-      case p.Expr.NullaryIntrinsic(kind, rtn) =>
-        val (rtn0, as0) = f(rtn)
-        (p.Expr.NullaryIntrinsic(kind, rtn0), as0)
-      case p.Expr.UnaryIntrinsic(lhs, kind, rtn) =>
-        val (rtn0, as0) = f(rtn)
-        (p.Expr.UnaryIntrinsic(lhs, kind, rtn0), as0)
-      case p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn) =>
-        val (rtn0, as0) = f(rtn)
-        (p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn0), as0)
-      case p.Expr.Cast(from, as) =>
-        val (as0, as0_) = f(as)
-        (p.Expr.Cast(from, as0), as0_)
-      case e @ p.Expr.Alias(_) =>
-        (e, Nil)
-      case p.Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
-        val (tpeArgs0, as0) = tpeArgs.map(f).unzip
-        val (rtn0, as1)     = f(rtn)
-        (p.Expr.Invoke(name, tpeArgs0, receiver, args, rtn0), as0.flatten ::: as1)
-      case p.Expr.Index(lhs, idx, component) =>
-        val (component0, as0) = f(component)
-        (p.Expr.Index(lhs, idx, component0), as0)
-      case p.Expr.Alloc(witness, size) =>
-        val (component0, as0) = f(witness.component)
-        (p.Expr.Alloc(p.Type.Array(component0), size), as0)
-      case p.Expr.Suspend(args, stmts, rtn, shape) => ???
-    }
+  def mapAccType[A](f: p.Type => (p.Type, List[A])): (p.Expr, List[A]) = e match {
+    case p.Expr.NullaryIntrinsic(kind, rtn) =>
+      val (rtn0, as0) = rtn.mapAcc(f)
+      (p.Expr.NullaryIntrinsic(kind, rtn0), as0)
+    case p.Expr.UnaryIntrinsic(lhs, kind, rtn) =>
+      val (lhs0, as0) = lhs.mapTypeAcc(f)
+      val (rtn0, as1) = rtn.mapAcc(f)
+      (p.Expr.UnaryIntrinsic(lhs0, kind, rtn0), as0 ::: as1)
+    case p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn) =>
+      val (lhs0, as0) = lhs.mapTypeAcc(f)
+      val (rhs0, as1) = rhs.mapTypeAcc(f)
+      val (rtn0, as2) = rtn.mapAcc(f)
+      (p.Expr.BinaryIntrinsic(lhs0, rhs0, kind, rtn0), as0 ::: as1 ::: as2)
+    case p.Expr.Cast(from, as) =>
+      val (from0, as0_) = from.mapTypeAcc(f)
+      val (as0, as1_)   = as.mapAcc(f)
+      (p.Expr.Cast(from0, as0), as0_ ::: as1_)
+    case p.Expr.Alias(term) =>
+      val (term0, as0) = term.mapTypeAcc(f)
+      (p.Expr.Alias(term0), as0)
+    case p.Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
+      val (tpeArgs0, as0)  = tpeArgs.map(f).unzip
+      val (receiver0, as1) = receiver.map(_.mapTypeAcc(f)).unzip
+      val (args0, as2)     = args.map(_.mapTypeAcc(f)).unzip
+      val (rtn0, as3)      = f(rtn)
+      (
+        p.Expr.Invoke(name, tpeArgs0, receiver0, args0, rtn0),
+        as0.flatten ::: as1.toList.flatten ::: as2.flatten ::: as3
+      )
+    case p.Expr.Index(lhs, idx, component) =>
+      // XXX idx here can really only be an Int, so the type mapping should always be no-op
+      //  maybe we should assert in such cases?
+      val (lhs0, as0)       = lhs.mapTypeAcc(f)
+      val (idx0, as1)       = idx.mapTypeAcc(f)
+      val (component0, as2) = f(component)
+      (p.Expr.Index(lhs0, idx0, component0), as0 ::: as1 ::: as2)
+    case p.Expr.Alloc(witness, size) =>
+      val (component0, as0) = f(witness.component)
+      // XXX size here can really only be an Int, so the type mapping should always be no-op
+      //  maybe we should assert in such cases?
+      val (size0, as1) = size.mapTypeAcc(f)
+      (p.Expr.Alloc(p.Type.Array(component0), size0), as0 ::: as1)
+    case p.Expr.Suspend(args, stmts, rtn, shape) => ???
+  }
 
   def repr: String = e match {
     case p.Expr.NullaryIntrinsic(kind, rtn) =>

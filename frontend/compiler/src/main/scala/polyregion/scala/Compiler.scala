@@ -272,11 +272,23 @@ object Compiler {
           case t                          => t
         }
 
-      mappedFn = fn.mapType(replaceTpe(_))
+      replaceTpeForTerm = (t: p.Term) =>
+        t match {
+          case s @ p.Term.Select(_, _) => s.mapType(replaceTpe(_))
+          case t                       => t
+        }
 
-      // FIXME  asInstanceOf bad
+      mappedFn = fn.mapType(replaceTpe(_))
       mappedFnDeps = deps.functions.map((defdef, ivks) =>
-        defdef -> ivks.map(_.mapType(replaceTpe(_)).asInstanceOf[p.Expr.Invoke])
+        defdef -> ivks.map { case p.Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
+          p.Expr.Invoke(
+            name,
+            tpeArgs.map(replaceTpe(_)),
+            receiver.map(replaceTpeForTerm(_)),
+            args.map(replaceTpeForTerm(_)),
+            replaceTpe(rtn)
+          ) : p.Expr.Invoke
+        }
       )
 
       log <- log.info("Type replacements", typeLut.map((a, b) => s"${a.repr} => ${b.repr}").toList.sorted*)
