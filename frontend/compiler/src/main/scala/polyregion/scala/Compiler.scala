@@ -66,7 +66,21 @@ object Compiler {
                   s"Cannot collapse multiple invocations (${ivks.map(_.repr)}), term compiler may have miscompiled".fail
                 else ().success
               s = ivks.head
-              r <- fnLut.collectFirst { case (sig, x) if sig.name == s.name => x } match {
+
+              maskStructTpeAps = (t: p.Type) =>
+                t.map {
+                  case p.Type.Struct(name, tpeVars, _) => p.Type.Struct(name, tpeVars, Nil)
+                  case x                               => x
+                }
+
+              r <- fnLut.collectFirst {
+                case (sig, x)
+                    if sig.name.last == s.name.last &&
+                      sig.rtn == s.rtn &&
+                      sig.receiver.map(maskStructTpeAps) == s.receiver.map(_.tpe.map(maskStructTpeAps)) &&
+                      sig.tpeVars.size == s.tpeArgs.size =>
+                  x
+              } match {
                 case Some((x, clsDeps)) =>
                   println(s"Replace: replace ${s.repr}")
                   Log(s"${s.repr}")
@@ -75,7 +89,10 @@ object Compiler {
                         .info_("Replacing with impl:", x.repr)
                         .info_("Additional structs:", clsDeps.map(_.repr).toList*)
                     )
-                    .map(l => (x :: xs, depss, clsDeps ++ clsDepss, moduleSymDepss, l :: logs))
+                    .map { l =>
+                      // Here we let the external function take the name we're using from the callsite
+                      (x.copy(name = s.name) :: xs, depss, clsDeps ++ clsDepss, moduleSymDepss, l :: logs)
+                    }
                 case None =>
                   if (defDef.rhs.isEmpty) {
                     println(
@@ -287,7 +304,7 @@ object Compiler {
             receiver.map(replaceTpeForTerm(_)),
             args.map(replaceTpeForTerm(_)),
             replaceTpe(rtn)
-          ) : p.Expr.Invoke
+          ): p.Expr.Invoke
         }
       )
 

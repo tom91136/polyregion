@@ -6,7 +6,7 @@ object PolyAst {
     def repr: String             = fqn.mkString(".")
     infix def :+(s: String): Sym = Sym(fqn :+ s)
     infix def ~(s: Sym): Sym     = Sym(fqn ++ s.fqn)
-
+    def last: String             = fqn.last
   }
   object Sym {
     def apply(raw: String): Sym = {
