@@ -976,14 +976,14 @@ bool Expr::operator==(const Expr::Index &l, const Expr::Index &r) {
 
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Alloc &x) {
   os << "Alloc(";
-  os << x.witness;
+  os << x.component;
   os << ',';
   os << x.size;
   os << ')';
   return os;
 }
 bool Expr::operator==(const Expr::Alloc &l, const Expr::Alloc &r) { 
-  return l.witness == r.witness && *l.size == *r.size;
+  return *l.component == *r.component && *l.size == *r.size;
 }
 
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Suspend &x) {
@@ -1731,7 +1731,7 @@ std::size_t std::hash<polyregion::polyast::Expr::Index>::operator()(const polyre
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Expr::Alloc>::operator()(const polyregion::polyast::Expr::Alloc &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.witness)>()(x.witness);
+  std::size_t seed = std::hash<decltype(x.component)>()(x.component);
   seed ^= std::hash<decltype(x.size)>()(x.size) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }

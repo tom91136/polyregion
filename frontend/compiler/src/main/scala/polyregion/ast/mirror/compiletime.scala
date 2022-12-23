@@ -46,7 +46,14 @@ private[polyregion] object compiletime {
   type TermResolver[A, R] = Option[A] => R
   type TypeResolver[R]    = () => R
 
-  case class CtorTermSelect[A](arg: (String, A), rest: List[(String, A)])
+  enum Value[+A] {
+    case Const(value: String)
+    case TermSelect(arg: (String, A), rest: List[(String, A)])
+    case CtorAp(tpe: A, args: List[Value[A]])
+  }
+
+  // case class CtorTermSelect[A](arg: (String, A), rest: List[(String, A)])
+  // case class CtorAp[A](tpe: A, args: )
 
   inline def primaryCtorApplyTerms[
       T,
@@ -72,134 +79,60 @@ private[polyregion] object compiletime {
       case Some(imp) => f(imp)
       case _         => report.errorAndAbort(s"No implicit found for ${TypeRepr.of[TermRes[A]].show}")
     }
-    def summonTypeRes(r: TypeRepr) = Implicits.search(TypeRepr.of[TypeRes].appliedTo(r)) match {
-      case s: ImplicitSearchSuccess => s.tree
+    def summonTypeRes(r: TypeRepr): Expr[TypeRes[Any]] = Implicits.search(TypeRepr.of[TypeRes].appliedTo(r)) match {
+      case s: ImplicitSearchSuccess => '{ ${ s.tree.asExpr }.asInstanceOf[TypeRes[Any]] }
       case _ => report.errorAndAbort(s"No implicit found for ${TypeRepr.of[TypeRes].appliedTo(r).show}")
     }
 
-    def const[A: Type: ToExpr](e: A) = summonTermRes[A](tc => '{ ${ tc }(Some(${ Expr(e) })) })
-    def select(name: String, tpe: TypeRepr, rest: List[(String, TypeRepr)]): Expr[Val] = {
-      def resolveOne(name: String, tpe: TypeRepr) =
-        '{ (${ Expr(name) }, ${ summonTypeRes(tpe.widenTermRefByName.dealias).asExpr }.asInstanceOf[TypeRes[Any]]()) }
-      val sel = '{
-        CtorTermSelect[Tpe](${ resolveOne(name, tpe) }, ${ (Expr.ofList(rest.map(resolveOne(_, _)))) })
+    def selectValue(name: String, tpe: TypeRepr, rest: List[(String, TypeRepr)]): Expr[Value[Tpe]] = {
+      def resolveOne(name: String, tpe: TypeRepr) = '{
+        (${ Expr(name) }, ${ summonTypeRes(tpe.widenTermRefByName.dealias) }())
       }
-      summonTermRes[CtorTermSelect[Tpe]](tc => '{ ${ tc }(Some($sel)) })
+      '{ Value.TermSelect[Tpe](${ resolveOne(name, tpe) }, ${ (Expr.ofList(rest.map(resolveOne(_, _)))) }) }
     }
 
-    // def doOne(t : Term) = {
-    //       case i @ Ident(x) =>
-    //         if (i.symbol.owner == symbol) select(x, i.tpe, Nil)
-    //         else report.errorAndAbort(s"Ident ${i.show} not part of class ${symbol.fullName}")
-    //       case s @ Select(qualifier, name) =>
-    //         if (qualifier.symbol.owner == symbol) {
-    //           // we're selecting from one of the ctor args
-    //           select(qualifier.symbol.name, qualifier.tpe, (name, s.tpe) :: Nil)
-    //         } else {
-    //           // some other constant
-    //           val applied = TypeRepr.of[TermRes].appliedTo(s.tpe.dealias)
-    //           Implicits.search(applied) match {
-    //             case imp: ImplicitSearchSuccess => '{ ${ imp.tree.asExpr }.asInstanceOf[TermRes[Any]](None) }
-    //             case _                          => report.errorAndAbort(s"No implicit found for ${applied.show}")
-    //           }
-    //         }
-    //       case Literal(BooleanConstant(x)) => const(x)
-    //       case Literal(ByteConstant(x))    => const(x)
-    //       case Literal(ShortConstant(x))   => const(x)
-    //       case Literal(IntConstant(x))     => const(x)
-    //       case Literal(LongConstant(x))    => const(x)
-    //       case Literal(FloatConstant(x))   => const(x)
-    //       case Literal(DoubleConstant(x))  => const(x)
-    //       case Literal(CharConstant(x))    => const(x)
-    //       case Literal(StringConstant(x))  => const(x)
+    // def const[A: Type: ToExpr](e: A) = summonTermRes[A](tc => '{ ${ tc }(Some(${ Expr(e) })) })
+    // def select(name: String, tpe: TypeRepr, rest: List[(String, TypeRepr)]): Expr[Val] =
+    //   summonTermRes[Value[Tpe]](tc => '{ ${ tc }(Some(${ selectValue(name, tpe, rest) })) })
 
-    //       case bad =>
-    //         bad match {
-    //           case Typed(ap@Apply(term, args), _) =>
-    //             val applied = TypeRepr.of[TermRes].appliedTo(ap.tpe.dealias)
-    //             val expr = Implicits.search(applied) match {
-    //               case imp: ImplicitSearchSuccess => '{ ${ imp.tree.asExpr }.asInstanceOf[TermRes[Any]](None) }
-    //               case _                          => report.errorAndAbort(s"No implicit found for ${applied.show}")
-    //             }
-    //             expr
-
-    //             // println(s"Ap ${term} ${args}")
-    //             // println(s"[] ${applied}")
-    //             // println("~" + expr.show)
-
-    //           case _ => ???
-    //         }
-
-           
-
-    //     }
+    def liftTermToValue(term: Term): Expr[Value[Tpe]] = term match {
+      case Typed(ap @ Apply(_, args), _) =>
+        '{
+          Value.CtorAp[Tpe](
+            ${ summonTypeRes(ap.tpe.widenTermRefByName.dealias) }(),
+            ${ Expr.ofList(args.map(liftTermToValue(_))) }
+          )
+        }
+      case i @ Ident(x) =>
+        if (i.symbol.owner == symbol) selectValue(x, i.tpe, Nil)
+        else report.errorAndAbort(s"Ident ${i.show} not part of class ${symbol.fullName}")
+      case s @ Select(qualifier, name) =>
+        if (qualifier.symbol.owner == symbol) { // we're selecting from one of the ctor args
+          selectValue(qualifier.symbol.name, qualifier.tpe, (name, s.tpe) :: Nil)
+        } else { // some other constant
+          '{ Value.CtorAp[Tpe](${ summonTypeRes(s.tpe.dealias) }(), Nil) }
+        }
+      // case Literal(BooleanConstant(x)) => const(x)
+      // case Literal(ByteConstant(x))    => const(x)
+      // case Literal(ShortConstant(x))   => const(x)
+      // case Literal(IntConstant(x))     => const(x)
+      // case Literal(LongConstant(x))    => const(x)
+      // case Literal(FloatConstant(x))   => const(x)
+      // case Literal(DoubleConstant(x))  => const(x)
+      // case Literal(CharConstant(x))    => const(x)
+      // case Literal(StringConstant(x))  => const(x)
+      case _ => ???
+    }
 
     def matchCtor(t: Tree, parent: Option[TypeRepr]): Option[Expr[List[Val]]] = t match {
       case a @ Apply(Select(New(tpeTree), "<init>"), args) if parent.forall(tpeTree.tpe =:= _.widenTermRefByName) =>
-        Some(Expr.ofList(args.map {
-          case i @ Ident(x) =>
-            if (i.symbol.owner == symbol) select(x, i.tpe, Nil)
-            else report.errorAndAbort(s"Ident ${i.show} not part of class ${symbol.fullName}")
-          case s @ Select(qualifier, name) =>
-            if (qualifier.symbol.owner == symbol) {
-              // we're selecting from one of the ctor args
-              select(qualifier.symbol.name, qualifier.tpe, (name, s.tpe) :: Nil)
-            } else {
-              // some other constant
-              val applied = TypeRepr.of[TermRes].appliedTo(s.tpe.dealias)
-              Implicits.search(applied) match {
-                case imp: ImplicitSearchSuccess => '{ ${ imp.tree.asExpr }.asInstanceOf[TermRes[Any]](None) }
-                case _                          => report.errorAndAbort(s"No implicit found for ${applied.show}")
-              }
-            }
-          case Literal(BooleanConstant(x)) => const(x)
-          case Literal(ByteConstant(x))    => const(x)
-          case Literal(ShortConstant(x))   => const(x)
-          case Literal(IntConstant(x))     => const(x)
-          case Literal(LongConstant(x))    => const(x)
-          case Literal(FloatConstant(x))   => const(x)
-          case Literal(DoubleConstant(x))  => const(x)
-          case Literal(CharConstant(x))    => const(x)
-          case Literal(StringConstant(x))  => const(x)
-
-          case bad =>
-            bad match {
-              case Typed(ap@Apply(term, args), _) =>
-                val applied = TypeRepr.of[TermRes].appliedTo(ap.tpe.dealias)
-                val expr = Implicits.search(applied) match {
-                  case imp: ImplicitSearchSuccess => '{ ${ imp.tree.asExpr }.asInstanceOf[TermRes[Any]](Some("a")) }
-                  case _                          => report.errorAndAbort(s"No implicit found for ${applied.show}")
-                }
-                println(expr.show)
-                expr
-
-
-                // println(s"Ap ${term} ${args}")
-                // println(s"[] ${applied}")
-                // println("~" + expr.show)
-
-              case _ => ???
-            }
-
-            // println(parent)
-            // println(bad)
-            // println(bad.show)
-
-            // println()
-
-            // ???
-          // case Literal(UnitConstant)       => constTC(())
-          // case Literal(NullConstant)       => constTC(null)
-          // case Literal(ClassOfConstant(x)) => constTC(x)
-
-        }))
-      case bad =>
-        println(s"Not spported: $bad")
-        None
+        Some(
+          Expr.ofList(args.map(arg => summonTermRes[Value[Tpe]](tc => '{ ${ tc }(Some(${ liftTermToValue(arg) })) })))
+        )
+      case _ => None
     }
 
     // Scala implements enum cases w/o params as vals in the companion with an anonymous cls
-    // pprint.pprintln(symbol.companionClass.tree.show)
     (if (tpe.isSingleton) {
        class CtorTraverser extends TreeAccumulator[Option[Expr[List[Val]]]] {
          def foldTree(x: Option[Expr[List[Val]]], tree: Tree)(owner: Symbol): Option[Expr[List[Val]]] =
@@ -208,11 +141,8 @@ private[polyregion] object compiletime {
        CtorTraverser().foldOverTree(None, tpe.termSymbol.tree)(Symbol.noSymbol)
      } else {
        symbol.tree match {
-         case ClassDef(name, _, headCtorApply :: _, _, _) =>
-//           println(s"match!:$name")
-//           pprint.pprintln(headCtorApply)
-           matchCtor(headCtorApply, None)
-         case _ => report.errorAndAbort(s"Not a classdef")
+         case ClassDef(name, _, headCtorApply :: _, _, _) => matchCtor(headCtorApply, None)
+         case _                                           => report.errorAndAbort(s"Not a classdef")
        }
      })
     match {

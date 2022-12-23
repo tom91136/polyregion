@@ -5,13 +5,14 @@ import cats.syntax.all.*
 import fansi.Str
 import polyregion.ast.mirror.CppStructGen.{StructSource, ToCppType}
 import polyregion.ast.mirror.compiletime
-import polyregion.ast.mirror.compiletime.CtorTermSelect
+// import polyregion.ast.mirror.compiletime.CtorTermSelect
 
 import java.nio.file.{Files, Paths, StandardOpenOption}
 import scala.annotation.tailrec
 import scala.collection.immutable.LazyList.cons
 import scala.compiletime.{constValue, erasedValue, error, summonInline}
 import scala.deriving.*
+import polyregion.ast.mirror.CppStructGen.ToCppTerm.Value
 
 private[polyregion] object CppStructGen {
 
@@ -413,19 +414,14 @@ private[polyregion] object CppStructGen {
 
   trait ToCppTerm[A] extends (Option[A] => ToCppTerm.Value)
   object ToCppTerm {
-    type Value = String | compiletime.CtorTermSelect[CppType]
-    given ToCppTerm[String]                              = x => s"\"${x.getOrElse("")}\""
-    given ToCppTerm[compiletime.CtorTermSelect[CppType]] = { x => 
-      // println(s"@@@ ${x}")
-      x.getOrElse("") 
-    }
-    inline given derived[T](using m: Mirror.Of[T]): ToCppTerm[T] = { (x: Option[T]) =>
-      println(s"@@ ${x} => ${constValue[m.MirroredLabel]}")
 
-      
+    type Value = compiletime.Value[CppType]
+    // given ToCppTerm[String] = x => compiletime.Value.Const(s"\"${x.getOrElse("")}\"")
+    given ToCppTerm[Value] = { x => x.getOrElse(compiletime.Value.Const("")) }
+    inline given derived[T](using m: Mirror.Of[T]): ToCppTerm[T] = { (x: Option[T]) =>
       inline m match {
-        case s: Mirror.SumOf[T]     => summonInline[ToCppType[s.MirroredMonoType]]().ref(qualified = true) + "()"
-        case p: Mirror.ProductOf[T] => summonInline[ToCppType[p.MirroredMonoType]]().ref(qualified = true) + "()"
+        case s: Mirror.SumOf[T]     => compiletime.Value.CtorAp(summonInline[ToCppType[s.MirroredMonoType]](), Nil)
+        case p: Mirror.ProductOf[T] => compiletime.Value.CtorAp(summonInline[ToCppType[p.MirroredMonoType]](), Nil)
         case x                      => error(s"Unhandled derive: $x")
       }
     }
@@ -541,15 +537,22 @@ private[polyregion] object CppStructGen {
   inline def deriveStruct[T: ToCppType: ToCppTerm](parent: Option[(StructNode, List[String])] = None)(using
       m: Mirror.Of[T]
   ): StructNode = {
-    val ctorTerms =
-      compiletime.primaryCtorApplyTerms[m.MirroredType, ToCppTerm.Value, ToCppTerm, CppType, ToCppType].map {
-        case x: String                   => x
-        case CtorTermSelect((x, _), Nil) => x
-        case CtorTermSelect((x, xt), (y, yt) :: Nil) =>
+
+    def write(x: ToCppTerm.Value): String =
+      x match {
+        case compiletime.Value.Const(value)            => value
+        case compiletime.Value.TermSelect((x, _), Nil) => x
+        case compiletime.Value.TermSelect((x, xt), (y, yt) :: Nil) =>
           if (xt.kind == CppType.Kind.Base) s"${xt.ns(y)}($x)"
           else s"$x.$y"
-        case CtorTermSelect(x, xs) => throw new RuntimeException(s"multiple path ${x :: xs} is not supported")
+        case compiletime.Value.TermSelect(x, xs) =>
+          throw new RuntimeException(s"multiple path ${x :: xs} is not supported")
+        case compiletime.Value.CtorAp(tpe, args) => tpe.ref(qualified = true) + s"(${args.map(write(_)).mkString(",")})"
+        case _                                   => ???
       }
+
+    val ctorTerms =
+      compiletime.primaryCtorApplyTerms[m.MirroredType, ToCppTerm.Value, ToCppTerm, CppType, ToCppType].map(write(_))
     val tpe     = summon[ToCppType[m.MirroredType]]()
     val applied = parent.map((s, _) => (s, ctorTerms))
     inline m match {

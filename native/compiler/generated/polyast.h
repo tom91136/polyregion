@@ -1096,9 +1096,9 @@ struct EXPORT Index : Expr::Base {
 };
 
 struct EXPORT Alloc : Expr::Base {
-  Type::Array witness;
+  Type::Any component;
   Term::Any size;
-  Alloc(Type::Array witness, Term::Any size) noexcept : Expr::Base(witness), witness(std::move(witness)), size(std::move(size)) {}
+  Alloc(Type::Any component, Term::Any size) noexcept : Expr::Base(Type::Array(component)), component(std::move(component)), size(std::move(size)) {}
   EXPORT operator Any() const { return std::make_shared<Alloc>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Alloc &);
   EXPORT friend bool operator==(const Expr::Alloc &, const Expr::Alloc &);

@@ -165,7 +165,7 @@ using std::string;
                ")" + ":" + repr(x.tpe);
       },
       [](const Expr::Index &x) { return repr(x.lhs) + "[" + repr(x.idx) + "]"; },
-      [](const Expr::Alloc &x) { return "new [" + repr(x.witness.component) + "*" + repr(x.size) + "]"; },
+      [](const Expr::Alloc &x) { return "new [" + repr(x.tpe) + "*" + repr(x.size) + "]"; },
       [](const Expr::Suspend &x) { return "Suspend(???)"s; } //
   );
 }

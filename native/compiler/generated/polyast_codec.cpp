@@ -1265,15 +1265,15 @@ json Expr::index_to_json(const Expr::Index& x) {
 }
 
 Expr::Alloc Expr::alloc_from_json(const json& j) { 
-  auto witness =  Type::array_from_json(j.at(0));
+  auto component =  Type::any_from_json(j.at(0));
   auto size =  Term::any_from_json(j.at(1));
-  return {witness, size};
+  return {component, size};
 }
 
 json Expr::alloc_to_json(const Expr::Alloc& x) { 
-  auto witness =  Type::array_to_json(x.witness);
+  auto component =  Type::any_to_json(x.component);
   auto size =  Term::any_to_json(x.size);
-  return json::array({witness, size});
+  return json::array({component, size});
 }
 
 Expr::Suspend Expr::suspend_from_json(const json& j) { 
@@ -1569,13 +1569,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "cdc266ed46f80cfb9ee4427b05ed4072") {
-   throw std::runtime_error("Expecting ADT hash to be cdc266ed46f80cfb9ee4427b05ed4072, but was " + hash);
+  if(hash != "8bf647ff2dd3cc342a57e2e41349ed18") {
+   throw std::runtime_error("Expecting ADT hash to be 8bf647ff2dd3cc342a57e2e41349ed18, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"cdc266ed46f80cfb9ee4427b05ed4072", x});
+  return json::array({"8bf647ff2dd3cc342a57e2e41349ed18", x});
 }
 } // namespace polyregion::polyast
