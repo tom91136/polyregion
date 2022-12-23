@@ -107,7 +107,7 @@ object PolyAst {
     case Alias(ref: Term)           extends Expr(ref.tpe)
     case Invoke(name: Sym, tpeArgs: List[Type], receiver: Option[Term], args: List[Term], rtn: Type) extends Expr(rtn)
     case Index(lhs: Term.Select, idx: Term, component: Type)                        extends Expr(component)
-    case Alloc(witness: Type.Array, size: Term)                                     extends Expr(witness)
+    case Alloc(witness: Type, size: Term)                                     extends Expr(Type.Array(witness))
     case Suspend(args: List[Named], stmts: List[Stmt], rtn: Type, shape: Type.Exec) extends Expr(shape)
   }
 

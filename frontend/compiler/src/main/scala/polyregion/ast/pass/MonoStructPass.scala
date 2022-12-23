@@ -36,6 +36,19 @@ object MonoStructPass extends ProgramPass {
 
     val replacementTable = monoStructDefs.toMap
 
+    // TL => 
+      // A<B<>>
+      
+      // A_<B_>
+      // B_
+
+      // A_B_
+      // B_
+
+    //  arity == 0, skip
+    //  arity != 0 && for all child, arity == 0, skip
+    // SCO
+
     println(s"[Rep] Table:\n${replacementTable.map((k,v) => s"\t${k.repr} => ${v.repr}").mkString("\n")}")
 
     def doReplacement(t: p.Type) = t match {

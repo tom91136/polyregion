@@ -87,6 +87,53 @@ private[polyregion] object compiletime {
       summonTermRes[CtorTermSelect[Tpe]](tc => '{ ${ tc }(Some($sel)) })
     }
 
+    // def doOne(t : Term) = {
+    //       case i @ Ident(x) =>
+    //         if (i.symbol.owner == symbol) select(x, i.tpe, Nil)
+    //         else report.errorAndAbort(s"Ident ${i.show} not part of class ${symbol.fullName}")
+    //       case s @ Select(qualifier, name) =>
+    //         if (qualifier.symbol.owner == symbol) {
+    //           // we're selecting from one of the ctor args
+    //           select(qualifier.symbol.name, qualifier.tpe, (name, s.tpe) :: Nil)
+    //         } else {
+    //           // some other constant
+    //           val applied = TypeRepr.of[TermRes].appliedTo(s.tpe.dealias)
+    //           Implicits.search(applied) match {
+    //             case imp: ImplicitSearchSuccess => '{ ${ imp.tree.asExpr }.asInstanceOf[TermRes[Any]](None) }
+    //             case _                          => report.errorAndAbort(s"No implicit found for ${applied.show}")
+    //           }
+    //         }
+    //       case Literal(BooleanConstant(x)) => const(x)
+    //       case Literal(ByteConstant(x))    => const(x)
+    //       case Literal(ShortConstant(x))   => const(x)
+    //       case Literal(IntConstant(x))     => const(x)
+    //       case Literal(LongConstant(x))    => const(x)
+    //       case Literal(FloatConstant(x))   => const(x)
+    //       case Literal(DoubleConstant(x))  => const(x)
+    //       case Literal(CharConstant(x))    => const(x)
+    //       case Literal(StringConstant(x))  => const(x)
+
+    //       case bad =>
+    //         bad match {
+    //           case Typed(ap@Apply(term, args), _) =>
+    //             val applied = TypeRepr.of[TermRes].appliedTo(ap.tpe.dealias)
+    //             val expr = Implicits.search(applied) match {
+    //               case imp: ImplicitSearchSuccess => '{ ${ imp.tree.asExpr }.asInstanceOf[TermRes[Any]](None) }
+    //               case _                          => report.errorAndAbort(s"No implicit found for ${applied.show}")
+    //             }
+    //             expr
+
+    //             // println(s"Ap ${term} ${args}")
+    //             // println(s"[] ${applied}")
+    //             // println("~" + expr.show)
+
+    //           case _ => ???
+    //         }
+
+           
+
+    //     }
+
     def matchCtor(t: Tree, parent: Option[TypeRepr]): Option[Expr[List[Val]]] = t match {
       case a @ Apply(Select(New(tpeTree), "<init>"), args) if parent.forall(tpeTree.tpe =:= _.widenTermRefByName) =>
         Some(Expr.ofList(args.map {
@@ -114,15 +161,41 @@ private[polyregion] object compiletime {
           case Literal(DoubleConstant(x))  => const(x)
           case Literal(CharConstant(x))    => const(x)
           case Literal(StringConstant(x))  => const(x)
+
           case bad =>
-            println(bad.show)
-            ???
+            bad match {
+              case Typed(ap@Apply(term, args), _) =>
+                val applied = TypeRepr.of[TermRes].appliedTo(ap.tpe.dealias)
+                val expr = Implicits.search(applied) match {
+                  case imp: ImplicitSearchSuccess => '{ ${ imp.tree.asExpr }.asInstanceOf[TermRes[Any]](Some("a")) }
+                  case _                          => report.errorAndAbort(s"No implicit found for ${applied.show}")
+                }
+                println(expr.show)
+                expr
+
+
+                // println(s"Ap ${term} ${args}")
+                // println(s"[] ${applied}")
+                // println("~" + expr.show)
+
+              case _ => ???
+            }
+
+            // println(parent)
+            // println(bad)
+            // println(bad.show)
+
+            // println()
+
+            // ???
           // case Literal(UnitConstant)       => constTC(())
           // case Literal(NullConstant)       => constTC(null)
           // case Literal(ClassOfConstant(x)) => constTC(x)
 
         }))
-      case _ => None
+      case bad =>
+        println(s"Not spported: $bad")
+        None
     }
 
     // Scala implements enum cases w/o params as vals in the companion with an anonymous cls

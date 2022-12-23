@@ -344,7 +344,7 @@ extension (e: p.Expr) {
       val (component0, as2) = f(component)
       (p.Expr.Index(lhs0, idx0, component0), as0 ::: as1 ::: as2)
     case p.Expr.Alloc(witness, size) =>
-      val (component0, as0) = f(witness.component)
+      val (component0, as0) = f(witness)
       // XXX size here can really only be an Int, so the type mapping should always be no-op
       //  maybe we should assert in such cases?
       val (size0, as1) = size.mapTypeAcc(f)
@@ -455,7 +455,7 @@ extension (e: p.Expr) {
     case p.Expr.Invoke(name, tpeArgs, recv, args, tpe) =>
       s"${recv.map(_.repr).getOrElse("<module>")}.${name.repr}<${tpeArgs.map(_.repr).mkString(",")}>(${args.map(_.repr).mkString(",")}) : ${tpe.repr}"
     case p.Expr.Index(lhs, idx, tpe)             => s"${lhs.repr}[${idx.repr}] : ${tpe.repr}"
-    case p.Expr.Alloc(tpe, size)                 => s"new [${tpe.component.repr}*${size.repr}]"
+    case p.Expr.Alloc(tpe, size)                 => s"new [${tpe.repr}*${size.repr}]"
     case p.Expr.Suspend(args, stmts, rtn, shape) => ???
   }
 }

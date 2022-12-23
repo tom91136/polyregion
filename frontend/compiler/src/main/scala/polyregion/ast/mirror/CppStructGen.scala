@@ -415,8 +415,14 @@ private[polyregion] object CppStructGen {
   object ToCppTerm {
     type Value = String | compiletime.CtorTermSelect[CppType]
     given ToCppTerm[String]                              = x => s"\"${x.getOrElse("")}\""
-    given ToCppTerm[compiletime.CtorTermSelect[CppType]] = { x => x.getOrElse("") }
-    inline given derived[T](using m: Mirror.Of[T]): ToCppTerm[T] = { (_: Option[T]) =>
+    given ToCppTerm[compiletime.CtorTermSelect[CppType]] = { x => 
+      // println(s"@@@ ${x}")
+      x.getOrElse("") 
+    }
+    inline given derived[T](using m: Mirror.Of[T]): ToCppTerm[T] = { (x: Option[T]) =>
+      println(s"@@ ${x} => ${constValue[m.MirroredLabel]}")
+
+      
       inline m match {
         case s: Mirror.SumOf[T]     => summonInline[ToCppType[s.MirroredMonoType]]().ref(qualified = true) + "()"
         case p: Mirror.ProductOf[T] => summonInline[ToCppType[p.MirroredMonoType]]().ref(qualified = true) + "()"
