@@ -1086,10 +1086,10 @@ struct EXPORT Invoke : Expr::Base {
 };
 
 struct EXPORT Index : Expr::Base {
-  Term::Select lhs;
+  Term::Any lhs;
   Term::Any idx;
   Type::Any component;
-  Index(Term::Select lhs, Term::Any idx, Type::Any component) noexcept : Expr::Base(component), lhs(std::move(lhs)), idx(std::move(idx)), component(std::move(component)) {}
+  Index(Term::Any lhs, Term::Any idx, Type::Any component) noexcept : Expr::Base(component), lhs(std::move(lhs)), idx(std::move(idx)), component(std::move(component)) {}
   EXPORT operator Any() const { return std::make_shared<Index>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Index &);
   EXPORT friend bool operator==(const Expr::Index &, const Expr::Index &);
@@ -1142,20 +1142,20 @@ struct EXPORT Var : Stmt::Base {
 };
 
 struct EXPORT Mut : Stmt::Base {
-  Term::Select name;
+  Term::Any name;
   Expr::Any expr;
   bool copy;
-  Mut(Term::Select name, Expr::Any expr, bool copy) noexcept : Stmt::Base(), name(std::move(name)), expr(std::move(expr)), copy(copy) {}
+  Mut(Term::Any name, Expr::Any expr, bool copy) noexcept : Stmt::Base(), name(std::move(name)), expr(std::move(expr)), copy(copy) {}
   EXPORT operator Any() const { return std::make_shared<Mut>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Stmt::Mut &);
   EXPORT friend bool operator==(const Stmt::Mut &, const Stmt::Mut &);
 };
 
 struct EXPORT Update : Stmt::Base {
-  Term::Select lhs;
+  Term::Any lhs;
   Term::Any idx;
   Term::Any value;
-  Update(Term::Select lhs, Term::Any idx, Term::Any value) noexcept : Stmt::Base(), lhs(std::move(lhs)), idx(std::move(idx)), value(std::move(value)) {}
+  Update(Term::Any lhs, Term::Any idx, Term::Any value) noexcept : Stmt::Base(), lhs(std::move(lhs)), idx(std::move(idx)), value(std::move(value)) {}
   EXPORT operator Any() const { return std::make_shared<Update>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Stmt::Update &);
   EXPORT friend bool operator==(const Stmt::Update &, const Stmt::Update &);

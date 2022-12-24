@@ -3,7 +3,7 @@ package polyregion.scala
 import cats.syntax.all.*
 import polyregion.ast.{PolyAst as p, *}
 import polyregion.scala.{Quoted, Symbols}
-
+import polyregion.ast.Traversal.*
 import scala.annotation.tailrec
 
 object IntrinsifyPass {

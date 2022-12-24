@@ -4,6 +4,7 @@ import cats.syntax.all.*
 import polyregion.ast.pass.*
 import polyregion.ast.{PolyAst as p, *}
 import polyregion.prism.StdLib
+import polyregion.ast.Traversal.*
 
 import java.nio.file.Paths
 import scala.quoted.Expr

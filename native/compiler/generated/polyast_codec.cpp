@@ -1251,14 +1251,14 @@ json Expr::invoke_to_json(const Expr::Invoke& x) {
 }
 
 Expr::Index Expr::index_from_json(const json& j) { 
-  auto lhs =  Term::select_from_json(j.at(0));
+  auto lhs =  Term::any_from_json(j.at(0));
   auto idx =  Term::any_from_json(j.at(1));
   auto component =  Type::any_from_json(j.at(2));
   return {lhs, idx, component};
 }
 
 json Expr::index_to_json(const Expr::Index& x) { 
-  auto lhs =  Term::select_to_json(x.lhs);
+  auto lhs =  Term::any_to_json(x.lhs);
   auto idx =  Term::any_to_json(x.idx);
   auto component =  Type::any_to_json(x.component);
   return json::array({lhs, idx, component});
@@ -1353,28 +1353,28 @@ json Stmt::var_to_json(const Stmt::Var& x) {
 }
 
 Stmt::Mut Stmt::mut_from_json(const json& j) { 
-  auto name =  Term::select_from_json(j.at(0));
+  auto name =  Term::any_from_json(j.at(0));
   auto expr =  Expr::any_from_json(j.at(1));
   auto copy = j.at(2).get<bool>();
   return {name, expr, copy};
 }
 
 json Stmt::mut_to_json(const Stmt::Mut& x) { 
-  auto name =  Term::select_to_json(x.name);
+  auto name =  Term::any_to_json(x.name);
   auto expr =  Expr::any_to_json(x.expr);
   auto copy = x.copy;
   return json::array({name, expr, copy});
 }
 
 Stmt::Update Stmt::update_from_json(const json& j) { 
-  auto lhs =  Term::select_from_json(j.at(0));
+  auto lhs =  Term::any_from_json(j.at(0));
   auto idx =  Term::any_from_json(j.at(1));
   auto value =  Term::any_from_json(j.at(2));
   return {lhs, idx, value};
 }
 
 json Stmt::update_to_json(const Stmt::Update& x) { 
-  auto lhs =  Term::select_to_json(x.lhs);
+  auto lhs =  Term::any_to_json(x.lhs);
   auto idx =  Term::any_to_json(x.idx);
   auto value =  Term::any_to_json(x.value);
   return json::array({lhs, idx, value});
@@ -1569,13 +1569,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "8bf647ff2dd3cc342a57e2e41349ed18") {
-   throw std::runtime_error("Expecting ADT hash to be 8bf647ff2dd3cc342a57e2e41349ed18, but was " + hash);
+  if(hash != "64b49254834b04349d947eee7e744c38") {
+   throw std::runtime_error("Expecting ADT hash to be 64b49254834b04349d947eee7e744c38, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"8bf647ff2dd3cc342a57e2e41349ed18", x});
+  return json::array({"64b49254834b04349d947eee7e744c38", x});
 }
 } // namespace polyregion::polyast

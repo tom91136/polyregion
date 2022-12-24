@@ -1,8 +1,8 @@
 package polyregion.ast.pass
 
 import cats.syntax.all.*
-import polyregion.ast.{PolyAst as p, *}
-
+import polyregion.ast.{PolyAst as p,given, *}
+import polyregion.ast.Traversal.*
 object MonoStructPass extends ProgramPass {
 
   override def apply(program: p.Program, log: Log): (p.Program, Log) = {

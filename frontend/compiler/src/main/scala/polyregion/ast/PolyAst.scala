@@ -106,7 +106,7 @@ object PolyAst {
     case Cast(from: Term, as: Type) extends Expr(as)
     case Alias(ref: Term)           extends Expr(ref.tpe)
     case Invoke(name: Sym, tpeArgs: List[Type], receiver: Option[Term], args: List[Term], rtn: Type) extends Expr(rtn)
-    case Index(lhs: Term.Select, idx: Term, component: Type)                        extends Expr(component)
+    case Index(lhs: Term , idx: Term, component: Type)                        extends Expr(component)
     case Alloc(component: Type, size: Term)                                     extends Expr(Type.Array(component))
     case Suspend(args: List[Named], stmts: List[Stmt], rtn: Type, shape: Type.Exec) extends Expr(shape)
   }
@@ -114,8 +114,8 @@ object PolyAst {
   enum Stmt derives MsgPack.Codec {
     case Comment(value: String)
     case Var(name: Named, expr: Option[Expr])
-    case Mut(name: Term.Select, expr: Expr, copy: Boolean)
-    case Update(lhs: Term.Select, idx: Term, value: Term)
+    case Mut(name: Term , expr: Expr, copy: Boolean)
+    case Update(lhs: Term , idx: Term, value: Term)
     case While(tests: List[Stmt], cond: Term, body: List[Stmt])
     case Break
     case Cont

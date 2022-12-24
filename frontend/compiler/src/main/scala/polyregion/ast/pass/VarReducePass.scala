@@ -30,11 +30,6 @@ object VarReducePass extends ProgramPass {
             case x @ SourceName => x :: Nil
             case x @ p.Term.Select(`name` :: _, _)  => x:: Nil
             case _              => Nil
-          },
-          {
-            case x @ SourceName => x :: Nil
-            case x @ p.Term.Select(`name` :: _, _)  => x:: Nil
-            case _              => Nil
           }
         )
       )

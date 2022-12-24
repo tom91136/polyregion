@@ -9,6 +9,24 @@ import scala.annotation.{tailrec, targetName}
 import scala.reflect.ClassTag
 import scala.util.{Success, Try}
 
+given Traversal[p.Type, p.Term] = Traversal.derived
+given Traversal[p.Expr, p.Term] = Traversal.derived
+given Traversal[p.UnaryIntrinsicKind, p.Term] = Traversal.derived
+given Traversal[p.BinaryIntrinsicKind, p.Term] = Traversal.derived
+given Traversal[p.NullaryIntrinsicKind, p.Term] = Traversal.derived
+given Traversal[p.Stmt, p.Term] = Traversal.derived
+
+
+given Traversal[p.Type, p.Type]  = Traversal.derived
+given Traversal[PolyAst.UnaryIntrinsicKind, PolyAst.Type] = Traversal.derived
+given Traversal[PolyAst.BinaryIntrinsicKind, PolyAst.Type] = Traversal.derived
+given Traversal[PolyAst.NullaryIntrinsicKind, PolyAst.Type] = Traversal.derived
+given Traversal[p.Expr, p.Type]  = Traversal.derived
+given Traversal[p.Stmt, p.Type]  = Traversal.derived
+given Traversal[p.Named, p.Type] = Traversal.derived
+
+given Traversal[p.Function, p.Type] = Traversal.derived
+
 @tailrec def doUntilNotEq[A](x: A, n: Int = 0, limit: Int = Int.MaxValue)(f: (Int, A) => A): (Int, A) = {
   val y = f(n, x)
   if (y == x || n >= limit) (n, y)
@@ -512,33 +530,21 @@ extension (stmt: p.Stmt) {
     case p.Stmt.Return(expr) => val (y, xs, as) = f(expr); (xs :+ p.Stmt.Return(y), as)
   }
 
-  def accTerm[A](g: p.Term.Select => List[A], f: p.Term => List[A]): List[A] =
-    stmt.mapAccTerm(s => s -> g(s), t => t -> f(t))._2
+  def accTerm[A](  f: p.Term => List[A]): List[A] =
+    stmt.mapAccTerm(  t => t -> f(t))._2
 
-  def mapTerm(g: p.Term.Select => p.Term.Select, f: p.Term => p.Term): List[p.Stmt] =
-    stmt.mapAccTerm(s => g(s) -> Nil, t => f(t) -> Nil)._1
-
-  def mapTerm(f: p.Term => p.Term): List[p.Stmt] =
-    stmt
-      .mapAccTerm(
-        f(_) match {
-          case s @ p.Term.Select(_, _) => s -> Nil
-          case x => throw new IllegalArgumentException(s"Select must be mapped to a select, got $x")
-        },
-        t => f(t) -> Nil
-      )
-      ._1
+  def mapTerm(  f: p.Term => p.Term): List[p.Stmt] =
+    stmt.mapAccTerm( t => f(t) -> Nil)._1
 
   def mapAccTerm[A](
-      g: p.Term.Select => (p.Term.Select, List[A]),
       f: p.Term => (p.Term, List[A])
   ): (List[p.Stmt], List[A]) = {
     val (stmts0, as0) = stmt.mapAcc {
       case p.Stmt.Mut(name, expr, copy) =>
-        val (name0, as) = g(name)
+        val (name0, as) = f(name)
         (p.Stmt.Mut(name0, expr, copy) :: Nil, as)
       case p.Stmt.Update(lhs, idx, value) =>
-        val (lhs0, as0)   = g(lhs)
+        val (lhs0, as0)   = f(lhs)
         val (idx0, as1)   = f(idx)
         val (value0, as2) = f(value)
         (p.Stmt.Update(lhs0, idx0, value0) :: Nil, as0 ::: as1 ::: as2)
@@ -569,7 +575,7 @@ extension (stmt: p.Stmt) {
           val (args0, as1)     = args.map(f).unzip
           (p.Expr.Invoke(name, tpeArgs, receiver0, args0, rtn), Nil, (as0 :: as1).flatten)
         case p.Expr.Index(lhs, idx, component) =>
-          val (lhs0, as0) = g(lhs)
+          val (lhs0, as0) = f(lhs)
           val (idx0, as1) = f(idx)
           (p.Expr.Index(lhs0, idx0, component), Nil, as0 ::: as1)
         case p.Expr.Alloc(witness, term) =>
@@ -587,11 +593,6 @@ extension (stmt: p.Stmt) {
   def mapType(f: p.Type => p.Type): List[p.Stmt] = mapAccType(x => f(x) -> Nil)._1
   def mapAccType[A](f: p.Type => (p.Type, List[A])): (List[p.Stmt], List[A]) = {
     val (stmts0, as0) = stmt.mapAccTerm(
-      { case p.Term.Select(xs, x) =>
-        val (xs0, as0) = xs.map(_.mapAccType(f)).unzip
-        val (x0, as1)  = x.mapAccType(f)
-        (p.Term.Select(xs0, x0), as0.flatten ::: as1)
-      },
       {
         case p.Term.Select(xs, x) =>
           val (xs0, as0) = xs.map(_.mapAccType(f)).unzip

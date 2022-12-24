@@ -971,7 +971,7 @@ std::ostream &Expr::operator<<(std::ostream &os, const Expr::Index &x) {
   return os;
 }
 bool Expr::operator==(const Expr::Index &l, const Expr::Index &r) { 
-  return l.lhs == r.lhs && *l.idx == *r.idx && *l.component == *r.component;
+  return *l.lhs == *r.lhs && *l.idx == *r.idx && *l.component == *r.component;
 }
 
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Alloc &x) {
@@ -1055,7 +1055,7 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Mut &x) {
   return os;
 }
 bool Stmt::operator==(const Stmt::Mut &l, const Stmt::Mut &r) { 
-  return l.name == r.name && *l.expr == *r.expr && l.copy == r.copy;
+  return *l.name == *r.name && *l.expr == *r.expr && l.copy == r.copy;
 }
 
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Update &x) {
@@ -1069,7 +1069,7 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Update &x) {
   return os;
 }
 bool Stmt::operator==(const Stmt::Update &l, const Stmt::Update &r) { 
-  return l.lhs == r.lhs && *l.idx == *r.idx && *l.value == *r.value;
+  return *l.lhs == *r.lhs && *l.idx == *r.idx && *l.value == *r.value;
 }
 
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::While &x) {

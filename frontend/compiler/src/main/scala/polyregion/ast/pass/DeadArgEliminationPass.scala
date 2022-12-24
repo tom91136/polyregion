@@ -1,24 +1,19 @@
 package polyregion.ast.pass
 
 import cats.syntax.all.*
-import polyregion.ast.{PolyAst as p, *}
+import polyregion.ast.{PolyAst as p, given, *}
+import polyregion.ast.Traversal.*
+
 
 object DeadArgEliminationPass extends ProgramPass {
 
   inline def run(f: p.Function): p.Function = {
+
     val topLevelRefs = f.body.flatMap { s =>
-      s.accTerm(
-        {
-          case p.Term.Select(Nil, x)      => x :: Nil
-          case p.Term.Select(x :: Nil, _) => x :: Nil
-          case _                          => Nil
-        },
-        {
-          case p.Term.Select(Nil, x)      => x :: Nil
-          case p.Term.Select(x :: Nil, _) => x :: Nil
-          case _                          => Nil
-        }
-      )
+      s.collect[p.Term].collect {
+        case p.Term.Select(Nil, x)      => x
+        case p.Term.Select(x :: Nil, _) => x
+      }
     }.toSet
 
     // println(s"aaa = ${topLevelRefs.toList.mkString("\n")}")

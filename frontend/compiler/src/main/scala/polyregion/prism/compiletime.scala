@@ -3,6 +3,7 @@ package polyregion.prism
 import cats.syntax.all.*
 import polyregion.ast.{PolyAst as p, *}
 import polyregion.scala.*
+import polyregion.ast.Traversal.*
 
 import _root_.scala.annotation.{compileTimeOnly, tailrec}
 import _root_.scala.quoted.*

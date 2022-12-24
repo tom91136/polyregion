@@ -1,8 +1,8 @@
 package polyregion.ast.pass
 
 import cats.syntax.all.*
-import polyregion.ast.{PolyAst as p, *}
-
+import polyregion.ast.{PolyAst as p, given, *}
+import polyregion.ast.Traversal.*
 import scala.collection.immutable.VectorMap
 
 // inline all calls originating from entry
@@ -16,13 +16,6 @@ object FnInlinePass extends ProgramPass {
     val stmts = for {
       s <- f.body
       s <- s.mapTerm(
-        {
-          case s @ p.Term.Select(Nil, n) if captureNames.contains(n)    => s
-          case s @ p.Term.Select(n :: _, _) if captureNames.contains(n) => s
-          case p.Term.Select(Nil, n)                                    => p.Term.Select(Nil, rename(n))
-          case p.Term.Select(n :: ns, x)                                => p.Term.Select(rename(n) :: ns, x)
-          case x                                                        => x
-        },
         {
           case s @ p.Term.Select(Nil, n) if captureNames.contains(n)    => s
           case s @ p.Term.Select(n :: _, _) if captureNames.contains(n) => s
@@ -78,21 +71,6 @@ object FnInlinePass extends ProgramPass {
         case (xs, (target, replacement)) =>
           xs.flatMap(
             _.mapTerm(
-              { original =>
-                println(s"substitute  ${original.repr} contains ${target.repr} => ${replacement.repr}")
-
-                (original, replacement) match {
-                  case (p.Term.Select(Nil, `target`), r @ p.Term.Select(_, _)) =>
-                    println("\tHit")
-                    r
-                  case (p.Term.Select(`target` :: xs, x), p.Term.Select(ys, y)) =>
-                    println("\tHit")
-                    p.Term.Select(ys ::: y :: xs, x)
-                  case _ => original
-                }
-
-              // if (original == target) replacement.asInstanceOf[p.Term.Select] else original
-              },
               { original =>
                 println(s"substitute  ${original.repr} ??? ${target.repr}")
 
