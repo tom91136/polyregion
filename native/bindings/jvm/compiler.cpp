@@ -26,7 +26,7 @@ static_assert(polyregion::to_underlying(cp::Target::Object_LLVM_SPIRV64) == Comp
 static_assert(polyregion::to_underlying(cp::Target::Source_C_OpenCL1_1) == Compiler::Target_Source_C_OpenCL1_1);
 static_assert(polyregion::to_underlying(cp::Target::Source_C_C11) == Compiler::Target_Source_C_C11);
 
-[[maybe_unused]] JNIEXPORT jint JNICALL  JNI_OnLoad(JavaVM *vm, void *) {
+[[maybe_unused]] JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
   fprintf(stderr, "JVM enter\n");
   JNIEnv *env = getEnv(vm);
   if (!env) return JNI_ERR;
@@ -96,9 +96,10 @@ jstring Compiler::hostTriplet0(JNIEnv *env, jclass) {
   return toJni(env, polyregion::backend::llvmc::defaultHostTriple().str());
 }
 
-jobject Compiler::layoutOf0(JNIEnv *env, jclass, jbyteArray structDef, jobject options) {
+jobjectArray Compiler::layoutOf0(JNIEnv *env, jclass, jbyteArray structDef, jobject options) {
   return wrapException(env, EX, [&]() {
-    return toJni(env, cp::layoutOf(fromJni<char>(env, structDef), fromJni(env, options))).instance;
+    auto layouts = cp::layoutOf(fromJni<char>(env, structDef), fromJni(env, options));
+    return toJni(env, layouts, gen::Layout::of(env).clazz, [&](auto &s) { return toJni(env, s).instance; });
   });
 }
 

@@ -1,7 +1,8 @@
 package polyregion.ast.pass
 
 import cats.syntax.all.*
-import polyregion.ast.{PolyAst as p, *}
+import polyregion.ast.{PolyAst as p, given, *}
+import polyregion.ast.Traversal.*
 
 object VarReducePass extends ProgramPass {
 
@@ -15,37 +16,25 @@ object VarReducePass extends ProgramPass {
     // var a: T = expr
     // use a
 
-    val allVars = f.body.flatMap(x =>
-      x.acc {
-        case v @ p.Stmt.Var(_, _) => v :: Nil
-        case _                    => Nil
-      }
-    )
+    val allVars = f.collectWhere[p.Stmt] { case v @ p.Stmt.Var(_, _) => v }
 
     val reduced = allVars.foldLeft(f.body) { case (stmts, source @ p.Stmt.Var(name, _)) =>
       val SourceName = p.Term.Select(Nil, name)
-      val allSelectToSource = f.body.flatMap(s =>
-        s.accTerm(
-          {
-            case x @ SourceName => x :: Nil
-            case x @ p.Term.Select(`name` :: _, _)  => x:: Nil
-            case _              => Nil
-          }
-        )
-      )
+      val allSelectToSource = f.body.collectWhere[p.Term] {
+        case x @ SourceName                    => x
+        case x @ p.Term.Select(`name` :: _, _) => x
+      }
       allSelectToSource match {
         case _ :: Nil =>
-          val candidates = f.body.flatMap(_.acc { // find vars with RHS to source
-            case r @ p.Stmt.Var(_, Some(p.Expr.Alias(SourceName))) => r :: Nil
-            case _                                                 => Nil
-          })
+          // find vars with RHS to source
+          val candidates = f.body.collectWhere[p.Stmt] { case r @ p.Stmt.Var(_, Some(p.Expr.Alias(SourceName))) => r }
           candidates match {
             case alias :: Nil => // single, inline rhs and delete
-              stmts.flatMap(_.map {
-                case `source` => Nil // source is only used here, delete
-                case `alias`  => alias.copy(expr = source.expr) :: Nil
-                case x        => x :: Nil
-              })
+              stmts.modifyAll[p.Stmt] {
+                case `source` => p.Stmt.Comment(s"${source}") // source is only used here, delete
+                case `alias`  => alias.copy(expr = source.expr)
+                case x        => x
+              }
             case _ => stmts
           }
         case _ => stmts
@@ -55,7 +44,9 @@ object VarReducePass extends ProgramPass {
     f.copy(body = reduced)
   }
 
-  override def apply(program: p.Program, log: Log): (p.Program, Log) =
+  override def apply(program: p.Program, log: Log): (p.Program, Log) = {
+    println(">VarReducePass")
     (p.Program(run(program.entry), program.functions.map(run(_)), program.defs), log)
+  }
 
 }

@@ -146,6 +146,9 @@ jobject Platforms::HSA0(JNIEnv *env, jclass) { return toJni<rt::hsa::HsaPlatform
 jobject Platforms::OpenCL0(JNIEnv *env, jclass) { return toJni<rt::cl::ClPlatform>(env); }
 jobject Platforms::Relocatable0(JNIEnv *env, jclass) { return toJni<rt::object::RelocatablePlatform>(env); }
 jobject Platforms::Dynamic0(JNIEnv *env, jclass) { return toJni<rt::object::SharedPlatform>(env); }
+jobject Platforms::directBufferFromPointer0(JNIEnv *env, jclass, jlong ptr, jlong size) {
+  return env->NewDirectByteBuffer(reinterpret_cast<void *>(ptr), size);
+}
 jobjectArray Platform::runtimeProperties0(JNIEnv *env, jclass, jlong nativePeer) {
   return toJni(env, findRef(env, platforms, nativePeer)->properties());
 }

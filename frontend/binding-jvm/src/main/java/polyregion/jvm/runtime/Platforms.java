@@ -1,6 +1,8 @@
 package polyregion.jvm.runtime;
 
 import java.nio.Buffer;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.file.Paths;
 
 import polyregion.jvm.Loader;
@@ -41,6 +43,8 @@ public final class Platforms implements AutoCloseable {
   static native long[] pointerOfDirectBuffers0(Buffer[] buffers);
 
   static native long pointerOfDirectBuffer0(Buffer buffer);
+
+  static native ByteBuffer directBufferFromPointer0(long ptr, long size);
 
   private final NativeLibrary library;
 
@@ -89,6 +93,10 @@ public final class Platforms implements AutoCloseable {
 
   public long pointerOfDirectBuffer(Buffer buffers) {
     return pointerOfDirectBuffer0(buffers);
+  }
+
+  public ByteBuffer directBufferFromPointer(long ptr, long size) {
+    return directBufferFromPointer0(ptr, size).order(ByteOrder.nativeOrder());
   }
 
   @Override

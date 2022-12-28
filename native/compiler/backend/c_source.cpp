@@ -168,7 +168,7 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr, const std::string &k
       [&](const Expr::Cast &x) { return "((" + mkTpe(x.as) + ") " + mkRef(x.from) + ")"; },
       [&](const Expr::Alias &x) { return mkRef(x.ref); },                                //
       [&](const Expr::Invoke &x) { return "???"s; },                                     //
-      [&](const Expr::Index &x) { return qualified(x.lhs) + "[" + mkRef(x.idx) + "]"; }, //
+      [&](const Expr::Index &x) { return mkRef(x.lhs) + "[" + mkRef(x.idx) + "]"; }, //
       [&](const Expr::Alloc &x) { return "{/*" + to_string(x) + "*/}"; },                //
       [&](const Expr::Suspend &x) { return "{/*suspend*/}"s; }                           //
   );
@@ -191,15 +191,15 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
       [&](const Stmt::Mut &x) {
         if (x.copy) {
           return "memcpy(" + //
-                 polyast::qualified(x.name) + ", " + mkExpr(x.expr, "?") + ", sizeof(" + mkTpe(tpe(x.expr)) + "));";
+                 mkRef(x.name) + ", " + mkExpr(x.expr, "?") + ", sizeof(" + mkTpe(tpe(x.expr)) + "));";
         } else {
-          return polyast::qualified(x.name) + " = " + mkExpr(x.expr, "?") + ";";
+          return mkRef(x.name) + " = " + mkExpr(x.expr, "?") + ";";
         }
       },
       [&](const Stmt::Update &x) {
         auto idx = mkRef(x.idx);
         auto val = mkRef(x.value);
-        return qualified(x.lhs) + "[" + idx + "] = " + val + ";";
+        return mkRef(x.lhs) + "[" + idx + "] = " + val + ";";
       },
       [&](const Stmt::While &x) {
         auto body = mk_string<Stmt::Any>(
@@ -224,7 +224,7 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
   );
 }
 
-compiler::Compilation backend::CSource::run(const Program &program, const compiler::Opt &opt) {
+compiler::Compilation backend::CSource::compileProgram(const Program &program, const compiler::Opt &opt) {
   auto fnTree = program.entry;
 
   auto start = compiler::nowMono();
@@ -289,4 +289,8 @@ compiler::Compilation backend::CSource::run(const Program &program, const compil
   }
 
   return {data, {}, {{compiler::nowMs(), compiler::elapsedNs(start), "polyast_to_" + dialectName + "_c", def}}};
+}
+std::vector<compiler::Layout> backend::CSource::resolveLayouts(const std::vector<polyast::StructDef> &defs,
+                                                               const compiler::Opt &opt) {
+  return std::vector<compiler::Layout>();
 }

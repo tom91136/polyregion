@@ -117,7 +117,7 @@ TEST_CASE("index prim array", "[compiler]") {
   DYNAMIC_SECTION("xs[" << idx << "]:" << tpe << " (local)") {
     CAPTURE(tpe, idx);
     assertCompile(program(function("foo", {}, tpe)({
-        let("xs") = Alloc(Array(tpe), 42_(Int)),          //
+        let("xs") = Alloc(tpe, 42_(Int)),                 //
         let("x") = "xs"_(Array(tpe))[integral(Int, idx)], //
         ret("x"_(tpe))                                    //
     })));
@@ -139,7 +139,7 @@ TEST_CASE("update prim array", "[compiler]") {
   DYNAMIC_SECTION("(xs[" << idx << "]:" << tpe << ") = " << val << " (local)") {
     CAPTURE(tpe, idx, val);
     assertCompile(program(function("foo", {}, tpe)({
-        let("xs") = Alloc(Array(tpe), 42_(Int)),     //
+        let("xs") = Alloc(tpe, 42_(Int)),            //
         "xs"_(Array(tpe))[integral(Int, idx)] = val, //
         ret("xs"_(Array(tpe))[integral(Int, idx)])   //
     })));
@@ -269,7 +269,7 @@ TEST_CASE("alias array", "[compiler]") {
 
   Function fn(Sym({"foo"}), {}, {}, {}, {}, arr,
               {
-                  Var(Named("s", arr), {Alloc(arr, IntConst(10))}),
+                  Var(Named("s", arr), {Alloc(arr.component, IntConst(10))}),
                   Var(Named("t", arr), {Alias(Select({}, Named("s", arr)))}),
                   Return(Alias(Select({}, Named("s", arr)))),
               });
@@ -315,9 +315,9 @@ TEST_CASE("mut array", "[compiler]") {
 
   Function fn(Sym({"foo"}), {}, {}, {}, {}, arr,
               {
-                  Var(Named("s", arr), {Alloc(arr, IntConst(10))}),
-                  Var(Named("t", arr), {Alloc(arr, IntConst(20))}),
-                  Var(Named("u", arr), {Alloc(arr, IntConst(30))}),
+                  Var(Named("s", arr), {Alloc(arr.component, IntConst(10))}),
+                  Var(Named("t", arr), {Alloc(arr.component, IntConst(20))}),
+                  Var(Named("u", arr), {Alloc(arr.component, IntConst(30))}),
                   Mut(Select({}, Named("s", arr)), Alias(Select({}, Named("t", arr))), false),
                   Mut(Select({}, Named("t", arr)), Alias(Select({}, Named("u", arr))), false),
                   Mut(Select({}, Named("t", arr)), Alias(Select({}, Named("s", arr))), false),
@@ -409,9 +409,9 @@ TEST_CASE("alloc array", "[compiler]") {
 
   Function fn(Sym({"foo"}), {}, {}, {}, {}, arr,
               {
-                  Var(Named("s", arr), {Alloc(arr, IntConst(10))}),
-                  Var(Named("t", arr), {Alloc(arr, IntConst(20))}),
-                  Var(Named("u", arr), {Alloc(arr, IntConst(30))}),
+                  Var(Named("s", arr), {Alloc(arr.component, IntConst(10))}),
+                  Var(Named("t", arr), {Alloc(arr.component, IntConst(20))}),
+                  Var(Named("u", arr), {Alloc(arr.component, IntConst(30))}),
                   Return(Alias(Select({}, Named("s", arr)))),
               });
 

@@ -1,7 +1,7 @@
 package polyregion.prism
 
 import cats.syntax.all.*
-import polyregion.ast.{PolyAst as p, *}
+import polyregion.ast.{PolyAst as p, given, *}
 import polyregion.scala.*
 import polyregion.ast.Traversal.*
 
@@ -198,9 +198,9 @@ object compiletime {
 //                case _ => Nil
 //              }
 
-            ).mapType(_.map(replaceTypes(mirrorToSourceTable)(_)))
+            ).modifyAll[p.Type](_.mapNode(replaceTypes(mirrorToSourceTable)(_)))
 
-          _ = pprint.pprintln(rewrittenMirror)
+//          _ = pprint.pprintln(rewrittenMirror)
 
 //          rewrittenMirror2 = rewrittenMirror.copy(
 //              body = rewrittenMirror.body.flatMap(_.mapTerm({
@@ -268,7 +268,7 @@ object compiletime {
               // Map the mirrored method to use the source types first, otherwise we're comparing different classes entirely.
               reflectedSigWithSourceTpes = reflectedSig
                 .copy(name = p.Sym(sourceName)) // We also replace the name to use the source ones.
-                .mapType(_.map(replaceTypes(mirrorToSourceTable)(_)))
+                .modifyAll[p.Type](_.mapNode(replaceTypes(mirrorToSourceTable)(_)))
 
               sourceSigs <- sources.traverse((sourceSym, sourceDef) =>
                 Compiler.deriveSignature(sourceDef).map(sourceSym -> _)

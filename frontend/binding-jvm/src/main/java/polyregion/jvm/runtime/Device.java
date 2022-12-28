@@ -13,11 +13,35 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.ToIntFunction;
 
 @SuppressWarnings("unused")
 public final class Device implements AutoCloseable {
+
+  // Simple value class that is unique for each instance
+  private static final class NullObjectToken {
+    private static final AtomicLong counter = new AtomicLong();
+    private final long identity;
+
+    NullObjectToken() {
+      this.identity = counter.getAndIncrement();
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) return true;
+      if (o == null || getClass() != o.getClass()) return false;
+      NullObjectToken that = (NullObjectToken) o;
+      return identity == that.identity;
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(identity);
+    }
+  }
 
   public static class Queue implements AutoCloseable {
 
@@ -134,17 +158,17 @@ public final class Device implements AutoCloseable {
           .devicePtr;
     }
 
-    public long registerAndInvalidateIfAbsent(Object object, ByteBuffer buffer, Runnable cb) {
-      return references
-          .get()
-          .computeIfAbsent(
-              Objects.requireNonNull(object),
-              key ->
-                  new MemoryProxy<>(ignored -> buffer.capacity(), (s, d) -> {}, (d, s) -> {})
-                      .attachBuffer(buffer)
-                      .invalidate(key, cb))
-          .devicePtr;
-    }
+    //    public long registerAndInvalidateIfAbsent(Object object, ByteBuffer buffer, Runnable cb) {
+    //      return references
+    //          .get()
+    //          .computeIfAbsent(
+    //              Objects.requireNonNull(object),
+    //              key ->
+    //                  new MemoryProxy<>(ignored -> buffer.capacity(), (s, d) -> {}, (d, s) -> {})
+    //                      .attachBuffer(buffer)
+    //                      .invalidate(key, cb))
+    //          .devicePtr;
+    //    }
 
     public void invalidate(Object o, Runnable cb) {
       MemoryProxy<Object> proxy = references.get().get(Objects.requireNonNull(o));

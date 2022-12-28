@@ -159,7 +159,7 @@ static backend::LLVM::Options toLLVMBackendOptions(const compiler::Options &opti
   }
 }
 
-compiler::Layout compiler::layoutOf(const polyast::StructDef &def, const Options &options) {
+std::vector<compiler::Layout> compiler::layoutOf(const std::vector<polyast::StructDef> &defs, const Options &options) {
 
   switch (options.target) {
     case Target::Object_LLVM_HOST:
@@ -169,36 +169,45 @@ compiler::Layout compiler::layoutOf(const polyast::StructDef &def, const Options
     case Target::Object_LLVM_NVPTX64:
     case Target::Object_LLVM_AMDGCN:
     case Target::Object_LLVM_SPIRV64: {
+
       auto llvmOptions = toLLVMBackendOptions(options);
       auto dataLayout = backend::llvmc::targetMachineFromTarget(llvmOptions.toTargetInfo())->createDataLayout();
-      ;
 
       llvm::LLVMContext c;
       backend::LLVM::AstTransformer xform(llvmOptions, c);
-      auto [structTy, _] = xform.mkStruct(def);
-
-      auto layout = dataLayout.getStructLayout(structTy);
-      std::vector<compiler::Member> members;
-      for (size_t i = 0; i < def.members.size(); ++i) {
-        members.emplace_back(def.members[i],                                          //
-                             layout->getElementOffset(i),                             //
-                             dataLayout.getTypeAllocSize(structTy->getElementType(i)) //
-        );
+      std::vector<compiler::Layout> layouts;
+      xform.addDefs(defs);
+      std::unordered_map<polyast::Sym, polyast::StructDef> lut(defs.size());
+      for (auto &d : defs)
+        lut.emplace(d.name, d);
+      for (auto &[sym, structTy] : xform.getStructTypes()) {
+        if (auto it = lut.find(sym); it != lut.end()) {
+          auto layout = dataLayout.getStructLayout(structTy);
+          std::vector<compiler::Member> members;
+          for (size_t i = 0; i < it->second.members.size(); ++i) {
+            members.emplace_back(it->second.members[i],                                   //
+                                 layout->getElementOffset(i),                             //
+                                 dataLayout.getTypeAllocSize(structTy->getElementType(i)) //
+            );
+          }
+          layouts.emplace_back(sym, layout->getSizeInBytes(), layout->getAlignment().value(), members);
+        } else
+          throw std::logic_error("Cannot find symbol " + to_string(sym) + " from domain");
       }
-      return compiler::Layout{.name = def.name,
-                              .sizeInBytes = layout->getSizeInBytes(),
-                              .alignment = layout->getAlignment().value(),
-                              .members = members};
+      return layouts;
     }
     case Target::Source_C_C11:
-    case Target::Source_C_OpenCL1_1: throw std::logic_error("Not available for source targets");
+    case Target::Source_C_OpenCL1_1:
+      // TODO we need to submit a kernel and execute it to get the offsets
+      throw std::logic_error("Not available for source targets");
   }
 }
 
-compiler::Layout compiler::layoutOf(const Bytes &sdef, const Options &backend) {
+std::vector<compiler::Layout> compiler::layoutOf(const Bytes &sdef, const Options &backend) {
   json json = deserialiseAst(sdef);
-  auto def = polyast::structdef_from_json(json);
-  return layoutOf(def, backend);
+  std::vector<polyast::StructDef> sdefs;
+  std::transform(json.begin(), json.end(), std::back_inserter(sdefs), &polyast::structdef_from_json);
+  return layoutOf(sdefs, backend);
 }
 
 static void sortEvents(compiler::Compilation &c) {
@@ -219,9 +228,8 @@ compiler::Compilation compiler::compile(const polyast::Program &program, const O
       case Target::Object_LLVM_ARM:
       case Target::Object_LLVM_NVPTX64:
       case Target::Object_LLVM_AMDGCN:
-      case Target::Object_LLVM_SPIRV64: {
-        return std::make_unique<backend::LLVM>(toLLVMBackendOptions(options));
-      }                                                                                  //
+      case Target::Object_LLVM_SPIRV64:                                                  //
+        return std::make_unique<backend::LLVM>(toLLVMBackendOptions(options));           //
       case Target::Source_C_OpenCL1_1:                                                   //
         return std::make_unique<backend::CSource>(backend::CSource::Dialect::OpenCL1_1); //
       case Target::Source_C_C11:                                                         //
@@ -231,7 +239,7 @@ compiler::Compilation compiler::compile(const polyast::Program &program, const O
 
   Compilation c;
   try {
-    c = mkBackend()->run(program, opt);
+    c = mkBackend()->compileProgram(program, opt);
   } catch (const std::exception &e) {
     c.messages = e.what();
   }

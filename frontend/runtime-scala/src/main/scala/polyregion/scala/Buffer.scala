@@ -222,7 +222,7 @@ object Buffer {
 
   object StructBuffer {
     inline def apply[A](inline dim: Int): StructBuffer[A] = {
-      val ns = compiletime.deriveNativeStruct[A]
+      val ns: NativeStruct[A] = ??? // compiletime.deriveNativeStruct[A]
       mkBuffer(
         ns.sizeInBytes,
         dim,

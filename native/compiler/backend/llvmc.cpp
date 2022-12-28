@@ -32,6 +32,8 @@
 #include "llvm/Transforms/Utils/Cloning.h"
 
 #include "llvm_utils.hpp"
+#include "llvm/IR/Verifier.h"
+#include "llvm/Transforms/InstCombine/InstCombine.h"
 
 #include <iostream>
 
@@ -89,8 +91,8 @@ void llvmc::initialise() {
   initializeCodeGen(*r);
   initializeLoopStrengthReducePass(*r);
   initializeLowerIntrinsicsPass(*r);
-//  initializeEntryExitInstrumenterPass(*r);
-//  initializePostInlineEntryExitInstrumenterPass(*r);
+  //  initializeEntryExitInstrumenterPass(*r);
+  //  initializePostInlineEntryExitInstrumenterPass(*r);
   initializeUnreachableBlockElimLegacyPassPass(*r);
   initializeConstantHoistingLegacyPassPass(*r);
   initializeScalarOpts(*r);
@@ -136,6 +138,27 @@ static void setFunctionAttributes(llvm::StringRef CPU, llvm::StringRef Features,
 
   // Let NewAttrs override Attrs.
   F.setAttributes(Attrs.addFnAttributes(Ctx, NewAttrs));
+}
+
+polyast::Pair<polyast::Opt<std::string>, std::string> llvmc::optimiseModule(llvm::Module &mod) {
+  llvm::PassManagerBuilder builder;
+  builder.OptLevel = 3;
+  llvm::legacy::PassManager m;
+  builder.populateModulePassManager(m);
+  m.add(llvm::createInstructionCombiningPass());
+  m.run(mod);
+
+  std::string ir;
+  llvm::raw_string_ostream irOut(ir);
+  mod.print(irOut, nullptr);
+
+  std::string err;
+  llvm::raw_string_ostream errOut(err);
+  if (llvm::verifyModule(mod, &errOut)) {
+    return {errOut.str(), irOut.str()};
+  } else {
+    return {{}, irOut.str()};
+  }
 }
 
 compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compiler::Opt &opt, bool emitDisassembly,
@@ -294,7 +317,6 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
               {{ptxStart, ptxElapsed, "llvm_to_ptx", std::string(ptx.begin(), ptx.end())}}};
     }
     default:
-
 
       auto features = polyregion::split(info.cpu.features, ',');
       polyregion::llvm_shared::collectCPUFeatures(info.cpu.uArch, info.triple.getArch(), features);

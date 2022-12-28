@@ -15,7 +15,7 @@ public final class Policy {
     this.localMemoryBytes = localMemoryBytes;
   }
 
-  public Policy(Dim3 global, Dim3 local ) {
+  public Policy(Dim3 global, Dim3 local) {
     this(global, local, 0);
   }
 

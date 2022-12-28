@@ -150,9 +150,15 @@ RelocatableDeviceQueue::RelocatableDeviceQueue(decltype(objects) objects, declty
   TRACE();
 }
 
+void* malloc_(size_t size){
+  auto p = std::malloc(size);
+  fprintf(stderr, "kernel malloc(%zu) = %p\n", size, p);
+  return p;
+}
+
 MemoryManager::MemoryManager() : SectionMemoryManager(nullptr) {}
 uint64_t MemoryManager::getSymbolAddress(const std::string &Name) {
-  return Name == "malloc" ? (uint64_t)&std::malloc : llvm::RTDyldMemoryManager::getSymbolAddress(Name);
+  return Name == "malloc" ? (uint64_t)&malloc_ : llvm::RTDyldMemoryManager::getSymbolAddress(Name);
 }
 
 void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,

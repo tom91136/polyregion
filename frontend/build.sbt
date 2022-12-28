@@ -5,7 +5,7 @@ lazy val bindingsDir = (nativeDir / "bindings" / "jvm").getAbsoluteFile
 
 // /home/tom/polyregion/native/cmake-build-debug-clang/bindings/jvm/libpolyregion-compiler-jvm.so
 
-lazy val scala3Version = "3.2.2-RC1"
+lazy val scala3Version = "3.2.2-RC2"
 lazy val catsVersion   = "2.9.0"
 lazy val munitVersion  = "1.0.0-M7"
 
@@ -29,10 +29,10 @@ lazy val commonSettings = Seq(
 //      Set("-explain-types", "-explain")
 //    )
 //  },
-  scalacOptions ++= Seq(                     //
-    "-no-indent",                            //
-    "-Wconf:cat=unchecked:error",            //
-    "-Wconf:name=MatchCaseUnreachable:error", //
+  scalacOptions ++= Seq(                         //
+    "-no-indent",                                //
+    "-Wconf:cat=unchecked:error",                //
+    "-Wconf:name=MatchCaseUnreachable:error",    //
     "-Wconf:name=PatternMatchExhaustivity:error" // TODO enable later
     // "-language:strictEquality"
   ),
@@ -62,7 +62,8 @@ lazy val `binding-jvm` = project.settings(
 lazy val `runtime-java` = project
   .settings(
     commonSettings,
-    name                := "runtime-java",
+    name := "runtime-java",
+    javacOptions ++= Seq("-proc:none"),
     autoScalaLibrary    := false,
     assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly"))
   )
@@ -72,6 +73,7 @@ lazy val `runtime-scala` = project
   .settings(
     commonSettings,
     name := "runtime-scala",
+    javacOptions ++= Seq("-proc:none"),
     libraryDependencies ++= Seq(
       "org.scalameta" %% "munit" % munitVersion % Test
     ),
@@ -87,11 +89,10 @@ lazy val compiler = project
     javacOptions ++= Seq("-proc:none"),
     scalacOptions ++=
       Seq("-Yretain-trees") ++     // XXX we need this so that the AST -> C++ conversion with partial ctors work
-        Seq("-Xmax-inlines", "64") // the AST has lots of leaf nodes and we use inline so bump the limit
+        Seq("-Xmax-inlines", "48") // the AST has lots of leaf nodes and we use inline so bump the limit
     ,
     libraryDependencies ++= Seq(
       "net.bytebuddy"  % "byte-buddy" % "1.12.20",
-      "com.lihaoyi"   %% "pprint"     % "0.8.1",
       "com.lihaoyi"   %% "fansi"      % "0.4.0",
       "com.lihaoyi"   %% "upickle"    % "2.0.0",
       "org.typelevel" %% "cats-core"  % catsVersion
@@ -116,6 +117,7 @@ lazy val `compiler-testsuite-scala` = project
     fork                      := true,
     Test / parallelExecution  := false,
     Test / testForkedParallel := false,
+    javacOptions ++= Seq("-proc:none"),
     commands += Command.command("testUntilFailed") { state =>
       "test" :: "testUntilFailed" :: state
     },
@@ -127,7 +129,7 @@ lazy val `compiler-testsuite-scala` = project
       "org.scalameta" %% "munit" % munitVersion % Test
     )
   )
-  .dependsOn( `runtime-scala`)
+  .dependsOn(`runtime-scala`)
 
 lazy val `compiler-testsuite-java` = project
   .settings(
@@ -145,7 +147,7 @@ lazy val `compiler-testsuite-java` = project
       "com.github.sbt" % "junit-interface" % "0.13.3" % Test
     )
   )
-  .dependsOn( `runtime-java`)
+  .dependsOn(`runtime-java`)
 
 lazy val mainCls = Some("polyregion.examples.CheckApi")
 

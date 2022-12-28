@@ -1,10 +1,10 @@
 package polyregion.scala
 
 import cats.syntax.all.*
-import polyregion.ast.pass.*
-import polyregion.ast.{PolyAst as p, *}
-import polyregion.prism.StdLib
 import polyregion.ast.Traversal.*
+import polyregion.ast.pass.*
+import polyregion.ast.{PolyAst as p, given, *}
+import polyregion.prism.StdLib
 
 import java.nio.file.Paths
 import scala.quoted.Expr
@@ -19,7 +19,7 @@ object Compiler {
   private val ProgramPasses: List[ProgramPass] = List(
     FnInlinePass, //
     VarReducePass,
-//    UnitExprElisionPass,    //
+    UnitExprElisionPass,    //
     DeadArgEliminationPass, //
     MonoStructPass          //
   )
@@ -57,6 +57,13 @@ object Compiler {
       Set.empty[q.Symbol],    // acc
       List.empty[Log]         // acc
     ).iterateWhileM { (remaining, fnAcc, clsDepAcc, moduleSymDepAcc, logAcc) =>
+
+      def maskStructTpeAps(t: p.Type): p.Type = t match {
+        case p.Type.Struct(name, tpeVars, _) => p.Type.Struct(name, tpeVars, Nil)
+        case p.Type.Array(c)                 => p.Type.Array(maskStructTpeAps(c))
+        case x                               => x
+      }
+
       remaining.toList
         .foldLeftM((fnAcc, (Map.empty: q.FnWitnesses), clsDepAcc, moduleSymDepAcc, logAcc)) {
           case ((xs, depss, clsDepss, moduleSymDepss, logs), (defDef, ivks)) =>
@@ -66,45 +73,33 @@ object Compiler {
                 if (ivks.map(_.name).size != 1)
                   s"Cannot collapse multiple invocations (${ivks.map(_.repr)}), term compiler may have miscompiled".fail
                 else ().success
-              s = ivks.head
+              target: p.Expr.Invoke = ivks.head
 
-              maskStructTpeAps = (t: p.Type) =>
-                t.map {
-                  case p.Type.Struct(name, tpeVars, _) => p.Type.Struct(name, tpeVars, Nil)
-                  case x                               => x
-                }
-
-              r <- fnLut.collectFirst {
+              fnApOfSameArityAndName = fnLut.collect {
                 case (sig, x)
-                    if sig.name.last == s.name.last &&
-                      sig.rtn == s.rtn &&
-                      sig.receiver.map(maskStructTpeAps) == s.receiver.map(_.tpe.map(maskStructTpeAps)) &&
-                      sig.tpeVars.size == s.tpeArgs.size =>
-                  x
-              } match {
-                case Some((x, clsDeps)) =>
-                  println(s"Replace: replace ${s.repr}")
-                  Log(s"${s.repr}")
-                    .map(
-                      _.info_("Callsites", ivks.map(_.repr).toList: _*)
-                        .info_("Replacing with impl:", x.repr)
-                        .info_("Additional structs:", clsDeps.map(_.repr).toList*)
-                    )
-                    .map { l =>
-                      // Here we let the external function take the name we're using from the callsite
-                      (x.copy(name = s.name) :: xs, depss, clsDeps ++ clsDepss, moduleSymDepss, l :: logs)
-                    }
-                case None =>
-                  if (defDef.rhs.isEmpty) {
-                    println(
-                      s"Replace: cannot replace ${s.repr} (name=${s.name})\n${fnLut.keySet.toList
-                        .map(x => s"\t${x.repr} (${x.name})")
-                        .sorted
-                        .mkString("\n")}"
-                    )
-                  }
+                    if sig.name.last == target.name.last &&      // match name first, most methods are eliminated here
+                      sig.tpeVars.size == target.tpeArgs.size && // then we check type arity
+                      sig.args.size == target.args.size          // then finally term arity
+                    =>
+                  val appliedTypes =
+                    sig.tpeVars.zip(target.tpeArgs).map((name, tpe) => (p.Type.Var(name): p.Type) -> tpe).toMap
+                  (sig.modifyAll[p.Type](_.mapLeaf(t => appliedTypes.getOrElse(t, t))): p.Signature) -> x
+              }
+
+              fnApOfMatchingTypes = fnApOfSameArityAndName.filter {
+                case (sig, _)
+                    if sig.rtn == target.rtn &&
+                      sig.args == target.args.map(_.tpe) &&
+                      sig.receiver == target.receiver.map(_.tpe) =>
+                  true
+                case _ => false
+              }
+
+              r <- fnApOfMatchingTypes.toList match {
+                case Nil =>
+                  // We found no replacement, log it and keep going.
                   for {
-                    l                   <- Log(s"Compile (no replacement): ${s.repr}")
+                    l                   <- Log(s"Compile (no replacement): ${target.repr}")
                     ((fn0, deps), log0) <- compileFn(defDef)
                     (fn1, wit0, clsDeps, moduleDeps, log1) <- compileAndReplaceStructDependencies(fn0, deps)(
                       StdLib.StructDefs
@@ -116,6 +111,24 @@ object Compiler {
                     moduleDeps ++ moduleSymDepss,
                     (l + log0 + log1) :: logs
                   )
+                case (_, (fn, clsDeps)) :: Nil =>
+                  // We found exactly one function matching the invocation!
+                  println(s"Replace: replace ${target.repr}")
+                  Log(s"${target.repr}")
+                    .map(
+                      _.info_("Callsites", ivks.map(_.repr).toList: _*)
+                        .info_("Replacing with impl:", fn.repr)
+                        .info_("Additional structs:", clsDeps.map(_.repr).toList*)
+                    )
+                    .map { l =>
+                      // Here we let the external function take the name we're using from the callsite
+                      (fn.copy(name = target.name) :: xs, depss, clsDeps ++ clsDepss, moduleSymDepss, l :: logs)
+                    }
+                case xs =>
+                  // We found multiple ambiguous replacements, signal error
+                  s"Ambiguous replacement for ${target.repr}, the following replacements all match the signiture:\n${xs
+                    .map("\t" + _._1.repr)
+                    .mkString("\n")}".fail
               }
             } yield r
         }
@@ -214,7 +227,7 @@ object Compiler {
       intrinsify: Boolean = true
   ): Result[((List[p.Stmt], p.Type, q.Dependencies, Option[(q.ClassDef, p.Type.Struct)]), Log)] = for {
     log <- Log(s"Compile term: ${term.pos.sourceFile.name}:${term.pos.startLine}~${term.pos.endLine}")
-    log <- log.info("Body (AST)", pprint.tokenize(term, indent = 1, showFieldNames = true).mkString)
+//    log <- log.info("Body (AST)", pprint.tokenize(term, indent = 1, showFieldNames = true).mkString)
     log <- log.info("Body (Ascii)", term.show(using q.Printer.TreeAnsiCode))
 
     // FILL TERM ARGS here
@@ -238,11 +251,6 @@ object Compiler {
   def findMatchingClassInHierarchy[A, B](using q: Quoted)(symbol: q.Symbol, clsLut: Map[p.Sym, B]): Option[B] = {
     val hierarchy: List[p.Sym] = structName0(symbol) ::
       q.TypeIdent(symbol).tpe.baseClasses.map(structName0(_))
-
-    println(s"[CC] in=${symbol}")
-    println(s"[CC] =>${hierarchy.mkString("\n[CC]   ")}")
-    println(s"[CC] =>[k]${clsLut.keys.mkString("\n[CC]   [k]")}")
-
     hierarchy.collectFirst(Function.unlift(clsLut.get(_)))
   }
 
@@ -292,11 +300,11 @@ object Compiler {
 
       replaceTpeForTerm = (t: p.Term) =>
         t match {
-          case s @ p.Term.Select(_, _) => s.mapType(replaceTpe(_))
+          case s @ p.Term.Select(_, _) => s.modifyAll[p.Type](replaceTpe(_))
           case t                       => t
         }
 
-      mappedFn = fn.mapType(replaceTpe(_))
+      mappedFn = fn.modifyAll[p.Type](replaceTpe(_))
       mappedFnDeps = deps.functions.map((defdef, ivks) =>
         defdef -> ivks.map { case p.Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
           p.Expr.Invoke(
@@ -447,6 +455,7 @@ object Compiler {
 
     // run the global optimiser
     (opt, log) <- runProgramOptPasses(unopt)(log)
+    _ = println("Opt done")
 
     // verify again after optimisation
     optLog                    <- Log("Opt")

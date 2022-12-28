@@ -4,8 +4,8 @@ import polyregion.ast.{PolyAst as p, *}
 import polyregion.jvm.{compiler as ct, runtime as rt}
 import polyregion.prism.StdLib
 
-import scala.quoted.*
 import java.nio.ByteBuffer
+import scala.quoted.*
 
 object Pickler {
 
@@ -38,14 +38,15 @@ object Pickler {
   }
 
   def layoutOf(using q: Quoted) //
-  (compiler: ct.Compiler, opt: ct.Options, repr: q.TypeRepr): ct.Layout = {
-    val sdef = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
+  (layouts: Map[p.StructDef, ct.Layout], repr: q.TypeRepr): ct.Layout = {
+    val sdef : p.StructDef= Retyper.structDef0(repr.typeSymbol).getOrElse(???)
     println(s"layoutOf=${sdef} ${repr.widenTermRefByName}")
-    compiler.layoutOf(CppSourceMirror.encode(sdef), opt)
+    val monomorphicName = p.Sym(sdef.tpe.monomorphicName)
+    layouts.find(_._1.name == monomorphicName).getOrElse(???)._2
   }
 
-  def sizeOf(using q: Quoted)(compiler: ct.Compiler, opt: ct.Options, sdef: p.StructDef): Int =
-    compiler.layoutOf(CppSourceMirror.encode(sdef), opt).sizeInBytes.toInt
+//  def sizeOf(using q: Quoted)(compiler: ct.Compiler, opt: ct.Options, sdef: p.StructDef): Int =
+//    compiler.layoutOf(CppSourceMirror.encode(sdef), opt).sizeInBytes.toInt
 
   // def sizeOf(using q: Quoted)(compiler: ct.Compiler, opt: ct.Options, tpe: p.Type, repr: q.TypeRepr): Int =
   //   tpe match {
@@ -96,16 +97,12 @@ object Pickler {
       )
   }
 
-  def getStruct(using q: Quoted)(
-      compiler: ct.Compiler,
-      opt: ct.Options,
+  def mkStruct(using q: Quoted)(
+      layouts: Map[p.StructDef, ct.Layout],
       source: Expr[java.nio.ByteBuffer],
-      byteOffset: Expr[Int],
-      repr: q.TypeRepr,
-      value: Expr[Any]
+      repr: q.TypeRepr
   ) = {
     import q.given
-
 
 //  val sourceLUT = StdLib.Mirrors.map(p => p._1.source -> p).toMap
 //     val (mirroredSDef, term) = Compiler.findMatchingClassInHierarchy(repr.typeSymbol, sourceLUT) match {
@@ -118,18 +115,21 @@ object Pickler {
 //     println(s"[putStruct] mirrored sdef: ${sdef.repr}")
 //     println(term.tpe)
 
-
     // if( mutableseq)
     // val length_ = source.getInt
-    // val data = source.getLong => Ptr, 
+    // val data = source.getLong => Ptr,
 
     // Find out the total size of this struct first, it could be nested arbitrarily but the top level's size must
     // reflect the total size; this is consistent with C's `sizeof(struct T)`.
     val sdef   = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
-    val layout = compiler.layoutOf(CppSourceMirror.encode(sdef), opt)
+//    val layout = layouts(sdef)
+    val layout = layoutOf(layouts, repr)
+
+
+
     val fields = sdef.members.zip(layout.members)
     val terms = fields.map { (named, m) =>
-      getPrimitive(source, '{ $byteOffset + ${ Expr(m.offsetInBytes.toInt) } }, named.tpe).asTerm
+      getPrimitive(source, '{ ${ Expr(m.offsetInBytes.toInt) } }, named.tpe).asTerm
     }
     q.Select
       .unique(q.New(q.TypeIdent(repr.typeSymbol)), "<init>")
@@ -138,8 +138,7 @@ object Pickler {
   }
 
   def putStruct(using q: Quoted)(
-      compiler: ct.Compiler,
-      opt: ct.Options,
+      layouts: Map[p.StructDef, ct.Layout],
       target: Expr[java.nio.ByteBuffer],
       byteOffset: Expr[Int],
       sdef: p.StructDef,
@@ -152,6 +151,7 @@ object Pickler {
     import q.given
 
     val sourceLUT = StdLib.Mirrors.map(p => p._1.source -> p).toMap
+    println(s"put ${repr.widenTermRefByName} ${repr} ${value}")
     val (mirroredSDef, term) = Compiler.findMatchingClassInHierarchy(repr.typeSymbol, sourceLUT) match {
       case None                 => sdef     -> value.asTerm
       case Some((m, (from, _))) => m.struct -> from(q.underlying, value).asTerm //
@@ -162,10 +162,10 @@ object Pickler {
     println(s"[putStruct] mirrored sdef: ${sdef.repr}")
     println(term.tpe)
 
-    val layout = compiler.layoutOf(CppSourceMirror.encode(sdef), opt)
+    val layout = layouts(sdef)
     val fields = sdef.members.zip(layout.members)
 
-    println(s"[putStruct] Fields: ${fields}")
+    println(s"[putStruct] Fields: \n${fields.map((n, m) => s"${n.repr} (${layout})").map("\t"+_).mkString("\n")}")
 
     val primitiveTuples = (term.asExpr, fields) match {
       case (
@@ -185,7 +185,17 @@ object Pickler {
           named.tpe match {
             case p.Type.Array(comp) =>
               ??? // Compiler emitted an illegal Array type (from intrinsic.Arr) which cannot appear on it's own!
-            case s @ p.Type.Struct(_, _, _) => (m, p.Type.Long, mkStruct(s, q.Select.unique(term, named.symbol).asExpr))
+            case s @ p.Type.Struct(_, _, _) =>
+
+
+              q.Select.unique(term, named.symbol).asExpr match {
+                case '{ $x : t} =>
+
+                  println(s"Repr: ${q.TypeRepr.of[t].widenTermRefByName}")
+                  (m, p.Type.Long, mkStruct(s, x))
+
+              }
+
             case _                          => (m, named.tpe, q.Select.unique(term, named.symbol).asExpr)
           }
         }

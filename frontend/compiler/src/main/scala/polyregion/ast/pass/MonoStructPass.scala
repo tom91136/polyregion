@@ -1,22 +1,17 @@
 package polyregion.ast.pass
 
 import cats.syntax.all.*
-import polyregion.ast.{PolyAst as p,given, *}
 import polyregion.ast.Traversal.*
+import polyregion.ast.{PolyAst as p, given, *}
 object MonoStructPass extends ProgramPass {
 
   override def apply(program: p.Program, log: Log): (p.Program, Log) = {
+    println(">MonoStructPass")
 
-    val structInSignature =
-      (program.entry.receiver.toList ::: program.entry.captures ::: program.entry.args).map(_.tpe).collect {
-        case s: p.Type.Struct => s
-      }
-    val structsInBody = program.entry.body.flatMap(_.accType {
-      case s: p.Type.Struct => s :: Nil
-      case x                => Nil
-    })
-
-    val structInFunction = structInSignature ::: structsInBody
+    val structInFunction: List[p.Type.Struct] =
+      program.entry
+        .collectWhere[p.Type] { case s: p.Type.Struct => s }
+        .distinct
 
     println(s"In f = ${structInFunction} ${program.defs}")
     val monoStructDefs = for {
@@ -28,7 +23,7 @@ object MonoStructPass extends ProgramPass {
     } yield struct -> p.StructDef(
       name = name,
       tpeVars = Nil,
-      members = sdef.members.map(_.mapType {
+      members = sdef.members.modifyAll[p.Type](_.mapLeaf {
         case p.Type.Var(name) => table(name)
         case x                => x
       })
@@ -36,56 +31,59 @@ object MonoStructPass extends ProgramPass {
 
     val replacementTable = monoStructDefs.toMap
 
-    // TL => 
-      // A<B<>>
-      
-      // A_<B_>
-      // B_
+    println(s"[Rep] Table:\n${replacementTable.map((k, v) => s"\t${k.repr} => ${v.repr}").mkString("\n")}")
 
-      // A_B_
-      // B_
-
-    //  arity == 0, skip
-    //  arity != 0 && for all child, arity == 0, skip
-    // SCO
-
-    println(s"[Rep] Table:\n${replacementTable.map((k,v) => s"\t${k.repr} => ${v.repr}").mkString("\n")}")
-
-    def doReplacement(t: p.Type) = t match {
-      case s: p.Type.Struct => 
-        
-      println(s"[Rep] ${s.repr} => ${replacementTable.get(s)}")
-
-        
-        
-        replacementTable.get(s).map(x => p.Type.Struct(x.name, Nil, Nil)).getOrElse(s)
-      case x                => x
+    // do the replacement outside in
+    def doReplacement(t: p.Type): p.Type = t match {
+      case s @ p.Type.Struct(name, tpeVars, args) =>
+        println(s"[Rep] ${s.repr} => ${replacementTable.get(s)}")
+        replacementTable.get(s) match {
+          case Some(sdef) => p.Type.Struct(sdef.name, Nil, Nil)
+          case None       => p.Type.Struct(name, tpeVars, args.map(doReplacement(_)))
+        }
+      case a @ p.Type.Array(c) => p.Type.Array(doReplacement(c))
+      case a                   => a
     }
+
+//    t.mapNode {
+//      case s: p.Type.Struct =>
+//        println(s"[Rep] ${s.repr} => ${replacementTable.get(s)}")
+//
+//        replacementTable.get(s).map(x => p.Type.Struct(x.name, Nil, Nil)).getOrElse(s)
+//      case x => x
+//    }
 
     def typeIsNotDeleted(t: p.Type) = t match {
       case s: p.Type.Struct => monoStructDefs.contains(s)
       case _                => true
     }
 
-    val body = program.entry.body.flatMap(_.mapType(doReplacement(_)))
+    // val body = program.entry.body.flatMap(_.mapType(doReplacement(_)))
 
-    val args     = program.entry.args.map(_.mapType(doReplacement(_)))     // .filter(x => typeIsNotDeleted(x.tpe))
-    val receiver = program.entry.receiver.map(_.mapType(doReplacement(_))) // .filter(x => typeIsNotDeleted(x.tpe))
-    val captures = program.entry.captures.map(_.mapType(doReplacement(_)))
-    val defs = monoStructDefs
-      .map(_._2)                                                              // make sure we handle nested structs
-      .map(s => s.copy(members = s.members.map(_.mapType(doReplacement(_))))) // .filter(x => typeIsNotDeleted(x.tpe))
+    // val args     = program.entry.args.map(_.mapType(doReplacement(_)))     // .filter(x => typeIsNotDeleted(x.tpe))
+    // val receiver = program.entry.receiver.map(_.mapType(doReplacement(_))) // .filter(x => typeIsNotDeleted(x.tpe))
+    // val captures = program.entry.captures.map(_.mapType(doReplacement(_)))
+
+    val rootStructDefs = monoStructDefs
+      .map(_._2) // make sure we handle nested structs
+      .map(s => s.copy(members = s.members.modifyAll[p.Type](doReplacement(_))))
+
+    val referencedStructDefs = rootStructDefs
+      .collectWhere[p.Type] { t =>
+        def findLeafStructDefs(t: p.Type): List[p.StructDef] = t match {
+          case p.Type.Struct(name, _, xs) => xs.flatMap(findLeafStructDefs(_)) ::: program.defs.filter(_.name == name)
+          case p.Type.Array(component)    => findLeafStructDefs(component)
+          case _                          => Nil
+        }
+        findLeafStructDefs(t)
+      }
+      .flatten
 
     (
       p.Program(
-        entry = program.entry.copy(
-          body = body,
-          args = args,
-          receiver = receiver,
-          captures = captures
-        ),
-        functions = Nil,
-        defs = defs
+        entry = program.entry.modifyAll[p.Type](doReplacement(_)),
+        functions = program.functions,
+        defs = rootStructDefs ++ referencedStructDefs
       ),
       log
     )

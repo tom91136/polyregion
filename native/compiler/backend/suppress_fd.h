@@ -15,7 +15,7 @@ const char *nulFileName = "NUL";
   #include <unistd.h>
   #define CROSS_DUP(fd) dup(fd)
   #define CROSS_DUP2(fd, newfd) dup2(fd, newfd)
-const char *nulFileName = "/dev/null";
+static constexpr auto nulFileName = "/dev/null";
 #endif
 
 namespace suppress_fd {

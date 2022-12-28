@@ -6,14 +6,11 @@ import polyregion.scala.intrinsics
 import polyregion.scala.intrinsics.TypedBuffer
 
 import scala.Predef as _
-import scala.quoted.Quotes
-import scala.quoted.Expr
-import scala.quoted.Type
+import scala.quoted.{Expr, Quotes, Type}
 
 object StdLib {
 
-  import _root_.scala as S
-  import _root_.java as J
+  import _root_.{java as J, scala as S}
 
   class Tuple2[T1, T2](_1: T1, _2: T2)
 
@@ -158,8 +155,8 @@ object StdLib {
   }
   class MutableSeq[A](val length_ : Int, val data: intrinsics.TypedBuffer[A]) {
     def length: Int                = length_
-    def apply(i: Int): A           = intrinsics.apply(data, i)     //  data.apply(i)
-    def update(i: Int, x: A): Unit = intrinsics.update(data, i, x) // data.update(i, x)
+    def apply(i: Int): A           = data.apply(i)
+    def update(i: Int, x: A): Unit = data.update(i, x)
   }
 
   final def Mirrors: List[Prism] = derivePackedMirrors(

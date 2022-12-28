@@ -2,15 +2,15 @@ package polyregion.scala
 
 import cats.data.EitherT
 import cats.syntax.all.*
-import polyregion.ast.{PolyAst as p, *}
-
+import polyregion.ast.{PolyAst as p, given, *}
+import polyregion.ast.Traversal.*
 import scala.annotation.tailrec
 
 object Remapper {
 
   private def fullyApplyGenExec(exec: p.Type.Exec, tpeArgs: List[p.Type]): p.Type.Exec = {
     val tpeTable = exec.tpeVars.zip(tpeArgs).toMap
-    def resolve(t: p.Type) = t.map {
+    def resolve(t: p.Type) = t.mapLeaf {
       case p.Type.Var(name) =>
         tpeTable.get(name) match {
           case Some(value) => value
@@ -127,7 +127,7 @@ object Remapper {
           }
 
           stmts = fieldNames.zip(args).map { (name, rhs) =>
-            val appliedTpe = rhs.tpe.map {
+            val appliedTpe = rhs.tpe.mapLeaf {
               case p.Type.Var(name) => tpeVarTable(name)
               case x                => x
             }

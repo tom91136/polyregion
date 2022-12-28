@@ -263,46 +263,6 @@ std::pair<Named, std::vector<Named>> polyast::uncons(const Term::Select &select)
   }
 }
 
-std::string dsl::dslRepr(const Function &fn) {
-  if (fn.name.fqn.size() != 1) {
-    throw std::logic_error("Name fragments is not supported");
-  }
-
-  auto nameRepr = [](const Named &n) { return "\"" + n.symbol + "\"_(" + repr(n.tpe) + ")"; };
-
-  auto proto =
-      "function(\"" + fn.name.fqn[0] + "\",{" + mk_string<Named>(fn.args, nameRepr, ", ") + "}, " + repr(fn.rtn) + ")";
-
-  auto body = mk_string<Stmt::Any>(
-      fn.body,
-      [&](const Stmt::Any &stmt) {
-        return variants::total(
-            *stmt, //
-            [](const Stmt::Comment &x) { return to_string(x); },
-            [](const Stmt::Var &x) {
-              if (x.expr) return "let(\"" + x.name.symbol + "\") = " + to_string(*(x.expr));
-              else
-                return to_string(x);
-            },
-            [&](const Stmt::Mut &x) {
-              if (x.name.init.empty()) return nameRepr(x.name.last) + " = " + to_string(x.expr);
-              else
-                return to_string(x);
-            },
-            [&](const Stmt::Update &x) {
-              if (x.lhs.init.empty())
-                return nameRepr(x.lhs.last) + "[" + to_string(x.idx) + "] = " + to_string(x.value);
-              else
-                return to_string(x);
-            },
-            [](const Stmt::While &x) { return to_string(x); }, [](const Stmt::Break &x) { return to_string(x); },
-            [](const Stmt::Cont &x) { return to_string(x); }, [](const Stmt::Cond &x) { return to_string(x); },
-            [](const Stmt::Return &x) { return to_string(x); });
-      },
-      ",\n");
-  return proto + "({" + body + "})";
-}
-
 Type::Array dsl::Array(const Type::Any &t) { return Tpe::Array(t); }
 Type::Struct dsl::Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args) {
   return {name, tpeVars, args};

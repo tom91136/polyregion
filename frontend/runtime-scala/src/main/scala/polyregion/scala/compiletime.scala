@@ -3,6 +3,7 @@ package polyregion.scala
 import cats.syntax.all.*
 import polyregion.ast.{CppSourceMirror, MsgPack, PolyAst as p, *}
 import polyregion.jvm.{compiler as ct, runtime as rt}
+import polyregion.prism.StdLib
 import polyregion.scala as srt
 
 import java.nio.file.Paths
@@ -13,8 +14,6 @@ import scala.collection.immutable.VectorMap
 import scala.collection.mutable.ArrayBuffer
 import scala.quoted.*
 import scala.util.Try
-import polyregion.prism.StdLib
-import scala.collection.immutable.Stream.cons.apply
 
 @compileTimeOnly("This class only exists at compile-time to expose offload methods")
 object compiletime {
@@ -24,7 +23,7 @@ object compiletime {
     import q.reflect.*
     given Printer[Tree] = Printer.TreeAnsiCode
     println(x.show)
-    pprint.pprintln(x.asTerm) // term => AST
+//    pprint.pprintln(x.asTerm) // term => AST
 
     implicit val Q = Quoted(q)
     val is = Q.collectTree(x.asTerm) {
@@ -48,41 +47,41 @@ object compiletime {
     import q.reflect.*
     println(">>" + TypeRepr.of[B].typeSymbol.tree.show)
     println(">>" + TypeRepr.of[B].widenTermRefByName.dealias.typeSymbol.tree.show)
-    import pprint.*
-    pprint.pprintln(TypeRepr.of[B].typeSymbol)
+//    import pprint.*
+//    pprint.pprintln(TypeRepr.of[B].typeSymbol)
     '{}
   }
 
-  inline def deriveNativeStruct[A]: NativeStruct[A] = ${ deriveNativeStructImpl[A] }
-  def deriveNativeStructImpl[A: Type](using q: Quotes): Expr[NativeStruct[A]] = {
-    import q.reflect.*
-    val Q = Quoted(q)
-
-    val compiler = ct.Compiler.create()
-
-    val repr   = Q.TypeRepr.of[A]
-    val opt    = ct.Options.of(ct.Target.LLVM_HOST, "native")
-    val layout = Pickler.layoutOf(using Q)(compiler, opt, repr)
-
-    val code = '{
-      new NativeStruct[A] {
-        override def sizeInBytes: Int = ${ Expr(layout.sizeInBytes.toInt) }
-        override def decode(buffer: ByteBuffer, index: Int): A = ${
-          ???
-          // Pickler.getStruct(using Q)(compiler, opt, 'buffer, '{ 0 }, 'index, repr).asExprOf[A]
-        }
-        override def encode(buffer: ByteBuffer, index: Int, a: A): Unit = ${
-          // Pickler.putStruct(using Q)(compiler, opt, 'buffer, '{ 0 }, 'index, ???, repr, 'a)
-          ???
-        }
-      }
-    }
-
-    compiler.close()
-    given Q.Printer[Q.Tree] = Q.Printer.TreeAnsiCode
-    println("Code=" + code.asTerm.show)
-    code
-  }
+//  inline def deriveNativeStruct[A]: NativeStruct[A] = ${ deriveNativeStructImpl[A] }
+//  def deriveNativeStructImpl[A: Type](using q: Quotes): Expr[NativeStruct[A]] = {
+//    import q.reflect.*
+//    val Q = Quoted(q)
+//
+//    val compiler = ct.Compiler.create()
+//
+//    val repr   = Q.TypeRepr.of[A]
+//    val opt    = ct.Options.of(ct.Target.LLVM_HOST, "native")
+//    val layout = Pickler.layoutOf(using Q)(compiler, opt, repr)
+//
+//    val code = '{
+//      new NativeStruct[A] {
+//        override def sizeInBytes: Int = ${ Expr(layout.sizeInBytes.toInt) }
+//        override def decode(buffer: ByteBuffer, index: Int): A = ${
+//          ???
+//          // Pickler.getStruct(using Q)(compiler, opt, 'buffer, '{ 0 }, 'index, repr).asExprOf[A]
+//        }
+//        override def encode(buffer: ByteBuffer, index: Int, a: A): Unit = ${
+//          // Pickler.putStruct(using Q)(compiler, opt, 'buffer, '{ 0 }, 'index, ???, repr, 'a)
+//          ???
+//        }
+//      }
+//    }
+//
+//    compiler.close()
+//    given Q.Printer[Q.Tree] = Q.Printer.TreeAnsiCode
+//    println("Code=" + code.asTerm.show)
+//    code
+//  }
 
   private case class ReifiedConfig(target: ct.Target, arch: String, opt: ct.Opt)
 
@@ -203,8 +202,8 @@ object compiletime {
       case (n @ p.Named(_, tpe), term) => (n, None, term).success
     }
 
-    prog = prog0.copy(entry = prog0.entry.copy(name = p.Sym(s"lambda${ProgramCounter.getAndIncrement()}")))
-    _    = println(log.render)
+    prog: p.Program = prog0.copy(entry = prog0.entry.copy(name = p.Sym(s"lambda${ProgramCounter.getAndIncrement()}")))
+    _               = println(log.render)
 
     serialisedAst <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, prog)))
     compiler = ct.Compiler.create()
@@ -236,6 +235,8 @@ object compiletime {
     }.unzip
     val returnTpeOrdinal = Pickler.tpeAsRuntimeTpe(prog.entry.rtn).value
     val returnTpeSize    = Pickler.tpeAsRuntimeTpe(prog.entry.rtn).sizeInBytes
+
+    println(s"Prog defs: ${prog.defs}")
 
     val code = '{
 
@@ -286,13 +287,14 @@ object compiletime {
         ${
           q.Match(
             'found.asTerm,
-            compilations.zipWithIndex.map { case ((c, _), i) =>
+            compilations.zipWithIndex.map { case ((config, compilation), i) =>
+              val layouts = compilation.layouts.map(l => p.Sym(l.name.toList) -> l).toMap
+
               q.CaseDef(
                 q.Literal(q.IntConstant(i)),
                 None,
                 bindCapturesToBuffer(
-                  compiler,
-                  ct.Options.of(c.target, c.arch),
+                  prog.defs.map(sd => sd -> layouts(sd.name)).toMap,
                   prog.defs.map(s => s.name -> s).toMap,
                   'fnValues,
                   queue,
@@ -302,8 +304,6 @@ object compiletime {
             }
           ).asExprOf[Unit]
         }
-
-        // ${ bindCapturesToBuffer(compiler, ???, 'fnValues, queue, captures) }
 
         println("Dispatch tid=" + Thread.currentThread.getId)
         println(s"fnTpeOrdinals=${fnTpeOrdinals.toList}")
@@ -317,7 +317,7 @@ object compiletime {
           rt.Policy($dim),
           { () =>
             println("Kernel completed, tid=" + Thread.currentThread.getId + " cb" + cb_)
-            $queue.syncAll(() => cb_(Right(())))  
+            $queue.syncAll(() => cb_(Right(())))
           }
         )
 
@@ -332,64 +332,71 @@ object compiletime {
   def bindStruct[t: Type](using
       q: Quoted
   )(
-      compiler: ct.Compiler,
-      opt: ct.Options,
+      layouts: Map[p.StructDef, ct.Layout],
       lut: Map[p.Sym, p.StructDef],
       queue: Expr[rt.Device.Queue],
-      ref: q.Term,
+      ref: Expr[t],
       struct: p.StructDef
   ): Expr[Long] = {
     given Quotes = q.underlying
     '{
+      println(s"bind struct ${${ Expr(struct.name.repr) }}, object ${$ref}")
 
-      $queue.registerAndInvalidateIfAbsent[t](
-        /* object */ ${ ref.asExprOf[t] },
-        /* sizeOf */ x => ${ Expr(Pickler.sizeOf(compiler, opt, struct)) },
-        /* write  */ (
-            x,
-            bb
-        ) =>
-          ${
-            Pickler.putStruct(
-              compiler,
-              opt,
-              'bb,
-              '{ 0 },
-              struct,
-              q.TypeRepr.of[t],
-              'x,
-              (s, expr) => ???, // bindStruct(compiler, opt, lut, queue, expr.asTerm, lut(s.name)),
-              (s, expr) => {
-                // println(s"Serialise array ${s} = ${expr}")
-                expr match {
-                  case '{ $xs: StdLib.MutableSeq[v] } => bindArray[v](compiler, opt, lut, queue, xs, s)
-                }
+      if ($ref == null) 0L
+      else
+        $queue.registerAndInvalidateIfAbsent[t](
+          /* object */ ${ ref.asExprOf[t] },
+          /* sizeOf */ x => ${ Expr(layouts(struct).sizeInBytes.toInt) },
+          /* write  */ (
+              x,
+              bb
+          ) => {
 
-              }
+            println(
+              s"bind struct ${${ Expr(struct.name.repr) }}, write  $x => $bb(0x${Platforms.pointerOfDirectBuffer(bb).toHexString})"
             )
+            if (x != null) {
+              ${
+                Pickler.putStruct(
+                  layouts,
+                  'bb,
+                  '{ 0 },
+                  struct,
+                  q.TypeRepr.of[t],
+                  'x,
+                  (s, expr) => {
+                    println(s"Do ${s}")
+                    bindStruct(layouts, lut, queue, expr, lut(s.name))
+                  },
+                  (s, expr) =>
+                    expr match {
+                      case '{ $xs: StdLib.MutableSeq[v] } =>
+                        '{
+                          println(
+                            s"bind struct ${${ Expr(struct.name.repr) }}, array type ${${ Expr(s.repr) }} => ${$expr}"
+                          )
+                          ${ bindArray[v](layouts, lut, queue, xs, s) }
+                        }
+                    }
+                )
+              }
+            }
           },
-        /* read   */ (bb, x) => {
-
-          // x : Seq
-          // to(x : seq, y : deserialise()  )
-          //
-          // ${
-          //   Pickler.getStruct(compiler, opt, 'bb, '{ 0 }, 'x , q.TypeRepr.of[t])
-          // }
-
-          // println(s"Deserialise array ${x} = ${bb}"); 
-          ()
-        }, // throw new AssertionError(s"No write-back for struct type " + ${ Expr(struct.repr) }),
-        /* cb     */ null
-      )
+          /* read   */ (bb, x) => {
+            println(
+              s"bind struct ${${ Expr(struct.name.repr) }}, read   $bb(0x${Platforms.pointerOfDirectBuffer(bb).toHexString}) => $x"
+            )
+            ()
+          }, // throw new AssertionError(s"No write-back for struct type " + ${ Expr(struct.repr) }),
+          /* cb     */ null
+        )
     }
   }
 
   def bindArray[t: Type](using
       q: Quoted
   )(
-      compiler: ct.Compiler,
-      opt: ct.Options,
+      layouts: Map[p.StructDef, ct.Layout],
       lut: Map[p.Sym, p.StructDef],
       queue: Expr[rt.Device.Queue],
       ref: Expr[StdLib.MutableSeq[t]],
@@ -406,7 +413,7 @@ object compiletime {
       component match {
         case p.Type.Array(_) => ??? // Nested array should not be a thing given the current scheme!
         case s @ p.Type.Struct(_, _, _) =>
-          val ptr = bindStruct(compiler, opt, lut, queue, '{ $src($index) }.asTerm, lut(s.name))
+          val ptr = bindStruct(layouts, lut, queue, '{ $src($index) }, lut(s.name))
           Pickler.putPrimitive(dest, byteOffset, p.Type.Long, ptr)
         case _ =>
           Pickler.putPrimitive(dest, byteOffset, component, '{ $src($index) })
@@ -424,7 +431,33 @@ object compiletime {
         case s @ p.Type.Struct(_, _, _) =>
           // val ptr = bindStruct(compiler, opt, lut, queue, '{ $expr(index) }.asTerm, lut(s.name))
           // Pickler.putPrimitive(target, i, p.Type.Long, ptr)
-          ???
+
+          // restore from long ptr stored here
+          val ptr  = Pickler.getPrimitive(src, byteOffset, p.Type.Long).asExprOf[Long]
+          val size = Pickler.layoutOf(layouts, q.TypeRepr.of[t]).sizeInBytes.toInt
+
+          // O != null;  O.register... => no-op array restore
+          // O == null:  (don't register, no-op) => ptr => restore [t]
+          //             Pickler.mkStruct(compiler, opt, new ByteBuffer(ptr, SizeOfStruct), q.TypeRepr.of[t])
+
+          // ...
+          // free all malloc allocations after restore
+
+          '{
+
+            val buffer = Platforms.directBufferFromPointer($ptr, ${ Expr(size) })
+            println(s"  Mk buffer = ${buffer}, ptr=0x${$ptr.toHexString}")
+
+            val restored =
+              ${
+                Pickler.mkStruct(layouts, 'buffer, q.TypeRepr.of[t]).asExprOf[t]
+              }
+            println(
+              s"bind array: restore [${$index}] (skipping struct type ${${ Expr(s.repr) }} ptr is =${$ptr}, ${buffer} = $restored)"
+            )
+            $dest($index) = restored
+
+          }
         case _ =>
           '{
             $dest($index) = ${ Pickler.getPrimitive(src, byteOffset, component).asExprOf[t] }
@@ -436,23 +469,24 @@ object compiletime {
 
     '{
       val xs = $ref
-      println(s"Register object ${xs}")
+      println(s"bind array: object ${xs} ")
       $queue.registerAndInvalidateIfAbsent[StdLib.MutableSeq[t]](
         /* object */ xs,
         /* sizeOf */ x => ${ Expr(Pickler.tpeAsRuntimeTpe(component).sizeInBytes) } * x.length_,
-        /* write  */ { (xss, bb) =>
-          // println(s"Write bb = ${xss} ==> ${bb}")
+        /* write  */ { (xs, bb) =>
+          println(s"bind array: write  ${xs} => $bb(${Platforms.pointerOfDirectBuffer(bb)})")
           var i = 0
-          while (i < xss.length_) {
-            ${ storeElem('bb, 'xss, 'i) }
+          while (i < xs.length_) {
+            ${ storeElem('bb, 'xs, 'i) }
             i += 1
           }
         },
-        /* read   */ (bb, x) => {
-          // println(s"Read bb = ${x} <== ${bb}")
+        /* read   */ (bb, xs) => {
+          println(s"bind array: read  ${bb}(${Platforms.pointerOfDirectBuffer(bb)}) => $xs")
           var i = 0
-          while (i < x.length_) {
-            ${ restoreElem('bb, 'x, 'i) }
+          while (i < xs.length_) {
+            println(s"do restore ${i}")
+            ${ restoreElem('bb, 'xs, 'i) }
             i += 1
           }
         },
@@ -462,8 +496,7 @@ object compiletime {
   }
 
   def bindCapturesToBuffer(using q: Quoted)(
-      compiler: ct.Compiler,
-      opt: ct.Options,
+      layouts: Map[p.StructDef, ct.Layout],
       lut: Map[p.Sym, p.StructDef],
       target: Expr[ByteBuffer],
       queue: Expr[rt.Device.Queue],
@@ -508,8 +541,8 @@ object compiletime {
         //   ()
         // }
 
-        val expr = (name.tpe, structDef, ref.tpe.asType) match {
-          case (p.Type.Array(comp), None, x @ '[srt.Buffer[_]]) =>
+        val expr = (name.tpe, structDef, ref.asExpr) match {
+          case (p.Type.Array(comp), None, _) =>
             ???
           // '{
           //   $target.putLong(
@@ -529,8 +562,8 @@ object compiletime {
           //   bindArray[ts.Underlying, t](arr, mutable = true, x => '{ $x.size })
           // case (arr @ p.Type.Array(_),None, ts @ '[scala.collection.immutable.Seq[t]]) =>
           //   bindArray[ts.Underlying, t](arr, mutable = false, x => '{ $x.length })
-          case (s @ p.Type.Struct(_, _, _), None, '[t])       => ???
-          case (s @ p.Type.Struct(_, _, _), Some(sdef), '[t]) =>
+          case (s @ p.Type.Struct(_, _, _), None, _)                  => ???
+          case (s @ p.Type.Struct(_, _, _), Some(sdef), '{ $ref: t }) =>
             // bindArray[ts.Underlying, t](arr, mutable = false, x => '{ $x.length })
             // Pickler.writeStruct(compiler, opt, target, Expr(byteOffset), Expr(0), ref.tpe, ref.asExpr)
 
@@ -543,16 +576,16 @@ object compiletime {
                   target,
                   Expr(byteOffset),
                   p.Type.Long,
-                  bindStruct[t](compiler, opt, lut, queue, ref, sdef)
+                  bindStruct[t](layouts, lut, queue, ref, sdef)
                 )
               }
             }
 
-          case (t, None, _) =>
+          case (t, None, '{ $ref: t }) =>
             // Pickler.putAll(compiler, opt, target, t, ref.tpe, ref.asExpr)
-            Pickler.putPrimitive(target, Expr(byteOffset), t, ref.asExpr)
+            Pickler.putPrimitive(target, Expr(byteOffset), t, ref)
 
-          case (t, Some(_), _) => ???
+          case (t, _, _) => ???
         }
         (byteOffset + Pickler.tpeAsRuntimeTpe(name.tpe).sizeInBytes, exprs :+ expr)
     }

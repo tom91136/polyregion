@@ -32,8 +32,7 @@ public:
 
 private:
   struct WhileCtx {
-    llvm::BasicBlock *exit;
-    llvm::BasicBlock *test;
+    llvm::BasicBlock *exit, *test;
   };
 
   enum class BlockKind { Terminal, Normal };
@@ -46,9 +45,9 @@ public:
     unsigned int AllocaAS = 0;
 
   private:
-    using StructMemberTable = Map<std::string, size_t>;
+    using StructMemberIndexTable = Map<std::string, size_t>;
     Map<std::string, Pair<Type::Any, llvm::Value *>> stackVarPtrs;
-    Map<Sym, Pair<llvm::StructType *, StructMemberTable>> structTypes;
+    Map<Sym, Pair<llvm::StructType *, StructMemberIndexTable>> structTypes;
     Map<Signature, llvm::Function *> functions;
     llvm::IRBuilder<> B;
 
@@ -62,24 +61,31 @@ public:
     llvm::Function *mkExternalFn(llvm::Function *parent, const Type::Any &rtn, const std::string &name,
                                  const std::vector<Type::Any> &args);
     llvm::Value *invokeMalloc(llvm::Function *parent, llvm::Value *size);
+    llvm::Type *mkTpe(const Type::Any &tpe, unsigned AS = 0, bool functionBoundary = false);
 
-//    llvm::Value *conditionalLoad(llvm::Value *rhs);
+    Pair<llvm::StructType *, StructMemberIndexTable> mkStruct(const StructDef &def);
+
+    //    Opt<llvm::StructType *> lookup(const Sym &s);
+    //    llvm::Value *conditionalLoad(llvm::Value *rhs);
 
   public:
     AstTransformer(Options options, llvm::LLVMContext &c)
         : options(std::move(options)), C(c), stackVarPtrs(), structTypes(), functions(), B(C) {}
 
-    Pair<llvm::StructType *, StructMemberTable> mkStruct(const StructDef &def);
-    llvm::Type *mkTpe(const Type::Any &tpe, unsigned AS = 0, bool functionBoundary = false);
-    Opt<llvm::StructType *> lookup(const Sym &s);
-    Pair<Opt<std::string>, std::string> transform(const std::unique_ptr<llvm::Module> &module, const Program &);
-    static Pair<Opt<std::string>, std::string> optimise(const std::unique_ptr<llvm::Module> &module);
+    void addDefs(const std::vector<StructDef> &);
+
+    std::vector<Pair<Sym, llvm::StructType *>> getStructTypes() const;
+
+    Pair<Opt<std::string>, std::string> transform(llvm::Module &, const Function &);
   };
+
+  std::vector<compiler::Layout> resolveLayouts(const std::vector<StructDef> &defs, const AstTransformer &xform);
 
 public:
   Options options;
   explicit LLVM(Options options) : options(std::move(options)){};
-  compiler::Compilation run(const Program &, const compiler::Opt& opt) override;
+  std::vector<compiler::Layout> resolveLayouts(const std::vector<StructDef> &defs, const compiler::Opt &opt) override;
+  compiler::Compilation compileProgram(const Program &, const compiler::Opt &opt) override;
 };
 
 } // namespace polyregion::backend

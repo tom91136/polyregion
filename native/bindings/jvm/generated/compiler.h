@@ -20,7 +20,7 @@ static constexpr jbyte Target_UNSUPPORTED = 1;
 [[maybe_unused]] jobject compile0(JNIEnv *env, jclass, jbyteArray function, jboolean emitAssembly, jobject options, jbyte opt);
 [[maybe_unused]] jbyte hostTarget0(JNIEnv *env, jclass);
 [[maybe_unused]] jstring hostTriplet0(JNIEnv *env, jclass);
-[[maybe_unused]] jobject layoutOf0(JNIEnv *env, jclass, jbyteArray structDef, jobject options);
+[[maybe_unused]] jobjectArray layoutOf0(JNIEnv *env, jclass, jbyteArray structDef, jobject options);
 
 thread_local jclass clazz = nullptr;
 
@@ -40,7 +40,7 @@ static void registerMethods(JNIEnv *env) {
       {(char *)"compile0", (char *)"([BZLpolyregion/jvm/compiler/Options;B)Lpolyregion/jvm/compiler/Compilation;", (void *)&compile0},
       {(char *)"hostTarget0", (char *)"()B", (void *)&hostTarget0},
       {(char *)"hostTriplet0", (char *)"()Ljava/lang/String;", (void *)&hostTriplet0},
-      {(char *)"layoutOf0", (char *)"([BLpolyregion/jvm/compiler/Options;)Lpolyregion/jvm/compiler/Layout;", (void *)&layoutOf0}};
+      {(char *)"layoutOf0", (char *)"([BLpolyregion/jvm/compiler/Options;)[Lpolyregion/jvm/compiler/Layout;", (void *)&layoutOf0}};
   if(env->RegisterNatives(clazz, methods, 4) != 0){
     throw std::logic_error("RegisterNatives returned non-zero for polyregion/jvm/compiler/Compiler");
   }

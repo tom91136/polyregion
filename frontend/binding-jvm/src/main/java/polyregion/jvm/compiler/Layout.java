@@ -39,7 +39,7 @@ public final class Layout {
   public String toString() {
     return "Layout{"
         + "name="
-        + Arrays.toString(members)
+        + Arrays.toString(name)
         + ", size="
         + sizeInBytes
         + ", alignment="

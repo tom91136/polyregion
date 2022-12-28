@@ -233,13 +233,16 @@ struct EXPORT Layout {
   EXPORT polyast::Sym name;
   EXPORT uint64_t sizeInBytes, alignment;
   EXPORT std::vector<Member> members;
+  EXPORT Layout(decltype(name) name, decltype(sizeInBytes) sizeInBytes, decltype(alignment) alignment,
+                decltype(members) members)
+      : name(std::move(name)), sizeInBytes(sizeInBytes), alignment(alignment), members(std::move(members)) {}
 };
 
 struct EXPORT Event {
-  int64_t epochMillis, elapsedNanos;
-  std::string name, data;
-  Event(decltype(epochMillis) epochMillis, decltype(elapsedNanos) elapsedNanos, //
-        decltype(name) name, decltype(data) data)                               //
+  EXPORT int64_t epochMillis, elapsedNanos;
+  EXPORT std::string name, data;
+  EXPORT Event(decltype(epochMillis) epochMillis, decltype(elapsedNanos) elapsedNanos, //
+               decltype(name) name, decltype(data) data)                               //
       : epochMillis(epochMillis), elapsedNanos(elapsedNanos), name(std::move(name)), data(std::move(data)) {}
 };
 
@@ -272,8 +275,8 @@ struct EXPORT Options {
   EXPORT std::string arch;
 };
 
-EXPORT Layout layoutOf(const polyast::StructDef &sdef, const Options &options);
-EXPORT Layout layoutOf(const Bytes &bytes, const Options &backend);
+EXPORT std::vector<Layout> layoutOf(const std::vector<polyast::StructDef> &sdefs, const Options &options);
+EXPORT std::vector<Layout> layoutOf(const Bytes &bytes, const Options &backend);
 
 EXPORT Compilation compile(const polyast::Program &program, const Options &options, const Opt &opt);
 EXPORT Compilation compile(const Bytes &astBytes, const Options &options, const Opt &opt);

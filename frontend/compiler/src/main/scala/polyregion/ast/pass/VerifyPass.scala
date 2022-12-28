@@ -2,7 +2,8 @@ package polyregion.ast.pass
 
 import cats.data.EitherT
 import cats.syntax.all.*
-import polyregion.ast.{PolyAst as p, *}
+import polyregion.ast.{PolyAst as p, given, *}
+import polyregion.ast.Traversal.*
 
 import scala.annotation.tailrec
 
@@ -56,14 +57,15 @@ object VerifyPass {
 
                             sdef.members
                               .map(x =>
-                                x.mapType {
+                                x.modifyAll[p.Type](_.mapLeaf {
                                   case p.Type.Var(name) => apTable(name)
                                   case x                => x
-                                }
+                                })
                               )
                               .filter(_ == n) match {
                               case _ :: Nil => acc
-                              case Nil => acc ~ s"Struct type ${sdef.repr} does not contain member ${n.repr} in `${t.repr} r={${program.defs}}`"
+                              case Nil =>
+                                acc ~ s"Struct type ${sdef.repr} does not contain member ${n.repr} in `${t.repr} r={${program.defs}}`"
                               case _ => acc ~ s"Struct type ${sdef.repr} contains multiple members of $n in `${t.repr}`"
                             }
                           }
@@ -131,12 +133,7 @@ object VerifyPass {
 //              .mkString("\n\t")} \n${f.repr}\n${errors.map(e => s"  -> $e").mkString("\n")}")
 //          }
 
-          errors ++ (xs.flatMap(x =>
-            x.acc[p.Type] {
-              case p.Stmt.Return(e) => e.tpe :: Nil
-              case x                => Nil
-            }
-          ) match {
+          errors ++ (xs.collectWhere[p.Stmt] { case p.Stmt.Return(e) => e.tpe } match {
             case Nil => List("Function contains no return statements")
             case ts if ts.exists(_ != f.rtn) =>
               List(

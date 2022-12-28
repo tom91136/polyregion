@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ast.h"
 #include "compiler.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/TargetRegistry.h"
@@ -25,6 +26,8 @@ EXPORT const CpuInfo &hostCpuInfo();
 EXPORT const llvm::Target &targetFromTriple(const llvm::Triple &tripleName);
 
 EXPORT std::unique_ptr<llvm::TargetMachine> targetMachineFromTarget(const TargetInfo &info);
+
+EXPORT polyast::Pair<polyast::Opt<std::string>, std::string> optimiseModule(llvm::Module &mod);
 
 EXPORT compiler::Compilation compileModule(const TargetInfo &info, const compiler::Opt &opt, bool emitDisassembly,
                                            std::unique_ptr<llvm::Module> M, llvm::LLVMContext &Context);

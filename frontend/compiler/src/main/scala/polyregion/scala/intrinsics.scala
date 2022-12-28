@@ -4,7 +4,11 @@ object intrinsics {
 
   private def intrinsic: Nothing = throw new AssertionError("illegal")
 
-  trait TypedBuffer[A]
+  trait TypedBuffer[A] {
+    def apply(i: Int): A
+    def update(i: Int, x: A): Unit
+  }
+  
   def array[A](size: Int): TypedBuffer[A]                   = intrinsic
   def apply[A](xs: TypedBuffer[A], index: Int): A           = intrinsic
   def update[A](xs: TypedBuffer[A], index: Int, x: A): Unit = intrinsic

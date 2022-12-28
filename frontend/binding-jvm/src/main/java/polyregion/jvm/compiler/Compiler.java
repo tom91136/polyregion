@@ -40,7 +40,7 @@ public final class Compiler implements AutoCloseable {
   private static native Compilation compile0(
       byte[] function, boolean emitAssembly, Options options, byte opt);
 
-  private static native Layout layoutOf0(byte[] structDef, Options options);
+  private static native Layout[] layoutOf0(byte[] structDef, Options options);
 
   private final NativeLibrary library;
 
@@ -76,7 +76,7 @@ public final class Compiler implements AutoCloseable {
     return compile0(function, emitAssembly, options, opt);
   }
 
-  public Layout layoutOf(byte[] structDef, Options options) {
+  public Layout[] layoutOf(byte[] structDef, Options options) {
     return layoutOf0(structDef, options);
   }
 

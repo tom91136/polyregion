@@ -52,8 +52,6 @@ const static Tpe::Long Long = Tpe::Long();
 const static Tpe::Unit Unit = Tpe::Unit();
 const static Tpe::Nothing Nothing = Tpe::Nothing();
 
-std::string dslRepr(const Function &fn);
-
 Tpe::Array Array(const Tpe::Any &t);
 Tpe::Struct Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args);
 
