@@ -1,4 +1,5 @@
 #include <iostream>
+#include <unordered_set>
 
 #include "ast.h"
 #include "llvm.h"
@@ -58,9 +59,8 @@ LLVM::AstTransformer::mkStruct(const StructDef &def) {
   std::vector<llvm::Type *> types(def.members.size());
   std::transform(def.members.begin(), def.members.end(), types.begin(), [&](const Named &n) { return mkTpe(n.tpe); });
   LLVM::AstTransformer::StructMemberIndexTable table;
-  for (size_t i = 0; i < def.members.size(); ++i) {
+  for (size_t i = 0; i < def.members.size(); ++i)
     table[def.members[i].symbol] = i;
-  }
   return {llvm::StructType::create(C, types, qualified(def.name)), table};
 }
 
@@ -938,13 +938,47 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
 }
 
 void LLVM::AstTransformer::addDefs(const std::vector<StructDef> &defs) {
-  // set up the struct defs first so that structs in params work
-  std::transform(                                    //
-      defs.begin(), defs.end(),                      //
-      std::inserter(structTypes, structTypes.end()), //
-      [&](auto &x) -> Pair<Sym, Pair<llvm::StructType *, LLVM::AstTransformer::StructMemberIndexTable>> {
-        return {x.name, mkStruct(x)};
+  auto record = [this](auto &defs) {
+    std::transform(                                    //
+        defs.begin(), defs.end(),                      //
+        std::inserter(structTypes, structTypes.end()), //
+        [&](auto &x) -> Pair<Sym, Pair<llvm::StructType *, LLVM::AstTransformer::StructMemberIndexTable>> {
+          return {x.name, mkStruct(x)};
+        });
+  };
+
+  // TODO handle recursive defs
+
+  // select defs with all non-struct members first, add to list of completed
+  std::vector<StructDef> defsWithoutDependencies;
+  std::unordered_set<StructDef> defsWithDependencies;
+
+  for (auto &def : defs) {
+    auto zeroDeps =
+        std::all_of(def.members.begin(), def.members.end(), [](auto &m) { return !holds<Type::Struct>(m.tpe); });
+    if (zeroDeps) defsWithoutDependencies.emplace_back(def);
+    else
+      defsWithDependencies.emplace(def);
+  }
+  record(defsWithoutDependencies);
+  while (!defsWithDependencies.empty()) {
+    std::vector<StructDef> result;
+    std::copy_if(defsWithDependencies.begin(), defsWithDependencies.end(), std::back_inserter(result), [&](auto &def) {
+      return std::all_of(def.members.begin(), def.members.end(), [&](auto &m) {
+        if (auto s = get_opt<Type::Struct>(m.tpe); s) return structTypes.find(s->name) != structTypes.end();
+        else
+          return true;
       });
+    });
+    if (!result.empty()) {
+      record(result);
+      for (auto &r : result)
+        defsWithDependencies.erase(r);
+    } else
+      throw std::logic_error("Recursive defs cannot be resolved: " +
+                             mk_string<StructDef>(
+                                 result, [](auto &r) { return to_string(r); }, ","));
+  }
 }
 
 std::vector<Pair<Sym, llvm::StructType *>> LLVM::AstTransformer::getStructTypes() const {
@@ -1109,7 +1143,7 @@ llvmc::TargetInfo LLVM::Options::toTargetInfo() const {
 }
 
 std::vector<compiler::Layout> LLVM::resolveLayouts(const std::vector<StructDef> &defs,
-                                                   const backend::LLVM::AstTransformer &xform) {
+                                                   const backend::LLVM::AstTransformer &xform) const {
 
   auto dataLayout = llvmc::targetMachineFromTarget(options.toTargetInfo())->createDataLayout();
 

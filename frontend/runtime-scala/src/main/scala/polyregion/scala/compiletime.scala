@@ -316,8 +316,15 @@ object compiletime {
           fnValues.array,
           rt.Policy($dim),
           { () =>
-            println("Kernel completed, tid=" + Thread.currentThread.getId + " cb" + cb_)
-            $queue.syncAll(() => cb_(Right(())))
+            println("Kernel completed, tid=" + Thread.currentThread.getId + " cb=" + cb_)
+
+
+            // $queue.syncAll(() => cb_(Right(())))
+            try $queue.syncAll(() => cb_(Right(())))
+            catch { case e: Throwable => 
+              e.printStackTrace()
+              // cb_(Left(new Exception("Cannot sync",e))) 
+            }
           }
         )
 
@@ -347,10 +354,7 @@ object compiletime {
         $queue.registerAndInvalidateIfAbsent[t](
           /* object */ ${ ref.asExprOf[t] },
           /* sizeOf */ x => ${ Expr(layouts(struct).sizeInBytes.toInt) },
-          /* write  */ (
-              x,
-              bb
-          ) => {
+          /* write  */ (x, bb) => {
 
             println(
               s"bind struct ${${ Expr(struct.name.repr) }}, write  $x => $bb(0x${Platforms.pointerOfDirectBuffer(bb).toHexString})"
@@ -364,10 +368,12 @@ object compiletime {
                   struct,
                   q.TypeRepr.of[t],
                   'x,
-                  (s, expr) => {
-                    println(s"Do ${s}")
-                    bindStruct(layouts, lut, queue, expr, lut(s.name))
-                  },
+                  (s, expr) =>
+                    expr match {
+                      case '{ $es: t } =>
+                        println(s"Do ${s}")
+                        bindStruct(layouts, lut, queue, es, lut(s.name))
+                    },
                   (s, expr) =>
                     expr match {
                       case '{ $xs: StdLib.MutableSeq[v] } =>
@@ -384,7 +390,7 @@ object compiletime {
           },
           /* read   */ (bb, x) => {
             println(
-              s"bind struct ${${ Expr(struct.name.repr) }}, read   $bb(0x${Platforms.pointerOfDirectBuffer(bb).toHexString}) => $x"
+              s"bind struct ${${ Expr(struct.name.repr) }}, read (no restore)  $bb(0x${Platforms.pointerOfDirectBuffer(bb).toHexString}) => $x"
             )
             ()
           }, // throw new AssertionError(s"No write-back for struct type " + ${ Expr(struct.repr) }),
@@ -450,7 +456,24 @@ object compiletime {
 
             val restored =
               ${
-                Pickler.mkStruct(layouts, 'buffer, q.TypeRepr.of[t]).asExprOf[t]
+
+                def restoreOne(buffer: Expr[ByteBuffer], repr: q.TypeRepr): Expr[Any] = Pickler.mkStruct(
+                  layouts,
+                  buffer,
+                  repr,
+                  (tpeRepr, buffer, offset) =>
+                    restoreOne(
+                      '{
+                        Platforms.directBufferFromPointer(
+                          ${ Pickler.getPrimitive(buffer, offset, p.Type.Long).asExprOf[Long] },
+                          ${ Expr(Pickler.layoutOf(layouts, tpeRepr).sizeInBytes.toInt) }
+                        )
+                      },
+                      tpeRepr
+                    )
+                )
+
+                restoreOne('buffer, q.TypeRepr.of[t]).asExprOf[t]
               }
             println(
               s"bind array: restore [${$index}] (skipping struct type ${${ Expr(s.repr) }} ptr is =${$ptr}, ${buffer} = $restored)"

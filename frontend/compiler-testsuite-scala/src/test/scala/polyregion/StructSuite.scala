@@ -17,7 +17,7 @@ class StructSuite extends BaseSuite {
   case class Short3(a: Short, b: Short, c: Short)
   case class Int3(a: Int, b: Int, c: Int)
   case class Long3(a: Long, b: Long, c: Long)
-  case class Long2(a: Long, b: Long )
+  case class Long2(a: Long, b: Long)
   case class Float3(a: Float, b: Float, c: Float)
   case class Double3(a: Double, b: Double, c: Double)
   case class Boolean3(a: Boolean, b: Boolean, c: Boolean)
@@ -166,15 +166,14 @@ class StructSuite extends BaseSuite {
 
   // ---
 
-    // {
-    //   val x = Float3(42.0, 1.0, 2.0)
-    //   testExpr("passthrough") {
-    //     val y = x
-    //     val z = y
-    //     z
-    //   }
-    // }
-
+  // {
+  //   val x = Float3(42.0, 1.0, 2.0)
+  //   testExpr("passthrough") {
+  //     val y = x
+  //     val z = y
+  //     z
+  //   }
+  // }
 
 //
   // testExpr("return")(Float3(42.0, 1.0, 2.0))
@@ -183,7 +182,12 @@ class StructSuite extends BaseSuite {
     val a = 0.1f
     val b = 0.2f
     val c = 0.3f
-    testExpr("ctor-arg-return")(Float3(a, b, c))
+    // testExpr("ctor-arg-return")(Float3(a, b, c))
+    val x = Float3(a, b, c)
+    // testExpr("ctor-arg-in") {
+    //   val y = x
+    //   y.a + y.b + y.c
+    // }
   }
 
   // testExpr("ctor-return") {
@@ -193,30 +197,16 @@ class StructSuite extends BaseSuite {
   //   Float3(a, b, c)
   // }
 
-    {
-     val xs = ArrayBuffer.tabulate(10)(x =>
-       Float3x3(
-         Float3(
-           x * math.Pi.toFloat * 1, //
-           x * math.Pi.toFloat * 2, //
-           x * math.Pi.toFloat * 3  //
-         ),
-         Float3(
-           x * math.Pi.toFloat * 4, //
-           x * math.Pi.toFloat * 5, //
-           x * math.Pi.toFloat * 6  //
-         ),
-         Float3(
-           x * math.Pi.toFloat * 7, //
-           x * math.Pi.toFloat * 8, //
-           x * math.Pi.toFloat * 9  //
-         )
-       )
-     )
-      testExpr("nested-buffer-param") {
-       xs(0).a.a + xs(1).b.b + xs(2).c.c
-     }
-   }
+  {
+    val nested = Int3x3(
+      Int3(1, 2, 3),
+      Int3(4, 5, 6),
+      Int3(7, 8, 9)
+    )
+    testExpr("nested-buffer-param") {
+      nested.a.a + nested.b.b + nested.c.c
+    }
+  }
 
   // testExpr("nested-return") {
   //   assertOffload(Vec33(Vec3(0.0, 1.0, 2.0), Vec3(3.0, 4.0, 5.0), Vec3(6.0, 7.0, 8.0)))

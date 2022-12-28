@@ -79,7 +79,7 @@ public:
     Pair<Opt<std::string>, std::string> transform(llvm::Module &, const Function &);
   };
 
-  std::vector<compiler::Layout> resolveLayouts(const std::vector<StructDef> &defs, const AstTransformer &xform);
+  std::vector<compiler::Layout> resolveLayouts(const std::vector<StructDef> &defs, const AstTransformer &xform) const;
 
 public:
   Options options;
