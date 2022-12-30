@@ -3,6 +3,7 @@ package polyregion.scala
 import polyregion.ast.{PolyAst as p, *}
 import polyregion.jvm.{compiler as ct, runtime as rt}
 import polyregion.prism.StdLib
+import cats.syntax.all.*
 
 import java.nio.ByteBuffer
 import scala.quoted.*
@@ -37,33 +38,6 @@ object Pickler {
     case illegal                => throw new RuntimeException(s"tpeAsRuntimeTpe: Illegal $illegal")
   }
 
-  def layoutOf(using q: Quoted) //
-  (layouts: Map[p.StructDef, ct.Layout], repr: q.TypeRepr): ct.Layout = {
-    val sdef: p.StructDef = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
-    println(s"layoutOf=${sdef} ${repr.widenTermRefByName}")
-    val monomorphicName = p.Sym(sdef.tpe.monomorphicName)
-    layouts.find(_._1.name == monomorphicName).getOrElse(???)._2
-  }
-
-//  def sizeOf(using q: Quoted)(compiler: ct.Compiler, opt: ct.Options, sdef: p.StructDef): Int =
-//    compiler.layoutOf(CppSourceMirror.encode(sdef), opt).sizeInBytes.toInt
-
-  // def sizeOf(using q: Quoted)(compiler: ct.Compiler, opt: ct.Options, tpe: p.Type, repr: q.TypeRepr): Int =
-  //   tpe match {
-  //     case p.Type.Float           => rt.Type.FLOAT.sizeInBytes
-  //     case p.Type.Double          => rt.Type.DOUBLE.sizeInBytes
-  //     case p.Type.Bool            => rt.Type.BYTE.sizeInBytes
-  //     case p.Type.Byte            => rt.Type.BYTE.sizeInBytes
-  //     case p.Type.Char            => rt.Type.CHAR.sizeInBytes
-  //     case p.Type.Short           => rt.Type.SHORT.sizeInBytes
-  //     case p.Type.Int             => rt.Type.INT.sizeInBytes
-  //     case p.Type.Long            => rt.Type.LONG.sizeInBytes
-  //     case p.Type.Unit            => rt.Type.VOID.sizeInBytes
-  //     case p.Type.Array(_)        => rt.Type.PTR.sizeInBytes
-  //     case p.Type.Struct(_, _, _) => layoutOf(compiler, opt, repr).sizeInBytes.toInt
-  //     case x                      => q.quotes.reflect.report.errorAndAbort(s"Cannot get size of type $x")
-  //   }
-
   def getPrimitive(using q: Quotes) //
   (source: Expr[java.nio.ByteBuffer], byteOffset: Expr[Int], tpe: p.Type): Expr[Any] = tpe match {
     case p.Type.Float  => '{ $source.getFloat($byteOffset) }
@@ -91,18 +65,88 @@ object Pickler {
     case p.Type.Int    => '{ $target.putInt($byteOffset, ${ value.asExprOf[Int] }) }
     case p.Type.Long   => '{ $target.putLong($byteOffset, ${ value.asExprOf[Long] }) }
     case p.Type.Unit   => '{ $target.put($byteOffset, 0.toByte) }
+    case p.Type.Struct =>  
     case x =>
       throw new RuntimeException(
         s"Cannot put ${x.repr} into buffer, it is not a primitive type (source is `${value.show}`)"
       )
   }
 
+  case class StructMapping[A](
+      source: p.StructDef,
+      sizeInBytes: Long,
+      members: List[StructMapping.Member[A]]
+  )
+  object StructMapping {
+    case class Member[A](mut: Boolean, sizeInBytes: Long, offsetInBytes: Long, fromTerm: A, toTerm: A)
+  }
+
+  def mkStructMapping(using
+      q: Quoted
+  )(root: q.Term, layouts: Map[p.StructDef, ct.Layout]): Result[StructMapping[q.Select]] = {
+
+    // We need to find the actual name of the root's TypeRepr.
+    val rootTpeSymbol = root.tpe.widenTermRefByName.typeSymbol
+    val sourceLUT = StdLib.Mirrors.map(p => p._1.source -> p).toMap
+
+
+    // First, we apply the same prism type replacement logic to get the correct struct def name.
+    // If we can't find a prism, just retype it here.
+    // Note that whatever we found here will be unapplied if we have type arguments.
+    val (unappliedRootSdef) = Compiler.findMatchingClassInHierarchy(symbol, sourceLUT) match {
+       case Some((m, (from, to))) => 
+        // m.struct -> to(q.underlying, value, ???).asTerm //
+        m.struct.success
+        case None                 => 
+          Retyper.structDef0(rootTpeSymbol)
+    }
+
+    // Once we have a name, we need to apply the same name mangling like we do in the compiler.
+    // We then use that name to find the real struct def.
+    val termSdefMonomorphicName = p.Sym(sdef.tpe.monomorphicName)
+
+
+    for {
+   
+    sdef <- reolvedSdef
+    
+
+
+    _ = layouts.find(_._1.name == monomorphicName).getOrElse(???)._2
+      
+     
+
+
+
+    layout
+
+    layout <- layouts.get(sdef).failIfEmpty(s"Unseen sdef ${sdef.repr}, known reprs: ${layouts}")
+    layoutTable = layout.members.map(m => m.name -> m).toMap
+    terms <- sdef.members.traverse { case p.StructMember(named, mut) =>
+      layoutTable
+        .get(named.symbol)
+        .map { m =>
+          StructMapping.Member(mut, m.sizeInBytes, m.offsetInBytes, q.Select.unique(root, named.symbol))
+        }
+        .failIfEmpty(s"Layout ${layout} is missing ${named.repr} from ${sdef.repr}")
+    }
+  } yield StructMapping(sdef, layout.sizeInBytes, terms)
+}
+
+  def layoutOf(using q: Quoted) //
+  (layouts: Map[p.StructDef, ct.Layout], repr: q.TypeRepr): ct.Layout = {
+    val sdef: p.StructDef = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
+    println(s"layoutOf=${sdef} ${repr.widenTermRefByName}")
+    val monomorphicName = p.Sym(sdef.tpe.monomorphicName)
+    layouts.find(_._1.name == monomorphicName).getOrElse(???)._2
+  }
+ 
 
   def mutStruct(using q: Quoted)(
-    layouts: Map[p.StructDef, ct.Layout],
-    source: Expr[java.nio.ByteBuffer],
-    dest: Expr[Any],
-    repr: q.TypeRepr
+      layouts: Map[p.StructDef, ct.Layout],
+      source: Expr[java.nio.ByteBuffer],
+      dest: Expr[Any],
+      repr: q.TypeRepr
 //    mkStruct: (q.TypeRepr, Expr[java.nio.ByteBuffer], Expr[Int]) => Expr[Any]
   ): Expr[Unit] = {
     import q.given
@@ -110,22 +154,20 @@ object Pickler {
     val sdef   = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
     val layout = layoutOf(layouts, repr)
 
-
-    val terms  = sdef.members.zip(layout.members).map { (named, m) =>
+    val terms = sdef.members.zip(layout.members).map { (named, m) =>
       named.tpe match {
-        case s@p.Type.Struct(_, _, _) =>
-
-
+        case s @ p.Type.Struct(_, _, _) =>
           val ptrToStruct = getPrimitive(source, Expr(m.offsetInBytes.toInt), named.tpe).asExprOf[Long]
-          val size = Pickler.layoutOf(layouts, q.Select.unique(dest.asTerm, named.symbol).tpe).sizeInBytes.toInt
+          val size        = Pickler.layoutOf(layouts, q.Select.unique(dest.asTerm, named.symbol).tpe).sizeInBytes.toInt
 
           // const,
 
-
-
           '{}
         case _ =>
-          q.Assign(q.Select.unique(dest.asTerm, named.symbol), getPrimitive(source, Expr(m.offsetInBytes.toInt), named.tpe).asTerm).asExpr
+          q.Assign(
+            q.Select.unique(dest.asTerm, named.symbol),
+            getPrimitive(source, Expr(m.offsetInBytes.toInt), named.tpe).asTerm
+          ).asExpr
       }
     }
 
@@ -181,6 +223,7 @@ object Pickler {
       .appliedToArgs(terms)
       .asExpr
   }
+
 
   def putStruct(using q: Quoted)(
       layouts: Map[p.StructDef, ct.Layout],

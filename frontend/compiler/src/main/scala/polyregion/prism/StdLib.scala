@@ -247,6 +247,7 @@ object StdLib {
       .flatMap(m => m.functions.map(f => f -> Set(m.struct.copy(name = m.source))))
       .map { case (f, clsDeps) => f.signature -> (f, clsDeps) }
       .toMap
+      
   final def StructDefs: Map[p.Sym, p.StructDef] =
     Mirrors
       .map(_._1)
@@ -255,13 +256,13 @@ object StdLib {
       }
       .toMap
 
-  final def StructDefs2: Map[p.Sym, (p.StructDef, List[p.Sym])] =
-    Mirrors
-      .map(_._1)
-      .map { x =>
-        x.source -> (x.struct.copy(name = x.source), x.sourceParents)
-      }
-      .toMap
+  // final def StructDefs2: Map[p.Sym, (p.StructDef, List[p.Sym])] =
+  //   Mirrors
+  //     .map(_._1)
+  //     .map { x =>
+  //       x.source -> (x.struct.copy(name = x.source), x.sourceParents)
+  //     }
+  //     .toMap
 
   @main def main(): Unit = {
 

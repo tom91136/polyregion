@@ -118,7 +118,7 @@ object compiletime {
     }
   }
 
-  private inline def checked[A](inline e: Result[A]): A = e match {
+  private inline def checked[A](e: Result[A]): A = e match {
     case Left(e)  => throw e
     case Right(x) => x
   }
@@ -180,7 +180,7 @@ object compiletime {
   private val ProgramCounter = AtomicLong(0)
   private def generate(using q: Quoted)(
       configs: List[ReifiedConfig],
-      queueExpr: Expr[rt.Device.Queue],
+      queue: Expr[rt.Device.Queue],
       f: Expr[Any],
       dim: Expr[rt.Dim3],
       cb: Expr[Callback[Unit]]
@@ -242,11 +242,9 @@ object compiletime {
 
       val cb_ : Callback[Unit] = $cb
 
-      val queue = $queueExpr
-
       // Validate device features support this code object.
       val miss      = ArrayBuffer[(String, Set[String])]()
-      val available = Set(queue.device.features(): _*)
+      val available = Set($queue.device.features(): _*)
 
       lazy val modules = Array[(String, Set[String], Array[Byte])](${
         Varargs(compilations.map { (config, compilation) =>
@@ -268,7 +266,7 @@ object compiletime {
         cb_(
           Left(
             new java.lang.RuntimeException(
-              s"Device (${queue.device.name}) with features `${available.mkString(",")}` does not meet the requirement for any of the following binaries: ${miss
+              s"Device (${$queue.device.name}) with features `${available.mkString(",")}` does not meet the requirement for any of the following binaries: ${miss
                   .map((config, missing) => s"$config (missing ${missing.mkString(",")})")
                   .mkString(",")} "
             )
@@ -277,8 +275,8 @@ object compiletime {
       } else {
 
         // We got everything, load the code object
-        if (!queue.device.moduleLoaded($moduleName)) {
-          queue.device.loadModule($moduleName, modules(found)._3)
+        if (! $queue.device.moduleLoaded($moduleName)) {
+          $queue.device.loadModule($moduleName, modules(found)._3)
         }
 
         // Allocate parameter and return type ordinals and value buffers
@@ -299,7 +297,7 @@ object compiletime {
                   prog.defs.map(sd => sd -> layouts(sd.name)).toMap,
                   prog.defs.map(s => s.name -> s).toMap,
                   'fnValues,
-                  '{ queue },
+                  queue,
                   capturesWithStructDefs
                 ).asTerm
               )
@@ -311,7 +309,7 @@ object compiletime {
         println(s"fnTpeOrdinals=${fnTpeOrdinals.toList}")
         println(s"fnValues.array=${fnValues.array.toList}")
         // Dispatch.
-        queue.enqueueInvokeAsync(
+        $queue.enqueueInvokeAsync(
           $moduleName,
           $fnName,
           fnTpeOrdinals,
@@ -320,8 +318,8 @@ object compiletime {
           { () =>
             println("Kernel completed, tid=" + Thread.currentThread.getId + " cb=" + cb_)
 
-            // queue.syncAll(() => cb_(Right(())))
-            try queue.syncAll(() => cb_(Right(())))
+            // $queue.syncAll(() => cb_(Right(())))
+            try $queue.syncAll(() => cb_(Right(())))
             catch {
               case e: Throwable =>
                 e.printStackTrace()
@@ -394,12 +392,6 @@ object compiletime {
             println(
               s"bind struct ${${ Expr(struct.name.repr) }}, read (no restore)  $bb(0x${Platforms.pointerOfDirectBuffer(bb).toHexString}) => $x"
             )
-
-
-            println(s"~ ${${ Expr(q.TypeRepr.of[t].widenTermRefByName.show) }}")
-//            Pickler.mkStruct
-
-            ${ Pickler.mutStruct(layouts, '{bb}, '{x},q.TypeRepr.of[t].widenTermRefByName ) }
             ()
           }, // throw new AssertionError(s"No write-back for struct type " + ${ Expr(struct.repr) }),
           /* cb     */ null
@@ -526,6 +518,48 @@ object compiletime {
     }
   }
 
+  def insertS(using q: Quoted)(
+      layouts: Map[p.StructDef, ct.Layout],
+      lut: Map[p.Sym, p.StructDef],
+      queue: Expr[rt.Device.Queue],
+      root: q.Term,
+      destination: Expr[ByteBuffer],
+      offsetInBytes: Expr[Int]
+  ) = {
+
+    val mapping = Pickler.mkStructMapping(root, layouts)
+
+    '{
+      val xs = $ref
+      println(s"bind array: object ${xs} ")
+      $queue.registerAndInvalidateIfAbsent[StdLib.MutableSeq[t]](
+        /* object */ xs,
+        /* sizeOf */ x => ${ Expr(Pickler.tpeAsRuntimeTpe(component).sizeInBytes) } * x.length_,
+        /* write  */ { (xs, bb) =>
+          println(s"bind array: write  ${xs} => $bb(${Platforms.pointerOfDirectBuffer(bb)})")
+          var i = 0
+          while (i < xs.length_) {
+            ${ storeElem('bb, 'xs, 'i) }
+            i += 1
+          }
+        },
+        /* read   */ (bb, xs) => {
+          println(s"bind array: read  ${bb}(${Platforms.pointerOfDirectBuffer(bb)}) => $xs")
+          var i = 0
+          while (i < xs.length_) {
+            println(s"do restore ${i}")
+            ${ restoreElem('bb, 'xs, 'i) }
+            i += 1
+          }
+        },
+        /* cb     */ null
+      )
+    }
+
+//
+
+  }
+
   def bindCapturesToBuffer(using q: Quoted)(
       layouts: Map[p.StructDef, ct.Layout],
       lut: Map[p.Sym, p.StructDef],
@@ -534,70 +568,20 @@ object compiletime {
       capturesWithStructDefs: List[(p.Named, Option[p.StructDef], q.Term)]
   ) = {
     given Quotes = q.underlying
-
     val (_, stmts) = capturesWithStructDefs.zipWithIndex.foldLeft((0, List.empty[Expr[Any]])) {
       case ((byteOffset, exprs), ((name, structDef, ref), idx)) =>
-        println(s"Bind => ${name} ${structDef}")
-        // inline def bindArray[ts: Type, t: Type](arr: p.Type.Array, mutable: Boolean, size: Expr[ts] => Expr[Int]) = '{
-        //   val pointer = $queue.registerAndInvalidateIfAbsent[ts](
-        //     /*object*/ ${ ref.asExprOf[ts] },
-        //     /*sizeOf*/ xs => ${ Expr(Pickler.sizeOf(compiler, opt, arr.component, q.TypeRepr.of[t])) } * ${ size('xs) },
-        //     /*write */ (xs, bb) => ${ Pickler.putAll(compiler, opt, 'bb, arr, q.TypeRepr.of[ts], 'xs) },
-        //     /*read  */ ${
-        //       // TODO what about var?
-        //       if (!mutable) '{ (bb, xs) =>
-        //         throw new AssertionError(s"No writeback for immutable type " + ${ Expr(arr.repr) })
-        //       }
-        //       else '{ (bb, xs) => ${ Pickler.getAllMutable(compiler, opt, 'bb, arr, q.TypeRepr.of[ts], 'xs) } }
-        //     },
-        //     null
-        //   )
-
-        //   $target.putLong(${ Expr(byteOffset) }, pointer)
-        //   ()
-        // }
-
-        // inline def bindStruct[t: Type](struct: p.StructDef) = '{
-
-        //   val pointer = $queue.registerAndInvalidateIfAbsent[t](
-        //     /* object */ ${ ref.asExprOf[t] },
-        //     /* sizeOf */ x => ${ Expr(Pickler.sizeOf(compiler, opt, struct)) },
-        //     /* write  */ (x, bb) =>
-        //       ${ Pickler.putStruct(compiler, opt, 'bb, '{ 0 }, '{ 0 }, struct, q.TypeRepr.of[t], 'x) },
-        //     /* read   */ null, // (bb, x) => throw new AssertionError(s"No write-back for struct type " + ${ Expr(struct.repr) }),
-        //     /* cb     */ null
-        //   )
-
-        //   $target.putLong(${ Expr(byteOffset) }, pointer)
-        //   ()
-        // }
-
+        println(s"[Bind] [$idx, offset=${byteOffset}]  repr=${ref.show} name=${name.repr} (${structDef.map(_.repr)})")
         val expr = (name.tpe, structDef, ref.asExpr) match {
           case (p.Type.Array(comp), None, _) =>
-            ???
-          // '{
-          //   $target.putLong(
-          //     ${ Expr(byteOffset) },
-          //     $queue.registerAndInvalidateIfAbsent(
-          //       ${ ref.asExprOf[x.Underlying] },
-          //       ${ ref.asExprOf[x.Underlying] }.backing,
-          //       null
-          //     )
-          //   )
-          // }
-          // case (arr @ p.Type.Array(_),None, ts @ '[Array[t]]) =>
-          //   bindArray[ts.Underlying, t](arr, mutable = true, x => '{ $x.length })
-          // case (arr @ p.Type.Array(_),None, ts @ '[scala.collection.mutable.Seq[t]]) =>
-          //   bindArray[ts.Underlying, t](arr, mutable = true, x => '{ $x.length })
-          // case (arr @ p.Type.Array(_),None, ts @ '[java.util.List[t]]) =>
-          //   bindArray[ts.Underlying, t](arr, mutable = true, x => '{ $x.size })
-          // case (arr @ p.Type.Array(_),None, ts @ '[scala.collection.immutable.Seq[t]]) =>
-          //   bindArray[ts.Underlying, t](arr, mutable = false, x => '{ $x.length })
-          case (s @ p.Type.Struct(_, _, _), None, _)                  => ???
-          case (s @ p.Type.Struct(_, _, _), Some(sdef), '{ $ref: t }) =>
-            // bindArray[ts.Underlying, t](arr, mutable = false, x => '{ $x.length })
-            // Pickler.writeStruct(compiler, opt, target, Expr(byteOffset), Expr(0), ref.tpe, ref.asExpr)
+            throw new RuntimeException(
+              s"Top level arrays at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
+            )
+          case (s @ p.Type.Struct(_, _, _), None, _) =>
+            throw new RuntimeException(
+              s"Struct type without definition at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
+            )
 
+          case (s @ p.Type.Struct(_, _, _), Some(sdef), '{ $ref: t }) =>
             '{
 
               println(s">>> ${${ Expr(s.repr) }}")
@@ -611,12 +595,12 @@ object compiletime {
                 )
               }
             }
+          case (t, None, '{ $ref: t }) => Pickler.putPrimitive(target, Expr(byteOffset), t, ref)
+          case (t, _, _) =>
+            throw new RuntimeException(
+              s"Unexpected type ${t.repr} at parameter boundary: repr=${ref.show} name=${name.repr}"
+            )
 
-          case (t, None, '{ $ref: t }) =>
-            // Pickler.putAll(compiler, opt, target, t, ref.tpe, ref.asExpr)
-            Pickler.putPrimitive(target, Expr(byteOffset), t, ref)
-
-          case (t, _, _) => ???
         }
         (byteOffset + Pickler.tpeAsRuntimeTpe(name.tpe).sizeInBytes, exprs :+ expr)
     }

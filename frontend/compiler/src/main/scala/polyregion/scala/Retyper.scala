@@ -62,17 +62,24 @@ object Retyper {
         _.pos.map(p => Try((p.startLine, p.startColumn)).getOrElse((0, 0)))
       ) // make sure the order follows source code decl. order
       .traverseFilter(field =>
-        (field.tree match { // TODO we need to work out nested structs
+        field.tree match { // TODO we need to work out nested structs
           case d: q.ValDef =>
             val tpe = d.tpt.tpe
             // Skip references to objects as those are singletons and should be identified and lifted by the Remapper.
-            if (isModuleClass(tpe.typeSymbol)) {
-              None.success
-            } else typer0(tpe).map { case (_ -> t, wit) => p.Named(field.name, t) }.map(Some(_))
+            if (isModuleClass(tpe.typeSymbol)) None.success
+            else
+              typer0(tpe).map { case (_ -> t, wit) =>
+                Some(
+                  p.StructMember(
+                    named = p.Named(field.name, t),
+                    mutable = d.symbol.flags.is(q.Flags.Mutable)
+                  )
+                )
+              }
           case _ => ???
-        })
+        }
       )
-      .map(p.StructDef(p.Sym(clsSym.fullName), clsTypeCtorNames(clsSym), _))
+      .map(p.StructDef(p.Sym(clsSym.fullName), true, clsTypeCtorNames(clsSym), _))
   }
 
   // Ctor rules
@@ -124,15 +131,15 @@ object Retyper {
       q: Quoted
   )(sym: p.Sym, tpeVars: List[String], clsSym: q.Symbol, kind: q.ClassKind): p.Type =
     (sym, kind) match {
-      case (p.Sym(Symbols.Scala :+ "Unit"), q.ClassKind.Class)      => p.Type.Unit
-      case (p.Sym(Symbols.Scala :+ "Boolean"), q.ClassKind.Class)   => p.Type.Bool
-      case (p.Sym(Symbols.Scala :+ "Byte"), q.ClassKind.Class)      => p.Type.Byte
-      case (p.Sym(Symbols.Scala :+ "Short"), q.ClassKind.Class)     => p.Type.Short
-      case (p.Sym(Symbols.Scala :+ "Int"), q.ClassKind.Class)       => p.Type.Int
-      case (p.Sym(Symbols.Scala :+ "Long"), q.ClassKind.Class)      => p.Type.Long
-      case (p.Sym(Symbols.Scala :+ "Float"), q.ClassKind.Class)     => p.Type.Float
-      case (p.Sym(Symbols.Scala :+ "Double"), q.ClassKind.Class)    => p.Type.Double
-      case (p.Sym(Symbols.Scala :+ "Char"), q.ClassKind.Class)      => p.Type.Char
+      case (p.Sym(Symbols.Scala :+ "Unit"), q.ClassKind.Class)    => p.Type.Unit
+      case (p.Sym(Symbols.Scala :+ "Boolean"), q.ClassKind.Class) => p.Type.Bool
+      case (p.Sym(Symbols.Scala :+ "Byte"), q.ClassKind.Class)    => p.Type.Byte
+      case (p.Sym(Symbols.Scala :+ "Short"), q.ClassKind.Class)   => p.Type.Short
+      case (p.Sym(Symbols.Scala :+ "Int"), q.ClassKind.Class)     => p.Type.Int
+      case (p.Sym(Symbols.Scala :+ "Long"), q.ClassKind.Class)    => p.Type.Long
+      case (p.Sym(Symbols.Scala :+ "Float"), q.ClassKind.Class)   => p.Type.Float
+      case (p.Sym(Symbols.Scala :+ "Double"), q.ClassKind.Class)  => p.Type.Double
+      case (p.Sym(Symbols.Scala :+ "Char"), q.ClassKind.Class)    => p.Type.Char
       // TODO type ctor args for now, need to work out type member refinements
       case (sym, q.ClassKind.Class | q.ClassKind.Object) => p.Type.Struct(sym, tpeVars, tpeVars.map(p.Type.Var(_)))
     }
@@ -179,7 +186,7 @@ object Retyper {
             case _ => (Nil, Map.empty).success
           }
 
-          receiverCtorTpeVars = receiverCtorTpes.collect { case  p.Type.Var(name) => name }
+          receiverCtorTpeVars = receiverCtorTpes.collect { case p.Type.Var(name) => name }
 
           // receiverTpes = clsTypeCtorNames(repr.termSymbol.maybeOwner) // XXX use the not yet widened `repr`, not `m`!
         } yield {
