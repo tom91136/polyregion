@@ -33,11 +33,11 @@ object compiletime {
     }
     println("===")
     println(s"IS=${is
-      .filter(x => x.symbol.isDefDef || true)
-      .reverse
-      .map(x => x -> x.tpe.dealias.widenTermRefByName.simplified)
-      .map((x, tpe) => s"-> $x : ${x.show} `${x.symbol.fullName}` : ${tpe.show}\n\t${tpe}")
-      .mkString("\n")}")
+        .filter(x => x.symbol.isDefDef || true)
+        .reverse
+        .map(x => x -> x.tpe.dealias.widenTermRefByName.simplified)
+        .map((x, tpe) => s"-> $x : ${x.show} `${x.symbol.fullName}` : ${tpe.show}\n\t${tpe}")
+        .mkString("\n")}")
     println("===")
     x
   }
@@ -118,7 +118,7 @@ object compiletime {
     }
   }
 
-  private inline def checked[A](e: Result[A]): A = e match {
+  private inline def checked[A](inline e: Result[A]): A = e match {
     case Left(e)  => throw e
     case Right(x) => x
   }
@@ -180,7 +180,7 @@ object compiletime {
   private val ProgramCounter = AtomicLong(0)
   private def generate(using q: Quoted)(
       configs: List[ReifiedConfig],
-      queue: Expr[rt.Device.Queue],
+      queueExpr: Expr[rt.Device.Queue],
       f: Expr[Any],
       dim: Expr[rt.Dim3],
       cb: Expr[Callback[Unit]]
@@ -242,9 +242,11 @@ object compiletime {
 
       val cb_ : Callback[Unit] = $cb
 
+      val queue = $queueExpr
+
       // Validate device features support this code object.
       val miss      = ArrayBuffer[(String, Set[String])]()
-      val available = Set($queue.device.features(): _*)
+      val available = Set(queue.device.features(): _*)
 
       lazy val modules = Array[(String, Set[String], Array[Byte])](${
         Varargs(compilations.map { (config, compilation) =>
@@ -266,17 +268,17 @@ object compiletime {
         cb_(
           Left(
             new java.lang.RuntimeException(
-              s"Device (${$queue.device.name}) with features `${available.mkString(",")}` does not meet the requirement for any of the following binaries: ${miss
-                .map((config, missing) => s"$config (missing ${missing.mkString(",")})")
-                .mkString(",")} "
+              s"Device (${queue.device.name}) with features `${available.mkString(",")}` does not meet the requirement for any of the following binaries: ${miss
+                  .map((config, missing) => s"$config (missing ${missing.mkString(",")})")
+                  .mkString(",")} "
             )
           )
         )
       } else {
 
         // We got everything, load the code object
-        if (! $queue.device.moduleLoaded($moduleName)) {
-          $queue.device.loadModule($moduleName, modules(found)._3)
+        if (!queue.device.moduleLoaded($moduleName)) {
+          queue.device.loadModule($moduleName, modules(found)._3)
         }
 
         // Allocate parameter and return type ordinals and value buffers
@@ -297,7 +299,7 @@ object compiletime {
                   prog.defs.map(sd => sd -> layouts(sd.name)).toMap,
                   prog.defs.map(s => s.name -> s).toMap,
                   'fnValues,
-                  queue,
+                  '{ queue },
                   capturesWithStructDefs
                 ).asTerm
               )
@@ -309,7 +311,7 @@ object compiletime {
         println(s"fnTpeOrdinals=${fnTpeOrdinals.toList}")
         println(s"fnValues.array=${fnValues.array.toList}")
         // Dispatch.
-        $queue.enqueueInvokeAsync(
+        queue.enqueueInvokeAsync(
           $moduleName,
           $fnName,
           fnTpeOrdinals,
@@ -318,12 +320,12 @@ object compiletime {
           { () =>
             println("Kernel completed, tid=" + Thread.currentThread.getId + " cb=" + cb_)
 
-
-            // $queue.syncAll(() => cb_(Right(())))
-            try $queue.syncAll(() => cb_(Right(())))
-            catch { case e: Throwable => 
-              e.printStackTrace()
-              // cb_(Left(new Exception("Cannot sync",e))) 
+            // queue.syncAll(() => cb_(Right(())))
+            try queue.syncAll(() => cb_(Right(())))
+            catch {
+              case e: Throwable =>
+                e.printStackTrace()
+              // cb_(Left(new Exception("Cannot sync",e)))
             }
           }
         )
@@ -392,6 +394,12 @@ object compiletime {
             println(
               s"bind struct ${${ Expr(struct.name.repr) }}, read (no restore)  $bb(0x${Platforms.pointerOfDirectBuffer(bb).toHexString}) => $x"
             )
+
+
+            println(s"~ ${${ Expr(q.TypeRepr.of[t].widenTermRefByName.show) }}")
+//            Pickler.mkStruct
+
+            ${ Pickler.mutStruct(layouts, '{bb}, '{x},q.TypeRepr.of[t].widenTermRefByName ) }
             ()
           }, // throw new AssertionError(s"No write-back for struct type " + ${ Expr(struct.repr) }),
           /* cb     */ null

@@ -8,8 +8,8 @@ import _root_.scala.reflect.ClassTag
 
 class CompoundCaptureSuite extends BaseSuite {
 
-  inline def testCapture[A](inline name: String)(inline r: => A) = if (Toggles.CompoundCaptureSuite) {
-    test(name)(assertOffload(r))
+  private inline def testCapture[A](inline name: String)(inline r: => A) = if (Toggles.CompoundCaptureSuite) {
+    test(name)(assertOffloadValue(offload1(r)))
   }
 
   object Foo {

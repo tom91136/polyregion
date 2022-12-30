@@ -2,8 +2,8 @@ package polyregion
 
 import polyregion.scala.*
 import polyregion.scala.compiletime.*
-import _root_.scala.collection.mutable.ArrayBuffer
 
+import _root_.scala.collection.mutable.ArrayBuffer
 import _root_.scala.compiletime.*
 import _root_.scala.reflect.ClassTag
 
@@ -43,12 +43,12 @@ class StructSuite extends BaseSuite {
       h: Boolean3
   )
 
-  inline def dummyNativeStruct[A] = new NativeStruct[A] {
-    def name: String                                                       = ""
-    def sizeInBytes: Int                                                   = 1
-    def encode(buffer: _root_.java.nio.ByteBuffer, index: Int, a: A): Unit = ()
-    def decode(buffer: _root_.java.nio.ByteBuffer, index: Int): A          = ???
-  }
+//  inline def dummyNativeStruct[A] = new NativeStruct[A] {
+//    def name: String                                                       = ""
+//    def sizeInBytes: Int                                                   = 1
+//    def encode(buffer: _root_.java.nio.ByteBuffer, index: Int, a: A): Unit = ()
+//    def decode(buffer: _root_.java.nio.ByteBuffer, index: Int): A          = ???
+//  }
 
   // inline given NativeStruct[Char3]    = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
   // inline given NativeStruct[Byte3]    = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct
@@ -63,8 +63,8 @@ class StructSuite extends BaseSuite {
   //   test(name)(assertOffload(r))
   // }
 
-  inline def testExpr[A](inline name: String)(inline r: => A) = if (Toggles.StructSuite) {
-    test(name)(assertOffload(r))
+  private inline def testExpr[A](inline name: String)(inline r: => A) = if (Toggles.StructSuite) {
+    test(name)(assertOffloadValue(offload1(r)))
   }
 
   // val xs = Buffer.range(0, 10)
@@ -203,9 +203,23 @@ class StructSuite extends BaseSuite {
       Int3(4, 5, 6),
       Int3(7, 8, 9)
     )
-    testExpr("nested-buffer-param") {
-      nested.a.a + nested.b.b + nested.c.c
+//    testExpr("nested-buffer-param") {
+//      nested.a.a + nested.b.b + nested.c.c
+//    }
+  }
+
+  {
+
+    class A {
+      var field = 1
     }
+    val a = A()
+    testExpr("a") {
+      a.field += 1
+      a.field
+    }
+    println(a.field)
+
   }
 
   // testExpr("nested-return") {

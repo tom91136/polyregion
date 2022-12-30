@@ -321,7 +321,7 @@ object IntrinsifyPass {
       case x => (x, (Nil, Nil))
     }
     val (stmts, ivks) = cs.combineAll
-    (stmt :: stmts, ivks)
+    (  stmts :+ stmt, ivks)
   }
 
   private def intrinsifyModuleApply(s: p.Stmt, idx: Int) = {
@@ -407,7 +407,7 @@ object IntrinsifyPass {
       case x => (x, (Nil, Nil))
     }
     val (stmts, ivks) = cs.combineAll
-    (stmt :: stmts, ivks)
+    (  stmts:+stmt, ivks)
   }
 
 }

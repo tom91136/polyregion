@@ -214,7 +214,7 @@ object Retyper {
 //              (None -> p.Type.Array(comp), wit).success
             case (_, _, ys) if tpe.isFunctionType => // FunctionN
               // TODO make sure this works
-              "impl".fail
+              s"Function type not implemented: ${tpe.show}".fail
             case (name, kind, ctorArgs) =>
               symbol.tree match {
                 case clsDef: q.ClassDef =>

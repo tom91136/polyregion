@@ -50,14 +50,18 @@ object RefOutliner {
       if !localDefTable.contains(root.symbol)
       // if !root.symbol.maybeOwner.flags.is(q.Flags.Macro)
 
-    } yield (root, path.toVector, s)).sortBy(_._2.length)
+    } yield (root, path.toVector, s)).distinct.sortBy(_._2.length)
 
     // remove refs if already covered by the same root
     sharedValRefs = normalisedForeignValRefs
       .foldLeft(Vector.empty[(q.Ident, Vector[String], q.Ref)]) {
-        case (acc, x @ (_, _, q.Ident(_))) => acc :+ x
-        case (acc, x @ (root, path, q.Select(i, _))) =>
-          acc.filterNot((root0, path0, _) => root.symbol == root0.symbol && path.startsWith(path0)) :+ x
+        case (acc, x @ (_, _, q.Ident(_))) =>
+          println(s">>>! $x ${acc}")
+          acc :+ x
+        case (acc, x @ (root, path, s@q.Select(i, _))) =>
+          println(s">>>  $root ~ $path $i ${acc} ${s.symbol.flags.is(q.Flags.Mutable)}")
+          if(s.symbol.flags.is(q.Flags.Mutable)) acc
+          else acc.filterNot((root0, path0, _) => root.symbol == root0.symbol && path.startsWith(path0)) :+ x
         case (_, (_, _, r)) =>
           // not recoverable, the API shape is different
           q.report.errorAndAbort(s"Unexpected val (reference) kind while outlining", r.asExpr)
@@ -84,6 +88,9 @@ object RefOutliner {
       "Root collapsed",
       sharedValRefs.map((root, x) => s"${x.show}(symbol=${x.symbol}, owner=${x.symbol.owner}, root=$root)")*
     )
+//    _ = println(log.render().mkString("\n"))
+//
+//    _ = ???
 
     // Set[(q.Ident, q.Ref, Option[p.Term])]
 

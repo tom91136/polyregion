@@ -8,8 +8,8 @@ import _root_.scala.reflect.ClassTag
 //noinspection DoubleNegationScala,SimplifyBoolean
 class LogicSuite extends BaseSuite {
 
-  inline def testExpr[A](inline r: => A) = if (Toggles.LogicSuite) {
-    test(s"${codeOf(r)}=${r}")(assertOffload[A](r))
+  private inline def testExpr[A](inline r: => A) = if (Toggles.LogicSuite) {
+    test(s"${codeOf(r)}=${r}")(assertOffloadValue(offload1(r)))
   }
 
   // Test both normal and inverse of any expr to weed out any false negatives

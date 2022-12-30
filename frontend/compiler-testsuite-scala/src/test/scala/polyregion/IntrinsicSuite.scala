@@ -1,13 +1,14 @@
 package polyregion
 
 import polyregion.scala.compiletime.*
+
 import _root_.scala.compiletime.*
 import _root_.scala.reflect.ClassTag
 
 class IntrinsicSuite extends BaseSuite {
 
-  inline def testExpr[A <: AnyVal](inline r: A)(using C: ClassTag[A]) = if (Toggles.IntrinsicSuite) {
-    test(s"${C.runtimeClass}=${codeOf(r)}=${r}")(assertOffload[A](r))
+  private inline def testExpr[A <: AnyVal](inline r: A)(using C: ClassTag[A]) = if (Toggles.IntrinsicSuite) {
+    test(s"${C.runtimeClass}=${codeOf(r)}=${r}")(assertOffloadValue(offload1(r)))
   }
 
   {
@@ -35,9 +36,9 @@ class IntrinsicSuite extends BaseSuite {
     testExpr[Double](math.log1p(a)) // D
     testExpr[Double](math.log10(a)) // D
 
-    testExpr[Double](math.atan2(a, b))  // D
-    testExpr[Double](math.hypot(a, b))  // D
-    testExpr[Double](math.pow(a, b))    // D
+    testExpr[Double](math.atan2(a, b)) // D
+    testExpr[Double](math.hypot(a, b)) // D
+    testExpr[Double](math.pow(a, b))   // D
     //    testExpr[Double](math.toDegrees(a)) // D // XXX JDK 1.8 is off by one in the bit pattern
     testExpr[Double](math.toRadians(a)) // D
 
@@ -66,13 +67,13 @@ class IntrinsicSuite extends BaseSuite {
       testExpr[Double](tan(a))
     } //
     {
-      import _root_.scala.{math => mymath}
+      import _root_.scala.math as mymath
       testExpr[Double](mymath.sin(a))
       testExpr[Double](mymath.cos(a))
       testExpr[Double](mymath.tan(a))
     } //
     {
-      import _root_.java.lang.{Math => mymath}
+      import _root_.java.lang.Math as mymath
       testExpr[Double](mymath.sin(a))
       testExpr[Double](mymath.cos(a))
       testExpr[Double](mymath.tan(a))

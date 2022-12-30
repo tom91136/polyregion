@@ -97,6 +97,42 @@ object Pickler {
       )
   }
 
+
+  def mutStruct(using q: Quoted)(
+    layouts: Map[p.StructDef, ct.Layout],
+    source: Expr[java.nio.ByteBuffer],
+    dest: Expr[Any],
+    repr: q.TypeRepr
+//    mkStruct: (q.TypeRepr, Expr[java.nio.ByteBuffer], Expr[Int]) => Expr[Any]
+  ): Expr[Unit] = {
+    import q.given
+
+    val sdef   = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
+    val layout = layoutOf(layouts, repr)
+
+
+    val terms  = sdef.members.zip(layout.members).map { (named, m) =>
+      named.tpe match {
+        case s@p.Type.Struct(_, _, _) =>
+
+
+          val ptrToStruct = getPrimitive(source, Expr(m.offsetInBytes.toInt), named.tpe).asExprOf[Long]
+          val size = Pickler.layoutOf(layouts, q.Select.unique(dest.asTerm, named.symbol).tpe).sizeInBytes.toInt
+
+          // const,
+
+
+
+          '{}
+        case _ =>
+          q.Assign(q.Select.unique(dest.asTerm, named.symbol), getPrimitive(source, Expr(m.offsetInBytes.toInt), named.tpe).asTerm).asExpr
+      }
+    }
+
+    Expr.block(terms, '{})
+
+  }
+
   def mkStruct(using q: Quoted)(
       layouts: Map[p.StructDef, ct.Layout],
       source: Expr[java.nio.ByteBuffer],

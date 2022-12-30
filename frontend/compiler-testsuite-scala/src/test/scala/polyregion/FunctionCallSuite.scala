@@ -7,8 +7,8 @@ import _root_.scala.reflect.ClassTag
 
 class FunctionCallSuite extends BaseSuite {
 
-  inline def testExpr[A](inline name: String)(inline r: => A) = if (Toggles.FunctionCallSuite) {
-    test(name)(assertOffload(r))
+  private inline def testExpr[A](inline name: String)(inline r: => A) = if (Toggles.FunctionCallSuite) {
+    test(name)(assertOffloadValue(offload1(r)))
   }
 
   {
@@ -74,7 +74,7 @@ class FunctionCallSuite extends BaseSuite {
     testExpr("class-init-inlinemix")(timesInlineMix(x, 2f))
     testExpr("class-init-inlinemix-nest")(timesInlineMix(timesInlineMix(timesInlineMix(x, 2f), 3f), 4f))
 
-    // FIXME NoPrefix() error 
+    // FIXME NoPrefix() error
     // testExpr("class-init-const-1")(double(1.0))
     // testExpr("class-init-const-2")(double2(1.0))
     // testExpr("class-init")(double(x))

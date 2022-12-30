@@ -22,6 +22,7 @@ object MonoStructPass extends ProgramPass {
       name  = p.Sym(struct.monomorphicName)
     } yield struct -> p.StructDef(
       name = name,
+      reference = false,
       tpeVars = Nil,
       members = sdef.members.modifyAll[p.Type](_.mapLeaf {
         case p.Type.Var(name) => table(name)

@@ -165,11 +165,11 @@ class AotDevice[F[_], T](d: rt.Device.Queue, f: Suspend[F]) extends AotOps[F, T]
   inline def mkQueue: Queue = Queue(d.device.createQueue)
 }
 
-class Device[F[_], T <: Target](d: rt.Device, f: Suspend[F]) {
-  lazy val name: String                                 = d.name
-  lazy val properties: Map[String, String]              = d.properties.map(p => p.key -> p.value).toMap
-  lazy val jit: JitDevice[F, Config[_ <: T, _]]         = JitDevice(d.createQueue, f)
-  lazy val aot: AotDevice[F, Config[_ <: T, _] | Tuple] = AotDevice(d.createQueue, f)
+class Device[F[_], T <: Target](val underlying: rt.Device, f: Suspend[F]) {
+  lazy val name: String                                 = underlying.name
+  lazy val properties: Map[String, String]              = underlying.properties.map(p => p.key -> p.value).toMap
+  lazy val jit: JitDevice[F, Config[_ <: T, _]]         = JitDevice(underlying.createQueue, f)
+  lazy val aot: AotDevice[F, Config[_ <: T, _] | Tuple] = AotDevice(underlying.createQueue, f)
 }
 
 enum Opt(val value: cp.Opt) {

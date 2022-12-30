@@ -57,7 +57,10 @@ static constexpr int64_t nIntMax(uint64_t bits) { return (int64_t(1) << (bits - 
 Pair<llvm::StructType *, LLVM::AstTransformer::StructMemberIndexTable>
 LLVM::AstTransformer::mkStruct(const StructDef &def) {
   std::vector<llvm::Type *> types(def.members.size());
-  std::transform(def.members.begin(), def.members.end(), types.begin(), [&](const Named &n) { return mkTpe(n.tpe); });
+  std::transform(def.members.begin(), def.members.end(), types.begin(), [&](const Named &n) {
+    auto tpe = mkTpe(n.tpe);
+    return tpe->isStructTy() ? B.getPtrTy() : tpe;
+  });
   LLVM::AstTransformer::StructMemberIndexTable table;
   for (size_t i = 0; i < def.members.size(); ++i)
     table[def.members[i].symbol] = i;
@@ -938,46 +941,27 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
 }
 
 void LLVM::AstTransformer::addDefs(const std::vector<StructDef> &defs) {
-  auto record = [this](auto &defs) {
-    std::transform(                                    //
-        defs.begin(), defs.end(),                      //
-        std::inserter(structTypes, structTypes.end()), //
-        [&](auto &x) -> Pair<Sym, Pair<llvm::StructType *, LLVM::AstTransformer::StructMemberIndexTable>> {
-          return {x.name, mkStruct(x)};
-        });
-  };
-
   // TODO handle recursive defs
-
-  // select defs with all non-struct members first, add to list of completed
-  std::vector<StructDef> defsWithoutDependencies;
-  std::unordered_set<StructDef> defsWithDependencies;
-
-  for (auto &def : defs) {
-    auto zeroDeps =
-        std::all_of(def.members.begin(), def.members.end(), [](auto &m) { return !holds<Type::Struct>(m.tpe); });
-    if (zeroDeps) defsWithoutDependencies.emplace_back(def);
-    else
-      defsWithDependencies.emplace(def);
-  }
-  record(defsWithoutDependencies);
+  std::unordered_set<StructDef> defsWithDependencies(defs.begin(), defs.end());
   while (!defsWithDependencies.empty()) {
-    std::vector<StructDef> result;
-    std::copy_if(defsWithDependencies.begin(), defsWithDependencies.end(), std::back_inserter(result), [&](auto &def) {
-      return std::all_of(def.members.begin(), def.members.end(), [&](auto &m) {
-        if (auto s = get_opt<Type::Struct>(m.tpe); s) return structTypes.find(s->name) != structTypes.end();
-        else
-          return true;
-      });
-    });
-    if (!result.empty()) {
-      record(result);
-      for (auto &r : result)
+    std::vector<StructDef> zeroDeps;
+    std::copy_if( //
+        defsWithDependencies.begin(), defsWithDependencies.end(), std::back_inserter(zeroDeps), [&](auto &def) {
+          return std::all_of(def.members.begin(), def.members.end(), [&](auto &m) {
+            if (auto s = get_opt<Type::Struct>(m.tpe); s) return structTypes.find(s->name) != structTypes.end();
+            else
+              return true;
+          });
+        });
+    if (!zeroDeps.empty()) {
+      for (auto &r : zeroDeps) {
+        structTypes.emplace(r.name, mkStruct(r));
         defsWithDependencies.erase(r);
+      }
     } else
       throw std::logic_error("Recursive defs cannot be resolved: " +
                              mk_string<StructDef>(
-                                 result, [](auto &r) { return to_string(r); }, ","));
+                                 zeroDeps, [](auto &r) { return to_string(r); }, ","));
   }
 }
 

@@ -1,15 +1,12 @@
 package polyregion
 
-import polyregion.scala.*
-import polyregion.scala.compiletime.*
-
 import _root_.scala.compiletime.*
 import _root_.scala.reflect.ClassTag
 
 class CaptureSuite extends BaseSuite {
 
-  inline def testCapture[A](inline name: String)(inline r: => A) = if (Toggles.CaptureSuite) {
-    test(name)(assertOffload(r))
+  private inline def testCapture[A](inline name: String)(inline r: => A) = if (Toggles.CaptureSuite) {
+    test(name)(assertOffloadValue(offload1(r)))
   }
 
   {

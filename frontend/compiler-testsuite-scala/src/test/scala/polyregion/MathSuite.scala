@@ -8,8 +8,10 @@ import _root_.scala.reflect.ClassTag
 
 class MathSuite extends BaseSuite {
 
-  inline def testExpr[A <: AnyVal](inline r: A)(using C: ClassTag[A]) = if (Toggles.MathSuite) {
-    test(s"${C.runtimeClass}=${codeOf(r)}=${r}")(assertOffload[A](r))
+  import Fixtures.*
+
+  private inline def testExpr[A <: AnyVal](inline r: A)(using C: ClassTag[A]) = if (Toggles.MathSuite) {
+    test(s"${C.runtimeClass}=${codeOf(r)}=${r}")(assertOffloadValue(offload1(r)))
   }
 
   // XXX Short, Byte, Char ops promote to Int

@@ -10,9 +10,11 @@ import _root_.scala.reflect.ClassTag
 
 class CastSuite extends BaseSuite {
 
-  inline def testExpr[A](inline name: String)(inline r: => A) = if (Toggles.CastSuite) {
-    test(name)(assertOffload[A](r))
+  private inline def testExpr[A](inline name: String)(inline r: => A) = if (Toggles.CastSuite) {
+    test(name)(assertOffloadValue(offload1(r)))
   }
+
+  import Fixtures.*
 
   inline def testCastDouble(inline x: Double): Unit = {
     testExpr(s"${x.getClass}-to-double-$x=${x.toDouble}") { val y = x; val z = y.toDouble; x.toDouble }
@@ -136,8 +138,5 @@ class CastSuite extends BaseSuite {
 //      math.atan(out)
 //    }
 //  }
-
-
-
 
 }

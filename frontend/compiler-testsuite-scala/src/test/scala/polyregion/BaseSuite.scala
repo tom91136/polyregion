@@ -1,34 +1,26 @@
 package polyregion
 
-import polyregion.scala.NativeStruct
+import polyregion.scala.{NativeStruct, Platforms}
 
+import _root_.java.util.concurrent.{CountDownLatch, TimeUnit}
 import _root_.scala.compiletime.*
 import _root_.scala.reflect.ClassTag
 
 trait BaseSuite extends munit.FunSuite {
 
-  inline def doOffload[A](inline x: => A): A = if (Toggles.NoOffload) x
-  else {
-    import polyregion.scala.*
-    import polyregion.scala.blocking.*
-    try
-//      CUDA.devices(0).aot.task[Config[Target.NVPTX64.SM52.type, Opt.O2], A](x)
-      Host.aot.task[Config[Target.Host.type, Opt.O2], A](x)
-    catch {
-      case e: AssertionError => throw e
-      case e: Error =>
-        throw new AssertionError(e)
-    }
-  }
-
-  def assertValEquals[A](actual: A, expected: A): Unit = (actual.asMatchable, expected.asMatchable) match {
-    case (a: Float, e: Float) => //
-      assertEquals(_root_.java.lang.Float.floatToIntBits(a), _root_.java.lang.Float.floatToIntBits(e))
-    case (a: Double, e: Double) => //
-      assertEquals(_root_.java.lang.Double.doubleToLongBits(a), _root_.java.lang.Double.doubleToLongBits(e))
-    case (a, e) => //
-      assertEquals(a, e)
-  }
+//  inline def doOffload[A](inline x: => A): A = if (Toggles.NoOffload) x
+//  else {
+//    import polyregion.scala.*
+//    import polyregion.scala.blocking.*
+//    try
+////      CUDA.devices(0).aot.task[Config[Target.NVPTX64.SM52.type, Opt.O2], A](x)
+//      Host.aot.task[Config[Target.Host.type, Opt.O2], A](x)
+//    catch {
+//      case e: AssertionError => throw e
+//      case e: Error =>
+//        throw new AssertionError(e)
+//    }
+//  }
 
   inline def unrollInclusive(inline n: Int)(inline f: Int => Unit): Unit = {
     if (n >= 0) f(n)
@@ -47,49 +39,75 @@ trait BaseSuite extends munit.FunSuite {
     unrollGen[A](2, xs)(f)
   }
 
-  inline def assertOffload[A](inline f: => A) = {
-    val expected =
-      try f
-      catch {
-        case e: Throwable => throw new AssertionError(s"offload reference expression ${codeOf(f)} failed to execute", e)
-      }
-    assertValEquals(doOffload[A](f), expected)
+  enum AssertTarget {
+    case JDK, Offload
   }
 
-  inline def Bytes = Array[Byte](-128, 127, 1, -1, 0, 42)
+  inline def offload0(using inline target: AssertTarget)(inline f: => Any): Unit = target match {
+    case AssertTarget.JDK => f
+    case AssertTarget.Offload =>
+      import polyregion.scala.*
+      import polyregion.scala.blocking.Host
+      val latch = new CountDownLatch(1)
+      polyregion.scala.compiletime.offload0[Config[Target.Host.type, Opt.O2]](
+        Host.underlying.createQueue(),
+        {
+          case Left(e)   => throw e
+          case Right(()) => latch.countDown()
+        }
+      ) { f; () }
+      latch.await(5, TimeUnit.SECONDS)
+  }
 
-  inline def Chars = Array[Char]('\u0000', '\uFFFF', 1, 0, 42)
+  inline def offload1[A](using inline target: AssertTarget)(inline f: => A): A = target match {
+    case AssertTarget.JDK => f
+    case AssertTarget.Offload =>
+      import polyregion.scala.*
+      import polyregion.scala.blocking.Host
+      val r     = _root_.scala.collection.mutable.ArrayBuffer[A](null.asInstanceOf[A])
+      val latch = new CountDownLatch(1)
+      polyregion.scala.compiletime.offload0[Config[Target.Host.type, Opt.O2]](
+        Host.underlying.createQueue(),
+        {
+          case Left(e)   => throw e
+          case Right(()) => latch.countDown()
+        }
+      ) { r(0) = f; () }
+      latch.await(5, TimeUnit.SECONDS)
+      r(0)
+  }
 
-  inline def Shorts = Array[Short](-32768, 32767, 1, -1, 0, 42)
+  inline def assertOffloadValue[A](inline f: AssertTarget ?=> A): Unit = {
+    val expected =
+      try f(using AssertTarget.JDK)
+      catch {
+        case e: Throwable => fail(s"offload reference expression failed to execute", e)
+      }
+    assertEquals(expected, expected, "offload reference values are not self-equal")
+    if (!Toggles.NoOffload) {
+      val actual = f(using AssertTarget.Offload)
+      assertValEquals(actual, expected)
+    }
+  }
 
-  inline def Ints = Array[Int](0x80000000, 0x7fffffff, 1, -1, 0, 42)
+  inline def assertOffloadEffect(inline f: AssertTarget ?=> Unit): Unit = {
+    try f(using AssertTarget.JDK)
+    catch {
+      case e: Throwable => throw new AssertionError(s"offload reference expression failed to execute", e)
+    }
+    if (!Toggles.NoOffload) {
+      f(using AssertTarget.Offload)
+    }
+  }
 
-  inline def Longs = Array[Long](0x8000000000000000L, 0x7fffffffffffffffL, 1, -1, 0, 42)
-
-  inline def Floats = Array[Float](
-    1.4e-45f,
-    1.17549435e-38f,
-    3.4028235e+38, // XXX 3.4028235e+38f appears to not fit!
-    0.0f / 0.0f,
-    1,
-    -1,
-    0,
-    42,
-    3.14159265358979323846
-  )
-
-  inline def Doubles = Array[Double](
-    4.9e-324d,
-    2.2250738585072014e-308d,
-    1.7976931348623157e+308d,
-    0.0f / 0.0d,
-    1,
-    -1,
-    0,
-    42,
-    3.14159265358979323846d
-  )
-
-  inline def Booleans = Array[Boolean](true, false)
+  inline def assertValEquals[A](inline actual: A, inline expected: A): Unit =
+    inline (actual.asMatchable, expected.asMatchable) match {
+      case (a: Float, e: Float) => //
+        assertEquals(_root_.java.lang.Float.floatToIntBits(a), _root_.java.lang.Float.floatToIntBits(e))
+      case (a: Double, e: Double) => //
+        assertEquals(_root_.java.lang.Double.doubleToLongBits(a), _root_.java.lang.Double.doubleToLongBits(e))
+      case (a, e) => //
+        assertEquals(a, e)
+    }
 
 }

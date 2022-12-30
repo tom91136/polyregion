@@ -2,13 +2,14 @@ package polyregion
 
 import polyregion.scala.compiletime.*
 
+import _root_.scala.annotation.nowarn
 import _root_.scala.compiletime.*
 import _root_.scala.reflect.ClassTag
 
 class ControlFlowSuite extends BaseSuite {
 
-  inline def testExpr[A](inline name: String)(inline f: => A) = if (Toggles.ControlFlowSuite) {
-    test(name)(assertOffload[A](f))
+  private inline def testExpr[A](inline name: String)(inline r: => A) = if (Toggles.ControlFlowSuite) {
+    test(name)(assertOffloadValue(offload1(r)))
   }
 
   {
@@ -27,15 +28,15 @@ class ControlFlowSuite extends BaseSuite {
     }
   }
 
-  testExpr("stmts") { 1; 2 }
+  testExpr("stmts") { 1; 2 }: @nowarn
 
   testExpr("const-if-true") {
-    (if (true) 42 else 69)
+    if (true) 42 else 69
   }
 
   testExpr("ref-if-true") {
     val x = true
-    (if (x) 42 else 69)
+    if (x) 42 else 69
   }
 
   testExpr("while-le-inc") {
@@ -66,11 +67,11 @@ class ControlFlowSuite extends BaseSuite {
   testExpr("ref-if-if-true") {
     val x = true
     val y = true
-    (if (x) (if (y) 1 else 2) else 3)
+    if (x) if (y) 1 else 2 else 3
   }
 
   testExpr("const-if-if-true") {
-    (if (true) (if (true) 1 else 2) else 3)
+    if (true) if (true) 1 else 2 else 3
   }
 
 }
