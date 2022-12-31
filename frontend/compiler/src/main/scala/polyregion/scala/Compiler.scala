@@ -19,9 +19,8 @@ object Compiler {
   private val ProgramPasses: List[ProgramPass] = List(
     FnInlinePass, //
     VarReducePass,
-    UnitExprElisionPass,    //
-    DeadArgEliminationPass, //
-    MonoStructPass          //
+    UnitExprElisionPass,   //
+    DeadArgEliminationPass //
   )
 
   private def runProgramOptPasses(program: p.Program)(log: Log): Result[(p.Program, Log)] =
@@ -45,17 +44,17 @@ object Compiler {
       deps: q.FnWitnesses
   )(
       fnLut: Map[p.Signature, (p.Function, Set[p.StructDef])] = Map.empty
-  ): Result[(List[p.Function], Set[(p.StructDef, q.TypeRepr)], Set[q.Symbol], Log)] = for {
+  ): Result[(List[p.Function], Set[p.StructDef], Set[q.Symbol], Log)] = for {
     log <- Log(s"Compile ${deps.size} dependent function(s)")
     log <- deps.toList.foldLeftM(log) { case (log, (fn, ivks)) =>
       log.info(q.DefDef(fn.symbol, rhsFn = _ => None).show, ivks.map(_.repr).toList.sorted*)
     }
     (_ /*input*/, fns, clsDeps, moduleSymDeps, logs) <- (
-      deps,                                 // seed
-      List.empty[p.Function],               // acc
-      Set.empty[(p.StructDef, q.TypeRepr)], // acc
-      Set.empty[q.Symbol],                  // acc
-      List.empty[Log]                       // acc
+      deps,                   // seed
+      List.empty[p.Function], // acc
+      Set.empty[p.StructDef], // acc
+      Set.empty[q.Symbol],    // acc
+      List.empty[Log]         // acc
     ).iterateWhileM { (remaining, fnAcc, clsDepAcc, moduleSymDepAcc, logAcc) =>
       remaining.toList
         .foldLeftM((fnAcc, Map.empty: q.FnWitnesses, clsDepAcc, moduleSymDepAcc, logAcc)) {
@@ -123,7 +122,7 @@ object Compiler {
                   } yield (
                     fn.copy(name = target.name) :: xs,
                     depss,
-                    clsDeps.map(_ -> (originalFnOwner.typeRef: q.TypeRepr)) ++ clsDepss,
+                    clsDeps ++ clsDepss,
                     moduleSymDepss,
                     log :: logs
                   )
@@ -260,57 +259,37 @@ object Compiler {
   def compileAndReplaceStructDependencies(using q: Quoted)(
       fn: p.Function,
       deps: q.Dependencies
-  )(
-      clsLut: Map[p.Sym, p.StructDef]
-  ): Result[(p.Function, q.FnWitnesses, Set[(p.StructDef, q.TypeRepr)], Set[q.Symbol], Log)] =
+  )(clsLut: Map[p.Sym, p.StructDef]): Result[(p.Function, q.FnWitnesses, Set[p.StructDef], Set[q.Symbol], Log)] =
     for {
       log <- Log(s"Compile dependent structs & apply replacements")
-      // We'll use Symbol.typeRef here, added in https://github.com/lampepfl/dotty/pull/14124, part of 3.1.3
-      (replacedClasses, classes) <- deps.classes.toList
-        .map((clsDef, tpeAps) => (clsDef.symbol, tpeAps))
-        .partitionEitherM { (clsDefSymbol, tpeAps) =>
-          findMatchingClassInHierarchy(clsDefSymbol, clsLut) match {
-            case Some(x) => Left((tpeAps, x, clsDefSymbol.typeRef)).success
-            case None    => structDef0(clsDefSymbol).map(x => Right((tpeAps, x, clsDefSymbol.typeRef: q.TypeRepr)))
-          }
+      (replacedClasses, classes) <- deps.classes.toList.partitionEitherM { case (clsDef, tpeAps) =>
+        findMatchingClassInHierarchy(clsDef.symbol, clsLut) match {
+          case Some(x) => Left(tpeAps -> x).success
+          case None    => structDef0(clsDef.symbol).map(x => Right(tpeAps -> x))
         }
-      (replacedModules, modules) <- deps.modules.toList
-        .partitionEitherM { (moduleSymbol, tpe) =>
-          findMatchingClassInHierarchy(moduleSymbol, clsLut) match {
-            case Some(x) => Left((tpe, x, moduleSymbol.typeRef)).success
-            case None    => structDef0(moduleSymbol).map(x => Right((tpe, x, moduleSymbol.typeRef: q.TypeRepr)))
-          }
+      }
+      (replacedModules, modules) <- deps.modules.toList.partitionEitherM { case (symbol, tpe) =>
+        findMatchingClassInHierarchy(symbol, clsLut) match {
+          case Some(x) => Left(tpe -> x).success
+          case None    => structDef0(symbol).map(x => Right(tpe -> x))
         }
+      }
 
-      log <- log.info(
-        "Replaced modules",
-        replacedModules.map((ap, s, repr) => s"${ap.repr} => ${s.repr} (repr=${repr.show})")*
-      )
-      log <- log.info(
-        "Replaced classes",
-        replacedClasses.map((aps, s, repr) => s"${aps.map(_.repr)} => ${s.repr} (repr=${repr.show})")*
-      )
-      log <- log.info(
-        "Reflected modules",
-        modules.map((ap, s, repr) => s"${ap.repr} => ${s.repr} (repr=${repr.show})")*
-      )
-      log <- log.info(
-        "Reflected classes",
-        classes.map((aps, s, repr) => s"${aps.map(_.repr)} => ${s.repr} (repr=${repr.show})")*
-      )
+      log <- log.info("Replaced modules", replacedModules.map((ap, s) => s"${ap.repr} => ${s.repr}")*)
+      log <- log.info("Replaced classes", replacedClasses.map((aps, s) => s"${aps.map(_.repr)} => ${s.repr}")*)
+      log <- log.info("Reflected modules", modules.map((ap, s) => s"${ap.repr} => ${s.repr}")*)
+      log <- log.info("Reflected classes", classes.map((aps, s) => s"${aps.map(_.repr)} => ${s.repr}")*)
 
       structDefs =
         (replacedClasses :::
           classes :::
           replacedModules :::
-          modules).map((_, sdef, repr) => sdef -> repr).toSet
+          modules).map(_._2).toSet
 
       typeLut: Map[p.Type.Struct, p.Type.Struct] =
         replacedClasses
-          .flatMap((tpeAps, sdef, repr) =>
-            tpeAps.map { case ap @ p.Type.Struct(_, _, ts) => ap -> sdef.tpe.copy(args = ts) }
-          )
-          .toMap ++ replacedModules.map((tpe, sdef, repr) => tpe -> sdef.tpe).toMap
+          .flatMap((tpeAps, sdef) => tpeAps.map { case ap @ p.Type.Struct(_, _, ts) => ap -> sdef.tpe.copy(args = ts) })
+          .toMap ++ replacedModules.map((tpe, sdef) => tpe -> sdef.tpe).toMap
 
       replaceTpe = (t: p.Type) =>
         t match {
@@ -338,10 +317,7 @@ object Compiler {
       )
 
       log <- log.info("Type replacements", typeLut.map((a, b) => s"${a.repr} => ${b.repr}").toList.sorted*)
-      log <- log.info(
-        "All struct defs",
-        structDefs.toList.map((sdef, repr) => s"${sdef.repr} (repr=${repr.show})").sorted*
-      )
+      log <- log.info("All struct defs", structDefs.toList.map(_.repr).sorted*)
       log <- log.info(
         "Dependent defs",
         mappedFnDeps.map((f, ivks) => s"${f.show} \ncallsites: \n${ivks.map(_.repr).mkString("\n")}").toList*
@@ -352,7 +328,14 @@ object Compiler {
 
     } yield (mappedFn, mappedFnDeps, structDefs, deps.modules.keySet, log)
 
-  def compileExpr(using q: Quoted)(expr: Expr[Any]): Result[(List[(p.Named, q.Term)], p.Program, Log)] = for {
+  def compileExpr(using q: Quoted)(expr: Expr[Any]): Result[
+    (                                                     //
+        List[(p.Named, q.Term)],                          //
+        Map[p.Sym, polyregion.prism.TermPrism[Any, Any]], //
+        p.Program,                                        //
+        Log                                               //
+    )
+  ] = for {
     log <- Log("Expr compiler")
     term = expr.asTerm
     // Generate a name for the expr first.
@@ -446,7 +429,7 @@ object Compiler {
       symbol.fullName.replace('.', '_') -> removeThisFromRef(symbol)
     }.toMap ++ exprThisCls.map((clsDef, _) => "this" -> q.This(clsDef.symbol)).toMap
 
-    unopt = p.Program(rootFn, allRootDependentFns, (rootDependentStructs ++ allRootDependentStructs).map(_._1).toList)
+    unopt = p.Program(rootFn, allRootDependentFns, (rootDependentStructs ++ allRootDependentStructs).toList)
     log <- log.info(
       s"Program compiled (unpot), structures = ${unopt.defs.size}, functions = ${unopt.functions.size}"
     )
@@ -477,7 +460,9 @@ object Compiler {
     _ = println(log.render().mkString("\n"))
 
     // run the global optimiser
-    (opt, log) <- runProgramOptPasses(unopt)(log)
+    (opt, log)                              <- runProgramOptPasses(unopt)(log)
+    (monomorphicToPolymorphicSym, opt, log) <- MonoStructPass(opt, log).success
+
     _ = println("Opt done")
 
     // verify again after optimisation
@@ -513,13 +498,28 @@ object Compiler {
           s"Unexpected type conversion, capture was ${tpe.repr} for $ref but function expected ${n.repr}".fail
       }
     }
+
     log <- log.info(
       s"Final captures",
       captured.map((name, ref) => s"${name.repr} <== ${ref.symbol}: ${ref.tpe.widenTermRefByName.show}")*
     )
+    log <- log.info(
+      s"Final name references (monomorphic -> polymorphic)",
+      monomorphicToPolymorphicSym.map((m, p) => s"$m => $p").toList*
+    )
+
     _ = println(log.render().mkString("\n"))
 
-    // List[(p.StructDef, q.TypeRepr)]
-  } yield (captured, opt, log)
+    // List[(p.StructDef, Option[Prism])]
+  } yield (
+    captured,
+    // For each def, we find the original name before monomorphic specialisation and then resolve the term mirrors
+    opt.defs.flatMap { monomorphicDef =>
+      val polymorphicSym = monomorphicToPolymorphicSym(monomorphicDef.name)
+      StdLib.Mirrors.collect { case (m, prism) if m.source == polymorphicSym => monomorphicDef.name -> prism }
+    }.toMap,
+    opt,
+    log
+  )
 
 }

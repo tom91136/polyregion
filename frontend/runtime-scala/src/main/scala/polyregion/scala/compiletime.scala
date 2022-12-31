@@ -188,7 +188,7 @@ object compiletime {
 
     // Name actual => type actual
     // configs               <- reifyConfigFromTpe[C](using q.underlying)()
-    (captures, prog0, log) <- Compiler.compileExpr(f)
+    (captures, prismRefs, prog0, log) <- Compiler.compileExpr(f)
 
     resolveStructDef = (s: p.Type.Struct) => prog0.defs.find(_.name == s.name)
 
@@ -519,45 +519,70 @@ object compiletime {
   }
 
   def insertS(using q: Quoted)(
-      layouts: Map[p.StructDef, ct.Layout],
+      layouts: Map[p.StructDef, (ct.Layout, Option[polyregion.prism.TermPrism[Any, Any]])],
       lut: Map[p.Sym, p.StructDef],
       queue: Expr[rt.Device.Queue],
       root: q.Term,
+      sdef: p.StructDef,
       destination: Expr[ByteBuffer],
       offsetInBytes: Expr[Int]
   ) = {
 
-    val mapping = Pickler.mkStructMapping(root, layouts)
+    //   (val|var) ${inst.a} == null => 0
+    //   (val|var) ${inst.a} != null => toPtr(   f(q, ${inst.a}: A ): A  )
 
-    '{
-      val xs = $ref
-      println(s"bind array: object ${xs} ")
-      $queue.registerAndInvalidateIfAbsent[StdLib.MutableSeq[t]](
-        /* object */ xs,
-        /* sizeOf */ x => ${ Expr(Pickler.tpeAsRuntimeTpe(component).sizeInBytes) } * x.length_,
-        /* write  */ { (xs, bb) =>
-          println(s"bind array: write  ${xs} => $bb(${Platforms.pointerOfDirectBuffer(bb)})")
-          var i = 0
-          while (i < xs.length_) {
-            ${ storeElem('bb, 'xs, 'i) }
-            i += 1
-          }
-        },
-        /* read   */ (bb, xs) => {
-          println(s"bind array: read  ${bb}(${Platforms.pointerOfDirectBuffer(bb)}) => $xs")
-          var i = 0
-          while (i < xs.length_) {
-            println(s"do restore ${i}")
-            ${ restoreElem('bb, 'xs, 'i) }
-            i += 1
-          }
-        },
-        /* cb     */ null
-      )
+    //   (val) // no-op
+    //   (var) $ptr == nullptr => ${inst.a} := null
+    //   (var) $ptr != nullptr => ${inst.a} := f(q, ${inst.a} ?, fromPtr($ptr)) : A
+
+    given Quotes = q.underlying
+
+    for {
+      mapping         <- Pickler.mkStructMapping(sdef, layouts.view.mapValues(_._1))
+      (_, maybePrism) <- layouts.get(sdef).failIfEmpty(s"Missing def ${sdef.repr}")
+
+      rootThroughPrism = maybePrism match {
+        case None             => root
+        case Some((from, to)) => from(q.underlying, root.asExpr).asTerm
+      }
+
+      // Basic steps:
+      // 1. Creating struct mapping
+      // 2. Find the associated prism if we have one and apply the root for `from` and `to`
+      // 2. If we see any nested struct types (including array),
+      // We treat arrays differently
+
+      a = mapping
+    } yield rootThroughPrism.asExpr match {
+      case '{ $expr: t } =>
+        '{
+          val captureRoot = $expr
+          println(s"[bind]: object ${captureRoot} ")
+          $queue.registerAndInvalidateIfAbsent[t](
+            /* object */ captureRoot,
+            /* sizeOf */ _ => ${ Expr(mapping.sizeInBytes.toInt) },
+            /* write  */ { (root, bb) =>
+              println(s"[bind]: write  ${root} => $bb(${Platforms.pointerOfDirectBuffer(bb)})")
+              mapping.members.map { m =>
+                m.tpe match {
+                  case s: p.Type.Struct => ???
+                  case _ =>
+                    ${
+                      Pickler.putPrimitive('bb, Expr(m.offsetInBytes.toInt), m.tpe, m.select('root.asTerm).asExpr)
+                    }
+                }
+              }
+
+            },
+            /* read   */ (bb, t) =>
+              //
+              println(s"[bind]: read  ${bb}(${Platforms.pointerOfDirectBuffer(bb)}) => $t"),
+            /* cb     */ null
+          )
+        }
     }
 
-//
-
+    ???
   }
 
   def bindCapturesToBuffer(using q: Quoted)(
@@ -580,7 +605,6 @@ object compiletime {
             throw new RuntimeException(
               s"Struct type without definition at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
             )
-
           case (s @ p.Type.Struct(_, _, _), Some(sdef), '{ $ref: t }) =>
             '{
 

@@ -1,11 +1,12 @@
 package polyregion.scala
 
+import cats.syntax.all.*
 import polyregion.ast.{PolyAst as p, *}
 import polyregion.jvm.{compiler as ct, runtime as rt}
 import polyregion.prism.StdLib
-import cats.syntax.all.*
 
 import java.nio.ByteBuffer
+import scala.collection.MapView
 import scala.quoted.*
 
 object Pickler {
@@ -65,7 +66,6 @@ object Pickler {
     case p.Type.Int    => '{ $target.putInt($byteOffset, ${ value.asExprOf[Int] }) }
     case p.Type.Long   => '{ $target.putLong($byteOffset, ${ value.asExprOf[Long] }) }
     case p.Type.Unit   => '{ $target.put($byteOffset, 0.toByte) }
-    case p.Type.Struct =>  
     case x =>
       throw new RuntimeException(
         s"Cannot put ${x.repr} into buffer, it is not a primitive type (source is `${value.show}`)"
@@ -78,60 +78,36 @@ object Pickler {
       members: List[StructMapping.Member[A]]
   )
   object StructMapping {
-    case class Member[A](mut: Boolean, sizeInBytes: Long, offsetInBytes: Long, fromTerm: A, toTerm: A)
+    case class Member[A](tpe: p.Type, mut: Boolean, sizeInBytes: Long, offsetInBytes: Long, select : A => A)
   }
 
   def mkStructMapping(using
       q: Quoted
-  )(root: q.Term, layouts: Map[p.StructDef, ct.Layout]): Result[StructMapping[q.Select]] = {
-
-    // We need to find the actual name of the root's TypeRepr.
-    val rootTpeSymbol = root.tpe.widenTermRefByName.typeSymbol
-    val sourceLUT = StdLib.Mirrors.map(p => p._1.source -> p).toMap
-
-
-    // First, we apply the same prism type replacement logic to get the correct struct def name.
-    // If we can't find a prism, just retype it here.
-    // Note that whatever we found here will be unapplied if we have type arguments.
-    val (unappliedRootSdef) = Compiler.findMatchingClassInHierarchy(symbol, sourceLUT) match {
-       case Some((m, (from, to))) => 
-        // m.struct -> to(q.underlying, value, ???).asTerm //
-        m.struct.success
-        case None                 => 
-          Retyper.structDef0(rootTpeSymbol)
-    }
-
-    // Once we have a name, we need to apply the same name mangling like we do in the compiler.
-    // We then use that name to find the real struct def.
-    val termSdefMonomorphicName = p.Sym(sdef.tpe.monomorphicName)
-
-
-    for {
-   
-    sdef <- reolvedSdef
-    
-
-
-    _ = layouts.find(_._1.name == monomorphicName).getOrElse(???)._2
-      
-     
-
-
-
-    layout
-
-    layout <- layouts.get(sdef).failIfEmpty(s"Unseen sdef ${sdef.repr}, known reprs: ${layouts}")
+  )(
+      sdef: p.StructDef,
+      layouts: MapView[p.StructDef, ct.Layout]
+  ): Result[StructMapping[q.Term]] = for {
+    layout <- layouts
+      .get(sdef)
+      .failIfEmpty(s"Unseen sdef ${sdef.repr}, known reprs: ${layouts}")
     layoutTable = layout.members.map(m => m.name -> m).toMap
     terms <- sdef.members.traverse { case p.StructMember(named, mut) =>
       layoutTable
         .get(named.symbol)
         .map { m =>
-          StructMapping.Member(mut, m.sizeInBytes, m.offsetInBytes, q.Select.unique(root, named.symbol))
+            
+
+//          val select = q.Select.unique(root, named.symbol)
+//          maybePrism match {
+//            case Some((from, to)) => from(q.underlying, select.asExpr).asTerm -> to(q.underlying, select.asExpr, ???).asTerm
+//            case None        =>  select -> select
+//          }
+//
+          StructMapping.Member(named.tpe,  mut, m.sizeInBytes, m.offsetInBytes, q.Select.unique(_, named.symbol))
         }
-        .failIfEmpty(s"Layout ${layout} is missing ${named.repr} from ${sdef.repr}")
+        .failIfEmpty(s"Layout $layout is missing ${named.repr} from ${sdef.repr}")
     }
   } yield StructMapping(sdef, layout.sizeInBytes, terms)
-}
 
   def layoutOf(using q: Quoted) //
   (layouts: Map[p.StructDef, ct.Layout], repr: q.TypeRepr): ct.Layout = {
@@ -140,164 +116,162 @@ object Pickler {
     val monomorphicName = p.Sym(sdef.tpe.monomorphicName)
     layouts.find(_._1.name == monomorphicName).getOrElse(???)._2
   }
- 
 
-  def mutStruct(using q: Quoted)(
-      layouts: Map[p.StructDef, ct.Layout],
-      source: Expr[java.nio.ByteBuffer],
-      dest: Expr[Any],
-      repr: q.TypeRepr
-//    mkStruct: (q.TypeRepr, Expr[java.nio.ByteBuffer], Expr[Int]) => Expr[Any]
-  ): Expr[Unit] = {
-    import q.given
-
-    val sdef   = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
-    val layout = layoutOf(layouts, repr)
-
-    val terms = sdef.members.zip(layout.members).map { (named, m) =>
-      named.tpe match {
-        case s @ p.Type.Struct(_, _, _) =>
-          val ptrToStruct = getPrimitive(source, Expr(m.offsetInBytes.toInt), named.tpe).asExprOf[Long]
-          val size        = Pickler.layoutOf(layouts, q.Select.unique(dest.asTerm, named.symbol).tpe).sizeInBytes.toInt
-
-          // const,
-
-          '{}
-        case _ =>
-          q.Assign(
-            q.Select.unique(dest.asTerm, named.symbol),
-            getPrimitive(source, Expr(m.offsetInBytes.toInt), named.tpe).asTerm
-          ).asExpr
-      }
-    }
-
-    Expr.block(terms, '{})
-
-  }
-
-  def mkStruct(using q: Quoted)(
-      layouts: Map[p.StructDef, ct.Layout],
-      source: Expr[java.nio.ByteBuffer],
-      repr: q.TypeRepr,
-      mkStruct: (q.TypeRepr, Expr[java.nio.ByteBuffer], Expr[Int]) => Expr[Any]
-  ): Expr[Any] = {
-    import q.given
-
-//  val sourceLUT = StdLib.Mirrors.map(p => p._1.source -> p).toMap
-//     val (mirroredSDef, term) = Compiler.findMatchingClassInHierarchy(repr.typeSymbol, sourceLUT) match {
-//       case None                 => sdef     -> value.asTerm
-//       case Some((m, (_, to))) => m.struct -> to(q.underlying, value, ???).asTerm //
-//     }
-
-//     println(s"[putStruct]     repr sdef: ${Retyper.structDef0(repr.typeSymbol).getOrElse(???).repr}")
-//     println(s"[putStruct]   source sdef: ${sdef.repr}")
-//     println(s"[putStruct] mirrored sdef: ${sdef.repr}")
-//     println(term.tpe)
-
-    // if( mutableseq)
-    // val length_ = source.getInt
-    // val data = source.getLong => Ptr,
-
-    // Find out the total size of this struct first, it could be nested arbitrarily but the top level's size must
-    // reflect the total size; this is consistent with C's `sizeof(struct T)`.
-    val sdef = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
+//  def mutStruct(using q: Quoted)(
+//      layouts: Map[p.StructDef, ct.Layout],
+//      source: Expr[java.nio.ByteBuffer],
+//      dest: Expr[Any],
+//      repr: q.TypeRepr
+////    mkStruct: (q.TypeRepr, Expr[java.nio.ByteBuffer], Expr[Int]) => Expr[Any]
+//  ): Expr[Unit] = {
+//    import q.given
+//
+//    val sdef   = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
+//    val layout = layoutOf(layouts, repr)
+//
+//    val terms = sdef.members.zip(layout.members).map { (named, m) =>
+//      named.tpe match {
+//        case s @ p.Type.Struct(_, _, _) =>
+//          val ptrToStruct = getPrimitive(source, Expr(m.offsetInBytes.toInt), named.tpe).asExprOf[Long]
+//          val size        = Pickler.layoutOf(layouts, q.Select.unique(dest.asTerm, named.symbol).tpe).sizeInBytes.toInt
+//
+//          // const,
+//
+//          '{}
+//        case _ =>
+//          q.Assign(
+//            q.Select.unique(dest.asTerm, named.symbol),
+//            getPrimitive(source, Expr(m.offsetInBytes.toInt), named.tpe).asTerm
+//          ).asExpr
+//      }
+//    }
+//
+//    Expr.block(terms, '{})
+//
+//  }
+//
+//  def mkStruct(using q: Quoted)(
+//      layouts: Map[p.StructDef, ct.Layout],
+//      source: Expr[java.nio.ByteBuffer],
+//      repr: q.TypeRepr,
+//      mkStruct: (q.TypeRepr, Expr[java.nio.ByteBuffer], Expr[Int]) => Expr[Any]
+//  ): Expr[Any] = {
+//    import q.given
+//
+////  val sourceLUT = StdLib.Mirrors.map(p => p._1.source -> p).toMap
+////     val (mirroredSDef, term) = Compiler.findMatchingClassInHierarchy(repr.typeSymbol, sourceLUT) match {
+////       case None                 => sdef     -> value.asTerm
+////       case Some((m, (_, to))) => m.struct -> to(q.underlying, value, ???).asTerm //
+////     }
+//
+////     println(s"[putStruct]     repr sdef: ${Retyper.structDef0(repr.typeSymbol).getOrElse(???).repr}")
+////     println(s"[putStruct]   source sdef: ${sdef.repr}")
+////     println(s"[putStruct] mirrored sdef: ${sdef.repr}")
+////     println(term.tpe)
+//
+//    // if( mutableseq)
+//    // val length_ = source.getInt
+//    // val data = source.getLong => Ptr,
+//
+//    // Find out the total size of this struct first, it could be nested arbitrarily but the top level's size must
+//    // reflect the total size; this is consistent with C's `sizeof(struct T)`.
+//    val sdef = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
+////    val layout = layouts(sdef)
+//    val layout = layoutOf(layouts, repr)
+//
+//    val fields = sdef.members.zip(layout.members)
+//    val terms = fields.map { (named, m) =>
+//      named.tpe match {
+//        case s @ p.Type.Struct(_, _, _) =>
+//          mkStruct(
+//            q.TermRef(repr, named.symbol).widenTermRefByName,
+//            source,
+//            Expr(m.offsetInBytes.toInt)
+//          ).asTerm
+//        // val ptrToStruct = getPrimitive(source, Expr(m.offsetInBytes.toInt), p.Type.Long).asTerm
+//        case _ => getPrimitive(source, Expr(m.offsetInBytes.toInt), named.tpe).asTerm
+//      }
+//
+//    }
+//    q.Select
+//      .unique(q.New(q.TypeIdent(repr.typeSymbol)), "<init>")
+//      .appliedToArgs(terms)
+//      .asExpr
+//  }
+//
+//  def putStruct(using q: Quoted)(
+//      layouts: Map[p.StructDef, ct.Layout],
+//      target: Expr[java.nio.ByteBuffer],
+//      byteOffset: Expr[Int],
+//      sdef: p.StructDef,
+//      repr: q.TypeRepr,
+//      value: Expr[Any],
+//      mkStruct: (p.Type.Struct, Expr[Any]) => Expr[Long],
+//      mkArray: (p.Type, Expr[StdLib.MutableSeq[?]]) => Expr[Long]
+//  ) = {
+//
+//    import q.given
+//
+//    val sourceLUT = StdLib.Mirrors.map(p => p._1.source -> p).toMap
+//    println(s"put ${repr.widenTermRefByName} ${repr} ${value}")
+//    val (mirroredSDef, term) = Compiler.findMatchingClassInHierarchy(repr.typeSymbol, sourceLUT) match {
+//      case None                 => sdef     -> value.asTerm
+//      case Some((m, (from, _))) => m.struct -> from(q.underlying, value).asTerm //
+//    }
+//
+//    println(s"[putStruct]     repr sdef: ${Retyper.structDef0(repr.typeSymbol).getOrElse(???).repr}")
+//    println(s"[putStruct]   source sdef: ${sdef.repr}")
+//    println(s"[putStruct] mirrored sdef: ${sdef.repr}")
+//    println(term.tpe)
+//
 //    val layout = layouts(sdef)
-    val layout = layoutOf(layouts, repr)
-
-    val fields = sdef.members.zip(layout.members)
-    val terms = fields.map { (named, m) =>
-      named.tpe match {
-        case s @ p.Type.Struct(_, _, _) =>
-          mkStruct(
-            q.TermRef(repr, named.symbol).widenTermRefByName,
-            source,
-            Expr(m.offsetInBytes.toInt)
-          ).asTerm
-        // val ptrToStruct = getPrimitive(source, Expr(m.offsetInBytes.toInt), p.Type.Long).asTerm
-        case _ => getPrimitive(source, Expr(m.offsetInBytes.toInt), named.tpe).asTerm
-      }
-
-    }
-    q.Select
-      .unique(q.New(q.TypeIdent(repr.typeSymbol)), "<init>")
-      .appliedToArgs(terms)
-      .asExpr
-  }
-
-
-  def putStruct(using q: Quoted)(
-      layouts: Map[p.StructDef, ct.Layout],
-      target: Expr[java.nio.ByteBuffer],
-      byteOffset: Expr[Int],
-      sdef: p.StructDef,
-      repr: q.TypeRepr,
-      value: Expr[Any],
-      mkStruct: (p.Type.Struct, Expr[Any]) => Expr[Long],
-      mkArray: (p.Type, Expr[StdLib.MutableSeq[?]]) => Expr[Long]
-  ) = {
-
-    import q.given
-
-    val sourceLUT = StdLib.Mirrors.map(p => p._1.source -> p).toMap
-    println(s"put ${repr.widenTermRefByName} ${repr} ${value}")
-    val (mirroredSDef, term) = Compiler.findMatchingClassInHierarchy(repr.typeSymbol, sourceLUT) match {
-      case None                 => sdef     -> value.asTerm
-      case Some((m, (from, _))) => m.struct -> from(q.underlying, value).asTerm //
-    }
-
-    println(s"[putStruct]     repr sdef: ${Retyper.structDef0(repr.typeSymbol).getOrElse(???).repr}")
-    println(s"[putStruct]   source sdef: ${sdef.repr}")
-    println(s"[putStruct] mirrored sdef: ${sdef.repr}")
-    println(term.tpe)
-
-    val layout = layouts(sdef)
-    val fields = sdef.members.zip(layout.members)
-
-    println(s"[putStruct] Fields: \n${fields.map((n, m) => s"${n.repr} (${layout})").map("\t" + _).mkString("\n")}")
-
-    val primitiveTuples = (term.asExpr, fields) match {
-      case (
-            '{ $expr: StdLib.MutableSeq[t] },
-            (length @ p.Named(_, p.Type.Int), lengthMember) :: (
-              array @ p.Named(_, p.Type.Array(comp)),
-              arrayMember
-            ) :: Nil
-          ) =>
-        println(s"Found MutableSeq, component = ${Type.show[t]}, tpe=${tpe}, expr = ${expr.show}")
-        List(
-          (lengthMember, length.tpe, q.Select.unique(term, length.symbol).asExpr),
-          (arrayMember, p.Type.Long, mkArray(comp, expr))
-        )
-      case _ =>
-        fields.map { (named, m) =>
-          named.tpe match {
-            case p.Type.Array(comp) =>
-              ??? // Compiler emitted an illegal Array type (from intrinsic.Arr) which cannot appear on it's own!
-            case s @ p.Type.Struct(_, _, _) =>
-              q.Select.unique(term, named.symbol).asExpr match {
-                case '{ $x: t } =>
-                  println(s"Repr: ${q.TypeRepr.of[t].widenTermRefByName}")
-                  (m, p.Type.Long, mkStruct(s, x))
-
-              }
-
-            case _ => (m, named.tpe, q.Select.unique(term, named.symbol).asExpr)
-          }
-        }
-    }
-
-    Expr.block(
-      primitiveTuples.map((member, tpe, expr) =>
-        putPrimitive(
-          target,
-          '{ $byteOffset + ${ Expr(member.offsetInBytes.toInt) } },
-          tpe,
-          expr
-        )
-      ),
-      '{}
-    )
-  }
+//    val fields = sdef.members.zip(layout.members)
+//
+//    println(s"[putStruct] Fields: \n${fields.map((n, m) => s"${n.repr} (${layout})").map("\t" + _).mkString("\n")}")
+//
+//    val primitiveTuples = (term.asExpr, fields) match {
+//      case (
+//            '{ $expr: StdLib.MutableSeq[t] },
+//            (length @ p.Named(_, p.Type.Int), lengthMember) :: (
+//              array @ p.Named(_, p.Type.Array(comp)),
+//              arrayMember
+//            ) :: Nil
+//          ) =>
+//        println(s"Found MutableSeq, component = ${Type.show[t]}, tpe=${tpe}, expr = ${expr.show}")
+//        List(
+//          (lengthMember, length.tpe, q.Select.unique(term, length.symbol).asExpr),
+//          (arrayMember, p.Type.Long, mkArray(comp, expr))
+//        )
+//      case _ =>
+//        fields.map { (named, m) =>
+//          named.tpe match {
+//            case p.Type.Array(comp) =>
+//              ??? // Compiler emitted an illegal Array type (from intrinsic.Arr) which cannot appear on it's own!
+//            case s @ p.Type.Struct(_, _, _) =>
+//              q.Select.unique(term, named.symbol).asExpr match {
+//                case '{ $x: t } =>
+//                  println(s"Repr: ${q.TypeRepr.of[t].widenTermRefByName}")
+//                  (m, p.Type.Long, mkStruct(s, x))
+//
+//              }
+//
+//            case _ => (m, named.tpe, q.Select.unique(term, named.symbol).asExpr)
+//          }
+//        }
+//    }
+//
+//    Expr.block(
+//      primitiveTuples.map((member, tpe, expr) =>
+//        putPrimitive(
+//          target,
+//          '{ $byteOffset + ${ Expr(member.offsetInBytes.toInt) } },
+//          tpe,
+//          expr
+//        )
+//      ),
+//      '{}
+//    )
+//  }
 
   def putAll(using q: Quoted)(
       compiler: ct.Compiler,

@@ -2,26 +2,27 @@ package polyregion.ast.pass
 
 import cats.syntax.all.*
 import polyregion.ast.Traversal.*
-import polyregion.ast.{PolyAst as p, given, *}
-object MonoStructPass extends ProgramPass {
+import polyregion.ast.{PolyAst as p, *, given}
+import polyregion.prism.Prism
 
-  override def apply(program: p.Program, log: Log): (p.Program, Log) = {
+object MonoStructPass extends BoundaryPass[Map[p.Sym, p.Sym]] {
+
+  override def apply(program: p.Program, log: Log): (Map[p.Sym, p.Sym], p.Program, Log) = {
     println(">MonoStructPass")
 
-    val structInFunction: List[p.Type.Struct] =
+    val structsInFunction: List[p.Type.Struct] =
       program.entry
         .collectWhere[p.Type] { case s: p.Type.Struct => s }
         .distinct
 
-    println(s"In f = ${structInFunction} ${program.defs}")
+    println(s"In f = ${structsInFunction} ${program.defs}")
     val monoStructDefs = for {
       sdef   <- program.defs
-      struct <- structInFunction.distinct // XXX this may be empty
+      struct <- structsInFunction // XXX this may be empty
       if struct.name == sdef.name
       table = struct.tpeVars.zip(struct.args).toMap
-      name  = p.Sym(struct.monomorphicName)
     } yield struct -> p.StructDef(
-      name = name,
+      name = p.Sym(struct.monomorphicName),
       reference = false,
       tpeVars = Nil,
       members = sdef.members.modifyAll[p.Type](_.mapLeaf {
@@ -46,25 +47,6 @@ object MonoStructPass extends ProgramPass {
       case a                   => a
     }
 
-//    t.mapNode {
-//      case s: p.Type.Struct =>
-//        println(s"[Rep] ${s.repr} => ${replacementTable.get(s)}")
-//
-//        replacementTable.get(s).map(x => p.Type.Struct(x.name, Nil, Nil)).getOrElse(s)
-//      case x => x
-//    }
-
-    def typeIsNotDeleted(t: p.Type) = t match {
-      case s: p.Type.Struct => monoStructDefs.contains(s)
-      case _                => true
-    }
-
-    // val body = program.entry.body.flatMap(_.mapType(doReplacement(_)))
-
-    // val args     = program.entry.args.map(_.mapType(doReplacement(_)))     // .filter(x => typeIsNotDeleted(x.tpe))
-    // val receiver = program.entry.receiver.map(_.mapType(doReplacement(_))) // .filter(x => typeIsNotDeleted(x.tpe))
-    // val captures = program.entry.captures.map(_.mapType(doReplacement(_)))
-
     val rootStructDefs = monoStructDefs
       .map(_._2) // make sure we handle nested structs
       .map(s => s.copy(members = s.members.modifyAll[p.Type](doReplacement(_))))
@@ -81,6 +63,9 @@ object MonoStructPass extends ProgramPass {
       .flatten
 
     (
+      // Create reverse lookup table for finding the original name of a monomorphic name.
+      // This is required for associating the term prism of a mirror during pickling.
+      replacementTable.map((struct, sdef) => sdef.name -> struct.name),
       p.Program(
         entry = program.entry.modifyAll[p.Type](doReplacement(_)),
         functions = program.functions,

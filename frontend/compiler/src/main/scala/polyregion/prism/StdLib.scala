@@ -269,12 +269,12 @@ object StdLib {
     Functions.values.foreach { case (fn, deps) =>
       println(s"${fn.repr.linesIterator.map("\t" + _).mkString("\n")}")
     }
-    StructDefs2.values.toList
-      .map { case (d, xs) =>
-        s"-> ${d.repr}\n${xs.map(x => s"\t${x.repr}").mkString("\n")}"
-      }
-      .sorted
-      .foreach(println(_))
+//    StructDefs2.values.toList
+//      .map { case (d, xs) =>
+//        s"-> ${d.repr}\n${xs.map(x => s"\t${x.repr}").mkString("\n")}"
+//      }
+//      .sorted
+//      .foreach(println(_))
 
     ()
   }
