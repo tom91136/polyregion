@@ -1205,11 +1205,20 @@ struct EXPORT Return : Stmt::Base {
 } // namespace Stmt
 
 
+struct EXPORT StructMember {
+  Named named;
+  bool isMutable;
+  StructMember(Named named, bool isMutable) noexcept : named(std::move(named)), isMutable(isMutable) {}
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const StructMember &);
+  EXPORT friend bool operator==(const StructMember &, const StructMember &);
+};
+
 struct EXPORT StructDef {
   Sym name;
+  bool isReference;
   std::vector<std::string> tpeVars;
-  std::vector<Named> members;
-  StructDef(Sym name, std::vector<std::string> tpeVars, std::vector<Named> members) noexcept : name(std::move(name)), tpeVars(std::move(tpeVars)), members(std::move(members)) {}
+  std::vector<StructMember> members;
+  StructDef(Sym name, bool isReference, std::vector<std::string> tpeVars, std::vector<StructMember> members) noexcept : name(std::move(name)), isReference(isReference), tpeVars(std::move(tpeVars)), members(std::move(members)) {}
   EXPORT friend std::ostream &operator<<(std::ostream &os, const StructDef &);
   EXPORT friend bool operator==(const StructDef &, const StructDef &);
 };
@@ -1628,6 +1637,9 @@ template <> struct std::hash<polyregion::polyast::Stmt::Cond> {
 };
 template <> struct std::hash<polyregion::polyast::Stmt::Return> {
   std::size_t operator()(const polyregion::polyast::Stmt::Return &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::StructMember> {
+  std::size_t operator()(const polyregion::polyast::StructMember &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::StructDef> {
   std::size_t operator()(const polyregion::polyast::StructDef &) const noexcept;

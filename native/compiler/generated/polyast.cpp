@@ -1144,9 +1144,23 @@ bool Stmt::operator==(const Stmt::Return &l, const Stmt::Return &r) {
   return *l.value == *r.value;
 }
 
+std::ostream &operator<<(std::ostream &os, const StructMember &x) {
+  os << "StructMember(";
+  os << x.named;
+  os << ',';
+  os << x.isMutable;
+  os << ')';
+  return os;
+}
+bool operator==(const StructMember &l, const StructMember &r) { 
+  return l.named == r.named && l.isMutable == r.isMutable;
+}
+
 std::ostream &operator<<(std::ostream &os, const StructDef &x) {
   os << "StructDef(";
   os << x.name;
+  os << ',';
+  os << x.isReference;
   os << ',';
   os << '{';
   if (!x.tpeVars.empty()) {
@@ -1165,7 +1179,7 @@ std::ostream &operator<<(std::ostream &os, const StructDef &x) {
   return os;
 }
 bool operator==(const StructDef &l, const StructDef &r) { 
-  return l.name == r.name && l.tpeVars == r.tpeVars && l.members == r.members;
+  return l.name == r.name && l.isReference == r.isReference && l.tpeVars == r.tpeVars && l.members == r.members;
 }
 
 std::ostream &operator<<(std::ostream &os, const Signature &x) {
@@ -1787,8 +1801,14 @@ std::size_t std::hash<polyregion::polyast::Stmt::Return>::operator()(const polyr
   std::size_t seed = std::hash<decltype(x.value)>()(x.value);
   return seed;
 }
+std::size_t std::hash<polyregion::polyast::StructMember>::operator()(const polyregion::polyast::StructMember &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.named)>()(x.named);
+  seed ^= std::hash<decltype(x.isMutable)>()(x.isMutable) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
 std::size_t std::hash<polyregion::polyast::StructDef>::operator()(const polyregion::polyast::StructDef &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.name)>()(x.name);
+  seed ^= std::hash<decltype(x.isReference)>()(x.isReference) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.tpeVars)>()(x.tpeVars) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.members)>()(x.members) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;

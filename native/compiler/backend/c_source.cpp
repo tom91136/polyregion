@@ -166,11 +166,11 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr, const std::string &k
         return mkRef(x.lhs) + " " + std::string(op) + " " + mkRef(x.rhs);
       },
       [&](const Expr::Cast &x) { return "((" + mkTpe(x.as) + ") " + mkRef(x.from) + ")"; },
-      [&](const Expr::Alias &x) { return mkRef(x.ref); },                                //
-      [&](const Expr::Invoke &x) { return "???"s; },                                     //
+      [&](const Expr::Alias &x) { return mkRef(x.ref); },                            //
+      [&](const Expr::Invoke &x) { return "???"s; },                                 //
       [&](const Expr::Index &x) { return mkRef(x.lhs) + "[" + mkRef(x.idx) + "]"; }, //
-      [&](const Expr::Alloc &x) { return "{/*" + to_string(x) + "*/}"; },                //
-      [&](const Expr::Suspend &x) { return "{/*suspend*/}"s; }                           //
+      [&](const Expr::Alloc &x) { return "{/*" + to_string(x) + "*/}"; },            //
+      [&](const Expr::Suspend &x) { return "{/*suspend*/}"s; }                       //
   );
 }
 
@@ -268,10 +268,10 @@ compiler::Compilation backend::CSource::compileProgram(const Program &program, c
   auto structDefs = mk_string<StructDef>(
       program.defs,
       [&](auto &x) {
-        return std::accumulate(                                                                           //
-                   x.members.begin(), x.members.end(),                                                    //
-                   "typedef struct {"s,                                                                   //
-                   [&](auto &&acc, auto m) { return acc + "\n  " + mkTpe(m.tpe) + " " + m.symbol + ";"; } //
+        return std::accumulate(                                                                                       //
+                   x.members.begin(), x.members.end(),                                                                //
+                   "typedef struct {"s,                                                                               //
+                   [&](auto &&acc, auto m) { return acc + "\n  " + mkTpe(m.named.tpe) + " " + m.named.symbol + ";"; } //
                    ) +
                "\n} " + qualified(x.name) + ";";
       },

@@ -195,6 +195,8 @@ namespace Term {
 [[nodiscard]] EXPORT json named_to_json(const Named &);
 [[nodiscard]] EXPORT Position position_from_json(const json &);
 [[nodiscard]] EXPORT json position_to_json(const Position &);
+[[nodiscard]] EXPORT StructMember structmember_from_json(const json &);
+[[nodiscard]] EXPORT json structmember_to_json(const StructMember &);
 [[nodiscard]] EXPORT StructDef structdef_from_json(const json &);
 [[nodiscard]] EXPORT json structdef_to_json(const StructDef &);
 [[nodiscard]] EXPORT Signature signature_from_json(const json &);

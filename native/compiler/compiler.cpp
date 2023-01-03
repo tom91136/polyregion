@@ -185,7 +185,7 @@ std::vector<compiler::Layout> compiler::layoutOf(const std::vector<polyast::Stru
           auto layout = dataLayout.getStructLayout(structTy);
           std::vector<compiler::Member> members;
           for (size_t i = 0; i < it->second.members.size(); ++i) {
-            members.emplace_back(it->second.members[i],                                   //
+            members.emplace_back(it->second.members[i].named,                             //
                                  layout->getElementOffset(i),                             //
                                  dataLayout.getTypeAllocSize(structTy->getElementType(i)) //
             );

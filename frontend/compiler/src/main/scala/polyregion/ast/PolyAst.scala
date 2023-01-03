@@ -114,7 +114,11 @@ object PolyAst {
   enum Stmt derives MsgPack.Codec {
     case Comment(value: String)
     case Var(name: Named, expr: Option[Expr])
-    case Mut(name: Term, expr: Expr, copy: Boolean)
+    case Mut(
+        name: Term,
+        expr: Expr,
+        copy: Boolean // FIXME do we need this copy thing now that we have value/ref semantics???
+    ) 
     case Update(lhs: Term, idx: Term, value: Term)
     case While(tests: List[Stmt], cond: Term, body: List[Stmt])
     case Break
@@ -123,10 +127,10 @@ object PolyAst {
     case Return(value: Expr)
   }
 
-  case class StructMember(named: Named, mutable: Boolean)
+  case class StructMember(named: Named, isMutable: Boolean) derives MsgPack.Codec
   case class StructDef(           //
       name: Sym,                  //
-      reference: Boolean,     //
+      isReference: Boolean,       //
       tpeVars: List[String],      //
       members: List[StructMember] //
   ) derives MsgPack.Codec
@@ -140,6 +144,7 @@ object PolyAst {
   ) derives MsgPack.Codec
 
   case class Signature(name: Sym, tpeVars: List[String], receiver: Option[Type], args: List[Type], rtn: Type)
+      derives MsgPack.Codec
 
   case class Function(         //
       name: Sym,               //

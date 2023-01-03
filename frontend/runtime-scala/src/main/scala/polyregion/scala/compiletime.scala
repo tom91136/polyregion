@@ -188,7 +188,7 @@ object compiletime {
 
     // Name actual => type actual
     // configs               <- reifyConfigFromTpe[C](using q.underlying)()
-    (captures, prismRefs, prog0, log) <- Compiler.compileExpr(f)
+    (captures, prismRefs, monoMap, prog0, log) <- Compiler.compileExpr(f)
 
     resolveStructDef = (s: p.Type.Struct) => prog0.defs.find(_.name == s.name)
 
@@ -294,7 +294,7 @@ object compiletime {
                 q.Literal(q.IntConstant(i)),
                 None,
                 bindCapturesToBuffer(
-                  prog.defs.map(sd => sd -> layouts(sd.name)).toMap,
+                  prog.defs.map(sd => sd -> (layouts(sd.name), prismRefs.get(sd.name))).toMap,
                   prog.defs.map(s => s.name -> s).toMap,
                   'fnValues,
                   queue,
@@ -336,346 +336,300 @@ object compiletime {
     code
   }
 
-  def bindStruct[t: Type](using
-      q: Quoted
-  )(
-      layouts: Map[p.StructDef, ct.Layout],
+  type PtrMapTpe = _root_.scala.collection.mutable.Map[Any, Long]
+  type ObjMapTpe = _root_.scala.collection.mutable.Map[Long, Any]
+
+  // Basic steps:
+  // 1. Creating struct mapping
+  // 2. Find the associated prism if we have one and apply the root for `from` and `to`
+  // 2. If we see any nested struct types (including array),
+  // We treat arrays differently
+  // Rules:
+  //  To:
+  //  - (val|var) ${inst.a} == null => 0
+  //  - (val|var) ${inst.a} != null => toPtr(   f(q, ${inst.a}: A ): A  )
+  //  From:
+  //  - (val) // no-op
+  //  - (var) $ptr == nullptr => ${inst.a} := null
+  //  - (var) $ptr != nullptr => ${inst.a} := f(q, ${inst.a} ?, fromPtr($ptr)) : A
+
+  def deriveAllRepr(using q: Quoted)(
       lut: Map[p.Sym, p.StructDef],
-      queue: Expr[rt.Device.Queue],
-      ref: Expr[t],
-      struct: p.StructDef
-  ): Expr[Long] = {
-    given Quotes = q.underlying
-    '{
-      println(s"bind struct ${${ Expr(struct.name.repr) }}, object ${$ref}")
-
-      if ($ref == null) 0L
-      else
-        $queue.registerAndInvalidateIfAbsent[t](
-          /* object */ ${ ref.asExprOf[t] },
-          /* sizeOf */ x => ${ Expr(layouts(struct).sizeInBytes.toInt) },
-          /* write  */ (x, bb) => {
-
-            println(
-              s"bind struct ${${ Expr(struct.name.repr) }}, write  $x => $bb(0x${Platforms.pointerOfDirectBuffer(bb).toHexString})"
-            )
-            if (x != null) {
-              ${
-                Pickler.putStruct(
-                  layouts,
-                  'bb,
-                  '{ 0 },
-                  struct,
-                  q.TypeRepr.of[t],
-                  'x,
-                  (s, expr) =>
-                    expr match {
-                      case '{ $es: t } =>
-                        println(s"Do ${s}")
-                        bindStruct(layouts, lut, queue, es, lut(s.name))
-                    },
-                  (s, expr) =>
-                    expr match {
-                      case '{ $xs: StdLib.MutableSeq[v] } =>
-                        '{
-                          println(
-                            s"bind struct ${${ Expr(struct.name.repr) }}, array type ${${ Expr(s.repr) }} => ${$expr}"
-                          )
-                          ${ bindArray[v](layouts, lut, queue, xs, s) }
-                        }
-                    }
-                )
-              }
-            }
-          },
-          /* read   */ (bb, x) => {
-            println(
-              s"bind struct ${${ Expr(struct.name.repr) }}, read (no restore)  $bb(0x${Platforms.pointerOfDirectBuffer(bb).toHexString}) => $x"
-            )
-            ()
-          }, // throw new AssertionError(s"No write-back for struct type " + ${ Expr(struct.repr) }),
-          /* cb     */ null
-        )
-    }
-  }
-
-  def bindArray[t: Type](using
-      q: Quoted
-  )(
-      layouts: Map[p.StructDef, ct.Layout],
-      lut: Map[p.Sym, p.StructDef],
-      queue: Expr[rt.Device.Queue],
-      ref: Expr[StdLib.MutableSeq[t]],
-      component: p.Type
-  ): Expr[Long] = {
-    given Quotes = q.underlying
-
-    def storeElem(
-        dest: Expr[ByteBuffer],
-        src: Expr[StdLib.MutableSeq[t]],
-        index: Expr[Int]
-    ) = {
-      val byteOffset = '{ $index * ${ Expr(Pickler.tpeAsRuntimeTpe(component).sizeInBytes) } }
-      component match {
-        case p.Type.Array(_) => ??? // Nested array should not be a thing given the current scheme!
-        case s @ p.Type.Struct(_, _, _) =>
-          val ptr = bindStruct(layouts, lut, queue, '{ $src($index) }, lut(s.name))
-          Pickler.putPrimitive(dest, byteOffset, p.Type.Long, ptr)
-        case _ =>
-          Pickler.putPrimitive(dest, byteOffset, component, '{ $src($index) })
-      }
-    }
-
-    def restoreElem(
-        src: Expr[ByteBuffer],
-        dest: Expr[StdLib.MutableSeq[t]],
-        index: Expr[Int]
-    ) = {
-      val byteOffset = '{ $index * ${ Expr(Pickler.tpeAsRuntimeTpe(component).sizeInBytes) } }
-      component match {
-        case p.Type.Array(_)            => ??? // Nested array should not be a thing given the current scheme!
-        case s @ p.Type.Struct(_, _, _) =>
-          // val ptr = bindStruct(compiler, opt, lut, queue, '{ $expr(index) }.asTerm, lut(s.name))
-          // Pickler.putPrimitive(target, i, p.Type.Long, ptr)
-
-          // restore from long ptr stored here
-          val ptr  = Pickler.getPrimitive(src, byteOffset, p.Type.Long).asExprOf[Long]
-          val size = Pickler.layoutOf(layouts, q.TypeRepr.of[t]).sizeInBytes.toInt
-
-          // O != null;  O.register... => no-op array restore
-          // O == null:  (don't register, no-op) => ptr => restore [t]
-          //             Pickler.mkStruct(compiler, opt, new ByteBuffer(ptr, SizeOfStruct), q.TypeRepr.of[t])
-
-          // ...
-          // free all malloc allocations after restore
-
-          '{
-
-            val buffer = Platforms.directBufferFromPointer($ptr, ${ Expr(size) })
-            println(s"  Mk buffer = ${buffer}, ptr=0x${$ptr.toHexString}")
-
-            val restored =
-              ${
-
-                def restoreOne(buffer: Expr[ByteBuffer], repr: q.TypeRepr): Expr[Any] = Pickler.mkStruct(
-                  layouts,
-                  buffer,
-                  repr,
-                  (tpeRepr, buffer, offset) =>
-                    restoreOne(
-                      '{
-                        Platforms.directBufferFromPointer(
-                          ${ Pickler.getPrimitive(buffer, offset, p.Type.Long).asExprOf[Long] },
-                          ${ Expr(Pickler.layoutOf(layouts, tpeRepr).sizeInBytes.toInt) }
-                        )
-                      },
-                      tpeRepr
-                    )
-                )
-
-                restoreOne('buffer, q.TypeRepr.of[t]).asExprOf[t]
-              }
-            println(
-              s"bind array: restore [${$index}] (skipping struct type ${${ Expr(s.repr) }} ptr is =${$ptr}, ${buffer} = $restored)"
-            )
-            $dest($index) = restored
-
-          }
-        case _ =>
-          '{
-            $dest($index) = ${ Pickler.getPrimitive(src, byteOffset, component).asExprOf[t] }
-
-          }
-
-      }
-    }
-
-    '{
-      val xs = $ref
-      println(s"bind array: object ${xs} ")
-      $queue.registerAndInvalidateIfAbsent[StdLib.MutableSeq[t]](
-        /* object */ xs,
-        /* sizeOf */ x => ${ Expr(Pickler.tpeAsRuntimeTpe(component).sizeInBytes) } * x.length_,
-        /* write  */ { (xs, bb) =>
-          println(s"bind array: write  ${xs} => $bb(${Platforms.pointerOfDirectBuffer(bb)})")
-          var i = 0
-          while (i < xs.length_) {
-            ${ storeElem('bb, 'xs, 'i) }
-            i += 1
-          }
-        },
-        /* read   */ (bb, xs) => {
-          println(s"bind array: read  ${bb}(${Platforms.pointerOfDirectBuffer(bb)}) => $xs")
-          var i = 0
-          while (i < xs.length_) {
-            println(s"do restore ${i}")
-            ${ restoreElem('bb, 'xs, 'i) }
-            i += 1
-          }
-        },
-        /* cb     */ null
-      )
-    }
-  }
-
-  def bindRead(using q: Quoted)(
-      layouts: Map[p.StructDef, (ct.Layout, Option[polyregion.prism.TermPrism[Any, Any]])],
-      lut: Map[p.Sym, p.StructDef],
-      root: q.Term,
       sdef: p.StructDef,
-      input: Expr[Long],
-  ): Expr[Unit] = (for {
-    mapping         <- Pickler.mkStructMapping(sdef, layouts.view.mapValues(_._1))
-    (_, maybePrism) <- layouts.get(sdef).failIfEmpty(s"Missing def ${sdef.repr}")
-    rootThroughPrism = maybePrism match {
-      case None          => ???
-      case Some((_, to)) => to(q.underlying, root.asExpr, _).asTerm
-    }
-    given Quotes = q.underlying
-  } yield '{
-
-    val root   = ${ rootThroughPrism.asExpr }
-    val buffer = ByteBuffer.allocate(mapping.sizeInBytes.toInt)
-    val ptr    = Platforms.pointerOfDirectBuffer(buffer)
-    //
-
-  }).fold(e => throw new CompilerException(s"Cannot bind read for ${root.show} (sdef=${sdef.repr})", e), identity)
-
-  def bindWrite(using q: Quoted)(
-      layouts: Map[p.StructDef, (ct.Layout, Option[polyregion.prism.TermPrism[Any, Any]])],
-      lut: Map[p.Sym, p.StructDef],
-      root: q.Term,
-      sdef: p.StructDef
-  ): Expr[Long] = (for {
-    mapping         <- Pickler.mkStructMapping(sdef, layouts.view.mapValues(_._1))
-    (_, maybePrism) <- layouts.get(sdef).failIfEmpty(s"Missing def ${sdef.repr}")
-    rootThroughPrism = maybePrism match {
-      case None            => root
-      case Some((from, _)) => from(q.underlying, root.asExpr).asTerm
-    }
-    given Quotes = q.underlying
-  } yield '{
-    val root   = ${ rootThroughPrism.asExpr }
-    val buffer = ByteBuffer.allocate(mapping.sizeInBytes.toInt)
-    val ptr    = Platforms.pointerOfDirectBuffer(buffer)
-    println(s"[bind]: object  ${root} => $buffer(0x${ptr.toHexString})")
-    ${
-      Varargs(mapping.members.map { m =>
-        val offset = Expr(m.offsetInBytes.toInt)
-        ('root, m.tpe) match {
-          case ('{ $expr: StdLib.MutableSeq[t] }, p.Type.Array(component)) =>
-            '{
-              val elementSizeInBytes = ${ Expr(Pickler.tpeAsRuntimeTpe(component).sizeInBytes()) }
-              val arrayBuffer        = ByteBuffer.allocate(elementSizeInBytes * $expr.length_)
-              val arrayPtr           = Platforms.pointerOfDirectBuffer(buffer)
-              println(
-                s"[bind]: array  [${$expr.length_} * ${${ Expr(component.repr) }} ]${$expr.data} => $arrayBuffer(0x${arrayPtr.toHexString})"
-              )
-              var i = 0
-              while (i < $expr.length_) {
-                ${
-                  component match {
-                    case p.Type.Struct(name, _, _) =>
-                      '{
-                        val ptr = ${ bindWrite(layouts, lut, '{ $expr(i) }.asTerm, lut(name)) }
-                        ${ Pickler.putPrimitive('buffer, offset, p.Type.Long, 'ptr) }
-                      }
-                    case t =>
-                      Pickler.putPrimitive('arrayBuffer, '{ elementSizeInBytes * i }, t, '{ $expr(i) })
-                  }
-                }
-                i += 1
-              }
-              ${ Pickler.putPrimitive('buffer, offset, p.Type.Long, 'arrayPtr) }
-            }
-          case (_, p.Type.Struct(name, _, _)) =>
-            '{
-              val ptr = if (root == null) 0L else ${ bindWrite(layouts, lut, m.select('root.asTerm), lut(name)) }
-              ${ Pickler.putPrimitive('buffer, offset, p.Type.Long, 'ptr) }
-            }
-          case (_, _) => Pickler.putPrimitive('buffer, offset, m.tpe, m.select('root.asTerm).asExpr)
-        }
-      })
-    }
-    ptr
-  }).fold(e => throw new CompilerException(s"Cannot bind write for ${root.show} (sdef=${sdef.repr})", e), identity)
-
-  def insertS(using q: Quoted)(
-      layouts: Map[p.StructDef, (ct.Layout, Option[polyregion.prism.TermPrism[Any, Any]])],
-      lut: Map[p.Sym, p.StructDef],
-      queue: Option[Expr[rt.Device.Queue]],
-      root: q.Term,
-      sdef: p.StructDef
-  ): Expr[Long] = {
-
-    // Basic steps:
-    // 1. Creating struct mapping
-    // 2. Find the associated prism if we have one and apply the root for `from` and `to`
-    // 2. If we see any nested struct types (including array),
-    // We treat arrays differently
-    // Rules:
-    //  To:
-    //  - (val|var) ${inst.a} == null => 0
-    //  - (val|var) ${inst.a} != null => toPtr(   f(q, ${inst.a}: A ): A  )
-    //  From:
-    //  - (val) // no-op
-    //  - (var) $ptr == nullptr => ${inst.a} := null
-    //  - (var) $ptr != nullptr => ${inst.a} := f(q, ${inst.a} ?, fromPtr($ptr)) : A
-
-    given Quotes = q.underlying
-
-    for {
-      mapping         <- Pickler.mkStructMapping(sdef, layouts.view.mapValues(_._1))
-      (_, maybePrism) <- layouts.get(sdef).failIfEmpty(s"Missing def ${sdef.repr}")
-      rootThroughPrism = maybePrism match {
-        case None             => root
-        case Some((from, to)) => from(q.underlying, root.asExpr).asTerm
+      repr: q.TypeRepr,
+      added: Set[p.Sym] = Set()
+  ): List[(p.StructDef, q.TypeRepr)] = {
+    val added0 = added + sdef.name
+    (sdef, repr.widenTermRefByName) :: sdef.members.flatMap(
+      _.named match {
+        case (p.Named(_, p.Type.Struct(name, _, _))) if added0.contains(name) => Nil
+        case (p.Named(member, p.Type.Struct(name, _, _))) =>
+          deriveAllRepr(lut, lut(name), q.TermRef(repr, member), added0)
+        case _ => Nil
       }
-    } yield rootThroughPrism.asExpr match {
+    )
+  }
 
-      case '{ $expr: StdLib.MutableSeq[t] } =>
+  def mkMethodSym(using q: Quoted)(name: String, rtn: q.TypeRepr, args: (String, q.TypeRepr)*) = q.Symbol.newMethod(
+    q.Symbol.spliceOwner,
+    name,
+    q.MethodType(args.map(_._1).toList)(paramInfosExp = _ => args.map(_._2).toList, resultTypeExp = _ => rtn)
+  )
 
-      case '{ $expr: t } =>
-        '{
-          val captureRoot = $expr
-          println(s"[bind]: object ${captureRoot} ")
+  def mkMethodDef(using q: Quoted)(sym: q.Symbol)(impl: PartialFunction[List[q.Tree], q.Term]) = q.DefDef(
+    sym,
+    {
+      case (argList0 :: Nil) =>
+        impl.lift(argList0).fold(q.report.errorAndAbort(s"Definition is not defined for input ${argList0}"))(Some(_))
+      case bad => q.report.errorAndAbort(s"Unexpected argument in method body: expected ${sym.signature}, got ${bad}")
+    }
+  )
 
-          $queue.registerAndInvalidateIfAbsent[t](
-            /* object */ captureRoot,
-            /* sizeOf */ _ => ${ Expr(mapping.sizeInBytes.toInt) },
-            /* write  */ { (root, bb) =>
-              println(s"[bind]: write  ${root} => $bb(${Platforms.pointerOfDirectBuffer(bb)})")
-              mapping.members.map { m =>
-                m.tpe match {
-                  case s: p.Type.Struct =>
-                    val sdef = lut(s.name)
+  def generateAll(using q: Quoted)(
+      layouts: Map[p.StructDef, (ct.Layout, Option[polyregion.prism.TermPrism[Any, Any]])],
+      lut: Map[p.Sym, p.StructDef],
+      sdef: p.StructDef,
+      repr: q.TypeRepr
+  )(root: Expr[Any], ptrMap: Expr[PtrMapTpe]) = {
+    given Quotes = q.underlying
 
-                    m.select('root.asTerm).asExpr
+    val sdefToRepr = deriveAllRepr(lut, sdef, repr).toMap
 
-                    Pickler.putPrimitive('bb, Expr(m.offsetInBytes.toInt), p.Type.Long, ???)
+    val writeReadSymbols = sdefToRepr.map((sdef, repr) =>
+      sdef -> (mkMethodSym(
+        s"write_${sdef.name.repr}",
+        q.TypeRepr.of[Long],
+        "root"   -> repr,
+        "ptrMap" -> q.TypeRepr.of[PtrMapTpe]
+      ), mkMethodSym(
+        s"read_${sdef.name.repr}",
+        repr,
+        "ptr"    -> q.TypeRepr.of[Long],
+        "ptrMap" -> q.TypeRepr.of[PtrMapTpe],
+        "objMap" -> q.TypeRepr.of[ObjMapTpe]
+      ), mkMethodSym(
+        s"update_${sdef.name.repr}",
+        q.TypeRepr.of[Long],
+        "root"   -> repr,
+        "ptr"    -> q.TypeRepr.of[Long],
+        "ptrMap" -> q.TypeRepr.of[PtrMapTpe],
+        "objMap" -> q.TypeRepr.of[ObjMapTpe]
+      ))
+    )
 
-                    ???
-                  case _ =>
-                    ${
-                      Pickler.putPrimitive('bb, Expr(m.offsetInBytes.toInt), m.tpe, m.select('root.asTerm).asExpr)
-                    }
-                }
-              }
+    def allocateBuffer(size: Expr[Int]) = '{ ByteBuffer.allocateDirect($size).order(ByteOrder.nativeOrder()) }
 
-            },
-            /* read   */ (bb, t) =>
-              //
-              println(s"[bind]: read  ${bb}(${Platforms.pointerOfDirectBuffer(bb)}) => $t"),
-            /* cb     */ null
-          )
+    def callWrite(name: p.Sym, root: q.Term, ptrMap: Expr[PtrMapTpe]) =
+      q.Apply(q.Ref(writeReadSymbols(lut(name))._1), List(root, ptrMap.asTerm)).asExprOf[Long]
+
+    def callRead(name: p.Sym, root: q.Term, ptr: Expr[Long], ptrMap: Expr[PtrMapTpe], objMap: Expr[ObjMapTpe]) =
+      q.Apply(q.Ref(writeReadSymbols(lut(name))._2), List(root, ptr.asTerm, ptrMap.asTerm, objMap.asTerm)).asExpr
+
+    def callUpdate(name: p.Sym, root: q.Term, ptr: Expr[Long], ptrMap: Expr[PtrMapTpe], objMap: Expr[ObjMapTpe]) =
+      q.Apply(q.Ref(writeReadSymbols(lut(name))._3), List(root, ptr.asTerm, ptrMap.asTerm, objMap.asTerm))
+        .asExprOf[Unit]
+
+    def writeArray[t: Type](expr: Expr[StdLib.MutableSeq[t]], comp: p.Type, ptrMap: Expr[PtrMapTpe]): Expr[Long] = {
+      val elementSizeInBytes = Pickler.tpeAsRuntimeTpe(comp).sizeInBytes()
+      '{
+        val arrBuffer = ${ allocateBuffer('{ ${ Expr(elementSizeInBytes) } * $expr.length_ }) }
+        val arrPtr    = Platforms.pointerOfDirectBuffer(arrBuffer)
+        println(
+          s"[bind]: array  [${$expr.length_} * ${${ Expr(comp.repr) }}]${$expr.data} => $arrBuffer(0x${arrPtr.toHexString})"
+        )
+        var i = 0
+        while (i < $expr.length_) {
+          ${
+            val elementOffset = '{ ${ Expr(elementSizeInBytes) } * i }
+            comp match {
+              case p.Type.Struct(name, _, _) =>
+                val ptr = callWrite(name, '{ $expr(i) }.asTerm, ptrMap)
+                Pickler.writePrim('arrBuffer, elementOffset, p.Type.Long, ptr)
+              case t =>
+                Pickler.writePrim('arrBuffer, elementOffset, t, '{ $expr(i) })
+            }
+          }
+          i += 1
         }
+        arrPtr
+      }
     }
 
-    ???
+    def writeMapping[t: Type](root: Expr[t], ptrMap: Expr[PtrMapTpe], mapping: Pickler.StructMapping[q.Term]) = '{
+      val buffer = ${ allocateBuffer(Expr(mapping.sizeInBytes.toInt)) }
+      val ptr    = Platforms.pointerOfDirectBuffer(buffer)
+      println(s"[bind]: object  ${$root} => $buffer(0x${ptr.toHexString})")
+      ${
+        Varargs(mapping.members.map { m =>
+          val memberOffset = Expr(m.offsetInBytes.toInt)
+          (root, m.tpe) match {
+            case ('{ $seq: StdLib.MutableSeq[t] }, p.Type.Array(comp)) =>
+              val ptr = writeArray[t](seq, comp, ptrMap)
+              Pickler.writePrim('buffer, memberOffset, p.Type.Long, ptr)
+            case (_, p.Type.Struct(name, _, _)) =>
+              val ptr = callWrite(name, m.select(root.asTerm), ptrMap)
+              Pickler.writePrim('buffer, memberOffset, p.Type.Long, ptr)
+            case (_, _) =>
+              Pickler.writePrim('buffer, memberOffset, m.tpe, m.select(root.asTerm).asExpr)
+          }
+        })
+      }
+      $ptrMap += ($root -> ptr)
+      ptr
+    }
+
+    def readArray[t: Type](
+        seq: Expr[StdLib.MutableSeq[t]],
+        comp: p.Type,
+        ptrMap: Expr[PtrMapTpe],
+        objMap: Expr[ObjMapTpe],
+        memberOffset: Expr[Int],
+        buffer: Expr[ByteBuffer],
+        mapping: Pickler.StructMapping[q.Term]
+    ): Expr[Unit] = {
+      val elementSizeInBytes = Pickler.tpeAsRuntimeTpe(comp).sizeInBytes()
+      '{
+        val arrayLen = ${
+          mapping.members.headOption match {
+            case Some(lengthMember) if lengthMember.tpe == p.Type.Int =>
+              Pickler
+                .readPrim(buffer, Expr(lengthMember.offsetInBytes.toInt), lengthMember.tpe)
+                .asExprOf[Int]
+            case _ =>
+              q.report.errorAndAbort(s"Illegal structure while encoding read for member ${mapping} ")
+          }
+        }
+        val arrPtr    = ${ Pickler.readPrim(buffer, memberOffset, p.Type.Long).asExprOf[Int] }
+        val arrBuffer = Platforms.directBufferFromPointer(arrPtr, ${ Expr(elementSizeInBytes) } * arrayLen)
+        var i         = 0
+        while (i < arrayLen) {
+          $seq(i) = ${
+            val elementOffset = '{ ${ Expr(elementSizeInBytes) } * i }
+            comp match {
+              case p.Type.Struct(name, _, _) =>
+                val arrElemPtr = Pickler.readPrim('arrBuffer, elementOffset, p.Type.Long).asExprOf[Long]
+                callRead(name, '{ $seq(i) }.asTerm, arrElemPtr, ptrMap, objMap).asExprOf[t]
+              case t =>
+                Pickler.readPrim('arrBuffer, elementOffset, t).asExprOf[t]
+            }
+          }
+          i += 1
+        }
+      }
+    }
+
+    def readMapping[t: Type](
+        root: Expr[t],
+        ptr: Expr[Long],
+        ptrMap: Expr[PtrMapTpe],
+        objMap: Expr[ObjMapTpe],
+        mapping: Pickler.StructMapping[q.Term]
+    ) = '{
+      val buffer = Platforms.directBufferFromPointer($ptr, ${ Expr(mapping.sizeInBytes.toInt) })
+      println(s"[bind]: object  ${$root} <- $buffer(0x${$ptr.toHexString})")
+      ${
+        Varargs(
+          mapping.members.map { m =>
+            val memberOffset = Expr(m.offsetInBytes.toInt)
+            (root, m.tpe) match {
+              case ('{ $seq: StdLib.MutableSeq[t] }, p.Type.Array(comp)) =>
+                readArray[t](seq, comp, ptrMap, objMap, memberOffset, 'buffer, mapping)
+              case (_, p.Type.Struct(name, _, _)) =>
+                val structPtr = Pickler.readPrim('buffer, memberOffset, p.Type.Long).asExprOf[Long]
+                val select    = m.select(root.asTerm)
+                if (m.mut) {
+                  q.Assign(m.select(root.asTerm), callRead(name, select, structPtr, ptrMap, objMap).asTerm)
+                    .asExprOf[Unit]
+                } else {
+                  callUpdate(name, select, structPtr, ptrMap, objMap)
+                }
+              case (_, _) =>
+                if (m.mut) {
+                  q.Assign(m.select(root.asTerm), Pickler.readPrim('buffer, memberOffset, m.tpe).asTerm).asExprOf[Unit]
+                } else '{ () } // otherwise no-op
+            }
+          }
+        )
+      }
+
+    }
+
+    val (writeDefs, readDefs, updateDefs) = writeReadSymbols.toList
+      .map((sdef, x) => Pickler.mkStructMapping(sdef, layouts) -> x)
+      .map { case (mapping, (writeSymbol, readSymbol, updateSymbol)) =>
+        val writeMethod = mkMethodDef(writeSymbol) { case List(root: q.Term, ptrMap: q.Term) =>
+          (mapping.write(root).asExpr, ptrMap.asExpr) match {
+            case ('{ $expr: t }, '{ $ptrMap: PtrMapTpe }) =>
+              '{
+                val root = $expr
+                $ptrMap.get(root) match {
+                  case Some(existing)       => existing
+                  case None if root == null => $ptrMap += (root -> 0); 0
+                  case None                 => ${ writeMapping('root, ptrMap, mapping) }
+                }
+              }.asTerm.changeOwner(writeSymbol)
+          }
+        }
+        val readMethod = mkMethodDef(readSymbol) {
+          case List(root: q.Term, ptr: q.Term, ptrMap: q.Term, objMap: q.Term) =>
+            (mapping.write(root).asExpr, ptr.asExpr, ptrMap.asExpr, objMap.asExpr) match {
+              case ('{ $rootExpr: t | Null }, '{ $ptrExpr: Long }, '{ $ptrMap: PtrMapTpe }, '{ $objMap: ObjMapTpe }) =>
+                '{
+                  ($ptrMap.get($rootExpr), $ptrExpr) match {
+                    case (_, 0) => null // object reassignment for var to null
+                    case (Some(writePtr), readPtr) if writePtr == readPtr => // same ptr, do the update
+                      ${ readMapping(rootExpr, 'readPtr, ptrMap, objMap, mapping) }; $rootExpr
+                    case (Some(writePtr), readPtr) if writePtr != readPtr => // object reassignment for var
+                      // Make sure we update the old writePtr (possibly orphaned, unless reassigned somewhere else) first.
+                      // This is to make sure modified object without a root (e.g through reassignment) is corrected updated.
+                      ${ callUpdate(sdef.name, rootExpr.asTerm, 'writePtr, ptrMap, objMap) }
+                      // Now, readPtr is either a new allocation or a an existing one, possibly shared.
+                      // We check that it hasn't already been read/updated yet (the object may be recursive) and proceed to
+                      // create the object.
+                      $objMap.get(readPtr) match {
+                        case Some(existing) => existing // Existing allocation found, use it.
+                        case None           => ()
+                      }
+                    case (None, readPtr) => // object not previously written, fail
+                      throw new RuntimeException(
+                        s"Val root object ${$rootExpr} was not previously written, cannot restore from to 0x${readPtr.toHexString}"
+                      )
+                  }
+                }.asTerm.changeOwner(readSymbol)
+            }
+        }
+        val updateMethod = mkMethodDef(updateSymbol) {
+          case List(root: q.Term, ptr: q.Term, ptrMap: q.Term, objMap: q.Term) =>
+            (mapping.write(root).asExpr, ptr.asExpr, ptrMap.asExpr, objMap.asExpr) match {
+              case ('{ $rootExpr: t }, '{ $ptrExpr: Long }, '{ $ptrMap: PtrMapTpe }, '{ $objMap: ObjMapTpe }) =>
+                '{
+                  ($ptrMap.get($rootExpr), $ptrExpr) match {
+                    case (Some(0), 0) => () // was null, still null, no-op
+                    case (Some(writePtr), readPtr) if writePtr == readPtr => // same ptr, do the update
+                      ${ readMapping(rootExpr, 'readPtr, ptrMap, objMap, mapping) }
+                      $objMap += (readPtr -> $rootExpr)
+                    case (Some(writePtr), readPtr) if writePtr != readPtr => // object reassignment for val, fail
+                      throw new RuntimeException(
+                        s"Cannot update immutable val, setting ${$rootExpr} (0x${writePtr.toHexString}) to 0x${readPtr.toHexString}"
+                      )
+                    case (None, readPtr) => // object not previously written, fail
+                      throw new RuntimeException(
+                        s"Val root object ${$rootExpr} was not previously written, cannot restore from to 0x${readPtr.toHexString}"
+                      )
+                  }
+                }.asTerm.changeOwner(updateSymbol)
+            }
+        }
+        //
+        (writeMethod, readMethod, updateMethod)
+      }
+      .unzip3
+
+    q.Block(writeDefs ::: readDefs ::: updateDefs, callWrite(sdef.name, root.asTerm, ptrMap).asTerm)
   }
 
   def bindCapturesToBuffer(using q: Quoted)(
-      layouts: Map[p.StructDef, ct.Layout],
+      layouts: Map[p.StructDef, (ct.Layout, Option[polyregion.prism.TermPrism[Any, Any]])],
       lut: Map[p.Sym, p.StructDef],
       target: Expr[ByteBuffer],
       queue: Expr[rt.Device.Queue],
@@ -695,20 +649,14 @@ object compiletime {
               s"Struct type without definition at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
             )
           case (s @ p.Type.Struct(_, _, _), Some(sdef), '{ $ref: t }) =>
-            '{
+            val rtn = generateAll(layouts, lut, sdef, ref.asTerm.tpe)(
+              ref,
+              '{ _root_.scala.collection.mutable.Map[Any, Long]() }
+            ).asExpr
 
-              println(s">>> ${${ Expr(s.repr) }}")
+            Pickler.writePrim(target, Expr(byteOffset), p.Type.Long, rtn)
 
-              ${
-                Pickler.putPrimitive(
-                  target,
-                  Expr(byteOffset),
-                  p.Type.Long,
-                  bindStruct[t](layouts, lut, queue, ref, sdef)
-                )
-              }
-            }
-          case (t, None, '{ $ref: t }) => Pickler.putPrimitive(target, Expr(byteOffset), t, ref)
+          case (t, None, '{ $ref: t }) => Pickler.writePrim(target, Expr(byteOffset), t, ref)
           case (t, _, _) =>
             throw new RuntimeException(
               s"Unexpected type ${t.repr} at parameter boundary: repr=${ref.show} name=${name.repr}"

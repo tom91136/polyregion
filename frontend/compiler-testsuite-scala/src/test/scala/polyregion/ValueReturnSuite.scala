@@ -4,6 +4,7 @@ import polyregion.scala.compiletime.*
 
 import _root_.scala.compiletime.*
 import _root_.scala.reflect.ClassTag
+import _root_.scala.collection.mutable.ListBuffer
 
 class ValueReturnSuite extends BaseSuite {
 
@@ -54,24 +55,28 @@ class ValueReturnSuite extends BaseSuite {
 //  }
 
   assertOffloadEffect {
+
     class MyCls {
       var fieldA = 10
     }
+
     var a = new MyCls
 
     class MyBox {
       var value = a
     }
+
     val box = new MyBox
 
+    val m = ListBuffer(1)
+    // val m = new polyregion.ValueReturnSuite#MyCls
     offload0 {
       val b = new MyCls
-      b.fieldA = 42
+      b.fieldA = 42 + m(0)
       box.value = b
     }
-    assertEquals(box.value.fieldA, 42)
+    assertEquals(box.value.fieldA, 43)
   }
-
 
   // assert values survives round trip
 

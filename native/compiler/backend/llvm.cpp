@@ -57,13 +57,13 @@ static constexpr int64_t nIntMax(uint64_t bits) { return (int64_t(1) << (bits - 
 Pair<llvm::StructType *, LLVM::AstTransformer::StructMemberIndexTable>
 LLVM::AstTransformer::mkStruct(const StructDef &def) {
   std::vector<llvm::Type *> types(def.members.size());
-  std::transform(def.members.begin(), def.members.end(), types.begin(), [&](const Named &n) {
-    auto tpe = mkTpe(n.tpe);
+  std::transform(def.members.begin(), def.members.end(), types.begin(), [&](const StructMember &n) {
+    auto tpe = mkTpe(n.named.tpe);
     return tpe->isStructTy() ? B.getPtrTy() : tpe;
   });
   LLVM::AstTransformer::StructMemberIndexTable table;
   for (size_t i = 0; i < def.members.size(); ++i)
-    table[def.members[i].symbol] = i;
+    table[def.members[i].named.symbol] = i;
   return {llvm::StructType::create(C, types, qualified(def.name)), table};
 }
 
@@ -948,7 +948,7 @@ void LLVM::AstTransformer::addDefs(const std::vector<StructDef> &defs) {
     std::copy_if( //
         defsWithDependencies.begin(), defsWithDependencies.end(), std::back_inserter(zeroDeps), [&](auto &def) {
           return std::all_of(def.members.begin(), def.members.end(), [&](auto &m) {
-            if (auto s = get_opt<Type::Struct>(m.tpe); s) return structTypes.find(s->name) != structTypes.end();
+            if (auto s = get_opt<Type::Struct>(m.named.tpe); s) return structTypes.find(s->name) != structTypes.end();
             else
               return true;
           });
@@ -1141,7 +1141,7 @@ std::vector<compiler::Layout> LLVM::resolveLayouts(const std::vector<StructDef> 
       auto layout = dataLayout.getStructLayout(structTy);
       std::vector<compiler::Member> members;
       for (size_t i = 0; i < it->second.members.size(); ++i) {
-        members.emplace_back(it->second.members[i],                                   //
+        members.emplace_back(it->second.members[i].named,                                   //
                              layout->getElementOffset(i),                             //
                              dataLayout.getTypeAllocSize(structTy->getElementType(i)) //
         );

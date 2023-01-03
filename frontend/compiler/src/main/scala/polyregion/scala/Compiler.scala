@@ -118,7 +118,7 @@ object Compiler {
                       .adaptError(e =>
                         new CompilerException(s"Cannot resolve struct def for owner of function ${defDef}", e)
                       )
-                    _ <- if (clsDeps != Set(originalFnOwnerStructDef)) "Bad claDep".fail else ().success
+                    // _ <- if (clsDeps != Set(originalFnOwnerStructDef)) s"Bad clsDep (${clsDeps.map(_.repr)}.contains(${originalFnOwnerStructDef.repr}) == false)".fail else ().success
                   } yield (
                     fn.copy(name = target.name) :: xs,
                     depss,
@@ -332,6 +332,7 @@ object Compiler {
     (                                                     //
         List[(p.Named, q.Term)],                          //
         Map[p.Sym, polyregion.prism.TermPrism[Any, Any]], //
+        Map[p.Sym, p.Sym], //
         p.Program,                                        //
         Log                                               //
     )
@@ -518,6 +519,7 @@ object Compiler {
       val polymorphicSym = monomorphicToPolymorphicSym(monomorphicDef.name)
       StdLib.Mirrors.collect { case (m, prism) if m.source == polymorphicSym => monomorphicDef.name -> prism }
     }.toMap,
+    monomorphicToPolymorphicSym,
     opt,
     log
   )

@@ -8,18 +8,18 @@ import _root_.scala.quoted.Type
 package object prism {
 
   type TermPrism[A, B] = (
-    
-    (Quotes, Expr[A]) => Expr[B]
-    , 
-    
-    (Quotes, Expr[A], Expr[B]) => Expr[A]
-    )
-  type Prism           = (polyregion.ast.PolyAst.Mirror, TermPrism[Any, Any])
+      (Quotes, Expr[A]) => Expr[B],
+      (Quotes, Expr[A], Expr[B]) => Expr[A]
+  )
+  type Prism = (polyregion.ast.PolyAst.Mirror, TermPrism[Any, Any])
 
-  class WitnessK[A <: Any, B <: Any](val f: (Quotes, Expr[A]) => Expr[B], val g: (Quotes, Expr[A], Expr[B]) => Expr[A]) {
-    // def unsafePrism: TermPrism[Any, Any] = (f.asInstanceOf[Expr[Any => Any]], g.asInstanceOf[Expr[(Any, Any) => Any]])
-
-    def unsafePrism : TermPrism[A,B] = (f,g)
+  class WitnessK[A <: Any, B <: Any](
+      val f: (Quotes, Expr[A]) => Expr[B],
+      val g: (Quotes, Expr[A], Expr[B]) => Expr[A]
+  ) {
+    def unsafePrism: TermPrism[Any, Any] =
+      (f.asInstanceOf[(Quotes, Expr[Any]) => Expr[Any]], g.asInstanceOf[(Quotes, Expr[Any], Expr[Any]) => Expr[Any]])
+    // def unsafePrism : TermPrism[A,B] = (f,g)
   }
 
   // A => B

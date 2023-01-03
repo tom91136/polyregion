@@ -72,7 +72,7 @@ object Retyper {
                 Some(
                   p.StructMember(
                     named = p.Named(field.name, t),
-                    mutable = d.symbol.flags.is(q.Flags.Mutable)
+                  isMutable = d.symbol.flags.is(q.Flags.Mutable)
                   )
                 )
               }

@@ -39,7 +39,7 @@ object Pickler {
     case illegal                => throw new RuntimeException(s"tpeAsRuntimeTpe: Illegal $illegal")
   }
 
-  def getPrimitive(using q: Quotes) //
+  def readPrim(using q: Quotes) //
   (source: Expr[java.nio.ByteBuffer], byteOffset: Expr[Int], tpe: p.Type): Expr[Any] = tpe match {
     case p.Type.Float  => '{ $source.getFloat($byteOffset) }
     case p.Type.Double => '{ $source.getDouble($byteOffset) }
@@ -55,7 +55,7 @@ object Pickler {
 
   }
 
-  def putPrimitive(using q: Quotes) //
+  def writePrim(using q: Quotes) //
   (target: Expr[java.nio.ByteBuffer], byteOffset: Expr[Int], tpe: p.Type, value: Expr[Any]): Expr[Unit] = tpe match {
     case p.Type.Float  => '{ $target.putFloat($byteOffset, ${ value.asExprOf[Float] }) }
     case p.Type.Double => '{ $target.putDouble($byteOffset, ${ value.asExprOf[Double] }) }
@@ -75,39 +75,41 @@ object Pickler {
   case class StructMapping[A](
       source: p.StructDef,
       sizeInBytes: Long,
+      write: A => A,
       members: List[StructMapping.Member[A]]
   )
   object StructMapping {
-    case class Member[A](tpe: p.Type, mut: Boolean, sizeInBytes: Long, offsetInBytes: Long, select : A => A)
+    case class Member[A](
+        tpe: p.Type,
+        mut: Boolean,
+        sizeInBytes: Long,
+        offsetInBytes: Long,
+        select: A => A
+    )
   }
 
-  def mkStructMapping(using
-      q: Quoted
-  )(
+  def mkStructMapping(using q: Quoted)(
       sdef: p.StructDef,
-      layouts: MapView[p.StructDef, ct.Layout]
-  ): Result[StructMapping[q.Term]] = for {
-    layout <- layouts
+      layouts: Map[p.StructDef, (ct.Layout, Option[polyregion.prism.TermPrism[Any, Any]])]
+  ): StructMapping[q.Term] = {
+    val (layout, maybePrism) = layouts
       .get(sdef)
-      .failIfEmpty(s"Unseen sdef ${sdef.repr}, known reprs: ${layouts}")
-    layoutTable = layout.members.map(m => m.name -> m).toMap
-    terms <- sdef.members.traverse { case p.StructMember(named, mut) =>
+      .getOrElse(q.report.errorAndAbort(s"Unseen sdef ${sdef.repr}, known reprs: ${layouts}"))
+    val layoutTable = layout.members.map(m => m.name -> m).toMap
+    val members = sdef.members.map { case p.StructMember(named, mut) =>
       layoutTable
         .get(named.symbol)
-        .map { m =>
-            
-
-//          val select = q.Select.unique(root, named.symbol)
-//          maybePrism match {
-//            case Some((from, to)) => from(q.underlying, select.asExpr).asTerm -> to(q.underlying, select.asExpr, ???).asTerm
-//            case None        =>  select -> select
-//          }
-//
-          StructMapping.Member(named.tpe,  mut, m.sizeInBytes, m.offsetInBytes, q.Select.unique(_, named.symbol))
-        }
-        .failIfEmpty(s"Layout $layout is missing ${named.repr} from ${sdef.repr}")
+        .map(m =>
+          StructMapping.Member(named.tpe, mut, m.sizeInBytes, m.offsetInBytes, q.Select.unique(_, named.symbol))
+        )
+        .getOrElse(q.report.errorAndAbort(s"Layout $layout is missing ${named.repr} from ${sdef.repr}"))
     }
-  } yield StructMapping(sdef, layout.sizeInBytes, terms)
+    val write = maybePrism match {
+      case None            => (root: q.Term) => root
+      case Some((from, _)) => (root: q.Term) => from(q.underlying, root.asExpr).asTerm
+    }
+    StructMapping(sdef, layout.sizeInBytes, write, members)
+  }
 
   def layoutOf(using q: Quoted) //
   (layouts: Map[p.StructDef, ct.Layout], repr: q.TypeRepr): ct.Layout = {
@@ -132,7 +134,7 @@ object Pickler {
 //    val terms = sdef.members.zip(layout.members).map { (named, m) =>
 //      named.tpe match {
 //        case s @ p.Type.Struct(_, _, _) =>
-//          val ptrToStruct = getPrimitive(source, Expr(m.offsetInBytes.toInt), named.tpe).asExprOf[Long]
+//          val ptrToStruct = readPrim(source, Expr(m.offsetInBytes.toInt), named.tpe).asExprOf[Long]
 //          val size        = Pickler.layoutOf(layouts, q.Select.unique(dest.asTerm, named.symbol).tpe).sizeInBytes.toInt
 //
 //          // const,
@@ -141,7 +143,7 @@ object Pickler {
 //        case _ =>
 //          q.Assign(
 //            q.Select.unique(dest.asTerm, named.symbol),
-//            getPrimitive(source, Expr(m.offsetInBytes.toInt), named.tpe).asTerm
+//            readPrim(source, Expr(m.offsetInBytes.toInt), named.tpe).asTerm
 //          ).asExpr
 //      }
 //    }
@@ -188,8 +190,8 @@ object Pickler {
 //            source,
 //            Expr(m.offsetInBytes.toInt)
 //          ).asTerm
-//        // val ptrToStruct = getPrimitive(source, Expr(m.offsetInBytes.toInt), p.Type.Long).asTerm
-//        case _ => getPrimitive(source, Expr(m.offsetInBytes.toInt), named.tpe).asTerm
+//        // val ptrToStruct = readPrim(source, Expr(m.offsetInBytes.toInt), p.Type.Long).asTerm
+//        case _ => readPrim(source, Expr(m.offsetInBytes.toInt), named.tpe).asTerm
 //      }
 //
 //    }
@@ -262,7 +264,7 @@ object Pickler {
 //
 //    Expr.block(
 //      primitiveTuples.map((member, tpe, expr) =>
-//        putPrimitive(
+//        writePrim(
 //          target,
 //          '{ $byteOffset + ${ Expr(member.offsetInBytes.toInt) } },
 //          tpe,
@@ -287,7 +289,7 @@ object Pickler {
     // inline def put[t: Type](comp: PT, i: Expr[Int], v: Expr[Any]) = comp match {
     //   case s @ p.Type.Struct(_, _, _) =>
     //     putStruct(compiler, opt, b, byteOffset = Expr(0), indexOffset = i, s, q.TypeRepr.of[t], v)
-    //   case c => putPrimitive(b, byteOffset = '{ $i * ${ Expr(sizeOf(compiler, opt, comp, q.TypeRepr.of[t])) } }, c, v)
+    //   case c => writePrim(b, byteOffset = '{ $i * ${ Expr(sizeOf(compiler, opt, comp, q.TypeRepr.of[t])) } }, c, v)
     // }
 
     (tpe, repr.asType) match {
@@ -335,7 +337,7 @@ object Pickler {
       // putStruct(compiler, opt, b, byteOffset = Expr(0), indexOffset = '{0}, s, q.TypeRepr.of[t], v)
 
       case (t, '[x]) =>
-        putPrimitive(b, byteOffset = '{ 0 }, t, v)
+        writePrim(b, byteOffset = '{ 0 }, t, v)
 
       // put[x](t, '{ 0 }, v)
       case (t, _) => q.report.errorAndAbort(s"Type information unavailable for ${t.repr}")
@@ -355,7 +357,7 @@ object Pickler {
 
   //   inline def get[t: Type](comp: PT, i: Expr[Int]) = (comp match {
   //     case p.Type.Struct(_, _, _) => getStruct(compiler, opt, b, i, Expr(0), q.TypeRepr.of[t])
-  //     case c => getPrimitive(b, '{ $i * ${ Expr(sizeOf(compiler, opt, comp, q.TypeRepr.of[t])) } }, c)
+  //     case c => readPrim(b, '{ $i * ${ Expr(sizeOf(compiler, opt, comp, q.TypeRepr.of[t])) } }, c)
   //   }).asExprOf[t]
 
   //   (tpe, repr.asType) match {
@@ -430,7 +432,7 @@ object Pickler {
   //       }
 
   //     case t =>
-  //       putPrimitive(buffer, '{ $index * ${ Expr(sizeOf(t, repr)) } }, t, value)
+  //       writePrim(buffer, '{ $index * ${ Expr(sizeOf(t, repr)) } }, t, value)
   //   }
   // }
 
@@ -452,7 +454,7 @@ object Pickler {
   //     //       while (i < xs.size) {  xs(i) =  ${ readUniform(buffer, '{ i }, tpe, compRepr,  ) }; i += 1 }
   //     //       ()
   //     //     }
-  //     case t             => getPrimitive(buffer, '{ $index * ${ Expr(sizeOf(t, repr)) } }, t)
+  //     case t             => readPrim(buffer, '{ $index * ${ Expr(sizeOf(t, repr)) } }, t)
   //   }
   // }
 

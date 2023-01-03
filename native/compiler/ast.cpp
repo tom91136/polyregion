@@ -211,8 +211,8 @@ using std::string;
 
 [[nodiscard]] string polyast::repr(const StructDef &def) {
   return "struct " + repr(def.name) + " { " +
-         mk_string<Named>(
-             def.members, [](auto &&x) { return repr(x); }, ",") +
+         mk_string<StructMember>(
+             def.members, [](auto &&x) { return (x.isMutable ? "mut " : "") + repr(x.named); }, ",") +
          " }";
 }
 
@@ -291,7 +291,7 @@ Term::Any dsl::integral(const Type::Any &tpe, unsigned long long int x) {
 
   );
 }
-Term::Any dsl::fractional(const Type::Any &tpe,   long double x) {
+Term::Any dsl::fractional(const Type::Any &tpe, long double x) {
   if (holds<Type::Double>(tpe)) return Term::DoubleConst(static_cast<double>(x));
   if (holds<Type::Float>(tpe)) return Term::FloatConst(static_cast<float>(x));
   throw std::logic_error("Cannot create fractional constant of type " + to_string(tpe) + " for value" +
@@ -332,7 +332,7 @@ dsl::IndexBuilder::operator const Expr::Any() const { return index; }
 Stmt::Update dsl::IndexBuilder::operator=(const Term::Any &term) const { return {index.lhs, index.idx, term}; }
 dsl::NamedBuilder::NamedBuilder(const Named &named) : named(named) {}
 dsl::NamedBuilder::operator const Term::Any() const { return Select({}, named); }
-//dsl::NamedBuilder::operator const Expr::Any() const { return Alias(Select({}, named)); }
+// dsl::NamedBuilder::operator const Expr::Any() const { return Alias(Select({}, named)); }
 dsl::NamedBuilder::operator const Named() const { return named; }
 dsl::IndexBuilder dsl::NamedBuilder::operator[](const Term::Any &idx) const {
   if (auto arr = get_opt<Type::Array>(named.tpe); arr) {

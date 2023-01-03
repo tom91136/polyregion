@@ -35,6 +35,7 @@ private[polyregion] object CppSourceMirror {
     :: deriveStruct[BinaryIntrinsicKind]()
     :: deriveStruct[Expr]()
     :: deriveStruct[Stmt]()
+    :: deriveStruct[StructMember]()
     :: deriveStruct[StructDef]()
     :: deriveStruct[Signature]()
     :: deriveStruct[Function]()

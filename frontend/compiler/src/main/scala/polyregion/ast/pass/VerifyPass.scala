@@ -62,7 +62,7 @@ object VerifyPass {
                                   case x                => x
                                 })
                               )
-                              .filter(_ == n) match {
+                              .filter(_.named == n) match {
                               case _ :: Nil => acc
                               case Nil =>
                                 acc ~ s"Struct type ${sdef.repr} does not contain member ${n.repr} in `${t.repr} r={${program.defs}}`"

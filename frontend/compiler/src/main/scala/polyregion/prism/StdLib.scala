@@ -6,6 +6,7 @@ import polyregion.scala.intrinsics
 import polyregion.scala.intrinsics.TypedBuffer
 
 import scala.Predef as _
+import scala.annotation.targetName
 import scala.quoted.{Expr, Quotes, Type}
 
 object StdLib {

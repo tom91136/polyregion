@@ -170,11 +170,11 @@ object PolyAstToExpr {
     def apply(x: p.Named)(using Quotes) = '{ p.Named(${ Expr(x.symbol) }, ${ Expr(x.tpe) }) }
   }
   given StructMemberToExpr: ToExpr[p.StructMember] with {
-    def apply(x: p.StructMember)(using Quotes) = '{ p.StructMember(${ Expr(x.named) }, ${ Expr(x.mutable) }) }
+    def apply(x: p.StructMember)(using Quotes) = '{ p.StructMember(${ Expr(x.named) }, ${ Expr(x.isMutable) }) }
   }
   given StructDefToExpr: ToExpr[p.StructDef] with {
     def apply(x: p.StructDef)(using Quotes) = '{
-      p.StructDef(${ Expr(x.name) }, ${ Expr(x.reference) }, ${ Expr(x.tpeVars) }, ${ Expr(x.members) })
+      p.StructDef(${ Expr(x.name) }, ${ Expr(x.isReference) }, ${ Expr(x.tpeVars) }, ${ Expr(x.members) })
     }
   }
   given TypeToExpr: ToExpr[p.Type] with {
@@ -200,13 +200,13 @@ object PolyAstToExpr {
 }
 
 extension (m: p.StructMember) {
-  def repr: String = s"${if (m.mutable) "var" else "val"} ${m.named.repr}"
+  def repr: String = s"${if (m.isMutable) "var" else "val"} ${m.named.repr}"
 }
 
 extension (sd: p.StructDef) {
   def tpe: p.Type.Struct = p.Type.Struct(sd.name, sd.tpeVars, Nil)
   def repr: String =
-    s"${sd.name.repr}<${sd.tpeVars.mkString(",")}>${if (sd.reference) "*" else ""} { ${sd.members.map(_.repr).mkString("; ")} }"
+    s"${sd.name.repr}<${sd.tpeVars.mkString(",")}>${if (sd.isReference) "*" else ""} { ${sd.members.map(_.repr).mkString("; ")} }"
 }
 
 extension (e: p.Sym) {

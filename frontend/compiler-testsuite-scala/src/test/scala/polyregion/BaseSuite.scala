@@ -43,7 +43,7 @@ trait BaseSuite extends munit.FunSuite {
     case JDK, Offload
   }
 
-  inline def offload0(using inline target: AssertTarget)(inline f: => Any): Unit = target match {
+  inline def offload0(using inline target: AssertTarget)(inline f: => Any): Unit =   target match {
     case AssertTarget.JDK => f
     case AssertTarget.Offload =>
       import polyregion.scala.*
@@ -59,7 +59,7 @@ trait BaseSuite extends munit.FunSuite {
       latch.await(5, TimeUnit.SECONDS)
   }
 
-  inline def offload1[A](using inline target: AssertTarget)(inline f: => A): A = target match {
+  inline def offload1[A](using inline target: AssertTarget)(inline f: => A): A =   target match {
     case AssertTarget.JDK => f
     case AssertTarget.Offload =>
       import polyregion.scala.*

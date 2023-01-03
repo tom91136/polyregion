@@ -160,7 +160,7 @@ TEST_CASE("index struct array member", "[compiler]") {
   Sym myStructSym({"MyStruct"});
   Named defX = Named("x", Type::Int());
   Named defY = Named("y", Type::Int());
-  StructDef def(myStructSym, {}, {defX, defY});
+  StructDef def(myStructSym, true, {}, {StructMember(defX, false), StructMember(defY, false)});
   Type::Struct myStruct(myStructSym, {}, {});
 
   Function fn(
@@ -185,7 +185,7 @@ TEST_CASE("array update struct elem member", "[compiler]") {
   Sym myStructSym({"MyStruct"});
   Named defX = Named("x", Type::Int());
   Named defY = Named("y", Type::Int());
-  StructDef def(myStructSym, {}, {defX, defY});
+  StructDef def(myStructSym, true, {}, {StructMember(defX, false), StructMember(defY, false)});
   Type::Struct myStruct(myStructSym, {}, {});
 
   Function fn(
@@ -205,7 +205,7 @@ TEST_CASE("array update struct elem", "[compiler]") {
   Sym myStructSym({"MyStruct"});
   Named defX = Named("x", Type::Int());
   Named defY = Named("y", Type::Int());
-  StructDef def(myStructSym, {}, {defX, defY});
+  StructDef def(myStructSym, true, {}, {StructMember(defX, false), StructMember(defY, false)});
   Type::Struct myStruct(myStructSym, {}, {});
 
   Function fn(
@@ -227,7 +227,7 @@ TEST_CASE("alias struct", "[compiler]") {
 
   Named defX = Named("x", Type::Int());
   Named defY = Named("y", Type::Int());
-  StructDef def(myStructSym, {}, {defX, defY});
+  StructDef def(myStructSym, true, {}, {StructMember(defX, false), StructMember(defY, false)});
   Type::Struct myStruct(myStructSym, {}, {});
 
   Function fn(Sym({"foo"}), {}, {}, {Named("out", myStruct)}, {}, Type::Int(),
@@ -245,7 +245,8 @@ TEST_CASE("alias struct member", "[compiler]") {
   polyregion::compiler::initialise();
 
   Sym sdef({"a", "b"});
-  StructDef def(sdef, {}, {Named("x", Type::Int()), Named("y", Type::Int())});
+  StructDef def(sdef, true, {},
+                {StructMember(Named("x", Type::Int()), false), StructMember(Named("y", Type::Int()), false)});
   Named arg("in", Type::Struct(sdef, {}, {}));
   Function fn(Sym({"foo"}), {}, {}, {arg}, {}, Type::Unit(),
               {
@@ -285,7 +286,7 @@ TEST_CASE("mut struct", "[compiler]") {
 
   Named defX = Named("x", Type::Int());
   Named defY = Named("y", Type::Int());
-  StructDef def(myStructSym, {}, {defX, defY});
+  StructDef def(myStructSym, true, {}, {StructMember(defX, false), StructMember(defY, false)});
   Type::Struct myStruct(myStructSym, {}, {});
 
   Function fn(
@@ -350,9 +351,9 @@ TEST_CASE("alloc struct", "[compiler]") {
 
   Named defX = Named("x", Type::Int());
   Named defY = Named("y", Type::Int());
-  StructDef def(myStructSym, {}, {defX, defY});
+  StructDef def(myStructSym, true, {}, {StructMember(defX, false), StructMember(defY, false)});
   Type::Struct myStruct(myStructSym, {}, {});
-  StructDef def2(myStruct2Sym, {}, {defX});
+  StructDef def2(myStruct2Sym, true, {}, {StructMember(defX, false)});
   Type::Struct myStruct2(myStruct2Sym, {}, {});
 
   Function fn(Sym({"foo"}), {}, {}, {Named("out", myStruct)}, {}, Type::Int(),
@@ -380,11 +381,12 @@ TEST_CASE("alloc struct nested", "[compiler]") {
   Named defX = Named("x", Type::Int());
   Named defY = Named("y", Type::Int());
 
-  StructDef def2(myStruct2Sym, {}, {defX});
+  StructDef def2(myStruct2Sym, true, {}, {StructMember(defX, false)});
   Type::Struct myStruct2(myStruct2Sym, {}, {});
   Named defZ = Named("z", myStruct2);
 
-  StructDef def(myStructSym, {}, {defX, defY, defZ});
+  StructDef def(myStructSym, true, {},
+                {StructMember(defX, false), StructMember(defY, false), StructMember(defZ, false)});
   Type::Struct myStruct(myStructSym, {}, {});
 
   Function fn(Sym({"foo"}), {}, {}, {}, {}, Type::Int(),
