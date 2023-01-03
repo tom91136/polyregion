@@ -370,17 +370,22 @@ object compiletime {
     )
   }
 
-  def mkMethodSym(using q: Quoted)(name: String, rtn: q.TypeRepr, args: (String, q.TypeRepr)*) = q.Symbol.newMethod(
-    q.Symbol.spliceOwner,
-    name,
-    q.MethodType(args.map(_._1).toList)(paramInfosExp = _ => args.map(_._2).toList, resultTypeExp = _ => rtn)
-  )
+  private def mkMethodSym(using q: Quoted)(name: String, rtn: q.TypeRepr, args: (String, q.TypeRepr)*) =
+    q.Symbol.newMethod(
+      q.Symbol.spliceOwner,
+      name,
+      q.MethodType(args.map(_._1).toList)(paramInfosExp = _ => args.map(_._2).toList, resultTypeExp = _ => rtn)
+    )
 
-  def mkMethodDef(using q: Quoted)(sym: q.Symbol)(impl: PartialFunction[List[q.Tree], q.Term]) = q.DefDef(
+  private def mkMethodDef(using q: Quoted)(sym: q.Symbol)(impl: PartialFunction[List[q.Tree], Expr[Any]]) = q.DefDef(
     sym,
     {
       case (argList0 :: Nil) =>
-        impl.lift(argList0).fold(q.report.errorAndAbort(s"Definition is not defined for input ${argList0}"))(Some(_))
+        impl
+          .lift(argList0)
+          .fold(q.report.errorAndAbort(s"Definition is not defined for input ${argList0}"))(expr =>
+            Some(expr.asTerm.changeOwner(sym))
+          )
       case bad => q.report.errorAndAbort(s"Unexpected argument in method body: expected ${sym.signature}, got ${bad}")
     }
   )
@@ -404,12 +409,13 @@ object compiletime {
       ), mkMethodSym(
         s"read_${sdef.name.repr}",
         repr,
+        "root"   -> repr,
         "ptr"    -> q.TypeRepr.of[Long],
         "ptrMap" -> q.TypeRepr.of[PtrMapTpe],
         "objMap" -> q.TypeRepr.of[ObjMapTpe]
       ), mkMethodSym(
         s"update_${sdef.name.repr}",
-        q.TypeRepr.of[Long],
+        q.TypeRepr.of[Unit],
         "root"   -> repr,
         "ptr"    -> q.TypeRepr.of[Long],
         "ptrMap" -> q.TypeRepr.of[PtrMapTpe],
@@ -435,7 +441,7 @@ object compiletime {
         val arrBuffer = ${ allocateBuffer('{ ${ Expr(elementSizeInBytes) } * $expr.length_ }) }
         val arrPtr    = Platforms.pointerOfDirectBuffer(arrBuffer)
         println(
-          s"[bind]: array  [${$expr.length_} * ${${ Expr(comp.repr) }}]${$expr.data} => $arrBuffer(0x${arrPtr.toHexString})"
+          s"[bind]: array  [${$expr.length_} * ${${ Expr(comp.repr) }}] ${$expr.data} => $arrBuffer(0x${arrPtr.toHexString})"
         )
         var i = 0
         while (i < $expr.length_) {
@@ -499,7 +505,7 @@ object compiletime {
               q.report.errorAndAbort(s"Illegal structure while encoding read for member ${mapping} ")
           }
         }
-        val arrPtr    = ${ Pickler.readPrim(buffer, memberOffset, p.Type.Long).asExprOf[Int] }
+        val arrPtr    = ${ Pickler.readPrim(buffer, memberOffset, p.Type.Int).asExprOf[Int] }
         val arrBuffer = Platforms.directBufferFromPointer(arrPtr, ${ Expr(elementSizeInBytes) } * arrayLen)
         var i         = 0
         while (i < arrayLen) {
@@ -551,81 +557,95 @@ object compiletime {
           }
         )
       }
-
     }
 
-    val (writeDefs, readDefs, updateDefs) = writeReadSymbols.toList
-      .map((sdef, x) => Pickler.mkStructMapping(sdef, layouts) -> x)
-      .map { case (mapping, (writeSymbol, readSymbol, updateSymbol)) =>
-        val writeMethod = mkMethodDef(writeSymbol) { case List(root: q.Term, ptrMap: q.Term) =>
-          (mapping.write(root).asExpr, ptrMap.asExpr) match {
-            case ('{ $expr: t }, '{ $ptrMap: PtrMapTpe }) =>
-              '{
-                val root = $expr
-                $ptrMap.get(root) match {
-                  case Some(existing)       => existing
-                  case None if root == null => $ptrMap += (root -> 0); 0
-                  case None                 => ${ writeMapping('root, ptrMap, mapping) }
-                }
-              }.asTerm.changeOwner(writeSymbol)
-          }
-        }
-        val readMethod = mkMethodDef(readSymbol) {
-          case List(root: q.Term, ptr: q.Term, ptrMap: q.Term, objMap: q.Term) =>
-            (mapping.write(root).asExpr, ptr.asExpr, ptrMap.asExpr, objMap.asExpr) match {
-              case ('{ $rootExpr: t | Null }, '{ $ptrExpr: Long }, '{ $ptrMap: PtrMapTpe }, '{ $objMap: ObjMapTpe }) =>
-                '{
-                  ($ptrMap.get($rootExpr), $ptrExpr) match {
-                    case (_, 0) => null // object reassignment for var to null
-                    case (Some(writePtr), readPtr) if writePtr == readPtr => // same ptr, do the update
-                      ${ readMapping(rootExpr, 'readPtr, ptrMap, objMap, mapping) }; $rootExpr
-                    case (Some(writePtr), readPtr) if writePtr != readPtr => // object reassignment for var
-                      // Make sure we update the old writePtr (possibly orphaned, unless reassigned somewhere else) first.
-                      // This is to make sure modified object without a root (e.g through reassignment) is corrected updated.
-                      ${ callUpdate(sdef.name, rootExpr.asTerm, 'writePtr, ptrMap, objMap) }
-                      // Now, readPtr is either a new allocation or a an existing one, possibly shared.
-                      // We check that it hasn't already been read/updated yet (the object may be recursive) and proceed to
-                      // create the object.
-                      $objMap.get(readPtr) match {
-                        case Some(existing) => existing // Existing allocation found, use it.
-                        case None           => ()
-                      }
-                    case (None, readPtr) => // object not previously written, fail
-                      throw new RuntimeException(
-                        s"Val root object ${$rootExpr} was not previously written, cannot restore from to 0x${readPtr.toHexString}"
-                      )
-                  }
-                }.asTerm.changeOwner(readSymbol)
+    def writeMethod(symbol: q.Symbol, mapping: Pickler.StructMapping[q.Term]) = mkMethodDef(symbol) {
+      case List(root: q.Term, ptrMap: q.Term) =>
+        (root.asExpr, mapping.write(root).asExpr, ptrMap.asExpr) match {
+          case ('{ $root: t }, '{ $rootAfterPrismExpr: u }, '{ $ptrMap: PtrMapTpe }) =>
+            '{
+              $ptrMap.get($root) match {
+                case Some(existing)        => existing
+                case None if $root == null => $ptrMap += ($root -> 0); 0
+                case None =>
+                  val rootAfterPrism = $rootAfterPrismExpr
+                  ${ writeMapping('rootAfterPrism, ptrMap, mapping) }
+              }
             }
         }
-        val updateMethod = mkMethodDef(updateSymbol) {
-          case List(root: q.Term, ptr: q.Term, ptrMap: q.Term, objMap: q.Term) =>
-            (mapping.write(root).asExpr, ptr.asExpr, ptrMap.asExpr, objMap.asExpr) match {
-              case ('{ $rootExpr: t }, '{ $ptrExpr: Long }, '{ $ptrMap: PtrMapTpe }, '{ $objMap: ObjMapTpe }) =>
-                '{
-                  ($ptrMap.get($rootExpr), $ptrExpr) match {
-                    case (Some(0), 0) => () // was null, still null, no-op
-                    case (Some(writePtr), readPtr) if writePtr == readPtr => // same ptr, do the update
-                      ${ readMapping(rootExpr, 'readPtr, ptrMap, objMap, mapping) }
-                      $objMap += (readPtr -> $rootExpr)
-                    case (Some(writePtr), readPtr) if writePtr != readPtr => // object reassignment for val, fail
-                      throw new RuntimeException(
-                        s"Cannot update immutable val, setting ${$rootExpr} (0x${writePtr.toHexString}) to 0x${readPtr.toHexString}"
-                      )
-                    case (None, readPtr) => // object not previously written, fail
-                      throw new RuntimeException(
-                        s"Val root object ${$rootExpr} was not previously written, cannot restore from to 0x${readPtr.toHexString}"
-                      )
-                  }
-                }.asTerm.changeOwner(updateSymbol)
-            }
-        }
-        //
-        (writeMethod, readMethod, updateMethod)
-      }
-      .unzip3
+    }
 
-    q.Block(writeDefs ::: readDefs ::: updateDefs, callWrite(sdef.name, root.asTerm, ptrMap).asTerm)
+    def readMethod(symbol: q.Symbol, mapping: Pickler.StructMapping[q.Term]) = mkMethodDef(symbol) {
+      case List(root: q.Term, ptr: q.Term, ptrMap: q.Term, objMap: q.Term) =>
+        (root.asExpr, ptr.asExpr, ptrMap.asExpr, objMap.asExpr) match {
+          case ('{ $rootExpr: t }, '{ $ptrExpr: Long }, '{ $ptrMap: PtrMapTpe }, '{ $objMap: ObjMapTpe }) =>
+            '{
+              val root: t = $rootExpr
+              ($ptrMap.get(root), $ptrExpr) match {
+                case (_, 0) => null // object reassignment for var to null
+                case (Some(writePtr), readPtr) if writePtr == readPtr => // same ptr, do the update
+                  ${ readMapping('root, 'readPtr, ptrMap, objMap, mapping) }; root
+                case (Some(writePtr), readPtr) => // object reassignment for var
+                  // Make sure we update the old writePtr (possibly orphaned, unless reassigned somewhere else) first.
+                  // This is to make sure modified object without a root (e.g through reassignment) is corrected updated.
+                  ${ callUpdate(mapping.source.name, 'root.asTerm, 'writePtr, ptrMap, objMap) }
+                  // Now, readPtr is either a new allocation or a an existing one, possibly shared.
+                  // We check that it hasn't already been read/updated yet (the object may be recursive) and proceed to
+                  // create the object.
+                  $objMap.get(readPtr) match {
+                    case Some(existing) => existing.asInstanceOf[t] // Existing allocation found, use it.
+                    case None =>
+                      throw new RuntimeException(
+                        s"Impl: restore 0x${readPtr.toHexString}: ${${ Expr(mapping.source.repr) }}"
+                      )
+                  }
+                case (None, readPtr) => // object not previously written, fail
+                  throw new RuntimeException(
+                    s"Val root object ${root} was not previously written, cannot restore from to 0x${readPtr.toHexString}"
+                  )
+              }
+            }
+        }
+    }
+    def updateMethod(symbol: q.Symbol, mapping: Pickler.StructMapping[q.Term]) = mkMethodDef(symbol) {
+      case List(root: q.Term, ptr: q.Term, ptrMap: q.Term, objMap: q.Term) =>
+        (root.asExpr, ptr.asExpr, ptrMap.asExpr, objMap.asExpr) match {
+          case ('{ $rootExpr: t }, '{ $ptrExpr: Long }, '{ $ptrMap: PtrMapTpe }, '{ $objMap: ObjMapTpe }) =>
+            '{
+              val root = $rootExpr
+              ($ptrMap.get(root), $ptrExpr) match {
+                case (Some(0), 0) => () // was null, still null, no-op
+                case (Some(writePtr), readPtr) if writePtr == readPtr => // same ptr, do the update
+                  ${ readMapping('root, 'readPtr, ptrMap, objMap, mapping) }
+                  $objMap += (readPtr -> root)
+                case (Some(writePtr), readPtr) => // object reassignment for val, fail
+                  throw new RuntimeException(
+                    s"Cannot update immutable val, setting ${root} (0x${writePtr.toHexString}) to 0x${readPtr.toHexString}"
+                  )
+                case (None, readPtr) => // object not previously written, fail
+                  throw new RuntimeException(
+                    s"Val root object ${root} was not previously written, cannot restore from to 0x${readPtr.toHexString}"
+                  )
+              }
+              ()
+            }
+        }
+    }
+
+    val defs = writeReadSymbols.toList
+      .map((sdef, x) => Pickler.mkStructMapping(sdef, layouts) -> x)
+      .flatMap { case (mapping, (writeSymbol, readSymbol, updateSymbol)) =>
+        List(
+          writeMethod(writeSymbol, mapping),  //
+          readMethod(readSymbol, mapping),    //
+          updateMethod(updateSymbol, mapping) //
+        )
+      }
+
+      
+      // callUpdate(sdef.name, root.asTerm,  ptrMap )
+
+    q.Block(defs, callWrite(sdef.name, root.asTerm, ptrMap).asTerm)
   }
 
   def bindCapturesToBuffer(using q: Quoted)(
@@ -639,6 +659,9 @@ object compiletime {
     val (_, stmts) = capturesWithStructDefs.zipWithIndex.foldLeft((0, List.empty[Expr[Any]])) {
       case ((byteOffset, exprs), ((name, structDef, ref), idx)) =>
         println(s"[Bind] [$idx, offset=${byteOffset}]  repr=${ref.show} name=${name.repr} (${structDef.map(_.repr)})")
+
+        val mutable = ref.symbol.flags.is(q.Flags.Mutable)
+
         val expr = (name.tpe, structDef, ref.asExpr) match {
           case (p.Type.Array(comp), None, _) =>
             throw new RuntimeException(
@@ -649,6 +672,7 @@ object compiletime {
               s"Struct type without definition at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
             )
           case (s @ p.Type.Struct(_, _, _), Some(sdef), '{ $ref: t }) =>
+            println(s"$ref = " + ref.asTerm.symbol.flags.show)
             val rtn = generateAll(layouts, lut, sdef, ref.asTerm.tpe)(
               ref,
               '{ _root_.scala.collection.mutable.Map[Any, Long]() }

@@ -66,9 +66,9 @@ class ValueReturnSuite extends BaseSuite {
       var value = a
     }
 
-    val box = new MyBox
+    var box = new MyBox
 
-    val m = ListBuffer(1)
+    val m = ListBuffer(1, 2, 3)
     // val m = new polyregion.ValueReturnSuite#MyCls
     offload0 {
       val b = new MyCls
