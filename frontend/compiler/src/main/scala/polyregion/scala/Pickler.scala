@@ -5,8 +5,7 @@ import polyregion.ast.{PolyAst as p, *}
 import polyregion.jvm.{compiler as ct, runtime as rt}
 import polyregion.prism.StdLib
 
-import java.nio.ByteBuffer
-import scala.collection.MapView
+import java.nio.{ByteBuffer, ByteOrder}
 import scala.quoted.*
 
 object Pickler {
@@ -72,23 +71,17 @@ object Pickler {
       )
   }
 
-  case class StructMapping[A](
+  private case class StructMapping[A](
       source: p.StructDef,
       sizeInBytes: Long,
       write: A => A,
       members: List[StructMapping.Member[A]]
   )
-  object StructMapping {
-    case class Member[A](
-        tpe: p.Type,
-        mut: Boolean,
-        sizeInBytes: Long,
-        offsetInBytes: Long,
-        select: A => A
-    )
+  private object StructMapping {
+    case class Member[A](tpe: p.Type, mut: Boolean, sizeInBytes: Long, offsetInBytes: Long, select: A => A)
   }
 
-  def mkStructMapping(using q: Quoted)(
+  private def mkStructMapping(using q: Quoted)( //
       sdef: p.StructDef,
       layouts: Map[p.StructDef, (ct.Layout, Option[polyregion.prism.TermPrism[Any, Any]])]
   ): StructMapping[q.Term] = {
@@ -111,351 +104,306 @@ object Pickler {
     StructMapping(sdef, layout.sizeInBytes, write, members)
   }
 
-  def layoutOf(using q: Quoted) //
-  (layouts: Map[p.StructDef, ct.Layout], repr: q.TypeRepr): ct.Layout = {
-    val sdef: p.StructDef = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
-    println(s"layoutOf=${sdef} ${repr.widenTermRefByName}")
-    val monomorphicName = p.Sym(sdef.tpe.monomorphicName)
-    layouts.find(_._1.name == monomorphicName).getOrElse(???)._2
-  }
-
-//  def mutStruct(using q: Quoted)(
-//      layouts: Map[p.StructDef, ct.Layout],
-//      source: Expr[java.nio.ByteBuffer],
-//      dest: Expr[Any],
-//      repr: q.TypeRepr
-////    mkStruct: (q.TypeRepr, Expr[java.nio.ByteBuffer], Expr[Int]) => Expr[Any]
-//  ): Expr[Unit] = {
-//    import q.given
-//
-//    val sdef   = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
-//    val layout = layoutOf(layouts, repr)
-//
-//    val terms = sdef.members.zip(layout.members).map { (named, m) =>
-//      named.tpe match {
-//        case s @ p.Type.Struct(_, _, _) =>
-//          val ptrToStruct = readPrim(source, Expr(m.offsetInBytes.toInt), named.tpe).asExprOf[Long]
-//          val size        = Pickler.layoutOf(layouts, q.Select.unique(dest.asTerm, named.symbol).tpe).sizeInBytes.toInt
-//
-//          // const,
-//
-//          '{}
-//        case _ =>
-//          q.Assign(
-//            q.Select.unique(dest.asTerm, named.symbol),
-//            readPrim(source, Expr(m.offsetInBytes.toInt), named.tpe).asTerm
-//          ).asExpr
-//      }
-//    }
-//
-//    Expr.block(terms, '{})
-//
-//  }
-//
-//  def mkStruct(using q: Quoted)(
-//      layouts: Map[p.StructDef, ct.Layout],
-//      source: Expr[java.nio.ByteBuffer],
-//      repr: q.TypeRepr,
-//      mkStruct: (q.TypeRepr, Expr[java.nio.ByteBuffer], Expr[Int]) => Expr[Any]
-//  ): Expr[Any] = {
-//    import q.given
-//
-////  val sourceLUT = StdLib.Mirrors.map(p => p._1.source -> p).toMap
-////     val (mirroredSDef, term) = Compiler.findMatchingClassInHierarchy(repr.typeSymbol, sourceLUT) match {
-////       case None                 => sdef     -> value.asTerm
-////       case Some((m, (_, to))) => m.struct -> to(q.underlying, value, ???).asTerm //
-////     }
-//
-////     println(s"[putStruct]     repr sdef: ${Retyper.structDef0(repr.typeSymbol).getOrElse(???).repr}")
-////     println(s"[putStruct]   source sdef: ${sdef.repr}")
-////     println(s"[putStruct] mirrored sdef: ${sdef.repr}")
-////     println(term.tpe)
-//
-//    // if( mutableseq)
-//    // val length_ = source.getInt
-//    // val data = source.getLong => Ptr,
-//
-//    // Find out the total size of this struct first, it could be nested arbitrarily but the top level's size must
-//    // reflect the total size; this is consistent with C's `sizeof(struct T)`.
-//    val sdef = Retyper.structDef0(repr.typeSymbol).getOrElse(???)
-////    val layout = layouts(sdef)
-//    val layout = layoutOf(layouts, repr)
-//
-//    val fields = sdef.members.zip(layout.members)
-//    val terms = fields.map { (named, m) =>
-//      named.tpe match {
-//        case s @ p.Type.Struct(_, _, _) =>
-//          mkStruct(
-//            q.TermRef(repr, named.symbol).widenTermRefByName,
-//            source,
-//            Expr(m.offsetInBytes.toInt)
-//          ).asTerm
-//        // val ptrToStruct = readPrim(source, Expr(m.offsetInBytes.toInt), p.Type.Long).asTerm
-//        case _ => readPrim(source, Expr(m.offsetInBytes.toInt), named.tpe).asTerm
-//      }
-//
-//    }
-//    q.Select
-//      .unique(q.New(q.TypeIdent(repr.typeSymbol)), "<init>")
-//      .appliedToArgs(terms)
-//      .asExpr
-//  }
-//
-//  def putStruct(using q: Quoted)(
-//      layouts: Map[p.StructDef, ct.Layout],
-//      target: Expr[java.nio.ByteBuffer],
-//      byteOffset: Expr[Int],
-//      sdef: p.StructDef,
-//      repr: q.TypeRepr,
-//      value: Expr[Any],
-//      mkStruct: (p.Type.Struct, Expr[Any]) => Expr[Long],
-//      mkArray: (p.Type, Expr[StdLib.MutableSeq[?]]) => Expr[Long]
-//  ) = {
-//
-//    import q.given
-//
-//    val sourceLUT = StdLib.Mirrors.map(p => p._1.source -> p).toMap
-//    println(s"put ${repr.widenTermRefByName} ${repr} ${value}")
-//    val (mirroredSDef, term) = Compiler.findMatchingClassInHierarchy(repr.typeSymbol, sourceLUT) match {
-//      case None                 => sdef     -> value.asTerm
-//      case Some((m, (from, _))) => m.struct -> from(q.underlying, value).asTerm //
-//    }
-//
-//    println(s"[putStruct]     repr sdef: ${Retyper.structDef0(repr.typeSymbol).getOrElse(???).repr}")
-//    println(s"[putStruct]   source sdef: ${sdef.repr}")
-//    println(s"[putStruct] mirrored sdef: ${sdef.repr}")
-//    println(term.tpe)
-//
-//    val layout = layouts(sdef)
-//    val fields = sdef.members.zip(layout.members)
-//
-//    println(s"[putStruct] Fields: \n${fields.map((n, m) => s"${n.repr} (${layout})").map("\t" + _).mkString("\n")}")
-//
-//    val primitiveTuples = (term.asExpr, fields) match {
-//      case (
-//            '{ $expr: StdLib.MutableSeq[t] },
-//            (length @ p.Named(_, p.Type.Int), lengthMember) :: (
-//              array @ p.Named(_, p.Type.Array(comp)),
-//              arrayMember
-//            ) :: Nil
-//          ) =>
-//        println(s"Found MutableSeq, component = ${Type.show[t]}, tpe=${tpe}, expr = ${expr.show}")
-//        List(
-//          (lengthMember, length.tpe, q.Select.unique(term, length.symbol).asExpr),
-//          (arrayMember, p.Type.Long, mkArray(comp, expr))
-//        )
-//      case _ =>
-//        fields.map { (named, m) =>
-//          named.tpe match {
-//            case p.Type.Array(comp) =>
-//              ??? // Compiler emitted an illegal Array type (from intrinsic.Arr) which cannot appear on it's own!
-//            case s @ p.Type.Struct(_, _, _) =>
-//              q.Select.unique(term, named.symbol).asExpr match {
-//                case '{ $x: t } =>
-//                  println(s"Repr: ${q.TypeRepr.of[t].widenTermRefByName}")
-//                  (m, p.Type.Long, mkStruct(s, x))
-//
-//              }
-//
-//            case _ => (m, named.tpe, q.Select.unique(term, named.symbol).asExpr)
-//          }
-//        }
-//    }
-//
-//    Expr.block(
-//      primitiveTuples.map((member, tpe, expr) =>
-//        writePrim(
-//          target,
-//          '{ $byteOffset + ${ Expr(member.offsetInBytes.toInt) } },
-//          tpe,
-//          expr
-//        )
-//      ),
-//      '{}
-//    )
-//  }
-
-  def putAll(using q: Quoted)(
-      compiler: ct.Compiler,
-      opt: ct.Options,
-      b: Expr[java.nio.ByteBuffer],
-      tpe: p.Type,
-      repr: q.TypeRepr,
-      v: Expr[Any]
-  ): Expr[Unit] = {
-    import p.Type as PT
-    import q.given
-
-    // inline def put[t: Type](comp: PT, i: Expr[Int], v: Expr[Any]) = comp match {
-    //   case s @ p.Type.Struct(_, _, _) =>
-    //     putStruct(compiler, opt, b, byteOffset = Expr(0), indexOffset = i, s, q.TypeRepr.of[t], v)
-    //   case c => writePrim(b, byteOffset = '{ $i * ${ Expr(sizeOf(compiler, opt, comp, q.TypeRepr.of[t])) } }, c, v)
-    // }
-
-    (tpe, repr.asType) match {
-//       case (PT.Array(PT.Array(_)), _)                  => ??? // TODO handle nested arrays
-//       case (PT.Array(PT.Byte), x @ '[Array[Byte]])     => '{ $b.put(${ v.asExprOf[x.Underlying] }) }
-//       case (PT.Array(PT.Char), x @ '[Array[Char]])     => '{ $b.asCharBuffer.put(${ v.asExprOf[x.Underlying] }) }
-//       case (PT.Array(PT.Int), x @ '[Array[Int]])       => '{ $b.asIntBuffer.put(${ v.asExprOf[x.Underlying] }) }
-//       case (PT.Array(PT.Short), x @ '[Array[Short]])   => '{ $b.asShortBuffer.put(${ v.asExprOf[x.Underlying] }) }
-//       case (PT.Array(PT.Long), x @ '[Array[Long]])     => '{ $b.asLongBuffer.put(${ v.asExprOf[x.Underlying] }) }
-//       case (PT.Array(PT.Float), x @ '[Array[Float]])   => '{ $b.asFloatBuffer.put(${ v.asExprOf[x.Underlying] }) }
-//       case (PT.Array(PT.Double), x @ '[Array[Double]]) => '{ $b.asDoubleBuffer.put(${ v.asExprOf[x.Underlying] }) }
-
-//       case (PT.Array(comp), x @ '[intrinsics.Arr[t]]) =>
-//         '{
-//           val xs = ${ v.asExprOf[x.Underlying] }
-//           ???
-// //          var i  = 0; while (i < xs.length) { ${ put[t](comp, 'i, '{ xs(i) }) }; i += 1 }
-//         }
-
-//       case (PT.Array(comp), x @ '[java.util.List[t]]) =>
-//         '{
-//           val xs = ${ v.asExprOf[x.Underlying] }
-//           var i  = 0; while (i < xs.size) { ${ put[t](comp, 'i, '{ xs.get(i) }) }; i += 1 }
-//         }
-//       case (PT.Array(comp), x @ '[java.lang.Iterable[t]]) =>
-//         '{
-//           val it = ${ v.asExprOf[x.Underlying] }.iterator()
-//           var i  = 0; while (it.hasNext()) { ${ put[t](comp, 'i, '{ it.next() }) }; i += 1 }
-//         }
-//       case (PT.Array(comp), x @ '[scala.Array[t]]) =>
-//         '{
-//           val xs = ${ v.asExprOf[x.Underlying] }
-//           var i  = 0; while (i < xs.length) { ${ put[t](comp, 'i, '{ xs(i) }) }; i += 1 }
-//         }
-//       case (PT.Array(comp), x @ '[scala.collection.Seq[t]]) =>
-//         '{ // We're reading only, so whether collection is mutable or not doesn't matter.
-//           val xs = ${ v.asExprOf[x.Underlying] }
-//           var i  = 0; while (i < xs.length) { ${ put[t](comp, 'i, '{ xs(i) }) }; i += 1 }
-//         }
-//       case (t @ PT.Array(_), illegal) =>
-//         q.report.errorAndAbort(s"Unsupported type ${t.repr} (${v.show}:${repr.show}) for writing to ByteBuffer.", v)
-
-      case (s @ p.Type.Struct(_, _, _), '[x]) =>
-        ???
-      // putStruct(compiler, opt, b, byteOffset = Expr(0), indexOffset = '{0}, s, q.TypeRepr.of[t], v)
-
-      case (t, '[x]) =>
-        writePrim(b, byteOffset = '{ 0 }, t, v)
-
-      // put[x](t, '{ 0 }, v)
-      case (t, _) => q.report.errorAndAbort(s"Type information unavailable for ${t.repr}")
+  def deriveAllRepr(using q: Quoted)( //
+      lut: Map[p.Sym, p.StructDef],
+      sdef: p.StructDef,
+      repr: q.TypeRepr
+  ): Map[p.StructDef, q.TypeRepr] = {
+    def go(using q: Quoted)(sdef: p.StructDef, repr: q.TypeRepr, added: Set[p.Sym]): List[(p.StructDef, q.TypeRepr)] = {
+      val added0 = added + sdef.name
+      (sdef, repr.widenTermRefByName) :: sdef.members.flatMap(
+        _.named match {
+          case (p.Named(_, p.Type.Struct(name, _, _))) if added0.contains(name) => Nil
+          case (p.Named(member, p.Type.Struct(name, _, _))) => go(lut(name), q.TermRef(repr, member), added0)
+          case _                                            => Nil
+        }
+      )
     }
+    go(sdef, repr, Set()).toMap
   }
 
-  // def getAllMutable(using q: Quoted)(
-  //     compiler: ct.Compiler,
-  //     opt: ct.Options,
-  //     b: Expr[java.nio.ByteBuffer],
-  //     tpe: p.Type,
-  //     repr: q.TypeRepr,
-  //     v: Expr[Any]
-  // ): Expr[Unit] = {
-  //   import p.Type as PT
-  //   import q.given
+  private def mkMethodSym(using q: Quoted)(name: String, rtn: q.TypeRepr, args: (String, q.TypeRepr)*) =
+    q.Symbol.newMethod(
+      q.Symbol.spliceOwner,
+      name,
+      q.MethodType(args.map(_._1).toList)(paramInfosExp = _ => args.map(_._2).toList, resultTypeExp = _ => rtn)
+    )
 
-  //   inline def get[t: Type](comp: PT, i: Expr[Int]) = (comp match {
-  //     case p.Type.Struct(_, _, _) => getStruct(compiler, opt, b, i, Expr(0), q.TypeRepr.of[t])
-  //     case c => readPrim(b, '{ $i * ${ Expr(sizeOf(compiler, opt, comp, q.TypeRepr.of[t])) } }, c)
-  //   }).asExprOf[t]
+  private def mkMethodDef(using q: Quoted)(sym: q.Symbol)(impl: PartialFunction[List[q.Tree], Expr[Any]]) = q.DefDef(
+    sym,
+    {
+      case (argList0 :: Nil) =>
+        impl
+          .lift(argList0)
+          .fold(q.report.errorAndAbort(s"Definition is not defined for input ${argList0}"))(expr =>
+            Some(expr.asTerm.changeOwner(sym))
+          )
+      case bad => q.report.errorAndAbort(s"Unexpected argument in method body: expected ${sym.signature}, got ${bad}")
+    }
+  )
 
-  //   (tpe, repr.asType) match {
-  //     case (PT.Array(PT.Array(_)), _)                  => ??? // TODO handle nested arrays
-  //     case (PT.Array(PT.Byte), x @ '[Array[Byte]])     => '{ $b.get(${ v.asExprOf[x.Underlying] }) }
-  //     case (PT.Array(PT.Char), x @ '[Array[Char]])     => '{ $b.asCharBuffer.get(${ v.asExprOf[x.Underlying] }) }
-  //     case (PT.Array(PT.Int), x @ '[Array[Int]])       => '{ $b.asIntBuffer.get(${ v.asExprOf[x.Underlying] }) }
-  //     case (PT.Array(PT.Short), x @ '[Array[Short]])   => '{ $b.asShortBuffer.get(${ v.asExprOf[x.Underlying] }) }
-  //     case (PT.Array(PT.Long), x @ '[Array[Long]])     => '{ $b.asLongBuffer.get(${ v.asExprOf[x.Underlying] }) }
-  //     case (PT.Array(PT.Float), x @ '[Array[Float]])   => '{ $b.asFloatBuffer.get(${ v.asExprOf[x.Underlying] }) }
-  //     case (PT.Array(PT.Double), x @ '[Array[Double]]) => '{ $b.asDoubleBuffer.get(${ v.asExprOf[x.Underlying] }) }
-  //     case (PT.Array(comp), x @ '[scala.Array[t]]) =>
-  //       '{
-  //         val xs = ${ v.asExprOf[x.Underlying] }
-  //         var i  = 0; while (i < xs.length) { xs(i) = ${ get[t](comp, 'i) }; i += 1 }
-  //       }
-  //     case (p.Type.Array(comp), x @ '[scala.collection.mutable.Seq[t]]) =>
-  //       // Unlike putAll, this is mutable only otherwise we can't write.
-  //       '{
-  //         val xs = ${ v.asExprOf[x.Underlying] }
-  //         var i  = 0; while (i < xs.length) { xs(i) = ${ get[t](comp, 'i) }; i += 1 }
-  //       }
-  //     case (p.Type.Array(comp), x @ '[java.util.List[t]]) =>
-  //       '{
-  //         val xs = ${ v.asExprOf[x.Underlying] }
-  //         var i  = 0; while (i < xs.size) { xs.set(i, ${ get[t](comp, 'i) }); i += 1 }
-  //       }
-  //     case (t @ p.Type.Array(_), illegal) =>
-  //       q.report.errorAndAbort(s"Unsupported direct array type ${t.repr} for reading from ByteBuffer: ${repr.show}")
-  //     // case (t, '[x]) => // get[x](t, '{ 0 }).asExprOf[Unit]
-  //     case (t, _) => q.report.errorAndAbort(s"Type information unavailable for ${t.repr}")
-  //   }
-  // }
+  def generateAll(using q: Quoted)(
+      lut: Map[p.Sym, p.StructDef],
+      layouts: Map[p.StructDef, (ct.Layout, Option[polyregion.prism.TermPrism[Any, Any]])],
+      reprs: Map[p.StructDef, q.TypeRepr],
+      pointerOfBuffer: Expr[ByteBuffer => Long],
+      bufferOfPointer: Expr[(Long, Long) => ByteBuffer]
+  ) = {
+    given Quotes = q.underlying
 
-  // TODO
-  // Array[Solid]        = [  { N, S[N]... }                                                                           ]
-  // Solid               = [  S                                                                                        ]
-  // RefA{RefB}          = [  RefA { {N:Int, *T}, RefB { {N':Int, *U} } }, T[N]..., U[N']...                           ]
-  // Ref                 = [  Ref  { {N:Int, *T}, {N':Int, *U} ... }, T[N]..., U[N']...                                ]
-  // Array[Ref] xs       = [  Ref  { {N:Int, *T}, {N':Int, *U}... }[xs.size]..., T[N * xs.size]..., U[N' * xs.size]... ]
-  // Array[Array[Solid]] = [  { N0:Int, *U { {N1, *T} } , U[N0]..., T[N0*N1]...                                        ]
+    import polyregion.jvm.runtime.Platforms
 
-  // def writeUniform  //
-  // (using q: Quoted) //
-  // (buffer: Expr[java.nio.ByteBuffer], index: Expr[Int], tpe: p.Type, repr: q.TypeRepr, value: Expr[Any]): Expr[Unit] = {
-  //   import q.given
-  //   println(s"Write s=${repr} ${tpe}")
+    type PtrMapTpe = _root_.scala.collection.mutable.Map[Any, Long]
+    type ObjMapTpe = _root_.scala.collection.mutable.Map[Long, Any]
 
-  //   tpe match {
-  //     case p.Type.Struct(name, tpeVars, args) =>
-  //       putStruct(buffer, index, repr, value)
-  //     case p.Type.Array(comp) =>
-  //       // TODO handle special case for where value == wrapped buffers; just unwrap it here
-  //       repr.asType match {
-  //         case x @ '[scala.Array[t]] =>
-  //           // TODO specialise for <Type>Buffer variants, there's a put <Type> array for all variants
-  //           '{
-  //             val xs = ${ value.asExprOf[x.Underlying] }
-  //             var i  = 0
-  //             while (i < xs.length) { ${ writeUniform(buffer, 'i, comp, q.TypeRepr.of[t], '{ xs(i) }) }; i += 1 }
-  //             ()
-  //           }
-  //         case x @ '[scala.collection.Seq[t]] =>
-  //           '{
-  //             val xs = ${ value.asExprOf[x.Underlying] }
-  //             var i  = 0
-  //             while (i < xs.length) { ${ writeUniform(buffer, 'i, comp, q.TypeRepr.of[t], '{ xs(i) }) }; i += 1 }
-  //             ()
-  //           }
+    val writeSymbols = reprs.map((sdef, repr) =>
+      sdef -> mkMethodSym(
+        s"write_${sdef.name.repr}",
+        q.TypeRepr.of[Long],
+        "root"   -> repr,
+        "ptrMap" -> q.TypeRepr.of[PtrMapTpe]
+      )
+    )
 
-  //         case illegal => q.report.errorAndAbort(s"Unsupported type for writing ${repr.show}")
-  //       }
+    val readSymbols = reprs.map((sdef, repr) =>
+      sdef -> mkMethodSym(
+        s"read_${sdef.name.repr}",
+        repr,
+        "root"   -> repr,
+        "ptr"    -> q.TypeRepr.of[Long],
+        "ptrMap" -> q.TypeRepr.of[PtrMapTpe],
+        "objMap" -> q.TypeRepr.of[ObjMapTpe]
+      )
+    )
 
-  //     case t =>
-  //       writePrim(buffer, '{ $index * ${ Expr(sizeOf(t, repr)) } }, t, value)
-  //   }
-  // }
+    val updateSymbols = reprs.map((sdef, repr) =>
+      sdef -> mkMethodSym(
+        s"update_${sdef.name.repr}",
+        q.TypeRepr.of[Unit],
+        "root"   -> repr,
+        "ptr"    -> q.TypeRepr.of[Long],
+        "ptrMap" -> q.TypeRepr.of[PtrMapTpe],
+        "objMap" -> q.TypeRepr.of[ObjMapTpe]
+      )
+    )
 
-  // def readUniform(using q: Quoted) //
-  // (buffer: Expr[java.nio.ByteBuffer], index: Expr[Int], tpe: p.Type, repr: q.TypeRepr): Expr[Any] = {
-  //   import q.given
-  //   tpe match {
-  //     case p.Type.Struct(name, tpeVars, args) => readStruct(buffer, index, repr)
-  //     case p.Type.Array(component) =>
-  //       repr.asType match {
-  //         case '[scala.collection.immutable.Seq[t]] => ??? // make a new one
-  //         case '[scala.collection.mutable.Seq[t]]   => ??? // write to existing if exists or make a new one
-  //         case illegal                              => ???
+    def allocateBuffer(size: Expr[Int]) = '{ ByteBuffer.allocateDirect($size).order(ByteOrder.nativeOrder()) }
 
-  //       }
-  //     // '{
-  //     //       val xs = ${ value.asExprOf[scala.collection.immutable.Seq[_]] }
-  //     //       var i  = 0
-  //     //       while (i < xs.size) {  xs(i) =  ${ readUniform(buffer, '{ i }, tpe, compRepr,  ) }; i += 1 }
-  //     //       ()
-  //     //     }
-  //     case t             => readPrim(buffer, '{ $index * ${ Expr(sizeOf(t, repr)) } }, t)
-  //   }
-  // }
+    def callWrite(name: p.Sym, root: Expr[Any], ptrMap: Expr[PtrMapTpe]) =
+      q.Apply(q.Ref(writeSymbols(lut(name))), List(root.asTerm, ptrMap.asTerm)).asExprOf[Long]
+
+    def callRead(name: p.Sym, root: Expr[Any], ptr: Expr[Long], ptrMap: Expr[PtrMapTpe], objMap: Expr[ObjMapTpe]) =
+      q.Apply(q.Ref(readSymbols(lut(name))), List(root.asTerm, ptr.asTerm, ptrMap.asTerm, objMap.asTerm)).asExpr
+
+    def callUpdate(name: p.Sym, root: Expr[Any], ptr: Expr[Long], ptrMap: Expr[PtrMapTpe], objMap: Expr[ObjMapTpe]) =
+      q.Apply(q.Ref(updateSymbols(lut(name))), List(root.asTerm, ptr.asTerm, ptrMap.asTerm, objMap.asTerm))
+        .asExprOf[Unit]
+
+    def writeArray[t: Type](expr: Expr[StdLib.MutableSeq[t]], comp: p.Type, ptrMap: Expr[PtrMapTpe]): Expr[Long] = {
+      val elementSizeInBytes = tpeAsRuntimeTpe(comp).sizeInBytes()
+      '{
+        val arrBuffer = ${ allocateBuffer('{ ${ Expr(elementSizeInBytes) } * $expr.length_ }) }
+        val arrPtr    = $pointerOfBuffer(arrBuffer)
+        println(
+          s"[bind]: array  [${$expr.length_} * ${${ Expr(comp.repr) }}] ${$expr.data} => $arrBuffer(0x${arrPtr.toHexString})"
+        )
+        var i = 0
+        while (i < $expr.length_) {
+          ${
+            val elementOffset = '{ ${ Expr(elementSizeInBytes) } * i }
+            comp match {
+              case p.Type.Struct(name, _, _) =>
+                val ptr = callWrite(name, '{ $expr(i) }, ptrMap)
+                writePrim('arrBuffer, elementOffset, p.Type.Long, ptr)
+              case t =>
+                writePrim('arrBuffer, elementOffset, t, '{ $expr(i) })
+            }
+          }
+          i += 1
+        }
+        arrPtr
+      }
+    }
+
+    def writeMapping[t: Type](root: Expr[t], ptrMap: Expr[PtrMapTpe], mapping: StructMapping[q.Term]) = '{
+      val buffer = ${ allocateBuffer(Expr(mapping.sizeInBytes.toInt)) }
+      val ptr    = $pointerOfBuffer(buffer)
+      println(s"[bind]: object  ${$root} => $buffer(0x${ptr.toHexString})")
+      ${
+        Varargs(mapping.members.map { m =>
+          val memberOffset = Expr(m.offsetInBytes.toInt)
+          (root, m.tpe) match {
+            case ('{ $seq: StdLib.MutableSeq[t] }, p.Type.Array(comp)) =>
+              val ptr = writeArray[t](seq, comp, ptrMap)
+              writePrim('buffer, memberOffset, p.Type.Long, ptr)
+            case (_, p.Type.Struct(name, _, _)) =>
+              val ptr = callWrite(name, m.select(root.asTerm).asExpr, ptrMap)
+              writePrim('buffer, memberOffset, p.Type.Long, ptr)
+            case (_, _) =>
+              writePrim('buffer, memberOffset, m.tpe, m.select(root.asTerm).asExpr)
+          }
+        })
+      }
+      $ptrMap += ($root -> ptr)
+      ptr
+    }
+
+    def readArray[t: Type](
+        seq: Expr[StdLib.MutableSeq[t]],
+        comp: p.Type,
+        ptrMap: Expr[PtrMapTpe],
+        objMap: Expr[ObjMapTpe],
+        memberOffset: Expr[Int],
+        buffer: Expr[ByteBuffer],
+        mapping: StructMapping[q.Term]
+    ): Expr[Unit] = {
+      val elementSizeInBytes = tpeAsRuntimeTpe(comp).sizeInBytes()
+      '{
+        val arrayLen = ${
+          mapping.members.headOption match {
+            case Some(lengthMember) if lengthMember.tpe == p.Type.Int =>
+              Pickler
+                .readPrim(buffer, Expr(lengthMember.offsetInBytes.toInt), lengthMember.tpe)
+                .asExprOf[Int]
+            case _ =>
+              q.report.errorAndAbort(s"Illegal structure while encoding read for member ${mapping} ")
+          }
+        }
+        val arrPtr    = ${ readPrim(buffer, memberOffset, p.Type.Long).asExprOf[Long] }
+        val arrBuffer = $bufferOfPointer(arrPtr, ${ Expr(elementSizeInBytes) } * arrayLen)
+        var i         = 0
+        while (i < arrayLen) {
+          $seq(i) = ${
+            val elementOffset = '{ ${ Expr(elementSizeInBytes) } * i }
+            comp match {
+              case p.Type.Struct(name, _, _) =>
+                val arrElemPtr = readPrim('arrBuffer, elementOffset, p.Type.Long).asExprOf[Long]
+                callRead(name, '{ $seq(i) }, arrElemPtr, ptrMap, objMap).asExprOf[t]
+              case t =>
+                readPrim('arrBuffer, elementOffset, t).asExprOf[t]
+            }
+          }
+          i += 1
+        }
+      }
+    }
+
+    def readMapping[t: Type](
+        root: Expr[t],
+        ptr: Expr[Long],
+        ptrMap: Expr[PtrMapTpe],
+        objMap: Expr[ObjMapTpe],
+        mapping: StructMapping[q.Term]
+    ) = '{
+      val buffer = $bufferOfPointer($ptr, ${ Expr(mapping.sizeInBytes.toInt) })
+      println(s"[bind]: object  ${$root} <- $buffer(0x${$ptr.toHexString})")
+      ${
+        Varargs(
+          mapping.members.map { m =>
+            val memberOffset = Expr(m.offsetInBytes.toInt)
+            (root, m.tpe) match {
+              case ('{ $seq: StdLib.MutableSeq[t] }, p.Type.Array(comp)) =>
+                readArray[t](seq, comp, ptrMap, objMap, memberOffset, 'buffer, mapping)
+              case (_, p.Type.Struct(name, _, _)) =>
+                val structPtr = readPrim('buffer, memberOffset, p.Type.Long).asExprOf[Long]
+                val select    = m.select(root.asTerm).asExpr
+                if (m.mut) {
+                  q.Assign(m.select(root.asTerm), callRead(name, select, structPtr, ptrMap, objMap).asTerm)
+                    .asExprOf[Unit]
+                } else {
+                  callUpdate(name, select, structPtr, ptrMap, objMap)
+                }
+              case (_, _) =>
+                if (m.mut) {
+                  q.Assign(m.select(root.asTerm), readPrim('buffer, memberOffset, m.tpe).asTerm).asExprOf[Unit]
+                } else '{ () } // otherwise no-op
+            }
+          }
+        )
+      }
+    }
+
+    def writeMethod(symbol: q.Symbol, mapping: StructMapping[q.Term]) = mkMethodDef(symbol) {
+      case List(root: q.Term, ptrMap: q.Term) =>
+        (root.asExpr, mapping.write(root).asExpr, ptrMap.asExpr) match {
+          case ('{ $root: t }, '{ $rootAfterPrismExpr: u }, '{ $ptrMap: PtrMapTpe }) =>
+            '{
+              $ptrMap.get($root) match {
+                case Some(existing)        => existing
+                case None if $root == null => $ptrMap += ($root -> 0); 0
+                case None =>
+                  val rootAfterPrism = $rootAfterPrismExpr
+                  ${ writeMapping('rootAfterPrism, ptrMap, mapping) }
+              }
+            }
+        }
+    }
+
+    def readMethod(symbol: q.Symbol, mapping: StructMapping[q.Term]) = mkMethodDef(symbol) {
+      case List(root: q.Term, ptr: q.Term, ptrMap: q.Term, objMap: q.Term) =>
+        (root.asExpr, ptr.asExpr, ptrMap.asExpr, objMap.asExpr) match {
+          case ('{ $rootExpr: t }, '{ $ptrExpr: Long }, '{ $ptrMap: PtrMapTpe }, '{ $objMap: ObjMapTpe }) =>
+            '{
+              val root: t = $rootExpr
+              ($ptrMap.get(root), $ptrExpr) match {
+                case (_, 0) => null // object reassignment for var to null
+                case (Some(writePtr), readPtr) if writePtr == readPtr => // same ptr, do the update
+                  ${ readMapping('root, 'readPtr, ptrMap, objMap, mapping) }; root
+                case (Some(writePtr), readPtr) => // object reassignment for var
+                  // Make sure we update the old writePtr (possibly orphaned, unless reassigned somewhere else) first.
+                  // This is to make sure modified object without a root (e.g through reassignment) is corrected updated.
+                  ${ callUpdate(mapping.source.name, 'root, 'writePtr, ptrMap, objMap) }
+                  // Now, readPtr is either a new allocation or a an existing one, possibly shared.
+                  // We check that it hasn't already been read/updated yet (the object may be recursive) and proceed to
+                  // create the object.
+                  $objMap.get(readPtr) match {
+                    case Some(existing) => existing.asInstanceOf[t] // Existing allocation found, use it.
+                    case None =>
+                      throw new RuntimeException(
+                        s"Impl: restore 0x${readPtr.toHexString}: ${${ Expr(mapping.source.repr) }}"
+                      )
+                  }
+                case (None, readPtr) => // object not previously written, fail
+                  throw new RuntimeException(
+                    s"Val root object ${root} was not previously written, cannot restore from to 0x${readPtr.toHexString}"
+                  )
+              }
+            }
+        }
+    }
+    def updateMethod(symbol: q.Symbol, mapping: StructMapping[q.Term]) = mkMethodDef(symbol) {
+      case List(root: q.Term, ptr: q.Term, ptrMap: q.Term, objMap: q.Term) =>
+        (root.asExpr, ptr.asExpr, ptrMap.asExpr, objMap.asExpr) match {
+          case ('{ $rootExpr: t }, '{ $ptrExpr: Long }, '{ $ptrMap: PtrMapTpe }, '{ $objMap: ObjMapTpe }) =>
+            '{
+              val root = $rootExpr
+              ($ptrMap.get(root), $ptrExpr) match {
+                case (Some(0), 0) => () // was null, still null, no-op
+                case (Some(writePtr), readPtr) if writePtr == readPtr => // same ptr, do the update
+                  ${ readMapping('root, 'readPtr, ptrMap, objMap, mapping) }
+                  $objMap += (readPtr -> root)
+                case (Some(writePtr), readPtr) => // object reassignment for val, fail
+                  throw new RuntimeException(
+                    s"Cannot update immutable val, setting ${root} (0x${writePtr.toHexString}) to 0x${readPtr.toHexString}"
+                  )
+                case (None, readPtr) => // object not previously written, fail
+                  throw new RuntimeException(
+                    s"Val root object ${root} was not previously written, cannot restore from to 0x${readPtr.toHexString}"
+                  )
+              }
+              ()
+            }
+        }
+    }
+
+    val mappings   = reprs.keys.map(mkStructMapping(_, layouts)).map(m => m.source -> m).toMap
+    val writeDefs  = writeSymbols.map((sdef, symbol) => writeMethod(symbol, mappings(sdef))).toList
+    val readDefs   = readSymbols.map((sdef, symbol) => readMethod(symbol, mappings(sdef))).toList
+    val updateDefs = updateSymbols.map((sdef, symbol) => updateMethod(symbol, mappings(sdef))).toList
+
+    val allDefs = writeDefs ::: readDefs ::: updateDefs
+
+    (allDefs, callWrite, callRead, callUpdate)
+  }
 
 }

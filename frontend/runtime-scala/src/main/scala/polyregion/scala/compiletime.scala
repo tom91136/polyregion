@@ -284,49 +284,96 @@ object compiletime {
         val fnValues =
           ByteBuffer.allocate(${ Expr(captureTpeSizes.sum + returnTpeSize) }).order(ByteOrder.nativeOrder)
 
+        val ptrMap = _root_.scala.collection.mutable.Map[Any, Long]()
+
         ${
+
           q.Match(
             'found.asTerm,
             compilations.zipWithIndex.map { case ((config, compilation), i) =>
-              val layouts = compilation.layouts.map(l => p.Sym(l.name.toList) -> l).toMap
+              val layouts0 = compilation.layouts.map(l => p.Sym(l.name.toList) -> l).toMap
+
+              val lut     = prog.defs.map(s => s.name -> s).toMap
+              val layouts = prog.defs.map(sd => sd -> (layouts0(sd.name), prismRefs.get(sd.name))).toMap
+              val allReprsInCaptures = capturesWithStructDefs
+                .collect { case (_, Some(sdef), term) => Pickler.deriveAllRepr(lut, sdef, term.tpe) }
+                .reduceLeftOption(_ ++ _)
+                .getOrElse(Map.empty)
+
+              val (defs, write, read, update) = Pickler.generateAll(
+                lut,
+                layouts,
+                allReprsInCaptures,
+                '{ Platforms.pointerOfDirectBuffer(_) },
+                '{ Platforms.directBufferFromPointer(_, _) }
+              )
 
               q.CaseDef(
                 q.Literal(q.IntConstant(i)),
                 None,
-                bindCapturesToBuffer(
-                  prog.defs.map(sd => sd -> (layouts(sd.name), prismRefs.get(sd.name))).toMap,
-                  prog.defs.map(s => s.name -> s).toMap,
-                  'fnValues,
-                  queue,
-                  capturesWithStructDefs
-                ).asTerm
+                q.Block(
+                  defs,
+                  '{
+                    ${
+                      bindWrite(
+                        write(_, _, 'ptrMap),
+                        'fnValues,
+                        queue,
+                        capturesWithStructDefs
+                      )
+                    }
+
+                    println("Dispatch tid=" + Thread.currentThread.getId)
+                    println(s"fnTpeOrdinals=${fnTpeOrdinals.toList}")
+                    println(s"fnValues.array=${fnValues.array.toList}")
+                    // Dispatch.
+                    $queue.enqueueInvokeAsync(
+                      $moduleName,
+                      $fnName,
+                      fnTpeOrdinals,
+                      fnValues.array,
+                      rt.Policy($dim),
+                      { () =>
+                        println("Kernel completed, tid=" + Thread.currentThread.getId + " cb=" + cb_)
+
+                        val objMap = _root_.scala.collection.mutable.Map[Long, Any]()
+
+                        try
+                          ${
+                            Varargs(capturesWithStructDefs.map { case (named, maybeSdef, term) =>
+                              bindRead(
+                                read(_, _, _, 'ptrMap, 'objMap),
+                                update(_, _, _, 'ptrMap, 'objMap),
+                                'fnValues,
+                                queue,
+                                capturesWithStructDefs
+                              )
+                            })
+                          }
+                        catch {
+                          case e: Throwable =>
+                            e.printStackTrace()
+                            cb_(Left(new Exception("Cannot sync", e)))
+                        }
+
+                        ()
+
+                        // // $queue.syncAll(() => cb_(Right(())))
+                        // try $queue.syncAll(() => cb_(Right(())))
+                        // catch {
+                        //   case e: Throwable =>
+                        //     e.printStackTrace()
+                        //   // cb_(Left(new Exception("Cannot sync",e)))
+                        // }
+                      }
+                    )
+
+                  }.asTerm
+                )
               )
-            }
+            } :+ q.CaseDef(q.Wildcard(), None, '{ ??? }.asTerm)
           ).asExprOf[Unit]
         }
-
-        println("Dispatch tid=" + Thread.currentThread.getId)
-        println(s"fnTpeOrdinals=${fnTpeOrdinals.toList}")
-        println(s"fnValues.array=${fnValues.array.toList}")
-        // Dispatch.
-        $queue.enqueueInvokeAsync(
-          $moduleName,
-          $fnName,
-          fnTpeOrdinals,
-          fnValues.array,
-          rt.Policy($dim),
-          { () =>
-            println("Kernel completed, tid=" + Thread.currentThread.getId + " cb=" + cb_)
-
-            // $queue.syncAll(() => cb_(Right(())))
-            try $queue.syncAll(() => cb_(Right(())))
-            catch {
-              case e: Throwable =>
-                e.printStackTrace()
-              // cb_(Left(new Exception("Cannot sync",e)))
-            }
-          }
-        )
 
       }
     }
@@ -353,304 +400,8 @@ object compiletime {
   //  - (var) $ptr == nullptr => ${inst.a} := null
   //  - (var) $ptr != nullptr => ${inst.a} := f(q, ${inst.a} ?, fromPtr($ptr)) : A
 
-  def deriveAllRepr(using q: Quoted)(
-      lut: Map[p.Sym, p.StructDef],
-      sdef: p.StructDef,
-      repr: q.TypeRepr,
-      added: Set[p.Sym] = Set()
-  ): List[(p.StructDef, q.TypeRepr)] = {
-    val added0 = added + sdef.name
-    (sdef, repr.widenTermRefByName) :: sdef.members.flatMap(
-      _.named match {
-        case (p.Named(_, p.Type.Struct(name, _, _))) if added0.contains(name) => Nil
-        case (p.Named(member, p.Type.Struct(name, _, _))) =>
-          deriveAllRepr(lut, lut(name), q.TermRef(repr, member), added0)
-        case _ => Nil
-      }
-    )
-  }
-
-  private def mkMethodSym(using q: Quoted)(name: String, rtn: q.TypeRepr, args: (String, q.TypeRepr)*) =
-    q.Symbol.newMethod(
-      q.Symbol.spliceOwner,
-      name,
-      q.MethodType(args.map(_._1).toList)(paramInfosExp = _ => args.map(_._2).toList, resultTypeExp = _ => rtn)
-    )
-
-  private def mkMethodDef(using q: Quoted)(sym: q.Symbol)(impl: PartialFunction[List[q.Tree], Expr[Any]]) = q.DefDef(
-    sym,
-    {
-      case (argList0 :: Nil) =>
-        impl
-          .lift(argList0)
-          .fold(q.report.errorAndAbort(s"Definition is not defined for input ${argList0}"))(expr =>
-            Some(expr.asTerm.changeOwner(sym))
-          )
-      case bad => q.report.errorAndAbort(s"Unexpected argument in method body: expected ${sym.signature}, got ${bad}")
-    }
-  )
-
-  def generateAll(using q: Quoted)(
-      layouts: Map[p.StructDef, (ct.Layout, Option[polyregion.prism.TermPrism[Any, Any]])],
-      lut: Map[p.Sym, p.StructDef],
-      sdef: p.StructDef,
-      repr: q.TypeRepr
-  )(root: Expr[Any], ptrMap: Expr[PtrMapTpe]) = {
-    given Quotes = q.underlying
-
-    val sdefToRepr = deriveAllRepr(lut, sdef, repr).toMap
-
-    val writeReadSymbols = sdefToRepr.map((sdef, repr) =>
-      sdef -> (mkMethodSym(
-        s"write_${sdef.name.repr}",
-        q.TypeRepr.of[Long],
-        "root"   -> repr,
-        "ptrMap" -> q.TypeRepr.of[PtrMapTpe]
-      ), mkMethodSym(
-        s"read_${sdef.name.repr}",
-        repr,
-        "root"   -> repr,
-        "ptr"    -> q.TypeRepr.of[Long],
-        "ptrMap" -> q.TypeRepr.of[PtrMapTpe],
-        "objMap" -> q.TypeRepr.of[ObjMapTpe]
-      ), mkMethodSym(
-        s"update_${sdef.name.repr}",
-        q.TypeRepr.of[Unit],
-        "root"   -> repr,
-        "ptr"    -> q.TypeRepr.of[Long],
-        "ptrMap" -> q.TypeRepr.of[PtrMapTpe],
-        "objMap" -> q.TypeRepr.of[ObjMapTpe]
-      ))
-    )
-
-    def allocateBuffer(size: Expr[Int]) = '{ ByteBuffer.allocateDirect($size).order(ByteOrder.nativeOrder()) }
-
-    def callWrite(name: p.Sym, root: q.Term, ptrMap: Expr[PtrMapTpe]) =
-      q.Apply(q.Ref(writeReadSymbols(lut(name))._1), List(root, ptrMap.asTerm)).asExprOf[Long]
-
-    def callRead(name: p.Sym, root: q.Term, ptr: Expr[Long], ptrMap: Expr[PtrMapTpe], objMap: Expr[ObjMapTpe]) =
-      q.Apply(q.Ref(writeReadSymbols(lut(name))._2), List(root, ptr.asTerm, ptrMap.asTerm, objMap.asTerm)).asExpr
-
-    def callUpdate(name: p.Sym, root: q.Term, ptr: Expr[Long], ptrMap: Expr[PtrMapTpe], objMap: Expr[ObjMapTpe]) =
-      q.Apply(q.Ref(writeReadSymbols(lut(name))._3), List(root, ptr.asTerm, ptrMap.asTerm, objMap.asTerm))
-        .asExprOf[Unit]
-
-    def writeArray[t: Type](expr: Expr[StdLib.MutableSeq[t]], comp: p.Type, ptrMap: Expr[PtrMapTpe]): Expr[Long] = {
-      val elementSizeInBytes = Pickler.tpeAsRuntimeTpe(comp).sizeInBytes()
-      '{
-        val arrBuffer = ${ allocateBuffer('{ ${ Expr(elementSizeInBytes) } * $expr.length_ }) }
-        val arrPtr    = Platforms.pointerOfDirectBuffer(arrBuffer)
-        println(
-          s"[bind]: array  [${$expr.length_} * ${${ Expr(comp.repr) }}] ${$expr.data} => $arrBuffer(0x${arrPtr.toHexString})"
-        )
-        var i = 0
-        while (i < $expr.length_) {
-          ${
-            val elementOffset = '{ ${ Expr(elementSizeInBytes) } * i }
-            comp match {
-              case p.Type.Struct(name, _, _) =>
-                val ptr = callWrite(name, '{ $expr(i) }.asTerm, ptrMap)
-                Pickler.writePrim('arrBuffer, elementOffset, p.Type.Long, ptr)
-              case t =>
-                Pickler.writePrim('arrBuffer, elementOffset, t, '{ $expr(i) })
-            }
-          }
-          i += 1
-        }
-        arrPtr
-      }
-    }
-
-    def writeMapping[t: Type](root: Expr[t], ptrMap: Expr[PtrMapTpe], mapping: Pickler.StructMapping[q.Term]) = '{
-      val buffer = ${ allocateBuffer(Expr(mapping.sizeInBytes.toInt)) }
-      val ptr    = Platforms.pointerOfDirectBuffer(buffer)
-      println(s"[bind]: object  ${$root} => $buffer(0x${ptr.toHexString})")
-      ${
-        Varargs(mapping.members.map { m =>
-          val memberOffset = Expr(m.offsetInBytes.toInt)
-          (root, m.tpe) match {
-            case ('{ $seq: StdLib.MutableSeq[t] }, p.Type.Array(comp)) =>
-              val ptr = writeArray[t](seq, comp, ptrMap)
-              Pickler.writePrim('buffer, memberOffset, p.Type.Long, ptr)
-            case (_, p.Type.Struct(name, _, _)) =>
-              val ptr = callWrite(name, m.select(root.asTerm), ptrMap)
-              Pickler.writePrim('buffer, memberOffset, p.Type.Long, ptr)
-            case (_, _) =>
-              Pickler.writePrim('buffer, memberOffset, m.tpe, m.select(root.asTerm).asExpr)
-          }
-        })
-      }
-      $ptrMap += ($root -> ptr)
-      ptr
-    }
-
-    def readArray[t: Type](
-        seq: Expr[StdLib.MutableSeq[t]],
-        comp: p.Type,
-        ptrMap: Expr[PtrMapTpe],
-        objMap: Expr[ObjMapTpe],
-        memberOffset: Expr[Int],
-        buffer: Expr[ByteBuffer],
-        mapping: Pickler.StructMapping[q.Term]
-    ): Expr[Unit] = {
-      val elementSizeInBytes = Pickler.tpeAsRuntimeTpe(comp).sizeInBytes()
-      '{
-        val arrayLen = ${
-          mapping.members.headOption match {
-            case Some(lengthMember) if lengthMember.tpe == p.Type.Int =>
-              Pickler
-                .readPrim(buffer, Expr(lengthMember.offsetInBytes.toInt), lengthMember.tpe)
-                .asExprOf[Int]
-            case _ =>
-              q.report.errorAndAbort(s"Illegal structure while encoding read for member ${mapping} ")
-          }
-        }
-        val arrPtr    = ${ Pickler.readPrim(buffer, memberOffset, p.Type.Int).asExprOf[Int] }
-        val arrBuffer = Platforms.directBufferFromPointer(arrPtr, ${ Expr(elementSizeInBytes) } * arrayLen)
-        var i         = 0
-        while (i < arrayLen) {
-          $seq(i) = ${
-            val elementOffset = '{ ${ Expr(elementSizeInBytes) } * i }
-            comp match {
-              case p.Type.Struct(name, _, _) =>
-                val arrElemPtr = Pickler.readPrim('arrBuffer, elementOffset, p.Type.Long).asExprOf[Long]
-                callRead(name, '{ $seq(i) }.asTerm, arrElemPtr, ptrMap, objMap).asExprOf[t]
-              case t =>
-                Pickler.readPrim('arrBuffer, elementOffset, t).asExprOf[t]
-            }
-          }
-          i += 1
-        }
-      }
-    }
-
-    def readMapping[t: Type](
-        root: Expr[t],
-        ptr: Expr[Long],
-        ptrMap: Expr[PtrMapTpe],
-        objMap: Expr[ObjMapTpe],
-        mapping: Pickler.StructMapping[q.Term]
-    ) = '{
-      val buffer = Platforms.directBufferFromPointer($ptr, ${ Expr(mapping.sizeInBytes.toInt) })
-      println(s"[bind]: object  ${$root} <- $buffer(0x${$ptr.toHexString})")
-      ${
-        Varargs(
-          mapping.members.map { m =>
-            val memberOffset = Expr(m.offsetInBytes.toInt)
-            (root, m.tpe) match {
-              case ('{ $seq: StdLib.MutableSeq[t] }, p.Type.Array(comp)) =>
-                readArray[t](seq, comp, ptrMap, objMap, memberOffset, 'buffer, mapping)
-              case (_, p.Type.Struct(name, _, _)) =>
-                val structPtr = Pickler.readPrim('buffer, memberOffset, p.Type.Long).asExprOf[Long]
-                val select    = m.select(root.asTerm)
-                if (m.mut) {
-                  q.Assign(m.select(root.asTerm), callRead(name, select, structPtr, ptrMap, objMap).asTerm)
-                    .asExprOf[Unit]
-                } else {
-                  callUpdate(name, select, structPtr, ptrMap, objMap)
-                }
-              case (_, _) =>
-                if (m.mut) {
-                  q.Assign(m.select(root.asTerm), Pickler.readPrim('buffer, memberOffset, m.tpe).asTerm).asExprOf[Unit]
-                } else '{ () } // otherwise no-op
-            }
-          }
-        )
-      }
-    }
-
-    def writeMethod(symbol: q.Symbol, mapping: Pickler.StructMapping[q.Term]) = mkMethodDef(symbol) {
-      case List(root: q.Term, ptrMap: q.Term) =>
-        (root.asExpr, mapping.write(root).asExpr, ptrMap.asExpr) match {
-          case ('{ $root: t }, '{ $rootAfterPrismExpr: u }, '{ $ptrMap: PtrMapTpe }) =>
-            '{
-              $ptrMap.get($root) match {
-                case Some(existing)        => existing
-                case None if $root == null => $ptrMap += ($root -> 0); 0
-                case None =>
-                  val rootAfterPrism = $rootAfterPrismExpr
-                  ${ writeMapping('rootAfterPrism, ptrMap, mapping) }
-              }
-            }
-        }
-    }
-
-    def readMethod(symbol: q.Symbol, mapping: Pickler.StructMapping[q.Term]) = mkMethodDef(symbol) {
-      case List(root: q.Term, ptr: q.Term, ptrMap: q.Term, objMap: q.Term) =>
-        (root.asExpr, ptr.asExpr, ptrMap.asExpr, objMap.asExpr) match {
-          case ('{ $rootExpr: t }, '{ $ptrExpr: Long }, '{ $ptrMap: PtrMapTpe }, '{ $objMap: ObjMapTpe }) =>
-            '{
-              val root: t = $rootExpr
-              ($ptrMap.get(root), $ptrExpr) match {
-                case (_, 0) => null // object reassignment for var to null
-                case (Some(writePtr), readPtr) if writePtr == readPtr => // same ptr, do the update
-                  ${ readMapping('root, 'readPtr, ptrMap, objMap, mapping) }; root
-                case (Some(writePtr), readPtr) => // object reassignment for var
-                  // Make sure we update the old writePtr (possibly orphaned, unless reassigned somewhere else) first.
-                  // This is to make sure modified object without a root (e.g through reassignment) is corrected updated.
-                  ${ callUpdate(mapping.source.name, 'root.asTerm, 'writePtr, ptrMap, objMap) }
-                  // Now, readPtr is either a new allocation or a an existing one, possibly shared.
-                  // We check that it hasn't already been read/updated yet (the object may be recursive) and proceed to
-                  // create the object.
-                  $objMap.get(readPtr) match {
-                    case Some(existing) => existing.asInstanceOf[t] // Existing allocation found, use it.
-                    case None =>
-                      throw new RuntimeException(
-                        s"Impl: restore 0x${readPtr.toHexString}: ${${ Expr(mapping.source.repr) }}"
-                      )
-                  }
-                case (None, readPtr) => // object not previously written, fail
-                  throw new RuntimeException(
-                    s"Val root object ${root} was not previously written, cannot restore from to 0x${readPtr.toHexString}"
-                  )
-              }
-            }
-        }
-    }
-    def updateMethod(symbol: q.Symbol, mapping: Pickler.StructMapping[q.Term]) = mkMethodDef(symbol) {
-      case List(root: q.Term, ptr: q.Term, ptrMap: q.Term, objMap: q.Term) =>
-        (root.asExpr, ptr.asExpr, ptrMap.asExpr, objMap.asExpr) match {
-          case ('{ $rootExpr: t }, '{ $ptrExpr: Long }, '{ $ptrMap: PtrMapTpe }, '{ $objMap: ObjMapTpe }) =>
-            '{
-              val root = $rootExpr
-              ($ptrMap.get(root), $ptrExpr) match {
-                case (Some(0), 0) => () // was null, still null, no-op
-                case (Some(writePtr), readPtr) if writePtr == readPtr => // same ptr, do the update
-                  ${ readMapping('root, 'readPtr, ptrMap, objMap, mapping) }
-                  $objMap += (readPtr -> root)
-                case (Some(writePtr), readPtr) => // object reassignment for val, fail
-                  throw new RuntimeException(
-                    s"Cannot update immutable val, setting ${root} (0x${writePtr.toHexString}) to 0x${readPtr.toHexString}"
-                  )
-                case (None, readPtr) => // object not previously written, fail
-                  throw new RuntimeException(
-                    s"Val root object ${root} was not previously written, cannot restore from to 0x${readPtr.toHexString}"
-                  )
-              }
-              ()
-            }
-        }
-    }
-
-    val defs = writeReadSymbols.toList
-      .map((sdef, x) => Pickler.mkStructMapping(sdef, layouts) -> x)
-      .flatMap { case (mapping, (writeSymbol, readSymbol, updateSymbol)) =>
-        List(
-          writeMethod(writeSymbol, mapping),  //
-          readMethod(readSymbol, mapping),    //
-          updateMethod(updateSymbol, mapping) //
-        )
-      }
-
-      
-      // callUpdate(sdef.name, root.asTerm,  ptrMap )
-
-    q.Block(defs, callWrite(sdef.name, root.asTerm, ptrMap).asTerm)
-  }
-
-  def bindCapturesToBuffer(using q: Quoted)(
-      layouts: Map[p.StructDef, (ct.Layout, Option[polyregion.prism.TermPrism[Any, Any]])],
-      lut: Map[p.Sym, p.StructDef],
+  def bindWrite(using q: Quoted)(
+      write: (p.Sym, Expr[Any]) => Expr[Long],
       target: Expr[ByteBuffer],
       queue: Expr[rt.Device.Queue],
       capturesWithStructDefs: List[(p.Named, Option[p.StructDef], q.Term)]
@@ -673,10 +424,8 @@ object compiletime {
             )
           case (s @ p.Type.Struct(_, _, _), Some(sdef), '{ $ref: t }) =>
             println(s"$ref = " + ref.asTerm.symbol.flags.show)
-            val rtn = generateAll(layouts, lut, sdef, ref.asTerm.tpe)(
-              ref,
-              '{ _root_.scala.collection.mutable.Map[Any, Long]() }
-            ).asExpr
+
+            val rtn = write(sdef.name, ref)
 
             Pickler.writePrim(target, Expr(byteOffset), p.Type.Long, rtn)
 
@@ -686,6 +435,54 @@ object compiletime {
               s"Unexpected type ${t.repr} at parameter boundary: repr=${ref.show} name=${name.repr}"
             )
 
+        }
+        (byteOffset + Pickler.tpeAsRuntimeTpe(name.tpe).sizeInBytes, exprs :+ expr)
+    }
+    Expr.block(stmts, '{ () })
+  }
+
+  def bindRead(using q: Quoted)(
+      read: (p.Sym, Expr[Any], Expr[Long]) => Expr[Any],
+      update: (p.Sym, Expr[Any], Expr[Long]) => Expr[Unit],
+      target: Expr[ByteBuffer],
+      queue: Expr[rt.Device.Queue],
+      capturesWithStructDefs: List[(p.Named, Option[p.StructDef], q.Term)]
+  ) = {
+    given Quotes = q.underlying
+    val (_, stmts) = capturesWithStructDefs.zipWithIndex.foldLeft((0, List.empty[Expr[Any]])) {
+      case ((byteOffset, exprs), ((name, structDef, ref), idx)) =>
+        println(
+          s"[Bind] <-  [$idx, offset=${byteOffset}]  repr=${ref.show} name=${name.repr} (${structDef.map(_.repr)})"
+        )
+
+        val mutable = ref.symbol.flags.is(q.Flags.Mutable)
+
+        val expr = (name.tpe, structDef, ref.asExpr) match {
+          case (p.Type.Array(comp), None, _) =>
+            throw new RuntimeException(
+              s"Top level arrays at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
+            )
+          case (s @ p.Type.Struct(_, _, _), None, _) =>
+            throw new RuntimeException(
+              s"Struct type without definition at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
+            )
+          case (s @ p.Type.Struct(_, _, _), Some(sdef), '{ $ref: t }) =>
+            println(s"$ref = " + ref.asTerm.symbol.flags.show)
+            val ptr = Pickler.readPrim(target, Expr(byteOffset), p.Type.Long).asExprOf[Long]
+            if (mutable) {
+              q.Assign(ref.asTerm, read(sdef.name, ref, ptr).asTerm).asExprOf[Unit]
+            } else {
+              update(sdef.name, ref, ptr)
+            }
+          case (t, None, '{ $ref: t }) =>
+            '{
+              println(s"[Bind] skipping primitive ${$ref}")
+            }
+          // Pickler.writePrim(target, Expr(byteOffset), t, ref)
+          case (t, _, _) =>
+            throw new RuntimeException(
+              s"Unexpected type ${t.repr} at parameter boundary: repr=${ref.show} name=${name.repr}"
+            )
         }
         (byteOffset + Pickler.tpeAsRuntimeTpe(name.tpe).sizeInBytes, exprs :+ expr)
     }
