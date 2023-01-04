@@ -72,10 +72,12 @@ class ValueReturnSuite extends BaseSuite {
     // val m = new polyregion.ValueReturnSuite#MyCls
     offload0 {
       val b = new MyCls
-      b.fieldA = 42 + m(0)
+      b.fieldA = 42 //+ m(0)
+      box.value.fieldA = 20
       box.value = b
     }
-    assertEquals(box.value.fieldA, 43)
+    assertEquals(a.fieldA, 20)
+    assertEquals(box.value.fieldA, 42)
   }
 
   // assert values survives round trip

@@ -338,7 +338,7 @@ object compiletime {
 
                         val objMap = _root_.scala.collection.mutable.Map[Long, Any]()
 
-                        try
+                        try {
                           ${
                             Varargs(capturesWithStructDefs.map { case (named, maybeSdef, term) =>
                               bindRead(
@@ -350,7 +350,9 @@ object compiletime {
                               )
                             })
                           }
-                        catch {
+                          println("Restore complete")
+                          cb_(Right(()))
+                        } catch {
                           case e: Throwable =>
                             e.printStackTrace()
                             cb_(Left(new Exception("Cannot sync", e)))

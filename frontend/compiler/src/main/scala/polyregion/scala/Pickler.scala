@@ -288,7 +288,7 @@ object Pickler {
       }
     }
 
-    def readMapping[t: Type](
+    def updateMapping[t: Type](
         root: Expr[t],
         ptr: Expr[Long],
         ptrMap: Expr[PtrMapTpe],
@@ -296,7 +296,7 @@ object Pickler {
         mapping: StructMapping[q.Term]
     ) = '{
       val buffer = $bufferOfPointer($ptr, ${ Expr(mapping.sizeInBytes.toInt) })
-      println(s"[bind]: object  ${$root} <- $buffer(0x${$ptr.toHexString})")
+      println(s"[bind]: update object  ${$root} <- $buffer(0x${$ptr.toHexString})")
       ${
         Varargs(
           mapping.members.map { m =>
@@ -320,6 +320,60 @@ object Pickler {
             }
           }
         )
+      }
+    }
+
+    def readMapping[t: Type](
+        ptr: Expr[Long],
+        ptrMap: Expr[PtrMapTpe],
+        objMap: Expr[ObjMapTpe],
+        mapping: StructMapping[q.Term]
+    ): Expr[t] = '{
+      val buffer = $bufferOfPointer($ptr, ${ Expr(mapping.sizeInBytes.toInt) })
+      println(s"[bind]: mk object ${${ Expr(q.TypeRepr.of[t].show) }} <- $buffer(0x${$ptr.toHexString})")
+      ${
+
+        // See if we have a ctor:
+
+        println(">> " + q.TypeRepr.of[t].typeSymbol.primaryConstructor.tree)
+        q.TypeRepr.of[t].typeSymbol.primaryConstructor.tree match {
+          case q.DefDef("<init>", ps, _, None) if ps.forall {
+                case q.TypeParamClause(_) | q.TermParamClause(Nil) => true
+                case _                                             => false
+              } => // default no-arg ctor
+            // TODO make sure we copy in the type args
+            '{
+              val root = ${
+                q.Select
+                  .unique(q.New(q.TypeIdent(q.TypeRepr.of[t].typeSymbol)), "<init>")
+                  .appliedToArgs(Nil)
+                  .asExpr
+              }.asInstanceOf[t]
+              ${ updateMapping('root, ptr, ptrMap, objMap, mapping) }
+              root
+            }
+          case q.DefDef("<init>", xs :: Nil, _, None) =>
+            val terms = mapping.members.map { m =>
+              val memberOffset = Expr(m.offsetInBytes.toInt)
+              m.tpe match {
+                case p.Type.Array(comp) =>
+                  ???
+                // readArray[t](seq, comp, ptrMap, objMap, memberOffset, 'buffer, mapping)
+                case p.Type.Struct(name, _, _) =>
+                  val structPtr = readPrim('buffer, memberOffset, p.Type.Long).asExprOf[Long]
+                  callRead(name, '{ null }, structPtr, ptrMap, objMap).asTerm
+                case _ => readPrim('buffer, memberOffset, m.tpe).asTerm
+              }
+            }
+            q.Select
+              .unique(q.New(q.TypeIdent(q.TypeRepr.of[t].typeSymbol)), "<init>")
+              .appliedToArgs(terms)
+              .asExprOf[t]
+          case _ => ???
+        }
+
+        // println("ctor = " + q.TypeRepr.of[t].typeSymbol.primaryConstructor.tree)
+
       }
     }
 
@@ -348,7 +402,7 @@ object Pickler {
               ($ptrMap.get(root), $ptrExpr) match {
                 case (_, 0) => null // object reassignment for var to null
                 case (Some(writePtr), readPtr) if writePtr == readPtr => // same ptr, do the update
-                  ${ readMapping('root, 'readPtr, ptrMap, objMap, mapping) }; root
+                  ${ updateMapping('root, 'readPtr, ptrMap, objMap, mapping) }; root
                 case (Some(writePtr), readPtr) => // object reassignment for var
                   // Make sure we update the old writePtr (possibly orphaned, unless reassigned somewhere else) first.
                   // This is to make sure modified object without a root (e.g through reassignment) is corrected updated.
@@ -358,10 +412,7 @@ object Pickler {
                   // create the object.
                   $objMap.get(readPtr) match {
                     case Some(existing) => existing.asInstanceOf[t] // Existing allocation found, use it.
-                    case None =>
-                      throw new RuntimeException(
-                        s"Impl: restore 0x${readPtr.toHexString}: ${${ Expr(mapping.source.repr) }}"
-                      )
+                    case None           => ${ readMapping[t]('readPtr, ptrMap, objMap, mapping) }
                   }
                 case (None, readPtr) => // object not previously written, fail
                   throw new RuntimeException(
@@ -380,7 +431,7 @@ object Pickler {
               ($ptrMap.get(root), $ptrExpr) match {
                 case (Some(0), 0) => () // was null, still null, no-op
                 case (Some(writePtr), readPtr) if writePtr == readPtr => // same ptr, do the update
-                  ${ readMapping('root, 'readPtr, ptrMap, objMap, mapping) }
+                  ${ updateMapping('root, 'readPtr, ptrMap, objMap, mapping) }
                   $objMap += (readPtr -> root)
                 case (Some(writePtr), readPtr) => // object reassignment for val, fail
                   throw new RuntimeException(
