@@ -68,36 +68,37 @@ class ValueReturnSuite extends BaseSuite {
 
     var box = new MyBox
 
-    val m = ListBuffer(1L, 2L, 3L)
+    val m = ListBuffer(1 , 2 , 3 )
     // val m = new polyregion.ValueReturnSuite#MyCls
 
-    val u = (42L,42.0)
+    val u = (42,42.0)
     // val v = (41.0,41)
 
-    // val vv = ((1 ), 2)
+    val vv = ((1,2 ), 2)
 
     // val xx = 2
     offload0 {
-      val box0 = box
+      // val box0 = box
 
-      m(0) =  box0.value.fieldA.toLong
+      // m(0) =  box0.value.fieldA.toLong
 
-      val b = new MyCls
-      b.fieldA = 42
-      val b1 = b
-      // b.fieldA = 42 + m(0)
-      box0.value.fieldA = 20
+      // val b = new MyCls
+      // b.fieldA = 42
+      // val b1 = b
+      // // b.fieldA = 42 + m(0)
+      // box0.value.fieldA = 20
       
-      // val ua = xx
-      // val u0 = u
-      val u1 = u
+      // // val ua = xx
+      // // val u0 = u
+      // val u1 = u
 
-      // val xxx = u._1
-      // val m = u0._1 + u0._1
-      // val i = vv._1
-      m(1) =  123
-      m(2) =  456
-       //+ xx  //+ v._2 //+ vv._1._1
+      // // val xxx = u._1
+      // // val m = u0._1 + u0._1
+      // // val i = vv._1
+      // m(1) =  123
+      // m(2) =  456
+      //  m(1) =     vv._1._1
+       m(1) = u._1
     }
 
     // assertEquals(m(0), 10L)

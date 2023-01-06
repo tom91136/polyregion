@@ -126,7 +126,7 @@ object Pickler {
   }
 
   def deriveAllRepr(using q: Quoted)( //
-      lut: Map[p.Sym, p.StructDef],
+      lut: Map[p.Sym, (p.StructDef, Option[polyregion.prism.Prism])],
       sdef: p.StructDef,
       repr: q.TypeRepr
   ): Map[p.StructDef, q.TypeRepr] = {
@@ -135,8 +135,22 @@ object Pickler {
       (sdef, repr.widenTermRefByName) :: sdef.members.flatMap(
         _.named match {
           case (p.Named(_, p.Type.Struct(name, _, _))) if added0.contains(name) => Nil
-          case (p.Named(member, p.Type.Struct(name, _, _))) => go(lut(name), q.TermRef(repr, member), added0)
-          case _                                            => Nil
+          case (p.Named(member, p.Type.Struct(name, _, _))) =>
+            lut(name) match {
+              case (sdef, None)                     => go(sdef, q.TermRef(repr, member), added0)
+              case (sdef, Some((_, (from, to, x)))) =>
+                // If we have a prism of struct def that has a nested structs, apply the prism then find out the type repr.
+                // This is required because the mirrored struct will almost certainly have a different layout compare the source;
+                // the field names and type will not match.
+                given Quotes = q.underlying
+                repr.widenTermRefByName.asType match {
+                  case '[t] =>
+                    val prismRepr =
+                      from(q.underlying, '{ _root_.scala.compiletime.uninitialized: t }).asTerm.tpe.widenTermRefByName
+                    go(sdef, q.TermRef(prismRepr, member), added0)
+                }
+            }
+          case _ => Nil
         }
       )
     }
@@ -334,29 +348,35 @@ object Pickler {
             val memberOffset = Expr(m.offsetInBytes.toInt)
             (root, m.tpe) match {
               case (_, p.Type.Array(comp)) =>
-                
                 (
                   mapping.write,
                   root.asTerm.tpe.widenTermRefByName match {
                     case q.AppliedType(_, x :: Nil) => x.asType
                     case t =>
-                      q.report.errorAndAbort(s"Unexpected type while matching on arrays ${t.show}, the correct shape is F[t]")
+                      q.report.errorAndAbort(
+                        s"Unexpected type while matching on arrays ${t.show}, the correct shape is F[t]"
+                      )
                   }
                 ) match {
                   case (Some((_, write)), '[t]) =>
                     val seq = write(root.asTerm).asExprOf[MutableSeq[t]]
                     readArray[t](seq, comp, ptrMap, objMap, memberOffset, 'buffer, mapping)
-                  case (_, _) => q.report.errorAndAbort("Missing write prism for array type, something isn't right here")
+                  case (_, _) =>
+                    q.report.errorAndAbort("Missing write prism for array type, something isn't right here")
                 }
 
               case (_, p.Type.Struct(name, _, _)) =>
                 val structPtr = readPrim('buffer, memberOffset, p.Type.Long).asExprOf[Long]
-                val select    = m.select(root.asTerm).asExpr
                 if (m.mut) {
-                  q.Assign(m.select(root.asTerm), callRead(name, select, structPtr, ptrMap, objMap).asTerm)
-                    .asExprOf[Unit]
+                  q.Assign(
+                    m.select(root.asTerm),
+                    callRead(name, m.select(root.asTerm).asExpr, structPtr, ptrMap, objMap).asTerm
+                  ).asExprOf[Unit]
                 } else {
-                  callUpdate(name, select, structPtr, ptrMap, objMap)
+                  // Don't update if there's a prism
+                  if (!mapping.write.isDefined) {
+                    callUpdate(name, m.select(root.asTerm).asExpr, structPtr, ptrMap, objMap)
+                  } else '{ () }
                 }
               case (_, _) =>
                 if (m.mut) {

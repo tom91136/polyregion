@@ -296,7 +296,9 @@ object compiletime {
               val lut     = prog.defs.map(s => s.name -> s).toMap
               val layouts = prog.defs.map(sd => sd -> (layouts0(sd.name), prismRefs.get(sd.name))).toMap
               val allReprsInCaptures = capturesWithStructDefs
-                .collect { case (_, Some(sdef), term) => Pickler.deriveAllRepr(lut, sdef, term.tpe) }
+                .collect { case (_, Some(sdef), term) =>
+                  Pickler.deriveAllRepr(lut.map((s, sd) => s -> (sd, prismRefs.get(s))), sdef, term.tpe)
+                }
                 .reduceLeftOption(_ ++ _)
                 .getOrElse(Map.empty)
 
@@ -341,13 +343,13 @@ object compiletime {
                         try {
                           ${
                             // Varargs(capturesWithStructDefs.map { case (named, maybeSdef, term) =>
-                              bindRead(
-                                read(_, _, _, 'ptrMap, 'objMap),
-                                update(_, _, _, 'ptrMap, 'objMap),
-                                'fnValues,
-                                queue,
-                                capturesWithStructDefs
-                              )
+                            bindRead(
+                              read(_, _, _, 'ptrMap, 'objMap),
+                              update(_, _, _, 'ptrMap, 'objMap),
+                              'fnValues,
+                              queue,
+                              capturesWithStructDefs
+                            )
                             // })
                           }
                           println("Restore complete")
