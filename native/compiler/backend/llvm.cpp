@@ -178,7 +178,10 @@ llvm::Value *LLVM::AstTransformer::mkTermVal(const Term::Any &ref) {
   using llvm::ConstantInt;
   return variants::total(
       *ref, //
-      [&](const Term::Select &x) -> llvm::Value * { return load(B, mkSelectPtr(x), mkTpe(x.tpe)); },
+      [&](const Term::Select &x) -> llvm::Value * {
+        auto tpe = mkTpe(x.tpe);
+        return load(B, mkSelectPtr(x), tpe->isStructTy() ? B.getPtrTy() : tpe);
+      },
       [&](const Term::Poison &x) -> llvm::Value * {
         if (auto tpe = mkTpe(x.tpe); llvm::isa<llvm::PointerType>(tpe)) {
           return llvm::ConstantPointerNull::get(static_cast<llvm::PointerType *>(tpe));
@@ -1141,7 +1144,7 @@ std::vector<compiler::Layout> LLVM::resolveLayouts(const std::vector<StructDef> 
       auto layout = dataLayout.getStructLayout(structTy);
       std::vector<compiler::Member> members;
       for (size_t i = 0; i < it->second.members.size(); ++i) {
-        members.emplace_back(it->second.members[i].named,                                   //
+        members.emplace_back(it->second.members[i].named,                             //
                              layout->getElementOffset(i),                             //
                              dataLayout.getTypeAllocSize(structTy->getElementType(i)) //
         );

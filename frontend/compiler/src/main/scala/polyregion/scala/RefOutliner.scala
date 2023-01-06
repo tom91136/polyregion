@@ -50,7 +50,7 @@ object RefOutliner {
       if !localDefTable.contains(root.symbol)
       // if !root.symbol.maybeOwner.flags.is(q.Flags.Macro)
 
-    } yield (root, path.toVector, s)).distinct.sortBy(_._2.length)
+    } yield (root, ("this" :: path).toVector, s)).distinctBy(_._3.symbol).sortBy(_._2.length)
 
     // remove refs if already covered by the same root
     sharedValRefs = normalisedForeignValRefs
@@ -58,10 +58,13 @@ object RefOutliner {
         case (acc, x @ (_, _, q.Ident(_))) =>
           println(s">>>! $x ${acc}")
           acc :+ x
-        case (acc, x @ (root, path, s@q.Select(i, _))) =>
+        case (acc, x @ (root, path, s @ q.Select(i, _))) =>
           println(s">>>  $root ~ $path $i ${acc} ${s.symbol.flags.is(q.Flags.Mutable)}")
-          if(s.symbol.flags.is(q.Flags.Mutable)) acc
-          else acc.filterNot((root0, path0, _) => root.symbol == root0.symbol && path.startsWith(path0)) :+ x
+          if (s.symbol.flags.is(q.Flags.Mutable)) acc
+          else {
+            if (acc.exists((root0, path0, _) => root.symbol == root0.symbol && path.startsWith(path0))) acc
+            else acc :+ x
+          }
         case (_, (_, _, r)) =>
           // not recoverable, the API shape is different
           q.report.errorAndAbort(s"Unexpected val (reference) kind while outlining", r.asExpr)
@@ -80,9 +83,9 @@ object RefOutliner {
     )
     log <- log.info(
       "Normalised",
-      normalisedForeignValRefs.map((root, path, x) =>
-        s"${x.show}(symbol=${x.symbol}, root=$root, path=${path.mkString})"
-      )*
+      normalisedForeignValRefs
+        .distinctBy(_._3.symbol)
+        .map((root, path, x) => s"${x.show}(symbol=${x.symbol}, root=$root, path=${path.mkString(".")})")*
     )
     log <- log.info(
       "Root collapsed",
@@ -124,8 +127,10 @@ object RefOutliner {
     log <- log.info(
       s"Typed",
       filteredTypedRefs.map { case (root, ref, value -> tpe) =>
-        s"${ref.show}(symbol=${ref.symbol}, owner=${ref.symbol.owner}, root=${root}${if (root == ref) ";self"
-        else ""}) : ${tpe} = ${value}"
+        s"${ref.show}(symbol=${ref.symbol}, owner=${ref.symbol.owner}, root=${root}${
+            if (root == ref) ";self"
+            else ""
+          }) : ${tpe} = ${value}"
       }*
     )
 

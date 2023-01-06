@@ -7,6 +7,7 @@ import polyregion.prism.StdLib
 
 import java.nio.{ByteBuffer, ByteOrder}
 import scala.quoted.*
+import polyregion.prism.StdLib.MutableSeq
 
 object Pickler {
 
@@ -74,7 +75,9 @@ object Pickler {
   private case class StructMapping[A](
       source: p.StructDef,
       sizeInBytes: Long,
-      write: A => A,
+      write: Option[(p.Mirror, A => A)],
+      read: Option[(p.Mirror, A => A)],
+      // update: Option[(A, A) => A],
       members: List[StructMapping.Member[A]]
   )
   private object StructMapping {
@@ -83,7 +86,7 @@ object Pickler {
 
   private def mkStructMapping(using q: Quoted)( //
       sdef: p.StructDef,
-      layouts: Map[p.StructDef, (ct.Layout, Option[polyregion.prism.TermPrism[Any, Any]])]
+      layouts: Map[p.StructDef, (ct.Layout, Option[polyregion.prism.Prism])]
   ): StructMapping[q.Term] = {
     val (layout, maybePrism) = layouts
       .get(sdef)
@@ -97,11 +100,29 @@ object Pickler {
         )
         .getOrElse(q.report.errorAndAbort(s"Layout $layout is missing ${named.repr} from ${sdef.repr}"))
     }
-    val write = maybePrism match {
-      case None            => (root: q.Term) => root
-      case Some((from, _)) => (root: q.Term) => from(q.underlying, root.asExpr).asTerm
-    }
-    StructMapping(sdef, layout.sizeInBytes, write, members)
+
+    val (write, read) = maybePrism.map { case (mirror, (write, read, update)) =>
+      (
+        (mirror, (root: q.Term) => write(q.underlying, root.asExpr).asTerm),
+        (mirror, (restored: q.Term) => read(q.underlying, restored.asExpr).asTerm)
+      )
+    }.unzip
+
+    // val (write, read, update) = maybePrism match {
+    //   case None =>
+    //     (
+    //       (root: q.Term) => root,
+    //       (root: q.Term) => root,
+    //       // (root: q.Term, restored: q.Term) => root
+    //     )
+    //   case Some((write, read, update)) =>
+    //     (
+    //       (root: q.Term) => write(q.underlying, root.asExpr).asTerm,
+    //       (root: q.Term) => read(q.underlying, root.asExpr).asTerm,
+    //       // (root: q.Term, restored: q.Term) => update(q.underlying, root.asExpr, restored.asExpr).asTerm
+    //     )
+    // }
+    StructMapping(sdef, layout.sizeInBytes, write, read, members)
   }
 
   def deriveAllRepr(using q: Quoted)( //
@@ -144,7 +165,7 @@ object Pickler {
 
   def generateAll(using q: Quoted)(
       lut: Map[p.Sym, p.StructDef],
-      layouts: Map[p.StructDef, (ct.Layout, Option[polyregion.prism.TermPrism[Any, Any]])],
+      layouts: Map[p.StructDef, (ct.Layout, Option[polyregion.prism.Prism])],
       reprs: Map[p.StructDef, q.TypeRepr],
       pointerOfBuffer: Expr[ByteBuffer => Long],
       bufferOfPointer: Expr[(Long, Long) => ByteBuffer]
@@ -205,7 +226,7 @@ object Pickler {
         val arrBuffer = ${ allocateBuffer('{ ${ Expr(elementSizeInBytes) } * $expr.length_ }) }
         val arrPtr    = $pointerOfBuffer(arrBuffer)
         println(
-          s"[bind]: array  [${$expr.length_} * ${${ Expr(comp.repr) }}] ${$expr.data} => $arrBuffer(0x${arrPtr.toHexString})"
+          s"[bind]: write array  [${$expr.length_} * ${${ Expr(comp.repr) }}] ${$expr.data} => $arrBuffer(0x${arrPtr.toHexString})"
         )
         var i = 0
         while (i < $expr.length_) {
@@ -225,22 +246,27 @@ object Pickler {
       }
     }
 
-    def writeMapping[t: Type](root: Expr[t], ptrMap: Expr[PtrMapTpe], mapping: StructMapping[q.Term]) = '{
+    def writeMapping[t: Type](
+        root: Expr[t],
+        rootAfterPrism: Expr[t],
+        ptrMap: Expr[PtrMapTpe],
+        mapping: StructMapping[q.Term]
+    ) = '{
       val buffer = ${ allocateBuffer(Expr(mapping.sizeInBytes.toInt)) }
       val ptr    = $pointerOfBuffer(buffer)
-      println(s"[bind]: object  ${$root} => $buffer(0x${ptr.toHexString})")
+      println(s"[bind]: object  ${$root}(prism=${$rootAfterPrism}) => $buffer(0x${ptr.toHexString})")
       ${
         Varargs(mapping.members.map { m =>
           val memberOffset = Expr(m.offsetInBytes.toInt)
-          (root, m.tpe) match {
+          (rootAfterPrism, m.tpe) match {
             case ('{ $seq: StdLib.MutableSeq[t] }, p.Type.Array(comp)) =>
               val ptr = writeArray[t](seq, comp, ptrMap)
               writePrim('buffer, memberOffset, p.Type.Long, ptr)
             case (_, p.Type.Struct(name, _, _)) =>
-              val ptr = callWrite(name, m.select(root.asTerm).asExpr, ptrMap)
+              val ptr = callWrite(name, m.select(rootAfterPrism.asTerm).asExpr, ptrMap)
               writePrim('buffer, memberOffset, p.Type.Long, ptr)
             case (_, _) =>
-              writePrim('buffer, memberOffset, m.tpe, m.select(root.asTerm).asExpr)
+              writePrim('buffer, memberOffset, m.tpe, m.select(rootAfterPrism.asTerm).asExpr)
           }
         })
       }
@@ -259,16 +285,18 @@ object Pickler {
     ): Expr[Unit] = {
       val elementSizeInBytes = tpeAsRuntimeTpe(comp).sizeInBytes()
       '{
+
         val arrayLen = ${
           mapping.members.headOption match {
             case Some(lengthMember) if lengthMember.tpe == p.Type.Int =>
               Pickler
-                .readPrim(buffer, Expr(lengthMember.offsetInBytes.toInt), lengthMember.tpe)
+                .readPrim(buffer, Expr(lengthMember.offsetInBytes.toInt), p.Type.Int)
                 .asExprOf[Int]
             case _ =>
               q.report.errorAndAbort(s"Illegal structure while encoding read for member ${mapping} ")
           }
         }
+
         val arrPtr    = ${ readPrim(buffer, memberOffset, p.Type.Long).asExprOf[Long] }
         val arrBuffer = $bufferOfPointer(arrPtr, ${ Expr(elementSizeInBytes) } * arrayLen)
         var i         = 0
@@ -285,6 +313,9 @@ object Pickler {
           }
           i += 1
         }
+        println(
+          s"[bind]: read array  [${arrayLen} * ${${ Expr(comp.repr) }}]  ${$seq} => $arrBuffer(0x${arrPtr.toHexString})"
+        )
       }
     }
 
@@ -302,8 +333,22 @@ object Pickler {
           mapping.members.map { m =>
             val memberOffset = Expr(m.offsetInBytes.toInt)
             (root, m.tpe) match {
-              case ('{ $seq: StdLib.MutableSeq[t] }, p.Type.Array(comp)) =>
-                readArray[t](seq, comp, ptrMap, objMap, memberOffset, 'buffer, mapping)
+              case (_, p.Type.Array(comp)) =>
+                
+                (
+                  mapping.write,
+                  root.asTerm.tpe.widenTermRefByName match {
+                    case q.AppliedType(_, x :: Nil) => x.asType
+                    case t =>
+                      q.report.errorAndAbort(s"Unexpected type while matching on arrays ${t.show}, the correct shape is F[t]")
+                  }
+                ) match {
+                  case (Some((_, write)), '[t]) =>
+                    val seq = write(root.asTerm).asExprOf[MutableSeq[t]]
+                    readArray[t](seq, comp, ptrMap, objMap, memberOffset, 'buffer, mapping)
+                  case (_, _) => q.report.errorAndAbort("Missing write prism for array type, something isn't right here")
+                }
+
               case (_, p.Type.Struct(name, _, _)) =>
                 val structPtr = readPrim('buffer, memberOffset, p.Type.Long).asExprOf[Long]
                 val select    = m.select(root.asTerm).asExpr
@@ -330,13 +375,16 @@ object Pickler {
         mapping: StructMapping[q.Term]
     ): Expr[t] = '{
       val buffer = $bufferOfPointer($ptr, ${ Expr(mapping.sizeInBytes.toInt) })
-      println(s"[bind]: mk object ${${ Expr(q.TypeRepr.of[t].show) }} <- $buffer(0x${$ptr.toHexString})")
+      println(
+        s"[bind]: mk object ${${ Expr(q.TypeRepr.of[t].widenTermRefByName.show) }} <- $buffer(0x${$ptr.toHexString})"
+      )
       ${
 
         // See if we have a ctor:
+        println(">> t= " + q.TypeRepr.of[t].widenTermRefByName.show)
+        println(">> " + q.TypeRepr.of[t].widenTermRefByName.typeSymbol.primaryConstructor.tree.show)
 
-        println(">> " + q.TypeRepr.of[t].typeSymbol.primaryConstructor.tree)
-        q.TypeRepr.of[t].typeSymbol.primaryConstructor.tree match {
+        q.TypeRepr.of[t].widenTermRefByName.typeSymbol.primaryConstructor.tree match {
           case q.DefDef("<init>", ps, _, None) if ps.forall {
                 case q.TypeParamClause(_) | q.TermParamClause(Nil) => true
                 case _                                             => false
@@ -352,13 +400,31 @@ object Pickler {
               ${ updateMapping('root, ptr, ptrMap, objMap, mapping) }
               root
             }
-          case q.DefDef("<init>", xs :: Nil, _, None) =>
+          case q.DefDef("<init>", ps, _, None) =>
+            // See if we can match up the type args and val args
+            val typeDefs = ps.collect { case q.TypeParamClause(xs) => xs }.flatten
+            val valDefs  = ps.collect { case q.TermParamClause(xs) => xs }.flatten
+
+            println(q.TypeRepr.of[t].widenTermRefByName)
+
+            val args = q.TypeRepr.of[t].widenTermRefByName match {
+              case q.AppliedType(_, xs) => xs
+              case _                    => Nil
+            }
+
+            if (typeDefs.size != args.size) {
+              ???
+            }
+            if (valDefs.size != mapping.members.size) {
+              ???
+            }
+
             val terms = mapping.members.map { m =>
               val memberOffset = Expr(m.offsetInBytes.toInt)
               m.tpe match {
                 case p.Type.Array(comp) =>
-                  ???
-                // readArray[t](seq, comp, ptrMap, objMap, memberOffset, 'buffer, mapping)
+                  // readArray[t](seq, comp, ptrMap, objMap, memberOffset, 'buffer, mapping)
+                  '{ ??? }.asTerm
                 case p.Type.Struct(name, _, _) =>
                   val structPtr = readPrim('buffer, memberOffset, p.Type.Long).asExprOf[Long]
                   callRead(name, '{ null }, structPtr, ptrMap, objMap).asTerm
@@ -367,6 +433,7 @@ object Pickler {
             }
             q.Select
               .unique(q.New(q.TypeIdent(q.TypeRepr.of[t].typeSymbol)), "<init>")
+              .appliedToTypes(args)
               .appliedToArgs(terms)
               .asExprOf[t]
           case _ => ???
@@ -379,7 +446,7 @@ object Pickler {
 
     def writeMethod(symbol: q.Symbol, mapping: StructMapping[q.Term]) = mkMethodDef(symbol) {
       case List(root: q.Term, ptrMap: q.Term) =>
-        (root.asExpr, mapping.write(root).asExpr, ptrMap.asExpr) match {
+        (root.asExpr, mapping.write.fold(root)((_, f) => f(root)).asExpr, ptrMap.asExpr) match {
           case ('{ $root: t }, '{ $rootAfterPrismExpr: u }, '{ $ptrMap: PtrMapTpe }) =>
             '{
               $ptrMap.get($root) match {
@@ -387,7 +454,7 @@ object Pickler {
                 case None if $root == null => $ptrMap += ($root -> 0); 0
                 case None =>
                   val rootAfterPrism = $rootAfterPrismExpr
-                  ${ writeMapping('rootAfterPrism, ptrMap, mapping) }
+                  ${ writeMapping(root, 'rootAfterPrism, ptrMap, mapping) }
               }
             }
         }
@@ -402,7 +469,29 @@ object Pickler {
               ($ptrMap.get(root), $ptrExpr) match {
                 case (_, 0) => null // object reassignment for var to null
                 case (Some(writePtr), readPtr) if writePtr == readPtr => // same ptr, do the update
-                  ${ updateMapping('root, 'readPtr, ptrMap, objMap, mapping) }; root
+                  ${
+                    // If we have a prism, then a full read is required as we need a concrete instance.
+                    (mapping.write, mapping.read) match {
+                      case (Some((_, write)), Some((mirror, read))) =>
+                        // XXX To derive the type of the prism's mirror, we need to  reconstruct it from the mirror's symbol.
+                        // However, synthesising the TypeRepr for non-trivial types (e.g Seq[A], or (A,B)) is hard to get right.
+                        // In theory, something like  `q.TypeIdent(q.Symbol.requiredClass(mirror.struct.name.repr))` should work
+                        // but most often then not we get a symbol that exists but does not have a tree.
+
+                        // As a workaround to all this, we simply instantiate the write prism with a dummy term of the correct type
+                        // and then extract the return type that way. The instantiated tree will never spliced anywhere so it safe to do so.
+
+                        write(rootExpr.asTerm).tpe.widenTermRefByName.asType match {
+                          case '[t] =>
+                            '{
+                              val restored = ${ readMapping[t]('readPtr, ptrMap, objMap, mapping) }
+                              ${ read('restored.asTerm).asExpr }
+                            }
+                        }
+                      case (_, None) => '{ ${ updateMapping('root, 'readPtr, ptrMap, objMap, mapping) }; root }
+                      case _         => ???
+                    }
+                  }
                 case (Some(writePtr), readPtr) => // object reassignment for var
                   // Make sure we update the old writePtr (possibly orphaned, unless reassigned somewhere else) first.
                   // This is to make sure modified object without a root (e.g through reassignment) is corrected updated.
@@ -412,11 +501,37 @@ object Pickler {
                   // create the object.
                   $objMap.get(readPtr) match {
                     case Some(existing) => existing.asInstanceOf[t] // Existing allocation found, use it.
-                    case None           => ${ readMapping[t]('readPtr, ptrMap, objMap, mapping) }
+                    case None =>
+                      ${
+                        (mapping.write, mapping.read) match {
+                          case (Some((_, write)), Some((mirror, read))) =>
+                            // XXX To derive the type of the prism's mirror, we need to reconstruct it from the mirror's symbol.
+                            // However, synthesising the TypeRepr for non-trivial types (e.g Seq[A], or (A,B)) is hard to get right.
+                            // In theory, something like  `q.TypeIdent(q.Symbol.requiredClass(mirror.struct.name.repr))` should work
+                            // but most often then not we get a symbol that exists but does not have a tree.
+
+                            // As a workaround to all this, we simply instantiate the write prism with a dummy term of the correct type
+                            // and then extract the return type that way. The instantiated tree will never spliced anywhere so it safe to do so.
+
+                            println(s"sss = ${rootExpr.asTerm.tpe.widenTermRefByName.show}")
+                            println(s"sss = ${write(rootExpr.asTerm).tpe.widenTermRefByName.show}")
+                            write(rootExpr.asTerm).tpe.widenTermRefByName.asType match {
+                              case '[t] =>
+                                '{
+                                  val restored = ${ readMapping[t]('readPtr, ptrMap, objMap, mapping) }
+                                  ${ read('restored.asTerm).asExpr }
+                                }
+                            }
+                          case (_, None) => readMapping[t]('readPtr, ptrMap, objMap, mapping)
+                          case _         => ???
+                        }
+                      }
+
+                    // ${ readMapping[t]('readPtr, ptrMap, objMap, mapping) }
                   }
                 case (None, readPtr) => // object not previously written, fail
                   throw new RuntimeException(
-                    s"Val root object ${root} was not previously written, cannot restore from to 0x${readPtr.toHexString}"
+                    s"Val root object ${root} was not previously written, cannot read from to 0x${readPtr.toHexString}"
                   )
               }
             }
@@ -432,6 +547,7 @@ object Pickler {
                 case (Some(0), 0) => () // was null, still null, no-op
                 case (Some(writePtr), readPtr) if writePtr == readPtr => // same ptr, do the update
                   ${ updateMapping('root, 'readPtr, ptrMap, objMap, mapping) }
+
                   $objMap += (readPtr -> root)
                 case (Some(writePtr), readPtr) => // object reassignment for val, fail
                   throw new RuntimeException(
@@ -439,7 +555,7 @@ object Pickler {
                   )
                 case (None, readPtr) => // object not previously written, fail
                   throw new RuntimeException(
-                    s"Val root object ${root} was not previously written, cannot restore from to 0x${readPtr.toHexString}"
+                    s"Val root object ${root} was not previously written, cannot update from to 0x${readPtr.toHexString}"
                   )
               }
               ()

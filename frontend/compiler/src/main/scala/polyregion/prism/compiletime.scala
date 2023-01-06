@@ -38,32 +38,12 @@ object compiletime {
       inline termPrisms: List[TermPrism[Any, Any]]
   ): List[Prism] = ${ derivePackedTypeMirrorsImpl[T]('termPrisms) }
 
-  inline def liftA(implicit q: Quotes, f: Expr[Int] => Expr[Int]): Expr[Any] = {
-
-    '{ ${ f('{ 1 }) } }
-    ???
-  }
-
-  val m: (Quotes, Expr[Int]) => Expr[Int] = { case (_ @ given Quotes, e) =>
-    '{
-
-      val in = $e
-      in + 2
-
-    }
-  }
-
-  // def makeIt : Expr[Int] = {
-  //   // Expr(2)
-  //   ???
-  // }
 
   inline def showTree(inline f: Any): Any =
     ${ showTreeImpl('{ 2 }) }
 
   def showTreeImpl(f: Expr[Int])(using Q: Quotes): Expr[Int] = {
     import Q.reflect.*
-
     // f.asTerm.as
     // Expr(f)
     // ???

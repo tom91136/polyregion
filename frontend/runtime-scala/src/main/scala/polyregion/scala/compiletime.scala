@@ -340,7 +340,7 @@ object compiletime {
 
                         try {
                           ${
-                            Varargs(capturesWithStructDefs.map { case (named, maybeSdef, term) =>
+                            // Varargs(capturesWithStructDefs.map { case (named, maybeSdef, term) =>
                               bindRead(
                                 read(_, _, _, 'ptrMap, 'objMap),
                                 update(_, _, _, 'ptrMap, 'objMap),
@@ -348,7 +348,7 @@ object compiletime {
                                 queue,
                                 capturesWithStructDefs
                               )
-                            })
+                            // })
                           }
                           println("Restore complete")
                           cb_(Right(()))
@@ -471,11 +471,18 @@ object compiletime {
           case (s @ p.Type.Struct(_, _, _), Some(sdef), '{ $ref: t }) =>
             println(s"$ref = " + ref.asTerm.symbol.flags.show)
             val ptr = Pickler.readPrim(target, Expr(byteOffset), p.Type.Long).asExprOf[Long]
-            if (mutable) {
-              q.Assign(ref.asTerm, read(sdef.name, ref, ptr).asTerm).asExprOf[Unit]
-            } else {
-              update(sdef.name, ref, ptr)
+            '{
+
+              println(s"Restore ${$ref}")
+              ${
+                if (mutable) {
+                  q.Assign(ref.asTerm, read(sdef.name, ref, ptr).asTerm).asExprOf[Unit]
+                } else {
+                  update(sdef.name, ref, ptr)
+                }
+              }
             }
+
           case (t, None, '{ $ref: t }) =>
             '{
               println(s"[Bind] skipping primitive ${$ref}")

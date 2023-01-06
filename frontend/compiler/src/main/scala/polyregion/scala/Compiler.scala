@@ -331,7 +331,7 @@ object Compiler {
   def compileExpr(using q: Quoted)(expr: Expr[Any]): Result[
     (                                                     //
         List[(p.Named, q.Term)],                          //
-        Map[p.Sym, polyregion.prism.TermPrism[Any, Any]], //
+        Map[p.Sym, polyregion.prism.Prism], //
         Map[p.Sym, p.Sym], //
         p.Program,                                        //
         Log                                               //
@@ -384,6 +384,10 @@ object Compiler {
     log <- log.info(
       "External captures",
       capturedNames.map((n, r) => s"$r(symbol=${r.symbol}, ${r.symbol.pos}) ~> ${n.repr}")*
+    )
+    log <- log.info(
+      "Scope replacements",
+      captureScope.map((sym, term) => s"$sym => ${term.repr}")*
     )
     log <- log.info(s"Expr dependent methods", exprDeps.functions.values.map(_.map(_.repr).toString).toList*)
     log <- log.info(s"Expr dependent structs", exprDeps.classes.values.map(_.map(_.repr).toString).toList*)
@@ -517,7 +521,7 @@ object Compiler {
     // For each def, we find the original name before monomorphic specialisation and then resolve the term mirrors
     opt.defs.flatMap { monomorphicDef =>
       val polymorphicSym = monomorphicToPolymorphicSym(monomorphicDef.name)
-      StdLib.Mirrors.collect { case (m, prism) if m.source == polymorphicSym => monomorphicDef.name -> prism }
+      StdLib.Mirrors.collect { case prism@(m, _) if m.source == polymorphicSym => monomorphicDef.name -> prism }
     }.toMap,
     monomorphicToPolymorphicSym,
     opt,
