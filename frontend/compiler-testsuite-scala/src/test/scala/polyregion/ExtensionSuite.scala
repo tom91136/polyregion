@@ -1,10 +1,10 @@
 package polyregion
 
-import polyregion.scala.*
-import polyregion.scala.compiletime.*
+import polyregion.scalalang.*
+import polyregion.scalalang.compiletime.*
 
-import _root_.scala.compiletime.*
-import _root_.scala.reflect.ClassTag
+import scala.compiletime.*
+import scala.reflect.ClassTag
 
 object OUT {
   val C = 2
@@ -57,7 +57,5 @@ class ExtensionSuite extends BaseSuite {
       // V3(1,2,2)
     }
   }
-
-  {}
 
 }

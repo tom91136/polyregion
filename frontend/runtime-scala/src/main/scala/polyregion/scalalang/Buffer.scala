@@ -1,4 +1,4 @@
-package polyregion.scala
+package polyregion.scalalang
 
 import java.util.Objects
 import java.util.concurrent.atomic.AtomicLong

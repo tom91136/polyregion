@@ -1,9 +1,9 @@
 package polyregion
 
-import polyregion.scala.compiletime.*
+import polyregion.scalalang.compiletime.*
 
-import _root_.scala.compiletime.*
-import _root_.scala.reflect.ClassTag
+import scala.compiletime.*
+import scala.reflect.ClassTag
 
 //noinspection DoubleNegationScala,SimplifyBoolean
 class LogicSuite extends BaseSuite {

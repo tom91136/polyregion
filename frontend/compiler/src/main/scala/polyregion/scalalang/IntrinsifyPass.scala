@@ -1,8 +1,8 @@
-package polyregion.scala
+package polyregion.scalalang
 
 import cats.syntax.all.*
 import polyregion.ast.{PolyAst as p,given , *}
-import polyregion.scala.{Quoted, Symbols}
+import polyregion.scalalang.{Quoted, Symbols}
 import polyregion.ast.Traversal.*
 
 object IntrinsifyPass {

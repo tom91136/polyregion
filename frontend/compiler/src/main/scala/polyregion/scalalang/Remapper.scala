@@ -1,4 +1,4 @@
-package polyregion.scala
+package polyregion.scalalang
 
 import cats.data.EitherT
 import cats.syntax.all.*

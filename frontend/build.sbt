@@ -14,7 +14,8 @@ lazy val commonSettings = Seq(
   version          := "0.0.1-SNAPSHOT",
   organization     := "uk.ac.bristol.uob-hpc",
   organizationName := "University of Bristol",
-  scalacOptions ~= filterConsoleScalacOptions,
+   compile / tpolecatExcludeOptions ++= ScalacOptions.defaultConsoleExclude,
+//  scalacOptions ~= filterConsoleScalacOptions,
   javacOptions ++=
     Seq(
       "-parameters",
@@ -33,7 +34,7 @@ lazy val commonSettings = Seq(
     "-no-indent",                                //
     "-Wconf:cat=unchecked:error",                //
     "-Wconf:name=MatchCaseUnreachable:error",    //
-    "-Wconf:name=PatternMatchExhaustivity:error" // TODO enable later
+    "-Wconf:name=PatternMatchExhaustivity:error" //
     // "-language:strictEquality"
   ),
   scalafmtDetailedError := true,
@@ -43,15 +44,15 @@ lazy val commonSettings = Seq(
 lazy val nativeLibSettings =
   commonSettings ++ Seq(autoScalaLibrary := false, unmanagedResources / includeFilter := "*.so" || "*.dll" || "*.dylib")
 
-lazy val `native-compiler-x86` = project.settings(
-  nativeLibSettings,
-  Compile / unmanagedResourceDirectories += nativeDir / "cmake-build-release-clang" / "bindings" / "jvm"
-)
-
-lazy val `native-runtime-x86` = project.settings(
-  nativeLibSettings,
-  Compile / unmanagedResourceDirectories += nativeDir / "cmake-build-release-clang" / "bindings" / "jvm"
-)
+//lazy val `native-compiler-x86` = project.settings(
+//  nativeLibSettings,
+//  Compile / unmanagedResourceDirectories += nativeDir / "cmake-build-release-clang" / "bindings" / "jvm"
+//)
+//
+//lazy val `native-runtime-x86` = project.settings(
+//  nativeLibSettings,
+//  Compile / unmanagedResourceDirectories += nativeDir / "cmake-build-release-clang" / "bindings" / "jvm"
+//)
 
 lazy val `binding-jvm` = project.settings(
   commonSettings,
@@ -92,7 +93,7 @@ lazy val compiler = project
         Seq("-Xmax-inlines", "48") // the AST has lots of leaf nodes and we use inline so bump the limit
     ,
     libraryDependencies ++= Seq(
-      "net.bytebuddy"  % "byte-buddy" % "1.12.20",
+      "net.bytebuddy"  % "byte-buddy" % "1.12.21",
       "com.lihaoyi"   %% "fansi"      % "0.4.0",
       "com.lihaoyi"   %% "upickle"    % "2.0.0",
       "org.typelevel" %% "cats-core"  % catsVersion
@@ -176,7 +177,7 @@ lazy val `benchmarks-scala` = project
     assembly / mainClass := Some("polyregion.benchmarks.Main"),
     scalacOptions ++= Seq("-Yretain-trees"),
     libraryDependencies ++= Seq(
-      "net.openhft" % "affinity" % "3.20.0"
+        "net.openhft" % "affinity" % "3.23.2"
       // "org.scala-lang.modules" %% "scala-parallel-collections" % "1.0.4"
     )
   )

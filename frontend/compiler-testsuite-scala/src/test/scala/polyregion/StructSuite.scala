@@ -1,11 +1,11 @@
 package polyregion
 
-import polyregion.scala.*
-import polyregion.scala.compiletime.*
+import polyregion.scalalang.*
+import polyregion.scalalang.compiletime.*
 
-import _root_.scala.collection.mutable.ArrayBuffer
-import _root_.scala.compiletime.*
-import _root_.scala.reflect.ClassTag
+import scala.collection.mutable.ArrayBuffer
+import scala.compiletime.*
+import scala.reflect.ClassTag
 
 class StructSuite extends BaseSuite {
 
@@ -46,8 +46,8 @@ class StructSuite extends BaseSuite {
 //  inline def dummyNativeStruct[A] = new NativeStruct[A] {
 //    def name: String                                                       = ""
 //    def sizeInBytes: Int                                                   = 1
-//    def encode(buffer: _root_.java.nio.ByteBuffer, index: Int, a: A): Unit = ()
-//    def decode(buffer: _root_.java.nio.ByteBuffer, index: Int): A          = ???
+//    def encode(buffer: java.nio.ByteBuffer, index: Int, a: A): Unit = ()
+//    def decode(buffer: java.nio.ByteBuffer, index: Int): A          = ???
 //  }
 
   // inline given NativeStruct[Char3]    = if (Toggles.StructSuite) dummyNativeStruct else dummyNativeStruct

@@ -1,4 +1,4 @@
-package polyregion.java
+package polyregion.javalang
 
 import com.sun.source.tree.*
 import com.sun.source.util.{SimpleTreeVisitor, TreeScanner, Trees}

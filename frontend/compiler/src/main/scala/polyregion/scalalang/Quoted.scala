@@ -1,4 +1,4 @@
-package polyregion.scala
+package polyregion.scalalang
 
 import cats.kernel.Monoid
 import polyregion.ast.{PolyAst as p, *}
@@ -39,7 +39,7 @@ class Quoted(val underlying: scala.quoted.Quotes) {
     @targetName("witness_module")
     def witness(x: Symbol, tpe: p.Type.Struct) = copy(modules = modules + (x -> tpe))
     def witness(x: ClassDef, application: p.Type.Struct) =
-      if (TypeRepr.of[polyregion.scala.intrinsics.type].typeSymbol.fullName == x.symbol.fullName) {
+      if (TypeRepr.of[polyregion.scalalang.intrinsics.type].typeSymbol.fullName == x.symbol.fullName) {
         this
       } else if (x.symbol.flags.is(Flags.Module)) {
         report.errorAndAbort(s"Witness illegal module ClassDef ${x.symbol} (${x.symbol.fullName})")

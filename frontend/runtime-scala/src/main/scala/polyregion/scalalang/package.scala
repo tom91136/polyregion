@@ -1,4 +1,4 @@
-package polyregion.scala
+package polyregion.scalalang
 
 import fansi.ErrorMode.Throw
 import polyregion.jvm.compiler.Options
@@ -56,7 +56,7 @@ trait AotOps[F[_], B](q: rt.Device.Queue, suspend: Suspend[F]) {
 //     val result = Buffer.ofDim[A](1)
     val result = scala.collection.mutable.ListBuffer[A](null.asInstanceOf[A])
     // val result = Array.ofDim[A](1)
-    polyregion.scala.compiletime.offload0[O](
+    polyregion.scalalang.compiletime.offload0[O](
       q,
       {
         case Left(e) => cb(Left(e))
@@ -71,8 +71,8 @@ trait AotOps[F[_], B](q: rt.Device.Queue, suspend: Suspend[F]) {
   /*                     */ (inline f: Int => Unit): F[Unit] = suspend { cb =>
     val startX = x.start
     val stepX  = x.step
-    polyregion.scala.compiletime.offload1[O](q, x, cb) {
-      f(Support.linearise(startX, stepX)(polyregion.scala.intrinsics.gpuGlobalIdxX)) //
+    polyregion.scalalang.compiletime.offload1[O](q, x, cb) {
+      f(Support.linearise(startX, stepX)(polyregion.scalalang.intrinsics.gpuGlobalIdxX)) //
       ()
     }
   }
@@ -83,10 +83,10 @@ trait AotOps[F[_], B](q: rt.Device.Queue, suspend: Suspend[F]) {
     val stepX  = x.step
     val startY = y.start
     val stepY  = y.step
-    polyregion.scala.compiletime.offload2[O](q, x, y, cb) {
+    polyregion.scalalang.compiletime.offload2[O](q, x, y, cb) {
       f(
-        Support.linearise(startX, stepX)(polyregion.scala.intrinsics.gpuGlobalIdxX),
-        Support.linearise(startY, stepY)(polyregion.scala.intrinsics.gpuGlobalIdxY)
+        Support.linearise(startX, stepX)(polyregion.scalalang.intrinsics.gpuGlobalIdxX),
+        Support.linearise(startY, stepY)(polyregion.scalalang.intrinsics.gpuGlobalIdxY)
       ) //
       ()
     }
@@ -100,11 +100,11 @@ trait AotOps[F[_], B](q: rt.Device.Queue, suspend: Suspend[F]) {
     val stepY  = y.step
     val startZ = z.start
     val stepZ  = z.step
-    polyregion.scala.compiletime.offload3[O](q, x, y, z, cb) {
+    polyregion.scalalang.compiletime.offload3[O](q, x, y, z, cb) {
       f(
-        Support.linearise(startX, stepX)(polyregion.scala.intrinsics.gpuGlobalIdxX),
-        Support.linearise(startY, stepY)(polyregion.scala.intrinsics.gpuGlobalIdxY),
-        Support.linearise(startZ, stepZ)(polyregion.scala.intrinsics.gpuGlobalIdxZ)
+        Support.linearise(startX, stepX)(polyregion.scalalang.intrinsics.gpuGlobalIdxX),
+        Support.linearise(startY, stepY)(polyregion.scalalang.intrinsics.gpuGlobalIdxY),
+        Support.linearise(startZ, stepZ)(polyregion.scalalang.intrinsics.gpuGlobalIdxZ)
       ) //
       ()
     }

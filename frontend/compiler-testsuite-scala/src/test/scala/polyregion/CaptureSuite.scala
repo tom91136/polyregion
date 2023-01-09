@@ -1,7 +1,7 @@
 package polyregion
 
-import _root_.scala.compiletime.*
-import _root_.scala.reflect.ClassTag
+import scala.compiletime.*
+import scala.reflect.ClassTag
 
 class CaptureSuite extends BaseSuite {
 

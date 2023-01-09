@@ -1,9 +1,9 @@
 package polyregion
 
-import _root_.scala.annotation.targetName
-import _root_.scala.quoted.Expr
-import _root_.scala.quoted.Quotes
-import _root_.scala.quoted.Type
+import scala.annotation.targetName
+import scala.quoted.Expr
+import scala.quoted.Quotes
+import scala.quoted.Type
 
 package object prism {
 

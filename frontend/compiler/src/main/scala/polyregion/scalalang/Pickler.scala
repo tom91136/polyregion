@@ -1,4 +1,4 @@
-package polyregion.scala
+package polyregion.scalalang
 
 import cats.syntax.all.*
 import polyregion.ast.{PolyAst as p, *}
@@ -146,7 +146,7 @@ object Pickler {
                 repr.widenTermRefByName.asType match {
                   case '[t] =>
                     val prismRepr =
-                      from(q.underlying, '{ _root_.scala.compiletime.uninitialized: t }).asTerm.tpe.widenTermRefByName
+                      from(q.underlying, '{ scala.compiletime.uninitialized: t }).asTerm.tpe.widenTermRefByName
                     go(sdef, q.TermRef(prismRepr, member), added0)
                 }
             }
@@ -188,8 +188,8 @@ object Pickler {
 
     import polyregion.jvm.runtime.Platforms
 
-    type PtrMapTpe = _root_.scala.collection.mutable.Map[Any, Long]
-    type ObjMapTpe = _root_.scala.collection.mutable.Map[Long, Any]
+    type PtrMapTpe = scala.collection.mutable.Map[Any, Long]
+    type ObjMapTpe = scala.collection.mutable.Map[Long, Any]
 
     val writeSymbols = reprs.map((sdef, repr) =>
       sdef -> mkMethodSym(

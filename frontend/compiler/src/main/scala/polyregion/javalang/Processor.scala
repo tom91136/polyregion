@@ -1,4 +1,4 @@
-package polyregion.java
+package polyregion.javalang
 
 import cats.Eval
 import cats.data.EitherT
@@ -11,10 +11,10 @@ import net.bytebuddy.implementation.{FieldAccessor, InvocationHandlerAdapter, Me
 import net.bytebuddy.matcher.ElementMatchers
 import polyregion.__UnsafeObject
 import polyregion.ast.*
-import polyregion.java.Processor.{addOpens, collectTree}
+import polyregion.javalang.Processor.{addOpens, collectTree}
 
-import _root_.java.lang.reflect.*
-import _root_.java.util
+import java.lang.reflect.*
+import java.util
 import java.nio.file.Paths
 import javax.annotation.processing.*
 import javax.lang.model.SourceVersion
@@ -249,8 +249,8 @@ class Processor extends AbstractProcessor {
 
   private var trees: Trees = _
 
-  override def getSupportedAnnotationTypes: _root_.java.util.Set[String] =
-    _root_.java.util.Collections.singleton[String]("*")
+  override def getSupportedAnnotationTypes: java.util.Set[String] =
+    java.util.Collections.singleton[String]("*")
 
   override def getSupportedSourceVersion: SourceVersion = SourceVersion.RELEASE_8
 
@@ -346,7 +346,7 @@ class Processor extends AbstractProcessor {
 
 
                   val bytes = new net.bytebuddy.ByteBuddy()
-                    .subclass(classOf[ /* _root_.polyregion.java.BinaryOffloadExecutable */ Nothing])
+                    .subclass(classOf[ /* polyregion.java.BinaryOffloadExecutable */ Nothing])
                     .name(fqcn)
                     .modifiers(Visibility.PUBLIC, TypeManifestation.FINAL)
                     .defineField(
@@ -399,7 +399,7 @@ class Processor extends AbstractProcessor {
 
   }
 
-  override def process(annotations: _root_.java.util.Set[_ <: TypeElement], roundEnv: RoundEnvironment): Boolean = {
+  override def process(annotations: java.util.Set[_ <: TypeElement], roundEnv: RoundEnvironment): Boolean = {
 
     @tailrec def collectDeclaredElements(xs: List[Element], acc: List[TypeElement] = Nil): List[TypeElement] =
       xs match {

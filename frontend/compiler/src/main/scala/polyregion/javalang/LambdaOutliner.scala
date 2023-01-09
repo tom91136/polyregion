@@ -1,11 +1,12 @@
-package polyregion.java
+package polyregion.javalang
 
 import cats.syntax.all.*
 import com.sun.source.tree.*
 import com.sun.source.util.Trees
 import polyregion.ast.*
-import polyregion.java.Processor.{asCanonicalName, collectTree, collectTrees}
+import polyregion.javalang.Processor.{asCanonicalName, collectTree, collectTrees}
 
+import scala.annotation.nowarn
 import javax.annotation.processing.ProcessingEnvironment
 import javax.lang.model.`type`.{ExecutableType, TypeKind, TypeMirror}
 import javax.lang.model.element.{ExecutableElement, Modifier, TypeElement}
@@ -61,7 +62,7 @@ object LambdaOutliner {
         reflector.classTable.get(target.implCls) match {
           case None =>
             s"Cannot find class ${target.implCls} (which defines method $invokeFn), classes visible include:\n${reflector.classTable.keys
-              .mkString("\n")}".fail
+                .mkString("\n")}".fail
           case Some(clsElem) =>
             val matchingReflectedMethods = clsElem.getEnclosedElements.asScala.toList.collect {
               case e: ExecutableElement
@@ -165,9 +166,9 @@ object LambdaOutliner {
             val labeledTarget = targetSwitch.getCases.asScala.toList.traverse { tree =>
               for {
                 label <-
-                  if (tree.getExpression.getKind == Tree.Kind.INT_LITERAL) {
-                    tree.getExpression.asInstanceOf[LiteralTree].getValue.asInstanceOf[Int].success
-                  } else s"Case expression is not an int literal. Tree:\n$tree".fail
+                  (if (tree.getExpression.getKind == Tree.Kind.INT_LITERAL) {
+                     tree.getExpression.asInstanceOf[LiteralTree].getValue.asInstanceOf[Int].success
+                   } else s"Case expression is not an int literal. Tree:\n$tree".fail): @nowarn
                 target <- tree.getStatements.asScala.toList.flatMap(collectTree(_) {
                   case a: MethodInvocationTree =>
                     collectTree(a.getMethodSelect) {

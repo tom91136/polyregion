@@ -1,4 +1,4 @@
-import static polyregion.java.Runtime.offload;
+import static polyregion.javalang.Runtime.offload;
 
 public class NoPackageTest {
 

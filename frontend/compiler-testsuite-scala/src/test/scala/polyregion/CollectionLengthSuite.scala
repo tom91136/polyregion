@@ -1,10 +1,10 @@
 package polyregion
 
-import polyregion.scala.*
-import polyregion.scala.compiletime.*
+import polyregion.scalalang.*
+import polyregion.scalalang.compiletime.*
 
-import _root_.scala.collection.mutable.ArrayBuffer
-import _root_.scala.compiletime.*
+import scala.collection.mutable.ArrayBuffer
+import scala.compiletime.*
 
 class CollectionLengthSuite extends BaseSuite {
 

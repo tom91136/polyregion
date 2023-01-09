@@ -1,6 +1,6 @@
 package polyregion.p0.p1;
 
-import polyregion.java.Runtime;
+import polyregion.javalang.Runtime;
 
 public class AnotherClass {
 	{

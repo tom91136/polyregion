@@ -1,10 +1,10 @@
 package polyregion
 
-import polyregion.scala.compiletime.*
+import polyregion.scalalang.compiletime.*
 
-import _root_.scala.compiletime.*
-import _root_.scala.reflect.ClassTag
-import _root_.scala.collection.mutable.ListBuffer
+import scala.compiletime.*
+import scala.reflect.ClassTag
+import scala.collection.mutable.ListBuffer
 
 class ValueReturnSuite extends BaseSuite {
 
@@ -74,31 +74,31 @@ class ValueReturnSuite extends BaseSuite {
     val u = (42,42.0)
     // val v = (41.0,41)
 
-    val vv = ((1,2 ), 2)
+    val vv = (1, 2)
 
     // val xx = 2
     offload0 {
-      // val box0 = box
+       val box0 = box
 
       // m(0) =  box0.value.fieldA.toLong
 
-      // val b = new MyCls
-      // b.fieldA = 42
-      // val b1 = b
-      // // b.fieldA = 42 + m(0)
-      // box0.value.fieldA = 20
+       val b = new MyCls
+       b.fieldA = 42
+       val b1 = b
+       // b.fieldA = 42 + m(0)
+       box0.value.fieldA = 20
       
       // // val ua = xx
       // // val u0 = u
-      // val u1 = u
+       val u1 = u
 
       // // val xxx = u._1
-      // // val m = u0._1 + u0._1
+        val v = u1._1 + u1._1
       // // val i = vv._1
       // m(1) =  123
       // m(2) =  456
       //  m(1) =     vv._1._1
-       m(1) = u._1
+       m(1) = 7
     }
 
     // assertEquals(m(0), 10L)

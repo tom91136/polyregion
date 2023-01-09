@@ -2,8 +2,8 @@ package polyregion.benchmarks
 
 import org.openjdk.jmh.annotations.*
 import java.util.concurrent.TimeUnit
-import polyregion.scala.compiletime.*
-import polyregion.scala.*
+import polyregion.scalalang.compiletime.*
+import polyregion.scalalang.*
 import concurrent.ExecutionContext.Implicits.global
 import net.openhft.affinity.AffinityLock
 

@@ -1,4 +1,4 @@
-package polyregion.scala
+package polyregion.scalalang
 
 import cats.syntax.all.*
 import polyregion.ast.Traversal.*

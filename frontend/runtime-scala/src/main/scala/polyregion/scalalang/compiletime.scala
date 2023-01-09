@@ -1,10 +1,10 @@
-package polyregion.scala
+package polyregion.scalalang
 
 import cats.syntax.all.*
-import polyregion.ast.{CppSourceMirror, MsgPack, PolyAst as p, *}
+import polyregion.ast.{PolyAst as p, *}
 import polyregion.jvm.{compiler as ct, runtime as rt}
 import polyregion.prism.StdLib
-import polyregion.scala as srt
+import polyregion.scalalang as srt
 
 import java.nio.file.Paths
 import java.nio.{ByteBuffer, ByteOrder}
@@ -96,7 +96,7 @@ object compiletime {
       case '[srt.Config[target, opt]] =>
         TypeRepr.of[target].widenTermRefByName.dealias.simplified match {
           case Refinement(target, xs, TypeBounds(l @ ConstantType(StringConstant(arch)), h)) if l == h =>
-            val vendorTpe   = target.select(TypeRepr.of[polyregion.scala.Target#Arch].typeSymbol).dealias
+            val vendorTpe   = target.select(TypeRepr.of[srt.Target#Arch].typeSymbol).dealias
             val cpTargetTpe = TypeRepr.of[ct.Target]
             if (vendorTpe <:< cpTargetTpe) {
               (ReifiedConfig(
@@ -284,7 +284,7 @@ object compiletime {
         val fnValues =
           ByteBuffer.allocate(${ Expr(captureTpeSizes.sum + returnTpeSize) }).order(ByteOrder.nativeOrder)
 
-        val ptrMap = _root_.scala.collection.mutable.Map[Any, Long]()
+        val ptrMap = scala.collection.mutable.Map[Any, Long]()
 
         ${
 
@@ -338,7 +338,7 @@ object compiletime {
                       { () =>
                         println("Kernel completed, tid=" + Thread.currentThread.getId + " cb=" + cb_)
 
-                        val objMap = _root_.scala.collection.mutable.Map[Long, Any]()
+                        val objMap = scala.collection.mutable.Map[Long, Any]()
 
                         try {
                           ${
@@ -387,8 +387,8 @@ object compiletime {
     code
   }
 
-  type PtrMapTpe = _root_.scala.collection.mutable.Map[Any, Long]
-  type ObjMapTpe = _root_.scala.collection.mutable.Map[Long, Any]
+  type PtrMapTpe = scala.collection.mutable.Map[Any, Long]
+  type ObjMapTpe = scala.collection.mutable.Map[Long, Any]
 
   // Basic steps:
   // 1. Creating struct mapping

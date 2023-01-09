@@ -1,8 +1,8 @@
 package polyregion
 
-import polyregion.scala.compiletime.*
+import polyregion.scalalang.compiletime.*
 
-import _root_.scala.compiletime.*
+import scala.compiletime.*
 
 class ApiSuite extends BaseSuite {
 

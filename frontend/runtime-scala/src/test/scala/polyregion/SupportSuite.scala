@@ -1,6 +1,6 @@
 package polyregion
 
-import polyregion.scala.Support
+import polyregion.scalalang.Support
 
 class SupportSuite extends munit.FunSuite {
 

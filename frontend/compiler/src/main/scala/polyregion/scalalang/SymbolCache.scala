@@ -1,4 +1,4 @@
-package polyregion.scala
+package polyregion.scalalang
 import polyregion.ast.{PolyAst as p, *}
 
 object SymbolCache {

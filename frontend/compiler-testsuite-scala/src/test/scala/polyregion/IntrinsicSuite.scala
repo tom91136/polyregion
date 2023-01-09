@@ -1,9 +1,9 @@
 package polyregion
 
-import polyregion.scala.compiletime.*
+import polyregion.scalalang.compiletime.*
 
-import _root_.scala.compiletime.*
-import _root_.scala.reflect.ClassTag
+import scala.compiletime.*
+import scala.reflect.ClassTag
 
 class IntrinsicSuite extends BaseSuite {
 
@@ -55,25 +55,25 @@ class IntrinsicSuite extends BaseSuite {
     //  testExpr[Long](math.round(a)) // L(L) = id, I(F), L(D)
 
     {
-      import _root_.scala.math.*
+      import scala.math.*
       testExpr[Double](sin(a))
       testExpr[Double](cos(a))
       testExpr[Double](tan(a))
     } //
     {
-      import _root_.java.lang.Math.*
+      import java.lang.Math.*
       testExpr[Double](sin(a))
       testExpr[Double](cos(a))
       testExpr[Double](tan(a))
     } //
     {
-      import _root_.scala.math as mymath
+      import scala.math as mymath
       testExpr[Double](mymath.sin(a))
       testExpr[Double](mymath.cos(a))
       testExpr[Double](mymath.tan(a))
     } //
     {
-      import _root_.java.lang.Math as mymath
+      import java.lang.Math as mymath
       testExpr[Double](mymath.sin(a))
       testExpr[Double](mymath.cos(a))
       testExpr[Double](mymath.tan(a))

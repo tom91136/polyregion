@@ -35,7 +35,7 @@ object Simple {
     val y = 50
     val n = 10
 
-    val xs = polyregion.scala.Buffer.range[Int](0, n)
+    val xs = polyregion.scalalang.Buffer.range[Int](0, n)
 
     val cow = Array(42, 100)
 
@@ -46,8 +46,8 @@ object Simple {
     println(xs)
     println(cow.toList)
 
-    import polyregion.scala.*
-    import polyregion.scala.blocking.*
+    import polyregion.scalalang.*
+    import polyregion.scalalang.blocking.*
 
     type M = Config[Target.NVPTX64.SM61.type, Opt.O0]
     type C = Config[Target.OpenCL_C.type, Opt.O0]

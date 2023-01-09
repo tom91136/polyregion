@@ -1,4 +1,4 @@
-package polyregion.java;
+package polyregion.javalang;
 
 import java.util.Arrays;
 

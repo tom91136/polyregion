@@ -2,8 +2,8 @@ package polyregion.prism
 
 import polyregion.ast.{PolyAst as p, *}
 import polyregion.prism.compiletime.*
-import polyregion.scala.intrinsics
-import polyregion.scala.intrinsics.TypedBuffer
+import polyregion.scalalang.intrinsics
+import polyregion.scalalang.intrinsics.TypedBuffer
 
 import scala.Predef as _
 import scala.annotation.targetName
@@ -11,7 +11,6 @@ import scala.quoted.{Expr, Quotes, Type}
 
 object StdLib {
 
-  import _root_.{java as J, scala as S}
 
   class Tuple2[T1, T2](val v1: T1, val v2: T2) {
     def _1 = v1
@@ -38,13 +37,13 @@ object StdLib {
     def until(end: Int): Range = new Range(x, end, 1)
   }
 
-  class ArrayOps[A](val xs: S.Array[A]) {
+  class ArrayOps[A](val xs: scala.Array[A]) {
     def size: Int = xs.length
   }
 
   class Predef {
     def intWrapper(x: Int): RichInt                  = new RichInt(x)
-    def intArrayOps(xs: S.Array[Int]): ArrayOps[Int] = new ArrayOps[Int](xs)
+    def intArrayOps(xs: scala.Array[Int]): ArrayOps[Int] = new ArrayOps[Int](xs)
   }
 
   object math {
@@ -165,40 +164,40 @@ object StdLib {
     (
       // Unsupported
 
-      witness[S.collection.ArrayOps[_], ArrayOps[_]]( //
-        { case (q @ given Quotes, _) => '{ throw new J.lang.AssertionError("No") } },
-        { case (q @ given Quotes, _) => '{ throw new J.lang.AssertionError("No") } },
-        { case (q @ given Quotes, ys, _) => '{ throw new J.lang.AssertionError("No") } }
+      witness[scala.collection.ArrayOps[_], ArrayOps[_]]( //
+        { case (q @ given Quotes, _) => '{ throw new java.lang.AssertionError("No") } },
+        { case (q @ given Quotes, _) => '{ throw new java.lang.AssertionError("No") } },
+        { case (q @ given Quotes, ys, _) => '{ throw new java.lang.AssertionError("No") } }
       ),
 //       // Mutable collections
-//       witness[S.Array.type, Array.type](_ => Array, (_, _) => S.Array),
-//       witness[S.Array, Array](
+//       witness[scala.Array.type, Array.type](_ => Array, (_, _) => scala.Array),
+//       witness[scala.Array, Array](
 //         [X] =>
-//           (xs: S.Array[X]) =>
+//           (xs: scala.Array[X]) =>
 //             Array[X](
 //               xs.length,
 //               new intrinsics.Arr[X] {
 // //              override def length: Int                    = xs.length
-//                 override def apply(i: S.Int): X             = xs(i)
-//                 override def update(i: S.Int, x: X): S.Unit = xs(i) = x
+//                 override def apply(i: scala.Int): X             = xs(i)
+//                 override def update(i: scala.Int, x: X): scala.Unit = xs(i) = x
 //               }
 //           ),
 //         [X] =>
-//           (ys: S.Array[X], xs: Array[X]) => {
+//           (ys: scala.Array[X], xs: Array[X]) => {
 //             var i = 0; while (i < xs.length) ys(i) = xs(i); ys
 //         }
 //       ),
-      // witness[S.collection.mutable.Seq.type, MutableSeq.type](_ => MutableSeq, (_, _) => S.collection.mutable.Seq),
-      // witness[S.collection.mutable.Seq[_], MutableSeq[_]](
+      // witness[scala.collection.mutable.Seq.type, MutableSeq.type](_ => MutableSeq, (_, _) => scala.collection.mutable.Seq),
+      // witness[scala.collection.mutable.Seq[_], MutableSeq[_]](
       //   { case (q @ given Quotes, xs) =>
       //     xs match {
-      //       case '{ $xs: S.collection.mutable.Seq[a] } =>
+      //       case '{ $xs: scala.collection.mutable.Seq[a] } =>
       //         '{
       //           new MutableSeq[a](
       //             $xs.length,
       //             new intrinsics.TypedBuffer[a] {
-      //               override def apply(i: S.Int): a             = $xs(i)
-      //               override def update(i: S.Int, x: a): S.Unit = $xs(i) = x
+      //               override def apply(i: scala.Int): a             = $xs(i)
+      //               override def update(i: scala.Int, x: a): scala.Unit = $xs(i) = x
       //             }
       //           )
       //         }
@@ -206,27 +205,27 @@ object StdLib {
       //   },
       //   { case (q @ given Quotes, xs) =>
       //     '{
-      //       val ys = S.collection.mutable.Seq[Any]($xs.length_)
+      //       val ys = scala.collection.mutable.Seq[Any]($xs.length_)
       //       var i  = 0; while (i < $xs.length) ys(i) = $xs(i); ys
       //     }
       //   },
       //   { case (q @ given Quotes, ys, xs) =>
       //     (ys, xs) match {
-      //       case ('{ $ys: S.collection.mutable.Seq[Any] }, '{ $xs: MutableSeq[Any] }) =>
+      //       case ('{ $ys: scala.collection.mutable.Seq[Any] }, '{ $xs: MutableSeq[Any] }) =>
       //         '{ var i = 0; while (i < $xs.length) $ys(i) = $xs(i) }
       //     }
       //   }
       // ),
-      witness[S.collection.mutable.ListBuffer[_], MutableSeq[_]](
+      witness[scala.collection.mutable.ListBuffer[_], MutableSeq[_]](
         { case (q @ given Quotes, xs) =>
           xs match {
-            case '{ $xs: S.collection.mutable.ListBuffer[a] } =>
+            case '{ $xs: scala.collection.mutable.ListBuffer[a] } =>
               '{
                 new MutableSeq[a](
                   $xs.length,
                   new intrinsics.TypedBuffer[a] {
-                    override def apply(i: S.Int): a             = $xs(i)
-                    override def update(i: S.Int, x: a): S.Unit = $xs(i) = x
+                    override def apply(i: scala.Int): a             = $xs(i)
+                    override def update(i: scala.Int, x: a): scala.Unit = $xs(i) = x
                   }
                 )
               }
@@ -236,68 +235,68 @@ object StdLib {
           xs match {
             case '{ $xs: MutableSeq[t] } =>
               '{
-                S.collection.mutable.ListBuffer.tabulate[t]($xs.length_)($xs(_))
+                scala.collection.mutable.ListBuffer.tabulate[t]($xs.length_)($xs(_))
               }
           }
 
         },
         { case (q @ given Quotes, ys, xs) =>
           (ys, xs) match {
-            case ('{ $ys: S.collection.mutable.ListBuffer[Any] }, '{ $xs: MutableSeq[Any] }) =>
+            case ('{ $ys: scala.collection.mutable.ListBuffer[Any] }, '{ $xs: MutableSeq[Any] }) =>
               '{ var i = 0; while (i < $xs.length) $ys(i) = $xs(i) }
           }
         }
       ),
-      witness[S.Tuple2[_, _], Tuple2[_, _]]( //
+      witness[scala.Tuple2[_, _], Tuple2[_, _]]( //
         { case (_ @ given Quotes, x) =>
-          x match { case '{ $x: S.Tuple2[t0, t1] } => '{ new Tuple2[t0, t1]($x._1, $x._2) } }
+          x match { case '{ $x: scala.Tuple2[t0, t1] } => '{ new Tuple2[t0, t1]($x._1, $x._2) } }
         },
         { case (_ @ given Quotes, x) =>
-          x match { case '{ $x: Tuple2[t0, t1] } => '{ S.Tuple2[t0, t1]($x._1, $x._2) } }
+          x match { case '{ $x: Tuple2[t0, t1] } => '{ scala.Tuple2[t0, t1]($x._1, $x._2) } }
         },
         { case (_ @ given Quotes, ys, _) => '{ () } }
       ),
 
       // Immutable types, restore simply uses the original instance
-      witness[S.reflect.ClassTag[_], ClassTag[_]]( //
+      witness[scala.reflect.ClassTag[_], ClassTag[_]]( //
         { case (_ @ given Quotes, x) => '{ new ClassTag[Any]() } },
         { case (_ @ given Quotes, x) =>
           x match { // TODO not sure if this will actually work
-            case '{ $cls: ClassTag[t] } => '{ scala.compiletime.summonInline[S.reflect.ClassTag[t]] }
+            case '{ $cls: ClassTag[t] } => '{ scala.compiletime.summonInline[scala.reflect.ClassTag[t]] }
           }
         },
         { case (_ @ given Quotes, ys, _) => '{ () } }
       ),
-      witness[J.lang.Class[_], Class[_]]( //
+      witness[java.lang.Class[_], Class[_]]( //
         { case (_ @ given Quotes, _) => '{ new Class[Any]() } },
         { case (_ @ given Quotes, x) =>
           x match { // TODO not sure if this will actually work
-            case '{ $cls: Class[t] } => '{ scala.compiletime.summonInline[J.lang.Class[t]] }
+            case '{ $cls: Class[t] } => '{ scala.compiletime.summonInline[java.lang.Class[t]] }
           }
         },
         { case (_ @ given Quotes, ys, _) => '{ () } }
       ),
-      witness[S.collection.immutable.Range, Range](
+      witness[scala.collection.immutable.Range, Range](
         { case (_ @ given Quotes, r) => '{ new Range($r.start, $r.end, $r.step) } },
-        { case (_ @ given Quotes, r) => '{ S.collection.immutable.Range($r.start, $r.end, $r.step) } },
+        { case (_ @ given Quotes, r) => '{ scala.collection.immutable.Range($r.start, $r.end, $r.step) } },
         { case (_ @ given Quotes, x, _) => '{ () } }
       ),
-      witness[S.reflect.ClassTag.type, ClassTag.type](
+      witness[scala.reflect.ClassTag.type, ClassTag.type](
         { case (_ @ given Quotes, _) => '{ ClassTag } },
-        { case (_ @ given Quotes, _) => '{ S.reflect.ClassTag } },
-        { case (_ @ given Quotes, _, _) => '{ S.reflect.ClassTag } }
+        { case (_ @ given Quotes, _) => '{ scala.reflect.ClassTag } },
+        { case (_ @ given Quotes, _, _) => '{ scala.reflect.ClassTag } }
       ),
-      witness[S.runtime.RichInt, RichInt](
+      witness[scala.runtime.RichInt, RichInt](
         { case (_ @ given Quotes, x) => '{ new RichInt($x.self) } },
-        { case (_ @ given Quotes, x) => '{ new S.runtime.RichInt($x.x) } },
+        { case (_ @ given Quotes, x) => '{ new scala.runtime.RichInt($x.x) } },
         { case (_ @ given Quotes, x, _) => '{ () } }
       ),
-      witness[S.Predef.type, Predef](
+      witness[scala.Predef.type, Predef](
         { case (_ @ given Quotes, _) => '{ new Predef() } },
-        { case (_ @ given Quotes, _) => '{ S.Predef } },
+        { case (_ @ given Quotes, _) => '{ scala.Predef } },
         { case (_ @ given Quotes, x, _) => '{ () } }
       ),
-      witness[S.math.package$, math.type](
+      witness[scala.math.package$, math.type](
         { case (_ @ given Quotes, _) => '{ math } },
         { case (_ @ given Quotes, bad) =>
           '{ throw new RuntimeException(s"Prism assert: cannot restore object ${$bad}") }

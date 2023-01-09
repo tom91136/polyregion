@@ -2,11 +2,11 @@ package polyregion.prism
 
 import cats.syntax.all.*
 import polyregion.ast.{PolyAst as p, given, *}
-import polyregion.scala.*
+import polyregion.scalalang.*
 import polyregion.ast.Traversal.*
 
-import _root_.scala.annotation.{compileTimeOnly, tailrec}
-import _root_.scala.quoted.*
+import scala.annotation.{compileTimeOnly, tailrec}
+import scala.quoted.*
 
 @compileTimeOnly("This class only exists at compile-time for internal use")
 object compiletime {
@@ -30,7 +30,7 @@ object compiletime {
   private final val TopRefs =
     Set("scala.Any", classOf[java.lang.Object].getName) // classOf[Any].getName gives "java.lang.Object"
 
-  private final val IntrinsicName = polyregion.scala.intrinsics.getClass.getName
+  private final val IntrinsicName = polyregion.scalalang.intrinsics.getClass.getName
 
   private inline def simplifyTpe(using q: Quoted)(t: q.TypeRepr) = t.dealias.simplified.widenTermRefByName
 
@@ -151,7 +151,7 @@ object compiletime {
     _ = println(s"Do ${sourceMethodSym} -> ${mirrorMethodSym}")
 
     sourceSignature <- sourceMethodSym.tree match {
-      case d: q.DefDef => polyregion.scala.Compiler.deriveSignature(d)
+      case d: q.DefDef => polyregion.scalalang.Compiler.deriveSignature(d)
       case unsupported => s"Unsupported source tree: ${unsupported.show} ".fail
     }
     _ = println(s"SIG=${sourceSignature.repr}")
@@ -161,7 +161,7 @@ object compiletime {
         println(d.show)
         for {
 
-          ((fn, fnDeps), fnLog) <- polyregion.scala.Compiler.compileFn(d, intrinsify = true)
+          ((fn, fnDeps), fnLog) <- polyregion.scalalang.Compiler.compileFn(d, intrinsify = true)
 
           rewrittenMirror =
             fn.copy(

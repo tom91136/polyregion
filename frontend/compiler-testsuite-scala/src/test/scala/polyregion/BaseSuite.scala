@@ -1,10 +1,10 @@
 package polyregion
 
-import polyregion.scala.{NativeStruct, Platforms}
+import polyregion.scalalang.{NativeStruct, Platforms}
 
-import _root_.java.util.concurrent.{CountDownLatch, TimeUnit}
-import _root_.scala.compiletime.*
-import _root_.scala.reflect.ClassTag
+import java.util.concurrent.{CountDownLatch, TimeUnit}
+import scala.compiletime.*
+import scala.reflect.ClassTag
 
 trait BaseSuite extends munit.FunSuite {
 
@@ -46,10 +46,10 @@ trait BaseSuite extends munit.FunSuite {
   inline def offload0(using inline target: AssertTarget)(inline f: => Any): Unit =   target match {
     case AssertTarget.JDK => f
     case AssertTarget.Offload =>
-      import polyregion.scala.*
-      import polyregion.scala.blocking.Host
+      import polyregion.scalalang.*
+      import polyregion.scalalang.blocking.Host
       val latch = new CountDownLatch(1)
-      polyregion.scala.compiletime.offload0[Config[Target.Host.type, Opt.O2]](
+      polyregion.scalalang.compiletime.offload0[Config[Target.Host.type, Opt.O2]](
         Host.underlying.createQueue(),
         {
           case Left(e)   => throw e
@@ -62,11 +62,11 @@ trait BaseSuite extends munit.FunSuite {
   inline def offload1[A](using inline target: AssertTarget)(inline f: => A): A =   target match {
     case AssertTarget.JDK => f
     case AssertTarget.Offload =>
-      import polyregion.scala.*
-      import polyregion.scala.blocking.Host
-      val r     = _root_.scala.collection.mutable.ArrayBuffer[A](null.asInstanceOf[A])
+      import polyregion.scalalang.*
+      import polyregion.scalalang.blocking.Host
+      val r     = scala.collection.mutable.ArrayBuffer[A](null.asInstanceOf[A])
       val latch = new CountDownLatch(1)
-      polyregion.scala.compiletime.offload0[Config[Target.Host.type, Opt.O2]](
+      polyregion.scalalang.compiletime.offload0[Config[Target.Host.type, Opt.O2]](
         Host.underlying.createQueue(),
         {
           case Left(e)   => throw e
@@ -103,9 +103,9 @@ trait BaseSuite extends munit.FunSuite {
   inline def assertValEquals[A](inline actual: A, inline expected: A): Unit =
     inline (actual.asMatchable, expected.asMatchable) match {
       case (a: Float, e: Float) => //
-        assertEquals(_root_.java.lang.Float.floatToIntBits(a), _root_.java.lang.Float.floatToIntBits(e))
+        assertEquals(java.lang.Float.floatToIntBits(a), java.lang.Float.floatToIntBits(e))
       case (a: Double, e: Double) => //
-        assertEquals(_root_.java.lang.Double.doubleToLongBits(a), _root_.java.lang.Double.doubleToLongBits(e))
+        assertEquals(java.lang.Double.doubleToLongBits(a), java.lang.Double.doubleToLongBits(e))
       case (a, e) => //
         assertEquals(a, e)
     }

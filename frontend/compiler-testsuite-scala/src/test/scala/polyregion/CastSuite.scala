@@ -1,12 +1,12 @@
 package polyregion
 
-import polyregion.scala.*
-import polyregion.scala.compiletime.*
+import polyregion.scalalang.*
+import polyregion.scalalang.compiletime.*
 
-import _root_.scala.collection.mutable.ArrayBuffer
-import _root_.scala.collection.{BuildFrom, Factory, mutable}
-import _root_.scala.compiletime.*
-import _root_.scala.reflect.ClassTag
+import scala.collection.mutable.ArrayBuffer
+import scala.collection.{BuildFrom, Factory, mutable}
+import scala.compiletime.*
+import scala.reflect.ClassTag
 
 class CastSuite extends BaseSuite {
 

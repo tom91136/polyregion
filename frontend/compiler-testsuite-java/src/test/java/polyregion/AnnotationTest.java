@@ -10,14 +10,12 @@ import java.lang.annotation.Target;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Objects;
 import java.util.stream.Collectors;
 
-import polyregion.AnnotationTest.CUDAArch.Config;
-import polyregion.java.OffloadFunction;
-import polyregion.java.OffloadRunnable;
+import polyregion.javalang.OffloadFunction;
+import polyregion.javalang.OffloadRunnable;
 
-import static polyregion.java.Runtime.offload;
+import static polyregion.javalang.Runtime.offload;
 
 public class AnnotationTest {
 

@@ -1,4 +1,4 @@
-package polyregion.scala
+package polyregion.scalalang
 
 import cats.kernel.Monoid
 import cats.syntax.all.*

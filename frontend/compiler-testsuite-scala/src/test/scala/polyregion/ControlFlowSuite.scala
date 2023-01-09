@@ -1,10 +1,10 @@
 package polyregion
 
-import polyregion.scala.compiletime.*
+import polyregion.scalalang.compiletime.*
 
-import _root_.scala.annotation.nowarn
-import _root_.scala.compiletime.*
-import _root_.scala.reflect.ClassTag
+import scala.annotation.nowarn
+import scala.compiletime.*
+import scala.reflect.ClassTag
 
 class ControlFlowSuite extends BaseSuite {
 

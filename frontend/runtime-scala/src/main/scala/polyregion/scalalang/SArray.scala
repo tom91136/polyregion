@@ -1,4 +1,4 @@
-package polyregion.scala
+package polyregion.scalalang
 
 import scala.compiletime.ops.int.*
 import scala.compiletime.ops.boolean.*
