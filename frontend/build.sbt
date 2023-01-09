@@ -14,7 +14,7 @@ lazy val commonSettings = Seq(
   version          := "0.0.1-SNAPSHOT",
   organization     := "uk.ac.bristol.uob-hpc",
   organizationName := "University of Bristol",
-   compile / tpolecatExcludeOptions ++= ScalacOptions.defaultConsoleExclude,
+  compile / tpolecatExcludeOptions ++= ScalacOptions.defaultConsoleExclude,
 //  scalacOptions ~= filterConsoleScalacOptions,
   javacOptions ++=
     Seq(
@@ -96,7 +96,8 @@ lazy val compiler = project
       "net.bytebuddy"  % "byte-buddy" % "1.12.21",
       "com.lihaoyi"   %% "fansi"      % "0.4.0",
       "com.lihaoyi"   %% "upickle"    % "2.0.0",
-      "org.typelevel" %% "cats-core"  % catsVersion
+      "org.typelevel" %% "cats-core"  % catsVersion,
+      "org.scalameta" %% "munit"      % munitVersion % Test
     ),
     (Compile / unmanagedJars) := {
       val xs       = (Compile / unmanagedJars).value
@@ -177,7 +178,7 @@ lazy val `benchmarks-scala` = project
     assembly / mainClass := Some("polyregion.benchmarks.Main"),
     scalacOptions ++= Seq("-Yretain-trees"),
     libraryDependencies ++= Seq(
-        "net.openhft" % "affinity" % "3.23.2"
+      "net.openhft" % "affinity" % "3.23.2"
       // "org.scala-lang.modules" %% "scala-parallel-collections" % "1.0.4"
     )
   )
