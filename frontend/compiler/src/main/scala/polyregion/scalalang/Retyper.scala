@@ -53,6 +53,15 @@ object Retyper {
       )
     }
 
+    // We extract all definitions in the class first.
+    // XXX Calling `tree` on a field symbol throws a match error on DefDef, possibly a bug
+    val definitions = q
+      .collectTree(clsSym.tree) {
+        case f: q.Definition => (f.symbol, f) :: Nil
+        case _               => Nil
+      }
+      .toMap
+
     // XXX there appears to be a bug where an assertion error is thrown if we call the start/end (but not the pos itself)
     // of certain type of trees returned from fieldMembers
     clsSym.fieldMembers
@@ -61,24 +70,29 @@ object Retyper {
       .sortBy(
         _.pos.map(p => Try((p.startLine, p.startColumn)).getOrElse((0, 0)))
       ) // make sure the order follows source code decl. order
-      .traverseFilter(field =>
-        field.tree match { // TODO we need to work out nested structs
-          case d: q.ValDef =>
-            val tpe = d.tpt.tpe
-            // Skip references to objects as those are singletons and should be identified and lifted by the Remapper.
-            if (isModuleClass(tpe.typeSymbol)) None.success
-            else
-              typer0(tpe).map { case (_ -> t, wit) =>
-                Some(
-                  p.StructMember(
-                    named = p.Named(field.name, t),
-                  isMutable = d.symbol.flags.is(q.Flags.Mutable)
+      .traverseFilter { field =>
+        for {
+          fieldTree <- definitions.get(field).failIfEmpty(s"Unexpected field ${field} from `Symbol.fieldMembers`")
+          sm <- fieldTree match { // TODO we need to work out nested structs
+            case d: q.DefDef => ???
+            case d: q.ValDef =>
+              val tpe = d.tpt.tpe
+              // Skip references to objects as those are singletons and should be identified and lifted by the Remapper.
+              if (isModuleClass(tpe.typeSymbol)) None.success
+              else
+                typer0(tpe).map { case (_ -> t, wit) =>
+                  Some(
+                    p.StructMember(
+                      named = p.Named(field.name, t),
+                      isMutable = d.symbol.flags.is(q.Flags.Mutable)
+                    )
                   )
-                )
-              }
-          case _ => ???
-        }
-      )
+                }
+            case _ => ???
+          }
+        } yield sm
+
+      }
       .map(p.StructDef(p.Sym(clsSym.fullName), true, clsTypeCtorNames(clsSym), _))
   }
 

@@ -25,10 +25,9 @@ class Quoted(val underlying: scala.quoted.Quotes) {
     case Object, Class
   }
 
-
   type ClsWitnesses = Map[ClassDef, Set[p.Type.Struct]]
-  type FnWitnesses = Map[DefDef, Set[p.Expr.Invoke]]
-  type Retyped          = (Option[p.Term], p.Type)
+  type FnWitnesses  = Map[DefDef, Set[p.Expr.Invoke]]
+  type Retyped      = (Option[p.Term], p.Type)
 
   // TODO everything here can be a Set as we don't need the rhs
   case class Dependencies(
@@ -64,16 +63,25 @@ class Quoted(val underlying: scala.quoted.Quotes) {
 
       refs: Map[Symbol, p.Term] = Map.empty, // ident/select table
 
-      // clss: Map[p.Sym, p.StructDef] = Map.empty,  // external class defs
-      // defs: Map[p.Signature, DefDef] = Map.empty, // external def defs
-
       deps: Dependencies = Dependencies(),
       stmts: List[p.Stmt] = List.empty, // fn statements
-      thisCls: Option[(ClassDef, p.Type.Struct)] = None
+      thisCls: Option[(ClassDef, p.Type.Struct)] = None,
+      symbolDefMap: Map[Symbol, Definition] = Map.empty
   ) {
     infix def !!(t: Tree): RemapContext = copy(traces = t :: traces)
     def down(t: Tree): RemapContext     = !!(t).copy(depth = depth + 1)
     def named(tpe: p.Type): p.Named     = p.Named(s"v${depth}", tpe)
+
+    def withDefs(x: Tree) : RemapContext = withDefs(x :: Nil)
+    def withDefs(xs: List[Tree]) : RemapContext= copy(symbolDefMap =
+      symbolDefMap ++
+        xs.flatMap(collectTree(_) {
+          case d: Definition => (d.symbol -> d) :: Nil
+          case _             => Nil
+        }).toMap
+    )
+
+    def findDefTree(s : Symbol) : Option[Definition] = symbolDefMap.get(s)
 
     def noStmts: RemapContext = copy(stmts = Nil)
     // def mark(s: p.Signature, d: DefDef) = copy(defs = defs + (s -> d))
@@ -82,7 +90,7 @@ class Quoted(val underlying: scala.quoted.Quotes) {
     def updateDeps(f: Dependencies => Dependencies): RemapContext = copy(deps = f(deps))
 
     def bindThis(x: ClassDef, tpe: p.Type.Struct): Result[RemapContext] = thisCls match {
-      case None => updateDeps(_.witness(x, tpe)).copy(thisCls = Some((x -> tpe))).success
+      case None => updateDeps(_.witness(x, tpe)).copy(thisCls = Some(x -> tpe)).success
       case Some((oldSym, oldTpe)) if oldSym == x && oldTpe == tpe => this.success
       case Some((oldSym, oldTpe)) => s"Cannot witness different this type: $oldSym != $x ($oldTpe != $tpe)".fail
     }

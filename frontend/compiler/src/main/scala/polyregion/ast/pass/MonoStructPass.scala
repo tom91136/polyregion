@@ -7,7 +7,7 @@ import polyregion.prism.Prism
 
 object MonoStructPass extends BoundaryPass[Map[p.Sym, p.Sym]] {
 
-  override def apply(program: p.Program, log: Log): (Map[p.Sym, p.Sym], p.Program, Log) = {
+  override def apply(program: p.Program, log: Log): (Map[p.Sym, p.Sym], p.Program) = {
     println(">MonoStructPass")
 
     val structsInFunction: List[p.Type.Struct] =
@@ -70,8 +70,7 @@ object MonoStructPass extends BoundaryPass[Map[p.Sym, p.Sym]] {
         entry = program.entry.modifyAll[p.Type](doReplacement(_)),
         functions = program.functions,
         defs = rootStructDefs ++ referencedStructDefs
-      ),
-      log
+      )
     )
 
   }

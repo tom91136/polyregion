@@ -65,6 +65,7 @@ object compiletime {
 
     val witnesses = collectWitnesses[T]().map((a, b) => (simplifyTpe(a), simplifyTpe(b)))
 
+    given l:Log = Log("Derive packed mirrors")
     (for {
       typeLUT <- witnesses.traverse { (s, m) =>
         for {
@@ -143,11 +144,11 @@ object compiletime {
     case x => x
   }
 
-  private def mirrorMethod(using q: Quoted)              //
+  private def mirrorMethod(using q: Quoted, sink: Log)              //
   (sourceMethodSym: q.Symbol, mirrorMethodSym: q.Symbol) //
   (mirrorToSourceTable: Map[p.Sym, p.Sym]): Result[(p.Function, q.Dependencies)] = for {
 
-    log <- Log(s"Mirror for ${sourceMethodSym} -> ${mirrorMethodSym}")
+    log <- sink.subLog(s"Mirror for ${sourceMethodSym} -> ${mirrorMethodSym}").success
     _ = println(s"Do ${sourceMethodSym} -> ${mirrorMethodSym}")
 
     sourceSignature <- sourceMethodSym.tree match {
@@ -161,7 +162,7 @@ object compiletime {
         println(d.show)
         for {
 
-          ((fn, fnDeps), fnLog) <- polyregion.scalalang.Compiler.compileFn(d, intrinsify = true)
+          (fn, fnDeps) <- polyregion.scalalang.Compiler.compileFn(log, d, intrinsify = true)
 
           rewrittenMirror =
             fn.copy(
@@ -216,7 +217,7 @@ object compiletime {
     }
   } yield mirrorMethods
 
-  private def derivePackedMirrorsImpl(using q: Quoted) //
+  private def derivePackedMirrorsImpl(using q: Quoted, sink : Log) //
   (source: q.TypeRepr, mirror: q.TypeRepr)             //
   (mirrorToSourceTable: Map[p.Sym, p.Sym]): Result[p.Mirror] = {
 
@@ -301,13 +302,13 @@ object compiletime {
 
       // FIXME we're creating a dummy function so that the replacement works,
       //  shouldn't have to do this really.
-      (_, _, dependentStructs, _, dependentLog) <-
-        Compiler.compileAndReplaceStructDependencies(
+      (_, _, dependentStructs, _) <-
+        Compiler.compileAndReplaceStructDependencies(sink, 
           p.Function(p.Sym("_dummy_"), Nil, None, Nil, Nil, p.Type.Nothing, Nil),
           deps
         )(Map.empty)
 
-      _ = println(dependentLog.render(1).mkString("\n"))
+      _ = println(sink.render(1).mkString("\n"))
 
       parents = source.baseClasses.map(c => p.Sym(c.fullName))
 

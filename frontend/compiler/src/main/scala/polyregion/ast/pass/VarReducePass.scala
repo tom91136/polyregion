@@ -1,7 +1,7 @@
 package polyregion.ast.pass
 
 import cats.syntax.all.*
-import polyregion.ast.{PolyAst as p, given, *}
+import polyregion.ast.{PolyAst as p, *, given}
 import polyregion.ast.Traversal.*
 
 object VarReducePass extends ProgramPass {
@@ -44,9 +44,9 @@ object VarReducePass extends ProgramPass {
     f.copy(body = reduced)
   }
 
-  override def apply(program: p.Program, log: Log): (p.Program, Log) = {
+  override def apply(program: p.Program, log: Log): p.Program = {
     println(">VarReducePass")
-    (p.Program(run(program.entry), program.functions.map(run(_)), program.defs), log)
+    p.Program(run(program.entry), program.functions.map(run(_)), program.defs)
   }
 
 }

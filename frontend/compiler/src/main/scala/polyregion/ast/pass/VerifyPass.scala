@@ -9,7 +9,7 @@ import scala.annotation.tailrec
 
 object VerifyPass {
 
-  def run(program: p.Program)(log: Log): (List[(p.Function, List[String])], Log) =
+  def run(program: p.Program)(log: Log): List[(p.Function, List[String])] =
     (program.entry :: program.functions).map { f =>
       f -> (f.body match {
         case Nil =>
@@ -142,5 +142,5 @@ object VerifyPass {
             case _ => Nil
           })
       })
-    } -> log
+    }  
 }

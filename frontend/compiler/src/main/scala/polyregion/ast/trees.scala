@@ -7,6 +7,7 @@ import polyregion.ast.Traversal.*
 
 import java.lang.reflect.Modifier
 import scala.annotation.{tailrec, targetName}
+import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 import scala.util.{Success, Try}
 
@@ -55,41 +56,36 @@ extension [A](a: Result[A]) {
 }
 
 //
-case class Log(name: String, lines: Vector[(String, Vector[String]) | Log]) {
+case class Log(name: String, lines: ArrayBuffer[(String, Vector[String]) | Log]) {
 
-  // def mark[A](name: String)(f: Log => Result[(A, Log)]): Result[(A, Log)] =
-  //   f(Log(name, Vector.empty)).map { case (x, l) => (x, copy(lines = lines :+ l)) }
+  @targetName("append") infix def subLog(name: String): Log = {
+    val sub = Log(name); lines += sub; sub
+  }
 
-  infix def +(log: Log): Log = copy(lines = lines :+ log)
+  @targetName("append") infix def +=(log: Log): Unit          = lines += log
+  @targetName("appendAll") infix def ++=(log: Seq[Log]): Unit = lines ++= log
+  def info(message: String, details: String*): Unit           = lines += (message -> details.toVector)
 
-  infix def ~+(log: Log): Result[Log] = copy(lines = lines :+ log).success
-
-  infix def ++(log: Seq[Log]): Log = copy(lines = lines ++ log)
-
-  def info_(message: String, details: String*): Log = copy(lines = lines :+ (message -> details.toVector))
-
-  def info(message: String, details: String*): Result[Log] = info_(message, details*).success
+//  def info(message: String, details: String*): Result[Log] = info_(message, details*).success
 
   def render(nesting: Int = 0): Vector[String] =
     Try {
-
       val colour = Log.Colours(nesting % Log.Colours.size)
       val attr   = colour ++ fansi.Reversed.On ++ fansi.Bold.On
       val indent = colour("┃ ")
 
-      ((colour("┏━") ++ attr(s" ${name} ") ++ colour("")) +: lines
+      ((colour("┏━") ++ attr(s" ${name} ") ++ colour("")) +: lines.toVector
         .flatMap {
-          case (log: Log) => log.render(nesting + 1).map(indent ++ _)
-          case (l, details) =>
-            ((colour ++ fansi.Underlined.On)(s"▓ $l ▓")) +: details.flatMap { l =>
+          case log: Log => log.render(nesting + 1).map(indent ++ _)
+          case (line, details) =>
+            ((colour ++ fansi.Underlined.On)(s"▓ $line ▓")) +: details.flatMap { l =>
               l.linesIterator.toList match {
                 case x :: xs =>
-                  ((colour("┃ ╰ ") ++ s"$x") :: xs.map(x => indent ++ s"  ${x}")).toVector
-                case Nil => Vector()
+                  ((colour("┃ ╰ ") ++ s"$x") :: xs.map(x => indent ++ s"  $x")).toVector
+                case Nil => Vector.empty
               }
-
             }
-        } :+ colour(s"┗━${"━" * (name.size + 2)}"))
+        } :+ colour(s"┗━${"━" * (name.length + 2)}"))
         .map(_.render)
     }.recover { case e: Exception =>
       Vector(s"Cannot render:${e}")
@@ -114,7 +110,7 @@ object Log {
     fansi.Color.LightCyan
   )
 
-  def apply(name: String): Result[Log] = Log(name, Vector.empty).success
+  def apply(name: String): Log = Log(name, ArrayBuffer.empty)
 
 }
 

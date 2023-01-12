@@ -20,7 +20,7 @@ object DeadArgEliminationPass extends ProgramPass {
     )
   }
 
-  override def apply(program: p.Program, log: Log): (p.Program, Log) =
-    (program.copy(entry = run(program.entry)), log)
+  override def apply(program: p.Program, log: Log): (p.Program) =
+    program.copy(entry = run(program.entry))
 
 }

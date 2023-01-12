@@ -2,7 +2,7 @@ package polyregion.ast.pass
 
 import cats.syntax.all.*
 import polyregion.ast.Traversal.*
-import polyregion.ast.{PolyAst as p, given, *}
+import polyregion.ast.{PolyAst as p, *, given}
 
 object UnitExprElisionPass extends ProgramPass {
 
@@ -19,9 +19,9 @@ object UnitExprElisionPass extends ProgramPass {
       case x                                               => x
     }
 
-  override def apply(program: p.Program, log: Log): (p.Program, Log) = {
+  override def apply(program: p.Program, log: Log): p.Program = {
     println(">UnitExprElisionPass")
-    (p.Program(run(program.entry), program.functions.map(run(_)), program.defs), log)
+    p.Program(run(program.entry), program.functions.map(run(_)), program.defs)
   }
 
 }

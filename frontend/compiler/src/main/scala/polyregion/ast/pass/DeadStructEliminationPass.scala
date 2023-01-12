@@ -5,8 +5,7 @@ import polyregion.ast.{PolyAst as p, *}
 
 object DeadStructEliminationPass extends ProgramPass {
 
-  override def apply(program: p.Program, log: Log): (p.Program, Log) = {
-
+  override def apply(program: p.Program, log: Log): p.Program =
     // program.entry.args
 
     // val selects = program.entry.body.flatMap { s =>
@@ -19,7 +18,5 @@ object DeadStructEliminationPass extends ProgramPass {
 
     // (p.Program(run(program.entry), program.functions.map(run(_)), program.defs), log)
     ???
-
-  }
 
 }

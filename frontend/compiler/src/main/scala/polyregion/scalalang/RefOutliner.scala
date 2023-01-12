@@ -17,10 +17,10 @@ object RefOutliner {
     case _              => None               // we got a non ref node, give up
   }
 
-  def outline(using q: Quoted)(term: q.Term)(log: Log) //
-      : Result[(List[(q.Ident, q.Ref, q.Retyped)], q.ClsWitnesses, Log)] = for {
+  def outline(using q: Quoted)(sink: Log, term: q.Term) //
+      : Result[(List[(q.Ident, q.Ref, q.Retyped)], q.ClsWitnesses)] = for {
 
-    log <- Log(s"Outline")
+    log <- sink.subLog(s"Outline").success
 
     localDefs = q.collectTree(term) {
       case b: q.ValDef => b :: Nil
@@ -28,7 +28,7 @@ object RefOutliner {
     }
     localDefTable = localDefs.map(_.symbol).toSet
 
-    log <- log.info("Local ValDefs", localDefs.map(_.toString)*)
+    _ = log.info("Local ValDefs", localDefs.map(_.toString)*)
 
     foreignRefs = q.collectTree[q.Ref](term) {
       // case ref: q.Ref if !ref.symbol.maybeOwner.flags.is(q.Flags.Macro) => ref :: Nil
@@ -75,19 +75,19 @@ object RefOutliner {
     // free methods          :  Flags.{Method}
     // free vals             :  Flags.{}
 
-    log <- log.info(
+    _ = log.info(
       "Foreign Refs",
       foreignRefs.map(x =>
         s"${x.show}(symbol=${x.symbol}, owner=${x.symbol.owner}) ~> $x, tpe=${x.tpe.widenTermRefByName.show}"
       )*
     )
-    log <- log.info(
+    _ = log.info(
       "Normalised",
       normalisedForeignValRefs
         .distinctBy(_._3.symbol)
         .map((root, path, x) => s"${x.show}(symbol=${x.symbol}, root=$root, path=${path.mkString(".")})")*
     )
-    log <- log.info(
+    _ = log.info(
       "Root collapsed",
       sharedValRefs.map((root, x) => s"${x.show}(symbol=${x.symbol}, owner=${x.symbol.owner}, root=$root)")*
     )
@@ -124,7 +124,7 @@ object RefOutliner {
       case _                                                                     => true
     }
 
-    log <- log.info(
+    _ = log.info(
       s"Typed",
       filteredTypedRefs.map { case (root, ref, value -> tpe) =>
         s"${ref.show}(symbol=${ref.symbol}, owner=${ref.symbol.owner}, root=${root}${
@@ -134,5 +134,5 @@ object RefOutliner {
       }*
     )
 
-  } yield (filteredTypedRefs, wit, log)
+  } yield (filteredTypedRefs, wit)
 }

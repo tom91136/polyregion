@@ -2,7 +2,7 @@ package polyregion.scalalang
 
 import cats.data.EitherT
 import cats.syntax.all.*
-import polyregion.ast.{PolyAst as p, given, *}
+import polyregion.ast.{PolyAst as p, *, given}
 import polyregion.ast.Traversal.*
 import scala.annotation.tailrec
 
@@ -15,7 +15,9 @@ object Remapper {
         tpeTable.get(name) match {
           case Some(value) => value
           case None =>
-            println(s"Ap gen ${exec} is missing required gen arg $name, exec need = ${exec.tpeVars}, given = ${tpeArgs}")
+            println(
+              s"Ap gen ${exec} is missing required gen arg $name, exec need = ${exec.tpeVars}, given = ${tpeArgs}"
+            )
             ???
         }
       case x => x
@@ -173,7 +175,13 @@ object Remapper {
         // Call no-arg functions (i.e. `x.toDouble` or just `def fn = ???; fn` ) directly or pass-through if not no-arg
         def invokeOrSelect(
             c: q.RemapContext
-        )(sym: q.Symbol, receiver: Option[p.Term])(select: => Result[p.Term.Select]) = sym.tree match {
+        )(sym: q.Symbol, receiver: Option[p.Term])(select: => Result[p.Term.Select]) = { 
+          
+          println("$$$ "+c.symbolDefMap.mkString("\n"))
+
+          println(sym)
+
+          sym.tree match {
           case fn: q.DefDef => // `receiver?.$fn`
             // Assert that the term list matches Exec's nested (recursive) types.
             // Note that Exec treats both empty args `()` and no-args as `Nil` where as the collected arg lists through
@@ -209,7 +217,7 @@ object Remapper {
           case local: q.ValDef => // sym.$local
             for (s <- select) yield s -> c
           case illegal => s"unexpected invoke/select receiver ${illegal}".fail
-        }
+        }}
 
         // We handle any reference to arbitrarily nested objects/modules (including direct ident with no nesting, as produced by `inline` calls)
         // directly because they are singletons (i.e. can appear anywhere with no dependencies, even the owner).
@@ -364,40 +372,42 @@ object Remapper {
         tpeArgs: List[p.Type] = Nil,
         termArgss: List[List[p.Term]] = Nil
     ): Result[(p.Term, q.RemapContext)] = {
-      println(s">>${term.show} = ${c.stmts.size} ~ ${term}")
+
+      val c1 = c.withDefs(term)
+
       (tpeArgs, termArgss, term) match {
-        case (Nil, Nil, q.NamedArg(name, rhs)) => (c !! term).mapTerm(rhs) // named argument: `$name = $rhs`
-        case (Nil, Nil, q.Typed(x, _))         => (c !! term).mapTerm(x)   // type ascription: `value : T`
+        case (Nil, Nil, q.NamedArg(name, rhs)) => (c1 !! term).mapTerm(rhs) // named argument: `$name = $rhs`
+        case (Nil, Nil, q.Typed(x, _))         => (c1 !! term).mapTerm(x)   // type ascription: `value : T`
         case (Nil, Nil, q.Inlined(call, bindings, expansion)) => // inlined DefDef
           for {
             // For non-inlined args, bindings will contain all relevant arguments with rhs.
             // TODO I think call is safe to ignore here? It looks like a subtree from the expansion...
-            (_, c) <- (c !! term).mapTrees(bindings)
+            (_, c) <- (c1 !! term).mapTrees(bindings)
             (v, c) <- (c !! term).mapTerm(expansion)
           } yield (v, c)
-        case (Nil, Nil, q.Literal(q.BooleanConstant(v))) => (p.Term.BoolConst(v), c !! term).pure
-        case (Nil, Nil, q.Literal(q.IntConstant(v)))     => (p.Term.IntConst(v), c !! term).pure
-        case (Nil, Nil, q.Literal(q.FloatConstant(v)))   => (p.Term.FloatConst(v), c !! term).pure
-        case (Nil, Nil, q.Literal(q.DoubleConstant(v)))  => (p.Term.DoubleConst(v), c !! term).pure
-        case (Nil, Nil, q.Literal(q.LongConstant(v)))    => (p.Term.LongConst(v), c !! term).pure
-        case (Nil, Nil, q.Literal(q.ShortConstant(v)))   => (p.Term.ShortConst(v), c !! term).pure
-        case (Nil, Nil, q.Literal(q.ByteConstant(v)))    => (p.Term.ByteConst(v), c !! term).pure
-        case (Nil, Nil, q.Literal(q.CharConstant(v)))    => (p.Term.CharConst(v), c !! term).pure
-        case (Nil, Nil, q.Literal(q.UnitConstant()))     => (p.Term.UnitConst, c !! term).pure
+        case (Nil, Nil, q.Literal(q.BooleanConstant(v))) => (p.Term.BoolConst(v), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.IntConstant(v)))     => (p.Term.IntConst(v), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.FloatConstant(v)))   => (p.Term.FloatConst(v), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.DoubleConstant(v)))  => (p.Term.DoubleConst(v), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.LongConstant(v)))    => (p.Term.LongConst(v), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.ShortConstant(v)))   => (p.Term.ShortConst(v), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.ByteConstant(v)))    => (p.Term.ByteConst(v), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.CharConstant(v)))    => (p.Term.CharConst(v), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.UnitConstant()))     => (p.Term.UnitConst, c1 !! term).pure
         case (Nil, Nil, q.Literal(q.StringConstant(v))) =>
           ??? // XXX alloc new string instance
         case (Nil, Nil, q.Literal(q.ClassOfConstant(_))) =>
-          c.typerAndWitness(term.tpe).map { case (_ -> tpe, c) =>
+          c1.typerAndWitness(term.tpe).map { case (_ -> tpe, c) =>
             val name = c.named(tpe)
             (p.Term.Select(Nil, name), (c.down(term)) ::= p.Stmt.Var(name, None))
           }
         case (Nil, Nil, l @ q.Literal(q.NullConstant())) =>
-          c.typerAndWitness(l.tpe).map { case (_ -> tpe, c) =>
+          c1.typerAndWitness(l.tpe).map { case (_ -> tpe, c) =>
             (p.Term.Poison(tpe), c !! term)
           }
         case (Nil, Nil, q.This(_)) => // reference to the current class: `this.???`
           // XXX Don't use typerAndWitness here, we need to record the witnessing of `this` separately.
-          (c !! term).typerAndWitness(term.tpe).flatMap {
+          (c1 !! term).typerAndWitness(term.tpe).flatMap {
             case (None -> (s @ p.Type.Struct(_, _, _)), c) =>
               // There may be more than one
               term.tpe.classSymbol.map(_.tree) match {
@@ -412,26 +422,26 @@ object Remapper {
         case (tpeArgs, termArgss, q.TypeApply(term, args)) => // *single* application of some types: `$term[$args...]`
           println(s"[mapper] <${tpeArgs.map(_.repr)}> tpeAp = `${term.show}`")
           for {
-            (args, c) <- c.typerNAndWitness(args.map(_.tpe))
+            (args, c) <- c1.typerNAndWitness(args.map(_.tpe))
             (term, c) <- c.mapTerm(term, tpeArgs = args.map(_._2), termArgss = termArgss)
           } yield (term, c)
         case (tpeArgs, termArgs, r: q.Ref) =>
           println(
             s"[mapper] ref = `${r}` termArgs={${termArgs.flatten.map(_.repr).mkString(",")}} tpeArgs=<${tpeArgs.map(_.repr).mkString(",")}>"
           )
-          (c.refs.get(r.symbol)) match {
+          c1.refs.get(r.symbol) match {
             case Some(term) =>
-              c.typerAndWitness(r.tpe).flatMap { case (_ -> tpe, c) =>
+              c1.typerAndWitness(r.tpe).flatMap { case (_ -> tpe, c) =>
                 println("~~~ " + tpe)
 
                 if (term.tpe != tpe) s"Ref type mismatch (${term.tpe} != $tpe)".fail
-                else (term, (c !! r)).success
+                else (term, c !! r).success
               }
             case None => (c !! r).mapRef0(r, tpeArgs, termArgs)
           }
         case (Nil, Nil, q.New(tpt)) => // new instance *without* arg application: `new $tpt`
           println(s"[mapper] new = `${term.show}`")
-          c.typerAndWitness(tpt.tpe).map { case (_ -> tpe, c) =>
+          c1.typerAndWitness(tpt.tpe).map { case (_ -> tpe, c) =>
             val name = c.named(tpe)
             (p.Term.Select(Nil, name), (c.down(term)) ::= p.Stmt.Var(name, None))
           }
@@ -442,17 +452,17 @@ object Remapper {
           // }
 
           for {
-            (args, c) <- c.down(ap).mapTerms(args)
+            (args, c) <- c1.down(ap).mapTerms(args)
             (fun, c)  <- (c !! ap).mapTerm(fun, tpeArgs = tpeArgs, termArgss = args :: termArgs0)
           } yield (fun, c)
         case (Nil, Nil, q.Block(stat, expr)) => // block expression: `{ $stmts...; $expr }`
           for {
-            (_, c)   <- (c !! term).mapTrees(stat)
+            (_, c)   <- (c1 !! term).mapTrees(stat)
             (ref, c) <- c.mapTerm(expr)
           } yield (ref, c)
         case (Nil, Nil, q.Assign(lhs, rhs)) => // simple assignment: `$lhs = $rhs`
           for {
-            (lhsRef, c) <- c.down(term).mapTerm(lhs) // go down here
+            (lhsRef, c) <- c1.down(term).mapTerm(lhs) // go down here
             (rhsRef, c) <- (c !! term).mapTerm(rhs)
             r <- (lhsRef, rhsRef) match {
               case (s @ p.Term.Select(_, _), rhs) =>
@@ -465,16 +475,16 @@ object Remapper {
           } yield r
         case (Nil, Nil, q.If(cond, thenTerm, elseTerm)) => // conditional: `if($cond) then $thenTerm else $elseTerm`
           for {
-            (_ -> tpe, c)       <- c.typerAndWitness(term.tpe) // TODO  return term value if already known at type-level
-            (condTerm, ifCtx)   <- c.down(term).mapTerm(cond)
+            (_ -> tpe, c)     <- c1.typerAndWitness(term.tpe) // TODO  return term value if already known at type-level
+            (condTerm, ifCtx) <- c.down(term).mapTerm(cond)
             (thenTerm, thenCtx) <- ifCtx.noStmts.mapTerm(thenTerm)
             (elseTerm, elseCtx) <- thenCtx.noStmts.mapTerm(elseTerm)
 
             _ <-
-              (if (condTerm.tpe != p.Type.Bool) s"Cond must be a Bool ref, got ${condTerm}".fail
-               else ().success)
+              if (condTerm.tpe != p.Type.Bool) s"Cond must be a Bool ref, got ${condTerm}".fail
+              else ().success
             cond <- (thenTerm, elseTerm) match {
-              case ((thenTerm), (elseTerm)) if thenTerm.tpe == tpe && elseTerm.tpe == tpe =>
+              case (thenTerm, elseTerm) if thenTerm.tpe == tpe && elseTerm.tpe == tpe =>
                 val name   = ifCtx.named(tpe)
                 val result = p.Stmt.Var(name, None)
                 val cond = p.Stmt.Cond(
@@ -489,14 +499,14 @@ object Remapper {
           } yield cond
         case (Nil, Nil, q.While(cond, body)) => // loop: `while($cond) {$body...}`
           for {
-            (condTerm, condCtx) <- c.noStmts.down(term).mapTerm(cond)
+            (condTerm, condCtx) <- c1.noStmts.down(term).mapTerm(cond)
             (_, bodyCtx)        <- condCtx.noStmts.mapTerm(body)
           } yield (
             p.Term.UnitConst,
             bodyCtx.replaceStmts(c.stmts :+ p.Stmt.While(condCtx.stmts, condTerm, bodyCtx.stmts))
           )
         case _ =>
-          c.fail(
+          c1.fail(
             s"Unhandled: <${tpeArgs.map(_.repr)}>`$term`(${termArgss}), show=`${term.show}`\nSymbol:\n${term.symbol}"
           )
       }

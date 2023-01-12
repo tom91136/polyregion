@@ -1,7 +1,7 @@
 package polyregion.ast.pass
 
 import cats.syntax.all.*
-import polyregion.ast.{PolyAst as p, given, *}
+import polyregion.ast.{PolyAst as p, *, given}
 import polyregion.ast.Traversal.*
 import scala.collection.immutable.VectorMap
 
@@ -38,7 +38,7 @@ object FnInlinePass extends ProgramPass {
 
     val table = f.tpeVars.zip(concreteTpeArgs).toMap
 
-    val renamed = renameAll(f.modifyAll[p.Type] (_.mapLeaf{
+    val renamed = renameAll(f.modifyAll[p.Type](_.mapLeaf {
       case p.Type.Var(name) if table.contains(name) => table(name)
       case x                                        => x
     }))
@@ -73,32 +73,29 @@ object FnInlinePass extends ProgramPass {
           s"no return in function ${f.signature}, substituted:\n${returnExprs.map(_.repr).mkString("\n")}"
         )
       case expr :: Nil => // single return, just pass the expr to the call-site
-        val noReturnStmt = substituted.modifyAll[p.Stmt] { 
+        val noReturnStmt = substituted.modifyAll[p.Stmt] {
           case p.Stmt.Return(e) => p.Stmt.Comment(s"inlined return ${e}")
-          case x => x
+          case x                => x
         }
         (expr, noReturnStmt, renamed.captures)
       case xs => // multiple returns, create intermediate return var
         val returnName               = p.Named("phi", ivk.tpe)
         val returnRef: p.Term.Select = p.Term.Select(Nil, returnName)
-        val returnRebound = substituted.modifyAll[p.Stmt] { 
+        val returnRebound = substituted.modifyAll[p.Stmt] {
           case p.Stmt.Return(e) => p.Stmt.Mut(returnRef, e, copy = false)
-          case x => x
+          case x                => x
         }
         (p.Expr.Alias(returnRef), p.Stmt.Var(returnName, None) :: returnRebound, renamed.captures)
     }
   }
 
-  override def apply(program: p.Program, log: Log): (p.Program, Log) = {
+  override def apply(program: p.Program, log: Log): p.Program = {
     println(">FnInlinePass")
 
     val (n, f) = doUntilNotEq(program.entry, limit = 10) { (i, f) =>
       println(s"[Inline ${i}]\n${f.repr}")
 
     val (stmts, captures) = f.body.foldMap { x =>
-
-
-
 
       val (y, xs) = x.modifyCollect[p.Expr, (List[p.Stmt], List[p.Named])] {
         case ivk @ p.Expr.Invoke(name, tpeArgs, recv, args, rtn) =>
@@ -114,7 +111,7 @@ object FnInlinePass extends ProgramPass {
             // `scalac` would have rejected bad receivers before this so it should be relatively safe.
 
             val varToTpeLut = f.tpeVars.zip(tpeArgs).toMap
-            val sig = f.signature.modifyAll[p.Type](_.mapLeaf{
+            val sig = f.signature.modifyAll[p.Type](_.mapLeaf {
               case v @ p.Type.Var(n) => varToTpeLut.getOrElse(n, v)
               case x                 => x
             })
@@ -143,13 +140,13 @@ object FnInlinePass extends ProgramPass {
         case x => (x, Nil -> Nil)
       }
       val (stmts, captures) = xs.combineAll //
-      (stmts :+ y , captures)
+      (stmts :+ y, captures)
     }
     f.copy(body = stmts, captures = (f.captures ++ captures).distinct)
     }
 
     println("Done")
-    (p.Program(f, Nil, program.defs), log)
+    p.Program(f, Nil, program.defs)
 
   }
 

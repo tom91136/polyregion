@@ -1,14 +1,10 @@
 package polyregion
 
-import scala.quoted.{Expr, FromExpr, Quotes, ToExpr, Varargs}
-import polyregion.scalalang.{Compiler, Quoted}
 import polyregion.ast.*
+import polyregion.scalalang.{Compiler, Quoted}
 
-import java.io.ObjectOutputStream
-import java.io.ByteArrayOutputStream
-
-import java.io.ObjectInputStream
-import java.io.ByteArrayInputStream
+import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
+import scala.quoted.*
 
 object CompilerTests {
 
@@ -39,27 +35,26 @@ object CompilerTests {
     }
   }
 
-  inline def compilerAssert(): Unit = ${
-    compilerAssert('{
-      val a = 1
-      val b = 2
-      a + b
-      ""
-//      val c = Array(1)
-    })
-  }
+  inline def compilerAssert(inline f: Any): Unit = ${ compilerAssert('f) }
   private def compilerAssert(using q: Quotes)(expr: Expr[Any]): Expr[Unit] = {
     println("In!")
+    val l = Log("")
 
     try {
 
-      (for {
-        (captures, prismRefs, monoMap, prog0, log) <- Compiler.compileExpr(using Quoted(q))(expr)
-        _ = println(log.name)
-      } yield '{ () }).fold(throw _, identity)
+      val v = (for {
+        (captures, prismRefs, monoMap, prog0) <- Compiler.compileExpr(using Quoted(q))(l, expr)
+
+      } yield '{ () }).fold(x => throw x, identity)
+      println(s"Log=${l.lines.size}")
+      println(l.render(0).mkString("\n"))
+      v
 
     } catch {
       case e: Throwable =>
+
+        println(s"Log=${l.lines.size}")
+        println(l.render(0).mkString("\n"))
         '{
           val exception = ${ Expr(e) }
           exception.printStackTrace
