@@ -6,47 +6,47 @@ import polyregion.ast.Traversal.*
 
 object VarReducePass extends ProgramPass {
 
-  private def run(f: p.Function) = {
-
-    // Remove intermediate assignments:
-    // var a: T = expr
-    // var b: T = a
-    // use b
-
-    // var a: T = expr
-    // use a
-
-    val allVars = f.collectWhere[p.Stmt] { case v @ p.Stmt.Var(_, _) => v }
-
-    val reduced = allVars.foldLeft(f.body) { case (stmts, source @ p.Stmt.Var(name, _)) =>
-      val SourceName = p.Term.Select(Nil, name)
-      val allSelectToSource = f.body.collectWhere[p.Term] {
-        case x @ SourceName                    => x
-        case x @ p.Term.Select(`name` :: _, _) => x
-      }
-      allSelectToSource match {
-        case _ :: Nil =>
-          // find vars with RHS to source
-          val candidates = f.body.collectWhere[p.Stmt] { case r @ p.Stmt.Var(_, Some(p.Expr.Alias(SourceName))) => r }
-          candidates match {
-            case alias :: Nil => // single, inline rhs and delete
-              stmts.modifyAll[p.Stmt] {
-                case `source` => p.Stmt.Comment(s"${source}") // source is only used here, delete
-                case `alias`  => alias.copy(expr = source.expr)
-                case x        => x
-              }
-            case _ => stmts
+  private def run(f: p.Function, log: Log) = {
+    // Remove intermediate assignments, so the following:
+    //    var a: T = expr
+    //    var b: T = a
+    //    f(b)
+    // becomes
+    //    var a: T = expr
+    //    f(a)
+    val (n, reduced) = doUntilNotEq(f) { (_, f) =>
+      f.collectFirst_[p.Stmt] {
+        // Find the first var declaration that points to an alias
+        case source @ p.Stmt.Var(name, Some(p.Expr.Alias(that))) => (source, name, that)
+      } match {
+        case Some((source, name, that)) =>
+          // Then  replace all references to that var with the alias itself
+          val modified = f.modifyAll[p.Term] {
+            case x @ p.Term.Select(Nil, `name`)    => that
+            case x @ p.Term.Select(`name` :: _, _) => that
+            case x                                 => x
           }
-        case _ => stmts
+          if (modified == f) f // No reference replaced, keep this dangling reference
+          else {
+            // We did end up having to replace references, so it's safe to delete the extra var declaration
+            log.info(s"Delete `${source.repr}`")
+            modified.modifyAll[p.Stmt] {
+              case `source` => p.Stmt.Comment(s"[VarReducePass] ${source.repr}")
+              case x        => x
+            }
+          }
+        case None => f
       }
     }
-
-    f.copy(body = reduced)
+    log.info(s"Var reduction is stable after ${n} passes")
+    reduced
   }
 
-  override def apply(program: p.Program, log: Log): p.Program = {
-    println(">VarReducePass")
-    p.Program(run(program.entry), program.functions.map(run(_)), program.defs)
-  }
+  override def apply(program: p.Program, log: Log): p.Program =
+    p.Program(
+      run(program.entry, log.subLog(s"VarReducePass on ${program.entry.name}")),
+      program.functions.map(f => run(f, log.subLog(s"VarReducePass on ${f.name}"))),
+      program.defs
+    )
 
 }

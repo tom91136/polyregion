@@ -18,6 +18,7 @@ class CompilerSpec extends munit.FunSuite {
     class Foo {
       val m = 2
       def a() = m + m
+      def b(x : Int) = m + x
     }
 
 
@@ -32,6 +33,12 @@ class CompilerSpec extends munit.FunSuite {
       val foo = new Foo
 //      val m = (1,2)
       val u   = foo.a()
+
+//      val m = u+1
+
+      val m = foo.b(1)
+//      val m2 = foo.b(_)
+
 
     })
 
