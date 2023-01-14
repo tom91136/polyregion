@@ -129,7 +129,8 @@ object Retyper {
 
   @tailrec private final def resolveClsFromTpeRepr(using
       q: Quoted
-  )(r: q.TypeRepr): Result[(p.Sym, List[String], q.Symbol, q.ClassKind)] =
+  )(r: q.TypeRepr): Result[(p.Sym, List[String], q.Symbol, q.ClassKind)] = {
+    println("~ " + r)
     r.dealias.simplified match {
       case q.ThisType(tpe) => resolveClsFromTpeRepr(tpe)
       case tpe: q.NamedType =>
@@ -138,8 +139,9 @@ object Retyper {
           case Some(sym) if sym.name == "<root>" => resolveClsFromTpeRepr(tpe.qualifier) // discard root package
           case Some(sym)                         => resolveClsFromSymbol(sym)
         }
-      case invalid => s"Not a class TypeRepr: ${Try(invalid.show)}".fail
+      case invalid => s"Not a class TypeRepr: ${invalid} (repr=${Try(invalid.show)})".fail
     }
+  }
 
   private def liftClsToTpe(using
       q: Quoted
@@ -189,9 +191,13 @@ object Retyper {
           //   `repr.termSymbol` call
           (_ -> rtnTpe, wit0) <- typer0(rtn)
           (argTpes, wit1)     <- typer0N(argTpes) //  args.traverse(typer0(_))
-
           (receiverCtorTpes, wit2) <- repr match {
-            case q.TermRef(receiverTpe, _) =>
+            case tr @ q.TermRef(_: q.NoPrefix, _) => // this is local function so no prefix
+              for {
+                classSymbol <- Remapper.owningClassSymbol(tr.termSymbol).failIfEmpty(s"No class for type ref ${tr}")
+                tpe         <- clsSymTyper0(classSymbol)
+              } yield (tpe :: Nil) -> Map.empty
+            case q.TermRef(receiverTpe, _) => // we have something concrete
               typer0(receiverTpe).map {
                 case (_ -> p.Type.Struct(_, _, args), wit) => args         -> wit
                 case (_ -> p.Type.Array(arg), wit)         => (arg :: Nil) -> wit

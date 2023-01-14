@@ -2,8 +2,9 @@ package polyregion.scalalang
 
 import cats.data.EitherT
 import cats.syntax.all.*
-import polyregion.ast.{PolyAst as p, *, given}
 import polyregion.ast.Traversal.*
+import polyregion.ast.{PolyAst as p, *, given}
+
 import scala.annotation.tailrec
 
 object Remapper {
@@ -36,15 +37,17 @@ object Remapper {
     case x                      => x
   }
 
-  private def ownersList(using q: Quoted)(sym: q.Symbol): LazyList[q.Symbol] =
+  def ownersList(using q: Quoted)(sym: q.Symbol): LazyList[q.Symbol] =
     LazyList.unfold(sym.maybeOwner)(s => if (s.isNoSymbol) None else Some(s, s.maybeOwner))
 
-  private def owningClassSymbol(using q: Quoted)(sym: q.Symbol): Option[q.Symbol] = ownersList(sym).find(_.isClassDef)
+  def owningClassSymbol(using q: Quoted)(sym: q.Symbol): Option[q.Symbol] = ownersList(sym).find(_.isClassDef)
 
   extension (using q: Quoted)(c: q.RemapContext) {
 
-    private def typerAndWitness(repr: q.TypeRepr): Result[(q.Retyped, q.RemapContext)] =
+    private def typerAndWitness(repr: q.TypeRepr): Result[(q.Retyped, q.RemapContext)] = {
+      println(s"[typer] ${repr.show} (${repr.widenTermRefByName.show}) (${repr.widenTermRefByName})")
       Retyper.typer0(repr).map((x, wit) => (x, c.updateDeps(d => d.copy(classes = d.classes |+| wit))))
+    }
 
     private def typerNAndWitness(reprs: List[q.TypeRepr]): Result[(List[(q.Retyped)], q.RemapContext)] =
       Retyper.typer0N(reprs).map((xs, wit) => (xs, c.updateDeps(d => d.copy(classes = d.classes |+| wit))))
@@ -73,6 +76,17 @@ object Remapper {
         )
       case q.ValDef(name, tpe, None) => c.fail(s"Unexpected variable $name:$tpe")
       // TODO DefDef here comes from general closures ( (a:A) => ??? )
+
+      case ddd @ q.DefDef(_, _, _, _) =>
+
+       println(RefOutliner.outline(Log(""), ddd.rhs.get).map((a, v) => a.mkString("\n")))
+
+       ???
+
+        Compiler.compileFn(Log(""), ddd).map { case (fn, deps) =>
+          (p.Term.UnitConst, c.updateDeps(_ |+| deps.witness(fn)))
+        }
+
       case q.Import(_, _) => (p.Term.UnitConst, c).success // ignore
       case t: q.Term      => (c !! tree).mapTerm(t)
 
@@ -175,49 +189,52 @@ object Remapper {
         // Call no-arg functions (i.e. `x.toDouble` or just `def fn = ???; fn` ) directly or pass-through if not no-arg
         def invokeOrSelect(
             c: q.RemapContext
-        )(sym: q.Symbol, receiver: Option[p.Term])(select: => Result[p.Term.Select]) = { 
-          
-          println("$$$ "+c.symbolDefMap.mkString("\n"))
+        )(sym: q.Symbol, receiver: Option[p.Term])(select: => Result[p.Term.Select]) = {
+
+          println("$$$ " + c.symbolDefMap.mkString("\n"))
 
           println(sym)
 
           sym.tree match {
-          case fn: q.DefDef => // `receiver?.$fn`
-            // Assert that the term list matches Exec's nested (recursive) types.
-            // Note that Exec treats both empty args `()` and no-args as `Nil` where as the collected arg lists through
-            // `Apply` will give empty args as `Nil` and not collect no-args at all because no application took place.
-            val termTpess = termArgss.map(_.map(_.tpe)) // Poison type???
-            val execTpess = collectExecArgLists(tpe)
-            println(s"Invoke ${receiver.map(_.repr)} . ${fn.show}")
-            println(s"-> r=${ref} t=${termTpess} e=${execTpess}")
-            for {
-              // First we validate the application by checking whether types of the positional arguments line up.
-              _ <- (fn.termParamss.isEmpty, termTpess, execTpess) match {
-                case (true, Nil, (Nil :: Nil) | Nil) => ().success // no-ap; no-arg Exec (`Nil::Nil`) or no Exec (`Nil`)
-                case (false, tss, ess) if tss == ess => ().success // everything else, do the assertion
-                case (ap, tss, ess) => // we may have unapplied generic types from the exec side
-                  (tss.flatten, ess.flatten) match {
-                    case (ts, es) if ts.size == es.size =>
-                      ts.zip(es).traverse {
-                        case (t, e) if t == e   => t.success // same type
-                        case (t, p.Type.Var(_)) => t.success // applied type
-                        case (p.Type.Struct(termSym, termVars, _), p.Type.Struct(execSym, execVars, _)) =>
-                          if (termSym != execSym) s"Class type mismatch: $termSym != $execSym ".fail
-                          else if (termVars != execVars)
-                            s"Class generic type arity mismatch: $termVars != $execVars ".fail
-                          else ().success
-                        case (t, u) => "Cannot match $t with $u".fail
-                      }
-                    case (ts, es) => s"Argument size mismatch $ts != $es".fail
-                  }
-              }
-              rtnTpe = resolveExecRtnTpe(tpe)
-              ivk <- c.mkInvoke(fn, tpeArgs, receiver, termArgss.flatten, rtnTpe)
-            } yield ivk
-          case local: q.ValDef => // sym.$local
-            for (s <- select) yield s -> c
-          case illegal => s"unexpected invoke/select receiver ${illegal}".fail
-        }}
+            case fn: q.DefDef => // `receiver?.$fn`
+              // Assert that the term list matches Exec's nested (recursive) types.
+              // Note that Exec treats both empty args `()` and no-args as `Nil` where as the collected arg lists through
+              // `Apply` will give empty args as `Nil` and not collect no-args at all because no application took place.
+              val termTpess = termArgss.map(_.map(_.tpe)) // Poison type???
+              val execTpess = collectExecArgLists(tpe)
+              println(s"Invoke ${receiver.map(_.repr)} . ${fn.show}")
+              println(s"-> r=${ref} t=${termTpess} e=${execTpess}")
+              for {
+                // First we validate the application by checking whether types of the positional arguments line up.
+                _ <- (fn.termParamss.isEmpty, termTpess, execTpess) match {
+                  case (true, Nil, (Nil :: Nil) | Nil) =>
+                    ().success // no-ap; no-arg Exec (`Nil::Nil`) or no Exec (`Nil`)
+                  case (false, tss, ess) if tss == ess => ().success // everything else, do the assertion
+                  case (ap, tss, ess) => // we may have unapplied generic types from the exec side
+                    (tss.flatten, ess.flatten) match {
+                      case (ts, es) if ts.size == es.size =>
+                        ts.zip(es).traverse {
+                          case (t, e) if t == e   => t.success // same type
+                          case (t, p.Type.Var(_)) => t.success // applied type
+                          case (p.Type.Struct(termSym, termVars, _), p.Type.Struct(execSym, execVars, _)) =>
+                            if (termSym != execSym) s"Class type mismatch: $termSym != $execSym ".fail
+                            else if (termVars != execVars)
+                              s"Class generic type arity mismatch: $termVars != $execVars ".fail
+                            else ().success
+                          case (t, u) => s"Cannot match $t with $u".fail
+                        }
+                      case (ts, es) => s"Argument size mismatch $ts != $es".fail
+                    }
+                }
+                _      = println(s"Do ret ${tpe}")
+                rtnTpe = resolveExecRtnTpe(tpe)
+                ivk <- c.mkInvoke(fn, tpeArgs, receiver, termArgss.flatten, rtnTpe)
+              } yield ivk
+            case local: q.ValDef => // sym.$local
+              for (s <- select) yield s -> c
+            case illegal => s"unexpected invoke/select receiver ${illegal}".fail
+          }
+        }
 
         // We handle any reference to arbitrarily nested objects/modules (including direct ident with no nesting, as produced by `inline` calls)
         // directly because they are singletons (i.e. can appear anywhere with no dependencies, even the owner).
@@ -324,17 +341,10 @@ object Remapper {
                 .getOrElse {
                   val sym = ident.symbol
 
-                  println(s"Gen1 ${ident} ${ident.symbol} ${sym.maybeOwner.isLocalDummy}")
-                  if (sym.maybeOwner.isLocalDummy) {
-                    // We're seeing a def/val defined in the class scope: `class X{ { def a()  } }`.
-                    // Method (or any kind of Def) `a` in this case is owned by a local dummy where the parent is `X`.
-                    // We happen to be referring to `a`  locally (i.e. via ident, and not select) so we're in the same scope as `a`.
-                    // As local dummy don't exists, we need to synthesize the receiver for this invoke to be the owning class of the local dummy, which is `X`.
-                    val classSym = sym.maybeOwner.maybeOwner // Up two levels to skip over the local dummy.
+                  def synthesiseSelectOnMethodWithReceiver(classSym: q.Symbol) =
                     Retyper.clsSymTyper0(classSym).map(classSym.tree -> _).flatMap {
                       case (clsDef: q.ClassDef, s @ p.Type.Struct(_, _, _)) =>
                         c.bindThis(clsDef, s).flatMap { c =>
-
                           val self = p.Named("this", s)
                           invokeOrSelect(c)(sym, Some(p.Term.Select(Nil, self)))(
                             p.Term.Select(self :: Nil, local).success
@@ -342,10 +352,30 @@ object Remapper {
                         }
                       case (illegal, tpe) => s"Unexpected tree $illegal with type $tpe when resolving local dummy".fail
                     }
+
+                  println(s"Gen1 ${ident} ${sym} ${sym.maybeOwner.isLocalDummy}")
+                  if (sym.maybeOwner.isLocalDummy) {
+                    // We're seeing a def/val defined in the class scope: `class X{ { def a()  } }`.
+                    // Method (or any kind of Def) `a` in this case is owned by a local dummy where the parent is `X`.
+                    // We happen to be referring to `a`  locally (i.e. via ident, and not select) so we're in the same scope as `a`.
+                    // As local dummies don't exist, we need to synthesize the receiver for this invoke to be the owning class of the local dummy, which is `X`.
+                    val classSym = sym.maybeOwner.maybeOwner // Up two levels to skip over the local dummy.
+                    if (!classSym.isNoSymbol) synthesiseSelectOnMethodWithReceiver(classSym)
+                    else s"The owner of $sym does not contain an implementation ".fail
                   } else {
                     println("~@@" + ownersList(sym).toList + s" rr=${c.root.owner}")
-                    // In any other case, we're probably referencing a local ValDef that appeared before before this.
-                    invokeOrSelect(c)(sym, None)(p.Term.Select(Nil, local).success)
+                    // In any other case, we're probably referencing a local ValDef/DefDef that appeared before this.
+
+                    if (sym.isValDef) { // For ValDef, we can ignore the receiver
+                      invokeOrSelect(c)(sym, None)(p.Term.Select(Nil, local).success)
+                    } else if (sym.isDefDef) { // For DefDef, we need to synthesise one like the local dummy case
+                      owningClassSymbol(sym)
+                        .failIfEmpty(s"$sym does not contain an implementation")
+                        .flatMap(synthesiseSelectOnMethodWithReceiver(_))
+                    } else {
+                      throw new RuntimeException(s"Unexpected ${sym}, not a valdef or defdef!")
+                    }
+
                   }
                 }
             case select @ q.Select(root, name) => // we have qualifiers before the actual name
@@ -431,13 +461,16 @@ object Remapper {
           )
           c1.refs.get(r.symbol) match {
             case Some(term) =>
+              println("~~~ " + term)
               c1.typerAndWitness(r.tpe).flatMap { case (_ -> tpe, c) =>
                 println("~~~ " + tpe)
 
                 if (term.tpe != tpe) s"Ref type mismatch (${term.tpe} != $tpe)".fail
                 else (term, c !! r).success
               }
-            case None => (c !! r).mapRef0(r, tpeArgs, termArgs)
+            case None =>
+              println("~~~ " + term.tpe.widenTermRefByName)
+              (c !! r).mapRef0(r, tpeArgs, termArgs)
           }
         case (Nil, Nil, q.New(tpt)) => // new instance *without* arg application: `new $tpt`
           println(s"[mapper] new = `${term.show}`")

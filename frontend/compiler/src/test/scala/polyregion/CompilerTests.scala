@@ -52,12 +52,13 @@ object CompilerTests {
 
     } catch {
       case e: Throwable =>
-
         println(s"Log=${l.lines.size}")
         println(l.render(0).mkString("\n"))
         '{
-          val exception = ${ Expr(e) }
-          exception.printStackTrace
+          val exception: Throwable = ${ Expr(e) }
+          exception.setStackTrace(
+            exception.getStackTrace.takeWhile(e => e.getClassName != "jdk.internal.reflect.NativeMethodAccessorImpl")
+          )
           throw exception
         }
     }

@@ -96,6 +96,7 @@ lazy val compiler = project
       "net.bytebuddy"  % "byte-buddy" % "1.12.21",
       "com.lihaoyi"   %% "fansi"      % "0.4.0",
       "com.lihaoyi"   %% "upickle"    % "2.0.0",
+      "com.lihaoyi"   %% "pprint"     % "0.7.0",
       "org.typelevel" %% "cats-core"  % catsVersion,
       "org.scalameta" %% "munit"      % munitVersion % Test
     ),

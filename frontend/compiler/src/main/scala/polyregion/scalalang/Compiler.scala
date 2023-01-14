@@ -40,9 +40,29 @@ object Compiler {
     }
   } yield p.Signature(p.Sym(f.symbol.fullName), receiverTpeVars ::: fnTypeVars, receiver, fnArgsTpes, fnRtnTpe)
 
+  private def matchingSignatures(sigs: Iterable[p.Signature], target: p.Expr.Invoke) = sigs
+    .collect {
+      case sig
+          if sig.name.last == target.name.last &&      // match name first, most methods are eliminated here
+            sig.tpeVars.size == target.tpeArgs.size && // then we check type arity
+            sig.args.size == target.args.size          // then finally term arity
+          =>
+        val appliedTypes = // we then applied any type variables to form an applied signature
+          sig.tpeVars.zip(target.tpeArgs).map((name, tpe) => (p.Type.Var(name): p.Type) -> tpe).toMap
+        sig.modifyAll[p.Type](_.mapLeaf(t => appliedTypes.getOrElse(t, t))) -> sig
+    }
+    .collect {
+      case (applied, sig) // finally we look for the matching signature
+          if applied.rtn == target.rtn &&
+            applied.args == target.args.map(_.tpe) &&
+            applied.receiver == target.receiver.map(_.tpe) =>
+        sig // and remember NOT to return the applied one
+    }
+
   def compileAllDependencies(using q: Quoted)(
       sink: Log,
-      deps: q.FnWitnesses
+      deps: q.FnWitnesses,
+      existing: List[p.Function]
   )(
       fnLut: Map[p.Signature, (p.Function, Set[p.StructDef])] = Map.empty
   ): Result[(List[p.Function], Set[p.StructDef], Set[q.Symbol])] = for {
@@ -68,69 +88,59 @@ object Compiler {
                 else ().success
               target: p.Expr.Invoke = ivks.head
 
-              fnApOfSameArityAndName = fnLut.collect {
-                case (sig, x)
-                    if sig.name.last == target.name.last &&      // match name first, most methods are eliminated here
-                      sig.tpeVars.size == target.tpeArgs.size && // then we check type arity
-                      sig.args.size == target.args.size          // then finally term arity
-                    =>
-                  val appliedTypes =
-                    sig.tpeVars.zip(target.tpeArgs).map((name, tpe) => (p.Type.Var(name): p.Type) -> tpe).toMap
-                  (sig.modifyAll[p.Type](_.mapLeaf(t => appliedTypes.getOrElse(t, t))): p.Signature) -> x
-              }
-
-              fnApOfMatchingTypes = fnApOfSameArityAndName.filter {
-                case (sig, _)
-                    if sig.rtn == target.rtn &&
-                      sig.args == target.args.map(_.tpe) &&
-                      sig.receiver == target.receiver.map(_.tpe) =>
-                  true
-                case _ => false
-              }
-
-              r <- fnApOfMatchingTypes.toList match {
-                case Nil =>
-                  // We found no replacement, log it and keep going.
-                  for {
-                    log <-  log.subLog(s"Compile (no replacement): ${target.repr}").success
-                    (fn0, deps) <- compileFn(log, defDef)
-                    (fn1, wit0, clsDeps, moduleDeps) <- compileAndReplaceStructDependencies(log, fn0, deps)(
-                      StdLib.StructDefs
-                    )
-                  } yield (
-                    fn1 :: xs,
-                    depss ++ wit0,
-                    clsDeps ++ clsDepss,
-                    moduleDeps ++ moduleSymDepss
-                  )
-                case (_, (fn, clsDeps)) :: Nil =>
-                  // We found exactly one function matching the invocation!
-                  println(s"Replace: replace ${target.repr}")
-                  for {
-                    log <- log.subLog(s"${target.repr}").success
-                    _ = log.info("Callsites", ivks.map(_.repr).toList: _*)
-                    _ = log.info("Replacing with impl:", fn.repr)
-                    _ = log.info("Additional structs:", clsDeps.map(_.repr).toList*)
-
-                    originalFnOwner = defDef.symbol.owner
-
-                    originalFnOwnerStructDef <- structDef0(originalFnOwner)
-                      .adaptError(e =>
-                        new CompilerException(s"Cannot resolve struct def for owner of function ${defDef}", e)
+              // First, see if it's already in the pile the existing compiled/resolved functions (happens to local definitions)
+              existingFns = existing.map(f => f.signature -> f).toMap
+              r <- matchingSignatures(existingFns.keys, target).toList match {
+                case _ :: Nil => // We have a perfect match from existing functions, no further actions needed
+                  (xs, depss, clsDepss, moduleSymDepss).success
+                case Nil => // Not there, we now look at actual dependencies
+                  matchingSignatures(fnLut.keys, target).map(s => fnLut(s)).toList match {
+                    case Nil => // We found no replacement, log it and keep going.
+                      for {
+                        log         <- log.subLog(s"Compile (no replacement): ${target.repr}").success
+                        (fn0, deps) <- compileFn(log, defDef)
+                        (fn1, wit0, clsDeps, moduleDeps) <- compileAndReplaceStructDependencies(log, fn0, deps)(
+                          StdLib.StructDefs
+                        )
+                      } yield (
+                        fn1 :: xs ::: deps.resolvedFunctions,
+                        depss ++ wit0,
+                        clsDeps ++ clsDepss,
+                        moduleDeps ++ moduleSymDepss
                       )
-                    // _ <- if (clsDeps != Set(originalFnOwnerStructDef)) s"Bad clsDep (${clsDeps.map(_.repr)}.contains(${originalFnOwnerStructDef.repr}) == false)".fail else ().success
-                  } yield (
-                    fn.copy(name = target.name) :: xs,
-                    depss,
-                    clsDeps ++ clsDepss,
-                    moduleSymDepss
-                  )
+                    case  (fn, clsDeps) :: Nil => // We found exactly one function matching the invocation
+                      println(s"Replace: replace ${target.repr}")
+                      for {
+                        log <- log.subLog(s"${target.repr}").success
+                        _ = log.info("Callsites", ivks.map(_.repr).toList: _*)
+                        _ = log.info("Replacing with impl:", fn.repr)
+                        _ = log.info("Additional structs:", clsDeps.map(_.repr).toList*)
+
+                        originalFnOwner = defDef.symbol.owner
+
+                        originalFnOwnerStructDef <- structDef0(originalFnOwner)
+                          .adaptError(e =>
+                            new CompilerException(s"Cannot resolve struct def for owner of function ${defDef}", e)
+                          )
+                        // _ <- if (clsDeps != Set(originalFnOwnerStructDef)) s"Bad clsDep (${clsDeps.map(_.repr)}.contains(${originalFnOwnerStructDef.repr}) == false)".fail else ().success
+                      } yield (
+                        fn.copy(name = target.name) :: xs,
+                        depss,
+                        clsDeps ++ clsDepss,
+                        moduleSymDepss
+                      )
+                    case xs => // We found multiple ambiguous replacements, signal error
+                      s"Ambiguous replacement for ${target.repr}, the following replacements all match the signature:\n${xs
+                          .map("\t" + _._1.repr)
+                          .mkString("\n")}".fail
+                  }
                 case xs =>
-                  // We found multiple ambiguous replacements, signal error
-                  s"Ambiguous replacement for ${target.repr}, the following replacements all match the signiture:\n${xs
+                  s"Ambiguous overload for ${target.repr}, the following existing resolved function all match the signature:\n${xs
                       .map("\t" + _._1.repr)
                       .mkString("\n")}".fail
               }
+ 
+ 
             } yield r
         }
         .map((xs, deps, clsDeps, moduleSymDeps) =>
@@ -168,7 +178,11 @@ object Compiler {
 
       // And then work out whether this def is part of a class/object instance or free-standing (e.g. local methods),
       // class defs will have a `this` receiver arg with the appropriate type.
-      owningClass <- Retyper.clsSymTyper0(f.symbol.owner)
+
+      owningSymbol <- Remapper
+        .owningClassSymbol(f.symbol)
+        .failIfEmpty(s"${f.symbol} does not have an owning class symbol")
+      owningClass <- Retyper.clsSymTyper0(owningSymbol)
       _ = log.info(s"Method owner: $owningClass")
       (receiver, receiverTpeVars) <- owningClass match {
         case t @ p.Type.Struct(_, tpeVars, _) => (Some(p.Named("this", t)), tpeVars).success
@@ -226,7 +240,7 @@ object Compiler {
       intrinsify: Boolean = true
   ): Result[(List[p.Stmt], p.Type, q.Dependencies, Option[(q.ClassDef, p.Type.Struct)])] = for {
     log <- sink.subLog(s"Compile term: ${term.pos.sourceFile.name}:${term.pos.startLine}~${term.pos.endLine}").success
-//    log <- log.info("Body (AST)", pprint.tokenize(term, indent = 1, showFieldNames = true).mkString)
+    _ = log.info("Body (AST)", pprint.tokenize(term, indent = 1, showFieldNames = true).mkString)
     _ = log.info("Body (Ascii)", term.show(using q.Printer.TreeAnsiCode))
 
     (termValue, c)      <- q.RemapContext(root = root, refs = scope).mapTerm(term, tpeArgs)
@@ -380,8 +394,18 @@ object Compiler {
       "Scope replacements",
       captureScope.map((sym, term) => s"$sym => ${term.repr}")*
     )
-    _ = log.info(s"Expr dependent methods", exprDeps.functions.values.map(_.map(_.repr).toString).toList*)
-    _ = log.info(s"Expr dependent structs", exprDeps.classes.values.map(_.map(_.repr).toString).toList*)
+    _ = log.info(
+      s"Expr dependent methods (${exprDeps.functions.size})",
+      exprDeps.functions.values.map(_.map(_.repr).toString).toList*
+    )
+    _ = log.info(
+      s"Expr dependent structs (${exprDeps.classes.size})",
+      exprDeps.classes.values.map(_.map(_.repr).toString).toList*
+    )
+    _ = log.info(
+      s"Expr resolved functions (${exprDeps.resolvedFunctions.size})",
+      exprDeps.resolvedFunctions.map(_.repr).toList*
+    )
 
     // The methods in a prism will have the receiver set to the mirrored class.
     // So before we compile any dependent methods, we must first replace all struct types.
@@ -394,7 +418,7 @@ object Compiler {
 
     // We got a compiled fn now, now compile all dependencies.
     (allRootDependentFns, allRootDependentStructs, allRootDependentModuleSymbols) <-
-      compileAllDependencies(log, rootDependentFns)(StdLib.Functions)
+      compileAllDependencies(log, rootDependentFns, exprDeps.resolvedFunctions)(StdLib.Functions)
 
     //    log <- log.info(s"Expr+Deps Dependent methods", deps.functions.values.map(_.toString).toList*)
 //    log <- log.info(s"Expr+Deps Dependent structs", deps.classes.values.map(_.toString).toList*)
@@ -424,14 +448,18 @@ object Compiler {
       symbol.fullName.replace('.', '_') -> removeThisFromRef(symbol)
     }.toMap ++ exprThisCls.map((clsDef, _) => "this" -> q.This(clsDef.symbol)).toMap
 
-    unopt = p.Program(rootFn, allRootDependentFns, (rootDependentStructs ++ allRootDependentStructs).toList)
+    unopt = p.Program(
+      rootFn,
+      allRootDependentFns ::: exprDeps.resolvedFunctions,
+      (rootDependentStructs ++ allRootDependentStructs).toList
+    )
     _ = log.info(
       s"Program compiled (unpot), structures = ${unopt.defs.size}, functions = ${unopt.functions.size}"
     )
 
     unoptLog <- log.subLog("Unopt").success
     _ = unoptLog.info(s"Structures = ${unopt.defs.size}", unopt.defs.map(_.repr)*)
-    _ = unoptLog.info(s"Functions  = ${unopt.functions.size}", unopt.functions.map(_.signatureRepr)*)
+    _ = unoptLog.info(s"Functions  = ${unopt.functions.size}", unopt.functions.map(_.repr)*)
     _ = unoptLog.info(s"Entry", unopt.entry.repr)
 
     // verify before optimisation

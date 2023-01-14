@@ -1,8 +1,9 @@
 package polyregion
 
-import scala.quoted.{Expr, Quotes}
-import polyregion.scalalang.{Compiler, Quoted}
 import polyregion.ast.*
+import polyregion.scalalang.{Compiler, Quoted}
+
+import scala.quoted.{Expr, Quotes}
 
 class CompilerSpec extends munit.FunSuite {
 
@@ -16,34 +17,45 @@ class CompilerSpec extends munit.FunSuite {
 
     def fn0 = 12
     class Foo {
-      val m = 2
-      def a() = m + m
-      def b(x : Int) = m + x
+      val m         = 2
+      def a()       = m + m
+      def b(x: Int) = m + x
     }
 
-
-    CompilerTests.compilerAssert({
-      val a   = 1
-      val b   = 2
-      val uuu = a + 2L
-      //      a + b
-      //      val u = (1,2)
-
-      val c   = fn0
-      val foo = new Foo
-//      val m = (1,2)
-      val u   = foo.a()
-
-//      val m = u+1
-
-      val m = foo.b(1)
+    CompilerTests.compilerAssert {
+//      val a   = 1
+//      val b   = 2
+//      val uuu = a + 2L
+//      //      a + b
+//      //      val u = (1,2)
+//
+//      val c   = fn0
+//      val foo = new Foo
+////      val m = (1,2)
+//      val u   = foo.a()
+//
+////      val m = u+1
+//
+//      val m = foo.b(1)
 //      val m2 = foo.b(_)
+//      val cap = 1
+//      def doIt(a : Int) = {
+//        val m = 12
+//        m + 3 + a + cap
+//      }
 
+      val u = 1
+      {
+        val u = 2
+        u + 3
+      }
+//      val a = 2
+//      val  m = doIt(a) // (a) [cap]
 
-    })
 
 //    assertEquals(1, 1)
 
+    }
   }
 
 }

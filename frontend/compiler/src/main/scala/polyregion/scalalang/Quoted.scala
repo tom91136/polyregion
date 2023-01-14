@@ -33,7 +33,8 @@ class Quoted(val underlying: scala.quoted.Quotes) {
   case class Dependencies(
       modules: Map[Symbol, p.Type.Struct] = Map.empty,
       classes: ClsWitnesses = Map.empty,
-      functions: FnWitnesses = Map.empty
+      functions: FnWitnesses = Map.empty,
+      resolvedFunctions: List[p.Function] = Nil
   ) {
     @targetName("witness_module")
     def witness(x: Symbol, tpe: p.Type.Struct) = copy(modules = modules + (x -> tpe))
@@ -48,11 +49,13 @@ class Quoted(val underlying: scala.quoted.Quotes) {
 
     def witness(x: DefDef, application: p.Expr.Invoke) =
       copy(functions = functions.updatedWith(x)(x => Some(x.getOrElse(Set.empty) + application)))
+
+    def witness(f: p.Function) = copy(resolvedFunctions = f :: resolvedFunctions)
   }
 
   given Monoid[Dependencies] = Monoid.instance(
     Dependencies(),
-    (x, y) => Dependencies(x.modules ++ y.modules, x.classes ++ y.classes, x.functions ++ y.functions)
+    (x, y) => Dependencies(x.modules ++ y.modules, x.classes ++ y.classes, x.functions ++ y.functions, x.resolvedFunctions ++ y.resolvedFunctions)
   )
 
   // TODO rename to RemapContext
@@ -72,8 +75,8 @@ class Quoted(val underlying: scala.quoted.Quotes) {
     def down(t: Tree): RemapContext     = !!(t).copy(depth = depth + 1)
     def named(tpe: p.Type): p.Named     = p.Named(s"v${depth}", tpe)
 
-    def withDefs(x: Tree) : RemapContext = withDefs(x :: Nil)
-    def withDefs(xs: List[Tree]) : RemapContext= copy(symbolDefMap =
+    def withDefs(x: Tree): RemapContext = withDefs(x :: Nil)
+    def withDefs(xs: List[Tree]): RemapContext = copy(symbolDefMap =
       symbolDefMap ++
         xs.flatMap(collectTree(_) {
           case d: Definition => (d.symbol -> d) :: Nil
@@ -81,11 +84,12 @@ class Quoted(val underlying: scala.quoted.Quotes) {
         }).toMap
     )
 
-    def findDefTree(s : Symbol) : Option[Definition] = symbolDefMap.get(s)
+    def findDefTree(s: Symbol): Option[Definition] = symbolDefMap.get(s)
 
     def noStmts: RemapContext = copy(stmts = Nil)
     // def mark(s: p.Signature, d: DefDef) = copy(defs = defs + (s -> d))
-    infix def ::=(xs: p.Stmt*): RemapContext                      = copy(stmts = stmts ++ xs)
+    infix def ::=(xs: p.Stmt*): RemapContext = copy(stmts = stmts ++ xs)
+//    infix def withFunction(xs: p.Function*): RemapContext                  = copy(functions = functions ++ xs)
     def replaceStmts(xs: Seq[p.Stmt]): RemapContext               = copy(stmts = xs.toList)
     def updateDeps(f: Dependencies => Dependencies): RemapContext = copy(deps = f(deps))
 
