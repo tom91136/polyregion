@@ -55,7 +55,13 @@ class Quoted(val underlying: scala.quoted.Quotes) {
 
   given Monoid[Dependencies] = Monoid.instance(
     Dependencies(),
-    (x, y) => Dependencies(x.modules ++ y.modules, x.classes ++ y.classes, x.functions ++ y.functions, x.resolvedFunctions ++ y.resolvedFunctions)
+    (x, y) =>
+      Dependencies(
+        x.modules ++ y.modules,
+        x.classes ++ y.classes,
+        x.functions ++ y.functions,
+        x.resolvedFunctions ++ y.resolvedFunctions
+      )
   )
 
   // TODO rename to RemapContext
@@ -65,7 +71,7 @@ class Quoted(val underlying: scala.quoted.Quotes) {
       traces: List[Tree] = List.empty, // debug
 
       refs: Map[Symbol, p.Term] = Map.empty, // ident/select table
-
+      names: Map[Symbol, Int] = Map.empty,
       deps: Dependencies = Dependencies(),
       stmts: List[p.Stmt] = List.empty, // fn statements
       thisCls: Option[(ClassDef, p.Type.Struct)] = None,
@@ -75,7 +81,27 @@ class Quoted(val underlying: scala.quoted.Quotes) {
     def down(t: Tree): RemapContext     = !!(t).copy(depth = depth + 1)
     def named(tpe: p.Type): p.Named     = p.Named(s"v${depth}", tpe)
 
-    def withDefs(x: Tree): RemapContext = withDefs(x :: Nil)
+    def mkName(s: Symbol): (String, RemapContext) =
+      names.get(s) match {
+        case Some(n) => (s"${s.name}_$n", this)
+        case None    =>
+          // New symbol, look for name collisions if any and generate new name with a higher ordinal
+          val newOrdinal = names
+            .collect { case (k, n) if k.name == s.name => n }
+            .maxOption
+            .map(_ + 1)
+            .getOrElse(0)
+          val name = newOrdinal match {
+            case 0 => s.name
+            case _ => s"${s.name}_$newOrdinal"
+          }
+          (name, copy(names = names + (s -> newOrdinal)))
+      }
+
+    // FIXME symbolDefMap should not required any more, it's for solving the non-existent issue
+    // where definitions appear in implementation of a macro which can't happen user code.
+    def findDefTree(s: Symbol): Option[Definition] = symbolDefMap.get(s)
+    def withDefs(x: Tree): RemapContext            = withDefs(x :: Nil)
     def withDefs(xs: List[Tree]): RemapContext = copy(symbolDefMap =
       symbolDefMap ++
         xs.flatMap(collectTree(_) {
@@ -83,8 +109,6 @@ class Quoted(val underlying: scala.quoted.Quotes) {
           case _             => Nil
         }).toMap
     )
-
-    def findDefTree(s: Symbol): Option[Definition] = symbolDefMap.get(s)
 
     def noStmts: RemapContext = copy(stmts = Nil)
     // def mark(s: p.Signature, d: DefDef) = copy(defs = defs + (s -> d))

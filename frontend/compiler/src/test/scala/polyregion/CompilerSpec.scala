@@ -45,10 +45,11 @@ class CompilerSpec extends munit.FunSuite {
 //      }
 
       val u = 1
-      {
+      val m = {
         val u = 2
         u + 3
       }
+      u
 //      val a = 2
 //      val  m = doIt(a) // (a) [cap]
 

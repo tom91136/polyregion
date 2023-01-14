@@ -65,6 +65,7 @@ object Remapper {
     def mapTree(tree: q.Tree): Result[(p.Term, q.RemapContext)] = tree match {
       case q.ValDef(name, tpeTree, Some(rhs)) =>
         for {
+          (name, c) <- c.mkName(tree.symbol).success
           (term -> tpe, c) <- c.typerAndWitness(tpeTree.tpe)
           // if tpe is singleton, substitute with constant directly
           (ref, c) <- term.fold((c !! tree).mapTerm(rhs))(x => (x, c).success)
@@ -78,10 +79,9 @@ object Remapper {
       // TODO DefDef here comes from general closures ( (a:A) => ??? )
 
       case ddd @ q.DefDef(_, _, _, _) =>
+        println(RefOutliner.outline(Log(""), ddd.rhs.get).map((a, v) => a.mkString("\n")))
 
-       println(RefOutliner.outline(Log(""), ddd.rhs.get).map((a, v) => a.mkString("\n")))
-
-       ???
+        ???
 
         Compiler.compileFn(Log(""), ddd).map { case (fn, deps) =>
           (p.Term.UnitConst, c.updateDeps(_ |+| deps.witness(fn)))

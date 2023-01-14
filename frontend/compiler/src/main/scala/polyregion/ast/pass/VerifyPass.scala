@@ -2,7 +2,7 @@ package polyregion.ast.pass
 
 import cats.data.EitherT
 import cats.syntax.all.*
-import polyregion.ast.{PolyAst as p, given, *}
+import polyregion.ast.{PolyAst as p, *, given}
 import polyregion.ast.Traversal.*
 
 import scala.annotation.tailrec
@@ -32,7 +32,7 @@ object VerifyPass {
               else
                 (
                   x._1,
-                  s"$tree uses the unseen variable ${n}, varaibles defined up to point: \n\t${x._1.mkString("\n\t")}" :: x._2
+                  s"$tree uses the unseen variable ${n.repr}, variables defined up to point: \n\t${x._1.mkString("\n\t")}" :: x._2
                 )
           }
 
@@ -125,6 +125,18 @@ object VerifyPass {
 
           val names = f.receiver.toList ++ f.args ++ f.captures
 
+          // Check for var name collisions:
+          val varCollisions =
+            f.collectWhere[p.Stmt] { case s: p.Stmt.Var =>
+              s
+            }.groupMap(v => v.name.symbol)(m => m.name.tpe -> m.expr)
+              .collect {
+                case (name, xs) if xs.size > 1 =>
+                  s"Variable $name was defined ${xs.size} times, RHSs=${xs.map((tpe, rhs) => s"${rhs.fold("_")(_.repr)} :$tpe").mkString(";")}"
+              }
+              .toList
+
+          // Check for unused vars:
           val (varTable, errors) = xs.foldLeft((names.toSet, Nil): Ctx)(validateStmt(_, _))
 
           // println(s"[Verifier] $alloc ${f.signatureRepr} vars:\n\t${varTable.mkString("\n\t")}")
@@ -133,7 +145,7 @@ object VerifyPass {
 //              .mkString("\n\t")} \n${f.repr}\n${errors.map(e => s"  -> $e").mkString("\n")}")
 //          }
 
-          errors ++ (xs.collectWhere[p.Stmt] { case p.Stmt.Return(e) => e.tpe } match {
+          varCollisions ++ errors ++ (xs.collectWhere[p.Stmt] { case p.Stmt.Return(e) => e.tpe } match {
             case Nil => List("Function contains no return statements")
             case ts if ts.exists(_ != f.rtn) =>
               List(
@@ -142,5 +154,5 @@ object VerifyPass {
             case _ => Nil
           })
       })
-    }  
+    }
 }
