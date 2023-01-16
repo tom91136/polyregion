@@ -1,7 +1,7 @@
 package polyregion.prism
 
 import cats.syntax.all.*
-import polyregion.ast.{PolyAst as p, given, *}
+import polyregion.ast.{PolyAst as p, *, given}
 import polyregion.scalalang.*
 import polyregion.ast.Traversal.*
 
@@ -38,7 +38,6 @@ object compiletime {
       inline termPrisms: List[TermPrism[Any, Any]]
   ): List[Prism] = ${ derivePackedTypeMirrorsImpl[T]('termPrisms) }
 
-
   inline def showTree(inline f: Any): Any =
     ${ showTreeImpl('{ 2 }) }
 
@@ -65,7 +64,7 @@ object compiletime {
 
     val witnesses = collectWitnesses[T]().map((a, b) => (simplifyTpe(a), simplifyTpe(b)))
 
-    given l:Log = Log("Derive packed mirrors")
+    given l: Log = Log("Derive packed mirrors")
     (for {
       typeLUT <- witnesses.traverse { (s, m) =>
         for {
@@ -144,7 +143,7 @@ object compiletime {
     case x => x
   }
 
-  private def mirrorMethod(using q: Quoted, sink: Log)              //
+  private def mirrorMethod(using q: Quoted, sink: Log)   //
   (sourceMethodSym: q.Symbol, mirrorMethodSym: q.Symbol) //
   (mirrorToSourceTable: Map[p.Sym, p.Sym]): Result[(p.Function, q.Dependencies)] = for {
 
@@ -162,13 +161,13 @@ object compiletime {
         println(d.show)
         for {
 
-          (fn, fnDeps) <- polyregion.scalalang.Compiler.compileFn(log, d, intrinsify = true)
+          (fn, fnDeps) <- polyregion.scalalang.Compiler.compileFn(log, d, Map.empty, intrinsify = true)
 
           rewrittenMirror =
             fn.copy(
               name = sourceSignature.name,
               // Get rid of the intrinsic$ capture introduced by calling stubs in that object.
-              captures = fn.captures.filter(_.tpe match {
+              moduleCaptures = fn.moduleCaptures.filter(_.tpe match {
                 case p.Type.Struct(sym, _, _) => sym != p.Sym(IntrinsicName)
                 case _                        => true
               })
@@ -217,8 +216,8 @@ object compiletime {
     }
   } yield mirrorMethods
 
-  private def derivePackedMirrorsImpl(using q: Quoted, sink : Log) //
-  (source: q.TypeRepr, mirror: q.TypeRepr)             //
+  private def derivePackedMirrorsImpl(using q: Quoted, sink: Log) //
+  (source: q.TypeRepr, mirror: q.TypeRepr)                        //
   (mirrorToSourceTable: Map[p.Sym, p.Sym]): Result[p.Mirror] = {
 
     val m = for {
@@ -303,8 +302,9 @@ object compiletime {
       // FIXME we're creating a dummy function so that the replacement works,
       //  shouldn't have to do this really.
       (_, _, dependentStructs, _) <-
-        Compiler.compileAndReplaceStructDependencies(sink, 
-          p.Function(p.Sym("_dummy_"), Nil, None, Nil, Nil, p.Type.Nothing, Nil),
+        Compiler.compileAndReplaceStructDependencies(
+          sink,
+          p.Function(p.Sym("_dummy_"), Nil, None, Nil, Nil, Nil, p.Type.Nothing, Nil),
           deps
         )(Map.empty)
 

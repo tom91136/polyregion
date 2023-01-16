@@ -94,11 +94,13 @@ object VerifyPass {
               (validateTerm(_: Ctx, lhs)).andThen(validateTerm(_, rhs))(c)
             case p.Expr.Cast(from, as) => validateTerm(c, from)
             case p.Expr.Alias(ref)     => validateTerm(c, ref)
-            case p.Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
-              args.foldLeft(receiver.map(validateTerm(c, _)).getOrElse(c))(validateTerm(_, _))
-            case p.Expr.Index(lhs, idx, component)       => (validateTerm(_: Ctx, lhs)).andThen(validateTerm(_, idx))(c)
-            case p.Expr.Alloc(witness, size)             => validateTerm(c, size)
-            case p.Expr.Suspend(args, stmts, rtn, shape) => ???
+            case p.Expr.Invoke(name, tpeArgs, receiver, args, captures, rtn) =>
+              val c0 = receiver.map(validateTerm(c, _)).getOrElse(c)
+              val c1 = args.foldLeft(c0)(validateTerm(_, _))
+              val c2 = captures.foldLeft(c1)(validateTerm(_, _))
+              c2
+            case p.Expr.Index(lhs, idx, component) => (validateTerm(_: Ctx, lhs)).andThen(validateTerm(_, idx))(c)
+            case p.Expr.Alloc(witness, size)       => validateTerm(c, size)
           }
 
           def validateStmt(c: Ctx, s: p.Stmt): Ctx = s match {
@@ -123,7 +125,7 @@ object VerifyPass {
             case p.Stmt.Return(value) => validateExpr(c, value)
           }
 
-          val names = f.receiver.toList ++ f.args ++ f.captures
+          val names = f.receiver.toList ++ f.args ++ f.moduleCaptures ++ f.termCaptures
 
           // Check for var name collisions:
           val varCollisions =

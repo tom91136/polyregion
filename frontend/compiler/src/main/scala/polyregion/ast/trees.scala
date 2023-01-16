@@ -401,11 +401,12 @@ extension (e: p.Expr) {
     case p.Expr.Cast(from, to) => s"${from.repr}.to[${to.repr}]"
     case p.Expr.Alias(ref)     => s"(~>${ref.repr})"
 
-    case p.Expr.Invoke(name, tpeArgs, recv, args, tpe) =>
-      s"${recv.map(_.repr).getOrElse("<module>")}.${name.repr}<${tpeArgs.map(_.repr).mkString(",")}>(${args.map(_.repr).mkString(",")}) : ${tpe.repr}"
-    case p.Expr.Index(lhs, idx, tpe)             => s"${lhs.repr}[${idx.repr}] : ${tpe.repr}"
-    case p.Expr.Alloc(tpe, size)                 => s"new [${tpe.repr}*${size.repr}]"
-    case p.Expr.Suspend(args, stmts, rtn, shape) => ???
+    case p.Expr.Invoke(name, tpeArgs, recv, args, captures, tpe) =>
+      s"${recv.map(_.repr).getOrElse("<module>")}.${name.repr}<${tpeArgs.map(_.repr).mkString(",")}>(${args
+          .map(_.repr)
+          .mkString(",")})[${captures.map(_.repr).mkString(",")}] : ${tpe.repr}"
+    case p.Expr.Index(lhs, idx, tpe) => s"${lhs.repr}[${idx.repr}] : ${tpe.repr}"
+    case p.Expr.Alloc(tpe, size)     => s"new [${tpe.repr}*${size.repr}]"
   }
 }
 
@@ -430,13 +431,22 @@ extension (fn: p.Function) {
   def mangledName = fn.receiver.map(_.tpe.repr).getOrElse("") + "!" + fn.name.fqn
     .mkString("_") + "!" + fn.args.map(_.tpe.repr).mkString("_") + "!" + fn.rtn.repr
 
-  def signature = p.Signature(fn.name, fn.tpeVars, fn.receiver.map(_.tpe), fn.args.map(_.tpe), fn.rtn)
+  def signature = p.Signature(
+    fn.name,
+    fn.tpeVars,
+    fn.receiver.map(_.tpe),
+    fn.args.map(_.tpe),
+    fn.moduleCaptures.map(_.tpe),
+    fn.termCaptures.map(_.tpe),
+    fn.rtn
+  )
 
   def signatureRepr = {
-    val captures = fn.captures.map(_.repr).mkString(",")
-    val tpeVars  = fn.tpeVars.mkString(",")
-    val args     = fn.args.map(_.repr).mkString(",")
-    s"${fn.receiver.fold("")(r => r.repr + ".")}${fn.name.repr}<$tpeVars>($args)[$captures] : ${fn.rtn.repr}"
+    val termCaptures   = fn.termCaptures.map(_.repr).mkString(",")
+    val moduleCaptures = fn.moduleCaptures.map(_.repr).mkString(",")
+    val tpeVars        = fn.tpeVars.mkString(",")
+    val args           = fn.args.map(_.repr).mkString(",")
+    s"${fn.receiver.fold("")(r => r.repr + ".")}${fn.name.repr}<$tpeVars>($args)[$moduleCaptures;${termCaptures}] : ${fn.rtn.repr}"
   }
 
   def repr: String =

@@ -103,12 +103,22 @@ object PolyAst {
     case UnaryIntrinsic(lhs: Term, kind: UnaryIntrinsicKind, rtn: Type)              extends Expr(rtn)
     case BinaryIntrinsic(lhs: Term, rhs: Term, kind: BinaryIntrinsicKind, rtn: Type) extends Expr(rtn)
 
-    case Cast(from: Term, as: Type) extends Expr(as)
-    case Alias(ref: Term)           extends Expr(ref.tpe)
-    case Invoke(name: Sym, tpeArgs: List[Type], receiver: Option[Term], args: List[Term], rtn: Type) extends Expr(rtn)
-    case Index(lhs: Term, idx: Term, component: Type)                               extends Expr(component)
-    case Alloc(component: Type, size: Term)                                         extends Expr(Type.Array(component))
-    case Suspend(args: List[Named], stmts: List[Stmt], rtn: Type, shape: Type.Exec) extends Expr(shape)
+    case Cast(from: Term, as: Type)                   extends Expr(as)
+    case Alias(ref: Term)                             extends Expr(ref.tpe)
+    case Index(lhs: Term, idx: Term, component: Type) extends Expr(component)
+    case Alloc(component: Type, size: Term)           extends Expr(Type.Array(component))
+
+    case Invoke(
+        name: Sym,
+        tpeArgs: List[Type],
+        receiver: Option[Term],
+        args: List[Term],
+        captures: List[Term],
+        rtn: Type
+    ) extends Expr(rtn)
+
+    // case Suspend(args: List[Named], stmts: List[Stmt], rtn: Type, shape: Type.Exec) extends Expr(shape)
+
   }
 
   enum Stmt derives MsgPack.Codec {
@@ -118,7 +128,7 @@ object PolyAst {
         name: Term,
         expr: Expr,
         copy: Boolean // FIXME do we need this copy thing now that we have value/ref semantics???
-    ) 
+    )
     case Update(lhs: Term, idx: Term, value: Term)
     case While(tests: List[Stmt], cond: Term, body: List[Stmt])
     case Break
@@ -143,15 +153,23 @@ object PolyAst {
       dependencies: List[StructDef] //
   ) derives MsgPack.Codec
 
-  case class Signature(name: Sym, tpeVars: List[String], receiver: Option[Type], args: List[Type], rtn: Type)
-      derives MsgPack.Codec
+  case class Signature(
+      name: Sym,
+      tpeVars: List[String],
+      receiver: Option[Type],
+      args: List[Type],
+      moduleCaptures: List[Type],
+      termCaptures: List[Type],
+      rtn: Type
+  ) derives MsgPack.Codec
 
   case class Function(         //
       name: Sym,               //
       tpeVars: List[String],   //
       receiver: Option[Named], //
       args: List[Named],       //
-      captures: List[Named],   //
+      moduleCaptures: List[Named],   //
+      termCaptures: List[Named],   //
       rtn: Type,               //
       body: List[Stmt]         //
   ) derives MsgPack.Codec      //

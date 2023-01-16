@@ -11,7 +11,7 @@ object FnInlinePass extends ProgramPass {
   // rename all var and selects to avoid collision
   private def renameAll(f: p.Function): p.Function = {
     def rename(n: p.Named) = p.Named(s"_inline_${f.mangledName}_${n.symbol}", n.tpe)
-    val captureNames       = f.captures.toSet
+    val captureNames       = f.moduleCaptures.toSet
     val body = f.body
       .modifyAll[p.Term] {
         case s @ p.Term.Select(Nil, n) if captureNames.contains(n)    => s
@@ -24,7 +24,16 @@ object FnInlinePass extends ProgramPass {
         case p.Stmt.Var(n, expr) => p.Stmt.Var(rename(n), expr)
         case x                   => x
       }
-    p.Function(f.name, f.tpeVars, f.receiver.map(rename(_)), f.args.map(rename(_)), f.captures, f.rtn, body)
+    p.Function(
+      f.name,
+      f.tpeVars,
+      f.receiver.map(rename(_)),
+      f.args.map(rename(_)),
+      f.moduleCaptures,
+      f.termCaptures.map(rename(_)),
+      f.rtn,
+      body
+    )
   }
 
   private def inlineOne(ivk: p.Expr.Invoke, f: p.Function): (p.Expr, List[p.Stmt], List[p.Named]) = {
@@ -46,8 +55,9 @@ object FnInlinePass extends ProgramPass {
     println("Renamed = " + renamed.signatureRepr)
     println("Ivk     = " + ivk.repr)
     val substituted =
-      (renamed.receiver ++ renamed.args).zip(ivk.receiver ++ ivk.args).foldLeft(renamed.body) {
-        case (xs, (target, replacement)) =>
+      (renamed.receiver ++ renamed.args ++ renamed.termCaptures)
+        .zip(ivk.receiver ++ ivk.args ++ ivk.captures)
+        .foldLeft(renamed.body) { case (xs, (target, replacement)) =>
           xs.modifyAll[p.Term] { original =>
             println(s"substitute  ${original.repr} ??? ${target.repr}")
 
@@ -63,7 +73,7 @@ object FnInlinePass extends ProgramPass {
           // if (original == target) replacement else original
           }
 
-      }
+        }
 
     val returnExprs = substituted.collectWhere[p.Stmt] { case p.Stmt.Return(e) => e }
 
@@ -77,7 +87,7 @@ object FnInlinePass extends ProgramPass {
           case p.Stmt.Return(e) => p.Stmt.Comment(s"inlined return ${e}")
           case x                => x
         }
-        (expr, noReturnStmt, renamed.captures)
+        (expr, noReturnStmt, renamed.moduleCaptures)
       case xs => // multiple returns, create intermediate return var
         val returnName               = p.Named("phi", ivk.tpe)
         val returnRef: p.Term.Select = p.Term.Select(Nil, returnName)
@@ -85,7 +95,7 @@ object FnInlinePass extends ProgramPass {
           case p.Stmt.Return(e) => p.Stmt.Mut(returnRef, e, copy = false)
           case x                => x
         }
-        (p.Expr.Alias(returnRef), p.Stmt.Var(returnName, None) :: returnRebound, renamed.captures)
+        (p.Expr.Alias(returnRef), p.Stmt.Var(returnName, None) :: returnRebound, renamed.moduleCaptures)
     }
   }
 
@@ -95,54 +105,57 @@ object FnInlinePass extends ProgramPass {
     val (n, f) = doUntilNotEq(program.entry, limit = 10) { (i, f) =>
       println(s"[Inline ${i}]\n${f.repr}")
 
-    val (stmts, captures) = f.body.foldMap { x =>
+      val (stmts, moduleCaptures) = f.body.foldMap { x =>
 
-      val (y, xs) = x.modifyCollect[p.Expr, (List[p.Stmt], List[p.Named])] {
-        case ivk @ p.Expr.Invoke(name, tpeArgs, recv, args, rtn) =>
-          // Find all viable overloads (same name and same arg count) first.
-          val overloads = program.functions.distinct.filter(f => f.name == name && f.args.size == args.size)
+        val (y, xs) = x.modifyCollect[p.Expr, (List[p.Stmt], List[p.Named])] {
+          case ivk @ p.Expr.Invoke(name, tpeArgs, recv, args, captures, rtn) =>
+            // Find all viable overloads (same name and same arg count) first.
+            val overloads = program.functions.distinct.filter(f => f.name == name && f.args.size == args.size)
 
-          overloads.filter { f =>
-            // For each overload candidate, we substitute any type variables with the actual invocation.
-            // As we're resolving overloads, failures are expected so unresolvable variables are kept as-is.
+            overloads.filter { f =>
+              // For each overload candidate, we substitute any type variables with the actual invocation.
+              // As we're resolving overloads, failures are expected so unresolvable variables are kept as-is.
 
-            // We can still inline if method name and argument type resolution succeed but types don't match for the receiver.
-            // This is because receivers could have *different* types in the inheritance tree.
-            // `scalac` would have rejected bad receivers before this so it should be relatively safe.
+              // We can still inline if method name and argument type resolution succeed but types don't match for the receiver.
+              // This is because receivers could have *different* types in the inheritance tree.
+              // `scalac` would have rejected bad receivers before this so it should be relatively safe.
 
-            val varToTpeLut = f.tpeVars.zip(tpeArgs).toMap
-            val sig = f.signature.modifyAll[p.Type](_.mapLeaf {
-              case v @ p.Type.Var(n) => varToTpeLut.getOrElse(n, v)
-              case x                 => x
-            })
-            sig.receiver.size == recv.size && // make sure receivers are both Some or None
-            sig.args.zip(args.map(_.tpe)).forall(_ =:= _) &&
-            sig.rtn =:= rtn
-          } match {
-            case Nil =>
-              println(s"-> Keep ${ivk.repr}")
-              println(s"Everything:\n${program.functions.map(_.repr).mkString("\n")}")
-              println(s"Overloads:\n${overloads.map(_.repr).mkString("\n")}")
+              val varToTpeLut = f.tpeVars.zip(tpeArgs).toMap
+              val sig = f.signature.modifyAll[p.Type](_.mapLeaf {
+                case v @ p.Type.Var(n) => varToTpeLut.getOrElse(n, v)
+                case x                 => x
+              })
+              sig.receiver.size == recv.size && // make sure receivers are both Some or None
+              sig.args.zip(args.map(_.tpe)).forall(_ =:= _) &&
+              sig.termCaptures.zip(captures.map(_.tpe)).forall(_ =:= _) &&
+              sig.rtn =:= rtn
+            } match {
+              case Nil =>
+                println(s"-> Keep ${ivk.repr}")
+                println(s"Everything:\n${program.functions.map(_.repr).mkString("\n")}")
+                println(s"Overloads:\n${overloads.map(_.repr).mkString("\n")}")
 
-              ???
+                ???
 
-              (ivk, Nil -> Nil) // can't find fn, keep it for now
-            case f :: Nil =>
-              println(s"Overloads:\n${f.repr}")
-              val (expr, stmts, names) = inlineOne(ivk, f)
-              println(s"Outcome:\n${stmts.map(_.repr).mkString("\n")}")
-              (expr, stmts -> names)
-            case xs =>
-              println(xs.mkString("\n"))
-              ??? // more than one, ambiguous
-          }
+                (ivk, Nil -> Nil) // can't find fn, keep it for now
+              case f :: Nil =>
+                println(s"Overloads:\n${f.repr}")
+                val (expr, stmts, names) = inlineOne(ivk, f)
+                println(s"Outcome:\n${stmts.map(_.repr).mkString("\n")}")
+                (expr, stmts -> names)
+              case xs =>
+                println(xs.mkString("\n"))
+                ??? // more than one, ambiguous
+            }
 
-        case x => (x, Nil -> Nil)
+          case x => (x, Nil -> Nil)
+        }
+
+        val (stmts, moduleCaptures) = xs.combineAll //
+        (stmts :+ y, moduleCaptures)
       }
-      val (stmts, captures) = xs.combineAll //
-      (stmts :+ y, captures)
-    }
-    f.copy(body = stmts, captures = (f.captures ++ captures).distinct)
+
+      f.copy(body = stmts, moduleCaptures = (f.moduleCaptures ++ moduleCaptures).distinct)
     }
 
     println("Done")

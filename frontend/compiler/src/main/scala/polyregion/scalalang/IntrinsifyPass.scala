@@ -170,7 +170,7 @@ object IntrinsifyPass {
 
   private def intrinsifyInstanceApply(s: p.Stmt, idx: Int): (List[p.Stmt], List[p.Expr.Invoke]) = {
     val (stmt, cs) = s.modifyCollect[p.Expr, (List[p.Stmt], List[p.Expr.Invoke])] {
-      case inv @ p.Expr.Invoke(sym, tpeArgs, Some(recv), args, rtn) =>
+      case inv @ p.Expr.Invoke(sym, tpeArgs, Some(recv), args, captures, rtn) =>
         (sym.fqn, recv, args) match {
           case (
                 "polyregion" :: "scala" :: "intrinsics$" :: op :: Nil,
@@ -326,7 +326,7 @@ object IntrinsifyPass {
 
   private def intrinsifyModuleApply(s: p.Stmt, idx: Int) = {
     val (stmt, cs) = s.modifyCollect[p.Expr, (List[p.Stmt], List[p.Expr.Invoke])] {
-      case inv @ p.Expr.Invoke(sym, tpeArgs, Some(_), args, rtn) =>
+      case inv @ p.Expr.Invoke(sym, tpeArgs, Some(_), args, captures, rtn) =>
         (sym.fqn, args) match {
 
           case ("scala" :: "Int$" :: "int2double" :: Nil, x :: Nil) if x.tpe == p.Type.Int =>

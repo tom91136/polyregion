@@ -38,7 +38,16 @@ object Compiler {
       case t @ p.Type.Struct(_, tpeVars, _) => (Some(t), tpeVars).success
       case x                                => s"Illegal receiver: $x".fail
     }
-  } yield p.Signature(p.Sym(f.symbol.fullName), receiverTpeVars ::: fnTypeVars, receiver, fnArgsTpes, fnRtnTpe)
+    // TODO run outliner here
+  } yield p.Signature(
+    p.Sym(f.symbol.fullName),
+    receiverTpeVars ::: fnTypeVars,
+    receiver,
+    fnArgsTpes,
+    Nil /* TODO outline module captures */,
+    Nil /* TODO outline term captures */,
+    fnRtnTpe
+  )
 
   private def matchingSignatures(sigs: Iterable[p.Signature], target: p.Expr.Invoke) = sigs
     .collect {
@@ -98,7 +107,7 @@ object Compiler {
                     case Nil => // We found no replacement, log it and keep going.
                       for {
                         log         <- log.subLog(s"Compile (no replacement): ${target.repr}").success
-                        (fn0, deps) <- compileFn(log, defDef)
+                        (fn0, deps) <- compileFn(log, defDef, Map.empty)
                         (fn1, wit0, clsDeps, moduleDeps) <- compileAndReplaceStructDependencies(log, fn0, deps)(
                           StdLib.StructDefs
                         )
@@ -108,7 +117,7 @@ object Compiler {
                         clsDeps ++ clsDepss,
                         moduleDeps ++ moduleSymDepss
                       )
-                    case  (fn, clsDeps) :: Nil => // We found exactly one function matching the invocation
+                    case (fn, clsDeps) :: Nil => // We found exactly one function matching the invocation
                       println(s"Replace: replace ${target.repr}")
                       for {
                         log <- log.subLog(s"${target.repr}").success
@@ -139,8 +148,7 @@ object Compiler {
                       .map("\t" + _._1.repr)
                       .mkString("\n")}".fail
               }
- 
- 
+
             } yield r
         }
         .map((xs, deps, clsDeps, moduleSymDeps) =>
@@ -159,7 +167,12 @@ object Compiler {
     d.modules.values.toList.map(t => p.Named(t.name.fqn.mkString("_"), t))
 
   def compileFn(using q: Quoted) //
-  (sink: Log, f: q.DefDef, intrinsify: Boolean = true): Result[(p.Function, q.Dependencies)] =
+  (
+      sink: Log,
+      f: q.DefDef,
+      scope: Map[q.Symbol, p.Term] = Map.empty,
+      intrinsify: Boolean = true
+  ): Result[(p.Function, q.Dependencies)] =
     for {
       log <- sink.subLog(s"Compile DefDef: ${f.name}").success
       _ = log.info(s"Body", f.show(using q.Printer.TreeAnsiCode))
@@ -203,7 +216,7 @@ object Compiler {
             sink = log,
             term = rhs,
             root = f.symbol,
-            scope = Map.empty, // We pass an empty scope table as we are compiling an independent fn.
+            scope = scope, // We pass an empty scope table as we are compiling an independent fn.
             tpeArgs = allTypeVars.map(p.Type.Var(_)),
             intrinsify = intrinsify
           ).map((stmts, _, deps, thisCls) => (stmts, deps, thisCls))
@@ -224,7 +237,8 @@ object Compiler {
         tpeVars = allTypeVars,
         receiver = receiver,
         args = fnArgs.map(_._2),
-        captures = deriveModuleStructCaptures(deps),
+        moduleCaptures = deriveModuleStructCaptures(deps),
+        termCaptures = Nil,
         rtn = fnRtnTpe,
         body = rhsStmts
       )
@@ -250,8 +264,6 @@ object Compiler {
         s"Term type ($termTpe) is not the same as term value type (${termValue.tpe}), term was $termValue".fail
       } else ().success
     statements = c.stmts :+ p.Stmt.Return(p.Expr.Alias(termValue))
-    _          = println(s"Deps1 = ${c.deps.classes.values} ${c.deps.functions.values}")
-
     (optStmts, optDeps) =
       if (intrinsify) runLocalOptPass(statements, c.deps)
       else (statements, c.deps)
@@ -313,12 +325,13 @@ object Compiler {
 
       mappedFn = fn.modifyAll[p.Type](replaceTpe(_))
       mappedFnDeps = deps.functions.map((defdef, ivks) =>
-        defdef -> ivks.map { case p.Expr.Invoke(name, tpeArgs, receiver, args, rtn) =>
+        defdef -> ivks.map { case p.Expr.Invoke(name, tpeArgs, receiver, args, captures, rtn) =>
           p.Expr.Invoke(
             name,
             tpeArgs.map(replaceTpe(_)),
             receiver.map(replaceTpeForTerm(_)),
             args.map(replaceTpeForTerm(_)),
+            captures.map(replaceTpeForTerm(_)),
             replaceTpe(rtn)
           ): p.Expr.Invoke
         }
@@ -378,8 +391,8 @@ object Compiler {
       tpeVars = Nil,
       receiver = None,
       args = Nil,
-      captures = capturedNames.map(_._1) ++
-        deriveModuleStructCaptures(exprDeps) ++
+      moduleCaptures = deriveModuleStructCaptures(exprDeps),
+      termCaptures = capturedNames.map(_._1) ++
         exprThisCls.map((_, tpe) => p.Named("this", tpe)),
       rtn = exprTpe,
       body = exprStmts
@@ -506,7 +519,7 @@ object Compiler {
       else ().success
 
     capturedNameTable = capturedNames.map((name, ref) => name.symbol -> (name.tpe, ref)).toMap
-    captured <- opt.entry.captures.traverse { n =>
+    captured <- (opt.entry.moduleCaptures ++ opt.entry.termCaptures).traverse { n =>
       // Struct type of symbols may have been modified through specialisation so we just validate whether it's still a struct for now
       capturedNameTable.get(n.symbol) match {
         case None                                       => (n -> captureNameToModuleRefTable(n.symbol)).success

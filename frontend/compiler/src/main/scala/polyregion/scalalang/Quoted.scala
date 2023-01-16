@@ -72,6 +72,7 @@ class Quoted(val underlying: scala.quoted.Quotes) {
 
       refs: Map[Symbol, p.Term] = Map.empty, // ident/select table
       names: Map[Symbol, Int] = Map.empty,
+      invokeCaptures: Map[Symbol, List[p.Term]] = Map.empty,
       deps: Dependencies = Dependencies(),
       stmts: List[p.Stmt] = List.empty, // fn statements
       thisCls: Option[(ClassDef, p.Type.Struct)] = None,
@@ -79,11 +80,15 @@ class Quoted(val underlying: scala.quoted.Quotes) {
   ) {
     infix def !!(t: Tree): RemapContext = copy(traces = t :: traces)
     def down(t: Tree): RemapContext     = !!(t).copy(depth = depth + 1)
-    def named(tpe: p.Type): p.Named     = p.Named(s"v${depth}", tpe)
+    def named(tpe: p.Type): p.Named     = p.Named(s"_v${depth}", tpe)
 
-    def mkName(s: Symbol): (String, RemapContext) =
+    def mkName(s: Symbol): (String, RemapContext) = {
+      def indexedName(ord: Int) = ord match {
+        case 0 => s.name
+        case n => s"${s.name}_$n"
+      }
       names.get(s) match {
-        case Some(n) => (s"${s.name}_$n", this)
+        case Some(n) => (indexedName(n), this)
         case None    =>
           // New symbol, look for name collisions if any and generate new name with a higher ordinal
           val newOrdinal = names
@@ -91,12 +96,9 @@ class Quoted(val underlying: scala.quoted.Quotes) {
             .maxOption
             .map(_ + 1)
             .getOrElse(0)
-          val name = newOrdinal match {
-            case 0 => s.name
-            case _ => s"${s.name}_$newOrdinal"
-          }
-          (name, copy(names = names + (s -> newOrdinal)))
+          (indexedName(newOrdinal), copy(names = names + (s -> newOrdinal)))
       }
+    }
 
     // FIXME symbolDefMap should not required any more, it's for solving the non-existent issue
     // where definitions appear in implementation of a macro which can't happen user code.
@@ -109,6 +111,10 @@ class Quoted(val underlying: scala.quoted.Quotes) {
           case _             => Nil
         }).toMap
     )
+
+    def withInvokeCapture(s : Symbol, xs : List[p.Term]) : RemapContext = {
+      copy(invokeCaptures = invokeCaptures + (s -> xs))
+    }
 
     def noStmts: RemapContext = copy(stmts = Nil)
     // def mark(s: p.Signature, d: DefDef) = copy(defs = defs + (s -> d))

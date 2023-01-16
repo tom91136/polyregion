@@ -65,7 +65,7 @@ object Remapper {
     def mapTree(tree: q.Tree): Result[(p.Term, q.RemapContext)] = tree match {
       case q.ValDef(name, tpeTree, Some(rhs)) =>
         for {
-          (name, c) <- c.mkName(tree.symbol).success
+          (name, c)        <- c.mkName(tree.symbol).success
           (term -> tpe, c) <- c.typerAndWitness(tpeTree.tpe)
           // if tpe is singleton, substitute with constant directly
           (ref, c) <- term.fold((c !! tree).mapTerm(rhs))(x => (x, c).success)
@@ -78,14 +78,30 @@ object Remapper {
       case q.ValDef(name, tpe, None) => c.fail(s"Unexpected variable $name:$tpe")
       // TODO DefDef here comes from general closures ( (a:A) => ??? )
 
-      case ddd @ q.DefDef(_, _, _, _) =>
-        println(RefOutliner.outline(Log(""), ddd.rhs.get).map((a, v) => a.mkString("\n")))
+      case defDef @ q.DefDef(_, _, _, _) =>
+        // The outliner would consider function args as foreign so we need to collect them first and discard.
+        val argSymbols = defDef.termParamss.flatMap(_.params).map(_.symbol).toSet
 
-        ???
+        for {
+          (captures, c) <- RefOutliner
+            .outline(Log(""), defDef.rhs.get)
+            .map((captures, v) => captures.filterNot(cap => argSymbols.contains(cap._2.symbol)))
+            .map(xs =>
+              xs.foldLeft(List.empty[(q.Symbol, p.Named)] -> c) { case ((acc, c0), (_, ref, (term, tpe))) =>
+                val (name, c) = c0.mkName(ref.symbol)
+                ((ref.symbol, p.Named(name, tpe)) :: acc) -> c
+              }
+            )
+          terms = captures.map((s, n) => s -> p.Term.Select(Nil, n))
+          c <- c.withInvokeCapture(defDef.symbol, terms.map(_._2)).success
 
-        Compiler.compileFn(Log(""), ddd).map { case (fn, deps) =>
-          (p.Term.UnitConst, c.updateDeps(_ |+| deps.witness(fn)))
-        }
+          // FIXME need to pass the context down so that nested functions would have the needed captures
+          //   at each level of the capture, the parent method will also need all captures of the children 
+          //
+          (fn, deps) <- Compiler.compileFn(Log(""), defDef, terms.toMap) 
+          
+
+        } yield (p.Term.UnitConst, c.updateDeps(_ |+| deps.witness(fn.copy(termCaptures = captures.map(_._2)))))
 
       case q.Import(_, _) => (p.Term.UnitConst, c).success // ignore
       case t: q.Term      => (c !! tree).mapTerm(t)
@@ -159,8 +175,16 @@ object Remapper {
           case _                            => Nil
         }
 
-        val ivk: p.Expr.Invoke = p.Expr.Invoke(p.Sym(sym.fullName), receiverTpeArgs ::: tpeArgs, receiver, args, rtnTpe)
-        val named              = c.named(rtnTpe)
+        println("@! "+sym + " " + c.invokeCaptures.get(sym))
+        val ivk: p.Expr.Invoke = p.Expr.Invoke(
+          p.Sym(sym.fullName),
+          receiverTpeArgs ::: tpeArgs,
+          receiver,
+          args,
+          c.invokeCaptures.getOrElse(sym, Nil),
+          rtnTpe
+        )
+        val named = c.named(rtnTpe)
         val c0 = c
           .down(fn)
           .updateDeps(_.witness(fn, ivk)) ::= p.Stmt.Var(named, Some(ivk))
@@ -367,7 +391,10 @@ object Remapper {
                     // In any other case, we're probably referencing a local ValDef/DefDef that appeared before this.
 
                     if (sym.isValDef) { // For ValDef, we can ignore the receiver
-                      invokeOrSelect(c)(sym, None)(p.Term.Select(Nil, local).success)
+
+                      val (name_, c_) = c.mkName(sym)
+
+                      invokeOrSelect(c_)(sym, None)(p.Term.Select(Nil, p.Named(name_, local.tpe)).success)
                     } else if (sym.isDefDef) { // For DefDef, we need to synthesise one like the local dummy case
                       owningClassSymbol(sym)
                         .failIfEmpty(s"$sym does not contain an implementation")

@@ -16,7 +16,8 @@ object DeadArgEliminationPass extends ProgramPass {
     f.copy(
       receiver = f.receiver.filter(topLevelRefs.contains(_)),
       args = f.args.filter(topLevelRefs.contains(_)),
-      captures = f.captures.filter(topLevelRefs.contains(_))
+      moduleCaptures = f.moduleCaptures.filter(topLevelRefs.contains(_)),
+      termCaptures = f.termCaptures.filter(topLevelRefs.contains(_))
     )
   }
 
