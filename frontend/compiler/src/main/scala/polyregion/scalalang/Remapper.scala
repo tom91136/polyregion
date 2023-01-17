@@ -96,10 +96,9 @@ object Remapper {
           c <- c.withInvokeCapture(defDef.symbol, terms.map(_._2)).success
 
           // FIXME need to pass the context down so that nested functions would have the needed captures
-          //   at each level of the capture, the parent method will also need all captures of the children 
+          //   at each level of the capture, the parent method will also need all captures of the children
           //
-          (fn, deps) <- Compiler.compileFn(Log(""), defDef, terms.toMap) 
-          
+          (fn, deps) <- Compiler.compileFn(Log(""), defDef, terms.toMap)
 
         } yield (p.Term.UnitConst, c.updateDeps(_ |+| deps.witness(fn.copy(termCaptures = captures.map(_._2)))))
 
@@ -110,6 +109,66 @@ object Remapper {
 
       case tree => c.fail(s"Unhandled: $tree\nSymbol:\n${tree.symbol}")
     }
+
+    def mapFn(f: q.DefDef, log: Log): Result[(p.Function, q.RemapContext)] =
+      for {
+
+        rhs <- f.rhs.failIfEmpty(s"Function does not contain an implementation: (in ${f.symbol.maybeOwner}) ${f.show}")
+        // First we run the typer on the return type to see if we can just return a term based on the type.
+        (fnRtnTerm -> fnRtnTpe, fnRtnWit) <- Retyper.typer0(f.returnTpt.tpe)
+
+        // We also run the typer on all the def's arguments, all of which should come in the form of a ValDef.
+        // TODO handle default value of args (ValDef.rhs)
+        (fnArgs, fnArgsWit) <- f.termParamss.flatMap(_.params).foldMapM { arg =>
+          Retyper.typer0(arg.tpt.tpe).map { case (_ -> t, wit) => ((arg, p.Named(arg.name, t)) :: Nil, wit) }
+        }
+
+        // And then work out whether this def is part of a class/object instance or free-standing (e.g. local methods),
+        //   class defs will have a `this` receiver arg with the appropriate type.
+        //   FIXME wording: all methods should have a receiver no?
+        owningSymbol <- owningClassSymbol(f.symbol).failIfEmpty(s"${f.symbol} does not have an owning class symbol")
+        owningClass  <- Retyper.clsSymTyper0(owningSymbol)
+        (receiver, receiverTpeVars) <- owningClass match {
+          case t @ p.Type.Struct(_, tpeVars, _) => (Some(p.Named("this", t)), tpeVars).success
+          case x                                => s"Illegal receiver: $x".fail
+        }
+        // Fuse receiver's tpe vars with what's explicitly defined
+        fnTpeVars  = f.paramss.flatMap(_.params).collect { case q.TypeDef(name, _) => name }
+        allTpeArgs = (receiverTpeVars ::: fnTpeVars).distinct
+
+        // Finally, we compile the def body like a closure or return the term if we have one.
+        fnStmts <- fnRtnTerm match {
+          case Some(t) =>
+            (p.Stmt.Return(p.Expr.Alias(t)) :: Nil).success
+          case None =>
+            for {
+              // We reuse the same context, but reset anything related to the *current* scope.
+              // So, delete any existing statement and `this` witness first
+              c <- c
+                .copy(depth = 0, stmts = Nil, thisCls = None) 
+                .success 
+              (term, c)         <- c.mapTerm(rhs, allTpeArgs.map(p.Type.Var(_)))
+              ((_, termTpe), _) <- Retyper.typer0(rhs.tpe)
+              _ <-
+                if (termTpe != term.tpe) ().success
+                else
+                  s"Dotty term type ($termTpe) is not the same as PolyAst term value type (${term.tpe}), term was $term".fail
+            } yield c.stmts :+ p.Stmt.Return(p.Expr.Alias(term))
+
+        }
+
+        fn = p.Function(
+          name = p.Sym(f.symbol.fullName),
+          tpeVars = allTpeArgs,
+          receiver = receiver,
+          args = fnArgs.map(_._2),
+          moduleCaptures = deriveModuleStructCaptures(deps),
+          termCaptures = Nil,
+          rtn = fnRtnTpe,
+          body = fnStmts
+        )
+
+      } yield ???
 
     def mapTerms(args: List[q.Term]): Result[(List[p.Term], q.RemapContext)] = args match {
       case Nil => (Nil, c).pure
@@ -175,7 +234,7 @@ object Remapper {
           case _                            => Nil
         }
 
-        println("@! "+sym + " " + c.invokeCaptures.get(sym))
+        println("@! " + sym + " " + c.invokeCaptures.get(sym))
         val ivk: p.Expr.Invoke = p.Expr.Invoke(
           p.Sym(sym.fullName),
           receiverTpeArgs ::: tpeArgs,
@@ -215,7 +274,7 @@ object Remapper {
             c: q.RemapContext
         )(sym: q.Symbol, receiver: Option[p.Term])(select: => Result[p.Term.Select]) = {
 
-          println("$$$ " + c.symbolDefMap.mkString("\n"))
+          // println("$$$ " + c.symbolDefMap.mkString("\n"))
 
           println(sym)
 
@@ -430,7 +489,7 @@ object Remapper {
         termArgss: List[List[p.Term]] = Nil
     ): Result[(p.Term, q.RemapContext)] = {
 
-      val c1 = c.withDefs(term)
+      val c1 = c // c.withDefs(term)
 
       (tpeArgs, termArgss, term) match {
         case (Nil, Nil, q.NamedArg(name, rhs)) => (c1 !! term).mapTerm(rhs) // named argument: `$name = $rhs`

@@ -76,7 +76,7 @@ class Quoted(val underlying: scala.quoted.Quotes) {
       deps: Dependencies = Dependencies(),
       stmts: List[p.Stmt] = List.empty, // fn statements
       thisCls: Option[(ClassDef, p.Type.Struct)] = None,
-      symbolDefMap: Map[Symbol, Definition] = Map.empty
+//      symbolDefMap: Map[Symbol, Definition] = Map.empty
   ) {
     infix def !!(t: Tree): RemapContext = copy(traces = t :: traces)
     def down(t: Tree): RemapContext     = !!(t).copy(depth = depth + 1)
@@ -102,15 +102,15 @@ class Quoted(val underlying: scala.quoted.Quotes) {
 
     // FIXME symbolDefMap should not required any more, it's for solving the non-existent issue
     // where definitions appear in implementation of a macro which can't happen user code.
-    def findDefTree(s: Symbol): Option[Definition] = symbolDefMap.get(s)
-    def withDefs(x: Tree): RemapContext            = withDefs(x :: Nil)
-    def withDefs(xs: List[Tree]): RemapContext = copy(symbolDefMap =
-      symbolDefMap ++
-        xs.flatMap(collectTree(_) {
-          case d: Definition => (d.symbol -> d) :: Nil
-          case _             => Nil
-        }).toMap
-    )
+//    def findDefTree(s: Symbol): Option[Definition] = symbolDefMap.get(s)
+//    def withDefs(x: Tree): RemapContext            = withDefs(x :: Nil)
+//    def withDefs(xs: List[Tree]): RemapContext = copy(symbolDefMap =
+//      symbolDefMap ++
+//        xs.flatMap(collectTree(_) {
+//          case d: Definition => (d.symbol -> d) :: Nil
+//          case _             => Nil
+//        }).toMap
+//    )
 
     def withInvokeCapture(s : Symbol, xs : List[p.Term]) : RemapContext = {
       copy(invokeCaptures = invokeCaptures + (s -> xs))
