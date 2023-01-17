@@ -42,6 +42,9 @@ object Remapper {
 
   def owningClassSymbol(using q: Quoted)(sym: q.Symbol): Option[q.Symbol] = ownersList(sym).find(_.isClassDef)
 
+  def deriveModuleStructCaptures(using q: Quoted)(d: q.Dependencies): List[p.Named] =
+    d.modules.values.toList.map(t => p.Named(t.name.fqn.mkString("_"), t))
+
   extension (using q: Quoted)(c: q.RemapContext) {
 
     private def typerAndWitness(repr: q.TypeRepr): Result[(q.Retyped, q.RemapContext)] = {
@@ -95,12 +98,13 @@ object Remapper {
           terms = captures.map((s, n) => s -> p.Term.Select(Nil, n))
           c <- c.withInvokeCapture(defDef.symbol, terms.map(_._2)).success
 
-          // FIXME need to pass the context down so that nested functions would have the needed captures
-          //   at each level of the capture, the parent method will also need all captures of the children
-          //
-          (fn, deps) <- Compiler.compileFn(Log(""), defDef, terms.toMap)
+          (fn, c) <- c.mapFn(defDef, Log(""))
+          // // FIXME need to pass the context down so that nested functions would have the needed captures
+          // //   at each level of the capture, the parent method will also need all captures of the children
+          // //
+          // (fn, deps) <- Compiler.compileFn(Log(""), defDef, terms.toMap)
 
-        } yield (p.Term.UnitConst, c.updateDeps(_ |+| deps.witness(fn.copy(termCaptures = captures.map(_._2)))))
+        } yield (p.Term.UnitConst, c.updateDeps(_ |+| c.deps.witness(fn.copy(termCaptures = captures.map(_._2)))))
 
       case q.Import(_, _) => (p.Term.UnitConst, c).success // ignore
       case t: q.Term      => (c !! tree).mapTerm(t)
@@ -150,7 +154,7 @@ object Remapper {
               (term, c)         <- c.mapTerm(rhs, allTpeArgs.map(p.Type.Var(_)))
               ((_, termTpe), _) <- Retyper.typer0(rhs.tpe)
               _ <-
-                if (termTpe != term.tpe) ().success
+                if (termTpe == term.tpe) ().success
                 else
                   s"Dotty term type ($termTpe) is not the same as PolyAst term value type (${term.tpe}), term was $term".fail
             } yield c.stmts :+ p.Stmt.Return(p.Expr.Alias(term))
@@ -162,13 +166,13 @@ object Remapper {
           tpeVars = allTpeArgs,
           receiver = receiver,
           args = fnArgs.map(_._2),
-          moduleCaptures = deriveModuleStructCaptures(deps),
+          moduleCaptures = deriveModuleStructCaptures(c.deps),
           termCaptures = Nil,
           rtn = fnRtnTpe,
           body = fnStmts
         )
 
-      } yield ???
+      } yield fn -> c
 
     def mapTerms(args: List[q.Term]): Result[(List[p.Term], q.RemapContext)] = args match {
       case Nil => (Nil, c).pure

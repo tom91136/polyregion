@@ -163,8 +163,6 @@ object Compiler {
     }(_._1.nonEmpty)
   } yield (fns, clsDeps, moduleSymDeps)
 
-  private def deriveModuleStructCaptures(using q: Quoted)(d: q.Dependencies): List[p.Named] =
-    d.modules.values.toList.map(t => p.Named(t.name.fqn.mkString("_"), t))
 
   def compileFn(using q: Quoted) //
   (
