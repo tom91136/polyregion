@@ -1,23 +1,30 @@
-package polyregion.scalalang
+package polyregion.ast.pass
 
 import cats.syntax.all.*
-import polyregion.ast.{PolyAst as p,given , *}
-import polyregion.scalalang.{Quoted, Symbols}
+import polyregion.ast.{PolyAst as p, *, given}
+import polyregion.scalalang.Symbols
 import polyregion.ast.Traversal.*
 
-object IntrinsifyPass {
+object IntrinsifyPass extends ProgramPass {
 
-  def intrinsify(using q: Quoted)(stmts: List[p.Stmt], dep: q.Dependencies): (List[p.Stmt], q.Dependencies) = {
-    val (xs, instanceInvokes) = stmts.zipWithIndex.foldMapM(intrinsifyInstanceApply(_, _))
+  override def apply(program: p.Program, log: Log): p.Program = {
+    val subLog = log.subLog("Intrinsify")
+    program.copy(
+      entry = intrinsifyOne(program.entry, subLog),
+      functions = program.functions.map(intrinsifyOne(_, subLog))
+    )
+  }
+
+  private def intrinsifyOne(f: p.Function, log: Log): (p.Function) = {
+    val (xs, instanceInvokes) = f.body.zipWithIndex.foldMapM(intrinsifyInstanceApply(_, _))
     val (ys, moduleInvokes)   = xs.zipWithIndex.foldMapM(intrinsifyModuleApply(_, _))
-    // println(s"Elim : ${dep.defs.map(_._1)} -  ${(instanceInvokes ++ moduleInvokes)} ")
-    val intrinsified = instanceInvokes ++ moduleInvokes
-    val eliminated = dep.functions.flatMap { (fn, ivks) =>
-
-      val xs = ivks.filterNot(intrinsified.contains(_))
-      if (xs.isEmpty) Map() else Map(fn -> xs)
-    }
-    (ys, dep.copy(functions = eliminated))
+    log.info(s"${f.signatureRepr}: ", (instanceInvokes ++ moduleInvokes).map(_.repr)*)
+    // val eliminated = dep.functions.flatMap { (fn, ivks) =>
+    //   val xs = ivks.filterNot(intrinsified.contains(_))
+    //   if (xs.isEmpty) Map() else Map(fn -> xs)
+    // }
+    // (ys, dep.copy(functions = eliminated))
+    f.copy(body = ys)
   }
 
   private final inline val DegreesToRadians = 0.017453292519943295
@@ -71,99 +78,74 @@ object IntrinsifyPass {
       rtn: p.Type
   ): (p.Expr, List[p.Stmt]) = {
 
-    def nullaryIntr(k: p.NullaryIntrinsicKind)        = p.Expr.NullaryIntrinsic(k, rtn)  -> List.empty[p.Stmt]
-    def unaryIntr(x: p.Term, k: p.UnaryIntrinsicKind) = p.Expr.UnaryIntrinsic(x, k, rtn) -> List.empty[p.Stmt]
-    def binaryIntr(x: p.Term, y: p.Term, k: p.BinaryIntrinsicKind) =
+    def nullary(k: p.NullaryIntrinsicKind)        = p.Expr.NullaryIntrinsic(k, rtn)  -> List.empty[p.Stmt]
+    def unary(x: p.Term, k: p.UnaryIntrinsicKind) = p.Expr.UnaryIntrinsic(x, k, rtn) -> List.empty[p.Stmt]
+    def binary(x: p.Term, y: p.Term, k: p.BinaryIntrinsicKind) =
       p.Expr.BinaryIntrinsic(x, y, k, rtn) -> List.empty[p.Stmt]
 
     (op, args) match {
-      case "gpuGlobalIdxX" -> Nil   => nullaryIntr(p.NullaryIntrinsicKind.GpuGlobalIdxX)
-      case "gpuGlobalIdxY" -> Nil   => nullaryIntr(p.NullaryIntrinsicKind.GpuGlobalIdxY)
-      case "gpuGlobalIdxZ" -> Nil   => nullaryIntr(p.NullaryIntrinsicKind.GpuGlobalIdxZ)
-      case "gpuGlobalSizeX" -> Nil  => nullaryIntr(p.NullaryIntrinsicKind.GpuGlobalSizeX)
-      case "gpuGlobalSizeY" -> Nil  => nullaryIntr(p.NullaryIntrinsicKind.GpuGlobalSizeY)
-      case "gpuGlobalSizeZ" -> Nil  => nullaryIntr(p.NullaryIntrinsicKind.GpuGlobalSizeZ)
-      case "gpuGroupIdxX" -> Nil    => nullaryIntr(p.NullaryIntrinsicKind.GpuGroupIdxX)
-      case "gpuGroupIdxY" -> Nil    => nullaryIntr(p.NullaryIntrinsicKind.GpuGroupIdxY)
-      case "gpuGroupIdxZ" -> Nil    => nullaryIntr(p.NullaryIntrinsicKind.GpuGroupIdxZ)
-      case "gpuGroupSizeX" -> Nil   => nullaryIntr(p.NullaryIntrinsicKind.GpuGroupSizeX)
-      case "gpuGroupSizeY" -> Nil   => nullaryIntr(p.NullaryIntrinsicKind.GpuGroupSizeY)
-      case "gpuGroupSizeZ" -> Nil   => nullaryIntr(p.NullaryIntrinsicKind.GpuGroupSizeZ)
-      case "gpuLocalIdxX" -> Nil    => nullaryIntr(p.NullaryIntrinsicKind.GpuLocalIdxX)
-      case "gpuLocalIdxY" -> Nil    => nullaryIntr(p.NullaryIntrinsicKind.GpuLocalIdxY)
-      case "gpuLocalIdxZ" -> Nil    => nullaryIntr(p.NullaryIntrinsicKind.GpuLocalIdxZ)
-      case "gpuLocalSizeX" -> Nil   => nullaryIntr(p.NullaryIntrinsicKind.GpuLocalSizeX)
-      case "gpuLocalSizeY" -> Nil   => nullaryIntr(p.NullaryIntrinsicKind.GpuLocalSizeY)
-      case "gpuLocalSizeZ" -> Nil   => nullaryIntr(p.NullaryIntrinsicKind.GpuLocalSizeZ)
-      case "gpuGroupBarrier" -> Nil => nullaryIntr(p.NullaryIntrinsicKind.GpuGroupBarrier)
-      case "gpuGroupFence" -> Nil   => nullaryIntr(p.NullaryIntrinsicKind.GpuGroupFence)
+      case "gpuGlobalIdxX" -> Nil   => nullary(p.NullaryIntrinsicKind.GpuGlobalIdxX)
+      case "gpuGlobalIdxY" -> Nil   => nullary(p.NullaryIntrinsicKind.GpuGlobalIdxY)
+      case "gpuGlobalIdxZ" -> Nil   => nullary(p.NullaryIntrinsicKind.GpuGlobalIdxZ)
+      case "gpuGlobalSizeX" -> Nil  => nullary(p.NullaryIntrinsicKind.GpuGlobalSizeX)
+      case "gpuGlobalSizeY" -> Nil  => nullary(p.NullaryIntrinsicKind.GpuGlobalSizeY)
+      case "gpuGlobalSizeZ" -> Nil  => nullary(p.NullaryIntrinsicKind.GpuGlobalSizeZ)
+      case "gpuGroupIdxX" -> Nil    => nullary(p.NullaryIntrinsicKind.GpuGroupIdxX)
+      case "gpuGroupIdxY" -> Nil    => nullary(p.NullaryIntrinsicKind.GpuGroupIdxY)
+      case "gpuGroupIdxZ" -> Nil    => nullary(p.NullaryIntrinsicKind.GpuGroupIdxZ)
+      case "gpuGroupSizeX" -> Nil   => nullary(p.NullaryIntrinsicKind.GpuGroupSizeX)
+      case "gpuGroupSizeY" -> Nil   => nullary(p.NullaryIntrinsicKind.GpuGroupSizeY)
+      case "gpuGroupSizeZ" -> Nil   => nullary(p.NullaryIntrinsicKind.GpuGroupSizeZ)
+      case "gpuLocalIdxX" -> Nil    => nullary(p.NullaryIntrinsicKind.GpuLocalIdxX)
+      case "gpuLocalIdxY" -> Nil    => nullary(p.NullaryIntrinsicKind.GpuLocalIdxY)
+      case "gpuLocalIdxZ" -> Nil    => nullary(p.NullaryIntrinsicKind.GpuLocalIdxZ)
+      case "gpuLocalSizeX" -> Nil   => nullary(p.NullaryIntrinsicKind.GpuLocalSizeX)
+      case "gpuLocalSizeY" -> Nil   => nullary(p.NullaryIntrinsicKind.GpuLocalSizeY)
+      case "gpuLocalSizeZ" -> Nil   => nullary(p.NullaryIntrinsicKind.GpuLocalSizeZ)
+      case "gpuGroupBarrier" -> Nil => nullary(p.NullaryIntrinsicKind.GpuGroupBarrier)
+      case "gpuGroupFence" -> Nil   => nullary(p.NullaryIntrinsicKind.GpuGroupFence)
 
-      case "sin" -> (x :: Nil)  => unaryIntr(x, p.UnaryIntrinsicKind.Sin)
-      case "cos" -> (x :: Nil)  => unaryIntr(x, p.UnaryIntrinsicKind.Cos)
-      case "tan" -> (x :: Nil)  => unaryIntr(x, p.UnaryIntrinsicKind.Tan)
-      case "asin" -> (x :: Nil) => unaryIntr(x, p.UnaryIntrinsicKind.Asin)
-      case "acos" -> (x :: Nil) => unaryIntr(x, p.UnaryIntrinsicKind.Acos)
-      case "atan" -> (x :: Nil) => unaryIntr(x, p.UnaryIntrinsicKind.Atan)
-      case "sinh" -> (x :: Nil) => unaryIntr(x, p.UnaryIntrinsicKind.Sinh)
-      case "cosh" -> (x :: Nil) => unaryIntr(x, p.UnaryIntrinsicKind.Cosh)
-      case "tanh" -> (x :: Nil) => unaryIntr(x, p.UnaryIntrinsicKind.Tanh)
+      case "sin" -> (x :: Nil)  => unary(x, p.UnaryIntrinsicKind.Sin)
+      case "cos" -> (x :: Nil)  => unary(x, p.UnaryIntrinsicKind.Cos)
+      case "tan" -> (x :: Nil)  => unary(x, p.UnaryIntrinsicKind.Tan)
+      case "asin" -> (x :: Nil) => unary(x, p.UnaryIntrinsicKind.Asin)
+      case "acos" -> (x :: Nil) => unary(x, p.UnaryIntrinsicKind.Acos)
+      case "atan" -> (x :: Nil) => unary(x, p.UnaryIntrinsicKind.Atan)
+      case "sinh" -> (x :: Nil) => unary(x, p.UnaryIntrinsicKind.Sinh)
+      case "cosh" -> (x :: Nil) => unary(x, p.UnaryIntrinsicKind.Cosh)
+      case "tanh" -> (x :: Nil) => unary(x, p.UnaryIntrinsicKind.Tanh)
 
-      case "signum" -> (x :: Nil) => unaryIntr(x, p.UnaryIntrinsicKind.Signum)
-      case "abs" -> (x :: Nil)    => unaryIntr(x, p.UnaryIntrinsicKind.Abs)
-      case "round" -> (x :: Nil)  => unaryIntr(x, p.UnaryIntrinsicKind.Round)
-      case "ceil" -> (x :: Nil)   => unaryIntr(x, p.UnaryIntrinsicKind.Ceil)
-      case "floor" -> (x :: Nil)  => unaryIntr(x, p.UnaryIntrinsicKind.Floor)
-      case "rint" -> (x :: Nil)   => unaryIntr(x, p.UnaryIntrinsicKind.Rint)
+      case "signum" -> (x :: Nil) => unary(x, p.UnaryIntrinsicKind.Signum)
+      case "abs" -> (x :: Nil)    => unary(x, p.UnaryIntrinsicKind.Abs)
+      case "round" -> (x :: Nil)  => unary(x, p.UnaryIntrinsicKind.Round)
+      case "ceil" -> (x :: Nil)   => unary(x, p.UnaryIntrinsicKind.Ceil)
+      case "floor" -> (x :: Nil)  => unary(x, p.UnaryIntrinsicKind.Floor)
+      case "rint" -> (x :: Nil)   => unary(x, p.UnaryIntrinsicKind.Rint)
 
-      case "sqrt" -> (x :: Nil)  => unaryIntr(x, p.UnaryIntrinsicKind.Sqrt)
-      case "cbrt" -> (x :: Nil)  => unaryIntr(x, p.UnaryIntrinsicKind.Cbrt)
-      case "exp" -> (x :: Nil)   => unaryIntr(x, p.UnaryIntrinsicKind.Exp)
-      case "expm1" -> (x :: Nil) => unaryIntr(x, p.UnaryIntrinsicKind.Expm1)
-      case "log" -> (x :: Nil)   => unaryIntr(x, p.UnaryIntrinsicKind.Log)
-      case "log1p" -> (x :: Nil) => unaryIntr(x, p.UnaryIntrinsicKind.Log1p)
-      case "log10" -> (x :: Nil) => unaryIntr(x, p.UnaryIntrinsicKind.Log10)
+      case "sqrt" -> (x :: Nil)  => unary(x, p.UnaryIntrinsicKind.Sqrt)
+      case "cbrt" -> (x :: Nil)  => unary(x, p.UnaryIntrinsicKind.Cbrt)
+      case "exp" -> (x :: Nil)   => unary(x, p.UnaryIntrinsicKind.Exp)
+      case "expm1" -> (x :: Nil) => unary(x, p.UnaryIntrinsicKind.Expm1)
+      case "log" -> (x :: Nil)   => unary(x, p.UnaryIntrinsicKind.Log)
+      case "log1p" -> (x :: Nil) => unary(x, p.UnaryIntrinsicKind.Log1p)
+      case "log10" -> (x :: Nil) => unary(x, p.UnaryIntrinsicKind.Log10)
 
-      case "pow" -> (x :: y :: Nil)   => binaryIntr(x, y, p.BinaryIntrinsicKind.Pow)
-      case "min" -> (x :: y :: Nil)   => binaryIntr(x, y, p.BinaryIntrinsicKind.Min)
-      case "max" -> (x :: y :: Nil)   => binaryIntr(x, y, p.BinaryIntrinsicKind.Max)
-      case "atan2" -> (x :: y :: Nil) => binaryIntr(x, y, p.BinaryIntrinsicKind.Atan2)
-      case "hypot" -> (x :: y :: Nil) => binaryIntr(x, y, p.BinaryIntrinsicKind.Hypot)
+      case "pow" -> (x :: y :: Nil)   => binary(x, y, p.BinaryIntrinsicKind.Pow)
+      case "min" -> (x :: y :: Nil)   => binary(x, y, p.BinaryIntrinsicKind.Min)
+      case "max" -> (x :: y :: Nil)   => binary(x, y, p.BinaryIntrinsicKind.Max)
+      case "atan2" -> (x :: y :: Nil) => binary(x, y, p.BinaryIntrinsicKind.Atan2)
+      case "hypot" -> (x :: y :: Nil) => binary(x, y, p.BinaryIntrinsicKind.Hypot)
 
-      case "array" -> (x :: Nil) if x.tpe == p.Type.Int =>
+      case "array" -> (x :: Nil) //
+          if x.tpe == p.Type.Int =>
         p.Expr.Alloc(p.Type.Array(tpeArgs.head), x) -> Nil
-      case "apply" -> ((s @ p.Term.Select(_, p.Named(_, p.Type.Array(`rtn`)))) :: i :: Nil) if i.tpe == p.Type.Int =>
+      case "apply" -> ((s @ p.Term.Select(_, p.Named(_, p.Type.Array(`rtn`)))) :: i :: Nil) //
+          if i.tpe == p.Type.Int =>
         p.Expr.Index(s, i, rtn) -> Nil
-      case "update" -> ((s @ p.Term.Select(_, p.Named(_, p.Type.Array(c)))) :: i :: x :: Nil)
+      case "update" -> ((s @ p.Term.Select(_, p.Named(_, p.Type.Array(c)))) :: i :: x :: Nil) //
           if i.tpe == p.Type.Int && x.tpe == c && rtn == p.Type.Unit =>
         p.Expr.Alias(p.Term.UnitConst) -> (p.Stmt.Update(s, i, x) :: Nil)
-
-      case _ =>
-        ???
-//      case "length" =>
-//        (x, x.tpe) match {
-//          case (s@Term.Select(_, _), t@p.Type.Array(_)) => p.Expr.Length(s, t) -> Nil
-//          case _                                        =>
-//            println(x.repr)
-//            println(x.tpe.repr)
-//            ???
-//        }
-//      case "apply"  => // x[y]
-//        (x -> x.tpe, y.tpe) match {
-//          case ((s@p.Term.Select(_, _)) -> p.Type.Array(_), p.Type.Int) => p.Expr.Index(s, y, rtn)
-//          case _                                                        => ???
-//        }
-//
-//      case "update" => // x[y] = z
-//
-//        (x, x.tpe, y, y.tpe) match {
-//          case ((s@p.Term.Select(_, _) -> p.Type.Array(_)), p.Type.Int) =>
-//
-//
-//
-//            p.Expr.Alias(p.Term.UnitConst), p.Stmt.Update (xs, idx, x)
-//          case _ => ???
-//
-//        }
+      case _ => ???
     }
 
   }
@@ -184,19 +166,20 @@ object IntrinsifyPass {
             (expr, (stmts, inv :: Nil))
 
           case (
-            "polyregion" :: "scala" :: "intrinsics$" :: "TypedBuffer" :: op :: Nil,
-            xs@p.Term
-            .Select(
-            _, _
-            ),
-            args
-            ) =>
+                "polyregion" :: "scala" :: "intrinsics$" :: "TypedBuffer" :: op :: Nil,
+                xs @ p.Term
+                  .Select(
+                    _,
+                    _
+                  ),
+                args
+              ) =>
             (op, args) match {
               case "update" -> (i :: x :: Nil) if i.tpe.kind == p.TypeKind.Integral =>
                 (p.Expr.Alias(p.Term.UnitConst), (p.Stmt.Update(xs, i, x) :: Nil, inv :: Nil))
-              case "apply" -> (i :: Nil) if i.tpe.kind == p.TypeKind.Integral       =>
+              case "apply" -> (i :: Nil) if i.tpe.kind == p.TypeKind.Integral =>
                 (p.Expr.Index(xs, i, rtn), (Nil, inv :: Nil))
-              case (op, args)                                                       =>
+              case (op, args) =>
                 println(s"$op $$args")
                 ???
             }
@@ -300,7 +283,7 @@ object IntrinsifyPass {
                 ("polyregion" :: "scala" :: "Buffer" :: "apply" :: Nil) |             //
                 ("scala" :: "collection" :: "SeqOps" :: "apply" :: Nil) |             //
                 ("scala" :: "collection" :: "mutable" :: "SeqOps" :: "apply" :: Nil), //
-                (xs @ p.Term.Select(_, p.Named(_, p.Type.Array(_)))),
+                xs @ p.Term.Select(_, p.Named(_, p.Type.Array(_))),
                 idx :: Nil
               ) if idx.tpe.kind == p.TypeKind.Integral =>
             (p.Expr.Index(xs, idx, rtn), (Nil, inv :: Nil))
@@ -309,19 +292,19 @@ object IntrinsifyPass {
                 ("polyregion" :: "scala" :: "Buffer" :: "update" :: Nil) |            //
                 ("scala" :: "collection" :: "mutable" :: "SeqOps" :: "update" :: Nil) //
                 ,
-                (xs @ p.Term.Select(_, p.Named(_, p.Type.Array(_)))),
+                xs @ p.Term.Select(_, p.Named(_, p.Type.Array(_))),
                 idx :: x :: Nil
               ) if idx.tpe.kind == p.TypeKind.Integral =>
             (p.Expr.Alias(p.Term.UnitConst), (p.Stmt.Update(xs, idx, x) :: Nil, inv :: Nil))
           case (unknownSym, recv, args) =>
             println(s"No instance intrinsic for call: $recv.`${unknownSym.mkString(".")}`(${args
-              .mkString(",")}), rtn=${rtn}, argn=${args.size}")
+                .mkString(",")}), rtn=${rtn}, argn=${args.size}")
             (inv, (Nil, Nil))
         }
       case x => (x, (Nil, Nil))
     }
     val (stmts, ivks) = cs.combineAll
-    (  stmts :+ stmt, ivks)
+    (stmts :+ stmt, ivks)
   }
 
   private def intrinsifyModuleApply(s: p.Stmt, idx: Int) = {
@@ -407,7 +390,7 @@ object IntrinsifyPass {
       case x => (x, (Nil, Nil))
     }
     val (stmts, ivks) = cs.combineAll
-    (  stmts:+stmt, ivks)
+    (stmts :+ stmt, ivks)
   }
 
 }

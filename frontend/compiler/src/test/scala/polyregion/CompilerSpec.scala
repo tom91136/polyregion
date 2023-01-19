@@ -40,15 +40,16 @@ class CompilerSpec extends munit.FunSuite {
 //      val m2 = foo.b(_)
 
       val x = 3
-      def x0 = x
 
       val cap = 1
-      def doIt(a : Int) = {
+      def doIt(a: Int) = {
         val m = 12
-        val u = m + a + cap + x
+        val u = m + a + cap
 //
 //        def second = cap + a
 //        second  + u +
+        def x0 = x
+
         x0
 
       }
@@ -64,8 +65,7 @@ class CompilerSpec extends munit.FunSuite {
 //      }
 //      u
       val a = 2
-      val  m = doIt(a) // (a) [cap]
-
+      val m = doIt(a) // (a) [cap]
 
 //    assertEquals(1, 1)
 

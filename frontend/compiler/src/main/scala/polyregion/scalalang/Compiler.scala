@@ -14,13 +14,12 @@ object Compiler {
   import Remapper.*
   import Retyper.*
 
-  private def runLocalOptPass(using Quoted) = IntrinsifyPass.intrinsify
-
   private val ProgramPasses: List[ProgramPass] = List(
-    FnInlinePass, //
+    IntrinsifyPass,
+    FnInlinePass,
     VarReducePass,
-    UnitExprElisionPass,   //
-    DeadArgEliminationPass //
+    UnitExprElisionPass,
+    DeadArgEliminationPass
   )
 
   private def runProgramOptPasses(program: p.Program, log: Log): Result[(p.Program)] =
@@ -163,7 +162,6 @@ object Compiler {
     }(_._1.nonEmpty)
   } yield (fns, clsDeps, moduleSymDeps)
 
-
   def compileFn(using q: Quoted) //
   (
       sink: Log,
@@ -262,9 +260,9 @@ object Compiler {
         s"Term type ($termTpe) is not the same as term value type (${termValue.tpe}), term was $termValue".fail
       } else ().success
     statements = c.stmts :+ p.Stmt.Return(p.Expr.Alias(termValue))
-    (optStmts, optDeps) =
-      if (intrinsify) runLocalOptPass(statements, c.deps)
-      else (statements, c.deps)
+    (optStmts, optDeps) = (statements, c.deps)
+      // if (intrinsify) runLocalOptPass(statements, c.deps)
+      // else (statements, c.deps)
   } yield (optStmts, termTpe, optDeps, c.thisCls)
 
   def findMatchingClassInHierarchy[A, B](using q: Quoted)(symbol: q.Symbol, clsLut: Map[p.Sym, B]): Option[B] = {

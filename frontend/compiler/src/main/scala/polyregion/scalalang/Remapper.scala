@@ -95,16 +95,17 @@ object Remapper {
                 ((ref.symbol, p.Named(name, tpe)) :: acc) -> c
               }
             )
-          terms = captures.map((s, n) => s -> p.Term.Select(Nil, n))
-          c <- c.withInvokeCapture(defDef.symbol, terms.map(_._2)).success
 
           (fn, c) <- c.mapFn(defDef, Log(""))
-          // // FIXME need to pass the context down so that nested functions would have the needed captures
-          // //   at each level of the capture, the parent method will also need all captures of the children
-          // //
-          // (fn, deps) <- Compiler.compileFn(Log(""), defDef, terms.toMap)
 
-        } yield (p.Term.UnitConst, c.updateDeps(_ |+| c.deps.witness(fn.copy(termCaptures = captures.map(_._2)))))
+          allCaptureNames = (fn.termCaptures ++ captures.map(_._2)).distinct // Include outlined and propagated
+          c <- c
+            .withInvokeCapture(defDef.symbol, allCaptureNames.map(p.Term.Select(Nil, _)))
+            .success
+        } yield (
+          p.Term.UnitConst,
+          c.updateDeps(_ |+| c.deps.witness(fn.copy(termCaptures = allCaptureNames)))
+        )
 
       case q.Import(_, _) => (p.Term.UnitConst, c).success // ignore
       case t: q.Term      => (c !! tree).mapTerm(t)
@@ -149,8 +150,8 @@ object Remapper {
               // We reuse the same context, but reset anything related to the *current* scope.
               // So, delete any existing statement and `this` witness first
               c <- c
-                .copy(depth = 0, stmts = Nil, thisCls = None) 
-                .success 
+                .copy(depth = 0, stmts = Nil, thisCls = None)
+                .success
               (term, c)         <- c.mapTerm(rhs, allTpeArgs.map(p.Type.Var(_)))
               ((_, termTpe), _) <- Retyper.typer0(rhs.tpe)
               _ <-
@@ -167,7 +168,10 @@ object Remapper {
           receiver = receiver,
           args = fnArgs.map(_._2),
           moduleCaptures = deriveModuleStructCaptures(c.deps),
-          termCaptures = Nil,
+          termCaptures = fnStmts // Propagate whatever capture we're seeing in all invokes local to this fn
+            .collectWhere[p.Expr] { case p.Expr.Invoke(_, _, _, _, captures, _) => captures }
+            .flatten
+            .collect { case p.Term.Select(Nil, n) => n },
           rtn = fnRtnTpe,
           body = fnStmts
         )
