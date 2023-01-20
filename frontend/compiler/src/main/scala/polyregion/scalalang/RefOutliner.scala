@@ -5,6 +5,7 @@ import polyregion.ast.{PolyAst as p, *}
 import polyregion.scalalang.Retyper.*
 
 import scala.annotation.tailrec
+import scala.util.Try
 
 object RefOutliner {
 
@@ -78,7 +79,7 @@ object RefOutliner {
     _ = log.info(
       "Foreign Refs",
       foreignRefs.map(x =>
-        s"${x.show}(symbol=${x.symbol}, owner=${x.symbol.owner}) ~> $x, tpe=${x.tpe.widenTermRefByName.show}"
+        s"${x.show}(symbol=${x.symbol}, owner=${Try(x.symbol.owner)}) ~> $x, tpe=${x.tpe.widenTermRefByName.show}"
       )*
     )
     _ = log.info(

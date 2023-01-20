@@ -633,6 +633,11 @@ object Remapper {
             p.Term.UnitConst,
             bodyCtx.replaceStmts(c.stmts :+ p.Stmt.While(condCtx.stmts, condTerm, bodyCtx.stmts))
           )
+        case (Nil, Nil, q.Closure(rhs, None)) => 
+          println(c.invokeCaptures)
+          // (p.Term.UnitConst, c).success
+          // TODO delete the LHS var??
+          ???
         case _ =>
           c1.fail(
             s"Unhandled: <${tpeArgs.map(_.repr)}>`$term`(${termArgss}), show=`${term.show}`\nSymbol:\n${term.symbol}"

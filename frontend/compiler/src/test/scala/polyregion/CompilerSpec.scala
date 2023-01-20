@@ -80,7 +80,7 @@ class CompilerSpec extends munit.FunSuite {
   test("fns") {
     CompilerTests.compilerAssert {
 
-      val twice = (a : Int) => a+a
+      val twice: Int => Int = (a: Int) => a + a
 
       twice(1)
 
