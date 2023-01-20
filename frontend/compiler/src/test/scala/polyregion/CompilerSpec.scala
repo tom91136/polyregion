@@ -7,69 +7,84 @@ import scala.quoted.{Expr, Quotes}
 
 class CompilerSpec extends munit.FunSuite {
 
-  test("check") {
-
-//    println("A")
-//    val m = 0
-//    val u = CompilerTests.compilerAssert {
-//      val u = m
+//  test("empty") {
+//    CompilerTests.compilerAssert {}
+//  }
+//
+//  test("unit") {
+//    CompilerTests.compilerAssert(())
+//  }
+//
+//  test("constant") {
+//    CompilerTests.compilerAssert(1)
+//  }
+//
+//  test("simple") {
+//    CompilerTests.compilerAssert {
+//      val a = 1
+//      val b = 2
+//      a + b
 //    }
-
-    def fn0 = 12
-    class Foo {
-      val m         = 2
-      def a()       = m + m
-      def b(x: Int) = m + x
-    }
-
-    CompilerTests.compilerAssert {
-//      val a   = 1
-//      val b   = 2
-//      val uuu = a + 2L
-//      //      a + b
-//      //      val u = (1,2)
+//  }
 //
-//      val c   = fn0
-//      val foo = new Foo
-////      val m = (1,2)
-//      val u   = foo.a()
+//  test("local function single") {
+//    CompilerTests.compilerAssert {
+//      val c                  = 12
+//      def f1(a: Int, b: Int) = a + b + c
+//      f1(1, 2)
+//    }
+//  }
 //
-////      val m = u+1
+//  test("local function single") {
+//    CompilerTests.compilerAssert {
+//      val c                  = 12
+//      def f1(a: Int, b: Int) = a + b + c
+//      f1(1, 2) + f1(1, 2) // FIXME inline fails for multiple invocations
+//    }
+//  }
 //
-//      val m = foo.b(1)
-//      val m2 = foo.b(_)
-
-      val x = 3
-
-      val cap = 1
-      def doIt(a: Int) = {
-        val m = 12
-        val u = m + a + cap
+//  test("local function multiple") {
+//    CompilerTests.compilerAssert {
+//      val c                  = 12
+//      def f1(a: Int, b: Int) = a + b + c
+//      def f2()               = f1(2, 1)
+//      f1(1, 2) + f2() + f2() // FIXME inline fails for multiple invocations
+//    }
+//  }
 //
-//        def second = cap + a
-//        second  + u +
-        def x0 = x
-
-        x0
-
-      }
-
-//      val u = 1
-//      val m = {
-//        val u = 2
-//        u + 3
-//        {
-//          val u = 42
-//          u + u
-//        }
+//  test("nested local function") {
+//    CompilerTests.compilerAssert {
+//      val c = 12
+//      def f2(a: Int, b: Int) = {
+//        def f1(a: Int, b: Int) = a + b + c
+//        a+b+f1(a,b)
 //      }
-//      u
-      val a = 2
-      val m = doIt(a) // (a) [cap]
+//      f2(1, 2)
+//    }
+//  }
+//
+//  test("external function") {
+//    def fn0 = 12
+//    class Foo {
+//      val m         = 2
+//      def a()       = m + m
+//      def b(x: Int) = m + x
+//    }
+//
+//    CompilerTests.compilerAssert {
+//      val f = Foo()
+//      f.m + f.a() + f.b(f.m) + fn0
+//    }
+//  }
 
-//    assertEquals(1, 1)
+  test("fns") {
+    CompilerTests.compilerAssert {
+
+      val twice = (a : Int) => a+a
+
+      twice(1)
 
     }
   }
-
+//
 }

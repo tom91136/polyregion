@@ -95,16 +95,17 @@ object Remapper {
                 ((ref.symbol, p.Named(name, tpe)) :: acc) -> c
               }
             )
-
-          (fn, c) <- c.mapFn(defDef, Log(""))
-
+          (fn, c0) <- c.mapFn(defDef, Log(""))
           allCaptureNames = (fn.termCaptures ++ captures.map(_._2)).distinct // Include outlined and propagated
           c <- c
             .withInvokeCapture(defDef.symbol, allCaptureNames.map(p.Term.Select(Nil, _)))
+            .updateDeps(_ |+| c0.deps)
+            .updateDeps(_.witness(fn.copy(termCaptures = allCaptureNames)))
             .success
+
         } yield (
           p.Term.UnitConst,
-          c.updateDeps(_ |+| c.deps.witness(fn.copy(termCaptures = allCaptureNames)))
+          c // FIXME restore statements!!!
         )
 
       case q.Import(_, _) => (p.Term.UnitConst, c).success // ignore
@@ -142,9 +143,9 @@ object Remapper {
         allTpeArgs = (receiverTpeVars ::: fnTpeVars).distinct
 
         // Finally, we compile the def body like a closure or return the term if we have one.
-        fnStmts <- fnRtnTerm match {
+        (fnStmts, c) <- fnRtnTerm match {
           case Some(t) =>
-            (p.Stmt.Return(p.Expr.Alias(t)) :: Nil).success
+            (p.Stmt.Return(p.Expr.Alias(t)) :: Nil, c).success
           case None =>
             for {
               // We reuse the same context, but reset anything related to the *current* scope.
@@ -158,7 +159,7 @@ object Remapper {
                 if (termTpe == term.tpe) ().success
                 else
                   s"Dotty term type ($termTpe) is not the same as PolyAst term value type (${term.tpe}), term was $term".fail
-            } yield c.stmts :+ p.Stmt.Return(p.Expr.Alias(term))
+            } yield (c.stmts :+ p.Stmt.Return(p.Expr.Alias(term)), c)
 
         }
 

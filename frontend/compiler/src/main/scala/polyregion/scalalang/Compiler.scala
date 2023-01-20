@@ -104,18 +104,27 @@ object Compiler {
                 case Nil => // Not there, we now look at actual dependencies
                   matchingSignatures(fnLut.keys, target).map(s => fnLut(s)).toList match {
                     case Nil => // We found no replacement, log it and keep going.
-                      for {
-                        log         <- log.subLog(s"Compile (no replacement): ${target.repr}").success
-                        (fn0, deps) <- compileFn(log, defDef, Map.empty)
-                        (fn1, wit0, clsDeps, moduleDeps) <- compileAndReplaceStructDependencies(log, fn0, deps)(
-                          StdLib.StructDefs
+                      if (defDef.rhs.isEmpty) {
+                        (
+                          xs,
+                          depss,
+                          clsDepss ,
+                          moduleSymDepss
+                        ).success
+                      } else {
+                        for {
+                          log         <- log.subLog(s"Compile (no replacement): ${target.repr}").success
+                          (fn0, deps) <- compileFn(log, defDef, Map.empty)
+                          (fn1, wit0, clsDeps, moduleDeps) <- compileAndReplaceStructDependencies(log, fn0, deps)(
+                            StdLib.StructDefs
+                          )
+                        } yield (
+                          fn1 :: xs ::: deps.resolvedFunctions,
+                          depss ++ wit0,
+                          clsDeps ++ clsDepss,
+                          moduleDeps ++ moduleSymDepss
                         )
-                      } yield (
-                        fn1 :: xs ::: deps.resolvedFunctions,
-                        depss ++ wit0,
-                        clsDeps ++ clsDepss,
-                        moduleDeps ++ moduleSymDepss
-                      )
+                      }
                     case (fn, clsDeps) :: Nil => // We found exactly one function matching the invocation
                       println(s"Replace: replace ${target.repr}")
                       for {
@@ -259,10 +268,10 @@ object Compiler {
       if (termTpe != termValue.tpe) {
         s"Term type ($termTpe) is not the same as term value type (${termValue.tpe}), term was $termValue".fail
       } else ().success
-    statements = c.stmts :+ p.Stmt.Return(p.Expr.Alias(termValue))
+    statements          = c.stmts :+ p.Stmt.Return(p.Expr.Alias(termValue))
     (optStmts, optDeps) = (statements, c.deps)
-      // if (intrinsify) runLocalOptPass(statements, c.deps)
-      // else (statements, c.deps)
+    // if (intrinsify) runLocalOptPass(statements, c.deps)
+    // else (statements, c.deps)
   } yield (optStmts, termTpe, optDeps, c.thisCls)
 
   def findMatchingClassInHierarchy[A, B](using q: Quoted)(symbol: q.Symbol, clsLut: Map[p.Sym, B]): Option[B] = {
