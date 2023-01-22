@@ -378,6 +378,9 @@ class Processor extends AbstractProcessor {
 
         override def finished(e: TaskEvent): Unit = {
           println(s"[  ENDED]  =>  ${e}")
+          import io.github.classgraph.ClassGraph
+
+          println(">@" + new ClassGraph().enableClassInfo().scan().getAllInterfaces.filter(c => c.getSimpleName == "Bad"))
           e.getKind match {
             case TaskEvent.Kind.ENTER =>
 //              enterVisited += (e.getSourceFile -> e.getCompilationUnit)
@@ -410,6 +413,18 @@ class Processor extends AbstractProcessor {
       }
 
     val classes = collectDeclaredElements(roundEnv.getRootElements.asScala.toList)
+
+    import io.github.classgraph.ClassGraph
+//    println(">" + new ClassGraph().getClasspath)
+
+
+    println("???")
+    println("~ "+classes(0).getSuperclass.getClass)
+
+    ???
+
+
+    println(classes.map(s => s"## $s").mkString("\n"))
 
     symbolTable ++= classes.map(e => e.getQualifiedName.toString -> e)
 

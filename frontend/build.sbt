@@ -67,7 +67,7 @@ lazy val `runtime-java` = project
     autoScalaLibrary    := false,
     assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly"))
   )
-  .dependsOn(`binding-jvm`, compiler % Compile)
+  .dependsOn(`binding-jvm`)
 
 lazy val `runtime-scala` = project
   .settings(
@@ -95,7 +95,8 @@ lazy val compiler = project
       "com.lihaoyi"   %% "pprint"     % "0.7.3",
       "com.lihaoyi"   %% "fansi"      % "0.4.0",
       "com.lihaoyi"   %% "upickle"    % "2.0.0",
-      "org.typelevel" %% "cats-core"  % catsVersion
+      "org.typelevel" %% "cats-core"  % catsVersion,
+      "io.github.classgraph" % "classgraph" % "4.8.154"
     ),
     (Compile / unmanagedJars) := {
       val xs       = (Compile / unmanagedJars).value

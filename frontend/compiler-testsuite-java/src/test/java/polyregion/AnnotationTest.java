@@ -1,6 +1,5 @@
 package polyregion;
 
-import org.graalvm.compiler.nodes.calc.IntegerDivRemNode.Op;
 import org.junit.Test;
 
 import java.io.Serializable;
@@ -126,7 +125,7 @@ public class AnnotationTest {
 		Device<CUDAArch> d = null;
 
 //		new Config<@X SM51, Opt.O1>(){}
-		d.<@Many.Support(SM51.class) Many>offload(  () -> System.out.println("A"));
+//		d.<@Many.Support(SM51.class) Many>offload(  () -> System.out.println("A"));
 		d.<@CUDAArch.Config(SM51.class) SM51>offload(  () -> System.out.println("A"));
 
 //		d.<Config<Haswell, Opt.O1>>offload(() -> System.out.println("A"));
