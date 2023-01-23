@@ -135,7 +135,7 @@ object Remapper {
         owningSymbol <- owningClassSymbol(f.symbol).failIfEmpty(s"${f.symbol} does not have an owning class symbol")
         owningClass  <- Retyper.clsSymTyper0(owningSymbol)
         (receiver, receiverTpeVars) <- owningClass match {
-          case t @ p.Type.Struct(_, tpeVars, _) => (Some(p.Named("this", t)), tpeVars).success
+          case t @ p.Type.Struct(_, tpeVars, _, _) => (Some(p.Named("this", t)), tpeVars).success
           case x                                => s"Illegal receiver: $x".fail
         }
         // Fuse receiver's tpe vars with what's explicitly defined
@@ -210,13 +210,13 @@ object Remapper {
           // Make sure we're requested a struct type here, the class may have generic types so we create a LUT of
           // type vars to type args so we can resolve the concrete field types later.
           tpeVarTable <- rtnTpe match {
-            case p.Type.Struct(_, tpeVars, `tpeArgs`) =>
+            case p.Type.Struct(_, tpeVars, `tpeArgs`, _) =>
               if (tpeVars.length != tpeArgs.length) {
                 s"Requested a ctor with different type arg length: vars=$tpeVars, args=${tpeArgs}".fail
               } else {
                 tpeVars.zip(tpeArgs).toMap.success
               }
-            case p.Type.Struct(_, _, bad) =>
+            case p.Type.Struct(_, _, bad, _) =>
               s"Requested a ctor with different type args, ctor=${bad}, requested=${tpeArgs}".fail
             case bad => s"Requested a ctor with a non-struct type: ${bad.repr}".fail
           }
@@ -239,7 +239,7 @@ object Remapper {
           throw new RuntimeException("Why is recv empty???")
 
         val receiverTpeArgs = receiver.map(_.tpe).fold(Nil) {
-          case p.Type.Struct(_, _, tpeArgs) => tpeArgs
+          case p.Type.Struct(_, _, tpeArgs, _) => tpeArgs
           case _                            => Nil
         }
 
@@ -308,7 +308,7 @@ object Remapper {
                         ts.zip(es).traverse {
                           case (t, e) if t == e   => t.success // same type
                           case (t, p.Type.Var(_)) => t.success // applied type
-                          case (p.Type.Struct(termSym, termVars, _), p.Type.Struct(execSym, execVars, _)) =>
+                          case (p.Type.Struct(termSym, termVars, _, _), p.Type.Struct(execSym, execVars, _, _)) =>
                             if (termSym != execSym) s"Class type mismatch: $termSym != $execSym ".fail
                             else if (termVars != execVars)
                               s"Class generic type arity mismatch: $termVars != $execVars ".fail
@@ -336,7 +336,7 @@ object Remapper {
           def mkSelect(owner: q.Symbol) = for {
             tpe <- Retyper.clsSymTyper0(owner)
             (term, c) <- tpe match {
-              case s @ p.Type.Struct(rootName, Nil, Nil) =>
+              case s @ p.Type.Struct(rootName, Nil, Nil, _) =>
                 for {
                   c <- ref match {
                     case q.Select(qualifier, _) => c.updateDeps(_.witness(qualifier.tpe.typeSymbol, s)).success
@@ -390,7 +390,7 @@ object Remapper {
             tpe <- Retyper.clsSymTyper0(ownerSym) // TODO what about generics???
 
             c <- (ownerSym.tree, tpe) match {
-              case (clsDef: q.ClassDef, s @ p.Type.Struct(_, _, _)) if !ownerSym.flags.is(q.Flags.Module) =>
+              case (clsDef: q.ClassDef, s @ p.Type.Struct(_, _, _, _)) if !ownerSym.flags.is(q.Flags.Module) =>
                 c.bindThis(clsDef, s)
               case _ => c.success
             }
@@ -409,7 +409,7 @@ object Remapper {
         // This handle cases like `ObjA.ObjB` or `($x: ObjA).ObjB`, both should resolve to `ObjB` directly
         if (Retyper.isModuleClass(ref.tpe.typeSymbol)) {
           tpe match { // Object references regardless of nesting can be direct so we use the generated reference name here.
-            case s @ p.Type.Struct(name, _, _) =>
+            case s @ p.Type.Struct(name, _, _, _) =>
               (
                 p.Term.Select(Nil, p.Named(name.fqn.mkString("_"), tpe)),
                 c.updateDeps(_.witness(ref.tpe.typeSymbol, s))
@@ -435,7 +435,7 @@ object Remapper {
 
                   def synthesiseSelectOnMethodWithReceiver(classSym: q.Symbol) =
                     Retyper.clsSymTyper0(classSym).map(classSym.tree -> _).flatMap {
-                      case (clsDef: q.ClassDef, s @ p.Type.Struct(_, _, _)) =>
+                      case (clsDef: q.ClassDef, s @ p.Type.Struct(_, _, _, _)) =>
                         c.bindThis(clsDef, s).flatMap { c =>
                           val self = p.Named("this", s)
                           invokeOrSelect(c)(sym, Some(p.Term.Select(Nil, self)))(
@@ -533,7 +533,7 @@ object Remapper {
         case (Nil, Nil, q.This(_)) => // reference to the current class: `this.???`
           // XXX Don't use typerAndWitness here, we need to record the witnessing of `this` separately.
           (c1 !! term).typerAndWitness(term.tpe).flatMap {
-            case (None -> (s @ p.Type.Struct(_, _, _)), c) =>
+            case (None -> (s @ p.Type.Struct(_, _, _, _)), c) =>
               // There may be more than one
               term.tpe.classSymbol.map(_.tree) match {
                 case Some(clsDef: q.ClassDef) =>

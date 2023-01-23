@@ -71,13 +71,13 @@ object compiletime {
           (_ -> st, _) <- Retyper.typer0(s)
           (_ -> mt, _) <- Retyper.typer0(m)
           st <- st match {
-            case p.Type.Struct(sym, _, _) =>
+            case p.Type.Struct(sym, _, _, _) =>
               println(s"???> Go ${sym} ==  ${m.show}")
               sym.success
             case bad => s"source class ${s.show} (mirror is ${m.show}) is not a class type, got repr: ${bad.repr}".fail
           }
           mt <- mt match {
-            case p.Type.Struct(sym, _, _) => sym.success
+            case p.Type.Struct(sym, _, _, _) => sym.success
             case bad => s"mirror class ${m.show} (source is ${s.show}) is not a class type, got repr: ${bad.repr}".fail
           }
         } yield mt -> st
@@ -133,9 +133,9 @@ object compiletime {
     }
 
   private def replaceTypes(mirrorToSourceTable: Map[p.Sym, p.Sym])(t: p.Type) = t match {
-    case p.Type.Struct(sym, tpeVars, args) =>
-      p.Type.Struct(mirrorToSourceTable.getOrElse(sym, sym), tpeVars, args) match {
-        case p.Type.Struct(Symbols.ArrayMirror, _, x :: Nil) =>
+    case p.Type.Struct(sym, tpeVars, args, parents) =>
+      p.Type.Struct(mirrorToSourceTable.getOrElse(sym, sym), tpeVars, args, parents) match {
+        case p.Type.Struct(Symbols.ArrayMirror, _, x :: Nil, _) =>
           // XXX restore @scala.Array back to the proper array type if needed
           p.Type.Array(x)
         case x => x
@@ -168,8 +168,8 @@ object compiletime {
               name = sourceSignature.name,
               // Get rid of the intrinsic$ capture introduced by calling stubs in that object.
               moduleCaptures = fn.moduleCaptures.filter(_.tpe match {
-                case p.Type.Struct(sym, _, _) => sym != p.Sym(IntrinsicName)
-                case _                        => true
+                case p.Type.Struct(sym, _, _, _) => sym != p.Sym(IntrinsicName)
+                case _                           => true
               })
 //              receiver = sourceSignature.receiver.map(p.Named("this", _)),
 //              tpeVars = fn.tpeVars

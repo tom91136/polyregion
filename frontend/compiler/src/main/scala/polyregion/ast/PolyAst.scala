@@ -39,8 +39,8 @@ object PolyAst {
     case Nothing extends Type(TypeKind.None)
 
     // specialisations
-    case Struct(name: Sym, tpeVars: List[String], args: List[Type]) extends Type(TypeKind.Ref)
-    case Array(component: Type)                                     extends Type(TypeKind.Ref)
+    case Struct(name: Sym, tpeVars: List[String], args: List[Type], parents: List[Sym]) extends Type(TypeKind.Ref)
+    case Array(component: Type)                                                         extends Type(TypeKind.Ref)
 
     //
     case Var(name: String)                                        extends Type(TypeKind.None)
@@ -138,11 +138,12 @@ object PolyAst {
   }
 
   case class StructMember(named: Named, isMutable: Boolean) derives MsgPack.Codec
-  case class StructDef(           //
-      name: Sym,                  //
-      isReference: Boolean,       //
-      tpeVars: List[String],      //
-      members: List[StructMember] //
+  case class StructDef(            //
+      name: Sym,                   //
+      isReference: Boolean,        //
+      tpeVars: List[String],       //
+      members: List[StructMember], //
+      parents: List[Sym]           //
   ) derives MsgPack.Codec
 
   case class Mirror(                //
@@ -163,16 +164,16 @@ object PolyAst {
       rtn: Type
   ) derives MsgPack.Codec
 
-  case class Function(         //
-      name: Sym,               //
-      tpeVars: List[String],   //
-      receiver: Option[Named], //
-      args: List[Named],       //
-      moduleCaptures: List[Named],   //
+  case class Function(             //
+      name: Sym,                   //
+      tpeVars: List[String],       //
+      receiver: Option[Named],     //
+      args: List[Named],           //
+      moduleCaptures: List[Named], //
       termCaptures: List[Named],   //
-      rtn: Type,               //
-      body: List[Stmt]         //
-  ) derives MsgPack.Codec      //
+      rtn: Type,                   //
+      body: List[Stmt]             //
+  ) derives MsgPack.Codec          //
 
   case class Program(
       entry: Function,

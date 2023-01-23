@@ -25,18 +25,18 @@ object Pickler {
   }
 
   def tpeAsRuntimeTpe(t: p.Type): rt.Type = t match {
-    case p.Type.Bool            => rt.Type.BOOL
-    case p.Type.Byte            => rt.Type.BYTE
-    case p.Type.Char            => rt.Type.CHAR
-    case p.Type.Short           => rt.Type.SHORT
-    case p.Type.Int             => rt.Type.INT
-    case p.Type.Long            => rt.Type.LONG
-    case p.Type.Float           => rt.Type.FLOAT
-    case p.Type.Double          => rt.Type.DOUBLE
-    case p.Type.Array(_)        => rt.Type.PTR
-    case p.Type.Struct(_, _, _) => rt.Type.PTR
-    case p.Type.Unit            => rt.Type.VOID
-    case illegal                => throw new RuntimeException(s"tpeAsRuntimeTpe: Illegal $illegal")
+    case p.Type.Bool               => rt.Type.BOOL
+    case p.Type.Byte               => rt.Type.BYTE
+    case p.Type.Char               => rt.Type.CHAR
+    case p.Type.Short              => rt.Type.SHORT
+    case p.Type.Int                => rt.Type.INT
+    case p.Type.Long               => rt.Type.LONG
+    case p.Type.Float              => rt.Type.FLOAT
+    case p.Type.Double             => rt.Type.DOUBLE
+    case p.Type.Array(_)           => rt.Type.PTR
+    case p.Type.Struct(_, _, _, _) => rt.Type.PTR
+    case p.Type.Unit               => rt.Type.VOID
+    case illegal                   => throw new RuntimeException(s"tpeAsRuntimeTpe: Illegal $illegal")
   }
 
   def readPrim(using q: Quotes) //
@@ -134,8 +134,8 @@ object Pickler {
       val added0 = added + sdef.name
       (sdef, repr.widenTermRefByName) :: sdef.members.flatMap(
         _.named match {
-          case (p.Named(_, p.Type.Struct(name, _, _))) if added0.contains(name) => Nil
-          case (p.Named(member, p.Type.Struct(name, _, _))) =>
+          case (p.Named(_, p.Type.Struct(name, _, _,_))) if added0.contains(name) => Nil
+          case (p.Named(member, p.Type.Struct(name, _, _,_))) =>
             lut(name) match {
               case (sdef, None)                     => go(sdef, q.TermRef(repr, member), added0)
               case (sdef, Some((_, (from, to, x)))) =>
@@ -247,7 +247,7 @@ object Pickler {
           ${
             val elementOffset = '{ ${ Expr(elementSizeInBytes) } * i }
             comp match {
-              case p.Type.Struct(name, _, _) =>
+              case p.Type.Struct(name, _, _,_) =>
                 val ptr = callWrite(name, '{ $expr(i) }, ptrMap)
                 writePrim('arrBuffer, elementOffset, p.Type.Long, ptr)
               case t =>
@@ -276,7 +276,7 @@ object Pickler {
             case ('{ $seq: StdLib.MutableSeq[t] }, p.Type.Array(comp)) =>
               val ptr = writeArray[t](seq, comp, ptrMap)
               writePrim('buffer, memberOffset, p.Type.Long, ptr)
-            case (_, p.Type.Struct(name, _, _)) =>
+            case (_, p.Type.Struct(name, _, _,_)) =>
               val ptr = callWrite(name, m.select(rootAfterPrism.asTerm).asExpr, ptrMap)
               writePrim('buffer, memberOffset, p.Type.Long, ptr)
             case (_, _) =>
@@ -318,7 +318,7 @@ object Pickler {
           $seq(i) = ${
             val elementOffset = '{ ${ Expr(elementSizeInBytes) } * i }
             comp match {
-              case p.Type.Struct(name, _, _) =>
+              case p.Type.Struct(name, _, _,_) =>
                 val arrElemPtr = readPrim('arrBuffer, elementOffset, p.Type.Long).asExprOf[Long]
                 callRead(name, '{ $seq(i) }, arrElemPtr, ptrMap, objMap).asExprOf[t]
               case t =>
@@ -365,7 +365,7 @@ object Pickler {
                     q.report.errorAndAbort("Missing write prism for array type, something isn't right here")
                 }
 
-              case (_, p.Type.Struct(name, _, _)) =>
+              case (_, p.Type.Struct(name, _, _,_)) =>
                 val structPtr = readPrim('buffer, memberOffset, p.Type.Long).asExprOf[Long]
                 if (m.mut) {
                   q.Assign(
@@ -445,7 +445,7 @@ object Pickler {
                 case p.Type.Array(comp) =>
                   // readArray[t](seq, comp, ptrMap, objMap, memberOffset, 'buffer, mapping)
                   '{ ??? }.asTerm
-                case p.Type.Struct(name, _, _) =>
+                case p.Type.Struct(name, _, _,_) =>
                   val structPtr = readPrim('buffer, memberOffset, p.Type.Long).asExprOf[Long]
                   callRead(name, '{ null }, structPtr, ptrMap, objMap).asTerm
                 case _ => readPrim('buffer, memberOffset, m.tpe).asTerm

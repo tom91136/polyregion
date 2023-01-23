@@ -157,7 +157,10 @@ object IntrinsifyPass extends ProgramPass {
           case (
                 "polyregion" :: "scala" :: "intrinsics$" :: op :: Nil,
                 p.Term
-                  .Select(Nil, p.Named(_, p.Type.Struct(p.Sym("polyregion" :: "scala" :: "intrinsics$" :: Nil), _, _))),
+                  .Select(
+                    Nil,
+                    p.Named(_, p.Type.Struct(p.Sym("polyregion" :: "scala" :: "intrinsics$" :: Nil), _, _, _))
+                  ),
                 xs
               ) =>
             println(s">>> ${recv} $op[${tpeArgs.map(_.repr)}](${xs.map(_.repr)}) : $rtn")

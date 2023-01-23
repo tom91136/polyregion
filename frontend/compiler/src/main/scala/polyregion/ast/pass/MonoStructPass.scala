@@ -25,10 +25,13 @@ object MonoStructPass extends BoundaryPass[Map[p.Sym, p.Sym]] {
       name = p.Sym(struct.monomorphicName),
       isReference = false,
       tpeVars = Nil,
-      members = sdef.members.modifyAll[p.Type](_.mapLeaf {
-        case p.Type.Var(name) => table(name)
-        case x                => x
-      })
+      members = sdef.members.modifyAll[p.Type](
+        _.mapLeaf {
+          case p.Type.Var(name) => table(name)
+          case x                => x
+        }
+      ),
+      parents = struct.parents
     )
 
     val replacementTable = monoStructDefs.toMap
@@ -37,11 +40,11 @@ object MonoStructPass extends BoundaryPass[Map[p.Sym, p.Sym]] {
 
     // do the replacement outside in
     def doReplacement(t: p.Type): p.Type = t match {
-      case s @ p.Type.Struct(name, tpeVars, args) =>
+      case s @ p.Type.Struct(name, tpeVars, args, parents) =>
         println(s"[Rep] ${s.repr} => ${replacementTable.get(s)}")
         replacementTable.get(s) match {
-          case Some(sdef) => p.Type.Struct(sdef.name, Nil, Nil)
-          case None       => p.Type.Struct(name, tpeVars, args.map(doReplacement(_)))
+          case Some(sdef) => p.Type.Struct(sdef.name, Nil, Nil, sdef.parents)
+          case None       => p.Type.Struct(name, tpeVars, args.map(doReplacement(_)), parents)
         }
       case a @ p.Type.Array(c) => p.Type.Array(doReplacement(c))
       case a                   => a
@@ -54,9 +57,10 @@ object MonoStructPass extends BoundaryPass[Map[p.Sym, p.Sym]] {
     val referencedStructDefs = rootStructDefs
       .collectWhere[p.Type] { t =>
         def findLeafStructDefs(t: p.Type): List[p.StructDef] = t match {
-          case p.Type.Struct(name, _, xs) => xs.flatMap(findLeafStructDefs(_)) ::: program.defs.filter(_.name == name)
-          case p.Type.Array(component)    => findLeafStructDefs(component)
-          case _                          => Nil
+          case p.Type.Struct(name, _, xs, _) =>
+            xs.flatMap(findLeafStructDefs(_)) ::: program.defs.filter(_.name == name)
+          case p.Type.Array(component) => findLeafStructDefs(component)
+          case _                       => Nil
         }
         findLeafStructDefs(t)
       }

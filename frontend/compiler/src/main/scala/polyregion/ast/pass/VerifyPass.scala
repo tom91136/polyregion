@@ -42,7 +42,7 @@ object VerifyPass {
               (rest :+ last)
                 .foldLeft((c !! (local, t.repr), local.tpe)) { case ((acc, tpe), n) =>
                   val c0 = tpe match {
-                    case s @ p.Type.Struct(name, tpeVars, args) =>
+                    case s @ p.Type.Struct(name, tpeVars, args, _) =>
                       sdefLUT.get(name) match {
                         case None =>
                           acc ~ s"Unknown struct type ${name} in `${t.repr}`, known structs: \n${sdefLUT.map(_._2).map(_.repr).mkString("\n")}"

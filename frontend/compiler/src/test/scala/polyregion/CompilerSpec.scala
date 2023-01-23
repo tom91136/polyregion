@@ -76,7 +76,16 @@ class CompilerSpec extends munit.FunSuite {
 //      f.m + f.a() + f.b(f.m) + fn0
 //    }
 //  }
+
+  trait X {
+    def m: Int
+  }
+  trait Y {
+    def m: Int = 1
+  }
+
   class Base(val a: Int) {
+//    override def m = 2
     def foo(n: Int): Int = a + n
   }
 
@@ -115,12 +124,15 @@ class CompilerSpec extends munit.FunSuite {
   // var x : ClassA = ???
   // x.foo()  // x =  ClassA
 
+  //  val o : Base = if(true) ClassA(2) else ClassB(1)
+
   test("fns") {
     CompilerTests.compilerAssert {
 
-      val o = ClassA(2)
+      val o : Base = ClassA(2)
+      o.foo(2)
 
-      val m = o.foo
+//      val m = o.foo(2)
 
 //      val twice: Int => Int = (a: Int) => a + a
 //
