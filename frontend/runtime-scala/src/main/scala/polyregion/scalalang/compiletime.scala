@@ -188,7 +188,8 @@ object compiletime {
 
     // Name actual => type actual
     // configs               <- reifyConfigFromTpe[C](using q.underlying)()
-    (captures, prismRefs, monoMap, prog0, log) <- Compiler.compileExpr(f)
+    log <- Log("").success
+    (captures, prismRefs, monoMap, prog0 ) <- Compiler.compileExpr(log, f)
 
     resolveStructDef = (s: p.Type.Struct) => prog0.defs.find(_.name == s.name)
 

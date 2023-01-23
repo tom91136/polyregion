@@ -76,13 +76,55 @@ class CompilerSpec extends munit.FunSuite {
 //      f.m + f.a() + f.b(f.m) + fn0
 //    }
 //  }
+  class Base(val a: Int) {
+    def foo(n: Int): Int = a + n
+  }
+
+  class ClassA(a: Int) extends Base(a) {
+    override def foo(n: Int): Int = 42 + n + super.foo(n)
+  }
+
+  class ClassB(val b: Int) extends Base(42) {
+    override def foo(n: Int): Int = b
+  }
+
+  // struct Base   { cls: Int, a: Int          } :> ClassA;ClassB
+  // struct ClassA { cls: Int, a: Int          } <: Base
+  // struct ClassB { cls: Int, a: Int, b : Int } <: Base
+  //
+  // foo^(cls: Int, obj : Base, n : Int){ // this == Base|ClassA|ClassB, root = Base
+  //        if(cls == #Base)   return obj.to[Base]   .foo(n);
+  //   else if(cls == #ClassA) return obj.to[ClassA] .foo(n);
+  //   else if(cls == #ClassB) return obj.to[ClassB] .foo(n);
+  //   else assert
+  // }
+  //
+  // (this: Base).foo(n : Int){ // this == Base
+  //   return this.a + n;
+  // }
+  // (this: ClassA).foo(n : Int){ // this == ClassA
+  //   return 42 + n + this.to[Base].foo(n) ; // super = Base
+  // }
+  // (this: ClassB).foo(n : Int){ // this == ClassB
+  //   return this.b;
+  // }
+
+  // var x : Base = ???
+  // foo^(x.cls, x)  // x = Base|ClassA|ClassB, dynamic dispatch ^
+
+  // var x : ClassA = ???
+  // x.foo()  // x =  ClassA
 
   test("fns") {
     CompilerTests.compilerAssert {
 
-      val twice: Int => Int = (a: Int) => a + a
+      val o = ClassA(2)
 
-      twice(1)
+      val m = o.foo
+
+//      val twice: Int => Int = (a: Int) => a + a
+//
+//      twice(1)
 
     }
   }

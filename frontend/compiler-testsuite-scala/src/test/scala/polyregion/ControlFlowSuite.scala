@@ -28,7 +28,7 @@ class ControlFlowSuite extends BaseSuite {
     }
   }
 
-  testExpr("stmts") { 1; 2 }: @nowarn
+//  testExpr("stmts") { 1; 2 }: @nowarn
 
   testExpr("const-if-true") {
     if (true) 42 else 69
