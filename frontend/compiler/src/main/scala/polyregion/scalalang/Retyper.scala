@@ -46,6 +46,21 @@ object Retyper {
 
   def structName0(using q: Quoted)(clsSym: q.Symbol): p.Sym = p.Sym(clsSym.fullName)
 
+  private def deriveParents(using q: Quoted)(clsSym: q.Symbol): List[p.Sym] = {
+    // Find out the parents
+    val roots = Set(
+      q.defn.AnyClass,
+      q.defn.MatchableClass,
+      q.defn.AnyValClass,
+      q.defn.AnyRefClass,
+      q.defn.ObjectClass
+    )
+    clsSym.typeRef.baseClasses
+      .drop(1)                      // head is the class itself
+      .filterNot(roots.contains(_)) // don't want the roots
+      .map(structName0(_))
+  }
+
   def structDef0(using q: Quoted)(clsSym: q.Symbol): Result[p.StructDef] = {
     if (clsSym.flags.is(q.Flags.Abstract)) {
       throw RuntimeException(
@@ -61,19 +76,6 @@ object Retyper {
         case _               => Nil
       }
       .toMap
-
-    // Find out the parents
-    val roots = Set(
-      q.defn.AnyClass,
-      q.defn.MatchableClass,
-      q.defn.AnyValClass,
-      q.defn.AnyRefClass,
-      q.defn.ObjectClass
-    )
-    val parents = clsSym.typeRef.baseClasses
-      .drop(1)                      // head is the class itself
-      .filterNot(roots.contains(_)) // don't want the roots
-      .map(structName0(_))
 
     // XXX there appears to be a bug where an assertion error is thrown if we call the start/end (but not the pos itself)
     // of certain type of trees returned from fieldMembers
@@ -106,7 +108,7 @@ object Retyper {
         } yield sm
 
       }
-      .map(p.StructDef(p.Sym(clsSym.fullName), true, clsTypeCtorNames(clsSym), _, parents))
+      .map(p.StructDef(p.Sym(clsSym.fullName), true, clsTypeCtorNames(clsSym), _, deriveParents(clsSym)))
   }
 
   // Ctor rules
@@ -145,14 +147,17 @@ object Retyper {
   )(r: q.TypeRepr): Result[(p.Sym, List[String], q.Symbol, q.ClassKind)] = {
     println("~ " + r)
     r.dealias.simplified match {
-      case q.ThisType(tpe) => resolveClsFromTpeRepr(tpe)
+      case q.ThisType(tpe)                => resolveClsFromTpeRepr(tpe)
+      case q.SuperType(thisTpe, superTpe) => resolveClsFromTpeRepr(superTpe)
       case tpe: q.NamedType =>
         tpe.classSymbol match {
           case None                              => s"Named type is not a class: ${tpe}".fail
           case Some(sym) if sym.name == "<root>" => resolveClsFromTpeRepr(tpe.qualifier) // discard root package
           case Some(sym)                         => resolveClsFromSymbol(sym)
         }
-      case invalid => s"Not a class TypeRepr: ${invalid} (repr=${Try(invalid.show)})".fail
+      case invalid =>
+        pprint.pprintln(invalid)
+        s"Not a class TypeRepr: ${invalid} (repr=${Try(invalid.show)})".fail
     }
   }
 
@@ -170,7 +175,7 @@ object Retyper {
       case (p.Sym(Symbols.Scala :+ "Double"), q.ClassKind.Class)  => p.Type.Double
       case (p.Sym(Symbols.Scala :+ "Char"), q.ClassKind.Class)    => p.Type.Char
       // TODO type ctor args for now, need to work out type member refinements
-      case (sym, q.ClassKind.Class | q.ClassKind.Object) => p.Type.Struct(sym, tpeVars, tpeVars.map(p.Type.Var(_)), Nil)
+      case (sym, q.ClassKind.Class | q.ClassKind.Object) => p.Type.Struct(sym, tpeVars, tpeVars.map(p.Type.Var(_)), deriveParents(clsSym))
     }
 
   def clsSymTyper0(using q: Quoted)(clsSym: q.Symbol): Result[p.Type] =
@@ -263,7 +268,7 @@ object Retyper {
             case (name, kind, ctorArgs) =>
               symbol.tree match {
                 case clsDef: q.ClassDef =>
-                  val appliedTpe: p.Type.Struct = p.Type.Struct(name, tpeVars, ctorArgs.map(_._2), Nil)
+                  val appliedTpe: p.Type.Struct = p.Type.Struct(name, tpeVars, ctorArgs.map(_._2), deriveParents(symbol))
                   (None -> appliedTpe, wit |+| Map(clsDef -> Set(appliedTpe))).success
                 case _ => s"$symbol is not a ClassDef".fail
               }

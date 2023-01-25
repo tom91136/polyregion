@@ -136,7 +136,7 @@ object Remapper {
         owningClass  <- Retyper.clsSymTyper0(owningSymbol)
         (receiver, receiverTpeVars) <- owningClass match {
           case t @ p.Type.Struct(_, tpeVars, _, _) => (Some(p.Named("this", t)), tpeVars).success
-          case x                                => s"Illegal receiver: $x".fail
+          case x                                   => s"Illegal receiver: $x".fail
         }
         // Fuse receiver's tpe vars with what's explicitly defined
         fnTpeVars  = f.paramss.flatMap(_.params).collect { case q.TypeDef(name, _) => name }
@@ -240,7 +240,7 @@ object Remapper {
 
         val receiverTpeArgs = receiver.map(_.tpe).fold(Nil) {
           case p.Type.Struct(_, _, tpeArgs, _) => tpeArgs
-          case _                            => Nil
+          case _                               => Nil
         }
 
         println("@! " + sym + " " + c.invokeCaptures.get(sym))
@@ -382,25 +382,22 @@ object Remapper {
           }
         }
 
+        def mkThisVar(clsSymbol: q.Symbol) = for {
+          tpe <- Retyper.clsSymTyper0(clsSymbol) // TODO what about generics???
+          c <- (clsSymbol.tree, tpe) match {
+            case (clsDef: q.ClassDef, s @ p.Type.Struct(_, _, _, _)) if !clsSymbol.flags.is(q.Flags.Module) =>
+              c.bindThis(clsDef, s)
+            case _ => c.success
+          }
+        } yield (p.Named("this", tpe), c)
+
         // When a ref is owned by a class/object (i.e. `c.root`), we add an implicit `this` reference.
         def handleThisRef(ref: q.Ref, named: p.Named) = if (owningClassSymbol(c.root).contains(ref.symbol.maybeOwner)) {
-
           val ownerSym = ref.symbol.owner
           Some(for {
-            tpe <- Retyper.clsSymTyper0(ownerSym) // TODO what about generics???
-
-            c <- (ownerSym.tree, tpe) match {
-              case (clsDef: q.ClassDef, s @ p.Type.Struct(_, _, _, _)) if !ownerSym.flags.is(q.Flags.Module) =>
-                c.bindThis(clsDef, s)
-              case _ => c.success
-            }
-            cls = p.Named("this", tpe)
-
-            _ = println(s"ACCEPT ${tpe}")
-            // c1 = c.updateDeps(_.witness(ref.tpe.typeSymbol, tpe.asInstanceOf[p.Type.Struct]))
-            // c1 = c
-            (invoke, c) <- invokeOrSelect(c)(ref.symbol, Some(p.Term.Select(Nil, cls)))(
-              p.Term.Select(cls :: Nil, named).success
+            (thisCls, c) <- mkThisVar(ownerSym)
+            (invoke, c) <- invokeOrSelect(c)(ref.symbol, Some(p.Term.Select(Nil, thisCls)))(
+              p.Term.Select(thisCls :: Nil, named).success
             )
           } yield (invoke, c))
         } else None
@@ -473,6 +470,22 @@ object Remapper {
 
                   }
                 }
+            case select @ q.Select(q.Super(term, _), name) =>
+              // We handle `super.m` separately: https://www.scala-lang.org/files/archive/spec/2.13/06-expressions.html#this-and-super
+              // "The statically referenced member m must be a type or a method"
+              for {
+                // Here, we're certain the owner of this method (i.e the select) will be the actual super class so we just use the same
+                // logic as witnessing `this`.
+                // We discard the context here because it binds `this` to the wrong class.
+                (thisCls, _) <- mkThisVar(select.symbol.owner)
+                c <- (select.symbol.owner.tree, thisCls.tpe) match {
+                  case (clsDef: q.ClassDef, tpe: p.Type.Struct) => c.updateDeps(_.witness(clsDef, tpe)).success
+                  case (bad, tpe) => s"super class $tpe is not backed by a class tree: $bad".fail
+                }
+                (term, c) <- invokeOrSelect(c)(select.symbol, Some(p.Term.Select(Nil, thisCls)))(
+                  "illegal selection of a non DefDef symbol from super".fail
+                )
+              } yield (term, c)
             case select @ q.Select(root, name) => // we have qualifiers before the actual name
               val named = p.Named(name, tpe)
               handleThisRef(select, named)
@@ -633,7 +646,7 @@ object Remapper {
             p.Term.UnitConst,
             bodyCtx.replaceStmts(c.stmts :+ p.Stmt.While(condCtx.stmts, condTerm, bodyCtx.stmts))
           )
-        case (Nil, Nil, q.Closure(rhs, None)) => 
+        case (Nil, Nil, q.Closure(rhs, None)) =>
           println(c.invokeCaptures)
           // (p.Term.UnitConst, c).success
           // TODO delete the LHS var??

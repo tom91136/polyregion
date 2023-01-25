@@ -27,13 +27,37 @@ object VerifyPass {
             def +(n: p.Named): Ctx =
               (x._1 + n, x._2)
             def ~(error: String): Ctx = (x._1, error :: x._2)
-            def !!(n: p.Named, tree: String): Ctx =
-              if (x._1.contains(n)) x
-              else
-                (
-                  x._1,
-                  s"$tree uses the unseen variable ${n.repr}, variables defined up to point: \n\t${x._1.mkString("\n\t")}" :: x._2
-                )
+            def !!(n: p.Named, tree: String): Ctx = {
+              val (names, errors) = x
+              if (names.contains(n)) x
+              else {
+                // ok, see if the same var is defined with another type
+                (names.find(_.symbol == n.symbol), n.tpe) match {
+                  case (Some(nn@p.Named(_, p.Type.Struct(_, _, _, parents))), p.Type.Struct(name, _, _, _))
+                      // if parents.contains(name) =>
+                        =>
+
+                    println(s"@@ ${parents} -> $name ${nn} == ${n}")
+                      // A 
+                      // Base 
+                    // Ok, subtype
+                    x
+                  case (Some(existing), _) =>
+                    (
+                      names,
+                      s"$tree uses the variable ${n.repr}, but its type was already defined as ${existing.tpe.repr}, variables defined up to point: \n\t${names
+                          .mkString("\n\t")}" :: errors
+                    )
+
+                  case (None, _) =>
+                    (
+                      names,
+                      s"$tree uses the unseen variable ${n.repr}, variables defined up to point: \n\t${names.mkString("\n\t")}" :: errors
+                    )
+                }
+
+              }
+            }
           }
 
           def validateTerm(c: Ctx, t: p.Term): Ctx = t match {

@@ -15,8 +15,9 @@ object Compiler {
   import Retyper.*
 
   private val ProgramPasses: List[ProgramPass] = List(
+    DynamicDispatchPass,
     IntrinsifyPass,
-    FnInlinePass,
+//    FnInlinePass,
     VarReducePass,
     UnitExprElisionPass,
     DeadArgEliminationPass
@@ -34,8 +35,8 @@ object Compiler {
     fnArgsTpes = fnArgsTpeWithTerms.map(_._2)
     fnTypeVars = f.paramss.flatMap(_.params).collect { case q.TypeDef(name, _) => name }
     (receiver, receiverTpeVars) <- owningClass match {
-      case t @ p.Type.Struct(_, tpeVars, _,_) => (Some(t), tpeVars).success
-      case x                                => s"Illegal receiver: $x".fail
+      case t @ p.Type.Struct(_, tpeVars, _, _) => (Some(t), tpeVars).success
+      case x                                   => s"Illegal receiver: $x".fail
     }
     // TODO run outliner here
   } yield p.Signature(
@@ -102,25 +103,35 @@ object Compiler {
                 case _ :: Nil => // We have a perfect match from existing functions, no further actions needed
                   (xs, depss, clsDepss, moduleSymDepss).success
                 case Nil => // Not there, we now look at actual dependencies
+                  println(s">>>> xs=${remaining.keys.toList.map(x => x.symbol.fullName)}")
+
                   matchingSignatures(fnLut.keys, target).map(s => fnLut(s)).toList match {
                     case Nil => // We found no replacement, log it and keep going.
                       if (defDef.rhs.isEmpty) {
                         (
                           xs,
                           depss,
-                          clsDepss ,
+                          clsDepss,
                           moduleSymDepss
                         ).success
                       } else {
+                        // see if function is already there
+
                         for {
-                          log         <- log.subLog(s"Compile (no replacement): ${target.repr}").success
+                          log <- log
+                            .subLog(s"Compile (no replacement): ${target.repr} (${defDef.symbol.fullName})")
+                            .success
                           (fn0, deps) <- compileFn(log, defDef, Map.empty)
                           (fn1, wit0, clsDeps, moduleDeps) <- compileAndReplaceStructDependencies(log, fn0, deps)(
                             StdLib.StructDefs
                           )
                         } yield (
                           fn1 :: xs ::: deps.resolvedFunctions,
-                          depss ++ wit0,
+                          depss ++ wit0.filterNot(x =>
+                            deps.functions.keySet.contains(
+                              x._1
+                            ) // make sure we don't add any new dependent functions that was already in the seed; avoid compiling the same thing twice
+                          ),
                           clsDeps ++ clsDepss,
                           moduleDeps ++ moduleSymDepss
                         )
@@ -203,8 +214,8 @@ object Compiler {
       owningClass <- Retyper.clsSymTyper0(owningSymbol)
       _ = log.info(s"Method owner: $owningClass")
       (receiver, receiverTpeVars) <- owningClass match {
-        case t @ p.Type.Struct(_, tpeVars, _,_) => (Some(p.Named("this", t)), tpeVars).success
-        case x                                => s"Illegal receiver: $x".fail
+        case t @ p.Type.Struct(_, tpeVars, _, _) => (Some(p.Named("this", t)), tpeVars).success
+        case x                                   => s"Illegal receiver: $x".fail
       }
 
       allTypeVars = (receiverTpeVars ::: fnTypeVars).distinct
@@ -231,7 +242,7 @@ object Compiler {
       // if such a reference exists at all.
       _ <-
         if (rhsThisCls.exists { case (_, tpe) => tpe != owningClass })
-          s"This type mismatch ($rhsThisCls != $owningClass)".fail
+          s"In `${f.show}` ,`this` type mismatch (${rhsThisCls.map(_._2.repr)}(rhs) != ${owningClass.repr}(owner))".fail
         else ().success
 
       // Make sure we record any class witnessed from the params and return type together with rhs.
@@ -313,13 +324,15 @@ object Compiler {
 
       typeLut: Map[p.Type.Struct, p.Type.Struct] =
         replacedClasses
-          .flatMap((tpeAps, sdef) => tpeAps.map { case ap @ p.Type.Struct(_, _, ts,_) => ap -> sdef.tpe.copy(args = ts) })
+          .flatMap((tpeAps, sdef) =>
+            tpeAps.map { case ap @ p.Type.Struct(_, _, ts, _) => ap -> sdef.tpe.copy(args = ts) }
+          )
           .toMap ++ replacedModules.map((tpe, sdef) => tpe -> sdef.tpe).toMap
 
       replaceTpe = (t: p.Type) =>
         t match {
-          case s @ p.Type.Struct(_, _, _,_) => typeLut.getOrElse(s, s)
-          case t                          => t
+          case s @ p.Type.Struct(_, _, _, _) => typeLut.getOrElse(s, s)
+          case t                             => t
         }
 
       replaceTpeForTerm = (t: p.Term) =>
@@ -425,6 +438,23 @@ object Compiler {
       exprDeps.resolvedFunctions.map(_.repr).toList*
     )
 
+    // We mark all potentially required virtual methods in the universe.
+    allClassSymbols = exprDeps.classes.map(_._1.symbol).toList
+    depsWithOverrides = exprDeps.functions.flatMap { (defdef, ivks) =>
+      val symbol = defdef.symbol
+      (defdef -> ivks) :: allClassSymbols
+        .map(symbol.overridingSymbol(_))
+        .filter(s => !s.isNoSymbol && s.isDefDef)
+        .map(_.tree)
+        .collect { case x: q.DefDef => x }
+        .filter(_ != defdef) // don't add the same one again
+        .map(_ -> ivks)
+    }.toMap
+
+    exprDeps <- exprDeps
+      .copy(functions = depsWithOverrides)
+      .success
+
     // The methods in a prism will have the receiver set to the mirrored class.
     // So before we compile any dependent methods, we must first replace all struct types.
     // And since we are visiting all structures, we also compile the non-replaced ones as well.
@@ -437,6 +467,8 @@ object Compiler {
     // We got a compiled fn now, now compile all dependencies.
     (allRootDependentFns, allRootDependentStructs, allRootDependentModuleSymbols) <-
       compileAllDependencies(log, rootDependentFns, exprDeps.resolvedFunctions)(StdLib.Functions)
+
+    _ = log.info("A ", rootDependentFns.map(x => x.toString).toList*)
 
     //    log <- log.info(s"Expr+Deps Dependent methods", deps.functions.values.map(_.toString).toList*)
 //    log <- log.info(s"Expr+Deps Dependent structs", deps.classes.values.map(_.toString).toList*)

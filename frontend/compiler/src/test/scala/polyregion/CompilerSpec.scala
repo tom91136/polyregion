@@ -97,11 +97,12 @@ class CompilerSpec extends munit.FunSuite {
     override def foo(n: Int): Int = b
   }
 
-  // struct Base   { cls: Int, a: Int          } :> ClassA;ClassB
+  // struct Base   { cls: Int, a: Int          } :> ClassA;ClassB;ClassX
   // struct ClassA { cls: Int, a: Int          } <: Base
   // struct ClassB { cls: Int, a: Int, b : Int } <: Base
+  // struct ClassX { cls: Int, a, Int}           <: ClassA
   //
-  // foo^(cls: Int, obj : Base, n : Int){ // this == Base|ClassA|ClassB, root = Base
+  // foo^(cls: Int, obj : Base, n : Int){ // this == Base|ClassA|ClassB|ClassX, root = Base
   //        if(cls == #Base)   return obj.to[Base]   .foo(n);
   //   else if(cls == #ClassA) return obj.to[ClassA] .foo(n);
   //   else if(cls == #ClassB) return obj.to[ClassB] .foo(n);
@@ -112,23 +113,31 @@ class CompilerSpec extends munit.FunSuite {
   //   return this.a + n;
   // }
   // (this: ClassA).foo(n : Int){ // this == ClassA
-  //   return 42 + n + this.to[Base].foo(n) ; // super = Base
+  //   return 42 + n + (this : Base).foo(n) ; // super = Base; if(  fn.recv.tpe <:< recv ) static dispatch else dynamic
   // }
   // (this: ClassB).foo(n : Int){ // this == ClassB
   //   return this.b;
   // }
 
   // var x : Base = ???
-  // foo^(x.cls, x)  // x = Base|ClassA|ClassB, dynamic dispatch ^
+  //
+  // x.foo(123)
+  // ---
+  // foo^(x.cls, x, 123)  // x = Base|ClassA|ClassB, dynamic dispatch ^
 
   // var x : ClassA = ???
   // x.foo()  // x =  ClassA
 
   //  val o : Base = if(true) ClassA(2) else ClassB(1)
 
+  class Unrelated
+
   test("fns") {
     CompilerTests.compilerAssert {
 
+      val un = Unrelated()
+//      val m = ClassB(9)
+//      m.foo(3)
       val o : Base = ClassA(2)
       o.foo(2)
 
