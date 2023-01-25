@@ -53,7 +53,11 @@ object Retyper {
       q.defn.MatchableClass,
       q.defn.AnyValClass,
       q.defn.AnyRefClass,
-      q.defn.ObjectClass
+      q.defn.ObjectClass,
+      q.Symbol.requiredClass("java.io.Serializable"),
+      q.Symbol.requiredClass("scala.reflect.ClassManifestDeprecatedApis"),
+      q.Symbol.requiredClass("scala.reflect.OptManifest"),
+      q.Symbol.requiredClass("scala.Equals"),
     )
     clsSym.typeRef.baseClasses
       .drop(1)                      // head is the class itself

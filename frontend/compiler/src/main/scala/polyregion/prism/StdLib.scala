@@ -24,7 +24,8 @@ object StdLib {
 
   class Class[T] {}
 
-  class ClassTag[T] {
+  class ClassTag[T] { // extends scala.Equals {
+    // override def canEqual(that: Any): Boolean = true
     // TODO
   }
   object ClassTag {

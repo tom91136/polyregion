@@ -26,6 +26,7 @@ given Traversal[p.Stmt, p.Term] = Traversal.derived
 given Traversal[p.Type, p.Stmt] = Traversal.derived
 given Traversal[p.Expr, p.Stmt] = Traversal.derived
 given Traversal[p.Term, p.Stmt] = Traversal.derived
+given Traversal[p.Stmt, p.Stmt] = Traversal.derived
 
 given Traversal[p.Signature, p.Type] = Traversal.derived
 
@@ -254,7 +255,7 @@ extension (e: p.Type) {
   }
   def repr: String = e match {
     case p.Type.Struct(sym, tpeVars, args, parents) =>
-      s"@${sym.repr}${tpeVars.zipAll(args, "???", p.Type.Var("???")).map((v, a) => s"$v=${a.repr}").mkString("<", ",", ">")}"
+      s"@${sym.repr}${tpeVars.zipAll(args, "???", p.Type.Var("???")).map((v, a) => s"$v=${a.repr}").mkString("<", ",", ">")}(${parents.map(_.repr).mkString("<:")})"
     case p.Type.Array(comp) => s"Array[${comp.repr}]"
     case p.Type.Bool        => "Bool"
     case p.Type.Byte        => "Byte"

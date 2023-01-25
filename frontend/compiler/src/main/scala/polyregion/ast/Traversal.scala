@@ -17,25 +17,31 @@ object Traversal {
   import scala.compiletime.{constValue, erasedValue, summonInline}
   import scala.deriving.*
 
-  private def prod[A, B](p: Mirror.ProductOf[A], instances: => List[Traversal[?, B]]) =
+  private def prod[A, B](p: Mirror.ProductOf[A], instances: => List[Traversal[?, B]], same: => A => Option[B]) =
     new Traversal[A, B] {
       extension (a: A) {
         def collectAll: List[B] =
-          instances.zip(a.asInstanceOf[Product].productIterator).flatMap { (instance, x) =>
+          same(a).toList ::: instances.zip(a.asInstanceOf[Product].productIterator).flatMap { (instance, x) =>
             instance.asInstanceOf[Traversal[Any, B]].collectAll(x)
           }
         def collectWhere[C](f: PartialFunction[B, C]): List[C] =
-          instances.zip(a.asInstanceOf[Product].productIterator).flatMap { (instance, x) =>
-            instance.asInstanceOf[Traversal[Any, B]].collectWhere(x)(f)
+          same(a).collect(f).toList ::: instances.zip(a.asInstanceOf[Product].productIterator).flatMap {
+            (instance, x) =>
+              instance.asInstanceOf[Traversal[Any, B]].collectWhere(x)(f)
           }
         def collectFirst_[C](f: PartialFunction[B, C]): Option[C] =
-          instances.view
-            .zip(a.asInstanceOf[Product].productIterator)
-            .map((instance, x) => instance.asInstanceOf[Traversal[Any, B]].collectFirst_(x)(f))
-            .collectFirst { case Some(x) => x }
+          same(a)
+            .collect(f)
+            .orElse(
+              instances.view
+                .zip(a.asInstanceOf[Product].productIterator)
+                .map((instance, x) => instance.asInstanceOf[Traversal[Any, B]].collectFirst_(x)(f))
+                .collectFirst { case Some(x) => x }
+            )
         def modifyAll(f: B => B): A = {
+
           val xs = instances
-            .zip(a.asInstanceOf[Product].productIterator)
+            .zip(same(a).fold(a)(f).asInstanceOf[Product].productIterator)
             .map { (instance, x) =>
               instance.asInstanceOf[Traversal[Any, B]].modifyAll(x)(f)
             }
@@ -44,7 +50,7 @@ object Traversal {
         }
         def modifyCollect[C](f: B => (B, C)): (A, List[C]) = {
           val (xs, cs) = instances
-            .zip(a.asInstanceOf[Product].productIterator)
+            .zip(same(a).fold(a)(f).asInstanceOf[Product].productIterator)
             .map { (instance, x) =>
               instance.asInstanceOf[Traversal[Any, B]].modifyCollect(x)(f)
             }
@@ -75,10 +81,18 @@ object Traversal {
       }
     }
 
-  inline given derived[A, B](using inline m: Mirror.Of[A], inline ev: NotGiven[A =:= B]): Traversal[A, B] =
+  inline given derived[A, B](using inline m: Mirror.Of[A] ): Traversal[A, B] =
     inline m match {
-      case p: Mirror.ProductOf[A] => prod[A, B](p, summonAll[m.MirroredElemTypes, B])
-      case s: Mirror.SumOf[A]     => sum[A, B](s, summonAll[m.MirroredElemTypes, B].toArray)
+      case p: Mirror.ProductOf[A] =>
+        prod[A, B](
+          p,
+          summonAll[p.MirroredElemTypes, B],
+          inline erasedValue[A] match {
+            case _: B => (a: A) => Some(a.asInstanceOf[B])
+            case _    => (a: A) => None
+          }
+        )
+      case s: Mirror.SumOf[A] => sum[A, B](s, summonAll[m.MirroredElemTypes, B].toArray)
     }
 
   extension [A](a: A) {
@@ -111,19 +125,19 @@ object Traversal {
     }
   }
 
-  // eq case
-  inline given [B]: Traversal[B, B] = new Traversal[B, B] {
-    extension (a: B) {
-      def collectAll: List[B]                                   = a :: Nil
-      def collectWhere[C](f: PartialFunction[B, C]): List[C]    = f.lift(a).toList
-      def collectFirst_[C](f: PartialFunction[B, C]): Option[C] = f.lift(a)
-      def modifyAll(f: B => B): B                               = f(a)
-      def modifyCollect[C](f: B => (B, C)): (B, List[C]) = {
-        val (b, c) = f(a)
-        (b, c :: Nil)
-      }
-    }
-  }
+  // // eq case
+  // inline given [B]: Traversal[B, B] = new Traversal[B, B] {
+  //   extension (a: B) {
+  //     def collectAll: List[B]                                   = a :: Nil
+  //     def collectWhere[C](f: PartialFunction[B, C]): List[C]    = f.lift(a).toList
+  //     def collectFirst_[C](f: PartialFunction[B, C]): Option[C] = f.lift(a)
+  //     def modifyAll(f: B => B): B                               = f(a)
+  //     def modifyCollect[C](f: B => (B, C)): (B, List[C]) = {
+  //       val (b, c) = f(a)
+  //       (b, c :: Nil)
+  //     }
+  //   }
+  // }
 
   inline given [A, B](using inline t: Traversal[A, B]): Traversal[List[A], B] = new Traversal[List[A], B] {
     extension (xs: List[A]) {

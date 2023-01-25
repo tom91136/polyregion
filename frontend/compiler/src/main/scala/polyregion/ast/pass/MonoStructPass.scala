@@ -72,7 +72,7 @@ object MonoStructPass extends BoundaryPass[Map[p.Sym, p.Sym]] {
       replacementTable.map((struct, sdef) => sdef.name -> struct.name),
       p.Program(
         entry = program.entry.modifyAll[p.Type](doReplacement(_)),
-        functions = program.functions,
+        functions = program.functions.map(_.modifyAll[p.Type](doReplacement(_))),
         defs = rootStructDefs ++ referencedStructDefs
       )
     )

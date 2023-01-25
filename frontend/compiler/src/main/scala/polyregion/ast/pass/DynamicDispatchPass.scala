@@ -51,7 +51,7 @@ object DynamicDispatchPass extends ProgramPass {
         val clsTagArg = p.Named("cls", p.Type.Int)
         val objArg    = p.Named("obj", c.tpe)
 
-        val branches = Function.chain(((c.tpe, baseFn) :: overridingFns).map { (tpe, fn) => (elseBr: p.Stmt) =>
+        val branches = Function.chain(((c.tpe, baseFn) :: overridingFns).map { (tpe, fn) => (elseBr: List[p.Stmt]) =>
           p.Stmt.Cond(
             cond = p.Expr.BinaryIntrinsic(
               p.Term.Select(Nil, clsTagArg),
@@ -70,9 +70,26 @@ object DynamicDispatchPass extends ProgramPass {
                   rtn = baseFn.rtn
                 )
               ) :: Nil,
-            falseBr = elseBr :: Nil
-          )
-        })(p.Stmt.Comment("Assert"))
+            falseBr = elseBr
+          ) :: Nil
+        })
+
+        val assertRtn = baseFn.rtn match {
+          case p.Type.Float                                => p.Term.FloatConst(0)
+          case p.Type.Double                               => p.Term.DoubleConst(0)
+          case p.Type.Bool                                 => p.Term.BoolConst(true)
+          case p.Type.Byte                                 => p.Term.ByteConst(0)
+          case p.Type.Char                                 => p.Term.CharConst(0)
+          case p.Type.Short                                => p.Term.ShortConst(0)
+          case p.Type.Int                                  => p.Term.IntConst(0)
+          case p.Type.Long                                 => p.Term.LongConst(0)
+          case p.Type.Unit                                 => p.Term.UnitConst
+          case p.Type.Nothing                              => ???
+          case p.Type.Struct(name, tpeVars, args, parents) => ???
+          case p.Type.Array(component)                     => ???
+          case p.Type.Var(name)                            => ???
+          case p.Type.Exec(tpeVars, args, rtn)             => ???
+        }
 
         p.Function(
           name = p.Sym(s"$simpleName^"),
@@ -82,7 +99,7 @@ object DynamicDispatchPass extends ProgramPass {
           moduleCaptures = Nil,
           termCaptures = Nil,
           rtn = baseFn.rtn,
-          body = branches :: Nil
+          body = branches(p.Stmt.Comment("Assert") :: p.Stmt.Return(p.Expr.Alias(assertRtn)) :: Nil)
         )
       }
     }
@@ -91,7 +108,8 @@ object DynamicDispatchPass extends ProgramPass {
 
     // Base, A, B
 
-    program.copy(entry = run(program.entry))
+    program.copy(entry = run(program.entry), functions = program.functions ::: fs)
+    // program
   }
 
 }

@@ -249,6 +249,10 @@ object compiletime {
               reflectedSigWithSourceTpes = reflectedSig
                 .copy(name = p.Sym(sourceName)) // We also replace the name to use the source ones.
                 .modifyAll[p.Type](_.mapNode(replaceTypes(mirrorToSourceTable)(_)))
+                .modifyAll[p.Type] {
+                  case s: p.Type.Struct => s.copy(parents = Nil)
+                  case x                => x
+                }
 
               sourceSigs <- sources.traverse((sourceSym, sourceDef) =>
                 Compiler.deriveSignature(sourceDef).map(sourceSym -> _)
@@ -257,9 +261,14 @@ object compiletime {
               r <- sourceSigs.filter { case (_, sourceSig) =>
                 // FIXME Removing the receiver for now because it may be impossible to mirror a private type.
                 //  Doing this may make the overload resolution less accurate.
-                //  We also discard the generic types here, to handle cases like Seq[A] =:= SeqOpt[A, CC[_], C]
+                //  We also discard the generic types here, to handle cases like Seq[A] =:= SeqOp[A, CC[_], C]
 
-                sourceSig.copy(receiver = None, tpeVars = Nil) ==
+                sourceSig
+                  .copy(receiver = None, tpeVars = Nil)
+                  .modifyAll[p.Type] {
+                    case s: p.Type.Struct => s.copy(parents = Nil)
+                    case x                => x
+                  } ==
                   reflectedSigWithSourceTpes.copy(receiver = None, tpeVars = Nil)
               } match {
                 case sourceMirror :: Nil => // single match

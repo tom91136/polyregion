@@ -171,7 +171,11 @@ object VerifyPass {
 //              .mkString("\n\t")} \n${f.repr}\n${errors.map(e => s"  -> $e").mkString("\n")}")
 //          }
 
-          varCollisions ++ errors ++ (xs.collectWhere[p.Stmt] { case p.Stmt.Return(e) => e.tpe } match {
+
+          val xxx = f.collectAll [p.Stmt]
+          println(s"~~~ ${xxx.map(_.repr).mkString("\n")}")
+
+          varCollisions ++ errors ++ (f.collectWhere[p.Stmt] { case p.Stmt.Return(e) => e.tpe } match {
             case Nil => List("Function contains no return statements")
             case ts if ts.exists(_ != f.rtn) =>
               List(
