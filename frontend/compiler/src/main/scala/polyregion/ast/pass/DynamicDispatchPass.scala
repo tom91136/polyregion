@@ -41,7 +41,7 @@ object DynamicDispatchPass extends ProgramPass {
       // Find all subclasses first
       val children = program.defs.filter(_.parents.contains(c.name))
       // Then, for each method in the base class, see if it has overrides from any subclass
-      clsFns(c.tpe).map { baseFn =>
+      clsFns(c.tpe).flatMap { baseFn =>
         val simpleName = baseFn.name.last
         val overridingFns = children.flatMap { c =>
           val recvTpe = c.tpe
@@ -51,60 +51,64 @@ object DynamicDispatchPass extends ProgramPass {
         val clsTagArg = p.Named("cls", p.Type.Int)
         val objArg    = p.Named("obj", c.tpe)
 
-        val branches = Function.chain(((c.tpe, baseFn) :: overridingFns).map { (tpe, fn) => (elseBr: List[p.Stmt]) =>
-          p.Stmt.Cond(
-            cond = p.Expr.BinaryIntrinsic(
-              p.Term.Select(Nil, clsTagArg),
-              p.Term.IntConst(clsTag(tpe)),
-              p.BinaryIntrinsicKind.LogicEq,
-              p.Type.Bool
-            ),
-            trueBr = p.Stmt.Var(p.Named("recv", tpe), Some(p.Expr.Cast(p.Term.Select(Nil, objArg), tpe))) ::
-              p.Stmt.Return(
-                p.Expr.Invoke(
-                  name = fn.name,
-                  tpeArgs = baseFn.tpeVars.map(p.Type.Var(_)),
-                  receiver = Some(p.Term.Select(Nil, p.Named("recv", tpe))),
-                  args = baseFn.args.map(p.Term.Select(Nil, _)),
-                  captures = Nil,
-                  rtn = baseFn.rtn
-                )
-              ) :: Nil,
-            falseBr = elseBr
+        if(overridingFns.isEmpty) Nil
+        else {
+
+          val branches = Function.chain(((c.tpe, baseFn) :: overridingFns).zipWithIndex.map { case ( (tpe, fn), i) => (elseBr: List[p.Stmt]) =>
+            p.Stmt.Cond(
+              cond = p.Expr.BinaryIntrinsic(
+                p.Term.Select(Nil, clsTagArg),
+                p.Term.IntConst(clsTag(tpe)),
+                p.BinaryIntrinsicKind.LogicEq,
+                p.Type.Bool
+              ),
+              trueBr = p.Stmt.Var(p.Named(s"recv_$i", tpe), Some(p.Expr.Cast(p.Term.Select(Nil, objArg), tpe))) ::
+                       p.Stmt.Return(
+                         p.Expr.Invoke(
+                           name = fn.name,
+                           tpeArgs = baseFn.tpeVars.map(p.Type.Var(_)),
+                           receiver = Some(p.Term.Select(Nil, p.Named(s"recv_$i", tpe))),
+                           args = baseFn.args.map(p.Term.Select(Nil, _)),
+                           captures = Nil,
+                           rtn = baseFn.rtn
+                         )
+                       ) :: Nil,
+              falseBr = elseBr
+            ) :: Nil
+          })
+
+          val assertRtn = baseFn.rtn match {
+            case p.Type.Float                                => p.Term.FloatConst(0)
+            case p.Type.Double                               => p.Term.DoubleConst(0)
+            case p.Type.Bool                                 => p.Term.BoolConst(true)
+            case p.Type.Byte                                 => p.Term.ByteConst(0)
+            case p.Type.Char                                 => p.Term.CharConst(0)
+            case p.Type.Short                                => p.Term.ShortConst(0)
+            case p.Type.Int                                  => p.Term.IntConst(0)
+            case p.Type.Long                                 => p.Term.LongConst(0)
+            case p.Type.Unit                                 => p.Term.UnitConst
+            case p.Type.Nothing                              => ???
+            case p.Type.Struct(name, tpeVars, args, parents) => ???
+            case p.Type.Array(component)                     => ???
+            case p.Type.Var(name)                            => ???
+            case p.Type.Exec(tpeVars, args, rtn)             => ???
+          }
+
+          p.Function(
+            name = p.Sym(s"$simpleName^"),
+            tpeVars = baseFn.tpeVars,
+            receiver = None,
+            args = clsTagArg :: objArg :: baseFn.args,
+            moduleCaptures = Nil,
+            termCaptures = Nil,
+            rtn = baseFn.rtn,
+            body = branches(p.Stmt.Comment("Assert") :: p.Stmt.Return(p.Expr.Alias(assertRtn)) :: Nil)
           ) :: Nil
-        })
-
-        val assertRtn = baseFn.rtn match {
-          case p.Type.Float                                => p.Term.FloatConst(0)
-          case p.Type.Double                               => p.Term.DoubleConst(0)
-          case p.Type.Bool                                 => p.Term.BoolConst(true)
-          case p.Type.Byte                                 => p.Term.ByteConst(0)
-          case p.Type.Char                                 => p.Term.CharConst(0)
-          case p.Type.Short                                => p.Term.ShortConst(0)
-          case p.Type.Int                                  => p.Term.IntConst(0)
-          case p.Type.Long                                 => p.Term.LongConst(0)
-          case p.Type.Unit                                 => p.Term.UnitConst
-          case p.Type.Nothing                              => ???
-          case p.Type.Struct(name, tpeVars, args, parents) => ???
-          case p.Type.Array(component)                     => ???
-          case p.Type.Var(name)                            => ???
-          case p.Type.Exec(tpeVars, args, rtn)             => ???
         }
-
-        p.Function(
-          name = p.Sym(s"$simpleName^"),
-          tpeVars = baseFn.tpeVars,
-          receiver = None,
-          args = clsTagArg :: objArg :: baseFn.args,
-          moduleCaptures = Nil,
-          termCaptures = Nil,
-          rtn = baseFn.rtn,
-          body = branches(p.Stmt.Comment("Assert") :: p.Stmt.Return(p.Expr.Alias(assertRtn)) :: Nil)
-        )
       }
     }
 
-    println(fs.map(_.repr).mkString("\n======\n"))
+
 
     // Base, A, B
 

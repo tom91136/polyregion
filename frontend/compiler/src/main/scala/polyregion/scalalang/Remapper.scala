@@ -71,7 +71,7 @@ object Remapper {
           (name, c)        <- c.mkName(tree.symbol).success
           (term -> tpe, c) <- c.typerAndWitness(tpeTree.tpe)
           // if tpe is singleton, substitute with constant directly
-          (ref, c) <- term.fold((c !! tree).mapTerm(rhs))(x => (x, c).success)
+          (ref, c) <- term.fold((c !! tree).mapTerm(rhs, Some(tpe)))(x => (x, c).success)
           // term
         } yield (
           p.Term.UnitConst,
@@ -153,7 +153,7 @@ object Remapper {
               c <- c
                 .copy(depth = 0, stmts = Nil, thisCls = None)
                 .success
-              (term, c)         <- c.mapTerm(rhs, allTpeArgs.map(p.Type.Var(_)))
+              (term, c)         <- c.mapTerm(rhs, Some(fnRtnTpe), allTpeArgs.map(p.Type.Var(_)))
               ((_, termTpe), _) <- Retyper.typer0(rhs.tpe)
               _ <-
                 if (termTpe == term.tpe) ().success
@@ -507,6 +507,7 @@ object Remapper {
 
     def mapTerm(
         term: q.Term,
+        eventualTpe: Option[p.Type] = None,
         tpeArgs: List[p.Type] = Nil,
         termArgss: List[List[p.Term]] = Nil
     ): Result[(p.Term, q.RemapContext)] = {
@@ -624,18 +625,36 @@ object Remapper {
             _ <-
               if (condTerm.tpe != p.Type.Bool) s"Cond must be a Bool ref, got ${condTerm}".fail
               else ().success
-            cond <- (thenTerm, elseTerm) match {
-              case (thenTerm, elseTerm) if thenTerm.tpe == tpe && elseTerm.tpe == tpe =>
-                val name   = ifCtx.named(tpe)
-                val result = p.Stmt.Var(name, None)
-                val cond = p.Stmt.Cond(
-                  p.Expr.Alias(condTerm),
-                  thenCtx.stmts :+ p.Stmt.Mut(p.Term.Select(Nil, name), p.Expr.Alias(thenTerm), copy = false),
-                  elseCtx.stmts :+ p.Stmt.Mut(p.Term.Select(Nil, name), p.Expr.Alias(elseTerm), copy = false)
-                )
-                (p.Term.Select(Nil, name), elseCtx.replaceStmts(ifCtx.stmts :+ result :+ cond)).success
+
+            mkCondStmts = (tpe : p.Type) => {
+              val name   = ifCtx.named(tpe)
+              val result = p.Stmt.Var(name, None)
+              val cond = p.Stmt.Cond(
+                p.Expr.Alias(condTerm),
+                thenCtx.stmts :+ p.Stmt.Mut(p.Term.Select(Nil, name), p.Expr.Alias(thenTerm), copy = false),
+                elseCtx.stmts :+ p.Stmt.Mut(p.Term.Select(Nil, name), p.Expr.Alias(elseTerm), copy = false)
+              )
+              (p.Term.Select(Nil, name), elseCtx.replaceStmts(ifCtx.stmts :+ result :+ cond)).success
+            }
+
+            // See https://dotty.epfl.ch/docs/reference/new-types/union-types-spec.html#erasure
+            // If we encounter a union type on the RHS and a struct on the LHS, use the struct type
+            // TODO synthesise coproduct proxy on the spot for unions
+            cond <- (thenTerm.tpe, elseTerm.tpe, eventualTpe) match {
+              case (`tpe`, `tpe`, _) => // Same on both side, perfect
+                mkCondStmts(tpe)
+
+              case (
+                    p.Type.Struct(_, _, _, thenTpeParents),
+                    p.Type.Struct(_, _, _, elseTpeParents),
+                    Some(widened@p.Type.Struct(name, _, _, _))
+                  ) if thenTpeParents.contains(name) && elseTpeParents.contains(name) =>
+                // We got a something like:
+                // `val a : Base = if(???) ClassA() else ClassB() # ClassA <: Base, ClassB <: Base`
+                // Where the eventual type is widened by the Scala compiler
+                mkCondStmts(widened)
               case _ =>
-                s"condition unification failure, then=${thenTerm} else=${elseTerm}, expr tpe=${tpe}".fail
+                s"condition unification failure, then=${thenTerm.repr} else=${elseTerm.repr}, expr tpe=${tpe.repr} actual=${term.tpe.widen.simplified.show}".fail
             }
           } yield cond
         case (Nil, Nil, q.While(cond, body)) => // loop: `while($cond) {$body...}`

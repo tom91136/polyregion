@@ -18,14 +18,12 @@ namespace Expr {
 [[nodiscard]] EXPORT json cast_to_json(const Expr::Cast &);
 [[nodiscard]] EXPORT Expr::Alias alias_from_json(const json &);
 [[nodiscard]] EXPORT json alias_to_json(const Expr::Alias &);
-[[nodiscard]] EXPORT Expr::Invoke invoke_from_json(const json &);
-[[nodiscard]] EXPORT json invoke_to_json(const Expr::Invoke &);
 [[nodiscard]] EXPORT Expr::Index index_from_json(const json &);
 [[nodiscard]] EXPORT json index_to_json(const Expr::Index &);
 [[nodiscard]] EXPORT Expr::Alloc alloc_from_json(const json &);
 [[nodiscard]] EXPORT json alloc_to_json(const Expr::Alloc &);
-[[nodiscard]] EXPORT Expr::Suspend suspend_from_json(const json &);
-[[nodiscard]] EXPORT json suspend_to_json(const Expr::Suspend &);
+[[nodiscard]] EXPORT Expr::Invoke invoke_from_json(const json &);
+[[nodiscard]] EXPORT json invoke_to_json(const Expr::Invoke &);
 [[nodiscard]] EXPORT Expr::Any any_from_json(const json &);
 [[nodiscard]] EXPORT json any_to_json(const Expr::Any &);
 } // namespace Expr

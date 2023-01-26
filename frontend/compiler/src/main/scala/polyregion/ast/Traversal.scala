@@ -1,7 +1,7 @@
 package polyregion.ast
 
-import scala.util.NotGiven
 import scala.annotation.targetName
+import scala.util.NotGiven
 
 trait Traversal[A, B] {
   extension (a: A) {
@@ -39,24 +39,28 @@ object Traversal {
                 .collectFirst { case Some(x) => x }
             )
         def modifyAll(f: B => B): A = {
-
           val xs = instances
-            .zip(same(a).fold(a)(f).asInstanceOf[Product].productIterator)
+            .zip(a.asInstanceOf[Product].productIterator)
             .map { (instance, x) =>
               instance.asInstanceOf[Traversal[Any, B]].modifyAll(x)(f)
             }
             .toArray
-          p.fromProduct(Tuple.fromArray(xs))
+          val a0 = p.fromProduct(Tuple.fromArray(xs))
+          same(a0).fold(a0)(f(_).asInstanceOf[A])
         }
         def modifyCollect[C](f: B => (B, C)): (A, List[C]) = {
           val (xs, cs) = instances
-            .zip(same(a).fold(a)(f).asInstanceOf[Product].productIterator)
+            .zip(a.asInstanceOf[Product].productIterator)
             .map { (instance, x) =>
               instance.asInstanceOf[Traversal[Any, B]].modifyCollect(x)(f)
             }
             .toArray
             .unzip
-          (p.fromProduct(Tuple.fromArray(xs)), cs.toList.flatten)
+          val a0 = p.fromProduct(Tuple.fromArray(xs))
+          same(a0).fold((a0, cs.toList.flatten)) { x =>
+            val (b0, c0) = f(x)
+            (b0.asInstanceOf[A], c0 :: cs.toList.flatten)
+          }
         }
       }
     }
@@ -81,15 +85,15 @@ object Traversal {
       }
     }
 
-  inline given derived[A, B](using inline m: Mirror.Of[A] ): Traversal[A, B] =
+  inline given derived[A, B](using inline m: Mirror.Of[A]): Traversal[A, B] =
     inline m match {
       case p: Mirror.ProductOf[A] =>
         prod[A, B](
           p,
           summonAll[p.MirroredElemTypes, B],
-          inline erasedValue[A] match {
-            case _: B => (a: A) => Some(a.asInstanceOf[B])
-            case _    => (a: A) => None
+          inline (erasedValue[A], erasedValue[B]) match {
+            case (_: B, _) => (a: A) => Some(a.asInstanceOf[B])
+            case _         => (a: A) => None
           }
         )
       case s: Mirror.SumOf[A] => sum[A, B](s, summonAll[m.MirroredElemTypes, B].toArray)

@@ -26,7 +26,7 @@ template <typename P> static void assertCompilationSucceeded(const P &p) {
 TEST_CASE("run", "[backend]") {
   polyregion::compiler::initialise();
 
-  Function fn(Sym({"foo"}), {}, {}, {}, {}, Type::Unit(),
+  Function fn(Sym({"foo"}), {}, {}, {}, {}, {}, Type::Unit(),
               {
 
                   Var(Named("a", Type::Int()), {Alias(IntConst(42))}),

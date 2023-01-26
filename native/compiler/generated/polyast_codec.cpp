@@ -167,7 +167,10 @@ Type::Struct Type::struct_from_json(const json& j) {
   std::vector<Type::Any> args;
   auto args_json = j.at(2);
   std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &Type::any_from_json);
-  return {name, tpeVars, args};
+  std::vector<Sym> parents;
+  auto parents_json = j.at(3);
+  std::transform(parents_json.begin(), parents_json.end(), std::back_inserter(parents), &sym_from_json);
+  return {name, tpeVars, args, parents};
 }
 
 json Type::struct_to_json(const Type::Struct& x) { 
@@ -175,7 +178,9 @@ json Type::struct_to_json(const Type::Struct& x) {
   auto tpeVars = x.tpeVars;
   std::vector<json> args;
   std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &Type::any_to_json);
-  return json::array({name, tpeVars, args});
+  std::vector<json> parents;
+  std::transform(x.parents.begin(), x.parents.end(), std::back_inserter(parents), &sym_to_json);
+  return json::array({name, tpeVars, args, parents});
 }
 
 Type::Array Type::array_from_json(const json& j) { 
@@ -1226,30 +1231,6 @@ json Expr::alias_to_json(const Expr::Alias& x) {
   return json::array({ref});
 }
 
-Expr::Invoke Expr::invoke_from_json(const json& j) { 
-  auto name =  sym_from_json(j.at(0));
-  std::vector<Type::Any> tpeArgs;
-  auto tpeArgs_json = j.at(1);
-  std::transform(tpeArgs_json.begin(), tpeArgs_json.end(), std::back_inserter(tpeArgs), &Type::any_from_json);
-  auto receiver = j.at(2).is_null() ? std::nullopt : std::make_optional(Term::any_from_json(j.at(2)));
-  std::vector<Term::Any> args;
-  auto args_json = j.at(3);
-  std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &Term::any_from_json);
-  auto rtn =  Type::any_from_json(j.at(4));
-  return {name, tpeArgs, receiver, args, rtn};
-}
-
-json Expr::invoke_to_json(const Expr::Invoke& x) { 
-  auto name =  sym_to_json(x.name);
-  std::vector<json> tpeArgs;
-  std::transform(x.tpeArgs.begin(), x.tpeArgs.end(), std::back_inserter(tpeArgs), &Type::any_to_json);
-  auto receiver = x.receiver ? Term::any_to_json(*x.receiver) : json{};
-  std::vector<json> args;
-  std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &Term::any_to_json);
-  auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({name, tpeArgs, receiver, args, rtn});
-}
-
 Expr::Index Expr::index_from_json(const json& j) { 
   auto lhs =  Term::any_from_json(j.at(0));
   auto idx =  Term::any_from_json(j.at(1));
@@ -1276,26 +1257,33 @@ json Expr::alloc_to_json(const Expr::Alloc& x) {
   return json::array({component, size});
 }
 
-Expr::Suspend Expr::suspend_from_json(const json& j) { 
-  std::vector<Named> args;
-  auto args_json = j.at(0);
-  std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &named_from_json);
-  std::vector<Stmt::Any> stmts;
-  auto stmts_json = j.at(1);
-  std::transform(stmts_json.begin(), stmts_json.end(), std::back_inserter(stmts), &Stmt::any_from_json);
-  auto rtn =  Type::any_from_json(j.at(2));
-  auto shape =  Type::exec_from_json(j.at(3));
-  return {args, stmts, rtn, shape};
+Expr::Invoke Expr::invoke_from_json(const json& j) { 
+  auto name =  sym_from_json(j.at(0));
+  std::vector<Type::Any> tpeArgs;
+  auto tpeArgs_json = j.at(1);
+  std::transform(tpeArgs_json.begin(), tpeArgs_json.end(), std::back_inserter(tpeArgs), &Type::any_from_json);
+  auto receiver = j.at(2).is_null() ? std::nullopt : std::make_optional(Term::any_from_json(j.at(2)));
+  std::vector<Term::Any> args;
+  auto args_json = j.at(3);
+  std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &Term::any_from_json);
+  std::vector<Term::Any> captures;
+  auto captures_json = j.at(4);
+  std::transform(captures_json.begin(), captures_json.end(), std::back_inserter(captures), &Term::any_from_json);
+  auto rtn =  Type::any_from_json(j.at(5));
+  return {name, tpeArgs, receiver, args, captures, rtn};
 }
 
-json Expr::suspend_to_json(const Expr::Suspend& x) { 
+json Expr::invoke_to_json(const Expr::Invoke& x) { 
+  auto name =  sym_to_json(x.name);
+  std::vector<json> tpeArgs;
+  std::transform(x.tpeArgs.begin(), x.tpeArgs.end(), std::back_inserter(tpeArgs), &Type::any_to_json);
+  auto receiver = x.receiver ? Term::any_to_json(*x.receiver) : json{};
   std::vector<json> args;
-  std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &named_to_json);
-  std::vector<json> stmts;
-  std::transform(x.stmts.begin(), x.stmts.end(), std::back_inserter(stmts), &Stmt::any_to_json);
+  std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &Term::any_to_json);
+  std::vector<json> captures;
+  std::transform(x.captures.begin(), x.captures.end(), std::back_inserter(captures), &Term::any_to_json);
   auto rtn =  Type::any_to_json(x.rtn);
-  auto shape =  Type::exec_to_json(x.shape);
-  return json::array({args, stmts, rtn, shape});
+  return json::array({name, tpeArgs, receiver, args, captures, rtn});
 }
 
 Expr::Any Expr::any_from_json(const json& j) { 
@@ -1307,10 +1295,9 @@ Expr::Any Expr::any_from_json(const json& j) {
   case 2: return Expr::binaryintrinsic_from_json(t);
   case 3: return Expr::cast_from_json(t);
   case 4: return Expr::alias_from_json(t);
-  case 5: return Expr::invoke_from_json(t);
-  case 6: return Expr::index_from_json(t);
-  case 7: return Expr::alloc_from_json(t);
-  case 8: return Expr::suspend_from_json(t);
+  case 5: return Expr::index_from_json(t);
+  case 6: return Expr::alloc_from_json(t);
+  case 7: return Expr::invoke_from_json(t);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
   }
 }
@@ -1322,10 +1309,9 @@ json Expr::any_to_json(const Expr::Any& x) {
   [](const Expr::BinaryIntrinsic &y) -> json { return {2, Expr::binaryintrinsic_to_json(y)}; },
   [](const Expr::Cast &y) -> json { return {3, Expr::cast_to_json(y)}; },
   [](const Expr::Alias &y) -> json { return {4, Expr::alias_to_json(y)}; },
-  [](const Expr::Invoke &y) -> json { return {5, Expr::invoke_to_json(y)}; },
-  [](const Expr::Index &y) -> json { return {6, Expr::index_to_json(y)}; },
-  [](const Expr::Alloc &y) -> json { return {7, Expr::alloc_to_json(y)}; },
-  [](const Expr::Suspend &y) -> json { return {8, Expr::suspend_to_json(y)}; },
+  [](const Expr::Index &y) -> json { return {5, Expr::index_to_json(y)}; },
+  [](const Expr::Alloc &y) -> json { return {6, Expr::alloc_to_json(y)}; },
+  [](const Expr::Invoke &y) -> json { return {7, Expr::invoke_to_json(y)}; },
   [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
   }, *x);
 }
@@ -1497,7 +1483,10 @@ StructDef structdef_from_json(const json& j) {
   std::vector<StructMember> members;
   auto members_json = j.at(3);
   std::transform(members_json.begin(), members_json.end(), std::back_inserter(members), &structmember_from_json);
-  return {name, isReference, tpeVars, members};
+  std::vector<Sym> parents;
+  auto parents_json = j.at(4);
+  std::transform(parents_json.begin(), parents_json.end(), std::back_inserter(parents), &sym_from_json);
+  return {name, isReference, tpeVars, members, parents};
 }
 
 json structdef_to_json(const StructDef& x) { 
@@ -1506,7 +1495,9 @@ json structdef_to_json(const StructDef& x) {
   auto tpeVars = x.tpeVars;
   std::vector<json> members;
   std::transform(x.members.begin(), x.members.end(), std::back_inserter(members), &structmember_to_json);
-  return json::array({name, isReference, tpeVars, members});
+  std::vector<json> parents;
+  std::transform(x.parents.begin(), x.parents.end(), std::back_inserter(parents), &sym_to_json);
+  return json::array({name, isReference, tpeVars, members, parents});
 }
 
 Signature signature_from_json(const json& j) { 
@@ -1516,8 +1507,14 @@ Signature signature_from_json(const json& j) {
   std::vector<Type::Any> args;
   auto args_json = j.at(3);
   std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &Type::any_from_json);
-  auto rtn =  Type::any_from_json(j.at(4));
-  return {name, tpeVars, receiver, args, rtn};
+  std::vector<Type::Any> moduleCaptures;
+  auto moduleCaptures_json = j.at(4);
+  std::transform(moduleCaptures_json.begin(), moduleCaptures_json.end(), std::back_inserter(moduleCaptures), &Type::any_from_json);
+  std::vector<Type::Any> termCaptures;
+  auto termCaptures_json = j.at(5);
+  std::transform(termCaptures_json.begin(), termCaptures_json.end(), std::back_inserter(termCaptures), &Type::any_from_json);
+  auto rtn =  Type::any_from_json(j.at(6));
+  return {name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn};
 }
 
 json signature_to_json(const Signature& x) { 
@@ -1526,8 +1523,12 @@ json signature_to_json(const Signature& x) {
   auto receiver = x.receiver ? Type::any_to_json(*x.receiver) : json{};
   std::vector<json> args;
   std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &Type::any_to_json);
+  std::vector<json> moduleCaptures;
+  std::transform(x.moduleCaptures.begin(), x.moduleCaptures.end(), std::back_inserter(moduleCaptures), &Type::any_to_json);
+  std::vector<json> termCaptures;
+  std::transform(x.termCaptures.begin(), x.termCaptures.end(), std::back_inserter(termCaptures), &Type::any_to_json);
   auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({name, tpeVars, receiver, args, rtn});
+  return json::array({name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn});
 }
 
 Function function_from_json(const json& j) { 
@@ -1537,14 +1538,17 @@ Function function_from_json(const json& j) {
   std::vector<Named> args;
   auto args_json = j.at(3);
   std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &named_from_json);
-  std::vector<Named> captures;
-  auto captures_json = j.at(4);
-  std::transform(captures_json.begin(), captures_json.end(), std::back_inserter(captures), &named_from_json);
-  auto rtn =  Type::any_from_json(j.at(5));
+  std::vector<Named> moduleCaptures;
+  auto moduleCaptures_json = j.at(4);
+  std::transform(moduleCaptures_json.begin(), moduleCaptures_json.end(), std::back_inserter(moduleCaptures), &named_from_json);
+  std::vector<Named> termCaptures;
+  auto termCaptures_json = j.at(5);
+  std::transform(termCaptures_json.begin(), termCaptures_json.end(), std::back_inserter(termCaptures), &named_from_json);
+  auto rtn =  Type::any_from_json(j.at(6));
   std::vector<Stmt::Any> body;
-  auto body_json = j.at(6);
+  auto body_json = j.at(7);
   std::transform(body_json.begin(), body_json.end(), std::back_inserter(body), &Stmt::any_from_json);
-  return {name, tpeVars, receiver, args, captures, rtn, body};
+  return {name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, body};
 }
 
 json function_to_json(const Function& x) { 
@@ -1553,12 +1557,14 @@ json function_to_json(const Function& x) {
   auto receiver = x.receiver ? named_to_json(*x.receiver) : json{};
   std::vector<json> args;
   std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &named_to_json);
-  std::vector<json> captures;
-  std::transform(x.captures.begin(), x.captures.end(), std::back_inserter(captures), &named_to_json);
+  std::vector<json> moduleCaptures;
+  std::transform(x.moduleCaptures.begin(), x.moduleCaptures.end(), std::back_inserter(moduleCaptures), &named_to_json);
+  std::vector<json> termCaptures;
+  std::transform(x.termCaptures.begin(), x.termCaptures.end(), std::back_inserter(termCaptures), &named_to_json);
   auto rtn =  Type::any_to_json(x.rtn);
   std::vector<json> body;
   std::transform(x.body.begin(), x.body.end(), std::back_inserter(body), &Stmt::any_to_json);
-  return json::array({name, tpeVars, receiver, args, captures, rtn, body});
+  return json::array({name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, body});
 }
 
 Program program_from_json(const json& j) { 
@@ -1583,13 +1589,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "0f6d7f81e37594baa7f2cec99414cc3f") {
-   throw std::runtime_error("Expecting ADT hash to be 0f6d7f81e37594baa7f2cec99414cc3f, but was " + hash);
+  if(hash != "d74b5ae71ae9da4f0833e2b485786063") {
+   throw std::runtime_error("Expecting ADT hash to be d74b5ae71ae9da4f0833e2b485786063, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"0f6d7f81e37594baa7f2cec99414cc3f", x});
+  return json::array({"d74b5ae71ae9da4f0833e2b485786063", x});
 }
 } // namespace polyregion::polyast

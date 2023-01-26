@@ -90,7 +90,7 @@ lazy val compiler = project
     javacOptions ++= Seq("-proc:none"),
     scalacOptions ++=
       Seq("-Yretain-trees") ++     // XXX we need this so that the AST -> C++ conversion with partial ctors work
-        Seq("-Xmax-inlines", "48") // the AST has lots of leaf nodes and we use inline so bump the limit
+        Seq("-Xmax-inlines", "40") // the AST has lots of leaf nodes and we use inline so bump the limit
     ,
     libraryDependencies ++= Seq(
       "net.bytebuddy"  % "byte-buddy" % "1.12.21",

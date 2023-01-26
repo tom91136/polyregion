@@ -273,7 +273,7 @@ object Compiler {
     _ = log.info("Body (AST)", pprint.tokenize(term, indent = 1, showFieldNames = true).mkString)
     _ = log.info("Body (Ascii)", term.show(using q.Printer.TreeAnsiCode))
 
-    (termValue, c)      <- q.RemapContext(root = root, refs = scope).mapTerm(term, tpeArgs)
+    (termValue, c)      <- q.RemapContext(root = root, refs = scope).mapTerm(term, None, tpeArgs)
     (_ -> termTpe, wit) <- Retyper.typer0(term.tpe)
     _ <-
       if (termTpe != termValue.tpe) {
@@ -539,7 +539,7 @@ object Compiler {
     optVerification <- VerifyPass.run(opt)(optLog).success
 
     _ = optLog.info(s"Structures = ${opt.defs.size}", opt.defs.map(_.repr)*)
-    _ = optLog.info(s"Functions  = ${opt.functions.size}", opt.functions.map(_.signatureRepr)*)
+    _ = optLog.info(s"Functions  = ${opt.functions.size}", opt.functions.map(_.repr)*)
     _ = optLog.info(s"Entry", opt.entry.repr)
 
     _ = optLog.info(

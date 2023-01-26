@@ -165,9 +165,7 @@ using std::string;
                ")" + ":" + repr(x.tpe);
       },
       [](const Expr::Index &x) { return repr(x.lhs) + "[" + repr(x.idx) + "]"; },
-      [](const Expr::Alloc &x) { return "new [" + repr(x.tpe) + "*" + repr(x.size) + "]"; },
-      [](const Expr::Suspend &x) { return "Suspend(???)"s; } //
-  );
+      [](const Expr::Alloc &x) { return "new [" + repr(x.tpe) + "*" + repr(x.size) + "]"; });
 }
 
 [[nodiscard]] string polyast::repr(const Stmt::Any &stmt) {
@@ -265,7 +263,7 @@ std::pair<Named, std::vector<Named>> polyast::uncons(const Term::Select &select)
 
 Type::Array dsl::Array(const Type::Any &t) { return Tpe::Array(t); }
 Type::Struct dsl::Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args) {
-  return {name, tpeVars, args};
+  return {name, tpeVars, args, {}};
 }
 Term::Any dsl::integral(const Type::Any &tpe, unsigned long long int x) {
   auto unsupported = [](auto &&t, auto &&v) -> Term::Any {
@@ -320,7 +318,7 @@ Expr::UnaryIntrinsic dsl::invoke(const UnaryIntrinsicKind::Any &kind, const Term
 Expr::NullaryIntrinsic dsl::invoke(const NullaryIntrinsicKind::Any &kind, const Type::Any &rtn) { return {kind, rtn}; }
 std::function<Function(std::vector<Stmt::Any>)> dsl::function(const string &name, const std::vector<Named> &args,
                                                               const Type::Any &rtn) {
-  return [=](auto &&stmts) { return Function(Sym({name}), {}, {}, args, {}, rtn, stmts); };
+  return [=](auto &&stmts) { return Function(Sym({name}), {}, {}, args, {}, {}, rtn, stmts); };
 }
 Stmt::Return dsl::ret(const Expr::Any &expr) { return Return(expr); }
 Stmt::Return dsl::ret(const Term::Any &term) { return Return(Alias(term)); }

@@ -14,14 +14,17 @@ import scala.util.{Success, Try}
 given Traversal[p.Term, p.Type] = Traversal.derived
 given Traversal[p.Expr, p.Type] = Traversal.derived
 given Traversal[p.Stmt, p.Type] = Traversal.derived
+given Traversal[p.Type, p.Type] = Traversal.derived
 
 given Traversal[p.Type, p.Expr] = Traversal.derived
 given Traversal[p.Stmt, p.Expr] = Traversal.derived
 given Traversal[p.Term, p.Expr] = Traversal.derived
+given Traversal[p.Expr, p.Expr] = Traversal.derived
 
 given Traversal[p.Type, p.Term] = Traversal.derived
 given Traversal[p.Expr, p.Term] = Traversal.derived
 given Traversal[p.Stmt, p.Term] = Traversal.derived
+given Traversal[p.Term, p.Term] = Traversal.derived
 
 given Traversal[p.Type, p.Stmt] = Traversal.derived
 given Traversal[p.Expr, p.Stmt] = Traversal.derived
@@ -209,7 +212,9 @@ extension (m: p.StructMember) {
 extension (sd: p.StructDef) {
   def tpe: p.Type.Struct = p.Type.Struct(sd.name, sd.tpeVars, Nil, sd.parents)
   def repr: String =
-    s"${sd.name.repr}<${sd.tpeVars.mkString(",")}>${if (sd.isReference) "*" else ""} { ${sd.members.map(_.repr).mkString("; ")} } <: ${sd.parents.map(_.repr).mkString("<:")}"
+    s"${sd.name.repr}<${sd.tpeVars.mkString(",")}>${if (sd.isReference) "*" else ""} { ${sd.members
+        .map(_.repr)
+        .mkString("; ")} } <: ${sd.parents.map(_.repr).mkString("<:")}"
 }
 
 extension (e: p.Sym) {
@@ -256,18 +261,18 @@ extension (e: p.Type) {
   def repr: String = e match {
     case p.Type.Struct(sym, tpeVars, args, parents) =>
       s"@${sym.repr}${tpeVars.zipAll(args, "???", p.Type.Var("???")).map((v, a) => s"$v=${a.repr}").mkString("<", ",", ">")}(${parents.map(_.repr).mkString("<:")})"
-    case p.Type.Array(comp) => s"Array[${comp.repr}]"
-    case p.Type.Bool        => "Bool"
-    case p.Type.Byte        => "Byte"
-    case p.Type.Char        => "Char"
-    case p.Type.Short       => "Short"
-    case p.Type.Int         => "Int"
-    case p.Type.Long        => "Long"
-    case p.Type.Float       => "Float"
-    case p.Type.Double      => "Double"
-    case p.Type.Unit        => "Unit"
-    case p.Type.Nothing     => "Nothing"
-    case p.Type.Var(name)   => s"#$name"
+    case p.Type.Array(comp)      => s"Array[${comp.repr}]"
+    case p.Type.Bool             => "Bool"
+    case p.Type.Byte             => "Byte"
+    case p.Type.Char             => "Char"
+    case p.Type.Short            => "Short"
+    case p.Type.Int              => "Int"
+    case p.Type.Long             => "Long"
+    case p.Type.Float            => "Float"
+    case p.Type.Double           => "Double"
+    case p.Type.Unit             => "Unit"
+    case p.Type.Nothing          => "Nothing"
+    case p.Type.Var(name)        => s"#$name"
     case p.Type.Exec(tpeArgs, args, rtn) =>
       s"<${tpeArgs.mkString(",")}>(${args.map(_.repr).mkString(",")}) => ${rtn.repr}"
   }
@@ -425,12 +430,14 @@ extension (stmt: p.Stmt) {
     case p.Stmt.Mut(name, expr, copy)   => s"${name.repr} ${if (copy) ":=!" else ":="} ${expr.repr}"
     case p.Stmt.Update(lhs, idx, value) => s"${lhs.repr}[${idx.repr}] := ${value.repr}"
     case p.Stmt.While(tests, cond, body) =>
-      s"while({${(tests.map(_.repr) :+ cond.repr).mkString(";")}}){\n${body.map("  " + _.repr).mkString("\n")}\n}"
+      s"while({${(tests.map(_.repr) :+ cond.repr).mkString(";")}}){\n${body.flatMap(_.repr.linesIterator.map("  " + _)).mkString("\n")}\n}"
     case p.Stmt.Break        => s"break;"
     case p.Stmt.Cont         => s"continue;"
     case p.Stmt.Return(expr) => s"return ${expr.repr}"
     case p.Stmt.Cond(cond, trueBr, falseBr) =>
-      s"if(${cond.repr}) {\n${trueBr.map("  " + _.repr).mkString("\n")}\n} else {\n${falseBr.map("  " + _.repr).mkString("\n")}\n}"
+      s"if(${cond.repr}) {\n${trueBr.flatMap(_.repr.linesIterator.map("  " + _)).mkString("\n")}\n} else {\n${falseBr
+          .flatMap(_.repr.linesIterator.map("  " + _))
+          .mkString("\n")}\n}"
   }
 }
 

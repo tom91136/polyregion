@@ -169,8 +169,7 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr, const std::string &k
       [&](const Expr::Alias &x) { return mkRef(x.ref); },                            //
       [&](const Expr::Invoke &x) { return "???"s; },                                 //
       [&](const Expr::Index &x) { return mkRef(x.lhs) + "[" + mkRef(x.idx) + "]"; }, //
-      [&](const Expr::Alloc &x) { return "{/*" + to_string(x) + "*/}"; },            //
-      [&](const Expr::Suspend &x) { return "{/*suspend*/}"s; }                       //
+      [&](const Expr::Alloc &x) { return "{/*" + to_string(x) + "*/}"; }             //
   );
 }
 
@@ -231,7 +230,8 @@ compiler::Compilation backend::CSource::compileProgram(const Program &program, c
   std::vector<Named> allArgs;
   if (fnTree.receiver) allArgs.insert(allArgs.begin(), *fnTree.receiver);
   allArgs.insert(allArgs.begin(), fnTree.args.begin(), fnTree.args.end());
-  allArgs.insert(allArgs.begin(), fnTree.captures.begin(), fnTree.captures.end());
+  allArgs.insert(allArgs.begin(), fnTree.moduleCaptures.begin(), fnTree.moduleCaptures.end());
+  allArgs.insert(allArgs.begin(), fnTree.termCaptures.begin(), fnTree.termCaptures.end());
 
   auto args = mk_string<Named>(
       allArgs,

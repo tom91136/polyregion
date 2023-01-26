@@ -47,6 +47,8 @@ object PolyAst {
     case Exec(tpeVars: List[String], args: List[Type], rtn: Type) extends Type(TypeKind.None)
   }
 
+//  val Intersection = Type.Struct(Sym("__intersection"), Nil, ???, Nil)
+
   case class Named(symbol: String, tpe: Type) derives MsgPack.Codec
 
   enum Term(val tpe: Type) derives MsgPack.Codec {

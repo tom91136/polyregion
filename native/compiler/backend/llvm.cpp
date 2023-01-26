@@ -204,7 +204,7 @@ llvm::Value *LLVM::AstTransformer::mkTermVal(const Term::Any &ref) {
 
 llvm::Function *LLVM::AstTransformer::mkExternalFn(llvm::Function *parent, const Type::Any &rtn,
                                                    const std::string &name, const std::vector<Type::Any> &args) {
-  const Signature s(Sym({name}), {}, {}, args, rtn);
+  const Signature s(Sym({name}), {}, {}, args, {}, {}, rtn);
   if (functions.find(s) == functions.end()) {
     auto llvmArgs = map_vec<Type::Any, llvm::Type *>(args, [&](auto t) { return mkTpe(t); });
     auto ft = llvm::FunctionType::get(mkTpe(rtn), llvmArgs, false);
@@ -745,8 +745,7 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
         auto elemSize = sizeOf(B, C, componentTpe);
         auto ptr = invokeMalloc(fn, B.CreateMul(B.CreateIntCast(size, mkTpe(Type::Long()), true), elemSize));
         return B.CreateBitCast(ptr, componentTpe);
-      },
-      [&](const Expr::Suspend &x) -> ValPtr { return undefined(__FILE__, __LINE__); });
+      });
 }
 
 LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<WhileCtx> whileCtx = {}) {
@@ -1007,7 +1006,8 @@ Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform(llvm::Module
   std::vector<Named> allArgs;
   if (fnTree.receiver) allArgs.insert(allArgs.begin(), *fnTree.receiver);
   allArgs.insert(allArgs.begin(), fnTree.args.begin(), fnTree.args.end());
-  allArgs.insert(allArgs.begin(), fnTree.captures.begin(), fnTree.captures.end());
+  allArgs.insert(allArgs.begin(), fnTree.moduleCaptures.begin(), fnTree.moduleCaptures.end());
+  allArgs.insert(allArgs.begin(), fnTree.termCaptures.begin(), fnTree.termCaptures.end());
 
   auto paramTpes = map_vec<Named, llvm::Type *>(allArgs, [&](auto &&named) {
     auto tpe = mkTpe(named.tpe, GlobalAS, true);

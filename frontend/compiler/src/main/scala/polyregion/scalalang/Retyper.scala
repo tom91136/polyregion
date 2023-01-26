@@ -243,7 +243,14 @@ object Retyper {
           r <-
             if (leftTpe == rightTpe) (term -> leftTpe, leftWit |+| rightWit).success
 //            else if(leftTpe == p.Type.Unit || rightTpe == p.Type.Unit) (term, p.Type.Unit).success
-            else s"Left type `$leftTpe` and right type `$rightTpe` did not unify for ${andOr.simplified.show}".fail
+            else {
+              val sym = (andOr match {
+                case _: q.OrType  => p.Sym("#Union")
+                case _: q.AndType => p.Sym("#Intersection")
+              })
+              (term -> p.Type.Struct(sym, Nil, leftTpe :: rightTpe:: Nil, Nil), leftWit |+| rightWit).success
+            }
+          //            else s"Left type `$leftTpe` and right type `$rightTpe` did not unify for ${andOr.widenByName.widen.simplified.show}".fail
         } yield r
       case tpe @ q.AppliedType(tpeCtor, args) =>
         for {

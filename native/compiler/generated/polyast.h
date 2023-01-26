@@ -196,11 +196,10 @@ struct UnaryIntrinsic;
 struct BinaryIntrinsic;
 struct Cast;
 struct Alias;
-struct Invoke;
 struct Index;
 struct Alloc;
-struct Suspend;
-using Any = Alternative<NullaryIntrinsic, UnaryIntrinsic, BinaryIntrinsic, Cast, Alias, Invoke, Index, Alloc, Suspend>;
+struct Invoke;
+using Any = Alternative<NullaryIntrinsic, UnaryIntrinsic, BinaryIntrinsic, Cast, Alias, Index, Alloc, Invoke>;
 } // namespace Expr
 namespace Stmt { 
 struct Comment;
@@ -356,7 +355,8 @@ struct EXPORT Struct : Type::Base {
   Sym name;
   std::vector<std::string> tpeVars;
   std::vector<Type::Any> args;
-  Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args) noexcept : Type::Base(TypeKind::Ref()), name(std::move(name)), tpeVars(std::move(tpeVars)), args(std::move(args)) {}
+  std::vector<Sym> parents;
+  Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args, std::vector<Sym> parents) noexcept : Type::Base(TypeKind::Ref()), name(std::move(name)), tpeVars(std::move(tpeVars)), args(std::move(args)), parents(std::move(parents)) {}
   EXPORT operator Any() const { return std::make_shared<Struct>(*this); };
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Struct &);
   EXPORT friend bool operator==(const Type::Struct &, const Type::Struct &);
@@ -1073,18 +1073,6 @@ struct EXPORT Alias : Expr::Base {
   EXPORT friend bool operator==(const Expr::Alias &, const Expr::Alias &);
 };
 
-struct EXPORT Invoke : Expr::Base {
-  Sym name;
-  std::vector<Type::Any> tpeArgs;
-  std::optional<Term::Any> receiver;
-  std::vector<Term::Any> args;
-  Type::Any rtn;
-  Invoke(Sym name, std::vector<Type::Any> tpeArgs, std::optional<Term::Any> receiver, std::vector<Term::Any> args, Type::Any rtn) noexcept : Expr::Base(rtn), name(std::move(name)), tpeArgs(std::move(tpeArgs)), receiver(std::move(receiver)), args(std::move(args)), rtn(std::move(rtn)) {}
-  EXPORT operator Any() const { return std::make_shared<Invoke>(*this); };
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Invoke &);
-  EXPORT friend bool operator==(const Expr::Invoke &, const Expr::Invoke &);
-};
-
 struct EXPORT Index : Expr::Base {
   Term::Any lhs;
   Term::Any idx;
@@ -1104,15 +1092,17 @@ struct EXPORT Alloc : Expr::Base {
   EXPORT friend bool operator==(const Expr::Alloc &, const Expr::Alloc &);
 };
 
-struct EXPORT Suspend : Expr::Base {
-  std::vector<Named> args;
-  std::vector<Stmt::Any> stmts;
+struct EXPORT Invoke : Expr::Base {
+  Sym name;
+  std::vector<Type::Any> tpeArgs;
+  std::optional<Term::Any> receiver;
+  std::vector<Term::Any> args;
+  std::vector<Term::Any> captures;
   Type::Any rtn;
-  Type::Exec shape;
-  Suspend(std::vector<Named> args, std::vector<Stmt::Any> stmts, Type::Any rtn, Type::Exec shape) noexcept : Expr::Base(shape), args(std::move(args)), stmts(std::move(stmts)), rtn(std::move(rtn)), shape(std::move(shape)) {}
-  EXPORT operator Any() const { return std::make_shared<Suspend>(*this); };
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Suspend &);
-  EXPORT friend bool operator==(const Expr::Suspend &, const Expr::Suspend &);
+  Invoke(Sym name, std::vector<Type::Any> tpeArgs, std::optional<Term::Any> receiver, std::vector<Term::Any> args, std::vector<Term::Any> captures, Type::Any rtn) noexcept : Expr::Base(rtn), name(std::move(name)), tpeArgs(std::move(tpeArgs)), receiver(std::move(receiver)), args(std::move(args)), captures(std::move(captures)), rtn(std::move(rtn)) {}
+  EXPORT operator Any() const { return std::make_shared<Invoke>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Invoke &);
+  EXPORT friend bool operator==(const Expr::Invoke &, const Expr::Invoke &);
 };
 } // namespace Expr
 namespace Stmt { 
@@ -1218,7 +1208,8 @@ struct EXPORT StructDef {
   bool isReference;
   std::vector<std::string> tpeVars;
   std::vector<StructMember> members;
-  StructDef(Sym name, bool isReference, std::vector<std::string> tpeVars, std::vector<StructMember> members) noexcept : name(std::move(name)), isReference(isReference), tpeVars(std::move(tpeVars)), members(std::move(members)) {}
+  std::vector<Sym> parents;
+  StructDef(Sym name, bool isReference, std::vector<std::string> tpeVars, std::vector<StructMember> members, std::vector<Sym> parents) noexcept : name(std::move(name)), isReference(isReference), tpeVars(std::move(tpeVars)), members(std::move(members)), parents(std::move(parents)) {}
   EXPORT friend std::ostream &operator<<(std::ostream &os, const StructDef &);
   EXPORT friend bool operator==(const StructDef &, const StructDef &);
 };
@@ -1228,8 +1219,10 @@ struct EXPORT Signature {
   std::vector<std::string> tpeVars;
   std::optional<Type::Any> receiver;
   std::vector<Type::Any> args;
+  std::vector<Type::Any> moduleCaptures;
+  std::vector<Type::Any> termCaptures;
   Type::Any rtn;
-  Signature(Sym name, std::vector<std::string> tpeVars, std::optional<Type::Any> receiver, std::vector<Type::Any> args, Type::Any rtn) noexcept : name(std::move(name)), tpeVars(std::move(tpeVars)), receiver(std::move(receiver)), args(std::move(args)), rtn(std::move(rtn)) {}
+  Signature(Sym name, std::vector<std::string> tpeVars, std::optional<Type::Any> receiver, std::vector<Type::Any> args, std::vector<Type::Any> moduleCaptures, std::vector<Type::Any> termCaptures, Type::Any rtn) noexcept : name(std::move(name)), tpeVars(std::move(tpeVars)), receiver(std::move(receiver)), args(std::move(args)), moduleCaptures(std::move(moduleCaptures)), termCaptures(std::move(termCaptures)), rtn(std::move(rtn)) {}
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Signature &);
   EXPORT friend bool operator==(const Signature &, const Signature &);
 };
@@ -1239,10 +1232,11 @@ struct EXPORT Function {
   std::vector<std::string> tpeVars;
   std::optional<Named> receiver;
   std::vector<Named> args;
-  std::vector<Named> captures;
+  std::vector<Named> moduleCaptures;
+  std::vector<Named> termCaptures;
   Type::Any rtn;
   std::vector<Stmt::Any> body;
-  Function(Sym name, std::vector<std::string> tpeVars, std::optional<Named> receiver, std::vector<Named> args, std::vector<Named> captures, Type::Any rtn, std::vector<Stmt::Any> body) noexcept : name(std::move(name)), tpeVars(std::move(tpeVars)), receiver(std::move(receiver)), args(std::move(args)), captures(std::move(captures)), rtn(std::move(rtn)), body(std::move(body)) {}
+  Function(Sym name, std::vector<std::string> tpeVars, std::optional<Named> receiver, std::vector<Named> args, std::vector<Named> moduleCaptures, std::vector<Named> termCaptures, Type::Any rtn, std::vector<Stmt::Any> body) noexcept : name(std::move(name)), tpeVars(std::move(tpeVars)), receiver(std::move(receiver)), args(std::move(args)), moduleCaptures(std::move(moduleCaptures)), termCaptures(std::move(termCaptures)), rtn(std::move(rtn)), body(std::move(body)) {}
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Function &);
   EXPORT friend bool operator==(const Function &, const Function &);
 };
@@ -1599,17 +1593,14 @@ template <> struct std::hash<polyregion::polyast::Expr::Cast> {
 template <> struct std::hash<polyregion::polyast::Expr::Alias> {
   std::size_t operator()(const polyregion::polyast::Expr::Alias &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Expr::Invoke> {
-  std::size_t operator()(const polyregion::polyast::Expr::Invoke &) const noexcept;
-};
 template <> struct std::hash<polyregion::polyast::Expr::Index> {
   std::size_t operator()(const polyregion::polyast::Expr::Index &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Expr::Alloc> {
   std::size_t operator()(const polyregion::polyast::Expr::Alloc &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Expr::Suspend> {
-  std::size_t operator()(const polyregion::polyast::Expr::Suspend &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Expr::Invoke> {
+  std::size_t operator()(const polyregion::polyast::Expr::Invoke &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Stmt::Comment> {
   std::size_t operator()(const polyregion::polyast::Stmt::Comment &) const noexcept;

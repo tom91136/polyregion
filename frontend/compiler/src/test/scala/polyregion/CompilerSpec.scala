@@ -136,9 +136,9 @@ class CompilerSpec extends munit.FunSuite {
     CompilerTests.compilerAssert {
 
       val un = Unrelated()
-//      val m = ClassB(9)
+      val m = ClassB(9)
 //      m.foo(3)
-      val o : Base = ClassA(2)
+      val o  = if(true) ClassA(2) else ClassB(9)
       o.foo(2)
 
 //      val m = o.foo(2)
