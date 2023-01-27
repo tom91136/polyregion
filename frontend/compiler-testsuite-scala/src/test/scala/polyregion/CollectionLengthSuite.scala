@@ -56,4 +56,26 @@ class CollectionLengthSuite extends BaseSuite {
 //    }
 //  }
 
+  class Base(val a: Int) {
+    def foo(n: Int): Int = a + n
+  }
+
+  class ClassA(a: Int) extends Base(a) {
+    override def foo(n: Int): Int = 42 + n + super.foo(n)
+  }
+
+  class ClassB(val b: Int) extends Base(42) {
+    override def foo(n: Int): Int = b
+  }
+
+  testExpr {
+
+    val m = ClassB(123)
+    m.foo(12345)
+
+    val o = if (true) ClassA(2) else ClassB(9)
+    o.foo(2)
+
+  }
+
 }

@@ -202,6 +202,7 @@ struct Invoke;
 using Any = Alternative<NullaryIntrinsic, UnaryIntrinsic, BinaryIntrinsic, Cast, Alias, Index, Alloc, Invoke>;
 } // namespace Expr
 namespace Stmt { 
+struct Block;
 struct Comment;
 struct Var;
 struct Mut;
@@ -211,7 +212,7 @@ struct Break;
 struct Cont;
 struct Cond;
 struct Return;
-using Any = Alternative<Comment, Var, Mut, Update, While, Break, Cont, Cond, Return>;
+using Any = Alternative<Block, Comment, Var, Mut, Update, While, Break, Cont, Cond, Return>;
 } // namespace Stmt
 
 
@@ -1114,6 +1115,14 @@ struct EXPORT Base {
   EXPORT friend bool operator==(const Stmt::Base &, const Stmt::Base &);
 };
 
+struct EXPORT Block : Stmt::Base {
+  std::vector<Stmt::Any> stmts;
+  explicit Block(std::vector<Stmt::Any> stmts) noexcept : Stmt::Base(), stmts(std::move(stmts)) {}
+  EXPORT operator Any() const { return std::make_shared<Block>(*this); };
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Stmt::Block &);
+  EXPORT friend bool operator==(const Stmt::Block &, const Stmt::Block &);
+};
+
 struct EXPORT Comment : Stmt::Base {
   std::string value;
   explicit Comment(std::string value) noexcept : Stmt::Base(), value(std::move(value)) {}
@@ -1601,6 +1610,9 @@ template <> struct std::hash<polyregion::polyast::Expr::Alloc> {
 };
 template <> struct std::hash<polyregion::polyast::Expr::Invoke> {
   std::size_t operator()(const polyregion::polyast::Expr::Invoke &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Stmt::Block> {
+  std::size_t operator()(const polyregion::polyast::Stmt::Block &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Stmt::Comment> {
   std::size_t operator()(const polyregion::polyast::Stmt::Comment &) const noexcept;

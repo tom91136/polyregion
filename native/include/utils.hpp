@@ -46,8 +46,8 @@ std::string mk_string2(const std::unordered_map<K, V> &xs,
 
 template <typename T, typename U>
 std::vector<U> map_vec(const std::vector<T> &xs, const std::function<U(const T &)> &f) {
-  std::vector<U> ys(std::size(xs));
-  std::transform(std::begin(xs), std::end(xs), ys.begin(), f);
+  std::vector<U> ys ;
+  std::transform(std::begin(xs), std::end(xs), std::back_inserter(ys), f);
   return ys;
 }
 

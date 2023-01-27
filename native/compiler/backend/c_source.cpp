@@ -176,6 +176,10 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr, const std::string &k
 std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
   return variants::total(
       *stmt, //
+      [&](const Stmt::Block &x) {
+        return mk_string<Stmt::Any>(
+            x.stmts, [&](auto x) { return mkStmt(x); }, "\n");
+      },
       [&](const Stmt::Comment &x) {
         auto lines = split(x.value, '\n');
         auto commented = map_vec<std::string, std::string>(lines, [](auto &&line) { return "// " + line; });

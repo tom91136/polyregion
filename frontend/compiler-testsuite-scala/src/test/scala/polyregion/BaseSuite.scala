@@ -64,7 +64,7 @@ trait BaseSuite extends munit.FunSuite {
     case AssertTarget.Offload =>
       import polyregion.scalalang.*
       import polyregion.scalalang.blocking.Host
-      val r     = scala.collection.mutable.ArrayBuffer[A](null.asInstanceOf[A])
+      val r     = scala.collection.mutable.ListBuffer[A](null.asInstanceOf[A])
       val latch = new CountDownLatch(1)
       polyregion.scalalang.compiletime.offload0[Config[Target.Host.type, Opt.O2]](
         Host.underlying.createQueue(),

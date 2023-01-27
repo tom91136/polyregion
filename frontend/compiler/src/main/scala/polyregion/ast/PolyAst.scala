@@ -124,6 +124,7 @@ object PolyAst {
   }
 
   enum Stmt derives MsgPack.Codec {
+    case Block(stmts: List[Stmt])
     case Comment(value: String)
     case Var(name: Named, expr: Option[Expr])
     case Mut(

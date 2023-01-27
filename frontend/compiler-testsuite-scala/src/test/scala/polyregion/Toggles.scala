@@ -18,7 +18,7 @@ object Toggles {
   final inline val CastSuite        = false
   final inline val MathSuite        = false
   final inline val IntrinsicSuite   = false
-  final inline val ValueReturnSuite = true
+  final inline val ValueReturnSuite = false
   final inline val ControlFlowSuite = false
   final inline val LogicSuite       = false //OK
   final inline val StructSuite      = false

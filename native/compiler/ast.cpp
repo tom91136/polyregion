@@ -171,6 +171,12 @@ using std::string;
 [[nodiscard]] string polyast::repr(const Stmt::Any &stmt) {
   return variants::total(
       *stmt, //
+      [](const Stmt::Block &x) {
+        return "{ \n" +
+               mk_string<Stmt::Any>(
+                   x.stmts, [&](auto x) { return repr(x); }, "\n") +
+               "}";
+      },
       [](const Stmt::Comment &x) { return "// " + x.value; },
       [](const Stmt::Var &x) { return "var " + repr(x.name) + " = " + (x.expr ? repr(*x.expr) : "_"); },
       [](const Stmt::Mut &x) { return repr(x.name) + " := " + repr(x.expr); },

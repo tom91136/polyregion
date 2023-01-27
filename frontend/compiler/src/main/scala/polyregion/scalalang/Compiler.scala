@@ -49,24 +49,33 @@ object Compiler {
     fnRtnTpe
   )
 
-  private def matchingSignatures(sigs: Iterable[p.Signature], target: p.Expr.Invoke) = sigs
-    .collect {
-      case sig
-          if sig.name.last == target.name.last &&      // match name first, most methods are eliminated here
-            sig.tpeVars.size == target.tpeArgs.size && // then we check type arity
-            sig.args.size == target.args.size          // then finally term arity
-          =>
-        val appliedTypes = // we then applied any type variables to form an applied signature
-          sig.tpeVars.zip(target.tpeArgs).map((name, tpe) => (p.Type.Var(name): p.Type) -> tpe).toMap
-        sig.modifyAll[p.Type](_.mapLeaf(t => appliedTypes.getOrElse(t, t))) -> sig
-    }
-    .collect {
-      case (applied, sig) // finally we look for the matching signature
-          if applied.rtn == target.rtn &&
-            applied.args == target.args.map(_.tpe) &&
-            applied.receiver == target.receiver.map(_.tpe) =>
-        sig // and remember NOT to return the applied one
-    }
+  private val deleteParents: PartialFunction[p.Type, p.Type] = {
+    case s: p.Type.Struct => s.copy(parents = Nil)
+    case x                => x
+  }
+
+  private def matchingSignatures(sigs: Iterable[p.Signature], target0: p.Expr.Invoke) = {
+    val target = target0.modifyAll[p.Type](deleteParents)
+    sigs
+      .map(_.modifyAll[p.Type](deleteParents))
+      .collect {
+        case sig
+            if sig.name.last == target.name.last &&      // match name first, most methods are eliminated here
+              sig.tpeVars.size == target.tpeArgs.size && // then we check type arity
+              sig.args.size == target.args.size          // then finally term arity
+            =>
+          val appliedTypes = // we then apply any type variables to form an applied signature
+            sig.tpeVars.zip(target.tpeArgs).map((name, tpe) => (p.Type.Var(name): p.Type) -> tpe).toMap
+          sig.modifyAll[p.Type](_.mapLeaf(t => appliedTypes.getOrElse(t, t))) -> sig
+      }
+      .collect {
+        case (applied, sig) // finally we look for the matching signature
+            if applied.rtn == target.rtn &&
+              applied.args == target.args.map(_.tpe) &&
+              applied.receiver == target.receiver.map(_.tpe) =>
+          sig // and remember NOT to return the applied one
+      }
+  }
 
   def compileAllDependencies(using q: Quoted)(
       sink: Log,
@@ -108,6 +117,7 @@ object Compiler {
                   matchingSignatures(fnLut.keys, target).map(s => fnLut(s)).toList match {
                     case Nil => // We found no replacement, log it and keep going.
                       if (defDef.rhs.isEmpty) {
+                        log.info(s"No implementation: ${target.repr}", fnLut.keys.map(r =>s"Candidate: ${r.repr}").toList*)
                         (
                           xs,
                           depss,
@@ -513,7 +523,7 @@ object Compiler {
     _ = unoptLog.info(s"Entry", unopt.entry.repr)
 
     // verify before optimisation
-    (unoptVerification,_) <- VerifyPass(unopt, unoptLog).success
+    unoptVerification <- VerifyPass(unopt, unoptLog, verifyFunction = false).success
     _ = unoptLog.info(
       s"Verifier",
       unoptVerification.map((f, xs) => s"${f.signatureRepr}\nError = ${xs.map("\t->" + _).mkString("\n")}")*
@@ -536,7 +546,7 @@ object Compiler {
 
     // verify again after optimisation
     optLog = log.subLog("Opt")
-    (optVerification,_) <- VerifyPass(opt, optLog).success
+    optVerification <- VerifyPass(opt, optLog, verifyFunction = true).success
 
     _ = optLog.info(s"Structures = ${opt.defs.size}", opt.defs.map(_.repr)*)
     _ = optLog.info(s"Functions  = ${opt.functions.size}", opt.functions.map(_.repr)*)

@@ -760,6 +760,12 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
 
   return variants::total(
       *stmt,
+      [&](const Stmt::Block &x) -> BlockKind {
+        auto kind = BlockKind::Normal;
+        for (auto &body : x.stmts)
+          kind = mkStmt(body, fn);
+        return kind;
+      },
       [&](const Stmt::Comment &x) -> BlockKind { // discard comments
         return BlockKind::Normal;
       },
@@ -974,7 +980,8 @@ std::vector<Pair<Sym, llvm::StructType *>> LLVM::AstTransformer::getStructTypes(
   return results;
 }
 
-Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform(llvm::Module &mod, const Function &fnTree) {
+Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform( //
+    llvm::Module &mod, const Function &fnTree, bool entryPoint) {
 
   // Work out what address space we're using for arguments
   unsigned GlobalAS = 0;
@@ -1022,22 +1029,24 @@ Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform(llvm::Module
 
   auto *fn = llvm::Function::Create(fnTpe, llvm::Function::ExternalLinkage, qualified(fnTree.name), mod);
 
-  // setup function conventions for targets
-  switch (options.target) {
-    case Target::x86_64:
-    case Target::AArch64:
-    case Target::ARM:
-      // nothing to do for CPUs
-      break;
-    case Target::NVPTX64:
-      mod.getOrInsertNamedMetadata("nvvm.annotations")
-          ->addOperand(
-              llvm::MDNode::get(C, // XXX the attribute name must be "kernel" here and not the function name!
-                                {llvm::ValueAsMetadata::get(fn), llvm::MDString::get(C, "kernel"),
-                                 llvm::ValueAsMetadata::get(llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 1))}));
-      break;
-    case Target::AMDGCN: fn->setCallingConv(llvm::CallingConv::AMDGPU_KERNEL); break;
-    case Target::SPIRV64: undefined(__FILE__, __LINE__); break;
+  if (entryPoint) {
+    // setup function conventions for targets
+    switch (options.target) {
+      case Target::x86_64:
+      case Target::AArch64:
+      case Target::ARM:
+        // nothing to do for CPUs
+        break;
+      case Target::NVPTX64:
+        mod.getOrInsertNamedMetadata("nvvm.annotations")
+            ->addOperand(
+                llvm::MDNode::get(C, // XXX the attribute name must be "kernel" here and not the function name!
+                                  {llvm::ValueAsMetadata::get(fn), llvm::MDString::get(C, "kernel"),
+                                   llvm::ValueAsMetadata::get(llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 1))}));
+        break;
+      case Target::AMDGCN: fn->setCallingConv(llvm::CallingConv::AMDGPU_KERNEL); break;
+      case Target::SPIRV64: undefined(__FILE__, __LINE__); break;
+    }
   }
 
   auto *entry = llvm::BasicBlock::Create(C, "entry", fn);
@@ -1166,36 +1175,53 @@ std::vector<compiler::Layout> LLVM::resolveLayouts(const std::vector<StructDef> 
 compiler::Compilation backend::LLVM::compileProgram(const Program &program, const compiler::Opt &opt) {
   using namespace llvm;
 
-  if (!program.functions.empty()) {
-    error(__FILE__, __LINE__, "More than one function in program");
-  }
-
   llvm::LLVMContext ctx;
   auto mod = std::make_unique<llvm::Module>("program", ctx);
 
   LLVM::AstTransformer xform(options, ctx);
   xform.addDefs(program.defs);
 
-  auto rawXform = compiler::nowMono();
-  auto [rawError, rawIR] = xform.transform(*mod, program.entry);
-  auto rawXformElapsed = compiler::elapsedNs(rawXform);
+
+
+  auto xformedFunctions = map_vec<Function, Pair<Opt<std::string>, compiler::Event>>(program.functions, [&](auto &f) {
+    auto fnXform = compiler::nowMono();
+    auto [fnError, fnIR] = xform.transform(*mod, f, false);
+    auto fnXformElapsed = compiler::elapsedNs(fnXform);
+    return std::make_pair(fnError,
+                          compiler::Event(compiler::nowMs(), fnXformElapsed, "ast_to_llvm_ir_" + repr(f.name), fnIR));
+  });
+
+  auto entryXform = compiler::nowMono();
+  auto [entryError, entryIR] = xform.transform(*mod, program.entry, true);
+  auto entryXformElapsed = compiler::elapsedNs(entryXform);
+  compiler::Event ast2IR(compiler::nowMs(), entryXformElapsed, "ast_to_llvm_ir_entry", entryIR);
+
   auto optXform = compiler::nowMono();
   auto [optError, optIR] = llvmc::optimiseModule(*mod);
   auto optXformElapsed = compiler::elapsedNs(optXform);
-
-  compiler::Event ast2IR(compiler::nowMs(), rawXformElapsed, "ast_to_llvm_ir", rawIR);
   compiler::Event astOpt(compiler::nowMs(), optXformElapsed, "llvm_ir_opt", optIR);
 
-  if (rawError || optError) {
+  if (entryError || optError ||
+      std::any_of(xformedFunctions.begin(), xformedFunctions.end(), [](auto &x) { return x.first.has_value(); })) {
+
+    std::vector<std::string> errors;
+    for (auto &[e, _] : xformedFunctions) {
+      if (e) errors.push_back(*e);
+    }
+    if (entryError) errors.push_back(*entryError);
+    if (optError) errors.push_back(*optError);
+
     return {{},
             {},               //
             {ast2IR, astOpt}, //
             mk_string<std::string>(
-                {rawError.value_or(""), optError.value_or("")}, [](auto &&x) { return x; }, "\n")};
+                errors, [](auto &&x) { return x; }, "\n")};
   }
 
   auto c = llvmc::compileModule(options.toTargetInfo(), opt, true, std::move(mod), ctx);
   c.layouts = resolveLayouts(program.defs, xform);
+  for (auto &[_, event] : xformedFunctions)
+    c.events.emplace_back(event);
   c.events.emplace_back(ast2IR);
   c.events.emplace_back(astOpt);
 

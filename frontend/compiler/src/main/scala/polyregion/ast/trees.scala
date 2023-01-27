@@ -261,18 +261,18 @@ extension (e: p.Type) {
   def repr: String = e match {
     case p.Type.Struct(sym, tpeVars, args, parents) =>
       s"@${sym.repr}${tpeVars.zipAll(args, "???", p.Type.Var("???")).map((v, a) => s"$v=${a.repr}").mkString("<", ",", ">")}(${parents.map(_.repr).mkString("<:")})"
-    case p.Type.Array(comp)      => s"Array[${comp.repr}]"
-    case p.Type.Bool             => "Bool"
-    case p.Type.Byte             => "Byte"
-    case p.Type.Char             => "Char"
-    case p.Type.Short            => "Short"
-    case p.Type.Int              => "Int"
-    case p.Type.Long             => "Long"
-    case p.Type.Float            => "Float"
-    case p.Type.Double           => "Double"
-    case p.Type.Unit             => "Unit"
-    case p.Type.Nothing          => "Nothing"
-    case p.Type.Var(name)        => s"#$name"
+    case p.Type.Array(comp) => s"Array[${comp.repr}]"
+    case p.Type.Bool        => "Bool"
+    case p.Type.Byte        => "Byte"
+    case p.Type.Char        => "Char"
+    case p.Type.Short       => "Short"
+    case p.Type.Int         => "Int"
+    case p.Type.Long        => "Long"
+    case p.Type.Float       => "Float"
+    case p.Type.Double      => "Double"
+    case p.Type.Unit        => "Unit"
+    case p.Type.Nothing     => "Nothing"
+    case p.Type.Var(name)   => s"#$name"
     case p.Type.Exec(tpeArgs, args, rtn) =>
       s"<${tpeArgs.mkString(",")}>(${args.map(_.repr).mkString(",")}) => ${rtn.repr}"
   }
@@ -425,6 +425,8 @@ extension (e: p.Expr) {
 
 extension (stmt: p.Stmt) {
   def repr: String = stmt match {
+    case p.Stmt.Block(xs) =>
+      s"{\n${xs.flatMap(_.repr.linesIterator.map("  " + _)).mkString("\n")}\n}"
     case p.Stmt.Comment(value)          => s" /* $value */"
     case p.Stmt.Var(name, rhs)          => s"var ${name.repr} = ${rhs.fold("_")(_.repr)}"
     case p.Stmt.Mut(name, expr, copy)   => s"${name.repr} ${if (copy) ":=!" else ":="} ${expr.repr}"

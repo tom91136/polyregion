@@ -1316,6 +1316,19 @@ json Expr::any_to_json(const Expr::Any& x) {
   }, *x);
 }
 
+Stmt::Block Stmt::block_from_json(const json& j) { 
+  std::vector<Stmt::Any> stmts;
+  auto stmts_json = j.at(0);
+  std::transform(stmts_json.begin(), stmts_json.end(), std::back_inserter(stmts), &Stmt::any_from_json);
+  return Stmt::Block(stmts);
+}
+
+json Stmt::block_to_json(const Stmt::Block& x) { 
+  std::vector<json> stmts;
+  std::transform(x.stmts.begin(), x.stmts.end(), std::back_inserter(stmts), &Stmt::any_to_json);
+  return json::array({stmts});
+}
+
 Stmt::Comment Stmt::comment_from_json(const json& j) { 
   auto value = j.at(0).get<std::string>();
   return Stmt::Comment(value);
@@ -1436,30 +1449,32 @@ Stmt::Any Stmt::any_from_json(const json& j) {
   size_t ord = j.at(0).get<size_t>();
   const auto t = j.at(1);
   switch (ord) {
-  case 0: return Stmt::comment_from_json(t);
-  case 1: return Stmt::var_from_json(t);
-  case 2: return Stmt::mut_from_json(t);
-  case 3: return Stmt::update_from_json(t);
-  case 4: return Stmt::while_from_json(t);
-  case 5: return Stmt::break_from_json(t);
-  case 6: return Stmt::cont_from_json(t);
-  case 7: return Stmt::cond_from_json(t);
-  case 8: return Stmt::return_from_json(t);
+  case 0: return Stmt::block_from_json(t);
+  case 1: return Stmt::comment_from_json(t);
+  case 2: return Stmt::var_from_json(t);
+  case 3: return Stmt::mut_from_json(t);
+  case 4: return Stmt::update_from_json(t);
+  case 5: return Stmt::while_from_json(t);
+  case 6: return Stmt::break_from_json(t);
+  case 7: return Stmt::cont_from_json(t);
+  case 8: return Stmt::cond_from_json(t);
+  case 9: return Stmt::return_from_json(t);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
   }
 }
 
 json Stmt::any_to_json(const Stmt::Any& x) { 
   return std::visit(overloaded{
-  [](const Stmt::Comment &y) -> json { return {0, Stmt::comment_to_json(y)}; },
-  [](const Stmt::Var &y) -> json { return {1, Stmt::var_to_json(y)}; },
-  [](const Stmt::Mut &y) -> json { return {2, Stmt::mut_to_json(y)}; },
-  [](const Stmt::Update &y) -> json { return {3, Stmt::update_to_json(y)}; },
-  [](const Stmt::While &y) -> json { return {4, Stmt::while_to_json(y)}; },
-  [](const Stmt::Break &y) -> json { return {5, Stmt::break_to_json(y)}; },
-  [](const Stmt::Cont &y) -> json { return {6, Stmt::cont_to_json(y)}; },
-  [](const Stmt::Cond &y) -> json { return {7, Stmt::cond_to_json(y)}; },
-  [](const Stmt::Return &y) -> json { return {8, Stmt::return_to_json(y)}; },
+  [](const Stmt::Block &y) -> json { return {0, Stmt::block_to_json(y)}; },
+  [](const Stmt::Comment &y) -> json { return {1, Stmt::comment_to_json(y)}; },
+  [](const Stmt::Var &y) -> json { return {2, Stmt::var_to_json(y)}; },
+  [](const Stmt::Mut &y) -> json { return {3, Stmt::mut_to_json(y)}; },
+  [](const Stmt::Update &y) -> json { return {4, Stmt::update_to_json(y)}; },
+  [](const Stmt::While &y) -> json { return {5, Stmt::while_to_json(y)}; },
+  [](const Stmt::Break &y) -> json { return {6, Stmt::break_to_json(y)}; },
+  [](const Stmt::Cont &y) -> json { return {7, Stmt::cont_to_json(y)}; },
+  [](const Stmt::Cond &y) -> json { return {8, Stmt::cond_to_json(y)}; },
+  [](const Stmt::Return &y) -> json { return {9, Stmt::return_to_json(y)}; },
   [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
   }, *x);
 }
@@ -1589,13 +1604,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "d74b5ae71ae9da4f0833e2b485786063") {
-   throw std::runtime_error("Expecting ADT hash to be d74b5ae71ae9da4f0833e2b485786063, but was " + hash);
+  if(hash != "ac853744821d4aa51fde3be50e418401") {
+   throw std::runtime_error("Expecting ADT hash to be ac853744821d4aa51fde3be50e418401, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"d74b5ae71ae9da4f0833e2b485786063", x});
+  return json::array({"ac853744821d4aa51fde3be50e418401", x});
 }
 } // namespace polyregion::polyast

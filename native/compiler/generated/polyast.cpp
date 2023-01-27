@@ -1006,6 +1006,21 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Any &x) {
 }
 bool Stmt::operator==(const Stmt::Base &, const Stmt::Base &) { return true; }
 
+std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Block &x) {
+  os << "Block(";
+  os << '{';
+  if (!x.stmts.empty()) {
+    std::for_each(x.stmts.begin(), std::prev(x.stmts.end()), [&os](auto &&x) { os << x; os << ','; });
+    os << x.stmts.back();
+  }
+  os << '}';
+  os << ')';
+  return os;
+}
+bool Stmt::operator==(const Stmt::Block &l, const Stmt::Block &r) { 
+  return std::equal(l.stmts.begin(), l.stmts.end(), r.stmts.begin(), [](auto &&l, auto &&r) { return *l == *r; });
+}
+
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Comment &x) {
   os << "Comment(";
   os << '"' << x.value << '"';
@@ -1765,6 +1780,10 @@ std::size_t std::hash<polyregion::polyast::Expr::Invoke>::operator()(const polyr
   seed ^= std::hash<decltype(x.args)>()(x.args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.captures)>()(x.captures) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Stmt::Block>::operator()(const polyregion::polyast::Stmt::Block &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.stmts)>()(x.stmts);
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Stmt::Comment>::operator()(const polyregion::polyast::Stmt::Comment &x) const noexcept {

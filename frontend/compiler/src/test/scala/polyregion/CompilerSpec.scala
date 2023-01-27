@@ -77,15 +77,8 @@ class CompilerSpec extends munit.FunSuite {
 //    }
 //  }
 
-  trait X {
-    def m: Int
-  }
-  trait Y {
-    def m: Int = 1
-  }
-
+ 
   class Base(val a: Int) {
-//    override def m = 2
     def foo(n: Int): Int = a + n
   }
 
@@ -136,8 +129,10 @@ class CompilerSpec extends munit.FunSuite {
     CompilerTests.compilerAssert {
 
       val un = Unrelated()
-      val m = ClassB(9)
-//      m.foo(3)
+      val m = ClassB(123)
+      m.foo(12345)
+
+
       val o  = if(true) ClassA(2) else ClassB(9)
       o.foo(2)
 

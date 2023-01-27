@@ -8,7 +8,7 @@ import polyregion.ast.Traversal.*
 import scala.annotation.tailrec
 import cats.syntax.validated
 
-object VerifyPass extends BoundaryPass[List[(p.Function, List[String])]] {
+object VerifyPass {
 
   case class Context(declared: Set[p.Named] = Set.empty, errors: List[String] = Nil) {
     def |+|(y: Context): Context = copy(declared ++ y.declared, errors ::: y.errors)
@@ -38,7 +38,12 @@ object VerifyPass extends BoundaryPass[List[(p.Function, List[String])]] {
       }
   }
 
-  def validateSingle(f: p.Function, defs: List[p.StructDef], fs: List[p.Function]): List[String] = {
+  def validateSingle(
+      f: p.Function,
+      defs: List[p.StructDef],
+      fs: List[p.Function],
+      verifyFunction: Boolean
+  ): List[String] = {
 
     val sdefLUT = defs.map(x => x.name -> x).toMap
 
@@ -51,7 +56,7 @@ object VerifyPass extends BoundaryPass[List[(p.Function, List[String])]] {
               case s @ p.Type.Struct(name, tpeVars, args, _) =>
                 sdefLUT.get(name) match {
                   case None =>
-                    acc ~ s"Unknown struct type ${name} in `${t.repr}`, known structs: \n${sdefLUT.map(_._2).map(_.repr).mkString("\n")}"
+                    acc ~ s"Unknown struct type ${name.repr} in `${t.repr}`, known structs: \n${sdefLUT.map(_._2).map(_.repr).mkString("\n")}"
                   case Some(sdef) =>
                     if (sdef.tpeVars != tpeVars) {
                       acc ~ s"Struct def ${sdef.repr} and struct type ${s.repr} has different type variables"
@@ -110,6 +115,7 @@ object VerifyPass extends BoundaryPass[List[(p.Function, List[String])]] {
     }
 
     def validateStmt(c: Context, s: p.Stmt): Context = s match {
+      case p.Stmt.Block(xs)  => xs.foldLeft(c)(validateStmt(_, _))
       case p.Stmt.Comment(_) => c
       case p.Stmt.Var(name, expr) =>
         expr.map(e => validateExpr(_: Context, e)).getOrElse(identity[Context])(c + name)
@@ -159,34 +165,35 @@ object VerifyPass extends BoundaryPass[List[(p.Function, List[String])]] {
     }
 
     val allFnLUT = fs.map(f => f.name -> f).toMap
-    val badFnInvokeErrors = f
-      .collectWhere[p.Expr] { case ivk: p.Expr.Invoke =>
-        allFnLUT.get(ivk.name) match {
-          case None => s"Callsite `${ivk.repr}` invokes an undefined function" :: Nil
-          case Some(f) =>
-            val sig = f.signature
-            (None ::
-              Option.when(ivk.rtn != sig.rtn)(
-                s"Callsite return type mismatch for `${ivk.repr}`, function signature: ${sig.repr}"
-              ) :: Option.when(ivk.receiver.map(_.tpe) != sig.receiver)(
-                s"Callsite receiver mismatch for `${ivk.repr}`, function signature: ${sig.repr}"
-              ) :: Option.when(ivk.args.map(_.tpe) != sig.args)(
-                s"Callsite args mismatch for `${ivk.repr}`, function signature: ${sig.repr}"
-              ) :: Option.when(ivk.captures.map(_.tpe) != (sig.moduleCaptures ++ sig.termCaptures))(
-                s"Callsite capture mismatch for `${ivk.repr}`, function signature: ${sig.repr}"
-              ) :: Option.when(ivk.tpeArgs.size != sig.tpeVars.size)(
-                s"Callsite type arg arity mismatch for `${ivk.repr}`, function signature: ${sig.repr}"
-              ) ::
-              Nil).flatten
-        }
-      }
-      .flatten
+    val badFnInvokeErrors =
+      if (!verifyFunction) Nil
+      else
+        f.collectWhere[p.Expr] { case ivk: p.Expr.Invoke =>
+          allFnLUT.get(ivk.name) match {
+            case None => s"Callsite `${ivk.repr}` invokes an undefined function" :: Nil
+            case Some(f) =>
+              val sig = f.signature
+              (None ::
+                Option.when(ivk.rtn != sig.rtn)(
+                  s"Callsite return type mismatch for `${ivk.repr}`, function signature: ${sig.repr}"
+                ) :: Option.when(ivk.receiver.map(_.tpe) != sig.receiver)(
+                  s"Callsite receiver mismatch for `${ivk.repr}`, function signature: ${sig.repr}"
+                ) :: Option.when(ivk.args.map(_.tpe) != sig.args)(
+                  s"Callsite args mismatch for `${ivk.repr}`, function signature: ${sig.repr}"
+                ) :: Option.when(ivk.captures.map(_.tpe) != (sig.moduleCaptures ++ sig.termCaptures))(
+                  s"Callsite capture mismatch for `${ivk.repr}`, function signature: ${sig.repr}"
+                ) :: Option.when(ivk.tpeArgs.size != sig.tpeVars.size)(
+                  s"Callsite type arg arity mismatch for `${ivk.repr}`, function signature: ${sig.repr}"
+                ) ::
+                Nil).flatten
+          }
+        }.flatten
 
     varCollisionErrors ++ referenceAndTypeErrors ++ badReturnErrors ++ badFnInvokeErrors
   }
 
-  def apply(program: p.Program, log: Log): (List[(p.Function, List[String])], p.Program) = {
+  def apply(program: p.Program, log: Log, verifyFunction: Boolean): (List[(p.Function, List[String])]) = {
     val allFunctions = program.entry :: program.functions
-    allFunctions.map(f => f -> validateSingle(f, program.defs, allFunctions)) -> program
+    allFunctions.map(f => f -> validateSingle(f, program.defs, allFunctions, verifyFunction))
   }
 }

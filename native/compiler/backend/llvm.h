@@ -76,7 +76,7 @@ public:
 
     std::vector<Pair<Sym, llvm::StructType *>> getStructTypes() const;
 
-    Pair<Opt<std::string>, std::string> transform(llvm::Module &, const Function &);
+    Pair<Opt<std::string>, std::string> transform(llvm::Module &, const Function &, bool);
   };
 
   std::vector<compiler::Layout> resolveLayouts(const std::vector<StructDef> &defs, const AstTransformer &xform) const;

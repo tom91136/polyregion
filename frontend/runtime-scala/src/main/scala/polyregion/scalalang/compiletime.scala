@@ -184,208 +184,215 @@ object compiletime {
       f: Expr[Any],
       dim: Expr[rt.Dim3],
       cb: Expr[Callback[Unit]]
-  ) = for {
+  ) = {
+    val log = Log("")
+    val result = for {
 
-    // Name actual => type actual
-    // configs               <- reifyConfigFromTpe[C](using q.underlying)()
-    log <- Log("").success
-    (captures, prismRefs, monoMap, prog0 ) <- Compiler.compileExpr(log, f)
+      // Name actual => type actual
+      // configs               <- reifyConfigFromTpe[C](using q.underlying)()
 
-    resolveStructDef = (s: p.Type.Struct) => prog0.defs.find(_.name == s.name)
+      (captures, prismRefs, monoMap, prog0) <- Compiler.compileExpr(log, f)
 
-    // Match up the struct types from the capture args so that we know how to copy the structs during argument pickling.
-    capturesWithStructDefs <- captures.traverse {
-      case (n @ p.Named(_, p.Type.Struct(name, _, _)), term) =>
-        prog0.defs
-          .find(_.name == name)
-          .failIfEmpty(s"Missing structure def from capture args ${n.repr}")
-          .map(d => (n, Some(d), term))
-      case (n @ p.Named(_, tpe), term) => (n, None, term).success
-    }
+      resolveStructDef = (s: p.Type.Struct) => prog0.defs.find(_.name == s.name)
 
-    prog: p.Program = prog0.copy(entry = prog0.entry.copy(name = p.Sym(s"lambda${ProgramCounter.getAndIncrement()}")))
-    _               = println(log.render)
-
-    serialisedAst <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, prog)))
-    compiler = ct.Compiler.create()
-
-    compilations <- configs.traverse(c =>
-      Either
-        .catchNonFatal(compiler.compile(serialisedAst, true, ct.Options.of(c.target, c.arch), c.opt.value))
-        .map(c -> _)
-    )
-
-  } yield {
-
-    compilations.foreach { (config, c) =>
-      println(s"Config=${config}")
-      println(s"Program=${c.program.length}")
-      println(s"Messages=\n  ${c.messages}")
-      println(s"Features=\n  ${c.features.toList}")
-      println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
-      println(s"Captures=\n${capturesWithStructDefs}")
-    }
-
-    given Quotes = q.underlying
-
-    val fnName     = Expr(prog.entry.name.repr)
-    val moduleName = Expr(s"${prog0.entry.name.repr}@${ProgramCounter.getAndIncrement()}")
-    val (captureTpeOrdinals, captureTpeSizes) = capturesWithStructDefs.map { (name, _, _) =>
-      val tpe = Pickler.tpeAsRuntimeTpe(name.tpe)
-      tpe.value -> tpe.sizeInBytes
-    }.unzip
-    val returnTpeOrdinal = Pickler.tpeAsRuntimeTpe(prog.entry.rtn).value
-    val returnTpeSize    = Pickler.tpeAsRuntimeTpe(prog.entry.rtn).sizeInBytes
-
-    println(s"Prog defs: ${prog.defs}")
-
-    val code = '{
-
-      val cb_ : Callback[Unit] = $cb
-
-      // Validate device features support this code object.
-      val miss      = ArrayBuffer[(String, Set[String])]()
-      val available = Set($queue.device.features(): _*)
-
-      lazy val modules = Array[(String, Set[String], Array[Byte])](${
-        Varargs(compilations.map { (config, compilation) =>
-          Expr((s"${config.arch}@${config.opt}(${config.target})", Set(compilation.features: _*), compilation.program))
-
-        })
-      }: _*)
-
-      var found = -1
-      var i     = 0
-      while (i < modules.size && found == -1) {
-        val (name, required, _) = modules(i)
-        val missing             = required -- available
-        if (missing.isEmpty) found = i
-        else miss += ((name, missing))
-        i += 1
+      // Match up the struct types from the capture args so that we know how to copy the structs during argument pickling.
+      capturesWithStructDefs <- captures.traverse {
+        case (n @ p.Named(_, p.Type.Struct(name, _, _, _)), term) =>
+          prog0.defs
+            .find(_.name == name)
+            .failIfEmpty(s"Missing structure def from capture args ${n.repr}")
+            .map(d => (n, Some(d), term))
+        case (n @ p.Named(_, tpe), term) => (n, None, term).success
       }
-      if (found == -1) {
-        cb_(
-          Left(
-            new java.lang.RuntimeException(
-              s"Device (${$queue.device.name}) with features `${available.mkString(",")}` does not meet the requirement for any of the following binaries: ${miss
-                  .map((config, missing) => s"$config (missing ${missing.mkString(",")})")
-                  .mkString(",")} "
+
+      prog: p.Program = prog0.copy(entry = prog0.entry.copy(name = p.Sym(s"lambda${ProgramCounter.getAndIncrement()}")))
+      _               = println(log.render)
+
+      serialisedAst <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, prog)))
+      compiler = ct.Compiler.create()
+
+      compilations <- configs.traverse(c =>
+        Either
+          .catchNonFatal(compiler.compile(serialisedAst, true, ct.Options.of(c.target, c.arch), c.opt.value))
+          .map(c -> _)
+      )
+
+    } yield {
+
+      compilations.foreach { (config, c) =>
+        println(s"Config=${config}")
+        println(s"Program=${c.program.length}")
+        println(s"Messages=\n  ${c.messages}")
+        println(s"Features=\n  ${c.features.toList}")
+        println(s"Elapsed=\n${c.events.sortBy(_.epochMillis).mkString("\n")}")
+        println(s"Captures=\n${capturesWithStructDefs}")
+      }
+
+      given Quotes = q.underlying
+
+      val fnName     = Expr(prog.entry.name.repr)
+      val moduleName = Expr(s"${prog0.entry.name.repr}@${ProgramCounter.getAndIncrement()}")
+      val (captureTpeOrdinals, captureTpeSizes) = capturesWithStructDefs.map { (name, _, _) =>
+        val tpe = Pickler.tpeAsRuntimeTpe(name.tpe)
+        tpe.value -> tpe.sizeInBytes
+      }.unzip
+      val returnTpeOrdinal = Pickler.tpeAsRuntimeTpe(prog.entry.rtn).value
+      val returnTpeSize    = Pickler.tpeAsRuntimeTpe(prog.entry.rtn).sizeInBytes
+
+      println(s"Prog defs: ${prog.defs}")
+
+      val code = '{
+
+        val cb_ : Callback[Unit] = $cb
+
+        // Validate device features support this code object.
+        val miss      = ArrayBuffer[(String, Set[String])]()
+        val available = Set($queue.device.features(): _*)
+
+        lazy val modules = Array[(String, Set[String], Array[Byte])](${
+          Varargs(compilations.map { (config, compilation) =>
+            Expr(
+              (s"${config.arch}@${config.opt}(${config.target})", Set(compilation.features: _*), compilation.program)
+            )
+
+          })
+        }: _*)
+
+        var found = -1
+        var i     = 0
+        while (i < modules.size && found == -1) {
+          val (name, required, _) = modules(i)
+          val missing             = required -- available
+          if (missing.isEmpty) found = i
+          else miss += ((name, missing))
+          i += 1
+        }
+        if (found == -1) {
+          cb_(
+            Left(
+              new java.lang.RuntimeException(
+                s"Device (${$queue.device.name}) with features `${available.mkString(",")}` does not meet the requirement for any of the following binaries: ${miss
+                    .map((config, missing) => s"$config (missing ${missing.mkString(",")})")
+                    .mkString(",")} "
+              )
             )
           )
-        )
-      } else {
+        } else {
 
-        // We got everything, load the code object
-        if (! $queue.device.moduleLoaded($moduleName)) {
-          $queue.device.loadModule($moduleName, modules(found)._3)
-        }
+          // We got everything, load the code object
+          if (! $queue.device.moduleLoaded($moduleName)) {
+            $queue.device.loadModule($moduleName, modules(found)._3)
+          }
 
-        // Allocate parameter and return type ordinals and value buffers
-        val fnTpeOrdinals = ${ Expr((captureTpeOrdinals :+ returnTpeOrdinal).toArray) }
-        val fnValues =
-          ByteBuffer.allocate(${ Expr(captureTpeSizes.sum + returnTpeSize) }).order(ByteOrder.nativeOrder)
+          // Allocate parameter and return type ordinals and value buffers
+          val fnTpeOrdinals = ${ Expr((captureTpeOrdinals :+ returnTpeOrdinal).toArray) }
+          val fnValues =
+            ByteBuffer.allocate(${ Expr(captureTpeSizes.sum + returnTpeSize) }).order(ByteOrder.nativeOrder)
 
-        val ptrMap = scala.collection.mutable.Map[Any, Long]()
+          val ptrMap = scala.collection.mutable.Map[Any, Long]()
 
-        ${
+          ${
 
-          q.Match(
-            'found.asTerm,
-            compilations.zipWithIndex.map { case ((config, compilation), i) =>
-              val layouts0 = compilation.layouts.map(l => p.Sym(l.name.toList) -> l).toMap
+            q.Match(
+              'found.asTerm,
+              compilations.zipWithIndex.map { case ((config, compilation), i) =>
+                val layouts0 = compilation.layouts.map(l => p.Sym(l.name.toList) -> l).toMap
 
-              val lut     = prog.defs.map(s => s.name -> s).toMap
-              val layouts = prog.defs.map(sd => sd -> (layouts0(sd.name), prismRefs.get(sd.name))).toMap
-              val allReprsInCaptures = capturesWithStructDefs
-                .collect { case (_, Some(sdef), term) =>
-                  Pickler.deriveAllRepr(lut.map((s, sd) => s -> (sd, prismRefs.get(s))), sdef, term.tpe)
-                }
-                .reduceLeftOption(_ ++ _)
-                .getOrElse(Map.empty)
+                val lut     = prog.defs.map(s => s.name -> s).toMap
+                val layouts = prog.defs.map(sd => sd -> (layouts0(sd.name), prismRefs.get(sd.name))).toMap
+                val allReprsInCaptures = capturesWithStructDefs
+                  .collect { case (_, Some(sdef), term) =>
+                    Pickler.deriveAllRepr(lut.map((s, sd) => s -> (sd, prismRefs.get(s))), sdef, term.tpe)
+                  }
+                  .reduceLeftOption(_ ++ _)
+                  .getOrElse(Map.empty)
 
-              val (defs, write, read, update) = Pickler.generateAll(
-                lut,
-                layouts,
-                allReprsInCaptures,
-                '{ Platforms.pointerOfDirectBuffer(_) },
-                '{ Platforms.directBufferFromPointer(_, _) }
-              )
-
-              q.CaseDef(
-                q.Literal(q.IntConstant(i)),
-                None,
-                q.Block(
-                  defs,
-                  '{
-                    ${
-                      bindWrite(
-                        write(_, _, 'ptrMap),
-                        'fnValues,
-                        queue,
-                        capturesWithStructDefs
-                      )
-                    }
-
-                    println("Dispatch tid=" + Thread.currentThread.getId)
-                    println(s"fnTpeOrdinals=${fnTpeOrdinals.toList}")
-                    println(s"fnValues.array=${fnValues.array.toList}")
-                    // Dispatch.
-                    $queue.enqueueInvokeAsync(
-                      $moduleName,
-                      $fnName,
-                      fnTpeOrdinals,
-                      fnValues.array,
-                      rt.Policy($dim),
-                      { () =>
-                        println("Kernel completed, tid=" + Thread.currentThread.getId + " cb=" + cb_)
-
-                        val objMap = scala.collection.mutable.Map[Long, Any]()
-
-                        try {
-                          ${
-                            // Varargs(capturesWithStructDefs.map { case (named, maybeSdef, term) =>
-                            bindRead(
-                              read(_, _, _, 'ptrMap, 'objMap),
-                              update(_, _, _, 'ptrMap, 'objMap),
-                              'fnValues,
-                              queue,
-                              capturesWithStructDefs
-                            )
-                            // })
-                          }
-                          println("Restore complete")
-                          cb_(Right(()))
-                        } catch {
-                          case e: Throwable =>
-                            e.printStackTrace()
-                            cb_(Left(new Exception("Cannot sync", e)))
-                        }
-
-                        ()
-
-                        // // $queue.syncAll(() => cb_(Right(())))
-                        // try $queue.syncAll(() => cb_(Right(())))
-                        // catch {
-                        //   case e: Throwable =>
-                        //     e.printStackTrace()
-                        //   // cb_(Left(new Exception("Cannot sync",e)))
-                        // }
-                      }
-                    )
-
-                  }.asTerm
+                val (defs, write, read, update) = Pickler.generateAll(
+                  lut,
+                  layouts,
+                  allReprsInCaptures,
+                  '{ Platforms.pointerOfDirectBuffer(_) },
+                  '{ Platforms.directBufferFromPointer(_, _) }
                 )
-              )
-            } :+ q.CaseDef(q.Wildcard(), None, '{ ??? }.asTerm)
-          ).asExprOf[Unit]
-        }
 
+                q.CaseDef(
+                  q.Literal(q.IntConstant(i)),
+                  None,
+                  q.Block(
+                    defs,
+                    '{
+                      ${
+                        bindWrite(
+                          write(_, _, 'ptrMap),
+                          'fnValues,
+                          queue,
+                          capturesWithStructDefs
+                        )
+                      }
+
+                      println("Dispatch tid=" + Thread.currentThread.getId)
+                      println(s"fnTpeOrdinals=${fnTpeOrdinals.toList}")
+                      println(s"fnValues.array=${fnValues.array.toList}")
+                      // Dispatch.
+                      $queue.enqueueInvokeAsync(
+                        $moduleName,
+                        $fnName,
+                        fnTpeOrdinals,
+                        fnValues.array,
+                        rt.Policy($dim),
+                        { () =>
+                          println("Kernel completed, tid=" + Thread.currentThread.getId + " cb=" + cb_)
+
+                          val objMap = scala.collection.mutable.Map[Long, Any]()
+
+                          try {
+                            ${
+                              // Varargs(capturesWithStructDefs.map { case (named, maybeSdef, term) =>
+                              bindRead(
+                                read(_, _, _, 'ptrMap, 'objMap),
+                                update(_, _, _, 'ptrMap, 'objMap),
+                                'fnValues,
+                                queue,
+                                capturesWithStructDefs
+                              )
+                              // })
+                            }
+                            println("Restore complete")
+                            cb_(Right(()))
+                          } catch {
+                            case e: Throwable =>
+                              e.printStackTrace()
+                              cb_(Left(new Exception("Cannot sync", e)))
+                          }
+
+                          ()
+
+                          // // $queue.syncAll(() => cb_(Right(())))
+                          // try $queue.syncAll(() => cb_(Right(())))
+                          // catch {
+                          //   case e: Throwable =>
+                          //     e.printStackTrace()
+                          //   // cb_(Left(new Exception("Cannot sync",e)))
+                          // }
+                        }
+                      )
+
+                    }.asTerm
+                  )
+                )
+              } :+ q.CaseDef(q.Wildcard(), None, '{ ??? }.asTerm)
+            ).asExprOf[Unit]
+          }
+
+        }
       }
+      given q.Printer[q.Tree] = q.Printer.TreeAnsiCode
+      println("Code=" + code.asTerm.show)
+      compiler.close()
+      code
     }
-    given q.Printer[q.Tree] = q.Printer.TreeAnsiCode
-    println("Code=" + code.asTerm.show)
-    compiler.close()
-    code
+    println(log.render(1).mkString("\n"))
+    result
   }
 
   type PtrMapTpe = scala.collection.mutable.Map[Any, Long]
@@ -423,11 +430,11 @@ object compiletime {
             throw new RuntimeException(
               s"Top level arrays at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
             )
-          case (s @ p.Type.Struct(_, _, _), None, _) =>
+          case (s @ p.Type.Struct(_, _, _, _), None, _) =>
             throw new RuntimeException(
               s"Struct type without definition at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
             )
-          case (s @ p.Type.Struct(_, _, _), Some(sdef), '{ $ref: t }) =>
+          case (s @ p.Type.Struct(_, _, _, _), Some(sdef), '{ $ref: t }) =>
             println(s"$ref = " + ref.asTerm.symbol.flags.show)
 
             val rtn = write(sdef.name, ref)
@@ -467,11 +474,11 @@ object compiletime {
             throw new RuntimeException(
               s"Top level arrays at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
             )
-          case (s @ p.Type.Struct(_, _, _), None, _) =>
+          case (s @ p.Type.Struct(_, _, _, _), None, _) =>
             throw new RuntimeException(
               s"Struct type without definition at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
             )
-          case (s @ p.Type.Struct(_, _, _), Some(sdef), '{ $ref: t }) =>
+          case (s @ p.Type.Struct(_, _, _, _), Some(sdef), '{ $ref: t }) =>
             println(s"$ref = " + ref.asTerm.symbol.flags.show)
             val ptr = Pickler.readPrim(target, Expr(byteOffset), p.Type.Long).asExprOf[Long]
             '{

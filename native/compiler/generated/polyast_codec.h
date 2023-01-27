@@ -72,6 +72,8 @@ namespace NullaryIntrinsicKind {
 [[nodiscard]] EXPORT json any_to_json(const NullaryIntrinsicKind::Any &);
 } // namespace NullaryIntrinsicKind
 namespace Stmt { 
+[[nodiscard]] EXPORT Stmt::Block block_from_json(const json &);
+[[nodiscard]] EXPORT json block_to_json(const Stmt::Block &);
 [[nodiscard]] EXPORT Stmt::Comment comment_from_json(const json &);
 [[nodiscard]] EXPORT json comment_to_json(const Stmt::Comment &);
 [[nodiscard]] EXPORT Stmt::Var var_from_json(const json &);

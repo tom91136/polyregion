@@ -155,11 +155,11 @@ object IntrinsifyPass extends ProgramPass {
       case inv @ p.Expr.Invoke(sym, tpeArgs, Some(recv), args, captures, rtn) =>
         (sym.fqn, recv, args) match {
           case (
-                "polyregion" :: "scala" :: "intrinsics$" :: op :: Nil,
+                "polyregion" :: "scalalang" :: "intrinsics$" :: op :: Nil,
                 p.Term
                   .Select(
                     Nil,
-                    p.Named(_, p.Type.Struct(p.Sym("polyregion" :: "scala" :: "intrinsics$" :: Nil), _, _, _))
+                    p.Named(_, p.Type.Struct(p.Sym("polyregion" :: "scalalang" :: "intrinsics$" :: Nil), _, _, _))
                   ),
                 xs
               ) =>
@@ -169,7 +169,7 @@ object IntrinsifyPass extends ProgramPass {
             (expr, (stmts, inv :: Nil))
 
           case (
-                "polyregion" :: "scala" :: "intrinsics$" :: "TypedBuffer" :: op :: Nil,
+                "polyregion" :: "scalalang" :: "intrinsics$" :: "TypedBuffer" :: op :: Nil,
                 xs @ p.Term
                   .Select(
                     _,
@@ -283,7 +283,7 @@ object IntrinsifyPass extends ProgramPass {
             (expr, (stmts, inv :: Nil))
           case (
                 ("scala" :: "Array" :: "apply" :: Nil) |                              //
-                ("polyregion" :: "scala" :: "Buffer" :: "apply" :: Nil) |             //
+                ("polyregion" :: "scalalang" :: "Buffer" :: "apply" :: Nil) |             //
                 ("scala" :: "collection" :: "SeqOps" :: "apply" :: Nil) |             //
                 ("scala" :: "collection" :: "mutable" :: "SeqOps" :: "apply" :: Nil), //
                 xs @ p.Term.Select(_, p.Named(_, p.Type.Array(_))),
@@ -292,7 +292,7 @@ object IntrinsifyPass extends ProgramPass {
             (p.Expr.Index(xs, idx, rtn), (Nil, inv :: Nil))
           case (
                 ("scala" :: "Array" :: "update" :: Nil) |                             //
-                ("polyregion" :: "scala" :: "Buffer" :: "update" :: Nil) |            //
+                ("polyregion" :: "scalalang" :: "Buffer" :: "update" :: Nil) |            //
                 ("scala" :: "collection" :: "mutable" :: "SeqOps" :: "update" :: Nil) //
                 ,
                 xs @ p.Term.Select(_, p.Named(_, p.Type.Array(_))),
