@@ -513,7 +513,7 @@ object Compiler {
     _ = unoptLog.info(s"Entry", unopt.entry.repr)
 
     // verify before optimisation
-    unoptVerification <- VerifyPass.run(unopt)(unoptLog).success
+    (unoptVerification,_) <- VerifyPass(unopt, unoptLog).success
     _ = unoptLog.info(
       s"Verifier",
       unoptVerification.map((f, xs) => s"${f.signatureRepr}\nError = ${xs.map("\t->" + _).mkString("\n")}")*
@@ -536,7 +536,7 @@ object Compiler {
 
     // verify again after optimisation
     optLog = log.subLog("Opt")
-    optVerification <- VerifyPass.run(opt)(optLog).success
+    (optVerification,_) <- VerifyPass(opt, optLog).success
 
     _ = optLog.info(s"Structures = ${opt.defs.size}", opt.defs.map(_.repr)*)
     _ = optLog.info(s"Functions  = ${opt.functions.size}", opt.functions.map(_.repr)*)

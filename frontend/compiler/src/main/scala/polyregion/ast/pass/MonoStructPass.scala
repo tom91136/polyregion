@@ -34,7 +34,10 @@ object MonoStructPass extends BoundaryPass[Map[p.Sym, p.Sym]] {
       parents = struct.parents
     )
 
-    val replacementTable = monoStructDefs.toMap
+    // Make sure we rename the parents too
+    val nameTable = monoStructDefs.map((s, sdef) => s.name -> sdef.name).toMap
+    val replacementTable =
+      monoStructDefs.map((s, sdef) => s -> sdef.copy(parents = sdef.parents.map(nameTable(_)))).toMap
 
     println(s"[Rep] Table:\n${replacementTable.map((k, v) => s"\t${k.repr} => ${v.repr}").mkString("\n")}")
 
