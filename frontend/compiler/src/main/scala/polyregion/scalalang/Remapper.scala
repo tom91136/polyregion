@@ -482,7 +482,19 @@ object Remapper {
                   case (clsDef: q.ClassDef, tpe: p.Type.Struct) => c.updateDeps(_.witness(clsDef, tpe)).success
                   case (bad, tpe) => s"super class $tpe is not backed by a class tree: $bad".fail
                 }
-                (term, c) <- invokeOrSelect(c)(select.symbol, Some(p.Term.Select(Nil, thisCls)))(
+
+                // we're gonna case this down to the base
+                superSubclassSymbol <- term.tpe.classSymbol
+                  .failIfEmpty(s"subclass of superclass ${term.tpe.show} does not have a class symbol")
+                superSubclassTpe <- Retyper.clsSymTyper0(superSubclassSymbol)
+
+                c <- c.down(select).success
+                castResult = c.down(select).named(thisCls.tpe)
+                c <- (c ::= p.Stmt.Var(
+                  castResult,
+                  Some(p.Expr.Cast(p.Term.Select(Nil, thisCls.copy(tpe = superSubclassTpe)), thisCls.tpe))
+                )).success
+                (term, c) <- invokeOrSelect(c)(select.symbol, Some(p.Term.Select(Nil, castResult)))(
                   "illegal selection of a non DefDef symbol from super".fail
                 )
               } yield (term, c)
@@ -503,6 +515,18 @@ object Remapper {
                   }
                 }
           }
+    }
+
+    private def mkMut(t: q.Tree, lhs: p.Term, rhs: p.Expr): (List[p.Stmt], q.RemapContext) = if (lhs.tpe == rhs.tpe) {
+      (p.Stmt.Mut(lhs, rhs, copy = false) :: Nil, c)
+    } else {
+      val c0       = c.down(t)
+      val tempName = c0.named(rhs.tpe)
+      (
+        p.Stmt.Var(tempName, Some(rhs)) ::
+          p.Stmt.Mut(lhs, p.Expr.Cast(p.Term.Select(Nil, tempName), lhs.tpe), copy = false) :: Nil,
+        c0
+      )
     }
 
     def mapTerm(
@@ -608,10 +632,8 @@ object Remapper {
             (rhsRef, c) <- (c !! term).mapTerm(rhs)
             r <- (lhsRef, rhsRef) match {
               case (s @ p.Term.Select(_, _), rhs) =>
-                (
-                  p.Term.UnitConst,
-                  c ::= p.Stmt.Mut(s, p.Expr.Alias(rhs), copy = false)
-                ).success
+                val (xs, c0) = c.mkMut(term, s, p.Expr.Alias(rhs))
+                (p.Term.UnitConst, c0.::=(xs*)).success
               case (lhs, rhs) => c.fail(s"Illegal assign LHS,RHS: lhs=${lhs.repr} rhs=$rhs")
             }
           } yield r
@@ -626,15 +648,19 @@ object Remapper {
               if (condTerm.tpe != p.Type.Bool) s"Cond must be a Bool ref, got ${condTerm}".fail
               else ().success
 
-            mkCondStmts = (tpe : p.Type) => {
-              val name   = ifCtx.named(tpe)
+            mkCondStmts = (tpe: p.Type) => {
+              val name   = elseCtx.named(tpe)
               val result = p.Stmt.Var(name, None)
+
+              val (thenStmts, c0) = elseCtx.mkMut(term, p.Term.Select(Nil, name), p.Expr.Alias(thenTerm))
+              val (elseStmts, c1) = c0.mkMut(term, p.Term.Select(Nil, name), p.Expr.Alias(elseTerm))
+
               val cond = p.Stmt.Cond(
                 p.Expr.Alias(condTerm),
-                thenCtx.stmts :+ p.Stmt.Mut(p.Term.Select(Nil, name), p.Expr.Alias(thenTerm), copy = false),
-                elseCtx.stmts :+ p.Stmt.Mut(p.Term.Select(Nil, name), p.Expr.Alias(elseTerm), copy = false)
+                thenCtx.stmts ++ thenStmts,
+                elseCtx.stmts ++ elseStmts
               )
-              (p.Term.Select(Nil, name), elseCtx.replaceStmts(ifCtx.stmts :+ result :+ cond)).success
+              (p.Term.Select(Nil, name), c1.replaceStmts(ifCtx.stmts :+ result :+ cond)).success
             }
 
             // See https://dotty.epfl.ch/docs/reference/new-types/union-types-spec.html#erasure
@@ -647,7 +673,7 @@ object Remapper {
               case (
                     p.Type.Struct(_, _, _, thenTpeParents),
                     p.Type.Struct(_, _, _, elseTpeParents),
-                    Some(widened@p.Type.Struct(name, _, _, _))
+                    Some(widened @ p.Type.Struct(name, _, _, _))
                   ) if thenTpeParents.contains(name) && elseTpeParents.contains(name) =>
                 // We got a something like:
                 // `val a : Base = if(???) ClassA() else ClassB() # ClassA <: Base, ClassB <: Base`

@@ -1,17 +1,17 @@
 #pragma once
 
 #include <cstring>
-//#include <fstream>
+// #include <fstream>
+#include <algorithm>
 #include <functional>
+#include <limits>
 #include <numeric>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <type_traits>
-#include <vector>
 #include <unordered_map>
-#include <optional>
-#include <algorithm>
-#include <limits>
+#include <vector>
 
 namespace polyregion {
 
@@ -46,7 +46,15 @@ std::string mk_string2(const std::unordered_map<K, V> &xs,
 
 template <typename T, typename U>
 std::vector<U> map_vec(const std::vector<T> &xs, const std::function<U(const T &)> &f) {
-  std::vector<U> ys ;
+  std::vector<U> ys;
+  std::transform(std::begin(xs), std::end(xs), std::back_inserter(ys), f);
+  return ys;
+}
+
+
+// See https://stackoverflow.com/a/64500326
+template <typename C, typename F> auto map_vec2(C &&xs, F &&f) -> std::vector<decltype(f(std::forward<C>(xs)[0]))> {
+  std::vector<decltype(f(std::forward<C>(xs)[0]))> ys;
   std::transform(std::begin(xs), std::end(xs), std::back_inserter(ys), f);
   return ys;
 }
@@ -68,20 +76,25 @@ static std::vector<std::string> split(const std::string &str, char delim) {
   return xs;
 }
 
-//template <typename T> std::vector<T> read_struct(const std::string &path) {
-//  std::fstream s(path, std::ios::binary | std::ios::in);
-//  if (!s.good()) {
-//    throw std::invalid_argument("Cannot open binary file for reading: " + path);
-//  }
-//  s.ignore(std::numeric_limits<std::streamsize>::max());
-//  auto len = s.gcount();
-//  s.clear();
-//  s.seekg(0, std::ios::beg);
-//  std::vector<T> xs(len / sizeof(T));
-//  s.read(reinterpret_cast<char *>(xs.data()), len);
-//  s.close();
-//  return xs;
-//}
+template <typename S> S indent(size_t n, const S &in) {
+  return mk_string<S>(
+      split(in, '\n'), [n](auto &l) { return std::string(n, ' ') + l; }, "\n");
+}
+
+// template <typename T> std::vector<T> read_struct(const std::string &path) {
+//   std::fstream s(path, std::ios::binary | std::ios::in);
+//   if (!s.good()) {
+//     throw std::invalid_argument("Cannot open binary file for reading: " + path);
+//   }
+//   s.ignore(std::numeric_limits<std::streamsize>::max());
+//   auto len = s.gcount();
+//   s.clear();
+//   s.seekg(0, std::ios::beg);
+//   std::vector<T> xs(len / sizeof(T));
+//   s.read(reinterpret_cast<char *>(xs.data()), len);
+//   s.close();
+//   return xs;
+// }
 
 template <typename T, template <typename...> typename Container>
 constexpr std::optional<T> get_opt(const Container<T> &xs, size_t i) {
@@ -158,6 +171,6 @@ static typename std::enable_if<std::is_unsigned<I>::value && std::is_unsigned<J>
   return static_cast<I>(value);
 }
 
-//constexpr inline unsigned int operator"" _(char const *p, size_t s) { return hash(p, s); }
+// constexpr inline unsigned int operator"" _(char const *p, size_t s) { return hash(p, s); }
 
 } // namespace polyregion

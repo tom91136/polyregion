@@ -44,6 +44,35 @@ static llvm::Value *sizeOf(llvm::IRBuilder<> &B, llvm::LLVMContext &C, llvm::Typ
 
 static llvm::Value *load(llvm::IRBuilder<> &B, llvm::Value *rhs, llvm::Type *ty) { return B.CreateLoad(ty, rhs); }
 
+LLVM::AstTransformer::AstTransformer(LLVM::Options options, llvm::LLVMContext &c)
+    : options(std::move(options)), C(c), stackVarPtrs(), structTypes(), functions(), B(C) {
+  // Work out what address space we're using for arguments
+  switch (options.target) {
+    case Target::x86_64:
+    case Target::AArch64:
+    case Target::ARM:
+      break; // CPUs default to generic so nothing to do here.
+      // For GPUs, any pointer passed in as args should be annotated global AS.
+      //             AMDGPU   |   NVVM
+      //      Generic (code)  0  Generic (code)
+      //       Global (Host)  1  Global
+      //        Region (GDS)  2  Internal Use
+      //         Local (LDS)  3  Shared
+      // Constant (Internal)  4  Constant
+      //             Private  5  Local
+    case Target::NVPTX64:
+      GlobalAS = 1;
+      AllocaAS = 0;
+      break;
+
+    case Target::AMDGCN:
+      GlobalAS = 1;
+      AllocaAS = 5;
+      break;
+    case Target::SPIRV64: undefined(__FILE__, __LINE__); break;
+  }
+}
+
 llvm::Value *LLVM::AstTransformer::invokeMalloc(llvm::Function *parent, llvm::Value *size) {
   return B.CreateCall(mkExternalFn(parent, Type::Array(Type::Byte()), "malloc", {Type::Long()}), size);
 }
@@ -204,14 +233,9 @@ llvm::Value *LLVM::AstTransformer::mkTermVal(const Term::Any &ref) {
 
 llvm::Function *LLVM::AstTransformer::mkExternalFn(llvm::Function *parent, const Type::Any &rtn,
                                                    const std::string &name, const std::vector<Type::Any> &args) {
-  const Signature s(Sym({name}), {}, {}, args, {}, {}, rtn);
-  if (functions.find(s) == functions.end()) {
-    auto llvmArgs = map_vec<Type::Any, llvm::Type *>(args, [&](auto t) { return mkTpe(t); });
-    auto ft = llvm::FunctionType::get(mkTpe(rtn), llvmArgs, false);
-    auto f = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, name, parent->getParent());
-    functions[s] = f;
-  }
-  return functions[s];
+  auto llvmArgs = map_vec<Type::Any, llvm::Type *>(args, [&](auto t) { return mkTpe(t); });
+  auto ft = llvm::FunctionType::get(mkTpe(rtn), llvmArgs, false);
+  return llvm::Function::Create(ft, llvm::Function::ExternalLinkage, name, parent->getParent());
 }
 
 llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Function *fn, const std::string &key) {
@@ -657,6 +681,20 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
         auto toTpe = mkTpe(x.as);
         enum class NumKind { Fractional, Integral };
 
+
+        // Same type
+        if (*x.as == *tpe(x.from)) return from;
+
+        // x.as <: x.from
+        auto lhsStruct = get_opt<Type::Struct>(x.as);
+        auto rhsStruct = get_opt<Type::Struct>(tpe(x.from));
+        if (lhsStruct && rhsStruct && std::any_of(lhsStruct->parents.begin(), lhsStruct->parents.end(),
+                                                  [&](auto &x) { return x == rhsStruct->name; })) {
+           return from;
+        }
+
+
+
         auto fromKind = variants::total(
             *kind(tpe(x.from)), [&](const TypeKind::Integral &) -> NumKind { return NumKind::Integral; },
             [&](const TypeKind::Fractional &) -> NumKind { return NumKind::Fractional; },
@@ -713,8 +751,34 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
       },
       [&](const Expr::Alias &x) -> ValPtr { return mkTermVal(x.ref); },
       [&](const Expr::Invoke &x) -> ValPtr {
-        //        auto lhs = mkTermVal(x.lhs );
-        return undefined(__FILE__, __LINE__, "Unimplemented invoke:`" + repr(x) + "`");
+        std::vector<Term::Any> allArgs;
+        if (x.receiver) allArgs.push_back((*x.receiver));
+        for (auto &arg : x.args)
+          allArgs.push_back((arg));
+        for (auto &arg : x.captures)
+          allArgs.push_back((arg));
+
+        auto paramTerms = map_vec2(allArgs, [&](auto &&term) { return mkTermVal(term); });
+
+        InvokeSignature sig(x.name, {}, map_opt(x.receiver, [](auto &x) { return tpe(x); }),
+                            map_vec2(x.args, [](auto &x) { return tpe(x); }),
+                            map_vec2(x.captures, [](auto &x) { return tpe(x); }), x.rtn);
+
+        if (auto fn = functions.find(sig); fn != functions.end()) {
+
+          for (auto x : allArgs) {
+            std::cout << "[param]" << repr(x) << std::endl;
+          }
+          std::cout << "[IVK]" << llvm_tostring(fn->second) << std::endl;
+
+          return B.CreateCall(fn->second, paramTerms);
+        } else {
+
+          for (auto [key, v] : functions) {
+            std::cerr << key << " = " << v << " =m" << (key == sig) << std::endl;
+          }
+          return undefined(__FILE__, __LINE__, "Cannot find function " + to_string(sig));
+        }
       },
       [&](const Expr::Index &x) -> ValPtr {
         if (auto lhs = get_opt<Term::Select>(x.lhs); lhs) {
@@ -748,6 +812,17 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
       });
 }
 
+static bool canAssign(Type::Any lhs, Type::Any rhs) {
+  if (*lhs == *rhs) return true;
+  auto lhsStruct = get_opt<Type::Struct>(lhs);
+  auto rhsStruct = get_opt<Type::Struct>(rhs);
+  if (lhsStruct && rhsStruct) {
+    return std::any_of(lhsStruct->parents.begin(), lhsStruct->parents.end(),
+                       [&](auto &x) { return x == rhsStruct->name; });
+  }
+  return false;
+}
+
 LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<WhileCtx> whileCtx = {}) {
 
   //  // XXX bool is i8 where non-zero values are true,
@@ -774,10 +849,12 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
         // [T : ref] =>> t:T* = &(rhs:T) ; lut += t
         // [T : val] =>> t:T  =   rhs:T  ; lut += &t
 
-        if (x.expr && tpe(*x.expr) != x.name.tpe) {
+        if (canAssign(tpe(*x.expr), x.name.tpe)) {
           throw std::logic_error("Semantic error: name type " + to_string(x.name.tpe) + " and rhs expr type " +
                                  to_string(tpe(*x.expr)) + " mismatch (" + repr(x) + ")");
         }
+
+        // or, check if x.name.tpe.parent.contains( x.expr.tpe)
 
         auto tpe = mkTpe(x.name.tpe);
 
@@ -980,57 +1057,36 @@ std::vector<Pair<Sym, llvm::StructType *>> LLVM::AstTransformer::getStructTypes(
   return results;
 }
 
-Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform( //
-    llvm::Module &mod, const Function &fnTree, bool entryPoint) {
-
-  // Work out what address space we're using for arguments
-  unsigned GlobalAS = 0;
-  switch (options.target) {
-    case Target::x86_64:
-    case Target::AArch64:
-    case Target::ARM:
-      break; // CPUs default to generic so nothing to do here.
-      // For GPUs, any pointer passed in as args should be annotated global AS.
-      //             AMDGPU   |   NVVM
-      //      Generic (code)  0  Generic (code)
-      //       Global (Host)  1  Global
-      //        Region (GDS)  2  Internal Use
-      //         Local (LDS)  3  Shared
-      // Constant (Internal)  4  Constant
-      //             Private  5  Local
-    case Target::NVPTX64:
-      GlobalAS = 1;
-      AllocaAS = 0;
-      break;
-
-    case Target::AMDGCN:
-      GlobalAS = 1;
-      AllocaAS = 5;
-      break;
-    case Target::SPIRV64: undefined(__FILE__, __LINE__); break;
-  }
-
+static std::vector<Named> collectFnDeclarationNames(const Function &f) {
   std::vector<Named> allArgs;
-  if (fnTree.receiver) allArgs.insert(allArgs.begin(), *fnTree.receiver);
-  allArgs.insert(allArgs.begin(), fnTree.args.begin(), fnTree.args.end());
-  allArgs.insert(allArgs.begin(), fnTree.moduleCaptures.begin(), fnTree.moduleCaptures.end());
-  allArgs.insert(allArgs.begin(), fnTree.termCaptures.begin(), fnTree.termCaptures.end());
+  if (f.receiver) allArgs.push_back(*f.receiver);
+  allArgs.insert(allArgs.end(), f.args.begin(), f.args.end());
+  allArgs.insert(allArgs.end(), f.moduleCaptures.begin(), f.moduleCaptures.end());
+  allArgs.insert(allArgs.end(), f.termCaptures.begin(), f.termCaptures.end());
+  return allArgs;
+}
 
-  auto paramTpes = map_vec<Named, llvm::Type *>(allArgs, [&](auto &&named) {
+void LLVM::AstTransformer::addFn(llvm::Module &mod, const Function &f, bool entry) {
+
+  auto paramTpes = map_vec<Named, llvm::Type *>(collectFnDeclarationNames(f), [&](auto &&named) {
     auto tpe = mkTpe(named.tpe, GlobalAS, true);
     return tpe->isStructTy() ? B.getPtrTy(GlobalAS) : tpe;
   });
 
   // Unit type at function return type position is void
   // Any other location, Unit is a singleton value
-  auto rtnTpe = holds<Type::Unit>(fnTree.rtn) ? llvm::Type::getVoidTy(C) : mkTpe(fnTree.rtn, 0, true);
+  auto rtnTpe = holds<Type::Unit>(f.rtn) ? llvm::Type::getVoidTy(C) : mkTpe(f.rtn, 0, true);
 
   auto fnTpe = llvm::FunctionType::get(rtnTpe, {paramTpes}, false);
 
-  auto *fn = llvm::Function::Create(fnTpe, llvm::Function::ExternalLinkage, qualified(fnTree.name), mod);
+  auto *fn = llvm::Function::Create(fnTpe,                                                                    //
+                                    entry ? llvm::Function::ExternalLinkage : llvm::Function::PrivateLinkage, //
+                                    qualified(f.name),                                                        //
+                                    mod);
 
-  if (entryPoint) {
-    // setup function conventions for targets
+  fn->setDSOLocal(true);
+
+  if (entry) { // setup external function conventions for targets
     switch (options.target) {
       case Target::x86_64:
       case Target::AArch64:
@@ -1049,10 +1105,73 @@ Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform( //
     }
   }
 
+  std::vector<Type::Any> argTpes;
+  for (auto &n : f.moduleCaptures)
+    argTpes.push_back(n.tpe);
+  for (auto &n : f.termCaptures)
+    argTpes.push_back(n.tpe);
+
+  functions.emplace(InvokeSignature(f.name,                                             //
+                                    {},                                                 //
+                                    map_opt(f.receiver, [](auto &x) { return x.tpe; }), //
+                                    map_vec2(f.args, [](auto &x) { return x.tpe; }),    //
+                                    argTpes,                                            //
+                                    f.rtn),
+                    fn);
+}
+
+Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform(llvm::Module &mod, const Program &program) {
+
+  transform(mod, program.entry);
+  for (auto &f : program.functions)
+    transform(mod, f);
+
+  std::string ir;
+  llvm::raw_string_ostream irOut(ir);
+  mod.print(irOut, nullptr);
+
+  std::string err;
+  llvm::raw_string_ostream errOut(err);
+  if (llvm::verifyModule(mod, &errOut)) {
+    std::cerr << "Verification failed:\n" << errOut.str() << "\nIR=\n" << irOut.str() << std::endl;
+    return {errOut.str(), irOut.str()};
+  } else {
+    return {{}, irOut.str()};
+  }
+}
+
+void LLVM::AstTransformer::transform(llvm::Module &mod, const Function &fnTree) {
+
+  std::vector<Type::Any> argTpes;
+  for (auto &n : fnTree.moduleCaptures)
+    argTpes.push_back(n.tpe);
+  for (auto &n : fnTree.termCaptures)
+    argTpes.push_back(n.tpe);
+
+  InvokeSignature sig(fnTree.name,                                             //
+                      {},                                                      //
+                      map_opt(fnTree.receiver, [](auto &x) { return x.tpe; }), //
+                      map_vec2(fnTree.args, [](auto &x) { return x.tpe; }),    //
+                      argTpes,                                                 //
+                      fnTree.rtn);
+
+  auto it = functions.find(sig);
+  if (it == functions.end()) {
+
+    for (auto [key, v] : functions) {
+      std::cerr << key << " = " << v << " = m " << (key == sig) << std::endl;
+    }
+
+    throw std::logic_error("Cannot find function " + to_string(sig) + ", function was not added before xform?");
+  }
+
+  auto *fn = it->second;
+
   auto *entry = llvm::BasicBlock::Create(C, "entry", fn);
   B.SetInsertPoint(entry);
 
   // add function params to the lut first as function body will need these at some point
+  auto allArgs = collectFnDeclarationNames(fnTree);
   std::transform(                                      //
       fn->arg_begin(), fn->arg_end(), allArgs.begin(), //
       std::inserter(stackVarPtrs, stackVarPtrs.end()), //
@@ -1070,29 +1189,9 @@ Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform( //
         return {named.symbol, {named.tpe, stack}};
       });
 
-  for (auto &stmt : fnTree.body) {
+  for (auto &stmt : fnTree.body)
     mkStmt(stmt, fn);
-  }
-
-  std::string ir;
-  llvm::raw_string_ostream irOut(ir);
-  mod.print(irOut, nullptr);
-
-  std::string err;
-  llvm::raw_string_ostream errOut(err);
-  if (llvm::verifyModule(mod, &errOut)) {
-    std::cerr << "Verification failed:\n" << errOut.str() << "\nIR=\n" << irOut.str() << std::endl;
-    return {errOut.str(), irOut.str()};
-  } else {
-    return {{}, irOut.str()};
-  }
 }
-
-// Opt<llvm::StructType *> LLVM::AstTransformer::lookup(const Sym &s) {
-//   if (auto x = get_opt(structTypes, s); x) return x->first;
-//   else
-//     return {};
-// }
 
 llvmc::TargetInfo LLVM::Options::toTargetInfo() const {
   using llvm::Triple;
@@ -1180,37 +1279,22 @@ compiler::Compilation backend::LLVM::compileProgram(const Program &program, cons
 
   LLVM::AstTransformer xform(options, ctx);
   xform.addDefs(program.defs);
+  xform.addFn(*mod, program.entry, true);
+  for (auto &f : program.functions)
+    xform.addFn(*mod, f, false);
 
+  auto transformStart = compiler::nowMono();
+  auto [maybeTransformErr, transformMsg] = xform.transform(*mod, program);
+  compiler::Event ast2IR(compiler::nowMs(), compiler::elapsedNs(transformStart), "ast_to_llvm_ir", transformMsg);
 
+  auto verifyStart = compiler::nowMono();
+  auto [maybeVerifyErr, verifyMsg] = llvmc::verifyModule(*mod);
+  compiler::Event astOpt(compiler::nowMs(), compiler::elapsedNs(verifyStart), "llvm_ir_verify", verifyMsg);
 
-  auto xformedFunctions = map_vec<Function, Pair<Opt<std::string>, compiler::Event>>(program.functions, [&](auto &f) {
-    auto fnXform = compiler::nowMono();
-    auto [fnError, fnIR] = xform.transform(*mod, f, false);
-    auto fnXformElapsed = compiler::elapsedNs(fnXform);
-    return std::make_pair(fnError,
-                          compiler::Event(compiler::nowMs(), fnXformElapsed, "ast_to_llvm_ir_" + repr(f.name), fnIR));
-  });
-
-  auto entryXform = compiler::nowMono();
-  auto [entryError, entryIR] = xform.transform(*mod, program.entry, true);
-  auto entryXformElapsed = compiler::elapsedNs(entryXform);
-  compiler::Event ast2IR(compiler::nowMs(), entryXformElapsed, "ast_to_llvm_ir_entry", entryIR);
-
-  auto optXform = compiler::nowMono();
-  auto [optError, optIR] = llvmc::optimiseModule(*mod);
-  auto optXformElapsed = compiler::elapsedNs(optXform);
-  compiler::Event astOpt(compiler::nowMs(), optXformElapsed, "llvm_ir_opt", optIR);
-
-  if (entryError || optError ||
-      std::any_of(xformedFunctions.begin(), xformedFunctions.end(), [](auto &x) { return x.first.has_value(); })) {
-
+  if (maybeTransformErr || maybeVerifyErr) {
     std::vector<std::string> errors;
-    for (auto &[e, _] : xformedFunctions) {
-      if (e) errors.push_back(*e);
-    }
-    if (entryError) errors.push_back(*entryError);
-    if (optError) errors.push_back(*optError);
-
+    if (maybeTransformErr) errors.push_back(*maybeTransformErr);
+    if (maybeVerifyErr) errors.push_back(*maybeVerifyErr);
     return {{},
             {},               //
             {ast2IR, astOpt}, //
@@ -1220,8 +1304,6 @@ compiler::Compilation backend::LLVM::compileProgram(const Program &program, cons
 
   auto c = llvmc::compileModule(options.toTargetInfo(), opt, true, std::move(mod), ctx);
   c.layouts = resolveLayouts(program.defs, xform);
-  for (auto &[_, event] : xformedFunctions)
-    c.events.emplace_back(event);
   c.events.emplace_back(ast2IR);
   c.events.emplace_back(astOpt);
 

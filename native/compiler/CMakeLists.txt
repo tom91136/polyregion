@@ -15,9 +15,11 @@ set(LIB_SOURCES
 add_library(compiler-lib ${LIB_SOURCES})
 add_dependencies(compiler-lib intrinsics_gen)
 
-add_executable(compiler-tests test/ast_codegen.cpp test/backend.cpp)
+add_executable(compiler-tests test/ast_codegen.cpp test/backend.cpp test/ast.cpp)
 add_executable(compiler-drv driver.cpp)
 add_dependencies(compiler-drv runtime-lib)
+
+
 
 target_include_directories(compiler-tests PUBLIC . ../include)
 target_include_directories(compiler-drv PUBLIC . ../include PRIVATE ../runtime)
@@ -26,6 +28,29 @@ target_include_directories(compiler-lib PUBLIC
         ${LLD_INCLUDE_DIRS}
         ${json_SOURCE_DIR}
         . ../include
+        )
+
+target_precompile_headers(compiler-tests PRIVATE
+        generated/polyast.h
+        generated/polyast_codec.h
+
+        compiler.h
+        ast.h
+
+        backend/backend.h
+        backend/c_source.h
+        backend/llvm.h
+        backend/llvmc.h
+        backend/suppress_fd.h
+        ../include/utils.hpp
+        ../include/variants.hpp
+        ${Catch2_SOURCE_DIR}/src/catch2/catch_all.hpp
+
+        <optional>
+        <ostream>
+        <unordered_map>
+        <utility>
+        <vector>
         )
 
 llvm_map_components_to_libnames(LLVM_LIBS

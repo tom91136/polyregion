@@ -206,7 +206,9 @@ object compiletime {
       }
 
       prog: p.Program = prog0.copy(entry = prog0.entry.copy(name = p.Sym(s"lambda${ProgramCounter.getAndIncrement()}")))
-      _               = println(log.render)
+      _ = println(log.render(1).mkString("\n"))
+      _               = println(prog.entry.repr)
+      _               = println(prog.functions.map(_.repr).mkString("\n"))
 
       serialisedAst <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, prog)))
       compiler = ct.Compiler.create()
@@ -391,7 +393,6 @@ object compiletime {
       compiler.close()
       code
     }
-    println(log.render(1).mkString("\n"))
     result
   }
 

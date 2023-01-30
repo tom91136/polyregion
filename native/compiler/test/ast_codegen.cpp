@@ -45,6 +45,7 @@ template <typename P> static void assertCompile(const P &p) {
   CAPTURE(c);
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);
+  std::cout << (c) << std::endl;
 }
 
 TEST_CASE("json round-trip", "[ast]") {
@@ -72,6 +73,21 @@ TEST_CASE("initialise more than once", "[compiler]") {
   polyregion::compiler::initialise();
   polyregion::compiler::initialise();
   polyregion::compiler::initialise();
+}
+
+TEST_CASE("fn call", "[compiler]") {
+  polyregion::compiler::initialise();
+  auto tpe = GENERATE(from_range(std::vector{Int}));
+  DYNAMIC_SECTION(tpe) {
+    CAPTURE(tpe);
+    auto callee = function("bar", {"a"_(tpe)}, tpe)({
+        ret("a"_(tpe)) //
+    });
+    auto entry = function("foo", {}, tpe)({
+        ret(Invoke(Sym({"bar"}), {}, {}, {generateConstValue(tpe)}, {}, tpe)) //
+    });
+    assertCompile(program(entry, {}, {callee}));
+  }
 }
 
 TEST_CASE("constant return", "[compiler]") {

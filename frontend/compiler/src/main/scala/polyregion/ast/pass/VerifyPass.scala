@@ -20,9 +20,9 @@ object VerifyPass {
       else {
         // ok, see if the same var is defined with another type
         (declared.find(_.symbol == n.symbol), n.tpe) match {
-          case (Some(nn @ p.Named(_, p.Type.Struct(_, _, _, parents))), p.Type.Struct(name, _, _, _))
-              if parents.contains(name) =>
-            this // Subtypes are ok
+          // case (Some(nn @ p.Named(_, p.Type.Struct(_, _, _, parents))), p.Type.Struct(name, _, _, _))
+          //     if parents.contains(name) =>
+          //   this // Subtypes are ok
           case (Some(existing), _) =>
             copy(errors =
               s"$tree uses the variable ${n.repr}, " +
@@ -103,8 +103,17 @@ object VerifyPass {
       case p.Expr.UnaryIntrinsic(lhs, kind, rtn) => validateTerm(c, lhs)
       case p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn) =>
         (validateTerm(_: Context, lhs)).andThen(validateTerm(_, rhs))(c)
-      case p.Expr.Cast(from, as) => validateTerm(c, from)
-      case p.Expr.Alias(ref)     => validateTerm(c, ref)
+      case p.Expr.Cast(from, as) =>
+        val c0 = validateTerm(c, from)
+        (from.tpe, as) match {
+          case (from, as) if from == as => c0
+          case (p.Type.Struct(_, _, _, parents), p.Type.Struct(name, _, _, _)) if parents.contains(name) =>
+            c0 // safe upcase
+          case (p.Type.Struct(name, _, _, _), p.Type.Struct(_, _, _, parents)) if parents.contains(name) =>
+            c0 // unsafe downcast
+          case (from, as) => c0 ~ s"Cannot cast unrelated type ${from.repr} to ${as.repr}: ${e.repr}"
+        }
+      case p.Expr.Alias(ref) => validateTerm(c, ref)
       case p.Expr.Invoke(name, tpeArgs, receiver, args, captures, rtn) =>
         val c0 = receiver.map(validateTerm(c, _)).getOrElse(c)
         val c1 = args.foldLeft(c0)(validateTerm(_, _))
@@ -118,8 +127,16 @@ object VerifyPass {
       case p.Stmt.Block(xs)  => xs.foldLeft(c)(validateStmt(_, _))
       case p.Stmt.Comment(_) => c
       case p.Stmt.Var(name, expr) =>
-        expr.map(e => validateExpr(_: Context, e)).getOrElse(identity[Context])(c + name)
-      case p.Stmt.Mut(name, expr, copy) => (validateTerm(_: Context, name)).andThen(validateExpr(_, expr))(c)
+        val c0 = expr.map(e => validateExpr(_: Context, e)).getOrElse(identity[Context])(c + name)
+        expr match {
+          case Some(rhs) if rhs.tpe != name.tpe =>
+            c0 ~ s"Var declaration of incompatible type ${rhs.tpe.repr} != ${name.tpe.repr}: ${s.repr}"
+          case _ => c0
+        }
+      case p.Stmt.Mut(name, expr, copy) =>
+        val c0 = (validateTerm(_: Context, name)).andThen(validateExpr(_, expr))(c)
+        if (name.tpe == expr.tpe) c0
+        else c0 ~ s"Assignment of incompatible type ${expr.tpe.repr} != ${name.tpe.repr}: ${s.repr}"
       case p.Stmt.Update(lhs, idx, value) =>
         (validateTerm(_, lhs)).andThen(validateTerm(_, idx)).andThen(validateTerm(_, value))(c)
       case p.Stmt.While(tests, cond, body) =>

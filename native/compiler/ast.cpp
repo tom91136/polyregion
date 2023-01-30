@@ -173,8 +173,8 @@ using std::string;
       *stmt, //
       [](const Stmt::Block &x) {
         return "{ \n" +
-               mk_string<Stmt::Any>(
-                   x.stmts, [&](auto x) { return repr(x); }, "\n") +
+               indent(2, mk_string<Stmt::Any>(
+                             x.stmts, [&](auto x) { return repr(x); }, "\n")) +
                "}";
       },
       [](const Stmt::Comment &x) { return "// " + x.value; },
@@ -186,18 +186,18 @@ using std::string;
             x.tests, [&](auto x) { return repr(x); }, "\n");
 
         return "while({" + tests + ";" + repr(x.cond) + "}){\n" +
-               mk_string<Stmt::Any>(
-                   x.body, [&](auto x) { return repr(x); }, "\n") +
+               indent(2, mk_string<Stmt::Any>(
+                             x.body, [&](auto x) { return repr(x); }, "\n")) +
                "}";
       },
       [](const Stmt::Break &x) { return "break;"s; }, [](const Stmt::Cont &x) { return "continue;"s; },
       [](const Stmt::Cond &x) {
         return "if(" + repr(x.cond) + ") { \n" +
-               mk_string<Stmt::Any>(
-                   x.trueBr, [&](auto x) { return repr(x); }, "\n") +
+               indent(2, mk_string<Stmt::Any>(
+                             x.trueBr, [&](auto x) { return repr(x); }, "\n")) +
                "} else {\n" +
-               mk_string<Stmt::Any>(
-                   x.falseBr, [&](auto x) { return repr(x); }, "\n") +
+               indent(2, mk_string<Stmt::Any>(
+                             x.falseBr, [&](auto x) { return repr(x); }, "\n")) +
                "}";
       },
       [](const Stmt::Return &x) { return "return " + repr(x.value); });
@@ -208,8 +208,8 @@ using std::string;
          mk_string<Named>(
              fn.args, [&](auto x) { return repr(x); }, ",") +
          ") : " + repr(fn.rtn) + " = {\n" +
-         mk_string<Stmt::Any>(
-             fn.body, [&](auto x) { return repr(x); }, "\n") +
+         indent(2, mk_string<Stmt::Any>(
+                       fn.body, [&](auto x) { return repr(x); }, "\n")) +
          "\n}";
 }
 

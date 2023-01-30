@@ -37,6 +37,7 @@ private[polyregion] object CppSourceMirror {
     :: deriveStruct[StructMember]()
     :: deriveStruct[StructDef]()
     :: deriveStruct[Signature]()
+    :: deriveStruct[InvokeSignature]()
     :: deriveStruct[Function]()
     :: deriveStruct[Program]()
     :: Nil

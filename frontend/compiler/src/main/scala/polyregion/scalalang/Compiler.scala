@@ -15,8 +15,10 @@ object Compiler {
   import Retyper.*
 
   private val ProgramPasses: List[ProgramPass] = List(
-    DynamicDispatchPass,
     IntrinsifyPass,
+    SpecialisationPass,
+    DynamicDispatchPass,
+
 //    FnInlinePass,
     VarReducePass,
     UnitExprElisionPass,
@@ -86,7 +88,7 @@ object Compiler {
   ): Result[(List[p.Function], Set[p.StructDef], Set[q.Symbol])] = for {
     log <- sink.subLog(s"Compile ${deps.size} dependent function(s)").success
     _ = deps.foreach { (fn, ivks) =>
-      log.info(q.DefDef(fn.symbol, rhsFn = _ => None).show, ivks.map(_.repr).toList.sorted*)
+      log.info(q.DefDef(fn, rhsFn = _ => None).show, ivks.map(_.repr).toList.sorted*)
     }
 
     (_ /*input*/, fns, clsDeps, moduleSymDeps) <- (
@@ -97,7 +99,7 @@ object Compiler {
     ).iterateWhileM { (remaining, fnAcc, clsDepAcc, moduleSymDepAcc) =>
       remaining.toList
         .foldLeftM((fnAcc, Map.empty: q.FnWitnesses, clsDepAcc, moduleSymDepAcc)) {
-          case ((xs, depss, clsDepss, moduleSymDepss), (defDef, ivks)) =>
+          case ((xs, depss, clsDepss, moduleSymDepss), (sym, ivks)) =>
             for {
               // XXX Generic specialisation on invoke is done in a pass later so we can ignore it for now
               _ <-
@@ -112,12 +114,16 @@ object Compiler {
                 case _ :: Nil => // We have a perfect match from existing functions, no further actions needed
                   (xs, depss, clsDepss, moduleSymDepss).success
                 case Nil => // Not there, we now look at actual dependencies
-                  println(s">>>> xs=${remaining.keys.toList.map(x => x.symbol.fullName)}")
+                  println(s">>>> xs=${remaining.keys.toList.map(x => x.fullName)}")
 
+                  val defDef = sym.tree.asInstanceOf[q.DefDef]
                   matchingSignatures(fnLut.keys, target).map(s => fnLut(s)).toList match {
                     case Nil => // We found no replacement, log it and keep going.
                       if (defDef.rhs.isEmpty) {
-                        log.info(s"No implementation: ${target.repr}", fnLut.keys.map(r =>s"Candidate: ${r.repr}").toList*)
+                        log.info(
+                          s"No implementation: ${target.repr}",
+                          fnLut.keys.map(r => s"Candidate: ${r.repr}").toList*
+                        )
                         (
                           xs,
                           depss,
@@ -308,10 +314,10 @@ object Compiler {
   )(clsLut: Map[p.Sym, p.StructDef]): Result[(p.Function, q.FnWitnesses, Set[p.StructDef], Set[q.Symbol])] =
     for {
       log <- sink.subLog(s"Compile dependent structs & apply replacements").success
-      (replacedClasses, classes) <- deps.classes.toList.partitionEitherM { case (clsDef, tpeAps) =>
-        findMatchingClassInHierarchy(clsDef.symbol, clsLut) match {
+      (replacedClasses, classes) <- deps.classes.toList.partitionEitherM { case (clsSym, tpeAps) =>
+        findMatchingClassInHierarchy(clsSym, clsLut) match {
           case Some(x) => Left(tpeAps -> x).success
-          case None    => structDef0(clsDef.symbol).map(x => Right(tpeAps -> x))
+          case None    => structDef0(clsSym).map(x => Right(tpeAps -> x))
         }
       }
       (replacedModules, modules) <- deps.modules.toList.partitionEitherM { case (symbol, tpe) =>
@@ -369,7 +375,7 @@ object Compiler {
       _ = log.info("All struct defs", structDefs.toList.map(_.repr).sorted*)
       _ = log.info(
         "Dependent defs",
-        mappedFnDeps.map((f, ivks) => s"${f.show} \ncallsites: \n${ivks.map(_.repr).mkString("\n")}").toList*
+        mappedFnDeps.map((f, ivks) => s"${f.fullName} \ncallsites: \n${ivks.map(_.repr).mkString("\n")}").toList*
       )
       _ = log.info("Fn after replacements", mappedFn.repr)
 
@@ -449,15 +455,14 @@ object Compiler {
     )
 
     // We mark all potentially required virtual methods in the universe.
-    allClassSymbols = exprDeps.classes.map(_._1.symbol).toList
-    depsWithOverrides = exprDeps.functions.flatMap { (defdef, ivks) =>
-      val symbol = defdef.symbol
-      (defdef -> ivks) :: allClassSymbols
-        .map(symbol.overridingSymbol(_))
+    allClassSymbols = exprDeps.classes.map(_._1).toList
+    depsWithOverrides = exprDeps.functions.flatMap { (sym, ivks) =>
+      (sym -> ivks) :: allClassSymbols
+        .map(sym.overridingSymbol(_))
         .filter(s => !s.isNoSymbol && s.isDefDef)
         .map(_.tree)
-        .collect { case x: q.DefDef => x }
-        .filter(_ != defdef) // don't add the same one again
+        .collect { case x: q.DefDef => x.symbol }
+        .filter(_ != sym) // don't add the same one again
         .map(_ -> ivks)
     }.toMap
 

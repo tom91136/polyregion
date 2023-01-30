@@ -167,6 +167,15 @@ object PolyAst {
       rtn: Type
   ) derives MsgPack.Codec
 
+  case class InvokeSignature(
+      name: Sym,
+      tpeVars: List[Type],
+      receiver: Option[Type],
+      args: List[Type],
+      captures: List[Type],
+      rtn: Type
+  ) derives MsgPack.Codec
+
   case class Function(             //
       name: Sym,                   //
       tpeVars: List[String],       //

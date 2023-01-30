@@ -1546,6 +1546,35 @@ json signature_to_json(const Signature& x) {
   return json::array({name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn});
 }
 
+InvokeSignature invokesignature_from_json(const json& j) { 
+  auto name =  sym_from_json(j.at(0));
+  std::vector<Type::Any> tpeVars;
+  auto tpeVars_json = j.at(1);
+  std::transform(tpeVars_json.begin(), tpeVars_json.end(), std::back_inserter(tpeVars), &Type::any_from_json);
+  auto receiver = j.at(2).is_null() ? std::nullopt : std::make_optional(Type::any_from_json(j.at(2)));
+  std::vector<Type::Any> args;
+  auto args_json = j.at(3);
+  std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &Type::any_from_json);
+  std::vector<Type::Any> captures;
+  auto captures_json = j.at(4);
+  std::transform(captures_json.begin(), captures_json.end(), std::back_inserter(captures), &Type::any_from_json);
+  auto rtn =  Type::any_from_json(j.at(5));
+  return {name, tpeVars, receiver, args, captures, rtn};
+}
+
+json invokesignature_to_json(const InvokeSignature& x) { 
+  auto name =  sym_to_json(x.name);
+  std::vector<json> tpeVars;
+  std::transform(x.tpeVars.begin(), x.tpeVars.end(), std::back_inserter(tpeVars), &Type::any_to_json);
+  auto receiver = x.receiver ? Type::any_to_json(*x.receiver) : json{};
+  std::vector<json> args;
+  std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &Type::any_to_json);
+  std::vector<json> captures;
+  std::transform(x.captures.begin(), x.captures.end(), std::back_inserter(captures), &Type::any_to_json);
+  auto rtn =  Type::any_to_json(x.rtn);
+  return json::array({name, tpeVars, receiver, args, captures, rtn});
+}
+
 Function function_from_json(const json& j) { 
   auto name =  sym_from_json(j.at(0));
   auto tpeVars = j.at(1).get<std::vector<std::string>>();
@@ -1604,13 +1633,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "ac853744821d4aa51fde3be50e418401") {
-   throw std::runtime_error("Expecting ADT hash to be ac853744821d4aa51fde3be50e418401, but was " + hash);
+  if(hash != "075c7cbef64ab48bdf60398ceb0b5abf") {
+   throw std::runtime_error("Expecting ADT hash to be 075c7cbef64ab48bdf60398ceb0b5abf, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"ac853744821d4aa51fde3be50e418401", x});
+  return json::array({"075c7cbef64ab48bdf60398ceb0b5abf", x});
 }
 } // namespace polyregion::polyast

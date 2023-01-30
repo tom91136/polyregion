@@ -33,6 +33,7 @@
 
 #include "llvm_utils.hpp"
 #include "llvm/IR/Verifier.h"
+#include "llvm/Transforms/IPO/Inliner.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 
 #include <iostream>
@@ -140,25 +141,21 @@ static void setFunctionAttributes(llvm::StringRef CPU, llvm::StringRef Features,
   F.setAttributes(Attrs.addFnAttributes(Ctx, NewAttrs));
 }
 
-polyast::Pair<polyast::Opt<std::string>, std::string> llvmc::optimiseModule(llvm::Module &mod) {
-  llvm::PassManagerBuilder builder;
-  builder.OptLevel = 3;
-  llvm::legacy::PassManager m;
-  builder.populateModulePassManager(m);
-  m.add(llvm::createInstructionCombiningPass());
-  m.run(mod);
-
-  std::string ir;
-  llvm::raw_string_ostream irOut(ir);
-  mod.print(irOut, nullptr);
-
+polyast::Pair<polyast::Opt<std::string>, std::string> llvmc::verifyModule(llvm::Module &mod) {
   std::string err;
   llvm::raw_string_ostream errOut(err);
   if (llvm::verifyModule(mod, &errOut)) {
-    return {errOut.str(), irOut.str()};
+    return {errOut.str(), "(module failed verification)"};
   } else {
-    return {{}, irOut.str()};
+    return {{}, "(module passed verification)"};
   }
+}
+
+static std::string module2Ir(const llvm::Module &m) {
+  std::string ir;
+  llvm::raw_string_ostream irOut(ir);
+  m.print(irOut, nullptr);
+  return ir;
 }
 
 compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compiler::Opt &opt, bool emitDisassembly,
@@ -211,84 +208,77 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
   }
 
   B.NewGVN = true;
+  B.MergeFunctions = true;
   B.SizeLevel = 0;
   B.LoopVectorize = B.OptLevel >= 2;
   B.SLPVectorize = B.OptLevel >= 2;
   //  B.RerollLoops = true;
   //  B.LoopsInterleaved = true;
 
-  auto doCodegen =
-      [&](llvm::Module &m,
-          const std::function<void(llvm::LLVMTargetMachine &, llvm::legacy::PassManager &, llvm::MCContext &)> &f) {
-        llvm::legacy::PassManager PM;
-        // XXX we have no rtti here so no dynamic cast
-        auto &LLVMTM =
-            static_cast<llvm::LLVMTargetMachine &>( // NOLINT(cppcoreguidelines-pro-type-static-cast-downcast)
-                *TM);
-        auto *MMIWP = new llvm::MachineModuleInfoWrapperPass(&LLVMTM); // pass manager takes owner of this
-        PM.add(MMIWP);
-        PM.add(createTargetTransformInfoWrapperPass(TM->getTargetIRAnalysis()));
-        llvm::TargetPassConfig *PassConfig = LLVMTM.createPassConfig(PM);
-        // Set PassConfig options provided by TargetMachine.
-        PassConfig->setDisableVerify(true);
-        PM.add(PassConfig);
-        // PM done
+  auto mkArtefact = [&](const llvm::CodeGenFileType &tpe, const llvm::Module &m0, std::vector<compiler::Event> &events,
+                        bool emplaceEvent) {
+    auto m = llvm::CloneModule(m0);
+    auto optPassStart = compiler::nowMono();
 
-        llvm::legacy::FunctionPassManager FNP(&m);
-        FNP.add(createTargetTransformInfoWrapperPass(TM->getTargetIRAnalysis()));
+    llvm::legacy::PassManager PM;
+    auto &LLVMTM =                              // XXX we have no rtti here so no dynamic cast
+        static_cast<llvm::LLVMTargetMachine &>( // NOLINT(cppcoreguidelines-pro-type-static-cast-downcast)
+            *TM);
+    auto *MMIWP = new llvm::MachineModuleInfoWrapperPass(&LLVMTM); // pass manager takes owner of this
+    PM.add(MMIWP);
+    PM.add(createTargetTransformInfoWrapperPass(TM->getTargetIRAnalysis()));
+    llvm::TargetPassConfig *PassConfig = LLVMTM.createPassConfig(PM);
+    // Set PassConfig options provided by TargetMachine.
+    PassConfig->setDisableVerify(true);
+    PM.add(PassConfig);
+    // PM done
 
-        TM->adjustPassManager(B);
-        B.populateFunctionPassManager(FNP);
-        B.populateModulePassManager(PM);
+    llvm::legacy::FunctionPassManager FNP(m.get());
+    FNP.add(createTargetTransformInfoWrapperPass(TM->getTargetIRAnalysis()));
 
-        FNP.doInitialization();
-        for (llvm::Function &func : *M) {
-          FNP.run(func);
-        }
-        FNP.doFinalization();
+    TM->adjustPassManager(B);
+    B.populateFunctionPassManager(FNP);
+    B.populateModulePassManager(PM);
 
-        if (PassConfig->addISelPasses()) throw std::logic_error("No ISEL");
-        PassConfig->addMachinePasses();
-        PassConfig->setInitialized();
+    FNP.doInitialization();
+    for (llvm::Function &func : *M) {
+      FNP.run(func);
+    }
+    FNP.doFinalization();
 
-        if (llvm::TargetPassConfig::willCompleteCodeGenPipeline()) {
-          f(LLVMTM, PM, MMIWP->getMMI().getContext());
-        }
-        PM.run(m);
-      };
+    auto iselPassStart = compiler::nowMono();
+    if (PassConfig->addISelPasses()) throw std::logic_error("No ISEL");
+    PassConfig->addMachinePasses();
+    PassConfig->setInitialized();
 
-  auto mkArtefact = [&](const llvm::CodeGenFileType &tpe) {
-    auto start = compiler::nowMono();
-    auto timestamp = compiler::nowMs();
     llvm::SmallVector<char, 0> objBuffer;
     llvm::raw_svector_ostream objStream(objBuffer);
-    doCodegen(*llvm::CloneModule(*M),
-              [&](auto &tm, auto &pm, auto &ctx) { tm.addAsmPrinter(pm, objStream, nullptr, tpe, ctx); });
-    return std::make_tuple(objBuffer, timestamp, compiler::elapsedNs(start));
-  };
 
-  //  llvm::legacy::PassManager pass;
-  //  llvm::SmallString<8> dataObj;
-  //  llvm::raw_svector_ostream destObj(dataObj);
-  //  TM->addPassesToEmitFile(pass, destObj, nullptr, llvm::CGFT_ObjectFile);
-  //  pass.run(*llvm::CloneModule(*M));
-  //  std::string obj(dataObj.begin(), dataObj.end());
+    if (llvm::TargetPassConfig::willCompleteCodeGenPipeline()) {
+      LLVMTM.addAsmPrinter(PM, objStream, nullptr, tpe, MMIWP->getMMI().getContext());
+    }
+    PM.run(*m);
+    if (emplaceEvent) {
+      events.emplace_back(compiler::nowMs(), compiler::elapsedNs(optPassStart), "llvm_to_obj_opt", module2Ir(*m));
+    }
+    return std::make_tuple(objBuffer, compiler::nowMs(), compiler::elapsedNs(iselPassStart));
+  };
 
   auto objectSize = [](const llvm::SmallVector<char, 0> &xs) {
     return std::to_string(static_cast<float>(xs.size_in_bytes()) / 1024) + "KiB";
   };
 
+  std::vector<compiler::Event> events;
+
   switch (info.triple.getOS()) {
     case llvm::Triple::AMDHSA: {
       // We need to link the object file for AMDGPU at this stage to get a working ELF binary.
       // This can only be done with LLD so just do it here after compiling.
-
-      std::vector<compiler::Event> events;
-
-      auto [object, objectStart, objectElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_ObjectFile);
+      auto [object, objectStart, objectElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_ObjectFile, *M, events, true);
       events.emplace_back(objectStart, objectElapsed, "llvm_to_obj", objectSize(object));
       if (emitDisassembly) {
-        auto [assembly, assemblyStart, assemblyElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_AssemblyFile);
+        auto [assembly, assemblyStart, assemblyElapsed] =
+            mkArtefact(llvm::CodeGenFileType::CGFT_AssemblyFile, *M, events, false);
         events.emplace_back(assemblyStart, assemblyElapsed, "llvm_to_asm",
                             std::string(assembly.begin(), assembly.end()));
       }
@@ -311,25 +301,26 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
       // NVIDIA's documentation only supports up-to PTX generation and ingestion via the CUDA driver API, so we can't
       // assemble the PTX to a CUBIN (SASS). Given that PTX ingestion is supported, we just generate that for now.
       // XXX ignore emitDisassembly here as PTX *is* the binary
-      auto [ptx, ptxStart, ptxElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_AssemblyFile);
-      return {std::vector<char>(ptx.begin(), ptx.end()),
-              {info.cpu.uArch},
-              {{ptxStart, ptxElapsed, "llvm_to_ptx", std::string(ptx.begin(), ptx.end())}}};
+      auto [ptx, ptxStart, ptxElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_AssemblyFile, *M, events, true);
+      events.emplace_back(ptxStart, ptxElapsed, "llvm_to_ptx", std::string(ptx.begin(), ptx.end()));
+      return {std::vector<char>(ptx.begin(), ptx.end()), {info.cpu.uArch}, events};
     }
     default:
 
       auto features = polyregion::split(info.cpu.features, ',');
       polyregion::llvm_shared::collectCPUFeatures(info.cpu.uArch, info.triple.getArch(), features);
 
-      auto [object, objectStart, objectElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_ObjectFile);
+      auto [object, objectStart, objectElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_ObjectFile, *M, events, true);
+      events.emplace_back(objectStart, objectElapsed, "llvm_to_obj", objectSize(object));
+
       std::vector<char> binary(object.begin(), object.end());
       if (emitDisassembly) {
-        auto [assembly, assemblyStart, assemblyElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_AssemblyFile);
-        return {binary,
-                features,
-                {{objectStart, objectElapsed, "llvm_to_obj", objectSize(object)},
-                 {assemblyStart, assemblyElapsed, "llvm_to_asm", std::string(assembly.begin(), assembly.end())}}};
-      } else
-        return {binary, features, {{objectStart, objectElapsed, "llvm_to_obj", objectSize(object)}}};
+        auto [assembly, assemblyStart, assemblyElapsed] =
+            mkArtefact(llvm::CodeGenFileType::CGFT_AssemblyFile, *M, events, false);
+        events.emplace_back(assemblyStart, assemblyElapsed, "llvm_to_asm",
+                            std::string(assembly.begin(), assembly.end()));
+      }
+
+      return {binary, features, events};
   }
 }

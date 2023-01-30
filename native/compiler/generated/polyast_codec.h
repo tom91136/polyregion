@@ -201,6 +201,8 @@ namespace Term {
 [[nodiscard]] EXPORT json structdef_to_json(const StructDef &);
 [[nodiscard]] EXPORT Signature signature_from_json(const json &);
 [[nodiscard]] EXPORT json signature_to_json(const Signature &);
+[[nodiscard]] EXPORT InvokeSignature invokesignature_from_json(const json &);
+[[nodiscard]] EXPORT json invokesignature_to_json(const InvokeSignature &);
 [[nodiscard]] EXPORT Function function_from_json(const json &);
 [[nodiscard]] EXPORT json function_to_json(const Function &);
 [[nodiscard]] EXPORT Program program_from_json(const json &);

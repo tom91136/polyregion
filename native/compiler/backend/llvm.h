@@ -10,6 +10,7 @@
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
 
 #include "llvmc.h"
+#include "utils.hpp"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
@@ -43,12 +44,13 @@ public:
     Options options;
     llvm::LLVMContext &C;
     unsigned int AllocaAS = 0;
+    unsigned int GlobalAS = 0;
 
   private:
     using StructMemberIndexTable = Map<std::string, size_t>;
     Map<std::string, Pair<Type::Any, llvm::Value *>> stackVarPtrs;
     Map<Sym, Pair<llvm::StructType *, StructMemberIndexTable>> structTypes;
-    Map<Signature, llvm::Function *> functions;
+    Map<InvokeSignature, llvm::Function *> functions;
     llvm::IRBuilder<> B;
 
     llvm::Value *findStackVar(const Named &named);
@@ -68,15 +70,19 @@ public:
     //    Opt<llvm::StructType *> lookup(const Sym &s);
     //    llvm::Value *conditionalLoad(llvm::Value *rhs);
 
+
   public:
-    AstTransformer(Options options, llvm::LLVMContext &c)
-        : options(std::move(options)), C(c), stackVarPtrs(), structTypes(), functions(), B(C) {}
+    AstTransformer(Options options, llvm::LLVMContext &c);
 
     void addDefs(const std::vector<StructDef> &);
+    void addFn(llvm::Module &mod, const Function &f, bool entry);
+
 
     std::vector<Pair<Sym, llvm::StructType *>> getStructTypes() const;
 
-    Pair<Opt<std::string>, std::string> transform(llvm::Module &, const Function &, bool);
+    void transform(llvm::Module &mod, const Function &program);
+
+    Pair<Opt<std::string>, std::string> transform(llvm::Module &mod, const Program &program);
   };
 
   std::vector<compiler::Layout> resolveLayouts(const std::vector<StructDef> &defs, const AstTransformer &xform) const;

@@ -280,7 +280,7 @@ object Retyper {
               symbol.tree match {
                 case clsDef: q.ClassDef =>
                   val appliedTpe: p.Type.Struct = p.Type.Struct(name, tpeVars, ctorArgs.map(_._2), deriveParents(symbol))
-                  (None -> appliedTpe, wit |+| Map(clsDef -> Set(appliedTpe))).success
+                  (None -> appliedTpe, wit |+| Map(symbol -> Set(appliedTpe))).success
                 case _ => s"$symbol is not a ClassDef".fail
               }
           }
@@ -314,7 +314,7 @@ object Retyper {
           liftClsToTpe(sym, tpeVars, symbol, kind) match {
             case s @ p.Type.Struct(_, _, _, _) =>
               symbol.tree match {
-                case clsDef: q.ClassDef => (None -> s, Map(clsDef -> Set(s))).success
+                case clsDef: q.ClassDef => (None -> s, Map(symbol -> Set(s))).success
                 case _                  => s"$symbol is not a ClassDef".fail
               }
             case tpe => (None -> tpe, Map.empty).success

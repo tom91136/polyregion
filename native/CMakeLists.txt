@@ -92,6 +92,7 @@ else ()
             -Wno-unused-parameter
             -Wno-unused-function
             -Wno-unused-variable
+            -ftime-trace
             )
 endif ()
 

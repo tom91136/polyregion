@@ -7,12 +7,13 @@ import polyregion.ast.mirror.CppStructGen.{StructSource, ToCppType}
 import polyregion.ast.mirror.compiletime
 // import polyregion.ast.mirror.compiletime.CtorTermSelect
 
+import polyregion.ast.mirror.CppStructGen.ToCppTerm.Value
+
 import java.nio.file.{Files, Paths, StandardOpenOption}
 import scala.annotation.tailrec
 import scala.collection.immutable.LazyList.cons
 import scala.compiletime.{constValue, erasedValue, error, summonInline}
 import scala.deriving.*
-import polyregion.ast.mirror.CppStructGen.ToCppTerm.Value
 
 private[polyregion] object CppStructGen {
 
@@ -236,8 +237,16 @@ private[polyregion] object CppStructGen {
 
       val ctorArgExpr  = ctorArgs.map((n, t) => s"${t.ref(qualified = true)} $n").csv
       val ctorAttrExpr = ctorAttrs.map(_.repr).sym("", " ", " ")
-      val ctorStmt     = s"$ctorAttrExpr${clsName(qualified = false)}($ctorArgExpr)$ctorChainExpr"
-      val memberStmts  = members.map((n, t) => s"${t.ref(qualified = true)} $n;")
+      val ctorStmt = s"$ctorAttrExpr${clsName(qualified = false)}($ctorArgExpr)${ctorChain match {
+          case Nil => ";"
+          case _   => " noexcept;";
+        }}"
+      val memberStmts = members.map((n, t) => s"${t.ref(qualified = true)} $n;")
+
+      val ctorStmtImpl = s"${clsName(qualified = true)}::${clsName(qualified = false)}($ctorArgExpr)${ctorChain match {
+          case Nil => " = default;"
+          case xs  => s" noexcept : ${xs.csv} {}"
+        }}"
 
       def ns(name: String) =
         tpe.namespace.sym("", "::", "::") + name
@@ -295,7 +304,12 @@ private[polyregion] object CppStructGen {
 
       val conversion =
         if (tpe.kind == CppType.Kind.Variant)
-          s"EXPORT operator Any() const { return std::make_shared<${tpe.name}>(*this); };" :: Nil
+          s"EXPORT operator Any() const;" :: Nil
+        else Nil
+
+      val conversionImpl =
+        if (tpe.kind == CppType.Kind.Variant)
+          s"EXPORT ${clsName(qualified = true)}::operator Any() const { return std::make_shared<${tpe.name}>(*this); };" :: Nil
         else Nil
 
       val visibility = if (tpe.kind == CppType.Kind.Base) "protected:" :: Nil else Nil
@@ -353,6 +367,8 @@ private[polyregion] object CppStructGen {
               val deref = (s: String) => if (tpe.kind == CppType.Kind.Base) s"*$s.$n" else s"$s.$n"
               val op    = s"${deref("l")} == ${deref("r")}"
               (tpe.kind, tpe.namespace ::: tpe.name :: Nil, tpe.ctors) match {
+                case (CppType.Kind.StdLib, "std" :: "optional" :: Nil, x :: Nil) if x.kind == CppType.Kind.Base =>
+                  s"( (!l.$n && !r.$n) || (l.$n && r.$n && **l.$n == **r.$n) )"
                 case (CppType.Kind.StdLib, "std" :: "vector" :: Nil, x :: Nil) if x.kind == CppType.Kind.Base =>
                   s"std::equal(l.$n.begin(), l.$n.end(), r.$n.begin(), [](auto &&l, auto &&r) { return *l == *r; })"
                 case _ => op
@@ -366,7 +382,7 @@ private[polyregion] object CppStructGen {
         name = clsName(qualified = false),
         parent = parent.map(x => x._1.clsName(qualified = true)),
         stmts = memberStmts ::: visibility ::: ctorStmt :: conversion ::: streamSig ::: equalitySig,
-        implStmts = streamImpl ::: equalityImpl ::: nsImpl,
+        implStmts = ctorStmtImpl :: streamImpl ::: equalityImpl ::: conversionImpl ::: nsImpl,
         includes = members.flatMap(_._2.include),
         variantStmt,
         nsDecl,

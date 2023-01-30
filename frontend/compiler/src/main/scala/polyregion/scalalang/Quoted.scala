@@ -25,8 +25,8 @@ class Quoted(val underlying: scala.quoted.Quotes) {
     case Object, Class
   }
 
-  type ClsWitnesses = Map[ClassDef, Set[p.Type.Struct]]
-  type FnWitnesses  = Map[DefDef, Set[p.Expr.Invoke]]
+  type ClsWitnesses = Map[Symbol, Set[p.Type.Struct]]
+  type FnWitnesses  = Map[Symbol, Set[p.Expr.Invoke]]
   type Retyped      = (Option[p.Term], p.Type)
 
   // TODO everything here can be a Set as we don't need the rhs
@@ -44,11 +44,17 @@ class Quoted(val underlying: scala.quoted.Quotes) {
       } else if (x.symbol.flags.is(Flags.Module)) {
         report.errorAndAbort(s"Witness illegal module ClassDef ${x.symbol} (${x.symbol.fullName})")
       } else {
-        copy(classes = classes.updatedWith(x)(x => Some(x.getOrElse(Set.empty) + application)))
+        copy(classes = classes.updatedWith(x.symbol) {
+          case Some(ivks) => Some(ivks + application)
+          case None       => Some(Set(application))
+        })
       }
 
     def witness(x: DefDef, application: p.Expr.Invoke) =
-      copy(functions = functions.updatedWith(x)(x => Some(x.getOrElse(Set.empty) + application)))
+      copy(functions = functions.updatedWith(x.symbol) {
+        case Some(ivks) => Some(ivks + application)
+        case None       => Some(Set(application))
+      })
 
     def witness(f: p.Function) = copy(resolvedFunctions = f :: resolvedFunctions)
   }
@@ -75,7 +81,7 @@ class Quoted(val underlying: scala.quoted.Quotes) {
       invokeCaptures: Map[Symbol, List[p.Term]] = Map.empty,
       deps: Dependencies = Dependencies(),
       stmts: List[p.Stmt] = List.empty, // fn statements
-      thisCls: Option[(ClassDef, p.Type.Struct)] = None,
+      thisCls: Option[(ClassDef, p.Type.Struct)] = None
 //      symbolDefMap: Map[Symbol, Definition] = Map.empty
   ) {
     infix def !!(t: Tree): RemapContext = copy(traces = t :: traces)
@@ -112,9 +118,8 @@ class Quoted(val underlying: scala.quoted.Quotes) {
 //        }).toMap
 //    )
 
-    def withInvokeCapture(s : Symbol, xs : List[p.Term]) : RemapContext = {
+    def withInvokeCapture(s: Symbol, xs: List[p.Term]): RemapContext =
       copy(invokeCaptures = invokeCaptures + (s -> xs))
-    }
 
     def noStmts: RemapContext = copy(stmts = Nil)
     // def mark(s: p.Signature, d: DefDef) = copy(defs = defs + (s -> d))
