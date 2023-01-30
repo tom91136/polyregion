@@ -233,9 +233,16 @@ llvm::Value *LLVM::AstTransformer::mkTermVal(const Term::Any &ref) {
 
 llvm::Function *LLVM::AstTransformer::mkExternalFn(llvm::Function *parent, const Type::Any &rtn,
                                                    const std::string &name, const std::vector<Type::Any> &args) {
-  auto llvmArgs = map_vec<Type::Any, llvm::Type *>(args, [&](auto t) { return mkTpe(t); });
-  auto ft = llvm::FunctionType::get(mkTpe(rtn), llvmArgs, false);
-  return llvm::Function::Create(ft, llvm::Function::ExternalLinkage, name, parent->getParent());
+  InvokeSignature sig(Sym({name}), {}, {}, args, {}, rtn);
+  if (auto it = functions.find(sig); it != functions.end()) {
+    return it->second;
+  } else {
+    auto llvmArgs = map_vec<Type::Any, llvm::Type *>(args, [&](auto t) { return mkTpe(t); });
+    auto ft = llvm::FunctionType::get(mkTpe(rtn), llvmArgs, false);
+    auto fn = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, name, parent->getParent());
+    functions.emplace(sig, fn);
+    return fn;
+  }
 }
 
 llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Function *fn, const std::string &key) {
@@ -681,19 +688,19 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
         auto toTpe = mkTpe(x.as);
         enum class NumKind { Fractional, Integral };
 
-
         // Same type
         if (*x.as == *tpe(x.from)) return from;
 
         // x.as <: x.from
         auto lhsStruct = get_opt<Type::Struct>(x.as);
         auto rhsStruct = get_opt<Type::Struct>(tpe(x.from));
-        if (lhsStruct && rhsStruct && std::any_of(lhsStruct->parents.begin(), lhsStruct->parents.end(),
-                                                  [&](auto &x) { return x == rhsStruct->name; })) {
-           return from;
+        if (lhsStruct && rhsStruct &&
+            (std::any_of(lhsStruct->parents.begin(), lhsStruct->parents.end(),
+                         [&](auto &x) { return x == rhsStruct->name; }) ||
+             std::any_of(rhsStruct->parents.begin(), rhsStruct->parents.end(),
+                         [&](auto &x) { return x == lhsStruct->name; }))) {
+          return from;
         }
-
-
 
         auto fromKind = variants::total(
             *kind(tpe(x.from)), [&](const TypeKind::Integral &) -> NumKind { return NumKind::Integral; },
@@ -765,13 +772,12 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
                             map_vec2(x.captures, [](auto &x) { return tpe(x); }), x.rtn);
 
         if (auto fn = functions.find(sig); fn != functions.end()) {
-
-          for (auto x : allArgs) {
-            std::cout << "[param]" << repr(x) << std::endl;
-          }
-          std::cout << "[IVK]" << llvm_tostring(fn->second) << std::endl;
-
-          return B.CreateCall(fn->second, paramTerms);
+          auto call = B.CreateCall(fn->second, paramTerms);
+          // in case the fn returns a unit (which is mapped to void), we just return the constant
+          if (holds<Type::Unit>(x.rtn)) {
+            return mkTermVal(Term::UnitConst());
+          } else
+            return call;
         } else {
 
           for (auto [key, v] : functions) {
@@ -849,7 +855,7 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
         // [T : ref] =>> t:T* = &(rhs:T) ; lut += t
         // [T : val] =>> t:T  =   rhs:T  ; lut += &t
 
-        if (canAssign(tpe(*x.expr), x.name.tpe)) {
+        if (x.expr && tpe(*x.expr) != x.name.tpe) {
           throw std::logic_error("Semantic error: name type " + to_string(x.name.tpe) + " and rhs expr type " +
                                  to_string(tpe(*x.expr)) + " mismatch (" + repr(x) + ")");
         }
@@ -1005,8 +1011,13 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
             kind = mkStmt(body, fn, whileCtx);
           if (kind != BlockKind::Terminal) B.CreateBr(condExit);
         }
-        B.SetInsertPoint(condExit);
-        return BlockKind::Terminal;
+        if (condExit->getNumUses() > 0) {
+          B.SetInsertPoint(condExit);
+          return BlockKind::Normal;
+        } else {
+          condExit->removeFromParent();
+          return BlockKind::Terminal;
+        }
       },
       [&](const Stmt::Return &x) -> BlockKind {
         auto rtnTpe = tpe(x.value);
@@ -1191,6 +1202,8 @@ void LLVM::AstTransformer::transform(llvm::Module &mod, const Function &fnTree) 
 
   for (auto &stmt : fnTree.body)
     mkStmt(stmt, fn);
+
+  stackVarPtrs.clear();
 }
 
 llvmc::TargetInfo LLVM::Options::toTargetInfo() const {

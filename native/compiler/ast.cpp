@@ -195,10 +195,10 @@ using std::string;
         return "if(" + repr(x.cond) + ") { \n" +
                indent(2, mk_string<Stmt::Any>(
                              x.trueBr, [&](auto x) { return repr(x); }, "\n")) +
-               "} else {\n" +
+               "\n} else {\n" +
                indent(2, mk_string<Stmt::Any>(
                              x.falseBr, [&](auto x) { return repr(x); }, "\n")) +
-               "}";
+               "\n}";
       },
       [](const Stmt::Return &x) { return "return " + repr(x.value); });
 }

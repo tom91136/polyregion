@@ -68,7 +68,7 @@ object Remapper {
     def mapTree(tree: q.Tree): Result[(p.Term, q.RemapContext)] = tree match {
       case q.ValDef(name, tpeTree, Some(rhs)) =>
         for {
-          (name, c)        <- c.mkName(tree.symbol).success
+          (name, c)        <- c.down(tree).mkName(tree.symbol).success
           (term -> tpe, c) <- c.typerAndWitness(tpeTree.tpe)
           // if tpe is singleton, substitute with constant directly
           (ref, c) <- term.fold((c !! tree).mapTerm(rhs, Some(tpe)))(x => (x, c).success)
@@ -641,18 +641,19 @@ object Remapper {
           for {
             (_ -> tpe, c)     <- c1.typerAndWitness(term.tpe) // TODO  return term value if already known at type-level
             (condTerm, ifCtx) <- c.down(term).mapTerm(cond)
-            (thenTerm, thenCtx) <- ifCtx.noStmts.mapTerm(thenTerm)
-            (elseTerm, elseCtx) <- thenCtx.noStmts.mapTerm(elseTerm)
+            (thenTerm, thenCtx) <- ifCtx.noStmts.down(thenTerm).mapTerm(thenTerm)
+            (elseTerm, elseCtx) <- thenCtx.noStmts.down(elseTerm).mapTerm(elseTerm)
 
             _ <-
               if (condTerm.tpe != p.Type.Bool) s"Cond must be a Bool ref, got ${condTerm}".fail
               else ().success
 
             mkCondStmts = (tpe: p.Type) => {
-              val name   = elseCtx.named(tpe)
+              val c = elseCtx.down(term)
+              val name   = c.named(tpe)
               val result = p.Stmt.Var(name, None)
 
-              val (thenStmts, c0) = elseCtx.mkMut(term, p.Term.Select(Nil, name), p.Expr.Alias(thenTerm))
+              val (thenStmts, c0) = c.mkMut(term, p.Term.Select(Nil, name), p.Expr.Alias(thenTerm))
               val (elseStmts, c1) = c0.mkMut(term, p.Term.Select(Nil, name), p.Expr.Alias(elseTerm))
 
               val cond = p.Stmt.Cond(
@@ -660,7 +661,7 @@ object Remapper {
                 thenCtx.stmts ++ thenStmts,
                 elseCtx.stmts ++ elseStmts
               )
-              (p.Term.Select(Nil, name), c1.replaceStmts(ifCtx.stmts :+ result :+ cond)).success
+              (p.Term.Select(Nil, name), c1.down(term).replaceStmts(ifCtx.stmts :+ result :+ cond)).success
             }
 
             // See https://dotty.epfl.ch/docs/reference/new-types/union-types-spec.html#erasure

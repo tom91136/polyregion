@@ -68,14 +68,21 @@ class CollectionLengthSuite extends BaseSuite {
     override def foo(n: Int): Int = b
   }
 
-  testExpr {
+  {
+    val i = 0
+    testExpr {
 
-    val m = ClassB(123)
-    m.foo(12345)
+      val m = ClassB(123)
 
-    val o = if (true) ClassA(2) else ClassB(9)
-    o.foo(2)
+      val o = if (i == 0) ClassA(2) else ClassB(9)
 
+      val n = Base(2)
+
+
+
+      o.foo(2) + n.foo(42) + m.foo(12345) + m.foo(42)
+
+    }
   }
 
 }

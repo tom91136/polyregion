@@ -128,13 +128,15 @@ class CompilerSpec extends munit.FunSuite {
   test("fns") {
     CompilerTests.compilerAssert {
 
-      val un = Unrelated()
-      val m = ClassB(123)
-      m.foo(12345)
+      // val un = Unrelated()
+      // val m = ClassB(123)
+      // m.foo(12345)
 
 
-      val o  = if(true) ClassA(2) else ClassB(9)
-      o.foo(2)
+      // val o  = if(true) ClassA(2) else ClassB(9)
+      // o.foo(2)
+
+      1
 
 //      val m = o.foo(2)
 

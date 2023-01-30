@@ -112,15 +112,18 @@ object DynamicDispatchPass extends ProgramPass {
 
     def replaceDispatches(f: p.Function) = f.modifyAll[p.Expr] {
       case ivk @ p.Expr.Invoke(name, tpeArgs, Some(recv: p.Term.Select), args, captures, rtn) =>
+        def isSuperCall(t: p.Type) = (t, f.receiver) match {
+          case (r @ p.Type.Struct(clsName, _, _, _), Some(p.Named(_, s @ p.Type.Struct(_, _, _, parents)))) =>
+            parents.contains(clsName) && f.name.last == name.last
+          case _ => false
+        }
+
         lut.get((recv.tpe, name.last)) match {
           case Some(dynamicDispatchFn) =>
-            recv match {
-              case p.Term.Select(Nil, p.Named("this", _)) if f.name.last == name.last => ivk // super call, keep it
-              case _ =>
-                val clsTagSelect = p.Term.Select(recv.init :+ recv.last, p.Named("_#cls", p.Type.Int))
-
-                p.Expr.Invoke(p.Sym(s"${name.last}^"), tpeArgs, None, clsTagSelect :: recv :: args, captures, rtn)
-              // ivk.copy(name = p.Sym(s"${name.last}^"))
+            if (isSuperCall(recv.tpe)) ivk
+            else {
+              val clsTagSelect = p.Term.Select(recv.init :+ recv.last, p.Named("_#cls", p.Type.Int))
+              p.Expr.Invoke(dynamicDispatchFn.name, tpeArgs, None, clsTagSelect :: recv :: args, captures, rtn)
             }
           case _ => ivk
         }

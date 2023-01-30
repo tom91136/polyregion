@@ -75,9 +75,87 @@ TEST_CASE("initialise more than once", "[compiler]") {
   polyregion::compiler::initialise();
 }
 
+TEST_CASE("nested if", "[compiler]") {
+  polyregion::compiler::initialise();
+
+  auto entry = function("foo", {"in0"_(Int), "in1"_(Int)}, Int)({
+      Cond(BinaryIntrinsic("in0"_(Int), 42_(Int), BinaryIntrinsicKind::LogicEq(), Bool),
+           {
+               Cond(BinaryIntrinsic("in1"_(Int), 42_(Int), BinaryIntrinsicKind::LogicEq(), Bool),
+                    {
+                        ret(1_(Int)) //
+                    },
+                    {
+                        ret(2_(Int)) //
+                    }),
+           },
+           {
+               ret(3_(Int)) //
+           }),
+  });
+  assertCompile(program(entry, {}, {}));
+}
+
+TEST_CASE("nested nested if", "[compiler]") {
+  polyregion::compiler::initialise();
+
+  auto entry = function("foo", {"in0"_(Int), "in1"_(Int), "in2"_(Int)}, Int)({
+      Cond(BinaryIntrinsic("in0"_(Int), 42_(Int), BinaryIntrinsicKind::LogicEq(), Bool),
+           {
+               Cond(BinaryIntrinsic("in1"_(Int), 42_(Int), BinaryIntrinsicKind::LogicEq(), Bool),
+                    {
+                        Cond(BinaryIntrinsic("in2"_(Int), 42_(Int), BinaryIntrinsicKind::LogicEq(), Bool),
+                             {
+                                 ret(1_(Int)) //
+                             },
+                             {
+                                 ret(2_(Int)) //
+                             }),
+                    },
+                    {
+                        ret(3_(Int)) //
+                    }),
+           },
+           {
+               ret(4_(Int)) //
+           }),
+  });
+  assertCompile(program(entry, {}, {}));
+}
+
+TEST_CASE("if", "[compiler]") {
+  polyregion::compiler::initialise();
+
+  auto entry = function("foo", {"in0"_(Int)},
+                        Int)({Cond(BinaryIntrinsic("in0"_(Int), 42_(Int), BinaryIntrinsicKind::LogicEq(), Bool),
+                                   {
+                                       ret(1_(Int)) //
+                                   },
+                                   {
+                                       ret(3_(Int)) //
+                                   })});
+  assertCompile(program(entry, {}, {}));
+}
+
+TEST_CASE("code after if", "[compiler]") {
+  polyregion::compiler::initialise();
+
+  auto entry = function("foo", {"in0"_(Int)},
+                        Int)({let("x") = 0_(Int), //
+                              Cond(BinaryIntrinsic("in0"_(Int), 42_(Int), BinaryIntrinsicKind::LogicEq(), Bool),
+                                   {
+                                       Mut("x"_(Int), Alias(1_(Int)), true) //
+                                   },
+                                   {
+                                       Mut("x"_(Int), Alias(3_(Int)), true) //
+                                   }),
+                              ret("x"_(Int))});
+  assertCompile(program(entry, {}, {}));
+}
+
 TEST_CASE("fn call", "[compiler]") {
   polyregion::compiler::initialise();
-  auto tpe = GENERATE(from_range(std::vector{Int}));
+  auto tpe = GENERATE(from_range(PrimitiveTypes));
   DYNAMIC_SECTION(tpe) {
     CAPTURE(tpe);
     auto callee = function("bar", {"a"_(tpe)}, tpe)({

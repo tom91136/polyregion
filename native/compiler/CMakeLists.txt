@@ -20,7 +20,6 @@ add_executable(compiler-drv driver.cpp)
 add_dependencies(compiler-drv runtime-lib)
 
 
-
 target_include_directories(compiler-tests PUBLIC . ../include)
 target_include_directories(compiler-drv PUBLIC . ../include PRIVATE ../runtime)
 target_include_directories(compiler-lib PUBLIC
@@ -30,28 +29,30 @@ target_include_directories(compiler-lib PUBLIC
         . ../include
         )
 
-target_precompile_headers(compiler-tests PRIVATE
-        generated/polyast.h
-        generated/polyast_codec.h
+if (NOT WIN32)
+    target_precompile_headers(compiler-tests PRIVATE
+            generated/polyast.h
+            generated/polyast_codec.h
 
-        compiler.h
-        ast.h
+            compiler.h
+            ast.h
 
-        backend/backend.h
-        backend/c_source.h
-        backend/llvm.h
-        backend/llvmc.h
-        backend/suppress_fd.h
-        ../include/utils.hpp
-        ../include/variants.hpp
-        ${Catch2_SOURCE_DIR}/src/catch2/catch_all.hpp
+            backend/backend.h
+            backend/c_source.h
+            backend/llvm.h
+            backend/llvmc.h
+            backend/suppress_fd.h
+            ../include/utils.hpp
+            ../include/variants.hpp
+            ${Catch2_SOURCE_DIR}/src/catch2/catch_all.hpp
 
-        <optional>
-        <ostream>
-        <unordered_map>
-        <utility>
-        <vector>
-        )
+            <optional>
+            <ostream>
+            <unordered_map>
+            <utility>
+            <vector>
+            )
+endif ()
 
 llvm_map_components_to_libnames(LLVM_LIBS
         #        core
