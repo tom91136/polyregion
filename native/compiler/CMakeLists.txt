@@ -6,6 +6,7 @@ set(LIB_SOURCES
         backend/llvmc.cpp
         backend/c_source.cpp
         backend/lld_lite.cpp
+        backend/memoryfs.cpp
 
         ast.cpp
         compiler.cpp
@@ -41,6 +42,7 @@ if (NOT WIN32)
             backend/c_source.h
             backend/llvm.h
             backend/llvmc.h
+            backend/memoryfs.h
             backend/suppress_fd.h
             ../include/utils.hpp
             ../include/variants.hpp
@@ -75,6 +77,7 @@ llvm_map_components_to_libnames(LLVM_LIBS
         core
         object
         irreader
+        passes
         ipo
         instcombine
         mc
@@ -85,6 +88,7 @@ llvm_map_components_to_libnames(LLVM_LIBS
         target
         transformutils
         vectorize
+        targetparser
 
         )
 

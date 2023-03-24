@@ -2,9 +2,11 @@
 
 #include "compiler.h"
 #include "lld_lite.h"
+#include "llvm_utils.hpp"
 #include "utils.hpp"
 
 #include "llvm/ADT/Triple.h"
+#include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/CodeGen/CommandFlags.h"
@@ -16,25 +18,28 @@
 #include "llvm/IR/LLVMRemarkStreamer.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Verifier.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/SubtargetFeature.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Object/ELF.h"
 #include "llvm/Pass.h"
+#include "llvm/Passes/OptimizationLevel.h"
+#include "llvm/Passes/PassBuilder.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Transforms/IPO.h"
+#include "llvm/Transforms/IPO/AlwaysInliner.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
-#include "llvm/Transforms/Utils/Cloning.h"
-
-#include "llvm_utils.hpp"
-#include "llvm/IR/Verifier.h"
-#include "llvm/Transforms/IPO/Inliner.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
+#include "llvm/Transforms/Scalar/DCE.h"
+#include "llvm/Transforms/Utils/Cloning.h"
+#include "llvm/Transforms/Vectorize/LoopVectorize.h"
+#include "llvm/Transforms/Vectorize/SLPVectorizer.h"
 
 #include <iostream>
 
@@ -158,6 +163,49 @@ static std::string module2Ir(const llvm::Module &m) {
   return ir;
 }
 
+// See
+// https://github.com/pytorch/pytorch/blob/6d4d9840cd4f18232e201cbcd843ea4f6cb4aabb/torch/csrc/jit/tensorexpr/llvm_codegen.cpp#L2466
+static void optimise(llvm::TargetMachine &TM, llvm::Module &M, llvm::OptimizationLevel &level) {
+  // Create the analysis managers.
+  llvm::LoopAnalysisManager LAM;
+  llvm::FunctionAnalysisManager FAM;
+  llvm::CGSCCAnalysisManager CGAM;
+  llvm::ModuleAnalysisManager MAM;
+
+  // Create the new pass manager builder.
+  // Take a look at the PassBuilder constructor parameters for more
+  // customization, e.g. specifying a TargetMachine or various debugging
+  // options.
+  llvm::PassBuilder PB(&TM);
+
+  TM.registerPassBuilderCallbacks(PB);
+
+  // Register all the basic analyses with the managers.
+  PB.registerModuleAnalyses(MAM);
+  PB.registerCGSCCAnalyses(CGAM);
+  PB.registerFunctionAnalyses(FAM);
+  PB.registerLoopAnalyses(LAM);
+  PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+
+  llvm::ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(level);
+  llvm::FunctionPassManager FPM = PB.buildFunctionSimplificationPipeline(level, llvm::ThinOrFullLTOPhase::None);
+
+  FAM.registerPass([&] { return TM.getTargetIRAnalysis(); });
+
+  FPM.addPass(llvm::LoopVectorizePass());
+  FPM.addPass(llvm::SLPVectorizerPass());
+
+  FPM.addPass(llvm::DCEPass());
+  MPM.addPass(llvm::AlwaysInlinerPass());
+
+  MPM.run(M, MAM);
+  for (auto &FF : M) {
+    if (!FF.empty()) {
+      FPM.run(FF, FAM);
+    }
+  }
+}
+
 compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compiler::Opt &opt, bool emitDisassembly,
                                            std::unique_ptr<llvm::Module> M, llvm::LLVMContext &Context) {
   auto start = compiler::nowMono();
@@ -196,29 +244,21 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
   for (llvm::Function &F : M->functions())
     setFunctionAttributes(info.cpu.uArch, info.cpu.features, F);
 
-  // AddOptimizationPasses
-  llvm::PassManagerBuilder B;
-
+  llvm::OptimizationLevel optLevel;
   switch (opt) {
-    case compiler::Opt::O0: B.OptLevel = 0; break;
-    case compiler::Opt::O1: B.OptLevel = 1; break;
-    case compiler::Opt::O2: B.OptLevel = 2; break;
+    case compiler::Opt::O0: optLevel = llvm::OptimizationLevel::O0; break;
+    case compiler::Opt::O1: optLevel = llvm::OptimizationLevel::O1; break;
+    case compiler::Opt::O2: optLevel = llvm::OptimizationLevel::O2; break;
     case compiler::Opt::O3: // fallthrough
-    case compiler::Opt::Ofast: B.OptLevel = 3; break;
+    case compiler::Opt::Ofast: optLevel = llvm::OptimizationLevel::O3; break;
   }
-
-  B.NewGVN = true;
-  B.MergeFunctions = true;
-  B.SizeLevel = 0;
-  B.LoopVectorize = B.OptLevel >= 2;
-  B.SLPVectorize = B.OptLevel >= 2;
-  //  B.RerollLoops = true;
-  //  B.LoopsInterleaved = true;
 
   auto mkArtefact = [&](const llvm::CodeGenFileType &tpe, const llvm::Module &m0, std::vector<compiler::Event> &events,
                         bool emplaceEvent) {
     auto m = llvm::CloneModule(m0);
     auto optPassStart = compiler::nowMono();
+
+    optimise(*TM, *m, optLevel);
 
     llvm::legacy::PassManager PM;
     auto &LLVMTM =                              // XXX we have no rtti here so no dynamic cast
@@ -232,19 +272,6 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
     PassConfig->setDisableVerify(true);
     PM.add(PassConfig);
     // PM done
-
-    llvm::legacy::FunctionPassManager FNP(m.get());
-    FNP.add(createTargetTransformInfoWrapperPass(TM->getTargetIRAnalysis()));
-
-    TM->adjustPassManager(B);
-    B.populateFunctionPassManager(FNP);
-    B.populateModulePassManager(PM);
-
-    FNP.doInitialization();
-    for (llvm::Function &func : *M) {
-      FNP.run(func);
-    }
-    FNP.doFinalization();
 
     auto iselPassStart = compiler::nowMono();
     if (PassConfig->addISelPasses()) throw std::logic_error("No ISEL");
@@ -284,10 +311,10 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
       }
 
       llvm::StringRef objectString(object.begin(), object.size());
-      lld::elf::ObjFile<llvm::object::ELF64LE> kernelObject(llvm::MemoryBufferRef(objectString, ""), "kernel.hsaco");
+      llvm::MemoryBufferRef kernelObject(objectString, "kernel.hsaco");
       // XXX Don't strip AMDGCN ELFs as hipModuleLoad will report "Invalid ptx". GC and optimisation is fine.
       auto linkerStart = compiler::nowMono();
-      auto [err, result] = backend::lld_lite::link({"-shared", "--gc-sections", "-O3"}, {&kernelObject});
+      auto [err, result] = backend::lld_lite::linkElf({"-shared", "--gc-sections", "-O3"}, {kernelObject});
       auto linkerElapsed = compiler::elapsedNs(linkerStart);
       events.emplace_back(compiler::nowMs(), linkerElapsed, "lld_link_amdgpu", "");
       if (!result) { // linker failed

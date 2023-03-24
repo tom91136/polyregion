@@ -1,14 +1,13 @@
 #pragma once
 
+#include "llvm/Support/MemoryBufferRef.h"
 #include <optional>
-#include "InputFiles.h"
-#include "lld/Common/DWARF.h"
-#include "lld/Common/Driver.h"
-#include "llvm/Object/ELF.h"
+#include <string>
+#include <vector>
 
 namespace polyregion::backend::lld_lite {
 
-std::pair<std::optional<std::string>, std::optional<std::string>> link(const std::vector<std::string> &args,
-                                                                       const std::vector<lld::elf::InputFile *> &files);
+std::pair<std::optional<std::string>, std::optional<std::string>>
+linkElf(const std::vector<std::string> &args, const std::vector<llvm::MemoryBufferRef> &files);
 
 } // namespace polyregion::backend::lld_lite

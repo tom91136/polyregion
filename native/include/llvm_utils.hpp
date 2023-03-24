@@ -18,7 +18,7 @@ static bool isCPUTargetSupported(const std::string &CPU, //
   switch (arch) {
     case Triple::x86_64: return CPU == "native" || (llvm::X86::parseArchX86(CPU) != llvm::X86::CPUKind::CK_None);
     case Triple::arm: return llvm::ARM::parseCPUArch(CPU) != llvm::ARM::ArchKind::INVALID;
-    case Triple::aarch64: return llvm::AArch64::parseCPUArch(CPU) != llvm::AArch64::ArchKind::INVALID;
+    case Triple::aarch64: return llvm::AArch64::parseCpu(CPU).Name != "invalid";
 
     case Triple::amdgcn: return llvm::AMDGPU::parseArchAMDGCN(CPU) != llvm::AMDGPU::GPUKind::GK_NONE;
     case Triple::nvptx64: return CPU.starts_with("sm_");
@@ -69,7 +69,7 @@ static void collectCPUFeatures(const std::string &CPU,             //
     }
     case Triple::aarch64: {
       std::vector<StringRef> extensions;
-      AArch64::getExtensionFeatures(AArch64::getDefaultExtensions(CPU, AArch64::parseCPUArch(CPU)), extensions);
+      AArch64::getExtensionFeatures(AArch64::getDefaultExtensions(CPU, AArch64::getArchForCpu(CPU)), extensions);
       normaliseFeature(extensions, drain);
       break;
     }

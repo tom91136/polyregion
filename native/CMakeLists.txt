@@ -19,12 +19,6 @@ ProcessorCount(NPROC)
 project(polyregion-native)
 
 FetchContent_Declare(
-        lld
-        URL https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_SRC_VERSION}/lld-${LLVM_SRC_VERSION}.src.tar.xz
-        URL_HASH SHA256=29fd83b61a1171c6bd51963ca54d0d7b577255e77fcd5ff03c0548fcc5b27b4f
-)
-
-FetchContent_Declare(
         libffi
         URL https://github.com/libffi/libffi/releases/download/v3.4.4/libffi-3.4.4.tar.gz
         URL_HASH SHA256=d66c56ad259a82cf2a9dfc408b32bf5da52371500b84745f7fb8b645712df676
@@ -185,87 +179,19 @@ if (${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.20.0")
 endif ()
 
 set(LLVM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/llvm")
+set(MLIR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/mlir")
+set(LLD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/lld")
+
 message(STATUS "Using LLVM at ${LLVM_DIR}")
+message(STATUS "Using MLIR at ${MLIR_DIR}")
+message(STATUS "Using LLD at ${LLD_DIR}")
 
 find_package(LLVM REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
-
-include("${LLVM_CMAKE_DIR}/AddLLVM.cmake")
-include("${LLVM_CMAKE_DIR}/TableGen.cmake")
+find_package(MLIR REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
+find_package(LLD REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
 
 message(STATUS "Using LLVM: ${LLVM_PACKAGE_VERSION} tools")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
-
-set(LLD_SRC_DIR_IN_RELEASE lld-${LLVM_SRC_VERSION}.src)
-
-FetchContent_GetProperties(lld)
-if (NOT lld_POPULATED)
-    FetchContent_Populate(lld)
-    # XXX as we are doing our custom FetchContent_MakeAvailable, SOURCE_SUBDIR isn't available so we do it manually here
-    set(lld_SOURCE_DIR "${lld_SOURCE_DIR}/")
-    set(lld_BINARY_DIR "${lld_BINARY_DIR}/")
-
-    # Make sure we find it here before LLVM tries;
-    #  we want to use the host tblgen and not the platform dependent one for cross builds.
-    find_program(LLVM_TABLEGEN_EXE "llvm-tblgen")
-
-    if (LLVM_TABLEGEN_EXE STREQUAL "LLVM_TABLEGEN_EXE-NOTFOUND")
-        message(STATUS "No host llvm-tblgen found, attempting to use the binary version from ${LLVM_TOOLS_BINARY_DIR}")
-        set(LLVM_TABLEGEN_EXE ${LLVM_TOOLS_BINARY_DIR}/llvm-tblgen)
-    endif ()
-
-    configure_file(
-            ${lld_SOURCE_DIR}/include/lld/Common/Version.inc.in
-            ${lld_BINARY_DIR}/include/lld/Common/Version.inc)
-
-    macro(add_lld_library name)
-        cmake_parse_arguments(ARG
-                "SHARED"
-                ""
-                ""
-                ${ARGN})
-        if (ARG_SHARED)
-            set(ARG_ENABLE_SHARED SHARED)
-        endif ()
-
-        llvm_add_library(${name} ${ARG_ENABLE_SHARED} ${ARG_UNPARSED_ARGUMENTS})
-        set_target_properties(${name} PROPERTIES FOLDER "lld libraries")
-
-        target_compile_options(${name} PRIVATE ${COMMON_COMPILE_OPTIONS})
-
-    endmacro(add_lld_library)
-
-    #    if (MSVC)
-    # Windows have atomics without lib
-    set(HAVE_CXX_ATOMICS64_WITHOUT_LIB ON)
-    set(HAVE_CXX_ATOMICS_WITHOUT_LIB ON)
-    #    endif ()
-
-
-    set(LLVM_TABLEGEN_FLAGS "${LLVM_INCLUDE_DIRS}")
-    list(TRANSFORM LLVM_TABLEGEN_FLAGS PREPEND -I)
-
-    add_subdirectory(${lld_SOURCE_DIR}/Common ${lld_BINARY_DIR}/Common)
-    target_include_directories(lldCommon PUBLIC
-            ${lld_SOURCE_DIR}/include ${lld_BINARY_DIR}/include
-            ${lld_BINARY_DIR}/Common
-            "${LLVM_INCLUDE_DIRS}"
-            )
-
-    message(STATUS "Using `${LLVM_TABLEGEN_EXE}` for llvm-tblgen")
-
-    add_subdirectory(${lld_SOURCE_DIR}/ELF ${lld_BINARY_DIR}/ELF)
-    target_include_directories(lldELF BEFORE PUBLIC
-            ${lld_SOURCE_DIR}/include ${lld_BINARY_DIR}/include
-            ${lld_BINARY_DIR}/ELF ${lld_SOURCE_DIR}/ELF
-            "${LLVM_INCLUDE_DIRS}"
-            )
-    #        add_subdirectory(COFF)
-    #        add_subdirectory(MachO)
-    #        add_subdirectory(MinGW)
-    #        add_subdirectory(wasm)
-
-    unset(LLVM_TABLEGEN_FLAGS)
-endif ()
 
 
 FetchContent_MakeAvailable(json)

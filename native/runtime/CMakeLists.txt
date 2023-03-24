@@ -39,6 +39,7 @@ set(LLVM_LIBS
         LLVMCore
         LLVMBinaryFormat
         LLVMSupport
+        LLVMTargetParser
         )
 
 message(STATUS "[runtime] Adding LLVM libs = ${LLVM_LIBS}")
