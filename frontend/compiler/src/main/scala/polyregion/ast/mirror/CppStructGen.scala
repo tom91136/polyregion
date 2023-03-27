@@ -309,7 +309,7 @@ private[polyregion] object CppStructGen {
 
       val conversionImpl =
         if (tpe.kind == CppType.Kind.Variant)
-          s"${clsName(qualified = true)}::operator Any() const { return std::make_shared<${tpe.name}>(*this); };" :: Nil
+          s"${clsName(qualified = true)}::operator ${ns("Any()")} const { return std::make_shared<${tpe.name}>(*this); }" :: Nil
         else Nil
 
       val visibility = if (tpe.kind == CppType.Kind.Base) "protected:" :: Nil else Nil
