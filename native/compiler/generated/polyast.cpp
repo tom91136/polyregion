@@ -45,7 +45,7 @@ std::ostream &TypeKind::operator<<(std::ostream &os, const TypeKind::None &x) {
   return os;
 }
 bool TypeKind::operator==(const TypeKind::None &, const TypeKind::None &) { return true; }
-EXPORT TypeKind::None::operator Any() const { return std::make_shared<None>(*this); };
+TypeKind::None::operator Any() const { return std::make_shared<None>(*this); };
 
 TypeKind::Ref::Ref() noexcept : TypeKind::Base() {}
 std::ostream &TypeKind::operator<<(std::ostream &os, const TypeKind::Ref &x) {
@@ -54,7 +54,7 @@ std::ostream &TypeKind::operator<<(std::ostream &os, const TypeKind::Ref &x) {
   return os;
 }
 bool TypeKind::operator==(const TypeKind::Ref &, const TypeKind::Ref &) { return true; }
-EXPORT TypeKind::Ref::operator Any() const { return std::make_shared<Ref>(*this); };
+TypeKind::Ref::operator Any() const { return std::make_shared<Ref>(*this); };
 
 TypeKind::Integral::Integral() noexcept : TypeKind::Base() {}
 std::ostream &TypeKind::operator<<(std::ostream &os, const TypeKind::Integral &x) {
@@ -63,7 +63,7 @@ std::ostream &TypeKind::operator<<(std::ostream &os, const TypeKind::Integral &x
   return os;
 }
 bool TypeKind::operator==(const TypeKind::Integral &, const TypeKind::Integral &) { return true; }
-EXPORT TypeKind::Integral::operator Any() const { return std::make_shared<Integral>(*this); };
+TypeKind::Integral::operator Any() const { return std::make_shared<Integral>(*this); };
 
 TypeKind::Fractional::Fractional() noexcept : TypeKind::Base() {}
 std::ostream &TypeKind::operator<<(std::ostream &os, const TypeKind::Fractional &x) {
@@ -72,7 +72,7 @@ std::ostream &TypeKind::operator<<(std::ostream &os, const TypeKind::Fractional 
   return os;
 }
 bool TypeKind::operator==(const TypeKind::Fractional &, const TypeKind::Fractional &) { return true; }
-EXPORT TypeKind::Fractional::operator Any() const { return std::make_shared<Fractional>(*this); };
+TypeKind::Fractional::operator Any() const { return std::make_shared<Fractional>(*this); };
 
 Type::Base::Base(TypeKind::Any kind) noexcept : kind(std::move(kind)) {}
 std::ostream &Type::operator<<(std::ostream &os, const Type::Any &x) {
@@ -91,7 +91,7 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Float &x) {
   return os;
 }
 bool Type::operator==(const Type::Float &, const Type::Float &) { return true; }
-EXPORT Type::Float::operator Any() const { return std::make_shared<Float>(*this); };
+Type::Float::operator Any() const { return std::make_shared<Float>(*this); };
 
 Type::Double::Double() noexcept : Type::Base(TypeKind::Fractional()) {}
 std::ostream &Type::operator<<(std::ostream &os, const Type::Double &x) {
@@ -100,7 +100,7 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Double &x) {
   return os;
 }
 bool Type::operator==(const Type::Double &, const Type::Double &) { return true; }
-EXPORT Type::Double::operator Any() const { return std::make_shared<Double>(*this); };
+Type::Double::operator Any() const { return std::make_shared<Double>(*this); };
 
 Type::Bool::Bool() noexcept : Type::Base(TypeKind::Integral()) {}
 std::ostream &Type::operator<<(std::ostream &os, const Type::Bool &x) {
@@ -109,7 +109,7 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Bool &x) {
   return os;
 }
 bool Type::operator==(const Type::Bool &, const Type::Bool &) { return true; }
-EXPORT Type::Bool::operator Any() const { return std::make_shared<Bool>(*this); };
+Type::Bool::operator Any() const { return std::make_shared<Bool>(*this); };
 
 Type::Byte::Byte() noexcept : Type::Base(TypeKind::Integral()) {}
 std::ostream &Type::operator<<(std::ostream &os, const Type::Byte &x) {
@@ -118,7 +118,7 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Byte &x) {
   return os;
 }
 bool Type::operator==(const Type::Byte &, const Type::Byte &) { return true; }
-EXPORT Type::Byte::operator Any() const { return std::make_shared<Byte>(*this); };
+Type::Byte::operator Any() const { return std::make_shared<Byte>(*this); };
 
 Type::Char::Char() noexcept : Type::Base(TypeKind::Integral()) {}
 std::ostream &Type::operator<<(std::ostream &os, const Type::Char &x) {
@@ -127,7 +127,7 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Char &x) {
   return os;
 }
 bool Type::operator==(const Type::Char &, const Type::Char &) { return true; }
-EXPORT Type::Char::operator Any() const { return std::make_shared<Char>(*this); };
+Type::Char::operator Any() const { return std::make_shared<Char>(*this); };
 
 Type::Short::Short() noexcept : Type::Base(TypeKind::Integral()) {}
 std::ostream &Type::operator<<(std::ostream &os, const Type::Short &x) {
@@ -136,7 +136,7 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Short &x) {
   return os;
 }
 bool Type::operator==(const Type::Short &, const Type::Short &) { return true; }
-EXPORT Type::Short::operator Any() const { return std::make_shared<Short>(*this); };
+Type::Short::operator Any() const { return std::make_shared<Short>(*this); };
 
 Type::Int::Int() noexcept : Type::Base(TypeKind::Integral()) {}
 std::ostream &Type::operator<<(std::ostream &os, const Type::Int &x) {
@@ -145,7 +145,7 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Int &x) {
   return os;
 }
 bool Type::operator==(const Type::Int &, const Type::Int &) { return true; }
-EXPORT Type::Int::operator Any() const { return std::make_shared<Int>(*this); };
+Type::Int::operator Any() const { return std::make_shared<Int>(*this); };
 
 Type::Long::Long() noexcept : Type::Base(TypeKind::Integral()) {}
 std::ostream &Type::operator<<(std::ostream &os, const Type::Long &x) {
@@ -154,7 +154,7 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Long &x) {
   return os;
 }
 bool Type::operator==(const Type::Long &, const Type::Long &) { return true; }
-EXPORT Type::Long::operator Any() const { return std::make_shared<Long>(*this); };
+Type::Long::operator Any() const { return std::make_shared<Long>(*this); };
 
 Type::Unit::Unit() noexcept : Type::Base(TypeKind::None()) {}
 std::ostream &Type::operator<<(std::ostream &os, const Type::Unit &x) {
@@ -163,7 +163,7 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Unit &x) {
   return os;
 }
 bool Type::operator==(const Type::Unit &, const Type::Unit &) { return true; }
-EXPORT Type::Unit::operator Any() const { return std::make_shared<Unit>(*this); };
+Type::Unit::operator Any() const { return std::make_shared<Unit>(*this); };
 
 Type::Nothing::Nothing() noexcept : Type::Base(TypeKind::None()) {}
 std::ostream &Type::operator<<(std::ostream &os, const Type::Nothing &x) {
@@ -172,7 +172,7 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Nothing &x) {
   return os;
 }
 bool Type::operator==(const Type::Nothing &, const Type::Nothing &) { return true; }
-EXPORT Type::Nothing::operator Any() const { return std::make_shared<Nothing>(*this); };
+Type::Nothing::operator Any() const { return std::make_shared<Nothing>(*this); };
 
 Type::Struct::Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args, std::vector<Sym> parents) noexcept : Type::Base(TypeKind::Ref()), name(std::move(name)), tpeVars(std::move(tpeVars)), args(std::move(args)), parents(std::move(parents)) {}
 std::ostream &Type::operator<<(std::ostream &os, const Type::Struct &x) {
@@ -205,7 +205,7 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Struct &x) {
 bool Type::operator==(const Type::Struct &l, const Type::Struct &r) { 
   return l.name == r.name && l.tpeVars == r.tpeVars && std::equal(l.args.begin(), l.args.end(), r.args.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && l.parents == r.parents;
 }
-EXPORT Type::Struct::operator Any() const { return std::make_shared<Struct>(*this); };
+Type::Struct::operator Any() const { return std::make_shared<Struct>(*this); };
 
 Type::Array::Array(Type::Any component) noexcept : Type::Base(TypeKind::Ref()), component(std::move(component)) {}
 std::ostream &Type::operator<<(std::ostream &os, const Type::Array &x) {
@@ -217,7 +217,7 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Array &x) {
 bool Type::operator==(const Type::Array &l, const Type::Array &r) { 
   return *l.component == *r.component;
 }
-EXPORT Type::Array::operator Any() const { return std::make_shared<Array>(*this); };
+Type::Array::operator Any() const { return std::make_shared<Array>(*this); };
 
 Type::Var::Var(std::string name) noexcept : Type::Base(TypeKind::None()), name(std::move(name)) {}
 std::ostream &Type::operator<<(std::ostream &os, const Type::Var &x) {
@@ -229,7 +229,7 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Var &x) {
 bool Type::operator==(const Type::Var &l, const Type::Var &r) { 
   return l.name == r.name;
 }
-EXPORT Type::Var::operator Any() const { return std::make_shared<Var>(*this); };
+Type::Var::operator Any() const { return std::make_shared<Var>(*this); };
 
 Type::Exec::Exec(std::vector<std::string> tpeVars, std::vector<Type::Any> args, Type::Any rtn) noexcept : Type::Base(TypeKind::None()), tpeVars(std::move(tpeVars)), args(std::move(args)), rtn(std::move(rtn)) {}
 std::ostream &Type::operator<<(std::ostream &os, const Type::Exec &x) {
@@ -255,7 +255,7 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Exec &x) {
 bool Type::operator==(const Type::Exec &l, const Type::Exec &r) { 
   return l.tpeVars == r.tpeVars && std::equal(l.args.begin(), l.args.end(), r.args.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && *l.rtn == *r.rtn;
 }
-EXPORT Type::Exec::operator Any() const { return std::make_shared<Exec>(*this); };
+Type::Exec::operator Any() const { return std::make_shared<Exec>(*this); };
 
 Position::Position(std::string file, int32_t line, int32_t col) noexcept : file(std::move(file)), line(line), col(col) {}
 std::ostream &operator<<(std::ostream &os, const Position &x) {
@@ -299,7 +299,7 @@ std::ostream &Term::operator<<(std::ostream &os, const Term::Select &x) {
 bool Term::operator==(const Term::Select &l, const Term::Select &r) { 
   return l.init == r.init && l.last == r.last;
 }
-EXPORT Term::Select::operator Any() const { return std::make_shared<Select>(*this); };
+Term::Select::operator Any() const { return std::make_shared<Select>(*this); };
 
 Term::Poison::Poison(Type::Any t) noexcept : Term::Base(t), t(std::move(t)) {}
 std::ostream &Term::operator<<(std::ostream &os, const Term::Poison &x) {
@@ -311,7 +311,7 @@ std::ostream &Term::operator<<(std::ostream &os, const Term::Poison &x) {
 bool Term::operator==(const Term::Poison &l, const Term::Poison &r) { 
   return *l.t == *r.t;
 }
-EXPORT Term::Poison::operator Any() const { return std::make_shared<Poison>(*this); };
+Term::Poison::operator Any() const { return std::make_shared<Poison>(*this); };
 
 Term::UnitConst::UnitConst() noexcept : Term::Base(Type::Unit()) {}
 std::ostream &Term::operator<<(std::ostream &os, const Term::UnitConst &x) {
@@ -320,7 +320,7 @@ std::ostream &Term::operator<<(std::ostream &os, const Term::UnitConst &x) {
   return os;
 }
 bool Term::operator==(const Term::UnitConst &, const Term::UnitConst &) { return true; }
-EXPORT Term::UnitConst::operator Any() const { return std::make_shared<UnitConst>(*this); };
+Term::UnitConst::operator Any() const { return std::make_shared<UnitConst>(*this); };
 
 Term::BoolConst::BoolConst(bool value) noexcept : Term::Base(Type::Bool()), value(value) {}
 std::ostream &Term::operator<<(std::ostream &os, const Term::BoolConst &x) {
@@ -332,7 +332,7 @@ std::ostream &Term::operator<<(std::ostream &os, const Term::BoolConst &x) {
 bool Term::operator==(const Term::BoolConst &l, const Term::BoolConst &r) { 
   return l.value == r.value;
 }
-EXPORT Term::BoolConst::operator Any() const { return std::make_shared<BoolConst>(*this); };
+Term::BoolConst::operator Any() const { return std::make_shared<BoolConst>(*this); };
 
 Term::ByteConst::ByteConst(int8_t value) noexcept : Term::Base(Type::Byte()), value(value) {}
 std::ostream &Term::operator<<(std::ostream &os, const Term::ByteConst &x) {
@@ -344,7 +344,7 @@ std::ostream &Term::operator<<(std::ostream &os, const Term::ByteConst &x) {
 bool Term::operator==(const Term::ByteConst &l, const Term::ByteConst &r) { 
   return l.value == r.value;
 }
-EXPORT Term::ByteConst::operator Any() const { return std::make_shared<ByteConst>(*this); };
+Term::ByteConst::operator Any() const { return std::make_shared<ByteConst>(*this); };
 
 Term::CharConst::CharConst(uint16_t value) noexcept : Term::Base(Type::Char()), value(value) {}
 std::ostream &Term::operator<<(std::ostream &os, const Term::CharConst &x) {
@@ -356,7 +356,7 @@ std::ostream &Term::operator<<(std::ostream &os, const Term::CharConst &x) {
 bool Term::operator==(const Term::CharConst &l, const Term::CharConst &r) { 
   return l.value == r.value;
 }
-EXPORT Term::CharConst::operator Any() const { return std::make_shared<CharConst>(*this); };
+Term::CharConst::operator Any() const { return std::make_shared<CharConst>(*this); };
 
 Term::ShortConst::ShortConst(int16_t value) noexcept : Term::Base(Type::Short()), value(value) {}
 std::ostream &Term::operator<<(std::ostream &os, const Term::ShortConst &x) {
@@ -368,7 +368,7 @@ std::ostream &Term::operator<<(std::ostream &os, const Term::ShortConst &x) {
 bool Term::operator==(const Term::ShortConst &l, const Term::ShortConst &r) { 
   return l.value == r.value;
 }
-EXPORT Term::ShortConst::operator Any() const { return std::make_shared<ShortConst>(*this); };
+Term::ShortConst::operator Any() const { return std::make_shared<ShortConst>(*this); };
 
 Term::IntConst::IntConst(int32_t value) noexcept : Term::Base(Type::Int()), value(value) {}
 std::ostream &Term::operator<<(std::ostream &os, const Term::IntConst &x) {
@@ -380,7 +380,7 @@ std::ostream &Term::operator<<(std::ostream &os, const Term::IntConst &x) {
 bool Term::operator==(const Term::IntConst &l, const Term::IntConst &r) { 
   return l.value == r.value;
 }
-EXPORT Term::IntConst::operator Any() const { return std::make_shared<IntConst>(*this); };
+Term::IntConst::operator Any() const { return std::make_shared<IntConst>(*this); };
 
 Term::LongConst::LongConst(int64_t value) noexcept : Term::Base(Type::Long()), value(value) {}
 std::ostream &Term::operator<<(std::ostream &os, const Term::LongConst &x) {
@@ -392,7 +392,7 @@ std::ostream &Term::operator<<(std::ostream &os, const Term::LongConst &x) {
 bool Term::operator==(const Term::LongConst &l, const Term::LongConst &r) { 
   return l.value == r.value;
 }
-EXPORT Term::LongConst::operator Any() const { return std::make_shared<LongConst>(*this); };
+Term::LongConst::operator Any() const { return std::make_shared<LongConst>(*this); };
 
 Term::FloatConst::FloatConst(float value) noexcept : Term::Base(Type::Float()), value(value) {}
 std::ostream &Term::operator<<(std::ostream &os, const Term::FloatConst &x) {
@@ -404,7 +404,7 @@ std::ostream &Term::operator<<(std::ostream &os, const Term::FloatConst &x) {
 bool Term::operator==(const Term::FloatConst &l, const Term::FloatConst &r) { 
   return l.value == r.value;
 }
-EXPORT Term::FloatConst::operator Any() const { return std::make_shared<FloatConst>(*this); };
+Term::FloatConst::operator Any() const { return std::make_shared<FloatConst>(*this); };
 
 Term::DoubleConst::DoubleConst(double value) noexcept : Term::Base(Type::Double()), value(value) {}
 std::ostream &Term::operator<<(std::ostream &os, const Term::DoubleConst &x) {
@@ -416,7 +416,7 @@ std::ostream &Term::operator<<(std::ostream &os, const Term::DoubleConst &x) {
 bool Term::operator==(const Term::DoubleConst &l, const Term::DoubleConst &r) { 
   return l.value == r.value;
 }
-EXPORT Term::DoubleConst::operator Any() const { return std::make_shared<DoubleConst>(*this); };
+Term::DoubleConst::operator Any() const { return std::make_shared<DoubleConst>(*this); };
 
 NullaryIntrinsicKind::Base::Base() = default;
 std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::Any &x) {
@@ -432,7 +432,7 @@ std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIn
   return os;
 }
 bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGlobalIdxX &, const NullaryIntrinsicKind::GpuGlobalIdxX &) { return true; }
-EXPORT NullaryIntrinsicKind::GpuGlobalIdxX::operator Any() const { return std::make_shared<GpuGlobalIdxX>(*this); };
+NullaryIntrinsicKind::GpuGlobalIdxX::operator Any() const { return std::make_shared<GpuGlobalIdxX>(*this); };
 
 NullaryIntrinsicKind::GpuGlobalIdxY::GpuGlobalIdxY() noexcept : NullaryIntrinsicKind::Base() {}
 std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGlobalIdxY &x) {
@@ -441,7 +441,7 @@ std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIn
   return os;
 }
 bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGlobalIdxY &, const NullaryIntrinsicKind::GpuGlobalIdxY &) { return true; }
-EXPORT NullaryIntrinsicKind::GpuGlobalIdxY::operator Any() const { return std::make_shared<GpuGlobalIdxY>(*this); };
+NullaryIntrinsicKind::GpuGlobalIdxY::operator Any() const { return std::make_shared<GpuGlobalIdxY>(*this); };
 
 NullaryIntrinsicKind::GpuGlobalIdxZ::GpuGlobalIdxZ() noexcept : NullaryIntrinsicKind::Base() {}
 std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGlobalIdxZ &x) {
@@ -450,7 +450,7 @@ std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIn
   return os;
 }
 bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGlobalIdxZ &, const NullaryIntrinsicKind::GpuGlobalIdxZ &) { return true; }
-EXPORT NullaryIntrinsicKind::GpuGlobalIdxZ::operator Any() const { return std::make_shared<GpuGlobalIdxZ>(*this); };
+NullaryIntrinsicKind::GpuGlobalIdxZ::operator Any() const { return std::make_shared<GpuGlobalIdxZ>(*this); };
 
 NullaryIntrinsicKind::GpuGlobalSizeX::GpuGlobalSizeX() noexcept : NullaryIntrinsicKind::Base() {}
 std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGlobalSizeX &x) {
@@ -459,7 +459,7 @@ std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIn
   return os;
 }
 bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGlobalSizeX &, const NullaryIntrinsicKind::GpuGlobalSizeX &) { return true; }
-EXPORT NullaryIntrinsicKind::GpuGlobalSizeX::operator Any() const { return std::make_shared<GpuGlobalSizeX>(*this); };
+NullaryIntrinsicKind::GpuGlobalSizeX::operator Any() const { return std::make_shared<GpuGlobalSizeX>(*this); };
 
 NullaryIntrinsicKind::GpuGlobalSizeY::GpuGlobalSizeY() noexcept : NullaryIntrinsicKind::Base() {}
 std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGlobalSizeY &x) {
@@ -468,7 +468,7 @@ std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIn
   return os;
 }
 bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGlobalSizeY &, const NullaryIntrinsicKind::GpuGlobalSizeY &) { return true; }
-EXPORT NullaryIntrinsicKind::GpuGlobalSizeY::operator Any() const { return std::make_shared<GpuGlobalSizeY>(*this); };
+NullaryIntrinsicKind::GpuGlobalSizeY::operator Any() const { return std::make_shared<GpuGlobalSizeY>(*this); };
 
 NullaryIntrinsicKind::GpuGlobalSizeZ::GpuGlobalSizeZ() noexcept : NullaryIntrinsicKind::Base() {}
 std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGlobalSizeZ &x) {
@@ -477,7 +477,7 @@ std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIn
   return os;
 }
 bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGlobalSizeZ &, const NullaryIntrinsicKind::GpuGlobalSizeZ &) { return true; }
-EXPORT NullaryIntrinsicKind::GpuGlobalSizeZ::operator Any() const { return std::make_shared<GpuGlobalSizeZ>(*this); };
+NullaryIntrinsicKind::GpuGlobalSizeZ::operator Any() const { return std::make_shared<GpuGlobalSizeZ>(*this); };
 
 NullaryIntrinsicKind::GpuGroupIdxX::GpuGroupIdxX() noexcept : NullaryIntrinsicKind::Base() {}
 std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupIdxX &x) {
@@ -486,7 +486,7 @@ std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIn
   return os;
 }
 bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupIdxX &, const NullaryIntrinsicKind::GpuGroupIdxX &) { return true; }
-EXPORT NullaryIntrinsicKind::GpuGroupIdxX::operator Any() const { return std::make_shared<GpuGroupIdxX>(*this); };
+NullaryIntrinsicKind::GpuGroupIdxX::operator Any() const { return std::make_shared<GpuGroupIdxX>(*this); };
 
 NullaryIntrinsicKind::GpuGroupIdxY::GpuGroupIdxY() noexcept : NullaryIntrinsicKind::Base() {}
 std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupIdxY &x) {
@@ -495,7 +495,7 @@ std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIn
   return os;
 }
 bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupIdxY &, const NullaryIntrinsicKind::GpuGroupIdxY &) { return true; }
-EXPORT NullaryIntrinsicKind::GpuGroupIdxY::operator Any() const { return std::make_shared<GpuGroupIdxY>(*this); };
+NullaryIntrinsicKind::GpuGroupIdxY::operator Any() const { return std::make_shared<GpuGroupIdxY>(*this); };
 
 NullaryIntrinsicKind::GpuGroupIdxZ::GpuGroupIdxZ() noexcept : NullaryIntrinsicKind::Base() {}
 std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupIdxZ &x) {
@@ -504,7 +504,7 @@ std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIn
   return os;
 }
 bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupIdxZ &, const NullaryIntrinsicKind::GpuGroupIdxZ &) { return true; }
-EXPORT NullaryIntrinsicKind::GpuGroupIdxZ::operator Any() const { return std::make_shared<GpuGroupIdxZ>(*this); };
+NullaryIntrinsicKind::GpuGroupIdxZ::operator Any() const { return std::make_shared<GpuGroupIdxZ>(*this); };
 
 NullaryIntrinsicKind::GpuGroupSizeX::GpuGroupSizeX() noexcept : NullaryIntrinsicKind::Base() {}
 std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupSizeX &x) {
@@ -513,7 +513,7 @@ std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIn
   return os;
 }
 bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupSizeX &, const NullaryIntrinsicKind::GpuGroupSizeX &) { return true; }
-EXPORT NullaryIntrinsicKind::GpuGroupSizeX::operator Any() const { return std::make_shared<GpuGroupSizeX>(*this); };
+NullaryIntrinsicKind::GpuGroupSizeX::operator Any() const { return std::make_shared<GpuGroupSizeX>(*this); };
 
 NullaryIntrinsicKind::GpuGroupSizeY::GpuGroupSizeY() noexcept : NullaryIntrinsicKind::Base() {}
 std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupSizeY &x) {
@@ -522,7 +522,7 @@ std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIn
   return os;
 }
 bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupSizeY &, const NullaryIntrinsicKind::GpuGroupSizeY &) { return true; }
-EXPORT NullaryIntrinsicKind::GpuGroupSizeY::operator Any() const { return std::make_shared<GpuGroupSizeY>(*this); };
+NullaryIntrinsicKind::GpuGroupSizeY::operator Any() const { return std::make_shared<GpuGroupSizeY>(*this); };
 
 NullaryIntrinsicKind::GpuGroupSizeZ::GpuGroupSizeZ() noexcept : NullaryIntrinsicKind::Base() {}
 std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupSizeZ &x) {
@@ -531,7 +531,7 @@ std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIn
   return os;
 }
 bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupSizeZ &, const NullaryIntrinsicKind::GpuGroupSizeZ &) { return true; }
-EXPORT NullaryIntrinsicKind::GpuGroupSizeZ::operator Any() const { return std::make_shared<GpuGroupSizeZ>(*this); };
+NullaryIntrinsicKind::GpuGroupSizeZ::operator Any() const { return std::make_shared<GpuGroupSizeZ>(*this); };
 
 NullaryIntrinsicKind::GpuLocalIdxX::GpuLocalIdxX() noexcept : NullaryIntrinsicKind::Base() {}
 std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuLocalIdxX &x) {
@@ -540,7 +540,7 @@ std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIn
   return os;
 }
 bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuLocalIdxX &, const NullaryIntrinsicKind::GpuLocalIdxX &) { return true; }
-EXPORT NullaryIntrinsicKind::GpuLocalIdxX::operator Any() const { return std::make_shared<GpuLocalIdxX>(*this); };
+NullaryIntrinsicKind::GpuLocalIdxX::operator Any() const { return std::make_shared<GpuLocalIdxX>(*this); };
 
 NullaryIntrinsicKind::GpuLocalIdxY::GpuLocalIdxY() noexcept : NullaryIntrinsicKind::Base() {}
 std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuLocalIdxY &x) {
@@ -549,7 +549,7 @@ std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIn
   return os;
 }
 bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuLocalIdxY &, const NullaryIntrinsicKind::GpuLocalIdxY &) { return true; }
-EXPORT NullaryIntrinsicKind::GpuLocalIdxY::operator Any() const { return std::make_shared<GpuLocalIdxY>(*this); };
+NullaryIntrinsicKind::GpuLocalIdxY::operator Any() const { return std::make_shared<GpuLocalIdxY>(*this); };
 
 NullaryIntrinsicKind::GpuLocalIdxZ::GpuLocalIdxZ() noexcept : NullaryIntrinsicKind::Base() {}
 std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuLocalIdxZ &x) {
@@ -558,7 +558,7 @@ std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIn
   return os;
 }
 bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuLocalIdxZ &, const NullaryIntrinsicKind::GpuLocalIdxZ &) { return true; }
-EXPORT NullaryIntrinsicKind::GpuLocalIdxZ::operator Any() const { return std::make_shared<GpuLocalIdxZ>(*this); };
+NullaryIntrinsicKind::GpuLocalIdxZ::operator Any() const { return std::make_shared<GpuLocalIdxZ>(*this); };
 
 NullaryIntrinsicKind::GpuLocalSizeX::GpuLocalSizeX() noexcept : NullaryIntrinsicKind::Base() {}
 std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuLocalSizeX &x) {
@@ -567,7 +567,7 @@ std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIn
   return os;
 }
 bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuLocalSizeX &, const NullaryIntrinsicKind::GpuLocalSizeX &) { return true; }
-EXPORT NullaryIntrinsicKind::GpuLocalSizeX::operator Any() const { return std::make_shared<GpuLocalSizeX>(*this); };
+NullaryIntrinsicKind::GpuLocalSizeX::operator Any() const { return std::make_shared<GpuLocalSizeX>(*this); };
 
 NullaryIntrinsicKind::GpuLocalSizeY::GpuLocalSizeY() noexcept : NullaryIntrinsicKind::Base() {}
 std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuLocalSizeY &x) {
@@ -576,7 +576,7 @@ std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIn
   return os;
 }
 bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuLocalSizeY &, const NullaryIntrinsicKind::GpuLocalSizeY &) { return true; }
-EXPORT NullaryIntrinsicKind::GpuLocalSizeY::operator Any() const { return std::make_shared<GpuLocalSizeY>(*this); };
+NullaryIntrinsicKind::GpuLocalSizeY::operator Any() const { return std::make_shared<GpuLocalSizeY>(*this); };
 
 NullaryIntrinsicKind::GpuLocalSizeZ::GpuLocalSizeZ() noexcept : NullaryIntrinsicKind::Base() {}
 std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuLocalSizeZ &x) {
@@ -585,7 +585,7 @@ std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIn
   return os;
 }
 bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuLocalSizeZ &, const NullaryIntrinsicKind::GpuLocalSizeZ &) { return true; }
-EXPORT NullaryIntrinsicKind::GpuLocalSizeZ::operator Any() const { return std::make_shared<GpuLocalSizeZ>(*this); };
+NullaryIntrinsicKind::GpuLocalSizeZ::operator Any() const { return std::make_shared<GpuLocalSizeZ>(*this); };
 
 NullaryIntrinsicKind::GpuGroupBarrier::GpuGroupBarrier() noexcept : NullaryIntrinsicKind::Base() {}
 std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupBarrier &x) {
@@ -594,7 +594,7 @@ std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIn
   return os;
 }
 bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupBarrier &, const NullaryIntrinsicKind::GpuGroupBarrier &) { return true; }
-EXPORT NullaryIntrinsicKind::GpuGroupBarrier::operator Any() const { return std::make_shared<GpuGroupBarrier>(*this); };
+NullaryIntrinsicKind::GpuGroupBarrier::operator Any() const { return std::make_shared<GpuGroupBarrier>(*this); };
 
 NullaryIntrinsicKind::GpuGroupFence::GpuGroupFence() noexcept : NullaryIntrinsicKind::Base() {}
 std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupFence &x) {
@@ -603,7 +603,7 @@ std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIn
   return os;
 }
 bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupFence &, const NullaryIntrinsicKind::GpuGroupFence &) { return true; }
-EXPORT NullaryIntrinsicKind::GpuGroupFence::operator Any() const { return std::make_shared<GpuGroupFence>(*this); };
+NullaryIntrinsicKind::GpuGroupFence::operator Any() const { return std::make_shared<GpuGroupFence>(*this); };
 
 UnaryIntrinsicKind::Base::Base() = default;
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Any &x) {
@@ -619,7 +619,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Sin &, const UnaryIntrinsicKind::Sin &) { return true; }
-EXPORT UnaryIntrinsicKind::Sin::operator Any() const { return std::make_shared<Sin>(*this); };
+UnaryIntrinsicKind::Sin::operator Any() const { return std::make_shared<Sin>(*this); };
 
 UnaryIntrinsicKind::Cos::Cos() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Cos &x) {
@@ -628,7 +628,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Cos &, const UnaryIntrinsicKind::Cos &) { return true; }
-EXPORT UnaryIntrinsicKind::Cos::operator Any() const { return std::make_shared<Cos>(*this); };
+UnaryIntrinsicKind::Cos::operator Any() const { return std::make_shared<Cos>(*this); };
 
 UnaryIntrinsicKind::Tan::Tan() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Tan &x) {
@@ -637,7 +637,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Tan &, const UnaryIntrinsicKind::Tan &) { return true; }
-EXPORT UnaryIntrinsicKind::Tan::operator Any() const { return std::make_shared<Tan>(*this); };
+UnaryIntrinsicKind::Tan::operator Any() const { return std::make_shared<Tan>(*this); };
 
 UnaryIntrinsicKind::Asin::Asin() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Asin &x) {
@@ -646,7 +646,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Asin &, const UnaryIntrinsicKind::Asin &) { return true; }
-EXPORT UnaryIntrinsicKind::Asin::operator Any() const { return std::make_shared<Asin>(*this); };
+UnaryIntrinsicKind::Asin::operator Any() const { return std::make_shared<Asin>(*this); };
 
 UnaryIntrinsicKind::Acos::Acos() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Acos &x) {
@@ -655,7 +655,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Acos &, const UnaryIntrinsicKind::Acos &) { return true; }
-EXPORT UnaryIntrinsicKind::Acos::operator Any() const { return std::make_shared<Acos>(*this); };
+UnaryIntrinsicKind::Acos::operator Any() const { return std::make_shared<Acos>(*this); };
 
 UnaryIntrinsicKind::Atan::Atan() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Atan &x) {
@@ -664,7 +664,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Atan &, const UnaryIntrinsicKind::Atan &) { return true; }
-EXPORT UnaryIntrinsicKind::Atan::operator Any() const { return std::make_shared<Atan>(*this); };
+UnaryIntrinsicKind::Atan::operator Any() const { return std::make_shared<Atan>(*this); };
 
 UnaryIntrinsicKind::Sinh::Sinh() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Sinh &x) {
@@ -673,7 +673,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Sinh &, const UnaryIntrinsicKind::Sinh &) { return true; }
-EXPORT UnaryIntrinsicKind::Sinh::operator Any() const { return std::make_shared<Sinh>(*this); };
+UnaryIntrinsicKind::Sinh::operator Any() const { return std::make_shared<Sinh>(*this); };
 
 UnaryIntrinsicKind::Cosh::Cosh() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Cosh &x) {
@@ -682,7 +682,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Cosh &, const UnaryIntrinsicKind::Cosh &) { return true; }
-EXPORT UnaryIntrinsicKind::Cosh::operator Any() const { return std::make_shared<Cosh>(*this); };
+UnaryIntrinsicKind::Cosh::operator Any() const { return std::make_shared<Cosh>(*this); };
 
 UnaryIntrinsicKind::Tanh::Tanh() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Tanh &x) {
@@ -691,7 +691,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Tanh &, const UnaryIntrinsicKind::Tanh &) { return true; }
-EXPORT UnaryIntrinsicKind::Tanh::operator Any() const { return std::make_shared<Tanh>(*this); };
+UnaryIntrinsicKind::Tanh::operator Any() const { return std::make_shared<Tanh>(*this); };
 
 UnaryIntrinsicKind::Signum::Signum() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Signum &x) {
@@ -700,7 +700,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Signum &, const UnaryIntrinsicKind::Signum &) { return true; }
-EXPORT UnaryIntrinsicKind::Signum::operator Any() const { return std::make_shared<Signum>(*this); };
+UnaryIntrinsicKind::Signum::operator Any() const { return std::make_shared<Signum>(*this); };
 
 UnaryIntrinsicKind::Abs::Abs() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Abs &x) {
@@ -709,7 +709,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Abs &, const UnaryIntrinsicKind::Abs &) { return true; }
-EXPORT UnaryIntrinsicKind::Abs::operator Any() const { return std::make_shared<Abs>(*this); };
+UnaryIntrinsicKind::Abs::operator Any() const { return std::make_shared<Abs>(*this); };
 
 UnaryIntrinsicKind::Round::Round() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Round &x) {
@@ -718,7 +718,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Round &, const UnaryIntrinsicKind::Round &) { return true; }
-EXPORT UnaryIntrinsicKind::Round::operator Any() const { return std::make_shared<Round>(*this); };
+UnaryIntrinsicKind::Round::operator Any() const { return std::make_shared<Round>(*this); };
 
 UnaryIntrinsicKind::Ceil::Ceil() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Ceil &x) {
@@ -727,7 +727,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Ceil &, const UnaryIntrinsicKind::Ceil &) { return true; }
-EXPORT UnaryIntrinsicKind::Ceil::operator Any() const { return std::make_shared<Ceil>(*this); };
+UnaryIntrinsicKind::Ceil::operator Any() const { return std::make_shared<Ceil>(*this); };
 
 UnaryIntrinsicKind::Floor::Floor() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Floor &x) {
@@ -736,7 +736,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Floor &, const UnaryIntrinsicKind::Floor &) { return true; }
-EXPORT UnaryIntrinsicKind::Floor::operator Any() const { return std::make_shared<Floor>(*this); };
+UnaryIntrinsicKind::Floor::operator Any() const { return std::make_shared<Floor>(*this); };
 
 UnaryIntrinsicKind::Rint::Rint() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Rint &x) {
@@ -745,7 +745,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Rint &, const UnaryIntrinsicKind::Rint &) { return true; }
-EXPORT UnaryIntrinsicKind::Rint::operator Any() const { return std::make_shared<Rint>(*this); };
+UnaryIntrinsicKind::Rint::operator Any() const { return std::make_shared<Rint>(*this); };
 
 UnaryIntrinsicKind::Sqrt::Sqrt() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Sqrt &x) {
@@ -754,7 +754,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Sqrt &, const UnaryIntrinsicKind::Sqrt &) { return true; }
-EXPORT UnaryIntrinsicKind::Sqrt::operator Any() const { return std::make_shared<Sqrt>(*this); };
+UnaryIntrinsicKind::Sqrt::operator Any() const { return std::make_shared<Sqrt>(*this); };
 
 UnaryIntrinsicKind::Cbrt::Cbrt() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Cbrt &x) {
@@ -763,7 +763,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Cbrt &, const UnaryIntrinsicKind::Cbrt &) { return true; }
-EXPORT UnaryIntrinsicKind::Cbrt::operator Any() const { return std::make_shared<Cbrt>(*this); };
+UnaryIntrinsicKind::Cbrt::operator Any() const { return std::make_shared<Cbrt>(*this); };
 
 UnaryIntrinsicKind::Exp::Exp() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Exp &x) {
@@ -772,7 +772,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Exp &, const UnaryIntrinsicKind::Exp &) { return true; }
-EXPORT UnaryIntrinsicKind::Exp::operator Any() const { return std::make_shared<Exp>(*this); };
+UnaryIntrinsicKind::Exp::operator Any() const { return std::make_shared<Exp>(*this); };
 
 UnaryIntrinsicKind::Expm1::Expm1() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Expm1 &x) {
@@ -781,7 +781,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Expm1 &, const UnaryIntrinsicKind::Expm1 &) { return true; }
-EXPORT UnaryIntrinsicKind::Expm1::operator Any() const { return std::make_shared<Expm1>(*this); };
+UnaryIntrinsicKind::Expm1::operator Any() const { return std::make_shared<Expm1>(*this); };
 
 UnaryIntrinsicKind::Log::Log() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Log &x) {
@@ -790,7 +790,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Log &, const UnaryIntrinsicKind::Log &) { return true; }
-EXPORT UnaryIntrinsicKind::Log::operator Any() const { return std::make_shared<Log>(*this); };
+UnaryIntrinsicKind::Log::operator Any() const { return std::make_shared<Log>(*this); };
 
 UnaryIntrinsicKind::Log1p::Log1p() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Log1p &x) {
@@ -799,7 +799,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Log1p &, const UnaryIntrinsicKind::Log1p &) { return true; }
-EXPORT UnaryIntrinsicKind::Log1p::operator Any() const { return std::make_shared<Log1p>(*this); };
+UnaryIntrinsicKind::Log1p::operator Any() const { return std::make_shared<Log1p>(*this); };
 
 UnaryIntrinsicKind::Log10::Log10() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Log10 &x) {
@@ -808,7 +808,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Log10 &, const UnaryIntrinsicKind::Log10 &) { return true; }
-EXPORT UnaryIntrinsicKind::Log10::operator Any() const { return std::make_shared<Log10>(*this); };
+UnaryIntrinsicKind::Log10::operator Any() const { return std::make_shared<Log10>(*this); };
 
 UnaryIntrinsicKind::BNot::BNot() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::BNot &x) {
@@ -817,7 +817,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::BNot &, const UnaryIntrinsicKind::BNot &) { return true; }
-EXPORT UnaryIntrinsicKind::BNot::operator Any() const { return std::make_shared<BNot>(*this); };
+UnaryIntrinsicKind::BNot::operator Any() const { return std::make_shared<BNot>(*this); };
 
 UnaryIntrinsicKind::Pos::Pos() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Pos &x) {
@@ -826,7 +826,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Pos &, const UnaryIntrinsicKind::Pos &) { return true; }
-EXPORT UnaryIntrinsicKind::Pos::operator Any() const { return std::make_shared<Pos>(*this); };
+UnaryIntrinsicKind::Pos::operator Any() const { return std::make_shared<Pos>(*this); };
 
 UnaryIntrinsicKind::Neg::Neg() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Neg &x) {
@@ -835,7 +835,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Neg &, const UnaryIntrinsicKind::Neg &) { return true; }
-EXPORT UnaryIntrinsicKind::Neg::operator Any() const { return std::make_shared<Neg>(*this); };
+UnaryIntrinsicKind::Neg::operator Any() const { return std::make_shared<Neg>(*this); };
 
 UnaryIntrinsicKind::LogicNot::LogicNot() noexcept : UnaryIntrinsicKind::Base() {}
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::LogicNot &x) {
@@ -844,7 +844,7 @@ std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrin
   return os;
 }
 bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::LogicNot &, const UnaryIntrinsicKind::LogicNot &) { return true; }
-EXPORT UnaryIntrinsicKind::LogicNot::operator Any() const { return std::make_shared<LogicNot>(*this); };
+UnaryIntrinsicKind::LogicNot::operator Any() const { return std::make_shared<LogicNot>(*this); };
 
 BinaryIntrinsicKind::Base::Base() = default;
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Any &x) {
@@ -860,7 +860,7 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
   return os;
 }
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Add &, const BinaryIntrinsicKind::Add &) { return true; }
-EXPORT BinaryIntrinsicKind::Add::operator Any() const { return std::make_shared<Add>(*this); };
+BinaryIntrinsicKind::Add::operator Any() const { return std::make_shared<Add>(*this); };
 
 BinaryIntrinsicKind::Sub::Sub() noexcept : BinaryIntrinsicKind::Base() {}
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Sub &x) {
@@ -869,7 +869,7 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
   return os;
 }
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Sub &, const BinaryIntrinsicKind::Sub &) { return true; }
-EXPORT BinaryIntrinsicKind::Sub::operator Any() const { return std::make_shared<Sub>(*this); };
+BinaryIntrinsicKind::Sub::operator Any() const { return std::make_shared<Sub>(*this); };
 
 BinaryIntrinsicKind::Mul::Mul() noexcept : BinaryIntrinsicKind::Base() {}
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Mul &x) {
@@ -878,7 +878,7 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
   return os;
 }
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Mul &, const BinaryIntrinsicKind::Mul &) { return true; }
-EXPORT BinaryIntrinsicKind::Mul::operator Any() const { return std::make_shared<Mul>(*this); };
+BinaryIntrinsicKind::Mul::operator Any() const { return std::make_shared<Mul>(*this); };
 
 BinaryIntrinsicKind::Div::Div() noexcept : BinaryIntrinsicKind::Base() {}
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Div &x) {
@@ -887,7 +887,7 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
   return os;
 }
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Div &, const BinaryIntrinsicKind::Div &) { return true; }
-EXPORT BinaryIntrinsicKind::Div::operator Any() const { return std::make_shared<Div>(*this); };
+BinaryIntrinsicKind::Div::operator Any() const { return std::make_shared<Div>(*this); };
 
 BinaryIntrinsicKind::Rem::Rem() noexcept : BinaryIntrinsicKind::Base() {}
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Rem &x) {
@@ -896,7 +896,7 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
   return os;
 }
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Rem &, const BinaryIntrinsicKind::Rem &) { return true; }
-EXPORT BinaryIntrinsicKind::Rem::operator Any() const { return std::make_shared<Rem>(*this); };
+BinaryIntrinsicKind::Rem::operator Any() const { return std::make_shared<Rem>(*this); };
 
 BinaryIntrinsicKind::Pow::Pow() noexcept : BinaryIntrinsicKind::Base() {}
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Pow &x) {
@@ -905,7 +905,7 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
   return os;
 }
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Pow &, const BinaryIntrinsicKind::Pow &) { return true; }
-EXPORT BinaryIntrinsicKind::Pow::operator Any() const { return std::make_shared<Pow>(*this); };
+BinaryIntrinsicKind::Pow::operator Any() const { return std::make_shared<Pow>(*this); };
 
 BinaryIntrinsicKind::Min::Min() noexcept : BinaryIntrinsicKind::Base() {}
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Min &x) {
@@ -914,7 +914,7 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
   return os;
 }
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Min &, const BinaryIntrinsicKind::Min &) { return true; }
-EXPORT BinaryIntrinsicKind::Min::operator Any() const { return std::make_shared<Min>(*this); };
+BinaryIntrinsicKind::Min::operator Any() const { return std::make_shared<Min>(*this); };
 
 BinaryIntrinsicKind::Max::Max() noexcept : BinaryIntrinsicKind::Base() {}
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Max &x) {
@@ -923,7 +923,7 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
   return os;
 }
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Max &, const BinaryIntrinsicKind::Max &) { return true; }
-EXPORT BinaryIntrinsicKind::Max::operator Any() const { return std::make_shared<Max>(*this); };
+BinaryIntrinsicKind::Max::operator Any() const { return std::make_shared<Max>(*this); };
 
 BinaryIntrinsicKind::Atan2::Atan2() noexcept : BinaryIntrinsicKind::Base() {}
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Atan2 &x) {
@@ -932,7 +932,7 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
   return os;
 }
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Atan2 &, const BinaryIntrinsicKind::Atan2 &) { return true; }
-EXPORT BinaryIntrinsicKind::Atan2::operator Any() const { return std::make_shared<Atan2>(*this); };
+BinaryIntrinsicKind::Atan2::operator Any() const { return std::make_shared<Atan2>(*this); };
 
 BinaryIntrinsicKind::Hypot::Hypot() noexcept : BinaryIntrinsicKind::Base() {}
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Hypot &x) {
@@ -941,7 +941,7 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
   return os;
 }
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Hypot &, const BinaryIntrinsicKind::Hypot &) { return true; }
-EXPORT BinaryIntrinsicKind::Hypot::operator Any() const { return std::make_shared<Hypot>(*this); };
+BinaryIntrinsicKind::Hypot::operator Any() const { return std::make_shared<Hypot>(*this); };
 
 BinaryIntrinsicKind::BAnd::BAnd() noexcept : BinaryIntrinsicKind::Base() {}
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::BAnd &x) {
@@ -950,7 +950,7 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
   return os;
 }
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::BAnd &, const BinaryIntrinsicKind::BAnd &) { return true; }
-EXPORT BinaryIntrinsicKind::BAnd::operator Any() const { return std::make_shared<BAnd>(*this); };
+BinaryIntrinsicKind::BAnd::operator Any() const { return std::make_shared<BAnd>(*this); };
 
 BinaryIntrinsicKind::BOr::BOr() noexcept : BinaryIntrinsicKind::Base() {}
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::BOr &x) {
@@ -959,7 +959,7 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
   return os;
 }
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::BOr &, const BinaryIntrinsicKind::BOr &) { return true; }
-EXPORT BinaryIntrinsicKind::BOr::operator Any() const { return std::make_shared<BOr>(*this); };
+BinaryIntrinsicKind::BOr::operator Any() const { return std::make_shared<BOr>(*this); };
 
 BinaryIntrinsicKind::BXor::BXor() noexcept : BinaryIntrinsicKind::Base() {}
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::BXor &x) {
@@ -968,7 +968,7 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
   return os;
 }
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::BXor &, const BinaryIntrinsicKind::BXor &) { return true; }
-EXPORT BinaryIntrinsicKind::BXor::operator Any() const { return std::make_shared<BXor>(*this); };
+BinaryIntrinsicKind::BXor::operator Any() const { return std::make_shared<BXor>(*this); };
 
 BinaryIntrinsicKind::BSL::BSL() noexcept : BinaryIntrinsicKind::Base() {}
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::BSL &x) {
@@ -977,7 +977,7 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
   return os;
 }
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::BSL &, const BinaryIntrinsicKind::BSL &) { return true; }
-EXPORT BinaryIntrinsicKind::BSL::operator Any() const { return std::make_shared<BSL>(*this); };
+BinaryIntrinsicKind::BSL::operator Any() const { return std::make_shared<BSL>(*this); };
 
 BinaryIntrinsicKind::BSR::BSR() noexcept : BinaryIntrinsicKind::Base() {}
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::BSR &x) {
@@ -986,7 +986,7 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
   return os;
 }
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::BSR &, const BinaryIntrinsicKind::BSR &) { return true; }
-EXPORT BinaryIntrinsicKind::BSR::operator Any() const { return std::make_shared<BSR>(*this); };
+BinaryIntrinsicKind::BSR::operator Any() const { return std::make_shared<BSR>(*this); };
 
 BinaryIntrinsicKind::BZSR::BZSR() noexcept : BinaryIntrinsicKind::Base() {}
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::BZSR &x) {
@@ -995,7 +995,7 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
   return os;
 }
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::BZSR &, const BinaryIntrinsicKind::BZSR &) { return true; }
-EXPORT BinaryIntrinsicKind::BZSR::operator Any() const { return std::make_shared<BZSR>(*this); };
+BinaryIntrinsicKind::BZSR::operator Any() const { return std::make_shared<BZSR>(*this); };
 
 BinaryIntrinsicKind::LogicEq::LogicEq() noexcept : BinaryIntrinsicKind::Base() {}
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicEq &x) {
@@ -1004,7 +1004,7 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
   return os;
 }
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicEq &, const BinaryIntrinsicKind::LogicEq &) { return true; }
-EXPORT BinaryIntrinsicKind::LogicEq::operator Any() const { return std::make_shared<LogicEq>(*this); };
+BinaryIntrinsicKind::LogicEq::operator Any() const { return std::make_shared<LogicEq>(*this); };
 
 BinaryIntrinsicKind::LogicNeq::LogicNeq() noexcept : BinaryIntrinsicKind::Base() {}
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicNeq &x) {
@@ -1013,7 +1013,7 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
   return os;
 }
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicNeq &, const BinaryIntrinsicKind::LogicNeq &) { return true; }
-EXPORT BinaryIntrinsicKind::LogicNeq::operator Any() const { return std::make_shared<LogicNeq>(*this); };
+BinaryIntrinsicKind::LogicNeq::operator Any() const { return std::make_shared<LogicNeq>(*this); };
 
 BinaryIntrinsicKind::LogicAnd::LogicAnd() noexcept : BinaryIntrinsicKind::Base() {}
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicAnd &x) {
@@ -1022,7 +1022,7 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
   return os;
 }
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicAnd &, const BinaryIntrinsicKind::LogicAnd &) { return true; }
-EXPORT BinaryIntrinsicKind::LogicAnd::operator Any() const { return std::make_shared<LogicAnd>(*this); };
+BinaryIntrinsicKind::LogicAnd::operator Any() const { return std::make_shared<LogicAnd>(*this); };
 
 BinaryIntrinsicKind::LogicOr::LogicOr() noexcept : BinaryIntrinsicKind::Base() {}
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicOr &x) {
@@ -1031,7 +1031,7 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
   return os;
 }
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicOr &, const BinaryIntrinsicKind::LogicOr &) { return true; }
-EXPORT BinaryIntrinsicKind::LogicOr::operator Any() const { return std::make_shared<LogicOr>(*this); };
+BinaryIntrinsicKind::LogicOr::operator Any() const { return std::make_shared<LogicOr>(*this); };
 
 BinaryIntrinsicKind::LogicLte::LogicLte() noexcept : BinaryIntrinsicKind::Base() {}
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicLte &x) {
@@ -1040,7 +1040,7 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
   return os;
 }
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicLte &, const BinaryIntrinsicKind::LogicLte &) { return true; }
-EXPORT BinaryIntrinsicKind::LogicLte::operator Any() const { return std::make_shared<LogicLte>(*this); };
+BinaryIntrinsicKind::LogicLte::operator Any() const { return std::make_shared<LogicLte>(*this); };
 
 BinaryIntrinsicKind::LogicGte::LogicGte() noexcept : BinaryIntrinsicKind::Base() {}
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicGte &x) {
@@ -1049,7 +1049,7 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
   return os;
 }
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicGte &, const BinaryIntrinsicKind::LogicGte &) { return true; }
-EXPORT BinaryIntrinsicKind::LogicGte::operator Any() const { return std::make_shared<LogicGte>(*this); };
+BinaryIntrinsicKind::LogicGte::operator Any() const { return std::make_shared<LogicGte>(*this); };
 
 BinaryIntrinsicKind::LogicLt::LogicLt() noexcept : BinaryIntrinsicKind::Base() {}
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicLt &x) {
@@ -1058,7 +1058,7 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
   return os;
 }
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicLt &, const BinaryIntrinsicKind::LogicLt &) { return true; }
-EXPORT BinaryIntrinsicKind::LogicLt::operator Any() const { return std::make_shared<LogicLt>(*this); };
+BinaryIntrinsicKind::LogicLt::operator Any() const { return std::make_shared<LogicLt>(*this); };
 
 BinaryIntrinsicKind::LogicGt::LogicGt() noexcept : BinaryIntrinsicKind::Base() {}
 std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicGt &x) {
@@ -1067,7 +1067,7 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
   return os;
 }
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicGt &, const BinaryIntrinsicKind::LogicGt &) { return true; }
-EXPORT BinaryIntrinsicKind::LogicGt::operator Any() const { return std::make_shared<LogicGt>(*this); };
+BinaryIntrinsicKind::LogicGt::operator Any() const { return std::make_shared<LogicGt>(*this); };
 
 Expr::Base::Base(Type::Any tpe) noexcept : tpe(std::move(tpe)) {}
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Any &x) {
@@ -1091,7 +1091,7 @@ std::ostream &Expr::operator<<(std::ostream &os, const Expr::NullaryIntrinsic &x
 bool Expr::operator==(const Expr::NullaryIntrinsic &l, const Expr::NullaryIntrinsic &r) { 
   return *l.kind == *r.kind && *l.rtn == *r.rtn;
 }
-EXPORT Expr::NullaryIntrinsic::operator Any() const { return std::make_shared<NullaryIntrinsic>(*this); };
+Expr::NullaryIntrinsic::operator Any() const { return std::make_shared<NullaryIntrinsic>(*this); };
 
 Expr::UnaryIntrinsic::UnaryIntrinsic(Term::Any lhs, UnaryIntrinsicKind::Any kind, Type::Any rtn) noexcept : Expr::Base(rtn), lhs(std::move(lhs)), kind(std::move(kind)), rtn(std::move(rtn)) {}
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::UnaryIntrinsic &x) {
@@ -1107,7 +1107,7 @@ std::ostream &Expr::operator<<(std::ostream &os, const Expr::UnaryIntrinsic &x) 
 bool Expr::operator==(const Expr::UnaryIntrinsic &l, const Expr::UnaryIntrinsic &r) { 
   return *l.lhs == *r.lhs && *l.kind == *r.kind && *l.rtn == *r.rtn;
 }
-EXPORT Expr::UnaryIntrinsic::operator Any() const { return std::make_shared<UnaryIntrinsic>(*this); };
+Expr::UnaryIntrinsic::operator Any() const { return std::make_shared<UnaryIntrinsic>(*this); };
 
 Expr::BinaryIntrinsic::BinaryIntrinsic(Term::Any lhs, Term::Any rhs, BinaryIntrinsicKind::Any kind, Type::Any rtn) noexcept : Expr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), kind(std::move(kind)), rtn(std::move(rtn)) {}
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::BinaryIntrinsic &x) {
@@ -1125,7 +1125,7 @@ std::ostream &Expr::operator<<(std::ostream &os, const Expr::BinaryIntrinsic &x)
 bool Expr::operator==(const Expr::BinaryIntrinsic &l, const Expr::BinaryIntrinsic &r) { 
   return *l.lhs == *r.lhs && *l.rhs == *r.rhs && *l.kind == *r.kind && *l.rtn == *r.rtn;
 }
-EXPORT Expr::BinaryIntrinsic::operator Any() const { return std::make_shared<BinaryIntrinsic>(*this); };
+Expr::BinaryIntrinsic::operator Any() const { return std::make_shared<BinaryIntrinsic>(*this); };
 
 Expr::Cast::Cast(Term::Any from, Type::Any as) noexcept : Expr::Base(as), from(std::move(from)), as(std::move(as)) {}
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Cast &x) {
@@ -1139,7 +1139,7 @@ std::ostream &Expr::operator<<(std::ostream &os, const Expr::Cast &x) {
 bool Expr::operator==(const Expr::Cast &l, const Expr::Cast &r) { 
   return *l.from == *r.from && *l.as == *r.as;
 }
-EXPORT Expr::Cast::operator Any() const { return std::make_shared<Cast>(*this); };
+Expr::Cast::operator Any() const { return std::make_shared<Cast>(*this); };
 
 Expr::Alias::Alias(Term::Any ref) noexcept : Expr::Base(Term::tpe(ref)), ref(std::move(ref)) {}
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Alias &x) {
@@ -1151,7 +1151,7 @@ std::ostream &Expr::operator<<(std::ostream &os, const Expr::Alias &x) {
 bool Expr::operator==(const Expr::Alias &l, const Expr::Alias &r) { 
   return *l.ref == *r.ref;
 }
-EXPORT Expr::Alias::operator Any() const { return std::make_shared<Alias>(*this); };
+Expr::Alias::operator Any() const { return std::make_shared<Alias>(*this); };
 
 Expr::Index::Index(Term::Any lhs, Term::Any idx, Type::Any component) noexcept : Expr::Base(component), lhs(std::move(lhs)), idx(std::move(idx)), component(std::move(component)) {}
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Index &x) {
@@ -1167,7 +1167,7 @@ std::ostream &Expr::operator<<(std::ostream &os, const Expr::Index &x) {
 bool Expr::operator==(const Expr::Index &l, const Expr::Index &r) { 
   return *l.lhs == *r.lhs && *l.idx == *r.idx && *l.component == *r.component;
 }
-EXPORT Expr::Index::operator Any() const { return std::make_shared<Index>(*this); };
+Expr::Index::operator Any() const { return std::make_shared<Index>(*this); };
 
 Expr::Alloc::Alloc(Type::Any component, Term::Any size) noexcept : Expr::Base(Type::Array(component)), component(std::move(component)), size(std::move(size)) {}
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Alloc &x) {
@@ -1181,7 +1181,7 @@ std::ostream &Expr::operator<<(std::ostream &os, const Expr::Alloc &x) {
 bool Expr::operator==(const Expr::Alloc &l, const Expr::Alloc &r) { 
   return *l.component == *r.component && *l.size == *r.size;
 }
-EXPORT Expr::Alloc::operator Any() const { return std::make_shared<Alloc>(*this); };
+Expr::Alloc::operator Any() const { return std::make_shared<Alloc>(*this); };
 
 Expr::Invoke::Invoke(Sym name, std::vector<Type::Any> tpeArgs, std::optional<Term::Any> receiver, std::vector<Term::Any> args, std::vector<Term::Any> captures, Type::Any rtn) noexcept : Expr::Base(rtn), name(std::move(name)), tpeArgs(std::move(tpeArgs)), receiver(std::move(receiver)), args(std::move(args)), captures(std::move(captures)), rtn(std::move(rtn)) {}
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Invoke &x) {
@@ -1222,7 +1222,7 @@ std::ostream &Expr::operator<<(std::ostream &os, const Expr::Invoke &x) {
 bool Expr::operator==(const Expr::Invoke &l, const Expr::Invoke &r) { 
   return l.name == r.name && std::equal(l.tpeArgs.begin(), l.tpeArgs.end(), r.tpeArgs.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && ( (!l.receiver && !r.receiver) || (l.receiver && r.receiver && **l.receiver == **r.receiver) ) && std::equal(l.args.begin(), l.args.end(), r.args.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && std::equal(l.captures.begin(), l.captures.end(), r.captures.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && *l.rtn == *r.rtn;
 }
-EXPORT Expr::Invoke::operator Any() const { return std::make_shared<Invoke>(*this); };
+Expr::Invoke::operator Any() const { return std::make_shared<Invoke>(*this); };
 
 Stmt::Base::Base() = default;
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Any &x) {
@@ -1246,7 +1246,7 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Block &x) {
 bool Stmt::operator==(const Stmt::Block &l, const Stmt::Block &r) { 
   return std::equal(l.stmts.begin(), l.stmts.end(), r.stmts.begin(), [](auto &&l, auto &&r) { return *l == *r; });
 }
-EXPORT Stmt::Block::operator Any() const { return std::make_shared<Block>(*this); };
+Stmt::Block::operator Any() const { return std::make_shared<Block>(*this); };
 
 Stmt::Comment::Comment(std::string value) noexcept : Stmt::Base(), value(std::move(value)) {}
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Comment &x) {
@@ -1258,7 +1258,7 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Comment &x) {
 bool Stmt::operator==(const Stmt::Comment &l, const Stmt::Comment &r) { 
   return l.value == r.value;
 }
-EXPORT Stmt::Comment::operator Any() const { return std::make_shared<Comment>(*this); };
+Stmt::Comment::operator Any() const { return std::make_shared<Comment>(*this); };
 
 Stmt::Var::Var(Named name, std::optional<Expr::Any> expr) noexcept : Stmt::Base(), name(std::move(name)), expr(std::move(expr)) {}
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Var &x) {
@@ -1276,7 +1276,7 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Var &x) {
 bool Stmt::operator==(const Stmt::Var &l, const Stmt::Var &r) { 
   return l.name == r.name && ( (!l.expr && !r.expr) || (l.expr && r.expr && **l.expr == **r.expr) );
 }
-EXPORT Stmt::Var::operator Any() const { return std::make_shared<Var>(*this); };
+Stmt::Var::operator Any() const { return std::make_shared<Var>(*this); };
 
 Stmt::Mut::Mut(Term::Any name, Expr::Any expr, bool copy) noexcept : Stmt::Base(), name(std::move(name)), expr(std::move(expr)), copy(copy) {}
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Mut &x) {
@@ -1292,7 +1292,7 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Mut &x) {
 bool Stmt::operator==(const Stmt::Mut &l, const Stmt::Mut &r) { 
   return *l.name == *r.name && *l.expr == *r.expr && l.copy == r.copy;
 }
-EXPORT Stmt::Mut::operator Any() const { return std::make_shared<Mut>(*this); };
+Stmt::Mut::operator Any() const { return std::make_shared<Mut>(*this); };
 
 Stmt::Update::Update(Term::Any lhs, Term::Any idx, Term::Any value) noexcept : Stmt::Base(), lhs(std::move(lhs)), idx(std::move(idx)), value(std::move(value)) {}
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Update &x) {
@@ -1308,7 +1308,7 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Update &x) {
 bool Stmt::operator==(const Stmt::Update &l, const Stmt::Update &r) { 
   return *l.lhs == *r.lhs && *l.idx == *r.idx && *l.value == *r.value;
 }
-EXPORT Stmt::Update::operator Any() const { return std::make_shared<Update>(*this); };
+Stmt::Update::operator Any() const { return std::make_shared<Update>(*this); };
 
 Stmt::While::While(std::vector<Stmt::Any> tests, Term::Any cond, std::vector<Stmt::Any> body) noexcept : Stmt::Base(), tests(std::move(tests)), cond(std::move(cond)), body(std::move(body)) {}
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::While &x) {
@@ -1334,7 +1334,7 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::While &x) {
 bool Stmt::operator==(const Stmt::While &l, const Stmt::While &r) { 
   return std::equal(l.tests.begin(), l.tests.end(), r.tests.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && *l.cond == *r.cond && std::equal(l.body.begin(), l.body.end(), r.body.begin(), [](auto &&l, auto &&r) { return *l == *r; });
 }
-EXPORT Stmt::While::operator Any() const { return std::make_shared<While>(*this); };
+Stmt::While::operator Any() const { return std::make_shared<While>(*this); };
 
 Stmt::Break::Break() noexcept : Stmt::Base() {}
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Break &x) {
@@ -1343,7 +1343,7 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Break &x) {
   return os;
 }
 bool Stmt::operator==(const Stmt::Break &, const Stmt::Break &) { return true; }
-EXPORT Stmt::Break::operator Any() const { return std::make_shared<Break>(*this); };
+Stmt::Break::operator Any() const { return std::make_shared<Break>(*this); };
 
 Stmt::Cont::Cont() noexcept : Stmt::Base() {}
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Cont &x) {
@@ -1352,7 +1352,7 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Cont &x) {
   return os;
 }
 bool Stmt::operator==(const Stmt::Cont &, const Stmt::Cont &) { return true; }
-EXPORT Stmt::Cont::operator Any() const { return std::make_shared<Cont>(*this); };
+Stmt::Cont::operator Any() const { return std::make_shared<Cont>(*this); };
 
 Stmt::Cond::Cond(Expr::Any cond, std::vector<Stmt::Any> trueBr, std::vector<Stmt::Any> falseBr) noexcept : Stmt::Base(), cond(std::move(cond)), trueBr(std::move(trueBr)), falseBr(std::move(falseBr)) {}
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Cond &x) {
@@ -1378,7 +1378,7 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Cond &x) {
 bool Stmt::operator==(const Stmt::Cond &l, const Stmt::Cond &r) { 
   return *l.cond == *r.cond && std::equal(l.trueBr.begin(), l.trueBr.end(), r.trueBr.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && std::equal(l.falseBr.begin(), l.falseBr.end(), r.falseBr.begin(), [](auto &&l, auto &&r) { return *l == *r; });
 }
-EXPORT Stmt::Cond::operator Any() const { return std::make_shared<Cond>(*this); };
+Stmt::Cond::operator Any() const { return std::make_shared<Cond>(*this); };
 
 Stmt::Return::Return(Expr::Any value) noexcept : Stmt::Base(), value(std::move(value)) {}
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Return &x) {
@@ -1390,7 +1390,7 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Return &x) {
 bool Stmt::operator==(const Stmt::Return &l, const Stmt::Return &r) { 
   return *l.value == *r.value;
 }
-EXPORT Stmt::Return::operator Any() const { return std::make_shared<Return>(*this); };
+Stmt::Return::operator Any() const { return std::make_shared<Return>(*this); };
 
 StructMember::StructMember(Named named, bool isMutable) noexcept : named(std::move(named)), isMutable(isMutable) {}
 std::ostream &operator<<(std::ostream &os, const StructMember &x) {
