@@ -17,9 +17,9 @@ elseif (UNIX)
 endif ()
 
 
-add_library(polyregion-shim-jvm SHARED cxa_thread_atexit.cpp generated/mirror.cpp shim.cpp)
-add_library(polyregion-compiler-jvm SHARED cxa_thread_atexit.cpp generated/mirror.cpp compiler.cpp)
-add_library(polyregion-runtime-jvm SHARED cxa_thread_atexit.cpp generated/mirror.cpp runtime.cpp)
+add_library(polyregion-shim-jvm SHARED ../../shared/cxa_thread_atexit.cpp generated/mirror.cpp shim.cpp)
+add_library(polyregion-compiler-jvm SHARED ../../shared/cxa_thread_atexit.cpp generated/mirror.cpp compiler.cpp)
+add_library(polyregion-runtime-jvm SHARED ../../shared/cxa_thread_atexit.cpp generated/mirror.cpp runtime.cpp)
 
 
 target_include_directories(polyregion-shim-jvm PRIVATE

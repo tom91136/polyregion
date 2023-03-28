@@ -17,7 +17,7 @@ add_library(compiler-lib ${LIB_SOURCES})
 add_dependencies(compiler-lib intrinsics_gen)
 
 add_executable(compiler-tests test/ast_codegen.cpp test/backend.cpp test/ast.cpp)
-add_executable(compiler-drv driver.cpp)
+add_executable(compiler-drv ../shared/cxa_thread_atexit.cpp driver.cpp)
 add_dependencies(compiler-drv runtime-lib)
 
 
