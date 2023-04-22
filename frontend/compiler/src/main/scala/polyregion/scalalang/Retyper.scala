@@ -57,7 +57,7 @@ object Retyper {
       q.Symbol.requiredClass("java.io.Serializable"),
       q.Symbol.requiredClass("scala.reflect.ClassManifestDeprecatedApis"),
       q.Symbol.requiredClass("scala.reflect.OptManifest"),
-      q.Symbol.requiredClass("scala.Equals"),
+      q.Symbol.requiredClass("scala.Equals")
     )
     clsSym.typeRef.baseClasses
       .drop(1)                      // head is the class itself
@@ -159,6 +159,7 @@ object Retyper {
           case Some(sym) if sym.name == "<root>" => resolveClsFromTpeRepr(tpe.qualifier) // discard root package
           case Some(sym)                         => resolveClsFromSymbol(sym)
         }
+      case q.AppliedType(x, xs) => resolveClsFromTpeRepr(x)
       case invalid =>
         pprint.pprintln(invalid)
         s"Not a class TypeRepr: ${invalid} (repr=${Try(invalid.show)})".fail
@@ -179,7 +180,8 @@ object Retyper {
       case (p.Sym(Symbols.Scala :+ "Double"), q.ClassKind.Class)  => p.Type.Double
       case (p.Sym(Symbols.Scala :+ "Char"), q.ClassKind.Class)    => p.Type.Char
       // TODO type ctor args for now, need to work out type member refinements
-      case (sym, q.ClassKind.Class | q.ClassKind.Object) => p.Type.Struct(sym, tpeVars, tpeVars.map(p.Type.Var(_)), deriveParents(clsSym))
+      case (sym, q.ClassKind.Class | q.ClassKind.Object) =>
+        p.Type.Struct(sym, tpeVars, tpeVars.map(p.Type.Var(_)), deriveParents(clsSym))
     }
 
   def clsSymTyper0(using q: Quoted)(clsSym: q.Symbol): Result[p.Type] =
@@ -244,11 +246,11 @@ object Retyper {
             if (leftTpe == rightTpe) (term -> leftTpe, leftWit |+| rightWit).success
 //            else if(leftTpe == p.Type.Unit || rightTpe == p.Type.Unit) (term, p.Type.Unit).success
             else {
-              val sym = (andOr match {
+              val sym = andOr match {
                 case _: q.OrType  => p.Sym("#Union")
                 case _: q.AndType => p.Sym("#Intersection")
-              })
-              (term -> p.Type.Struct(sym, Nil, leftTpe :: rightTpe:: Nil, Nil), leftWit |+| rightWit).success
+              }
+              (term -> p.Type.Struct(sym, Nil, leftTpe :: rightTpe :: Nil, Nil), leftWit |+| rightWit).success
             }
           //            else s"Left type `$leftTpe` and right type `$rightTpe` did not unify for ${andOr.widenByName.widen.simplified.show}".fail
         } yield r
@@ -279,7 +281,8 @@ object Retyper {
             case (name, kind, ctorArgs) =>
               symbol.tree match {
                 case clsDef: q.ClassDef =>
-                  val appliedTpe: p.Type.Struct = p.Type.Struct(name, tpeVars, ctorArgs.map(_._2), deriveParents(symbol))
+                  val appliedTpe: p.Type.Struct =
+                    p.Type.Struct(name, tpeVars, ctorArgs.map(_._2), deriveParents(symbol))
                   (None -> appliedTpe, wit |+| Map(symbol -> Set(appliedTpe))).success
                 case _ => s"$symbol is not a ClassDef".fail
               }

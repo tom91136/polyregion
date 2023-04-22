@@ -23,8 +23,12 @@ object DynamicDispatchPass extends ProgramPass {
     val fs = program.defs.flatMap { c =>
       // Find all subclasses first
       val children = program.defs.filter(_.parents.contains(c.name))
+      log.info(s"Children for ${c.repr}", children.map(_.repr)*)
+      log.info(s"Fns for ${c.repr}", clsFns(c.tpe).map(_.repr)*)
+
       // Then, for each method in the base class, see if it has overrides from any subclass
       clsFns(c.tpe).flatMap { baseFn =>
+
         val simpleName = baseFn.name.last
         val overridingFns = children.flatMap { c =>
           val recvTpe = c.tpe

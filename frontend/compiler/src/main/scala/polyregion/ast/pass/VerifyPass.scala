@@ -130,7 +130,10 @@ object VerifyPass {
         val c0 = expr.map(e => validateExpr(_: Context, e)).getOrElse(identity[Context])(c + name)
         expr match {
           case Some(rhs) if rhs.tpe != name.tpe =>
-            c0 ~ s"Var declaration of incompatible type ${rhs.tpe.repr} != ${name.tpe.repr}: ${s.repr}"
+            (name.tpe, rhs.tpe) match {
+              case (p.Type.Struct(name, _, _, _), p.Type.Struct(_, _, _, parents)) if parents.contains(name) => c0
+              case _ => c0 ~ s"Var declaration of incompatible type ${rhs.tpe.repr} != ${name.tpe.repr}: ${s.repr}"
+            }
           case _ => c0
         }
       case p.Stmt.Mut(name, expr, copy) =>

@@ -287,6 +287,15 @@ object Remapper {
 
           println(sym)
 
+          def isFnTpe(t: p.Type, u: p.Type) = (t, u) match {
+            case (p.Type.Struct(_, _,_, parents), p.Type.Exec(tpeVars, args, rtnTpe)) =>
+              parents.exists {
+                case p.Sym("scala" :: s"Function$n":: Nil) if args.size == n.toInt => true
+                case _                                                          => false
+              }
+            case _ => false
+          }
+
           sym.tree match {
             case fn: q.DefDef => // `receiver?.$fn`
               // Assert that the term list matches Exec's nested (recursive) types.
@@ -313,7 +322,8 @@ object Remapper {
                             else if (termVars != execVars)
                               s"Class generic type arity mismatch: $termVars != $execVars ".fail
                             else ().success
-                          case (t, u) => s"Cannot match $t with $u".fail
+                          case (t, u) if isFnTpe(t, u) || isFnTpe(u, t) => t.success
+                          case (t, u)                                   => s"Cannot match $t with $u".fail
                         }
                       case (ts, es) => s"Argument size mismatch $ts != $es".fail
                     }
@@ -649,7 +659,7 @@ object Remapper {
               else ().success
 
             mkCondStmts = (tpe: p.Type) => {
-              val c = elseCtx.down(term)
+              val c      = elseCtx.down(term)
               val name   = c.named(tpe)
               val result = p.Stmt.Var(name, None)
 
@@ -696,7 +706,9 @@ object Remapper {
           println(c.invokeCaptures)
           // (p.Term.UnitConst, c).success
           // TODO delete the LHS var??
+          pprint.pprintln(rhs)
           ???
+
         case _ =>
           c1.fail(
             s"Unhandled: <${tpeArgs.map(_.repr)}>`$term`(${termArgss}), show=`${term.show}`\nSymbol:\n${term.symbol}"

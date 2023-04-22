@@ -5,6 +5,15 @@ import polyregion.ast.Traversal.*
 import polyregion.ast.{PolyAst as p, *, given}
 import polyregion.prism.Prism
 
+// This pass copies all generic functions with the applied types at callsite:
+//   def foo[A](a: A) = a
+//   foo[Int]
+//   foo[Long]
+// becomes
+//   def foo_Long(a : Long) = a
+//   def foo_Int(a : Int) = a
+//   foo_Int
+//   foo_Long
 object SpecialisationPass extends ProgramPass {
 
   override def apply(program: p.Program, log: Log): p.Program = {
@@ -14,6 +23,11 @@ object SpecialisationPass extends ProgramPass {
       .distinct
 
     val fnLUT = program.functions.map(f => f.name -> f).toMap
+
+    println("--")
+    println(fnLUT.keySet.mkString("\n"))
+    println("--")
+    println(callsites.mkString("\n"))
 
     val callsiteWithImpl = callsites
       .filter(_.tpeArgs.nonEmpty)

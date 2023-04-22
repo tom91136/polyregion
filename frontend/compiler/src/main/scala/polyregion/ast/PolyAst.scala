@@ -45,6 +45,8 @@ object PolyAst {
     //
     case Var(name: String)                                        extends Type(TypeKind.None)
     case Exec(tpeVars: List[String], args: List[Type], rtn: Type) extends Type(TypeKind.None)
+
+    // def Exec(tpeVars: List[String], args: List[Type], rtn: Type) = Struct(Sym("" :: "Poly":: Nil), tpeVars, args, rtn, Nil)
   }
 
 //  val Intersection = Type.Struct(Sym("__intersection"), Nil, ???, Nil)

@@ -11,7 +11,6 @@ import scala.quoted.{Expr, Quotes, Type}
 
 object StdLib {
 
-
   class Tuple2[T1, T2](val v1: T1, val v2: T2) {
     def _1 = v1
     def _2 = v2
@@ -43,7 +42,7 @@ object StdLib {
   }
 
   class Predef {
-    def intWrapper(x: Int): RichInt                  = new RichInt(x)
+    def intWrapper(x: Int): RichInt                      = new RichInt(x)
     def intArrayOps(xs: scala.Array[Int]): ArrayOps[Int] = new ArrayOps[Int](xs)
   }
 
@@ -161,6 +160,14 @@ object StdLib {
     def update(i: Int, x: A): Unit = data.update(i, x)
   }
 
+  // trait Function0[+R] { def apply(): R }
+
+  // trait Function1[-T1, +R] {
+  //   def apply(v1: T1): R
+  //   def compose[A](g: A => T1): A => R = { x => apply(g(x)) }
+  //   def andThen[A](g: R => A): T1 => A = { x => g(apply(x)) }
+  // }
+
   final def Mirrors: List[Prism] = derivePackedMirrors(
     (
       // Unsupported
@@ -225,7 +232,7 @@ object StdLib {
                 new MutableSeq[a](
                   $xs.length,
                   new intrinsics.TypedBuffer[a] {
-                    override def apply(i: scala.Int): a             = $xs(i)
+                    override def apply(i: scala.Int): a                 = $xs(i)
                     override def update(i: scala.Int, x: a): scala.Unit = $xs(i) = x
                   }
                 )

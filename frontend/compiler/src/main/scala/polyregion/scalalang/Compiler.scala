@@ -15,9 +15,9 @@ object Compiler {
   import Retyper.*
 
   private val ProgramPasses: List[ProgramPass] = List(
-    IntrinsifyPass,
-    SpecialisationPass,
-    DynamicDispatchPass,
+    printPass(IntrinsifyPass),
+    printPass(SpecialisationPass),
+    printPass(DynamicDispatchPass),
 
 //    FnInlinePass,
     VarReducePass,
@@ -26,7 +26,7 @@ object Compiler {
   )
 
   private def runProgramOptPasses(program: p.Program, log: Log): Result[(p.Program)] =
-    scala.Function.chain(ProgramPasses.map(p => p(_, log)))(program).success
+    scala.Function.chain(ProgramPasses.map(p => p(_, log) )  )(program).success
 
   // This derives the signature based on the *owning* symbol only!
   // This means, for cases where the method's direct root can be different, the actual owner(i.e. the context of the definition site) is used.
@@ -411,6 +411,10 @@ object Compiler {
         }
     }
 
+    _ = println(term.show)
+    _ = pprint.pprintln(term)
+    // _ = println(log.render().mkString("\n"))
+
     // Then compile the term.
     (exprStmts, exprTpe, exprDeps, exprThisCls) <- compileTerm(
       log,
@@ -527,6 +531,8 @@ object Compiler {
     _ = unoptLog.info(s"Functions  = ${unopt.functions.size}", unopt.functions.map(_.repr)*)
     _ = unoptLog.info(s"Entry", unopt.entry.repr)
 
+    
+
     // verify before optimisation
     unoptVerification <- VerifyPass(unopt, unoptLog, verifyFunction = false).success
     _ = unoptLog.info(
@@ -548,6 +554,8 @@ object Compiler {
 
     opt                                <- runProgramOptPasses(unopt, optPassLog)
     (monomorphicToPolymorphicSym, opt) <- MonoStructPass(opt, log).success
+
+    _ = println(log.render().mkString("\n"))
 
     // verify again after optimisation
     optLog = log.subLog("Opt")
