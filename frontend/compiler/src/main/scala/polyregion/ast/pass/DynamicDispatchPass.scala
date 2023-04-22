@@ -93,7 +93,11 @@ object DynamicDispatchPass extends ProgramPass {
               moduleCaptures = Nil,
               termCaptures = Nil,
               rtn = baseFn.rtn,
-              body = branches(p.Stmt.Comment("Assert") :: p.Stmt.Return(p.Expr.Alias(assertRtn)) :: Nil)
+              body = branches(
+                p.Stmt.Comment("unseen class, assert")
+                  :: p.Stmt.Return(p.Expr.NullaryIntrinsic(p.NullaryIntrinsicKind.Assert, p.Type.Nothing))
+                  :: Nil
+              )
             )
           ) :: Nil
         }

@@ -8,7 +8,7 @@ object intrinsics {
     def apply(i: Int): A
     def update(i: Int, x: A): Unit
   }
-  
+
   def array[A](size: Int): TypedBuffer[A]                   = intrinsic
   def apply[A](xs: TypedBuffer[A], index: Int): A           = intrinsic
   def update[A](xs: TypedBuffer[A], index: Int, x: A): Unit = intrinsic
@@ -63,5 +63,7 @@ object intrinsics {
   def log[A](a: A): A      = intrinsic
   def log1p[A](a: A): A    = intrinsic
   def log10[A](a: A): A    = intrinsic
+
+  def assert(): Nothing = intrinsic
 
 }

@@ -177,7 +177,7 @@ object VerifyPass {
 
     val badReturnErrors = f.collectWhere[p.Stmt] { case p.Stmt.Return(e) => e.tpe } match {
       case Nil => List("Function contains no return statements")
-      case ts if ts.exists(_ != f.rtn) =>
+      case ts if ts.exists(x => x != f.rtn && !(x == p.Type.Nothing || f.rtn == p.Type.Nothing)) =>
         List(
           s"Not all return stmts return the function return type, expected ${f.rtn.repr}, got ${ts.map(_.repr).mkString(",")}"
         )

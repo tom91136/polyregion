@@ -585,6 +585,14 @@ json NullaryIntrinsicKind::gpugroupfence_to_json(const NullaryIntrinsicKind::Gpu
   return json::array({});
 }
 
+NullaryIntrinsicKind::Assert NullaryIntrinsicKind::assert_from_json(const json& j) { 
+  return {};
+}
+
+json NullaryIntrinsicKind::assert_to_json(const NullaryIntrinsicKind::Assert& x) { 
+  return json::array({});
+}
+
 NullaryIntrinsicKind::Any NullaryIntrinsicKind::any_from_json(const json& j) { 
   size_t ord = j.at(0).get<size_t>();
   const auto t = j.at(1);
@@ -609,6 +617,7 @@ NullaryIntrinsicKind::Any NullaryIntrinsicKind::any_from_json(const json& j) {
   case 17: return NullaryIntrinsicKind::gpulocalsizez_from_json(t);
   case 18: return NullaryIntrinsicKind::gpugroupbarrier_from_json(t);
   case 19: return NullaryIntrinsicKind::gpugroupfence_from_json(t);
+  case 20: return NullaryIntrinsicKind::assert_from_json(t);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
   }
 }
@@ -635,6 +644,7 @@ json NullaryIntrinsicKind::any_to_json(const NullaryIntrinsicKind::Any& x) {
   [](const NullaryIntrinsicKind::GpuLocalSizeZ &y) -> json { return {17, NullaryIntrinsicKind::gpulocalsizez_to_json(y)}; },
   [](const NullaryIntrinsicKind::GpuGroupBarrier &y) -> json { return {18, NullaryIntrinsicKind::gpugroupbarrier_to_json(y)}; },
   [](const NullaryIntrinsicKind::GpuGroupFence &y) -> json { return {19, NullaryIntrinsicKind::gpugroupfence_to_json(y)}; },
+  [](const NullaryIntrinsicKind::Assert &y) -> json { return {20, NullaryIntrinsicKind::assert_to_json(y)}; },
   [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
   }, *x);
 }
@@ -1633,13 +1643,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "05b99ffca648cc4b3d86a65a7336a6f2") {
-   throw std::runtime_error("Expecting ADT hash to be 05b99ffca648cc4b3d86a65a7336a6f2, but was " + hash);
+  if(hash != "d4169d729a4075213ce6d1039626c170") {
+   throw std::runtime_error("Expecting ADT hash to be d4169d729a4075213ce6d1039626c170, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"05b99ffca648cc4b3d86a65a7336a6f2", x});
+  return json::array({"d4169d729a4075213ce6d1039626c170", x});
 }
 } // namespace polyregion::polyast

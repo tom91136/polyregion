@@ -56,7 +56,7 @@ class CollectionLengthSuite extends BaseSuite {
 //    }
 //  }
 
-  trait Base (val a: Int) {
+  class Base (val a: Int) {
     def foo(n: Int): Int // = a + n
   }
 
@@ -67,6 +67,7 @@ class CollectionLengthSuite extends BaseSuite {
   class ClassB(val b: Int) extends Base (42) {
     override def foo(n: Int): Int = b
     def bar                       = foo(2)
+    def baz = b
   }
 
   trait XFunction1[-T1, +R] {
@@ -122,7 +123,14 @@ class CollectionLengthSuite extends BaseSuite {
 
       // f0(1) + f1(1)
 
-      o.foo(2) + m.foo(12345) + m.foo(42) + m.bar
+      o.foo(42)
+      // o.a
+
+      // m.baz
+      // o.foo(2)
+      // m.bar
+      // o.foo(2) + m.foo(12345) + m.foo(42) + m.bar
+      // 1
 
     }
   }

@@ -317,6 +317,7 @@ extension (e: p.Expr) {
   def repr: String = e match {
     case p.Expr.NullaryIntrinsic(kind, rtn) =>
       val fn = kind match {
+        case p.NullaryIntrinsicKind.Assert         => "Assert"
         case p.NullaryIntrinsicKind.GpuGlobalIdxX  => "GlobalIdxX"
         case p.NullaryIntrinsicKind.GpuGlobalIdxY  => "GlobalIdxY"
         case p.NullaryIntrinsicKind.GpuGlobalIdxZ  => "GlobalIdxZ"

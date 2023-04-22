@@ -99,6 +99,8 @@ object PolyAst {
     // Unit
     case GpuGroupBarrier // __syncthreads() or barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE)
     case GpuGroupFence   // __threadfence_block() or mem_fence(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE)
+
+    case Assert
   }
 
   enum Expr(val tpe: Type) derives MsgPack.Codec {

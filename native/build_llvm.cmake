@@ -58,7 +58,7 @@ endif ()
 set(LLVM_OPTIONS
 
         -DLLVM_BUILD_DOCS=OFF
-        -DLLVM_BUILD_TOOLS=ON
+        -DLLVM_BUILD_TOOLS=OFF
         -DLLVM_BUILD_TESTS=OFF
         -DLLVM_BUILD_EXAMPLES=OFF
         -DLLVM_BUILD_BENCHMARKS=OFF
@@ -132,6 +132,48 @@ endif ()
 execute_process(
         COMMAND ${CMAKE_COMMAND}
         --build ${LLVM_BUILD_DIR}
+        --target
+        lldCommon
+        lldELF
+        LLVMSelectionDAG
+        LLVMPasses
+        LLVMObjCARCOpts
+        LLVMCoroutines
+        LLVMipo
+        LLVMInstrumentation
+        LLVMVectorize
+        LLVMLinker
+        LLVMFrontendOpenMP
+        LLVMIRReader
+        LLVMAsmPrinter
+        LLVMCodeGen
+        LLVMTarget
+        LLVMScalarOpts
+        LLVMInstCombine
+        LLVMAggressiveInstCombine
+        LLVMExecutionEngine
+        LLVMTransformUtils
+        LLVMBitWriter
+        LLVMAsmParser
+        LLVMAnalysis
+        LLVMProfileData
+        LLVMSymbolize
+        LLVMDebugInfoPDB
+        LLVMDebugInfoMSF
+        LLVMDebugInfoDWARF
+        LLVMObject
+        LLVMTextAPI
+        LLVMMCParser
+        LLVMMC
+        LLVMDebugInfoCodeView
+        LLVMBitReader
+        LLVMCore
+        LLVMRemarks
+        LLVMBitstreamReader
+        LLVMBinaryFormat
+        LLVMSupport
+        LLVMDemangle
+        LLVMTargetParser
         -- -k 0 # keep going even with error
         WORKING_DIRECTORY ${LLVM_BUILD_DIR}
         RESULT_VARIABLE SUCCESS)

@@ -605,6 +605,15 @@ std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIn
 bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupFence &, const NullaryIntrinsicKind::GpuGroupFence &) { return true; }
 NullaryIntrinsicKind::GpuGroupFence::operator NullaryIntrinsicKind::Any() const { return std::make_shared<GpuGroupFence>(*this); }
 
+NullaryIntrinsicKind::Assert::Assert() noexcept : NullaryIntrinsicKind::Base() {}
+std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::Assert &x) {
+  os << "Assert(";
+  os << ')';
+  return os;
+}
+bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::Assert &, const NullaryIntrinsicKind::Assert &) { return true; }
+NullaryIntrinsicKind::Assert::operator NullaryIntrinsicKind::Any() const { return std::make_shared<Assert>(*this); }
+
 UnaryIntrinsicKind::Base::Base() = default;
 std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Any &x) {
   std::visit([&os](auto &&arg) { os << *arg; }, x);
@@ -1823,6 +1832,10 @@ std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupBarrier
 }
 std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupFence>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupFence &x) const noexcept {
   std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGroupFence");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::Assert>::operator()(const polyregion::polyast::NullaryIntrinsicKind::Assert &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::Assert");
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Sin>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Sin &x) const noexcept {

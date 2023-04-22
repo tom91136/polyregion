@@ -26,7 +26,7 @@ object Compiler {
   )
 
   private def runProgramOptPasses(program: p.Program, log: Log): Result[(p.Program)] =
-    scala.Function.chain(ProgramPasses.map(p => p(_, log) )  )(program).success
+    scala.Function.chain(ProgramPasses.map(p => p(_, log)))(program).success
 
   // This derives the signature based on the *owning* symbol only!
   // This means, for cases where the method's direct root can be different, the actual owner(i.e. the context of the definition site) is used.
@@ -121,15 +121,21 @@ object Compiler {
                     case Nil => // We found no replacement, log it and keep going.
                       if (defDef.rhs.isEmpty) {
                         log.info(
-                          s"No implementation: ${target.repr}",
+                          s"No implementation: ${target.repr} (${defDef.symbol.flags.show})",
                           fnLut.keys.map(r => s"Candidate: ${r.repr}").toList*
                         )
+
+                        // if (defDef.symbol.flags.is(q.Flags.Abstract)) {
+
+                        // } else {
                         (
                           xs,
                           depss,
                           clsDepss,
                           moduleSymDepss
                         ).success
+                        // }
+
                       } else {
                         // see if function is already there
 
@@ -458,7 +464,7 @@ object Compiler {
       exprDeps.resolvedFunctions.map(_.repr).toList*
     )
 
-    // We mark all potentially required virtual methods in the universe.
+    // We mark all potentially required *concrete* virtual methods in the universe.
     allClassSymbols = exprDeps.classes.map(_._1).toList
     depsWithOverrides = exprDeps.functions.flatMap { (sym, ivks) =>
       (sym -> ivks) :: allClassSymbols
@@ -469,6 +475,36 @@ object Compiler {
         .filter(_ != sym) // don't add the same one again
         .map(_ -> ivks)
     }.toMap
+
+    // We also mark all parents of those virtual methods, these are abstract
+    abstractDefs = exprDeps.functions
+      .flatMap { (sym, ivks) =>
+        allClassSymbols
+          .map(sym.overridingSymbol(_))
+          .filter(s => s.isDefDef)
+          .map(_.tree)
+          .collect { case x: q.DefDef => x }
+          .filter(_.symbol.flags.is(q.Flags.Deferred))
+      }
+      .toList
+      .distinctBy(_.symbol)
+
+    abstractFnsWithAssertBody <- abstractDefs.traverse(deriveSignature(_).map { sig =>
+      val fn = p.Function(
+        name = sig.name,
+        tpeVars = sig.tpeVars,
+        receiver = sig.receiver.map(p.Named("this", _)),
+        args = sig.args.zipWithIndex.map((t, i) => p.Named(s"arg$i", t)),
+        moduleCaptures = sig.moduleCaptures.zipWithIndex.map((t, i) => p.Named(s"arg$i", t)),
+        termCaptures = sig.termCaptures.zipWithIndex.map((t, i) => p.Named(s"arg$i", t)),
+        rtn = sig.rtn,
+        body = p.Stmt.Comment("abstract definition, assert")
+          :: p.Stmt.Return(p.Expr.NullaryIntrinsic(p.NullaryIntrinsicKind.Assert, p.Type.Nothing))
+          :: Nil
+      )
+      log.info(s"Abstract (trait function)", sig.repr)
+      fn
+    })
 
     exprDeps <- exprDeps
       .copy(functions = depsWithOverrides)
@@ -519,7 +555,7 @@ object Compiler {
 
     unopt = p.Program(
       rootFn,
-      allRootDependentFns ::: exprDeps.resolvedFunctions,
+      abstractFnsWithAssertBody ::: allRootDependentFns ::: exprDeps.resolvedFunctions,
       (rootDependentStructs ++ allRootDependentStructs).toList
     )
     _ = log.info(
@@ -530,8 +566,6 @@ object Compiler {
     _ = unoptLog.info(s"Structures = ${unopt.defs.size}", unopt.defs.map(_.repr)*)
     _ = unoptLog.info(s"Functions  = ${unopt.functions.size}", unopt.functions.map(_.repr)*)
     _ = unoptLog.info(s"Entry", unopt.entry.repr)
-
-    
 
     // verify before optimisation
     unoptVerification <- VerifyPass(unopt, unoptLog, verifyFunction = false).success

@@ -84,6 +84,8 @@ object IntrinsifyPass extends ProgramPass {
       p.Expr.BinaryIntrinsic(x, y, k, rtn) -> List.empty[p.Stmt]
 
     (op, args) match {
+      case "assert" -> Nil => nullary(p.NullaryIntrinsicKind.Assert)
+
       case "gpuGlobalIdxX" -> Nil   => nullary(p.NullaryIntrinsicKind.GpuGlobalIdxX)
       case "gpuGlobalIdxY" -> Nil   => nullary(p.NullaryIntrinsicKind.GpuGlobalIdxY)
       case "gpuGlobalIdxZ" -> Nil   => nullary(p.NullaryIntrinsicKind.GpuGlobalIdxZ)
@@ -283,7 +285,7 @@ object IntrinsifyPass extends ProgramPass {
             (expr, (stmts, inv :: Nil))
           case (
                 ("scala" :: "Array" :: "apply" :: Nil) |                              //
-                ("polyregion" :: "scalalang" :: "Buffer" :: "apply" :: Nil) |             //
+                ("polyregion" :: "scalalang" :: "Buffer" :: "apply" :: Nil) |         //
                 ("scala" :: "collection" :: "SeqOps" :: "apply" :: Nil) |             //
                 ("scala" :: "collection" :: "mutable" :: "SeqOps" :: "apply" :: Nil), //
                 xs @ p.Term.Select(_, p.Named(_, p.Type.Array(_))),
@@ -292,7 +294,7 @@ object IntrinsifyPass extends ProgramPass {
             (p.Expr.Index(xs, idx, rtn), (Nil, inv :: Nil))
           case (
                 ("scala" :: "Array" :: "update" :: Nil) |                             //
-                ("polyregion" :: "scalalang" :: "Buffer" :: "update" :: Nil) |            //
+                ("polyregion" :: "scalalang" :: "Buffer" :: "update" :: Nil) |        //
                 ("scala" :: "collection" :: "mutable" :: "SeqOps" :: "update" :: Nil) //
                 ,
                 xs @ p.Term.Select(_, p.Named(_, p.Type.Array(_))),

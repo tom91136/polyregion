@@ -72,6 +72,7 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr, const std::string &k
       [](const Expr::NullaryIntrinsic &x) {
         return variants::total(
             *x.kind, //
+            [](const NullaryIntrinsicKind::Assert &) { return "abort()"s; },
             [](const NullaryIntrinsicKind::GpuGlobalIdxX &) { return "get_global_id(0)"s; },
             [](const NullaryIntrinsicKind::GpuGlobalIdxY &) { return "get_global_id(1)"s; },
             [](const NullaryIntrinsicKind::GpuGlobalIdxZ &) { return "get_global_id(2)"s; },

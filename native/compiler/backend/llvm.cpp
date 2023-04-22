@@ -108,7 +108,7 @@ llvm::Type *LLVM::AstTransformer::mkTpe(const Type::Any &tpe, unsigned AS, bool 
       [&](const Type::Int &x) -> llvm::Type * { return llvm::Type::getInt32Ty(C); },                           //
       [&](const Type::Long &x) -> llvm::Type * { return llvm::Type::getInt64Ty(C); },                          //
       [&](const Type::Unit &x) -> llvm::Type * { return llvm::Type::getIntNTy(C, functionBoundary ? 8 : 1); }, //
-      [&](const Type::Nothing &x) -> llvm::Type * { return undefined(__FILE__, __LINE__); },                   //
+      [&](const Type::Nothing &x) -> llvm::Type * { return llvm::Type::getVoidTy(C); },                        //
       [&](const Type::Struct &x) -> llvm::Type * {
         if (auto def = polyregion::get_opt(structTypes, x.name); def) return def->first;
         else {
@@ -301,6 +301,10 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
     });
   };
 
+  const auto ext0 = [&](const std::string &name, const Type::Any &tpe) -> ValPtr {
+    return B.CreateCall(mkExternalFn(fn, tpe, name, {tpe}));
+  };
+
   const auto ext1 = [&](const std::string &name, const Type::Any &tpe, const Term::Any &arg) -> ValPtr {
     return B.CreateCall(mkExternalFn(fn, tpe, name, {tpe}), mkTermVal(arg));
   };
@@ -421,6 +425,7 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
             };
             return variants::total(
                 *x.kind, //
+                [&](const NullaryIntrinsicKind::Assert &) { return ext0("abort", Type::Nothing()); },
                 [&](const NullaryIntrinsicKind::GpuGlobalIdxX &) {
                   return globalId(Intr::nvvm_read_ptx_sreg_ctaid_x, Intr::nvvm_read_ptx_sreg_ntid_x,
                                   Intr::nvvm_read_ptx_sreg_tid_x);
@@ -520,6 +525,7 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
 
             return variants::total(
                 *x.kind, //
+                [&](const NullaryIntrinsicKind::Assert &) { return ext0("abort", Type::Nothing()); },
                 [&](const NullaryIntrinsicKind::GpuGlobalIdxX &) {
                   return globalIdU32(Intr::amdgcn_workgroup_id_x, Intr::amdgcn_workitem_id_x, 0);
                 },

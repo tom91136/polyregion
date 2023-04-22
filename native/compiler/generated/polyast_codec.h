@@ -68,6 +68,8 @@ namespace NullaryIntrinsicKind {
 [[nodiscard]] EXPORT json gpugroupbarrier_to_json(const NullaryIntrinsicKind::GpuGroupBarrier &);
 [[nodiscard]] EXPORT NullaryIntrinsicKind::GpuGroupFence gpugroupfence_from_json(const json &);
 [[nodiscard]] EXPORT json gpugroupfence_to_json(const NullaryIntrinsicKind::GpuGroupFence &);
+[[nodiscard]] EXPORT NullaryIntrinsicKind::Assert assert_from_json(const json &);
+[[nodiscard]] EXPORT json assert_to_json(const NullaryIntrinsicKind::Assert &);
 [[nodiscard]] EXPORT NullaryIntrinsicKind::Any any_from_json(const json &);
 [[nodiscard]] EXPORT json any_to_json(const NullaryIntrinsicKind::Any &);
 } // namespace NullaryIntrinsicKind

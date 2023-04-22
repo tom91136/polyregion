@@ -64,6 +64,7 @@ using std::string;
       [](const Expr::NullaryIntrinsic &x) {
         auto op = variants::total(
             *x.kind, //
+            [](const NullaryIntrinsicKind::Assert &) { return "Assert"; },
             [](const NullaryIntrinsicKind::GpuGlobalIdxX &) { return "GpuGlobalIdxX"; },
             [](const NullaryIntrinsicKind::GpuGlobalIdxY &) { return "GpuGlobalIdxY"; },
             [](const NullaryIntrinsicKind::GpuGlobalIdxZ &) { return "GpuGlobalIdxZ"; },

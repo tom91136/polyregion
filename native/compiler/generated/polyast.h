@@ -132,7 +132,8 @@ struct GpuLocalSizeY;
 struct GpuLocalSizeZ;
 struct GpuGroupBarrier;
 struct GpuGroupFence;
-using Any = Alternative<GpuGlobalIdxX, GpuGlobalIdxY, GpuGlobalIdxZ, GpuGlobalSizeX, GpuGlobalSizeY, GpuGlobalSizeZ, GpuGroupIdxX, GpuGroupIdxY, GpuGroupIdxZ, GpuGroupSizeX, GpuGroupSizeY, GpuGroupSizeZ, GpuLocalIdxX, GpuLocalIdxY, GpuLocalIdxZ, GpuLocalSizeX, GpuLocalSizeY, GpuLocalSizeZ, GpuGroupBarrier, GpuGroupFence>;
+struct Assert;
+using Any = Alternative<GpuGlobalIdxX, GpuGlobalIdxY, GpuGlobalIdxZ, GpuGlobalSizeX, GpuGlobalSizeY, GpuGlobalSizeZ, GpuGroupIdxX, GpuGroupIdxY, GpuGroupIdxZ, GpuGroupSizeX, GpuGroupSizeY, GpuGroupSizeZ, GpuLocalIdxX, GpuLocalIdxY, GpuLocalIdxZ, GpuLocalSizeX, GpuLocalSizeY, GpuLocalSizeZ, GpuGroupBarrier, GpuGroupFence, Assert>;
 } // namespace NullaryIntrinsicKind
 namespace UnaryIntrinsicKind { 
 struct Sin;
@@ -646,6 +647,13 @@ struct EXPORT GpuGroupFence : NullaryIntrinsicKind::Base {
   EXPORT operator Any() const;
   EXPORT friend std::ostream &operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupFence &);
   EXPORT friend bool operator==(const NullaryIntrinsicKind::GpuGroupFence &, const NullaryIntrinsicKind::GpuGroupFence &);
+};
+
+struct EXPORT Assert : NullaryIntrinsicKind::Base {
+  Assert() noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const NullaryIntrinsicKind::Assert &);
+  EXPORT friend bool operator==(const NullaryIntrinsicKind::Assert &, const NullaryIntrinsicKind::Assert &);
 };
 } // namespace NullaryIntrinsicKind
 namespace UnaryIntrinsicKind { 
@@ -1448,6 +1456,9 @@ template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroup
 };
 template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupFence> {
   std::size_t operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupFence &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::Assert> {
+  std::size_t operator()(const polyregion::polyast::NullaryIntrinsicKind::Assert &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Sin> {
   std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Sin &) const noexcept;
