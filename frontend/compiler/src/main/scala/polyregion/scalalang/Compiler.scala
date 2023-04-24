@@ -16,8 +16,8 @@ object Compiler {
 
   private val ProgramPasses: List[ProgramPass] = List(
     printPass(IntrinsifyPass),
-    printPass(SpecialisationPass),
     printPass(DynamicDispatchPass),
+    printPass(SpecialisationPass),
 
 //    FnInlinePass,
     VarReducePass,

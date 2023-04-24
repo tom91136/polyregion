@@ -227,6 +227,17 @@ extension (n: p.Named) {
 
 extension (e: p.Type) {
 
+  def erased : p.Type = e match {
+    case p.Type.Struct(sym, vars, _, parents) =>
+      p.Type.Struct(
+        sym,
+        List.tabulate(vars.size)(i => s"T$i"),
+        List.tabulate(vars.size)(i => p.Type.Var(s"T$i")),
+        parents
+      )
+    case x => x
+  }
+
   @targetName("tpeEquals")
   def =:=(that: p.Type): Boolean =
     (e, that) match {

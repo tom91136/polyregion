@@ -17,7 +17,10 @@ object DynamicDispatchPass extends ProgramPass {
 
     def clsTag(x: p.Type.Struct) = x.name.fqn.mkString(".").hashCode
 
-    def clsFns(tpe: p.Type.Struct): List[p.Function] = program.functions.filter(_.receiver.exists(_.tpe == tpe))
+    def clsFns(tpe: p.Type.Struct): List[p.Function] = {
+      val erasedTpe = tpe.erased
+      program.functions.filter(_.receiver.exists(_.tpe.erased == erasedTpe))
+    }
 
     // 2. Synthesize the dynamic dispatch method
     val fs = program.defs.flatMap { c =>
@@ -25,6 +28,19 @@ object DynamicDispatchPass extends ProgramPass {
       val children = program.defs.filter(_.parents.contains(c.name))
       log.info(s"Children for ${c.repr}", children.map(_.repr)*)
       log.info(s"Fns for ${c.repr}", clsFns(c.tpe).map(_.repr)*)
+      log.info(s"overriding fns for ${c.repr}", clsFns(c.tpe).map { f =>
+
+
+        val simpleName    = f.name.last
+        val overridingFns = children.flatMap { c =>
+          val recvTpe = c.tpe
+          clsFns(recvTpe)//.filter(_.name.last == simpleName).map(recvTpe -> _)
+        }
+
+        s"${f.repr} => ${overridingFns.map(_.repr).mkString(" ; ")}"
+
+      }*)
+
 
       // Then, for each method in the base class, see if it has overrides from any subclass
       clsFns(c.tpe).flatMap { baseFn =>
@@ -36,12 +52,13 @@ object DynamicDispatchPass extends ProgramPass {
         }
         // If we do find any, synthesise the dynamic dispatch function
         val clsTagArg = p.Named("cls", p.Type.Int)
-        val objArg    = p.Named("obj", c.tpe)
+        val objArg    = p.Named("obj", baseFn.receiver.get.tpe)
 
         if (overridingFns.isEmpty) Nil
         else {
 
-          val branches = Function.chain(((c.tpe, baseFn) :: overridingFns).zipWithIndex.map { case ((tpe, fn), i) =>
+          val branches = Function.chain(((c.tpe, baseFn) :: overridingFns).zipWithIndex.map { case ((_, fn), i) =>
+            val tpe = fn.receiver.get.tpe.asInstanceOf[p.Type.Struct]
             (elseBr: List[p.Stmt]) =>
               p.Stmt.Cond(
                 cond = p.Expr.BinaryIntrinsic(
@@ -65,23 +82,6 @@ object DynamicDispatchPass extends ProgramPass {
               ) :: Nil
           })
 
-          val assertRtn = baseFn.rtn match {
-            case p.Type.Float                                => p.Term.FloatConst(0)
-            case p.Type.Double                               => p.Term.DoubleConst(0)
-            case p.Type.Bool                                 => p.Term.BoolConst(true)
-            case p.Type.Byte                                 => p.Term.ByteConst(0)
-            case p.Type.Char                                 => p.Term.CharConst(0)
-            case p.Type.Short                                => p.Term.ShortConst(0)
-            case p.Type.Int                                  => p.Term.IntConst(0)
-            case p.Type.Long                                 => p.Term.LongConst(0)
-            case p.Type.Unit                                 => p.Term.UnitConst
-            case p.Type.Nothing                              => ???
-            case p.Type.Struct(name, tpeVars, args, parents) => ???
-            case p.Type.Array(component)                     => ???
-            case p.Type.Var(name)                            => ???
-            case p.Type.Exec(tpeVars, args, rtn)             => ???
-          }
-
           (
             c.tpe,
             baseFn.name,
@@ -104,7 +104,7 @@ object DynamicDispatchPass extends ProgramPass {
       }
     }
 
-    val lut             = fs.map((tpe, name, fn) => (tpe: p.Type, name.last) -> fn).toMap
+    val lut             = fs.map((tpe, name, fn) => (tpe.erased: p.Type, name.last) -> fn).toMap
     val polymorphicSyms = withClassTag.map(_.name).toSet
 
     // Ensure synthetic class tag fields are initialised to the correct constant
@@ -118,17 +118,22 @@ object DynamicDispatchPass extends ProgramPass {
       case x => x
     }
 
+    log.info(s"LUT: ", lut.map {case ((t, s),v) => s"$t($s) => ${v.signatureRepr}"}.toList*)
+
     def replaceDispatches(f: p.Function) = f.modifyAll[p.Expr] {
       case ivk @ p.Expr.Invoke(name, tpeArgs, Some(recv: p.Term.Select), args, captures, rtn) =>
+
+        log.info(s"Replace: ${ivk.repr}", lut.get((recv.tpe, name.last)).toString)
+
         def isSuperCall(t: p.Type) = (t, f.receiver) match {
-          case (r @ p.Type.Struct(clsName, _, _, _), Some(p.Named(_, s @ p.Type.Struct(_, _, _, parents)))) =>
+          case (  p.Type.Struct(clsName, _, _, _), Some(p.Named(_,   p.Type.Struct(_, _, _, parents)))) =>
             parents.contains(clsName) && f.name.last == name.last
           case _ => false
         }
 
-        lut.get((recv.tpe, name.last)) match {
+        lut.get((recv.tpe.erased, name.last)) match {
           case Some(dynamicDispatchFn) =>
-            if (isSuperCall(recv.tpe)) ivk
+            if (isSuperCall(recv.tpe.erased)) ivk
             else {
               val clsTagSelect = p.Term.Select(recv.init :+ recv.last, p.Named("_#cls", p.Type.Int))
               p.Expr.Invoke(dynamicDispatchFn.name, tpeArgs, None, clsTagSelect :: recv :: args, captures, rtn)

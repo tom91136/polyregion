@@ -10,6 +10,7 @@ package object pass {
     val sl = l.subLog(s"[${pass.getClass.getName}]")
     sl.info("Structs", r.defs.map(_.repr)*)
     sl.info("Fns", r.functions.map(_.repr)*)
+    sl.info("Entry", r.entry.repr)
     r
   }
 

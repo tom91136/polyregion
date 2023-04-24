@@ -77,6 +77,10 @@ llvm::Value *LLVM::AstTransformer::invokeMalloc(llvm::Function *parent, llvm::Va
   return B.CreateCall(mkExternalFn(parent, Type::Array(Type::Byte()), "malloc", {Type::Long()}), size);
 }
 
+llvm::Value *LLVM::AstTransformer::invokeAbort(llvm::Function *parent) {
+  return B.CreateCall(mkExternalFn(parent, Type::Nothing(), "abort", {}));
+}
+
 // the only unsigned type in PolyAst
 static bool isUnsigned(const Type::Any &tpe) { return holds<Type::Char>(tpe); }
 
@@ -301,10 +305,6 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
     });
   };
 
-  const auto ext0 = [&](const std::string &name, const Type::Any &tpe) -> ValPtr {
-    return B.CreateCall(mkExternalFn(fn, tpe, name, {tpe}));
-  };
-
   const auto ext1 = [&](const std::string &name, const Type::Any &tpe, const Term::Any &arg) -> ValPtr {
     return B.CreateCall(mkExternalFn(fn, tpe, name, {tpe}), mkTermVal(arg));
   };
@@ -410,7 +410,30 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
         switch (options.target) {
           case Target::x86_64:
           case Target::AArch64:
-          case Target::ARM: return undefined(__FILE__, __LINE__);
+          case Target::ARM:
+            return variants::total(
+                *x.kind, //
+                [&](const NullaryIntrinsicKind::Assert &) -> ValPtr { return invokeAbort(fn); },
+                [&](const NullaryIntrinsicKind::GpuGlobalIdxX &) -> ValPtr { return undefined(__FILE__, __LINE__); },
+                [&](const NullaryIntrinsicKind::GpuGlobalIdxY &) -> ValPtr { return undefined(__FILE__, __LINE__); },
+                [&](const NullaryIntrinsicKind::GpuGlobalIdxZ &) -> ValPtr { return undefined(__FILE__, __LINE__); },
+                [&](const NullaryIntrinsicKind::GpuGlobalSizeX &) -> ValPtr { return undefined(__FILE__, __LINE__); },
+                [&](const NullaryIntrinsicKind::GpuGlobalSizeY &) -> ValPtr { return undefined(__FILE__, __LINE__); },
+                [&](const NullaryIntrinsicKind::GpuGlobalSizeZ &) -> ValPtr { return undefined(__FILE__, __LINE__); },
+                [&](const NullaryIntrinsicKind::GpuGroupIdxX &) -> ValPtr { return undefined(__FILE__, __LINE__); },
+                [&](const NullaryIntrinsicKind::GpuGroupIdxY &) -> ValPtr { return undefined(__FILE__, __LINE__); },
+                [&](const NullaryIntrinsicKind::GpuGroupIdxZ &) -> ValPtr { return undefined(__FILE__, __LINE__); },
+                [&](const NullaryIntrinsicKind::GpuGroupSizeX &) -> ValPtr { return undefined(__FILE__, __LINE__); },
+                [&](const NullaryIntrinsicKind::GpuGroupSizeY &) -> ValPtr { return undefined(__FILE__, __LINE__); },
+                [&](const NullaryIntrinsicKind::GpuGroupSizeZ &) -> ValPtr { return undefined(__FILE__, __LINE__); },
+                [&](const NullaryIntrinsicKind::GpuLocalIdxX &) -> ValPtr { return undefined(__FILE__, __LINE__); },
+                [&](const NullaryIntrinsicKind::GpuLocalIdxY &) -> ValPtr { return undefined(__FILE__, __LINE__); },
+                [&](const NullaryIntrinsicKind::GpuLocalIdxZ &) -> ValPtr { return undefined(__FILE__, __LINE__); },
+                [&](const NullaryIntrinsicKind::GpuLocalSizeX &) -> ValPtr { return undefined(__FILE__, __LINE__); },
+                [&](const NullaryIntrinsicKind::GpuLocalSizeY &) -> ValPtr { return undefined(__FILE__, __LINE__); },
+                [&](const NullaryIntrinsicKind::GpuLocalSizeZ &) -> ValPtr { return undefined(__FILE__, __LINE__); },
+                [&](const NullaryIntrinsicKind::GpuGroupBarrier &) -> ValPtr { return undefined(__FILE__, __LINE__); },
+                [&](const NullaryIntrinsicKind::GpuGroupFence &) -> ValPtr { return undefined(__FILE__, __LINE__); });
           case Target::SPIRV64: return undefined(__FILE__, __LINE__);
           case Target::NVPTX64: {
             // threadId  @llvm.nvvm.read.ptx.sreg.tid.*
@@ -425,7 +448,7 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
             };
             return variants::total(
                 *x.kind, //
-                [&](const NullaryIntrinsicKind::Assert &) { return ext0("abort", Type::Nothing()); },
+                [&](const NullaryIntrinsicKind::Assert &) { return invokeAbort(fn); },
                 [&](const NullaryIntrinsicKind::GpuGlobalIdxX &) {
                   return globalId(Intr::nvvm_read_ptx_sreg_ctaid_x, Intr::nvvm_read_ptx_sreg_ntid_x,
                                   Intr::nvvm_read_ptx_sreg_tid_x);
@@ -525,7 +548,7 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
 
             return variants::total(
                 *x.kind, //
-                [&](const NullaryIntrinsicKind::Assert &) { return ext0("abort", Type::Nothing()); },
+                [&](const NullaryIntrinsicKind::Assert &) { return invokeAbort(fn); },
                 [&](const NullaryIntrinsicKind::GpuGlobalIdxX &) {
                   return globalIdU32(Intr::amdgcn_workgroup_id_x, Intr::amdgcn_workitem_id_x, 0);
                 },
@@ -1027,14 +1050,16 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
       },
       [&](const Stmt::Return &x) -> BlockKind {
         auto rtnTpe = tpe(x.value);
+        auto expr = mkExprVal(x.value, fn, "return");
         if (holds<Type::Unit>(rtnTpe)) {
           B.CreateRetVoid();
+        } else if (holds<Type::Nothing>(rtnTpe)) {
+          B.CreateUnreachable();
         } else if (holds<Type::Bool>(rtnTpe)) {
           // Extend from i1 to i8
-          auto b = mkExprVal(x.value, fn, "return");
-          B.CreateRet(B.CreateIntCast(b, llvm::Type::getInt8Ty(C), true));
+          B.CreateRet(B.CreateIntCast(expr, llvm::Type::getInt8Ty(C), true));
         } else {
-          B.CreateRet(mkExprVal(x.value, fn, "return"));
+          B.CreateRet(expr);
         }
         return BlockKind::Terminal;
       } //

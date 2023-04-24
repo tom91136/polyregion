@@ -63,6 +63,8 @@ public:
     llvm::Function *mkExternalFn(llvm::Function *parent, const Type::Any &rtn, const std::string &name,
                                  const std::vector<Type::Any> &args);
     llvm::Value *invokeMalloc(llvm::Function *parent, llvm::Value *size);
+    llvm::Value *invokeAbort(llvm::Function *parent);
+
     llvm::Type *mkTpe(const Type::Any &tpe, unsigned AS = 0, bool functionBoundary = false);
 
     Pair<llvm::StructType *, StructMemberIndexTable> mkStruct(const StructDef &def);
