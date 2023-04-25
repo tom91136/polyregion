@@ -16,6 +16,38 @@ import polyregion.prism.Prism
 //   foo_Long
 object SpecialisationPass extends ProgramPass {
 
+  def monomorphicName(ivk: p.Expr.Invoke): p.Sym = {
+    val monomorphicToken = ivk.tpeArgs.map(_.monomorphicName).mkString("_")
+    ivk.name.fqn match {
+      case xs :+ x => p.Sym(xs :+ monomorphicToken :+ x)
+      case xs      => p.Sym(monomorphicToken :: xs)
+    }
+  }
+
+  def recursiveSpecialise(
+      fnLUT: Map[p.Sym, p.Function],
+      entry: p.Function,
+      done: Map[p.Sym, p.Function] = Map.empty
+  ): Map[p.Sym, p.Function] = entry
+    .collectWhere[p.Expr] { case ivk: p.Expr.Invoke => ivk }
+    .filter(_.tpeArgs.nonEmpty)
+    .distinct
+    .foldLeft(done) { case (acc, ivk) =>
+      val newName = monomorphicName(ivk)
+      if (done.contains(newName)) acc
+      else {
+        val fnImpl = fnLUT(ivk.name)
+        val tpeLut = fnImpl.tpeVars.zip(ivk.tpeArgs).toMap
+        val specialisedFnImpl = fnImpl
+          .copy(name = newName, tpeVars = Nil)
+          .modifyAll[p.Type] {
+            case p.Type.Var(name) => tpeLut(name)
+            case x                => x
+          }
+        recursiveSpecialise(fnLUT, specialisedFnImpl, acc + (specialisedFnImpl.name -> specialisedFnImpl))
+      }
+    }
+
   override def apply(program: p.Program, log: Log): p.Program = {
 
     val callsites = (program.entry :: program.functions)
@@ -29,49 +61,26 @@ object SpecialisationPass extends ProgramPass {
     println("--")
     println(callsites.mkString("\n"))
 
-    val callsiteWithImpl = callsites
-      .filter(_.tpeArgs.nonEmpty)
-      .map { ivk =>
+    // Tracing specialisation
+    // 1. For entry fn, find all callsites
+    // 2. Specialise fn for each callsite, cache results
+    // 3. Walk all callsites again, replace with monomorphic names
 
-        log.info("ivk", ivk.repr)
+    val specialisations = recursiveSpecialise(fnLUT, program.entry)
 
-        val monomorphicToken = ivk.tpeArgs.map(_.monomorphicName).mkString("_")
-        val monomorphicName = ivk.name.fqn match {
-          case xs :+ x => p.Sym(xs :+ monomorphicToken :+ x)
-          case xs      => p.Sym(monomorphicToken :: xs)
-        }
-
-        val fnImpl = fnLUT(ivk.name)
-        val tpeLut = fnImpl.tpeVars.zip(ivk.tpeArgs).toMap
-        val specialisedFnImpl = fnImpl
-          .copy(name = monomorphicName, tpeVars = Nil)
-          .modifyAll[p.Type] {
-            case p.Type.Var(name) => tpeLut(name)
-            case x                => x
-          }
-        ivk -> (ivk.copy(name = monomorphicName, tpeArgs = Nil), specialisedFnImpl, fnImpl)
-      }
-      .toMap
-
-    val originalToSpecialisedLUT = callsiteWithImpl.toList.groupMap { case (_, (_, specialisedFn, originalFn)) =>
-      originalFn
-    } { case (_, (_, specialisedFn, _)) => specialisedFn }
-
-    log.info(
-      "Specialisations",
-      originalToSpecialisedLUT
-        .map((k, vs) => s"${k.signatureRepr} -> ${vs.map(_.signatureRepr).mkString(" ; ")}")
-        .toList*
-    )
-
-    val programFnsWithSpecialisation = program.functions.flatMap(f => originalToSpecialisedLUT.getOrElse(f, f:: Nil))
+    log.info("Specialisations", specialisations.values.map(_.signatureRepr).toList.sorted*)
 
     def doReplace(f: p.Function) = f.modifyAll[p.Expr] {
-      case ivk: p.Expr.Invoke => callsiteWithImpl.get(ivk).fold(ivk)((rewritten, _, _) => rewritten)
-      case x                  => x
+      case ivk: p.Expr.Invoke =>
+        if (ivk.tpeArgs.isEmpty) ivk
+        else ivk.copy(name = monomorphicName(ivk), tpeArgs = Nil)
+      case x => x
     }
 
-    program.copy(entry = doReplace(program.entry), functions = programFnsWithSpecialisation.map(doReplace(_)))
+    program.copy(
+      entry = doReplace(program.entry),
+      functions = (program.functions.filter(_.tpeVars.isEmpty) ++ specialisations.values).map(doReplace(_))
+    )
 
   }
 

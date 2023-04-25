@@ -117,14 +117,14 @@ class CollectionLengthSuite extends BaseSuite {
 //       f0()
 
       val f1: XFunction1[Int, Int] = if (i == 0) F1() else F2()
-      f1.apply(2)
+
       // take(f1)
       // take(f1)
       // f1.andThen(f1).apply(42)
 
-//      val m = ClassB(123)
+      val m = ClassB(123)
 
-//      val o = if (i == 0) ClassA(2) else ClassB(9)
+      val o = if (i != 0) ClassA(2) else ClassB(9)
 
       // val m = 42
 
@@ -142,7 +142,7 @@ class CollectionLengthSuite extends BaseSuite {
       // m.baz
       // o.foo(2)
       // m.bar
-      // o.foo(2) + m.foo(12345) + m.foo(42) + m.bar
+       o.foo(2) + m.foo(12345) + m.foo(42) + m.bar + f1.apply(2)
       // 1
 
     }
