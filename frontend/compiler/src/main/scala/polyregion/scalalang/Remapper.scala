@@ -108,8 +108,10 @@ object Remapper {
           c // FIXME restore statements!!!
         )
 
-      case q.Import(_, _) => (p.Term.UnitConst, c).success // ignore
-      case t: q.Term      => (c !! tree).mapTerm(t)
+      case q.Import(_, _)        => (p.Term.UnitConst, c).success // ignore
+      case q.TypeDef(name, tree) => (p.Term.UnitConst, c).success // ignore
+      case q.ClassDef(name, ctor, parents, selfTpeValDef, body) => (p.Term.UnitConst, c).success
+      case t: q.Term => (c !! tree).mapTerm(t)
 
       // def f(x...) : A = ??? === val f : x... => A = ???
 
@@ -288,10 +290,10 @@ object Remapper {
           println(sym)
 
           def isFnTpe(t: p.Type, u: p.Type) = (t, u) match {
-            case (p.Type.Struct(_, _,_, parents), p.Type.Exec(tpeVars, args, rtnTpe)) =>
+            case (p.Type.Struct(_, _, _, parents), p.Type.Exec(tpeVars, args, rtnTpe)) =>
               parents.exists {
-                case p.Sym("scala" :: s"Function$n":: Nil) if args.size == n.toInt => true
-                case _                                                          => false
+                case p.Sym("scala" :: s"Function$n" :: Nil) if args.size == n.toInt => true
+                case _                                                              => false
               }
             case _ => false
           }
@@ -325,7 +327,8 @@ object Remapper {
                           case (t, u) if isFnTpe(t, u) || isFnTpe(u, t) => t.success
                           case (t, u)                                   => s"Cannot match $t with $u".fail
                         }
-                      case (ts, es) => s"Argument size mismatch $ts != $es".fail
+                      case (ts, es) =>
+                        s"Argument size mismatch ${ts.map(_.repr)}(size=${ts.size}) != ${es.map(_.repr)}(size=${es.size})".fail
                     }
                 }
                 _      = println(s"Do ret ${tpe}")
@@ -708,7 +711,6 @@ object Remapper {
           // TODO delete the LHS var??
           pprint.pprintln(rhs)
           ???
-
         case _ =>
           c1.fail(
             s"Unhandled: <${tpeArgs.map(_.repr)}>`$term`(${termArgss}), show=`${term.show}`\nSymbol:\n${term.symbol}"

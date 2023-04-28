@@ -82,6 +82,7 @@ object Compiler {
   def compileAllDependencies(using q: Quoted)(
       sink: Log,
       deps: q.FnWitnesses,
+      missingDefDefs: Map[q.Symbol, q.DefDef],
       existing: List[p.Function]
   )(
       fnLut: Map[p.Signature, (p.Function, Set[p.StructDef])] = Map.empty
@@ -119,13 +120,16 @@ object Compiler {
                   val defDef = sym.tree.asInstanceOf[q.DefDef]
                   matchingSignatures(fnLut.keys, target).map(s => fnLut(s)).toList match {
                     case Nil => // We found no replacement, log it and keep going.
-                      if (defDef.rhs.isEmpty) {
+                      val actualDefDef = missingDefDefs.getOrElse(sym, defDef)
+
+                      if (actualDefDef.rhs.isEmpty) {
                         log.info(
-                          s"No implementation: ${target.repr} (${defDef.symbol.flags.show})",
+                          s"No implementation: ${target.repr} (${actualDefDef.symbol.flags.show}); ${actualDefDef.symbol
+                              .hashCode()}",
                           fnLut.keys.map(r => s"Candidate: ${r.repr}").toList*
                         )
 
-                        // if (defDef.symbol.flags.is(q.Flags.Abstract)) {
+                        // if (actualDefDef.symbol.flags.is(q.Flags.Abstract)) {
 
                         // } else {
                         (
@@ -141,9 +145,9 @@ object Compiler {
 
                         for {
                           log <- log
-                            .subLog(s"Compile (no replacement): ${target.repr} (${defDef.symbol.fullName})")
+                            .subLog(s"Compile (no replacement): ${target.repr} (${actualDefDef.symbol.fullName})")
                             .success
-                          (fn0, deps) <- compileFn(log, defDef, Map.empty)
+                          (fn0, deps) <- compileFn(log, actualDefDef, Map.empty)
                           (fn1, wit0, clsDeps, moduleDeps) <- compileAndReplaceStructDependencies(log, fn0, deps)(
                             StdLib.StructDefs
                           )
@@ -442,7 +446,21 @@ object Compiler {
       body = exprStmts
     )
 
+    symbolToMacroDefinedDefDefs = q
+      .collectTree[(q.Symbol, q.DefDef)](term) {
+        case dd: q.DefDef =>
+          dd.symbol.tree match {
+            case q.DefDef(_, _, _, None) => (dd.symbol -> dd) :: Nil
+            case _                       => Nil
+          }
+        case _ => Nil
+      }
+      .toMap
+
+    // For defdef symbols defined inside the macro, symbol.tree will be EmptyTree, so we associate it up front.
+
     _ = log.info("Expr Fn", exprFn.repr)
+    _ = log.info("symbolToMacroDefinedDefDefs", symbolToMacroDefinedDefDefs.map((k, v) => s"${k} => ${v.show}").toList*)
     _ = log.info(
       "External captures",
       capturedNames.map((n, r) => s"$r(symbol=${r.symbol}, ${r.symbol.pos}) ~> ${n.repr}")*
@@ -521,7 +539,9 @@ object Compiler {
 
     // We got a compiled fn now, now compile all dependencies.
     (allRootDependentFns, allRootDependentStructs, allRootDependentModuleSymbols) <-
-      compileAllDependencies(log, rootDependentFns, exprDeps.resolvedFunctions)(StdLib.Functions)
+      compileAllDependencies(log, rootDependentFns, symbolToMacroDefinedDefDefs, exprDeps.resolvedFunctions)(
+        StdLib.Functions
+      )
 
     _ = log.info("A ", rootDependentFns.map(x => x.toString).toList*)
 
