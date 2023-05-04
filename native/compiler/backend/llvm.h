@@ -45,6 +45,7 @@ public:
     llvm::LLVMContext &C;
     unsigned int AllocaAS = 0;
     unsigned int GlobalAS = 0;
+    unsigned int LocalAS = 0;
 
   private:
     using StructMemberIndexTable = Map<std::string, size_t>;
@@ -65,7 +66,7 @@ public:
     llvm::Value *invokeMalloc(llvm::Function *parent, llvm::Value *size);
     llvm::Value *invokeAbort(llvm::Function *parent);
 
-    llvm::Type *mkTpe(const Type::Any &tpe, unsigned AS = 0, bool functionBoundary = false);
+    llvm::Type *mkTpe(const Type::Any &tpe,   bool functionBoundary = false);
 
     Pair<llvm::StructType *, StructMemberIndexTable> mkStruct(const StructDef &def);
 

@@ -140,11 +140,11 @@ object IntrinsifyPass extends ProgramPass {
 
       case "array" -> (x :: Nil) //
           if x.tpe == p.Type.Int =>
-        p.Expr.Alloc(p.Type.Array(tpeArgs.head), x) -> Nil
-      case "apply" -> ((s @ p.Term.Select(_, p.Named(_, p.Type.Array(`rtn`)))) :: i :: Nil) //
+        p.Expr.Alloc(p.Type.Array(tpeArgs.head, p.Type.Space.Global), x) -> Nil
+      case "apply" -> ((s @ p.Term.Select(_, p.Named(_, p.Type.Array(`rtn`, _)))) :: i :: Nil) //
           if i.tpe == p.Type.Int =>
         p.Expr.Index(s, i, rtn) -> Nil
-      case "update" -> ((s @ p.Term.Select(_, p.Named(_, p.Type.Array(c)))) :: i :: x :: Nil) //
+      case "update" -> ((s @ p.Term.Select(_, p.Named(_, p.Type.Array(c, _)))) :: i :: x :: Nil) //
           if i.tpe == p.Type.Int && x.tpe == c && rtn == p.Type.Unit =>
         p.Expr.Alias(p.Term.UnitConst) -> (p.Stmt.Update(s, i, x) :: Nil)
       case _ => ???
@@ -288,7 +288,7 @@ object IntrinsifyPass extends ProgramPass {
                 ("polyregion" :: "scalalang" :: "Buffer" :: "apply" :: Nil) |         //
                 ("scala" :: "collection" :: "SeqOps" :: "apply" :: Nil) |             //
                 ("scala" :: "collection" :: "mutable" :: "SeqOps" :: "apply" :: Nil), //
-                xs @ p.Term.Select(_, p.Named(_, p.Type.Array(_))),
+                xs @ p.Term.Select(_, p.Named(_, p.Type.Array(_, _))),
                 idx :: Nil
               ) if idx.tpe.kind == p.TypeKind.Integral =>
             (p.Expr.Index(xs, idx, rtn), (Nil, inv :: Nil))
@@ -297,7 +297,7 @@ object IntrinsifyPass extends ProgramPass {
                 ("polyregion" :: "scalalang" :: "Buffer" :: "update" :: Nil) |        //
                 ("scala" :: "collection" :: "mutable" :: "SeqOps" :: "update" :: Nil) //
                 ,
-                xs @ p.Term.Select(_, p.Named(_, p.Type.Array(_))),
+                xs @ p.Term.Select(_, p.Named(_, p.Type.Array(_, _))),
                 idx :: x :: Nil
               ) if idx.tpe.kind == p.TypeKind.Integral =>
             (p.Expr.Alias(p.Term.UnitConst), (p.Stmt.Update(xs, idx, x) :: Nil, inv :: Nil))

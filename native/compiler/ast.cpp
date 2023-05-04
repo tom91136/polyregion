@@ -189,24 +189,35 @@ using std::string;
         return "while({" + tests + ";" + repr(x.cond) + "}){\n" +
                indent(2, mk_string<Stmt::Any>(
                              x.body, [&](auto x) { return repr(x); }, "\n")) +
-               "}";
+               "\n}";
       },
       [](const Stmt::Break &x) { return "break;"s; }, [](const Stmt::Cont &x) { return "continue;"s; },
       [](const Stmt::Cond &x) {
+        auto elseStmts = x.falseBr.empty() //
+                             ? "\n}"
+                             : "\n} else {\n" +
+                                   indent(2, mk_string<Stmt::Any>(
+                                                 x.falseBr, [&](auto x) { return repr(x); }, "\n")) +
+                                   "\n}";
         return "if(" + repr(x.cond) + ") { \n" +
                indent(2, mk_string<Stmt::Any>(
                              x.trueBr, [&](auto x) { return repr(x); }, "\n")) +
-               "\n} else {\n" +
-               indent(2, mk_string<Stmt::Any>(
-                             x.falseBr, [&](auto x) { return repr(x); }, "\n")) +
-               "\n}";
+               elseStmts;
       },
       [](const Stmt::Return &x) { return "return " + repr(x.value); });
 }
 
+[[nodiscard]] string polyast::repr(const Arg &arg) { return repr(arg.named); }
+
+[[nodiscard]] string polyast::repr(const TypeSpace::Any &space) {
+  return variants::total(
+      *space, //
+      [&](const TypeSpace::Global &x) { return "^Global"; }, [&](const TypeSpace::Local &x) { return "^Local"; });
+}
+
 [[nodiscard]] string polyast::repr(const Function &fn) {
   return "def " + repr(fn.name) + "(" +
-         mk_string<Named>(
+         mk_string<Arg>(
              fn.args, [&](auto x) { return repr(x); }, ",") +
          ") : " + repr(fn.rtn) + " = {\n" +
          indent(2, mk_string<Stmt::Any>(
@@ -268,7 +279,7 @@ std::pair<Named, std::vector<Named>> polyast::uncons(const Term::Select &select)
   }
 }
 
-Type::Array dsl::Array(const Type::Any &t) { return Tpe::Array(t); }
+Type::Array dsl::Array(const Type::Any &t, const ::TypeSpace::Any &s) { return Tpe::Array(t, s); }
 Type::Struct dsl::Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args) {
   return {name, tpeVars, args, {}};
 }
@@ -323,7 +334,7 @@ Expr::UnaryIntrinsic dsl::invoke(const UnaryIntrinsicKind::Any &kind, const Term
   return {lhs, kind, rtn};
 }
 Expr::NullaryIntrinsic dsl::invoke(const NullaryIntrinsicKind::Any &kind, const Type::Any &rtn) { return {kind, rtn}; }
-std::function<Function(std::vector<Stmt::Any>)> dsl::function(const string &name, const std::vector<Named> &args,
+std::function<Function(std::vector<Stmt::Any>)> dsl::function(const string &name, const std::vector<Arg> &args,
                                                               const Type::Any &rtn) {
   return [=](auto &&stmts) { return Function(Sym({name}), {}, {}, args, {}, {}, rtn, stmts); };
 }
@@ -333,12 +344,14 @@ Program dsl::program(Function entry, std::vector<StructDef> defs, std::vector<Fu
   return Program(entry, functions, defs);
 }
 dsl::IndexBuilder::IndexBuilder(const Expr::Index &index) : index(index) {}
-dsl::IndexBuilder::operator const Expr::Any() const { return index; }
+dsl::IndexBuilder::operator Expr::Any() const { return index; }
 Stmt::Update dsl::IndexBuilder::operator=(const Term::Any &term) const { return {index.lhs, index.idx, term}; }
 dsl::NamedBuilder::NamedBuilder(const Named &named) : named(named) {}
-dsl::NamedBuilder::operator const Term::Any() const { return Select({}, named); }
+dsl::NamedBuilder::operator Term::Any() const { return Select({}, named); }
 // dsl::NamedBuilder::operator const Expr::Any() const { return Alias(Select({}, named)); }
-dsl::NamedBuilder::operator const Named() const { return named; }
+dsl::NamedBuilder::operator Named() const { return named; }
+Arg dsl::NamedBuilder::operator()() const { return Arg(named, {}); }
+
 dsl::IndexBuilder dsl::NamedBuilder::operator[](const Term::Any &idx) const {
   if (auto arr = get_opt<Type::Array>(named.tpe); arr) {
     return IndexBuilder({Select({}, named), idx, arr->component});

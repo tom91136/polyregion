@@ -161,7 +161,7 @@ object VerifyPass {
       case Nil => List("Function does not contain any statement") // Not legal even for a unit function
       case xs  =>
         // Use the function args as starting names
-        val initialNames = Context((f.receiver.toList ++ f.args ++ f.moduleCaptures ++ f.termCaptures).toSet)
+        val initialNames = Context((f.receiver.toList ++ f.args ++ f.moduleCaptures ++ f.termCaptures).map(_.named).toSet)
         xs.foldLeft(initialNames)(validateStmt(_, _)).errors
     }
 

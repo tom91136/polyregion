@@ -13,20 +13,39 @@
 
 using namespace polyregion;
 
-runtime::ArgBuffer::ArgBuffer(std::initializer_list<TypedPointer> args) { put(args); }
-void runtime::ArgBuffer::put(runtime::Type tpe, void *ptr) { put({{tpe, ptr}}); }
-void runtime::ArgBuffer::put(std::initializer_list<runtime::TypedPointer> args) {
-  for (auto &[tpe, ptr] : args) {
-    types.push_back(tpe);
+template <typename F, typename It>
+constexpr static void insertIntoBufferAt(runtime::ArgBuffer &buffer, It begin, It end, F f) {
+  for (auto it = begin; it != end; ++it) {
+    auto &[tpe, ptr] = *it;
+    buffer.types.insert(f(buffer.types), tpe);
     if (auto size = byteOfType(tpe); size != 0) {
-      if (tpe == Type::Scratch || !ptr) {
-        data.insert(data.end(), size, std::byte(0));
+      if (tpe == runtime::Type::Scratch || !ptr) {
+        buffer.data.insert(f(buffer.data), size, std::byte(0));
       } else {
-        auto begin = static_cast<std::byte *>(ptr);
-        data.insert(data.end(), begin, begin + size);
+        auto offset = static_cast<std::byte *>(ptr);
+        buffer.data.insert(f(buffer.data), offset, offset + size);
       }
     }
   }
+}
+
+runtime::ArgBuffer::ArgBuffer(std::initializer_list<TypedPointer> args) { append(args); }
+void runtime::ArgBuffer::append(Type tpe, void *ptr) { append({{tpe, ptr}}); }
+void runtime::ArgBuffer::append(const ArgBuffer &that) {
+  data.insert(data.end(), that.data.begin(), that.data.end());
+  types.insert(types.end(), that.types.begin(), that.types.end());
+}
+void runtime::ArgBuffer::append(std::initializer_list<TypedPointer> args) {
+  insertIntoBufferAt(*this, args.begin(), args.end(), [](auto &it) { return it.end(); });
+}
+void runtime::ArgBuffer::prepend(Type tpe, void *ptr) { prepend({{tpe, ptr}}); }
+void runtime::ArgBuffer::prepend(const ArgBuffer &that) {
+  data.insert(data.begin(), that.data.begin(), that.data.end());
+  types.insert(types.begin(), that.types.begin(), that.types.end());
+}
+void runtime::ArgBuffer::prepend(std::initializer_list<TypedPointer> args) {
+  // begin always inserts to the front, so we traverse it backwards to keep the same order
+  insertIntoBufferAt(*this, rbegin(args), rend(args), [](auto &it) { return it.begin(); });
 }
 
 void runtime::init() { libm::exportAll(); }
@@ -73,7 +92,7 @@ void *runtime::detail::CountedCallbackHandler::createHandle(const runtime::Callb
   static std::mutex lock;
 
   auto eventId = eventCounter++;
-  auto f = [=]() {
+  auto f = [cb, eventId]() {
     cb();
     const std::lock_guard<std::mutex> guard(lock);
     callbacks.erase(eventId);

@@ -1,8 +1,8 @@
 package polyregion.ast
 
-import polyregion.ast.{MsgPack, PolyAst}
 import polyregion.ast.mirror.CppNlohmannJsonCodecGen
 import polyregion.ast.mirror.CppStructGen.*
+import polyregion.ast.{MsgPack, PolyAst}
 
 import java.lang.annotation.Target
 import java.math.BigInteger
@@ -23,28 +23,36 @@ private[polyregion] object CppSourceMirror {
     String.format("%032x", new BigInteger(1, md5.digest()));
   }
 
-  private final val structs = deriveStruct[Sym]() //
-    :: deriveStruct[Named]()
-    :: deriveStruct[TypeKind]()
-    :: deriveStruct[Type]()
-    :: deriveStruct[Position]()
-    :: deriveStruct[Term]()
-    :: deriveStruct[NullaryIntrinsicKind]()
-    :: deriveStruct[UnaryIntrinsicKind]()
-    :: deriveStruct[BinaryIntrinsicKind]()
-    :: deriveStruct[Expr]()
-    :: deriveStruct[Stmt]()
-    :: deriveStruct[StructMember]()
-    :: deriveStruct[StructDef]()
-    :: deriveStruct[Signature]()
-    :: deriveStruct[InvokeSignature]()
-    :: deriveStruct[Function]()
-    :: deriveStruct[Program]()
-    :: Nil
+  private final val structs =
+    deriveStruct[Sym]()
+      :: deriveStruct[Named]()
+      :: deriveStruct[TypeKind]()
+      :: deriveStruct[Type]()
+      :: deriveStruct[SourcePosition]()
+      :: deriveStruct[Term]()
+      :: deriveStruct[NullaryIntrinsicKind]()
+      :: deriveStruct[UnaryIntrinsicKind]()
+      :: deriveStruct[BinaryIntrinsicKind]()
+      :: deriveStruct[Type.Space]()
+      // :: deriveStruct[Intrinsic]()
+      :: deriveStruct[Expr]()
+      :: deriveStruct[Stmt]()
+      :: deriveStruct[StructMember]()
+      :: deriveStruct[StructDef]()
+      :: deriveStruct[Signature]()
+      :: deriveStruct[InvokeSignature]()
+      :: deriveStruct[Function.Kind]()
+      :: deriveStruct[Function.Attr]()
+      :: deriveStruct[Arg]()
+      :: deriveStruct[Function]()
+      :: deriveStruct[Program]()
+      :: Nil //  
 
   private final val namespace         = "polyregion::polyast"
   private final val adtFileName       = "polyast"
   private final val jsonCodecFileName = "polyast_codec"
+
+  // val initNS = symbolNames[PolyAst.type].head
 
   private final val adtSources       = structs.flatMap(_.emit)
   private final val jsonCodecSources = structs.flatMap(CppNlohmannJsonCodecGen.emit(_))

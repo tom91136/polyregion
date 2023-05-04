@@ -224,7 +224,7 @@ object Retyper {
             case q.TermRef(receiverTpe, _) => // we have something concrete
               typer0(receiverTpe).map {
                 case (_ -> p.Type.Struct(_, _, args, _), wit) => args         -> wit
-                case (_ -> p.Type.Array(arg), wit)            => (arg :: Nil) -> wit
+                case (_ -> p.Type.Array(arg, _), wit)            => (arg :: Nil) -> wit
                 case (_ -> _, wit)                            => Nil          -> wit
               }
             case _ => (Nil, Map.empty).success
@@ -267,7 +267,7 @@ object Retyper {
           retyped <- (name, kind, tpeCtorArgs) match {
             case (Symbols.ArrayMirror, q.ClassKind.Class, (_, comp: p.Type) :: Nil) =>
               // case (Symbols.Array, q.ClassKind.Class, (_, comp: p.Type) :: Nil) =>
-              (None -> p.Type.Array(comp), wit).success
+              (None -> p.Type.Array(comp, p.Type.Space.Global), wit).success
 //            case (_, q.ClassKind.Class, (_, comp: p.Type) :: Nil) if tpe <:< argAppliedSeqLikeTpe =>
 //              (None -> p.Type.Array(comp), wit).success
             case (_, _, ys) if tpe.isFunctionType => // FunctionN

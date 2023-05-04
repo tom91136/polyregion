@@ -73,30 +73,14 @@ namespace NullaryIntrinsicKind {
 [[nodiscard]] EXPORT NullaryIntrinsicKind::Any any_from_json(const json &);
 [[nodiscard]] EXPORT json any_to_json(const NullaryIntrinsicKind::Any &);
 } // namespace NullaryIntrinsicKind
-namespace Stmt { 
-[[nodiscard]] EXPORT Stmt::Block block_from_json(const json &);
-[[nodiscard]] EXPORT json block_to_json(const Stmt::Block &);
-[[nodiscard]] EXPORT Stmt::Comment comment_from_json(const json &);
-[[nodiscard]] EXPORT json comment_to_json(const Stmt::Comment &);
-[[nodiscard]] EXPORT Stmt::Var var_from_json(const json &);
-[[nodiscard]] EXPORT json var_to_json(const Stmt::Var &);
-[[nodiscard]] EXPORT Stmt::Mut mut_from_json(const json &);
-[[nodiscard]] EXPORT json mut_to_json(const Stmt::Mut &);
-[[nodiscard]] EXPORT Stmt::Update update_from_json(const json &);
-[[nodiscard]] EXPORT json update_to_json(const Stmt::Update &);
-[[nodiscard]] EXPORT Stmt::While while_from_json(const json &);
-[[nodiscard]] EXPORT json while_to_json(const Stmt::While &);
-[[nodiscard]] EXPORT Stmt::Break break_from_json(const json &);
-[[nodiscard]] EXPORT json break_to_json(const Stmt::Break &);
-[[nodiscard]] EXPORT Stmt::Cont cont_from_json(const json &);
-[[nodiscard]] EXPORT json cont_to_json(const Stmt::Cont &);
-[[nodiscard]] EXPORT Stmt::Cond cond_from_json(const json &);
-[[nodiscard]] EXPORT json cond_to_json(const Stmt::Cond &);
-[[nodiscard]] EXPORT Stmt::Return return_from_json(const json &);
-[[nodiscard]] EXPORT json return_to_json(const Stmt::Return &);
-[[nodiscard]] EXPORT Stmt::Any any_from_json(const json &);
-[[nodiscard]] EXPORT json any_to_json(const Stmt::Any &);
-} // namespace Stmt
+namespace FunctionAttr { 
+[[nodiscard]] EXPORT FunctionAttr::FPRelaxed fprelaxed_from_json(const json &);
+[[nodiscard]] EXPORT json fprelaxed_to_json(const FunctionAttr::FPRelaxed &);
+[[nodiscard]] EXPORT FunctionAttr::FPStrict fpstrict_from_json(const json &);
+[[nodiscard]] EXPORT json fpstrict_to_json(const FunctionAttr::FPStrict &);
+[[nodiscard]] EXPORT FunctionAttr::Any any_from_json(const json &);
+[[nodiscard]] EXPORT json any_to_json(const FunctionAttr::Any &);
+} // namespace FunctionAttr
 namespace UnaryIntrinsicKind { 
 [[nodiscard]] EXPORT UnaryIntrinsicKind::Sin sin_from_json(const json &);
 [[nodiscard]] EXPORT json sin_to_json(const UnaryIntrinsicKind::Sin &);
@@ -153,6 +137,14 @@ namespace UnaryIntrinsicKind {
 [[nodiscard]] EXPORT UnaryIntrinsicKind::Any any_from_json(const json &);
 [[nodiscard]] EXPORT json any_to_json(const UnaryIntrinsicKind::Any &);
 } // namespace UnaryIntrinsicKind
+namespace TypeSpace { 
+[[nodiscard]] EXPORT TypeSpace::Global global_from_json(const json &);
+[[nodiscard]] EXPORT json global_to_json(const TypeSpace::Global &);
+[[nodiscard]] EXPORT TypeSpace::Local local_from_json(const json &);
+[[nodiscard]] EXPORT json local_to_json(const TypeSpace::Local &);
+[[nodiscard]] EXPORT TypeSpace::Any any_from_json(const json &);
+[[nodiscard]] EXPORT json any_to_json(const TypeSpace::Any &);
+} // namespace TypeSpace
 namespace TypeKind { 
 [[nodiscard]] EXPORT TypeKind::None none_from_json(const json &);
 [[nodiscard]] EXPORT json none_to_json(const TypeKind::None &);
@@ -195,8 +187,8 @@ namespace Term {
 [[nodiscard]] EXPORT json sym_to_json(const Sym &);
 [[nodiscard]] EXPORT Named named_from_json(const json &);
 [[nodiscard]] EXPORT json named_to_json(const Named &);
-[[nodiscard]] EXPORT Position position_from_json(const json &);
-[[nodiscard]] EXPORT json position_to_json(const Position &);
+[[nodiscard]] EXPORT SourcePosition sourceposition_from_json(const json &);
+[[nodiscard]] EXPORT json sourceposition_to_json(const SourcePosition &);
 [[nodiscard]] EXPORT StructMember structmember_from_json(const json &);
 [[nodiscard]] EXPORT json structmember_to_json(const StructMember &);
 [[nodiscard]] EXPORT StructDef structdef_from_json(const json &);
@@ -205,10 +197,44 @@ namespace Term {
 [[nodiscard]] EXPORT json signature_to_json(const Signature &);
 [[nodiscard]] EXPORT InvokeSignature invokesignature_from_json(const json &);
 [[nodiscard]] EXPORT json invokesignature_to_json(const InvokeSignature &);
+[[nodiscard]] EXPORT Arg arg_from_json(const json &);
+[[nodiscard]] EXPORT json arg_to_json(const Arg &);
 [[nodiscard]] EXPORT Function function_from_json(const json &);
 [[nodiscard]] EXPORT json function_to_json(const Function &);
 [[nodiscard]] EXPORT Program program_from_json(const json &);
 [[nodiscard]] EXPORT json program_to_json(const Program &);
+namespace FunctionKind { 
+[[nodiscard]] EXPORT FunctionKind::Internal internal_from_json(const json &);
+[[nodiscard]] EXPORT json internal_to_json(const FunctionKind::Internal &);
+[[nodiscard]] EXPORT FunctionKind::Exported exported_from_json(const json &);
+[[nodiscard]] EXPORT json exported_to_json(const FunctionKind::Exported &);
+[[nodiscard]] EXPORT FunctionKind::Any any_from_json(const json &);
+[[nodiscard]] EXPORT json any_to_json(const FunctionKind::Any &);
+} // namespace FunctionKind
+namespace Stmt { 
+[[nodiscard]] EXPORT Stmt::Block block_from_json(const json &);
+[[nodiscard]] EXPORT json block_to_json(const Stmt::Block &);
+[[nodiscard]] EXPORT Stmt::Comment comment_from_json(const json &);
+[[nodiscard]] EXPORT json comment_to_json(const Stmt::Comment &);
+[[nodiscard]] EXPORT Stmt::Var var_from_json(const json &);
+[[nodiscard]] EXPORT json var_to_json(const Stmt::Var &);
+[[nodiscard]] EXPORT Stmt::Mut mut_from_json(const json &);
+[[nodiscard]] EXPORT json mut_to_json(const Stmt::Mut &);
+[[nodiscard]] EXPORT Stmt::Update update_from_json(const json &);
+[[nodiscard]] EXPORT json update_to_json(const Stmt::Update &);
+[[nodiscard]] EXPORT Stmt::While while_from_json(const json &);
+[[nodiscard]] EXPORT json while_to_json(const Stmt::While &);
+[[nodiscard]] EXPORT Stmt::Break break_from_json(const json &);
+[[nodiscard]] EXPORT json break_to_json(const Stmt::Break &);
+[[nodiscard]] EXPORT Stmt::Cont cont_from_json(const json &);
+[[nodiscard]] EXPORT json cont_to_json(const Stmt::Cont &);
+[[nodiscard]] EXPORT Stmt::Cond cond_from_json(const json &);
+[[nodiscard]] EXPORT json cond_to_json(const Stmt::Cond &);
+[[nodiscard]] EXPORT Stmt::Return return_from_json(const json &);
+[[nodiscard]] EXPORT json return_to_json(const Stmt::Return &);
+[[nodiscard]] EXPORT Stmt::Any any_from_json(const json &);
+[[nodiscard]] EXPORT json any_to_json(const Stmt::Any &);
+} // namespace Stmt
 namespace Type { 
 [[nodiscard]] EXPORT Type::Float float_from_json(const json &);
 [[nodiscard]] EXPORT json float_to_json(const Type::Float &);

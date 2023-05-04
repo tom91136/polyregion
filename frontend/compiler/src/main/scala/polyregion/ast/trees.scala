@@ -183,6 +183,14 @@ object PolyAstToExpr {
       )
     }
   }
+
+  given ArrayAttrToExpr: ToExpr[p.Type.Space] with {
+    def apply(x: p.Type.Space)(using Quotes) = x match {
+      case p.Type.Space.Local  => '{ p.Type.Space.Local }
+      case p.Type.Space.Global => '{ p.Type.Space.Global }
+    }
+  }
+
   given TypeToExpr: ToExpr[p.Type] with {
     def apply(x: p.Type)(using Quotes) = x match {
       case p.Type.Var(_) => ???
@@ -197,7 +205,7 @@ object PolyAstToExpr {
       case p.Type.Unit   => '{ p.Type.Unit }
       case p.Type.Struct(name, tpeVars, args, parents) =>
         '{ p.Type.Struct(${ Expr(name) }, ${ Expr(tpeVars) }, ${ Expr(args) }, ${ Expr(parents) }) }
-      case p.Type.Array(component)         => '{ p.Type.Array(${ Expr(component) }) }
+      case p.Type.Array(component, space)   => '{ p.Type.Array(${ Expr(component) }, ${ Expr(space) }) }
       case p.Type.Exec(tpeVars, args, rtn) => ???
       case p.Type.Nothing                  => ???
     }
@@ -227,7 +235,7 @@ extension (n: p.Named) {
 
 extension (e: p.Type) {
 
-  def erased : p.Type = e match {
+  def erased: p.Type = e match {
     case p.Type.Struct(sym, vars, _, parents) =>
       p.Type.Struct(
         sym,
@@ -246,21 +254,21 @@ extension (e: p.Type) {
       case (p.Type.Nothing, p.Type.Nothing)             => true
       case (p.Type.Nothing, _)                          => true
       case (_, p.Type.Nothing)                          => true
-      case (p.Type.Array(xs), p.Type.Array(ys))         => xs =:= ys
+      case (p.Type.Array(xt, xa), p.Type.Array(yt, ya)) => xt =:= yt && xa == ya
       case (p.Type.Exec(_, _, _), p.Type.Exec(_, _, _)) => ??? // TODO impl exec
       case (x, y)                                       => x == y
     }
 
   def mapLeaf(f: p.Type => p.Type): p.Type = e match {
     case p.Type.Struct(name, tpeVars, args, parents) => p.Type.Struct(name, tpeVars, args.map(f), parents)
-    case p.Type.Array(component)                     => p.Type.Array(f(component))
+    case p.Type.Array(component, space)               => p.Type.Array(f(component), space)
     case p.Type.Exec(tpeVars, args, rtn)             => p.Type.Exec(tpeVars, args.map(f), f(rtn))
     case x                                           => f(x)
   }
 
   def mapNode(f: p.Type => p.Type): p.Type = e match {
     case p.Type.Struct(name, tpeVars, args, parents) => f(p.Type.Struct(name, tpeVars, args.map(f), parents))
-    case p.Type.Array(component)                     => f(p.Type.Array(f(component)))
+    case p.Type.Array(component, space)               => f(p.Type.Array(f(component), space))
     case p.Type.Exec(tpeVars, args, rtn)             => f(p.Type.Exec(tpeVars, args.map(f), f(rtn)))
     case x                                           => x
   }
@@ -272,7 +280,7 @@ extension (e: p.Type) {
   def repr: String = e match {
     case p.Type.Struct(sym, tpeVars, args, parents) =>
       s"@${sym.repr}${tpeVars.zipAll(args, "???", p.Type.Var("???")).map((v, a) => s"$v=${a.repr}").mkString("<", ",", ">")}(${parents.map(_.repr).mkString("<:")})"
-    case p.Type.Array(comp) => s"Array[${comp.repr}]"
+    case p.Type.Array(comp, space) => s"Array[${comp.repr}^${space}]"
     case p.Type.Bool        => "Bool"
     case p.Type.Byte        => "Byte"
     case p.Type.Char        => "Char"
@@ -292,7 +300,7 @@ extension (e: p.Type) {
   def monomorphicName: String = e match {
     case p.Type.Struct(sym, _, args, parents) =>
       sym.fqn.mkString("_") + args.map(_.monomorphicName).mkString("_", "_", "_")
-    case p.Type.Array(comp)              => s"${comp.monomorphicName}[]"
+    case p.Type.Array(comp, space)              => s"${comp.monomorphicName}^$space[]"
     case p.Type.Bool                     => "Bool"
     case p.Type.Byte                     => "Byte"
     case p.Type.Char                     => "Char"
@@ -455,18 +463,22 @@ extension (stmt: p.Stmt) {
   }
 }
 
+extension (arg: p.Arg) {
+  def repr: String = s"${arg.named.repr}"
+}
+
 extension (fn: p.Function) {
 
-  def mangledName = fn.receiver.map(_.tpe.repr).getOrElse("") + "!" + fn.name.fqn
-    .mkString("_") + "!" + fn.args.map(_.tpe.repr).mkString("_") + "!" + fn.rtn.repr
+  def mangledName = fn.receiver.map(_.named.tpe.repr).getOrElse("") + "!" + fn.name.fqn
+    .mkString("_") + "!" + fn.args.map(_.named.tpe.repr).mkString("_") + "!" + fn.rtn.repr
 
   def signature = p.Signature(
     fn.name,
     fn.tpeVars,
-    fn.receiver.map(_.tpe),
-    fn.args.map(_.tpe),
-    fn.moduleCaptures.map(_.tpe),
-    fn.termCaptures.map(_.tpe),
+    fn.receiver.map(_.named.tpe),
+    fn.args.map(_.named.tpe),
+    fn.moduleCaptures.map(_.named.tpe),
+    fn.termCaptures.map(_.named.tpe),
     fn.rtn
   )
 

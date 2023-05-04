@@ -191,6 +191,11 @@ struct LogicLt;
 struct LogicGt;
 using Any = Alternative<Add, Sub, Mul, Div, Rem, Pow, Min, Max, Atan2, Hypot, BAnd, BOr, BXor, BSL, BSR, BZSR, LogicEq, LogicNeq, LogicAnd, LogicOr, LogicLte, LogicGte, LogicLt, LogicGt>;
 } // namespace BinaryIntrinsicKind
+namespace TypeSpace { 
+struct Global;
+struct Local;
+using Any = Alternative<Global, Local>;
+} // namespace TypeSpace
 namespace Expr { 
 struct NullaryIntrinsic;
 struct UnaryIntrinsic;
@@ -215,6 +220,18 @@ struct Cond;
 struct Return;
 using Any = Alternative<Block, Comment, Var, Mut, Update, While, Break, Cont, Cond, Return>;
 } // namespace Stmt
+
+
+namespace FunctionKind { 
+struct Internal;
+struct Exported;
+using Any = Alternative<Internal, Exported>;
+} // namespace FunctionKind
+namespace FunctionAttr { 
+struct FPRelaxed;
+struct FPStrict;
+using Any = Alternative<FPRelaxed, FPStrict>;
+} // namespace FunctionAttr
 
 
 
@@ -366,7 +383,8 @@ struct EXPORT Struct : Type::Base {
 
 struct EXPORT Array : Type::Base {
   Type::Any component;
-  explicit Array(Type::Any component) noexcept;
+  TypeSpace::Any space;
+  Array(Type::Any component, TypeSpace::Any space) noexcept;
   EXPORT operator Any() const;
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Array &);
   EXPORT friend bool operator==(const Type::Array &, const Type::Array &);
@@ -392,13 +410,13 @@ struct EXPORT Exec : Type::Base {
 } // namespace Type
 
 
-struct EXPORT Position {
+struct EXPORT SourcePosition {
   std::string file;
   int32_t line;
-  int32_t col;
-  Position(std::string file, int32_t line, int32_t col) noexcept;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Position &);
-  EXPORT friend bool operator==(const Position &, const Position &);
+  std::optional<int32_t> col;
+  SourcePosition(std::string file, int32_t line, std::optional<int32_t> col) noexcept;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const SourcePosition &);
+  EXPORT friend bool operator==(const SourcePosition &, const SourcePosition &);
 };
 
 namespace Term { 
@@ -1024,6 +1042,29 @@ struct EXPORT LogicGt : BinaryIntrinsicKind::Base {
   EXPORT friend bool operator==(const BinaryIntrinsicKind::LogicGt &, const BinaryIntrinsicKind::LogicGt &);
 };
 } // namespace BinaryIntrinsicKind
+namespace TypeSpace { 
+
+struct EXPORT Base {
+  protected:
+  Base();
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const TypeSpace::Any &);
+  EXPORT friend bool operator==(const TypeSpace::Base &, const TypeSpace::Base &);
+};
+
+struct EXPORT Global : TypeSpace::Base {
+  Global() noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const TypeSpace::Global &);
+  EXPORT friend bool operator==(const TypeSpace::Global &, const TypeSpace::Global &);
+};
+
+struct EXPORT Local : TypeSpace::Base {
+  Local() noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const TypeSpace::Local &);
+  EXPORT friend bool operator==(const TypeSpace::Local &, const TypeSpace::Local &);
+};
+} // namespace TypeSpace
 namespace Expr { 
 
 struct EXPORT Base {
@@ -1256,16 +1297,72 @@ struct EXPORT InvokeSignature {
   EXPORT friend bool operator==(const InvokeSignature &, const InvokeSignature &);
 };
 
+namespace FunctionKind { 
+
+struct EXPORT Base {
+  protected:
+  Base();
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const FunctionKind::Any &);
+  EXPORT friend bool operator==(const FunctionKind::Base &, const FunctionKind::Base &);
+};
+
+struct EXPORT Internal : FunctionKind::Base {
+  Internal() noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const FunctionKind::Internal &);
+  EXPORT friend bool operator==(const FunctionKind::Internal &, const FunctionKind::Internal &);
+};
+
+struct EXPORT Exported : FunctionKind::Base {
+  Exported() noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const FunctionKind::Exported &);
+  EXPORT friend bool operator==(const FunctionKind::Exported &, const FunctionKind::Exported &);
+};
+} // namespace FunctionKind
+namespace FunctionAttr { 
+
+struct EXPORT Base {
+  protected:
+  Base();
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const FunctionAttr::Any &);
+  EXPORT friend bool operator==(const FunctionAttr::Base &, const FunctionAttr::Base &);
+};
+
+struct EXPORT FPRelaxed : FunctionAttr::Base {
+  FPRelaxed() noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const FunctionAttr::FPRelaxed &);
+  EXPORT friend bool operator==(const FunctionAttr::FPRelaxed &, const FunctionAttr::FPRelaxed &);
+};
+
+struct EXPORT FPStrict : FunctionAttr::Base {
+  FPStrict() noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const FunctionAttr::FPStrict &);
+  EXPORT friend bool operator==(const FunctionAttr::FPStrict &, const FunctionAttr::FPStrict &);
+};
+} // namespace FunctionAttr
+
+
+struct EXPORT Arg {
+  Named named;
+  std::optional<SourcePosition> pos;
+  Arg(Named named, std::optional<SourcePosition> pos) noexcept;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Arg &);
+  EXPORT friend bool operator==(const Arg &, const Arg &);
+};
+
 struct EXPORT Function {
   Sym name;
   std::vector<std::string> tpeVars;
-  std::optional<Named> receiver;
-  std::vector<Named> args;
-  std::vector<Named> moduleCaptures;
-  std::vector<Named> termCaptures;
+  std::optional<Arg> receiver;
+  std::vector<Arg> args;
+  std::vector<Arg> moduleCaptures;
+  std::vector<Arg> termCaptures;
   Type::Any rtn;
   std::vector<Stmt::Any> body;
-  Function(Sym name, std::vector<std::string> tpeVars, std::optional<Named> receiver, std::vector<Named> args, std::vector<Named> moduleCaptures, std::vector<Named> termCaptures, Type::Any rtn, std::vector<Stmt::Any> body) noexcept;
+  Function(Sym name, std::vector<std::string> tpeVars, std::optional<Arg> receiver, std::vector<Arg> args, std::vector<Arg> moduleCaptures, std::vector<Arg> termCaptures, Type::Any rtn, std::vector<Stmt::Any> body) noexcept;
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Function &);
   EXPORT friend bool operator==(const Function &, const Function &);
 };
@@ -1361,8 +1458,8 @@ template <> struct std::hash<polyregion::polyast::Type::Var> {
 template <> struct std::hash<polyregion::polyast::Type::Exec> {
   std::size_t operator()(const polyregion::polyast::Type::Exec &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Position> {
-  std::size_t operator()(const polyregion::polyast::Position &) const noexcept;
+template <> struct std::hash<polyregion::polyast::SourcePosition> {
+  std::size_t operator()(const polyregion::polyast::SourcePosition &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Term::Select> {
   std::size_t operator()(const polyregion::polyast::Term::Select &) const noexcept;
@@ -1610,6 +1707,12 @@ template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicLt> 
 template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicGt> {
   std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicGt &) const noexcept;
 };
+template <> struct std::hash<polyregion::polyast::TypeSpace::Global> {
+  std::size_t operator()(const polyregion::polyast::TypeSpace::Global &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::TypeSpace::Local> {
+  std::size_t operator()(const polyregion::polyast::TypeSpace::Local &) const noexcept;
+};
 template <> struct std::hash<polyregion::polyast::Expr::NullaryIntrinsic> {
   std::size_t operator()(const polyregion::polyast::Expr::NullaryIntrinsic &) const noexcept;
 };
@@ -1675,6 +1778,21 @@ template <> struct std::hash<polyregion::polyast::Signature> {
 };
 template <> struct std::hash<polyregion::polyast::InvokeSignature> {
   std::size_t operator()(const polyregion::polyast::InvokeSignature &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::FunctionKind::Internal> {
+  std::size_t operator()(const polyregion::polyast::FunctionKind::Internal &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::FunctionKind::Exported> {
+  std::size_t operator()(const polyregion::polyast::FunctionKind::Exported &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::FunctionAttr::FPRelaxed> {
+  std::size_t operator()(const polyregion::polyast::FunctionAttr::FPRelaxed &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::FunctionAttr::FPStrict> {
+  std::size_t operator()(const polyregion::polyast::FunctionAttr::FPStrict &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Arg> {
+  std::size_t operator()(const polyregion::polyast::Arg &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Function> {
   std::size_t operator()(const polyregion::polyast::Function &) const noexcept;

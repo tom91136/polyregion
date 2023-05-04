@@ -46,6 +46,14 @@ macro(configure_platform PLATFORM ENTRIES LIST)
     }")
 endmacro()
 
+
+macro(read_to_hex FILE OUT_VAR)
+    #    execute_process(COMMAND gzip "${FILE}")
+    file(READ "${FILE}" HEX_STRING HEX)
+    file(REMOVE "${FILE}")
+    to_hex_array("${HEX_STRING}" ${OUT_VAR})
+endmacro()
+
 foreach (C_SOURCE ${C_SRC_FILES})
     message(STATUS "Building ${C_SOURCE}...")
     get_filename_component(PROGRAM_NAME ${C_SOURCE} NAME_WE)
@@ -54,19 +62,17 @@ foreach (C_SOURCE ${C_SRC_FILES})
 
     set(RELOCATABLE_OBJ_PROGRAM_ENTRIES "")
     foreach (CPU_ARCH ${CPU_ARCHS})
-        message(STATUS "[RELOCATABLE_OBJ] ${CPU_ARCH}")
-        execute_process(
-                COMMAND clang
+        set(CLI clang
                 -target x86_64-pc-linux-gnu
-                -fPIC -Os
+                -fPIC -Os -g0
                 -std=c11 -march=${CPU_ARCH}
                 -xc ${C_SOURCE}
                 -c
-                -o data.bin
-        )
-        file(READ data.bin HEX_STRING HEX)
-        file(REMOVE data.bin)
-        to_hex_array("${HEX_STRING}" RELOCATABLE_OBJ_ENTRY_HEX)
+                -o data.bin)
+        string(REPLACE ";" " " CLI_NS "${CLI}")
+        message(STATUS "[RELOCATABLE_OBJ] ${CLI_NS}")
+        execute_process(COMMAND ${CLI})
+        read_to_hex(data.bin RELOCATABLE_OBJ_ENTRY_HEX)
         list(APPEND RELOCATABLE_OBJ_PROGRAM_ENTRIES "{\"${CPU_ARCH}\", ${RELOCATABLE_OBJ_ENTRY_HEX}}")
     endforeach ()
     configure_platform("RELOCATABLE_OBJ" RELOCATABLE_OBJ_PROGRAM_ENTRIES PROGRAM_ENTRIES)
@@ -74,19 +80,17 @@ foreach (C_SOURCE ${C_SRC_FILES})
 
     set(SHARED_OBJ_PROGRAM_ENTRIES "")
     foreach (CPU_ARCH ${CPU_ARCHS})
-        message(STATUS "[SHARED_OBJ] ${CPU_ARCH}")
-        execute_process(
-                COMMAND clang
+        set(CLI clang
                 -target x86_64-pc-linux-gnu
-                -Os
+                -Os -g0
                 -std=c11 -march=${CPU_ARCH}
                 -xc ${C_SOURCE}
                 -shared
-                -o data.bin
-        )
-        file(READ data.bin HEX_STRING HEX)
-        file(REMOVE data.bin)
-        to_hex_array("${HEX_STRING}" SHARED_OBJ_ENTRY_HEX)
+                -o data.bin)
+        string(REPLACE ";" " " CLI_NS "${CLI}")
+        message(STATUS "[SHARED_OBJ] ${CLI_NS}")
+        execute_process(COMMAND ${CLI})
+        read_to_hex(data.bin SHARED_OBJ_ENTRY_HEX)
         list(APPEND SHARED_OBJ_PROGRAM_ENTRIES "{\"${CPU_ARCH}\", ${SHARED_OBJ_ENTRY_HEX}}")
     endforeach ()
     configure_platform("SHARED_OBJ" SHARED_OBJ_PROGRAM_ENTRIES PROGRAM_ENTRIES)
@@ -112,18 +116,17 @@ foreach (CL_SOURCE ${CL_SRC_FILES})
 
     set(NV_PROGRAM_ENTRIES "")
     foreach (NV_ARCH ${NV_ARCHS})
-        message(STATUS "[CUDA] ${NV_ARCH}")
-        execute_process(
-                COMMAND clang
+        set(CLI clang
                 -target nvptx64--nvidiacl
                 -cl-std=CL1.2 -march=${NV_ARCH}
-                -O3
+                -O3 -g0
                 -xcl ${CL_SOURCE} -Xclang -mlink-bitcode-file -Xclang /usr/lib64/clc/nvptx64--nvidiacl.bc
-                -S -o-
-                OUTPUT_VARIABLE PTX_STRING
-        )
-        string(HEX "${PTX_STRING}" HEX_STRING)
-        to_hex_array("${HEX_STRING}" NV_ENTRY_HEX)
+                -S -o-)
+        string(REPLACE ";" " " CLI_NS "${CLI}")
+        message(STATUS "[CUDA] ${CLI_NS}")
+        execute_process(COMMAND ${CLI} OUTPUT_VARIABLE PTX_STRING)
+        file(WRITE data.bin "${PTX_STRING}")
+        read_to_hex(data.bin NV_ENTRY_HEX)
         list(APPEND NV_PROGRAM_ENTRIES "{\"${NV_ARCH}\", ${NV_ENTRY_HEX}}")
     endforeach ()
     configure_platform("CUDA" NV_PROGRAM_ENTRIES PROGRAM_ENTRIES)
@@ -131,18 +134,16 @@ foreach (CL_SOURCE ${CL_SRC_FILES})
 
     set(AMDGPU_PROGRAM_ENTRIES "")
     foreach (AMDGPU_ARCH ${AMDGPU_ARCHS})
-        message(STATUS "[HSA] ${AMDGPU_ARCH}")
-        execute_process(
-                COMMAND clang
+        set(CLI clang
                 -target amdgcn--amdhsa -nogpulib
                 -cl-std=CL1.2 -mcpu=${AMDGPU_ARCH}
-                -O3
+                -O3 -g0
                 -xcl ${CL_SOURCE} -Xclang -mlink-bitcode-file -Xclang /usr/lib64/clc/amdgcn--amdhsa.bc
-                -o data.bin
-        )
-        file(READ data.bin HEX_STRING HEX)
-        file(REMOVE data.bin)
-        to_hex_array("${HEX_STRING}" AMDGPU_ENTRY_HEX)
+                -o data.bin)
+        string(REPLACE ";" " " CLI_NS "${CLI}")
+        message(STATUS "[HSA] ${CLI_NS}")
+        execute_process(COMMAND ${CLI})
+        read_to_hex(data.bin AMDGPU_ENTRY_HEX)
         list(APPEND AMDGPU_PROGRAM_ENTRIES "{\"${AMDGPU_ARCH}\", ${AMDGPU_ENTRY_HEX}}")
     endforeach ()
     configure_platform("HSA" AMDGPU_PROGRAM_ENTRIES PROGRAM_ENTRIES)

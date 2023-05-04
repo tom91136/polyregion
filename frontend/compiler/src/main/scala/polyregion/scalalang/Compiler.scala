@@ -277,9 +277,9 @@ object Compiler {
       compiledFn = p.Function(
         name = p.Sym(f.symbol.fullName),
         tpeVars = allTypeVars,
-        receiver = receiver,
-        args = fnArgs.map(_._2),
-        moduleCaptures = deriveModuleStructCaptures(deps),
+        receiver = receiver.map(p.Arg(_)),
+        args = fnArgs.map(_._2).map(p.Arg(_)),
+        moduleCaptures = deriveModuleStructCaptures(deps).map(p.Arg(_)),
         termCaptures = Nil,
         rtn = fnRtnTpe,
         body = rhsStmts
@@ -439,9 +439,9 @@ object Compiler {
       tpeVars = Nil,
       receiver = None,
       args = Nil,
-      moduleCaptures = deriveModuleStructCaptures(exprDeps),
-      termCaptures = capturedNames.map(_._1) ++
-        exprThisCls.map((_, tpe) => p.Named("this", tpe)),
+      moduleCaptures = deriveModuleStructCaptures(exprDeps).map(p.Arg(_)),
+      termCaptures = (capturedNames.map(_._1) ++
+        exprThisCls.map((_, tpe) => p.Named("this", tpe))).map(p.Arg(_)),
       rtn = exprTpe,
       body = exprStmts
     )
@@ -511,10 +511,10 @@ object Compiler {
       val fn = p.Function(
         name = sig.name,
         tpeVars = sig.tpeVars,
-        receiver = sig.receiver.map(p.Named("this", _)),
-        args = sig.args.zipWithIndex.map((t, i) => p.Named(s"arg$i", t)),
-        moduleCaptures = sig.moduleCaptures.zipWithIndex.map((t, i) => p.Named(s"arg$i", t)),
-        termCaptures = sig.termCaptures.zipWithIndex.map((t, i) => p.Named(s"arg$i", t)),
+        receiver = sig.receiver.map(p.Named("this", _)).map(p.Arg(_)),
+        args = sig.args.zipWithIndex.map((t, i) => p.Named(s"arg$i", t)).map(p.Arg(_)),
+        moduleCaptures = sig.moduleCaptures.zipWithIndex.map((t, i) => p.Named(s"arg$i", t)).map(p.Arg(_)),
+        termCaptures = sig.termCaptures.zipWithIndex.map((t, i) => p.Named(s"arg$i", t)).map(p.Arg(_)),
         rtn = sig.rtn,
         body = p.Stmt.Comment("abstract definition, assert")
           :: p.Stmt.Return(p.Expr.NullaryIntrinsic(p.NullaryIntrinsicKind.Assert, p.Type.Nothing))
@@ -635,9 +635,9 @@ object Compiler {
     capturedNameTable = capturedNames.map((name, ref) => name.symbol -> (name.tpe, ref)).toMap
     captured <- (opt.entry.moduleCaptures ++ opt.entry.termCaptures).traverse { n =>
       // Struct type of symbols may have been modified through specialisation so we just validate whether it's still a struct for now
-      capturedNameTable.get(n.symbol) match {
-        case None                                       => (n -> captureNameToModuleRefTable(n.symbol)).success
-        case Some((tpe, ref)) if tpe.kind == n.tpe.kind => (n -> ref).success
+      capturedNameTable.get(n.named.symbol) match {
+        case None                                       => (n -> captureNameToModuleRefTable(n.named.symbol)).success
+        case Some((tpe, ref)) if tpe.kind == n.named.tpe.kind => (n -> ref).success
         case Some((tpe, ref)) =>
           s"Unexpected type conversion, capture was ${tpe.repr} for $ref but function expected ${n.repr}".fail
       }
@@ -654,7 +654,7 @@ object Compiler {
 
     // List[(StructDef, Option[Prism])]
   } yield (
-    captured,
+    captured.map((arg, term) => arg.named -> term),
     // For each def, we find the original name before monomorphic specialisation and then resolve the term mirrors
     opt.defs.flatMap { monomorphicDef =>
       val polymorphicSym = monomorphicToPolymorphicSym(monomorphicDef.name)

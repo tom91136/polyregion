@@ -137,7 +137,7 @@ object compiletime {
       p.Type.Struct(mirrorToSourceTable.getOrElse(sym, sym), tpeVars, args, parents) match {
         case p.Type.Struct(Symbols.ArrayMirror, _, x :: Nil, _) =>
           // XXX restore @scala.Array back to the proper array type if needed
-          p.Type.Array(x)
+          p.Type.Array(x, p.Type.Space.Global)
         case x => x
       }
     case x => x
@@ -167,7 +167,7 @@ object compiletime {
             fn.copy(
               name = sourceSignature.name,
               // Get rid of the intrinsic$ capture introduced by calling stubs in that object.
-              moduleCaptures = fn.moduleCaptures.filter(_.tpe match {
+              moduleCaptures = fn.moduleCaptures.filter(_.named.tpe match {
                 case p.Type.Struct(sym, _, _, _) => sym != p.Sym(IntrinsicName)
                 case _                           => true
               })

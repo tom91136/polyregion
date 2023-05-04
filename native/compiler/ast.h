@@ -19,6 +19,8 @@ std::string repr(const Named &);
 std::string repr(const Term::Any &);
 std::string repr(const Expr::Any &);
 std::string repr(const Stmt::Any &);
+std::string repr(const Arg &);
+std::string repr(const TypeSpace::Any &space);
 std::string repr(const Function &);
 std::string repr(const StructDef &);
 std::string repr(const Program &);
@@ -41,6 +43,9 @@ namespace Fn0 = NullaryIntrinsicKind;
 namespace Fn2 = BinaryIntrinsicKind;
 namespace Fn1 = UnaryIntrinsicKind;
 
+const static TypeSpace::Global Global = TypeSpace::Global();
+const static TypeSpace::Local Local = TypeSpace::Local();
+
 const static Tpe::Float Float = Tpe::Float();
 const static Tpe::Double Double = Tpe::Double();
 const static Tpe::Bool Bool = Tpe::Bool();
@@ -52,7 +57,7 @@ const static Tpe::Long Long = Tpe::Long();
 const static Tpe::Unit Unit = Tpe::Unit();
 const static Tpe::Nothing Nothing = Tpe::Nothing();
 
-Tpe::Array Array(const Tpe::Any &t);
+Tpe::Array Array(const Tpe::Any &t, const TypeSpace::Any &s = TypeSpace::Global());
 Tpe::Struct Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args);
 
 struct AssignmentBuilder {
@@ -65,16 +70,17 @@ struct AssignmentBuilder {
 struct IndexBuilder {
   Index index;
   explicit IndexBuilder(const Index &index);
-  operator const Expr::Any() const; // NOLINT(google-explicit-constructor)
+  operator Expr::Any() const; // NOLINT(google-explicit-constructor)
   Update operator=(const Term::Any &term) const;
 };
 
 struct NamedBuilder {
   Named named;
   explicit NamedBuilder(const Named &named);
-  operator const Term::Any() const; // NOLINT(google-explicit-constructor)
-//  operator const Expr::Any() const; // NOLINT(google-explicit-constructor)
-  operator const Named() const;     // NOLINT(google-explicit-constructor)
+  operator Term::Any() const; // NOLINT(google-explicit-constructor)
+                              //  operator const Expr::Any() const; // NOLINT(google-explicit-constructor)
+  operator Named() const;     // NOLINT(google-explicit-constructor)
+  Arg operator()() const;
   IndexBuilder operator[](const Term::Any &idx) const;
 };
 
@@ -94,7 +100,7 @@ UnaryIntrinsic invoke(const UnaryIntrinsicKind::Any &kind, const Term::Any &lhs,
 
 NullaryIntrinsic invoke(const NullaryIntrinsicKind::Any &kind, const Type::Any &rtn);
 
-std::function<Function(std::vector<Stmt::Any>)> function(const std::string &name, const std::vector<Named> &args,
+std::function<Function(std::vector<Stmt::Any>)> function(const std::string &name, const std::vector<Arg> &args,
                                                          const Type::Any &rtn);
 Program program(Function entry, std::vector<StructDef> defs = {}, std::vector<Function> functions = {});
 

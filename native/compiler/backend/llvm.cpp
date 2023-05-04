@@ -62,11 +62,13 @@ LLVM::AstTransformer::AstTransformer(LLVM::Options options, llvm::LLVMContext &c
       //             Private  5  Local
     case Target::NVPTX64:
       GlobalAS = 1;
+      LocalAS = 3;
       AllocaAS = 0;
       break;
 
     case Target::AMDGCN:
       GlobalAS = 1;
+      LocalAS = 3;
       AllocaAS = 5;
       break;
     case Target::SPIRV64: undefined(__FILE__, __LINE__); break;
@@ -74,7 +76,8 @@ LLVM::AstTransformer::AstTransformer(LLVM::Options options, llvm::LLVMContext &c
 }
 
 llvm::Value *LLVM::AstTransformer::invokeMalloc(llvm::Function *parent, llvm::Value *size) {
-  return B.CreateCall(mkExternalFn(parent, Type::Array(Type::Byte()), "malloc", {Type::Long()}), size);
+  return B.CreateCall(mkExternalFn(parent, Type::Array(Type::Byte(), TypeSpace::Global()), "malloc", {Type::Long()}),
+                      size);
 }
 
 llvm::Value *LLVM::AstTransformer::invokeAbort(llvm::Function *parent) {
@@ -100,7 +103,7 @@ LLVM::AstTransformer::mkStruct(const StructDef &def) {
   return {llvm::StructType::create(C, types, qualified(def.name)), table};
 }
 
-llvm::Type *LLVM::AstTransformer::mkTpe(const Type::Any &tpe, unsigned AS, bool functionBoundary) {            //
+llvm::Type *LLVM::AstTransformer::mkTpe(const Type::Any &tpe, bool functionBoundary) {                         //
   return variants::total(                                                                                      //
       *tpe,                                                                                                    //
       [&](const Type::Float &x) -> llvm::Type * { return llvm::Type::getFloatTy(C); },                         //
@@ -125,7 +128,13 @@ llvm::Type *LLVM::AstTransformer::mkTpe(const Type::Any &tpe, unsigned AS, bool 
         }
       }, //
       [&](const Type::Array &x) -> llvm::Type * {
-        return B.getPtrTy(AS);
+        ;
+
+        return B.getPtrTy(variants::total(
+            *x.space,                                             //
+            [&](const TypeSpace::Local &_) { return LocalAS; },   //
+            [&](const TypeSpace::Global &_) { return GlobalAS; }) //
+        );
         //        // These two types promote to a byte when stored in an array
         //        if (holds<Type::Bool>(x.component) || holds<Type::Unit>(x.component)) {
         //          return llvm::Type::getInt8Ty(C)->getPointerTo(AS);
@@ -191,7 +200,7 @@ llvm::Value *LLVM::AstTransformer::mkSelectPtr(const Term::Select &select) {
         root = B.CreateInBoundsGEP(structTy, load(B, root, B.getPtrTy(AllocaAS)),
                                    {llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0),
                                     llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), *idx)},
-                                   qualified(select) + "_ptr");
+                                   qualified(select) + "_select_ptr");
         tpe = path.tpe;
       } else {
         auto pool = mk_string2<std::string, size_t>(
@@ -213,7 +222,7 @@ llvm::Value *LLVM::AstTransformer::mkTermVal(const Term::Any &ref) {
       *ref, //
       [&](const Term::Select &x) -> llvm::Value * {
         auto tpe = mkTpe(x.tpe);
-        return load(B, mkSelectPtr(x), tpe->isStructTy() ? B.getPtrTy() : tpe);
+        return load(B, mkSelectPtr(x), tpe->isStructTy() ? B.getPtrTy(GlobalAS) : tpe);
       },
       [&](const Term::Poison &x) -> llvm::Value * {
         if (auto tpe = mkTpe(x.tpe); llvm::isa<llvm::PointerType>(tpe)) {
@@ -506,8 +515,8 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
             //  319:256 kernel_object Handle for an object in memory that includes an
             //          implementation-defined executable ISA image for the kernel.
             //  383:320 kernarg_address Address of memory containing kernel arguments.
-            //  447:384 Reserved, must be 0. 511:448 completion_signal HSA signaling object handle used to indicate
-            //          completion of the job
+            //  447:384 Reserved, must be 0.
+            //  511:448 completion_signal HSA signaling object handle used to indicate completion of the job
 
             // see llvm/libclc/amdgcn-amdhsa/lib/workitem/get_global_size.cl
             auto globalSizeU32 = [&](size_t dim) -> ValPtr {
@@ -578,11 +587,13 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
 
                 [&](const NullaryIntrinsicKind::GpuGroupBarrier &) -> ValPtr {
                   // work_group_barrier (__memory_scope, 1, 1)
-                  return undefined(__FILE__, __LINE__);
+                  // FIXME
+                  // intr1(Intr::amdgcn_s_waitcnt,Type::Int(), Term::IntConst(0xFF));
+                  return intr0(Intr::amdgcn_s_barrier);
                 },
                 [&](const NullaryIntrinsicKind::GpuGroupFence &) -> ValPtr {
                   // atomic_work_item_fence(0, 5, 1)
-                  return undefined(__FILE__, __LINE__);
+                  return intr1(Intr::amdgcn_s_waitcnt, Type::Int(), Term::IntConst(0xFF));
                 });
         }
       },
@@ -868,6 +879,7 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
   //               : B.CreateICmpNE(cond, llvm::ConstantInt::get(llvm::Type::getInt8Ty(C), 0, true));
   //  };
 
+  fprintf(stderr, "%s\n", to_string(stmt).c_str());
   return variants::total(
       *stmt,
       [&](const Stmt::Block &x) -> BlockKind {
@@ -899,7 +911,9 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
 
         stackVarPtrs[x.name.symbol] = {x.name.tpe, stackPtr};
 
-        if (holds<Type::Array>(x.name.tpe)) {
+        if (holds<Type::Unit>(x.name.tpe)) {
+          // discard , keep effect
+        } else if (holds<Type::Array>(x.name.tpe)) {
           if (rhs) {
             B.CreateStore(*rhs, stackPtr);
           } else
@@ -956,12 +970,10 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
               auto ty = mkTpe(tpe(rhs));
               auto ptr = B.CreateInBoundsGEP(                         //
                   ty->isStructTy() ? B.getPtrTy(AllocaAS) : ty, dest, //
-                  mkTermVal(x.idx), qualified(*lhs) + "_ptr"          //
+                  mkTermVal(x.idx), qualified(*lhs) + "_update_ptr"   //
               );                                                      //
 
-              if (holds<Type::Struct>(tpe(rhs))) {
-                B.CreateStore(mkTermVal(rhs), ptr);
-              } else if (holds<Type::Bool>(tpe(rhs)) || holds<Type::Unit>(tpe(rhs))) {
+              if (holds<Type::Bool>(tpe(rhs)) || holds<Type::Unit>(tpe(rhs))) {
                 // Extend from i1 to i8
                 auto b = mkTermVal(rhs);
                 B.CreateStore(B.CreateIntCast(b, llvm::Type::getInt8Ty(C), true), ptr);
@@ -1099,8 +1111,8 @@ std::vector<Pair<Sym, llvm::StructType *>> LLVM::AstTransformer::getStructTypes(
   return results;
 }
 
-static std::vector<Named> collectFnDeclarationNames(const Function &f) {
-  std::vector<Named> allArgs;
+static std::vector<Arg> collectFnDeclarationNames(const Function &f) {
+  std::vector<Arg> allArgs;
   if (f.receiver) allArgs.push_back(*f.receiver);
   allArgs.insert(allArgs.end(), f.args.begin(), f.args.end());
   allArgs.insert(allArgs.end(), f.moduleCaptures.begin(), f.moduleCaptures.end());
@@ -1110,25 +1122,25 @@ static std::vector<Named> collectFnDeclarationNames(const Function &f) {
 
 void LLVM::AstTransformer::addFn(llvm::Module &mod, const Function &f, bool entry) {
 
-  auto paramTpes = map_vec<Named, llvm::Type *>(collectFnDeclarationNames(f), [&](auto &&named) {
-    auto tpe = mkTpe(named.tpe, GlobalAS, true);
+  auto paramTpes = map_vec<Arg, llvm::Type *>(collectFnDeclarationNames(f), [&](auto &&arg) {
+    auto tpe = mkTpe(arg.named.tpe, true);
     return tpe->isStructTy() ? B.getPtrTy(GlobalAS) : tpe;
   });
 
   // Unit type at function return type position is void
   // Any other location, Unit is a singleton value
-  auto rtnTpe = holds<Type::Unit>(f.rtn) ? llvm::Type::getVoidTy(C) : mkTpe(f.rtn, 0, true);
+  auto rtnTpe = holds<Type::Unit>(f.rtn) ? llvm::Type::getVoidTy(C) : mkTpe(f.rtn, true);
 
   auto fnTpe = llvm::FunctionType::get(rtnTpe, {paramTpes}, false);
 
-  auto *fn = llvm::Function::Create(fnTpe,                                                                    //
-                                    entry ? llvm::Function::ExternalLinkage : llvm::Function::PrivateLinkage, //
-                                    qualified(f.name),                                                        //
+  auto *fn = llvm::Function::Create(fnTpe,                                                                     //
+                                    entry ? llvm::Function::ExternalLinkage : llvm::Function::ExternalLinkage, // TODO
+                                    qualified(f.name),                                                         //
                                     mod);
 
   fn->setDSOLocal(true);
 
-  if (entry) { // setup external function conventions for targets
+  if (entry || true) { // setup external function conventions for targets
     switch (options.target) {
       case Target::x86_64:
       case Target::AArch64:
@@ -1149,15 +1161,15 @@ void LLVM::AstTransformer::addFn(llvm::Module &mod, const Function &f, bool entr
 
   std::vector<Type::Any> argTpes;
   for (auto &n : f.moduleCaptures)
-    argTpes.push_back(n.tpe);
+    argTpes.push_back(n.named.tpe);
   for (auto &n : f.termCaptures)
-    argTpes.push_back(n.tpe);
+    argTpes.push_back(n.named.tpe);
 
-  functions.emplace(InvokeSignature(f.name,                                             //
-                                    {},                                                 //
-                                    map_opt(f.receiver, [](auto &x) { return x.tpe; }), //
-                                    map_vec2(f.args, [](auto &x) { return x.tpe; }),    //
-                                    argTpes,                                            //
+  functions.emplace(InvokeSignature(f.name,                                                   //
+                                    {},                                                       //
+                                    map_opt(f.receiver, [](auto &x) { return x.named.tpe; }), //
+                                    map_vec2(f.args, [](auto &x) { return x.named.tpe; }),    //
+                                    argTpes,                                                  //
                                     f.rtn),
                     fn);
 }
@@ -1186,15 +1198,15 @@ void LLVM::AstTransformer::transform(llvm::Module &mod, const Function &fnTree) 
 
   std::vector<Type::Any> argTpes;
   for (auto &n : fnTree.moduleCaptures)
-    argTpes.push_back(n.tpe);
+    argTpes.push_back(n.named.tpe);
   for (auto &n : fnTree.termCaptures)
-    argTpes.push_back(n.tpe);
+    argTpes.push_back(n.named.tpe);
 
-  InvokeSignature sig(fnTree.name,                                             //
-                      {},                                                      //
-                      map_opt(fnTree.receiver, [](auto &x) { return x.tpe; }), //
-                      map_vec2(fnTree.args, [](auto &x) { return x.tpe; }),    //
-                      argTpes,                                                 //
+  InvokeSignature sig(fnTree.name,                                                   //
+                      {},                                                            //
+                      map_opt(fnTree.receiver, [](auto &x) { return x.named.tpe; }), //
+                      map_vec2(fnTree.args, [](auto &x) { return x.named.tpe; }),    //
+                      argTpes,                                                       //
                       fnTree.rtn);
 
   auto it = functions.find(sig);
@@ -1217,18 +1229,19 @@ void LLVM::AstTransformer::transform(llvm::Module &mod, const Function &fnTree) 
   std::transform(                                      //
       fn->arg_begin(), fn->arg_end(), allArgs.begin(), //
       std::inserter(stackVarPtrs, stackVarPtrs.end()), //
-      [&](auto &arg, const auto &named) -> Pair<std::string, Pair<Type::Any, llvm::Value *>> {
-        arg.setName(named.symbol);
+      [&](auto &arg, const auto &fnArg) -> Pair<std::string, Pair<Type::Any, llvm::Value *>> {
+        arg.setName(fnArg.named.symbol);
 
-        auto argValue = holds<Type::Bool>(named.tpe) || holds<Type::Unit>(named.tpe)
+        auto argValue = holds<Type::Bool>(fnArg.named.tpe) || holds<Type::Unit>(fnArg.named.tpe)
                             ? B.CreateICmpNE(&arg, llvm::ConstantInt::get(llvm::Type::getInt8Ty(C), 0, true))
                             : &arg;
 
-        auto tpe = mkTpe(named.tpe, GlobalAS);
+        //        auto as = holds<ArgKind::Local>(fnArg.kind) ? LocalAS : GlobalAS;
+        auto tpe = mkTpe(fnArg.named.tpe);
         auto stack = B.CreateAlloca(tpe->isStructTy() ? B.getPtrTy(GlobalAS) : tpe, AllocaAS, nullptr,
-                                    named.symbol + "_stack_ptr");
+                                    fnArg.named.symbol + "_stack_ptr");
         B.CreateStore(argValue, stack);
-        return {named.symbol, {named.tpe, stack}};
+        return {fnArg.named.symbol, {fnArg.named.tpe, stack}};
       });
 
   for (auto &stmt : fnTree.body)

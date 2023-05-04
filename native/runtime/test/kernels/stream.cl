@@ -1,24 +1,24 @@
-__kernel void stream_copy(__global float *a, __global float *b, __global float *c) {
+__kernel void stream_copy_float(__global float *a, __global float *b, __global float *c) {
   int i = get_global_id(0);
   c[i] = a[i];
 }
 
-__kernel void stream_mul(__global float *a, __global float *b, __global float *c, float scalar) {
+__kernel void stream_mul_float(__global float *a, __global float *b, __global float *c, float scalar) {
   int i = get_global_id(0);
   b[i] = scalar * c[i];
 }
 
-__kernel void stream_add(__global float *a, __global float *b, __global float *c) {
+__kernel void stream_add_float(__global float *a, __global float *b, __global float *c) {
   int i = get_global_id(0);
   c[i] = a[i] + b[i];
 }
 
-__kernel void stream_triad(__global float *a, __global float *b, __global float *c, float scalar) {
+__kernel void stream_triad_float(__global float *a, __global float *b, __global float *c, float scalar) {
   int i = get_global_id(0);
   a[i] = b[i] + scalar * c[i];
 }
 
-__kernel void stream_dot(__global float *a, __global float *b, __global float *c, __global float *sum,
+__kernel void stream_dot_float(__global float *a, __global float *b, __global float *c, __global float *sum,
                          __local float *wg_sum, int array_size) {
   int i = get_global_id(0);
   const int local_i = get_local_id(0);

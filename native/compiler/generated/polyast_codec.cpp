@@ -185,12 +185,14 @@ json Type::struct_to_json(const Type::Struct& x) {
 
 Type::Array Type::array_from_json(const json& j) { 
   auto component =  Type::any_from_json(j.at(0));
-  return Type::Array(component);
+  auto space =  TypeSpace::any_from_json(j.at(1));
+  return {component, space};
 }
 
 json Type::array_to_json(const Type::Array& x) { 
   auto component =  Type::any_to_json(x.component);
-  return json::array({component});
+  auto space =  TypeSpace::any_to_json(x.space);
+  return json::array({component, space});
 }
 
 Type::Var Type::var_from_json(const json& j) { 
@@ -262,17 +264,17 @@ json Type::any_to_json(const Type::Any& x) {
   }, *x);
 }
 
-Position position_from_json(const json& j) { 
+SourcePosition sourceposition_from_json(const json& j) { 
   auto file = j.at(0).get<std::string>();
   auto line = j.at(1).get<int32_t>();
-  auto col = j.at(2).get<int32_t>();
+  auto col = j.at(2).is_null() ? std::nullopt : std::make_optional(j.at(2).get<int32_t>());
   return {file, line, col};
 }
 
-json position_to_json(const Position& x) { 
+json sourceposition_to_json(const SourcePosition& x) { 
   auto file = x.file;
   auto line = x.line;
-  auto col = x.col;
+  auto col = x.col ? json{*x.col} : json{};
   return json::array({file, line, col});
 }
 
@@ -1177,6 +1179,40 @@ json BinaryIntrinsicKind::any_to_json(const BinaryIntrinsicKind::Any& x) {
   }, *x);
 }
 
+TypeSpace::Global TypeSpace::global_from_json(const json& j) { 
+  return {};
+}
+
+json TypeSpace::global_to_json(const TypeSpace::Global& x) { 
+  return json::array({});
+}
+
+TypeSpace::Local TypeSpace::local_from_json(const json& j) { 
+  return {};
+}
+
+json TypeSpace::local_to_json(const TypeSpace::Local& x) { 
+  return json::array({});
+}
+
+TypeSpace::Any TypeSpace::any_from_json(const json& j) { 
+  size_t ord = j.at(0).get<size_t>();
+  const auto t = j.at(1);
+  switch (ord) {
+  case 0: return TypeSpace::global_from_json(t);
+  case 1: return TypeSpace::local_from_json(t);
+  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
+  }
+}
+
+json TypeSpace::any_to_json(const TypeSpace::Any& x) { 
+  return std::visit(overloaded{
+  [](const TypeSpace::Global &y) -> json { return {0, TypeSpace::global_to_json(y)}; },
+  [](const TypeSpace::Local &y) -> json { return {1, TypeSpace::local_to_json(y)}; },
+  [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
+  }, *x);
+}
+
 Expr::NullaryIntrinsic Expr::nullaryintrinsic_from_json(const json& j) { 
   auto kind =  NullaryIntrinsicKind::any_from_json(j.at(0));
   auto rtn =  Type::any_from_json(j.at(1));
@@ -1585,19 +1621,99 @@ json invokesignature_to_json(const InvokeSignature& x) {
   return json::array({name, tpeVars, receiver, args, captures, rtn});
 }
 
+FunctionKind::Internal FunctionKind::internal_from_json(const json& j) { 
+  return {};
+}
+
+json FunctionKind::internal_to_json(const FunctionKind::Internal& x) { 
+  return json::array({});
+}
+
+FunctionKind::Exported FunctionKind::exported_from_json(const json& j) { 
+  return {};
+}
+
+json FunctionKind::exported_to_json(const FunctionKind::Exported& x) { 
+  return json::array({});
+}
+
+FunctionKind::Any FunctionKind::any_from_json(const json& j) { 
+  size_t ord = j.at(0).get<size_t>();
+  const auto t = j.at(1);
+  switch (ord) {
+  case 0: return FunctionKind::internal_from_json(t);
+  case 1: return FunctionKind::exported_from_json(t);
+  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
+  }
+}
+
+json FunctionKind::any_to_json(const FunctionKind::Any& x) { 
+  return std::visit(overloaded{
+  [](const FunctionKind::Internal &y) -> json { return {0, FunctionKind::internal_to_json(y)}; },
+  [](const FunctionKind::Exported &y) -> json { return {1, FunctionKind::exported_to_json(y)}; },
+  [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
+  }, *x);
+}
+
+FunctionAttr::FPRelaxed FunctionAttr::fprelaxed_from_json(const json& j) { 
+  return {};
+}
+
+json FunctionAttr::fprelaxed_to_json(const FunctionAttr::FPRelaxed& x) { 
+  return json::array({});
+}
+
+FunctionAttr::FPStrict FunctionAttr::fpstrict_from_json(const json& j) { 
+  return {};
+}
+
+json FunctionAttr::fpstrict_to_json(const FunctionAttr::FPStrict& x) { 
+  return json::array({});
+}
+
+FunctionAttr::Any FunctionAttr::any_from_json(const json& j) { 
+  size_t ord = j.at(0).get<size_t>();
+  const auto t = j.at(1);
+  switch (ord) {
+  case 0: return FunctionAttr::fprelaxed_from_json(t);
+  case 1: return FunctionAttr::fpstrict_from_json(t);
+  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
+  }
+}
+
+json FunctionAttr::any_to_json(const FunctionAttr::Any& x) { 
+  return std::visit(overloaded{
+  [](const FunctionAttr::FPRelaxed &y) -> json { return {0, FunctionAttr::fprelaxed_to_json(y)}; },
+  [](const FunctionAttr::FPStrict &y) -> json { return {1, FunctionAttr::fpstrict_to_json(y)}; },
+  [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
+  }, *x);
+}
+
+Arg arg_from_json(const json& j) { 
+  auto named =  named_from_json(j.at(0));
+  auto pos = j.at(1).is_null() ? std::nullopt : std::make_optional(sourceposition_from_json(j.at(1)));
+  return {named, pos};
+}
+
+json arg_to_json(const Arg& x) { 
+  auto named =  named_to_json(x.named);
+  auto pos = x.pos ? sourceposition_to_json(*x.pos) : json{};
+  return json::array({named, pos});
+}
+
 Function function_from_json(const json& j) { 
   auto name =  sym_from_json(j.at(0));
   auto tpeVars = j.at(1).get<std::vector<std::string>>();
-  auto receiver = j.at(2).is_null() ? std::nullopt : std::make_optional(named_from_json(j.at(2)));
-  std::vector<Named> args;
+  auto receiver = j.at(2).is_null() ? std::nullopt : std::make_optional(arg_from_json(j.at(2)));
+  std::vector<Arg> args;
   auto args_json = j.at(3);
-  std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &named_from_json);
-  std::vector<Named> moduleCaptures;
+  std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &arg_from_json);
+  std::vector<Arg> moduleCaptures;
   auto moduleCaptures_json = j.at(4);
-  std::transform(moduleCaptures_json.begin(), moduleCaptures_json.end(), std::back_inserter(moduleCaptures), &named_from_json);
-  std::vector<Named> termCaptures;
+  std::transform(moduleCaptures_json.begin(), moduleCaptures_json.end(), std::back_inserter(moduleCaptures), &arg_from_json);
+  std::vector<Arg> termCaptures;
   auto termCaptures_json = j.at(5);
-  std::transform(termCaptures_json.begin(), termCaptures_json.end(), std::back_inserter(termCaptures), &named_from_json);
+  std::transform(termCaptures_json.begin(), termCaptures_json.end(), std::back_inserter(termCaptures), &arg_from_json);
   auto rtn =  Type::any_from_json(j.at(6));
   std::vector<Stmt::Any> body;
   auto body_json = j.at(7);
@@ -1608,13 +1724,13 @@ Function function_from_json(const json& j) {
 json function_to_json(const Function& x) { 
   auto name =  sym_to_json(x.name);
   auto tpeVars = x.tpeVars;
-  auto receiver = x.receiver ? named_to_json(*x.receiver) : json{};
+  auto receiver = x.receiver ? arg_to_json(*x.receiver) : json{};
   std::vector<json> args;
-  std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &named_to_json);
+  std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &arg_to_json);
   std::vector<json> moduleCaptures;
-  std::transform(x.moduleCaptures.begin(), x.moduleCaptures.end(), std::back_inserter(moduleCaptures), &named_to_json);
+  std::transform(x.moduleCaptures.begin(), x.moduleCaptures.end(), std::back_inserter(moduleCaptures), &arg_to_json);
   std::vector<json> termCaptures;
-  std::transform(x.termCaptures.begin(), x.termCaptures.end(), std::back_inserter(termCaptures), &named_to_json);
+  std::transform(x.termCaptures.begin(), x.termCaptures.end(), std::back_inserter(termCaptures), &arg_to_json);
   auto rtn =  Type::any_to_json(x.rtn);
   std::vector<json> body;
   std::transform(x.body.begin(), x.body.end(), std::back_inserter(body), &Stmt::any_to_json);
@@ -1643,13 +1759,13 @@ json program_to_json(const Program& x) {
 json hashed_from_json(const json& j) { 
   auto hash = j.at(0).get<std::string>();
   auto data = j.at(1);
-  if(hash != "d4169d729a4075213ce6d1039626c170") {
-   throw std::runtime_error("Expecting ADT hash to be d4169d729a4075213ce6d1039626c170, but was " + hash);
+  if(hash != "5a5fb8263400635b61d0ffe705df50b8") {
+   throw std::runtime_error("Expecting ADT hash to be 5a5fb8263400635b61d0ffe705df50b8, but was " + hash);
   }
   return data;
 }
 
 json hashed_to_json(const json& x) { 
-  return json::array({"d4169d729a4075213ce6d1039626c170", x});
+  return json::array({"5a5fb8263400635b61d0ffe705df50b8", x});
 }
 } // namespace polyregion::polyast

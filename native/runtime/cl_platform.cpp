@@ -276,8 +276,8 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
   };
 
   auto args = detail::argDataAsPointers(types, argData);
-  auto global = policy.global;
   auto [local, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});
+  auto global = Dim3{policy.global.x * local.x, policy.global.y * local.y, policy.global.z * local.z};
 
   // last arg is the return, void assertion should have been done before this
   for (cl_uint i = 0; i < types.size() - 1; ++i) {

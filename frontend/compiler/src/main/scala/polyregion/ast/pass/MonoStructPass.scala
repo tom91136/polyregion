@@ -49,7 +49,7 @@ object MonoStructPass extends BoundaryPass[Map[p.Sym, p.Sym]] {
           case Some(sdef) => p.Type.Struct(sdef.name, Nil, Nil, sdef.parents)
           case None       => p.Type.Struct(name, tpeVars, args.map(doReplacement(_)), parents)
         }
-      case a @ p.Type.Array(c) => p.Type.Array(doReplacement(c))
+      case a @ p.Type.Array(c, s) => p.Type.Array(doReplacement(c), s)
       case a                   => a
     }
 
@@ -62,7 +62,7 @@ object MonoStructPass extends BoundaryPass[Map[p.Sym, p.Sym]] {
         def findLeafStructDefs(t: p.Type): List[p.StructDef] = t match {
           case p.Type.Struct(name, _, xs, _) =>
             xs.flatMap(findLeafStructDefs(_)) ::: program.defs.filter(_.name == name)
-          case p.Type.Array(component) => findLeafStructDefs(component)
+          case p.Type.Array(component, _) => findLeafStructDefs(component)
           case _                       => Nil
         }
         findLeafStructDefs(t)

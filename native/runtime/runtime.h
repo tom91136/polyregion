@@ -40,8 +40,12 @@ struct ArgBuffer {
   std::vector<Type> types;
   std::vector<std::byte> data;
   ArgBuffer(std::initializer_list<TypedPointer> args = {});
-  void put(Type tpe, void *ptr);
-  void put(std::initializer_list<TypedPointer> args);
+  void append(Type tpe, void *ptr);
+  void append(const ArgBuffer &that);
+  void append(std::initializer_list<TypedPointer> args);
+  void prepend(Type tpe, void *ptr);
+  void prepend(const ArgBuffer &that);
+  void prepend(std::initializer_list<TypedPointer> args);
 };
 
 // non-public APIs

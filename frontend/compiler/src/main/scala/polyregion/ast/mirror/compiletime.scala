@@ -13,6 +13,13 @@ private[polyregion] object compiletime {
         case MirrorKind.CaseProduct => '{ MirrorKind.CaseProduct }
       }
   }
+  inline def symbolNames[T] = ${ symbolNamesImpl[T] }
+  def symbolNamesImpl[T: Type](using quotes: Quotes): Expr[List[String]] = {
+    import quotes.reflect.*
+    val sym  = TypeRepr.of[T].dealias.simplified.typeSymbol
+    val name = List.unfold(sym)(s => if (!s.isPackageDef) Some((s.name, s.owner)) else None)
+    Expr(name.map(_.replace("$", "")).reverse)
+  }
 
   inline def mirrorMeta[T] = ${ mirrorMetaImpl[T] }
   def mirrorMetaImpl[T: Type](using quotes: Quotes): Expr[(List[String], MirrorKind)] = {
@@ -39,8 +46,29 @@ private[polyregion] object compiletime {
             s"Type ${tpe.show} not an enum, enum case, or case class (singleton=$s, case=$c, enum=$e, sealed=$se)"
           )
       }
-    val names = parents.filter(s => flags.exists(s.flags.is(_))).map(_.name).reverse
-    Expr((names, kind))
+
+    // report.warning(tpe.typeSymbol.toString())
+
+    val names = parents.filter(s => flags.exists(s.flags.is(_))).reverse
+
+    val owners = names.headOption
+      .map { s =>
+
+        val prefix = List
+          .unfold(s.owner)(s =>
+            if (!s.isPackageDef && !s.owner.isPackageDef) Some((s.name.replace("$", ""), s.owner)) else None
+          )
+          .reverse
+          .mkString
+
+        names.map(_.name) match {
+          case x :: xs => s"$prefix$x" :: xs
+          case xs      => xs
+        }
+      }
+      .getOrElse(names.map(_.name))
+
+    Expr((owners, kind))
   }
 
   type TermResolver[A, R] = Option[A] => R
@@ -88,7 +116,7 @@ private[polyregion] object compiletime {
       def resolveOne(name: String, tpe: TypeRepr) = '{
         (${ Expr(name) }, ${ summonTypeRes(tpe.widenTermRefByName.dealias) }())
       }
-      '{ Value.TermSelect[Tpe](${ resolveOne(name, tpe) }, ${ (Expr.ofList(rest.map(resolveOne(_, _)))) }) }
+      '{ Value.TermSelect[Tpe](${ resolveOne(name, tpe) }, ${ Expr.ofList(rest.map(resolveOne(_, _))) }) }
     }
 
     // def const[A: Type: ToExpr](e: A) = summonTermRes[A](tc => '{ ${ tc }(Some(${ Expr(e) })) })
@@ -121,7 +149,12 @@ private[polyregion] object compiletime {
       // case Literal(DoubleConstant(x))  => const(x)
       // case Literal(CharConstant(x))    => const(x)
       // case Literal(StringConstant(x))  => const(x)
-      case _ => ???
+
+      case x =>
+        x.asExpr match {
+          case '{ List($xs*) } => ??? // TODO
+          case _               => report.errorAndAbort(s"Can't handle expr: ${term.asExpr.show}", term.asExpr)
+        }
     }
 
     def matchCtor(t: Tree, parent: Option[TypeRepr]): Option[Expr[List[Val]]] = t match {
@@ -159,24 +192,26 @@ private[polyregion] object compiletime {
   ): Expr[List[(String, U)]] = {
     import quotes.reflect.*
     val symbol = TypeRepr.of[T].dealias.simplified.typeSymbol
-    if (symbol.primaryConstructor.isNoSymbol)
-      report.errorAndAbort(s"No Ctor symbol for ${symbol.name}")
-    else if (symbol.caseFields.nonEmpty)
+    if (symbol.caseFields.nonEmpty)
       report.errorAndAbort(s"Sum type required, got product type (${symbol.name}) instead")
-    else {
-      symbol.primaryConstructor.tree match {
-        case DefDef("<init>", head :: Nil, _, _) =>
-//          println(s"Non-Sealed Ctor: ${head}")
-          Expr.ofList(head.params.collect { case ValDef(name, tpeTree, _) =>
-            val instance = Implicits.search(TypeRepr.of[TypeRes].appliedTo(tpeTree.tpe)) match {
-              case s: ImplicitSearchSuccess => s.tree
-            }
-            '{ (${ Expr(name) }, ${ instance.asExpr }.asInstanceOf[TypeRes[Any]]()) }
-          })
-        case DefDef("<init>", args, _, _) => report.errorAndAbort(s"Ctor has more than one parameter list (${args})")
+    else
+      symbol.tree match {
+        case ClassDef(_, ctor: DefDef, _, _, _) =>
+          ctor match {
+            case dd @ DefDef("<init>", head :: Nil, _, _) =>
+              Expr.ofList(head.params.collect { case d @ ValDef(name, tpeTree, _) =>
+                val shape = TypeRepr.of[TypeRes].appliedTo(tpeTree.tpe)
+                val instance = Implicits.search(TypeRepr.of[TypeRes].appliedTo(tpeTree.tpe)) match {
+                  case s: ImplicitSearchSuccess => s.tree
+                  case _                        => report.errorAndAbort(s"Cannot find an instance of ${shape.show}")
+                }
+                '{ (${ Expr(name) }, ${ instance.asExpr }.asInstanceOf[TypeRes[Any]]()) }
+              })
+            case DefDef("<init>", args, _, _) =>
+              report.errorAndAbort(s"Ctor has more than one parameter list (${args})")
+          }
+        case bad => report.errorAndAbort(s"Not a ClassDef symbol for ${symbol.name}: ${bad.show}")
       }
-
-    }
 
   }
 

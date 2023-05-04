@@ -1,3 +1,4 @@
+#include "concurrency_utils.hpp"
 #include "kernels/cpu_fma.hpp"
 #include "kernels/gpu_fma.hpp"
 #include "test_utils.h"
@@ -8,6 +9,7 @@
 
 using namespace polyregion::runtime;
 using namespace polyregion::test_utils;
+using namespace polyregion::concurrency_utils;
 
 const static std::vector<float> xs{0.f,
                                    -0.f,
@@ -40,14 +42,17 @@ TEST_CASE("CPU/GPU scalar fma") {
           DYNAMIC_SECTION("a=" << a << " b=" << b << " c=" << c) {
             auto q = d->createQueue();
             auto out_d = d->mallocTyped<float>(1, Access::RW);
+
+            ArgBuffer buffer;
+            if (d->sharedAddressSpace()) buffer.append(Type::Long64, nullptr);
+
+            buffer.append(
+                {{Type::Float32, &a}, {Type::Float32, &b}, {Type::Float32, &c}, {Type::Ptr, &out_d}, {Type::Void, {}}});
+
             waitAll([&](auto &h) {
               q->enqueueInvokeAsync( //
                   "module", "_fma",
-                  {{Type::Float32, &a},
-                   {Type::Float32, &b},
-                   {Type::Float32, &c},
-                   {Type::Ptr, &out_d},
-                   {Type::Void, {}}}, //
+                  buffer, //
                   {}, h);
             });
             float out = {};

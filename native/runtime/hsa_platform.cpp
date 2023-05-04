@@ -452,7 +452,7 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
     }
   }
   auto [block, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});
-  auto grid = policy.global;
+  auto grid = Dim3{policy.global.x * block.x, policy.global.y * block.y, policy.global.z * block.z};
   hsa_signal_t signal = createSignal("Allocate kernel signal");
   uint64_t index = hsa_queue_load_write_index_relaxed(queue);
   const uint32_t queueMask = queue->size - 1;

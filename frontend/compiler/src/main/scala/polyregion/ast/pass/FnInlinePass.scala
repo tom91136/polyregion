@@ -11,7 +11,7 @@ object FnInlinePass extends ProgramPass {
   // rename all var and selects to avoid collision
   private def renameAll(f: p.Function): p.Function = {
     def rename(n: p.Named) = p.Named(s"_inline_${f.mangledName}_${n.symbol}", n.tpe)
-    val captureNames       = f.moduleCaptures.toSet
+    val captureNames       = f.moduleCaptures.map(_.named).toSet
     val body = f.body
       .modifyAll[p.Term] {
         case s @ p.Term.Select(Nil, n) if captureNames.contains(n)    => s
@@ -27,16 +27,16 @@ object FnInlinePass extends ProgramPass {
     p.Function(
       f.name,
       f.tpeVars,
-      f.receiver.map(rename(_)),
-      f.args.map(rename(_)),
+      f.receiver.map(arg => arg.copy(rename(arg.named))),
+      f.args.map(arg => arg.copy(rename(arg.named))),
       f.moduleCaptures,
-      f.termCaptures.map(rename(_)),
+      f.termCaptures.map(arg => arg.copy(rename(arg.named))),
       f.rtn,
       body
     )
   }
 
-  private def inlineOne(ivk: p.Expr.Invoke, f: p.Function): (p.Expr, List[p.Stmt], List[p.Named]) = {
+  private def inlineOne(ivk: p.Expr.Invoke, f: p.Function): (p.Expr, List[p.Stmt], List[p.Arg]) = {
 
     val concreteTpeArgs = ivk.receiver
       .map(_.tpe match {
@@ -55,7 +55,7 @@ object FnInlinePass extends ProgramPass {
     println("Renamed = " + renamed.signatureRepr)
     println("Ivk     = " + ivk.repr)
     val substituted =
-      (renamed.receiver ++ renamed.args ++ renamed.termCaptures)
+      (renamed.receiver.map(_.named) ++ renamed.args.map(_.named) ++ renamed.termCaptures.map(_.named))
         .zip(ivk.receiver ++ ivk.args ++ ivk.captures)
         .foldLeft(renamed.body) { case (xs, (target, replacement)) =>
           xs.modifyAll[p.Term] { original =>
@@ -107,7 +107,7 @@ object FnInlinePass extends ProgramPass {
 
       val (stmts, moduleCaptures) = f.body.foldMap { x =>
 
-        val (y, xs) = x.modifyCollect[p.Expr, (List[p.Stmt], List[p.Named])] {
+        val (y, xs) = x.modifyCollect[p.Expr, (List[p.Stmt], List[p.Arg])] {
           case ivk @ p.Expr.Invoke(name, tpeArgs, recv, args, captures, rtn) =>
             // Find all viable overloads (same name and same arg count) first.
             val overloads = program.functions.distinct.filter(f => f.name == name && f.args.size == args.size)

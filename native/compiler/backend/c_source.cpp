@@ -51,19 +51,19 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
 
 std::string backend::CSource::mkRef(const Term::Any &ref) {
   return variants::total(
-      *ref,                                                                    //
-      [](const Term::Select &x) { return polyast::qualified(x); },             //
-      [](const Term::Poison &x) { return "NULL /* " + repr(x.tpe) + " */"s; }, //
-      [](const Term::UnitConst &x) { return "/*void*/"s; },                    //
-      [](const Term::BoolConst &x) { return x.value ? "true"s : "false"s; },   //
-      [](const Term::ByteConst &x) { return std::to_string(x.value); },        //
-      [](const Term::CharConst &x) { return std::to_string(x.value); },        //
-      [](const Term::ShortConst &x) { return std::to_string(x.value); },       //
-      [](const Term::IntConst &x) { return std::to_string(x.value); },         //
-      [](const Term::LongConst &x) { return std::to_string(x.value); },        //
-      [](const Term::DoubleConst &x) { return std::to_string(x.value); },      //
-      [](const Term::FloatConst &x) { return std::to_string(x.value); }        //
-  );                                                                           // FIXME escape string
+      *ref,                                                                      //
+      [](const Term::Select &x) { return polyast::qualified(x); },               //
+      [](const Term::Poison &x) { return "(NULL /* " + repr(x.tpe) + " */)"s; }, //
+      [](const Term::UnitConst &x) { return "/*void*/"s; },                      //
+      [](const Term::BoolConst &x) { return x.value ? "true"s : "false"s; },     //
+      [](const Term::ByteConst &x) { return std::to_string(x.value); },          //
+      [](const Term::CharConst &x) { return std::to_string(x.value); },          //
+      [](const Term::ShortConst &x) { return std::to_string(x.value); },         //
+      [](const Term::IntConst &x) { return std::to_string(x.value); },           //
+      [](const Term::LongConst &x) { return std::to_string(x.value); },          //
+      [](const Term::DoubleConst &x) { return std::to_string(x.value); },        //
+      [](const Term::FloatConst &x) { return std::to_string(x.value) + "f"; }    //
+  );                                                                             // FIXME escape string
 }
 
 std::string backend::CSource::mkExpr(const Expr::Any &expr, const std::string &key) {
@@ -92,10 +92,10 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr, const std::string &k
             [](const NullaryIntrinsicKind::GpuLocalSizeY &) { return "get_local_size(1)"s; },
             [](const NullaryIntrinsicKind::GpuLocalSizeZ &) { return "get_local_size(2)"s; },
             [](const NullaryIntrinsicKind::GpuGroupBarrier &) {
-              return "barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE)"s;
+              return "barrier(CLK_LOCAL_MEM_FENCE)"s;
             },
             [](const NullaryIntrinsicKind::GpuGroupFence &) {
-              return "mem_fence(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE)"s;
+              return "mem_fence(CLK_LOCAL_MEM_FENCE)"s;
             });
       },
       [&](const Expr::UnaryIntrinsic &x) {
@@ -188,6 +188,9 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
             commented, [](auto &&x) { return x; }, "\n");
       },
       [&](const Stmt::Var &x) {
+        if (holds<Type::Unit>(x.name.tpe)) {
+          return mkExpr(*x.expr, x.name.symbol) + ";";
+        }
         auto line =
             mkTpe(x.name.tpe) + " " + x.name.symbol + (x.expr ? (" = " + mkExpr(*x.expr, x.name.symbol)) : "") + ";";
         return line;
@@ -211,38 +214,54 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
 
         auto tests = mk_string<Stmt::Any>(
             x.tests, [&](auto &stmt) { return mkStmt(stmt); }, "\n");
-        return "while(true) {" + tests + "\nif(!" + mkRef(x.cond) + ") break;" + "\n" + body + "\n}";
+
+        auto whileBody = tests + "\nif(!" + mkRef(x.cond) + ") break;" + "\n" + body;
+
+        return "while(true) {\n" + indent(2, whileBody) + "\n}";
       },
       [&](const Stmt::Break &x) { return "break;"s; },   //
       [&](const Stmt::Cont &x) { return "continue;"s; }, //
       [&](const Stmt::Cond &x) {
-        return "if(" + mkExpr(x.cond, "if") + ") { \n" +
-               mk_string<Stmt::Any>(
-                   x.trueBr, [&](auto x) { return mkStmt(x); }, "\n") +
-               "} else {\n" +
-               mk_string<Stmt::Any>(
-                   x.falseBr, [&](auto x) { return mkStmt(x); }, "\n") +
-               "}";
+        auto elseStmts = x.falseBr.empty() //
+                             ? "\n}"
+                             : "\n} else {\n" +
+                                   indent(2, mk_string<Stmt::Any>(
+                                                 x.falseBr, [&](auto x) { return mkStmt(x); }, "\n")) +
+                                   "}";
+
+        return "if(" + mkExpr(x.cond, "if") + ") {\n" +
+               indent(2, mk_string<Stmt::Any>(
+                             x.trueBr, [&](auto x) { return mkStmt(x); }, "\n")) +
+               elseStmts;
       },
       [&](const Stmt::Return &x) { return "return " + mkExpr(x.value, "rtn") + ";"; } //
   );
 }
 
-compiler::Compilation backend::CSource::compileProgram(const Program &program, const compiler::Opt &opt) {
-  auto fnTree = program.entry;
+std::string backend::CSource ::mkFn(const Function &fnTree) {
 
-  auto start = compiler::nowMono();
-  std::vector<Named> allArgs;
+  std::vector<Arg> allArgs;
   if (fnTree.receiver) allArgs.insert(allArgs.begin(), *fnTree.receiver);
   allArgs.insert(allArgs.begin(), fnTree.args.begin(), fnTree.args.end());
   allArgs.insert(allArgs.begin(), fnTree.moduleCaptures.begin(), fnTree.moduleCaptures.end());
   allArgs.insert(allArgs.begin(), fnTree.termCaptures.begin(), fnTree.termCaptures.end());
 
-  auto args = mk_string<Named>(
+  auto args = mk_string<Arg>(
       allArgs,
       [&](auto x) {
-        return holds<Type::Array>(x.tpe) ? ("global " + mkTpe(x.tpe) + " " + x.symbol)
-                                         : (mkTpe(x.tpe) + " " + x.symbol);
+        auto decl = mkTpe(x.named.tpe) + " " + x.named.symbol;
+
+        if (dialect == Dialect::OpenCL1_1) {
+          if (auto arr = get_opt<Type::Array>(x.named.tpe); arr) {
+            decl = variants::total(
+                       *arr->space,                                   //
+                       [](TypeSpace::Global _) { return "global "; }, //
+                       [](TypeSpace::Local _) { return "local "; }) +
+                   decl;
+          }
+        }
+
+        return decl;
       },
       ", ");
 
@@ -268,7 +287,13 @@ compiler::Compilation backend::CSource::compileProgram(const Program &program, c
   auto prototype = fnPrefix + mkTpe(fnTree.rtn) + " " + qualified(fnTree.name) + "(" + args + ")";
 
   auto body = mk_string<Stmt::Any>(
-      fnTree.body, [&](auto &stmt) { return "  " + mkStmt(stmt); }, "\n");
+      fnTree.body, [&](auto &stmt) { return mkStmt(stmt); }, "\n");
+
+  return prototype + " {\n" + indent(2, body) + "\n}";
+}
+
+compiler::Compilation backend::CSource::compileProgram(const Program &program, const compiler::Opt &opt) {
+  auto start = compiler::nowMono();
 
   auto structDefs = mk_string<StructDef>(
       program.defs,
@@ -282,8 +307,21 @@ compiler::Compilation backend::CSource::compileProgram(const Program &program, c
       },
       "\n");
 
-  auto def = structDefs + "\n" + prototype + " {\n" + body + "\n}";
-  //  std::cout << def << std::endl;
+  std::vector<std::string> lines;
+
+  switch (dialect) {
+    case Dialect::C11: lines.push_back("#include <stdint.h>\n#include <stdbool.h>"); break;
+    default: break;
+  }
+
+  lines.push_back(structDefs);
+  lines.push_back(mkFn(program.entry));
+  for (auto &f : program.functions)
+    lines.push_back(mkFn(f));
+
+  auto def = mk_string<std::string>(lines, std::identity{}, "\n");
+
+  std::cout << def << std::endl;
   std::vector<char> data(def.begin(), def.end());
 
   std::string dialectName;
@@ -295,7 +333,7 @@ compiler::Compilation backend::CSource::compileProgram(const Program &program, c
 
   return {data, {}, {{compiler::nowMs(), compiler::elapsedNs(start), "polyast_to_" + dialectName + "_c", def}}};
 }
-std::vector<compiler::Layout> backend::CSource::resolveLayouts(const std::vector<polyast::StructDef> &defs,
+std::vector<compiler::Layout> backend::CSource::resolveLayouts(const std::vector<StructDef> &defs,
                                                                const compiler::Opt &opt) {
   return std::vector<compiler::Layout>();
 }

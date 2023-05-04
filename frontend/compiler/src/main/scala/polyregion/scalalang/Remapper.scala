@@ -96,9 +96,11 @@ object Remapper {
               }
             )
           (fn, c0) <- c.mapFn(defDef, Log(""))
-          allCaptureNames = (fn.termCaptures ++ captures.map(_._2)).distinct // Include outlined and propagated
+          allCaptureNames = (fn.termCaptures ++ captures
+            .map(_._2)
+            .map(p.Arg(_))).distinct // Include outlined and propagated
           c <- c
-            .withInvokeCapture(defDef.symbol, allCaptureNames.map(p.Term.Select(Nil, _)))
+            .withInvokeCapture(defDef.symbol, allCaptureNames.map(arg => p.Term.Select(Nil, arg.named)))
             .updateDeps(_ |+| c0.deps)
             .updateDeps(_.witness(fn.copy(termCaptures = allCaptureNames)))
             .success
@@ -108,10 +110,10 @@ object Remapper {
           c // FIXME restore statements!!!
         )
 
-      case q.Import(_, _)        => (p.Term.UnitConst, c).success // ignore
-      case q.TypeDef(name, tree) => (p.Term.UnitConst, c).success // ignore
+      case q.Import(_, _)                                       => (p.Term.UnitConst, c).success // ignore
+      case q.TypeDef(name, tree)                                => (p.Term.UnitConst, c).success // ignore
       case q.ClassDef(name, ctor, parents, selfTpeValDef, body) => (p.Term.UnitConst, c).success
-      case t: q.Term => (c !! tree).mapTerm(t)
+      case t: q.Term                                            => (c !! tree).mapTerm(t)
 
       // def f(x...) : A = ??? === val f : x... => A = ???
 
@@ -168,13 +170,14 @@ object Remapper {
         fn = p.Function(
           name = p.Sym(f.symbol.fullName),
           tpeVars = allTpeArgs,
-          receiver = receiver,
-          args = fnArgs.map(_._2),
-          moduleCaptures = deriveModuleStructCaptures(c.deps),
+          receiver = receiver.map(p.Arg(_)),
+          args = fnArgs.map(_._2).map(p.Arg(_)),
+          moduleCaptures = deriveModuleStructCaptures(c.deps).map(p.Arg(_)),
           termCaptures = fnStmts // Propagate whatever capture we're seeing in all invokes local to this fn
             .collectWhere[p.Expr] { case p.Expr.Invoke(_, _, _, _, captures, _) => captures }
             .flatten
-            .collect { case p.Term.Select(Nil, n) => n },
+            .collect { case p.Term.Select(Nil, n) => n }
+            .map(p.Arg(_)),
           rtn = fnRtnTpe,
           body = fnStmts
         )

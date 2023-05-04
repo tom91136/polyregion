@@ -207,15 +207,17 @@ bool Type::operator==(const Type::Struct &l, const Type::Struct &r) {
 }
 Type::Struct::operator Type::Any() const { return std::make_shared<Struct>(*this); }
 
-Type::Array::Array(Type::Any component) noexcept : Type::Base(TypeKind::Ref()), component(std::move(component)) {}
+Type::Array::Array(Type::Any component, TypeSpace::Any space) noexcept : Type::Base(TypeKind::Ref()), component(std::move(component)), space(std::move(space)) {}
 std::ostream &Type::operator<<(std::ostream &os, const Type::Array &x) {
   os << "Array(";
   os << x.component;
+  os << ',';
+  os << x.space;
   os << ')';
   return os;
 }
 bool Type::operator==(const Type::Array &l, const Type::Array &r) { 
-  return *l.component == *r.component;
+  return *l.component == *r.component && *l.space == *r.space;
 }
 Type::Array::operator Type::Any() const { return std::make_shared<Array>(*this); }
 
@@ -257,18 +259,22 @@ bool Type::operator==(const Type::Exec &l, const Type::Exec &r) {
 }
 Type::Exec::operator Type::Any() const { return std::make_shared<Exec>(*this); }
 
-Position::Position(std::string file, int32_t line, int32_t col) noexcept : file(std::move(file)), line(line), col(col) {}
-std::ostream &operator<<(std::ostream &os, const Position &x) {
-  os << "Position(";
+SourcePosition::SourcePosition(std::string file, int32_t line, std::optional<int32_t> col) noexcept : file(std::move(file)), line(line), col(std::move(col)) {}
+std::ostream &operator<<(std::ostream &os, const SourcePosition &x) {
+  os << "SourcePosition(";
   os << '"' << x.file << '"';
   os << ',';
   os << x.line;
   os << ',';
-  os << x.col;
+  os << '{';
+  if (x.col) {
+    os << *x.col;
+  }
+  os << '}';
   os << ')';
   return os;
 }
-bool operator==(const Position &l, const Position &r) { 
+bool operator==(const SourcePosition &l, const SourcePosition &r) { 
   return l.file == r.file && l.line == r.line && l.col == r.col;
 }
 
@@ -1078,6 +1084,31 @@ std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntr
 bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicGt &, const BinaryIntrinsicKind::LogicGt &) { return true; }
 BinaryIntrinsicKind::LogicGt::operator BinaryIntrinsicKind::Any() const { return std::make_shared<LogicGt>(*this); }
 
+TypeSpace::Base::Base() = default;
+std::ostream &TypeSpace::operator<<(std::ostream &os, const TypeSpace::Any &x) {
+  std::visit([&os](auto &&arg) { os << *arg; }, x);
+  return os;
+}
+bool TypeSpace::operator==(const TypeSpace::Base &, const TypeSpace::Base &) { return true; }
+
+TypeSpace::Global::Global() noexcept : TypeSpace::Base() {}
+std::ostream &TypeSpace::operator<<(std::ostream &os, const TypeSpace::Global &x) {
+  os << "Global(";
+  os << ')';
+  return os;
+}
+bool TypeSpace::operator==(const TypeSpace::Global &, const TypeSpace::Global &) { return true; }
+TypeSpace::Global::operator TypeSpace::Any() const { return std::make_shared<Global>(*this); }
+
+TypeSpace::Local::Local() noexcept : TypeSpace::Base() {}
+std::ostream &TypeSpace::operator<<(std::ostream &os, const TypeSpace::Local &x) {
+  os << "Local(";
+  os << ')';
+  return os;
+}
+bool TypeSpace::operator==(const TypeSpace::Local &, const TypeSpace::Local &) { return true; }
+TypeSpace::Local::operator TypeSpace::Any() const { return std::make_shared<Local>(*this); }
+
 Expr::Base::Base(Type::Any tpe) noexcept : tpe(std::move(tpe)) {}
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Any &x) {
   std::visit([&os](auto &&arg) { os << *arg; }, x);
@@ -1178,7 +1209,7 @@ bool Expr::operator==(const Expr::Index &l, const Expr::Index &r) {
 }
 Expr::Index::operator Expr::Any() const { return std::make_shared<Index>(*this); }
 
-Expr::Alloc::Alloc(Type::Any component, Term::Any size) noexcept : Expr::Base(Type::Array(component)), component(std::move(component)), size(std::move(size)) {}
+Expr::Alloc::Alloc(Type::Any component, Term::Any size) noexcept : Expr::Base(Type::Array(component,TypeSpace::Global())), component(std::move(component)), size(std::move(size)) {}
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Alloc &x) {
   os << "Alloc(";
   os << x.component;
@@ -1535,7 +1566,74 @@ bool operator==(const InvokeSignature &l, const InvokeSignature &r) {
   return l.name == r.name && std::equal(l.tpeVars.begin(), l.tpeVars.end(), r.tpeVars.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && ( (!l.receiver && !r.receiver) || (l.receiver && r.receiver && **l.receiver == **r.receiver) ) && std::equal(l.args.begin(), l.args.end(), r.args.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && std::equal(l.captures.begin(), l.captures.end(), r.captures.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && *l.rtn == *r.rtn;
 }
 
-Function::Function(Sym name, std::vector<std::string> tpeVars, std::optional<Named> receiver, std::vector<Named> args, std::vector<Named> moduleCaptures, std::vector<Named> termCaptures, Type::Any rtn, std::vector<Stmt::Any> body) noexcept : name(std::move(name)), tpeVars(std::move(tpeVars)), receiver(std::move(receiver)), args(std::move(args)), moduleCaptures(std::move(moduleCaptures)), termCaptures(std::move(termCaptures)), rtn(std::move(rtn)), body(std::move(body)) {}
+FunctionKind::Base::Base() = default;
+std::ostream &FunctionKind::operator<<(std::ostream &os, const FunctionKind::Any &x) {
+  std::visit([&os](auto &&arg) { os << *arg; }, x);
+  return os;
+}
+bool FunctionKind::operator==(const FunctionKind::Base &, const FunctionKind::Base &) { return true; }
+
+FunctionKind::Internal::Internal() noexcept : FunctionKind::Base() {}
+std::ostream &FunctionKind::operator<<(std::ostream &os, const FunctionKind::Internal &x) {
+  os << "Internal(";
+  os << ')';
+  return os;
+}
+bool FunctionKind::operator==(const FunctionKind::Internal &, const FunctionKind::Internal &) { return true; }
+FunctionKind::Internal::operator FunctionKind::Any() const { return std::make_shared<Internal>(*this); }
+
+FunctionKind::Exported::Exported() noexcept : FunctionKind::Base() {}
+std::ostream &FunctionKind::operator<<(std::ostream &os, const FunctionKind::Exported &x) {
+  os << "Exported(";
+  os << ')';
+  return os;
+}
+bool FunctionKind::operator==(const FunctionKind::Exported &, const FunctionKind::Exported &) { return true; }
+FunctionKind::Exported::operator FunctionKind::Any() const { return std::make_shared<Exported>(*this); }
+
+FunctionAttr::Base::Base() = default;
+std::ostream &FunctionAttr::operator<<(std::ostream &os, const FunctionAttr::Any &x) {
+  std::visit([&os](auto &&arg) { os << *arg; }, x);
+  return os;
+}
+bool FunctionAttr::operator==(const FunctionAttr::Base &, const FunctionAttr::Base &) { return true; }
+
+FunctionAttr::FPRelaxed::FPRelaxed() noexcept : FunctionAttr::Base() {}
+std::ostream &FunctionAttr::operator<<(std::ostream &os, const FunctionAttr::FPRelaxed &x) {
+  os << "FPRelaxed(";
+  os << ')';
+  return os;
+}
+bool FunctionAttr::operator==(const FunctionAttr::FPRelaxed &, const FunctionAttr::FPRelaxed &) { return true; }
+FunctionAttr::FPRelaxed::operator FunctionAttr::Any() const { return std::make_shared<FPRelaxed>(*this); }
+
+FunctionAttr::FPStrict::FPStrict() noexcept : FunctionAttr::Base() {}
+std::ostream &FunctionAttr::operator<<(std::ostream &os, const FunctionAttr::FPStrict &x) {
+  os << "FPStrict(";
+  os << ')';
+  return os;
+}
+bool FunctionAttr::operator==(const FunctionAttr::FPStrict &, const FunctionAttr::FPStrict &) { return true; }
+FunctionAttr::FPStrict::operator FunctionAttr::Any() const { return std::make_shared<FPStrict>(*this); }
+
+Arg::Arg(Named named, std::optional<SourcePosition> pos) noexcept : named(std::move(named)), pos(std::move(pos)) {}
+std::ostream &operator<<(std::ostream &os, const Arg &x) {
+  os << "Arg(";
+  os << x.named;
+  os << ',';
+  os << '{';
+  if (x.pos) {
+    os << *x.pos;
+  }
+  os << '}';
+  os << ')';
+  return os;
+}
+bool operator==(const Arg &l, const Arg &r) { 
+  return l.named == r.named && l.pos == r.pos;
+}
+
+Function::Function(Sym name, std::vector<std::string> tpeVars, std::optional<Arg> receiver, std::vector<Arg> args, std::vector<Arg> moduleCaptures, std::vector<Arg> termCaptures, Type::Any rtn, std::vector<Stmt::Any> body) noexcept : name(std::move(name)), tpeVars(std::move(tpeVars)), receiver(std::move(receiver)), args(std::move(args)), moduleCaptures(std::move(moduleCaptures)), termCaptures(std::move(termCaptures)), rtn(std::move(rtn)), body(std::move(body)) {}
 std::ostream &operator<<(std::ostream &os, const Function &x) {
   os << "Function(";
   os << x.name;
@@ -1691,6 +1789,7 @@ std::size_t std::hash<polyregion::polyast::Type::Struct>::operator()(const polyr
 }
 std::size_t std::hash<polyregion::polyast::Type::Array>::operator()(const polyregion::polyast::Type::Array &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.component)>()(x.component);
+  seed ^= std::hash<decltype(x.space)>()(x.space) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Type::Var>::operator()(const polyregion::polyast::Type::Var &x) const noexcept {
@@ -1703,7 +1802,7 @@ std::size_t std::hash<polyregion::polyast::Type::Exec>::operator()(const polyreg
   seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Position>::operator()(const polyregion::polyast::Position &x) const noexcept {
+std::size_t std::hash<polyregion::polyast::SourcePosition>::operator()(const polyregion::polyast::SourcePosition &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.file)>()(x.file);
   seed ^= std::hash<decltype(x.line)>()(x.line) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.col)>()(x.col) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
@@ -2038,6 +2137,14 @@ std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicGt>::operat
   std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::LogicGt");
   return seed;
 }
+std::size_t std::hash<polyregion::polyast::TypeSpace::Global>::operator()(const polyregion::polyast::TypeSpace::Global &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::TypeSpace::Global");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::TypeSpace::Local>::operator()(const polyregion::polyast::TypeSpace::Local &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::TypeSpace::Local");
+  return seed;
+}
 std::size_t std::hash<polyregion::polyast::Expr::NullaryIntrinsic>::operator()(const polyregion::polyast::Expr::NullaryIntrinsic &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.kind)>()(x.kind);
   seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
@@ -2164,6 +2271,27 @@ std::size_t std::hash<polyregion::polyast::InvokeSignature>::operator()(const po
   seed ^= std::hash<decltype(x.args)>()(x.args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.captures)>()(x.captures) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::FunctionKind::Internal>::operator()(const polyregion::polyast::FunctionKind::Internal &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::FunctionKind::Internal");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::FunctionKind::Exported>::operator()(const polyregion::polyast::FunctionKind::Exported &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::FunctionKind::Exported");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::FunctionAttr::FPRelaxed>::operator()(const polyregion::polyast::FunctionAttr::FPRelaxed &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::FunctionAttr::FPRelaxed");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::FunctionAttr::FPStrict>::operator()(const polyregion::polyast::FunctionAttr::FPStrict &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::FunctionAttr::FPStrict");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Arg>::operator()(const polyregion::polyast::Arg &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.named)>()(x.named);
+  seed ^= std::hash<decltype(x.pos)>()(x.pos) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Function>::operator()(const polyregion::polyast::Function &x) const noexcept {

@@ -19,7 +19,7 @@ object DynamicDispatchPass extends ProgramPass {
 
     def clsFns(tpe: p.Type.Struct): List[p.Function] = {
       val erasedTpe = tpe.erased
-      program.functions.filter(_.receiver.exists(_.tpe.erased == erasedTpe))
+      program.functions.filter(_.receiver.exists(_.named.tpe.erased == erasedTpe))
     }
 
     // 2. Synthesize the dynamic dispatch method
@@ -51,29 +51,29 @@ object DynamicDispatchPass extends ProgramPass {
           clsFns(recvTpe).filter(_.name.last == simpleName).map(recvTpe -> _)
         }
         // If we do find any, synthesise the dynamic dispatch function
-        val clsTagArg = p.Named("cls", p.Type.Int)
-        val objArg    = p.Named("obj", baseFn.receiver.get.tpe)
+        val clsTagArg =  p.Arg( p.Named("cls", p.Type.Int) )
+        val objArg    =  p.Arg( p.Named("obj", baseFn.receiver.get.named.tpe) )
 
         if (overridingFns.isEmpty) Nil
         else {
 
           val branches = Function.chain(((c.tpe, baseFn) :: overridingFns).zipWithIndex.map { case ((_, fn), i) =>
-            val tpe = fn.receiver.get.tpe.asInstanceOf[p.Type.Struct]
+            val tpe = fn.receiver.get.named.tpe.asInstanceOf[p.Type.Struct]
             (elseBr: List[p.Stmt]) =>
               p.Stmt.Cond(
                 cond = p.Expr.BinaryIntrinsic(
-                  p.Term.Select(Nil, clsTagArg),
+                  p.Term.Select(Nil, clsTagArg.named),
                   p.Term.IntConst(clsTag(tpe)),
                   p.BinaryIntrinsicKind.LogicEq,
                   p.Type.Bool
                 ),
-                trueBr = p.Stmt.Var(p.Named(s"recv_$i", tpe), Some(p.Expr.Cast(p.Term.Select(Nil, objArg), tpe))) ::
+                trueBr = p.Stmt.Var(p.Named(s"recv_$i", tpe), Some(p.Expr.Cast(p.Term.Select(Nil, objArg.named), tpe))) ::
                   p.Stmt.Return(
                     p.Expr.Invoke(
                       name = fn.name,
                       tpeArgs = baseFn.tpeVars.map(p.Type.Var(_)),
                       receiver = Some(p.Term.Select(Nil, p.Named(s"recv_$i", tpe))),
-                      args = baseFn.args.map(p.Term.Select(Nil, _)),
+                      args = baseFn.args.map(arg => p.Term.Select(Nil, arg.named)),
                       captures = Nil,
                       rtn = baseFn.rtn
                     )
@@ -126,7 +126,7 @@ object DynamicDispatchPass extends ProgramPass {
         log.info(s"Replace: ${ivk.repr}", lut.get((recv.tpe, name.last)).toString)
 
         def isSuperCall(t: p.Type) = (t, f.receiver) match {
-          case (  p.Type.Struct(clsName, _, _, _), Some(p.Named(_,   p.Type.Struct(_, _, _, parents)))) =>
+          case (  p.Type.Struct(clsName, _, _, _), Some(p.Arg( p.Named(_,   p.Type.Struct(_, _, _, parents)), _))) =>
             parents.contains(clsName) && f.name.last == name.last
           case _ => false
         }

@@ -1,8 +1,8 @@
 #pragma once
 
 #include <atomic>
-#include <shared_mutex>
 #include <mutex>
+#include <shared_mutex>
 
 #include "dl.h"
 #include "runtime.h"
@@ -10,6 +10,9 @@
 #include "llvm/Object/ObjectFile.h"
 
 namespace polyregion::runtime::object {
+
+using WriteLock = std::unique_lock<std::shared_mutex>;
+using ReadLock = std::shared_lock<std::shared_mutex>;
 
 class EXPORT ObjectDevice : public Device {
 public:
@@ -26,9 +29,27 @@ public:
   EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) override;
   EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, void *dst, size_t size, const MaybeCallback &cb) override;
 };
+
 namespace {
-using ObjectModules = std::unordered_map<std::string, std::unique_ptr<llvm::object::ObjectFile>>;
-}
+
+class MemoryManager : public llvm::SectionMemoryManager {
+public:
+  MemoryManager();
+
+private:
+  uint64_t getSymbolAddress(const std::string &Name) override;
+};
+
+struct LoadedCodeObject {
+  MemoryManager mm;
+  llvm::RuntimeDyld ld;
+  std::unique_ptr<llvm::object::ObjectFile> rawObject;
+  explicit LoadedCodeObject(std::unique_ptr<llvm::object::ObjectFile> obj);
+};
+
+using ObjectModules = std::unordered_map<std::string, std::unique_ptr<LoadedCodeObject>>;
+
+} // namespace
 
 class EXPORT RelocatablePlatform : public Platform {
 public:
@@ -44,26 +65,12 @@ class EXPORT RelocatableDevice : public ObjectDevice { //, private llvm::Section
   std::shared_mutex lock;
 
 public:
-  using WriteLock = std::unique_lock<decltype(lock)>;
-  using ReadLock = std::shared_lock<decltype(lock)>;
   EXPORT RelocatableDevice();
   EXPORT std::string name() override;
   EXPORT void loadModule(const std::string &name, const std::string &image) override;
   EXPORT bool moduleLoaded(const std::string &name) override;
   EXPORT std::unique_ptr<DeviceQueue> createQueue() override;
 };
-
-namespace {
-
-class MemoryManager : public llvm::SectionMemoryManager {
-public:
-  MemoryManager();
-
-private:
-  uint64_t getSymbolAddress(const std::string &Name) override;
-};
-
-} // namespace
 
 class EXPORT RelocatableDeviceQueue : public ObjectDeviceQueue {
   ObjectModules &objects;
@@ -91,6 +98,7 @@ public:
 
 class EXPORT SharedDevice : public ObjectDevice {
   DynamicModules modules;
+  std::shared_mutex lock;
 
 public:
   ~SharedDevice() override;
@@ -102,9 +110,10 @@ public:
 
 class EXPORT SharedDeviceQueue : public ObjectDeviceQueue {
   DynamicModules &modules;
+  std::shared_mutex &lock;
 
 public:
-  explicit SharedDeviceQueue(decltype(modules) modules);
+  explicit SharedDeviceQueue(decltype(modules) modules, decltype(lock) lock);
   EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, std::vector<Type> types,
                                  std::vector<std::byte> argData, const Policy &policy,
                                  const MaybeCallback &cb) override;

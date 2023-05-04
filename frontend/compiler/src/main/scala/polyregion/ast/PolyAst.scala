@@ -40,7 +40,7 @@ object PolyAst {
 
     // specialisations
     case Struct(name: Sym, tpeVars: List[String], args: List[Type], parents: List[Sym]) extends Type(TypeKind.Ref)
-    case Array(component: Type)                                                         extends Type(TypeKind.Ref)
+    case Array(component: Type, space: Type.Space)                                      extends Type(TypeKind.Ref)
 
     //
     case Var(name: String)                                        extends Type(TypeKind.None)
@@ -48,8 +48,11 @@ object PolyAst {
 
     // def Exec(tpeVars: List[String], args: List[Type], rtn: Type) = Struct(Sym("" :: "Poly":: Nil), tpeVars, args, rtn, Nil)
   }
+  object Type {
+    enum Space derives MsgPack.Codec { case Global, Local }
+  }
 
-//  val Intersection = Type.Struct(Sym("__intersection"), Nil, ???, Nil)
+  //  val Intersection = Type.Struct(Sym("__intersection"), Nil, ???, Nil)
 
   case class Named(symbol: String, tpe: Type) derives MsgPack.Codec
 
@@ -67,7 +70,7 @@ object PolyAst {
     case DoubleConst(value: Double)             extends Term(Type.Double)
   }
 
-  case class Position(file: String, line: Int, col: Int) derives MsgPack.Codec
+  case class SourcePosition(file: String, line: Int, col: Option[Int]) derives MsgPack.Codec
 
   enum BinaryIntrinsicKind {
     case Add, Sub, Mul, Div, Rem
@@ -103,6 +106,22 @@ object PolyAst {
     case Assert
   }
 
+  enum Intrinsic(args: List[Type], rtn: Type) {
+    case GpuGlobalIdx(dim: Term)  extends Intrinsic(List[Type](Type.Int), Type.Unit)
+    case GpuGlobalSize(dim: Term) extends Intrinsic(List[Type](Type.Int), Type.Unit)
+    case GpuGroupIdx(dim: Term)   extends Intrinsic(List[Type](Type.Int), Type.Unit)
+    case GpuGroupSize(dim: Term)  extends Intrinsic(List[Type](Type.Int), Type.Unit)
+    case GpuLocalIdx(dim: Term)   extends Intrinsic(List[Type](Type.Int), Type.Unit)
+    case GpuLocalSize(dim: Term)  extends Intrinsic(List[Type](Type.Int), Type.Unit)
+
+    case GpuBarrierGlobal extends Intrinsic(List[Type](), Type.Unit)
+    case GpuBarrierLocal  extends Intrinsic(List[Type](), Type.Unit)
+    case GpuBarrierAll    extends Intrinsic(List[Type](), Type.Unit)
+    case GpuFenceGlobal   extends Intrinsic(List[Type](), Type.Unit)
+    case GpuFenceLocal    extends Intrinsic(List[Type](), Type.Unit)
+    case GpuFenceAll      extends Intrinsic(List[Type](), Type.Unit)
+  }
+
   enum Expr(val tpe: Type) derives MsgPack.Codec {
 
     case NullaryIntrinsic(kind: NullaryIntrinsicKind, rtn: Type)                     extends Expr(rtn)
@@ -112,7 +131,7 @@ object PolyAst {
     case Cast(from: Term, as: Type)                   extends Expr(as)
     case Alias(ref: Term)                             extends Expr(ref.tpe)
     case Index(lhs: Term, idx: Term, component: Type) extends Expr(component)
-    case Alloc(component: Type, size: Term)           extends Expr(Type.Array(component))
+    case Alloc(component: Type, size: Term)           extends Expr(Type.Array(component, Type.Space.Global))
 
     case Invoke(
         name: Sym,
@@ -126,6 +145,8 @@ object PolyAst {
     // case Suspend(args: List[Named], stmts: List[Stmt], rtn: Type, shape: Type.Exec) extends Expr(shape)
 
   }
+
+  case class Arg(named: Named, pos: Option[SourcePosition] = None) derives MsgPack.Codec
 
   enum Stmt derives MsgPack.Codec {
     case Block(stmts: List[Stmt])
@@ -180,19 +201,23 @@ object PolyAst {
       rtn: Type
   ) derives MsgPack.Codec
 
-  case class Function(             //
-      name: Sym,                   //
-      tpeVars: List[String],       //
-      receiver: Option[Named],     //
-      args: List[Named],           //
-      moduleCaptures: List[Named], //
-      termCaptures: List[Named],   //
-      rtn: Type,                   //
-      body: List[Stmt]             //
-  ) derives MsgPack.Codec          //
+  case class Function(           //
+      name: Sym,                 //
+      tpeVars: List[String],     //
+      receiver: Option[Arg],     //
+      args: List[Arg],           //
+      moduleCaptures: List[Arg], //
+      termCaptures: List[Arg],   //
+      rtn: Type,                 //
+      body: List[Stmt]           //
+  ) derives MsgPack.Codec
+  object Function {
+    enum Kind derives MsgPack.Codec { case Internal, Exported  }
+    enum Attr derives MsgPack.Codec { case FPRelaxed, FPStrict }
+  } //
 
   case class Program(
-      entry: Function,
+      entry: Function, // TODO merge entry with the rest when we add internal/export attrs
       functions: List[Function],
       defs: List[StructDef]
   ) derives MsgPack.Codec

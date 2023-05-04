@@ -22,6 +22,7 @@ private:
   std::string mkRef(const Term::Any &ref);
   std::string mkExpr(const Expr::Any &expr, const std::string &key);
   std::string mkStmt(const Stmt::Any &stmt);
+  std::string mkFn(const Function &);
 
 public:
   explicit CSource(const Dialect &dialect) : dialect(dialect) {}

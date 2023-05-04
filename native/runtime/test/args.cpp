@@ -1,3 +1,4 @@
+#include "concurrency_utils.hpp"
 #include "kernels/cpu_args.hpp"
 #include "kernels/gpu_args.hpp"
 #include "test_utils.h"
@@ -8,6 +9,7 @@
 
 using namespace polyregion::runtime;
 using namespace polyregion::test_utils;
+using namespace polyregion::concurrency_utils;
 
 // See https://github.com/JuliaGPU/AMDGPU.jl/issues/10
 
@@ -41,11 +43,14 @@ TEST_CASE("CPU/GPU scalar args") {
             std::iota(values.begin(), values.end(), 1);
 
             ArgBuffer buffer;
-            for (size_t i = 0; i < scalarArgCount; ++i)
-              buffer.put(Type::Float32, &values[i]);
 
-            if (args != 0) buffer.put(Type::Ptr, &out_d);
-            buffer.put(Type::Void, {});
+            if (d->sharedAddressSpace()) buffer.append(Type::Long64, nullptr);
+
+            for (size_t i = 0; i < scalarArgCount; ++i)
+              buffer.append(Type::Float32, &values[i]);
+
+            if (args != 0) buffer.append(Type::Ptr, &out_d);
+            buffer.append(Type::Void, {});
 
             float expected = args == 0 ? 0                         // Actual 0 arg kernel, expect 0
                                        : (scalarArgCount == 0 ? 42 // 1 arg with no scalar, use constant

@@ -49,10 +49,10 @@ template <typename P> static void assertCompile(const P &p) {
 }
 
 TEST_CASE("json round-trip", "[ast]") {
-  Function expected(                                                    //
-      Sym({"foo"}), {},                                                 //
-      {}, {Named("a", Type::Int()), Named("b", Type::Float())}, {}, {}, //
-      Type::Unit(),                                                     //
+  Function expected(                                                                      //
+      Sym({"foo"}), {},                                                                   //
+      {}, {Arg(Named("a", Type::Int()), {}), Arg(Named("b", Type::Float()), {})}, {}, {}, //
+      Type::Unit(),                                                                       //
       {
           Comment("a"),                         //
           Comment("b"),                         //
@@ -78,7 +78,7 @@ TEST_CASE("initialise more than once", "[compiler]") {
 TEST_CASE("nested if", "[compiler]") {
   polyregion::compiler::initialise();
 
-  auto entry = function("foo", {"in0"_(Int), "in1"_(Int)}, Int)({
+  auto entry = function("foo", {"in0"_(Int)(), "in1"_(Int)()}, Int)({
       Cond(BinaryIntrinsic("in0"_(Int), 42_(Int), BinaryIntrinsicKind::LogicEq(), Bool),
            {
                Cond(BinaryIntrinsic("in1"_(Int), 42_(Int), BinaryIntrinsicKind::LogicEq(), Bool),
@@ -99,7 +99,7 @@ TEST_CASE("nested if", "[compiler]") {
 TEST_CASE("nested nested if", "[compiler]") {
   polyregion::compiler::initialise();
 
-  auto entry = function("foo", {"in0"_(Int), "in1"_(Int), "in2"_(Int)}, Int)({
+  auto entry = function("foo", {"in0"_(Int)(), "in1"_(Int)(), "in2"_(Int)()}, Int)({
       Cond(BinaryIntrinsic("in0"_(Int), 42_(Int), BinaryIntrinsicKind::LogicEq(), Bool),
            {
                Cond(BinaryIntrinsic("in1"_(Int), 42_(Int), BinaryIntrinsicKind::LogicEq(), Bool),
@@ -126,7 +126,7 @@ TEST_CASE("nested nested if", "[compiler]") {
 TEST_CASE("if", "[compiler]") {
   polyregion::compiler::initialise();
 
-  auto entry = function("foo", {"in0"_(Int)},
+  auto entry = function("foo", {"in0"_(Int)()},
                         Int)({Cond(BinaryIntrinsic("in0"_(Int), 42_(Int), BinaryIntrinsicKind::LogicEq(), Bool),
                                    {
                                        ret(1_(Int)) //
@@ -140,7 +140,7 @@ TEST_CASE("if", "[compiler]") {
 TEST_CASE("code after if", "[compiler]") {
   polyregion::compiler::initialise();
 
-  auto entry = function("foo", {"in0"_(Int)},
+  auto entry = function("foo", {"in0"_(Int)()},
                         Int)({let("x") = 0_(Int), //
                               Cond(BinaryIntrinsic("in0"_(Int), 42_(Int), BinaryIntrinsicKind::LogicEq(), Bool),
                                    {
@@ -158,7 +158,7 @@ TEST_CASE("fn call", "[compiler]") {
   auto tpe = GENERATE(from_range(PrimitiveTypes));
   DYNAMIC_SECTION(tpe) {
     CAPTURE(tpe);
-    auto callee = function("bar", {"a"_(tpe)}, tpe)({
+    auto callee = function("bar", {"a"_(tpe)()}, tpe)({
         ret("a"_(tpe)) //
     });
     auto entry = function("foo", {}, tpe)({
@@ -194,7 +194,7 @@ TEST_CASE("alias prim", "[compiler]") {
   }
   DYNAMIC_SECTION(tpe << "(arg)") {
     CAPTURE(tpe);
-    assertCompile(program(function("foo", {"in"_(tpe)}, tpe)({
+    assertCompile(program(function("foo", {"in"_(tpe)()}, tpe)({
         let("v1") = "in"_(tpe), //
         let("v2") = "v1"_(tpe), //
         let("v3") = "v2"_(tpe), //
@@ -218,7 +218,7 @@ TEST_CASE("index prim array", "[compiler]") {
   }
   DYNAMIC_SECTION("xs[" << idx << "]:" << tpe << " (args)") {
     CAPTURE(tpe, idx);
-    assertCompile(program(function("foo", {"xs"_(Array(tpe))}, tpe)({
+    assertCompile(program(function("foo", {"xs"_(Array(tpe))()}, tpe)({
         let("x") = "xs"_(Array(tpe))[integral(Int, idx)], //
         ret("x"_(tpe))                                    //
     })));
@@ -241,7 +241,7 @@ TEST_CASE("update prim array", "[compiler]") {
   invoke(Fn0::GpuGlobalIdxX(), Int);
   DYNAMIC_SECTION("(xs[" << idx << "]:" << tpe << ") = " << val << " (args)") {
     CAPTURE(tpe, idx, val);
-    assertCompile(program(function("foo", {"xs"_(Array(tpe))}, tpe)({
+    assertCompile(program(function("foo", {"xs"_(Array(tpe))()}, tpe)({
         "xs"_(Array(tpe))[integral(Int, idx)] = val, //
         ret("xs"_(Array(tpe))[integral(Int, idx)])   //
     })));
@@ -258,15 +258,14 @@ TEST_CASE("index struct array member", "[compiler]") {
   Type::Struct myStruct(myStructSym, {}, {}, {});
 
   Function fn(
-      Sym({"foo"}), {}, {}, {Named("s", Type::Array(myStruct))}, {}, {}, Type::Int(),
+      Sym({"foo"}), {}, {}, {Arg(Named("s", Array(myStruct)), {})}, {}, {}, Type::Int(),
       {
 
-          Var(Named("a", myStruct),
-              {Index(Select({}, Named("s", Type::Array(myStruct))), Term::IntConst(0), myStruct)}),
+          Var(Named("a", myStruct), {Index(Select({}, Named("s", Array(myStruct))), Term::IntConst(0), myStruct)}),
 
           Var(Named("b", Type::Int()), {Alias(Select({Named("a", myStruct)}, defX))}),
 
-          //                  Mut(Select({Named("s", Type::Array(myStruct ))}, defX), Alias(IntConst(42)), false),
+          //                  Mut(Select({Named("s",  Array(myStruct ))}, defX), Alias(IntConst(42)), false),
           Return(Alias(IntConst(69))),
       });
   Program p(fn, {}, {def});
@@ -282,13 +281,12 @@ TEST_CASE("array update struct elem member", "[compiler]") {
   StructDef def(myStructSym, true, {}, {StructMember(defX, false), StructMember(defY, false)}, {});
   Type::Struct myStruct(myStructSym, {}, {}, {});
 
-  Function fn(
-      Sym({"foo"}), {}, {}, {Named("xs", Type::Array(myStruct))}, {}, {}, Type::Int(),
-      {
-          Var(Named("x", myStruct), Index(Select({}, Named("xs", Type::Array(myStruct))), IntConst(0), myStruct)),
-          Mut(Select({Named("x", myStruct)}, defX), Alias(IntConst(42)), false),
-          Return(Alias(IntConst(69))),
-      });
+  Function fn(Sym({"foo"}), {}, {}, {Arg(Named("xs", Array(myStruct)), {})}, {}, {}, Type::Int(),
+              {
+                  Var(Named("x", myStruct), Index(Select({}, Named("xs", Array(myStruct))), IntConst(0), myStruct)),
+                  Mut(Select({Named("x", myStruct)}, defX), Alias(IntConst(42)), false),
+                  Return(Alias(IntConst(69))),
+              });
   Program p(fn, {}, {def});
   assertCompile(p);
 }
@@ -302,13 +300,12 @@ TEST_CASE("array update struct elem", "[compiler]") {
   StructDef def(myStructSym, true, {}, {StructMember(defX, false), StructMember(defY, false)}, {});
   Type::Struct myStruct(myStructSym, {}, {}, {});
 
-  Function fn(
-      Sym({"foo"}), {}, {}, {Named("xs", Type::Array(myStruct))}, {}, {}, Type::Int(),
-      {
-          Var(Named("data", myStruct), {}),
-          Update(Select({}, Named("xs", Type::Array(myStruct))), IntConst(7), Select({}, Named("data", myStruct))),
-          Return(Alias(IntConst(69))),
-      });
+  Function fn(Sym({"foo"}), {}, {}, {Arg(Named("xs", Array(myStruct)), {})}, {}, {}, Type::Int(),
+              {
+                  Var(Named("data", myStruct), {}),
+                  Update(Select({}, Named("xs", Array(myStruct))), IntConst(7), Select({}, Named("data", myStruct))),
+                  Return(Alias(IntConst(69))),
+              });
   Program p(fn, {}, {def});
   assertCompile(p);
 }
@@ -324,7 +321,7 @@ TEST_CASE("alias struct", "[compiler]") {
   StructDef def(myStructSym, true, {}, {StructMember(defX, false), StructMember(defY, false)}, {});
   Type::Struct myStruct(myStructSym, {}, {}, {});
 
-  Function fn(Sym({"foo"}), {}, {}, {Named("out", myStruct)}, {}, {}, Type::Int(),
+  Function fn(Sym({"foo"}), {}, {}, {Arg(Named("out", myStruct), {})}, {}, {}, Type::Int(),
               {
                   Var(Named("s", myStruct), {}),
                   Var(Named("t", myStruct), {Alias(Select({}, Named("s", myStruct)))}),
@@ -342,7 +339,7 @@ TEST_CASE("alias struct member", "[compiler]") {
   StructDef def(sdef, true, {},
                 {StructMember(Named("x", Type::Int()), false), StructMember(Named("y", Type::Int()), false)}, {});
   Named arg("in", Type::Struct(sdef, {}, {}, {}));
-  Function fn(Sym({"foo"}), {}, {}, {arg}, {}, {}, Type::Unit(),
+  Function fn(Sym({"foo"}), {}, {}, {Arg(arg, {})}, {}, {}, Type::Unit(),
               {
                   Var(                          //
                       Named("y2", Type::Int()), //
@@ -360,7 +357,7 @@ TEST_CASE("alias struct member", "[compiler]") {
 TEST_CASE("alias array", "[compiler]") {
   polyregion::compiler::initialise();
 
-  auto arr = Type::Array(Type::Int());
+  auto arr = Array(Type::Int());
 
   Function fn(Sym({"foo"}), {}, {}, {}, {}, {}, arr,
               {
@@ -384,7 +381,7 @@ TEST_CASE("mut struct", "[compiler]") {
   Type::Struct myStruct(myStructSym, {}, {}, {});
 
   Function fn(
-      Sym({"foo"}), {}, {}, {Named("out", myStruct)}, {}, {}, Type::Unit(),
+      Sym({"foo"}), {}, {}, {Arg(Named("out", myStruct), {})}, {}, {}, Type::Unit(),
       {
           //                  Var(Named("s", myStruct), {}),
           //                  Var(Named("t", myStruct), {}),
@@ -406,7 +403,7 @@ TEST_CASE("mut struct", "[compiler]") {
 TEST_CASE("mut array", "[compiler]") {
   polyregion::compiler::initialise();
 
-  auto arr = Type::Array(Type::Int());
+  auto arr = Array(Type::Int());
 
   Function fn(Sym({"foo"}), {}, {}, {}, {}, {}, arr,
               {
@@ -450,7 +447,7 @@ TEST_CASE("alloc struct", "[compiler]") {
   StructDef def2(myStruct2Sym, true, {}, {StructMember(defX, false)}, {});
   Type::Struct myStruct2(myStruct2Sym, {}, {}, {});
 
-  Function fn(Sym({"foo"}), {}, {}, {Named("out", myStruct)}, {}, {}, Type::Int(),
+  Function fn(Sym({"foo"}), {}, {}, {Arg(Named("out", myStruct), {})}, {}, {}, Type::Int(),
               {
                   Var(Named("s", myStruct), {}),
                   Mut(Select({Named("s", myStruct)}, defX), Alias(IntConst(42)), false),
@@ -501,7 +498,7 @@ TEST_CASE("alloc struct nested", "[compiler]") {
 TEST_CASE("alloc array", "[compiler]") {
   polyregion::compiler::initialise();
 
-  auto arr = Type::Array(Type::Int());
+  auto arr = Array(Type::Int());
 
   Function fn(Sym({"foo"}), {}, {}, {}, {}, {}, arr,
               {

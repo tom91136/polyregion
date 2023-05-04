@@ -17,19 +17,19 @@ void run() {
 
   using namespace polyregion;
   using namespace polyast::dsl;
-  auto fn0 = function("lambda", {"xs"_(Array(Int)), "x"_(Int)}, Unit)({
-      let("gid") = "x"_(Int), //  invoke(Fn0::GpuGlobalIdxX(), Int),
+  auto fn0 = function("lambda", {"x"_(Long), "xs"_(Array(Int))}, Unit)({
+      let("gid") = Cast("x"_(Long), Int), //  invoke(Fn0::GpuGlobalIdxX(), Int),
       let("xs_gid") = "xs"_(Array(Int))["gid"_(Int)],
       let("result") = invoke(Fn2::Add(), "xs_gid"_(Int), "gid"_(Int), Int),
-      let("resultX2") = invoke(Fn2::Mul(), "result"_(Int), "x"_(Int), Int),
+      let("resultX2") = invoke(Fn2::Mul(), "result"_(Int), "gid"_(Int), Int),
       "xs"_(Array(Int))["gid"_(Int)] = "resultX2"_(Int),
       ret(),
   });
 
-  auto fn1 = function("lambda", {"xs"_(Array(Int)), "x"_(Int)}, Unit)({
-      let("gid") = "x"_(Int), //  invoke(Fn0::GpuGlobalIdxX(), Int),
+  auto fn1 = function("lambda", {"x"_(Long), "xs"_(Array(Int))}, Unit)({
+      let("gid") = Cast("x"_(Long), Int), //  invoke(Fn0::GpuGlobalIdxX(), Int),
       let("xs_gid") = "xs"_(Array(Int))["gid"_(Int)],
-//      let("resultX2_tan") = invoke(Fn1::Tanh(), "xs_gid"_(Int), Int),
+      //      let("resultX2_tan") = invoke(Fn1::Tanh(), "xs_gid"_(Int), Int),
       "xs"_(Array(Int))["gid"_(Int)] = "xs_gid"_(Int),
       ret(),
   });
@@ -54,30 +54,26 @@ void run() {
   } catch (const std::exception &e) {
     std::cerr << "[REL] " << e.what() << std::endl;
   }
-
-  //      try {
-  //        rts.push_back(std::make_unique<CudaPlatform>());
-  //      } catch (const std::exception &e) {
-  //        std::cerr << "[CUDA] " << e.what() << std::endl;
-  //      }
-  //
-  //      try {
-  //        rts.push_back(std::make_unique<ClPlatform>());
-  //      } catch (const std::exception &e) {
-  //        std::cerr << "[OCL] " << e.what() << std::endl;
-  //      }
-  //
-      try {
-        rts.push_back(std::make_unique<HsaPlatform>());
-      } catch (const std::exception &e) {
-        std::cerr << "[HSA] " << e.what() << std::endl;
-      }
-  //
-    try {
-      rts.push_back(std::make_unique<HipPlatform>());
-    } catch (const std::exception &e) {
-      std::cerr << "[HIP] " << e.what() << std::endl;
-    }
+//  try {
+//    rts.push_back(std::make_unique<CudaPlatform>());
+//  } catch (const std::exception &e) {
+//    std::cerr << "[CUDA] " << e.what() << std::endl;
+//  }
+//  try {
+//    rts.push_back(std::make_unique<ClPlatform>());
+//  } catch (const std::exception &e) {
+//    std::cerr << "[OCL] " << e.what() << std::endl;
+//  }
+//  try {
+//    rts.push_back(std::make_unique<HsaPlatform>());
+//  } catch (const std::exception &e) {
+//    std::cerr << "[HSA] " << e.what() << std::endl;
+//  }
+//  try {
+//    rts.push_back(std::make_unique<HipPlatform>());
+//  } catch (const std::exception &e) {
+//    std::cerr << "[HIP] " << e.what() << std::endl;
+//  }
 
   static std::vector<int> xs;
 
@@ -147,11 +143,11 @@ void run() {
           q1->enqueueHostToDeviceAsync(xs.data(), ptr, size,
                                        [&]() { std::cout << "[" << i << "]  H->D ok" << std::endl; });
 
-          int32_t x = 3;
+          int64_t x = 3;
 
           ArgBuffer buffer({
+              {Type::Long64, &x},
               {Type::Ptr, &ptr},
-              {Type::Int32, &x},
               {Type::Void, nullptr},
           });
 
@@ -179,12 +175,11 @@ void run() {
           q1->enqueueHostToDeviceAsync(xs.data(), ptr, size,
                                        [&]() { std::cout << "[" << i << "]  H->D ok" << std::endl; });
 
-          int32_t x = 3;
-
+          int64_t x = 3;
 
           ArgBuffer buffer({
+              {Type::Long64, &x},
               {Type::Ptr, &ptr},
-              {Type::Int32, &x},
               {Type::Void, nullptr},
           });
 

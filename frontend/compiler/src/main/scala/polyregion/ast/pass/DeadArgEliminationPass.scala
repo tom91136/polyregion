@@ -14,10 +14,10 @@ object DeadArgEliminationPass extends ProgramPass {
       }
     }.toSet
     f.copy(
-      receiver = f.receiver.filter(topLevelRefs.contains(_)),
-      args = f.args.filter(topLevelRefs.contains(_)),
-      moduleCaptures = f.moduleCaptures.filter(topLevelRefs.contains(_)),
-      termCaptures = f.termCaptures.filter(topLevelRefs.contains(_))
+      receiver = f.receiver.filter(arg => topLevelRefs.contains(arg.named)),
+      args = f.args.filter(arg => topLevelRefs.contains(arg.named)),
+      moduleCaptures = f.moduleCaptures.filter(arg => topLevelRefs.contains(arg.named)),
+      termCaptures = f.termCaptures.filter(arg => topLevelRefs.contains(arg.named))
     )
   }
 

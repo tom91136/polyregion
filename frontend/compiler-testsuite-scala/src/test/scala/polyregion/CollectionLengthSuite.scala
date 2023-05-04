@@ -144,15 +144,16 @@ class CollectionLengthSuite extends BaseSuite {
 //      val ext = 128
 //      type A = Int
 
-      class Foo2{
-        def innerFn : Int = 42
-      }
-
-      val f2 = new Foo2{
-        override def innerFn = 43
-      }
-      f2.innerFn
-      1
+      i+1
+//      class Foo2{
+//        def innerFn : Int = 42
+//      }
+//
+//      val f2 = new Foo2{
+//        override def innerFn = 43
+//      }
+//      f2.innerFn
+//      1
 //      val f = new Foo{
 //        override def foo = 42
 //      }
