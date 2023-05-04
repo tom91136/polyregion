@@ -65,7 +65,7 @@ class EXPORT RelocatableDevice : public ObjectDevice { //, private llvm::Section
   std::shared_mutex lock;
 
 public:
-  EXPORT RelocatableDevice();
+  RelocatableDevice();
   EXPORT std::string name() override;
   EXPORT void loadModule(const std::string &name, const std::string &image) override;
   EXPORT bool moduleLoaded(const std::string &name) override;

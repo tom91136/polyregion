@@ -7,6 +7,7 @@
 #include "cuda_platform.h"
 #include "hip_platform.h"
 #include "hsa_platform.h"
+#include "vulkan_platform.h"
 #include "object_platform.h"
 #include "runtime.h"
 #include "utils.hpp"
@@ -252,6 +253,16 @@ void run() {
   using namespace polyregion::runtime::hip;
   using namespace polyregion::runtime::hsa;
   using namespace polyregion::runtime::cl;
+  using namespace polyregion::runtime::vulkan;
+
+  VulkanPlatform p ;
+  for ( auto &d : p.enumerate()){
+    std::cout << d->name() << std::endl;
+  }
+
+  std::exit(0);
+
+
 
   std::vector<std::unique_ptr<Platform>> rts;
 

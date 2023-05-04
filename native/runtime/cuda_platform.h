@@ -26,7 +26,7 @@ class EXPORT CudaDevice : public Device {
   CudaModuleStore store;
 
 public:
-  EXPORT explicit CudaDevice(int ordinal);
+  explicit CudaDevice(int ordinal);
   EXPORT int64_t id() override;
   EXPORT std::string name() override;
   EXPORT bool sharedAddressSpace() override;

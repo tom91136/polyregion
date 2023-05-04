@@ -1,34 +1,53 @@
 #pragma once
 
-#include "hipew.h"
+
 #include "runtime.h"
 
-namespace polyregion::runtime::hip {
+#define VK_NO_PROTOTYPES
+//#define VK_USE_PLATFORM_ANDROID_KHR 1
+//#define KOMPUTE_OPT_USE_SPDLOG 1
 
-class EXPORT HipPlatform : public Platform {
+//#include "kompute/Core.hpp"
+//#include "kompute/Manager.hpp"
+#include "json.hpp"
+#include "vulkan/vulkan_raii.hpp"
+
+namespace polyregion::runtime::vulkan {
+
+class EXPORT VulkanPlatform : public Platform {
+
+//  vk::DynamicLoader dl;
+   vk::raii::Context context;
+   vk::raii::Instance instance;
+
+//  kp::Manager mgr;
+
+
 public:
-  EXPORT explicit HipPlatform();
-  EXPORT ~HipPlatform() override = default;
+  EXPORT explicit VulkanPlatform();
+  EXPORT ~VulkanPlatform() override = default;
   EXPORT std::string name() override;
   EXPORT std::vector<Property> properties() override;
   EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;
 };
 
 namespace {
-using HipModuleStore = detail::ModuleStore<hipModule_t, hipFunction_t>;
+using VulkanModuleStore = detail::ModuleStore<int, int>;
 }
 
-class EXPORT HipDevice : public Device {
-
-  hipDevice_t device = {};
-  detail::LazyDroppable<hipCtx_t> context;
+class EXPORT VulkanDevice : public Device {
+//
+  size_t deviceId;
   std::string deviceName;
-  HipModuleStore store; // store needs to be dropped before dropping device
+  vk::raii::Device device;
+  vk::raii::CommandPool commandPool;
+  vk::raii::CommandBuffers commandBuffers;
+
+  VulkanModuleStore store;
 
 public:
-  explicit HipDevice(int ordinal);
-  ~HipDevice() override;
-  EXPORT int64_t id() override;
+  explicit VulkanDevice(size_t queueId,size_t deviceId, const std::string &deviceName, vk::raii::Device device );
+  int64_t id() override;
   EXPORT std::string name() override;
   EXPORT bool sharedAddressSpace() override;
   EXPORT std::vector<Property> properties() override;
@@ -38,20 +57,20 @@ public:
   EXPORT uintptr_t malloc(size_t size, Access access) override;
   EXPORT void free(uintptr_t ptr) override;
   EXPORT std::unique_ptr<DeviceQueue> createQueue() override;
+  ~VulkanDevice() override;
 };
 
-class EXPORT HipDeviceQueue : public DeviceQueue {
+class EXPORT VulkanDeviceQueue : public DeviceQueue {
 
   detail::CountingLatch latch;
 
-  HipModuleStore &store;
-  hipStream_t stream{};
+  VulkanModuleStore &store;
 
   void enqueueCallback(const MaybeCallback &cb);
 
 public:
-  EXPORT explicit HipDeviceQueue(decltype(store) store);
-  EXPORT ~HipDeviceQueue() override;
+  EXPORT explicit VulkanDeviceQueue(decltype(store) store);
+  EXPORT ~VulkanDeviceQueue() override;
   EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) override;
   EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, void *dst, size_t size, const MaybeCallback &cb) override;
   EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, std::vector<Type> types,
@@ -59,4 +78,4 @@ public:
                                  const MaybeCallback &cb) override;
 };
 
-} // namespace polyregion::runtime::hip
+} // namespace polyregion::runtime::vulkan

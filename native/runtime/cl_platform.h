@@ -34,7 +34,7 @@ class EXPORT ClDevice : public Device {
   cl_mem queryMemObject(uintptr_t handle);
 
 public:
-  EXPORT explicit ClDevice(cl_device_id device);
+  explicit ClDevice(cl_device_id device);
   ~ClDevice() override;
   EXPORT int64_t id() override;
   EXPORT std::string name() override;

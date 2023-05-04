@@ -37,6 +37,36 @@ FetchContent_Declare(
         GIT_TAG v3.2.1
 )
 
+FetchContent_Declare(
+        Vulkan-Headers
+        URL https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.3.231.zip
+        URL_HASH SHA256=68fa5e19776d0e371cd86878db882a5aa9a4d6e3d91ed9363f8ea14e3c356cc6
+)
+
+#FetchContent_Declare(
+#        volk
+#        URL https://github.com/zeux/volk/archive/refs/tags/1.3.215.zip
+#        URL_HASH SHA256=9fd7bb2a2e0fb0aaccf32847638b7f8f5e1ebea242f2e8e7a7ab741d6c302f1c
+#)
+
+#FetchContent_Declare(
+#        fmt
+#        URL https://github.com/fmtlib/fmt/releases/download/9.1.0/fmt-9.1.0.zip
+#        URL_HASH SHA256=cceb4cb9366e18a5742128cb3524ce5f50e88b476f1e54737a47ffdf4df4c996
+#)
+
+#FetchContent_Declare(
+#        Kompute
+#        URL https://github.com/KomputeProject/kompute/archive/e7890bbb4d82ebfb855022e93a2de8b64091cd98.zip
+#        URL_HASH SHA256=f06576e35769fa6789e5ce1f7d073e92b5cdd94d6c6b2b992cc0e274df84e4e6
+#)
+
+#FetchContent_Declare(
+#        spdlog
+#        URL https://github.com/gabime/spdlog/archive/refs/tags/v1.11.0.zip
+#        URL_HASH SHA256=33f83c6b86ec0fbbd0eb0f4e980da6767494dc0ad063900bcfae8bc3e9c75f21
+#)
+
 
 if (USE_LINKER)
     message(STATUS "Using custom linker: ${USE_LINKER}")
@@ -60,7 +90,7 @@ if (MSVC)
 else ()
     # FIXME adjust for CUDA stuff for now
     set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan -g3)
-    #    set(COMMON_DEBUG_OPTIONS)
+#    set(COMMON_DEBUG_OPTIONS)
 endif ()
 
 if (MSVC)
@@ -195,6 +225,27 @@ message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
 FetchContent_MakeAvailable(json)
 FetchContent_MakeAvailable(Catch2)
+FetchContent_MakeAvailable(Vulkan-Headers)
+#FetchContent_MakeAvailable(fmt)
+#FetchContent_MakeAvailable(spdlog)
+
+#FetchContent_MakeAvailable(volk)
+
+#set(KOMPUTE_OPT_USE_BUILT_IN_VULKAN_HEADER OFF CACHE BOOL "")
+
+
+#set(CMAKE_DISABLE_FIND_PACKAGE_Vulkan)
+#set(Vulkan_LIBRARY "a")
+#set(Vulkan_INCLUDE_DIR "${vulkan-headers_SOURCE_DIR}/include/vulkan")
+#message(FATAL_ERROR ${vulkan-headers_SOURCE_DIR}/include/vulkan)
+
+#FetchContent_GetProperties(kompute)
+#if (NOT kompute_POPULATED)
+#    FetchContent_Populate(kompute)
+##    add_subdirectory(${kompute_SOURCE_DIR} ${kompute_BINARY_DIR} EXCLUDE_FROM_ALL)
+#    set(kompute_INCLUDE_DIRS "${kompute_SOURCE_DIR}/src/include")
+#    file(GLOB kompute_SOURCE_FILES "${kompute_SOURCE_DIR}/src/*.cpp")
+#endif ()
 
 # libffi does not use CMake so we inject one manually from VCPKG
 # See https://github.com/microsoft/vcpkg/blob/2f0872b7d592635e8e4919d178650d549c211464/ports/libffi/CMakeLists.txt
