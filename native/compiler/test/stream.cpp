@@ -205,10 +205,10 @@ TEST_CASE("BabelStream") {
 
   polyregion::compiler::initialise();
 
-  auto p = mkStreamProgram("_double", Double, true);
+  auto p = mkStreamProgram("_float", Float, true);
 
   INFO(repr(p));
-  auto c = polyregion::compiler::compile(p, {polyregion::compiler::Target::Source_C_OpenCL1_1, "gfx1012"},
+  auto c = polyregion::compiler::compile(p, {polyregion::compiler::Target::Source_C_OpenCL1_1, ""},
                                          polyregion::compiler::Opt::O3);
 
   //  auto c = polyregion::compiler::compile(p, {polyregion::compiler::Target::Object_LLVM_AMDGCN, "gfx1012"},
@@ -227,9 +227,9 @@ TEST_CASE("BabelStream") {
   auto platform = runtime::Platform::of(runtime::Backend::OpenCL);
   const auto relTolerance = 0.008f;
   for (auto &d : platform->enumerate()) {
-    polyregion::stream::runStream<double>(
-        runtime::Type::Double64, //
-        "_double",               //
+    polyregion::stream::runStream<float>(
+        runtime::Type::Float32, //
+        "_float",               //
         33554432,                //
         100,                     //
         256,                     //

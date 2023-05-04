@@ -17,7 +17,7 @@ void run() {
 
   using namespace polyregion;
   using namespace polyast::dsl;
-  auto fn0 = function("lambda", {"x"_(Long), "xs"_(Array(Int))}, Unit)({
+  auto fn0 = function("lambda", {"x"_(Long)(), "xs"_(Array(Int))()}, Unit)({
       let("gid") = Cast("x"_(Long), Int), //  invoke(Fn0::GpuGlobalIdxX(), Int),
       let("xs_gid") = "xs"_(Array(Int))["gid"_(Int)],
       let("result") = invoke(Fn2::Add(), "xs_gid"_(Int), "gid"_(Int), Int),
@@ -26,7 +26,7 @@ void run() {
       ret(),
   });
 
-  auto fn1 = function("lambda", {"x"_(Long), "xs"_(Array(Int))}, Unit)({
+  auto fn1 = function("lambda", {"x"_(Long)(), "xs"_(Array(Int))()}, Unit)({
       let("gid") = Cast("x"_(Long), Int), //  invoke(Fn0::GpuGlobalIdxX(), Int),
       let("xs_gid") = "xs"_(Array(Int))["gid"_(Int)],
       //      let("resultX2_tan") = invoke(Fn1::Tanh(), "xs_gid"_(Int), Int),
