@@ -26,12 +26,7 @@ class EXPORT ClDevice : public Device {
   detail::LazyDroppable<cl_context> context;
   std::string deviceName;
   ClModuleStore store; // store needs to be dropped before dropping device
-
-  std::shared_mutex mutex;
-  std::atomic_uintptr_t bufferCounter;
-  std::unordered_map<uintptr_t, cl_mem> allocations;
-
-  cl_mem queryMemObject(uintptr_t handle);
+  detail::MemoryObjects<cl_mem> memoryObjects;
 
 public:
   explicit ClDevice(cl_device_id device);
@@ -39,6 +34,7 @@ public:
   EXPORT int64_t id() override;
   EXPORT std::string name() override;
   EXPORT bool sharedAddressSpace() override;
+  EXPORT bool singleEntryPerModule() override;
   EXPORT std::vector<Property> properties() override;
   EXPORT std::vector<std::string> features() override;
   EXPORT void loadModule(const std::string &name, const std::string &image) override;
@@ -63,9 +59,11 @@ public:
   EXPORT ~ClDeviceQueue() override;
   EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) override;
   EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, void *dst, size_t size, const MaybeCallback &cb) override;
-  EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, std::vector<Type> types,
-                                 std::vector<std::byte> argData, const Policy &policy,
-                                 const MaybeCallback &cb) override;
+  EXPORT void enqueueInvokeAsync(const std::string &moduleName,  //
+                                 const std::string &symbol,      //
+                                 const std::vector<Type> &types, //
+                                 std::vector<std::byte> argData, //
+                                 const Policy &policy, const MaybeCallback &cb) override;
 };
 
 } // namespace polyregion::runtime::cl

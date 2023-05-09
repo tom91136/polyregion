@@ -10,6 +10,7 @@
 #include "hip_platform.h"
 #include "hsa_platform.h"
 #include "object_platform.h"
+#include "vulkan_platform.h"
 
 using namespace polyregion;
 
@@ -57,6 +58,7 @@ std::unique_ptr<runtime::Platform> runtime::Platform::of(const runtime::Backend 
     case Backend::HIP: return std::make_unique<hip::HipPlatform>();
     case Backend::HSA: return std::make_unique<hsa::HsaPlatform>();
     case Backend::OpenCL: return std::make_unique<cl::ClPlatform>();
+    case Backend::Vulkan: return std::make_unique<vulkan::VulkanPlatform>();
     case Backend::SHARED_OBJ: return std::make_unique<object::SharedPlatform>();
     case Backend::RELOCATABLE_OBJ: return std::make_unique<object::RelocatablePlatform>();
   }
@@ -125,4 +127,7 @@ std::vector<void *> runtime::detail::argDataAsPointers(const std::vector<Type> &
     argsPtr += byteOfType((types[i]));
   }
   return argsPtrStore;
+}
+std::ostream &runtime::operator<<(std::ostream &os, const runtime::Dim3 &dim3) {
+  return os << "Dim3{x: " << dim3.x << " y: " << dim3.y << " z: " << dim3.z << "}";
 }

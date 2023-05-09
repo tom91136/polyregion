@@ -23,6 +23,7 @@ x86-64;x86-64-v2;x86-64-v3;x86-64-v4\
 
 file(GLOB CL_SRC_FILES ${CMAKE_SOURCE_DIR}/*.cl)
 file(GLOB C_SRC_FILES ${CMAKE_SOURCE_DIR}/*.c)
+file(GLOB GLSL_SRC_DIRS ${CMAKE_SOURCE_DIR}/glsl_*)
 
 
 # clang  -target nvptx64--nvidiacl -cl-std=CL1.2 -march=sm_80 -O3 -xcl stream.cl -Xclang -mlink-bitcode-file -Xclang /usr/lib64/clc/nvptx64--nvidiacl.bc -S -o-
@@ -54,11 +55,35 @@ macro(read_to_hex FILE OUT_VAR)
     to_hex_array("${HEX_STRING}" ${OUT_VAR})
 endmacro()
 
+foreach (GLSL_DIR ${GLSL_SRC_DIRS})
+    message(STATUS "Building ${GLSL_DIR}...")
+    get_filename_component(PROGRAM_NAME ${GLSL_DIR} NAME_WE)
+    set(PROGRAM_ENTRIES "")
+    set(OUT_HEADER "generated_spirv_${PROGRAM_NAME}.hpp")
+    set(PROGRAM_ENTRIES "")
+    set(SPIRV_MODULE_ENTRIES "")
+    set(MODULES "")
+    file(GLOB GLSL_SRC_FILES ${GLSL_DIR}/*.glsl)
+    foreach (FILE_NAME ${GLSL_SRC_FILES})
+        get_filename_component(MODULE_NAME "${FILE_NAME}" NAME_WE)
+        set(CLI glslangValidator --target-env vulkan1.1 ${FILE_NAME} -o data.bin)
+        string(REPLACE ";" " " CLI_NS "${CLI}")
+        message(STATUS "[GLSL-SPIRV-VK1_1] ${CLI_NS}")
+        execute_process(COMMAND ${CLI})
+        read_to_hex(data.bin SPIRV_ENTRY_HEX)
+        list(APPEND SPIRV_MODULE_ENTRIES "{\"${MODULE_NAME}\", ${SPIRV_ENTRY_HEX}}")
+    endforeach ()
+    configure_platform("Vulkan" SPIRV_MODULE_ENTRIES PROGRAM_ENTRIES)
+    set(VARIANT spirv)
+    configure_file(${CMAKE_SOURCE_DIR}/_embed.hpp.in ${OUT_HEADER} @ONLY)
+
+endforeach ()
+
 foreach (C_SOURCE ${C_SRC_FILES})
     message(STATUS "Building ${C_SOURCE}...")
     get_filename_component(PROGRAM_NAME ${C_SOURCE} NAME_WE)
     set(PROGRAM_ENTRIES "")
-    set(OUT_HEADER "cpu_${PROGRAM_NAME}.hpp")
+    set(OUT_HEADER "generated_cpu_${PROGRAM_NAME}.hpp")
 
     set(RELOCATABLE_OBJ_PROGRAM_ENTRIES "")
     foreach (CPU_ARCH ${CPU_ARCHS})
@@ -100,12 +125,11 @@ foreach (C_SOURCE ${C_SRC_FILES})
     configure_file(${CMAKE_SOURCE_DIR}/_embed.hpp.in ${OUT_HEADER} @ONLY)
 endforeach ()
 
-
 foreach (CL_SOURCE ${CL_SRC_FILES})
     message(STATUS "Building ${CL_SOURCE}...")
     get_filename_component(PROGRAM_NAME ${CL_SOURCE} NAME_WE)
     set(PROGRAM_ENTRIES "")
-    set(OUT_HEADER "gpu_${PROGRAM_NAME}.hpp")
+    set(OUT_HEADER "generated_gpu_${PROGRAM_NAME}.hpp")
 
 
     # OpenCL, just embed the source directly

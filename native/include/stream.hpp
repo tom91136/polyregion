@@ -39,9 +39,9 @@ template <typename T> struct Kernels {
 };
 
 template <typename T, typename FValidate, typename FValidateSum>
-void runStream(Type tpe, const std::string &suffix, size_t size, size_t times, size_t groups, std::unique_ptr<Device> d,
-               const std::string &image, bool verbose, FValidate fValidate, FValidateSum fValidateSum) {
-  d->loadModule("module", image);
+void runStream(Type tpe, size_t size, size_t times, size_t groups, std::unique_ptr<Device> d,
+               const Kernels<std::pair<std::string, std::string>> &specs, bool verbose, FValidate fValidate,
+               FValidateSum fValidateSum) {
 
   bool cpu = d->sharedAddressSpace();
 
@@ -86,13 +86,14 @@ void runStream(Type tpe, const std::string &suffix, size_t size, size_t times, s
       .triad = std::vector<double>(times),
       .dot = std::vector<double>(times),
   };
-  auto invoke = [&](const auto &acc, const std::string &kernelName, const Policy &policy, const ArgBuffer &buffer) {
+  auto invoke = [&](const auto &acc, const std::pair<std::string, std::string> &spec, const Policy &policy,
+                    const ArgBuffer &buffer) {
     return [&](auto &h) {
       auto _buffer = buffer;
       if (cpu) _buffer.prepend({{Type::Long64, nullptr}, {Type::Ptr, &begins_d}, {Type::Ptr, &ends_d}});
 
       auto t1 = std::chrono::high_resolution_clock::now();
-      q->enqueueInvokeAsync("module", kernelName + suffix, _buffer, policy, [&, t1]() {
+      q->enqueueInvokeAsync(spec.first, spec.second, _buffer, policy, [&, t1]() {
         auto t2 = std::chrono::high_resolution_clock::now();
         acc(elapsed, std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1).count());
         h();
@@ -107,15 +108,15 @@ void runStream(Type tpe, const std::string &suffix, size_t size, size_t times, s
 
   for (size_t i = 0; i < times; i++) {
     waitAll(10000,
-            invoke([=](auto &acc, auto x) { acc.copy[i] = x; }, "stream_copy", forPolicy,
+            invoke([=](auto &acc, auto x) { acc.copy[i] = x; }, specs.copy, forPolicy,
                    {{Type::Ptr, &a_d}, {Type::Ptr, &b_d}, {Type::Ptr, &c_d}, {Type::Void, {}}}),
-            invoke([=](auto &acc, auto x) { acc.mul[i] = x; }, "stream_mul", forPolicy,
+            invoke([=](auto &acc, auto x) { acc.mul[i] = x; }, specs.mul, forPolicy,
                    {{Type::Ptr, &a_d}, {Type::Ptr, &b_d}, {Type::Ptr, &c_d}, {tpe, &scalar}, {Type::Void, {}}}),
-            invoke([=](auto &acc, auto x) { acc.add[i] = x; }, "stream_add", forPolicy,
+            invoke([=](auto &acc, auto x) { acc.add[i] = x; }, specs.add, forPolicy,
                    {{Type::Ptr, &a_d}, {Type::Ptr, &b_d}, {Type::Ptr, &c_d}, {Type::Void, {}}}),
-            invoke([=](auto &acc, auto x) { acc.triad[i] = x; }, "stream_triad", forPolicy,
+            invoke([=](auto &acc, auto x) { acc.triad[i] = x; }, specs.triad, forPolicy,
                    {{Type::Ptr, &a_d}, {Type::Ptr, &b_d}, {Type::Ptr, &c_d}, {tpe, &scalar}, {Type::Void, {}}}),
-            invoke([=](auto &acc, auto x) { acc.dot[i] = x; }, "stream_dot", dotPolicy,
+            invoke([=](auto &acc, auto x) { acc.dot[i] = x; }, specs.dot, dotPolicy,
                    cpu ? ArgBuffer{{Type::Ptr, &a_d},
                                    {Type::Ptr, &b_d},
                                    {Type::Ptr, &c_d},
@@ -159,6 +160,10 @@ void runStream(Type tpe, const std::string &suffix, size_t size, size_t times, s
   fValidate(error(c, expectedC), eps);
   auto reducedSum = std::reduce(sum.begin(), sum.end());
   fValidateSum(std::fabs((reducedSum - expectedSum) / expectedSum));
+
+//  for (int i = 0; i < sum.size(); ++i) {
+//    std::cout << "[" << i << "]" << sum[i] << std::endl;
+//  }
 
   const auto sizesMB = Kernels<double>{.copy = double(2 * sizeof(T) * size) / 1000 / 1000,  //
                                        .mul = double(2 * sizeof(T) * size) / 1000 / 1000,   //

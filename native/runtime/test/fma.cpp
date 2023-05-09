@@ -1,6 +1,7 @@
 #include "concurrency_utils.hpp"
-#include "kernels/cpu_fma.hpp"
-#include "kernels/gpu_fma.hpp"
+#include "kernels/generated_cpu_fma.hpp"
+#include "kernels/generated_gpu_fma.hpp"
+#include "kernels/generated_spirv_glsl_fma.hpp"
 #include "test_utils.h"
 #include "utils.hpp"
 #include <catch2/catch_test_macros.hpp>
@@ -20,28 +21,38 @@ const static std::vector<float> xs{0.f,
                                    std::numeric_limits<float>::max(),     //
                                    std::numeric_limits<float>::min()};
 
-TEST_CASE("CPU/GPU scalar fma") {
-  auto backend = GENERATE(                                        //
-      Backend::CUDA, Backend::OpenCL, Backend::HIP, Backend::HSA, //
-      Backend::RELOCATABLE_OBJ, Backend::SHARED_OBJ               //
-  );
-
+template <typename I> void testFma(I images, std::initializer_list<Backend> backends) {
+  auto backend = GENERATE_REF(values(backends));
+  auto platform = Platform::of(backend);
   DYNAMIC_SECTION("backend=" << nameOfBackend(backend)) {
-    auto platform = Platform::of(backend);
     for (auto &d : platform->enumerate()) {
       DYNAMIC_SECTION("device=" << d->name()) {
-        if (auto image = findTestImage((backend == Backend::RELOCATABLE_OBJ || backend == Backend::SHARED_OBJ)
-                                           ? generated::cpu::fma
-                                           : generated::gpu::fma,
-                                       backend, d->features());
-            image) {
-          d->loadModule("module", *image);
+        if (auto imageGroups = findTestImage(images, backend, d->features()); !imageGroups.empty()) {
+
+          if (imageGroups.size() != 1) {
+            FAIL("Found more than one (" << imageGroups.size() << ") kernel test images for device `" << d->name()
+                                         << "`(backend=" << nameOfBackend(backend) << ", features="
+                                         << polyregion::mk_string<std::string>(d->features(), std::identity(), ",")
+                                         << ")");
+          }
+
+          std::string module_;
+          std::string function_;
+          if (d->singleEntryPerModule()) {
+            module_ = "fma";
+            function_ = "main";
+          } else {
+            module_ = "module";
+            function_ = "_fma";
+          }
+          d->loadModule(module_, imageGroups[0].second);
+
           auto a = GENERATE(from_range(xs));
           auto b = GENERATE(from_range(xs));
           auto c = GENERATE(from_range(xs));
           DYNAMIC_SECTION("a=" << a << " b=" << b << " c=" << c) {
             auto q = d->createQueue();
-            auto out_d = d->mallocTyped<float>(1, Access::RW);
+            auto out_d = d->template mallocTyped<float>(1, Access::RW);
 
             ArgBuffer buffer;
             if (d->sharedAddressSpace()) buffer.append(Type::Long64, nullptr);
@@ -51,16 +62,17 @@ TEST_CASE("CPU/GPU scalar fma") {
 
             waitAll([&](auto &h) {
               q->enqueueInvokeAsync( //
-                  "module", "_fma",
+                  module_, function_,
                   buffer, //
                   {}, h);
             });
             float out = {};
             waitAll([&](auto &h) { q->enqueueDeviceToHostAsyncTyped(out_d, &out, 1, h); });
-            REQUIRE_THAT(out, Catch::Matchers::WithinULP(a * b + c, 0));
+            auto expected = a * b + c;
+            INFO("fma actual=" << out << " expected=" << expected);
+            CHECK_THAT(out, Catch::Matchers::WithinULP(expected, 0));
             d->free(out_d);
           }
-
         } else {
           WARN("No kernel test image found for device `"
                << d->name() << "`(backend=" << nameOfBackend(backend)
@@ -69,4 +81,25 @@ TEST_CASE("CPU/GPU scalar fma") {
       }
     }
   }
+}
+
+TEST_CASE("GPU FMA") {
+#ifndef NDEBUG
+  WARN("Make sure ASAN is disabled otherwise most GPU backends will fail with memory related errors");
+#endif
+  testFma(generated::gpu::fma,                                         //
+          {Backend::CUDA, Backend::OpenCL, Backend::HIP, Backend::HSA} //
+  );
+}
+
+TEST_CASE("SPIRV FMA") {
+  testFma(generated::spirv::glsl_fma, //
+          {Backend::Vulkan}           //
+  );
+}
+
+TEST_CASE("CPU FMA") {
+  testFma(generated::cpu::fma,                            //
+          {Backend::RELOCATABLE_OBJ, Backend::SHARED_OBJ} //
+  );
 }

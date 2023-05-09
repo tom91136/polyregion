@@ -7,10 +7,12 @@
 #include "cuda_platform.h"
 #include "hip_platform.h"
 #include "hsa_platform.h"
-#include "vulkan_platform.h"
+#include "io.hpp"
 #include "object_platform.h"
 #include "runtime.h"
 #include "utils.hpp"
+#include "vulkan_platform.h"
+#include <fstream>
 #include <vector>
 
 // echo "void lambda( int* array, int x){ int tid = 0; array[tid] = array[tid] + tid + x; }"
@@ -255,15 +257,6 @@ void run() {
   using namespace polyregion::runtime::cl;
   using namespace polyregion::runtime::vulkan;
 
-  VulkanPlatform p ;
-  for ( auto &d : p.enumerate()){
-    std::cout << d->name() << std::endl;
-  }
-
-  std::exit(0);
-
-
-
   std::vector<std::unique_ptr<Platform>> rts;
 
   try {
@@ -271,18 +264,24 @@ void run() {
   } catch (const std::exception &e) {
     std::cerr << "[REL] " << e.what() << std::endl;
   }
-//
-//    try {
-//      rts.push_back(std::make_unique<CudaPlatform>());
-//    } catch (const std::exception &e) {
-//      std::cerr << "[CUDA] " << e.what() << std::endl;
-//    }
+  //
+  //    try {
+  //      rts.push_back(std::make_unique<CudaPlatform>());
+  //    } catch (const std::exception &e) {
+  //      std::cerr << "[CUDA] " << e.what() << std::endl;
+  //    }
 
-//    try {
-//      rts.push_back(std::make_unique<ClPlatform>());
-//    } catch (const std::exception &e) {
-//      std::cerr << "[OCL] " << e.what() << std::endl;
-//    }
+  //    try {
+  //      rts.push_back(std::make_unique<ClPlatform>());
+  //    } catch (const std::exception &e) {
+  //      std::cerr << "[OCL] " << e.what() << std::endl;
+  //    }
+
+  //    try {
+  //      rts.push_back(std::make_unique<VulkanPlatform>());
+  //    } catch (const std::exception &e) {
+  //      std::cerr << "[Vulkan] " << e.what() << std::endl;
+  //    }
   //
   //  try {
   //    rts.push_back(std::make_unique<HsaPlatform>());

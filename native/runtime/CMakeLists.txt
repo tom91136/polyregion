@@ -26,7 +26,7 @@ target_include_directories(runtime-lib PUBLIC ../include
         ${libffi_INCLUDE_DIRS}
         ${LLVM_INCLUDE_DIRS}
         ${json_SOURCE_DIR}
-        #        ${kompute_INCLUDE_DIRS}
+        ${vulkanmemoryallocator_SOURCE_DIR}
         thirdparty/
         thirdparty/clew/include
         thirdparty/hipew/include

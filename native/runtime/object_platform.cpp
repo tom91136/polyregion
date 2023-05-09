@@ -56,6 +56,10 @@ bool ObjectDevice::sharedAddressSpace() {
   TRACE();
   return true;
 }
+bool ObjectDevice::singleEntryPerModule() {
+  TRACE();
+  return false;
+}
 std::vector<Property> ObjectDevice::properties() {
   TRACE();
   return {};
@@ -221,7 +225,7 @@ void validatePolicyAndArgs(const char *prefix, std::vector<Type> types, const Po
 }
 
 void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                                std::vector<Type> types, std::vector<std::byte> argData,
+                                                const std::vector<Type> &types, std::vector<std::byte> argData,
                                                 const Policy &policy, const MaybeCallback &cb) {
   TRACE();
   validatePolicyAndArgs(RELOBJ_ERROR_PREFIX, types, policy);
@@ -349,7 +353,7 @@ SharedDeviceQueue::SharedDeviceQueue(decltype(modules) modules, decltype(lock) l
   TRACE();
 }
 void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                           std::vector<Type> types, std::vector<std::byte> argData,
+                                           const std::vector<Type> &types, std::vector<std::byte> argData,
                                            const Policy &policy, const MaybeCallback &cb) {
   TRACE();
   validatePolicyAndArgs(SHOBJ_ERROR_PREFIX, types, policy);

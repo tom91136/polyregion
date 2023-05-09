@@ -72,7 +72,7 @@ HipDevice::HipDevice(int ordinal)
             CHECKED(hipModuleLoadData(&module, s.data()));
             return module;
           },
-          [this](auto &&m, auto &&name) {
+          [this](auto &&m, auto &&name, auto) {
             TRACE();
             context.touch();
             hipFunction_t fn;
@@ -99,6 +99,10 @@ std::string HipDevice::name() {
   return deviceName;
 }
 bool HipDevice::sharedAddressSpace() {
+  TRACE();
+  return false;
+}
+bool HipDevice::singleEntryPerModule() {
   TRACE();
   return false;
 }
@@ -179,12 +183,12 @@ void HipDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t s
   enqueueCallback(cb);
 }
 void HipDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                        std::vector<Type> types, std::vector<std::byte> argData, const Policy &policy,
-                                        const MaybeCallback &cb) {
+                                        const std::vector<Type> &types, std::vector<std::byte> argData,
+                                        const Policy &policy, const MaybeCallback &cb) {
   TRACE();
   if (types.back() != Type::Void)
     throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported");
-  auto fn = store.resolveFunction(moduleName, symbol);
+  auto fn = store.resolveFunction(moduleName, symbol, types);
   auto grid = policy.global;
   auto [block, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});
   auto args = detail::argDataAsPointers(types, argData);

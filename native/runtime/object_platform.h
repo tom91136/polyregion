@@ -20,6 +20,7 @@ public:
   EXPORT std::vector<Property> properties() override;
   EXPORT std::vector<std::string> features() override;
   EXPORT bool sharedAddressSpace() override;
+  EXPORT bool singleEntryPerModule() override;
   EXPORT uintptr_t malloc(size_t size, Access access) override;
   EXPORT void free(uintptr_t ptr) override;
 };
@@ -78,8 +79,8 @@ class EXPORT RelocatableDeviceQueue : public ObjectDeviceQueue {
 
 public:
   RelocatableDeviceQueue(decltype(objects) objects, decltype(lock) lock);
-  EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, std::vector<Type> types,
-                                 std::vector<std::byte> argData, const Policy &policy,
+  EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
+                                 const std::vector<Type> &types, std::vector<std::byte> argData, const Policy &policy,
                                  const MaybeCallback &cb) override;
 };
 
@@ -114,8 +115,8 @@ class EXPORT SharedDeviceQueue : public ObjectDeviceQueue {
 
 public:
   explicit SharedDeviceQueue(decltype(modules) modules, decltype(lock) lock);
-  EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, std::vector<Type> types,
-                                 std::vector<std::byte> argData, const Policy &policy,
+  EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
+                                 const std::vector<Type> &types, std::vector<std::byte> argData, const Policy &policy,
                                  const MaybeCallback &cb) override;
 };
 

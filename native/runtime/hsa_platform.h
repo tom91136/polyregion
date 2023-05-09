@@ -18,8 +18,8 @@ public:
 
 namespace {
 using SymbolArgOffsetTable = std::unordered_map<std::string, std::vector<size_t>>;
-using HsaModuleStore = detail::ModuleStore<                              //
-    std::pair<hsa_executable_t, SymbolArgOffsetTable>,                   //
+using HsaModuleStore = detail::ModuleStore<                               //
+    std::pair<hsa_executable_t, SymbolArgOffsetTable>,                    //
     std::pair<hsa_executable_symbol_t, SymbolArgOffsetTable::mapped_type> //
     >;
 } // namespace
@@ -46,6 +46,7 @@ public:
   EXPORT int64_t id() override;
   EXPORT std::string name() override;
   EXPORT bool sharedAddressSpace() override;
+  EXPORT bool singleEntryPerModule() override;
   EXPORT std::vector<Property> properties() override;
   EXPORT std::vector<std::string> features() override;
   EXPORT void loadModule(const std::string &name, const std::string &image) override;
@@ -71,8 +72,8 @@ public:
   EXPORT ~HsaDeviceQueue() override;
   EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) override;
   EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, void *dst, size_t size, const MaybeCallback &cb) override;
-  EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, std::vector<Type> types,
-                                 std::vector<std::byte> argData, const Policy &policy,
+  EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
+                                 const std::vector<Type> &types, std::vector<std::byte> argData, const Policy &policy,
                                  const MaybeCallback &cb) override;
 };
 

@@ -1,7 +1,7 @@
 #include "test_utils.h"
 #include "llvm_utils.hpp"
 
-std::optional<std::string> polyregion::test_utils::findTestImage(
+std::vector<std::pair<std::string, std::string>> polyregion::test_utils::findTestImage(
     const std::unordered_map<std::string, std::unordered_map<std::string, std::vector<uint8_t>>> &images,
     const polyregion::runtime::Backend &backend, const std::vector<std::string> &features) {
 
@@ -15,15 +15,18 @@ std::optional<std::string> polyregion::test_utils::findTestImage(
   if (auto it = images.find(std::string(nameOfBackend(actualBackend))); it != images.end()) {
     auto entries = it->second;
 
-    if (features.empty() && entries.size() == 1) { // for things like OpenCL which is arch independent
-      auto head = entries.begin()->second;
-      return std::string(head.begin(), head.end());
+    if (features.empty() ) { // for things like OpenCL/Vulkan which is arch independent
+      std::vector<std::pair<std::string, std::string>> out;
+      for (auto &[k, v] : entries)
+        out.emplace_back(k, std::string(v.begin(), v.end()));
+      return out;
     } else {
 
       // Try direct match first, GPUs would just be the ISA itself
       for (auto &f : sortedFeatures) {
         if (auto archAndCode = entries.find(f); archAndCode != entries.end()) {
-          return std::string(archAndCode->second.begin(), archAndCode->second.end());
+
+          return {{archAndCode->first, std::string(archAndCode->second.begin(), archAndCode->second.end())}};
         }
       }
 
@@ -41,7 +44,7 @@ std::optional<std::string> polyregion::test_utils::findTestImage(
         //                  << std::endl;
 
         if (missing.empty()) {
-          return std::string(image.begin(), image.end());
+          return {{arch, std::string(image.begin(), image.end())}};
         }
       }
     }

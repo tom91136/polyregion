@@ -7,6 +7,9 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <ostream>
+#include <queue>
+#include <shared_mutex>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -105,6 +108,44 @@ public:
   std::shared_ptr<Token> acquire();
 };
 
+template <typename T> class BlockingQueue {
+  std::condition_variable condition;
+  std::mutex mutex;
+  std::queue<T> queue;
+  bool shutdown = false;
+
+public:
+  void terminate() {
+    {
+      std::unique_lock<std::mutex> lock(mutex);
+      shutdown = true;
+    }
+    condition.notify_all();
+  }
+
+  void push(T item) {
+    {
+      std::unique_lock<std::mutex> lock(mutex);
+      queue.push(std::move(item));
+    }
+    condition.notify_one();
+  }
+
+  std::pair<std::optional<T>, bool> pop() {
+    std::unique_lock<std::mutex> lock(mutex);
+    while (true) {
+      if (queue.empty()) {
+        if (shutdown) return {{}, false};
+      } else
+        break;
+      condition.wait(lock);
+    }
+    T item(std::move(queue.front()));
+    queue.pop();
+    return {{item}, true};
+  }
+};
+
 class CountedCallbackHandler {
   using Storage = std::unordered_map<uint64_t, Callback>;
   using EntryPtr = std::add_pointer_t<Storage::value_type>;
@@ -114,33 +155,81 @@ public:
   static void consume(void *data);
 };
 
+template <typename K, typename V> class CountedStore {
+  std::shared_mutex mutex;
+  std::atomic<K> counter;
+  std::unordered_map<K, V> allocations;
+
+public:
+  std::pair<K, V &> store(V value) {
+    std::unique_lock writeLock(mutex);
+    while (true) {
+      auto id = this->counter++;
+      if (auto it = allocations.find(id); it != allocations.end()) continue;
+      else {
+        auto inserted = allocations.emplace_hint(it, id, std::move(value));
+        return {id, inserted->second};
+      }
+    }
+  }
+
+  std::optional<V > find(K key) {
+    std::shared_lock readLock(mutex);
+    if (auto it = allocations.find(key); it != allocations.end()) return std::optional{ it->second } ;
+    return {};
+  }
+
+  bool erase(K key) {
+    std::unique_lock writeLock(mutex);
+    return allocations.erase(key) == 1;
+  }
+};
+
+template <typename T> class MemoryObjects {
+  CountedStore<uintptr_t, T> store;
+
+public:
+  uintptr_t malloc(T t) { return store.store(t).first; }
+  std::optional<T> query(uintptr_t ptr) { return store.find(ptr); }
+  void erase(uintptr_t ptr) { store.erase(ptr); }
+};
+
 template <typename M, typename F> class ModuleStore {
 
-  using LoadedModule = std::pair<M, std::unordered_map<std::string, F>>;
+  struct LoadedModule {
+    M first;
+    std::unordered_map<std::string, F> second;
+  };
+  //  using LoadedModule = std::pair<M, std::unordered_map<std::string, F>>;
   std::unordered_map<std::string, LoadedModule> modules = {};
 
   std::string errorPrefix;
   std::function<M(const std::string &)> load;
-  std::function<F(M, const std::string &)> resolve;
+  std::function<F(M, const std::string &, const std::vector<Type> &)> resolve;
   std::function<void(M)> dropModule;
   std::function<void(F)> dropFunction;
 
 public:
-  ModuleStore(
-      decltype(errorPrefix) errorPrefix,                //
-      const decltype(load) &load,                       //
-      const decltype(resolve) &resolve,                 //
-      const decltype(dropModule) &dropModule = []() {}, //
-      const decltype(dropFunction) &dropFunction = []() {})
+  ModuleStore(decltype(errorPrefix) errorPrefix,           //
+              const decltype(load) &load,                  //
+              const decltype(resolve) &resolve,            //
+              const decltype(dropModule) &dropModule = {}, //
+              const decltype(dropFunction) &dropFunction = {})
       : errorPrefix(std::move(errorPrefix)), //
-        load(load), resolve(resolve), dropModule(dropModule), dropFunction(dropFunction) {}
+        load(load), resolve(resolve), dropModule(dropModule), dropFunction(dropFunction) {
+
+    static_assert(std::is_move_constructible<F>::value == std::is_move_constructible<M>::value,
+                  "move constructible mismatch between Module (M) and Func (F)");
+  }
 
   ~ModuleStore() {
     for (auto &[moduleName, loaded] : modules) {
       auto &[m, fns] = loaded;
-      for (auto &[fnName, fn] : fns)
-        dropFunction(fn);
-      dropModule(m);
+      if (dropFunction) {
+        for (auto &[fnName, fn] : fns)
+          dropFunction(std::move(fn));
+      }
+      if (dropModule) dropModule(std::move(m));
     }
   }
 
@@ -154,17 +243,15 @@ public:
 
   bool moduleLoaded(const std::string &name) { return modules.find(name) != modules.end(); }
 
-  F resolveFunction(const std::string &moduleName, const std::string &symbol) {
+  F &resolveFunction(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types) {
     auto moduleIt = modules.find(moduleName);
     if (moduleIt == modules.end())
       throw std::logic_error(errorPrefix + "No module named `" + moduleName + "` was loaded");
     auto &[m, fnTable] = moduleIt->second;
     if (auto it = fnTable.find(symbol); it != fnTable.end()) return it->second;
     else {
-      auto fn = resolve(m, symbol);
-      //      CHECKED(hipModuleGetFunction(&fn, m, symbol.c_str()));
-      fnTable.emplace_hint(it, symbol, fn);
-      return fn;
+      auto inserted = fnTable.emplace_hint(it, symbol, resolve(m, symbol, types));
+      return inserted->second;
     }
   }
 };
@@ -182,6 +269,7 @@ struct EXPORT Dim3 {
     if (z < 1) throw std::logic_error("z < 1");
   }
   constexpr Dim3() : Dim3(1, 1, 1) {}
+  friend std::ostream &operator<<(std::ostream &os, const Dim3 &dim3);
 };
 
 struct EXPORT Policy {
@@ -206,6 +294,7 @@ enum class EXPORT Backend {
   HIP,
   HSA,
   OpenCL,
+  Vulkan,
   SHARED_OBJ,
   RELOCATABLE_OBJ,
 };
@@ -216,6 +305,7 @@ constexpr std::string_view EXPORT nameOfBackend(const Backend &b) {
     case Backend::HIP: return "HIP";
     case Backend::HSA: return "HSA";
     case Backend::OpenCL: return "OpenCL";
+    case Backend::Vulkan: return "Vulkan";
     case Backend::SHARED_OBJ: return "SHARED_OBJ";
     case Backend::RELOCATABLE_OBJ: return "RELOCATABLE_OBJ";
   }
@@ -243,8 +333,8 @@ public:
   };
 
   virtual EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                         std::vector<Type> types, std::vector<std::byte> argData, const Policy &policy,
-                                         const MaybeCallback &cb) = 0;
+                                         const std::vector<Type> &types, std::vector<std::byte> argData,
+                                         const Policy &policy, const MaybeCallback &cb) = 0;
 
   virtual EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
                                          const ArgBuffer &buffer, const Policy &policy, const MaybeCallback &cb) {
@@ -258,10 +348,11 @@ public:
   [[nodiscard]] virtual EXPORT int64_t id() = 0;
   [[nodiscard]] virtual EXPORT std::string name() = 0;
   [[nodiscard]] virtual EXPORT bool sharedAddressSpace() = 0;
+  [[nodiscard]] virtual EXPORT bool singleEntryPerModule() = 0;
   [[nodiscard]] virtual EXPORT std::vector<Property> properties() = 0;
   [[nodiscard]] virtual EXPORT std::vector<std::string> features() = 0;
   virtual EXPORT void loadModule(const std::string &name, const std::string &image) = 0;
-  virtual EXPORT bool moduleLoaded(const std::string &name) = 0;
+  [[nodiscard]] virtual EXPORT bool moduleLoaded(const std::string &name) = 0;
   [[nodiscard]] virtual EXPORT uintptr_t malloc(size_t size, Access access) = 0;
 
   template <typename T> [[nodiscard]] EXPORT uintptr_t mallocTyped(size_t count, Access access) {

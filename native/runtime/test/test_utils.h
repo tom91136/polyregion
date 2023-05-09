@@ -10,7 +10,7 @@
 
 namespace polyregion::test_utils {
 
-std::optional<std::string>
+std::vector<std::pair<std::string, std::string>>
 findTestImage(const std::unordered_map<std::string, std::unordered_map<std::string, std::vector<uint8_t>>> &images,
               const polyregion::runtime::Backend &backend, const std::vector<std::string> &features);
 

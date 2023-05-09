@@ -1,6 +1,9 @@
 
 #include "cl_platform.h"
+#include <cassert>
 #include <chrono>
+#include <cstring>
+#include <iostream>
 #include <thread>
 using namespace polyregion::runtime;
 using namespace polyregion::runtime::cl;
@@ -129,7 +132,7 @@ ClDevice::ClDevice(cl_device_id device)
             TRACE();
             return program;
           },
-          [this](auto &&m, auto &&name) {
+          [this](auto &&m, auto &&name, auto) {
             TRACE();
             context.touch();
             TRACE();
@@ -142,16 +145,10 @@ ClDevice::ClDevice(cl_device_id device)
           [&](auto &&f) {
             TRACE();
             CHECKED(clReleaseKernel(f));
-          }),
-      bufferCounter(), allocations() {
+          }) {
   TRACE();
 }
-cl_mem ClDevice::queryMemObject(uintptr_t ptr) {
-  std::shared_lock readLock(mutex);
-  if (auto it = allocations.find(ptr); it != allocations.end()) return it->second;
-  else
-    throw std::logic_error(std::string(ERROR_PREFIX) + "Illegal memory object: " + std::to_string(ptr));
-}
+
 int64_t ClDevice::id() {
   TRACE();
   return reinterpret_cast<int64_t>(*device);
@@ -161,6 +158,10 @@ std::string ClDevice::name() {
   return deviceName;
 }
 bool ClDevice::sharedAddressSpace() {
+  TRACE();
+  return false;
+}
+bool ClDevice::singleEntryPerModule() {
   TRACE();
   return false;
 }
@@ -196,27 +197,28 @@ uintptr_t ClDevice::malloc(size_t size, Access access) {
     case Access::RW:
     default: flags = CL_MEM_READ_WRITE; break;
   }
-  std::unique_lock writeLock(mutex);
-  while (true) {
-    auto id = this->bufferCounter++;
-    if (auto it = allocations.find(id); it != allocations.end()) continue;
-    else {
-      allocations.emplace_hint(it, id, OUT_CHECKED(clCreateBuffer(*context, flags, size, nullptr, OUT_ERR)));
-      return id;
-    }
-  }
+  return memoryObjects.malloc(OUT_CHECKED(clCreateBuffer(*context, flags, size, nullptr, OUT_ERR)));
 }
+
 void ClDevice::free(uintptr_t ptr) {
   TRACE();
   context.touch();
-  CHECKED(clReleaseMemObject(queryMemObject(ptr)));
-  std::unique_lock writeLock(mutex);
-  allocations.erase(ptr);
+
+  if (auto mem = memoryObjects.query(ptr); mem) {
+    CHECKED(clReleaseMemObject(*mem));
+    memoryObjects.erase(ptr);
+  } else
+    throw std::logic_error(std::string(ERROR_PREFIX) + "Illegal memory object: " + std::to_string(ptr));
 }
 std::unique_ptr<DeviceQueue> ClDevice::createQueue() {
   TRACE();
-  return std::make_unique<ClDeviceQueue>(store, OUT_CHECKED(clCreateCommandQueue(*context, *device, 0, OUT_ERR)),
-                                         [this](auto &&ptr) { return queryMemObject(ptr); });
+  return std::make_unique<ClDeviceQueue>(
+      store, OUT_CHECKED(clCreateCommandQueue(*context, *device, 0, OUT_ERR)), [this](auto &&ptr) {
+        if (auto mem = memoryObjects.query(ptr); mem) {
+          return *mem;
+        } else
+          throw std::logic_error(std::string(ERROR_PREFIX) + "Illegal memory object: " + std::to_string(ptr));
+      });
 }
 ClDevice::~ClDevice() { TRACE(); }
 
@@ -260,13 +262,13 @@ void ClDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t si
   enqueueCallback(cb, event);
 }
 void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                       std::vector<Type> types, std::vector<std::byte> argData, const Policy &policy,
-                                       const MaybeCallback &cb) {
+                                       const std::vector<Type> &types, std::vector<std::byte> argData,
+                                       const Policy &policy, const MaybeCallback &cb) {
   TRACE();
   if (types.back() != Type::Void)
     throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported, was " +
                            runtime::typeName(types.back()));
-  auto kernel = store.resolveFunction(moduleName, symbol);
+  auto kernel = store.resolveFunction(moduleName, symbol, types);
   auto toSize = [](Type t) -> size_t {
     switch (t) {
       case Type::Ptr: return sizeof(cl_mem);
@@ -285,7 +287,10 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
     auto tpe = types[i];
     switch (tpe) {
       case Type::Ptr: {
-        cl_mem mem = queryMemObject(*static_cast<uintptr_t *>(rawPtr));
+        static_assert(byteOfType(Type::Ptr) == sizeof(uintptr_t));
+        uintptr_t ptr = {};
+        std::memcpy(&ptr, rawPtr, byteOfType(Type::Ptr));
+        cl_mem mem = queryMemObject(ptr);
         CHECKED(clSetKernelArg(kernel, i, toSize(tpe), &mem));
       } break;
       case Type::Scratch: {

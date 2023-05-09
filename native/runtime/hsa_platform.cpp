@@ -190,7 +190,7 @@ HsaDevice::HsaDevice(uint32_t queueSize, hsa_agent_t hostAgent, hsa_agent_t agen
                                      "Cannot to extract AMDGPU METADATA from image: " + e.what());
             }
           },
-          [this](auto &&m, auto &&name) {
+          [this](auto &&m, auto &&name, auto) {
             TRACE();
             auto [exec, offsets] = m;
             hsa_executable_symbol_t symbol;
@@ -278,6 +278,10 @@ std::string HsaDevice::name() {
   return deviceName;
 }
 bool HsaDevice::sharedAddressSpace() {
+  TRACE();
+  return false;
+}
+bool HsaDevice::singleEntryPerModule() {
   TRACE();
   return false;
 }
@@ -386,13 +390,13 @@ void HsaDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t s
   });
 }
 void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                        std::vector<Type> types, std::vector<std::byte> argData, const Policy &policy,
+                                        const std::vector<Type> &types, std::vector<std::byte> argData, const Policy &policy,
                                         const MaybeCallback &cb) {
   TRACE();
   if (types.back() != Type::Void)
     throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported");
 
-  auto [fn, argOffsets] = device.store.resolveFunction(moduleName, symbol);
+  auto [fn, argOffsets] = device.store.resolveFunction(moduleName, symbol, types);
 
   if (argOffsets.size() < types.size() - 1) {
     throw std::logic_error(std::string(ERROR_PREFIX) + "Symbol `" + symbol + "` expects at least " +
