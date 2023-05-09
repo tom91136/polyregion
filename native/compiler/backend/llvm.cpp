@@ -879,7 +879,6 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
   //               : B.CreateICmpNE(cond, llvm::ConstantInt::get(llvm::Type::getInt8Ty(C), 0, true));
   //  };
 
-  fprintf(stderr, "%s\n", to_string(stmt).c_str());
   return variants::total(
       *stmt,
       [&](const Stmt::Block &x) -> BlockKind {

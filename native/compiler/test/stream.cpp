@@ -21,10 +21,6 @@ using namespace NullaryIntrinsicKind;
 
 using namespace polyregion::polyast::dsl;
 
-TEST_CASE("GPU BabelStream") {
-  //
-}
-
 Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
   using Stmts = std::vector<Stmt::Any>;
   static auto empty = [](auto, auto) -> Stmts { return {}; };
@@ -191,11 +187,11 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
 
   //
 
-  std::cout << repr(copy) << std::endl;
-  std::cout << repr(mul) << std::endl;
-  std::cout << repr(add) << std::endl;
-  std::cout << repr(triad) << std::endl;
-  std::cout << repr(dot) << std::endl;
+  //  std::cout << repr(copy) << std::endl;
+  //  std::cout << repr(mul) << std::endl;
+  //  std::cout << repr(add) << std::endl;
+  //  std::cout << repr(triad) << std::endl;
+  //  std::cout << repr(dot) << std::endl;
 
   auto entry = function("entry", {}, Unit)({ret(UnitConst())});
   return Program(entry, {copy, mul, add, triad, dot}, {});
@@ -203,54 +199,87 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
 
 TEST_CASE("BabelStream") {
 
-  polyregion::compiler::initialise();
+  // x86-64 CMOV
+  // x86-64-v2 CMPXCHG16B
+  // x86-64-v3 AVX,AVX2
+  // x86-64-v4 AVX512
 
-  auto p = mkStreamProgram("_float", Float, true);
+  std::vector<std::tuple<runtime::Backend, compiler::Target, std::string>> configs = {
+      {runtime::Backend::OpenCL, compiler::Target::Source_C_OpenCL1_1, ""},
+      {runtime::Backend::CUDA, compiler::Target::Object_LLVM_NVPTX64, "sm_35"},
+      {runtime::Backend::HIP, compiler::Target::Object_LLVM_AMDGCN, "gfx1012"},
+      {runtime::Backend::RELOCATABLE_OBJ, compiler::Target::Object_LLVM_x86_64, "x86-64-v3"},
+      //      {runtime::Backend::SHARED_OBJ, compiler::Target::Object_LLVM_x86_64, "x86-64-v3"},
+  };
 
+  auto [backend, target, arch] = GENERATE_REF(from_range(configs));
+
+  auto cpu = backend == runtime::Backend::RELOCATABLE_OBJ || backend == runtime::Backend::SHARED_OBJ;
+
+  auto p = mkStreamProgram("_float", Float, !cpu);
   INFO(repr(p));
-  auto c = polyregion::compiler::compile(p, {polyregion::compiler::Target::Source_C_OpenCL1_1, ""},
-                                         polyregion::compiler::Opt::O3);
 
-  //  auto c = polyregion::compiler::compile(p, {polyregion::compiler::Target::Object_LLVM_AMDGCN, "gfx1012"},
-  //                                         polyregion::compiler::Opt::O3);
+  auto platform = runtime::Platform::of(backend);
+  DYNAMIC_SECTION("backend=" << nameOfBackend(backend) << " arch=" << arch) {
 
-  //  auto c = polyregion::compiler::compile(p, {polyregion::compiler::Target::Object_LLVM_NVPTX64, "sm_60"},
-  //                                         polyregion::compiler::Opt::O3);
+    polyregion::compiler::initialise();
+    auto c = polyregion::compiler::compile(p, {target, arch}, polyregion::compiler::Opt::O3);
+    //    std::cerr << c << std::endl;
+    INFO(c);
+    REQUIRE(c.binary);
 
-  //      auto c = polyregion::compiler::compile(p, {polyregion::compiler::Target::Object_LLVM_x86_64, "znver3"},
-  //                                             polyregion::compiler::Opt::O3);
+    std::string image(c.binary->data(), c.binary->size());
 
-  std::cout << c << std::endl;
-  //
-  std::string image(c.binary->data(), c.binary->size());
+    const auto relTolerance = 0.008f;
 
-  auto platform = runtime::Platform::of(runtime::Backend::OpenCL);
-  const auto relTolerance = 0.008f;
-  for (auto &d : platform->enumerate()) {
-    polyregion::stream::runStream<float>(
-        runtime::Type::Float32, //
-        "_float",               //
-        33554432,                //
-        100,                     //
-        256,                     //
-        std::move(d),            //
-        image,                   //
-        true,                    //
-        [](auto actual, auto tolerance) {
-          if (actual >= tolerance) {
-            std::cerr << "Tolerance (" << tolerance << ") exceeded for value " << actual << std::endl;
-          }
-        }, //
-        [=](auto actual) {
-          if (actual >= relTolerance) {
-            std::cerr << "Tolerance (" << relTolerance << ") exceeded for value " << actual << std::endl;
-          }
-        } //
-    );
+    for (auto &d : platform->enumerate()) {
+
+      std::string suffix = "_float";
+
+      polyregion::stream::Kernels<std::pair<std::string, std::string>> kernelSpecs;
+      if (d->singleEntryPerModule()) {
+        //      for (auto &[module_, data] : imageGroups)
+        //        d->loadModule(module_, data);
+        throw std::logic_error("SPIRV impl");
+        kernelSpecs = {.copy = {"stream_copy" + suffix, "main"},
+                       .mul = {"stream_mul" + suffix, "main"},
+                       .add = {"stream_add" + suffix, "main"},
+                       .triad = {"stream_triad" + suffix, "main"},
+                       .dot = {"stream_dot" + suffix, "main"}};
+      } else {
+
+        d->loadModule("module", image);
+        kernelSpecs = {.copy = {"module", "stream_copy" + suffix},
+                       .mul = {"module", "stream_mul" + suffix},
+                       .add = {"module", "stream_add" + suffix},
+                       .triad = {"module", "stream_triad" + suffix},
+                       .dot = {"module", "stream_dot" + suffix}};
+      }
+
+      polyregion::stream::runStream<float>(
+          runtime::Type::Float32,                              //
+          33554432,                                            //
+          100,                                                 //
+          cpu ? std::thread::hardware_concurrency() / 2 : 256, //
+          std::move(d),                                        //
+          kernelSpecs,                                         //
+          true,                                                //
+          [](auto actual, auto tolerance) {
+            if (actual >= tolerance) {
+              std::cerr << "Tolerance (" << tolerance << ") exceeded for value " << actual << std::endl;
+            }
+          }, //
+          [=](auto actual) {
+            if (actual >= relTolerance) {
+              std::cerr << "Tolerance (" << relTolerance << ") exceeded for value " << actual << std::endl;
+            }
+          } //
+      );
+    }
+
+    CHECK(c.messages == "");
+    CHECK(c.binary != std::nullopt);
+
+    //
   }
-
-  CHECK(c.messages == "");
-  CHECK(c.binary != std::nullopt);
-
-  //
 }
