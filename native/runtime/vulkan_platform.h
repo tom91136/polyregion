@@ -1,13 +1,10 @@
 #pragma once
 
 #include "runtime.h"
+#include <thread>
 
 #define VK_NO_PROTOTYPES
-// #define VK_USE_PLATFORM_ANDROID_KHR 1
-// #define KOMPUTE_OPT_USE_SPDLOG 1
 
-// #include "kompute/Core.hpp"
-// #include "kompute/Manager.hpp"
 #include "json.hpp"
 #include "vulkan/vulkan_raii.hpp"
 
@@ -144,8 +141,7 @@ class EXPORT VulkanDeviceQueue : public DeviceQueue {
   void enqueueCallback(const MaybeCallback &cb);
 
 public:
-  EXPORT explicit VulkanDeviceQueue(
-                                    decltype(ctx) ctx,                     //
+  EXPORT explicit VulkanDeviceQueue(decltype(ctx) ctx,                     //
                                     decltype(allocator) allocator,         //
                                     decltype(computeQueue) computeQueue,   //
                                     decltype(transferQueue) transferQueue, //

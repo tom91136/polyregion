@@ -56,17 +56,9 @@ target_link_libraries(runtime-lib PRIVATE
         ${DL_LIB}
         libffi
         Vulkan-Headers
-        #        fmt
-        #        spdlog::spdlog
-        #        pthread
-        #        dl
         )
 
 target_link_libraries(runtime-drv PRIVATE runtime-lib
-        #        Vulkan-Headers
-        #        fmt
-        #        spdlog::spdlog
-
         )
 target_link_libraries(runtime-tests PRIVATE runtime-lib Catch2::Catch2WithMain)
 

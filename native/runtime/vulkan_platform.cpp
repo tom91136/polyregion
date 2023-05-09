@@ -48,7 +48,7 @@ static vk::raii::Instance createInstance(std::vector<const char *> &extensions, 
   auto insertSupported = [](auto &from, auto &to, auto &available, auto f) {
     std::copy_if(from.begin(), from.end(), std::back_inserter(to), [&](auto ext) {
       return std::find_if(available.begin(), available.end(),
-                          [&](auto avail) { return std::string(f(avail)) == ext; }) != available.end();
+                          [&](auto avail) { return std::string_view(f(avail)) == ext; }) != available.end();
     });
   };
 
