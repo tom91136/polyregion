@@ -290,7 +290,7 @@ static MemObject allocate(VmaAllocator &allocator, size_t size) {
   VmaAllocation allocation{};
   VmaAllocationInfo allocInfo;
   vmaCreateBuffer(allocator, &bufferInfo, &allocCreateInfo, &buffer, &allocation, &allocInfo);
-  return {buffer, allocation, allocInfo.pMappedData, size};
+  return {vk::Buffer(buffer), allocation, allocInfo.pMappedData, size};
 }
 
 uintptr_t VulkanDevice::malloc(size_t size, Access) {
@@ -300,7 +300,7 @@ uintptr_t VulkanDevice::malloc(size_t size, Access) {
 void VulkanDevice::free(uintptr_t ptr) {
   TRACE();
   if (auto obj = memoryObjects.query(ptr); obj) {
-    vmaDestroyBuffer(allocator, (*obj)->buffer, (*obj)->allocation);
+    vmaDestroyBuffer(allocator, VkBuffer((*obj)->buffer), (*obj)->allocation);
     memoryObjects.erase(ptr);
   } else
     throw std::logic_error(std::string(ERROR_PREFIX) + "Illegal memory object: " + std::to_string(ptr));
@@ -467,7 +467,7 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
         fn.cmdPool.reset();
         enqueuedStore.erase(key);
         if (auto argObj = (*enqueued_)->argObject; argObj) {
-          vmaDestroyBuffer(allocator, argObj->buffer, argObj->allocation);
+          vmaDestroyBuffer(allocator, VkBuffer(argObj->buffer), argObj->allocation);
         }
       }
       (*cb)();
@@ -477,7 +477,7 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
     computeQueue.submit(vk::SubmitInfo{{}, {}, *fn.cmdBuffer}, *fence);
     ctx.waitForFences({*fence}, true, uint64_t(-1));
     fn.cmdPool.reset();
-    vmaDestroyBuffer(allocator, argObj->buffer, argObj->allocation);
+    vmaDestroyBuffer(allocator, VkBuffer(argObj->buffer), argObj->allocation);
   }
 }
 
