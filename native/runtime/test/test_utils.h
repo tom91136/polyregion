@@ -9,9 +9,10 @@
 #include <vector>
 
 namespace polyregion::test_utils {
+using ImageGroups = std::unordered_map<std::string, std::unordered_map<std::string, std::vector<uint8_t>>>;
 
-std::vector<std::pair<std::string, std::string>>
-findTestImage(const std::unordered_map<std::string, std::unordered_map<std::string, std::vector<uint8_t>>> &images,
-              const polyregion::runtime::Backend &backend, const std::vector<std::string> &features);
+std::vector<std::pair<std::string, std::string>> findTestImage(const ImageGroups &images,
+                                                               const polyregion::runtime::Backend &backend,
+                                                               const std::vector<std::string> &features);
 
 } // namespace polyregion::test_utils

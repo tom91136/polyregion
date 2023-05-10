@@ -3,6 +3,7 @@
 #include "kernels/generated_cpu_stream.hpp"
 #include "kernels/generated_gpu_stream_double.hpp"
 #include "kernels/generated_gpu_stream_float.hpp"
+#include "kernels/generated_msl_stream_float.hpp"
 #include "kernels/generated_spirv_glsl_stream.hpp"
 #include "test_utils.h"
 #include "utils.hpp"
@@ -87,11 +88,24 @@ TEST_CASE("GPU BabelStream") {
   WARN("Make sure ASAN is disabled otherwise most GPU backends will fail with memory related errors");
 #endif
   DYNAMIC_SECTION("float") {
-    testStream<float>(generated::gpu::stream_float, Type::Float32, "_float", 0.008f, //
-                      {1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072},         //
-                      {1, 2, 32, 64, 128, 256},                                      //
-                      {1, 2, 10},                                                    //
-                      {Backend::CUDA, Backend::OpenCL, Backend::HIP, Backend::HSA});
+    polyregion::test_utils::ImageGroups images{};
+    images.insert(generated::gpu::stream_float.begin(), generated::gpu::stream_float.end());
+#ifdef RUNTIME_ENABLE_METAL
+    images.insert(generated::msl::stream_float.begin(), generated::msl::stream_float.end());
+#endif
+    testStream<float>(images, Type::Float32, "_float", 0.008f,               //
+                      {1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072}, //
+                      {1, 2, 32, 64, 128, 256},                              //
+                      {1, 2, 10},                                            //
+                      {
+                          Backend::CUDA,
+                          Backend::OpenCL,
+                          Backend::HIP,
+                          Backend::HSA,
+#ifdef RUNTIME_ENABLE_METAL
+                          Backend::Metal,
+#endif
+                      });
   }
   DYNAMIC_SECTION("double") {
     testStream<double>(generated::gpu::stream_double, Type::Double64, "_double", 0.008f, //
@@ -99,21 +113,6 @@ TEST_CASE("GPU BabelStream") {
                        {1, 2, 32, 64, 128, 256},                                         //
                        {1, 2, 10},                                                       //
                        {Backend::CUDA, Backend::OpenCL, Backend::HIP, Backend::HSA});
-  }
-}
-
-TEST_CASE("Metal BabelStream") {
-  DYNAMIC_SECTION("float") {
-
-    auto xs = polyregion::read_struct<uint8_t>("/Users/tom/polyregion/native/runtime/test/kernels/stream.msl");
-    const std::unordered_map<std::string, std::unordered_map<std::string, std::vector<uint8_t>>> stream_float = {
-        {"Metal", {{"", xs}}}};
-
-    testStream<float>(stream_float, Type::Float32, "_float", 0.008f,         //
-                      {1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072}, //
-                      {1, 2, 32, 64, 128, 256},                              //
-                      {1, 2, 10},                                            //
-                      {Backend::Metal});
   }
 }
 

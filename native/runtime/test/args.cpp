@@ -2,6 +2,7 @@
 #include "io.hpp"
 #include "kernels/generated_cpu_args.hpp"
 #include "kernels/generated_gpu_args.hpp"
+#include "kernels/generated_msl_args.hpp"
 #include "kernels/generated_spirv_glsl_args.hpp"
 #include "test_utils.h"
 #include "utils.hpp"
@@ -89,25 +90,27 @@ TEST_CASE("GPU Args") {
 #ifndef NDEBUG
   WARN("Make sure ASAN is disabled otherwise most GPU backends will fail with memory related errors");
 #endif
-  testArgs(generated::gpu::args,                                        //
-           {Backend::CUDA, Backend::OpenCL, Backend::HIP, Backend::HSA} //
+  polyregion::test_utils::ImageGroups images{};
+  images.insert(generated::gpu::args.begin(), generated::gpu::args.end());
+#ifdef RUNTIME_ENABLE_METAL
+  images.insert(generated::msl::args.begin(), generated::msl::args.end());
+#endif
+  testArgs(generated::gpu::args, //
+           {
+               Backend::CUDA,
+               Backend::OpenCL,
+               Backend::HIP,
+               Backend::HSA,
+#ifdef RUNTIME_ENABLE_METAL
+               Backend::Metal,
+#endif
+           } //
   );
 }
 
 TEST_CASE("SPIRV Args") {
   testArgs(generated::spirv::glsl_args, //
            {Backend::Vulkan}            //
-  );
-}
-
-TEST_CASE("Metal Args") {
-  auto xs = polyregion::read_struct<uint8_t>("/Users/tom/polyregion/native/runtime/test/kernels/args.msl");
-  const std::unordered_map<std::string, std::unordered_map<std::string, std::vector<uint8_t>>> stream_float = {
-      {"Metal", {{"", xs}}}};
-
-
-  testArgs(stream_float, //
-          {Backend::Metal}           //
   );
 }
 

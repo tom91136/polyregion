@@ -1,9 +1,9 @@
 #include "test_utils.h"
 #include "llvm_utils.hpp"
 
-std::vector<std::pair<std::string, std::string>> polyregion::test_utils::findTestImage(
-    const std::unordered_map<std::string, std::unordered_map<std::string, std::vector<uint8_t>>> &images,
-    const polyregion::runtime::Backend &backend, const std::vector<std::string> &features) {
+std::vector<std::pair<std::string, std::string>>
+polyregion::test_utils::findTestImage(const ImageGroups &images, const polyregion::runtime::Backend &backend,
+                                      const std::vector<std::string> &features) {
 
   auto sortedFeatures = features;
   std::sort(sortedFeatures.begin(), sortedFeatures.end());
@@ -15,7 +15,7 @@ std::vector<std::pair<std::string, std::string>> polyregion::test_utils::findTes
   if (auto it = images.find(std::string(nameOfBackend(actualBackend))); it != images.end()) {
     auto entries = it->second;
 
-    if (features.empty() ) { // for things like OpenCL/Vulkan which is arch independent
+    if (features.empty()) { // for things like OpenCL/Vulkan which is arch independent
       std::vector<std::pair<std::string, std::string>> out;
       for (auto &[k, v] : entries)
         out.emplace_back(k, std::string(v.begin(), v.end()));

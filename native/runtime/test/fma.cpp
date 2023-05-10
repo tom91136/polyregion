@@ -2,6 +2,7 @@
 #include "io.hpp"
 #include "kernels/generated_cpu_fma.hpp"
 #include "kernels/generated_gpu_fma.hpp"
+#include "kernels/generated_msl_fma.hpp"
 #include "kernels/generated_spirv_glsl_fma.hpp"
 #include "test_utils.h"
 #include "utils.hpp"
@@ -54,7 +55,7 @@ template <typename I> void testFma(I images, std::initializer_list<Backend> back
           DYNAMIC_SECTION("a=" << a << " b=" << b << " c=" << c) {
             auto q = d->createQueue();
             auto out_d = d->template mallocTyped<float>(1, Access::RW);
-//
+            //
             ArgBuffer buffer;
             if (d->sharedAddressSpace()) buffer.append(Type::Long64, nullptr);
 
@@ -71,7 +72,15 @@ template <typename I> void testFma(I images, std::initializer_list<Backend> back
             waitAll([&](auto &h) { q->enqueueDeviceToHostAsyncTyped(out_d, &out, 1, h); });
             auto expected = a * b + c;
             INFO("fma actual=" << out << " expected=" << expected);
-            CHECK_THAT(out, Catch::Matchers::WithinULP(expected, 0));
+
+            if (c == 0 && //
+                ((a == std::numeric_limits<float>::min() && b == std::numeric_limits<float>::epsilon()) ||
+                 (b == std::numeric_limits<float>::min() && a == std::numeric_limits<float>::epsilon()))) {
+              CHECK_THAT(out, Catch::Matchers::WithinRel(0.f) || Catch::Matchers::WithinRel(expected));
+            } else {
+              CHECK_THAT(out, Catch::Matchers::WithinRel(expected));
+            }
+
             d->free(out_d);
           }
         } else {
@@ -88,19 +97,21 @@ TEST_CASE("GPU FMA") {
 #ifndef NDEBUG
   WARN("Make sure ASAN is disabled otherwise most GPU backends will fail with memory related errors");
 #endif
-  testFma(generated::gpu::fma,                                         //
-          {Backend::CUDA, Backend::OpenCL, Backend::HIP, Backend::HSA} //
-  );
-}
-
-TEST_CASE("Metal FMA") {
-  auto xs = polyregion::read_struct<uint8_t>("/Users/tom/polyregion/native/runtime/test/kernels/fma.msl");
-  const std::unordered_map<std::string, std::unordered_map<std::string, std::vector<uint8_t>>> stream_float = {
-      {"Metal", {{"", xs}}}};
-
-
-  testFma(stream_float, //
-          {Backend::Metal}           //
+  polyregion::test_utils::ImageGroups images{};
+  images.insert(generated::gpu::fma.begin(), generated::gpu::fma.end());
+#ifdef RUNTIME_ENABLE_METAL
+  images.insert(generated::msl::fma.begin(), generated::msl::fma.end());
+#endif
+  testFma(generated::gpu::fma, //
+          {
+              Backend::CUDA,
+              Backend::OpenCL,
+              Backend::HIP,
+              Backend::HSA,
+#ifdef RUNTIME_ENABLE_METAL
+              Backend::Metal,
+#endif
+          } //
   );
 }
 
