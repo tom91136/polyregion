@@ -26,7 +26,8 @@
     #define __PRETTY_FUNCTION__ __FUNCSIG__
   #endif
 
-//  #define TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this, __PRETTY_FUNCTION__)
+//  #define TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this,
+//  __PRETTY_FUNCTION__)
   #define TRACE()
 
 #endif
@@ -173,9 +174,9 @@ public:
     }
   }
 
-  std::optional<V > find(K key) {
+  std::optional<V> find(K key) {
     std::shared_lock readLock(mutex);
-    if (auto it = allocations.find(key); it != allocations.end()) return std::optional{ it->second } ;
+    if (auto it = allocations.find(key); it != allocations.end()) return std::optional{it->second};
     return {};
   }
 
@@ -295,6 +296,7 @@ enum class EXPORT Backend {
   HSA,
   OpenCL,
   Vulkan,
+  Metal,
   SHARED_OBJ,
   RELOCATABLE_OBJ,
 };
@@ -306,6 +308,7 @@ constexpr std::string_view EXPORT nameOfBackend(const Backend &b) {
     case Backend::HSA: return "HSA";
     case Backend::OpenCL: return "OpenCL";
     case Backend::Vulkan: return "Vulkan";
+    case Backend::Metal: return "Metal";
     case Backend::SHARED_OBJ: return "SHARED_OBJ";
     case Backend::RELOCATABLE_OBJ: return "RELOCATABLE_OBJ";
   }

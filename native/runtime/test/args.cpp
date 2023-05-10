@@ -1,4 +1,5 @@
 #include "concurrency_utils.hpp"
+#include "io.hpp"
 #include "kernels/generated_cpu_args.hpp"
 #include "kernels/generated_gpu_args.hpp"
 #include "kernels/generated_spirv_glsl_args.hpp"
@@ -96,6 +97,17 @@ TEST_CASE("GPU Args") {
 TEST_CASE("SPIRV Args") {
   testArgs(generated::spirv::glsl_args, //
            {Backend::Vulkan}            //
+  );
+}
+
+TEST_CASE("Metal Args") {
+  auto xs = polyregion::read_struct<uint8_t>("/Users/tom/polyregion/native/runtime/test/kernels/args.msl");
+  const std::unordered_map<std::string, std::unordered_map<std::string, std::vector<uint8_t>>> stream_float = {
+      {"Metal", {{"", xs}}}};
+
+
+  testArgs(stream_float, //
+          {Backend::Metal}           //
   );
 }
 

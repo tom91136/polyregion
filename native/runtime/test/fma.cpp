@@ -1,4 +1,5 @@
 #include "concurrency_utils.hpp"
+#include "io.hpp"
 #include "kernels/generated_cpu_fma.hpp"
 #include "kernels/generated_gpu_fma.hpp"
 #include "kernels/generated_spirv_glsl_fma.hpp"
@@ -53,7 +54,7 @@ template <typename I> void testFma(I images, std::initializer_list<Backend> back
           DYNAMIC_SECTION("a=" << a << " b=" << b << " c=" << c) {
             auto q = d->createQueue();
             auto out_d = d->template mallocTyped<float>(1, Access::RW);
-
+//
             ArgBuffer buffer;
             if (d->sharedAddressSpace()) buffer.append(Type::Long64, nullptr);
 
@@ -89,6 +90,17 @@ TEST_CASE("GPU FMA") {
 #endif
   testFma(generated::gpu::fma,                                         //
           {Backend::CUDA, Backend::OpenCL, Backend::HIP, Backend::HSA} //
+  );
+}
+
+TEST_CASE("Metal FMA") {
+  auto xs = polyregion::read_struct<uint8_t>("/Users/tom/polyregion/native/runtime/test/kernels/fma.msl");
+  const std::unordered_map<std::string, std::unordered_map<std::string, std::vector<uint8_t>>> stream_float = {
+      {"Metal", {{"", xs}}}};
+
+
+  testFma(stream_float, //
+          {Backend::Metal}           //
   );
 }
 

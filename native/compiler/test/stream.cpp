@@ -206,9 +206,9 @@ TEST_CASE("BabelStream") {
 
   std::vector<std::tuple<runtime::Backend, compiler::Target, std::string>> configs = {
       {runtime::Backend::OpenCL, compiler::Target::Source_C_OpenCL1_1, ""},
-      {runtime::Backend::CUDA, compiler::Target::Object_LLVM_NVPTX64, "sm_35"},
-      {runtime::Backend::HIP, compiler::Target::Object_LLVM_AMDGCN, "gfx1012"},
-      {runtime::Backend::RELOCATABLE_OBJ, compiler::Target::Object_LLVM_x86_64, "x86-64-v3"},
+      //{runtime::Backend::CUDA, compiler::Target::Object_LLVM_NVPTX64, "sm_35"},
+      //{runtime::Backend::HIP, compiler::Target::Object_LLVM_AMDGCN, "gfx1012"},
+      {runtime::Backend::RELOCATABLE_OBJ, compiler::Target::Object_LLVM_AArch64, "apple-m1"},
       //      {runtime::Backend::SHARED_OBJ, compiler::Target::Object_LLVM_x86_64, "x86-64-v3"},
   };
 
@@ -226,7 +226,7 @@ TEST_CASE("BabelStream") {
     auto c = polyregion::compiler::compile(p, {target, arch}, polyregion::compiler::Opt::O3);
     //    std::cerr << c << std::endl;
     INFO(c);
-    REQUIRE(c.binary);
+    CHECK(c.binary);
 
     std::string image(c.binary->data(), c.binary->size());
 

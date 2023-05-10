@@ -7,6 +7,7 @@
 #include "cuda_platform.h"
 #include "hip_platform.h"
 #include "hsa_platform.h"
+#include "metal_platform.h"
 #include "io.hpp"
 #include "object_platform.h"
 #include "runtime.h"
@@ -250,17 +251,11 @@ static uint8_t hsacoKernelSourcegfx803[]{
 void run() {
 
   using namespace polyregion::runtime;
-  using namespace polyregion::runtime::object;
-  using namespace polyregion::runtime::cuda;
-  using namespace polyregion::runtime::hip;
-  using namespace polyregion::runtime::hsa;
-  using namespace polyregion::runtime::cl;
-  using namespace polyregion::runtime::vulkan;
 
   std::vector<std::unique_ptr<Platform>> rts;
 
   try {
-    rts.push_back(std::make_unique<RelocatablePlatform>());
+    rts.push_back(std::make_unique<object::RelocatablePlatform>());
   } catch (const std::exception &e) {
     std::cerr << "[REL] " << e.what() << std::endl;
   }

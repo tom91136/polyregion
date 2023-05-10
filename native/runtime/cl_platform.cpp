@@ -113,7 +113,7 @@ ClDevice::ClDevice(cl_device_id device)
             auto imageData = image.data();
             auto imageLen = image.size();
             auto program = OUT_CHECKED(clCreateProgramWithSource(*context, 1, &imageData, &imageLen, OUT_ERR));
-            const std::string compilerArgs = "-Werror";
+            const std::string compilerArgs = "";
             cl_int result = clBuildProgram(program, 1, &(*this->device), compilerArgs.data(), nullptr, nullptr);
             if (result != CL_SUCCESS) {
               size_t len;

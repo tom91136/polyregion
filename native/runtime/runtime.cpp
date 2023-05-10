@@ -9,6 +9,7 @@
 #include "cuda_platform.h"
 #include "hip_platform.h"
 #include "hsa_platform.h"
+#include "metal_platform.h"
 #include "object_platform.h"
 #include "vulkan_platform.h"
 
@@ -59,6 +60,12 @@ std::unique_ptr<runtime::Platform> runtime::Platform::of(const runtime::Backend 
     case Backend::HSA: return std::make_unique<hsa::HsaPlatform>();
     case Backend::OpenCL: return std::make_unique<cl::ClPlatform>();
     case Backend::Vulkan: return std::make_unique<vulkan::VulkanPlatform>();
+    case Backend::Metal:
+#ifdef RUNTIME_ENABLE_METAL
+      return std::make_unique<metal::MetalPlatform>();
+#else
+      throw std::logic_error("Metal backend not available");
+#endif
     case Backend::SHARED_OBJ: return std::make_unique<object::SharedPlatform>();
     case Backend::RELOCATABLE_OBJ: return std::make_unique<object::RelocatablePlatform>();
   }

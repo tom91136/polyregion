@@ -1,3 +1,25 @@
+if (NOT RUNTIME_ENABLE_METAL)
+    if (APPLE)
+        set(RUNTIME_ENABLE_METAL ON)
+    endif ()
+endif ()
+
+if (RUNTIME_ENABLE_METAL)
+    list(APPEND RUNTIME_ENABLE_BACKENDS RUNTIME_ENABLE_METAL)
+    list(APPEND RUNTIME_SRC_FILES
+            metal_cpp_impl.cpp
+            metal_platform.cpp
+            )
+    list(APPEND RUNTIME_INCLUDE_DIRS
+            thirdparty/metal-cpp
+            )
+    list(APPEND RUNTIME_LINK_LIBS
+            "-framework Metal"
+            "-framework Foundation"
+            )
+endif ()
+
+
 add_library(runtime-lib STATIC
         libm.cpp
         runtime.cpp
@@ -11,6 +33,7 @@ add_library(runtime-lib STATIC
         thirdparty/hipew/src/hipew.c
         thirdparty/clew/src/clew.c
         thirdparty/hsaew/src/hsaew.c
+        ${RUNTIME_SRC_FILES}
         #        ${kompute_SOURCE_FILES}
         )
 add_dependencies(runtime-lib intrinsics_gen) # for LLVM tblgen
@@ -19,9 +42,7 @@ add_executable(runtime-tests test/test_utils.cpp test/fma.cpp test/args.cpp test
 add_executable(runtime-drv ../shared/cxa_thread_atexit.cpp driver.cpp)
 #add_library(runtime-dylib SHARED polyregion_runtime.cpp)
 
-target_compile_definitions(runtime-lib PRIVATE ${libffi_DEFINITIONS}
-        #        VK_NO_PROTOTYPES VK_USE_PLATFORM_ANDROID_KHR=1 KOMPUTE_OPT_USE_SPDLOG KOMPUTE_DISABLE_VK_DEBUG_LAYERS
-        )
+target_compile_definitions(runtime-lib PUBLIC ${libffi_DEFINITIONS} ${RUNTIME_ENABLE_BACKENDS})
 target_include_directories(runtime-lib PUBLIC ../include
         ${libffi_INCLUDE_DIRS}
         ${LLVM_INCLUDE_DIRS}
@@ -33,6 +54,7 @@ target_include_directories(runtime-lib PUBLIC ../include
         thirdparty/cuew/include
         thirdparty/hsaew/include
         ${vulkan-headers_SOURCE_DIR}/include
+        ${RUNTIME_INCLUDE_DIRS}
         )
 target_include_directories(runtime-drv PRIVATE ../include)
 target_include_directories(runtime-tests PRIVATE . ../include)
@@ -56,6 +78,7 @@ target_link_libraries(runtime-lib PRIVATE
         ${DL_LIB}
         libffi
         Vulkan-Headers
+        ${RUNTIME_LINK_LIBS}
         )
 
 target_link_libraries(runtime-drv PRIVATE runtime-lib
