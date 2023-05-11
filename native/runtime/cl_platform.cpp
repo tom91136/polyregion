@@ -235,14 +235,15 @@ ClDeviceQueue::~ClDeviceQueue() {
 void ClDeviceQueue::enqueueCallback(const MaybeCallback &cb, cl_event event) {
   TRACE();
   if (!cb) return;
+  static detail::CountedCallbackHandler handler;
   CHECKED(clSetEventCallback(
       event, CL_COMPLETE,
       [](cl_event e, cl_int status, void *data) {
         CHECKED(clReleaseEvent(e));
         CHECKED(status);
-        detail::CountedCallbackHandler::consume(data);
+        handler.consume(data);
       },
-      detail::CountedCallbackHandler::createHandle([cb, token = latch.acquire()]() {
+      handler.createHandle([cb, token = latch.acquire()]() {
         if (cb) (*cb)();
       })));
   CHECKED(clFlush(queue));

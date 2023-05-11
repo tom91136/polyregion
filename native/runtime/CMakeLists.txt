@@ -79,6 +79,7 @@ target_link_libraries(runtime-lib PRIVATE
         libffi
         Vulkan-Headers
         ${RUNTIME_LINK_LIBS}
+        TBB::tbb
         )
 
 target_link_libraries(runtime-drv PRIVATE runtime-lib

@@ -50,6 +50,12 @@ FetchContent_Declare(
         DOWNLOAD_NO_EXTRACT YES
 )
 
+FetchContent_Declare(
+        oneTBB
+        URL https://github.com/oneapi-src/oneTBB/archive/refs/tags/v2021.9.0.zip
+        URL_HASH SHA256=fcebb93cb9f7e882f62cd351b1c093dbefdcae04b616227dc716b0a5efa9e8ab
+)
+
 if (USE_LINKER)
     message(STATUS "Using custom linker: ${USE_LINKER}")
     if (MSVC)
@@ -209,6 +215,7 @@ FetchContent_MakeAvailable(json)
 FetchContent_MakeAvailable(Catch2)
 FetchContent_MakeAvailable(Vulkan-Headers)
 FetchContent_MakeAvailable(VulkanMemoryAllocator)
+FetchContent_MakeAvailable(oneTBB)
 
 # libffi does not use CMake so we inject one manually from VCPKG
 # See https://github.com/microsoft/vcpkg/blob/2f0872b7d592635e8e4919d178650d549c211464/ports/libffi/CMakeLists.txt

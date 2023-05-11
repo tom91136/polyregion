@@ -5,6 +5,7 @@
 #include <shared_mutex>
 
 #include "dl.h"
+#include "oneapi/tbb.h"
 #include "runtime.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/Object/ObjectFile.h"
@@ -26,7 +27,58 @@ public:
 };
 
 class EXPORT ObjectDeviceQueue : public DeviceQueue {
+protected:
+  detail::CountingLatch latch;
+  tbb::task_arena arena;
+  tbb::task_group group;
+
+  template <typename F> void threadedLaunch(size_t N, const MaybeCallback &cb, F f) {
+    static std::atomic_size_t counter(0);
+    static std::unordered_map<size_t, std::atomic_size_t> pending;
+    static std::shared_mutex pendingLock;
+    static detail::CountedCallbackHandler handler;
+
+    //      auto cbHandle = cb ? handler.createHandle(*cb) : nullptr;
+
+    auto id = counter++;
+    WriteLock wPending(pendingLock);
+    pending.emplace(id, N);
+    for (size_t tid = 0; tid < N; ++tid) {
+      std::thread([id, cb, f, tid]() {
+        f(tid);
+        WriteLock rwPending(pendingLock);
+        if (auto it = pending.find(id); it != pending.end()) {
+          if (--it->second == 0) {
+            if (cb) (*cb)();
+            pending.erase(id);
+          }
+        }
+      }).detach();
+    }
+
+    //    auto id = counter++;
+    //    WriteLock wPending(pendingLock);
+    //    pending.emplace(id, N);
+    //    arena.enqueue([N, id, f, cb, this]() {
+    //      for (size_t tid = 0; tid < N; ++tid) {
+    //        group.run([id, tid, f, cb]() {
+    //          f(tid);
+    //          WriteLock rwPending(pendingLock);
+    //          if (auto it = pending.find(id); it != pending.end()) {
+    //            if (--it->second == 0) {
+    //              pending.erase(id);
+    //              if (cb) (*cb)();
+    //              //            detail::CountedCallbackHandler::consume(cbHandle);
+    //            }
+    //          }
+    //        });
+    //      }
+    //    });
+  }
+
 public:
+  EXPORT explicit ObjectDeviceQueue();
+  EXPORT ~ObjectDeviceQueue() noexcept override;
   EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) override;
   EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, void *dst, size_t size, const MaybeCallback &cb) override;
 };
@@ -110,6 +162,7 @@ public:
 };
 
 class EXPORT SharedDeviceQueue : public ObjectDeviceQueue {
+
   DynamicModules &modules;
   std::shared_mutex &lock;
 

@@ -1,5 +1,6 @@
 #include "runtime.h"
 
+#include <iostream>
 #include <mutex>
 #include <utility>
 
@@ -75,47 +76,44 @@ runtime::detail::CountingLatch::Token::Token(runtime::detail::CountingLatch &lat
 runtime::detail::CountingLatch::Token::~Token() {
   TRACE();
   latch.pending--;
+  std::lock_guard lock(latch.mutex);
   latch.cv.notify_all();
 }
 std::shared_ptr<runtime::detail::CountingLatch::Token> runtime::detail::CountingLatch::acquire() {
   TRACE();
   pending++;
+  std::lock_guard lock(mutex);
   cv.notify_all();
   return std::make_shared<Token>(*this);
 }
 runtime::detail::CountingLatch::~CountingLatch() {
   TRACE();
   auto now = std::chrono::system_clock::now();
-  std::unique_lock<std::mutex> lock(mutex);
+  std::unique_lock lock(mutex);
   if (!cv.wait_until(lock, now + std::chrono::seconds(10), [&]() { return pending == 0; })) {
+    std::cerr << "Timed out with " + std::to_string(pending) + " pending latches" << std::endl;
     throw std::logic_error("Timed out with " + std::to_string(pending) + " pending latches");
   }
 }
 
 void *runtime::detail::CountedCallbackHandler::createHandle(const runtime::Callback &cb) {
-
-  // XXX We're storing the callbacks statically to extend lifetime because the callback behaviour on different runtimes
-  // is not predictable, some may transfer control back even after destruction of all related context.
-  static std::atomic_uint64_t eventCounter = 0;
-  static Storage callbacks;
-  static std::mutex lock;
-
+  std::lock_guard guard(lock);
   auto eventId = eventCounter++;
-  auto f = [cb, eventId]() {
-    cb();
-    const std::lock_guard<std::mutex> guard(lock);
-    callbacks.erase(eventId);
-  };
-
-  const std::lock_guard<std::mutex> guard(lock);
-  auto pos = callbacks.emplace(eventId, f).first;
-  // just to be sure
-  static_assert(std::is_same<EntryPtr, decltype(&(*pos))>());
-  return &(*pos);
+  auto pos = callbacks.emplace(eventId, cb).first;
+  return reinterpret_cast<void *>(pos->first);
 }
 void runtime::detail::CountedCallbackHandler::consume(void *data) {
-  auto dev = static_cast<EntryPtr>(data);
-  if (dev) dev->second();
+  const std::lock_guard guard(lock);
+  if (auto it = callbacks.find(reinterpret_cast<uintptr_t>(data)); it != callbacks.end()) {
+    it->second();
+    callbacks.erase(reinterpret_cast<uintptr_t>(data));
+
+  }else{
+    throw std::logic_error("no");
+  }
+}
+runtime::detail::CountedCallbackHandler::~CountedCallbackHandler() {
+  const std::lock_guard guard(lock);
 }
 
 std::string runtime::detail::allocateAndTruncate(const std::function<void(char *, size_t)> &f, size_t length) {

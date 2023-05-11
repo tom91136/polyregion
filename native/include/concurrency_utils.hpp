@@ -12,13 +12,15 @@ template <typename F> static void waitAll(F f, size_t timeoutMillis = 10000) {
   std::atomic_size_t pending(1);
   std::condition_variable cv;
   std::mutex mutex;
-  std::unique_lock<std::mutex> lock(mutex);
+
   const auto countdown = [&]() {
+    std::lock_guard lock(mutex);
     pending--;
     cv.notify_all();
   };
   auto now = std::chrono::system_clock::now();
   f(countdown);
+  std::unique_lock lock(mutex);
   cv.wait_until(lock, now + std::chrono::milliseconds(timeoutMillis), [&]() { return pending == 0; });
 }
 
@@ -30,14 +32,16 @@ template <typename F> static void waitAllN(F f, size_t timeoutMillis = 10000) {
   std::atomic_size_t pending{0};
   std::condition_variable cv;
   auto now = std::chrono::system_clock::now();
+  std::mutex mutex;
+
   f([&]() {
     pending++;
     return [&]() {
+      std::lock_guard lock(mutex);
       pending--;
       cv.notify_all();
     };
   });
-  std::mutex mutex;
   std::unique_lock<std::mutex> lock(mutex);
   cv.wait_until(lock, now + std::chrono::milliseconds(timeoutMillis), [&]() { return pending == 0; });
 }

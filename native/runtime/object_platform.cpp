@@ -14,6 +14,8 @@
 
 #include "llvm_utils.hpp"
 
+#include "oneapi/tbb.h"
+
 using namespace polyregion::runtime;
 using namespace polyregion::runtime::object;
 
@@ -101,6 +103,15 @@ void ObjectDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_
   std::memcpy(dst, reinterpret_cast<void *>(src), size);
   if (cb) (*cb)();
 }
+ObjectDeviceQueue::ObjectDeviceQueue() {
+  TRACE();
+  arena.initialize(int(std::thread::hardware_concurrency()));
+}
+
+ObjectDeviceQueue::~ObjectDeviceQueue() noexcept{
+  group.wait();
+  TRACE();
+}
 
 RelocatablePlatform::RelocatablePlatform() { TRACE(); }
 std::string RelocatablePlatform::name() {
@@ -177,31 +188,47 @@ uint64_t MemoryManager::getSymbolAddress(const std::string &Name) {
   return Name == "malloc" ? (uint64_t)&malloc_ : llvm::RTDyldMemoryManager::getSymbolAddress(Name);
 }
 
-template <typename F> static void threadedLaunch(size_t N, const MaybeCallback &cb, F f) {
+template <typename F>
+static void threadedLaunch(detail::CountedCallbackHandler &handler, tbb::task_arena &arena,size_t N, const MaybeCallback &cb, F f) {
   static std::atomic_size_t counter(0);
   static std::unordered_map<size_t, std::atomic_size_t> pending;
   static std::shared_mutex pendingLock;
 
-  auto cbHandle = cb ? detail::CountedCallbackHandler::createHandle(*cb) : nullptr;
+//  auto cbHandle = cb ? handler.createHandle(*cb) : nullptr;
 
-  auto id = counter++;
-  WriteLock wPending(pendingLock);
-  pending.emplace(id, N);
+//  auto id = counter++;
+//  WriteLock wPending(pendingLock);
+//  pending.emplace(id, N);
+//  for (size_t tid = 0; tid < N; ++tid) {
+//    std::thread([id, cb,  f, tid, &handler]() {
+//      f(tid);
+//        WriteLock rwPending(pendingLock);
+//        if (auto it = pending.find(id); it != pending.end()) {
+//          if (--it->second == 0) {
+//              if(cb) (*cb)();
+////            handler.consume(cbHandle);
+//            pending.erase(id);
+//          }
+//        }
+//    }).detach();
+//  }
 
-  for (size_t tid = 0; tid < N; ++tid) {
-    std::thread([id, cbHandle, f, tid]() {
-      f(tid);
-      if (cbHandle) {
+    auto id = counter++;
+    WriteLock wPending(pendingLock);
+    pending.emplace(id, N);
+    for (size_t tid = 0; tid < N; ++tid) {
+      arena.enqueue([id, tid, f, cb]() {
+        f(tid);
         WriteLock rwPending(pendingLock);
         if (auto it = pending.find(id); it != pending.end()) {
           if (--it->second == 0) {
-            detail::CountedCallbackHandler::consume(cbHandle);
             pending.erase(id);
+            if (cb) (*cb)();
+            //            detail::CountedCallbackHandler::consume(cbHandle);
           }
         }
-      }
-    }).detach();
-  }
+      });
+    }
 }
 
 void validatePolicyAndArgs(const char *prefix, std::vector<Type> types, const Policy &policy) {
@@ -223,7 +250,6 @@ void validatePolicyAndArgs(const char *prefix, std::vector<Type> types, const Po
                            ", but was " + typeName(types[0]));
   }
 }
-
 void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
                                                 const std::vector<Type> &types, std::vector<std::byte> argData,
                                                 const Policy &policy, const MaybeCallback &cb) {
@@ -251,18 +277,22 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
                            polyregion::mk_string<std::string>(
                                symbols, [](auto &x) { return x; }, ","));
   }
-
-  threadedLaunch(policy.global.x, cb, [sym, types, argData](size_t tid) {
-    auto argData_ = argData;
-    auto argPtrs = detail::argDataAsPointers(types, argData_);
-    if (types[0] != Type::Long64) {
-      throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Expecting first argument as index: " +
-                             typeName(Type::Long64) + ", but was " + typeName(types[0]));
-    }
-    auto _tid = int64_t(tid);
-    argPtrs[0] = &_tid;
-    invoke(sym.getAddress(), types, argPtrs);
-  });
+  this->threadedLaunch(
+        policy.global.x,
+      [cb, token = latch.acquire()]() {
+        if (cb) (*cb)();
+      },
+      [sym, types, argData](size_t tid) {
+        auto argData_ = argData;
+        auto argPtrs = detail::argDataAsPointers(types, argData_);
+        if (types[0] != Type::Long64) {
+          throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Expecting first argument as index: " +
+                                 typeName(Type::Long64) + ", but was " + typeName(types[0]));
+        }
+        auto _tid = int64_t(tid);
+        argPtrs[0] = &_tid;
+        invoke(sym.getAddress(), types, argPtrs);
+      });
 }
 
 static constexpr const char *SHOBJ_ERROR_PREFIX = "[SharedObject error] ";
@@ -377,12 +407,16 @@ void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
     symbolTable.emplace_hint(it, symbol, address);
   }
 
-  threadedLaunch(policy.global.x, cb, [address, types, argData](size_t tid) {
-    auto argData_ = argData;
-    auto argPtrs = detail::argDataAsPointers(types, argData_);
-    auto _tid = int64_t(tid);
-    argPtrs[0] = &_tid;
-    invoke(reinterpret_cast<uint64_t>(address), types, argPtrs);
-  });
+  this->threadedLaunch(  policy.global.x,
+      [cb, token = latch.acquire()]() {
+        if (cb) (*cb)();
+      },
+      [address, types, argData](size_t tid) {
+        auto argData_ = argData;
+        auto argPtrs = detail::argDataAsPointers(types, argData_);
+        auto _tid = int64_t(tid);
+        argPtrs[0] = &_tid;
+        invoke(reinterpret_cast<uint64_t>(address), types, argPtrs);
+      });
   TRACE();
 }

@@ -346,16 +346,17 @@ void HsaDeviceQueue::destroySignal(const char *message, hsa_signal_t signal) {
 }
 
 void HsaDeviceQueue::enqueueCallback(hsa_signal_t signal, const Callback &cb) {
+  static detail::CountedCallbackHandler handler;
   CHECKED("Attach async handler to signal", //
           hsa_amd_signal_async_handler(
               signal, HSA_SIGNAL_CONDITION_LT, 1,
               [](hsa_signal_value_t value, void *data) -> bool {
                 // Signals trigger when value is set to 0 or less, anything not 0 is an error.
                 CHECKED("Validate async signal value", static_cast<hsa_status_t>(value));
-                detail::CountedCallbackHandler::consume(data);
+                handler.consume(data);
                 return false;
               },
-              detail::CountedCallbackHandler::createHandle(cb)));
+              handler.createHandle(cb)));
 }
 
 void HsaDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
@@ -390,8 +391,8 @@ void HsaDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t s
   });
 }
 void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                        const std::vector<Type> &types, std::vector<std::byte> argData, const Policy &policy,
-                                        const MaybeCallback &cb) {
+                                        const std::vector<Type> &types, std::vector<std::byte> argData,
+                                        const Policy &policy, const MaybeCallback &cb) {
   TRACE();
   if (types.back() != Type::Void)
     throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported");

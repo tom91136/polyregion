@@ -92,8 +92,8 @@ std::string allocateAndTruncate(const std::function<void(char *, size_t)> &f, si
 std::vector<void *> argDataAsPointers(const std::vector<Type> &types, std::vector<std::byte> &argData);
 
 class CountingLatch {
-  std::condition_variable cv;
   std::mutex mutex;
+  std::condition_variable cv;
   std::atomic_long pending{};
 
   class Token {
@@ -117,23 +117,19 @@ template <typename T> class BlockingQueue {
 
 public:
   void terminate() {
-    {
-      std::unique_lock<std::mutex> lock(mutex);
-      shutdown = true;
-    }
+    std::unique_lock lock(mutex);
+    shutdown = true;
     condition.notify_all();
   }
 
   void push(T item) {
-    {
-      std::unique_lock<std::mutex> lock(mutex);
-      queue.push(std::move(item));
-    }
+    std::unique_lock lock(mutex);
+    queue.push(std::move(item));
     condition.notify_one();
   }
 
   std::pair<std::optional<T>, bool> pop() {
-    std::unique_lock<std::mutex> lock(mutex);
+    std::unique_lock lock(mutex);
     while (true) {
       if (queue.empty()) {
         if (shutdown) return {{}, false};
@@ -147,13 +143,17 @@ public:
   }
 };
 
+// XXX We're storing the callbacks statically to extend lifetime because the callback behaviour on different runtimes
+// is not predictable, some may transfer control back even after destruction of all related context.
 class CountedCallbackHandler {
-  using Storage = std::unordered_map<uint64_t, Callback>;
-  using EntryPtr = std::add_pointer_t<Storage::value_type>;
+  std::atomic_uintptr_t eventCounter = 0;
+  std::unordered_map<uintptr_t, Callback> callbacks;
+  std::mutex lock;
 
 public:
-  static void *createHandle(const Callback &cb);
-  static void consume(void *data);
+  ~CountedCallbackHandler();
+  void *createHandle(const Callback &cb);
+  void consume(void *data);
 };
 
 template <typename K, typename V> class CountedStore {
