@@ -95,23 +95,28 @@ TEST_CASE("GPU Args") {
 #ifdef RUNTIME_ENABLE_METAL
   images.insert(generated::msl::args.begin(), generated::msl::args.end());
 #endif
-  testArgs(generated::gpu::args, //
+  testArgs(images, //
            {
+#ifndef __APPLE__
                Backend::CUDA,
-               Backend::OpenCL,
                Backend::HIP,
                Backend::HSA,
+#endif
+               Backend::OpenCL,
 #ifdef RUNTIME_ENABLE_METAL
                Backend::Metal,
 #endif
-           } //
-  );
+           });
 }
 
 TEST_CASE("SPIRV Args") {
+#ifdef __APPLE__
+  WARN("Vulkan not natively supported on macOS");
+#else
   testArgs(generated::spirv::glsl_args, //
            {Backend::Vulkan}            //
   );
+#endif
 }
 
 TEST_CASE("CPU Args") {

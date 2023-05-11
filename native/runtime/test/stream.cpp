@@ -98,15 +98,18 @@ TEST_CASE("GPU BabelStream") {
                       {1, 2, 32, 64, 128, 256},                              //
                       {1, 2, 10},                                            //
                       {
+#ifndef __APPLE__
                           Backend::CUDA,
-                          Backend::OpenCL,
                           Backend::HIP,
                           Backend::HSA,
+#endif
+                          Backend::OpenCL,
 #ifdef RUNTIME_ENABLE_METAL
                           Backend::Metal,
 #endif
                       });
   }
+#ifndef __APPLE__ // macOS can't do doubles: Not supported in Metal and CL gives CL_INVALID_KERNEL
   DYNAMIC_SECTION("double") {
     testStream<double>(generated::gpu::stream_double, Type::Double64, "_double", 0.008f, //
                        {1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072},            //
@@ -114,9 +117,13 @@ TEST_CASE("GPU BabelStream") {
                        {1, 2, 10},                                                       //
                        {Backend::CUDA, Backend::OpenCL, Backend::HIP, Backend::HSA});
   }
+#endif
 }
 
 TEST_CASE("SPIRV BabelStream") {
+#ifdef __APPLE__
+  WARN("Vulkan not natively supported on macOS");
+#else
   DYNAMIC_SECTION("float") {
     testStream<float>(generated::spirv::glsl_stream, Type::Float32, "_float", 0.008f, //
                       {1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072},          //
@@ -131,6 +138,7 @@ TEST_CASE("SPIRV BabelStream") {
                        {1, 2, 10},                                                       //
                        {Backend::Vulkan});
   }
+#endif
 }
 
 TEST_CASE("CPU BabelStream") {
