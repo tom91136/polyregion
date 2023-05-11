@@ -97,6 +97,8 @@ jobs:
                echo "======"
              done
           }
-          show_libs build-darwin-${{ inputs.build_arch }}/bindings/jvm/*.dylib
-          show_libs build-darwin-${{ inputs.build_arch }}/compiler/compiler-drv 
+          show_libs build-darwin-${{ inputs.build_arch }}/bindings/jvm/libpolyregion-compiler-jvm.dylib
+          show_libs build-darwin-${{ inputs.build_arch }}/bindings/jvm/libpolyregion-runtime-jvm.dylib
+          show_libs build-darwin-${{ inputs.build_arch }}/bindings/jvm/libpolyregion-shim-jvm.dylib
+          show_libs build-darwin-${{ inputs.build_arch }}/compiler/compiler-drv
           show_libs build-darwin-${{ inputs.build_arch }}/runtime/runtime-drv
