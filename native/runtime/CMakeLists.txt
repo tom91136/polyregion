@@ -73,7 +73,7 @@ set(LLVM_LIBS
 message(STATUS "[runtime] Adding LLVM libs = ${LLVM_LIBS}")
 
 
-target_link_libraries(runtime-lib PRIVATE
+target_link_libraries(runtime-lib PUBLIC
         ${LLVM_LIBS}
         ${DL_LIB}
         libffi

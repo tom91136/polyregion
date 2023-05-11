@@ -102,23 +102,28 @@ TEST_CASE("GPU FMA") {
 #ifdef RUNTIME_ENABLE_METAL
   images.insert(generated::msl::fma.begin(), generated::msl::fma.end());
 #endif
-  testFma(generated::gpu::fma, //
+  testFma(images, //
           {
+#ifndef __APPLE__
               Backend::CUDA,
-              Backend::OpenCL,
               Backend::HIP,
               Backend::HSA,
+#endif
+              Backend::OpenCL,
 #ifdef RUNTIME_ENABLE_METAL
               Backend::Metal,
 #endif
-          } //
-  );
+          });
 }
 
 TEST_CASE("SPIRV FMA") {
+#ifdef __APPLE__
+  WARN("Vulkan not natively supported on macOS");
+#else
   testFma(generated::spirv::glsl_fma, //
           {Backend::Vulkan}           //
   );
+#endif
 }
 
 TEST_CASE("CPU FMA") {
