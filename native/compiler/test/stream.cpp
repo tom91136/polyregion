@@ -205,13 +205,16 @@ TEST_CASE("BabelStream") {
   // x86-64-v4 AVX512
 
   std::vector<std::tuple<runtime::Backend, compiler::Target, std::string>> configs = {
+      // CL runs everywhere
       {runtime::Backend::OpenCL, compiler::Target::Source_C_OpenCL1_1, ""},
-      //      {runtime::Backend::Metal, compiler::Target::Source_C_Metal1_0, ""},
+#ifdef __APPLE__
+      {runtime::Backend::RELOCATABLE_OBJ, compiler::Target::Object_LLVM_AArch64, "apple-m1"},
+      {runtime::Backend::Metal, compiler::Target::Source_C_Metal1_0, ""},
+#elif
       {runtime::Backend::CUDA, compiler::Target::Object_LLVM_NVPTX64, "sm_60"},
       {runtime::Backend::HIP, compiler::Target::Object_LLVM_AMDGCN, "gfx1012"},
-      //      {runtime::Backend::RELOCATABLE_OBJ, compiler::Target::Object_LLVM_AArch64, "apple-m1"},
-
       {runtime::Backend::RELOCATABLE_OBJ, compiler::Target::Object_LLVM_x86_64, "x86-64-v3"},
+#endif
   };
 
   auto [backend, target, arch] = GENERATE_REF(from_range(configs));
@@ -259,13 +262,14 @@ TEST_CASE("BabelStream") {
       }
 
       polyregion::stream::runStream<float>(
-          runtime::Type::Float32,                              //
-          33554432,                                            //
-          100,                                                 //
-          cpu ? std::thread::hardware_concurrency() / 2 : 256, //
-          std::move(d),                                        //
-          kernelSpecs,                                         //
-          true,                                                //
+          runtime::Type::Float32,                          //
+          33554432,                                        //
+          100,                                             //
+          cpu ? std::thread::hardware_concurrency() : 256, //
+          platform->name(),
+          std::move(d), //
+          kernelSpecs,  //
+          true,         //
           [](auto actual, auto tolerance) {
             if (actual >= tolerance) {
               std::cerr << "Tolerance (" << tolerance << ") exceeded for value " << actual << std::endl;

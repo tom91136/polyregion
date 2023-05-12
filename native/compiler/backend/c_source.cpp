@@ -279,33 +279,34 @@ std::string backend::CSource ::mkFn(const Function &fnTree) {
   std::vector<std::string> argExprs(allArgs.size());
   for (size_t i = 0; i < allArgs.size(); ++i) {
     auto arg = allArgs[i];
-    auto decl = mkTpe(arg.named.tpe) + " " + arg.named.symbol;
+    auto tpe = mkTpe(arg.named.tpe);
+    auto name = arg.named.symbol;
+    std::string decl;
     switch (dialect) {
       case Dialect::OpenCL1_1: {
         if (auto arr = get_opt<Type::Array>(arg.named.tpe); arr) {
           decl = variants::total(
-              *arr->space,                                           //
-              [&](TypeSpace::Global _) { return "global " + decl; }, //
-              [&](TypeSpace::Local _) { return "local " + decl; });
-        };
+              *arr->space,                                                       //
+              [&](TypeSpace::Global _) { return "global " + tpe + " " + name; }, //
+              [&](TypeSpace::Local _) { return "local " + tpe + " " + name; });
+        } else
+          decl = tpe + " " + name;
         break;
       }
       case Dialect::MSL1_0: {
-
         // Scalar:      device $T &$name      [[ buffer($i) ]]
         // Global:      device $T  $name      [[ buffer($i) ]]
         // Local:  threadgroup $T &$name [[ threadgroup($i) ]]
         // query:              $T &$name           [[ $type ]]
-
         auto idx = std::to_string(i);
         if (auto arr = get_opt<Type::Array>(arg.named.tpe); arr) {
           decl = variants::total(
-              *arr->space,                                                                                  //
-              [&](TypeSpace::Global _) { return "device " + decl + " [[ buffer(" + idx + ") ]]"; },         //
-              [&](TypeSpace::Local _) { return "threadgroup " + decl + " [[ threadgroup(" + idx + ") ]]"; } //
+              *arr->space,                                                                                            //
+              [&](TypeSpace::Global _) { return "device " + tpe + " " + name + " [[buffer(" + idx + ")]]"; },         //
+              [&](TypeSpace::Local _) { return "threadgroup " + tpe + " " + name + " [[threadgroup(" + idx + ")]]"; } //
           );
         } else {
-          decl = "device &" + decl + " [[ buffer(" + idx + ") ]]";
+          decl = "device " + tpe + " &" + name + " [[buffer(" + idx + ")]]";
         };
         break;
       }
@@ -370,6 +371,7 @@ std::string backend::CSource ::mkFn(const Function &fnTree) {
   std::string fnPrefix;
   switch (dialect) {
     case Dialect::C11: fnPrefix = ""; break;
+    case Dialect::MSL1_0:
     case Dialect::OpenCL1_1: fnPrefix = "kernel "; break;
     default: fnPrefix = "";
   }

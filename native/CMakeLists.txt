@@ -215,6 +215,9 @@ FetchContent_MakeAvailable(json)
 FetchContent_MakeAvailable(Catch2)
 FetchContent_MakeAvailable(Vulkan-Headers)
 FetchContent_MakeAvailable(VulkanMemoryAllocator)
+
+set(BUILD_SHARED_LIBS OFF)
+set(TBB_TEST OFF)
 FetchContent_MakeAvailable(oneTBB)
 
 # libffi does not use CMake so we inject one manually from VCPKG

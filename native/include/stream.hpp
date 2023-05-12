@@ -39,7 +39,7 @@ template <typename T> struct Kernels {
 };
 
 template <typename T, typename FValidate, typename FValidateSum>
-void runStream(Type tpe, size_t size, size_t times, size_t groups, std::unique_ptr<Device> d,
+void runStream(Type tpe, size_t size, size_t times, size_t groups, const std::string &title, std::unique_ptr<Device> d,
                const Kernels<std::pair<std::string, std::string>> &specs, bool verbose, FValidate fValidate,
                FValidateSum fValidateSum) {
 
@@ -161,9 +161,9 @@ void runStream(Type tpe, size_t size, size_t times, size_t groups, std::unique_p
   auto reducedSum = std::reduce(sum.begin(), sum.end());
   fValidateSum(std::fabs((reducedSum - expectedSum) / expectedSum));
 
-//  for (int i = 0; i < sum.size(); ++i) {
-//    std::cout << "[" << i << "]" << sum[i] << std::endl;
-//  }
+  //  for (int i = 0; i < sum.size(); ++i) {
+  //    std::cout << "[" << i << "]" << sum[i] << std::endl;
+  //  }
 
   const auto sizesMB = Kernels<double>{.copy = double(2 * sizeof(T) * size) / 1000 / 1000,  //
                                        .mul = double(2 * sizeof(T) * size) / 1000 / 1000,   //
@@ -176,7 +176,7 @@ void runStream(Type tpe, size_t size, size_t times, size_t groups, std::unique_p
   if (verbose) {
     std::cerr                                 //
         << std::fixed << std::setprecision(3) //
-        << "===Stream (" << d->name() << " #" << d->id() << " )===\n"
+        << "===BabelStream (" << title << "; " << d->name() << " #" << d->id() << " )===\n"
         << "Running kernels " << times << " times\n"
         << "Precision: " << typeName(tpe) << "\n"
         << "Array size: " << sizesMB.copy / 2 << " MB (=" << sizesMB.copy / 2 / 1000 << " GB)\n"
