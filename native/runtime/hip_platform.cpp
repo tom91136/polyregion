@@ -199,6 +199,10 @@ void HipDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
                                 sharedMem,                 //
                                 stream, args.data(),       //
                                 nullptr));
+// XXX HIP is available on Win32 but submitting hangs unless we "touch" the stream to get to dispatch...
+#ifdef _WIN32
+  hipStreamQuery(stream);
+#endif
   enqueueCallback(cb);
 }
 

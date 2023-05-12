@@ -45,7 +45,7 @@ void runStream(Type tpe, size_t size, size_t times, size_t groups, const std::st
 
   bool cpu = d->sharedAddressSpace();
 
-  auto [begin, end] = sequencePair(splitStaticExclusive(0, size, groups));
+  auto [begin, end] = sequencePair(splitStaticExclusive<int64_t>(0, int64_t(size), int64_t(groups)));
   auto begins_d = cpu ? d->mallocTyped<int64_t>(begin.size(), Access::RO) : 0;
   auto ends_d = cpu ? d->mallocTyped<int64_t>(end.size(), Access::RO) : 0;
   auto sumGroups = cpu ? groups : 256;

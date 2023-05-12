@@ -46,19 +46,20 @@ template <typename F> static void waitAllN(F f, size_t timeoutMillis = 10000) {
   cv.wait_until(lock, now + std::chrono::milliseconds(timeoutMillis), [&]() { return pending == 0; });
 }
 
-constexpr std::vector<std::pair<int64_t, int64_t>> splitStaticExclusive(int64_t start, int64_t end, int64_t N) {
+template <typename T = int64_t>
+std::vector<std::pair<T, T>> splitStaticExclusive(T start, T end, T N) {
   assert(N >= 0);
   auto range = std::abs(end - start);
   if (range == 0) return {};
   else if (N == 1)
     return {{start, end}};
   else if (range < N) {
-    std::vector<std::pair<int64_t, int64_t>> xs(range);
-    for (int64_t i = 0; i < range; ++i)
+    std::vector<std::pair<T, T>> xs(range);
+    for (T i = 0; i < range; ++i)
       xs[i] = {start + i, 1};
     return xs;
   } else {
-    std::vector<std::pair<int64_t, int64_t>> xs(N);
+    std::vector<std::pair<T, T>> xs(N);
     auto k = range / N;
     auto m = range % N;
     for (int64_t i = 0; i < N; ++i) {
