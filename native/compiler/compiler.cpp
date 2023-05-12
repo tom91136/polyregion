@@ -37,6 +37,7 @@ std::optional<compiler::Target> compiler::targetFromOrdinal(std::underlying_type
     case Target::Object_LLVM_AMDGCN:
     case Target::Source_C_OpenCL1_1:
     case Target::Source_C_C11:
+    case Target::Source_C_Metal1_0:
     case Target::Object_LLVM_SPIRV64:
       return target;
       // XXX do not add default here, see  -Werror=switch
@@ -154,6 +155,7 @@ static backend::LLVM::Options toLLVMBackendOptions(const compiler::Options &opti
       // XXX SPIR is target independent, probably
       return {.target = backend::LLVM::Target::SPIRV64, .arch = options.arch};
     case compiler::Target::Source_C_OpenCL1_1: //
+    case compiler::Target::Source_C_Metal1_0:  //
     case compiler::Target::Source_C_C11:       //
       throw std::logic_error("Not an object target");
   }
@@ -198,6 +200,7 @@ std::vector<compiler::Layout> compiler::layoutOf(const std::vector<polyast::Stru
     }
     case Target::Source_C_C11:
     case Target::Source_C_OpenCL1_1:
+    case Target::Source_C_Metal1_0:
       // TODO we need to submit a kernel and execute it to get the offsets
       throw std::logic_error("Not available for source targets");
   }
@@ -232,6 +235,8 @@ compiler::Compilation compiler::compile(const polyast::Program &program, const O
         return std::make_unique<backend::LLVM>(toLLVMBackendOptions(options));           //
       case Target::Source_C_OpenCL1_1:                                                   //
         return std::make_unique<backend::CSource>(backend::CSource::Dialect::OpenCL1_1); //
+      case Target::Source_C_Metal1_0:                                                    //
+        return std::make_unique<backend::CSource>(backend::CSource::Dialect::MSL1_0);    //
       case Target::Source_C_C11:                                                         //
         return std::make_unique<backend::CSource>(backend::CSource::Dialect::C11);       //
     }

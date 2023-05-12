@@ -32,6 +32,7 @@ enum class EXPORT Target : uint8_t {
 
   Source_C_C11 = 30,
   Source_C_OpenCL1_1,
+  Source_C_Metal1_0,
 };
 
 enum class EXPORT Opt : uint8_t {

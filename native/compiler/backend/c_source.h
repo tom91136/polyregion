@@ -14,6 +14,7 @@ public:
   enum class Dialect {
     C11,
     OpenCL1_1,
+    MSL1_0,
   };
 
 private:
