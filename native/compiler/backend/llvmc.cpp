@@ -1,10 +1,15 @@
 #include "llvmc.h"
 
+#include "clspv.h"
 #include "compiler.h"
 #include "lld_lite.h"
 #include "llvm_utils.hpp"
 #include "utils.hpp"
 
+#include "spirv-tools/libspirv.h"
+#include "spirv-tools/libspirv.hpp"
+
+#include "spirv-tools/optimizer.hpp"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
@@ -40,6 +45,8 @@
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Vectorize/LoopVectorize.h"
 #include "llvm/Transforms/Vectorize/SLPVectorizer.h"
+
+// #include "LLVMSPIRVLib.h"
 
 #include <iostream>
 
@@ -109,6 +116,20 @@ void llvmc::initialise() {
   initializeHardwareLoopsPass(*r);
   initializeTransformUtils(*r);
   initializeReplaceWithVeclibLegacyPass(*r);
+
+  //    initializeLLVMToSPIRVLegacyPass(*r);
+  //    initializeOCLToSPIRVLegacyPass(*r);
+  //    initializeOCLTypeToSPIRVLegacyPass(*r);
+  //    initializeSPIRVLowerBoolLegacyPass(*r);
+  //    initializeSPIRVLowerConstExprLegacyPass(*r);
+  //    initializeSPIRVLowerOCLBlocksLegacyPass(*r);
+  //    initializeSPIRVLowerMemmoveLegacyPass(*r);
+  //    initializeSPIRVLowerSaddWithOverflowLegacyPass(*r);
+  //    initializeSPIRVRegularizeLLVMLegacyPass(*r);
+  //    initializeSPIRVToOCL12LegacyPass(*r);
+  //    initializeSPIRVToOCL20LegacyPass(*r);
+  //    initializePreprocessMetadataLegacyPass(*r);
+  //    initializeSPIRVLowerBitCastToNonStandardTypeLegacyPass(*r);
 }
 
 /// Set function attributes of function \p F based on CPU, Features, and command
@@ -207,7 +228,7 @@ static void optimise(llvm::TargetMachine &TM, llvm::Module &M, llvm::Optimizatio
 }
 
 compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compiler::Opt &opt, bool emitDisassembly,
-                                           std::unique_ptr<llvm::Module> M, llvm::LLVMContext &Context) {
+                                           std::unique_ptr<llvm::Module> M) {
   auto start = compiler::nowMono();
 
   auto useUnsafeMath = opt == compiler::Opt::Ofast;
@@ -253,7 +274,7 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
     case compiler::Opt::Ofast: optLevel = llvm::OptimizationLevel::O3; break;
   }
 
-  auto mkArtefact = [&](const llvm::CodeGenFileType &tpe, const llvm::Module &m0, std::vector<compiler::Event> &events,
+  auto mkArtefact = [&](const std::optional<llvm::CodeGenFileType> &tpe, const llvm::Module &m0, std::vector<compiler::Event> &events,
                         bool emplaceEvent) {
     auto m = llvm::CloneModule(m0);
     auto optPassStart = compiler::nowMono();
@@ -281,14 +302,16 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
     llvm::SmallVector<char, 0> objBuffer;
     llvm::raw_svector_ostream objStream(objBuffer);
 
-    if (llvm::TargetPassConfig::willCompleteCodeGenPipeline()) {
-      LLVMTM.addAsmPrinter(PM, objStream, nullptr, tpe, MMIWP->getMMI().getContext());
+    if (tpe) {
+      if (llvm::TargetPassConfig::willCompleteCodeGenPipeline()) {
+        LLVMTM.addAsmPrinter(PM, objStream, nullptr, *tpe, MMIWP->getMMI().getContext());
+      }
     }
     PM.run(*m);
     if (emplaceEvent) {
       events.emplace_back(compiler::nowMs(), compiler::elapsedNs(optPassStart), "llvm_to_obj_opt", module2Ir(*m));
     }
-    return std::make_tuple(objBuffer, compiler::nowMs(), compiler::elapsedNs(iselPassStart));
+    return std::make_tuple(std::move(m), objBuffer, compiler::nowMs(), compiler::elapsedNs(iselPassStart));
   };
 
   auto objectSize = [](const llvm::SmallVector<char, 0> &xs) {
@@ -301,13 +324,11 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
     case llvm::Triple::AMDHSA: {
       // We need to link the object file for AMDGPU at this stage to get a working ELF binary.
       // This can only be done with LLD so just do it here after compiling.
-      auto [object, objectStart, objectElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_ObjectFile, *M, events, true);
+      auto [_, object, objectStart, objectElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_ObjectFile, *M, events, true);
       events.emplace_back(objectStart, objectElapsed, "llvm_to_obj", objectSize(object));
       if (emitDisassembly) {
-        auto [assembly, assemblyStart, assemblyElapsed] =
-            mkArtefact(llvm::CodeGenFileType::CGFT_AssemblyFile, *M, events, false);
-        events.emplace_back(assemblyStart, assemblyElapsed, "llvm_to_asm",
-                            std::string(assembly.begin(), assembly.end()));
+        auto [m, assembly, assemblyStart, assemblyElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_AssemblyFile, *M, events, false);
+        events.emplace_back(assemblyStart, assemblyElapsed, "llvm_to_asm", std::string(assembly.begin(), assembly.end()));
       }
 
       llvm::StringRef objectString(object.begin(), object.size());
@@ -318,8 +339,7 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
       auto linkerElapsed = compiler::elapsedNs(linkerStart);
       events.emplace_back(compiler::nowMs(), linkerElapsed, "lld_link_amdgpu", "");
       if (!result) { // linker failed
-        return {
-            {}, {info.cpu.uArch}, events, "Linker did not complete normally: " + err.value_or("(no message reported)")};
+        return {{}, {info.cpu.uArch}, events, "Linker did not complete normally: " + err.value_or("(no message reported)")};
       } else { // linker succeeded, still report any stdout to as message
         return {std::vector<char>(result->begin(), result->end()), {info.cpu.uArch}, events, err.value_or("")};
       }
@@ -328,26 +348,105 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
       // NVIDIA's documentation only supports up-to PTX generation and ingestion via the CUDA driver API, so we can't
       // assemble the PTX to a CUBIN (SASS). Given that PTX ingestion is supported, we just generate that for now.
       // XXX ignore emitDisassembly here as PTX *is* the binary
-      auto [ptx, ptxStart, ptxElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_AssemblyFile, *M, events, true);
+      auto [_, ptx, ptxStart, ptxElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_AssemblyFile, *M, events, true);
       events.emplace_back(ptxStart, ptxElapsed, "llvm_to_ptx", std::string(ptx.begin(), ptx.end()));
       return {std::vector<char>(ptx.begin(), ptx.end()), {info.cpu.uArch}, events};
     }
     default:
+      if (info.triple.getArch() == llvm::Triple::ArchType::spirv32 || info.triple.getArch() == llvm::Triple::ArchType::spirv64) {
 
-      auto features = polyregion::split(info.cpu.features, ',');
-      polyregion::llvm_shared::collectCPUFeatures(info.cpu.uArch, info.triple.getArch(), features);
+        //        auto [m, assembly, assemblyStart, assemblyElapsed] = mkArtefact({}, *M, events, true);
+        //
 
-      auto [object, objectStart, objectElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_ObjectFile, *M, events, true);
-      events.emplace_back(objectStart, objectElapsed, "llvm_to_obj", objectSize(object));
+        auto opt0Start = compiler::nowMono();
 
-      std::vector<char> binary(object.begin(), object.end());
-      if (emitDisassembly) {
-        auto [assembly, assemblyStart, assemblyElapsed] =
-            mkArtefact(llvm::CodeGenFileType::CGFT_AssemblyFile, *M, events, false);
-        events.emplace_back(assemblyStart, assemblyElapsed, "llvm_to_asm",
-                            std::string(assembly.begin(), assembly.end()));
+//        optimise(*TM, *M, optLevel);
+//
+         std::cerr << "<<<<<<<<<<<" << std::endl;
+
+
+        events.emplace_back(compiler::nowMs(), compiler::elapsedNs(opt0Start), "opt0", module2Ir(*M));
+
+        auto clspvStart = compiler::nowMono();
+
+        llvm::SmallVector<char, 0> objBuffer;
+        llvm::raw_svector_ostream objStream(objBuffer);
+        clspv::RunPassPipeline(*M, '0', &objStream);
+
+
+        events.emplace_back(compiler::nowMs(), compiler::elapsedNs(clspvStart), "clspv", module2Ir(*M));
+
+        auto optPassStart = compiler::nowMono();
+        std::vector<char> binary(objBuffer.begin(), objBuffer.end());
+
+        std::vector<uint32_t> spvRaw((binary.size() + 3) / 4, 0);
+        std::memcpy(spvRaw.data(), binary.data(), binary.size());
+
+        spvtools::Optimizer optimizer(SPV_ENV_VULKAN_1_1);
+                optimizer.RegisterPass(spvtools::CreateStripNonSemanticInfoPass());
+        std::vector<uint32_t> nonSemanticSpv;
+        optimizer.Run(spvRaw.data(), spvRaw.size(), &nonSemanticSpv);
+
+        //        spvtools::SpirvTools tools(SPV_ENV_UNIVERSAL_1_5);
+        //        std::string out;
+        //        auto error = tools.Disassemble(disBuffer.data(), disBuffer.size(), &out, disOptions);
+        spv_text text;
+        spv_diagnostic diagnostic = nullptr;
+        spv_context context = spvContextCreate(SPV_ENV_VULKAN_1_1);
+        spv_result_t error = spvBinaryToText(context, nonSemanticSpv.data(), nonSemanticSpv.size(),
+                                             SPV_BINARY_TO_TEXT_OPTION_NONE |               //
+                                                 SPV_BINARY_TO_TEXT_OPTION_INDENT |         //
+                                                 SPV_BINARY_TO_TEXT_OPTION_FRIENDLY_NAMES | //
+                                                 SPV_BINARY_TO_TEXT_OPTION_COMMENT,
+                                             &text, &diagnostic);
+        spvContextDestroy(context);
+        if (error) {
+          events.emplace_back(compiler::nowMs(), compiler::elapsedNs(optPassStart), "spirv-opt",
+                              "[Error " +                                                                            //
+                                  std::to_string(diagnostic->position.index) + ":" +                                 //
+                                  std::to_string(diagnostic->position.line) + ":" +                                  //
+                                  std::to_string(diagnostic->position.column) + "] " + std::string(diagnostic->error) //
+          );
+          spvDiagnosticDestroy(diagnostic);
+        } else {
+          std::string out(text->str, text->length);
+          events.emplace_back(compiler::nowMs(), compiler::elapsedNs(optPassStart), "spirv-opt", out);
+          spvTextDestroy(text);
+        }
+
+        //        auto [ptx, ptxStart, ptxElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_ObjectFile, *M, events, true);
+        //        events.emplace_back(ptxStart, ptxElapsed, "llvm_to_ptx", std::string(ptx.begin(), ptx.end()));
+        //        return {std::vector<char>(ptx.begin(), ptx.end()), {info.cpu.uArch}, events};
+
+        //        SPIRV::TranslatorOpts opts;
+        //        opts.shouldReplaceLLVMFmulAddWithOpenCLMad()
+        //        auto spirvConvertStart = compiler::nowMono();
+        //        std::string errors;
+        //        std::stringstream ss;
+        //        llvm::writeSpirv(M.get(), opts, ss, errors);
+        //        std::string spirvBin = ss.str();
+        //        events.emplace_back(compiler::nowMs(), compiler::elapsedNs(spirvConvertStart), "llvm_to_spirv",
+        //                            "(" + std::to_string(spirvBin.size()) + " bytes)");
+        //        std::vector<char> binary(spirvBin.begin(), spirvBin.end());
+
+        std::vector<char> convertedSpv(nonSemanticSpv.size() * sizeof(uint32_t));
+        std::memcpy(convertedSpv.data(), nonSemanticSpv.data(), convertedSpv.size());
+
+        return {convertedSpv, {info.cpu.uArch}, events, ""};
+      } else {
+        auto features = polyregion::split(info.cpu.features, ',');
+        polyregion::llvm_shared::collectCPUFeatures(info.cpu.uArch, info.triple.getArch(), features);
+
+        auto [_, object, objectStart, objectElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_ObjectFile, *M, events, true);
+        events.emplace_back(objectStart, objectElapsed, "llvm_to_obj", objectSize(object));
+
+        std::vector<char> binary(object.begin(), object.end());
+        if (emitDisassembly) {
+          auto [_, assembly, assemblyStart, assemblyElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_AssemblyFile, *M, events, false);
+          events.emplace_back(assemblyStart, assemblyElapsed, "llvm_to_asm", std::string(assembly.begin(), assembly.end()));
+        }
+
+        return {binary, features, events};
       }
-
-      return {binary, features, events};
   }
 }

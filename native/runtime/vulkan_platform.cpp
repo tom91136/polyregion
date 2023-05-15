@@ -163,16 +163,12 @@ static vk::raii::Device createDevice(const vk::raii::PhysicalDevice &dev, uint32
 Resolved::Resolved(uint32_t computeQueueId,
                    const std::shared_ptr<vk::raii::ShaderModule> &shaderModule, //
                    const std::vector<vk::DescriptorSetLayoutBinding> &bindings, //
-                   vk::DescriptorPoolSize size,
+                   const std::vector<vk::DescriptorPoolSize> &sizes,
                    vk::raii::Device &ctx)                       //
     : shaderModule(shaderModule),                               //
       dscLayout(ctx.createDescriptorSetLayout({{}, bindings})), //
       dscPool(ctx.createDescriptorPool(
-          size.descriptorCount == 0
-              ? vk::DescriptorPoolCreateInfo(
-                    vk::DescriptorPoolCreateFlags{vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet}, 1, {})
-              : vk::DescriptorPoolCreateInfo(
-                    vk::DescriptorPoolCreateFlags{vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet}, 1, size))), //
+          vk::DescriptorPoolCreateInfo(vk::DescriptorPoolCreateFlags{vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet}, 1, sizes))), //
       dscSet(std::move(ctx.allocateDescriptorSets({*dscPool, *dscLayout})[0])), pipeCache({}),                       //
       pipeLayout(ctx.createPipelineLayout(
           vk::PipelineLayoutCreateInfo{vk::PipelineLayoutCreateFlags(), 1, &*dscLayout, 0, nullptr})),
@@ -208,19 +204,22 @@ VulkanDevice::VulkanDevice(vk::raii::Instance &instance,              //
             TRACE();
             std::vector<vk::DescriptorSetLayoutBinding> bindings;
             uint32_t bindingsId = 0;
+            size_t storages = 0;
             size_t scalars = 0;
             for (auto tpe : types) {
-              if (tpe == Type::Ptr)
-                bindings.emplace_back(bindingsId++, vk::DescriptorType::eStorageBuffer, 1,
-                                      vk::ShaderStageFlagBits::eCompute);
-              else if (tpe != Type::Void)
+              if (tpe == Type::Ptr) {
+                bindings.emplace_back(bindingsId++, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute);
+                storages++;
+              } else if (tpe != Type::Void)
                 scalars++;
             }
-            if (scalars != 0)
-              bindings.emplace_back(bindingsId, vk::DescriptorType::eStorageBuffer, 1,
-                                    vk::ShaderStageFlagBits::eCompute);
-            auto size = vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, bindings.size());
-            return Resolved(this->computeQueueId.first, m, bindings, size, ctx);
+            if (scalars != 0) bindings.emplace_back(bindingsId, vk::DescriptorType::eUniformBuffer, 1, vk::ShaderStageFlagBits::eCompute);
+
+            std::vector<vk::DescriptorPoolSize> sizes;
+            if (storages != 0) sizes.emplace_back(vk::DescriptorType::eStorageBuffer, storages);
+            if (scalars != 0) sizes.emplace_back(vk::DescriptorType::eUniformBuffer, scalars);
+
+            return Resolved(this->computeQueueId.first, m, bindings, sizes, ctx);
           }) {
   TRACE();
 }
@@ -276,12 +275,11 @@ bool VulkanDevice::moduleLoaded(const std::string &name) {
   return store.moduleLoaded(name);
 }
 
-static MemObject allocate(VmaAllocator &allocator, size_t size) {
+static MemObject allocate(VmaAllocator &allocator, size_t size, bool uniform) {
   VkBufferCreateInfo bufferInfo = {};
   bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
   bufferInfo.size = size;
-  bufferInfo.usage =
-      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+  bufferInfo.usage = (uniform ? VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT : VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
   VmaAllocationCreateInfo allocCreateInfo = {};
   allocCreateInfo.usage = VMA_MEMORY_USAGE_AUTO;
   allocCreateInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
@@ -295,7 +293,7 @@ static MemObject allocate(VmaAllocator &allocator, size_t size) {
 
 uintptr_t VulkanDevice::malloc(size_t size, Access) {
   TRACE();
-  return memoryObjects.malloc(std::make_shared<MemObject>(allocate(allocator, size)));
+  return memoryObjects.malloc(std::make_shared<MemObject>(allocate(allocator, size, false)));
 }
 void VulkanDevice::free(uintptr_t ptr) {
   TRACE();
@@ -385,7 +383,7 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
 
   auto args = detail::argDataAsPointers(types, argData);
 
-  std::vector<vk::DescriptorBufferInfo> infos;
+  std::vector<std::pair<vk::DescriptorBufferInfo,vk::DescriptorType >> infos;
   size_t argBufferSize = 0;
 
   {
@@ -400,13 +398,13 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
         uintptr_t ptr = {};
         std::memcpy(&ptr, rawPtr, byteOfType(Type::Ptr));
         const auto obj = queryMemObject(ptr);
-        infos.emplace_back(obj->buffer, 0, obj->size);
+        infos.emplace_back(vk::DescriptorBufferInfo{obj->buffer, 0, obj->size}, vk::DescriptorType::eStorageBuffer);
       }
     }
   }
 
-  auto argObj = argBufferSize == 0 ? nullptr : std::make_shared<MemObject>(allocate(allocator, argBufferSize));
-  if (argBufferSize) {
+  auto argObj = argBufferSize == 0 ? nullptr : std::make_shared<MemObject>(allocate(allocator, argBufferSize, true));
+  if (argObj) {
     auto *argPtr = static_cast<std::byte *>(argObj->mappedData);
     for (size_t i = 0; i < types.size() - 1; ++i) {
       auto tpe = types[i];
@@ -414,7 +412,7 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
       std::memcpy(argPtr, args[i], byteOfType(tpe));
       argPtr += byteOfType(tpe);
     }
-    infos.emplace_back(argObj->buffer, 0, argObj->size);
+    infos.emplace_back(vk::DescriptorBufferInfo{argObj->buffer, 0, argObj->size}, vk::DescriptorType::eUniformBuffer);
   }
 
   auto &fn = store.resolveFunction(moduleName, symbol, types);
@@ -442,7 +440,7 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
   std::vector<vk::WriteDescriptorSet> writeDsSets;
   {
     for (uint32_t i = 0; i < infos.size(); ++i)
-      writeDsSets.emplace_back(*fn.dscSet, i, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &infos[i]);
+      writeDsSets.emplace_back(*fn.dscSet, i, 0, 1, infos[i].second, nullptr, &infos[i].first);
   }
 
   ctx.updateDescriptorSets(writeDsSets, {});

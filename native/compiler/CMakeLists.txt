@@ -2,30 +2,46 @@ set(LIB_SOURCES
         generated/polyast.cpp
         generated/polyast_codec.cpp
 
+
+        backend/llvm_amdgpu.cpp
+        backend/llvm_nvptx.cpp
+        backend/llvm_opencl.cpp
+
         backend/llvm.cpp
+
         backend/llvmc.cpp
         backend/c_source.cpp
         backend/lld_lite.cpp
         backend/memoryfs.cpp
+        backend/clspv.cpp
 
         ast.cpp
         compiler.cpp
         polyregion_compiler.cpp
+
+        ${clspv_passes_SOURCE_FILES}
         )
 
 add_library(compiler-lib ${LIB_SOURCES})
 add_dependencies(compiler-lib intrinsics_gen)
 
-add_executable(compiler-tests test/ast_codegen.cpp test/backend.cpp test/ast.cpp test/stream.cpp)
+add_executable(compiler-tests test/ast_codegen.cpp test/backend.cpp test/ast.cpp)
+add_executable(compiler-benchmark benchmark/babelstream.cpp)
 add_executable(compiler-drv ../shared/cxa_thread_atexit.cpp driver.cpp)
 add_dependencies(compiler-drv runtime-lib)
 
 
 target_include_directories(compiler-tests PUBLIC . ../include PRIVATE ../runtime)
+target_include_directories(compiler-benchmark PUBLIC . ../include PRIVATE ../runtime)
 target_include_directories(compiler-drv PUBLIC . ../include PRIVATE ../runtime)
 target_include_directories(compiler-lib PUBLIC
         ${LLVM_INCLUDE_DIRS}
         ${LLD_INCLUDE_DIRS}
+        #        ${spirv-llvm-translator_SOURCE_DIR}/include
+
+        ${clspv_passes_INCLUDE_DIRS}
+        ${spirv-tools_SOURCE_DIR}/include
+
         ${json_SOURCE_DIR}
         . ../include
         )
@@ -89,8 +105,10 @@ llvm_map_components_to_libnames(LLVM_LIBS
         transformutils
         vectorize
         targetparser
+        objcarcopts
 
         )
+
 
 set(LLD_LIBS lldCommon lldELF)
 
@@ -110,12 +128,14 @@ message(STATUS "[compiler] Adding LLD libs = ${LLD_LIBS} ")
 
 target_link_libraries(compiler-lib PRIVATE
 
+        SPIRV-Tools-opt
         "$<$<CONFIG:RELEASE>:${LLVM_LIBS};${LLD_LIBS}>"
         "$<$<CONFIG:DEBUG>:${LLVM_LIBS};${LLD_LIBS}>"
         #        "$<$<CONFIG:DEBUG>:LLVM>"  # linking all the static libs is too slow for dev
         #        capstone-static
         )
 target_link_libraries(compiler-tests PRIVATE compiler-lib runtime-lib Catch2::Catch2WithMain)
+target_link_libraries(compiler-benchmark PRIVATE compiler-lib runtime-lib)
 target_link_libraries(compiler-drv PRIVATE compiler-lib runtime-lib ${LLVM_LIBS} ${LLD_LIBS})
 
 set(COMPILE_OPTIONS
@@ -132,7 +152,9 @@ set(LINK_OPTIONS
 target_compile_options(compiler-lib PRIVATE ${COMPILE_OPTIONS})
 target_compile_options(compiler-drv PRIVATE ${COMPILE_OPTIONS})
 target_compile_options(compiler-tests PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(compiler-benchmark PRIVATE ${COMPILE_OPTIONS})
 
 target_link_options(compiler-lib PRIVATE ${LINK_OPTIONS})
 target_link_options(compiler-drv PRIVATE ${LINK_OPTIONS})
 target_link_options(compiler-tests PRIVATE ${LINK_OPTIONS})
+target_link_options(compiler-benchmark PRIVATE ${LINK_OPTIONS})

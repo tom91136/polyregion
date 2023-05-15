@@ -3,7 +3,7 @@ AllowShortIfStatementsOnASingleLine: Always
 AllowShortCaseLabelsOnASingleLine: true
 AllowShortFunctionsOnASingleLine: All
 IndentCaseLabels: true
-ColumnLimit: 120
+ColumnLimit: 140
 CompactNamespaces: true
 FixNamespaceComments: true
 IndentPPDirectives: BeforeHash

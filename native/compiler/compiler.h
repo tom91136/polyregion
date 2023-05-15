@@ -28,6 +28,7 @@ enum class EXPORT Target : uint8_t {
 
   Object_LLVM_NVPTX64 = 20,
   Object_LLVM_AMDGCN,
+  Object_LLVM_SPIRV32,
   Object_LLVM_SPIRV64,
 
   Source_C_C11 = 30,

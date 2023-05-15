@@ -62,7 +62,7 @@ struct Resolved {
   Resolved(uint32_t computeQueueId,
            const std::shared_ptr<vk::raii::ShaderModule> &shaderModule, //
            const std::vector<vk::DescriptorSetLayoutBinding> &bindings, //
-           vk::DescriptorPoolSize size,                                 //
+           const std::vector<vk::DescriptorPoolSize> &size,                                 //
            vk::raii::Device &ctx);
 };
 

@@ -8,7 +8,7 @@ layout (std430, binding = 0) buffer stream_dot_a { float a[]; };
 layout (std430, binding = 1) buffer stream_dot_b { float b[]; };
 layout (std430, binding = 2) buffer stream_dot_c { float c[]; };
 layout (std430, binding = 3) buffer stream_dot_sum { float sum[]; };
-layout (std430, binding = 4) buffer stream_dot_args { Args args; };
+layout (binding = 4) uniform stream_dot_args { Args args; };
 
 shared float wg_sum[gl_WorkGroupSize.x];
 

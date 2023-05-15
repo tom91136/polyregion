@@ -22,8 +22,7 @@ int64_t compiler::elapsedNs(const TimePoint &a, const TimePoint &b) {
 }
 
 int64_t compiler::nowMs() {
-  return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
-      .count();
+  return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
 std::optional<compiler::Target> compiler::targetFromOrdinal(std::underlying_type_t<compiler::Target> ordinal) {
@@ -38,6 +37,7 @@ std::optional<compiler::Target> compiler::targetFromOrdinal(std::underlying_type
     case Target::Source_C_OpenCL1_1:
     case Target::Source_C_C11:
     case Target::Source_C_Metal1_0:
+    case Target::Object_LLVM_SPIRV32:
     case Target::Object_LLVM_SPIRV64:
       return target;
       // XXX do not add default here, see  -Werror=switch
@@ -120,8 +120,7 @@ static backend::LLVM::Options toLLVMBackendOptions(const compiler::Options &opti
 
   auto validate = [&](llvm::Triple::ArchType arch) {
     if (!llvm_shared::isCPUTargetSupported(options.arch, arch)) {
-      throw std::logic_error("Unsupported target CPU `" + options.arch + "` on `" +
-                             llvm::Triple::getArchTypeName(arch).str() + "`");
+      throw std::logic_error("Unsupported target CPU `" + options.arch + "` on `" + llvm::Triple::getArchTypeName(arch).str() + "`");
     }
   };
 
@@ -151,9 +150,8 @@ static backend::LLVM::Options toLLVMBackendOptions(const compiler::Options &opti
     case compiler::Target::Object_LLVM_AMDGCN:
       validate(llvm::Triple::ArchType::amdgcn);
       return {.target = backend::LLVM::Target::AMDGCN, .arch = options.arch};
-    case compiler::Target::Object_LLVM_SPIRV64:
-      // XXX SPIR is target independent, probably
-      return {.target = backend::LLVM::Target::SPIRV64, .arch = options.arch};
+    case compiler::Target::Object_LLVM_SPIRV32: return {.target = backend::LLVM::Target::SPIRV32, .arch = options.arch};
+    case compiler::Target::Object_LLVM_SPIRV64: return {.target = backend::LLVM::Target::SPIRV64, .arch = options.arch};
     case compiler::Target::Source_C_OpenCL1_1: //
     case compiler::Target::Source_C_Metal1_0:  //
     case compiler::Target::Source_C_C11:       //
@@ -170,6 +168,7 @@ std::vector<compiler::Layout> compiler::layoutOf(const std::vector<polyast::Stru
     case Target::Object_LLVM_ARM:
     case Target::Object_LLVM_NVPTX64:
     case Target::Object_LLVM_AMDGCN:
+    case Target::Object_LLVM_SPIRV32:
     case Target::Object_LLVM_SPIRV64: {
 
       auto llvmOptions = toLLVMBackendOptions(options);
@@ -214,8 +213,7 @@ std::vector<compiler::Layout> compiler::layoutOf(const Bytes &sdef, const Option
 }
 
 static void sortEvents(compiler::Compilation &c) {
-  std::sort(c.events.begin(), c.events.end(),
-            [](const auto &l, const auto &r) { return l.epochMillis < r.epochMillis; });
+  std::sort(c.events.begin(), c.events.end(), [](const auto &l, const auto &r) { return l.epochMillis < r.epochMillis; });
 }
 
 compiler::Compilation compiler::compile(const polyast::Program &program, const Options &options, const Opt &opt) {
@@ -231,6 +229,7 @@ compiler::Compilation compiler::compile(const polyast::Program &program, const O
       case Target::Object_LLVM_ARM:
       case Target::Object_LLVM_NVPTX64:
       case Target::Object_LLVM_AMDGCN:
+      case Target::Object_LLVM_SPIRV32:
       case Target::Object_LLVM_SPIRV64:                                                  //
         return std::make_unique<backend::LLVM>(toLLVMBackendOptions(options));           //
       case Target::Source_C_OpenCL1_1:                                                   //
@@ -243,11 +242,12 @@ compiler::Compilation compiler::compile(const polyast::Program &program, const O
   };
 
   Compilation c;
-  try {
-    c = mkBackend()->compileProgram(program, opt);
-  } catch (const std::exception &e) {
-    c.messages = e.what();
-  }
+  //  try {
+  c = mkBackend()->compileProgram(program, opt);
+  //  } catch (const std::exception &e) {
+  //    c.messages = e.what();
+  //    throw e;
+  //  }
   sortEvents(c);
   return c;
 }

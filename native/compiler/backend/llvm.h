@@ -21,10 +21,14 @@ namespace polyregion::backend {
 
 using namespace polyregion::polyast;
 
+class LLVMTargetSpecificHandler {
+  virtual void witnessEntry(llvm::LLVMContext &ctx, llvm::Module &mod, llvm::Function &fn) = 0;
+};
+
 class LLVM : public Backend {
 
 public:
-  enum class Target { x86_64, AArch64, ARM, NVPTX64, AMDGCN, SPIRV64 };
+  enum class Target { x86_64, AArch64, ARM, NVPTX64, AMDGCN, SPIRV32, SPIRV64 };
   struct Options {
     Target target;
     std::string arch;
@@ -61,25 +65,22 @@ public:
     llvm::Value *mkExprVal(const Expr::Any &expr, llvm::Function *fn, const std::string &key);
     BlockKind mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<WhileCtx> whileCtx);
 
-    llvm::Function *mkExternalFn(llvm::Function *parent, const Type::Any &rtn, const std::string &name,
-                                 const std::vector<Type::Any> &args);
+    llvm::Function *mkExternalFn(llvm::Function *parent, const Type::Any &rtn, const std::string &name, const std::vector<Type::Any> &args);
     llvm::Value *invokeMalloc(llvm::Function *parent, llvm::Value *size);
     llvm::Value *invokeAbort(llvm::Function *parent);
 
-    llvm::Type *mkTpe(const Type::Any &tpe,   bool functionBoundary = false);
+    llvm::Type *mkTpe(const Type::Any &tpe, bool functionBoundary = false);
 
     Pair<llvm::StructType *, StructMemberIndexTable> mkStruct(const StructDef &def);
 
     //    Opt<llvm::StructType *> lookup(const Sym &s);
     //    llvm::Value *conditionalLoad(llvm::Value *rhs);
 
-
   public:
-    AstTransformer(Options options, llvm::LLVMContext &c);
+    AstTransformer(const Options &options, llvm::LLVMContext &c);
 
     void addDefs(const std::vector<StructDef> &);
     void addFn(llvm::Module &mod, const Function &f, bool entry);
-
 
     std::vector<Pair<Sym, llvm::StructType *>> getStructTypes() const;
 
