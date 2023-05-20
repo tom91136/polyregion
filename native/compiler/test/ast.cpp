@@ -18,14 +18,14 @@ TEST_CASE("Invoke identity") {
   InvokeSignature a(Sym({"polyregion", "CollectionLengthSuite", "ClassB", "foo"}), {},
                     {Type::Struct(Sym({"polyregion_CollectionLengthSuite_ClassB__"}), {}, {},
                                   {Sym({"polyregion_CollectionLengthSuite_Base__"})})},
-                    {Type::Int()}, {}, Type::Int());
+                    {Type::IntS32()}, {}, Type::IntS32());
 
   InvokeSignature b(
       Sym({"polyregion", "CollectionLengthSuite", "ClassB", "foo"}),
       {},
                     {Type::Struct(Sym({"polyregion_CollectionLengthSuite_ClassB__"}), {}, {},
                                   {Sym({"polyregion_CollectionLengthSuite_Base__"})})},
-                    {Type::Int()}, {}, Type::Int());
+                    {Type::IntS32()}, {}, Type::IntS32());
 
   CHECK(a == b);
 }

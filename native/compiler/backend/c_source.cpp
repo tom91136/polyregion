@@ -14,39 +14,53 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
     case Dialect::C11:
     case Dialect::MSL1_0:
       return variants::total(
-          *tpe,                                                           //
-          [&](const Type::Float &x) { return "float"s; },                 //
-          [&](const Type::Double &x) { return "double"s; },               //
-          [&](const Type::Bool &x) { return "bool"s; },                   //
-          [&](const Type::Byte &x) { return "int8_t"s; },                 //
-          [&](const Type::Char &x) { return "uint16_t"s; },               //
-          [&](const Type::Short &x) { return "int16_t"s; },               //
-          [&](const Type::Int &x) { return "int32_t"s; },                 //
-          [&](const Type::Long &x) { return "int64_t"s; },                //
-          [&](const Type::Unit &x) { return "void"s; },                   //
-          [&](const Type::Nothing &x) { return "/*nothing*/"s; },         //
+          *tpe,                                             //
+          [&](const Type::Float16 &) { return "__fp16"s; }, //
+          [&](const Type::Float32 &) { return "float"s; },  //
+          [&](const Type::Float64 &) { return "double"s; }, //
+
+          [&](const Type::IntU8 &) { return "uint8_t"s; },   //
+          [&](const Type::IntU16 &) { return "uint16_t"s; }, //
+          [&](const Type::IntU32 &) { return "uint32_t"s; }, //
+          [&](const Type::IntU64 &) { return "uint64_t"s; }, //
+
+          [&](const Type::IntS8 &) { return "int8_t"s; },   //
+          [&](const Type::IntS16 &) { return "int16_t"s; }, //
+          [&](const Type::IntS32 &) { return "int32_t"s; }, //
+          [&](const Type::IntS64 &) { return "int64_t"s; }, //
+
+          [&](const Type::Bool1 &) { return "bool"s; },                   //
+          [&](const Type::Unit0 &) { return "void"s; },                   //
+          [&](const Type::Nothing &) { return "/*nothing*/"s; },          //
           [&](const Type::Struct &x) { return qualified(x.name); },       //
           [&](const Type::Array &x) { return mkTpe(x.component) + "*"; }, //
-          [&](const Type::Var &x) { return "/*type var*/"s; },            //
-          [&](const Type::Exec &x) { return "/*exec*/"s; }                //
+          [&](const Type::Var &) { return "/*type var*/"s; },             //
+          [&](const Type::Exec &) { return "/*exec*/"s; }                 //
       );
     case Dialect::OpenCL1_1:
       return variants::total(
-          *tpe,                                                           //
-          [&](const Type::Float &x) { return "float"s; },                 //
-          [&](const Type::Double &x) { return "double"s; },               //
-          [&](const Type::Bool &x) { return "char"s; },                   //
-          [&](const Type::Byte &x) { return "char"s; },                   //
-          [&](const Type::Char &x) { return "ushort"s; },                 //
-          [&](const Type::Short &x) { return "short"s; },                 //
-          [&](const Type::Int &x) { return "int"s; },                     //
-          [&](const Type::Long &x) { return "long"s; },                   //
-          [&](const Type::Unit &x) { return "void"s; },                   //
-          [&](const Type::Nothing &x) { return "/*nothing*/"s; },         //
+          *tpe,                                             //
+          [&](const Type::Float16 &) { return "half"s; },   //
+          [&](const Type::Float32 &) { return "float"s; },  //
+          [&](const Type::Float64 &) { return "double"s; }, //
+
+          [&](const Type::IntU8 &) { return "uchar"s; },   //
+          [&](const Type::IntU16 &) { return "ushort"s; }, //
+          [&](const Type::IntU32 &) { return "uint"s; },   //
+          [&](const Type::IntU64 &) { return "ulong"s; },  //
+
+          [&](const Type::IntS8 &) { return "char"s; },   //
+          [&](const Type::IntS16 &) { return "short"s; }, //
+          [&](const Type::IntS32 &) { return "int"s; },   //
+          [&](const Type::IntS64 &) { return "long"s; },  //
+
+          [&](const Type::Bool1 &) { return "char"s; },                   //
+          [&](const Type::Unit0 &) { return "void"s; },                   //
+          [&](const Type::Nothing &) { return "/*nothing*/"s; },          //
           [&](const Type::Struct &x) { return qualified(x.name); },       //
           [&](const Type::Array &x) { return mkTpe(x.component) + "*"; }, //
-          [&](const Type::Var &x) { return "/*type var*/"s; },            //
-          [&](const Type::Exec &x) { return "/*exec*/"s; }                //
+          [&](const Type::Var &) { return "/*type var*/"s; },             //
+          [&](const Type::Exec &) { return "/*exec*/"s; }                 //
       );
   }
 }
@@ -56,145 +70,140 @@ std::string backend::CSource::mkRef(const Term::Any &ref) {
       *ref,                                                                      //
       [](const Term::Select &x) { return polyast::qualified(x); },               //
       [](const Term::Poison &x) { return "(NULL /* " + repr(x.tpe) + " */)"s; }, //
-      [](const Term::UnitConst &x) { return "/*void*/"s; },                      //
-      [](const Term::BoolConst &x) { return x.value ? "true"s : "false"s; },     //
-      [](const Term::ByteConst &x) { return std::to_string(x.value); },          //
-      [](const Term::CharConst &x) { return std::to_string(x.value); },          //
-      [](const Term::ShortConst &x) { return std::to_string(x.value); },         //
-      [](const Term::IntConst &x) { return std::to_string(x.value); },           //
-      [](const Term::LongConst &x) { return std::to_string(x.value); },          //
-      [](const Term::DoubleConst &x) { return std::to_string(x.value); },        //
-      [](const Term::FloatConst &x) { return std::to_string(x.value) + "f"; }    //
+      [](const Term::Unit0Const &x) { return "/*void*/"s; },                     //
+      [](const Term::Bool1Const &x) { return x.value ? "true"s : "false"s; },    //
+
+      [](const Term::IntU8Const &x) { return std::to_string(x.value); },  //
+      [](const Term::IntU16Const &x) { return std::to_string(x.value); }, //
+      [](const Term::IntU32Const &x) { return std::to_string(x.value); }, //
+      [](const Term::IntU64Const &x) { return std::to_string(x.value); }, //
+
+      [](const Term::IntS8Const &x) { return std::to_string(x.value); },  //
+      [](const Term::IntS16Const &x) { return std::to_string(x.value); }, //
+      [](const Term::IntS32Const &x) { return std::to_string(x.value); }, //
+      [](const Term::IntS64Const &x) { return std::to_string(x.value); }, //
+
+      [](const Term::Float64Const &x) { return std::to_string(x.value); },       //
+      [](const Term::Float32Const &x) { return std::to_string(x.value) + "f"; }, //
+      [](const Term::Float16Const &x) { return std::to_string(x.value) + ""; }   //
   );                                                                             // FIXME escape string
 }
 
 std::string backend::CSource::mkExpr(const Expr::Any &expr, const std::string &key) {
   return variants::total(
       *expr, //
-      [&](const Expr::NullaryIntrinsic &x) {
-        switch (dialect) {
-          case Dialect::C11:
-          case Dialect::MSL1_0:
-            return variants::total(
-                *x.kind, //
-                [](const NullaryIntrinsicKind::Assert &) { return "abort()"s; },
-                [](const NullaryIntrinsicKind::GpuGlobalIdxX &) { return "___get_global_id___.x"s; },
-                [](const NullaryIntrinsicKind::GpuGlobalIdxY &) { return "___get_global_id___.y"s; },
-                [](const NullaryIntrinsicKind::GpuGlobalIdxZ &) { return "___get_global_id___.z"s; },
-                [](const NullaryIntrinsicKind::GpuGlobalSizeX &) { return "___get_global_size___.x"s; },
-                [](const NullaryIntrinsicKind::GpuGlobalSizeY &) { return "___get_global_size___.y"s; },
-                [](const NullaryIntrinsicKind::GpuGlobalSizeZ &) { return "___get_global_size___.z"s; },
-                [](const NullaryIntrinsicKind::GpuGroupIdxX &) { return "___get_group_id___.x"s; },
-                [](const NullaryIntrinsicKind::GpuGroupIdxY &) { return "___get_group_id___.y"s; },
-                [](const NullaryIntrinsicKind::GpuGroupIdxZ &) { return "___get_group_id___.z"s; },
-                [](const NullaryIntrinsicKind::GpuGroupSizeX &) { return "___get_num_groups___.x"s; },
-                [](const NullaryIntrinsicKind::GpuGroupSizeY &) { return "___get_num_groups___.y"s; },
-                [](const NullaryIntrinsicKind::GpuGroupSizeZ &) { return "___get_num_groups___.z"s; },
-                [](const NullaryIntrinsicKind::GpuLocalIdxX &) { return "___get_local_id___.x"s; },
-                [](const NullaryIntrinsicKind::GpuLocalIdxY &) { return "___get_local_id___.y"s; },
-                [](const NullaryIntrinsicKind::GpuLocalIdxZ &) { return "___get_local_id___.z"s; },
-                [](const NullaryIntrinsicKind::GpuLocalSizeX &) { return "___get_local_size___.x"s; },
-                [](const NullaryIntrinsicKind::GpuLocalSizeY &) { return "___get_local_size___.y"s; },
-                [](const NullaryIntrinsicKind::GpuLocalSizeZ &) { return "___get_local_size___.z"s; },
-                [](const NullaryIntrinsicKind::GpuGroupBarrier &) {
-                  return "threadgroup_barrier(metal::mem_flags::mem_threadgroup)"s;
-                },
-                [](const NullaryIntrinsicKind::GpuGroupFence &) {
-                  return "threadgroup_barrier(metal::mem_flags::mem_threadgroup)"s;
-                });
-          case Dialect::OpenCL1_1:
-            return variants::total(
-                *x.kind, //
-                [](const NullaryIntrinsicKind::Assert &) { return "abort()"s; },
-                [](const NullaryIntrinsicKind::GpuGlobalIdxX &) { return "get_global_id(0)"s; },
-                [](const NullaryIntrinsicKind::GpuGlobalIdxY &) { return "get_global_id(1)"s; },
-                [](const NullaryIntrinsicKind::GpuGlobalIdxZ &) { return "get_global_id(2)"s; },
-                [](const NullaryIntrinsicKind::GpuGlobalSizeX &) { return "get_global_size(0)"s; },
-                [](const NullaryIntrinsicKind::GpuGlobalSizeY &) { return "get_global_size(1)"s; },
-                [](const NullaryIntrinsicKind::GpuGlobalSizeZ &) { return "get_global_size(2)"s; },
-                [](const NullaryIntrinsicKind::GpuGroupIdxX &) { return "get_group_id(0)"s; },
-                [](const NullaryIntrinsicKind::GpuGroupIdxY &) { return "get_group_id(1)"s; },
-                [](const NullaryIntrinsicKind::GpuGroupIdxZ &) { return "get_group_id(2)"s; },
-                [](const NullaryIntrinsicKind::GpuGroupSizeX &) { return "get_num_groups(0)"s; },
-                [](const NullaryIntrinsicKind::GpuGroupSizeY &) { return "get_num_groups(1)"s; },
-                [](const NullaryIntrinsicKind::GpuGroupSizeZ &) { return "get_num_groups(2)"s; },
-                [](const NullaryIntrinsicKind::GpuLocalIdxX &) { return "get_local_id(0)"s; },
-                [](const NullaryIntrinsicKind::GpuLocalIdxY &) { return "get_local_id(1)"s; },
-                [](const NullaryIntrinsicKind::GpuLocalIdxZ &) { return "get_local_id(2)"s; },
-                [](const NullaryIntrinsicKind::GpuLocalSizeX &) { return "get_local_size(0)"s; },
-                [](const NullaryIntrinsicKind::GpuLocalSizeY &) { return "get_local_size(1)"s; },
-                [](const NullaryIntrinsicKind::GpuLocalSizeZ &) { return "get_local_size(2)"s; },
-                [](const NullaryIntrinsicKind::GpuGroupBarrier &) { return "barrier(CLK_LOCAL_MEM_FENCE)"s; },
-                [](const NullaryIntrinsicKind::GpuGroupFence &) { return "mem_fence(CLK_LOCAL_MEM_FENCE)"s; });
-        }
-      },
-      [&](const Expr::UnaryIntrinsic &x) {
-        auto op = variants::total(
-            *x.kind,                                                 //
-            [](const UnaryIntrinsicKind::Sin &) { return "sin"; },   //
-            [](const UnaryIntrinsicKind::Cos &) { return "cos"; },   //
-            [](const UnaryIntrinsicKind::Tan &) { return "tan"; },   //
-            [](const UnaryIntrinsicKind::Asin &) { return "asin"; }, //
-            [](const UnaryIntrinsicKind::Acos &) { return "acos"; }, //
-            [](const UnaryIntrinsicKind::Atan &) { return "atan"; }, //
-            [](const UnaryIntrinsicKind::Sinh &) { return "sinh"; }, //
-            [](const UnaryIntrinsicKind::Cosh &) { return "cosh"; }, //
-            [](const UnaryIntrinsicKind::Tanh &) { return "tanh"; }, //
-
-            [](const UnaryIntrinsicKind::Signum &) { return "signum"; }, //
-            [](const UnaryIntrinsicKind::Abs &) { return "abs"; },       //
-            [](const UnaryIntrinsicKind::Round &) { return "round"; },   //
-            [](const UnaryIntrinsicKind::Ceil &) { return "ceil"; },     //
-            [](const UnaryIntrinsicKind::Floor &) { return "floor"; },   //
-            [](const UnaryIntrinsicKind::Rint &) { return "rint"; },     //
-
-            [](const UnaryIntrinsicKind::Sqrt &) { return "sqrt"; },   //
-            [](const UnaryIntrinsicKind::Cbrt &) { return "cbrt"; },   //
-            [](const UnaryIntrinsicKind::Exp &) { return "exp"; },     //
-            [](const UnaryIntrinsicKind::Expm1 &) { return "expm1"; }, //
-            [](const UnaryIntrinsicKind::Log &) { return "log"; },     //
-            [](const UnaryIntrinsicKind::Log1p &) { return "log1p"; }, //
-            [](const UnaryIntrinsicKind::Log10 &) { return "log10"; }, //
-            [](const UnaryIntrinsicKind::BNot &) { return "~"; },      //
-            [](const UnaryIntrinsicKind::Pos &) { return "+"; },       //
-            [](const UnaryIntrinsicKind::Neg &) { return "-"; },       //
-            [](const UnaryIntrinsicKind::LogicNot &x) { return "!"; });
-        return std::string(op) + "(" + mkRef(x.lhs) + ")";
-      },
-      [&](const Expr::BinaryIntrinsic &x) {
-        auto op = variants::total(
-            *x.kind,                                              //
-            [](const BinaryIntrinsicKind::Add &) { return "+"; }, //
-            [](const BinaryIntrinsicKind::Sub &) { return "-"; }, //
-            [](const BinaryIntrinsicKind::Mul &) { return "*"; }, //
-            [](const BinaryIntrinsicKind::Div &) { return "/"; }, //
-            [](const BinaryIntrinsicKind::Rem &) { return "%"; }, //
-
-            [](const BinaryIntrinsicKind::Pow &) { return "**"; }, //
-
-            [](const BinaryIntrinsicKind::Min &) { return "min"; }, //
-            [](const BinaryIntrinsicKind::Max &) { return "max"; }, //
-
-            [](const BinaryIntrinsicKind::Atan2 &) { return "atan2"; }, //
-            [](const BinaryIntrinsicKind::Hypot &) { return "hypot"; }, //
-
-            [](const BinaryIntrinsicKind::BAnd &) { return "&"; },   //
-            [](const BinaryIntrinsicKind::BOr &) { return "|"; },    //
-            [](const BinaryIntrinsicKind::BXor &) { return "^"; },   //
-            [](const BinaryIntrinsicKind::BSL &) { return "<<"; },   //
-            [](const BinaryIntrinsicKind::BSR &) { return ">>"; },   //
-            [](const BinaryIntrinsicKind::BZSR &) { return ">>>"; }, //
-
-            [](const BinaryIntrinsicKind::LogicEq &x) { return "=="; },  //
-            [](const BinaryIntrinsicKind::LogicNeq &x) { return "!="; }, //
-            [](const BinaryIntrinsicKind::LogicAnd &x) { return "&&"; }, //
-            [](const BinaryIntrinsicKind::LogicOr &x) { return "||"; },  //
-            [](const BinaryIntrinsicKind::LogicLte &x) { return "<="; }, //
-            [](const BinaryIntrinsicKind::LogicGte &x) { return ">="; }, //
-            [](const BinaryIntrinsicKind::LogicLt &x) { return "<"; },   //
-            [](const BinaryIntrinsicKind::LogicGt &x) { return ">"; }    //
+      [&](const Expr::SpecOp &x) {
+        struct DialectAccessor {
+          std::string cl, msl;
+        };
+        const auto gpuIntr = [&](const DialectAccessor &accessor) -> std::string {
+          switch (dialect) {
+            case Dialect::C11: throw std::logic_error(to_string(x) + " not supported for C11");
+            case Dialect::MSL1_0: return accessor.msl;
+            case Dialect::OpenCL1_1: return accessor.cl;
+          }
+        };
+        const auto gpuDimIntr = [&](const DialectAccessor &accessor, const Term::Any &index) -> std::string {
+          switch (dialect) {
+            case Dialect::C11: throw std::logic_error(to_string(x) + " not supported for C11");
+            case Dialect::MSL1_0: return accessor.msl + "[" + mkRef(index) + "]";
+            case Dialect::OpenCL1_1: return accessor.cl + "(" + mkRef(index) + ")";
+          }
+        };
+        return variants::total(
+            *x.op,                                             //
+            [&](const Spec::Assert &v) { return "abort()"s; }, //
+            [&](const Spec::GpuBarrierGlobal &v) {
+              return gpuIntr({.cl = "barrier(CLK_GLOBAL_MEM_FENCE)", //
+                              .msl = "threadgroup_barrier(metal::mem_flags::mem_none)"});
+            },
+            [&](const Spec::GpuBarrierLocal &v) {
+              return gpuIntr({.cl = "barrier(CLK_LOCAL_MEM_FENCE)", //
+                              .msl = "threadgroup_barrier(metal::mem_flags::mem_none)"});
+            },
+            [&](const Spec::GpuBarrierAll &v) {
+              return gpuIntr({.cl = "barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE)", //
+                              .msl = "threadgroup_barrier(metal::mem_flags::mem_none)"});
+            },
+            [&](const Spec::GpuFenceGlobal &v) {
+              return gpuIntr({.cl = "mem_fence(CLK_GLOBAL_MEM_FENCE)", //
+                              .msl = "threadgroup_barrier(metal::mem_flags::mem_device)"});
+            },
+            [&](const Spec::GpuFenceLocal &v) {
+              return gpuIntr({.cl = "mem_fence(CLK_LOCAL_MEM_FENCE)", //
+                              .msl = "threadgroup_barrier(metal::mem_flags::mem_threadgroup)"});
+            },
+            [&](const Spec::GpuFenceAll &v) {
+              return gpuIntr({.cl = "mem_fence(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE)", //
+                              .msl = "threadgroup_barrier(metal::mem_flags::mem_device)"});
+            },
+            [&](const Spec::GpuGlobalIdx &v) { return gpuDimIntr({.cl = "get_global_id", .msl = "__get_global_id__"}, v.dim); },      //
+            [&](const Spec::GpuGlobalSize &v) { return gpuDimIntr({.cl = "get_global_size", .msl = "__get_global_size__"}, v.dim); }, //
+            [&](const Spec::GpuGroupIdx &v) { return gpuDimIntr({.cl = "get_group_id", .msl = "__get_group_id__"}, v.dim); },         //
+            [&](const Spec::GpuGroupSize &v) { return gpuDimIntr({.cl = "get_num_groups", .msl = "__get_num_groups__"}, v.dim); },    //
+            [&](const Spec::GpuLocalIdx &v) { return gpuDimIntr({.cl = "get_local_id", .msl = "__get_local_id__"}, v.dim); },         //
+            [&](const Spec::GpuLocalSize &v) { return gpuDimIntr({.cl = "get_local_size", .msl = "__get_local_size__"}, v.dim); }     //
         );
-        return mkRef(x.lhs) + " " + std::string(op) + " " + mkRef(x.rhs);
+      },
+      [&](const Expr::IntrOp &x) {
+        return variants::total(
+            *x.op,                                                                                 //
+            [&](const Intr::Pos &v) { return "(+" + mkRef(v.x) + ")"; },                           //
+            [&](const Intr::Neg &v) { return "(-" + mkRef(v.x) + ")"; },                           //
+            [&](const Intr::BNot &v) { return "(~" + mkRef(v.x) + ")"; },                          //
+            [&](const Intr::LogicNot &v) { return "(!" + mkRef(v.x) + ")"; },                      //
+            [&](const Intr::Add &v) { return "(" + mkRef(v.x) + " + " + mkRef(v.y) + ")"; },       //
+            [&](const Intr::Sub &v) { return "(" + mkRef(v.x) + " - " + mkRef(v.y) + ")"; },       //
+            [&](const Intr::Mul &v) { return "(" + mkRef(v.x) + " * " + mkRef(v.y) + ")"; },       //
+            [&](const Intr::Div &v) { return "(" + mkRef(v.x) + " / " + mkRef(v.y) + ")"; },       //
+            [&](const Intr::Rem &v) { return "(" + mkRef(v.x) + " % " + mkRef(v.y) + ")"; },       //
+            [&](const Intr::Min &v) { return "min(" + mkRef(v.x) + ", " + mkRef(v.y) + ")"; },     //
+            [&](const Intr::Max &v) { return "max(" + mkRef(v.x) + ", " + mkRef(v.y) + ")"; },     //
+            [&](const Intr::BAnd &v) { return "(" + mkRef(v.x) + " & " + mkRef(v.y) + ")"; },      //
+            [&](const Intr::BOr &v) { return "(" + mkRef(v.x) + " | " + mkRef(v.y) + ")"; },       //
+            [&](const Intr::BXor &v) { return "(" + mkRef(v.x) + " ^ " + mkRef(v.y) + ")"; },      //
+            [&](const Intr::BSL &v) { return "(" + mkRef(v.x) + " << " + mkRef(v.y) + ")"; },      //
+            [&](const Intr::BSR &v) { return "(" + mkRef(v.x) + " >> " + mkRef(v.y) + ")"; },      //
+            [&](const Intr::BZSR &v) { return "(" + mkRef(v.x) + " <<< " + mkRef(v.y) + ")"; },    //
+            [&](const Intr::LogicAnd &v) { return "(" + mkRef(v.x) + " && " + mkRef(v.y) + ")"; }, //
+            [&](const Intr::LogicOr &v) { return "(" + mkRef(v.x) + " || " + mkRef(v.y) + ")"; },  //
+            [&](const Intr::LogicEq &v) { return "(" + mkRef(v.x) + " == " + mkRef(v.y) + ")"; },  //
+            [&](const Intr::LogicNeq &v) { return "(" + mkRef(v.x) + " != " + mkRef(v.y) + ")"; }, //
+            [&](const Intr::LogicLte &v) { return "(" + mkRef(v.x) + " <= " + mkRef(v.y) + ")"; }, //
+            [&](const Intr::LogicGte &v) { return "(" + mkRef(v.x) + " >= " + mkRef(v.y) + ")"; }, //
+            [&](const Intr::LogicLt &v) { return "(" + mkRef(v.x) + " < " + mkRef(v.y) + ")"; },   //
+            [&](const Intr::LogicGt &v) { return "(" + mkRef(v.x) + " > " + mkRef(v.y) + ")"; }    //
+        );
+      },
+      [&](const Expr::MathOp &x) {
+        return variants::total(
+            *x.op,                                                                                 //
+            [&](const Math::Abs &v) { return "abs(" + mkRef(v.x) + ")"; },                         //
+            [&](const Math::Sin &v) { return "sin(" + mkRef(v.x) + ")"; },                         //
+            [&](const Math::Cos &v) { return "cos(" + mkRef(v.x) + ")"; },                         //
+            [&](const Math::Tan &v) { return "tan(" + mkRef(v.x) + ")"; },                         //
+            [&](const Math::Asin &v) { return "asin(" + mkRef(v.x) + ")"; },                       //
+            [&](const Math::Acos &v) { return "acos(" + mkRef(v.x) + ")"; },                       //
+            [&](const Math::Atan &v) { return "atan(" + mkRef(v.x) + ")"; },                       //
+            [&](const Math::Sinh &v) { return "sinh(" + mkRef(v.x) + ")"; },                       //
+            [&](const Math::Cosh &v) { return "cosh(" + mkRef(v.x) + ")"; },                       //
+            [&](const Math::Tanh &v) { return "tanh(" + mkRef(v.x) + ")"; },                       //
+            [&](const Math::Signum &v) { return "signum(" + mkRef(v.x) + ")"; },                   //
+            [&](const Math::Round &v) { return "round(" + mkRef(v.x) + ")"; },                     //
+            [&](const Math::Ceil &v) { return "ceil(" + mkRef(v.x) + ")"; },                       //
+            [&](const Math::Floor &v) { return "floor(" + mkRef(v.x) + ")"; },                     //
+            [&](const Math::Rint &v) { return "rint(" + mkRef(v.x) + ")"; },                       //
+            [&](const Math::Sqrt &v) { return "sqrt(" + mkRef(v.x) + ")"; },                       //
+            [&](const Math::Cbrt &v) { return "cbrt(" + mkRef(v.x) + ")"; },                       //
+            [&](const Math::Exp &v) { return "exp(" + mkRef(v.x) + ")"; },                         //
+            [&](const Math::Expm1 &v) { return "expm1(" + mkRef(v.x) + ")"; },                     //
+            [&](const Math::Log &v) { return "log(" + mkRef(v.x) + ")"; },                         //
+            [&](const Math::Log1p &v) { return "log1p(" + mkRef(v.x) + ")"; },                     //
+            [&](const Math::Log10 &v) { return "log10(" + mkRef(v.x) + ")"; },                     //
+            [&](const Math::Pow &v) { return "pow(" + mkRef(v.x) + ", " + mkRef(v.y) + ")"; },     //
+            [&](const Math::Atan2 &v) { return "atan2(" + mkRef(v.x) + ", " + mkRef(v.y) + ")"; }, //
+            [&](const Math::Hypot &v) { return "hypot(" + mkRef(v.x) + ", " + mkRef(v.y) + ")"; }  //
+        );
       },
       [&](const Expr::Cast &x) { return "((" + mkTpe(x.as) + ") " + mkRef(x.from) + ")"; },
       [&](const Expr::Alias &x) { return mkRef(x.ref); },                            //
@@ -218,11 +227,10 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
             commented, [](auto &&x) { return x; }, "\n");
       },
       [&](const Stmt::Var &x) {
-        if (holds<Type::Unit>(x.name.tpe)) {
+        if (holds<Type::Unit0>(x.name.tpe)) {
           return mkExpr(*x.expr, x.name.symbol) + ";";
         }
-        auto line =
-            mkTpe(x.name.tpe) + " " + x.name.symbol + (x.expr ? (" = " + mkExpr(*x.expr, x.name.symbol)) : "") + ";";
+        auto line = mkTpe(x.name.tpe) + " " + x.name.symbol + (x.expr ? (" = " + mkExpr(*x.expr, x.name.symbol)) : "") + ";";
         return line;
       },
       [&](const Stmt::Mut &x) {
@@ -320,37 +328,13 @@ std::string backend::CSource ::mkFn(const Function &fnTree) {
     std::set<std::pair<std::string, std::string>> iargs; // ordered set for consistency
     for (auto &stmt : fnTree.body) {
       auto findIntrinsics = [&](Expr::Any &expr) {
-        if (auto intr = get_opt<Expr::NullaryIntrinsic>(expr); intr) {
-          if (holds<NullaryIntrinsicKind::GpuGlobalIdxX>(intr->kind) ||
-              holds<NullaryIntrinsicKind::GpuGlobalIdxY>(intr->kind) ||
-              holds<NullaryIntrinsicKind::GpuGlobalIdxZ>(intr->kind)) {
-            iargs.emplace("get_global_id", "thread_position_in_grid");
-          }
-          if (holds<NullaryIntrinsicKind::GpuGlobalSizeX>(intr->kind) ||
-              holds<NullaryIntrinsicKind::GpuGlobalSizeY>(intr->kind) ||
-              holds<NullaryIntrinsicKind::GpuGlobalSizeZ>(intr->kind)) {
-            iargs.emplace("get_global_size", "threads_per_grid");
-          }
-          if (holds<NullaryIntrinsicKind::GpuGroupIdxX>(intr->kind) ||
-              holds<NullaryIntrinsicKind::GpuGroupIdxY>(intr->kind) ||
-              holds<NullaryIntrinsicKind::GpuGroupIdxZ>(intr->kind)) {
-            iargs.emplace("get_group_id", "threadgroup_position_in_grid");
-          };
-          if (holds<NullaryIntrinsicKind::GpuGroupSizeX>(intr->kind) ||
-              holds<NullaryIntrinsicKind::GpuGroupSizeY>(intr->kind) ||
-              holds<NullaryIntrinsicKind::GpuGroupSizeZ>(intr->kind)) {
-            iargs.emplace("get_num_groups", "threadgroups_per_grid");
-          };
-          if (holds<NullaryIntrinsicKind::GpuLocalIdxX>(intr->kind) ||
-              holds<NullaryIntrinsicKind::GpuLocalIdxY>(intr->kind) ||
-              holds<NullaryIntrinsicKind::GpuLocalIdxZ>(intr->kind)) {
-            iargs.emplace("get_local_id", "thread_position_in_threadgroup");
-          };
-          if (holds<NullaryIntrinsicKind::GpuLocalSizeX>(intr->kind) ||
-              holds<NullaryIntrinsicKind::GpuLocalSizeY>(intr->kind) ||
-              holds<NullaryIntrinsicKind::GpuLocalSizeZ>(intr->kind)) {
-            iargs.emplace("get_local_size", "threads_per_threadgroup");
-          };
+        if (auto spec = get_opt<Expr::SpecOp>(expr); spec) {
+          if (holds<Spec::GpuGlobalIdx>(spec->op)) iargs.emplace("get_global_id", "thread_position_in_grid");
+          if (holds<Spec::GpuGlobalSize>(spec->op)) iargs.emplace("get_global_size", "threads_per_grid");
+          if (holds<Spec::GpuGroupIdx>(spec->op)) iargs.emplace("get_group_id", "threadgroup_position_in_grid");
+          if (holds<Spec::GpuGroupSize>(spec->op)) iargs.emplace("get_num_groups", "threadgroups_per_grid");
+          if (holds<Spec::GpuLocalIdx>(spec->op)) iargs.emplace("get_local_id", "thread_position_in_threadgroup");
+          if (holds<Spec::GpuLocalSize>(spec->op)) iargs.emplace("get_local_size", "threads_per_threadgroup");
         }
       };
       if (auto var = get_opt<Stmt::Var>(stmt); var) {
@@ -362,7 +346,7 @@ std::string backend::CSource ::mkFn(const Function &fnTree) {
       }
     }
     for (auto &[name, attr] : iargs)
-      argExprs.push_back("uint3 ___" + name + "___ [[ " + attr + " ]]");
+      argExprs.push_back("uint3 __" + name + "__ [[ " + attr + " ]]");
   }
 
   auto args = mk_string<std::string>(
@@ -414,7 +398,7 @@ compiler::Compilation backend::CSource::compileProgram(const Program &program, c
   std::vector<std::string> lines;
 
   switch (dialect) {
-    case Dialect::C11: lines.push_back("#include <stdint.h>\n#include <stdbool.h>"); break;
+    case Dialect::C11: lines.emplace_back("#include <stdint.h>\n#include <stdbool.h>"); break;
     default: break;
   }
 
@@ -438,7 +422,6 @@ compiler::Compilation backend::CSource::compileProgram(const Program &program, c
 
   return {data, {}, {{compiler::nowMs(), compiler::elapsedNs(start), "polyast_to_" + dialectName + "_c", def}}};
 }
-std::vector<compiler::Layout> backend::CSource::resolveLayouts(const std::vector<StructDef> &defs,
-                                                               const compiler::Opt &opt) {
+std::vector<compiler::Layout> backend::CSource::resolveLayouts(const std::vector<StructDef> &defs, const compiler::Opt &opt) {
   return std::vector<compiler::Layout>();
 }

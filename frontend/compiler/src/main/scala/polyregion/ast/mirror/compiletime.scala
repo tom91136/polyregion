@@ -123,42 +123,62 @@ private[polyregion] object compiletime {
     // def select(name: String, tpe: TypeRepr, rest: List[(String, TypeRepr)]): Expr[Val] =
     //   summonTermRes[Value[Tpe]](tc => '{ ${ tc }(Some(${ selectValue(name, tpe, rest) })) })
 
-    def liftTermToValue(term: Term): Expr[Value[Tpe]] = term match {
-      case Typed(ap @ Apply(_, args), _) =>
-        '{
-          Value.CtorAp[Tpe](
-            ${ summonTypeRes(ap.tpe.widenTermRefByName.dealias) }(),
-            ${ Expr.ofList(args.map(liftTermToValue(_))) }
-          )
-        }
-      case i @ Ident(x) =>
-        if (i.symbol.owner == symbol) selectValue(x, i.tpe, Nil)
-        else report.errorAndAbort(s"Ident ${i.show} not part of class ${symbol.fullName}")
-      case s @ Select(qualifier, name) =>
-        if (qualifier.symbol.owner == symbol) { // we're selecting from one of the ctor args
-          selectValue(qualifier.symbol.name, qualifier.tpe, (name, s.tpe) :: Nil)
-        } else { // some other constant
-          '{ Value.CtorAp[Tpe](${ summonTypeRes(s.tpe.dealias) }(), Nil) }
-        }
-      // case Literal(BooleanConstant(x)) => const(x)
-      // case Literal(ByteConstant(x))    => const(x)
-      // case Literal(ShortConstant(x))   => const(x)
-      // case Literal(IntConstant(x))     => const(x)
-      // case Literal(LongConstant(x))    => const(x)
-      // case Literal(FloatConstant(x))   => const(x)
-      // case Literal(DoubleConstant(x))  => const(x)
-      // case Literal(CharConstant(x))    => const(x)
-      // case Literal(StringConstant(x))  => const(x)
-
-      case x =>
-        x.asExpr match {
-          case '{ List($xs*) } => ??? // TODO
-          case _               => report.errorAndAbort(s"Can't handle expr: ${term.asExpr.show}", term.asExpr)
-        }
-    }
+    def liftTermToValue(term: Term): Expr[Value[Tpe]] =
+      term match {
+        case Typed(x, _)                                                                         => liftTermToValue(x)
+        case TypeApply(x, _)                                                                     => liftTermToValue(x)
+        case Apply(TypeApply(Select( Ident("List"), "apply"), _), x :: Nil)        => liftTermToValue(x)
+        case Apply(Select(Apply(Ident("List"), List()), "apply"), x :: Nil)                      => liftTermToValue(x)
+        case Apply(Select(Ident("ScalaRunTime"), "wrapRefArray" | "genericWrapArray"), x :: Nil) => liftTermToValue(x)
+        case Apply(x, Nil) => liftTermToValue(x)
+        case Repeated(terms, tpt) =>
+          '{
+            lazy val _x = Value.CtorAp[Tpe](
+              ${ summonTypeRes(TypeRepr.of[List].appliedTo(tpt.tpe).widenTermRefByName.dealias) }(),
+              ${ Expr.ofList(terms.map(liftTermToValue(_))) }
+            )
+            _x
+          }
+        case ap @ Apply(x, args) =>
+          '{
+            Value.CtorAp[Tpe](
+              ${ summonTypeRes(ap.tpe.widenTermRefByName.dealias) }(),
+              ${ Expr.ofList(args.map(liftTermToValue(_))) }
+            )
+          }
+        case i @ Ident(x) =>
+          if (i.symbol.owner == symbol) selectValue(x, i.tpe, Nil)
+          else {
+            i.symbol.tree match {
+              case ValDef(_, _, Some(x)) if !i.symbol.flags.is(Flags.Case) => liftTermToValue(x)
+              case DefDef(_, Nil :: Nil, _, Some(x))                       => liftTermToValue(x)
+              case x =>
+                report.errorAndAbort(
+                  s"Ident ${i}:${i.tpe.widenTermRefByName.show} with tree${x} doesn't refer to a term tree"
+                )
+            }
+          }
+        case s @ Select(qualifier, "asInstanceOf") => liftTermToValue(qualifier)
+        case s @ Select(qualifier, name) =>
+          if (qualifier.symbol.owner == symbol) { // we're selecting from one of the ctor args
+            selectValue(qualifier.symbol.name, qualifier.tpe, (name, s.tpe) :: Nil)
+          } else { // some other constant
+            s.symbol.tree match {
+              case ValDef(_, _, Some(x)) if !s.symbol.flags.is(Flags.Case) => liftTermToValue(x)
+              case DefDef(_, Nil :: Nil | Nil, _, Some(x))                 => liftTermToValue(x)
+              case x =>
+                '{ Value.CtorAp[Tpe](${ summonTypeRes(s.tpe.dealias) }(), Nil) }
+            }
+          }
+        case x =>
+          pprint.pprintln(term)
+          report.errorAndAbort(s"Can't handle expr: ${term}\n${term.show}")
+      }
 
     def matchCtor(t: Tree, parent: Option[TypeRepr]): Option[Expr[List[Val]]] = t match {
       case a @ Apply(Select(New(tpeTree), "<init>"), args) if parent.forall(tpeTree.tpe =:= _.widenTermRefByName) =>
+        println(s"Show >>> ")
+        pprint.pprintln(t)
         Some(
           Expr.ofList(args.map(arg => summonTermRes[Value[Tpe]](tc => '{ ${ tc }(Some(${ liftTermToValue(arg) })) })))
         )

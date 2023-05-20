@@ -170,15 +170,15 @@ object Retyper {
       q: Quoted
   )(sym: p.Sym, tpeVars: List[String], clsSym: q.Symbol, kind: q.ClassKind): p.Type =
     (sym, kind) match {
-      case (p.Sym(Symbols.Scala :+ "Unit"), q.ClassKind.Class)    => p.Type.Unit
-      case (p.Sym(Symbols.Scala :+ "Boolean"), q.ClassKind.Class) => p.Type.Bool
-      case (p.Sym(Symbols.Scala :+ "Byte"), q.ClassKind.Class)    => p.Type.Byte
-      case (p.Sym(Symbols.Scala :+ "Short"), q.ClassKind.Class)   => p.Type.Short
-      case (p.Sym(Symbols.Scala :+ "Int"), q.ClassKind.Class)     => p.Type.Int
-      case (p.Sym(Symbols.Scala :+ "Long"), q.ClassKind.Class)    => p.Type.Long
-      case (p.Sym(Symbols.Scala :+ "Float"), q.ClassKind.Class)   => p.Type.Float
-      case (p.Sym(Symbols.Scala :+ "Double"), q.ClassKind.Class)  => p.Type.Double
-      case (p.Sym(Symbols.Scala :+ "Char"), q.ClassKind.Class)    => p.Type.Char
+      case (p.Sym(Symbols.Scala :+ "Unit"), q.ClassKind.Class)    => p.Type.Unit0
+      case (p.Sym(Symbols.Scala :+ "Boolean"), q.ClassKind.Class) => p.Type.Bool1
+      case (p.Sym(Symbols.Scala :+ "Byte"), q.ClassKind.Class)    => p.Type.IntS8
+      case (p.Sym(Symbols.Scala :+ "Short"), q.ClassKind.Class)   => p.Type.IntS16
+      case (p.Sym(Symbols.Scala :+ "Int"), q.ClassKind.Class)     => p.Type.IntS32
+      case (p.Sym(Symbols.Scala :+ "Long"), q.ClassKind.Class)    => p.Type.IntS64
+      case (p.Sym(Symbols.Scala :+ "Float"), q.ClassKind.Class)   => p.Type.Float32
+      case (p.Sym(Symbols.Scala :+ "Double"), q.ClassKind.Class)  => p.Type.Float64
+      case (p.Sym(Symbols.Scala :+ "Char"), q.ClassKind.Class)    => p.Type.IntU16
       // TODO type ctor args for now, need to work out type member refinements
       case (sym, q.ClassKind.Class | q.ClassKind.Object) =>
         p.Type.Struct(sym, tpeVars, tpeVars.map(p.Type.Var(_)), deriveParents(clsSym))
@@ -244,7 +244,7 @@ object Retyper {
           term = leftTerm.orElse(rightTerm)
           r <-
             if (leftTpe == rightTpe) (term -> leftTpe, leftWit |+| rightWit).success
-//            else if(leftTpe == p.Type.Unit || rightTpe == p.Type.Unit) (term, p.Type.Unit).success
+//            else if(leftTpe == p.Type.Unit0 || rightTpe == p.Type.Unit0) (term, p.Type.Unit0).success
             else {
               val sym = andOr match {
                 case _: q.OrType  => p.Sym("#Union")
@@ -291,16 +291,16 @@ object Retyper {
       // widen singletons
       case q.ConstantType(x) =>
         x match {
-          case q.BooleanConstant(v) => (Some(p.Term.BoolConst(v)) -> p.Type.Bool, Map.empty).success
-          case q.ByteConstant(v)    => (Some(p.Term.ByteConst(v)) -> p.Type.Byte, Map.empty).success
-          case q.ShortConstant(v)   => (Some(p.Term.ShortConst(v)) -> p.Type.Short, Map.empty).success
-          case q.IntConstant(v)     => (Some(p.Term.IntConst(v)) -> p.Type.Int, Map.empty).success
-          case q.LongConstant(v)    => (Some(p.Term.LongConst(v)) -> p.Type.Long, Map.empty).success
-          case q.FloatConstant(v)   => (Some(p.Term.FloatConst(v)) -> p.Type.Float, Map.empty).success
-          case q.DoubleConstant(v)  => (Some(p.Term.DoubleConst(v)) -> p.Type.Double, Map.empty).success
-          case q.CharConstant(v)    => (Some(p.Term.CharConst(v)) -> p.Type.Char, Map.empty).success
+          case q.BooleanConstant(v) => (Some(p.Term.Bool1Const(v)) -> p.Type.Bool1, Map.empty).success
+          case q.ByteConstant(v)    => (Some(p.Term.IntS8Const(v)) -> p.Type.IntS8, Map.empty).success
+          case q.ShortConstant(v)   => (Some(p.Term.IntS16Const(v)) -> p.Type.IntS16, Map.empty).success
+          case q.IntConstant(v)     => (Some(p.Term.IntS32Const(v)) -> p.Type.IntS32, Map.empty).success
+          case q.LongConstant(v)    => (Some(p.Term.IntS64Const(v)) -> p.Type.IntS64, Map.empty).success
+          case q.FloatConstant(v)   => (Some(p.Term.Float32Const(v)) -> p.Type.Float32, Map.empty).success
+          case q.DoubleConstant(v)  => (Some(p.Term.Float64Const(v)) -> p.Type.Float64, Map.empty).success
+          case q.CharConstant(v)    => (Some(p.Term.IntU16Const(v)) -> p.Type.IntU16, Map.empty).success
           case q.StringConstant(v)  => ???
-          case q.UnitConstant       => (Some(p.Term.UnitConst) -> p.Type.Unit, Map.empty).success
+          case q.UnitConstant       => (Some(p.Term.Unit0Const) -> p.Type.Unit0, Map.empty).success
           case q.NullConstant       => ???
           case q.ClassOfConstant(cls) =>
             val reifiedTpe = q.TypeRepr.typeConstructorOf(classOf[Class[_]]).appliedTo(cls)

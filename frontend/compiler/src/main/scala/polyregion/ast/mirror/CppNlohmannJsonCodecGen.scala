@@ -19,14 +19,14 @@ private[polyregion] object CppNlohmannJsonCodecGen {
 
   def fromJsonFn(t: CppType) = t.ref(qualified = false).toLowerCase + "_from_json"
   def toJsonFn(t: CppType)   = t.ref(qualified = false).toLowerCase + "_to_json"
-  def jsonAt(idx: Int)       = s"j.at($idx)"
+  def jsonAt(idx: Int)       = s"j_.at($idx)"
 
   def fromJsonBody(s: StructNode) = if (s.tpe.kind == CppType.Kind.Base) {
-    s"size_t ord = ${jsonAt(0)}.get<size_t>();" ::
-      s"const auto t = ${jsonAt(1)};" ::
-      "switch (ord) {" ::
-      s.variants.zipWithIndex.map((c, i) => s"case ${i}: return ${c.tpe.ns(fromJsonFn(c.tpe))}(t);") :::
-      s"default: throw std::out_of_range(\"Bad ordinal \" + std::to_string(ord));" ::
+    s"size_t ord_ = ${jsonAt(0)}.get<size_t>();" ::
+      s"const auto t_ = ${jsonAt(1)};" ::
+      "switch (ord_) {" ::
+      s.variants.zipWithIndex.map((c, i) => s"case ${i}: return ${c.tpe.ns(fromJsonFn(c.tpe))}(t_);") :::
+      s"default: throw std::out_of_range(\"Bad ordinal \" + std::to_string(ord_));" ::
       "}" :: Nil
   } else {
 
@@ -64,9 +64,9 @@ private[polyregion] object CppNlohmannJsonCodecGen {
   def toJsonBody(s: StructNode) = if (s.tpe.kind == CppType.Kind.Base) {
     "return std::visit(overloaded{" ::
       s.variants.zipWithIndex.map((c, i) =>
-        s"[](const ${c.tpe.ref(qualified = true)} &y) -> json { return {$i, ${c.tpe.ns(toJsonFn(c.tpe))}(y)}; },"
-      ) ::: "[](const auto &x) -> json { throw std::out_of_range(\"Unimplemented type:\" + to_string(x) ); }" ::
-      "}, *x);" :: Nil
+        s"[](const ${c.tpe.ref(qualified = true)} &y_) -> json { return {$i, ${c.tpe.ns(toJsonFn(c.tpe))}(y_)}; },"
+      ) ::: "[](const auto &x_) -> json { throw std::out_of_range(\"Unimplemented type:\" + to_string(x_) ); }" ::
+      "}, *x_);" :: Nil
   } else {
     s.members.flatMap { case (name, tpe) =>
       tpe.kind match {
@@ -74,17 +74,17 @@ private[polyregion] object CppNlohmannJsonCodecGen {
           (tpe.namespace ::: tpe.name :: Nil, tpe.ctors) match {
             case ("std" :: "optional" :: Nil, x :: Nil) =>
               val deref =
-                if (x.kind != CppType.Kind.StdLib) s"${x.ns(toJsonFn(x))}(*x.${name})"
-                else s"json{*x.${name}}"
-              s"auto $name = x.${name} ? $deref : json{};" :: Nil
+                if (x.kind != CppType.Kind.StdLib) s"${x.ns(toJsonFn(x))}(*x_.${name})"
+                else s"json{*x_.${name}}"
+              s"auto $name = x_.${name} ? $deref : json{};" :: Nil
 
             case ("std" :: "vector" :: Nil, x :: Nil) if x.kind != CppType.Kind.StdLib =>
               s"std::vector<json> $name;" ::
-                s"std::transform(x.${name}.begin(), x.${name}.end(), std::back_inserter($name), &${x.ns(toJsonFn(x))});"
+                s"std::transform(x_.${name}.begin(), x_.${name}.end(), std::back_inserter($name), &${x.ns(toJsonFn(x))});"
                 :: Nil
-            case _ => s"auto $name = x.${name};" :: Nil
+            case _ => s"auto $name = x_.${name};" :: Nil
           }
-        case _ => s"auto $name =  ${tpe.ns(toJsonFn(tpe))}(x.${name});" :: Nil
+        case _ => s"auto $name =  ${tpe.ns(toJsonFn(tpe))}(x_.${name});" :: Nil
       }
     } :::
       s"return json::array(${s.members.map(_._1).mkString("{", ", ", "}")});" ::
@@ -93,12 +93,12 @@ private[polyregion] object CppNlohmannJsonCodecGen {
 
   def emit(s: StructNode): List[CppNlohmannJsonCodecGen] = {
     val fromJsonImpl = "" ::
-      s"${s.tpe.ref(qualified = true)} ${s.tpe.ns(fromJsonFn(s.tpe))}(const json& j) { " :: //
-      fromJsonBody(s).map("  " + _) :::                                                     //
-      "}" :: Nil                                                                            //
+      s"${s.tpe.ref(qualified = true)} ${s.tpe.ns(fromJsonFn(s.tpe))}(const json& j_) { " :: //
+      fromJsonBody(s).map("  " + _) :::                                                      //
+      "}" :: Nil                                                                             //
 
     val toJsonImpl = "" ::
-      s"json ${s.tpe.ns(toJsonFn(s.tpe))}(const ${s.tpe.ref(qualified = true)}& x) { " :: //
+      s"json ${s.tpe.ns(toJsonFn(s.tpe))}(const ${s.tpe.ref(qualified = true)}& x_) { " :: //
       toJsonBody(s).map("  " + _) :::
       "}" :: Nil //
 
@@ -145,17 +145,17 @@ private[polyregion] object CppNlohmannJsonCodecGen {
           |
           |namespace $namespace { 
           |${xs.flatMap(_.impls).mkString("\n")}
-          |json hashed_from_json(const json& j) { 
-          |  auto hash = j.at(0).get<std::string>();
-          |  auto data = j.at(1);
-          |  if(hash != "$hash") {
-          |   throw std::runtime_error("Expecting ADT hash to be ${hash}, but was " + hash);
+          |json hashed_from_json(const json& j_) { 
+          |  auto hash_ = j_.at(0).get<std::string>();
+          |  auto data_ = j_.at(1);
+          |  if(hash_ != "$hash") {
+          |   throw std::runtime_error("Expecting ADT hash to be ${hash}, but was " + hash_);
           |  }
-          |  return data;
+          |  return data_;
           |}
           |
-          |json hashed_to_json(const json& x) { 
-          |  return json::array({"$hash", x});
+          |json hashed_to_json(const json& x_) { 
+          |  return json::array({"$hash", x_});
           |}
           |} // namespace $namespace
           |""".stripMargin

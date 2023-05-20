@@ -5,1767 +5,2020 @@ template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
 namespace polyregion::polyast { 
 
-Sym sym_from_json(const json& j) { 
-  auto fqn = j.at(0).get<std::vector<std::string>>();
+Sym sym_from_json(const json& j_) { 
+  auto fqn = j_.at(0).get<std::vector<std::string>>();
   return Sym(fqn);
 }
 
-json sym_to_json(const Sym& x) { 
-  auto fqn = x.fqn;
+json sym_to_json(const Sym& x_) { 
+  auto fqn = x_.fqn;
   return json::array({fqn});
 }
 
-Named named_from_json(const json& j) { 
-  auto symbol = j.at(0).get<std::string>();
-  auto tpe =  Type::any_from_json(j.at(1));
+Named named_from_json(const json& j_) { 
+  auto symbol = j_.at(0).get<std::string>();
+  auto tpe =  Type::any_from_json(j_.at(1));
   return {symbol, tpe};
 }
 
-json named_to_json(const Named& x) { 
-  auto symbol = x.symbol;
-  auto tpe =  Type::any_to_json(x.tpe);
+json named_to_json(const Named& x_) { 
+  auto symbol = x_.symbol;
+  auto tpe =  Type::any_to_json(x_.tpe);
   return json::array({symbol, tpe});
 }
 
-TypeKind::None TypeKind::none_from_json(const json& j) { 
+TypeKind::None TypeKind::none_from_json(const json& j_) { 
   return {};
 }
 
-json TypeKind::none_to_json(const TypeKind::None& x) { 
+json TypeKind::none_to_json(const TypeKind::None& x_) { 
   return json::array({});
 }
 
-TypeKind::Ref TypeKind::ref_from_json(const json& j) { 
+TypeKind::Ref TypeKind::ref_from_json(const json& j_) { 
   return {};
 }
 
-json TypeKind::ref_to_json(const TypeKind::Ref& x) { 
+json TypeKind::ref_to_json(const TypeKind::Ref& x_) { 
   return json::array({});
 }
 
-TypeKind::Integral TypeKind::integral_from_json(const json& j) { 
+TypeKind::Integral TypeKind::integral_from_json(const json& j_) { 
   return {};
 }
 
-json TypeKind::integral_to_json(const TypeKind::Integral& x) { 
+json TypeKind::integral_to_json(const TypeKind::Integral& x_) { 
   return json::array({});
 }
 
-TypeKind::Fractional TypeKind::fractional_from_json(const json& j) { 
+TypeKind::Fractional TypeKind::fractional_from_json(const json& j_) { 
   return {};
 }
 
-json TypeKind::fractional_to_json(const TypeKind::Fractional& x) { 
+json TypeKind::fractional_to_json(const TypeKind::Fractional& x_) { 
   return json::array({});
 }
 
-TypeKind::Any TypeKind::any_from_json(const json& j) { 
-  size_t ord = j.at(0).get<size_t>();
-  const auto t = j.at(1);
-  switch (ord) {
-  case 0: return TypeKind::none_from_json(t);
-  case 1: return TypeKind::ref_from_json(t);
-  case 2: return TypeKind::integral_from_json(t);
-  case 3: return TypeKind::fractional_from_json(t);
-  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
+TypeKind::Any TypeKind::any_from_json(const json& j_) { 
+  size_t ord_ = j_.at(0).get<size_t>();
+  const auto t_ = j_.at(1);
+  switch (ord_) {
+  case 0: return TypeKind::none_from_json(t_);
+  case 1: return TypeKind::ref_from_json(t_);
+  case 2: return TypeKind::integral_from_json(t_);
+  case 3: return TypeKind::fractional_from_json(t_);
+  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
 
-json TypeKind::any_to_json(const TypeKind::Any& x) { 
+json TypeKind::any_to_json(const TypeKind::Any& x_) { 
   return std::visit(overloaded{
-  [](const TypeKind::None &y) -> json { return {0, TypeKind::none_to_json(y)}; },
-  [](const TypeKind::Ref &y) -> json { return {1, TypeKind::ref_to_json(y)}; },
-  [](const TypeKind::Integral &y) -> json { return {2, TypeKind::integral_to_json(y)}; },
-  [](const TypeKind::Fractional &y) -> json { return {3, TypeKind::fractional_to_json(y)}; },
-  [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
-  }, *x);
+  [](const TypeKind::None &y_) -> json { return {0, TypeKind::none_to_json(y_)}; },
+  [](const TypeKind::Ref &y_) -> json { return {1, TypeKind::ref_to_json(y_)}; },
+  [](const TypeKind::Integral &y_) -> json { return {2, TypeKind::integral_to_json(y_)}; },
+  [](const TypeKind::Fractional &y_) -> json { return {3, TypeKind::fractional_to_json(y_)}; },
+  [](const auto &x_) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x_) ); }
+  }, *x_);
 }
 
-Type::Float Type::float_from_json(const json& j) { 
+Type::Float16 Type::float16_from_json(const json& j_) { 
   return {};
 }
 
-json Type::float_to_json(const Type::Float& x) { 
+json Type::float16_to_json(const Type::Float16& x_) { 
   return json::array({});
 }
 
-Type::Double Type::double_from_json(const json& j) { 
+Type::Float32 Type::float32_from_json(const json& j_) { 
   return {};
 }
 
-json Type::double_to_json(const Type::Double& x) { 
+json Type::float32_to_json(const Type::Float32& x_) { 
   return json::array({});
 }
 
-Type::Bool Type::bool_from_json(const json& j) { 
+Type::Float64 Type::float64_from_json(const json& j_) { 
   return {};
 }
 
-json Type::bool_to_json(const Type::Bool& x) { 
+json Type::float64_to_json(const Type::Float64& x_) { 
   return json::array({});
 }
 
-Type::Byte Type::byte_from_json(const json& j) { 
+Type::IntU8 Type::intu8_from_json(const json& j_) { 
   return {};
 }
 
-json Type::byte_to_json(const Type::Byte& x) { 
+json Type::intu8_to_json(const Type::IntU8& x_) { 
   return json::array({});
 }
 
-Type::Char Type::char_from_json(const json& j) { 
+Type::IntU16 Type::intu16_from_json(const json& j_) { 
   return {};
 }
 
-json Type::char_to_json(const Type::Char& x) { 
+json Type::intu16_to_json(const Type::IntU16& x_) { 
   return json::array({});
 }
 
-Type::Short Type::short_from_json(const json& j) { 
+Type::IntU32 Type::intu32_from_json(const json& j_) { 
   return {};
 }
 
-json Type::short_to_json(const Type::Short& x) { 
+json Type::intu32_to_json(const Type::IntU32& x_) { 
   return json::array({});
 }
 
-Type::Int Type::int_from_json(const json& j) { 
+Type::IntU64 Type::intu64_from_json(const json& j_) { 
   return {};
 }
 
-json Type::int_to_json(const Type::Int& x) { 
+json Type::intu64_to_json(const Type::IntU64& x_) { 
   return json::array({});
 }
 
-Type::Long Type::long_from_json(const json& j) { 
+Type::IntS8 Type::ints8_from_json(const json& j_) { 
   return {};
 }
 
-json Type::long_to_json(const Type::Long& x) { 
+json Type::ints8_to_json(const Type::IntS8& x_) { 
   return json::array({});
 }
 
-Type::Unit Type::unit_from_json(const json& j) { 
+Type::IntS16 Type::ints16_from_json(const json& j_) { 
   return {};
 }
 
-json Type::unit_to_json(const Type::Unit& x) { 
+json Type::ints16_to_json(const Type::IntS16& x_) { 
   return json::array({});
 }
 
-Type::Nothing Type::nothing_from_json(const json& j) { 
+Type::IntS32 Type::ints32_from_json(const json& j_) { 
   return {};
 }
 
-json Type::nothing_to_json(const Type::Nothing& x) { 
+json Type::ints32_to_json(const Type::IntS32& x_) { 
   return json::array({});
 }
 
-Type::Struct Type::struct_from_json(const json& j) { 
-  auto name =  sym_from_json(j.at(0));
-  auto tpeVars = j.at(1).get<std::vector<std::string>>();
+Type::IntS64 Type::ints64_from_json(const json& j_) { 
+  return {};
+}
+
+json Type::ints64_to_json(const Type::IntS64& x_) { 
+  return json::array({});
+}
+
+Type::Nothing Type::nothing_from_json(const json& j_) { 
+  return {};
+}
+
+json Type::nothing_to_json(const Type::Nothing& x_) { 
+  return json::array({});
+}
+
+Type::Unit0 Type::unit0_from_json(const json& j_) { 
+  return {};
+}
+
+json Type::unit0_to_json(const Type::Unit0& x_) { 
+  return json::array({});
+}
+
+Type::Bool1 Type::bool1_from_json(const json& j_) { 
+  return {};
+}
+
+json Type::bool1_to_json(const Type::Bool1& x_) { 
+  return json::array({});
+}
+
+Type::Struct Type::struct_from_json(const json& j_) { 
+  auto name =  sym_from_json(j_.at(0));
+  auto tpeVars = j_.at(1).get<std::vector<std::string>>();
   std::vector<Type::Any> args;
-  auto args_json = j.at(2);
+  auto args_json = j_.at(2);
   std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &Type::any_from_json);
   std::vector<Sym> parents;
-  auto parents_json = j.at(3);
+  auto parents_json = j_.at(3);
   std::transform(parents_json.begin(), parents_json.end(), std::back_inserter(parents), &sym_from_json);
   return {name, tpeVars, args, parents};
 }
 
-json Type::struct_to_json(const Type::Struct& x) { 
-  auto name =  sym_to_json(x.name);
-  auto tpeVars = x.tpeVars;
+json Type::struct_to_json(const Type::Struct& x_) { 
+  auto name =  sym_to_json(x_.name);
+  auto tpeVars = x_.tpeVars;
   std::vector<json> args;
-  std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &Type::any_to_json);
+  std::transform(x_.args.begin(), x_.args.end(), std::back_inserter(args), &Type::any_to_json);
   std::vector<json> parents;
-  std::transform(x.parents.begin(), x.parents.end(), std::back_inserter(parents), &sym_to_json);
+  std::transform(x_.parents.begin(), x_.parents.end(), std::back_inserter(parents), &sym_to_json);
   return json::array({name, tpeVars, args, parents});
 }
 
-Type::Array Type::array_from_json(const json& j) { 
-  auto component =  Type::any_from_json(j.at(0));
-  auto space =  TypeSpace::any_from_json(j.at(1));
+Type::Array Type::array_from_json(const json& j_) { 
+  auto component =  Type::any_from_json(j_.at(0));
+  auto space =  TypeSpace::any_from_json(j_.at(1));
   return {component, space};
 }
 
-json Type::array_to_json(const Type::Array& x) { 
-  auto component =  Type::any_to_json(x.component);
-  auto space =  TypeSpace::any_to_json(x.space);
+json Type::array_to_json(const Type::Array& x_) { 
+  auto component =  Type::any_to_json(x_.component);
+  auto space =  TypeSpace::any_to_json(x_.space);
   return json::array({component, space});
 }
 
-Type::Var Type::var_from_json(const json& j) { 
-  auto name = j.at(0).get<std::string>();
+Type::Var Type::var_from_json(const json& j_) { 
+  auto name = j_.at(0).get<std::string>();
   return Type::Var(name);
 }
 
-json Type::var_to_json(const Type::Var& x) { 
-  auto name = x.name;
+json Type::var_to_json(const Type::Var& x_) { 
+  auto name = x_.name;
   return json::array({name});
 }
 
-Type::Exec Type::exec_from_json(const json& j) { 
-  auto tpeVars = j.at(0).get<std::vector<std::string>>();
+Type::Exec Type::exec_from_json(const json& j_) { 
+  auto tpeVars = j_.at(0).get<std::vector<std::string>>();
   std::vector<Type::Any> args;
-  auto args_json = j.at(1);
+  auto args_json = j_.at(1);
   std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &Type::any_from_json);
-  auto rtn =  Type::any_from_json(j.at(2));
+  auto rtn =  Type::any_from_json(j_.at(2));
   return {tpeVars, args, rtn};
 }
 
-json Type::exec_to_json(const Type::Exec& x) { 
-  auto tpeVars = x.tpeVars;
+json Type::exec_to_json(const Type::Exec& x_) { 
+  auto tpeVars = x_.tpeVars;
   std::vector<json> args;
-  std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &Type::any_to_json);
-  auto rtn =  Type::any_to_json(x.rtn);
+  std::transform(x_.args.begin(), x_.args.end(), std::back_inserter(args), &Type::any_to_json);
+  auto rtn =  Type::any_to_json(x_.rtn);
   return json::array({tpeVars, args, rtn});
 }
 
-Type::Any Type::any_from_json(const json& j) { 
-  size_t ord = j.at(0).get<size_t>();
-  const auto t = j.at(1);
-  switch (ord) {
-  case 0: return Type::float_from_json(t);
-  case 1: return Type::double_from_json(t);
-  case 2: return Type::bool_from_json(t);
-  case 3: return Type::byte_from_json(t);
-  case 4: return Type::char_from_json(t);
-  case 5: return Type::short_from_json(t);
-  case 6: return Type::int_from_json(t);
-  case 7: return Type::long_from_json(t);
-  case 8: return Type::unit_from_json(t);
-  case 9: return Type::nothing_from_json(t);
-  case 10: return Type::struct_from_json(t);
-  case 11: return Type::array_from_json(t);
-  case 12: return Type::var_from_json(t);
-  case 13: return Type::exec_from_json(t);
-  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
+Type::Any Type::any_from_json(const json& j_) { 
+  size_t ord_ = j_.at(0).get<size_t>();
+  const auto t_ = j_.at(1);
+  switch (ord_) {
+  case 0: return Type::float16_from_json(t_);
+  case 1: return Type::float32_from_json(t_);
+  case 2: return Type::float64_from_json(t_);
+  case 3: return Type::intu8_from_json(t_);
+  case 4: return Type::intu16_from_json(t_);
+  case 5: return Type::intu32_from_json(t_);
+  case 6: return Type::intu64_from_json(t_);
+  case 7: return Type::ints8_from_json(t_);
+  case 8: return Type::ints16_from_json(t_);
+  case 9: return Type::ints32_from_json(t_);
+  case 10: return Type::ints64_from_json(t_);
+  case 11: return Type::nothing_from_json(t_);
+  case 12: return Type::unit0_from_json(t_);
+  case 13: return Type::bool1_from_json(t_);
+  case 14: return Type::struct_from_json(t_);
+  case 15: return Type::array_from_json(t_);
+  case 16: return Type::var_from_json(t_);
+  case 17: return Type::exec_from_json(t_);
+  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
 
-json Type::any_to_json(const Type::Any& x) { 
+json Type::any_to_json(const Type::Any& x_) { 
   return std::visit(overloaded{
-  [](const Type::Float &y) -> json { return {0, Type::float_to_json(y)}; },
-  [](const Type::Double &y) -> json { return {1, Type::double_to_json(y)}; },
-  [](const Type::Bool &y) -> json { return {2, Type::bool_to_json(y)}; },
-  [](const Type::Byte &y) -> json { return {3, Type::byte_to_json(y)}; },
-  [](const Type::Char &y) -> json { return {4, Type::char_to_json(y)}; },
-  [](const Type::Short &y) -> json { return {5, Type::short_to_json(y)}; },
-  [](const Type::Int &y) -> json { return {6, Type::int_to_json(y)}; },
-  [](const Type::Long &y) -> json { return {7, Type::long_to_json(y)}; },
-  [](const Type::Unit &y) -> json { return {8, Type::unit_to_json(y)}; },
-  [](const Type::Nothing &y) -> json { return {9, Type::nothing_to_json(y)}; },
-  [](const Type::Struct &y) -> json { return {10, Type::struct_to_json(y)}; },
-  [](const Type::Array &y) -> json { return {11, Type::array_to_json(y)}; },
-  [](const Type::Var &y) -> json { return {12, Type::var_to_json(y)}; },
-  [](const Type::Exec &y) -> json { return {13, Type::exec_to_json(y)}; },
-  [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
-  }, *x);
+  [](const Type::Float16 &y_) -> json { return {0, Type::float16_to_json(y_)}; },
+  [](const Type::Float32 &y_) -> json { return {1, Type::float32_to_json(y_)}; },
+  [](const Type::Float64 &y_) -> json { return {2, Type::float64_to_json(y_)}; },
+  [](const Type::IntU8 &y_) -> json { return {3, Type::intu8_to_json(y_)}; },
+  [](const Type::IntU16 &y_) -> json { return {4, Type::intu16_to_json(y_)}; },
+  [](const Type::IntU32 &y_) -> json { return {5, Type::intu32_to_json(y_)}; },
+  [](const Type::IntU64 &y_) -> json { return {6, Type::intu64_to_json(y_)}; },
+  [](const Type::IntS8 &y_) -> json { return {7, Type::ints8_to_json(y_)}; },
+  [](const Type::IntS16 &y_) -> json { return {8, Type::ints16_to_json(y_)}; },
+  [](const Type::IntS32 &y_) -> json { return {9, Type::ints32_to_json(y_)}; },
+  [](const Type::IntS64 &y_) -> json { return {10, Type::ints64_to_json(y_)}; },
+  [](const Type::Nothing &y_) -> json { return {11, Type::nothing_to_json(y_)}; },
+  [](const Type::Unit0 &y_) -> json { return {12, Type::unit0_to_json(y_)}; },
+  [](const Type::Bool1 &y_) -> json { return {13, Type::bool1_to_json(y_)}; },
+  [](const Type::Struct &y_) -> json { return {14, Type::struct_to_json(y_)}; },
+  [](const Type::Array &y_) -> json { return {15, Type::array_to_json(y_)}; },
+  [](const Type::Var &y_) -> json { return {16, Type::var_to_json(y_)}; },
+  [](const Type::Exec &y_) -> json { return {17, Type::exec_to_json(y_)}; },
+  [](const auto &x_) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x_) ); }
+  }, *x_);
 }
 
-SourcePosition sourceposition_from_json(const json& j) { 
-  auto file = j.at(0).get<std::string>();
-  auto line = j.at(1).get<int32_t>();
-  auto col = j.at(2).is_null() ? std::nullopt : std::make_optional(j.at(2).get<int32_t>());
+SourcePosition sourceposition_from_json(const json& j_) { 
+  auto file = j_.at(0).get<std::string>();
+  auto line = j_.at(1).get<int32_t>();
+  auto col = j_.at(2).is_null() ? std::nullopt : std::make_optional(j_.at(2).get<int32_t>());
   return {file, line, col};
 }
 
-json sourceposition_to_json(const SourcePosition& x) { 
-  auto file = x.file;
-  auto line = x.line;
-  auto col = x.col ? json{*x.col} : json{};
+json sourceposition_to_json(const SourcePosition& x_) { 
+  auto file = x_.file;
+  auto line = x_.line;
+  auto col = x_.col ? json{*x_.col} : json{};
   return json::array({file, line, col});
 }
 
-Term::Select Term::select_from_json(const json& j) { 
+Term::Select Term::select_from_json(const json& j_) { 
   std::vector<Named> init;
-  auto init_json = j.at(0);
+  auto init_json = j_.at(0);
   std::transform(init_json.begin(), init_json.end(), std::back_inserter(init), &named_from_json);
-  auto last =  named_from_json(j.at(1));
+  auto last =  named_from_json(j_.at(1));
   return {init, last};
 }
 
-json Term::select_to_json(const Term::Select& x) { 
+json Term::select_to_json(const Term::Select& x_) { 
   std::vector<json> init;
-  std::transform(x.init.begin(), x.init.end(), std::back_inserter(init), &named_to_json);
-  auto last =  named_to_json(x.last);
+  std::transform(x_.init.begin(), x_.init.end(), std::back_inserter(init), &named_to_json);
+  auto last =  named_to_json(x_.last);
   return json::array({init, last});
 }
 
-Term::Poison Term::poison_from_json(const json& j) { 
-  auto t =  Type::any_from_json(j.at(0));
+Term::Poison Term::poison_from_json(const json& j_) { 
+  auto t =  Type::any_from_json(j_.at(0));
   return Term::Poison(t);
 }
 
-json Term::poison_to_json(const Term::Poison& x) { 
-  auto t =  Type::any_to_json(x.t);
+json Term::poison_to_json(const Term::Poison& x_) { 
+  auto t =  Type::any_to_json(x_.t);
   return json::array({t});
 }
 
-Term::UnitConst Term::unitconst_from_json(const json& j) { 
+Term::Float16Const Term::float16const_from_json(const json& j_) { 
+  auto value = j_.at(0).get<float>();
+  return Term::Float16Const(value);
+}
+
+json Term::float16const_to_json(const Term::Float16Const& x_) { 
+  auto value = x_.value;
+  return json::array({value});
+}
+
+Term::Float32Const Term::float32const_from_json(const json& j_) { 
+  auto value = j_.at(0).get<float>();
+  return Term::Float32Const(value);
+}
+
+json Term::float32const_to_json(const Term::Float32Const& x_) { 
+  auto value = x_.value;
+  return json::array({value});
+}
+
+Term::Float64Const Term::float64const_from_json(const json& j_) { 
+  auto value = j_.at(0).get<double>();
+  return Term::Float64Const(value);
+}
+
+json Term::float64const_to_json(const Term::Float64Const& x_) { 
+  auto value = x_.value;
+  return json::array({value});
+}
+
+Term::IntU8Const Term::intu8const_from_json(const json& j_) { 
+  auto value = j_.at(0).get<int8_t>();
+  return Term::IntU8Const(value);
+}
+
+json Term::intu8const_to_json(const Term::IntU8Const& x_) { 
+  auto value = x_.value;
+  return json::array({value});
+}
+
+Term::IntU16Const Term::intu16const_from_json(const json& j_) { 
+  auto value = j_.at(0).get<uint16_t>();
+  return Term::IntU16Const(value);
+}
+
+json Term::intu16const_to_json(const Term::IntU16Const& x_) { 
+  auto value = x_.value;
+  return json::array({value});
+}
+
+Term::IntU32Const Term::intu32const_from_json(const json& j_) { 
+  auto value = j_.at(0).get<int32_t>();
+  return Term::IntU32Const(value);
+}
+
+json Term::intu32const_to_json(const Term::IntU32Const& x_) { 
+  auto value = x_.value;
+  return json::array({value});
+}
+
+Term::IntU64Const Term::intu64const_from_json(const json& j_) { 
+  auto value = j_.at(0).get<int64_t>();
+  return Term::IntU64Const(value);
+}
+
+json Term::intu64const_to_json(const Term::IntU64Const& x_) { 
+  auto value = x_.value;
+  return json::array({value});
+}
+
+Term::IntS8Const Term::ints8const_from_json(const json& j_) { 
+  auto value = j_.at(0).get<int8_t>();
+  return Term::IntS8Const(value);
+}
+
+json Term::ints8const_to_json(const Term::IntS8Const& x_) { 
+  auto value = x_.value;
+  return json::array({value});
+}
+
+Term::IntS16Const Term::ints16const_from_json(const json& j_) { 
+  auto value = j_.at(0).get<int16_t>();
+  return Term::IntS16Const(value);
+}
+
+json Term::ints16const_to_json(const Term::IntS16Const& x_) { 
+  auto value = x_.value;
+  return json::array({value});
+}
+
+Term::IntS32Const Term::ints32const_from_json(const json& j_) { 
+  auto value = j_.at(0).get<int32_t>();
+  return Term::IntS32Const(value);
+}
+
+json Term::ints32const_to_json(const Term::IntS32Const& x_) { 
+  auto value = x_.value;
+  return json::array({value});
+}
+
+Term::IntS64Const Term::ints64const_from_json(const json& j_) { 
+  auto value = j_.at(0).get<int64_t>();
+  return Term::IntS64Const(value);
+}
+
+json Term::ints64const_to_json(const Term::IntS64Const& x_) { 
+  auto value = x_.value;
+  return json::array({value});
+}
+
+Term::Unit0Const Term::unit0const_from_json(const json& j_) { 
   return {};
 }
 
-json Term::unitconst_to_json(const Term::UnitConst& x) { 
+json Term::unit0const_to_json(const Term::Unit0Const& x_) { 
   return json::array({});
 }
 
-Term::BoolConst Term::boolconst_from_json(const json& j) { 
-  auto value = j.at(0).get<bool>();
-  return Term::BoolConst(value);
+Term::Bool1Const Term::bool1const_from_json(const json& j_) { 
+  auto value = j_.at(0).get<bool>();
+  return Term::Bool1Const(value);
 }
 
-json Term::boolconst_to_json(const Term::BoolConst& x) { 
-  auto value = x.value;
+json Term::bool1const_to_json(const Term::Bool1Const& x_) { 
+  auto value = x_.value;
   return json::array({value});
 }
 
-Term::ByteConst Term::byteconst_from_json(const json& j) { 
-  auto value = j.at(0).get<int8_t>();
-  return Term::ByteConst(value);
-}
-
-json Term::byteconst_to_json(const Term::ByteConst& x) { 
-  auto value = x.value;
-  return json::array({value});
-}
-
-Term::CharConst Term::charconst_from_json(const json& j) { 
-  auto value = j.at(0).get<uint16_t>();
-  return Term::CharConst(value);
-}
-
-json Term::charconst_to_json(const Term::CharConst& x) { 
-  auto value = x.value;
-  return json::array({value});
-}
-
-Term::ShortConst Term::shortconst_from_json(const json& j) { 
-  auto value = j.at(0).get<int16_t>();
-  return Term::ShortConst(value);
-}
-
-json Term::shortconst_to_json(const Term::ShortConst& x) { 
-  auto value = x.value;
-  return json::array({value});
-}
-
-Term::IntConst Term::intconst_from_json(const json& j) { 
-  auto value = j.at(0).get<int32_t>();
-  return Term::IntConst(value);
-}
-
-json Term::intconst_to_json(const Term::IntConst& x) { 
-  auto value = x.value;
-  return json::array({value});
-}
-
-Term::LongConst Term::longconst_from_json(const json& j) { 
-  auto value = j.at(0).get<int64_t>();
-  return Term::LongConst(value);
-}
-
-json Term::longconst_to_json(const Term::LongConst& x) { 
-  auto value = x.value;
-  return json::array({value});
-}
-
-Term::FloatConst Term::floatconst_from_json(const json& j) { 
-  auto value = j.at(0).get<float>();
-  return Term::FloatConst(value);
-}
-
-json Term::floatconst_to_json(const Term::FloatConst& x) { 
-  auto value = x.value;
-  return json::array({value});
-}
-
-Term::DoubleConst Term::doubleconst_from_json(const json& j) { 
-  auto value = j.at(0).get<double>();
-  return Term::DoubleConst(value);
-}
-
-json Term::doubleconst_to_json(const Term::DoubleConst& x) { 
-  auto value = x.value;
-  return json::array({value});
-}
-
-Term::Any Term::any_from_json(const json& j) { 
-  size_t ord = j.at(0).get<size_t>();
-  const auto t = j.at(1);
-  switch (ord) {
-  case 0: return Term::select_from_json(t);
-  case 1: return Term::poison_from_json(t);
-  case 2: return Term::unitconst_from_json(t);
-  case 3: return Term::boolconst_from_json(t);
-  case 4: return Term::byteconst_from_json(t);
-  case 5: return Term::charconst_from_json(t);
-  case 6: return Term::shortconst_from_json(t);
-  case 7: return Term::intconst_from_json(t);
-  case 8: return Term::longconst_from_json(t);
-  case 9: return Term::floatconst_from_json(t);
-  case 10: return Term::doubleconst_from_json(t);
-  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
+Term::Any Term::any_from_json(const json& j_) { 
+  size_t ord_ = j_.at(0).get<size_t>();
+  const auto t_ = j_.at(1);
+  switch (ord_) {
+  case 0: return Term::select_from_json(t_);
+  case 1: return Term::poison_from_json(t_);
+  case 2: return Term::float16const_from_json(t_);
+  case 3: return Term::float32const_from_json(t_);
+  case 4: return Term::float64const_from_json(t_);
+  case 5: return Term::intu8const_from_json(t_);
+  case 6: return Term::intu16const_from_json(t_);
+  case 7: return Term::intu32const_from_json(t_);
+  case 8: return Term::intu64const_from_json(t_);
+  case 9: return Term::ints8const_from_json(t_);
+  case 10: return Term::ints16const_from_json(t_);
+  case 11: return Term::ints32const_from_json(t_);
+  case 12: return Term::ints64const_from_json(t_);
+  case 13: return Term::unit0const_from_json(t_);
+  case 14: return Term::bool1const_from_json(t_);
+  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
 
-json Term::any_to_json(const Term::Any& x) { 
+json Term::any_to_json(const Term::Any& x_) { 
   return std::visit(overloaded{
-  [](const Term::Select &y) -> json { return {0, Term::select_to_json(y)}; },
-  [](const Term::Poison &y) -> json { return {1, Term::poison_to_json(y)}; },
-  [](const Term::UnitConst &y) -> json { return {2, Term::unitconst_to_json(y)}; },
-  [](const Term::BoolConst &y) -> json { return {3, Term::boolconst_to_json(y)}; },
-  [](const Term::ByteConst &y) -> json { return {4, Term::byteconst_to_json(y)}; },
-  [](const Term::CharConst &y) -> json { return {5, Term::charconst_to_json(y)}; },
-  [](const Term::ShortConst &y) -> json { return {6, Term::shortconst_to_json(y)}; },
-  [](const Term::IntConst &y) -> json { return {7, Term::intconst_to_json(y)}; },
-  [](const Term::LongConst &y) -> json { return {8, Term::longconst_to_json(y)}; },
-  [](const Term::FloatConst &y) -> json { return {9, Term::floatconst_to_json(y)}; },
-  [](const Term::DoubleConst &y) -> json { return {10, Term::doubleconst_to_json(y)}; },
-  [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
-  }, *x);
+  [](const Term::Select &y_) -> json { return {0, Term::select_to_json(y_)}; },
+  [](const Term::Poison &y_) -> json { return {1, Term::poison_to_json(y_)}; },
+  [](const Term::Float16Const &y_) -> json { return {2, Term::float16const_to_json(y_)}; },
+  [](const Term::Float32Const &y_) -> json { return {3, Term::float32const_to_json(y_)}; },
+  [](const Term::Float64Const &y_) -> json { return {4, Term::float64const_to_json(y_)}; },
+  [](const Term::IntU8Const &y_) -> json { return {5, Term::intu8const_to_json(y_)}; },
+  [](const Term::IntU16Const &y_) -> json { return {6, Term::intu16const_to_json(y_)}; },
+  [](const Term::IntU32Const &y_) -> json { return {7, Term::intu32const_to_json(y_)}; },
+  [](const Term::IntU64Const &y_) -> json { return {8, Term::intu64const_to_json(y_)}; },
+  [](const Term::IntS8Const &y_) -> json { return {9, Term::ints8const_to_json(y_)}; },
+  [](const Term::IntS16Const &y_) -> json { return {10, Term::ints16const_to_json(y_)}; },
+  [](const Term::IntS32Const &y_) -> json { return {11, Term::ints32const_to_json(y_)}; },
+  [](const Term::IntS64Const &y_) -> json { return {12, Term::ints64const_to_json(y_)}; },
+  [](const Term::Unit0Const &y_) -> json { return {13, Term::unit0const_to_json(y_)}; },
+  [](const Term::Bool1Const &y_) -> json { return {14, Term::bool1const_to_json(y_)}; },
+  [](const auto &x_) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x_) ); }
+  }, *x_);
 }
 
-NullaryIntrinsicKind::GpuGlobalIdxX NullaryIntrinsicKind::gpuglobalidxx_from_json(const json& j) { 
+TypeSpace::Global TypeSpace::global_from_json(const json& j_) { 
   return {};
 }
 
-json NullaryIntrinsicKind::gpuglobalidxx_to_json(const NullaryIntrinsicKind::GpuGlobalIdxX& x) { 
+json TypeSpace::global_to_json(const TypeSpace::Global& x_) { 
   return json::array({});
 }
 
-NullaryIntrinsicKind::GpuGlobalIdxY NullaryIntrinsicKind::gpuglobalidxy_from_json(const json& j) { 
+TypeSpace::Local TypeSpace::local_from_json(const json& j_) { 
   return {};
 }
 
-json NullaryIntrinsicKind::gpuglobalidxy_to_json(const NullaryIntrinsicKind::GpuGlobalIdxY& x) { 
+json TypeSpace::local_to_json(const TypeSpace::Local& x_) { 
   return json::array({});
 }
 
-NullaryIntrinsicKind::GpuGlobalIdxZ NullaryIntrinsicKind::gpuglobalidxz_from_json(const json& j) { 
-  return {};
-}
-
-json NullaryIntrinsicKind::gpuglobalidxz_to_json(const NullaryIntrinsicKind::GpuGlobalIdxZ& x) { 
-  return json::array({});
-}
-
-NullaryIntrinsicKind::GpuGlobalSizeX NullaryIntrinsicKind::gpuglobalsizex_from_json(const json& j) { 
-  return {};
-}
-
-json NullaryIntrinsicKind::gpuglobalsizex_to_json(const NullaryIntrinsicKind::GpuGlobalSizeX& x) { 
-  return json::array({});
-}
-
-NullaryIntrinsicKind::GpuGlobalSizeY NullaryIntrinsicKind::gpuglobalsizey_from_json(const json& j) { 
-  return {};
-}
-
-json NullaryIntrinsicKind::gpuglobalsizey_to_json(const NullaryIntrinsicKind::GpuGlobalSizeY& x) { 
-  return json::array({});
-}
-
-NullaryIntrinsicKind::GpuGlobalSizeZ NullaryIntrinsicKind::gpuglobalsizez_from_json(const json& j) { 
-  return {};
-}
-
-json NullaryIntrinsicKind::gpuglobalsizez_to_json(const NullaryIntrinsicKind::GpuGlobalSizeZ& x) { 
-  return json::array({});
-}
-
-NullaryIntrinsicKind::GpuGroupIdxX NullaryIntrinsicKind::gpugroupidxx_from_json(const json& j) { 
-  return {};
-}
-
-json NullaryIntrinsicKind::gpugroupidxx_to_json(const NullaryIntrinsicKind::GpuGroupIdxX& x) { 
-  return json::array({});
-}
-
-NullaryIntrinsicKind::GpuGroupIdxY NullaryIntrinsicKind::gpugroupidxy_from_json(const json& j) { 
-  return {};
-}
-
-json NullaryIntrinsicKind::gpugroupidxy_to_json(const NullaryIntrinsicKind::GpuGroupIdxY& x) { 
-  return json::array({});
-}
-
-NullaryIntrinsicKind::GpuGroupIdxZ NullaryIntrinsicKind::gpugroupidxz_from_json(const json& j) { 
-  return {};
-}
-
-json NullaryIntrinsicKind::gpugroupidxz_to_json(const NullaryIntrinsicKind::GpuGroupIdxZ& x) { 
-  return json::array({});
-}
-
-NullaryIntrinsicKind::GpuGroupSizeX NullaryIntrinsicKind::gpugroupsizex_from_json(const json& j) { 
-  return {};
-}
-
-json NullaryIntrinsicKind::gpugroupsizex_to_json(const NullaryIntrinsicKind::GpuGroupSizeX& x) { 
-  return json::array({});
-}
-
-NullaryIntrinsicKind::GpuGroupSizeY NullaryIntrinsicKind::gpugroupsizey_from_json(const json& j) { 
-  return {};
-}
-
-json NullaryIntrinsicKind::gpugroupsizey_to_json(const NullaryIntrinsicKind::GpuGroupSizeY& x) { 
-  return json::array({});
-}
-
-NullaryIntrinsicKind::GpuGroupSizeZ NullaryIntrinsicKind::gpugroupsizez_from_json(const json& j) { 
-  return {};
-}
-
-json NullaryIntrinsicKind::gpugroupsizez_to_json(const NullaryIntrinsicKind::GpuGroupSizeZ& x) { 
-  return json::array({});
-}
-
-NullaryIntrinsicKind::GpuLocalIdxX NullaryIntrinsicKind::gpulocalidxx_from_json(const json& j) { 
-  return {};
-}
-
-json NullaryIntrinsicKind::gpulocalidxx_to_json(const NullaryIntrinsicKind::GpuLocalIdxX& x) { 
-  return json::array({});
-}
-
-NullaryIntrinsicKind::GpuLocalIdxY NullaryIntrinsicKind::gpulocalidxy_from_json(const json& j) { 
-  return {};
-}
-
-json NullaryIntrinsicKind::gpulocalidxy_to_json(const NullaryIntrinsicKind::GpuLocalIdxY& x) { 
-  return json::array({});
-}
-
-NullaryIntrinsicKind::GpuLocalIdxZ NullaryIntrinsicKind::gpulocalidxz_from_json(const json& j) { 
-  return {};
-}
-
-json NullaryIntrinsicKind::gpulocalidxz_to_json(const NullaryIntrinsicKind::GpuLocalIdxZ& x) { 
-  return json::array({});
-}
-
-NullaryIntrinsicKind::GpuLocalSizeX NullaryIntrinsicKind::gpulocalsizex_from_json(const json& j) { 
-  return {};
-}
-
-json NullaryIntrinsicKind::gpulocalsizex_to_json(const NullaryIntrinsicKind::GpuLocalSizeX& x) { 
-  return json::array({});
-}
-
-NullaryIntrinsicKind::GpuLocalSizeY NullaryIntrinsicKind::gpulocalsizey_from_json(const json& j) { 
-  return {};
-}
-
-json NullaryIntrinsicKind::gpulocalsizey_to_json(const NullaryIntrinsicKind::GpuLocalSizeY& x) { 
-  return json::array({});
-}
-
-NullaryIntrinsicKind::GpuLocalSizeZ NullaryIntrinsicKind::gpulocalsizez_from_json(const json& j) { 
-  return {};
-}
-
-json NullaryIntrinsicKind::gpulocalsizez_to_json(const NullaryIntrinsicKind::GpuLocalSizeZ& x) { 
-  return json::array({});
-}
-
-NullaryIntrinsicKind::GpuGroupBarrier NullaryIntrinsicKind::gpugroupbarrier_from_json(const json& j) { 
-  return {};
-}
-
-json NullaryIntrinsicKind::gpugroupbarrier_to_json(const NullaryIntrinsicKind::GpuGroupBarrier& x) { 
-  return json::array({});
-}
-
-NullaryIntrinsicKind::GpuGroupFence NullaryIntrinsicKind::gpugroupfence_from_json(const json& j) { 
-  return {};
-}
-
-json NullaryIntrinsicKind::gpugroupfence_to_json(const NullaryIntrinsicKind::GpuGroupFence& x) { 
-  return json::array({});
-}
-
-NullaryIntrinsicKind::Assert NullaryIntrinsicKind::assert_from_json(const json& j) { 
-  return {};
-}
-
-json NullaryIntrinsicKind::assert_to_json(const NullaryIntrinsicKind::Assert& x) { 
-  return json::array({});
-}
-
-NullaryIntrinsicKind::Any NullaryIntrinsicKind::any_from_json(const json& j) { 
-  size_t ord = j.at(0).get<size_t>();
-  const auto t = j.at(1);
-  switch (ord) {
-  case 0: return NullaryIntrinsicKind::gpuglobalidxx_from_json(t);
-  case 1: return NullaryIntrinsicKind::gpuglobalidxy_from_json(t);
-  case 2: return NullaryIntrinsicKind::gpuglobalidxz_from_json(t);
-  case 3: return NullaryIntrinsicKind::gpuglobalsizex_from_json(t);
-  case 4: return NullaryIntrinsicKind::gpuglobalsizey_from_json(t);
-  case 5: return NullaryIntrinsicKind::gpuglobalsizez_from_json(t);
-  case 6: return NullaryIntrinsicKind::gpugroupidxx_from_json(t);
-  case 7: return NullaryIntrinsicKind::gpugroupidxy_from_json(t);
-  case 8: return NullaryIntrinsicKind::gpugroupidxz_from_json(t);
-  case 9: return NullaryIntrinsicKind::gpugroupsizex_from_json(t);
-  case 10: return NullaryIntrinsicKind::gpugroupsizey_from_json(t);
-  case 11: return NullaryIntrinsicKind::gpugroupsizez_from_json(t);
-  case 12: return NullaryIntrinsicKind::gpulocalidxx_from_json(t);
-  case 13: return NullaryIntrinsicKind::gpulocalidxy_from_json(t);
-  case 14: return NullaryIntrinsicKind::gpulocalidxz_from_json(t);
-  case 15: return NullaryIntrinsicKind::gpulocalsizex_from_json(t);
-  case 16: return NullaryIntrinsicKind::gpulocalsizey_from_json(t);
-  case 17: return NullaryIntrinsicKind::gpulocalsizez_from_json(t);
-  case 18: return NullaryIntrinsicKind::gpugroupbarrier_from_json(t);
-  case 19: return NullaryIntrinsicKind::gpugroupfence_from_json(t);
-  case 20: return NullaryIntrinsicKind::assert_from_json(t);
-  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
+TypeSpace::Any TypeSpace::any_from_json(const json& j_) { 
+  size_t ord_ = j_.at(0).get<size_t>();
+  const auto t_ = j_.at(1);
+  switch (ord_) {
+  case 0: return TypeSpace::global_from_json(t_);
+  case 1: return TypeSpace::local_from_json(t_);
+  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
 
-json NullaryIntrinsicKind::any_to_json(const NullaryIntrinsicKind::Any& x) { 
+json TypeSpace::any_to_json(const TypeSpace::Any& x_) { 
   return std::visit(overloaded{
-  [](const NullaryIntrinsicKind::GpuGlobalIdxX &y) -> json { return {0, NullaryIntrinsicKind::gpuglobalidxx_to_json(y)}; },
-  [](const NullaryIntrinsicKind::GpuGlobalIdxY &y) -> json { return {1, NullaryIntrinsicKind::gpuglobalidxy_to_json(y)}; },
-  [](const NullaryIntrinsicKind::GpuGlobalIdxZ &y) -> json { return {2, NullaryIntrinsicKind::gpuglobalidxz_to_json(y)}; },
-  [](const NullaryIntrinsicKind::GpuGlobalSizeX &y) -> json { return {3, NullaryIntrinsicKind::gpuglobalsizex_to_json(y)}; },
-  [](const NullaryIntrinsicKind::GpuGlobalSizeY &y) -> json { return {4, NullaryIntrinsicKind::gpuglobalsizey_to_json(y)}; },
-  [](const NullaryIntrinsicKind::GpuGlobalSizeZ &y) -> json { return {5, NullaryIntrinsicKind::gpuglobalsizez_to_json(y)}; },
-  [](const NullaryIntrinsicKind::GpuGroupIdxX &y) -> json { return {6, NullaryIntrinsicKind::gpugroupidxx_to_json(y)}; },
-  [](const NullaryIntrinsicKind::GpuGroupIdxY &y) -> json { return {7, NullaryIntrinsicKind::gpugroupidxy_to_json(y)}; },
-  [](const NullaryIntrinsicKind::GpuGroupIdxZ &y) -> json { return {8, NullaryIntrinsicKind::gpugroupidxz_to_json(y)}; },
-  [](const NullaryIntrinsicKind::GpuGroupSizeX &y) -> json { return {9, NullaryIntrinsicKind::gpugroupsizex_to_json(y)}; },
-  [](const NullaryIntrinsicKind::GpuGroupSizeY &y) -> json { return {10, NullaryIntrinsicKind::gpugroupsizey_to_json(y)}; },
-  [](const NullaryIntrinsicKind::GpuGroupSizeZ &y) -> json { return {11, NullaryIntrinsicKind::gpugroupsizez_to_json(y)}; },
-  [](const NullaryIntrinsicKind::GpuLocalIdxX &y) -> json { return {12, NullaryIntrinsicKind::gpulocalidxx_to_json(y)}; },
-  [](const NullaryIntrinsicKind::GpuLocalIdxY &y) -> json { return {13, NullaryIntrinsicKind::gpulocalidxy_to_json(y)}; },
-  [](const NullaryIntrinsicKind::GpuLocalIdxZ &y) -> json { return {14, NullaryIntrinsicKind::gpulocalidxz_to_json(y)}; },
-  [](const NullaryIntrinsicKind::GpuLocalSizeX &y) -> json { return {15, NullaryIntrinsicKind::gpulocalsizex_to_json(y)}; },
-  [](const NullaryIntrinsicKind::GpuLocalSizeY &y) -> json { return {16, NullaryIntrinsicKind::gpulocalsizey_to_json(y)}; },
-  [](const NullaryIntrinsicKind::GpuLocalSizeZ &y) -> json { return {17, NullaryIntrinsicKind::gpulocalsizez_to_json(y)}; },
-  [](const NullaryIntrinsicKind::GpuGroupBarrier &y) -> json { return {18, NullaryIntrinsicKind::gpugroupbarrier_to_json(y)}; },
-  [](const NullaryIntrinsicKind::GpuGroupFence &y) -> json { return {19, NullaryIntrinsicKind::gpugroupfence_to_json(y)}; },
-  [](const NullaryIntrinsicKind::Assert &y) -> json { return {20, NullaryIntrinsicKind::assert_to_json(y)}; },
-  [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
-  }, *x);
+  [](const TypeSpace::Global &y_) -> json { return {0, TypeSpace::global_to_json(y_)}; },
+  [](const TypeSpace::Local &y_) -> json { return {1, TypeSpace::local_to_json(y_)}; },
+  [](const auto &x_) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x_) ); }
+  }, *x_);
 }
 
-UnaryIntrinsicKind::Sin UnaryIntrinsicKind::sin_from_json(const json& j) { 
+Overload overload_from_json(const json& j_) { 
+  std::vector<Type::Any> args;
+  auto args_json = j_.at(0);
+  std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &Type::any_from_json);
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {args, rtn};
+}
+
+json overload_to_json(const Overload& x_) { 
+  std::vector<json> args;
+  std::transform(x_.args.begin(), x_.args.end(), std::back_inserter(args), &Type::any_to_json);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({args, rtn});
+}
+
+Spec::Assert Spec::assert_from_json(const json& j_) { 
   return {};
 }
 
-json UnaryIntrinsicKind::sin_to_json(const UnaryIntrinsicKind::Sin& x) { 
+json Spec::assert_to_json(const Spec::Assert& x_) { 
   return json::array({});
 }
 
-UnaryIntrinsicKind::Cos UnaryIntrinsicKind::cos_from_json(const json& j) { 
+Spec::GpuBarrierGlobal Spec::gpubarrierglobal_from_json(const json& j_) { 
   return {};
 }
 
-json UnaryIntrinsicKind::cos_to_json(const UnaryIntrinsicKind::Cos& x) { 
+json Spec::gpubarrierglobal_to_json(const Spec::GpuBarrierGlobal& x_) { 
   return json::array({});
 }
 
-UnaryIntrinsicKind::Tan UnaryIntrinsicKind::tan_from_json(const json& j) { 
+Spec::GpuBarrierLocal Spec::gpubarrierlocal_from_json(const json& j_) { 
   return {};
 }
 
-json UnaryIntrinsicKind::tan_to_json(const UnaryIntrinsicKind::Tan& x) { 
+json Spec::gpubarrierlocal_to_json(const Spec::GpuBarrierLocal& x_) { 
   return json::array({});
 }
 
-UnaryIntrinsicKind::Asin UnaryIntrinsicKind::asin_from_json(const json& j) { 
+Spec::GpuBarrierAll Spec::gpubarrierall_from_json(const json& j_) { 
   return {};
 }
 
-json UnaryIntrinsicKind::asin_to_json(const UnaryIntrinsicKind::Asin& x) { 
+json Spec::gpubarrierall_to_json(const Spec::GpuBarrierAll& x_) { 
   return json::array({});
 }
 
-UnaryIntrinsicKind::Acos UnaryIntrinsicKind::acos_from_json(const json& j) { 
+Spec::GpuFenceGlobal Spec::gpufenceglobal_from_json(const json& j_) { 
   return {};
 }
 
-json UnaryIntrinsicKind::acos_to_json(const UnaryIntrinsicKind::Acos& x) { 
+json Spec::gpufenceglobal_to_json(const Spec::GpuFenceGlobal& x_) { 
   return json::array({});
 }
 
-UnaryIntrinsicKind::Atan UnaryIntrinsicKind::atan_from_json(const json& j) { 
+Spec::GpuFenceLocal Spec::gpufencelocal_from_json(const json& j_) { 
   return {};
 }
 
-json UnaryIntrinsicKind::atan_to_json(const UnaryIntrinsicKind::Atan& x) { 
+json Spec::gpufencelocal_to_json(const Spec::GpuFenceLocal& x_) { 
   return json::array({});
 }
 
-UnaryIntrinsicKind::Sinh UnaryIntrinsicKind::sinh_from_json(const json& j) { 
+Spec::GpuFenceAll Spec::gpufenceall_from_json(const json& j_) { 
   return {};
 }
 
-json UnaryIntrinsicKind::sinh_to_json(const UnaryIntrinsicKind::Sinh& x) { 
+json Spec::gpufenceall_to_json(const Spec::GpuFenceAll& x_) { 
   return json::array({});
 }
 
-UnaryIntrinsicKind::Cosh UnaryIntrinsicKind::cosh_from_json(const json& j) { 
-  return {};
+Spec::GpuGlobalIdx Spec::gpuglobalidx_from_json(const json& j_) { 
+  auto dim =  Term::any_from_json(j_.at(0));
+  return Spec::GpuGlobalIdx(dim);
 }
 
-json UnaryIntrinsicKind::cosh_to_json(const UnaryIntrinsicKind::Cosh& x) { 
-  return json::array({});
+json Spec::gpuglobalidx_to_json(const Spec::GpuGlobalIdx& x_) { 
+  auto dim =  Term::any_to_json(x_.dim);
+  return json::array({dim});
 }
 
-UnaryIntrinsicKind::Tanh UnaryIntrinsicKind::tanh_from_json(const json& j) { 
-  return {};
+Spec::GpuGlobalSize Spec::gpuglobalsize_from_json(const json& j_) { 
+  auto dim =  Term::any_from_json(j_.at(0));
+  return Spec::GpuGlobalSize(dim);
 }
 
-json UnaryIntrinsicKind::tanh_to_json(const UnaryIntrinsicKind::Tanh& x) { 
-  return json::array({});
+json Spec::gpuglobalsize_to_json(const Spec::GpuGlobalSize& x_) { 
+  auto dim =  Term::any_to_json(x_.dim);
+  return json::array({dim});
 }
 
-UnaryIntrinsicKind::Signum UnaryIntrinsicKind::signum_from_json(const json& j) { 
-  return {};
+Spec::GpuGroupIdx Spec::gpugroupidx_from_json(const json& j_) { 
+  auto dim =  Term::any_from_json(j_.at(0));
+  return Spec::GpuGroupIdx(dim);
 }
 
-json UnaryIntrinsicKind::signum_to_json(const UnaryIntrinsicKind::Signum& x) { 
-  return json::array({});
+json Spec::gpugroupidx_to_json(const Spec::GpuGroupIdx& x_) { 
+  auto dim =  Term::any_to_json(x_.dim);
+  return json::array({dim});
 }
 
-UnaryIntrinsicKind::Abs UnaryIntrinsicKind::abs_from_json(const json& j) { 
-  return {};
+Spec::GpuGroupSize Spec::gpugroupsize_from_json(const json& j_) { 
+  auto dim =  Term::any_from_json(j_.at(0));
+  return Spec::GpuGroupSize(dim);
 }
 
-json UnaryIntrinsicKind::abs_to_json(const UnaryIntrinsicKind::Abs& x) { 
-  return json::array({});
+json Spec::gpugroupsize_to_json(const Spec::GpuGroupSize& x_) { 
+  auto dim =  Term::any_to_json(x_.dim);
+  return json::array({dim});
 }
 
-UnaryIntrinsicKind::Round UnaryIntrinsicKind::round_from_json(const json& j) { 
-  return {};
+Spec::GpuLocalIdx Spec::gpulocalidx_from_json(const json& j_) { 
+  auto dim =  Term::any_from_json(j_.at(0));
+  return Spec::GpuLocalIdx(dim);
 }
 
-json UnaryIntrinsicKind::round_to_json(const UnaryIntrinsicKind::Round& x) { 
-  return json::array({});
+json Spec::gpulocalidx_to_json(const Spec::GpuLocalIdx& x_) { 
+  auto dim =  Term::any_to_json(x_.dim);
+  return json::array({dim});
 }
 
-UnaryIntrinsicKind::Ceil UnaryIntrinsicKind::ceil_from_json(const json& j) { 
-  return {};
+Spec::GpuLocalSize Spec::gpulocalsize_from_json(const json& j_) { 
+  auto dim =  Term::any_from_json(j_.at(0));
+  return Spec::GpuLocalSize(dim);
 }
 
-json UnaryIntrinsicKind::ceil_to_json(const UnaryIntrinsicKind::Ceil& x) { 
-  return json::array({});
+json Spec::gpulocalsize_to_json(const Spec::GpuLocalSize& x_) { 
+  auto dim =  Term::any_to_json(x_.dim);
+  return json::array({dim});
 }
 
-UnaryIntrinsicKind::Floor UnaryIntrinsicKind::floor_from_json(const json& j) { 
-  return {};
-}
-
-json UnaryIntrinsicKind::floor_to_json(const UnaryIntrinsicKind::Floor& x) { 
-  return json::array({});
-}
-
-UnaryIntrinsicKind::Rint UnaryIntrinsicKind::rint_from_json(const json& j) { 
-  return {};
-}
-
-json UnaryIntrinsicKind::rint_to_json(const UnaryIntrinsicKind::Rint& x) { 
-  return json::array({});
-}
-
-UnaryIntrinsicKind::Sqrt UnaryIntrinsicKind::sqrt_from_json(const json& j) { 
-  return {};
-}
-
-json UnaryIntrinsicKind::sqrt_to_json(const UnaryIntrinsicKind::Sqrt& x) { 
-  return json::array({});
-}
-
-UnaryIntrinsicKind::Cbrt UnaryIntrinsicKind::cbrt_from_json(const json& j) { 
-  return {};
-}
-
-json UnaryIntrinsicKind::cbrt_to_json(const UnaryIntrinsicKind::Cbrt& x) { 
-  return json::array({});
-}
-
-UnaryIntrinsicKind::Exp UnaryIntrinsicKind::exp_from_json(const json& j) { 
-  return {};
-}
-
-json UnaryIntrinsicKind::exp_to_json(const UnaryIntrinsicKind::Exp& x) { 
-  return json::array({});
-}
-
-UnaryIntrinsicKind::Expm1 UnaryIntrinsicKind::expm1_from_json(const json& j) { 
-  return {};
-}
-
-json UnaryIntrinsicKind::expm1_to_json(const UnaryIntrinsicKind::Expm1& x) { 
-  return json::array({});
-}
-
-UnaryIntrinsicKind::Log UnaryIntrinsicKind::log_from_json(const json& j) { 
-  return {};
-}
-
-json UnaryIntrinsicKind::log_to_json(const UnaryIntrinsicKind::Log& x) { 
-  return json::array({});
-}
-
-UnaryIntrinsicKind::Log1p UnaryIntrinsicKind::log1p_from_json(const json& j) { 
-  return {};
-}
-
-json UnaryIntrinsicKind::log1p_to_json(const UnaryIntrinsicKind::Log1p& x) { 
-  return json::array({});
-}
-
-UnaryIntrinsicKind::Log10 UnaryIntrinsicKind::log10_from_json(const json& j) { 
-  return {};
-}
-
-json UnaryIntrinsicKind::log10_to_json(const UnaryIntrinsicKind::Log10& x) { 
-  return json::array({});
-}
-
-UnaryIntrinsicKind::BNot UnaryIntrinsicKind::bnot_from_json(const json& j) { 
-  return {};
-}
-
-json UnaryIntrinsicKind::bnot_to_json(const UnaryIntrinsicKind::BNot& x) { 
-  return json::array({});
-}
-
-UnaryIntrinsicKind::Pos UnaryIntrinsicKind::pos_from_json(const json& j) { 
-  return {};
-}
-
-json UnaryIntrinsicKind::pos_to_json(const UnaryIntrinsicKind::Pos& x) { 
-  return json::array({});
-}
-
-UnaryIntrinsicKind::Neg UnaryIntrinsicKind::neg_from_json(const json& j) { 
-  return {};
-}
-
-json UnaryIntrinsicKind::neg_to_json(const UnaryIntrinsicKind::Neg& x) { 
-  return json::array({});
-}
-
-UnaryIntrinsicKind::LogicNot UnaryIntrinsicKind::logicnot_from_json(const json& j) { 
-  return {};
-}
-
-json UnaryIntrinsicKind::logicnot_to_json(const UnaryIntrinsicKind::LogicNot& x) { 
-  return json::array({});
-}
-
-UnaryIntrinsicKind::Any UnaryIntrinsicKind::any_from_json(const json& j) { 
-  size_t ord = j.at(0).get<size_t>();
-  const auto t = j.at(1);
-  switch (ord) {
-  case 0: return UnaryIntrinsicKind::sin_from_json(t);
-  case 1: return UnaryIntrinsicKind::cos_from_json(t);
-  case 2: return UnaryIntrinsicKind::tan_from_json(t);
-  case 3: return UnaryIntrinsicKind::asin_from_json(t);
-  case 4: return UnaryIntrinsicKind::acos_from_json(t);
-  case 5: return UnaryIntrinsicKind::atan_from_json(t);
-  case 6: return UnaryIntrinsicKind::sinh_from_json(t);
-  case 7: return UnaryIntrinsicKind::cosh_from_json(t);
-  case 8: return UnaryIntrinsicKind::tanh_from_json(t);
-  case 9: return UnaryIntrinsicKind::signum_from_json(t);
-  case 10: return UnaryIntrinsicKind::abs_from_json(t);
-  case 11: return UnaryIntrinsicKind::round_from_json(t);
-  case 12: return UnaryIntrinsicKind::ceil_from_json(t);
-  case 13: return UnaryIntrinsicKind::floor_from_json(t);
-  case 14: return UnaryIntrinsicKind::rint_from_json(t);
-  case 15: return UnaryIntrinsicKind::sqrt_from_json(t);
-  case 16: return UnaryIntrinsicKind::cbrt_from_json(t);
-  case 17: return UnaryIntrinsicKind::exp_from_json(t);
-  case 18: return UnaryIntrinsicKind::expm1_from_json(t);
-  case 19: return UnaryIntrinsicKind::log_from_json(t);
-  case 20: return UnaryIntrinsicKind::log1p_from_json(t);
-  case 21: return UnaryIntrinsicKind::log10_from_json(t);
-  case 22: return UnaryIntrinsicKind::bnot_from_json(t);
-  case 23: return UnaryIntrinsicKind::pos_from_json(t);
-  case 24: return UnaryIntrinsicKind::neg_from_json(t);
-  case 25: return UnaryIntrinsicKind::logicnot_from_json(t);
-  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
+Spec::Any Spec::any_from_json(const json& j_) { 
+  size_t ord_ = j_.at(0).get<size_t>();
+  const auto t_ = j_.at(1);
+  switch (ord_) {
+  case 0: return Spec::assert_from_json(t_);
+  case 1: return Spec::gpubarrierglobal_from_json(t_);
+  case 2: return Spec::gpubarrierlocal_from_json(t_);
+  case 3: return Spec::gpubarrierall_from_json(t_);
+  case 4: return Spec::gpufenceglobal_from_json(t_);
+  case 5: return Spec::gpufencelocal_from_json(t_);
+  case 6: return Spec::gpufenceall_from_json(t_);
+  case 7: return Spec::gpuglobalidx_from_json(t_);
+  case 8: return Spec::gpuglobalsize_from_json(t_);
+  case 9: return Spec::gpugroupidx_from_json(t_);
+  case 10: return Spec::gpugroupsize_from_json(t_);
+  case 11: return Spec::gpulocalidx_from_json(t_);
+  case 12: return Spec::gpulocalsize_from_json(t_);
+  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
 
-json UnaryIntrinsicKind::any_to_json(const UnaryIntrinsicKind::Any& x) { 
+json Spec::any_to_json(const Spec::Any& x_) { 
   return std::visit(overloaded{
-  [](const UnaryIntrinsicKind::Sin &y) -> json { return {0, UnaryIntrinsicKind::sin_to_json(y)}; },
-  [](const UnaryIntrinsicKind::Cos &y) -> json { return {1, UnaryIntrinsicKind::cos_to_json(y)}; },
-  [](const UnaryIntrinsicKind::Tan &y) -> json { return {2, UnaryIntrinsicKind::tan_to_json(y)}; },
-  [](const UnaryIntrinsicKind::Asin &y) -> json { return {3, UnaryIntrinsicKind::asin_to_json(y)}; },
-  [](const UnaryIntrinsicKind::Acos &y) -> json { return {4, UnaryIntrinsicKind::acos_to_json(y)}; },
-  [](const UnaryIntrinsicKind::Atan &y) -> json { return {5, UnaryIntrinsicKind::atan_to_json(y)}; },
-  [](const UnaryIntrinsicKind::Sinh &y) -> json { return {6, UnaryIntrinsicKind::sinh_to_json(y)}; },
-  [](const UnaryIntrinsicKind::Cosh &y) -> json { return {7, UnaryIntrinsicKind::cosh_to_json(y)}; },
-  [](const UnaryIntrinsicKind::Tanh &y) -> json { return {8, UnaryIntrinsicKind::tanh_to_json(y)}; },
-  [](const UnaryIntrinsicKind::Signum &y) -> json { return {9, UnaryIntrinsicKind::signum_to_json(y)}; },
-  [](const UnaryIntrinsicKind::Abs &y) -> json { return {10, UnaryIntrinsicKind::abs_to_json(y)}; },
-  [](const UnaryIntrinsicKind::Round &y) -> json { return {11, UnaryIntrinsicKind::round_to_json(y)}; },
-  [](const UnaryIntrinsicKind::Ceil &y) -> json { return {12, UnaryIntrinsicKind::ceil_to_json(y)}; },
-  [](const UnaryIntrinsicKind::Floor &y) -> json { return {13, UnaryIntrinsicKind::floor_to_json(y)}; },
-  [](const UnaryIntrinsicKind::Rint &y) -> json { return {14, UnaryIntrinsicKind::rint_to_json(y)}; },
-  [](const UnaryIntrinsicKind::Sqrt &y) -> json { return {15, UnaryIntrinsicKind::sqrt_to_json(y)}; },
-  [](const UnaryIntrinsicKind::Cbrt &y) -> json { return {16, UnaryIntrinsicKind::cbrt_to_json(y)}; },
-  [](const UnaryIntrinsicKind::Exp &y) -> json { return {17, UnaryIntrinsicKind::exp_to_json(y)}; },
-  [](const UnaryIntrinsicKind::Expm1 &y) -> json { return {18, UnaryIntrinsicKind::expm1_to_json(y)}; },
-  [](const UnaryIntrinsicKind::Log &y) -> json { return {19, UnaryIntrinsicKind::log_to_json(y)}; },
-  [](const UnaryIntrinsicKind::Log1p &y) -> json { return {20, UnaryIntrinsicKind::log1p_to_json(y)}; },
-  [](const UnaryIntrinsicKind::Log10 &y) -> json { return {21, UnaryIntrinsicKind::log10_to_json(y)}; },
-  [](const UnaryIntrinsicKind::BNot &y) -> json { return {22, UnaryIntrinsicKind::bnot_to_json(y)}; },
-  [](const UnaryIntrinsicKind::Pos &y) -> json { return {23, UnaryIntrinsicKind::pos_to_json(y)}; },
-  [](const UnaryIntrinsicKind::Neg &y) -> json { return {24, UnaryIntrinsicKind::neg_to_json(y)}; },
-  [](const UnaryIntrinsicKind::LogicNot &y) -> json { return {25, UnaryIntrinsicKind::logicnot_to_json(y)}; },
-  [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
-  }, *x);
+  [](const Spec::Assert &y_) -> json { return {0, Spec::assert_to_json(y_)}; },
+  [](const Spec::GpuBarrierGlobal &y_) -> json { return {1, Spec::gpubarrierglobal_to_json(y_)}; },
+  [](const Spec::GpuBarrierLocal &y_) -> json { return {2, Spec::gpubarrierlocal_to_json(y_)}; },
+  [](const Spec::GpuBarrierAll &y_) -> json { return {3, Spec::gpubarrierall_to_json(y_)}; },
+  [](const Spec::GpuFenceGlobal &y_) -> json { return {4, Spec::gpufenceglobal_to_json(y_)}; },
+  [](const Spec::GpuFenceLocal &y_) -> json { return {5, Spec::gpufencelocal_to_json(y_)}; },
+  [](const Spec::GpuFenceAll &y_) -> json { return {6, Spec::gpufenceall_to_json(y_)}; },
+  [](const Spec::GpuGlobalIdx &y_) -> json { return {7, Spec::gpuglobalidx_to_json(y_)}; },
+  [](const Spec::GpuGlobalSize &y_) -> json { return {8, Spec::gpuglobalsize_to_json(y_)}; },
+  [](const Spec::GpuGroupIdx &y_) -> json { return {9, Spec::gpugroupidx_to_json(y_)}; },
+  [](const Spec::GpuGroupSize &y_) -> json { return {10, Spec::gpugroupsize_to_json(y_)}; },
+  [](const Spec::GpuLocalIdx &y_) -> json { return {11, Spec::gpulocalidx_to_json(y_)}; },
+  [](const Spec::GpuLocalSize &y_) -> json { return {12, Spec::gpulocalsize_to_json(y_)}; },
+  [](const auto &x_) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x_) ); }
+  }, *x_);
 }
 
-BinaryIntrinsicKind::Add BinaryIntrinsicKind::add_from_json(const json& j) { 
-  return {};
+Intr::BNot Intr::bnot_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
 }
 
-json BinaryIntrinsicKind::add_to_json(const BinaryIntrinsicKind::Add& x) { 
-  return json::array({});
+json Intr::bnot_to_json(const Intr::BNot& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
 }
 
-BinaryIntrinsicKind::Sub BinaryIntrinsicKind::sub_from_json(const json& j) { 
-  return {};
+Intr::LogicNot Intr::logicnot_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  return Intr::LogicNot(x);
 }
 
-json BinaryIntrinsicKind::sub_to_json(const BinaryIntrinsicKind::Sub& x) { 
-  return json::array({});
+json Intr::logicnot_to_json(const Intr::LogicNot& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  return json::array({x});
 }
 
-BinaryIntrinsicKind::Mul BinaryIntrinsicKind::mul_from_json(const json& j) { 
-  return {};
+Intr::Pos Intr::pos_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
 }
 
-json BinaryIntrinsicKind::mul_to_json(const BinaryIntrinsicKind::Mul& x) { 
-  return json::array({});
+json Intr::pos_to_json(const Intr::Pos& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
 }
 
-BinaryIntrinsicKind::Div BinaryIntrinsicKind::div_from_json(const json& j) { 
-  return {};
+Intr::Neg Intr::neg_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
 }
 
-json BinaryIntrinsicKind::div_to_json(const BinaryIntrinsicKind::Div& x) { 
-  return json::array({});
+json Intr::neg_to_json(const Intr::Neg& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
 }
 
-BinaryIntrinsicKind::Rem BinaryIntrinsicKind::rem_from_json(const json& j) { 
-  return {};
+Intr::Add Intr::add_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto y =  Term::any_from_json(j_.at(1));
+  auto rtn =  Type::any_from_json(j_.at(2));
+  return {x, y, rtn};
 }
 
-json BinaryIntrinsicKind::rem_to_json(const BinaryIntrinsicKind::Rem& x) { 
-  return json::array({});
+json Intr::add_to_json(const Intr::Add& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto y =  Term::any_to_json(x_.y);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, y, rtn});
 }
 
-BinaryIntrinsicKind::Pow BinaryIntrinsicKind::pow_from_json(const json& j) { 
-  return {};
+Intr::Sub Intr::sub_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto y =  Term::any_from_json(j_.at(1));
+  auto rtn =  Type::any_from_json(j_.at(2));
+  return {x, y, rtn};
 }
 
-json BinaryIntrinsicKind::pow_to_json(const BinaryIntrinsicKind::Pow& x) { 
-  return json::array({});
+json Intr::sub_to_json(const Intr::Sub& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto y =  Term::any_to_json(x_.y);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, y, rtn});
 }
 
-BinaryIntrinsicKind::Min BinaryIntrinsicKind::min_from_json(const json& j) { 
-  return {};
+Intr::Mul Intr::mul_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto y =  Term::any_from_json(j_.at(1));
+  auto rtn =  Type::any_from_json(j_.at(2));
+  return {x, y, rtn};
 }
 
-json BinaryIntrinsicKind::min_to_json(const BinaryIntrinsicKind::Min& x) { 
-  return json::array({});
+json Intr::mul_to_json(const Intr::Mul& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto y =  Term::any_to_json(x_.y);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, y, rtn});
 }
 
-BinaryIntrinsicKind::Max BinaryIntrinsicKind::max_from_json(const json& j) { 
-  return {};
+Intr::Div Intr::div_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto y =  Term::any_from_json(j_.at(1));
+  auto rtn =  Type::any_from_json(j_.at(2));
+  return {x, y, rtn};
 }
 
-json BinaryIntrinsicKind::max_to_json(const BinaryIntrinsicKind::Max& x) { 
-  return json::array({});
+json Intr::div_to_json(const Intr::Div& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto y =  Term::any_to_json(x_.y);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, y, rtn});
 }
 
-BinaryIntrinsicKind::Atan2 BinaryIntrinsicKind::atan2_from_json(const json& j) { 
-  return {};
+Intr::Rem Intr::rem_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto y =  Term::any_from_json(j_.at(1));
+  auto rtn =  Type::any_from_json(j_.at(2));
+  return {x, y, rtn};
 }
 
-json BinaryIntrinsicKind::atan2_to_json(const BinaryIntrinsicKind::Atan2& x) { 
-  return json::array({});
+json Intr::rem_to_json(const Intr::Rem& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto y =  Term::any_to_json(x_.y);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, y, rtn});
 }
 
-BinaryIntrinsicKind::Hypot BinaryIntrinsicKind::hypot_from_json(const json& j) { 
-  return {};
+Intr::Min Intr::min_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto y =  Term::any_from_json(j_.at(1));
+  auto rtn =  Type::any_from_json(j_.at(2));
+  return {x, y, rtn};
 }
 
-json BinaryIntrinsicKind::hypot_to_json(const BinaryIntrinsicKind::Hypot& x) { 
-  return json::array({});
+json Intr::min_to_json(const Intr::Min& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto y =  Term::any_to_json(x_.y);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, y, rtn});
 }
 
-BinaryIntrinsicKind::BAnd BinaryIntrinsicKind::band_from_json(const json& j) { 
-  return {};
+Intr::Max Intr::max_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto y =  Term::any_from_json(j_.at(1));
+  auto rtn =  Type::any_from_json(j_.at(2));
+  return {x, y, rtn};
 }
 
-json BinaryIntrinsicKind::band_to_json(const BinaryIntrinsicKind::BAnd& x) { 
-  return json::array({});
+json Intr::max_to_json(const Intr::Max& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto y =  Term::any_to_json(x_.y);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, y, rtn});
 }
 
-BinaryIntrinsicKind::BOr BinaryIntrinsicKind::bor_from_json(const json& j) { 
-  return {};
+Intr::BAnd Intr::band_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto y =  Term::any_from_json(j_.at(1));
+  auto rtn =  Type::any_from_json(j_.at(2));
+  return {x, y, rtn};
 }
 
-json BinaryIntrinsicKind::bor_to_json(const BinaryIntrinsicKind::BOr& x) { 
-  return json::array({});
+json Intr::band_to_json(const Intr::BAnd& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto y =  Term::any_to_json(x_.y);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, y, rtn});
 }
 
-BinaryIntrinsicKind::BXor BinaryIntrinsicKind::bxor_from_json(const json& j) { 
-  return {};
+Intr::BOr Intr::bor_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto y =  Term::any_from_json(j_.at(1));
+  auto rtn =  Type::any_from_json(j_.at(2));
+  return {x, y, rtn};
 }
 
-json BinaryIntrinsicKind::bxor_to_json(const BinaryIntrinsicKind::BXor& x) { 
-  return json::array({});
+json Intr::bor_to_json(const Intr::BOr& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto y =  Term::any_to_json(x_.y);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, y, rtn});
 }
 
-BinaryIntrinsicKind::BSL BinaryIntrinsicKind::bsl_from_json(const json& j) { 
-  return {};
+Intr::BXor Intr::bxor_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto y =  Term::any_from_json(j_.at(1));
+  auto rtn =  Type::any_from_json(j_.at(2));
+  return {x, y, rtn};
 }
 
-json BinaryIntrinsicKind::bsl_to_json(const BinaryIntrinsicKind::BSL& x) { 
-  return json::array({});
+json Intr::bxor_to_json(const Intr::BXor& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto y =  Term::any_to_json(x_.y);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, y, rtn});
 }
 
-BinaryIntrinsicKind::BSR BinaryIntrinsicKind::bsr_from_json(const json& j) { 
-  return {};
+Intr::BSL Intr::bsl_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto y =  Term::any_from_json(j_.at(1));
+  auto rtn =  Type::any_from_json(j_.at(2));
+  return {x, y, rtn};
 }
 
-json BinaryIntrinsicKind::bsr_to_json(const BinaryIntrinsicKind::BSR& x) { 
-  return json::array({});
+json Intr::bsl_to_json(const Intr::BSL& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto y =  Term::any_to_json(x_.y);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, y, rtn});
 }
 
-BinaryIntrinsicKind::BZSR BinaryIntrinsicKind::bzsr_from_json(const json& j) { 
-  return {};
+Intr::BSR Intr::bsr_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto y =  Term::any_from_json(j_.at(1));
+  auto rtn =  Type::any_from_json(j_.at(2));
+  return {x, y, rtn};
 }
 
-json BinaryIntrinsicKind::bzsr_to_json(const BinaryIntrinsicKind::BZSR& x) { 
-  return json::array({});
+json Intr::bsr_to_json(const Intr::BSR& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto y =  Term::any_to_json(x_.y);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, y, rtn});
 }
 
-BinaryIntrinsicKind::LogicEq BinaryIntrinsicKind::logiceq_from_json(const json& j) { 
-  return {};
+Intr::BZSR Intr::bzsr_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto y =  Term::any_from_json(j_.at(1));
+  auto rtn =  Type::any_from_json(j_.at(2));
+  return {x, y, rtn};
 }
 
-json BinaryIntrinsicKind::logiceq_to_json(const BinaryIntrinsicKind::LogicEq& x) { 
-  return json::array({});
+json Intr::bzsr_to_json(const Intr::BZSR& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto y =  Term::any_to_json(x_.y);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, y, rtn});
 }
 
-BinaryIntrinsicKind::LogicNeq BinaryIntrinsicKind::logicneq_from_json(const json& j) { 
-  return {};
+Intr::LogicAnd Intr::logicand_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto y =  Term::any_from_json(j_.at(1));
+  return {x, y};
 }
 
-json BinaryIntrinsicKind::logicneq_to_json(const BinaryIntrinsicKind::LogicNeq& x) { 
-  return json::array({});
+json Intr::logicand_to_json(const Intr::LogicAnd& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto y =  Term::any_to_json(x_.y);
+  return json::array({x, y});
 }
 
-BinaryIntrinsicKind::LogicAnd BinaryIntrinsicKind::logicand_from_json(const json& j) { 
-  return {};
+Intr::LogicOr Intr::logicor_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto y =  Term::any_from_json(j_.at(1));
+  return {x, y};
 }
 
-json BinaryIntrinsicKind::logicand_to_json(const BinaryIntrinsicKind::LogicAnd& x) { 
-  return json::array({});
+json Intr::logicor_to_json(const Intr::LogicOr& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto y =  Term::any_to_json(x_.y);
+  return json::array({x, y});
 }
 
-BinaryIntrinsicKind::LogicOr BinaryIntrinsicKind::logicor_from_json(const json& j) { 
-  return {};
+Intr::LogicEq Intr::logiceq_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto y =  Term::any_from_json(j_.at(1));
+  return {x, y};
 }
 
-json BinaryIntrinsicKind::logicor_to_json(const BinaryIntrinsicKind::LogicOr& x) { 
-  return json::array({});
+json Intr::logiceq_to_json(const Intr::LogicEq& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto y =  Term::any_to_json(x_.y);
+  return json::array({x, y});
 }
 
-BinaryIntrinsicKind::LogicLte BinaryIntrinsicKind::logiclte_from_json(const json& j) { 
-  return {};
+Intr::LogicNeq Intr::logicneq_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto y =  Term::any_from_json(j_.at(1));
+  return {x, y};
 }
 
-json BinaryIntrinsicKind::logiclte_to_json(const BinaryIntrinsicKind::LogicLte& x) { 
-  return json::array({});
+json Intr::logicneq_to_json(const Intr::LogicNeq& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto y =  Term::any_to_json(x_.y);
+  return json::array({x, y});
 }
 
-BinaryIntrinsicKind::LogicGte BinaryIntrinsicKind::logicgte_from_json(const json& j) { 
-  return {};
+Intr::LogicLte Intr::logiclte_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto y =  Term::any_from_json(j_.at(1));
+  return {x, y};
 }
 
-json BinaryIntrinsicKind::logicgte_to_json(const BinaryIntrinsicKind::LogicGte& x) { 
-  return json::array({});
+json Intr::logiclte_to_json(const Intr::LogicLte& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto y =  Term::any_to_json(x_.y);
+  return json::array({x, y});
 }
 
-BinaryIntrinsicKind::LogicLt BinaryIntrinsicKind::logiclt_from_json(const json& j) { 
-  return {};
+Intr::LogicGte Intr::logicgte_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto y =  Term::any_from_json(j_.at(1));
+  return {x, y};
 }
 
-json BinaryIntrinsicKind::logiclt_to_json(const BinaryIntrinsicKind::LogicLt& x) { 
-  return json::array({});
+json Intr::logicgte_to_json(const Intr::LogicGte& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto y =  Term::any_to_json(x_.y);
+  return json::array({x, y});
 }
 
-BinaryIntrinsicKind::LogicGt BinaryIntrinsicKind::logicgt_from_json(const json& j) { 
-  return {};
+Intr::LogicLt Intr::logiclt_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto y =  Term::any_from_json(j_.at(1));
+  return {x, y};
 }
 
-json BinaryIntrinsicKind::logicgt_to_json(const BinaryIntrinsicKind::LogicGt& x) { 
-  return json::array({});
+json Intr::logiclt_to_json(const Intr::LogicLt& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto y =  Term::any_to_json(x_.y);
+  return json::array({x, y});
 }
 
-BinaryIntrinsicKind::Any BinaryIntrinsicKind::any_from_json(const json& j) { 
-  size_t ord = j.at(0).get<size_t>();
-  const auto t = j.at(1);
-  switch (ord) {
-  case 0: return BinaryIntrinsicKind::add_from_json(t);
-  case 1: return BinaryIntrinsicKind::sub_from_json(t);
-  case 2: return BinaryIntrinsicKind::mul_from_json(t);
-  case 3: return BinaryIntrinsicKind::div_from_json(t);
-  case 4: return BinaryIntrinsicKind::rem_from_json(t);
-  case 5: return BinaryIntrinsicKind::pow_from_json(t);
-  case 6: return BinaryIntrinsicKind::min_from_json(t);
-  case 7: return BinaryIntrinsicKind::max_from_json(t);
-  case 8: return BinaryIntrinsicKind::atan2_from_json(t);
-  case 9: return BinaryIntrinsicKind::hypot_from_json(t);
-  case 10: return BinaryIntrinsicKind::band_from_json(t);
-  case 11: return BinaryIntrinsicKind::bor_from_json(t);
-  case 12: return BinaryIntrinsicKind::bxor_from_json(t);
-  case 13: return BinaryIntrinsicKind::bsl_from_json(t);
-  case 14: return BinaryIntrinsicKind::bsr_from_json(t);
-  case 15: return BinaryIntrinsicKind::bzsr_from_json(t);
-  case 16: return BinaryIntrinsicKind::logiceq_from_json(t);
-  case 17: return BinaryIntrinsicKind::logicneq_from_json(t);
-  case 18: return BinaryIntrinsicKind::logicand_from_json(t);
-  case 19: return BinaryIntrinsicKind::logicor_from_json(t);
-  case 20: return BinaryIntrinsicKind::logiclte_from_json(t);
-  case 21: return BinaryIntrinsicKind::logicgte_from_json(t);
-  case 22: return BinaryIntrinsicKind::logiclt_from_json(t);
-  case 23: return BinaryIntrinsicKind::logicgt_from_json(t);
-  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
+Intr::LogicGt Intr::logicgt_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto y =  Term::any_from_json(j_.at(1));
+  return {x, y};
+}
+
+json Intr::logicgt_to_json(const Intr::LogicGt& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto y =  Term::any_to_json(x_.y);
+  return json::array({x, y});
+}
+
+Intr::Any Intr::any_from_json(const json& j_) { 
+  size_t ord_ = j_.at(0).get<size_t>();
+  const auto t_ = j_.at(1);
+  switch (ord_) {
+  case 0: return Intr::bnot_from_json(t_);
+  case 1: return Intr::logicnot_from_json(t_);
+  case 2: return Intr::pos_from_json(t_);
+  case 3: return Intr::neg_from_json(t_);
+  case 4: return Intr::add_from_json(t_);
+  case 5: return Intr::sub_from_json(t_);
+  case 6: return Intr::mul_from_json(t_);
+  case 7: return Intr::div_from_json(t_);
+  case 8: return Intr::rem_from_json(t_);
+  case 9: return Intr::min_from_json(t_);
+  case 10: return Intr::max_from_json(t_);
+  case 11: return Intr::band_from_json(t_);
+  case 12: return Intr::bor_from_json(t_);
+  case 13: return Intr::bxor_from_json(t_);
+  case 14: return Intr::bsl_from_json(t_);
+  case 15: return Intr::bsr_from_json(t_);
+  case 16: return Intr::bzsr_from_json(t_);
+  case 17: return Intr::logicand_from_json(t_);
+  case 18: return Intr::logicor_from_json(t_);
+  case 19: return Intr::logiceq_from_json(t_);
+  case 20: return Intr::logicneq_from_json(t_);
+  case 21: return Intr::logiclte_from_json(t_);
+  case 22: return Intr::logicgte_from_json(t_);
+  case 23: return Intr::logiclt_from_json(t_);
+  case 24: return Intr::logicgt_from_json(t_);
+  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
 
-json BinaryIntrinsicKind::any_to_json(const BinaryIntrinsicKind::Any& x) { 
+json Intr::any_to_json(const Intr::Any& x_) { 
   return std::visit(overloaded{
-  [](const BinaryIntrinsicKind::Add &y) -> json { return {0, BinaryIntrinsicKind::add_to_json(y)}; },
-  [](const BinaryIntrinsicKind::Sub &y) -> json { return {1, BinaryIntrinsicKind::sub_to_json(y)}; },
-  [](const BinaryIntrinsicKind::Mul &y) -> json { return {2, BinaryIntrinsicKind::mul_to_json(y)}; },
-  [](const BinaryIntrinsicKind::Div &y) -> json { return {3, BinaryIntrinsicKind::div_to_json(y)}; },
-  [](const BinaryIntrinsicKind::Rem &y) -> json { return {4, BinaryIntrinsicKind::rem_to_json(y)}; },
-  [](const BinaryIntrinsicKind::Pow &y) -> json { return {5, BinaryIntrinsicKind::pow_to_json(y)}; },
-  [](const BinaryIntrinsicKind::Min &y) -> json { return {6, BinaryIntrinsicKind::min_to_json(y)}; },
-  [](const BinaryIntrinsicKind::Max &y) -> json { return {7, BinaryIntrinsicKind::max_to_json(y)}; },
-  [](const BinaryIntrinsicKind::Atan2 &y) -> json { return {8, BinaryIntrinsicKind::atan2_to_json(y)}; },
-  [](const BinaryIntrinsicKind::Hypot &y) -> json { return {9, BinaryIntrinsicKind::hypot_to_json(y)}; },
-  [](const BinaryIntrinsicKind::BAnd &y) -> json { return {10, BinaryIntrinsicKind::band_to_json(y)}; },
-  [](const BinaryIntrinsicKind::BOr &y) -> json { return {11, BinaryIntrinsicKind::bor_to_json(y)}; },
-  [](const BinaryIntrinsicKind::BXor &y) -> json { return {12, BinaryIntrinsicKind::bxor_to_json(y)}; },
-  [](const BinaryIntrinsicKind::BSL &y) -> json { return {13, BinaryIntrinsicKind::bsl_to_json(y)}; },
-  [](const BinaryIntrinsicKind::BSR &y) -> json { return {14, BinaryIntrinsicKind::bsr_to_json(y)}; },
-  [](const BinaryIntrinsicKind::BZSR &y) -> json { return {15, BinaryIntrinsicKind::bzsr_to_json(y)}; },
-  [](const BinaryIntrinsicKind::LogicEq &y) -> json { return {16, BinaryIntrinsicKind::logiceq_to_json(y)}; },
-  [](const BinaryIntrinsicKind::LogicNeq &y) -> json { return {17, BinaryIntrinsicKind::logicneq_to_json(y)}; },
-  [](const BinaryIntrinsicKind::LogicAnd &y) -> json { return {18, BinaryIntrinsicKind::logicand_to_json(y)}; },
-  [](const BinaryIntrinsicKind::LogicOr &y) -> json { return {19, BinaryIntrinsicKind::logicor_to_json(y)}; },
-  [](const BinaryIntrinsicKind::LogicLte &y) -> json { return {20, BinaryIntrinsicKind::logiclte_to_json(y)}; },
-  [](const BinaryIntrinsicKind::LogicGte &y) -> json { return {21, BinaryIntrinsicKind::logicgte_to_json(y)}; },
-  [](const BinaryIntrinsicKind::LogicLt &y) -> json { return {22, BinaryIntrinsicKind::logiclt_to_json(y)}; },
-  [](const BinaryIntrinsicKind::LogicGt &y) -> json { return {23, BinaryIntrinsicKind::logicgt_to_json(y)}; },
-  [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
-  }, *x);
+  [](const Intr::BNot &y_) -> json { return {0, Intr::bnot_to_json(y_)}; },
+  [](const Intr::LogicNot &y_) -> json { return {1, Intr::logicnot_to_json(y_)}; },
+  [](const Intr::Pos &y_) -> json { return {2, Intr::pos_to_json(y_)}; },
+  [](const Intr::Neg &y_) -> json { return {3, Intr::neg_to_json(y_)}; },
+  [](const Intr::Add &y_) -> json { return {4, Intr::add_to_json(y_)}; },
+  [](const Intr::Sub &y_) -> json { return {5, Intr::sub_to_json(y_)}; },
+  [](const Intr::Mul &y_) -> json { return {6, Intr::mul_to_json(y_)}; },
+  [](const Intr::Div &y_) -> json { return {7, Intr::div_to_json(y_)}; },
+  [](const Intr::Rem &y_) -> json { return {8, Intr::rem_to_json(y_)}; },
+  [](const Intr::Min &y_) -> json { return {9, Intr::min_to_json(y_)}; },
+  [](const Intr::Max &y_) -> json { return {10, Intr::max_to_json(y_)}; },
+  [](const Intr::BAnd &y_) -> json { return {11, Intr::band_to_json(y_)}; },
+  [](const Intr::BOr &y_) -> json { return {12, Intr::bor_to_json(y_)}; },
+  [](const Intr::BXor &y_) -> json { return {13, Intr::bxor_to_json(y_)}; },
+  [](const Intr::BSL &y_) -> json { return {14, Intr::bsl_to_json(y_)}; },
+  [](const Intr::BSR &y_) -> json { return {15, Intr::bsr_to_json(y_)}; },
+  [](const Intr::BZSR &y_) -> json { return {16, Intr::bzsr_to_json(y_)}; },
+  [](const Intr::LogicAnd &y_) -> json { return {17, Intr::logicand_to_json(y_)}; },
+  [](const Intr::LogicOr &y_) -> json { return {18, Intr::logicor_to_json(y_)}; },
+  [](const Intr::LogicEq &y_) -> json { return {19, Intr::logiceq_to_json(y_)}; },
+  [](const Intr::LogicNeq &y_) -> json { return {20, Intr::logicneq_to_json(y_)}; },
+  [](const Intr::LogicLte &y_) -> json { return {21, Intr::logiclte_to_json(y_)}; },
+  [](const Intr::LogicGte &y_) -> json { return {22, Intr::logicgte_to_json(y_)}; },
+  [](const Intr::LogicLt &y_) -> json { return {23, Intr::logiclt_to_json(y_)}; },
+  [](const Intr::LogicGt &y_) -> json { return {24, Intr::logicgt_to_json(y_)}; },
+  [](const auto &x_) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x_) ); }
+  }, *x_);
 }
 
-TypeSpace::Global TypeSpace::global_from_json(const json& j) { 
-  return {};
+Math::Abs Math::abs_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
 }
 
-json TypeSpace::global_to_json(const TypeSpace::Global& x) { 
-  return json::array({});
+json Math::abs_to_json(const Math::Abs& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
 }
 
-TypeSpace::Local TypeSpace::local_from_json(const json& j) { 
-  return {};
+Math::Sin Math::sin_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
 }
 
-json TypeSpace::local_to_json(const TypeSpace::Local& x) { 
-  return json::array({});
+json Math::sin_to_json(const Math::Sin& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
 }
 
-TypeSpace::Any TypeSpace::any_from_json(const json& j) { 
-  size_t ord = j.at(0).get<size_t>();
-  const auto t = j.at(1);
-  switch (ord) {
-  case 0: return TypeSpace::global_from_json(t);
-  case 1: return TypeSpace::local_from_json(t);
-  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
+Math::Cos Math::cos_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
+}
+
+json Math::cos_to_json(const Math::Cos& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
+}
+
+Math::Tan Math::tan_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
+}
+
+json Math::tan_to_json(const Math::Tan& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
+}
+
+Math::Asin Math::asin_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
+}
+
+json Math::asin_to_json(const Math::Asin& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
+}
+
+Math::Acos Math::acos_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
+}
+
+json Math::acos_to_json(const Math::Acos& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
+}
+
+Math::Atan Math::atan_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
+}
+
+json Math::atan_to_json(const Math::Atan& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
+}
+
+Math::Sinh Math::sinh_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
+}
+
+json Math::sinh_to_json(const Math::Sinh& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
+}
+
+Math::Cosh Math::cosh_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
+}
+
+json Math::cosh_to_json(const Math::Cosh& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
+}
+
+Math::Tanh Math::tanh_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
+}
+
+json Math::tanh_to_json(const Math::Tanh& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
+}
+
+Math::Signum Math::signum_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
+}
+
+json Math::signum_to_json(const Math::Signum& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
+}
+
+Math::Round Math::round_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
+}
+
+json Math::round_to_json(const Math::Round& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
+}
+
+Math::Ceil Math::ceil_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
+}
+
+json Math::ceil_to_json(const Math::Ceil& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
+}
+
+Math::Floor Math::floor_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
+}
+
+json Math::floor_to_json(const Math::Floor& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
+}
+
+Math::Rint Math::rint_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
+}
+
+json Math::rint_to_json(const Math::Rint& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
+}
+
+Math::Sqrt Math::sqrt_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
+}
+
+json Math::sqrt_to_json(const Math::Sqrt& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
+}
+
+Math::Cbrt Math::cbrt_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
+}
+
+json Math::cbrt_to_json(const Math::Cbrt& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
+}
+
+Math::Exp Math::exp_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
+}
+
+json Math::exp_to_json(const Math::Exp& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
+}
+
+Math::Expm1 Math::expm1_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
+}
+
+json Math::expm1_to_json(const Math::Expm1& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
+}
+
+Math::Log Math::log_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
+}
+
+json Math::log_to_json(const Math::Log& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
+}
+
+Math::Log1p Math::log1p_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
+}
+
+json Math::log1p_to_json(const Math::Log1p& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
+}
+
+Math::Log10 Math::log10_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto rtn =  Type::any_from_json(j_.at(1));
+  return {x, rtn};
+}
+
+json Math::log10_to_json(const Math::Log10& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, rtn});
+}
+
+Math::Pow Math::pow_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto y =  Term::any_from_json(j_.at(1));
+  auto rtn =  Type::any_from_json(j_.at(2));
+  return {x, y, rtn};
+}
+
+json Math::pow_to_json(const Math::Pow& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto y =  Term::any_to_json(x_.y);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, y, rtn});
+}
+
+Math::Atan2 Math::atan2_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto y =  Term::any_from_json(j_.at(1));
+  auto rtn =  Type::any_from_json(j_.at(2));
+  return {x, y, rtn};
+}
+
+json Math::atan2_to_json(const Math::Atan2& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto y =  Term::any_to_json(x_.y);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, y, rtn});
+}
+
+Math::Hypot Math::hypot_from_json(const json& j_) { 
+  auto x =  Term::any_from_json(j_.at(0));
+  auto y =  Term::any_from_json(j_.at(1));
+  auto rtn =  Type::any_from_json(j_.at(2));
+  return {x, y, rtn};
+}
+
+json Math::hypot_to_json(const Math::Hypot& x_) { 
+  auto x =  Term::any_to_json(x_.x);
+  auto y =  Term::any_to_json(x_.y);
+  auto rtn =  Type::any_to_json(x_.rtn);
+  return json::array({x, y, rtn});
+}
+
+Math::Any Math::any_from_json(const json& j_) { 
+  size_t ord_ = j_.at(0).get<size_t>();
+  const auto t_ = j_.at(1);
+  switch (ord_) {
+  case 0: return Math::abs_from_json(t_);
+  case 1: return Math::sin_from_json(t_);
+  case 2: return Math::cos_from_json(t_);
+  case 3: return Math::tan_from_json(t_);
+  case 4: return Math::asin_from_json(t_);
+  case 5: return Math::acos_from_json(t_);
+  case 6: return Math::atan_from_json(t_);
+  case 7: return Math::sinh_from_json(t_);
+  case 8: return Math::cosh_from_json(t_);
+  case 9: return Math::tanh_from_json(t_);
+  case 10: return Math::signum_from_json(t_);
+  case 11: return Math::round_from_json(t_);
+  case 12: return Math::ceil_from_json(t_);
+  case 13: return Math::floor_from_json(t_);
+  case 14: return Math::rint_from_json(t_);
+  case 15: return Math::sqrt_from_json(t_);
+  case 16: return Math::cbrt_from_json(t_);
+  case 17: return Math::exp_from_json(t_);
+  case 18: return Math::expm1_from_json(t_);
+  case 19: return Math::log_from_json(t_);
+  case 20: return Math::log1p_from_json(t_);
+  case 21: return Math::log10_from_json(t_);
+  case 22: return Math::pow_from_json(t_);
+  case 23: return Math::atan2_from_json(t_);
+  case 24: return Math::hypot_from_json(t_);
+  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
 
-json TypeSpace::any_to_json(const TypeSpace::Any& x) { 
+json Math::any_to_json(const Math::Any& x_) { 
   return std::visit(overloaded{
-  [](const TypeSpace::Global &y) -> json { return {0, TypeSpace::global_to_json(y)}; },
-  [](const TypeSpace::Local &y) -> json { return {1, TypeSpace::local_to_json(y)}; },
-  [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
-  }, *x);
+  [](const Math::Abs &y_) -> json { return {0, Math::abs_to_json(y_)}; },
+  [](const Math::Sin &y_) -> json { return {1, Math::sin_to_json(y_)}; },
+  [](const Math::Cos &y_) -> json { return {2, Math::cos_to_json(y_)}; },
+  [](const Math::Tan &y_) -> json { return {3, Math::tan_to_json(y_)}; },
+  [](const Math::Asin &y_) -> json { return {4, Math::asin_to_json(y_)}; },
+  [](const Math::Acos &y_) -> json { return {5, Math::acos_to_json(y_)}; },
+  [](const Math::Atan &y_) -> json { return {6, Math::atan_to_json(y_)}; },
+  [](const Math::Sinh &y_) -> json { return {7, Math::sinh_to_json(y_)}; },
+  [](const Math::Cosh &y_) -> json { return {8, Math::cosh_to_json(y_)}; },
+  [](const Math::Tanh &y_) -> json { return {9, Math::tanh_to_json(y_)}; },
+  [](const Math::Signum &y_) -> json { return {10, Math::signum_to_json(y_)}; },
+  [](const Math::Round &y_) -> json { return {11, Math::round_to_json(y_)}; },
+  [](const Math::Ceil &y_) -> json { return {12, Math::ceil_to_json(y_)}; },
+  [](const Math::Floor &y_) -> json { return {13, Math::floor_to_json(y_)}; },
+  [](const Math::Rint &y_) -> json { return {14, Math::rint_to_json(y_)}; },
+  [](const Math::Sqrt &y_) -> json { return {15, Math::sqrt_to_json(y_)}; },
+  [](const Math::Cbrt &y_) -> json { return {16, Math::cbrt_to_json(y_)}; },
+  [](const Math::Exp &y_) -> json { return {17, Math::exp_to_json(y_)}; },
+  [](const Math::Expm1 &y_) -> json { return {18, Math::expm1_to_json(y_)}; },
+  [](const Math::Log &y_) -> json { return {19, Math::log_to_json(y_)}; },
+  [](const Math::Log1p &y_) -> json { return {20, Math::log1p_to_json(y_)}; },
+  [](const Math::Log10 &y_) -> json { return {21, Math::log10_to_json(y_)}; },
+  [](const Math::Pow &y_) -> json { return {22, Math::pow_to_json(y_)}; },
+  [](const Math::Atan2 &y_) -> json { return {23, Math::atan2_to_json(y_)}; },
+  [](const Math::Hypot &y_) -> json { return {24, Math::hypot_to_json(y_)}; },
+  [](const auto &x_) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x_) ); }
+  }, *x_);
 }
 
-Expr::NullaryIntrinsic Expr::nullaryintrinsic_from_json(const json& j) { 
-  auto kind =  NullaryIntrinsicKind::any_from_json(j.at(0));
-  auto rtn =  Type::any_from_json(j.at(1));
-  return {kind, rtn};
+Expr::SpecOp Expr::specop_from_json(const json& j_) { 
+  auto op =  Spec::any_from_json(j_.at(0));
+  return Expr::SpecOp(op);
 }
 
-json Expr::nullaryintrinsic_to_json(const Expr::NullaryIntrinsic& x) { 
-  auto kind =  NullaryIntrinsicKind::any_to_json(x.kind);
-  auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({kind, rtn});
+json Expr::specop_to_json(const Expr::SpecOp& x_) { 
+  auto op =  Spec::any_to_json(x_.op);
+  return json::array({op});
 }
 
-Expr::UnaryIntrinsic Expr::unaryintrinsic_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto kind =  UnaryIntrinsicKind::any_from_json(j.at(1));
-  auto rtn =  Type::any_from_json(j.at(2));
-  return {lhs, kind, rtn};
+Expr::MathOp Expr::mathop_from_json(const json& j_) { 
+  auto op =  Math::any_from_json(j_.at(0));
+  return Expr::MathOp(op);
 }
 
-json Expr::unaryintrinsic_to_json(const Expr::UnaryIntrinsic& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto kind =  UnaryIntrinsicKind::any_to_json(x.kind);
-  auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({lhs, kind, rtn});
+json Expr::mathop_to_json(const Expr::MathOp& x_) { 
+  auto op =  Math::any_to_json(x_.op);
+  return json::array({op});
 }
 
-Expr::BinaryIntrinsic Expr::binaryintrinsic_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto rhs =  Term::any_from_json(j.at(1));
-  auto kind =  BinaryIntrinsicKind::any_from_json(j.at(2));
-  auto rtn =  Type::any_from_json(j.at(3));
-  return {lhs, rhs, kind, rtn};
+Expr::IntrOp Expr::introp_from_json(const json& j_) { 
+  auto op =  Intr::any_from_json(j_.at(0));
+  return Expr::IntrOp(op);
 }
 
-json Expr::binaryintrinsic_to_json(const Expr::BinaryIntrinsic& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto rhs =  Term::any_to_json(x.rhs);
-  auto kind =  BinaryIntrinsicKind::any_to_json(x.kind);
-  auto rtn =  Type::any_to_json(x.rtn);
-  return json::array({lhs, rhs, kind, rtn});
+json Expr::introp_to_json(const Expr::IntrOp& x_) { 
+  auto op =  Intr::any_to_json(x_.op);
+  return json::array({op});
 }
 
-Expr::Cast Expr::cast_from_json(const json& j) { 
-  auto from =  Term::any_from_json(j.at(0));
-  auto as =  Type::any_from_json(j.at(1));
+Expr::Cast Expr::cast_from_json(const json& j_) { 
+  auto from =  Term::any_from_json(j_.at(0));
+  auto as =  Type::any_from_json(j_.at(1));
   return {from, as};
 }
 
-json Expr::cast_to_json(const Expr::Cast& x) { 
-  auto from =  Term::any_to_json(x.from);
-  auto as =  Type::any_to_json(x.as);
+json Expr::cast_to_json(const Expr::Cast& x_) { 
+  auto from =  Term::any_to_json(x_.from);
+  auto as =  Type::any_to_json(x_.as);
   return json::array({from, as});
 }
 
-Expr::Alias Expr::alias_from_json(const json& j) { 
-  auto ref =  Term::any_from_json(j.at(0));
+Expr::Alias Expr::alias_from_json(const json& j_) { 
+  auto ref =  Term::any_from_json(j_.at(0));
   return Expr::Alias(ref);
 }
 
-json Expr::alias_to_json(const Expr::Alias& x) { 
-  auto ref =  Term::any_to_json(x.ref);
+json Expr::alias_to_json(const Expr::Alias& x_) { 
+  auto ref =  Term::any_to_json(x_.ref);
   return json::array({ref});
 }
 
-Expr::Index Expr::index_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto idx =  Term::any_from_json(j.at(1));
-  auto component =  Type::any_from_json(j.at(2));
+Expr::Index Expr::index_from_json(const json& j_) { 
+  auto lhs =  Term::any_from_json(j_.at(0));
+  auto idx =  Term::any_from_json(j_.at(1));
+  auto component =  Type::any_from_json(j_.at(2));
   return {lhs, idx, component};
 }
 
-json Expr::index_to_json(const Expr::Index& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto idx =  Term::any_to_json(x.idx);
-  auto component =  Type::any_to_json(x.component);
+json Expr::index_to_json(const Expr::Index& x_) { 
+  auto lhs =  Term::any_to_json(x_.lhs);
+  auto idx =  Term::any_to_json(x_.idx);
+  auto component =  Type::any_to_json(x_.component);
   return json::array({lhs, idx, component});
 }
 
-Expr::Alloc Expr::alloc_from_json(const json& j) { 
-  auto component =  Type::any_from_json(j.at(0));
-  auto size =  Term::any_from_json(j.at(1));
+Expr::Alloc Expr::alloc_from_json(const json& j_) { 
+  auto component =  Type::any_from_json(j_.at(0));
+  auto size =  Term::any_from_json(j_.at(1));
   return {component, size};
 }
 
-json Expr::alloc_to_json(const Expr::Alloc& x) { 
-  auto component =  Type::any_to_json(x.component);
-  auto size =  Term::any_to_json(x.size);
+json Expr::alloc_to_json(const Expr::Alloc& x_) { 
+  auto component =  Type::any_to_json(x_.component);
+  auto size =  Term::any_to_json(x_.size);
   return json::array({component, size});
 }
 
-Expr::Invoke Expr::invoke_from_json(const json& j) { 
-  auto name =  sym_from_json(j.at(0));
+Expr::Invoke Expr::invoke_from_json(const json& j_) { 
+  auto name =  sym_from_json(j_.at(0));
   std::vector<Type::Any> tpeArgs;
-  auto tpeArgs_json = j.at(1);
+  auto tpeArgs_json = j_.at(1);
   std::transform(tpeArgs_json.begin(), tpeArgs_json.end(), std::back_inserter(tpeArgs), &Type::any_from_json);
-  auto receiver = j.at(2).is_null() ? std::nullopt : std::make_optional(Term::any_from_json(j.at(2)));
+  auto receiver = j_.at(2).is_null() ? std::nullopt : std::make_optional(Term::any_from_json(j_.at(2)));
   std::vector<Term::Any> args;
-  auto args_json = j.at(3);
+  auto args_json = j_.at(3);
   std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &Term::any_from_json);
   std::vector<Term::Any> captures;
-  auto captures_json = j.at(4);
+  auto captures_json = j_.at(4);
   std::transform(captures_json.begin(), captures_json.end(), std::back_inserter(captures), &Term::any_from_json);
-  auto rtn =  Type::any_from_json(j.at(5));
+  auto rtn =  Type::any_from_json(j_.at(5));
   return {name, tpeArgs, receiver, args, captures, rtn};
 }
 
-json Expr::invoke_to_json(const Expr::Invoke& x) { 
-  auto name =  sym_to_json(x.name);
+json Expr::invoke_to_json(const Expr::Invoke& x_) { 
+  auto name =  sym_to_json(x_.name);
   std::vector<json> tpeArgs;
-  std::transform(x.tpeArgs.begin(), x.tpeArgs.end(), std::back_inserter(tpeArgs), &Type::any_to_json);
-  auto receiver = x.receiver ? Term::any_to_json(*x.receiver) : json{};
+  std::transform(x_.tpeArgs.begin(), x_.tpeArgs.end(), std::back_inserter(tpeArgs), &Type::any_to_json);
+  auto receiver = x_.receiver ? Term::any_to_json(*x_.receiver) : json{};
   std::vector<json> args;
-  std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &Term::any_to_json);
+  std::transform(x_.args.begin(), x_.args.end(), std::back_inserter(args), &Term::any_to_json);
   std::vector<json> captures;
-  std::transform(x.captures.begin(), x.captures.end(), std::back_inserter(captures), &Term::any_to_json);
-  auto rtn =  Type::any_to_json(x.rtn);
+  std::transform(x_.captures.begin(), x_.captures.end(), std::back_inserter(captures), &Term::any_to_json);
+  auto rtn =  Type::any_to_json(x_.rtn);
   return json::array({name, tpeArgs, receiver, args, captures, rtn});
 }
 
-Expr::Any Expr::any_from_json(const json& j) { 
-  size_t ord = j.at(0).get<size_t>();
-  const auto t = j.at(1);
-  switch (ord) {
-  case 0: return Expr::nullaryintrinsic_from_json(t);
-  case 1: return Expr::unaryintrinsic_from_json(t);
-  case 2: return Expr::binaryintrinsic_from_json(t);
-  case 3: return Expr::cast_from_json(t);
-  case 4: return Expr::alias_from_json(t);
-  case 5: return Expr::index_from_json(t);
-  case 6: return Expr::alloc_from_json(t);
-  case 7: return Expr::invoke_from_json(t);
-  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
+Expr::Any Expr::any_from_json(const json& j_) { 
+  size_t ord_ = j_.at(0).get<size_t>();
+  const auto t_ = j_.at(1);
+  switch (ord_) {
+  case 0: return Expr::specop_from_json(t_);
+  case 1: return Expr::mathop_from_json(t_);
+  case 2: return Expr::introp_from_json(t_);
+  case 3: return Expr::cast_from_json(t_);
+  case 4: return Expr::alias_from_json(t_);
+  case 5: return Expr::index_from_json(t_);
+  case 6: return Expr::alloc_from_json(t_);
+  case 7: return Expr::invoke_from_json(t_);
+  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
 
-json Expr::any_to_json(const Expr::Any& x) { 
+json Expr::any_to_json(const Expr::Any& x_) { 
   return std::visit(overloaded{
-  [](const Expr::NullaryIntrinsic &y) -> json { return {0, Expr::nullaryintrinsic_to_json(y)}; },
-  [](const Expr::UnaryIntrinsic &y) -> json { return {1, Expr::unaryintrinsic_to_json(y)}; },
-  [](const Expr::BinaryIntrinsic &y) -> json { return {2, Expr::binaryintrinsic_to_json(y)}; },
-  [](const Expr::Cast &y) -> json { return {3, Expr::cast_to_json(y)}; },
-  [](const Expr::Alias &y) -> json { return {4, Expr::alias_to_json(y)}; },
-  [](const Expr::Index &y) -> json { return {5, Expr::index_to_json(y)}; },
-  [](const Expr::Alloc &y) -> json { return {6, Expr::alloc_to_json(y)}; },
-  [](const Expr::Invoke &y) -> json { return {7, Expr::invoke_to_json(y)}; },
-  [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
-  }, *x);
+  [](const Expr::SpecOp &y_) -> json { return {0, Expr::specop_to_json(y_)}; },
+  [](const Expr::MathOp &y_) -> json { return {1, Expr::mathop_to_json(y_)}; },
+  [](const Expr::IntrOp &y_) -> json { return {2, Expr::introp_to_json(y_)}; },
+  [](const Expr::Cast &y_) -> json { return {3, Expr::cast_to_json(y_)}; },
+  [](const Expr::Alias &y_) -> json { return {4, Expr::alias_to_json(y_)}; },
+  [](const Expr::Index &y_) -> json { return {5, Expr::index_to_json(y_)}; },
+  [](const Expr::Alloc &y_) -> json { return {6, Expr::alloc_to_json(y_)}; },
+  [](const Expr::Invoke &y_) -> json { return {7, Expr::invoke_to_json(y_)}; },
+  [](const auto &x_) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x_) ); }
+  }, *x_);
 }
 
-Stmt::Block Stmt::block_from_json(const json& j) { 
+Stmt::Block Stmt::block_from_json(const json& j_) { 
   std::vector<Stmt::Any> stmts;
-  auto stmts_json = j.at(0);
+  auto stmts_json = j_.at(0);
   std::transform(stmts_json.begin(), stmts_json.end(), std::back_inserter(stmts), &Stmt::any_from_json);
   return Stmt::Block(stmts);
 }
 
-json Stmt::block_to_json(const Stmt::Block& x) { 
+json Stmt::block_to_json(const Stmt::Block& x_) { 
   std::vector<json> stmts;
-  std::transform(x.stmts.begin(), x.stmts.end(), std::back_inserter(stmts), &Stmt::any_to_json);
+  std::transform(x_.stmts.begin(), x_.stmts.end(), std::back_inserter(stmts), &Stmt::any_to_json);
   return json::array({stmts});
 }
 
-Stmt::Comment Stmt::comment_from_json(const json& j) { 
-  auto value = j.at(0).get<std::string>();
+Stmt::Comment Stmt::comment_from_json(const json& j_) { 
+  auto value = j_.at(0).get<std::string>();
   return Stmt::Comment(value);
 }
 
-json Stmt::comment_to_json(const Stmt::Comment& x) { 
-  auto value = x.value;
+json Stmt::comment_to_json(const Stmt::Comment& x_) { 
+  auto value = x_.value;
   return json::array({value});
 }
 
-Stmt::Var Stmt::var_from_json(const json& j) { 
-  auto name =  named_from_json(j.at(0));
-  auto expr = j.at(1).is_null() ? std::nullopt : std::make_optional(Expr::any_from_json(j.at(1)));
+Stmt::Var Stmt::var_from_json(const json& j_) { 
+  auto name =  named_from_json(j_.at(0));
+  auto expr = j_.at(1).is_null() ? std::nullopt : std::make_optional(Expr::any_from_json(j_.at(1)));
   return {name, expr};
 }
 
-json Stmt::var_to_json(const Stmt::Var& x) { 
-  auto name =  named_to_json(x.name);
-  auto expr = x.expr ? Expr::any_to_json(*x.expr) : json{};
+json Stmt::var_to_json(const Stmt::Var& x_) { 
+  auto name =  named_to_json(x_.name);
+  auto expr = x_.expr ? Expr::any_to_json(*x_.expr) : json{};
   return json::array({name, expr});
 }
 
-Stmt::Mut Stmt::mut_from_json(const json& j) { 
-  auto name =  Term::any_from_json(j.at(0));
-  auto expr =  Expr::any_from_json(j.at(1));
-  auto copy = j.at(2).get<bool>();
+Stmt::Mut Stmt::mut_from_json(const json& j_) { 
+  auto name =  Term::any_from_json(j_.at(0));
+  auto expr =  Expr::any_from_json(j_.at(1));
+  auto copy = j_.at(2).get<bool>();
   return {name, expr, copy};
 }
 
-json Stmt::mut_to_json(const Stmt::Mut& x) { 
-  auto name =  Term::any_to_json(x.name);
-  auto expr =  Expr::any_to_json(x.expr);
-  auto copy = x.copy;
+json Stmt::mut_to_json(const Stmt::Mut& x_) { 
+  auto name =  Term::any_to_json(x_.name);
+  auto expr =  Expr::any_to_json(x_.expr);
+  auto copy = x_.copy;
   return json::array({name, expr, copy});
 }
 
-Stmt::Update Stmt::update_from_json(const json& j) { 
-  auto lhs =  Term::any_from_json(j.at(0));
-  auto idx =  Term::any_from_json(j.at(1));
-  auto value =  Term::any_from_json(j.at(2));
+Stmt::Update Stmt::update_from_json(const json& j_) { 
+  auto lhs =  Term::any_from_json(j_.at(0));
+  auto idx =  Term::any_from_json(j_.at(1));
+  auto value =  Term::any_from_json(j_.at(2));
   return {lhs, idx, value};
 }
 
-json Stmt::update_to_json(const Stmt::Update& x) { 
-  auto lhs =  Term::any_to_json(x.lhs);
-  auto idx =  Term::any_to_json(x.idx);
-  auto value =  Term::any_to_json(x.value);
+json Stmt::update_to_json(const Stmt::Update& x_) { 
+  auto lhs =  Term::any_to_json(x_.lhs);
+  auto idx =  Term::any_to_json(x_.idx);
+  auto value =  Term::any_to_json(x_.value);
   return json::array({lhs, idx, value});
 }
 
-Stmt::While Stmt::while_from_json(const json& j) { 
+Stmt::While Stmt::while_from_json(const json& j_) { 
   std::vector<Stmt::Any> tests;
-  auto tests_json = j.at(0);
+  auto tests_json = j_.at(0);
   std::transform(tests_json.begin(), tests_json.end(), std::back_inserter(tests), &Stmt::any_from_json);
-  auto cond =  Term::any_from_json(j.at(1));
+  auto cond =  Term::any_from_json(j_.at(1));
   std::vector<Stmt::Any> body;
-  auto body_json = j.at(2);
+  auto body_json = j_.at(2);
   std::transform(body_json.begin(), body_json.end(), std::back_inserter(body), &Stmt::any_from_json);
   return {tests, cond, body};
 }
 
-json Stmt::while_to_json(const Stmt::While& x) { 
+json Stmt::while_to_json(const Stmt::While& x_) { 
   std::vector<json> tests;
-  std::transform(x.tests.begin(), x.tests.end(), std::back_inserter(tests), &Stmt::any_to_json);
-  auto cond =  Term::any_to_json(x.cond);
+  std::transform(x_.tests.begin(), x_.tests.end(), std::back_inserter(tests), &Stmt::any_to_json);
+  auto cond =  Term::any_to_json(x_.cond);
   std::vector<json> body;
-  std::transform(x.body.begin(), x.body.end(), std::back_inserter(body), &Stmt::any_to_json);
+  std::transform(x_.body.begin(), x_.body.end(), std::back_inserter(body), &Stmt::any_to_json);
   return json::array({tests, cond, body});
 }
 
-Stmt::Break Stmt::break_from_json(const json& j) { 
+Stmt::Break Stmt::break_from_json(const json& j_) { 
   return {};
 }
 
-json Stmt::break_to_json(const Stmt::Break& x) { 
+json Stmt::break_to_json(const Stmt::Break& x_) { 
   return json::array({});
 }
 
-Stmt::Cont Stmt::cont_from_json(const json& j) { 
+Stmt::Cont Stmt::cont_from_json(const json& j_) { 
   return {};
 }
 
-json Stmt::cont_to_json(const Stmt::Cont& x) { 
+json Stmt::cont_to_json(const Stmt::Cont& x_) { 
   return json::array({});
 }
 
-Stmt::Cond Stmt::cond_from_json(const json& j) { 
-  auto cond =  Expr::any_from_json(j.at(0));
+Stmt::Cond Stmt::cond_from_json(const json& j_) { 
+  auto cond =  Expr::any_from_json(j_.at(0));
   std::vector<Stmt::Any> trueBr;
-  auto trueBr_json = j.at(1);
+  auto trueBr_json = j_.at(1);
   std::transform(trueBr_json.begin(), trueBr_json.end(), std::back_inserter(trueBr), &Stmt::any_from_json);
   std::vector<Stmt::Any> falseBr;
-  auto falseBr_json = j.at(2);
+  auto falseBr_json = j_.at(2);
   std::transform(falseBr_json.begin(), falseBr_json.end(), std::back_inserter(falseBr), &Stmt::any_from_json);
   return {cond, trueBr, falseBr};
 }
 
-json Stmt::cond_to_json(const Stmt::Cond& x) { 
-  auto cond =  Expr::any_to_json(x.cond);
+json Stmt::cond_to_json(const Stmt::Cond& x_) { 
+  auto cond =  Expr::any_to_json(x_.cond);
   std::vector<json> trueBr;
-  std::transform(x.trueBr.begin(), x.trueBr.end(), std::back_inserter(trueBr), &Stmt::any_to_json);
+  std::transform(x_.trueBr.begin(), x_.trueBr.end(), std::back_inserter(trueBr), &Stmt::any_to_json);
   std::vector<json> falseBr;
-  std::transform(x.falseBr.begin(), x.falseBr.end(), std::back_inserter(falseBr), &Stmt::any_to_json);
+  std::transform(x_.falseBr.begin(), x_.falseBr.end(), std::back_inserter(falseBr), &Stmt::any_to_json);
   return json::array({cond, trueBr, falseBr});
 }
 
-Stmt::Return Stmt::return_from_json(const json& j) { 
-  auto value =  Expr::any_from_json(j.at(0));
+Stmt::Return Stmt::return_from_json(const json& j_) { 
+  auto value =  Expr::any_from_json(j_.at(0));
   return Stmt::Return(value);
 }
 
-json Stmt::return_to_json(const Stmt::Return& x) { 
-  auto value =  Expr::any_to_json(x.value);
+json Stmt::return_to_json(const Stmt::Return& x_) { 
+  auto value =  Expr::any_to_json(x_.value);
   return json::array({value});
 }
 
-Stmt::Any Stmt::any_from_json(const json& j) { 
-  size_t ord = j.at(0).get<size_t>();
-  const auto t = j.at(1);
-  switch (ord) {
-  case 0: return Stmt::block_from_json(t);
-  case 1: return Stmt::comment_from_json(t);
-  case 2: return Stmt::var_from_json(t);
-  case 3: return Stmt::mut_from_json(t);
-  case 4: return Stmt::update_from_json(t);
-  case 5: return Stmt::while_from_json(t);
-  case 6: return Stmt::break_from_json(t);
-  case 7: return Stmt::cont_from_json(t);
-  case 8: return Stmt::cond_from_json(t);
-  case 9: return Stmt::return_from_json(t);
-  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
+Stmt::Any Stmt::any_from_json(const json& j_) { 
+  size_t ord_ = j_.at(0).get<size_t>();
+  const auto t_ = j_.at(1);
+  switch (ord_) {
+  case 0: return Stmt::block_from_json(t_);
+  case 1: return Stmt::comment_from_json(t_);
+  case 2: return Stmt::var_from_json(t_);
+  case 3: return Stmt::mut_from_json(t_);
+  case 4: return Stmt::update_from_json(t_);
+  case 5: return Stmt::while_from_json(t_);
+  case 6: return Stmt::break_from_json(t_);
+  case 7: return Stmt::cont_from_json(t_);
+  case 8: return Stmt::cond_from_json(t_);
+  case 9: return Stmt::return_from_json(t_);
+  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
 
-json Stmt::any_to_json(const Stmt::Any& x) { 
+json Stmt::any_to_json(const Stmt::Any& x_) { 
   return std::visit(overloaded{
-  [](const Stmt::Block &y) -> json { return {0, Stmt::block_to_json(y)}; },
-  [](const Stmt::Comment &y) -> json { return {1, Stmt::comment_to_json(y)}; },
-  [](const Stmt::Var &y) -> json { return {2, Stmt::var_to_json(y)}; },
-  [](const Stmt::Mut &y) -> json { return {3, Stmt::mut_to_json(y)}; },
-  [](const Stmt::Update &y) -> json { return {4, Stmt::update_to_json(y)}; },
-  [](const Stmt::While &y) -> json { return {5, Stmt::while_to_json(y)}; },
-  [](const Stmt::Break &y) -> json { return {6, Stmt::break_to_json(y)}; },
-  [](const Stmt::Cont &y) -> json { return {7, Stmt::cont_to_json(y)}; },
-  [](const Stmt::Cond &y) -> json { return {8, Stmt::cond_to_json(y)}; },
-  [](const Stmt::Return &y) -> json { return {9, Stmt::return_to_json(y)}; },
-  [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
-  }, *x);
+  [](const Stmt::Block &y_) -> json { return {0, Stmt::block_to_json(y_)}; },
+  [](const Stmt::Comment &y_) -> json { return {1, Stmt::comment_to_json(y_)}; },
+  [](const Stmt::Var &y_) -> json { return {2, Stmt::var_to_json(y_)}; },
+  [](const Stmt::Mut &y_) -> json { return {3, Stmt::mut_to_json(y_)}; },
+  [](const Stmt::Update &y_) -> json { return {4, Stmt::update_to_json(y_)}; },
+  [](const Stmt::While &y_) -> json { return {5, Stmt::while_to_json(y_)}; },
+  [](const Stmt::Break &y_) -> json { return {6, Stmt::break_to_json(y_)}; },
+  [](const Stmt::Cont &y_) -> json { return {7, Stmt::cont_to_json(y_)}; },
+  [](const Stmt::Cond &y_) -> json { return {8, Stmt::cond_to_json(y_)}; },
+  [](const Stmt::Return &y_) -> json { return {9, Stmt::return_to_json(y_)}; },
+  [](const auto &x_) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x_) ); }
+  }, *x_);
 }
 
-StructMember structmember_from_json(const json& j) { 
-  auto named =  named_from_json(j.at(0));
-  auto isMutable = j.at(1).get<bool>();
+StructMember structmember_from_json(const json& j_) { 
+  auto named =  named_from_json(j_.at(0));
+  auto isMutable = j_.at(1).get<bool>();
   return {named, isMutable};
 }
 
-json structmember_to_json(const StructMember& x) { 
-  auto named =  named_to_json(x.named);
-  auto isMutable = x.isMutable;
+json structmember_to_json(const StructMember& x_) { 
+  auto named =  named_to_json(x_.named);
+  auto isMutable = x_.isMutable;
   return json::array({named, isMutable});
 }
 
-StructDef structdef_from_json(const json& j) { 
-  auto name =  sym_from_json(j.at(0));
-  auto isReference = j.at(1).get<bool>();
-  auto tpeVars = j.at(2).get<std::vector<std::string>>();
+StructDef structdef_from_json(const json& j_) { 
+  auto name =  sym_from_json(j_.at(0));
+  auto isReference = j_.at(1).get<bool>();
+  auto tpeVars = j_.at(2).get<std::vector<std::string>>();
   std::vector<StructMember> members;
-  auto members_json = j.at(3);
+  auto members_json = j_.at(3);
   std::transform(members_json.begin(), members_json.end(), std::back_inserter(members), &structmember_from_json);
   std::vector<Sym> parents;
-  auto parents_json = j.at(4);
+  auto parents_json = j_.at(4);
   std::transform(parents_json.begin(), parents_json.end(), std::back_inserter(parents), &sym_from_json);
   return {name, isReference, tpeVars, members, parents};
 }
 
-json structdef_to_json(const StructDef& x) { 
-  auto name =  sym_to_json(x.name);
-  auto isReference = x.isReference;
-  auto tpeVars = x.tpeVars;
+json structdef_to_json(const StructDef& x_) { 
+  auto name =  sym_to_json(x_.name);
+  auto isReference = x_.isReference;
+  auto tpeVars = x_.tpeVars;
   std::vector<json> members;
-  std::transform(x.members.begin(), x.members.end(), std::back_inserter(members), &structmember_to_json);
+  std::transform(x_.members.begin(), x_.members.end(), std::back_inserter(members), &structmember_to_json);
   std::vector<json> parents;
-  std::transform(x.parents.begin(), x.parents.end(), std::back_inserter(parents), &sym_to_json);
+  std::transform(x_.parents.begin(), x_.parents.end(), std::back_inserter(parents), &sym_to_json);
   return json::array({name, isReference, tpeVars, members, parents});
 }
 
-Signature signature_from_json(const json& j) { 
-  auto name =  sym_from_json(j.at(0));
-  auto tpeVars = j.at(1).get<std::vector<std::string>>();
-  auto receiver = j.at(2).is_null() ? std::nullopt : std::make_optional(Type::any_from_json(j.at(2)));
+Signature signature_from_json(const json& j_) { 
+  auto name =  sym_from_json(j_.at(0));
+  auto tpeVars = j_.at(1).get<std::vector<std::string>>();
+  auto receiver = j_.at(2).is_null() ? std::nullopt : std::make_optional(Type::any_from_json(j_.at(2)));
   std::vector<Type::Any> args;
-  auto args_json = j.at(3);
+  auto args_json = j_.at(3);
   std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &Type::any_from_json);
   std::vector<Type::Any> moduleCaptures;
-  auto moduleCaptures_json = j.at(4);
+  auto moduleCaptures_json = j_.at(4);
   std::transform(moduleCaptures_json.begin(), moduleCaptures_json.end(), std::back_inserter(moduleCaptures), &Type::any_from_json);
   std::vector<Type::Any> termCaptures;
-  auto termCaptures_json = j.at(5);
+  auto termCaptures_json = j_.at(5);
   std::transform(termCaptures_json.begin(), termCaptures_json.end(), std::back_inserter(termCaptures), &Type::any_from_json);
-  auto rtn =  Type::any_from_json(j.at(6));
+  auto rtn =  Type::any_from_json(j_.at(6));
   return {name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn};
 }
 
-json signature_to_json(const Signature& x) { 
-  auto name =  sym_to_json(x.name);
-  auto tpeVars = x.tpeVars;
-  auto receiver = x.receiver ? Type::any_to_json(*x.receiver) : json{};
+json signature_to_json(const Signature& x_) { 
+  auto name =  sym_to_json(x_.name);
+  auto tpeVars = x_.tpeVars;
+  auto receiver = x_.receiver ? Type::any_to_json(*x_.receiver) : json{};
   std::vector<json> args;
-  std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &Type::any_to_json);
+  std::transform(x_.args.begin(), x_.args.end(), std::back_inserter(args), &Type::any_to_json);
   std::vector<json> moduleCaptures;
-  std::transform(x.moduleCaptures.begin(), x.moduleCaptures.end(), std::back_inserter(moduleCaptures), &Type::any_to_json);
+  std::transform(x_.moduleCaptures.begin(), x_.moduleCaptures.end(), std::back_inserter(moduleCaptures), &Type::any_to_json);
   std::vector<json> termCaptures;
-  std::transform(x.termCaptures.begin(), x.termCaptures.end(), std::back_inserter(termCaptures), &Type::any_to_json);
-  auto rtn =  Type::any_to_json(x.rtn);
+  std::transform(x_.termCaptures.begin(), x_.termCaptures.end(), std::back_inserter(termCaptures), &Type::any_to_json);
+  auto rtn =  Type::any_to_json(x_.rtn);
   return json::array({name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn});
 }
 
-InvokeSignature invokesignature_from_json(const json& j) { 
-  auto name =  sym_from_json(j.at(0));
+InvokeSignature invokesignature_from_json(const json& j_) { 
+  auto name =  sym_from_json(j_.at(0));
   std::vector<Type::Any> tpeVars;
-  auto tpeVars_json = j.at(1);
+  auto tpeVars_json = j_.at(1);
   std::transform(tpeVars_json.begin(), tpeVars_json.end(), std::back_inserter(tpeVars), &Type::any_from_json);
-  auto receiver = j.at(2).is_null() ? std::nullopt : std::make_optional(Type::any_from_json(j.at(2)));
+  auto receiver = j_.at(2).is_null() ? std::nullopt : std::make_optional(Type::any_from_json(j_.at(2)));
   std::vector<Type::Any> args;
-  auto args_json = j.at(3);
+  auto args_json = j_.at(3);
   std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &Type::any_from_json);
   std::vector<Type::Any> captures;
-  auto captures_json = j.at(4);
+  auto captures_json = j_.at(4);
   std::transform(captures_json.begin(), captures_json.end(), std::back_inserter(captures), &Type::any_from_json);
-  auto rtn =  Type::any_from_json(j.at(5));
+  auto rtn =  Type::any_from_json(j_.at(5));
   return {name, tpeVars, receiver, args, captures, rtn};
 }
 
-json invokesignature_to_json(const InvokeSignature& x) { 
-  auto name =  sym_to_json(x.name);
+json invokesignature_to_json(const InvokeSignature& x_) { 
+  auto name =  sym_to_json(x_.name);
   std::vector<json> tpeVars;
-  std::transform(x.tpeVars.begin(), x.tpeVars.end(), std::back_inserter(tpeVars), &Type::any_to_json);
-  auto receiver = x.receiver ? Type::any_to_json(*x.receiver) : json{};
+  std::transform(x_.tpeVars.begin(), x_.tpeVars.end(), std::back_inserter(tpeVars), &Type::any_to_json);
+  auto receiver = x_.receiver ? Type::any_to_json(*x_.receiver) : json{};
   std::vector<json> args;
-  std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &Type::any_to_json);
+  std::transform(x_.args.begin(), x_.args.end(), std::back_inserter(args), &Type::any_to_json);
   std::vector<json> captures;
-  std::transform(x.captures.begin(), x.captures.end(), std::back_inserter(captures), &Type::any_to_json);
-  auto rtn =  Type::any_to_json(x.rtn);
+  std::transform(x_.captures.begin(), x_.captures.end(), std::back_inserter(captures), &Type::any_to_json);
+  auto rtn =  Type::any_to_json(x_.rtn);
   return json::array({name, tpeVars, receiver, args, captures, rtn});
 }
 
-FunctionKind::Internal FunctionKind::internal_from_json(const json& j) { 
+FunctionKind::Internal FunctionKind::internal_from_json(const json& j_) { 
   return {};
 }
 
-json FunctionKind::internal_to_json(const FunctionKind::Internal& x) { 
+json FunctionKind::internal_to_json(const FunctionKind::Internal& x_) { 
   return json::array({});
 }
 
-FunctionKind::Exported FunctionKind::exported_from_json(const json& j) { 
+FunctionKind::Exported FunctionKind::exported_from_json(const json& j_) { 
   return {};
 }
 
-json FunctionKind::exported_to_json(const FunctionKind::Exported& x) { 
+json FunctionKind::exported_to_json(const FunctionKind::Exported& x_) { 
   return json::array({});
 }
 
-FunctionKind::Any FunctionKind::any_from_json(const json& j) { 
-  size_t ord = j.at(0).get<size_t>();
-  const auto t = j.at(1);
-  switch (ord) {
-  case 0: return FunctionKind::internal_from_json(t);
-  case 1: return FunctionKind::exported_from_json(t);
-  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
+FunctionKind::Any FunctionKind::any_from_json(const json& j_) { 
+  size_t ord_ = j_.at(0).get<size_t>();
+  const auto t_ = j_.at(1);
+  switch (ord_) {
+  case 0: return FunctionKind::internal_from_json(t_);
+  case 1: return FunctionKind::exported_from_json(t_);
+  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
 
-json FunctionKind::any_to_json(const FunctionKind::Any& x) { 
+json FunctionKind::any_to_json(const FunctionKind::Any& x_) { 
   return std::visit(overloaded{
-  [](const FunctionKind::Internal &y) -> json { return {0, FunctionKind::internal_to_json(y)}; },
-  [](const FunctionKind::Exported &y) -> json { return {1, FunctionKind::exported_to_json(y)}; },
-  [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
-  }, *x);
+  [](const FunctionKind::Internal &y_) -> json { return {0, FunctionKind::internal_to_json(y_)}; },
+  [](const FunctionKind::Exported &y_) -> json { return {1, FunctionKind::exported_to_json(y_)}; },
+  [](const auto &x_) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x_) ); }
+  }, *x_);
 }
 
-FunctionAttr::FPRelaxed FunctionAttr::fprelaxed_from_json(const json& j) { 
+FunctionAttr::FPRelaxed FunctionAttr::fprelaxed_from_json(const json& j_) { 
   return {};
 }
 
-json FunctionAttr::fprelaxed_to_json(const FunctionAttr::FPRelaxed& x) { 
+json FunctionAttr::fprelaxed_to_json(const FunctionAttr::FPRelaxed& x_) { 
   return json::array({});
 }
 
-FunctionAttr::FPStrict FunctionAttr::fpstrict_from_json(const json& j) { 
+FunctionAttr::FPStrict FunctionAttr::fpstrict_from_json(const json& j_) { 
   return {};
 }
 
-json FunctionAttr::fpstrict_to_json(const FunctionAttr::FPStrict& x) { 
+json FunctionAttr::fpstrict_to_json(const FunctionAttr::FPStrict& x_) { 
   return json::array({});
 }
 
-FunctionAttr::Any FunctionAttr::any_from_json(const json& j) { 
-  size_t ord = j.at(0).get<size_t>();
-  const auto t = j.at(1);
-  switch (ord) {
-  case 0: return FunctionAttr::fprelaxed_from_json(t);
-  case 1: return FunctionAttr::fpstrict_from_json(t);
-  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord));
+FunctionAttr::Any FunctionAttr::any_from_json(const json& j_) { 
+  size_t ord_ = j_.at(0).get<size_t>();
+  const auto t_ = j_.at(1);
+  switch (ord_) {
+  case 0: return FunctionAttr::fprelaxed_from_json(t_);
+  case 1: return FunctionAttr::fpstrict_from_json(t_);
+  default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
 
-json FunctionAttr::any_to_json(const FunctionAttr::Any& x) { 
+json FunctionAttr::any_to_json(const FunctionAttr::Any& x_) { 
   return std::visit(overloaded{
-  [](const FunctionAttr::FPRelaxed &y) -> json { return {0, FunctionAttr::fprelaxed_to_json(y)}; },
-  [](const FunctionAttr::FPStrict &y) -> json { return {1, FunctionAttr::fpstrict_to_json(y)}; },
-  [](const auto &x) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x) ); }
-  }, *x);
+  [](const FunctionAttr::FPRelaxed &y_) -> json { return {0, FunctionAttr::fprelaxed_to_json(y_)}; },
+  [](const FunctionAttr::FPStrict &y_) -> json { return {1, FunctionAttr::fpstrict_to_json(y_)}; },
+  [](const auto &x_) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x_) ); }
+  }, *x_);
 }
 
-Arg arg_from_json(const json& j) { 
-  auto named =  named_from_json(j.at(0));
-  auto pos = j.at(1).is_null() ? std::nullopt : std::make_optional(sourceposition_from_json(j.at(1)));
+Arg arg_from_json(const json& j_) { 
+  auto named =  named_from_json(j_.at(0));
+  auto pos = j_.at(1).is_null() ? std::nullopt : std::make_optional(sourceposition_from_json(j_.at(1)));
   return {named, pos};
 }
 
-json arg_to_json(const Arg& x) { 
-  auto named =  named_to_json(x.named);
-  auto pos = x.pos ? sourceposition_to_json(*x.pos) : json{};
+json arg_to_json(const Arg& x_) { 
+  auto named =  named_to_json(x_.named);
+  auto pos = x_.pos ? sourceposition_to_json(*x_.pos) : json{};
   return json::array({named, pos});
 }
 
-Function function_from_json(const json& j) { 
-  auto name =  sym_from_json(j.at(0));
-  auto tpeVars = j.at(1).get<std::vector<std::string>>();
-  auto receiver = j.at(2).is_null() ? std::nullopt : std::make_optional(arg_from_json(j.at(2)));
+Function function_from_json(const json& j_) { 
+  auto name =  sym_from_json(j_.at(0));
+  auto tpeVars = j_.at(1).get<std::vector<std::string>>();
+  auto receiver = j_.at(2).is_null() ? std::nullopt : std::make_optional(arg_from_json(j_.at(2)));
   std::vector<Arg> args;
-  auto args_json = j.at(3);
+  auto args_json = j_.at(3);
   std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &arg_from_json);
   std::vector<Arg> moduleCaptures;
-  auto moduleCaptures_json = j.at(4);
+  auto moduleCaptures_json = j_.at(4);
   std::transform(moduleCaptures_json.begin(), moduleCaptures_json.end(), std::back_inserter(moduleCaptures), &arg_from_json);
   std::vector<Arg> termCaptures;
-  auto termCaptures_json = j.at(5);
+  auto termCaptures_json = j_.at(5);
   std::transform(termCaptures_json.begin(), termCaptures_json.end(), std::back_inserter(termCaptures), &arg_from_json);
-  auto rtn =  Type::any_from_json(j.at(6));
+  auto rtn =  Type::any_from_json(j_.at(6));
   std::vector<Stmt::Any> body;
-  auto body_json = j.at(7);
+  auto body_json = j_.at(7);
   std::transform(body_json.begin(), body_json.end(), std::back_inserter(body), &Stmt::any_from_json);
   return {name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, body};
 }
 
-json function_to_json(const Function& x) { 
-  auto name =  sym_to_json(x.name);
-  auto tpeVars = x.tpeVars;
-  auto receiver = x.receiver ? arg_to_json(*x.receiver) : json{};
+json function_to_json(const Function& x_) { 
+  auto name =  sym_to_json(x_.name);
+  auto tpeVars = x_.tpeVars;
+  auto receiver = x_.receiver ? arg_to_json(*x_.receiver) : json{};
   std::vector<json> args;
-  std::transform(x.args.begin(), x.args.end(), std::back_inserter(args), &arg_to_json);
+  std::transform(x_.args.begin(), x_.args.end(), std::back_inserter(args), &arg_to_json);
   std::vector<json> moduleCaptures;
-  std::transform(x.moduleCaptures.begin(), x.moduleCaptures.end(), std::back_inserter(moduleCaptures), &arg_to_json);
+  std::transform(x_.moduleCaptures.begin(), x_.moduleCaptures.end(), std::back_inserter(moduleCaptures), &arg_to_json);
   std::vector<json> termCaptures;
-  std::transform(x.termCaptures.begin(), x.termCaptures.end(), std::back_inserter(termCaptures), &arg_to_json);
-  auto rtn =  Type::any_to_json(x.rtn);
+  std::transform(x_.termCaptures.begin(), x_.termCaptures.end(), std::back_inserter(termCaptures), &arg_to_json);
+  auto rtn =  Type::any_to_json(x_.rtn);
   std::vector<json> body;
-  std::transform(x.body.begin(), x.body.end(), std::back_inserter(body), &Stmt::any_to_json);
+  std::transform(x_.body.begin(), x_.body.end(), std::back_inserter(body), &Stmt::any_to_json);
   return json::array({name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, body});
 }
 
-Program program_from_json(const json& j) { 
-  auto entry =  function_from_json(j.at(0));
+Program program_from_json(const json& j_) { 
+  auto entry =  function_from_json(j_.at(0));
   std::vector<Function> functions;
-  auto functions_json = j.at(1);
+  auto functions_json = j_.at(1);
   std::transform(functions_json.begin(), functions_json.end(), std::back_inserter(functions), &function_from_json);
   std::vector<StructDef> defs;
-  auto defs_json = j.at(2);
+  auto defs_json = j_.at(2);
   std::transform(defs_json.begin(), defs_json.end(), std::back_inserter(defs), &structdef_from_json);
   return {entry, functions, defs};
 }
 
-json program_to_json(const Program& x) { 
-  auto entry =  function_to_json(x.entry);
+json program_to_json(const Program& x_) { 
+  auto entry =  function_to_json(x_.entry);
   std::vector<json> functions;
-  std::transform(x.functions.begin(), x.functions.end(), std::back_inserter(functions), &function_to_json);
+  std::transform(x_.functions.begin(), x_.functions.end(), std::back_inserter(functions), &function_to_json);
   std::vector<json> defs;
-  std::transform(x.defs.begin(), x.defs.end(), std::back_inserter(defs), &structdef_to_json);
+  std::transform(x_.defs.begin(), x_.defs.end(), std::back_inserter(defs), &structdef_to_json);
   return json::array({entry, functions, defs});
 }
-json hashed_from_json(const json& j) { 
-  auto hash = j.at(0).get<std::string>();
-  auto data = j.at(1);
-  if(hash != "5a5fb8263400635b61d0ffe705df50b8") {
-   throw std::runtime_error("Expecting ADT hash to be 5a5fb8263400635b61d0ffe705df50b8, but was " + hash);
+json hashed_from_json(const json& j_) { 
+  auto hash_ = j_.at(0).get<std::string>();
+  auto data_ = j_.at(1);
+  if(hash_ != "26ca8dbd95d734899d3eca0c01fcfa3d") {
+   throw std::runtime_error("Expecting ADT hash to be 26ca8dbd95d734899d3eca0c01fcfa3d, but was " + hash_);
   }
-  return data;
+  return data_;
 }
 
-json hashed_to_json(const json& x) { 
-  return json::array({"5a5fb8263400635b61d0ffe705df50b8", x});
+json hashed_to_json(const json& x_) { 
+  return json::array({"26ca8dbd95d734899d3eca0c01fcfa3d", x_});
 }
 } // namespace polyregion::polyast

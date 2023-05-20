@@ -86,23 +86,41 @@ object VerifyPass {
             (c0, n.tpe)
           }
           ._1
-      case p.Term.Poison(_)      => c
-      case p.Term.UnitConst      => c
-      case p.Term.BoolConst(_)   => c
-      case p.Term.ByteConst(_)   => c
-      case p.Term.CharConst(_)   => c
-      case p.Term.ShortConst(_)  => c
-      case p.Term.IntConst(_)    => c
-      case p.Term.LongConst(_)   => c
-      case p.Term.FloatConst(_)  => c
-      case p.Term.DoubleConst(_) => c
+      case _ => c
     }
 
     def validateExpr(c: Context, e: p.Expr): Context = e match {
-      case p.Expr.NullaryIntrinsic(kind, rtn)    => c
-      case p.Expr.UnaryIntrinsic(lhs, kind, rtn) => validateTerm(c, lhs)
-      case p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn) =>
-        (validateTerm(_: Context, lhs)).andThen(validateTerm(_, rhs))(c)
+      // case p.Expr.NullaryIntrinsic(kind, rtn)    => c
+      // case p.Expr.UnaryIntrinsic(lhs, kind, rtn) => validateTerm(c, lhs)
+      // case p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn) =>
+      //   (validateTerm(_: Context, lhs)).andThen(validateTerm(_, rhs))(c)
+      case p.Expr.SpecOp(op) =>
+        val c0 = op.terms.foldLeft(c)(validateTerm(_, _))
+        op.overloads.filter { o =>
+          op.terms.map(_.tpe).zip(o.args).forall(_ == _) && op.tpe == o.rtn
+        } match {
+          case Nil      => c0 ~ s"No matching overload for intrinsic ${op}"
+          case x :: Nil => c0
+          case xs       => c0 ~ s"Multiple matching overload for intrinsic ${op}:\n${xs}"
+        }
+      case p.Expr.IntrOp(op) =>
+        val c0 = op.terms.foldLeft(c)(validateTerm(_, _))
+        op.overloads.filter { o =>
+          op.terms.map(_.tpe).zip(o.args).forall(_ == _) && op.tpe == o.rtn
+        } match {
+          case Nil      => c0 ~ s"No matching overload for intrinsic ${op}"
+          case x :: Nil => c0
+          case xs       => c0 ~ s"Multiple matching overload for intrinsic ${op}:\n${xs}"
+        }
+      case p.Expr.MathOp(op) =>
+        val c0 = op.terms.foldLeft(c)(validateTerm(_, _))
+        op.overloads.filter { o =>
+          op.terms.map(_.tpe).zip(o.args).forall(_ == _) && op.tpe == o.rtn
+        } match {
+          case Nil      => c0 ~ s"No matching overload for intrinsic ${op}"
+          case x :: Nil => c0
+          case xs       => c0 ~ s"Multiple matching overload for intrinsic ${op}:\n${xs}"
+        }
       case p.Expr.Cast(from, as) =>
         val c0 = validateTerm(c, from)
         (from.tpe, as) match {
@@ -161,7 +179,9 @@ object VerifyPass {
       case Nil => List("Function does not contain any statement") // Not legal even for a unit function
       case xs  =>
         // Use the function args as starting names
-        val initialNames = Context((f.receiver.toList ++ f.args ++ f.moduleCaptures ++ f.termCaptures).map(_.named).toSet)
+        val initialNames = Context(
+          (f.receiver.toList ++ f.args ++ f.moduleCaptures ++ f.termCaptures).map(_.named).toSet
+        )
         xs.foldLeft(initialNames)(validateStmt(_, _)).errors
     }
 

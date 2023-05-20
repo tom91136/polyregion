@@ -96,7 +96,7 @@ object Traversal {
             case _         => (a: A) => None
           }
         )
-      case s: Mirror.SumOf[A] => sum[A, B](s, summonAll[m.MirroredElemTypes, B].toArray)
+      case s: Mirror.SumOf[A] => sum[A, B](s, summonAll[s.MirroredElemTypes, B].toArray)
     }
 
   extension [A](a: A) {

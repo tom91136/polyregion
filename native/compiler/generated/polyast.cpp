@@ -84,86 +84,104 @@ bool Type::operator==(const Type::Base &l, const Type::Base &r) {
 }
 TypeKind::Any Type::kind(const Type::Any& x){ return select<&Type::Base::kind>(x); }
 
-Type::Float::Float() noexcept : Type::Base(TypeKind::Fractional()) {}
-std::ostream &Type::operator<<(std::ostream &os, const Type::Float &x) {
-  os << "Float(";
+Type::Float16::Float16() noexcept : Type::Base(TypeKind::Fractional()) {}
+std::ostream &Type::operator<<(std::ostream &os, const Type::Float16 &x) {
+  os << "Float16(";
   os << ')';
   return os;
 }
-bool Type::operator==(const Type::Float &, const Type::Float &) { return true; }
-Type::Float::operator Type::Any() const { return std::make_shared<Float>(*this); }
+bool Type::operator==(const Type::Float16 &, const Type::Float16 &) { return true; }
+Type::Float16::operator Type::Any() const { return std::make_shared<Float16>(*this); }
 
-Type::Double::Double() noexcept : Type::Base(TypeKind::Fractional()) {}
-std::ostream &Type::operator<<(std::ostream &os, const Type::Double &x) {
-  os << "Double(";
+Type::Float32::Float32() noexcept : Type::Base(TypeKind::Fractional()) {}
+std::ostream &Type::operator<<(std::ostream &os, const Type::Float32 &x) {
+  os << "Float32(";
   os << ')';
   return os;
 }
-bool Type::operator==(const Type::Double &, const Type::Double &) { return true; }
-Type::Double::operator Type::Any() const { return std::make_shared<Double>(*this); }
+bool Type::operator==(const Type::Float32 &, const Type::Float32 &) { return true; }
+Type::Float32::operator Type::Any() const { return std::make_shared<Float32>(*this); }
 
-Type::Bool::Bool() noexcept : Type::Base(TypeKind::Integral()) {}
-std::ostream &Type::operator<<(std::ostream &os, const Type::Bool &x) {
-  os << "Bool(";
+Type::Float64::Float64() noexcept : Type::Base(TypeKind::Fractional()) {}
+std::ostream &Type::operator<<(std::ostream &os, const Type::Float64 &x) {
+  os << "Float64(";
   os << ')';
   return os;
 }
-bool Type::operator==(const Type::Bool &, const Type::Bool &) { return true; }
-Type::Bool::operator Type::Any() const { return std::make_shared<Bool>(*this); }
+bool Type::operator==(const Type::Float64 &, const Type::Float64 &) { return true; }
+Type::Float64::operator Type::Any() const { return std::make_shared<Float64>(*this); }
 
-Type::Byte::Byte() noexcept : Type::Base(TypeKind::Integral()) {}
-std::ostream &Type::operator<<(std::ostream &os, const Type::Byte &x) {
-  os << "Byte(";
+Type::IntU8::IntU8() noexcept : Type::Base(TypeKind::Integral()) {}
+std::ostream &Type::operator<<(std::ostream &os, const Type::IntU8 &x) {
+  os << "IntU8(";
   os << ')';
   return os;
 }
-bool Type::operator==(const Type::Byte &, const Type::Byte &) { return true; }
-Type::Byte::operator Type::Any() const { return std::make_shared<Byte>(*this); }
+bool Type::operator==(const Type::IntU8 &, const Type::IntU8 &) { return true; }
+Type::IntU8::operator Type::Any() const { return std::make_shared<IntU8>(*this); }
 
-Type::Char::Char() noexcept : Type::Base(TypeKind::Integral()) {}
-std::ostream &Type::operator<<(std::ostream &os, const Type::Char &x) {
-  os << "Char(";
+Type::IntU16::IntU16() noexcept : Type::Base(TypeKind::Integral()) {}
+std::ostream &Type::operator<<(std::ostream &os, const Type::IntU16 &x) {
+  os << "IntU16(";
   os << ')';
   return os;
 }
-bool Type::operator==(const Type::Char &, const Type::Char &) { return true; }
-Type::Char::operator Type::Any() const { return std::make_shared<Char>(*this); }
+bool Type::operator==(const Type::IntU16 &, const Type::IntU16 &) { return true; }
+Type::IntU16::operator Type::Any() const { return std::make_shared<IntU16>(*this); }
 
-Type::Short::Short() noexcept : Type::Base(TypeKind::Integral()) {}
-std::ostream &Type::operator<<(std::ostream &os, const Type::Short &x) {
-  os << "Short(";
+Type::IntU32::IntU32() noexcept : Type::Base(TypeKind::Integral()) {}
+std::ostream &Type::operator<<(std::ostream &os, const Type::IntU32 &x) {
+  os << "IntU32(";
   os << ')';
   return os;
 }
-bool Type::operator==(const Type::Short &, const Type::Short &) { return true; }
-Type::Short::operator Type::Any() const { return std::make_shared<Short>(*this); }
+bool Type::operator==(const Type::IntU32 &, const Type::IntU32 &) { return true; }
+Type::IntU32::operator Type::Any() const { return std::make_shared<IntU32>(*this); }
 
-Type::Int::Int() noexcept : Type::Base(TypeKind::Integral()) {}
-std::ostream &Type::operator<<(std::ostream &os, const Type::Int &x) {
-  os << "Int(";
+Type::IntU64::IntU64() noexcept : Type::Base(TypeKind::Integral()) {}
+std::ostream &Type::operator<<(std::ostream &os, const Type::IntU64 &x) {
+  os << "IntU64(";
   os << ')';
   return os;
 }
-bool Type::operator==(const Type::Int &, const Type::Int &) { return true; }
-Type::Int::operator Type::Any() const { return std::make_shared<Int>(*this); }
+bool Type::operator==(const Type::IntU64 &, const Type::IntU64 &) { return true; }
+Type::IntU64::operator Type::Any() const { return std::make_shared<IntU64>(*this); }
 
-Type::Long::Long() noexcept : Type::Base(TypeKind::Integral()) {}
-std::ostream &Type::operator<<(std::ostream &os, const Type::Long &x) {
-  os << "Long(";
+Type::IntS8::IntS8() noexcept : Type::Base(TypeKind::Integral()) {}
+std::ostream &Type::operator<<(std::ostream &os, const Type::IntS8 &x) {
+  os << "IntS8(";
   os << ')';
   return os;
 }
-bool Type::operator==(const Type::Long &, const Type::Long &) { return true; }
-Type::Long::operator Type::Any() const { return std::make_shared<Long>(*this); }
+bool Type::operator==(const Type::IntS8 &, const Type::IntS8 &) { return true; }
+Type::IntS8::operator Type::Any() const { return std::make_shared<IntS8>(*this); }
 
-Type::Unit::Unit() noexcept : Type::Base(TypeKind::None()) {}
-std::ostream &Type::operator<<(std::ostream &os, const Type::Unit &x) {
-  os << "Unit(";
+Type::IntS16::IntS16() noexcept : Type::Base(TypeKind::Integral()) {}
+std::ostream &Type::operator<<(std::ostream &os, const Type::IntS16 &x) {
+  os << "IntS16(";
   os << ')';
   return os;
 }
-bool Type::operator==(const Type::Unit &, const Type::Unit &) { return true; }
-Type::Unit::operator Type::Any() const { return std::make_shared<Unit>(*this); }
+bool Type::operator==(const Type::IntS16 &, const Type::IntS16 &) { return true; }
+Type::IntS16::operator Type::Any() const { return std::make_shared<IntS16>(*this); }
+
+Type::IntS32::IntS32() noexcept : Type::Base(TypeKind::Integral()) {}
+std::ostream &Type::operator<<(std::ostream &os, const Type::IntS32 &x) {
+  os << "IntS32(";
+  os << ')';
+  return os;
+}
+bool Type::operator==(const Type::IntS32 &, const Type::IntS32 &) { return true; }
+Type::IntS32::operator Type::Any() const { return std::make_shared<IntS32>(*this); }
+
+Type::IntS64::IntS64() noexcept : Type::Base(TypeKind::Integral()) {}
+std::ostream &Type::operator<<(std::ostream &os, const Type::IntS64 &x) {
+  os << "IntS64(";
+  os << ')';
+  return os;
+}
+bool Type::operator==(const Type::IntS64 &, const Type::IntS64 &) { return true; }
+Type::IntS64::operator Type::Any() const { return std::make_shared<IntS64>(*this); }
 
 Type::Nothing::Nothing() noexcept : Type::Base(TypeKind::None()) {}
 std::ostream &Type::operator<<(std::ostream &os, const Type::Nothing &x) {
@@ -173,6 +191,24 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Nothing &x) {
 }
 bool Type::operator==(const Type::Nothing &, const Type::Nothing &) { return true; }
 Type::Nothing::operator Type::Any() const { return std::make_shared<Nothing>(*this); }
+
+Type::Unit0::Unit0() noexcept : Type::Base(TypeKind::None()) {}
+std::ostream &Type::operator<<(std::ostream &os, const Type::Unit0 &x) {
+  os << "Unit0(";
+  os << ')';
+  return os;
+}
+bool Type::operator==(const Type::Unit0 &, const Type::Unit0 &) { return true; }
+Type::Unit0::operator Type::Any() const { return std::make_shared<Unit0>(*this); }
+
+Type::Bool1::Bool1() noexcept : Type::Base(TypeKind::Integral()) {}
+std::ostream &Type::operator<<(std::ostream &os, const Type::Bool1 &x) {
+  os << "Bool1(";
+  os << ')';
+  return os;
+}
+bool Type::operator==(const Type::Bool1 &, const Type::Bool1 &) { return true; }
+Type::Bool1::operator Type::Any() const { return std::make_shared<Bool1>(*this); }
 
 Type::Struct::Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args, std::vector<Sym> parents) noexcept : Type::Base(TypeKind::Ref()), name(std::move(name)), tpeVars(std::move(tpeVars)), args(std::move(args)), parents(std::move(parents)) {}
 std::ostream &Type::operator<<(std::ostream &os, const Type::Struct &x) {
@@ -319,770 +355,158 @@ bool Term::operator==(const Term::Poison &l, const Term::Poison &r) {
 }
 Term::Poison::operator Term::Any() const { return std::make_shared<Poison>(*this); }
 
-Term::UnitConst::UnitConst() noexcept : Term::Base(Type::Unit()) {}
-std::ostream &Term::operator<<(std::ostream &os, const Term::UnitConst &x) {
-  os << "UnitConst(";
-  os << ')';
-  return os;
-}
-bool Term::operator==(const Term::UnitConst &, const Term::UnitConst &) { return true; }
-Term::UnitConst::operator Term::Any() const { return std::make_shared<UnitConst>(*this); }
-
-Term::BoolConst::BoolConst(bool value) noexcept : Term::Base(Type::Bool()), value(value) {}
-std::ostream &Term::operator<<(std::ostream &os, const Term::BoolConst &x) {
-  os << "BoolConst(";
+Term::Float16Const::Float16Const(float value) noexcept : Term::Base(Type::Float16()), value(value) {}
+std::ostream &Term::operator<<(std::ostream &os, const Term::Float16Const &x) {
+  os << "Float16Const(";
   os << x.value;
   os << ')';
   return os;
 }
-bool Term::operator==(const Term::BoolConst &l, const Term::BoolConst &r) { 
+bool Term::operator==(const Term::Float16Const &l, const Term::Float16Const &r) { 
   return l.value == r.value;
 }
-Term::BoolConst::operator Term::Any() const { return std::make_shared<BoolConst>(*this); }
+Term::Float16Const::operator Term::Any() const { return std::make_shared<Float16Const>(*this); }
 
-Term::ByteConst::ByteConst(int8_t value) noexcept : Term::Base(Type::Byte()), value(value) {}
-std::ostream &Term::operator<<(std::ostream &os, const Term::ByteConst &x) {
-  os << "ByteConst(";
+Term::Float32Const::Float32Const(float value) noexcept : Term::Base(Type::Float32()), value(value) {}
+std::ostream &Term::operator<<(std::ostream &os, const Term::Float32Const &x) {
+  os << "Float32Const(";
   os << x.value;
   os << ')';
   return os;
 }
-bool Term::operator==(const Term::ByteConst &l, const Term::ByteConst &r) { 
+bool Term::operator==(const Term::Float32Const &l, const Term::Float32Const &r) { 
   return l.value == r.value;
 }
-Term::ByteConst::operator Term::Any() const { return std::make_shared<ByteConst>(*this); }
+Term::Float32Const::operator Term::Any() const { return std::make_shared<Float32Const>(*this); }
 
-Term::CharConst::CharConst(uint16_t value) noexcept : Term::Base(Type::Char()), value(value) {}
-std::ostream &Term::operator<<(std::ostream &os, const Term::CharConst &x) {
-  os << "CharConst(";
+Term::Float64Const::Float64Const(double value) noexcept : Term::Base(Type::Float64()), value(value) {}
+std::ostream &Term::operator<<(std::ostream &os, const Term::Float64Const &x) {
+  os << "Float64Const(";
   os << x.value;
   os << ')';
   return os;
 }
-bool Term::operator==(const Term::CharConst &l, const Term::CharConst &r) { 
+bool Term::operator==(const Term::Float64Const &l, const Term::Float64Const &r) { 
   return l.value == r.value;
 }
-Term::CharConst::operator Term::Any() const { return std::make_shared<CharConst>(*this); }
+Term::Float64Const::operator Term::Any() const { return std::make_shared<Float64Const>(*this); }
 
-Term::ShortConst::ShortConst(int16_t value) noexcept : Term::Base(Type::Short()), value(value) {}
-std::ostream &Term::operator<<(std::ostream &os, const Term::ShortConst &x) {
-  os << "ShortConst(";
+Term::IntU8Const::IntU8Const(int8_t value) noexcept : Term::Base(Type::IntU8()), value(value) {}
+std::ostream &Term::operator<<(std::ostream &os, const Term::IntU8Const &x) {
+  os << "IntU8Const(";
   os << x.value;
   os << ')';
   return os;
 }
-bool Term::operator==(const Term::ShortConst &l, const Term::ShortConst &r) { 
+bool Term::operator==(const Term::IntU8Const &l, const Term::IntU8Const &r) { 
   return l.value == r.value;
 }
-Term::ShortConst::operator Term::Any() const { return std::make_shared<ShortConst>(*this); }
+Term::IntU8Const::operator Term::Any() const { return std::make_shared<IntU8Const>(*this); }
 
-Term::IntConst::IntConst(int32_t value) noexcept : Term::Base(Type::Int()), value(value) {}
-std::ostream &Term::operator<<(std::ostream &os, const Term::IntConst &x) {
-  os << "IntConst(";
+Term::IntU16Const::IntU16Const(uint16_t value) noexcept : Term::Base(Type::IntU16()), value(value) {}
+std::ostream &Term::operator<<(std::ostream &os, const Term::IntU16Const &x) {
+  os << "IntU16Const(";
   os << x.value;
   os << ')';
   return os;
 }
-bool Term::operator==(const Term::IntConst &l, const Term::IntConst &r) { 
+bool Term::operator==(const Term::IntU16Const &l, const Term::IntU16Const &r) { 
   return l.value == r.value;
 }
-Term::IntConst::operator Term::Any() const { return std::make_shared<IntConst>(*this); }
+Term::IntU16Const::operator Term::Any() const { return std::make_shared<IntU16Const>(*this); }
 
-Term::LongConst::LongConst(int64_t value) noexcept : Term::Base(Type::Long()), value(value) {}
-std::ostream &Term::operator<<(std::ostream &os, const Term::LongConst &x) {
-  os << "LongConst(";
+Term::IntU32Const::IntU32Const(int32_t value) noexcept : Term::Base(Type::IntU32()), value(value) {}
+std::ostream &Term::operator<<(std::ostream &os, const Term::IntU32Const &x) {
+  os << "IntU32Const(";
   os << x.value;
   os << ')';
   return os;
 }
-bool Term::operator==(const Term::LongConst &l, const Term::LongConst &r) { 
+bool Term::operator==(const Term::IntU32Const &l, const Term::IntU32Const &r) { 
   return l.value == r.value;
 }
-Term::LongConst::operator Term::Any() const { return std::make_shared<LongConst>(*this); }
+Term::IntU32Const::operator Term::Any() const { return std::make_shared<IntU32Const>(*this); }
 
-Term::FloatConst::FloatConst(float value) noexcept : Term::Base(Type::Float()), value(value) {}
-std::ostream &Term::operator<<(std::ostream &os, const Term::FloatConst &x) {
-  os << "FloatConst(";
+Term::IntU64Const::IntU64Const(int64_t value) noexcept : Term::Base(Type::IntU64()), value(value) {}
+std::ostream &Term::operator<<(std::ostream &os, const Term::IntU64Const &x) {
+  os << "IntU64Const(";
   os << x.value;
   os << ')';
   return os;
 }
-bool Term::operator==(const Term::FloatConst &l, const Term::FloatConst &r) { 
+bool Term::operator==(const Term::IntU64Const &l, const Term::IntU64Const &r) { 
   return l.value == r.value;
 }
-Term::FloatConst::operator Term::Any() const { return std::make_shared<FloatConst>(*this); }
+Term::IntU64Const::operator Term::Any() const { return std::make_shared<IntU64Const>(*this); }
 
-Term::DoubleConst::DoubleConst(double value) noexcept : Term::Base(Type::Double()), value(value) {}
-std::ostream &Term::operator<<(std::ostream &os, const Term::DoubleConst &x) {
-  os << "DoubleConst(";
+Term::IntS8Const::IntS8Const(int8_t value) noexcept : Term::Base(Type::IntS8()), value(value) {}
+std::ostream &Term::operator<<(std::ostream &os, const Term::IntS8Const &x) {
+  os << "IntS8Const(";
   os << x.value;
   os << ')';
   return os;
 }
-bool Term::operator==(const Term::DoubleConst &l, const Term::DoubleConst &r) { 
+bool Term::operator==(const Term::IntS8Const &l, const Term::IntS8Const &r) { 
   return l.value == r.value;
 }
-Term::DoubleConst::operator Term::Any() const { return std::make_shared<DoubleConst>(*this); }
+Term::IntS8Const::operator Term::Any() const { return std::make_shared<IntS8Const>(*this); }
 
-NullaryIntrinsicKind::Base::Base() = default;
-std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::Any &x) {
-  std::visit([&os](auto &&arg) { os << *arg; }, x);
-  return os;
-}
-bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::Base &, const NullaryIntrinsicKind::Base &) { return true; }
-
-NullaryIntrinsicKind::GpuGlobalIdxX::GpuGlobalIdxX() noexcept : NullaryIntrinsicKind::Base() {}
-std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGlobalIdxX &x) {
-  os << "GpuGlobalIdxX(";
-  os << ')';
-  return os;
-}
-bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGlobalIdxX &, const NullaryIntrinsicKind::GpuGlobalIdxX &) { return true; }
-NullaryIntrinsicKind::GpuGlobalIdxX::operator NullaryIntrinsicKind::Any() const { return std::make_shared<GpuGlobalIdxX>(*this); }
-
-NullaryIntrinsicKind::GpuGlobalIdxY::GpuGlobalIdxY() noexcept : NullaryIntrinsicKind::Base() {}
-std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGlobalIdxY &x) {
-  os << "GpuGlobalIdxY(";
-  os << ')';
-  return os;
-}
-bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGlobalIdxY &, const NullaryIntrinsicKind::GpuGlobalIdxY &) { return true; }
-NullaryIntrinsicKind::GpuGlobalIdxY::operator NullaryIntrinsicKind::Any() const { return std::make_shared<GpuGlobalIdxY>(*this); }
-
-NullaryIntrinsicKind::GpuGlobalIdxZ::GpuGlobalIdxZ() noexcept : NullaryIntrinsicKind::Base() {}
-std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGlobalIdxZ &x) {
-  os << "GpuGlobalIdxZ(";
-  os << ')';
-  return os;
-}
-bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGlobalIdxZ &, const NullaryIntrinsicKind::GpuGlobalIdxZ &) { return true; }
-NullaryIntrinsicKind::GpuGlobalIdxZ::operator NullaryIntrinsicKind::Any() const { return std::make_shared<GpuGlobalIdxZ>(*this); }
-
-NullaryIntrinsicKind::GpuGlobalSizeX::GpuGlobalSizeX() noexcept : NullaryIntrinsicKind::Base() {}
-std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGlobalSizeX &x) {
-  os << "GpuGlobalSizeX(";
-  os << ')';
-  return os;
-}
-bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGlobalSizeX &, const NullaryIntrinsicKind::GpuGlobalSizeX &) { return true; }
-NullaryIntrinsicKind::GpuGlobalSizeX::operator NullaryIntrinsicKind::Any() const { return std::make_shared<GpuGlobalSizeX>(*this); }
-
-NullaryIntrinsicKind::GpuGlobalSizeY::GpuGlobalSizeY() noexcept : NullaryIntrinsicKind::Base() {}
-std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGlobalSizeY &x) {
-  os << "GpuGlobalSizeY(";
-  os << ')';
-  return os;
-}
-bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGlobalSizeY &, const NullaryIntrinsicKind::GpuGlobalSizeY &) { return true; }
-NullaryIntrinsicKind::GpuGlobalSizeY::operator NullaryIntrinsicKind::Any() const { return std::make_shared<GpuGlobalSizeY>(*this); }
-
-NullaryIntrinsicKind::GpuGlobalSizeZ::GpuGlobalSizeZ() noexcept : NullaryIntrinsicKind::Base() {}
-std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGlobalSizeZ &x) {
-  os << "GpuGlobalSizeZ(";
-  os << ')';
-  return os;
-}
-bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGlobalSizeZ &, const NullaryIntrinsicKind::GpuGlobalSizeZ &) { return true; }
-NullaryIntrinsicKind::GpuGlobalSizeZ::operator NullaryIntrinsicKind::Any() const { return std::make_shared<GpuGlobalSizeZ>(*this); }
-
-NullaryIntrinsicKind::GpuGroupIdxX::GpuGroupIdxX() noexcept : NullaryIntrinsicKind::Base() {}
-std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupIdxX &x) {
-  os << "GpuGroupIdxX(";
-  os << ')';
-  return os;
-}
-bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupIdxX &, const NullaryIntrinsicKind::GpuGroupIdxX &) { return true; }
-NullaryIntrinsicKind::GpuGroupIdxX::operator NullaryIntrinsicKind::Any() const { return std::make_shared<GpuGroupIdxX>(*this); }
-
-NullaryIntrinsicKind::GpuGroupIdxY::GpuGroupIdxY() noexcept : NullaryIntrinsicKind::Base() {}
-std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupIdxY &x) {
-  os << "GpuGroupIdxY(";
-  os << ')';
-  return os;
-}
-bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupIdxY &, const NullaryIntrinsicKind::GpuGroupIdxY &) { return true; }
-NullaryIntrinsicKind::GpuGroupIdxY::operator NullaryIntrinsicKind::Any() const { return std::make_shared<GpuGroupIdxY>(*this); }
-
-NullaryIntrinsicKind::GpuGroupIdxZ::GpuGroupIdxZ() noexcept : NullaryIntrinsicKind::Base() {}
-std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupIdxZ &x) {
-  os << "GpuGroupIdxZ(";
-  os << ')';
-  return os;
-}
-bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupIdxZ &, const NullaryIntrinsicKind::GpuGroupIdxZ &) { return true; }
-NullaryIntrinsicKind::GpuGroupIdxZ::operator NullaryIntrinsicKind::Any() const { return std::make_shared<GpuGroupIdxZ>(*this); }
-
-NullaryIntrinsicKind::GpuGroupSizeX::GpuGroupSizeX() noexcept : NullaryIntrinsicKind::Base() {}
-std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupSizeX &x) {
-  os << "GpuGroupSizeX(";
-  os << ')';
-  return os;
-}
-bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupSizeX &, const NullaryIntrinsicKind::GpuGroupSizeX &) { return true; }
-NullaryIntrinsicKind::GpuGroupSizeX::operator NullaryIntrinsicKind::Any() const { return std::make_shared<GpuGroupSizeX>(*this); }
-
-NullaryIntrinsicKind::GpuGroupSizeY::GpuGroupSizeY() noexcept : NullaryIntrinsicKind::Base() {}
-std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupSizeY &x) {
-  os << "GpuGroupSizeY(";
-  os << ')';
-  return os;
-}
-bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupSizeY &, const NullaryIntrinsicKind::GpuGroupSizeY &) { return true; }
-NullaryIntrinsicKind::GpuGroupSizeY::operator NullaryIntrinsicKind::Any() const { return std::make_shared<GpuGroupSizeY>(*this); }
-
-NullaryIntrinsicKind::GpuGroupSizeZ::GpuGroupSizeZ() noexcept : NullaryIntrinsicKind::Base() {}
-std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupSizeZ &x) {
-  os << "GpuGroupSizeZ(";
-  os << ')';
-  return os;
-}
-bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupSizeZ &, const NullaryIntrinsicKind::GpuGroupSizeZ &) { return true; }
-NullaryIntrinsicKind::GpuGroupSizeZ::operator NullaryIntrinsicKind::Any() const { return std::make_shared<GpuGroupSizeZ>(*this); }
-
-NullaryIntrinsicKind::GpuLocalIdxX::GpuLocalIdxX() noexcept : NullaryIntrinsicKind::Base() {}
-std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuLocalIdxX &x) {
-  os << "GpuLocalIdxX(";
-  os << ')';
-  return os;
-}
-bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuLocalIdxX &, const NullaryIntrinsicKind::GpuLocalIdxX &) { return true; }
-NullaryIntrinsicKind::GpuLocalIdxX::operator NullaryIntrinsicKind::Any() const { return std::make_shared<GpuLocalIdxX>(*this); }
-
-NullaryIntrinsicKind::GpuLocalIdxY::GpuLocalIdxY() noexcept : NullaryIntrinsicKind::Base() {}
-std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuLocalIdxY &x) {
-  os << "GpuLocalIdxY(";
-  os << ')';
-  return os;
-}
-bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuLocalIdxY &, const NullaryIntrinsicKind::GpuLocalIdxY &) { return true; }
-NullaryIntrinsicKind::GpuLocalIdxY::operator NullaryIntrinsicKind::Any() const { return std::make_shared<GpuLocalIdxY>(*this); }
-
-NullaryIntrinsicKind::GpuLocalIdxZ::GpuLocalIdxZ() noexcept : NullaryIntrinsicKind::Base() {}
-std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuLocalIdxZ &x) {
-  os << "GpuLocalIdxZ(";
-  os << ')';
-  return os;
-}
-bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuLocalIdxZ &, const NullaryIntrinsicKind::GpuLocalIdxZ &) { return true; }
-NullaryIntrinsicKind::GpuLocalIdxZ::operator NullaryIntrinsicKind::Any() const { return std::make_shared<GpuLocalIdxZ>(*this); }
-
-NullaryIntrinsicKind::GpuLocalSizeX::GpuLocalSizeX() noexcept : NullaryIntrinsicKind::Base() {}
-std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuLocalSizeX &x) {
-  os << "GpuLocalSizeX(";
-  os << ')';
-  return os;
-}
-bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuLocalSizeX &, const NullaryIntrinsicKind::GpuLocalSizeX &) { return true; }
-NullaryIntrinsicKind::GpuLocalSizeX::operator NullaryIntrinsicKind::Any() const { return std::make_shared<GpuLocalSizeX>(*this); }
-
-NullaryIntrinsicKind::GpuLocalSizeY::GpuLocalSizeY() noexcept : NullaryIntrinsicKind::Base() {}
-std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuLocalSizeY &x) {
-  os << "GpuLocalSizeY(";
-  os << ')';
-  return os;
-}
-bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuLocalSizeY &, const NullaryIntrinsicKind::GpuLocalSizeY &) { return true; }
-NullaryIntrinsicKind::GpuLocalSizeY::operator NullaryIntrinsicKind::Any() const { return std::make_shared<GpuLocalSizeY>(*this); }
-
-NullaryIntrinsicKind::GpuLocalSizeZ::GpuLocalSizeZ() noexcept : NullaryIntrinsicKind::Base() {}
-std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuLocalSizeZ &x) {
-  os << "GpuLocalSizeZ(";
-  os << ')';
-  return os;
-}
-bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuLocalSizeZ &, const NullaryIntrinsicKind::GpuLocalSizeZ &) { return true; }
-NullaryIntrinsicKind::GpuLocalSizeZ::operator NullaryIntrinsicKind::Any() const { return std::make_shared<GpuLocalSizeZ>(*this); }
-
-NullaryIntrinsicKind::GpuGroupBarrier::GpuGroupBarrier() noexcept : NullaryIntrinsicKind::Base() {}
-std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupBarrier &x) {
-  os << "GpuGroupBarrier(";
-  os << ')';
-  return os;
-}
-bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupBarrier &, const NullaryIntrinsicKind::GpuGroupBarrier &) { return true; }
-NullaryIntrinsicKind::GpuGroupBarrier::operator NullaryIntrinsicKind::Any() const { return std::make_shared<GpuGroupBarrier>(*this); }
-
-NullaryIntrinsicKind::GpuGroupFence::GpuGroupFence() noexcept : NullaryIntrinsicKind::Base() {}
-std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupFence &x) {
-  os << "GpuGroupFence(";
-  os << ')';
-  return os;
-}
-bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::GpuGroupFence &, const NullaryIntrinsicKind::GpuGroupFence &) { return true; }
-NullaryIntrinsicKind::GpuGroupFence::operator NullaryIntrinsicKind::Any() const { return std::make_shared<GpuGroupFence>(*this); }
-
-NullaryIntrinsicKind::Assert::Assert() noexcept : NullaryIntrinsicKind::Base() {}
-std::ostream &NullaryIntrinsicKind::operator<<(std::ostream &os, const NullaryIntrinsicKind::Assert &x) {
-  os << "Assert(";
-  os << ')';
-  return os;
-}
-bool NullaryIntrinsicKind::operator==(const NullaryIntrinsicKind::Assert &, const NullaryIntrinsicKind::Assert &) { return true; }
-NullaryIntrinsicKind::Assert::operator NullaryIntrinsicKind::Any() const { return std::make_shared<Assert>(*this); }
-
-UnaryIntrinsicKind::Base::Base() = default;
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Any &x) {
-  std::visit([&os](auto &&arg) { os << *arg; }, x);
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Base &, const UnaryIntrinsicKind::Base &) { return true; }
-
-UnaryIntrinsicKind::Sin::Sin() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Sin &x) {
-  os << "Sin(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Sin &, const UnaryIntrinsicKind::Sin &) { return true; }
-UnaryIntrinsicKind::Sin::operator UnaryIntrinsicKind::Any() const { return std::make_shared<Sin>(*this); }
-
-UnaryIntrinsicKind::Cos::Cos() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Cos &x) {
-  os << "Cos(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Cos &, const UnaryIntrinsicKind::Cos &) { return true; }
-UnaryIntrinsicKind::Cos::operator UnaryIntrinsicKind::Any() const { return std::make_shared<Cos>(*this); }
-
-UnaryIntrinsicKind::Tan::Tan() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Tan &x) {
-  os << "Tan(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Tan &, const UnaryIntrinsicKind::Tan &) { return true; }
-UnaryIntrinsicKind::Tan::operator UnaryIntrinsicKind::Any() const { return std::make_shared<Tan>(*this); }
-
-UnaryIntrinsicKind::Asin::Asin() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Asin &x) {
-  os << "Asin(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Asin &, const UnaryIntrinsicKind::Asin &) { return true; }
-UnaryIntrinsicKind::Asin::operator UnaryIntrinsicKind::Any() const { return std::make_shared<Asin>(*this); }
-
-UnaryIntrinsicKind::Acos::Acos() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Acos &x) {
-  os << "Acos(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Acos &, const UnaryIntrinsicKind::Acos &) { return true; }
-UnaryIntrinsicKind::Acos::operator UnaryIntrinsicKind::Any() const { return std::make_shared<Acos>(*this); }
-
-UnaryIntrinsicKind::Atan::Atan() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Atan &x) {
-  os << "Atan(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Atan &, const UnaryIntrinsicKind::Atan &) { return true; }
-UnaryIntrinsicKind::Atan::operator UnaryIntrinsicKind::Any() const { return std::make_shared<Atan>(*this); }
-
-UnaryIntrinsicKind::Sinh::Sinh() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Sinh &x) {
-  os << "Sinh(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Sinh &, const UnaryIntrinsicKind::Sinh &) { return true; }
-UnaryIntrinsicKind::Sinh::operator UnaryIntrinsicKind::Any() const { return std::make_shared<Sinh>(*this); }
-
-UnaryIntrinsicKind::Cosh::Cosh() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Cosh &x) {
-  os << "Cosh(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Cosh &, const UnaryIntrinsicKind::Cosh &) { return true; }
-UnaryIntrinsicKind::Cosh::operator UnaryIntrinsicKind::Any() const { return std::make_shared<Cosh>(*this); }
-
-UnaryIntrinsicKind::Tanh::Tanh() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Tanh &x) {
-  os << "Tanh(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Tanh &, const UnaryIntrinsicKind::Tanh &) { return true; }
-UnaryIntrinsicKind::Tanh::operator UnaryIntrinsicKind::Any() const { return std::make_shared<Tanh>(*this); }
-
-UnaryIntrinsicKind::Signum::Signum() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Signum &x) {
-  os << "Signum(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Signum &, const UnaryIntrinsicKind::Signum &) { return true; }
-UnaryIntrinsicKind::Signum::operator UnaryIntrinsicKind::Any() const { return std::make_shared<Signum>(*this); }
-
-UnaryIntrinsicKind::Abs::Abs() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Abs &x) {
-  os << "Abs(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Abs &, const UnaryIntrinsicKind::Abs &) { return true; }
-UnaryIntrinsicKind::Abs::operator UnaryIntrinsicKind::Any() const { return std::make_shared<Abs>(*this); }
-
-UnaryIntrinsicKind::Round::Round() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Round &x) {
-  os << "Round(";
+Term::IntS16Const::IntS16Const(int16_t value) noexcept : Term::Base(Type::IntS16()), value(value) {}
+std::ostream &Term::operator<<(std::ostream &os, const Term::IntS16Const &x) {
+  os << "IntS16Const(";
+  os << x.value;
   os << ')';
   return os;
 }
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Round &, const UnaryIntrinsicKind::Round &) { return true; }
-UnaryIntrinsicKind::Round::operator UnaryIntrinsicKind::Any() const { return std::make_shared<Round>(*this); }
-
-UnaryIntrinsicKind::Ceil::Ceil() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Ceil &x) {
-  os << "Ceil(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Ceil &, const UnaryIntrinsicKind::Ceil &) { return true; }
-UnaryIntrinsicKind::Ceil::operator UnaryIntrinsicKind::Any() const { return std::make_shared<Ceil>(*this); }
-
-UnaryIntrinsicKind::Floor::Floor() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Floor &x) {
-  os << "Floor(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Floor &, const UnaryIntrinsicKind::Floor &) { return true; }
-UnaryIntrinsicKind::Floor::operator UnaryIntrinsicKind::Any() const { return std::make_shared<Floor>(*this); }
-
-UnaryIntrinsicKind::Rint::Rint() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Rint &x) {
-  os << "Rint(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Rint &, const UnaryIntrinsicKind::Rint &) { return true; }
-UnaryIntrinsicKind::Rint::operator UnaryIntrinsicKind::Any() const { return std::make_shared<Rint>(*this); }
-
-UnaryIntrinsicKind::Sqrt::Sqrt() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Sqrt &x) {
-  os << "Sqrt(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Sqrt &, const UnaryIntrinsicKind::Sqrt &) { return true; }
-UnaryIntrinsicKind::Sqrt::operator UnaryIntrinsicKind::Any() const { return std::make_shared<Sqrt>(*this); }
-
-UnaryIntrinsicKind::Cbrt::Cbrt() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Cbrt &x) {
-  os << "Cbrt(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Cbrt &, const UnaryIntrinsicKind::Cbrt &) { return true; }
-UnaryIntrinsicKind::Cbrt::operator UnaryIntrinsicKind::Any() const { return std::make_shared<Cbrt>(*this); }
-
-UnaryIntrinsicKind::Exp::Exp() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Exp &x) {
-  os << "Exp(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Exp &, const UnaryIntrinsicKind::Exp &) { return true; }
-UnaryIntrinsicKind::Exp::operator UnaryIntrinsicKind::Any() const { return std::make_shared<Exp>(*this); }
-
-UnaryIntrinsicKind::Expm1::Expm1() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Expm1 &x) {
-  os << "Expm1(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Expm1 &, const UnaryIntrinsicKind::Expm1 &) { return true; }
-UnaryIntrinsicKind::Expm1::operator UnaryIntrinsicKind::Any() const { return std::make_shared<Expm1>(*this); }
-
-UnaryIntrinsicKind::Log::Log() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Log &x) {
-  os << "Log(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Log &, const UnaryIntrinsicKind::Log &) { return true; }
-UnaryIntrinsicKind::Log::operator UnaryIntrinsicKind::Any() const { return std::make_shared<Log>(*this); }
-
-UnaryIntrinsicKind::Log1p::Log1p() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Log1p &x) {
-  os << "Log1p(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Log1p &, const UnaryIntrinsicKind::Log1p &) { return true; }
-UnaryIntrinsicKind::Log1p::operator UnaryIntrinsicKind::Any() const { return std::make_shared<Log1p>(*this); }
-
-UnaryIntrinsicKind::Log10::Log10() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Log10 &x) {
-  os << "Log10(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Log10 &, const UnaryIntrinsicKind::Log10 &) { return true; }
-UnaryIntrinsicKind::Log10::operator UnaryIntrinsicKind::Any() const { return std::make_shared<Log10>(*this); }
-
-UnaryIntrinsicKind::BNot::BNot() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::BNot &x) {
-  os << "BNot(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::BNot &, const UnaryIntrinsicKind::BNot &) { return true; }
-UnaryIntrinsicKind::BNot::operator UnaryIntrinsicKind::Any() const { return std::make_shared<BNot>(*this); }
-
-UnaryIntrinsicKind::Pos::Pos() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Pos &x) {
-  os << "Pos(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Pos &, const UnaryIntrinsicKind::Pos &) { return true; }
-UnaryIntrinsicKind::Pos::operator UnaryIntrinsicKind::Any() const { return std::make_shared<Pos>(*this); }
-
-UnaryIntrinsicKind::Neg::Neg() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::Neg &x) {
-  os << "Neg(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::Neg &, const UnaryIntrinsicKind::Neg &) { return true; }
-UnaryIntrinsicKind::Neg::operator UnaryIntrinsicKind::Any() const { return std::make_shared<Neg>(*this); }
-
-UnaryIntrinsicKind::LogicNot::LogicNot() noexcept : UnaryIntrinsicKind::Base() {}
-std::ostream &UnaryIntrinsicKind::operator<<(std::ostream &os, const UnaryIntrinsicKind::LogicNot &x) {
-  os << "LogicNot(";
-  os << ')';
-  return os;
-}
-bool UnaryIntrinsicKind::operator==(const UnaryIntrinsicKind::LogicNot &, const UnaryIntrinsicKind::LogicNot &) { return true; }
-UnaryIntrinsicKind::LogicNot::operator UnaryIntrinsicKind::Any() const { return std::make_shared<LogicNot>(*this); }
-
-BinaryIntrinsicKind::Base::Base() = default;
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Any &x) {
-  std::visit([&os](auto &&arg) { os << *arg; }, x);
-  return os;
-}
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Base &, const BinaryIntrinsicKind::Base &) { return true; }
-
-BinaryIntrinsicKind::Add::Add() noexcept : BinaryIntrinsicKind::Base() {}
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Add &x) {
-  os << "Add(";
-  os << ')';
-  return os;
-}
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Add &, const BinaryIntrinsicKind::Add &) { return true; }
-BinaryIntrinsicKind::Add::operator BinaryIntrinsicKind::Any() const { return std::make_shared<Add>(*this); }
-
-BinaryIntrinsicKind::Sub::Sub() noexcept : BinaryIntrinsicKind::Base() {}
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Sub &x) {
-  os << "Sub(";
-  os << ')';
-  return os;
-}
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Sub &, const BinaryIntrinsicKind::Sub &) { return true; }
-BinaryIntrinsicKind::Sub::operator BinaryIntrinsicKind::Any() const { return std::make_shared<Sub>(*this); }
-
-BinaryIntrinsicKind::Mul::Mul() noexcept : BinaryIntrinsicKind::Base() {}
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Mul &x) {
-  os << "Mul(";
-  os << ')';
-  return os;
-}
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Mul &, const BinaryIntrinsicKind::Mul &) { return true; }
-BinaryIntrinsicKind::Mul::operator BinaryIntrinsicKind::Any() const { return std::make_shared<Mul>(*this); }
-
-BinaryIntrinsicKind::Div::Div() noexcept : BinaryIntrinsicKind::Base() {}
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Div &x) {
-  os << "Div(";
-  os << ')';
-  return os;
-}
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Div &, const BinaryIntrinsicKind::Div &) { return true; }
-BinaryIntrinsicKind::Div::operator BinaryIntrinsicKind::Any() const { return std::make_shared<Div>(*this); }
-
-BinaryIntrinsicKind::Rem::Rem() noexcept : BinaryIntrinsicKind::Base() {}
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Rem &x) {
-  os << "Rem(";
-  os << ')';
-  return os;
-}
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Rem &, const BinaryIntrinsicKind::Rem &) { return true; }
-BinaryIntrinsicKind::Rem::operator BinaryIntrinsicKind::Any() const { return std::make_shared<Rem>(*this); }
-
-BinaryIntrinsicKind::Pow::Pow() noexcept : BinaryIntrinsicKind::Base() {}
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Pow &x) {
-  os << "Pow(";
-  os << ')';
-  return os;
-}
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Pow &, const BinaryIntrinsicKind::Pow &) { return true; }
-BinaryIntrinsicKind::Pow::operator BinaryIntrinsicKind::Any() const { return std::make_shared<Pow>(*this); }
-
-BinaryIntrinsicKind::Min::Min() noexcept : BinaryIntrinsicKind::Base() {}
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Min &x) {
-  os << "Min(";
-  os << ')';
-  return os;
-}
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Min &, const BinaryIntrinsicKind::Min &) { return true; }
-BinaryIntrinsicKind::Min::operator BinaryIntrinsicKind::Any() const { return std::make_shared<Min>(*this); }
-
-BinaryIntrinsicKind::Max::Max() noexcept : BinaryIntrinsicKind::Base() {}
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Max &x) {
-  os << "Max(";
-  os << ')';
-  return os;
-}
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Max &, const BinaryIntrinsicKind::Max &) { return true; }
-BinaryIntrinsicKind::Max::operator BinaryIntrinsicKind::Any() const { return std::make_shared<Max>(*this); }
-
-BinaryIntrinsicKind::Atan2::Atan2() noexcept : BinaryIntrinsicKind::Base() {}
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Atan2 &x) {
-  os << "Atan2(";
-  os << ')';
-  return os;
-}
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Atan2 &, const BinaryIntrinsicKind::Atan2 &) { return true; }
-BinaryIntrinsicKind::Atan2::operator BinaryIntrinsicKind::Any() const { return std::make_shared<Atan2>(*this); }
-
-BinaryIntrinsicKind::Hypot::Hypot() noexcept : BinaryIntrinsicKind::Base() {}
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::Hypot &x) {
-  os << "Hypot(";
-  os << ')';
-  return os;
-}
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::Hypot &, const BinaryIntrinsicKind::Hypot &) { return true; }
-BinaryIntrinsicKind::Hypot::operator BinaryIntrinsicKind::Any() const { return std::make_shared<Hypot>(*this); }
-
-BinaryIntrinsicKind::BAnd::BAnd() noexcept : BinaryIntrinsicKind::Base() {}
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::BAnd &x) {
-  os << "BAnd(";
-  os << ')';
-  return os;
-}
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::BAnd &, const BinaryIntrinsicKind::BAnd &) { return true; }
-BinaryIntrinsicKind::BAnd::operator BinaryIntrinsicKind::Any() const { return std::make_shared<BAnd>(*this); }
-
-BinaryIntrinsicKind::BOr::BOr() noexcept : BinaryIntrinsicKind::Base() {}
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::BOr &x) {
-  os << "BOr(";
-  os << ')';
-  return os;
-}
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::BOr &, const BinaryIntrinsicKind::BOr &) { return true; }
-BinaryIntrinsicKind::BOr::operator BinaryIntrinsicKind::Any() const { return std::make_shared<BOr>(*this); }
-
-BinaryIntrinsicKind::BXor::BXor() noexcept : BinaryIntrinsicKind::Base() {}
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::BXor &x) {
-  os << "BXor(";
-  os << ')';
-  return os;
-}
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::BXor &, const BinaryIntrinsicKind::BXor &) { return true; }
-BinaryIntrinsicKind::BXor::operator BinaryIntrinsicKind::Any() const { return std::make_shared<BXor>(*this); }
-
-BinaryIntrinsicKind::BSL::BSL() noexcept : BinaryIntrinsicKind::Base() {}
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::BSL &x) {
-  os << "BSL(";
-  os << ')';
-  return os;
-}
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::BSL &, const BinaryIntrinsicKind::BSL &) { return true; }
-BinaryIntrinsicKind::BSL::operator BinaryIntrinsicKind::Any() const { return std::make_shared<BSL>(*this); }
-
-BinaryIntrinsicKind::BSR::BSR() noexcept : BinaryIntrinsicKind::Base() {}
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::BSR &x) {
-  os << "BSR(";
-  os << ')';
-  return os;
+bool Term::operator==(const Term::IntS16Const &l, const Term::IntS16Const &r) { 
+  return l.value == r.value;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::BSR &, const BinaryIntrinsicKind::BSR &) { return true; }
-BinaryIntrinsicKind::BSR::operator BinaryIntrinsicKind::Any() const { return std::make_shared<BSR>(*this); }
+Term::IntS16Const::operator Term::Any() const { return std::make_shared<IntS16Const>(*this); }
 
-BinaryIntrinsicKind::BZSR::BZSR() noexcept : BinaryIntrinsicKind::Base() {}
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::BZSR &x) {
-  os << "BZSR(";
+Term::IntS32Const::IntS32Const(int32_t value) noexcept : Term::Base(Type::IntS32()), value(value) {}
+std::ostream &Term::operator<<(std::ostream &os, const Term::IntS32Const &x) {
+  os << "IntS32Const(";
+  os << x.value;
   os << ')';
   return os;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::BZSR &, const BinaryIntrinsicKind::BZSR &) { return true; }
-BinaryIntrinsicKind::BZSR::operator BinaryIntrinsicKind::Any() const { return std::make_shared<BZSR>(*this); }
-
-BinaryIntrinsicKind::LogicEq::LogicEq() noexcept : BinaryIntrinsicKind::Base() {}
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicEq &x) {
-  os << "LogicEq(";
-  os << ')';
-  return os;
-}
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicEq &, const BinaryIntrinsicKind::LogicEq &) { return true; }
-BinaryIntrinsicKind::LogicEq::operator BinaryIntrinsicKind::Any() const { return std::make_shared<LogicEq>(*this); }
-
-BinaryIntrinsicKind::LogicNeq::LogicNeq() noexcept : BinaryIntrinsicKind::Base() {}
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicNeq &x) {
-  os << "LogicNeq(";
-  os << ')';
-  return os;
-}
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicNeq &, const BinaryIntrinsicKind::LogicNeq &) { return true; }
-BinaryIntrinsicKind::LogicNeq::operator BinaryIntrinsicKind::Any() const { return std::make_shared<LogicNeq>(*this); }
-
-BinaryIntrinsicKind::LogicAnd::LogicAnd() noexcept : BinaryIntrinsicKind::Base() {}
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicAnd &x) {
-  os << "LogicAnd(";
-  os << ')';
-  return os;
+bool Term::operator==(const Term::IntS32Const &l, const Term::IntS32Const &r) { 
+  return l.value == r.value;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicAnd &, const BinaryIntrinsicKind::LogicAnd &) { return true; }
-BinaryIntrinsicKind::LogicAnd::operator BinaryIntrinsicKind::Any() const { return std::make_shared<LogicAnd>(*this); }
+Term::IntS32Const::operator Term::Any() const { return std::make_shared<IntS32Const>(*this); }
 
-BinaryIntrinsicKind::LogicOr::LogicOr() noexcept : BinaryIntrinsicKind::Base() {}
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicOr &x) {
-  os << "LogicOr(";
+Term::IntS64Const::IntS64Const(int64_t value) noexcept : Term::Base(Type::IntS64()), value(value) {}
+std::ostream &Term::operator<<(std::ostream &os, const Term::IntS64Const &x) {
+  os << "IntS64Const(";
+  os << x.value;
   os << ')';
   return os;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicOr &, const BinaryIntrinsicKind::LogicOr &) { return true; }
-BinaryIntrinsicKind::LogicOr::operator BinaryIntrinsicKind::Any() const { return std::make_shared<LogicOr>(*this); }
-
-BinaryIntrinsicKind::LogicLte::LogicLte() noexcept : BinaryIntrinsicKind::Base() {}
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicLte &x) {
-  os << "LogicLte(";
-  os << ')';
-  return os;
+bool Term::operator==(const Term::IntS64Const &l, const Term::IntS64Const &r) { 
+  return l.value == r.value;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicLte &, const BinaryIntrinsicKind::LogicLte &) { return true; }
-BinaryIntrinsicKind::LogicLte::operator BinaryIntrinsicKind::Any() const { return std::make_shared<LogicLte>(*this); }
+Term::IntS64Const::operator Term::Any() const { return std::make_shared<IntS64Const>(*this); }
 
-BinaryIntrinsicKind::LogicGte::LogicGte() noexcept : BinaryIntrinsicKind::Base() {}
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicGte &x) {
-  os << "LogicGte(";
+Term::Unit0Const::Unit0Const() noexcept : Term::Base(Type::Unit0()) {}
+std::ostream &Term::operator<<(std::ostream &os, const Term::Unit0Const &x) {
+  os << "Unit0Const(";
   os << ')';
   return os;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicGte &, const BinaryIntrinsicKind::LogicGte &) { return true; }
-BinaryIntrinsicKind::LogicGte::operator BinaryIntrinsicKind::Any() const { return std::make_shared<LogicGte>(*this); }
+bool Term::operator==(const Term::Unit0Const &, const Term::Unit0Const &) { return true; }
+Term::Unit0Const::operator Term::Any() const { return std::make_shared<Unit0Const>(*this); }
 
-BinaryIntrinsicKind::LogicLt::LogicLt() noexcept : BinaryIntrinsicKind::Base() {}
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicLt &x) {
-  os << "LogicLt(";
+Term::Bool1Const::Bool1Const(bool value) noexcept : Term::Base(Type::Bool1()), value(value) {}
+std::ostream &Term::operator<<(std::ostream &os, const Term::Bool1Const &x) {
+  os << "Bool1Const(";
+  os << x.value;
   os << ')';
   return os;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicLt &, const BinaryIntrinsicKind::LogicLt &) { return true; }
-BinaryIntrinsicKind::LogicLt::operator BinaryIntrinsicKind::Any() const { return std::make_shared<LogicLt>(*this); }
-
-BinaryIntrinsicKind::LogicGt::LogicGt() noexcept : BinaryIntrinsicKind::Base() {}
-std::ostream &BinaryIntrinsicKind::operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicGt &x) {
-  os << "LogicGt(";
-  os << ')';
-  return os;
+bool Term::operator==(const Term::Bool1Const &l, const Term::Bool1Const &r) { 
+  return l.value == r.value;
 }
-bool BinaryIntrinsicKind::operator==(const BinaryIntrinsicKind::LogicGt &, const BinaryIntrinsicKind::LogicGt &) { return true; }
-BinaryIntrinsicKind::LogicGt::operator BinaryIntrinsicKind::Any() const { return std::make_shared<LogicGt>(*this); }
+Term::Bool1Const::operator Term::Any() const { return std::make_shared<Bool1Const>(*this); }
 
 TypeSpace::Base::Base() = default;
 std::ostream &TypeSpace::operator<<(std::ostream &os, const TypeSpace::Any &x) {
@@ -1109,6 +533,925 @@ std::ostream &TypeSpace::operator<<(std::ostream &os, const TypeSpace::Local &x)
 bool TypeSpace::operator==(const TypeSpace::Local &, const TypeSpace::Local &) { return true; }
 TypeSpace::Local::operator TypeSpace::Any() const { return std::make_shared<Local>(*this); }
 
+Overload::Overload(std::vector<Type::Any> args, Type::Any rtn) noexcept : args(std::move(args)), rtn(std::move(rtn)) {}
+std::ostream &operator<<(std::ostream &os, const Overload &x) {
+  os << "Overload(";
+  os << '{';
+  if (!x.args.empty()) {
+    std::for_each(x.args.begin(), std::prev(x.args.end()), [&os](auto &&x) { os << x; os << ','; });
+    os << x.args.back();
+  }
+  os << '}';
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool operator==(const Overload &l, const Overload &r) { 
+  return std::equal(l.args.begin(), l.args.end(), r.args.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && *l.rtn == *r.rtn;
+}
+
+Spec::Base::Base(std::vector<Overload> overloads, std::vector<Term::Any> terms, Type::Any tpe) noexcept : overloads(std::move(overloads)), terms(std::move(terms)), tpe(std::move(tpe)) {}
+std::ostream &Spec::operator<<(std::ostream &os, const Spec::Any &x) {
+  std::visit([&os](auto &&arg) { os << *arg; }, x);
+  return os;
+}
+bool Spec::operator==(const Spec::Base &l, const Spec::Base &r) { 
+  return l.overloads == r.overloads && std::equal(l.terms.begin(), l.terms.end(), r.terms.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && *l.tpe == *r.tpe;
+}
+std::vector<Overload> Spec::overloads(const Spec::Any& x){ return select<&Spec::Base::overloads>(x); }
+std::vector<Term::Any> Spec::terms(const Spec::Any& x){ return select<&Spec::Base::terms>(x); }
+Type::Any Spec::tpe(const Spec::Any& x){ return select<&Spec::Base::tpe>(x); }
+
+Spec::Assert::Assert() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Nothing()) {}
+std::ostream &Spec::operator<<(std::ostream &os, const Spec::Assert &x) {
+  os << "Assert(";
+  os << ')';
+  return os;
+}
+bool Spec::operator==(const Spec::Assert &, const Spec::Assert &) { return true; }
+Spec::Assert::operator Spec::Any() const { return std::make_shared<Assert>(*this); }
+
+Spec::GpuBarrierGlobal::GpuBarrierGlobal() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Unit0()) {}
+std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuBarrierGlobal &x) {
+  os << "GpuBarrierGlobal(";
+  os << ')';
+  return os;
+}
+bool Spec::operator==(const Spec::GpuBarrierGlobal &, const Spec::GpuBarrierGlobal &) { return true; }
+Spec::GpuBarrierGlobal::operator Spec::Any() const { return std::make_shared<GpuBarrierGlobal>(*this); }
+
+Spec::GpuBarrierLocal::GpuBarrierLocal() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Unit0()) {}
+std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuBarrierLocal &x) {
+  os << "GpuBarrierLocal(";
+  os << ')';
+  return os;
+}
+bool Spec::operator==(const Spec::GpuBarrierLocal &, const Spec::GpuBarrierLocal &) { return true; }
+Spec::GpuBarrierLocal::operator Spec::Any() const { return std::make_shared<GpuBarrierLocal>(*this); }
+
+Spec::GpuBarrierAll::GpuBarrierAll() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Unit0()) {}
+std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuBarrierAll &x) {
+  os << "GpuBarrierAll(";
+  os << ')';
+  return os;
+}
+bool Spec::operator==(const Spec::GpuBarrierAll &, const Spec::GpuBarrierAll &) { return true; }
+Spec::GpuBarrierAll::operator Spec::Any() const { return std::make_shared<GpuBarrierAll>(*this); }
+
+Spec::GpuFenceGlobal::GpuFenceGlobal() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Unit0()) {}
+std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuFenceGlobal &x) {
+  os << "GpuFenceGlobal(";
+  os << ')';
+  return os;
+}
+bool Spec::operator==(const Spec::GpuFenceGlobal &, const Spec::GpuFenceGlobal &) { return true; }
+Spec::GpuFenceGlobal::operator Spec::Any() const { return std::make_shared<GpuFenceGlobal>(*this); }
+
+Spec::GpuFenceLocal::GpuFenceLocal() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Unit0()) {}
+std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuFenceLocal &x) {
+  os << "GpuFenceLocal(";
+  os << ')';
+  return os;
+}
+bool Spec::operator==(const Spec::GpuFenceLocal &, const Spec::GpuFenceLocal &) { return true; }
+Spec::GpuFenceLocal::operator Spec::Any() const { return std::make_shared<GpuFenceLocal>(*this); }
+
+Spec::GpuFenceAll::GpuFenceAll() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Unit0()) {}
+std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuFenceAll &x) {
+  os << "GpuFenceAll(";
+  os << ')';
+  return os;
+}
+bool Spec::operator==(const Spec::GpuFenceAll &, const Spec::GpuFenceAll &) { return true; }
+Spec::GpuFenceAll::operator Spec::Any() const { return std::make_shared<GpuFenceAll>(*this); }
+
+Spec::GpuGlobalIdx::GpuGlobalIdx(Term::Any dim) noexcept : Spec::Base({Overload({Type::IntU32()},Type::IntU32())}, {dim}, Type::IntU32()), dim(std::move(dim)) {}
+std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuGlobalIdx &x) {
+  os << "GpuGlobalIdx(";
+  os << x.dim;
+  os << ')';
+  return os;
+}
+bool Spec::operator==(const Spec::GpuGlobalIdx &l, const Spec::GpuGlobalIdx &r) { 
+  return *l.dim == *r.dim;
+}
+Spec::GpuGlobalIdx::operator Spec::Any() const { return std::make_shared<GpuGlobalIdx>(*this); }
+
+Spec::GpuGlobalSize::GpuGlobalSize(Term::Any dim) noexcept : Spec::Base({Overload({Type::IntU32()},Type::IntU32())}, {dim}, Type::IntU32()), dim(std::move(dim)) {}
+std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuGlobalSize &x) {
+  os << "GpuGlobalSize(";
+  os << x.dim;
+  os << ')';
+  return os;
+}
+bool Spec::operator==(const Spec::GpuGlobalSize &l, const Spec::GpuGlobalSize &r) { 
+  return *l.dim == *r.dim;
+}
+Spec::GpuGlobalSize::operator Spec::Any() const { return std::make_shared<GpuGlobalSize>(*this); }
+
+Spec::GpuGroupIdx::GpuGroupIdx(Term::Any dim) noexcept : Spec::Base({Overload({Type::IntU32()},Type::IntU32())}, {dim}, Type::IntU32()), dim(std::move(dim)) {}
+std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuGroupIdx &x) {
+  os << "GpuGroupIdx(";
+  os << x.dim;
+  os << ')';
+  return os;
+}
+bool Spec::operator==(const Spec::GpuGroupIdx &l, const Spec::GpuGroupIdx &r) { 
+  return *l.dim == *r.dim;
+}
+Spec::GpuGroupIdx::operator Spec::Any() const { return std::make_shared<GpuGroupIdx>(*this); }
+
+Spec::GpuGroupSize::GpuGroupSize(Term::Any dim) noexcept : Spec::Base({Overload({Type::IntU32()},Type::IntU32())}, {dim}, Type::IntU32()), dim(std::move(dim)) {}
+std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuGroupSize &x) {
+  os << "GpuGroupSize(";
+  os << x.dim;
+  os << ')';
+  return os;
+}
+bool Spec::operator==(const Spec::GpuGroupSize &l, const Spec::GpuGroupSize &r) { 
+  return *l.dim == *r.dim;
+}
+Spec::GpuGroupSize::operator Spec::Any() const { return std::make_shared<GpuGroupSize>(*this); }
+
+Spec::GpuLocalIdx::GpuLocalIdx(Term::Any dim) noexcept : Spec::Base({Overload({Type::IntU32()},Type::IntU32())}, {dim}, Type::IntU32()), dim(std::move(dim)) {}
+std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuLocalIdx &x) {
+  os << "GpuLocalIdx(";
+  os << x.dim;
+  os << ')';
+  return os;
+}
+bool Spec::operator==(const Spec::GpuLocalIdx &l, const Spec::GpuLocalIdx &r) { 
+  return *l.dim == *r.dim;
+}
+Spec::GpuLocalIdx::operator Spec::Any() const { return std::make_shared<GpuLocalIdx>(*this); }
+
+Spec::GpuLocalSize::GpuLocalSize(Term::Any dim) noexcept : Spec::Base({Overload({Type::IntU32()},Type::IntU32())}, {dim}, Type::IntU32()), dim(std::move(dim)) {}
+std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuLocalSize &x) {
+  os << "GpuLocalSize(";
+  os << x.dim;
+  os << ')';
+  return os;
+}
+bool Spec::operator==(const Spec::GpuLocalSize &l, const Spec::GpuLocalSize &r) { 
+  return *l.dim == *r.dim;
+}
+Spec::GpuLocalSize::operator Spec::Any() const { return std::make_shared<GpuLocalSize>(*this); }
+
+Intr::Base::Base(std::vector<Overload> overloads, std::vector<Term::Any> terms, Type::Any tpe) noexcept : overloads(std::move(overloads)), terms(std::move(terms)), tpe(std::move(tpe)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::Any &x) {
+  std::visit([&os](auto &&arg) { os << *arg; }, x);
+  return os;
+}
+bool Intr::operator==(const Intr::Base &l, const Intr::Base &r) { 
+  return l.overloads == r.overloads && std::equal(l.terms.begin(), l.terms.end(), r.terms.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && *l.tpe == *r.tpe;
+}
+std::vector<Overload> Intr::overloads(const Intr::Any& x){ return select<&Intr::Base::overloads>(x); }
+std::vector<Term::Any> Intr::terms(const Intr::Any& x){ return select<&Intr::Base::terms>(x); }
+Type::Any Intr::tpe(const Intr::Any& x){ return select<&Intr::Base::tpe>(x); }
+
+Intr::BNot::BNot(Term::Any x, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8()},Type::IntU8()),Overload({Type::IntU16()},Type::IntU16()),Overload({Type::IntU32()},Type::IntU32()),Overload({Type::IntU64()},Type::IntU64()),Overload({Type::IntS8()},Type::IntS8()),Overload({Type::IntS16()},Type::IntS16()),Overload({Type::IntS32()},Type::IntS32()),Overload({Type::IntS64()},Type::IntS64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::BNot &x) {
+  os << "BNot(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::BNot &l, const Intr::BNot &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Intr::BNot::operator Intr::Any() const { return std::make_shared<BNot>(*this); }
+
+Intr::LogicNot::LogicNot(Term::Any x) noexcept : Intr::Base({Overload({Type::Bool1(),Type::Bool1()},Type::Bool1())}, {x}, Type::Bool1()), x(std::move(x)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicNot &x) {
+  os << "LogicNot(";
+  os << x.x;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::LogicNot &l, const Intr::LogicNot &r) { 
+  return *l.x == *r.x;
+}
+Intr::LogicNot::operator Intr::Any() const { return std::make_shared<LogicNot>(*this); }
+
+Intr::Pos::Pos(Term::Any x, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::Pos &x) {
+  os << "Pos(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::Pos &l, const Intr::Pos &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Intr::Pos::operator Intr::Any() const { return std::make_shared<Pos>(*this); }
+
+Intr::Neg::Neg(Term::Any x, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::Neg &x) {
+  os << "Neg(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::Neg &l, const Intr::Neg &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Intr::Neg::operator Intr::Any() const { return std::make_shared<Neg>(*this); }
+
+Intr::Add::Add(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::Add &x) {
+  os << "Add(";
+  os << x.x;
+  os << ',';
+  os << x.y;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::Add &l, const Intr::Add &r) { 
+  return *l.x == *r.x && *l.y == *r.y && *l.rtn == *r.rtn;
+}
+Intr::Add::operator Intr::Any() const { return std::make_shared<Add>(*this); }
+
+Intr::Sub::Sub(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::Sub &x) {
+  os << "Sub(";
+  os << x.x;
+  os << ',';
+  os << x.y;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::Sub &l, const Intr::Sub &r) { 
+  return *l.x == *r.x && *l.y == *r.y && *l.rtn == *r.rtn;
+}
+Intr::Sub::operator Intr::Any() const { return std::make_shared<Sub>(*this); }
+
+Intr::Mul::Mul(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::Mul &x) {
+  os << "Mul(";
+  os << x.x;
+  os << ',';
+  os << x.y;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::Mul &l, const Intr::Mul &r) { 
+  return *l.x == *r.x && *l.y == *r.y && *l.rtn == *r.rtn;
+}
+Intr::Mul::operator Intr::Any() const { return std::make_shared<Mul>(*this); }
+
+Intr::Div::Div(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::Div &x) {
+  os << "Div(";
+  os << x.x;
+  os << ',';
+  os << x.y;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::Div &l, const Intr::Div &r) { 
+  return *l.x == *r.x && *l.y == *r.y && *l.rtn == *r.rtn;
+}
+Intr::Div::operator Intr::Any() const { return std::make_shared<Div>(*this); }
+
+Intr::Rem::Rem(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::Rem &x) {
+  os << "Rem(";
+  os << x.x;
+  os << ',';
+  os << x.y;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::Rem &l, const Intr::Rem &r) { 
+  return *l.x == *r.x && *l.y == *r.y && *l.rtn == *r.rtn;
+}
+Intr::Rem::operator Intr::Any() const { return std::make_shared<Rem>(*this); }
+
+Intr::Min::Min(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::Min &x) {
+  os << "Min(";
+  os << x.x;
+  os << ',';
+  os << x.y;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::Min &l, const Intr::Min &r) { 
+  return *l.x == *r.x && *l.y == *r.y && *l.rtn == *r.rtn;
+}
+Intr::Min::operator Intr::Any() const { return std::make_shared<Min>(*this); }
+
+Intr::Max::Max(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::Max &x) {
+  os << "Max(";
+  os << x.x;
+  os << ',';
+  os << x.y;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::Max &l, const Intr::Max &r) { 
+  return *l.x == *r.x && *l.y == *r.y && *l.rtn == *r.rtn;
+}
+Intr::Max::operator Intr::Any() const { return std::make_shared<Max>(*this); }
+
+Intr::BAnd::BAnd(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::BAnd &x) {
+  os << "BAnd(";
+  os << x.x;
+  os << ',';
+  os << x.y;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::BAnd &l, const Intr::BAnd &r) { 
+  return *l.x == *r.x && *l.y == *r.y && *l.rtn == *r.rtn;
+}
+Intr::BAnd::operator Intr::Any() const { return std::make_shared<BAnd>(*this); }
+
+Intr::BOr::BOr(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::BOr &x) {
+  os << "BOr(";
+  os << x.x;
+  os << ',';
+  os << x.y;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::BOr &l, const Intr::BOr &r) { 
+  return *l.x == *r.x && *l.y == *r.y && *l.rtn == *r.rtn;
+}
+Intr::BOr::operator Intr::Any() const { return std::make_shared<BOr>(*this); }
+
+Intr::BXor::BXor(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::BXor &x) {
+  os << "BXor(";
+  os << x.x;
+  os << ',';
+  os << x.y;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::BXor &l, const Intr::BXor &r) { 
+  return *l.x == *r.x && *l.y == *r.y && *l.rtn == *r.rtn;
+}
+Intr::BXor::operator Intr::Any() const { return std::make_shared<BXor>(*this); }
+
+Intr::BSL::BSL(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::BSL &x) {
+  os << "BSL(";
+  os << x.x;
+  os << ',';
+  os << x.y;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::BSL &l, const Intr::BSL &r) { 
+  return *l.x == *r.x && *l.y == *r.y && *l.rtn == *r.rtn;
+}
+Intr::BSL::operator Intr::Any() const { return std::make_shared<BSL>(*this); }
+
+Intr::BSR::BSR(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::BSR &x) {
+  os << "BSR(";
+  os << x.x;
+  os << ',';
+  os << x.y;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::BSR &l, const Intr::BSR &r) { 
+  return *l.x == *r.x && *l.y == *r.y && *l.rtn == *r.rtn;
+}
+Intr::BSR::operator Intr::Any() const { return std::make_shared<BSR>(*this); }
+
+Intr::BZSR::BZSR(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::BZSR &x) {
+  os << "BZSR(";
+  os << x.x;
+  os << ',';
+  os << x.y;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::BZSR &l, const Intr::BZSR &r) { 
+  return *l.x == *r.x && *l.y == *r.y && *l.rtn == *r.rtn;
+}
+Intr::BZSR::operator Intr::Any() const { return std::make_shared<BZSR>(*this); }
+
+Intr::LogicAnd::LogicAnd(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Bool1(),Type::Bool1()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicAnd &x) {
+  os << "LogicAnd(";
+  os << x.x;
+  os << ',';
+  os << x.y;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::LogicAnd &l, const Intr::LogicAnd &r) { 
+  return *l.x == *r.x && *l.y == *r.y;
+}
+Intr::LogicAnd::operator Intr::Any() const { return std::make_shared<LogicAnd>(*this); }
+
+Intr::LogicOr::LogicOr(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Bool1(),Type::Bool1()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicOr &x) {
+  os << "LogicOr(";
+  os << x.x;
+  os << ',';
+  os << x.y;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::LogicOr &l, const Intr::LogicOr &r) { 
+  return *l.x == *r.x && *l.y == *r.y;
+}
+Intr::LogicOr::operator Intr::Any() const { return std::make_shared<LogicOr>(*this); }
+
+Intr::LogicEq::LogicEq(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Bool1()),Overload({Type::Float32(),Type::Float32()},Type::Bool1()),Overload({Type::Float64(),Type::Float64()},Type::Bool1()),Overload({Type::IntU8(),Type::IntU8()},Type::Bool1()),Overload({Type::IntU16(),Type::IntU16()},Type::Bool1()),Overload({Type::IntU32(),Type::IntU32()},Type::Bool1()),Overload({Type::IntU64(),Type::IntU64()},Type::Bool1()),Overload({Type::IntS8(),Type::IntS8()},Type::Bool1()),Overload({Type::IntS16(),Type::IntS16()},Type::Bool1()),Overload({Type::IntS32(),Type::IntS32()},Type::Bool1()),Overload({Type::IntS64(),Type::IntS64()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicEq &x) {
+  os << "LogicEq(";
+  os << x.x;
+  os << ',';
+  os << x.y;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::LogicEq &l, const Intr::LogicEq &r) { 
+  return *l.x == *r.x && *l.y == *r.y;
+}
+Intr::LogicEq::operator Intr::Any() const { return std::make_shared<LogicEq>(*this); }
+
+Intr::LogicNeq::LogicNeq(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Bool1()),Overload({Type::Float32(),Type::Float32()},Type::Bool1()),Overload({Type::Float64(),Type::Float64()},Type::Bool1()),Overload({Type::IntU8(),Type::IntU8()},Type::Bool1()),Overload({Type::IntU16(),Type::IntU16()},Type::Bool1()),Overload({Type::IntU32(),Type::IntU32()},Type::Bool1()),Overload({Type::IntU64(),Type::IntU64()},Type::Bool1()),Overload({Type::IntS8(),Type::IntS8()},Type::Bool1()),Overload({Type::IntS16(),Type::IntS16()},Type::Bool1()),Overload({Type::IntS32(),Type::IntS32()},Type::Bool1()),Overload({Type::IntS64(),Type::IntS64()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicNeq &x) {
+  os << "LogicNeq(";
+  os << x.x;
+  os << ',';
+  os << x.y;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::LogicNeq &l, const Intr::LogicNeq &r) { 
+  return *l.x == *r.x && *l.y == *r.y;
+}
+Intr::LogicNeq::operator Intr::Any() const { return std::make_shared<LogicNeq>(*this); }
+
+Intr::LogicLte::LogicLte(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Bool1()),Overload({Type::Float32(),Type::Float32()},Type::Bool1()),Overload({Type::Float64(),Type::Float64()},Type::Bool1()),Overload({Type::IntU8(),Type::IntU8()},Type::Bool1()),Overload({Type::IntU16(),Type::IntU16()},Type::Bool1()),Overload({Type::IntU32(),Type::IntU32()},Type::Bool1()),Overload({Type::IntU64(),Type::IntU64()},Type::Bool1()),Overload({Type::IntS8(),Type::IntS8()},Type::Bool1()),Overload({Type::IntS16(),Type::IntS16()},Type::Bool1()),Overload({Type::IntS32(),Type::IntS32()},Type::Bool1()),Overload({Type::IntS64(),Type::IntS64()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicLte &x) {
+  os << "LogicLte(";
+  os << x.x;
+  os << ',';
+  os << x.y;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::LogicLte &l, const Intr::LogicLte &r) { 
+  return *l.x == *r.x && *l.y == *r.y;
+}
+Intr::LogicLte::operator Intr::Any() const { return std::make_shared<LogicLte>(*this); }
+
+Intr::LogicGte::LogicGte(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Bool1()),Overload({Type::Float32(),Type::Float32()},Type::Bool1()),Overload({Type::Float64(),Type::Float64()},Type::Bool1()),Overload({Type::IntU8(),Type::IntU8()},Type::Bool1()),Overload({Type::IntU16(),Type::IntU16()},Type::Bool1()),Overload({Type::IntU32(),Type::IntU32()},Type::Bool1()),Overload({Type::IntU64(),Type::IntU64()},Type::Bool1()),Overload({Type::IntS8(),Type::IntS8()},Type::Bool1()),Overload({Type::IntS16(),Type::IntS16()},Type::Bool1()),Overload({Type::IntS32(),Type::IntS32()},Type::Bool1()),Overload({Type::IntS64(),Type::IntS64()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicGte &x) {
+  os << "LogicGte(";
+  os << x.x;
+  os << ',';
+  os << x.y;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::LogicGte &l, const Intr::LogicGte &r) { 
+  return *l.x == *r.x && *l.y == *r.y;
+}
+Intr::LogicGte::operator Intr::Any() const { return std::make_shared<LogicGte>(*this); }
+
+Intr::LogicLt::LogicLt(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Bool1()),Overload({Type::Float32(),Type::Float32()},Type::Bool1()),Overload({Type::Float64(),Type::Float64()},Type::Bool1()),Overload({Type::IntU8(),Type::IntU8()},Type::Bool1()),Overload({Type::IntU16(),Type::IntU16()},Type::Bool1()),Overload({Type::IntU32(),Type::IntU32()},Type::Bool1()),Overload({Type::IntU64(),Type::IntU64()},Type::Bool1()),Overload({Type::IntS8(),Type::IntS8()},Type::Bool1()),Overload({Type::IntS16(),Type::IntS16()},Type::Bool1()),Overload({Type::IntS32(),Type::IntS32()},Type::Bool1()),Overload({Type::IntS64(),Type::IntS64()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicLt &x) {
+  os << "LogicLt(";
+  os << x.x;
+  os << ',';
+  os << x.y;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::LogicLt &l, const Intr::LogicLt &r) { 
+  return *l.x == *r.x && *l.y == *r.y;
+}
+Intr::LogicLt::operator Intr::Any() const { return std::make_shared<LogicLt>(*this); }
+
+Intr::LogicGt::LogicGt(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Bool1()),Overload({Type::Float32(),Type::Float32()},Type::Bool1()),Overload({Type::Float64(),Type::Float64()},Type::Bool1()),Overload({Type::IntU8(),Type::IntU8()},Type::Bool1()),Overload({Type::IntU16(),Type::IntU16()},Type::Bool1()),Overload({Type::IntU32(),Type::IntU32()},Type::Bool1()),Overload({Type::IntU64(),Type::IntU64()},Type::Bool1()),Overload({Type::IntS8(),Type::IntS8()},Type::Bool1()),Overload({Type::IntS16(),Type::IntS16()},Type::Bool1()),Overload({Type::IntS32(),Type::IntS32()},Type::Bool1()),Overload({Type::IntS64(),Type::IntS64()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
+std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicGt &x) {
+  os << "LogicGt(";
+  os << x.x;
+  os << ',';
+  os << x.y;
+  os << ')';
+  return os;
+}
+bool Intr::operator==(const Intr::LogicGt &l, const Intr::LogicGt &r) { 
+  return *l.x == *r.x && *l.y == *r.y;
+}
+Intr::LogicGt::operator Intr::Any() const { return std::make_shared<LogicGt>(*this); }
+
+Math::Base::Base(std::vector<Overload> overloads, std::vector<Term::Any> terms, Type::Any tpe) noexcept : overloads(std::move(overloads)), terms(std::move(terms)), tpe(std::move(tpe)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Any &x) {
+  std::visit([&os](auto &&arg) { os << *arg; }, x);
+  return os;
+}
+bool Math::operator==(const Math::Base &l, const Math::Base &r) { 
+  return l.overloads == r.overloads && std::equal(l.terms.begin(), l.terms.end(), r.terms.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && *l.tpe == *r.tpe;
+}
+std::vector<Overload> Math::overloads(const Math::Any& x){ return select<&Math::Base::overloads>(x); }
+std::vector<Term::Any> Math::terms(const Math::Any& x){ return select<&Math::Base::terms>(x); }
+Type::Any Math::tpe(const Math::Any& x){ return select<&Math::Base::tpe>(x); }
+
+Math::Abs::Abs(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Abs &x) {
+  os << "Abs(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Abs &l, const Math::Abs &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Math::Abs::operator Math::Any() const { return std::make_shared<Abs>(*this); }
+
+Math::Sin::Sin(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Sin &x) {
+  os << "Sin(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Sin &l, const Math::Sin &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Math::Sin::operator Math::Any() const { return std::make_shared<Sin>(*this); }
+
+Math::Cos::Cos(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Cos &x) {
+  os << "Cos(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Cos &l, const Math::Cos &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Math::Cos::operator Math::Any() const { return std::make_shared<Cos>(*this); }
+
+Math::Tan::Tan(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Tan &x) {
+  os << "Tan(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Tan &l, const Math::Tan &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Math::Tan::operator Math::Any() const { return std::make_shared<Tan>(*this); }
+
+Math::Asin::Asin(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Asin &x) {
+  os << "Asin(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Asin &l, const Math::Asin &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Math::Asin::operator Math::Any() const { return std::make_shared<Asin>(*this); }
+
+Math::Acos::Acos(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Acos &x) {
+  os << "Acos(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Acos &l, const Math::Acos &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Math::Acos::operator Math::Any() const { return std::make_shared<Acos>(*this); }
+
+Math::Atan::Atan(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Atan &x) {
+  os << "Atan(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Atan &l, const Math::Atan &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Math::Atan::operator Math::Any() const { return std::make_shared<Atan>(*this); }
+
+Math::Sinh::Sinh(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Sinh &x) {
+  os << "Sinh(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Sinh &l, const Math::Sinh &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Math::Sinh::operator Math::Any() const { return std::make_shared<Sinh>(*this); }
+
+Math::Cosh::Cosh(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Cosh &x) {
+  os << "Cosh(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Cosh &l, const Math::Cosh &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Math::Cosh::operator Math::Any() const { return std::make_shared<Cosh>(*this); }
+
+Math::Tanh::Tanh(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Tanh &x) {
+  os << "Tanh(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Tanh &l, const Math::Tanh &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Math::Tanh::operator Math::Any() const { return std::make_shared<Tanh>(*this); }
+
+Math::Signum::Signum(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Signum &x) {
+  os << "Signum(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Signum &l, const Math::Signum &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Math::Signum::operator Math::Any() const { return std::make_shared<Signum>(*this); }
+
+Math::Round::Round(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Round &x) {
+  os << "Round(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Round &l, const Math::Round &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Math::Round::operator Math::Any() const { return std::make_shared<Round>(*this); }
+
+Math::Ceil::Ceil(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Ceil &x) {
+  os << "Ceil(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Ceil &l, const Math::Ceil &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Math::Ceil::operator Math::Any() const { return std::make_shared<Ceil>(*this); }
+
+Math::Floor::Floor(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Floor &x) {
+  os << "Floor(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Floor &l, const Math::Floor &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Math::Floor::operator Math::Any() const { return std::make_shared<Floor>(*this); }
+
+Math::Rint::Rint(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Rint &x) {
+  os << "Rint(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Rint &l, const Math::Rint &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Math::Rint::operator Math::Any() const { return std::make_shared<Rint>(*this); }
+
+Math::Sqrt::Sqrt(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Sqrt &x) {
+  os << "Sqrt(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Sqrt &l, const Math::Sqrt &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Math::Sqrt::operator Math::Any() const { return std::make_shared<Sqrt>(*this); }
+
+Math::Cbrt::Cbrt(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Cbrt &x) {
+  os << "Cbrt(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Cbrt &l, const Math::Cbrt &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Math::Cbrt::operator Math::Any() const { return std::make_shared<Cbrt>(*this); }
+
+Math::Exp::Exp(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Exp &x) {
+  os << "Exp(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Exp &l, const Math::Exp &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Math::Exp::operator Math::Any() const { return std::make_shared<Exp>(*this); }
+
+Math::Expm1::Expm1(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Expm1 &x) {
+  os << "Expm1(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Expm1 &l, const Math::Expm1 &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Math::Expm1::operator Math::Any() const { return std::make_shared<Expm1>(*this); }
+
+Math::Log::Log(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Log &x) {
+  os << "Log(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Log &l, const Math::Log &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Math::Log::operator Math::Any() const { return std::make_shared<Log>(*this); }
+
+Math::Log1p::Log1p(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Log1p &x) {
+  os << "Log1p(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Log1p &l, const Math::Log1p &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Math::Log1p::operator Math::Any() const { return std::make_shared<Log1p>(*this); }
+
+Math::Log10::Log10(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Log10 &x) {
+  os << "Log10(";
+  os << x.x;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Log10 &l, const Math::Log10 &r) { 
+  return *l.x == *r.x && *l.rtn == *r.rtn;
+}
+Math::Log10::operator Math::Any() const { return std::make_shared<Log10>(*this); }
+
+Math::Pow::Pow(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Pow &x) {
+  os << "Pow(";
+  os << x.x;
+  os << ',';
+  os << x.y;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Pow &l, const Math::Pow &r) { 
+  return *l.x == *r.x && *l.y == *r.y && *l.rtn == *r.rtn;
+}
+Math::Pow::operator Math::Any() const { return std::make_shared<Pow>(*this); }
+
+Math::Atan2::Atan2(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Atan2 &x) {
+  os << "Atan2(";
+  os << x.x;
+  os << ',';
+  os << x.y;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Atan2 &l, const Math::Atan2 &r) { 
+  return *l.x == *r.x && *l.y == *r.y && *l.rtn == *r.rtn;
+}
+Math::Atan2::operator Math::Any() const { return std::make_shared<Atan2>(*this); }
+
+Math::Hypot::Hypot(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+std::ostream &Math::operator<<(std::ostream &os, const Math::Hypot &x) {
+  os << "Hypot(";
+  os << x.x;
+  os << ',';
+  os << x.y;
+  os << ',';
+  os << x.rtn;
+  os << ')';
+  return os;
+}
+bool Math::operator==(const Math::Hypot &l, const Math::Hypot &r) { 
+  return *l.x == *r.x && *l.y == *r.y && *l.rtn == *r.rtn;
+}
+Math::Hypot::operator Math::Any() const { return std::make_shared<Hypot>(*this); }
+
 Expr::Base::Base(Type::Any tpe) noexcept : tpe(std::move(tpe)) {}
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Any &x) {
   std::visit([&os](auto &&arg) { os << *arg; }, x);
@@ -1119,53 +1462,41 @@ bool Expr::operator==(const Expr::Base &l, const Expr::Base &r) {
 }
 Type::Any Expr::tpe(const Expr::Any& x){ return select<&Expr::Base::tpe>(x); }
 
-Expr::NullaryIntrinsic::NullaryIntrinsic(NullaryIntrinsicKind::Any kind, Type::Any rtn) noexcept : Expr::Base(rtn), kind(std::move(kind)), rtn(std::move(rtn)) {}
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::NullaryIntrinsic &x) {
-  os << "NullaryIntrinsic(";
-  os << x.kind;
-  os << ',';
-  os << x.rtn;
+Expr::SpecOp::SpecOp(Spec::Any op) noexcept : Expr::Base(Spec::tpe(op)), op(std::move(op)) {}
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::SpecOp &x) {
+  os << "SpecOp(";
+  os << x.op;
   os << ')';
   return os;
 }
-bool Expr::operator==(const Expr::NullaryIntrinsic &l, const Expr::NullaryIntrinsic &r) { 
-  return *l.kind == *r.kind && *l.rtn == *r.rtn;
+bool Expr::operator==(const Expr::SpecOp &l, const Expr::SpecOp &r) { 
+  return *l.op == *r.op;
 }
-Expr::NullaryIntrinsic::operator Expr::Any() const { return std::make_shared<NullaryIntrinsic>(*this); }
+Expr::SpecOp::operator Expr::Any() const { return std::make_shared<SpecOp>(*this); }
 
-Expr::UnaryIntrinsic::UnaryIntrinsic(Term::Any lhs, UnaryIntrinsicKind::Any kind, Type::Any rtn) noexcept : Expr::Base(rtn), lhs(std::move(lhs)), kind(std::move(kind)), rtn(std::move(rtn)) {}
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::UnaryIntrinsic &x) {
-  os << "UnaryIntrinsic(";
-  os << x.lhs;
-  os << ',';
-  os << x.kind;
-  os << ',';
-  os << x.rtn;
+Expr::MathOp::MathOp(Math::Any op) noexcept : Expr::Base(Math::tpe(op)), op(std::move(op)) {}
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::MathOp &x) {
+  os << "MathOp(";
+  os << x.op;
   os << ')';
   return os;
 }
-bool Expr::operator==(const Expr::UnaryIntrinsic &l, const Expr::UnaryIntrinsic &r) { 
-  return *l.lhs == *r.lhs && *l.kind == *r.kind && *l.rtn == *r.rtn;
+bool Expr::operator==(const Expr::MathOp &l, const Expr::MathOp &r) { 
+  return *l.op == *r.op;
 }
-Expr::UnaryIntrinsic::operator Expr::Any() const { return std::make_shared<UnaryIntrinsic>(*this); }
+Expr::MathOp::operator Expr::Any() const { return std::make_shared<MathOp>(*this); }
 
-Expr::BinaryIntrinsic::BinaryIntrinsic(Term::Any lhs, Term::Any rhs, BinaryIntrinsicKind::Any kind, Type::Any rtn) noexcept : Expr::Base(rtn), lhs(std::move(lhs)), rhs(std::move(rhs)), kind(std::move(kind)), rtn(std::move(rtn)) {}
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::BinaryIntrinsic &x) {
-  os << "BinaryIntrinsic(";
-  os << x.lhs;
-  os << ',';
-  os << x.rhs;
-  os << ',';
-  os << x.kind;
-  os << ',';
-  os << x.rtn;
+Expr::IntrOp::IntrOp(Intr::Any op) noexcept : Expr::Base(Intr::tpe(op)), op(std::move(op)) {}
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::IntrOp &x) {
+  os << "IntrOp(";
+  os << x.op;
   os << ')';
   return os;
 }
-bool Expr::operator==(const Expr::BinaryIntrinsic &l, const Expr::BinaryIntrinsic &r) { 
-  return *l.lhs == *r.lhs && *l.rhs == *r.rhs && *l.kind == *r.kind && *l.rtn == *r.rtn;
+bool Expr::operator==(const Expr::IntrOp &l, const Expr::IntrOp &r) { 
+  return *l.op == *r.op;
 }
-Expr::BinaryIntrinsic::operator Expr::Any() const { return std::make_shared<BinaryIntrinsic>(*this); }
+Expr::IntrOp::operator Expr::Any() const { return std::make_shared<IntrOp>(*this); }
 
 Expr::Cast::Cast(Term::Any from, Type::Any as) noexcept : Expr::Base(as), from(std::move(from)), as(std::move(as)) {}
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Cast &x) {
@@ -1740,44 +2071,60 @@ std::size_t std::hash<polyregion::polyast::TypeKind::Fractional>::operator()(con
   std::size_t seed = std::hash<std::string>()("polyregion::polyast::TypeKind::Fractional");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Type::Float>::operator()(const polyregion::polyast::Type::Float &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::Float");
+std::size_t std::hash<polyregion::polyast::Type::Float16>::operator()(const polyregion::polyast::Type::Float16 &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::Float16");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Type::Double>::operator()(const polyregion::polyast::Type::Double &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::Double");
+std::size_t std::hash<polyregion::polyast::Type::Float32>::operator()(const polyregion::polyast::Type::Float32 &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::Float32");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Type::Bool>::operator()(const polyregion::polyast::Type::Bool &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::Bool");
+std::size_t std::hash<polyregion::polyast::Type::Float64>::operator()(const polyregion::polyast::Type::Float64 &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::Float64");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Type::Byte>::operator()(const polyregion::polyast::Type::Byte &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::Byte");
+std::size_t std::hash<polyregion::polyast::Type::IntU8>::operator()(const polyregion::polyast::Type::IntU8 &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::IntU8");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Type::Char>::operator()(const polyregion::polyast::Type::Char &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::Char");
+std::size_t std::hash<polyregion::polyast::Type::IntU16>::operator()(const polyregion::polyast::Type::IntU16 &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::IntU16");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Type::Short>::operator()(const polyregion::polyast::Type::Short &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::Short");
+std::size_t std::hash<polyregion::polyast::Type::IntU32>::operator()(const polyregion::polyast::Type::IntU32 &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::IntU32");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Type::Int>::operator()(const polyregion::polyast::Type::Int &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::Int");
+std::size_t std::hash<polyregion::polyast::Type::IntU64>::operator()(const polyregion::polyast::Type::IntU64 &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::IntU64");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Type::Long>::operator()(const polyregion::polyast::Type::Long &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::Long");
+std::size_t std::hash<polyregion::polyast::Type::IntS8>::operator()(const polyregion::polyast::Type::IntS8 &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::IntS8");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Type::Unit>::operator()(const polyregion::polyast::Type::Unit &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::Unit");
+std::size_t std::hash<polyregion::polyast::Type::IntS16>::operator()(const polyregion::polyast::Type::IntS16 &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::IntS16");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Type::IntS32>::operator()(const polyregion::polyast::Type::IntS32 &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::IntS32");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Type::IntS64>::operator()(const polyregion::polyast::Type::IntS64 &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::IntS64");
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Type::Nothing>::operator()(const polyregion::polyast::Type::Nothing &x) const noexcept {
   std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::Nothing");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Type::Unit0>::operator()(const polyregion::polyast::Type::Unit0 &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::Unit0");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Type::Bool1>::operator()(const polyregion::polyast::Type::Bool1 &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Type::Bool1");
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Type::Struct>::operator()(const polyregion::polyast::Type::Struct &x) const noexcept {
@@ -1817,324 +2164,56 @@ std::size_t std::hash<polyregion::polyast::Term::Poison>::operator()(const polyr
   std::size_t seed = std::hash<decltype(x.t)>()(x.t);
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Term::UnitConst>::operator()(const polyregion::polyast::Term::UnitConst &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Term::UnitConst");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::Term::BoolConst>::operator()(const polyregion::polyast::Term::BoolConst &x) const noexcept {
+std::size_t std::hash<polyregion::polyast::Term::Float16Const>::operator()(const polyregion::polyast::Term::Float16Const &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.value)>()(x.value);
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Term::ByteConst>::operator()(const polyregion::polyast::Term::ByteConst &x) const noexcept {
+std::size_t std::hash<polyregion::polyast::Term::Float32Const>::operator()(const polyregion::polyast::Term::Float32Const &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.value)>()(x.value);
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Term::CharConst>::operator()(const polyregion::polyast::Term::CharConst &x) const noexcept {
+std::size_t std::hash<polyregion::polyast::Term::Float64Const>::operator()(const polyregion::polyast::Term::Float64Const &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.value)>()(x.value);
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Term::ShortConst>::operator()(const polyregion::polyast::Term::ShortConst &x) const noexcept {
+std::size_t std::hash<polyregion::polyast::Term::IntU8Const>::operator()(const polyregion::polyast::Term::IntU8Const &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.value)>()(x.value);
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Term::IntConst>::operator()(const polyregion::polyast::Term::IntConst &x) const noexcept {
+std::size_t std::hash<polyregion::polyast::Term::IntU16Const>::operator()(const polyregion::polyast::Term::IntU16Const &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.value)>()(x.value);
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Term::LongConst>::operator()(const polyregion::polyast::Term::LongConst &x) const noexcept {
+std::size_t std::hash<polyregion::polyast::Term::IntU32Const>::operator()(const polyregion::polyast::Term::IntU32Const &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.value)>()(x.value);
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Term::FloatConst>::operator()(const polyregion::polyast::Term::FloatConst &x) const noexcept {
+std::size_t std::hash<polyregion::polyast::Term::IntU64Const>::operator()(const polyregion::polyast::Term::IntU64Const &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.value)>()(x.value);
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Term::DoubleConst>::operator()(const polyregion::polyast::Term::DoubleConst &x) const noexcept {
+std::size_t std::hash<polyregion::polyast::Term::IntS8Const>::operator()(const polyregion::polyast::Term::IntS8Const &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.value)>()(x.value);
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxX>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxX &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxX");
+std::size_t std::hash<polyregion::polyast::Term::IntS16Const>::operator()(const polyregion::polyast::Term::IntS16Const &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.value)>()(x.value);
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxY>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxY &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxY");
+std::size_t std::hash<polyregion::polyast::Term::IntS32Const>::operator()(const polyregion::polyast::Term::IntS32Const &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.value)>()(x.value);
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxZ>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxZ &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxZ");
+std::size_t std::hash<polyregion::polyast::Term::IntS64Const>::operator()(const polyregion::polyast::Term::IntS64Const &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.value)>()(x.value);
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGlobalSizeX>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGlobalSizeX &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGlobalSizeX");
+std::size_t std::hash<polyregion::polyast::Term::Unit0Const>::operator()(const polyregion::polyast::Term::Unit0Const &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Term::Unit0Const");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGlobalSizeY>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGlobalSizeY &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGlobalSizeY");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGlobalSizeZ>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGlobalSizeZ &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGlobalSizeZ");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupIdxX>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupIdxX &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGroupIdxX");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupIdxY>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupIdxY &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGroupIdxY");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupIdxZ>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupIdxZ &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGroupIdxZ");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupSizeX>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupSizeX &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGroupSizeX");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupSizeY>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupSizeY &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGroupSizeY");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupSizeZ>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupSizeZ &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGroupSizeZ");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuLocalIdxX>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuLocalIdxX &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuLocalIdxX");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuLocalIdxY>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuLocalIdxY &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuLocalIdxY");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuLocalIdxZ>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuLocalIdxZ &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuLocalIdxZ");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuLocalSizeX>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuLocalSizeX &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuLocalSizeX");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuLocalSizeY>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuLocalSizeY &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuLocalSizeY");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuLocalSizeZ>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuLocalSizeZ &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuLocalSizeZ");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupBarrier>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupBarrier &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGroupBarrier");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupFence>::operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupFence &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::GpuGroupFence");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::NullaryIntrinsicKind::Assert>::operator()(const polyregion::polyast::NullaryIntrinsicKind::Assert &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::NullaryIntrinsicKind::Assert");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Sin>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Sin &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Sin");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Cos>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Cos &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Cos");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Tan>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Tan &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Tan");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Asin>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Asin &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Asin");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Acos>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Acos &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Acos");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Atan>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Atan &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Atan");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Sinh>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Sinh &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Sinh");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Cosh>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Cosh &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Cosh");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Tanh>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Tanh &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Tanh");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Signum>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Signum &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Signum");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Abs>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Abs &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Abs");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Round>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Round &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Round");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Ceil>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Ceil &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Ceil");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Floor>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Floor &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Floor");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Rint>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Rint &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Rint");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Sqrt>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Sqrt &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Sqrt");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Cbrt>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Cbrt &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Cbrt");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Exp>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Exp &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Exp");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Expm1>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Expm1 &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Expm1");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Log>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Log &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Log");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Log1p>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Log1p &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Log1p");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Log10>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Log10 &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Log10");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::BNot>::operator()(const polyregion::polyast::UnaryIntrinsicKind::BNot &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::BNot");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Pos>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Pos &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Pos");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::Neg>::operator()(const polyregion::polyast::UnaryIntrinsicKind::Neg &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::Neg");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::UnaryIntrinsicKind::LogicNot>::operator()(const polyregion::polyast::UnaryIntrinsicKind::LogicNot &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::UnaryIntrinsicKind::LogicNot");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Add>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Add &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Add");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Sub>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Sub &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Sub");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Mul>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Mul &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Mul");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Div>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Div &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Div");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Rem>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Rem &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Rem");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Pow>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Pow &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Pow");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Min>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Min &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Min");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Max>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Max &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Max");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Atan2>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Atan2 &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Atan2");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::Hypot>::operator()(const polyregion::polyast::BinaryIntrinsicKind::Hypot &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::Hypot");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::BAnd>::operator()(const polyregion::polyast::BinaryIntrinsicKind::BAnd &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::BAnd");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::BOr>::operator()(const polyregion::polyast::BinaryIntrinsicKind::BOr &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::BOr");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::BXor>::operator()(const polyregion::polyast::BinaryIntrinsicKind::BXor &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::BXor");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::BSL>::operator()(const polyregion::polyast::BinaryIntrinsicKind::BSL &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::BSL");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::BSR>::operator()(const polyregion::polyast::BinaryIntrinsicKind::BSR &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::BSR");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::BZSR>::operator()(const polyregion::polyast::BinaryIntrinsicKind::BZSR &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::BZSR");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicEq>::operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicEq &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::LogicEq");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicNeq>::operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicNeq &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::LogicNeq");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicAnd>::operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicAnd &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::LogicAnd");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicOr>::operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicOr &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::LogicOr");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicLte>::operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicLte &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::LogicLte");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicGte>::operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicGte &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::LogicGte");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicLt>::operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicLt &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::LogicLt");
-  return seed;
-}
-std::size_t std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicGt>::operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicGt &x) const noexcept {
-  std::size_t seed = std::hash<std::string>()("polyregion::polyast::BinaryIntrinsicKind::LogicGt");
+std::size_t std::hash<polyregion::polyast::Term::Bool1Const>::operator()(const polyregion::polyast::Term::Bool1Const &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.value)>()(x.value);
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::TypeSpace::Global>::operator()(const polyregion::polyast::TypeSpace::Global &x) const noexcept {
@@ -2145,22 +2224,338 @@ std::size_t std::hash<polyregion::polyast::TypeSpace::Local>::operator()(const p
   std::size_t seed = std::hash<std::string>()("polyregion::polyast::TypeSpace::Local");
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Expr::NullaryIntrinsic>::operator()(const polyregion::polyast::Expr::NullaryIntrinsic &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.kind)>()(x.kind);
+std::size_t std::hash<polyregion::polyast::Overload>::operator()(const polyregion::polyast::Overload &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.args)>()(x.args);
   seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Expr::UnaryIntrinsic>::operator()(const polyregion::polyast::Expr::UnaryIntrinsic &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.lhs)>()(x.lhs);
-  seed ^= std::hash<decltype(x.kind)>()(x.kind) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+std::size_t std::hash<polyregion::polyast::Spec::Assert>::operator()(const polyregion::polyast::Spec::Assert &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Spec::Assert");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Spec::GpuBarrierGlobal>::operator()(const polyregion::polyast::Spec::GpuBarrierGlobal &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Spec::GpuBarrierGlobal");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Spec::GpuBarrierLocal>::operator()(const polyregion::polyast::Spec::GpuBarrierLocal &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Spec::GpuBarrierLocal");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Spec::GpuBarrierAll>::operator()(const polyregion::polyast::Spec::GpuBarrierAll &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Spec::GpuBarrierAll");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Spec::GpuFenceGlobal>::operator()(const polyregion::polyast::Spec::GpuFenceGlobal &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Spec::GpuFenceGlobal");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Spec::GpuFenceLocal>::operator()(const polyregion::polyast::Spec::GpuFenceLocal &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Spec::GpuFenceLocal");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Spec::GpuFenceAll>::operator()(const polyregion::polyast::Spec::GpuFenceAll &x) const noexcept {
+  std::size_t seed = std::hash<std::string>()("polyregion::polyast::Spec::GpuFenceAll");
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Spec::GpuGlobalIdx>::operator()(const polyregion::polyast::Spec::GpuGlobalIdx &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.dim)>()(x.dim);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Spec::GpuGlobalSize>::operator()(const polyregion::polyast::Spec::GpuGlobalSize &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.dim)>()(x.dim);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Spec::GpuGroupIdx>::operator()(const polyregion::polyast::Spec::GpuGroupIdx &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.dim)>()(x.dim);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Spec::GpuGroupSize>::operator()(const polyregion::polyast::Spec::GpuGroupSize &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.dim)>()(x.dim);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Spec::GpuLocalIdx>::operator()(const polyregion::polyast::Spec::GpuLocalIdx &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.dim)>()(x.dim);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Spec::GpuLocalSize>::operator()(const polyregion::polyast::Spec::GpuLocalSize &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.dim)>()(x.dim);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Intr::BNot>::operator()(const polyregion::polyast::Intr::BNot &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
   seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Expr::BinaryIntrinsic>::operator()(const polyregion::polyast::Expr::BinaryIntrinsic &x) const noexcept {
-  std::size_t seed = std::hash<decltype(x.lhs)>()(x.lhs);
-  seed ^= std::hash<decltype(x.rhs)>()(x.rhs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-  seed ^= std::hash<decltype(x.kind)>()(x.kind) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+std::size_t std::hash<polyregion::polyast::Intr::LogicNot>::operator()(const polyregion::polyast::Intr::LogicNot &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Intr::Pos>::operator()(const polyregion::polyast::Intr::Pos &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
   seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Intr::Neg>::operator()(const polyregion::polyast::Intr::Neg &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Intr::Add>::operator()(const polyregion::polyast::Intr::Add &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.y)>()(x.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Intr::Sub>::operator()(const polyregion::polyast::Intr::Sub &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.y)>()(x.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Intr::Mul>::operator()(const polyregion::polyast::Intr::Mul &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.y)>()(x.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Intr::Div>::operator()(const polyregion::polyast::Intr::Div &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.y)>()(x.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Intr::Rem>::operator()(const polyregion::polyast::Intr::Rem &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.y)>()(x.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Intr::Min>::operator()(const polyregion::polyast::Intr::Min &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.y)>()(x.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Intr::Max>::operator()(const polyregion::polyast::Intr::Max &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.y)>()(x.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Intr::BAnd>::operator()(const polyregion::polyast::Intr::BAnd &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.y)>()(x.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Intr::BOr>::operator()(const polyregion::polyast::Intr::BOr &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.y)>()(x.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Intr::BXor>::operator()(const polyregion::polyast::Intr::BXor &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.y)>()(x.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Intr::BSL>::operator()(const polyregion::polyast::Intr::BSL &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.y)>()(x.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Intr::BSR>::operator()(const polyregion::polyast::Intr::BSR &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.y)>()(x.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Intr::BZSR>::operator()(const polyregion::polyast::Intr::BZSR &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.y)>()(x.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Intr::LogicAnd>::operator()(const polyregion::polyast::Intr::LogicAnd &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.y)>()(x.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Intr::LogicOr>::operator()(const polyregion::polyast::Intr::LogicOr &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.y)>()(x.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Intr::LogicEq>::operator()(const polyregion::polyast::Intr::LogicEq &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.y)>()(x.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Intr::LogicNeq>::operator()(const polyregion::polyast::Intr::LogicNeq &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.y)>()(x.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Intr::LogicLte>::operator()(const polyregion::polyast::Intr::LogicLte &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.y)>()(x.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Intr::LogicGte>::operator()(const polyregion::polyast::Intr::LogicGte &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.y)>()(x.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Intr::LogicLt>::operator()(const polyregion::polyast::Intr::LogicLt &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.y)>()(x.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Intr::LogicGt>::operator()(const polyregion::polyast::Intr::LogicGt &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.y)>()(x.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Abs>::operator()(const polyregion::polyast::Math::Abs &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Sin>::operator()(const polyregion::polyast::Math::Sin &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Cos>::operator()(const polyregion::polyast::Math::Cos &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Tan>::operator()(const polyregion::polyast::Math::Tan &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Asin>::operator()(const polyregion::polyast::Math::Asin &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Acos>::operator()(const polyregion::polyast::Math::Acos &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Atan>::operator()(const polyregion::polyast::Math::Atan &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Sinh>::operator()(const polyregion::polyast::Math::Sinh &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Cosh>::operator()(const polyregion::polyast::Math::Cosh &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Tanh>::operator()(const polyregion::polyast::Math::Tanh &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Signum>::operator()(const polyregion::polyast::Math::Signum &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Round>::operator()(const polyregion::polyast::Math::Round &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Ceil>::operator()(const polyregion::polyast::Math::Ceil &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Floor>::operator()(const polyregion::polyast::Math::Floor &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Rint>::operator()(const polyregion::polyast::Math::Rint &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Sqrt>::operator()(const polyregion::polyast::Math::Sqrt &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Cbrt>::operator()(const polyregion::polyast::Math::Cbrt &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Exp>::operator()(const polyregion::polyast::Math::Exp &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Expm1>::operator()(const polyregion::polyast::Math::Expm1 &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Log>::operator()(const polyregion::polyast::Math::Log &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Log1p>::operator()(const polyregion::polyast::Math::Log1p &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Log10>::operator()(const polyregion::polyast::Math::Log10 &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Pow>::operator()(const polyregion::polyast::Math::Pow &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.y)>()(x.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Atan2>::operator()(const polyregion::polyast::Math::Atan2 &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.y)>()(x.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Math::Hypot>::operator()(const polyregion::polyast::Math::Hypot &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.x)>()(x.x);
+  seed ^= std::hash<decltype(x.y)>()(x.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.rtn)>()(x.rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Expr::SpecOp>::operator()(const polyregion::polyast::Expr::SpecOp &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.op)>()(x.op);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Expr::MathOp>::operator()(const polyregion::polyast::Expr::MathOp &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.op)>()(x.op);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::Expr::IntrOp>::operator()(const polyregion::polyast::Expr::IntrOp &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.op)>()(x.op);
   return seed;
 }
 std::size_t std::hash<polyregion::polyast::Expr::Cast>::operator()(const polyregion::polyast::Expr::Cast &x) const noexcept {

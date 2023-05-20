@@ -56,7 +56,7 @@ object Remapper {
       Retyper.typer0N(reprs).map((xs, wit) => (xs, c.updateDeps(d => d.copy(classes = d.classes |+| wit))))
 
     def mapTrees(args: List[q.Tree]): Result[(p.Term, q.RemapContext)] = args match {
-      case Nil => (p.Term.UnitConst, c).pure
+      case Nil => (p.Term.Unit0Const, c).pure
       case x :: xs =>
         (c ::= p.Stmt.Comment(x.show.replace("\n", " ; ")))
           .mapTree(x)
@@ -74,7 +74,7 @@ object Remapper {
           (ref, c) <- term.fold((c !! tree).mapTerm(rhs, Some(tpe)))(x => (x, c).success)
           // term
         } yield (
-          p.Term.UnitConst,
+          p.Term.Unit0Const,
           c ::= p.Stmt.Var(p.Named(name, tpe), Some(p.Expr.Alias(ref)))
           // case (v: q.ErasedMethodVal, tpe: q.ErasedFnTpe) => c.suspend(name -> tpe)(v)
         )
@@ -106,13 +106,13 @@ object Remapper {
             .success
 
         } yield (
-          p.Term.UnitConst,
+          p.Term.Unit0Const,
           c // FIXME restore statements!!!
         )
 
-      case q.Import(_, _)                                       => (p.Term.UnitConst, c).success // ignore
-      case q.TypeDef(name, tree)                                => (p.Term.UnitConst, c).success // ignore
-      case q.ClassDef(name, ctor, parents, selfTpeValDef, body) => (p.Term.UnitConst, c).success
+      case q.Import(_, _)                                       => (p.Term.Unit0Const, c).success // ignore
+      case q.TypeDef(name, tree)                                => (p.Term.Unit0Const, c).success // ignore
+      case q.ClassDef(name, ctor, parents, selfTpeValDef, body) => (p.Term.Unit0Const, c).success
       case t: q.Term                                            => (c !! tree).mapTerm(t)
 
       // def f(x...) : A = ??? === val f : x... => A = ???
@@ -564,15 +564,15 @@ object Remapper {
             (_, c) <- (c1 !! term).mapTrees(bindings)
             (v, c) <- (c !! term).mapTerm(expansion)
           } yield (v, c)
-        case (Nil, Nil, q.Literal(q.BooleanConstant(v))) => (p.Term.BoolConst(v), c1 !! term).pure
-        case (Nil, Nil, q.Literal(q.IntConstant(v)))     => (p.Term.IntConst(v), c1 !! term).pure
-        case (Nil, Nil, q.Literal(q.FloatConstant(v)))   => (p.Term.FloatConst(v), c1 !! term).pure
-        case (Nil, Nil, q.Literal(q.DoubleConstant(v)))  => (p.Term.DoubleConst(v), c1 !! term).pure
-        case (Nil, Nil, q.Literal(q.LongConstant(v)))    => (p.Term.LongConst(v), c1 !! term).pure
-        case (Nil, Nil, q.Literal(q.ShortConstant(v)))   => (p.Term.ShortConst(v), c1 !! term).pure
-        case (Nil, Nil, q.Literal(q.ByteConstant(v)))    => (p.Term.ByteConst(v), c1 !! term).pure
-        case (Nil, Nil, q.Literal(q.CharConstant(v)))    => (p.Term.CharConst(v), c1 !! term).pure
-        case (Nil, Nil, q.Literal(q.UnitConstant()))     => (p.Term.UnitConst, c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.BooleanConstant(v))) => (p.Term.Bool1Const(v), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.IntConstant(v)))     => (p.Term.IntS32Const(v), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.FloatConstant(v)))   => (p.Term.Float32Const(v), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.DoubleConstant(v)))  => (p.Term.Float64Const(v), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.LongConstant(v)))    => (p.Term.IntS64Const(v), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.ShortConstant(v)))   => (p.Term.IntS16Const(v), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.ByteConstant(v)))    => (p.Term.IntS8Const(v), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.CharConstant(v)))    => (p.Term.IntU16Const(v), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.UnitConstant()))     => (p.Term.Unit0Const, c1 !! term).pure
         case (Nil, Nil, q.Literal(q.StringConstant(v))) =>
           ??? // XXX alloc new string instance
         case (Nil, Nil, q.Literal(q.ClassOfConstant(_))) =>
@@ -649,7 +649,7 @@ object Remapper {
             r <- (lhsRef, rhsRef) match {
               case (s @ p.Term.Select(_, _), rhs) =>
                 val (xs, c0) = c.mkMut(term, s, p.Expr.Alias(rhs))
-                (p.Term.UnitConst, c0.::=(xs*)).success
+                (p.Term.Unit0Const, c0.::=(xs*)).success
               case (lhs, rhs) => c.fail(s"Illegal assign LHS,RHS: lhs=${lhs.repr} rhs=$rhs")
             }
           } yield r
@@ -661,7 +661,7 @@ object Remapper {
             (elseTerm, elseCtx) <- thenCtx.noStmts.down(elseTerm).mapTerm(elseTerm)
 
             _ <-
-              if (condTerm.tpe != p.Type.Bool) s"Cond must be a Bool ref, got ${condTerm}".fail
+              if (condTerm.tpe != p.Type.Bool1) s"Cond must be a Bool ref, got ${condTerm}".fail
               else ().success
 
             mkCondStmts = (tpe: p.Type) => {
@@ -705,12 +705,12 @@ object Remapper {
             (condTerm, condCtx) <- c1.noStmts.down(term).mapTerm(cond)
             (_, bodyCtx)        <- condCtx.noStmts.mapTerm(body)
           } yield (
-            p.Term.UnitConst,
+            p.Term.Unit0Const,
             bodyCtx.replaceStmts(c.stmts :+ p.Stmt.While(condCtx.stmts, condTerm, bodyCtx.stmts))
           )
         case (Nil, Nil, q.Closure(rhs, None)) =>
           println(c.invokeCaptures)
-          // (p.Term.UnitConst, c).success
+          // (p.Term.Unit0Const, c).success
           // TODO delete the LHS var??
           pprint.pprintln(rhs)
           ???

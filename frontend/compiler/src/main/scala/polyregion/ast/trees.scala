@@ -193,19 +193,25 @@ object PolyAstToExpr {
 
   given TypeToExpr: ToExpr[p.Type] with {
     def apply(x: p.Type)(using Quotes) = x match {
-      case p.Type.Var(_) => ???
-      case p.Type.Float  => '{ p.Type.Float }
-      case p.Type.Double => '{ p.Type.Double }
-      case p.Type.Bool   => '{ p.Type.Bool }
-      case p.Type.Byte   => '{ p.Type.Byte }
-      case p.Type.Char   => '{ p.Type.Char }
-      case p.Type.Short  => '{ p.Type.Short }
-      case p.Type.Int    => '{ p.Type.Int }
-      case p.Type.Long   => '{ p.Type.Long }
-      case p.Type.Unit   => '{ p.Type.Unit }
+      case p.Type.Var(_)  => ???
+      case p.Type.Float32 => '{ p.Type.Float32 }
+      case p.Type.Float64 => '{ p.Type.Float64 }
+      case p.Type.Bool1   => '{ p.Type.Bool1 }
+      case p.Type.IntS8   => '{ p.Type.IntS8 }
+      case p.Type.IntU16  => '{ p.Type.IntU16 }
+      case p.Type.IntS16  => '{ p.Type.IntS16 }
+      case p.Type.IntS32  => '{ p.Type.IntS32 }
+      case p.Type.IntS64  => '{ p.Type.IntS64 }
+      case p.Type.Unit0   => '{ p.Type.Unit0 }
+
+      case p.Type.Float16 => '{ p.Type.Float16 }
+      case p.Type.IntU8   => '{ p.Type.IntU8 }
+      case p.Type.IntU32  => '{ p.Type.IntU32 }
+      case p.Type.IntU64  => '{ p.Type.IntU64 }
+
       case p.Type.Struct(name, tpeVars, args, parents) =>
         '{ p.Type.Struct(${ Expr(name) }, ${ Expr(tpeVars) }, ${ Expr(args) }, ${ Expr(parents) }) }
-      case p.Type.Array(component, space)   => '{ p.Type.Array(${ Expr(component) }, ${ Expr(space) }) }
+      case p.Type.Array(component, space)  => '{ p.Type.Array(${ Expr(component) }, ${ Expr(space) }) }
       case p.Type.Exec(tpeVars, args, rtn) => ???
       case p.Type.Nothing                  => ???
     }
@@ -261,14 +267,14 @@ extension (e: p.Type) {
 
   def mapLeaf(f: p.Type => p.Type): p.Type = e match {
     case p.Type.Struct(name, tpeVars, args, parents) => p.Type.Struct(name, tpeVars, args.map(f), parents)
-    case p.Type.Array(component, space)               => p.Type.Array(f(component), space)
+    case p.Type.Array(component, space)              => p.Type.Array(f(component), space)
     case p.Type.Exec(tpeVars, args, rtn)             => p.Type.Exec(tpeVars, args.map(f), f(rtn))
     case x                                           => f(x)
   }
 
   def mapNode(f: p.Type => p.Type): p.Type = e match {
     case p.Type.Struct(name, tpeVars, args, parents) => f(p.Type.Struct(name, tpeVars, args.map(f), parents))
-    case p.Type.Array(component, space)               => f(p.Type.Array(f(component), space))
+    case p.Type.Array(component, space)              => f(p.Type.Array(f(component), space))
     case p.Type.Exec(tpeVars, args, rtn)             => f(p.Type.Exec(tpeVars, args.map(f), f(rtn)))
     case x                                           => x
   }
@@ -281,17 +287,23 @@ extension (e: p.Type) {
     case p.Type.Struct(sym, tpeVars, args, parents) =>
       s"@${sym.repr}${tpeVars.zipAll(args, "???", p.Type.Var("???")).map((v, a) => s"$v=${a.repr}").mkString("<", ",", ">")}(${parents.map(_.repr).mkString("<:")})"
     case p.Type.Array(comp, space) => s"Array[${comp.repr}^${space}]"
-    case p.Type.Bool        => "Bool"
-    case p.Type.Byte        => "Byte"
-    case p.Type.Char        => "Char"
-    case p.Type.Short       => "Short"
-    case p.Type.Int         => "Int"
-    case p.Type.Long        => "Long"
-    case p.Type.Float       => "Float"
-    case p.Type.Double      => "Double"
-    case p.Type.Unit        => "Unit"
-    case p.Type.Nothing     => "Nothing"
-    case p.Type.Var(name)   => s"#$name"
+    case p.Type.Bool1              => "Bool1"
+    case p.Type.IntS8              => "IntS8b"
+    case p.Type.IntU16             => "IntU16c"
+    case p.Type.IntS16             => "IntS16s"
+    case p.Type.IntS32             => "IntS32i"
+    case p.Type.IntS64             => "IntS64l"
+    case p.Type.Float32            => "Float32f"
+    case p.Type.Float64            => "Float64d"
+
+    case p.Type.Float16 => "Float16"
+    case p.Type.IntU8   => "IntU8"
+    case p.Type.IntU32  => "IntU32"
+    case p.Type.IntU64  => "IntU64"
+
+    case p.Type.Unit0     => "Unit0v"
+    case p.Type.Nothing   => "Nothing"
+    case p.Type.Var(name) => s"#$name"
     case p.Type.Exec(tpeArgs, args, rtn) =>
       s"<${tpeArgs.mkString(",")}>(${args.map(_.repr).mkString(",")}) => ${rtn.repr}"
   }
@@ -300,16 +312,22 @@ extension (e: p.Type) {
   def monomorphicName: String = e match {
     case p.Type.Struct(sym, _, args, parents) =>
       sym.fqn.mkString("_") + args.map(_.monomorphicName).mkString("_", "_", "_")
-    case p.Type.Array(comp, space)              => s"${comp.monomorphicName}^$space[]"
-    case p.Type.Bool                     => "Bool"
-    case p.Type.Byte                     => "Byte"
-    case p.Type.Char                     => "Char"
-    case p.Type.Short                    => "Short"
-    case p.Type.Int                      => "Int"
-    case p.Type.Long                     => "Long"
-    case p.Type.Float                    => "Float"
-    case p.Type.Double                   => "Double"
-    case p.Type.Unit                     => "Unit"
+    case p.Type.Array(comp, space) => s"${comp.monomorphicName}^$space[]"
+    case p.Type.Bool1              => "Bool1"
+    case p.Type.IntS8              => "IntS8b"
+    case p.Type.IntU16             => "IntU16c"
+    case p.Type.IntS16             => "IntS16s"
+    case p.Type.IntS32             => "IntS32i"
+    case p.Type.IntS64             => "IntS64l"
+    case p.Type.Float32            => "Float32f"
+    case p.Type.Float64            => "Float64d"
+
+    case p.Type.Float16 => "Float16"
+    case p.Type.IntU8   => "IntU8"
+    case p.Type.IntU32  => "IntU32"
+    case p.Type.IntU64  => "IntU64"
+
+    case p.Type.Unit0                    => "Unit0v"
     case p.Type.Nothing                  => "Nothing"
     case p.Type.Var(name)                => s"#$name"
     case p.Type.Exec(tpeArgs, args, rtn) => ???
@@ -318,119 +336,128 @@ extension (e: p.Type) {
 
 extension (e: p.Term) {
   def repr: String = e match {
-    case p.Term.Select(xs, x)  => (xs :+ x).map(_.repr).mkString(".")
-    case p.Term.Poison(t)      => s"Poison($t)"
-    case p.Term.UnitConst      => s"Unit()"
-    case p.Term.BoolConst(x)   => s"Bool($x)"
-    case p.Term.ByteConst(x)   => s"Byte($x)"
-    case p.Term.CharConst(x)   => s"Char($x)"
-    case p.Term.ShortConst(x)  => s"Short($x)"
-    case p.Term.IntConst(x)    => s"Int($x)"
-    case p.Term.LongConst(x)   => s"Long($x)"
-    case p.Term.FloatConst(x)  => s"Float($x)"
-    case p.Term.DoubleConst(x) => s"Double($x)"
+    case p.Term.Select(xs, x)   => (xs :+ x).map(_.repr).mkString(".")
+    case p.Term.Poison(t)       => s"Poison($t)"
+    case p.Term.Unit0Const      => s"Unit0Const()"
+    case p.Term.Bool1Const(x)   => s"Bool1Const($x)"
+    case p.Term.IntS8Const(x)   => s"IntS8Const($x)"
+    case p.Term.IntU16Const(x)  => s"IntU16Const($x)"
+    case p.Term.IntS16Const(x)  => s"IntS16Const($x)"
+    case p.Term.IntS32Const(x)  => s"IntS32Const($x)"
+    case p.Term.IntS64Const(x)  => s"IntS64Const($x)"
+    case p.Term.Float32Const(x) => s"Float32Const($x)"
+    case p.Term.Float64Const(x) => s"Float64Const($x)"
+
+    case p.Term.Float16Const(x) => s"Float16Const($x)"
+    case p.Term.IntU8Const(x)   => s"IntU8Const($x)"
+    case p.Term.IntU32Const(x)  => s"IntU32Const($x)"
+    case p.Term.IntU64Const(x)  => s"IntU64Const($x)"
+
   }
 }
 
 extension (e: p.Expr) {
   def repr: String = e match {
-    case p.Expr.NullaryIntrinsic(kind, rtn) =>
-      val fn = kind match {
-        case p.NullaryIntrinsicKind.Assert         => "Assert"
-        case p.NullaryIntrinsicKind.GpuGlobalIdxX  => "GlobalIdxX"
-        case p.NullaryIntrinsicKind.GpuGlobalIdxY  => "GlobalIdxY"
-        case p.NullaryIntrinsicKind.GpuGlobalIdxZ  => "GlobalIdxZ"
-        case p.NullaryIntrinsicKind.GpuGlobalSizeX => "GlobalSizeX"
-        case p.NullaryIntrinsicKind.GpuGlobalSizeY => "GlobalSizeY"
-        case p.NullaryIntrinsicKind.GpuGlobalSizeZ => "GlobalSizeZ"
-        case p.NullaryIntrinsicKind.GpuGroupIdxX   => "GroupIdxX"
-        case p.NullaryIntrinsicKind.GpuGroupIdxY   => "GroupIdxY"
-        case p.NullaryIntrinsicKind.GpuGroupIdxZ   => "GroupIdxZ"
-        case p.NullaryIntrinsicKind.GpuGroupSizeX  => "GroupSizeX"
-        case p.NullaryIntrinsicKind.GpuGroupSizeY  => "GroupSizeY"
-        case p.NullaryIntrinsicKind.GpuGroupSizeZ  => "GroupSizeZ"
-        case p.NullaryIntrinsicKind.GpuLocalIdxX   => "LocalIdxX"
-        case p.NullaryIntrinsicKind.GpuLocalIdxY   => "LocalIdxY"
-        case p.NullaryIntrinsicKind.GpuLocalIdxZ   => "LocalIdxZ"
-        case p.NullaryIntrinsicKind.GpuLocalSizeX  => "LocalSizeX"
-        case p.NullaryIntrinsicKind.GpuLocalSizeY  => "LocalSizeY"
-        case p.NullaryIntrinsicKind.GpuLocalSizeZ  => "LocalSizeZ"
+    // case p.Expr.NullaryIntrinsic(kind, rtn) =>
+    //   val fn = kind match {
+    //     case p.NullaryIntrinsicKind.Assert         => "Assert"
+    //     case p.NullaryIntrinsicKind.GpuGlobalIdxX  => "GlobalIdxX"
+    //     case p.NullaryIntrinsicKind.GpuGlobalIdxY  => "GlobalIdxY"
+    //     case p.NullaryIntrinsicKind.GpuGlobalIdxZ  => "GlobalIdxZ"
+    //     case p.NullaryIntrinsicKind.GpuGlobalSizeX => "GlobalSizeX"
+    //     case p.NullaryIntrinsicKind.GpuGlobalSizeY => "GlobalSizeY"
+    //     case p.NullaryIntrinsicKind.GpuGlobalSizeZ => "GlobalSizeZ"
+    //     case p.NullaryIntrinsicKind.GpuGroupIdxX   => "GroupIdxX"
+    //     case p.NullaryIntrinsicKind.GpuGroupIdxY   => "GroupIdxY"
+    //     case p.NullaryIntrinsicKind.GpuGroupIdxZ   => "GroupIdxZ"
+    //     case p.NullaryIntrinsicKind.GpuGroupSizeX  => "GroupSizeX"
+    //     case p.NullaryIntrinsicKind.GpuGroupSizeY  => "GroupSizeY"
+    //     case p.NullaryIntrinsicKind.GpuGroupSizeZ  => "GroupSizeZ"
+    //     case p.NullaryIntrinsicKind.GpuLocalIdxX   => "LocalIdxX"
+    //     case p.NullaryIntrinsicKind.GpuLocalIdxY   => "LocalIdxY"
+    //     case p.NullaryIntrinsicKind.GpuLocalIdxZ   => "LocalIdxZ"
+    //     case p.NullaryIntrinsicKind.GpuLocalSizeX  => "LocalSizeX"
+    //     case p.NullaryIntrinsicKind.GpuLocalSizeY  => "LocalSizeY"
+    //     case p.NullaryIntrinsicKind.GpuLocalSizeZ  => "LocalSizeZ"
 
-        case p.NullaryIntrinsicKind.GpuGroupBarrier => "GroupBarrier"
-        case p.NullaryIntrinsicKind.GpuGroupFence   => "GroupFence"
-      }
-      s"$fn'"
-    case p.Expr.UnaryIntrinsic(lhs, kind, rtn) =>
-      val fn = kind match {
-        case p.UnaryIntrinsicKind.Sin  => "sin"
-        case p.UnaryIntrinsicKind.Cos  => "cos"
-        case p.UnaryIntrinsicKind.Tan  => "tan"
-        case p.UnaryIntrinsicKind.Asin => "asin"
-        case p.UnaryIntrinsicKind.Acos => "acos"
-        case p.UnaryIntrinsicKind.Atan => "atan"
-        case p.UnaryIntrinsicKind.Sinh => "sinh"
-        case p.UnaryIntrinsicKind.Cosh => "cosh"
-        case p.UnaryIntrinsicKind.Tanh => "tanh"
+    //     case p.NullaryIntrinsicKind.GpuGroupBarrier => "GroupBarrier"
+    //     case p.NullaryIntrinsicKind.GpuGroupFence   => "GroupFence"
+    //   }
+    //   s"$fn'"
+    // case p.Expr.UnaryIntrinsic(lhs, kind, rtn) =>
+    //   val fn = kind match {
+    //     case p.UnaryIntrinsicKind.Sin  => "sin"
+    //     case p.UnaryIntrinsicKind.Cos  => "cos"
+    //     case p.UnaryIntrinsicKind.Tan  => "tan"
+    //     case p.UnaryIntrinsicKind.Asin => "asin"
+    //     case p.UnaryIntrinsicKind.Acos => "acos"
+    //     case p.UnaryIntrinsicKind.Atan => "atan"
+    //     case p.UnaryIntrinsicKind.Sinh => "sinh"
+    //     case p.UnaryIntrinsicKind.Cosh => "cosh"
+    //     case p.UnaryIntrinsicKind.Tanh => "tanh"
 
-        case p.UnaryIntrinsicKind.Signum => "signum"
-        case p.UnaryIntrinsicKind.Abs    => "abs"
-        case p.UnaryIntrinsicKind.Round  => "round"
-        case p.UnaryIntrinsicKind.Ceil   => "ceil"
-        case p.UnaryIntrinsicKind.Floor  => "floor"
-        case p.UnaryIntrinsicKind.Rint   => "rint"
+    //     case p.UnaryIntrinsicKind.Signum => "signum"
+    //     case p.UnaryIntrinsicKind.Abs    => "abs"
+    //     case p.UnaryIntrinsicKind.Round  => "round"
+    //     case p.UnaryIntrinsicKind.Ceil   => "ceil"
+    //     case p.UnaryIntrinsicKind.Floor  => "floor"
+    //     case p.UnaryIntrinsicKind.Rint   => "rint"
 
-        case p.UnaryIntrinsicKind.Sqrt  => "sqrt"
-        case p.UnaryIntrinsicKind.Cbrt  => "cbrt"
-        case p.UnaryIntrinsicKind.Exp   => "exp"
-        case p.UnaryIntrinsicKind.Expm1 => "expm1"
-        case p.UnaryIntrinsicKind.Log   => "log"
-        case p.UnaryIntrinsicKind.Log1p => "log1p"
-        case p.UnaryIntrinsicKind.Log10 => "log10"
+    //     case p.UnaryIntrinsicKind.Sqrt  => "sqrt"
+    //     case p.UnaryIntrinsicKind.Cbrt  => "cbrt"
+    //     case p.UnaryIntrinsicKind.Exp   => "exp"
+    //     case p.UnaryIntrinsicKind.Expm1 => "expm1"
+    //     case p.UnaryIntrinsicKind.Log   => "log"
+    //     case p.UnaryIntrinsicKind.Log1p => "log1p"
+    //     case p.UnaryIntrinsicKind.Log10 => "log10"
 
-        case p.UnaryIntrinsicKind.BNot => "~"
+    //     case p.UnaryIntrinsicKind.BNot => "~"
 
-        case p.UnaryIntrinsicKind.Pos => "+"
-        case p.UnaryIntrinsicKind.Neg => "-"
+    //     case p.UnaryIntrinsicKind.Pos => "+"
+    //     case p.UnaryIntrinsicKind.Neg => "-"
 
-        case p.UnaryIntrinsicKind.LogicNot => "!"
+    //     case p.UnaryIntrinsicKind.LogicNot => "!"
 
-      }
-      s"$fn'(${lhs.repr})"
-    case p.Expr.BinaryIntrinsic(lhs, rhs, kind, _) =>
-      val op = kind match {
-        case p.BinaryIntrinsicKind.Add => "+"
-        case p.BinaryIntrinsicKind.Sub => "-"
-        case p.BinaryIntrinsicKind.Mul => "*"
-        case p.BinaryIntrinsicKind.Div => "/"
-        case p.BinaryIntrinsicKind.Rem => "%"
+    //   }
+    //   s"$fn'(${lhs.repr})"
+    // case p.Expr.BinaryIntrinsic(lhs, rhs, kind, _) =>
+    //   val op = kind match {
+    //     case p.BinaryIntrinsicKind.Add => "+"
+    //     case p.BinaryIntrinsicKind.Sub => "-"
+    //     case p.BinaryIntrinsicKind.Mul => "*"
+    //     case p.BinaryIntrinsicKind.Div => "/"
+    //     case p.BinaryIntrinsicKind.Rem => "%"
 
-        case p.BinaryIntrinsicKind.Pow => "**"
+    //     case p.BinaryIntrinsicKind.Pow => "**"
 
-        case p.BinaryIntrinsicKind.Min => "min"
-        case p.BinaryIntrinsicKind.Max => "max"
+    //     case p.BinaryIntrinsicKind.Min => "min"
+    //     case p.BinaryIntrinsicKind.Max => "max"
 
-        case p.BinaryIntrinsicKind.Atan2 => "atan2"
-        case p.BinaryIntrinsicKind.Hypot => "hypot"
+    //     case p.BinaryIntrinsicKind.Atan2 => "atan2"
+    //     case p.BinaryIntrinsicKind.Hypot => "hypot"
 
-        case p.BinaryIntrinsicKind.BAnd => "&"
-        case p.BinaryIntrinsicKind.BOr  => "|"
-        case p.BinaryIntrinsicKind.BXor => "^"
-        case p.BinaryIntrinsicKind.BSL  => "<<"
-        case p.BinaryIntrinsicKind.BSR  => ">>"
-        case p.BinaryIntrinsicKind.BZSR => ">>>"
+    //     case p.BinaryIntrinsicKind.BAnd => "&"
+    //     case p.BinaryIntrinsicKind.BOr  => "|"
+    //     case p.BinaryIntrinsicKind.BXor => "^"
+    //     case p.BinaryIntrinsicKind.BSL  => "<<"
+    //     case p.BinaryIntrinsicKind.BSR  => ">>"
+    //     case p.BinaryIntrinsicKind.BZSR => ">>>"
 
-        case p.BinaryIntrinsicKind.LogicEq  => "=="
-        case p.BinaryIntrinsicKind.LogicNeq => "!="
-        case p.BinaryIntrinsicKind.LogicAnd => "&&"
-        case p.BinaryIntrinsicKind.LogicOr  => "||"
-        case p.BinaryIntrinsicKind.LogicLte => "<="
-        case p.BinaryIntrinsicKind.LogicGte => ">="
-        case p.BinaryIntrinsicKind.LogicLt  => "<"
-        case p.BinaryIntrinsicKind.LogicGt  => ">"
+    //     case p.BinaryIntrinsicKind.LogicEq  => "=="
+    //     case p.BinaryIntrinsicKind.LogicNeq => "!="
+    //     case p.BinaryIntrinsicKind.LogicAnd => "&&"
+    //     case p.BinaryIntrinsicKind.LogicOr  => "||"
+    //     case p.BinaryIntrinsicKind.LogicLte => "<="
+    //     case p.BinaryIntrinsicKind.LogicGte => ">="
+    //     case p.BinaryIntrinsicKind.LogicLt  => "<"
+    //     case p.BinaryIntrinsicKind.LogicGt  => ">"
 
-      }
-      s"${lhs.repr} $op' ${rhs.repr}"
+    //   }
+    //   s"${lhs.repr} $op' ${rhs.repr}"
 
+    case p.Expr.SpecOp(op)     => s"${op}'"
+    case p.Expr.IntrOp(op)     => s"${op}'"
+    case p.Expr.MathOp(op)     => s"${op}'"
     case p.Expr.Cast(from, to) => s"${from.repr}.to[${to.repr}]"
     case p.Expr.Alias(ref)     => s"(~>${ref.repr})"
 

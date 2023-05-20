@@ -5,9 +5,12 @@
 #include "llvm.h"
 #include "llvmc.h"
 
+#include "llvm_amdgpu.h"
+#include "llvm_cpu.h"
+#include "llvm_nvptx.h"
+#include "llvm_opencl.h"
+
 #include "llvm/IR/Intrinsics.h"
-#include "llvm/IR/IntrinsicsAMDGPU.h"
-#include "llvm/IR/IntrinsicsNVPTX.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Support/Host.h"
@@ -24,7 +27,8 @@ template <typename T> static std::string llvm_tostring(const T *t) {
   return rso.str();
 }
 
-static llvm::Value *sizeOf(llvm::IRBuilder<> &B, llvm::LLVMContext &C, llvm::Type *ptrTpe) {
+ValPtr LLVMBackend::load(llvm::IRBuilder<> &B, ValPtr rhs, llvm::Type *ty) { return B.CreateLoad(ty, rhs); }
+ValPtr LLVMBackend::sizeOf(llvm::IRBuilder<> &B, llvm::LLVMContext &C, llvm::Type *ptrTpe) {
   // http://nondot.org/sabre/LLVMNotes/SizeOf-OffsetOf-VariableSizedStructs.txt
   // we want
   // %SizePtr = getelementptr %T, %T* null, i32 1
@@ -39,10 +43,8 @@ static llvm::Value *sizeOf(llvm::IRBuilder<> &B, llvm::LLVMContext &C, llvm::Typ
   return sizeVal;
 }
 
-static llvm::Value *load(llvm::IRBuilder<> &B, llvm::Value *rhs, llvm::Type *ty) { return B.CreateLoad(ty, rhs); }
-
-LLVM::AstTransformer::AstTransformer(const LLVM::Options &options, llvm::LLVMContext &c)
-    : options(options), C(c), stackVarPtrs(), structTypes(), functions(), B(C) {
+LLVMBackend::AstTransformer::AstTransformer(const LLVMBackend::Options &options, llvm::LLVMContext &c)
+    : options(options), C(c), targetHandler(TargetSpecificHandler::from(options.target)), stackVarPtrs(), structTypes(), functions(), B(C) {
   // Work out what address space we're using for arguments
   switch (options.target) {
     case Target::x86_64:
@@ -76,45 +78,67 @@ LLVM::AstTransformer::AstTransformer(const LLVM::Options &options, llvm::LLVMCon
   }
 }
 
-llvm::Value *LLVM::AstTransformer::invokeMalloc(llvm::Function *parent, llvm::Value *size) {
-  return B.CreateCall(mkExternalFn(parent, Type::Array(Type::Byte(), TypeSpace::Global()), "malloc", {Type::Long()}), size);
+std::unique_ptr<LLVMBackend::TargetSpecificHandler> LLVMBackend::TargetSpecificHandler::from(LLVMBackend::Target target) {
+  switch (target) {
+    case Target::x86_64:  // fallthrough
+    case Target::AArch64: // fallthrough
+    case Target::ARM: return std::make_unique<CPUTargetSpecificHandler>();
+    case Target::NVPTX64: return std::make_unique<NVPTXTargetSpecificHandler>();
+    case Target::AMDGCN: return std::make_unique<AMDGPUTargetSpecificHandler>();
+    case Target::SPIRV32: // fallthrough
+    case Target::SPIRV64: return std::make_unique<OpenCLTargetSpecificHandler>();
+  }
+}
+LLVMBackend::TargetSpecificHandler::~TargetSpecificHandler() {}
+
+ValPtr LLVMBackend::AstTransformer::invokeMalloc(llvm::Function *parent, ValPtr size) {
+  return B.CreateCall(mkExternalFn(parent, Type::Array(Type::IntS8(), TypeSpace::Global()), "malloc", {Type::IntS64()}), size);
 }
 
-llvm::Value *LLVM::AstTransformer::invokeAbort(llvm::Function *parent) {
+ValPtr LLVMBackend::AstTransformer::invokeAbort(llvm::Function *parent) {
   return B.CreateCall(mkExternalFn(parent, Type::Nothing(), "abort", {}));
 }
 
 // the only unsigned type in PolyAst
-static bool isUnsigned(const Type::Any &tpe) { return holds<Type::Char>(tpe); }
+static bool isUnsigned(const Type::Any &tpe) { return holds<Type::IntU16>(tpe); }
 
 static constexpr int64_t nIntMin(uint64_t bits) { return -(int64_t(1) << (bits - 1)); }
 static constexpr int64_t nIntMax(uint64_t bits) { return (int64_t(1) << (bits - 1)) - 1; }
 
-Pair<llvm::StructType *, LLVM::AstTransformer::StructMemberIndexTable> LLVM::AstTransformer::mkStruct(const StructDef &def) {
+Pair<llvm::StructType *, LLVMBackend::AstTransformer::StructMemberIndexTable> LLVMBackend::AstTransformer::mkStruct(const StructDef &def) {
   std::vector<llvm::Type *> types(def.members.size());
   std::transform(def.members.begin(), def.members.end(), types.begin(), [&](const StructMember &n) {
     auto tpe = mkTpe(n.named.tpe);
     return tpe->isStructTy() ? B.getPtrTy() : tpe;
   });
-  LLVM::AstTransformer::StructMemberIndexTable table;
+  LLVMBackend::AstTransformer::StructMemberIndexTable table;
   for (size_t i = 0; i < def.members.size(); ++i)
     table[def.members[i].named.symbol] = i;
   return {llvm::StructType::create(C, types, qualified(def.name)), table};
 }
 
-llvm::Type *LLVM::AstTransformer::mkTpe(const Type::Any &tpe, bool functionBoundary) {                         //
-  return variants::total(                                                                                      //
-      *tpe,                                                                                                    //
-      [&](const Type::Float &x) -> llvm::Type * { return llvm::Type::getFloatTy(C); },                         //
-      [&](const Type::Double &x) -> llvm::Type * { return llvm::Type::getDoubleTy(C); },                       //
-      [&](const Type::Bool &x) -> llvm::Type * { return llvm::Type::getIntNTy(C, functionBoundary ? 8 : 1); }, //
-      [&](const Type::Byte &x) -> llvm::Type * { return llvm::Type::getInt8Ty(C); },                           //
-      [&](const Type::Char &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },                          //
-      [&](const Type::Short &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); },                         //
-      [&](const Type::Int &x) -> llvm::Type * { return llvm::Type::getInt32Ty(C); },                           //
-      [&](const Type::Long &x) -> llvm::Type * { return llvm::Type::getInt64Ty(C); },                          //
-      [&](const Type::Unit &x) -> llvm::Type * { return llvm::Type::getIntNTy(C, functionBoundary ? 8 : 1); }, //
-      [&](const Type::Nothing &x) -> llvm::Type * { return llvm::Type::getVoidTy(C); },                        //
+llvm::Type *LLVMBackend::AstTransformer::mkTpe(const Type::Any &tpe, bool functionBoundary) {                   //
+  return variants::total(                                                                                       //
+      *tpe,                                                                                                     //
+      [&](const Type::Float16 &x) -> llvm::Type * { return llvm::Type::getHalfTy(C); },                         //
+      [&](const Type::Float32 &x) -> llvm::Type * { return llvm::Type::getFloatTy(C); },                        //
+      [&](const Type::Float64 &x) -> llvm::Type * { return llvm::Type::getDoubleTy(C); },                       //
+      [&](const Type::Bool1 &x) -> llvm::Type * { return llvm::Type::getIntNTy(C, functionBoundary ? 8 : 1); }, //
+
+      [&](const Type::IntU8 &x) -> llvm::Type * { return llvm::Type::getInt8Ty(C); },   //
+      [&](const Type::IntU16 &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); }, //
+      [&](const Type::IntU32 &x) -> llvm::Type * { return llvm::Type::getInt32Ty(C); }, //
+      [&](const Type::IntU64 &x) -> llvm::Type * { return llvm::Type::getInt64Ty(C); }, //
+
+      [&](const Type::IntS8 &x) -> llvm::Type * { return llvm::Type::getInt8Ty(C); },   //
+      [&](const Type::IntS16 &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); }, //
+      [&](const Type::IntS32 &x) -> llvm::Type * { return llvm::Type::getInt32Ty(C); }, //
+      [&](const Type::IntS64 &x) -> llvm::Type * { return llvm::Type::getInt64Ty(C); }, //
+
+      [&](const Type::Unit0 &x) -> llvm::Type * {
+        return functionBoundary ? llvm::Type::getVoidTy(C) : llvm::Type::getIntNTy(C, 1); /*TODO this really needs to be 0*/
+      },                                                                                 //
+      [&](const Type::Nothing &x) -> llvm::Type * { return llvm::Type::getVoidTy(C); },  //
       [&](const Type::Struct &x) -> llvm::Type * {
         if (auto def = polyregion::get_opt(structTypes, x.name); def) return def->first;
         else {
@@ -134,7 +158,7 @@ llvm::Type *LLVM::AstTransformer::mkTpe(const Type::Any &tpe, bool functionBound
             [&](const TypeSpace::Global &_) { return GlobalAS; }) //
         );
         //        // These two types promote to a byte when stored in an array
-        //        if (holds<Type::Bool>(x.component) || holds<Type::Unit>(x.component)) {
+        //        if (holds<Type::Bool1>(x.component) || holds<Type::Unit0>(x.component)) {
         //          return llvm::Type::getInt8Ty(C)->getPointerTo(AS);
         //        } else {
         //          auto comp = mkTpe(x.component);
@@ -147,7 +171,7 @@ llvm::Type *LLVM::AstTransformer::mkTpe(const Type::Any &tpe, bool functionBound
   );
 }
 
-llvm::Value *LLVM::AstTransformer::findStackVar(const Named &named) {
+ValPtr LLVMBackend::AstTransformer::findStackVar(const Named &named) {
   //  check the LUT table for known variables defined by var or brought in scope by parameters
   if (auto x = polyregion::get_opt(stackVarPtrs, named.symbol); x) {
     auto [tpe, value] = *x;
@@ -156,7 +180,7 @@ llvm::Value *LLVM::AstTransformer::findStackVar(const Named &named) {
     }
     return value;
   } else {
-    auto pool = mk_string2<std::string, Pair<Type::Any, llvm::Value *>>(
+    auto pool = mk_string2<std::string, Pair<Type::Any, ValPtr>>(
         stackVarPtrs,
         [](auto &&p) { return "`" + p.first + "` = " + to_string(p.second.first) + "(IR=" + llvm_tostring(p.second.second) + ")"; },
         "\n->");
@@ -164,7 +188,7 @@ llvm::Value *LLVM::AstTransformer::findStackVar(const Named &named) {
   }
 }
 
-llvm::Value *LLVM::AstTransformer::mkSelectPtr(const Term::Select &select) {
+ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
 
   auto fail = [&]() { return " (part of the select expression " + to_string(select) + ")"; };
 
@@ -209,535 +233,160 @@ llvm::Value *LLVM::AstTransformer::mkSelectPtr(const Term::Select &select) {
   }
 }
 
-llvm::Value *LLVM::AstTransformer::mkTermVal(const Term::Any &ref) {
+ValPtr LLVMBackend::AstTransformer::mkTermVal(const Term::Any &ref) {
   using llvm::ConstantFP;
   using llvm::ConstantInt;
   return variants::total(
       *ref, //
-      [&](const Term::Select &x) -> llvm::Value * {
+      [&](const Term::Select &x) -> ValPtr {
         auto tpe = mkTpe(x.tpe);
         return load(B, mkSelectPtr(x), tpe->isStructTy() ? B.getPtrTy(GlobalAS) : tpe);
       },
-      [&](const Term::Poison &x) -> llvm::Value * {
+      [&](const Term::Poison &x) -> ValPtr {
         if (auto tpe = mkTpe(x.tpe); llvm::isa<llvm::PointerType>(tpe)) {
           return llvm::ConstantPointerNull::get(static_cast<llvm::PointerType *>(tpe));
         } else {
           return undefined(__FILE__, __LINE__);
         }
       },
-      [&](const Term::UnitConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt1Ty(C), 0); },
-      [&](const Term::BoolConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt1Ty(C), x.value); },
-      [&](const Term::ByteConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt8Ty(C), x.value); },
-      [&](const Term::CharConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt16Ty(C), x.value); },
-      [&](const Term::ShortConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt16Ty(C), x.value); },
-      [&](const Term::IntConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt32Ty(C), x.value); },
-      [&](const Term::LongConst &x) -> llvm::Value * { return ConstantInt::get(llvm::Type::getInt64Ty(C), x.value); },
-      [&](const Term::FloatConst &x) -> llvm::Value * { return ConstantFP::get(llvm::Type::getFloatTy(C), x.value); },
-      [&](const Term::DoubleConst &x) -> llvm::Value * { return ConstantFP::get(llvm::Type::getDoubleTy(C), x.value); });
+      [&](const Term::Unit0Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getIntNTy(C, 0), 0); },
+      [&](const Term::Bool1Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt1Ty(C), x.value); },
+
+      [&](const Term::IntU8Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt8Ty(C), x.value); },
+      [&](const Term::IntU16Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt16Ty(C), x.value); },
+      [&](const Term::IntU32Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt32Ty(C), x.value); },
+      [&](const Term::IntU64Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt64Ty(C), x.value); },
+
+      [&](const Term::IntS8Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt8Ty(C), x.value); },
+      [&](const Term::IntS16Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt16Ty(C), x.value); },
+      [&](const Term::IntS32Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt32Ty(C), x.value); },
+      [&](const Term::IntS64Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt64Ty(C), x.value); },
+
+      [&](const Term::Float16Const &x) -> ValPtr { return ConstantFP::get(llvm::Type::getHalfTy(C), x.value); },
+      [&](const Term::Float32Const &x) -> ValPtr { return ConstantFP::get(llvm::Type::getFloatTy(C), x.value); },
+      [&](const Term::Float64Const &x) -> ValPtr { return ConstantFP::get(llvm::Type::getDoubleTy(C), x.value); });
 }
 
-llvm::Function *LLVM::AstTransformer::mkExternalFn(llvm::Function *parent, const Type::Any &rtn, const std::string &name,
-                                                   const std::vector<Type::Any> &args) {
+llvm::Function *LLVMBackend::AstTransformer::mkExternalFn(llvm::Function *parent, const Type::Any &rtn, const std::string &name,
+                                                          const std::vector<Type::Any> &args) {
   InvokeSignature sig(Sym({name}), {}, {}, args, {}, rtn);
   if (auto it = functions.find(sig); it != functions.end()) {
     return it->second;
   } else {
     auto llvmArgs = map_vec<Type::Any, llvm::Type *>(args, [&](auto t) { return mkTpe(t); });
-    auto ft = llvm::FunctionType::get(mkTpe(rtn), llvmArgs, false);
+    auto ft = llvm::FunctionType::get(mkTpe(rtn, true), llvmArgs, false);
     auto fn = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, name, parent->getParent());
     functions.emplace(sig, fn);
     return fn;
   }
 }
 
-llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Function *fn, const std::string &key) {
-
-  using ValPtr = llvm::Value *;
-  namespace Intr = llvm::Intrinsic;
-
-  const auto unaryExpr = [&](const Term::Any &l, const Type::Any &rtn, const std::function<ValPtr(ValPtr)> &fn) {
-    if (tpe(l) != rtn) {
-      throw std::logic_error("Semantic error: lhs type " + to_string(tpe(l)) + " of binary numeric operation in " + to_string(expr) +
-                             " doesn't match return type " + to_string(rtn));
-    }
-
-    return fn(mkTermVal(l));
-  };
-
-  const auto binaryExpr = [&](const Term::Any &l, const Term::Any &r, const Type::Any &rtn,
-                              const std::function<ValPtr(ValPtr, ValPtr)> &fn) {
-    if (tpe(l) != rtn) {
-      throw std::logic_error("Semantic error: lhs type " + to_string(tpe(l)) + " of binary numeric operation in " + to_string(expr) +
-                             " doesn't match return type " + to_string(rtn));
-    }
-    if (tpe(r) != rtn) {
-      throw std::logic_error("Semantic error: rhs type " + to_string(tpe(r)) + " of binary numeric operation in " + to_string(expr) +
-                             " doesn't match return type " + to_string(rtn));
-    }
-
-    return fn(mkTermVal(l), mkTermVal(r));
-  };
-
-  const auto unaryNumOp = [&](const Term::Any &arg, const Type::Any &rtn, const std::function<ValPtr(ValPtr)> &integralFn,
-                              const std::function<ValPtr(ValPtr)> &fractionalFn) -> ValPtr {
-    return unaryExpr(arg, rtn, [&](auto lhs) -> ValPtr {
-      if (holds<TypeKind::Integral>(kind(rtn))) {
-        return integralFn(lhs);
-      } else if (holds<TypeKind::Fractional>(kind(rtn))) {
-        return fractionalFn(lhs);
-      } else {
-        return undefined(__FILE__, __LINE__);
-      }
-    });
-  };
-
-  const auto binaryNumOp = [&](const Term::Any &l, const Term::Any &r, const Type::Any &rtn,
-                               const std::function<ValPtr(ValPtr, ValPtr)> &integralFn,
-                               const std::function<ValPtr(ValPtr, ValPtr)> &fractionalFn) -> ValPtr {
-    return binaryExpr(l, r, rtn, [&](auto lhs, auto rhs) -> ValPtr {
-      if (holds<TypeKind::Integral>(kind(rtn))) {
-        return integralFn(lhs, rhs);
-      } else if (holds<TypeKind::Fractional>(kind(rtn))) {
-        return fractionalFn(lhs, rhs);
-      } else {
-        return undefined(__FILE__, __LINE__);
-      }
-    });
-  };
-
-  const auto extFn1 = [&](const std::string &name, const Type::Any &tpe, const Term::Any &arg) -> ValPtr {
-    auto fn_ = mkExternalFn(fn, tpe, name, {tpe});
-    if (options.target == Target::SPIRV32 || options.target == Target::SPIRV64) {
-      fn_->setCallingConv(llvm::CallingConv::SPIR_FUNC);
-      fn_->addFnAttr(llvm::Attribute::NoBuiltin);
-      fn_->addFnAttr(llvm::Attribute::Convergent);
-      if (!holds<Type::Unit>(tpe)) {
-        fn_->addFnAttr(llvm::Attribute::WillReturn);
-      }
-    }
-    auto call = B.CreateCall(fn_, mkTermVal(arg));
-    call->setCallingConv(fn_->getCallingConv());
-    return call;
-  };
-
-  const auto extFn2 = [&](const std::string &name, const Type::Any &tpe, //
-                          const Term::Any &lhs, const Term::Any &rhs) -> ValPtr {
-    auto fn_ = mkExternalFn(fn, tpe, name, {tpe, tpe});
-    if (options.target == Target::SPIRV32 || options.target == Target::SPIRV64) {
-      fn_->setCallingConv(llvm::CallingConv::SPIR_FUNC);
-      fn_->addFnAttr(llvm::Attribute::NoBuiltin);
-      fn_->addFnAttr(llvm::Attribute::Convergent);
-    }
-    auto call = B.CreateCall(fn_, {mkTermVal(lhs), mkTermVal(rhs)});
-    call->setCallingConv(fn_->getCallingConv());
-    return call;
-  };
-
-  const auto intr0 = [&](Intr::ID id) -> ValPtr {
-    auto callee = Intr::getDeclaration(fn->getParent(), id, {});
-    return B.CreateCall(callee);
-  };
-
-  const auto intr1 = [&](Intr::ID id, const Type::Any &overload, const Term::Any &arg) -> ValPtr {
-    auto callee = Intr::getDeclaration(fn->getParent(), id, mkTpe(overload));
-    return B.CreateCall(callee, mkTermVal(arg));
-  };
-
-  const auto intr2 = [&](Intr::ID id, const Type::Any &overload, //
-                         const Term::Any &lhs, const Term::Any &rhs) -> ValPtr {
-    // XXX the overload type here is about the overloading of intrinsic names, not about the parameter types
-    // i.e. f32 is for foo.f32(float %a, float %b, float %c)
-    auto callee = Intr::getDeclaration(fn->getParent(), id, mkTpe(overload));
-    return B.CreateCall(callee, {mkTermVal(lhs), mkTermVal(rhs)});
-  };
+ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Function *fn, const std::string &key) {
 
   return variants::total(
       *expr, //
-      [&](const Expr::UnaryIntrinsic &x) {
-        auto tpe = x.rtn;
-        auto arg = x.lhs;
+      [&](const Expr::SpecOp &x) -> ValPtr { return targetHandler->mkSpecVal(*this, fn, x); },
+      [&](const Expr::MathOp &x) -> ValPtr { return targetHandler->mkMathVal(*this, fn, x); },
+      [&](const Expr::IntrOp &x) -> ValPtr {
+        auto intr = x.op;
         return variants::total(
-            *x.kind,                                                                     //
-            [&](const UnaryIntrinsicKind::Sin &) { return intr1(Intr::sin, tpe, arg); }, //
-            [&](const UnaryIntrinsicKind::Cos &) { return intr1(Intr::cos, tpe, arg); }, //
-            [&](const UnaryIntrinsicKind::Tan &) { return extFn1("tan", tpe, arg); },    //
-
-            [&](const UnaryIntrinsicKind::Asin &) { return extFn1("asin", tpe, arg); }, //
-            [&](const UnaryIntrinsicKind::Acos &) { return extFn1("acos", tpe, arg); }, //
-            [&](const UnaryIntrinsicKind::Atan &) { return extFn1("atan", tpe, arg); }, //
-            [&](const UnaryIntrinsicKind::Sinh &) { return extFn1("sinh", tpe, arg); }, //
-            [&](const UnaryIntrinsicKind::Cosh &) { return extFn1("cosh", tpe, arg); }, //
-            [&](const UnaryIntrinsicKind::Tanh &) { return extFn1("tanh", tpe, arg); }, //
-
-            [&](const UnaryIntrinsicKind::Signum &) {
+            *intr, //
+            [&](const Intr::BNot &v) -> ValPtr { return unaryExpr(expr, v.x, v.tpe, [&](auto x) { return B.CreateNot(x); }); },
+            [&](const Intr::LogicNot &v) -> ValPtr { return B.CreateNot(mkTermVal(v.x)); },
+            [&](const Intr::Pos &v) -> ValPtr {
               return unaryNumOp(
-                  arg, tpe, //
-                  [&](auto x) {
-                    auto msbOffset = x->getType()->getPrimitiveSizeInBits() - 1;
-                    return B.CreateOr(B.CreateAShr(x, msbOffset), B.CreateLShr(B.CreateNeg(x), msbOffset));
-                  },
-                  [&](auto x) {
-                    auto nan = B.CreateFCmpUNO(x, x);
-                    auto zero = B.CreateFCmpUNO(x, llvm::ConstantFP::get(x->getType(), 0));
-                    Term::Any magnitude;
-                    if (holds<Type::Float>(tpe))        //
-                      magnitude = Term::FloatConst(1);  //
-                    else if (holds<Type::Double>(tpe))  //
-                      magnitude = Term::DoubleConst(1); //
-                    else
-                      error(__FILE__, __LINE__);
-                    return B.CreateSelect(B.CreateLogicalOr(nan, zero), x, intr2(Intr::copysign, tpe, magnitude, arg));
-                  });
-            }, //
-            [&](const UnaryIntrinsicKind::Abs &) {
+                  expr, v.x, v.tpe, [&](auto x) { return x; }, [&](auto x) { return x; });
+            },
+            [&](const Intr::Neg &v) -> ValPtr {
               return unaryNumOp(
-                  arg, tpe, //
-                  [&](auto x) { return intr1(Intr::abs, tpe, arg); }, [&](auto x) { return intr1(Intr::fabs, tpe, arg); });
-            },                                                                               //
-            [&](const UnaryIntrinsicKind::Round &) { return intr1(Intr::round, tpe, arg); }, //
-            [&](const UnaryIntrinsicKind::Ceil &) { return intr1(Intr::ceil, tpe, arg); },   //
-            [&](const UnaryIntrinsicKind::Floor &) { return intr1(Intr::floor, tpe, arg); }, //
-            [&](const UnaryIntrinsicKind::Rint &) { return intr1(Intr::rint, tpe, arg); },   //
-
-            [&](const UnaryIntrinsicKind::Sqrt &) { return intr1(Intr::sqrt, tpe, arg); },   //
-            [&](const UnaryIntrinsicKind::Cbrt &) { return extFn1("cbrt", tpe, arg); },      //
-            [&](const UnaryIntrinsicKind::Exp &) { return intr1(Intr::exp, tpe, arg); },     //
-            [&](const UnaryIntrinsicKind::Expm1 &) { return extFn1("expm1", tpe, arg); },    //
-            [&](const UnaryIntrinsicKind::Log &) { return intr1(Intr::log, tpe, arg); },     //
-            [&](const UnaryIntrinsicKind::Log1p &) { return extFn1("log1p", tpe, arg); },    //
-            [&](const UnaryIntrinsicKind::Log10 &) { return intr1(Intr::log10, tpe, arg); }, //
-
-            [&](const UnaryIntrinsicKind::BNot &) { return unaryExpr(arg, tpe, [&](auto x) { return B.CreateNot(x); }); },
-            [&](const UnaryIntrinsicKind::Pos &) {
-              return unaryNumOp(
-                  arg, tpe,                  //
-                  [&](auto x) { return x; }, //
-                  [&](auto x) { return x; });
+                  expr, v.x, v.tpe, [&](auto x) { return B.CreateNeg(x); }, [&](auto x) { return B.CreateFNeg(x); });
             },
-            [&](const UnaryIntrinsicKind::Neg &) {
-              return unaryNumOp(
-                  arg, tpe,                               //
-                  [&](auto x) { return B.CreateNeg(x); }, //
-                  [&](auto x) { return B.CreateFNeg(x); });
-            },
-            [&](const UnaryIntrinsicKind::LogicNot &) { return B.CreateNot(mkTermVal(x.lhs), key); });
-      },
-      [&](const Expr::NullaryIntrinsic &x) -> ValPtr {
-        switch (options.target) {
-          case Target::x86_64:
-          case Target::AArch64:
-          case Target::ARM:
-            return variants::total(
-                *x.kind, //
-                [&](const NullaryIntrinsicKind::Assert &) -> ValPtr { return invokeAbort(fn); },
-                [&](const NullaryIntrinsicKind::GpuGlobalIdxX &) -> ValPtr { return undefined(__FILE__, __LINE__); },
-                [&](const NullaryIntrinsicKind::GpuGlobalIdxY &) -> ValPtr { return undefined(__FILE__, __LINE__); },
-                [&](const NullaryIntrinsicKind::GpuGlobalIdxZ &) -> ValPtr { return undefined(__FILE__, __LINE__); },
-                [&](const NullaryIntrinsicKind::GpuGlobalSizeX &) -> ValPtr { return undefined(__FILE__, __LINE__); },
-                [&](const NullaryIntrinsicKind::GpuGlobalSizeY &) -> ValPtr { return undefined(__FILE__, __LINE__); },
-                [&](const NullaryIntrinsicKind::GpuGlobalSizeZ &) -> ValPtr { return undefined(__FILE__, __LINE__); },
-                [&](const NullaryIntrinsicKind::GpuGroupIdxX &) -> ValPtr { return undefined(__FILE__, __LINE__); },
-                [&](const NullaryIntrinsicKind::GpuGroupIdxY &) -> ValPtr { return undefined(__FILE__, __LINE__); },
-                [&](const NullaryIntrinsicKind::GpuGroupIdxZ &) -> ValPtr { return undefined(__FILE__, __LINE__); },
-                [&](const NullaryIntrinsicKind::GpuGroupSizeX &) -> ValPtr { return undefined(__FILE__, __LINE__); },
-                [&](const NullaryIntrinsicKind::GpuGroupSizeY &) -> ValPtr { return undefined(__FILE__, __LINE__); },
-                [&](const NullaryIntrinsicKind::GpuGroupSizeZ &) -> ValPtr { return undefined(__FILE__, __LINE__); },
-                [&](const NullaryIntrinsicKind::GpuLocalIdxX &) -> ValPtr { return undefined(__FILE__, __LINE__); },
-                [&](const NullaryIntrinsicKind::GpuLocalIdxY &) -> ValPtr { return undefined(__FILE__, __LINE__); },
-                [&](const NullaryIntrinsicKind::GpuLocalIdxZ &) -> ValPtr { return undefined(__FILE__, __LINE__); },
-                [&](const NullaryIntrinsicKind::GpuLocalSizeX &) -> ValPtr { return undefined(__FILE__, __LINE__); },
-                [&](const NullaryIntrinsicKind::GpuLocalSizeY &) -> ValPtr { return undefined(__FILE__, __LINE__); },
-                [&](const NullaryIntrinsicKind::GpuLocalSizeZ &) -> ValPtr { return undefined(__FILE__, __LINE__); },
-                [&](const NullaryIntrinsicKind::GpuGroupBarrier &) -> ValPtr { return undefined(__FILE__, __LINE__); },
-                [&](const NullaryIntrinsicKind::GpuGroupFence &) -> ValPtr { return undefined(__FILE__, __LINE__); });
-          case Target::SPIRV32:
-          case Target::SPIRV64: {
-            // See https://github.com/KhronosGroup/SPIR-Tools/wiki/SPIR-1.2-built-in-functions
-            // We don't want the mangled ones because SPIRV-LLVM-Translator does it for us
-            auto Int = Type::Int();
-            auto Int0 = Term::IntConst(0);
-            auto Int1 = Term::IntConst(1);
-            auto Int2 = Term::IntConst(2);
-            return variants::total(
-                *x.kind, //
-                [&](const NullaryIntrinsicKind::Assert &) -> ValPtr { return invokeAbort(fn); },
-                [&](const NullaryIntrinsicKind::GpuGlobalIdxX &) -> ValPtr { return extFn1("_Z13get_global_idj", Int, Int0); },
-                [&](const NullaryIntrinsicKind::GpuGlobalIdxY &) -> ValPtr { return extFn1("_Z13get_global_idj", Int, Int1); },
-                [&](const NullaryIntrinsicKind::GpuGlobalIdxZ &) -> ValPtr { return extFn1("_Z13get_global_idj", Int, Int2); },
-                [&](const NullaryIntrinsicKind::GpuGlobalSizeX &) -> ValPtr { return extFn1("_Z15get_global_sizej", Int, Int0); },
-                [&](const NullaryIntrinsicKind::GpuGlobalSizeY &) -> ValPtr { return extFn1("_Z15get_global_sizej", Int, Int1); },
-                [&](const NullaryIntrinsicKind::GpuGlobalSizeZ &) -> ValPtr { return extFn1("_Z15get_global_sizej", Int, Int2); },
-                [&](const NullaryIntrinsicKind::GpuGroupIdxX &) -> ValPtr { return extFn1("_Z12get_group_idj", Int, Int0); },
-                [&](const NullaryIntrinsicKind::GpuGroupIdxY &) -> ValPtr { return extFn1("_Z12get_group_idj", Int, Int1); },
-                [&](const NullaryIntrinsicKind::GpuGroupIdxZ &) -> ValPtr { return extFn1("_Z12get_group_idj", Int, Int2); },
-                [&](const NullaryIntrinsicKind::GpuGroupSizeX &) -> ValPtr { return extFn1("_Z14get_num_groupsj", Int, Int0); },
-                [&](const NullaryIntrinsicKind::GpuGroupSizeY &) -> ValPtr { return extFn1("_Z14get_num_groupsj", Int, Int1); },
-                [&](const NullaryIntrinsicKind::GpuGroupSizeZ &) -> ValPtr { return extFn1("_Z14get_num_groupsj", Int, Int2); },
-                [&](const NullaryIntrinsicKind::GpuLocalIdxX &) -> ValPtr { return extFn1("_Z12get_local_idj", Int, Int0); },
-                [&](const NullaryIntrinsicKind::GpuLocalIdxY &) -> ValPtr { return extFn1("_Z12get_local_idj", Int, Int1); },
-                [&](const NullaryIntrinsicKind::GpuLocalIdxZ &) -> ValPtr { return extFn1("_Z12get_local_idj", Int, Int2); },
-                [&](const NullaryIntrinsicKind::GpuLocalSizeX &) -> ValPtr { return extFn1("_Z14get_local_sizej", Int, Int0); },
-                [&](const NullaryIntrinsicKind::GpuLocalSizeY &) -> ValPtr { return extFn1("_Z14get_local_sizej", Int, Int1); },
-                [&](const NullaryIntrinsicKind::GpuLocalSizeZ &) -> ValPtr { return extFn1("_Z14get_local_sizej", Int, Int2); },
-                [&](const NullaryIntrinsicKind::GpuGroupBarrier &) -> ValPtr { return extFn1("_Z7barrierj", Int, Term::IntConst(0x01)); },
-                [&](const NullaryIntrinsicKind::GpuGroupFence &) -> ValPtr { return extFn1("_Z9mem_fencej", Int, Term::IntConst(0x01)); });
-          }
-          case Target::NVPTX64: {
-            // threadId  @llvm.nvvm.read.ptx.sreg.tid.*
-            // blockIdx  @llvm.nvvm.read.ptx.sreg.ctaid.*
-            // blockDim  @llvm.nvvm.read.ptx.sreg.ntid.*
-            // gridDim   @llvm.nvvm.read.ptx.sreg.nctaid.*
-            auto globalSize = [&](Intr::ID nctaid, Intr::ID ntid) -> ValPtr { return B.CreateMul(intr0(nctaid), intr0(ntid)); };
-            auto globalId = [&](Intr::ID ctaid, Intr::ID ntid, Intr::ID tid) -> ValPtr {
-              return B.CreateAdd(B.CreateMul(intr0(ctaid), intr0(ntid)), intr0(tid));
-            };
-            return variants::total(
-                *x.kind, //
-                [&](const NullaryIntrinsicKind::Assert &) { return invokeAbort(fn); },
-                [&](const NullaryIntrinsicKind::GpuGlobalIdxX &) {
-                  return globalId(Intr::nvvm_read_ptx_sreg_ctaid_x, Intr::nvvm_read_ptx_sreg_ntid_x, Intr::nvvm_read_ptx_sreg_tid_x);
-                },
-                [&](const NullaryIntrinsicKind::GpuGlobalIdxY &) {
-                  return globalId(Intr::nvvm_read_ptx_sreg_ctaid_y, Intr::nvvm_read_ptx_sreg_ntid_y, Intr::nvvm_read_ptx_sreg_tid_y);
-                },
-                [&](const NullaryIntrinsicKind::GpuGlobalIdxZ &) {
-                  return globalId(Intr::nvvm_read_ptx_sreg_ctaid_z, Intr::nvvm_read_ptx_sreg_ntid_z, Intr::nvvm_read_ptx_sreg_tid_z);
-                },
-                [&](const NullaryIntrinsicKind::GpuGlobalSizeX &) {
-                  return globalSize(Intr::nvvm_read_ptx_sreg_nctaid_x, Intr::nvvm_read_ptx_sreg_ntid_x);
-                },
-                [&](const NullaryIntrinsicKind::GpuGlobalSizeY &) {
-                  return globalSize(Intr::nvvm_read_ptx_sreg_nctaid_y, Intr::nvvm_read_ptx_sreg_ntid_y);
-                },
-                [&](const NullaryIntrinsicKind::GpuGlobalSizeZ &) {
-                  return globalSize(Intr::nvvm_read_ptx_sreg_nctaid_z, Intr::nvvm_read_ptx_sreg_ntid_z);
-                },
-                [&](const NullaryIntrinsicKind::GpuGroupIdxX &) { return intr0(Intr::nvvm_read_ptx_sreg_ctaid_x); },
-                [&](const NullaryIntrinsicKind::GpuGroupIdxY &) { return intr0(Intr::nvvm_read_ptx_sreg_ctaid_y); },
-                [&](const NullaryIntrinsicKind::GpuGroupIdxZ &) { return intr0(Intr::nvvm_read_ptx_sreg_ctaid_z); },
-                [&](const NullaryIntrinsicKind::GpuGroupSizeX &) { return intr0(Intr::nvvm_read_ptx_sreg_nctaid_x); },
-                [&](const NullaryIntrinsicKind::GpuGroupSizeY &) { return intr0(Intr::nvvm_read_ptx_sreg_nctaid_y); },
-                [&](const NullaryIntrinsicKind::GpuGroupSizeZ &) { return intr0(Intr::nvvm_read_ptx_sreg_nctaid_z); },
-                [&](const NullaryIntrinsicKind::GpuLocalIdxX &) { return intr0(Intr::nvvm_read_ptx_sreg_tid_x); },
-                [&](const NullaryIntrinsicKind::GpuLocalIdxY &) { return intr0(Intr::nvvm_read_ptx_sreg_tid_y); },
-                [&](const NullaryIntrinsicKind::GpuLocalIdxZ &) { return intr0(Intr::nvvm_read_ptx_sreg_tid_z); },
-                [&](const NullaryIntrinsicKind::GpuLocalSizeX &) { return intr0(Intr::nvvm_read_ptx_sreg_ntid_x); },
-                [&](const NullaryIntrinsicKind::GpuLocalSizeY &) { return intr0(Intr::nvvm_read_ptx_sreg_ntid_y); },
-                [&](const NullaryIntrinsicKind::GpuLocalSizeZ &) { return intr0(Intr::nvvm_read_ptx_sreg_ntid_z); },
-
-                [&](const NullaryIntrinsicKind::GpuGroupBarrier &) { return intr0(Intr::nvvm_barrier0); },
-                [&](const NullaryIntrinsicKind::GpuGroupFence &) { return intr0(Intr::nvvm_membar_cta); });
-          }
-          case Target::AMDGCN:
-
-            // HSA Sys Arch 1.2:  2.9.6 Kernel Dispatch Packet format:
-            //  15:0    header Packet header, see 2.9.1 Packet header (on page 25).
-            //  17:16   dimensions Number of dimensions specified in gridSize. Valid values are 1, 2, or 3.
-            //  31:18   Reserved, must be 0.
-            //  47:32   workgroup_size_x x dimension of work-group (measured in work-items).
-            //  63:48   workgroup_size_y y dimension of work-group (measured in work-items).
-            //  79:64   workgroup_size_z z dimension of work-group (measured in work-items).
-            //  95:80   Reserved, must be 0.
-            //  127:96  grid_size_x x dimension of grid (measured in work-items).
-            //  159:128 grid_size_y y dimension of grid (measured in work-items).
-            //  191:160 grid_size_z z dimension of grid (measured in work-items).
-            //  223:192 private_segment_size_bytes Total size in bytes of private memory allocation request (per
-            //          work-item).
-            //  255:224 group_segment_size_bytes Total size in bytes of group memory allocation request (per
-            //          work-group).
-            //  319:256 kernel_object Handle for an object in memory that includes an
-            //          implementation-defined executable ISA image for the kernel.
-            //  383:320 kernarg_address Address of memory containing kernel arguments.
-            //  447:384 Reserved, must be 0.
-            //  511:448 completion_signal HSA signaling object handle used to indicate completion of the job
-
-            // see llvm/libclc/amdgcn-amdhsa/lib/workitem/get_global_size.cl
-            auto globalSizeU32 = [&](size_t dim) -> ValPtr {
-              if (dim >= 3) throw std::logic_error("Dim >= 3");
-              auto i32Ty = llvm::Type::getInt32Ty(C);
-              auto i32ptr = B.CreatePointerCast(intr0(Intr::amdgcn_dispatch_ptr), i32Ty->getPointerTo());
-              // 127:96   grid_size_x;  (32*3+(0*32)==96)
-              // 159:128  grid_size_y;  (32*3+(1*32)==128)
-              // 191:160  grid_size_z;  (32*3+(2*32)==160)
-              auto size = B.CreateInBoundsGEP(i32Ty, i32ptr, llvm::ConstantInt::get(i32Ty, 3 + dim));
-              return load(B, size, i32Ty);
-            };
-
-            // see llvm/libclc/amdgcn-amdhsa/lib/workitem/get_local_size.cl
-            auto localSizeU32 = [&](size_t dim) -> ValPtr {
-              if (dim >= 3) throw std::logic_error("Dim >= 3");
-              auto i16Ty = llvm::Type::getInt16Ty(C);
-              auto i16ptr = B.CreatePointerCast(intr0(Intr::amdgcn_dispatch_ptr), i16Ty->getPointerTo());
-              // 47:32   workgroup_size_x (16*2+(0*16)==32)
-              // 63:48   workgroup_size_y (16*2+(1*16)==48)
-              // 79:64   workgroup_size_z (16*2+(2*16)==64)
-              auto size = B.CreateInBoundsGEP(i16Ty, i16ptr, llvm::ConstantInt::get(i16Ty, 2 + dim));
-              return B.CreateIntCast(load(B, size, i16Ty), llvm::Type::getInt32Ty(C), false);
-            };
-
-            auto globalIdU32 = [&](Intr::ID workgroupId, Intr::ID workitemId, size_t dim) -> ValPtr {
-              return B.CreateAdd(B.CreateMul(intr0(workgroupId), localSizeU32(dim)), intr0(workitemId));
-            };
-
-            //            // see llvm/libclc/amdgcn-amdhsa/lib/workitem/get_num_groups.cl
-            auto numGroupsU32 = [&](size_t dim) -> ValPtr {
-              auto n = globalSizeU32(dim);
-              auto d = localSizeU32(dim);
-              auto q = B.CreateUDiv(globalSizeU32(dim), localSizeU32(dim));                 // q = n / d
-              auto rem = B.CreateZExt(B.CreateICmpUGT(n, B.CreateMul(q, d)), n->getType()); // ( (uint32t) (n > q*d) )
-              return B.CreateAdd(q, rem);                                                   // q + rem
-            };
-
-            return variants::total(
-                *x.kind, //
-                [&](const NullaryIntrinsicKind::Assert &) { return invokeAbort(fn); },
-                [&](const NullaryIntrinsicKind::GpuGlobalIdxX &) {
-                  return globalIdU32(Intr::amdgcn_workgroup_id_x, Intr::amdgcn_workitem_id_x, 0);
-                },
-                [&](const NullaryIntrinsicKind::GpuGlobalIdxY &) {
-                  return globalIdU32(Intr::amdgcn_workgroup_id_y, Intr::amdgcn_workitem_id_y, 1);
-                },
-                [&](const NullaryIntrinsicKind::GpuGlobalIdxZ &) {
-                  return globalIdU32(Intr::amdgcn_workgroup_id_z, Intr::amdgcn_workitem_id_z, 2);
-                },
-                [&](const NullaryIntrinsicKind::GpuGlobalSizeX &) { return globalSizeU32(0); },
-                [&](const NullaryIntrinsicKind::GpuGlobalSizeY &) { return globalSizeU32(1); },
-                [&](const NullaryIntrinsicKind::GpuGlobalSizeZ &) { return globalSizeU32(2); },
-
-                [&](const NullaryIntrinsicKind::GpuGroupIdxX &) { return intr0(Intr::amdgcn_workgroup_id_x); },
-                [&](const NullaryIntrinsicKind::GpuGroupIdxY &) { return intr0(Intr::amdgcn_workgroup_id_y); },
-                [&](const NullaryIntrinsicKind::GpuGroupIdxZ &) { return intr0(Intr::amdgcn_workgroup_id_z); },
-                [&](const NullaryIntrinsicKind::GpuGroupSizeX &) { return numGroupsU32(0); },
-                [&](const NullaryIntrinsicKind::GpuGroupSizeY &) { return numGroupsU32(1); },
-                [&](const NullaryIntrinsicKind::GpuGroupSizeZ &) { return numGroupsU32(2); },
-
-                [&](const NullaryIntrinsicKind::GpuLocalIdxX &) { return intr0(Intr::amdgcn_workitem_id_x); },
-                [&](const NullaryIntrinsicKind::GpuLocalIdxY &) { return intr0(Intr::amdgcn_workitem_id_y); },
-                [&](const NullaryIntrinsicKind::GpuLocalIdxZ &) { return intr0(Intr::amdgcn_workitem_id_z); },
-                [&](const NullaryIntrinsicKind::GpuLocalSizeX &) { return localSizeU32(0); },
-                [&](const NullaryIntrinsicKind::GpuLocalSizeY &) { return localSizeU32(1); },
-                [&](const NullaryIntrinsicKind::GpuLocalSizeZ &) { return localSizeU32(2); },
-
-                [&](const NullaryIntrinsicKind::GpuGroupBarrier &) -> ValPtr {
-                  // work_group_barrier (__memory_scope, 1, 1)
-                  // FIXME
-                  // intr1(Intr::amdgcn_s_waitcnt,Type::Int(), Term::IntConst(0xFF));
-                  return intr0(Intr::amdgcn_s_barrier);
-                },
-                [&](const NullaryIntrinsicKind::GpuGroupFence &) -> ValPtr {
-                  // atomic_work_item_fence(0, 5, 1)
-                  return intr1(Intr::amdgcn_s_waitcnt, Type::Int(), Term::IntConst(0xFF));
-                });
-        }
-      },
-      [&](const Expr::BinaryIntrinsic &x) {
-        return variants::total(
-            *x.kind, //
-            [&](const BinaryIntrinsicKind::Add &) -> ValPtr {
+            [&](const Intr::Add &v) -> ValPtr {
               return binaryNumOp(
-                  x.lhs, x.rhs, x.rtn, //
-                  [&](auto l, auto r) { return B.CreateAdd(l, r, key); }, [&](auto l, auto r) { return B.CreateFAdd(l, r, key); });
+                  expr, v.x, v.y, v.tpe, //
+                  [&](auto l, auto r) { return B.CreateAdd(l, r); }, [&](auto l, auto r) { return B.CreateFAdd(l, r); });
             },
-            [&](const BinaryIntrinsicKind::Sub &) -> ValPtr {
+            [&](const Intr::Sub &v) -> ValPtr {
               return binaryNumOp(
-                  x.lhs, x.rhs, x.rtn, //
-                  [&](auto l, auto r) { return B.CreateSub(l, r, key); }, [&](auto l, auto r) { return B.CreateFSub(l, r, key); });
+                  expr, v.x, v.y, v.tpe, //
+                  [&](auto l, auto r) { return B.CreateSub(l, r); }, [&](auto l, auto r) { return B.CreateFSub(l, r); });
             },
-            [&](const BinaryIntrinsicKind::Div &) -> ValPtr {
+            [&](const Intr::Mul &v) -> ValPtr {
               return binaryNumOp(
-                  x.lhs, x.rhs, x.rtn, //
-                  [&](auto l, auto r) { return B.CreateSDiv(l, r, key); }, [&](auto l, auto r) { return B.CreateFDiv(l, r, key); });
+                  expr, v.x, v.y, v.tpe, //
+                  [&](auto l, auto r) { return B.CreateMul(l, r); }, [&](auto l, auto r) { return B.CreateFMul(l, r); });
             },
-            [&](const BinaryIntrinsicKind::Mul &) -> ValPtr {
+            [&](const Intr::Div &v) -> ValPtr {
               return binaryNumOp(
-                  x.lhs, x.rhs, x.rtn, //
-                  [&](auto l, auto r) { return B.CreateMul(l, r, key); }, [&](auto l, auto r) { return B.CreateFMul(l, r, key); });
+                  expr, v.x, v.y, v.tpe, //
+                  [&](auto l, auto r) { return B.CreateSDiv(l, r); }, [&](auto l, auto r) { return B.CreateFDiv(l, r); });
             },
-            [&](const BinaryIntrinsicKind::Rem &) -> ValPtr {
+            [&](const Intr::Rem &v) -> ValPtr {
               return binaryNumOp(
-                  x.lhs, x.rhs, x.rtn, //
-                  [&](auto l, auto r) { return B.CreateSRem(l, r, key); }, [&](auto l, auto r) { return B.CreateFRem(l, r, key); });
+                  expr, v.x, v.y, v.tpe, //
+                  [&](auto l, auto r) { return B.CreateSRem(l, r); }, [&](auto l, auto r) { return B.CreateFRem(l, r); });
             },
-            [&](const BinaryIntrinsicKind::Pow &) -> ValPtr {
-              return intr2(Intr::pow, x.rtn, x.lhs, x.rhs); //
-            },
-
-            [&](const BinaryIntrinsicKind::Min &) -> ValPtr {
+            [&](const Intr::Min &v) -> ValPtr {
               return binaryNumOp(
-                  x.lhs, x.rhs, x.rtn, //
+                  expr, v.x, v.y, v.tpe, //
                   [&](auto l, auto r) { return B.CreateSelect(B.CreateICmpSLT(l, r), l, r); },
                   [&](auto l, auto r) { return B.CreateMinimum(l, r); });
             },
-            [&](const BinaryIntrinsicKind::Max &) -> ValPtr {
+            [&](const Intr::Max &v) -> ValPtr {
               return binaryNumOp(
-                  x.lhs, x.rhs, x.rtn, //
+                  expr, v.x, v.y, v.tpe, //
                   [&](auto l, auto r) { return B.CreateSelect(B.CreateICmpSLT(l, r), r, l); },
                   [&](auto l, auto r) { return B.CreateMaximum(l, r); });
+            }, //
+            [&](const Intr::BAnd &v) -> ValPtr {
+              return binaryExpr(expr, v.x, v.y, v.tpe, [&](auto l, auto r) { return B.CreateAnd(l, r); });
             },
-
-            [&](const BinaryIntrinsicKind::Atan2 &) -> ValPtr { return extFn2("atan2", x.rtn, x.lhs, x.rhs); }, //
-            [&](const BinaryIntrinsicKind::Hypot &) -> ValPtr { return extFn2("hypot", x.rtn, x.lhs, x.rhs); }, //
-            [&](const BinaryIntrinsicKind::BAnd &) -> ValPtr {
-              return binaryExpr(x.lhs, x.rhs, x.rtn, [&](auto l, auto r) { return B.CreateAnd(l, r); });
+            [&](const Intr::BOr &v) -> ValPtr {
+              return binaryExpr(expr, v.x, v.y, v.tpe, [&](auto l, auto r) { return B.CreateOr(l, r); });
             },
-            [&](const BinaryIntrinsicKind::BOr &) -> ValPtr {
-              return binaryExpr(x.lhs, x.rhs, x.rtn, [&](auto l, auto r) { return B.CreateOr(l, r); });
+            [&](const Intr::BXor &v) -> ValPtr {
+              return binaryExpr(expr, v.x, v.y, v.tpe, [&](auto l, auto r) { return B.CreateXor(l, r); });
             },
-            [&](const BinaryIntrinsicKind::BXor &) -> ValPtr {
-              return binaryExpr(x.lhs, x.rhs, x.rtn, [&](auto l, auto r) { return B.CreateXor(l, r); });
+            [&](const Intr::BSL &v) -> ValPtr {
+              return binaryExpr(expr, v.x, v.y, v.tpe, [&](auto l, auto r) { return B.CreateShl(l, r); });
             },
-            [&](const BinaryIntrinsicKind::BSL &) -> ValPtr {
-              return binaryExpr(x.lhs, x.rhs, x.rtn, [&](auto l, auto r) { return B.CreateShl(l, r); });
+            [&](const Intr::BSR &v) -> ValPtr {
+              return binaryExpr(expr, v.x, v.y, v.tpe, [&](auto l, auto r) { return B.CreateAShr(l, r); });
             },
-            [&](const BinaryIntrinsicKind::BSR &) -> ValPtr {
-              return binaryExpr(x.lhs, x.rhs, x.rtn, [&](auto l, auto r) { return B.CreateAShr(l, r); });
-            },
-            [&](const BinaryIntrinsicKind::BZSR &) -> ValPtr {
-              return binaryExpr(x.lhs, x.rhs, x.rtn, [&](auto l, auto r) { return B.CreateLShr(l, r); });
-            },
-            [&](const BinaryIntrinsicKind::LogicEq &) -> ValPtr {
+            [&](const Intr::BZSR &v) -> ValPtr {
+              return binaryExpr(expr, v.x, v.y, v.tpe, [&](auto l, auto r) { return B.CreateLShr(l, r); });
+            },                                                                                                     //
+            [&](const Intr::LogicAnd &v) -> ValPtr { return B.CreateLogicalAnd(mkTermVal(v.x), mkTermVal(v.y)); }, //
+            [&](const Intr::LogicOr &v) -> ValPtr { return B.CreateLogicalOr(mkTermVal(v.x), mkTermVal(v.y)); },   //
+            [&](const Intr::LogicEq &v) -> ValPtr {
               return binaryNumOp(
-                  x.lhs, x.rhs, tpe(x.lhs),                             //
-                  [&](auto l, auto r) { return B.CreateICmpEQ(l, r); }, //
-                  [&](auto l, auto r) { return B.CreateFCmpOEQ(l, r); } //
-              );
+                  expr, v.x, v.y, tpe(v.x), //
+                  [&](auto l, auto r) { return B.CreateICmpEQ(l, r); }, [&](auto l, auto r) { return B.CreateFCmpOEQ(l, r); });
             },
-            [&](const BinaryIntrinsicKind::LogicNeq &) -> ValPtr {
+            [&](const Intr::LogicNeq &v) -> ValPtr {
               return binaryNumOp(
-                  x.lhs, x.rhs, tpe(x.lhs),                             //
-                  [&](auto l, auto r) { return B.CreateICmpNE(l, r); }, //
-                  [&](auto l, auto r) { return B.CreateFCmpONE(l, r); } //
-              );
+                  expr, v.x, v.y, tpe(v.x), //
+                  [&](auto l, auto r) { return B.CreateICmpNE(l, r); }, [&](auto l, auto r) { return B.CreateFCmpONE(l, r); });
             },
-            [&](const BinaryIntrinsicKind::LogicAnd &) -> ValPtr { return B.CreateLogicalAnd(mkTermVal(x.lhs), mkTermVal(x.rhs)); },
-            [&](const BinaryIntrinsicKind::LogicOr &) -> ValPtr { return B.CreateLogicalOr(mkTermVal(x.lhs), mkTermVal(x.rhs)); },
-            [&](const BinaryIntrinsicKind::LogicLte &) -> ValPtr {
+            [&](const Intr::LogicLte &v) -> ValPtr {
               return binaryNumOp(
-                  x.lhs, x.rhs, tpe(x.lhs),                              //
-                  [&](auto l, auto r) { return B.CreateICmpSLE(l, r); }, //
-                  [&](auto l, auto r) { return B.CreateFCmpOLE(l, r); }  //
-              );
+                  expr, v.x, v.y, tpe(v.x), //
+                  [&](auto l, auto r) { return B.CreateICmpSLE(l, r); }, [&](auto l, auto r) { return B.CreateFCmpOLE(l, r); });
             },
-            [&](const BinaryIntrinsicKind::LogicGte &) -> ValPtr {
+            [&](const Intr::LogicGte &v) -> ValPtr {
               return binaryNumOp(
-                  x.lhs, x.rhs, tpe(x.lhs),                              //
-                  [&](auto l, auto r) { return B.CreateICmpSGE(l, r); }, //
-                  [&](auto l, auto r) { return B.CreateFCmpOGE(l, r); }  //
-              );
+                  expr, v.x, v.y, tpe(v.x), //
+                  [&](auto l, auto r) { return B.CreateICmpSGE(l, r); }, [&](auto l, auto r) { return B.CreateFCmpOGE(l, r); });
             },
-            [&](const BinaryIntrinsicKind::LogicLt &) -> ValPtr {
+            [&](const Intr::LogicLt &v) -> ValPtr {
               return binaryNumOp(
-                  x.lhs, x.rhs, tpe(x.lhs),                              //
-                  [&](auto l, auto r) { return B.CreateICmpSLT(l, r); }, //
-                  [&](auto l, auto r) { return B.CreateFCmpOLT(l, r); }  //
-              );
+                  expr, v.x, v.y, tpe(v.x), //
+                  [&](auto l, auto r) { return B.CreateICmpSLT(l, r); }, [&](auto l, auto r) { return B.CreateFCmpOLT(l, r); });
             },
-            [&](const BinaryIntrinsicKind::LogicGt &) -> ValPtr {
+            [&](const Intr::LogicGt &v) -> ValPtr {
               return binaryNumOp(
-                  x.lhs, x.rhs, tpe(x.lhs),                              //
-                  [&](auto l, auto r) { return B.CreateICmpSGT(l, r); }, //
-                  [&](auto l, auto r) { return B.CreateFCmpOGT(l, r); }  //
-              );
+                  expr, v.x, v.y, tpe(v.x), //
+                  [&](auto l, auto r) { return B.CreateICmpSGT(l, r); }, [&](auto l, auto r) { return B.CreateFCmpOGT(l, r); });
             });
       },
       [&](const Expr::Cast &x) -> ValPtr {
@@ -781,7 +430,7 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
 
           // to the equally sized integral type first if narrowing; XXX narrowing directly produces a poison value
 
-          llvm::Value *c = nullptr;
+          ValPtr c = nullptr;
           if (fromTpe->getPrimitiveSizeInBits() > toTpe->getPrimitiveSizeInBits() || true) {
             auto min32BitIntBits = std::max<llvm::TypeSize::ScalarTy>(32, toTpe->getPrimitiveSizeInBits());
             auto toTpeMaxInFp = llvm::ConstantFP::get(fromTpe, double(nIntMax(min32BitIntBits)));
@@ -829,8 +478,8 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
         if (auto fn = functions.find(sig); fn != functions.end()) {
           auto call = B.CreateCall(fn->second, paramTerms);
           // in case the fn returns a unit (which is mapped to void), we just return the constant
-          if (holds<Type::Unit>(x.rtn)) {
-            return mkTermVal(Term::UnitConst());
+          if (holds<Type::Unit0>(x.rtn)) {
+            return mkTermVal(Term::Unit0Const());
           } else
             return call;
         } else {
@@ -851,7 +500,7 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
                                            mkTermVal(x.idx), key + "_ptr");
             if (holds<TypeKind::Ref>(kind(arrTpe->component))) {
               return ptr;
-            } else if (holds<Type::Bool>(arrTpe->component) || holds<Type::Unit>(arrTpe->component)) {
+            } else if (holds<Type::Bool1>(arrTpe->component) || holds<Type::Unit0>(arrTpe->component)) {
               // Narrow from i8 to i1
               return B.CreateICmpNE(load(B, ptr, ty), llvm::ConstantInt::get(llvm::Type::getInt1Ty(C), 0, true));
             } else {
@@ -867,7 +516,7 @@ llvm::Value *LLVM::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Functi
         auto componentTpe = B.getPtrTy(0);
         auto size = mkTermVal(x.size);
         auto elemSize = sizeOf(B, C, componentTpe);
-        auto ptr = invokeMalloc(fn, B.CreateMul(B.CreateIntCast(size, mkTpe(Type::Long()), true), elemSize));
+        auto ptr = invokeMalloc(fn, B.CreateMul(B.CreateIntCast(size, mkTpe(Type::IntS64()), true), elemSize));
         return B.CreateBitCast(ptr, componentTpe);
       });
 }
@@ -882,11 +531,11 @@ static bool canAssign(Type::Any lhs, Type::Any rhs) {
   return false;
 }
 
-LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<WhileCtx> whileCtx = {}) {
+LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<WhileCtx> whileCtx = {}) {
 
   //  // XXX bool is i8 where non-zero values are true,
   //  //   `br` only takes i1 as the first arg, so we do the appropriate comparison now
-  //  auto boolToi8 = [&](llvm::Value *cond) {
+  //  auto boolToi8 = [&](ValPtr cond) {
   //    return cond->getType()->isIntegerTy(1)
   //               ? cond // as-is if we're already i1
   //               : B.CreateICmpNE(cond, llvm::ConstantInt::get(llvm::Type::getInt8Ty(C), 0, true));
@@ -922,7 +571,7 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
 
         stackVarPtrs[x.name.symbol] = {x.name.tpe, stackPtr};
 
-        if (holds<Type::Unit>(x.name.tpe)) {
+        if (holds<Type::Unit0>(x.name.tpe)) {
           // discard , keep effect
         } else if (holds<Type::Array>(x.name.tpe)) {
           if (rhs) {
@@ -984,7 +633,7 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
                   mkTermVal(x.idx), qualified(*lhs) + "_update_ptr"   //
               );                                                      //
 
-              if (holds<Type::Bool>(tpe(rhs)) || holds<Type::Unit>(tpe(rhs))) {
+              if (holds<Type::Bool1>(tpe(rhs)) || holds<Type::Unit0>(tpe(rhs))) {
                 // Extend from i1 to i8
                 auto b = mkTermVal(rhs);
                 B.CreateStore(B.CreateIntCast(b, llvm::Type::getInt8Ty(C), true), ptr);
@@ -1072,16 +721,19 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
       },
       [&](const Stmt::Return &x) -> BlockKind {
         auto rtnTpe = tpe(x.value);
-        auto expr = mkExprVal(x.value, fn, "return");
-        if (holds<Type::Unit>(rtnTpe)) {
+
+        if (holds<Type::Unit0>(rtnTpe)) {
           B.CreateRetVoid();
         } else if (holds<Type::Nothing>(rtnTpe)) {
           B.CreateUnreachable();
-        } else if (holds<Type::Bool>(rtnTpe)) {
-          // Extend from i1 to i8
-          B.CreateRet(B.CreateIntCast(expr, llvm::Type::getInt8Ty(C), true));
         } else {
-          B.CreateRet(expr);
+          auto expr = mkExprVal(x.value, fn, "return");
+          if (holds<Type::Bool1>(rtnTpe)) {
+            // Extend from i1 to i8
+            B.CreateRet(B.CreateIntCast(expr, llvm::Type::getInt8Ty(C), true));
+          } else {
+            B.CreateRet(expr);
+          }
         }
         return BlockKind::Terminal;
       } //
@@ -1089,7 +741,7 @@ LLVM::BlockKind LLVM::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Functi
   );
 }
 
-void LLVM::AstTransformer::addDefs(const std::vector<StructDef> &defs) {
+void LLVMBackend::AstTransformer::addDefs(const std::vector<StructDef> &defs) {
   // TODO handle recursive defs
   std::unordered_set<StructDef> defsWithDependencies(defs.begin(), defs.end());
   while (!defsWithDependencies.empty()) {
@@ -1113,7 +765,7 @@ void LLVM::AstTransformer::addDefs(const std::vector<StructDef> &defs) {
   }
 }
 
-std::vector<Pair<Sym, llvm::StructType *>> LLVM::AstTransformer::getStructTypes() const {
+std::vector<Pair<Sym, llvm::StructType *>> LLVMBackend::AstTransformer::getStructTypes() const {
   std::vector<Pair<Sym, llvm::StructType *>> results;
   for (auto &[k, v] : structTypes)
     results.emplace_back(k, v.first);
@@ -1129,7 +781,7 @@ static std::vector<Arg> collectFnDeclarationNames(const Function &f) {
   return allArgs;
 }
 
-void LLVM::AstTransformer::addFn(llvm::Module &mod, const Function &f, bool entry) {
+void LLVMBackend::AstTransformer::addFn(llvm::Module &mod, const Function &f, bool entry) {
 
   auto args = collectFnDeclarationNames(f);
   auto llvmArgTpes = map_vec<Arg, llvm::Type *>(args, [&](auto &&arg) {
@@ -1139,7 +791,7 @@ void LLVM::AstTransformer::addFn(llvm::Module &mod, const Function &f, bool entr
 
   // Unit type at function return type position is void
   // Any other location, Unit is a singleton value
-  auto rtnTpe = holds<Type::Unit>(f.rtn) ? llvm::Type::getVoidTy(C) : mkTpe(f.rtn, true);
+  auto rtnTpe = holds<Type::Unit0>(f.rtn) ? llvm::Type::getVoidTy(C) : mkTpe(f.rtn, true);
 
   auto fnTpe = llvm::FunctionType::get(rtnTpe, {llvmArgTpes}, false);
 
@@ -1151,6 +803,9 @@ void LLVM::AstTransformer::addFn(llvm::Module &mod, const Function &f, bool entr
   fn->setDSOLocal(true);
 
   if (entry || true) { // setup external function conventions for targets
+
+    //    targetHandler->witnessEntry(*this, mod, fn);
+
     switch (options.target) {
       case Target::x86_64:
       case Target::AArch64:
@@ -1191,23 +846,26 @@ void LLVM::AstTransformer::addFn(llvm::Module &mod, const Function &f, bool entr
 
           auto typeName = [](Type::Any tpe) -> std::string {
             auto impl = [](Type::Any tpe, auto &thunk) -> std::string {
-              return variants::total(                                                                           //
-                  *tpe,                                                                                         //
-                  [&](const Type::Float &x) -> std::string { return "float"; },                                 //
-                  [&](const Type::Double &x) -> std::string { return "double"; },                               //
-                  [&](const Type::Bool &x) -> std::string { return "bool"; },                                   //
-                  [&](const Type::Byte &x) -> std::string { return "char"; },                                   //
-                  [&](const Type::Char &x) -> std::string { return "chars"; },                                  //
-                  [&](const Type::Short &x) -> std::string { return "short"; },                                 //
-                  [&](const Type::Int &x) -> std::string { return "int"; },                                     //
-                  [&](const Type::Long &x) -> std::string { return "long"; },                                   //
-                  [&](const Type::Unit &x) -> std::string { return "char"; },                                   //
-                  [&](const Type::Nothing &x) -> std::string { return "char"; },                                //
-                  [&](const Type::Struct &x) -> std::string { return "char"; },                                 //
-                  [&](const Type::Array &x) -> std::string { return thunk(x.component, thunk) + "*"; },         //
-                  [&](const Type::Var &x) -> std::string { return undefined(__FILE__, __LINE__, "type var"); }, //
-                  [&](const Type::Exec &x) -> std::string { return undefined(__FILE__, __LINE__, "exec"); }
-
+              return variants::total(
+                  *tpe,                                                                                        //
+                  [&](const Type::Float16 &) -> std::string { return "half"; },                                //
+                  [&](const Type::Float32 &) -> std::string { return "float"; },                               //
+                  [&](const Type::Float64 &) -> std::string { return "double"; },                              //
+                  [&](const Type::IntU8 &) -> std::string { return "uchar"; },                                 //
+                  [&](const Type::IntU16 &) -> std::string { return "ushort"; },                               //
+                  [&](const Type::IntU32 &) -> std::string { return "uint"; },                                 //
+                  [&](const Type::IntU64 &) -> std::string { return "ulong"; },                                //
+                  [&](const Type::IntS8 &) -> std::string { return "char"; },                                  //
+                  [&](const Type::IntS16 &) -> std::string { return "short"; },                                //
+                  [&](const Type::IntS32 &) -> std::string { return "int"; },                                  //
+                  [&](const Type::IntS64 &) -> std::string { return "long"; },                                 //
+                  [&](const Type::Bool1 &) -> std::string { return "char"; },                                  //
+                  [&](const Type::Unit0 &) -> std::string { return "void"; },                                  //
+                  [&](const Type::Nothing &) -> std::string { return "/*nothing*/"; },                         //
+                  [&](const Type::Struct &x) -> std::string { return qualified(x.name); },                     //
+                  [&](const Type::Array &x) -> std::string { return thunk(x.component, thunk) + "*"; },        //
+                  [&](const Type::Var &) -> std::string { return undefined(__FILE__, __LINE__, "type var"); }, //
+                  [&](const Type::Exec &) -> std::string { return undefined(__FILE__, __LINE__, "exec"); }     //
               );
             };
             return impl(tpe, impl);
@@ -1246,7 +904,7 @@ void LLVM::AstTransformer::addFn(llvm::Module &mod, const Function &f, bool entr
                     fn);
 }
 
-Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform(llvm::Module &mod, const Program &program) {
+Pair<Opt<std::string>, std::string> LLVMBackend::AstTransformer::transform(llvm::Module &mod, const Program &program) {
 
   transform(mod, program.entry);
   for (auto &f : program.functions)
@@ -1266,7 +924,7 @@ Pair<Opt<std::string>, std::string> LLVM::AstTransformer::transform(llvm::Module
   }
 }
 
-void LLVM::AstTransformer::transform(llvm::Module &mod, const Function &fnTree) {
+void LLVMBackend::AstTransformer::transform(llvm::Module &mod, const Function &fnTree) {
 
   std::vector<Type::Any> argTpes;
   for (auto &n : fnTree.moduleCaptures)
@@ -1301,10 +959,10 @@ void LLVM::AstTransformer::transform(llvm::Module &mod, const Function &fnTree) 
   std::transform(                                      //
       fn->arg_begin(), fn->arg_end(), allArgs.begin(), //
       std::inserter(stackVarPtrs, stackVarPtrs.end()), //
-      [&](auto &arg, const auto &fnArg) -> Pair<std::string, Pair<Type::Any, llvm::Value *>> {
+      [&](auto &arg, const auto &fnArg) -> Pair<std::string, Pair<Type::Any, ValPtr>> {
         arg.setName(fnArg.named.symbol);
 
-        auto argValue = holds<Type::Bool>(fnArg.named.tpe) || holds<Type::Unit>(fnArg.named.tpe)
+        auto argValue = holds<Type::Bool1>(fnArg.named.tpe) || holds<Type::Unit0>(fnArg.named.tpe)
                             ? B.CreateICmpNE(&arg, llvm::ConstantInt::get(llvm::Type::getInt8Ty(C), 0, true))
                             : &arg;
 
@@ -1320,8 +978,94 @@ void LLVM::AstTransformer::transform(llvm::Module &mod, const Function &fnTree) 
 
   stackVarPtrs.clear();
 }
+ValPtr LLVMBackend::AstTransformer::unaryExpr(const AnyExpr &expr, const AnyTerm &l, const AnyType &rtn, const ValPtrFn1 &fn) { //
+  if (tpe(l) != rtn) {
+    throw std::logic_error("Semantic error: lhs type " + to_string(tpe(l)) + " of binary numeric operation in " + to_string(expr) +
+                           " doesn't match return type " + to_string(rtn));
+  }
 
-llvmc::TargetInfo LLVM::Options::toTargetInfo() const {
+  return fn(mkTermVal(l));
+}
+ValPtr LLVMBackend::AstTransformer::binaryExpr(const AnyExpr &expr, const AnyTerm &l, const AnyTerm &r, const AnyType &rtn,
+                                               const ValPtrFn2 &fn) { //
+  if (tpe(l) != rtn) {
+    throw std::logic_error("Semantic error: lhs type " + to_string(tpe(l)) + " of binary numeric operation in " + to_string(expr) +
+                           " doesn't match return type " + to_string(rtn));
+  }
+  if (tpe(r) != rtn) {
+    throw std::logic_error("Semantic error: rhs type " + to_string(tpe(r)) + " of binary numeric operation in " + to_string(expr) +
+                           " doesn't match return type " + to_string(rtn));
+  }
+
+  return fn(mkTermVal(l), mkTermVal(r));
+}
+ValPtr LLVMBackend::AstTransformer::unaryNumOp(const AnyExpr &expr, const AnyTerm &arg, const AnyType &rtn, //
+                                               const ValPtrFn1 &integralFn, const ValPtrFn1 &fractionalFn) {
+  return unaryExpr(expr, arg, rtn, [&](auto lhs) -> ValPtr {
+    if (holds<TypeKind::Integral>(kind(rtn))) {
+      return integralFn(lhs);
+    } else if (holds<TypeKind::Fractional>(kind(rtn))) {
+      return fractionalFn(lhs);
+    } else {
+      return undefined(__FILE__, __LINE__);
+    }
+  });
+}
+ValPtr LLVMBackend::AstTransformer::binaryNumOp(const AnyExpr &expr, const AnyTerm &l, const AnyTerm &r, const AnyType &rtn, //
+                                                const ValPtrFn2 &integralFn, const ValPtrFn2 &fractionalFn) {
+  return binaryExpr(expr, l, r, rtn, [&](auto lhs, auto rhs) -> ValPtr {
+    if (holds<TypeKind::Integral>(kind(rtn))) {
+      return integralFn(lhs, rhs);
+    } else if (holds<TypeKind::Fractional>(kind(rtn))) {
+      return fractionalFn(lhs, rhs);
+    } else {
+      return undefined(__FILE__, __LINE__);
+    }
+  });
+}
+ValPtr LLVMBackend::AstTransformer::extFn1(llvm::Function *fn, const std::string &name, const AnyType &rtn, const AnyTerm &arg) { //
+  auto fn_ = mkExternalFn(fn, rtn, name, {tpe(arg)});
+  if (options.target == Target::SPIRV32 || options.target == Target::SPIRV64) {
+    fn_->setCallingConv(llvm::CallingConv::SPIR_FUNC);
+    //    fn_->addFnAttr(llvm::Attribute::NoBuiltin);
+    //    fn_->addFnAttr(llvm::Attribute::Convergent);
+  }
+  if (!holds<Type::Unit0>(rtn)) {
+    fn_->addFnAttr(llvm::Attribute::WillReturn);
+  }
+  auto call = B.CreateCall(fn_, mkTermVal(arg));
+  call->setCallingConv(fn_->getCallingConv());
+  return call;
+}
+ValPtr LLVMBackend::AstTransformer::extFn2(llvm::Function *fn, const std::string &name, const AnyType &rtn, const AnyTerm &lhs,
+                                           const AnyTerm &rhs) { //
+  auto fn_ = mkExternalFn(fn, rtn, name, {tpe(lhs), tpe(rhs)});
+  if (options.target == Target::SPIRV32 || options.target == Target::SPIRV64) {
+    fn_->setCallingConv(llvm::CallingConv::SPIR_FUNC);
+    fn_->addFnAttr(llvm::Attribute::NoBuiltin);
+    fn_->addFnAttr(llvm::Attribute::Convergent);
+  }
+  auto call = B.CreateCall(fn_, {mkTermVal(lhs), mkTermVal(rhs)});
+  call->setCallingConv(fn_->getCallingConv());
+  return call;
+}
+ValPtr LLVMBackend::AstTransformer::intr0(llvm::Function *fn, llvm::Intrinsic::ID id) { //
+  auto callee = llvm::Intrinsic::getDeclaration(fn->getParent(), id, {});
+  return B.CreateCall(callee);
+}
+ValPtr LLVMBackend::AstTransformer::intr1(llvm::Function *fn, llvm::Intrinsic::ID id, const AnyType &overload, const AnyTerm &arg) { //
+  auto callee = llvm::Intrinsic::getDeclaration(fn->getParent(), id, mkTpe(overload));
+  return B.CreateCall(callee, mkTermVal(arg));
+}
+ValPtr LLVMBackend::AstTransformer::intr2(llvm::Function *fn, llvm::Intrinsic::ID id, const AnyType &overload, //
+                                          const AnyTerm &lhs, const AnyTerm &rhs) {                            //
+  // XXX the overload type here is about the overloading of intrinsic names, not about the parameter types
+  // i.e. f32 is for foo.f32(float %a, float %b, float %c)
+  auto callee = llvm::Intrinsic::getDeclaration(fn->getParent(), id, mkTpe(overload));
+  return B.CreateCall(callee, {mkTermVal(lhs), mkTermVal(rhs)});
+}
+
+llvmc::TargetInfo LLVMBackend::Options::toTargetInfo() const {
   using llvm::Triple;
   const auto bindGpuArch = [&](Triple::ArchType archTpe, Triple::VendorType vendor, Triple::OSType os) {
     Triple triple(Triple::getArchTypeName(archTpe), Triple::getVendorTypeName(vendor), Triple::getOSTypeName(os));
@@ -1349,17 +1093,18 @@ llvmc::TargetInfo LLVM::Options::toTargetInfo() const {
   };
 
   switch (target) {
-    case LLVM::Target::x86_64: return bindCpuArch(Triple::ArchType::x86_64);
-    case LLVM::Target::AArch64: return bindCpuArch(Triple::ArchType::aarch64);
-    case LLVM::Target::ARM: return bindCpuArch(Triple::ArchType::arm);
-    case LLVM::Target::NVPTX64: return bindGpuArch(Triple::ArchType::nvptx64, Triple::VendorType::NVIDIA, Triple::OSType::CUDA);
-    case LLVM::Target::AMDGCN: return bindGpuArch(Triple::ArchType::amdgcn, Triple::VendorType::AMD, Triple::OSType::AMDHSA);
+    case LLVMBackend::Target::x86_64: return bindCpuArch(Triple::ArchType::x86_64);
+    case LLVMBackend::Target::AArch64: return bindCpuArch(Triple::ArchType::aarch64);
+    case LLVMBackend::Target::ARM: return bindCpuArch(Triple::ArchType::arm);
+    case LLVMBackend::Target::NVPTX64: return bindGpuArch(Triple::ArchType::nvptx64, Triple::VendorType::NVIDIA, Triple::OSType::CUDA);
+    case LLVMBackend::Target::AMDGCN: return bindGpuArch(Triple::ArchType::amdgcn, Triple::VendorType::AMD, Triple::OSType::AMDHSA);
     case Target::SPIRV32: return bindGpuArch(Triple::ArchType::spirv32, Triple::VendorType::UnknownVendor, Triple::OSType::UnknownOS);
     case Target::SPIRV64: return bindGpuArch(Triple::ArchType::spirv64, Triple::VendorType::UnknownVendor, Triple::OSType::UnknownOS);
   }
 }
 
-std::vector<compiler::Layout> LLVM::resolveLayouts(const std::vector<StructDef> &defs, const backend::LLVM::AstTransformer &xform) const {
+std::vector<compiler::Layout> LLVMBackend::resolveLayouts(const std::vector<StructDef> &defs,
+                                                          const backend::LLVMBackend::AstTransformer &xform) const {
 
   auto dataLayout = llvmc::targetMachineFromTarget(options.toTargetInfo())->createDataLayout();
 
@@ -1385,20 +1130,20 @@ std::vector<compiler::Layout> LLVM::resolveLayouts(const std::vector<StructDef> 
   return layouts;
 }
 
-std::vector<compiler::Layout> LLVM::resolveLayouts(const std::vector<StructDef> &defs, const compiler::Opt &opt) {
+std::vector<compiler::Layout> LLVMBackend::resolveLayouts(const std::vector<StructDef> &defs, const compiler::Opt &opt) {
   llvm::LLVMContext ctx;
-  backend::LLVM::AstTransformer xform(options, ctx);
+  backend::LLVMBackend::AstTransformer xform(options, ctx);
   xform.addDefs(defs);
   return resolveLayouts(defs, xform);
 }
 
-compiler::Compilation backend::LLVM::compileProgram(const Program &program, const compiler::Opt &opt) {
+compiler::Compilation backend::LLVMBackend::compileProgram(const Program &program, const compiler::Opt &opt) {
   using namespace llvm;
 
   llvm::LLVMContext ctx;
   auto mod = std::make_unique<llvm::Module>("program", ctx);
 
-  LLVM::AstTransformer xform(options, ctx);
+  LLVMBackend::AstTransformer xform(options, ctx);
   xform.addDefs(program.defs);
   xform.addFn(*mod, program.entry, true);
   for (auto &f : program.functions)

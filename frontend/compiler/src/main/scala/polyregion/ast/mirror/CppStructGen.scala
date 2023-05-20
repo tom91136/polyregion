@@ -408,6 +408,7 @@ private[polyregion] object CppStructGen {
       kind: CppType.Kind = CppType.Kind.StdLib,
       movable: Boolean = false,
       constexpr: Boolean = true,
+      initialiser: Boolean = false,
       streamOp: (String, String) => List[String] = (s, v) => List(s"$s << $v;"),
       include: List[String] = Nil,
       ctors: List[CppType] = Nil
@@ -469,6 +470,7 @@ private[polyregion] object CppStructGen {
         s"vector",
         movable = true,
         constexpr = false,
+        initialiser = true,
         streamOp = { (s, v) =>
           List(
             s"$s << '{';",
@@ -563,8 +565,10 @@ private[polyregion] object CppStructGen {
           else s"$x.$y"
         case compiletime.Value.TermSelect(x, xs) =>
           throw new RuntimeException(s"multiple path ${x :: xs} is not supported")
-        case compiletime.Value.CtorAp(tpe, args) => tpe.ref(qualified = true) + s"(${args.map(write(_)).mkString(",")})"
-        case _                                   => ???
+        case compiletime.Value.CtorAp(tpe, args) =>
+          if (!tpe.initialiser) tpe.ref(qualified = true) + s"(${args.map(write(_)).mkString(",")})"
+          else s"{${args.map(write(_)).mkString(",")}}"
+        case _ => ???
       }
 
     val ctorTerms =

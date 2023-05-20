@@ -517,7 +517,7 @@ object Compiler {
         termCaptures = sig.termCaptures.zipWithIndex.map((t, i) => p.Named(s"arg$i", t)).map(p.Arg(_)),
         rtn = sig.rtn,
         body = p.Stmt.Comment("abstract definition, assert")
-          :: p.Stmt.Return(p.Expr.NullaryIntrinsic(p.NullaryIntrinsicKind.Assert, p.Type.Nothing))
+          :: p.Stmt.Return(p.Expr.SpecOp(p.Spec.Assert))
           :: Nil
       )
       log.info(s"Abstract (trait function)", sig.repr)
@@ -636,7 +636,7 @@ object Compiler {
     captured <- (opt.entry.moduleCaptures ++ opt.entry.termCaptures).traverse { n =>
       // Struct type of symbols may have been modified through specialisation so we just validate whether it's still a struct for now
       capturedNameTable.get(n.named.symbol) match {
-        case None                                       => (n -> captureNameToModuleRefTable(n.named.symbol)).success
+        case None => (n -> captureNameToModuleRefTable(n.named.symbol)).success
         case Some((tpe, ref)) if tpe.kind == n.named.tpe.kind => (n -> ref).success
         case Some((tpe, ref)) =>
           s"Unexpected type conversion, capture was ${tpe.repr} for $ref but function expected ${n.repr}".fail

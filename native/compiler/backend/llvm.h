@@ -21,11 +21,20 @@ namespace polyregion::backend {
 
 using namespace polyregion::polyast;
 
-class LLVMTargetSpecificHandler {
-  virtual void witnessEntry(llvm::LLVMContext &ctx, llvm::Module &mod, llvm::Function &fn) = 0;
-};
+using ValPtr = llvm::Value *;
+using ValPtrFn2 = std::function<ValPtr(ValPtr, ValPtr)>;
+using ValPtrFn1 = std::function<ValPtr(ValPtr)>;
+using AnyTerm = Term::Any;
+using AnyType = Type::Any;
+using AnyExpr = Expr::Any;
+using AnyStmt = Stmt::Any;
 
-class LLVM : public Backend {
+class AMDGPUTargetSpecificHandler;
+class NVPTXTargetSpecificHandler;
+class CPUTargetSpecificHandler;
+class OpenCLTargetSpecificHandler;
+
+class LLVMBackend : public Backend {
 
 public:
   enum class Target { x86_64, AArch64, ARM, NVPTX64, AMDGCN, SPIRV32, SPIRV64 };
@@ -43,38 +52,65 @@ private:
   enum class BlockKind { Terminal, Normal };
 
 public:
+  static ValPtr sizeOf(llvm::IRBuilder<> &B, llvm::LLVMContext &C, llvm::Type *ptrTpe);
+  static ValPtr load(llvm::IRBuilder<> &B, ValPtr rhs, llvm::Type *ty);
+
+  class AstTransformer;
+
+  struct TargetSpecificHandler {
+    virtual void witnessEntry(AstTransformer &xform, llvm::Module &mod, llvm::Function &fn) = 0;
+    virtual ValPtr mkSpecVal(AstTransformer &xform, llvm::Function *fn, const Expr::SpecOp &op) = 0;
+    virtual ValPtr mkMathVal(AstTransformer &xform, llvm::Function *fn, const Expr::MathOp &op) = 0;
+    virtual ~TargetSpecificHandler();
+    static std::unique_ptr<TargetSpecificHandler> from(Target target);
+  };
+
   class AstTransformer {
+
+    friend AMDGPUTargetSpecificHandler;
+    friend NVPTXTargetSpecificHandler;
+    friend CPUTargetSpecificHandler;
+    friend OpenCLTargetSpecificHandler;
 
     Options options;
     llvm::LLVMContext &C;
+    std::unique_ptr<TargetSpecificHandler> targetHandler;
     unsigned int AllocaAS = 0;
     unsigned int GlobalAS = 0;
     unsigned int LocalAS = 0;
 
-  private:
     using StructMemberIndexTable = Map<std::string, size_t>;
     Map<std::string, Pair<Type::Any, llvm::Value *>> stackVarPtrs;
     Map<Sym, Pair<llvm::StructType *, StructMemberIndexTable>> structTypes;
     Map<InvokeSignature, llvm::Function *> functions;
     llvm::IRBuilder<> B;
 
-    llvm::Value *findStackVar(const Named &named);
-
-    llvm::Value *mkSelectPtr(const Term::Select &select);
-    llvm::Value *mkTermVal(const Term::Any &ref);
-    llvm::Value *mkExprVal(const Expr::Any &expr, llvm::Function *fn, const std::string &key);
+    ValPtr findStackVar(const Named &named);
+    ValPtr mkSelectPtr(const Term::Select &select);
+    ValPtr mkTermVal(const Term::Any &ref);
+    ValPtr mkExprVal(const Expr::Any &expr, llvm::Function *fn, const std::string &key);
     BlockKind mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<WhileCtx> whileCtx);
-
     llvm::Function *mkExternalFn(llvm::Function *parent, const Type::Any &rtn, const std::string &name, const std::vector<Type::Any> &args);
-    llvm::Value *invokeMalloc(llvm::Function *parent, llvm::Value *size);
-    llvm::Value *invokeAbort(llvm::Function *parent);
+    ValPtr invokeMalloc(llvm::Function *parent, ValPtr size);
+    ValPtr invokeAbort(llvm::Function *parent);
 
     llvm::Type *mkTpe(const Type::Any &tpe, bool functionBoundary = false);
 
     Pair<llvm::StructType *, StructMemberIndexTable> mkStruct(const StructDef &def);
 
-    //    Opt<llvm::StructType *> lookup(const Sym &s);
-    //    llvm::Value *conditionalLoad(llvm::Value *rhs);
+    ValPtr unaryExpr(const AnyExpr &expr, const AnyTerm &l, const AnyType &rtn, const ValPtrFn1 &fn);
+    ValPtr binaryExpr(const AnyExpr &expr, const AnyTerm &l, const AnyTerm &r, const AnyType &rtn, const ValPtrFn2 &fn);
+
+    ValPtr unaryNumOp(const AnyExpr &expr, const AnyTerm &arg, const AnyType &rtn, const ValPtrFn1 &integralFn,
+                      const ValPtrFn1 &fractionalFn);
+    ValPtr binaryNumOp(const AnyExpr &expr, const AnyTerm &l, const AnyTerm &r, const AnyType &rtn, const ValPtrFn2 &integralFn,
+                       const ValPtrFn2 &fractionalFn);
+
+    ValPtr extFn1(llvm::Function *fn, const std::string &name, const AnyType &tpe, const AnyTerm &arg);
+    ValPtr extFn2(llvm::Function *fn, const std::string &name, const AnyType &tpe, const AnyTerm &lhs, const AnyTerm &rhs);
+    ValPtr intr0(llvm::Function *fn, llvm::Intrinsic::ID id);
+    ValPtr intr1(llvm::Function *fn, llvm::Intrinsic::ID id, const AnyType &overload, const AnyTerm &arg);
+    ValPtr intr2(llvm::Function *fn, llvm::Intrinsic::ID id, const AnyType &overload, const AnyTerm &lhs, const AnyTerm &rhs);
 
   public:
     AstTransformer(const Options &options, llvm::LLVMContext &c);
@@ -89,13 +125,13 @@ public:
     Pair<Opt<std::string>, std::string> transform(llvm::Module &mod, const Program &program);
   };
 
-  std::vector<compiler::Layout> resolveLayouts(const std::vector<StructDef> &defs, const AstTransformer &xform) const;
+  [[nodiscard]] std::vector<compiler::Layout> resolveLayouts(const std::vector<StructDef> &defs, const AstTransformer &xform) const;
 
 public:
   Options options;
-  explicit LLVM(Options options) : options(std::move(options)){};
-  std::vector<compiler::Layout> resolveLayouts(const std::vector<StructDef> &defs, const compiler::Opt &opt) override;
-  compiler::Compilation compileProgram(const Program &, const compiler::Opt &opt) override;
+  explicit LLVMBackend(Options options) : options(std::move(options)){};
+  [[nodiscard]] std::vector<compiler::Layout> resolveLayouts(const std::vector<StructDef> &defs, const compiler::Opt &opt) override;
+  [[nodiscard]] compiler::Compilation compileProgram(const Program &, const compiler::Opt &opt) override;
 };
 
 } // namespace polyregion::backend

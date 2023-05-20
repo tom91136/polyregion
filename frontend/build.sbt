@@ -5,7 +5,7 @@ lazy val bindingsDir = (nativeDir / "bindings" / "jvm").getAbsoluteFile
 
 // /home/tom/polyregion/native/cmake-build-debug-clang/bindings/jvm/libpolyregion-compiler-jvm.so
 
-lazy val scala3Version = "3.2.1"
+lazy val scala3Version = "3.2.2"
 lazy val catsVersion   = "2.8.0"
 lazy val munitVersion  = "1.0.0-M7"
 
@@ -90,7 +90,7 @@ lazy val compiler = project
     javacOptions ++= Seq("-proc:none"),
     scalacOptions ++=
       Seq("-Yretain-trees") ++     // XXX we need this so that the AST -> C++ conversion with partial ctors work
-        Seq("-Xmax-inlines", "40") // the AST has lots of leaf nodes and we use inline so bump the limit
+        Seq("-Xmax-inlines", "80") // the AST has lots of leaf nodes and we use inline so bump the limit
     ,
     libraryDependencies ++= Seq(
       "net.bytebuddy"  % "byte-buddy" % "1.12.21",

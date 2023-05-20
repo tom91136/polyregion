@@ -360,7 +360,7 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
 
         auto opt0Start = compiler::nowMono();
 
-//        optimise(*TM, *M, optLevel);
+        optimise(*TM, *M, optLevel);
 //
          std::cerr << "<<<<<<<<<<<" << std::endl;
 

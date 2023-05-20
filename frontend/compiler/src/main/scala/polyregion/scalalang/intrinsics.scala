@@ -13,27 +13,19 @@ object intrinsics {
   def apply[A](xs: TypedBuffer[A], index: Int): A           = intrinsic
   def update[A](xs: TypedBuffer[A], index: Int, x: A): Unit = intrinsic
 
-  def gpuGlobalIdxX: Int  = intrinsic
-  def gpuGlobalIdxY: Int  = intrinsic
-  def gpuGlobalIdxZ: Int  = intrinsic
-  def gpuGlobalSizeX: Int = intrinsic
-  def gpuGlobalSizeY: Int = intrinsic
-  def gpuGlobalSizeZ: Int = intrinsic
-  def gpuGroupIdxX: Int   = intrinsic
-  def gpuGroupIdxY: Int   = intrinsic
-  def gpuGroupIdxZ: Int   = intrinsic
-  def gpuGroupSizeX: Int  = intrinsic
-  def gpuGroupSizeY: Int  = intrinsic
-  def gpuGroupSizeZ: Int  = intrinsic
-  def gpuLocalIdxX: Int   = intrinsic
-  def gpuLocalIdxY: Int   = intrinsic
-  def gpuLocalIdxZ: Int   = intrinsic
-  def gpuLocalSizeX: Int  = intrinsic
-  def gpuLocalSizeY: Int  = intrinsic
-  def gpuLocalSizeZ: Int  = intrinsic
+  def gpuGlobalIdx(dim: Int): Int  = intrinsic
+  def gpuGlobalSize(dim: Int): Int = intrinsic
+  def gpuGroupIdx(dim: Int): Int   = intrinsic
+  def gpuGroupSize(dim: Int): Int  = intrinsic
+  def gpuLocalIdx(dim: Int): Int   = intrinsic
+  def gpuLocalSize(dim: Int): Int  = intrinsic
 
-  def gpuGroupBarrier(): Unit = intrinsic
-  def gpuGroupFence(): Unit   = intrinsic
+  def gpuBarrierGlobal(): Unit = intrinsic
+  def gpuBarrierLocal(): Unit  = intrinsic
+  def gpuBarrierAll(): Unit    = intrinsic
+  def gpuFenceGlobal(): Unit   = intrinsic
+  def gpuFenceLocal(): Unit    = intrinsic
+  def gpuFenceAll(): Unit      = intrinsic
 
   def pow[A](a: A, b: A): A   = intrinsic
   def min[A](a: A, b: A): A   = intrinsic

@@ -30,11 +30,14 @@ private[polyregion] object CppSourceMirror {
       :: deriveStruct[Type]()
       :: deriveStruct[SourcePosition]()
       :: deriveStruct[Term]()
-      :: deriveStruct[NullaryIntrinsicKind]()
-      :: deriveStruct[UnaryIntrinsicKind]()
-      :: deriveStruct[BinaryIntrinsicKind]()
+      // :: deriveStruct[NullaryIntrinsicKind]()
+      // :: deriveStruct[UnaryIntrinsicKind]()
+      // :: deriveStruct[BinaryIntrinsicKind]()
       :: deriveStruct[Type.Space]()
-      // :: deriveStruct[Intrinsic]()
+      :: deriveStruct[Overload]()
+      :: deriveStruct[Spec]()
+      :: deriveStruct[Intr]()
+      :: deriveStruct[Math]()
       :: deriveStruct[Expr]()
       :: deriveStruct[Stmt]()
       :: deriveStruct[StructMember]()
@@ -46,7 +49,7 @@ private[polyregion] object CppSourceMirror {
       :: deriveStruct[Arg]()
       :: deriveStruct[Function]()
       :: deriveStruct[Program]()
-      :: Nil //  
+      :: Nil //
 
   private final val namespace         = "polyregion::polyast"
   private final val adtFileName       = "polyast"

@@ -39,22 +39,23 @@ using namespace Stmt;
 using namespace Term;
 using namespace Expr;
 namespace Tpe = Type;
-namespace Fn0 = NullaryIntrinsicKind;
-namespace Fn2 = BinaryIntrinsicKind;
-namespace Fn1 = UnaryIntrinsicKind;
+// namespace Fn0 = NullaryIntrinsicKind;
+// namespace Fn2 = BinaryIntrinsicKind;
+// namespace Fn1 = UnaryIntrinsicKind;
 
 const static TypeSpace::Global Global = TypeSpace::Global();
 const static TypeSpace::Local Local = TypeSpace::Local();
 
-const static Tpe::Float Float = Tpe::Float();
-const static Tpe::Double Double = Tpe::Double();
-const static Tpe::Bool Bool = Tpe::Bool();
-const static Tpe::Byte Byte = Tpe::Byte();
-const static Tpe::Char Char = Tpe::Char();
-const static Tpe::Short Short = Tpe::Short();
-const static Tpe::Int Int = Tpe::Int();
-const static Tpe::Long Long = Tpe::Long();
-const static Tpe::Unit Unit = Tpe::Unit();
+const static Tpe::Float32 Float = Tpe::Float32();
+const static Tpe::Float64 Double = Tpe::Float64();
+const static Tpe::Bool1 Bool = Tpe::Bool1();
+const static Tpe::IntS8 Byte = Tpe::IntS8();
+const static Tpe::IntU16 Char = Tpe::IntU16();
+const static Tpe::IntS16 Short = Tpe::IntS16();
+const static Tpe::IntS32 SInt = Tpe::IntS32();
+const static Tpe::IntU32 UInt = Tpe::IntU32();
+const static Tpe::IntS64 Long = Tpe::IntS64();
+const static Tpe::Unit0 Unit = Tpe::Unit0();
 const static Tpe::Nothing Nothing = Tpe::Nothing();
 
 Tpe::Array Array(const Tpe::Any &t, const TypeSpace::Any &s = TypeSpace::Global());
@@ -93,18 +94,13 @@ std::function<NamedBuilder(Type::Any)> operator"" _(const char *name, size_t);
 
 Stmt::Any let(const std::string &name, const Type::Any &tpe);
 AssignmentBuilder let(const std::string &name);
-BinaryIntrinsic invoke(const BinaryIntrinsicKind::Any &kind, const Term::Any &lhs, const Term::Any &rhs,
-                       const Type::Any &rtn);
-
-UnaryIntrinsic invoke(const UnaryIntrinsicKind::Any &kind, const Term::Any &lhs, const Type::Any &rtn);
-
-NullaryIntrinsic invoke(const NullaryIntrinsicKind::Any &kind, const Type::Any &rtn);
-
-std::function<Function(std::vector<Stmt::Any>)> function(const std::string &name, const std::vector<Arg> &args,
-                                                         const Type::Any &rtn);
+IntrOp invoke(const Intr::Any &);
+MathOp invoke(const Math::Any &);
+SpecOp invoke(const Spec::Any &);
+std::function<Function(std::vector<Stmt::Any>)> function(const std::string &name, const std::vector<Arg> &args, const Type::Any &rtn);
 Program program(Function entry, std::vector<StructDef> defs = {}, std::vector<Function> functions = {});
 
-Return ret(const Expr::Any &expr = Alias(UnitConst()));
+Return ret(const Expr::Any &expr = Alias(Unit0Const()));
 Return ret(const Term::Any &term);
 
 } // namespace dsl

@@ -79,63 +79,99 @@ struct Fractional;
 using Any = Alternative<None, Ref, Integral, Fractional>;
 } // namespace TypeKind
 namespace Type { 
-struct Float;
-struct Double;
-struct Bool;
-struct Byte;
-struct Char;
-struct Short;
-struct Int;
-struct Long;
-struct Unit;
+struct Float16;
+struct Float32;
+struct Float64;
+struct IntU8;
+struct IntU16;
+struct IntU32;
+struct IntU64;
+struct IntS8;
+struct IntS16;
+struct IntS32;
+struct IntS64;
 struct Nothing;
+struct Unit0;
+struct Bool1;
 struct Struct;
 struct Array;
 struct Var;
 struct Exec;
-using Any = Alternative<Float, Double, Bool, Byte, Char, Short, Int, Long, Unit, Nothing, Struct, Array, Var, Exec>;
+using Any = Alternative<Float16, Float32, Float64, IntU8, IntU16, IntU32, IntU64, IntS8, IntS16, IntS32, IntS64, Nothing, Unit0, Bool1, Struct, Array, Var, Exec>;
 } // namespace Type
 
 
 namespace Term { 
 struct Select;
 struct Poison;
-struct UnitConst;
-struct BoolConst;
-struct ByteConst;
-struct CharConst;
-struct ShortConst;
-struct IntConst;
-struct LongConst;
-struct FloatConst;
-struct DoubleConst;
-using Any = Alternative<Select, Poison, UnitConst, BoolConst, ByteConst, CharConst, ShortConst, IntConst, LongConst, FloatConst, DoubleConst>;
+struct Float16Const;
+struct Float32Const;
+struct Float64Const;
+struct IntU8Const;
+struct IntU16Const;
+struct IntU32Const;
+struct IntU64Const;
+struct IntS8Const;
+struct IntS16Const;
+struct IntS32Const;
+struct IntS64Const;
+struct Unit0Const;
+struct Bool1Const;
+using Any = Alternative<Select, Poison, Float16Const, Float32Const, Float64Const, IntU8Const, IntU16Const, IntU32Const, IntU64Const, IntS8Const, IntS16Const, IntS32Const, IntS64Const, Unit0Const, Bool1Const>;
 } // namespace Term
-namespace NullaryIntrinsicKind { 
-struct GpuGlobalIdxX;
-struct GpuGlobalIdxY;
-struct GpuGlobalIdxZ;
-struct GpuGlobalSizeX;
-struct GpuGlobalSizeY;
-struct GpuGlobalSizeZ;
-struct GpuGroupIdxX;
-struct GpuGroupIdxY;
-struct GpuGroupIdxZ;
-struct GpuGroupSizeX;
-struct GpuGroupSizeY;
-struct GpuGroupSizeZ;
-struct GpuLocalIdxX;
-struct GpuLocalIdxY;
-struct GpuLocalIdxZ;
-struct GpuLocalSizeX;
-struct GpuLocalSizeY;
-struct GpuLocalSizeZ;
-struct GpuGroupBarrier;
-struct GpuGroupFence;
+namespace TypeSpace { 
+struct Global;
+struct Local;
+using Any = Alternative<Global, Local>;
+} // namespace TypeSpace
+
+
+namespace Spec { 
 struct Assert;
-using Any = Alternative<GpuGlobalIdxX, GpuGlobalIdxY, GpuGlobalIdxZ, GpuGlobalSizeX, GpuGlobalSizeY, GpuGlobalSizeZ, GpuGroupIdxX, GpuGroupIdxY, GpuGroupIdxZ, GpuGroupSizeX, GpuGroupSizeY, GpuGroupSizeZ, GpuLocalIdxX, GpuLocalIdxY, GpuLocalIdxZ, GpuLocalSizeX, GpuLocalSizeY, GpuLocalSizeZ, GpuGroupBarrier, GpuGroupFence, Assert>;
-} // namespace NullaryIntrinsicKind
-namespace UnaryIntrinsicKind { 
+struct GpuBarrierGlobal;
+struct GpuBarrierLocal;
+struct GpuBarrierAll;
+struct GpuFenceGlobal;
+struct GpuFenceLocal;
+struct GpuFenceAll;
+struct GpuGlobalIdx;
+struct GpuGlobalSize;
+struct GpuGroupIdx;
+struct GpuGroupSize;
+struct GpuLocalIdx;
+struct GpuLocalSize;
+using Any = Alternative<Assert, GpuBarrierGlobal, GpuBarrierLocal, GpuBarrierAll, GpuFenceGlobal, GpuFenceLocal, GpuFenceAll, GpuGlobalIdx, GpuGlobalSize, GpuGroupIdx, GpuGroupSize, GpuLocalIdx, GpuLocalSize>;
+} // namespace Spec
+namespace Intr { 
+struct BNot;
+struct LogicNot;
+struct Pos;
+struct Neg;
+struct Add;
+struct Sub;
+struct Mul;
+struct Div;
+struct Rem;
+struct Min;
+struct Max;
+struct BAnd;
+struct BOr;
+struct BXor;
+struct BSL;
+struct BSR;
+struct BZSR;
+struct LogicAnd;
+struct LogicOr;
+struct LogicEq;
+struct LogicNeq;
+struct LogicLte;
+struct LogicGte;
+struct LogicLt;
+struct LogicGt;
+using Any = Alternative<BNot, LogicNot, Pos, Neg, Add, Sub, Mul, Div, Rem, Min, Max, BAnd, BOr, BXor, BSL, BSR, BZSR, LogicAnd, LogicOr, LogicEq, LogicNeq, LogicLte, LogicGte, LogicLt, LogicGt>;
+} // namespace Intr
+namespace Math { 
+struct Abs;
 struct Sin;
 struct Cos;
 struct Tan;
@@ -146,7 +182,6 @@ struct Sinh;
 struct Cosh;
 struct Tanh;
 struct Signum;
-struct Abs;
 struct Round;
 struct Ceil;
 struct Floor;
@@ -158,54 +193,21 @@ struct Expm1;
 struct Log;
 struct Log1p;
 struct Log10;
-struct BNot;
-struct Pos;
-struct Neg;
-struct LogicNot;
-using Any = Alternative<Sin, Cos, Tan, Asin, Acos, Atan, Sinh, Cosh, Tanh, Signum, Abs, Round, Ceil, Floor, Rint, Sqrt, Cbrt, Exp, Expm1, Log, Log1p, Log10, BNot, Pos, Neg, LogicNot>;
-} // namespace UnaryIntrinsicKind
-namespace BinaryIntrinsicKind { 
-struct Add;
-struct Sub;
-struct Mul;
-struct Div;
-struct Rem;
 struct Pow;
-struct Min;
-struct Max;
 struct Atan2;
 struct Hypot;
-struct BAnd;
-struct BOr;
-struct BXor;
-struct BSL;
-struct BSR;
-struct BZSR;
-struct LogicEq;
-struct LogicNeq;
-struct LogicAnd;
-struct LogicOr;
-struct LogicLte;
-struct LogicGte;
-struct LogicLt;
-struct LogicGt;
-using Any = Alternative<Add, Sub, Mul, Div, Rem, Pow, Min, Max, Atan2, Hypot, BAnd, BOr, BXor, BSL, BSR, BZSR, LogicEq, LogicNeq, LogicAnd, LogicOr, LogicLte, LogicGte, LogicLt, LogicGt>;
-} // namespace BinaryIntrinsicKind
-namespace TypeSpace { 
-struct Global;
-struct Local;
-using Any = Alternative<Global, Local>;
-} // namespace TypeSpace
+using Any = Alternative<Abs, Sin, Cos, Tan, Asin, Acos, Atan, Sinh, Cosh, Tanh, Signum, Round, Ceil, Floor, Rint, Sqrt, Cbrt, Exp, Expm1, Log, Log1p, Log10, Pow, Atan2, Hypot>;
+} // namespace Math
 namespace Expr { 
-struct NullaryIntrinsic;
-struct UnaryIntrinsic;
-struct BinaryIntrinsic;
+struct SpecOp;
+struct MathOp;
+struct IntrOp;
 struct Cast;
 struct Alias;
 struct Index;
 struct Alloc;
 struct Invoke;
-using Any = Alternative<NullaryIntrinsic, UnaryIntrinsic, BinaryIntrinsic, Cast, Alias, Index, Alloc, Invoke>;
+using Any = Alternative<SpecOp, MathOp, IntrOp, Cast, Alias, Index, Alloc, Invoke>;
 } // namespace Expr
 namespace Stmt { 
 struct Block;
@@ -300,67 +302,81 @@ struct EXPORT Base {
 };
 EXPORT TypeKind::Any kind(const Type::Any&);
 
-struct EXPORT Float : Type::Base {
-  Float() noexcept;
+struct EXPORT Float16 : Type::Base {
+  Float16() noexcept;
   EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Float &);
-  EXPORT friend bool operator==(const Type::Float &, const Type::Float &);
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Float16 &);
+  EXPORT friend bool operator==(const Type::Float16 &, const Type::Float16 &);
 };
 
-struct EXPORT Double : Type::Base {
-  Double() noexcept;
+struct EXPORT Float32 : Type::Base {
+  Float32() noexcept;
   EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Double &);
-  EXPORT friend bool operator==(const Type::Double &, const Type::Double &);
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Float32 &);
+  EXPORT friend bool operator==(const Type::Float32 &, const Type::Float32 &);
 };
 
-struct EXPORT Bool : Type::Base {
-  Bool() noexcept;
+struct EXPORT Float64 : Type::Base {
+  Float64() noexcept;
   EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Bool &);
-  EXPORT friend bool operator==(const Type::Bool &, const Type::Bool &);
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Float64 &);
+  EXPORT friend bool operator==(const Type::Float64 &, const Type::Float64 &);
 };
 
-struct EXPORT Byte : Type::Base {
-  Byte() noexcept;
+struct EXPORT IntU8 : Type::Base {
+  IntU8() noexcept;
   EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Byte &);
-  EXPORT friend bool operator==(const Type::Byte &, const Type::Byte &);
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::IntU8 &);
+  EXPORT friend bool operator==(const Type::IntU8 &, const Type::IntU8 &);
 };
 
-struct EXPORT Char : Type::Base {
-  Char() noexcept;
+struct EXPORT IntU16 : Type::Base {
+  IntU16() noexcept;
   EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Char &);
-  EXPORT friend bool operator==(const Type::Char &, const Type::Char &);
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::IntU16 &);
+  EXPORT friend bool operator==(const Type::IntU16 &, const Type::IntU16 &);
 };
 
-struct EXPORT Short : Type::Base {
-  Short() noexcept;
+struct EXPORT IntU32 : Type::Base {
+  IntU32() noexcept;
   EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Short &);
-  EXPORT friend bool operator==(const Type::Short &, const Type::Short &);
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::IntU32 &);
+  EXPORT friend bool operator==(const Type::IntU32 &, const Type::IntU32 &);
 };
 
-struct EXPORT Int : Type::Base {
-  Int() noexcept;
+struct EXPORT IntU64 : Type::Base {
+  IntU64() noexcept;
   EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Int &);
-  EXPORT friend bool operator==(const Type::Int &, const Type::Int &);
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::IntU64 &);
+  EXPORT friend bool operator==(const Type::IntU64 &, const Type::IntU64 &);
 };
 
-struct EXPORT Long : Type::Base {
-  Long() noexcept;
+struct EXPORT IntS8 : Type::Base {
+  IntS8() noexcept;
   EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Long &);
-  EXPORT friend bool operator==(const Type::Long &, const Type::Long &);
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::IntS8 &);
+  EXPORT friend bool operator==(const Type::IntS8 &, const Type::IntS8 &);
 };
 
-struct EXPORT Unit : Type::Base {
-  Unit() noexcept;
+struct EXPORT IntS16 : Type::Base {
+  IntS16() noexcept;
   EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Unit &);
-  EXPORT friend bool operator==(const Type::Unit &, const Type::Unit &);
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::IntS16 &);
+  EXPORT friend bool operator==(const Type::IntS16 &, const Type::IntS16 &);
+};
+
+struct EXPORT IntS32 : Type::Base {
+  IntS32() noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::IntS32 &);
+  EXPORT friend bool operator==(const Type::IntS32 &, const Type::IntS32 &);
+};
+
+struct EXPORT IntS64 : Type::Base {
+  IntS64() noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::IntS64 &);
+  EXPORT friend bool operator==(const Type::IntS64 &, const Type::IntS64 &);
 };
 
 struct EXPORT Nothing : Type::Base {
@@ -368,6 +384,20 @@ struct EXPORT Nothing : Type::Base {
   EXPORT operator Any() const;
   EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Nothing &);
   EXPORT friend bool operator==(const Type::Nothing &, const Type::Nothing &);
+};
+
+struct EXPORT Unit0 : Type::Base {
+  Unit0() noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Unit0 &);
+  EXPORT friend bool operator==(const Type::Unit0 &, const Type::Unit0 &);
+};
+
+struct EXPORT Bool1 : Type::Base {
+  Bool1() noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Bool1 &);
+  EXPORT friend bool operator==(const Type::Bool1 &, const Type::Bool1 &);
 };
 
 struct EXPORT Struct : Type::Base {
@@ -447,601 +477,109 @@ struct EXPORT Poison : Term::Base {
   EXPORT friend bool operator==(const Term::Poison &, const Term::Poison &);
 };
 
-struct EXPORT UnitConst : Term::Base {
-  UnitConst() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::UnitConst &);
-  EXPORT friend bool operator==(const Term::UnitConst &, const Term::UnitConst &);
-};
-
-struct EXPORT BoolConst : Term::Base {
-  bool value;
-  explicit BoolConst(bool value) noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::BoolConst &);
-  EXPORT friend bool operator==(const Term::BoolConst &, const Term::BoolConst &);
-};
-
-struct EXPORT ByteConst : Term::Base {
-  int8_t value;
-  explicit ByteConst(int8_t value) noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::ByteConst &);
-  EXPORT friend bool operator==(const Term::ByteConst &, const Term::ByteConst &);
-};
-
-struct EXPORT CharConst : Term::Base {
-  uint16_t value;
-  explicit CharConst(uint16_t value) noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::CharConst &);
-  EXPORT friend bool operator==(const Term::CharConst &, const Term::CharConst &);
-};
-
-struct EXPORT ShortConst : Term::Base {
-  int16_t value;
-  explicit ShortConst(int16_t value) noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::ShortConst &);
-  EXPORT friend bool operator==(const Term::ShortConst &, const Term::ShortConst &);
-};
-
-struct EXPORT IntConst : Term::Base {
-  int32_t value;
-  explicit IntConst(int32_t value) noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::IntConst &);
-  EXPORT friend bool operator==(const Term::IntConst &, const Term::IntConst &);
-};
-
-struct EXPORT LongConst : Term::Base {
-  int64_t value;
-  explicit LongConst(int64_t value) noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::LongConst &);
-  EXPORT friend bool operator==(const Term::LongConst &, const Term::LongConst &);
-};
-
-struct EXPORT FloatConst : Term::Base {
+struct EXPORT Float16Const : Term::Base {
   float value;
-  explicit FloatConst(float value) noexcept;
+  explicit Float16Const(float value) noexcept;
   EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::FloatConst &);
-  EXPORT friend bool operator==(const Term::FloatConst &, const Term::FloatConst &);
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::Float16Const &);
+  EXPORT friend bool operator==(const Term::Float16Const &, const Term::Float16Const &);
 };
 
-struct EXPORT DoubleConst : Term::Base {
-  double value;
-  explicit DoubleConst(double value) noexcept;
+struct EXPORT Float32Const : Term::Base {
+  float value;
+  explicit Float32Const(float value) noexcept;
   EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::DoubleConst &);
-  EXPORT friend bool operator==(const Term::DoubleConst &, const Term::DoubleConst &);
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::Float32Const &);
+  EXPORT friend bool operator==(const Term::Float32Const &, const Term::Float32Const &);
+};
+
+struct EXPORT Float64Const : Term::Base {
+  double value;
+  explicit Float64Const(double value) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::Float64Const &);
+  EXPORT friend bool operator==(const Term::Float64Const &, const Term::Float64Const &);
+};
+
+struct EXPORT IntU8Const : Term::Base {
+  int8_t value;
+  explicit IntU8Const(int8_t value) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::IntU8Const &);
+  EXPORT friend bool operator==(const Term::IntU8Const &, const Term::IntU8Const &);
+};
+
+struct EXPORT IntU16Const : Term::Base {
+  uint16_t value;
+  explicit IntU16Const(uint16_t value) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::IntU16Const &);
+  EXPORT friend bool operator==(const Term::IntU16Const &, const Term::IntU16Const &);
+};
+
+struct EXPORT IntU32Const : Term::Base {
+  int32_t value;
+  explicit IntU32Const(int32_t value) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::IntU32Const &);
+  EXPORT friend bool operator==(const Term::IntU32Const &, const Term::IntU32Const &);
+};
+
+struct EXPORT IntU64Const : Term::Base {
+  int64_t value;
+  explicit IntU64Const(int64_t value) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::IntU64Const &);
+  EXPORT friend bool operator==(const Term::IntU64Const &, const Term::IntU64Const &);
+};
+
+struct EXPORT IntS8Const : Term::Base {
+  int8_t value;
+  explicit IntS8Const(int8_t value) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::IntS8Const &);
+  EXPORT friend bool operator==(const Term::IntS8Const &, const Term::IntS8Const &);
+};
+
+struct EXPORT IntS16Const : Term::Base {
+  int16_t value;
+  explicit IntS16Const(int16_t value) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::IntS16Const &);
+  EXPORT friend bool operator==(const Term::IntS16Const &, const Term::IntS16Const &);
+};
+
+struct EXPORT IntS32Const : Term::Base {
+  int32_t value;
+  explicit IntS32Const(int32_t value) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::IntS32Const &);
+  EXPORT friend bool operator==(const Term::IntS32Const &, const Term::IntS32Const &);
+};
+
+struct EXPORT IntS64Const : Term::Base {
+  int64_t value;
+  explicit IntS64Const(int64_t value) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::IntS64Const &);
+  EXPORT friend bool operator==(const Term::IntS64Const &, const Term::IntS64Const &);
+};
+
+struct EXPORT Unit0Const : Term::Base {
+  Unit0Const() noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::Unit0Const &);
+  EXPORT friend bool operator==(const Term::Unit0Const &, const Term::Unit0Const &);
+};
+
+struct EXPORT Bool1Const : Term::Base {
+  bool value;
+  explicit Bool1Const(bool value) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::Bool1Const &);
+  EXPORT friend bool operator==(const Term::Bool1Const &, const Term::Bool1Const &);
 };
 } // namespace Term
-namespace NullaryIntrinsicKind { 
-
-struct EXPORT Base {
-  protected:
-  Base();
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const NullaryIntrinsicKind::Any &);
-  EXPORT friend bool operator==(const NullaryIntrinsicKind::Base &, const NullaryIntrinsicKind::Base &);
-};
-
-struct EXPORT GpuGlobalIdxX : NullaryIntrinsicKind::Base {
-  GpuGlobalIdxX() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGlobalIdxX &);
-  EXPORT friend bool operator==(const NullaryIntrinsicKind::GpuGlobalIdxX &, const NullaryIntrinsicKind::GpuGlobalIdxX &);
-};
-
-struct EXPORT GpuGlobalIdxY : NullaryIntrinsicKind::Base {
-  GpuGlobalIdxY() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGlobalIdxY &);
-  EXPORT friend bool operator==(const NullaryIntrinsicKind::GpuGlobalIdxY &, const NullaryIntrinsicKind::GpuGlobalIdxY &);
-};
-
-struct EXPORT GpuGlobalIdxZ : NullaryIntrinsicKind::Base {
-  GpuGlobalIdxZ() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGlobalIdxZ &);
-  EXPORT friend bool operator==(const NullaryIntrinsicKind::GpuGlobalIdxZ &, const NullaryIntrinsicKind::GpuGlobalIdxZ &);
-};
-
-struct EXPORT GpuGlobalSizeX : NullaryIntrinsicKind::Base {
-  GpuGlobalSizeX() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGlobalSizeX &);
-  EXPORT friend bool operator==(const NullaryIntrinsicKind::GpuGlobalSizeX &, const NullaryIntrinsicKind::GpuGlobalSizeX &);
-};
-
-struct EXPORT GpuGlobalSizeY : NullaryIntrinsicKind::Base {
-  GpuGlobalSizeY() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGlobalSizeY &);
-  EXPORT friend bool operator==(const NullaryIntrinsicKind::GpuGlobalSizeY &, const NullaryIntrinsicKind::GpuGlobalSizeY &);
-};
-
-struct EXPORT GpuGlobalSizeZ : NullaryIntrinsicKind::Base {
-  GpuGlobalSizeZ() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGlobalSizeZ &);
-  EXPORT friend bool operator==(const NullaryIntrinsicKind::GpuGlobalSizeZ &, const NullaryIntrinsicKind::GpuGlobalSizeZ &);
-};
-
-struct EXPORT GpuGroupIdxX : NullaryIntrinsicKind::Base {
-  GpuGroupIdxX() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupIdxX &);
-  EXPORT friend bool operator==(const NullaryIntrinsicKind::GpuGroupIdxX &, const NullaryIntrinsicKind::GpuGroupIdxX &);
-};
-
-struct EXPORT GpuGroupIdxY : NullaryIntrinsicKind::Base {
-  GpuGroupIdxY() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupIdxY &);
-  EXPORT friend bool operator==(const NullaryIntrinsicKind::GpuGroupIdxY &, const NullaryIntrinsicKind::GpuGroupIdxY &);
-};
-
-struct EXPORT GpuGroupIdxZ : NullaryIntrinsicKind::Base {
-  GpuGroupIdxZ() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupIdxZ &);
-  EXPORT friend bool operator==(const NullaryIntrinsicKind::GpuGroupIdxZ &, const NullaryIntrinsicKind::GpuGroupIdxZ &);
-};
-
-struct EXPORT GpuGroupSizeX : NullaryIntrinsicKind::Base {
-  GpuGroupSizeX() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupSizeX &);
-  EXPORT friend bool operator==(const NullaryIntrinsicKind::GpuGroupSizeX &, const NullaryIntrinsicKind::GpuGroupSizeX &);
-};
-
-struct EXPORT GpuGroupSizeY : NullaryIntrinsicKind::Base {
-  GpuGroupSizeY() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupSizeY &);
-  EXPORT friend bool operator==(const NullaryIntrinsicKind::GpuGroupSizeY &, const NullaryIntrinsicKind::GpuGroupSizeY &);
-};
-
-struct EXPORT GpuGroupSizeZ : NullaryIntrinsicKind::Base {
-  GpuGroupSizeZ() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupSizeZ &);
-  EXPORT friend bool operator==(const NullaryIntrinsicKind::GpuGroupSizeZ &, const NullaryIntrinsicKind::GpuGroupSizeZ &);
-};
-
-struct EXPORT GpuLocalIdxX : NullaryIntrinsicKind::Base {
-  GpuLocalIdxX() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuLocalIdxX &);
-  EXPORT friend bool operator==(const NullaryIntrinsicKind::GpuLocalIdxX &, const NullaryIntrinsicKind::GpuLocalIdxX &);
-};
-
-struct EXPORT GpuLocalIdxY : NullaryIntrinsicKind::Base {
-  GpuLocalIdxY() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuLocalIdxY &);
-  EXPORT friend bool operator==(const NullaryIntrinsicKind::GpuLocalIdxY &, const NullaryIntrinsicKind::GpuLocalIdxY &);
-};
-
-struct EXPORT GpuLocalIdxZ : NullaryIntrinsicKind::Base {
-  GpuLocalIdxZ() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuLocalIdxZ &);
-  EXPORT friend bool operator==(const NullaryIntrinsicKind::GpuLocalIdxZ &, const NullaryIntrinsicKind::GpuLocalIdxZ &);
-};
-
-struct EXPORT GpuLocalSizeX : NullaryIntrinsicKind::Base {
-  GpuLocalSizeX() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuLocalSizeX &);
-  EXPORT friend bool operator==(const NullaryIntrinsicKind::GpuLocalSizeX &, const NullaryIntrinsicKind::GpuLocalSizeX &);
-};
-
-struct EXPORT GpuLocalSizeY : NullaryIntrinsicKind::Base {
-  GpuLocalSizeY() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuLocalSizeY &);
-  EXPORT friend bool operator==(const NullaryIntrinsicKind::GpuLocalSizeY &, const NullaryIntrinsicKind::GpuLocalSizeY &);
-};
-
-struct EXPORT GpuLocalSizeZ : NullaryIntrinsicKind::Base {
-  GpuLocalSizeZ() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuLocalSizeZ &);
-  EXPORT friend bool operator==(const NullaryIntrinsicKind::GpuLocalSizeZ &, const NullaryIntrinsicKind::GpuLocalSizeZ &);
-};
-
-struct EXPORT GpuGroupBarrier : NullaryIntrinsicKind::Base {
-  GpuGroupBarrier() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupBarrier &);
-  EXPORT friend bool operator==(const NullaryIntrinsicKind::GpuGroupBarrier &, const NullaryIntrinsicKind::GpuGroupBarrier &);
-};
-
-struct EXPORT GpuGroupFence : NullaryIntrinsicKind::Base {
-  GpuGroupFence() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const NullaryIntrinsicKind::GpuGroupFence &);
-  EXPORT friend bool operator==(const NullaryIntrinsicKind::GpuGroupFence &, const NullaryIntrinsicKind::GpuGroupFence &);
-};
-
-struct EXPORT Assert : NullaryIntrinsicKind::Base {
-  Assert() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const NullaryIntrinsicKind::Assert &);
-  EXPORT friend bool operator==(const NullaryIntrinsicKind::Assert &, const NullaryIntrinsicKind::Assert &);
-};
-} // namespace NullaryIntrinsicKind
-namespace UnaryIntrinsicKind { 
-
-struct EXPORT Base {
-  protected:
-  Base();
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Any &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Base &, const UnaryIntrinsicKind::Base &);
-};
-
-struct EXPORT Sin : UnaryIntrinsicKind::Base {
-  Sin() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Sin &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Sin &, const UnaryIntrinsicKind::Sin &);
-};
-
-struct EXPORT Cos : UnaryIntrinsicKind::Base {
-  Cos() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Cos &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Cos &, const UnaryIntrinsicKind::Cos &);
-};
-
-struct EXPORT Tan : UnaryIntrinsicKind::Base {
-  Tan() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Tan &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Tan &, const UnaryIntrinsicKind::Tan &);
-};
-
-struct EXPORT Asin : UnaryIntrinsicKind::Base {
-  Asin() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Asin &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Asin &, const UnaryIntrinsicKind::Asin &);
-};
-
-struct EXPORT Acos : UnaryIntrinsicKind::Base {
-  Acos() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Acos &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Acos &, const UnaryIntrinsicKind::Acos &);
-};
-
-struct EXPORT Atan : UnaryIntrinsicKind::Base {
-  Atan() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Atan &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Atan &, const UnaryIntrinsicKind::Atan &);
-};
-
-struct EXPORT Sinh : UnaryIntrinsicKind::Base {
-  Sinh() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Sinh &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Sinh &, const UnaryIntrinsicKind::Sinh &);
-};
-
-struct EXPORT Cosh : UnaryIntrinsicKind::Base {
-  Cosh() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Cosh &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Cosh &, const UnaryIntrinsicKind::Cosh &);
-};
-
-struct EXPORT Tanh : UnaryIntrinsicKind::Base {
-  Tanh() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Tanh &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Tanh &, const UnaryIntrinsicKind::Tanh &);
-};
-
-struct EXPORT Signum : UnaryIntrinsicKind::Base {
-  Signum() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Signum &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Signum &, const UnaryIntrinsicKind::Signum &);
-};
-
-struct EXPORT Abs : UnaryIntrinsicKind::Base {
-  Abs() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Abs &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Abs &, const UnaryIntrinsicKind::Abs &);
-};
-
-struct EXPORT Round : UnaryIntrinsicKind::Base {
-  Round() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Round &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Round &, const UnaryIntrinsicKind::Round &);
-};
-
-struct EXPORT Ceil : UnaryIntrinsicKind::Base {
-  Ceil() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Ceil &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Ceil &, const UnaryIntrinsicKind::Ceil &);
-};
-
-struct EXPORT Floor : UnaryIntrinsicKind::Base {
-  Floor() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Floor &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Floor &, const UnaryIntrinsicKind::Floor &);
-};
-
-struct EXPORT Rint : UnaryIntrinsicKind::Base {
-  Rint() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Rint &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Rint &, const UnaryIntrinsicKind::Rint &);
-};
-
-struct EXPORT Sqrt : UnaryIntrinsicKind::Base {
-  Sqrt() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Sqrt &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Sqrt &, const UnaryIntrinsicKind::Sqrt &);
-};
-
-struct EXPORT Cbrt : UnaryIntrinsicKind::Base {
-  Cbrt() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Cbrt &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Cbrt &, const UnaryIntrinsicKind::Cbrt &);
-};
-
-struct EXPORT Exp : UnaryIntrinsicKind::Base {
-  Exp() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Exp &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Exp &, const UnaryIntrinsicKind::Exp &);
-};
-
-struct EXPORT Expm1 : UnaryIntrinsicKind::Base {
-  Expm1() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Expm1 &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Expm1 &, const UnaryIntrinsicKind::Expm1 &);
-};
-
-struct EXPORT Log : UnaryIntrinsicKind::Base {
-  Log() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Log &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Log &, const UnaryIntrinsicKind::Log &);
-};
-
-struct EXPORT Log1p : UnaryIntrinsicKind::Base {
-  Log1p() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Log1p &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Log1p &, const UnaryIntrinsicKind::Log1p &);
-};
-
-struct EXPORT Log10 : UnaryIntrinsicKind::Base {
-  Log10() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Log10 &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Log10 &, const UnaryIntrinsicKind::Log10 &);
-};
-
-struct EXPORT BNot : UnaryIntrinsicKind::Base {
-  BNot() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::BNot &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::BNot &, const UnaryIntrinsicKind::BNot &);
-};
-
-struct EXPORT Pos : UnaryIntrinsicKind::Base {
-  Pos() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Pos &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Pos &, const UnaryIntrinsicKind::Pos &);
-};
-
-struct EXPORT Neg : UnaryIntrinsicKind::Base {
-  Neg() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::Neg &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::Neg &, const UnaryIntrinsicKind::Neg &);
-};
-
-struct EXPORT LogicNot : UnaryIntrinsicKind::Base {
-  LogicNot() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const UnaryIntrinsicKind::LogicNot &);
-  EXPORT friend bool operator==(const UnaryIntrinsicKind::LogicNot &, const UnaryIntrinsicKind::LogicNot &);
-};
-} // namespace UnaryIntrinsicKind
-namespace BinaryIntrinsicKind { 
-
-struct EXPORT Base {
-  protected:
-  Base();
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::Any &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::Base &, const BinaryIntrinsicKind::Base &);
-};
-
-struct EXPORT Add : BinaryIntrinsicKind::Base {
-  Add() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::Add &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::Add &, const BinaryIntrinsicKind::Add &);
-};
-
-struct EXPORT Sub : BinaryIntrinsicKind::Base {
-  Sub() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::Sub &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::Sub &, const BinaryIntrinsicKind::Sub &);
-};
-
-struct EXPORT Mul : BinaryIntrinsicKind::Base {
-  Mul() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::Mul &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::Mul &, const BinaryIntrinsicKind::Mul &);
-};
-
-struct EXPORT Div : BinaryIntrinsicKind::Base {
-  Div() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::Div &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::Div &, const BinaryIntrinsicKind::Div &);
-};
-
-struct EXPORT Rem : BinaryIntrinsicKind::Base {
-  Rem() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::Rem &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::Rem &, const BinaryIntrinsicKind::Rem &);
-};
-
-struct EXPORT Pow : BinaryIntrinsicKind::Base {
-  Pow() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::Pow &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::Pow &, const BinaryIntrinsicKind::Pow &);
-};
-
-struct EXPORT Min : BinaryIntrinsicKind::Base {
-  Min() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::Min &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::Min &, const BinaryIntrinsicKind::Min &);
-};
-
-struct EXPORT Max : BinaryIntrinsicKind::Base {
-  Max() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::Max &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::Max &, const BinaryIntrinsicKind::Max &);
-};
-
-struct EXPORT Atan2 : BinaryIntrinsicKind::Base {
-  Atan2() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::Atan2 &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::Atan2 &, const BinaryIntrinsicKind::Atan2 &);
-};
-
-struct EXPORT Hypot : BinaryIntrinsicKind::Base {
-  Hypot() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::Hypot &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::Hypot &, const BinaryIntrinsicKind::Hypot &);
-};
-
-struct EXPORT BAnd : BinaryIntrinsicKind::Base {
-  BAnd() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::BAnd &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::BAnd &, const BinaryIntrinsicKind::BAnd &);
-};
-
-struct EXPORT BOr : BinaryIntrinsicKind::Base {
-  BOr() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::BOr &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::BOr &, const BinaryIntrinsicKind::BOr &);
-};
-
-struct EXPORT BXor : BinaryIntrinsicKind::Base {
-  BXor() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::BXor &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::BXor &, const BinaryIntrinsicKind::BXor &);
-};
-
-struct EXPORT BSL : BinaryIntrinsicKind::Base {
-  BSL() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::BSL &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::BSL &, const BinaryIntrinsicKind::BSL &);
-};
-
-struct EXPORT BSR : BinaryIntrinsicKind::Base {
-  BSR() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::BSR &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::BSR &, const BinaryIntrinsicKind::BSR &);
-};
-
-struct EXPORT BZSR : BinaryIntrinsicKind::Base {
-  BZSR() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::BZSR &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::BZSR &, const BinaryIntrinsicKind::BZSR &);
-};
-
-struct EXPORT LogicEq : BinaryIntrinsicKind::Base {
-  LogicEq() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicEq &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::LogicEq &, const BinaryIntrinsicKind::LogicEq &);
-};
-
-struct EXPORT LogicNeq : BinaryIntrinsicKind::Base {
-  LogicNeq() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicNeq &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::LogicNeq &, const BinaryIntrinsicKind::LogicNeq &);
-};
-
-struct EXPORT LogicAnd : BinaryIntrinsicKind::Base {
-  LogicAnd() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicAnd &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::LogicAnd &, const BinaryIntrinsicKind::LogicAnd &);
-};
-
-struct EXPORT LogicOr : BinaryIntrinsicKind::Base {
-  LogicOr() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicOr &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::LogicOr &, const BinaryIntrinsicKind::LogicOr &);
-};
-
-struct EXPORT LogicLte : BinaryIntrinsicKind::Base {
-  LogicLte() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicLte &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::LogicLte &, const BinaryIntrinsicKind::LogicLte &);
-};
-
-struct EXPORT LogicGte : BinaryIntrinsicKind::Base {
-  LogicGte() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicGte &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::LogicGte &, const BinaryIntrinsicKind::LogicGte &);
-};
-
-struct EXPORT LogicLt : BinaryIntrinsicKind::Base {
-  LogicLt() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicLt &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::LogicLt &, const BinaryIntrinsicKind::LogicLt &);
-};
-
-struct EXPORT LogicGt : BinaryIntrinsicKind::Base {
-  LogicGt() noexcept;
-  EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const BinaryIntrinsicKind::LogicGt &);
-  EXPORT friend bool operator==(const BinaryIntrinsicKind::LogicGt &, const BinaryIntrinsicKind::LogicGt &);
-};
-} // namespace BinaryIntrinsicKind
 namespace TypeSpace { 
 
 struct EXPORT Base {
@@ -1065,6 +603,623 @@ struct EXPORT Local : TypeSpace::Base {
   EXPORT friend bool operator==(const TypeSpace::Local &, const TypeSpace::Local &);
 };
 } // namespace TypeSpace
+
+
+struct EXPORT Overload {
+  std::vector<Type::Any> args;
+  Type::Any rtn;
+  Overload(std::vector<Type::Any> args, Type::Any rtn) noexcept;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Overload &);
+  EXPORT friend bool operator==(const Overload &, const Overload &);
+};
+
+namespace Spec { 
+
+struct EXPORT Base {
+  std::vector<Overload> overloads;
+  std::vector<Term::Any> terms;
+  Type::Any tpe;
+  protected:
+  Base(std::vector<Overload> overloads, std::vector<Term::Any> terms, Type::Any tpe) noexcept;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::Any &);
+  EXPORT friend bool operator==(const Spec::Base &, const Spec::Base &);
+};
+EXPORT std::vector<Overload> overloads(const Spec::Any&);
+EXPORT std::vector<Term::Any> terms(const Spec::Any&);
+EXPORT Type::Any tpe(const Spec::Any&);
+
+struct EXPORT Assert : Spec::Base {
+  Assert() noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::Assert &);
+  EXPORT friend bool operator==(const Spec::Assert &, const Spec::Assert &);
+};
+
+struct EXPORT GpuBarrierGlobal : Spec::Base {
+  GpuBarrierGlobal() noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::GpuBarrierGlobal &);
+  EXPORT friend bool operator==(const Spec::GpuBarrierGlobal &, const Spec::GpuBarrierGlobal &);
+};
+
+struct EXPORT GpuBarrierLocal : Spec::Base {
+  GpuBarrierLocal() noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::GpuBarrierLocal &);
+  EXPORT friend bool operator==(const Spec::GpuBarrierLocal &, const Spec::GpuBarrierLocal &);
+};
+
+struct EXPORT GpuBarrierAll : Spec::Base {
+  GpuBarrierAll() noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::GpuBarrierAll &);
+  EXPORT friend bool operator==(const Spec::GpuBarrierAll &, const Spec::GpuBarrierAll &);
+};
+
+struct EXPORT GpuFenceGlobal : Spec::Base {
+  GpuFenceGlobal() noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::GpuFenceGlobal &);
+  EXPORT friend bool operator==(const Spec::GpuFenceGlobal &, const Spec::GpuFenceGlobal &);
+};
+
+struct EXPORT GpuFenceLocal : Spec::Base {
+  GpuFenceLocal() noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::GpuFenceLocal &);
+  EXPORT friend bool operator==(const Spec::GpuFenceLocal &, const Spec::GpuFenceLocal &);
+};
+
+struct EXPORT GpuFenceAll : Spec::Base {
+  GpuFenceAll() noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::GpuFenceAll &);
+  EXPORT friend bool operator==(const Spec::GpuFenceAll &, const Spec::GpuFenceAll &);
+};
+
+struct EXPORT GpuGlobalIdx : Spec::Base {
+  Term::Any dim;
+  explicit GpuGlobalIdx(Term::Any dim) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::GpuGlobalIdx &);
+  EXPORT friend bool operator==(const Spec::GpuGlobalIdx &, const Spec::GpuGlobalIdx &);
+};
+
+struct EXPORT GpuGlobalSize : Spec::Base {
+  Term::Any dim;
+  explicit GpuGlobalSize(Term::Any dim) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::GpuGlobalSize &);
+  EXPORT friend bool operator==(const Spec::GpuGlobalSize &, const Spec::GpuGlobalSize &);
+};
+
+struct EXPORT GpuGroupIdx : Spec::Base {
+  Term::Any dim;
+  explicit GpuGroupIdx(Term::Any dim) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::GpuGroupIdx &);
+  EXPORT friend bool operator==(const Spec::GpuGroupIdx &, const Spec::GpuGroupIdx &);
+};
+
+struct EXPORT GpuGroupSize : Spec::Base {
+  Term::Any dim;
+  explicit GpuGroupSize(Term::Any dim) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::GpuGroupSize &);
+  EXPORT friend bool operator==(const Spec::GpuGroupSize &, const Spec::GpuGroupSize &);
+};
+
+struct EXPORT GpuLocalIdx : Spec::Base {
+  Term::Any dim;
+  explicit GpuLocalIdx(Term::Any dim) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::GpuLocalIdx &);
+  EXPORT friend bool operator==(const Spec::GpuLocalIdx &, const Spec::GpuLocalIdx &);
+};
+
+struct EXPORT GpuLocalSize : Spec::Base {
+  Term::Any dim;
+  explicit GpuLocalSize(Term::Any dim) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::GpuLocalSize &);
+  EXPORT friend bool operator==(const Spec::GpuLocalSize &, const Spec::GpuLocalSize &);
+};
+} // namespace Spec
+namespace Intr { 
+
+struct EXPORT Base {
+  std::vector<Overload> overloads;
+  std::vector<Term::Any> terms;
+  Type::Any tpe;
+  protected:
+  Base(std::vector<Overload> overloads, std::vector<Term::Any> terms, Type::Any tpe) noexcept;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::Any &);
+  EXPORT friend bool operator==(const Intr::Base &, const Intr::Base &);
+};
+EXPORT std::vector<Overload> overloads(const Intr::Any&);
+EXPORT std::vector<Term::Any> terms(const Intr::Any&);
+EXPORT Type::Any tpe(const Intr::Any&);
+
+struct EXPORT BNot : Intr::Base {
+  Term::Any x;
+  Type::Any rtn;
+  BNot(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::BNot &);
+  EXPORT friend bool operator==(const Intr::BNot &, const Intr::BNot &);
+};
+
+struct EXPORT LogicNot : Intr::Base {
+  Term::Any x;
+  explicit LogicNot(Term::Any x) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::LogicNot &);
+  EXPORT friend bool operator==(const Intr::LogicNot &, const Intr::LogicNot &);
+};
+
+struct EXPORT Pos : Intr::Base {
+  Term::Any x;
+  Type::Any rtn;
+  Pos(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::Pos &);
+  EXPORT friend bool operator==(const Intr::Pos &, const Intr::Pos &);
+};
+
+struct EXPORT Neg : Intr::Base {
+  Term::Any x;
+  Type::Any rtn;
+  Neg(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::Neg &);
+  EXPORT friend bool operator==(const Intr::Neg &, const Intr::Neg &);
+};
+
+struct EXPORT Add : Intr::Base {
+  Term::Any x;
+  Term::Any y;
+  Type::Any rtn;
+  Add(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::Add &);
+  EXPORT friend bool operator==(const Intr::Add &, const Intr::Add &);
+};
+
+struct EXPORT Sub : Intr::Base {
+  Term::Any x;
+  Term::Any y;
+  Type::Any rtn;
+  Sub(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::Sub &);
+  EXPORT friend bool operator==(const Intr::Sub &, const Intr::Sub &);
+};
+
+struct EXPORT Mul : Intr::Base {
+  Term::Any x;
+  Term::Any y;
+  Type::Any rtn;
+  Mul(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::Mul &);
+  EXPORT friend bool operator==(const Intr::Mul &, const Intr::Mul &);
+};
+
+struct EXPORT Div : Intr::Base {
+  Term::Any x;
+  Term::Any y;
+  Type::Any rtn;
+  Div(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::Div &);
+  EXPORT friend bool operator==(const Intr::Div &, const Intr::Div &);
+};
+
+struct EXPORT Rem : Intr::Base {
+  Term::Any x;
+  Term::Any y;
+  Type::Any rtn;
+  Rem(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::Rem &);
+  EXPORT friend bool operator==(const Intr::Rem &, const Intr::Rem &);
+};
+
+struct EXPORT Min : Intr::Base {
+  Term::Any x;
+  Term::Any y;
+  Type::Any rtn;
+  Min(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::Min &);
+  EXPORT friend bool operator==(const Intr::Min &, const Intr::Min &);
+};
+
+struct EXPORT Max : Intr::Base {
+  Term::Any x;
+  Term::Any y;
+  Type::Any rtn;
+  Max(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::Max &);
+  EXPORT friend bool operator==(const Intr::Max &, const Intr::Max &);
+};
+
+struct EXPORT BAnd : Intr::Base {
+  Term::Any x;
+  Term::Any y;
+  Type::Any rtn;
+  BAnd(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::BAnd &);
+  EXPORT friend bool operator==(const Intr::BAnd &, const Intr::BAnd &);
+};
+
+struct EXPORT BOr : Intr::Base {
+  Term::Any x;
+  Term::Any y;
+  Type::Any rtn;
+  BOr(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::BOr &);
+  EXPORT friend bool operator==(const Intr::BOr &, const Intr::BOr &);
+};
+
+struct EXPORT BXor : Intr::Base {
+  Term::Any x;
+  Term::Any y;
+  Type::Any rtn;
+  BXor(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::BXor &);
+  EXPORT friend bool operator==(const Intr::BXor &, const Intr::BXor &);
+};
+
+struct EXPORT BSL : Intr::Base {
+  Term::Any x;
+  Term::Any y;
+  Type::Any rtn;
+  BSL(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::BSL &);
+  EXPORT friend bool operator==(const Intr::BSL &, const Intr::BSL &);
+};
+
+struct EXPORT BSR : Intr::Base {
+  Term::Any x;
+  Term::Any y;
+  Type::Any rtn;
+  BSR(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::BSR &);
+  EXPORT friend bool operator==(const Intr::BSR &, const Intr::BSR &);
+};
+
+struct EXPORT BZSR : Intr::Base {
+  Term::Any x;
+  Term::Any y;
+  Type::Any rtn;
+  BZSR(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::BZSR &);
+  EXPORT friend bool operator==(const Intr::BZSR &, const Intr::BZSR &);
+};
+
+struct EXPORT LogicAnd : Intr::Base {
+  Term::Any x;
+  Term::Any y;
+  LogicAnd(Term::Any x, Term::Any y) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::LogicAnd &);
+  EXPORT friend bool operator==(const Intr::LogicAnd &, const Intr::LogicAnd &);
+};
+
+struct EXPORT LogicOr : Intr::Base {
+  Term::Any x;
+  Term::Any y;
+  LogicOr(Term::Any x, Term::Any y) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::LogicOr &);
+  EXPORT friend bool operator==(const Intr::LogicOr &, const Intr::LogicOr &);
+};
+
+struct EXPORT LogicEq : Intr::Base {
+  Term::Any x;
+  Term::Any y;
+  LogicEq(Term::Any x, Term::Any y) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::LogicEq &);
+  EXPORT friend bool operator==(const Intr::LogicEq &, const Intr::LogicEq &);
+};
+
+struct EXPORT LogicNeq : Intr::Base {
+  Term::Any x;
+  Term::Any y;
+  LogicNeq(Term::Any x, Term::Any y) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::LogicNeq &);
+  EXPORT friend bool operator==(const Intr::LogicNeq &, const Intr::LogicNeq &);
+};
+
+struct EXPORT LogicLte : Intr::Base {
+  Term::Any x;
+  Term::Any y;
+  LogicLte(Term::Any x, Term::Any y) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::LogicLte &);
+  EXPORT friend bool operator==(const Intr::LogicLte &, const Intr::LogicLte &);
+};
+
+struct EXPORT LogicGte : Intr::Base {
+  Term::Any x;
+  Term::Any y;
+  LogicGte(Term::Any x, Term::Any y) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::LogicGte &);
+  EXPORT friend bool operator==(const Intr::LogicGte &, const Intr::LogicGte &);
+};
+
+struct EXPORT LogicLt : Intr::Base {
+  Term::Any x;
+  Term::Any y;
+  LogicLt(Term::Any x, Term::Any y) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::LogicLt &);
+  EXPORT friend bool operator==(const Intr::LogicLt &, const Intr::LogicLt &);
+};
+
+struct EXPORT LogicGt : Intr::Base {
+  Term::Any x;
+  Term::Any y;
+  LogicGt(Term::Any x, Term::Any y) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::LogicGt &);
+  EXPORT friend bool operator==(const Intr::LogicGt &, const Intr::LogicGt &);
+};
+} // namespace Intr
+namespace Math { 
+
+struct EXPORT Base {
+  std::vector<Overload> overloads;
+  std::vector<Term::Any> terms;
+  Type::Any tpe;
+  protected:
+  Base(std::vector<Overload> overloads, std::vector<Term::Any> terms, Type::Any tpe) noexcept;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Any &);
+  EXPORT friend bool operator==(const Math::Base &, const Math::Base &);
+};
+EXPORT std::vector<Overload> overloads(const Math::Any&);
+EXPORT std::vector<Term::Any> terms(const Math::Any&);
+EXPORT Type::Any tpe(const Math::Any&);
+
+struct EXPORT Abs : Math::Base {
+  Term::Any x;
+  Type::Any rtn;
+  Abs(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Abs &);
+  EXPORT friend bool operator==(const Math::Abs &, const Math::Abs &);
+};
+
+struct EXPORT Sin : Math::Base {
+  Term::Any x;
+  Type::Any rtn;
+  Sin(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Sin &);
+  EXPORT friend bool operator==(const Math::Sin &, const Math::Sin &);
+};
+
+struct EXPORT Cos : Math::Base {
+  Term::Any x;
+  Type::Any rtn;
+  Cos(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Cos &);
+  EXPORT friend bool operator==(const Math::Cos &, const Math::Cos &);
+};
+
+struct EXPORT Tan : Math::Base {
+  Term::Any x;
+  Type::Any rtn;
+  Tan(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Tan &);
+  EXPORT friend bool operator==(const Math::Tan &, const Math::Tan &);
+};
+
+struct EXPORT Asin : Math::Base {
+  Term::Any x;
+  Type::Any rtn;
+  Asin(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Asin &);
+  EXPORT friend bool operator==(const Math::Asin &, const Math::Asin &);
+};
+
+struct EXPORT Acos : Math::Base {
+  Term::Any x;
+  Type::Any rtn;
+  Acos(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Acos &);
+  EXPORT friend bool operator==(const Math::Acos &, const Math::Acos &);
+};
+
+struct EXPORT Atan : Math::Base {
+  Term::Any x;
+  Type::Any rtn;
+  Atan(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Atan &);
+  EXPORT friend bool operator==(const Math::Atan &, const Math::Atan &);
+};
+
+struct EXPORT Sinh : Math::Base {
+  Term::Any x;
+  Type::Any rtn;
+  Sinh(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Sinh &);
+  EXPORT friend bool operator==(const Math::Sinh &, const Math::Sinh &);
+};
+
+struct EXPORT Cosh : Math::Base {
+  Term::Any x;
+  Type::Any rtn;
+  Cosh(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Cosh &);
+  EXPORT friend bool operator==(const Math::Cosh &, const Math::Cosh &);
+};
+
+struct EXPORT Tanh : Math::Base {
+  Term::Any x;
+  Type::Any rtn;
+  Tanh(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Tanh &);
+  EXPORT friend bool operator==(const Math::Tanh &, const Math::Tanh &);
+};
+
+struct EXPORT Signum : Math::Base {
+  Term::Any x;
+  Type::Any rtn;
+  Signum(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Signum &);
+  EXPORT friend bool operator==(const Math::Signum &, const Math::Signum &);
+};
+
+struct EXPORT Round : Math::Base {
+  Term::Any x;
+  Type::Any rtn;
+  Round(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Round &);
+  EXPORT friend bool operator==(const Math::Round &, const Math::Round &);
+};
+
+struct EXPORT Ceil : Math::Base {
+  Term::Any x;
+  Type::Any rtn;
+  Ceil(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Ceil &);
+  EXPORT friend bool operator==(const Math::Ceil &, const Math::Ceil &);
+};
+
+struct EXPORT Floor : Math::Base {
+  Term::Any x;
+  Type::Any rtn;
+  Floor(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Floor &);
+  EXPORT friend bool operator==(const Math::Floor &, const Math::Floor &);
+};
+
+struct EXPORT Rint : Math::Base {
+  Term::Any x;
+  Type::Any rtn;
+  Rint(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Rint &);
+  EXPORT friend bool operator==(const Math::Rint &, const Math::Rint &);
+};
+
+struct EXPORT Sqrt : Math::Base {
+  Term::Any x;
+  Type::Any rtn;
+  Sqrt(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Sqrt &);
+  EXPORT friend bool operator==(const Math::Sqrt &, const Math::Sqrt &);
+};
+
+struct EXPORT Cbrt : Math::Base {
+  Term::Any x;
+  Type::Any rtn;
+  Cbrt(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Cbrt &);
+  EXPORT friend bool operator==(const Math::Cbrt &, const Math::Cbrt &);
+};
+
+struct EXPORT Exp : Math::Base {
+  Term::Any x;
+  Type::Any rtn;
+  Exp(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Exp &);
+  EXPORT friend bool operator==(const Math::Exp &, const Math::Exp &);
+};
+
+struct EXPORT Expm1 : Math::Base {
+  Term::Any x;
+  Type::Any rtn;
+  Expm1(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Expm1 &);
+  EXPORT friend bool operator==(const Math::Expm1 &, const Math::Expm1 &);
+};
+
+struct EXPORT Log : Math::Base {
+  Term::Any x;
+  Type::Any rtn;
+  Log(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Log &);
+  EXPORT friend bool operator==(const Math::Log &, const Math::Log &);
+};
+
+struct EXPORT Log1p : Math::Base {
+  Term::Any x;
+  Type::Any rtn;
+  Log1p(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Log1p &);
+  EXPORT friend bool operator==(const Math::Log1p &, const Math::Log1p &);
+};
+
+struct EXPORT Log10 : Math::Base {
+  Term::Any x;
+  Type::Any rtn;
+  Log10(Term::Any x, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Log10 &);
+  EXPORT friend bool operator==(const Math::Log10 &, const Math::Log10 &);
+};
+
+struct EXPORT Pow : Math::Base {
+  Term::Any x;
+  Term::Any y;
+  Type::Any rtn;
+  Pow(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Pow &);
+  EXPORT friend bool operator==(const Math::Pow &, const Math::Pow &);
+};
+
+struct EXPORT Atan2 : Math::Base {
+  Term::Any x;
+  Term::Any y;
+  Type::Any rtn;
+  Atan2(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Atan2 &);
+  EXPORT friend bool operator==(const Math::Atan2 &, const Math::Atan2 &);
+};
+
+struct EXPORT Hypot : Math::Base {
+  Term::Any x;
+  Term::Any y;
+  Type::Any rtn;
+  Hypot(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
+  EXPORT operator Any() const;
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Hypot &);
+  EXPORT friend bool operator==(const Math::Hypot &, const Math::Hypot &);
+};
+} // namespace Math
 namespace Expr { 
 
 struct EXPORT Base {
@@ -1076,34 +1231,28 @@ struct EXPORT Base {
 };
 EXPORT Type::Any tpe(const Expr::Any&);
 
-struct EXPORT NullaryIntrinsic : Expr::Base {
-  NullaryIntrinsicKind::Any kind;
-  Type::Any rtn;
-  NullaryIntrinsic(NullaryIntrinsicKind::Any kind, Type::Any rtn) noexcept;
+struct EXPORT SpecOp : Expr::Base {
+  Spec::Any op;
+  explicit SpecOp(Spec::Any op) noexcept;
   EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::NullaryIntrinsic &);
-  EXPORT friend bool operator==(const Expr::NullaryIntrinsic &, const Expr::NullaryIntrinsic &);
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::SpecOp &);
+  EXPORT friend bool operator==(const Expr::SpecOp &, const Expr::SpecOp &);
 };
 
-struct EXPORT UnaryIntrinsic : Expr::Base {
-  Term::Any lhs;
-  UnaryIntrinsicKind::Any kind;
-  Type::Any rtn;
-  UnaryIntrinsic(Term::Any lhs, UnaryIntrinsicKind::Any kind, Type::Any rtn) noexcept;
+struct EXPORT MathOp : Expr::Base {
+  Math::Any op;
+  explicit MathOp(Math::Any op) noexcept;
   EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::UnaryIntrinsic &);
-  EXPORT friend bool operator==(const Expr::UnaryIntrinsic &, const Expr::UnaryIntrinsic &);
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::MathOp &);
+  EXPORT friend bool operator==(const Expr::MathOp &, const Expr::MathOp &);
 };
 
-struct EXPORT BinaryIntrinsic : Expr::Base {
-  Term::Any lhs;
-  Term::Any rhs;
-  BinaryIntrinsicKind::Any kind;
-  Type::Any rtn;
-  BinaryIntrinsic(Term::Any lhs, Term::Any rhs, BinaryIntrinsicKind::Any kind, Type::Any rtn) noexcept;
+struct EXPORT IntrOp : Expr::Base {
+  Intr::Any op;
+  explicit IntrOp(Intr::Any op) noexcept;
   EXPORT operator Any() const;
-  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::BinaryIntrinsic &);
-  EXPORT friend bool operator==(const Expr::BinaryIntrinsic &, const Expr::BinaryIntrinsic &);
+  EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::IntrOp &);
+  EXPORT friend bool operator==(const Expr::IntrOp &, const Expr::IntrOp &);
 };
 
 struct EXPORT Cast : Expr::Base {
@@ -1416,35 +1565,47 @@ template <> struct std::hash<polyregion::polyast::TypeKind::Integral> {
 template <> struct std::hash<polyregion::polyast::TypeKind::Fractional> {
   std::size_t operator()(const polyregion::polyast::TypeKind::Fractional &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Type::Float> {
-  std::size_t operator()(const polyregion::polyast::Type::Float &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Type::Float16> {
+  std::size_t operator()(const polyregion::polyast::Type::Float16 &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Type::Double> {
-  std::size_t operator()(const polyregion::polyast::Type::Double &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Type::Float32> {
+  std::size_t operator()(const polyregion::polyast::Type::Float32 &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Type::Bool> {
-  std::size_t operator()(const polyregion::polyast::Type::Bool &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Type::Float64> {
+  std::size_t operator()(const polyregion::polyast::Type::Float64 &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Type::Byte> {
-  std::size_t operator()(const polyregion::polyast::Type::Byte &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Type::IntU8> {
+  std::size_t operator()(const polyregion::polyast::Type::IntU8 &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Type::Char> {
-  std::size_t operator()(const polyregion::polyast::Type::Char &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Type::IntU16> {
+  std::size_t operator()(const polyregion::polyast::Type::IntU16 &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Type::Short> {
-  std::size_t operator()(const polyregion::polyast::Type::Short &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Type::IntU32> {
+  std::size_t operator()(const polyregion::polyast::Type::IntU32 &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Type::Int> {
-  std::size_t operator()(const polyregion::polyast::Type::Int &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Type::IntU64> {
+  std::size_t operator()(const polyregion::polyast::Type::IntU64 &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Type::Long> {
-  std::size_t operator()(const polyregion::polyast::Type::Long &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Type::IntS8> {
+  std::size_t operator()(const polyregion::polyast::Type::IntS8 &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Type::Unit> {
-  std::size_t operator()(const polyregion::polyast::Type::Unit &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Type::IntS16> {
+  std::size_t operator()(const polyregion::polyast::Type::IntS16 &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Type::IntS32> {
+  std::size_t operator()(const polyregion::polyast::Type::IntS32 &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Type::IntS64> {
+  std::size_t operator()(const polyregion::polyast::Type::IntS64 &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Type::Nothing> {
   std::size_t operator()(const polyregion::polyast::Type::Nothing &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Type::Unit0> {
+  std::size_t operator()(const polyregion::polyast::Type::Unit0 &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Type::Bool1> {
+  std::size_t operator()(const polyregion::polyast::Type::Bool1 &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Type::Struct> {
   std::size_t operator()(const polyregion::polyast::Type::Struct &) const noexcept;
@@ -1467,245 +1628,44 @@ template <> struct std::hash<polyregion::polyast::Term::Select> {
 template <> struct std::hash<polyregion::polyast::Term::Poison> {
   std::size_t operator()(const polyregion::polyast::Term::Poison &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Term::UnitConst> {
-  std::size_t operator()(const polyregion::polyast::Term::UnitConst &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Term::Float16Const> {
+  std::size_t operator()(const polyregion::polyast::Term::Float16Const &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Term::BoolConst> {
-  std::size_t operator()(const polyregion::polyast::Term::BoolConst &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Term::Float32Const> {
+  std::size_t operator()(const polyregion::polyast::Term::Float32Const &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Term::ByteConst> {
-  std::size_t operator()(const polyregion::polyast::Term::ByteConst &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Term::Float64Const> {
+  std::size_t operator()(const polyregion::polyast::Term::Float64Const &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Term::CharConst> {
-  std::size_t operator()(const polyregion::polyast::Term::CharConst &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Term::IntU8Const> {
+  std::size_t operator()(const polyregion::polyast::Term::IntU8Const &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Term::ShortConst> {
-  std::size_t operator()(const polyregion::polyast::Term::ShortConst &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Term::IntU16Const> {
+  std::size_t operator()(const polyregion::polyast::Term::IntU16Const &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Term::IntConst> {
-  std::size_t operator()(const polyregion::polyast::Term::IntConst &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Term::IntU32Const> {
+  std::size_t operator()(const polyregion::polyast::Term::IntU32Const &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Term::LongConst> {
-  std::size_t operator()(const polyregion::polyast::Term::LongConst &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Term::IntU64Const> {
+  std::size_t operator()(const polyregion::polyast::Term::IntU64Const &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Term::FloatConst> {
-  std::size_t operator()(const polyregion::polyast::Term::FloatConst &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Term::IntS8Const> {
+  std::size_t operator()(const polyregion::polyast::Term::IntS8Const &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Term::DoubleConst> {
-  std::size_t operator()(const polyregion::polyast::Term::DoubleConst &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Term::IntS16Const> {
+  std::size_t operator()(const polyregion::polyast::Term::IntS16Const &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxX> {
-  std::size_t operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxX &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Term::IntS32Const> {
+  std::size_t operator()(const polyregion::polyast::Term::IntS32Const &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxY> {
-  std::size_t operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxY &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Term::IntS64Const> {
+  std::size_t operator()(const polyregion::polyast::Term::IntS64Const &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxZ> {
-  std::size_t operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGlobalIdxZ &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Term::Unit0Const> {
+  std::size_t operator()(const polyregion::polyast::Term::Unit0Const &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGlobalSizeX> {
-  std::size_t operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGlobalSizeX &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGlobalSizeY> {
-  std::size_t operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGlobalSizeY &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGlobalSizeZ> {
-  std::size_t operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGlobalSizeZ &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupIdxX> {
-  std::size_t operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupIdxX &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupIdxY> {
-  std::size_t operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupIdxY &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupIdxZ> {
-  std::size_t operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupIdxZ &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupSizeX> {
-  std::size_t operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupSizeX &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupSizeY> {
-  std::size_t operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupSizeY &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupSizeZ> {
-  std::size_t operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupSizeZ &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuLocalIdxX> {
-  std::size_t operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuLocalIdxX &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuLocalIdxY> {
-  std::size_t operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuLocalIdxY &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuLocalIdxZ> {
-  std::size_t operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuLocalIdxZ &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuLocalSizeX> {
-  std::size_t operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuLocalSizeX &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuLocalSizeY> {
-  std::size_t operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuLocalSizeY &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuLocalSizeZ> {
-  std::size_t operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuLocalSizeZ &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupBarrier> {
-  std::size_t operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupBarrier &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::GpuGroupFence> {
-  std::size_t operator()(const polyregion::polyast::NullaryIntrinsicKind::GpuGroupFence &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::NullaryIntrinsicKind::Assert> {
-  std::size_t operator()(const polyregion::polyast::NullaryIntrinsicKind::Assert &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Sin> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Sin &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Cos> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Cos &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Tan> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Tan &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Asin> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Asin &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Acos> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Acos &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Atan> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Atan &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Sinh> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Sinh &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Cosh> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Cosh &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Tanh> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Tanh &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Signum> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Signum &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Abs> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Abs &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Round> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Round &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Ceil> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Ceil &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Floor> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Floor &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Rint> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Rint &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Sqrt> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Sqrt &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Cbrt> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Cbrt &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Exp> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Exp &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Expm1> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Expm1 &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Log> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Log &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Log1p> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Log1p &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Log10> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Log10 &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::BNot> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::BNot &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Pos> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Pos &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::Neg> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::Neg &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::UnaryIntrinsicKind::LogicNot> {
-  std::size_t operator()(const polyregion::polyast::UnaryIntrinsicKind::LogicNot &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::Add> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::Add &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::Sub> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::Sub &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::Mul> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::Mul &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::Div> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::Div &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::Rem> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::Rem &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::Pow> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::Pow &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::Min> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::Min &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::Max> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::Max &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::Atan2> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::Atan2 &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::Hypot> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::Hypot &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::BAnd> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::BAnd &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::BOr> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::BOr &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::BXor> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::BXor &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::BSL> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::BSL &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::BSR> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::BSR &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::BZSR> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::BZSR &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicEq> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicEq &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicNeq> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicNeq &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicAnd> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicAnd &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicOr> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicOr &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicLte> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicLte &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicGte> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicGte &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicLt> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicLt &) const noexcept;
-};
-template <> struct std::hash<polyregion::polyast::BinaryIntrinsicKind::LogicGt> {
-  std::size_t operator()(const polyregion::polyast::BinaryIntrinsicKind::LogicGt &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Term::Bool1Const> {
+  std::size_t operator()(const polyregion::polyast::Term::Bool1Const &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::TypeSpace::Global> {
   std::size_t operator()(const polyregion::polyast::TypeSpace::Global &) const noexcept;
@@ -1713,14 +1673,206 @@ template <> struct std::hash<polyregion::polyast::TypeSpace::Global> {
 template <> struct std::hash<polyregion::polyast::TypeSpace::Local> {
   std::size_t operator()(const polyregion::polyast::TypeSpace::Local &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Expr::NullaryIntrinsic> {
-  std::size_t operator()(const polyregion::polyast::Expr::NullaryIntrinsic &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Overload> {
+  std::size_t operator()(const polyregion::polyast::Overload &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Expr::UnaryIntrinsic> {
-  std::size_t operator()(const polyregion::polyast::Expr::UnaryIntrinsic &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Spec::Assert> {
+  std::size_t operator()(const polyregion::polyast::Spec::Assert &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Expr::BinaryIntrinsic> {
-  std::size_t operator()(const polyregion::polyast::Expr::BinaryIntrinsic &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Spec::GpuBarrierGlobal> {
+  std::size_t operator()(const polyregion::polyast::Spec::GpuBarrierGlobal &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Spec::GpuBarrierLocal> {
+  std::size_t operator()(const polyregion::polyast::Spec::GpuBarrierLocal &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Spec::GpuBarrierAll> {
+  std::size_t operator()(const polyregion::polyast::Spec::GpuBarrierAll &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Spec::GpuFenceGlobal> {
+  std::size_t operator()(const polyregion::polyast::Spec::GpuFenceGlobal &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Spec::GpuFenceLocal> {
+  std::size_t operator()(const polyregion::polyast::Spec::GpuFenceLocal &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Spec::GpuFenceAll> {
+  std::size_t operator()(const polyregion::polyast::Spec::GpuFenceAll &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Spec::GpuGlobalIdx> {
+  std::size_t operator()(const polyregion::polyast::Spec::GpuGlobalIdx &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Spec::GpuGlobalSize> {
+  std::size_t operator()(const polyregion::polyast::Spec::GpuGlobalSize &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Spec::GpuGroupIdx> {
+  std::size_t operator()(const polyregion::polyast::Spec::GpuGroupIdx &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Spec::GpuGroupSize> {
+  std::size_t operator()(const polyregion::polyast::Spec::GpuGroupSize &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Spec::GpuLocalIdx> {
+  std::size_t operator()(const polyregion::polyast::Spec::GpuLocalIdx &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Spec::GpuLocalSize> {
+  std::size_t operator()(const polyregion::polyast::Spec::GpuLocalSize &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::BNot> {
+  std::size_t operator()(const polyregion::polyast::Intr::BNot &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::LogicNot> {
+  std::size_t operator()(const polyregion::polyast::Intr::LogicNot &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::Pos> {
+  std::size_t operator()(const polyregion::polyast::Intr::Pos &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::Neg> {
+  std::size_t operator()(const polyregion::polyast::Intr::Neg &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::Add> {
+  std::size_t operator()(const polyregion::polyast::Intr::Add &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::Sub> {
+  std::size_t operator()(const polyregion::polyast::Intr::Sub &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::Mul> {
+  std::size_t operator()(const polyregion::polyast::Intr::Mul &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::Div> {
+  std::size_t operator()(const polyregion::polyast::Intr::Div &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::Rem> {
+  std::size_t operator()(const polyregion::polyast::Intr::Rem &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::Min> {
+  std::size_t operator()(const polyregion::polyast::Intr::Min &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::Max> {
+  std::size_t operator()(const polyregion::polyast::Intr::Max &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::BAnd> {
+  std::size_t operator()(const polyregion::polyast::Intr::BAnd &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::BOr> {
+  std::size_t operator()(const polyregion::polyast::Intr::BOr &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::BXor> {
+  std::size_t operator()(const polyregion::polyast::Intr::BXor &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::BSL> {
+  std::size_t operator()(const polyregion::polyast::Intr::BSL &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::BSR> {
+  std::size_t operator()(const polyregion::polyast::Intr::BSR &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::BZSR> {
+  std::size_t operator()(const polyregion::polyast::Intr::BZSR &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::LogicAnd> {
+  std::size_t operator()(const polyregion::polyast::Intr::LogicAnd &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::LogicOr> {
+  std::size_t operator()(const polyregion::polyast::Intr::LogicOr &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::LogicEq> {
+  std::size_t operator()(const polyregion::polyast::Intr::LogicEq &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::LogicNeq> {
+  std::size_t operator()(const polyregion::polyast::Intr::LogicNeq &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::LogicLte> {
+  std::size_t operator()(const polyregion::polyast::Intr::LogicLte &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::LogicGte> {
+  std::size_t operator()(const polyregion::polyast::Intr::LogicGte &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::LogicLt> {
+  std::size_t operator()(const polyregion::polyast::Intr::LogicLt &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Intr::LogicGt> {
+  std::size_t operator()(const polyregion::polyast::Intr::LogicGt &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Abs> {
+  std::size_t operator()(const polyregion::polyast::Math::Abs &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Sin> {
+  std::size_t operator()(const polyregion::polyast::Math::Sin &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Cos> {
+  std::size_t operator()(const polyregion::polyast::Math::Cos &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Tan> {
+  std::size_t operator()(const polyregion::polyast::Math::Tan &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Asin> {
+  std::size_t operator()(const polyregion::polyast::Math::Asin &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Acos> {
+  std::size_t operator()(const polyregion::polyast::Math::Acos &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Atan> {
+  std::size_t operator()(const polyregion::polyast::Math::Atan &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Sinh> {
+  std::size_t operator()(const polyregion::polyast::Math::Sinh &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Cosh> {
+  std::size_t operator()(const polyregion::polyast::Math::Cosh &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Tanh> {
+  std::size_t operator()(const polyregion::polyast::Math::Tanh &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Signum> {
+  std::size_t operator()(const polyregion::polyast::Math::Signum &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Round> {
+  std::size_t operator()(const polyregion::polyast::Math::Round &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Ceil> {
+  std::size_t operator()(const polyregion::polyast::Math::Ceil &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Floor> {
+  std::size_t operator()(const polyregion::polyast::Math::Floor &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Rint> {
+  std::size_t operator()(const polyregion::polyast::Math::Rint &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Sqrt> {
+  std::size_t operator()(const polyregion::polyast::Math::Sqrt &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Cbrt> {
+  std::size_t operator()(const polyregion::polyast::Math::Cbrt &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Exp> {
+  std::size_t operator()(const polyregion::polyast::Math::Exp &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Expm1> {
+  std::size_t operator()(const polyregion::polyast::Math::Expm1 &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Log> {
+  std::size_t operator()(const polyregion::polyast::Math::Log &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Log1p> {
+  std::size_t operator()(const polyregion::polyast::Math::Log1p &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Log10> {
+  std::size_t operator()(const polyregion::polyast::Math::Log10 &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Pow> {
+  std::size_t operator()(const polyregion::polyast::Math::Pow &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Atan2> {
+  std::size_t operator()(const polyregion::polyast::Math::Atan2 &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Math::Hypot> {
+  std::size_t operator()(const polyregion::polyast::Math::Hypot &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::SpecOp> {
+  std::size_t operator()(const polyregion::polyast::Expr::SpecOp &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::MathOp> {
+  std::size_t operator()(const polyregion::polyast::Expr::MathOp &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::Expr::IntrOp> {
+  std::size_t operator()(const polyregion::polyast::Expr::IntrOp &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Expr::Cast> {
   std::size_t operator()(const polyregion::polyast::Expr::Cast &) const noexcept;

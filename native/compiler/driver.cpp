@@ -17,20 +17,20 @@ void run() {
 
   using namespace polyregion;
   using namespace polyast::dsl;
-  auto fn0 = function("lambda", {"x"_(Long)(), "xs"_(Array(Int))()}, Unit)({
-      let("gid") = Cast("x"_(Long), Int), //  invoke(Fn0::GpuGlobalIdxX(), Int),
-      let("xs_gid") = "xs"_(Array(Int))["gid"_(Int)],
-      let("result") = invoke(Fn2::Add(), "xs_gid"_(Int), "gid"_(Int), Int),
-      let("resultX2") = invoke(Fn2::Mul(), "result"_(Int), "gid"_(Int), Int),
-      "xs"_(Array(Int))["gid"_(Int)] = "resultX2"_(Int),
+  auto fn0 = function("lambda", {"x"_(Long)(), "xs"_(Array(SInt))()}, Unit)({
+      let("gid") = Cast("x"_(Long), SInt), //  invoke(Fn0::GpuGlobalIdxX(), Int),
+      let("xs_gid") = "xs"_(Array(SInt))["gid"_(SInt)],
+      let("result") = invoke(Fn2::Add(), "xs_gid"_(SInt), "gid"_(SInt), SInt),
+      let("resultX2") = invoke(Fn2::Mul(), "result"_(SInt), "gid"_(SInt), SInt),
+      "xs"_(Array(SInt))["gid"_(SInt)] = "resultX2"_(SInt),
       ret(),
   });
 
-  auto fn1 = function("lambda", {"x"_(Long)(), "xs"_(Array(Int))()}, Unit)({
-      let("gid") = Cast("x"_(Long), Int), //  invoke(Fn0::GpuGlobalIdxX(), Int),
-      let("xs_gid") = "xs"_(Array(Int))["gid"_(Int)],
+  auto fn1 = function("lambda", {"x"_(Long)(), "xs"_(Array(SInt))()}, Unit)({
+      let("gid") = Cast("x"_(Long), SInt), //  invoke(Fn0::GpuGlobalIdxX(), Int),
+      let("xs_gid") = "xs"_(Array(SInt))["gid"_(SInt)],
       //      let("resultX2_tan") = invoke(Fn1::Tanh(), "xs_gid"_(Int), Int),
-      "xs"_(Array(Int))["gid"_(Int)] = "xs_gid"_(Int),
+      "xs"_(Array(SInt))["gid"_(SInt)] = "xs_gid"_(SInt),
       ret(),
   });
 
@@ -146,7 +146,7 @@ void run() {
           int64_t x = 3;
 
           ArgBuffer buffer({
-              {Type::Long64, &x},
+              {Type::IntS6464, &x},
               {Type::Ptr, &ptr},
               {Type::Void, nullptr},
           });
@@ -178,7 +178,7 @@ void run() {
           int64_t x = 3;
 
           ArgBuffer buffer({
-              {Type::Long64, &x},
+              {Type::IntS6464, &x},
               {Type::Ptr, &ptr},
               {Type::Void, nullptr},
           });

@@ -6,6 +6,7 @@ set(LIB_SOURCES
         backend/llvm_amdgpu.cpp
         backend/llvm_nvptx.cpp
         backend/llvm_opencl.cpp
+        backend/llvm_cpu.cpp
 
         backend/llvm.cpp
 

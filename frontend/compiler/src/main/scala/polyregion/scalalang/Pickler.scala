@@ -12,44 +12,44 @@ import polyregion.prism.StdLib.MutableSeq
 object Pickler {
 
   def liftTpe(using q: Quotes)(t: p.Type) = t match {
-    case p.Type.Bool   => Type.of[Boolean]
-    case p.Type.Char   => Type.of[Char]
-    case p.Type.Byte   => Type.of[Byte]
-    case p.Type.Short  => Type.of[Short]
-    case p.Type.Int    => Type.of[Int]
-    case p.Type.Long   => Type.of[Long]
-    case p.Type.Float  => Type.of[Float]
-    case p.Type.Double => Type.of[Double]
-    case p.Type.Unit   => Type.of[Unit]
+    case p.Type.Bool1   => Type.of[Boolean]
+    case p.Type.IntU16   => Type.of[Char]
+    case p.Type.IntS8   => Type.of[Byte]
+    case p.Type.IntS16  => Type.of[Short]
+    case p.Type.IntS32    => Type.of[Int]
+    case p.Type.IntS64   => Type.of[Long]
+    case p.Type.Float32  => Type.of[Float]
+    case p.Type.Float64 => Type.of[Double]
+    case p.Type.Unit0   => Type.of[Unit]
     case illegal       => throw new RuntimeException(s"liftTpe: Cannot lift $illegal")
   }
 
   def tpeAsRuntimeTpe(t: p.Type): rt.Type = t match {
-    case p.Type.Bool               => rt.Type.BOOL
-    case p.Type.Byte               => rt.Type.BYTE
-    case p.Type.Char               => rt.Type.CHAR
-    case p.Type.Short              => rt.Type.SHORT
-    case p.Type.Int                => rt.Type.INT
-    case p.Type.Long               => rt.Type.LONG
-    case p.Type.Float              => rt.Type.FLOAT
-    case p.Type.Double             => rt.Type.DOUBLE
+    case p.Type.Bool1               => rt.Type.BOOL
+    case p.Type.IntS8               => rt.Type.BYTE
+    case p.Type.IntU16               => rt.Type.CHAR
+    case p.Type.IntS16              => rt.Type.SHORT
+    case p.Type.IntS32                => rt.Type.INT
+    case p.Type.IntS64               => rt.Type.LONG
+    case p.Type.Float32              => rt.Type.FLOAT
+    case p.Type.Float64             => rt.Type.DOUBLE
     case p.Type.Array(_,_)           => rt.Type.PTR
     case p.Type.Struct(_, _, _, _) => rt.Type.PTR
-    case p.Type.Unit               => rt.Type.VOID
+    case p.Type.Unit0               => rt.Type.VOID
     case illegal                   => throw new RuntimeException(s"tpeAsRuntimeTpe: Illegal $illegal")
   }
 
   def readPrim(using q: Quotes) //
   (source: Expr[java.nio.ByteBuffer], byteOffset: Expr[Int], tpe: p.Type): Expr[Any] = tpe match {
-    case p.Type.Float  => '{ $source.getFloat($byteOffset) }
-    case p.Type.Double => '{ $source.getDouble($byteOffset) }
-    case p.Type.Bool   => '{ if ($source.get($byteOffset) == 0) false else true }
-    case p.Type.Byte   => '{ $source.get($byteOffset) }
-    case p.Type.Char   => '{ $source.getChar($byteOffset) }
-    case p.Type.Short  => '{ $source.getShort($byteOffset) }
-    case p.Type.Int    => '{ $source.getInt($byteOffset) }
-    case p.Type.Long   => '{ $source.getLong($byteOffset) }
-    case p.Type.Unit   => '{ $source.get($byteOffset); () }
+    case p.Type.Float32  => '{ $source.getFloat($byteOffset) }
+    case p.Type.Float64 => '{ $source.getDouble($byteOffset) }
+    case p.Type.Bool1   => '{ if ($source.get($byteOffset) == 0) false else true }
+    case p.Type.IntS8   => '{ $source.get($byteOffset) }
+    case p.Type.IntU16   => '{ $source.getChar($byteOffset) }
+    case p.Type.IntS16  => '{ $source.getShort($byteOffset) }
+    case p.Type.IntS32    => '{ $source.getInt($byteOffset) }
+    case p.Type.IntS64   => '{ $source.getLong($byteOffset) }
+    case p.Type.Unit0   => '{ $source.get($byteOffset); () }
     case x =>
       throw new RuntimeException(s"Cannot get ${x.repr} from buffer, it is not a primitive type")
 
@@ -57,15 +57,15 @@ object Pickler {
 
   def writePrim(using q: Quotes) //
   (target: Expr[java.nio.ByteBuffer], byteOffset: Expr[Int], tpe: p.Type, value: Expr[Any]): Expr[Unit] = tpe match {
-    case p.Type.Float  => '{ $target.putFloat($byteOffset, ${ value.asExprOf[Float] }) }
-    case p.Type.Double => '{ $target.putDouble($byteOffset, ${ value.asExprOf[Double] }) }
-    case p.Type.Bool   => '{ $target.put($byteOffset, if (!${ value.asExprOf[Boolean] }) 0.toByte else 1.toByte) }
-    case p.Type.Byte   => '{ $target.put($byteOffset, ${ value.asExprOf[Byte] }) }
-    case p.Type.Char   => '{ $target.putChar($byteOffset, ${ value.asExprOf[Char] }) }
-    case p.Type.Short  => '{ $target.putShort($byteOffset, ${ value.asExprOf[Short] }) }
-    case p.Type.Int    => '{ $target.putInt($byteOffset, ${ value.asExprOf[Int] }) }
-    case p.Type.Long   => '{ $target.putLong($byteOffset, ${ value.asExprOf[Long] }) }
-    case p.Type.Unit   => '{ $target.put($byteOffset, 0.toByte) }
+    case p.Type.Float32  => '{ $target.putFloat($byteOffset, ${ value.asExprOf[Float] }) }
+    case p.Type.Float64 => '{ $target.putDouble($byteOffset, ${ value.asExprOf[Double] }) }
+    case p.Type.Bool1   => '{ $target.put($byteOffset, if (!${ value.asExprOf[Boolean] }) 0.toByte else 1.toByte) }
+    case p.Type.IntS8   => '{ $target.put($byteOffset, ${ value.asExprOf[Byte] }) }
+    case p.Type.IntU16   => '{ $target.putChar($byteOffset, ${ value.asExprOf[Char] }) }
+    case p.Type.IntS16  => '{ $target.putShort($byteOffset, ${ value.asExprOf[Short] }) }
+    case p.Type.IntS32    => '{ $target.putInt($byteOffset, ${ value.asExprOf[Int] }) }
+    case p.Type.IntS64   => '{ $target.putLong($byteOffset, ${ value.asExprOf[Long] }) }
+    case p.Type.Unit0   => '{ $target.put($byteOffset, 0.toByte) }
     case x =>
       throw new RuntimeException(
         s"Cannot put ${x.repr} into buffer, it is not a primitive type (source is `${value.show}`)"
@@ -249,7 +249,7 @@ object Pickler {
             comp match {
               case p.Type.Struct(name, _, _,_) =>
                 val ptr = callWrite(name, '{ $expr(i) }, ptrMap)
-                writePrim('arrBuffer, elementOffset, p.Type.Long, ptr)
+                writePrim('arrBuffer, elementOffset, p.Type.IntS64, ptr)
               case t =>
                 writePrim('arrBuffer, elementOffset, t, '{ $expr(i) })
             }
@@ -275,10 +275,10 @@ object Pickler {
           (rootAfterPrism, m.tpe) match {
             case ('{ $seq: StdLib.MutableSeq[t] }, p.Type.Array(comp, _)) =>
               val ptr = writeArray[t](seq, comp, ptrMap)
-              writePrim('buffer, memberOffset, p.Type.Long, ptr)
+              writePrim('buffer, memberOffset, p.Type.IntS64, ptr)
             case (_, p.Type.Struct(name, _, _,_)) =>
               val ptr = callWrite(name, m.select(rootAfterPrism.asTerm).asExpr, ptrMap)
-              writePrim('buffer, memberOffset, p.Type.Long, ptr)
+              writePrim('buffer, memberOffset, p.Type.IntS64, ptr)
             case (_, _) =>
               writePrim('buffer, memberOffset, m.tpe, m.select(rootAfterPrism.asTerm).asExpr)
           }
@@ -302,16 +302,16 @@ object Pickler {
 
         val arrayLen = ${
           mapping.members.headOption match {
-            case Some(lengthMember) if lengthMember.tpe == p.Type.Int =>
+            case Some(lengthMember) if lengthMember.tpe == p.Type.IntS32 =>
               Pickler
-                .readPrim(buffer, Expr(lengthMember.offsetInBytes.toInt), p.Type.Int)
+                .readPrim(buffer, Expr(lengthMember.offsetInBytes.toInt), p.Type.IntS32)
                 .asExprOf[Int]
             case _ =>
               q.report.errorAndAbort(s"Illegal structure while encoding read for member ${mapping} ")
           }
         }
 
-        val arrPtr    = ${ readPrim(buffer, memberOffset, p.Type.Long).asExprOf[Long] }
+        val arrPtr    = ${ readPrim(buffer, memberOffset, p.Type.IntS64).asExprOf[Long] }
         val arrBuffer = $bufferOfPointer(arrPtr, ${ Expr(elementSizeInBytes) } * arrayLen)
         var i         = 0
         while (i < arrayLen) {
@@ -319,7 +319,7 @@ object Pickler {
             val elementOffset = '{ ${ Expr(elementSizeInBytes) } * i }
             comp match {
               case p.Type.Struct(name, _, _,_) =>
-                val arrElemPtr = readPrim('arrBuffer, elementOffset, p.Type.Long).asExprOf[Long]
+                val arrElemPtr = readPrim('arrBuffer, elementOffset, p.Type.IntS64).asExprOf[Long]
                 callRead(name, '{ $seq(i) }, arrElemPtr, ptrMap, objMap).asExprOf[t]
               case t =>
                 readPrim('arrBuffer, elementOffset, t).asExprOf[t]
@@ -366,7 +366,7 @@ object Pickler {
                 }
 
               case (_, p.Type.Struct(name, _, _,_)) =>
-                val structPtr = readPrim('buffer, memberOffset, p.Type.Long).asExprOf[Long]
+                val structPtr = readPrim('buffer, memberOffset, p.Type.IntS64).asExprOf[Long]
                 if (m.mut) {
                   q.Assign(
                     m.select(root.asTerm),
@@ -446,7 +446,7 @@ object Pickler {
                   // readArray[t](seq, comp, ptrMap, objMap, memberOffset, 'buffer, mapping)
                   '{ ??? }.asTerm
                 case p.Type.Struct(name, _, _,_) =>
-                  val structPtr = readPrim('buffer, memberOffset, p.Type.Long).asExprOf[Long]
+                  val structPtr = readPrim('buffer, memberOffset, p.Type.IntS64).asExprOf[Long]
                   callRead(name, '{ null }, structPtr, ptrMap, objMap).asTerm
                 case _ => readPrim('buffer, memberOffset, m.tpe).asTerm
               }

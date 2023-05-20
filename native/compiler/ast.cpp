@@ -16,21 +16,27 @@ using std::string;
 
 [[nodiscard]] string polyast::repr(const Type::Any &type) {
   return variants::total(
-      *type,                                                                   //
-      [](const Type::Float &x) { return "Float"s; },                           //
-      [](const Type::Double &x) { return "Double"s; },                         //
-      [](const Type::Bool &x) { return "Bool"s; },                             //
-      [](const Type::Byte &x) { return "Byte"s; },                             //
-      [](const Type::Char &x) { return "Char"s; },                             //
-      [](const Type::Short &x) { return "Short"s; },                           //
-      [](const Type::Int &x) { return "Int"s; },                               //
-      [](const Type::Long &x) { return "Long"s; },                             //
-      [](const Type::Unit &x) { return "Unit"s; },                             //
-      [](const Type::Nothing &x) { return "Nothing"s; },                       //
+      *type,                                            //
+      [](const Type::Float16 &) { return "Float16"s; }, //
+      [](const Type::Float32 &) { return "Float32"s; }, //
+      [](const Type::Float64 &) { return "Float64"s; }, //
+
+      [](const Type::IntS8 &) { return "IntS8"s; },   //
+      [](const Type::IntS16 &) { return "IntS16"s; }, //
+      [](const Type::IntS32 &) { return "IntS32"s; }, //
+      [](const Type::IntS64 &) { return "IntS64"s; }, //
+      [](const Type::IntU8 &) { return "IntU8"s; },   //
+      [](const Type::IntU16 &) { return "IntU16"s; }, //
+      [](const Type::IntU32 &) { return "IntU32"s; }, //
+      [](const Type::IntU64 &) { return "IntU64"s; }, //
+
+      [](const Type::Unit0 &) { return "Unit0"s; },                            //
+      [](const Type::Bool1 &) { return "Bool1"s; },                            //
+      [](const Type::Nothing &) { return "Nothing"s; },                        //
       [](const Type::Struct &x) { return "Struct[" + repr(x.name) + "]"; },    //
       [](const Type::Array &x) { return "Array[" + repr(x.component) + "]"; }, //
       [](const Type::Var &x) { return "Var[" + x.name + "]"; },                //
-      [](const Type::Exec &x) { return "Exec[???]"s; }                         //
+      [](const Type::Exec &) { return "Exec[???]"s; }                          //
   );
 }
 
@@ -46,117 +52,32 @@ using std::string;
                          x.init, [&](auto x) { return repr(x); }, ".") +
                          "." + repr(x.last);
       },
-      [](const Term::Poison &x) { return "Poison(" + repr(x.tpe) + ")"s; },
-      [](const Term::UnitConst &x) { return "Unit()"s; },
-      [](const Term::BoolConst &x) { return "Bool(" + std::to_string(x.value) + ")"; },
-      [](const Term::ByteConst &x) { return "Byte(" + std::to_string(x.value) + ")"; },
-      [](const Term::CharConst &x) { return "Char(" + std::to_string(x.value) + ")"; },
-      [](const Term::ShortConst &x) { return "Short(" + std::to_string(x.value) + ")"; },
-      [](const Term::IntConst &x) { return "Int(" + std::to_string(x.value) + ")"; },
-      [](const Term::LongConst &x) { return "Long(" + std::to_string(x.value) + ")"; },
-      [](const Term::DoubleConst &x) { return "Double(" + std::to_string(x.value) + ")"; },
-      [](const Term::FloatConst &x) { return "Float(" + std::to_string(x.value) + ")"; });
+      [](const Term::Poison &x) { return "Poison(" + repr(x.tpe) + ")"; },
+
+      [](const Term::Float16Const &x) { return "Float16(" + std::to_string(x.value) + ")"; }, //
+      [](const Term::Float32Const &x) { return "Float32(" + std::to_string(x.value) + ")"; }, //
+      [](const Term::Float64Const &x) { return "Float64(" + std::to_string(x.value) + ")"; }, //
+
+      [](const Term::IntU8Const &x) { return "IntU8(" + std::to_string(x.value) + ")"; },   //
+      [](const Term::IntU16Const &x) { return "IntU16(" + std::to_string(x.value) + ")"; }, //
+      [](const Term::IntU32Const &x) { return "IntU32(" + std::to_string(x.value) + ")"; }, //
+      [](const Term::IntU64Const &x) { return "IntU64(" + std::to_string(x.value) + ")"; }, //
+      [](const Term::IntS8Const &x) { return "IntS8(" + std::to_string(x.value) + ")"; },   //
+      [](const Term::IntS16Const &x) { return "IntS16(" + std::to_string(x.value) + ")"; }, //
+      [](const Term::IntS32Const &x) { return "IntS32(" + std::to_string(x.value) + ")"; }, //
+      [](const Term::IntS64Const &x) { return "IntS64(" + std::to_string(x.value) + ")"; }, //
+
+      [](const Term::Bool1Const &x) { return "Bool1(" + std::to_string(x.value) + ")"; }, //
+      [](const Term::Unit0Const &x) { return "Unit0()"s; }                                //
+
+  );
 }
 
 [[nodiscard]] string polyast::repr(const Expr::Any &expr) {
   return variants::total(
       *expr, //
-      [](const Expr::NullaryIntrinsic &x) {
-        auto op = variants::total(
-            *x.kind, //
-            [](const NullaryIntrinsicKind::Assert &) { return "Assert"; },
-            [](const NullaryIntrinsicKind::GpuGlobalIdxX &) { return "GpuGlobalIdxX"; },
-            [](const NullaryIntrinsicKind::GpuGlobalIdxY &) { return "GpuGlobalIdxY"; },
-            [](const NullaryIntrinsicKind::GpuGlobalIdxZ &) { return "GpuGlobalIdxZ"; },
-            [](const NullaryIntrinsicKind::GpuGlobalSizeX &) { return "GpuGlobalSizeX"; },
-            [](const NullaryIntrinsicKind::GpuGlobalSizeY &) { return "GpuGlobalSizeY"; },
-            [](const NullaryIntrinsicKind::GpuGlobalSizeZ &) { return "GpuGlobalSizeZ"; },
-            [](const NullaryIntrinsicKind::GpuGroupIdxX &) { return "GpuGroupIdxX"; },
-            [](const NullaryIntrinsicKind::GpuGroupIdxY &) { return "GpuGroupIdxY"; },
-            [](const NullaryIntrinsicKind::GpuGroupIdxZ &) { return "GpuGroupIdxZ"; },
-            [](const NullaryIntrinsicKind::GpuGroupSizeX &) { return "GpuGroupSizeX"; },
-            [](const NullaryIntrinsicKind::GpuGroupSizeY &) { return "GpuGroupSizeY"; },
-            [](const NullaryIntrinsicKind::GpuGroupSizeZ &) { return "GpuGroupSizeZ"; },
-            [](const NullaryIntrinsicKind::GpuLocalIdxX &) { return "GpuLocalIdxX"; },
-            [](const NullaryIntrinsicKind::GpuLocalIdxY &) { return "GpuLocalIdxY"; },
-            [](const NullaryIntrinsicKind::GpuLocalIdxZ &) { return "GpuLocalIdxZ"; },
-            [](const NullaryIntrinsicKind::GpuLocalSizeX &) { return "GpuLocalSizeX"; },
-            [](const NullaryIntrinsicKind::GpuLocalSizeY &) { return "GpuLocalSizeY"; },
-            [](const NullaryIntrinsicKind::GpuLocalSizeZ &) { return "GpuLocalSizeZ"; },
-            [](const NullaryIntrinsicKind::GpuGroupBarrier &) { return "GpuGroupBarrier"; },
-            [](const NullaryIntrinsicKind::GpuGroupFence &) { return "GpuGroupFence"; });
-        return std::string(op) + "()";
-      },
-      [](const Expr::UnaryIntrinsic &x) {
-        auto op = variants::total(
-            *x.kind,                                                 //
-            [](const UnaryIntrinsicKind::Sin &) { return "sin"; },   //
-            [](const UnaryIntrinsicKind::Cos &) { return "cos"; },   //
-            [](const UnaryIntrinsicKind::Tan &) { return "tan"; },   //
-            [](const UnaryIntrinsicKind::Asin &) { return "asin"; }, //
-            [](const UnaryIntrinsicKind::Acos &) { return "acos"; }, //
-            [](const UnaryIntrinsicKind::Atan &) { return "atan"; }, //
-            [](const UnaryIntrinsicKind::Sinh &) { return "sinh"; }, //
-            [](const UnaryIntrinsicKind::Cosh &) { return "cosh"; }, //
-            [](const UnaryIntrinsicKind::Tanh &) { return "tanh"; }, //
-
-            [](const UnaryIntrinsicKind::Signum &) { return "signum"; }, //
-            [](const UnaryIntrinsicKind::Abs &) { return "abs"; },       //
-            [](const UnaryIntrinsicKind::Round &) { return "round"; },   //
-            [](const UnaryIntrinsicKind::Ceil &) { return "ceil"; },     //
-            [](const UnaryIntrinsicKind::Floor &) { return "floor"; },   //
-            [](const UnaryIntrinsicKind::Rint &) { return "rint"; },     //
-
-            [](const UnaryIntrinsicKind::Sqrt &) { return "sqrt"; },   //
-            [](const UnaryIntrinsicKind::Cbrt &) { return "cbrt"; },   //
-            [](const UnaryIntrinsicKind::Exp &) { return "exp"; },     //
-            [](const UnaryIntrinsicKind::Expm1 &) { return "expm1"; }, //
-            [](const UnaryIntrinsicKind::Log &) { return "log"; },     //
-            [](const UnaryIntrinsicKind::Log1p &) { return "log1p"; }, //
-            [](const UnaryIntrinsicKind::Log10 &) { return "log10"; }, //
-            [](const UnaryIntrinsicKind::BNot &) { return "~"; },      //
-            [](const UnaryIntrinsicKind::Pos &) { return "+"; },       //
-            [](const UnaryIntrinsicKind::Neg &) { return "-"; },       //
-
-            [](const UnaryIntrinsicKind::LogicNot &x) { return "!"; } //
-        );
-        return std::string(op) + "(" + repr(x.lhs) + ")";
-      },
-      [](const Expr::BinaryIntrinsic &x) {
-        auto op = variants::total(
-            *x.kind,                                              //
-            [](const BinaryIntrinsicKind::Add &) { return "+"; }, //
-            [](const BinaryIntrinsicKind::Sub &) { return "-"; }, //
-            [](const BinaryIntrinsicKind::Mul &) { return "*"; }, //
-            [](const BinaryIntrinsicKind::Div &) { return "/"; }, //
-            [](const BinaryIntrinsicKind::Rem &) { return "%"; }, //
-
-            [](const BinaryIntrinsicKind::Pow &) { return "**"; }, //
-
-            [](const BinaryIntrinsicKind::Min &) { return "min"; }, //
-            [](const BinaryIntrinsicKind::Max &) { return "max"; }, //
-
-            [](const BinaryIntrinsicKind::Atan2 &) { return "atan2"; }, //
-            [](const BinaryIntrinsicKind::Hypot &) { return "hypot"; }, //
-
-            [](const BinaryIntrinsicKind::BAnd &) { return "&"; },   //
-            [](const BinaryIntrinsicKind::BOr &) { return "|"; },    //
-            [](const BinaryIntrinsicKind::BXor &) { return "^"; },   //
-            [](const BinaryIntrinsicKind::BSL &) { return "<<"; },   //
-            [](const BinaryIntrinsicKind::BSR &) { return ">>"; },   //
-            [](const BinaryIntrinsicKind::BZSR &) { return ">>>"; }, //
-
-            [](const BinaryIntrinsicKind::LogicEq &) { return "=="; },  //
-            [](const BinaryIntrinsicKind::LogicNeq &) { return "!="; }, //
-            [](const BinaryIntrinsicKind::LogicAnd &) { return "&&"; }, //
-            [](const BinaryIntrinsicKind::LogicOr &) { return "||"; },  //
-            [](const BinaryIntrinsicKind::LogicLte &) { return "<="; }, //
-            [](const BinaryIntrinsicKind::LogicGte &) { return ">="; }, //
-            [](const BinaryIntrinsicKind::LogicLt &) { return "<"; },   //
-            [](const BinaryIntrinsicKind::LogicGt &) { return ">"; }    //
-        );
-        return repr(x.lhs) + " " + std::string(op) + " " + repr(x.rhs);
-      },
+      [](const Expr::SpecOp &x) { return to_string(x); }, [](const Expr::MathOp &x) { return to_string(x); },
+      [](const Expr::IntrOp &x) { return to_string(x); },
       [](const Expr::Cast &x) { return "(" + repr(x.from) + ".to[" + repr(x.as) + "])"; },
       [](const Expr::Alias &x) { return "(~>" + repr(x.ref) + ")"; },
       [](const Expr::Invoke &x) {
@@ -280,38 +201,41 @@ std::pair<Named, std::vector<Named>> polyast::uncons(const Term::Select &select)
 }
 
 Type::Array dsl::Array(const Type::Any &t, const ::TypeSpace::Any &s) { return Tpe::Array(t, s); }
-Type::Struct dsl::Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args) {
-  return {name, tpeVars, args, {}};
-}
+Type::Struct dsl::Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args) { return {name, tpeVars, args, {}}; }
 Term::Any dsl::integral(const Type::Any &tpe, unsigned long long int x) {
   auto unsupported = [](auto &&t, auto &&v) -> Term::Any {
-    throw std::logic_error("Cannot create integral constant of type " + to_string(t) + " for value" +
-                           std::to_string(v));
+    throw std::logic_error("Cannot create integral constant of type " + to_string(t) + " for value" + std::to_string(v));
   };
-  return variants::total(                                                      //
-      *tpe,                                                                    //
-      [&](const Type::Float &) -> Term::Any { return Term::FloatConst(x); },   //
-      [&](const Type::Double &) -> Term::Any { return Term::DoubleConst(x); }, //
-      [&](const Type::Bool &) -> Term::Any { return Term::BoolConst(x); },     //
-      [&](const Type::Byte &) -> Term::Any { return Term::ByteConst(x); },     //
-      [&](const Type::Char &) -> Term::Any { return Term::CharConst(x); },     //
-      [&](const Type::Short &) -> Term::Any { return Term::ShortConst(x); },   //
-      [&](const Type::Int &) -> Term::Any { return Term::IntConst(x); },       //
-      [&](const Type::Long &) -> Term::Any { return Term::LongConst(x); },     //
-      [&](const Type::Unit &t) -> Term::Any { return unsupported(t, x); },     //
-      [&](const Type::Nothing &t) -> Term::Any { return unsupported(t, x); },  //
-      [&](const Type::Struct &t) -> Term::Any { return unsupported(t, x); },   //
-      [&](const Type::Array &t) -> Term::Any { return unsupported(t, x); },    //
-      [&](const Type::Var &t) -> Term::Any { return unsupported(t, x); },      //
-      [&](const Type::Exec &t) -> Term::Any { return unsupported(t, x); }      //
+  return variants::total(                                                        //
+      *tpe,                                                                      //
+      [&](const Type::Float16 &) -> Term::Any { return Term::Float16Const(x); }, //
+      [&](const Type::Float32 &) -> Term::Any { return Term::Float32Const(x); }, //
+      [&](const Type::Float64 &) -> Term::Any { return Term::Float64Const(x); }, //
+
+      [&](const Type::IntU8 &) -> Term::Any { return Term::IntU8Const(x); },   //
+      [&](const Type::IntU16 &) -> Term::Any { return Term::IntU16Const(x); }, //
+      [&](const Type::IntU32 &) -> Term::Any { return Term::IntU32Const(x); }, //
+      [&](const Type::IntU64 &) -> Term::Any { return Term::IntU64Const(x); }, //
+      [&](const Type::IntS8 &) -> Term::Any { return Term::IntS8Const(x); },   //
+      [&](const Type::IntS16 &) -> Term::Any { return Term::IntS16Const(x); }, //
+      [&](const Type::IntS32 &) -> Term::Any { return Term::IntS32Const(x); }, //
+      [&](const Type::IntS64 &) -> Term::Any { return Term::IntS64Const(x); }, //
+
+      [&](const Type::Unit0 &t) -> Term::Any { return unsupported(t, x); },   //
+      [&](const Type::Bool1 &) -> Term::Any { return Term::Bool1Const(x); },  //
+      [&](const Type::Nothing &t) -> Term::Any { return unsupported(t, x); }, //
+      [&](const Type::Struct &t) -> Term::Any { return unsupported(t, x); },  //
+      [&](const Type::Array &t) -> Term::Any { return unsupported(t, x); },   //
+      [&](const Type::Var &t) -> Term::Any { return unsupported(t, x); },     //
+      [&](const Type::Exec &t) -> Term::Any { return unsupported(t, x); }     //
 
   );
 }
 Term::Any dsl::fractional(const Type::Any &tpe, long double x) {
-  if (holds<Type::Double>(tpe)) return Term::DoubleConst(static_cast<double>(x));
-  if (holds<Type::Float>(tpe)) return Term::FloatConst(static_cast<float>(x));
-  throw std::logic_error("Cannot create fractional constant of type " + to_string(tpe) + " for value" +
-                         std::to_string(x));
+  if (holds<Type::Float64>(tpe)) return Term::Float64Const(static_cast<double>(x));
+  if (holds<Type::Float32>(tpe)) return Term::Float32Const(static_cast<float>(x));
+  if (holds<Type::Float16>(tpe)) return Term::Float16Const(static_cast<float>(x));
+  throw std::logic_error("Cannot create fractional constant of type " + to_string(tpe) + " for value" + std::to_string(x));
 }
 std::function<Term::Any(Type::Any)> dsl::operator""_(unsigned long long int x) {
   return [=](const Type::Any &t) { return integral(t, x); };
@@ -326,16 +250,10 @@ std::function<dsl::NamedBuilder(Type::Any)> dsl::operator""_(const char *name, s
 
 Stmt::Any dsl::let(const string &name, const Type::Any &tpe) { return Var(Named(name, tpe), {}); }
 dsl::AssignmentBuilder dsl::let(const string &name) { return AssignmentBuilder{name}; }
-Expr::BinaryIntrinsic dsl::invoke(const BinaryIntrinsicKind::Any &kind, const Term::Any &lhs, const Term::Any &rhs,
-                                  const Type::Any &rtn) {
-  return {lhs, rhs, kind, rtn};
-}
-Expr::UnaryIntrinsic dsl::invoke(const UnaryIntrinsicKind::Any &kind, const Term::Any &lhs, const Type::Any &rtn) {
-  return {lhs, kind, rtn};
-}
-Expr::NullaryIntrinsic dsl::invoke(const NullaryIntrinsicKind::Any &kind, const Type::Any &rtn) { return {kind, rtn}; }
-std::function<Function(std::vector<Stmt::Any>)> dsl::function(const string &name, const std::vector<Arg> &args,
-                                                              const Type::Any &rtn) {
+Expr::IntrOp dsl::invoke(const Intr::Any &intr) { return Expr::IntrOp(intr); }
+Expr::MathOp dsl::invoke(const Math::Any &intr) { return Expr::MathOp(intr); }
+Expr::SpecOp dsl::invoke(const Spec::Any &intr) { return Expr::SpecOp(intr); }
+std::function<Function(std::vector<Stmt::Any>)> dsl::function(const string &name, const std::vector<Arg> &args, const Type::Any &rtn) {
   return [=](auto &&stmts) { return Function(Sym({name}), {}, {}, args, {}, {}, rtn, stmts); };
 }
 Stmt::Return dsl::ret(const Expr::Any &expr) { return Return(expr); }
@@ -343,6 +261,7 @@ Stmt::Return dsl::ret(const Term::Any &term) { return Return(Alias(term)); }
 Program dsl::program(Function entry, std::vector<StructDef> defs, std::vector<Function> functions) {
   return Program(entry, functions, defs);
 }
+
 dsl::IndexBuilder::IndexBuilder(const Expr::Index &index) : index(index) {}
 dsl::IndexBuilder::operator Expr::Any() const { return index; }
 Stmt::Update dsl::IndexBuilder::operator=(const Term::Any &term) const { return {index.lhs, index.idx, term}; }

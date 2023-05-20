@@ -116,7 +116,7 @@ static json deserialiseAst(const compiler::Bytes &astBytes) {
   }
 }
 
-static backend::LLVM::Options toLLVMBackendOptions(const compiler::Options &options) {
+static backend::LLVMBackend::Options toLLVMBackendOptions(const compiler::Options &options) {
 
   auto validate = [&](llvm::Triple::ArchType arch) {
     if (!llvm_shared::isCPUTargetSupported(options.arch, arch)) {
@@ -129,29 +129,29 @@ static backend::LLVM::Options toLLVMBackendOptions(const compiler::Options &opti
       auto host = backend::llvmc::defaultHostTriple();
       validate(host.getArch());
       switch (host.getArch()) {
-        case llvm::Triple::ArchType::x86_64: return {.target = backend::LLVM::Target::x86_64, .arch = options.arch};
-        case llvm::Triple::ArchType::aarch64: return {.target = backend::LLVM::Target::AArch64, .arch = options.arch};
-        case llvm::Triple::ArchType::arm: return {.target = backend::LLVM::Target::ARM, .arch = options.arch};
+        case llvm::Triple::ArchType::x86_64: return {.target = backend::LLVMBackend::Target::x86_64, .arch = options.arch};
+        case llvm::Triple::ArchType::aarch64: return {.target = backend::LLVMBackend::Target::AArch64, .arch = options.arch};
+        case llvm::Triple::ArchType::arm: return {.target = backend::LLVMBackend::Target::ARM, .arch = options.arch};
         default: throw std::logic_error("Unsupported host triplet: " + host.str());
       }
     }
     case compiler::Target::Object_LLVM_x86_64:
       validate(llvm::Triple::ArchType::x86_64);
-      return {.target = backend::LLVM::Target::x86_64, .arch = options.arch};
+      return {.target = backend::LLVMBackend::Target::x86_64, .arch = options.arch};
     case compiler::Target::Object_LLVM_AArch64:
       validate(llvm::Triple::ArchType::aarch64);
-      return {.target = backend::LLVM::Target::AArch64, .arch = options.arch};
+      return {.target = backend::LLVMBackend::Target::AArch64, .arch = options.arch};
     case compiler::Target::Object_LLVM_ARM:
       validate(llvm::Triple::ArchType::arm);
-      return {.target = backend::LLVM::Target::ARM, .arch = options.arch};
+      return {.target = backend::LLVMBackend::Target::ARM, .arch = options.arch};
     case compiler::Target::Object_LLVM_NVPTX64:
       validate(llvm::Triple::ArchType::nvptx64);
-      return {.target = backend::LLVM::Target::NVPTX64, .arch = options.arch};
+      return {.target = backend::LLVMBackend::Target::NVPTX64, .arch = options.arch};
     case compiler::Target::Object_LLVM_AMDGCN:
       validate(llvm::Triple::ArchType::amdgcn);
-      return {.target = backend::LLVM::Target::AMDGCN, .arch = options.arch};
-    case compiler::Target::Object_LLVM_SPIRV32: return {.target = backend::LLVM::Target::SPIRV32, .arch = options.arch};
-    case compiler::Target::Object_LLVM_SPIRV64: return {.target = backend::LLVM::Target::SPIRV64, .arch = options.arch};
+      return {.target = backend::LLVMBackend::Target::AMDGCN, .arch = options.arch};
+    case compiler::Target::Object_LLVM_SPIRV32: return {.target = backend::LLVMBackend::Target::SPIRV32, .arch = options.arch};
+    case compiler::Target::Object_LLVM_SPIRV64: return {.target = backend::LLVMBackend::Target::SPIRV64, .arch = options.arch};
     case compiler::Target::Source_C_OpenCL1_1: //
     case compiler::Target::Source_C_Metal1_0:  //
     case compiler::Target::Source_C_C11:       //
@@ -175,7 +175,7 @@ std::vector<compiler::Layout> compiler::layoutOf(const std::vector<polyast::Stru
       auto dataLayout = backend::llvmc::targetMachineFromTarget(llvmOptions.toTargetInfo())->createDataLayout();
 
       llvm::LLVMContext c;
-      backend::LLVM::AstTransformer xform(llvmOptions, c);
+      backend::LLVMBackend::AstTransformer xform(llvmOptions, c);
       std::vector<compiler::Layout> layouts;
       xform.addDefs(defs);
       std::unordered_map<polyast::Sym, polyast::StructDef> lut(defs.size());
@@ -231,7 +231,7 @@ compiler::Compilation compiler::compile(const polyast::Program &program, const O
       case Target::Object_LLVM_AMDGCN:
       case Target::Object_LLVM_SPIRV32:
       case Target::Object_LLVM_SPIRV64:                                                  //
-        return std::make_unique<backend::LLVM>(toLLVMBackendOptions(options));           //
+        return std::make_unique<backend::LLVMBackend>(toLLVMBackendOptions(options));           //
       case Target::Source_C_OpenCL1_1:                                                   //
         return std::make_unique<backend::CSource>(backend::CSource::Dialect::OpenCL1_1); //
       case Target::Source_C_Metal1_0:                                                    //

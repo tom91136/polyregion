@@ -161,9 +161,9 @@ void runStream(Type tpe, size_t size, size_t times, size_t groups, const std::st
   auto reducedSum = std::reduce(sum.begin(), sum.end());
   fValidateSum(std::fabs((reducedSum - expectedSum) / expectedSum));
 
-  //  for (int i = 0; i < sum.size(); ++i) {
-  //    std::cout << "[" << i << "]" << sum[i] << std::endl;
-  //  }
+    for (int i = 0; i < sum.size(); ++i) {
+      std::cout << "[" << i << "]" << sum[i] << std::endl;
+    }
 
   const auto sizesMB = Kernels<double>{.copy = double(2 * sizeof(T) * size) / 1000 / 1000,  //
                                        .mul = double(2 * sizeof(T) * size) / 1000 / 1000,   //
