@@ -30,9 +30,11 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 static std::vector<const char *> commonExtensions = {VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME};
 
 #ifndef NDEBUG
-static std::vector<const char *> extraLayers = {"VK_LAYER_KHRONOS_validation"};
+static std::vector<const char *> extraLayers = {
+    "VK_LAYER_KHRONOS_validation" //
+};
 static std::vector<const char *> extraExtensions = {
-    VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
+    VK_EXT_DEBUG_REPORT_EXTENSION_NAME, //
 };
 #else
 static std::vector<const char *> extraLayers = {};
@@ -47,8 +49,8 @@ static vk::raii::Instance createInstance(std::vector<const char *> &extensions, 
 
   auto insertSupported = [](auto &from, auto &to, auto &available, auto f) {
     std::copy_if(from.begin(), from.end(), std::back_inserter(to), [&](auto ext) {
-      return std::find_if(available.begin(), available.end(),
-                          [&](auto avail) { return std::string_view(f(avail)) == ext; }) != available.end();
+      return std::find_if(available.begin(), available.end(), [&](auto avail) { return std::string_view(f(avail)) == ext; }) !=
+             available.end();
     });
   };
 
@@ -91,13 +93,11 @@ std::vector<std::unique_ptr<Device>> VulkanPlatform::enumerate() {
     std::vector<vk::QueueFamilyProperties> queueProps = dev.getQueueFamilyProperties();
 
     auto computeQueueIds = transform_idx_if<uint32_t>(queueProps, [](auto &q, auto i) {
-      return q.queueCount > 0 && q.queueFlags & vk::QueueFlagBits::eCompute ? std::optional{std::pair{i, q.queueCount}}
-                                                                            : std::nullopt;
+      return q.queueCount > 0 && q.queueFlags & vk::QueueFlagBits::eCompute ? std::optional{std::pair{i, q.queueCount}} : std::nullopt;
     });
 
     auto transferQueueIds = transform_idx_if<uint32_t>(queueProps, [](auto &q, auto i) {
-      return q.queueCount > 0 && q.queueFlags & vk::QueueFlagBits::eTransfer ? std::optional{std::pair{i, q.queueCount}}
-                                                                             : std::nullopt;
+      return q.queueCount > 0 && q.queueFlags & vk::QueueFlagBits::eTransfer ? std::optional{std::pair{i, q.queueCount}} : std::nullopt;
     });
 
     // XXX VK_QUEUE_COMPUTE_BIT implies VK_QUEUE_TRANSFER_BIT, see
@@ -145,14 +145,12 @@ VmaAllocator createAllocator(vk::raii::Instance &instance, vk::raii::PhysicalDev
   return allocator;
 }
 
-static vk::raii::Device createDevice(const vk::raii::PhysicalDevice &dev, uint32_t computeQueueId,
-                                     uint32_t transferQueueId) {
+static vk::raii::Device createDevice(const vk::raii::PhysicalDevice &dev, uint32_t computeQueueId, uint32_t transferQueueId) {
   float priority = 1.0f;
   std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
   queueCreateInfos.reserve(2);
   queueCreateInfos.emplace_back(vk::DeviceQueueCreateFlags(), computeQueueId, 1, &priority);
-  if (computeQueueId != transferQueueId)
-    queueCreateInfos.emplace_back(vk::DeviceQueueCreateFlags(), transferQueueId, 1, &priority);
+  if (computeQueueId != transferQueueId) queueCreateInfos.emplace_back(vk::DeviceQueueCreateFlags(), transferQueueId, 1, &priority);
 
   auto f = dev.getFeatures();
   return dev.createDevice({{}, queueCreateInfos, {}, {}, &f});
@@ -169,9 +167,8 @@ Resolved::Resolved(uint32_t computeQueueId,
       dscLayout(ctx.createDescriptorSetLayout({{}, bindings})), //
       dscPool(ctx.createDescriptorPool(
           vk::DescriptorPoolCreateInfo(vk::DescriptorPoolCreateFlags{vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet}, 1, sizes))), //
-      dscSet(std::move(ctx.allocateDescriptorSets({*dscPool, *dscLayout})[0])), pipeCache({}),                       //
-      pipeLayout(ctx.createPipelineLayout(
-          vk::PipelineLayoutCreateInfo{vk::PipelineLayoutCreateFlags(), 1, &*dscLayout, 0, nullptr})),
+      dscSet(std::move(ctx.allocateDescriptorSets({*dscPool, *dscLayout})[0])), pipeCache({}),                                           //
+      pipeLayout(ctx.createPipelineLayout(vk::PipelineLayoutCreateInfo{vk::PipelineLayoutCreateFlags(), 1, &*dscLayout, 0, nullptr})),
 
       cmdPool(ctx.createCommandPool({vk::CommandPoolCreateFlagBits::eResetCommandBuffer, computeQueueId})), //
       cmdBuffer(std::move(ctx.allocateCommandBuffers({*cmdPool, vk::CommandBufferLevel::ePrimary, 1})[0]))
@@ -185,8 +182,7 @@ VulkanDevice::VulkanDevice(vk::raii::Instance &instance,              //
     : computeQueueId(computeQueueId),   //
       transferQueueId(transferQueueId), //
       device(std::move(device_)),       //
-      ctx(createDevice(device, computeQueueId.first, transferQueueId.first)),
-      allocator(createAllocator(instance, device, ctx)),
+      ctx(createDevice(device, computeQueueId.first, transferQueueId.first)), allocator(createAllocator(instance, device, ctx)),
       transferCmdPool(std::make_shared<vk::raii::CommandPool>(
           ctx.createCommandPool({vk::CommandPoolCreateFlagBits::eResetCommandBuffer, transferQueueId.first}))), //
       transferCmdBuffer(std::make_shared<vk::raii::CommandBuffer>(
@@ -279,7 +275,8 @@ static MemObject allocate(VmaAllocator &allocator, size_t size, bool uniform) {
   VkBufferCreateInfo bufferInfo = {};
   bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
   bufferInfo.size = size;
-  bufferInfo.usage = (uniform ? VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT : VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+  bufferInfo.usage = (uniform ? VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT : VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) |
+                     VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
   VmaAllocationCreateInfo allocCreateInfo = {};
   allocCreateInfo.usage = VMA_MEMORY_USAGE_AUTO;
   allocCreateInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
@@ -370,12 +367,10 @@ void VulkanDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_
   vmaInvalidateAllocation(allocator, obj->allocation, 0, size);
   if (cb) (*cb)();
 }
-void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                           const std::vector<Type> &types, std::vector<std::byte> argData,
-                                           const Policy &policy, const MaybeCallback &cb) {
+void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
+                                           std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
   TRACE();
-  if (types.back() != Type::Void)
-    throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported");
+  if (types.back() != Type::Void) throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported");
 
   // pointers are uniforms sharing the same descriptor set with monotonically increasing binding
   // anything that's scalar goes into a struct and added as the last binding of the same descriptor set
@@ -383,7 +378,7 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
 
   auto args = detail::argDataAsPointers(types, argData);
 
-  std::vector<std::pair<vk::DescriptorBufferInfo,vk::DescriptorType >> infos;
+  std::vector<std::pair<vk::DescriptorBufferInfo, vk::DescriptorType>> infos;
   size_t argBufferSize = 0;
 
   {
@@ -403,28 +398,38 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
     }
   }
 
+  size_t scratchCount = 0;
   auto argObj = argBufferSize == 0 ? nullptr : std::make_shared<MemObject>(allocate(allocator, argBufferSize, true));
   if (argObj) {
     auto *argPtr = static_cast<std::byte *>(argObj->mappedData);
     for (size_t i = 0; i < types.size() - 1; ++i) {
       auto tpe = types[i];
+      if (tpe == Type::Scratch) scratchCount++;
       if (tpe == Type::Ptr || tpe == Type::Scratch) continue;
       std::memcpy(argPtr, args[i], byteOfType(tpe));
       argPtr += byteOfType(tpe);
     }
     infos.emplace_back(vk::DescriptorBufferInfo{argObj->buffer, 0, argObj->size}, vk::DescriptorType::eUniformBuffer);
   }
+  if (scratchCount > 1) {
+    throw std::logic_error(std::string(ERROR_PREFIX) + "Only a single scratch buffer is supported, " + std::to_string(scratchCount) +
+                           " requested.");
+  }
 
   auto &fn = store.resolveFunction(moduleName, symbol, types);
   const auto [local, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});
-  const auto global = Dim3{policy.global.x * local.x, policy.global.y * local.y, policy.global.z * local.z};
-  const auto specEntries = std::array<vk::SpecializationMapEntry, 3>{{
+  const auto global = Dim3{policy.global.x, policy.global.y, policy.global.z};
+  auto specEntries = std::vector<vk::SpecializationMapEntry>{
       {0, 0 * sizeof(uint32_t), sizeof(uint32_t)},
       {1, 1 * sizeof(uint32_t), sizeof(uint32_t)},
       {2, 2 * sizeof(uint32_t), sizeof(uint32_t)},
-  }};
+  };
+  auto specValues = std::vector<uint32_t>{uint32_t(local.x), uint32_t(local.y), uint32_t(local.z)};
+  if (scratchCount > 0) {
+    specEntries.emplace_back(3, 3 * sizeof(uint32_t), sizeof(uint32_t));
+    specValues.emplace_back(uint32_t(sharedMem));
+  }
 
-  const auto specValues = std::array<uint32_t, 3>{uint32_t(local.x), uint32_t(local.y), uint32_t(local.z)};
   vk::SpecializationInfo specInfo(specEntries.size(), specEntries.data(), //
                                   specValues.size() * sizeof(uint32_t), specValues.data());
 
@@ -454,8 +459,8 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
   fn.cmdBuffer.end();
 
   if (cb) {
-    auto [key, enqueued] = enqueuedStore.store(std::make_shared<Enqueued>(
-        Enqueued{std::move(pipe), ctx.createFence(vk::FenceCreateInfo()), std::move(argObj)}));
+    auto [key, enqueued] = enqueuedStore.store(
+        std::make_shared<Enqueued>(Enqueued{std::move(pipe), ctx.createFence(vk::FenceCreateInfo()), std::move(argObj)}));
 
     computeQueue.submit(vk::SubmitInfo{{}, {}, *fn.cmdBuffer}, *(enqueued->fence));
     callbackQueue.push([this, &fn, cb, key = key]() {

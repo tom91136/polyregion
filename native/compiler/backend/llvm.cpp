@@ -100,7 +100,9 @@ ValPtr LLVMBackend::AstTransformer::invokeAbort(llvm::Function *parent) {
 }
 
 // the only unsigned type in PolyAst
-static bool isUnsigned(const Type::Any &tpe) { return holds<Type::IntU16>(tpe); }
+static bool isUnsigned(const Type::Any &tpe) {
+  return holds<Type::IntU8>(tpe) || holds<Type::IntU16>(tpe) || holds<Type::IntU32>(tpe) || holds<Type::IntU64>(tpe);
+}
 
 static constexpr int64_t nIntMin(uint64_t bits) { return -(int64_t(1) << (bits - 1)); }
 static constexpr int64_t nIntMax(uint64_t bits) { return (int64_t(1) << (bits - 1)) - 1; }
@@ -137,8 +139,8 @@ llvm::Type *LLVMBackend::AstTransformer::mkTpe(const Type::Any &tpe, bool functi
 
       [&](const Type::Unit0 &x) -> llvm::Type * {
         return functionBoundary ? llvm::Type::getVoidTy(C) : llvm::Type::getIntNTy(C, 1); /*TODO this really needs to be 0*/
-      },                                                                                 //
-      [&](const Type::Nothing &x) -> llvm::Type * { return llvm::Type::getVoidTy(C); },  //
+      },                                                                                  //
+      [&](const Type::Nothing &x) -> llvm::Type * { return llvm::Type::getVoidTy(C); },   //
       [&](const Type::Struct &x) -> llvm::Type * {
         if (auto def = polyregion::get_opt(structTypes, x.name); def) return def->first;
         else {

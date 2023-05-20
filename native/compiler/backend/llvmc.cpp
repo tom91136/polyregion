@@ -360,11 +360,9 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
 
         auto opt0Start = compiler::nowMono();
 
+        // TODO generate PHI nodes properly and not rely on this
         optimise(*TM, *M, optLevel);
 //
-         std::cerr << "<<<<<<<<<<<" << std::endl;
-
-
         events.emplace_back(compiler::nowMs(), compiler::elapsedNs(opt0Start), "opt0", module2Ir(*M));
 
         auto clspvStart = compiler::nowMono();

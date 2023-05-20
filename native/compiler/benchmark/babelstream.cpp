@@ -147,33 +147,33 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
                     let("global_size") = invoke(GpuGlobalSize(0_(UInt))),
                     "wg_sum"_(Array(type, Local))[local_i] = 0_(type),
                     While({let("cont") = invoke(LogicLt("i"_(UInt), "array_size"_(UInt)))}, "cont"_(Bool),
-                          {let("ai") = "a"_(Array(type))[i],                                          // ai = a[i]
-                           let("bi") = "b"_(Array(type))[i],                                          // bi = b[i]
-                           let("sumid") = "wg_sum"_(Array(type, Local))[local_i],                     // sumid = sum[local_i]
-                           let("r0") = invoke(Mul("ai"_(type), "bi"_(type), type)),                   // r0 = ai * bi
-                           let("r1") = invoke(Add("r0"_(type), "sumid"_(type), type)),                // r1 = r0 + sumid
-                           "wg_sum"_(Array(type, Local))[local_i] = "r1"_(type),                      // a[i] = bi
+                          {let("ai") = "a"_(Array(type))[i],                                              // ai = a[i]
+                           let("bi") = "b"_(Array(type))[i],                                              // bi = b[i]
+                           let("sumid") = "wg_sum"_(Array(type, Local))[local_i],                         // sumid = sum[local_i]
+                           let("r0") = invoke(Mul("ai"_(type), "bi"_(type), type)),                       // r0 = ai * bi
+                           let("r1") = invoke(Add("r0"_(type), "sumid"_(type), type)),                    // r1 = r0 + sumid
+                           "wg_sum"_(Array(type, Local))[local_i] = "r1"_(type),                          // a[i] = bi
                            Mut("i"_(UInt), invoke(Add("i"_(UInt), "global_size"_(UInt), UInt)), false)}), // i += array_size
-                    let("offset") = invoke(GpuLocalSize(0_(UInt))),                                    // offset = get_local_size()
+                    let("offset") = invoke(GpuLocalSize(0_(UInt))),                                       // offset = get_local_size()
                     Mut("offset"_(UInt), invoke(Div("offset"_(UInt), 2_(UInt), UInt)), false),            // offset /= 2
-                    While(
-                        {let("cont") = invoke(LogicGt("offset"_(UInt), 0_(UInt)))}, "cont"_(Bool),
-                        {
-                            let("_") = invoke(GpuBarrierLocal()),
-                            Cond({invoke(LogicLt("local_i"_(UInt), "offset"_(UInt)))}, //
-                                 {
-                                     let("new_offset") = invoke(Add("local_i"_(UInt), "offset"_(UInt), UInt)), // new_offset = local_i + offset
-                                     let("wg_sum_old") = "wg_sum"_(Array(type, Local))[local_i],            // wg_sum_old = wg_sum[local_i]
-                                     let("wg_sum_at_offset") = "wg_sum"_(Array(type, Local))["new_offset"_(UInt)], // wg_sum_at_offset =
-                                                                                                                  // wg_sum[new_offset]
-                                     Mut("wg_sum_at_offset"_(type), invoke(Add("wg_sum_at_offset"_(type), "wg_sum_old"_(type), type)),
-                                         false),
+                    While({let("cont") = invoke(LogicGt("offset"_(UInt), 0_(UInt)))}, "cont"_(Bool),
+                          {
+                              let("_") = invoke(GpuBarrierLocal()),
+                              Cond({invoke(LogicLt("local_i"_(UInt), "offset"_(UInt)))}, //
+                                   {
+                                       let("new_offset") =
+                                           invoke(Add("local_i"_(UInt), "offset"_(UInt), UInt)),   // new_offset = local_i + offset
+                                       let("wg_sum_old") = "wg_sum"_(Array(type, Local))[local_i], // wg_sum_old = wg_sum[local_i]
+                                       let("wg_sum_at_offset") = "wg_sum"_(Array(type, Local))["new_offset"_(UInt)], // wg_sum_at_offset =
+                                                                                                                     // wg_sum[new_offset]
+                                       Mut("wg_sum_at_offset"_(type), invoke(Add("wg_sum_at_offset"_(type), "wg_sum_old"_(type), type)),
+                                           false),
 
-                                     "wg_sum"_(Array(type, Local))[local_i] = "wg_sum_at_offset"_(type) // a[i] = bi
-                                 },
-                                 {}),
-                            Mut("offset"_(UInt), invoke(Div("offset"_(UInt), 2_(UInt), UInt)), false) // offset /= 2
-                        }),
+                                       "wg_sum"_(Array(type, Local))[local_i] = "wg_sum_at_offset"_(type), // a[i] = bi
+                                   },
+                                   {}),
+                              Mut("offset"_(UInt), invoke(Div("offset"_(UInt), 2_(UInt), UInt)), false) // offset /= 2
+                          }),
                     let("group_id") = invoke(GpuGroupIdx(0_(UInt))),
                     Cond({invoke(LogicEq("local_i"_(UInt), 0_(UInt)))}, //
                          {
@@ -181,12 +181,7 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
                              "sum"_(Array(type))["group_id"_(UInt)] = "wg_sum_old_1"_(type),
                          },
 
-
-
                          {}),
-//                    let("fooo") = Cast("global_size"_(UInt), type),
-//                    "sum"_(Array(type))["group_id"_(UInt)] =  "fooo"_(type)
-                    //
                 };
               },
               empty);
@@ -212,15 +207,15 @@ int main() {
 
   std::vector<std::tuple<runtime::Backend, compiler::Target, std::string>> configs = {
       // CL runs everywhere
-//            {runtime::Backend::OpenCL, compiler::Target::Source_C_OpenCL1_1, ""},
-      {runtime::Backend::Vulkan, compiler::Target::Object_LLVM_SPIRV32, ""},
+      {runtime::Backend::OpenCL, compiler::Target::Source_C_OpenCL1_1, ""},
+      {runtime::Backend::Vulkan, compiler::Target::Object_LLVM_SPIRV64, ""},
 #ifdef __APPLE__
       {runtime::Backend::RELOCATABLE_OBJ, compiler::Target::Object_LLVM_AArch64, "apple-m1"},
       {runtime::Backend::Metal, compiler::Target::Source_C_Metal1_0, ""},
 #else
-//      {runtime::Backend::CUDA, compiler::Target::Object_LLVM_NVPTX64, "sm_60"},
-//      {runtime::Backend::HIP, compiler::Target::Object_LLVM_AMDGCN, "gfx1012"},
-//      {runtime::Backend::RELOCATABLE_OBJ, compiler::Target::Object_LLVM_x86_64, "x86-64-v3"},
+      {runtime::Backend::CUDA, compiler::Target::Object_LLVM_NVPTX64, "sm_60"},
+      //      {runtime::Backend::HIP, compiler::Target::Object_LLVM_AMDGCN, "gfx1012"},
+      {runtime::Backend::RELOCATABLE_OBJ, compiler::Target::Object_LLVM_x86_64, "x86-64-v3"},
 #endif
   };
 
@@ -236,7 +231,7 @@ int main() {
     {
 
       polyregion::compiler::initialise();
-      auto c = polyregion::compiler::compile(p, {target, arch}, polyregion::compiler::Opt::O1);
+      auto c = polyregion::compiler::compile(p, {target, arch}, polyregion::compiler::Opt::Ofast);
       //    std::cerr << c << std::endl;
       std::cerr << c << std::endl;
 
@@ -274,7 +269,7 @@ int main() {
         polyregion::stream::runStream<float>(
             runtime::Type::Float32,                          //
             33554432,                                        //
-            3,                                               //
+            100,                                             //
             cpu ? std::thread::hardware_concurrency() : 256, //
             platform->name(),
             std::move(d), //
@@ -282,12 +277,12 @@ int main() {
             true,         //
             [](auto actual, auto tolerance) {
               if (actual >= tolerance) {
-                std::cerr << "Tolerance (" << tolerance << ") exceeded for array value:" << actual << std::endl;
+                std::cerr << "Tolerance (" << tolerance * 100 << "%) exceeded for array value delta: " << actual * 100 << "&" << std::endl;
               }
             }, //
             [=](auto actual) {
               if (actual >= relTolerance) {
-                std::cerr << "Tolerance (" << relTolerance << ") exceeded for dot value:" << actual << std::endl;
+                std::cerr << "Tolerance (" << relTolerance * 100 << "%) exceeded for dot value delta: " << actual * 100 << "&" << std::endl;
               }
             } //
         );

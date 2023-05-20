@@ -17,11 +17,13 @@ void run() {
 
   using namespace polyregion;
   using namespace polyast::dsl;
+  using namespace polyast::Intr;
+
   auto fn0 = function("lambda", {"x"_(Long)(), "xs"_(Array(SInt))()}, Unit)({
       let("gid") = Cast("x"_(Long), SInt), //  invoke(Fn0::GpuGlobalIdxX(), Int),
       let("xs_gid") = "xs"_(Array(SInt))["gid"_(SInt)],
-      let("result") = invoke(Fn2::Add(), "xs_gid"_(SInt), "gid"_(SInt), SInt),
-      let("resultX2") = invoke(Fn2::Mul(), "result"_(SInt), "gid"_(SInt), SInt),
+      let("result") = invoke(Add("xs_gid"_(SInt), "gid"_(SInt), SInt)),
+      let("resultX2") = invoke(Mul("result"_(SInt), "gid"_(SInt), SInt)),
       "xs"_(Array(SInt))["gid"_(SInt)] = "resultX2"_(SInt),
       ret(),
   });
@@ -54,26 +56,26 @@ void run() {
   } catch (const std::exception &e) {
     std::cerr << "[REL] " << e.what() << std::endl;
   }
-//  try {
-//    rts.push_back(std::make_unique<CudaPlatform>());
-//  } catch (const std::exception &e) {
-//    std::cerr << "[CUDA] " << e.what() << std::endl;
-//  }
-//  try {
-//    rts.push_back(std::make_unique<ClPlatform>());
-//  } catch (const std::exception &e) {
-//    std::cerr << "[OCL] " << e.what() << std::endl;
-//  }
-//  try {
-//    rts.push_back(std::make_unique<HsaPlatform>());
-//  } catch (const std::exception &e) {
-//    std::cerr << "[HSA] " << e.what() << std::endl;
-//  }
-//  try {
-//    rts.push_back(std::make_unique<HipPlatform>());
-//  } catch (const std::exception &e) {
-//    std::cerr << "[HIP] " << e.what() << std::endl;
-//  }
+  //  try {
+  //    rts.push_back(std::make_unique<CudaPlatform>());
+  //  } catch (const std::exception &e) {
+  //    std::cerr << "[CUDA] " << e.what() << std::endl;
+  //  }
+  //  try {
+  //    rts.push_back(std::make_unique<ClPlatform>());
+  //  } catch (const std::exception &e) {
+  //    std::cerr << "[OCL] " << e.what() << std::endl;
+  //  }
+  //  try {
+  //    rts.push_back(std::make_unique<HsaPlatform>());
+  //  } catch (const std::exception &e) {
+  //    std::cerr << "[HSA] " << e.what() << std::endl;
+  //  }
+  //  try {
+  //    rts.push_back(std::make_unique<HipPlatform>());
+  //  } catch (const std::exception &e) {
+  //    std::cerr << "[HIP] " << e.what() << std::endl;
+  //  }
 
   static std::vector<int> xs;
 
@@ -114,8 +116,7 @@ void run() {
       if (c0.binary) {
 
         if (options.target == compiler::Target::Source_C_OpenCL1_1) {
-          std::ofstream outfile("bin_" + (options.arch.empty() ? "no_arch" : options.arch) + ".cl",
-                                std::ios::out | std::ios::trunc);
+          std::ofstream outfile("bin_" + (options.arch.empty() ? "no_arch" : options.arch) + ".cl", std::ios::out | std::ios::trunc);
           outfile.write(c0.binary->data(), c0.binary->size());
           outfile.close();
         } else {
@@ -140,13 +141,12 @@ void run() {
 
           auto size = sizeof(decltype(xs)::value_type) * xs.size();
           auto ptr = d->malloc(size, Access::RW);
-          q1->enqueueHostToDeviceAsync(xs.data(), ptr, size,
-                                       [&]() { std::cout << "[" << i << "]  H->D ok" << std::endl; });
+          q1->enqueueHostToDeviceAsync(xs.data(), ptr, size, [&]() { std::cout << "[" << i << "]  H->D ok" << std::endl; });
 
           int64_t x = 3;
 
           ArgBuffer buffer({
-              {Type::IntS6464, &x},
+              {Type::Long64, &x},
               {Type::Ptr, &ptr},
               {Type::Void, nullptr},
           });
@@ -172,13 +172,12 @@ void run() {
           }
           auto size = sizeof(decltype(xs)::value_type) * xs.size();
           auto ptr = d->malloc(size, Access::RW);
-          q1->enqueueHostToDeviceAsync(xs.data(), ptr, size,
-                                       [&]() { std::cout << "[" << i << "]  H->D ok" << std::endl; });
+          q1->enqueueHostToDeviceAsync(xs.data(), ptr, size, [&]() { std::cout << "[" << i << "]  H->D ok" << std::endl; });
 
           int64_t x = 3;
 
           ArgBuffer buffer({
-              {Type::IntS6464, &x},
+              {Type::Long64, &x},
               {Type::Ptr, &ptr},
               {Type::Void, nullptr},
           });
