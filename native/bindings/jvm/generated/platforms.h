@@ -19,8 +19,10 @@ static constexpr jbyte TYPE_VOID = 1;
 [[maybe_unused]] jobject Dynamic0(JNIEnv *env, jclass);
 [[maybe_unused]] jobject HIP0(JNIEnv *env, jclass);
 [[maybe_unused]] jobject HSA0(JNIEnv *env, jclass);
+[[maybe_unused]] jobject Metal0(JNIEnv *env, jclass);
 [[maybe_unused]] jobject OpenCL0(JNIEnv *env, jclass);
 [[maybe_unused]] jobject Relocatable0(JNIEnv *env, jclass);
+[[maybe_unused]] jobject Vulkan0(JNIEnv *env, jclass);
 [[maybe_unused]] void deleteAllPeers0(JNIEnv *env, jclass);
 [[maybe_unused]] jobject directBufferFromPointer0(JNIEnv *env, jclass, jlong ptr, jlong size);
 [[maybe_unused]] jlong pointerOfDirectBuffer0(JNIEnv *env, jclass, jobject buffer);
@@ -40,18 +42,20 @@ static void unregisterMethods(JNIEnv *env) {
 static void registerMethods(JNIEnv *env) {
   if (clazz) return;
   clazz = reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/runtime/Platforms")));
-  const static JNINativeMethod methods[10] = {
+  const static JNINativeMethod methods[12] = {
       {(char *)"CUDA0", (char *)"()Lpolyregion/jvm/runtime/Platform;", (void *)&CUDA0},
       {(char *)"Dynamic0", (char *)"()Lpolyregion/jvm/runtime/Platform;", (void *)&Dynamic0},
       {(char *)"HIP0", (char *)"()Lpolyregion/jvm/runtime/Platform;", (void *)&HIP0},
       {(char *)"HSA0", (char *)"()Lpolyregion/jvm/runtime/Platform;", (void *)&HSA0},
+      {(char *)"Metal0", (char *)"()Lpolyregion/jvm/runtime/Platform;", (void *)&Metal0},
       {(char *)"OpenCL0", (char *)"()Lpolyregion/jvm/runtime/Platform;", (void *)&OpenCL0},
       {(char *)"Relocatable0", (char *)"()Lpolyregion/jvm/runtime/Platform;", (void *)&Relocatable0},
+      {(char *)"Vulkan0", (char *)"()Lpolyregion/jvm/runtime/Platform;", (void *)&Vulkan0},
       {(char *)"deleteAllPeers0", (char *)"()V", (void *)&deleteAllPeers0},
       {(char *)"directBufferFromPointer0", (char *)"(JJ)Ljava/nio/ByteBuffer;", (void *)&directBufferFromPointer0},
       {(char *)"pointerOfDirectBuffer0", (char *)"(Ljava/nio/Buffer;)J", (void *)&pointerOfDirectBuffer0},
       {(char *)"pointerOfDirectBuffers0", (char *)"([Ljava/nio/Buffer;)[J", (void *)&pointerOfDirectBuffers0}};
-  if(env->RegisterNatives(clazz, methods, 10) != 0){
+  if(env->RegisterNatives(clazz, methods, 12) != 0){
     throw std::logic_error("RegisterNatives returned non-zero for polyregion/jvm/runtime/Platforms");
   }
 }

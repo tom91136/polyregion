@@ -21,6 +21,7 @@ static_assert(polyregion::to_underlying(cp::Target::Object_LLVM_ARM) == Compiler
 
 static_assert(polyregion::to_underlying(cp::Target::Object_LLVM_NVPTX64) == Compiler::Target_Object_LLVM_NVPTX64);
 static_assert(polyregion::to_underlying(cp::Target::Object_LLVM_AMDGCN) == Compiler::Target_Object_LLVM_AMDGCN);
+static_assert(polyregion::to_underlying(cp::Target::Object_LLVM_SPIRV32) == Compiler::Target_Object_LLVM_SPIRV32);
 static_assert(polyregion::to_underlying(cp::Target::Object_LLVM_SPIRV64) == Compiler::Target_Object_LLVM_SPIRV64);
 
 static_assert(polyregion::to_underlying(cp::Target::Source_C_OpenCL1_1) == Compiler::Target_Source_C_OpenCL1_1);

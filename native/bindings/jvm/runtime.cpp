@@ -11,6 +11,8 @@
 #include "generated/platforms.h"
 #include "hip_platform.h"
 #include "hsa_platform.h"
+#include "vulkan_platform.h"
+#include "metal_platform.h"
 #include "jni_utils.h"
 #include "object_platform.h"
 #include "utils.hpp"
@@ -144,6 +146,14 @@ jobject Platforms::CUDA0(JNIEnv *env, jclass) { return toJni<rt::cuda::CudaPlatf
 jobject Platforms::HIP0(JNIEnv *env, jclass) { return toJni<rt::hip::HipPlatform>(env); }
 jobject Platforms::HSA0(JNIEnv *env, jclass) { return toJni<rt::hsa::HsaPlatform>(env); }
 jobject Platforms::OpenCL0(JNIEnv *env, jclass) { return toJni<rt::cl::ClPlatform>(env); }
+jobject Platforms::Vulkan0(JNIEnv *env, jclass) { return toJni<rt::vulkan::VulkanPlatform>(env); }
+jobject Platforms::Metal0(JNIEnv *env, jclass) {
+#ifdef RUNTIME_ENABLE_METAL
+  return toJni<rt::metal::MetalPlatform>(env);
+#else
+  return nullptr;
+#endif
+}
 jobject Platforms::Relocatable0(JNIEnv *env, jclass) { return toJni<rt::object::RelocatablePlatform>(env); }
 jobject Platforms::Dynamic0(JNIEnv *env, jclass) { return toJni<rt::object::SharedPlatform>(env); }
 jobject Platforms::directBufferFromPointer0(JNIEnv *env, jclass, jlong ptr, jlong size) {
