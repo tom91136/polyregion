@@ -15,14 +15,7 @@ set(POLYREGION_SHARED_LIB OFF CACHE BOOL "")
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 ProcessorCount(NPROC)
 
-
 project(polyregion-native)
-
-FetchContent_Declare(
-        libffi
-        URL https://github.com/libffi/libffi/releases/download/v3.4.4/libffi-3.4.4.tar.gz
-        URL_HASH SHA256=d66c56ad259a82cf2a9dfc408b32bf5da52371500b84745f7fb8b645712df676
-)
 
 FetchContent_Declare(
         json
@@ -32,35 +25,11 @@ FetchContent_Declare(
 )
 
 FetchContent_Declare(
-        Catch2
-        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-        GIT_TAG v3.2.1
-)
-
-FetchContent_Declare(
-        oneTBB
-        URL https://github.com/oneapi-src/oneTBB/archive/refs/tags/v2021.9.0.zip
-        URL_HASH SHA256=fcebb93cb9f7e882f62cd351b1c093dbefdcae04b616227dc716b0a5efa9e8ab
-)
-
-FetchContent_Declare(
-        Vulkan-Headers
-        URL https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.3.231.zip
-        URL_HASH SHA256=68fa5e19776d0e371cd86878db882a5aa9a4d6e3d91ed9363f8ea14e3c356cc6
-)
-
-FetchContent_Declare(
         VulkanMemoryAllocator
         URL https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/v3.0.1/include/vk_mem_alloc.h
         URL_HASH SHA256=087975b663fb5e5c0fd0ff9aac7f9fd5a0fada72f8d1f65b6bd8fcfd3a388359
         DOWNLOAD_NO_EXTRACT YES
 )
-
-#FetchContent_Declare(
-#        SPIRV-LLVM-Translator
-#        URL https://github.com/KhronosGroup/SPIRV-LLVM-Translator/archive/refs/tags/v16.0.0.zip
-#        URL_HASH SHA256=212f230957d92c96edd573fc9fbb3218ec0684060d9dc9c43a1b2f52eafdcada
-#)
 
 FetchContent_Declare(
         clspv
@@ -68,18 +37,10 @@ FetchContent_Declare(
         URL_HASH SHA256=ebffbb5f01c001090181ea91e3ff6e1fb7e30f1e928adb6f02ee585c76e418bf
 )
 
-FetchContent_Declare(
-        SPIRV-Headers
-        URL https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/sdk-1.3.246.1.zip
-        URL_HASH SHA256=175dd419bef640634b0d5eb645181b07b924afc0569a398f86f9e8d7ba15f6b2
-)
-
-FetchContent_Declare(
-        SPIRV-Tools
-        URL https://github.com/KhronosGroup/SPIRV-Tools/archive/refs/tags/v2023.2.zip
-        URL_HASH SHA256=3a4165617f42385c21040b2ee8df21205582eb17b63ac1ffbccf1eb836b19090
-)
-
+find_package(Catch2 CONFIG REQUIRED)
+find_package(TBB CONFIG REQUIRED)
+find_package(libffi CONFIG REQUIRED)
+find_package(SPIRV-Tools-opt CONFIG REQUIRED)
 
 if (USE_LINKER)
     message(STATUS "Using custom linker: ${USE_LINKER}")
@@ -103,7 +64,7 @@ if (MSVC)
 else ()
     # FIXME adjust for CUDA stuff for now
     set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan -g3)
-        set(COMMON_DEBUG_OPTIONS)
+    set(COMMON_DEBUG_OPTIONS)
 endif ()
 
 if (MSVC)
@@ -165,8 +126,8 @@ else ()
     else ()
         # For lld, we setup LTO, ICF, and threading
         set(COMMON_LINKER_OPTIONS
-#                LINKER:--lto-O3
-                LINKER:--icf=all
+                #                LINKER:--lto-O3
+#                LINKER:--icf=all
                 LINKER:--threads=${NPROC}
                 LINKER:--no-allow-shlib-undefined
                 LINKER:--no-undefined-version
@@ -229,38 +190,15 @@ message(STATUS "Using MLIR at ${MLIR_DIR}")
 message(STATUS "Using LLD at ${LLD_DIR}")
 
 find_package(LLVM REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
-find_package(MLIR REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
 find_package(LLD REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
+#find_package(MLIR REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
 
 message(STATUS "Using LLVM: ${LLVM_PACKAGE_VERSION} tools")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
-
 FetchContent_MakeAvailable(json)
-FetchContent_MakeAvailable(Catch2)
-FetchContent_MakeAvailable(Vulkan-Headers)
 FetchContent_MakeAvailable(VulkanMemoryAllocator)
-FetchContent_MakeAvailable(SPIRV-Headers)
 
-set(SPIRV_BUILD_FUZZER OFF)
-set(SPIRV_BUILD_LIBFUZZER_TARGETS OFF)
-set(SPIRV_TOOLS_BUILD_STATIC OFF)
-set(SPIRV_SKIP_EXECUTABLES ON)
-FetchContent_MakeAvailable(SPIRV-Tools)
-
-#set(LLVM_SPIRV_BUILD_EXTERNAL ON)
-#set(CMAKE_DISABLE_FIND_PACKAGE_SPIRV-Tools ON)
-#set(CMAKE_DISABLE_FIND_PACKAGE_SPIRV-Tools-tools ON)
-
-
-#FetchContent_GetProperties(spirv-headers)
-#if (NOT spirv-headers_POPULATED)
-#    FetchContent_Populate(spirv-headers)
-#
-#endif ()
-
-
-#FetchContent_MakeAvailable(clspv)
 FetchContent_GetProperties(clspv)
 if (NOT clspv_POPULATED)
     FetchContent_Populate(clspv)
@@ -343,7 +281,7 @@ if (NOT clspv_POPULATED)
             )
 
     foreach (SOURCE
-            "${clspv_SOURCE_DIR}/lib/UndoInstCombinePass.cpp";
+            "${clspv_SOURCE_DIR}/lib/UndoInstCombinePass.cpp"
             "${clspv_SOURCE_DIR}/lib/SPIRVProducerPass.cpp")
         message(STATUS "Patching ${SOURCE}")
 
@@ -351,29 +289,6 @@ if (NOT clspv_POPULATED)
         string(REPLACE "PoisonMaskElem" "UndefMaskElem" FILE_CONTENTS "${FILE_CONTENTS}")
         file(WRITE "${SOURCE}" "${FILE_CONTENTS}")
     endforeach ()
-endif ()
-
-
-set(BUILD_SHARED_LIBS OFF)
-set(TBB_TEST OFF)
-FetchContent_MakeAvailable(oneTBB)
-
-# libffi does not use CMake so we inject one manually from VCPKG
-# See https://github.com/microsoft/vcpkg/blob/2f0872b7d592635e8e4919d178650d549c211464/ports/libffi/CMakeLists.txt
-# and related configurations in <ROOT>/libffi
-FetchContent_GetProperties(libffi)
-if (NOT libffi_POPULATED)
-    FetchContent_Populate(libffi)
-    file(COPY ${CMAKE_SOURCE_DIR}/libffi/CMakeLists.txt DESTINATION "${libffi_SOURCE_DIR}")
-    file(COPY ${CMAKE_SOURCE_DIR}/libffi/libffiConfig.cmake.in DESTINATION "${libffi_SOURCE_DIR}")
-    file(COPY ${CMAKE_SOURCE_DIR}/libffi/fficonfig.h DESTINATION "${libffi_SOURCE_DIR}/include")
-    if (WIN32)
-        set(VCPKG_TARGET_ARCHITECTURE x64)
-    endif ()
-    set(libffi_DEFINITIONS FFI_BUILDING NO_JAVA_RAW_API)
-
-    add_subdirectory(${libffi_SOURCE_DIR} ${libffi_BINARY_DIR} EXCLUDE_FROM_ALL)
-    set(libffi_INCLUDE_DIRS "${libffi_BINARY_DIR}/include")
 endif ()
 
 # set CXX stuff here in case LLVM overwrites it

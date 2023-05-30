@@ -24,7 +24,6 @@ set(LIB_SOURCES
         )
 
 add_library(compiler-lib ${LIB_SOURCES})
-add_dependencies(compiler-lib intrinsics_gen)
 
 add_executable(compiler-tests test/ast_codegen.cpp test/backend.cpp test/ast.cpp)
 add_executable(compiler-benchmark benchmark/babelstream.cpp)
@@ -63,7 +62,7 @@ if (NOT WIN32)
             backend/suppress_fd.h
             ../include/utils.hpp
             ../include/variants.hpp
-            ${Catch2_SOURCE_DIR}/src/catch2/catch_all.hpp
+#            ${Catch2_SOURCE_DIR}/src/catch2/catch_all.hpp
 
             <optional>
             <ostream>

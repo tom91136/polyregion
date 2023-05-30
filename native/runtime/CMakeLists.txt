@@ -36,7 +36,6 @@ add_library(runtime-lib STATIC
         ${RUNTIME_SRC_FILES}
         #        ${kompute_SOURCE_FILES}
         )
-add_dependencies(runtime-lib intrinsics_gen) # for LLVM tblgen
 
 add_executable(runtime-tests test/test_utils.cpp test/fma.cpp test/args.cpp test/stream.cpp)
 add_executable(runtime-drv ../shared/cxa_thread_atexit.cpp driver.cpp)
@@ -77,7 +76,6 @@ target_link_libraries(runtime-lib PUBLIC
         ${LLVM_LIBS}
         ${DL_LIB}
         libffi
-        Vulkan-Headers
         ${RUNTIME_LINK_LIBS}
         TBB::tbb
         )
