@@ -25,11 +25,25 @@ jobs:
         run: |
           sudo apt-get install ninja-build llvm
 
+      - name: Dotenv
+        uses: falti/dotenv-action@v1.0.4
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "${{ steps.dotenv.outputs.vcpkg_commit }}"
+
+      - name: Set VCPKG_ROOT
+        shell: pwsh
+        working-directory: ./native
+        run: echo "VCPKG_ROOT=${{ github.workspace }}/vcpkg" >> $env:GITHUB_ENV
+
       - name: Check environment
         run: |
           clang --version
           llvm-tblgen --version
           echo "JAVA_HOME=$JAVA_HOME"
+          echo "VCPKG_ROOT=$VCPKG_ROOT"
 
       - name: Restore sysroot cache
         if: ${{ !env.ACT }}
@@ -80,19 +94,6 @@ jobs:
         with:
           path: ./native/llvm-*
           key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/ProjectConfig.cmake', './native/toolchain*.cmake') }}
-
-      - name: Dotenv
-        uses: falti/dotenv-action@v1.0.4
-
-      - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgGitCommitId: "${{ steps.dotenv.outputs.vcpkg_commit }}"
-
-      - name: Set VCPKG_ROOT
-        shell: pwsh
-        working-directory: ./native
-        run: echo "VCPKG_ROOT=${{ github.workspace }}/vcpkg" >> $env:GITHUB_ENV
 
       - name: Configure release build
         working-directory: ./native

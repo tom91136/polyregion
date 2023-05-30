@@ -41,12 +41,26 @@ jobs:
           Get-ChildItem -Name -Recurse .
           echo "JAVA_HOME=${PWD}\jdk_${jdk_arch}\$version" >> $env:GITHUB_ENV
 
+      - name: Dotenv
+        uses: falti/dotenv-action@v1.0.4
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "${{ steps.dotenv.outputs.vcpkg_commit }}"
+
+      - name: Set VCPKG_ROOT
+        shell: pwsh
+        working-directory: ./native
+        run: echo "VCPKG_ROOT=${{ github.workspace }}/vcpkg" >> $env:GITHUB_ENV
+
       - name: Check environment
         shell: pwsh
         run: |
           Write-Output $env:JAVA_HOME
           & "$env:JAVA_HOME\bin\java.exe" -version
           Write-Output $env:PROCESSOR_ARCHITECTURE
+          Write-Output $env:VCPKG_ROOT
 
       - name: Restore LLVM cache
         if: ${{ !env.ACT }}
@@ -60,9 +74,9 @@ jobs:
         id: build-llvm
         if: steps.restore-llvm.outputs.cache-hit != 'true'
         working-directory: ./native
+        # Don't use host tools on Windows as it's not present, build them from scratch
+        # FIXME this needs revisiting if ARM64 on Windows takes off
         run: |
-          # Don't use host tools on Windows as it's not present, built them from scratch
-          # FIXME this needs revisiting if ARM64 on Windows takes off 
           call setup_msvc_env.bat ${{ inputs.build_arch }} 
           cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DLLVM_USE_HOST_TOOLS=OFF -DARCH=${{ inputs.build_arch }} -DACTION=LLVM -P build.cmake
 
@@ -73,19 +87,6 @@ jobs:
         with:
           path: ./native/llvm-*
           key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/ProjectConfig.cmake', './native/toolchain*.cmake') }}
-
-      - name: Dotenv
-        uses: falti/dotenv-action@v1.0.4
-
-      - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgGitCommitId: "${{ steps.dotenv.outputs.vcpkg_commit }}"
-
-      - name: Set VCPKG_ROOT
-        shell: pwsh
-        working-directory: ./native
-        run: echo "VCPKG_ROOT=${{ github.workspace }}/vcpkg" >> $env:GITHUB_ENV
 
       - name: Configure release build
         working-directory: ./native
