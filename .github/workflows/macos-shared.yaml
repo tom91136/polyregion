@@ -27,6 +27,7 @@ jobs:
           echo "/usr/local/opt/llvm/bin"    >> $GITHUB_PATH
 
       - name: Dotenv
+        id: dotenv
         uses: falti/dotenv-action@v1.0.4
         with:
           path: ./native/.env

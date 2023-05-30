@@ -42,6 +42,7 @@ jobs:
           echo "JAVA_HOME=${PWD}\jdk_${jdk_arch}\$version" >> $env:GITHUB_ENV
 
       - name: Dotenv
+        id: dotenv
         uses: falti/dotenv-action@v1.0.4
         with:
           path: ./native/.env
