@@ -28,6 +28,8 @@ jobs:
 
       - name: Dotenv
         uses: falti/dotenv-action@v1.0.4
+        with:
+          path: ./native/.env
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11

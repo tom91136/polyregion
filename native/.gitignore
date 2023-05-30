@@ -256,3 +256,5 @@ $RECYCLE.BIN/
 /llvm-*
 
 venv
+
+!.env
