@@ -17,29 +17,29 @@ elseif (UNIX)
 endif ()
 
 
-add_library(polyregion-shim-jvm SHARED ../../shared/cxa_thread_atexit.cpp generated/mirror.cpp shim.cpp)
-add_library(polyregion-compiler-jvm SHARED ../../shared/cxa_thread_atexit.cpp generated/mirror.cpp compiler.cpp)
-add_library(polyregion-runtime-jvm SHARED ../../shared/cxa_thread_atexit.cpp generated/mirror.cpp runtime.cpp)
+add_library(Polyc-JNIshim SHARED ../../shared/cxa_thread_atexit.cpp generated/mirror.cpp shim.cpp)
+add_library(Polyc-JNI SHARED ../../shared/cxa_thread_atexit.cpp generated/mirror.cpp compiler.cpp)
+add_library(PolyRT-JNI SHARED ../../shared/cxa_thread_atexit.cpp generated/mirror.cpp runtime.cpp)
 
 
-target_include_directories(polyregion-shim-jvm PRIVATE
+target_include_directories(Polyc-JNIshim PRIVATE
         ../../include
 
         ${JNI_INCLUDE_DIRS})
-target_include_directories(polyregion-compiler-jvm PRIVATE
+target_include_directories(Polyc-JNI PRIVATE
         .
         ../../compiler
 
         ${JNI_INCLUDE_DIRS})
-target_include_directories(polyregion-runtime-jvm PRIVATE
+target_include_directories(PolyRT-JNI PRIVATE
         .
         ../../runtime
 
         ${JNI_INCLUDE_DIRS})
 
-target_link_libraries(polyregion-shim-jvm PRIVATE ${DL_LIB})
-target_link_libraries(polyregion-compiler-jvm PRIVATE compiler-lib)
-target_link_libraries(polyregion-runtime-jvm PRIVATE runtime-lib)
+target_link_libraries(Polyc-JNIshim PRIVATE ${DL_LIB})
+target_link_libraries(Polyc-JNI PRIVATE Polyc)
+target_link_libraries(PolyRT-JNI PRIVATE PolyRT)
 
 set(COMPILE_OPTIONS
         ${COMMON_COMPILE_OPTIONS}
@@ -48,24 +48,25 @@ set(COMPILE_OPTIONS
 
 set(LINK_OPTIONS
         ${COMMON_LINK_OPTIONS}
+        ${STRICT_LINKER_OPTIONS}
         "$<$<CONFIG:DEBUG>:${COMMON_DEBUG_OPTIONS}>")
 
-target_compile_options(polyregion-shim-jvm PRIVATE ${COMPILE_OPTIONS})
-target_compile_options(polyregion-compiler-jvm PRIVATE ${COMPILE_OPTIONS})
-target_compile_options(polyregion-runtime-jvm PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(Polyc-JNIshim PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(Polyc-JNI PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(PolyRT-JNI PRIVATE ${COMPILE_OPTIONS})
 
-target_link_options(polyregion-shim-jvm PRIVATE ${LINK_OPTIONS})
-target_link_options(polyregion-compiler-jvm PRIVATE ${LINK_OPTIONS})
-target_link_options(polyregion-runtime-jvm PRIVATE ${LINK_OPTIONS})
+target_link_options(Polyc-JNIshim PRIVATE ${LINK_OPTIONS})
+target_link_options(Polyc-JNI PRIVATE ${LINK_OPTIONS})
+target_link_options(PolyRT-JNI PRIVATE ${LINK_OPTIONS})
 
 # Running `strip` on macOS drops even more stuff than just compiling with -dead_strip.
 if (APPLE)
     add_custom_command(
-            TARGET polyregion-runtime-jvm POST_BUILD
+            TARGET PolyRT-JNI POST_BUILD
             COMMAND strip
-            ARGS -SXx $<TARGET_FILE:polyregion-runtime-jvm>)
+            ARGS -SXx $<TARGET_FILE:PolyRT-JNI>)
     add_custom_command(
-            TARGET polyregion-compiler-jvm POST_BUILD
+            TARGET Polyc-JNI POST_BUILD
             COMMAND strip
-            ARGS -SXx $<TARGET_FILE:polyregion-compiler-jvm>)
+            ARGS -SXx $<TARGET_FILE:Polyc-JNI>)
 endif ()

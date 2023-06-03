@@ -478,7 +478,7 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
   } else {
     auto fence = ctx.createFence(vk::FenceCreateInfo());
     computeQueue.submit(vk::SubmitInfo{{}, {}, *fn.cmdBuffer}, *fence);
-    ctx.waitForFences({*fence}, true, uint64_t(-1));
+    auto r = ctx.waitForFences({*fence}, true, uint64_t(-1));
     fn.cmdPool.reset();
     vmaDestroyBuffer(allocator, VkBuffer(argObj->buffer), argObj->allocation);
   }

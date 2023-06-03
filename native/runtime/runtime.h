@@ -259,10 +259,10 @@ public:
 
 } // namespace detail
 
-EXPORT void init();
+POLYREGION_EXPORT void init();
 
-struct EXPORT Dim3 {
-  EXPORT size_t x, y, z;
+struct POLYREGION_EXPORT Dim3 {
+  POLYREGION_EXPORT size_t x, y, z;
   [[nodiscard]] std::array<size_t, 3> sizes() const { return {x, y, z}; }
   constexpr Dim3(size_t x, size_t y, size_t z) : x(x), y(y), z(z) {
     if (x < 1) throw std::logic_error("x < 1");
@@ -273,14 +273,14 @@ struct EXPORT Dim3 {
   friend std::ostream &operator<<(std::ostream &os, const Dim3 &dim3);
 };
 
-struct EXPORT Policy {
-  EXPORT Dim3 global{};
-  EXPORT std::optional<std::pair<Dim3, size_t>> local{};
+struct POLYREGION_EXPORT Policy {
+  POLYREGION_EXPORT Dim3 global{};
+  POLYREGION_EXPORT std::optional<std::pair<Dim3, size_t>> local{};
 };
 
 enum class Access : uint8_t { RW = 1, RO, WO };
 
-constexpr std::optional<Access> EXPORT fromUnderlying(uint8_t v) {
+constexpr std::optional<Access> POLYREGION_EXPORT fromUnderlying(uint8_t v) {
   auto x = static_cast<Access>(v);
   switch (x) {
     case Access::RW:
@@ -290,7 +290,7 @@ constexpr std::optional<Access> EXPORT fromUnderlying(uint8_t v) {
   }
 }
 
-enum class EXPORT Backend {
+enum class POLYREGION_EXPORT Backend {
   CUDA,
   HIP,
   HSA,
@@ -301,7 +301,7 @@ enum class EXPORT Backend {
   RELOCATABLE_OBJ,
 };
 
-constexpr std::string_view EXPORT nameOfBackend(const Backend &b) {
+constexpr std::string_view POLYREGION_EXPORT nameOfBackend(const Backend &b) {
   switch (b) {
     case Backend::CUDA: return "CUDA";
     case Backend::HIP: return "HIP";
@@ -314,68 +314,68 @@ constexpr std::string_view EXPORT nameOfBackend(const Backend &b) {
   }
 }
 
-struct EXPORT DeviceQueue {
+struct POLYREGION_EXPORT DeviceQueue {
 
 public:
-  virtual EXPORT ~DeviceQueue() = default;
-  virtual EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t bytes,
+  virtual POLYREGION_EXPORT ~DeviceQueue() = default;
+  virtual POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t bytes,
                                                const MaybeCallback &cb) = 0;
 
   template <typename T>
-  EXPORT void enqueueHostToDeviceAsyncTyped(const T *src, uintptr_t dst, size_t count, const MaybeCallback &cb = {}) {
+  POLYREGION_EXPORT void enqueueHostToDeviceAsyncTyped(const T *src, uintptr_t dst, size_t count, const MaybeCallback &cb = {}) {
     static_assert(sizeof(T) != 0);
     enqueueHostToDeviceAsync(src, dst, count * sizeof(T), cb);
   };
 
-  virtual EXPORT void enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) = 0;
+  virtual POLYREGION_EXPORT void enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) = 0;
 
   template <typename T>
-  EXPORT void enqueueDeviceToHostAsyncTyped(uintptr_t src, T *dst, size_t count, const MaybeCallback &cb = {}) {
+  POLYREGION_EXPORT void enqueueDeviceToHostAsyncTyped(uintptr_t src, T *dst, size_t count, const MaybeCallback &cb = {}) {
     static_assert(sizeof(T) != 0);
     enqueueDeviceToHostAsync(src, dst, count * sizeof(T), cb);
   };
 
-  virtual EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
+  virtual POLYREGION_EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
                                          const std::vector<Type> &types, std::vector<std::byte> argData,
                                          const Policy &policy, const MaybeCallback &cb) = 0;
 
-  virtual EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
+  virtual POLYREGION_EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
                                          const ArgBuffer &buffer, const Policy &policy, const MaybeCallback &cb) {
     enqueueInvokeAsync(moduleName, symbol, buffer.types, buffer.data, policy, cb);
   };
 };
 
-struct EXPORT Device {
+struct POLYREGION_EXPORT Device {
 public:
-  virtual EXPORT ~Device() = default;
-  [[nodiscard]] virtual EXPORT int64_t id() = 0;
-  [[nodiscard]] virtual EXPORT std::string name() = 0;
-  [[nodiscard]] virtual EXPORT bool sharedAddressSpace() = 0;
-  [[nodiscard]] virtual EXPORT bool singleEntryPerModule() = 0;
-  [[nodiscard]] virtual EXPORT std::vector<Property> properties() = 0;
-  [[nodiscard]] virtual EXPORT std::vector<std::string> features() = 0;
-  virtual EXPORT void loadModule(const std::string &name, const std::string &image) = 0;
-  [[nodiscard]] virtual EXPORT bool moduleLoaded(const std::string &name) = 0;
-  [[nodiscard]] virtual EXPORT uintptr_t malloc(size_t size, Access access) = 0;
+  virtual POLYREGION_EXPORT ~Device() = default;
+  [[nodiscard]] virtual POLYREGION_EXPORT int64_t id() = 0;
+  [[nodiscard]] virtual POLYREGION_EXPORT std::string name() = 0;
+  [[nodiscard]] virtual POLYREGION_EXPORT bool sharedAddressSpace() = 0;
+  [[nodiscard]] virtual POLYREGION_EXPORT bool singleEntryPerModule() = 0;
+  [[nodiscard]] virtual POLYREGION_EXPORT std::vector<Property> properties() = 0;
+  [[nodiscard]] virtual POLYREGION_EXPORT std::vector<std::string> features() = 0;
+  virtual POLYREGION_EXPORT void loadModule(const std::string &name, const std::string &image) = 0;
+  [[nodiscard]] virtual POLYREGION_EXPORT bool moduleLoaded(const std::string &name) = 0;
+  [[nodiscard]] virtual POLYREGION_EXPORT uintptr_t malloc(size_t size, Access access) = 0;
 
-  template <typename T> [[nodiscard]] EXPORT uintptr_t mallocTyped(size_t count, Access access) {
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT uintptr_t mallocTyped(size_t count, Access access) {
     static_assert(sizeof(T) != 0);
     return malloc(count * sizeof(T), access);
   };
 
-  virtual EXPORT void free(uintptr_t ptr) = 0;
-  template <typename... T> EXPORT void freeAll(T... ptrs) {
+  virtual POLYREGION_EXPORT void free(uintptr_t ptr) = 0;
+  template <typename... T> POLYREGION_EXPORT void freeAll(T... ptrs) {
     ([&]() { free(ptrs); }(), ...);
   };
-  [[nodiscard]] virtual EXPORT std::unique_ptr<DeviceQueue> createQueue() = 0;
+  [[nodiscard]] virtual POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue() = 0;
 };
 
 class Platform {
 public:
-  virtual EXPORT ~Platform() = default;
-  [[nodiscard]] EXPORT virtual std::string name() = 0;
-  [[nodiscard]] EXPORT virtual std::vector<Property> properties() = 0;
-  [[nodiscard]] EXPORT virtual std::vector<std::unique_ptr<Device>> enumerate() = 0;
+  virtual POLYREGION_EXPORT ~Platform() = default;
+  [[nodiscard]] POLYREGION_EXPORT virtual std::string name() = 0;
+  [[nodiscard]] POLYREGION_EXPORT virtual std::vector<Property> properties() = 0;
+  [[nodiscard]] POLYREGION_EXPORT virtual std::vector<std::unique_ptr<Device>> enumerate() = 0;
   static std::unique_ptr<Platform> of(const Backend &b);
 };
 

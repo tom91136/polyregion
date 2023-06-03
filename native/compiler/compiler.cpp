@@ -231,7 +231,7 @@ compiler::Compilation compiler::compile(const polyast::Program &program, const O
       case Target::Object_LLVM_AMDGCN:
       case Target::Object_LLVM_SPIRV32:
       case Target::Object_LLVM_SPIRV64:                                                  //
-        return std::make_unique<backend::LLVMBackend>(toLLVMBackendOptions(options));           //
+        return std::make_unique<backend::LLVMBackend>(toLLVMBackendOptions(options));    //
       case Target::Source_C_OpenCL1_1:                                                   //
         return std::make_unique<backend::CSource>(backend::CSource::Dialect::OpenCL1_1); //
       case Target::Source_C_Metal1_0:                                                    //

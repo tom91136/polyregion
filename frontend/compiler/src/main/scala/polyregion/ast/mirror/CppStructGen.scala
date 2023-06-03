@@ -55,7 +55,7 @@ private[polyregion] object CppStructGen {
       val (_, stmts, forwardDeclStmts) = xs.foldLeft[(Option[String], List[String], List[String])]((None, Nil, Nil)) {
         case ((ns, implStmts, forwardDeclStmts), cls) =>
           val moreImplStmts = "" ::
-            s"struct EXPORT ${cls.parent.fold(cls.name)(s"${cls.name} : " + _)} {" //
+            s"struct POLYREGION_EXPORT ${cls.parent.fold(cls.name)(s"${cls.name} : " + _)} {" //
             :: cls.stmts.map("  " + _) :::                                         //
             "};" ::                                                                //
             cls.nsDeclStmts                                                        //
@@ -286,7 +286,7 @@ private[polyregion] object CppStructGen {
               "}" :: Nil
 
           val streamProto =
-            s"EXPORT friend std::ostream &operator<<(std::ostream &os, const ${tpe.ref(qualified = true)} &);" :: Nil
+            s"POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const ${tpe.ref(qualified = true)} &);" :: Nil
           (streamProto, streamMethodStmts)
         }
 
@@ -304,7 +304,7 @@ private[polyregion] object CppStructGen {
 
       val conversion =
         if (tpe.kind == CppType.Kind.Variant)
-          s"EXPORT operator Any() const;" :: Nil
+          s"POLYREGION_EXPORT operator Any() const;" :: Nil
         else Nil
 
       val conversionImpl =
@@ -319,7 +319,7 @@ private[polyregion] object CppStructGen {
           val arg = tpe.ref(qualified = true)
           val rtn = t.ref(qualified = true)
           (
-            s"EXPORT $rtn $n(const $arg&);",
+            s"POLYREGION_EXPORT $rtn $n(const $arg&);",
             s"$rtn ${ns(n)}(const $arg& x){ return select<&${clsName(qualified = true)}::$n>(x); }"
           )
         }.unzip
@@ -357,7 +357,7 @@ private[polyregion] object CppStructGen {
         }
 
       val equalitySig =
-        s"EXPORT friend bool operator==(const ${clsName(qualified = true)} &, const ${clsName(qualified = true)} &);" :: Nil
+        s"POLYREGION_EXPORT friend bool operator==(const ${clsName(qualified = true)} &, const ${clsName(qualified = true)} &);" :: Nil
       val equalityImpl = members match {
         case Nil =>
           s"bool ${ns("operator==")}(const ${clsName(qualified = true)} &, const ${clsName(qualified = true)} &) { return true; }" :: Nil

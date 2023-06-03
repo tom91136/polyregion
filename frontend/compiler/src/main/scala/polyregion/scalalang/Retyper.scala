@@ -112,7 +112,7 @@ object Retyper {
         } yield sm
 
       }
-      .map(p.StructDef(p.Sym(clsSym.fullName), true, clsTypeCtorNames(clsSym), _, deriveParents(clsSym)))
+      .map(p.StructDef(p.Sym(clsSym.fullName), clsTypeCtorNames(clsSym), _, deriveParents(clsSym)))
   }
 
   // Ctor rules

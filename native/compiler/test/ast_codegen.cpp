@@ -19,7 +19,21 @@ using namespace Math;
 using namespace polyregion;
 using namespace polyast::dsl;
 
-static std::vector<Tpe::Any> PrimitiveTypes = {Float, Double, Bool, Byte, Char, Short, SInt, Long };
+static std::vector<Tpe::Any> PrimitiveTypes = {
+    Type::Float16(), //
+    Type::Float32(), //
+    Type::Float64(), //
+    Type::Bool1(),   //
+    Type::IntS8(),   //
+    Type::IntS16(),  //
+    Type::IntS32(),  //
+    Type::IntS64(),  //
+    Type::IntU8(),   //
+    Type::IntU16(),  //
+    Type::IntU32(),  //
+    Type::IntU64(),  //
+    Type::Unit0(),
+};
 
 Term::Any generateConstValue(Tpe::Any t) {
   auto unsupported = [&]() -> Term::Any { throw std::logic_error("No constant for type " + to_string(t)); };
@@ -138,12 +152,12 @@ TEST_CASE("if", "[compiler]") {
   polyregion::compiler::initialise();
 
   auto entry = function("foo", {"in0"_(SInt)()}, SInt)({Cond(IntrOp(LogicEq("in0"_(SInt), 42_(SInt))),
-                                                           {
-                                                               ret(1_(SInt)) //
-                                                           },
-                                                           {
-                                                               ret(3_(SInt)) //
-                                                           })});
+                                                             {
+                                                                 ret(1_(SInt)) //
+                                                             },
+                                                             {
+                                                                 ret(3_(SInt)) //
+                                                             })});
   assertCompile(program(entry, {}, {}));
 }
 
@@ -152,18 +166,33 @@ TEST_CASE("code after if", "[compiler]") {
 
   auto entry = function("foo", {"in0"_(SInt)()},
                         SInt)({let("x") = 0_(SInt), //
-                              Cond(IntrOp(LogicEq("in0"_(SInt), 42_(SInt))),
-                                   {
-                                       Mut("x"_(SInt), Alias(1_(SInt)), true) //
-                                   },
-                                   {
-                                       Mut("x"_(SInt), Alias(3_(SInt)), true) //
-                                   }),
-                              ret("x"_(SInt))});
+                               Cond(IntrOp(LogicEq("in0"_(SInt), 42_(SInt))),
+                                    {
+                                        Mut("x"_(SInt), Alias(1_(SInt)), true) //
+                                    },
+                                    {
+                                        Mut("x"_(SInt), Alias(3_(SInt)), true) //
+                                    }),
+                               ret("x"_(SInt))});
   assertCompile(program(entry, {}, {}));
 }
 
-TEST_CASE("fn call", "[compiler]") {
+TEST_CASE("fn call arg0", "[compiler]") {
+  polyregion::compiler::initialise();
+  auto tpe = GENERATE(from_range(PrimitiveTypes));
+  DYNAMIC_SECTION(tpe) {
+    CAPTURE(tpe);
+    auto callee = function("bar", {}, tpe)({
+        ret(generateConstValue(tpe)) //
+    });
+    auto entry = function("foo", {}, tpe)({
+        ret(Invoke(Sym({"bar"}), {}, {}, {}, {}, tpe)) //
+    });
+    assertCompile(program(entry, {}, {callee}));
+  }
+}
+
+TEST_CASE("fn call arg1", "[compiler]") {
   polyregion::compiler::initialise();
   auto tpe = GENERATE(from_range(PrimitiveTypes));
   DYNAMIC_SECTION(tpe) {
@@ -173,6 +202,42 @@ TEST_CASE("fn call", "[compiler]") {
     });
     auto entry = function("foo", {}, tpe)({
         ret(Invoke(Sym({"bar"}), {}, {}, {generateConstValue(tpe)}, {}, tpe)) //
+    });
+    assertCompile(program(entry, {}, {callee}));
+  }
+}
+
+TEST_CASE("fn call arg2", "[compiler]") {
+  polyregion::compiler::initialise();
+  auto tpe0 = GENERATE(from_range(PrimitiveTypes));
+  auto tpe1 = GENERATE(from_range(PrimitiveTypes));
+  DYNAMIC_SECTION(tpe0 << "," << tpe1) {
+    CAPTURE(tpe0);
+    CAPTURE(tpe1);
+    auto callee = function("bar", {"a"_(tpe0)(), "b"_(tpe1)()}, tpe0)({
+        ret("a"_(tpe0)) //
+    });
+    auto entry = function("foo", {}, tpe0)({
+        ret(Invoke(Sym({"bar"}), {}, {}, {generateConstValue(tpe0), generateConstValue(tpe1)}, {}, tpe0)) //
+    });
+    assertCompile(program(entry, {}, {callee}));
+  }
+}
+
+TEST_CASE("fn call arg3", "[compiler]") {
+  polyregion::compiler::initialise();
+  auto tpe0 = GENERATE(from_range(PrimitiveTypes));
+  auto tpe1 = GENERATE(from_range(PrimitiveTypes));
+  auto tpe2 = GENERATE(from_range(PrimitiveTypes));
+  DYNAMIC_SECTION(tpe0 << "," << tpe1 << "," << tpe2) {
+    CAPTURE(tpe0);
+    CAPTURE(tpe1);
+    CAPTURE(tpe2);
+    auto callee = function("bar", {"a"_(tpe0)(), "b"_(tpe1)(), "c"_(tpe2)()}, tpe0)({
+        ret("a"_(tpe0)) //
+    });
+    auto entry = function("foo", {}, tpe0)({
+        ret(Invoke(Sym({"bar"}), {}, {}, {generateConstValue(tpe0), generateConstValue(tpe1), generateConstValue(tpe2)}, {}, tpe0)) //
     });
     assertCompile(program(entry, {}, {callee}));
   }
@@ -223,14 +288,14 @@ TEST_CASE("index prim array", "[compiler]") {
     assertCompile(program(function("foo", {}, tpe)({
         let("xs") = Alloc(tpe, 42_(SInt)),                 //
         let("x") = "xs"_(Array(tpe))[integral(SInt, idx)], //
-        ret("x"_(tpe))                                    //
+        ret("x"_(tpe))                                     //
     })));
   }
   DYNAMIC_SECTION("xs[" << idx << "]:" << tpe << " (args)") {
     CAPTURE(tpe, idx);
     assertCompile(program(function("foo", {"xs"_(Array(tpe))()}, tpe)({
         let("x") = "xs"_(Array(tpe))[integral(SInt, idx)], //
-        ret("x"_(tpe))                                    //
+        ret("x"_(tpe))                                     //
     })));
   }
 }
@@ -248,12 +313,54 @@ TEST_CASE("update prim array", "[compiler]") {
         ret("xs"_(Array(tpe))[integral(SInt, idx)])   //
     })));
   }
-  invoke(GpuGlobalIdx(0_(SInt)));
   DYNAMIC_SECTION("(xs[" << idx << "]:" << tpe << ") = " << val << " (args)") {
     CAPTURE(tpe, idx, val);
     assertCompile(program(function("foo", {"xs"_(Array(tpe))()}, tpe)({
         "xs"_(Array(tpe))[integral(SInt, idx)] = val, //
         ret("xs"_(Array(tpe))[integral(SInt, idx)])   //
+    })));
+  }
+}
+
+TEST_CASE("update prim array by ref", "[compiler]") {
+  polyregion::compiler::initialise();
+  auto tpe = GENERATE(from_range(PrimitiveTypes));
+  auto idx = GENERATE(std::optional<int>{}, 0, 1, 3, 7, 10);
+  auto val = generateConstValue(tpe);
+  DYNAMIC_SECTION("(xs[" << (idx ? std::to_string(*idx) : "(none)") << "]:" << tpe << ") = " << val << " (local)") {
+    CAPTURE(tpe, idx, val);
+    assertCompile(program(function("foo", {}, tpe)({
+        let("xs") = Alloc(tpe, 42_(SInt)), //
+        let("ref") = RefTo("xs"_(Array(tpe)), idx ? std::optional{integral(SInt, *idx)} : std::nullopt, tpe),
+        ret("ref"_(Array(tpe))[integral(SInt, 0)]) //
+    })));
+  }
+  DYNAMIC_SECTION("(xs[" << (idx ? std::to_string(*idx) : "(none)") << "]:" << tpe << ") = " << val << " (args)") {
+    CAPTURE(tpe, idx, val);
+    assertCompile(program(function("foo", {"xs"_(Array(tpe))()}, tpe)({
+        let("ref") = RefTo("xs"_(Array(tpe)), idx ? std::optional{integral(SInt, *idx)} : std::nullopt, tpe),
+        ret("ref"_(Array(tpe))[integral(SInt, 0)]) //
+    })));
+  }
+}
+
+TEST_CASE("update value by ref", "[compiler]") {
+  polyregion::compiler::initialise();
+  auto tpe = GENERATE(from_range(PrimitiveTypes));
+  auto val = generateConstValue(tpe);
+  DYNAMIC_SECTION("(&x:" << tpe << ") = " << val << " (local)") {
+    CAPTURE(tpe, val);
+    assertCompile(program(function("foo", {}, tpe)({
+        let("x") = val,                          //
+        let("y") = RefTo("x"_(tpe), {}, tpe),    //
+        ret("y"_(Array(tpe))[integral(SInt, 0)]) //
+    })));
+  }
+  DYNAMIC_SECTION("(&x:" << tpe << ") = " << val << " (args)") {
+    CAPTURE(tpe, val);
+    assertCompile(program(function("foo", {"x"_(tpe)()}, tpe)({
+        let("y") = RefTo("x"_(tpe), {}, tpe),    //
+        ret("y"_(Array(tpe))[integral(SInt, 0)]) //
     })));
   }
 }
@@ -264,7 +371,7 @@ TEST_CASE("index struct array member", "[compiler]") {
   Sym myStructSym({"MyStruct"});
   Named defX = Named("x", Type::IntS32());
   Named defY = Named("y", Type::IntS32());
-  StructDef def(myStructSym, true, {}, {StructMember(defX, false), StructMember(defY, false)}, {});
+  StructDef def(myStructSym, {}, {StructMember(defX, false), StructMember(defY, false)}, {});
   Type::Struct myStruct(myStructSym, {}, {}, {});
 
   Function fn(Sym({"foo"}), {}, {}, {Arg(Named("s", Array(myStruct)), {})}, {}, {}, Type::IntS32(),
@@ -287,7 +394,7 @@ TEST_CASE("array update struct elem member", "[compiler]") {
   Sym myStructSym({"MyStruct"});
   Named defX = Named("x", Type::IntS32());
   Named defY = Named("y", Type::IntS32());
-  StructDef def(myStructSym, true, {}, {StructMember(defX, false), StructMember(defY, false)}, {});
+  StructDef def(myStructSym, {}, {StructMember(defX, false), StructMember(defY, false)}, {});
   Type::Struct myStruct(myStructSym, {}, {}, {});
 
   Function fn(Sym({"foo"}), {}, {}, {Arg(Named("xs", Array(myStruct)), {})}, {}, {}, Type::IntS32(),
@@ -306,7 +413,7 @@ TEST_CASE("array update struct elem", "[compiler]") {
   Sym myStructSym({"MyStruct"});
   Named defX = Named("x", Type::IntS32());
   Named defY = Named("y", Type::IntS32());
-  StructDef def(myStructSym, true, {}, {StructMember(defX, false), StructMember(defY, false)}, {});
+  StructDef def(myStructSym, {}, {StructMember(defX, false), StructMember(defY, false)}, {});
   Type::Struct myStruct(myStructSym, {}, {}, {});
 
   Function fn(Sym({"foo"}), {}, {}, {Arg(Named("xs", Array(myStruct)), {})}, {}, {}, Type::IntS32(),
@@ -327,7 +434,7 @@ TEST_CASE("alias struct", "[compiler]") {
 
   Named defX = Named("x", Type::IntS32());
   Named defY = Named("y", Type::IntS32());
-  StructDef def(myStructSym, true, {}, {StructMember(defX, false), StructMember(defY, false)}, {});
+  StructDef def(myStructSym, {}, {StructMember(defX, false), StructMember(defY, false)}, {});
   Type::Struct myStruct(myStructSym, {}, {}, {});
 
   Function fn(Sym({"foo"}), {}, {}, {Arg(Named("out", myStruct), {})}, {}, {}, Type::IntS32(),
@@ -345,7 +452,7 @@ TEST_CASE("alias struct member", "[compiler]") {
   polyregion::compiler::initialise();
 
   Sym sdef({"a", "b"});
-  StructDef def(sdef, true, {}, {StructMember(Named("x", Type::IntS32()), false), StructMember(Named("y", Type::IntS32()), false)}, {});
+  StructDef def(sdef, {}, {StructMember(Named("x", Type::IntS32()), false), StructMember(Named("y", Type::IntS32()), false)}, {});
   Named arg("in", Type::Struct(sdef, {}, {}, {}));
   Function fn(Sym({"foo"}), {}, {}, {Arg(arg, {})}, {}, {}, Type::Unit0(),
               {
@@ -385,7 +492,7 @@ TEST_CASE("mut struct", "[compiler]") {
 
   Named defX = Named("x", Type::IntS32());
   Named defY = Named("y", Type::IntS32());
-  StructDef def(myStructSym, true, {}, {StructMember(defX, false), StructMember(defY, false)}, {});
+  StructDef def(myStructSym, {}, {StructMember(defX, false), StructMember(defY, false)}, {});
   Type::Struct myStruct(myStructSym, {}, {}, {});
 
   Function fn(Sym({"foo"}), {}, {}, {Arg(Named("out", myStruct), {})}, {}, {}, Type::Unit0(),
@@ -449,9 +556,9 @@ TEST_CASE("alloc struct", "[compiler]") {
 
   Named defX = Named("x", Type::IntS32());
   Named defY = Named("y", Type::IntS32());
-  StructDef def(myStructSym, true, {}, {StructMember(defX, false), StructMember(defY, false)}, {});
+  StructDef def(myStructSym, {}, {StructMember(defX, false), StructMember(defY, false)}, {});
   Type::Struct myStruct(myStructSym, {}, {}, {});
-  StructDef def2(myStruct2Sym, true, {}, {StructMember(defX, false)}, {});
+  StructDef def2(myStruct2Sym, {}, {StructMember(defX, false)}, {});
   Type::Struct myStruct2(myStruct2Sym, {}, {}, {});
 
   Function fn(Sym({"foo"}), {}, {}, {Arg(Named("out", myStruct), {})}, {}, {}, Type::IntS32(),
@@ -479,11 +586,11 @@ TEST_CASE("alloc struct nested", "[compiler]") {
   Named defX = Named("x", Type::IntS32());
   Named defY = Named("y", Type::IntS32());
 
-  StructDef def2(myStruct2Sym, true, {}, {StructMember(defX, false)}, {});
+  StructDef def2(myStruct2Sym, {}, {StructMember(defX, false)}, {});
   Type::Struct myStruct2(myStruct2Sym, {}, {}, {});
   Named defZ = Named("z", myStruct2);
 
-  StructDef def(myStructSym, true, {}, {StructMember(defX, false), StructMember(defY, false), StructMember(defZ, false)}, {});
+  StructDef def(myStructSym, {}, {StructMember(defX, false), StructMember(defY, false), StructMember(defZ, false)}, {});
   Type::Struct myStruct(myStructSym, {}, {}, {});
 
   Function fn(Sym({"foo"}), {}, {}, {}, {}, {}, Type::IntS32(),

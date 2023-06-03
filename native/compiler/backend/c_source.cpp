@@ -209,7 +209,12 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr, const std::string &k
       [&](const Expr::Alias &x) { return mkRef(x.ref); },                            //
       [&](const Expr::Invoke &x) { return "???"s; },                                 //
       [&](const Expr::Index &x) { return mkRef(x.lhs) + "[" + mkRef(x.idx) + "]"; }, //
-      [&](const Expr::Alloc &x) { return "{/*" + to_string(x) + "*/}"; }             //
+      [&](const Expr::RefTo &x) {
+        std::string str = "&" + mkRef(x.lhs);
+        if (x.idx) str += "[" + mkRef(*x.idx) + "]";
+        return str;
+      },                                                                 //
+      [&](const Expr::Alloc &x) { return "{/*" + to_string(x) + "*/}"; } //
   );
 }
 

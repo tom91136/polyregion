@@ -1544,6 +1544,20 @@ json Expr::index_to_json(const Expr::Index& x_) {
   return json::array({lhs, idx, component});
 }
 
+Expr::RefTo Expr::refto_from_json(const json& j_) { 
+  auto lhs =  Term::any_from_json(j_.at(0));
+  auto idx = j_.at(1).is_null() ? std::nullopt : std::make_optional(Term::any_from_json(j_.at(1)));
+  auto component =  Type::any_from_json(j_.at(2));
+  return {lhs, idx, component};
+}
+
+json Expr::refto_to_json(const Expr::RefTo& x_) { 
+  auto lhs =  Term::any_to_json(x_.lhs);
+  auto idx = x_.idx ? Term::any_to_json(*x_.idx) : json{};
+  auto component =  Type::any_to_json(x_.component);
+  return json::array({lhs, idx, component});
+}
+
 Expr::Alloc Expr::alloc_from_json(const json& j_) { 
   auto component =  Type::any_from_json(j_.at(0));
   auto size =  Term::any_from_json(j_.at(1));
@@ -1595,8 +1609,9 @@ Expr::Any Expr::any_from_json(const json& j_) {
   case 3: return Expr::cast_from_json(t_);
   case 4: return Expr::alias_from_json(t_);
   case 5: return Expr::index_from_json(t_);
-  case 6: return Expr::alloc_from_json(t_);
-  case 7: return Expr::invoke_from_json(t_);
+  case 6: return Expr::refto_from_json(t_);
+  case 7: return Expr::alloc_from_json(t_);
+  case 8: return Expr::invoke_from_json(t_);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
@@ -1609,8 +1624,9 @@ json Expr::any_to_json(const Expr::Any& x_) {
   [](const Expr::Cast &y_) -> json { return {3, Expr::cast_to_json(y_)}; },
   [](const Expr::Alias &y_) -> json { return {4, Expr::alias_to_json(y_)}; },
   [](const Expr::Index &y_) -> json { return {5, Expr::index_to_json(y_)}; },
-  [](const Expr::Alloc &y_) -> json { return {6, Expr::alloc_to_json(y_)}; },
-  [](const Expr::Invoke &y_) -> json { return {7, Expr::invoke_to_json(y_)}; },
+  [](const Expr::RefTo &y_) -> json { return {6, Expr::refto_to_json(y_)}; },
+  [](const Expr::Alloc &y_) -> json { return {7, Expr::alloc_to_json(y_)}; },
+  [](const Expr::Invoke &y_) -> json { return {8, Expr::invoke_to_json(y_)}; },
   [](const auto &x_) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x_) ); }
   }, *x_);
 }
@@ -1792,26 +1808,24 @@ json structmember_to_json(const StructMember& x_) {
 
 StructDef structdef_from_json(const json& j_) { 
   auto name =  sym_from_json(j_.at(0));
-  auto isReference = j_.at(1).get<bool>();
-  auto tpeVars = j_.at(2).get<std::vector<std::string>>();
+  auto tpeVars = j_.at(1).get<std::vector<std::string>>();
   std::vector<StructMember> members;
-  auto members_json = j_.at(3);
+  auto members_json = j_.at(2);
   std::transform(members_json.begin(), members_json.end(), std::back_inserter(members), &structmember_from_json);
   std::vector<Sym> parents;
-  auto parents_json = j_.at(4);
+  auto parents_json = j_.at(3);
   std::transform(parents_json.begin(), parents_json.end(), std::back_inserter(parents), &sym_from_json);
-  return {name, isReference, tpeVars, members, parents};
+  return {name, tpeVars, members, parents};
 }
 
 json structdef_to_json(const StructDef& x_) { 
   auto name =  sym_to_json(x_.name);
-  auto isReference = x_.isReference;
   auto tpeVars = x_.tpeVars;
   std::vector<json> members;
   std::transform(x_.members.begin(), x_.members.end(), std::back_inserter(members), &structmember_to_json);
   std::vector<json> parents;
   std::transform(x_.parents.begin(), x_.parents.end(), std::back_inserter(parents), &sym_to_json);
-  return json::array({name, isReference, tpeVars, members, parents});
+  return json::array({name, tpeVars, members, parents});
 }
 
 Signature signature_from_json(const json& j_) { 
@@ -2012,13 +2026,13 @@ json program_to_json(const Program& x_) {
 json hashed_from_json(const json& j_) { 
   auto hash_ = j_.at(0).get<std::string>();
   auto data_ = j_.at(1);
-  if(hash_ != "26ca8dbd95d734899d3eca0c01fcfa3d") {
-   throw std::runtime_error("Expecting ADT hash to be 26ca8dbd95d734899d3eca0c01fcfa3d, but was " + hash_);
+  if(hash_ != "3d96e3dbaa0419695b477d5cd70fe13c") {
+   throw std::runtime_error("Expecting ADT hash to be 3d96e3dbaa0419695b477d5cd70fe13c, but was " + hash_);
   }
   return data_;
 }
 
 json hashed_to_json(const json& x_) { 
-  return json::array({"26ca8dbd95d734899d3eca0c01fcfa3d", x_});
+  return json::array({"3d96e3dbaa0419695b477d5cd70fe13c", x_});
 }
 } // namespace polyregion::polyast

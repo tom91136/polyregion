@@ -159,7 +159,7 @@ static void clewExit(void)
     }
 }
 
-int clewInit()
+int clewInit(void)
 {
 #ifdef _WIN32
     const char *paths[] = {"OpenCL.dll", NULL};

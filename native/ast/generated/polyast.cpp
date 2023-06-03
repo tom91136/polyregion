@@ -1540,6 +1540,26 @@ bool Expr::operator==(const Expr::Index &l, const Expr::Index &r) {
 }
 Expr::Index::operator Expr::Any() const { return std::make_shared<Index>(*this); }
 
+Expr::RefTo::RefTo(Term::Any lhs, std::optional<Term::Any> idx, Type::Any component) noexcept : Expr::Base(Type::Array(component,TypeSpace::Global())), lhs(std::move(lhs)), idx(std::move(idx)), component(std::move(component)) {}
+std::ostream &Expr::operator<<(std::ostream &os, const Expr::RefTo &x) {
+  os << "RefTo(";
+  os << x.lhs;
+  os << ',';
+  os << '{';
+  if (x.idx) {
+    os << *x.idx;
+  }
+  os << '}';
+  os << ',';
+  os << x.component;
+  os << ')';
+  return os;
+}
+bool Expr::operator==(const Expr::RefTo &l, const Expr::RefTo &r) { 
+  return *l.lhs == *r.lhs && ( (!l.idx && !r.idx) || (l.idx && r.idx && **l.idx == **r.idx) ) && *l.component == *r.component;
+}
+Expr::RefTo::operator Expr::Any() const { return std::make_shared<RefTo>(*this); }
+
 Expr::Alloc::Alloc(Type::Any component, Term::Any size) noexcept : Expr::Base(Type::Array(component,TypeSpace::Global())), component(std::move(component)), size(std::move(size)) {}
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Alloc &x) {
   os << "Alloc(";
@@ -1776,12 +1796,10 @@ bool operator==(const StructMember &l, const StructMember &r) {
   return l.named == r.named && l.isMutable == r.isMutable;
 }
 
-StructDef::StructDef(Sym name, bool isReference, std::vector<std::string> tpeVars, std::vector<StructMember> members, std::vector<Sym> parents) noexcept : name(std::move(name)), isReference(isReference), tpeVars(std::move(tpeVars)), members(std::move(members)), parents(std::move(parents)) {}
+StructDef::StructDef(Sym name, std::vector<std::string> tpeVars, std::vector<StructMember> members, std::vector<Sym> parents) noexcept : name(std::move(name)), tpeVars(std::move(tpeVars)), members(std::move(members)), parents(std::move(parents)) {}
 std::ostream &operator<<(std::ostream &os, const StructDef &x) {
   os << "StructDef(";
   os << x.name;
-  os << ',';
-  os << x.isReference;
   os << ',';
   os << '{';
   if (!x.tpeVars.empty()) {
@@ -1807,7 +1825,7 @@ std::ostream &operator<<(std::ostream &os, const StructDef &x) {
   return os;
 }
 bool operator==(const StructDef &l, const StructDef &r) { 
-  return l.name == r.name && l.isReference == r.isReference && l.tpeVars == r.tpeVars && l.members == r.members && l.parents == r.parents;
+  return l.name == r.name && l.tpeVars == r.tpeVars && l.members == r.members && l.parents == r.parents;
 }
 
 Signature::Signature(Sym name, std::vector<std::string> tpeVars, std::optional<Type::Any> receiver, std::vector<Type::Any> args, std::vector<Type::Any> moduleCaptures, std::vector<Type::Any> termCaptures, Type::Any rtn) noexcept : name(std::move(name)), tpeVars(std::move(tpeVars)), receiver(std::move(receiver)), args(std::move(args)), moduleCaptures(std::move(moduleCaptures)), termCaptures(std::move(termCaptures)), rtn(std::move(rtn)) {}
@@ -2573,6 +2591,12 @@ std::size_t std::hash<polyregion::polyast::Expr::Index>::operator()(const polyre
   seed ^= std::hash<decltype(x.component)>()(x.component) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
+std::size_t std::hash<polyregion::polyast::Expr::RefTo>::operator()(const polyregion::polyast::Expr::RefTo &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.lhs)>()(x.lhs);
+  seed ^= std::hash<decltype(x.idx)>()(x.idx) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.component)>()(x.component) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
 std::size_t std::hash<polyregion::polyast::Expr::Alloc>::operator()(const polyregion::polyast::Expr::Alloc &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.component)>()(x.component);
   seed ^= std::hash<decltype(x.size)>()(x.size) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
@@ -2643,7 +2667,6 @@ std::size_t std::hash<polyregion::polyast::StructMember>::operator()(const polyr
 }
 std::size_t std::hash<polyregion::polyast::StructDef>::operator()(const polyregion::polyast::StructDef &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.name)>()(x.name);
-  seed ^= std::hash<decltype(x.isReference)>()(x.isReference) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.tpeVars)>()(x.tpeVars) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.members)>()(x.members) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.parents)>()(x.parents) + 0x9e3779b9 + (seed << 6) + (seed >> 2);

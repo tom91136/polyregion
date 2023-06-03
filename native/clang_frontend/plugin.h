@@ -1,0 +1,6 @@
+#ifndef OUTLINECXX_LIBRARY_H
+#define OUTLINECXX_LIBRARY_H
+
+void hello();
+
+#endif //OUTLINECXX_LIBRARY_H

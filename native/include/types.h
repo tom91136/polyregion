@@ -6,7 +6,7 @@
 
 namespace polyregion::runtime {
 
-enum class EXPORT Type : uint8_t {
+enum class POLYREGION_EXPORT Type : uint8_t {
   Void = 1,
   Bool8,
   Byte8,
@@ -20,7 +20,7 @@ enum class EXPORT Type : uint8_t {
   Scratch,
 };
 
-static constexpr EXPORT size_t byteOfType(Type t) {
+static constexpr POLYREGION_EXPORT size_t byteOfType(Type t) {
   switch (t) {
     case Type::Void: return 0;
     case Type::Bool8:
@@ -36,7 +36,7 @@ static constexpr EXPORT size_t byteOfType(Type t) {
   }
 }
 
-static constexpr EXPORT const char *typeName(Type t) {
+static constexpr POLYREGION_EXPORT const char *typeName(Type t) {
   switch (t) {
     case Type::Void: return "Void";
     case Type::Bool8: return "Bool8";

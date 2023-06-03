@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "export.h"
-#include "generated/polyast.h"
+#include "ast.h"
 
 namespace polyregion::compiler {
 
@@ -20,7 +20,7 @@ using TimePoint = std::chrono::steady_clock::time_point;
 [[nodiscard]] int64_t elapsedNs(const TimePoint &a, const TimePoint &b = nowMono());
 [[nodiscard]] int64_t nowMs();
 
-enum class EXPORT Target : uint8_t {
+enum class POLYREGION_EXPORT Target : uint8_t {
   Object_LLVM_HOST = 10,
   Object_LLVM_x86_64,
   Object_LLVM_AArch64,
@@ -36,7 +36,7 @@ enum class EXPORT Target : uint8_t {
   Source_C_Metal1_0,
 };
 
-enum class EXPORT Opt : uint8_t {
+enum class POLYREGION_EXPORT Opt : uint8_t {
   O0 = 10,
   O1,
   O2,
@@ -44,11 +44,11 @@ enum class EXPORT Opt : uint8_t {
   Ofast,
 };
 
-EXPORT std::optional<Target> targetFromOrdinal(std::underlying_type_t<Target> ordinal);
+POLYREGION_EXPORT std::optional<Target> targetFromOrdinal(std::underlying_type_t<Target> ordinal);
 
-EXPORT std::optional<Opt> optFromOrdinal(std::underlying_type_t<Opt> ordinal);
+POLYREGION_EXPORT std::optional<Opt> optFromOrdinal(std::underlying_type_t<Opt> ordinal);
 
-enum class EXPORT CpuArch : uint32_t {
+enum class POLYREGION_EXPORT CpuArch : uint32_t {
 
   ARM_Others,
   ARM_A64FX,
@@ -153,7 +153,7 @@ enum class EXPORT CpuArch : uint32_t {
 
 };
 
-enum class EXPORT GpuArch : uint32_t {
+enum class POLYREGION_EXPORT GpuArch : uint32_t {
 
   NVIDIA_SM_20_Fermi,  // GeForce 400, 500, 600, GT-630
   NVIDIA_SM_30_Kepler, // GeForce 700, GT-730
@@ -224,41 +224,41 @@ enum class EXPORT GpuArch : uint32_t {
 
 };
 
-struct EXPORT Member {
-  EXPORT polyast::Named name;
-  EXPORT uint64_t offsetInBytes, sizeInBytes;
-  EXPORT Member(decltype(name) name, decltype(offsetInBytes) offsetInBytes, decltype(sizeInBytes) sizeInBytes)
+struct POLYREGION_EXPORT Member {
+  POLYREGION_EXPORT polyast::Named name;
+  POLYREGION_EXPORT uint64_t offsetInBytes, sizeInBytes;
+  POLYREGION_EXPORT Member(decltype(name) name, decltype(offsetInBytes) offsetInBytes, decltype(sizeInBytes) sizeInBytes)
       : name(std::move(name)), offsetInBytes(offsetInBytes), sizeInBytes(sizeInBytes) {}
 };
 
-struct EXPORT Layout {
-  EXPORT polyast::Sym name;
-  EXPORT uint64_t sizeInBytes, alignment;
-  EXPORT std::vector<Member> members;
-  EXPORT Layout(decltype(name) name, decltype(sizeInBytes) sizeInBytes, decltype(alignment) alignment,
+struct POLYREGION_EXPORT Layout {
+  POLYREGION_EXPORT polyast::Sym name;
+  POLYREGION_EXPORT uint64_t sizeInBytes, alignment;
+  POLYREGION_EXPORT std::vector<Member> members;
+  POLYREGION_EXPORT Layout(decltype(name) name, decltype(sizeInBytes) sizeInBytes, decltype(alignment) alignment,
                 decltype(members) members)
       : name(std::move(name)), sizeInBytes(sizeInBytes), alignment(alignment), members(std::move(members)) {}
 };
 
-struct EXPORT Event {
-  EXPORT int64_t epochMillis, elapsedNanos;
-  EXPORT std::string name, data;
-  EXPORT Event(decltype(epochMillis) epochMillis, decltype(elapsedNanos) elapsedNanos, //
+struct POLYREGION_EXPORT Event {
+  POLYREGION_EXPORT int64_t epochMillis, elapsedNanos;
+  POLYREGION_EXPORT std::string name, data;
+  POLYREGION_EXPORT Event(decltype(epochMillis) epochMillis, decltype(elapsedNanos) elapsedNanos, //
                decltype(name) name, decltype(data) data)                               //
       : epochMillis(epochMillis), elapsedNanos(elapsedNanos), name(std::move(name)), data(std::move(data)) {}
 };
 
 using Bytes = std::vector<char>;
 
-struct EXPORT Compilation {
-  EXPORT std::vector<Layout> layouts;
-  EXPORT std::optional<Bytes> binary;
-  EXPORT std::vector<std::string> features;
-  EXPORT std::vector<Event> events;
-  EXPORT std::string messages;
-  EXPORT Compilation() = default;
-  EXPORT explicit Compilation(decltype(messages) messages) : messages(std::move(messages)) {}
-  EXPORT Compilation(decltype(binary) binary,     //
+struct POLYREGION_EXPORT Compilation {
+  POLYREGION_EXPORT std::vector<Layout> layouts;
+  POLYREGION_EXPORT std::optional<Bytes> binary;
+  POLYREGION_EXPORT std::vector<std::string> features;
+  POLYREGION_EXPORT std::vector<Event> events;
+  POLYREGION_EXPORT std::string messages;
+  POLYREGION_EXPORT Compilation() = default;
+  POLYREGION_EXPORT explicit Compilation(decltype(messages) messages) : messages(std::move(messages)) {}
+  POLYREGION_EXPORT Compilation(decltype(binary) binary,     //
                      decltype(features) features, //
                      decltype(events) events,     //
                      decltype(messages) messages = "")
@@ -266,21 +266,21 @@ struct EXPORT Compilation {
         messages(std::move(messages)) {}
 };
 
-EXPORT std::ostream &operator<<(std::ostream &, const Member &);
-EXPORT std::ostream &operator<<(std::ostream &, const Layout &);
-EXPORT std::ostream &operator<<(std::ostream &, const Compilation &);
+POLYREGION_EXPORT std::ostream &operator<<(std::ostream &, const Member &);
+POLYREGION_EXPORT std::ostream &operator<<(std::ostream &, const Layout &);
+POLYREGION_EXPORT std::ostream &operator<<(std::ostream &, const Compilation &);
 
-EXPORT void initialise();
+POLYREGION_EXPORT void initialise();
 
-struct EXPORT Options {
-  EXPORT Target target;
-  EXPORT std::string arch;
+struct POLYREGION_EXPORT Options {
+  POLYREGION_EXPORT Target target;
+  POLYREGION_EXPORT std::string arch;
 };
 
-EXPORT std::vector<Layout> layoutOf(const std::vector<polyast::StructDef> &sdefs, const Options &options);
-EXPORT std::vector<Layout> layoutOf(const Bytes &bytes, const Options &backend);
+POLYREGION_EXPORT std::vector<Layout> layoutOf(const std::vector<polyast::StructDef> &sdefs, const Options &options);
+POLYREGION_EXPORT std::vector<Layout> layoutOf(const Bytes &bytes, const Options &backend);
 
-EXPORT Compilation compile(const polyast::Program &program, const Options &options, const Opt &opt);
-EXPORT Compilation compile(const Bytes &astBytes, const Options &options, const Opt &opt);
+POLYREGION_EXPORT Compilation compile(const polyast::Program &program, const Options &options, const Opt &opt);
+POLYREGION_EXPORT Compilation compile(const Bytes &astBytes, const Options &options, const Opt &opt);
 
 } // namespace polyregion::compiler

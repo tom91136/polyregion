@@ -1,6 +1,6 @@
 set(LIB_SOURCES
-        generated/polyast.cpp
-        generated/polyast_codec.cpp
+        #        generated/polyast.cpp
+        #        generated/polyast_codec.cpp
 
 
         backend/llvm_amdgpu.cpp
@@ -16,25 +16,23 @@ set(LIB_SOURCES
         backend/memoryfs.cpp
         backend/clspv.cpp
 
-        ast.cpp
+        #        ast.cpp
         compiler.cpp
         polyregion_compiler.cpp
 
         ${clspv_passes_SOURCE_FILES}
         )
 
-add_library(compiler-lib ${LIB_SOURCES})
+add_library(Polyc ${LIB_SOURCES})
+add_executable(polyc-tests test/ast_codegen.cpp test/backend.cpp test/ast.cpp)
+add_executable(polyc-benchmarks benchmark/babelstream.cpp)
+add_executable(polyc-bin ../shared/cxa_thread_atexit.cpp driver.cpp)
+add_dependencies(polyc-bin PolyRT)
 
-add_executable(compiler-tests test/ast_codegen.cpp test/backend.cpp test/ast.cpp)
-add_executable(compiler-benchmark benchmark/babelstream.cpp)
-add_executable(compiler-drv ../shared/cxa_thread_atexit.cpp driver.cpp)
-add_dependencies(compiler-drv runtime-lib)
-
-
-target_include_directories(compiler-tests PUBLIC . ../include PRIVATE ../runtime)
-target_include_directories(compiler-benchmark PUBLIC . ../include PRIVATE ../runtime)
-target_include_directories(compiler-drv PUBLIC . ../include PRIVATE ../runtime)
-target_include_directories(compiler-lib PUBLIC
+target_include_directories(polyc-tests PUBLIC . ../include PRIVATE ../runtime)
+target_include_directories(polyc-benchmarks PUBLIC . ../include PRIVATE ../runtime)
+target_include_directories(polyc-bin PUBLIC . ../include PRIVATE ../runtime)
+target_include_directories(Polyc PUBLIC
         ${LLVM_INCLUDE_DIRS}
         ${LLD_INCLUDE_DIRS}
         #        ${spirv-llvm-translator_SOURCE_DIR}/include
@@ -42,17 +40,14 @@ target_include_directories(compiler-lib PUBLIC
         ${clspv_passes_INCLUDE_DIRS}
         ${spirv-tools_SOURCE_DIR}/include
 
-        ${json_SOURCE_DIR}
+
         . ../include
         )
 
 if (NOT WIN32)
-    target_precompile_headers(compiler-tests PRIVATE
-            generated/polyast.h
-            generated/polyast_codec.h
+    target_precompile_headers(polyc-tests PRIVATE
 
             compiler.h
-            ast.h
 
             backend/backend.h
             backend/c_source.h
@@ -62,7 +57,7 @@ if (NOT WIN32)
             backend/suppress_fd.h
             ../include/utils.hpp
             ../include/variants.hpp
-#            ${Catch2_SOURCE_DIR}/src/catch2/catch_all.hpp
+            #            ${Catch2_SOURCE_DIR}/src/catch2/catch_all.hpp
 
             <optional>
             <ostream>
@@ -123,20 +118,22 @@ message(STATUS "[compiler] Adding LLD libs = ${LLD_LIBS} ")
 #
 #message(STATUS "[compiler] Target source headers = ${LLVM_TARGETS_SOURCE_HEADERS} ")
 #message(STATUS "[compiler] Target binary headers = ${LLVM_TARGETS_BINARY_HEADERS} ")
-#target_include_directories(compiler-lib PRIVATE ${LLVM_TARGETS_SOURCE_HEADERS} ${LLVM_TARGETS_BINARY_HEADERS})
+#target_include_directories(Polyc PRIVATE ${LLVM_TARGETS_SOURCE_HEADERS} ${LLVM_TARGETS_BINARY_HEADERS})
 
 
-target_link_libraries(compiler-lib PRIVATE
-
+target_link_libraries(Polyc
+        PUBLIC
+        PolyAST
+        PRIVATE
         SPIRV-Tools-opt
         "$<$<CONFIG:RELEASE>:${LLVM_LIBS};${LLD_LIBS}>"
         "$<$<CONFIG:DEBUG>:${LLVM_LIBS};${LLD_LIBS}>"
         #        "$<$<CONFIG:DEBUG>:LLVM>"  # linking all the static libs is too slow for dev
         #        capstone-static
         )
-target_link_libraries(compiler-tests PRIVATE compiler-lib runtime-lib Catch2::Catch2WithMain)
-target_link_libraries(compiler-benchmark PRIVATE compiler-lib runtime-lib)
-target_link_libraries(compiler-drv PRIVATE compiler-lib runtime-lib ${LLVM_LIBS} ${LLD_LIBS})
+target_link_libraries(polyc-tests PRIVATE Polyc PolyRT Catch2::Catch2WithMain)
+target_link_libraries(polyc-benchmarks PRIVATE Polyc PolyRT)
+target_link_libraries(polyc-bin PRIVATE Polyc PolyRT ${LLVM_LIBS} ${LLD_LIBS})
 
 set(COMPILE_OPTIONS
         ${COMMON_COMPILE_OPTIONS}
@@ -146,15 +143,18 @@ set(COMPILE_OPTIONS
 
 set(LINK_OPTIONS
         ${COMMON_LINK_OPTIONS}
+        ${STRICT_LINKER_OPTIONS}
         "$<$<CONFIG:DEBUG>:${COMMON_DEBUG_OPTIONS}>"
         )
 
-target_compile_options(compiler-lib PRIVATE ${COMPILE_OPTIONS})
-target_compile_options(compiler-drv PRIVATE ${COMPILE_OPTIONS})
-target_compile_options(compiler-tests PRIVATE ${COMPILE_OPTIONS})
-target_compile_options(compiler-benchmark PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(Polyc PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(polyc-bin PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(polyc-tests PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(polyc-benchmarks PRIVATE ${COMPILE_OPTIONS})
 
-target_link_options(compiler-lib PRIVATE ${LINK_OPTIONS})
-target_link_options(compiler-drv PRIVATE ${LINK_OPTIONS})
-target_link_options(compiler-tests PRIVATE ${LINK_OPTIONS})
-target_link_options(compiler-benchmark PRIVATE ${LINK_OPTIONS})
+target_link_options(Polyc PRIVATE ${LINK_OPTIONS})
+target_link_options(polyc-bin PRIVATE ${LINK_OPTIONS})
+target_link_options(polyc-tests PRIVATE ${LINK_OPTIONS})
+target_link_options(polyc-benchmarks PRIVATE ${LINK_OPTIONS})
+
+set_target_properties(polyc-bin PROPERTIES OUTPUT_NAME polyc)

@@ -138,7 +138,12 @@ object VerifyPass {
         val c2 = captures.foldLeft(c1)(validateTerm(_, _))
         c2
       case p.Expr.Index(lhs, idx, component) => (validateTerm(_: Context, lhs)).andThen(validateTerm(_, idx))(c)
-      case p.Expr.Alloc(witness, size)       => validateTerm(c, size)
+      case p.Expr.RefTo(lhs, idx, component) =>
+        idx match {
+          case Some(idx) => (validateTerm(_: Context, lhs)).andThen(validateTerm(_, idx))(c)
+          case None      => (validateTerm(_: Context, lhs))(c)
+        }
+      case p.Expr.Alloc(witness, size) => validateTerm(c, size)
     }
 
     def validateStmt(c: Context, s: p.Stmt): Context = s match {

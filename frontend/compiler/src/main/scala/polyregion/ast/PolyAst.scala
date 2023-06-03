@@ -139,10 +139,9 @@ object PolyAst {
 
   case class Overload(args: List[Type], rtn: Type) derives MsgPack.Codec
 
-
   object Spec {
-    inline def GpuIndex          = List(Overload(List(Type.IntU32), Type.IntU32))
-    inline def NullaryUnit       = List(Overload(List[Type](), Type.Unit0))
+    inline def GpuIndex    = List(Overload(List(Type.IntU32), Type.IntU32))
+    inline def NullaryUnit = List(Overload(List[Type](), Type.Unit0))
   }
   enum Spec(val overloads: List[Overload], val terms: List[Term], val tpe: Type) derives MsgPack.Codec {
     // nullary misc
@@ -288,8 +287,8 @@ object PolyAst {
     // unary logic
     case LogicNot(x: Term) extends Intr(Intr.BinaryUniformBool, List(x), Type.Bool1)
 
-    case Pos(x: Term, rtn: Type)    extends Intr(Intr.BinaryUniformNumeric, List(x), rtn)
-    case Neg(x: Term, rtn: Type)    extends Intr(Intr.BinaryUniformNumeric, List(x), rtn)
+    case Pos(x: Term, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x), rtn)
+    case Neg(x: Term, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x), rtn)
 
     // --- binary ---
 
@@ -301,7 +300,7 @@ object PolyAst {
     case Rem(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
     case Min(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
     case Max(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformNumeric, List(x, y), rtn)
-    
+
     // /**/case Pow(x: Term, y: Term, rtn: Type)   extends Intr(Intr.BinaryUniformFractional, List(x, y), rtn)
     // /**/case Atan2(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformFractional, List(x, y), rtn)
     // /**/case Hypot(x: Term, y: Term, rtn: Type) extends Intr(Intr.BinaryUniformFractional, List(x, y), rtn)
@@ -338,7 +337,7 @@ object PolyAst {
   }
   enum Math(val overloads: List[Overload], val terms: List[Term], val tpe: Type) derives MsgPack.Codec {
     // --- unary ---
-    
+
     case Abs(x: Term, rtn: Type)    extends Math(Intr.BinaryUniformNumeric, List(x), rtn)
     case Sin(x: Term, rtn: Type)    extends Math(Math.UnaryUniformFractional, List(x), rtn)
     case Cos(x: Term, rtn: Type)    extends Math(Math.UnaryUniformFractional, List(x), rtn)
@@ -367,22 +366,21 @@ object PolyAst {
     case Hypot(x: Term, y: Term, rtn: Type) extends Math(Math.BinaryUniformFractional, List(x, y), rtn)
   }
 
-  
-
   enum Expr(val tpe: Type) derives MsgPack.Codec {
 
     // case NullaryIntrinsic(kind: NullaryIntrinsicKind, rtn: Type)                     extends Expr(rtn)
     // case UnaryIntrinsic(lhs: Term, kind: UnaryIntrinsicKind, rtn: Type)              extends Expr(rtn)
     // case BinaryIntrinsic(lhs: Term, rhs: Term, kind: BinaryIntrinsicKind, rtn: Type) extends Expr(rtn)
 
-    case SpecOp(op: Spec) extends Expr(op.tpe) 
+    case SpecOp(op: Spec) extends Expr(op.tpe)
     case MathOp(op: Math) extends Expr(op.tpe)
     case IntrOp(op: Intr) extends Expr(op.tpe)
 
-    case Cast(from: Term, as: Type)                   extends Expr(as)
-    case Alias(ref: Term)                             extends Expr(ref.tpe)
-    case Index(lhs: Term, idx: Term, component: Type) extends Expr(component)
-    case Alloc(component: Type, size: Term)           extends Expr(Type.Array(component, Type.Space.Global))
+    case Cast(from: Term, as: Type)                           extends Expr(as)
+    case Alias(ref: Term)                                     extends Expr(ref.tpe)
+    case Index(lhs: Term, idx: Term, component: Type)         extends Expr(component)
+    case RefTo(lhs: Term, idx: Option[Term], component: Type) extends Expr(Type.Array(component, Type.Space.Global))
+    case Alloc(component: Type, size: Term)                   extends Expr(Type.Array(component, Type.Space.Global))
 
     case Invoke(
         name: Sym,
@@ -419,7 +417,6 @@ object PolyAst {
   case class StructMember(named: Named, isMutable: Boolean) derives MsgPack.Codec
   case class StructDef(            //
       name: Sym,                   //
-      isReference: Boolean,        //
       tpeVars: List[String],       //
       members: List[StructMember], //
       parents: List[Sym]           //

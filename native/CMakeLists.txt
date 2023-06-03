@@ -10,9 +10,11 @@ if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.24.0")
 endif ()
 
 set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON" FORCE)
+set(CMAKE_SKIP_INSTALL_ALL_DEPENDENCY ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 set(USE_LINKER "" CACHE INTERNAL "Path to custom linker")
 set(POLYREGION_SHARED_LIB OFF CACHE BOOL "")
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 ProcessorCount(NPROC)
 
 project(polyregion-native)
@@ -64,7 +66,7 @@ if (MSVC)
 else ()
     # FIXME adjust for CUDA stuff for now
     set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan -g3)
-    set(COMMON_DEBUG_OPTIONS)
+    #    set(COMMON_DEBUG_OPTIONS)
 endif ()
 
 if (MSVC)
@@ -110,8 +112,8 @@ else ()
     set(DEBUG OFF)
 
     if (NOT MSVC)
-        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
-        set(CMAKE_CXX_COMPILE_OPTIONS_IPO -flto=thin)
+        #        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+        #        set(CMAKE_CXX_COMPILE_OPTIONS_IPO -flto=thin)
     endif ()
 
     set(COMMON_COMPILE_OPTIONS
@@ -124,14 +126,16 @@ else ()
     if (APPLE)
         # LLD support for macOS is not there yet, flags are for ld64.
     else ()
-        # For lld, we setup LTO, ICF, and threading
-        set(COMMON_LINKER_OPTIONS
-                #                LINKER:--lto-O3
-#                LINKER:--icf=all
-                LINKER:--threads=${NPROC}
+        set(STRICT_LINKER_OPTIONS
                 LINKER:--no-allow-shlib-undefined
                 LINKER:--no-undefined-version
                 LINKER:--no-undefined
+                )
+        # For lld, we setup LTO, ICF, and threading
+        set(COMMON_LINKER_OPTIONS
+                #                LINKER:--lto-O3
+                #                LINKER:--icf=all
+                LINKER:--threads=${NPROC}
                 LINKER:-O3                # O3 for linker means optimise for space
                 )
     endif ()
@@ -182,14 +186,17 @@ if (${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.20.0")
 endif ()
 
 set(LLVM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/llvm")
-set(MLIR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/mlir")
 set(LLD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/lld")
+set(Clang_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/clang")
+#set(MLIR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/mlir")
 
 message(STATUS "Using LLVM at ${LLVM_DIR}")
-message(STATUS "Using MLIR at ${MLIR_DIR}")
 message(STATUS "Using LLD at ${LLD_DIR}")
+message(STATUS "Using Clang at ${Clang_DIR}")
+#message(STATUS "Using MLIR at ${MLIR_DIR}")
 
 find_package(LLVM REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
+find_package(Clang REQUIRED PATHS ${Clang_DIR} NO_DEFAULT_PATH)
 find_package(LLD REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
 #find_package(MLIR REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
 
@@ -295,6 +302,8 @@ endif ()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+add_subdirectory(ast)
 add_subdirectory(compiler)
 add_subdirectory(runtime)
 add_subdirectory(bindings)
+add_subdirectory(clang_frontend)

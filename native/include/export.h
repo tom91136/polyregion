@@ -4,5 +4,5 @@
 //  #define EXPORT __declspec(dllexport)
   #define EXPORT
 #else
-  #define EXPORT __attribute__((visibility("default")))
+  #define POLYREGION_EXPORT __attribute__((visibility("default")))
 #endif

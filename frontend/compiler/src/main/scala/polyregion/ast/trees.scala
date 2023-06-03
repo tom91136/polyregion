@@ -176,7 +176,6 @@ object PolyAstToExpr {
     def apply(x: p.StructDef)(using Quotes) = '{
       p.StructDef(
         ${ Expr(x.name) },
-        ${ Expr(x.isReference) },
         ${ Expr(x.tpeVars) },
         ${ Expr(x.members) },
         ${ Expr(x.parents) }
@@ -226,7 +225,7 @@ extension (m: p.StructMember) {
 extension (sd: p.StructDef) {
   def tpe: p.Type.Struct = p.Type.Struct(sd.name, sd.tpeVars, Nil, sd.parents)
   def repr: String =
-    s"${sd.name.repr}<${sd.tpeVars.mkString(",")}>${if (sd.isReference) "*" else ""} { ${sd.members
+    s"${sd.name.repr}<${sd.tpeVars.mkString(",")}> { ${sd.members
         .map(_.repr)
         .mkString("; ")} } <: ${sd.parents.map(_.repr).mkString("<:")}"
 }
@@ -466,6 +465,7 @@ extension (e: p.Expr) {
           .map(_.repr)
           .mkString(",")})[${captures.map(_.repr).mkString(",")}] : ${tpe.repr}"
     case p.Expr.Index(lhs, idx, tpe) => s"${lhs.repr}[${idx.repr}] : ${tpe.repr}"
+    case p.Expr.RefTo(lhs, idx, tpe) => s"&${lhs.repr}${idx.fold("")(x => s"[${x.repr}]")} : ${tpe.repr}"
     case p.Expr.Alloc(tpe, size)     => s"new [${tpe.repr}*${size.repr}]"
   }
 }

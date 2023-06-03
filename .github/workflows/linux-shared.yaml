@@ -97,30 +97,30 @@ jobs:
         working-directory: ./native
         run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=CONFIGURE -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
 
-      - name: Release build runtime-drv
+      - name: Release build polyrt-exec
         working-directory: ./native
         if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=runtime-drv -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyrt-exec -P build.cmake
 
-      - name: Release build compiler-drv
+      - name: Release build polyc-bin
         working-directory: ./native
         if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=compiler-drv -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyc-bin -P build.cmake
 
       - name: Release build JVM shim
         working-directory: ./native
         if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyregion-shim-jvm -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=Polyc-JNIshim -P build.cmake
 
       - name: Release build JVM runtime
         working-directory: ./native
         if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyregion-runtime-jvm -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=PolyRT-JNI -P build.cmake
 
       - name: Release build JVM compiler
         working-directory: ./native
         if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyregion-compiler-jvm -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=Polyc-JNI -P build.cmake
 
       - name: Check artefact
         working-directory: ./native
@@ -138,5 +138,5 @@ jobs:
           }
 
           show_libs build-linux-${{ inputs.build_arch }}/bindings/jvm/*.so 
-          show_libs build-linux-${{ inputs.build_arch }}/compiler/compiler-drv 
-          show_libs build-linux-${{ inputs.build_arch }}/runtime/runtime-drv
+          show_libs build-linux-${{ inputs.build_arch }}/compiler/polyc-bin 
+          show_libs build-linux-${{ inputs.build_arch }}/runtime/polyrt-exec

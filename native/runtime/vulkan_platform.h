@@ -26,7 +26,7 @@
 
 namespace polyregion::runtime::vulkan {
 
-class EXPORT VulkanPlatform : public Platform {
+class POLYREGION_EXPORT VulkanPlatform : public Platform {
 
   //  vk::DynamicLoader dl;
 
@@ -39,11 +39,11 @@ class EXPORT VulkanPlatform : public Platform {
   //  kp::Manager mgr;
 
 public:
-  EXPORT explicit VulkanPlatform();
-  EXPORT ~VulkanPlatform() override = default;
-  EXPORT std::string name() override;
-  EXPORT std::vector<Property> properties() override;
-  EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;
+  POLYREGION_EXPORT explicit VulkanPlatform();
+  POLYREGION_EXPORT ~VulkanPlatform() override = default;
+  POLYREGION_EXPORT std::string name() override;
+  POLYREGION_EXPORT std::vector<Property> properties() override;
+  POLYREGION_EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;
 };
 
 namespace {
@@ -83,7 +83,7 @@ using VulkanModuleStore = detail::ModuleStore<std::shared_ptr<vk::raii::ShaderMo
 using VkMemObject = std::shared_ptr<MemObject>;
 } // namespace
 
-class EXPORT VulkanDevice : public Device {
+class POLYREGION_EXPORT VulkanDevice : public Device {
   //
 
   std::pair<uint32_t, size_t> computeQueueId;
@@ -111,20 +111,20 @@ public:
                         decltype(transferQueueId) transferQueueId, //
                         decltype(device) device_);
   int64_t id() override;
-  EXPORT std::string name() override;
-  EXPORT bool sharedAddressSpace() override;
-  EXPORT bool singleEntryPerModule() override;
-  EXPORT std::vector<Property> properties() override;
-  EXPORT std::vector<std::string> features() override;
-  EXPORT void loadModule(const std::string &name, const std::string &image) override;
-  EXPORT bool moduleLoaded(const std::string &name) override;
-  EXPORT uintptr_t malloc(size_t size, Access access) override;
-  EXPORT void free(uintptr_t ptr) override;
-  EXPORT std::unique_ptr<DeviceQueue> createQueue() override;
+  POLYREGION_EXPORT std::string name() override;
+  POLYREGION_EXPORT bool sharedAddressSpace() override;
+  POLYREGION_EXPORT bool singleEntryPerModule() override;
+  POLYREGION_EXPORT std::vector<Property> properties() override;
+  POLYREGION_EXPORT std::vector<std::string> features() override;
+  POLYREGION_EXPORT void loadModule(const std::string &name, const std::string &image) override;
+  POLYREGION_EXPORT bool moduleLoaded(const std::string &name) override;
+  POLYREGION_EXPORT uintptr_t malloc(size_t size, Access access) override;
+  POLYREGION_EXPORT void free(uintptr_t ptr) override;
+  POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue() override;
   ~VulkanDevice() override;
 };
 
-class EXPORT VulkanDeviceQueue : public DeviceQueue {
+class POLYREGION_EXPORT VulkanDeviceQueue : public DeviceQueue {
 
   detail::CountingLatch latch;
   vk::raii::Device &ctx;
@@ -141,16 +141,16 @@ class EXPORT VulkanDeviceQueue : public DeviceQueue {
   void enqueueCallback(const MaybeCallback &cb);
 
 public:
-  EXPORT explicit VulkanDeviceQueue(decltype(ctx) ctx,                     //
+  POLYREGION_EXPORT explicit VulkanDeviceQueue(decltype(ctx) ctx,                     //
                                     decltype(allocator) allocator,         //
                                     decltype(computeQueue) computeQueue,   //
                                     decltype(transferQueue) transferQueue, //
                                     decltype(store) store,                 //
                                     decltype(queryMemObject) queryMemObject);
-  EXPORT ~VulkanDeviceQueue() override;
-  EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) override;
-  EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, void *dst, size_t size, const MaybeCallback &cb) override;
-  EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
+  POLYREGION_EXPORT ~VulkanDeviceQueue() override;
+  POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) override;
+  POLYREGION_EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, void *dst, size_t size, const MaybeCallback &cb) override;
+  POLYREGION_EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
                                  const std::vector<Type> &types, std::vector<std::byte> argData, const Policy &policy,
                                  const MaybeCallback &cb) override;
 };

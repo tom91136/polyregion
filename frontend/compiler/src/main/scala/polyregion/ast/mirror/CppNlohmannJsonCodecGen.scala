@@ -103,8 +103,8 @@ private[polyregion] object CppNlohmannJsonCodecGen {
       "}" :: Nil //
 
     val decls =
-      s"[[nodiscard]] EXPORT ${s.tpe.ref(qualified = true)} ${fromJsonFn(s.tpe)}(const json &);" ::
-        s"[[nodiscard]] EXPORT json ${toJsonFn(s.tpe)}(const ${s.tpe.ref(qualified = true)} &);" ::
+      s"[[nodiscard]] POLYREGION_EXPORT ${s.tpe.ref(qualified = true)} ${fromJsonFn(s.tpe)}(const json &);" ::
+        s"[[nodiscard]] POLYREGION_EXPORT json ${toJsonFn(s.tpe)}(const ${s.tpe.ref(qualified = true)} &);" ::
         Nil
 
     s.variants.flatMap(s => emit(s)) :+
@@ -130,8 +130,8 @@ private[polyregion] object CppNlohmannJsonCodecGen {
           |
           |namespace ${namespace} { 
           |${lines.mkString("\n")}
-          |[[nodiscard]] EXPORT json hashed_to_json(const json&);
-          |[[nodiscard]] EXPORT json hashed_from_json(const json&);
+          |[[nodiscard]] POLYREGION_EXPORT json hashed_to_json(const json&);
+          |[[nodiscard]] POLYREGION_EXPORT json hashed_from_json(const json&);
           |} // namespace $namespace
           |
           |""".stripMargin

@@ -23,7 +23,6 @@ object MonoStructPass extends BoundaryPass[Map[p.Sym, p.Sym]] {
       table = struct.tpeVars.zip(struct.args).toMap
     } yield struct -> p.StructDef(
       name = p.Sym(struct.monomorphicName),
-      isReference = false,
       tpeVars = Nil,
       members = sdef.members.modifyAll[p.Type](
         _.mapLeaf {

@@ -92,7 +92,6 @@ runtime::detail::CountingLatch::~CountingLatch() {
   std::unique_lock lock(mutex);
   if (!cv.wait_until(lock, now + std::chrono::seconds(10), [&]() { return pending == 0; })) {
     std::cerr << "Timed out with " + std::to_string(pending) + " pending latches" << std::endl;
-    throw std::logic_error("Timed out with " + std::to_string(pending) + " pending latches");
   }
 }
 

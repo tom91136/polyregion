@@ -76,8 +76,8 @@ typedef enum
   HSA_ACCESS_PERMISSION_RW = 3
 } hsa_access_permission_t;
 typedef int hsa_file_t;
-typedef hsa_status_t hsaew_hsa_init();
-typedef hsa_status_t hsaew_hsa_shut_down();
+typedef hsa_status_t hsaew_hsa_init(void);
+typedef hsa_status_t hsaew_hsa_shut_down(void);
 typedef enum 
 {
   HSA_ENDIANNESS_LITTLE = 0,

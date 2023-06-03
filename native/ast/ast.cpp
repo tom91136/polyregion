@@ -16,22 +16,22 @@ using std::string;
 
 [[nodiscard]] string polyast::repr(const Type::Any &type) {
   return variants::total(
-      *type,                                            //
-      [](const Type::Float16 &) { return "Float16"s; }, //
-      [](const Type::Float32 &) { return "Float32"s; }, //
-      [](const Type::Float64 &) { return "Float64"s; }, //
+      *type,                                        //
+      [](const Type::Float16 &) { return "F16"s; }, //
+      [](const Type::Float32 &) { return "F32"s; }, //
+      [](const Type::Float64 &) { return "F64"s; }, //
 
-      [](const Type::IntS8 &) { return "IntS8"s; },   //
-      [](const Type::IntS16 &) { return "IntS16"s; }, //
-      [](const Type::IntS32 &) { return "IntS32"s; }, //
-      [](const Type::IntS64 &) { return "IntS64"s; }, //
-      [](const Type::IntU8 &) { return "IntU8"s; },   //
-      [](const Type::IntU16 &) { return "IntU16"s; }, //
-      [](const Type::IntU32 &) { return "IntU32"s; }, //
-      [](const Type::IntU64 &) { return "IntU64"s; }, //
+      [](const Type::IntS8 &) { return "I8"s; },   //
+      [](const Type::IntS16 &) { return "I16"s; }, //
+      [](const Type::IntS32 &) { return "I32"s; }, //
+      [](const Type::IntS64 &) { return "I64"s; }, //
+      [](const Type::IntU8 &) { return "U8"s; },   //
+      [](const Type::IntU16 &) { return "U16"s; }, //
+      [](const Type::IntU32 &) { return "U32"s; }, //
+      [](const Type::IntU64 &) { return "U64"s; }, //
 
-      [](const Type::Unit0 &) { return "Unit0"s; },                            //
-      [](const Type::Bool1 &) { return "Bool1"s; },                            //
+      [](const Type::Unit0 &) { return "Unit"s; },                             //
+      [](const Type::Bool1 &) { return "Bool"s; },                             //
       [](const Type::Nothing &) { return "Nothing"s; },                        //
       [](const Type::Struct &x) { return "Struct[" + repr(x.name) + "]"; },    //
       [](const Type::Array &x) { return "Array[" + repr(x.component) + "]"; }, //
@@ -54,21 +54,21 @@ using std::string;
       },
       [](const Term::Poison &x) { return "Poison(" + repr(x.tpe) + ")"; },
 
-      [](const Term::Float16Const &x) { return "Float16(" + std::to_string(x.value) + ")"; }, //
-      [](const Term::Float32Const &x) { return "Float32(" + std::to_string(x.value) + ")"; }, //
-      [](const Term::Float64Const &x) { return "Float64(" + std::to_string(x.value) + ")"; }, //
+      [](const Term::Float16Const &x) { return "f16(" + std::to_string(x.value) + ")"; }, //
+      [](const Term::Float32Const &x) { return "f32(" + std::to_string(x.value) + ")"; }, //
+      [](const Term::Float64Const &x) { return "f64(" + std::to_string(x.value) + ")"; }, //
 
-      [](const Term::IntU8Const &x) { return "IntU8(" + std::to_string(x.value) + ")"; },   //
-      [](const Term::IntU16Const &x) { return "IntU16(" + std::to_string(x.value) + ")"; }, //
-      [](const Term::IntU32Const &x) { return "IntU32(" + std::to_string(x.value) + ")"; }, //
-      [](const Term::IntU64Const &x) { return "IntU64(" + std::to_string(x.value) + ")"; }, //
-      [](const Term::IntS8Const &x) { return "IntS8(" + std::to_string(x.value) + ")"; },   //
-      [](const Term::IntS16Const &x) { return "IntS16(" + std::to_string(x.value) + ")"; }, //
-      [](const Term::IntS32Const &x) { return "IntS32(" + std::to_string(x.value) + ")"; }, //
-      [](const Term::IntS64Const &x) { return "IntS64(" + std::to_string(x.value) + ")"; }, //
+      [](const Term::IntU8Const &x) { return "u8(" + std::to_string(x.value) + ")"; },   //
+      [](const Term::IntU16Const &x) { return "u16(" + std::to_string(x.value) + ")"; }, //
+      [](const Term::IntU32Const &x) { return "u32(" + std::to_string(x.value) + ")"; }, //
+      [](const Term::IntU64Const &x) { return "u64(" + std::to_string(x.value) + ")"; }, //
+      [](const Term::IntS8Const &x) { return "i8(" + std::to_string(x.value) + ")"; },   //
+      [](const Term::IntS16Const &x) { return "i16(" + std::to_string(x.value) + ")"; }, //
+      [](const Term::IntS32Const &x) { return "i32(" + std::to_string(x.value) + ")"; }, //
+      [](const Term::IntS64Const &x) { return "i64(" + std::to_string(x.value) + ")"; }, //
 
-      [](const Term::Bool1Const &x) { return "Bool1(" + std::to_string(x.value) + ")"; }, //
-      [](const Term::Unit0Const &x) { return "Unit0()"s; }                                //
+      [](const Term::Bool1Const &x) { return "bool(" + std::to_string(x.value) + ")"; }, //
+      [](const Term::Unit0Const &x) { return "unit()"s; }                                //
 
   );
 }
@@ -87,6 +87,11 @@ using std::string;
                ")" + ":" + repr(x.tpe);
       },
       [](const Expr::Index &x) { return repr(x.lhs) + "[" + repr(x.idx) + "]"; },
+      [](const Expr::RefTo &x) {
+        std::string str = "&" + repr(x.lhs);
+        if (x.idx) str += "[" + repr(*x.idx) + "]";
+        return str;
+      },
       [](const Expr::Alloc &x) { return "new [" + repr(x.tpe) + "*" + repr(x.size) + "]"; });
 }
 
@@ -99,7 +104,7 @@ using std::string;
                              x.stmts, [&](auto x) { return repr(x); }, "\n")) +
                "}";
       },
-      [](const Stmt::Comment &x) { return "// " + x.value; },
+      [](const Stmt::Comment &x) { return "/* " + x.value + " */"; },
       [](const Stmt::Var &x) { return "var " + repr(x.name) + " = " + (x.expr ? repr(*x.expr) : "_"); },
       [](const Stmt::Mut &x) { return repr(x.name) + " := " + repr(x.expr); },
       [](const Stmt::Update &x) { return repr(x.lhs) + "[" + repr(x.idx) + "] = " + repr(x.value); },
@@ -137,13 +142,30 @@ using std::string;
 }
 
 [[nodiscard]] string polyast::repr(const Function &fn) {
-  return "def " + repr(fn.name) + "(" +
+  std::string str;
+  if (fn.receiver) str += repr(*fn.receiver) + ".";
+  str += repr(fn.name);
+  str += "<" +
+         mk_string<std::string>(
+             fn.tpeVars, [](auto &x) { return x; }, ", ") +
+         ">";
+  str += "(" +
          mk_string<Arg>(
              fn.args, [&](auto x) { return repr(x); }, ",") +
-         ") : " + repr(fn.rtn) + " = {\n" +
+         ")";
+  str += "[" +
+         mk_string<Arg>(
+             fn.moduleCaptures, [&](auto x) { return repr(x); }, ",") +
+         ";" +
+         mk_string<Arg>(
+             fn.termCaptures, [&](auto x) { return repr(x); }, ",") +
+         "]";
+  str += ": " + repr(fn.rtn);
+  str += " = {\n" +
          indent(2, mk_string<Stmt::Any>(
                        fn.body, [&](auto x) { return repr(x); }, "\n")) +
          "\n}";
+  return str;
 }
 
 [[nodiscard]] string polyast::repr(const StructDef &def) {
