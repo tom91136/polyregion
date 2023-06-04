@@ -278,7 +278,7 @@ struct POLYREGION_EXPORT Options {
 };
 
 POLYREGION_EXPORT std::vector<Layout> layoutOf(const std::vector<polyast::StructDef> &sdefs, const Options &options);
-POLYREGION_EXPORT std::vector<Layout> layoutOf(const Bytes &bytes, const Options &backend);
+POLYREGION_EXPORT std::vector<Layout> layoutOf(const Bytes &bytes, const Options &options);
 
 POLYREGION_EXPORT Compilation compile(const polyast::Program &program, const Options &options, const Opt &opt);
 POLYREGION_EXPORT Compilation compile(const Bytes &astBytes, const Options &options, const Opt &opt);

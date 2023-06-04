@@ -41,7 +41,7 @@ public:
   struct Options {
     Target target;
     std::string arch;
-    [[nodiscard]] llvmc::TargetInfo toTargetInfo() const;
+    [[nodiscard]] llvmc::TargetInfo targetInfo() const;
   };
 
 private:

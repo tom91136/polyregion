@@ -1095,16 +1095,35 @@ ValPtr LLVMBackend::AstTransformer::intr2(llvm::Function *fn, llvm::Intrinsic::I
   return B.CreateCall(callee, {mkTermVal(lhs), mkTermVal(rhs)});
 }
 
-llvmc::TargetInfo LLVMBackend::Options::toTargetInfo() const {
+llvmc::TargetInfo LLVMBackend::Options::targetInfo() const {
   using llvm::Triple;
   const auto bindGpuArch = [&](Triple::ArchType archTpe, Triple::VendorType vendor, Triple::OSType os) {
     Triple triple(Triple::getArchTypeName(archTpe), Triple::getVendorTypeName(vendor), Triple::getOSTypeName(os));
-    if (archTpe == Triple::ArchType::UnknownArch) throw std::logic_error("Arch must be specified for " + triple.str());
-    return llvmc::TargetInfo{
-        .triple = triple,
-        .target = backend::llvmc::targetFromTriple(triple),
-        .cpu = {.uArch = arch, .features = {}},
-    };
+
+    switch (archTpe) {
+      case Triple::ArchType::UnknownArch: throw std::logic_error("Arch must be specified for " + triple.str());
+      case Triple::ArchType::spirv32:
+        // XXX We don't have a SPIRV target machine in LLVM yet, but we do know the data layout from Clang:
+        // See clang/lib/Basic/Targets/SPIR.h
+        return llvmc::TargetInfo{
+            .triple = triple,                                                                                                         //
+            .layout = llvm::DataLayout("e-p:32:32-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024"), //
+            .target = nullptr,                                                                                                        //
+            .cpu = {.uArch = arch, .features = {}}};
+      case Triple::ArchType::spirv64: // Same thing for SPIRV64
+        return llvmc::TargetInfo{
+            .triple = triple,                                                                                                 //
+            .layout = llvm::DataLayout("e-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024"), //
+            .target = nullptr,                                                                                                //
+            .cpu = {.uArch = arch, .features = {}}};
+      default:
+        return llvmc::TargetInfo{
+            .triple = triple,
+            .layout = {},
+            .target = backend::llvmc::targetFromTriple(triple),
+            .cpu = {.uArch = arch, .features = {}},
+        };
+    }
   };
 
   const auto bindCpuArch = [&](Triple::ArchType archTpe) {
@@ -1136,7 +1155,7 @@ llvmc::TargetInfo LLVMBackend::Options::toTargetInfo() const {
 std::vector<compiler::Layout> LLVMBackend::resolveLayouts(const std::vector<StructDef> &defs,
                                                           const backend::LLVMBackend::AstTransformer &xform) const {
 
-  auto dataLayout = llvmc::targetMachineFromTarget(options.toTargetInfo())->createDataLayout();
+  auto dataLayout = options.targetInfo().resolveDataLayout();
 
   std::unordered_map<polyast::Sym, polyast::StructDef> lut(defs.size());
   for (auto &d : defs)
@@ -1198,7 +1217,7 @@ compiler::Compilation backend::LLVMBackend::compileProgram(const Program &progra
                 errors, [](auto &&x) { return x; }, "\n")};
   }
 
-  auto c = llvmc::compileModule(options.toTargetInfo(), opt, true, std::move(mod));
+  auto c = llvmc::compileModule(options.targetInfo(), opt, true, std::move(mod));
   c.layouts = resolveLayouts(program.defs, xform);
   c.events.emplace_back(ast2IR);
   c.events.emplace_back(astOpt);

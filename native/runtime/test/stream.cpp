@@ -124,6 +124,13 @@ TEST_CASE("SPIRV BabelStream") {
 #ifdef __APPLE__
   WARN("Vulkan not natively supported on macOS");
 #else
+
+//  testStream<float>(generated::spirv::glsl_stream, Type::Float32, "_float", 0.008f, //
+//                    {33554432},          //
+//                    {256},                                       //
+//                    {100},                                                     //
+//                    {Backend::Vulkan});
+
   DYNAMIC_SECTION("float") {
     testStream<float>(generated::spirv::glsl_stream, Type::Float32, "_float", 0.008f, //
                       {1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072},          //

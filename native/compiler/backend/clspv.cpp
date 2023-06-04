@@ -57,7 +57,7 @@ int polyregion::backend::clspv::RunPassPipeline(llvm::Module &M, char Optimizati
 
   std::vector<const char *> args = {
       "",
-      "-show-producer-ir",
+//      "-show-producer-ir",
 //      "-print-after-all",
       "-pod-ubo=true",
       "-cl-kernel-arg-info=true"

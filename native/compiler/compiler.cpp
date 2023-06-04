@@ -172,7 +172,7 @@ std::vector<compiler::Layout> compiler::layoutOf(const std::vector<polyast::Stru
     case Target::Object_LLVM_SPIRV64: {
 
       auto llvmOptions = toLLVMBackendOptions(options);
-      auto dataLayout = backend::llvmc::targetMachineFromTarget(llvmOptions.toTargetInfo())->createDataLayout();
+      auto dataLayout = llvmOptions.targetInfo().resolveDataLayout();
 
       llvm::LLVMContext c;
       backend::LLVMBackend::AstTransformer xform(llvmOptions, c);
@@ -205,11 +205,11 @@ std::vector<compiler::Layout> compiler::layoutOf(const std::vector<polyast::Stru
   }
 }
 
-std::vector<compiler::Layout> compiler::layoutOf(const Bytes &sdef, const Options &backend) {
+std::vector<compiler::Layout> compiler::layoutOf(const Bytes &sdef, const Options &options) {
   json json = deserialiseAst(sdef);
   std::vector<polyast::StructDef> sdefs;
   std::transform(json.begin(), json.end(), std::back_inserter(sdefs), &polyast::structdef_from_json);
-  return layoutOf(sdefs, backend);
+  return layoutOf(sdefs, options);
 }
 
 static void sortEvents(compiler::Compilation &c) {
