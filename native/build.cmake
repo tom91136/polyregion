@@ -51,6 +51,7 @@ else ()
 endif ()
 
 if (CMAKE_SYSROOT)
+    set(ENV{CMAKE_SYSROOT} ${CMAKE_SYSROOT})
     list(APPEND BUILD_OPTIONS -DCMAKE_SYSROOT=${CMAKE_SYSROOT})
 endif ()
 
