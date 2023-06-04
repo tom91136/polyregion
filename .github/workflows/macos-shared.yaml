@@ -112,5 +112,5 @@ jobs:
           show_libs build-darwin-${{ inputs.build_arch }}/bindings/jvm/libPolyc-JNI.dylib
           show_libs build-darwin-${{ inputs.build_arch }}/bindings/jvm/libPolyRT-JNI.dylib
           show_libs build-darwin-${{ inputs.build_arch }}/bindings/jvm/libPolyc-JNIshim.dylib
-          show_libs build-darwin-${{ inputs.build_arch }}/compiler/polyc-bin
+          show_libs build-darwin-${{ inputs.build_arch }}/compiler/polyc
           show_libs build-darwin-${{ inputs.build_arch }}/runtime/polyrt-exec
