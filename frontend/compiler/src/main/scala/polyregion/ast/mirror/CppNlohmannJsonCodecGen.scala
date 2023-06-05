@@ -23,7 +23,7 @@ private[polyregion] object CppNlohmannJsonCodecGen {
 
   def fromJsonBody(s: StructNode) = if (s.tpe.kind == CppType.Kind.Base) {
     s"size_t ord_ = ${jsonAt(0)}.get<size_t>();" ::
-      s"const auto t_ = ${jsonAt(1)};" ::
+      s"const auto &t_ = ${jsonAt(1)};" ::
       "switch (ord_) {" ::
       s.variants.zipWithIndex.map((c, i) => s"case ${i}: return ${c.tpe.ns(fromJsonFn(c.tpe))}(t_);") :::
       s"default: throw std::out_of_range(\"Bad ordinal \" + std::to_string(ord_));" ::

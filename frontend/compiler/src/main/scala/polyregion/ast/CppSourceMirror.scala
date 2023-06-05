@@ -49,6 +49,10 @@ private[polyregion] object CppSourceMirror {
       :: deriveStruct[Arg]()
       :: deriveStruct[Function]()
       :: deriveStruct[Program]()
+      :: deriveStruct[CompileLayoutMember]() 
+      :: deriveStruct[CompileLayout]() 
+      :: deriveStruct[CompileEvent]() 
+      :: deriveStruct[CompileResult]() 
       :: Nil //
 
   private final val namespace         = "polyregion::polyast"
@@ -76,7 +80,7 @@ private[polyregion] object CppSourceMirror {
     val jsonCodecHeader = CppNlohmannJsonCodecGen.emitHeader(namespace, jsonCodecSources)
     val jsonCodecImpl   = CppNlohmannJsonCodecGen.emitImpl(namespace, jsonCodecFileName, AdtHash, jsonCodecSources)
 
-    val target = Paths.get("../native/compiler/generated/").toAbsolutePath.normalize
+    val target = Paths.get("../native/ast/generated/").toAbsolutePath.normalize
     println(s"Generated Codec=${(jsonCodecHeader + jsonCodecImpl).count(_ == '\n')} lines")
 
     println(s"MD5=${AdtHash}")

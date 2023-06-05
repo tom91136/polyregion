@@ -1,5 +1,7 @@
 package polyregion.ast
 
+import scala.collection.immutable.ArraySeq
+
 object PolyAst {
 
   case class Sym(fqn: List[String]) derives MsgPack.Codec {
@@ -468,6 +470,32 @@ object PolyAst {
       entry: Function, // TODO merge entry with the rest when we add internal/export attrs
       functions: List[Function],
       defs: List[StructDef]
+  ) derives MsgPack.Codec
+
+
+  case class CompileLayoutMember( //
+      name: Named,
+      offsetInBytes: Long,
+      sizeInBytes: Long
+  ) derives MsgPack.Codec
+  case class CompileLayout( //
+      name: Sym,
+      sizeInBytes: Long,
+      alignment: Long,
+      members: List[CompileLayoutMember]
+  ) derives MsgPack.Codec
+  case class CompileEvent( //
+      epochMillis: Long,
+      elapsedNanos: Long,
+      name: String,
+      data: String
+  ) derives MsgPack.Codec
+  case class CompileResult(
+      binary: Option[ArraySeq[Byte]],
+      features: List[String],
+      events: List[CompileEvent],
+      layouts: List[CompileLayout],
+      messages: String
   ) derives MsgPack.Codec
 
 }

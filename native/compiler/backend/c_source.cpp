@@ -385,7 +385,7 @@ std::string backend::CSource ::mkFn(const Function &fnTree) {
   return prototype + " {\n" + indent(2, body) + "\n}";
 }
 
-compiler::Compilation backend::CSource::compileProgram(const Program &program, const compiler::Opt &opt) {
+polyast::Compilation backend::CSource::compileProgram(const Program &program, const polyast::OptLevel &opt) {
   auto start = compiler::nowMono();
 
   auto structDefs = mk_string<StructDef>(
@@ -415,7 +415,7 @@ compiler::Compilation backend::CSource::compileProgram(const Program &program, c
   auto def = mk_string<std::string>(lines, std::identity{}, "\n");
 
   std::cout << def << std::endl;
-  std::vector<char> data(def.begin(), def.end());
+  std::vector<int8_t> data(def.begin(), def.end());
 
   std::string dialectName;
   switch (dialect) {
@@ -425,8 +425,8 @@ compiler::Compilation backend::CSource::compileProgram(const Program &program, c
     default: dialectName = "unknown";
   }
 
-  return {data, {}, {{compiler::nowMs(), compiler::elapsedNs(start), "polyast_to_" + dialectName + "_c", def}}};
+  return {data, {}, {{compiler::nowMs(), compiler::elapsedNs(start), "polyast_to_" + dialectName + "_c", def}}, {}, ""};
 }
-std::vector<compiler::Layout> backend::CSource::resolveLayouts(const std::vector<StructDef> &defs, const compiler::Opt &opt) {
-  return std::vector<compiler::Layout>();
+std::vector<polyast::Layout> backend::CSource::resolveLayouts(const std::vector<StructDef> &defs, const polyast::OptLevel &opt) {
+  return std::vector<polyast::Layout>();
 }

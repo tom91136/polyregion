@@ -61,7 +61,7 @@ json TypeKind::fractional_to_json(const TypeKind::Fractional& x_) {
 
 TypeKind::Any TypeKind::any_from_json(const json& j_) { 
   size_t ord_ = j_.at(0).get<size_t>();
-  const auto t_ = j_.at(1);
+  const auto &t_ = j_.at(1);
   switch (ord_) {
   case 0: return TypeKind::none_from_json(t_);
   case 1: return TypeKind::ref_from_json(t_);
@@ -256,7 +256,7 @@ json Type::exec_to_json(const Type::Exec& x_) {
 
 Type::Any Type::any_from_json(const json& j_) { 
   size_t ord_ = j_.at(0).get<size_t>();
-  const auto t_ = j_.at(1);
+  const auto &t_ = j_.at(1);
   switch (ord_) {
   case 0: return Type::float16_from_json(t_);
   case 1: return Type::float32_from_json(t_);
@@ -473,7 +473,7 @@ json Term::bool1const_to_json(const Term::Bool1Const& x_) {
 
 Term::Any Term::any_from_json(const json& j_) { 
   size_t ord_ = j_.at(0).get<size_t>();
-  const auto t_ = j_.at(1);
+  const auto &t_ = j_.at(1);
   switch (ord_) {
   case 0: return Term::select_from_json(t_);
   case 1: return Term::poison_from_json(t_);
@@ -533,7 +533,7 @@ json TypeSpace::local_to_json(const TypeSpace::Local& x_) {
 
 TypeSpace::Any TypeSpace::any_from_json(const json& j_) { 
   size_t ord_ = j_.at(0).get<size_t>();
-  const auto t_ = j_.at(1);
+  const auto &t_ = j_.at(1);
   switch (ord_) {
   case 0: return TypeSpace::global_from_json(t_);
   case 1: return TypeSpace::local_from_json(t_);
@@ -682,7 +682,7 @@ json Spec::gpulocalsize_to_json(const Spec::GpuLocalSize& x_) {
 
 Spec::Any Spec::any_from_json(const json& j_) { 
   size_t ord_ = j_.at(0).get<size_t>();
-  const auto t_ = j_.at(1);
+  const auto &t_ = j_.at(1);
   switch (ord_) {
   case 0: return Spec::assert_from_json(t_);
   case 1: return Spec::gpubarrierglobal_from_json(t_);
@@ -1046,7 +1046,7 @@ json Intr::logicgt_to_json(const Intr::LogicGt& x_) {
 
 Intr::Any Intr::any_from_json(const json& j_) { 
   size_t ord_ = j_.at(0).get<size_t>();
-  const auto t_ = j_.at(1);
+  const auto &t_ = j_.at(1);
   switch (ord_) {
   case 0: return Intr::bnot_from_json(t_);
   case 1: return Intr::logicnot_from_json(t_);
@@ -1416,7 +1416,7 @@ json Math::hypot_to_json(const Math::Hypot& x_) {
 
 Math::Any Math::any_from_json(const json& j_) { 
   size_t ord_ = j_.at(0).get<size_t>();
-  const auto t_ = j_.at(1);
+  const auto &t_ = j_.at(1);
   switch (ord_) {
   case 0: return Math::abs_from_json(t_);
   case 1: return Math::sin_from_json(t_);
@@ -1601,7 +1601,7 @@ json Expr::invoke_to_json(const Expr::Invoke& x_) {
 
 Expr::Any Expr::any_from_json(const json& j_) { 
   size_t ord_ = j_.at(0).get<size_t>();
-  const auto t_ = j_.at(1);
+  const auto &t_ = j_.at(1);
   switch (ord_) {
   case 0: return Expr::specop_from_json(t_);
   case 1: return Expr::mathop_from_json(t_);
@@ -1762,7 +1762,7 @@ json Stmt::return_to_json(const Stmt::Return& x_) {
 
 Stmt::Any Stmt::any_from_json(const json& j_) { 
   size_t ord_ = j_.at(0).get<size_t>();
-  const auto t_ = j_.at(1);
+  const auto &t_ = j_.at(1);
   switch (ord_) {
   case 0: return Stmt::block_from_json(t_);
   case 1: return Stmt::comment_from_json(t_);
@@ -1906,7 +1906,7 @@ json FunctionKind::exported_to_json(const FunctionKind::Exported& x_) {
 
 FunctionKind::Any FunctionKind::any_from_json(const json& j_) { 
   size_t ord_ = j_.at(0).get<size_t>();
-  const auto t_ = j_.at(1);
+  const auto &t_ = j_.at(1);
   switch (ord_) {
   case 0: return FunctionKind::internal_from_json(t_);
   case 1: return FunctionKind::exported_from_json(t_);
@@ -1940,7 +1940,7 @@ json FunctionAttr::fpstrict_to_json(const FunctionAttr::FPStrict& x_) {
 
 FunctionAttr::Any FunctionAttr::any_from_json(const json& j_) { 
   size_t ord_ = j_.at(0).get<size_t>();
-  const auto t_ = j_.at(1);
+  const auto &t_ = j_.at(1);
   switch (ord_) {
   case 0: return FunctionAttr::fprelaxed_from_json(t_);
   case 1: return FunctionAttr::fpstrict_from_json(t_);
@@ -2023,16 +2023,89 @@ json program_to_json(const Program& x_) {
   std::transform(x_.defs.begin(), x_.defs.end(), std::back_inserter(defs), &structdef_to_json);
   return json::array({entry, functions, defs});
 }
+
+CompileLayoutMember compilelayoutmember_from_json(const json& j_) { 
+  auto name =  named_from_json(j_.at(0));
+  auto offsetInBytes = j_.at(1).get<int64_t>();
+  auto sizeInBytes = j_.at(2).get<int64_t>();
+  return {name, offsetInBytes, sizeInBytes};
+}
+
+json compilelayoutmember_to_json(const CompileLayoutMember& x_) { 
+  auto name =  named_to_json(x_.name);
+  auto offsetInBytes = x_.offsetInBytes;
+  auto sizeInBytes = x_.sizeInBytes;
+  return json::array({name, offsetInBytes, sizeInBytes});
+}
+
+CompileLayout compilelayout_from_json(const json& j_) { 
+  auto name =  sym_from_json(j_.at(0));
+  auto sizeInBytes = j_.at(1).get<int64_t>();
+  auto alignment = j_.at(2).get<int64_t>();
+  std::vector<CompileLayoutMember> members;
+  auto members_json = j_.at(3);
+  std::transform(members_json.begin(), members_json.end(), std::back_inserter(members), &compilelayoutmember_from_json);
+  return {name, sizeInBytes, alignment, members};
+}
+
+json compilelayout_to_json(const CompileLayout& x_) { 
+  auto name =  sym_to_json(x_.name);
+  auto sizeInBytes = x_.sizeInBytes;
+  auto alignment = x_.alignment;
+  std::vector<json> members;
+  std::transform(x_.members.begin(), x_.members.end(), std::back_inserter(members), &compilelayoutmember_to_json);
+  return json::array({name, sizeInBytes, alignment, members});
+}
+
+CompileEvent compileevent_from_json(const json& j_) { 
+  auto epochMillis = j_.at(0).get<int64_t>();
+  auto elapsedNanos = j_.at(1).get<int64_t>();
+  auto name = j_.at(2).get<std::string>();
+  auto data = j_.at(3).get<std::string>();
+  return {epochMillis, elapsedNanos, name, data};
+}
+
+json compileevent_to_json(const CompileEvent& x_) { 
+  auto epochMillis = x_.epochMillis;
+  auto elapsedNanos = x_.elapsedNanos;
+  auto name = x_.name;
+  auto data = x_.data;
+  return json::array({epochMillis, elapsedNanos, name, data});
+}
+
+CompileResult compileresult_from_json(const json& j_) { 
+  auto binary = j_.at(0).is_null() ? std::nullopt : std::make_optional(j_.at(0).get<std::vector<int8_t>>());
+  auto features = j_.at(1).get<std::vector<std::string>>();
+  std::vector<CompileEvent> events;
+  auto events_json = j_.at(2);
+  std::transform(events_json.begin(), events_json.end(), std::back_inserter(events), &compileevent_from_json);
+  std::vector<CompileLayout> layouts;
+  auto layouts_json = j_.at(3);
+  std::transform(layouts_json.begin(), layouts_json.end(), std::back_inserter(layouts), &compilelayout_from_json);
+  auto messages = j_.at(4).get<std::string>();
+  return {binary, features, events, layouts, messages};
+}
+
+json compileresult_to_json(const CompileResult& x_) { 
+  auto binary = x_.binary ? json{*x_.binary} : json{};
+  auto features = x_.features;
+  std::vector<json> events;
+  std::transform(x_.events.begin(), x_.events.end(), std::back_inserter(events), &compileevent_to_json);
+  std::vector<json> layouts;
+  std::transform(x_.layouts.begin(), x_.layouts.end(), std::back_inserter(layouts), &compilelayout_to_json);
+  auto messages = x_.messages;
+  return json::array({binary, features, events, layouts, messages});
+}
 json hashed_from_json(const json& j_) { 
   auto hash_ = j_.at(0).get<std::string>();
   auto data_ = j_.at(1);
-  if(hash_ != "3d96e3dbaa0419695b477d5cd70fe13c") {
-   throw std::runtime_error("Expecting ADT hash to be 3d96e3dbaa0419695b477d5cd70fe13c, but was " + hash_);
+  if(hash_ != "f8459e30cff69a28d6f348d836efd1c4") {
+   throw std::runtime_error("Expecting ADT hash to be f8459e30cff69a28d6f348d836efd1c4, but was " + hash_);
   }
   return data_;
 }
 
 json hashed_to_json(const json& x_) { 
-  return json::array({"3d96e3dbaa0419695b477d5cd70fe13c", x_});
+  return json::array({"f8459e30cff69a28d6f348d836efd1c4", x_});
 }
 } // namespace polyregion::polyast

@@ -9,6 +9,7 @@
 
 namespace polyregion::polyast {
 
+using Bytes = std::vector<char>;
 template <typename T> using Opt = std::optional<T>;
 template <typename T, typename U> using Pair = std::pair<T, U>;
 template <typename T, typename U> using Map = std::unordered_map<T, U>;
@@ -32,6 +33,56 @@ Named head(const Term::Select &);
 std::vector<Named> tail(const Term::Select &);
 
 std::pair<Named, std::vector<Named>> uncons(const Term::Select &);
+
+enum class Target : uint8_t {
+  Object_LLVM_HOST = 10,
+  Object_LLVM_x86_64,
+  Object_LLVM_AArch64,
+  Object_LLVM_ARM,
+
+  Object_LLVM_NVPTX64 = 20,
+  Object_LLVM_AMDGCN,
+  Object_LLVM_SPIRV32,
+  Object_LLVM_SPIRV64,
+
+  Source_C_C11 = 30,
+  Source_C_OpenCL1_1,
+  Source_C_Metal1_0,
+};
+
+enum class OptLevel : uint8_t {
+  O0 = 10,
+  O1,
+  O2,
+  O3,
+  Ofast,
+};
+
+std::optional<Target> targetFromOrdinal(std::underlying_type_t<Target> ordinal);
+
+std::optional<OptLevel> optFromOrdinal(std::underlying_type_t<OptLevel> ordinal);
+
+using Member = CompileLayoutMember;
+using Layout = CompileLayout;
+using Event = CompileEvent;
+using Compilation = CompileResult;
+
+// struct Compilation {
+//   std::vector<Layout> layouts;
+//   std::optional<Bytes> binary;
+//   std::vector<std::string> features;
+//   std::vector<Event> events;
+//   std::string messages;
+//   Compilation() = default;
+//   explicit Compilation(decltype(messages) messages) : messages(std::move(messages)) {}
+//   Compilation(decltype(binary) binary,     //
+//               decltype(features) features, //
+//               decltype(events) events,     //
+//               decltype(messages) messages = "")
+//       : binary(std::move(binary)), features(std::move(features)), events(std::move(events)), messages(std::move(messages)) {}
+// };
+
+std::string repr(const polyast::Compilation &);
 
 namespace dsl {
 

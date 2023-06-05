@@ -14,20 +14,20 @@ using namespace polyregion;
 using namespace polyast::dsl;
 using namespace polyast::Intr;
 
-static std::unordered_map<std::string, compiler::Target> table = {
-    {"host", compiler::Target::Object_LLVM_HOST},
-    {"x86_64", compiler::Target::Object_LLVM_x86_64},
-    {"aarch64", compiler::Target::Object_LLVM_AArch64},
-    {"arm", compiler::Target::Object_LLVM_ARM},
+static std::unordered_map<std::string, polyast::Target> table = {
+    {"host", polyast::Target::Object_LLVM_HOST},
+    {"x86_64", polyast::Target::Object_LLVM_x86_64},
+    {"aarch64", polyast::Target::Object_LLVM_AArch64},
+    {"arm", polyast::Target::Object_LLVM_ARM},
 
-    {"nvptx64", compiler::Target::Object_LLVM_NVPTX64},
-    {"amdgcn", compiler::Target::Object_LLVM_AMDGCN},
-    {"spirv32", compiler::Target::Object_LLVM_SPIRV32},
-    {"spirv64", compiler::Target::Object_LLVM_SPIRV64},
+    {"nvptx64", polyast::Target::Object_LLVM_NVPTX64},
+    {"amdgcn", polyast::Target::Object_LLVM_AMDGCN},
+    {"spirv32", polyast::Target::Object_LLVM_SPIRV32},
+    {"spirv64", polyast::Target::Object_LLVM_SPIRV64},
 
-    {"c11", compiler::Target::Source_C_C11},
-    {"opencl1_1", compiler::Target::Source_C_OpenCL1_1},
-    {"metal1_0", compiler::Target::Source_C_Metal1_0},
+    {"c11", polyast::Target::Source_C_C11},
+    {"opencl1_1", polyast::Target::Source_C_OpenCL1_1},
+    {"metal1_0", polyast::Target::Source_C_Metal1_0},
 };
 
 // See https://stackoverflow.com/a/39758021/896997
@@ -62,7 +62,7 @@ int fired_main(fire::optional<std::string> maybePath = fire::arg({0, "<source>",
 
     auto program = polyast::program_from_json(raw);
 
-    auto compilation = compiler::compile(program, compiler::Options{compiler::Target::Object_LLVM_SPIRV64, ""}, compiler::Opt::O3);
+    auto compilation = compiler::compile(program, compiler::Options{polyast::Target::Object_LLVM_SPIRV64, ""}, polyast::OptLevel::O3);
 
     if (verbose) {
       std::cerr << compilation << std::endl;
@@ -76,7 +76,7 @@ int fired_main(fire::optional<std::string> maybePath = fire::arg({0, "<source>",
         std::fwrite(compilation.binary->data(), compilation.binary->size(), sizeof(std::byte), stdout);
       } else {
         std::ofstream outStream(out, std::ios_base::binary | std::ios_base::out | std::ios_base::app);
-        outStream.write(compilation.binary->data(), compilation.binary->size());
+        outStream.write(reinterpret_cast<const char *>(compilation.binary->data()), compilation.binary->size());
       }
     }
 

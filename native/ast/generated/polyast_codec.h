@@ -291,6 +291,14 @@ namespace Term {
 [[nodiscard]] POLYREGION_EXPORT json function_to_json(const Function &);
 [[nodiscard]] POLYREGION_EXPORT Program program_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json program_to_json(const Program &);
+[[nodiscard]] POLYREGION_EXPORT CompileLayoutMember compilelayoutmember_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json compilelayoutmember_to_json(const CompileLayoutMember &);
+[[nodiscard]] POLYREGION_EXPORT CompileLayout compilelayout_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json compilelayout_to_json(const CompileLayout &);
+[[nodiscard]] POLYREGION_EXPORT CompileEvent compileevent_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json compileevent_to_json(const CompileEvent &);
+[[nodiscard]] POLYREGION_EXPORT CompileResult compileresult_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json compileresult_to_json(const CompileResult &);
 namespace FunctionKind { 
 [[nodiscard]] POLYREGION_EXPORT FunctionKind::Internal internal_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json internal_to_json(const FunctionKind::Internal &);

@@ -241,12 +241,12 @@ public:
 
                        auto p = Program(f0, fns, structDefs);
 
-                       polyregion::compiler::initialise();
-                       auto result = polyregion::compiler::compile(
-                           p, polyregion::compiler::Options{polyregion::compiler::Target::Object_LLVM_x86_64, "native"},
-                           polyregion::compiler::Opt::O3);
 
-                       std::cout << result << std::endl;
+
+
+                        // TODO invoke
+
+//                       std::cout << result << std::endl;
 
                      },
                  },

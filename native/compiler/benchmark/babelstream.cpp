@@ -213,7 +213,7 @@ int main() {
       {runtime::Backend::RELOCATABLE_OBJ, compiler::Target::Object_LLVM_AArch64, "apple-m1"},
       {runtime::Backend::Metal, compiler::Target::Source_C_Metal1_0, ""},
 #else
-//      {runtime::Backend::CUDA, compiler::Target::Object_LLVM_NVPTX64, "sm_60"},
+      {runtime::Backend::CUDA, compiler::Target::Object_LLVM_NVPTX64, "sm_80"},
 //            {runtime::Backend::HIP, compiler::Target::Object_LLVM_AMDGCN, "gfx1012"},
 //      {runtime::Backend::RELOCATABLE_OBJ, compiler::Target::Object_LLVM_x86_64, "x86-64-v3"},
 #endif

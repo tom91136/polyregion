@@ -234,11 +234,11 @@ static void optimise(llvm::TargetMachine &TM, llvm::Module &M, llvm::Optimizatio
   }
 }
 
-compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compiler::Opt &opt, bool emitDisassembly,
-                                           std::unique_ptr<llvm::Module> M) {
+polyast::Compilation llvmc::compileModule(const TargetInfo &info, const polyast::OptLevel &opt, bool emitDisassembly,
+                                          std::unique_ptr<llvm::Module> M) {
   auto start = compiler::nowMono();
 
-  auto useUnsafeMath = opt == compiler::Opt::Ofast;
+  auto useUnsafeMath = opt == polyast::OptLevel::Ofast;
   llvm::TargetOptions options;
   options.AllowFPOpFusion = useUnsafeMath ? llvm::FPOpFusion::Fast : llvm::FPOpFusion::Standard;
   options.UnsafeFPMath = useUnsafeMath;
@@ -249,11 +249,11 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
 
   llvm::CodeGenOpt::Level genOpt;
   switch (opt) {
-    case compiler::Opt::O0: genOpt = llvm::CodeGenOpt::None; break;
-    case compiler::Opt::O1: genOpt = llvm::CodeGenOpt::Less; break;
-    case compiler::Opt::O2: genOpt = llvm::CodeGenOpt::Default; break;
-    case compiler::Opt::O3: // fallthrough
-    case compiler::Opt::Ofast: genOpt = llvm::CodeGenOpt::Aggressive; break;
+    case polyast::OptLevel::O0: genOpt = llvm::CodeGenOpt::None; break;
+    case polyast::OptLevel::O1: genOpt = llvm::CodeGenOpt::Less; break;
+    case polyast::OptLevel::O2: genOpt = llvm::CodeGenOpt::Default; break;
+    case polyast::OptLevel::O3: // fallthrough
+    case polyast::OptLevel::Ofast: genOpt = llvm::CodeGenOpt::Aggressive; break;
   }
 
   // We have two groups of targets:
@@ -269,11 +269,11 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
 
   llvm::OptimizationLevel optLevel;
   switch (opt) {
-    case compiler::Opt::O0: optLevel = llvm::OptimizationLevel::O0; break;
-    case compiler::Opt::O1: optLevel = llvm::OptimizationLevel::O1; break;
-    case compiler::Opt::O2: optLevel = llvm::OptimizationLevel::O2; break;
-    case compiler::Opt::O3: // fallthrough
-    case compiler::Opt::Ofast: optLevel = llvm::OptimizationLevel::O3; break;
+    case polyast::OptLevel::O0: optLevel = llvm::OptimizationLevel::O0; break;
+    case polyast::OptLevel::O1: optLevel = llvm::OptimizationLevel::O1; break;
+    case polyast::OptLevel::O2: optLevel = llvm::OptimizationLevel::O2; break;
+    case polyast::OptLevel::O3: // fallthrough
+    case polyast::OptLevel::Ofast: optLevel = llvm::OptimizationLevel::O3; break;
   }
 
   auto mkLLVMTargetMachine = [](const TargetInfo &info, const llvm::TargetOptions &options, const llvm::CodeGenOpt::Level &level) {
@@ -297,7 +297,7 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
   auto mkLLVMTargetMachineArtefact = [&](llvm::LLVMTargetMachine &TM,                     //
                                          const std::optional<llvm::CodeGenFileType> &tpe, //
                                          const llvm::Module &m0,                          //
-                                         std::vector<compiler::Event> &events, bool emplaceEvent) {
+                                         std::vector<polyast::Event> &events, bool emplaceEvent) {
     auto m = llvm::CloneModule(m0);
     auto optPassStart = compiler::nowMono();
 
@@ -337,7 +337,7 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
     return std::to_string(static_cast<float>(xs.size_in_bytes()) / 1024) + "KiB";
   };
 
-  std::vector<compiler::Event> events;
+  std::vector<polyast::Event> events;
 
   switch (info.triple.getOS()) {
     case llvm::Triple::AMDHSA: {
@@ -361,9 +361,9 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
       auto linkerElapsed = compiler::elapsedNs(linkerStart);
       events.emplace_back(compiler::nowMs(), linkerElapsed, "lld_link_amdgpu", "");
       if (!result) { // linker failed
-        return {{}, {info.cpu.uArch}, events, "Linker did not complete normally: " + err.value_or("(no message reported)")};
+        return {{}, {info.cpu.uArch}, events, {}, "Linker did not complete normally: " + err.value_or("(no message reported)")};
       } else { // linker succeeded, still report any stdout to as message
-        return {std::vector<char>(result->begin(), result->end()), {info.cpu.uArch}, events, err.value_or("")};
+        return {std::vector<int8_t>(result->begin(), result->end()), {info.cpu.uArch}, events, {}, err.value_or("")};
       }
     }
     case llvm::Triple::CUDA: {
@@ -375,7 +375,7 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
       auto [_, ptx, ptxStart, ptxElapsed] = //
           mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::CGFT_AssemblyFile, *M, events, true);
       events.emplace_back(ptxStart, ptxElapsed, "llvm_to_ptx", std::string(ptx.begin(), ptx.end()));
-      return {std::vector<char>(ptx.begin(), ptx.end()), {info.cpu.uArch}, events};
+      return {std::vector<int8_t>(ptx.begin(), ptx.end()), {info.cpu.uArch}, events, {}, ""};
     }
     default:
       switch (info.triple.getArch()) {
@@ -390,7 +390,7 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
 
           llvm::SmallVector<char, 0> objBuffer;
           llvm::raw_svector_ostream objStream(objBuffer);
-          clspv::RunPassPipeline(*M, '1', &objStream);
+          clspv::RunPassPipeline(*M, '3', &objStream);
 
           events.emplace_back(compiler::nowMs(), compiler::elapsedNs(clspvStart), "clspv", module2Ir(*M));
 
@@ -406,13 +406,13 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
 
           spvtools::Optimizer optimizer(SPV_ENV_VULKAN_1_1);
           optimizer.RegisterPass(spvtools::CreateStripNonSemanticInfoPass());
-          //          optimizer.RegisterPerformancePasses();
+          optimizer.RegisterPerformancePasses();
           std::vector<uint32_t> nonSemanticSpv;
           optimizer.Run(spvRaw.data(), spvRaw.size(), &nonSemanticSpv);
 
-//          std::ofstream fileS("foo.spv", std::ios::binary);
-//          fileS.write(reinterpret_cast<const char *>(nonSemanticSpv.data()), nonSemanticSpv.size() * sizeof(uint32_t));
-//          fileS.close();
+          //          std::ofstream fileS("foo.spv", std::ios::binary);
+          //          fileS.write(reinterpret_cast<const char *>(nonSemanticSpv.data()), nonSemanticSpv.size() * sizeof(uint32_t));
+          //          fileS.close();
 
           //        spvtools::SpirvTools tools(SPV_ENV_UNIVERSAL_1_5);
           //        std::string out;
@@ -456,10 +456,10 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
           //                            "(" + std::to_string(spirvBin.size()) + " bytes)");
           //        std::vector<char> binary(spirvBin.begin(), spirvBin.end());
 
-          std::vector<char> convertedSpv(nonSemanticSpv.size() * sizeof(uint32_t));
+          std::vector<int8_t> convertedSpv(nonSemanticSpv.size() * sizeof(uint32_t));
           std::memcpy(convertedSpv.data(), nonSemanticSpv.data(), convertedSpv.size());
 
-          return {convertedSpv, {info.cpu.uArch}, events, ""};
+          return {convertedSpv, {info.cpu.uArch}, events, {}, ""};
         }
         default: {
 
@@ -472,13 +472,13 @@ compiler::Compilation llvmc::compileModule(const TargetInfo &info, const compile
               mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::CGFT_ObjectFile, *M, events, true);
           events.emplace_back(objectStart, objectElapsed, "llvm_to_obj", objectSize(object));
 
-          std::vector<char> binary(object.begin(), object.end());
+          std::vector<int8_t> binary(object.begin(), object.end());
           if (emitDisassembly) {
             auto [_, assembly, assemblyStart, assemblyElapsed] =
                 mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::CGFT_AssemblyFile, *M, events, false);
             events.emplace_back(assemblyStart, assemblyElapsed, "llvm_to_asm", std::string(assembly.begin(), assembly.end()));
           }
-          return {binary, features, events};
+          return {binary, features, events, {}, ""};
         }
       }
   }

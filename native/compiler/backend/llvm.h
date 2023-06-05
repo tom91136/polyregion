@@ -125,13 +125,13 @@ public:
     Pair<Opt<std::string>, std::string> transform(llvm::Module &mod, const Program &program);
   };
 
-  [[nodiscard]] std::vector<compiler::Layout> resolveLayouts(const std::vector<StructDef> &defs, const AstTransformer &xform) const;
+  [[nodiscard]] std::vector<polyast::Layout> resolveLayouts(const std::vector<StructDef> &defs, const AstTransformer &xform) const;
 
 public:
   Options options;
   explicit LLVMBackend(Options options) : options(std::move(options)){};
-  [[nodiscard]] std::vector<compiler::Layout> resolveLayouts(const std::vector<StructDef> &defs, const compiler::Opt &opt) override;
-  [[nodiscard]] compiler::Compilation compileProgram(const Program &, const compiler::Opt &opt) override;
+  [[nodiscard]] std::vector<polyast::Layout> resolveLayouts(const std::vector<StructDef> &defs, const polyast::OptLevel &opt) override;
+  [[nodiscard]] polyast::Compilation compileProgram(const Program &, const polyast::OptLevel &opt) override;
 };
 
 } // namespace polyregion::backend

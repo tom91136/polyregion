@@ -1,7 +1,9 @@
 package polyregion.ast
 
+import scala.reflect.ClassTag
 import scala.compiletime.{constValue, erasedValue, summonInline}
 import scala.deriving.Mirror
+import scala.collection.immutable.ArraySeq
 
 object MsgPack {
 
@@ -35,6 +37,9 @@ object MsgPack {
   )
   given [A](using C: Codec[A]): Codec[List[A]] =
     Codec(xs => upack.Arr(xs.map(C.encode(_))*), _.arr.map(m => C.decode(m)).toList)
+
+  given [A : ClassTag](using C: Codec[A]): Codec[ArraySeq[A]] =
+    Codec(xs => upack.Arr(xs.map(C.encode(_))*), _.arr.map(m => C.decode(m)).to(ArraySeq))
 
   given [A, B](using C: Codec[(A, B)]): Codec[Map[A, B]] =
     Codec(

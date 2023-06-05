@@ -1535,6 +1535,46 @@ struct POLYREGION_EXPORT Program {
   POLYREGION_EXPORT friend bool operator==(const Program &, const Program &);
 };
 
+struct POLYREGION_EXPORT CompileLayoutMember {
+  Named name;
+  int64_t offsetInBytes;
+  int64_t sizeInBytes;
+  CompileLayoutMember(Named name, int64_t offsetInBytes, int64_t sizeInBytes) noexcept;
+  POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const CompileLayoutMember &);
+  POLYREGION_EXPORT friend bool operator==(const CompileLayoutMember &, const CompileLayoutMember &);
+};
+
+struct POLYREGION_EXPORT CompileLayout {
+  Sym name;
+  int64_t sizeInBytes;
+  int64_t alignment;
+  std::vector<CompileLayoutMember> members;
+  CompileLayout(Sym name, int64_t sizeInBytes, int64_t alignment, std::vector<CompileLayoutMember> members) noexcept;
+  POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const CompileLayout &);
+  POLYREGION_EXPORT friend bool operator==(const CompileLayout &, const CompileLayout &);
+};
+
+struct POLYREGION_EXPORT CompileEvent {
+  int64_t epochMillis;
+  int64_t elapsedNanos;
+  std::string name;
+  std::string data;
+  CompileEvent(int64_t epochMillis, int64_t elapsedNanos, std::string name, std::string data) noexcept;
+  POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const CompileEvent &);
+  POLYREGION_EXPORT friend bool operator==(const CompileEvent &, const CompileEvent &);
+};
+
+struct POLYREGION_EXPORT CompileResult {
+  std::optional<std::vector<int8_t>> binary;
+  std::vector<std::string> features;
+  std::vector<CompileEvent> events;
+  std::vector<CompileLayout> layouts;
+  std::string messages;
+  CompileResult(std::optional<std::vector<int8_t>> binary, std::vector<std::string> features, std::vector<CompileEvent> events, std::vector<CompileLayout> layouts, std::string messages) noexcept;
+  POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const CompileResult &);
+  POLYREGION_EXPORT friend bool operator==(const CompileResult &, const CompileResult &);
+};
+
 } // namespace polyregion::polyast
 #ifndef _MSC_VER
   #pragma clang diagnostic pop // ide google-explicit-constructor
@@ -1964,6 +2004,18 @@ template <> struct std::hash<polyregion::polyast::Function> {
 };
 template <> struct std::hash<polyregion::polyast::Program> {
   std::size_t operator()(const polyregion::polyast::Program &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::CompileLayoutMember> {
+  std::size_t operator()(const polyregion::polyast::CompileLayoutMember &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::CompileLayout> {
+  std::size_t operator()(const polyregion::polyast::CompileLayout &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::CompileEvent> {
+  std::size_t operator()(const polyregion::polyast::CompileEvent &) const noexcept;
+};
+template <> struct std::hash<polyregion::polyast::CompileResult> {
+  std::size_t operator()(const polyregion::polyast::CompileResult &) const noexcept;
 };
 
 }

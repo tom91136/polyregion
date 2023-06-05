@@ -56,9 +56,9 @@ private[polyregion] object CppStructGen {
         case ((ns, implStmts, forwardDeclStmts), cls) =>
           val moreImplStmts = "" ::
             s"struct POLYREGION_EXPORT ${cls.parent.fold(cls.name)(s"${cls.name} : " + _)} {" //
-            :: cls.stmts.map("  " + _) :::                                         //
-            "};" ::                                                                //
-            cls.nsDeclStmts                                                        //
+            :: cls.stmts.map("  " + _) :::                                                    //
+            "};" ::                                                                           //
+            cls.nsDeclStmts                                                                   //
           val nsName = cls.namespaces.mkString("::")
           ns match {
             case None =>
@@ -463,7 +463,7 @@ private[polyregion] object CppStructGen {
         streamOp = (s, v) => s"""$s << '"' << $v << '"';""" :: Nil,
         include = List("string")
       )
-    given [A: ToCppType]: ToCppType[List[A]] = { () =>
+    given [A: ToCppType, C[_] <: scala.collection.Seq[_]]: ToCppType[C[A]] = { () =>
       val tpe = summon[ToCppType[A]]()
       CppType(
         "std" :: Nil,
@@ -475,6 +475,7 @@ private[polyregion] object CppStructGen {
           List(
             s"$s << '{';",
             s"if (!$v.empty()) {",
+            // s"  for (auto &&x_ : $v) { ${tpe.streamOp(s, "x_").mkString(";")} $s << ','; }",
             s"  std::for_each($v.begin(), std::prev($v.end()), [&$s](auto &&x) { ${tpe.streamOp(s, "x").mkString(";")} $s << ','; });",
             s"  ${tpe.streamOp(s, s"$v.back()").mkString(";")}",
             s"}",
@@ -496,7 +497,7 @@ private[polyregion] object CppStructGen {
           List(
             s"$s << '{';",
             s"if ($v) {",
-            s"  ${tpe.streamOp(s, s"*$v").mkString(";")}",
+            s"${tpe.streamOp(s, s"(*$v)").map("  " + _).mkString("\n")}",
             s"}",
             s"$s << '}';"
           )

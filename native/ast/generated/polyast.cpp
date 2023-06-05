@@ -304,7 +304,7 @@ std::ostream &operator<<(std::ostream &os, const SourcePosition &x) {
   os << ',';
   os << '{';
   if (x.col) {
-    os << *x.col;
+    os << (*x.col);
   }
   os << '}';
   os << ')';
@@ -1547,7 +1547,7 @@ std::ostream &Expr::operator<<(std::ostream &os, const Expr::RefTo &x) {
   os << ',';
   os << '{';
   if (x.idx) {
-    os << *x.idx;
+    os << (*x.idx);
   }
   os << '}';
   os << ',';
@@ -1588,7 +1588,7 @@ std::ostream &Expr::operator<<(std::ostream &os, const Expr::Invoke &x) {
   os << ',';
   os << '{';
   if (x.receiver) {
-    os << *x.receiver;
+    os << (*x.receiver);
   }
   os << '}';
   os << ',';
@@ -1658,7 +1658,7 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Var &x) {
   os << ',';
   os << '{';
   if (x.expr) {
-    os << *x.expr;
+    os << (*x.expr);
   }
   os << '}';
   os << ')';
@@ -1842,7 +1842,7 @@ std::ostream &operator<<(std::ostream &os, const Signature &x) {
   os << ',';
   os << '{';
   if (x.receiver) {
-    os << *x.receiver;
+    os << (*x.receiver);
   }
   os << '}';
   os << ',';
@@ -1889,7 +1889,7 @@ std::ostream &operator<<(std::ostream &os, const InvokeSignature &x) {
   os << ',';
   os << '{';
   if (x.receiver) {
-    os << *x.receiver;
+    os << (*x.receiver);
   }
   os << '}';
   os << ',';
@@ -1972,7 +1972,7 @@ std::ostream &operator<<(std::ostream &os, const Arg &x) {
   os << ',';
   os << '{';
   if (x.pos) {
-    os << *x.pos;
+    os << (*x.pos);
   }
   os << '}';
   os << ')';
@@ -1996,7 +1996,7 @@ std::ostream &operator<<(std::ostream &os, const Function &x) {
   os << ',';
   os << '{';
   if (x.receiver) {
-    os << *x.receiver;
+    os << (*x.receiver);
   }
   os << '}';
   os << ',';
@@ -2059,6 +2059,103 @@ std::ostream &operator<<(std::ostream &os, const Program &x) {
 }
 bool operator==(const Program &l, const Program &r) { 
   return l.entry == r.entry && l.functions == r.functions && l.defs == r.defs;
+}
+
+CompileLayoutMember::CompileLayoutMember(Named name, int64_t offsetInBytes, int64_t sizeInBytes) noexcept : name(std::move(name)), offsetInBytes(offsetInBytes), sizeInBytes(sizeInBytes) {}
+std::ostream &operator<<(std::ostream &os, const CompileLayoutMember &x) {
+  os << "CompileLayoutMember(";
+  os << x.name;
+  os << ',';
+  os << x.offsetInBytes;
+  os << ',';
+  os << x.sizeInBytes;
+  os << ')';
+  return os;
+}
+bool operator==(const CompileLayoutMember &l, const CompileLayoutMember &r) { 
+  return l.name == r.name && l.offsetInBytes == r.offsetInBytes && l.sizeInBytes == r.sizeInBytes;
+}
+
+CompileLayout::CompileLayout(Sym name, int64_t sizeInBytes, int64_t alignment, std::vector<CompileLayoutMember> members) noexcept : name(std::move(name)), sizeInBytes(sizeInBytes), alignment(alignment), members(std::move(members)) {}
+std::ostream &operator<<(std::ostream &os, const CompileLayout &x) {
+  os << "CompileLayout(";
+  os << x.name;
+  os << ',';
+  os << x.sizeInBytes;
+  os << ',';
+  os << x.alignment;
+  os << ',';
+  os << '{';
+  if (!x.members.empty()) {
+    std::for_each(x.members.begin(), std::prev(x.members.end()), [&os](auto &&x) { os << x; os << ','; });
+    os << x.members.back();
+  }
+  os << '}';
+  os << ')';
+  return os;
+}
+bool operator==(const CompileLayout &l, const CompileLayout &r) { 
+  return l.name == r.name && l.sizeInBytes == r.sizeInBytes && l.alignment == r.alignment && l.members == r.members;
+}
+
+CompileEvent::CompileEvent(int64_t epochMillis, int64_t elapsedNanos, std::string name, std::string data) noexcept : epochMillis(epochMillis), elapsedNanos(elapsedNanos), name(std::move(name)), data(std::move(data)) {}
+std::ostream &operator<<(std::ostream &os, const CompileEvent &x) {
+  os << "CompileEvent(";
+  os << x.epochMillis;
+  os << ',';
+  os << x.elapsedNanos;
+  os << ',';
+  os << '"' << x.name << '"';
+  os << ',';
+  os << '"' << x.data << '"';
+  os << ')';
+  return os;
+}
+bool operator==(const CompileEvent &l, const CompileEvent &r) { 
+  return l.epochMillis == r.epochMillis && l.elapsedNanos == r.elapsedNanos && l.name == r.name && l.data == r.data;
+}
+
+CompileResult::CompileResult(std::optional<std::vector<int8_t>> binary, std::vector<std::string> features, std::vector<CompileEvent> events, std::vector<CompileLayout> layouts, std::string messages) noexcept : binary(std::move(binary)), features(std::move(features)), events(std::move(events)), layouts(std::move(layouts)), messages(std::move(messages)) {}
+std::ostream &operator<<(std::ostream &os, const CompileResult &x) {
+  os << "CompileResult(";
+  os << '{';
+  if (x.binary) {
+    os << '{';
+  if (!(*x.binary).empty()) {
+    std::for_each((*x.binary).begin(), std::prev((*x.binary).end()), [&os](auto &&x) { os << x; os << ','; });
+    os << (*x.binary).back();
+  }
+  os << '}';
+  }
+  os << '}';
+  os << ',';
+  os << '{';
+  if (!x.features.empty()) {
+    std::for_each(x.features.begin(), std::prev(x.features.end()), [&os](auto &&x) { os << '"' << x << '"'; os << ','; });
+    os << '"' << x.features.back() << '"';
+  }
+  os << '}';
+  os << ',';
+  os << '{';
+  if (!x.events.empty()) {
+    std::for_each(x.events.begin(), std::prev(x.events.end()), [&os](auto &&x) { os << x; os << ','; });
+    os << x.events.back();
+  }
+  os << '}';
+  os << ',';
+  os << '{';
+  if (!x.layouts.empty()) {
+    std::for_each(x.layouts.begin(), std::prev(x.layouts.end()), [&os](auto &&x) { os << x; os << ','; });
+    os << x.layouts.back();
+  }
+  os << '}';
+  os << ',';
+  os << '"' << x.messages << '"';
+  os << ')';
+  return os;
+}
+bool operator==(const CompileResult &l, const CompileResult &r) { 
+  return l.binary == r.binary && l.features == r.features && l.events == r.events && l.layouts == r.layouts && l.messages == r.messages;
 }
 
 } // namespace polyregion::polyast
@@ -2727,6 +2824,34 @@ std::size_t std::hash<polyregion::polyast::Program>::operator()(const polyregion
   std::size_t seed = std::hash<decltype(x.entry)>()(x.entry);
   seed ^= std::hash<decltype(x.functions)>()(x.functions) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.defs)>()(x.defs) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::CompileLayoutMember>::operator()(const polyregion::polyast::CompileLayoutMember &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.name)>()(x.name);
+  seed ^= std::hash<decltype(x.offsetInBytes)>()(x.offsetInBytes) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.sizeInBytes)>()(x.sizeInBytes) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::CompileLayout>::operator()(const polyregion::polyast::CompileLayout &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.name)>()(x.name);
+  seed ^= std::hash<decltype(x.sizeInBytes)>()(x.sizeInBytes) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.alignment)>()(x.alignment) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.members)>()(x.members) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::CompileEvent>::operator()(const polyregion::polyast::CompileEvent &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.epochMillis)>()(x.epochMillis);
+  seed ^= std::hash<decltype(x.elapsedNanos)>()(x.elapsedNanos) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.name)>()(x.name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.data)>()(x.data) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+std::size_t std::hash<polyregion::polyast::CompileResult>::operator()(const polyregion::polyast::CompileResult &x) const noexcept {
+  std::size_t seed = std::hash<decltype(x.binary)>()(x.binary);
+  seed ^= std::hash<decltype(x.features)>()(x.features) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.events)>()(x.events) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.layouts)>()(x.layouts) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(x.messages)>()(x.messages) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
 

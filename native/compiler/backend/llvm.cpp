@@ -1152,8 +1152,8 @@ llvmc::TargetInfo LLVMBackend::Options::targetInfo() const {
   }
 }
 
-std::vector<compiler::Layout> LLVMBackend::resolveLayouts(const std::vector<StructDef> &defs,
-                                                          const backend::LLVMBackend::AstTransformer &xform) const {
+std::vector<polyast::Layout> LLVMBackend::resolveLayouts(const std::vector<StructDef> &defs,
+                                                         const backend::LLVMBackend::AstTransformer &xform) const {
 
   auto dataLayout = options.targetInfo().resolveDataLayout();
 
@@ -1161,11 +1161,11 @@ std::vector<compiler::Layout> LLVMBackend::resolveLayouts(const std::vector<Stru
   for (auto &d : defs)
     lut.emplace(d.name, d);
 
-  std::vector<compiler::Layout> layouts;
+  std::vector<polyast::Layout> layouts;
   for (auto &[sym, structTy] : xform.getStructTypes()) {
     if (auto it = lut.find(sym); it != lut.end()) {
       auto layout = dataLayout.getStructLayout(structTy);
-      std::vector<compiler::Member> members;
+      std::vector<polyast::Member> members;
       for (size_t i = 0; i < it->second.members.size(); ++i) {
         members.emplace_back(it->second.members[i].named,                             //
                              layout->getElementOffset(i),                             //
@@ -1179,14 +1179,14 @@ std::vector<compiler::Layout> LLVMBackend::resolveLayouts(const std::vector<Stru
   return layouts;
 }
 
-std::vector<compiler::Layout> LLVMBackend::resolveLayouts(const std::vector<StructDef> &defs, const compiler::Opt &opt) {
+std::vector<polyast::Layout> LLVMBackend::resolveLayouts(const std::vector<StructDef> &defs, const polyast::OptLevel &opt) {
   llvm::LLVMContext ctx;
   backend::LLVMBackend::AstTransformer xform(options, ctx);
   xform.addDefs(defs);
   return resolveLayouts(defs, xform);
 }
 
-compiler::Compilation backend::LLVMBackend::compileProgram(const Program &program, const compiler::Opt &opt) {
+polyast::Compilation backend::LLVMBackend::compileProgram(const Program &program, const polyast::OptLevel &opt) {
   using namespace llvm;
 
   llvm::LLVMContext ctx;
@@ -1200,11 +1200,11 @@ compiler::Compilation backend::LLVMBackend::compileProgram(const Program &progra
 
   auto transformStart = compiler::nowMono();
   auto [maybeTransformErr, transformMsg] = xform.transform(*mod, program);
-  compiler::Event ast2IR(compiler::nowMs(), compiler::elapsedNs(transformStart), "ast_to_llvm_ir", transformMsg);
+  polyast::Event ast2IR(compiler::nowMs(), compiler::elapsedNs(transformStart), "ast_to_llvm_ir", transformMsg);
 
   auto verifyStart = compiler::nowMono();
   auto [maybeVerifyErr, verifyMsg] = llvmc::verifyModule(*mod);
-  compiler::Event astOpt(compiler::nowMs(), compiler::elapsedNs(verifyStart), "llvm_ir_verify", verifyMsg);
+  polyast::Event astOpt(compiler::nowMs(), compiler::elapsedNs(verifyStart), "llvm_ir_verify", verifyMsg);
 
   if (maybeTransformErr || maybeVerifyErr) {
     std::vector<std::string> errors;
@@ -1213,6 +1213,7 @@ compiler::Compilation backend::LLVMBackend::compileProgram(const Program &progra
     return {{},
             {},               //
             {ast2IR, astOpt}, //
+            {},               //
             mk_string<std::string>(
                 errors, [](auto &&x) { return x; }, "\n")};
   }
