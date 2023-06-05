@@ -20,6 +20,13 @@ ProcessorCount(NPROC)
 project(polyregion-native)
 
 FetchContent_Declare(
+        fire
+        URL https://raw.githubusercontent.com/kongaskristjan/fire-hpp/c31b9d6593ee4edfdf9df875d006e26d9a8df879/include/fire-hpp/fire.hpp
+        URL_HASH SHA256=f9b82674d0c0a7322043fe837bce895d5798d18585f0e4b1ff105418a8a9e2f8
+        DOWNLOAD_NO_EXTRACT YES
+)
+
+FetchContent_Declare(
         json
         URL https://github.com/nlohmann/json/releases/download/v3.11.2/json.hpp
         URL_HASH SHA256=665fa14b8af3837966949e8eb0052d583e2ac105d3438baba9951785512cf921
@@ -203,6 +210,7 @@ find_package(LLD REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
 message(STATUS "Using LLVM: ${LLVM_PACKAGE_VERSION} tools")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
+FetchContent_MakeAvailable(fire)
 FetchContent_MakeAvailable(json)
 FetchContent_MakeAvailable(VulkanMemoryAllocator)
 

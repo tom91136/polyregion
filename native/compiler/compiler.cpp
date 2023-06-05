@@ -101,7 +101,6 @@ std::ostream &compiler::operator<<(std::ostream &os, const compiler::Layout &lay
 void compiler::initialise() {
   if (!init) {
     init = true;
-    std::cout << "Init LLVM..." << std::endl;
     backend::llvmc::initialise();
   }
 }

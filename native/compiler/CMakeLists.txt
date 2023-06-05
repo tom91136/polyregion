@@ -27,11 +27,10 @@ add_library(Polyc ${LIB_SOURCES})
 add_executable(polyc-tests test/ast_codegen.cpp test/backend.cpp test/ast.cpp)
 add_executable(polyc-benchmarks benchmark/babelstream.cpp)
 add_executable(polyc-bin ../shared/cxa_thread_atexit.cpp driver.cpp)
-add_dependencies(polyc-bin PolyRT)
 
 target_include_directories(polyc-tests PUBLIC . ../include PRIVATE ../runtime)
 target_include_directories(polyc-benchmarks PUBLIC . ../include PRIVATE ../runtime)
-target_include_directories(polyc-bin PUBLIC . ../include PRIVATE ../runtime)
+target_include_directories(polyc-bin PUBLIC . ../include ${fire_SOURCE_DIR} PRIVATE)
 target_include_directories(Polyc PUBLIC
         ${LLVM_INCLUDE_DIRS}
         ${LLD_INCLUDE_DIRS}
@@ -133,7 +132,7 @@ target_link_libraries(Polyc
         )
 target_link_libraries(polyc-tests PRIVATE Polyc PolyRT Catch2::Catch2WithMain)
 target_link_libraries(polyc-benchmarks PRIVATE Polyc PolyRT)
-target_link_libraries(polyc-bin PRIVATE Polyc PolyRT ${LLVM_LIBS} ${LLD_LIBS})
+target_link_libraries(polyc-bin PRIVATE Polyc ${LLVM_LIBS} ${LLD_LIBS})
 
 set(COMPILE_OPTIONS
         ${COMMON_COMPILE_OPTIONS}
