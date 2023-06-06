@@ -1,36 +1,38 @@
 #pragma once
 
+#include "../runtime/runtime.h"
 #include "concurrency_utils.hpp"
-#include "runtime.h"
 
 namespace polystl {
 
 struct __generated__foo_cpp_34 {
 
+  int32_t a;
+  int32_t b;
+  int32_t *c;
+
   constexpr static const unsigned char __offloadImage[] = {0xFF};
   constexpr static const unsigned char __uniqueName[] = "theName";
-  constexpr static const ArgBuffer __argBuffer = ArgBuffer{};
+  const polyregion::runtime::ArgBuffer __argBuffer{
+      polyregion::runtime::TypedPointer{polyregion::runtime::Type::Int32, &a},
+      polyregion::runtime::TypedPointer{polyregion::runtime::Type::Int32, &b},
+      polyregion::runtime::TypedPointer{polyregion::runtime::Type::Ptr, &c},
+  };
 
+  __generated__foo_cpp_34(int32_t a, int32_t b, int32_t *c) : a(a),b(b), c(c) {}
 
-  int hello;
-  __generated__foo_cpp_34(int & _hello)
-      : hello{_hello}
-  {}
-
-  inline int operator()(int & x) const {
-
-    return x * hello;
-  }
-
-}
+  //  inline int operator()(int & x) const {
+  //    return x * hello;
+  //  }
+};
 
 template <class _ExecutionPolicy, //
-          class _ForwardIterator1, class _ForwardIterator2,
+          class _ForwardIterator1,
           class _UnaryOperation>
-_ForwardIterator2 transform(_ExecutionPolicy &&__exec, //
-                            _ForwardIterator1 __first, //
-                            _ForwardIterator1 __last,  //
-                            _ForwardIterator2 __result, _UnaryOperation __op) {
+void for_each(_ExecutionPolicy &&__exec, //
+              _ForwardIterator1 __first, //
+              _ForwardIterator1 __last,  //
+              _UnaryOperation __op) {
   auto N = std::distance(__first, __last);
 
   using namespace polyregion::runtime;
@@ -53,11 +55,6 @@ _ForwardIterator2 transform(_ExecutionPolicy &&__exec, //
       cb();
     });
   });
-
-  //        [[lift]] std::vector<Type::> m = __op;
-  // enqueueInvokeAsync("a", "b", {Type::Ptr, Type::Ptr, <captureTpes...>}, {&__first, &__result, <captures...>}, {N, 1, 1});
-  //          void kernel(__first : Struct__First){   __result[i] = __op(__first[i])    }
-  //        while (__first != __last) *__result++ = __op(*__first++);
-  return __result;
+  fprintf(stderr, "Done\n");
 }
 } // namespace polystl

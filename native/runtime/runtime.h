@@ -43,7 +43,7 @@ using MaybeCallback = std::optional<Callback>;
 struct ArgBuffer {
   std::vector<Type> types;
   std::vector<std::byte> data;
-  ArgBuffer(std::initializer_list<TypedPointer> args = {});
+  constexpr ArgBuffer(std::initializer_list<TypedPointer> args = {});
   void append(Type tpe, void *ptr);
   void append(const ArgBuffer &that);
   void append(std::initializer_list<TypedPointer> args);

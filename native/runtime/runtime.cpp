@@ -32,7 +32,7 @@ constexpr static void insertIntoBufferAt(runtime::ArgBuffer &buffer, It begin, I
   }
 }
 
-runtime::ArgBuffer::ArgBuffer(std::initializer_list<TypedPointer> args) { append(args); }
+constexpr runtime::ArgBuffer::ArgBuffer(std::initializer_list<TypedPointer> args) { append(args); }
 void runtime::ArgBuffer::append(Type tpe, void *ptr) { append({{tpe, ptr}}); }
 void runtime::ArgBuffer::append(const ArgBuffer &that) {
   data.insert(data.end(), that.data.begin(), that.data.end());

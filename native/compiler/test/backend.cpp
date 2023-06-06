@@ -15,8 +15,8 @@ using namespace Intr;
 
 template <typename P> static void assertCompilationSucceeded(const P &p) {
   INFO(repr(p));
-  auto c = polyregion::compiler::compile(p, polyregion::compiler::Options{polyregion::compiler::Target::Object_LLVM_x86_64, "native"},
-                                         polyregion::compiler::Opt::O3);
+  auto c = polyregion::compiler::compile(p, polyregion::compiler::Options{Target::Object_LLVM_x86_64, "native"},
+                                         OptLevel::O3);
   std::cout << c << std::endl;
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);
@@ -40,17 +40,17 @@ TEST_CASE("run", "[backend]") {
 
   Program p(fn, {}, {});
   INFO(repr(p));
-  auto c = polyregion::compiler::compile(p, {polyregion::compiler::Target::Object_LLVM_AMDGCN, "gfx906"}, polyregion::compiler::Opt::O3);
+  auto c = polyregion::compiler::compile(p, {Target::Object_LLVM_AMDGCN, "gfx906"}, OptLevel::O3);
   std::cout << c << std::endl;
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);
 
-  c = polyregion::compiler::compile(p, {polyregion::compiler::Target::Object_LLVM_AMDGCN, "gfx803"}, polyregion::compiler::Opt::O3);
+  c = polyregion::compiler::compile(p, {Target::Object_LLVM_AMDGCN, "gfx803"}, OptLevel::O3);
   std::cout << c << std::endl;
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);
 
-  c = polyregion::compiler::compile(p, {polyregion::compiler::Target::Object_LLVM_NVPTX64, "sm_35"}, polyregion::compiler::Opt::O3);
+  c = polyregion::compiler::compile(p, {Target::Object_LLVM_NVPTX64, "sm_35"}, OptLevel::O3);
   std::cout << c << std::endl;
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);

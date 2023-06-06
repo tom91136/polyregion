@@ -50,6 +50,22 @@ private:
   void run(const clang::ast_matchers::MatchFinder::MatchResult &result) override { f(result); }
 };
 
+static std::string printType(clang::QualType type, clang::ASTContext &c) {
+  std::string s;
+  llvm::raw_string_ostream os(s);
+  type.print(os, c.getPrintingPolicy());
+  return s;
+}
+
+static std::string replaceAll(std::string subject, const std::string &search, const std::string &replace) {
+  size_t pos = 0;
+  while ((pos = subject.find(search, pos)) != std::string::npos) {
+    subject.replace(pos, search.length(), replace);
+    pos += replace.length();
+  }
+  return subject;
+}
+
 constexpr const char *policyTag = "policyTag";
 constexpr const char *operatorCallTag = "operatorCallTag";
 constexpr const char *transformCall = "transformCall";
@@ -207,73 +223,121 @@ public:
     Finder.matchAST(context);
 
     for (auto r : results) {
-      std::visit(overloaded{
-                     [&](Failure &f) { //
-                       std::cout << "Failed:" << pretty_string(f.callExpr, context) << "\nReason:" << f.reason << "\n";
-                     },
-                     [&](Callsite &c) { //
-                       std::cout << pretty_string(c.callExpr, context) << "\n";
-                       c.callExpr->dumpColor();
-                       std::cout << "decl=" << std::endl;
-                       c.functorDecl->dumpColor();
-                       std::cout << "fnDecl=" << std::endl;
-                       c.calleeDecl->dumpColor();
+      std::visit(
+          overloaded{
+              [&](Failure &f) { //
+                std::cout << "Failed:" << pretty_string(f.callExpr, context) << "\nReason:" << f.reason << "\n";
+              },
+              [&](Callsite &c) { //
+                std::cout << pretty_string(c.callExpr, context) << "\n";
+                c.callExpr->dumpColor();
+                std::cout << "decl=" << std::endl;
+                c.functorDecl->dumpColor();
+                std::cout << "fnDecl=" << std::endl;
+                c.calleeDecl->dumpColor();
 
-                       polyregion::polystl::Remapper remapper(context);
+                polyregion::polystl::Remapper remapper(context);
 
-                       std::vector<polyregion::polyast::Arg> captures;
-                       for (auto cap : c.functorDecl->getParent()->captures()) {
-                         auto var = cap.getCapturedVar();
-                         captures.push_back(
-                             {polyregion::polyast::Named(var->getDeclName().getAsString(), remapper.handleType(var->getType())), {}});
-                       }
+                auto owningClass = c.functorDecl->getParent();
+                std::vector<polyregion::polyast::Arg> captures;
+                for (auto cap : owningClass->captures()) {
 
-                       std::cout << "=========" << std::endl;
-                       auto r = polyregion::polystl::Remapper::RemapContext{};
-                       remapper.handleStmt(c.functorDecl->getBody(), r);
-                       auto f0 = polyregion::polyast::Function(polyregion::polyast::Sym({"kernel"}), {}, {}, captures, {}, {},
-                                                               remapper.handleType(c.functorDecl->getReturnType()), r.stmts);
+                  if (cap.capturesVariable()) {
+                    auto var = cap.getCapturedVar();
+                    captures.push_back(
+                        {polyregion::polyast::Named(var->getDeclName().getAsString(), remapper.handleType(var->getType())), {}});
+                  } else if (cap.capturesThis()) {
+                    captures.push_back(
+                        {polyregion::polyast::Named("this", remapper.handleType(owningClass->getTypeForDecl()->getCanonicalTypeInternal())),
+                         {}});
+                  } else {
+                    throw std::logic_error("Illegal capture");
+                  }
+                }
 
-                       std::vector<Function> fns;
-                       std::vector<StructDef> structDefs;
-                       for (auto &[_, s] : r.structs) {
-                         structDefs.push_back(s);
-                         std::cout << repr(s) << std::endl;
-                       }
-                       for (auto &[_, f] : r.functions) {
-                         fns.push_back(f);
-                         std::cout << repr(f) << std::endl;
-                       }
-                       std::cout << repr(f0) << std::endl;
+                std::cout << "=========" << std::endl;
+                auto r = polyregion::polystl::Remapper::RemapContext{};
+                remapper.handleStmt(c.functorDecl->getBody(), r);
+                auto f0 = polyregion::polyast::Function(polyregion::polyast::Sym({"kernel"}), {}, {}, captures, {}, {},
+                                                        remapper.handleType(c.functorDecl->getReturnType()), r.stmts);
 
-                       auto p = Program(f0, fns, structDefs);
+                std::vector<Function> fns;
+                std::vector<StructDef> structDefs;
+                for (auto &[_, s] : r.structs) {
+                  structDefs.push_back(s);
+                  std::cout << repr(s) << std::endl;
+                }
+                for (auto &[_, f] : r.functions) {
+                  fns.push_back(f);
+                  std::cout << repr(f) << std::endl;
+                }
+                std::cout << repr(f0) << std::endl;
 
-                       std::cout << "AAA" << std::endl;
+                auto p = Program(f0, fns, structDefs);
 
-                       std::vector<std::string> caps;
-                       for (auto c : c.functorDecl->getParent()->captures()) {
-                         caps.push_back(c.getCapturedVar()->getQualifiedNameAsString());
-                       }
+                std::cout << "AAA" << std::endl;
 
-                       constexpr static const char *s1 = R"cpp(
+                std::vector<std::string> fieldDecl;
+                std::vector<std::string> ctorArgs;
+                std::vector<std::string> ctorInits;
+                std::vector<std::string> ctorAps;
+
+                for (auto c : c.functorDecl->getParent()->captures()) {
+
+                  switch (c.getCaptureKind()) {
+                    case clang::LambdaCaptureKind::LCK_This: break;
+                    case clang::LambdaCaptureKind::LCK_StarThis: break;
+                    case clang::LambdaCaptureKind::LCK_ByCopy: break;
+                    case clang::LambdaCaptureKind::LCK_ByRef: break;
+                    case clang::LambdaCaptureKind::LCK_VLAType: break;
+                  }
+
+                  if (c.capturesVariable()) {
+                    auto var = c.getCapturedVar();
+                    auto tpe = printType(var->getType().getDesugaredType(context), context);
+                    auto name = var->getQualifiedNameAsString();
+                    fieldDecl.push_back(fmt::format("{} {};", tpe, name));
+                    ctorArgs.push_back(fmt::format("{} {}", tpe, name));
+                    ctorInits.push_back(fmt::format("{}({})", name, name));
+                    ctorAps.push_back(name);
+
+                  } else if (c.capturesThis()) {
+
+                  } else {
+                    throw std::logic_error("Illegal capture");
+                  }
+                }
+
+                constexpr static const char *s1 = R"cpp(
                        struct {name} {{
-                         {members}
+                         {fields}
+                         {name}({ctorArgs}) :{ctorInits} {{}}
+                         inline {applyReturnTpe} operator()({applyArgs}) {}
                        }};
                        )cpp";
 
-                       FileRewriter_.InsertText(c.callExpr->getBeginLoc(), fmt::format(s1,                                           //
-                                                                                       fmt::arg("name", "theClass"),                 //
-                                                                                       fmt::arg("members", fmt::join(caps, "\n")) //
-                                                                                       ));
-                       FileRewriter_.ReplaceText(c.callLambdaArgExpr->getSourceRange(), "theClass()");
+                auto fileName = context.getSourceManager().getFilename(c.callLambdaArgExpr->getExprLoc());
+                auto line = context.getSourceManager().getSpellingLineNumber(c.callLambdaArgExpr->getExprLoc());
+                auto col = context.getSourceManager().getSpellingColumnNumber(c.callLambdaArgExpr->getExprLoc());
 
-                       // TODO invoke
+                auto identifier = fmt::format("lambda_{}_{}_{}__", replaceAll(replaceAll(fileName.str(), "/", "_"), ".", "_"), line, col);
 
-                       //                       std::cout << result << std::endl;
+                FileRewriter_.InsertText(c.callExpr->getBeginLoc(), fmt::format(s1,                                             //
+                                                                                fmt::arg("name", identifier),                   //
+                                                                                fmt::arg("fields", fmt::join(fieldDecl, "\n")), //
+                                                                                fmt::arg("ctorArgs", fmt::join(ctorArgs, ", ")),
+                                                                                fmt::arg("ctorInits", fmt::join(ctorInits, ", "))));
 
-                     },
-                 },
-                 r);
+                FileRewriter_.ReplaceText(c.callLambdaArgExpr->getSourceRange(),
+                                          fmt::format("{}({})", identifier, fmt::join(ctorAps, ", ")));
+
+                // TODO invoke
+
+                //                       std::cout << result << std::endl;
+
+              },
+          },
+          r);
     }
 
     FileID_ = context.getSourceManager().getMainFileID();

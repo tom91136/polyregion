@@ -64,8 +64,8 @@ Term::Any generateConstValue(Tpe::Any t) {
 
 template <typename P> static void assertCompile(const P &p) {
   CAPTURE(repr(p));
-  auto c = polyregion::compiler::compile(p, polyregion::compiler::Options{polyregion::compiler::Target::Object_LLVM_x86_64, "native"},
-                                         polyregion::compiler::Opt::O3);
+  auto c = polyregion::compiler::compile(p, polyregion::compiler::Options{Target::Object_LLVM_x86_64, "native"},
+                                         OptLevel::O3);
   CAPTURE(c);
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);

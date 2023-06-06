@@ -2,6 +2,7 @@
 
 add_library(PolySTLPlugin SHARED ../shared/cxa_thread_atexit.cpp plugin.cpp remapper.cpp)
 
+add_executable(polystl-test ../shared/cxa_thread_atexit.cpp test.cpp)
 
 target_include_directories(PolySTLPlugin PRIVATE
         .
@@ -11,6 +12,7 @@ target_include_directories(PolySTLPlugin PRIVATE
         ${LLVM_INCLUDE_DIRS}
         )
 target_link_libraries(PolySTLPlugin PRIVATE PolyAST fmt::fmt-header-only)
+target_link_libraries(polystl-test PRIVATE PolyRT)
 
 
 set(COMPILE_OPTIONS
@@ -23,8 +25,10 @@ set(LINK_OPTIONS
         "$<$<CONFIG:DEBUG>:${COMMON_DEBUG_OPTIONS}>")
 
 target_compile_options(PolySTLPlugin PRIVATE ${COMPILE_OPTIONS})
-
 target_link_options(PolySTLPlugin PRIVATE ${LINK_OPTIONS})
+
+target_compile_options(polystl-test PRIVATE ${COMPILE_OPTIONS})
+target_link_options(polystl-test PRIVATE ${LINK_OPTIONS})
 
 # Running `strip` on macOS drops even more stuff than just compiling with -dead_strip.
 if (APPLE)
