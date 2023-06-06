@@ -254,7 +254,7 @@ std::optional<polyast::OptLevel> polyast::optFromOrdinal(std::underlying_type_t<
   }
 }
 
-std::string repr(const polyast::Compilation &compilation) {
+std::string polyast::repr(const polyast::CompileResult &compilation) {
   std::ostringstream os;
   os << "Compilation {"                                                                                            //
      << "\n  binary: " << (compilation.binary ? std::to_string(compilation.binary->size()) + " bytes" : "(empty)") //

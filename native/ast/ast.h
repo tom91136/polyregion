@@ -62,27 +62,7 @@ std::optional<Target> targetFromOrdinal(std::underlying_type_t<Target> ordinal);
 
 std::optional<OptLevel> optFromOrdinal(std::underlying_type_t<OptLevel> ordinal);
 
-using Member = CompileLayoutMember;
-using Layout = CompileLayout;
-using Event = CompileEvent;
-using Compilation = CompileResult;
-
-// struct Compilation {
-//   std::vector<Layout> layouts;
-//   std::optional<Bytes> binary;
-//   std::vector<std::string> features;
-//   std::vector<Event> events;
-//   std::string messages;
-//   Compilation() = default;
-//   explicit Compilation(decltype(messages) messages) : messages(std::move(messages)) {}
-//   Compilation(decltype(binary) binary,     //
-//               decltype(features) features, //
-//               decltype(events) events,     //
-//               decltype(messages) messages = "")
-//       : binary(std::move(binary)), features(std::move(features)), events(std::move(events)), messages(std::move(messages)) {}
-// };
-
-std::string repr(const polyast::Compilation &);
+std::string repr(const polyast::CompileResult &);
 
 namespace dsl {
 

@@ -20,9 +20,16 @@
     },
     {
       "name": "vulkan-headers"
+    },
+    {
+      "name" : "fmt"
     }
   ],
   "overrides": [
+    {
+      "name" : "fmt",
+      "version" : "10.0.0"
+    },
     {
       "name": "spirv-headers",
       "version": "1.3.246.1"

@@ -85,7 +85,7 @@ static backend::LLVMBackend::Options toLLVMBackendOptions(const compiler::Option
   }
 }
 
-std::vector<polyast::Layout> compiler::layoutOf(const std::vector<polyast::StructDef> &defs, const Options &options) {
+std::vector<polyast::CompileLayout> compiler::layoutOf(const std::vector<polyast::StructDef> &defs, const Options &options) {
 
   switch (options.target) {
     case polyast::Target::Object_LLVM_HOST:
@@ -102,7 +102,7 @@ std::vector<polyast::Layout> compiler::layoutOf(const std::vector<polyast::Struc
 
       llvm::LLVMContext c;
       backend::LLVMBackend::AstTransformer xform(llvmOptions, c);
-      std::vector<polyast::Layout> layouts;
+      std::vector<polyast::CompileLayout> layouts;
       xform.addDefs(defs);
       std::unordered_map<polyast::Sym, polyast::StructDef> lut(defs.size());
       for (auto &d : defs)
@@ -110,7 +110,7 @@ std::vector<polyast::Layout> compiler::layoutOf(const std::vector<polyast::Struc
       for (auto &[sym, structTy] : xform.getStructTypes()) {
         if (auto it = lut.find(sym); it != lut.end()) {
           auto layout = dataLayout.getStructLayout(structTy);
-          std::vector<polyast::Member> members;
+          std::vector<polyast::CompileLayoutMember> members;
           for (size_t i = 0; i < it->second.members.size(); ++i) {
             members.emplace_back(it->second.members[i].named,                             //
                                  layout->getElementOffset(i),                             //
@@ -131,20 +131,20 @@ std::vector<polyast::Layout> compiler::layoutOf(const std::vector<polyast::Struc
   }
 }
 
-std::vector<polyast::Layout> compiler::layoutOf(const polyast::Bytes &sdef, const Options &options) {
+std::vector<polyast::CompileLayout> compiler::layoutOf(const polyast::Bytes &sdef, const Options &options) {
   json json = deserialiseAst(sdef);
   std::vector<polyast::StructDef> sdefs;
   std::transform(json.begin(), json.end(), std::back_inserter(sdefs), &polyast::structdef_from_json);
   return layoutOf(sdefs, options);
 }
 
-static void sortEvents(polyast::Compilation &c) {
+static void sortEvents(polyast::CompileResult &c) {
   std::sort(c.events.begin(), c.events.end(), [](const auto &l, const auto &r) { return l.epochMillis < r.epochMillis; });
 }
 
-polyast::Compilation compiler::compile(const polyast::Program &program, const Options &options, const polyast::OptLevel &opt) {
+polyast::CompileResult compiler::compile(const polyast::Program &program, const Options &options, const polyast::OptLevel &opt) {
   if (!init) {
-    return polyast::Compilation{{}, {}, {}, {}, "initialise was not called before"};
+    return polyast::CompileResult{{}, {}, {}, {}, "initialise was not called before"};
   }
 
   auto mkBackend = [&]() -> std::unique_ptr<backend::Backend> {
@@ -167,14 +167,14 @@ polyast::Compilation compiler::compile(const polyast::Program &program, const Op
     }
   };
 
-  polyast::Compilation c = mkBackend()->compileProgram(program, opt);
+  polyast::CompileResult c = mkBackend()->compileProgram(program, opt);
   sortEvents(c);
   return c;
 }
 
-polyast::Compilation compiler::compile(const polyast::Bytes &astBytes, const Options &options, const polyast::OptLevel &opt) {
+polyast::CompileResult compiler::compile(const polyast::Bytes &astBytes, const Options &options, const polyast::OptLevel &opt) {
 
-  std::vector<polyast::Event> events;
+  std::vector<polyast::CompileEvent> events;
 
   //  std::cout << "[polyregion-native] Len  : " << astBytes.size() << std::endl;
   auto jsonStart = nowMono();

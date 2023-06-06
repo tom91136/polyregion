@@ -48,7 +48,7 @@ static_assert(polyregion::to_underlying(polyast::Target::Source_C_C11) == Compil
   Compiler::unregisterMethods(env);
 }
 
-static generated::Layout::Instance toJni(JNIEnv *env, const polyast::Layout &l) {
+static generated::Layout::Instance toJni(JNIEnv *env, const polyast::CompileLayout &l) {
   return gen::Layout::of(env)(
       env,                                                                                        //
       toJni(env, l.name.fqn, gen::String::of(env).clazz, [&](auto &x) { return toJni(env, x); }), //
@@ -65,7 +65,7 @@ static generated::Layout::Instance toJni(JNIEnv *env, const polyast::Layout &l) 
   );                                                                                              //
 }
 
-static generated::Event::Instance toJni(JNIEnv *env, const polyast::Event &e) {
+static generated::Event::Instance toJni(JNIEnv *env, const polyast::CompileEvent &e) {
   return gen::Event::of(env)(env, e.epochMillis, e.elapsedNanos, toJni(env, e.name), toJni(env, e.data));
 }
 

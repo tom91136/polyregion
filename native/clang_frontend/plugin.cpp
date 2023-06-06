@@ -1,9 +1,11 @@
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_set>
 #include <vector>
-#include <optional>
+
+#include "fmt/core.h"
 
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/ASTContext.h"
@@ -158,9 +160,10 @@ public:
             .bind(transformCall);
 
     struct Callsite {
-      const clang::CallExpr *callExpr;
-      const clang::FunctionDecl *calleeDecl;
-      const clang::CXXMethodDecl *functorDecl;
+      const clang::CallExpr *callExpr;         // decl of the std::transform call
+      const clang::Expr *callLambdaArgExpr;    // decl of the lambda arg
+      const clang::FunctionDecl *calleeDecl;   // decl of the specialised std::transform
+      const clang::CXXMethodDecl *functorDecl; // decl of the specialised lambda functor
     };
     struct Failure {
       const clang::Stmt *callExpr;
@@ -178,11 +181,11 @@ public:
           if (auto lambdaArgCxxRecordDecl = lastArgExpr->getType()->getAsCXXRecordDecl()) {
             if (auto target = OverloadTargetVisitor(lambdaArgCxxRecordDecl).run(fnDecl->getBody()); target) {
               // We found a valid overload target, validate this by checking whether the decl belongs to the last arg's implicit class.
-              if ((*target)->getParent() == lambdaArgCxxRecordDecl) results.emplace_back(Callsite{algCallExpr, fnDecl, *target});
-              else {
+              if ((*target)->getParent() == lambdaArgCxxRecordDecl)
+                results.emplace_back(Callsite{algCallExpr, lastArgExpr, fnDecl, *target});
+              else
                 results.emplace_back(Failure{algCallExpr, "Target record mismatch:\nLast arg=" + to_string((*target)->getParent()) +
                                                               "\nTarget=" + to_string(lambdaArgCxxRecordDecl)});
-              }
             } else {
               results.emplace_back(Failure{algCallExpr, "Cannot find any call `()` to last arg:" + pretty_string(lastArgExpr, context)});
             }
@@ -210,7 +213,11 @@ public:
                      },
                      [&](Callsite &c) { //
                        std::cout << pretty_string(c.callExpr, context) << "\n";
+                       c.callExpr->dumpColor();
+                       std::cout << "decl=" << std::endl;
                        c.functorDecl->dumpColor();
+                       std::cout << "fnDecl=" << std::endl;
+                       c.calleeDecl->dumpColor();
 
                        polyregion::polystl::Remapper remapper(context);
 
@@ -241,12 +248,28 @@ public:
 
                        auto p = Program(f0, fns, structDefs);
 
+                       std::cout << "AAA" << std::endl;
 
+                       std::vector<std::string> caps;
+                       for (auto c : c.functorDecl->getParent()->captures()) {
+                         caps.push_back(c.getCapturedVar()->getQualifiedNameAsString());
+                       }
 
+                       constexpr static const char *s1 = R"cpp(
+                       struct {name} {{
+                         {members}
+                       }};
+                       )cpp";
 
-                        // TODO invoke
+                       FileRewriter_.InsertText(c.callExpr->getBeginLoc(), fmt::format(s1,                                           //
+                                                                                       fmt::arg("name", "theClass"),                 //
+                                                                                       fmt::arg("members", fmt::join(caps, "\n")) //
+                                                                                       ));
+                       FileRewriter_.ReplaceText(c.callLambdaArgExpr->getSourceRange(), "theClass()");
 
-//                       std::cout << result << std::endl;
+                       // TODO invoke
+
+                       //                       std::cout << result << std::endl;
 
                      },
                  },

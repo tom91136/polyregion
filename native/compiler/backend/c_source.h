@@ -28,11 +28,11 @@ private:
 public:
   explicit CSource(const Dialect &dialect) : dialect(dialect) {}
 
-  polyast::Compilation compileProgram( //
+  polyast::CompileResult compileProgram( //
       const Program &,                  //
       const polyast::OptLevel &             //
       ) override;
-  std::vector<polyast::Layout> resolveLayouts( //
+  std::vector<polyast::CompileLayout> resolveLayouts( //
       const std::vector<polyast::StructDef> &,  //
       const polyast::OptLevel &                     //
       ) override;

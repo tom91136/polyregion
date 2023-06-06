@@ -10,7 +10,7 @@ target_include_directories(PolySTLPlugin PRIVATE
         ${CLANG_INCLUDE_DIRS}
         ${LLVM_INCLUDE_DIRS}
         )
-target_link_libraries(PolySTLPlugin PRIVATE PolyAST)
+target_link_libraries(PolySTLPlugin PRIVATE PolyAST fmt::fmt-header-only)
 
 
 set(COMPILE_OPTIONS

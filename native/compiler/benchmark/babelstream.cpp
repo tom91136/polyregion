@@ -205,15 +205,15 @@ int main() {
   // x86-64-v3 AVX,AVX2
   // x86-64-v4 AVX512
 
-  std::vector<std::tuple<runtime::Backend, compiler::Target, std::string>> configs = {
+  std::vector<std::tuple<runtime::Backend, polyast::Target, std::string>> configs = {
       // CL runs everywhere
-//      {runtime::Backend::OpenCL, compiler::Target::Source_C_OpenCL1_1, ""},
-      {runtime::Backend::Vulkan, compiler::Target::Object_LLVM_SPIRV64, ""},
+      //      {runtime::Backend::OpenCL, compiler::Target::Source_C_OpenCL1_1, ""},
+      {runtime::Backend::Vulkan, polyast::Target::Object_LLVM_SPIRV64, ""},
 #ifdef __APPLE__
       {runtime::Backend::RELOCATABLE_OBJ, compiler::Target::Object_LLVM_AArch64, "apple-m1"},
       {runtime::Backend::Metal, compiler::Target::Source_C_Metal1_0, ""},
 #else
-      {runtime::Backend::CUDA, compiler::Target::Object_LLVM_NVPTX64, "sm_80"},
+      {runtime::Backend::CUDA, polyast::Target::Object_LLVM_NVPTX64, "sm_80"},
 //            {runtime::Backend::HIP, compiler::Target::Object_LLVM_AMDGCN, "gfx1012"},
 //      {runtime::Backend::RELOCATABLE_OBJ, compiler::Target::Object_LLVM_x86_64, "x86-64-v3"},
 #endif
@@ -231,15 +231,15 @@ int main() {
     {
 
       polyregion::compiler::initialise();
-      auto c = polyregion::compiler::compile(p, {target, arch}, polyregion::compiler::Opt::Ofast);
+      auto c = polyregion::compiler::compile(p, {target, arch}, polyast::OptLevel::Ofast);
       //    std::cerr << c << std::endl;
-      std::cerr << c << std::endl;
+      std::cerr << repr(c) << std::endl;
 
       if (!c.binary) {
         throw std::logic_error("No binary produced");
       }
 
-      std::string image(c.binary->data(), c.binary->size());
+      std::string image(reinterpret_cast<char *>(c.binary->data()), c.binary->size());
 
       const auto relTolerance = 0.008f;
 

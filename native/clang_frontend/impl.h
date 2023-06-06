@@ -5,8 +5,24 @@
 
 namespace polystl {
 
+struct __generated__foo_cpp_34 {
+
+  constexpr static const unsigned char __offloadImage[] = {0xFF};
+  constexpr static const unsigned char __uniqueName[] = "theName";
+  constexpr static const ArgBuffer __argBuffer = ArgBuffer{};
 
 
+  int hello;
+  __generated__foo_cpp_34(int & _hello)
+      : hello{_hello}
+  {}
+
+  inline int operator()(int & x) const {
+
+    return x * hello;
+  }
+
+}
 
 template <class _ExecutionPolicy, //
           class _ForwardIterator1, class _ForwardIterator2,
@@ -30,7 +46,6 @@ _ForwardIterator2 transform(_ExecutionPolicy &&__exec, //
   if (!theDevice->moduleLoaded(name)) {
     theDevice->loadModule(name, image);
   }
-
 
   polyregion::concurrency_utils::waitAll([&](auto cb) {
     theQueue->enqueueInvokeAsync(name, "kernel", buffer, Policy{{N}, {}}, [&]() {

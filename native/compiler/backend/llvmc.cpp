@@ -234,7 +234,7 @@ static void optimise(llvm::TargetMachine &TM, llvm::Module &M, llvm::Optimizatio
   }
 }
 
-polyast::Compilation llvmc::compileModule(const TargetInfo &info, const polyast::OptLevel &opt, bool emitDisassembly,
+polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const polyast::OptLevel &opt, bool emitDisassembly,
                                           std::unique_ptr<llvm::Module> M) {
   auto start = compiler::nowMono();
 
@@ -297,7 +297,7 @@ polyast::Compilation llvmc::compileModule(const TargetInfo &info, const polyast:
   auto mkLLVMTargetMachineArtefact = [&](llvm::LLVMTargetMachine &TM,                     //
                                          const std::optional<llvm::CodeGenFileType> &tpe, //
                                          const llvm::Module &m0,                          //
-                                         std::vector<polyast::Event> &events, bool emplaceEvent) {
+                                         std::vector<polyast::CompileEvent> &events, bool emplaceEvent) {
     auto m = llvm::CloneModule(m0);
     auto optPassStart = compiler::nowMono();
 
@@ -337,7 +337,7 @@ polyast::Compilation llvmc::compileModule(const TargetInfo &info, const polyast:
     return std::to_string(static_cast<float>(xs.size_in_bytes()) / 1024) + "KiB";
   };
 
-  std::vector<polyast::Event> events;
+  std::vector<polyast::CompileEvent> events;
 
   switch (info.triple.getOS()) {
     case llvm::Triple::AMDHSA: {

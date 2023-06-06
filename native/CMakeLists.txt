@@ -46,6 +46,7 @@ FetchContent_Declare(
         URL_HASH SHA256=ebffbb5f01c001090181ea91e3ff6e1fb7e30f1e928adb6f02ee585c76e418bf
 )
 
+find_package(fmt CONFIG REQUIRED)
 find_package(Catch2 CONFIG REQUIRED)
 find_package(TBB CONFIG REQUIRED)
 find_package(libffi CONFIG REQUIRED)
