@@ -246,8 +246,7 @@ public:
 
   F &resolveFunction(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types) {
     auto moduleIt = modules.find(moduleName);
-    if (moduleIt == modules.end())
-      throw std::logic_error(errorPrefix + "No module named `" + moduleName + "` was loaded");
+    if (moduleIt == modules.end()) throw std::logic_error(errorPrefix + "No module named `" + moduleName + "` was loaded");
     auto &[m, fnTable] = moduleIt->second;
     if (auto it = fnTable.find(symbol); it != fnTable.end()) return it->second;
     else {
@@ -318,8 +317,7 @@ struct POLYREGION_EXPORT DeviceQueue {
 
 public:
   virtual POLYREGION_EXPORT ~DeviceQueue() = default;
-  virtual POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t bytes,
-                                               const MaybeCallback &cb) = 0;
+  virtual POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t bytes, const MaybeCallback &cb) = 0;
 
   template <typename T>
   POLYREGION_EXPORT void enqueueHostToDeviceAsyncTyped(const T *src, uintptr_t dst, size_t count, const MaybeCallback &cb = {}) {
@@ -336,11 +334,11 @@ public:
   };
 
   virtual POLYREGION_EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                         const std::vector<Type> &types, std::vector<std::byte> argData,
-                                         const Policy &policy, const MaybeCallback &cb) = 0;
+                                                    const std::vector<Type> &types, std::vector<std::byte> argData, const Policy &policy,
+                                                    const MaybeCallback &cb) = 0;
 
-  virtual POLYREGION_EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                         const ArgBuffer &buffer, const Policy &policy, const MaybeCallback &cb) {
+  virtual POLYREGION_EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const ArgBuffer &buffer,
+                                                    const Policy &policy, const MaybeCallback &cb) {
     enqueueInvokeAsync(moduleName, symbol, buffer.types, buffer.data, policy, cb);
   };
 };

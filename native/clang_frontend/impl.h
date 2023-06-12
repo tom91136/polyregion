@@ -25,6 +25,34 @@ struct __generated__foo_cpp_34 {
   //    return x * hello;
   //  }
 };
+using namespace polyregion::runtime;
+
+static std::unordered_map<std::string, Backend> nameToBackend = {
+    {"ptx", Backend::CUDA},             //
+    {"cuda", Backend::CUDA},            //
+    {"amdgpu", Backend::HIP},           //
+    {"hip", Backend::HIP},              //
+    {"hsa", Backend::HSA},              //
+    {"opencl", Backend::OpenCL},        //
+    {"ocl", Backend::OpenCL},           //
+    {"cl", Backend::OpenCL},            //
+    {"vulkan", Backend::Vulkan},        //
+    {"vk", Backend::Vulkan},            //
+    {"metal", Backend::Metal},          //
+    {"mtl", Backend::Metal},            //
+    {"apple", Backend::Metal},          //
+    {"host_so", Backend::SHARED_OBJ},   //
+    {"host", Backend::RELOCATABLE_OBJ}, //
+};
+
+std::unique_ptr<polyregion::runtime::Platform> createPlatform(){
+ auto r= std::getenv("POLY_PLATFORM");
+
+
+// polyregion::runtime::Platform:
+
+}
+
 
 template <class _ExecutionPolicy, //
           class _ForwardIterator1,
@@ -48,6 +76,7 @@ void for_each(_ExecutionPolicy &&__exec, //
   if (!theDevice->moduleLoaded(name)) {
     theDevice->loadModule(name, image);
   }
+  // __first[i]
 
   polyregion::concurrency_utils::waitAll([&](auto cb) {
     theQueue->enqueueInvokeAsync(name, "kernel", buffer, Policy{{N}, {}}, [&]() {
