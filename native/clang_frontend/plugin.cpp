@@ -24,6 +24,9 @@
 #include "clang/Rewrite/Core/Rewriter.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Program.h"
+
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/MemoryBuffer.h"
 
@@ -312,7 +315,7 @@ public:
                        struct {name} {{
                          {fields}
                          {name}({ctorArgs}) :{ctorInits} {{}}
-                         inline {applyReturnTpe} operator()({applyArgs}) {}
+                         inline {applyReturnTpe} operator()({applyArgs}) {{ return 0; }}
                        }};
                        )cpp";
 
@@ -322,11 +325,15 @@ public:
 
                 auto identifier = fmt::format("lambda_{}_{}_{}__", replaceAll(replaceAll(fileName.str(), "/", "_"), ".", "_"), line, col);
 
-                FileRewriter_.InsertText(c.callExpr->getBeginLoc(), fmt::format(s1,                                             //
-                                                                                fmt::arg("name", identifier),                   //
-                                                                                fmt::arg("fields", fmt::join(fieldDecl, "\n")), //
-                                                                                fmt::arg("ctorArgs", fmt::join(ctorArgs, ", ")),
-                                                                                fmt::arg("ctorInits", fmt::join(ctorInits, ", "))));
+                FileRewriter_.InsertText(c.callExpr->getBeginLoc(),
+                                         fmt::format(s1,                                                          //
+                                                     fmt::arg("name", identifier),                                //
+                                                     fmt::arg("fields", fmt::join(fieldDecl, "\n")),              //
+                                                     fmt::arg("ctorArgs", fmt::join(ctorArgs, ", ")),             //
+                                                     fmt::arg("ctorInits", fmt::join(ctorInits, ", ")),           //
+                                                     fmt::arg("applyReturnTpe", "int"),                           //
+                                                     fmt::arg("applyArgs", fmt::join(std::vector{"int a"}, ", ")) //
+                                                     ));
 
                 FileRewriter_.ReplaceText(c.callLambdaArgExpr->getSourceRange(),
                                           fmt::format("{}({})", identifier, fmt::join(ctorAps, ", ")));
@@ -423,6 +430,63 @@ protected:
 
     std::cout << "action=" << success << std::endl;
     //    buffers.clear();
+
+    Program p(Function(Sym({"fn"}), {}, {}, {Arg(Named("a", Type::IntS64()), {})}, {}, {}, Type::IntS64(), //
+                       {
+                           Stmt::Var(Named("out", Type::IntS64()), {Expr::IntrOp(Intr::Add(Term::Select({}, Named("a", Type::IntS64())),
+                                                                                           Term::IntS64Const(42), Type::IntS64()))}),
+
+                           Stmt::Return(Expr::Alias(Term::Select({}, Named("out", Type::IntS64())))),
+                       }),
+              {}, {});
+
+    auto data = nlohmann::json::to_msgpack(hashed_to_json(program_to_json(p)));
+
+    //    llvm::sys::fs::createTemporaryFile("","", )
+
+    llvm::SmallString<64> inputPath;
+    auto inputCreateEC = llvm::sys::fs::createTemporaryFile("", "", inputPath);
+    if (inputCreateEC) {
+      llvm::errs() << "Failed to create temp input file: " << inputCreateEC.message() << "\n";
+      return;
+    }
+
+    llvm::SmallString<64> outputPath;
+    auto outputCreateEC = llvm::sys::fs::createTemporaryFile("", "", outputPath);
+    if (outputCreateEC) {
+      llvm::errs() << "Failed to create temp output file: " << outputCreateEC.message() << "\n";
+      return;
+    }
+
+    std::error_code streamEC;
+    llvm::raw_fd_ostream File(inputPath, streamEC, llvm::sys::fs::OF_None);
+    if (streamEC) {
+      llvm::errs() << "Failed to open file: " << streamEC.message() << "\n";
+      return;
+    }
+    File.write(reinterpret_cast<const char *>(data.data()), data.size());
+    File.flush();
+    llvm::outs() << "Wrote " << inputPath.str() << " \n";
+
+    int code = llvm::sys::ExecuteAndWait(                                                              //
+        "/home/tom/polyregion/native/cmake-build-debug-clang/compiler/polyc",                          //
+        {"polyc", inputPath.str(), "--out", outputPath.str(), "--target", "host", "--arch", "native"}, //
+        {{}}                                                                                           //
+    );
+
+    auto BufferOrErr = llvm::MemoryBuffer::getFile(outputPath);
+
+    if (auto Err = BufferOrErr.getError()) {
+      llvm::errs() << llvm::errorCodeToError(Err) << "\n";
+    } else {
+
+      auto result = compileresult_from_json(nlohmann::json::from_msgpack((*BufferOrErr)->getBufferStart(), (*BufferOrErr)->getBufferEnd()));
+      std::cout << repr(result) << std::endl;
+    }
+
+    //    llvm::outs() << code << "\n";
+
+    // Git
 
     //    PreprocessorOpts.clearRemappedFiles();
     //    compile(CI_, FileName_, FileRewriteBuffer->begin(), FileRewriteBuffer->end());

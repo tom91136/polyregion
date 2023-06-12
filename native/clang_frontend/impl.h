@@ -2,32 +2,15 @@
 
 #include "../runtime/runtime.h"
 #include "concurrency_utils.hpp"
+#include <algorithm>
+#include <execution>
 
 namespace polystl {
 
-struct __generated__foo_cpp_34 {
 
-  int32_t a;
-  int32_t b;
-  int32_t *c;
-
-  constexpr static const unsigned char __offloadImage[] = {0xFF};
-  constexpr static const unsigned char __uniqueName[] = "theName";
-  const polyregion::runtime::ArgBuffer __argBuffer{
-      polyregion::runtime::TypedPointer{polyregion::runtime::Type::Int32, &a},
-      polyregion::runtime::TypedPointer{polyregion::runtime::Type::Int32, &b},
-      polyregion::runtime::TypedPointer{polyregion::runtime::Type::Ptr, &c},
-  };
-
-  __generated__foo_cpp_34(int32_t a, int32_t b, int32_t *c) : a(a),b(b), c(c) {}
-
-  //  inline int operator()(int & x) const {
-  //    return x * hello;
-  //  }
-};
 using namespace polyregion::runtime;
 
-static std::unordered_map<std::string, Backend> nameToBackend = {
+static const std::unordered_map<std::string, Backend> NameToBackend = {
     {"ptx", Backend::CUDA},             //
     {"cuda", Backend::CUDA},            //
     {"amdgpu", Backend::HIP},           //
@@ -45,14 +28,32 @@ static std::unordered_map<std::string, Backend> nameToBackend = {
     {"host", Backend::RELOCATABLE_OBJ}, //
 };
 
-std::unique_ptr<polyregion::runtime::Platform> createPlatform(){
- auto r= std::getenv("POLY_PLATFORM");
-
-
-// polyregion::runtime::Platform:
-
+std::unique_ptr<polyregion::runtime::Platform> createPlatform() {
+  if (auto env = std::getenv("POLY_PLATFORM"); env) {
+    std::string name(env);
+    std::transform(name.begin(), name.end(), name.begin(), [](auto &c) { return std::tolower(c); });
+    if (auto it = NameToBackend.find(name); it != NameToBackend.end()) return Platform::of(it->second);
+  }
+  return {};
 }
 
+std::unique_ptr<polyregion::runtime::Device> selectDevice(polyregion::runtime::Platform &p) {
+  if (auto env = std::getenv("POLY_DEVICE"); env) {
+    std::string name(env);
+    std::transform(name.begin(), name.end(), name.begin(), [](auto &c) { return std::tolower(c); });
+    auto devices = p.enumerate();
+    size_t index = std::strtol(name.c_str(), nullptr, 10);
+    if (errno == 0 && (index - 1) > devices.size()) { // we got a number, check inbounds and select device
+      return std::move(devices[index]);
+    } else if (auto matching = // or do a substring match
+               std::find_if(devices.begin(), devices.end(),
+                            [&name](const auto &device) { return device->name().find(name) != std::string::npos; });
+               matching != devices.end()) {
+      return std::move(*matching);
+    }
+  }
+  return {};
+}
 
 template <class _ExecutionPolicy, //
           class _ForwardIterator1,
@@ -61,29 +62,33 @@ void for_each(_ExecutionPolicy &&__exec, //
               _ForwardIterator1 __first, //
               _ForwardIterator1 __last,  //
               _UnaryOperation __op) {
-  auto N = std::distance(__first, __last);
 
   using namespace polyregion::runtime;
 
-  std::string &image = __op.__offloadImage;
-  std::string &name = __op.__uniqueName;
-  ArgBuffer &buffer = __op.__argBuffer;
+  const std::string &image = __op.__kernelImage;
+  const std::string &name = __op.__uniqueName;
+  const ArgBuffer &buffer = __op.__argBuffer;
 
-  static auto platform = Platform::of(Backend::CUDA);
-  static auto theDevice = std::move(platform->enumerate()[0]);
-  static auto theQueue = theDevice->createQueue();
+  static auto thePlatform = createPlatform();
+  static auto theDevice = thePlatform ? selectDevice(*thePlatform) : std::unique_ptr<polyregion::runtime::Device>{};
+  static auto theQueue = theDevice ? theDevice->createQueue() : std::unique_ptr<polyregion::runtime::DeviceQueue>{};
 
-  if (!theDevice->moduleLoaded(name)) {
-    theDevice->loadModule(name, image);
-  }
-  // __first[i]
-
-  polyregion::concurrency_utils::waitAll([&](auto cb) {
-    theQueue->enqueueInvokeAsync(name, "kernel", buffer, Policy{{N}, {}}, [&]() {
-      fprintf(stderr, "Module %s completed\n", name.c_str());
-      cb();
+  if (theDevice && theQueue) {
+    if (!theDevice->moduleLoaded(name)) {
+      theDevice->loadModule(name, image);
+    }
+    size_t N = std::distance(__first, __last);
+    polyregion::concurrency_utils::waitAll([&](auto cb) {
+      theQueue->enqueueInvokeAsync(name, "kernel", buffer, Policy{Dim3{N, 1, 1}, {}}, [&]() {
+        fprintf(stderr, "Module %s completed\n", name.c_str());
+        cb();
+      });
     });
-  });
-  fprintf(stderr, "Done\n");
+    fprintf(stderr, "Done\n");
+  } else {
+    fprintf(stderr, "Host fallback\n");
+    std::for_each(__exec, __first, __last, __op);
+  }
 }
+
 } // namespace polystl

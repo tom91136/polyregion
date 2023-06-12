@@ -314,7 +314,7 @@ SourcePosition sourceposition_from_json(const json& j_) {
 json sourceposition_to_json(const SourcePosition& x_) { 
   auto file = x_.file;
   auto line = x_.line;
-  auto col = x_.col ? json{*x_.col} : json{};
+  auto col = x_.col ? json(*x_.col) : json();
   return json::array({file, line, col});
 }
 
@@ -1553,7 +1553,7 @@ Expr::RefTo Expr::refto_from_json(const json& j_) {
 
 json Expr::refto_to_json(const Expr::RefTo& x_) { 
   auto lhs =  Term::any_to_json(x_.lhs);
-  auto idx = x_.idx ? Term::any_to_json(*x_.idx) : json{};
+  auto idx = x_.idx ? Term::any_to_json(*x_.idx) : json();
   auto component =  Type::any_to_json(x_.component);
   return json::array({lhs, idx, component});
 }
@@ -1590,7 +1590,7 @@ json Expr::invoke_to_json(const Expr::Invoke& x_) {
   auto name =  sym_to_json(x_.name);
   std::vector<json> tpeArgs;
   std::transform(x_.tpeArgs.begin(), x_.tpeArgs.end(), std::back_inserter(tpeArgs), &Type::any_to_json);
-  auto receiver = x_.receiver ? Term::any_to_json(*x_.receiver) : json{};
+  auto receiver = x_.receiver ? Term::any_to_json(*x_.receiver) : json();
   std::vector<json> args;
   std::transform(x_.args.begin(), x_.args.end(), std::back_inserter(args), &Term::any_to_json);
   std::vector<json> captures;
@@ -1662,7 +1662,7 @@ Stmt::Var Stmt::var_from_json(const json& j_) {
 
 json Stmt::var_to_json(const Stmt::Var& x_) { 
   auto name =  named_to_json(x_.name);
-  auto expr = x_.expr ? Expr::any_to_json(*x_.expr) : json{};
+  auto expr = x_.expr ? Expr::any_to_json(*x_.expr) : json();
   return json::array({name, expr});
 }
 
@@ -1848,7 +1848,7 @@ Signature signature_from_json(const json& j_) {
 json signature_to_json(const Signature& x_) { 
   auto name =  sym_to_json(x_.name);
   auto tpeVars = x_.tpeVars;
-  auto receiver = x_.receiver ? Type::any_to_json(*x_.receiver) : json{};
+  auto receiver = x_.receiver ? Type::any_to_json(*x_.receiver) : json();
   std::vector<json> args;
   std::transform(x_.args.begin(), x_.args.end(), std::back_inserter(args), &Type::any_to_json);
   std::vector<json> moduleCaptures;
@@ -1879,7 +1879,7 @@ json invokesignature_to_json(const InvokeSignature& x_) {
   auto name =  sym_to_json(x_.name);
   std::vector<json> tpeVars;
   std::transform(x_.tpeVars.begin(), x_.tpeVars.end(), std::back_inserter(tpeVars), &Type::any_to_json);
-  auto receiver = x_.receiver ? Type::any_to_json(*x_.receiver) : json{};
+  auto receiver = x_.receiver ? Type::any_to_json(*x_.receiver) : json();
   std::vector<json> args;
   std::transform(x_.args.begin(), x_.args.end(), std::back_inserter(args), &Type::any_to_json);
   std::vector<json> captures;
@@ -1964,7 +1964,7 @@ Arg arg_from_json(const json& j_) {
 
 json arg_to_json(const Arg& x_) { 
   auto named =  named_to_json(x_.named);
-  auto pos = x_.pos ? sourceposition_to_json(*x_.pos) : json{};
+  auto pos = x_.pos ? sourceposition_to_json(*x_.pos) : json();
   return json::array({named, pos});
 }
 
@@ -1991,7 +1991,7 @@ Function function_from_json(const json& j_) {
 json function_to_json(const Function& x_) { 
   auto name =  sym_to_json(x_.name);
   auto tpeVars = x_.tpeVars;
-  auto receiver = x_.receiver ? arg_to_json(*x_.receiver) : json{};
+  auto receiver = x_.receiver ? arg_to_json(*x_.receiver) : json();
   std::vector<json> args;
   std::transform(x_.args.begin(), x_.args.end(), std::back_inserter(args), &arg_to_json);
   std::vector<json> moduleCaptures;
@@ -2087,7 +2087,7 @@ CompileResult compileresult_from_json(const json& j_) {
 }
 
 json compileresult_to_json(const CompileResult& x_) { 
-  auto binary = x_.binary ? json{*x_.binary} : json{};
+  auto binary = x_.binary ? json(*x_.binary) : json();
   auto features = x_.features;
   std::vector<json> events;
   std::transform(x_.events.begin(), x_.events.end(), std::back_inserter(events), &compileevent_to_json);

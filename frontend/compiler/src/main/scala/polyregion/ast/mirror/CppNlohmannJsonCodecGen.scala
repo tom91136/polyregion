@@ -75,8 +75,8 @@ private[polyregion] object CppNlohmannJsonCodecGen {
             case ("std" :: "optional" :: Nil, x :: Nil) =>
               val deref =
                 if (x.kind != CppType.Kind.StdLib) s"${x.ns(toJsonFn(x))}(*x_.${name})"
-                else s"json{*x_.${name}}"
-              s"auto $name = x_.${name} ? $deref : json{};" :: Nil
+                else s"json(*x_.${name})"
+              s"auto $name = x_.${name} ? $deref : json();" :: Nil
 
             case ("std" :: "vector" :: Nil, x :: Nil) if x.kind != CppType.Kind.StdLib =>
               s"std::vector<json> $name;" ::
