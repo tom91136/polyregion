@@ -67,17 +67,96 @@ using std::string;
       [](const Term::IntS32Const &x) { return "i32(" + std::to_string(x.value) + ")"; }, //
       [](const Term::IntS64Const &x) { return "i64(" + std::to_string(x.value) + ")"; }, //
 
-      [](const Term::Bool1Const &x) { return "bool(" + std::to_string(x.value) + ")"; }, //
-      [](const Term::Unit0Const &x) { return "unit()"s; }                                //
+      [](const Term::Bool1Const &x) { return "bool(" + (x.value ? "true"s : "false"s) + ")"; }, //
+      [](const Term::Unit0Const &x) { return "unit()"s; }                                       //
 
   );
 }
 
+[[nodiscard]] string polyast::repr(const Intr::Any &expr) {
+  return variants::total(
+      *expr,                                                                           //
+      [](const Intr::BNot &x) { return "'~" + repr(x.x); },                            //
+      [](const Intr::LogicNot &x) { return "'!" + repr(x.x); },                        //
+      [](const Intr::Pos &x) { return "'+" + repr(x.x); },                             //
+      [](const Intr::Neg &x) { return "'-" + repr(x.x); },                             //
+      [](const Intr::Add &x) { return repr(x.x) + "'+" + repr(x.y); },                 //
+      [](const Intr::Sub &x) { return repr(x.x) + "'-" + repr(x.y); },                 //
+      [](const Intr::Mul &x) { return repr(x.x) + "'*" + repr(x.y); },                 //
+      [](const Intr::Div &x) { return repr(x.x) + "'/" + repr(x.y); },                 //
+      [](const Intr::Rem &x) { return repr(x.x) + "'%" + repr(x.y); },                 //
+      [](const Intr::Min &x) { return "'min(" + repr(x.x) + ", " + repr(x.y) + ")"; }, //
+      [](const Intr::Max &x) { return "'max(" + repr(x.x) + ", " + repr(x.y) + ")"; }, //
+      [](const Intr::BAnd &x) { return repr(x.x) + "'&" + repr(x.y); },                //
+      [](const Intr::BOr &x) { return repr(x.x) + "'|" + repr(x.y); },                 //
+      [](const Intr::BXor &x) { return repr(x.x) + "'^" + repr(x.y); },                //
+      [](const Intr::BSL &x) { return repr(x.x) + "'<<" + repr(x.y); },                //
+      [](const Intr::BSR &x) { return repr(x.x) + "'>>" + repr(x.y); },                //
+      [](const Intr::BZSR &x) { return repr(x.x) + "'>>>" + repr(x.y); },              //
+      [](const Intr::LogicAnd &x) { return repr(x.x) + "'&&" + repr(x.y); },           //
+      [](const Intr::LogicOr &x) { return repr(x.x) + "'||" + repr(x.y); },            //
+      [](const Intr::LogicEq &x) { return repr(x.x) + "'==" + repr(x.y); },            //
+      [](const Intr::LogicNeq &x) { return repr(x.x) + "'!=" + repr(x.y); },           //
+      [](const Intr::LogicLte &x) { return repr(x.x) + "'<=" + repr(x.y); },           //
+      [](const Intr::LogicGte &x) { return repr(x.x) + "'>=" + repr(x.y); },           //
+      [](const Intr::LogicLt &x) { return repr(x.x) + "'<" + repr(x.y); },             //
+      [](const Intr::LogicGt &x) { return repr(x.x) + "'>" + repr(x.y); });
+}
+
+[[nodiscard]] string polyast::repr(const Spec::Any &expr) {
+  return variants::total(
+      *expr,                                                                              //
+      [](const Spec::Assert &x) { return "'assert"s; },                                   //
+      [](const Spec::GpuBarrierGlobal &x) { return "'gpuBarrierGlobal"s; },               //
+      [](const Spec::GpuBarrierLocal &x) { return "'gpuBarrierLocal"s; },                 //
+      [](const Spec::GpuBarrierAll &x) { return "'gpuBarrierAll"s; },                     //
+      [](const Spec::GpuFenceGlobal &x) { return "'gpuFenceGlobal"s; },                   //
+      [](const Spec::GpuFenceLocal &x) { return "'gpuFenceLocal"s; },                     //
+      [](const Spec::GpuFenceAll &x) { return "'gpuFenceAll"s; },                         //
+      [](const Spec::GpuGlobalIdx &x) { return "'gpuGlobalIdx(" + repr(x.dim) + ")"; },   //
+      [](const Spec::GpuGlobalSize &x) { return "'gpuGlobalSize(" + repr(x.dim) + ")"; }, //
+      [](const Spec::GpuGroupIdx &x) { return "'gpuGroupIdx(" + repr(x.dim) + ")"; },     //
+      [](const Spec::GpuGroupSize &x) { return "'gpuGroupSize(" + repr(x.dim) + ")"; },   //
+      [](const Spec::GpuLocalIdx &x) { return "'gpuLocalIdx(" + repr(x.dim) + ")"; },     //
+      [](const Spec::GpuLocalSize &x) { return "'gpuLocalSize(" + repr(x.dim) + ")"; });
+}
+
+[[nodiscard]] string polyast::repr(const Math::Any &expr) {
+  return variants::total(
+      *expr,                                                                               //
+      [](const Math::Abs &x) { return "'abs(" + repr(x.x) + ")"; },                        //
+      [](const Math::Sin &x) { return "'sin(" + repr(x.x) + ")"; },                        //
+      [](const Math::Cos &x) { return "'cos(" + repr(x.x) + ")"; },                        //
+      [](const Math::Tan &x) { return "'tan(" + repr(x.x) + ")"; },                        //
+      [](const Math::Asin &x) { return "'asin(" + repr(x.x) + ")"; },                      //
+      [](const Math::Acos &x) { return "'acos(" + repr(x.x) + ")"; },                      //
+      [](const Math::Atan &x) { return "'atan(" + repr(x.x) + ")"; },                      //
+      [](const Math::Sinh &x) { return "'sinh(" + repr(x.x) + ")"; },                      //
+      [](const Math::Cosh &x) { return "'cosh(" + repr(x.x) + ")"; },                      //
+      [](const Math::Tanh &x) { return "'tanh(" + repr(x.x) + ")"; },                      //
+      [](const Math::Signum &x) { return "'signum(" + repr(x.x) + ")"; },                  //
+      [](const Math::Round &x) { return "'round(" + repr(x.x) + ")"; },                    //
+      [](const Math::Ceil &x) { return "'ceil(" + repr(x.x) + ")"; },                      //
+      [](const Math::Floor &x) { return "'floor(" + repr(x.x) + ")"; },                    //
+      [](const Math::Rint &x) { return "'rint(" + repr(x.x) + ")"; },                      //
+      [](const Math::Sqrt &x) { return "'sqrt(" + repr(x.x) + ")"; },                      //
+      [](const Math::Cbrt &x) { return "'cbrt(" + repr(x.x) + ")"; },                      //
+      [](const Math::Exp &x) { return "'exp(" + repr(x.x) + ")"; },                        //
+      [](const Math::Expm1 &x) { return "'expm1(" + repr(x.x) + ")"; },                    //
+      [](const Math::Log &x) { return "'log(" + repr(x.x) + ")"; },                        //
+      [](const Math::Log1p &x) { return "'log1p(" + repr(x.x) + ")"; },                    //
+      [](const Math::Log10 &x) { return "'log10(" + repr(x.x) + ")"; },                    //
+      [](const Math::Pow &x) { return "'pow(" + repr(x.x) + ", " + repr(x.y) + ")"; },     //
+      [](const Math::Atan2 &x) { return "'atan2(" + repr(x.x) + ", " + repr(x.y) + ")"; }, //
+      [](const Math::Hypot &x) { return "'hypot(" + repr(x.x) + ", " + repr(x.y) + ")"; });
+}
+
 [[nodiscard]] string polyast::repr(const Expr::Any &expr) {
   return variants::total(
-      *expr, //
-      [](const Expr::SpecOp &x) { return to_string(x); }, [](const Expr::MathOp &x) { return to_string(x); },
-      [](const Expr::IntrOp &x) { return to_string(x); },
+      *expr,                                            //
+      [](const Expr::SpecOp &x) { return repr(x.op); }, //
+      [](const Expr::MathOp &x) { return repr(x.op); }, //
+      [](const Expr::IntrOp &x) { return repr(x.op); }, //
       [](const Expr::Cast &x) { return "(" + repr(x.from) + ".to[" + repr(x.as) + "])"; },
       [](const Expr::Alias &x) { return "(~>" + repr(x.ref) + ")"; },
       [](const Expr::Invoke &x) {
@@ -90,7 +169,7 @@ using std::string;
       [](const Expr::RefTo &x) {
         std::string str = "&" + repr(x.lhs);
         if (x.idx) str += "[" + repr(*x.idx) + "]";
-        return str;
+        return str + ":" + repr(x.tpe);
       },
       [](const Expr::Alloc &x) { return "new [" + repr(x.tpe) + "*" + repr(x.size) + "]"; });
 }

@@ -56,7 +56,7 @@ if (NOT DEFINED LLVM_USE_HOST_TOOLS)
 endif ()
 
 set(LLVM_OPTIONS
-
+        ${LLVM_OPTIONS}
         -DLLVM_BUILD_DOCS=OFF
         -DLLVM_BUILD_TOOLS=OFF
         -DLLVM_BUILD_TESTS=OFF
@@ -104,6 +104,13 @@ endif ()
 if (USE_LINKER)
     list(APPEND BUILD_OPTIONS -DLLVM_USE_LINKER=${USE_LINKER})
 endif ()
+
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    list(APPEND BUILD_OPTIONS -DCMAKE_CXX_FLAGS_DEBUG=-O2)
+else ()
+
+endif ()
+
 
 file(REMOVE ${LLVM_BUILD_DIR}/CMakeCache.txt)
 
@@ -174,7 +181,26 @@ execute_process(
         LLVMSupport
         LLVMDemangle
         LLVMTargetParser
+        LLVMOption
+
+
+        clang-resource-headers
+        clangFrontend
+        clangDriver
+        clangParse
+        clangSerialization
+        clangSema
+        clangEdit
         clangAST
+        clangLex
+        clangBasic
+        clangAnalysis
+        clangSupport
+        clangAST
+        clangASTMatchers
+        clangRewrite
+
+
         -- -k 0 # keep going even with error
         WORKING_DIRECTORY ${LLVM_BUILD_DIR}
         RESULT_VARIABLE SUCCESS)

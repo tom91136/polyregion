@@ -58,6 +58,7 @@ struct Remapper {
 public:
   explicit Remapper(clang::ASTContext &context);
   static Term::Any integralConstOfType(const Type::Any &tpe, uint64_t value);
+  static Term::Any floatConstOfType(const Type::Any &tpe, double value);
   [[nodiscard]] Type::Any handleType(clang::QualType tpe) const;
   [[nodiscard]] std::string typeName(const Type::Any &tpe) const;
   [[nodiscard]] std::string nameOfRecord(const clang::RecordType *tpe) const;

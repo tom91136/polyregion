@@ -1,8 +1,34 @@
 
+set(HOST_TEST_SOURCES
+        test/offload_arith.hpp
+        test/offload_outline.hpp
+        )
 
-add_library(PolySTLPlugin SHARED ../shared/cxa_thread_atexit.cpp plugin.cpp remapper.cpp)
+file(REMOVE "${CMAKE_CURRENT_BINARY_DIR}/test-host.cpp")
+foreach (SOURCE ${HOST_TEST_SOURCES})
+    file(APPEND "${CMAKE_CURRENT_BINARY_DIR}/test-host.cpp" "#include \"${CMAKE_CURRENT_SOURCE_DIR}/${SOURCE}\"\n")
+endforeach (SOURCE)
 
-add_executable(polystl-test ../shared/cxa_thread_atexit.cpp test.cpp)
+
+foreach (SOURCE ${HOST_TEST_SOURCES})
+    list(APPEND TOOL_TRANSFORMED_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/${SOURCE}")
+    add_custom_command(
+            OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${SOURCE}"
+            COMMAND "cat ${SOURCE}"
+            DEPENDS PolySTLTool
+    )
+endforeach (SOURCE)
+
+
+add_library(PolySTLPlugin SHARED ../shared/cxa_thread_atexit.cpp plugin.cpp remapper.cpp clang_utils.cpp frontend.cpp outliner.cpp outliner.h)
+add_executable(PolySTLTool ../shared/cxa_thread_atexit.cpp tool.cpp remapper.cpp clang_utils.cpp frontend.cpp outliner.cpp outliner.h)
+
+message(WARNING "-> ${TOOL_TRANSFORMED_SOURCES}")
+add_executable(polystl-test ../shared/cxa_thread_atexit.cpp #
+        ${TOOL_TRANSFORMED_SOURCES})
+add_executable(polystl-test-host ../shared/cxa_thread_atexit.cpp #
+        "${CMAKE_CURRENT_BINARY_DIR}/test-host.cpp")
+
 
 target_include_directories(PolySTLPlugin PRIVATE
         .
@@ -11,8 +37,47 @@ target_include_directories(PolySTLPlugin PRIVATE
         ${CLANG_INCLUDE_DIRS}
         ${LLVM_INCLUDE_DIRS}
         )
+target_include_directories(PolySTLTool PRIVATE
+        .
+        ../compiler
+        ../include
+        ${CLANG_INCLUDE_DIRS}
+        ${LLVM_INCLUDE_DIRS}
+        )
+
 target_link_libraries(PolySTLPlugin PRIVATE PolyAST fmt::fmt-header-only)
-target_link_libraries(polystl-test PRIVATE PolyRT)
+target_link_libraries(PolySTLTool PRIVATE
+        PolyAST
+        Polyc
+        fmt::fmt-header-only
+
+        LLVMFrontendOpenMP
+        LLVMOption
+
+        clangFrontend
+        clangDriver
+        clangParse
+        clangSerialization
+        clangSema
+        clangEdit
+        clangAST
+        clangLex
+        clangBasic
+        clangAnalysis
+        clangSupport
+        clangAST
+        clangASTMatchers
+        clangRewrite
+        )
+target_link_libraries(polystl-test PRIVATE PolyRT Catch2::Catch2WithMain)
+target_link_libraries(polystl-test-host PRIVATE PolyRT Catch2::Catch2WithMain)
+
+
+get_filename_component(Clang_RESOURCE_DIR "${Clang_DIR}/../../clang" ABSOLUTE)
+
+add_custom_command(TARGET PolySTLTool POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${Clang_RESOURCE_DIR}" "$<TARGET_FILE_DIR:PolySTLTool>/lib/clang"
+        )
 
 
 set(COMPILE_OPTIONS
@@ -25,10 +90,15 @@ set(LINK_OPTIONS
         "$<$<CONFIG:DEBUG>:${COMMON_DEBUG_OPTIONS}>")
 
 target_compile_options(PolySTLPlugin PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(PolySTLTool PRIVATE ${COMPILE_OPTIONS})
+
+target_link_options(PolySTLTool PRIVATE ${LINK_OPTIONS})
 target_link_options(PolySTLPlugin PRIVATE ${LINK_OPTIONS})
 
 target_compile_options(polystl-test PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(polystl-test-host PRIVATE ${COMPILE_OPTIONS})
 target_link_options(polystl-test PRIVATE ${LINK_OPTIONS})
+target_link_options(polystl-test-host PRIVATE ${LINK_OPTIONS})
 
 # Running `strip` on macOS drops even more stuff than just compiling with -dead_strip.
 if (APPLE)
@@ -36,4 +106,9 @@ if (APPLE)
             TARGET PolySTLPlugin POST_BUILD
             COMMAND strip
             ARGS -SXx $<TARGET_FILE:PolySTLPlugin>)
+    add_custom_command(
+            TARGET PolySTLTool POST_BUILD
+            COMMAND strip
+            ARGS -SXx $<TARGET_FILE:PolySTLTool>)
 endif ()
+

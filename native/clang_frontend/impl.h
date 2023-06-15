@@ -2,12 +2,10 @@
 
 #include "../runtime/runtime.h"
 #include "concurrency_utils.hpp"
-#include <algorithm>
-#include <execution>
 
 namespace polystl {
 
-
+namespace {
 using namespace polyregion::runtime;
 
 static const std::unordered_map<std::string, Backend> NameToBackend = {
@@ -27,8 +25,7 @@ static const std::unordered_map<std::string, Backend> NameToBackend = {
     {"host_so", Backend::SHARED_OBJ},   //
     {"host", Backend::RELOCATABLE_OBJ}, //
 };
-
-std::unique_ptr<polyregion::runtime::Platform> createPlatform() {
+static std::unique_ptr<polyregion::runtime::Platform> createPlatform() {
   if (auto env = std::getenv("POLY_PLATFORM"); env) {
     std::string name(env);
     std::transform(name.begin(), name.end(), name.begin(), [](auto &c) { return std::tolower(c); });
@@ -37,14 +34,15 @@ std::unique_ptr<polyregion::runtime::Platform> createPlatform() {
   return {};
 }
 
-std::unique_ptr<polyregion::runtime::Device> selectDevice(polyregion::runtime::Platform &p) {
+static std::unique_ptr<polyregion::runtime::Device> selectDevice(polyregion::runtime::Platform &p) {
   if (auto env = std::getenv("POLY_DEVICE"); env) {
     std::string name(env);
     std::transform(name.begin(), name.end(), name.begin(), [](auto &c) { return std::tolower(c); });
     auto devices = p.enumerate();
+    errno = 0;
     size_t index = std::strtol(name.c_str(), nullptr, 10);
-    if (errno == 0 && (index - 1) > devices.size()) { // we got a number, check inbounds and select device
-      return std::move(devices[index]);
+    if (errno == 0 && index < devices.size()) { // we got a number, check inbounds and select device
+      return std::move(devices.at(index));
     } else if (auto matching = // or do a substring match
                std::find_if(devices.begin(), devices.end(),
                             [&name](const auto &device) { return device->name().find(name) != std::string::npos; });
@@ -55,19 +53,20 @@ std::unique_ptr<polyregion::runtime::Device> selectDevice(polyregion::runtime::P
   return {};
 }
 
-template <class _ExecutionPolicy, //
-          class _ForwardIterator1,
-          class _UnaryOperation>
-void for_each(_ExecutionPolicy &&__exec, //
-              _ForwardIterator1 __first, //
-              _ForwardIterator1 __last,  //
-              _UnaryOperation __op) {
+} // namespace
+
+template <typename _KernelClass, typename _Fallback>
+void __polyregion_offload_dispatch__(size_t global,              //
+                                     size_t local,               //
+                                     size_t localMemBytes,       //
+                                     _KernelClass __kernelClass, //
+                                     _Fallback __fallback) {
 
   using namespace polyregion::runtime;
 
-  const std::string &image = __op.__kernelImage;
-  const std::string &name = __op.__uniqueName;
-  const ArgBuffer &buffer = __op.__argBuffer;
+  const std::string &image = __kernelClass.__kernelImage;
+  const std::string &name = __kernelClass.__uniqueName;
+  const ArgBuffer &buffer = __kernelClass.__argBuffer;
 
   static auto thePlatform = createPlatform();
   static auto theDevice = thePlatform ? selectDevice(*thePlatform) : std::unique_ptr<polyregion::runtime::Device>{};
@@ -77,17 +76,26 @@ void for_each(_ExecutionPolicy &&__exec, //
     if (!theDevice->moduleLoaded(name)) {
       theDevice->loadModule(name, image);
     }
-    size_t N = std::distance(__first, __last);
+
+    // [](int n) { __op(__first[x]);  }
+
     polyregion::concurrency_utils::waitAll([&](auto cb) {
-      theQueue->enqueueInvokeAsync(name, "kernel", buffer, Policy{Dim3{N, 1, 1}, {}}, [&]() {
-        fprintf(stderr, "Module %s completed\n", name.c_str());
-        cb();
-      });
+      theQueue->enqueueInvokeAsync(
+          name, "kernel", buffer,
+          Policy{                    //
+                 Dim3{global, 1, 1}, //
+                 local > 0 ? std::optional{std::pair<Dim3, size_t>{Dim3{local, 0, 0}, localMemBytes}} : std::nullopt},
+          [&]() {
+            fprintf(stderr, "Module %s completed\n", name.c_str());
+            cb();
+          });
     });
     fprintf(stderr, "Done\n");
   } else {
     fprintf(stderr, "Host fallback\n");
-    std::for_each(__exec, __first, __last, __op);
+//    for (size_t i = 0; i < global; ++i) {
+//      __fallback(i);
+//    }
   }
 }
 
