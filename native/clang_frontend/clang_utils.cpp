@@ -2,6 +2,7 @@
 
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Expr.h"
+#include "clang/Basic/SourceManager.h"
 #include "clang/Lex/Lexer.h"
 
 namespace polyregion::polystl {
@@ -20,6 +21,18 @@ std::string replaceAllInplace(std::string subject, const std::string &search, co
     pos += replace.length();
   }
   return subject;
+}
+
+
+Location getLocation(const clang::SourceLocation &l, clang::ASTContext &c) {
+  return {.filename = c.getSourceManager().getFilename(l).str(),
+      .line = c.getSourceManager().getSpellingLineNumber(l),
+      .col = c.getSourceManager().getSpellingColumnNumber(l)};
+}
+
+
+Location getLocation(const clang::Expr &e, clang::ASTContext &c) {
+  return getLocation(e.getExprLoc(), c);
 }
 
 std::string underlyingToken(clang::Expr *stmt, clang::ASTContext &c) {

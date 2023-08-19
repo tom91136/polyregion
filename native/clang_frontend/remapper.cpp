@@ -1,3 +1,4 @@
+#include <fmt/format.h>
 #include <iostream>
 
 #include "ast.h"
@@ -168,7 +169,14 @@ std::string Remapper::nameOfRecord(const clang::RecordType *tpe) const {
     }
     return name;
   } else {
-    return tpe->getDecl()->getNameAsString();
+    std::cout << "AAA\n";
+    auto name = tpe->getDecl()->getNameAsString();
+    if (name.empty()) { // some decl don't have names (lambdas), use $filename_$line_$col
+      auto location = getLocation(tpe->getDecl()->getLocation(), context);
+      return fmt::format("{}:{}:{}", location.filename, location.line, location.col);
+    } else {
+      return name;
+    }
   }
 }
 
@@ -325,7 +333,27 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
         auto decl = expr->getDecl();
         auto actual = handleType(expr->getType());
         auto declType = handleType(decl->getType());
-        auto declSelect = Term::Select({}, Named(decl->getDeclName().getAsString(), declType));
+        auto declName = Named(decl->getDeclName().getAsString(), declType);
+        auto declSelect = Term::Select({}, declName);
+        std::cout << "> decl ref => " <<expr->isImplicitCXXThis() << "\n";
+        expr->dumpColor();
+
+        std::cout << expr->getDecl()->getDeclContext()->getPrimaryContext()->getDeclKindName();
+        std::cout << "<<<\n";
+
+
+//        handleType(expr->getFoundDecl().get)
+//        handleExpr(, r);
+
+
+         if(expr->isImplicitCXXThis()){
+           // Named("this", handleType(expr->this))
+            Term::Select({ }, declName );
+
+         }else{
+           Term::Select({}, declName);
+         }
+
         // handle decay `int &x = /* */; int y = x;`
         if (auto declArrTpe = get_opt<Type::Array>(declType); declArrTpe && actual == declArrTpe->component) {
           //          return Expr::Index(declSelect, {integralConstOfType(Type::IntU64(), 0)}, actual);

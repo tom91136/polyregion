@@ -81,10 +81,6 @@ void m(){
 
 template <typename T, typename F> void assertOffload(F g) {
   T expected = g();
-  int u;
-  T actual = offload<T>([&](){
-    int bbb = u;
-    return g();
-  });
+  T actual = offload<T>(g);
   CHECK(expected == actual);
 }

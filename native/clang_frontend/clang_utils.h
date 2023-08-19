@@ -26,4 +26,12 @@ std::string replaceAllInplace(std::string subject, const std::string &search, co
 
 std::string underlyingToken(clang::Expr *stmt, clang::ASTContext &c);
 
+struct Location {
+  std::string filename;
+  size_t line, col;
+};
+
+Location getLocation(const clang::SourceLocation &e, clang::ASTContext &c);
+Location getLocation(const clang::Expr &e, clang::ASTContext &c) ;
+
 } // namespace polyregion::polystl
