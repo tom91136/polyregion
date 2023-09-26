@@ -2,6 +2,7 @@
 
 #include "../runtime/runtime.h"
 #include "concurrency_utils.hpp"
+#include <cstring>
 
 namespace polystl {
 
@@ -55,38 +56,37 @@ static std::unique_ptr<polyregion::runtime::Device> selectDevice(polyregion::run
 
 } // namespace
 
-template <typename _KernelClass, typename _Fallback>
+template <typename F>
 void __polyregion_offload_dispatch__(size_t global,              //
                                      size_t local,               //
                                      size_t localMemBytes,       //
-                                     _KernelClass __kernelClass, //
-                                     _Fallback __fallback) {
+                                     F __f, const char *__kernelName, const unsigned char *__kernelImageBytes, size_t __kernelImageSize) {
 
   using namespace polyregion::runtime;
 
-  const std::string &image = __kernelClass.__kernelImage;
-  const std::string &name = __kernelClass.__uniqueName;
-  const ArgBuffer &buffer = __kernelClass.__argBuffer;
+  char argData[sizeof(F)];
+  std::memcpy(argData, (&__f), sizeof(F));
+  const ArgBuffer buffer{{Type::Ptr, argData}};
 
   static auto thePlatform = createPlatform();
   static auto theDevice = thePlatform ? selectDevice(*thePlatform) : std::unique_ptr<polyregion::runtime::Device>{};
   static auto theQueue = theDevice ? theDevice->createQueue() : std::unique_ptr<polyregion::runtime::DeviceQueue>{};
 
   if (theDevice && theQueue) {
-    if (!theDevice->moduleLoaded(name)) {
-      theDevice->loadModule(name, image);
+    if (!theDevice->moduleLoaded(__kernelName)) {
+      theDevice->loadModule(__kernelName, std::string(__kernelImageBytes, __kernelImageBytes + __kernelImageSize));
     }
 
     // [](int n) { __op(__first[x]);  }
 
     polyregion::concurrency_utils::waitAll([&](auto cb) {
       theQueue->enqueueInvokeAsync(
-          name, "kernel", buffer,
+          __kernelName, "kernel", buffer,
           Policy{                    //
                  Dim3{global, 1, 1}, //
                  local > 0 ? std::optional{std::pair<Dim3, size_t>{Dim3{local, 0, 0}, localMemBytes}} : std::nullopt},
           [&]() {
-            fprintf(stderr, "Module %s completed\n", name.c_str());
+            fprintf(stderr, "Module %s completed\n", __kernelName);
             cb();
           });
     });

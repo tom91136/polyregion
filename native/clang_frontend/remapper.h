@@ -33,12 +33,24 @@ using namespace polyregion::polyast;
 struct Remapper {
   clang::ASTContext &context;
   struct RemapContext {
+    std::optional<std::reference_wrapper<StructDef>> parent;
     size_t counter{};
     std::vector<Stmt::Any> stmts{};
     std::unordered_map<std::string, Function> functions{};
     std::unordered_map<std::string, StructDef> structs{};
-    template <typename T> [[nodiscard]] std::pair<T, std::vector<Stmt::Any>> scoped( const std::function<T(RemapContext &)> &f, bool persistCounter = false) {
-      RemapContext r{persistCounter ? 0 : counter, {}, functions, structs};
+
+    template <typename T>
+    [[nodiscard]] std::pair<T, std::vector<Stmt::Any>>
+    scoped(const std::function<T(RemapContext &)> &f, std::optional<std::string> scopeStructName = {}, bool persistCounter = false) {
+      std::optional<std::reference_wrapper<StructDef>> nextParent = parent;
+      if (scopeStructName) {
+        if (auto it = structs.find(*scopeStructName); it != structs.end()) {
+          nextParent = std::optional<std::reference_wrapper<StructDef>>{it->second};
+        } else {
+          throw std::logic_error("Unexpected parent scope: " + *scopeStructName);
+        }
+      }
+      RemapContext r{nextParent, persistCounter ? 0 : counter, {}, functions, structs};
       auto result = f(r);
       if(!persistCounter){
         counter = r.counter;
@@ -47,7 +59,8 @@ struct Remapper {
       structs = r.structs;
       return {result, r.stmts};
     }
-    [[nodiscard]] std::vector<Stmt::Any> scoped(const std::function<void(RemapContext &)> &f, bool persistCounter = false);
+    [[nodiscard]] std::vector<Stmt::Any> scoped(const std::function<void(RemapContext &)> &f,
+                                                std::optional<std::string> scopeStructName = {}, bool persistCounter = false);
 
     void push(const Stmt::Any &stmt);
     Named newName(const Type::Any &tpe);

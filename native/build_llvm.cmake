@@ -106,7 +106,7 @@ if (USE_LINKER)
 endif ()
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    list(APPEND BUILD_OPTIONS -DCMAKE_CXX_FLAGS_DEBUG=-O2)
+    list(APPEND BUILD_OPTIONS "-DCMAKE_CXX_FLAGS_DEBUG='-O2 -g'")
 else ()
 
 endif ()
@@ -186,6 +186,7 @@ execute_process(
 
         clang-resource-headers
         clangFrontend
+        clangCodeGen
         clangDriver
         clangParse
         clangSerialization

@@ -150,8 +150,6 @@ llvm::Type *LLVMBackend::AstTransformer::mkTpe(const Type::Any &tpe, bool functi
         }
       }, //
       [&](const Type::Array &x) -> llvm::Type * {
-        ;
-
         return B.getPtrTy(variants::total(
             *x.space,                                             //
             [&](const TypeSpace::Local &_) { return LocalAS; },   //

@@ -25,8 +25,8 @@ std::string replaceAllInplace(std::string subject, const std::string &search, co
 
 
 Location getLocation(const clang::SourceLocation &l, clang::ASTContext &c) {
-  return {.filename = c.getSourceManager().getFilename(l).str(),
-      .line = c.getSourceManager().getSpellingLineNumber(l),
+  return {.filename = llvm::sys::path::filename(c.getSourceManager().getFilename(l)).str(),
+          .line = c.getSourceManager().getSpellingLineNumber(l),
       .col = c.getSourceManager().getSpellingColumnNumber(l)};
 }
 

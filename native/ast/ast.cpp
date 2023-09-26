@@ -17,18 +17,18 @@ using std::string;
 [[nodiscard]] string polyast::repr(const Type::Any &type) {
   return variants::total(
       *type,                                        //
-      [](const Type::Float16 &) { return "F16"s; }, //
-      [](const Type::Float32 &) { return "F32"s; }, //
-      [](const Type::Float64 &) { return "F64"s; }, //
+      [](const Type::Float16 &) { return "f16"s; }, //
+      [](const Type::Float32 &) { return "f32"s; }, //
+      [](const Type::Float64 &) { return "f64"s; }, //
 
-      [](const Type::IntS8 &) { return "I8"s; },   //
-      [](const Type::IntS16 &) { return "I16"s; }, //
-      [](const Type::IntS32 &) { return "I32"s; }, //
-      [](const Type::IntS64 &) { return "I64"s; }, //
-      [](const Type::IntU8 &) { return "U8"s; },   //
-      [](const Type::IntU16 &) { return "U16"s; }, //
-      [](const Type::IntU32 &) { return "U32"s; }, //
-      [](const Type::IntU64 &) { return "U64"s; }, //
+      [](const Type::IntS8 &) { return "i8"s; },   //
+      [](const Type::IntS16 &) { return "i16"s; }, //
+      [](const Type::IntS32 &) { return "i32"s; }, //
+      [](const Type::IntS64 &) { return "i64"s; }, //
+      [](const Type::IntU8 &) { return "u8"s; },   //
+      [](const Type::IntU16 &) { return "u16"s; }, //
+      [](const Type::IntU32 &) { return "u32"s; }, //
+      [](const Type::IntU64 &) { return "u64"s; }, //
 
       [](const Type::Unit0 &) { return "Unit"s; },                             //
       [](const Type::Bool1 &) { return "Bool"s; },                             //
@@ -40,7 +40,7 @@ using std::string;
   );
 }
 
-[[nodiscard]] string polyast::repr(const Named &path) { return "(" + path.symbol + ":" + repr(path.tpe) + ")"; }
+[[nodiscard]] string polyast::repr(const Named &path) { return "(" + path.symbol + ": " + repr(path.tpe) + ")"; }
 
 [[nodiscard]] string polyast::repr(const Term::Any &ref) {
   return variants::total(
@@ -80,27 +80,27 @@ using std::string;
       [](const Intr::LogicNot &x) { return "'!" + repr(x.x); },                        //
       [](const Intr::Pos &x) { return "'+" + repr(x.x); },                             //
       [](const Intr::Neg &x) { return "'-" + repr(x.x); },                             //
-      [](const Intr::Add &x) { return repr(x.x) + "'+" + repr(x.y); },                 //
-      [](const Intr::Sub &x) { return repr(x.x) + "'-" + repr(x.y); },                 //
-      [](const Intr::Mul &x) { return repr(x.x) + "'*" + repr(x.y); },                 //
-      [](const Intr::Div &x) { return repr(x.x) + "'/" + repr(x.y); },                 //
-      [](const Intr::Rem &x) { return repr(x.x) + "'%" + repr(x.y); },                 //
+      [](const Intr::Add &x) { return repr(x.x) + " '+ " + repr(x.y); },                 //
+      [](const Intr::Sub &x) { return repr(x.x) + " '- " + repr(x.y); },                 //
+      [](const Intr::Mul &x) { return repr(x.x) + " '* " + repr(x.y); },                 //
+      [](const Intr::Div &x) { return repr(x.x) + " '/ " + repr(x.y); },                 //
+      [](const Intr::Rem &x) { return repr(x.x) + " '% " + repr(x.y); },                 //
       [](const Intr::Min &x) { return "'min(" + repr(x.x) + ", " + repr(x.y) + ")"; }, //
       [](const Intr::Max &x) { return "'max(" + repr(x.x) + ", " + repr(x.y) + ")"; }, //
-      [](const Intr::BAnd &x) { return repr(x.x) + "'&" + repr(x.y); },                //
-      [](const Intr::BOr &x) { return repr(x.x) + "'|" + repr(x.y); },                 //
-      [](const Intr::BXor &x) { return repr(x.x) + "'^" + repr(x.y); },                //
-      [](const Intr::BSL &x) { return repr(x.x) + "'<<" + repr(x.y); },                //
-      [](const Intr::BSR &x) { return repr(x.x) + "'>>" + repr(x.y); },                //
-      [](const Intr::BZSR &x) { return repr(x.x) + "'>>>" + repr(x.y); },              //
-      [](const Intr::LogicAnd &x) { return repr(x.x) + "'&&" + repr(x.y); },           //
-      [](const Intr::LogicOr &x) { return repr(x.x) + "'||" + repr(x.y); },            //
-      [](const Intr::LogicEq &x) { return repr(x.x) + "'==" + repr(x.y); },            //
-      [](const Intr::LogicNeq &x) { return repr(x.x) + "'!=" + repr(x.y); },           //
-      [](const Intr::LogicLte &x) { return repr(x.x) + "'<=" + repr(x.y); },           //
-      [](const Intr::LogicGte &x) { return repr(x.x) + "'>=" + repr(x.y); },           //
-      [](const Intr::LogicLt &x) { return repr(x.x) + "'<" + repr(x.y); },             //
-      [](const Intr::LogicGt &x) { return repr(x.x) + "'>" + repr(x.y); });
+      [](const Intr::BAnd &x) { return repr(x.x) + " '& " + repr(x.y); },                //
+      [](const Intr::BOr &x) { return repr(x.x) + " '| " + repr(x.y); },                 //
+      [](const Intr::BXor &x) { return repr(x.x) + " '^ " + repr(x.y); },                //
+      [](const Intr::BSL &x) { return repr(x.x) + " '<< " + repr(x.y); },                //
+      [](const Intr::BSR &x) { return repr(x.x) + " '>> " + repr(x.y); },                //
+      [](const Intr::BZSR &x) { return repr(x.x) + " '>>> " + repr(x.y); },              //
+      [](const Intr::LogicAnd &x) { return repr(x.x) + " '&& " + repr(x.y); },           //
+      [](const Intr::LogicOr &x) { return repr(x.x) + " '|| " + repr(x.y); },            //
+      [](const Intr::LogicEq &x) { return repr(x.x) + " '== " + repr(x.y); },            //
+      [](const Intr::LogicNeq &x) { return repr(x.x) + " '!= " + repr(x.y); },           //
+      [](const Intr::LogicLte &x) { return repr(x.x) + " '<= " + repr(x.y); },           //
+      [](const Intr::LogicGte &x) { return repr(x.x) + " '>= " + repr(x.y); },           //
+      [](const Intr::LogicLt &x) { return repr(x.x) + " '< " + repr(x.y); },             //
+      [](const Intr::LogicGt &x) { return repr(x.x) + " '> " + repr(x.y); });
 }
 
 [[nodiscard]] string polyast::repr(const Spec::Any &expr) {
@@ -163,13 +163,13 @@ using std::string;
         return (x.receiver ? repr(*x.receiver) : "<module>") + "." + repr(x.name) + "(" +
                mk_string<Term::Any>(
                    x.args, [&](auto x) { return repr(x); }, ",") +
-               ")" + ":" + repr(x.tpe);
+               ")" + ": " + repr(x.tpe);
       },
       [](const Expr::Index &x) { return repr(x.lhs) + "[" + repr(x.idx) + "]"; },
       [](const Expr::RefTo &x) {
         std::string str = "&" + repr(x.lhs);
         if (x.idx) str += "[" + repr(*x.idx) + "]";
-        return str + ":" + repr(x.tpe);
+        return str + ": " + repr(x.tpe);
       },
       [](const Expr::Alloc &x) { return "new [" + repr(x.tpe) + "*" + repr(x.size) + "]"; });
 }

@@ -34,8 +34,8 @@
 #include "clang_utils.h"
 #include "compiler.h"
 #include "frontend.h"
-#include "outliner.h"
 #include "remapper.h"
+#include "rewriter.h"
 namespace {
 
 using namespace polyregion::polystl;
@@ -86,10 +86,10 @@ static std::optional<CompileResult> compileIt(Program &p) {
   }
 }
 
-struct PluginRewriteAndCompileAction : public RewriteAndCompileAction {
+struct PluginRewriteAndCompileAction : public ModifyASTAndEmitObjAction {
   PluginRewriteAndCompileAction()
-      : RewriteAndCompileAction(std::make_unique<clang::EmitObjAction>(),
-                                [](clang::Rewriter &r, std::atomic_bool &error) { return std::make_unique<OutlineConsumer>(r, error); }) {}
+      : ModifyASTAndEmitObjAction(std::make_unique<clang::EmitObjAction>(),
+                                [](clang::Rewriter &r, std::atomic_bool &error) { return std::make_unique<OffloadRewriteConsumer>(r, error); }) {}
 };
 
 } // end namespace

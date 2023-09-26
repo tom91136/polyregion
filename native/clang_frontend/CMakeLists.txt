@@ -20,8 +20,12 @@ foreach (SOURCE ${HOST_TEST_SOURCES})
 endforeach (SOURCE)
 
 
-add_library(PolySTLPlugin SHARED ../shared/cxa_thread_atexit.cpp plugin.cpp remapper.cpp clang_utils.cpp frontend.cpp outliner.cpp outliner.h)
-add_executable(PolySTLTool ../shared/cxa_thread_atexit.cpp tool.cpp remapper.cpp clang_utils.cpp frontend.cpp outliner.cpp outliner.h)
+add_library(PolySTLPlugin SHARED ../shared/cxa_thread_atexit.cpp
+        plugin.cpp
+        remapper.cpp clang_utils.cpp ast_visitors.cpp codegen.cpp frontend.cpp rewriter.cpp)
+add_executable(PolySTLTool ../shared/cxa_thread_atexit.cpp
+        tool.cpp
+        remapper.cpp clang_utils.cpp ast_visitors.cpp codegen.cpp frontend.cpp rewriter.cpp)
 
 message(WARNING "-> ${TOOL_TRANSFORMED_SOURCES}")
 add_executable(polystl-test ../shared/cxa_thread_atexit.cpp #
@@ -53,7 +57,9 @@ target_link_libraries(PolySTLTool PRIVATE
 
         LLVMFrontendOpenMP
         LLVMOption
+        LLVMCodeGen
 
+        clangCodeGen
         clangFrontend
         clangDriver
         clangParse
