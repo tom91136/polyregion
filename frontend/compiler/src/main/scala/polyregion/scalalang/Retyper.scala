@@ -181,7 +181,7 @@ object Retyper {
       case (p.Sym(Symbols.Scala :+ "Char"), q.ClassKind.Class)    => p.Type.IntU16
       // TODO type ctor args for now, need to work out type member refinements
       case (sym, q.ClassKind.Class | q.ClassKind.Object) =>
-        p.Type.Struct(sym, tpeVars, tpeVars.map(p.Type.Var(_)), deriveParents(clsSym))
+        p.Type.Struct(sym, true, tpeVars, tpeVars.map(p.Type.Var(_)), deriveParents(clsSym))
     }
 
   def clsSymTyper0(using q: Quoted)(clsSym: q.Symbol): Result[p.Type] =
@@ -223,9 +223,9 @@ object Retyper {
               } yield (tpe :: Nil) -> Map.empty
             case q.TermRef(receiverTpe, _) => // we have something concrete
               typer0(receiverTpe).map {
-                case (_ -> p.Type.Struct(_, _, args, _), wit) => args         -> wit
+                case (_ -> p.Type.Struct(_, _, _, args, _), wit) => args         -> wit
                 case (_ -> p.Type.Array(arg, _), wit)            => (arg :: Nil) -> wit
-                case (_ -> _, wit)                            => Nil          -> wit
+                case (_ -> _, wit)                               => Nil          -> wit
               }
             case _ => (Nil, Map.empty).success
           }
@@ -250,7 +250,7 @@ object Retyper {
                 case _: q.OrType  => p.Sym("#Union")
                 case _: q.AndType => p.Sym("#Intersection")
               }
-              (term -> p.Type.Struct(sym, Nil, leftTpe :: rightTpe :: Nil, Nil), leftWit |+| rightWit).success
+              (term -> p.Type.Struct(sym, true, Nil, leftTpe :: rightTpe :: Nil, Nil), leftWit |+| rightWit).success
             }
           //            else s"Left type `$leftTpe` and right type `$rightTpe` did not unify for ${andOr.widenByName.widen.simplified.show}".fail
         } yield r
@@ -282,7 +282,7 @@ object Retyper {
               symbol.tree match {
                 case clsDef: q.ClassDef =>
                   val appliedTpe: p.Type.Struct =
-                    p.Type.Struct(name, tpeVars, ctorArgs.map(_._2), deriveParents(symbol))
+                    p.Type.Struct(name, true, tpeVars, ctorArgs.map(_._2), deriveParents(symbol))
                   (None -> appliedTpe, wit |+| Map(symbol -> Set(appliedTpe))).success
                 case _ => s"$symbol is not a ClassDef".fail
               }
@@ -315,7 +315,7 @@ object Retyper {
         // println(s"[fallthrough typer] ${expr} => ${expr.show} ${expr.getClass}")
         resolveClsFromTpeRepr(expr).flatMap { (sym, tpeVars, symbol, kind) =>
           liftClsToTpe(sym, tpeVars, symbol, kind) match {
-            case s @ p.Type.Struct(_, _, _, _) =>
+            case s @ p.Type.Struct(_, _, _, _, _) =>
               symbol.tree match {
                 case clsDef: q.ClassDef => (None -> s, Map(symbol -> Set(s))).success
                 case _                  => s"$symbol is not a ClassDef".fail

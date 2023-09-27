@@ -16,14 +16,14 @@ using namespace Expr;
 TEST_CASE("Invoke identity") {
 
   InvokeSignature a(Sym({"polyregion", "CollectionLengthSuite", "ClassB", "foo"}), {},
-                    {Type::Struct(Sym({"polyregion_CollectionLengthSuite_ClassB__"}), {}, {},
+                    {Type::Struct(Sym({"polyregion_CollectionLengthSuite_ClassB__"}), true, {}, {},
                                   {Sym({"polyregion_CollectionLengthSuite_Base__"})})},
                     {Type::IntS32()}, {}, Type::IntS32());
 
   InvokeSignature b(
       Sym({"polyregion", "CollectionLengthSuite", "ClassB", "foo"}),
       {},
-                    {Type::Struct(Sym({"polyregion_CollectionLengthSuite_ClassB__"}), {}, {},
+                    {Type::Struct(Sym({"polyregion_CollectionLengthSuite_ClassB__"}), true, {}, {},
                                   {Sym({"polyregion_CollectionLengthSuite_Base__"})})},
                     {Type::IntS32()}, {}, Type::IntS32());
 
@@ -32,10 +32,10 @@ TEST_CASE("Invoke identity") {
 
 TEST_CASE("Struct identity") {
 
-  Type::Any a = Type::Struct(Sym({"polyregion_CollectionLengthSuite_ClassB__"}), {}, {},
+  Type::Any a = Type::Struct(Sym({"polyregion_CollectionLengthSuite_ClassB__"}), true, {}, {},
                  {Sym({"polyregion_CollectionLengthSuite_Base__"})});
 
-  Type::Any b = Type::Struct(Sym({"polyregion_CollectionLengthSuite_ClassB__"}), {}, {},
+  Type::Any b = Type::Struct(Sym({"polyregion_CollectionLengthSuite_ClassB__"}), true, {}, {},
                  {Sym({"polyregion_CollectionLengthSuite_Base__"})});
 
 

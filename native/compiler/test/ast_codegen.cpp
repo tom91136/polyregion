@@ -69,7 +69,7 @@ template <typename P> static void assertCompile(const P &p) {
   CAPTURE(c);
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);
-  std::cout << (c) << std::endl;
+  INFO(c);
 }
 
 TEST_CASE("json round-trip", "[ast]") {
@@ -372,7 +372,7 @@ TEST_CASE("index struct array member", "[compiler]") {
   Named defX = Named("x", Type::IntS32());
   Named defY = Named("y", Type::IntS32());
   StructDef def(myStructSym, {}, {StructMember(defX, false), StructMember(defY, false)}, {});
-  Type::Struct myStruct(myStructSym, {}, {}, {});
+  Type::Struct myStruct(myStructSym, true, {}, {}, {});
 
   Function fn(Sym({"foo"}), {}, {}, {Arg(Named("s", Array(myStruct)), {})}, {}, {}, Type::IntS32(),
               {
@@ -395,7 +395,7 @@ TEST_CASE("array update struct elem member", "[compiler]") {
   Named defX = Named("x", Type::IntS32());
   Named defY = Named("y", Type::IntS32());
   StructDef def(myStructSym, {}, {StructMember(defX, false), StructMember(defY, false)}, {});
-  Type::Struct myStruct(myStructSym, {}, {}, {});
+  Type::Struct myStruct(myStructSym, true, {}, {}, {});
 
   Function fn(Sym({"foo"}), {}, {}, {Arg(Named("xs", Array(myStruct)), {})}, {}, {}, Type::IntS32(),
               {
@@ -414,7 +414,7 @@ TEST_CASE("array update struct elem", "[compiler]") {
   Named defX = Named("x", Type::IntS32());
   Named defY = Named("y", Type::IntS32());
   StructDef def(myStructSym, {}, {StructMember(defX, false), StructMember(defY, false)}, {});
-  Type::Struct myStruct(myStructSym, {}, {}, {});
+  Type::Struct myStruct(myStructSym, true, {}, {}, {});
 
   Function fn(Sym({"foo"}), {}, {}, {Arg(Named("xs", Array(myStruct)), {})}, {}, {}, Type::IntS32(),
               {
@@ -435,7 +435,7 @@ TEST_CASE("alias struct", "[compiler]") {
   Named defX = Named("x", Type::IntS32());
   Named defY = Named("y", Type::IntS32());
   StructDef def(myStructSym, {}, {StructMember(defX, false), StructMember(defY, false)}, {});
-  Type::Struct myStruct(myStructSym, {}, {}, {});
+  Type::Struct myStruct(myStructSym, true, {}, {}, {});
 
   Function fn(Sym({"foo"}), {}, {}, {Arg(Named("out", myStruct), {})}, {}, {}, Type::IntS32(),
               {
@@ -453,7 +453,7 @@ TEST_CASE("alias struct member", "[compiler]") {
 
   Sym sdef({"a", "b"});
   StructDef def(sdef, {}, {StructMember(Named("x", Type::IntS32()), false), StructMember(Named("y", Type::IntS32()), false)}, {});
-  Named arg("in", Type::Struct(sdef, {}, {}, {}));
+  Named arg("in", Type::Struct(sdef, true, {}, {}, {}));
   Function fn(Sym({"foo"}), {}, {}, {Arg(arg, {})}, {}, {}, Type::Unit0(),
               {
                   Var(                             //
@@ -493,7 +493,7 @@ TEST_CASE("mut struct", "[compiler]") {
   Named defX = Named("x", Type::IntS32());
   Named defY = Named("y", Type::IntS32());
   StructDef def(myStructSym, {}, {StructMember(defX, false), StructMember(defY, false)}, {});
-  Type::Struct myStruct(myStructSym, {}, {}, {});
+  Type::Struct myStruct(myStructSym, true, {}, {}, {});
 
   Function fn(Sym({"foo"}), {}, {}, {Arg(Named("out", myStruct), {})}, {}, {}, Type::Unit0(),
               {
@@ -557,9 +557,9 @@ TEST_CASE("alloc struct", "[compiler]") {
   Named defX = Named("x", Type::IntS32());
   Named defY = Named("y", Type::IntS32());
   StructDef def(myStructSym, {}, {StructMember(defX, false), StructMember(defY, false)}, {});
-  Type::Struct myStruct(myStructSym, {}, {}, {});
+  Type::Struct myStruct(myStructSym, true, {}, {}, {});
   StructDef def2(myStruct2Sym, {}, {StructMember(defX, false)}, {});
-  Type::Struct myStruct2(myStruct2Sym, {}, {}, {});
+  Type::Struct myStruct2(myStruct2Sym, true, {}, {}, {});
 
   Function fn(Sym({"foo"}), {}, {}, {Arg(Named("out", myStruct), {})}, {}, {}, Type::IntS32(),
               {
@@ -587,11 +587,11 @@ TEST_CASE("alloc struct nested", "[compiler]") {
   Named defY = Named("y", Type::IntS32());
 
   StructDef def2(myStruct2Sym, {}, {StructMember(defX, false)}, {});
-  Type::Struct myStruct2(myStruct2Sym, {}, {}, {});
+  Type::Struct myStruct2(myStruct2Sym, true, {}, {}, {});
   Named defZ = Named("z", myStruct2);
 
   StructDef def(myStructSym, {}, {StructMember(defX, false), StructMember(defY, false), StructMember(defZ, false)}, {});
-  Type::Struct myStruct(myStructSym, {}, {}, {});
+  Type::Struct myStruct(myStructSym, true, {}, {}, {});
 
   Function fn(Sym({"foo"}), {}, {}, {}, {}, {}, Type::IntS32(),
               {

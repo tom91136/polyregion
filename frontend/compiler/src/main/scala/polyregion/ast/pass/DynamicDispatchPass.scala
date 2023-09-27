@@ -27,14 +27,14 @@ object DynamicDispatchPass extends ProgramPass {
       // Find all subclasses first
       val children = program.defs.filter(_.parents.contains(c.name))
       log.info(s"Children for ${c.repr}", children.map(_.repr)*)
-      log.info(s"Fns for ${c.repr}", clsFns(c.tpe).map(_.repr)*)
+      log.info(s"Fns for ${c.repr}", clsFns(c.tpe()).map(_.repr)*)
       log.info(
         s"overriding fns for ${c.repr}",
-        clsFns(c.tpe).map { f =>
+        clsFns(c.tpe()).map { f =>
 
           val simpleName = f.name.last
           val overridingFns = children.flatMap { c =>
-            val recvTpe = c.tpe
+            val recvTpe = c.tpe()
             clsFns(recvTpe) // .filter(_.name.last == simpleName).map(recvTpe -> _)
           }
 
@@ -44,11 +44,11 @@ object DynamicDispatchPass extends ProgramPass {
       )
 
       // Then, for each method in the base class, see if it has overrides from any subclass
-      clsFns(c.tpe).flatMap { baseFn =>
+      clsFns(c.tpe()).flatMap { baseFn =>
 
         val simpleName = baseFn.name.last
         val overridingFns = children.flatMap { c =>
-          val recvTpe = c.tpe
+          val recvTpe = c.tpe()
           clsFns(recvTpe).filter(_.name.last == simpleName).map(recvTpe -> _)
         }
         // If we do find any, synthesise the dynamic dispatch function
@@ -82,7 +82,7 @@ object DynamicDispatchPass extends ProgramPass {
           })
 
           (
-            c.tpe,
+            c.tpe(),
             baseFn.name,
             p.Function(
               name = p.Sym(s"$simpleName^"),
@@ -108,7 +108,7 @@ object DynamicDispatchPass extends ProgramPass {
 
     // Ensure synthetic class tag fields are initialised to the correct constant
     def insertClassTags(f: p.Function) = f.modifyAll[p.Stmt] {
-      case stmt @ p.Stmt.Var(local @ p.Named(_, s @ p.Type.Struct(name, _, _, _)), None)
+      case stmt @ p.Stmt.Var(local @ p.Named(_, s @ p.Type.Struct(name, _, _, _, _)), None)
           if polymorphicSyms.contains(name) =>
         val rhs        = p.Term.IntS32Const(clsTag(s))
         val clsSelect  = p.Term.Select(local :: Nil, p.Named("_#cls", p.Type.IntS32))
@@ -124,7 +124,7 @@ object DynamicDispatchPass extends ProgramPass {
         log.info(s"Replace: ${ivk.repr}", lut.get((recv.tpe, name.last)).toString)
 
         def isSuperCall(t: p.Type) = (t, f.receiver) match {
-          case (p.Type.Struct(clsName, _, _, _), Some(p.Arg(p.Named(_, p.Type.Struct(_, _, _, parents)), _))) =>
+          case (p.Type.Struct(clsName, _, _, _, _), Some(p.Arg(p.Named(_, p.Type.Struct(_, _, _, _, parents)), _))) =>
             parents.contains(clsName) && f.name.last == name.last
           case _ => false
         }

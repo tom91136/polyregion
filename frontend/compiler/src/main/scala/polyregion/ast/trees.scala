@@ -208,8 +208,8 @@ object PolyAstToExpr {
       case p.Type.IntU32  => '{ p.Type.IntU32 }
       case p.Type.IntU64  => '{ p.Type.IntU64 }
 
-      case p.Type.Struct(name, tpeVars, args, parents) =>
-        '{ p.Type.Struct(${ Expr(name) }, ${ Expr(tpeVars) }, ${ Expr(args) }, ${ Expr(parents) }) }
+      case p.Type.Struct(name, ref, tpeVars, args, parents) =>
+        '{ p.Type.Struct(${ Expr(name) }, ${ Expr(ref) }, ${ Expr(tpeVars) }, ${ Expr(args) }, ${ Expr(parents) }) }
       case p.Type.Array(component, space)  => '{ p.Type.Array(${ Expr(component) }, ${ Expr(space) }) }
       case p.Type.Exec(tpeVars, args, rtn) => ???
       case p.Type.Nothing                  => ???
@@ -223,7 +223,7 @@ extension (m: p.StructMember) {
 }
 
 extension (sd: p.StructDef) {
-  def tpe: p.Type.Struct = p.Type.Struct(sd.name, sd.tpeVars, Nil, sd.parents)
+  def tpe(ref: Boolean = true): p.Type.Struct = p.Type.Struct(sd.name, ref, sd.tpeVars, Nil, sd.parents)
   def repr: String =
     s"${sd.name.repr}<${sd.tpeVars.mkString(",")}> { ${sd.members
         .map(_.repr)
@@ -241,9 +241,10 @@ extension (n: p.Named) {
 extension (e: p.Type) {
 
   def erased: p.Type = e match {
-    case p.Type.Struct(sym, vars, _, parents) =>
+    case p.Type.Struct(sym, ref, vars, _, parents) =>
       p.Type.Struct(
         sym,
+        ref,
         List.tabulate(vars.size)(i => s"T$i"),
         List.tabulate(vars.size)(i => p.Type.Var(s"T$i")),
         parents
@@ -254,8 +255,10 @@ extension (e: p.Type) {
   @targetName("tpeEquals")
   def =:=(that: p.Type): Boolean =
     (e, that) match {
-      case (p.Type.Struct(xSym, xVars, xTpes, xParents), p.Type.Struct(ySym, yVars, yTpes, yParents)) =>
-        xSym == ySym && xVars == yVars && xTpes.zip(yTpes).forall(_ =:= _) && xParents.zip(yParents).forall(_ == _)
+      case (p.Type.Struct(xSym, xRef, xVars, xTpes, xParents), p.Type.Struct(ySym, yRef, yVars, yTpes, yParents)) =>
+        xSym == ySym && xRef == yRef && xVars == yVars && xTpes.zip(yTpes).forall(_ =:= _) && xParents
+          .zip(yParents)
+          .forall(_ == _)
       case (p.Type.Nothing, p.Type.Nothing)             => true
       case (p.Type.Nothing, _)                          => true
       case (_, p.Type.Nothing)                          => true
@@ -265,17 +268,17 @@ extension (e: p.Type) {
     }
 
   def mapLeaf(f: p.Type => p.Type): p.Type = e match {
-    case p.Type.Struct(name, tpeVars, args, parents) => p.Type.Struct(name, tpeVars, args.map(f), parents)
-    case p.Type.Array(component, space)              => p.Type.Array(f(component), space)
-    case p.Type.Exec(tpeVars, args, rtn)             => p.Type.Exec(tpeVars, args.map(f), f(rtn))
-    case x                                           => f(x)
+    case p.Type.Struct(name, ref, tpeVars, args, parents) => p.Type.Struct(name, ref, tpeVars, args.map(f), parents)
+    case p.Type.Array(component, space)                   => p.Type.Array(f(component), space)
+    case p.Type.Exec(tpeVars, args, rtn)                  => p.Type.Exec(tpeVars, args.map(f), f(rtn))
+    case x                                                => f(x)
   }
 
   def mapNode(f: p.Type => p.Type): p.Type = e match {
-    case p.Type.Struct(name, tpeVars, args, parents) => f(p.Type.Struct(name, tpeVars, args.map(f), parents))
-    case p.Type.Array(component, space)              => f(p.Type.Array(f(component), space))
-    case p.Type.Exec(tpeVars, args, rtn)             => f(p.Type.Exec(tpeVars, args.map(f), f(rtn)))
-    case x                                           => x
+    case p.Type.Struct(name, ref, tpeVars, args, parents) => f(p.Type.Struct(name, ref, tpeVars, args.map(f), parents))
+    case p.Type.Array(component, space)                   => f(p.Type.Array(f(component), space))
+    case p.Type.Exec(tpeVars, args, rtn)                  => f(p.Type.Exec(tpeVars, args.map(f), f(rtn)))
+    case x                                                => x
   }
 
   def isNumeric: Boolean = e.kind match {
@@ -283,8 +286,11 @@ extension (e: p.Type) {
     case _                                       => false
   }
   def repr: String = e match {
-    case p.Type.Struct(sym, tpeVars, args, parents) =>
-      s"@${sym.repr}${tpeVars.zipAll(args, "???", p.Type.Var("???")).map((v, a) => s"$v=${a.repr}").mkString("<", ",", ">")}(${parents.map(_.repr).mkString("<:")})"
+    case p.Type.Struct(sym, ref, tpeVars, args, parents) =>
+      s"@${if (ref) "&" else ""}${sym.repr}${tpeVars
+          .zipAll(args, "???", p.Type.Var("???"))
+          .map((v, a) => s"$v=${a.repr}")
+          .mkString("<", ",", ">")}(${parents.map(_.repr).mkString("<:")})"
     case p.Type.Array(comp, space) => s"Array[${comp.repr}^${space}]"
     case p.Type.Bool1              => "Bool1"
     case p.Type.IntS8              => "IntS8b"
@@ -309,8 +315,8 @@ extension (e: p.Type) {
 
   // TODO remove
   def monomorphicName: String = e match {
-    case p.Type.Struct(sym, _, args, parents) =>
-      sym.fqn.mkString("_") + args.map(_.monomorphicName).mkString("_", "_", "_")
+    case p.Type.Struct(sym, ref, _, args, parents) =>
+      (if (ref) "&" else "") + sym.fqn.mkString("_") + args.map(_.monomorphicName).mkString("_", "_", "_")
     case p.Type.Array(comp, space) => s"${comp.monomorphicName}^$space[]"
     case p.Type.Bool1              => "Bool1"
     case p.Type.IntS8              => "IntS8b"

@@ -40,8 +40,8 @@ object FnInlinePass extends ProgramPass {
 
     val concreteTpeArgs = ivk.receiver
       .map(_.tpe match {
-        case p.Type.Struct(_, _, tpeArgs, _) => tpeArgs
-        case _                               => Nil
+        case p.Type.Struct(_, _, _, tpeArgs, _) => tpeArgs
+        case _                                  => Nil
       })
       .getOrElse(Nil) ++ ivk.tpeArgs
 

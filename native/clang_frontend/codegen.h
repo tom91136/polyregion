@@ -4,7 +4,7 @@
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
 
-namespace polyregion::polyast {
+namespace polyregion::polystl {
 
 std::string generate(clang::ASTContext &C, const clang::CXXRecordDecl *parent, clang::QualType returnTpe, const clang::Stmt *body);
 

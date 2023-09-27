@@ -47,17 +47,16 @@ void m(){
 
 
 //
-  assertOffload1<int>( [&]() {
-    printf("A\n");
-    int ccc = 123;
-    ccc += mmm(12, 34) + mmm(56,78);
-    return ccc;
-  });
-
+  //  assertOffload1<int>( [&]() {
+  ////    printf("A\n");
+  //    int ccc = 123;
+  //    ccc += mmm(12, 34) + mmm(56,78);
+  //    return ccc;
+  //  });
 
   assertOffload1<short>([&]() {
-    printf("B\n");
-    return 4242;
+    //    printf("B\n");
+    return 42 + aaaa;
   });
 }
 

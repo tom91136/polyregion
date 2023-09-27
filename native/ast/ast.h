@@ -93,7 +93,7 @@ const static Tpe::Unit0 Unit = Tpe::Unit0();
 const static Tpe::Nothing Nothing = Tpe::Nothing();
 
 Tpe::Array Array(const Tpe::Any &t, const TypeSpace::Any &s = TypeSpace::Global());
-Tpe::Struct Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args);
+Tpe::Struct Struct(Sym name, bool ref, std::vector<std::string> tpeVars, std::vector<Type::Any> args);
 
 struct AssignmentBuilder {
   std::string name;

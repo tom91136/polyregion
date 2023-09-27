@@ -165,7 +165,7 @@ object IntrinsifyPass extends ProgramPass {
                 p.Term
                   .Select(
                     Nil,
-                    p.Named(_, p.Type.Struct(p.Sym("polyregion" :: "scalalang" :: "intrinsics$" :: Nil), _, _, _))
+                    p.Named(_, p.Type.Struct(p.Sym("polyregion" :: "scalalang" :: "intrinsics$" :: Nil),_, _, _, _))
                   ),
                 xs
               ) =>

@@ -403,10 +403,11 @@ struct POLYREGION_EXPORT Bool1 : Type::Base {
 
 struct POLYREGION_EXPORT Struct : Type::Base {
   Sym name;
+  bool ref;
   std::vector<std::string> tpeVars;
   std::vector<Type::Any> args;
   std::vector<Sym> parents;
-  Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args, std::vector<Sym> parents) noexcept;
+  Struct(Sym name, bool ref, std::vector<std::string> tpeVars, std::vector<Type::Any> args, std::vector<Sym> parents) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Struct &);
   POLYREGION_EXPORT friend bool operator==(const Type::Struct &, const Type::Struct &);

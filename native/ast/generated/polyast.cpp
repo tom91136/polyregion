@@ -210,10 +210,12 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Bool1 &x) {
 bool Type::operator==(const Type::Bool1 &, const Type::Bool1 &) { return true; }
 Type::Bool1::operator Type::Any() const { return std::make_shared<Bool1>(*this); }
 
-Type::Struct::Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args, std::vector<Sym> parents) noexcept : Type::Base(TypeKind::Ref()), name(std::move(name)), tpeVars(std::move(tpeVars)), args(std::move(args)), parents(std::move(parents)) {}
+Type::Struct::Struct(Sym name, bool ref, std::vector<std::string> tpeVars, std::vector<Type::Any> args, std::vector<Sym> parents) noexcept : Type::Base(TypeKind::Ref()), name(std::move(name)), ref(ref), tpeVars(std::move(tpeVars)), args(std::move(args)), parents(std::move(parents)) {}
 std::ostream &Type::operator<<(std::ostream &os, const Type::Struct &x) {
   os << "Struct(";
   os << x.name;
+  os << ',';
+  os << x.ref;
   os << ',';
   os << '{';
   if (!x.tpeVars.empty()) {
@@ -239,7 +241,7 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Struct &x) {
   return os;
 }
 bool Type::operator==(const Type::Struct &l, const Type::Struct &r) { 
-  return l.name == r.name && l.tpeVars == r.tpeVars && std::equal(l.args.begin(), l.args.end(), r.args.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && l.parents == r.parents;
+  return l.name == r.name && l.ref == r.ref && l.tpeVars == r.tpeVars && std::equal(l.args.begin(), l.args.end(), r.args.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && l.parents == r.parents;
 }
 Type::Struct::operator Type::Any() const { return std::make_shared<Struct>(*this); }
 
@@ -2244,6 +2246,7 @@ std::size_t std::hash<polyregion::polyast::Type::Bool1>::operator()(const polyre
 }
 std::size_t std::hash<polyregion::polyast::Type::Struct>::operator()(const polyregion::polyast::Type::Struct &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.name)>()(x.name);
+  seed ^= std::hash<decltype(x.ref)>()(x.ref) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.tpeVars)>()(x.tpeVars) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.args)>()(x.args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.parents)>()(x.parents) + 0x9e3779b9 + (seed << 6) + (seed >> 2);

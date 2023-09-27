@@ -4,12 +4,64 @@
 #include "codegen.h"
 #include "remapper.h"
 
+#include "clang/AST/RecordLayout.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Program.h"
+
 #include "fmt/format.h"
 
 using namespace polyregion::variants;
 using namespace polyregion::polyast;
 
-std::string polyregion::polyast::generate(clang::ASTContext &C, const clang::CXXRecordDecl *parent, clang::QualType returnTpe, const clang::Stmt *body) {
+static std::optional<CompileResult> compileIt(Program &p) {
+  auto data = nlohmann::json::to_msgpack(hashed_to_json(program_to_json(p)));
+
+  //    llvm::sys::fs::createTemporaryFile("","", )
+
+  llvm::SmallString<64> inputPath;
+  auto inputCreateEC = llvm::sys::fs::createTemporaryFile("", "", inputPath);
+  if (inputCreateEC) {
+    llvm::errs() << "Failed to create temp input file: " << inputCreateEC.message() << "\n";
+    return {};
+  }
+
+  llvm::SmallString<64> outputPath;
+  auto outputCreateEC = llvm::sys::fs::createTemporaryFile("", "", outputPath);
+  if (outputCreateEC) {
+    llvm::errs() << "Failed to create temp output file: " << outputCreateEC.message() << "\n";
+    return {};
+  }
+
+  std::error_code streamEC;
+  llvm::raw_fd_ostream File(inputPath, streamEC, llvm::sys::fs::OF_None);
+  if (streamEC) {
+    llvm::errs() << "Failed to open file: " << streamEC.message() << "\n";
+    return {};
+  }
+  File.write(reinterpret_cast<const char *>(data.data()), data.size());
+  File.flush();
+  llvm::outs() << "Wrote " << inputPath.str() << " \n";
+
+  int code = llvm::sys::ExecuteAndWait(                                                              //
+      "/home/tom/polyregion/native/cmake-build-debug-clang/compiler/polyc",                          //
+      {"polyc", inputPath.str(), "--out", outputPath.str(), "--target", "host", "--arch", "native"}, //
+      {{}}                                                                                           //
+  );
+
+  auto BufferOrErr = llvm::MemoryBuffer::getFile(outputPath);
+
+  if (auto Err = BufferOrErr.getError()) {
+    llvm::errs() << llvm::errorCodeToError(Err) << "\n";
+    return {};
+  } else {
+
+    return compileresult_from_json(nlohmann::json::from_msgpack((*BufferOrErr)->getBufferStart(), (*BufferOrErr)->getBufferEnd()));
+  }
+}
+
+std::string polyregion::polystl::generate(clang::ASTContext &C, const clang::CXXRecordDecl *parent, clang::QualType returnTpe,
+                                          const clang::Stmt *body) {
   polyregion::polystl::Remapper remapper(C);
 
   auto r = polyregion::polystl::Remapper::RemapContext{};
@@ -34,14 +86,18 @@ std::string polyregion::polyast::generate(clang::ASTContext &C, const clang::CXX
   }
   std::cout << repr(f0) << std::endl;
 
-  //              auto p = Program(f0, fns, structDefs);
-  //
-  //              //              auto result = compileIt(p);
-  //              //              if (result) {
-  //              //                std::cout << repr(*result) << std::endl;
-  //              //              } else {
-  //              //                std::cout << "No compile!" << std::endl;
-  //              //              }
+  auto p = Program(f0, fns, structDefs);
+
+  auto &layout = C.getASTRecordLayout(parent);
+
+  std::cout << C.getTypeSize(parent->getTypeForDecl())  << "\n";
+
+//  auto result = compileIt(p);
+//  if (result) {
+//    std::cout << repr(*result) << std::endl;
+//  } else {
+//    std::cout << "No compile!" << std::endl;
+//  }
   //
   std::vector<std::string> fieldDecl;
   std::vector<std::string> ctorArgs;
@@ -60,7 +116,7 @@ std::string polyregion::polyast::generate(clang::ASTContext &C, const clang::CXX
 
     if (c.capturesVariable()) {
       auto var = c.getCapturedVar();
-      auto tpe = polyregion::polystl::print_type(var->getType().getDesugaredType(C), C);
+      auto tpe = print_type(var->getType().getDesugaredType(C), C);
       auto name = var->getQualifiedNameAsString();
       fieldDecl.push_back(fmt::format("{} {};", tpe, name));
       ctorArgs.push_back(fmt::format("{} {}", tpe, name));

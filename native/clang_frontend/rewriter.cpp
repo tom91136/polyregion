@@ -1,7 +1,5 @@
 #include <fmt/format.h>
 #include <iostream>
-#include <memory>
-#include <optional>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -16,7 +14,6 @@
 #include "ast_visitors.h"
 #include "clang_utils.h"
 #include "codegen.h"
-#include "remapper.h"
 #include "rewriter.h"
 
 using namespace polyregion::polystl;
@@ -310,22 +307,26 @@ void handleDecl(clang::ASTContext &C) {
   for (auto r : results) {
     std::visit(overloaded{
                    [&](Failure &f) { //
-                     std::cout << "Failed:" << pretty_string(f.callExpr, C) << "\nReason:" << f.reason << "\n";
+                     llvm::errs() << "Failed:" << pretty_string(f.callExpr, C) << "\nReason:" << f.reason << "\n";
                    },
                    [&](Callsite &c) { //
-                                      //              std::cout << pretty_string(c.callExpr, context) << "\n";
-                     std::cout << "callLambdaArgExpr=" << std::endl;
+                                      //              llvm::outs() << pretty_string(c.callExpr, context) << "\n";
+                     llvm::errs() << "callLambdaArgExpr=" << "\n";
                      //                     c.callLambdaArgExpr->dumpColor();
-                     std::cout << "callExpr=" << std::endl;
+                     llvm::errs() << "callExpr=" << "\n";
                      //                     c.callExpr->dumpColor();
-                     std::cout << "functorDecl=" << std::endl;
-                     //                     c.functorDecl->dumpColor(); // F __polyregion__f; F = [&]() { __polyregion__v[0] =
+                     llvm::errs() << "functorDecl=" << "\n";
+                                          c.functorDecl->dumpColor(); // F __polyregion__f; F = [&]() { __polyregion__v[0] =
                      //                     __polyregion__f(); }
-                     std::cout << "calleeDecl=" << std::endl;
-                     std::cout << ">>>" << std::endl;
+                     llvm::errs() << "calleeDecl=" << "\n";
+
+                     c.calleeDecl->dump();
+                     llvm::errs() << ">>>" << "\n";
                      std::string image = {0x12, 0x34, 0x54};
 
-                     generate(C, c.functorDecl->getParent(), c.functorDecl->getReturnType(), c.calleeDecl->getBody());
+
+
+                     auto m = generate(C, c.functorDecl->getParent(), c.functorDecl->getReturnType(), c.functorDecl->getBody());
 
                      insertKernelImage(C, c, spVisitor, image);
                    },

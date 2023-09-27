@@ -366,7 +366,9 @@ std::string polyast::repr(const polyast::CompileResult &compilation) {
 }
 
 Type::Array dsl::Array(const Type::Any &t, const ::TypeSpace::Any &s) { return Tpe::Array(t, s); }
-Type::Struct dsl::Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args) { return {name, tpeVars, args, {}}; }
+Type::Struct dsl::Struct(Sym name, bool ref, std::vector<std::string> tpeVars, std::vector<Type::Any> args) {
+  return {name, ref, tpeVars, args, {}};
+}
 Term::Any dsl::integral(const Type::Any &tpe, unsigned long long int x) {
   auto unsupported = [](auto &&t, auto &&v) -> Term::Any {
     throw std::logic_error("Cannot create integral constant of type " + to_string(t) + " for value" + std::to_string(v));

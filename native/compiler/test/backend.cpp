@@ -41,17 +41,17 @@ TEST_CASE("run", "[backend]") {
   Program p(fn, {}, {});
   INFO(repr(p));
   auto c = polyregion::compiler::compile(p, {Target::Object_LLVM_AMDGCN, "gfx906"}, OptLevel::O3);
-  std::cout << c << std::endl;
+  INFO(c);
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);
 
   c = polyregion::compiler::compile(p, {Target::Object_LLVM_AMDGCN, "gfx803"}, OptLevel::O3);
-  std::cout << c << std::endl;
+  INFO(c );
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);
 
   c = polyregion::compiler::compile(p, {Target::Object_LLVM_NVPTX64, "sm_35"}, OptLevel::O3);
-  std::cout << c << std::endl;
+  INFO(c);
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);
 }

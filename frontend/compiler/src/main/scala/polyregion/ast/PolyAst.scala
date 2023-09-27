@@ -55,8 +55,14 @@ object PolyAst {
     case Bool1   extends Type(TypeKind.Integral)
 
     // specialisations
-    case Struct(name: Sym, tpeVars: List[String], args: List[Type], parents: List[Sym]) extends Type(TypeKind.Ref)
-    case Array(component: Type, space: Type.Space)                                      extends Type(TypeKind.Ref)
+    case Struct(
+        name: Sym,             //
+        ref: Boolean,             //
+        tpeVars: List[String], //
+        args: List[Type],      //
+        parents: List[Sym]
+    )                                              extends Type(TypeKind.Ref)
+    case Array(component: Type, space: Type.Space) extends Type(TypeKind.Ref)
 
     //
     case Var(name: String)                                        extends Type(TypeKind.None)
@@ -471,7 +477,6 @@ object PolyAst {
       functions: List[Function],
       defs: List[StructDef]
   ) derives MsgPack.Codec
-
 
   case class CompileLayoutMember( //
       name: Named,
