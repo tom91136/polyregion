@@ -23,7 +23,7 @@ set(LIB_SOURCES
         ${clspv_passes_SOURCE_FILES}
         )
 
-add_library(Polyc ${LIB_SOURCES})
+add_library(polyc ${LIB_SOURCES})
 add_executable(polyc-tests test/ast_codegen.cpp test/backend.cpp test/ast.cpp)
 add_executable(polyc-benchmarks benchmark/babelstream.cpp)
 add_executable(polyc-bin ../shared/cxa_thread_atexit.cpp driver.cpp)
@@ -31,7 +31,7 @@ add_executable(polyc-bin ../shared/cxa_thread_atexit.cpp driver.cpp)
 target_include_directories(polyc-tests PUBLIC . ../include PRIVATE ../runtime)
 target_include_directories(polyc-benchmarks PUBLIC . ../include PRIVATE ../runtime)
 target_include_directories(polyc-bin PUBLIC . ../include ${fire_SOURCE_DIR} PRIVATE)
-target_include_directories(Polyc PUBLIC
+target_include_directories(polyc PUBLIC
         ${LLVM_INCLUDE_DIRS}
         ${LLD_INCLUDE_DIRS}
         #        ${spirv-llvm-translator_SOURCE_DIR}/include
@@ -117,10 +117,10 @@ message(STATUS "[compiler] Adding LLD libs = ${LLD_LIBS} ")
 #
 #message(STATUS "[compiler] Target source headers = ${LLVM_TARGETS_SOURCE_HEADERS} ")
 #message(STATUS "[compiler] Target binary headers = ${LLVM_TARGETS_BINARY_HEADERS} ")
-#target_include_directories(Polyc PRIVATE ${LLVM_TARGETS_SOURCE_HEADERS} ${LLVM_TARGETS_BINARY_HEADERS})
+#target_include_directories(polyc PRIVATE ${LLVM_TARGETS_SOURCE_HEADERS} ${LLVM_TARGETS_BINARY_HEADERS})
 
 
-target_link_libraries(Polyc
+target_link_libraries(polyc
         PUBLIC
         PolyAST
         PRIVATE
@@ -130,9 +130,9 @@ target_link_libraries(Polyc
         #        "$<$<CONFIG:DEBUG>:LLVM>"  # linking all the static libs is too slow for dev
         #        capstone-static
         )
-target_link_libraries(polyc-tests PRIVATE Polyc PolyRT Catch2::Catch2WithMain)
-target_link_libraries(polyc-benchmarks PRIVATE Polyc PolyRT)
-target_link_libraries(polyc-bin PRIVATE Polyc ${LLVM_LIBS} ${LLD_LIBS})
+target_link_libraries(polyc-tests PRIVATE polyc polyrt-static Catch2::Catch2WithMain)
+target_link_libraries(polyc-benchmarks PRIVATE polyc polyrt-static)
+target_link_libraries(polyc-bin PRIVATE polyc ${LLVM_LIBS} ${LLD_LIBS})
 
 set(COMPILE_OPTIONS
         ${COMMON_COMPILE_OPTIONS}
@@ -146,12 +146,12 @@ set(LINK_OPTIONS
         "$<$<CONFIG:DEBUG>:${COMMON_DEBUG_OPTIONS}>"
         )
 
-target_compile_options(Polyc PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(polyc PRIVATE ${COMPILE_OPTIONS})
 target_compile_options(polyc-bin PRIVATE ${COMPILE_OPTIONS})
 target_compile_options(polyc-tests PRIVATE ${COMPILE_OPTIONS})
 target_compile_options(polyc-benchmarks PRIVATE ${COMPILE_OPTIONS})
 
-target_link_options(Polyc PRIVATE ${LINK_OPTIONS})
+target_link_options(polyc PRIVATE ${LINK_OPTIONS})
 target_link_options(polyc-bin PRIVATE ${LINK_OPTIONS})
 target_link_options(polyc-tests PRIVATE ${LINK_OPTIONS})
 target_link_options(polyc-benchmarks PRIVATE ${LINK_OPTIONS})

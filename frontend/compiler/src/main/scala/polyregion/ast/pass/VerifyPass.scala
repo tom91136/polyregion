@@ -53,7 +53,7 @@ object VerifyPass {
         (rest :+ last)
           .foldLeft((c !! (local, t.repr), local.tpe)) { case ((acc, tpe), n) =>
             val c0 = tpe match {
-              case s @ p.Type.Struct(name, _, tpeVars, args, _) =>
+              case s @ p.Type.Struct(name, tpeVars, args, _) =>
                 sdefLUT.get(name) match {
                   case None =>
                     acc ~ s"Unknown struct type ${name.repr} in `${t.repr}`, known structs: \n${sdefLUT.map(_._2).map(_.repr).mkString("\n")}"
@@ -125,9 +125,9 @@ object VerifyPass {
         val c0 = validateTerm(c, from)
         (from.tpe, as) match {
           case (from, as) if from == as => c0
-          case (p.Type.Struct(_, _, _, _, parents), p.Type.Struct(name, _, _, _, _)) if parents.contains(name) =>
+          case (p.Type.Struct(_, _, _, parents), p.Type.Struct(name, _, _, _)) if parents.contains(name) =>
             c0 // safe upcase
-          case (p.Type.Struct(name, _, _, _, _), p.Type.Struct(_, _, _, _, parents)) if parents.contains(name) =>
+          case (p.Type.Struct(name, _, _, _), p.Type.Struct(_, _, _, parents)) if parents.contains(name) =>
             c0 // unsafe downcast
           case (from, as) => c0 ~ s"Cannot cast unrelated type ${from.repr} to ${as.repr}: ${e.repr}"
         }
@@ -154,7 +154,7 @@ object VerifyPass {
         expr match {
           case Some(rhs) if rhs.tpe != name.tpe =>
             (name.tpe, rhs.tpe) match {
-              case (p.Type.Struct(name, _, _, _, _), p.Type.Struct(_, _, _, _, parents)) if parents.contains(name) => c0
+              case (p.Type.Struct(name, _, _, _), p.Type.Struct(_, _, _, parents)) if parents.contains(name) => c0
               case _ => c0 ~ s"Var declaration of incompatible type ${rhs.tpe.repr} != ${name.tpe.repr}: ${s.repr}"
             }
           case _ => c0

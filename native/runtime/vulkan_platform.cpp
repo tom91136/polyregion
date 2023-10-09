@@ -238,6 +238,10 @@ bool VulkanDevice::singleEntryPerModule() {
   TRACE();
   return true;
 }
+bool VulkanDevice::leadingIndexArgument() {
+  TRACE();
+  return false;
+}
 std::vector<Property> VulkanDevice::properties() {
   TRACE();
   const auto props = device.getProperties();

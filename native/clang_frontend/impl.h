@@ -36,10 +36,10 @@ static std::unique_ptr<polyregion::runtime::Platform> createPlatform() {
 }
 
 static std::unique_ptr<polyregion::runtime::Device> selectDevice(polyregion::runtime::Platform &p) {
+  auto devices = p.enumerate();
   if (auto env = std::getenv("POLY_DEVICE"); env) {
     std::string name(env);
     std::transform(name.begin(), name.end(), name.begin(), [](auto &c) { return std::tolower(c); });
-    auto devices = p.enumerate();
     errno = 0;
     size_t index = std::strtol(name.c_str(), nullptr, 10);
     if (errno == 0 && index < devices.size()) { // we got a number, check inbounds and select device
@@ -50,11 +50,17 @@ static std::unique_ptr<polyregion::runtime::Device> selectDevice(polyregion::run
                matching != devices.end()) {
       return std::move(*matching);
     }
-  }
-  return {};
+  } else if (!devices.empty())
+    return std::move(devices[0]);
+  else
+    return {};
 }
 
 } // namespace
+
+struct M {
+  int32_t *foo;
+};
 
 template <typename F>
 void __polyregion_offload_dispatch__(size_t global,              //
@@ -66,7 +72,7 @@ void __polyregion_offload_dispatch__(size_t global,              //
 
   char argData[sizeof(F)];
   std::memcpy(argData, (&__f), sizeof(F));
-  const ArgBuffer buffer{{Type::Ptr, argData}};
+  void *argPtr = &argData;
 
   static auto thePlatform = createPlatform();
   static auto theDevice = thePlatform ? selectDevice(*thePlatform) : std::unique_ptr<polyregion::runtime::Device>{};
@@ -79,7 +85,12 @@ void __polyregion_offload_dispatch__(size_t global,              //
 
     // [](int n) { __op(__first[x]);  }
 
-    polyregion::concurrency_utils::waitAll([&](auto cb) {
+    polyregion::concurrency_utils::waitAll([&](auto &cb) {
+      fprintf(stderr, "Do it\n");
+      auto buffer = theDevice->leadingIndexArgument() //
+                        ? ArgBuffer{{Type::Long64, nullptr}, {Type::Ptr, &argPtr}, {Type::Int32, nullptr}}
+                        : ArgBuffer{{Type::Ptr, &argPtr}};
+
       theQueue->enqueueInvokeAsync(
           __kernelName, "kernel", buffer,
           Policy{                    //

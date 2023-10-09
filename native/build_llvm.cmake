@@ -81,6 +81,8 @@ set(LLVM_OPTIONS
         -DLLVM_ENABLE_ASSERTIONS=ON
         -DLLVM_ENABLE_LTO=${USE_LTO}
         "-DLLVM_ENABLE_PROJECTS=lld\;mlir\;clang"
+        "-DLLVM_ENABLE_RUNTIMES=compiler-rt\;openmp"
+        -DCOMPILER_RT_BUILD_SANITIZERS=ON
 
         -DLLVM_USE_CRT_RELEASE=MT
         -DLLVM_INSTALL_UTILS=OFF
@@ -184,6 +186,7 @@ execute_process(
         LLVMOption
 
 
+        compiler-rt
         clang-resource-headers
         clangFrontend
         clangCodeGen

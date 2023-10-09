@@ -33,7 +33,7 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
           [&](const Type::Unit0 &) { return "void"s; },                   //
           [&](const Type::Nothing &) { return "/*nothing*/"s; },          //
           [&](const Type::Struct &x) { return qualified(x.name); },       //
-          [&](const Type::Array &x) { return mkTpe(x.component) + "*"; }, //
+          [&](const Type::Ptr &x) { return mkTpe(x.component) + "*"; }, //
           [&](const Type::Var &) { return "/*type var*/"s; },             //
           [&](const Type::Exec &) { return "/*exec*/"s; }                 //
       );
@@ -58,7 +58,7 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
           [&](const Type::Unit0 &) { return "void"s; },                   //
           [&](const Type::Nothing &) { return "/*nothing*/"s; },          //
           [&](const Type::Struct &x) { return qualified(x.name); },       //
-          [&](const Type::Array &x) { return mkTpe(x.component) + "*"; }, //
+          [&](const Type::Ptr &x) { return mkTpe(x.component) + "*"; }, //
           [&](const Type::Var &) { return "/*type var*/"s; },             //
           [&](const Type::Exec &) { return "/*exec*/"s; }                 //
       );
@@ -297,7 +297,7 @@ std::string backend::CSource ::mkFn(const Function &fnTree) {
     std::string decl;
     switch (dialect) {
       case Dialect::OpenCL1_1: {
-        if (auto arr = get_opt<Type::Array>(arg.named.tpe); arr) {
+        if (auto arr = get_opt<Type::Ptr>(arg.named.tpe); arr) {
           decl = variants::total(
               *arr->space,                                                       //
               [&](TypeSpace::Global _) { return "global " + tpe + " " + name; }, //
@@ -312,7 +312,7 @@ std::string backend::CSource ::mkFn(const Function &fnTree) {
         // Local:  threadgroup $T &$name [[ threadgroup($i) ]]
         // query:              $T &$name           [[ $type ]]
         auto idx = std::to_string(i);
-        if (auto arr = get_opt<Type::Array>(arg.named.tpe); arr) {
+        if (auto arr = get_opt<Type::Ptr>(arg.named.tpe); arr) {
           decl = variants::total(
               *arr->space,                                                                                            //
               [&](TypeSpace::Global _) { return "device " + tpe + " " + name + " [[buffer(" + idx + ")]]"; },         //

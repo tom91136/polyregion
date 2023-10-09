@@ -17,29 +17,29 @@ elseif (UNIX)
 endif ()
 
 
-add_library(Polyc-JNIshim SHARED ../../shared/cxa_thread_atexit.cpp generated/mirror.cpp shim.cpp)
-add_library(Polyc-JNI SHARED ../../shared/cxa_thread_atexit.cpp generated/mirror.cpp compiler.cpp)
-add_library(PolyRT-JNI SHARED ../../shared/cxa_thread_atexit.cpp generated/mirror.cpp runtime.cpp)
+add_library(polyc-JNIshim SHARED ../../shared/cxa_thread_atexit.cpp generated/mirror.cpp shim.cpp)
+add_library(polyc-JNI SHARED ../../shared/cxa_thread_atexit.cpp generated/mirror.cpp compiler.cpp)
+add_library(polyrt-JNI SHARED ../../shared/cxa_thread_atexit.cpp generated/mirror.cpp runtime.cpp)
 
 
-target_include_directories(Polyc-JNIshim PRIVATE
+target_include_directories(polyc-JNIshim PRIVATE
         ../../include
 
         ${JNI_INCLUDE_DIRS})
-target_include_directories(Polyc-JNI PRIVATE
+target_include_directories(polyc-JNI PRIVATE
         .
         ../../compiler
 
         ${JNI_INCLUDE_DIRS})
-target_include_directories(PolyRT-JNI PRIVATE
+target_include_directories(polyrt-JNI PRIVATE
         .
         ../../runtime
 
         ${JNI_INCLUDE_DIRS})
 
-target_link_libraries(Polyc-JNIshim PRIVATE ${DL_LIB})
-target_link_libraries(Polyc-JNI PRIVATE Polyc)
-target_link_libraries(PolyRT-JNI PRIVATE PolyRT)
+target_link_libraries(polyc-JNIshim PRIVATE ${DL_LIB})
+target_link_libraries(polyc-JNI PRIVATE polyc)
+target_link_libraries(polyrt-JNI PRIVATE polyrt-static)
 
 set(COMPILE_OPTIONS
         ${COMMON_COMPILE_OPTIONS}
@@ -51,22 +51,22 @@ set(LINK_OPTIONS
         ${STRICT_LINKER_OPTIONS}
         "$<$<CONFIG:DEBUG>:${COMMON_DEBUG_OPTIONS}>")
 
-target_compile_options(Polyc-JNIshim PRIVATE ${COMPILE_OPTIONS})
-target_compile_options(Polyc-JNI PRIVATE ${COMPILE_OPTIONS})
-target_compile_options(PolyRT-JNI PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(polyc-JNIshim PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(polyc-JNI PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(polyrt-JNI PRIVATE ${COMPILE_OPTIONS})
 
-target_link_options(Polyc-JNIshim PRIVATE ${LINK_OPTIONS})
-target_link_options(Polyc-JNI PRIVATE ${LINK_OPTIONS})
-target_link_options(PolyRT-JNI PRIVATE ${LINK_OPTIONS})
+target_link_options(polyc-JNIshim PRIVATE ${LINK_OPTIONS})
+target_link_options(polyc-JNI PRIVATE ${LINK_OPTIONS})
+target_link_options(polyrt-JNI PRIVATE ${LINK_OPTIONS})
 
 # Running `strip` on macOS drops even more stuff than just compiling with -dead_strip.
 if (APPLE)
     add_custom_command(
-            TARGET PolyRT-JNI POST_BUILD
+            TARGET polyrt-JNI POST_BUILD
             COMMAND strip
-            ARGS -SXx $<TARGET_FILE:PolyRT-JNI>)
+            ARGS -SXx $<TARGET_FILE:polyrt-JNI>)
     add_custom_command(
-            TARGET Polyc-JNI POST_BUILD
+            TARGET polyc-JNI POST_BUILD
             COMMAND strip
-            ARGS -SXx $<TARGET_FILE:Polyc-JNI>)
+            ARGS -SXx $<TARGET_FILE:polyc-JNI>)
 endif ()

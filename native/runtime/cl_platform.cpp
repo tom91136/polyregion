@@ -165,6 +165,10 @@ bool ClDevice::singleEntryPerModule() {
   TRACE();
   return false;
 }
+bool ClDevice::leadingIndexArgument() {
+  TRACE();
+  return false;
+}
 std::vector<Property> ClDevice::properties() {
   TRACE();
   return {

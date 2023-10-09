@@ -62,6 +62,10 @@ bool ObjectDevice::singleEntryPerModule() {
   TRACE();
   return false;
 }
+bool ObjectDevice::leadingIndexArgument() {
+  TRACE();
+  return true;
+}
 std::vector<Property> ObjectDevice::properties() {
   TRACE();
   return {};

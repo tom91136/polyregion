@@ -210,12 +210,10 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Bool1 &x) {
 bool Type::operator==(const Type::Bool1 &, const Type::Bool1 &) { return true; }
 Type::Bool1::operator Type::Any() const { return std::make_shared<Bool1>(*this); }
 
-Type::Struct::Struct(Sym name, bool ref, std::vector<std::string> tpeVars, std::vector<Type::Any> args, std::vector<Sym> parents) noexcept : Type::Base(TypeKind::Ref()), name(std::move(name)), ref(ref), tpeVars(std::move(tpeVars)), args(std::move(args)), parents(std::move(parents)) {}
+Type::Struct::Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args, std::vector<Sym> parents) noexcept : Type::Base(TypeKind::Ref()), name(std::move(name)), tpeVars(std::move(tpeVars)), args(std::move(args)), parents(std::move(parents)) {}
 std::ostream &Type::operator<<(std::ostream &os, const Type::Struct &x) {
   os << "Struct(";
   os << x.name;
-  os << ',';
-  os << x.ref;
   os << ',';
   os << '{';
   if (!x.tpeVars.empty()) {
@@ -241,23 +239,23 @@ std::ostream &Type::operator<<(std::ostream &os, const Type::Struct &x) {
   return os;
 }
 bool Type::operator==(const Type::Struct &l, const Type::Struct &r) { 
-  return l.name == r.name && l.ref == r.ref && l.tpeVars == r.tpeVars && std::equal(l.args.begin(), l.args.end(), r.args.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && l.parents == r.parents;
+  return l.name == r.name && l.tpeVars == r.tpeVars && std::equal(l.args.begin(), l.args.end(), r.args.begin(), [](auto &&l, auto &&r) { return *l == *r; }) && l.parents == r.parents;
 }
 Type::Struct::operator Type::Any() const { return std::make_shared<Struct>(*this); }
 
-Type::Array::Array(Type::Any component, TypeSpace::Any space) noexcept : Type::Base(TypeKind::Ref()), component(std::move(component)), space(std::move(space)) {}
-std::ostream &Type::operator<<(std::ostream &os, const Type::Array &x) {
-  os << "Array(";
+Type::Ptr::Ptr(Type::Any component, TypeSpace::Any space) noexcept : Type::Base(TypeKind::Ref()), component(std::move(component)), space(std::move(space)) {}
+std::ostream &Type::operator<<(std::ostream &os, const Type::Ptr &x) {
+  os << "Ptr(";
   os << x.component;
   os << ',';
   os << x.space;
   os << ')';
   return os;
 }
-bool Type::operator==(const Type::Array &l, const Type::Array &r) { 
+bool Type::operator==(const Type::Ptr &l, const Type::Ptr &r) { 
   return *l.component == *r.component && *l.space == *r.space;
 }
-Type::Array::operator Type::Any() const { return std::make_shared<Array>(*this); }
+Type::Ptr::operator Type::Any() const { return std::make_shared<Ptr>(*this); }
 
 Type::Var::Var(std::string name) noexcept : Type::Base(TypeKind::None()), name(std::move(name)) {}
 std::ostream &Type::operator<<(std::ostream &os, const Type::Var &x) {
@@ -1542,7 +1540,7 @@ bool Expr::operator==(const Expr::Index &l, const Expr::Index &r) {
 }
 Expr::Index::operator Expr::Any() const { return std::make_shared<Index>(*this); }
 
-Expr::RefTo::RefTo(Term::Any lhs, std::optional<Term::Any> idx, Type::Any component) noexcept : Expr::Base(Type::Array(component,TypeSpace::Global())), lhs(std::move(lhs)), idx(std::move(idx)), component(std::move(component)) {}
+Expr::RefTo::RefTo(Term::Any lhs, std::optional<Term::Any> idx, Type::Any component) noexcept : Expr::Base(Type::Ptr(component,TypeSpace::Global())), lhs(std::move(lhs)), idx(std::move(idx)), component(std::move(component)) {}
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::RefTo &x) {
   os << "RefTo(";
   os << x.lhs;
@@ -1562,7 +1560,7 @@ bool Expr::operator==(const Expr::RefTo &l, const Expr::RefTo &r) {
 }
 Expr::RefTo::operator Expr::Any() const { return std::make_shared<RefTo>(*this); }
 
-Expr::Alloc::Alloc(Type::Any component, Term::Any size) noexcept : Expr::Base(Type::Array(component,TypeSpace::Global())), component(std::move(component)), size(std::move(size)) {}
+Expr::Alloc::Alloc(Type::Any component, Term::Any size) noexcept : Expr::Base(Type::Ptr(component,TypeSpace::Global())), component(std::move(component)), size(std::move(size)) {}
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Alloc &x) {
   os << "Alloc(";
   os << x.component;
@@ -2246,13 +2244,12 @@ std::size_t std::hash<polyregion::polyast::Type::Bool1>::operator()(const polyre
 }
 std::size_t std::hash<polyregion::polyast::Type::Struct>::operator()(const polyregion::polyast::Type::Struct &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.name)>()(x.name);
-  seed ^= std::hash<decltype(x.ref)>()(x.ref) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.tpeVars)>()(x.tpeVars) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.args)>()(x.args) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(x.parents)>()(x.parents) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::size_t std::hash<polyregion::polyast::Type::Array>::operator()(const polyregion::polyast::Type::Array &x) const noexcept {
+std::size_t std::hash<polyregion::polyast::Type::Ptr>::operator()(const polyregion::polyast::Type::Ptr &x) const noexcept {
   std::size_t seed = std::hash<decltype(x.component)>()(x.component);
   seed ^= std::hash<decltype(x.space)>()(x.space) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;

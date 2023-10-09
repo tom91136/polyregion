@@ -144,11 +144,11 @@ object IntrinsifyPass extends ProgramPass {
 
       case "array" -> (x :: Nil) //
           if x.tpe == p.Type.IntS32 =>
-        p.Expr.Alloc(p.Type.Array(tpeArgs.head, p.Type.Space.Global), x) -> Nil
-      case "apply" -> ((s @ p.Term.Select(_, p.Named(_, p.Type.Array(`rtn`, _)))) :: i :: Nil) //
+        p.Expr.Alloc(p.Type.Ptr(tpeArgs.head, p.Type.Space.Global), x) -> Nil
+      case "apply" -> ((s @ p.Term.Select(_, p.Named(_, p.Type.Ptr(`rtn`, _)))) :: i :: Nil) //
           if i.tpe == p.Type.IntS32 =>
         p.Expr.Index(s, i, rtn) -> Nil
-      case "update" -> ((s @ p.Term.Select(_, p.Named(_, p.Type.Array(c, _)))) :: i :: x :: Nil) //
+      case "update" -> ((s @ p.Term.Select(_, p.Named(_, p.Type.Ptr(c, _)))) :: i :: x :: Nil) //
           if i.tpe == p.Type.IntS32 && x.tpe == c && rtn == p.Type.Unit0 =>
         p.Expr.Alias(p.Term.Unit0Const) -> (p.Stmt.Update(s, i, x) :: Nil)
       case _ => ???
@@ -165,7 +165,7 @@ object IntrinsifyPass extends ProgramPass {
                 p.Term
                   .Select(
                     Nil,
-                    p.Named(_, p.Type.Struct(p.Sym("polyregion" :: "scalalang" :: "intrinsics$" :: Nil),_, _, _, _))
+                    p.Named(_, p.Type.Struct(p.Sym("polyregion" :: "scalalang" :: "intrinsics$" :: Nil), _, _, _))
                   ),
                 xs
               ) =>
@@ -283,7 +283,7 @@ object IntrinsifyPass extends ProgramPass {
                 ("polyregion" :: "scalalang" :: "Buffer" :: "apply" :: Nil) |         //
                 ("scala" :: "collection" :: "SeqOps" :: "apply" :: Nil) |             //
                 ("scala" :: "collection" :: "mutable" :: "SeqOps" :: "apply" :: Nil), //
-                xs @ p.Term.Select(_, p.Named(_, p.Type.Array(_, _))),
+                xs @ p.Term.Select(_, p.Named(_, p.Type.Ptr(_, _))),
                 idx :: Nil
               ) if idx.tpe.kind == p.TypeKind.Integral =>
             (p.Expr.Index(xs, idx, rtn), (Nil, inv :: Nil))
@@ -292,7 +292,7 @@ object IntrinsifyPass extends ProgramPass {
                 ("polyregion" :: "scalalang" :: "Buffer" :: "update" :: Nil) |        //
                 ("scala" :: "collection" :: "mutable" :: "SeqOps" :: "update" :: Nil) //
                 ,
-                xs @ p.Term.Select(_, p.Named(_, p.Type.Array(_, _))),
+                xs @ p.Term.Select(_, p.Named(_, p.Type.Ptr(_, _))),
                 idx :: x :: Nil
               ) if idx.tpe.kind == p.TypeKind.Integral =>
             (p.Expr.Alias(p.Term.Unit0Const), (p.Stmt.Update(xs, idx, x) :: Nil, inv :: Nil))
@@ -326,7 +326,7 @@ object IntrinsifyPass extends ProgramPass {
 
           case (Symbols.ArrayModule :+ "ofDim", x :: Nil) =>
             rtn match {
-              case arr: p.Type.Array =>
+              case arr: p.Type.Ptr =>
                 (p.Expr.Alloc(arr, x), (Nil, inv :: Nil))
               case _ => ???
             }

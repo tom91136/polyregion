@@ -92,7 +92,7 @@ std::unique_ptr<LLVMBackend::TargetSpecificHandler> LLVMBackend::TargetSpecificH
 LLVMBackend::TargetSpecificHandler::~TargetSpecificHandler() {}
 
 ValPtr LLVMBackend::AstTransformer::invokeMalloc(llvm::Function *parent, ValPtr size) {
-  return B.CreateCall(mkExternalFn(parent, Type::Array(Type::IntS8(), TypeSpace::Global()), "malloc", {Type::IntS64()}), size);
+  return B.CreateCall(mkExternalFn(parent, Type::Ptr(Type::IntS8(), TypeSpace::Global()), "malloc", {Type::IntS64()}), size);
 }
 
 ValPtr LLVMBackend::AstTransformer::invokeAbort(llvm::Function *parent) {
@@ -109,10 +109,7 @@ static constexpr int64_t nIntMax(uint64_t bits) { return (int64_t(1) << (bits - 
 
 Pair<llvm::StructType *, LLVMBackend::AstTransformer::StructMemberIndexTable> LLVMBackend::AstTransformer::mkStruct(const StructDef &def) {
   std::vector<llvm::Type *> types(def.members.size());
-  std::transform(def.members.begin(), def.members.end(), types.begin(), [&](const StructMember &n) {
-    auto tpe = mkTpe(n.named.tpe);
-    return tpe->isStructTy() ? B.getPtrTy() : tpe;
-  });
+  std::transform(def.members.begin(), def.members.end(), types.begin(), [&](const StructMember &n) { return mkTpe(n.named.tpe); });
   LLVMBackend::AstTransformer::StructMemberIndexTable table;
   for (size_t i = 0; i < def.members.size(); ++i)
     table[def.members[i].named.symbol] = i;
@@ -149,7 +146,7 @@ llvm::Type *LLVMBackend::AstTransformer::mkTpe(const Type::Any &tpe, bool functi
           return undefined(__FILE__, __LINE__, "Unseen struct def: " + to_string(x) + ", table=\n" + pool);
         }
       }, //
-      [&](const Type::Array &x) -> llvm::Type * {
+      [&](const Type::Ptr &x) -> llvm::Type * {
         return B.getPtrTy(variants::total(
             *x.space,                                             //
             [&](const TypeSpace::Local &_) { return LocalAS; },   //
@@ -192,10 +189,19 @@ ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
   auto fail = [&]() { return " (part of the select expression " + to_string(select) + ")"; };
 
   auto structTypeOf = [&](const Type::Any &tpe) -> Pair<llvm::StructType *, StructMemberIndexTable> {
-    if (auto s = get_opt<Type::Struct>(tpe); s) {
-      if (auto def = polyregion::get_opt(structTypes, s->name); def) return *def;
+    auto findTy = [&](Type::Struct s) {
+      if (auto def = polyregion::get_opt(structTypes, s.name); def) return *def;
       else
-        error(__FILE__, __LINE__, "Unseen struct type " + to_string(s->name) + " in select path" + fail());
+        error(__FILE__, __LINE__, "Unseen struct type " + to_string(s.name) + " in select path" + fail());
+    };
+
+    if (auto s = get_opt<Type::Struct>(tpe); s) {
+      return findTy(*s);
+    } else if (auto p = get_opt<Type::Ptr>(tpe); p) {
+      if (auto _s = get_opt<Type::Struct>(p->component); _s) return findTy(*_s);
+      else
+        error(__FILE__, __LINE__,
+              "Illegal select path involving pointer to non-struct type " + to_string(s->name) + " in select path" + fail());
     } else
       error(__FILE__, __LINE__, "Illegal select path involving non-struct type " + to_string(tpe) + fail());
   };
@@ -239,8 +245,7 @@ ValPtr LLVMBackend::AstTransformer::mkTermVal(const Term::Any &ref) {
       *ref, //
       [&](const Term::Select &x) -> ValPtr {
         if (holds<Type::Unit0>(x.tpe)) return mkTermVal(Term::Unit0Const());
-        auto tpe = mkTpe(x.tpe);
-        return load(B, mkSelectPtr(x), tpe->isStructTy() ? B.getPtrTy(GlobalAS) : tpe);
+        return load(B, mkSelectPtr(x), mkTpe(x.tpe));
       },
       [&](const Term::Poison &x) -> ValPtr {
         if (auto tpe = mkTpe(x.tpe); llvm::isa<llvm::PointerType>(tpe)) {
@@ -498,7 +503,7 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
       },
       [&](const Expr::Index &x) -> ValPtr {
         if (auto lhs = get_opt<Term::Select>(x.lhs); lhs) {
-          if (auto arrTpe = get_opt<Type::Array>(lhs->tpe); arrTpe) {
+          if (auto arrTpe = get_opt<Type::Ptr>(lhs->tpe); arrTpe) {
 
             if (holds<Type::Unit0>(arrTpe->component)) {
               // Still call GEP so that memory access and OOB effects are still present.
@@ -508,9 +513,8 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
                                   mkTermVal(x.idx), key + "_ptr"); //
               return val;
             }
-
             auto ty = mkTpe(arrTpe->component);
-            auto ptr = B.CreateInBoundsGEP(ty->isStructTy() ? B.getPtrTy(AllocaAS) : ty, //
+            auto ptr = B.CreateInBoundsGEP(ty,              //
                                            mkTermVal(*lhs),                              //
                                            mkTermVal(x.idx), key + "_ptr");
             if (holds<TypeKind::Ref>(kind(arrTpe->component))) {
@@ -529,10 +533,10 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
 
       [&](const Expr::RefTo &x) -> ValPtr {
         if (auto lhs = get_opt<Term::Select>(x.lhs); lhs) {
-          if (auto arrTpe = get_opt<Type::Array>(lhs->tpe); arrTpe) { // taking reference of an index in an array
+          if (auto arrTpe = get_opt<Type::Ptr>(lhs->tpe); arrTpe) { // taking reference of an index in an array
             auto offset = x.idx ? mkTermVal(*x.idx) : llvm::ConstantInt::get(llvm::Type::getInt64Ty(C), 0, true);
             auto ty = holds<Type::Unit0>(arrTpe->component) ? llvm::Type::getInt8Ty(C) : mkTpe(arrTpe->component);
-            return B.CreateInBoundsGEP(ty->isStructTy() ? B.getPtrTy(AllocaAS) : ty, //
+            return B.CreateInBoundsGEP(ty,              //
                                        mkTermVal(*lhs),                              //
                                        offset, key + "_ptr");
           } else if (auto structTpe = get_opt<Type::Struct>(lhs->tpe); structTpe) {
@@ -601,10 +605,10 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
           if (x.expr) mkExprVal(*x.expr, fn, x.name.symbol + "_var_rhs");
         } else {
           auto tpe = mkTpe(x.name.tpe);
-          auto stackPtr = B.CreateAlloca(tpe->isStructTy() ? B.getPtrTy(AllocaAS) : tpe, AllocaAS, nullptr, x.name.symbol + "_stack_ptr");
+          auto stackPtr = B.CreateAlloca(tpe, AllocaAS, nullptr, x.name.symbol + "_stack_ptr");
           auto rhs = x.expr ? std::make_optional(mkExprVal(*x.expr, fn, x.name.symbol + "_var_rhs")) : std::nullopt;
           stackVarPtrs[x.name.symbol] = {x.name.tpe, stackPtr};
-          if (holds<Type::Array>(x.name.tpe)) {
+          if (holds<Type::Ptr>(x.name.tpe)) {
             if (rhs) {
               B.CreateStore(*rhs, stackPtr);
             } else
@@ -653,7 +657,7 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
       },
       [&](const Stmt::Update &x) -> BlockKind {
         if (auto lhs = get_opt<Term::Select>(x.lhs); lhs) {
-          if (auto arrTpe = get_opt<Type::Array>(lhs->tpe); arrTpe) {
+          if (auto arrTpe = get_opt<Type::Ptr>(lhs->tpe); arrTpe) {
             auto rhs = x.value;
             if (arrTpe->component != tpe(rhs)) {
               throw std::logic_error("Semantic error: array component type (" + to_string(arrTpe->component) + ") and rhs expr (" +
@@ -665,10 +669,8 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
                 auto ptr = B.CreateInBoundsGEP(ty, dest, mkTermVal(x.idx), qualified(*lhs) + "_update_ptr");
                 B.CreateStore(B.CreateIntCast(mkTermVal(rhs), ty, true), ptr);
               } else {
-                auto ty = mkTpe(tpe(rhs));
-                auto ptr = B.CreateInBoundsGEP(                         //
-                    ty->isStructTy() ? B.getPtrTy(AllocaAS) : ty, dest, //
-                    mkTermVal(x.idx), qualified(*lhs) + "_update_ptr"   //
+                auto ptr = B.CreateInBoundsGEP(mkTpe(tpe(rhs)), dest,                            //
+                                               mkTermVal(x.idx), qualified(*lhs) + "_update_ptr" //
                 );                                                      //
                 B.CreateStore(mkTermVal(rhs), ptr);
               }
@@ -813,10 +815,7 @@ static std::vector<Arg> collectFnDeclarationNames(const Function &f) {
 void LLVMBackend::AstTransformer::addFn(llvm::Module &mod, const Function &f, bool entry) {
 
   auto args = collectFnDeclarationNames(f);
-  auto llvmArgTpes = map_vec<Arg, llvm::Type *>(args, [&](auto &&arg) {
-    auto tpe = mkTpe(arg.named.tpe, true);
-    return tpe->isStructTy() ? B.getPtrTy(GlobalAS) : tpe;
-  });
+  auto llvmArgTpes = map_vec<Arg, llvm::Type *>(args, [&](auto &&arg) { return mkTpe(arg.named.tpe, true); });
 
   // Unit type at function return type position is void, any other location, Unit is a singleton value
   auto rtnTpe = holds<Type::Unit0>(f.rtn) ? llvm::Type::getVoidTy(C) : mkTpe(f.rtn, true);
@@ -891,7 +890,7 @@ void LLVMBackend::AstTransformer::addFn(llvm::Module &mod, const Function &f, bo
                   [&](const Type::Unit0 &) -> std::string { return "void"; },                                  //
                   [&](const Type::Nothing &) -> std::string { return "/*nothing*/"; },                         //
                   [&](const Type::Struct &x) -> std::string { return qualified(x.name); },                     //
-                  [&](const Type::Array &x) -> std::string { return thunk(x.component, thunk) + "*"; },        //
+                  [&](const Type::Ptr &x) -> std::string { return thunk(x.component, thunk) + "*"; },          //
                   [&](const Type::Var &) -> std::string { return undefined(__FILE__, __LINE__, "type var"); }, //
                   [&](const Type::Exec &) -> std::string { return undefined(__FILE__, __LINE__, "exec"); }     //
               );
@@ -995,8 +994,7 @@ void LLVMBackend::AstTransformer::transform(llvm::Module &mod, const Function &f
                             : &arg;
 
         //        auto as = holds<ArgKind::Local>(fnArg.kind) ? LocalAS : GlobalAS;
-        auto tpe = mkTpe(fnArg.named.tpe);
-        auto stack = B.CreateAlloca(tpe->isStructTy() ? B.getPtrTy(GlobalAS) : tpe, AllocaAS, nullptr, fnArg.named.symbol + "_stack_ptr");
+        auto stack = B.CreateAlloca(mkTpe(fnArg.named.tpe), AllocaAS, nullptr, fnArg.named.symbol + "_stack_ptr");
         B.CreateStore(argValue, stack);
         return {fnArg.named.symbol, {fnArg.named.tpe, stack}};
       });

@@ -285,6 +285,10 @@ bool HsaDevice::singleEntryPerModule() {
   TRACE();
   return false;
 }
+bool HsaDevice::leadingIndexArgument() {
+  TRACE();
+  return false;
+}
 std::vector<Property> HsaDevice::properties() {
   TRACE();
   return {};

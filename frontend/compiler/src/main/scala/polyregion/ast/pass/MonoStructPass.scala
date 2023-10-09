@@ -42,14 +42,14 @@ object MonoStructPass extends BoundaryPass[Map[p.Sym, p.Sym]] {
 
     // do the replacement outside in
     def doReplacement(t: p.Type): p.Type = t match {
-      case s @ p.Type.Struct(name, ref, tpeVars, args, parents) =>
+      case s @ p.Type.Struct(name, tpeVars, args, parents) =>
         println(s"[Rep] ${s.repr} => ${replacementTable.get(s)}")
         replacementTable.get(s) match {
-          case Some(sdef) => p.Type.Struct(sdef.name, ref, Nil, Nil, sdef.parents)
-          case None       => p.Type.Struct(name, ref, tpeVars, args.map(doReplacement(_)), parents)
+          case Some(sdef) => p.Type.Struct(sdef.name, Nil, Nil, sdef.parents)
+          case None       => p.Type.Struct(name, tpeVars, args.map(doReplacement(_)), parents)
         }
-      case a @ p.Type.Array(c, s) => p.Type.Array(doReplacement(c), s)
-      case a                      => a
+      case a @ p.Type.Ptr(c, s) => p.Type.Ptr(doReplacement(c), s)
+      case a                    => a
     }
 
     val rootStructDefs = monoStructDefs
@@ -59,10 +59,10 @@ object MonoStructPass extends BoundaryPass[Map[p.Sym, p.Sym]] {
     val referencedStructDefs = rootStructDefs
       .collectWhere[p.Type] { t =>
         def findLeafStructDefs(t: p.Type): List[p.StructDef] = t match {
-          case p.Type.Struct(name, _, _, xs, _) =>
+          case p.Type.Struct(name, _, xs, _) =>
             xs.flatMap(findLeafStructDefs(_)) ::: program.defs.filter(_.name == name)
-          case p.Type.Array(component, _) => findLeafStructDefs(component)
-          case _                          => Nil
+          case p.Type.Ptr(component, _) => findLeafStructDefs(component)
+          case _                        => Nil
         }
         findLeafStructDefs(t)
       }

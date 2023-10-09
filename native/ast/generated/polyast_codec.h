@@ -226,8 +226,8 @@ namespace Type {
 [[nodiscard]] POLYREGION_EXPORT json bool1_to_json(const Type::Bool1 &);
 [[nodiscard]] POLYREGION_EXPORT Type::Struct struct_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json struct_to_json(const Type::Struct &);
-[[nodiscard]] POLYREGION_EXPORT Type::Array array_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json array_to_json(const Type::Array &);
+[[nodiscard]] POLYREGION_EXPORT Type::Ptr ptr_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json ptr_to_json(const Type::Ptr &);
 [[nodiscard]] POLYREGION_EXPORT Type::Var var_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json var_to_json(const Type::Var &);
 [[nodiscard]] POLYREGION_EXPORT Type::Exec exec_from_json(const json &);

@@ -65,12 +65,19 @@ std::string polyregion::polystl::generate(clang::ASTContext &C, const clang::CXX
   polyregion::polystl::Remapper remapper(C);
 
   auto r = polyregion::polystl::Remapper::RemapContext{};
-  r.parent = r.structs.find(remapper.handleRecord(parent, r))->second;
-  remapper.handleStmt(body, r);
-  //
-  //
-  auto f0 =
-      polyregion::polyast::Function(polyregion::polyast::Sym({"kernel"}), {}, {}, {}, {}, {}, remapper.handleType(returnTpe), r.stmts);
+  auto parentName = remapper.handleRecord(parent, r);
+  StructDef &parentDef = r.structs.find(parentName)->second;
+
+  auto stmts = r.scoped([&](auto &r) { remapper.handleStmt(body, r); }, parentName);
+  stmts.push_back(Stmt::Return(Expr::Alias(Term::Unit0Const())));
+
+  auto recv =
+      Arg(Named("this", Type::Ptr(Type::Struct(Sym({parentName}), parentDef.tpeVars, {}, parentDef.parents), TypeSpace::Global())), {});
+
+  auto leadingIndex = Arg(Named("idx", Type::IntS64()), {});
+
+  auto f0 = polyregion::polyast::Function(polyregion::polyast::Sym({"kernel"}), {}, {}, {leadingIndex, recv}, {}, {},
+                                          remapper.handleType(returnTpe), stmts);
 
   std::vector<Function> fns;
   std::vector<StructDef> structDefs;
@@ -92,42 +99,44 @@ std::string polyregion::polystl::generate(clang::ASTContext &C, const clang::CXX
 
   std::cout << C.getTypeSize(parent->getTypeForDecl())  << "\n";
 
-//  auto result = compileIt(p);
-//  if (result) {
-//    std::cout << repr(*result) << std::endl;
-//  } else {
-//    std::cout << "No compile!" << std::endl;
-//  }
-  //
-  std::vector<std::string> fieldDecl;
-  std::vector<std::string> ctorArgs;
-  std::vector<std::string> ctorInits;
-  std::vector<std::string> ctorAps;
-
-  for (auto c : parent->captures()) {
-
-    switch (c.getCaptureKind()) {
-      case clang::LambdaCaptureKind::LCK_This: break;
-      case clang::LambdaCaptureKind::LCK_StarThis: break;
-      case clang::LambdaCaptureKind::LCK_ByCopy: break;
-      case clang::LambdaCaptureKind::LCK_ByRef: break;
-      case clang::LambdaCaptureKind::LCK_VLAType: break;
-    }
-
-    if (c.capturesVariable()) {
-      auto var = c.getCapturedVar();
-      auto tpe = print_type(var->getType().getDesugaredType(C), C);
-      auto name = var->getQualifiedNameAsString();
-      fieldDecl.push_back(fmt::format("{} {};", tpe, name));
-      ctorArgs.push_back(fmt::format("{} {}", tpe, name));
-      ctorInits.push_back(fmt::format("{}({})", name, name));
-      ctorAps.push_back(name);
-
-    } else if (c.capturesThis()) {
-
-    } else {
-      throw std::logic_error("Illegal capture");
-    }
+  auto result = compileIt(p);
+  if (result) {
+    std::cout << repr(*result) << std::endl;
+    auto xs = *result->binary;
+    return std::string(xs.begin(), xs.end());
+  } else {
+    std::cout << "No compile!" << std::endl;
   }
+  //
+  //  std::vector<std::string> fieldDecl;
+  //  std::vector<std::string> ctorArgs;
+  //  std::vector<std::string> ctorInits;
+  //  std::vector<std::string> ctorAps;
+
+  //  for (auto c : parent->captures()) {
+  //
+  //    switch (c.getCaptureKind()) {
+  //      case clang::LambdaCaptureKind::LCK_This: break;
+  //      case clang::LambdaCaptureKind::LCK_StarThis: break;
+  //      case clang::LambdaCaptureKind::LCK_ByCopy: break;
+  //      case clang::LambdaCaptureKind::LCK_ByRef: break;
+  //      case clang::LambdaCaptureKind::LCK_VLAType: break;
+  //    }
+  //
+  //    if (c.capturesVariable()) {
+  //      auto var = c.getCapturedVar();
+  //      auto tpe = print_type(var->getType().getDesugaredType(C), C);
+  //      auto name = var->getQualifiedNameAsString();
+  //      fieldDecl.push_back(fmt::format("{} {};", tpe, name));
+  //      ctorArgs.push_back(fmt::format("{} {}", tpe, name));
+  //      ctorInits.push_back(fmt::format("{}({})", name, name));
+  //      ctorAps.push_back(name);
+  //
+  //    } else if (c.capturesThis()) {
+  //
+  //    } else {
+  //      throw std::logic_error("Illegal capture");
+  //    }
+  //  }
   return "";
 }

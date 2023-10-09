@@ -195,35 +195,33 @@ json Type::bool1_to_json(const Type::Bool1& x_) {
 
 Type::Struct Type::struct_from_json(const json& j_) { 
   auto name =  sym_from_json(j_.at(0));
-  auto ref = j_.at(1).get<bool>();
-  auto tpeVars = j_.at(2).get<std::vector<std::string>>();
+  auto tpeVars = j_.at(1).get<std::vector<std::string>>();
   std::vector<Type::Any> args;
-  auto args_json = j_.at(3);
+  auto args_json = j_.at(2);
   std::transform(args_json.begin(), args_json.end(), std::back_inserter(args), &Type::any_from_json);
   std::vector<Sym> parents;
-  auto parents_json = j_.at(4);
+  auto parents_json = j_.at(3);
   std::transform(parents_json.begin(), parents_json.end(), std::back_inserter(parents), &sym_from_json);
-  return {name, ref, tpeVars, args, parents};
+  return {name, tpeVars, args, parents};
 }
 
 json Type::struct_to_json(const Type::Struct& x_) { 
   auto name =  sym_to_json(x_.name);
-  auto ref = x_.ref;
   auto tpeVars = x_.tpeVars;
   std::vector<json> args;
   std::transform(x_.args.begin(), x_.args.end(), std::back_inserter(args), &Type::any_to_json);
   std::vector<json> parents;
   std::transform(x_.parents.begin(), x_.parents.end(), std::back_inserter(parents), &sym_to_json);
-  return json::array({name, ref, tpeVars, args, parents});
+  return json::array({name, tpeVars, args, parents});
 }
 
-Type::Array Type::array_from_json(const json& j_) { 
+Type::Ptr Type::ptr_from_json(const json& j_) { 
   auto component =  Type::any_from_json(j_.at(0));
   auto space =  TypeSpace::any_from_json(j_.at(1));
   return {component, space};
 }
 
-json Type::array_to_json(const Type::Array& x_) { 
+json Type::ptr_to_json(const Type::Ptr& x_) { 
   auto component =  Type::any_to_json(x_.component);
   auto space =  TypeSpace::any_to_json(x_.space);
   return json::array({component, space});
@@ -275,7 +273,7 @@ Type::Any Type::any_from_json(const json& j_) {
   case 12: return Type::unit0_from_json(t_);
   case 13: return Type::bool1_from_json(t_);
   case 14: return Type::struct_from_json(t_);
-  case 15: return Type::array_from_json(t_);
+  case 15: return Type::ptr_from_json(t_);
   case 16: return Type::var_from_json(t_);
   case 17: return Type::exec_from_json(t_);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
@@ -299,7 +297,7 @@ json Type::any_to_json(const Type::Any& x_) {
   [](const Type::Unit0 &y_) -> json { return {12, Type::unit0_to_json(y_)}; },
   [](const Type::Bool1 &y_) -> json { return {13, Type::bool1_to_json(y_)}; },
   [](const Type::Struct &y_) -> json { return {14, Type::struct_to_json(y_)}; },
-  [](const Type::Array &y_) -> json { return {15, Type::array_to_json(y_)}; },
+  [](const Type::Ptr &y_) -> json { return {15, Type::ptr_to_json(y_)}; },
   [](const Type::Var &y_) -> json { return {16, Type::var_to_json(y_)}; },
   [](const Type::Exec &y_) -> json { return {17, Type::exec_to_json(y_)}; },
   [](const auto &x_) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x_) ); }
@@ -2101,13 +2099,13 @@ json compileresult_to_json(const CompileResult& x_) {
 json hashed_from_json(const json& j_) { 
   auto hash_ = j_.at(0).get<std::string>();
   auto data_ = j_.at(1);
-  if(hash_ != "3c7281817896114f33bd79bc57c3d98e") {
-   throw std::runtime_error("Expecting ADT hash to be 3c7281817896114f33bd79bc57c3d98e, but was " + hash_);
+  if(hash_ != "b494e0906548079319adc4dd7992e27a") {
+   throw std::runtime_error("Expecting ADT hash to be b494e0906548079319adc4dd7992e27a, but was " + hash_);
   }
   return data_;
 }
 
 json hashed_to_json(const json& x_) { 
-  return json::array({"3c7281817896114f33bd79bc57c3d98e", x_});
+  return json::array({"b494e0906548079319adc4dd7992e27a", x_});
 }
 } // namespace polyregion::polyast

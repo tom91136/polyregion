@@ -25,18 +25,18 @@ object Pickler {
   }
 
   def tpeAsRuntimeTpe(t: p.Type): rt.Type = t match {
-    case p.Type.Bool1                 => rt.Type.BOOL
-    case p.Type.IntS8                 => rt.Type.BYTE
-    case p.Type.IntU16                => rt.Type.CHAR
-    case p.Type.IntS16                => rt.Type.SHORT
-    case p.Type.IntS32                => rt.Type.INT
-    case p.Type.IntS64                => rt.Type.LONG
-    case p.Type.Float32               => rt.Type.FLOAT
-    case p.Type.Float64               => rt.Type.DOUBLE
-    case p.Type.Array(_, _)           => rt.Type.PTR
-    case p.Type.Struct(_, _, _, _, _) => rt.Type.PTR
-    case p.Type.Unit0                 => rt.Type.VOID
-    case illegal                      => throw new RuntimeException(s"tpeAsRuntimeTpe: Illegal $illegal")
+    case p.Type.Bool1              => rt.Type.BOOL
+    case p.Type.IntS8              => rt.Type.BYTE
+    case p.Type.IntU16             => rt.Type.CHAR
+    case p.Type.IntS16             => rt.Type.SHORT
+    case p.Type.IntS32             => rt.Type.INT
+    case p.Type.IntS64             => rt.Type.LONG
+    case p.Type.Float32            => rt.Type.FLOAT
+    case p.Type.Float64            => rt.Type.DOUBLE
+    case p.Type.Ptr(_, _)          => rt.Type.PTR
+    case p.Type.Struct(_, _, _, _) => rt.Type.PTR
+    case p.Type.Unit0              => rt.Type.VOID
+    case illegal                   => throw new RuntimeException(s"tpeAsRuntimeTpe: Illegal $illegal")
   }
 
   def readPrim(using q: Quotes) //
@@ -134,8 +134,8 @@ object Pickler {
       val added0 = added + sdef.name
       (sdef, repr.widenTermRefByName) :: sdef.members.flatMap(
         _.named match {
-          case (p.Named(_, p.Type.Struct(name, _, _, _, _))) if added0.contains(name) => Nil
-          case (p.Named(member, p.Type.Struct(name, _, _, _, _))) =>
+          case (p.Named(_, p.Type.Struct(name, _, _, _))) if added0.contains(name) => Nil
+          case (p.Named(member, p.Type.Struct(name, _, _, _))) =>
             lut(name) match {
               case (sdef, None)                     => go(sdef, q.TermRef(repr, member), added0)
               case (sdef, Some((_, (from, to, x)))) =>
@@ -247,7 +247,7 @@ object Pickler {
           ${
             val elementOffset = '{ ${ Expr(elementSizeInBytes) } * i }
             comp match {
-              case p.Type.Struct(name, _, _, _, _) =>
+              case p.Type.Struct(name, _, _, _) =>
                 val ptr = callWrite(name, '{ $expr(i) }, ptrMap)
                 writePrim('arrBuffer, elementOffset, p.Type.IntS64, ptr)
               case t =>
@@ -273,10 +273,10 @@ object Pickler {
         Varargs(mapping.members.map { m =>
           val memberOffset = Expr(m.offsetInBytes.toInt)
           (rootAfterPrism, m.tpe) match {
-            case ('{ $seq: StdLib.MutableSeq[t] }, p.Type.Array(comp, _)) =>
+            case ('{ $seq: StdLib.MutableSeq[t] }, p.Type.Ptr(comp, _)) =>
               val ptr = writeArray[t](seq, comp, ptrMap)
               writePrim('buffer, memberOffset, p.Type.IntS64, ptr)
-            case (_, p.Type.Struct(name, _, _, _, _)) =>
+            case (_, p.Type.Struct(name, _, _, _)) =>
               val ptr = callWrite(name, m.select(rootAfterPrism.asTerm).asExpr, ptrMap)
               writePrim('buffer, memberOffset, p.Type.IntS64, ptr)
             case (_, _) =>
@@ -318,7 +318,7 @@ object Pickler {
           $seq(i) = ${
             val elementOffset = '{ ${ Expr(elementSizeInBytes) } * i }
             comp match {
-              case p.Type.Struct(name, _, _, _, _) =>
+              case p.Type.Struct(name, _, _, _) =>
                 val arrElemPtr = readPrim('arrBuffer, elementOffset, p.Type.IntS64).asExprOf[Long]
                 callRead(name, '{ $seq(i) }, arrElemPtr, ptrMap, objMap).asExprOf[t]
               case t =>
@@ -347,7 +347,7 @@ object Pickler {
           mapping.members.map { m =>
             val memberOffset = Expr(m.offsetInBytes.toInt)
             (root, m.tpe) match {
-              case (_, p.Type.Array(comp, _)) =>
+              case (_, p.Type.Ptr(comp, _)) =>
                 (
                   mapping.write,
                   root.asTerm.tpe.widenTermRefByName match {
@@ -365,7 +365,7 @@ object Pickler {
                     q.report.errorAndAbort("Missing write prism for array type, something isn't right here")
                 }
 
-              case (_, p.Type.Struct(name, _, _, _, _)) =>
+              case (_, p.Type.Struct(name, _, _, _)) =>
                 val structPtr = readPrim('buffer, memberOffset, p.Type.IntS64).asExprOf[Long]
                 if (m.mut) {
                   q.Assign(
@@ -442,10 +442,10 @@ object Pickler {
             val terms = mapping.members.map { m =>
               val memberOffset = Expr(m.offsetInBytes.toInt)
               m.tpe match {
-                case p.Type.Array(comp, _) =>
+                case p.Type.Ptr(comp, _) =>
                   // readArray[t](seq, comp, ptrMap, objMap, memberOffset, 'buffer, mapping)
                   '{ ??? }.asTerm
-                case p.Type.Struct(name, _, _, _, _) =>
+                case p.Type.Struct(name, _, _, _) =>
                   val structPtr = readPrim('buffer, memberOffset, p.Type.IntS64).asExprOf[Long]
                   callRead(name, '{ null }, structPtr, ptrMap, objMap).asTerm
                 case _ => readPrim('buffer, memberOffset, m.tpe).asTerm

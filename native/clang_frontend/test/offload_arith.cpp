@@ -3,17 +3,6 @@
 //
 #include "offload.hpp"
 
-template<typename F>
-struct wrapper1 {
-  F f;
-  wrapper1(F f) :f(f) {}
-  auto operator ()() const { return f(); }
-};
-
-//template<typename F>
-//wrapper1<F> wrap0(F f) {
-//  return wrapper1<F>{f};
-//}
 
 
 template < typename T, typename F> void assertOffload1(F f){
@@ -60,13 +49,33 @@ void m(){
   });
 }
 
+struct A{
+  int& xs;
+  A(int&aa): xs(aa){}
+};
+
 int main (){
 //TEST_CASE("Invoke arith") {
- printf("In\n");
- m<int>();
- printf("===\n");
- m<double>();
- printf("Done\n");
+  //  printf("In\n");
+  //  m<int>();
+  //  printf("===\n");
+  //  m<double>();
+
+  int32_t a = 42;
+  int32_t b = 42;
+  int32_t c = __polyregion_offload_f1__([&]() {
+//    A aa(a);
+//    aa.xs = 2;
+//    a = 3;
+//    b +=2;
+
+    a++;
+    return a+b+42;
+  });
+  printf("a = %d\n", a);
+  printf("b = %d\n", b);
+  printf("c = %d\n", c);
+  printf("Done\n");
 
 }
 

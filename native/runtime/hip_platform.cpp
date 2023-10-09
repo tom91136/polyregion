@@ -106,6 +106,10 @@ bool HipDevice::singleEntryPerModule() {
   TRACE();
   return false;
 }
+bool HipDevice::leadingIndexArgument() {
+  TRACE();
+  return false;
+}
 std::vector<Property> HipDevice::properties() {
   // XXX Do not use hipDeviceGetAttribute and hipDeviceAttribute_t. AMD "reordered" the enums in ROCm 5.0
   // See https://docs.amd.com/bundle/ROCm_Release_Notes_v5.0/page/Breaking_Changes.html

@@ -37,8 +37,8 @@ object Compiler {
     fnArgsTpes = fnArgsTpeWithTerms.map(_._2)
     fnTypeVars = f.paramss.flatMap(_.params).collect { case q.TypeDef(name, _) => name }
     (receiver, receiverTpeVars) <- owningClass match {
-      case t @ p.Type.Struct(_, _, tpeVars, _, _) => (Some(t), tpeVars).success
-      case x                                      => s"Illegal receiver: $x".fail
+      case t @ p.Type.Struct(_, tpeVars, _, _) => (Some(t), tpeVars).success
+      case x                                   => s"Illegal receiver: $x".fail
     }
     // TODO run outliner here
   } yield p.Signature(
@@ -240,8 +240,8 @@ object Compiler {
       owningClass <- Retyper.clsSymTyper0(owningSymbol)
       _ = log.info(s"Method owner: $owningClass")
       (receiver, receiverTpeVars) <- owningClass match {
-        case t @ p.Type.Struct(_, _, tpeVars, _, _) => (Some(p.Named("this", t)), tpeVars).success
-        case x                                      => s"Illegal receiver: $x".fail
+        case t @ p.Type.Struct(_, tpeVars, _, _) => (Some(p.Named("this", t)), tpeVars).success
+        case x                                   => s"Illegal receiver: $x".fail
       }
 
       allTypeVars = (receiverTpeVars ::: fnTypeVars).distinct
@@ -351,14 +351,14 @@ object Compiler {
       typeLut: Map[p.Type.Struct, p.Type.Struct] =
         replacedClasses
           .flatMap((tpeAps, sdef) =>
-            tpeAps.map { case ap @ p.Type.Struct(_, _, _, ts, _) => ap -> sdef.tpe().copy(args = ts) }
+            tpeAps.map { case ap @ p.Type.Struct(_, _, ts, _) => ap -> sdef.tpe().copy(args = ts) }
           )
           .toMap ++ replacedModules.map((tpe, sdef) => tpe -> sdef.tpe()).toMap
 
       replaceTpe = (t: p.Type) =>
         t match {
-          case s @ p.Type.Struct(_, _, _, _, _) => typeLut.getOrElse(s, s)
-          case t                                => t
+          case s @ p.Type.Struct(_, _, _, _) => typeLut.getOrElse(s, s)
+          case t                             => t
         }
 
       replaceTpeForTerm = (t: p.Term) =>

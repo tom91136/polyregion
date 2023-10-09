@@ -98,6 +98,10 @@ bool CudaDevice::singleEntryPerModule() {
   TRACE();
   return false;
 }
+bool CudaDevice::leadingIndexArgument() {
+  TRACE();
+  return false;
+}
 std::vector<Property> CudaDevice::properties() {
   TRACE();
   return {};

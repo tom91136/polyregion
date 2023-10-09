@@ -57,12 +57,11 @@ object PolyAst {
     // specialisations
     case Struct(
         name: Sym,             //
-        ref: Boolean,             //
         tpeVars: List[String], //
         args: List[Type],      //
         parents: List[Sym]
     )                                              extends Type(TypeKind.Ref)
-    case Array(component: Type, space: Type.Space) extends Type(TypeKind.Ref)
+    case Ptr(component: Type, space: Type.Space) extends Type(TypeKind.Ref)
 
     //
     case Var(name: String)                                        extends Type(TypeKind.None)
@@ -387,8 +386,8 @@ object PolyAst {
     case Cast(from: Term, as: Type)                           extends Expr(as)
     case Alias(ref: Term)                                     extends Expr(ref.tpe)
     case Index(lhs: Term, idx: Term, component: Type)         extends Expr(component)
-    case RefTo(lhs: Term, idx: Option[Term], component: Type) extends Expr(Type.Array(component, Type.Space.Global))
-    case Alloc(component: Type, size: Term)                   extends Expr(Type.Array(component, Type.Space.Global))
+    case RefTo(lhs: Term, idx: Option[Term], component: Type) extends Expr(Type.Ptr(component, Type.Space.Global))
+    case Alloc(component: Type, size: Term)                   extends Expr(Type.Ptr(component, Type.Space.Global))
 
     case Invoke(
         name: Sym,

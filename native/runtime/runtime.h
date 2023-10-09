@@ -40,16 +40,16 @@ using Property = std::pair<std::string, std::string>;
 using Callback = std::function<void()>;
 using MaybeCallback = std::optional<Callback>;
 
-struct ArgBuffer {
-  std::vector<Type> types;
-  std::vector<std::byte> data;
-  ArgBuffer(std::initializer_list<TypedPointer> args = {});
-  void append(Type tpe, void *ptr);
-  void append(const ArgBuffer &that);
-  void append(std::initializer_list<TypedPointer> args);
-  void prepend(Type tpe, void *ptr);
-  void prepend(const ArgBuffer &that);
-  void prepend(std::initializer_list<TypedPointer> args);
+struct POLYREGION_EXPORT ArgBuffer {
+  POLYREGION_EXPORT std::vector<Type> types;
+  POLYREGION_EXPORT std::vector<std::byte> data;
+  POLYREGION_EXPORT ArgBuffer(std::initializer_list<TypedPointer> args = {});
+  POLYREGION_EXPORT void append(Type tpe, void *ptr);
+  POLYREGION_EXPORT void append(const ArgBuffer &that);
+  POLYREGION_EXPORT void append(std::initializer_list<TypedPointer> args);
+  POLYREGION_EXPORT void prepend(Type tpe, void *ptr);
+  POLYREGION_EXPORT void prepend(const ArgBuffer &that);
+  POLYREGION_EXPORT void prepend(std::initializer_list<TypedPointer> args);
 };
 
 // non-public APIs
@@ -350,6 +350,7 @@ public:
   [[nodiscard]] virtual POLYREGION_EXPORT std::string name() = 0;
   [[nodiscard]] virtual POLYREGION_EXPORT bool sharedAddressSpace() = 0;
   [[nodiscard]] virtual POLYREGION_EXPORT bool singleEntryPerModule() = 0;
+  [[nodiscard]] virtual POLYREGION_EXPORT bool leadingIndexArgument() = 0;
   [[nodiscard]] virtual POLYREGION_EXPORT std::vector<Property> properties() = 0;
   [[nodiscard]] virtual POLYREGION_EXPORT std::vector<std::string> features() = 0;
   virtual POLYREGION_EXPORT void loadModule(const std::string &name, const std::string &image) = 0;
@@ -368,7 +369,7 @@ public:
   [[nodiscard]] virtual POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue() = 0;
 };
 
-class Platform {
+class POLYREGION_EXPORT Platform {
 public:
   virtual POLYREGION_EXPORT ~Platform() = default;
   [[nodiscard]] POLYREGION_EXPORT virtual std::string name() = 0;

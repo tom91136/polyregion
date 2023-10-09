@@ -33,7 +33,7 @@ set(LLVM_LIBS
 message(STATUS "[runtime] Adding LLVM libs = ${LLVM_LIBS}")
 
 
-add_library(PolyRT STATIC
+set(POLYRT_SRC
         libm.cpp
         runtime.cpp
         vulkan_platform.cpp
@@ -47,31 +47,35 @@ add_library(PolyRT STATIC
         thirdparty/clew/src/clew.c
         thirdparty/hsaew/src/hsaew.c
         ${RUNTIME_SRC_FILES}
-        )
+)
+add_library(polyrt SHARED ${POLYRT_SRC})
+add_library(polyrt-static STATIC ${POLYRT_SRC})
 
+foreach (TARGET polyrt polyrt-static)
+    set_target_properties(${TARGET} PROPERTIES PUBLIC_HEADER runtime.h)
+    target_compile_definitions(${TARGET} PUBLIC ${RUNTIME_BACKEND_DEFS})
+    target_include_directories(${TARGET} PUBLIC ../include
+            thirdparty/
+            thirdparty/clew/include
+            thirdparty/hipew/include
+            thirdparty/cuew/include
+            thirdparty/hsaew/include
+            ${libffi_INCLUDE_DIRS}
+            ${json_SOURCE_DIR}
+            ${LLVM_INCLUDE_DIRS}
+            ${vulkanmemoryallocator_SOURCE_DIR}
+            ${vulkan-headers_SOURCE_DIR}/include
+            ${RUNTIME_INCLUDE_DIRS}
+    )
+    target_link_libraries(${TARGET} PUBLIC
+            libffi
+            TBB::tbb
+            ${LLVM_LIBS}
+            ${DL_LIB}
+            ${RUNTIME_LINK_LIBS}
+    )
+endforeach ()
 
-set_target_properties(PolyRT PROPERTIES PUBLIC_HEADER runtime.h)
-target_compile_definitions(PolyRT PUBLIC ${RUNTIME_BACKEND_DEFS})
-target_include_directories(PolyRT PUBLIC ../include
-        thirdparty/
-        thirdparty/clew/include
-        thirdparty/hipew/include
-        thirdparty/cuew/include
-        thirdparty/hsaew/include
-        ${libffi_INCLUDE_DIRS}
-        ${json_SOURCE_DIR}
-        ${LLVM_INCLUDE_DIRS}
-        ${vulkanmemoryallocator_SOURCE_DIR}
-        ${vulkan-headers_SOURCE_DIR}/include
-        ${RUNTIME_INCLUDE_DIRS}
-        )
-target_link_libraries(PolyRT PUBLIC
-        libffi
-        TBB::tbb
-        ${LLVM_LIBS}
-        ${DL_LIB}
-        ${RUNTIME_LINK_LIBS}
-        )
 
 add_executable(polyrt-tests test/test_utils.cpp test/fma.cpp test/args.cpp test/stream.cpp)
 add_executable(polyrt-exec ../shared/cxa_thread_atexit.cpp driver.cpp)
@@ -79,8 +83,8 @@ add_executable(polyrt-exec ../shared/cxa_thread_atexit.cpp driver.cpp)
 target_include_directories(polyrt-exec PRIVATE ../include)
 target_include_directories(polyrt-tests PRIVATE . ../include)
 
-target_link_libraries(polyrt-exec PRIVATE PolyRT)
-target_link_libraries(polyrt-tests PRIVATE PolyRT Catch2::Catch2WithMain)
+target_link_libraries(polyrt-exec PRIVATE polyrt-static)
+target_link_libraries(polyrt-tests PRIVATE polyrt-static Catch2::Catch2WithMain)
 
 set(COMPILE_OPTIONS
         #        -fvisibility-global-new-delete-hidden
@@ -95,11 +99,13 @@ set(LINK_OPTIONS
         "$<$<CONFIG:DEBUG>:${COMMON_DEBUG_OPTIONS}>"
         )
 
-target_compile_options(PolyRT PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(polyrt PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(polyrt-static PRIVATE ${COMPILE_OPTIONS})
 target_compile_options(polyrt-exec PRIVATE ${COMPILE_OPTIONS})
 target_compile_options(polyrt-tests PRIVATE ${COMPILE_OPTIONS})
 
-target_link_options(PolyRT PRIVATE ${LINK_OPTIONS})
+target_link_options(polyrt PRIVATE ${LINK_OPTIONS})
+target_link_options(polyrt-static PRIVATE ${LINK_OPTIONS})
 target_link_options(polyrt-exec PRIVATE ${LINK_OPTIONS})
 target_link_options(polyrt-tests PRIVATE ${LINK_OPTIONS})
 

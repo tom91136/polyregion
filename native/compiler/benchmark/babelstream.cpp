@@ -25,9 +25,9 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
   auto mkCpuStreamFn = [&](const std::string &name, std::vector<Arg> extraArgs, const std::function<Stmts(Term::Any, Term::Any)> &mkPrelude,
                            const std::function<Stmts(Term::Any, Term::Any)> &mkLoopBody,
                            const std::function<Stmts(Term::Any, Term::Any)> &mkEpilogue) {
-    std::vector<Arg> args = {"a"_(Array(type))(), "b"_(Array(type))(), "c"_(Array(type))()};
+    std::vector<Arg> args = {"a"_(Ptr(type))(), "b"_(Ptr(type))(), "c"_(Ptr(type))()};
     if (!gpu) {
-      std::vector<Arg> cpuArgs = {"id"_(Long)(), "begin"_(Array(Long))(), "end"_(Array(Long))()};
+      std::vector<Arg> cpuArgs = {"id"_(Long)(), "begin"_(Ptr(Long))(), "end"_(Ptr(Long))()};
       args.insert(args.begin(), cpuArgs.begin(), cpuArgs.end());
     }
     args.insert(args.end(), extraArgs.begin(), extraArgs.end());
@@ -35,7 +35,7 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
     Stmts stmts;
 
     if (!gpu) {
-      stmts.push_back(let("i") = "begin"_(Array(Long))["id"_(Long)]); // long i = begin[id]
+      stmts.push_back(let("i") = "begin"_(Ptr(Long))["id"_(Long)]); // long i = begin[id]
 
       auto prelude = mkPrelude("id"_(Long), "i"_(Long));
       stmts.insert(stmts.end(), prelude.begin(), prelude.end()); // ...
@@ -43,7 +43,7 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
       auto loopBody = mkLoopBody("id"_(Long), "i"_(Long));
       loopBody.push_back(Mut("i"_(Long), invoke(Add("i"_(Long), 1_(Long), Long)), false)); // i++
 
-      stmts.push_back(While({let("bound") = "end"_(Array(Long))["id"_(Long)], let("cont") = invoke(LogicLt("i"_(Long), "bound"_(Long)))},
+      stmts.push_back(While({let("bound") = "end"_(Ptr(Long))["id"_(Long)], let("cont") = invoke(LogicLt("i"_(Long), "bound"_(Long)))},
                             "cont"_(Bool),
                             loopBody)); // while(i < end[id])
 
@@ -73,8 +73,8 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
       "copy", {}, empty,
       [&](auto _, auto i) -> Stmts {
         return {
-            let("ai") = "a"_(Array(type))[i],   // ai = a[i]
-            "c"_(Array(type))[i] = "ai"_(type), // c[i] = ai
+            let("ai") = "a"_(Ptr(type))[i],   // ai = a[i]
+            "c"_(Ptr(type))[i] = "ai"_(type), // c[i] = ai
         };
       },
       empty);
@@ -83,9 +83,9 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
       "mul", {"scalar"_(type)()}, empty,
       [&](auto _, auto i) -> Stmts {
         return {
-            let("ci") = "c"_(Array(type))[i],                           // ci = b[i]
+            let("ci") = "c"_(Ptr(type))[i],                           // ci = b[i]
             let("r") = invoke(Mul("ci"_(type), "scalar"_(type), type)), // r = ci * scalar
-            "b"_(Array(type))[i] = "r"_(type),                          // b[i] = result
+            "b"_(Ptr(type))[i] = "r"_(type),                          // b[i] = result
         };
       },
       empty);
@@ -94,10 +94,10 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
       "add", {}, empty,
       [&](auto _, auto i) -> Stmts {
         return {
-            let("ai") = "a"_(Array(type))[i],                       // ai = a[i]
-            let("bi") = "b"_(Array(type))[i],                       // bi = b[i]
+            let("ai") = "a"_(Ptr(type))[i],                       // ai = a[i]
+            let("bi") = "b"_(Ptr(type))[i],                       // bi = b[i]
             let("r") = invoke(Add("ai"_(type), "bi"_(type), type)), // r = ai + bi
-            "c"_(Array(type))[i] = "r"_(type),                      // c[i] = r
+            "c"_(Ptr(type))[i] = "r"_(type),                      // c[i] = r
         };
       },
       empty);
@@ -106,11 +106,11 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
       "triad", {"scalar"_(type)()}, empty,
       [&](auto _, auto i) -> Stmts {
         return {
-            let("bi") = "b"_(Array(type))[i],                            // bi = b[i]
-            let("ci") = "c"_(Array(type))[i],                            // ci = b[i]
+            let("bi") = "b"_(Ptr(type))[i],                            // bi = b[i]
+            let("ci") = "c"_(Ptr(type))[i],                            // ci = b[i]
             let("r0") = invoke(Mul("ci"_(type), "scalar"_(type), type)), // r0 = ci * scalar
             let("r1") = invoke(Add("bi"_(type), "r0"_(type), type)),     // r1 = bi + r0
-            "a"_(Array(type))[i] = "r1"_(type),                          // a[i] = r1
+            "a"_(Ptr(type))[i] = "r1"_(type),                          // a[i] = r1
         };
       },
       empty);
@@ -118,7 +118,7 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
   auto dot =
       !gpu ? //
           mkCpuStreamFn(
-              "dot", {"sum"_(Array(type))()},
+              "dot", {"sum"_(Ptr(type))()},
               [&](auto id, auto i) -> Stmts { //
                 return {
                     let("acc") = 0_(type) // sum[id] = 0.0
@@ -126,8 +126,8 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
               },
               [&](auto id, auto i) -> Stmts {
                 return {
-                    let("ai") = "a"_(Array(type))[i],                                         // ai = a[i]
-                    let("bi") = "b"_(Array(type))[i],                                         // bi = b[i]
+                    let("ai") = "a"_(Ptr(type))[i],                                         // ai = a[i]
+                    let("bi") = "b"_(Ptr(type))[i],                                         // bi = b[i]
                     let("sumid") = "acc"_(type),                                              // sumid = acc
                     let("r0") = invoke(Mul("ai"_(type), "bi"_(type), type)),                  // r0 = ai * bi
                     Mut("acc"_(type), invoke(Add("r0"_(type), "sumid"_(type), type)), false), // r1 = r0 + sumid
@@ -136,23 +136,23 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
               },
               [&](auto id, auto i) -> Stmts {
                 return {
-                    "sum"_(Array(type))[id] = "acc"_(type) // a[i] = bi
+                    "sum"_(Ptr(type))[id] = "acc"_(type) // a[i] = bi
                 };
               })
            : //
           mkCpuStreamFn(
-              "dot", {"sum"_(Array(type))(), "wg_sum"_(Array(type, Local))(), "array_size"_(UInt)()}, empty,
+              "dot", {"sum"_(Ptr(type))(), "wg_sum"_(Ptr(type, Local))(), "array_size"_(UInt)()}, empty,
               [&](auto local_i, auto i) -> Stmts {
                 return {
                     let("global_size") = invoke(GpuGlobalSize(0_(UInt))),
-                    "wg_sum"_(Array(type, Local))[local_i] = 0_(type),
+                    "wg_sum"_(Ptr(type, Local))[local_i] = 0_(type),
                     While({let("cont") = invoke(LogicLt("i"_(UInt), "array_size"_(UInt)))}, "cont"_(Bool),
-                          {let("ai") = "a"_(Array(type))[i],                                              // ai = a[i]
-                           let("bi") = "b"_(Array(type))[i],                                              // bi = b[i]
-                           let("sumid") = "wg_sum"_(Array(type, Local))[local_i],                         // sumid = sum[local_i]
+                          {let("ai") = "a"_(Ptr(type))[i],                                              // ai = a[i]
+                           let("bi") = "b"_(Ptr(type))[i],                                              // bi = b[i]
+                           let("sumid") = "wg_sum"_(Ptr(type, Local))[local_i],                         // sumid = sum[local_i]
                            let("r0") = invoke(Mul("ai"_(type), "bi"_(type), type)),                       // r0 = ai * bi
                            let("r1") = invoke(Add("r0"_(type), "sumid"_(type), type)),                    // r1 = r0 + sumid
-                           "wg_sum"_(Array(type, Local))[local_i] = "r1"_(type),                          // a[i] = bi
+                           "wg_sum"_(Ptr(type, Local))[local_i] = "r1"_(type),                          // a[i] = bi
                            Mut("i"_(UInt), invoke(Add("i"_(UInt), "global_size"_(UInt), UInt)), false)}), // i += array_size
                     let("offset") = invoke(GpuLocalSize(0_(UInt))),                                       // offset = get_local_size()
                     Mut("offset"_(UInt), invoke(Div("offset"_(UInt), 2_(UInt), UInt)), false),            // offset /= 2
@@ -163,13 +163,13 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
                                    {
                                        let("new_offset") =
                                            invoke(Add("local_i"_(UInt), "offset"_(UInt), UInt)),   // new_offset = local_i + offset
-                                       let("wg_sum_old") = "wg_sum"_(Array(type, Local))[local_i], // wg_sum_old = wg_sum[local_i]
-                                       let("wg_sum_at_offset") = "wg_sum"_(Array(type, Local))["new_offset"_(UInt)], // wg_sum_at_offset =
+                                       let("wg_sum_old") = "wg_sum"_(Ptr(type, Local))[local_i], // wg_sum_old = wg_sum[local_i]
+                                       let("wg_sum_at_offset") = "wg_sum"_(Ptr(type, Local))["new_offset"_(UInt)], // wg_sum_at_offset =
                                                                                                                      // wg_sum[new_offset]
                                        Mut("wg_sum_at_offset"_(type), invoke(Add("wg_sum_at_offset"_(type), "wg_sum_old"_(type), type)),
                                            false),
 
-                                       "wg_sum"_(Array(type, Local))[local_i] = "wg_sum_at_offset"_(type), // a[i] = bi
+                                       "wg_sum"_(Ptr(type, Local))[local_i] = "wg_sum_at_offset"_(type), // a[i] = bi
                                    },
                                    {}),
                               Mut("offset"_(UInt), invoke(Div("offset"_(UInt), 2_(UInt), UInt)), false) // offset /= 2
@@ -177,8 +177,8 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
                     let("group_id") = invoke(GpuGroupIdx(0_(UInt))),
                     Cond({invoke(LogicEq("local_i"_(UInt), 0_(UInt)))}, //
                          {
-                             let("wg_sum_old_1") = "wg_sum"_(Array(type, Local))[local_i],
-                             "sum"_(Array(type))["group_id"_(UInt)] = "wg_sum_old_1"_(type),
+                             let("wg_sum_old_1") = "wg_sum"_(Ptr(type, Local))[local_i],
+                             "sum"_(Ptr(type))["group_id"_(UInt)] = "wg_sum_old_1"_(type),
                          },
 
                          {}),

@@ -94,10 +94,10 @@ struct Nothing;
 struct Unit0;
 struct Bool1;
 struct Struct;
-struct Array;
+struct Ptr;
 struct Var;
 struct Exec;
-using Any = Alternative<Float16, Float32, Float64, IntU8, IntU16, IntU32, IntU64, IntS8, IntS16, IntS32, IntS64, Nothing, Unit0, Bool1, Struct, Array, Var, Exec>;
+using Any = Alternative<Float16, Float32, Float64, IntU8, IntU16, IntU32, IntU64, IntS8, IntS16, IntS32, IntS64, Nothing, Unit0, Bool1, Struct, Ptr, Var, Exec>;
 } // namespace Type
 
 
@@ -403,23 +403,22 @@ struct POLYREGION_EXPORT Bool1 : Type::Base {
 
 struct POLYREGION_EXPORT Struct : Type::Base {
   Sym name;
-  bool ref;
   std::vector<std::string> tpeVars;
   std::vector<Type::Any> args;
   std::vector<Sym> parents;
-  Struct(Sym name, bool ref, std::vector<std::string> tpeVars, std::vector<Type::Any> args, std::vector<Sym> parents) noexcept;
+  Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args, std::vector<Sym> parents) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Struct &);
   POLYREGION_EXPORT friend bool operator==(const Type::Struct &, const Type::Struct &);
 };
 
-struct POLYREGION_EXPORT Array : Type::Base {
+struct POLYREGION_EXPORT Ptr : Type::Base {
   Type::Any component;
   TypeSpace::Any space;
-  Array(Type::Any component, TypeSpace::Any space) noexcept;
+  Ptr(Type::Any component, TypeSpace::Any space) noexcept;
   POLYREGION_EXPORT operator Any() const;
-  POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Array &);
-  POLYREGION_EXPORT friend bool operator==(const Type::Array &, const Type::Array &);
+  POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Ptr &);
+  POLYREGION_EXPORT friend bool operator==(const Type::Ptr &, const Type::Ptr &);
 };
 
 struct POLYREGION_EXPORT Var : Type::Base {
@@ -1661,8 +1660,8 @@ template <> struct std::hash<polyregion::polyast::Type::Bool1> {
 template <> struct std::hash<polyregion::polyast::Type::Struct> {
   std::size_t operator()(const polyregion::polyast::Type::Struct &) const noexcept;
 };
-template <> struct std::hash<polyregion::polyast::Type::Array> {
-  std::size_t operator()(const polyregion::polyast::Type::Array &) const noexcept;
+template <> struct std::hash<polyregion::polyast::Type::Ptr> {
+  std::size_t operator()(const polyregion::polyast::Type::Ptr &) const noexcept;
 };
 template <> struct std::hash<polyregion::polyast::Type::Var> {
   std::size_t operator()(const polyregion::polyast::Type::Var &) const noexcept;

@@ -18,7 +18,7 @@ jobs:
     runs-on: windows-2022
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Setup JDK (${{ inputs.build_arch }})
         shell: pwsh
@@ -111,21 +111,21 @@ jobs:
         if: always()
         run: |
           call setup_msvc_env.bat ${{ inputs.build_arch }} 
-          cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=Polyc-JNIshim -P build.cmake
+          cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyc-JNIshim -P build.cmake
 
       - name: Release build runtime
         working-directory: ./native
         if: always()
         run: |
           call setup_msvc_env.bat ${{ inputs.build_arch }} 
-          cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=PolyRT-JNI -P build.cmake
+          cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyrt-JNI -P build.cmake
 
       - name: Release build compiler
         working-directory: ./native
         if: always()
         run: |
           call setup_msvc_env.bat ${{ inputs.build_arch }} 
-          cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=Polyc-JNI -P build.cmake
+          cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyc-JNI -P build.cmake
 
       - name: Check artefact
         if: always()

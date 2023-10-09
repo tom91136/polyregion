@@ -111,6 +111,10 @@ bool MetalDevice::singleEntryPerModule() {
   TRACE();
   return false;
 }
+bool MetalDevice::leadingIndexArgument() {
+  TRACE();
+  return false;
+}
 std::vector<Property> MetalDevice::properties() {
   TRACE();
   return {{

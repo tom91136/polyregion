@@ -18,7 +18,7 @@ jobs:
   build:
     runs-on: macos-12
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Install dependencies
         run: |
@@ -83,17 +83,17 @@ jobs:
       - name: Release build shim
         working-directory: ./native
         if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=Polyc-JNIshim -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyc-JNIshim -P build.cmake
 
       - name: Release build runtime
         working-directory: ./native
         if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=PolyRT-JNI -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyrt-JNI -P build.cmake
 
       - name: Release build compiler
         working-directory: ./native
         if: always()
-        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=Polyc-JNI -P build.cmake
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polyc-JNI -P build.cmake
 
       - name: Check artefact
         if: always()
@@ -109,8 +109,8 @@ jobs:
                echo "======"
              done
           }
-          show_libs build-darwin-${{ inputs.build_arch }}/bindings/jvm/libPolyc-JNI.dylib
-          show_libs build-darwin-${{ inputs.build_arch }}/bindings/jvm/libPolyRT-JNI.dylib
-          show_libs build-darwin-${{ inputs.build_arch }}/bindings/jvm/libPolyc-JNIshim.dylib
+          show_libs build-darwin-${{ inputs.build_arch }}/bindings/jvm/libpolyc-JNI.dylib
+          show_libs build-darwin-${{ inputs.build_arch }}/bindings/jvm/libpolyrt-JNI.dylib
+          show_libs build-darwin-${{ inputs.build_arch }}/bindings/jvm/libpolyc-JNIshim.dylib
           show_libs build-darwin-${{ inputs.build_arch }}/compiler/polyc
           show_libs build-darwin-${{ inputs.build_arch }}/runtime/polyrt-exec

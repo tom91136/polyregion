@@ -108,7 +108,7 @@ object DynamicDispatchPass extends ProgramPass {
 
     // Ensure synthetic class tag fields are initialised to the correct constant
     def insertClassTags(f: p.Function) = f.modifyAll[p.Stmt] {
-      case stmt @ p.Stmt.Var(local @ p.Named(_, s @ p.Type.Struct(name, _, _, _, _)), None)
+      case stmt @ p.Stmt.Var(local @ p.Named(_, s @ p.Type.Struct(name, _, _, _)), None)
           if polymorphicSyms.contains(name) =>
         val rhs        = p.Term.IntS32Const(clsTag(s))
         val clsSelect  = p.Term.Select(local :: Nil, p.Named("_#cls", p.Type.IntS32))
@@ -124,7 +124,7 @@ object DynamicDispatchPass extends ProgramPass {
         log.info(s"Replace: ${ivk.repr}", lut.get((recv.tpe, name.last)).toString)
 
         def isSuperCall(t: p.Type) = (t, f.receiver) match {
-          case (p.Type.Struct(clsName, _, _, _, _), Some(p.Arg(p.Named(_, p.Type.Struct(_, _, _, _, parents)), _))) =>
+          case (p.Type.Struct(clsName, _, _, _), Some(p.Arg(p.Named(_, p.Type.Struct(_, _, _, parents)), _))) =>
             parents.contains(clsName) && f.name.last == name.last
           case _ => false
         }

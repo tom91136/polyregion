@@ -53,7 +53,7 @@ target_include_directories(PolySTLTool PRIVATE
 target_link_libraries(PolySTLPlugin PRIVATE PolyAST fmt::fmt-header-only)
 target_link_libraries(PolySTLTool PRIVATE
         PolyAST
-        Polyc
+        polyc
         fmt::fmt-header-only
 
         LLVMFrontendOpenMP
@@ -76,8 +76,8 @@ target_link_libraries(PolySTLTool PRIVATE
         clangASTMatchers
         clangRewrite
         )
-target_link_libraries(polystl-test PRIVATE PolyRT Catch2::Catch2WithMain)
-target_link_libraries(polystl-test-host PRIVATE PolyRT Catch2::Catch2WithMain)
+target_link_libraries(polystl-test PRIVATE polyrt-static Catch2::Catch2WithMain)
+target_link_libraries(polystl-test-host PRIVATE polyrt-static Catch2::Catch2WithMain)
 
 
 get_filename_component(Clang_RESOURCE_DIR "${Clang_DIR}/../../clang" ABSOLUTE)

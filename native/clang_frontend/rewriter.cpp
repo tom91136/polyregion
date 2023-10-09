@@ -322,11 +322,11 @@ void handleDecl(clang::ASTContext &C) {
 
                      c.calleeDecl->dump();
                      llvm::errs() << ">>>" << "\n";
-                     std::string image = {0x12, 0x34, 0x54};
+//                     std::string image = {0x12, 0x34, 0x54};
 
 
 
-                     auto m = generate(C, c.functorDecl->getParent(), c.functorDecl->getReturnType(), c.functorDecl->getBody());
+                     auto image = generate(C, c.functorDecl->getParent(), c.functorDecl->getReturnType(), c.functorDecl->getBody());
 
                      insertKernelImage(C, c, spVisitor, image);
                    },

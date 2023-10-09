@@ -22,6 +22,7 @@ public:
   POLYREGION_EXPORT std::vector<std::string> features() override;
   POLYREGION_EXPORT bool sharedAddressSpace() override;
   POLYREGION_EXPORT bool singleEntryPerModule() override;
+  POLYREGION_EXPORT bool leadingIndexArgument() override;
   POLYREGION_EXPORT uintptr_t malloc(size_t size, Access access) override;
   POLYREGION_EXPORT void free(uintptr_t ptr) override;
 };
