@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies
         # llvm-tblgen is in llvm
         run: |
-          sudo apt-get install ninja-build llvm
+          sudo apt-get install ninja-build llvm libcrypt-dev
 
       - name: Dotenv
         id: dotenv
