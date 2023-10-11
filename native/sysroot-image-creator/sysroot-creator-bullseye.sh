@@ -37,6 +37,10 @@ libstdc++6
 libstdc++-10-dev
 
 linux-libc-dev
+libpthread-stubs0-dev
+
+libcrypt-dev
+libcrypt1
 "
 DEBIAN_PACKAGES_X86_64="\
 libtsan0

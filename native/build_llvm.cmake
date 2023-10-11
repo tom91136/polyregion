@@ -81,7 +81,7 @@ set(LLVM_OPTIONS
         -DLLVM_ENABLE_ASSERTIONS=ON
         -DLLVM_ENABLE_LTO=${USE_LTO}
         "-DLLVM_ENABLE_PROJECTS=lld\;mlir\;clang"
-        "-DLLVM_ENABLE_RUNTIMES=compiler-rt\;openmp"
+        "-DLLVM_ENABLE_RUNTIMES=compiler-rt"
         -DCOMPILER_RT_BUILD_SANITIZERS=ON
 
         -DLLVM_USE_CRT_RELEASE=MT
@@ -114,7 +114,20 @@ else ()
 endif ()
 
 
-file(REMOVE ${LLVM_BUILD_DIR}/CMakeCache.txt)
+file(GLOB_RECURSE CMAKE_CACHE_FILES
+        "${LLVM_BUILD_DIR}/**/CMakeFiles/*"
+        "${LLVM_BUILD_DIR}/**/CMakeCache.txt"
+)
+list(LENGTH CMAKE_CACHE_FILES N_CACHE_FILES)
+
+foreach (CACHE_FILE ${CMAKE_CACHE_FILES})
+    file(REMOVE "${CACHE_FILE}")
+    message("Removed: ${CACHE_FILE}")
+endforeach ()
+
+message(INFO "Removed ${N_CACHE_FILES} cache files")
+
+file(REMOVE_RECURSE "${LLVM_BUILD_DIR}/runtimes")
 
 execute_process(
         COMMAND ${CMAKE_COMMAND}
@@ -186,7 +199,6 @@ execute_process(
         LLVMOption
 
 
-        compiler-rt
         clang-resource-headers
         clangFrontend
         clangCodeGen

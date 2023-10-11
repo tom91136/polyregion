@@ -247,6 +247,7 @@ ReversionGlibc() {
   # Avoid requiring unsupported glibc versions.
   "${SCRIPT_DIR}/reversion_glibc.py" "${INSTALL_ROOT}/lib/${arch}-${os}/libc.so.6"
   "${SCRIPT_DIR}/reversion_glibc.py" "${INSTALL_ROOT}/lib/${arch}-${os}/libm.so.6"
+  "${SCRIPT_DIR}/reversion_glibc.py" "${INSTALL_ROOT}/lib/${arch}-${os}/libcrypt.so.1"
 }
 
 InstallIntoSysroot() {
