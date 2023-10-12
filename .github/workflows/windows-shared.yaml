@@ -16,11 +16,9 @@ defaults:
 jobs:
   build:
     runs-on: windows-2022
-    timeout-minutes: 360
 
     steps:
       - uses: actions/checkout@v4
-
 
       - name: Setup JDK (${{ inputs.build_arch }})
         shell: pwsh
@@ -93,10 +91,6 @@ jobs:
         run: |
           call setup_msvc_env.bat ${{ inputs.build_arch }} 
           cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=CONFIGURE -P build.cmake
-
-      - name: Setup tmate session
-        if: always()
-        uses: mxschmitt/action-tmate@v3
 
       - name: Release build polyrt-exec
         working-directory: ./native
