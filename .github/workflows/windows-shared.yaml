@@ -20,8 +20,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
 
       - name: Setup JDK (${{ inputs.build_arch }})
         shell: pwsh
@@ -94,6 +92,9 @@ jobs:
         run: |
           call setup_msvc_env.bat ${{ inputs.build_arch }} 
           cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=CONFIGURE -P build.cmake
+
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
 
       - name: Release build polyrt-exec
         working-directory: ./native
