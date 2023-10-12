@@ -94,6 +94,7 @@ jobs:
           cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=CONFIGURE -P build.cmake
 
       - name: Setup tmate session
+        if: always()
         uses: mxschmitt/action-tmate@v3
 
       - name: Release build polyrt-exec
