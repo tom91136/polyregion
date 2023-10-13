@@ -122,10 +122,10 @@ list(LENGTH CMAKE_CACHE_FILES N_CACHE_FILES)
 
 foreach (CACHE_FILE ${CMAKE_CACHE_FILES})
     file(REMOVE "${CACHE_FILE}")
-    message("Removed: ${CACHE_FILE}")
+    message(STATUS "Removed: ${CACHE_FILE}")
 endforeach ()
 
-message(INFO "Removed ${N_CACHE_FILES} cache files")
+message(STATUS "Removed ${N_CACHE_FILES} cache files")
 
 file(REMOVE_RECURSE "${LLVM_BUILD_DIR}/runtimes")
 
