@@ -81,7 +81,7 @@ if (MSVC)
     set(COMMON_COMPILE_OPTIONS
             /W4
             /nologo
-            )
+    )
 else ()
 
     set(COMMON_COMPILE_OPTIONS
@@ -100,7 +100,7 @@ else ()
             -Wno-unused-parameter
             -Wno-unused-function
             -Wno-unused-variable
-            )
+    )
 endif ()
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -124,11 +124,13 @@ else ()
         #        set(CMAKE_CXX_COMPILE_OPTIONS_IPO -flto=thin)
     endif ()
 
-    set(COMMON_COMPILE_OPTIONS
-            ${COMMON_COMPILE_OPTIONS}
-            -fvisibility=hidden       # don't export anything by default
-            -fvisibility-inlines-hidden
-            )
+    if (UNIX)
+        set(COMMON_COMPILE_OPTIONS
+                ${COMMON_COMPILE_OPTIONS}
+                -fvisibility=hidden       # don't export anything by default
+                -fvisibility-inlines-hidden
+        )
+    endif ()
 
     # Setup link options
     if (APPLE)
@@ -138,14 +140,14 @@ else ()
                 LINKER:--no-allow-shlib-undefined
                 LINKER:--no-undefined-version
                 LINKER:--no-undefined
-                )
+        )
         # For lld, we setup LTO, ICF, and threading
         set(COMMON_LINKER_OPTIONS
                 #                LINKER:--lto-O3
                 #                LINKER:--icf=all
                 LINKER:--threads=${NPROC}
                 LINKER:-O3                # O3 for linker means optimise for space
-                )
+        )
     endif ()
     if (CMAKE_BUILD_TYPE STREQUAL "Release")
         # For Release, we also strip everything out
@@ -156,13 +158,13 @@ else ()
                     LINKER:-dead_strip_dylibs
                     LINKER:-S # No debug symbols
                     LINKER:-x # No local symbols
-                    )
+            )
         else ()
             set(COMMON_LINKER_OPTIONS
                     ${COMMON_LINKER_OPTIONS}
                     LINKER:--gc-sections      # remove unused sections
                     LINKER:--strip-all        # strip symbols not used for DSO
-                    )
+            )
         endif ()
     endif ()
 endif ()
@@ -294,7 +296,7 @@ if (NOT clspv_POPULATED)
             ${clspv_SOURCE_DIR}/lib/UndoTranslateSamplerFoldPass.cpp
             ${clspv_SOURCE_DIR}/lib/UndoTruncateToOddIntegerPass.cpp
             ${clspv_SOURCE_DIR}/lib/ZeroInitializeAllocasPass.cpp
-            )
+    )
 
     foreach (SOURCE
             "${clspv_SOURCE_DIR}/lib/UndoInstCombinePass.cpp"
