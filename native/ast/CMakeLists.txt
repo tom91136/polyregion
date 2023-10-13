@@ -15,14 +15,17 @@ set(LINK_OPTIONS
 target_compile_options(PolyAST PRIVATE ${COMPILE_OPTIONS})
 target_link_options(PolyAST PRIVATE ${LINK_OPTIONS})
 
-target_precompile_headers(PolyAST PUBLIC
-        generated/polyast.h
-        generated/polyast_codec.h
-        ast.h
+if (NOT WIN32)
 
-        <optional>
-        <ostream>
-        <unordered_map>
-        <utility>
-        <vector>
-        )
+    target_precompile_headers(PolyAST PUBLIC
+            generated/polyast.h
+            generated/polyast_codec.h
+            ast.h
+
+            <optional>
+            <ostream>
+            <unordered_map>
+            <utility>
+            <vector>
+    )
+endif ()
