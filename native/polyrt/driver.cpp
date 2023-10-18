@@ -3,16 +3,16 @@
 #include <string>
 #include <thread>
 
-#include "cl_platform.h"
-#include "cuda_platform.h"
-#include "hip_platform.h"
-#include "hsa_platform.h"
-#include "metal_platform.h"
+#include "polyrt/cl_platform.h"
+#include "polyrt/cuda_platform.h"
+#include "polyrt/hip_platform.h"
+#include "polyrt/hsa_platform.h"
+#include "polyrt/metal_platform.h"
 #include "io.hpp"
-#include "object_platform.h"
-#include "runtime.h"
+#include "polyrt/object_platform.h"
+#include "polyrt/runtime.h"
 #include "utils.hpp"
-#include "vulkan_platform.h"
+#include "polyrt/vulkan_platform.h"
 #include <fstream>
 #include <vector>
 

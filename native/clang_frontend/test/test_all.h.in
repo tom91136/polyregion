@@ -1,0 +1,8 @@
+#pragma once
+
+#include <vector>
+#include <string>
+
+static std::string BinaryDir = "@POLYCPP_TEST_BINARY_DIR@";
+
+static std::vector<std::string> TestFiles = { @POLYCPP_TEST_INPUT_FILES@ };

@@ -544,10 +544,14 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
 
           } else { // taking reference of a var
             if (x.idx) throw std::logic_error("Semantic error: Cannot take reference of scalar with index in " + to_string(x));
-            return mkTermVal(*lhs);
+
+              if (holds<Type::Unit0>(lhs->tpe))
+                throw std::logic_error("Semantic error: Cannot take reference of an select with unit type in " + to_string(x));
+              return mkSelectPtr(*lhs);
+
           }
         } else
-          throw std::logic_error("Semantic error: LHS of " + to_string(x) + " (index) is not a select");
+          throw std::logic_error("Semantic error: LHS of " + to_string(x) + " (index) is not a select, can't take reference of a constant");
       },
 
       [&](const Expr::Alloc &x) -> ValPtr { //

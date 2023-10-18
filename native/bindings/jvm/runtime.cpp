@@ -4,17 +4,17 @@
 #include <utility>
 #include <vector>
 
-#include "cl_platform.h"
-#include "cuda_platform.h"
+#include "polyrt/cl_platform.h"
+#include "polyrt/cuda_platform.h"
 #include "generated/mirror.h"
 #include "generated/platform.h"
 #include "generated/platforms.h"
-#include "hip_platform.h"
-#include "hsa_platform.h"
-#include "vulkan_platform.h"
-#include "metal_platform.h"
+#include "polyrt/hip_platform.h"
+#include "polyrt/hsa_platform.h"
+#include "polyrt/vulkan_platform.h"
+#include "polyrt/metal_platform.h"
 #include "jni_utils.h"
-#include "object_platform.h"
+#include "polyrt/object_platform.h"
 #include "utils.hpp"
 
 using namespace polyregion;

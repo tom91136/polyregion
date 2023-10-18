@@ -1,4 +1,4 @@
-#include "runtime.h"
+#include "polyrt/runtime.h"
 
 #include <iostream>
 #include <mutex>
@@ -6,18 +6,17 @@
 
 #include "libm.h"
 
-#include "cl_platform.h"
-#include "cuda_platform.h"
-#include "hip_platform.h"
-#include "hsa_platform.h"
-#include "metal_platform.h"
-#include "object_platform.h"
-#include "vulkan_platform.h"
+#include "polyrt/cl_platform.h"
+#include "polyrt/cuda_platform.h"
+#include "polyrt/hip_platform.h"
+#include "polyrt/hsa_platform.h"
+#include "polyrt/metal_platform.h"
+#include "polyrt/object_platform.h"
+#include "polyrt/vulkan_platform.h"
 
 using namespace polyregion;
 
-template <typename F, typename It>
-constexpr static void insertIntoBufferAt(runtime::ArgBuffer &buffer, It begin, It end, F f) {
+template <typename F, typename It> constexpr static void insertIntoBufferAt(runtime::ArgBuffer &buffer, It begin, It end, F f) {
   for (auto it = begin; it != end; ++it) {
     auto &[tpe, ptr] = *it;
     buffer.types.insert(f(buffer.types), tpe);
@@ -107,13 +106,11 @@ void runtime::detail::CountedCallbackHandler::consume(void *data) {
     it->second();
     callbacks.erase(reinterpret_cast<uintptr_t>(data));
 
-  }else{
+  } else {
     throw std::logic_error("no");
   }
 }
-runtime::detail::CountedCallbackHandler::~CountedCallbackHandler() {
-  const std::lock_guard guard(lock);
-}
+runtime::detail::CountedCallbackHandler::~CountedCallbackHandler() { const std::lock_guard guard(lock); }
 
 std::string runtime::detail::allocateAndTruncate(const std::function<void(char *, size_t)> &f, size_t length) {
   std::string xs(length, '\0');
@@ -122,8 +119,7 @@ std::string runtime::detail::allocateAndTruncate(const std::function<void(char *
   return xs;
 }
 
-std::vector<void *> runtime::detail::argDataAsPointers(const std::vector<Type> &types,
-                                                       std::vector<std::byte> &argData) {
+std::vector<void *> runtime::detail::argDataAsPointers(const std::vector<Type> &types, std::vector<std::byte> &argData) {
   std::byte *argsPtr = argData.data();
   std::vector<void *> argsPtrStore(types.size());
   for (size_t i = 0; i < types.size(); ++i) {

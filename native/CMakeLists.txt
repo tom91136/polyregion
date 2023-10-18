@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.18) # XXX FetchContent_Declare DOWNLOAD_NO_EXTRACT is >= 3.18
+cmake_minimum_required(VERSION 3.23 FATAL_ERROR) # XXX FetchContent_Declare DOWNLOAD_NO_EXTRACT is >= 3.18
 
 include(FetchContent)
 include(ProcessorCount)
@@ -313,8 +313,21 @@ endif ()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_subdirectory(ast)
-add_subdirectory(compiler)
-add_subdirectory(runtime)
+set(COMPILE_OPTIONS
+        #        -fvisibility-global-new-delete-hidden
+        ${COMMON_COMPILE_OPTIONS}
+        "$<$<CONFIG:RELEASE>:${COMMON_RELEASE_OPTIONS}>"
+        "$<$<CONFIG:DEBUG>:${COMMON_DEBUG_OPTIONS}>"
+)
+
+set(LINK_OPTIONS
+        ${COMMON_LINK_OPTIONS}
+        ${STRICT_LINKER_OPTIONS}
+        "$<$<CONFIG:DEBUG>:${COMMON_DEBUG_OPTIONS}>"
+)
+
+add_subdirectory(polyast)
+add_subdirectory(polyc)
+add_subdirectory(polyrt)
 add_subdirectory(bindings)
 add_subdirectory(clang_frontend)

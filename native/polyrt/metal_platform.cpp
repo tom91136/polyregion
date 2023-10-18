@@ -1,5 +1,5 @@
 
-#include "metal_platform.h"
+#include "polyrt/metal_platform.h"
 #include <cstring>
 
 using namespace polyregion::runtime;

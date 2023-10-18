@@ -134,17 +134,6 @@ target_link_libraries(polyc-tests PRIVATE polyc polyrt-static Catch2::Catch2With
 target_link_libraries(polyc-benchmarks PRIVATE polyc polyrt-static)
 target_link_libraries(polyc-bin PRIVATE polyc ${LLVM_LIBS} ${LLD_LIBS})
 
-set(COMPILE_OPTIONS
-        ${COMMON_COMPILE_OPTIONS}
-        "$<$<CONFIG:RELEASE>:${COMMON_RELEASE_OPTIONS}>"
-        "$<$<CONFIG:DEBUG>:${COMMON_DEBUG_OPTIONS}>"
-        )
-
-set(LINK_OPTIONS
-        ${COMMON_LINK_OPTIONS}
-        ${STRICT_LINKER_OPTIONS}
-        "$<$<CONFIG:DEBUG>:${COMMON_DEBUG_OPTIONS}>"
-        )
 
 target_compile_options(polyc PRIVATE ${COMPILE_OPTIONS})
 target_compile_options(polyc-bin PRIVATE ${COMPILE_OPTIONS})

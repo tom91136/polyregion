@@ -4,7 +4,7 @@
 #include <utility>
 
 #include "ffi_wrapped.h"
-#include "object_platform.h"
+#include "polyrt/object_platform.h"
 #include "utils.hpp"
 
 #include "llvm/ADT/StringMap.h"
@@ -112,7 +112,7 @@ ObjectDeviceQueue::ObjectDeviceQueue() {
   arena.initialize(int(std::thread::hardware_concurrency()));
 }
 
-ObjectDeviceQueue::~ObjectDeviceQueue() noexcept{
+ObjectDeviceQueue::~ObjectDeviceQueue() noexcept {
   group.wait();
   TRACE();
 }
@@ -143,8 +143,7 @@ std::string RelocatableDevice::name() {
 }
 
 MemoryManager::MemoryManager() : SectionMemoryManager(nullptr) {}
-LoadedCodeObject::LoadedCodeObject(std::unique_ptr<llvm::object::ObjectFile> obj)
-    : ld(mm, mm), rawObject(std::move(obj)) {
+LoadedCodeObject::LoadedCodeObject(std::unique_ptr<llvm::object::ObjectFile> obj) : ld(mm, mm), rawObject(std::move(obj)) {
   ld.loadObject(*this->rawObject);
 }
 
@@ -177,10 +176,7 @@ std::unique_ptr<DeviceQueue> RelocatableDevice::createQueue() {
   return std::make_unique<RelocatableDeviceQueue>(objects, lock);
 }
 
-RelocatableDeviceQueue::RelocatableDeviceQueue(decltype(objects) objects, decltype(lock) lock)
-    : objects(objects), lock(lock) {
-  TRACE();
-}
+RelocatableDeviceQueue::RelocatableDeviceQueue(decltype(objects) objects, decltype(lock) lock) : objects(objects), lock(lock) { TRACE(); }
 
 void *malloc_(size_t size) {
   auto p = std::malloc(size);
@@ -193,52 +189,52 @@ uint64_t MemoryManager::getSymbolAddress(const std::string &Name) {
 }
 
 template <typename F>
-static void threadedLaunch(detail::CountedCallbackHandler &handler, tbb::task_arena &arena,size_t N, const MaybeCallback &cb, F f) {
+static void threadedLaunch(detail::CountedCallbackHandler &handler, tbb::task_arena &arena, size_t N, const MaybeCallback &cb, F f) {
   static std::atomic_size_t counter(0);
   static std::unordered_map<size_t, std::atomic_size_t> pending;
   static std::shared_mutex pendingLock;
 
-//  auto cbHandle = cb ? handler.createHandle(*cb) : nullptr;
+  //  auto cbHandle = cb ? handler.createHandle(*cb) : nullptr;
 
-//  auto id = counter++;
-//  WriteLock wPending(pendingLock);
-//  pending.emplace(id, N);
-//  for (size_t tid = 0; tid < N; ++tid) {
-//    std::thread([id, cb,  f, tid, &handler]() {
-//      f(tid);
-//        WriteLock rwPending(pendingLock);
-//        if (auto it = pending.find(id); it != pending.end()) {
-//          if (--it->second == 0) {
-//              if(cb) (*cb)();
-////            handler.consume(cbHandle);
-//            pending.erase(id);
-//          }
-//        }
-//    }).detach();
-//  }
+  //  auto id = counter++;
+  //  WriteLock wPending(pendingLock);
+  //  pending.emplace(id, N);
+  //  for (size_t tid = 0; tid < N; ++tid) {
+  //    std::thread([id, cb,  f, tid, &handler]() {
+  //      f(tid);
+  //        WriteLock rwPending(pendingLock);
+  //        if (auto it = pending.find(id); it != pending.end()) {
+  //          if (--it->second == 0) {
+  //              if(cb) (*cb)();
+  ////            handler.consume(cbHandle);
+  //            pending.erase(id);
+  //          }
+  //        }
+  //    }).detach();
+  //  }
 
-    auto id = counter++;
-    WriteLock wPending(pendingLock);
-    pending.emplace(id, N);
-    for (size_t tid = 0; tid < N; ++tid) {
-      arena.enqueue([id, tid, f, cb]() {
-        f(tid);
-        WriteLock rwPending(pendingLock);
-        if (auto it = pending.find(id); it != pending.end()) {
-          if (--it->second == 0) {
-            pending.erase(id);
-            if (cb) (*cb)();
-            //            detail::CountedCallbackHandler::consume(cbHandle);
-          }
+  auto id = counter++;
+  WriteLock wPending(pendingLock);
+  pending.emplace(id, N);
+  for (size_t tid = 0; tid < N; ++tid) {
+    arena.enqueue([id, tid, f, cb]() {
+      f(tid);
+      WriteLock rwPending(pendingLock);
+      if (auto it = pending.find(id); it != pending.end()) {
+        if (--it->second == 0) {
+          pending.erase(id);
+          if (cb) (*cb)();
+          //            detail::CountedCallbackHandler::consume(cbHandle);
         }
-      });
-    }
+      }
+    });
+  }
 }
 
 void validatePolicyAndArgs(const char *prefix, std::vector<Type> types, const Policy &policy) {
   if (auto scratchCount = std::count(types.begin(), types.end(), Type::Scratch); scratchCount != 0) {
-    throw std::logic_error(std::string(prefix) + "Scratch types are not supported on the CPU, found" +
-                           std::to_string(scratchCount) + " arg(s)");
+    throw std::logic_error(std::string(prefix) + "Scratch types are not supported on the CPU, found" + std::to_string(scratchCount) +
+                           " arg(s)");
   }
   if (policy.global.y != 1) {
     throw std::logic_error(std::string(prefix) + "Policy dimension Y > 1 is not supported");
@@ -250,24 +246,21 @@ void validatePolicyAndArgs(const char *prefix, std::vector<Type> types, const Po
     throw std::logic_error(std::string(prefix) + "Policy local dimension is not supported");
   }
   if (types[0] != Type::Long64) {
-    throw std::logic_error(std::string(prefix) + "Expecting first argument as index: " + typeName(Type::Long64) +
-                           ", but was " + typeName(types[0]));
+    throw std::logic_error(std::string(prefix) + "Expecting first argument as index: " + typeName(Type::Long64) + ", but was " +
+                           typeName(types[0]));
   }
 }
-void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                                const std::vector<Type> &types, std::vector<std::byte> argData,
-                                                const Policy &policy, const MaybeCallback &cb) {
+void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
+                                                std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
   TRACE();
   validatePolicyAndArgs(RELOBJ_ERROR_PREFIX, types, policy);
 
   ReadLock r(lock);
   const auto moduleIt = objects.find(moduleName);
-  if (moduleIt == objects.end())
-    throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "No module named " + moduleName + " was loaded");
+  if (moduleIt == objects.end()) throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "No module named " + moduleName + " was loaded");
 
   auto &[_, obj] = *moduleIt;
-  auto fnName =
-      (obj->rawObject->isMachO() || obj->rawObject->isMachOUniversalBinary()) ? std::string("_") + symbol : symbol;
+  auto fnName = (obj->rawObject->isMachO() || obj->rawObject->isMachOUniversalBinary()) ? std::string("_") + symbol : symbol;
   auto sym = obj->ld.getSymbol(fnName);
   if (!sym) {
     auto table = obj->ld.getSymbolTable();
@@ -276,13 +269,12 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
     for (auto &[k, v] : table)
       symbols.emplace_back("[`" + k.str() + "`@" + polyregion::hex(v.getAddress()) + "]");
     throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Symbol `" + std::string(fnName) +
-                           "` not found in the given object, available symbols (" + std::to_string(table.size()) +
-                           ") = " +
+                           "` not found in the given object, available symbols (" + std::to_string(table.size()) + ") = " +
                            polyregion::mk_string<std::string>(
                                symbols, [](auto &x) { return x; }, ","));
   }
   this->threadedLaunch(
-        policy.global.x,
+      policy.global.x,
       [cb, token = latch.acquire()]() {
         if (cb) (*cb)();
       },
@@ -290,8 +282,8 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
         auto argData_ = argData;
         auto argPtrs = detail::argDataAsPointers(types, argData_);
         if (types[0] != Type::Long64) {
-          throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Expecting first argument as index: " +
-                                 typeName(Type::Long64) + ", but was " + typeName(types[0]));
+          throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Expecting first argument as index: " + typeName(Type::Long64) +
+                                 ", but was " + typeName(types[0]));
         }
         auto _tid = int64_t(tid);
         argPtrs[0] = &_tid;
@@ -368,8 +360,7 @@ void SharedDevice::loadModule(const std::string &name, const std::string &image)
     std::set_terminate(cleanUp);
 
     if (auto dylib = polyregion_dl_open(tmpPath); !dylib) {
-      throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) +
-                             "Cannot load module: " + std::string(polyregion_dl_error()));
+      throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) + "Cannot load module: " + std::string(polyregion_dl_error()));
     } else
       modules.emplace_hint(it, name, LoadedModule{image, dylib, {}});
   }
@@ -383,19 +374,15 @@ std::unique_ptr<DeviceQueue> SharedDevice::createQueue() {
   return std::make_unique<SharedDeviceQueue>(modules, lock);
 }
 
-SharedDeviceQueue::SharedDeviceQueue(decltype(modules) modules, decltype(lock) lock) : modules(modules), lock(lock) {
-  TRACE();
-}
-void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                           const std::vector<Type> &types, std::vector<std::byte> argData,
-                                           const Policy &policy, const MaybeCallback &cb) {
+SharedDeviceQueue::SharedDeviceQueue(decltype(modules) modules, decltype(lock) lock) : modules(modules), lock(lock) { TRACE(); }
+void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
+                                           std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
   TRACE();
   validatePolicyAndArgs(SHOBJ_ERROR_PREFIX, types, policy);
 
   ReadLock r(lock);
   auto moduleIt = modules.find(moduleName);
-  if (moduleIt == modules.end())
-    throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) + "No module named " + moduleName + " was loaded");
+  if (moduleIt == modules.end()) throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) + "No module named " + moduleName + " was loaded");
 
   auto &[image, handle, symbolTable] = moduleIt->second;
 
@@ -405,13 +392,14 @@ void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
     address = polyregion_dl_find(handle, symbol.c_str());
     auto err = polyregion_dl_error();
     if (err) {
-      throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) + "Cannot load symbol " + symbol + " from module " +
-                             moduleName + " (" + std::to_string(image.size()) + " bytes): " + std::string(err));
+      throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) + "Cannot load symbol " + symbol + " from module " + moduleName + " (" +
+                             std::to_string(image.size()) + " bytes): " + std::string(err));
     }
     symbolTable.emplace_hint(it, symbol, address);
   }
 
-  this->threadedLaunch(  policy.global.x,
+  this->threadedLaunch(
+      policy.global.x,
       [cb, token = latch.acquire()]() {
         if (cb) (*cb)();
       },

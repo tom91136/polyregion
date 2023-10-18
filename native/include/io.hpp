@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <limits>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,13 @@ template <typename T> std::vector<T> read_struct(const std::string &path) {
   s.read(reinterpret_cast<char *>(xs.data()), len);
   s.close();
   return xs;
+}
+
+static inline std::string read_string(const std::string &path) {
+  std::ifstream t(path);
+  std::stringstream buffer;
+  buffer << t.rdbuf();
+  return buffer.str();
 }
 
 } // namespace polyregion

@@ -79,7 +79,7 @@ public:
   std::string handleCall(const clang::FunctionDecl *decl, RemapContext &r);
   std::string handleRecord(const  clang::RecordDecl *decl, RemapContext &r);
 
-  [[nodiscard]] Expr::Any handleExpr(const clang::Expr *root, RemapContext &r);
+  [[nodiscard]] Expr::Any handleExpr(const clang::Expr *expr, RemapContext &r);
   void handleStmt(const clang::Stmt *root, RemapContext &r);
 };
 

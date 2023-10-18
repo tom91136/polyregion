@@ -1,7 +1,7 @@
 //#include <vector>
 //#include <string>
 //
-#include "offload.hpp"
+#include "../polystl/polystl.hpp"
 
 
 
@@ -54,6 +54,14 @@ struct A{
   A(int&aa): xs(aa){}
 };
 
+
+int twice(int* a){
+  return *a*2;
+}
+
+struct Foo{
+  int a;
+};
 int main (){
 //TEST_CASE("Invoke arith") {
   //  printf("In\n");
@@ -63,18 +71,35 @@ int main (){
 
   int32_t a = 42;
   int32_t b = 42;
+  auto x = []{ return 1; };
+  Foo aa;
+
   int32_t c = __polyregion_offload_f1__([&]() {
 //    A aa(a);
 //    aa.xs = 2;
 //    a = 3;
 //    b +=2;
 
-    a++;
-    return a+b+42;
+//    a++;
+
+
+    int xs_[2] = {1,2};
+//    int xs_ = {};
+//
+//    int m  = 128;
+//    int __foo = 128;
+//    auto&& __bar = &__foo;
+
+    int& mm= xs_[1];
+
+    mm = 1;
+    auto &&k = &mm;
+    return *k;
   });
   printf("a = %d\n", a);
   printf("b = %d\n", b);
   printf("c = %d\n", c);
+  printf("aa = %d\n", aa.a);
   printf("Done\n");
 
 }

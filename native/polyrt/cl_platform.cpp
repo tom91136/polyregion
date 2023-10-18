@@ -1,5 +1,5 @@
 
-#include "cl_platform.h"
+#include "polyrt/cl_platform.h"
 #include <cassert>
 #include <chrono>
 #include <cstring>

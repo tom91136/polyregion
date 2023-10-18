@@ -1,4 +1,4 @@
-#include "hsa_platform.h"
+#include "polyrt/hsa_platform.h"
 #include "json.hpp"
 #include "utils.hpp"
 #include <atomic>

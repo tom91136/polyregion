@@ -43,12 +43,16 @@ static std::optional<CompileResult> compileIt(Program &p) {
   File.flush();
   llvm::outs() << "Wrote " << inputPath.str() << " \n";
 
+  std::string binPath;
+  if (auto envBin = std::getenv("POLYC_BIN"); envBin) binPath = envBin;
+
   int code = llvm::sys::ExecuteAndWait(                                                              //
-      "/home/tom/polyregion/native/cmake-build-debug-clang/compiler/polyc",                          //
-      {"polyc", inputPath.str(), "--out", outputPath.str(), "--target", "host", "--arch", "native"}, //
+      binPath,                                                                              //
+      {"", inputPath.str(), "--out", outputPath.str(), "--target", "host", "--arch", "native"}, //
       {{}}                                                                                           //
   );
 
+  std::cout << "polyc: <" << code << ">\n";
   auto BufferOrErr = llvm::MemoryBuffer::getFile(outputPath);
 
   if (auto Err = BufferOrErr.getError()) {
@@ -97,7 +101,7 @@ std::string polyregion::polystl::generate(clang::ASTContext &C, const clang::CXX
 
   auto &layout = C.getASTRecordLayout(parent);
 
-  std::cout << C.getTypeSize(parent->getTypeForDecl())  << "\n";
+  std::cout << "Capture size:" << C.getTypeSize(parent->getTypeForDecl()) << "\n";
 
   auto result = compileIt(p);
   if (result) {

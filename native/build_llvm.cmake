@@ -198,7 +198,7 @@ execute_process(
         LLVMTargetParser
         LLVMOption
 
-
+        compiler-rt
         clang-resource-headers
         clangFrontend
         clangCodeGen

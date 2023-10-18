@@ -1,4 +1,4 @@
-#include "cuda_platform.h"
+#include "polyrt/cuda_platform.h"
 #include "utils.hpp"
 
 using namespace polyregion::runtime;

@@ -76,6 +76,32 @@ static std::vector<std::string> split(const std::string &str, char delim) {
   return xs;
 }
 
+template <typename T> std::vector<T> flatten(const std::vector<std::vector<T>> &v) {
+  std::size_t total_size = 0;
+  for (const auto &sub : v)
+    total_size += sub.size();
+  std::vector<T> result;
+  result.reserve(total_size);
+  for (const auto &sub : v)
+    result.insert(result.end(), sub.begin(), sub.end());
+  return result;
+}
+
+template <typename T> std::vector<std::vector<T>> cartesin_product(const std::vector<std::vector<T>> &v) {
+  std::vector<std::vector<T>> s = {{}};
+  for (const auto &u : v) {
+    std::vector<std::vector<T>> r;
+    for (const auto &x : s) {
+      for (const auto y : u) {
+        r.push_back(x);
+        r.back().push_back(y);
+      }
+    }
+    s = move(r);
+  }
+  return s;
+}
+
 template <typename S> S indent(size_t n, const S &in) {
   return mk_string<S>(
       split(in, '\n'), [n](auto &l) { return std::string(n, ' ') + l; }, "\n");
@@ -108,10 +134,20 @@ constexpr std::optional<V> get_opt(const Container<K, V> &xs, const K &k) {
     return std::nullopt;
 }
 
+template <typename T, typename Predicate>
+std::pair<std::vector<T>, std::vector<T>> take_while(const std::vector<T> &input, Predicate pred) {
+  std::vector<T> xs(input.begin(), input.end());
+  std::vector<T> ys;
+  auto pos = std::find_if_not(xs.begin(), xs.end(), pred);
+  ys.insert(ys.end(), pos, xs.end());
+  xs.erase(pos, xs.end());
+  return {xs, ys};
+}
+
 // https://stackoverflow.com/a/33447587/896997
 template <typename N, typename = typename std::enable_if_t<std::is_arithmetic_v<N>, N>>
 std::string hex(N w, size_t hex_len = sizeof(N) << 1) {
-  static const char *digits = "0123456789ABCDEF";
+  static const char *digits = "0123456789abcdef";
   std::string rc(hex_len, '0');
   for (size_t i = 0, j = (hex_len - 1) * 4; i < hex_len; ++i, j -= 4)
     rc[i] = digits[(w >> j) & 0x0f];
@@ -139,36 +175,57 @@ constexpr uint32_t hash(const char *data, size_t const size) noexcept {
 
 constexpr uint32_t hash(const std::string_view &str) noexcept { return hash(str.data(), str.length()); }
 
-template <typename I, typename J>
-static typename std::enable_if<std::is_signed<I>::value && std::is_signed<J>::value, I>::type int_cast(J value) {
+template <typename I, typename J> static std::enable_if_t<std::is_signed_v<I> && std::is_signed_v<J>, I> int_cast(J value) {
   if (value < std::numeric_limits<I>::min() || value > std::numeric_limits<I>::max()) {
     throw std::out_of_range("out of range");
   }
   return static_cast<I>(value);
 }
 
-template <typename I, typename J>
-static typename std::enable_if<std::is_signed<I>::value && std::is_unsigned<J>::value, I>::type int_cast(J value) {
-  if (value > static_cast<typename std::make_unsigned<I>::type>(std::numeric_limits<I>::max())) {
+template <typename I, typename J> static std::enable_if_t<std::is_signed_v<I> && std::is_unsigned_v<J>, I> int_cast(J value) {
+  if (value > static_cast<std::make_unsigned_t<I>>(std::numeric_limits<I>::max())) {
     throw std::out_of_range("out of range");
   }
   return static_cast<I>(value);
 }
 
-template <typename I, typename J>
-static typename std::enable_if<std::is_unsigned<I>::value && std::is_signed<J>::value, I>::type int_cast(J value) {
-  if (value < 0 || static_cast<typename std::make_unsigned<J>::type>(value) > std::numeric_limits<I>::max()) {
+template <typename I, typename J> static std::enable_if_t<std::is_unsigned_v<I> && std::is_signed_v<J>, I> int_cast(J value) {
+  if (value < 0 || static_cast<std::make_unsigned_t<J>>(value) > std::numeric_limits<I>::max()) {
     throw std::out_of_range("out of range");
   }
   return static_cast<I>(value);
 }
 
-template <typename I, typename J>
-static typename std::enable_if<std::is_unsigned<I>::value && std::is_unsigned<J>::value, I>::type int_cast(J value) {
+template <typename I, typename J> static std::enable_if_t<std::is_unsigned_v<I> && std::is_unsigned_v<J>, I> int_cast(J value) {
   if (value > std::numeric_limits<I>::max()) {
     throw std::out_of_range("out of range");
   }
   return static_cast<I>(value);
+}
+
+static inline std::string &trimInplace(std::string &str) {
+  str.erase(str.find_last_not_of(' ') + 1);
+  str.erase(0, str.find_first_not_of(' '));
+  return str;
+}
+
+static inline std::string trim(const std::string &str) {
+  std::string that = str;
+  return trimInplace(that);
+}
+
+static inline std::string &replaceInPlace(std::string &haystack, const std::string &needle, const std::string &replace) {
+  size_t pos = 0;
+  while ((pos = haystack.find(needle, pos)) != std::string::npos) {
+    haystack.replace(pos, needle.length(), replace);
+    pos += replace.length();
+  }
+  return haystack;
+}
+
+static inline std::string &replace(std::string &haystack, const std::string &needle, const std::string &replace) {
+  std::string that = haystack;
+  return replaceInPlace(that, needle, replace);
 }
 
 // constexpr inline unsigned int operator"" _(char const *p, size_t s) { return hash(p, s); }

@@ -27,13 +27,13 @@ target_include_directories(polyc-JNIshim PRIVATE
 
         ${JNI_INCLUDE_DIRS})
 target_include_directories(polyc-JNI PRIVATE
-        .
-        ../../compiler
+#        .
+#        ../../compiler
 
         ${JNI_INCLUDE_DIRS})
 target_include_directories(polyrt-JNI PRIVATE
-        .
-        ../../runtime
+#        .
+#        ../../runtime
 
         ${JNI_INCLUDE_DIRS})
 
@@ -41,15 +41,7 @@ target_link_libraries(polyc-JNIshim PRIVATE ${DL_LIB})
 target_link_libraries(polyc-JNI PRIVATE polyc)
 target_link_libraries(polyrt-JNI PRIVATE polyrt-static)
 
-set(COMPILE_OPTIONS
-        ${COMMON_COMPILE_OPTIONS}
-        "$<$<CONFIG:RELEASE>:${COMMON_RELEASE_OPTIONS}>"
-        "$<$<CONFIG:DEBUG>:${COMMON_DEBUG_OPTIONS}>")
 
-set(LINK_OPTIONS
-        ${COMMON_LINK_OPTIONS}
-        ${STRICT_LINKER_OPTIONS}
-        "$<$<CONFIG:DEBUG>:${COMMON_DEBUG_OPTIONS}>")
 
 target_compile_options(polyc-JNIshim PRIVATE ${COMPILE_OPTIONS})
 target_compile_options(polyc-JNI PRIVATE ${COMPILE_OPTIONS})

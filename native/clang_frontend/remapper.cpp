@@ -220,8 +220,8 @@ Type::Any Remapper::handleType(clang::QualType tpe) const {
   auto refTpe = [&](Type::Any tpe) {
     // T*              => Struct[T]
     // T&              => Struct[T]
-    // Prim*           => Array[Prim]
-    // Prim&           => Array[Prim]
+    // Prim*           => Ptr[Prim]
+    // Prim&           => Ptr[Prim]
     return holds<Type::Struct>(tpe) ? tpe : Type::Ptr(tpe, TypeSpace::Global());
   };
 
@@ -250,13 +250,12 @@ Type::Any Remapper::handleType(clang::QualType tpe) const {
       },
       [&](const clang::PointerType *tpe) { return refTpe(handleType(tpe->getPointeeType())); },       // T*
       [&](const clang::ConstantArrayType *tpe) { return refTpe(handleType(tpe->getElementType())); }, // T[$N]
-      [&](const clang::LValueReferenceType *tpe) {
-        // Prim&   => Array[Prim]
-        // Prim*&  => Array[Prim]
+      [&](const clang::ReferenceType *tpe) { // includes LValueReferenceType and RValueReferenceType
+        // Prim&   => Ptr[Prim]
+        // Prim*&  => Ptr[Prim]
         // T&      => Struct[T]
         // T*&     => Struct[T]
         auto tpe_ = handleType(tpe->getPointeeType());
-
         return holds<Type::Struct>(tpe_) || holds<Type::Ptr>(tpe_) ? tpe_ : refTpe(tpe_);
       },                                                                                                            // T
       [&](const clang::RecordType *tpe) -> Type::Any { return Type::Struct(Sym({nameOfRecord(tpe)}), {}, {}, {}); } // struct T { ... }
@@ -360,35 +359,35 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
       [&](const clang::ExprWithCleanups *expr) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },
       [&](const clang::CXXBoolLiteralExpr *stmt) -> Expr::Any { return Expr::Alias(Term::Bool1Const(stmt->getValue())); },
       [&](const clang::CastExpr *stmt) -> Expr::Any {
-        auto expr = r.newVar(handleExpr(stmt->getSubExpr(), r));
+        auto targetTpe = handleType(stmt->getType());
+        auto sourceExpr = handleExpr(stmt->getSubExpr(), r);
         switch (stmt->getCastKind()) {
           case clang::CK_IntegralCast:
             if (auto conversion = stmt->getConversionFunction()) {
               // TODO
             }
-            return Expr::Cast(expr, handleType(stmt->getType()));
+            return Expr::Cast(r.newVar(sourceExpr), handleType(stmt->getType()));
 
           case clang::CK_ArrayToPointerDecay: //
           case clang::CK_NoOp:                //
-            return Expr::Alias(expr);
-
+            return Expr::Alias(r.newVar(sourceExpr));
           case clang::CK_LValueToRValue:
-
-            std::cout << "Cast " << repr(handleType(stmt->getType())) << " -> " << repr(handleType(stmt->getSubExpr()->getType())) << " ie "
-                      << repr(tpe(expr)) << "\n";
-
-            // Cast if Rvalue iff LHS is an Array[T]
-            if (holds<Type::Ptr>(tpe(expr))) {
-              //              return Expr::Index(expr, integralConstOfType(Type::IntU64(), 0), tpe(expr));
-              return Expr::Alias(expr);
+            std::cout << "Cast " << repr(handleType(stmt->getType())) << " <- " << repr(handleType(stmt->getSubExpr()->getType())) << "\n";
+            if (targetTpe == tpe(sourceExpr)) {
+              return sourceExpr;
+            } else if (auto ptrTpe = get_opt<Type::Ptr>(tpe(sourceExpr)); ptrTpe && targetTpe == ptrTpe->component) {
+              return Expr::Index(r.newVar(sourceExpr), integralConstOfType(Type::IntS64(), 0), targetTpe);
             } else {
-              return Expr::Alias(expr);
+              std::cout << "Unhandled L->R cast:" << stmt->getCastKindName() << std::endl;
+              stmt->dumpColor();
+              return sourceExpr;
             }
+
           default:
             std::cout << "Unhandled cast:" << stmt->getCastKindName() << std::endl;
 
             stmt->dumpColor();
-            return Expr::Alias(expr);
+            return sourceExpr;
         }
       },
       [&](const clang::IntegerLiteral *stmt) -> Expr::Any {
@@ -471,55 +470,56 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
         }
         expr->getType().dump();
 
-        if (expr->isLValue()) {
-          return Expr::RefTo(arr, idx, handleType(expr->getType()));
-        } else {
-          return Expr::Index(arr, idx, handleType(expr->getType()));
-        }
+        return Expr::Index(arr, idx, handleType(expr->getType()));
       },
-      [&](const clang::UnaryOperator *stmt) -> Expr::Any {
+      [&](const clang::UnaryOperator *expr) -> Expr::Any {
         // Here we're just dealing with the builtin operators, overloaded operators will be a clang::CXXOperatorCallExpr.
-        auto lhs = r.newVar(handleExpr(stmt->getSubExpr(), r));
-        auto tpe = handleType(stmt->getType());
+        auto lhs = r.newVar(handleExpr(expr->getSubExpr(), r));
+        auto exprTpe = handleType(expr->getType());
 
-        switch (stmt->getOpcode()) {
+        switch (expr->getOpcode()) {
           case clang::UO_PostInc: {
             auto before = r.newVar(Expr::Alias(lhs));
-            assign(lhs, r.newVar(Expr::IntrOp(Intr::Add(deref(lhs), integralConstOfType(tpe, 1), tpe))));
+            assign(lhs, r.newVar(Expr::IntrOp(Intr::Add(deref(lhs), integralConstOfType(exprTpe, 1), exprTpe))));
             return Expr::Alias(before);
           }
           case clang::UO_PostDec: {
             auto before = r.newVar(Expr::Alias(lhs));
-            assign(lhs, r.newVar(Expr::IntrOp(Intr::Sub(deref(lhs), integralConstOfType(tpe, 1), tpe))));
+            assign(lhs, r.newVar(Expr::IntrOp(Intr::Sub(deref(lhs), integralConstOfType(exprTpe, 1), exprTpe))));
             return Expr::Alias(before);
           }
-          case clang::UO_PreInc: return assign(lhs, (r.newVar(Expr::IntrOp(Intr::Add(deref(lhs), integralConstOfType(tpe, 1), tpe)))));
-          case clang::UO_PreDec: return assign(lhs, (r.newVar(Expr::IntrOp(Intr::Sub(deref(lhs), integralConstOfType(tpe, 1), tpe)))));
-          case clang::UO_AddrOf: return Expr::RefTo(lhs, {integralConstOfType(Type::IntU64(), 0)}, handleType(stmt->getType()));
-          case clang::UO_Deref: return Expr::Index(lhs, {integralConstOfType(Type::IntU64(), 0)}, handleType(stmt->getType()));
-          case clang::UO_Plus: return Expr::IntrOp(Intr::Pos(lhs, tpe));
-          case clang::UO_Minus: return Expr::IntrOp(Intr::Neg(lhs, tpe));
-          case clang::UO_Not: return Expr::IntrOp(Intr::BNot(lhs, tpe));
+          case clang::UO_PreInc:
+            return assign(lhs, (r.newVar(Expr::IntrOp(Intr::Add(deref(lhs), integralConstOfType(exprTpe, 1), exprTpe)))));
+          case clang::UO_PreDec:
+            return assign(lhs, (r.newVar(Expr::IntrOp(Intr::Sub(deref(lhs), integralConstOfType(exprTpe, 1), exprTpe)))));
+          case clang::UO_AddrOf:
+            if (holds<Type::Ptr>(tpe(lhs))) return Expr::Alias(lhs);
+            else
+              return Expr::RefTo(lhs, {}, tpe(lhs));
+          case clang::UO_Deref: return Expr::Index(lhs, {integralConstOfType(Type::IntU64(), 0)}, exprTpe);
+          case clang::UO_Plus: return Expr::IntrOp(Intr::Pos(lhs, exprTpe));
+          case clang::UO_Minus: return Expr::IntrOp(Intr::Neg(lhs, exprTpe));
+          case clang::UO_Not: return Expr::IntrOp(Intr::BNot(lhs, exprTpe));
           case clang::UO_LNot: return Expr::IntrOp(Intr::LogicNot(lhs));
-          case clang::UO_Real: return Expr::Alias(Term::Poison(tpe));
-          case clang::UO_Imag: return Expr::Alias(Term::Poison(tpe));
-          case clang::UO_Extension: return Expr::Alias(Term::Poison(tpe));
-          case clang::UO_Coawait: return Expr::Alias(Term::Poison(tpe));
+          case clang::UO_Real: return Expr::Alias(Term::Poison(exprTpe));
+          case clang::UO_Imag: return Expr::Alias(Term::Poison(exprTpe));
+          case clang::UO_Extension: return Expr::Alias(Term::Poison(exprTpe));
+          case clang::UO_Coawait: return Expr::Alias(Term::Poison(exprTpe));
         }
       },
-      [&](const clang::BinaryOperator *stmt) -> Expr::Any {
+      [&](const clang::BinaryOperator *expr) -> Expr::Any {
         // Here we're just dealing with the builtin operators, overloaded operators will be a clang::CXXOperatorCallExpr.
-        auto lhs = r.newVar(handleExpr(stmt->getLHS(), r));
-        auto rhs = r.newVar(handleExpr(stmt->getRHS(), r));
-        auto tpe_ = handleType(stmt->getType());
+        auto lhs = r.newVar(handleExpr(expr->getLHS(), r));
+        auto rhs = r.newVar(handleExpr(expr->getRHS(), r));
+        auto tpe_ = handleType(expr->getType());
 
-        auto assignable = stmt->getLHS()->isLValue();
+        auto assignable = expr->getLHS()->isLValue();
 
-        auto shouldBeAssignable = stmt->isLValue();
+        auto shouldBeAssignable = expr->isLValue();
 
         // Assignment of a value X to a lvalue iff the lvalue is an array type =>  Update(lhs, 0, X)
 
-        std::cout << "BIN l=" << (handleType(stmt->getLHS()->getType())) << "\n";
+        std::cout << "BIN l=" << (handleType(expr->getLHS()->getType())) << "\n";
 
         auto opAssign = [&](const Intr::Any &op) {
           if (holds<Type::Ptr>(tpe(lhs))) {
@@ -530,7 +530,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
           return Expr::Alias(lhs);
         };
 
-        switch (stmt->getOpcode()) {
+        switch (expr->getOpcode()) {
           case clang::BO_PtrMemD: return failExpr(); // TODO ???
           case clang::BO_PtrMemI: return failExpr(); // TODO ???
           case clang::BO_Mul: return Expr::IntrOp(Intr::Mul(deref(lhs), deref(rhs), tpe_));
@@ -643,11 +643,23 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
       },
       [&](const clang::DeclStmt *stmt) {
         for (auto decl : stmt->decls()) {
+
+          auto createInit = [](auto tpe, const Type::Any &component) -> std::optional<Expr::Any> {
+            if (auto ptrTpe = get_opt<Type::Ptr>(component); ptrTpe) {
+              if (auto constArrTpe = llvm::dyn_cast<clang::ConstantArrayType>(tpe); constArrTpe) {
+                auto lit = constArrTpe->getSize().getLimitedValue();
+                return Expr::Alloc(ptrTpe->component, integralConstOfType(Type::IntS64(), lit));
+              }
+            }
+            return {};
+          };
+
           if (auto var = llvm::dyn_cast<clang::VarDecl>(decl)) {
             if (auto initList = llvm::dyn_cast_if_present<clang::InitListExpr>(var->getInit())) {
               // Expand `int[3] xs = { 1,2,3 };` => `int[3] xs; xs[0] = 1; xs[1] = 2; xs[2] = 3;`
               auto name = Named(var->getDeclName().getAsString(), handleType(var->getType()));
-              r.push(Stmt::Var(name, {}));
+
+              r.push(Stmt::Var(name, createInit(var->getType(), name.tpe)));
               if (auto cArr = llvm::dyn_cast<clang::ConstantArrayType>(var->getType()); cArr && initList->hasArrayFiller()) {
                 // Expand `int xs[2] = {1};` => `int xs[2]; xs[0] = 1; xs[1] = 0;`
                 // Extra elements are *empty initialised*.
@@ -667,10 +679,12 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
             } else {
               auto rhs = var->hasInit() ? std::optional{handleExpr(var->getInit(), r)} : std::nullopt;
               auto declTpe = handleType(var->getType());
+
               if (rhs) {
+                std::cout << " @@ Decl:" << declTpe << " r=" << *rhs << " t=" << tpe(*rhs) << "\n";
 
                 auto rhsTpe = tpe(*rhs);
-                auto rhsTerm = get_opt<Expr::Alias>(*rhs);
+
                 auto declArrTpe = get_opt<Type::Ptr>(declTpe);
                 auto rhsArrTpe = get_opt<Type::Ptr>(rhsTpe);
 
@@ -679,18 +693,30 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
                   //   int &rhs = /* */;
                   //   int &lhs = rhs;
                   // no-op, lhs now aliases to rhs
-                } else if (declArrTpe && declArrTpe->component == rhsTpe && rhsTerm) {
+                } else if (auto rhsAlias = get_opt<Expr::Alias>(*rhs); declArrTpe && declArrTpe->component == rhsTpe && rhsAlias) {
                   // Handle decay
-                  //   int rhs = /**/;
+                  //   int rhs = /* */;
                   //   int &lhs = rhs;
-                  rhs = Expr::RefTo(rhsTerm->ref, {}, rhsTpe);
+                  rhs = Expr::RefTo(rhsAlias->ref, {}, rhsTpe);
+
+                } else if (auto rhsIndex = get_opt<Expr::Index>(*rhs); declArrTpe && declArrTpe->component == rhsTpe && rhsIndex) {
+                  // Handle decay
+                  //   auto rhs = xs[0];
+                  //   int &lhs = rhs;
+                  rhs = Expr::RefTo(rhsIndex->lhs, rhsIndex->idx, rhsIndex->component);
                 } else if (rhsArrTpe && declTpe == rhsArrTpe->component) {
                   // Handle decay
                   //   int &rhs = /* */;
-                  //   int lhs = rhs; // lus = rhs[0];
-                  rhs = Expr::Index(rhsTerm->ref, integralConstOfType(Type::IntS64(), 0), declTpe);
+                  //   int lhs = rhs; // lhs = rhs[0];
+                  std::cout << " @@ index it\n";
+
+                  rhs = Expr::Index(r.newVar(*rhs), integralConstOfType(Type::IntS64(), 0), declTpe);
                 } else {
                   // no-op
+                }
+              } else {
+                if (auto arrInit = createInit(var->getType(), declTpe); arrInit) {
+                  rhs = *arrInit;
                 }
               }
               r.push(Stmt::Var(Named(var->getDeclName().getAsString(), declTpe), rhs));

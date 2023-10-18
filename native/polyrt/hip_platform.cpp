@@ -1,4 +1,4 @@
-#include "hip_platform.h"
+#include "polyrt/hip_platform.h"
 #include "utils.hpp"
 
 using namespace polyregion::runtime;

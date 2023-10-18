@@ -3,7 +3,7 @@
 #include <cassert>
 #include <cstdio>
 // #include "../impl.h"
-#include "../impl.h"
+#include "../polystl/impl.h"
 // #include "catch2/catch_all.hpp"
 
 template <typename F>
@@ -12,18 +12,12 @@ void __polyregion_offload_dispatch_impl__(size_t global,        //
                                      size_t localMemBytes, //
                                      F __f, const char *__kernelName, const unsigned char *__kernelImageBytes, size_t __kernelImageSize) {
 
-//  static_assert(sizeof(F) == 16);//  *[8], *[8]
-  fprintf(stderr, "__polyregion_offload_dispatch_impl__(%ld, %ld, %ld, sizeof=%lu, %s, %p, %ld)\n", global, local, localMemBytes, sizeof(__f),
-          __kernelName, __kernelImageBytes, __kernelImageSize);
-  fprintf(stderr, "\tImage=");
-  for (size_t i = 0; i < __kernelImageSize; ++i) {
-    fprintf(stderr, "0x%x ", __kernelImageBytes[i]);
-  }
-
-
-
-  fprintf(stderr, "\n");
-  fprintf(stderr, "Go\n");
+//  fprintf(stderr, "__polyregion_offload_dispatch_impl__(%ld, %ld, %ld, sizeof=%lu, %s, %p, %ld)\n", global, local, localMemBytes, sizeof(__f),
+//          __kernelName, __kernelImageBytes, __kernelImageSize);
+//  fprintf(stderr, "\tImage=");
+//  for (size_t i = 0; i < __kernelImageSize; ++i) {
+//    fprintf(stderr, "0x%x ", __kernelImageBytes[i]);
+//  }
   polystl::__polyregion_offload_dispatch__(global, localMemBytes, localMemBytes, __f, __kernelName, __kernelImageBytes, __kernelImageSize);
 }
 
@@ -31,8 +25,6 @@ template <typename F> void __polyregion_offload__(F __stub_polyregion__f__) {
   const unsigned char *__stub_kernelImageBytes__{};
   int __stub_kernelImageSize__{};
   const char *__stub_kernelName__{};
-  fprintf(stderr, "\tG=%ld\n", sizeof (F));
-
   __polyregion_offload_dispatch_impl__(1, 0, 0,                   //
                                        __stub_polyregion__f__,    //
                                   __stub_kernelName__,       //
@@ -43,7 +35,6 @@ template <typename F> void __polyregion_offload__(F __stub_polyregion__f__) {
 
 template <typename F> std::invoke_result_t<F> __polyregion_offload_f1__(F __polyregion__f) {
   std::invoke_result_t<F> __polyregion__v {};
-  fprintf(stderr, "\tF=%ld\n", sizeof (F));
   __polyregion_offload__([&__polyregion__v, &__polyregion__f]() {  __polyregion__v = __polyregion__f(); });
   return __polyregion__v;
 }

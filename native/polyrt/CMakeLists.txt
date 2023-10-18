@@ -9,14 +9,14 @@ if (RUNTIME_ENABLE_METAL)
     list(APPEND RUNTIME_SRC_FILES
             metal_cpp_impl.cpp
             metal_platform.cpp
-            )
+    )
     list(APPEND RUNTIME_INCLUDE_DIRS
             thirdparty/metal-cpp
-            )
+    )
     list(APPEND RUNTIME_LINK_LIBS
             "-framework Metal"
             "-framework Foundation"
-            )
+    )
 endif ()
 
 
@@ -28,7 +28,7 @@ set(LLVM_LIBS
         LLVMBinaryFormat
         LLVMSupport
         LLVMTargetParser
-        )
+)
 
 message(STATUS "[runtime] Adding LLVM libs = ${LLVM_LIBS}")
 
@@ -48,13 +48,47 @@ set(POLYRT_SRC
         thirdparty/hsaew/src/hsaew.c
         ${RUNTIME_SRC_FILES}
 )
-add_library(polyrt SHARED ${POLYRT_SRC})
-add_library(polyrt-static STATIC ${POLYRT_SRC})
+add_library(polyrt SHARED  )
+add_library(polyrt-obj OBJECT  )
+add_library(polyrt-static STATIC  )
 
-foreach (TARGET polyrt polyrt-static)
-    set_target_properties(${TARGET} PROPERTIES PUBLIC_HEADER runtime.h)
+foreach (TARGET polyrt polyrt-obj polyrt-static)
+
+
+    target_sources(${TARGET}
+            PRIVATE ${POLYRT_SRC}
+
+
+            PUBLIC FILE_SET HEADERS
+            TYPE HEADERS
+            BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include
+            FILES
+            include/polyrt/cl_platform.h
+            include/polyrt/cuda_platform.h
+            include/polyrt/hip_platform.h
+            include/polyrt/hsa_platform.h
+            include/polyrt/metal_platform.h
+            include/polyrt/object_platform.h
+            include/polyrt/vulkan_platform.h
+            include/polyrt/runtime.h)
+
+#
+#    foreach (HEADER
+#            cl_platform.h
+#            cuda_platform.h
+#            hip_platform.h
+#            hsa_platform.h
+#            metal_platform.h
+#            object_platform.h
+#            vulkan_platform.h
+#            runtime.h)
+#        set_target_properties(${TARGET} PROPERTIES PUBLIC_HEADER "include/${HEADER}")
+#    endforeach ()
+
     target_compile_definitions(${TARGET} PUBLIC ${RUNTIME_BACKEND_DEFS})
-    target_include_directories(${TARGET} PUBLIC ../include
+    target_include_directories(${TARGET} PUBLIC
+            ../include
+#            include/polyrt
             thirdparty/
             thirdparty/clew/include
             thirdparty/hipew/include
@@ -74,6 +108,9 @@ foreach (TARGET polyrt polyrt-static)
             ${DL_LIB}
             ${RUNTIME_LINK_LIBS}
     )
+
+    target_compile_options(${TARGET} PRIVATE ${COMPILE_OPTIONS})
+    target_link_options(${TARGET} PRIVATE ${LINK_OPTIONS})
 endforeach ()
 
 
@@ -86,26 +123,9 @@ target_include_directories(polyrt-tests PRIVATE . ../include)
 target_link_libraries(polyrt-exec PRIVATE polyrt-static)
 target_link_libraries(polyrt-tests PRIVATE polyrt-static Catch2::Catch2WithMain)
 
-set(COMPILE_OPTIONS
-        #        -fvisibility-global-new-delete-hidden
-        ${COMMON_COMPILE_OPTIONS}
-        "$<$<CONFIG:RELEASE>:${COMMON_RELEASE_OPTIONS}>"
-        "$<$<CONFIG:DEBUG>:${COMMON_DEBUG_OPTIONS}>"
-        )
-
-set(LINK_OPTIONS
-        ${COMMON_LINK_OPTIONS}
-        ${STRICT_LINKER_OPTIONS}
-        "$<$<CONFIG:DEBUG>:${COMMON_DEBUG_OPTIONS}>"
-        )
-
-target_compile_options(polyrt PRIVATE ${COMPILE_OPTIONS})
-target_compile_options(polyrt-static PRIVATE ${COMPILE_OPTIONS})
 target_compile_options(polyrt-exec PRIVATE ${COMPILE_OPTIONS})
 target_compile_options(polyrt-tests PRIVATE ${COMPILE_OPTIONS})
 
-target_link_options(polyrt PRIVATE ${LINK_OPTIONS})
-target_link_options(polyrt-static PRIVATE ${LINK_OPTIONS})
 target_link_options(polyrt-exec PRIVATE ${LINK_OPTIONS})
 target_link_options(polyrt-tests PRIVATE ${LINK_OPTIONS})
 
