@@ -100,8 +100,8 @@ jobs:
         working-directory: ./native
         run: |
           ls -lah build-darwin-${{ inputs.build_arch }}/bindings/jvm
-          ls -lah build-darwin-${{ inputs.build_arch }}/compiler/
-          ls -lah build-darwin-${{ inputs.build_arch }}/runtime/
+          ls -lah build-darwin-${{ inputs.build_arch }}/polyc/
+          ls -lah build-darwin-${{ inputs.build_arch }}/polyrt/
           show_libs () {
              for arg in $@; do
                file "$1"
@@ -112,5 +112,5 @@ jobs:
           show_libs build-darwin-${{ inputs.build_arch }}/bindings/jvm/libpolyc-JNI.dylib
           show_libs build-darwin-${{ inputs.build_arch }}/bindings/jvm/libpolyrt-JNI.dylib
           show_libs build-darwin-${{ inputs.build_arch }}/bindings/jvm/libpolyc-JNIshim.dylib
-          show_libs build-darwin-${{ inputs.build_arch }}/compiler/polyc
-          show_libs build-darwin-${{ inputs.build_arch }}/runtime/polyrt-exec
+          show_libs build-darwin-${{ inputs.build_arch }}/polyc/polyc
+          show_libs build-darwin-${{ inputs.build_arch }}/polyrt/polyrt-exec

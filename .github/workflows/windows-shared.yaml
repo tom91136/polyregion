@@ -133,5 +133,5 @@ jobs:
         working-directory: ./native
         run: |
           ls .\build-windows-${{ inputs.build_arch }}\bindings\jvm\ | Select-Object Name, @{Name="MegaBytes";Expression={$_.Length / 1MB}}
-          ls .\build-windows-${{ inputs.build_arch }}\compiler      | Select-Object Name, @{Name="MegaBytes";Expression={$_.Length / 1MB}}
-          ls .\build-windows-${{ inputs.build_arch }}\runtime       | Select-Object Name, @{Name="MegaBytes";Expression={$_.Length / 1MB}}
+          ls .\build-windows-${{ inputs.build_arch }}\polyc      | Select-Object Name, @{Name="MegaBytes";Expression={$_.Length / 1MB}}
+          ls .\build-windows-${{ inputs.build_arch }}\polyrt       | Select-Object Name, @{Name="MegaBytes";Expression={$_.Length / 1MB}}
