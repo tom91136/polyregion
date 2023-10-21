@@ -56,8 +56,12 @@ int executeCC1(std::vector<std::string> &cc1Args, bool stdpar) {
 
   clang::CompilerInstance CI;
   CI.setDiagnostics(diag.get());
-  assert(clang::CompilerInvocation::CreateFromArgs(CI.getInvocation(), cc1Args_, *diag));
-  CI.setTarget(clang::TargetInfo::CreateTargetInfo(CI.getDiagnostics(), CI.getInvocation().TargetOpts));
+  if (!clang::CompilerInvocation::CreateFromArgs(CI.getInvocation(), cc1Args_, *diag)) {
+    return EXIT_FAILURE;
+  }
+
+  auto ct = clang::TargetInfo::CreateTargetInfo(CI.getDiagnostics(), CI.getInvocation().TargetOpts);
+  CI.setTarget(ct);
   bool success;
   if (stdpar) {
     using namespace polyregion;
@@ -74,6 +78,8 @@ int executeCC1(std::vector<std::string> &cc1Args, bool stdpar) {
 int main(int argc, const char *argv[]) {
 
   llvm::InitLLVM init(argc, argv);
+  llvm::setBugReportMsg("PLEASE submit a bug report to TODO and include the crash backtrace, "
+                        "preprocessed source, and associated run script.\n");
 
   llvm::InitializeAllTargets();
   llvm::InitializeAllTargetMCs();
@@ -90,7 +96,7 @@ int main(int argc, const char *argv[]) {
   auto execParentDir = llvm::sys::path::parent_path(execPath).str();
 
   clang::driver::Driver driver(execPath, triple, diags, "PolyCpp compiler");
-  driver.ResourceDir = execParentDir + "/lib/clang/" + std::to_string(CLANG_VERSION_MAJOR);
+  driver.ResourceDir = (execParentDir + "/lib/clang/" + std::to_string(CLANG_VERSION_MAJOR));
 
   std::vector<const char *> args(argv, argv + argc);
   // sort out -fstdpar

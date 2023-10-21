@@ -2,7 +2,7 @@
 #include "compiler.h"
 #include "concurrency_utils.hpp"
 #include "generated/polyast.h"
-#include "runtime.h"
+#include "polyrt/runtime.h"
 #include "stream.hpp"
 #include "utils.hpp"
 

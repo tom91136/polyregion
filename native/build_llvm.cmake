@@ -9,6 +9,7 @@ if (NOT CMAKE_BUILD_TYPE)
 endif ()
 
 set(LLVM_BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR})
+set(LLVM_DIST_DIR ${CMAKE_CURRENT_BINARY_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-dist)
 
 set(DOWNLOAD_LLVM OFF)
 if (EXISTS ${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src.tar.xz)
@@ -21,18 +22,64 @@ else ()
     set(DOWNLOAD_LLVM ON)
 endif ()
 
-# See https://github.com/llvm/llvm-project/issues/54941
-file(WRITE ${LLVM_BUILD_DIR}/third-party/benchmark/CMakeLists.txt "")
-
 if (DOWNLOAD_LLVM)
     message(STATUS "Downloading LLVM source...")
     file(DOWNLOAD
             ${LLVM_SOURCE_URL}
             ${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src.tar.xz
             EXPECTED_HASH SHA256=${LLVM_SOURCE_SHA256}
-            )
+    )
     file(ARCHIVE_EXTRACT INPUT ${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src.tar.xz DESTINATION "${LLVM_BUILD_DIR}")
 endif ()
+
+### Patches ###
+
+string(TIMESTAMP CURRENT_TIME UTC)
+
+# Remove benchmarks, see https://github.com/llvm/llvm-project/issues/54941
+file(WRITE ${LLVM_BUILD_DIR}/third-party/benchmark/CMakeLists.txt "")
+
+# Patch LLD to include an implementation of cxx so that sysroots with 2.18 symbols removed will work
+set(LLD_CPP_PATH "${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src/lld/tools/lld/lld.cpp")
+file(READ "${LLD_CPP_PATH}" LLD_CPP_CONTENT)
+if (LLD_CPP_CONTENT MATCHES "^//===- tools/lld/lld.cpp - Linker Driver Dispatcher -----------------------===//")
+    string(PREPEND LLD_CPP_CONTENT "// __cxa_thread_atexit_impl patched at ${CURRENT_TIME}
+#ifdef __linux__
+  #include <features.h>
+  #ifdef __GLIBC__
+    #include <cxxabi.h>
+// See https://hg.mozilla.org/integration/autoland/rev/98efceb86ec5
+// Specifically, the diff at
+// https://hg.mozilla.org/integration/autoland/diff/98efceb86ec55e39c4306bca0ec27486366ec9ad/build/unix/stdc%2B%2Bcompat/stdc%2B%2Bcompat.cpp
+extern \"C\" [[maybe_unused]] int __cxa_thread_atexit_impl(void (*dtor)(void *), void *obj, void *dso_handle) {
+  return __cxxabiv1::__cxa_thread_atexit(dtor, obj, dso_handle);
+}
+  #endif
+#endif
+")
+    file(WRITE "${LLD_CPP_PATH}" "${LLD_CPP_CONTENT}")
+    message(STATUS "Patched __cxa_thread_atexit_impl in ${LLD_CPP_PATH}")
+endif ()
+
+# Patch -nostdinc++ detection failure in compiler-rt, it's unclear why this only happens in that particular module
+
+
+set(RUNTIME_CMAKELIST_PATH "${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src/runtimes/CMakeLists.txt")
+file(READ "${RUNTIME_CMAKELIST_PATH}" RUNTIME_CMAKELIST_CONTENT)
+
+set(NOSTDINCXX_FRAGMENT_REGEX "check_cxx_compiler_flag\\(-nostdinc\\+\\+ CXX_SUPPORTS_NOSTDINCXX_FLAG\\)
+if \\(CXX_SUPPORTS_NOSTDINCXX_FLAG\\)")
+
+if (RUNTIME_CMAKELIST_CONTENT MATCHES "${NOSTDINCXX_FRAGMENT_REGEX}")
+    string(REGEX REPLACE "${NOSTDINCXX_FRAGMENT_REGEX}" "# CXX_SUPPORTS_NOSTDINCXX_FLAG patched at ${CURRENT_TIME}
+check_cxx_compiler_flag(-nostdinc++ CXX_SUPPORTS_NOSTDINCXX_FLAG)
+set(CXX_SUPPORTS_NOSTDINCXX_FLAG ON)
+if (CXX_SUPPORTS_NOSTDINCXX_FLAG)" RUNTIME_CMAKELIST_CONTENT "${RUNTIME_CMAKELIST_CONTENT}")
+    file(WRITE "${RUNTIME_CMAKELIST_PATH}" "${RUNTIME_CMAKELIST_CONTENT}")
+    message(STATUS "Patched CXX_SUPPORTS_NOSTDINCXX_FLAG in ${RUNTIME_CMAKELIST_PATH}")
+endif ()
+
+### End patches ###
 
 if (UNIX AND NOT APPLE)
     set(USE_LTO Thin)
@@ -55,42 +102,6 @@ if (NOT DEFINED LLVM_USE_HOST_TOOLS)
     set(LLVM_USE_HOST_TOOLS ON)
 endif ()
 
-set(LLVM_OPTIONS
-        ${LLVM_OPTIONS}
-        -DLLVM_BUILD_DOCS=OFF
-        -DLLVM_BUILD_TOOLS=OFF
-        -DLLVM_BUILD_TESTS=OFF
-        -DLLVM_BUILD_EXAMPLES=OFF
-        -DLLVM_BUILD_BENCHMARKS=OFF
-
-        -DLLVM_INCLUDE_TOOLS=ON
-        -DLLVM_INCLUDE_TESTS=OFF
-        -DLLVM_INCLUDE_EXAMPLES=OFF
-        -DLLVM_INCLUDE_BENCHMARKS=OFF
-
-        -DLLVM_ENABLE_RTTI=OFF
-        -DLLVM_ENABLE_BINDINGS=OFF
-        -DLLVM_ENABLE_ZLIB=OFF
-        -DLLVM_ENABLE_ZSTD=OFF
-        -DLLVM_ENABLE_LIBXML2=OFF
-        -DLLVM_ENABLE_LIBPFM=OFF
-        -DLLVM_ENABLE_TERMINFO=OFF
-        -DLLVM_ENABLE_UNWIND_TABLES=OFF
-        -DLLVM_ENABLE_IDE=ON
-        -DLLVM_ENABLE_THREADS=ON
-        -DLLVM_ENABLE_ASSERTIONS=ON
-        -DLLVM_ENABLE_LTO=${USE_LTO}
-        "-DLLVM_ENABLE_PROJECTS=lld\;mlir\;clang"
-        "-DLLVM_ENABLE_RUNTIMES=compiler-rt"
-        -DCOMPILER_RT_BUILD_SANITIZERS=ON
-
-        -DLLVM_USE_CRT_RELEASE=MT
-        -DLLVM_INSTALL_UTILS=OFF
-        -DLLVM_USE_HOST_TOOLS=${LLVM_USE_HOST_TOOLS}
-        -DLLVM_STATIC_LINK_CXX_STDLIB=${USE_STATIC_CXX_STDLIB}
-        "-DLLVM_TARGETS_TO_BUILD=X86\;AArch64\;ARM\;NVPTX\;AMDGPU" # quote this because of the semicolons
-        )
-
 if (CMAKE_CXX_COMPILER)
     list(APPEND BUILD_OPTIONS -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER})
 endif ()
@@ -107,13 +118,6 @@ if (USE_LINKER)
     list(APPEND BUILD_OPTIONS -DLLVM_USE_LINKER=${USE_LINKER})
 endif ()
 
-if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    list(APPEND BUILD_OPTIONS "-DCMAKE_CXX_FLAGS_DEBUG='-O2 -g'")
-else ()
-
-endif ()
-
-
 file(GLOB_RECURSE CMAKE_CACHE_FILES
         "${LLVM_BUILD_DIR}/**/CMakeFiles/*"
         "${LLVM_BUILD_DIR}/**/CMakeCache.txt"
@@ -129,16 +133,24 @@ message(STATUS "Removed ${N_CACHE_FILES} cache files")
 
 file(REMOVE_RECURSE "${LLVM_BUILD_DIR}/runtimes")
 
+if (UNIX AND NOT APPLE)
+    # Set this explicitly for Linux otherwise compiler-rt builds using the host triplet
+    if (CMAKE_SYSTEM_PROCESSOR STREQUAL arm)
+        list(APPEND BUILD_OPTIONS -DLLVM_HOST_TRIPLE=${CMAKE_SYSTEM_PROCESSOR}-linux-gnueabihf)
+    else ()
+        list(APPEND BUILD_OPTIONS -DLLVM_HOST_TRIPLE=${CMAKE_SYSTEM_PROCESSOR}-linux-gnu)
+    endif ()
+endif ()
+
 execute_process(
         COMMAND ${CMAKE_COMMAND}
         -S ${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src/llvm
         -B ${LLVM_BUILD_DIR}
-        ${LLVM_OPTIONS}
+        -C ${CMAKE_CURRENT_BINARY_DIR}/CachedBuild.cmake
         ${BUILD_OPTIONS}
         -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+        -DCMAKE_INSTALL_PREFIX=${LLVM_DIST_DIR}
         -DCMAKE_VERBOSE_MAKEFILE=ON
-        -DBUILD_SHARED_LIBS=${BUILD_SHARED_LIBS}
-        -DLLVM_TABLEGEN=llvm-tblgen
         -GNinja
 
         WORKING_DIRECTORY ${LLVM_BUILD_DIR}
@@ -157,66 +169,8 @@ execute_process(
         --target
         lldCommon
         lldELF
-        LLVMSelectionDAG
-        LLVMPasses
-        LLVMObjCARCOpts
-        LLVMCoroutines
-        LLVMipo
-        LLVMInstrumentation
-        LLVMVectorize
-        LLVMLinker
-        LLVMFrontendOpenMP
-        LLVMIRReader
-        LLVMAsmPrinter
-        LLVMCodeGen
-        LLVMTarget
-        LLVMScalarOpts
-        LLVMInstCombine
-        LLVMAggressiveInstCombine
         LLVMExecutionEngine
-        LLVMTransformUtils
-        LLVMBitWriter
-        LLVMAsmParser
-        LLVMAnalysis
-        LLVMProfileData
-        LLVMSymbolize
-        LLVMDebugInfoPDB
-        LLVMDebugInfoMSF
-        LLVMDebugInfoDWARF
-        LLVMObject
-        LLVMTextAPI
-        LLVMMCParser
-        LLVMMC
-        LLVMDebugInfoCodeView
-        LLVMBitReader
-        LLVMCore
-        LLVMRemarks
-        LLVMBitstreamReader
-        LLVMBinaryFormat
-        LLVMSupport
-        LLVMDemangle
-        LLVMTargetParser
-        LLVMOption
-
-        compiler-rt
-        clang-resource-headers
-        clangFrontend
-        clangCodeGen
-        clangDriver
-        clangParse
-        clangSerialization
-        clangSema
-        clangEdit
-        clangAST
-        clangLex
-        clangBasic
-        clangAnalysis
-        clangSupport
-        clangAST
-        clangASTMatchers
-        clangRewrite
-
-
+        install-toolchain-distribution
         -- -k 0 # keep going even with error
         WORKING_DIRECTORY ${LLVM_BUILD_DIR}
         RESULT_VARIABLE SUCCESS)

@@ -1,7 +1,6 @@
 //#include <vector>
 //#include <string>
 //
-#include "../polystl/polystl.hpp"
 
 
 
@@ -83,18 +82,7 @@ int main (){
 //    a++;
 
 
-    int xs_[2] = {1,2};
-//    int xs_ = {};
-//
-//    int m  = 128;
-//    int __foo = 128;
-//    auto&& __bar = &__foo;
-
-    int& mm= xs_[1];
-
-    mm = 1;
-    auto &&k = &mm;
-    return *k;
+   return 1;
   });
   printf("a = %d\n", a);
   printf("b = %d\n", b);

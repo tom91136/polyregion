@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.23 FATAL_ERROR) # XXX FetchContent_Declare DOWNLOAD_NO_EXTRACT is >= 3.18
 
+
+set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O3 -gline-tables-only -DNDEBUG" CACHE STRING "")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -gline-tables-only -DNDEBUG" CACHE STRING "")
+
+
 include(FetchContent)
 include(ProcessorCount)
 include(ProjectConfig.cmake)
@@ -149,7 +154,7 @@ else ()
                 LINKER:-O3                # O3 for linker means optimise for space
         )
     endif ()
-    if (CMAKE_BUILD_TYPE STREQUAL "Release")
+    if (CMAKE_BUILD_TYPE MATCHES "Rel*")
         # For Release, we also strip everything out
         if (APPLE)
             set(COMMON_LINKER_OPTIONS
@@ -162,8 +167,9 @@ else ()
         else ()
             set(COMMON_LINKER_OPTIONS
                     ${COMMON_LINKER_OPTIONS}
+                    -static-libstdc++
                     LINKER:--gc-sections      # remove unused sections
-                    LINKER:--strip-all        # strip symbols not used for DSO
+#                    LINKER:--strip-all        # strip symbols not used for DSO
             )
         endif ()
     endif ()
@@ -316,14 +322,15 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(COMPILE_OPTIONS
         #        -fvisibility-global-new-delete-hidden
         ${COMMON_COMPILE_OPTIONS}
-        "$<$<CONFIG:RELEASE>:${COMMON_RELEASE_OPTIONS}>"
-        "$<$<CONFIG:DEBUG>:${COMMON_DEBUG_OPTIONS}>"
+        "$<$<CONFIG:RelWithDebInfo>:${COMMON_RELEASE_OPTIONS}>"
+        "$<$<CONFIG:Release>:${COMMON_RELEASE_OPTIONS}>"
+        "$<$<CONFIG:Debug>:${COMMON_DEBUG_OPTIONS}>"
 )
 
 set(LINK_OPTIONS
         ${COMMON_LINK_OPTIONS}
         ${STRICT_LINKER_OPTIONS}
-        "$<$<CONFIG:DEBUG>:${COMMON_DEBUG_OPTIONS}>"
+        "$<$<CONFIG:Debug>:${COMMON_DEBUG_OPTIONS}>"
 )
 
 add_subdirectory(polyast)

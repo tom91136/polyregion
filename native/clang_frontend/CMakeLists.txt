@@ -8,7 +8,7 @@ add_executable(polycpp ../shared/cxa_thread_atexit.cpp
         tool.cpp
         remapper.cpp clang_utils.cpp ast_visitors.cpp codegen.cpp frontend.cpp rewriter.cpp)
 
-add_dependencies(polycpp polystl polystl-static)
+add_dependencies(polycpp polystl polystl-static polyc-bin)
 
 
 add_executable(polycpp-test test/test_all.cpp)
@@ -47,30 +47,29 @@ target_include_directories(polycpp PRIVATE
         )
 
 #target_link_libraries(PolySTLPlugin PRIVATE PolyAST fmt::fmt-header-only)
+
+llvm_map_components_to_libnames(LLVM_LIBS
+        ${LLVM_TARGETS_TO_BUILD}
+        codegen
+        option
+        support
+        frontendopenmp
+        targetparser
+)
+
+
 target_link_libraries(polycpp PRIVATE
         PolyAST
-        polyc
         fmt::fmt-header-only
 
-        LLVMFrontendOpenMP
-        LLVMOption
-        LLVMCodeGen
+        ${LLVM_LIBS}
 
-        clangCodeGen
-        clangFrontend
-        clangDriver
-        clangParse
-        clangSerialization
-        clangSema
-        clangEdit
-        clangAST
-        clangLex
         clangBasic
-        clangAnalysis
-        clangSupport
-        clangAST
-        clangASTMatchers
-        clangRewrite
+        clangCodeGen
+        clangDriver
+        clangFrontend
+        clangFrontendTool
+        clangSerialization
         )
 target_link_libraries(polycpp-test PRIVATE
         LLVMSupport

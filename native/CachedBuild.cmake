@@ -1,7 +1,12 @@
 
 
-# Build an optimized toolchain for an example set of targets.
-set(CMAKE_BUILD_TYPE Release CACHE STRING "")
+#set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "")
+set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O3 -gline-tables-only -DNDEBUG" CACHE STRING "")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -gline-tables-only -DNDEBUG" CACHE STRING "")
+
+set(CMAKE_C_FLAGS_DEBUG "-O2 -g3" CACHE STRING "")
+set(CMAKE_CXX_FLAGS_DEBUG "-O2 -g3" CACHE STRING "")
+
 set(LLVM_TARGETS_TO_BUILD
         AArch64
         ARM
@@ -14,6 +19,7 @@ set(LLVM_TARGETS_TO_BUILD
 # Enable the LLVM projects and runtimes.
 set(LLVM_ENABLE_PROJECTS
         clang
+        clang-tools-extra
         lld
         CACHE STRING "")
 set(LLVM_ENABLE_RUNTIMES
@@ -22,7 +28,10 @@ set(LLVM_ENABLE_RUNTIMES
         libcxxabi
         CACHE STRING "")
 
-set(USE_STATIC_CXX_STDLIB ON)
+set(LLVM_STATIC_LINK_CXX_STDLIB ON CACHE BOOL "")
+set(COMPILER_RT_DEFAULT_TARGET_ONLY ON CACHE BOOL "")
+set(COMPILER_RT_BUILD_LIBFUZZER OFF CACHE BOOL "")
+set(COMPILER_RT_SANITIZERS_TO_BUILD "asan;dfsan;msan;hwasan;tsan;cfi" CACHE STRING "")
 
 # We'll build two distributions: Toolchain, which just holds the tools
 # (intended for most end users), and Development, which has libraries (for end
@@ -42,12 +51,47 @@ set(LLVM_RUNTIME_DISTRIBUTION_COMPONENTS
 # include cxx-headers explicitly here (in addition to it being added to
 # LLVM_RUNTIME_DISTRIBUTION_COMPONENTS above).
 set(LLVM_Toolchain_DISTRIBUTION_COMPONENTS
-        builtins
-        clang
-        clang-resource-headers
-        cxx-headers
+        # Linker
         lld
+
+        # Clang tools
+        clang
+        clang-tidy
+        clang-rename
+        clang-resource-headers
+        clang-format
+        clang-offload-bundler
+        clang-tblgen
+        modularize
+
+        # Clang shared
+        builtins
+        runtimes
+        cxx-headers
+
+        # LLVM tools
+        llc
+        llvm-tblgen
+        llvm-cov
+        llvm-link
+        llvm-profdata
+        llvm-profgen
+
+        # binutil replacements
+        llvm-addr2line
+        llvm-ar
+        llvm-cxxfilt
+        llvm-install-name-tool
+        llvm-nm
+        llvm-objcopy
         llvm-objdump
+        llvm-ranlib
+        llvm-readelf
+        llvm-size
+        llvm-strings
+        llvm-strip
+
+
 
         CACHE STRING "")
 

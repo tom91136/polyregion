@@ -45,6 +45,7 @@ libcrypt1
 DEBIAN_PACKAGES_X86_64="\
 libtsan0
 liblsan0
+libc6-dev-i386
 "
 DEBIAN_PACKAGES_X86="\
 libasan6

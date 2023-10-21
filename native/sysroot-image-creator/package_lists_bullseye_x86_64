@@ -12,6 +12,7 @@ https://snapshot.debian.org/archive/debian/20221215T151605Z/pool/main/g/gcc-10/l
 https://snapshot.debian.org/archive/debian/20221215T151605Z/pool/main/g/gcc-10/libubsan1_10.2.1-6_amd64.deb
 https://snapshot.debian.org/archive/debian/20221215T151605Z/pool/main/g/glibc/libc6_2.31-13+deb11u4_amd64.deb
 https://snapshot.debian.org/archive/debian/20221215T151605Z/pool/main/g/glibc/libc6-dev_2.31-13+deb11u4_amd64.deb
+https://snapshot.debian.org/archive/debian/20221215T151605Z/pool/main/g/glibc/libc6-dev-i386_2.31-13+deb11u4_amd64.deb
 https://snapshot.debian.org/archive/debian/20221215T151605Z/pool/main/libp/libpthread-stubs/libpthread-stubs0-dev_0.4-1_amd64.deb
 https://snapshot.debian.org/archive/debian/20221215T151605Z/pool/main/libx/libxcrypt/libcrypt1_4.4.18-4_amd64.deb
 https://snapshot.debian.org/archive/debian/20221215T151605Z/pool/main/libx/libxcrypt/libcrypt-dev_4.4.18-4_amd64.deb

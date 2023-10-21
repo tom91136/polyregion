@@ -125,10 +125,8 @@ target_link_libraries(polyc
         PolyAST
         PRIVATE
         SPIRV-Tools-opt
-        "$<$<CONFIG:RELEASE>:${LLVM_LIBS};${LLD_LIBS}>"
-        "$<$<CONFIG:DEBUG>:${LLVM_LIBS};${LLD_LIBS}>"
-        #        "$<$<CONFIG:DEBUG>:LLVM>"  # linking all the static libs is too slow for dev
-        #        capstone-static
+        ${LLVM_LIBS}
+        ${LLD_LIBS}
         )
 target_link_libraries(polyc-tests PRIVATE polyc polyrt-static Catch2::Catch2WithMain)
 target_link_libraries(polyc-benchmarks PRIVATE polyc polyrt-static)
