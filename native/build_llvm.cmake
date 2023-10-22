@@ -146,7 +146,7 @@ execute_process(
         COMMAND ${CMAKE_COMMAND}
         -S ${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src/llvm
         -B ${LLVM_BUILD_DIR}
-        -C ${CMAKE_CURRENT_BINARY_DIR}/CachedBuild.cmake
+        -C ${CMAKE_CURRENT_BINARY_DIR}/build_llvm_cache.cmake
         ${BUILD_OPTIONS}
         -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
         -DCMAKE_INSTALL_PREFIX=${LLVM_DIST_DIR}

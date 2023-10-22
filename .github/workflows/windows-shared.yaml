@@ -63,10 +63,10 @@ jobs:
       - name: Restore LLVM cache
         if: ${{ !env.ACT }}
         id: restore-llvm
-        uses: actions/cache/restore@v3.2.0-beta.1
+        uses: actions/cache/restore@v3
         with:
           path: ./native/llvm-*
-          key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/ProjectConfig.cmake', './native/toolchain*.cmake') }}
+          key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchain*.cmake') }}
 
       - name: Build LLVM
         id: build-llvm
@@ -80,11 +80,11 @@ jobs:
 
       - name: Save LLVM cache
         if: steps.build-llvm.outcome == 'success'
-        uses: actions/cache/save@v3.2.0-beta.1
+        uses: actions/cache/save@v3
         id: save-llvm
         with:
           path: ./native/llvm-*
-          key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/ProjectConfig.cmake', './native/toolchain*.cmake') }}
+          key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchain*.cmake') }}
 
       - name: Configure release build
         working-directory: ./native
