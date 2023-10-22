@@ -47,7 +47,7 @@ jobs:
       - name: Restore LLVM cache
         if: ${{ !env.ACT }}
         id: restore-llvm
-        uses: actions/cache/restore@3
+        uses: actions/cache/restore@v3
         with:
           path: ./native/llvm-*
           key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm.cmake_cache', './native/ProjectConfig.cmake', './native/toolchain*.cmake') }}
@@ -60,7 +60,7 @@ jobs:
 
       - name: Save LLVM cache
         if: steps.build-llvm.outcome == 'success'
-        uses: actions/cache/save@3
+        uses: actions/cache/save@v3
         id: save-llvm
         with:
           path: ./native/llvm-*
