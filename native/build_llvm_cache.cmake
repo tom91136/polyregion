@@ -1,11 +1,25 @@
 
 
-#set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "")
-set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O3 -gline-tables-only -DNDEBUG" CACHE STRING "")
-set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -gline-tables-only -DNDEBUG" CACHE STRING "")
+if (UNIX)
+    list(APPEND RUNTIME_COMPONENTS compiler-rt libcxx libcxxabi)
+    list(APPEND RUNTIME_TARGETS cxx-headers)
+elseif (WIN32)
+    # needs a bootstrapping build for libcxx because cl.exe isn't support
+    # see https://libcxx.llvm.org/BuildingLibcxx.html#support-for-windows
+    list(APPEND RUNTIME_COMPONENTS compiler-rt)
+    # nothing for RUNTIME_TARGETS
+else ()
+    message(FATAL_ERROR "Unsupported platform, cannot determine runtimes to build")
+endif ()
 
-set(CMAKE_C_FLAGS_DEBUG "-O2 -g3" CACHE STRING "")
-set(CMAKE_CXX_FLAGS_DEBUG "-O2 -g3" CACHE STRING "")
+
+if (UNIX)
+    set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O3 -gline-tables-only -DNDEBUG" CACHE STRING "")
+    set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -gline-tables-only -DNDEBUG" CACHE STRING "")
+
+    set(CMAKE_C_FLAGS_DEBUG "-O2 -g3" CACHE STRING "")
+    set(CMAKE_CXX_FLAGS_DEBUG "-O2 -g3" CACHE STRING "")
+endif ()
 
 set(LLVM_TARGETS_TO_BUILD
         AArch64
@@ -22,11 +36,7 @@ set(LLVM_ENABLE_PROJECTS
         clang-tools-extra
         lld
         CACHE STRING "")
-set(LLVM_ENABLE_RUNTIMES
-        compiler-rt
-        libcxx
-        libcxxabi
-        CACHE STRING "")
+set(LLVM_ENABLE_RUNTIMES ${RUNTIME_COMPONENTS} CACHE STRING "")
 
 set(LLVM_ENABLE_ZLIB OFF CACHE BOOL "")
 set(LLVM_ENABLE_ZSTD OFF CACHE BOOL "")
@@ -50,7 +60,7 @@ set(LLVM_DISTRIBUTIONS
 
 # We want to include the C++ headers in our distribution.
 set(LLVM_RUNTIME_DISTRIBUTION_COMPONENTS
-        cxx-headers
+        ${RUNTIME_TARGETS}
         CACHE STRING "")
 
 # You likely want more tools; this is just an example :) Note that we need to
@@ -73,7 +83,7 @@ set(LLVM_Toolchain_DISTRIBUTION_COMPONENTS
         # Clang shared
         builtins
         runtimes
-        cxx-headers
+        ${RUNTIME_TARGETS}
 
         # LLVM tools
         llc
@@ -96,7 +106,6 @@ set(LLVM_Toolchain_DISTRIBUTION_COMPONENTS
         llvm-size
         llvm-strings
         llvm-strip
-
 
 
         CACHE STRING "")
