@@ -34,14 +34,16 @@ struct Remapper {
   clang::ASTContext &context;
   struct RemapContext {
     std::optional<std::reference_wrapper<StructDef>> parent;
+    Type::Any rtnType;
     size_t counter{};
     std::vector<Stmt::Any> stmts{};
     std::unordered_map<std::string, Function> functions{};
     std::unordered_map<std::string, StructDef> structs{};
 
     template <typename T>
-    [[nodiscard]] std::pair<T, std::vector<Stmt::Any>>
-    scoped(const std::function<T(RemapContext &)> &f, std::optional<std::string> scopeStructName = {}, bool persistCounter = false) {
+    [[nodiscard]] std::pair<T, std::vector<Stmt::Any>> scoped(const std::function<T(RemapContext &)> &f, const std::optional<Type::Any> &scopeRtnType = {},
+                                                              std::optional<std::string> scopeStructName = {},
+                                                              bool persistCounter = false) {
       std::optional<std::reference_wrapper<StructDef>> nextParent = parent;
       if (scopeStructName) {
         if (auto it = structs.find(*scopeStructName); it != structs.end()) {
@@ -50,7 +52,7 @@ struct Remapper {
           throw std::logic_error("Unexpected parent scope: " + *scopeStructName);
         }
       }
-      RemapContext r{nextParent, persistCounter ? 0 : counter, {}, functions, structs};
+      RemapContext r{nextParent, scopeRtnType.value_or(rtnType), persistCounter ? 0 : counter, {}, functions, structs};
       auto result = f(r);
       if(!persistCounter){
         counter = r.counter;
@@ -59,13 +61,15 @@ struct Remapper {
       structs = r.structs;
       return {result, r.stmts};
     }
-    [[nodiscard]] std::vector<Stmt::Any> scoped(const std::function<void(RemapContext &)> &f,
+    [[nodiscard]] std::vector<Stmt::Any> scoped(const std::function<void(RemapContext &)> &f, const std::optional<Type::Any> &scopeRtnType ={},
                                                 std::optional<std::string> scopeStructName = {}, bool persistCounter = false);
 
     void push(const Stmt::Any &stmt);
     Named newName(const Type::Any &tpe);
     Term::Any newVar(const Expr::Any &expr);
-//    void operator+=(const Remapper &that);
+    void newVar0(const Expr::Any &expr);
+    Named newVar(const Type::Any &tpe);
+    //    void operator+=(const Remapper &that);
   };
 
 public:
@@ -76,11 +80,11 @@ public:
   [[nodiscard]] std::string typeName(const Type::Any &tpe) const;
   [[nodiscard]] std::string nameOfRecord(const clang::RecordType *tpe) const;
 
-  std::string handleCall(const clang::FunctionDecl *decl, RemapContext &r);
+  std::pair<std::string, Function> handleCall(const clang::FunctionDecl *decl, RemapContext &r);
   std::string handleRecord(const  clang::RecordDecl *decl, RemapContext &r);
 
   [[nodiscard]] Expr::Any handleExpr(const clang::Expr *expr, RemapContext &r);
-  void handleStmt(const clang::Stmt *root, RemapContext &r);
+  void handleStmt(const clang::Stmt *root, RemapContext &expr);
 };
 
 } // namespace polyregion::polystl

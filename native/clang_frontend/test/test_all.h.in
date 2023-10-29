@@ -4,5 +4,10 @@
 #include <string>
 
 static std::string BinaryDir = "@POLYCPP_TEST_BINARY_DIR@";
-
 static std::vector<std::string> TestFiles = { @POLYCPP_TEST_INPUT_FILES@ };
+
+
+static std::string PolySTLLib = "@POLYCPP_POLYSTL_LIB@";
+static std::string PolySTLLDLibraryPath = "@POLYCPP_POLYSTL_LIBRARY_PATH@";
+static std::string PolySTLInclude = "@POLYCPP_POLYSTL_INCLUDE@";
+static std::string PolyCBin = "@POLYCPP_POLYC_BIN@";

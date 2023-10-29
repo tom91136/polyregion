@@ -1,5 +1,4 @@
 #include <fstream>
-
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
 
@@ -115,10 +114,13 @@ TEST_CASE("all") {
         auto fragments = polyregion::split(command, ' ');
         auto [envs, args] = polyregion::take_while(fragments, [](auto &x) { return x.find('=') != std::string::npos; });
         args.emplace_back("-fsanitize=address");
-        envs.emplace_back("POLYSTL_LIB=/home/tom/polyregion/native/cmake-build-debug-clang/clang_frontend/polystl/libpolystl.so");
-        envs.emplace_back("LD_LIBRARY_PATH=/home/tom/polyregion/native/cmake-build-debug-clang/clang_frontend/polystl/");
-        envs.emplace_back("POLYSTL_INCLUDE=../../clang_frontend/polystl/include:../../polyrt/include:../../include");
-        envs.emplace_back("POLYC_BIN=/home/tom/polyregion/native/cmake-build-debug-clang/polyc/polyc");
+
+        envs.emplace_back("POLYSTL_LIB=" + PolySTLLib);
+        envs.emplace_back("POLYSTL_INCLUDE=" + PolySTLInclude);
+        envs.emplace_back("POLYC_BIN=" + PolyCBin);
+
+
+        envs.emplace_back("LD_LIBRARY_PATH=" + PolySTLLDLibraryPath);
         if (auto path = std::getenv("PATH"); path) envs.emplace_back(std::string("PATH=") + path);
 
         if (args.empty()) throw std::logic_error("Bad command: " + command);
@@ -133,7 +135,7 @@ TEST_CASE("all") {
         auto stderrFile = llvm::sys::fs::TempFile::create("polycpp_stderr-%%-%%-%%-%%-%%");
         if (auto e = stderrFile.takeError()) FAIL("Cannot create stderr:" << toString(std::move(e)));
 
-        auto code = llvm::sys::ExecuteAndWait(args[0], args_, envs_, {std::nullopt, stdoutFile->TmpName, stderrFile->TmpName});
+        auto exitCode = llvm::sys::ExecuteAndWait(args[0], args_, envs_, {std::nullopt, stdoutFile->TmpName, stderrFile->TmpName});
 
         auto stdout_ = polyregion::read_string(stdoutFile->TmpName);
         auto stderr_ = polyregion::read_string(stderrFile->TmpName);
@@ -145,7 +147,7 @@ TEST_CASE("all") {
         WARN("envs: " << polyregion::mk_string<llvm::StringRef>(envs_, &llvm::StringRef::str, " "));
         WARN("stderr:\n" << stderr_ << "[EOF]");
         WARN("stdout:\n" << stdout_ << "[EOF]");
-        REQUIRE(code == 0);
+        REQUIRE(exitCode == 0);
         //              CHECK(stderr_.empty());
         auto stdoutLines = polyregion::split(stdout_, '\n');
         for (auto &[line, value] : run.expect) {

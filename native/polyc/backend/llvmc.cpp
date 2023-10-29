@@ -178,9 +178,9 @@ polyast::Pair<polyast::Opt<std::string>, std::string> llvmc::verifyModule(llvm::
   std::string err;
   llvm::raw_string_ostream errOut(err);
   if (llvm::verifyModule(mod, &errOut)) {
-    return {errOut.str(), "(module failed verification)"};
+    return {errOut.str(), "Fail: module failed verification\n" + errOut.str()};
   } else {
-    return {{}, "(module passed verification)"};
+    return {{}, "Success: module passed verification"};
   }
 }
 

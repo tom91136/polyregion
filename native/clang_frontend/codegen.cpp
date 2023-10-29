@@ -72,7 +72,9 @@ std::string polyregion::polystl::generate(clang::ASTContext &C, const clang::CXX
   auto parentName = remapper.handleRecord(parent, r);
   StructDef &parentDef = r.structs.find(parentName)->second;
 
-  auto stmts = r.scoped([&](auto &r) { remapper.handleStmt(body, r); }, parentName);
+  auto rtnTpe = remapper.handleType(returnTpe);
+
+  auto stmts = r.scoped([&](auto &r) { remapper.handleStmt(body, r); }, rtnTpe, parentName);
   stmts.push_back(Stmt::Return(Expr::Alias(Term::Unit0Const())));
 
   auto recv =
@@ -80,8 +82,7 @@ std::string polyregion::polystl::generate(clang::ASTContext &C, const clang::CXX
 
   auto leadingIndex = Arg(Named("idx", Type::IntS64()), {});
 
-  auto f0 = polyregion::polyast::Function(polyregion::polyast::Sym({"kernel"}), {}, {}, {leadingIndex, recv}, {}, {},
-                                          remapper.handleType(returnTpe), stmts);
+  auto f0 = polyregion::polyast::Function(polyregion::polyast::Sym({"kernel"}), {}, {}, {leadingIndex, recv}, {}, {}, rtnTpe, stmts);
 
   std::vector<Function> fns;
   std::vector<StructDef> structDefs;

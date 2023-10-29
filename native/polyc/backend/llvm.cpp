@@ -222,7 +222,7 @@ ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
       auto [structTy, table] = structTypeOf(tpe);
       if (auto idx = get_opt(table, path.symbol); idx) {
         root = B.CreateInBoundsGEP(
-            structTy, load(B, root, B.getPtrTy(AllocaAS)),
+            structTy, holds<Type::Ptr>(tpe) ? load(B, root, B.getPtrTy(AllocaAS)) : root,
             {llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), *idx)},
             qualified(select) + "_select_ptr");
         tpe = path.tpe;
@@ -495,10 +495,10 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
             return call;
         } else {
 
-          for (auto [key, v] : functions) {
-            std::cerr << key << " = " << v << " =m" << (key == sig) << std::endl;
+          for (auto &[key, v] : functions) {
+            std::cerr << repr(key) << " = " << v << " match = " << (key == sig) << std::endl;
           }
-          return undefined(__FILE__, __LINE__, "Cannot find function " + to_string(sig));
+          return undefined(__FILE__, __LINE__, "Cannot find function " + repr(sig));
         }
       },
       [&](const Expr::Index &x) -> ValPtr {
@@ -539,9 +539,6 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
             return B.CreateInBoundsGEP(ty,              //
                                        mkTermVal(*lhs),                              //
                                        offset, key + "_ptr");
-          } else if (auto structTpe = get_opt<Type::Struct>(lhs->tpe); structTpe) {
-            return mkTermVal(*lhs);
-
           } else { // taking reference of a var
             if (x.idx) throw std::logic_error("Semantic error: Cannot take reference of scalar with index in " + to_string(x));
 
@@ -612,28 +609,8 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
           auto stackPtr = B.CreateAlloca(tpe, AllocaAS, nullptr, x.name.symbol + "_stack_ptr");
           auto rhs = x.expr ? std::make_optional(mkExprVal(*x.expr, fn, x.name.symbol + "_var_rhs")) : std::nullopt;
           stackVarPtrs[x.name.symbol] = {x.name.tpe, stackPtr};
-          if (holds<Type::Ptr>(x.name.tpe)) {
-            if (rhs) {
-              B.CreateStore(*rhs, stackPtr);
-            } else
-              undefined(__FILE__, __LINE__, "var array with no expr?");
-          } else if (holds<Type::Struct>(x.name.tpe)) {
-            if (rhs) {
-              B.CreateStore(*rhs, stackPtr);
-            } else { // otherwise, heap allocate the struct and return the pointer to that
-                     //            if (!tpe->isPointerTy()) {
-                     //              throw std::logic_error("The LLVM struct type `" + llvm_tostring(tpe) +
-                     //                                     "` was not a pointer to the struct " + repr(x.name.tpe) +
-                     //                                     " in stmt:" + repr(stmt));
-                     //            }
-              auto elemSize = sizeOf(B, C, tpe);
-              auto ptr = invokeMalloc(fn, elemSize);
-              B.CreateStore(ptr, stackPtr); //
-            }
-          } else { // any other primitives
-            if (rhs) {
-              B.CreateStore(*rhs, stackPtr); //
-            }
+          if (rhs) {
+            B.CreateStore(*rhs, stackPtr); //
           }
         }
         return BlockKind::Normal;

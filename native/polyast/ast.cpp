@@ -15,6 +15,26 @@ using std::string;
       sym.fqn, [](auto &&x) { return x; }, ".");
 }
 
+[[nodiscard]] string polyast::repr(const InvokeSignature &ivk) {
+  string str;
+  if (ivk.receiver) str += repr(*ivk.receiver) + ".";
+  str += repr(ivk.name);
+  str += "<" +
+         mk_string<Type::Any>(
+             ivk.tpeVars, [](auto &x) { return repr(x); }, ", ") +
+         ">";
+  str += "(" +
+         mk_string<Type::Any>(
+             ivk.args, [&](auto x) { return repr(x); }, ",") +
+         ")";
+  str += "[" +
+         mk_string<Type::Any>(
+             ivk.captures, [&](auto x) { return repr(x); }, ",") +
+         "]";
+  str += ": " + repr(ivk.rtn);
+  return str;
+}
+
 [[nodiscard]] string polyast::repr(const Type::Any &type) {
   return variants::total(
       *type,                                        //

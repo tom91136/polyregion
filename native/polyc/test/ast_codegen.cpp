@@ -8,6 +8,7 @@
 #include <iostream>
 
 using namespace polyregion::polyast;
+using Catch::Matchers::ContainsSubstring;
 
 using namespace Stmt;
 using namespace Term;
@@ -19,9 +20,22 @@ using namespace Math;
 using namespace polyregion;
 using namespace polyast::dsl;
 
-static std::vector<Tpe::Any> PrimitiveTypes = {
+static std::vector<Tpe::Any> PrimitiveTypesNoUnit = {
     Float,          //
     Double,         //
+    Bool,           //
+    Byte,           //
+    Short,          //
+    Char,           //
+    SInt,           //
+    UInt,           //
+    Long,           //
+    Type::IntU8(),  //
+    Type::IntU64(),  //
+};
+
+static std::vector<Tpe::Any> PrimitiveTypes = {
+    Float,          //
     Double,         //
     Bool,           //
     Byte,           //
@@ -69,6 +83,11 @@ template <typename P> static void assertCompile(const P &p) {
   CAPTURE(c);
   CHECK(c.messages == "");
   CHECK(c.binary != std::nullopt);
+  for (auto e : c.events) {
+    REQUIRE_THAT(e.data, !ContainsSubstring(" undef"));
+    REQUIRE_THAT(e.data, !ContainsSubstring("unreachable"));
+  }
+//  FAIL("debug");
   INFO(c);
 }
 
@@ -175,6 +194,103 @@ TEST_CASE("code after if", "[compiler]") {
                                     }),
                                ret("x"_(SInt))});
   assertCompile(program(entry, {}, {}));
+}
+
+TEST_CASE("return ptr to struct", "[compiler]") {
+  polyregion::compiler::initialise();
+  auto tpe = GENERATE(from_range(PrimitiveTypesNoUnit));
+  DYNAMIC_SECTION(tpe) {
+    Sym foo({"foo"});
+    Named x = Named("x", tpe);
+    StructDef def(foo, {}, {StructMember(x, false)}, {});
+    Type::Struct fooTpe(foo, {}, {}, {});
+    auto entry = function("foo", {"foo"_(Ptr(fooTpe))()}, Ptr(fooTpe))({
+        Mut(Select({"foo"_(Ptr(fooTpe))}, x), Alias(generateConstValue(tpe)), false),
+        ret("foo"_(Ptr(fooTpe))) //
+    });
+    assertCompile(program(entry, {def}, {}));
+  }
+}
+
+
+TEST_CASE("return struct", "[compiler]") {
+  polyregion::compiler::initialise();
+  auto tpe = GENERATE(from_range(PrimitiveTypesNoUnit));
+  DYNAMIC_SECTION(tpe) {
+    Sym foo({"foo"});
+    Named x = Named("x", tpe);
+    StructDef def(foo, {}, {StructMember(x, false)}, {});
+    Type::Struct fooTpe(foo, {}, {}, {});
+    auto entry = function("foo", {}, fooTpe)({
+        let("foo") = fooTpe, //
+        Mut(Select({"foo"_(fooTpe)}, x), Alias(generateConstValue(tpe)), false),
+        ret("foo"_(fooTpe)) //
+    });
+    assertCompile(program(entry, {def}, {}));
+  }
+}
+
+
+TEST_CASE("nested struct select", "[compiler]") {
+  polyregion::compiler::initialise();
+
+  Sym bar({"bar"});
+  Named z = Named("z",  Ptr(SInt));
+  StructDef barDef(bar, {}, {StructMember(z, false) }, {});
+  Type::Struct barTpe(bar, {}, {}, {});
+
+  Sym foo({"foo"});
+  Named x = Named("x",  Ptr(SInt));
+  Named y = Named("y",  Ptr(barTpe));
+  StructDef fooDef(foo, {}, {StructMember(x, false), StructMember(y, false)}, {});
+  Type::Struct fooTpe(foo, {}, {}, {});
+
+  auto aux = function("aux", { "in"_(Ptr(barTpe))()  },  SInt)({
+      ret(Index(Select({"in"_(Ptr(barTpe))}, z) , 0_(SInt),  SInt ))
+  });
+
+  auto entry = function("bar", { "in"_(Ptr(fooTpe))()  },  Unit)({
+      let("r") =    (Invoke(Sym({"aux"}), {}, {}, { Select({"in"_(Ptr(fooTpe))}, y) }, {}, SInt)), //
+      Update(Select({"in"_(Ptr(fooTpe))}, x) , 0_(SInt), "r"_(SInt)),
+      ret(Unit0Const()) //
+  });
+
+  assertCompile(program(entry, {fooDef, barDef}, { aux} ));
+}
+
+TEST_CASE("return struct and take ref", "[compiler]") {
+  polyregion::compiler::initialise();
+
+  Sym bar({"bar"});
+  Named z = Named("z",  SInt);
+  StructDef barDef(bar, {}, {StructMember(z, false) }, {});
+  Type::Struct barTpe(bar, {}, {}, {});
+
+  Sym foo({"foo"});
+  Named x = Named("x",  Ptr(SInt));
+  Named y = Named("y",  Ptr(barTpe));
+  StructDef fooDef(foo, {}, {StructMember(x, false), StructMember(y, false)}, {});
+  Type::Struct fooTpe(foo, {}, {}, {});
+
+  auto aux = function("aux", { "out"_(Ptr(barTpe))(), "in"_(Ptr(barTpe))()  },  Ptr(barTpe))({
+      Mut(Select({"out"_(Ptr(barTpe))}, z), Alias(Select({"in"_(Ptr(barTpe))}, z)), true),
+      ret("out"_(Ptr(barTpe)))
+  });
+
+  auto gen = function("gen", {   },   barTpe)({
+      let("a") = barTpe, //
+      Mut(Select({"a"_(barTpe)}, z), Alias(0_(SInt)), true), //
+      ret("a"_( barTpe))
+  });
+
+  auto entry = function("bar", {"in"_(Ptr(fooTpe))()}, Unit)({
+      let("a") = (Invoke(Sym({"gen"}), {}, {}, {}, {},  barTpe)), //
+      let("ar") = RefTo("a"_(barTpe), {}, barTpe), //
+      let("r") = (Invoke(Sym({"aux"}), {}, {}, {Select({"in"_(Ptr(fooTpe))}, y), "ar"_(Ptr(barTpe))}, {}, Ptr(barTpe))), //
+      ret(Unit0Const()) //
+  });
+
+  assertCompile(program(entry, {fooDef, barDef}, { gen, aux} ));
 }
 
 TEST_CASE("fn call arg0", "[compiler]") {
@@ -286,7 +402,8 @@ TEST_CASE("index prim array", "[compiler]") {
   DYNAMIC_SECTION("xs[" << idx << "]:" << tpe << " (local)") {
     CAPTURE(tpe, idx);
     assertCompile(program(function("foo", {}, tpe)({
-        let("xs") = Alloc(tpe, 42_(SInt)),                 //
+        let("xs") = Alloc(tpe, 42_(SInt)),
+        "xs"_(Ptr(tpe))[integral(SInt, idx)] = generateConstValue(tpe), //
         let("x") = "xs"_(Ptr(tpe))[integral(SInt, idx)], //
         ret("x"_(tpe))                                     //
     })));
@@ -324,13 +441,14 @@ TEST_CASE("update prim array", "[compiler]") {
 
 TEST_CASE("update prim array by ref", "[compiler]") {
   polyregion::compiler::initialise();
-  auto tpe = GENERATE(from_range(PrimitiveTypes));
+  auto tpe = GENERATE(from_range(PrimitiveTypesNoUnit));
   auto idx = GENERATE(std::optional<int>{}, 0, 1, 3, 7, 10);
   auto val = generateConstValue(tpe);
   DYNAMIC_SECTION("(xs[" << (idx ? std::to_string(*idx) : "(none)") << "]:" << tpe << ") = " << val << " (local)") {
     CAPTURE(tpe, idx, val);
     assertCompile(program(function("foo", {}, tpe)({
         let("xs") = Alloc(tpe, 42_(SInt)), //
+        "xs"_(Ptr(tpe))[integral(SInt, idx.value_or(0))] = generateConstValue(tpe), //
         let("ref") = RefTo("xs"_(Ptr(tpe)), idx ? std::optional{integral(SInt, *idx)} : std::nullopt, tpe),
         ret("ref"_(Ptr(tpe))[integral(SInt, 0)]) //
     })));
@@ -344,9 +462,9 @@ TEST_CASE("update prim array by ref", "[compiler]") {
   }
 }
 
-TEST_CASE("update value by ref", "[compiler]") {
+TEST_CASE("update prim value by ref", "[compiler]") {
   polyregion::compiler::initialise();
-  auto tpe = GENERATE(from_range(PrimitiveTypes));
+  auto tpe = GENERATE(from_range(PrimitiveTypesNoUnit));
   auto val = generateConstValue(tpe);
   DYNAMIC_SECTION("(&x:" << tpe << ") = " << val << " (local)") {
     CAPTURE(tpe, val);
@@ -561,7 +679,7 @@ TEST_CASE("alloc struct", "[compiler]") {
 
                   //                  Mut(Select({}, Named("out", myStruct)), Alias(Select({}, Named("s", myStruct))),
                   //                  true), Return(Alias(Unit0Const())),
-                  Return(Alias(IntS32Const(69))),
+                  Return(IntrOp(Add(Select({Named("s", myStruct)}, defX), Select({Named("s", myStruct)}, defY), SInt))),
               });
 
   Program p(fn, {}, {def, def2});

@@ -5,6 +5,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <vector>
+#include <cmath>
 
 namespace polyregion::concurrency_utils {
 

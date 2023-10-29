@@ -23,12 +23,24 @@ foreach (TEST_FILE ${TEST_FILE_PATHS})
     string(APPEND POLYCPP_TEST_INPUT_FILES "\"${TEST_FILE}\", ")
 endforeach ()
 
+
+set(POLYCPP_POLYSTL_LIB "$<TARGET_FILE:polystl>")
+set(POLYCPP_POLYSTL_LIBRARY_PATH "$<TARGET_FILE_DIR:polystl>")
+set(POLYCPP_POLYSTL_INCLUDE "${CMAKE_SOURCE_DIR}/$<TARGET_NAME:clang_frontend>/$<TARGET_NAME:polystl>/include:${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polyrt>/include:${CMAKE_SOURCE_DIR}/include")
+set(POLYCPP_POLYC_BIN "$<TARGET_FILE:polyc-bin>")
+
 target_include_directories(polycpp-test PRIVATE
         ../include
         ${LLVM_INCLUDE_DIRS}
         "${CMAKE_CURRENT_BINARY_DIR}"
 )
-configure_file(test/test_all.h.in "${CMAKE_CURRENT_BINARY_DIR}/test_all.h")
+
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/test/test_all.h.in" "${CMAKE_CURRENT_BINARY_DIR}/test_all.h.in")
+
+file(GENERATE
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/test_all.h"
+        INPUT "${CMAKE_CURRENT_BINARY_DIR}/test_all.h.in"
+)
 
 
 #target_include_directories(PolySTLPlugin PRIVATE
