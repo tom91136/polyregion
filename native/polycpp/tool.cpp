@@ -98,6 +98,7 @@ int main(int argc, const char *argv[]) {
   clang::driver::Driver driver(execPath, triple, diags, "PolyCpp compiler");
   driver.ResourceDir = (execParentDir + "/lib/clang/" + std::to_string(CLANG_VERSION_MAJOR));
 
+
   std::vector<const char *> args(argv, argv + argc);
   // sort out -fstdpar
   auto fstdparIt = std::remove_if(args.begin(), args.end(), [](auto x) { return x == std::string("-fstdpar"); });

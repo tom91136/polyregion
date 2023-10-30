@@ -335,6 +335,6 @@ set(LINK_OPTIONS
 
 add_subdirectory(polyast)
 add_subdirectory(polyc)
+add_subdirectory(polycpp)
 add_subdirectory(polyrt)
 add_subdirectory(bindings)
-add_subdirectory(clang_frontend)

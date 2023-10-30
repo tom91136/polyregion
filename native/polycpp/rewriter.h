@@ -5,10 +5,10 @@
 namespace polyregion::polystl {
 class OffloadRewriteConsumer : public clang::ASTConsumer {
 private:
-//  std::unordered_map<int64_t, std::pair<clang::FunctionDecl *, clang::CXXRecordDecl *>> drain{};
+  //  std::unordered_map<int64_t, std::pair<clang::FunctionDecl *, clang::CXXRecordDecl *>> drain{};
 public:
   OffloadRewriteConsumer();
   void HandleTranslationUnit(clang::ASTContext &context) override;
 };
 
-} // namespace polyregion::clang_frontend
+} // namespace polyregion::polystl
