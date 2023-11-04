@@ -208,13 +208,14 @@ int main() {
   std::vector<std::tuple<runtime::Backend, polyast::Target, std::string>> configs = {
       // CL runs everywhere
             {runtime::Backend::OpenCL, polyast::Target::Source_C_OpenCL1_1, ""},
-      {runtime::Backend::Vulkan, polyast::Target::Object_LLVM_SPIRV64, ""},
+//      {runtime::Backend::Vulkan, polyast::Target::Object_LLVM_SPIRV64, ""},
 #ifdef __APPLE__
       {runtime::Backend::RELOCATABLE_OBJ, compiler::Target::Object_LLVM_AArch64, "apple-m1"},
       {runtime::Backend::Metal, compiler::Target::Source_C_Metal1_0, ""},
 #else
       {runtime::Backend::CUDA, polyast::Target::Object_LLVM_NVPTX64, "sm_60"},
       {runtime::Backend::HIP, polyast::Target::Object_LLVM_AMDGCN, "gfx1036"},
+      {runtime::Backend::HSA, polyast::Target::Object_LLVM_AMDGCN, "gfx1036"},
       {runtime::Backend::RELOCATABLE_OBJ, polyast::Target::Object_LLVM_x86_64, "x86-64-v3"},
 #endif
   };

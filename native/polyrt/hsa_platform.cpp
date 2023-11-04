@@ -125,7 +125,7 @@ static SymbolArgOffsetTable extractSymbolArgOffsetTable(const std::string &image
           try {
             using namespace nlohmann;
             auto kernels =
-                nlohmann::json::from_msgpack(note.getDesc().begin(), note.getDesc().end()).at("amdhsa.kernels");
+                nlohmann::json::from_msgpack(note.getDesc(s.sh_addralign).begin(), note.getDesc(s.sh_addralign).end()).at("amdhsa.kernels");
             SymbolArgOffsetTable offsetTable(kernels.size());
             for (auto &kernel : kernels) {
               auto kernelName = kernel.at(".name").template get<std::string>();

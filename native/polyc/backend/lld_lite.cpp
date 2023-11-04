@@ -7,6 +7,10 @@
 #include <atomic>
 #include <fstream>
 
+namespace lld::elf {
+bool link(ArrayRef<const char *> args, llvm::raw_ostream &stdoutOS, llvm::raw_ostream &stderrOS, bool exitEarly, bool disableOutput);
+}
+
 std::pair<std::optional<std::string>, std::optional<std::string>>
 polyregion::backend::lld_lite::linkElf(const std::vector<std::string> &args,
                                     const std::vector<llvm::MemoryBufferRef> &files) {

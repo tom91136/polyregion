@@ -136,9 +136,9 @@ file(REMOVE_RECURSE "${LLVM_BUILD_DIR}/runtimes")
 if (UNIX AND NOT APPLE)
     # Set this explicitly for Linux otherwise compiler-rt builds using the host triplet
     if (CMAKE_SYSTEM_PROCESSOR STREQUAL arm)
-        list(APPEND BUILD_OPTIONS -DLLVM_HOST_TRIPLE=${CMAKE_SYSTEM_PROCESSOR}-linux-gnueabihf)
+        list(APPEND BUILD_OPTIONS -DLLVM_HOST_TRIPLE=${CMAKE_SYSTEM_PROCESSOR}-unknown-linux-gnueabihf)
     else ()
-        list(APPEND BUILD_OPTIONS -DLLVM_HOST_TRIPLE=${CMAKE_SYSTEM_PROCESSOR}-linux-gnu)
+        list(APPEND BUILD_OPTIONS -DLLVM_HOST_TRIPLE=${CMAKE_SYSTEM_PROCESSOR}-unknown-linux-gnu)
     endif ()
 endif ()
 

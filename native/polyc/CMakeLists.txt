@@ -20,7 +20,7 @@ set(LIB_SOURCES
         compiler.cpp
         polyregion_compiler.cpp
 
-        ${clspv_passes_SOURCE_FILES}
+#        ${clspv_passes_SOURCE_FILES}
         )
 
 add_library(polyc ${LIB_SOURCES})
@@ -36,7 +36,7 @@ target_include_directories(polyc PUBLIC
         ${LLD_INCLUDE_DIRS}
         #        ${spirv-llvm-translator_SOURCE_DIR}/include
 
-        ${clspv_passes_INCLUDE_DIRS}
+#        ${clspv_passes_INCLUDE_DIRS}
         ${spirv-tools_SOURCE_DIR}/include
 
 

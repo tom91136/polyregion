@@ -2,13 +2,13 @@
 
 #include <vector>
 
-#include "llvm/ADT/Triple.h"
 #include "llvm/Support/Host.h"
+#include "llvm/TargetParser/Triple.h"
 
-#include "llvm/Support/AArch64TargetParser.h"
-#include "llvm/Support/ARMTargetParser.h"
-#include "llvm/Support/TargetParser.h"
-#include "llvm/Support/X86TargetParser.h"
+#include "llvm/TargetParser/AArch64TargetParser.h"
+#include "llvm/TargetParser/ARMTargetParser.h"
+#include "llvm/TargetParser/TargetParser.h"
+#include "llvm/TargetParser/X86TargetParser.h"
 
 namespace polyregion::llvm_shared {
 
@@ -18,8 +18,7 @@ static bool isCPUTargetSupported(const std::string &CPU, //
   switch (arch) {
     case Triple::x86_64: return CPU == "native" || (llvm::X86::parseArchX86(CPU) != llvm::X86::CPUKind::CK_None);
     case Triple::arm: return llvm::ARM::parseCPUArch(CPU) != llvm::ARM::ArchKind::INVALID;
-    case Triple::aarch64: return llvm::AArch64::parseCpu(CPU).Name != "invalid";
-
+    case Triple::aarch64: return llvm::AArch64::parseCpu(CPU).has_value();
     case Triple::amdgcn: return llvm::AMDGPU::parseArchAMDGCN(CPU) != llvm::AMDGPU::GPUKind::GK_NONE;
     case Triple::nvptx64: return CPU.starts_with("sm_");
 
@@ -69,8 +68,10 @@ static void collectCPUFeatures(const std::string &CPU,             //
     }
     case Triple::aarch64: {
       std::vector<StringRef> extensions;
-      AArch64::getExtensionFeatures(AArch64::getDefaultExtensions(CPU, AArch64::getArchForCpu(CPU)), extensions);
-      normaliseFeature(extensions, drain);
+      if (auto a = AArch64::getArchForCpu(CPU); a) {
+        AArch64::getExtensionFeatures(a->DefaultExts, extensions);
+        normaliseFeature(extensions, drain);
+      }
       break;
     }
     default: throw std::logic_error("Unexpected arch from triple:" + Triple::getArchTypeName(arch).str());

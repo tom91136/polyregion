@@ -10,7 +10,7 @@
 #include "spirv-tools/libspirv.hpp"
 
 #include "spirv-tools/optimizer.hpp"
-#include "llvm/ADT/Triple.h"
+#include "llvm/TargetParser/Triple.h"
 #include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
@@ -26,7 +26,7 @@
 #include "llvm/IR/Verifier.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/MC/MCInstrInfo.h"
-#include "llvm/MC/SubtargetFeature.h"
+#include "llvm/TargetParser/SubtargetFeature.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Object/ELF.h"
 #include "llvm/Pass.h"
@@ -39,7 +39,6 @@
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/IPO/AlwaysInliner.h"
-#include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Scalar/DCE.h"
 #include "llvm/Transforms/Utils/Cloning.h"
@@ -120,7 +119,7 @@ void llvmc::initialise() {
   initializeScalarizeMaskedMemIntrinLegacyPassPass(*r);
   initializeExpandReductionsPass(*r);
   initializeExpandVectorPredicationPass(*r);
-  initializeHardwareLoopsPass(*r);
+//  initializeHardwareLoopsPass(*r);
   initializeTransformUtils(*r);
   initializeReplaceWithVeclibLegacyPass(*r);
 
