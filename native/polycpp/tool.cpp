@@ -63,7 +63,7 @@ int executeCC1(std::vector<std::string> &cc1Args, bool stdpar) {
   auto ct = clang::TargetInfo::CreateTargetInfo(CI.getDiagnostics(), CI.getInvocation().TargetOpts);
   CI.setTarget(ct);
   bool success;
-  if (stdpar) {
+  if (stdpar && !std::getenv("POLYCPP_NO_REWRITE")) {
     using namespace polyregion;
     polystl::ModifyASTAndEmitObjAction action([]() { return std::make_unique<polystl::OffloadRewriteConsumer>(); });
     success = CI.ExecuteAction(action);

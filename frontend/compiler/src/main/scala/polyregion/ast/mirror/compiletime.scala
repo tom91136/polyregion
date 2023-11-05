@@ -139,6 +139,15 @@ private[polyregion] object compiletime {
             )
             _x
           }
+        // case Ident("None") => 
+
+        //   '{
+        //     lazy val _x = Value.CtorAp[Tpe](
+        //       ${ summonTypeRes(TypeRepr.of[Option].appliedTo(tpt.tpe).widenTermRefByName.dealias) }(),
+        //       ${ Expr.ofList(terms.map(liftTermToValue(_))) }
+        //     )
+        //     _x
+        //   }
         case ap @ Apply(x, args) =>
           '{
             Value.CtorAp[Tpe](
@@ -153,9 +162,10 @@ private[polyregion] object compiletime {
               case ValDef(_, _, Some(x)) if !i.symbol.flags.is(Flags.Case) => liftTermToValue(x)
               case DefDef(_, Nil :: Nil, _, Some(x))                       => liftTermToValue(x)
               case x =>
-                report.errorAndAbort(
-                  s"Ident ${i}:${i.tpe.widenTermRefByName.show} with tree${x} doesn't refer to a term tree"
-                )
+                 '{ Value.CtorAp[Tpe](${ summonTypeRes(i.tpe.dealias) }(), Nil) }
+                // report.errorAndAbort(
+                //   s"Ident ${i}:${i.tpe.widenTermRefByName.show} with tree${x} doesn't refer to a term tree"
+                // )
             }
           }
         case s @ Select(qualifier, "asInstanceOf") => liftTermToValue(qualifier)

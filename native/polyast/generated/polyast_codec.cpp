@@ -217,14 +217,16 @@ json Type::struct_to_json(const Type::Struct& x_) {
 
 Type::Ptr Type::ptr_from_json(const json& j_) { 
   auto component =  Type::any_from_json(j_.at(0));
-  auto space =  TypeSpace::any_from_json(j_.at(1));
-  return {component, space};
+  auto length = j_.at(1).is_null() ? std::nullopt : std::make_optional(j_.at(1).get<int32_t>());
+  auto space =  TypeSpace::any_from_json(j_.at(2));
+  return {component, length, space};
 }
 
 json Type::ptr_to_json(const Type::Ptr& x_) { 
   auto component =  Type::any_to_json(x_.component);
+  auto length = x_.length ? json(*x_.length) : json();
   auto space =  TypeSpace::any_to_json(x_.space);
-  return json::array({component, space});
+  return json::array({component, length, space});
 }
 
 Type::Var Type::var_from_json(const json& j_) { 
@@ -2099,13 +2101,13 @@ json compileresult_to_json(const CompileResult& x_) {
 json hashed_from_json(const json& j_) { 
   auto hash_ = j_.at(0).get<std::string>();
   auto data_ = j_.at(1);
-  if(hash_ != "b494e0906548079319adc4dd7992e27a") {
-   throw std::runtime_error("Expecting ADT hash to be b494e0906548079319adc4dd7992e27a, but was " + hash_);
+  if(hash_ != "1a8d21966353d787961c541d91735d27") {
+   throw std::runtime_error("Expecting ADT hash to be 1a8d21966353d787961c541d91735d27, but was " + hash_);
   }
   return data_;
 }
 
 json hashed_to_json(const json& x_) { 
-  return json::array({"b494e0906548079319adc4dd7992e27a", x_});
+  return json::array({"1a8d21966353d787961c541d91735d27", x_});
 }
 } // namespace polyregion::polyast

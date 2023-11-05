@@ -104,9 +104,9 @@ struct TestCase {
   }
 };
 
-TEST_CASE("all") {
+void testAll(bool passthrough){
 
-  auto run = [](TestCase &case_, const std::string &binaryName, const std::function<std::string(std::string &)> &mkCommand) {
+  auto run = [passthrough](TestCase &case_, const std::string &binaryName, const std::function<std::string(std::string &)> &mkCommand) {
     for (size_t i = 0; i < case_.runs.size(); ++i) {
       auto &run = case_.runs[i];
       auto command = mkCommand(run.command);
@@ -114,6 +114,11 @@ TEST_CASE("all") {
         auto fragments = polyregion::split(command, ' ');
         auto [envs, args] = polyregion::take_while(fragments, [](auto &x) { return x.find('=') != std::string::npos; });
         args.emplace_back("-fsanitize=address");
+
+        if(passthrough){
+          envs.emplace_back("POLYCPP_NO_REWRITE=1");
+          envs.emplace_back("POLYSTL_NO_OFFLOAD=1");
+        }
 
         envs.emplace_back("POLYSTL_LIB=" + PolySTLLib);
         envs.emplace_back("POLYSTL_INCLUDE=" + PolySTLInclude);
@@ -150,14 +155,14 @@ TEST_CASE("all") {
         REQUIRE(exitCode == 0);
         //              CHECK(stderr_.empty());
         auto stdoutLines = polyregion::split(stdout_, '\n');
-        for (auto &[line, value] : run.expect) {
-          DYNAMIC_SECTION("EXPECT " << (line ? std::to_string(*line) : "*") << "==" << value) {
+        for (auto &[line, expected] : run.expect) {
+          DYNAMIC_SECTION("EXPECT " << (line ? std::to_string(*line) : "*") << "==" << expected) {
             if (line) {
               INFO(stdoutLines.size());
               auto idx = *line < 0 ? stdoutLines.size() + *line : *line;
-              CHECK(stdoutLines[idx] == value);
+              CHECK(stdoutLines[idx] == expected);
             } else {
-              CHECK(stdout_ == value);
+              CHECK(stdout_ == expected);
             }
           }
         }
@@ -198,4 +203,13 @@ TEST_CASE("all") {
       }
     }
   }
+}
+
+
+TEST_CASE("offload") {
+  testAll(false);
+}
+
+TEST_CASE("passthrough") {
+  testAll(true);
 }

@@ -78,7 +78,7 @@ std::string polyregion::polystl::generate(clang::ASTContext &C, const clang::CXX
   stmts.push_back(Stmt::Return(Expr::Alias(Term::Unit0Const())));
 
   auto recv =
-      Arg(Named("this", Type::Ptr(Type::Struct(Sym({parentName}), parentDef.tpeVars, {}, parentDef.parents), TypeSpace::Global())), {});
+      Arg(Named("this", Type::Ptr(Type::Struct(Sym({parentName}), parentDef.tpeVars, {}, parentDef.parents), {}, TypeSpace::Global())), {});
 
   auto leadingIndex = Arg(Named("idx", Type::IntS64()), {});
 

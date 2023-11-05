@@ -414,8 +414,9 @@ struct POLYREGION_EXPORT Struct : Type::Base {
 
 struct POLYREGION_EXPORT Ptr : Type::Base {
   Type::Any component;
+  std::optional<int32_t> length;
   TypeSpace::Any space;
-  Ptr(Type::Any component, TypeSpace::Any space) noexcept;
+  Ptr(Type::Any component, std::optional<int32_t> length, TypeSpace::Any space) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Ptr &);
   POLYREGION_EXPORT friend bool operator==(const Type::Ptr &, const Type::Ptr &);

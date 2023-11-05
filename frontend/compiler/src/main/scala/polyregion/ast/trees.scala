@@ -210,7 +210,8 @@ object PolyAstToExpr {
 
       case p.Type.Struct(name, tpeVars, args, parents) =>
         '{ p.Type.Struct(${ Expr(name) }, ${ Expr(tpeVars) }, ${ Expr(args) }, ${ Expr(parents) }) }
-      case p.Type.Ptr(component, space)    => '{ p.Type.Ptr(${ Expr(component) }, ${ Expr(space) }) }
+      case p.Type.Ptr(component, length, space) =>
+        '{ p.Type.Ptr(${ Expr(component) }, ${ Expr(length) }, ${ Expr(space) }) }
       case p.Type.Exec(tpeVars, args, rtn) => ???
       case p.Type.Nothing                  => ???
     }
@@ -258,24 +259,24 @@ extension (e: p.Type) {
         xSym == ySym && xVars == yVars && xTpes.zip(yTpes).forall(_ =:= _) && xParents
           .zip(yParents)
           .forall(_ == _)
-      case (p.Type.Nothing, p.Type.Nothing)             => true
-      case (p.Type.Nothing, _)                          => true
-      case (_, p.Type.Nothing)                          => true
-      case (p.Type.Ptr(xt, xa), p.Type.Ptr(yt, ya))     => xt =:= yt && xa == ya
-      case (p.Type.Exec(_, _, _), p.Type.Exec(_, _, _)) => ??? // TODO impl exec
-      case (x, y)                                       => x == y
+      case (p.Type.Nothing, p.Type.Nothing)                 => true
+      case (p.Type.Nothing, _)                              => true
+      case (_, p.Type.Nothing)                              => true
+      case (p.Type.Ptr(xt, xl, xa), p.Type.Ptr(yt, yl, ya)) => xt =:= yt && xl == yl && xa == ya
+      case (p.Type.Exec(_, _, _), p.Type.Exec(_, _, _))     => ??? // TODO impl exec
+      case (x, y)                                           => x == y
     }
 
   def mapLeaf(f: p.Type => p.Type): p.Type = e match {
     case p.Type.Struct(name, tpeVars, args, parents) => p.Type.Struct(name, tpeVars, args.map(f), parents)
-    case p.Type.Ptr(component, space)                => p.Type.Ptr(f(component), space)
+    case p.Type.Ptr(component, length, space)        => p.Type.Ptr(f(component), length, space)
     case p.Type.Exec(tpeVars, args, rtn)             => p.Type.Exec(tpeVars, args.map(f), f(rtn))
     case x                                           => f(x)
   }
 
   def mapNode(f: p.Type => p.Type): p.Type = e match {
     case p.Type.Struct(name, tpeVars, args, parents) => f(p.Type.Struct(name, tpeVars, args.map(f), parents))
-    case p.Type.Ptr(component, space)                => f(p.Type.Ptr(f(component), space))
+    case p.Type.Ptr(component, length, space)        => f(p.Type.Ptr(f(component), length, space))
     case p.Type.Exec(tpeVars, args, rtn)             => f(p.Type.Exec(tpeVars, args.map(f), f(rtn)))
     case x                                           => x
   }
@@ -290,15 +291,15 @@ extension (e: p.Type) {
           .zipAll(args, "???", p.Type.Var("???"))
           .map((v, a) => s"$v=${a.repr}")
           .mkString("<", ",", ">")}(${parents.map(_.repr).mkString("<:")})"
-    case p.Type.Ptr(comp, space) => s"Array[${comp.repr}^${space}]"
-    case p.Type.Bool1            => "Bool1"
-    case p.Type.IntS8            => "IntS8b"
-    case p.Type.IntU16           => "IntU16c"
-    case p.Type.IntS16           => "IntS16s"
-    case p.Type.IntS32           => "IntS32i"
-    case p.Type.IntS64           => "IntS64l"
-    case p.Type.Float32          => "Float32f"
-    case p.Type.Float64          => "Float64d"
+    case p.Type.Ptr(comp, length, space) => s"Array[${comp.repr}${length.fold("")(i => s"*$i")}^${space}]"
+    case p.Type.Bool1                    => "Bool1"
+    case p.Type.IntS8                    => "IntS8b"
+    case p.Type.IntU16                   => "IntU16c"
+    case p.Type.IntS16                   => "IntS16s"
+    case p.Type.IntS32                   => "IntS32i"
+    case p.Type.IntS64                   => "IntS64l"
+    case p.Type.Float32                  => "Float32f"
+    case p.Type.Float64                  => "Float64d"
 
     case p.Type.Float16 => "Float16"
     case p.Type.IntU8   => "IntU8"
@@ -316,7 +317,7 @@ extension (e: p.Type) {
   def monomorphicName: String = e match {
     case p.Type.Struct(sym, _, args, parents) =>
       sym.fqn.mkString("_") + args.map(_.monomorphicName).mkString("_", "_", "_")
-    case p.Type.Ptr(comp, space) => s"${comp.monomorphicName}^$space[]"
+    case p.Type.Ptr(comp, length, space) => s"${comp.monomorphicName}${length.fold("")(i => s"*$i")}^$space[]"
     case p.Type.Bool1            => "Bool1"
     case p.Type.IntS8            => "IntS8b"
     case p.Type.IntU16           => "IntU16c"

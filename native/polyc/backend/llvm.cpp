@@ -92,7 +92,7 @@ std::unique_ptr<LLVMBackend::TargetSpecificHandler> LLVMBackend::TargetSpecificH
 LLVMBackend::TargetSpecificHandler::~TargetSpecificHandler() {}
 
 ValPtr LLVMBackend::AstTransformer::invokeMalloc(llvm::Function *parent, ValPtr size) {
-  return B.CreateCall(mkExternalFn(parent, Type::Ptr(Type::IntS8(), TypeSpace::Global()), "malloc", {Type::IntS64()}), size);
+  return B.CreateCall(mkExternalFn(parent, Type::Ptr(Type::IntS8(), {}, TypeSpace::Global()), "malloc", {Type::IntS64()}), size);
 }
 
 ValPtr LLVMBackend::AstTransformer::invokeAbort(llvm::Function *parent) {
@@ -147,11 +147,15 @@ llvm::Type *LLVMBackend::AstTransformer::mkTpe(const Type::Any &tpe, bool functi
         }
       }, //
       [&](const Type::Ptr &x) -> llvm::Type * {
-        return B.getPtrTy(variants::total(
-            *x.space,                                             //
-            [&](const TypeSpace::Local &_) { return LocalAS; },   //
-            [&](const TypeSpace::Global &_) { return GlobalAS; }) //
-        );
+        if (x.length) return llvm::ArrayType::get(mkTpe(x.component), *x.length);
+        else {
+          return B.getPtrTy(variants::total(
+              *x.space,                                             //
+              [&](const TypeSpace::Local &_) { return LocalAS; },   //
+              [&](const TypeSpace::Global &_) { return GlobalAS; }) //
+          );
+        }
+
         //        // These two types promote to a byte when stored in an array
         //        if (holds<Type::Bool1>(x.component) || holds<Type::Unit0>(x.component)) {
         //          return llvm::Type::getInt8Ty(C)->getPointerTo(AS);
@@ -516,10 +520,8 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
             auto ty = mkTpe(arrTpe->component);
             auto ptr = B.CreateInBoundsGEP(ty,              //
                                            mkTermVal(*lhs),                              //
-                                           mkTermVal(x.idx), key + "_ptr");
-            if (holds<TypeKind::Ref>(kind(arrTpe->component))) {
-              return ptr;
-            } else if (holds<Type::Bool1>(arrTpe->component)) { // Narrow from i8 to i1
+                                           mkTermVal(x.idx), key + "_idx_ptr");
+            if (holds<Type::Bool1>(arrTpe->component)) { // Narrow from i8 to i1
               return B.CreateICmpNE(load(B, ptr, ty), llvm::ConstantInt::get(llvm::Type::getInt1Ty(C), 0, true));
             } else {
               return load(B, ptr, ty);
@@ -538,7 +540,7 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
             auto ty = holds<Type::Unit0>(arrTpe->component) ? llvm::Type::getInt8Ty(C) : mkTpe(arrTpe->component);
             return B.CreateInBoundsGEP(ty,              //
                                        mkTermVal(*lhs),                              //
-                                       offset, key + "_ptr");
+                                       offset, key + "_ref_to_ptr");
           } else { // taking reference of a var
             if (x.idx) throw std::logic_error("Semantic error: Cannot take reference of scalar with index in " + to_string(x));
 

@@ -506,6 +506,17 @@ private[polyregion] object CppStructGen {
         ctors = tpe :: Nil
       )
     }
+    given ToCppType[None.type] = { () =>
+      CppType(
+        "std" :: Nil,
+        s"optional",
+        movable = true,
+        constexpr = false,
+        initialiser = true,
+        streamOp = { (s, v) => List(s"$s << '{}';") },
+        include = List("optional")
+      )
+    }
 
     // inline def forAll[T <: Tuple](p: CppType => Boolean): Boolean =
     //   inline erasedValue[T] match

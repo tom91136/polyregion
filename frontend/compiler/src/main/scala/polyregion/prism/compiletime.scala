@@ -137,7 +137,7 @@ object compiletime {
       p.Type.Struct(mirrorToSourceTable.getOrElse(sym, sym), tpeVars, args, parents) match {
         case p.Type.Struct(Symbols.ArrayMirror, _, x :: Nil, _) =>
           // XXX restore @scala.Array back to the proper array type if needed
-          p.Type.Ptr(x, p.Type.Space.Global)
+          p.Type.Ptr(x, None, p.Type.Space.Global)
         case x => x
       }
     case x => x

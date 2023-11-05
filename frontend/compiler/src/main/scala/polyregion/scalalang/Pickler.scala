@@ -33,7 +33,7 @@ object Pickler {
     case p.Type.IntS64             => rt.Type.LONG
     case p.Type.Float32            => rt.Type.FLOAT
     case p.Type.Float64            => rt.Type.DOUBLE
-    case p.Type.Ptr(_, _)          => rt.Type.PTR
+    case p.Type.Ptr(_, _, _)       => rt.Type.PTR
     case p.Type.Struct(_, _, _, _) => rt.Type.PTR
     case p.Type.Unit0              => rt.Type.VOID
     case illegal                   => throw new RuntimeException(s"tpeAsRuntimeTpe: Illegal $illegal")
@@ -273,7 +273,7 @@ object Pickler {
         Varargs(mapping.members.map { m =>
           val memberOffset = Expr(m.offsetInBytes.toInt)
           (rootAfterPrism, m.tpe) match {
-            case ('{ $seq: StdLib.MutableSeq[t] }, p.Type.Ptr(comp, _)) =>
+            case ('{ $seq: StdLib.MutableSeq[t] }, p.Type.Ptr(comp, _, _)) =>
               val ptr = writeArray[t](seq, comp, ptrMap)
               writePrim('buffer, memberOffset, p.Type.IntS64, ptr)
             case (_, p.Type.Struct(name, _, _, _)) =>
@@ -347,7 +347,7 @@ object Pickler {
           mapping.members.map { m =>
             val memberOffset = Expr(m.offsetInBytes.toInt)
             (root, m.tpe) match {
-              case (_, p.Type.Ptr(comp, _)) =>
+              case (_, p.Type.Ptr(comp, _, _)) =>
                 (
                   mapping.write,
                   root.asTerm.tpe.widenTermRefByName match {
@@ -442,7 +442,7 @@ object Pickler {
             val terms = mapping.members.map { m =>
               val memberOffset = Expr(m.offsetInBytes.toInt)
               m.tpe match {
-                case p.Type.Ptr(comp, _) =>
+                case p.Type.Ptr(comp, _, _) =>
                   // readArray[t](seq, comp, ptrMap, objMap, memberOffset, 'buffer, mapping)
                   '{ ??? }.asTerm
                 case p.Type.Struct(name, _, _, _) =>

@@ -66,7 +66,7 @@ using std::string;
             x.parents, [](auto &x) { return repr(x); }, "<:");
         return "@" + repr(x.name) + args + parents;
       },                                                                   //
-      [](const Type::Ptr &x) { return "Ptr[" + repr(x.component) + "]"; }, //
+      [](const Type::Ptr &x) { return "Ptr[" + repr(x.component) + (x.length ? "*" + std::to_string(*x.length) : "") + "]"; }, //
       [](const Type::Var &x) { return "Var[" + x.name + "]"; },                //
       [](const Type::Exec &) { return "Exec[???]"s; }                          //
   );
@@ -197,7 +197,7 @@ using std::string;
                    x.args, [&](auto x) { return repr(x); }, ",") +
                ")" + ": " + repr(x.tpe);
       },
-      [](const Expr::Index &x) { return repr(x.lhs) + "[" + repr(x.idx) + "]"; },
+      [](const Expr::Index &x) { return repr(x.lhs) + "[" + repr(x.idx) + "]:" + repr(x.component); },
       [](const Expr::RefTo &x) {
         string str = "&(" + repr(x.lhs) + ")";
         if (x.idx) str += "[" + repr(*x.idx) + "]";
@@ -397,7 +397,7 @@ string polyast::repr(const polyast::CompileResult &compilation) {
   return os.str();
 }
 
-Type::Ptr dsl::Ptr(const Type::Any &t, const ::TypeSpace::Any &s) { return Tpe::Ptr(t, s); }
+Type::Ptr dsl::Ptr(const Type::Any &t, std::optional<int32_t> l, const ::TypeSpace::Any &s) { return Tpe::Ptr(t, l, s); }
 Type::Struct dsl::Struct(Sym name, std::vector<string> tpeVars, std::vector<Type::Any> args) { return {name, tpeVars, args, {}}; }
 Term::Any dsl::integral(const Type::Any &tpe, unsigned long long int x) {
   auto unsupported = [](auto &&t, auto &&v) -> Term::Any {

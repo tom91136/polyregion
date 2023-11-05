@@ -35,8 +35,13 @@ template <typename F> POLYREGION_EXPORT void __polyregion_offload__(F __stub_pol
 }
 
 template <typename F> POLYREGION_EXPORT std::invoke_result_t<F> __polyregion_offload_f1__(F __polyregion__f) {
+  static bool offload = !std::getenv("POLYSTL_NO_OFFLOAD");
   std::invoke_result_t<F> __polyregion__v{};
-  __polyregion_offload__([&__polyregion__v, &__polyregion__f]() { __polyregion__v = __polyregion__f(); });
+  if (offload) {
+    __polyregion_offload__([&__polyregion__v, &__polyregion__f]() { __polyregion__v = __polyregion__f(); });
+  } else {
+    [&__polyregion__v, &__polyregion__f]() { __polyregion__v = __polyregion__f(); }();
+  }
   return __polyregion__v;
 }
 

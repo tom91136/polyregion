@@ -73,11 +73,11 @@ Term::Any Remapper::integralConstOfType(const Type::Any &tpe, uint64_t value) {
 
       [&](const Type::Bool1 &) -> Term::Any { return Term::Bool1Const(value == 0 ? false : true); }, //
       [&](const Type::Unit0 &) -> Term::Any { return Term::Unit0Const(); },                          //
-      [&](const Type::Nothing &x) -> Term::Any { throw std::logic_error("Bad type " + repr(tpe)); }, //
-      [&](const Type::Struct &x) -> Term::Any { throw std::logic_error("Bad type " + repr(tpe)); },  //
-      [&](const Type::Ptr &x) -> Term::Any { throw std::logic_error("Bad type " + repr(tpe)); },     //
-      [&](const Type::Var &x) -> Term::Any { throw std::logic_error("Bad type " + repr(tpe)); },     //
-      [&](const Type::Exec &x) -> Term::Any { throw std::logic_error("Bad type " + repr(tpe)); }     //
+      [&](const Type::Nothing &x) -> Term::Any { return Term::Poison(x); },                          //
+      [&](const Type::Struct &x) -> Term::Any { return Term::Poison(x); },                           //
+      [&](const Type::Ptr &x) -> Term::Any { return Term::Poison(x); },                              //
+      [&](const Type::Var &x) -> Term::Any { return Term::Poison(x); },                              //
+      [&](const Type::Exec &x) -> Term::Any { return Term::Poison(x); }                              //
   );
 }
 
@@ -114,7 +114,7 @@ static Term::Any defaultValue(const Type::Any &tpe) {
       [&](const Type::Unit0 &) -> Term::Any { return Term::Unit0Const(); },                          //
       [&](const Type::Nothing &x) -> Term::Any { throw std::logic_error("Bad type " + repr(tpe)); }, //
       [&](const Type::Struct &x) -> Term::Any { throw std::logic_error("Bad type " + repr(tpe)); },  //
-      [&](const Type::Ptr &x) -> Term::Any { throw std::logic_error("Bad type " + repr(tpe)); },     //
+      [&](const Type::Ptr &x) -> Term::Any { return Term::Poison(x); },                              //
       [&](const Type::Var &x) -> Term::Any { throw std::logic_error("Bad type " + repr(tpe)); },     //
       [&](const Type::Exec &x) -> Term::Any { throw std::logic_error("Bad type " + repr(tpe)); }     //
   );
@@ -136,7 +136,7 @@ static void defaultInitialiseStruct(Remapper::RemapContext &r, const Type::Struc
 
 Remapper::Remapper(clang::ASTContext &context) : context(context) {}
 
-static Type::Ptr ptrTo(const Type::Any &tpe) { return {tpe, TypeSpace::Global()}; }
+static Type::Ptr ptrTo(const Type::Any &tpe) { return {tpe, {}, TypeSpace::Global()}; }
 static std::string declName(const clang::NamedDecl *decl) {
   return decl->getDeclName().isEmpty() //
              ? "_unnamed_" + polyregion::hex(decl->getID())
@@ -176,7 +176,8 @@ static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const
     //   int lhs = rhs; // lhs = rhs[0];
     return Expr::Index(r.newVar(expr), Remapper::integralConstOfType(Type::IntS64(), 0), targetTpe);
   } else {
-    throw std::logic_error("Cannot confirm rhs " + repr(rhsTpe) + " with target " + repr(targetTpe));
+    r.push(Stmt::Comment("Cannot conform rhs " + repr(rhsTpe) + " with target " + repr(targetTpe)));
+    return Expr::Alias(Term::Poison(rhsTpe));
   }
 };
 
@@ -230,10 +231,16 @@ std::pair<std::string, Function> Remapper::handleCall(const clang::FunctionDecl 
       receiver = Arg(Named("this", ptrTo(handleType(context.getRecordType(record)))), {});
       parent = handleRecord(record, r);
       for (auto init : ctor->inits()) { // handle CXXCtorInitializer here
-        auto tpe = handleType(init->getMember()->getType());
-        auto member = Term::Select({receiver->named}, Named(init->getMember()->getNameAsString(), tpe));
-        auto rhs = conform(r, handleExpr(init->getInit(), r), tpe);
-        body.push_back(Stmt::Mut(member, rhs, true));
+        if (init->isAnyMemberInitializer()) {
+          auto tpe = handleType(init->getAnyMember()->getType());
+          auto member = Term::Select({receiver->named}, Named(init->getMember()->getNameAsString(), tpe));
+          auto rhs = conform(r, handleExpr(init->getInit(), r), tpe);
+          body.push_back(Stmt::Mut(member, rhs, true));
+        } else if (init->isBaseInitializer()) {
+          body.push_back(Stmt::Comment("Unimplemented initialiser:" + pretty_string(init->getInit(), context)));
+        } else {
+          throw std::logic_error("Unknown initializer type!");
+        }
       }
     } else if (auto dtor = llvm::dyn_cast<clang::CXXDestructorDecl>(decl)) {
       auto record = dtor->getParent();
@@ -253,7 +260,8 @@ std::pair<std::string, Function> Remapper::handleCall(const clang::FunctionDecl 
       if (holds<Type::Unit0>(rtnType)) {
         body.emplace_back(Stmt::Return(Expr::Alias(Term::Unit0Const())));
       } else {
-        throw std::logic_error("Function with empty body but non-unit return type!");
+        body.emplace_back(Stmt::Comment("Function with empty body but non-unit return type!"));
+        //        throw std::logic_error("Function with empty body but non-unit return type!");
       }
     }
     auto fn = r.functions.emplace(name, Function(Sym({name}), {}, receiver, args, {}, {}, rtnType, body)).first->second;
@@ -274,7 +282,7 @@ std::string Remapper::handleRecord(const clang::RecordDecl *decl, RemapContext &
         Type::Any tpe;
         switch (capture.getCaptureKind()) {
           case clang::LCK_ByCopy: tpe = handleType(var->getType()); break;
-          case clang::LCK_ByRef: tpe = Type::Ptr(handleType(var->getType()), TypeSpace::Global()); break;
+          case clang::LCK_ByRef: tpe = Type::Ptr(handleType(var->getType()), {}, TypeSpace::Global()); break;
           case clang::LCK_This: throw std::logic_error("Impl");
           case clang::LCK_StarThis: throw std::logic_error("Impl");
           case clang::LCK_VLAType: throw std::logic_error("Impl");
@@ -330,7 +338,7 @@ Type::Any Remapper::handleType(clang::QualType tpe) const {
     // T&              => Struct[T]
     // Prim*           => Ptr[Prim]
     // Prim&           => Ptr[Prim]
-    return Type::Ptr(tpe, TypeSpace::Global());
+    return Type::Ptr(tpe, {}, TypeSpace::Global());
   };
 
   auto desugared = tpe.getDesugaredType(context);
@@ -357,7 +365,11 @@ Type::Any Remapper::handleType(clang::QualType tpe) const {
         }
       },
       [&](const clang::PointerType *tpe) { return refTpe(handleType(tpe->getPointeeType())); },       // T*
-      [&](const clang::ConstantArrayType *tpe) { return refTpe(handleType(tpe->getElementType())); }, // T[$N]
+      [&](const clang::ConstantArrayType *tpe) {                                                // T[$N]
+        return Type::Ptr(handleType(tpe->getElementType()),                                     //
+                         polyregion::int_cast<int32_t>(tpe->getSize().getLimitedValue()),       //
+                         TypeSpace::Global());
+      },
       [&](const clang::ReferenceType *tpe) { // includes LValueReferenceType and RValueReferenceType
         // Prim&   => Ptr[Prim]
         // Prim*&  => Ptr[Prim]
@@ -514,7 +526,13 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
         }
         return Expr::Alias(Term::IntS64Const(0));
       },
-
+      [&](const clang::AbstractConditionalOperator *expr) -> Expr::Any { // covers a?b:c and a?:c
+        auto lhs = Term::Select({}, r.newVar(handleType(expr->getType())));
+        r.push(Stmt::Cond(handleExpr(expr->getCond(), r), //
+                          r.scoped([&](auto &r_) { r_.push(Stmt::Mut(lhs, handleExpr(expr->getTrueExpr(), r_), true)); }),
+                          r.scoped([&](auto &r_) { r_.push(Stmt::Mut(lhs, handleExpr(expr->getFalseExpr(), r_), true)); })));
+        return Expr::Alias(lhs);
+      },
       [&](const clang::DeclRefExpr *expr) -> Expr::Any {
         auto decl = expr->getDecl();
         auto actual = handleType(expr->getType());
@@ -547,9 +565,23 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
         //        }
       },
       [&](const clang::ArraySubscriptExpr *expr) -> Expr::Any {
-        auto arr = r.newVar(handleExpr(expr->getBase(), r));
-        auto idx = r.newVar(handleExpr(expr->getIdx(), r));
-        return Expr::Index(arr, idx, handleType(expr->getType()));
+        auto idxExpr = r.newVar(handleExpr(expr->getIdx(), r));
+        auto baseExpr = handleExpr(expr->getBase(), r);
+        auto exprTpe = handleType(expr->getType());
+        if (auto arrTpe = get_opt<Type::Ptr>(tpe(baseExpr)); arrTpe) {
+          // A subscript always returns lvalue which is then cast to rvalue later if required.
+          // As such, we use a RefTo instead of Index.
+          if (auto ref = get_opt<Type::Ptr>(arrTpe->component); ref && ref->component == exprTpe) {
+            // Case 1: Ptr[Ptr[C]] => C
+            return Expr::RefTo(deref(r.newVar(baseExpr)), idxExpr, exprTpe);
+          } else if (arrTpe->component == exprTpe) {
+            // Case 2: Ptr[C]      => C
+            return Expr::RefTo(r.newVar(baseExpr), idxExpr, exprTpe);
+          } else {
+            throw std::logic_error("Cannot index nested ptr expressions with mismatching expected components");
+          }
+        } else
+          throw std::logic_error("Cannot index non-ptr expressions");
       },
       [&](const clang::UnaryOperator *expr) -> Expr::Any {
         // Here we're just dealing with the builtin operators, overloaded operators will be a clang::CXXOperatorCallExpr.
@@ -684,7 +716,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
 
         if (fn.args.size() != expr->getNumArgs() - 1)
           throw std::logic_error("Arg count mismatch, expected " + std::to_string(fn.args.size()) + " but was " +
-                                 std::to_string(expr->getNumArgs()));
+                                 std::to_string(expr->getNumArgs() - 1));
         std::vector<Term::Any> args;
         auto receiver = r.newVar(handleExpr(expr->getArg(0), r));
         for (size_t i = 1; i < expr->getNumArgs(); ++i) {
@@ -805,7 +837,8 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
               throw std::logic_error(std::string("unhandled var rhs: "));
             }
           } else {
-            throw std::logic_error(std::string("unhandled decl: ") + stmt->getStmtClassName());
+            r.push(Stmt::Comment("Unhandled Stmt Decl:" + pretty_string(stmt, context)));
+            r.push(Stmt::Return(Expr::Alias(Term::Poison(Type::Unit0()))));
           }
         }
         return true;
