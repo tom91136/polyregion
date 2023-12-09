@@ -27,7 +27,10 @@ template <typename T> static std::string llvm_tostring(const T *t) {
   return rso.str();
 }
 
-ValPtr LLVMBackend::load(llvm::IRBuilder<> &B, ValPtr rhs, llvm::Type *ty) { return B.CreateLoad(ty, rhs); }
+ValPtr LLVMBackend::load(llvm::IRBuilder<> &B, ValPtr rhs, llvm::Type *ty) {
+  //  assert(!ty->isArrayTy());
+  return B.CreateLoad(ty, rhs);
+}
 ValPtr LLVMBackend::sizeOf(llvm::IRBuilder<> &B, llvm::LLVMContext &C, llvm::Type *ptrTpe) {
   // http://nondot.org/sabre/LLVMNotes/SizeOf-OffsetOf-VariableSizedStructs.txt
   // we want
@@ -225,10 +228,20 @@ ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
     for (auto &path : tail) {
       auto [structTy, table] = structTypeOf(tpe);
       if (auto idx = get_opt(table, path.symbol); idx) {
-        root = B.CreateInBoundsGEP(
-            structTy, holds<Type::Ptr>(tpe) ? load(B, root, B.getPtrTy(AllocaAS)) : root,
-            {llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), *idx)},
-            qualified(select) + "_select_ptr");
+
+        if (auto p = get_opt<Type::Ptr>(tpe); p && !p->length) {
+          root = B.CreateInBoundsGEP(
+              structTy, load(B, root, B.getPtrTy(AllocaAS)),
+              {//
+               llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), *idx)},
+              qualified(select) + "_select_ptr");
+        } else {
+          root = B.CreateInBoundsGEP(
+              structTy, root,
+              {//
+               llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), *idx)},
+              qualified(select) + "_select_ptr");
+        }
         tpe = path.tpe;
       } else {
         auto pool = mk_string2<std::string, size_t>(
@@ -249,7 +262,9 @@ ValPtr LLVMBackend::AstTransformer::mkTermVal(const Term::Any &ref) {
       *ref, //
       [&](const Term::Select &x) -> ValPtr {
         if (holds<Type::Unit0>(x.tpe)) return mkTermVal(Term::Unit0Const());
-        return load(B, mkSelectPtr(x), mkTpe(x.tpe));
+        if (auto ptr = get_opt<Type::Ptr>(x.tpe); ptr && ptr->length) return mkSelectPtr(x);
+        else
+          return load(B, mkSelectPtr(x), mkTpe(x.tpe));
       },
       [&](const Term::Poison &x) -> ValPtr {
         if (auto tpe = mkTpe(x.tpe); llvm::isa<llvm::PointerType>(tpe)) {
@@ -517,14 +532,30 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
                                   mkTermVal(x.idx), key + "_ptr"); //
               return val;
             }
-            auto ty = mkTpe(arrTpe->component);
-            auto ptr = B.CreateInBoundsGEP(ty,              //
-                                           mkTermVal(*lhs),                              //
-                                           mkTermVal(x.idx), key + "_idx_ptr");
-            if (holds<Type::Bool1>(arrTpe->component)) { // Narrow from i8 to i1
-              return B.CreateICmpNE(load(B, ptr, ty), llvm::ConstantInt::get(llvm::Type::getInt1Ty(C), 0, true));
+            if (arrTpe->length) {
+              auto ty = mkTpe(*arrTpe);
+              auto ptr = B.CreateInBoundsGEP(ty,              //
+                                             mkTermVal(*lhs), //
+                                             {llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), mkTermVal(x.idx)}, key + "_idx_ptr");
+              return load(B, ptr, mkTpe(arrTpe->component));
             } else {
-              return load(B, ptr, ty);
+              auto ty = mkTpe(arrTpe->component);
+              auto ptr = B.CreateInBoundsGEP(ty,              //
+                                             mkTermVal(*lhs), //
+                                             mkTermVal(x.idx), key + "_idx_ptr");
+              if (holds<Type::Bool1>(arrTpe->component)) { // Narrow from i8 to i1
+                return B.CreateICmpNE(load(B, ptr, ty), llvm::ConstantInt::get(llvm::Type::getInt1Ty(C), 0, true));
+              } else {
+
+                //                if(auto sizedArr = get_opt<Type::Ptr>(arrTpe->component); sizedArr && sizedArr->length){
+                //                  return ptr;
+                //                }else{
+                //                  return load(B, ptr, ty);
+                //                }
+
+                //                return arrTpe->component->length ? ptr :load(B, ptr, ty);
+                return load(B, ptr, ty);
+              }
             }
           } else {
             throw std::logic_error("Semantic error: array index not called on array type (" + to_string(lhs->tpe) + ")(" + repr(x) + ")");
@@ -537,10 +568,18 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
         if (auto lhs = get_opt<Term::Select>(x.lhs); lhs) {
           if (auto arrTpe = get_opt<Type::Ptr>(lhs->tpe); arrTpe) { // taking reference of an index in an array
             auto offset = x.idx ? mkTermVal(*x.idx) : llvm::ConstantInt::get(llvm::Type::getInt64Ty(C), 0, true);
-            auto ty = holds<Type::Unit0>(arrTpe->component) ? llvm::Type::getInt8Ty(C) : mkTpe(arrTpe->component);
-            return B.CreateInBoundsGEP(ty,              //
-                                       mkTermVal(*lhs),                              //
-                                       offset, key + "_ref_to_ptr");
+            if (arrTpe->length) {
+              auto ty = mkTpe(*arrTpe);
+              return B.CreateInBoundsGEP(ty,              //
+                                         mkTermVal(*lhs), //
+                                         {llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), offset}, key + "_ref_to_ptr");
+
+            } else {
+              auto ty = holds<Type::Unit0>(arrTpe->component) ? llvm::Type::getInt8Ty(C) : mkTpe(arrTpe->component);
+              return B.CreateInBoundsGEP(ty,              //
+                                         mkTermVal(*lhs), //
+                                         offset, key + "_ref_to_ptr");
+            }
           } else { // taking reference of a var
             if (x.idx) throw std::logic_error("Semantic error: Cannot take reference of scalar with index in " + to_string(x));
 
@@ -642,6 +681,12 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
         if (auto lhs = get_opt<Term::Select>(x.lhs); lhs) {
           if (auto arrTpe = get_opt<Type::Ptr>(lhs->tpe); arrTpe) {
             auto rhs = x.value;
+
+            bool componentIsSizedArray = false;
+            if (auto p = get_opt<Type::Ptr>(arrTpe->component); p && p->length) {
+              componentIsSizedArray = true;
+            }
+
             if (arrTpe->component != tpe(rhs)) {
               throw std::logic_error("Semantic error: array component type (" + to_string(arrTpe->component) + ") and rhs expr (" +
                                      to_string(tpe(rhs)) + ") mismatch (" + repr(x) + ")");
@@ -649,11 +694,19 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
               auto dest = mkTermVal(*lhs);
               if (holds<Type::Bool1>(tpe(rhs)) || holds<Type::Unit0>(tpe(rhs))) { // Extend from i1 to i8
                 auto ty = llvm::Type::getInt8Ty(C);
-                auto ptr = B.CreateInBoundsGEP(ty, dest, mkTermVal(x.idx), qualified(*lhs) + "_update_ptr");
+                auto ptr = B.CreateInBoundsGEP( //
+                    ty, dest,
+                    componentIsSizedArray ? llvm::ArrayRef<ValPtr>{llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), mkTermVal(x.idx)}
+                                          : llvm::ArrayRef<ValPtr>{mkTermVal(x.idx)},
+                    qualified(*lhs) + "_update_ptr");
                 B.CreateStore(B.CreateIntCast(mkTermVal(rhs), ty, true), ptr);
               } else {
-                auto ptr = B.CreateInBoundsGEP(mkTpe(tpe(rhs)), dest,                            //
-                                               mkTermVal(x.idx), qualified(*lhs) + "_update_ptr" //
+
+                auto ptr = B.CreateInBoundsGEP( //
+                    mkTpe(tpe(rhs)), dest,      //
+                    componentIsSizedArray ? llvm::ArrayRef<ValPtr>{llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), mkTermVal(x.idx)}
+                                          : llvm::ArrayRef<ValPtr>{mkTermVal(x.idx)},
+                    qualified(*lhs) + "_update_ptr" //
                 );                                                      //
                 B.CreateStore(mkTermVal(rhs), ptr);
               }
@@ -742,6 +795,8 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
           if (holds<Type::Bool1>(rtnTpe)) {
             // Extend from i1 to i8
             B.CreateRet(B.CreateIntCast(expr, llvm::Type::getInt8Ty(C), true));
+          } else if (auto ptr = get_opt<Type::Ptr>(rtnTpe); ptr && ptr->length) {
+            B.CreateRet(load(B, expr, mkTpe(rtnTpe)));
           } else {
             B.CreateRet(expr);
           }

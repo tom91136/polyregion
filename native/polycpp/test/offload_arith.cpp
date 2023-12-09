@@ -11,12 +11,12 @@ int main (){
 
   struct foobar{int a;};
   foobar value;
-//  int foo[12];
+  int foo[12];
   int a = __polyregion_offload_f1__([&]() {
-//    foo[1] = 42;
+    foo[1] = 42;
 
-std::vector<int> a(2);
-a.emplace_back(2);
+//std::vector<int> a(2);
+//a.emplace_back(2);
 //    std::opt<int, 3> foo{};
 //    foobar that;
 //    that.a = 123;

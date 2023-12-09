@@ -87,7 +87,7 @@ template <typename P> static void assertCompile(const P &p) {
     REQUIRE_THAT(e.data, !ContainsSubstring(" undef"));
     REQUIRE_THAT(e.data, !ContainsSubstring("unreachable"));
   }
-//  FAIL("debug");
+  FAIL("debug");
   INFO(c);
 }
 
@@ -395,6 +395,77 @@ TEST_CASE("alias prim", "[compiler]") {
   }
 }
 
+TEST_CASE("index sized prim array", "[compiler]") {
+  polyregion::compiler::initialise();
+  auto tpe = SInt;//GENERATE(from_range(PrimitiveTypes));
+
+  auto idx = 3;//GENERATE(0, 1, 3, 7, 10);
+//  DYNAMIC_SECTION("xs[" << idx << "]:" << tpe << " (local)") {
+//    CAPTURE(tpe, idx);
+//    assertCompile(program(function("foo", {}, tpe)({
+//        let("xs") = Alloc(tpe, 42_(SInt)),
+//        "xs"_(Ptr(tpe))[integral(SInt, idx)] = generateConstValue(tpe), //
+//        let("x") = "xs"_(Ptr(tpe))[integral(SInt, idx)], //
+//        ret("x"_(tpe))                                     //
+//    })));
+//  }
+  DYNAMIC_SECTION("xs[" << idx << "]:" << tpe << " (args)") {
+    CAPTURE(tpe, idx);
+    assertCompile(program(function("foo", {"xs"_(Ptr(tpe, 10))()}, tpe)({
+        let("x") = "xs"_(Ptr(tpe, 10))[integral(SInt, idx)], //
+        ret("x"_(tpe))                                     //
+    })));
+  }
+}
+
+TEST_CASE("mut sized prim array", "[compiler]") {
+  polyregion::compiler::initialise();
+  auto tpe = SInt;//GENERATE(from_range(PrimitiveTypes));
+
+  auto idx = 3;//GENERATE(0, 1, 3, 7, 10);
+  //  DYNAMIC_SECTION("xs[" << idx << "]:" << tpe << " (local)") {
+  //    CAPTURE(tpe, idx);
+  //    assertCompile(program(function("foo", {}, tpe)({
+  //        let("xs") = Alloc(tpe, 42_(SInt)),
+  //        "xs"_(Ptr(tpe))[integral(SInt, idx)] = generateConstValue(tpe), //
+  //        let("x") = "xs"_(Ptr(tpe))[integral(SInt, idx)], //
+  //        ret("x"_(tpe))                                     //
+  //    })));
+  //  }
+  DYNAMIC_SECTION("xs[" << idx << "]:" << tpe << " (args)") {
+    CAPTURE(tpe, idx);
+    assertCompile(program(function("foo", {"xs"_(Ptr(tpe, 10))()}, Ptr(tpe, 10))({
+         "xs"_(Ptr(tpe, 10))[integral(SInt, idx)] = integral(SInt, 42), //
+        ret("xs"_(Ptr(tpe, 10)))                                     //
+    })));
+  }
+}
+
+
+TEST_CASE("mut ptr to sized prim array", "[compiler]") {
+  polyregion::compiler::initialise();
+  auto tpe = SInt;//GENERATE(from_range(PrimitiveTypes));
+
+  auto idx = 3;//GENERATE(0, 1, 3, 7, 10);
+  //  DYNAMIC_SECTION("xs[" << idx << "]:" << tpe << " (local)") {
+  //    CAPTURE(tpe, idx);
+  //    assertCompile(program(function("foo", {}, tpe)({
+  //        let("xs") = Alloc(tpe, 42_(SInt)),
+  //        "xs"_(Ptr(tpe))[integral(SInt, idx)] = generateConstValue(tpe), //
+  //        let("x") = "xs"_(Ptr(tpe))[integral(SInt, idx)], //
+  //        ret("x"_(tpe))                                     //
+  //    })));
+  //  }
+  DYNAMIC_SECTION("xs[" << idx << "]:" << tpe << " (args)") {
+    CAPTURE(tpe, idx);
+    assertCompile(program(function("foo", {"xs"_(Ptr(Ptr(tpe, 10)))()}, tpe)({
+        let("deref") = "xs"_(Ptr(Ptr(tpe, 10)))[integral(SInt, 2)],
+        "deref"_(Ptr(tpe, 10))[integral(SInt, idx)] = integral(SInt, 42), //
+        ret("deref"_(Ptr(tpe, 10))[integral(SInt, idx)] )                                     //
+    })));
+  }
+}
+
 TEST_CASE("index prim array", "[compiler]") {
   polyregion::compiler::initialise();
   auto tpe = GENERATE(from_range(PrimitiveTypes));
@@ -593,6 +664,8 @@ TEST_CASE("alias array", "[compiler]") {
   Program p(fn, {}, {});
   assertCompile(p);
 }
+
+
 
 TEST_CASE("mut struct", "[compiler]") {
   polyregion::compiler::initialise();

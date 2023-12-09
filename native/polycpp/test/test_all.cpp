@@ -196,6 +196,7 @@ void testAll(bool passthrough){
               store.push_back(fmt::arg("output", binaryName));
               for (const auto &[k, v] : variables)
                 store.push_back(fmt::arg(k.c_str(), v));
+              CAPTURE(test);
               run(case_, binaryName, [&](std::string &command) { return fmt::vformat(command, store); });
             }
           }
