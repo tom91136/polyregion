@@ -1,14 +1,27 @@
 // #CASE: =array
-// #MATRIX: size=1,10,100
+// #MATRIX: size=1,2,10,100
 // #RUN: polycpp -fstdpar -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE== -o {output} {input}
 // #RUN: POLY_PLATFORM=host {output}
 //   #EXPECT: -1 -1
 
 // #CASE: &array
-// #MATRIX: size=1,10,100
+// #MATRIX: size=1,2,10,100
+// #RUN: polycpp -fstdpar -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE=& -o {output} {input}
+// #RUN: POLY_PLATFORM=host {output}
+//   #EXPECT: -1 -1
+
+// #CASE: =array*=42
+// #MATRIX: size=1,2,10,100
+// #RUN: polycpp -fstdpar -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE== -DCHECK_MUT -o {output} {input}
+// #RUN: POLY_PLATFORM=host {output}
+//   #EXPECT: -42 -1
+
+// #CASE: &array*=42
+// #MATRIX: size=1,2,10,100
 // #RUN: polycpp -fstdpar -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE=& -DCHECK_MUT -o {output} {input}
 // #RUN: POLY_PLATFORM=host {output}
-//   #EXPECT: 42 42
+//   #EXPECT: -42 -42
+
 
 #include <cstddef>
 #include <cstdio>
@@ -28,14 +41,17 @@ int main() {
 
   int xs[CHECK_SIZE_DEF] = {};
   std::memset(xs, -1, sizeof(xs));
-  int result = __polyregion_offload_f1__([CHECK_CAPTURE]() {
+  int result = __polyregion_offload_f1__([CHECK_CAPTURE]() mutable {
 #ifdef CHECK_MUT
-    xs[CHECK_SIZE_DEF - 1] = 42;
+    xs[CHECK_SIZE_DEF - 1] *= 42;
 #endif
 //    int aaa = xs[4];
 //    return 42;
     return xs[CHECK_SIZE_DEF - 1];
   });
   printf("%d %d", result, xs[CHECK_SIZE_DEF - 1]);
+
+
+
   return 0;
 }

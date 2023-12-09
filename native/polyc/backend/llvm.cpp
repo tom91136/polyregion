@@ -568,11 +568,12 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
         if (auto lhs = get_opt<Term::Select>(x.lhs); lhs) {
           if (auto arrTpe = get_opt<Type::Ptr>(lhs->tpe); arrTpe) { // taking reference of an index in an array
             auto offset = x.idx ? mkTermVal(*x.idx) : llvm::ConstantInt::get(llvm::Type::getInt64Ty(C), 0, true);
-            if (arrTpe->length) {
-              auto ty = mkTpe(*arrTpe);
+            if (auto nestedArrTpe = get_opt<Type::Ptr>(arrTpe->component); nestedArrTpe && nestedArrTpe->length) {
+              auto ty = holds<Type::Unit0>(arrTpe->component) ? llvm::Type::getInt8Ty(C) : mkTpe(arrTpe->component);
               return B.CreateInBoundsGEP(ty,              //
                                          mkTermVal(*lhs), //
-                                         {llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), offset}, key + "_ref_to_ptr");
+                                         {llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), offset},
+                                         key + "_ref_to_" + llvm_tostring(ty));
 
             } else {
               auto ty = holds<Type::Unit0>(arrTpe->component) ? llvm::Type::getInt8Ty(C) : mkTpe(arrTpe->component);

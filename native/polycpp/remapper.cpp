@@ -573,7 +573,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
           // As such, we use a RefTo instead of Index.
           if (auto ref = get_opt<Type::Ptr>(arrTpe->component); ref && ref->component == exprTpe) {
             // Case 1: Ptr[Ptr[C]] => C
-            return Expr::RefTo(deref(r.newVar(baseExpr)), idxExpr, exprTpe);
+            return Expr::RefTo(ref->length ? r.newVar(baseExpr) : deref(r.newVar(baseExpr)), idxExpr, exprTpe);
           } else if (arrTpe->component == exprTpe) {
             // Case 2: Ptr[C]      => C
             return Expr::RefTo(r.newVar(baseExpr), idxExpr, exprTpe);

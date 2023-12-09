@@ -147,7 +147,7 @@ void testAll(bool passthrough){
         consumeError(stdoutFile->discard());
         consumeError(stderrFile->discard());
 
-        WARN("exe:  " << args[0] << " (wd=" << BinaryDir << ")");
+        WARN("exe:  " << BinaryDir << "/"  << args[0]);
         WARN("args: " << polyregion::mk_string<llvm::StringRef>(args_, &llvm::StringRef::str, " "));
         WARN("envs: " << polyregion::mk_string<llvm::StringRef>(envs_, &llvm::StringRef::str, " "));
         WARN("stderr:\n" << stderr_ << "[EOF]");
