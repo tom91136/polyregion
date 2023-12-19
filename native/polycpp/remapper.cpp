@@ -198,13 +198,13 @@ std::string Remapper::typeName(const Type::Any &tpe) const {
       [&](const Type::IntS32 &) -> std::string { return "int32_t"; }, //
       [&](const Type::IntS64 &) -> std::string { return "int64_t"; }, //
 
-      [&](const Type::Bool1 &) -> std::string { return "bool"; },                       //
-      [&](const Type::Unit0 &) -> std::string { return "void"; },                       //
-      [&](const Type::Nothing &) -> std::string { return "/*nothing*/"; },              //
-      [&](const Type::Struct &x) -> std::string { return qualified(x.name); },          //
+      [&](const Type::Bool1 &) -> std::string { return "bool"; },                     //
+      [&](const Type::Unit0 &) -> std::string { return "void"; },                     //
+      [&](const Type::Nothing &) -> std::string { return "/*nothing*/"; },            //
+      [&](const Type::Struct &x) -> std::string { return qualified(x.name); },        //
       [&](const Type::Ptr &x) -> std::string { return typeName(x.component) + "*"; }, //
-      [&](const Type::Var &) -> std::string { return "/*type var*/"; },                 //
-      [&](const Type::Exec &) -> std::string { return "/*exec*/"; }                     //
+      [&](const Type::Var &) -> std::string { return "/*type var*/"; },               //
+      [&](const Type::Exec &) -> std::string { return "/*exec*/"; }                   //
   );
 }
 std::pair<std::string, Function> Remapper::handleCall(const clang::FunctionDecl *decl, RemapContext &r) {
@@ -222,7 +222,6 @@ std::pair<std::string, Function> Remapper::handleCall(const clang::FunctionDecl 
       args.push_back(Arg(Named(declName(param), handleType(param->getType(), r)), {}));
     }
 
-    std::vector<Stmt::Any> body;
     std::optional<Arg> receiver{};
     std::optional<std::string> parent{};
 
@@ -230,18 +229,6 @@ std::pair<std::string, Function> Remapper::handleCall(const clang::FunctionDecl 
       auto record = ctor->getParent();
       receiver = Arg(Named("this", ptrTo(handleType(context.getRecordType(record), r))), {});
       parent = handleRecord(record, r);
-      for (auto init : ctor->inits()) { // handle CXXCtorInitializer here
-        if (init->isAnyMemberInitializer()) {
-          auto tpe = handleType(init->getAnyMember()->getType(), r);
-          auto member = Term::Select({receiver->named}, Named(init->getMember()->getNameAsString(), tpe));
-          auto rhs = conform(r, handleExpr(init->getInit(), r), tpe);
-          body.push_back(Stmt::Mut(member, rhs, true));
-        } else if (init->isBaseInitializer()) {
-          body.push_back(Stmt::Comment("Unimplemented initialiser:" + pretty_string(init->getInit(), context)));
-        } else {
-          throw std::logic_error("Unknown initializer type!");
-        }
-      }
     } else if (auto dtor = llvm::dyn_cast<clang::CXXDestructorDecl>(decl)) {
       auto record = dtor->getParent();
       receiver = Arg(Named("this", ptrTo(handleType(context.getRecordType(record), r))), {});
@@ -254,7 +241,31 @@ std::pair<std::string, Function> Remapper::handleCall(const clang::FunctionDecl 
 
     auto rtnType = handleType(decl->getReturnType(), r);
 
-    auto fnBody = r.scoped([&](auto &r) { handleStmt(decl->getBody(), r); }, rtnType, parent, true);
+    auto fnBody = r.scoped(
+        [&](auto &r) {
+          if (auto ctor = llvm::dyn_cast<clang::CXXConstructorDecl>(decl)) {
+            r.push(Stmt::Comment("Ctor: " + declName(decl)));
+            for (auto init : ctor->inits()) { // handle CXXCtorInitializer here
+              if (init->isAnyMemberInitializer()) {
+                auto tpe = handleType(init->getAnyMember()->getType(), r);
+                auto member = Term::Select({receiver->named}, Named(init->getMember()->getNameAsString(), tpe));
+                auto rhs = conform(r, handleExpr(init->getInit(), r), tpe);
+                r.push(Stmt::Mut(member, rhs, true));
+              } else if (init->isBaseInitializer()) {
+                r.push(Stmt::Comment("Unimplemented initialiser:" + pretty_string(init->getInit(), context)));
+              } else {
+                throw std::logic_error("Unknown initializer type!");
+              }
+            }
+            handleStmt(decl->getBody(), r);
+            r.push(Stmt::Return(Expr::Alias(Term::Unit0Const())));
+          } else {
+            handleStmt(decl->getBody(), r);
+          }
+        },
+        rtnType, parent, true);
+
+    std::vector<Stmt::Any> body;
     body.insert(body.end(), fnBody.begin(), fnBody.end());
     if (fnBody.empty()) {
       if (holds<Type::Unit0>(rtnType)) {
@@ -388,9 +399,9 @@ Type::Any Remapper::handleType(clang::QualType tpe, RemapContext &r) const {
         }
       },
       [&](const clang::PointerType *tpe) { return refTpe(handleType(tpe->getPointeeType(), r)); }, // T*
-      [&](const clang::ConstantArrayType *tpe) {                                                // T[$N]
+      [&](const clang::ConstantArrayType *tpe) {                                                   // T[$N]
         return Type::Ptr(handleType(tpe->getElementType(), r),                                     //
-                         polyregion::int_cast<int32_t>(tpe->getSize().getLimitedValue()),       //
+                         polyregion::int_cast<int32_t>(tpe->getSize().getLimitedValue()),          //
                          TypeSpace::Global());
       },
       [&](const clang::ReferenceType *tpe) { // includes LValueReferenceType and RValueReferenceType
@@ -399,7 +410,7 @@ Type::Any Remapper::handleType(clang::QualType tpe, RemapContext &r) const {
         // T&      => Struct[T]
         // T*&     => Struct[T]
         return refTpe(handleType(tpe->getPointeeType(), r));
-      },                                                                                                            // T
+      }, // T
       [&](const clang::RecordType *tpe) -> Type::Any {
         auto name = handleRecord(tpe->getDecl(), r);
         return Type::Struct(Sym({name}), {}, {}, {});
@@ -656,7 +667,6 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
 
         // Assignment of a value X to a lvalue iff the lvalue is an array type =>  Update(lhs, 0, X)
 
-
         auto opAssign = [&](const Intr::Any &op) {
           if (holds<Type::Ptr>(tpe(lhs))) {
             r.push(Stmt::Update(lhs, integralConstOfType(Type::IntS64(), 0), r.newVar(Expr::IntrOp(op))));
@@ -701,7 +711,6 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
           case clang::BO_LOr: return Expr::IntrOp(Intr::LogicOr(deref(lhs), deref(rhs)));
           case clang::BO_Assign:
             // handle *x = y;
-
 
             return assign(lhs, rhs); // Builtin direct assignment
           case clang::BO_MulAssign:; return opAssign(Intr::Mul(deref(lhs), deref(rhs), tpe_));
@@ -797,7 +806,6 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
         }
       },
 
-
       [&](const clang::Expr *) { return failExpr(); });
   if (result) {
 
@@ -817,6 +825,14 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
 void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
   if (!root) return;
   llvm::outs() << "[Stmt] >>> \n";
+
+  r.push(Stmt::Comment(pretty_string(root, context)));
+
+  std::string s;
+  llvm::raw_string_ostream os(s);
+  root->dump(os, context);
+  r.push(Stmt::Comment(s));
+
   root->dumpPretty(context);
   llvm::outs() << "<<< \n";
   visitDyn<bool>(
