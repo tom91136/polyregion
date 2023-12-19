@@ -74,15 +74,14 @@ struct Remapper {
 
 public:
   explicit Remapper(clang::ASTContext &context);
-  static Term::Any integralConstOfType(const Type::Any &tpe, uint64_t value);
-  static Term::Any floatConstOfType(const Type::Any &tpe, double value);
-  [[nodiscard]] Type::Any handleType(clang::QualType tpe ) const;
+  [[nodiscard]] static Term::Any integralConstOfType(const Type::Any &tpe, uint64_t value);
+  [[nodiscard]] static Term::Any floatConstOfType(const Type::Any &tpe, double value);
+
   [[nodiscard]] std::string typeName(const Type::Any &tpe) const;
-  [[nodiscard]] std::string nameOfRecord(const clang::RecordType *tpe) const;
-
-  std::pair<std::string, Function> handleCall(const clang::FunctionDecl *decl, RemapContext &r);
-  std::string handleRecord(const  clang::RecordDecl *decl, RemapContext &r);
-
+  [[nodiscard]] std::string nameOfRecord(const clang::RecordType *tpe, RemapContext &r) const;
+  [[nodiscard]] std::pair<std::string, Function> handleCall(const clang::FunctionDecl *decl, RemapContext &r);
+  [[nodiscard]] Type::Any handleType(clang::QualType tpe, RemapContext &r) const;
+  [[nodiscard]] std::string handleRecord(const clang::RecordDecl *decl, RemapContext &r) const;
   [[nodiscard]] Expr::Any handleExpr(const clang::Expr *expr, RemapContext &r);
   void handleStmt(const clang::Stmt *root, RemapContext &expr);
 };

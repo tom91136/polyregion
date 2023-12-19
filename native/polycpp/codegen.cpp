@@ -72,7 +72,7 @@ std::string polyregion::polystl::generate(clang::ASTContext &C, const clang::CXX
   auto parentName = remapper.handleRecord(parent, r);
   StructDef &parentDef = r.structs.find(parentName)->second;
 
-  auto rtnTpe = remapper.handleType(returnTpe);
+  auto rtnTpe = remapper.handleType(returnTpe, r);
 
   auto stmts = r.scoped([&](auto &r) { remapper.handleStmt(body, r); }, rtnTpe, parentName);
   stmts.push_back(Stmt::Return(Expr::Alias(Term::Unit0Const())));

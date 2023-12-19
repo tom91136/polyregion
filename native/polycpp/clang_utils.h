@@ -18,6 +18,10 @@ template <typename Node> std::string to_string(Node *node) {
   return s;
 }
 
+std::string dump_to_string(const clang::Type &tpe, const clang::ASTContext &c);
+
+std::string dump_to_string(const clang::Decl *decl);
+
 template <typename Node> std::string to_string(Node node) { return to_string(&node); }
 
 std::string print_type(clang::QualType type, clang::ASTContext &c);

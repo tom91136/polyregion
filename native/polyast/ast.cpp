@@ -280,7 +280,11 @@ using std::string;
 }
 
 [[nodiscard]] string polyast::repr(const StructDef &def) {
-  return "struct " + repr(def.name) + " { " +
+
+  return "struct " + repr(def.name) + (def.parents.empty() ? "" : ": ") +
+         mk_string<Sym>(
+             def.parents, [](auto &&x) { return repr(x); }, ", ") +
+         " { " +
          mk_string<StructMember>(
              def.members, [](auto &&x) { return (x.isMutable ? "mut " : "") + repr(x.named); }, ",") +
          " }";

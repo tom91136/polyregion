@@ -111,11 +111,22 @@ static constexpr int64_t nIntMin(uint64_t bits) { return -(int64_t(1) << (bits -
 static constexpr int64_t nIntMax(uint64_t bits) { return (int64_t(1) << (bits - 1)) - 1; }
 
 Pair<llvm::StructType *, LLVMBackend::AstTransformer::StructMemberIndexTable> LLVMBackend::AstTransformer::mkStruct(const StructDef &def) {
-  std::vector<llvm::Type *> types(def.members.size());
-  std::transform(def.members.begin(), def.members.end(), types.begin(), [&](const StructMember &n) { return mkTpe(n.named.tpe); });
+  std::vector<llvm::Type *> types;
   LLVMBackend::AstTransformer::StructMemberIndexTable table;
-  for (size_t i = 0; i < def.members.size(); ++i)
-    table[def.members[i].named.symbol] = i;
+  for (const auto &p : def.parents) {
+    if (auto it = structTypes.find(p); it != structTypes.end()) {
+      auto [parentStructTpe, parentTable] = it->second;
+      for (const auto &[sym, idx] : parentTable) {
+        types.push_back(parentStructTpe->getElementType(idx));
+        table[sym] = types.size() - 1;
+      }
+    } else
+      error(__FILE__, __LINE__, "Unseen struct def in inheritance chain: " + repr(p));
+  }
+  for (const auto &m : def.members) {
+    types.push_back(mkTpe(m.named.tpe));
+    table[m.named.symbol] = types.size() - 1;
+  }
   return {llvm::StructType::create(C, types, qualified(def.name)), table};
 }
 
@@ -813,11 +824,14 @@ void LLVMBackend::AstTransformer::addDefs(const std::vector<StructDef> &defs) {
     std::vector<StructDef> zeroDeps;
     std::copy_if( //
         defsWithDependencies.begin(), defsWithDependencies.end(), std::back_inserter(zeroDeps), [&](auto &def) {
-          return std::all_of(def.members.begin(), def.members.end(), [&](auto &m) {
+          bool noInheritanceDependency =
+              std::all_of(def.parents.begin(), def.parents.end(), [&](auto &p) { return structTypes.find(p) != structTypes.end(); });
+          bool noMemberDependencies = std::all_of(def.members.begin(), def.members.end(), [&](auto &m) {
             if (auto s = get_opt<Type::Struct>(m.named.tpe); s) return structTypes.find(s->name) != structTypes.end();
             else
               return true;
           });
+          return noMemberDependencies && noInheritanceDependency;
         });
     if (!zeroDeps.empty()) {
       for (auto &r : zeroDeps) {

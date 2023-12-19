@@ -39,5 +39,17 @@ std::string underlyingToken(clang::Expr *stmt, clang::ASTContext &c) {
   auto range = clang::CharSourceRange::getTokenRange(stmt->getBeginLoc(), stmt->getEndLoc());
   return clang::Lexer::getSourceText(range, c.getSourceManager(), c.getLangOpts()).str();
 }
+std::string dump_to_string(const clang::Type &tpe, const clang::ASTContext &c) {
+  std::string s;
+  llvm::raw_string_ostream os(s);
+  tpe.dump(os, c);
+  return s;
+}
+std::string dump_to_string(const clang::Decl *decl ) {
+  std::string s;
+  llvm::raw_string_ostream os(s);
+  decl->dump(os);
+  return s;
+}
 
 } // namespace polyregion::polystl
