@@ -81,10 +81,12 @@ public:
 
     using StructMemberIndexTable = Map<std::string, size_t>;
     Map<std::string, Pair<Type::Any, llvm::Value *>> stackVarPtrs;
-    Map<Sym, Pair<llvm::StructType *, StructMemberIndexTable>> structTypes;
+    Map<Sym, std::tuple<StructDef, llvm::StructType *, StructMemberIndexTable>> structTypes;
     Map<InvokeSignature, llvm::Function *> functions;
     llvm::IRBuilder<> B;
 
+    Opt<Pair<std::vector<llvm::StructType *>, size_t>> findSymbolInHeirachy( //
+        const Sym &structName, const std::string &member, const std::vector<llvm::StructType *> &xs = {}) const;
     ValPtr findStackVar(const Named &named);
     ValPtr mkSelectPtr(const Term::Select &select);
     ValPtr mkTermVal(const Term::Any &ref);
@@ -96,7 +98,7 @@ public:
 
     llvm::Type *mkTpe(const Type::Any &tpe, bool functionBoundary = false);
 
-    Pair<llvm::StructType *, StructMemberIndexTable> mkStruct(const StructDef &def);
+    std::tuple<StructDef, llvm::StructType *, StructMemberIndexTable> mkStruct(const StructDef &def);
 
     ValPtr unaryExpr(const AnyExpr &expr, const AnyTerm &l, const AnyType &rtn, const ValPtrFn1 &fn);
     ValPtr binaryExpr(const AnyExpr &expr, const AnyTerm &l, const AnyTerm &r, const AnyType &rtn, const ValPtrFn2 &fn);
@@ -130,7 +132,8 @@ public:
 public:
   Options options;
   explicit LLVMBackend(Options options) : options(std::move(options)){};
-  [[nodiscard]] std::vector<polyast::CompileLayout> resolveLayouts(const std::vector<StructDef> &defs, const polyast::OptLevel &opt) override;
+  [[nodiscard]] std::vector<polyast::CompileLayout> resolveLayouts(const std::vector<StructDef> &defs,
+                                                                   const polyast::OptLevel &opt) override;
   [[nodiscard]] polyast::CompileResult compileProgram(const Program &, const polyast::OptLevel &opt) override;
 };
 

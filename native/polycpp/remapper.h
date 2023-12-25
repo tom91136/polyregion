@@ -1,9 +1,9 @@
 #pragma once
 
-#include "clang/AST/ASTContext.h"
-#include "llvm/Support/Casting.h"
 #include "generated/polyast.h"
 #include "variants.hpp"
+#include "clang/AST/ASTContext.h"
+#include "llvm/Support/Casting.h"
 
 #include <optional>
 #include <type_traits>
@@ -41,9 +41,9 @@ struct Remapper {
     std::unordered_map<std::string, StructDef> structs{};
 
     template <typename T>
-    [[nodiscard]] std::pair<T, std::vector<Stmt::Any>> scoped(const std::function<T(RemapContext &)> &f, const std::optional<Type::Any> &scopeRtnType = {},
-                                                              std::optional<std::string> scopeStructName = {},
-                                                              bool persistCounter = false) {
+    [[nodiscard]] std::pair<T, std::vector<Stmt::Any>>
+    scoped(const std::function<T(RemapContext &)> &f, const std::optional<Type::Any> &scopeRtnType = {},
+           std::optional<std::string> scopeStructName = {}, bool persistCounter = false) {
       std::optional<std::reference_wrapper<StructDef>> nextParent = parent;
       if (scopeStructName) {
         if (auto it = structs.find(*scopeStructName); it != structs.end()) {
@@ -54,14 +54,15 @@ struct Remapper {
       }
       RemapContext r{nextParent, scopeRtnType.value_or(rtnType), persistCounter ? 0 : counter, {}, functions, structs};
       auto result = f(r);
-      if(!persistCounter){
+      if (!persistCounter) {
         counter = r.counter;
       }
       functions = r.functions;
       structs = r.structs;
       return {result, r.stmts};
     }
-    [[nodiscard]] std::vector<Stmt::Any> scoped(const std::function<void(RemapContext &)> &f, const std::optional<Type::Any> &scopeRtnType ={},
+    [[nodiscard]] std::vector<Stmt::Any> scoped(const std::function<void(RemapContext &)> &f,
+                                                const std::optional<Type::Any> &scopeRtnType = {},
                                                 std::optional<std::string> scopeStructName = {}, bool persistCounter = false);
 
     void push(const Stmt::Any &stmt);

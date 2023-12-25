@@ -127,11 +127,9 @@ static void defaultInitialiseStruct(Remapper::RemapContext &r, const Type::Struc
         auto roots_ = roots;
         roots_.push_back(m.named);
         defaultInitialiseStruct(r, *nested, roots_);
-      } else
-        r.push(Stmt::Mut(Term::Select(roots, m.named), Expr::Alias(defaultValue(m.named.tpe)), true));
+      } else r.push(Stmt::Mut(Term::Select(roots, m.named), Expr::Alias(defaultValue(m.named.tpe)), true));
     }
-  } else
-    throw std::logic_error("Cannot initialise unknown struct type " + repr(tpe));
+  } else throw std::logic_error("Cannot initialise unknown struct type " + repr(tpe));
 }
 
 Remapper::Remapper(clang::ASTContext &context) : context(context) {}
@@ -244,24 +242,25 @@ std::pair<std::string, Function> Remapper::handleCall(const clang::FunctionDecl 
     auto fnBody = r.scoped(
         [&](auto &r) {
           if (auto ctor = llvm::dyn_cast<clang::CXXConstructorDecl>(decl)) {
-            r.push(Stmt::Comment("Ctor: " + declName(decl)));
-            for (auto init : ctor->inits()) { // handle CXXCtorInitializer here
-              if (init->isAnyMemberInitializer()) {
-                auto tpe = handleType(init->getAnyMember()->getType(), r);
-                auto member = Term::Select({receiver->named}, Named(init->getMember()->getNameAsString(), tpe));
-                auto rhs = conform(r, handleExpr(init->getInit(), r), tpe);
-                r.push(Stmt::Mut(member, rhs, true));
-              } else if (init->isBaseInitializer()) {
-                r.push(Stmt::Comment("Unimplemented initialiser:" + pretty_string(init->getInit(), context)));
-              } else {
-                throw std::logic_error("Unknown initializer type!");
-              }
-            }
-            handleStmt(decl->getBody(), r);
-            r.push(Stmt::Return(Expr::Alias(Term::Unit0Const())));
-          } else {
-            handleStmt(decl->getBody(), r);
-          }
+            if (auto instancePtr = get_opt<Type::Ptr>(receiver->named.tpe); instancePtr) {
+              if (auto structTpe = get_opt<Type::Struct>(instancePtr->component); structTpe) {
+                r.push(Stmt::Comment("Ctor: " + declName(decl)));
+                for (auto init : ctor->inits()) { // handle CXXCtorInitializer here
+                  if (init->isAnyMemberInitializer()) {
+                    auto tpe = handleType(init->getAnyMember()->getType(), r);
+                    auto memberName = qualified(structTpe->name) + "::" + init->getMember()->getNameAsString();
+                    auto member = Term::Select({receiver->named}, Named(memberName, tpe));
+                    auto rhs = conform(r, handleExpr(init->getInit(), r), tpe);
+                    r.push(Stmt::Mut(member, rhs, true));
+                  } else if (init->isBaseInitializer())
+                    r.push(Stmt::Comment("Unimplemented initialiser:" + pretty_string(init->getInit(), context)));
+                  else throw std::logic_error("Unknown initializer type!");
+                }
+                handleStmt(decl->getBody(), r);
+                r.push(Stmt::Return(Expr::Alias(Term::Unit0Const())));
+              } else throw std::logic_error("receiver is not a struct type!");
+            } else throw std::logic_error("receiver is not a instance ptr type!");
+          } else handleStmt(decl->getBody(), r);
         },
         rtnType, parent, true);
 
@@ -317,8 +316,7 @@ std::string Remapper::handleRecord(const clang::RecordDecl *decl, RemapContext &
             } else
               r.push(Stmt::Comment("Invariant: base class " + dump_to_string(*baseTpe, context) +
                                    "  inserted but was not found:" + recordName));
-          } else
-            r.push(Stmt::Comment("ERROR: Base class " + dump_to_string(*baseTpe, context) + " of " + name + " is not a Record"));
+          } else r.push(Stmt::Comment("ERROR: Base class " + dump_to_string(*baseTpe, context) + " of " + name + " is not a Record"));
         }
       };
 
@@ -326,7 +324,8 @@ std::string Remapper::handleRecord(const clang::RecordDecl *decl, RemapContext &
       resolveBases(cxxRecord->vbases());
     }
     for (auto field : decl->fields()) {
-      members.emplace_back(Named(field->getName().str(), handleType(field->getType(), r)), true);
+
+      members.emplace_back(Named(name + "::" + field->getName().str(), handleType(field->getType(), r)), true);
     }
 
     auto sd = r.structs.emplace(name, StructDef(Sym({name}), {}, members, parents));
@@ -420,8 +419,7 @@ Type::Any Remapper::handleType(clang::QualType tpe, RemapContext &r) const {
     llvm::outs() << "Unhandled type:\n";
     desugared->dump();
     return Type::Nothing();
-  } else
-    return *result;
+  } else return *result;
 }
 
 Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &r) {
@@ -617,8 +615,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
           } else {
             throw std::logic_error("Cannot index nested ptr expressions with mismatching expected components");
           }
-        } else
-          throw std::logic_error("Cannot index non-ptr expressions");
+        } else throw std::logic_error("Cannot index non-ptr expressions");
       },
       [&](const clang::UnaryOperator *expr) -> Expr::Any {
         // Here we're just dealing with the builtin operators, overloaded operators will be a clang::CXXOperatorCallExpr.
@@ -642,8 +639,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
             return assign(lhs, (r.newVar(Expr::IntrOp(Intr::Sub(deref(lhs), integralConstOfType(exprTpe, 1), exprTpe)))));
           case clang::UO_AddrOf:
             if (holds<Type::Ptr>(tpe(lhs))) return Expr::Alias(lhs);
-            else
-              return Expr::RefTo(lhs, {}, tpe(lhs));
+            else return Expr::RefTo(lhs, {}, tpe(lhs));
           case clang::UO_Deref: return Expr::RefTo(lhs, {integralConstOfType(Type::IntU64(), 0)}, exprTpe);
           case clang::UO_Plus: return Expr::IntrOp(Intr::Pos(lhs, exprTpe));
           case clang::UO_Minus: return Expr::IntrOp(Intr::Neg(lhs, exprTpe));
@@ -791,21 +787,31 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
       },
       [&](const clang::MemberExpr *expr) { //  instance.member; instance->member
         auto baseExpr = handleExpr(expr->getBase(), r);
-        auto member = Named(expr->getMemberNameInfo().getAsString(), handleType(expr->getMemberDecl()->getType(), r));
-        if (auto alias = get_opt<Expr::Alias>(baseExpr); alias) {
-          if (auto select = get_opt<Term::Select>(alias->ref); select) {
-            std::vector<Named> xs(select->init.begin(), select->init.end());
-            xs.push_back(select->last);
-            return Expr::Alias(Term::Select(xs, member));
-          } else
-            throw std::logic_error("Member expr on term that isn't select is illegal:" + repr(baseExpr));
+        auto baseTpe = tpe(baseExpr);
+        if (auto opt = get_opt<Type::Ptr>(baseTpe); opt) baseTpe = opt->component;
+
+        if (auto recordDecl = llvm::dyn_cast<clang::RecordDecl>(expr->getMemberDecl()->getDeclContext()); recordDecl) {
+          if (auto s = get_opt<Type::Struct>(handleType(context.getRecordType(recordDecl), r)); s) {
+            auto member =
+                Named(qualified(s->name) + "::" + expr->getMemberNameInfo().getAsString(), handleType(expr->getMemberDecl()->getType(), r));
+            if (auto alias = get_opt<Expr::Alias>(baseExpr); alias) {
+              if (auto select = get_opt<Term::Select>(alias->ref); select) {
+                std::vector<Named> xs(select->init.begin(), select->init.end());
+                xs.push_back(select->last);
+                return Expr::Alias(Term::Select(xs, member));
+              } else throw std::logic_error("Member expr on term that isn't select is illegal:" + repr(baseExpr));
+            } else {
+              auto baseVar = Stmt::Var(r.newName(tpe(baseExpr)), baseExpr);
+              r.push(baseVar);
+              return Expr::Alias(Term::Select({baseVar.name}, member));
+            }
+          } else {
+            throw std::logic_error("Member expr on non-struct type is not legal:" + repr(baseExpr));
+          }
         } else {
-          auto baseVar = Stmt::Var(r.newName(tpe(baseExpr)), baseExpr);
-          r.push(baseVar);
-          return Expr::Alias(Term::Select({baseVar.name}, member));
+          throw std::logic_error("Member expr on non-record type is not legal:" + repr(baseExpr));
         }
       },
-
       [&](const clang::Expr *) { return failExpr(); });
   if (result) {
 
@@ -826,12 +832,12 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
   if (!root) return;
   llvm::outs() << "[Stmt] >>> \n";
 
-  r.push(Stmt::Comment(pretty_string(root, context)));
+  // r.push(Stmt::Comment(pretty_string(root, context)));
 
   std::string s;
   llvm::raw_string_ostream os(s);
   root->dump(os, context);
-  r.push(Stmt::Comment(s));
+  // r.push(Stmt::Comment(s));
 
   root->dumpPretty(context);
   llvm::outs() << "<<< \n";

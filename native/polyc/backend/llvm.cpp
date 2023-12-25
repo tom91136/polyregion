@@ -110,24 +110,30 @@ static bool isUnsigned(const Type::Any &tpe) {
 static constexpr int64_t nIntMin(uint64_t bits) { return -(int64_t(1) << (bits - 1)); }
 static constexpr int64_t nIntMax(uint64_t bits) { return (int64_t(1) << (bits - 1)) - 1; }
 
-Pair<llvm::StructType *, LLVMBackend::AstTransformer::StructMemberIndexTable> LLVMBackend::AstTransformer::mkStruct(const StructDef &def) {
+std::tuple<StructDef, llvm::StructType *, LLVMBackend::AstTransformer::StructMemberIndexTable>
+LLVMBackend::AstTransformer::mkStruct(const StructDef &def) {
   std::vector<llvm::Type *> types;
-  LLVMBackend::AstTransformer::StructMemberIndexTable table;
+  StructMemberIndexTable table;
   for (const auto &p : def.parents) {
     if (auto it = structTypes.find(p); it != structTypes.end()) {
-      auto [parentStructTpe, parentTable] = it->second;
-      for (const auto &[sym, idx] : parentTable) {
-        types.push_back(parentStructTpe->getElementType(idx));
-        table[sym] = types.size() - 1;
-      }
-    } else
-      error(__FILE__, __LINE__, "Unseen struct def in inheritance chain: " + repr(p));
+      auto [parentDef, parentStructTpe, parentTable] = it->second;
+      types.push_back(parentStructTpe);
+      table[qualified(parentDef.name)] = types.size() - 1;
+      // for (const auto &[sym, idx] : parentTable) {
+      //   types.push_back(parentStructTpe->getElementType(idx));
+      //   table[sym] = types.size() - 1;
+      // }
+    } else error(__FILE__, __LINE__, "Unseen struct def in inheritance chain: " + repr(p));
   }
   for (const auto &m : def.members) {
     types.push_back(mkTpe(m.named.tpe));
     table[m.named.symbol] = types.size() - 1;
   }
-  return {llvm::StructType::create(C, types, qualified(def.name)), table};
+  std::cout << "Sym: " << repr(def) << "\n";
+  for (auto &[k, v] : table) {
+    std::cout << " =>" << k << " " << v << "\n";
+  }
+  return {def, llvm::StructType::create(C, types, qualified(def.name)), table};
 }
 
 llvm::Type *LLVMBackend::AstTransformer::mkTpe(const Type::Any &tpe, bool functionBoundary) {                   //
@@ -151,10 +157,14 @@ llvm::Type *LLVMBackend::AstTransformer::mkTpe(const Type::Any &tpe, bool functi
       [&](const Type::Unit0 &x) -> llvm::Type * { return llvm::Type::getVoidTy(C); },   //
       [&](const Type::Nothing &x) -> llvm::Type * { return llvm::Type::getVoidTy(C); }, //
       [&](const Type::Struct &x) -> llvm::Type * {
-        if (auto def = polyregion::get_opt(structTypes, x.name); def) return def->first;
+        if (auto def = polyregion::get_opt(structTypes, x.name); def) return std::get<llvm::StructType *>(*def);
         else {
-          auto pool = mk_string2<Sym, Pair<llvm::StructType *, StructMemberIndexTable>>(
-              structTypes, [](auto &&p) { return "`" + to_string(p.first) + "`" + " = " + std::to_string(p.second.second.size()); },
+          auto pool = mk_string2<Sym, std::tuple<StructDef, llvm::StructType *, StructMemberIndexTable>>(
+              structTypes,
+              [](const auto &e) {
+                auto &[_, structTy, table] = e.second;
+                return "`" + to_string(structTy) + "`" + " = " + std::to_string(table.size());
+              },
               "\n->");
 
           return undefined(__FILE__, __LINE__, "Unseen struct def: " + to_string(x) + ", table=\n" + pool);
@@ -206,11 +216,10 @@ ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
 
   auto fail = [&]() { return " (part of the select expression " + to_string(select) + ")"; };
 
-  auto structTypeOf = [&](const Type::Any &tpe) -> Pair<llvm::StructType *, StructMemberIndexTable> {
+  auto structTypeOf = [&](const Type::Any &tpe) -> std::tuple<StructDef, llvm::StructType *, StructMemberIndexTable> {
     auto findTy = [&](Type::Struct s) {
       if (auto def = polyregion::get_opt(structTypes, s.name); def) return *def;
-      else
-        error(__FILE__, __LINE__, "Unseen struct type " + to_string(s.name) + " in select path" + fail());
+      else error(__FILE__, __LINE__, "Unseen struct type " + to_string(s.name) + " in select path" + fail());
     };
 
     if (auto s = get_opt<Type::Struct>(tpe); s) {
@@ -220,8 +229,7 @@ ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
       else
         error(__FILE__, __LINE__,
               "Illegal select path involving pointer to non-struct type " + to_string(s->name) + " in select path" + fail());
-    } else
-      error(__FILE__, __LINE__, "Illegal select path involving non-struct type " + to_string(tpe) + fail());
+    } else error(__FILE__, __LINE__, "Illegal select path involving non-struct type " + to_string(tpe) + fail());
   };
 
   if (select.init.empty()) return findStackVar(select.last); // local var lookup
@@ -237,32 +245,67 @@ ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
     auto tpe = head.tpe;
     auto root = findStackVar(head);
     for (auto &path : tail) {
-      auto [structTy, table] = structTypeOf(tpe);
-      if (auto idx = get_opt(table, path.symbol); idx) {
-
+      auto selectFinal = [&](llvm::StructType *structTy, size_t idx) {
         if (auto p = get_opt<Type::Ptr>(tpe); p && !p->length) {
           root = B.CreateInBoundsGEP(
               structTy, load(B, root, B.getPtrTy(AllocaAS)),
               {//
-               llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), *idx)},
+               llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), idx)},
               qualified(select) + "_select_ptr");
         } else {
           root = B.CreateInBoundsGEP(
               structTy, root,
               {//
-               llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), *idx)},
+               llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), idx)},
               qualified(select) + "_select_ptr");
         }
+      };
+      auto [s, structTy, table] = structTypeOf(tpe);
+      if (auto idx = get_opt(table, path.symbol); idx) {
+        selectFinal(structTy, *idx);
         tpe = path.tpe;
       } else {
-        auto pool = mk_string2<std::string, size_t>(
-            table, [](auto &&p) { return "`" + p.first + "`" + " = " + std::to_string(p.second); }, "\n->");
+        if (auto inHeirachy = findSymbolInHeirachy(s.name, path.symbol); inHeirachy) {
+          auto &[inheritanceChain, finaIdx] = *inHeirachy;
+          for (auto chain : inheritanceChain) {
+            root = B.CreateInBoundsGEP(
+                chain, root,
+                {//
+                 llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0)},
+                qualified(select) + "_chain_ptr");
+          }
+          selectFinal(structTy, finaIdx);
+          tpe = path.tpe;
+        } else {
+          auto pool = mk_string2<std::string, size_t>(
+              table, [](auto &&p) { return "`" + p.first + "`" + " = " + std::to_string(p.second); }, "\n->");
 
-        return undefined(__FILE__, __LINE__,
-                         "Illegal select path with unknown struct member index of name `" + to_string(path) + "`, pool=" + pool + fail());
+          return undefined(__FILE__, __LINE__,
+                           "Illegal select path with unknown struct member index of name `" + to_string(path) + "`, pool=" + pool + fail());
+        }
       }
     }
     return root;
+  }
+}
+
+Opt<Pair<std::vector<llvm::StructType *>, size_t>> LLVMBackend::AstTransformer::findSymbolInHeirachy( //
+    const Sym &structName, const std::string &member, const std::vector<llvm::StructType *> &xs) const {
+  if (auto it = structTypes.find(structName); it != structTypes.end()) {
+    auto [sdef, structTy, table] = it->second;
+    if (auto idx = get_opt(table, member); idx) {
+      return {std::pair{xs, *idx}};
+    } else {
+      if (sdef.parents.empty()) return {};
+      auto ys = xs;
+      ys.push_back(structTy);
+      for (auto parent : sdef.parents) {
+        if (auto x = findSymbolInHeirachy(parent, member, ys); x) return x;
+      }
+      return {};
+    }
+  } else {
+    error(__FILE__, __LINE__, "Unseen struct type " + to_string(structName) + " in heirachy");
   }
 }
 
@@ -274,8 +317,7 @@ ValPtr LLVMBackend::AstTransformer::mkTermVal(const Term::Any &ref) {
       [&](const Term::Select &x) -> ValPtr {
         if (holds<Type::Unit0>(x.tpe)) return mkTermVal(Term::Unit0Const());
         if (auto ptr = get_opt<Type::Ptr>(x.tpe); ptr && ptr->length) return mkSelectPtr(x);
-        else
-          return load(B, mkSelectPtr(x), mkTpe(x.tpe));
+        else return load(B, mkSelectPtr(x), mkTpe(x.tpe));
       },
       [&](const Term::Poison &x) -> ValPtr {
         if (auto tpe = mkTpe(x.tpe); llvm::isa<llvm::PointerType>(tpe)) {
@@ -332,12 +374,10 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
             [&](const Intr::BNot &v) -> ValPtr { return unaryExpr(expr, v.x, v.tpe, [&](auto x) { return B.CreateNot(x); }); },
             [&](const Intr::LogicNot &v) -> ValPtr { return B.CreateNot(mkTermVal(v.x)); },
             [&](const Intr::Pos &v) -> ValPtr {
-              return unaryNumOp(
-                  expr, v.x, v.tpe, [&](auto x) { return x; }, [&](auto x) { return x; });
+              return unaryNumOp(expr, v.x, v.tpe, [&](auto x) { return x; }, [&](auto x) { return x; });
             },
             [&](const Intr::Neg &v) -> ValPtr {
-              return unaryNumOp(
-                  expr, v.x, v.tpe, [&](auto x) { return B.CreateNeg(x); }, [&](auto x) { return B.CreateFNeg(x); });
+              return unaryNumOp(expr, v.x, v.tpe, [&](auto x) { return B.CreateNeg(x); }, [&](auto x) { return B.CreateFNeg(x); });
             },
             [&](const Intr::Add &v) -> ValPtr {
               return binaryNumOp(
@@ -496,8 +536,7 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
           return B.CreateIntCast(from, toTpe, !isUnsigned(tpe(x.from)), "integral_cast");
         } else if (fromKind == NumKind::Fractional && toKind == NumKind::Fractional) {
           return B.CreateFPCast(from, toTpe, "fractional_cast");
-        } else
-          error(__FILE__, __LINE__, "unhandled cast");
+        } else error(__FILE__, __LINE__, "unhandled cast");
       },
       [&](const Expr::Alias &x) -> ValPtr { return mkTermVal(x.ref); },
       [&](const Expr::Invoke &x) -> ValPtr {
@@ -521,8 +560,7 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
           // in case the fn returns a unit (which is mapped to void), we just return the constant
           if (holds<Type::Unit0>(x.rtn)) {
             return mkTermVal(Term::Unit0Const());
-          } else
-            return call;
+          } else return call;
         } else {
 
           for (auto &[key, v] : functions) {
@@ -571,8 +609,7 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
           } else {
             throw std::logic_error("Semantic error: array index not called on array type (" + to_string(lhs->tpe) + ")(" + repr(x) + ")");
           }
-        } else
-          throw std::logic_error("Semantic error: LHS of " + to_string(x) + " (index) is not a select");
+        } else throw std::logic_error("Semantic error: LHS of " + to_string(x) + " (index) is not a select");
       },
 
       [&](const Expr::RefTo &x) -> ValPtr {
@@ -595,10 +632,9 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
           } else { // taking reference of a var
             if (x.idx) throw std::logic_error("Semantic error: Cannot take reference of scalar with index in " + to_string(x));
 
-              if (holds<Type::Unit0>(lhs->tpe))
-                throw std::logic_error("Semantic error: Cannot take reference of an select with unit type in " + to_string(x));
-              return mkSelectPtr(*lhs);
-
+            if (holds<Type::Unit0>(lhs->tpe))
+              throw std::logic_error("Semantic error: Cannot take reference of an select with unit type in " + to_string(x));
+            return mkSelectPtr(*lhs);
           }
         } else
           throw std::logic_error("Semantic error: LHS of " + to_string(x) + " (index) is not a select, can't take reference of a constant");
@@ -685,8 +721,7 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
           } else { // struct member select
             B.CreateStore(rhs, mkSelectPtr(*lhs));
           }
-        } else
-          throw std::logic_error("Semantic error: LHS of " + to_string(x) + " (mut) is not a select");
+        } else throw std::logic_error("Semantic error: LHS of " + to_string(x) + " (mut) is not a select");
         return BlockKind::Normal;
       },
       [&](const Stmt::Update &x) -> BlockKind {
@@ -719,15 +754,14 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
                     componentIsSizedArray ? llvm::ArrayRef<ValPtr>{llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), mkTermVal(x.idx)}
                                           : llvm::ArrayRef<ValPtr>{mkTermVal(x.idx)},
                     qualified(*lhs) + "_update_ptr" //
-                );                                                      //
+                );                                  //
                 B.CreateStore(mkTermVal(rhs), ptr);
               }
             }
           } else {
             throw std::logic_error("Semantic error: array update not called on array type (" + to_string(lhs->tpe) + ")(" + repr(x) + ")");
           }
-        } else
-          throw std::logic_error("Semantic error: LHS of " + to_string(x) + " (update) is not a select");
+        } else throw std::logic_error("Semantic error: LHS of " + to_string(x) + " (update) is not a select");
 
         return BlockKind::Normal;
       },
@@ -759,14 +793,12 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
       },
       [&](const Stmt::Break &x) -> BlockKind {
         if (whileCtx) B.CreateBr(whileCtx->exit);
-        else
-          undefined(__FILE__, __LINE__, "orphaned break!");
+        else undefined(__FILE__, __LINE__, "orphaned break!");
         return BlockKind::Normal;
       }, //
       [&](const Stmt::Cont &x) -> BlockKind {
         if (whileCtx) B.CreateBr(whileCtx->test);
-        else
-          undefined(__FILE__, __LINE__, "orphaned cont!");
+        else undefined(__FILE__, __LINE__, "orphaned cont!");
         return BlockKind::Normal;
       }, //
       [&](const Stmt::Cond &x) -> BlockKind {
@@ -828,8 +860,7 @@ void LLVMBackend::AstTransformer::addDefs(const std::vector<StructDef> &defs) {
               std::all_of(def.parents.begin(), def.parents.end(), [&](auto &p) { return structTypes.find(p) != structTypes.end(); });
           bool noMemberDependencies = std::all_of(def.members.begin(), def.members.end(), [&](auto &m) {
             if (auto s = get_opt<Type::Struct>(m.named.tpe); s) return structTypes.find(s->name) != structTypes.end();
-            else
-              return true;
+            else return true;
           });
           return noMemberDependencies && noInheritanceDependency;
         });
@@ -839,15 +870,15 @@ void LLVMBackend::AstTransformer::addDefs(const std::vector<StructDef> &defs) {
         defsWithDependencies.erase(r);
       }
     } else
-      throw std::logic_error("Recursive defs cannot be resolved: " + mk_string<StructDef>(
-                                                                         zeroDeps, [](auto &r) { return to_string(r); }, ","));
+      throw std::logic_error("Recursive defs cannot be resolved: " +
+                             mk_string<StructDef>(zeroDeps, [](auto &r) { return to_string(r); }, ","));
   }
 }
 
 std::vector<Pair<Sym, llvm::StructType *>> LLVMBackend::AstTransformer::getStructTypes() const {
   std::vector<Pair<Sym, llvm::StructType *>> results;
   for (auto &[k, v] : structTypes)
-    results.emplace_back(k, v.first);
+    results.emplace_back(k, std::get<llvm::StructType *>(v));
   return results;
 }
 
@@ -1202,7 +1233,7 @@ llvmc::TargetInfo LLVMBackend::Options::targetInfo() const {
 }
 
 std::vector<polyast::CompileLayout> LLVMBackend::resolveLayouts(const std::vector<StructDef> &defs,
-                                                         const backend::LLVMBackend::AstTransformer &xform) const {
+                                                                const backend::LLVMBackend::AstTransformer &xform) const {
 
   auto dataLayout = options.targetInfo().resolveDataLayout();
 
@@ -1222,8 +1253,7 @@ std::vector<polyast::CompileLayout> LLVMBackend::resolveLayouts(const std::vecto
         );
       }
       layouts.emplace_back(sym, layout->getSizeInBytes(), layout->getAlignment().value(), members);
-    } else
-      throw std::logic_error("Cannot find symbol " + to_string(sym) + " from domain");
+    } else throw std::logic_error("Cannot find symbol " + to_string(sym) + " from domain");
   }
   return layouts;
 }
@@ -1263,8 +1293,7 @@ polyast::CompileResult backend::LLVMBackend::compileProgram(const Program &progr
             {},               //
             {ast2IR, astOpt}, //
             {},               //
-            mk_string<std::string>(
-                errors, [](auto &&x) { return x; }, "\n")};
+            mk_string<std::string>(errors, [](auto &&x) { return x; }, "\n")};
   }
 
   auto c = llvmc::compileModule(options.targetInfo(), opt, true, std::move(mod));
