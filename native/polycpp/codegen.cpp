@@ -46,13 +46,19 @@ static std::optional<CompileResult> compileIt(Program &p) {
   std::string binPath;
   if (auto envBin = std::getenv("POLYC_BIN"); envBin) binPath = envBin;
 
+  std::vector<llvm::StringRef> args{"", inputPath.str(), "--out", outputPath.str(), "--target", "host", "--arch", "native"};
   int code = llvm::sys::ExecuteAndWait(                                                              //
       binPath,                                                                              //
-      {"", inputPath.str(), "--out", outputPath.str(), "--target", "host", "--arch", "native"}, //
+      args, //
       {{}}                                                                                           //
   );
 
-  std::cout << "polyc: <" << code << ">\n";
+  std::cout << "polyc: <" << code << ">" << std::endl;
+  if(code != 0) {
+    std::cout << "[POLYC] Non zero return for task: " << binPath;
+    for (auto arg : args) std::cout << " " << arg.str();
+    std::cout << std::endl;
+  }
   auto BufferOrErr = llvm::MemoryBuffer::getFile(outputPath);
 
   if (auto Err = BufferOrErr.getError()) {

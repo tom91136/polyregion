@@ -265,13 +265,26 @@ ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
         selectFinal(structTy, *idx);
         tpe = path.tpe;
       } else {
-        if (auto inHeirachy = findSymbolInHeirachy(s.name, path.symbol); inHeirachy) {
+        if (auto inHeirachy = findSymbolInHeirachy<size_t>(s.name, [&](auto, auto, auto xs) { return get_opt(xs, path.symbol); });
+            inHeirachy) {
           auto &[inheritanceChain, finaIdx] = *inHeirachy;
+          auto chainPrev = structTy;
           for (auto chain : inheritanceChain) {
+            size_t N = 0;
+            if (chain != chainPrev) { // skip the first chain; it's 0 offset
+              if (auto relativeIdxIt =
+                      std::find_if(chainPrev->element_begin(), chainPrev->element_end(), [&](auto t) { return t == chain; });
+                  relativeIdxIt != chainPrev->element_end()) {
+                N = std::distance(chainPrev->element_begin(), relativeIdxIt);
+              } else {
+                return undefined(__FILE__, __LINE__, "Illegal select path with out of bounds parent `" + to_string(path) + "`" + fail());
+              }
+            }
+            chainPrev = chain;
             root = B.CreateInBoundsGEP(
                 chain, root,
                 {//
-                 llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0)},
+                 llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), N)},
                 qualified(select) + "_chain_ptr");
           }
           selectFinal(structTy, finaIdx);
@@ -289,18 +302,40 @@ ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
   }
 }
 
-Opt<Pair<std::vector<llvm::StructType *>, size_t>> LLVMBackend::AstTransformer::findSymbolInHeirachy( //
-    const Sym &structName, const std::string &member, const std::vector<llvm::StructType *> &xs) const {
+// Opt<Pair<std::vector<llvm::StructType *>, size_t>> LLVMBackend::AstTransformer::findSymbolInHeirachy( //
+//     const Sym &structName, const std::string &member, const std::vector<llvm::StructType *> &xs) const {
+//   if (auto it = structTypes.find(structName); it != structTypes.end()) {
+//     auto [sdef, structTy, table] = it->second;
+//     if (auto idx = get_opt(table, member); idx) {
+//       return {std::pair{xs, *idx}};
+//     } else {
+//       if (sdef.parents.empty()) return {};
+//       auto ys = xs;
+//       ys.push_back(structTy);
+//       for (auto parent : sdef.parents) {
+//         if (auto x = findSymbolInHeirachy(parent, member, ys); x) return x;
+//       }
+//       return {};
+//     }
+//   } else {
+//     error(__FILE__, __LINE__, "Unseen struct type " + to_string(structName) + " in heirachy");
+//   }
+// }
+
+template <typename T>
+Opt<Pair<std::vector<llvm::StructType *>, T>> LLVMBackend::AstTransformer::findSymbolInHeirachy( //
+    const Sym &structName, std::function<Opt<T>(StructDef, llvm::StructType *, StructMemberIndexTable)> f,
+    const std::vector<llvm::StructType *> &xs) const {
   if (auto it = structTypes.find(structName); it != structTypes.end()) {
     auto [sdef, structTy, table] = it->second;
-    if (auto idx = get_opt(table, member); idx) {
-      return {std::pair{xs, *idx}};
+    if (auto x = f(sdef, structTy, table); x) {
+      return {std::pair{xs, *x}};
     } else {
       if (sdef.parents.empty()) return {};
       auto ys = xs;
       ys.push_back(structTy);
       for (auto parent : sdef.parents) {
-        if (auto x = findSymbolInHeirachy(parent, member, ys); x) return x;
+        if (auto x = findSymbolInHeirachy(parent, f, ys); x) return x;
       }
       return {};
     }
@@ -479,12 +514,61 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
         if (*x.as == *tpe(x.from)) return from;
 
         // x.as <: x.from
-        auto lhsStruct = get_opt<Type::Struct>(x.as);
-        auto rhsStruct = get_opt<Type::Struct>(tpe(x.from));
-        if (lhsStruct && rhsStruct &&
-            (std::any_of(lhsStruct->parents.begin(), lhsStruct->parents.end(), [&](auto &x) { return x == rhsStruct->name; }) ||
-             std::any_of(rhsStruct->parents.begin(), rhsStruct->parents.end(), [&](auto &x) { return x == lhsStruct->name; }))) {
-          return from;
+
+        if (auto rhsPtr = get_opt<Type::Ptr>(tpe(x.from)); rhsPtr) {
+          if (auto lhsPtr = get_opt<Type::Ptr>(x.as); lhsPtr) {
+            auto lhsStruct = get_opt<Type::Struct>(lhsPtr->component);
+            auto rhsStruct = get_opt<Type::Struct>(rhsPtr->component);
+            if (lhsStruct && rhsStruct &&
+                (std::any_of(lhsStruct->parents.begin(), lhsStruct->parents.end(), [&](auto &x) { return x == rhsStruct->name; }) ||
+                 std::any_of(rhsStruct->parents.begin(), rhsStruct->parents.end(), [&](auto &x) { return x == lhsStruct->name; }))) {
+
+              auto lhsTpe = mkTpe(*lhsStruct);
+
+              // B.to[A]
+
+              std::cout << "R " << llvm_tostring(lhsTpe) << std::endl;
+
+
+
+              if (auto inHeirachy = findSymbolInHeirachy<bool>(
+                      rhsStruct->name, [&](auto, auto structTy, auto) -> Opt<bool> { return structTy == lhsTpe ? std::optional{true} : std::nullopt ; });
+                  inHeirachy) {
+
+
+                auto &[inheritanceChain, finaIdx] = *inHeirachy;
+
+                auto chainPrev = lhsTpe->isStructTy() ? static_cast<llvm::StructType*>(lhsTpe) : undefined(__FILE__, __LINE__,"Illegal lhs tpe!");
+                for (auto chain : inheritanceChain) {
+
+
+                  std::cout << "@@ " << llvm_tostring(chain) << std::endl;
+
+                  size_t N = 0;
+                  if (chain != chainPrev) { // skip the first chain; it's 0 offset
+                    if (auto relativeIdxIt =
+                            std::find_if(chainPrev->element_begin(), chainPrev->element_end(), [&](auto t) { return t == chain; });
+                        relativeIdxIt != chainPrev->element_end()) {
+                      N = std::distance(chainPrev->element_begin(), relativeIdxIt);
+                    } else {
+                      return undefined(__FILE__, __LINE__, "Illegal select path with out of bounds parent `" + to_string(path) + "`");
+                    }
+                  }
+
+                  from = B.CreateInBoundsGEP(
+                      chain, from,
+                      {//
+                       llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), N)},
+                       "_upcast_ptr");
+
+                }
+              }
+
+              // find the offset
+
+              return from;
+            }
+          }
         }
 
         auto fromKind = variants::total(
@@ -695,6 +779,8 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
           if (x.expr) mkExprVal(*x.expr, fn, x.name.symbol + "_var_rhs");
         } else {
           auto tpe = mkTpe(x.name.tpe);
+
+          std::cout << llvm_tostring(tpe) << " = " << x.name.tpe << "\n";
           auto stackPtr = B.CreateAlloca(tpe, AllocaAS, nullptr, x.name.symbol + "_stack_ptr");
           auto rhs = x.expr ? std::make_optional(mkExprVal(*x.expr, fn, x.name.symbol + "_var_rhs")) : std::nullopt;
           stackVarPtrs[x.name.symbol] = {x.name.tpe, stackPtr};
@@ -866,7 +952,9 @@ void LLVMBackend::AstTransformer::addDefs(const std::vector<StructDef> &defs) {
         });
     if (!zeroDeps.empty()) {
       for (auto &r : zeroDeps) {
-        structTypes.emplace(r.name, mkStruct(r));
+
+        auto v = structTypes.emplace(r.name, mkStruct(r));
+        std::cout << "Add " << llvm_tostring(std::get<llvm::StructType *>(v.first->second)) << " from " << r << "\n";
         defsWithDependencies.erase(r);
       }
     } else

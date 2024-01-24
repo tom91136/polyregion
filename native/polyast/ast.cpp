@@ -63,8 +63,8 @@ using std::string;
         }
         args += ">";
         auto parents = mk_string<Sym>(
-            x.parents, [](auto &x) { return repr(x); }, "<:");
-        return "@" + repr(x.name) + args + parents;
+            x.parents, [](auto &x) { return repr(x); }, ",");
+        return "@" + repr(x.name) + args + (x.parents.empty() ? "" : "<:{" + parents + "}");
       },                                                                   //
       [](const Type::Ptr &x) { return "Ptr[" + repr(x.component) + (x.length ? "*" + std::to_string(*x.length) : "") + "]"; }, //
       [](const Type::Var &x) { return "Var[" + x.name + "]"; },                //

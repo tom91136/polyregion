@@ -85,8 +85,11 @@ public:
     Map<InvokeSignature, llvm::Function *> functions;
     llvm::IRBuilder<> B;
 
-    Opt<Pair<std::vector<llvm::StructType *>, size_t>> findSymbolInHeirachy( //
-        const Sym &structName, const std::string &member, const std::vector<llvm::StructType *> &xs = {}) const;
+    template <typename T>
+    Opt<Pair<std::vector<llvm::StructType *>, T>> findSymbolInHeirachy( //
+        const Sym &structName, std::function<Opt<T>(StructDef, llvm::StructType *, StructMemberIndexTable)> f,
+        const std::vector<llvm::StructType *> &xs = {}) const;
+
     ValPtr findStackVar(const Named &named);
     ValPtr mkSelectPtr(const Term::Select &select);
     ValPtr mkTermVal(const Term::Any &ref);

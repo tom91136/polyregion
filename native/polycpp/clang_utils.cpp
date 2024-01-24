@@ -52,4 +52,11 @@ std::string dump_to_string(const clang::Decl *decl ) {
   return s;
 }
 
+std::string dump_to_string(const clang::Expr *decl, const clang::ASTContext &c) {
+  std::string s;
+  llvm::raw_string_ostream os(s);
+  decl->dump(os, c);
+  return s;
+}
+
 } // namespace polyregion::polystl

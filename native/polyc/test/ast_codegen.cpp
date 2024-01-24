@@ -119,6 +119,34 @@ TEST_CASE("initialise more than once", "[compiler]") {
   polyregion::compiler::initialise();
 }
 
+TEST_CASE("inheritance", "[compiler]") {
+  polyregion::compiler::initialise();
+  auto tpe = GENERATE(from_range(PrimitiveTypesNoUnit));
+
+
+  StructDef(Sym({"C"}),{},{StructMember(Named("C::a",IntS32()),1),StructMember(Named("C::b",IntS32()),1),StructMember(Named("C::c",Float),1)},{Sym({"B"}),Sym({"A"})})
+  StructDef(Sym({"A"}),{},{StructMember(Named("A::x",Float32()),1),StructMember(Named("A::y",Float ),1)},{Sym({"Base"})})
+  StructDef(Sym({"Base"}),{},{StructMember(Named("Base::x",IntS32()),1)},{})
+  StructDef(Sym({"B"}),{},{StructMember(Named("B::x",IntS32()),1),StructMember(Named("B::y",Nothing()),1)},{})
+
+
+
+  DYNAMIC_SECTION(tpe) {
+    Sym foo({"foo"});
+    Named x = Named("x", tpe);
+
+    StructDef def(foo, {}, {StructMember(x, false)}, {});
+
+    Type::Struct fooTpe(foo, {}, {}, {});
+    auto entry = function("foo", {}, fooTpe)({
+        let("foo") = fooTpe, //
+        Mut(Select({"foo"_(fooTpe)}, x), Alias(generateConstValue(tpe)), false),
+        ret("foo"_(fooTpe)) //
+    });
+    assertCompile(program(entry, {def}, {}));
+  }
+}
+
 TEST_CASE("nested if", "[compiler]") {
   polyregion::compiler::initialise();
 

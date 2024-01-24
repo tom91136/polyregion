@@ -140,6 +140,21 @@ static std::string declName(const clang::NamedDecl *decl) {
              ? "_unnamed_" + polyregion::hex(decl->getID())
              : decl->getDeclName().getAsString();
 }
+
+static bool inherits(const Remapper::RemapContext &r, const Sym &parentName, const Type::Any &child) {
+  if (auto c = get_opt<Type::Struct>(child); c) {
+    if (c->parents.empty()) return false; // no parent
+    return std::any_of(c->parents.begin(), c->parents.end(), [&](auto p) {
+      if (p == parentName) return true;                                    // direct parents
+      if (auto it = r.structs.find(qualified(p)); it != r.structs.end()) { // indirect parents
+        return inherits(r, it->second.name, child);
+      }
+      return false;
+    });
+  }
+  return false;
+}
+
 static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const Type::Any &targetTpe) {
   auto rhsTpe = tpe(expr);
 
@@ -151,28 +166,35 @@ static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const
     return expr;
   }
 
-  auto declArrTpe = get_opt<Type::Ptr>(targetTpe);
-  auto rhsArrTpe = get_opt<Type::Ptr>(rhsTpe);
-  if (auto rhsAlias = get_opt<Expr::Alias>(expr); declArrTpe && declArrTpe->component == rhsTpe && rhsAlias) {
+  auto tgtPtrTpe = get_opt<Type::Ptr>(targetTpe);
+  auto rhsPtrTpe = get_opt<Type::Ptr>(rhsTpe);
+  if (auto rhsAlias = get_opt<Expr::Alias>(expr); tgtPtrTpe && tgtPtrTpe->component == rhsTpe && rhsAlias) {
     // Handle decay
     //   int rhs = /* */;
     //   int &lhs = rhs;
     return Expr::RefTo(rhsAlias->ref, {}, rhsTpe);
-  } else if (auto rhsIndex = get_opt<Expr::Index>(expr); declArrTpe && declArrTpe->component == rhsTpe && rhsIndex) {
+  } else if (auto rhsIndex = get_opt<Expr::Index>(expr); tgtPtrTpe && tgtPtrTpe->component == rhsTpe && rhsIndex) {
     // Handle decay
     //   auto rhs = xs[0];
     //   int &lhs = rhs;
     return Expr::RefTo(rhsIndex->lhs, rhsIndex->idx, rhsIndex->component);
-  } else if (!rhsArrTpe && declArrTpe) {
+  } else if (!rhsPtrTpe && tgtPtrTpe) {
     // Handle promote
     //   int rhs = /* */;
     //   int *lhs = &rhs;
     return Expr::RefTo(r.newVar(expr), {}, rhsTpe);
-  } else if (rhsArrTpe && targetTpe == rhsArrTpe->component) {
+  } else if (rhsPtrTpe && targetTpe == rhsPtrTpe->component) {
     // Handle decay
     //   int &rhs = /* */;
     //   int lhs = rhs; // lhs = rhs[0];
     return Expr::Index(r.newVar(expr), Remapper::integralConstOfType(Type::IntS64(), 0), targetTpe);
+  } else if (rhsPtrTpe && tgtPtrTpe) {
+    if (auto tgtStruct = get_opt<Type::Struct>(tgtPtrTpe->component); tgtStruct && inherits(r, tgtStruct->name, rhsPtrTpe->component)) {
+      return Expr::Cast(r.newVar(expr), *tgtPtrTpe);
+    } else {
+      r.push(Stmt::Comment("Cannot conform ptr type rhs " + repr(rhsTpe) + " with target ptr " + repr(targetTpe)));
+      return Expr::Alias(Term::Poison(rhsTpe));
+    }
   } else {
     r.push(Stmt::Comment("Cannot conform rhs " + repr(rhsTpe) + " with target " + repr(targetTpe)));
     return Expr::Alias(Term::Poison(rhsTpe));
@@ -252,9 +274,17 @@ std::pair<std::string, Function> Remapper::handleCall(const clang::FunctionDecl 
                     auto member = Term::Select({receiver->named}, Named(memberName, tpe));
                     auto rhs = conform(r, handleExpr(init->getInit(), r), tpe);
                     r.push(Stmt::Mut(member, rhs, true));
-                  } else if (init->isBaseInitializer())
-                    r.push(Stmt::Comment("Unimplemented initialiser:" + pretty_string(init->getInit(), context)));
-                  else throw std::logic_error("Unknown initializer type!");
+                  } else if (init->isBaseInitializer()) {
+
+//                    auto instance = Term::Select({}, receiver->named);
+
+                    auto rhs = conform(r, handleExpr(init->getInit(), r), handleType(init->getInit()->getType(), r) );
+//                    r.push(Stmt::Mut(member, rhs, true));
+
+
+//                    init.get
+//                      r.push(Stmt::Comment("Unimplemented initialiser: " + repr(rhs)));
+                  } else throw std::logic_error("Unknown initializer type!");
                 }
                 handleStmt(decl->getBody(), r);
                 r.push(Stmt::Return(Expr::Alias(Term::Unit0Const())));
@@ -385,16 +415,15 @@ Type::Any Remapper::handleType(clang::QualType tpe, RemapContext &r) const {
           case clang::BuiltinType::UInt: return Type::IntU32();
           case clang::BuiltinType::Short: return Type::IntS16();
           case clang::BuiltinType::UShort: return Type::IntU16();
+          case clang::BuiltinType::Char_S:
           case clang::BuiltinType::SChar: return Type::IntS8();
+          case clang::BuiltinType::Char_U:
           case clang::BuiltinType::UChar: return Type::IntU8();
           case clang::BuiltinType::Float: return Type::Float32();
           case clang::BuiltinType::Double: return Type::Float64();
           case clang::BuiltinType::Bool: return Type::Bool1();
           case clang::BuiltinType::Void: return Type::Unit0();
-          default:
-            llvm::outs() << "Unhandled builtin type:\n";
-            tpe->dump();
-            return Type::Nothing();
+          default: llvm::outs() << "Unhandled builtin type:" << dump_to_string(*tpe, context); return Type::Nothing();
         }
       },
       [&](const clang::PointerType *tpe) { return refTpe(handleType(tpe->getPointeeType(), r)); }, // T*
@@ -412,7 +441,9 @@ Type::Any Remapper::handleType(clang::QualType tpe, RemapContext &r) const {
       }, // T
       [&](const clang::RecordType *tpe) -> Type::Any {
         auto name = handleRecord(tpe->getDecl(), r);
-        return Type::Struct(Sym({name}), {}, {}, {});
+        if (auto it = r.structs.find(name); it != r.structs.end()) {
+          return Type::Struct(it->second.name, it->second.tpeVars, {}, it->second.parents);
+        } else throw std::logic_error("Cannot resolve record type: " + name);
       } // struct T { ... }
   );
   if (!result) {
@@ -755,7 +786,12 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
         for (size_t i = 0; i < expr->getNumArgs(); ++i)
           args.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn.args[i].named.tpe)));
 
-        return Expr::Invoke(Sym({name}), {}, ref(receiver), args, {}, handleType(expr->getCallReturnType(context), r));
+        return Expr::Invoke(                                                          //
+            Sym({name}),                                                              //
+            {},                                                                       //
+            r.newVar(conform(r, Expr::Alias(ref(receiver)), fn.receiver->named.tpe)), //
+            args,                                                                     //
+            {}, handleType(expr->getCallReturnType(context), r));
       },
       [&](const clang::CXXOperatorCallExpr *expr) {
         auto [name, fn] = handleCall(expr->getCalleeDecl()->getAsFunction(), r);
@@ -768,7 +804,12 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
         for (size_t i = 1; i < expr->getNumArgs(); ++i) {
           args.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn.args[i - 1].named.tpe)));
         }
-        return Expr::Invoke(Sym({name}), {}, ref(receiver), args, {}, handleType(expr->getCallReturnType(context), r));
+        return Expr::Invoke(                                                          //
+            Sym({name}),                                                              //
+            {},                                                                       //
+            r.newVar(conform(r, Expr::Alias(ref(receiver)), fn.receiver->named.tpe)) //
+            , args,                                                                   //
+            {}, handleType(expr->getCallReturnType(context), r));
       },
       [&](const clang::CallExpr *expr) { //  method(...)
         auto [name, fn] = handleCall(expr->getCalleeDecl()->getAsFunction(), r);

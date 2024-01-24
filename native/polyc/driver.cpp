@@ -78,6 +78,14 @@ int fired_main(fire::optional<std::string> maybePath = fire::arg({0, "Input sour
     auto program = polyast::program_from_json(polyast::hashed_from_json(raw));
 
     compiler::initialise();
+    std::cout << "[POLYC] Compiling program:\n";
+
+    for (auto def : program.defs) {
+      std::cout << def << "\n";
+    }
+
+
+
     auto compilation = compiler::compile(program, compiler::Options{target, rawArch}, opt);
     if (verbose) std::cerr << repr(compilation) << std::endl;
     if (!compilation.messages.empty()) std::cerr << compilation.messages << std::endl;
