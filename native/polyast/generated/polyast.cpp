@@ -39,6 +39,7 @@ std::ostream &TypeKind::operator<<(std::ostream &os, const TypeKind::Any &x) {
 bool TypeKind::operator==(const TypeKind::Base &, const TypeKind::Base &) { return true; }
 
 TypeKind::None::None() noexcept : TypeKind::Base() {}
+uint32_t TypeKind::None::id() const { return 0; };
 std::ostream &TypeKind::operator<<(std::ostream &os, const TypeKind::None &x) {
   os << "None(";
   os << ')';
@@ -48,6 +49,7 @@ bool TypeKind::operator==(const TypeKind::None &, const TypeKind::None &) { retu
 TypeKind::None::operator TypeKind::Any() const { return std::make_shared<None>(*this); }
 
 TypeKind::Ref::Ref() noexcept : TypeKind::Base() {}
+uint32_t TypeKind::Ref::id() const { return 1; };
 std::ostream &TypeKind::operator<<(std::ostream &os, const TypeKind::Ref &x) {
   os << "Ref(";
   os << ')';
@@ -57,6 +59,7 @@ bool TypeKind::operator==(const TypeKind::Ref &, const TypeKind::Ref &) { return
 TypeKind::Ref::operator TypeKind::Any() const { return std::make_shared<Ref>(*this); }
 
 TypeKind::Integral::Integral() noexcept : TypeKind::Base() {}
+uint32_t TypeKind::Integral::id() const { return 2; };
 std::ostream &TypeKind::operator<<(std::ostream &os, const TypeKind::Integral &x) {
   os << "Integral(";
   os << ')';
@@ -66,6 +69,7 @@ bool TypeKind::operator==(const TypeKind::Integral &, const TypeKind::Integral &
 TypeKind::Integral::operator TypeKind::Any() const { return std::make_shared<Integral>(*this); }
 
 TypeKind::Fractional::Fractional() noexcept : TypeKind::Base() {}
+uint32_t TypeKind::Fractional::id() const { return 3; };
 std::ostream &TypeKind::operator<<(std::ostream &os, const TypeKind::Fractional &x) {
   os << "Fractional(";
   os << ')';
@@ -85,6 +89,7 @@ bool Type::operator==(const Type::Base &l, const Type::Base &r) {
 TypeKind::Any Type::kind(const Type::Any& x){ return select<&Type::Base::kind>(x); }
 
 Type::Float16::Float16() noexcept : Type::Base(TypeKind::Fractional()) {}
+uint32_t Type::Float16::id() const { return 0; };
 std::ostream &Type::operator<<(std::ostream &os, const Type::Float16 &x) {
   os << "Float16(";
   os << ')';
@@ -94,6 +99,7 @@ bool Type::operator==(const Type::Float16 &, const Type::Float16 &) { return tru
 Type::Float16::operator Type::Any() const { return std::make_shared<Float16>(*this); }
 
 Type::Float32::Float32() noexcept : Type::Base(TypeKind::Fractional()) {}
+uint32_t Type::Float32::id() const { return 1; };
 std::ostream &Type::operator<<(std::ostream &os, const Type::Float32 &x) {
   os << "Float32(";
   os << ')';
@@ -103,6 +109,7 @@ bool Type::operator==(const Type::Float32 &, const Type::Float32 &) { return tru
 Type::Float32::operator Type::Any() const { return std::make_shared<Float32>(*this); }
 
 Type::Float64::Float64() noexcept : Type::Base(TypeKind::Fractional()) {}
+uint32_t Type::Float64::id() const { return 2; };
 std::ostream &Type::operator<<(std::ostream &os, const Type::Float64 &x) {
   os << "Float64(";
   os << ')';
@@ -112,6 +119,7 @@ bool Type::operator==(const Type::Float64 &, const Type::Float64 &) { return tru
 Type::Float64::operator Type::Any() const { return std::make_shared<Float64>(*this); }
 
 Type::IntU8::IntU8() noexcept : Type::Base(TypeKind::Integral()) {}
+uint32_t Type::IntU8::id() const { return 3; };
 std::ostream &Type::operator<<(std::ostream &os, const Type::IntU8 &x) {
   os << "IntU8(";
   os << ')';
@@ -121,6 +129,7 @@ bool Type::operator==(const Type::IntU8 &, const Type::IntU8 &) { return true; }
 Type::IntU8::operator Type::Any() const { return std::make_shared<IntU8>(*this); }
 
 Type::IntU16::IntU16() noexcept : Type::Base(TypeKind::Integral()) {}
+uint32_t Type::IntU16::id() const { return 4; };
 std::ostream &Type::operator<<(std::ostream &os, const Type::IntU16 &x) {
   os << "IntU16(";
   os << ')';
@@ -130,6 +139,7 @@ bool Type::operator==(const Type::IntU16 &, const Type::IntU16 &) { return true;
 Type::IntU16::operator Type::Any() const { return std::make_shared<IntU16>(*this); }
 
 Type::IntU32::IntU32() noexcept : Type::Base(TypeKind::Integral()) {}
+uint32_t Type::IntU32::id() const { return 5; };
 std::ostream &Type::operator<<(std::ostream &os, const Type::IntU32 &x) {
   os << "IntU32(";
   os << ')';
@@ -139,6 +149,7 @@ bool Type::operator==(const Type::IntU32 &, const Type::IntU32 &) { return true;
 Type::IntU32::operator Type::Any() const { return std::make_shared<IntU32>(*this); }
 
 Type::IntU64::IntU64() noexcept : Type::Base(TypeKind::Integral()) {}
+uint32_t Type::IntU64::id() const { return 6; };
 std::ostream &Type::operator<<(std::ostream &os, const Type::IntU64 &x) {
   os << "IntU64(";
   os << ')';
@@ -148,6 +159,7 @@ bool Type::operator==(const Type::IntU64 &, const Type::IntU64 &) { return true;
 Type::IntU64::operator Type::Any() const { return std::make_shared<IntU64>(*this); }
 
 Type::IntS8::IntS8() noexcept : Type::Base(TypeKind::Integral()) {}
+uint32_t Type::IntS8::id() const { return 7; };
 std::ostream &Type::operator<<(std::ostream &os, const Type::IntS8 &x) {
   os << "IntS8(";
   os << ')';
@@ -157,6 +169,7 @@ bool Type::operator==(const Type::IntS8 &, const Type::IntS8 &) { return true; }
 Type::IntS8::operator Type::Any() const { return std::make_shared<IntS8>(*this); }
 
 Type::IntS16::IntS16() noexcept : Type::Base(TypeKind::Integral()) {}
+uint32_t Type::IntS16::id() const { return 8; };
 std::ostream &Type::operator<<(std::ostream &os, const Type::IntS16 &x) {
   os << "IntS16(";
   os << ')';
@@ -166,6 +179,7 @@ bool Type::operator==(const Type::IntS16 &, const Type::IntS16 &) { return true;
 Type::IntS16::operator Type::Any() const { return std::make_shared<IntS16>(*this); }
 
 Type::IntS32::IntS32() noexcept : Type::Base(TypeKind::Integral()) {}
+uint32_t Type::IntS32::id() const { return 9; };
 std::ostream &Type::operator<<(std::ostream &os, const Type::IntS32 &x) {
   os << "IntS32(";
   os << ')';
@@ -175,6 +189,7 @@ bool Type::operator==(const Type::IntS32 &, const Type::IntS32 &) { return true;
 Type::IntS32::operator Type::Any() const { return std::make_shared<IntS32>(*this); }
 
 Type::IntS64::IntS64() noexcept : Type::Base(TypeKind::Integral()) {}
+uint32_t Type::IntS64::id() const { return 10; };
 std::ostream &Type::operator<<(std::ostream &os, const Type::IntS64 &x) {
   os << "IntS64(";
   os << ')';
@@ -184,6 +199,7 @@ bool Type::operator==(const Type::IntS64 &, const Type::IntS64 &) { return true;
 Type::IntS64::operator Type::Any() const { return std::make_shared<IntS64>(*this); }
 
 Type::Nothing::Nothing() noexcept : Type::Base(TypeKind::None()) {}
+uint32_t Type::Nothing::id() const { return 11; };
 std::ostream &Type::operator<<(std::ostream &os, const Type::Nothing &x) {
   os << "Nothing(";
   os << ')';
@@ -193,6 +209,7 @@ bool Type::operator==(const Type::Nothing &, const Type::Nothing &) { return tru
 Type::Nothing::operator Type::Any() const { return std::make_shared<Nothing>(*this); }
 
 Type::Unit0::Unit0() noexcept : Type::Base(TypeKind::None()) {}
+uint32_t Type::Unit0::id() const { return 12; };
 std::ostream &Type::operator<<(std::ostream &os, const Type::Unit0 &x) {
   os << "Unit0(";
   os << ')';
@@ -202,6 +219,7 @@ bool Type::operator==(const Type::Unit0 &, const Type::Unit0 &) { return true; }
 Type::Unit0::operator Type::Any() const { return std::make_shared<Unit0>(*this); }
 
 Type::Bool1::Bool1() noexcept : Type::Base(TypeKind::Integral()) {}
+uint32_t Type::Bool1::id() const { return 13; };
 std::ostream &Type::operator<<(std::ostream &os, const Type::Bool1 &x) {
   os << "Bool1(";
   os << ')';
@@ -211,6 +229,7 @@ bool Type::operator==(const Type::Bool1 &, const Type::Bool1 &) { return true; }
 Type::Bool1::operator Type::Any() const { return std::make_shared<Bool1>(*this); }
 
 Type::Struct::Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args, std::vector<Sym> parents) noexcept : Type::Base(TypeKind::Ref()), name(std::move(name)), tpeVars(std::move(tpeVars)), args(std::move(args)), parents(std::move(parents)) {}
+uint32_t Type::Struct::id() const { return 14; };
 std::ostream &Type::operator<<(std::ostream &os, const Type::Struct &x) {
   os << "Struct(";
   os << x.name;
@@ -244,6 +263,7 @@ bool Type::operator==(const Type::Struct &l, const Type::Struct &r) {
 Type::Struct::operator Type::Any() const { return std::make_shared<Struct>(*this); }
 
 Type::Ptr::Ptr(Type::Any component, std::optional<int32_t> length, TypeSpace::Any space) noexcept : Type::Base(TypeKind::Ref()), component(std::move(component)), length(std::move(length)), space(std::move(space)) {}
+uint32_t Type::Ptr::id() const { return 15; };
 std::ostream &Type::operator<<(std::ostream &os, const Type::Ptr &x) {
   os << "Ptr(";
   os << x.component;
@@ -264,6 +284,7 @@ bool Type::operator==(const Type::Ptr &l, const Type::Ptr &r) {
 Type::Ptr::operator Type::Any() const { return std::make_shared<Ptr>(*this); }
 
 Type::Var::Var(std::string name) noexcept : Type::Base(TypeKind::None()), name(std::move(name)) {}
+uint32_t Type::Var::id() const { return 16; };
 std::ostream &Type::operator<<(std::ostream &os, const Type::Var &x) {
   os << "Var(";
   os << '"' << x.name << '"';
@@ -276,6 +297,7 @@ bool Type::operator==(const Type::Var &l, const Type::Var &r) {
 Type::Var::operator Type::Any() const { return std::make_shared<Var>(*this); }
 
 Type::Exec::Exec(std::vector<std::string> tpeVars, std::vector<Type::Any> args, Type::Any rtn) noexcept : Type::Base(TypeKind::None()), tpeVars(std::move(tpeVars)), args(std::move(args)), rtn(std::move(rtn)) {}
+uint32_t Type::Exec::id() const { return 17; };
 std::ostream &Type::operator<<(std::ostream &os, const Type::Exec &x) {
   os << "Exec(";
   os << '{';
@@ -331,6 +353,7 @@ bool Term::operator==(const Term::Base &l, const Term::Base &r) {
 Type::Any Term::tpe(const Term::Any& x){ return select<&Term::Base::tpe>(x); }
 
 Term::Select::Select(std::vector<Named> init, Named last) noexcept : Term::Base(last.tpe), init(std::move(init)), last(std::move(last)) {}
+uint32_t Term::Select::id() const { return 0; };
 std::ostream &Term::operator<<(std::ostream &os, const Term::Select &x) {
   os << "Select(";
   os << '{';
@@ -350,6 +373,7 @@ bool Term::operator==(const Term::Select &l, const Term::Select &r) {
 Term::Select::operator Term::Any() const { return std::make_shared<Select>(*this); }
 
 Term::Poison::Poison(Type::Any t) noexcept : Term::Base(t), t(std::move(t)) {}
+uint32_t Term::Poison::id() const { return 1; };
 std::ostream &Term::operator<<(std::ostream &os, const Term::Poison &x) {
   os << "Poison(";
   os << x.t;
@@ -362,6 +386,7 @@ bool Term::operator==(const Term::Poison &l, const Term::Poison &r) {
 Term::Poison::operator Term::Any() const { return std::make_shared<Poison>(*this); }
 
 Term::Float16Const::Float16Const(float value) noexcept : Term::Base(Type::Float16()), value(value) {}
+uint32_t Term::Float16Const::id() const { return 2; };
 std::ostream &Term::operator<<(std::ostream &os, const Term::Float16Const &x) {
   os << "Float16Const(";
   os << x.value;
@@ -374,6 +399,7 @@ bool Term::operator==(const Term::Float16Const &l, const Term::Float16Const &r) 
 Term::Float16Const::operator Term::Any() const { return std::make_shared<Float16Const>(*this); }
 
 Term::Float32Const::Float32Const(float value) noexcept : Term::Base(Type::Float32()), value(value) {}
+uint32_t Term::Float32Const::id() const { return 3; };
 std::ostream &Term::operator<<(std::ostream &os, const Term::Float32Const &x) {
   os << "Float32Const(";
   os << x.value;
@@ -386,6 +412,7 @@ bool Term::operator==(const Term::Float32Const &l, const Term::Float32Const &r) 
 Term::Float32Const::operator Term::Any() const { return std::make_shared<Float32Const>(*this); }
 
 Term::Float64Const::Float64Const(double value) noexcept : Term::Base(Type::Float64()), value(value) {}
+uint32_t Term::Float64Const::id() const { return 4; };
 std::ostream &Term::operator<<(std::ostream &os, const Term::Float64Const &x) {
   os << "Float64Const(";
   os << x.value;
@@ -398,6 +425,7 @@ bool Term::operator==(const Term::Float64Const &l, const Term::Float64Const &r) 
 Term::Float64Const::operator Term::Any() const { return std::make_shared<Float64Const>(*this); }
 
 Term::IntU8Const::IntU8Const(int8_t value) noexcept : Term::Base(Type::IntU8()), value(value) {}
+uint32_t Term::IntU8Const::id() const { return 5; };
 std::ostream &Term::operator<<(std::ostream &os, const Term::IntU8Const &x) {
   os << "IntU8Const(";
   os << x.value;
@@ -410,6 +438,7 @@ bool Term::operator==(const Term::IntU8Const &l, const Term::IntU8Const &r) {
 Term::IntU8Const::operator Term::Any() const { return std::make_shared<IntU8Const>(*this); }
 
 Term::IntU16Const::IntU16Const(uint16_t value) noexcept : Term::Base(Type::IntU16()), value(value) {}
+uint32_t Term::IntU16Const::id() const { return 6; };
 std::ostream &Term::operator<<(std::ostream &os, const Term::IntU16Const &x) {
   os << "IntU16Const(";
   os << x.value;
@@ -422,6 +451,7 @@ bool Term::operator==(const Term::IntU16Const &l, const Term::IntU16Const &r) {
 Term::IntU16Const::operator Term::Any() const { return std::make_shared<IntU16Const>(*this); }
 
 Term::IntU32Const::IntU32Const(int32_t value) noexcept : Term::Base(Type::IntU32()), value(value) {}
+uint32_t Term::IntU32Const::id() const { return 7; };
 std::ostream &Term::operator<<(std::ostream &os, const Term::IntU32Const &x) {
   os << "IntU32Const(";
   os << x.value;
@@ -434,6 +464,7 @@ bool Term::operator==(const Term::IntU32Const &l, const Term::IntU32Const &r) {
 Term::IntU32Const::operator Term::Any() const { return std::make_shared<IntU32Const>(*this); }
 
 Term::IntU64Const::IntU64Const(int64_t value) noexcept : Term::Base(Type::IntU64()), value(value) {}
+uint32_t Term::IntU64Const::id() const { return 8; };
 std::ostream &Term::operator<<(std::ostream &os, const Term::IntU64Const &x) {
   os << "IntU64Const(";
   os << x.value;
@@ -446,6 +477,7 @@ bool Term::operator==(const Term::IntU64Const &l, const Term::IntU64Const &r) {
 Term::IntU64Const::operator Term::Any() const { return std::make_shared<IntU64Const>(*this); }
 
 Term::IntS8Const::IntS8Const(int8_t value) noexcept : Term::Base(Type::IntS8()), value(value) {}
+uint32_t Term::IntS8Const::id() const { return 9; };
 std::ostream &Term::operator<<(std::ostream &os, const Term::IntS8Const &x) {
   os << "IntS8Const(";
   os << x.value;
@@ -458,6 +490,7 @@ bool Term::operator==(const Term::IntS8Const &l, const Term::IntS8Const &r) {
 Term::IntS8Const::operator Term::Any() const { return std::make_shared<IntS8Const>(*this); }
 
 Term::IntS16Const::IntS16Const(int16_t value) noexcept : Term::Base(Type::IntS16()), value(value) {}
+uint32_t Term::IntS16Const::id() const { return 10; };
 std::ostream &Term::operator<<(std::ostream &os, const Term::IntS16Const &x) {
   os << "IntS16Const(";
   os << x.value;
@@ -470,6 +503,7 @@ bool Term::operator==(const Term::IntS16Const &l, const Term::IntS16Const &r) {
 Term::IntS16Const::operator Term::Any() const { return std::make_shared<IntS16Const>(*this); }
 
 Term::IntS32Const::IntS32Const(int32_t value) noexcept : Term::Base(Type::IntS32()), value(value) {}
+uint32_t Term::IntS32Const::id() const { return 11; };
 std::ostream &Term::operator<<(std::ostream &os, const Term::IntS32Const &x) {
   os << "IntS32Const(";
   os << x.value;
@@ -482,6 +516,7 @@ bool Term::operator==(const Term::IntS32Const &l, const Term::IntS32Const &r) {
 Term::IntS32Const::operator Term::Any() const { return std::make_shared<IntS32Const>(*this); }
 
 Term::IntS64Const::IntS64Const(int64_t value) noexcept : Term::Base(Type::IntS64()), value(value) {}
+uint32_t Term::IntS64Const::id() const { return 12; };
 std::ostream &Term::operator<<(std::ostream &os, const Term::IntS64Const &x) {
   os << "IntS64Const(";
   os << x.value;
@@ -494,6 +529,7 @@ bool Term::operator==(const Term::IntS64Const &l, const Term::IntS64Const &r) {
 Term::IntS64Const::operator Term::Any() const { return std::make_shared<IntS64Const>(*this); }
 
 Term::Unit0Const::Unit0Const() noexcept : Term::Base(Type::Unit0()) {}
+uint32_t Term::Unit0Const::id() const { return 13; };
 std::ostream &Term::operator<<(std::ostream &os, const Term::Unit0Const &x) {
   os << "Unit0Const(";
   os << ')';
@@ -503,6 +539,7 @@ bool Term::operator==(const Term::Unit0Const &, const Term::Unit0Const &) { retu
 Term::Unit0Const::operator Term::Any() const { return std::make_shared<Unit0Const>(*this); }
 
 Term::Bool1Const::Bool1Const(bool value) noexcept : Term::Base(Type::Bool1()), value(value) {}
+uint32_t Term::Bool1Const::id() const { return 14; };
 std::ostream &Term::operator<<(std::ostream &os, const Term::Bool1Const &x) {
   os << "Bool1Const(";
   os << x.value;
@@ -522,6 +559,7 @@ std::ostream &TypeSpace::operator<<(std::ostream &os, const TypeSpace::Any &x) {
 bool TypeSpace::operator==(const TypeSpace::Base &, const TypeSpace::Base &) { return true; }
 
 TypeSpace::Global::Global() noexcept : TypeSpace::Base() {}
+uint32_t TypeSpace::Global::id() const { return 0; };
 std::ostream &TypeSpace::operator<<(std::ostream &os, const TypeSpace::Global &x) {
   os << "Global(";
   os << ')';
@@ -531,6 +569,7 @@ bool TypeSpace::operator==(const TypeSpace::Global &, const TypeSpace::Global &)
 TypeSpace::Global::operator TypeSpace::Any() const { return std::make_shared<Global>(*this); }
 
 TypeSpace::Local::Local() noexcept : TypeSpace::Base() {}
+uint32_t TypeSpace::Local::id() const { return 1; };
 std::ostream &TypeSpace::operator<<(std::ostream &os, const TypeSpace::Local &x) {
   os << "Local(";
   os << ')';
@@ -570,6 +609,7 @@ std::vector<Term::Any> Spec::terms(const Spec::Any& x){ return select<&Spec::Bas
 Type::Any Spec::tpe(const Spec::Any& x){ return select<&Spec::Base::tpe>(x); }
 
 Spec::Assert::Assert() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Nothing()) {}
+uint32_t Spec::Assert::id() const { return 0; };
 std::ostream &Spec::operator<<(std::ostream &os, const Spec::Assert &x) {
   os << "Assert(";
   os << ')';
@@ -579,6 +619,7 @@ bool Spec::operator==(const Spec::Assert &, const Spec::Assert &) { return true;
 Spec::Assert::operator Spec::Any() const { return std::make_shared<Assert>(*this); }
 
 Spec::GpuBarrierGlobal::GpuBarrierGlobal() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Unit0()) {}
+uint32_t Spec::GpuBarrierGlobal::id() const { return 1; };
 std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuBarrierGlobal &x) {
   os << "GpuBarrierGlobal(";
   os << ')';
@@ -588,6 +629,7 @@ bool Spec::operator==(const Spec::GpuBarrierGlobal &, const Spec::GpuBarrierGlob
 Spec::GpuBarrierGlobal::operator Spec::Any() const { return std::make_shared<GpuBarrierGlobal>(*this); }
 
 Spec::GpuBarrierLocal::GpuBarrierLocal() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Unit0()) {}
+uint32_t Spec::GpuBarrierLocal::id() const { return 2; };
 std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuBarrierLocal &x) {
   os << "GpuBarrierLocal(";
   os << ')';
@@ -597,6 +639,7 @@ bool Spec::operator==(const Spec::GpuBarrierLocal &, const Spec::GpuBarrierLocal
 Spec::GpuBarrierLocal::operator Spec::Any() const { return std::make_shared<GpuBarrierLocal>(*this); }
 
 Spec::GpuBarrierAll::GpuBarrierAll() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Unit0()) {}
+uint32_t Spec::GpuBarrierAll::id() const { return 3; };
 std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuBarrierAll &x) {
   os << "GpuBarrierAll(";
   os << ')';
@@ -606,6 +649,7 @@ bool Spec::operator==(const Spec::GpuBarrierAll &, const Spec::GpuBarrierAll &) 
 Spec::GpuBarrierAll::operator Spec::Any() const { return std::make_shared<GpuBarrierAll>(*this); }
 
 Spec::GpuFenceGlobal::GpuFenceGlobal() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Unit0()) {}
+uint32_t Spec::GpuFenceGlobal::id() const { return 4; };
 std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuFenceGlobal &x) {
   os << "GpuFenceGlobal(";
   os << ')';
@@ -615,6 +659,7 @@ bool Spec::operator==(const Spec::GpuFenceGlobal &, const Spec::GpuFenceGlobal &
 Spec::GpuFenceGlobal::operator Spec::Any() const { return std::make_shared<GpuFenceGlobal>(*this); }
 
 Spec::GpuFenceLocal::GpuFenceLocal() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Unit0()) {}
+uint32_t Spec::GpuFenceLocal::id() const { return 5; };
 std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuFenceLocal &x) {
   os << "GpuFenceLocal(";
   os << ')';
@@ -624,6 +669,7 @@ bool Spec::operator==(const Spec::GpuFenceLocal &, const Spec::GpuFenceLocal &) 
 Spec::GpuFenceLocal::operator Spec::Any() const { return std::make_shared<GpuFenceLocal>(*this); }
 
 Spec::GpuFenceAll::GpuFenceAll() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Unit0()) {}
+uint32_t Spec::GpuFenceAll::id() const { return 6; };
 std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuFenceAll &x) {
   os << "GpuFenceAll(";
   os << ')';
@@ -633,6 +679,7 @@ bool Spec::operator==(const Spec::GpuFenceAll &, const Spec::GpuFenceAll &) { re
 Spec::GpuFenceAll::operator Spec::Any() const { return std::make_shared<GpuFenceAll>(*this); }
 
 Spec::GpuGlobalIdx::GpuGlobalIdx(Term::Any dim) noexcept : Spec::Base({Overload({Type::IntU32()},Type::IntU32())}, {dim}, Type::IntU32()), dim(std::move(dim)) {}
+uint32_t Spec::GpuGlobalIdx::id() const { return 7; };
 std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuGlobalIdx &x) {
   os << "GpuGlobalIdx(";
   os << x.dim;
@@ -645,6 +692,7 @@ bool Spec::operator==(const Spec::GpuGlobalIdx &l, const Spec::GpuGlobalIdx &r) 
 Spec::GpuGlobalIdx::operator Spec::Any() const { return std::make_shared<GpuGlobalIdx>(*this); }
 
 Spec::GpuGlobalSize::GpuGlobalSize(Term::Any dim) noexcept : Spec::Base({Overload({Type::IntU32()},Type::IntU32())}, {dim}, Type::IntU32()), dim(std::move(dim)) {}
+uint32_t Spec::GpuGlobalSize::id() const { return 8; };
 std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuGlobalSize &x) {
   os << "GpuGlobalSize(";
   os << x.dim;
@@ -657,6 +705,7 @@ bool Spec::operator==(const Spec::GpuGlobalSize &l, const Spec::GpuGlobalSize &r
 Spec::GpuGlobalSize::operator Spec::Any() const { return std::make_shared<GpuGlobalSize>(*this); }
 
 Spec::GpuGroupIdx::GpuGroupIdx(Term::Any dim) noexcept : Spec::Base({Overload({Type::IntU32()},Type::IntU32())}, {dim}, Type::IntU32()), dim(std::move(dim)) {}
+uint32_t Spec::GpuGroupIdx::id() const { return 9; };
 std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuGroupIdx &x) {
   os << "GpuGroupIdx(";
   os << x.dim;
@@ -669,6 +718,7 @@ bool Spec::operator==(const Spec::GpuGroupIdx &l, const Spec::GpuGroupIdx &r) {
 Spec::GpuGroupIdx::operator Spec::Any() const { return std::make_shared<GpuGroupIdx>(*this); }
 
 Spec::GpuGroupSize::GpuGroupSize(Term::Any dim) noexcept : Spec::Base({Overload({Type::IntU32()},Type::IntU32())}, {dim}, Type::IntU32()), dim(std::move(dim)) {}
+uint32_t Spec::GpuGroupSize::id() const { return 10; };
 std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuGroupSize &x) {
   os << "GpuGroupSize(";
   os << x.dim;
@@ -681,6 +731,7 @@ bool Spec::operator==(const Spec::GpuGroupSize &l, const Spec::GpuGroupSize &r) 
 Spec::GpuGroupSize::operator Spec::Any() const { return std::make_shared<GpuGroupSize>(*this); }
 
 Spec::GpuLocalIdx::GpuLocalIdx(Term::Any dim) noexcept : Spec::Base({Overload({Type::IntU32()},Type::IntU32())}, {dim}, Type::IntU32()), dim(std::move(dim)) {}
+uint32_t Spec::GpuLocalIdx::id() const { return 11; };
 std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuLocalIdx &x) {
   os << "GpuLocalIdx(";
   os << x.dim;
@@ -693,6 +744,7 @@ bool Spec::operator==(const Spec::GpuLocalIdx &l, const Spec::GpuLocalIdx &r) {
 Spec::GpuLocalIdx::operator Spec::Any() const { return std::make_shared<GpuLocalIdx>(*this); }
 
 Spec::GpuLocalSize::GpuLocalSize(Term::Any dim) noexcept : Spec::Base({Overload({Type::IntU32()},Type::IntU32())}, {dim}, Type::IntU32()), dim(std::move(dim)) {}
+uint32_t Spec::GpuLocalSize::id() const { return 12; };
 std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuLocalSize &x) {
   os << "GpuLocalSize(";
   os << x.dim;
@@ -717,6 +769,7 @@ std::vector<Term::Any> Intr::terms(const Intr::Any& x){ return select<&Intr::Bas
 Type::Any Intr::tpe(const Intr::Any& x){ return select<&Intr::Base::tpe>(x); }
 
 Intr::BNot::BNot(Term::Any x, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8()},Type::IntU8()),Overload({Type::IntU16()},Type::IntU16()),Overload({Type::IntU32()},Type::IntU32()),Overload({Type::IntU64()},Type::IntU64()),Overload({Type::IntS8()},Type::IntS8()),Overload({Type::IntS16()},Type::IntS16()),Overload({Type::IntS32()},Type::IntS32()),Overload({Type::IntS64()},Type::IntS64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Intr::BNot::id() const { return 0; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::BNot &x) {
   os << "BNot(";
   os << x.x;
@@ -731,6 +784,7 @@ bool Intr::operator==(const Intr::BNot &l, const Intr::BNot &r) {
 Intr::BNot::operator Intr::Any() const { return std::make_shared<BNot>(*this); }
 
 Intr::LogicNot::LogicNot(Term::Any x) noexcept : Intr::Base({Overload({Type::Bool1(),Type::Bool1()},Type::Bool1())}, {x}, Type::Bool1()), x(std::move(x)) {}
+uint32_t Intr::LogicNot::id() const { return 1; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicNot &x) {
   os << "LogicNot(";
   os << x.x;
@@ -743,6 +797,7 @@ bool Intr::operator==(const Intr::LogicNot &l, const Intr::LogicNot &r) {
 Intr::LogicNot::operator Intr::Any() const { return std::make_shared<LogicNot>(*this); }
 
 Intr::Pos::Pos(Term::Any x, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Intr::Pos::id() const { return 2; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::Pos &x) {
   os << "Pos(";
   os << x.x;
@@ -757,6 +812,7 @@ bool Intr::operator==(const Intr::Pos &l, const Intr::Pos &r) {
 Intr::Pos::operator Intr::Any() const { return std::make_shared<Pos>(*this); }
 
 Intr::Neg::Neg(Term::Any x, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Intr::Neg::id() const { return 3; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::Neg &x) {
   os << "Neg(";
   os << x.x;
@@ -771,6 +827,7 @@ bool Intr::operator==(const Intr::Neg &l, const Intr::Neg &r) {
 Intr::Neg::operator Intr::Any() const { return std::make_shared<Neg>(*this); }
 
 Intr::Add::Add(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+uint32_t Intr::Add::id() const { return 4; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::Add &x) {
   os << "Add(";
   os << x.x;
@@ -787,6 +844,7 @@ bool Intr::operator==(const Intr::Add &l, const Intr::Add &r) {
 Intr::Add::operator Intr::Any() const { return std::make_shared<Add>(*this); }
 
 Intr::Sub::Sub(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+uint32_t Intr::Sub::id() const { return 5; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::Sub &x) {
   os << "Sub(";
   os << x.x;
@@ -803,6 +861,7 @@ bool Intr::operator==(const Intr::Sub &l, const Intr::Sub &r) {
 Intr::Sub::operator Intr::Any() const { return std::make_shared<Sub>(*this); }
 
 Intr::Mul::Mul(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+uint32_t Intr::Mul::id() const { return 6; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::Mul &x) {
   os << "Mul(";
   os << x.x;
@@ -819,6 +878,7 @@ bool Intr::operator==(const Intr::Mul &l, const Intr::Mul &r) {
 Intr::Mul::operator Intr::Any() const { return std::make_shared<Mul>(*this); }
 
 Intr::Div::Div(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+uint32_t Intr::Div::id() const { return 7; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::Div &x) {
   os << "Div(";
   os << x.x;
@@ -835,6 +895,7 @@ bool Intr::operator==(const Intr::Div &l, const Intr::Div &r) {
 Intr::Div::operator Intr::Any() const { return std::make_shared<Div>(*this); }
 
 Intr::Rem::Rem(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+uint32_t Intr::Rem::id() const { return 8; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::Rem &x) {
   os << "Rem(";
   os << x.x;
@@ -851,6 +912,7 @@ bool Intr::operator==(const Intr::Rem &l, const Intr::Rem &r) {
 Intr::Rem::operator Intr::Any() const { return std::make_shared<Rem>(*this); }
 
 Intr::Min::Min(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+uint32_t Intr::Min::id() const { return 9; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::Min &x) {
   os << "Min(";
   os << x.x;
@@ -867,6 +929,7 @@ bool Intr::operator==(const Intr::Min &l, const Intr::Min &r) {
 Intr::Min::operator Intr::Any() const { return std::make_shared<Min>(*this); }
 
 Intr::Max::Max(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+uint32_t Intr::Max::id() const { return 10; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::Max &x) {
   os << "Max(";
   os << x.x;
@@ -883,6 +946,7 @@ bool Intr::operator==(const Intr::Max &l, const Intr::Max &r) {
 Intr::Max::operator Intr::Any() const { return std::make_shared<Max>(*this); }
 
 Intr::BAnd::BAnd(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+uint32_t Intr::BAnd::id() const { return 11; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::BAnd &x) {
   os << "BAnd(";
   os << x.x;
@@ -899,6 +963,7 @@ bool Intr::operator==(const Intr::BAnd &l, const Intr::BAnd &r) {
 Intr::BAnd::operator Intr::Any() const { return std::make_shared<BAnd>(*this); }
 
 Intr::BOr::BOr(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+uint32_t Intr::BOr::id() const { return 12; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::BOr &x) {
   os << "BOr(";
   os << x.x;
@@ -915,6 +980,7 @@ bool Intr::operator==(const Intr::BOr &l, const Intr::BOr &r) {
 Intr::BOr::operator Intr::Any() const { return std::make_shared<BOr>(*this); }
 
 Intr::BXor::BXor(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+uint32_t Intr::BXor::id() const { return 13; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::BXor &x) {
   os << "BXor(";
   os << x.x;
@@ -931,6 +997,7 @@ bool Intr::operator==(const Intr::BXor &l, const Intr::BXor &r) {
 Intr::BXor::operator Intr::Any() const { return std::make_shared<BXor>(*this); }
 
 Intr::BSL::BSL(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+uint32_t Intr::BSL::id() const { return 14; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::BSL &x) {
   os << "BSL(";
   os << x.x;
@@ -947,6 +1014,7 @@ bool Intr::operator==(const Intr::BSL &l, const Intr::BSL &r) {
 Intr::BSL::operator Intr::Any() const { return std::make_shared<BSL>(*this); }
 
 Intr::BSR::BSR(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+uint32_t Intr::BSR::id() const { return 15; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::BSR &x) {
   os << "BSR(";
   os << x.x;
@@ -963,6 +1031,7 @@ bool Intr::operator==(const Intr::BSR &l, const Intr::BSR &r) {
 Intr::BSR::operator Intr::Any() const { return std::make_shared<BSR>(*this); }
 
 Intr::BZSR::BZSR(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+uint32_t Intr::BZSR::id() const { return 16; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::BZSR &x) {
   os << "BZSR(";
   os << x.x;
@@ -979,6 +1048,7 @@ bool Intr::operator==(const Intr::BZSR &l, const Intr::BZSR &r) {
 Intr::BZSR::operator Intr::Any() const { return std::make_shared<BZSR>(*this); }
 
 Intr::LogicAnd::LogicAnd(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Bool1(),Type::Bool1()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
+uint32_t Intr::LogicAnd::id() const { return 17; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicAnd &x) {
   os << "LogicAnd(";
   os << x.x;
@@ -993,6 +1063,7 @@ bool Intr::operator==(const Intr::LogicAnd &l, const Intr::LogicAnd &r) {
 Intr::LogicAnd::operator Intr::Any() const { return std::make_shared<LogicAnd>(*this); }
 
 Intr::LogicOr::LogicOr(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Bool1(),Type::Bool1()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
+uint32_t Intr::LogicOr::id() const { return 18; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicOr &x) {
   os << "LogicOr(";
   os << x.x;
@@ -1007,6 +1078,7 @@ bool Intr::operator==(const Intr::LogicOr &l, const Intr::LogicOr &r) {
 Intr::LogicOr::operator Intr::Any() const { return std::make_shared<LogicOr>(*this); }
 
 Intr::LogicEq::LogicEq(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Bool1()),Overload({Type::Float32(),Type::Float32()},Type::Bool1()),Overload({Type::Float64(),Type::Float64()},Type::Bool1()),Overload({Type::IntU8(),Type::IntU8()},Type::Bool1()),Overload({Type::IntU16(),Type::IntU16()},Type::Bool1()),Overload({Type::IntU32(),Type::IntU32()},Type::Bool1()),Overload({Type::IntU64(),Type::IntU64()},Type::Bool1()),Overload({Type::IntS8(),Type::IntS8()},Type::Bool1()),Overload({Type::IntS16(),Type::IntS16()},Type::Bool1()),Overload({Type::IntS32(),Type::IntS32()},Type::Bool1()),Overload({Type::IntS64(),Type::IntS64()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
+uint32_t Intr::LogicEq::id() const { return 19; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicEq &x) {
   os << "LogicEq(";
   os << x.x;
@@ -1021,6 +1093,7 @@ bool Intr::operator==(const Intr::LogicEq &l, const Intr::LogicEq &r) {
 Intr::LogicEq::operator Intr::Any() const { return std::make_shared<LogicEq>(*this); }
 
 Intr::LogicNeq::LogicNeq(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Bool1()),Overload({Type::Float32(),Type::Float32()},Type::Bool1()),Overload({Type::Float64(),Type::Float64()},Type::Bool1()),Overload({Type::IntU8(),Type::IntU8()},Type::Bool1()),Overload({Type::IntU16(),Type::IntU16()},Type::Bool1()),Overload({Type::IntU32(),Type::IntU32()},Type::Bool1()),Overload({Type::IntU64(),Type::IntU64()},Type::Bool1()),Overload({Type::IntS8(),Type::IntS8()},Type::Bool1()),Overload({Type::IntS16(),Type::IntS16()},Type::Bool1()),Overload({Type::IntS32(),Type::IntS32()},Type::Bool1()),Overload({Type::IntS64(),Type::IntS64()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
+uint32_t Intr::LogicNeq::id() const { return 20; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicNeq &x) {
   os << "LogicNeq(";
   os << x.x;
@@ -1035,6 +1108,7 @@ bool Intr::operator==(const Intr::LogicNeq &l, const Intr::LogicNeq &r) {
 Intr::LogicNeq::operator Intr::Any() const { return std::make_shared<LogicNeq>(*this); }
 
 Intr::LogicLte::LogicLte(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Bool1()),Overload({Type::Float32(),Type::Float32()},Type::Bool1()),Overload({Type::Float64(),Type::Float64()},Type::Bool1()),Overload({Type::IntU8(),Type::IntU8()},Type::Bool1()),Overload({Type::IntU16(),Type::IntU16()},Type::Bool1()),Overload({Type::IntU32(),Type::IntU32()},Type::Bool1()),Overload({Type::IntU64(),Type::IntU64()},Type::Bool1()),Overload({Type::IntS8(),Type::IntS8()},Type::Bool1()),Overload({Type::IntS16(),Type::IntS16()},Type::Bool1()),Overload({Type::IntS32(),Type::IntS32()},Type::Bool1()),Overload({Type::IntS64(),Type::IntS64()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
+uint32_t Intr::LogicLte::id() const { return 21; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicLte &x) {
   os << "LogicLte(";
   os << x.x;
@@ -1049,6 +1123,7 @@ bool Intr::operator==(const Intr::LogicLte &l, const Intr::LogicLte &r) {
 Intr::LogicLte::operator Intr::Any() const { return std::make_shared<LogicLte>(*this); }
 
 Intr::LogicGte::LogicGte(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Bool1()),Overload({Type::Float32(),Type::Float32()},Type::Bool1()),Overload({Type::Float64(),Type::Float64()},Type::Bool1()),Overload({Type::IntU8(),Type::IntU8()},Type::Bool1()),Overload({Type::IntU16(),Type::IntU16()},Type::Bool1()),Overload({Type::IntU32(),Type::IntU32()},Type::Bool1()),Overload({Type::IntU64(),Type::IntU64()},Type::Bool1()),Overload({Type::IntS8(),Type::IntS8()},Type::Bool1()),Overload({Type::IntS16(),Type::IntS16()},Type::Bool1()),Overload({Type::IntS32(),Type::IntS32()},Type::Bool1()),Overload({Type::IntS64(),Type::IntS64()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
+uint32_t Intr::LogicGte::id() const { return 22; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicGte &x) {
   os << "LogicGte(";
   os << x.x;
@@ -1063,6 +1138,7 @@ bool Intr::operator==(const Intr::LogicGte &l, const Intr::LogicGte &r) {
 Intr::LogicGte::operator Intr::Any() const { return std::make_shared<LogicGte>(*this); }
 
 Intr::LogicLt::LogicLt(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Bool1()),Overload({Type::Float32(),Type::Float32()},Type::Bool1()),Overload({Type::Float64(),Type::Float64()},Type::Bool1()),Overload({Type::IntU8(),Type::IntU8()},Type::Bool1()),Overload({Type::IntU16(),Type::IntU16()},Type::Bool1()),Overload({Type::IntU32(),Type::IntU32()},Type::Bool1()),Overload({Type::IntU64(),Type::IntU64()},Type::Bool1()),Overload({Type::IntS8(),Type::IntS8()},Type::Bool1()),Overload({Type::IntS16(),Type::IntS16()},Type::Bool1()),Overload({Type::IntS32(),Type::IntS32()},Type::Bool1()),Overload({Type::IntS64(),Type::IntS64()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
+uint32_t Intr::LogicLt::id() const { return 23; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicLt &x) {
   os << "LogicLt(";
   os << x.x;
@@ -1077,6 +1153,7 @@ bool Intr::operator==(const Intr::LogicLt &l, const Intr::LogicLt &r) {
 Intr::LogicLt::operator Intr::Any() const { return std::make_shared<LogicLt>(*this); }
 
 Intr::LogicGt::LogicGt(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Bool1()),Overload({Type::Float32(),Type::Float32()},Type::Bool1()),Overload({Type::Float64(),Type::Float64()},Type::Bool1()),Overload({Type::IntU8(),Type::IntU8()},Type::Bool1()),Overload({Type::IntU16(),Type::IntU16()},Type::Bool1()),Overload({Type::IntU32(),Type::IntU32()},Type::Bool1()),Overload({Type::IntU64(),Type::IntU64()},Type::Bool1()),Overload({Type::IntS8(),Type::IntS8()},Type::Bool1()),Overload({Type::IntS16(),Type::IntS16()},Type::Bool1()),Overload({Type::IntS32(),Type::IntS32()},Type::Bool1()),Overload({Type::IntS64(),Type::IntS64()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
+uint32_t Intr::LogicGt::id() const { return 24; };
 std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicGt &x) {
   os << "LogicGt(";
   os << x.x;
@@ -1103,6 +1180,7 @@ std::vector<Term::Any> Math::terms(const Math::Any& x){ return select<&Math::Bas
 Type::Any Math::tpe(const Math::Any& x){ return select<&Math::Base::tpe>(x); }
 
 Math::Abs::Abs(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Math::Abs::id() const { return 0; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Abs &x) {
   os << "Abs(";
   os << x.x;
@@ -1117,6 +1195,7 @@ bool Math::operator==(const Math::Abs &l, const Math::Abs &r) {
 Math::Abs::operator Math::Any() const { return std::make_shared<Abs>(*this); }
 
 Math::Sin::Sin(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Math::Sin::id() const { return 1; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Sin &x) {
   os << "Sin(";
   os << x.x;
@@ -1131,6 +1210,7 @@ bool Math::operator==(const Math::Sin &l, const Math::Sin &r) {
 Math::Sin::operator Math::Any() const { return std::make_shared<Sin>(*this); }
 
 Math::Cos::Cos(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Math::Cos::id() const { return 2; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Cos &x) {
   os << "Cos(";
   os << x.x;
@@ -1145,6 +1225,7 @@ bool Math::operator==(const Math::Cos &l, const Math::Cos &r) {
 Math::Cos::operator Math::Any() const { return std::make_shared<Cos>(*this); }
 
 Math::Tan::Tan(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Math::Tan::id() const { return 3; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Tan &x) {
   os << "Tan(";
   os << x.x;
@@ -1159,6 +1240,7 @@ bool Math::operator==(const Math::Tan &l, const Math::Tan &r) {
 Math::Tan::operator Math::Any() const { return std::make_shared<Tan>(*this); }
 
 Math::Asin::Asin(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Math::Asin::id() const { return 4; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Asin &x) {
   os << "Asin(";
   os << x.x;
@@ -1173,6 +1255,7 @@ bool Math::operator==(const Math::Asin &l, const Math::Asin &r) {
 Math::Asin::operator Math::Any() const { return std::make_shared<Asin>(*this); }
 
 Math::Acos::Acos(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Math::Acos::id() const { return 5; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Acos &x) {
   os << "Acos(";
   os << x.x;
@@ -1187,6 +1270,7 @@ bool Math::operator==(const Math::Acos &l, const Math::Acos &r) {
 Math::Acos::operator Math::Any() const { return std::make_shared<Acos>(*this); }
 
 Math::Atan::Atan(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Math::Atan::id() const { return 6; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Atan &x) {
   os << "Atan(";
   os << x.x;
@@ -1201,6 +1285,7 @@ bool Math::operator==(const Math::Atan &l, const Math::Atan &r) {
 Math::Atan::operator Math::Any() const { return std::make_shared<Atan>(*this); }
 
 Math::Sinh::Sinh(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Math::Sinh::id() const { return 7; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Sinh &x) {
   os << "Sinh(";
   os << x.x;
@@ -1215,6 +1300,7 @@ bool Math::operator==(const Math::Sinh &l, const Math::Sinh &r) {
 Math::Sinh::operator Math::Any() const { return std::make_shared<Sinh>(*this); }
 
 Math::Cosh::Cosh(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Math::Cosh::id() const { return 8; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Cosh &x) {
   os << "Cosh(";
   os << x.x;
@@ -1229,6 +1315,7 @@ bool Math::operator==(const Math::Cosh &l, const Math::Cosh &r) {
 Math::Cosh::operator Math::Any() const { return std::make_shared<Cosh>(*this); }
 
 Math::Tanh::Tanh(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Math::Tanh::id() const { return 9; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Tanh &x) {
   os << "Tanh(";
   os << x.x;
@@ -1243,6 +1330,7 @@ bool Math::operator==(const Math::Tanh &l, const Math::Tanh &r) {
 Math::Tanh::operator Math::Any() const { return std::make_shared<Tanh>(*this); }
 
 Math::Signum::Signum(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Math::Signum::id() const { return 10; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Signum &x) {
   os << "Signum(";
   os << x.x;
@@ -1257,6 +1345,7 @@ bool Math::operator==(const Math::Signum &l, const Math::Signum &r) {
 Math::Signum::operator Math::Any() const { return std::make_shared<Signum>(*this); }
 
 Math::Round::Round(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Math::Round::id() const { return 11; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Round &x) {
   os << "Round(";
   os << x.x;
@@ -1271,6 +1360,7 @@ bool Math::operator==(const Math::Round &l, const Math::Round &r) {
 Math::Round::operator Math::Any() const { return std::make_shared<Round>(*this); }
 
 Math::Ceil::Ceil(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Math::Ceil::id() const { return 12; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Ceil &x) {
   os << "Ceil(";
   os << x.x;
@@ -1285,6 +1375,7 @@ bool Math::operator==(const Math::Ceil &l, const Math::Ceil &r) {
 Math::Ceil::operator Math::Any() const { return std::make_shared<Ceil>(*this); }
 
 Math::Floor::Floor(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Math::Floor::id() const { return 13; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Floor &x) {
   os << "Floor(";
   os << x.x;
@@ -1299,6 +1390,7 @@ bool Math::operator==(const Math::Floor &l, const Math::Floor &r) {
 Math::Floor::operator Math::Any() const { return std::make_shared<Floor>(*this); }
 
 Math::Rint::Rint(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Math::Rint::id() const { return 14; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Rint &x) {
   os << "Rint(";
   os << x.x;
@@ -1313,6 +1405,7 @@ bool Math::operator==(const Math::Rint &l, const Math::Rint &r) {
 Math::Rint::operator Math::Any() const { return std::make_shared<Rint>(*this); }
 
 Math::Sqrt::Sqrt(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Math::Sqrt::id() const { return 15; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Sqrt &x) {
   os << "Sqrt(";
   os << x.x;
@@ -1327,6 +1420,7 @@ bool Math::operator==(const Math::Sqrt &l, const Math::Sqrt &r) {
 Math::Sqrt::operator Math::Any() const { return std::make_shared<Sqrt>(*this); }
 
 Math::Cbrt::Cbrt(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Math::Cbrt::id() const { return 16; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Cbrt &x) {
   os << "Cbrt(";
   os << x.x;
@@ -1341,6 +1435,7 @@ bool Math::operator==(const Math::Cbrt &l, const Math::Cbrt &r) {
 Math::Cbrt::operator Math::Any() const { return std::make_shared<Cbrt>(*this); }
 
 Math::Exp::Exp(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Math::Exp::id() const { return 17; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Exp &x) {
   os << "Exp(";
   os << x.x;
@@ -1355,6 +1450,7 @@ bool Math::operator==(const Math::Exp &l, const Math::Exp &r) {
 Math::Exp::operator Math::Any() const { return std::make_shared<Exp>(*this); }
 
 Math::Expm1::Expm1(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Math::Expm1::id() const { return 18; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Expm1 &x) {
   os << "Expm1(";
   os << x.x;
@@ -1369,6 +1465,7 @@ bool Math::operator==(const Math::Expm1 &l, const Math::Expm1 &r) {
 Math::Expm1::operator Math::Any() const { return std::make_shared<Expm1>(*this); }
 
 Math::Log::Log(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Math::Log::id() const { return 19; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Log &x) {
   os << "Log(";
   os << x.x;
@@ -1383,6 +1480,7 @@ bool Math::operator==(const Math::Log &l, const Math::Log &r) {
 Math::Log::operator Math::Any() const { return std::make_shared<Log>(*this); }
 
 Math::Log1p::Log1p(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Math::Log1p::id() const { return 20; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Log1p &x) {
   os << "Log1p(";
   os << x.x;
@@ -1397,6 +1495,7 @@ bool Math::operator==(const Math::Log1p &l, const Math::Log1p &r) {
 Math::Log1p::operator Math::Any() const { return std::make_shared<Log1p>(*this); }
 
 Math::Log10::Log10(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
+uint32_t Math::Log10::id() const { return 21; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Log10 &x) {
   os << "Log10(";
   os << x.x;
@@ -1411,6 +1510,7 @@ bool Math::operator==(const Math::Log10 &l, const Math::Log10 &r) {
 Math::Log10::operator Math::Any() const { return std::make_shared<Log10>(*this); }
 
 Math::Pow::Pow(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+uint32_t Math::Pow::id() const { return 22; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Pow &x) {
   os << "Pow(";
   os << x.x;
@@ -1427,6 +1527,7 @@ bool Math::operator==(const Math::Pow &l, const Math::Pow &r) {
 Math::Pow::operator Math::Any() const { return std::make_shared<Pow>(*this); }
 
 Math::Atan2::Atan2(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+uint32_t Math::Atan2::id() const { return 23; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Atan2 &x) {
   os << "Atan2(";
   os << x.x;
@@ -1443,6 +1544,7 @@ bool Math::operator==(const Math::Atan2 &l, const Math::Atan2 &r) {
 Math::Atan2::operator Math::Any() const { return std::make_shared<Atan2>(*this); }
 
 Math::Hypot::Hypot(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
+uint32_t Math::Hypot::id() const { return 24; };
 std::ostream &Math::operator<<(std::ostream &os, const Math::Hypot &x) {
   os << "Hypot(";
   os << x.x;
@@ -1469,6 +1571,7 @@ bool Expr::operator==(const Expr::Base &l, const Expr::Base &r) {
 Type::Any Expr::tpe(const Expr::Any& x){ return select<&Expr::Base::tpe>(x); }
 
 Expr::SpecOp::SpecOp(Spec::Any op) noexcept : Expr::Base(Spec::tpe(op)), op(std::move(op)) {}
+uint32_t Expr::SpecOp::id() const { return 0; };
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::SpecOp &x) {
   os << "SpecOp(";
   os << x.op;
@@ -1481,6 +1584,7 @@ bool Expr::operator==(const Expr::SpecOp &l, const Expr::SpecOp &r) {
 Expr::SpecOp::operator Expr::Any() const { return std::make_shared<SpecOp>(*this); }
 
 Expr::MathOp::MathOp(Math::Any op) noexcept : Expr::Base(Math::tpe(op)), op(std::move(op)) {}
+uint32_t Expr::MathOp::id() const { return 1; };
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::MathOp &x) {
   os << "MathOp(";
   os << x.op;
@@ -1493,6 +1597,7 @@ bool Expr::operator==(const Expr::MathOp &l, const Expr::MathOp &r) {
 Expr::MathOp::operator Expr::Any() const { return std::make_shared<MathOp>(*this); }
 
 Expr::IntrOp::IntrOp(Intr::Any op) noexcept : Expr::Base(Intr::tpe(op)), op(std::move(op)) {}
+uint32_t Expr::IntrOp::id() const { return 2; };
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::IntrOp &x) {
   os << "IntrOp(";
   os << x.op;
@@ -1505,6 +1610,7 @@ bool Expr::operator==(const Expr::IntrOp &l, const Expr::IntrOp &r) {
 Expr::IntrOp::operator Expr::Any() const { return std::make_shared<IntrOp>(*this); }
 
 Expr::Cast::Cast(Term::Any from, Type::Any as) noexcept : Expr::Base(as), from(std::move(from)), as(std::move(as)) {}
+uint32_t Expr::Cast::id() const { return 3; };
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Cast &x) {
   os << "Cast(";
   os << x.from;
@@ -1519,6 +1625,7 @@ bool Expr::operator==(const Expr::Cast &l, const Expr::Cast &r) {
 Expr::Cast::operator Expr::Any() const { return std::make_shared<Cast>(*this); }
 
 Expr::Alias::Alias(Term::Any ref) noexcept : Expr::Base(Term::tpe(ref)), ref(std::move(ref)) {}
+uint32_t Expr::Alias::id() const { return 4; };
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Alias &x) {
   os << "Alias(";
   os << x.ref;
@@ -1531,6 +1638,7 @@ bool Expr::operator==(const Expr::Alias &l, const Expr::Alias &r) {
 Expr::Alias::operator Expr::Any() const { return std::make_shared<Alias>(*this); }
 
 Expr::Index::Index(Term::Any lhs, Term::Any idx, Type::Any component) noexcept : Expr::Base(component), lhs(std::move(lhs)), idx(std::move(idx)), component(std::move(component)) {}
+uint32_t Expr::Index::id() const { return 5; };
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Index &x) {
   os << "Index(";
   os << x.lhs;
@@ -1547,6 +1655,7 @@ bool Expr::operator==(const Expr::Index &l, const Expr::Index &r) {
 Expr::Index::operator Expr::Any() const { return std::make_shared<Index>(*this); }
 
 Expr::RefTo::RefTo(Term::Any lhs, std::optional<Term::Any> idx, Type::Any component) noexcept : Expr::Base(Type::Ptr(component,{},TypeSpace::Global())), lhs(std::move(lhs)), idx(std::move(idx)), component(std::move(component)) {}
+uint32_t Expr::RefTo::id() const { return 6; };
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::RefTo &x) {
   os << "RefTo(";
   os << x.lhs;
@@ -1567,6 +1676,7 @@ bool Expr::operator==(const Expr::RefTo &l, const Expr::RefTo &r) {
 Expr::RefTo::operator Expr::Any() const { return std::make_shared<RefTo>(*this); }
 
 Expr::Alloc::Alloc(Type::Any component, Term::Any size) noexcept : Expr::Base(Type::Ptr(component,{},TypeSpace::Global())), component(std::move(component)), size(std::move(size)) {}
+uint32_t Expr::Alloc::id() const { return 7; };
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Alloc &x) {
   os << "Alloc(";
   os << x.component;
@@ -1581,6 +1691,7 @@ bool Expr::operator==(const Expr::Alloc &l, const Expr::Alloc &r) {
 Expr::Alloc::operator Expr::Any() const { return std::make_shared<Alloc>(*this); }
 
 Expr::Invoke::Invoke(Sym name, std::vector<Type::Any> tpeArgs, std::optional<Term::Any> receiver, std::vector<Term::Any> args, std::vector<Term::Any> captures, Type::Any rtn) noexcept : Expr::Base(rtn), name(std::move(name)), tpeArgs(std::move(tpeArgs)), receiver(std::move(receiver)), args(std::move(args)), captures(std::move(captures)), rtn(std::move(rtn)) {}
+uint32_t Expr::Invoke::id() const { return 8; };
 std::ostream &Expr::operator<<(std::ostream &os, const Expr::Invoke &x) {
   os << "Invoke(";
   os << x.name;
@@ -1629,6 +1740,7 @@ std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Any &x) {
 bool Stmt::operator==(const Stmt::Base &, const Stmt::Base &) { return true; }
 
 Stmt::Block::Block(std::vector<Stmt::Any> stmts) noexcept : Stmt::Base(), stmts(std::move(stmts)) {}
+uint32_t Stmt::Block::id() const { return 0; };
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Block &x) {
   os << "Block(";
   os << '{';
@@ -1646,6 +1758,7 @@ bool Stmt::operator==(const Stmt::Block &l, const Stmt::Block &r) {
 Stmt::Block::operator Stmt::Any() const { return std::make_shared<Block>(*this); }
 
 Stmt::Comment::Comment(std::string value) noexcept : Stmt::Base(), value(std::move(value)) {}
+uint32_t Stmt::Comment::id() const { return 1; };
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Comment &x) {
   os << "Comment(";
   os << '"' << x.value << '"';
@@ -1658,6 +1771,7 @@ bool Stmt::operator==(const Stmt::Comment &l, const Stmt::Comment &r) {
 Stmt::Comment::operator Stmt::Any() const { return std::make_shared<Comment>(*this); }
 
 Stmt::Var::Var(Named name, std::optional<Expr::Any> expr) noexcept : Stmt::Base(), name(std::move(name)), expr(std::move(expr)) {}
+uint32_t Stmt::Var::id() const { return 2; };
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Var &x) {
   os << "Var(";
   os << x.name;
@@ -1676,6 +1790,7 @@ bool Stmt::operator==(const Stmt::Var &l, const Stmt::Var &r) {
 Stmt::Var::operator Stmt::Any() const { return std::make_shared<Var>(*this); }
 
 Stmt::Mut::Mut(Term::Any name, Expr::Any expr, bool copy) noexcept : Stmt::Base(), name(std::move(name)), expr(std::move(expr)), copy(copy) {}
+uint32_t Stmt::Mut::id() const { return 3; };
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Mut &x) {
   os << "Mut(";
   os << x.name;
@@ -1692,6 +1807,7 @@ bool Stmt::operator==(const Stmt::Mut &l, const Stmt::Mut &r) {
 Stmt::Mut::operator Stmt::Any() const { return std::make_shared<Mut>(*this); }
 
 Stmt::Update::Update(Term::Any lhs, Term::Any idx, Term::Any value) noexcept : Stmt::Base(), lhs(std::move(lhs)), idx(std::move(idx)), value(std::move(value)) {}
+uint32_t Stmt::Update::id() const { return 4; };
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Update &x) {
   os << "Update(";
   os << x.lhs;
@@ -1708,6 +1824,7 @@ bool Stmt::operator==(const Stmt::Update &l, const Stmt::Update &r) {
 Stmt::Update::operator Stmt::Any() const { return std::make_shared<Update>(*this); }
 
 Stmt::While::While(std::vector<Stmt::Any> tests, Term::Any cond, std::vector<Stmt::Any> body) noexcept : Stmt::Base(), tests(std::move(tests)), cond(std::move(cond)), body(std::move(body)) {}
+uint32_t Stmt::While::id() const { return 5; };
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::While &x) {
   os << "While(";
   os << '{';
@@ -1734,6 +1851,7 @@ bool Stmt::operator==(const Stmt::While &l, const Stmt::While &r) {
 Stmt::While::operator Stmt::Any() const { return std::make_shared<While>(*this); }
 
 Stmt::Break::Break() noexcept : Stmt::Base() {}
+uint32_t Stmt::Break::id() const { return 6; };
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Break &x) {
   os << "Break(";
   os << ')';
@@ -1743,6 +1861,7 @@ bool Stmt::operator==(const Stmt::Break &, const Stmt::Break &) { return true; }
 Stmt::Break::operator Stmt::Any() const { return std::make_shared<Break>(*this); }
 
 Stmt::Cont::Cont() noexcept : Stmt::Base() {}
+uint32_t Stmt::Cont::id() const { return 7; };
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Cont &x) {
   os << "Cont(";
   os << ')';
@@ -1752,6 +1871,7 @@ bool Stmt::operator==(const Stmt::Cont &, const Stmt::Cont &) { return true; }
 Stmt::Cont::operator Stmt::Any() const { return std::make_shared<Cont>(*this); }
 
 Stmt::Cond::Cond(Expr::Any cond, std::vector<Stmt::Any> trueBr, std::vector<Stmt::Any> falseBr) noexcept : Stmt::Base(), cond(std::move(cond)), trueBr(std::move(trueBr)), falseBr(std::move(falseBr)) {}
+uint32_t Stmt::Cond::id() const { return 8; };
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Cond &x) {
   os << "Cond(";
   os << x.cond;
@@ -1778,6 +1898,7 @@ bool Stmt::operator==(const Stmt::Cond &l, const Stmt::Cond &r) {
 Stmt::Cond::operator Stmt::Any() const { return std::make_shared<Cond>(*this); }
 
 Stmt::Return::Return(Expr::Any value) noexcept : Stmt::Base(), value(std::move(value)) {}
+uint32_t Stmt::Return::id() const { return 9; };
 std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Return &x) {
   os << "Return(";
   os << x.value;
@@ -1929,6 +2050,7 @@ std::ostream &FunctionKind::operator<<(std::ostream &os, const FunctionKind::Any
 bool FunctionKind::operator==(const FunctionKind::Base &, const FunctionKind::Base &) { return true; }
 
 FunctionKind::Internal::Internal() noexcept : FunctionKind::Base() {}
+uint32_t FunctionKind::Internal::id() const { return 0; };
 std::ostream &FunctionKind::operator<<(std::ostream &os, const FunctionKind::Internal &x) {
   os << "Internal(";
   os << ')';
@@ -1938,6 +2060,7 @@ bool FunctionKind::operator==(const FunctionKind::Internal &, const FunctionKind
 FunctionKind::Internal::operator FunctionKind::Any() const { return std::make_shared<Internal>(*this); }
 
 FunctionKind::Exported::Exported() noexcept : FunctionKind::Base() {}
+uint32_t FunctionKind::Exported::id() const { return 1; };
 std::ostream &FunctionKind::operator<<(std::ostream &os, const FunctionKind::Exported &x) {
   os << "Exported(";
   os << ')';
@@ -1954,6 +2077,7 @@ std::ostream &FunctionAttr::operator<<(std::ostream &os, const FunctionAttr::Any
 bool FunctionAttr::operator==(const FunctionAttr::Base &, const FunctionAttr::Base &) { return true; }
 
 FunctionAttr::FPRelaxed::FPRelaxed() noexcept : FunctionAttr::Base() {}
+uint32_t FunctionAttr::FPRelaxed::id() const { return 0; };
 std::ostream &FunctionAttr::operator<<(std::ostream &os, const FunctionAttr::FPRelaxed &x) {
   os << "FPRelaxed(";
   os << ')';
@@ -1963,6 +2087,7 @@ bool FunctionAttr::operator==(const FunctionAttr::FPRelaxed &, const FunctionAtt
 FunctionAttr::FPRelaxed::operator FunctionAttr::Any() const { return std::make_shared<FPRelaxed>(*this); }
 
 FunctionAttr::FPStrict::FPStrict() noexcept : FunctionAttr::Base() {}
+uint32_t FunctionAttr::FPStrict::id() const { return 1; };
 std::ostream &FunctionAttr::operator<<(std::ostream &os, const FunctionAttr::FPStrict &x) {
   os << "FPStrict(";
   os << ')';

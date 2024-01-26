@@ -199,7 +199,7 @@ private[polyregion] object CppStructGen {
   case class StructNode(
       tpe: CppType,
       members: List[(String, CppType)],
-      parent: Option[(StructNode, List[String])],
+      parentTpe: Option[(CppType, List[String])],
       variants: List[StructNode] = Nil
   ) {
 
@@ -208,22 +208,22 @@ private[polyregion] object CppStructGen {
       if (qualified) tpe.namespace.sym("", "::", "::") + name else name
     }
 
-    def emit: List[StructSource] = {
+    def emit(parent: Option[StructNode] = None): List[StructSource] = {
 
       val ctorInit = members.map { (n, tpe) =>
         if (tpe.kind == CppType.Kind.Base) s"$n(std::move($n))"
         else if (tpe.movable) s"$n(std::move($n))"
         else s"$n($n)"
       }
-      val (ctorArgs, ctorChain) = parent match {
-        case None => (members, ctorInit)
-        case Some((base, Nil)) =>
+      val (ctorArgs, ctorChain) = (parent, parentTpe) match {
+
+        case (Some(base), Some(_, Nil)) =>
           (members ::: base.members) ->
             (s"${base.clsName(qualified = true)}(${base.members.map((n, _) => n).csv})" :: ctorInit)
-
-        case Some((base, xs)) =>
+        case (Some(base), Some(_, xs)) =>
           members ->
             (s"${base.clsName(qualified = true)}(${xs.csv})" :: ctorInit)
+        case (_, _) => (members, ctorInit)
       }
 
       import CppAttrs.*
@@ -302,15 +302,12 @@ private[polyregion] object CppStructGen {
             s"using Any = Alternative<${allVariants.csv}>;" :: Nil
         } else Nil
 
-      val conversion =
-        if (tpe.kind == CppType.Kind.Variant)
-          s"POLYREGION_EXPORT operator Any() const;" :: Nil
-        else Nil
-
-      val conversionImpl =
-        if (tpe.kind == CppType.Kind.Variant)
+      val (conversionSig, conversionImpl) = if (tpe.kind == CppType.Kind.Variant) {
+        (
+          s"POLYREGION_EXPORT operator Any() const;" :: Nil,
           s"${clsName(qualified = true)}::operator ${ns("Any()")} const { return std::make_shared<${tpe.name}>(*this); }" :: Nil
-        else Nil
+        )
+      } else (Nil, Nil)
 
       val visibility = if (tpe.kind == CppType.Kind.Base) "protected:" :: Nil else Nil
 
@@ -356,39 +353,56 @@ private[polyregion] object CppStructGen {
           (stdSpecialisationsDeclStmts, stdSpecialisationsStmts)
         }
 
-      val equalitySig =
-        s"POLYREGION_EXPORT friend bool operator==(const ${clsName(qualified = true)} &, const ${clsName(qualified = true)} &);" :: Nil
-      val equalityImpl = members match {
-        case Nil =>
-          s"bool ${ns("operator==")}(const ${clsName(qualified = true)} &, const ${clsName(qualified = true)} &) { return true; }" :: Nil
-        case xs =>
-          s"bool ${ns("operator==")}(const ${clsName(qualified = true)} &l, const ${clsName(qualified = true)} &r) { " ::
-            xs.map { (n, tpe) =>
-              val deref = (s: String) => if (tpe.kind == CppType.Kind.Base) s"*$s.$n" else s"$s.$n"
-              val op    = s"${deref("l")} == ${deref("r")}"
-              (tpe.kind, tpe.namespace ::: tpe.name :: Nil, tpe.ctors) match {
-                case (CppType.Kind.StdLib, "std" :: "optional" :: Nil, x :: Nil) if x.kind == CppType.Kind.Base =>
-                  s"( (!l.$n && !r.$n) || (l.$n && r.$n && **l.$n == **r.$n) )"
-                case (CppType.Kind.StdLib, "std" :: "vector" :: Nil, x :: Nil) if x.kind == CppType.Kind.Base =>
-                  s"std::equal(l.$n.begin(), l.$n.end(), r.$n.begin(), [](auto &&l, auto &&r) { return *l == *r; })"
-                case _ => op
-              }
-            }.sym("  return ", " && ", ";") ::
-            "}" :: Nil
+      val (equalitySig, equalityImpl) =
+        (s"POLYREGION_EXPORT friend bool operator==(const ${clsName(qualified = true)} &, const ${clsName(qualified = true)} &);" :: Nil) -> (members match {
+          case Nil =>
+            s"bool ${ns("operator==")}(const ${clsName(qualified = true)} &, const ${clsName(qualified = true)} &) { return true; }" :: Nil
+          case xs =>
+            s"bool ${ns("operator==")}(const ${clsName(qualified = true)} &l, const ${clsName(qualified = true)} &r) { " ::
+              xs.map { (n, tpe) =>
+                val deref = (s: String) => if (tpe.kind == CppType.Kind.Base) s"*$s.$n" else s"$s.$n"
+                val op    = s"${deref("l")} == ${deref("r")}"
+                (tpe.kind, tpe.namespace ::: tpe.name :: Nil, tpe.ctors) match {
+                  case (CppType.Kind.StdLib, "std" :: "optional" :: Nil, x :: Nil) if x.kind == CppType.Kind.Base =>
+                    s"( (!l.$n && !r.$n) || (l.$n && r.$n && **l.$n == **r.$n) )"
+                  case (CppType.Kind.StdLib, "std" :: "vector" :: Nil, x :: Nil) if x.kind == CppType.Kind.Base =>
+                    s"std::equal(l.$n.begin(), l.$n.end(), r.$n.begin(), [](auto &&l, auto &&r) { return *l == *r; })"
+                  case _ => op
+                }
+              }.sym("  return ", " && ", ";") ::
+              "}" :: Nil
+        })
+
+      val (idSig, idImpl) = (tpe.kind, parent) match {
+        case (CppType.Kind.Variant, Some(p)) =>
+          val idxValue = p.variants.indexWhere(_.tpe == tpe) match {
+            case -1 => s"#error \"assert failed: invalid parent for variant ${tpe}\""
+            case n  => s"$n"
+          }
+          (
+            s"POLYREGION_EXPORT uint32_t id() const override;" :: Nil,
+            s"uint32_t ${clsName(qualified = true)}::id() const { return $idxValue; };" :: Nil
+          )
+        case (CppType.Kind.Base, _) =>
+          (
+            s"POLYREGION_EXPORT virtual uint32_t id() const = 0;" :: Nil,
+            Nil
+          )
+        case (_, _) => (Nil, Nil)
       }
 
       StructSource(
         namespaces = tpe.namespace,
         name = clsName(qualified = false),
-        parent = parent.map(x => x._1.clsName(qualified = true)),
-        stmts = memberStmts ::: visibility ::: ctorStmt :: conversion ::: streamSig ::: equalitySig,
-        implStmts = ctorStmtImpl :: streamImpl ::: equalityImpl ::: conversionImpl ::: nsImpl,
+        parent = parent.map(_.clsName(qualified = true)),
+        stmts = memberStmts ::: idSig ::: visibility ::: ctorStmt :: conversionSig ::: streamSig ::: equalitySig,
+        implStmts = ctorStmtImpl :: idImpl ::: streamImpl ::: equalityImpl ::: conversionImpl ::: nsImpl,
         includes = members.flatMap(_._2.include),
         variantStmt,
         nsDecl,
         stdSpecialisationsDeclStmts,
         stdSpecialisationsStmts
-      ) :: variants.flatMap(_.emit)
+      ) :: variants.flatMap(_.emit(Some(this)))
     }
   }
 
@@ -548,7 +562,7 @@ private[polyregion] object CppStructGen {
     }
   }
 
-  inline def deriveSum[N <: Tuple, T <: Tuple](parent: Option[(StructNode, List[String])] = None): List[StructNode] =
+  inline def deriveSum[N <: Tuple, T <: Tuple](parent: Option[(CppType, List[String])] = None): List[StructNode] =
     inline (erasedValue[N], erasedValue[T]) match {
       case (_: EmptyTuple, _: EmptyTuple) => Nil
       case (_: (n *: ns), _: (t *: ts)) =>
@@ -564,7 +578,7 @@ private[polyregion] object CppStructGen {
       case (_: EmptyTuple, _: EmptyTuple) => Nil
       case (_: (l *: ls), _: (t *: ts)) => (s"${constValue[l]}", summonInline[ToCppType[t]]()) :: deriveProduct[ls, ts]
     }
-  inline def deriveStruct[T: ToCppType: ToCppTerm](parent: Option[(StructNode, List[String])] = None)(using
+  inline def deriveStruct[T: ToCppType: ToCppTerm](parent: Option[(CppType, List[String])] = None)(using
       m: Mirror.Of[T]
   ): StructNode = {
 
@@ -590,8 +604,7 @@ private[polyregion] object CppStructGen {
     inline m match {
       case s: Mirror.SumOf[T] =>
         val members = compiletime.sumTypeCtorParams[s.MirroredType, CppType, ToCppType]
-        val sum     = StructNode(tpe, members, applied)
-        sum.copy(variants = deriveSum[s.MirroredElemLabels, s.MirroredElemTypes](Some((sum, ctorTerms))))
+        StructNode(tpe, members, applied, deriveSum[s.MirroredElemLabels, s.MirroredElemTypes](Some(tpe -> ctorTerms)))
       case p: Mirror.ProductOf[T] =>
         val members = deriveProduct[p.MirroredElemLabels, p.MirroredElemTypes]
         StructNode(tpe, members, applied)

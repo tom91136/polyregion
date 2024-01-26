@@ -258,6 +258,7 @@ struct POLYREGION_EXPORT Named {
 namespace TypeKind { 
 
 struct POLYREGION_EXPORT Base {
+  POLYREGION_EXPORT virtual uint32_t id() const = 0;
   protected:
   Base();
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const TypeKind::Any &);
@@ -265,6 +266,7 @@ struct POLYREGION_EXPORT Base {
 };
 
 struct POLYREGION_EXPORT None : TypeKind::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   None() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const TypeKind::None &);
@@ -272,6 +274,7 @@ struct POLYREGION_EXPORT None : TypeKind::Base {
 };
 
 struct POLYREGION_EXPORT Ref : TypeKind::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   Ref() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const TypeKind::Ref &);
@@ -279,6 +282,7 @@ struct POLYREGION_EXPORT Ref : TypeKind::Base {
 };
 
 struct POLYREGION_EXPORT Integral : TypeKind::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   Integral() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const TypeKind::Integral &);
@@ -286,6 +290,7 @@ struct POLYREGION_EXPORT Integral : TypeKind::Base {
 };
 
 struct POLYREGION_EXPORT Fractional : TypeKind::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   Fractional() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const TypeKind::Fractional &);
@@ -296,6 +301,7 @@ namespace Type {
 
 struct POLYREGION_EXPORT Base {
   TypeKind::Any kind;
+  POLYREGION_EXPORT virtual uint32_t id() const = 0;
   protected:
   explicit Base(TypeKind::Any kind) noexcept;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Any &);
@@ -304,6 +310,7 @@ struct POLYREGION_EXPORT Base {
 POLYREGION_EXPORT TypeKind::Any kind(const Type::Any&);
 
 struct POLYREGION_EXPORT Float16 : Type::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   Float16() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Float16 &);
@@ -311,6 +318,7 @@ struct POLYREGION_EXPORT Float16 : Type::Base {
 };
 
 struct POLYREGION_EXPORT Float32 : Type::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   Float32() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Float32 &);
@@ -318,6 +326,7 @@ struct POLYREGION_EXPORT Float32 : Type::Base {
 };
 
 struct POLYREGION_EXPORT Float64 : Type::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   Float64() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Float64 &);
@@ -325,6 +334,7 @@ struct POLYREGION_EXPORT Float64 : Type::Base {
 };
 
 struct POLYREGION_EXPORT IntU8 : Type::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   IntU8() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::IntU8 &);
@@ -332,6 +342,7 @@ struct POLYREGION_EXPORT IntU8 : Type::Base {
 };
 
 struct POLYREGION_EXPORT IntU16 : Type::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   IntU16() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::IntU16 &);
@@ -339,6 +350,7 @@ struct POLYREGION_EXPORT IntU16 : Type::Base {
 };
 
 struct POLYREGION_EXPORT IntU32 : Type::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   IntU32() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::IntU32 &);
@@ -346,6 +358,7 @@ struct POLYREGION_EXPORT IntU32 : Type::Base {
 };
 
 struct POLYREGION_EXPORT IntU64 : Type::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   IntU64() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::IntU64 &);
@@ -353,6 +366,7 @@ struct POLYREGION_EXPORT IntU64 : Type::Base {
 };
 
 struct POLYREGION_EXPORT IntS8 : Type::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   IntS8() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::IntS8 &);
@@ -360,6 +374,7 @@ struct POLYREGION_EXPORT IntS8 : Type::Base {
 };
 
 struct POLYREGION_EXPORT IntS16 : Type::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   IntS16() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::IntS16 &);
@@ -367,6 +382,7 @@ struct POLYREGION_EXPORT IntS16 : Type::Base {
 };
 
 struct POLYREGION_EXPORT IntS32 : Type::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   IntS32() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::IntS32 &);
@@ -374,6 +390,7 @@ struct POLYREGION_EXPORT IntS32 : Type::Base {
 };
 
 struct POLYREGION_EXPORT IntS64 : Type::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   IntS64() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::IntS64 &);
@@ -381,6 +398,7 @@ struct POLYREGION_EXPORT IntS64 : Type::Base {
 };
 
 struct POLYREGION_EXPORT Nothing : Type::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   Nothing() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Nothing &);
@@ -388,6 +406,7 @@ struct POLYREGION_EXPORT Nothing : Type::Base {
 };
 
 struct POLYREGION_EXPORT Unit0 : Type::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   Unit0() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Unit0 &);
@@ -395,6 +414,7 @@ struct POLYREGION_EXPORT Unit0 : Type::Base {
 };
 
 struct POLYREGION_EXPORT Bool1 : Type::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   Bool1() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Bool1 &);
@@ -406,6 +426,7 @@ struct POLYREGION_EXPORT Struct : Type::Base {
   std::vector<std::string> tpeVars;
   std::vector<Type::Any> args;
   std::vector<Sym> parents;
+  POLYREGION_EXPORT uint32_t id() const override;
   Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args, std::vector<Sym> parents) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Struct &);
@@ -416,6 +437,7 @@ struct POLYREGION_EXPORT Ptr : Type::Base {
   Type::Any component;
   std::optional<int32_t> length;
   TypeSpace::Any space;
+  POLYREGION_EXPORT uint32_t id() const override;
   Ptr(Type::Any component, std::optional<int32_t> length, TypeSpace::Any space) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Ptr &);
@@ -424,6 +446,7 @@ struct POLYREGION_EXPORT Ptr : Type::Base {
 
 struct POLYREGION_EXPORT Var : Type::Base {
   std::string name;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit Var(std::string name) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Var &);
@@ -434,6 +457,7 @@ struct POLYREGION_EXPORT Exec : Type::Base {
   std::vector<std::string> tpeVars;
   std::vector<Type::Any> args;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Exec(std::vector<std::string> tpeVars, std::vector<Type::Any> args, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Exec &);
@@ -455,6 +479,7 @@ namespace Term {
 
 struct POLYREGION_EXPORT Base {
   Type::Any tpe;
+  POLYREGION_EXPORT virtual uint32_t id() const = 0;
   protected:
   explicit Base(Type::Any tpe) noexcept;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::Any &);
@@ -465,6 +490,7 @@ POLYREGION_EXPORT Type::Any tpe(const Term::Any&);
 struct POLYREGION_EXPORT Select : Term::Base {
   std::vector<Named> init;
   Named last;
+  POLYREGION_EXPORT uint32_t id() const override;
   Select(std::vector<Named> init, Named last) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::Select &);
@@ -473,6 +499,7 @@ struct POLYREGION_EXPORT Select : Term::Base {
 
 struct POLYREGION_EXPORT Poison : Term::Base {
   Type::Any t;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit Poison(Type::Any t) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::Poison &);
@@ -481,6 +508,7 @@ struct POLYREGION_EXPORT Poison : Term::Base {
 
 struct POLYREGION_EXPORT Float16Const : Term::Base {
   float value;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit Float16Const(float value) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::Float16Const &);
@@ -489,6 +517,7 @@ struct POLYREGION_EXPORT Float16Const : Term::Base {
 
 struct POLYREGION_EXPORT Float32Const : Term::Base {
   float value;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit Float32Const(float value) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::Float32Const &);
@@ -497,6 +526,7 @@ struct POLYREGION_EXPORT Float32Const : Term::Base {
 
 struct POLYREGION_EXPORT Float64Const : Term::Base {
   double value;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit Float64Const(double value) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::Float64Const &);
@@ -505,6 +535,7 @@ struct POLYREGION_EXPORT Float64Const : Term::Base {
 
 struct POLYREGION_EXPORT IntU8Const : Term::Base {
   int8_t value;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit IntU8Const(int8_t value) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::IntU8Const &);
@@ -513,6 +544,7 @@ struct POLYREGION_EXPORT IntU8Const : Term::Base {
 
 struct POLYREGION_EXPORT IntU16Const : Term::Base {
   uint16_t value;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit IntU16Const(uint16_t value) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::IntU16Const &);
@@ -521,6 +553,7 @@ struct POLYREGION_EXPORT IntU16Const : Term::Base {
 
 struct POLYREGION_EXPORT IntU32Const : Term::Base {
   int32_t value;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit IntU32Const(int32_t value) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::IntU32Const &);
@@ -529,6 +562,7 @@ struct POLYREGION_EXPORT IntU32Const : Term::Base {
 
 struct POLYREGION_EXPORT IntU64Const : Term::Base {
   int64_t value;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit IntU64Const(int64_t value) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::IntU64Const &);
@@ -537,6 +571,7 @@ struct POLYREGION_EXPORT IntU64Const : Term::Base {
 
 struct POLYREGION_EXPORT IntS8Const : Term::Base {
   int8_t value;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit IntS8Const(int8_t value) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::IntS8Const &);
@@ -545,6 +580,7 @@ struct POLYREGION_EXPORT IntS8Const : Term::Base {
 
 struct POLYREGION_EXPORT IntS16Const : Term::Base {
   int16_t value;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit IntS16Const(int16_t value) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::IntS16Const &);
@@ -553,6 +589,7 @@ struct POLYREGION_EXPORT IntS16Const : Term::Base {
 
 struct POLYREGION_EXPORT IntS32Const : Term::Base {
   int32_t value;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit IntS32Const(int32_t value) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::IntS32Const &);
@@ -561,6 +598,7 @@ struct POLYREGION_EXPORT IntS32Const : Term::Base {
 
 struct POLYREGION_EXPORT IntS64Const : Term::Base {
   int64_t value;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit IntS64Const(int64_t value) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::IntS64Const &);
@@ -568,6 +606,7 @@ struct POLYREGION_EXPORT IntS64Const : Term::Base {
 };
 
 struct POLYREGION_EXPORT Unit0Const : Term::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   Unit0Const() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::Unit0Const &);
@@ -576,6 +615,7 @@ struct POLYREGION_EXPORT Unit0Const : Term::Base {
 
 struct POLYREGION_EXPORT Bool1Const : Term::Base {
   bool value;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit Bool1Const(bool value) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Term::Bool1Const &);
@@ -585,6 +625,7 @@ struct POLYREGION_EXPORT Bool1Const : Term::Base {
 namespace TypeSpace { 
 
 struct POLYREGION_EXPORT Base {
+  POLYREGION_EXPORT virtual uint32_t id() const = 0;
   protected:
   Base();
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const TypeSpace::Any &);
@@ -592,6 +633,7 @@ struct POLYREGION_EXPORT Base {
 };
 
 struct POLYREGION_EXPORT Global : TypeSpace::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   Global() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const TypeSpace::Global &);
@@ -599,6 +641,7 @@ struct POLYREGION_EXPORT Global : TypeSpace::Base {
 };
 
 struct POLYREGION_EXPORT Local : TypeSpace::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   Local() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const TypeSpace::Local &);
@@ -621,6 +664,7 @@ struct POLYREGION_EXPORT Base {
   std::vector<Overload> overloads;
   std::vector<Term::Any> terms;
   Type::Any tpe;
+  POLYREGION_EXPORT virtual uint32_t id() const = 0;
   protected:
   Base(std::vector<Overload> overloads, std::vector<Term::Any> terms, Type::Any tpe) noexcept;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::Any &);
@@ -631,6 +675,7 @@ POLYREGION_EXPORT std::vector<Term::Any> terms(const Spec::Any&);
 POLYREGION_EXPORT Type::Any tpe(const Spec::Any&);
 
 struct POLYREGION_EXPORT Assert : Spec::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   Assert() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::Assert &);
@@ -638,6 +683,7 @@ struct POLYREGION_EXPORT Assert : Spec::Base {
 };
 
 struct POLYREGION_EXPORT GpuBarrierGlobal : Spec::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   GpuBarrierGlobal() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::GpuBarrierGlobal &);
@@ -645,6 +691,7 @@ struct POLYREGION_EXPORT GpuBarrierGlobal : Spec::Base {
 };
 
 struct POLYREGION_EXPORT GpuBarrierLocal : Spec::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   GpuBarrierLocal() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::GpuBarrierLocal &);
@@ -652,6 +699,7 @@ struct POLYREGION_EXPORT GpuBarrierLocal : Spec::Base {
 };
 
 struct POLYREGION_EXPORT GpuBarrierAll : Spec::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   GpuBarrierAll() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::GpuBarrierAll &);
@@ -659,6 +707,7 @@ struct POLYREGION_EXPORT GpuBarrierAll : Spec::Base {
 };
 
 struct POLYREGION_EXPORT GpuFenceGlobal : Spec::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   GpuFenceGlobal() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::GpuFenceGlobal &);
@@ -666,6 +715,7 @@ struct POLYREGION_EXPORT GpuFenceGlobal : Spec::Base {
 };
 
 struct POLYREGION_EXPORT GpuFenceLocal : Spec::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   GpuFenceLocal() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::GpuFenceLocal &);
@@ -673,6 +723,7 @@ struct POLYREGION_EXPORT GpuFenceLocal : Spec::Base {
 };
 
 struct POLYREGION_EXPORT GpuFenceAll : Spec::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   GpuFenceAll() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::GpuFenceAll &);
@@ -681,6 +732,7 @@ struct POLYREGION_EXPORT GpuFenceAll : Spec::Base {
 
 struct POLYREGION_EXPORT GpuGlobalIdx : Spec::Base {
   Term::Any dim;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit GpuGlobalIdx(Term::Any dim) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::GpuGlobalIdx &);
@@ -689,6 +741,7 @@ struct POLYREGION_EXPORT GpuGlobalIdx : Spec::Base {
 
 struct POLYREGION_EXPORT GpuGlobalSize : Spec::Base {
   Term::Any dim;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit GpuGlobalSize(Term::Any dim) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::GpuGlobalSize &);
@@ -697,6 +750,7 @@ struct POLYREGION_EXPORT GpuGlobalSize : Spec::Base {
 
 struct POLYREGION_EXPORT GpuGroupIdx : Spec::Base {
   Term::Any dim;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit GpuGroupIdx(Term::Any dim) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::GpuGroupIdx &);
@@ -705,6 +759,7 @@ struct POLYREGION_EXPORT GpuGroupIdx : Spec::Base {
 
 struct POLYREGION_EXPORT GpuGroupSize : Spec::Base {
   Term::Any dim;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit GpuGroupSize(Term::Any dim) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::GpuGroupSize &);
@@ -713,6 +768,7 @@ struct POLYREGION_EXPORT GpuGroupSize : Spec::Base {
 
 struct POLYREGION_EXPORT GpuLocalIdx : Spec::Base {
   Term::Any dim;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit GpuLocalIdx(Term::Any dim) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::GpuLocalIdx &);
@@ -721,6 +777,7 @@ struct POLYREGION_EXPORT GpuLocalIdx : Spec::Base {
 
 struct POLYREGION_EXPORT GpuLocalSize : Spec::Base {
   Term::Any dim;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit GpuLocalSize(Term::Any dim) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Spec::GpuLocalSize &);
@@ -733,6 +790,7 @@ struct POLYREGION_EXPORT Base {
   std::vector<Overload> overloads;
   std::vector<Term::Any> terms;
   Type::Any tpe;
+  POLYREGION_EXPORT virtual uint32_t id() const = 0;
   protected:
   Base(std::vector<Overload> overloads, std::vector<Term::Any> terms, Type::Any tpe) noexcept;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::Any &);
@@ -745,6 +803,7 @@ POLYREGION_EXPORT Type::Any tpe(const Intr::Any&);
 struct POLYREGION_EXPORT BNot : Intr::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   BNot(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::BNot &);
@@ -753,6 +812,7 @@ struct POLYREGION_EXPORT BNot : Intr::Base {
 
 struct POLYREGION_EXPORT LogicNot : Intr::Base {
   Term::Any x;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit LogicNot(Term::Any x) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::LogicNot &);
@@ -762,6 +822,7 @@ struct POLYREGION_EXPORT LogicNot : Intr::Base {
 struct POLYREGION_EXPORT Pos : Intr::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Pos(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::Pos &);
@@ -771,6 +832,7 @@ struct POLYREGION_EXPORT Pos : Intr::Base {
 struct POLYREGION_EXPORT Neg : Intr::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Neg(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::Neg &);
@@ -781,6 +843,7 @@ struct POLYREGION_EXPORT Add : Intr::Base {
   Term::Any x;
   Term::Any y;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Add(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::Add &);
@@ -791,6 +854,7 @@ struct POLYREGION_EXPORT Sub : Intr::Base {
   Term::Any x;
   Term::Any y;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Sub(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::Sub &);
@@ -801,6 +865,7 @@ struct POLYREGION_EXPORT Mul : Intr::Base {
   Term::Any x;
   Term::Any y;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Mul(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::Mul &);
@@ -811,6 +876,7 @@ struct POLYREGION_EXPORT Div : Intr::Base {
   Term::Any x;
   Term::Any y;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Div(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::Div &);
@@ -821,6 +887,7 @@ struct POLYREGION_EXPORT Rem : Intr::Base {
   Term::Any x;
   Term::Any y;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Rem(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::Rem &);
@@ -831,6 +898,7 @@ struct POLYREGION_EXPORT Min : Intr::Base {
   Term::Any x;
   Term::Any y;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Min(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::Min &);
@@ -841,6 +909,7 @@ struct POLYREGION_EXPORT Max : Intr::Base {
   Term::Any x;
   Term::Any y;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Max(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::Max &);
@@ -851,6 +920,7 @@ struct POLYREGION_EXPORT BAnd : Intr::Base {
   Term::Any x;
   Term::Any y;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   BAnd(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::BAnd &);
@@ -861,6 +931,7 @@ struct POLYREGION_EXPORT BOr : Intr::Base {
   Term::Any x;
   Term::Any y;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   BOr(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::BOr &);
@@ -871,6 +942,7 @@ struct POLYREGION_EXPORT BXor : Intr::Base {
   Term::Any x;
   Term::Any y;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   BXor(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::BXor &);
@@ -881,6 +953,7 @@ struct POLYREGION_EXPORT BSL : Intr::Base {
   Term::Any x;
   Term::Any y;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   BSL(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::BSL &);
@@ -891,6 +964,7 @@ struct POLYREGION_EXPORT BSR : Intr::Base {
   Term::Any x;
   Term::Any y;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   BSR(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::BSR &);
@@ -901,6 +975,7 @@ struct POLYREGION_EXPORT BZSR : Intr::Base {
   Term::Any x;
   Term::Any y;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   BZSR(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::BZSR &);
@@ -910,6 +985,7 @@ struct POLYREGION_EXPORT BZSR : Intr::Base {
 struct POLYREGION_EXPORT LogicAnd : Intr::Base {
   Term::Any x;
   Term::Any y;
+  POLYREGION_EXPORT uint32_t id() const override;
   LogicAnd(Term::Any x, Term::Any y) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::LogicAnd &);
@@ -919,6 +995,7 @@ struct POLYREGION_EXPORT LogicAnd : Intr::Base {
 struct POLYREGION_EXPORT LogicOr : Intr::Base {
   Term::Any x;
   Term::Any y;
+  POLYREGION_EXPORT uint32_t id() const override;
   LogicOr(Term::Any x, Term::Any y) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::LogicOr &);
@@ -928,6 +1005,7 @@ struct POLYREGION_EXPORT LogicOr : Intr::Base {
 struct POLYREGION_EXPORT LogicEq : Intr::Base {
   Term::Any x;
   Term::Any y;
+  POLYREGION_EXPORT uint32_t id() const override;
   LogicEq(Term::Any x, Term::Any y) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::LogicEq &);
@@ -937,6 +1015,7 @@ struct POLYREGION_EXPORT LogicEq : Intr::Base {
 struct POLYREGION_EXPORT LogicNeq : Intr::Base {
   Term::Any x;
   Term::Any y;
+  POLYREGION_EXPORT uint32_t id() const override;
   LogicNeq(Term::Any x, Term::Any y) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::LogicNeq &);
@@ -946,6 +1025,7 @@ struct POLYREGION_EXPORT LogicNeq : Intr::Base {
 struct POLYREGION_EXPORT LogicLte : Intr::Base {
   Term::Any x;
   Term::Any y;
+  POLYREGION_EXPORT uint32_t id() const override;
   LogicLte(Term::Any x, Term::Any y) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::LogicLte &);
@@ -955,6 +1035,7 @@ struct POLYREGION_EXPORT LogicLte : Intr::Base {
 struct POLYREGION_EXPORT LogicGte : Intr::Base {
   Term::Any x;
   Term::Any y;
+  POLYREGION_EXPORT uint32_t id() const override;
   LogicGte(Term::Any x, Term::Any y) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::LogicGte &);
@@ -964,6 +1045,7 @@ struct POLYREGION_EXPORT LogicGte : Intr::Base {
 struct POLYREGION_EXPORT LogicLt : Intr::Base {
   Term::Any x;
   Term::Any y;
+  POLYREGION_EXPORT uint32_t id() const override;
   LogicLt(Term::Any x, Term::Any y) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::LogicLt &);
@@ -973,6 +1055,7 @@ struct POLYREGION_EXPORT LogicLt : Intr::Base {
 struct POLYREGION_EXPORT LogicGt : Intr::Base {
   Term::Any x;
   Term::Any y;
+  POLYREGION_EXPORT uint32_t id() const override;
   LogicGt(Term::Any x, Term::Any y) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Intr::LogicGt &);
@@ -985,6 +1068,7 @@ struct POLYREGION_EXPORT Base {
   std::vector<Overload> overloads;
   std::vector<Term::Any> terms;
   Type::Any tpe;
+  POLYREGION_EXPORT virtual uint32_t id() const = 0;
   protected:
   Base(std::vector<Overload> overloads, std::vector<Term::Any> terms, Type::Any tpe) noexcept;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Any &);
@@ -997,6 +1081,7 @@ POLYREGION_EXPORT Type::Any tpe(const Math::Any&);
 struct POLYREGION_EXPORT Abs : Math::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Abs(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Abs &);
@@ -1006,6 +1091,7 @@ struct POLYREGION_EXPORT Abs : Math::Base {
 struct POLYREGION_EXPORT Sin : Math::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Sin(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Sin &);
@@ -1015,6 +1101,7 @@ struct POLYREGION_EXPORT Sin : Math::Base {
 struct POLYREGION_EXPORT Cos : Math::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Cos(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Cos &);
@@ -1024,6 +1111,7 @@ struct POLYREGION_EXPORT Cos : Math::Base {
 struct POLYREGION_EXPORT Tan : Math::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Tan(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Tan &);
@@ -1033,6 +1121,7 @@ struct POLYREGION_EXPORT Tan : Math::Base {
 struct POLYREGION_EXPORT Asin : Math::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Asin(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Asin &);
@@ -1042,6 +1131,7 @@ struct POLYREGION_EXPORT Asin : Math::Base {
 struct POLYREGION_EXPORT Acos : Math::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Acos(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Acos &);
@@ -1051,6 +1141,7 @@ struct POLYREGION_EXPORT Acos : Math::Base {
 struct POLYREGION_EXPORT Atan : Math::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Atan(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Atan &);
@@ -1060,6 +1151,7 @@ struct POLYREGION_EXPORT Atan : Math::Base {
 struct POLYREGION_EXPORT Sinh : Math::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Sinh(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Sinh &);
@@ -1069,6 +1161,7 @@ struct POLYREGION_EXPORT Sinh : Math::Base {
 struct POLYREGION_EXPORT Cosh : Math::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Cosh(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Cosh &);
@@ -1078,6 +1171,7 @@ struct POLYREGION_EXPORT Cosh : Math::Base {
 struct POLYREGION_EXPORT Tanh : Math::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Tanh(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Tanh &);
@@ -1087,6 +1181,7 @@ struct POLYREGION_EXPORT Tanh : Math::Base {
 struct POLYREGION_EXPORT Signum : Math::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Signum(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Signum &);
@@ -1096,6 +1191,7 @@ struct POLYREGION_EXPORT Signum : Math::Base {
 struct POLYREGION_EXPORT Round : Math::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Round(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Round &);
@@ -1105,6 +1201,7 @@ struct POLYREGION_EXPORT Round : Math::Base {
 struct POLYREGION_EXPORT Ceil : Math::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Ceil(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Ceil &);
@@ -1114,6 +1211,7 @@ struct POLYREGION_EXPORT Ceil : Math::Base {
 struct POLYREGION_EXPORT Floor : Math::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Floor(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Floor &);
@@ -1123,6 +1221,7 @@ struct POLYREGION_EXPORT Floor : Math::Base {
 struct POLYREGION_EXPORT Rint : Math::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Rint(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Rint &);
@@ -1132,6 +1231,7 @@ struct POLYREGION_EXPORT Rint : Math::Base {
 struct POLYREGION_EXPORT Sqrt : Math::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Sqrt(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Sqrt &);
@@ -1141,6 +1241,7 @@ struct POLYREGION_EXPORT Sqrt : Math::Base {
 struct POLYREGION_EXPORT Cbrt : Math::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Cbrt(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Cbrt &);
@@ -1150,6 +1251,7 @@ struct POLYREGION_EXPORT Cbrt : Math::Base {
 struct POLYREGION_EXPORT Exp : Math::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Exp(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Exp &);
@@ -1159,6 +1261,7 @@ struct POLYREGION_EXPORT Exp : Math::Base {
 struct POLYREGION_EXPORT Expm1 : Math::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Expm1(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Expm1 &);
@@ -1168,6 +1271,7 @@ struct POLYREGION_EXPORT Expm1 : Math::Base {
 struct POLYREGION_EXPORT Log : Math::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Log(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Log &);
@@ -1177,6 +1281,7 @@ struct POLYREGION_EXPORT Log : Math::Base {
 struct POLYREGION_EXPORT Log1p : Math::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Log1p(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Log1p &);
@@ -1186,6 +1291,7 @@ struct POLYREGION_EXPORT Log1p : Math::Base {
 struct POLYREGION_EXPORT Log10 : Math::Base {
   Term::Any x;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Log10(Term::Any x, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Log10 &);
@@ -1196,6 +1302,7 @@ struct POLYREGION_EXPORT Pow : Math::Base {
   Term::Any x;
   Term::Any y;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Pow(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Pow &);
@@ -1206,6 +1313,7 @@ struct POLYREGION_EXPORT Atan2 : Math::Base {
   Term::Any x;
   Term::Any y;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Atan2(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Atan2 &);
@@ -1216,6 +1324,7 @@ struct POLYREGION_EXPORT Hypot : Math::Base {
   Term::Any x;
   Term::Any y;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Hypot(Term::Any x, Term::Any y, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Math::Hypot &);
@@ -1226,6 +1335,7 @@ namespace Expr {
 
 struct POLYREGION_EXPORT Base {
   Type::Any tpe;
+  POLYREGION_EXPORT virtual uint32_t id() const = 0;
   protected:
   explicit Base(Type::Any tpe) noexcept;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Any &);
@@ -1235,6 +1345,7 @@ POLYREGION_EXPORT Type::Any tpe(const Expr::Any&);
 
 struct POLYREGION_EXPORT SpecOp : Expr::Base {
   Spec::Any op;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit SpecOp(Spec::Any op) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::SpecOp &);
@@ -1243,6 +1354,7 @@ struct POLYREGION_EXPORT SpecOp : Expr::Base {
 
 struct POLYREGION_EXPORT MathOp : Expr::Base {
   Math::Any op;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit MathOp(Math::Any op) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::MathOp &);
@@ -1251,6 +1363,7 @@ struct POLYREGION_EXPORT MathOp : Expr::Base {
 
 struct POLYREGION_EXPORT IntrOp : Expr::Base {
   Intr::Any op;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit IntrOp(Intr::Any op) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::IntrOp &);
@@ -1260,6 +1373,7 @@ struct POLYREGION_EXPORT IntrOp : Expr::Base {
 struct POLYREGION_EXPORT Cast : Expr::Base {
   Term::Any from;
   Type::Any as;
+  POLYREGION_EXPORT uint32_t id() const override;
   Cast(Term::Any from, Type::Any as) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Cast &);
@@ -1268,6 +1382,7 @@ struct POLYREGION_EXPORT Cast : Expr::Base {
 
 struct POLYREGION_EXPORT Alias : Expr::Base {
   Term::Any ref;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit Alias(Term::Any ref) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Alias &);
@@ -1278,6 +1393,7 @@ struct POLYREGION_EXPORT Index : Expr::Base {
   Term::Any lhs;
   Term::Any idx;
   Type::Any component;
+  POLYREGION_EXPORT uint32_t id() const override;
   Index(Term::Any lhs, Term::Any idx, Type::Any component) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Index &);
@@ -1288,6 +1404,7 @@ struct POLYREGION_EXPORT RefTo : Expr::Base {
   Term::Any lhs;
   std::optional<Term::Any> idx;
   Type::Any component;
+  POLYREGION_EXPORT uint32_t id() const override;
   RefTo(Term::Any lhs, std::optional<Term::Any> idx, Type::Any component) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::RefTo &);
@@ -1297,6 +1414,7 @@ struct POLYREGION_EXPORT RefTo : Expr::Base {
 struct POLYREGION_EXPORT Alloc : Expr::Base {
   Type::Any component;
   Term::Any size;
+  POLYREGION_EXPORT uint32_t id() const override;
   Alloc(Type::Any component, Term::Any size) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Alloc &);
@@ -1310,6 +1428,7 @@ struct POLYREGION_EXPORT Invoke : Expr::Base {
   std::vector<Term::Any> args;
   std::vector<Term::Any> captures;
   Type::Any rtn;
+  POLYREGION_EXPORT uint32_t id() const override;
   Invoke(Sym name, std::vector<Type::Any> tpeArgs, std::optional<Term::Any> receiver, std::vector<Term::Any> args, std::vector<Term::Any> captures, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Invoke &);
@@ -1319,6 +1438,7 @@ struct POLYREGION_EXPORT Invoke : Expr::Base {
 namespace Stmt { 
 
 struct POLYREGION_EXPORT Base {
+  POLYREGION_EXPORT virtual uint32_t id() const = 0;
   protected:
   Base();
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Stmt::Any &);
@@ -1327,6 +1447,7 @@ struct POLYREGION_EXPORT Base {
 
 struct POLYREGION_EXPORT Block : Stmt::Base {
   std::vector<Stmt::Any> stmts;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit Block(std::vector<Stmt::Any> stmts) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Stmt::Block &);
@@ -1335,6 +1456,7 @@ struct POLYREGION_EXPORT Block : Stmt::Base {
 
 struct POLYREGION_EXPORT Comment : Stmt::Base {
   std::string value;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit Comment(std::string value) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Stmt::Comment &);
@@ -1344,6 +1466,7 @@ struct POLYREGION_EXPORT Comment : Stmt::Base {
 struct POLYREGION_EXPORT Var : Stmt::Base {
   Named name;
   std::optional<Expr::Any> expr;
+  POLYREGION_EXPORT uint32_t id() const override;
   Var(Named name, std::optional<Expr::Any> expr) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Stmt::Var &);
@@ -1354,6 +1477,7 @@ struct POLYREGION_EXPORT Mut : Stmt::Base {
   Term::Any name;
   Expr::Any expr;
   bool copy;
+  POLYREGION_EXPORT uint32_t id() const override;
   Mut(Term::Any name, Expr::Any expr, bool copy) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Stmt::Mut &);
@@ -1364,6 +1488,7 @@ struct POLYREGION_EXPORT Update : Stmt::Base {
   Term::Any lhs;
   Term::Any idx;
   Term::Any value;
+  POLYREGION_EXPORT uint32_t id() const override;
   Update(Term::Any lhs, Term::Any idx, Term::Any value) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Stmt::Update &);
@@ -1374,6 +1499,7 @@ struct POLYREGION_EXPORT While : Stmt::Base {
   std::vector<Stmt::Any> tests;
   Term::Any cond;
   std::vector<Stmt::Any> body;
+  POLYREGION_EXPORT uint32_t id() const override;
   While(std::vector<Stmt::Any> tests, Term::Any cond, std::vector<Stmt::Any> body) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Stmt::While &);
@@ -1381,6 +1507,7 @@ struct POLYREGION_EXPORT While : Stmt::Base {
 };
 
 struct POLYREGION_EXPORT Break : Stmt::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   Break() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Stmt::Break &);
@@ -1388,6 +1515,7 @@ struct POLYREGION_EXPORT Break : Stmt::Base {
 };
 
 struct POLYREGION_EXPORT Cont : Stmt::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   Cont() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Stmt::Cont &);
@@ -1398,6 +1526,7 @@ struct POLYREGION_EXPORT Cond : Stmt::Base {
   Expr::Any cond;
   std::vector<Stmt::Any> trueBr;
   std::vector<Stmt::Any> falseBr;
+  POLYREGION_EXPORT uint32_t id() const override;
   Cond(Expr::Any cond, std::vector<Stmt::Any> trueBr, std::vector<Stmt::Any> falseBr) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Stmt::Cond &);
@@ -1406,6 +1535,7 @@ struct POLYREGION_EXPORT Cond : Stmt::Base {
 
 struct POLYREGION_EXPORT Return : Stmt::Base {
   Expr::Any value;
+  POLYREGION_EXPORT uint32_t id() const override;
   explicit Return(Expr::Any value) noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Stmt::Return &);
@@ -1460,6 +1590,7 @@ struct POLYREGION_EXPORT InvokeSignature {
 namespace FunctionKind { 
 
 struct POLYREGION_EXPORT Base {
+  POLYREGION_EXPORT virtual uint32_t id() const = 0;
   protected:
   Base();
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const FunctionKind::Any &);
@@ -1467,6 +1598,7 @@ struct POLYREGION_EXPORT Base {
 };
 
 struct POLYREGION_EXPORT Internal : FunctionKind::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   Internal() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const FunctionKind::Internal &);
@@ -1474,6 +1606,7 @@ struct POLYREGION_EXPORT Internal : FunctionKind::Base {
 };
 
 struct POLYREGION_EXPORT Exported : FunctionKind::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   Exported() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const FunctionKind::Exported &);
@@ -1483,6 +1616,7 @@ struct POLYREGION_EXPORT Exported : FunctionKind::Base {
 namespace FunctionAttr { 
 
 struct POLYREGION_EXPORT Base {
+  POLYREGION_EXPORT virtual uint32_t id() const = 0;
   protected:
   Base();
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const FunctionAttr::Any &);
@@ -1490,6 +1624,7 @@ struct POLYREGION_EXPORT Base {
 };
 
 struct POLYREGION_EXPORT FPRelaxed : FunctionAttr::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   FPRelaxed() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const FunctionAttr::FPRelaxed &);
@@ -1497,6 +1632,7 @@ struct POLYREGION_EXPORT FPRelaxed : FunctionAttr::Base {
 };
 
 struct POLYREGION_EXPORT FPStrict : FunctionAttr::Base {
+  POLYREGION_EXPORT uint32_t id() const override;
   FPStrict() noexcept;
   POLYREGION_EXPORT operator Any() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const FunctionAttr::FPStrict &);

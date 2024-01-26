@@ -61,7 +61,7 @@ private[polyregion] object CppSourceMirror {
 
   // val initNS = symbolNames[PolyAst.type].head
 
-  private final val adtSources       = structs.flatMap(_.emit)
+  private final val adtSources       = structs.flatMap(_.emit())
   private final val jsonCodecSources = structs.flatMap(CppNlohmannJsonCodecGen.emit(_))
 
   private final val adtHeader = StructSource.emitHeader(namespace, adtSources)
