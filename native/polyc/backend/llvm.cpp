@@ -13,7 +13,7 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Verifier.h"
-#include "llvm/Support/Host.h"
+#include "llvm/TargetParser/Host.h"
 #include "llvm/Transforms/Scalar.h"
 
 using namespace polyregion;
@@ -104,7 +104,7 @@ ValPtr LLVMBackend::AstTransformer::invokeAbort(llvm::Function *parent) {
 
 // the only unsigned type in PolyAst
 static bool isUnsigned(const Type::Any &tpe) {
-  return holds<Type::IntU8>(tpe) || holds<Type::IntU16>(tpe) || holds<Type::IntU32>(tpe) || holds<Type::IntU64>(tpe);
+  return tpe.is<Type::IntU8>() || tpe.is<Type::IntU16>() || tpe.is<Type::IntU32>() || tpe.is<Type::IntU64>();
 }
 
 static constexpr int64_t nIntMin(uint64_t bits) { return -(int64_t(1) << (bits - 1)); }
@@ -137,8 +137,7 @@ LLVMBackend::AstTransformer::mkStruct(const StructDef &def) {
 }
 
 llvm::Type *LLVMBackend::AstTransformer::mkTpe(const Type::Any &tpe, bool functionBoundary) {                   //
-  return variants::total(                                                                                       //
-      *tpe,                                                                                                     //
+  return tpe.match_total(                                                                                       //
       [&](const Type::Float16 &x) -> llvm::Type * { return llvm::Type::getHalfTy(C); },                         //
       [&](const Type::Float32 &x) -> llvm::Type * { return llvm::Type::getFloatTy(C); },                        //
       [&](const Type::Float64 &x) -> llvm::Type * { return llvm::Type::getDoubleTy(C); },                       //
@@ -173,15 +172,14 @@ llvm::Type *LLVMBackend::AstTransformer::mkTpe(const Type::Any &tpe, bool functi
       [&](const Type::Ptr &x) -> llvm::Type * {
         if (x.length) return llvm::ArrayType::get(mkTpe(x.component), *x.length);
         else {
-          return B.getPtrTy(variants::total(
-              *x.space,                                             //
+          return B.getPtrTy(x.space.match_total(                    //
               [&](const TypeSpace::Local &_) { return LocalAS; },   //
               [&](const TypeSpace::Global &_) { return GlobalAS; }) //
           );
         }
 
         //        // These two types promote to a byte when stored in an array
-        //        if (holds<Type::Bool1>(x.component) || holds<Type::Unit0>(x.component)) {
+        //        if (HOLDS(Type::Bool1, x.component) || HOLDS(Type::Unit0, x.component)) {
         //          return llvm::Type::getInt8Ty(C)->getPointerTo(AS);
         //        } else {
         //          auto comp = mkTpe(x.component);
@@ -195,7 +193,7 @@ llvm::Type *LLVMBackend::AstTransformer::mkTpe(const Type::Any &tpe, bool functi
 }
 
 ValPtr LLVMBackend::AstTransformer::findStackVar(const Named &named) {
-  if (holds<Type::Unit0>(named.tpe)) return mkTermVal(Term::Unit0Const());
+  if (named.tpe.is<Type::Unit0>()) return mkTermVal(Term::Unit0Const());
   //  check the LUT table for known variables defined by var or brought in scope by parameters
   if (auto x = polyregion::get_opt(stackVarPtrs, named.symbol); x) {
     auto [tpe, value] = *x;
@@ -222,10 +220,10 @@ ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
       else error(__FILE__, __LINE__, "Unseen struct type " + to_string(s.name) + " in select path" + fail());
     };
 
-    if (auto s = get_opt<Type::Struct>(tpe); s) {
+    if (auto s = tpe.get<Type::Struct>(); s) {
       return findTy(*s);
-    } else if (auto p = get_opt<Type::Ptr>(tpe); p) {
-      if (auto _s = get_opt<Type::Struct>(p->component); _s) return findTy(*_s);
+    } else if (auto p = tpe.get<Type::Ptr>(); p) {
+      if (auto _s = p->component.get<Type::Struct>(); _s) return findTy(*_s);
       else
         error(__FILE__, __LINE__,
               "Illegal select path involving pointer to non-struct type " + to_string(s->name) + " in select path" + fail());
@@ -246,7 +244,7 @@ ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
     auto root = findStackVar(head);
     for (auto &path : tail) {
       auto selectFinal = [&](llvm::StructType *structTy, size_t idx) {
-        if (auto p = get_opt<Type::Ptr>(tpe); p && !p->length) {
+        if (auto p = tpe.get<Type::Ptr>(); p && !p->length) {
           root = B.CreateInBoundsGEP(
               structTy, load(B, root, B.getPtrTy(AllocaAS)),
               {//
@@ -347,11 +345,10 @@ Opt<Pair<std::vector<llvm::StructType *>, T>> LLVMBackend::AstTransformer::findS
 ValPtr LLVMBackend::AstTransformer::mkTermVal(const Term::Any &ref) {
   using llvm::ConstantFP;
   using llvm::ConstantInt;
-  return variants::total(
-      *ref, //
+  return ref.match_total( //
       [&](const Term::Select &x) -> ValPtr {
-        if (holds<Type::Unit0>(x.tpe)) return mkTermVal(Term::Unit0Const());
-        if (auto ptr = get_opt<Type::Ptr>(x.tpe); ptr && ptr->length) return mkSelectPtr(x);
+        if (x.tpe.is<Type::Unit0>()) return mkTermVal(Term::Unit0Const());
+        if (auto ptr = x.tpe.get<Type::Ptr>(); ptr && ptr->length) return mkSelectPtr(x);
         else return load(B, mkSelectPtr(x), mkTpe(x.tpe));
       },
       [&](const Term::Poison &x) -> ValPtr {
@@ -398,14 +395,12 @@ llvm::Function *LLVMBackend::AstTransformer::mkExternalFn(llvm::Function *parent
 
 ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Function *fn, const std::string &key) {
 
-  return variants::total(
-      *expr, //
+  return expr.match_total( //
       [&](const Expr::SpecOp &x) -> ValPtr { return targetHandler->mkSpecVal(*this, fn, x); },
       [&](const Expr::MathOp &x) -> ValPtr { return targetHandler->mkMathVal(*this, fn, x); },
       [&](const Expr::IntrOp &x) -> ValPtr {
         auto intr = x.op;
-        return variants::total(
-            *intr, //
+        return intr.match_total( //
             [&](const Intr::BNot &v) -> ValPtr { return unaryExpr(expr, v.x, v.tpe, [&](auto x) { return B.CreateNot(x); }); },
             [&](const Intr::LogicNot &v) -> ValPtr { return B.CreateNot(mkTermVal(v.x)); },
             [&](const Intr::Pos &v) -> ValPtr {
@@ -473,32 +468,32 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
             [&](const Intr::LogicOr &v) -> ValPtr { return B.CreateLogicalOr(mkTermVal(v.x), mkTermVal(v.y)); },   //
             [&](const Intr::LogicEq &v) -> ValPtr {
               return binaryNumOp(
-                  expr, v.x, v.y, tpe(v.x), //
+                  expr, v.x, v.y, v.x.tpe(), //
                   [&](auto l, auto r) { return B.CreateICmpEQ(l, r); }, [&](auto l, auto r) { return B.CreateFCmpOEQ(l, r); });
             },
             [&](const Intr::LogicNeq &v) -> ValPtr {
               return binaryNumOp(
-                  expr, v.x, v.y, tpe(v.x), //
+                  expr, v.x, v.y, v.x.tpe(), //
                   [&](auto l, auto r) { return B.CreateICmpNE(l, r); }, [&](auto l, auto r) { return B.CreateFCmpONE(l, r); });
             },
             [&](const Intr::LogicLte &v) -> ValPtr {
               return binaryNumOp(
-                  expr, v.x, v.y, tpe(v.x), //
+                  expr, v.x, v.y, v.x.tpe(), //
                   [&](auto l, auto r) { return B.CreateICmpSLE(l, r); }, [&](auto l, auto r) { return B.CreateFCmpOLE(l, r); });
             },
             [&](const Intr::LogicGte &v) -> ValPtr {
               return binaryNumOp(
-                  expr, v.x, v.y, tpe(v.x), //
+                  expr, v.x, v.y, v.x.tpe(), //
                   [&](auto l, auto r) { return B.CreateICmpSGE(l, r); }, [&](auto l, auto r) { return B.CreateFCmpOGE(l, r); });
             },
             [&](const Intr::LogicLt &v) -> ValPtr {
               return binaryNumOp(
-                  expr, v.x, v.y, tpe(v.x), //
+                  expr, v.x, v.y, v.x.tpe(), //
                   [&](auto l, auto r) { return B.CreateICmpSLT(l, r); }, [&](auto l, auto r) { return B.CreateFCmpOLT(l, r); });
             },
             [&](const Intr::LogicGt &v) -> ValPtr {
               return binaryNumOp(
-                  expr, v.x, v.y, tpe(v.x), //
+                  expr, v.x, v.y, v.x.tpe(), //
                   [&](auto l, auto r) { return B.CreateICmpSGT(l, r); }, [&](auto l, auto r) { return B.CreateFCmpOGT(l, r); });
             });
       },
@@ -506,19 +501,19 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
         // we only allow widening or narrowing of integral and fractional types
         // pointers are not allowed to participate on either end
         auto from = mkTermVal(x.from);
-        auto fromTpe = mkTpe(tpe(x.from));
+        auto fromTpe = mkTpe(x.from.tpe());
         auto toTpe = mkTpe(x.as);
         enum class NumKind { Fractional, Integral };
 
         // Same type
-        if (*x.as == *tpe(x.from)) return from;
+        if (x.as == x.from.tpe()) return from;
 
         // x.as <: x.from
 
-        if (auto rhsPtr = get_opt<Type::Ptr>(tpe(x.from)); rhsPtr) {
-          if (auto lhsPtr = get_opt<Type::Ptr>(x.as); lhsPtr) {
-            auto lhsStruct = get_opt<Type::Struct>(lhsPtr->component);
-            auto rhsStruct = get_opt<Type::Struct>(rhsPtr->component);
+        if (auto rhsPtr = x.from.tpe().get<Type::Ptr>(); rhsPtr) {
+          if (auto lhsPtr = x.as.get<Type::Ptr>(); lhsPtr) {
+            auto lhsStruct = lhsPtr->component.get<Type::Struct>();
+            auto rhsStruct = rhsPtr->component.get<Type::Struct>();
             if (lhsStruct && rhsStruct &&
                 (std::any_of(lhsStruct->parents.begin(), lhsStruct->parents.end(), [&](auto &x) { return x == rhsStruct->name; }) ||
                  std::any_of(rhsStruct->parents.begin(), rhsStruct->parents.end(), [&](auto &x) { return x == lhsStruct->name; }))) {
@@ -529,18 +524,16 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
 
               std::cout << "R " << llvm_tostring(lhsTpe) << std::endl;
 
-
-
               if (auto inHeirachy = findSymbolInHeirachy<bool>(
-                      rhsStruct->name, [&](auto, auto structTy, auto) -> Opt<bool> { return structTy == lhsTpe ? std::optional{true} : std::nullopt ; });
+                      rhsStruct->name,
+                      [&](auto, auto structTy, auto) -> Opt<bool> { return structTy == lhsTpe ? std::optional{true} : std::nullopt; });
                   inHeirachy) {
-
 
                 auto &[inheritanceChain, finaIdx] = *inHeirachy;
 
-                auto chainPrev = lhsTpe->isStructTy() ? static_cast<llvm::StructType*>(lhsTpe) : undefined(__FILE__, __LINE__,"Illegal lhs tpe!");
+                auto chainPrev =
+                    lhsTpe->isStructTy() ? static_cast<llvm::StructType *>(lhsTpe) : undefined(__FILE__, __LINE__, "Illegal lhs tpe!");
                 for (auto chain : inheritanceChain) {
-
 
                   std::cout << "@@ " << llvm_tostring(chain) << std::endl;
 
@@ -559,8 +552,7 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
                       chain, from,
                       {//
                        llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), N)},
-                       "_upcast_ptr");
-
+                      "_upcast_ptr");
                 }
               }
 
@@ -571,16 +563,15 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
           }
         }
 
-        auto fromKind = variants::total(
-            *kind(tpe(x.from)), [&](const TypeKind::Integral &) -> NumKind { return NumKind::Integral; },
+        auto fromKind = x.from.tpe().kind().match_total( //
+            [&](const TypeKind::Integral &) -> NumKind { return NumKind::Integral; },
             [&](const TypeKind::Fractional &) -> NumKind { return NumKind::Fractional; },
             [&](const TypeKind::Ref &) -> NumKind {
               throw std::logic_error("Semantic error: conversion from ref type (" + to_string(fromTpe) + ") is not allowed");
             },
             [&](const TypeKind::None &) -> NumKind { error(__FILE__, __LINE__, "none!?"); });
 
-        auto toKind = variants::total(
-            *kind(x.as), //
+        auto toKind = x.as.kind().match_total( //
             [&](const TypeKind::Integral &) -> NumKind { return NumKind::Integral; },
             [&](const TypeKind::Fractional &) -> NumKind { return NumKind::Fractional; },
             [&](const TypeKind::Ref &) -> NumKind {
@@ -615,9 +606,9 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
         } else if (fromKind == NumKind::Integral && toKind == NumKind::Fractional) {
           // XXX this is a *widening* conversion, even though we may lose precision
           // XXX here the result is rounded using the default rounding mode so the dest bit width doesn't matter
-          return isUnsigned(tpe(x.from)) ? B.CreateUIToFP(from, toTpe) : B.CreateSIToFP(from, toTpe);
+          return isUnsigned(x.from.tpe()) ? B.CreateUIToFP(from, toTpe) : B.CreateSIToFP(from, toTpe);
         } else if (fromKind == NumKind::Integral && toKind == NumKind::Integral) {
-          return B.CreateIntCast(from, toTpe, !isUnsigned(tpe(x.from)), "integral_cast");
+          return B.CreateIntCast(from, toTpe, !isUnsigned(x.from.tpe()), "integral_cast");
         } else if (fromKind == NumKind::Fractional && toKind == NumKind::Fractional) {
           return B.CreateFPCast(from, toTpe, "fractional_cast");
         } else error(__FILE__, __LINE__, "unhandled cast");
@@ -627,22 +618,23 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
         std::vector<Term::Any> allArgs;
         if (x.receiver) allArgs.push_back((*x.receiver));
         for (auto &arg : x.args)
-          if (!holds<Type::Unit0>(tpe(arg))) allArgs.push_back(arg);
+          if (!arg.tpe().is<Type::Unit0>()) allArgs.push_back(arg);
         for (auto &arg : x.captures)
-          if (!holds<Type::Unit0>(tpe(arg))) allArgs.push_back(arg);
+          if (!arg.tpe().is<Type::Unit0>()) allArgs.push_back(arg);
 
         auto paramTerms = map_vec2(allArgs, [&](auto &&term) {
           auto val = mkTermVal(term);
-          return holds<Type::Bool1>(tpe(term)) ? B.CreateZExt(val, mkTpe(Type::Bool1(), true)) : val;
+          return term.tpe().template is<Type::Bool1>() ? B.CreateZExt(val, mkTpe(Type::Bool1(), true)) : val;
         });
 
-        InvokeSignature sig(x.name, {}, map_opt(x.receiver, [](auto &x) { return tpe(x); }),
-                            map_vec2(x.args, [](auto &x) { return tpe(x); }), map_vec2(x.captures, [](auto &x) { return tpe(x); }), x.rtn);
+        InvokeSignature sig(x.name, {}, map_opt(x.receiver, [](auto &x) { return x.tpe(); }),
+                            map_vec2(x.args, [](auto &x) { return x.tpe(); }), map_vec2(x.captures, [](auto &x) { return x.tpe(); }),
+                            x.rtn);
 
         if (auto fn = functions.find(sig); fn != functions.end()) {
           auto call = B.CreateCall(fn->second, paramTerms);
           // in case the fn returns a unit (which is mapped to void), we just return the constant
-          if (holds<Type::Unit0>(x.rtn)) {
+          if (x.rtn.is<Type::Unit0>()) {
             return mkTermVal(Term::Unit0Const());
           } else return call;
         } else {
@@ -654,10 +646,10 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
         }
       },
       [&](const Expr::Index &x) -> ValPtr {
-        if (auto lhs = get_opt<Term::Select>(x.lhs); lhs) {
-          if (auto arrTpe = get_opt<Type::Ptr>(lhs->tpe); arrTpe) {
+        if (auto lhs = x.lhs.get<Term::Select>(); lhs) {
+          if (auto arrTpe = lhs->tpe.get<Type::Ptr>(); arrTpe) {
 
-            if (holds<Type::Unit0>(arrTpe->component)) {
+            if (arrTpe->component.is<Type::Unit0>()) {
               // Still call GEP so that memory access and OOB effects are still present.
               auto val = mkTermVal(Term::Unit0Const());
               B.CreateInBoundsGEP(val->getType(),                  //
@@ -676,7 +668,7 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
               auto ptr = B.CreateInBoundsGEP(ty,              //
                                              mkTermVal(*lhs), //
                                              mkTermVal(x.idx), key + "_idx_ptr");
-              if (holds<Type::Bool1>(arrTpe->component)) { // Narrow from i8 to i1
+              if (arrTpe->component.is<Type::Bool1>()) { // Narrow from i8 to i1
                 return B.CreateICmpNE(load(B, ptr, ty), llvm::ConstantInt::get(llvm::Type::getInt1Ty(C), 0, true));
               } else {
 
@@ -697,18 +689,18 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
       },
 
       [&](const Expr::RefTo &x) -> ValPtr {
-        if (auto lhs = get_opt<Term::Select>(x.lhs); lhs) {
-          if (auto arrTpe = get_opt<Type::Ptr>(lhs->tpe); arrTpe) { // taking reference of an index in an array
+        if (auto lhs = x.lhs.get<Term::Select>(); lhs) {
+          if (auto arrTpe = lhs->tpe.get<Type::Ptr>(); arrTpe) { // taking reference of an index in an array
             auto offset = x.idx ? mkTermVal(*x.idx) : llvm::ConstantInt::get(llvm::Type::getInt64Ty(C), 0, true);
-            if (auto nestedArrTpe = get_opt<Type::Ptr>(arrTpe->component); nestedArrTpe && nestedArrTpe->length) {
-              auto ty = holds<Type::Unit0>(arrTpe->component) ? llvm::Type::getInt8Ty(C) : mkTpe(arrTpe->component);
+            if (auto nestedArrTpe = arrTpe->component.get<Type::Ptr>(); nestedArrTpe && nestedArrTpe->length) {
+              auto ty = arrTpe->component.is<Type::Unit0>() ? llvm::Type::getInt8Ty(C) : mkTpe(arrTpe->component);
               return B.CreateInBoundsGEP(ty,              //
                                          mkTermVal(*lhs), //
                                          {llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), offset},
                                          key + "_ref_to_" + llvm_tostring(ty));
 
             } else {
-              auto ty = holds<Type::Unit0>(arrTpe->component) ? llvm::Type::getInt8Ty(C) : mkTpe(arrTpe->component);
+              auto ty = arrTpe->component.is<Type::Unit0>() ? llvm::Type::getInt8Ty(C) : mkTpe(arrTpe->component);
               return B.CreateInBoundsGEP(ty,              //
                                          mkTermVal(*lhs), //
                                          offset, key + "_ref_to_ptr");
@@ -716,7 +708,7 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
           } else { // taking reference of a var
             if (x.idx) throw std::logic_error("Semantic error: Cannot take reference of scalar with index in " + to_string(x));
 
-            if (holds<Type::Unit0>(lhs->tpe))
+            if (lhs->tpe.is<Type::Unit0>())
               throw std::logic_error("Semantic error: Cannot take reference of an select with unit type in " + to_string(x));
             return mkSelectPtr(*lhs);
           }
@@ -734,9 +726,9 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
 }
 
 static bool canAssign(Type::Any lhs, Type::Any rhs) {
-  if (*lhs == *rhs) return true;
-  auto lhsStruct = get_opt<Type::Struct>(lhs);
-  auto rhsStruct = get_opt<Type::Struct>(rhs);
+  if (lhs == rhs) return true;
+  auto lhsStruct = lhs.get<Type::Struct>();
+  auto rhsStruct = rhs.get<Type::Struct>();
   if (lhsStruct && rhsStruct) {
     return std::any_of(lhsStruct->parents.begin(), lhsStruct->parents.end(), [&](auto &x) { return x == rhsStruct->name; });
   }
@@ -753,8 +745,7 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
   //               : B.CreateICmpNE(cond, llvm::ConstantInt::get(llvm::Type::getInt8Ty(C), 0, true));
   //  };
 
-  return variants::total(
-      *stmt,
+  return stmt.match_total(
       [&](const Stmt::Block &x) -> BlockKind {
         auto kind = BlockKind::Normal;
         for (auto &body : x.stmts)
@@ -769,12 +760,12 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
         // [T : ref] =>> t:T* = &(rhs:T) ; lut += t
         // [T : val] =>> t:T  =   rhs:T  ; lut += &t
 
-        if (x.expr && tpe(*x.expr) != x.name.tpe) {
-          throw std::logic_error("Semantic error: name type " + to_string(x.name.tpe) + " and rhs expr type " + to_string(tpe(*x.expr)) +
+        if (x.expr && x.expr->tpe() != x.name.tpe) {
+          throw std::logic_error("Semantic error: name type " + to_string(x.name.tpe) + " and rhs expr type " + to_string(x.expr->tpe()) +
                                  " mismatch (" + repr(x) + ")");
         }
 
-        if (holds<Type::Unit0>(x.name.tpe)) {
+        if (x.name.tpe.is<Type::Unit0>()) {
           // Unit0 declaration, discard declaration but keep RHS effect.
           if (x.expr) mkExprVal(*x.expr, fn, x.name.symbol + "_var_rhs");
         } else {
@@ -783,7 +774,7 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
           std::cout << llvm_tostring(tpe) << " = " << x.name.tpe << "\n";
           auto stackPtr = B.CreateAlloca(tpe, AllocaAS, nullptr, x.name.symbol + "_stack_ptr");
           auto rhs = x.expr ? std::make_optional(mkExprVal(*x.expr, fn, x.name.symbol + "_var_rhs")) : std::nullopt;
-          stackVarPtrs[x.name.symbol] = {x.name.tpe, stackPtr};
+          stackVarPtrs.emplace(x.name.symbol, Pair<Type::Any, llvm::Value *>{x.name.tpe, stackPtr});
           if (rhs) {
             B.CreateStore(*rhs, stackPtr); //
           }
@@ -794,12 +785,12 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
         // [T : ref]        =>> t   := &(rhs:T) ; lut += t
         // [T : ref {u: U}] =>> t.u := &(rhs:U)
         // [T : val]        =>> t   :=   rhs:T
-        if (auto lhs = get_opt<Term::Select>(x.name); lhs) {
-          if (tpe(x.expr) != lhs->tpe) {
-            throw std::logic_error("Semantic error: name type (" + to_string(tpe(x.expr)) + ") and rhs expr (" + to_string(lhs->tpe) +
+        if (auto lhs = x.name.get<Term::Select>(); lhs) {
+          if (x.expr.tpe() != lhs->tpe) {
+            throw std::logic_error("Semantic error: name type (" + to_string(x.expr.tpe()) + ") and rhs expr (" + to_string(lhs->tpe) +
                                    ") mismatch (" + repr(x) + ")");
           }
-          if (holds<Type::Unit0>(lhs->tpe)) return BlockKind::Normal;
+          if (lhs->tpe.is<Type::Unit0>()) return BlockKind::Normal;
           auto rhs = mkExprVal(x.expr, fn, qualified(*lhs) + "_mut");
           if (lhs->init.empty()) { // local var
             auto stackPtr = findStackVar(lhs->last);
@@ -811,21 +802,21 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
         return BlockKind::Normal;
       },
       [&](const Stmt::Update &x) -> BlockKind {
-        if (auto lhs = get_opt<Term::Select>(x.lhs); lhs) {
-          if (auto arrTpe = get_opt<Type::Ptr>(lhs->tpe); arrTpe) {
+        if (auto lhs = x.lhs.get<Term::Select>(); lhs) {
+          if (auto arrTpe = lhs->tpe.get<Type::Ptr>(); arrTpe) {
             auto rhs = x.value;
 
             bool componentIsSizedArray = false;
-            if (auto p = get_opt<Type::Ptr>(arrTpe->component); p && p->length) {
+            if (auto p = arrTpe->component.get<Type::Ptr>(); p && p->length) {
               componentIsSizedArray = true;
             }
 
-            if (arrTpe->component != tpe(rhs)) {
+            if (arrTpe->component != rhs.tpe()) {
               throw std::logic_error("Semantic error: array component type (" + to_string(arrTpe->component) + ") and rhs expr (" +
-                                     to_string(tpe(rhs)) + ") mismatch (" + repr(x) + ")");
+                                     to_string(rhs.tpe()) + ") mismatch (" + repr(x) + ")");
             } else {
               auto dest = mkTermVal(*lhs);
-              if (holds<Type::Bool1>(tpe(rhs)) || holds<Type::Unit0>(tpe(rhs))) { // Extend from i1 to i8
+              if (rhs.tpe().is<Type::Bool1>() || rhs.tpe().is<Type::Unit0>()) { // Extend from i1 to i8
                 auto ty = llvm::Type::getInt8Ty(C);
                 auto ptr = B.CreateInBoundsGEP( //
                     ty, dest,
@@ -836,7 +827,7 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
               } else {
 
                 auto ptr = B.CreateInBoundsGEP( //
-                    mkTpe(tpe(rhs)), dest,      //
+                    mkTpe(rhs.tpe()), dest,     //
                     componentIsSizedArray ? llvm::ArrayRef<ValPtr>{llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), mkTermVal(x.idx)}
                                           : llvm::ArrayRef<ValPtr>{mkTermVal(x.idx)},
                     qualified(*lhs) + "_update_ptr" //
@@ -915,17 +906,17 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
         }
       },
       [&](const Stmt::Return &x) -> BlockKind {
-        auto rtnTpe = tpe(x.value);
-        if (holds<Type::Unit0>(rtnTpe)) {
+        auto rtnTpe = x.value.tpe();
+        if (rtnTpe.is<Type::Unit0>()) {
           B.CreateRetVoid();
-        } else if (holds<Type::Nothing>(rtnTpe)) {
+        } else if (rtnTpe.is<Type::Nothing>()) {
           B.CreateUnreachable();
         } else {
           auto expr = mkExprVal(x.value, fn, "return");
-          if (holds<Type::Bool1>(rtnTpe)) {
+          if (rtnTpe.is<Type::Bool1>()) {
             // Extend from i1 to i8
             B.CreateRet(B.CreateIntCast(expr, llvm::Type::getInt8Ty(C), true));
-          } else if (auto ptr = get_opt<Type::Ptr>(rtnTpe); ptr && ptr->length) {
+          } else if (auto ptr = rtnTpe.get<Type::Ptr>(); ptr && ptr->length) {
             B.CreateRet(load(B, expr, mkTpe(rtnTpe)));
           } else {
             B.CreateRet(expr);
@@ -945,7 +936,7 @@ void LLVMBackend::AstTransformer::addDefs(const std::vector<StructDef> &defs) {
           bool noInheritanceDependency =
               std::all_of(def.parents.begin(), def.parents.end(), [&](auto &p) { return structTypes.find(p) != structTypes.end(); });
           bool noMemberDependencies = std::all_of(def.members.begin(), def.members.end(), [&](auto &m) {
-            if (auto s = get_opt<Type::Struct>(m.named.tpe); s) return structTypes.find(s->name) != structTypes.end();
+            if (auto s = m.named.tpe.template get<Type::Struct>(); s) return structTypes.find(s->name) != structTypes.end();
             else return true;
           });
           return noMemberDependencies && noInheritanceDependency;
@@ -975,7 +966,7 @@ static std::vector<Arg> collectFnDeclarationNames(const Function &f) {
   if (f.receiver) allArgs.push_back(*f.receiver);
   auto addAddExcludingUnit = [&](auto &xs) {
     for (auto &x : xs) {
-      if (!holds<Type::Unit0>(x.named.tpe)) allArgs.push_back(x);
+      if (!x.named.tpe.template is<Type::Unit0>()) allArgs.push_back(x);
     }
   };
   addAddExcludingUnit(f.args);
@@ -990,7 +981,7 @@ void LLVMBackend::AstTransformer::addFn(llvm::Module &mod, const Function &f, bo
   auto llvmArgTpes = map_vec<Arg, llvm::Type *>(args, [&](auto &&arg) { return mkTpe(arg.named.tpe, true); });
 
   // Unit type at function return type position is void, any other location, Unit is a singleton value
-  auto rtnTpe = holds<Type::Unit0>(f.rtn) ? llvm::Type::getVoidTy(C) : mkTpe(f.rtn, true);
+  auto rtnTpe = f.rtn.is<Type::Unit0>() ? llvm::Type::getVoidTy(C) : mkTpe(f.rtn, true);
 
   auto fnTpe = llvm::FunctionType::get(rtnTpe, {llvmArgTpes}, false);
 
@@ -1045,8 +1036,7 @@ void LLVMBackend::AstTransformer::addFn(llvm::Module &mod, const Function &f, bo
 
           auto typeName = [](Type::Any tpe) -> std::string {
             auto impl = [](Type::Any tpe, auto &thunk) -> std::string {
-              return variants::total(
-                  *tpe,                                                                                        //
+              return tpe.match_total(                                                                          //
                   [&](const Type::Float16 &) -> std::string { return "half"; },                                //
                   [&](const Type::Float32 &) -> std::string { return "float"; },                               //
                   [&](const Type::Float64 &) -> std::string { return "double"; },                              //
@@ -1161,11 +1151,11 @@ void LLVMBackend::AstTransformer::transform(llvm::Module &mod, const Function &f
       [&](auto &arg, const auto &fnArg) -> Pair<std::string, Pair<Type::Any, ValPtr>> {
         arg.setName(fnArg.named.symbol);
 
-        auto argValue = holds<Type::Bool1>(fnArg.named.tpe) || holds<Type::Unit0>(fnArg.named.tpe)
+        auto argValue = fnArg.named.tpe.template is<Type::Bool1>() || fnArg.named.tpe.template is<Type::Unit0>()
                             ? B.CreateICmpNE(&arg, llvm::ConstantInt::get(llvm::Type::getInt8Ty(C), 0, true))
                             : &arg;
 
-        //        auto as = holds<ArgKind::Local>(fnArg.kind) ? LocalAS : GlobalAS;
+        //        auto as = HOLDS(ArgKind::Local, fnArg.kind) ? LocalAS : GlobalAS;
         auto stack = B.CreateAlloca(mkTpe(fnArg.named.tpe), AllocaAS, nullptr, fnArg.named.symbol + "_stack_ptr");
         B.CreateStore(argValue, stack);
         return {fnArg.named.symbol, {fnArg.named.tpe, stack}};
@@ -1177,8 +1167,8 @@ void LLVMBackend::AstTransformer::transform(llvm::Module &mod, const Function &f
   stackVarPtrs.clear();
 }
 ValPtr LLVMBackend::AstTransformer::unaryExpr(const AnyExpr &expr, const AnyTerm &l, const AnyType &rtn, const ValPtrFn1 &fn) { //
-  if (tpe(l) != rtn) {
-    throw std::logic_error("Semantic error: lhs type " + to_string(tpe(l)) + " of binary numeric operation in " + to_string(expr) +
+  if (l.tpe() != rtn) {
+    throw std::logic_error("Semantic error: lhs type " + to_string(l.tpe()) + " of binary numeric operation in " + to_string(expr) +
                            " doesn't match return type " + to_string(rtn));
   }
 
@@ -1186,12 +1176,12 @@ ValPtr LLVMBackend::AstTransformer::unaryExpr(const AnyExpr &expr, const AnyTerm
 }
 ValPtr LLVMBackend::AstTransformer::binaryExpr(const AnyExpr &expr, const AnyTerm &l, const AnyTerm &r, const AnyType &rtn,
                                                const ValPtrFn2 &fn) { //
-  if (tpe(l) != rtn) {
-    throw std::logic_error("Semantic error: lhs type " + to_string(tpe(l)) + " of binary numeric operation in " + to_string(expr) +
+  if (l.tpe() != rtn) {
+    throw std::logic_error("Semantic error: lhs type " + to_string(l.tpe()) + " of binary numeric operation in " + to_string(expr) +
                            " doesn't match return type " + to_string(rtn));
   }
-  if (tpe(r) != rtn) {
-    throw std::logic_error("Semantic error: rhs type " + to_string(tpe(r)) + " of binary numeric operation in " + to_string(expr) +
+  if (r.tpe() != rtn) {
+    throw std::logic_error("Semantic error: rhs type " + to_string(r.tpe()) + " of binary numeric operation in " + to_string(expr) +
                            " doesn't match return type " + to_string(rtn));
   }
 
@@ -1200,9 +1190,9 @@ ValPtr LLVMBackend::AstTransformer::binaryExpr(const AnyExpr &expr, const AnyTer
 ValPtr LLVMBackend::AstTransformer::unaryNumOp(const AnyExpr &expr, const AnyTerm &arg, const AnyType &rtn, //
                                                const ValPtrFn1 &integralFn, const ValPtrFn1 &fractionalFn) {
   return unaryExpr(expr, arg, rtn, [&](auto lhs) -> ValPtr {
-    if (holds<TypeKind::Integral>(kind(rtn))) {
+    if (rtn.kind().is<TypeKind::Integral>()) {
       return integralFn(lhs);
-    } else if (holds<TypeKind::Fractional>(kind(rtn))) {
+    } else if (rtn.kind().is<TypeKind::Fractional>()) {
       return fractionalFn(lhs);
     } else {
       return undefined(__FILE__, __LINE__);
@@ -1212,9 +1202,9 @@ ValPtr LLVMBackend::AstTransformer::unaryNumOp(const AnyExpr &expr, const AnyTer
 ValPtr LLVMBackend::AstTransformer::binaryNumOp(const AnyExpr &expr, const AnyTerm &l, const AnyTerm &r, const AnyType &rtn, //
                                                 const ValPtrFn2 &integralFn, const ValPtrFn2 &fractionalFn) {
   return binaryExpr(expr, l, r, rtn, [&](auto lhs, auto rhs) -> ValPtr {
-    if (holds<TypeKind::Integral>(kind(rtn))) {
+    if (rtn.kind().is<TypeKind::Integral>()) {
       return integralFn(lhs, rhs);
-    } else if (holds<TypeKind::Fractional>(kind(rtn))) {
+    } else if (rtn.kind().is<TypeKind::Fractional>()) {
       return fractionalFn(lhs, rhs);
     } else {
       return undefined(__FILE__, __LINE__);
@@ -1222,13 +1212,13 @@ ValPtr LLVMBackend::AstTransformer::binaryNumOp(const AnyExpr &expr, const AnyTe
   });
 }
 ValPtr LLVMBackend::AstTransformer::extFn1(llvm::Function *fn, const std::string &name, const AnyType &rtn, const AnyTerm &arg) { //
-  auto fn_ = mkExternalFn(fn, rtn, name, {tpe(arg)});
+  auto fn_ = mkExternalFn(fn, rtn, name, {arg.tpe()});
   if (options.target == Target::SPIRV32 || options.target == Target::SPIRV64) {
     fn_->setCallingConv(llvm::CallingConv::SPIR_FUNC);
     //    fn_->addFnAttr(llvm::Attribute::NoBuiltin);
     //    fn_->addFnAttr(llvm::Attribute::Convergent);
   }
-  if (!holds<Type::Unit0>(rtn)) {
+  if (!rtn.is<Type::Unit0>()) {
     fn_->addFnAttr(llvm::Attribute::WillReturn);
   }
   auto call = B.CreateCall(fn_, mkTermVal(arg));
@@ -1237,7 +1227,7 @@ ValPtr LLVMBackend::AstTransformer::extFn1(llvm::Function *fn, const std::string
 }
 ValPtr LLVMBackend::AstTransformer::extFn2(llvm::Function *fn, const std::string &name, const AnyType &rtn, const AnyTerm &lhs,
                                            const AnyTerm &rhs) { //
-  auto fn_ = mkExternalFn(fn, rtn, name, {tpe(lhs), tpe(rhs)});
+  auto fn_ = mkExternalFn(fn, rtn, name, {lhs.tpe(), rhs.tpe()});
   if (options.target == Target::SPIRV32 || options.target == Target::SPIRV64) {
     fn_->setCallingConv(llvm::CallingConv::SPIR_FUNC);
     fn_->addFnAttr(llvm::Attribute::NoBuiltin);

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "generated/polyast.h"
-#include "variants.hpp"
 #include "clang/AST/ASTContext.h"
 #include "llvm/Support/Casting.h"
 
@@ -34,7 +33,7 @@ struct Remapper {
   clang::ASTContext &context;
   struct RemapContext {
     std::optional<std::reference_wrapper<StructDef>> parent;
-    Type::Any rtnType;
+    Type::Any rtnType = Type::Unit0();
     size_t counter{};
     std::vector<Stmt::Any> stmts{};
     std::unordered_map<std::string, Function> functions{};

@@ -104,6 +104,9 @@ std::vector<polyast::CompileLayout> compiler::layoutOf(const std::vector<polyast
       backend::LLVMBackend::AstTransformer xform(llvmOptions, c);
       std::vector<polyast::CompileLayout> layouts;
       xform.addDefs(defs);
+
+
+
       std::unordered_map<polyast::Sym, polyast::StructDef> lut(defs.size());
       for (auto &d : defs)
         lut.emplace(d.name, d);

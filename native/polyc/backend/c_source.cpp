@@ -2,7 +2,6 @@
 
 #include "c_source.h"
 #include "utils.hpp"
-#include "variants.hpp"
 #include <set>
 
 using namespace polyregion;
@@ -13,10 +12,8 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
   switch (dialect) {
     case Dialect::C11:
     case Dialect::MSL1_0:
-      return variants::total(
-          *tpe,                                             //
-          [&](const Type::Float16 &) { return "__fp16"s; }, //
-          [&](const Type::Float32 &) { return "float"s; },  //
+      return tpe.match_total([&](const Type::Float16 &) { return "__fp16"s; }, //
+                             [&](const Type::Float32 &) { return "float"s; },  //
           [&](const Type::Float64 &) { return "double"s; }, //
 
           [&](const Type::IntU8 &) { return "uint8_t"s; },   //
@@ -38,10 +35,8 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
           [&](const Type::Exec &) { return "/*exec*/"s; }                 //
       );
     case Dialect::OpenCL1_1:
-      return variants::total(
-          *tpe,                                             //
-          [&](const Type::Float16 &) { return "half"s; },   //
-          [&](const Type::Float32 &) { return "float"s; },  //
+      return tpe.match_total([&](const Type::Float16 &) { return "half"s; },   //
+                             [&](const Type::Float32 &) { return "float"s; },  //
           [&](const Type::Float64 &) { return "double"s; }, //
 
           [&](const Type::IntU8 &) { return "uchar"s; },   //
@@ -66,10 +61,8 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
 }
 
 std::string backend::CSource::mkRef(const Term::Any &ref) {
-  return variants::total(
-      *ref,                                                                      //
-      [](const Term::Select &x) { return polyast::qualified(x); },               //
-      [](const Term::Poison &x) { return "(NULL /* " + repr(x.tpe) + " */)"s; }, //
+  return ref.match_total([](const Term::Select &x) { return polyast::qualified(x); },               //
+                         [](const Term::Poison &x) { return "(NULL /* " + repr(x.tpe) + " */)"s; }, //
       [](const Term::Unit0Const &x) { return "/*void*/"s; },                     //
       [](const Term::Bool1Const &x) { return x.value ? "true"s : "false"s; },    //
 
@@ -90,8 +83,7 @@ std::string backend::CSource::mkRef(const Term::Any &ref) {
 }
 
 std::string backend::CSource::mkExpr(const Expr::Any &expr, const std::string &key) {
-  return variants::total(
-      *expr, //
+  return expr.match_total(
       [&](const Expr::SpecOp &x) {
         struct DialectAccessor {
           std::string cl, msl;
@@ -110,8 +102,7 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr, const std::string &k
             case Dialect::OpenCL1_1: return accessor.cl + "(" + mkRef(index) + ")";
           }
         };
-        return variants::total(
-            *x.op,                                             //
+        return x.op.match_total(
             [&](const Spec::Assert &v) { return "abort()"s; }, //
             [&](const Spec::GpuBarrierGlobal &v) {
               return gpuIntr({.cl = "barrier(CLK_GLOBAL_MEM_FENCE)", //
@@ -146,10 +137,8 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr, const std::string &k
         );
       },
       [&](const Expr::IntrOp &x) {
-        return variants::total(
-            *x.op,                                                                                 //
-            [&](const Intr::Pos &v) { return "(+" + mkRef(v.x) + ")"; },                           //
-            [&](const Intr::Neg &v) { return "(-" + mkRef(v.x) + ")"; },                           //
+        return x.op.match_total([&](const Intr::Pos &v) { return "(+" + mkRef(v.x) + ")"; },                           //
+                                [&](const Intr::Neg &v) { return "(-" + mkRef(v.x) + ")"; },                           //
             [&](const Intr::BNot &v) { return "(~" + mkRef(v.x) + ")"; },                          //
             [&](const Intr::LogicNot &v) { return "(!" + mkRef(v.x) + ")"; },                      //
             [&](const Intr::Add &v) { return "(" + mkRef(v.x) + " + " + mkRef(v.y) + ")"; },       //
@@ -176,10 +165,8 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr, const std::string &k
         );
       },
       [&](const Expr::MathOp &x) {
-        return variants::total(
-            *x.op,                                                                                 //
-            [&](const Math::Abs &v) { return "abs(" + mkRef(v.x) + ")"; },                         //
-            [&](const Math::Sin &v) { return "sin(" + mkRef(v.x) + ")"; },                         //
+        return x.op.match_total([&](const Math::Abs &v) { return "abs(" + mkRef(v.x) + ")"; },                         //
+                                [&](const Math::Sin &v) { return "sin(" + mkRef(v.x) + ")"; },                         //
             [&](const Math::Cos &v) { return "cos(" + mkRef(v.x) + ")"; },                         //
             [&](const Math::Tan &v) { return "tan(" + mkRef(v.x) + ")"; },                         //
             [&](const Math::Asin &v) { return "asin(" + mkRef(v.x) + ")"; },                       //
@@ -219,8 +206,7 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr, const std::string &k
 }
 
 std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
-  return variants::total(
-      *stmt, //
+  return stmt.match_total(
       [&](const Stmt::Block &x) {
         return mk_string<Stmt::Any>(
             x.stmts, [&](auto x) { return mkStmt(x); }, "\n");
@@ -232,7 +218,7 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
             commented, [](auto &&x) { return x; }, "\n");
       },
       [&](const Stmt::Var &x) {
-        if (holds<Type::Unit0>(x.name.tpe)) {
+        if (x.name.tpe.is<Type::Unit0>()) {
           return mkExpr(*x.expr, x.name.symbol) + ";";
         }
         auto line = mkTpe(x.name.tpe) + " " + x.name.symbol + (x.expr ? (" = " + mkExpr(*x.expr, x.name.symbol)) : "") + ";";
@@ -241,7 +227,7 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
       [&](const Stmt::Mut &x) {
         if (x.copy) {
           return "memcpy(" + //
-                 mkRef(x.name) + ", " + mkExpr(x.expr, "?") + ", sizeof(" + mkTpe(tpe(x.expr)) + "));";
+                 mkRef(x.name) + ", " + mkExpr(x.expr, "?") + ", sizeof(" + mkTpe(x.expr.tpe()) + "));";
         } else {
           return mkRef(x.name) + " = " + mkExpr(x.expr, "?") + ";";
         }
@@ -297,11 +283,9 @@ std::string backend::CSource ::mkFn(const Function &fnTree) {
     std::string decl;
     switch (dialect) {
       case Dialect::OpenCL1_1: {
-        if (auto arr = get_opt<Type::Ptr>(arg.named.tpe); arr) {
-          decl = variants::total(
-              *arr->space,                                                       //
-              [&](TypeSpace::Global _) { return "global " + tpe + " " + name; }, //
-              [&](TypeSpace::Local _) { return "local " + tpe + " " + name; });
+        if (auto arr = arg.named.tpe.get<Type::Ptr>(); arr) {
+          decl = arr->space.match_total([&](TypeSpace::Global _) { return "global " + tpe + " " + name; }, //
+                                        [&](TypeSpace::Local _) { return "local " + tpe + " " + name; });
         } else
           decl = tpe + " " + name;
         break;
@@ -312,9 +296,8 @@ std::string backend::CSource ::mkFn(const Function &fnTree) {
         // Local:  threadgroup $T &$name [[ threadgroup($i) ]]
         // query:              $T &$name           [[ $type ]]
         auto idx = std::to_string(i);
-        if (auto arr = get_opt<Type::Ptr>(arg.named.tpe); arr) {
-          decl = variants::total(
-              *arr->space,                                                                                            //
+        if (auto arr = arg.named.tpe.get<Type::Ptr>(); arr) {
+          decl = arr->space.match_total(
               [&](TypeSpace::Global _) { return "device " + tpe + " " + name + " [[buffer(" + idx + ")]]"; },         //
               [&](TypeSpace::Local _) { return "threadgroup " + tpe + " " + name + " [[threadgroup(" + idx + ")]]"; } //
           );
@@ -333,20 +316,20 @@ std::string backend::CSource ::mkFn(const Function &fnTree) {
     std::set<std::pair<std::string, std::string>> iargs; // ordered set for consistency
     for (auto &stmt : fnTree.body) {
       auto findIntrinsics = [&](Expr::Any &expr) {
-        if (auto spec = get_opt<Expr::SpecOp>(expr); spec) {
-          if (holds<Spec::GpuGlobalIdx>(spec->op)) iargs.emplace("get_global_id", "thread_position_in_grid");
-          if (holds<Spec::GpuGlobalSize>(spec->op)) iargs.emplace("get_global_size", "threads_per_grid");
-          if (holds<Spec::GpuGroupIdx>(spec->op)) iargs.emplace("get_group_id", "threadgroup_position_in_grid");
-          if (holds<Spec::GpuGroupSize>(spec->op)) iargs.emplace("get_num_groups", "threadgroups_per_grid");
-          if (holds<Spec::GpuLocalIdx>(spec->op)) iargs.emplace("get_local_id", "thread_position_in_threadgroup");
-          if (holds<Spec::GpuLocalSize>(spec->op)) iargs.emplace("get_local_size", "threads_per_threadgroup");
+        if (auto spec = expr.get<Expr::SpecOp>(); spec) {
+          if (spec->op.is<Spec::GpuGlobalIdx>()) iargs.emplace("get_global_id", "thread_position_in_grid");
+          if (spec->op.is<Spec::GpuGlobalSize>()) iargs.emplace("get_global_size", "threads_per_grid");
+          if (spec->op.is<Spec::GpuGroupIdx>()) iargs.emplace("get_group_id", "threadgroup_position_in_grid");
+          if (spec->op.is<Spec::GpuGroupSize>()) iargs.emplace("get_num_groups", "threadgroups_per_grid");
+          if (spec->op.is<Spec::GpuLocalIdx>()) iargs.emplace("get_local_id", "thread_position_in_threadgroup");
+          if (spec->op.is<Spec::GpuLocalSize>()) iargs.emplace("get_local_size", "threads_per_threadgroup");
         }
       };
-      if (auto var = get_opt<Stmt::Var>(stmt); var) {
+      if (auto var = stmt.get<Stmt::Var>(); var) {
         if (var->expr) findIntrinsics(*var->expr);
-      } else if (auto mut = get_opt<Stmt::Mut>(stmt); mut) {
+      } else if (auto mut = stmt.get<Stmt::Mut>(); mut) {
         findIntrinsics(mut->expr);
-      } else if (auto cond = get_opt<Stmt::Cond>(stmt); cond) {
+      } else if (auto cond = stmt.get<Stmt::Cond>(); cond) {
         findIntrinsics(cond->cond);
       }
     }

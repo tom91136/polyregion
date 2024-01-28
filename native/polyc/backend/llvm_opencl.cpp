@@ -18,8 +18,7 @@ void OpenCLTargetSpecificHandler::witnessEntry(LLVMBackend::AstTransformer &ctx,
 // See https://github.com/KhronosGroup/SPIR-Tools/wiki/SPIR-1.2-built-in-functions
 ValPtr OpenCLTargetSpecificHandler::mkSpecVal(LLVMBackend::AstTransformer &xform, llvm::Function *fn, const Expr::SpecOp &expr) {
 
-  return variants::total(
-      *expr.op, //
+  return expr.op.match_total( //
       [&](const Spec::Assert &) -> ValPtr { return undefined(__FILE__, __LINE__); },
       [&](const Spec::GpuGlobalIdx &v) -> ValPtr { return xform.extFn1(fn, "_Z13get_global_idj", v.tpe, v.dim); },
       [&](const Spec::GpuGlobalSize &v) -> ValPtr { return xform.extFn1(fn, "_Z15get_global_sizej", v.tpe, v.dim); },
@@ -47,8 +46,7 @@ ValPtr OpenCLTargetSpecificHandler::mkSpecVal(LLVMBackend::AstTransformer &xform
       });
 }
 ValPtr OpenCLTargetSpecificHandler::mkMathVal(LLVMBackend::AstTransformer &xform, llvm::Function *fn, const Expr::MathOp &expr) {
-  return variants::total(
-      *expr.op,                                                                       //
+  return expr.op.match_total( //                                                       //
       [&](const Math::Abs &v) -> ValPtr { return undefined(__FILE__, __LINE__); },    //
       [&](const Math::Sin &v) -> ValPtr { return undefined(__FILE__, __LINE__); },    //
       [&](const Math::Cos &v) -> ValPtr { return undefined(__FILE__, __LINE__); },    //

@@ -3,6 +3,7 @@ package polyregion.ast.mirror
 import cats.conversions.variance
 import polyregion.ast.MsgPack
 import polyregion.ast.mirror.CppStructGen.*
+import cats.syntax.all.*
 import polyregion.ast.mirror.CppNlohmannJsonCodecGen
 
 import java.lang.annotation.Target
@@ -62,11 +63,11 @@ private[polyregion] object CppNlohmannJsonCodecGen {
   }
 
   def toJsonBody(s: StructNode) = if (s.tpe.kind == CppType.Kind.Base) {
-    "return std::visit(overloaded{" ::
+    "return x_.match_total(" ::
       s.variants.zipWithIndex.map((c, i) =>
-        s"[](const ${c.tpe.ref(qualified = true)} &y_) -> json { return {$i, ${c.tpe.ns(toJsonFn(c.tpe))}(y_)}; },"
-      ) ::: "[](const auto &x_) -> json { throw std::out_of_range(\"Unimplemented type:\" + to_string(x_) ); }" ::
-      "}, *x_);" :: Nil
+        s"[](const ${c.tpe.ref(qualified = true)} &y_) -> json { return {$i, ${c.tpe.ns(toJsonFn(c.tpe))}(y_)}; }" :: Nil
+      ).intercalate(","::Nil) :::
+      ");" :: Nil
   } else {
     s.members.flatMap { case (name, tpe) =>
       tpe.kind match {

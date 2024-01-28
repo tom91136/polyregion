@@ -28,8 +28,7 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(LLVMBackend::AstTransformer &xform,
                                                   xform.mkTermVal(Term::IntU32Const(0)))));
   };
 
-  return variants::total(
-      *expr.op, //
+  return expr.op.match_total( //
       [&](const Spec::Assert &v) -> ValPtr {
         // xform.extFn1(fn, "__assertfail", Type::Unit0(), Term::Unit0Const()); // TODO
         return undefined(__FILE__, __LINE__);
@@ -81,8 +80,7 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(LLVMBackend::AstTransformer &xform,
       });
 }
 ValPtr NVPTXTargetSpecificHandler::mkMathVal(LLVMBackend::AstTransformer &xform, llvm::Function *fn, const Expr::MathOp &expr) {
-  return variants::total(
-      *expr.op,                                                                       //
+  return expr.op.match_total(                                                      //                                                     //
       [&](const Math::Abs &v) -> ValPtr { return undefined(__FILE__, __LINE__); },    //
       [&](const Math::Sin &v) -> ValPtr { return undefined(__FILE__, __LINE__); },    //
       [&](const Math::Cos &v) -> ValPtr { return undefined(__FILE__, __LINE__); },    //

@@ -74,8 +74,7 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(LLVMBackend::AstTransformer &xform
                                                   xform.mkTermVal(Term::IntS32Const(0)))));
   };
 
-  return variants::total(
-      *expr.op,                                                                       //
+  return expr.op.match_total(                                                         //
       [&](const Spec::Assert &v) -> ValPtr { return undefined(__FILE__, __LINE__); }, //
       [&](const Spec::GpuBarrierGlobal &v) -> ValPtr {
         // work_group_barrier (__memory_scope, 1, 1)
@@ -146,8 +145,7 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(LLVMBackend::AstTransformer &xform
       });
 }
 ValPtr AMDGPUTargetSpecificHandler::mkMathVal(LLVMBackend::AstTransformer &xform, llvm::Function *fn, const Expr::MathOp &expr) {
-  return variants::total(
-      *expr.op,                                                                       //
+  return expr.op.match_total(                                                         //
       [&](const Math::Abs &v) -> ValPtr { return undefined(__FILE__, __LINE__); },    //
       [&](const Math::Sin &v) -> ValPtr { return undefined(__FILE__, __LINE__); },    //
       [&](const Math::Cos &v) -> ValPtr { return undefined(__FILE__, __LINE__); },    //

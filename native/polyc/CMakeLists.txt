@@ -55,7 +55,6 @@ if (NOT WIN32)
             backend/memoryfs.h
             backend/suppress_fd.h
             ../include/utils.hpp
-            ../include/variants.hpp
             #            ${Catch2_SOURCE_DIR}/src/catch2/catch_all.hpp
 
             <optional>

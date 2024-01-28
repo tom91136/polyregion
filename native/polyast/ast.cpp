@@ -3,7 +3,6 @@
 
 #include "ast.h"
 #include "utils.hpp"
-#include "variants.hpp"
 
 using namespace std::string_literals;
 using namespace polyregion::polyast;
@@ -36,8 +35,7 @@ using std::string;
 }
 
 [[nodiscard]] string polyast::repr(const Type::Any &type) {
-  return variants::total(
-      *type,                                        //
+  return type.match_total(                          //
       [](const Type::Float16 &) { return "f16"s; }, //
       [](const Type::Float32 &) { return "f32"s; }, //
       [](const Type::Float64 &) { return "f64"s; }, //
@@ -75,8 +73,7 @@ using std::string;
 [[nodiscard]] string polyast::repr(const Named &path) { return "(" + path.symbol + ": " + repr(path.tpe) + ")"; }
 
 [[nodiscard]] string polyast::repr(const Term::Any &ref) {
-  return variants::total(
-      *ref,
+  return ref.match_total(
       [](const Term::Select &x) {
         return x.init.empty() //
                    ? repr(x.last)
@@ -106,8 +103,7 @@ using std::string;
 }
 
 [[nodiscard]] string polyast::repr(const Intr::Any &expr) {
-  return variants::total(
-      *expr,                                                                           //
+  return expr.match_total(                                                             //
       [](const Intr::BNot &x) { return "'~" + repr(x.x); },                            //
       [](const Intr::LogicNot &x) { return "'!" + repr(x.x); },                        //
       [](const Intr::Pos &x) { return "'+" + repr(x.x); },                             //
@@ -136,8 +132,7 @@ using std::string;
 }
 
 [[nodiscard]] string polyast::repr(const Spec::Any &expr) {
-  return variants::total(
-      *expr,                                                                              //
+  return expr.match_total(                                                                //
       [](const Spec::Assert &x) { return "'assert"s; },                                   //
       [](const Spec::GpuBarrierGlobal &x) { return "'gpuBarrierGlobal"s; },               //
       [](const Spec::GpuBarrierLocal &x) { return "'gpuBarrierLocal"s; },                 //
@@ -154,8 +149,7 @@ using std::string;
 }
 
 [[nodiscard]] string polyast::repr(const Math::Any &expr) {
-  return variants::total(
-      *expr,                                                                               //
+  return expr.match_total(                                                                 //
       [](const Math::Abs &x) { return "'abs(" + repr(x.x) + ")"; },                        //
       [](const Math::Sin &x) { return "'sin(" + repr(x.x) + ")"; },                        //
       [](const Math::Cos &x) { return "'cos(" + repr(x.x) + ")"; },                        //
@@ -184,8 +178,7 @@ using std::string;
 }
 
 [[nodiscard]] string polyast::repr(const Expr::Any &expr) {
-  return variants::total(
-      *expr,                                            //
+  return expr.match_total(                              //
       [](const Expr::SpecOp &x) { return repr(x.op); }, //
       [](const Expr::MathOp &x) { return repr(x.op); }, //
       [](const Expr::IntrOp &x) { return repr(x.op); }, //
@@ -207,8 +200,7 @@ using std::string;
 }
 
 [[nodiscard]] string polyast::repr(const Stmt::Any &stmt) {
-  return variants::total(
-      *stmt, //
+  return stmt.match_total( //
       [](const Stmt::Block &x) {
         return "{ \n" +
                indent(2, mk_string<Stmt::Any>(
@@ -247,8 +239,7 @@ using std::string;
 [[nodiscard]] string polyast::repr(const Arg &arg) { return repr(arg.named); }
 
 [[nodiscard]] string polyast::repr(const TypeSpace::Any &space) {
-  return variants::total(
-      *space, //
+  return space.match_total( //
       [&](const TypeSpace::Global &x) { return "^Global"; }, [&](const TypeSpace::Local &x) { return "^Local"; });
 }
 
@@ -407,8 +398,7 @@ Term::Any dsl::integral(const Type::Any &tpe, unsigned long long int x) {
   auto unsupported = [](auto &&t, auto &&v) -> Term::Any {
     throw std::logic_error("Cannot create integral constant of type " + to_string(t) + " for value" + std::to_string(v));
   };
-  return variants::total(                                                        //
-      *tpe,                                                                      //
+  return tpe.match_total(                                                        //
       [&](const Type::Float16 &) -> Term::Any { return Term::Float16Const(x); }, //
       [&](const Type::Float32 &) -> Term::Any { return Term::Float32Const(x); }, //
       [&](const Type::Float64 &) -> Term::Any { return Term::Float64Const(x); }, //
@@ -433,9 +423,9 @@ Term::Any dsl::integral(const Type::Any &tpe, unsigned long long int x) {
   );
 }
 Term::Any dsl::fractional(const Type::Any &tpe, long double x) {
-  if (holds<Type::Float64>(tpe)) return Term::Float64Const(static_cast<double>(x));
-  if (holds<Type::Float32>(tpe)) return Term::Float32Const(static_cast<float>(x));
-  if (holds<Type::Float16>(tpe)) return Term::Float16Const(static_cast<float>(x));
+  if (tpe.is<Type::Float64>()) return Term::Float64Const(static_cast<double>(x));
+  if (tpe.is<Type::Float32>()) return Term::Float32Const(static_cast<float>(x));
+  if (tpe.is<Type::Float16>()) return Term::Float16Const(static_cast<float>(x));
   throw std::logic_error("Cannot create fractional constant of type " + to_string(tpe) + " for value" + std::to_string(x));
 }
 std::function<Term::Any(Type::Any)> dsl::operator""_(unsigned long long int x) {
@@ -473,7 +463,7 @@ dsl::NamedBuilder::operator Named() const { return named; }
 Arg dsl::NamedBuilder::operator()() const { return Arg(named, {}); }
 
 dsl::IndexBuilder dsl::NamedBuilder::operator[](const Term::Any &idx) const {
-  if (auto arr = get_opt<Type::Ptr>(named.tpe); arr) {
+  if (auto arr = named.tpe.get<Type::Ptr>(); arr) {
     return IndexBuilder({Select({}, named), idx, arr->component});
   } else {
     throw std::logic_error("Cannot index a reference to non-array type" + to_string(named));
@@ -481,6 +471,6 @@ dsl::IndexBuilder dsl::NamedBuilder::operator[](const Term::Any &idx) const {
 }
 
 dsl::AssignmentBuilder::AssignmentBuilder(const string &name) : name(name) {}
-Stmt::Any dsl::AssignmentBuilder::operator=(Expr::Any rhs) const { return Var(Named(name, tpe(rhs)), {rhs}); }
-Stmt::Any dsl::AssignmentBuilder::operator=(Term::Any rhs) const { return Var(Named(name, tpe(rhs)), {Alias(rhs)}); }
+Stmt::Any dsl::AssignmentBuilder::operator=(Expr::Any rhs) const { return Var(Named(name, rhs.tpe()), {rhs}); }
+Stmt::Any dsl::AssignmentBuilder::operator=(Term::Any rhs) const { return Var(Named(name, rhs.tpe()), {Alias(rhs)}); }
 Stmt::Any dsl::AssignmentBuilder::operator=(Type::Any tpe) const { return Var(Named(name, tpe), {}); }

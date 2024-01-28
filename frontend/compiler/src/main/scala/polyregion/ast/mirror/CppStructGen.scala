@@ -14,6 +14,7 @@ import scala.annotation.tailrec
 import scala.collection.immutable.LazyList.cons
 import scala.compiletime.{constValue, erasedValue, error, summonInline}
 import scala.deriving.*
+import polyregion.ast.mirror.CppStructGen.CppType.Kind
 
 private[polyregion] object CppStructGen {
 
@@ -40,8 +41,9 @@ private[polyregion] object CppStructGen {
       includes: List[String],
       forwardDeclStmts: List[String],
       nsDeclStmts: List[String],
-      stdSpecialisationsDeclStmts: String => List[String],
-      stdSpecialisationsStmts: String => List[String]
+      stdSpecialisationsDeclStmts: List[String => List[String]],
+      stdSpecialisationsStmts: List[String => List[String]],
+      headerImplStmts: String => List[String]
   )
 
   object StructSource {
@@ -95,49 +97,44 @@ private[polyregion] object CppStructGen {
             |  }
             |};
             |
-            |template <typename ...T> struct std::hash<$namespace::Alternative<T...>> {
-            |  std::size_t operator()($namespace::Alternative<T...> const &x) const noexcept {
-            |    return std::hash<std::variant<T...>>()($namespace::unwrap(x));
-            |  }
-            |};
-            |${xs.flatMap(_.stdSpecialisationsDeclStmts(namespace)).sym("\n", "\n", "\n")}
+            |${xs.flatMap(_.stdSpecialisationsDeclStmts.flatMap(_(namespace))).sym("\n", "\n", "\n")}
             |}
             |""".stripMargin
 
       val shared = //
         s"""|
-            |template <typename... T> //
-            |using Alternative = std::variant<std::shared_ptr<T>...>;
             |
-            |template <typename... T> //
-            |constexpr std::variant<T...> unwrap(const Alternative<T...> &a) {
-            |  return std::visit([](auto &&arg) { return std::variant<T...>(*arg); }, a);
-            |}
+            |template <typename... Ts> class alternatives {
+            |  template <class T> struct id {
+            |    using type = T;
+            |  };
             |
-            |template <typename... T> //
-            |constexpr std::variant<T...> operator*(const Alternative<T...> &a) {
-            |  return unwrap(a);
-            |}
+            |public:
+            |  template <typename T, typename... Us> static constexpr bool all_unique_impl() {
+            |    if constexpr (sizeof...(Us) == 0) return true;
+            |    else
+            |      return (!std::is_same_v<T, Us> && ...) && all_unique_impl<Us...>();
+            |  }
             |
-            |template <typename... T> //
-            |constexpr bool operator==(const Alternative<T...> &l,const Alternative<T...> &r) {
-            |  return unwrap(l) == unwrap(r);
-            |}
+            |  template <size_t N, typename T, typename... Us> static constexpr auto at_impl() {
+            |    if constexpr (N == 0) return id<T>();
+            |    else
+            |      return at_impl<N - 1, Us...>();
+            |  }
             |
-			|template <typename... T> //
-            |constexpr bool operator!=(const Alternative<T...> &l,const Alternative<T...> &r) {
-            |  return unwrap(l) != unwrap(r);
-            |}
-			|
-			|template <typename R, typename... T> //
-            |constexpr bool holds(const Alternative<T...> &l ) {
-            |  return std::holds_alternative<R>(unwrap(l));
-            |}
-			|
-            |template <auto member, class... T> //
-            |constexpr auto select(const Alternative<T...> &a) {
-            |  return std::visit([](auto &&arg) { return *(arg).*member; }, a);
-            |}
+            |  static constexpr size_t size = sizeof...(Ts);
+            |  template <typename T> static constexpr bool contains = (std::is_same_v<T, Ts> || ...);
+            |  template <typename T> static constexpr bool all = (std::is_same_v<T, Ts> && ...);
+            |  static constexpr bool all_unique = all_unique_impl<Ts...>();
+            |  template <size_t N> using at = typename decltype(at_impl<N, Ts...>())::type;
+            |};
+            |
+            |template <typename F, typename Ret, typename A, typename... Rest> //
+            |A arg1_(Ret (F::*)(A, Rest...));
+            |template <typename F, typename Ret, typename A, typename... Rest> //
+            |A arg1_(Ret (F::*)(A, Rest...) const);
+            |template <typename F> struct arg1 { using type = decltype(arg1_(&F::operator())); };
+            |template <typename T> using arg1_t = typename arg1<T>::type;
             |
             |template <typename T> //
             |std::string to_string(const T& x) {
@@ -146,12 +143,7 @@ private[polyregion] object CppStructGen {
             |  return ss.str();
             |}
             |
-            |template <typename T, typename... Ts> //
-            |constexpr std::optional<T> get_opt(const Alternative<Ts...> &a) {
-            |  if (const std::shared_ptr<T> *v = std::get_if<std::shared_ptr<T>>(&a)) return {**v};
-            |  else
-            |    return {};
-            |}""".stripMargin
+            |""".stripMargin
 
       s"""|#ifndef _MSC_VER
           |  #pragma clang diagnostic push
@@ -175,6 +167,7 @@ private[polyregion] object CppStructGen {
           |#ifndef _MSC_VER
           |  #pragma clang diagnostic pop // ide google-explicit-constructor
           |#endif
+          |${xs.flatMap(_.headerImplStmts(namespace)).mkString("\n")}
           |$stdSpecialisationDecl
           |#ifndef _MSC_VER
           |  #pragma clang diagnostic pop // -Wunknown-pragmas
@@ -183,16 +176,16 @@ private[polyregion] object CppStructGen {
     }
     def emitImpl(namespace: String, headerName: String, xs: List[StructSource]) =
       s"""|#include "$headerName.h"
-            |
-            |namespace $namespace {
-            |
-            |${xs.map(_.implStmts.mkString("\n")).mkString("\n\n")}
-            |
-            |} // namespace $namespace
-            |
-            |${xs.flatMap(_.stdSpecialisationsStmts(namespace)).sym("\n", "\n", "\n")}
-            |
-            |""".stripMargin
+          |
+          |namespace $namespace {
+          |
+          |${xs.map(_.implStmts.mkString("\n")).mkString("\n\n")}
+          |
+          |} // namespace $namespace
+          |
+          |${xs.flatMap(_.stdSpecialisationsStmts.flatMap(_(namespace))).sym("\n", "\n", "\n")}
+          |
+          |""".stripMargin
 
   }
 
@@ -253,65 +246,209 @@ private[polyregion] object CppStructGen {
 
       val hasMoreSumTypes = variants.exists(_.tpe.kind == CppType.Kind.Base)
 
-      val (streamSig, streamImpl) =
-        if (tpe.kind == CppType.Kind.Base && hasMoreSumTypes) {
-          (Nil, Nil)
-        } else {
-          // val streamStmts =
-          //   if (tpe.kind == CppType.Kind.Base) List(s"std::visit([&os](auto &&arg) { os << *arg; }, x);") :: Nil
-          //   else
-          //     members.map((n, tpe) =>
-          //       if (tpe.kind == CppType.Kind.Base) s"std::visit([&os](auto &&arg) { os << *arg; }, x.$n);" :: Nil
-          //       else tpe.streamOp("os", s"x.$n")
-          //     )
+      val (streamSig, streamImpl) = tpe.kind match {
+        case CppType.Kind.Base => (Nil, Nil)
+        case _ =>
+          (
+            s"POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const ${clsName(qualified = true)} &);" :: Nil,
+            s"std::ostream &${ns("operator<<")}(std::ostream &os, const ${clsName(qualified = true)} &x) { return x.dump(os); }" :: Nil
+          )
+      }
 
-          val streamStmts =
-            if (tpe.kind == CppType.Kind.Base) "std::visit([&os](auto &&arg) { os << *arg; }, x);" :: Nil
-            else {
-              val fields = members.map((n, tpe) =>
-                if (tpe.kind == CppType.Kind.Base && false)
-                  s"std::visit([&os](auto &&arg) { os << *arg; }, x.$n);" :: Nil
-                else tpe.streamOp("os", s"x.$n")
-              )
-
-              s"os << \"${tpe.name}(\";" ::
-                fields.intercalate("os << ',';" :: Nil) :::
-                "os << ')';" :: Nil
-            }
-
-          val streamMethodStmts =
-            s"std::ostream &${ns("operator<<")}(std::ostream &os, const ${tpe.ref(qualified = true)} &x) {" ::
-              streamStmts.map("  " + _) :::
+      val (dumpSig, dumpImpl) = tpe.kind match {
+        case CppType.Kind.Base if hasMoreSumTypes => (Nil, Nil)
+        case CppType.Kind.Base =>
+          (
+            s"[[nodiscard]] POLYREGION_EXPORT virtual std::ostream &dump(std::ostream &os) const = 0;" :: Nil,
+            Nil
+          )
+        case _ =>
+          val stmts =
+            s"std::ostream &${clsName(qualified = true)}::dump(std::ostream &os) const {" ::
+              s"  os << \"${tpe.name}(\";" ::
+              members.map((n, tpe) => tpe.streamOp("os", s"$n").map("  " + _)).intercalate("  os << ',';" :: Nil) :::
+              "  os << ')';" ::
               "  return os;" ::
               "}" :: Nil
+          val sig =
+            s"[[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const${
+                if (tpe.kind == CppType.Kind.Variant) " override" else ""
+              };" :: Nil
+          (sig, stmts)
+      }
 
-          val streamProto =
-            s"POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const ${tpe.ref(qualified = true)} &);" :: Nil
-          (streamProto, streamMethodStmts)
+      val visibility = if (tpe.kind == CppType.Kind.Base) "protected:" :: Nil else Nil
+
+      val (stdSpecialisationsDeclStmts, stdSpecialisationsStmts) = {
+
+        val name = if (tpe.kind == CppType.Kind.Base) ns("Any") else clsName(qualified = true)
+
+        val stdSpecialisationsDeclStmts = (ns: String) =>
+          s"template <> struct std::hash<$ns::$name> {" ::
+            s"  std::size_t operator()(const $ns::$name &) const noexcept;" ::
+            s"};" :: Nil
+
+        val stdSpecialisationsStmts = (ns: String) =>
+          s"std::size_t std::hash<$ns::$name>::operator()(const $ns::$name &x) const noexcept { return x.hash_code(); }"
+            :: Nil
+
+        (stdSpecialisationsDeclStmts, stdSpecialisationsStmts)
+      }
+
+      val (equalitySig, equalityImpl) = {
+        val name = clsName(qualified = true)
+
+        def mkEqStmt(lhs: String, rhs: String, n: String, tpe: CppType) =
+          (tpe.kind, tpe.namespace ::: tpe.name :: Nil, tpe.ctors) match {
+            case (CppType.Kind.StdLib, "std" :: "optional" :: Nil, x :: Nil) if x.kind == CppType.Kind.Base =>
+              s"( (!$lhs$n && !$rhs$n) || ($lhs$n && $rhs$n && *$lhs$n == *$rhs$n) )"
+            case (CppType.Kind.StdLib, "std" :: "vector" :: Nil, x :: Nil) if x.kind == CppType.Kind.Base =>
+              s"std::equal($lhs$n.begin(), $lhs$n.end(), $rhs$n.begin(), [](auto &&l, auto &&r) { return l == r; })"
+            case _ => s"($lhs$n == $rhs$n)"
+          }
+
+        tpe.kind match {
+          case CppType.Kind.Base =>
+            (
+              s"[[nodiscard]] POLYREGION_EXPORT virtual bool operator==(const $name &) const = 0;" :: Nil,
+              Nil
+            )
+          case CppType.Kind.Variant =>
+            (
+              s"[[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override ;" :: Nil,
+              s"[ [nodiscard]] POLYREGION_EXPORT bool $name::operator==(const Base& rhs_) const {" ::
+                s"  if(rhs_.id() != variant_id) return false;" ::
+                (members match {
+                  case Nil => "  return true;" :: Nil
+                  case xs =>
+                    s"  auto rhs = static_cast<const $name&>(rhs_);" ::
+                      xs.map((n, tpe) => mkEqStmt("this->", "rhs.", n, tpe)).mkString("return ", " && ", ";") :: Nil
+                }) ::: "}" :: Nil
+            )
+          case _ =>
+            (
+              s"[[nodiscard]] POLYREGION_EXPORT bool operator==(const $name &) const;" :: Nil,
+              s"[[nodiscard]] POLYREGION_EXPORT bool $name::operator==(const $name& rhs) const {" ::
+                (members match {
+                  case Nil => "  return true;" :: Nil
+                  case xs  => xs.map((n, tpe) => mkEqStmt("", "rhs.", n, tpe)).mkString("return ", " && ", ";") :: Nil
+                }) ::: "}" :: Nil
+            )
         }
+      }
+
+      val (idSig, idImpl) = (tpe.kind, parent) match {
+        case (CppType.Kind.Variant, Some(p)) =>
+          val idxValue = p.variants.indexWhere(_.tpe == tpe) match {
+            case -1 => s"#error \"assert failed: invalid parent for variant ${tpe}\""
+            case n  => s"$n"
+          }
+          (
+            s"constexpr static uint32_t variant_id = $idxValue;" ::
+              s"[[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;" :: Nil,
+            s"uint32_t ${clsName(qualified = true)}::id() const { return variant_id; };" :: Nil
+          )
+        case (CppType.Kind.Base, _) =>
+          (
+            s"[[nodiscard]] POLYREGION_EXPORT virtual uint32_t id() const = 0;" :: Nil,
+            Nil
+          )
+        case (_, _) => (Nil, Nil)
+      }
+
+      val (hashCodeSig, hashCodeImpl) = (tpe.kind, parent) match {
+
+        case (CppType.Kind.Variant, Some(p)) =>
+          (
+            s"[[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;" :: Nil,
+            s"size_t ${clsName(qualified = true)}::hash_code() const { " ::
+              "  size_t seed = variant_id;" ::
+              members.map((n, t) =>
+                s"  seed ^= std::hash<decltype($n)>()($n) + 0x9e3779b9 + (seed << 6) + (seed >> 2);"
+              ) :::
+              "  return seed;" ::
+              "}" :: Nil
+          )
+        case (CppType.Kind.Base, _) =>
+          (
+            s"[[nodiscard]] POLYREGION_EXPORT virtual size_t hash_code() const = 0;" :: Nil,
+            Nil
+          )
+        case (CppType.Kind.Data, _) =>
+          (
+            s"[[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;" :: Nil,
+            s"size_t ${clsName(qualified = true)}::hash_code() const { " ::
+              "  size_t seed = 0;" ::
+              members.map((n, t) =>
+                s"  seed ^= std::hash<decltype($n)>()($n) + 0x9e3779b9 + (seed << 6) + (seed >> 2);"
+              ) :::
+              "  return seed;" ::
+              "}" :: Nil
+          )
+        case (_, _) => (Nil, Nil)
+      }
 
       def foldVariants(xs: List[StructNode]): List[String] = xs.flatMap(s =>
         if (s.tpe.kind == CppType.Kind.Variant) s.tpe.name :: foldVariants(s.variants) else foldVariants(s.variants)
       )
 
-      val variantStmt =
-        if (tpe.kind == CppType.Kind.Base) {
-          val allVariants   = foldVariants(variants)
-          val memberGetters = members.map((n, t) => s"std::shared_ptr<${t.ref(qualified = true)}> $n(const Any &x);")
-          allVariants.map(v => s"struct $v;") ::: //
-            s"using Any = Alternative<${allVariants.csv}>;" :: Nil
-        } else Nil
-
       val (conversionSig, conversionImpl) = if (tpe.kind == CppType.Kind.Variant) {
         (
           s"POLYREGION_EXPORT operator Any() const;" :: Nil,
-          s"${clsName(qualified = true)}::operator ${ns("Any()")} const { return std::make_shared<${tpe.name}>(*this); }" :: Nil
+          s"${clsName(qualified = true)}::operator ${ns("Any()")} const { return static_pointer_cast<Base> (std::make_shared<${tpe.name}>(*this)); }" :: Nil
         )
       } else (Nil, Nil)
 
-      val visibility = if (tpe.kind == CppType.Kind.Base) "protected:" :: Nil else Nil
+      val variantStmt =
+        if (tpe.kind == CppType.Kind.Base) {
+          val allVariants = foldVariants(variants)
+          // val memberGetters = members.map((n, t) => s"std::shared_ptr<${t.ref(qualified = true)}> $n(const Any &x);")
+          // allVariants.map(v => s"struct $v;") ::: //
+          //   s"using Any = Alternative<${allVariants.csv}>;" :: Nil
 
-      val (nsDecl, nsImpl) = if (tpe.kind == CppType.Kind.Base && !hasMoreSumTypes) {
+          s"""
+             |struct POLYREGION_EXPORT Base;
+             |class Any {
+             |  std::shared_ptr<Base> _v;
+             |public:
+             |  Any(std::shared_ptr<Base> _v) : _v(std::move(_v)) {}
+             |  Any(const Any& other) : _v(other._v) {}
+             |  Any(Any&& other) noexcept : _v(std::move(other._v)) {}
+             |  Any& operator=(const Any& other) { return *this = Any(other); }
+             |  Any& operator=(Any&& other) noexcept {
+             |    std::swap(_v, other._v);
+             |    return *this;
+             |  }
+             |  POLYREGION_EXPORT virtual std::ostream &dump(std::ostream &os) const; 
+             |  POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Any &x);
+             |  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Any &rhs) const;
+             |  [[nodiscard]] POLYREGION_EXPORT bool operator!=(const Any &rhs) const;
+             |  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const;
+             |  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
+             |${members.map((name, tpe) => s"  ${tpe.ref(true)} ${name}() const;").mkString("\n")}
+             |  template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT bool is() const;
+             |  template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT std::optional<T> get() const;
+             |  template<typename... F> constexpr POLYREGION_EXPORT auto match_total(F &&...fs) const;
+             |};
+            """.stripMargin :: Nil
+        } else if (tpe.kind == CppType.Kind.Data) {
+
+          s"struct ${tpe.name};" :: Nil
+        } else Nil
+
+      val variantImpl = if (tpe.kind == CppType.Kind.Base) {
+
+        s"uint32_t ${tpe.ref(true)}::id() const { return _v->id(); }" ::
+          s"size_t ${tpe.ref(true)}::hash_code() const { return _v->hash_code(); }" ::
+          members.map((name, t) => s"${t.ref(true)} ${tpe.ref(true)}::${name}() const { return _v->${name}; }") :::
+          s"std::ostream &${tpe.ref(true)}::dump(std::ostream &os) const { return _v->dump(os); }" ::
+          s"std::ostream &${tpe.ns("operator<<")}(std::ostream &os, const ${tpe.ref(false)} &x) { return x.dump(os); }" ::
+          s"bool ${tpe.ref(true)}::operator==(const ${tpe.ref(false)} &rhs) const { return _v->operator==(*rhs._v) ; }" ::
+          s"bool ${tpe.ref(true)}::operator!=(const ${tpe.ref(false)} &rhs) const { return !_v->operator==(*rhs._v) ; }" ::
+          Nil
+      } else Nil
+
+      val (nsDecl, nsImpl) = if (tpe.kind == CppType.Kind.Base && !hasMoreSumTypes && false) {
         members.map { (n, t) =>
           val arg = tpe.ref(qualified = true)
           val rtn = t.ref(qualified = true)
@@ -322,86 +459,91 @@ private[polyregion] object CppStructGen {
         }.unzip
       } else (Nil, Nil)
 
-      val (stdSpecialisationsDeclStmts, stdSpecialisationsStmts) =
-        if (tpe.kind == CppType.Kind.Base) {
-          ((_: String) => Nil, (_: String) => Nil)
-        } else {
+      val headerImpl = { (ns: String) =>
 
-          val stdSpecialisationsDeclStmts = (ns: String) =>
-            s"template <> struct std::hash<$ns::${clsName(qualified = true)}> {" ::
-              s"  std::size_t operator()(const $ns::${clsName(qualified = true)} &) const noexcept;" ::
-              s"};" :: Nil
-
-          val stdSpecialisationsStmts = (ns: String) =>
-            s"std::size_t std::hash<$ns::${clsName(qualified = true)}>::operator()(const $ns::${clsName(qualified = true)} &x) const noexcept {" ::
-          (members match {
-            case Nil => s"std::size_t seed = std::hash<std::string>()(\"$ns::${clsName(qualified = true)}\");" :: Nil
-            case (n, t) :: xs =>
-              def mkHashExpr(member: String, tpe: CppType) = {
-                val wrap = s"x.${member}"
-                s"std::hash<decltype($wrap)>()($wrap)"
-              }
-              xs.foldLeft[List[String]](
-                s"std::size_t seed = ${mkHashExpr(n, t)};" :: Nil
-              ) { case (acc, (n, t)) =>
-                acc :+ s"seed ^= ${mkHashExpr(n, t)} + 0x9e3779b9 + (seed << 6) + (seed >> 2);"
-              }
-          }).map("  " + _) :::
-            s"  return seed;" ::
-            s"}" :: Nil
-
-          (stdSpecialisationsDeclStmts, stdSpecialisationsStmts)
+        def selectChain(xs: List[(String, String)], catchAll: String): List[String] = {
+          def fmtOne(cond: String, stmt: String) = s"if($cond) { $stmt }"
+          xs match {
+            case (cond, stmt) :: Nil => fmtOne(cond, stmt) :: Nil
+            case (cond, stmt) :: xs =>
+              (fmtOne(cond, stmt) :: xs.map("else " + fmtOne(_, _))) ::: s"else { $catchAll }" :: Nil
+            case Nil => catchAll :: Nil
+          }
         }
 
-      val (equalitySig, equalityImpl) =
-        (s"POLYREGION_EXPORT friend bool operator==(const ${clsName(qualified = true)} &, const ${clsName(qualified = true)} &);" :: Nil) -> (members match {
-          case Nil =>
-            s"bool ${ns("operator==")}(const ${clsName(qualified = true)} &, const ${clsName(qualified = true)} &) { return true; }" :: Nil
-          case xs =>
-            s"bool ${ns("operator==")}(const ${clsName(qualified = true)} &l, const ${clsName(qualified = true)} &r) { " ::
-              xs.map { (n, tpe) =>
-                val deref = (s: String) => if (tpe.kind == CppType.Kind.Base) s"*$s.$n" else s"$s.$n"
-                val op    = s"${deref("l")} == ${deref("r")}"
-                (tpe.kind, tpe.namespace ::: tpe.name :: Nil, tpe.ctors) match {
-                  case (CppType.Kind.StdLib, "std" :: "optional" :: Nil, x :: Nil) if x.kind == CppType.Kind.Base =>
-                    s"( (!l.$n && !r.$n) || (l.$n && r.$n && **l.$n == **r.$n) )"
-                  case (CppType.Kind.StdLib, "std" :: "vector" :: Nil, x :: Nil) if x.kind == CppType.Kind.Base =>
-                    s"std::equal(l.$n.begin(), l.$n.end(), r.$n.begin(), [](auto &&l, auto &&r) { return *l == *r; })"
-                  case _ => op
-                }
-              }.sym("  return ", " && ", ";") ::
-              "}" :: Nil
-        })
+        val sel = selectChain(variants.map(s => s.tpe.applied(true) -> "/*?*/"), "/*???*/")
 
-      val (idSig, idImpl) = (tpe.kind, parent) match {
-        case (CppType.Kind.Variant, Some(p)) =>
-          val idxValue = p.variants.indexWhere(_.tpe == tpe) match {
-            case -1 => s"#error \"assert failed: invalid parent for variant ${tpe}\""
-            case n  => s"$n"
-          }
-          (
-            s"POLYREGION_EXPORT uint32_t id() const override;" :: Nil,
-            s"uint32_t ${clsName(qualified = true)}::id() const { return $idxValue; };" :: Nil
-          )
-        case (CppType.Kind.Base, _) =>
-          (
-            s"POLYREGION_EXPORT virtual uint32_t id() const = 0;" :: Nil,
+        if (tpe.kind == CppType.Kind.Base) {
+          val qualifiedNs = (ns :: tpe.namespace).mkString("::")
+          s"namespace $qualifiedNs{ using All = alternatives<${variants.map(_.tpe.applied(true)).mkString(", ")}>; }" ::
+            s"""|template<typename T> constexpr POLYREGION_EXPORT bool $ns::${tpe.ref(true)}::is() const { 
+                |  static_assert(($qualifiedNs::All::contains<T>), "type not part of the variant");
+                |  return T::variant_id == _v->id();
+              |}""".stripMargin ::
+            s"""|template<typename T> constexpr POLYREGION_EXPORT std::optional<T> $ns::${tpe.ref(true)}::get() const { 
+                |  static_assert(($qualifiedNs::All::contains<T>), "type not part of the variant");
+                |  if (T::variant_id == _v->id()) return {*std::static_pointer_cast<T>(_v)};
+                |  else return {};
+                |}""".stripMargin ::
+            s"""|template<typename ...Fs> constexpr POLYREGION_EXPORT auto $ns::${tpe.ref(
+                 true
+               )}::match_total(Fs &&...fs) const { 
+                |  using Ts = alternatives<std::decay_t<arg1_t<Fs>>...>;
+                |  using Rs = alternatives<std::invoke_result_t<Fs, std::decay_t<arg1_t<Fs>>>...>;
+                |  using R0 = typename Rs::template at<0>;
+                |  static_assert($qualifiedNs::All::size == sizeof...(Fs), "match is not total as case count is not equal to variant's size");
+                |  static_assert(($qualifiedNs::All::contains<std::decay_t<arg1_t<Fs>>> && ...), "one or more cases not part of the variant");
+                |  static_assert((Rs::template all<R0>), "all cases must return the same type");
+                |  static_assert(Ts::all_unique, "one or more cases overlap");
+                |  uint32_t id = _v->id();
+                |  if constexpr (std::is_void_v<R0>) {
+                |    ([&]() -> bool {
+                |      using T = std::decay_t<arg1_t<Fs>>;
+                |      if (T::variant_id == id) {
+                |        fs(*std::static_pointer_cast<T>(_v));
+                |        return true;
+                |      }
+                |      return false;
+                |    }() || ...);
+                |    return;
+                |  } else {
+                |    std::optional<R0> r;
+                |    ([&]() -> bool {
+                |      using T = std::decay_t<arg1_t<Fs>>;
+                |      if (T::variant_id == id) {
+                |        r = fs(*std::static_pointer_cast<T>(_v));
+                |        return true;
+                |      }
+                |      return false;
+                |    }() || ...);
+                |    return *r;
+                |  }
+                |
+                |}""".stripMargin ::
+            "" ::
             Nil
-          )
-        case (_, _) => (Nil, Nil)
+        } else Nil
       }
 
       StructSource(
         namespaces = tpe.namespace,
         name = clsName(qualified = false),
         parent = parent.map(_.clsName(qualified = true)),
-        stmts = memberStmts ::: idSig ::: visibility ::: ctorStmt :: conversionSig ::: streamSig ::: equalitySig,
-        implStmts = ctorStmtImpl :: idImpl ::: streamImpl ::: equalityImpl ::: conversionImpl ::: nsImpl,
+        stmts = memberStmts //
+          ::: idSig         //
+          ::: hashCodeSig   //
+          ::: dumpSig       //
+          ::: equalitySig
+          ::: visibility
+          ::: ctorStmt :: conversionSig ::: streamSig,
+        implStmts =
+          ctorStmtImpl :: idImpl ::: hashCodeImpl ::: streamImpl ::: dumpImpl ::: equalityImpl ::: conversionImpl ::: nsImpl ::: variantImpl,
         includes = members.flatMap(_._2.include),
         variantStmt,
         nsDecl,
-        stdSpecialisationsDeclStmts,
-        stdSpecialisationsStmts
+        stdSpecialisationsDeclStmts :: Nil,
+        stdSpecialisationsStmts :: Nil,
+        headerImpl
       ) :: variants.flatMap(_.emit(Some(this)))
     }
   }
@@ -587,7 +729,7 @@ private[polyregion] object CppStructGen {
         case compiletime.Value.Const(value)            => value
         case compiletime.Value.TermSelect((x, _), Nil) => x
         case compiletime.Value.TermSelect((x, xt), (y, yt) :: Nil) =>
-          if (xt.kind == CppType.Kind.Base) s"${xt.ns(y)}($x)"
+          if (xt.kind == CppType.Kind.Base) s"$x.${y}()"
           else s"$x.$y"
         case compiletime.Value.TermSelect(x, xs) =>
           throw new RuntimeException(s"multiple path ${x :: xs} is not supported")

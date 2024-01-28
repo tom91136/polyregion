@@ -1,7 +1,7 @@
 #pragma once
 
 #include "generated/polyast.h"
-#include "variants.hpp"
+#include <functional>
 #include <optional>
 #include <ostream>
 #include <unordered_map>

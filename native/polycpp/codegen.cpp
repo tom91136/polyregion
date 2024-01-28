@@ -11,7 +11,6 @@
 
 #include "fmt/format.h"
 
-using namespace polyregion::variants;
 using namespace polyregion::polyast;
 
 static std::optional<CompileResult> compileIt(Program &p) {

@@ -51,8 +51,7 @@ static std::vector<Tpe::Any> PrimitiveTypes = {
 
 Term::Any generateConstValue(Tpe::Any t) {
   auto unsupported = [&]() -> Term::Any { throw std::logic_error("No constant for type " + to_string(t)); };
-  return variants::total(
-      *t,                                                                 //
+  return t.match_total(                                                                 //
       [&](const Type::Float16 &) -> Term::Any { return 42.0_(t); },       //
       [&](const Type::Float32 &) -> Term::Any { return 42.0_(t); },       //
       [&](const Type::Float64 &) -> Term::Any { return 42.0_(t); },       //
@@ -87,8 +86,8 @@ template <typename P> static void assertCompile(const P &p) {
     REQUIRE_THAT(e.data, !ContainsSubstring(" undef"));
     REQUIRE_THAT(e.data, !ContainsSubstring("unreachable"));
   }
-  FAIL("debug");
-  INFO(c);
+//  FAIL("debug");
+//  INFO(c);
 }
 
 TEST_CASE("json round-trip", "[ast]") {
@@ -122,15 +121,6 @@ TEST_CASE("initialise more than once", "[compiler]") {
 TEST_CASE("inheritance", "[compiler]") {
   polyregion::compiler::initialise();
   auto tpe = GENERATE(from_range(PrimitiveTypesNoUnit));
-
-
-  StructDef(Sym({"C"}),{},{StructMember(Named("C::a",IntS32()),1),StructMember(Named("C::b",IntS32()),1),StructMember(Named("C::c",Float),1)},{Sym({"B"}),Sym({"A"})})
-  StructDef(Sym({"A"}),{},{StructMember(Named("A::x",Float32()),1),StructMember(Named("A::y",Float ),1)},{Sym({"Base"})})
-  StructDef(Sym({"Base"}),{},{StructMember(Named("Base::x",IntS32()),1)},{})
-  StructDef(Sym({"B"}),{},{StructMember(Named("B::x",IntS32()),1),StructMember(Named("B::y",Nothing()),1)},{})
-
-
-
   DYNAMIC_SECTION(tpe) {
     Sym foo({"foo"});
     Named x = Named("x", tpe);

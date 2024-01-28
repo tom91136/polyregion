@@ -36,7 +36,5 @@ TEST_CASE("Struct identity") {
   Type::Any b =
       Type::Struct(Sym({"polyregion_CollectionLengthSuite_ClassB__"}), {}, {}, {Sym({"polyregion_CollectionLengthSuite_Base__"})});
 
-
-
-  CHECK(*(a) == *(b));
+  CHECK(a == b);
 }

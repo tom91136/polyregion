@@ -72,13 +72,15 @@ TypeKind::Any TypeKind::any_from_json(const json& j_) {
 }
 
 json TypeKind::any_to_json(const TypeKind::Any& x_) { 
-  return std::visit(overloaded{
-  [](const TypeKind::None &y_) -> json { return {0, TypeKind::none_to_json(y_)}; },
-  [](const TypeKind::Ref &y_) -> json { return {1, TypeKind::ref_to_json(y_)}; },
-  [](const TypeKind::Integral &y_) -> json { return {2, TypeKind::integral_to_json(y_)}; },
-  [](const TypeKind::Fractional &y_) -> json { return {3, TypeKind::fractional_to_json(y_)}; },
-  [](const auto &x_) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x_) ); }
-  }, *x_);
+  return x_.match_total(
+  [](const TypeKind::None &y_) -> json { return {0, TypeKind::none_to_json(y_)}; }
+  ,
+  [](const TypeKind::Ref &y_) -> json { return {1, TypeKind::ref_to_json(y_)}; }
+  ,
+  [](const TypeKind::Integral &y_) -> json { return {2, TypeKind::integral_to_json(y_)}; }
+  ,
+  [](const TypeKind::Fractional &y_) -> json { return {3, TypeKind::fractional_to_json(y_)}; }
+  );
 }
 
 Type::Float16 Type::float16_from_json(const json& j_) { 
@@ -283,27 +285,43 @@ Type::Any Type::any_from_json(const json& j_) {
 }
 
 json Type::any_to_json(const Type::Any& x_) { 
-  return std::visit(overloaded{
-  [](const Type::Float16 &y_) -> json { return {0, Type::float16_to_json(y_)}; },
-  [](const Type::Float32 &y_) -> json { return {1, Type::float32_to_json(y_)}; },
-  [](const Type::Float64 &y_) -> json { return {2, Type::float64_to_json(y_)}; },
-  [](const Type::IntU8 &y_) -> json { return {3, Type::intu8_to_json(y_)}; },
-  [](const Type::IntU16 &y_) -> json { return {4, Type::intu16_to_json(y_)}; },
-  [](const Type::IntU32 &y_) -> json { return {5, Type::intu32_to_json(y_)}; },
-  [](const Type::IntU64 &y_) -> json { return {6, Type::intu64_to_json(y_)}; },
-  [](const Type::IntS8 &y_) -> json { return {7, Type::ints8_to_json(y_)}; },
-  [](const Type::IntS16 &y_) -> json { return {8, Type::ints16_to_json(y_)}; },
-  [](const Type::IntS32 &y_) -> json { return {9, Type::ints32_to_json(y_)}; },
-  [](const Type::IntS64 &y_) -> json { return {10, Type::ints64_to_json(y_)}; },
-  [](const Type::Nothing &y_) -> json { return {11, Type::nothing_to_json(y_)}; },
-  [](const Type::Unit0 &y_) -> json { return {12, Type::unit0_to_json(y_)}; },
-  [](const Type::Bool1 &y_) -> json { return {13, Type::bool1_to_json(y_)}; },
-  [](const Type::Struct &y_) -> json { return {14, Type::struct_to_json(y_)}; },
-  [](const Type::Ptr &y_) -> json { return {15, Type::ptr_to_json(y_)}; },
-  [](const Type::Var &y_) -> json { return {16, Type::var_to_json(y_)}; },
-  [](const Type::Exec &y_) -> json { return {17, Type::exec_to_json(y_)}; },
-  [](const auto &x_) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x_) ); }
-  }, *x_);
+  return x_.match_total(
+  [](const Type::Float16 &y_) -> json { return {0, Type::float16_to_json(y_)}; }
+  ,
+  [](const Type::Float32 &y_) -> json { return {1, Type::float32_to_json(y_)}; }
+  ,
+  [](const Type::Float64 &y_) -> json { return {2, Type::float64_to_json(y_)}; }
+  ,
+  [](const Type::IntU8 &y_) -> json { return {3, Type::intu8_to_json(y_)}; }
+  ,
+  [](const Type::IntU16 &y_) -> json { return {4, Type::intu16_to_json(y_)}; }
+  ,
+  [](const Type::IntU32 &y_) -> json { return {5, Type::intu32_to_json(y_)}; }
+  ,
+  [](const Type::IntU64 &y_) -> json { return {6, Type::intu64_to_json(y_)}; }
+  ,
+  [](const Type::IntS8 &y_) -> json { return {7, Type::ints8_to_json(y_)}; }
+  ,
+  [](const Type::IntS16 &y_) -> json { return {8, Type::ints16_to_json(y_)}; }
+  ,
+  [](const Type::IntS32 &y_) -> json { return {9, Type::ints32_to_json(y_)}; }
+  ,
+  [](const Type::IntS64 &y_) -> json { return {10, Type::ints64_to_json(y_)}; }
+  ,
+  [](const Type::Nothing &y_) -> json { return {11, Type::nothing_to_json(y_)}; }
+  ,
+  [](const Type::Unit0 &y_) -> json { return {12, Type::unit0_to_json(y_)}; }
+  ,
+  [](const Type::Bool1 &y_) -> json { return {13, Type::bool1_to_json(y_)}; }
+  ,
+  [](const Type::Struct &y_) -> json { return {14, Type::struct_to_json(y_)}; }
+  ,
+  [](const Type::Ptr &y_) -> json { return {15, Type::ptr_to_json(y_)}; }
+  ,
+  [](const Type::Var &y_) -> json { return {16, Type::var_to_json(y_)}; }
+  ,
+  [](const Type::Exec &y_) -> json { return {17, Type::exec_to_json(y_)}; }
+  );
 }
 
 SourcePosition sourceposition_from_json(const json& j_) { 
@@ -497,24 +515,37 @@ Term::Any Term::any_from_json(const json& j_) {
 }
 
 json Term::any_to_json(const Term::Any& x_) { 
-  return std::visit(overloaded{
-  [](const Term::Select &y_) -> json { return {0, Term::select_to_json(y_)}; },
-  [](const Term::Poison &y_) -> json { return {1, Term::poison_to_json(y_)}; },
-  [](const Term::Float16Const &y_) -> json { return {2, Term::float16const_to_json(y_)}; },
-  [](const Term::Float32Const &y_) -> json { return {3, Term::float32const_to_json(y_)}; },
-  [](const Term::Float64Const &y_) -> json { return {4, Term::float64const_to_json(y_)}; },
-  [](const Term::IntU8Const &y_) -> json { return {5, Term::intu8const_to_json(y_)}; },
-  [](const Term::IntU16Const &y_) -> json { return {6, Term::intu16const_to_json(y_)}; },
-  [](const Term::IntU32Const &y_) -> json { return {7, Term::intu32const_to_json(y_)}; },
-  [](const Term::IntU64Const &y_) -> json { return {8, Term::intu64const_to_json(y_)}; },
-  [](const Term::IntS8Const &y_) -> json { return {9, Term::ints8const_to_json(y_)}; },
-  [](const Term::IntS16Const &y_) -> json { return {10, Term::ints16const_to_json(y_)}; },
-  [](const Term::IntS32Const &y_) -> json { return {11, Term::ints32const_to_json(y_)}; },
-  [](const Term::IntS64Const &y_) -> json { return {12, Term::ints64const_to_json(y_)}; },
-  [](const Term::Unit0Const &y_) -> json { return {13, Term::unit0const_to_json(y_)}; },
-  [](const Term::Bool1Const &y_) -> json { return {14, Term::bool1const_to_json(y_)}; },
-  [](const auto &x_) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x_) ); }
-  }, *x_);
+  return x_.match_total(
+  [](const Term::Select &y_) -> json { return {0, Term::select_to_json(y_)}; }
+  ,
+  [](const Term::Poison &y_) -> json { return {1, Term::poison_to_json(y_)}; }
+  ,
+  [](const Term::Float16Const &y_) -> json { return {2, Term::float16const_to_json(y_)}; }
+  ,
+  [](const Term::Float32Const &y_) -> json { return {3, Term::float32const_to_json(y_)}; }
+  ,
+  [](const Term::Float64Const &y_) -> json { return {4, Term::float64const_to_json(y_)}; }
+  ,
+  [](const Term::IntU8Const &y_) -> json { return {5, Term::intu8const_to_json(y_)}; }
+  ,
+  [](const Term::IntU16Const &y_) -> json { return {6, Term::intu16const_to_json(y_)}; }
+  ,
+  [](const Term::IntU32Const &y_) -> json { return {7, Term::intu32const_to_json(y_)}; }
+  ,
+  [](const Term::IntU64Const &y_) -> json { return {8, Term::intu64const_to_json(y_)}; }
+  ,
+  [](const Term::IntS8Const &y_) -> json { return {9, Term::ints8const_to_json(y_)}; }
+  ,
+  [](const Term::IntS16Const &y_) -> json { return {10, Term::ints16const_to_json(y_)}; }
+  ,
+  [](const Term::IntS32Const &y_) -> json { return {11, Term::ints32const_to_json(y_)}; }
+  ,
+  [](const Term::IntS64Const &y_) -> json { return {12, Term::ints64const_to_json(y_)}; }
+  ,
+  [](const Term::Unit0Const &y_) -> json { return {13, Term::unit0const_to_json(y_)}; }
+  ,
+  [](const Term::Bool1Const &y_) -> json { return {14, Term::bool1const_to_json(y_)}; }
+  );
 }
 
 TypeSpace::Global TypeSpace::global_from_json(const json& j_) { 
@@ -544,11 +575,11 @@ TypeSpace::Any TypeSpace::any_from_json(const json& j_) {
 }
 
 json TypeSpace::any_to_json(const TypeSpace::Any& x_) { 
-  return std::visit(overloaded{
-  [](const TypeSpace::Global &y_) -> json { return {0, TypeSpace::global_to_json(y_)}; },
-  [](const TypeSpace::Local &y_) -> json { return {1, TypeSpace::local_to_json(y_)}; },
-  [](const auto &x_) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x_) ); }
-  }, *x_);
+  return x_.match_total(
+  [](const TypeSpace::Global &y_) -> json { return {0, TypeSpace::global_to_json(y_)}; }
+  ,
+  [](const TypeSpace::Local &y_) -> json { return {1, TypeSpace::local_to_json(y_)}; }
+  );
 }
 
 Overload overload_from_json(const json& j_) { 
@@ -704,22 +735,33 @@ Spec::Any Spec::any_from_json(const json& j_) {
 }
 
 json Spec::any_to_json(const Spec::Any& x_) { 
-  return std::visit(overloaded{
-  [](const Spec::Assert &y_) -> json { return {0, Spec::assert_to_json(y_)}; },
-  [](const Spec::GpuBarrierGlobal &y_) -> json { return {1, Spec::gpubarrierglobal_to_json(y_)}; },
-  [](const Spec::GpuBarrierLocal &y_) -> json { return {2, Spec::gpubarrierlocal_to_json(y_)}; },
-  [](const Spec::GpuBarrierAll &y_) -> json { return {3, Spec::gpubarrierall_to_json(y_)}; },
-  [](const Spec::GpuFenceGlobal &y_) -> json { return {4, Spec::gpufenceglobal_to_json(y_)}; },
-  [](const Spec::GpuFenceLocal &y_) -> json { return {5, Spec::gpufencelocal_to_json(y_)}; },
-  [](const Spec::GpuFenceAll &y_) -> json { return {6, Spec::gpufenceall_to_json(y_)}; },
-  [](const Spec::GpuGlobalIdx &y_) -> json { return {7, Spec::gpuglobalidx_to_json(y_)}; },
-  [](const Spec::GpuGlobalSize &y_) -> json { return {8, Spec::gpuglobalsize_to_json(y_)}; },
-  [](const Spec::GpuGroupIdx &y_) -> json { return {9, Spec::gpugroupidx_to_json(y_)}; },
-  [](const Spec::GpuGroupSize &y_) -> json { return {10, Spec::gpugroupsize_to_json(y_)}; },
-  [](const Spec::GpuLocalIdx &y_) -> json { return {11, Spec::gpulocalidx_to_json(y_)}; },
-  [](const Spec::GpuLocalSize &y_) -> json { return {12, Spec::gpulocalsize_to_json(y_)}; },
-  [](const auto &x_) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x_) ); }
-  }, *x_);
+  return x_.match_total(
+  [](const Spec::Assert &y_) -> json { return {0, Spec::assert_to_json(y_)}; }
+  ,
+  [](const Spec::GpuBarrierGlobal &y_) -> json { return {1, Spec::gpubarrierglobal_to_json(y_)}; }
+  ,
+  [](const Spec::GpuBarrierLocal &y_) -> json { return {2, Spec::gpubarrierlocal_to_json(y_)}; }
+  ,
+  [](const Spec::GpuBarrierAll &y_) -> json { return {3, Spec::gpubarrierall_to_json(y_)}; }
+  ,
+  [](const Spec::GpuFenceGlobal &y_) -> json { return {4, Spec::gpufenceglobal_to_json(y_)}; }
+  ,
+  [](const Spec::GpuFenceLocal &y_) -> json { return {5, Spec::gpufencelocal_to_json(y_)}; }
+  ,
+  [](const Spec::GpuFenceAll &y_) -> json { return {6, Spec::gpufenceall_to_json(y_)}; }
+  ,
+  [](const Spec::GpuGlobalIdx &y_) -> json { return {7, Spec::gpuglobalidx_to_json(y_)}; }
+  ,
+  [](const Spec::GpuGlobalSize &y_) -> json { return {8, Spec::gpuglobalsize_to_json(y_)}; }
+  ,
+  [](const Spec::GpuGroupIdx &y_) -> json { return {9, Spec::gpugroupidx_to_json(y_)}; }
+  ,
+  [](const Spec::GpuGroupSize &y_) -> json { return {10, Spec::gpugroupsize_to_json(y_)}; }
+  ,
+  [](const Spec::GpuLocalIdx &y_) -> json { return {11, Spec::gpulocalidx_to_json(y_)}; }
+  ,
+  [](const Spec::GpuLocalSize &y_) -> json { return {12, Spec::gpulocalsize_to_json(y_)}; }
+  );
 }
 
 Intr::BNot Intr::bnot_from_json(const json& j_) { 
@@ -1080,34 +1122,57 @@ Intr::Any Intr::any_from_json(const json& j_) {
 }
 
 json Intr::any_to_json(const Intr::Any& x_) { 
-  return std::visit(overloaded{
-  [](const Intr::BNot &y_) -> json { return {0, Intr::bnot_to_json(y_)}; },
-  [](const Intr::LogicNot &y_) -> json { return {1, Intr::logicnot_to_json(y_)}; },
-  [](const Intr::Pos &y_) -> json { return {2, Intr::pos_to_json(y_)}; },
-  [](const Intr::Neg &y_) -> json { return {3, Intr::neg_to_json(y_)}; },
-  [](const Intr::Add &y_) -> json { return {4, Intr::add_to_json(y_)}; },
-  [](const Intr::Sub &y_) -> json { return {5, Intr::sub_to_json(y_)}; },
-  [](const Intr::Mul &y_) -> json { return {6, Intr::mul_to_json(y_)}; },
-  [](const Intr::Div &y_) -> json { return {7, Intr::div_to_json(y_)}; },
-  [](const Intr::Rem &y_) -> json { return {8, Intr::rem_to_json(y_)}; },
-  [](const Intr::Min &y_) -> json { return {9, Intr::min_to_json(y_)}; },
-  [](const Intr::Max &y_) -> json { return {10, Intr::max_to_json(y_)}; },
-  [](const Intr::BAnd &y_) -> json { return {11, Intr::band_to_json(y_)}; },
-  [](const Intr::BOr &y_) -> json { return {12, Intr::bor_to_json(y_)}; },
-  [](const Intr::BXor &y_) -> json { return {13, Intr::bxor_to_json(y_)}; },
-  [](const Intr::BSL &y_) -> json { return {14, Intr::bsl_to_json(y_)}; },
-  [](const Intr::BSR &y_) -> json { return {15, Intr::bsr_to_json(y_)}; },
-  [](const Intr::BZSR &y_) -> json { return {16, Intr::bzsr_to_json(y_)}; },
-  [](const Intr::LogicAnd &y_) -> json { return {17, Intr::logicand_to_json(y_)}; },
-  [](const Intr::LogicOr &y_) -> json { return {18, Intr::logicor_to_json(y_)}; },
-  [](const Intr::LogicEq &y_) -> json { return {19, Intr::logiceq_to_json(y_)}; },
-  [](const Intr::LogicNeq &y_) -> json { return {20, Intr::logicneq_to_json(y_)}; },
-  [](const Intr::LogicLte &y_) -> json { return {21, Intr::logiclte_to_json(y_)}; },
-  [](const Intr::LogicGte &y_) -> json { return {22, Intr::logicgte_to_json(y_)}; },
-  [](const Intr::LogicLt &y_) -> json { return {23, Intr::logiclt_to_json(y_)}; },
-  [](const Intr::LogicGt &y_) -> json { return {24, Intr::logicgt_to_json(y_)}; },
-  [](const auto &x_) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x_) ); }
-  }, *x_);
+  return x_.match_total(
+  [](const Intr::BNot &y_) -> json { return {0, Intr::bnot_to_json(y_)}; }
+  ,
+  [](const Intr::LogicNot &y_) -> json { return {1, Intr::logicnot_to_json(y_)}; }
+  ,
+  [](const Intr::Pos &y_) -> json { return {2, Intr::pos_to_json(y_)}; }
+  ,
+  [](const Intr::Neg &y_) -> json { return {3, Intr::neg_to_json(y_)}; }
+  ,
+  [](const Intr::Add &y_) -> json { return {4, Intr::add_to_json(y_)}; }
+  ,
+  [](const Intr::Sub &y_) -> json { return {5, Intr::sub_to_json(y_)}; }
+  ,
+  [](const Intr::Mul &y_) -> json { return {6, Intr::mul_to_json(y_)}; }
+  ,
+  [](const Intr::Div &y_) -> json { return {7, Intr::div_to_json(y_)}; }
+  ,
+  [](const Intr::Rem &y_) -> json { return {8, Intr::rem_to_json(y_)}; }
+  ,
+  [](const Intr::Min &y_) -> json { return {9, Intr::min_to_json(y_)}; }
+  ,
+  [](const Intr::Max &y_) -> json { return {10, Intr::max_to_json(y_)}; }
+  ,
+  [](const Intr::BAnd &y_) -> json { return {11, Intr::band_to_json(y_)}; }
+  ,
+  [](const Intr::BOr &y_) -> json { return {12, Intr::bor_to_json(y_)}; }
+  ,
+  [](const Intr::BXor &y_) -> json { return {13, Intr::bxor_to_json(y_)}; }
+  ,
+  [](const Intr::BSL &y_) -> json { return {14, Intr::bsl_to_json(y_)}; }
+  ,
+  [](const Intr::BSR &y_) -> json { return {15, Intr::bsr_to_json(y_)}; }
+  ,
+  [](const Intr::BZSR &y_) -> json { return {16, Intr::bzsr_to_json(y_)}; }
+  ,
+  [](const Intr::LogicAnd &y_) -> json { return {17, Intr::logicand_to_json(y_)}; }
+  ,
+  [](const Intr::LogicOr &y_) -> json { return {18, Intr::logicor_to_json(y_)}; }
+  ,
+  [](const Intr::LogicEq &y_) -> json { return {19, Intr::logiceq_to_json(y_)}; }
+  ,
+  [](const Intr::LogicNeq &y_) -> json { return {20, Intr::logicneq_to_json(y_)}; }
+  ,
+  [](const Intr::LogicLte &y_) -> json { return {21, Intr::logiclte_to_json(y_)}; }
+  ,
+  [](const Intr::LogicGte &y_) -> json { return {22, Intr::logicgte_to_json(y_)}; }
+  ,
+  [](const Intr::LogicLt &y_) -> json { return {23, Intr::logiclt_to_json(y_)}; }
+  ,
+  [](const Intr::LogicGt &y_) -> json { return {24, Intr::logicgt_to_json(y_)}; }
+  );
 }
 
 Math::Abs Math::abs_from_json(const json& j_) { 
@@ -1450,34 +1515,57 @@ Math::Any Math::any_from_json(const json& j_) {
 }
 
 json Math::any_to_json(const Math::Any& x_) { 
-  return std::visit(overloaded{
-  [](const Math::Abs &y_) -> json { return {0, Math::abs_to_json(y_)}; },
-  [](const Math::Sin &y_) -> json { return {1, Math::sin_to_json(y_)}; },
-  [](const Math::Cos &y_) -> json { return {2, Math::cos_to_json(y_)}; },
-  [](const Math::Tan &y_) -> json { return {3, Math::tan_to_json(y_)}; },
-  [](const Math::Asin &y_) -> json { return {4, Math::asin_to_json(y_)}; },
-  [](const Math::Acos &y_) -> json { return {5, Math::acos_to_json(y_)}; },
-  [](const Math::Atan &y_) -> json { return {6, Math::atan_to_json(y_)}; },
-  [](const Math::Sinh &y_) -> json { return {7, Math::sinh_to_json(y_)}; },
-  [](const Math::Cosh &y_) -> json { return {8, Math::cosh_to_json(y_)}; },
-  [](const Math::Tanh &y_) -> json { return {9, Math::tanh_to_json(y_)}; },
-  [](const Math::Signum &y_) -> json { return {10, Math::signum_to_json(y_)}; },
-  [](const Math::Round &y_) -> json { return {11, Math::round_to_json(y_)}; },
-  [](const Math::Ceil &y_) -> json { return {12, Math::ceil_to_json(y_)}; },
-  [](const Math::Floor &y_) -> json { return {13, Math::floor_to_json(y_)}; },
-  [](const Math::Rint &y_) -> json { return {14, Math::rint_to_json(y_)}; },
-  [](const Math::Sqrt &y_) -> json { return {15, Math::sqrt_to_json(y_)}; },
-  [](const Math::Cbrt &y_) -> json { return {16, Math::cbrt_to_json(y_)}; },
-  [](const Math::Exp &y_) -> json { return {17, Math::exp_to_json(y_)}; },
-  [](const Math::Expm1 &y_) -> json { return {18, Math::expm1_to_json(y_)}; },
-  [](const Math::Log &y_) -> json { return {19, Math::log_to_json(y_)}; },
-  [](const Math::Log1p &y_) -> json { return {20, Math::log1p_to_json(y_)}; },
-  [](const Math::Log10 &y_) -> json { return {21, Math::log10_to_json(y_)}; },
-  [](const Math::Pow &y_) -> json { return {22, Math::pow_to_json(y_)}; },
-  [](const Math::Atan2 &y_) -> json { return {23, Math::atan2_to_json(y_)}; },
-  [](const Math::Hypot &y_) -> json { return {24, Math::hypot_to_json(y_)}; },
-  [](const auto &x_) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x_) ); }
-  }, *x_);
+  return x_.match_total(
+  [](const Math::Abs &y_) -> json { return {0, Math::abs_to_json(y_)}; }
+  ,
+  [](const Math::Sin &y_) -> json { return {1, Math::sin_to_json(y_)}; }
+  ,
+  [](const Math::Cos &y_) -> json { return {2, Math::cos_to_json(y_)}; }
+  ,
+  [](const Math::Tan &y_) -> json { return {3, Math::tan_to_json(y_)}; }
+  ,
+  [](const Math::Asin &y_) -> json { return {4, Math::asin_to_json(y_)}; }
+  ,
+  [](const Math::Acos &y_) -> json { return {5, Math::acos_to_json(y_)}; }
+  ,
+  [](const Math::Atan &y_) -> json { return {6, Math::atan_to_json(y_)}; }
+  ,
+  [](const Math::Sinh &y_) -> json { return {7, Math::sinh_to_json(y_)}; }
+  ,
+  [](const Math::Cosh &y_) -> json { return {8, Math::cosh_to_json(y_)}; }
+  ,
+  [](const Math::Tanh &y_) -> json { return {9, Math::tanh_to_json(y_)}; }
+  ,
+  [](const Math::Signum &y_) -> json { return {10, Math::signum_to_json(y_)}; }
+  ,
+  [](const Math::Round &y_) -> json { return {11, Math::round_to_json(y_)}; }
+  ,
+  [](const Math::Ceil &y_) -> json { return {12, Math::ceil_to_json(y_)}; }
+  ,
+  [](const Math::Floor &y_) -> json { return {13, Math::floor_to_json(y_)}; }
+  ,
+  [](const Math::Rint &y_) -> json { return {14, Math::rint_to_json(y_)}; }
+  ,
+  [](const Math::Sqrt &y_) -> json { return {15, Math::sqrt_to_json(y_)}; }
+  ,
+  [](const Math::Cbrt &y_) -> json { return {16, Math::cbrt_to_json(y_)}; }
+  ,
+  [](const Math::Exp &y_) -> json { return {17, Math::exp_to_json(y_)}; }
+  ,
+  [](const Math::Expm1 &y_) -> json { return {18, Math::expm1_to_json(y_)}; }
+  ,
+  [](const Math::Log &y_) -> json { return {19, Math::log_to_json(y_)}; }
+  ,
+  [](const Math::Log1p &y_) -> json { return {20, Math::log1p_to_json(y_)}; }
+  ,
+  [](const Math::Log10 &y_) -> json { return {21, Math::log10_to_json(y_)}; }
+  ,
+  [](const Math::Pow &y_) -> json { return {22, Math::pow_to_json(y_)}; }
+  ,
+  [](const Math::Atan2 &y_) -> json { return {23, Math::atan2_to_json(y_)}; }
+  ,
+  [](const Math::Hypot &y_) -> json { return {24, Math::hypot_to_json(y_)}; }
+  );
 }
 
 Expr::SpecOp Expr::specop_from_json(const json& j_) { 
@@ -1619,18 +1707,25 @@ Expr::Any Expr::any_from_json(const json& j_) {
 }
 
 json Expr::any_to_json(const Expr::Any& x_) { 
-  return std::visit(overloaded{
-  [](const Expr::SpecOp &y_) -> json { return {0, Expr::specop_to_json(y_)}; },
-  [](const Expr::MathOp &y_) -> json { return {1, Expr::mathop_to_json(y_)}; },
-  [](const Expr::IntrOp &y_) -> json { return {2, Expr::introp_to_json(y_)}; },
-  [](const Expr::Cast &y_) -> json { return {3, Expr::cast_to_json(y_)}; },
-  [](const Expr::Alias &y_) -> json { return {4, Expr::alias_to_json(y_)}; },
-  [](const Expr::Index &y_) -> json { return {5, Expr::index_to_json(y_)}; },
-  [](const Expr::RefTo &y_) -> json { return {6, Expr::refto_to_json(y_)}; },
-  [](const Expr::Alloc &y_) -> json { return {7, Expr::alloc_to_json(y_)}; },
-  [](const Expr::Invoke &y_) -> json { return {8, Expr::invoke_to_json(y_)}; },
-  [](const auto &x_) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x_) ); }
-  }, *x_);
+  return x_.match_total(
+  [](const Expr::SpecOp &y_) -> json { return {0, Expr::specop_to_json(y_)}; }
+  ,
+  [](const Expr::MathOp &y_) -> json { return {1, Expr::mathop_to_json(y_)}; }
+  ,
+  [](const Expr::IntrOp &y_) -> json { return {2, Expr::introp_to_json(y_)}; }
+  ,
+  [](const Expr::Cast &y_) -> json { return {3, Expr::cast_to_json(y_)}; }
+  ,
+  [](const Expr::Alias &y_) -> json { return {4, Expr::alias_to_json(y_)}; }
+  ,
+  [](const Expr::Index &y_) -> json { return {5, Expr::index_to_json(y_)}; }
+  ,
+  [](const Expr::RefTo &y_) -> json { return {6, Expr::refto_to_json(y_)}; }
+  ,
+  [](const Expr::Alloc &y_) -> json { return {7, Expr::alloc_to_json(y_)}; }
+  ,
+  [](const Expr::Invoke &y_) -> json { return {8, Expr::invoke_to_json(y_)}; }
+  );
 }
 
 Stmt::Block Stmt::block_from_json(const json& j_) { 
@@ -1781,19 +1876,27 @@ Stmt::Any Stmt::any_from_json(const json& j_) {
 }
 
 json Stmt::any_to_json(const Stmt::Any& x_) { 
-  return std::visit(overloaded{
-  [](const Stmt::Block &y_) -> json { return {0, Stmt::block_to_json(y_)}; },
-  [](const Stmt::Comment &y_) -> json { return {1, Stmt::comment_to_json(y_)}; },
-  [](const Stmt::Var &y_) -> json { return {2, Stmt::var_to_json(y_)}; },
-  [](const Stmt::Mut &y_) -> json { return {3, Stmt::mut_to_json(y_)}; },
-  [](const Stmt::Update &y_) -> json { return {4, Stmt::update_to_json(y_)}; },
-  [](const Stmt::While &y_) -> json { return {5, Stmt::while_to_json(y_)}; },
-  [](const Stmt::Break &y_) -> json { return {6, Stmt::break_to_json(y_)}; },
-  [](const Stmt::Cont &y_) -> json { return {7, Stmt::cont_to_json(y_)}; },
-  [](const Stmt::Cond &y_) -> json { return {8, Stmt::cond_to_json(y_)}; },
-  [](const Stmt::Return &y_) -> json { return {9, Stmt::return_to_json(y_)}; },
-  [](const auto &x_) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x_) ); }
-  }, *x_);
+  return x_.match_total(
+  [](const Stmt::Block &y_) -> json { return {0, Stmt::block_to_json(y_)}; }
+  ,
+  [](const Stmt::Comment &y_) -> json { return {1, Stmt::comment_to_json(y_)}; }
+  ,
+  [](const Stmt::Var &y_) -> json { return {2, Stmt::var_to_json(y_)}; }
+  ,
+  [](const Stmt::Mut &y_) -> json { return {3, Stmt::mut_to_json(y_)}; }
+  ,
+  [](const Stmt::Update &y_) -> json { return {4, Stmt::update_to_json(y_)}; }
+  ,
+  [](const Stmt::While &y_) -> json { return {5, Stmt::while_to_json(y_)}; }
+  ,
+  [](const Stmt::Break &y_) -> json { return {6, Stmt::break_to_json(y_)}; }
+  ,
+  [](const Stmt::Cont &y_) -> json { return {7, Stmt::cont_to_json(y_)}; }
+  ,
+  [](const Stmt::Cond &y_) -> json { return {8, Stmt::cond_to_json(y_)}; }
+  ,
+  [](const Stmt::Return &y_) -> json { return {9, Stmt::return_to_json(y_)}; }
+  );
 }
 
 StructMember structmember_from_json(const json& j_) { 
@@ -1917,11 +2020,11 @@ FunctionKind::Any FunctionKind::any_from_json(const json& j_) {
 }
 
 json FunctionKind::any_to_json(const FunctionKind::Any& x_) { 
-  return std::visit(overloaded{
-  [](const FunctionKind::Internal &y_) -> json { return {0, FunctionKind::internal_to_json(y_)}; },
-  [](const FunctionKind::Exported &y_) -> json { return {1, FunctionKind::exported_to_json(y_)}; },
-  [](const auto &x_) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x_) ); }
-  }, *x_);
+  return x_.match_total(
+  [](const FunctionKind::Internal &y_) -> json { return {0, FunctionKind::internal_to_json(y_)}; }
+  ,
+  [](const FunctionKind::Exported &y_) -> json { return {1, FunctionKind::exported_to_json(y_)}; }
+  );
 }
 
 FunctionAttr::FPRelaxed FunctionAttr::fprelaxed_from_json(const json& j_) { 
@@ -1951,11 +2054,11 @@ FunctionAttr::Any FunctionAttr::any_from_json(const json& j_) {
 }
 
 json FunctionAttr::any_to_json(const FunctionAttr::Any& x_) { 
-  return std::visit(overloaded{
-  [](const FunctionAttr::FPRelaxed &y_) -> json { return {0, FunctionAttr::fprelaxed_to_json(y_)}; },
-  [](const FunctionAttr::FPStrict &y_) -> json { return {1, FunctionAttr::fpstrict_to_json(y_)}; },
-  [](const auto &x_) -> json { throw std::out_of_range("Unimplemented type:" + to_string(x_) ); }
-  }, *x_);
+  return x_.match_total(
+  [](const FunctionAttr::FPRelaxed &y_) -> json { return {0, FunctionAttr::fprelaxed_to_json(y_)}; }
+  ,
+  [](const FunctionAttr::FPStrict &y_) -> json { return {1, FunctionAttr::fpstrict_to_json(y_)}; }
+  );
 }
 
 Arg arg_from_json(const json& j_) { 
@@ -2101,13 +2204,13 @@ json compileresult_to_json(const CompileResult& x_) {
 json hashed_from_json(const json& j_) { 
   auto hash_ = j_.at(0).get<std::string>();
   auto data_ = j_.at(1);
-  if(hash_ != "93b03d0e412bc9648865fa456e656dae") {
-   throw std::runtime_error("Expecting ADT hash to be 93b03d0e412bc9648865fa456e656dae, but was " + hash_);
+  if(hash_ != "b306b9badfee3509c83dd693b5361b30") {
+   throw std::runtime_error("Expecting ADT hash to be b306b9badfee3509c83dd693b5361b30, but was " + hash_);
   }
   return data_;
 }
 
 json hashed_to_json(const json& x_) { 
-  return json::array({"93b03d0e412bc9648865fa456e656dae", x_});
+  return json::array({"b306b9badfee3509c83dd693b5361b30", x_});
 }
 } // namespace polyregion::polyast
