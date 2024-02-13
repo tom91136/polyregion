@@ -20,14 +20,22 @@
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/TargetParser/Host.h"
 
+#include "aspartame/vector.hpp"
+#include "aspartame/string.hpp"
+#include "aspartame/view.hpp"
+
+
+#include "aspartame/fluent.hpp"
+
 #include "frontend.h"
 #include "rewriter.h"
 #include "utils.hpp"
+using namespace aspartame;
 
 static std::vector<std::string> mkDelimitedEnvPaths(const char *env, std::optional<std::string> leading) {
   std::vector<std::string> xs;
   if (auto line = std::getenv(env); line) {
-    for (auto path : polyregion::split(line, llvm::sys::EnvPathSeparator)) {
+    for (auto &path :  line ^ split(llvm::sys::EnvPathSeparator)) {
       if (leading) xs.push_back(*leading);
       xs.push_back(path);
     }
@@ -48,8 +56,10 @@ int executeCC1(std::vector<std::string> &cc1Args, bool stdpar) {
     // -no-polyrt
   }
 
-  std::vector<const char *> cc1Args_(cc1Args.size());
-  std::transform(cc1Args.begin(), cc1Args.end(), cc1Args_.begin(), [](auto &x) { return x.c_str(); });
+  std::vector<const char *> cc1Args_ = cc1Args ^ map([]( auto &x){return x.c_str();});
+
+//  std::vector<const char *> cc1Args_(cc1Args.size());
+//  std::transform(cc1Args.begin(), cc1Args.end(), cc1Args_.begin(), [](auto &x) { return x.c_str(); });
   auto diagOptions = clang::CreateAndPopulateDiagOpts(cc1Args_);
   auto diagClient = std::make_unique<clang::TextDiagnosticPrinter>(llvm::errs(), &*diagOptions);
   auto diag = clang::CompilerInstance::createDiagnostics(diagOptions.release(), diagClient.release(), true);
@@ -98,8 +108,15 @@ int main(int argc, const char *argv[]) {
   clang::driver::Driver driver(execPath, triple, diags, "PolyCpp compiler");
   driver.ResourceDir = (execParentDir + "/lib/clang/" + std::to_string(CLANG_VERSION_MAJOR));
 
-
   std::vector<const char *> args(argv, argv + argc);
+
+
+
+  auto stdparIdx = args ^ index_of("-fstdpar");
+  args | zip_with_index<decltype(stdparIdx)>() | filter([&](auto &, auto i){ return i == stdparIdx; });
+
+
+
   // sort out -fstdpar
   auto fstdparIt = std::remove_if(args.begin(), args.end(), [](auto x) { return x == std::string("-fstdpar"); });
   auto stdpar = fstdparIt != args.end();

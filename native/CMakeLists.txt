@@ -51,6 +51,15 @@ FetchContent_Declare(
         URL_HASH SHA256=ebffbb5f01c001090181ea91e3ff6e1fb7e30f1e928adb6f02ee585c76e418bf
 )
 
+FetchContent_Declare(
+        Aspartame
+        SOURCE_DIR /home/tom/Aspartame
+#        GIT_REPOSITORY https://github.com/tom91136/Aspartame.git
+#        GIT_TAG        43aa85a6956126903cc0a5a3c11b4fe3ca0241f5
+)
+
+FetchContent_MakeAvailable(Aspartame)
+
 find_package(fmt CONFIG REQUIRED)
 find_package(Catch2 CONFIG REQUIRED)
 find_package(TBB CONFIG REQUIRED)

@@ -2,34 +2,32 @@
 #include <iomanip>
 
 #include "ast.h"
-#include "utils.hpp"
+// #include "utils.hpp"
+
+#include "aspartame/string.hpp"
+#include "aspartame/vector.hpp"
+#include "aspartame/view.hpp"
+
+#include "aspartame/fluent.hpp"
 
 using namespace std::string_literals;
 using namespace polyregion::polyast;
 using namespace polyregion;
 using std::string;
 
-[[nodiscard]] string polyast::repr(const Sym &sym) {
-  return mk_string<string>(
-      sym.fqn, [](auto &&x) { return x; }, ".");
-}
+using namespace aspartame;
+
+auto show_repr = [](auto &x) { return repr(x); };
+
+[[nodiscard]] string polyast::repr(const Sym &sym) { return sym.fqn ^ mk_string("."); }
 
 [[nodiscard]] string polyast::repr(const InvokeSignature &ivk) {
   string str;
   if (ivk.receiver) str += repr(*ivk.receiver) + ".";
   str += repr(ivk.name);
-  str += "<" +
-         mk_string<Type::Any>(
-             ivk.tpeVars, [](auto &x) { return repr(x); }, ", ") +
-         ">";
-  str += "(" +
-         mk_string<Type::Any>(
-             ivk.args, [&](auto x) { return repr(x); }, ",") +
-         ")";
-  str += "[" +
-         mk_string<Type::Any>(
-             ivk.captures, [&](auto x) { return repr(x); }, ",") +
-         "]";
+  str += ivk.tpeVars ^ mk_string("<", ", ", ">", show_repr);
+  str += ivk.args ^ mk_string("(", ", ", ")", show_repr);
+  str += ivk.captures ^ mk_string("[", ", ", "]", show_repr);
   str += ": " + repr(ivk.rtn);
   return str;
 }
@@ -60,9 +58,8 @@ using std::string;
           args += repr(x.args[i]);
         }
         args += ">";
-        auto parents = mk_string<Sym>(
-            x.parents, [](auto &x) { return repr(x); }, ",");
-        return "@" + repr(x.name) + args + (x.parents.empty() ? "" : "<:{" + parents + "}");
+        auto parents = x.parents ^ mk_string("{", ",", "}", show_repr);
+        return "@" + repr(x.name) + args + (x.parents.empty() ? "" : "<:" + parents);
       },                                                                   //
       [](const Type::Ptr &x) { return "Ptr[" + repr(x.component) + (x.length ? "*" + std::to_string(*x.length) : "") + "]"; }, //
       [](const Type::Var &x) { return "Var[" + x.name + "]"; },                //
@@ -73,14 +70,8 @@ using std::string;
 [[nodiscard]] string polyast::repr(const Named &path) { return "(" + path.symbol + ": " + repr(path.tpe) + ")"; }
 
 [[nodiscard]] string polyast::repr(const Term::Any &ref) {
-  return ref.match_total(
-      [](const Term::Select &x) {
-        return x.init.empty() //
-                   ? repr(x.last)
-                   : mk_string<Named>(
-                         x.init, [&](auto x) { return repr(x); }, ".") +
-                         "." + repr(x.last);
-      },
+  return ref.match_total( //
+      [](const Term::Select &x) { return x.init | append(x.last) | mk_string(".", show_repr); },
       [](const Term::Poison &x) { return "Poison(" + repr(x.tpe) + ")"; },
 
       [](const Term::Float16Const &x) { return "f16(" + std::to_string(x.value) + ")"; }, //
@@ -185,10 +176,8 @@ using std::string;
       [](const Expr::Cast &x) { return "(" + repr(x.from) + ".to[" + repr(x.as) + "])"; },
       [](const Expr::Alias &x) { return "(~>" + repr(x.ref) + ")"; },
       [](const Expr::Invoke &x) {
-        return (x.receiver ? repr(*x.receiver) : "<module>") + "." + repr(x.name) + "(" +
-               mk_string<Term::Any>(
-                   x.args, [&](auto x) { return repr(x); }, ",") +
-               ")" + ": " + repr(x.tpe);
+        return (x.receiver ? repr(*x.receiver) : "<module>") + "." + repr(x.name) + //
+               (x.args ^ mk_string("(", ",", ")", show_repr)) + ": " + repr(x.tpe);
       },
       [](const Expr::Index &x) { return repr(x.lhs) + "[" + repr(x.idx) + "]:" + repr(x.component); },
       [](const Expr::RefTo &x) {
@@ -201,37 +190,21 @@ using std::string;
 
 [[nodiscard]] string polyast::repr(const Stmt::Any &stmt) {
   return stmt.match_total( //
-      [](const Stmt::Block &x) {
-        return "{ \n" +
-               indent(2, mk_string<Stmt::Any>(
-                             x.stmts, [&](auto x) { return repr(x); }, "\n")) +
-               "}";
-      },
+      [](const Stmt::Block &x) { return "{ \n" + (x.stmts ^ mk_string("\n", show_repr) ^ indent(2)) + "}"; },
       [](const Stmt::Comment &x) { return "/* " + x.value + " */"; },
       [](const Stmt::Var &x) { return "var " + repr(x.name) + " = " + (x.expr ? repr(*x.expr) : "_"); },
       [](const Stmt::Mut &x) { return repr(x.name) + " := " + repr(x.expr); },
       [](const Stmt::Update &x) { return repr(x.lhs) + "[" + repr(x.idx) + "] = " + repr(x.value); },
       [](const Stmt::While &x) {
-        auto tests = mk_string<Stmt::Any>(
-            x.tests, [&](auto x) { return repr(x); }, "\n");
-
-        return "while({" + tests + ";" + repr(x.cond) + "}){\n" +
-               indent(2, mk_string<Stmt::Any>(
-                             x.body, [&](auto x) { return repr(x); }, "\n")) +
-               "\n}";
+        auto tests = x.tests ^ mk_string("\n", show_repr);
+        return "while({" + tests + ";" + repr(x.cond) + "}){\n" + (x.body ^ mk_string("\n", show_repr) ^ indent(2)) + "\n}";
       },
       [](const Stmt::Break &x) { return "break;"s; }, [](const Stmt::Cont &x) { return "continue;"s; },
       [](const Stmt::Cond &x) {
         auto elseStmts = x.falseBr.empty() //
                              ? "\n}"
-                             : "\n} else {\n" +
-                                   indent(2, mk_string<Stmt::Any>(
-                                                 x.falseBr, [&](auto x) { return repr(x); }, "\n")) +
-                                   "\n}";
-        return "if(" + repr(x.cond) + ") { \n" +
-               indent(2, mk_string<Stmt::Any>(
-                             x.trueBr, [&](auto x) { return repr(x); }, "\n")) +
-               elseStmts;
+                             : "\n} else {\n" + (x.falseBr ^ mk_string("\n", show_repr) ^ indent(2)) + "\n}";
+        return "if(" + repr(x.cond) + ") { \n" + (x.trueBr ^ mk_string("\n", show_repr) ^ indent(2)) + elseStmts;
       },
       [](const Stmt::Return &x) { return "return " + repr(x.value); });
 }
@@ -247,60 +220,34 @@ using std::string;
   string str;
   if (fn.receiver) str += repr(*fn.receiver) + ".";
   str += repr(fn.name);
-  str += "<" +
-         mk_string<string>(
-             fn.tpeVars, [](auto &x) { return x; }, ", ") +
-         ">";
-  str += "(" +
-         mk_string<Arg>(
-             fn.args, [&](auto x) { return repr(x); }, ",") +
-         ")";
-  str += "[" +
-         mk_string<Arg>(
-             fn.moduleCaptures, [&](auto x) { return repr(x); }, ",") +
-         ";" +
-         mk_string<Arg>(
-             fn.termCaptures, [&](auto x) { return repr(x); }, ",") +
-         "]";
+  str += fn.tpeVars ^ mk_string("<", ",", ">");
+  str += fn.args ^ mk_string("(", ",", ")", show_repr);
+  str += "[" + (fn.moduleCaptures ^ mk_string(",", show_repr)) + ";" + (fn.termCaptures ^ mk_string(",", show_repr)) + "]";
   str += ": " + repr(fn.rtn);
-  str += " = {\n" +
-         indent(2, mk_string<Stmt::Any>(
-                       fn.body, [&](auto x) { return repr(x); }, "\n")) +
-         "\n}";
+  str += " = {\n" + (fn.body ^ mk_string("\n", show_repr) ^ indent(2)) + "\n}";
   return str;
 }
 
 [[nodiscard]] string polyast::repr(const StructDef &def) {
 
-  return "struct " + repr(def.name) + (def.parents.empty() ? "" : ": ") +
-         mk_string<Sym>(
-             def.parents, [](auto &&x) { return repr(x); }, ", ") +
-         " { " +
-         mk_string<StructMember>(
-             def.members, [](auto &&x) { return (x.isMutable ? "mut " : "") + repr(x.named); }, ",") +
-         " }";
+  return "struct " + repr(def.name) + (def.parents.empty() ? "" : ": ")                                      //
+         + (def.parents ^ mk_string(", ", show_repr)) +                                                      //
+         " { " +                                                                                             //
+         (def.members ^ mk_string(",", [](auto &x) { return (x.isMutable ? "mut " : "") + repr(x.named); })) //
+         + " }";
 }
 
 [[nodiscard]] string polyast::repr(const Program &program) {
-  auto defs = mk_string<StructDef>(
-      program.defs, [](auto &&x) { return repr(x); }, "\n");
-  auto fns = mk_string<Function>(
-      program.functions, [](auto &&x) { return repr(x); }, "\n");
+  auto defs = program.defs ^ mk_string("\n");
+  auto fns = program.functions ^ mk_string("\n");
   return defs + "\n" + fns + "\n" + repr(program.entry);
 }
 
 string polyast::qualified(const Term::Select &select) {
-  return select.init.empty() //
-             ? select.last.symbol
-             : polyregion::mk_string<Named>(
-                   select.init, [](auto &n) { return n.symbol; }, ".") +
-                   "." + select.last.symbol;
+  return select.init | append(select.last) | mk_string(".", [](auto &x) { return x.symbol; });
 }
 
-string polyast::qualified(const Sym &sym) {
-  return polyregion::mk_string<string>(
-      sym.fqn, [](auto &n) { return n; }, ".");
-}
+string polyast::qualified(const Sym &sym) { return sym.fqn ^ mk_string("."); }
 
 std::vector<Named> polyast::path(const Term::Select &select) {
   std::vector<Named> xs(select.init);
@@ -365,14 +312,8 @@ string polyast::repr(const polyast::CompileResult &compilation) {
   os << "Compilation {"                                                                                            //
      << "\n  binary: " << (compilation.binary ? std::to_string(compilation.binary->size()) + " bytes" : "(empty)") //
      << "\n  messages: `" << compilation.messages << "`"                                                           //
-     << "\n  features: `"
-     << mk_string<string>(
-            compilation.features, [](auto x) { return x; }, ",")
-     << "`"
-     << "\n  layouts: `"
-     << mk_string<CompileLayout>(
-            compilation.layouts, [](auto x) { return to_string(x); }, "\n    ")
-     << "`"
+     << "\n  features: `" << (compilation.features ^ mk_string(",")) << "`"                                        //
+     << "\n  layouts: `" << (compilation.layouts ^ mk_string("\n    ")) << "`"                                     //
      << "\n  events:\n";
 
   for (auto &e : compilation.events) {

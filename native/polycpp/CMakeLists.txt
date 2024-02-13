@@ -82,11 +82,13 @@ target_link_libraries(polycpp PRIVATE
         clangFrontend
         clangFrontendTool
         clangSerialization
+        Aspartame::Aspartame
         )
 target_link_libraries(polycpp-test PRIVATE
         LLVMSupport
         fmt::fmt-header-only
-        Catch2::Catch2WithMain)
+        Catch2::Catch2WithMain
+)
 
 
 if (NOT WIN32)
