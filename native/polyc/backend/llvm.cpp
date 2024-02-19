@@ -243,19 +243,19 @@ ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
     auto tpe = head.tpe;
     auto root = findStackVar(head);
     for (auto &path : tail) {
-      auto selectFinal = [&](llvm::StructType *structTy, size_t idx) {
-        if (auto p = tpe.get<Type::Ptr>(); p && !p->length) {
+      auto selectFinal = [&](llvm::StructType *structTy, size_t idx, bool conditionalLoad = true, const std::string &suffix = "") {
+        if (auto p = tpe.get<Type::Ptr>(); conditionalLoad && p && !p->length) {
           root = B.CreateInBoundsGEP(
               structTy, load(B, root, B.getPtrTy(AllocaAS)),
               {//
                llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), idx)},
-              qualified(select) + "_select_ptr");
+              qualified(select) + "_select_ptr_" + suffix);
         } else {
           root = B.CreateInBoundsGEP(
               structTy, root,
               {//
                llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), idx)},
-              qualified(select) + "_select_ptr");
+              qualified(select) + "_select_ptr_" + suffix);
         }
       };
       auto [s, structTy, table] = structTypeOf(tpe);
@@ -263,10 +263,19 @@ ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
         selectFinal(structTy, *idx);
         tpe = path.tpe;
       } else {
-        if (auto inHeirachy = findSymbolInHeirachy<size_t>(s.name, [&](auto, auto, auto xs) { return get_opt(xs, path.symbol); });
+        if (auto inHeirachy = findSymbolInHeirachy<std::pair<size_t, llvm::StructType *>>(
+                s.name,
+                [&](auto, auto ty, auto xs) -> std::optional<std::pair<size_t, llvm::StructType *>> {
+                  auto o = get_opt(xs, path.symbol);
+                  return o ? std::optional{std::pair{*o, ty}} : std::nullopt;
+                  ;
+                });
             inHeirachy) {
-          auto &[inheritanceChain, finaIdx] = *inHeirachy;
+          auto &[inheritanceChain, lastIndex] = *inHeirachy;
           auto chainPrev = structTy;
+          // TODO conditional deref only on the first chain; garbage code but semantically correct,redo this whole thing with views
+          size_t c = 0;
+          inheritanceChain.push_back(lastIndex.second);
           for (auto chain : inheritanceChain) {
             size_t N = 0;
             if (chain != chainPrev) { // skip the first chain; it's 0 offset
@@ -274,18 +283,15 @@ ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
                       std::find_if(chainPrev->element_begin(), chainPrev->element_end(), [&](auto t) { return t == chain; });
                   relativeIdxIt != chainPrev->element_end()) {
                 N = std::distance(chainPrev->element_begin(), relativeIdxIt);
+                selectFinal(chainPrev, N, c == 0, "in_chain_" + chain->getName().str());
+                c++;
               } else {
                 return undefined(__FILE__, __LINE__, "Illegal select path with out of bounds parent `" + to_string(path) + "`" + fail());
               }
             }
             chainPrev = chain;
-            root = B.CreateInBoundsGEP(
-                chain, root,
-                {//
-                 llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), N)},
-                qualified(select) + "_chain_ptr");
           }
-          selectFinal(structTy, finaIdx);
+          selectFinal(lastIndex.second, lastIndex.first, false, "in_chain_final_" + lastIndex.second->getName().str());
           tpe = path.tpe;
         } else {
           auto pool = mk_string2<std::string, size_t>(
@@ -332,7 +338,7 @@ Opt<Pair<std::vector<llvm::StructType *>, T>> LLVMBackend::AstTransformer::findS
       if (sdef.parents.empty()) return {};
       auto ys = xs;
       ys.push_back(structTy);
-      for (auto parent : sdef.parents) {
+      for (const auto &parent : sdef.parents) {
         if (auto x = findSymbolInHeirachy(parent, f, ys); x) return x;
       }
       return {};
@@ -540,9 +546,9 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
                   size_t N = 0;
                   if (chain != chainPrev) { // skip the first chain; it's 0 offset
                     if (auto relativeIdxIt =
-                            std::find_if(chainPrev->element_begin(), chainPrev->element_end(), [&](auto t) { return t == chain; });
-                        relativeIdxIt != chainPrev->element_end()) {
-                      N = std::distance(chainPrev->element_begin(), relativeIdxIt);
+                            std::find_if(chain->element_begin(), chain->element_end(), [&](auto t) { return t == chainPrev; });
+                        relativeIdxIt != chain->element_end()) {
+                      N = std::distance(chain->element_begin(), relativeIdxIt);
                     } else {
                       return undefined(__FILE__, __LINE__, "Illegal select path with out of bounds parent `" + to_string(path) + "`");
                     }

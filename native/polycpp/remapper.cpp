@@ -25,18 +25,21 @@
 using namespace polyregion::polyast;
 using namespace polyregion::polystl;
 
-std::vector<Stmt::Any> Remapper::RemapContext::scoped(const std::function<void(RemapContext &)> &f,
-                                                      const std::optional<Type::Any> &scopeRtnType,
-                                                      std::optional<std::string> scopeStructName, bool persistCounter) {
+std::vector<Stmt::Any> Remapper::RemapContext::scoped(const std::function<void(RemapContext &)> &f, //
+                                                      const std::optional<bool> &scopeCtorChain,    //
+                                                      const std::optional<Type::Any> &scopeRtnType, //
+                                                      std::optional<std::string> scopeStructName,   //
+                                                      bool persistCounter) {
   return scoped<std::nullptr_t>(
              [&](auto &r) {
                f(r);
                return nullptr;
              },
-             scopeRtnType, std::move(scopeStructName), persistCounter)
+             scopeCtorChain, scopeRtnType, std::move(scopeStructName), persistCounter)
       .second;
 }
 void Remapper::RemapContext::push(const Stmt::Any &stmt) { stmts.push_back(stmt); }
+void Remapper::RemapContext::push(const std::vector<Stmt::Any> &xs) { stmts.insert(stmts.end(), xs.begin(), xs.end()); }
 Named Remapper::RemapContext::newName(const Type::Any &tpe) { return {"_v" + std::to_string(++counter), tpe}; }
 Term::Any Remapper::RemapContext::newVar(const Expr::Any &expr) {
   if (auto alias = expr.get<Expr::Alias>(); alias) {
@@ -119,12 +122,23 @@ static Term::Any defaultValue(const Type::Any &tpe) {
 
 static void defaultInitialiseStruct(Remapper::RemapContext &r, const Type::Struct &tpe, const std::vector<Named> &roots) {
   if (auto it = r.structs.find(tpe.name.fqn[0]); it != r.structs.end()) {
+
+    for(auto& p : it->second.parents){
+      if(auto parentIt = r.structs.find(qualified(p)); parentIt != r.structs.end()){
+//        defaultInitialiseStruct(r, Type::Struct(parentIt->second.name, parentIt->second.tpeVars, {}, parentIt->second.parents), roots);
+      }
+    }
+
+
     for (auto &m : it->second.members) {
       if (auto nested = m.named.tpe.get<Type::Struct>(); nested) {
-        auto roots_ = roots;
-        roots_.push_back(m.named);
-        defaultInitialiseStruct(r, *nested, roots_);
-      } else r.push(Stmt::Mut(Term::Select(roots, m.named), Expr::Alias(defaultValue(m.named.tpe)), true));
+//        auto roots_ = roots;
+//        roots_.push_back(m.named);
+//        defaultInitialiseStruct(r, *nested, roots_);
+      } else {
+        r.push(Stmt::Comment("Zero init member"));
+        r.push(Stmt::Mut(Term::Select(roots, m.named), Expr::Alias(defaultValue(m.named.tpe)), true));
+      }
     }
   } else throw std::logic_error("Cannot initialise unknown struct type " + repr(tpe));
 }
@@ -194,7 +208,7 @@ static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const
     }
   } else {
     r.push(Stmt::Comment("Cannot conform rhs " + repr(rhsTpe) + " with target " + repr(targetTpe)));
-    return Expr::Alias(Term::Poison(rhsTpe));
+    return Expr::Alias(Term::Poison(targetTpe));
   }
 };
 
@@ -265,6 +279,7 @@ std::pair<std::string, Function> Remapper::handleCall(const clang::FunctionDecl 
                 r.push(Stmt::Comment("Ctor: " + declName(decl)));
                 for (auto init : ctor->inits()) { // handle CXXCtorInitializer here
                   if (init->isAnyMemberInitializer()) {
+                    r.push(Stmt::Comment("Ctor init: " + init->getMember()->getNameAsString()));
                     auto tpe = handleType(init->getAnyMember()->getType(), r);
                     auto memberName = qualified(structTpe->name) + "::" + init->getMember()->getNameAsString();
                     auto member = Term::Select({receiver->named}, Named(memberName, tpe));
@@ -272,13 +287,35 @@ std::pair<std::string, Function> Remapper::handleCall(const clang::FunctionDecl 
                     r.push(Stmt::Mut(member, rhs, true));
                   } else if (init->isBaseInitializer()) {
 
-                    //                    auto instance = Term::Select({}, receiver->named);
+                    auto chainedCtorStmts = r.scoped(
+                        [&](auto &r) {
+                          auto baseTpe = handleType(init->getInit()->getType(), r);
+                          if (auto baseStruct = baseTpe.template get<Type::Struct>(); baseStruct) {
+                            r.push(Stmt::Comment("Ctor base init: " + repr(baseTpe)));
 
-                    auto rhs = conform(r, handleExpr(init->getInit(), r), handleType(init->getInit()->getType(), r));
-                    //                    r.push(Stmt::Mut(member, rhs, true));
+                            r.newVar(handleExpr(init->getInit(), r));
 
-                    //                    init.get
-                    //                      r.push(Stmt::Comment("Unimplemented initialiser: " + repr(rhs)));
+                            //                      auto rhs = conform(r, , baseTpe);
+                            //                      auto var = Stmt::Var(r.newName(rhs.tpe()), rhs);
+                            //                      r.push(var);
+
+                            //                      if (auto it = r.structs.find(qualified(baseStruct->name)); it != r.structs.end()) {
+                            //                        for (auto &&m : it->second.members) {
+                            //                          auto member = Term::Select({receiver->named}, m.named);
+                            //                          r.push(Stmt::Mut(member, Expr::Alias(Term::Select({var.name}, m.named)), true));
+                            //                        }
+                            //                      } else throw std::logic_error("Cannot resolve record type: " + name);
+                            //                      r.push(Stmt::Comment("Ctor rhs: \n" + repr(rhs)));
+
+                            //                    init.get
+                            //                      r.push(Stmt::Comment("Unimplemented initialiser: " + repr(rhs)));
+                          } else {
+                            r.push(Stmt::Comment("Base initialiser is not a struct type: " + repr(baseTpe)));
+                          }
+                        },
+                        true, rtnType, parent, true);
+                    r.push(chainedCtorStmts);
+
                   } else throw std::logic_error("Unknown initializer type!");
                 }
                 handleStmt(decl->getBody(), r);
@@ -287,7 +324,7 @@ std::pair<std::string, Function> Remapper::handleCall(const clang::FunctionDecl 
             } else throw std::logic_error("receiver is not a instance ptr type!");
           } else handleStmt(decl->getBody(), r);
         },
-        rtnType, parent, true);
+        false, rtnType, parent, false);
 
     std::vector<Stmt::Any> body;
     body.insert(body.end(), fnBody.begin(), fnBody.end());
@@ -757,22 +794,42 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
       },
       [&](const clang::CXXConstructExpr *expr) {
         auto [name, fn] = handleCall(expr->getConstructor(), r);
-        auto named = r.newVar(handleType(expr->getType(), r));
-        if (auto tpe = named.tpe.get<Type::Struct>(); tpe) {
-          defaultInitialiseStruct(r, *tpe, {named});
+        auto ctorTpe = handleType(expr->getType(), r);
 
-          if (fn.args.size() != expr->getNumArgs())
-            throw std::logic_error("Arg count mismatch, expected " + std::to_string(fn.args.size()) + " but was " +
-                                   std::to_string(expr->getNumArgs()));
+        if (fn.args.size() != expr->getNumArgs())
+          throw std::logic_error("Arg count mismatch, expected " + std::to_string(fn.args.size()) + " but was " +
+                                 std::to_string(expr->getNumArgs()));
+
+        if (auto tpe = ctorTpe.get<Type::Struct>(); tpe) {
+          r.push(Stmt::Comment("CXXConstructExpr: " + repr(tpe->name)));
+
+          if (r.parent && r.ctorChain) {
+            r.push(Stmt::Comment("In Ctor Chain:  " + repr(ctorTpe) + " parent=" + repr(*r.parent)));
+          } else {
+            r.push(Stmt::Comment("New ctor:  " + repr(ctorTpe)));
+          }
+
+          auto instance = r.parent && r.ctorChain //
+              ? [&]() -> Expr::Any {
+            Named instance("this", ptrTo(Type::Struct(r.parent->get().name, {}, {}, r.parent->get().parents)));
+            r.push(Stmt::Comment("This zero init"));
+            defaultInitialiseStruct(r, *tpe, {instance});
+            return Expr::Alias(Term::Select({}, instance));
+          }()
+              : [&]() -> Expr::Any {
+                  auto allocated = r.newVar(ctorTpe);
+                  defaultInitialiseStruct(r, *tpe, {allocated});
+                  return Expr::RefTo(Term::Select({}, allocated), {}, ctorTpe);
+                }();
+
           std::vector<Term::Any> args;
           for (size_t i = 0; i < expr->getNumArgs(); ++i)
             args.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn.args[i].named.tpe)));
 
-          auto instanceRef = r.newVar(Expr::RefTo(Term::Select({}, named), {}, named.tpe));
-          r.newVar(Expr::Invoke(Sym({name}), {}, instanceRef, args, {}, Type::Unit0()));
-          return Expr::Alias(Term::Select({}, named));
+          r.newVar(Expr::Invoke(Sym({name}), {}, r.newVar(conform(r, instance, ptrTo(ctorTpe))), args, {}, Type::Unit0()));
+          return instance;
         } else {
-          throw std::logic_error("CXX ctor resulted in a non-struct type: " + repr(named));
+          throw std::logic_error("CXX ctor resulted in a non-struct type: " + repr(ctorTpe));
         }
       },
       [&](const clang::CXXMemberCallExpr *expr) { // instance.method(...)

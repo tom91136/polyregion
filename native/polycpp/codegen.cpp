@@ -79,7 +79,7 @@ std::string polyregion::polystl::generate(clang::ASTContext &C, const clang::CXX
 
   auto rtnTpe = remapper.handleType(returnTpe, r);
 
-  auto stmts = r.scoped([&](auto &r) { remapper.handleStmt(body, r); }, rtnTpe, parentName);
+  auto stmts = r.scoped([&](auto &r) { remapper.handleStmt(body, r); }, false, rtnTpe, parentName);
   stmts.push_back(Stmt::Return(Expr::Alias(Term::Unit0Const())));
 
   auto recv =

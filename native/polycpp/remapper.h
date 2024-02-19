@@ -33,6 +33,7 @@ struct Remapper {
   clang::ASTContext &context;
   struct RemapContext {
     std::optional<std::reference_wrapper<StructDef>> parent;
+    bool ctorChain = false;
     Type::Any rtnType = Type::Unit0();
     size_t counter{};
     std::vector<Stmt::Any> stmts{};
@@ -40,9 +41,11 @@ struct Remapper {
     std::unordered_map<std::string, StructDef> structs{};
 
     template <typename T>
-    [[nodiscard]] std::pair<T, std::vector<Stmt::Any>>
-    scoped(const std::function<T(RemapContext &)> &f, const std::optional<Type::Any> &scopeRtnType = {},
-           std::optional<std::string> scopeStructName = {}, bool persistCounter = false) {
+    [[nodiscard]] std::pair<T, std::vector<Stmt::Any>> scoped(const std::function<T(RemapContext &)> &f,         //
+                                                              const std::optional<bool> &scopeCtorChain = {},    //
+                                                              const std::optional<Type::Any> &scopeRtnType = {}, //
+                                                              std::optional<std::string> scopeStructName = {},   //
+                                                              bool persistCounter = true) {
       std::optional<std::reference_wrapper<StructDef>> nextParent = parent;
       if (scopeStructName) {
         if (auto it = structs.find(*scopeStructName); it != structs.end()) {
@@ -51,20 +54,26 @@ struct Remapper {
           throw std::logic_error("Unexpected parent scope: " + *scopeStructName);
         }
       }
-      RemapContext r{nextParent, scopeRtnType.value_or(rtnType), persistCounter ? 0 : counter, {}, functions, structs};
+      RemapContext r{
+          nextParent, scopeCtorChain.value_or(ctorChain), scopeRtnType.value_or(rtnType), persistCounter ? counter : 0, {}, functions,
+          structs};
       auto result = f(r);
-      if (!persistCounter) {
+      if (persistCounter) {
         counter = r.counter;
       }
       functions = r.functions;
       structs = r.structs;
       return {result, r.stmts};
     }
-    [[nodiscard]] std::vector<Stmt::Any> scoped(const std::function<void(RemapContext &)> &f,
-                                                const std::optional<Type::Any> &scopeRtnType = {},
-                                                std::optional<std::string> scopeStructName = {}, bool persistCounter = false);
+    [[nodiscard]] std::vector<Stmt::Any> scoped(const std::function<void(RemapContext &)> &f,      //
+                                                const std::optional<bool> &scopeCtorChain = {},    //
+                                                const std::optional<Type::Any> &scopeRtnType = {}, //
+                                                std::optional<std::string> scopeStructName = {},   //
+                                                bool persistCounter = false);
 
     void push(const Stmt::Any &stmt);
+    void push(const std::vector<Stmt::Any> &xs);
+
     Named newName(const Type::Any &tpe);
     Term::Any newVar(const Expr::Any &expr);
     void newVar0(const Expr::Any &expr);
