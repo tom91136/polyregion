@@ -1,6 +1,11 @@
 #include <iostream>
 #include <unordered_set>
 
+#include "aspartame/optional.hpp"
+#include "aspartame/unordered_map.hpp"
+#include "aspartame/vector.hpp"
+#include "aspartame/view.hpp"
+
 #include "ast.h"
 #include "llvm.h"
 #include "llvmc.h"
@@ -19,6 +24,7 @@
 using namespace polyregion;
 using namespace polyregion::polyast;
 using namespace polyregion::backend;
+using namespace aspartame;
 
 template <typename T> static std::string llvm_tostring(const T *t) {
   std::string str;
@@ -92,7 +98,7 @@ std::unique_ptr<LLVMBackend::TargetSpecificHandler> LLVMBackend::TargetSpecificH
     case Target::SPIRV64: return std::make_unique<OpenCLTargetSpecificHandler>();
   }
 }
-LLVMBackend::TargetSpecificHandler::~TargetSpecificHandler() {}
+LLVMBackend::TargetSpecificHandler::~TargetSpecificHandler() = default;
 
 ValPtr LLVMBackend::AstTransformer::invokeMalloc(llvm::Function *parent, ValPtr size) {
   return B.CreateCall(mkExternalFn(parent, Type::Ptr(Type::IntS8(), {}, TypeSpace::Global()), "malloc", {Type::IntS64()}), size);
@@ -110,8 +116,7 @@ static bool isUnsigned(const Type::Any &tpe) {
 static constexpr int64_t nIntMin(uint64_t bits) { return -(int64_t(1) << (bits - 1)); }
 static constexpr int64_t nIntMax(uint64_t bits) { return (int64_t(1) << (bits - 1)) - 1; }
 
-std::tuple<StructDef, llvm::StructType *, LLVMBackend::AstTransformer::StructMemberIndexTable>
-LLVMBackend::AstTransformer::mkStruct(const StructDef &def) {
+LLVMBackend::AstTransformer::StructInfo LLVMBackend::AstTransformer::mkStruct(const StructDef &def) {
   std::vector<llvm::Type *> types;
   StructMemberIndexTable table;
   for (const auto &p : def.parents) {
@@ -123,7 +128,7 @@ LLVMBackend::AstTransformer::mkStruct(const StructDef &def) {
       //   types.push_back(parentStructTpe->getElementType(idx));
       //   table[sym] = types.size() - 1;
       // }
-    } else error(__FILE__, __LINE__, "Unseen struct def in inheritance chain: " + repr(p));
+    } else throw std::logic_error("Unseen struct def in inheritance chain: " + repr(p));
   }
   for (const auto &m : def.members) {
     types.push_back(mkTpe(m.named.tpe));
@@ -156,18 +161,14 @@ llvm::Type *LLVMBackend::AstTransformer::mkTpe(const Type::Any &tpe, bool functi
       [&](const Type::Unit0 &x) -> llvm::Type * { return llvm::Type::getVoidTy(C); },   //
       [&](const Type::Nothing &x) -> llvm::Type * { return llvm::Type::getVoidTy(C); }, //
       [&](const Type::Struct &x) -> llvm::Type * {
-        if (auto def = polyregion::get_opt(structTypes, x.name); def) return std::get<llvm::StructType *>(*def);
-        else {
-          auto pool = mk_string2<Sym, std::tuple<StructDef, llvm::StructType *, StructMemberIndexTable>>(
-              structTypes,
-              [](const auto &e) {
-                auto &[_, structTy, table] = e.second;
-                return "`" + to_string(structTy) + "`" + " = " + std::to_string(table.size());
-              },
-              "\n->");
-
-          return undefined(__FILE__, __LINE__, "Unseen struct def: " + to_string(x) + ", table=\n" + pool);
-        }
+        return structTypes ^ get(x.name) ^
+               fold([](auto &info) { return info.tpe; },
+                    [&]() -> llvm::StructType * {
+                      auto pool = structTypes | values() | mk_string("\n", "\n", "\n", [](auto &info) {
+                                    return " -> " + repr(info.def) + ", IR=" + to_string(info.tpe);
+                                  });
+                      throw std::logic_error("Unseen struct def: " + to_string(x) + ", currently in-scope structs:" + pool);
+                    });
       }, //
       [&](const Type::Ptr &x) -> llvm::Type * {
         if (x.length) return llvm::ArrayType::get(mkTpe(x.component), *x.length);
@@ -185,9 +186,9 @@ llvm::Type *LLVMBackend::AstTransformer::mkTpe(const Type::Any &tpe, bool functi
         //          auto comp = mkTpe(x.component);
         //          return comp->isPointerTy() ? comp : comp->getPointerTo(AS);
         //        }
-      },                                                                                             //
-      [&](const Type::Var &x) -> llvm::Type * { return undefined(__FILE__, __LINE__, "type var"); }, //
-      [&](const Type::Exec &x) -> llvm::Type * { return undefined(__FILE__, __LINE__, "exec"); }
+      },                                                                               //
+      [&](const Type::Var &x) -> llvm::Type * { throw std::logic_error("type var"); }, //
+      [&](const Type::Exec &x) -> llvm::Type * { throw std::logic_error("exec"); }
 
   );
 }
@@ -195,29 +196,31 @@ llvm::Type *LLVMBackend::AstTransformer::mkTpe(const Type::Any &tpe, bool functi
 ValPtr LLVMBackend::AstTransformer::findStackVar(const Named &named) {
   if (named.tpe.is<Type::Unit0>()) return mkTermVal(Term::Unit0Const());
   //  check the LUT table for known variables defined by var or brought in scope by parameters
-  if (auto x = polyregion::get_opt(stackVarPtrs, named.symbol); x) {
-    auto [tpe, value] = *x;
-    if (named.tpe != tpe) {
-      error(__FILE__, __LINE__, "Named local variable (" + to_string(named) + ") has different type from LUT (" + to_string(tpe) + ")");
-    }
-    return value;
-  } else {
-    auto pool = mk_string2<std::string, Pair<Type::Any, ValPtr>>(
-        stackVarPtrs,
-        [](auto &&p) { return "`" + p.first + "` = " + to_string(p.second.first) + "(IR=" + llvm_tostring(p.second.second) + ")"; },
-        "\n->");
-    return undefined(__FILE__, __LINE__, "Unseen variable: " + to_string(named) + ", variable table=\n->" + pool);
-  }
+  return stackVarPtrs ^ get(named.symbol) ^
+         fold(
+             [&](auto &tpe, auto &value) {
+               if (named.tpe != tpe)
+                 throw std::logic_error("Named local variable (" + to_string(named) + ") has different type from LUT (" + to_string(tpe) +
+                                        ")");
+               return value;
+             },
+             [&]() -> ValPtr {
+               auto pool = stackVarPtrs | mk_string("\n", "\n", "\n", [](auto &k, auto &v) {
+                             auto &[tpe, ir] = v;
+                             return " -> `" + k + "` = " + to_string(tpe) + "(IR=" + llvm_tostring(ir) + ")";
+                           });
+               throw std::logic_error("Unseen variable: " + to_string(named) + ", variable table=\n->" + pool);
+             });
 }
 
 ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
 
   auto fail = [&]() { return " (part of the select expression " + to_string(select) + ")"; };
 
-  auto structTypeOf = [&](const Type::Any &tpe) -> std::tuple<StructDef, llvm::StructType *, StructMemberIndexTable> {
-    auto findTy = [&](Type::Struct s) {
-      if (auto def = polyregion::get_opt(structTypes, s.name); def) return *def;
-      else error(__FILE__, __LINE__, "Unseen struct type " + to_string(s.name) + " in select path" + fail());
+  auto structTypeOf = [&](const Type::Any &tpe) -> StructInfo {
+    auto findTy = [&](const Type::Struct &s) -> StructInfo {
+      return structTypes ^ get(s.name) ^
+             fold([&]() -> StructInfo { throw std::logic_error("Unseen struct type " + to_string(s.name) + " in select path" + fail()); });
     };
 
     if (auto s = tpe.get<Type::Struct>(); s) {
@@ -225,9 +228,9 @@ ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
     } else if (auto p = tpe.get<Type::Ptr>(); p) {
       if (auto _s = p->component.get<Type::Struct>(); _s) return findTy(*_s);
       else
-        error(__FILE__, __LINE__,
-              "Illegal select path involving pointer to non-struct type " + to_string(s->name) + " in select path" + fail());
-    } else error(__FILE__, __LINE__, "Illegal select path involving non-struct type " + to_string(tpe) + fail());
+        throw std::logic_error("Illegal select path involving pointer to non-struct type " + to_string(s->name) + " in select path" +
+                               fail());
+    } else throw std::logic_error("Illegal select path involving non-struct type " + to_string(tpe) + fail());
   };
 
   if (select.init.empty()) return findStackVar(select.last); // local var lookup
@@ -259,14 +262,14 @@ ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
         }
       };
       auto [s, structTy, table] = structTypeOf(tpe);
-      if (auto idx = get_opt(table, path.symbol); idx) {
+      if (auto idx = table ^ get( path.symbol); idx) {
         selectFinal(structTy, *idx);
         tpe = path.tpe;
       } else {
         if (auto inHeirachy = findSymbolInHeirachy<std::pair<size_t, llvm::StructType *>>(
                 s.name,
                 [&](auto, auto ty, auto xs) -> std::optional<std::pair<size_t, llvm::StructType *>> {
-                  auto o = get_opt(xs, path.symbol);
+                  auto o = xs ^ get( path.symbol);
                   return o ? std::optional{std::pair{*o, ty}} : std::nullopt;
                   ;
                 });
@@ -286,7 +289,7 @@ ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
                 selectFinal(chainPrev, N, c == 0, "in_chain_" + chain->getName().str());
                 c++;
               } else {
-                return undefined(__FILE__, __LINE__, "Illegal select path with out of bounds parent `" + to_string(path) + "`" + fail());
+                throw BackendException("Illegal select path with out of bounds parent `" + to_string(path) + "`" + fail());
               }
             }
             chainPrev = chain;
@@ -294,11 +297,9 @@ ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
           selectFinal(lastIndex.second, lastIndex.first, false, "in_chain_final_" + lastIndex.second->getName().str());
           tpe = path.tpe;
         } else {
-          auto pool = mk_string2<std::string, size_t>(
-              table, [](auto &&p) { return "`" + p.first + "`" + " = " + std::to_string(p.second); }, "\n->");
-
-          return undefined(__FILE__, __LINE__,
-                           "Illegal select path with unknown struct member index of name `" + to_string(path) + "`, pool=" + pool + fail());
+          auto pool = table | mk_string("\n", "\n", "\n", [](auto &k, auto &v) { return " -> `" + k + "` = " + std::to_string(v) + ")"; });
+          throw std::logic_error("Illegal select path with unknown struct member index of name `" + to_string(path) + "`, pool=" + pool +
+                                 fail());
         }
       }
     }
@@ -322,7 +323,7 @@ ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
 //       return {};
 //     }
 //   } else {
-//     error(__FILE__, __LINE__, "Unseen struct type " + to_string(structName) + " in heirachy");
+//     throw std::logic_error( "Unseen struct type " + to_string(structName) + " in heirachy");
 //   }
 // }
 
@@ -344,7 +345,7 @@ Opt<Pair<std::vector<llvm::StructType *>, T>> LLVMBackend::AstTransformer::findS
       return {};
     }
   } else {
-    error(__FILE__, __LINE__, "Unseen struct type " + to_string(structName) + " in heirachy");
+    throw std::logic_error("Unseen struct type " + to_string(structName) + " in heirachy");
   }
 }
 
@@ -361,7 +362,7 @@ ValPtr LLVMBackend::AstTransformer::mkTermVal(const Term::Any &ref) {
         if (auto tpe = mkTpe(x.tpe); llvm::isa<llvm::PointerType>(tpe)) {
           return llvm::ConstantPointerNull::get(static_cast<llvm::PointerType *>(tpe));
         } else {
-          return undefined(__FILE__, __LINE__);
+          throw BackendException("unimplemented");
         }
       },
       [&](const Term::Unit0Const &x) -> ValPtr {
@@ -387,16 +388,12 @@ ValPtr LLVMBackend::AstTransformer::mkTermVal(const Term::Any &ref) {
 
 llvm::Function *LLVMBackend::AstTransformer::mkExternalFn(llvm::Function *parent, const Type::Any &rtn, const std::string &name,
                                                           const std::vector<Type::Any> &args) {
-  InvokeSignature sig(Sym({name}), {}, {}, args, {}, rtn);
-  if (auto it = functions.find(sig); it != functions.end()) {
-    return it->second;
-  } else {
-    auto llvmArgs = map_vec<Type::Any, llvm::Type *>(args, [&](auto t) { return mkTpe(t); });
-    auto ft = llvm::FunctionType::get(mkTpe(rtn, true), llvmArgs, false);
-    auto fn = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, name, parent->getParent());
-    functions.emplace(sig, fn);
-    return fn;
-  }
+  return functions ^= get_or_emplace(InvokeSignature(Sym({name}), {}, {}, args, {}, rtn), [&](auto &sig) -> llvm::Function * {
+           auto llvmArgs = args ^ map([&](auto t) { return mkTpe(t); });
+           auto ft = llvm::FunctionType::get(mkTpe(rtn, true), llvmArgs, false);
+           auto fn = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, name, parent->getParent());
+           return fn;
+         });
 }
 
 ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Function *fn, const std::string &key) {
@@ -538,7 +535,7 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
                 auto &[inheritanceChain, finaIdx] = *inHeirachy;
 
                 auto chainPrev =
-                    lhsTpe->isStructTy() ? static_cast<llvm::StructType *>(lhsTpe) : undefined(__FILE__, __LINE__, "Illegal lhs tpe!");
+                    lhsTpe->isStructTy() ? static_cast<llvm::StructType *>(lhsTpe) : throw std::logic_error("Illegal lhs tpe!");
                 for (auto chain : inheritanceChain) {
 
                   std::cout << "@@ " << llvm_tostring(chain) << std::endl;
@@ -550,7 +547,7 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
                         relativeIdxIt != chain->element_end()) {
                       N = std::distance(chain->element_begin(), relativeIdxIt);
                     } else {
-                      return undefined(__FILE__, __LINE__, "Illegal select path with out of bounds parent `" + to_string(path) + "`");
+                      throw std::logic_error("Illegal select path with out of bounds parent `" + to_string(path) + "`");
                     }
                   }
 
@@ -575,7 +572,7 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
             [&](const TypeKind::Ref &) -> NumKind {
               throw std::logic_error("Semantic error: conversion from ref type (" + to_string(fromTpe) + ") is not allowed");
             },
-            [&](const TypeKind::None &) -> NumKind { error(__FILE__, __LINE__, "none!?"); });
+            [&](const TypeKind::None &) -> NumKind { throw std::logic_error("none!?"); });
 
         auto toKind = x.as.kind().match_total( //
             [&](const TypeKind::Integral &) -> NumKind { return NumKind::Integral; },
@@ -583,7 +580,7 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
             [&](const TypeKind::Ref &) -> NumKind {
               throw std::logic_error("Semantic error: conversion to ref type (" + to_string(fromTpe) + ") is not allowed");
             },
-            [&](const TypeKind::None &) -> NumKind { error(__FILE__, __LINE__, "none!?"); });
+            [&](const TypeKind::None &) -> NumKind { throw std::logic_error("none!?"); });
 
         if (fromKind == NumKind::Fractional && toKind == NumKind::Integral) {
 
@@ -617,7 +614,7 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
           return B.CreateIntCast(from, toTpe, !isUnsigned(x.from.tpe()), "integral_cast");
         } else if (fromKind == NumKind::Fractional && toKind == NumKind::Fractional) {
           return B.CreateFPCast(from, toTpe, "fractional_cast");
-        } else error(__FILE__, __LINE__, "unhandled cast");
+        } else throw std::logic_error("unhandled cast");
       },
       [&](const Expr::Alias &x) -> ValPtr { return mkTermVal(x.ref); },
       [&](const Expr::Invoke &x) -> ValPtr {
@@ -628,13 +625,15 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
         for (auto &arg : x.captures)
           if (!arg.tpe().is<Type::Unit0>()) allArgs.push_back(arg);
 
-        auto paramTerms = map_vec2(allArgs, [&](auto &&term) {
-          auto val = mkTermVal(term);
-          return term.tpe().template is<Type::Bool1>() ? B.CreateZExt(val, mkTpe(Type::Bool1(), true)) : val;
-        });
+        auto paramTerms = allArgs ^ map([&](auto &&term) {
+                            auto val = mkTermVal(term);
+                            return term.tpe().template is<Type::Bool1>() ? B.CreateZExt(val, mkTpe(Type::Bool1(), true)) : val;
+                          });
 
-        InvokeSignature sig(x.name, {}, map_opt(x.receiver, [](auto &x) { return x.tpe(); }),
-                            map_vec2(x.args, [](auto &x) { return x.tpe(); }), map_vec2(x.captures, [](auto &x) { return x.tpe(); }),
+        InvokeSignature sig(x.name, {},                                        //
+                            x.receiver ^ map([](auto &x) { return x.tpe(); }), //
+                            x.args ^ map([](auto &x) { return x.tpe(); }),     //
+                            x.captures ^ map([](auto &x) { return x.tpe(); }), //
                             x.rtn);
 
         if (auto fn = functions.find(sig); fn != functions.end()) {
@@ -648,7 +647,7 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
           for (auto &[key, v] : functions) {
             std::cerr << repr(key) << " = " << v << " match = " << (key == sig) << std::endl;
           }
-          return undefined(__FILE__, __LINE__, "Cannot find function " + repr(sig));
+          throw std::logic_error("Cannot find function " + repr(sig));
         }
       },
       [&](const Expr::Index &x) -> ValPtr {
@@ -876,12 +875,12 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
       },
       [&](const Stmt::Break &x) -> BlockKind {
         if (whileCtx) B.CreateBr(whileCtx->exit);
-        else undefined(__FILE__, __LINE__, "orphaned break!");
+        else throw std::logic_error("orphaned break!");
         return BlockKind::Normal;
       }, //
       [&](const Stmt::Cont &x) -> BlockKind {
         if (whileCtx) B.CreateBr(whileCtx->test);
-        else undefined(__FILE__, __LINE__, "orphaned cont!");
+        else throw std::logic_error("orphaned cont!");
         return BlockKind::Normal;
       }, //
       [&](const Stmt::Cond &x) -> BlockKind {
@@ -951,20 +950,16 @@ void LLVMBackend::AstTransformer::addDefs(const std::vector<StructDef> &defs) {
       for (auto &r : zeroDeps) {
 
         auto v = structTypes.emplace(r.name, mkStruct(r));
-        std::cout << "Add " << llvm_tostring(std::get<llvm::StructType *>(v.first->second)) << " from " << r << "\n";
+        std::cout << "Add " << llvm_tostring(v.first->second.tpe) << " from " << r << "\n";
         defsWithDependencies.erase(r);
       }
     } else
-      throw std::logic_error("Recursive defs cannot be resolved: " +
-                             mk_string<StructDef>(zeroDeps, [](auto &r) { return to_string(r); }, ","));
+      throw std::logic_error("Recursive defs cannot be resolved: " + (zeroDeps ^ mk_string(",", [](auto &r) { return to_string(r); })));
   }
 }
 
 std::vector<Pair<Sym, llvm::StructType *>> LLVMBackend::AstTransformer::getStructTypes() const {
-  std::vector<Pair<Sym, llvm::StructType *>> results;
-  for (auto &[k, v] : structTypes)
-    results.emplace_back(k, std::get<llvm::StructType *>(v));
-  return results;
+  return structTypes | map([](auto &k, auto &v) { return std::pair{k, v.tpe}; }) | to_vector();
 }
 
 static std::vector<Arg> collectFnDeclarationNames(const Function &f) {
@@ -984,7 +979,7 @@ static std::vector<Arg> collectFnDeclarationNames(const Function &f) {
 void LLVMBackend::AstTransformer::addFn(llvm::Module &mod, const Function &f, bool entry) {
 
   auto args = collectFnDeclarationNames(f);
-  auto llvmArgTpes = map_vec<Arg, llvm::Type *>(args, [&](auto &&arg) { return mkTpe(arg.named.tpe, true); });
+  auto llvmArgTpes = args ^ map([&](auto &&arg) { return mkTpe(arg.named.tpe, true); });
 
   // Unit type at function return type position is void, any other location, Unit is a singleton value
   auto rtnTpe = f.rtn.is<Type::Unit0>() ? llvm::Type::getVoidTy(C) : mkTpe(f.rtn, true);
@@ -1042,25 +1037,25 @@ void LLVMBackend::AstTransformer::addFn(llvm::Module &mod, const Function &f, bo
 
           auto typeName = [](Type::Any tpe) -> std::string {
             auto impl = [](Type::Any tpe, auto &thunk) -> std::string {
-              return tpe.match_total(                                                                          //
-                  [&](const Type::Float16 &) -> std::string { return "half"; },                                //
-                  [&](const Type::Float32 &) -> std::string { return "float"; },                               //
-                  [&](const Type::Float64 &) -> std::string { return "double"; },                              //
-                  [&](const Type::IntU8 &) -> std::string { return "uchar"; },                                 //
-                  [&](const Type::IntU16 &) -> std::string { return "ushort"; },                               //
-                  [&](const Type::IntU32 &) -> std::string { return "uint"; },                                 //
-                  [&](const Type::IntU64 &) -> std::string { return "ulong"; },                                //
-                  [&](const Type::IntS8 &) -> std::string { return "char"; },                                  //
-                  [&](const Type::IntS16 &) -> std::string { return "short"; },                                //
-                  [&](const Type::IntS32 &) -> std::string { return "int"; },                                  //
-                  [&](const Type::IntS64 &) -> std::string { return "long"; },                                 //
-                  [&](const Type::Bool1 &) -> std::string { return "char"; },                                  //
-                  [&](const Type::Unit0 &) -> std::string { return "void"; },                                  //
-                  [&](const Type::Nothing &) -> std::string { return "/*nothing*/"; },                         //
-                  [&](const Type::Struct &x) -> std::string { return qualified(x.name); },                     //
-                  [&](const Type::Ptr &x) -> std::string { return thunk(x.component, thunk) + "*"; },          //
-                  [&](const Type::Var &) -> std::string { return undefined(__FILE__, __LINE__, "type var"); }, //
-                  [&](const Type::Exec &) -> std::string { return undefined(__FILE__, __LINE__, "exec"); }     //
+              return tpe.match_total(                                                                 //
+                  [&](const Type::Float16 &) -> std::string { return "half"; },                       //
+                  [&](const Type::Float32 &) -> std::string { return "float"; },                      //
+                  [&](const Type::Float64 &) -> std::string { return "double"; },                     //
+                  [&](const Type::IntU8 &) -> std::string { return "uchar"; },                        //
+                  [&](const Type::IntU16 &) -> std::string { return "ushort"; },                      //
+                  [&](const Type::IntU32 &) -> std::string { return "uint"; },                        //
+                  [&](const Type::IntU64 &) -> std::string { return "ulong"; },                       //
+                  [&](const Type::IntS8 &) -> std::string { return "char"; },                         //
+                  [&](const Type::IntS16 &) -> std::string { return "short"; },                       //
+                  [&](const Type::IntS32 &) -> std::string { return "int"; },                         //
+                  [&](const Type::IntS64 &) -> std::string { return "long"; },                        //
+                  [&](const Type::Bool1 &) -> std::string { return "char"; },                         //
+                  [&](const Type::Unit0 &) -> std::string { return "void"; },                         //
+                  [&](const Type::Nothing &) -> std::string { return "/*nothing*/"; },                //
+                  [&](const Type::Struct &x) -> std::string { return qualified(x.name); },            //
+                  [&](const Type::Ptr &x) -> std::string { return thunk(x.component, thunk) + "*"; }, //
+                  [&](const Type::Var &) -> std::string { throw std::logic_error("type var"); },      //
+                  [&](const Type::Exec &) -> std::string { throw std::logic_error("exec"); }          //
               );
             };
             return impl(tpe, impl);
@@ -1090,11 +1085,11 @@ void LLVMBackend::AstTransformer::addFn(llvm::Module &mod, const Function &f, bo
   for (auto &n : f.termCaptures)
     extraArgTpes.push_back(n.named.tpe);
 
-  functions.emplace(InvokeSignature(f.name,                                                   //
-                                    {},                                                       //
-                                    map_opt(f.receiver, [](auto &x) { return x.named.tpe; }), //
-                                    map_vec2(f.args, [](auto &x) { return x.named.tpe; }),    //
-                                    extraArgTpes,                                             //
+  functions.emplace(InvokeSignature(f.name,                                                //
+                                    {},                                                    //
+                                    f.receiver ^ map([](auto &x) { return x.named.tpe; }), //
+                                    f.args ^ map([](auto &x) { return x.named.tpe; }),     //
+                                    extraArgTpes,                                          //
                                     f.rtn),
                     fn);
 }
@@ -1127,11 +1122,11 @@ void LLVMBackend::AstTransformer::transform(llvm::Module &mod, const Function &f
   for (auto &n : fnTree.termCaptures)
     argTpes.push_back(n.named.tpe);
 
-  InvokeSignature sig(fnTree.name,                                                   //
-                      {},                                                            //
-                      map_opt(fnTree.receiver, [](auto &x) { return x.named.tpe; }), //
-                      map_vec2(fnTree.args, [](auto &x) { return x.named.tpe; }),    //
-                      argTpes,                                                       //
+  InvokeSignature sig(fnTree.name,                                                //
+                      {},                                                         //
+                      fnTree.receiver ^ map([](auto &x) { return x.named.tpe; }), //
+                      fnTree.args ^ map([](auto &x) { return x.named.tpe; }),     //
+                      argTpes,                                                    //
                       fnTree.rtn);
 
   auto it = functions.find(sig);
@@ -1201,7 +1196,7 @@ ValPtr LLVMBackend::AstTransformer::unaryNumOp(const AnyExpr &expr, const AnyTer
     } else if (rtn.kind().is<TypeKind::Fractional>()) {
       return fractionalFn(lhs);
     } else {
-      return undefined(__FILE__, __LINE__);
+      throw BackendException("unimplemented");
     }
   });
 }
@@ -1213,7 +1208,7 @@ ValPtr LLVMBackend::AstTransformer::binaryNumOp(const AnyExpr &expr, const AnyTe
     } else if (rtn.kind().is<TypeKind::Fractional>()) {
       return fractionalFn(lhs, rhs);
     } else {
-      return undefined(__FILE__, __LINE__);
+      throw BackendException("unimplemented");
     }
   });
 }
@@ -1377,7 +1372,7 @@ polyast::CompileResult backend::LLVMBackend::compileProgram(const Program &progr
             {},               //
             {ast2IR, astOpt}, //
             {},               //
-            mk_string<std::string>(errors, [](auto &&x) { return x; }, "\n")};
+            errors ^ mk_string("\n")};
   }
 
   auto c = llvmc::compileModule(options.targetInfo(), opt, true, std::move(mod));

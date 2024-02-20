@@ -10,7 +10,7 @@
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
 
 #include "llvmc.h"
-#include "utils.hpp"
+//#include "utils.hpp"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
@@ -79,9 +79,15 @@ public:
     unsigned int GlobalAS = 0;
     unsigned int LocalAS = 0;
 
+
     using StructMemberIndexTable = Map<std::string, size_t>;
+    struct StructInfo{
+      StructDef def;
+      llvm::StructType *tpe;
+      StructMemberIndexTable memberIndices;
+    };
     Map<std::string, Pair<Type::Any, llvm::Value *>> stackVarPtrs;
-    Map<Sym, std::tuple<StructDef, llvm::StructType *, StructMemberIndexTable>> structTypes;
+    Map<Sym, StructInfo> structTypes;
     Map<InvokeSignature, llvm::Function *> functions;
     llvm::IRBuilder<> B;
 
@@ -101,7 +107,7 @@ public:
 
     llvm::Type *mkTpe(const Type::Any &tpe, bool functionBoundary = false);
 
-    std::tuple<StructDef, llvm::StructType *, StructMemberIndexTable> mkStruct(const StructDef &def);
+    StructInfo mkStruct(const StructDef &def);
 
     ValPtr unaryExpr(const AnyExpr &expr, const AnyTerm &l, const AnyType &rtn, const ValPtrFn1 &fn);
     ValPtr binaryExpr(const AnyExpr &expr, const AnyTerm &l, const AnyTerm &r, const AnyType &rtn, const ValPtrFn2 &fn);

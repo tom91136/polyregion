@@ -5,18 +5,18 @@ void CPUTargetSpecificHandler::witnessEntry(LLVMBackend::AstTransformer &ctx, ll
 ValPtr CPUTargetSpecificHandler::mkSpecVal(LLVMBackend::AstTransformer &xform, llvm::Function *fn, const Expr::SpecOp &expr) {
   return expr.op.match_total(                                                 //
       [&](const Spec::Assert &v) -> ValPtr { return xform.invokeAbort(fn); }, //
-      [&](const Spec::GpuBarrierGlobal &v) -> ValPtr { return undefined(__FILE__, __LINE__); },
-      [&](const Spec::GpuBarrierLocal &v) -> ValPtr { return undefined(__FILE__, __LINE__); },
-      [&](const Spec::GpuBarrierAll &v) -> ValPtr { return undefined(__FILE__, __LINE__); },
-      [&](const Spec::GpuFenceGlobal &v) -> ValPtr { return undefined(__FILE__, __LINE__); },
-      [&](const Spec::GpuFenceLocal &v) -> ValPtr { return undefined(__FILE__, __LINE__); },
-      [&](const Spec::GpuFenceAll &v) -> ValPtr { return undefined(__FILE__, __LINE__); },
-      [&](const Spec::GpuGlobalIdx &v) -> ValPtr { return undefined(__FILE__, __LINE__); },
-      [&](const Spec::GpuGlobalSize &v) -> ValPtr { return undefined(__FILE__, __LINE__); }, //
-      [&](const Spec::GpuGroupIdx &v) -> ValPtr { return undefined(__FILE__, __LINE__); },   //
-      [&](const Spec::GpuGroupSize &v) -> ValPtr { return undefined(__FILE__, __LINE__); },  //
-      [&](const Spec::GpuLocalIdx &v) -> ValPtr { return undefined(__FILE__, __LINE__); },   //
-      [&](const Spec::GpuLocalSize &v) -> ValPtr { return undefined(__FILE__, __LINE__); }   //
+      [&](const Spec::GpuBarrierGlobal &v) -> ValPtr { throw BackendException("unimplemented"); },
+      [&](const Spec::GpuBarrierLocal &v) -> ValPtr { throw BackendException("unimplemented"); },
+      [&](const Spec::GpuBarrierAll &v) -> ValPtr { throw BackendException("unimplemented"); },
+      [&](const Spec::GpuFenceGlobal &v) -> ValPtr { throw BackendException("unimplemented"); },
+      [&](const Spec::GpuFenceLocal &v) -> ValPtr { throw BackendException("unimplemented"); },
+      [&](const Spec::GpuFenceAll &v) -> ValPtr { throw BackendException("unimplemented"); },
+      [&](const Spec::GpuGlobalIdx &v) -> ValPtr { throw BackendException("unimplemented"); },
+      [&](const Spec::GpuGlobalSize &v) -> ValPtr { throw BackendException("unimplemented"); }, //
+      [&](const Spec::GpuGroupIdx &v) -> ValPtr { throw BackendException("unimplemented"); },   //
+      [&](const Spec::GpuGroupSize &v) -> ValPtr { throw BackendException("unimplemented"); },  //
+      [&](const Spec::GpuLocalIdx &v) -> ValPtr { throw BackendException("unimplemented"); },   //
+      [&](const Spec::GpuLocalSize &v) -> ValPtr { throw BackendException("unimplemented"); }   //
   );
 }
 ValPtr CPUTargetSpecificHandler::mkMathVal(LLVMBackend::AstTransformer &xform, llvm::Function *fn, const Expr::MathOp &expr) {
@@ -55,7 +55,7 @@ ValPtr CPUTargetSpecificHandler::mkMathVal(LLVMBackend::AstTransformer &xform, l
               else if (v.tpe.is<Type::Float64>())  //
                 return mag(Term::Float64Const(1)); //
               else
-                error(__FILE__, __LINE__);
+                throw BackendException("unimplemented");
             });
       },                                                                                                    //
       [&](const Math::Round &v) -> ValPtr { return xform.intr1(fn, llvm::Intrinsic::round, v.tpe, v.x); },  //

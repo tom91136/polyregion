@@ -3,6 +3,8 @@ set(LIB_SOURCES
         #        generated/polyast_codec.cpp
 
 
+        backend/backend.cpp
+
         backend/llvm_amdgpu.cpp
         backend/llvm_nvptx.cpp
         backend/llvm_opencl.cpp
@@ -123,6 +125,7 @@ target_link_libraries(polyc
         PUBLIC
         PolyAST
         PRIVATE
+        Aspartame::Aspartame
         SPIRV-Tools-opt
         ${LLVM_LIBS}
         ${LLD_LIBS}
