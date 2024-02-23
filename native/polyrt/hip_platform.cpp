@@ -38,6 +38,10 @@ std::vector<Property> HipPlatform::properties() {
   TRACE();
   return {};
 }
+Platform::Kind HipPlatform::kind() {
+  TRACE();
+  return Platform::Kind::Managed;
+}
 std::vector<std::unique_ptr<Device>> HipPlatform::enumerate() {
   TRACE();
   int count = 0;
@@ -103,10 +107,6 @@ bool HipDevice::sharedAddressSpace() {
   return false;
 }
 bool HipDevice::singleEntryPerModule() {
-  TRACE();
-  return false;
-}
-bool HipDevice::leadingIndexArgument() {
   TRACE();
   return false;
 }

@@ -175,18 +175,27 @@ static std::vector<std::variant<Failure, Callsite>> outlinePolyregionOffload(cla
           auto lastArgExpr = offloadCallExpr->getArg(offloadCallExpr->getNumArgs() - 1)->IgnoreUnlessSpelledInSource();
           auto fnDecl = offloadCallExpr->getDirectCallee();
           if (auto lambdaArgCxxRecordDecl = lastArgExpr->getType()->getAsCXXRecordDecl()) {
-            if (auto target = OverloadTargetVisitor(lambdaArgCxxRecordDecl).run(fnDecl->getBody()); target) {
-              // We found a valid overload target, validate this by checking whether the decl belongs to the last arg's implicit class.
-              if ((*target)->getParent() == lambdaArgCxxRecordDecl)
-                results.emplace_back(Callsite{const_cast<clang::CallExpr *>(offloadCallExpr), const_cast<clang::Expr *>(lastArgExpr),
-                                              const_cast<clang::FunctionDecl *>(fnDecl), *target});
-              else
-                results.emplace_back(Failure{offloadCallExpr, "Target record mismatch:\nLast arg=" + to_string((*target)->getParent()) +
-                                                                  "\nTarget=" + to_string(lambdaArgCxxRecordDecl)});
-            } else {
-              results.emplace_back(
-                  Failure{offloadCallExpr, "Cannot find any call `operator ()` to last arg:" + pretty_string(lastArgExpr, context)});
+
+            if (auto op = lambdaArgCxxRecordDecl->getLambdaCallOperator(); lambdaArgCxxRecordDecl->isLambda() && op) {
+              results.emplace_back(Callsite{const_cast<clang::CallExpr *>(offloadCallExpr), const_cast<clang::Expr *>(lastArgExpr),
+                                            const_cast<clang::FunctionDecl *>(fnDecl), op});
             }
+
+            //            if (auto target = OverloadTargetVisitor(lambdaArgCxxRecordDecl).run(fnDecl->getBody()); target) {
+            //              // We found a valid overload target, validate this by checking whether the decl belongs to the last arg's
+            //              implicit class. if ((*target)->getParent() == lambdaArgCxxRecordDecl)
+            //                results.emplace_back(Callsite{const_cast<clang::CallExpr *>(offloadCallExpr), const_cast<clang::Expr
+            //                *>(lastArgExpr),
+            //                                              const_cast<clang::FunctionDecl *>(fnDecl), *target});
+            //              else
+            //                results.emplace_back(Failure{offloadCallExpr, "Target record mismatch:\nLast arg=" +
+            //                to_string((*target)->getParent()) +
+            //                                                                  "\nTarget=" + to_string(lambdaArgCxxRecordDecl)});
+            //            } else {
+            //              results.emplace_back(
+            //                  Failure{offloadCallExpr, "Cannot find any call `operator ()` to last arg:" + pretty_string(lastArgExpr,
+            //                  context) + "\naa=" + dump_to_string(lambdaArgCxxRecordDecl->getLambdaCallOperator())});
+            //            }
           } else {
             results.emplace_back(Failure{offloadCallExpr, "Last arg does is not a valid synthesised record type"});
           }

@@ -5,12 +5,16 @@
 
 #include "runtime.h"
 
+
 template <typename F>
 POLYREGION_EXPORT void __polyregion_offload_dispatch_impl__(size_t global,        //
                                                             size_t local,         //
                                                             size_t localMemBytes, //
-                                                            F __f, const char *__kernelName, const unsigned char *__kernelImageBytes,
-                                                            size_t __kernelImageSize) {
+                                                            F __f, //
+                                                            const char *__kernelName, //
+                                                            size_t __kernelImageSize,
+                                                            const unsigned char *__kernelImageBytes
+                                                            ) {
 
   //  fprintf(stderr, "__polyregion_offload_dispatch_impl__(%ld, %ld, %ld, sizeof=%lu, %s, %p, %ld)\n", global, local, localMemBytes,
   //  sizeof(__f),
@@ -19,22 +23,39 @@ POLYREGION_EXPORT void __polyregion_offload_dispatch_impl__(size_t global,      
   //  for (size_t i = 0; i < __kernelImageSize; ++i) {
   //    fprintf(stderr, "0x%x ", __kernelImageBytes[i]);
   //  }
-  polystl::__polyregion_offload_dispatch__(global, localMemBytes, localMemBytes, __f, __kernelName, __kernelImageBytes, __kernelImageSize);
+  polystl::__polyregion_offload_dispatch__(global, localMemBytes, localMemBytes, __f, __kernelName, __kernelImageSize, __kernelImageBytes);
 }
 
-template <typename F> POLYREGION_EXPORT void __polyregion_offload__(F __stub_polyregion__f__) {
+template <typename F> //
+POLYREGION_EXPORT void __polyregion_offload__(F __stub_polyregion__f__) {
   const unsigned char *__stub_kernelImageBytes__{};
-  int __stub_kernelImageSize__{};
+  size_t __stub_kernelImageSize__{};
   const char *__stub_kernelName__{};
   __polyregion_offload_dispatch_impl__(1, 0, 0,                   //
                                        __stub_polyregion__f__,    //
                                        __stub_kernelName__,       //
-                                       __stub_kernelImageBytes__, //
-                                       __stub_kernelImageSize__);
-  __stub_polyregion__f__();
+                                       __stub_kernelImageSize__, //
+                                       __stub_kernelImageBytes__);
+
+
+  bool cpu = true;
+  if(cpu){
+    int*a,*b;
+    [](int tid, int*, int *){
+
+    };
+  }
+
+
+
+
+  static_assert(std::is_invocable_v< decltype(__stub_polyregion__f__)>);
+//  [[polyregion(__stub_polyregion__f__())]];
+
 }
 
-template <typename F> POLYREGION_EXPORT std::invoke_result_t<F> __polyregion_offload_f1__(F __polyregion__f) {
+template <typename F> //
+POLYREGION_EXPORT std::invoke_result_t<F> __polyregion_offload_f1__(F __polyregion__f) {
   static bool offload = !std::getenv("POLYSTL_NO_OFFLOAD");
   std::invoke_result_t<F> __polyregion__v{};
   if (offload) {

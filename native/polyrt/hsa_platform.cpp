@@ -67,6 +67,10 @@ std::vector<Property> HsaPlatform::properties() {
   TRACE();
   return {};
 }
+Platform::Kind HsaPlatform::kind() {
+  TRACE();
+  return Platform::Kind::Managed;
+}
 std::vector<std::unique_ptr<Device>> HsaPlatform::enumerate() {
   TRACE();
 
@@ -282,10 +286,6 @@ bool HsaDevice::sharedAddressSpace() {
   return false;
 }
 bool HsaDevice::singleEntryPerModule() {
-  TRACE();
-  return false;
-}
-bool HsaDevice::leadingIndexArgument() {
   TRACE();
   return false;
 }

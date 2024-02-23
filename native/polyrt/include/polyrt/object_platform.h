@@ -22,7 +22,6 @@ public:
   POLYREGION_EXPORT std::vector<std::string> features() override;
   POLYREGION_EXPORT bool sharedAddressSpace() override;
   POLYREGION_EXPORT bool singleEntryPerModule() override;
-  POLYREGION_EXPORT bool leadingIndexArgument() override;
   POLYREGION_EXPORT uintptr_t malloc(size_t size, Access access) override;
   POLYREGION_EXPORT void free(uintptr_t ptr) override;
 };
@@ -111,6 +110,7 @@ public:
   POLYREGION_EXPORT ~RelocatablePlatform() override = default;
   POLYREGION_EXPORT std::string name() override;
   POLYREGION_EXPORT std::vector<Property> properties() override;
+  POLYREGION_EXPORT Kind kind() override;
   POLYREGION_EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;
 };
 
@@ -147,6 +147,7 @@ public:
   POLYREGION_EXPORT ~SharedPlatform() override = default;
   POLYREGION_EXPORT std::string name() override;
   POLYREGION_EXPORT std::vector<Property> properties() override;
+  POLYREGION_EXPORT Kind kind() override;
   POLYREGION_EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;
 };
 

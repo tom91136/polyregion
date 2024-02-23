@@ -16,6 +16,7 @@ public:
   POLYREGION_EXPORT ~MetalPlatform() override;
   POLYREGION_EXPORT std::string name() override;
   POLYREGION_EXPORT std::vector<Property> properties() override;
+  POLYREGION_EXPORT Kind kind() override;
   POLYREGION_EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;
 };
 

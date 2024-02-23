@@ -62,10 +62,6 @@ bool ObjectDevice::singleEntryPerModule() {
   TRACE();
   return false;
 }
-bool ObjectDevice::leadingIndexArgument() {
-  TRACE();
-  return true;
-}
 std::vector<Property> ObjectDevice::properties() {
   TRACE();
   return {};
@@ -125,6 +121,10 @@ std::string RelocatablePlatform::name() {
 std::vector<Property> RelocatablePlatform::properties() {
   TRACE();
   return {};
+}
+Platform::Kind RelocatablePlatform::kind() {
+  TRACE();
+  return Platform::Kind::HostThreaded;
 }
 std::vector<std::unique_ptr<Device>> RelocatablePlatform::enumerate() {
   TRACE();
@@ -300,6 +300,10 @@ std::string SharedPlatform::name() {
 std::vector<Property> SharedPlatform::properties() {
   TRACE();
   return {};
+}
+Platform::Kind SharedPlatform::kind() {
+  TRACE();
+  return Platform::Kind::HostThreaded;
 }
 std::vector<std::unique_ptr<Device>> SharedPlatform::enumerate() {
   TRACE();

@@ -44,6 +44,10 @@ std::vector<Property> MetalPlatform::properties() {
   TRACE();
   return {};
 }
+Platform::Kind MetalPlatform::kind() {
+  TRACE();
+  return Platform::Kind::Managed;
+}
 std::vector<std::unique_ptr<Device>> MetalPlatform::enumerate() {
   TRACE();
   std::vector<std::unique_ptr<Device>> devices;
@@ -108,10 +112,6 @@ bool MetalDevice::sharedAddressSpace() {
   return false;
 }
 bool MetalDevice::singleEntryPerModule() {
-  TRACE();
-  return false;
-}
-bool MetalDevice::leadingIndexArgument() {
   TRACE();
   return false;
 }

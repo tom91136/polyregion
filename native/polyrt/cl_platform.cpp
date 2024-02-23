@@ -54,6 +54,10 @@ std::vector<Property> ClPlatform::properties() {
   TRACE();
   return {};
 }
+Platform::Kind ClPlatform::kind() {
+  TRACE();
+  return Platform::Kind::Managed;
+}
 std::vector<std::unique_ptr<Device>> ClPlatform::enumerate() {
   TRACE();
   cl_uint numPlatforms = 0;
@@ -162,10 +166,6 @@ bool ClDevice::sharedAddressSpace() {
   return false;
 }
 bool ClDevice::singleEntryPerModule() {
-  TRACE();
-  return false;
-}
-bool ClDevice::leadingIndexArgument() {
   TRACE();
   return false;
 }

@@ -202,7 +202,7 @@ jboolean Platform::moduleLoaded0(JNIEnv *env, jclass, jlong nativePeer, jstring 
 }
 
 jlong Platform::malloc0(JNIEnv *env, jclass, jlong nativePeer, jlong size, jbyte access) {
-  if (auto a = rt::fromUnderlying(access); a) {
+  if (auto a = rt::from_string(access); a) {
     return wrapException(env, EX,
                          [&]() { return static_cast<jlong>(findRef(env, devices, nativePeer)->malloc(size, *a)); });
   } else

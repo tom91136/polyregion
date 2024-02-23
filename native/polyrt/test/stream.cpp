@@ -48,7 +48,7 @@ void testStream(I images, Type tpe, const std::string &suffix, T relTolerance, /
                   if (imageGroups.size() != 1) {
                     FAIL("Found more than one ("
                          << imageGroups.size() << ") kernel test images for device `" << d->name()
-                         << "`(backend=" << nameOfBackend(backend) << ", features="
+                         << "`(backend=" << to_string(backend) << ", features="
                          << polyregion::mk_string<std::string>(d->features(), std::identity(), ",") << ")");
                   } else {
                     d->loadModule("module", imageGroups[0].second);
@@ -72,7 +72,7 @@ void testStream(I images, Type tpe, const std::string &suffix, T relTolerance, /
                     });
               } else {
                 WARN("No kernel test image found for device `"
-                     << d->name() << "`(backend=" << nameOfBackend(backend) << ", features="
+                     << d->name() << "`(backend=" << to_string(backend) << ", features="
                      << polyregion::mk_string<std::string>(d->features(), std::identity(), ",") << ")");
               }
             }

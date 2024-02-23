@@ -17,8 +17,14 @@ add_dependencies(polycpp-test polycpp)
 
 
 get_filename_component(POLYCPP_TEST_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}" ABSOLUTE)
-file(GLOB TEST_FILE_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/test/check_*.cpp")
 set(POLYCPP_TEST_INPUT_FILES "")
+
+file(GLOB TEST_FILE_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/test/check_*.cpp")
+foreach (TEST_FILE ${TEST_FILE_PATHS})
+    string(APPEND POLYCPP_TEST_INPUT_FILES "\"${TEST_FILE}\", ")
+endforeach ()
+
+file(GLOB TEST_FILE_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/test/**/check_*.cpp")
 foreach (TEST_FILE ${TEST_FILE_PATHS})
     string(APPEND POLYCPP_TEST_INPUT_FILES "\"${TEST_FILE}\", ")
 endforeach ()

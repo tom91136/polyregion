@@ -279,7 +279,7 @@ struct POLYREGION_EXPORT Policy {
 
 enum class Access : uint8_t { RW = 1, RO, WO };
 
-constexpr std::optional<Access> POLYREGION_EXPORT fromUnderlying(uint8_t v) {
+constexpr std::optional<Access> POLYREGION_EXPORT from_string(uint8_t v) {
   auto x = static_cast<Access>(v);
   switch (x) {
     case Access::RW:
@@ -289,7 +289,7 @@ constexpr std::optional<Access> POLYREGION_EXPORT fromUnderlying(uint8_t v) {
   }
 }
 
-enum class POLYREGION_EXPORT Backend {
+enum class POLYREGION_EXPORT Backend: uint8_t {
   CUDA,
   HIP,
   HSA,
@@ -300,7 +300,7 @@ enum class POLYREGION_EXPORT Backend {
   RELOCATABLE_OBJ,
 };
 
-constexpr std::string_view POLYREGION_EXPORT nameOfBackend(const Backend &b) {
+constexpr std::string_view POLYREGION_EXPORT to_string(const Backend &b) {
   switch (b) {
     case Backend::CUDA: return "CUDA";
     case Backend::HIP: return "HIP";
@@ -312,6 +312,8 @@ constexpr std::string_view POLYREGION_EXPORT nameOfBackend(const Backend &b) {
     case Backend::RELOCATABLE_OBJ: return "RELOCATABLE_OBJ";
   }
 }
+
+
 
 struct POLYREGION_EXPORT DeviceQueue {
 
@@ -350,7 +352,6 @@ public:
   [[nodiscard]] virtual POLYREGION_EXPORT std::string name() = 0;
   [[nodiscard]] virtual POLYREGION_EXPORT bool sharedAddressSpace() = 0;
   [[nodiscard]] virtual POLYREGION_EXPORT bool singleEntryPerModule() = 0;
-  [[nodiscard]] virtual POLYREGION_EXPORT bool leadingIndexArgument() = 0;
   [[nodiscard]] virtual POLYREGION_EXPORT std::vector<Property> properties() = 0;
   [[nodiscard]] virtual POLYREGION_EXPORT std::vector<std::string> features() = 0;
   virtual POLYREGION_EXPORT void loadModule(const std::string &name, const std::string &image) = 0;
@@ -371,9 +372,19 @@ public:
 
 class POLYREGION_EXPORT Platform {
 public:
+  enum class POLYREGION_EXPORT Kind : uint8_t {
+    HostThreaded, Managed
+  };
+  static constexpr std::string_view POLYREGION_EXPORT to_string(const Kind &b) {
+    switch (b) {
+      case Kind::HostThreaded: return "HostThreaded";
+      case Kind::Managed: return "Managed";
+    }
+  }
   virtual POLYREGION_EXPORT ~Platform() = default;
   [[nodiscard]] POLYREGION_EXPORT virtual std::string name() = 0;
   [[nodiscard]] POLYREGION_EXPORT virtual std::vector<Property> properties() = 0;
+  [[nodiscard]] POLYREGION_EXPORT virtual Kind kind() = 0;
   [[nodiscard]] POLYREGION_EXPORT virtual std::vector<std::unique_ptr<Device>> enumerate() = 0;
   static std::unique_ptr<Platform> of(const Backend &b);
 };

@@ -30,6 +30,10 @@ std::vector<Property> CudaPlatform::properties() {
   TRACE();
   return {};
 }
+Platform::Kind CudaPlatform::kind() {
+  TRACE();
+  return Platform::Kind::Managed;
+}
 std::vector<std::unique_ptr<Device>> CudaPlatform::enumerate() {
   TRACE();
   int count = 0;
@@ -95,10 +99,6 @@ bool CudaDevice::sharedAddressSpace() {
   return false;
 }
 bool CudaDevice::singleEntryPerModule() {
-  TRACE();
-  return false;
-}
-bool CudaDevice::leadingIndexArgument() {
   TRACE();
   return false;
 }

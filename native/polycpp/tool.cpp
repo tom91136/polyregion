@@ -46,7 +46,7 @@ static std::vector<std::string> mkDelimitedEnvPaths(const char *env, std::option
 int executeCC1(std::vector<std::string> &cc1Args, bool stdpar) {
 
   if (stdpar) {
-    auto includes = mkDelimitedEnvPaths("POLYSTL_INCLUDE", "-idirafter");
+    auto includes = mkDelimitedEnvPaths("POLYSTL_INCLUDE", "-isystem");
     cc1Args.insert(cc1Args.end(), includes.begin(), includes.end());
 
     cc1Args.insert(cc1Args.end(), {"-include", "polystl/polystl.hpp"});

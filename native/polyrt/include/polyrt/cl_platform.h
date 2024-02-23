@@ -13,6 +13,7 @@ public:
   POLYREGION_EXPORT ~ClPlatform() override;
   POLYREGION_EXPORT std::string name() override;
   POLYREGION_EXPORT std::vector<Property> properties() override;
+  POLYREGION_EXPORT Kind kind() override;
   POLYREGION_EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;
 };
 
@@ -35,7 +36,6 @@ public:
   POLYREGION_EXPORT std::string name() override;
   POLYREGION_EXPORT bool sharedAddressSpace() override;
   POLYREGION_EXPORT bool singleEntryPerModule() override;
-  POLYREGION_EXPORT bool leadingIndexArgument() override;
   POLYREGION_EXPORT std::vector<Property> properties() override;
   POLYREGION_EXPORT std::vector<std::string> features() override;
   POLYREGION_EXPORT void loadModule(const std::string &name, const std::string &image) override;

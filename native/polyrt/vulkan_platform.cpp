@@ -78,6 +78,11 @@ std::vector<Property> VulkanPlatform::properties() {
   return {};
 }
 
+Platform::Kind VulkanPlatform::kind() {
+  TRACE();
+  return Platform::Kind::Managed;
+}
+
 template <typename T> constexpr static auto transform_idx_if(auto &from, auto &&f) {
   std::vector<typename decltype(f(from[0], T(0)))::value_type> out;
   for (T i = 0; i < from.size(); ++i) {
@@ -237,10 +242,6 @@ bool VulkanDevice::sharedAddressSpace() {
 bool VulkanDevice::singleEntryPerModule() {
   TRACE();
   return true;
-}
-bool VulkanDevice::leadingIndexArgument() {
-  TRACE();
-  return false;
 }
 std::vector<Property> VulkanDevice::properties() {
   TRACE();
