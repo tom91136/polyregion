@@ -6,6 +6,8 @@
 
 using namespace polyregion::runtime;
 
+// -fstdpar
+
 static const std::unordered_map<std::string, Backend> NameToBackend = {
     {"ptx", Backend::CUDA},             //
     {"cuda", Backend::CUDA},            //

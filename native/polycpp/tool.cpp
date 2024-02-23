@@ -32,6 +32,36 @@
 #include "utils.hpp"
 using namespace aspartame;
 
+static std::variant<std::string, polyregion::polyast::Target> parse(std::string csv){
+
+
+
+  csv ^ split(',') ^ map([](auto &x) -> std::variant<std::string, polyregion::polyast::Target>{
+
+    auto parseTarget = [](const std::string& target){
+      return
+    };
+
+    auto targetArchTuple = x ^ split(':');
+
+    switch (targetArchTuple.size()){
+      case 0:
+
+      case 1:
+
+      default:
+
+        break;
+    }
+
+
+    return 0;
+
+  });
+
+
+}
+
 static std::vector<std::string> mkDelimitedEnvPaths(const char *env, std::optional<std::string> leading) {
   std::vector<std::string> xs;
   if (auto line = std::getenv(env); line) {

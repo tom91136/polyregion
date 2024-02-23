@@ -132,7 +132,7 @@ target_link_libraries(polyc
         )
 target_link_libraries(polyc-tests PRIVATE polyc polyrt-static Catch2::Catch2WithMain)
 target_link_libraries(polyc-benchmarks PRIVATE polyc polyrt-static)
-target_link_libraries(polyc-bin PRIVATE polyc ${LLVM_LIBS} ${LLD_LIBS})
+target_link_libraries(polyc-bin PRIVATE polyc ${LLVM_LIBS} ${LLD_LIBS} Aspartame::Aspartame)
 
 
 target_compile_options(polyc PRIVATE ${COMPILE_OPTIONS})

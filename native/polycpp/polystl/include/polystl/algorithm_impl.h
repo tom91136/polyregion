@@ -67,9 +67,8 @@ for_each(ExecutionPolicy &&, ForwardIt first, ForwardIt last, UnaryFunction2 f) 
   };
 
   for (int i = 0; i < 3; ++i) {
-
     objects[i].features
-    objects[i].
+    objects[i].features
 
   }
 
