@@ -22,11 +22,6 @@
 // #RUN: POLY_PLATFORM=host {output}
 //   #EXPECT: -42 -42
 
-
-#include <cstddef>
-#include <cstdio>
-#include <cstring>
-
 #ifndef CHECK_SIZE_DEF
   #error "CHECK_SIZE_DEF undefined"
 #endif
@@ -35,7 +30,11 @@
   #error "CHECK_CAPTURE undefined"
 #endif
 
+#include <cstddef>
+#include <cstdio>
+#include <cstring>
 
+#include "test_utils.h"
 
 int main() {
 

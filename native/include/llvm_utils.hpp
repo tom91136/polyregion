@@ -20,7 +20,7 @@ static bool isCPUTargetSupported(const std::string &CPU, //
     case Triple::arm: return llvm::ARM::parseCPUArch(CPU) != llvm::ARM::ArchKind::INVALID;
     case Triple::aarch64: return llvm::AArch64::parseCpu(CPU).has_value();
     case Triple::amdgcn: return llvm::AMDGPU::parseArchAMDGCN(CPU) != llvm::AMDGPU::GPUKind::GK_NONE;
-    case Triple::nvptx64: return CPU.starts_with("sm_");
+    case Triple::nvptx64: return CPU.rfind("sm_", 0) == 0;
 
     default: throw std::logic_error("Unexpected arch from triple:" + Triple::getArchTypeName(arch).str());
   }

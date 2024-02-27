@@ -1,7 +1,11 @@
-
-
-add_library(polystl SHARED ../../shared/cxa_thread_atexit.cpp runtime.cpp include/polystl/algorithm_impl.h)
-add_library(polystl-static STATIC ../../shared/cxa_thread_atexit.cpp runtime.cpp)
+add_library(polystl SHARED
+        ../../shared/cxa_thread_atexit.cpp
+        polystl.cpp
+        include/polystl/algorithm_impl.h
+        include/polystl/polystl.h)
+add_library(polystl-static STATIC
+        ../../shared/cxa_thread_atexit.cpp
+        polystl.cpp)
 
 target_include_directories(polystl PRIVATE include/  )
 target_include_directories(polystl-static  PRIVATE include/  )

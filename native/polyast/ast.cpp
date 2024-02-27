@@ -238,8 +238,8 @@ auto show_repr = [](auto &x) { return repr(x); };
 }
 
 [[nodiscard]] string polyast::repr(const Program &program) {
-  auto defs = program.defs ^ mk_string("\n");
-  auto fns = program.functions ^ mk_string("\n");
+  auto defs = program.defs ^ mk_string("\n", show_repr);
+  auto fns = program.functions ^ mk_string("\n", show_repr);
   return defs + "\n" + fns + "\n" + repr(program.entry);
 }
 

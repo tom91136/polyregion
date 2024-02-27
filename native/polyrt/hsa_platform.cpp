@@ -67,9 +67,13 @@ std::vector<Property> HsaPlatform::properties() {
   TRACE();
   return {};
 }
-Platform::Kind HsaPlatform::kind() {
+PlatformKind HsaPlatform::kind() {
   TRACE();
-  return Platform::Kind::Managed;
+  return PlatformKind::Managed;
+}
+ModuleFormat HsaPlatform::moduleFormat() {
+  TRACE();
+  return ModuleFormat::HSACO;
 }
 std::vector<std::unique_ptr<Device>> HsaPlatform::enumerate() {
   TRACE();
@@ -112,42 +116,43 @@ std::vector<std::unique_ptr<Device>> HsaPlatform::enumerate() {
 
 // ---
 
+template <typename ELFT> static auto extractGeneric(const llvm::object::ELFObjectFile<ELFT> &obj) {
+  using ELFT_Note = typename ELFT::Note;
+  const auto &file = obj.getELFFile();
+  if (auto sections = file.sections(); auto e = sections.takeError())
+    throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot read ELF sections: " + toString(std::move(e)));
+  else {
+    for (const auto s : *sections) {
+      if (s.sh_type != llvm::ELF::SHT_NOTE) continue;
+      auto Err = llvm::Error::success();
+      for (ELFT_Note note : file.notes(s, Err)) {
+        if (note.getName() != "AMDGPU" || note.getType() != llvm::ELF::NT_AMDGPU_METADATA) continue;
+        try {
+          using namespace nlohmann;
+          auto kernels =
+              nlohmann::json::from_msgpack(note.getDesc(s.sh_addralign).begin(), note.getDesc(s.sh_addralign).end()).at("amdhsa.kernels");
+          SymbolArgOffsetTable offsetTable(kernels.size());
+          for (auto &kernel : kernels) {
+            auto kernelName = kernel.at(".name").template get<std::string>();
+            auto args = kernel.at(".args");
+            std::vector<size_t> offsets(args.size());
+            for (size_t i = 0; i < offsets.size(); ++i)
+              offsets[i] = args.at(i).at(".offset");
+            offsetTable.emplace(kernelName, offsets);
+          }
+          return offsetTable;
+        } catch (const std::exception &e) {
+          throw std::logic_error("Illegal AMDGPU METADATA in .note section (" + std::string(e.what()) + ")");
+        }
+      }
+    }
+    throw std::logic_error("ELF image does not contains AMDGPU METADATA in the .note section");
+  }
+};
+
 static SymbolArgOffsetTable extractSymbolArgOffsetTable(const std::string &image) {
   using namespace llvm::object;
 
-  const auto extractGeneric = []<typename ELFT>(const ELFObjectFile<ELFT> &obj) {
-    using ELFT_Note = typename ELFT::Note;
-    const auto &file = obj.getELFFile();
-    if (auto sections = file.sections(); auto e = sections.takeError())
-      throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot read ELF sections: " + toString(std::move(e)));
-    else {
-      for (const auto s : *sections) {
-        if (s.sh_type != llvm::ELF::SHT_NOTE) continue;
-        auto Err = llvm::Error::success();
-        for (ELFT_Note note : file.notes(s, Err)) {
-          if (note.getName() != "AMDGPU" || note.getType() != llvm::ELF::NT_AMDGPU_METADATA) continue;
-          try {
-            using namespace nlohmann;
-            auto kernels =
-                nlohmann::json::from_msgpack(note.getDesc(s.sh_addralign).begin(), note.getDesc(s.sh_addralign).end()).at("amdhsa.kernels");
-            SymbolArgOffsetTable offsetTable(kernels.size());
-            for (auto &kernel : kernels) {
-              auto kernelName = kernel.at(".name").template get<std::string>();
-              auto args = kernel.at(".args");
-              std::vector<size_t> offsets(args.size());
-              for (size_t i = 0; i < offsets.size(); ++i)
-                offsets[i] = args.at(i).at(".offset");
-              offsetTable.emplace(kernelName, offsets);
-            }
-            return offsetTable;
-          } catch (const std::exception &e) {
-            throw std::logic_error("Illegal AMDGPU METADATA in .note section (" + std::string(e.what()) + ")");
-          }
-        }
-      }
-      throw std::logic_error("ELF image does not contains AMDGPU METADATA in the .note section");
-    }
-  };
   if (auto object = ObjectFile::createObjectFile(llvm::MemoryBufferRef(llvm::StringRef(image), ""));
       auto e = object.takeError()) {
     throw std::logic_error("Cannot load module: " + toString(std::move(e)));

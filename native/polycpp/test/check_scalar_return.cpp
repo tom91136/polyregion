@@ -34,6 +34,8 @@
 #include <cstddef>
 #include <cstdio>
 
+#include "test_utils.h"
+
 int main() {
   CHECK_TYPE_DEF c = __polyregion_offload_f1__([]() { return CHECK_TYPE_VAL; });
   printf(CHECK_TYPE_FMT, c);

@@ -7,6 +7,8 @@
 #include <cstddef>
 #include <cstdio>
 
+#include "test_utils.h"
+
 int main() {
 
   struct Base {

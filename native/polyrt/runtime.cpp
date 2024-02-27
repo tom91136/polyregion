@@ -66,8 +66,8 @@ std::unique_ptr<runtime::Platform> runtime::Platform::of(const runtime::Backend 
 #else
       throw std::logic_error("Metal backend not available");
 #endif
-    case Backend::SHARED_OBJ: return std::make_unique<object::SharedPlatform>();
-    case Backend::RELOCATABLE_OBJ: return std::make_unique<object::RelocatablePlatform>();
+    case Backend::SharedObject: return std::make_unique<object::SharedPlatform>();
+    case Backend::RelocatableObject: return std::make_unique<object::RelocatablePlatform>();
   }
 }
 

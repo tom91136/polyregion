@@ -78,12 +78,16 @@ std::vector<Property> VulkanPlatform::properties() {
   return {};
 }
 
-Platform::Kind VulkanPlatform::kind() {
+PlatformKind VulkanPlatform::kind() {
   TRACE();
-  return Platform::Kind::Managed;
+  return PlatformKind::Managed;
+}
+ModuleFormat VulkanPlatform::moduleFormat() {
+  TRACE();
+  return ModuleFormat::SPIRV;
 }
 
-template <typename T> constexpr static auto transform_idx_if(auto &from, auto &&f) {
+template <typename T, typename U, typename F> constexpr static auto transform_idx_if(U &from, F &&f) {
   std::vector<typename decltype(f(from[0], T(0)))::value_type> out;
   for (T i = 0; i < from.size(); ++i) {
     if (auto maybe = f(from[i], i); maybe) out.push_back(*maybe);

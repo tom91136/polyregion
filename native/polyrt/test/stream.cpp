@@ -154,7 +154,7 @@ TEST_CASE("CPU BabelStream") {
                        {1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072},     //
                        {1, 2, 3, 4, 5, 6, 7, 8},                                  //
                        {1, 2, 10},                                                //
-                       {Backend::RELOCATABLE_OBJ, Backend::SHARED_OBJ}            //
+                       {Backend::RelocatableObject, Backend::SharedObject}            //
     );
   }
   DYNAMIC_SECTION("float") {
@@ -162,7 +162,7 @@ TEST_CASE("CPU BabelStream") {
                       {1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072},   //
                       {1, 2, 3, 4, 5, 6, 7, 8},                                //
                       {1, 2, 10},                                              //
-                      {Backend::RELOCATABLE_OBJ, Backend::SHARED_OBJ}          //
+                      {Backend::RelocatableObject, Backend::SharedObject}          //
     );
   }
 }

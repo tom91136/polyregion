@@ -38,9 +38,13 @@ std::vector<Property> HipPlatform::properties() {
   TRACE();
   return {};
 }
-Platform::Kind HipPlatform::kind() {
+PlatformKind HipPlatform::kind() {
   TRACE();
-  return Platform::Kind::Managed;
+  return PlatformKind::Managed;
+}
+ModuleFormat HipPlatform::moduleFormat() {
+  TRACE();
+  return ModuleFormat::HSACO;
 }
 std::vector<std::unique_ptr<Device>> HipPlatform::enumerate() {
   TRACE();

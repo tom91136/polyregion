@@ -4,6 +4,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -16,6 +17,7 @@
 #include <vector>
 
 #include "export.h"
+#include "json.hpp"
 #include "types.h"
 
 #ifdef TRACE
@@ -39,6 +41,9 @@ using TypedPointer = std::pair<Type, void *>;
 using Property = std::pair<std::string, std::string>;
 using Callback = std::function<void()>;
 using MaybeCallback = std::optional<Callback>;
+
+template <typename T> constexpr std::optional<T> POLYREGION_EXPORT from_underlying(std::underlying_type_t<T>);
+template <typename T> constexpr std::optional<T> POLYREGION_EXPORT from_string(const char *);
 
 struct POLYREGION_EXPORT ArgBuffer {
   POLYREGION_EXPORT std::vector<Type> types;
@@ -279,7 +284,7 @@ struct POLYREGION_EXPORT Policy {
 
 enum class Access : uint8_t { RW = 1, RO, WO };
 
-constexpr std::optional<Access> POLYREGION_EXPORT from_string(uint8_t v) {
+template <> constexpr std::optional<Access> POLYREGION_EXPORT from_underlying<Access>(std::underlying_type_t<Access> v) {
   auto x = static_cast<Access>(v);
   switch (x) {
     case Access::RW:
@@ -289,15 +294,15 @@ constexpr std::optional<Access> POLYREGION_EXPORT from_string(uint8_t v) {
   }
 }
 
-enum class POLYREGION_EXPORT Backend: uint8_t {
+enum class POLYREGION_EXPORT Backend : uint8_t {
   CUDA,
   HIP,
   HSA,
   OpenCL,
   Vulkan,
   Metal,
-  SHARED_OBJ,
-  RELOCATABLE_OBJ,
+  SharedObject,
+  RelocatableObject,
 };
 
 constexpr std::string_view POLYREGION_EXPORT to_string(const Backend &b) {
@@ -308,8 +313,8 @@ constexpr std::string_view POLYREGION_EXPORT to_string(const Backend &b) {
     case Backend::OpenCL: return "OpenCL";
     case Backend::Vulkan: return "Vulkan";
     case Backend::Metal: return "Metal";
-    case Backend::SHARED_OBJ: return "SHARED_OBJ";
-    case Backend::RELOCATABLE_OBJ: return "RELOCATABLE_OBJ";
+    case Backend::SharedObject: return "SharedObject";
+    case Backend::RelocatableObject: return "RelocatableObject";
   }
 }
 
@@ -372,21 +377,13 @@ public:
 
 class POLYREGION_EXPORT Platform {
 public:
-  enum class POLYREGION_EXPORT Kind : uint8_t {
-    HostThreaded, Managed
-  };
-  static constexpr std::string_view POLYREGION_EXPORT to_string(const Kind &b) {
-    switch (b) {
-      case Kind::HostThreaded: return "HostThreaded";
-      case Kind::Managed: return "Managed";
-    }
-  }
   virtual POLYREGION_EXPORT ~Platform() = default;
   [[nodiscard]] POLYREGION_EXPORT virtual std::string name() = 0;
   [[nodiscard]] POLYREGION_EXPORT virtual std::vector<Property> properties() = 0;
-  [[nodiscard]] POLYREGION_EXPORT virtual Kind kind() = 0;
+  [[nodiscard]] POLYREGION_EXPORT virtual PlatformKind kind() = 0;
+  [[nodiscard]] POLYREGION_EXPORT virtual ModuleFormat moduleFormat() = 0;
   [[nodiscard]] POLYREGION_EXPORT virtual std::vector<std::unique_ptr<Device>> enumerate() = 0;
   static std::unique_ptr<Platform> of(const Backend &b);
 };
-
 } // namespace polyregion::runtime
+

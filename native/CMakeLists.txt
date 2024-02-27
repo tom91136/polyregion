@@ -325,7 +325,7 @@ if (NOT clspv_POPULATED)
 endif ()
 
 # set CXX stuff here in case LLVM overwrites it
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(COMPILE_OPTIONS

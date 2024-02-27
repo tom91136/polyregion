@@ -2,6 +2,12 @@
 #include <iostream>
 #include <utility>
 
+#include "aspartame/optional.hpp"
+#include "aspartame/string.hpp"
+#include "aspartame/unordered_map.hpp"
+#include "aspartame/vector.hpp"
+#include "aspartame/view.hpp"
+
 #include "ast.h"
 #include "clang_utils.h"
 #include "remapper.h"
@@ -24,6 +30,7 @@
 
 using namespace polyregion::polyast;
 using namespace polyregion::polystl;
+using namespace aspartame;
 
 std::vector<Stmt::Any> Remapper::RemapContext::scoped(const std::function<void(RemapContext &)> &f, //
                                                       const std::optional<bool> &scopeCtorChain,    //
@@ -238,10 +245,6 @@ std::string Remapper::typeName(const Type::Any &tpe) const {
   );
 }
 std::pair<std::string, Function> Remapper::handleCall(const clang::FunctionDecl *decl, RemapContext &r) {
-  llvm::outs() << "handleCall: >>>\n";
-  decl->dump(llvm::outs());
-  decl->print(llvm::outs(), 2, true);
-  llvm::outs() << "handleCall: <<< \n";
 
   auto l = getLocation(decl->getLocation(), context);
   auto name = fmt::format("{}_{}_{}_{}_{}", l.filename, l.line, l.col, decl->getQualifiedNameAsString(), polyregion::hex(decl->getID()));
@@ -329,13 +332,13 @@ std::pair<std::string, Function> Remapper::handleCall(const clang::FunctionDecl 
     std::vector<Stmt::Any> body;
     body.insert(body.end(), fnBody.begin(), fnBody.end());
     if (fnBody.empty()) {
-      if (rtnType.is<Type::Unit0>()) {
-        body.emplace_back(Stmt::Return(Expr::Alias(Term::Unit0Const())));
-      } else {
         body.emplace_back(Stmt::Comment("Function with empty body but non-unit return type!"));
-        //        throw std::logic_error("Function with empty body but non-unit return type!");
-      }
     }
+
+    if (rtnType.is<Type::Unit0>() && !(body ^ last_maybe() ^ exists([](auto x) { return x.template is<Stmt::Return>(); }))) {
+      body.emplace_back(Stmt::Return(Expr::Alias(Term::Unit0Const())));
+    }
+
     auto fn = r.functions.emplace(name, Function(Sym({name}), {}, receiver, args, {}, {}, rtnType, body)).first->second;
     return {name, fn};
   } else {
@@ -347,7 +350,7 @@ std::string Remapper::handleRecord(const clang::RecordDecl *decl, RemapContext &
   auto name = nameOfRecord(llvm::dyn_cast_if_present<clang::RecordType>(context.getRecordType(decl)), r);
   if (r.structs.find(name) == r.structs.end()) {
     //    r.push(Stmt::Comment("Rec: "+dump_to_string(decl )));
-    decl->dump();
+    //    decl->dump();
     std::vector<StructMember> members;
     std::vector<Sym> parents;
 
@@ -870,16 +873,39 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
             {}, handleType(expr->getCallReturnType(context), r));
       },
       [&](const clang::CallExpr *expr) { //  method(...)
-        auto [name, fn] = handleCall(expr->getCalleeDecl()->getAsFunction(), r);
+        const static std::string builtinPrefix = "__polyregion_builtin_";
+        auto target = expr->getCalleeDecl()->getAsFunction();
+        auto qualifiedName = target->getQualifiedNameAsString();
+        if (qualifiedName ^ starts_with(builtinPrefix)) { // builtins are unqualified free functions
+          auto builtinName = qualifiedName.substr(builtinPrefix.size());
+          std::cout << "S>>>" << (builtinName) << "\n";
 
-        if (fn.args.size() != expr->getNumArgs())
-          throw std::logic_error("Arg count mismatch, expected " + std::to_string(fn.args.size()) + " but was " +
-                                 std::to_string(expr->getNumArgs()));
-        std::vector<Term::Any> args;
-        for (size_t i = 0; i < expr->getNumArgs(); ++i)
-          args.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn.args[i].named.tpe)));
+          auto args = expr->arguments() | map([&](auto &arg) { return r.newVar(handleExpr(arg, r)); }) | to_vector();
+          std::unordered_map<std::string, std::function<Expr::Any()>> specs{
+              {"gpu_global_idx", [&]() -> Expr::Any {
+                 if (args.size() != 1) {
+                   r.push(Stmt::Comment("illegal arg count for gpu_global_idx"));
+                   return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
+                 } else return Expr::Any(Expr::SpecOp(Spec::GpuGlobalIdx(args[0])));
+               }}};
 
-        return Expr::Invoke(Sym({name}), {}, {}, args, {}, handleType(expr->getCallReturnType(context), r));
+          return specs                               //
+                 ^ get(builtinName)                  //
+                 ^ fold([](auto &f) { return f(); }, //
+                        [&]() -> Expr::Any {         //
+                          r.push(Stmt::Comment("unimplemented builtin " + builtinName));
+                          return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
+                        });
+        } else {
+          auto [name, fn] = handleCall(expr->getCalleeDecl()->getAsFunction(), r);
+          if (fn.args.size() != expr->getNumArgs())
+            throw std::logic_error("Arg count mismatch, expected " + std::to_string(fn.args.size()) + " but was " +
+                                   std::to_string(expr->getNumArgs()));
+          std::vector<Term::Any> args;
+          for (size_t i = 0; i < expr->getNumArgs(); ++i)
+            args.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn.args[i].named.tpe)));
+          return Expr::Any(Expr::Invoke(Sym({name}), {}, {}, args, {}, handleType(expr->getCallReturnType(context), r)));
+        }
       },
       [&](const clang::CXXThisExpr *expr) { //  method(...)
         return Expr::Alias(Term::Select({}, Named("this", (handleType(expr->getType(), r)))));
@@ -918,7 +944,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
     if (result->tpe() != expected) {
       std::cerr << "# handleExpr invariant: expected " << repr(expected) << (root->getType()->isReferenceType() ? "(&)" : "") << ", was "
                 << repr(result->tpe()) << " for the following\n";
-      root->dumpColor();
+      //      root->dumpColor();
     }
 
     return *result;
@@ -935,7 +961,7 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
 
   std::string s;
   llvm::raw_string_ostream os(s);
-  root->dump(os, context);
+  //  root->dump(os, context);
   // r.push(Stmt::Comment(s));
 
   root->dumpPretty(context);
@@ -1009,8 +1035,8 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
         if (stmt->hasInitStorage()) handleStmt(stmt->getInit(), r);
         if (stmt->hasVarStorage()) handleStmt(stmt->getConditionVariableDeclStmt(), r);
         r.push(Stmt::Cond(handleExpr(stmt->getCond(), r), //
-                          r.scoped([&](auto &r_) { handleStmt(stmt->getThen(), r_); }),
-                          r.scoped([&](auto &r_) { handleStmt(stmt->getElse(), r_); })));
+                          r.scoped([&](auto &r_) { handleStmt(stmt->getThen(), r_); }, {}, {}, {}, true),
+                          r.scoped([&](auto &r_) { handleStmt(stmt->getElse(), r_); }, {}, {}, {}, true)));
         return true;
       },
       [&](const clang::ForStmt *stmt) {
@@ -1022,15 +1048,21 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
         // }
         if (auto init = stmt->getInit()) handleStmt(init, r);
         auto cond = stmt->getCond();
+
         auto [condTerm, condStmts] =
             r.scoped<Term::Any>([&](auto &r) { return r.newVar(cond ? handleExpr(cond, r) : Expr::Alias(Term::Bool1Const(true))); });
-        auto body = r.scoped([&](auto &r) { handleStmt(stmt->getBody(), r); });
+        auto body = r.scoped(
+            [&](auto &r) {
+              handleStmt(stmt->getBody(), r);
+              r.newVar(handleExpr(stmt->getInc(), r));
+            },
+            {}, {}, {}, true);
         r.push(Stmt::While(condStmts, condTerm, body));
         return true;
       },
       [&](const clang::WhileStmt *stmt) {
         auto [condTerm, condStmts] = r.scoped<Term::Any>([&](auto &r) { return r.newVar(handleExpr(stmt->getCond(), r)); });
-        auto body = r.scoped([&](auto &r) { handleStmt(stmt->getBody(), r); });
+        auto body = r.scoped([&](auto &r) { handleStmt(stmt->getBody(), r); }, {}, {}, {}, true);
         r.push(Stmt::While(condStmts, condTerm, body));
         return true;
       },

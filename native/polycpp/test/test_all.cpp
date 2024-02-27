@@ -2,11 +2,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
 
+#include "aspartame/string.hpp"
 #include "fmt/args.h"
 #include "io.hpp"
 #include "test_all.h"
 #include "utils.hpp"
 #include "llvm/Support/Program.h"
+
+using namespace aspartame;
 
 std::string extractTestName(const std::string &path) {
   std::string prefix = "check_";
@@ -37,7 +40,7 @@ struct TestCase {
       std::vector<typename std::invoke_result_t<decltype(f), std::string &>::value_type> xs;
       for (std::string line; std::getline(file, line);) {
         polyregion::trimInplace(line);
-        if (!line.starts_with("//")) continue;
+        if (!(line ^ starts_with("//"))) continue;
         polyregion::replaceInPlace(line, "//", "");
         if (auto t = f(line); t) {
           xs.emplace_back(*t);
@@ -58,7 +61,7 @@ struct TestCase {
       return parseNormalised(file, [&](std::string &line) -> std::optional<TestCase::Run::Expect> {
         if (auto expect = parseRight("#EXPECT", line); expect) {
           auto delim = expect->find(':', 0);
-          auto lineNum = expect->starts_with("@") ? std::optional{std::stoi(expect->substr(1, delim))} : std::nullopt;
+          auto lineNum = *expect ^ starts_with("@") ? std::optional{std::stoi(expect->substr(1, delim))} : std::nullopt;
           return TestCase::Run::Expect{lineNum, polyregion::trim(expect->substr(delim + 1))};
         } else
           return {};

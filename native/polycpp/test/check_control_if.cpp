@@ -43,15 +43,15 @@
 // #RUN: POLY_PLATFORM=host A=1 B=1 {output}
 //   #EXPECT: -1
 
-
+#ifndef CHECK_EXPR_DEF
+  #error "CHECK_EXPR_DEF undefined"
+#endif
 
 #include <cstddef>
 #include <cstdio>
 #include <string>
 
-#ifndef CHECK_EXPR_DEF
-  #error "CHECK_EXPR_DEF undefined"
-#endif
+#include "test_utils.h"
 
 int main() {
 

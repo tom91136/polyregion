@@ -32,36 +32,6 @@
 #include "utils.hpp"
 using namespace aspartame;
 
-static std::variant<std::string, polyregion::polyast::Target> parse(std::string csv){
-
-
-
-  csv ^ split(',') ^ map([](auto &x) -> std::variant<std::string, polyregion::polyast::Target>{
-
-    auto parseTarget = [](const std::string& target){
-      return
-    };
-
-    auto targetArchTuple = x ^ split(':');
-
-    switch (targetArchTuple.size()){
-      case 0:
-
-      case 1:
-
-      default:
-
-        break;
-    }
-
-
-    return 0;
-
-  });
-
-
-}
-
 static std::vector<std::string> mkDelimitedEnvPaths(const char *env, std::optional<std::string> leading) {
   std::vector<std::string> xs;
   if (auto line = std::getenv(env); line) {
@@ -79,7 +49,7 @@ int executeCC1(std::vector<std::string> &cc1Args, bool stdpar) {
     auto includes = mkDelimitedEnvPaths("POLYSTL_INCLUDE", "-isystem");
     cc1Args.insert(cc1Args.end(), includes.begin(), includes.end());
 
-    cc1Args.insert(cc1Args.end(), {"-include", "polystl/polystl.hpp"});
+    cc1Args.insert(cc1Args.end(), {"-include", "polystl/polystl.h"});
 
     // -static-polyrt
     // -dynamic-polyrt
@@ -105,7 +75,7 @@ int executeCC1(std::vector<std::string> &cc1Args, bool stdpar) {
   bool success;
   if (stdpar && !std::getenv("POLYCPP_NO_REWRITE")) {
     using namespace polyregion;
-    polystl::ModifyASTAndEmitObjAction action([]() { return std::make_unique<polystl::OffloadRewriteConsumer>(); });
+    polystl::ModifyASTAndEmitObjAction action([&]() { return std::make_unique<polystl::OffloadRewriteConsumer>(CI.getDiagnostics()); });
     success = CI.ExecuteAction(action);
     CI.getSourceManager().PrintStats();
   } else {

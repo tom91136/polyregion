@@ -30,9 +30,13 @@ std::vector<Property> CudaPlatform::properties() {
   TRACE();
   return {};
 }
-Platform::Kind CudaPlatform::kind() {
+PlatformKind CudaPlatform::kind() {
   TRACE();
-  return Platform::Kind::Managed;
+  return PlatformKind::Managed;
+}
+ModuleFormat CudaPlatform::moduleFormat() {
+  TRACE();
+  return ModuleFormat::PTX;
 }
 std::vector<std::unique_ptr<Device>> CudaPlatform::enumerate() {
   TRACE();

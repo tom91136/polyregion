@@ -42,6 +42,8 @@
 #include <cstddef>
 #include <cstdio>
 
+#include "test_utils.h"
+
 int main() {
   CHECK_TYPE_DEF value = CHECK_TYPE_VAL;
   CHECK_TYPE_DEF c = __polyregion_offload_f1__([CHECK_CAPTURE]() { return value; });

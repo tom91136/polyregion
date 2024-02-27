@@ -395,7 +395,7 @@ polyast::CompileResult backend::CSource::compileProgram(const Program &program, 
   for (auto &f : program.functions)
     lines.push_back(mkFn(f));
 
-  auto def = mk_string<std::string>(lines, std::identity{}, "\n");
+  auto def = mk_string<std::string>(lines, [](auto x) { return x; }, "\n");
 
   std::cout << def << std::endl;
   std::vector<int8_t> data(def.begin(), def.end());

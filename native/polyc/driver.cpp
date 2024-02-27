@@ -20,31 +20,33 @@ using namespace polyast::dsl;
 using namespace polyast::Intr;
 
 static std::unordered_map<std::string, polyast::Target> Targets = {
+    // obj
     {"host", polyast::Target::Object_LLVM_HOST},
     {"native", polyast::Target::Object_LLVM_HOST},
-
     {"x86_64", polyast::Target::Object_LLVM_x86_64},
     {"aarch64", polyast::Target::Object_LLVM_AArch64},
     {"arm", polyast::Target::Object_LLVM_ARM},
 
+    // ptx
     {"nvptx64", polyast::Target::Object_LLVM_NVPTX64},
     {"ptx", polyast::Target::Object_LLVM_NVPTX64},
     {"cuda", polyast::Target::Object_LLVM_NVPTX64},
 
+    // hsaco
     {"amdgcn", polyast::Target::Object_LLVM_AMDGCN},
     {"hsa", polyast::Target::Object_LLVM_AMDGCN},
     {"hip", polyast::Target::Object_LLVM_AMDGCN},
 
+    // spirv
     {"spirv32", polyast::Target::Object_LLVM_SPIRV32},
     {"spirv64", polyast::Target::Object_LLVM_SPIRV64},
     {"spirv", polyast::Target::Object_LLVM_SPIRV64},
     {"vulkan", polyast::Target::Object_LLVM_SPIRV64},
 
+    // src
     {"c11", polyast::Target::Source_C_C11},
-
     {"opencl1_1", polyast::Target::Source_C_OpenCL1_1},
     {"opencl", polyast::Target::Source_C_OpenCL1_1},
-
     {"metal1_0", polyast::Target::Source_C_Metal1_0},
     {"metal", polyast::Target::Source_C_Metal1_0},
 

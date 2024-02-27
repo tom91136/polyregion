@@ -11,7 +11,8 @@ public:
   POLYREGION_EXPORT ~HipPlatform() override = default;
   POLYREGION_EXPORT std::string name() override;
   POLYREGION_EXPORT std::vector<Property> properties() override;
-  POLYREGION_EXPORT Kind kind() override;
+  POLYREGION_EXPORT PlatformKind kind() override;
+  POLYREGION_EXPORT ModuleFormat moduleFormat() override;
   POLYREGION_EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;
 };
 

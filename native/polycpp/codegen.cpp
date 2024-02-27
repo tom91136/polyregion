@@ -4,74 +4,64 @@
 #include "codegen.h"
 #include "remapper.h"
 
+#include "aspartame/optional.hpp"
+#include "aspartame/unordered_map.hpp"
+#include "aspartame/variant.hpp"
+#include "aspartame/vector.hpp"
+#include "aspartame/view.hpp"
+
 #include "clang/AST/RecordLayout.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Program.h"
 
 #include "fmt/format.h"
+#include "types.h"
 
 using namespace polyregion::polyast;
+using namespace aspartame;
 
-static std::optional<CompileResult> compileIt(Program &p) {
+static std::variant<std::string, CompileResult> compileProgram(Program &p, const std::string &target, const std::string &arch) {
   auto data = nlohmann::json::to_msgpack(hashed_to_json(program_to_json(p)));
-
-  //    llvm::sys::fs::createTemporaryFile("","", )
 
   llvm::SmallString<64> inputPath;
   auto inputCreateEC = llvm::sys::fs::createTemporaryFile("", "", inputPath);
-  if (inputCreateEC) {
-    llvm::errs() << "Failed to create temp input file: " << inputCreateEC.message() << "\n";
-    return {};
-  }
+  if (inputCreateEC) return "Failed to create temp input file: " + inputCreateEC.message();
 
   llvm::SmallString<64> outputPath;
   auto outputCreateEC = llvm::sys::fs::createTemporaryFile("", "", outputPath);
-  if (outputCreateEC) {
-    llvm::errs() << "Failed to create temp output file: " << outputCreateEC.message() << "\n";
-    return {};
-  }
+  if (outputCreateEC) return "Failed to create temp output file: " + outputCreateEC.message();
 
   std::error_code streamEC;
-  llvm::raw_fd_ostream File(inputPath, streamEC, llvm::sys::fs::OF_None);
-  if (streamEC) {
-    llvm::errs() << "Failed to open file: " << streamEC.message() << "\n";
-    return {};
-  }
-  File.write(reinterpret_cast<const char *>(data.data()), data.size());
-  File.flush();
-  llvm::outs() << "Wrote " << inputPath.str() << " \n";
+  llvm::raw_fd_ostream file(inputPath, streamEC, llvm::sys::fs::OF_None);
+  if (streamEC) return "Failed to open file: " + streamEC.message();
 
-  std::string binPath;
+  file.write(reinterpret_cast<const char *>(data.data()), data.size());
+  file.flush();
+
+  std::string binPath = "polyc";
   if (auto envBin = std::getenv("POLYC_BIN"); envBin) binPath = envBin;
 
-  std::vector<llvm::StringRef> args{"", inputPath.str(), "--out", outputPath.str(), "--target", "host", "--arch", "native"};
-  int code = llvm::sys::ExecuteAndWait(                                                              //
-      binPath,                                                                              //
-      args, //
-      {{}}                                                                                           //
-  );
+  std::vector<llvm::StringRef> args{"", inputPath.str(), "--out", outputPath.str(), "--target", target, "--arch", arch};
 
-  std::cout << "polyc: <" << code << ">" << std::endl;
-  if(code != 0) {
-    std::cout << "[POLYC] Non zero return for task: " << binPath;
-    for (auto arg : args) std::cout << " " << arg.str();
-    std::cout << std::endl;
-  }
+  if (int code = llvm::sys::ExecuteAndWait(binPath, args, {{}}); code != 0)
+    return "Non-zero exit code for task: " + (args ^ mk_string(" ", [](auto &s) { return s.str(); }));
+
   auto BufferOrErr = llvm::MemoryBuffer::getFile(outputPath);
 
-  if (auto Err = BufferOrErr.getError()) {
-    llvm::errs() << llvm::errorCodeToError(Err) << "\n";
-    return {};
-  } else {
-
-    return compileresult_from_json(nlohmann::json::from_msgpack((*BufferOrErr)->getBufferStart(), (*BufferOrErr)->getBufferEnd()));
-  }
+  if (auto Err = BufferOrErr.getError()) return "Failed to read output buffer: " + toString(llvm::errorCodeToError(Err));
+  else return compileresult_from_json(nlohmann::json::from_msgpack((*BufferOrErr)->getBufferStart(), (*BufferOrErr)->getBufferEnd()));
 }
 
-std::string polyregion::polystl::generate(clang::ASTContext &C, const clang::CXXRecordDecl *parent, clang::QualType returnTpe,
-                                          const clang::Stmt *body) {
+polyregion::runtime::KernelBundle polyregion::polystl::generate(clang::ASTContext &C,           //
+                                                                clang::DiagnosticsEngine &diag, //
+                                                                const std::string &moduleId,    //
+                                                                const clang::CXXMethodDecl &functor) {
   polyregion::polystl::Remapper remapper(C);
+
+  auto parent = functor.getParent();
+  auto returnTpe = functor.getReturnType();
+  auto body = functor.getBody();
 
   auto r = polyregion::polystl::Remapper::RemapContext{};
   auto parentName = remapper.handleRecord(parent, r);
@@ -85,68 +75,80 @@ std::string polyregion::polystl::generate(clang::ASTContext &C, const clang::CXX
   auto recv =
       Arg(Named("this", Type::Ptr(Type::Struct(Sym({parentName}), parentDef.tpeVars, {}, parentDef.parents), {}, TypeSpace::Global())), {});
 
-  auto leadingIndex = Arg(Named("idx", Type::IntS64()), {});
+  auto args = functor.parameters()                                                                                           //
+              | map([&](const auto *x) { return Arg(Named(x->getName().str(), remapper.handleType(x->getType(), r)), {}); }) //
+              | append(recv)                                                                                                 //
+              | to_vector();
 
-  auto f0 = polyregion::polyast::Function(polyregion::polyast::Sym({"kernel"}), {}, {}, {leadingIndex, recv}, {}, {}, rtnTpe, stmts);
+  auto f0 = polyregion::polyast::Function(polyregion::polyast::Sym({"kernel"}), {}, {}, args, {}, {}, rtnTpe, stmts);
 
-  std::vector<Function> fns;
-  std::vector<StructDef> structDefs;
-  std::cout << "=========" << std::endl;
+  auto p = Program(f0, r.functions ^ values(), r.structs ^ values());
 
-  for (auto &[_, s] : r.structs) {
-    structDefs.push_back(s);
-    std::cout << repr(s) << std::endl;
-  }
-  for (auto &[_, f] : r.functions) {
-    fns.push_back(f);
-    std::cout << repr(f) << std::endl;
-  }
-  std::cout << repr(f0) << std::endl;
+  diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Remark, "[PolySTL] Remapped program [%0, sizeof capture=%1]\n%2"))
+      << moduleId << C.getTypeSize(parent->getTypeForDecl()) << repr(p);
 
-  auto p = Program(f0, fns, structDefs);
+  std::vector<std::pair<std::string, std::string>> targets = {{"host", "native"}};
 
-  auto &layout = C.getASTRecordLayout(parent);
+  auto objects =
+      targets //
+      | collect([&](auto &target, auto &features) {
+          return compileProgram(p, target, features) ^
+                 fold_total([&](const CompileResult &r) -> std::optional<CompileResult> { return r; },
+                            [&](const std::string &err) -> std::optional<CompileResult> {
+                              diag.Report(
+                                  diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Warning,
+                                                       "[PolySTL] Frontend failed to compile program [%0, target=%1, features=%2]\n%3"))
+                                  << moduleId << target << features << err;
+                              return std::nullopt;
+                            }) ^
+                 map([&](auto &x) {
+                   return std::tuple{target, features, x};
+                 });
+        }) //
+      | collect([&](auto &target, auto &features, auto &result) -> std::optional<runtime::KernelObject> {
+          diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Remark,
+                                           "[PolySTL] Compilation events for [%0, target=%1, features=%2]\n%3"))
+              << moduleId << target << features << repr(result);
 
-  std::cout << "Capture size:" << C.getTypeSize(parent->getTypeForDecl()) << "\n";
+          if (auto bin = result.binary; !bin) {
+            diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Warning,
+                                             "[PolySTL] Backend failed to compile program [%0, target=%1, features=%2]\nReason: %3"))
+                << moduleId << target << features << result.messages;
+            return std::nullopt;
+          } else {
 
-  auto result = compileIt(p);
-  if (result) {
-    std::cout << repr(*result) << std::endl;
-    auto xs = *result->binary;
-    return std::string(xs.begin(), xs.end());
-  } else {
-    std::cout << "No compile!" << std::endl;
-  }
-  //
-  //  std::vector<std::string> fieldDecl;
-  //  std::vector<std::string> ctorArgs;
-  //  std::vector<std::string> ctorInits;
-  //  std::vector<std::string> ctorAps;
+            if (!result.messages.empty()) {
+              diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Warning,
+                                               "[PolySTL] Backend emitted binary (%0KB) with warnings [%1, target=%2, features=%3]\n%4"))
+                  << std::to_string(static_cast<float>(bin->size()) / 1000.f) << moduleId << target << features << result.messages;
 
-  //  for (auto c : parent->captures()) {
-  //
-  //    switch (c.getCaptureKind()) {
-  //      case clang::LambdaCaptureKind::LCK_This: break;
-  //      case clang::LambdaCaptureKind::LCK_StarThis: break;
-  //      case clang::LambdaCaptureKind::LCK_ByCopy: break;
-  //      case clang::LambdaCaptureKind::LCK_ByRef: break;
-  //      case clang::LambdaCaptureKind::LCK_VLAType: break;
-  //    }
-  //
-  //    if (c.capturesVariable()) {
-  //      auto var = c.getCapturedVar();
-  //      auto tpe = print_type(var->getType().getDesugaredType(C), C);
-  //      auto name = var->getQualifiedNameAsString();
-  //      fieldDecl.push_back(fmt::format("{} {};", tpe, name));
-  //      ctorArgs.push_back(fmt::format("{} {}", tpe, name));
-  //      ctorInits.push_back(fmt::format("{}({})", name, name));
-  //      ctorAps.push_back(name);
-  //
-  //    } else if (c.capturesThis()) {
-  //
-  //    } else {
-  //      throw std::logic_error("Illegal capture");
-  //    }
-  //  }
-  return "";
+            } else {
+              diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Remark,
+                                               "[PolySTL] Backend emitted binary (%0KB) [%1, target=%2, features=%3]"))
+                  << std::to_string(static_cast<float>(bin->size()) / 1000.f) << moduleId << target << features << result.messages;
+            }
+
+
+
+            if (auto format = std::optional{runtime::ModuleFormat::Object}; format) {
+              return runtime::KernelObject{
+                  //
+                  *format,                                                                                                         //
+                  *format == runtime::ModuleFormat::Object ? runtime::PlatformKind::HostThreaded : runtime::PlatformKind::Managed, //
+                  result.features,                                                                                                 //
+                  moduleId,                                                                                                        //
+                  std::string(bin->begin(), bin->end())                                                                            //
+              };
+
+            } else {
+              diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Remark,
+                                               "[PolySTL] Backend emitted binary for unknown target [%1, target=%2, features=%3]"))
+                  << moduleId << target << features << result.messages;
+              return std::nullopt;
+            }
+          }
+        }) //
+      | to_vector();
+
+  return runtime::KernelBundle{objects, program_to_json(p)};
 }

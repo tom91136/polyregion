@@ -10,7 +10,7 @@
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/Support/DynamicLibrary.h"
-#include "llvm/Support/Host.h"
+#include "llvm/TargetParser/Host.h"
 
 #include "llvm_utils.hpp"
 
@@ -122,9 +122,13 @@ std::vector<Property> RelocatablePlatform::properties() {
   TRACE();
   return {};
 }
-Platform::Kind RelocatablePlatform::kind() {
+PlatformKind RelocatablePlatform::kind() {
   TRACE();
-  return Platform::Kind::HostThreaded;
+  return PlatformKind::HostThreaded;
+}
+ModuleFormat RelocatablePlatform::moduleFormat() {
+  TRACE();
+  return ModuleFormat::Object;
 }
 std::vector<std::unique_ptr<Device>> RelocatablePlatform::enumerate() {
   TRACE();
@@ -301,9 +305,13 @@ std::vector<Property> SharedPlatform::properties() {
   TRACE();
   return {};
 }
-Platform::Kind SharedPlatform::kind() {
+PlatformKind SharedPlatform::kind() {
   TRACE();
-  return Platform::Kind::HostThreaded;
+  return PlatformKind::HostThreaded;
+}
+ModuleFormat SharedPlatform::moduleFormat() {
+  TRACE();
+  return ModuleFormat::Object;
 }
 std::vector<std::unique_ptr<Device>> SharedPlatform::enumerate() {
   TRACE();

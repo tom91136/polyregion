@@ -216,13 +216,13 @@ int main() {
       {runtime::Backend::CUDA, polyast::Target::Object_LLVM_NVPTX64, "sm_60"},
       {runtime::Backend::HIP, polyast::Target::Object_LLVM_AMDGCN, "gfx1036"},
       {runtime::Backend::HSA, polyast::Target::Object_LLVM_AMDGCN, "gfx1036"},
-      {runtime::Backend::RELOCATABLE_OBJ, polyast::Target::Object_LLVM_x86_64, "x86-64-v3"},
+      {runtime::Backend::RelocatableObject, polyast::Target::Object_LLVM_x86_64, "x86-64-v3"},
 #endif
   };
 
   for (auto [backend, target, arch] : configs) {
 
-    auto cpu = backend == runtime::Backend::RELOCATABLE_OBJ || backend == runtime::Backend::SHARED_OBJ;
+    auto cpu = backend == runtime::Backend::RelocatableObject || backend == runtime::Backend::SharedObject;
 
     auto p = mkStreamProgram("_float", Float, !cpu);
     std::cout << repr(p) << std::endl;

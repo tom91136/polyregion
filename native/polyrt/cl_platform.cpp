@@ -54,9 +54,13 @@ std::vector<Property> ClPlatform::properties() {
   TRACE();
   return {};
 }
-Platform::Kind ClPlatform::kind() {
+PlatformKind ClPlatform::kind() {
   TRACE();
-  return Platform::Kind::Managed;
+  return PlatformKind::Managed;
+}
+ModuleFormat ClPlatform::moduleFormat() {
+  TRACE();
+  return ModuleFormat::Source;
 }
 std::vector<std::unique_ptr<Device>> ClPlatform::enumerate() {
   TRACE();

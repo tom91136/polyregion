@@ -32,7 +32,7 @@ endforeach ()
 
 set(POLYCPP_POLYSTL_LIB "$<TARGET_FILE:polystl>")
 set(POLYCPP_POLYSTL_LIBRARY_PATH "$<TARGET_FILE_DIR:polystl>")
-set(POLYCPP_POLYSTL_INCLUDE "${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polycpp>/$<TARGET_NAME:polystl>/include:${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polyrt>/include:${CMAKE_SOURCE_DIR}/include")
+set(POLYCPP_POLYSTL_INCLUDE "${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polycpp>/$<TARGET_NAME:polystl>/include:${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polyrt>/include:${CMAKE_SOURCE_DIR}/include:${json_SOURCE_DIR}")
 set(POLYCPP_POLYC_BIN "$<TARGET_FILE:polyc-bin>")
 
 target_include_directories(polycpp-test PRIVATE
@@ -93,6 +93,7 @@ target_link_libraries(polycpp PRIVATE
 target_link_libraries(polycpp-test PRIVATE
         LLVMSupport
         fmt::fmt-header-only
+        Aspartame::Aspartame
         Catch2::Catch2WithMain
 )
 
