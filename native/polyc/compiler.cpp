@@ -51,7 +51,7 @@ static backend::LLVMBackend::Options toLLVMBackendOptions(const compiler::Option
   };
 
   switch (options.target) {
-    case polyast::Target::Object_LLVM_HOST: {
+    case compiletime::Target::Object_LLVM_HOST: {
       auto host = backend::llvmc::defaultHostTriple();
       validate(host.getArch());
       switch (host.getArch()) {
@@ -61,26 +61,26 @@ static backend::LLVMBackend::Options toLLVMBackendOptions(const compiler::Option
         default: throw std::logic_error("Unsupported host triplet: " + host.str());
       }
     }
-    case polyast::Target::Object_LLVM_x86_64:
+    case compiletime::Target::Object_LLVM_x86_64:
       validate(llvm::Triple::ArchType::x86_64);
       return {.target = backend::LLVMBackend::Target::x86_64, .arch = options.arch};
-    case polyast::Target::Object_LLVM_AArch64:
+    case compiletime::Target::Object_LLVM_AArch64:
       validate(llvm::Triple::ArchType::aarch64);
       return {.target = backend::LLVMBackend::Target::AArch64, .arch = options.arch};
-    case polyast::Target::Object_LLVM_ARM:
+    case compiletime::Target::Object_LLVM_ARM:
       validate(llvm::Triple::ArchType::arm);
       return {.target = backend::LLVMBackend::Target::ARM, .arch = options.arch};
-    case polyast::Target::Object_LLVM_NVPTX64:
+    case compiletime::Target::Object_LLVM_NVPTX64:
       validate(llvm::Triple::ArchType::nvptx64);
       return {.target = backend::LLVMBackend::Target::NVPTX64, .arch = options.arch};
-    case polyast::Target::Object_LLVM_AMDGCN:
+    case compiletime::Target::Object_LLVM_AMDGCN:
       validate(llvm::Triple::ArchType::amdgcn);
       return {.target = backend::LLVMBackend::Target::AMDGCN, .arch = options.arch};
-    case polyast::Target::Object_LLVM_SPIRV32: return {.target = backend::LLVMBackend::Target::SPIRV32, .arch = options.arch};
-    case polyast::Target::Object_LLVM_SPIRV64: return {.target = backend::LLVMBackend::Target::SPIRV64, .arch = options.arch};
-    case polyast::Target::Source_C_OpenCL1_1: //
-    case polyast::Target::Source_C_Metal1_0:  //
-    case polyast::Target::Source_C_C11:       //
+    case compiletime::Target::Object_LLVM_SPIRV32: return {.target = backend::LLVMBackend::Target::SPIRV32, .arch = options.arch};
+    case compiletime::Target::Object_LLVM_SPIRV64: return {.target = backend::LLVMBackend::Target::SPIRV64, .arch = options.arch};
+    case compiletime::Target::Source_C_OpenCL1_1: //
+    case compiletime::Target::Source_C_Metal1_0:  //
+    case compiletime::Target::Source_C_C11:       //
       throw std::logic_error("Not an object target");
   }
 }
@@ -88,14 +88,14 @@ static backend::LLVMBackend::Options toLLVMBackendOptions(const compiler::Option
 std::vector<polyast::CompileLayout> compiler::layoutOf(const std::vector<polyast::StructDef> &defs, const Options &options) {
 
   switch (options.target) {
-    case polyast::Target::Object_LLVM_HOST:
-    case polyast::Target::Object_LLVM_x86_64:
-    case polyast::Target::Object_LLVM_AArch64:
-    case polyast::Target::Object_LLVM_ARM:
-    case polyast::Target::Object_LLVM_NVPTX64:
-    case polyast::Target::Object_LLVM_AMDGCN:
-    case polyast::Target::Object_LLVM_SPIRV32:
-    case polyast::Target::Object_LLVM_SPIRV64: {
+    case compiletime::Target::Object_LLVM_HOST:
+    case compiletime::Target::Object_LLVM_x86_64:
+    case compiletime::Target::Object_LLVM_AArch64:
+    case compiletime::Target::Object_LLVM_ARM:
+    case compiletime::Target::Object_LLVM_NVPTX64:
+    case compiletime::Target::Object_LLVM_AMDGCN:
+    case compiletime::Target::Object_LLVM_SPIRV32:
+    case compiletime::Target::Object_LLVM_SPIRV64: {
 
       auto llvmOptions = toLLVMBackendOptions(options);
       auto dataLayout = llvmOptions.targetInfo().resolveDataLayout();
@@ -126,9 +126,9 @@ std::vector<polyast::CompileLayout> compiler::layoutOf(const std::vector<polyast
       }
       return layouts;
     }
-    case polyast::Target::Source_C_C11:
-    case polyast::Target::Source_C_OpenCL1_1:
-    case polyast::Target::Source_C_Metal1_0:
+    case compiletime::Target::Source_C_C11:
+    case compiletime::Target::Source_C_OpenCL1_1:
+    case compiletime::Target::Source_C_Metal1_0:
       // TODO we need to submit a kernel and execute it to get the offsets
       throw std::logic_error("Not available for source targets");
   }
@@ -145,27 +145,27 @@ static void sortEvents(polyast::CompileResult &c) {
   std::sort(c.events.begin(), c.events.end(), [](const auto &l, const auto &r) { return l.epochMillis < r.epochMillis; });
 }
 
-polyast::CompileResult compiler::compile(const polyast::Program &program, const Options &options, const polyast::OptLevel &opt) {
+polyast::CompileResult compiler::compile(const polyast::Program &program, const Options &options, const compiletime::OptLevel &opt) {
   if (!init) {
     return polyast::CompileResult{{}, {}, {}, {}, "initialise was not called before"};
   }
 
   auto mkBackend = [&]() -> std::unique_ptr<backend::Backend> {
     switch (options.target) {
-      case polyast::Target::Object_LLVM_HOST:
-      case polyast::Target::Object_LLVM_x86_64:
-      case polyast::Target::Object_LLVM_AArch64:
-      case polyast::Target::Object_LLVM_ARM:
-      case polyast::Target::Object_LLVM_NVPTX64:
-      case polyast::Target::Object_LLVM_AMDGCN:
-      case polyast::Target::Object_LLVM_SPIRV32:
-      case polyast::Target::Object_LLVM_SPIRV64:                                         //
+      case compiletime::Target::Object_LLVM_HOST:
+      case compiletime::Target::Object_LLVM_x86_64:
+      case compiletime::Target::Object_LLVM_AArch64:
+      case compiletime::Target::Object_LLVM_ARM:
+      case compiletime::Target::Object_LLVM_NVPTX64:
+      case compiletime::Target::Object_LLVM_AMDGCN:
+      case compiletime::Target::Object_LLVM_SPIRV32:
+      case compiletime::Target::Object_LLVM_SPIRV64:                                         //
         return std::make_unique<backend::LLVMBackend>(toLLVMBackendOptions(options));    //
-      case polyast::Target::Source_C_OpenCL1_1:                                          //
+      case compiletime::Target::Source_C_OpenCL1_1:                                          //
         return std::make_unique<backend::CSource>(backend::CSource::Dialect::OpenCL1_1); //
-      case polyast::Target::Source_C_Metal1_0:                                           //
+      case compiletime::Target::Source_C_Metal1_0:                                           //
         return std::make_unique<backend::CSource>(backend::CSource::Dialect::MSL1_0);    //
-      case polyast::Target::Source_C_C11:                                                //
+      case compiletime::Target::Source_C_C11:                                                //
         return std::make_unique<backend::CSource>(backend::CSource::Dialect::C11);       //
     }
   };
@@ -175,7 +175,7 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
   return c;
 }
 
-polyast::CompileResult compiler::compile(const polyast::Bytes &astBytes, const Options &options, const polyast::OptLevel &opt) {
+polyast::CompileResult compiler::compile(const polyast::Bytes &astBytes, const Options &options, const compiletime::OptLevel &opt) {
 
   std::vector<polyast::CompileEvent> events;
 

@@ -19,38 +19,13 @@ using namespace polyregion;
 using namespace polyast::dsl;
 using namespace polyast::Intr;
 
-static std::unordered_map<std::string, polyast::Target> Targets = {
-    // obj
-    {"host", polyast::Target::Object_LLVM_HOST},
-    {"native", polyast::Target::Object_LLVM_HOST},
-    {"x86_64", polyast::Target::Object_LLVM_x86_64},
-    {"aarch64", polyast::Target::Object_LLVM_AArch64},
-    {"arm", polyast::Target::Object_LLVM_ARM},
+// cuda:sm_60,sm_20^host:native-sve+bmi
 
-    // ptx
-    {"nvptx64", polyast::Target::Object_LLVM_NVPTX64},
-    {"ptx", polyast::Target::Object_LLVM_NVPTX64},
-    {"cuda", polyast::Target::Object_LLVM_NVPTX64},
 
-    // hsaco
-    {"amdgcn", polyast::Target::Object_LLVM_AMDGCN},
-    {"hsa", polyast::Target::Object_LLVM_AMDGCN},
-    {"hip", polyast::Target::Object_LLVM_AMDGCN},
+// tools =>
+// std::vector<std::pair<polyast::Target, std::vector<std::string>> parseTargetPairs(const std::string & name)
 
-    // spirv
-    {"spirv32", polyast::Target::Object_LLVM_SPIRV32},
-    {"spirv64", polyast::Target::Object_LLVM_SPIRV64},
-    {"spirv", polyast::Target::Object_LLVM_SPIRV64},
-    {"vulkan", polyast::Target::Object_LLVM_SPIRV64},
 
-    // src
-    {"c11", polyast::Target::Source_C_C11},
-    {"opencl1_1", polyast::Target::Source_C_OpenCL1_1},
-    {"opencl", polyast::Target::Source_C_OpenCL1_1},
-    {"metal1_0", polyast::Target::Source_C_Metal1_0},
-    {"metal", polyast::Target::Source_C_Metal1_0},
-
-};
 
 // See https://stackoverflow.com/a/39758021/896997
 std::vector<std::byte> readFromStdIn() {
@@ -70,23 +45,23 @@ using namespace aspartame;
 
 static std::string targetDescription =
     "PolyAST to object code compiler.\nSupported targets:" //
-    + (Targets ^
+    + (compiletime::targets() ^
        group_map_reduce([](auto, auto t) { return t; }, [](auto k, auto) { return k; }, [](auto l, auto r) { return l + "|" + r; }) //
        ^ to_vector()                                                                                                                //
        ^ sort_by([](auto k, auto) { return k; })                                                                                    //
-       ^ mk_string("\n\t", "\n\t", "", [](polyast::Target k, auto v) {
+       ^ mk_string("\n\t", "\n\t", "", [](compiletime::Target k, auto v) {
            switch (k) {
-             case polyast::Target::Object_LLVM_HOST: return v + ": \tObject (LLVM, HOST)";
-             case polyast::Target::Object_LLVM_x86_64: return v + ": \tObject (LLVM, x86_64)";
-             case polyast::Target::Object_LLVM_AArch64: return v + ": \tObject (LLVM, AArch64)";
-             case polyast::Target::Object_LLVM_ARM: return v + ": \tObject (LLVM, ARM)";
-             case polyast::Target::Object_LLVM_NVPTX64: return v + ": \tObject (LLVM, NVPTX64)";
-             case polyast::Target::Object_LLVM_AMDGCN: return v + ": \tObject (LLVM, AMDGCN)";
-             case polyast::Target::Object_LLVM_SPIRV32: return v + ": \tObject (LLVM, SPIRV32)";
-             case polyast::Target::Object_LLVM_SPIRV64: return v + ": \tObject (LLVM, SPIRV64)";
-             case polyast::Target::Source_C_C11: return v + ": \tSource (C, C11)";
-             case polyast::Target::Source_C_OpenCL1_1: return v + ": \tSource (C, OpenCL1_1)";
-             case polyast::Target::Source_C_Metal1_0: return v + ": \tSource (C, Metal1_0)";
+             case compiletime::Target::Object_LLVM_HOST: return v + ": \tObject (LLVM, HOST)";
+             case compiletime::Target::Object_LLVM_x86_64: return v + ": \tObject (LLVM, x86_64)";
+             case compiletime::Target::Object_LLVM_AArch64: return v + ": \tObject (LLVM, AArch64)";
+             case compiletime::Target::Object_LLVM_ARM: return v + ": \tObject (LLVM, ARM)";
+             case compiletime::Target::Object_LLVM_NVPTX64: return v + ": \tObject (LLVM, NVPTX64)";
+             case compiletime::Target::Object_LLVM_AMDGCN: return v + ": \tObject (LLVM, AMDGCN)";
+             case compiletime::Target::Object_LLVM_SPIRV32: return v + ": \tObject (LLVM, SPIRV32)";
+             case compiletime::Target::Object_LLVM_SPIRV64: return v + ": \tObject (LLVM, SPIRV64)";
+             case compiletime::Target::Source_C_C11: return v + ": \tSource (C, C11)";
+             case compiletime::Target::Source_C_OpenCL1_1: return v + ": \tSource (C, OpenCL1_1)";
+             case compiletime::Target::Source_C_Metal1_0: return v + ": \tSource (C, Metal1_0)";
            }
          }));
 
@@ -103,16 +78,16 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                bool verbose = fire::arg({"--verbose", "-v", "Verbose output"})
 
 ) {
-  return Targets ^ get(rawTarget ^ to_lower()) ^
+  return compiletime::targets() ^ get(rawTarget ^ to_lower()) ^
          fold(
-             [&](const polyast::Target &target) { //
-               polyast::OptLevel opt;
+             [&](const compiletime::Target &target) { //
+               compiletime::OptLevel opt;
                switch (rawOpt) {
-                 case 0: opt = polyast::OptLevel::O0; break;
-                 case 1: opt = polyast::OptLevel::O1; break;
-                 case 2: opt = polyast::OptLevel::O2; break;
-                 case 3: opt = polyast::OptLevel::O3; break;
-                 case 4: opt = polyast::OptLevel::Ofast; break;
+                 case 0: opt = compiletime::OptLevel::O0; break;
+                 case 1: opt = compiletime::OptLevel::O1; break;
+                 case 2: opt = compiletime::OptLevel::O2; break;
+                 case 3: opt = compiletime::OptLevel::O3; break;
+                 case 4: opt = compiletime::OptLevel::Ofast; break;
                  default: std::cerr << "Unknown optimisation level: " << std::to_string(rawOpt) << std::endl; return EXIT_FAILURE;
                }
 

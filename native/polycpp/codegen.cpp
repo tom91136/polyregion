@@ -53,10 +53,11 @@ static std::variant<std::string, CompileResult> compileProgram(Program &p, const
   else return compileresult_from_json(nlohmann::json::from_msgpack((*BufferOrErr)->getBufferStart(), (*BufferOrErr)->getBufferEnd()));
 }
 
-polyregion::runtime::KernelBundle polyregion::polystl::generate(clang::ASTContext &C,           //
-                                                                clang::DiagnosticsEngine &diag, //
-                                                                const std::string &moduleId,    //
-                                                                const clang::CXXMethodDecl &functor) {
+polyregion::runtime::KernelBundle polyregion::polystl::generate(clang::ASTContext &C,                //
+                                                                clang::DiagnosticsEngine &diag,      //
+                                                                const std::string &moduleId,         //
+                                                                const clang::CXXMethodDecl &functor, //
+                                                                const std::vector<std::pair<std::string, std::string>> &targets) {
   polyregion::polystl::Remapper remapper(C);
 
   auto parent = functor.getParent();
@@ -86,8 +87,6 @@ polyregion::runtime::KernelBundle polyregion::polystl::generate(clang::ASTContex
 
   diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Remark, "[PolySTL] Remapped program [%0, sizeof capture=%1]\n%2"))
       << moduleId << C.getTypeSize(parent->getTypeForDecl()) << repr(p);
-
-  std::vector<std::pair<std::string, std::string>> targets = {{"host", "native"}};
 
   auto objects =
       targets //
@@ -127,8 +126,6 @@ polyregion::runtime::KernelBundle polyregion::polystl::generate(clang::ASTContex
                                                "[PolySTL] Backend emitted binary (%0KB) [%1, target=%2, features=%3]"))
                   << std::to_string(static_cast<float>(bin->size()) / 1000.f) << moduleId << target << features << result.messages;
             }
-
-
 
             if (auto format = std::optional{runtime::ModuleFormat::Object}; format) {
               return runtime::KernelObject{

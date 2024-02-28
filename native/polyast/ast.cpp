@@ -275,37 +275,7 @@ std::pair<Named, std::vector<Named>> polyast::uncons(const Term::Select &select)
   }
 }
 
-std::optional<polyast::Target> polyast::targetFromOrdinal(std::underlying_type_t<polyast::Target> ordinal) {
-  auto target = static_cast<Target>(ordinal);
-  switch (target) {
-    case Target::Object_LLVM_HOST:
-    case Target::Object_LLVM_x86_64:
-    case Target::Object_LLVM_AArch64:
-    case Target::Object_LLVM_ARM:
-    case Target::Object_LLVM_NVPTX64:
-    case Target::Object_LLVM_AMDGCN:
-    case Target::Source_C_OpenCL1_1:
-    case Target::Source_C_C11:
-    case Target::Source_C_Metal1_0:
-    case Target::Object_LLVM_SPIRV32:
-    case Target::Object_LLVM_SPIRV64:
-      return target;
-      // XXX do not add default here, see  -Werror=switch
-  }
-}
 
-std::optional<polyast::OptLevel> polyast::optFromOrdinal(std::underlying_type_t<polyast::OptLevel> ordinal) {
-  auto target = static_cast<OptLevel>(ordinal);
-  switch (target) {
-    case OptLevel::O0:
-    case OptLevel::O1:
-    case OptLevel::O2:
-    case OptLevel::O3:
-    case OptLevel::Ofast:
-      return target;
-      // XXX do not add default here, see  -Werror=switch
-  }
-}
 
 string polyast::repr(const polyast::CompileResult &compilation) {
   std::ostringstream os;

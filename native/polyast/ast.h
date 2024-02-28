@@ -38,33 +38,6 @@ std::vector<Named> tail(const Term::Select &);
 
 std::pair<Named, std::vector<Named>> uncons(const Term::Select &);
 
-enum class Target : uint8_t {
-  Object_LLVM_HOST = 10,
-  Object_LLVM_x86_64,
-  Object_LLVM_AArch64,
-  Object_LLVM_ARM,
-
-  Object_LLVM_NVPTX64 = 20,
-  Object_LLVM_AMDGCN,
-  Object_LLVM_SPIRV32,
-  Object_LLVM_SPIRV64,
-
-  Source_C_C11 = 30,
-  Source_C_OpenCL1_1,
-  Source_C_Metal1_0,
-};
-
-enum class OptLevel : uint8_t {
-  O0 = 10,
-  O1,
-  O2,
-  O3,
-  Ofast,
-};
-
-std::optional<Target> targetFromOrdinal(std::underlying_type_t<Target> ordinal);
-
-std::optional<OptLevel> optFromOrdinal(std::underlying_type_t<OptLevel> ordinal);
 
 std::string repr(const polyast::CompileResult &);
 

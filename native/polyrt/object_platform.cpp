@@ -250,8 +250,8 @@ void validatePolicyAndArgs(const char *prefix, std::vector<Type> types, const Po
     throw std::logic_error(std::string(prefix) + "Policy local dimension is not supported");
   }
   if (types[0] != Type::Long64) {
-    throw std::logic_error(std::string(prefix) + "Expecting first argument as index: " + typeName(Type::Long64) + ", but was " +
-                           typeName(types[0]));
+    throw std::logic_error(std::string(prefix) + "Expecting first argument as index: " + std::string(to_string(Type::Long64)) + ", but was " +
+                           std::string(to_string(types[0])));
   }
 }
 void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
@@ -286,8 +286,8 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
         auto argData_ = argData;
         auto argPtrs = detail::argDataAsPointers(types, argData_);
         if (types[0] != Type::Long64) {
-          throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Expecting first argument as index: " + typeName(Type::Long64) +
-                                 ", but was " + typeName(types[0]));
+          throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Expecting first argument as index: " + std::string(to_string(Type::Long64)) +
+                                 ", but was " + std::string(to_string(types[0])));
         }
         auto _tid = int64_t(tid);
         argPtrs[0] = &_tid;

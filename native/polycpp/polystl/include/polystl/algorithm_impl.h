@@ -45,29 +45,35 @@ for_each(ExecutionPolicy &&, ForwardIt first, ForwardIt last, UnaryFunction f) {
   auto N = std::thread::hardware_concurrency();
   std::fprintf(stderr, "[POLYSTL:%s] Dispatch global range <%d>\n", __func__, global);
 
-  {
-    auto [b, e] = polyregion::concurrency_utils::splitStaticExclusive2<int64_t>(0, global, 1);
-    const int64_t *begin = b.data();
-    const int64_t *end = e.data();
-    const auto kernel = [&f, &first, begin, end](const int64_t tid) {
-      for (int64_t i = begin[tid]; i < end[tid]; ++i) {
-        f(*(first + i));
+  if (auto kind = polystl::platformKind(); kind) {
+    switch (*kind) {
+      case polyregion::runtime::PlatformKind ::HostThreaded: {
+        auto [b, e] = polyregion::concurrency_utils::splitStaticExclusive2<int64_t>(0, global, 1);
+        const int64_t *begin = b.data();
+        const int64_t *end = e.data();
+        const auto kernel = [&f, &first, begin, end](const int64_t tid) {
+          for (int64_t i = begin[tid]; i < end[tid]; ++i) {
+            f(*(first + i));
+          }
+        };
+        auto &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::HostThreaded>(kernel);
+        std::byte argData[sizeof(decltype(kernel))];
+        std::memcpy(argData, &kernel, sizeof(decltype(kernel)));
+        for (auto &object : bundle.objects) {
+          if (polystl::dispatchHostThreaded(b.size(), &argData, object)) return;
+        }
+        break;
       }
-    };
-    auto &bundle = __polyregion_offload__(kernel);
-    std::byte argData[sizeof(decltype(kernel))];
-    std::memcpy(argData, &kernel, sizeof(decltype(kernel)));
-    for (auto &object : bundle.objects) {
-      if (polystl::dispatchHostThreaded(b.size(), &argData, object)) return;
-    }
-  }
-  {
-    const auto kernel = [&f, &first]() { f(*(first + __polyregion_builtin_gpu_global_idx(0))); };
-    auto &bundle = __polyregion_offload__(kernel);
-    std::byte argData[sizeof(decltype(kernel))];
-    std::memcpy(argData, &kernel, sizeof(decltype(kernel)));
-    for (auto &object : bundle.objects) {
-      if (polystl::dispatchManaged(global, 0, 0, &argData, object)) return;
+      case polyregion::runtime::PlatformKind ::Managed: {
+        const auto kernel = [&f, &first]() { f(*(first + __polyregion_builtin_gpu_global_idx(0))); };
+        auto &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
+        std::byte argData[sizeof(decltype(kernel))];
+        std::memcpy(argData, &kernel, sizeof(decltype(kernel)));
+        for (auto &object : bundle.objects) {
+          if (polystl::dispatchManaged(global, 0, 0, &argData, object)) return;
+        }
+        break;
+      }
     }
   }
 
@@ -78,4 +84,3 @@ for_each(ExecutionPolicy &&, ForwardIt first, ForwardIt last, UnaryFunction f) {
 }
 
 } // namespace std
-

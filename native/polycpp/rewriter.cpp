@@ -51,6 +51,7 @@ struct Callsite {
   clang::Expr *callLambdaArgExpr;    // decl of the lambda arg
   clang::FunctionDecl *calleeDecl;   // decl of the specialised std::transform
   clang::CXXMethodDecl *functorDecl; // decl of the specialised lambda functor, this is the root of the lambda body
+  polyregion::runtime::PlatformKind kind;
 };
 struct Failure {
   const clang::Stmt *callExpr;
@@ -71,11 +72,29 @@ static std::vector<std::variant<Failure, Callsite>> outlinePolyregionOffload(cla
           if (auto lambdaArgCxxRecordDecl = lastArgExpr->getType()->getAsCXXRecordDecl()) {
             // TODO we should support explicit structs with () operator and not just lambdas
             if (auto op = lambdaArgCxxRecordDecl->getLambdaCallOperator(); lambdaArgCxxRecordDecl->isLambda() && op) {
-              results.emplace_back(Callsite{const_cast<clang::CallExpr *>(offloadCallExpr), const_cast<clang::Expr *>(lastArgExpr),
-                                            const_cast<clang::FunctionDecl *>(fnDecl), op});
+
+              // prototype is <polyregion::runtime::PlatformKind, typename F>; we check the first template arg's type and value
+              auto templateArgs = fnDecl->getTemplateSpecializationArgs();
+              if (templateArgs->size() != 2) {
+                results.emplace_back(
+                    Failure{offloadCallExpr, "Template arity mismatch for " + std::string(offloadFunctionName) + ", expecting 2"});
+              } else {
+                auto templateArg0 = templateArgs->get(0);
+                if (templateArg0.getKind() == clang::TemplateArgument::Integral &&
+                    templateArg0.getIntegralType()->getAsTagDecl()->getName().str() == "PlatformKind") {
+                  auto kind = static_cast<polyregion::runtime::PlatformKind>(templateArg0.getAsIntegral().getExtValue());
+                  results.emplace_back(Callsite{const_cast<clang::CallExpr *>(offloadCallExpr), const_cast<clang::Expr *>(lastArgExpr),
+                                                const_cast<clang::FunctionDecl *>(fnDecl), op, kind});
+                } else {
+                  results.emplace_back(Failure{offloadCallExpr, "First template kind is not a PlatformKind"});
+                }
+              }
+            } else {
+              results.emplace_back(Failure{offloadCallExpr, "Last arg is not a lambda or does not provide a operator ()"});
             }
+
           } else {
-            results.emplace_back(Failure{offloadCallExpr, "Last arg does is not a valid synthesised lambda record type"});
+            results.emplace_back(Failure{offloadCallExpr, "Last arg is not a valid synthesised lambda record type"});
           }
         } else {
           auto root = result.Nodes.getNodeAs<clang::Stmt>(offloadFunctionName);
@@ -103,7 +122,7 @@ static std::string createHumanReadableFunctionIdentifier(clang::ASTContext &c, c
   return identifier;
 }
 
-void insertKernelImage(clang::ASTContext &C, Callsite &c, polyregion::runtime::KernelBundle & bundle) {
+void insertKernelImage(clang::ASTContext &C, Callsite &c, polyregion::runtime::KernelBundle &bundle) {
   auto varDeclWithName = [](clang::Stmt *stmt, const std::string &name) -> clang::VarDecl * {
     if (auto declStmt = llvm::dyn_cast<clang::DeclStmt>(stmt); declStmt && declStmt->isSingleDecl()) {
       if (auto varDecl = llvm::dyn_cast<clang::VarDecl>(declStmt->getSingleDecl()); varDecl && varDecl->getName() == name) {
@@ -154,7 +173,6 @@ void insertKernelImage(clang::ASTContext &C, Callsite &c, polyregion::runtime::K
     return clang::ImplicitCastExpr::Create(C, to, clang::CK_ArrayToPointerDecay, expr, nullptr, clang::VK_PRValue, {});
   };
 
-
   auto existingStmts = c.calleeDecl->getBody()->children();
 
   auto image = bundle.toMsgPack();
@@ -190,7 +208,7 @@ void insertKernelImage(clang::ASTContext &C, Callsite &c, polyregion::runtime::K
       newStmts.push_back(stmt);
       newStmts.push_back(
           createAssignStmt(kernelImageSizeDecl, clang::IntegerLiteral::Create(C, llvm::APInt(C.getTypeSize(tpe), image.size()), tpe, {})));
-    }else{
+    } else {
       newStmts.push_back(stmt);
     }
   }
@@ -224,8 +242,6 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
   for (auto r : results) {
     std::visit(overloaded{
                    [&](Failure &f) { //
-                     llvm::errs() << "Failed:" << pretty_string(f.callExpr, C) << "\nReason:" << f.reason << "\n";
-
                      diag.Report(f.callExpr->getBeginLoc(),
                                  diag.getCustomDiagID(clang::DiagnosticsEngine::Warning, "[PolySTL] Outline failed: %0"))
                          .AddString(f.reason);
@@ -234,11 +250,36 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
                    [&](Callsite &c) { //
                      auto moduleId = createHumanReadableFunctionIdentifier(C, c.calleeDecl);
 
-                     auto bundle = generate(C, diag, moduleId, *c.functorDecl);
+
+                     // if target ==
+//                     Object_LLVM_HOST ,
+//                     Object_LLVM_x86_64,
+//                     Object_LLVM_AArch64,
+//                     Object_LLVM_ARM,
+//                     Source_C_C11 ,
+
+
+
+
+                     switch (c.kind) {
+                       case runtime::PlatformKind::HostThreaded:
+
+                         break;
+                       case runtime::PlatformKind::Managed:
+
+                         break;
+                     }
+
+                     std::vector<std::pair<std::string, std::string>> targets = {
+                         {"host", "native"},
+//                         {"cuda", "sm_80"}
+                     };
+
+                     auto bundle = generate(C, diag, moduleId, *c.functorDecl, targets);
 
                      diag.Report(c.callLambdaArgExpr->getExprLoc(),
-                                 diag.getCustomDiagID(clang::DiagnosticsEngine::Remark, "[PolySTL] Outlined function: %0 (%1)\n"))
-                         << moduleId
+                                 diag.getCustomDiagID(clang::DiagnosticsEngine::Remark, "[PolySTL] Outlined function: %0 for %1 (%2)\n"))
+                         << moduleId << to_string(c.kind)
                          << (bundle.objects //
                              | map([](auto &o) {
                                  return std::string(to_string(o.format)) + "=" +

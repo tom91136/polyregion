@@ -18,7 +18,7 @@ std::invoke_result_t<F> __polyregion_offload_f1__(F f) {
   if (offload) {
     {
       const auto kernel = [&result, &f](const int64_t tid) { result = f(); };
-      auto &bundle = __polyregion_offload__(kernel);
+      auto &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::HostThreaded>(kernel);
       std::byte argData[sizeof(decltype(kernel))];
       std::memcpy(argData, &kernel, sizeof(decltype(kernel)));
       for (auto &object : bundle.objects) {
@@ -28,7 +28,7 @@ std::invoke_result_t<F> __polyregion_offload_f1__(F f) {
     }
     {
       const auto kernel = [&result, &f]() { result = f(); };
-      auto &bundle = __polyregion_offload__(kernel);
+      auto &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
       std::byte argData[sizeof(decltype(kernel))];
       std::memcpy(argData, &kernel, sizeof(decltype(kernel)));
       for (auto &object : bundle.objects) {

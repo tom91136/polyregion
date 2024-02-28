@@ -233,11 +233,11 @@ static void optimise(llvm::TargetMachine &TM, llvm::Module &M, llvm::Optimizatio
   }
 }
 
-polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const polyast::OptLevel &opt, bool emitDisassembly,
+polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compiletime::OptLevel &opt, bool emitDisassembly,
                                           std::unique_ptr<llvm::Module> M) {
   auto start = compiler::nowMono();
 
-  auto useUnsafeMath = opt == polyast::OptLevel::Ofast;
+  auto useUnsafeMath = opt == compiletime::OptLevel::Ofast;
   llvm::TargetOptions options;
   options.AllowFPOpFusion = useUnsafeMath ? llvm::FPOpFusion::Fast : llvm::FPOpFusion::Standard;
   options.UnsafeFPMath = useUnsafeMath;
@@ -248,11 +248,11 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const polyas
 
   llvm::CodeGenOpt::Level genOpt;
   switch (opt) {
-    case polyast::OptLevel::O0: genOpt = llvm::CodeGenOpt::None; break;
-    case polyast::OptLevel::O1: genOpt = llvm::CodeGenOpt::Less; break;
-    case polyast::OptLevel::O2: genOpt = llvm::CodeGenOpt::Default; break;
-    case polyast::OptLevel::O3: // fallthrough
-    case polyast::OptLevel::Ofast: genOpt = llvm::CodeGenOpt::Aggressive; break;
+    case compiletime::OptLevel::O0: genOpt = llvm::CodeGenOpt::None; break;
+    case compiletime::OptLevel::O1: genOpt = llvm::CodeGenOpt::Less; break;
+    case compiletime::OptLevel::O2: genOpt = llvm::CodeGenOpt::Default; break;
+    case compiletime::OptLevel::O3: // fallthrough
+    case compiletime::OptLevel::Ofast: genOpt = llvm::CodeGenOpt::Aggressive; break;
   }
 
   // We have two groups of targets:
@@ -268,11 +268,11 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const polyas
 
   llvm::OptimizationLevel optLevel;
   switch (opt) {
-    case polyast::OptLevel::O0: optLevel = llvm::OptimizationLevel::O0; break;
-    case polyast::OptLevel::O1: optLevel = llvm::OptimizationLevel::O1; break;
-    case polyast::OptLevel::O2: optLevel = llvm::OptimizationLevel::O2; break;
-    case polyast::OptLevel::O3: // fallthrough
-    case polyast::OptLevel::Ofast: optLevel = llvm::OptimizationLevel::O3; break;
+    case compiletime::OptLevel::O0: optLevel = llvm::OptimizationLevel::O0; break;
+    case compiletime::OptLevel::O1: optLevel = llvm::OptimizationLevel::O1; break;
+    case compiletime::OptLevel::O2: optLevel = llvm::OptimizationLevel::O2; break;
+    case compiletime::OptLevel::O3: // fallthrough
+    case compiletime::OptLevel::Ofast: optLevel = llvm::OptimizationLevel::O3; break;
   }
 
   auto mkLLVMTargetMachine = [](const TargetInfo &info, const llvm::TargetOptions &options, const llvm::CodeGenOpt::Level &level) {

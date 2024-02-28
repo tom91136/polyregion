@@ -142,8 +142,8 @@ public:
   Options options;
   explicit LLVMBackend(Options options) : options(std::move(options)){};
   [[nodiscard]] std::vector<polyast::CompileLayout> resolveLayouts(const std::vector<StructDef> &defs,
-                                                                   const polyast::OptLevel &opt) override;
-  [[nodiscard]] polyast::CompileResult compileProgram(const Program &, const polyast::OptLevel &opt) override;
+                                                                   const compiletime::OptLevel &opt) override;
+  [[nodiscard]] polyast::CompileResult compileProgram(const Program &, const compiletime::OptLevel &opt) override;
 };
 
 } // namespace polyregion::backend

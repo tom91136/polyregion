@@ -275,8 +275,7 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
                                        const Policy &policy, const MaybeCallback &cb) {
   TRACE();
   if (types.back() != Type::Void)
-    throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported, was " +
-                           runtime::typeName(types.back()));
+    throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported, was " + std::string(to_string(types.back())));
   auto kernel = store.resolveFunction(moduleName, symbol, types);
   auto toSize = [](Type t) -> size_t {
     switch (t) {

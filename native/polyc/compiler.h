@@ -8,8 +8,9 @@
 #include <utility>
 #include <vector>
 
-#include "export.h"
 #include "ast.h"
+#include "export.h"
+#include "types.h"
 
 namespace polyregion::compiler {
 
@@ -23,14 +24,14 @@ using TimePoint = std::chrono::steady_clock::time_point;
 POLYREGION_EXPORT void initialise();
 
 struct POLYREGION_EXPORT Options {
-  POLYREGION_EXPORT polyast::Target target;
+  POLYREGION_EXPORT compiletime::Target target;
   POLYREGION_EXPORT std::string arch;
 };
 
 POLYREGION_EXPORT std::vector<polyast::CompileLayout> layoutOf(const std::vector<polyast::StructDef> &sdefs, const Options &options);
 POLYREGION_EXPORT std::vector<polyast::CompileLayout> layoutOf(const polyast::Bytes &bytes, const Options &options);
 
-POLYREGION_EXPORT polyast::CompileResult compile(const polyast::Program &program, const Options &options, const polyast::OptLevel &opt);
-POLYREGION_EXPORT polyast::CompileResult compile(const polyast::Bytes &astBytes, const Options &options, const polyast::OptLevel &opt);
+POLYREGION_EXPORT polyast::CompileResult compile(const polyast::Program &program, const Options &options, const compiletime::OptLevel &opt);
+POLYREGION_EXPORT polyast::CompileResult compile(const polyast::Bytes &astBytes, const Options &options, const compiletime::OptLevel &opt);
 
 } // namespace polyregion::compiler

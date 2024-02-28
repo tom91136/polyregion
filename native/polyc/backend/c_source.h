@@ -30,11 +30,11 @@ public:
 
   polyast::CompileResult compileProgram( //
       const Program &,                  //
-      const polyast::OptLevel &             //
+      const compiletime::OptLevel &             //
       ) override;
   std::vector<polyast::CompileLayout> resolveLayouts( //
       const std::vector<polyast::StructDef> &,  //
-      const polyast::OptLevel &                     //
+      const compiletime::OptLevel &                     //
       ) override;
 };
 

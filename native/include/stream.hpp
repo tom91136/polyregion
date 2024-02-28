@@ -178,7 +178,7 @@ void runStream(Type tpe, size_t size, size_t times, size_t groups, const std::st
         << std::fixed << std::setprecision(3) //
         << "===BabelStream (" << title << "; " << d->name() << " #" << d->id() << " )===\n"
         << "Running kernels " << times << " times\n"
-        << "Precision: " << typeName(tpe) << "\n"
+        << "Precision: " << to_string(tpe) << "\n"
         << "Array size: " << sizesMB.copy / 2 << " MB (=" << sizesMB.copy / 2 / 1000 << " GB)\n"
         << "Total size: " << sizesMB.triad << " MB (=" << sizesMB.triad / 1000 << " GB)\n"
         << "D2H = " << d2hElapsed << "s"

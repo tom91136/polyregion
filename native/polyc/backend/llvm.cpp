@@ -1337,14 +1337,14 @@ std::vector<polyast::CompileLayout> LLVMBackend::resolveLayouts(const std::vecto
   return layouts;
 }
 
-std::vector<polyast::CompileLayout> LLVMBackend::resolveLayouts(const std::vector<StructDef> &defs, const polyast::OptLevel &opt) {
+std::vector<polyast::CompileLayout> LLVMBackend::resolveLayouts(const std::vector<StructDef> &defs, const compiletime::OptLevel &opt) {
   llvm::LLVMContext ctx;
   backend::LLVMBackend::AstTransformer xform(options, ctx);
   xform.addDefs(defs);
   return resolveLayouts(defs, xform);
 }
 
-polyast::CompileResult backend::LLVMBackend::compileProgram(const Program &program, const polyast::OptLevel &opt) {
+polyast::CompileResult backend::LLVMBackend::compileProgram(const Program &program, const compiletime::OptLevel &opt) {
   using namespace llvm;
 
   llvm::LLVMContext ctx;

@@ -368,7 +368,7 @@ std::string backend::CSource ::mkFn(const Function &fnTree) {
   return prototype + " {\n" + indent(2, body) + "\n}";
 }
 
-polyast::CompileResult backend::CSource::compileProgram(const Program &program, const polyast::OptLevel &opt) {
+polyast::CompileResult backend::CSource::compileProgram(const Program &program, const compiletime::OptLevel &opt) {
   auto start = compiler::nowMono();
 
   auto structDefs = mk_string<StructDef>(
@@ -410,6 +410,6 @@ polyast::CompileResult backend::CSource::compileProgram(const Program &program, 
 
   return {data, {}, {{compiler::nowMs(), compiler::elapsedNs(start), "polyast_to_" + dialectName + "_c", def}}, {}, ""};
 }
-std::vector<polyast::CompileLayout> backend::CSource::resolveLayouts(const std::vector<StructDef> &defs, const polyast::OptLevel &opt) {
+std::vector<polyast::CompileLayout> backend::CSource::resolveLayouts(const std::vector<StructDef> &defs, const compiletime::OptLevel &opt) {
   return std::vector<polyast::CompileLayout>();
 }

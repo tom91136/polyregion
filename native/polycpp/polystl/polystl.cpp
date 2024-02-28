@@ -59,15 +59,26 @@ std::unique_ptr<Platform> polystl::thePlatform;
 std::unique_ptr<Device> polystl::theDevice;
 std::unique_ptr<DeviceQueue> polystl::theQueue;
 
+static void initialiseRuntime() {
+  using namespace polystl;
+  if (!thePlatform) {
+    fprintf(stderr, "[POLYSTL] Initialising backends...\n");
+    thePlatform = createPlatform();
+    theDevice = thePlatform ? selectDevice(*thePlatform) : std::unique_ptr<Device>{};
+    theQueue = theDevice ? theDevice->createQueue() : std::unique_ptr<DeviceQueue>{};
+    if (thePlatform) {
+      fprintf(stderr, "[POLYSTL] - Platform:%s [%s, %s]\n",
+              thePlatform->name().c_str(),                  //
+              to_string(thePlatform->kind()).data(),        //
+              to_string(thePlatform->moduleFormat()).data() //
+      );
+    }
+  }
+}
+
 static bool loadKernelObject(const polystl::KernelObject &object) {
   using namespace polystl;
-
-  if (!thePlatform) {
-    polystl::thePlatform = polystl::createPlatform();
-    polystl::theDevice = polystl::thePlatform ? polystl::selectDevice(*polystl::thePlatform) : std::unique_ptr<Device>{};
-    polystl::theQueue = polystl::theDevice ? polystl::theDevice->createQueue() : std::unique_ptr<DeviceQueue>{};
-  }
-
+  initialiseRuntime();
   if (!thePlatform || !theDevice || !theQueue) {
     fprintf(stderr, "[POLYSTL] No device/queue\n");
     return false;
@@ -79,6 +90,16 @@ static bool loadKernelObject(const polystl::KernelObject &object) {
   if (!theDevice->moduleLoaded(object.moduleName)) //
     theDevice->loadModule(object.moduleName, object.moduleImage);
   return true;
+}
+
+std::optional<polystl::PlatformKind> polystl::platformKind() {
+  using namespace polystl;
+  initialiseRuntime();
+  if (!thePlatform || !theDevice || !theQueue) {
+    fprintf(stderr, "[POLYSTL] No device/queue\n");
+    return {};
+  }
+  return thePlatform->kind();
 }
 
 bool polystl::dispatchHostThreaded(size_t global, void *functorData, const KernelObject &object) {
