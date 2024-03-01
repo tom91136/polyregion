@@ -21,6 +21,9 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(LLVMBackend::AstTransformer &xform,
     return xform.B.CreateAdd(xform.B.CreateMul(xform.intr0(fn, ctaid), xform.intr0(fn, ntid)), xform.intr0(fn, tid));
   };
   auto dim3OrAssert = [&](const AnyTerm &dim, ValPtr d0, ValPtr d1, ValPtr d2) {
+    if (dim.tpe() != Type::IntU32()) {
+      throw std::logic_error("dim selector should be a " + to_string(Type::IntU32()) + " but got " + to_string(dim.tpe()));
+    }
     return xform.B.CreateSelect(
         xform.B.CreateICmpEQ(xform.mkTermVal(dim), xform.mkTermVal(Term::IntU32Const(0))), d0,
         xform.B.CreateSelect(xform.B.CreateICmpEQ(xform.mkTermVal(dim), xform.mkTermVal(Term::IntU32Const(1))), d0,

@@ -10,5 +10,5 @@ polyregion::runtime::KernelBundle generate(clang::ASTContext &C,                
                                            clang::DiagnosticsEngine &diag,      //
                                            const std::string &moduleId,         //
                                            const clang::CXXMethodDecl &functor, //
-                                           const std::vector<std::pair<std::string, std::string>> &targets);
+                                           const std::vector<std::pair<compiletime::Target, std::string>> &targets);
 }

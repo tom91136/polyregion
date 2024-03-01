@@ -26,17 +26,17 @@ enum class POLYREGION_EXPORT Target : uint8_t {
 };
 static inline constexpr std::string_view to_string(const Target &target) {
   switch (target) {
-    case Target::Object_LLVM_HOST: return "Object_LLVM_HOST";
-    case Target::Object_LLVM_x86_64: return "Object_LLVM_x86_64";
-    case Target::Object_LLVM_AArch64: return "Object_LLVM_AArch64";
-    case Target::Object_LLVM_ARM: return "Object_LLVM_ARM";
-    case Target::Object_LLVM_NVPTX64: return "Object_LLVM_NVPTX64";
-    case Target::Object_LLVM_AMDGCN: return "Object_LLVM_AMDGCN";
-    case Target::Object_LLVM_SPIRV32: return "Object_LLVM_SPIRV32";
-    case Target::Object_LLVM_SPIRV64: return "Object_LLVM_SPIRV64";
-    case Target::Source_C_C11: return "Source_C_C11";
-    case Target::Source_C_OpenCL1_1: return "Source_C_OpenCL1_1";
-    case Target::Source_C_Metal1_0: return "Source_C_Metal1_0";
+    case Target::Object_LLVM_HOST: return "host";
+    case Target::Object_LLVM_x86_64: return "x86_64";
+    case Target::Object_LLVM_AArch64: return "aarch64";
+    case Target::Object_LLVM_ARM: return "arm";
+    case Target::Object_LLVM_NVPTX64: return "nvptx64";
+    case Target::Object_LLVM_AMDGCN: return "amdgcn";
+    case Target::Object_LLVM_SPIRV32: return "spirv32";
+    case Target::Object_LLVM_SPIRV64: return "spirv64";
+    case Target::Source_C_C11: return "c11";
+    case Target::Source_C_OpenCL1_1: return "opencl1_1";
+    case Target::Source_C_Metal1_0: return "metal1_0";
   }
 }
 static inline constexpr std::optional<Target> targetFromOrdinal(std::underlying_type_t<Target> ordinal) {

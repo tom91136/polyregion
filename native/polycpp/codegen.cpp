@@ -18,10 +18,11 @@
 #include "fmt/format.h"
 #include "types.h"
 
+using namespace polyregion;
 using namespace polyregion::polyast;
 using namespace aspartame;
 
-static std::variant<std::string, CompileResult> compileProgram(Program &p, const std::string &target, const std::string &arch) {
+static std::variant<std::string, CompileResult> compileProgram(Program &p, const compiletime::Target &target, const std::string &arch) {
   auto data = nlohmann::json::to_msgpack(hashed_to_json(program_to_json(p)));
 
   llvm::SmallString<64> inputPath;
@@ -42,7 +43,7 @@ static std::variant<std::string, CompileResult> compileProgram(Program &p, const
   std::string binPath = "polyc";
   if (auto envBin = std::getenv("POLYC_BIN"); envBin) binPath = envBin;
 
-  std::vector<llvm::StringRef> args{"", inputPath.str(), "--out", outputPath.str(), "--target", target, "--arch", arch};
+  std::vector<llvm::StringRef> args{"", inputPath.str(), "--out", outputPath.str(), "--target", to_string(target), "--arch", arch};
 
   if (int code = llvm::sys::ExecuteAndWait(binPath, args, {{}}); code != 0)
     return "Non-zero exit code for task: " + (args ^ mk_string(" ", [](auto &s) { return s.str(); }));
@@ -57,7 +58,7 @@ polyregion::runtime::KernelBundle polyregion::polystl::generate(clang::ASTContex
                                                                 clang::DiagnosticsEngine &diag,      //
                                                                 const std::string &moduleId,         //
                                                                 const clang::CXXMethodDecl &functor, //
-                                                                const std::vector<std::pair<std::string, std::string>> &targets) {
+                                                                const std::vector<std::pair<compiletime::Target, std::string>> &targets) {
   polyregion::polystl::Remapper remapper(C);
 
   auto parent = functor.getParent();
@@ -97,7 +98,7 @@ polyregion::runtime::KernelBundle polyregion::polystl::generate(clang::ASTContex
                               diag.Report(
                                   diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Warning,
                                                        "[PolySTL] Frontend failed to compile program [%0, target=%1, features=%2]\n%3"))
-                                  << moduleId << target << features << err;
+                                  << moduleId << std::string(to_string(target)) << features << err;
                               return std::nullopt;
                             }) ^
                  map([&](auto &x) {
@@ -107,24 +108,26 @@ polyregion::runtime::KernelBundle polyregion::polystl::generate(clang::ASTContex
       | collect([&](auto &target, auto &features, auto &result) -> std::optional<runtime::KernelObject> {
           diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Remark,
                                            "[PolySTL] Compilation events for [%0, target=%1, features=%2]\n%3"))
-              << moduleId << target << features << repr(result);
+              << moduleId << std::string(to_string(target)) << features << repr(result);
 
           if (auto bin = result.binary; !bin) {
             diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Warning,
                                              "[PolySTL] Backend failed to compile program [%0, target=%1, features=%2]\nReason: %3"))
-                << moduleId << target << features << result.messages;
+                << moduleId << std::string(to_string(target)) << features << result.messages;
             return std::nullopt;
           } else {
 
             if (!result.messages.empty()) {
               diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Warning,
                                                "[PolySTL] Backend emitted binary (%0KB) with warnings [%1, target=%2, features=%3]\n%4"))
-                  << std::to_string(static_cast<float>(bin->size()) / 1000.f) << moduleId << target << features << result.messages;
+                  << std::to_string(static_cast<float>(bin->size()) / 1000.f) << moduleId << std::string(to_string(target)) << features
+                  << result.messages;
 
             } else {
               diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Remark,
                                                "[PolySTL] Backend emitted binary (%0KB) [%1, target=%2, features=%3]"))
-                  << std::to_string(static_cast<float>(bin->size()) / 1000.f) << moduleId << target << features << result.messages;
+                  << std::to_string(static_cast<float>(bin->size()) / 1000.f) << moduleId << std::string(to_string(target)) << features
+                  << result.messages;
             }
 
             if (auto format = std::optional{runtime::ModuleFormat::Object}; format) {
@@ -140,7 +143,7 @@ polyregion::runtime::KernelBundle polyregion::polystl::generate(clang::ASTContex
             } else {
               diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Remark,
                                                "[PolySTL] Backend emitted binary for unknown target [%1, target=%2, features=%3]"))
-                  << moduleId << target << features << result.messages;
+                  << moduleId << std::string(to_string(target)) << features << result.messages;
               return std::nullopt;
             }
           }

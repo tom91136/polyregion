@@ -258,24 +258,14 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
 //                     Object_LLVM_ARM,
 //                     Source_C_C11 ,
 
-
-
-
-                     switch (c.kind) {
-                       case runtime::PlatformKind::HostThreaded:
-
-                         break;
-                       case runtime::PlatformKind::Managed:
-
-                         break;
-                     }
-
-                     std::vector<std::pair<std::string, std::string>> targets = {
-                         {"host", "native"},
-//                         {"cuda", "sm_80"}
+                     std::vector<std::pair<compiletime::Target, std::string>> targets = {
+                         {compiletime::Target::Object_LLVM_HOST, "native"},
+                         {compiletime::Target::Object_LLVM_NVPTX64, "sm_60"},
                      };
 
-                     auto bundle = generate(C, diag, moduleId, *c.functorDecl, targets);
+                     auto bundle =
+                         generate(C, diag, moduleId, *c.functorDecl,
+                                  targets ^ filter([&](auto &target, auto &) { return c.kind == runtime::targetPlatformKind(target); }));
 
                      diag.Report(c.callLambdaArgExpr->getExprLoc(),
                                  diag.getCustomDiagID(clang::DiagnosticsEngine::Remark, "[PolySTL] Outlined function: %0 for %1 (%2)\n"))
@@ -288,6 +278,7 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
                              | mk_string(", "));
 
                      insertKernelImage(C, c, bundle);
+
                    },
                },
                r);
