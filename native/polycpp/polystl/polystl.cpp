@@ -84,9 +84,20 @@ static bool loadKernelObject(const polystl::KernelObject &object) {
     return false;
   }
 
-  if (thePlatform->kind() != object.kind || thePlatform->moduleFormat() != object.format) //
+  if (thePlatform->kind() != object.kind || thePlatform->moduleFormat() != object.format) {
+    fprintf(stderr, "[POLYSTL] Incompatible image  %s [%s] (targeting %s [%s])\n",
+            to_string(object.kind).data(), //
+            to_string(object.format).data(),
+            to_string(thePlatform->kind()).data(), //
+            to_string(thePlatform->moduleFormat()).data());
     return false;
+  } //
 
+  fprintf(stderr, "[POLYSTL] Loading image  %s [%s] (targeting %s [%s])\n",
+          to_string(object.kind).data(), //
+          to_string(object.format).data(),
+          to_string(thePlatform->kind()).data(), //
+          to_string(thePlatform->moduleFormat()).data());
   if (!theDevice->moduleLoaded(object.moduleName)) //
     theDevice->loadModule(object.moduleName, object.moduleImage);
   return true;
@@ -118,12 +129,17 @@ bool polystl::dispatchHostThreaded(size_t global, void *functorData, const Kerne
   return true;
 }
 
-bool polystl::dispatchManaged(size_t global, size_t local, size_t localMemBytes, void *functorData, const KernelObject &object) {
+bool polystl::dispatchManaged(size_t global, size_t local, size_t localMemBytes, size_t functorDataSize, const void *functorData,
+                              const KernelObject &object) {
   if (!loadKernelObject(object)) return false;
   const static auto fn = __func__;
+
+  auto m = theDevice->malloc(functorDataSize, polystl::Access::RW);
+
+  polyregion::concurrency_utils::waitAll(
+      [&](auto &cb) { polystl::theQueue->enqueueHostToDeviceAsync(functorData, m, functorDataSize, [&]() { cb(); }); });
   polyregion::concurrency_utils::waitAll([&](auto &cb) {
-    // FIXME why is the last arg (Void here, can be any type) needed?
-    ArgBuffer buffer{{Type::Ptr, &functorData}};
+    ArgBuffer buffer{{Type::Ptr, &m}, {Type::Void, nullptr}};
     theQueue->enqueueInvokeAsync(
         object.moduleName, "kernel", buffer, //
         Policy{                              //
@@ -134,7 +150,7 @@ bool polystl::dispatchManaged(size_t global, size_t local, size_t localMemBytes,
           cb();
         });
   });
-
+  theDevice->free(m);
   std::fprintf(stderr, "[POLYSTL:%s] Done\n", fn);
   return true;
 }

@@ -122,7 +122,7 @@ static std::string createHumanReadableFunctionIdentifier(clang::ASTContext &c, c
   return identifier;
 }
 
-void insertKernelImage(clang::ASTContext &C, Callsite &c, polyregion::runtime::KernelBundle &bundle) {
+void insertKernelImage(clang::ASTContext &C, Callsite &c, const polyregion::runtime::KernelBundle &bundle) {
   auto varDeclWithName = [](clang::Stmt *stmt, const std::string &name) -> clang::VarDecl * {
     if (auto declStmt = llvm::dyn_cast<clang::DeclStmt>(stmt); declStmt && declStmt->isSingleDecl()) {
       if (auto varDecl = llvm::dyn_cast<clang::VarDecl>(declStmt->getSingleDecl()); varDecl && varDecl->getName() == name) {
@@ -259,13 +259,14 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
 //                     Source_C_C11 ,
 
                      std::vector<std::pair<compiletime::Target, std::string>> targets = {
-                         {compiletime::Target::Object_LLVM_HOST, "native"},
+//                         {compiletime::Target::Object_LLVM_HOST, "native"},
                          {compiletime::Target::Object_LLVM_NVPTX64, "sm_60"},
                      };
 
                      auto bundle =
                          generate(C, diag, moduleId, *c.functorDecl,
                                   targets ^ filter([&](auto &target, auto &) { return c.kind == runtime::targetPlatformKind(target); }));
+
 
                      diag.Report(c.callLambdaArgExpr->getExprLoc(),
                                  diag.getCustomDiagID(clang::DiagnosticsEngine::Remark, "[PolySTL] Outlined function: %0 for %1 (%2)\n"))

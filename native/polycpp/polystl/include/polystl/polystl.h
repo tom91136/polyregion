@@ -19,7 +19,9 @@ extern std::unique_ptr<DeviceQueue> theQueue;
 
 POLYREGION_EXPORT std::optional<polystl::PlatformKind> platformKind();
 POLYREGION_EXPORT bool dispatchHostThreaded(size_t global, void *functorData, const KernelObject &object);
-POLYREGION_EXPORT bool dispatchManaged(size_t global, size_t local, size_t localMemBytes, void *functorData, const KernelObject &object);
+POLYREGION_EXPORT bool dispatchManaged(size_t global, size_t local, size_t localMemBytes, //
+                                       size_t functorDataSize, const void *functorData,         //
+                                       const KernelObject &object);
 
 } // namespace polystl
 
@@ -30,5 +32,7 @@ const polyregion::runtime::KernelBundle &__polyregion_offload__([[maybe_unused]]
   [[maybe_unused]] size_t __stub_kernelImageSize__{};                                 // NOLINT(*-reserved-identifier)
   [[maybe_unused]] const unsigned char *__stub_kernelImageBytes__{};                  // NOLINT(*-reserved-identifier)
   const static polystl::KernelBundle bundle = polystl::KernelBundle::fromMsgPack(__stub_kernelImageSize__, __stub_kernelImageBytes__);
+  fprintf(stderr, "Load %s ", to_string(bundle.objects[0].kind).data());
+  fprintf(stderr, "Load %s ", to_string(bundle.objects[0].format).data());
   return bundle;
 }

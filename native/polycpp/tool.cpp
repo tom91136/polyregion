@@ -1,3 +1,4 @@
+#include <clang/CodeGen/BackendUtil.h>
 #include <cstdlib>
 #include <iostream>
 
@@ -20,22 +21,129 @@
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/TargetParser/Host.h"
 
-#include "aspartame/vector.hpp"
 #include "aspartame/string.hpp"
+#include "aspartame/vector.hpp"
 #include "aspartame/view.hpp"
-
 
 #include "aspartame/fluent.hpp"
 
 #include "frontend.h"
 #include "rewriter.h"
 #include "utils.hpp"
+
+#include "llvm/Pass.h"
+#include "llvm/Passes/PassBuilder.h"
+#include "llvm/Passes/PassPlugin.h"
+
+using namespace llvm;
+
 using namespace aspartame;
+
+void interpose(llvm::Module &M) {
+
+  static constexpr std::pair<StringLiteral, StringLiteral> ReplaceMap[]{
+      {"aligned_alloc", "__hipstdpar_aligned_alloc"},
+      {"calloc", "__hipstdpar_calloc"},
+      {"free", "__hipstdpar_free"},
+      {"malloc", "__hipstdpar_malloc"},
+      {"memalign", "__hipstdpar_aligned_alloc"},
+      {"posix_memalign", "__hipstdpar_posix_aligned_alloc"},
+      {"realloc", "__hipstdpar_realloc"},
+      {"reallocarray", "__hipstdpar_realloc_array"},
+      {"_ZdaPv", "__hipstdpar_operator_delete"},
+      {"_ZdaPvm", "__hipstdpar_operator_delete_sized"},
+      {"_ZdaPvSt11align_val_t", "__hipstdpar_operator_delete_aligned"},
+      {"_ZdaPvmSt11align_val_t", "__hipstdpar_operator_delete_aligned_sized"},
+      {"_ZdlPv", "__hipstdpar_operator_delete"},
+      {"_ZdlPvm", "__hipstdpar_operator_delete_sized"},
+      {"_ZdlPvSt11align_val_t", "__hipstdpar_operator_delete_aligned"},
+      {"_ZdlPvmSt11align_val_t", "__hipstdpar_operator_delete_aligned_sized"},
+      {"_Znam", "__hipstdpar_operator_new"},
+      {"_ZnamRKSt9nothrow_t", "__hipstdpar_operator_new_nothrow"},
+      {"_ZnamSt11align_val_t", "__hipstdpar_operator_new_aligned"},
+      {"_ZnamSt11align_val_tRKSt9nothrow_t", "__hipstdpar_operator_new_aligned_nothrow"},
+
+      {"_Znwm", "__hipstdpar_operator_new"},
+      {"_ZnwmRKSt9nothrow_t", "__hipstdpar_operator_new_nothrow"},
+      {"_ZnwmSt11align_val_t", "__hipstdpar_operator_new_aligned"},
+      {"_ZnwmSt11align_val_tRKSt9nothrow_t", "__hipstdpar_operator_new_aligned_nothrow"},
+      {"__builtin_calloc", "__hipstdpar_calloc"},
+      {"__builtin_free", "__hipstdpar_free"},
+      {"__builtin_malloc", "__hipstdpar_malloc"},
+      {"__builtin_operator_delete", "__hipstdpar_operator_delete"},
+      {"__builtin_operator_new", "__hipstdpar_operator_new"},
+      {"__builtin_realloc", "__hipstdpar_realloc"},
+      {"__libc_calloc", "__hipstdpar_calloc"},
+      {"__libc_free", "__hipstdpar_free"},
+      {"__libc_malloc", "__hipstdpar_malloc"},
+      {"__libc_memalign", "__hipstdpar_aligned_alloc"},
+      {"__libc_realloc", "__hipstdpar_realloc"}};
+
+  SmallDenseMap<StringRef, StringRef> AllocReplacements(std::cbegin(ReplaceMap), std::cend(ReplaceMap));
+
+  for (auto &&F : M) {
+
+    for(auto & i : F){
+      for(auto & instr : i){
+
+
+        // sealed: local alloca
+        // unsealed:
+        //   -c(unknown)           => cross TU, NEEDS LINKER, split comp
+        //   - p -> c(stack_ptr)   => pass information
+        //   - p -> c?(stack_ptr)  => special case c
+        //   - p -> c(stack_ptr?)  => special ptr
+
+
+        //
+        //
+
+        if (llvm::isa<llvm::AllocaInst>(instr)) {
+
+
+          llvm::errs() << "Fn " << F.getName() << " " ;
+
+          llvm::AllocaInst &allocaInst = llvm::cast<llvm::AllocaInst>(instr);
+
+          // Accessing the allocated type
+          llvm::Type *allocatedType = allocaInst.getAllocatedType();
+          llvm::errs() << "Allocated Type: ";
+          allocatedType->print(llvm::errs());
+          llvm::errs() << "\n";
+
+          if (allocaInst.isArrayAllocation()) {
+            llvm::Value *arraySize = allocaInst.getArraySize();
+            llvm::errs() << "Array size (as an operand): ";
+            arraySize->print(llvm::errs());
+            llvm::errs() << "\n";
+          }
+        }
+
+
+      }
+    }
+    if (!F.hasName()) continue;
+    if (!AllocReplacements.contains(F.getName())) continue;
+
+    if (auto R = M.getFunction(AllocReplacements[F.getName()])) {
+      F.replaceAllUsesWith(R);
+    } else {
+      std::string W;
+      raw_string_ostream OS(W);
+
+      OS << "cannot be interposed, missing: " << AllocReplacements[F.getName()]
+         << ". Tried to run the allocation interposition pass without the "
+         << "replacement functions available.";
+
+      F.getContext().diagnose(DiagnosticInfoUnsupported(F, W, F.getSubprogram(), DS_Warning));
+    }
+  }
+}
 
 static std::vector<std::string> mkDelimitedEnvPaths(const char *env, std::optional<std::string> leading) {
   std::vector<std::string> xs;
   if (auto line = std::getenv(env); line) {
-    for (auto &path :  line ^ split(llvm::sys::EnvPathSeparator)) {
+    for (auto &path : line ^ split(llvm::sys::EnvPathSeparator)) {
       if (leading) xs.push_back(*leading);
       xs.push_back(path);
     }
@@ -56,10 +164,10 @@ int executeCC1(std::vector<std::string> &cc1Args, bool stdpar) {
     // -no-polyrt
   }
 
-  std::vector<const char *> cc1Args_ = cc1Args ^ map([]( auto &x){return x.c_str();});
+  std::vector<const char *> cc1Args_ = cc1Args ^ map([](auto &x) { return x.c_str(); });
 
-//  std::vector<const char *> cc1Args_(cc1Args.size());
-//  std::transform(cc1Args.begin(), cc1Args.end(), cc1Args_.begin(), [](auto &x) { return x.c_str(); });
+  //  std::vector<const char *> cc1Args_(cc1Args.size());
+  //  std::transform(cc1Args.begin(), cc1Args.end(), cc1Args_.begin(), [](auto &x) { return x.c_str(); });
   auto diagOptions = clang::CreateAndPopulateDiagOpts(cc1Args_);
   auto diagClient = std::make_unique<clang::TextDiagnosticPrinter>(llvm::errs(), &*diagOptions);
   auto diag = clang::CompilerInstance::createDiagnostics(diagOptions.release(), diagClient.release(), true);
@@ -77,6 +185,25 @@ int executeCC1(std::vector<std::string> &cc1Args, bool stdpar) {
     using namespace polyregion;
     polystl::ModifyASTAndEmitObjAction action([&]() { return std::make_unique<polystl::OffloadRewriteConsumer>(CI.getDiagnostics()); });
     success = CI.ExecuteAction(action);
+    if (!success) {
+      diag->Report(diag->getCustomDiagID(clang::DiagnosticsEngine::Error, "[PolySTL] Frontend pass did not succeed"));
+      return EXIT_FAILURE;
+    }
+
+    auto M = action.takeModule();
+    interpose(*M);
+    clang::EmitBackendOutput(CI.getDiagnostics(),                           //
+                             CI.getHeaderSearchOpts(),                      //
+                             CI.getCodeGenOpts(),                           //
+                             CI.getTargetOpts(),                            //
+                             CI.getLangOpts(),                              //
+                             M->getDataLayoutStr(),                         //
+                             M.get(),                                       //
+                             clang::Backend_EmitObj,                        //
+                             CI.getFileManager().getVirtualFileSystemPtr(), //
+                             CI.createDefaultOutputFile(true, "", "o"));
+
+    CI.clearOutputFiles(/*erase*/ false);
     CI.getSourceManager().PrintStats();
   } else {
     clang::EmitObjAction action;
@@ -110,12 +237,8 @@ int main(int argc, const char *argv[]) {
 
   std::vector<const char *> args(argv, argv + argc);
 
-
-
   auto stdparIdx = args ^ index_of("-fstdpar");
-  args | zip_with_index<decltype(stdparIdx)>() | filter([&](auto &, auto i){ return i == stdparIdx; });
-
-
+  args | zip_with_index<decltype(stdparIdx)>() | filter([&](auto &, auto i) { return i == stdparIdx; });
 
   // sort out -fstdpar
   auto fstdparIt = std::remove_if(args.begin(), args.end(), [](auto x) { return x == std::string("-fstdpar"); });

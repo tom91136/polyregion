@@ -5,6 +5,7 @@
 #include "aspartame/unordered_map.hpp"
 #include "aspartame/vector.hpp"
 #include "aspartame/view.hpp"
+#include "aspartame/string.hpp"
 
 #include "ast.h"
 #include "llvm.h"
@@ -986,9 +987,12 @@ void LLVMBackend::AstTransformer::addFn(llvm::Module &mod, const Function &f, bo
 
   auto fnTpe = llvm::FunctionType::get(rtnTpe, {llvmArgTpes}, false);
 
+
+  auto cleanName=  qualified(f.name) ^ map([](char c) { return !std::isalnum(c) && c != '_' ? '_' : c; });
+
   auto *fn = llvm::Function::Create(fnTpe,                                                                     //
-                                    entry ? llvm::Function::ExternalLinkage : llvm::Function::ExternalLinkage, // TODO
-                                    qualified(f.name),                                                         //
+                                    entry ? llvm::Function::ExternalLinkage : llvm::Function::InternalLinkage, // TODO
+                                    cleanName,                                                         //
                                     mod);
 
   fn->setDSOLocal(true);

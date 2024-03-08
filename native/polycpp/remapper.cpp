@@ -130,18 +130,18 @@ static Term::Any defaultValue(const Type::Any &tpe) {
 static void defaultInitialiseStruct(Remapper::RemapContext &r, const Type::Struct &tpe, const std::vector<Named> &roots) {
   if (auto it = r.structs.find(tpe.name.fqn[0]); it != r.structs.end()) {
 
-    for(auto& p : it->second.parents){
-      if(auto parentIt = r.structs.find(qualified(p)); parentIt != r.structs.end()){
-//        defaultInitialiseStruct(r, Type::Struct(parentIt->second.name, parentIt->second.tpeVars, {}, parentIt->second.parents), roots);
+    for (auto &p : it->second.parents) {
+      if (auto parentIt = r.structs.find(qualified(p)); parentIt != r.structs.end()) {
+        //        defaultInitialiseStruct(r, Type::Struct(parentIt->second.name, parentIt->second.tpeVars, {}, parentIt->second.parents),
+        //        roots);
       }
     }
 
-
     for (auto &m : it->second.members) {
       if (auto nested = m.named.tpe.get<Type::Struct>(); nested) {
-//        auto roots_ = roots;
-//        roots_.push_back(m.named);
-//        defaultInitialiseStruct(r, *nested, roots_);
+        //        auto roots_ = roots;
+        //        roots_.push_back(m.named);
+        //        defaultInitialiseStruct(r, *nested, roots_);
       } else {
         r.push(Stmt::Comment("Zero init member"));
         r.push(Stmt::Mut(Term::Select(roots, m.named), Expr::Alias(defaultValue(m.named.tpe)), true));
@@ -332,7 +332,7 @@ std::pair<std::string, Function> Remapper::handleCall(const clang::FunctionDecl 
     std::vector<Stmt::Any> body;
     body.insert(body.end(), fnBody.begin(), fnBody.end());
     if (fnBody.empty()) {
-        body.emplace_back(Stmt::Comment("Function with empty body but non-unit return type!"));
+      body.emplace_back(Stmt::Comment("Function with empty body but non-unit return type!"));
     }
 
     if (rtnType.is<Type::Unit0>() && !(body ^ last_maybe() ^ exists([](auto x) { return x.template is<Stmt::Return>(); }))) {

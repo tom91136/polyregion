@@ -24,7 +24,7 @@
 
 namespace polyregion::polystl {
 
-class ModifyASTAndEmitObjAction : public clang::EmitObjAction {
+class ModifyASTAndEmitObjAction : public clang::EmitLLVMOnlyAction {
 private:
   std::function<std::unique_ptr<clang::ASTConsumer>()> mkConsumer;
   std::function<void()> endActionCb;

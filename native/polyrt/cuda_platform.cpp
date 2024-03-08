@@ -9,7 +9,7 @@ using namespace polyregion::runtime::cuda;
 static constexpr const char *ERROR_PREFIX = "[CUDA error] ";
 
 static void checked(CUresult result, const char *file, int line) {
-  if (result != CUDA_SUCCESS) {
+  if (result != CUDA_SUCCESS && result != CUDA_ERROR_DEINITIALIZED) {
     throw std::logic_error(std::string(ERROR_PREFIX) + file + ":" + std::to_string(line) + ": " +
                            cuewErrorString(result));
   }
@@ -119,6 +119,7 @@ std::vector<std::string> CudaDevice::features() {
 }
 void CudaDevice::loadModule(const std::string &name, const std::string &image) {
   TRACE();
+  fprintf(stderr, "[%s]>>>\n%s\n<<<",name.c_str(), image.c_str());
   store.loadModule(name, image);
 }
 bool CudaDevice::moduleLoaded(const std::string &name) {

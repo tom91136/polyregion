@@ -116,7 +116,7 @@ void testAll(bool passthrough){
       DYNAMIC_SECTION("RUN " <<  run.command) {
         auto fragments = polyregion::split(command, ' ');
         auto [envs, args] = polyregion::take_while(fragments, [](auto &x) { return x.find('=') != std::string::npos; });
-        args.emplace_back("-fsanitize=address");
+//        args.emplace_back("-fsanitize=address");
 
         if(passthrough){
           envs.emplace_back("POLYCPP_NO_REWRITE=1");

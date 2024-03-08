@@ -1,4 +1,5 @@
 add_subdirectory(polystl)
+add_subdirectory(interpose)
 
 
 #add_library(PolySTLPlugin SHARED ../shared/cxa_thread_atexit.cpp
@@ -73,6 +74,7 @@ llvm_map_components_to_libnames(LLVM_LIBS
         support
         frontendopenmp
         targetparser
+        extensions
 )
 
 
@@ -89,6 +91,7 @@ target_link_libraries(polycpp PRIVATE
         clangFrontendTool
         clangSerialization
         Aspartame::Aspartame
+        Bye2
         )
 target_link_libraries(polycpp-test PRIVATE
         LLVMSupport
@@ -96,6 +99,8 @@ target_link_libraries(polycpp-test PRIVATE
         Aspartame::Aspartame
         Catch2::Catch2WithMain
 )
+
+
 
 
 if (NOT WIN32)

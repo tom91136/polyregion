@@ -92,6 +92,16 @@ polyregion::runtime::KernelBundle polyregion::polystl::generate(clang::ASTContex
   auto objects =
       targets //
       | collect([&](auto &target, auto &features) {
+
+
+          if(runtime::targetPlatformKind(target) == runtime::PlatformKind::Managed){
+            auto entry = Function(Sym({"entry"}),{}, {}, {}, {}, {},   Type::Unit0(), {Stmt::Return(Expr::Alias(Term::Unit0Const()))});
+
+//            p.functions.emplace_back(p.entry);
+//            p.entry = entry;
+
+          }
+
           return compileProgram(p, target, features) ^
                  fold_total([&](const CompileResult &r) -> std::optional<CompileResult> { return r; },
                             [&](const std::string &err) -> std::optional<CompileResult> {
@@ -130,7 +140,7 @@ polyregion::runtime::KernelBundle polyregion::polystl::generate(clang::ASTContex
                   << result.messages;
             }
 
-            if (auto format = std::optional{runtime::ModuleFormat::Object}; format) {
+            if (auto format = std::optional{runtime::targetFormat(target)}; format) {
               return runtime::KernelObject{
                   //
                   *format,                                                                                                         //

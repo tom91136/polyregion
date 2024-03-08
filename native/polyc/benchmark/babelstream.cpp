@@ -5,6 +5,7 @@
 #include "polyrt/runtime.h"
 #include "stream.hpp"
 #include "utils.hpp"
+#include <thread>
 
 using namespace polyregion;
 using namespace polyregion::concurrency_utils;
@@ -205,18 +206,18 @@ int main() {
   // x86-64-v3 AVX,AVX2
   // x86-64-v4 AVX512
 
-  std::vector<std::tuple<runtime::Backend, polyast::Target, std::string>> configs = {
+  std::vector<std::tuple<runtime::Backend, compiletime::Target, std::string>> configs = {
       // CL runs everywhere
-            {runtime::Backend::OpenCL, polyast::Target::Source_C_OpenCL1_1, ""},
-//      {runtime::Backend::Vulkan, polyast::Target::Object_LLVM_SPIRV64, ""},
+//            {runtime::Backend::OpenCL, compiletime::Target::Source_C_OpenCL1_1, ""},
+//      {runtime::Backend::Vulkan, compiletime::Target::Object_LLVM_SPIRV64, ""},
 #ifdef __APPLE__
       {runtime::Backend::RELOCATABLE_OBJ, compiler::Target::Object_LLVM_AArch64, "apple-m1"},
       {runtime::Backend::Metal, compiler::Target::Source_C_Metal1_0, ""},
 #else
-      {runtime::Backend::CUDA, polyast::Target::Object_LLVM_NVPTX64, "sm_60"},
-      {runtime::Backend::HIP, polyast::Target::Object_LLVM_AMDGCN, "gfx1036"},
-      {runtime::Backend::HSA, polyast::Target::Object_LLVM_AMDGCN, "gfx1036"},
-      {runtime::Backend::RelocatableObject, polyast::Target::Object_LLVM_x86_64, "x86-64-v3"},
+      {runtime::Backend::CUDA, compiletime::Target::Object_LLVM_NVPTX64, "sm_60"},
+//      {runtime::Backend::HIP, compiletime::Target::Object_LLVM_AMDGCN, "gfx1036"},
+//      {runtime::Backend::HSA, compiletime::Target::Object_LLVM_AMDGCN, "gfx1036"},
+//      {runtime::Backend::RelocatableObject, compiletime::Target::Object_LLVM_x86_64, "x86-64-v3"},
 #endif
   };
 
@@ -228,11 +229,11 @@ int main() {
     std::cout << repr(p) << std::endl;
 
     auto platform = runtime::Platform::of(backend);
-    std::cout << "backend=" << nameOfBackend(backend) << " arch=" << arch << std::endl;
+    std::cout << "backend=" << to_string(backend) << " arch=" << arch << std::endl;
     {
 
       polyregion::compiler::initialise();
-      auto c = polyregion::compiler::compile(p, {target, arch}, polyast::OptLevel::Ofast);
+      auto c = polyregion::compiler::compile(p, {target, arch}, compiletime::OptLevel::Ofast);
       //    std::cerr << c << std::endl;
       std::cerr << repr(c) << std::endl;
 

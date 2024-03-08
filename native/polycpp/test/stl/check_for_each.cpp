@@ -1,6 +1,6 @@
 // #CASE: general
-// #RUN: polycpp -fstdpar -o {output} {input}
-// #RUN: POLY_PLATFORM=host SIZE=1024 {output}
+// #RUN: polycpp -O3 -fstdpar -o {output} {input}
+// #RUN: POLY_PLATFORM=cuda SIZE=1024 {output}
 //   #EXPECT: 204.800000
 
 #include <algorithm>
