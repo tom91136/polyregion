@@ -316,13 +316,13 @@ private[polyregion] object CppStructGen {
           case CppType.Kind.Variant =>
             (
               s"[[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override ;" :: Nil,
-              s"[ [nodiscard]] POLYREGION_EXPORT bool $name::operator==(const Base& rhs_) const {" ::
+              s"[[nodiscard]] POLYREGION_EXPORT bool $name::operator==(const Base& rhs_) const {" ::
                 s"  if(rhs_.id() != variant_id) return false;" ::
                 (members match {
                   case Nil => "  return true;" :: Nil
                   case xs =>
-                    s"  auto rhs = static_cast<const $name&>(rhs_);" ::
-                      xs.map((n, tpe) => mkEqStmt("this->", "rhs.", n, tpe)).mkString("return ", " && ", ";") :: Nil
+                    s"  auto rhs = static_cast<const $name&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)" ::
+                      xs.map((n, tpe) => mkEqStmt("this->", "rhs.", n, tpe)).mkString("  return ", " && ", ";") :: Nil
                 }) ::: "}" :: Nil
             )
           case _ =>
@@ -331,7 +331,7 @@ private[polyregion] object CppStructGen {
               s"[[nodiscard]] POLYREGION_EXPORT bool $name::operator==(const $name& rhs) const {" ::
                 (members match {
                   case Nil => "  return true;" :: Nil
-                  case xs  => xs.map((n, tpe) => mkEqStmt("", "rhs.", n, tpe)).mkString("return ", " && ", ";") :: Nil
+                  case xs  => xs.map((n, tpe) => mkEqStmt("", "rhs.", n, tpe)).mkString("  return ", " && ", ";") :: Nil
                 }) ::: "}" :: Nil
             )
         }
@@ -395,7 +395,7 @@ private[polyregion] object CppStructGen {
       val (conversionSig, conversionImpl) = if (tpe.kind == CppType.Kind.Variant) {
         (
           s"POLYREGION_EXPORT operator Any() const;" :: Nil,
-          s"${clsName(qualified = true)}::operator ${ns("Any()")} const { return static_pointer_cast<Base> (std::make_shared<${tpe.name}>(*this)); }" :: Nil
+          s"${clsName(qualified = true)}::operator ${ns("Any()")} const { return std::static_pointer_cast<Base>(std::make_shared<${tpe.name}>(*this)); }" :: Nil
         )
       } else (Nil, Nil)
 

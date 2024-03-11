@@ -21,7 +21,7 @@ std::ostream &Sym::dump(std::ostream &os) const {
   return os;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Sym::operator==(const Sym& rhs) const {
-return (fqn == rhs.fqn);
+  return (fqn == rhs.fqn);
 }
 
 Named::Named(std::string symbol, Type::Any tpe) noexcept : symbol(std::move(symbol)), tpe(std::move(tpe)) {}
@@ -41,7 +41,7 @@ std::ostream &Named::dump(std::ostream &os) const {
   return os;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Named::operator==(const Named& rhs) const {
-return (symbol == rhs.symbol) && (tpe == rhs.tpe);
+  return (symbol == rhs.symbol) && (tpe == rhs.tpe);
 }
 
 TypeKind::Base::Base() = default;
@@ -64,11 +64,11 @@ std::ostream &TypeKind::None::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool TypeKind::None::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool TypeKind::None::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-TypeKind::None::operator TypeKind::Any() const { return static_pointer_cast<Base> (std::make_shared<None>(*this)); }
+TypeKind::None::operator TypeKind::Any() const { return std::static_pointer_cast<Base>(std::make_shared<None>(*this)); }
 
 TypeKind::Ref::Ref() noexcept : TypeKind::Base() {}
 uint32_t TypeKind::Ref::id() const { return variant_id; };
@@ -82,11 +82,11 @@ std::ostream &TypeKind::Ref::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool TypeKind::Ref::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool TypeKind::Ref::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-TypeKind::Ref::operator TypeKind::Any() const { return static_pointer_cast<Base> (std::make_shared<Ref>(*this)); }
+TypeKind::Ref::operator TypeKind::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Ref>(*this)); }
 
 TypeKind::Integral::Integral() noexcept : TypeKind::Base() {}
 uint32_t TypeKind::Integral::id() const { return variant_id; };
@@ -100,11 +100,11 @@ std::ostream &TypeKind::Integral::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool TypeKind::Integral::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool TypeKind::Integral::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-TypeKind::Integral::operator TypeKind::Any() const { return static_pointer_cast<Base> (std::make_shared<Integral>(*this)); }
+TypeKind::Integral::operator TypeKind::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Integral>(*this)); }
 
 TypeKind::Fractional::Fractional() noexcept : TypeKind::Base() {}
 uint32_t TypeKind::Fractional::id() const { return variant_id; };
@@ -118,11 +118,11 @@ std::ostream &TypeKind::Fractional::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool TypeKind::Fractional::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool TypeKind::Fractional::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-TypeKind::Fractional::operator TypeKind::Any() const { return static_pointer_cast<Base> (std::make_shared<Fractional>(*this)); }
+TypeKind::Fractional::operator TypeKind::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Fractional>(*this)); }
 
 Type::Base::Base(TypeKind::Any kind) noexcept : kind(std::move(kind)) {}
 uint32_t Type::Any::id() const { return _v->id(); }
@@ -145,11 +145,11 @@ std::ostream &Type::Float16::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Type::Float16::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Type::Float16::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-Type::Float16::operator Type::Any() const { return static_pointer_cast<Base> (std::make_shared<Float16>(*this)); }
+Type::Float16::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Float16>(*this)); }
 
 Type::Float32::Float32() noexcept : Type::Base(TypeKind::Fractional()) {}
 uint32_t Type::Float32::id() const { return variant_id; };
@@ -163,11 +163,11 @@ std::ostream &Type::Float32::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Type::Float32::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Type::Float32::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-Type::Float32::operator Type::Any() const { return static_pointer_cast<Base> (std::make_shared<Float32>(*this)); }
+Type::Float32::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Float32>(*this)); }
 
 Type::Float64::Float64() noexcept : Type::Base(TypeKind::Fractional()) {}
 uint32_t Type::Float64::id() const { return variant_id; };
@@ -181,11 +181,11 @@ std::ostream &Type::Float64::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Type::Float64::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Type::Float64::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-Type::Float64::operator Type::Any() const { return static_pointer_cast<Base> (std::make_shared<Float64>(*this)); }
+Type::Float64::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Float64>(*this)); }
 
 Type::IntU8::IntU8() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::IntU8::id() const { return variant_id; };
@@ -199,11 +199,11 @@ std::ostream &Type::IntU8::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Type::IntU8::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Type::IntU8::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-Type::IntU8::operator Type::Any() const { return static_pointer_cast<Base> (std::make_shared<IntU8>(*this)); }
+Type::IntU8::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntU8>(*this)); }
 
 Type::IntU16::IntU16() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::IntU16::id() const { return variant_id; };
@@ -217,11 +217,11 @@ std::ostream &Type::IntU16::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Type::IntU16::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Type::IntU16::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-Type::IntU16::operator Type::Any() const { return static_pointer_cast<Base> (std::make_shared<IntU16>(*this)); }
+Type::IntU16::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntU16>(*this)); }
 
 Type::IntU32::IntU32() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::IntU32::id() const { return variant_id; };
@@ -235,11 +235,11 @@ std::ostream &Type::IntU32::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Type::IntU32::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Type::IntU32::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-Type::IntU32::operator Type::Any() const { return static_pointer_cast<Base> (std::make_shared<IntU32>(*this)); }
+Type::IntU32::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntU32>(*this)); }
 
 Type::IntU64::IntU64() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::IntU64::id() const { return variant_id; };
@@ -253,11 +253,11 @@ std::ostream &Type::IntU64::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Type::IntU64::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Type::IntU64::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-Type::IntU64::operator Type::Any() const { return static_pointer_cast<Base> (std::make_shared<IntU64>(*this)); }
+Type::IntU64::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntU64>(*this)); }
 
 Type::IntS8::IntS8() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::IntS8::id() const { return variant_id; };
@@ -271,11 +271,11 @@ std::ostream &Type::IntS8::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Type::IntS8::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Type::IntS8::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-Type::IntS8::operator Type::Any() const { return static_pointer_cast<Base> (std::make_shared<IntS8>(*this)); }
+Type::IntS8::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntS8>(*this)); }
 
 Type::IntS16::IntS16() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::IntS16::id() const { return variant_id; };
@@ -289,11 +289,11 @@ std::ostream &Type::IntS16::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Type::IntS16::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Type::IntS16::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-Type::IntS16::operator Type::Any() const { return static_pointer_cast<Base> (std::make_shared<IntS16>(*this)); }
+Type::IntS16::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntS16>(*this)); }
 
 Type::IntS32::IntS32() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::IntS32::id() const { return variant_id; };
@@ -307,11 +307,11 @@ std::ostream &Type::IntS32::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Type::IntS32::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Type::IntS32::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-Type::IntS32::operator Type::Any() const { return static_pointer_cast<Base> (std::make_shared<IntS32>(*this)); }
+Type::IntS32::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntS32>(*this)); }
 
 Type::IntS64::IntS64() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::IntS64::id() const { return variant_id; };
@@ -325,11 +325,11 @@ std::ostream &Type::IntS64::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Type::IntS64::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Type::IntS64::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-Type::IntS64::operator Type::Any() const { return static_pointer_cast<Base> (std::make_shared<IntS64>(*this)); }
+Type::IntS64::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntS64>(*this)); }
 
 Type::Nothing::Nothing() noexcept : Type::Base(TypeKind::None()) {}
 uint32_t Type::Nothing::id() const { return variant_id; };
@@ -343,11 +343,11 @@ std::ostream &Type::Nothing::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Type::Nothing::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Type::Nothing::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-Type::Nothing::operator Type::Any() const { return static_pointer_cast<Base> (std::make_shared<Nothing>(*this)); }
+Type::Nothing::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Nothing>(*this)); }
 
 Type::Unit0::Unit0() noexcept : Type::Base(TypeKind::None()) {}
 uint32_t Type::Unit0::id() const { return variant_id; };
@@ -361,11 +361,11 @@ std::ostream &Type::Unit0::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Type::Unit0::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Type::Unit0::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-Type::Unit0::operator Type::Any() const { return static_pointer_cast<Base> (std::make_shared<Unit0>(*this)); }
+Type::Unit0::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Unit0>(*this)); }
 
 Type::Bool1::Bool1() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::Bool1::id() const { return variant_id; };
@@ -379,11 +379,11 @@ std::ostream &Type::Bool1::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Type::Bool1::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Type::Bool1::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-Type::Bool1::operator Type::Any() const { return static_pointer_cast<Base> (std::make_shared<Bool1>(*this)); }
+Type::Bool1::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Bool1>(*this)); }
 
 Type::Struct::Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args, std::vector<Sym> parents) noexcept : Type::Base(TypeKind::Ref()), name(std::move(name)), tpeVars(std::move(tpeVars)), args(std::move(args)), parents(std::move(parents)) {}
 uint32_t Type::Struct::id() const { return variant_id; };
@@ -423,12 +423,12 @@ std::ostream &Type::Struct::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Type::Struct::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Type::Struct::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Type::Struct&>(rhs_);
-return (this->name == rhs.name) && (this->tpeVars == rhs.tpeVars) && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && (this->parents == rhs.parents);
+  auto rhs = static_cast<const Type::Struct&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->name == rhs.name) && (this->tpeVars == rhs.tpeVars) && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && (this->parents == rhs.parents);
 }
-Type::Struct::operator Type::Any() const { return static_pointer_cast<Base> (std::make_shared<Struct>(*this)); }
+Type::Struct::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Struct>(*this)); }
 
 Type::Ptr::Ptr(Type::Any component, std::optional<int32_t> length, TypeSpace::Any space) noexcept : Type::Base(TypeKind::Ref()), component(std::move(component)), length(std::move(length)), space(std::move(space)) {}
 uint32_t Type::Ptr::id() const { return variant_id; };
@@ -454,12 +454,12 @@ std::ostream &Type::Ptr::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Type::Ptr::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Type::Ptr::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Type::Ptr&>(rhs_);
-return (this->component == rhs.component) && (this->length == rhs.length) && (this->space == rhs.space);
+  auto rhs = static_cast<const Type::Ptr&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->component == rhs.component) && (this->length == rhs.length) && (this->space == rhs.space);
 }
-Type::Ptr::operator Type::Any() const { return static_pointer_cast<Base> (std::make_shared<Ptr>(*this)); }
+Type::Ptr::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Ptr>(*this)); }
 
 Type::Var::Var(std::string name) noexcept : Type::Base(TypeKind::None()), name(std::move(name)) {}
 uint32_t Type::Var::id() const { return variant_id; };
@@ -475,12 +475,12 @@ std::ostream &Type::Var::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Type::Var::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Type::Var::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Type::Var&>(rhs_);
-return (this->name == rhs.name);
+  auto rhs = static_cast<const Type::Var&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->name == rhs.name);
 }
-Type::Var::operator Type::Any() const { return static_pointer_cast<Base> (std::make_shared<Var>(*this)); }
+Type::Var::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Var>(*this)); }
 
 Type::Exec::Exec(std::vector<std::string> tpeVars, std::vector<Type::Any> args, Type::Any rtn) noexcept : Type::Base(TypeKind::None()), tpeVars(std::move(tpeVars)), args(std::move(args)), rtn(std::move(rtn)) {}
 uint32_t Type::Exec::id() const { return variant_id; };
@@ -512,12 +512,12 @@ std::ostream &Type::Exec::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Type::Exec::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Type::Exec::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Type::Exec&>(rhs_);
-return (this->tpeVars == rhs.tpeVars) && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Type::Exec&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->tpeVars == rhs.tpeVars) && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && (this->rtn == rhs.rtn);
 }
-Type::Exec::operator Type::Any() const { return static_pointer_cast<Base> (std::make_shared<Exec>(*this)); }
+Type::Exec::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Exec>(*this)); }
 
 SourcePosition::SourcePosition(std::string file, int32_t line, std::optional<int32_t> col) noexcept : file(std::move(file)), line(line), col(std::move(col)) {}
 size_t SourcePosition::hash_code() const { 
@@ -543,7 +543,7 @@ std::ostream &SourcePosition::dump(std::ostream &os) const {
   return os;
 }
 [[nodiscard]] POLYREGION_EXPORT bool SourcePosition::operator==(const SourcePosition& rhs) const {
-return (file == rhs.file) && (line == rhs.line) && (col == rhs.col);
+  return (file == rhs.file) && (line == rhs.line) && (col == rhs.col);
 }
 
 Term::Base::Base(Type::Any tpe) noexcept : tpe(std::move(tpe)) {}
@@ -577,12 +577,12 @@ std::ostream &Term::Select::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Term::Select::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Term::Select::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::Select&>(rhs_);
-return (this->init == rhs.init) && (this->last == rhs.last);
+  auto rhs = static_cast<const Term::Select&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->init == rhs.init) && (this->last == rhs.last);
 }
-Term::Select::operator Term::Any() const { return static_pointer_cast<Base> (std::make_shared<Select>(*this)); }
+Term::Select::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Select>(*this)); }
 
 Term::Poison::Poison(Type::Any t) noexcept : Term::Base(t), t(std::move(t)) {}
 uint32_t Term::Poison::id() const { return variant_id; };
@@ -598,12 +598,12 @@ std::ostream &Term::Poison::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Term::Poison::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Term::Poison::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::Poison&>(rhs_);
-return (this->t == rhs.t);
+  auto rhs = static_cast<const Term::Poison&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->t == rhs.t);
 }
-Term::Poison::operator Term::Any() const { return static_pointer_cast<Base> (std::make_shared<Poison>(*this)); }
+Term::Poison::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Poison>(*this)); }
 
 Term::Float16Const::Float16Const(float value) noexcept : Term::Base(Type::Float16()), value(value) {}
 uint32_t Term::Float16Const::id() const { return variant_id; };
@@ -619,12 +619,12 @@ std::ostream &Term::Float16Const::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Term::Float16Const::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Term::Float16Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::Float16Const&>(rhs_);
-return (this->value == rhs.value);
+  auto rhs = static_cast<const Term::Float16Const&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->value == rhs.value);
 }
-Term::Float16Const::operator Term::Any() const { return static_pointer_cast<Base> (std::make_shared<Float16Const>(*this)); }
+Term::Float16Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Float16Const>(*this)); }
 
 Term::Float32Const::Float32Const(float value) noexcept : Term::Base(Type::Float32()), value(value) {}
 uint32_t Term::Float32Const::id() const { return variant_id; };
@@ -640,12 +640,12 @@ std::ostream &Term::Float32Const::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Term::Float32Const::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Term::Float32Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::Float32Const&>(rhs_);
-return (this->value == rhs.value);
+  auto rhs = static_cast<const Term::Float32Const&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->value == rhs.value);
 }
-Term::Float32Const::operator Term::Any() const { return static_pointer_cast<Base> (std::make_shared<Float32Const>(*this)); }
+Term::Float32Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Float32Const>(*this)); }
 
 Term::Float64Const::Float64Const(double value) noexcept : Term::Base(Type::Float64()), value(value) {}
 uint32_t Term::Float64Const::id() const { return variant_id; };
@@ -661,12 +661,12 @@ std::ostream &Term::Float64Const::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Term::Float64Const::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Term::Float64Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::Float64Const&>(rhs_);
-return (this->value == rhs.value);
+  auto rhs = static_cast<const Term::Float64Const&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->value == rhs.value);
 }
-Term::Float64Const::operator Term::Any() const { return static_pointer_cast<Base> (std::make_shared<Float64Const>(*this)); }
+Term::Float64Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Float64Const>(*this)); }
 
 Term::IntU8Const::IntU8Const(int8_t value) noexcept : Term::Base(Type::IntU8()), value(value) {}
 uint32_t Term::IntU8Const::id() const { return variant_id; };
@@ -682,12 +682,12 @@ std::ostream &Term::IntU8Const::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Term::IntU8Const::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Term::IntU8Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::IntU8Const&>(rhs_);
-return (this->value == rhs.value);
+  auto rhs = static_cast<const Term::IntU8Const&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->value == rhs.value);
 }
-Term::IntU8Const::operator Term::Any() const { return static_pointer_cast<Base> (std::make_shared<IntU8Const>(*this)); }
+Term::IntU8Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntU8Const>(*this)); }
 
 Term::IntU16Const::IntU16Const(uint16_t value) noexcept : Term::Base(Type::IntU16()), value(value) {}
 uint32_t Term::IntU16Const::id() const { return variant_id; };
@@ -703,12 +703,12 @@ std::ostream &Term::IntU16Const::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Term::IntU16Const::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Term::IntU16Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::IntU16Const&>(rhs_);
-return (this->value == rhs.value);
+  auto rhs = static_cast<const Term::IntU16Const&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->value == rhs.value);
 }
-Term::IntU16Const::operator Term::Any() const { return static_pointer_cast<Base> (std::make_shared<IntU16Const>(*this)); }
+Term::IntU16Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntU16Const>(*this)); }
 
 Term::IntU32Const::IntU32Const(int32_t value) noexcept : Term::Base(Type::IntU32()), value(value) {}
 uint32_t Term::IntU32Const::id() const { return variant_id; };
@@ -724,12 +724,12 @@ std::ostream &Term::IntU32Const::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Term::IntU32Const::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Term::IntU32Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::IntU32Const&>(rhs_);
-return (this->value == rhs.value);
+  auto rhs = static_cast<const Term::IntU32Const&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->value == rhs.value);
 }
-Term::IntU32Const::operator Term::Any() const { return static_pointer_cast<Base> (std::make_shared<IntU32Const>(*this)); }
+Term::IntU32Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntU32Const>(*this)); }
 
 Term::IntU64Const::IntU64Const(int64_t value) noexcept : Term::Base(Type::IntU64()), value(value) {}
 uint32_t Term::IntU64Const::id() const { return variant_id; };
@@ -745,12 +745,12 @@ std::ostream &Term::IntU64Const::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Term::IntU64Const::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Term::IntU64Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::IntU64Const&>(rhs_);
-return (this->value == rhs.value);
+  auto rhs = static_cast<const Term::IntU64Const&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->value == rhs.value);
 }
-Term::IntU64Const::operator Term::Any() const { return static_pointer_cast<Base> (std::make_shared<IntU64Const>(*this)); }
+Term::IntU64Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntU64Const>(*this)); }
 
 Term::IntS8Const::IntS8Const(int8_t value) noexcept : Term::Base(Type::IntS8()), value(value) {}
 uint32_t Term::IntS8Const::id() const { return variant_id; };
@@ -766,12 +766,12 @@ std::ostream &Term::IntS8Const::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Term::IntS8Const::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Term::IntS8Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::IntS8Const&>(rhs_);
-return (this->value == rhs.value);
+  auto rhs = static_cast<const Term::IntS8Const&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->value == rhs.value);
 }
-Term::IntS8Const::operator Term::Any() const { return static_pointer_cast<Base> (std::make_shared<IntS8Const>(*this)); }
+Term::IntS8Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntS8Const>(*this)); }
 
 Term::IntS16Const::IntS16Const(int16_t value) noexcept : Term::Base(Type::IntS16()), value(value) {}
 uint32_t Term::IntS16Const::id() const { return variant_id; };
@@ -787,12 +787,12 @@ std::ostream &Term::IntS16Const::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Term::IntS16Const::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Term::IntS16Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::IntS16Const&>(rhs_);
-return (this->value == rhs.value);
+  auto rhs = static_cast<const Term::IntS16Const&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->value == rhs.value);
 }
-Term::IntS16Const::operator Term::Any() const { return static_pointer_cast<Base> (std::make_shared<IntS16Const>(*this)); }
+Term::IntS16Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntS16Const>(*this)); }
 
 Term::IntS32Const::IntS32Const(int32_t value) noexcept : Term::Base(Type::IntS32()), value(value) {}
 uint32_t Term::IntS32Const::id() const { return variant_id; };
@@ -808,12 +808,12 @@ std::ostream &Term::IntS32Const::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Term::IntS32Const::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Term::IntS32Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::IntS32Const&>(rhs_);
-return (this->value == rhs.value);
+  auto rhs = static_cast<const Term::IntS32Const&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->value == rhs.value);
 }
-Term::IntS32Const::operator Term::Any() const { return static_pointer_cast<Base> (std::make_shared<IntS32Const>(*this)); }
+Term::IntS32Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntS32Const>(*this)); }
 
 Term::IntS64Const::IntS64Const(int64_t value) noexcept : Term::Base(Type::IntS64()), value(value) {}
 uint32_t Term::IntS64Const::id() const { return variant_id; };
@@ -829,12 +829,12 @@ std::ostream &Term::IntS64Const::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Term::IntS64Const::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Term::IntS64Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::IntS64Const&>(rhs_);
-return (this->value == rhs.value);
+  auto rhs = static_cast<const Term::IntS64Const&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->value == rhs.value);
 }
-Term::IntS64Const::operator Term::Any() const { return static_pointer_cast<Base> (std::make_shared<IntS64Const>(*this)); }
+Term::IntS64Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntS64Const>(*this)); }
 
 Term::Unit0Const::Unit0Const() noexcept : Term::Base(Type::Unit0()) {}
 uint32_t Term::Unit0Const::id() const { return variant_id; };
@@ -848,11 +848,11 @@ std::ostream &Term::Unit0Const::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Term::Unit0Const::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Term::Unit0Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-Term::Unit0Const::operator Term::Any() const { return static_pointer_cast<Base> (std::make_shared<Unit0Const>(*this)); }
+Term::Unit0Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Unit0Const>(*this)); }
 
 Term::Bool1Const::Bool1Const(bool value) noexcept : Term::Base(Type::Bool1()), value(value) {}
 uint32_t Term::Bool1Const::id() const { return variant_id; };
@@ -868,12 +868,12 @@ std::ostream &Term::Bool1Const::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Term::Bool1Const::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Term::Bool1Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::Bool1Const&>(rhs_);
-return (this->value == rhs.value);
+  auto rhs = static_cast<const Term::Bool1Const&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->value == rhs.value);
 }
-Term::Bool1Const::operator Term::Any() const { return static_pointer_cast<Base> (std::make_shared<Bool1Const>(*this)); }
+Term::Bool1Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Bool1Const>(*this)); }
 
 TypeSpace::Base::Base() = default;
 uint32_t TypeSpace::Any::id() const { return _v->id(); }
@@ -895,11 +895,11 @@ std::ostream &TypeSpace::Global::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool TypeSpace::Global::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool TypeSpace::Global::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-TypeSpace::Global::operator TypeSpace::Any() const { return static_pointer_cast<Base> (std::make_shared<Global>(*this)); }
+TypeSpace::Global::operator TypeSpace::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Global>(*this)); }
 
 TypeSpace::Local::Local() noexcept : TypeSpace::Base() {}
 uint32_t TypeSpace::Local::id() const { return variant_id; };
@@ -913,11 +913,11 @@ std::ostream &TypeSpace::Local::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool TypeSpace::Local::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool TypeSpace::Local::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-TypeSpace::Local::operator TypeSpace::Any() const { return static_pointer_cast<Base> (std::make_shared<Local>(*this)); }
+TypeSpace::Local::operator TypeSpace::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Local>(*this)); }
 
 Overload::Overload(std::vector<Type::Any> args, Type::Any rtn) noexcept : args(std::move(args)), rtn(std::move(rtn)) {}
 size_t Overload::hash_code() const { 
@@ -941,7 +941,7 @@ std::ostream &Overload::dump(std::ostream &os) const {
   return os;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Overload::operator==(const Overload& rhs) const {
-return std::equal(args.begin(), args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && (rtn == rhs.rtn);
+  return std::equal(args.begin(), args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && (rtn == rhs.rtn);
 }
 
 Spec::Base::Base(std::vector<Overload> overloads, std::vector<Term::Any> terms, Type::Any tpe) noexcept : overloads(std::move(overloads)), terms(std::move(terms)), tpe(std::move(tpe)) {}
@@ -967,11 +967,11 @@ std::ostream &Spec::Assert::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Spec::Assert::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Spec::Assert::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-Spec::Assert::operator Spec::Any() const { return static_pointer_cast<Base> (std::make_shared<Assert>(*this)); }
+Spec::Assert::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Assert>(*this)); }
 
 Spec::GpuBarrierGlobal::GpuBarrierGlobal() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Unit0()) {}
 uint32_t Spec::GpuBarrierGlobal::id() const { return variant_id; };
@@ -985,11 +985,11 @@ std::ostream &Spec::GpuBarrierGlobal::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Spec::GpuBarrierGlobal::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Spec::GpuBarrierGlobal::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-Spec::GpuBarrierGlobal::operator Spec::Any() const { return static_pointer_cast<Base> (std::make_shared<GpuBarrierGlobal>(*this)); }
+Spec::GpuBarrierGlobal::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuBarrierGlobal>(*this)); }
 
 Spec::GpuBarrierLocal::GpuBarrierLocal() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Unit0()) {}
 uint32_t Spec::GpuBarrierLocal::id() const { return variant_id; };
@@ -1003,11 +1003,11 @@ std::ostream &Spec::GpuBarrierLocal::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Spec::GpuBarrierLocal::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Spec::GpuBarrierLocal::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-Spec::GpuBarrierLocal::operator Spec::Any() const { return static_pointer_cast<Base> (std::make_shared<GpuBarrierLocal>(*this)); }
+Spec::GpuBarrierLocal::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuBarrierLocal>(*this)); }
 
 Spec::GpuBarrierAll::GpuBarrierAll() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Unit0()) {}
 uint32_t Spec::GpuBarrierAll::id() const { return variant_id; };
@@ -1021,11 +1021,11 @@ std::ostream &Spec::GpuBarrierAll::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Spec::GpuBarrierAll::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Spec::GpuBarrierAll::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-Spec::GpuBarrierAll::operator Spec::Any() const { return static_pointer_cast<Base> (std::make_shared<GpuBarrierAll>(*this)); }
+Spec::GpuBarrierAll::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuBarrierAll>(*this)); }
 
 Spec::GpuFenceGlobal::GpuFenceGlobal() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Unit0()) {}
 uint32_t Spec::GpuFenceGlobal::id() const { return variant_id; };
@@ -1039,11 +1039,11 @@ std::ostream &Spec::GpuFenceGlobal::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Spec::GpuFenceGlobal::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Spec::GpuFenceGlobal::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-Spec::GpuFenceGlobal::operator Spec::Any() const { return static_pointer_cast<Base> (std::make_shared<GpuFenceGlobal>(*this)); }
+Spec::GpuFenceGlobal::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuFenceGlobal>(*this)); }
 
 Spec::GpuFenceLocal::GpuFenceLocal() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Unit0()) {}
 uint32_t Spec::GpuFenceLocal::id() const { return variant_id; };
@@ -1057,11 +1057,11 @@ std::ostream &Spec::GpuFenceLocal::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Spec::GpuFenceLocal::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Spec::GpuFenceLocal::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-Spec::GpuFenceLocal::operator Spec::Any() const { return static_pointer_cast<Base> (std::make_shared<GpuFenceLocal>(*this)); }
+Spec::GpuFenceLocal::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuFenceLocal>(*this)); }
 
 Spec::GpuFenceAll::GpuFenceAll() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Unit0()) {}
 uint32_t Spec::GpuFenceAll::id() const { return variant_id; };
@@ -1075,11 +1075,11 @@ std::ostream &Spec::GpuFenceAll::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Spec::GpuFenceAll::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Spec::GpuFenceAll::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-Spec::GpuFenceAll::operator Spec::Any() const { return static_pointer_cast<Base> (std::make_shared<GpuFenceAll>(*this)); }
+Spec::GpuFenceAll::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuFenceAll>(*this)); }
 
 Spec::GpuGlobalIdx::GpuGlobalIdx(Term::Any dim) noexcept : Spec::Base({Overload({Type::IntU32()},Type::IntU32())}, {dim}, Type::IntU32()), dim(std::move(dim)) {}
 uint32_t Spec::GpuGlobalIdx::id() const { return variant_id; };
@@ -1095,12 +1095,12 @@ std::ostream &Spec::GpuGlobalIdx::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Spec::GpuGlobalIdx::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Spec::GpuGlobalIdx::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Spec::GpuGlobalIdx&>(rhs_);
-return (this->dim == rhs.dim);
+  auto rhs = static_cast<const Spec::GpuGlobalIdx&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->dim == rhs.dim);
 }
-Spec::GpuGlobalIdx::operator Spec::Any() const { return static_pointer_cast<Base> (std::make_shared<GpuGlobalIdx>(*this)); }
+Spec::GpuGlobalIdx::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuGlobalIdx>(*this)); }
 
 Spec::GpuGlobalSize::GpuGlobalSize(Term::Any dim) noexcept : Spec::Base({Overload({Type::IntU32()},Type::IntU32())}, {dim}, Type::IntU32()), dim(std::move(dim)) {}
 uint32_t Spec::GpuGlobalSize::id() const { return variant_id; };
@@ -1116,12 +1116,12 @@ std::ostream &Spec::GpuGlobalSize::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Spec::GpuGlobalSize::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Spec::GpuGlobalSize::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Spec::GpuGlobalSize&>(rhs_);
-return (this->dim == rhs.dim);
+  auto rhs = static_cast<const Spec::GpuGlobalSize&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->dim == rhs.dim);
 }
-Spec::GpuGlobalSize::operator Spec::Any() const { return static_pointer_cast<Base> (std::make_shared<GpuGlobalSize>(*this)); }
+Spec::GpuGlobalSize::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuGlobalSize>(*this)); }
 
 Spec::GpuGroupIdx::GpuGroupIdx(Term::Any dim) noexcept : Spec::Base({Overload({Type::IntU32()},Type::IntU32())}, {dim}, Type::IntU32()), dim(std::move(dim)) {}
 uint32_t Spec::GpuGroupIdx::id() const { return variant_id; };
@@ -1137,12 +1137,12 @@ std::ostream &Spec::GpuGroupIdx::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Spec::GpuGroupIdx::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Spec::GpuGroupIdx::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Spec::GpuGroupIdx&>(rhs_);
-return (this->dim == rhs.dim);
+  auto rhs = static_cast<const Spec::GpuGroupIdx&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->dim == rhs.dim);
 }
-Spec::GpuGroupIdx::operator Spec::Any() const { return static_pointer_cast<Base> (std::make_shared<GpuGroupIdx>(*this)); }
+Spec::GpuGroupIdx::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuGroupIdx>(*this)); }
 
 Spec::GpuGroupSize::GpuGroupSize(Term::Any dim) noexcept : Spec::Base({Overload({Type::IntU32()},Type::IntU32())}, {dim}, Type::IntU32()), dim(std::move(dim)) {}
 uint32_t Spec::GpuGroupSize::id() const { return variant_id; };
@@ -1158,12 +1158,12 @@ std::ostream &Spec::GpuGroupSize::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Spec::GpuGroupSize::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Spec::GpuGroupSize::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Spec::GpuGroupSize&>(rhs_);
-return (this->dim == rhs.dim);
+  auto rhs = static_cast<const Spec::GpuGroupSize&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->dim == rhs.dim);
 }
-Spec::GpuGroupSize::operator Spec::Any() const { return static_pointer_cast<Base> (std::make_shared<GpuGroupSize>(*this)); }
+Spec::GpuGroupSize::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuGroupSize>(*this)); }
 
 Spec::GpuLocalIdx::GpuLocalIdx(Term::Any dim) noexcept : Spec::Base({Overload({Type::IntU32()},Type::IntU32())}, {dim}, Type::IntU32()), dim(std::move(dim)) {}
 uint32_t Spec::GpuLocalIdx::id() const { return variant_id; };
@@ -1179,12 +1179,12 @@ std::ostream &Spec::GpuLocalIdx::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Spec::GpuLocalIdx::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Spec::GpuLocalIdx::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Spec::GpuLocalIdx&>(rhs_);
-return (this->dim == rhs.dim);
+  auto rhs = static_cast<const Spec::GpuLocalIdx&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->dim == rhs.dim);
 }
-Spec::GpuLocalIdx::operator Spec::Any() const { return static_pointer_cast<Base> (std::make_shared<GpuLocalIdx>(*this)); }
+Spec::GpuLocalIdx::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuLocalIdx>(*this)); }
 
 Spec::GpuLocalSize::GpuLocalSize(Term::Any dim) noexcept : Spec::Base({Overload({Type::IntU32()},Type::IntU32())}, {dim}, Type::IntU32()), dim(std::move(dim)) {}
 uint32_t Spec::GpuLocalSize::id() const { return variant_id; };
@@ -1200,12 +1200,12 @@ std::ostream &Spec::GpuLocalSize::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Spec::GpuLocalSize::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Spec::GpuLocalSize::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Spec::GpuLocalSize&>(rhs_);
-return (this->dim == rhs.dim);
+  auto rhs = static_cast<const Spec::GpuLocalSize&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->dim == rhs.dim);
 }
-Spec::GpuLocalSize::operator Spec::Any() const { return static_pointer_cast<Base> (std::make_shared<GpuLocalSize>(*this)); }
+Spec::GpuLocalSize::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuLocalSize>(*this)); }
 
 Intr::Base::Base(std::vector<Overload> overloads, std::vector<Term::Any> terms, Type::Any tpe) noexcept : overloads(std::move(overloads)), terms(std::move(terms)), tpe(std::move(tpe)) {}
 uint32_t Intr::Any::id() const { return _v->id(); }
@@ -1235,12 +1235,12 @@ std::ostream &Intr::BNot::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::BNot::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::BNot::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::BNot&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Intr::BNot&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Intr::BNot::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<BNot>(*this)); }
+Intr::BNot::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<BNot>(*this)); }
 
 Intr::LogicNot::LogicNot(Term::Any x) noexcept : Intr::Base({Overload({Type::Bool1(),Type::Bool1()},Type::Bool1())}, {x}, Type::Bool1()), x(std::move(x)) {}
 uint32_t Intr::LogicNot::id() const { return variant_id; };
@@ -1256,12 +1256,12 @@ std::ostream &Intr::LogicNot::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::LogicNot::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::LogicNot::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::LogicNot&>(rhs_);
-return (this->x == rhs.x);
+  auto rhs = static_cast<const Intr::LogicNot&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x);
 }
-Intr::LogicNot::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<LogicNot>(*this)); }
+Intr::LogicNot::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicNot>(*this)); }
 
 Intr::Pos::Pos(Term::Any x, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Intr::Pos::id() const { return variant_id; };
@@ -1280,12 +1280,12 @@ std::ostream &Intr::Pos::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::Pos::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::Pos::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::Pos&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Intr::Pos&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Intr::Pos::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<Pos>(*this)); }
+Intr::Pos::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Pos>(*this)); }
 
 Intr::Neg::Neg(Term::Any x, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Intr::Neg::id() const { return variant_id; };
@@ -1304,12 +1304,12 @@ std::ostream &Intr::Neg::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::Neg::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::Neg::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::Neg&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Intr::Neg&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Intr::Neg::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<Neg>(*this)); }
+Intr::Neg::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Neg>(*this)); }
 
 Intr::Add::Add(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::Add::id() const { return variant_id; };
@@ -1331,12 +1331,12 @@ std::ostream &Intr::Add::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::Add::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::Add::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::Add&>(rhs_);
-return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Intr::Add&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
 }
-Intr::Add::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<Add>(*this)); }
+Intr::Add::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Add>(*this)); }
 
 Intr::Sub::Sub(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::Sub::id() const { return variant_id; };
@@ -1358,12 +1358,12 @@ std::ostream &Intr::Sub::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::Sub::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::Sub::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::Sub&>(rhs_);
-return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Intr::Sub&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
 }
-Intr::Sub::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<Sub>(*this)); }
+Intr::Sub::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Sub>(*this)); }
 
 Intr::Mul::Mul(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::Mul::id() const { return variant_id; };
@@ -1385,12 +1385,12 @@ std::ostream &Intr::Mul::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::Mul::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::Mul::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::Mul&>(rhs_);
-return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Intr::Mul&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
 }
-Intr::Mul::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<Mul>(*this)); }
+Intr::Mul::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Mul>(*this)); }
 
 Intr::Div::Div(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::Div::id() const { return variant_id; };
@@ -1412,12 +1412,12 @@ std::ostream &Intr::Div::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::Div::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::Div::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::Div&>(rhs_);
-return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Intr::Div&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
 }
-Intr::Div::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<Div>(*this)); }
+Intr::Div::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Div>(*this)); }
 
 Intr::Rem::Rem(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::Rem::id() const { return variant_id; };
@@ -1439,12 +1439,12 @@ std::ostream &Intr::Rem::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::Rem::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::Rem::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::Rem&>(rhs_);
-return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Intr::Rem&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
 }
-Intr::Rem::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<Rem>(*this)); }
+Intr::Rem::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Rem>(*this)); }
 
 Intr::Min::Min(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::Min::id() const { return variant_id; };
@@ -1466,12 +1466,12 @@ std::ostream &Intr::Min::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::Min::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::Min::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::Min&>(rhs_);
-return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Intr::Min&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
 }
-Intr::Min::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<Min>(*this)); }
+Intr::Min::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Min>(*this)); }
 
 Intr::Max::Max(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::Max::id() const { return variant_id; };
@@ -1493,12 +1493,12 @@ std::ostream &Intr::Max::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::Max::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::Max::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::Max&>(rhs_);
-return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Intr::Max&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
 }
-Intr::Max::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<Max>(*this)); }
+Intr::Max::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Max>(*this)); }
 
 Intr::BAnd::BAnd(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::BAnd::id() const { return variant_id; };
@@ -1520,12 +1520,12 @@ std::ostream &Intr::BAnd::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::BAnd::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::BAnd::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::BAnd&>(rhs_);
-return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Intr::BAnd&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
 }
-Intr::BAnd::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<BAnd>(*this)); }
+Intr::BAnd::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<BAnd>(*this)); }
 
 Intr::BOr::BOr(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::BOr::id() const { return variant_id; };
@@ -1547,12 +1547,12 @@ std::ostream &Intr::BOr::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::BOr::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::BOr::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::BOr&>(rhs_);
-return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Intr::BOr&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
 }
-Intr::BOr::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<BOr>(*this)); }
+Intr::BOr::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<BOr>(*this)); }
 
 Intr::BXor::BXor(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::BXor::id() const { return variant_id; };
@@ -1574,12 +1574,12 @@ std::ostream &Intr::BXor::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::BXor::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::BXor::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::BXor&>(rhs_);
-return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Intr::BXor&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
 }
-Intr::BXor::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<BXor>(*this)); }
+Intr::BXor::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<BXor>(*this)); }
 
 Intr::BSL::BSL(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::BSL::id() const { return variant_id; };
@@ -1601,12 +1601,12 @@ std::ostream &Intr::BSL::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::BSL::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::BSL::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::BSL&>(rhs_);
-return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Intr::BSL&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
 }
-Intr::BSL::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<BSL>(*this)); }
+Intr::BSL::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<BSL>(*this)); }
 
 Intr::BSR::BSR(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::BSR::id() const { return variant_id; };
@@ -1628,12 +1628,12 @@ std::ostream &Intr::BSR::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::BSR::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::BSR::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::BSR&>(rhs_);
-return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Intr::BSR&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
 }
-Intr::BSR::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<BSR>(*this)); }
+Intr::BSR::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<BSR>(*this)); }
 
 Intr::BZSR::BZSR(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::BZSR::id() const { return variant_id; };
@@ -1655,12 +1655,12 @@ std::ostream &Intr::BZSR::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::BZSR::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::BZSR::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::BZSR&>(rhs_);
-return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Intr::BZSR&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
 }
-Intr::BZSR::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<BZSR>(*this)); }
+Intr::BZSR::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<BZSR>(*this)); }
 
 Intr::LogicAnd::LogicAnd(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Bool1(),Type::Bool1()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
 uint32_t Intr::LogicAnd::id() const { return variant_id; };
@@ -1679,12 +1679,12 @@ std::ostream &Intr::LogicAnd::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::LogicAnd::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::LogicAnd::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::LogicAnd&>(rhs_);
-return (this->x == rhs.x) && (this->y == rhs.y);
+  auto rhs = static_cast<const Intr::LogicAnd&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->y == rhs.y);
 }
-Intr::LogicAnd::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<LogicAnd>(*this)); }
+Intr::LogicAnd::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicAnd>(*this)); }
 
 Intr::LogicOr::LogicOr(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Bool1(),Type::Bool1()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
 uint32_t Intr::LogicOr::id() const { return variant_id; };
@@ -1703,12 +1703,12 @@ std::ostream &Intr::LogicOr::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::LogicOr::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::LogicOr::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::LogicOr&>(rhs_);
-return (this->x == rhs.x) && (this->y == rhs.y);
+  auto rhs = static_cast<const Intr::LogicOr&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->y == rhs.y);
 }
-Intr::LogicOr::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<LogicOr>(*this)); }
+Intr::LogicOr::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicOr>(*this)); }
 
 Intr::LogicEq::LogicEq(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Bool1()),Overload({Type::Float32(),Type::Float32()},Type::Bool1()),Overload({Type::Float64(),Type::Float64()},Type::Bool1()),Overload({Type::IntU8(),Type::IntU8()},Type::Bool1()),Overload({Type::IntU16(),Type::IntU16()},Type::Bool1()),Overload({Type::IntU32(),Type::IntU32()},Type::Bool1()),Overload({Type::IntU64(),Type::IntU64()},Type::Bool1()),Overload({Type::IntS8(),Type::IntS8()},Type::Bool1()),Overload({Type::IntS16(),Type::IntS16()},Type::Bool1()),Overload({Type::IntS32(),Type::IntS32()},Type::Bool1()),Overload({Type::IntS64(),Type::IntS64()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
 uint32_t Intr::LogicEq::id() const { return variant_id; };
@@ -1727,12 +1727,12 @@ std::ostream &Intr::LogicEq::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::LogicEq::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::LogicEq::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::LogicEq&>(rhs_);
-return (this->x == rhs.x) && (this->y == rhs.y);
+  auto rhs = static_cast<const Intr::LogicEq&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->y == rhs.y);
 }
-Intr::LogicEq::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<LogicEq>(*this)); }
+Intr::LogicEq::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicEq>(*this)); }
 
 Intr::LogicNeq::LogicNeq(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Bool1()),Overload({Type::Float32(),Type::Float32()},Type::Bool1()),Overload({Type::Float64(),Type::Float64()},Type::Bool1()),Overload({Type::IntU8(),Type::IntU8()},Type::Bool1()),Overload({Type::IntU16(),Type::IntU16()},Type::Bool1()),Overload({Type::IntU32(),Type::IntU32()},Type::Bool1()),Overload({Type::IntU64(),Type::IntU64()},Type::Bool1()),Overload({Type::IntS8(),Type::IntS8()},Type::Bool1()),Overload({Type::IntS16(),Type::IntS16()},Type::Bool1()),Overload({Type::IntS32(),Type::IntS32()},Type::Bool1()),Overload({Type::IntS64(),Type::IntS64()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
 uint32_t Intr::LogicNeq::id() const { return variant_id; };
@@ -1751,12 +1751,12 @@ std::ostream &Intr::LogicNeq::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::LogicNeq::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::LogicNeq::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::LogicNeq&>(rhs_);
-return (this->x == rhs.x) && (this->y == rhs.y);
+  auto rhs = static_cast<const Intr::LogicNeq&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->y == rhs.y);
 }
-Intr::LogicNeq::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<LogicNeq>(*this)); }
+Intr::LogicNeq::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicNeq>(*this)); }
 
 Intr::LogicLte::LogicLte(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Bool1()),Overload({Type::Float32(),Type::Float32()},Type::Bool1()),Overload({Type::Float64(),Type::Float64()},Type::Bool1()),Overload({Type::IntU8(),Type::IntU8()},Type::Bool1()),Overload({Type::IntU16(),Type::IntU16()},Type::Bool1()),Overload({Type::IntU32(),Type::IntU32()},Type::Bool1()),Overload({Type::IntU64(),Type::IntU64()},Type::Bool1()),Overload({Type::IntS8(),Type::IntS8()},Type::Bool1()),Overload({Type::IntS16(),Type::IntS16()},Type::Bool1()),Overload({Type::IntS32(),Type::IntS32()},Type::Bool1()),Overload({Type::IntS64(),Type::IntS64()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
 uint32_t Intr::LogicLte::id() const { return variant_id; };
@@ -1775,12 +1775,12 @@ std::ostream &Intr::LogicLte::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::LogicLte::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::LogicLte::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::LogicLte&>(rhs_);
-return (this->x == rhs.x) && (this->y == rhs.y);
+  auto rhs = static_cast<const Intr::LogicLte&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->y == rhs.y);
 }
-Intr::LogicLte::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<LogicLte>(*this)); }
+Intr::LogicLte::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicLte>(*this)); }
 
 Intr::LogicGte::LogicGte(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Bool1()),Overload({Type::Float32(),Type::Float32()},Type::Bool1()),Overload({Type::Float64(),Type::Float64()},Type::Bool1()),Overload({Type::IntU8(),Type::IntU8()},Type::Bool1()),Overload({Type::IntU16(),Type::IntU16()},Type::Bool1()),Overload({Type::IntU32(),Type::IntU32()},Type::Bool1()),Overload({Type::IntU64(),Type::IntU64()},Type::Bool1()),Overload({Type::IntS8(),Type::IntS8()},Type::Bool1()),Overload({Type::IntS16(),Type::IntS16()},Type::Bool1()),Overload({Type::IntS32(),Type::IntS32()},Type::Bool1()),Overload({Type::IntS64(),Type::IntS64()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
 uint32_t Intr::LogicGte::id() const { return variant_id; };
@@ -1799,12 +1799,12 @@ std::ostream &Intr::LogicGte::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::LogicGte::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::LogicGte::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::LogicGte&>(rhs_);
-return (this->x == rhs.x) && (this->y == rhs.y);
+  auto rhs = static_cast<const Intr::LogicGte&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->y == rhs.y);
 }
-Intr::LogicGte::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<LogicGte>(*this)); }
+Intr::LogicGte::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicGte>(*this)); }
 
 Intr::LogicLt::LogicLt(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Bool1()),Overload({Type::Float32(),Type::Float32()},Type::Bool1()),Overload({Type::Float64(),Type::Float64()},Type::Bool1()),Overload({Type::IntU8(),Type::IntU8()},Type::Bool1()),Overload({Type::IntU16(),Type::IntU16()},Type::Bool1()),Overload({Type::IntU32(),Type::IntU32()},Type::Bool1()),Overload({Type::IntU64(),Type::IntU64()},Type::Bool1()),Overload({Type::IntS8(),Type::IntS8()},Type::Bool1()),Overload({Type::IntS16(),Type::IntS16()},Type::Bool1()),Overload({Type::IntS32(),Type::IntS32()},Type::Bool1()),Overload({Type::IntS64(),Type::IntS64()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
 uint32_t Intr::LogicLt::id() const { return variant_id; };
@@ -1823,12 +1823,12 @@ std::ostream &Intr::LogicLt::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::LogicLt::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::LogicLt::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::LogicLt&>(rhs_);
-return (this->x == rhs.x) && (this->y == rhs.y);
+  auto rhs = static_cast<const Intr::LogicLt&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->y == rhs.y);
 }
-Intr::LogicLt::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<LogicLt>(*this)); }
+Intr::LogicLt::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicLt>(*this)); }
 
 Intr::LogicGt::LogicGt(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Bool1()),Overload({Type::Float32(),Type::Float32()},Type::Bool1()),Overload({Type::Float64(),Type::Float64()},Type::Bool1()),Overload({Type::IntU8(),Type::IntU8()},Type::Bool1()),Overload({Type::IntU16(),Type::IntU16()},Type::Bool1()),Overload({Type::IntU32(),Type::IntU32()},Type::Bool1()),Overload({Type::IntU64(),Type::IntU64()},Type::Bool1()),Overload({Type::IntS8(),Type::IntS8()},Type::Bool1()),Overload({Type::IntS16(),Type::IntS16()},Type::Bool1()),Overload({Type::IntS32(),Type::IntS32()},Type::Bool1()),Overload({Type::IntS64(),Type::IntS64()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
 uint32_t Intr::LogicGt::id() const { return variant_id; };
@@ -1847,12 +1847,12 @@ std::ostream &Intr::LogicGt::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Intr::LogicGt::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Intr::LogicGt::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::LogicGt&>(rhs_);
-return (this->x == rhs.x) && (this->y == rhs.y);
+  auto rhs = static_cast<const Intr::LogicGt&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->y == rhs.y);
 }
-Intr::LogicGt::operator Intr::Any() const { return static_pointer_cast<Base> (std::make_shared<LogicGt>(*this)); }
+Intr::LogicGt::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicGt>(*this)); }
 
 Math::Base::Base(std::vector<Overload> overloads, std::vector<Term::Any> terms, Type::Any tpe) noexcept : overloads(std::move(overloads)), terms(std::move(terms)), tpe(std::move(tpe)) {}
 uint32_t Math::Any::id() const { return _v->id(); }
@@ -1882,12 +1882,12 @@ std::ostream &Math::Abs::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Abs::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Abs::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Abs&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Abs&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Math::Abs::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Abs>(*this)); }
+Math::Abs::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Abs>(*this)); }
 
 Math::Sin::Sin(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Sin::id() const { return variant_id; };
@@ -1906,12 +1906,12 @@ std::ostream &Math::Sin::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Sin::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Sin::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Sin&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Sin&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Math::Sin::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Sin>(*this)); }
+Math::Sin::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Sin>(*this)); }
 
 Math::Cos::Cos(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Cos::id() const { return variant_id; };
@@ -1930,12 +1930,12 @@ std::ostream &Math::Cos::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Cos::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Cos::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Cos&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Cos&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Math::Cos::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Cos>(*this)); }
+Math::Cos::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Cos>(*this)); }
 
 Math::Tan::Tan(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Tan::id() const { return variant_id; };
@@ -1954,12 +1954,12 @@ std::ostream &Math::Tan::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Tan::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Tan::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Tan&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Tan&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Math::Tan::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Tan>(*this)); }
+Math::Tan::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Tan>(*this)); }
 
 Math::Asin::Asin(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Asin::id() const { return variant_id; };
@@ -1978,12 +1978,12 @@ std::ostream &Math::Asin::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Asin::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Asin::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Asin&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Asin&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Math::Asin::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Asin>(*this)); }
+Math::Asin::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Asin>(*this)); }
 
 Math::Acos::Acos(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Acos::id() const { return variant_id; };
@@ -2002,12 +2002,12 @@ std::ostream &Math::Acos::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Acos::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Acos::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Acos&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Acos&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Math::Acos::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Acos>(*this)); }
+Math::Acos::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Acos>(*this)); }
 
 Math::Atan::Atan(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Atan::id() const { return variant_id; };
@@ -2026,12 +2026,12 @@ std::ostream &Math::Atan::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Atan::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Atan::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Atan&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Atan&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Math::Atan::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Atan>(*this)); }
+Math::Atan::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Atan>(*this)); }
 
 Math::Sinh::Sinh(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Sinh::id() const { return variant_id; };
@@ -2050,12 +2050,12 @@ std::ostream &Math::Sinh::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Sinh::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Sinh::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Sinh&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Sinh&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Math::Sinh::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Sinh>(*this)); }
+Math::Sinh::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Sinh>(*this)); }
 
 Math::Cosh::Cosh(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Cosh::id() const { return variant_id; };
@@ -2074,12 +2074,12 @@ std::ostream &Math::Cosh::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Cosh::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Cosh::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Cosh&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Cosh&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Math::Cosh::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Cosh>(*this)); }
+Math::Cosh::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Cosh>(*this)); }
 
 Math::Tanh::Tanh(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Tanh::id() const { return variant_id; };
@@ -2098,12 +2098,12 @@ std::ostream &Math::Tanh::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Tanh::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Tanh::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Tanh&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Tanh&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Math::Tanh::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Tanh>(*this)); }
+Math::Tanh::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Tanh>(*this)); }
 
 Math::Signum::Signum(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Signum::id() const { return variant_id; };
@@ -2122,12 +2122,12 @@ std::ostream &Math::Signum::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Signum::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Signum::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Signum&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Signum&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Math::Signum::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Signum>(*this)); }
+Math::Signum::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Signum>(*this)); }
 
 Math::Round::Round(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Round::id() const { return variant_id; };
@@ -2146,12 +2146,12 @@ std::ostream &Math::Round::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Round::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Round::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Round&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Round&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Math::Round::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Round>(*this)); }
+Math::Round::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Round>(*this)); }
 
 Math::Ceil::Ceil(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Ceil::id() const { return variant_id; };
@@ -2170,12 +2170,12 @@ std::ostream &Math::Ceil::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Ceil::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Ceil::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Ceil&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Ceil&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Math::Ceil::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Ceil>(*this)); }
+Math::Ceil::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Ceil>(*this)); }
 
 Math::Floor::Floor(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Floor::id() const { return variant_id; };
@@ -2194,12 +2194,12 @@ std::ostream &Math::Floor::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Floor::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Floor::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Floor&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Floor&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Math::Floor::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Floor>(*this)); }
+Math::Floor::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Floor>(*this)); }
 
 Math::Rint::Rint(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Rint::id() const { return variant_id; };
@@ -2218,12 +2218,12 @@ std::ostream &Math::Rint::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Rint::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Rint::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Rint&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Rint&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Math::Rint::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Rint>(*this)); }
+Math::Rint::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Rint>(*this)); }
 
 Math::Sqrt::Sqrt(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Sqrt::id() const { return variant_id; };
@@ -2242,12 +2242,12 @@ std::ostream &Math::Sqrt::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Sqrt::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Sqrt::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Sqrt&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Sqrt&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Math::Sqrt::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Sqrt>(*this)); }
+Math::Sqrt::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Sqrt>(*this)); }
 
 Math::Cbrt::Cbrt(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Cbrt::id() const { return variant_id; };
@@ -2266,12 +2266,12 @@ std::ostream &Math::Cbrt::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Cbrt::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Cbrt::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Cbrt&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Cbrt&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Math::Cbrt::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Cbrt>(*this)); }
+Math::Cbrt::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Cbrt>(*this)); }
 
 Math::Exp::Exp(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Exp::id() const { return variant_id; };
@@ -2290,12 +2290,12 @@ std::ostream &Math::Exp::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Exp::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Exp::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Exp&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Exp&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Math::Exp::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Exp>(*this)); }
+Math::Exp::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Exp>(*this)); }
 
 Math::Expm1::Expm1(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Expm1::id() const { return variant_id; };
@@ -2314,12 +2314,12 @@ std::ostream &Math::Expm1::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Expm1::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Expm1::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Expm1&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Expm1&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Math::Expm1::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Expm1>(*this)); }
+Math::Expm1::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Expm1>(*this)); }
 
 Math::Log::Log(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Log::id() const { return variant_id; };
@@ -2338,12 +2338,12 @@ std::ostream &Math::Log::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Log::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Log::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Log&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Log&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Math::Log::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Log>(*this)); }
+Math::Log::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Log>(*this)); }
 
 Math::Log1p::Log1p(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Log1p::id() const { return variant_id; };
@@ -2362,12 +2362,12 @@ std::ostream &Math::Log1p::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Log1p::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Log1p::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Log1p&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Log1p&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Math::Log1p::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Log1p>(*this)); }
+Math::Log1p::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Log1p>(*this)); }
 
 Math::Log10::Log10(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Log10::id() const { return variant_id; };
@@ -2386,12 +2386,12 @@ std::ostream &Math::Log10::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Log10::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Log10::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Log10&>(rhs_);
-return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Log10&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
 }
-Math::Log10::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Log10>(*this)); }
+Math::Log10::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Log10>(*this)); }
 
 Math::Pow::Pow(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Math::Pow::id() const { return variant_id; };
@@ -2413,12 +2413,12 @@ std::ostream &Math::Pow::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Pow::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Pow::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Pow&>(rhs_);
-return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Pow&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
 }
-Math::Pow::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Pow>(*this)); }
+Math::Pow::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Pow>(*this)); }
 
 Math::Atan2::Atan2(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Math::Atan2::id() const { return variant_id; };
@@ -2440,12 +2440,12 @@ std::ostream &Math::Atan2::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Atan2::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Atan2::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Atan2&>(rhs_);
-return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Atan2&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
 }
-Math::Atan2::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Atan2>(*this)); }
+Math::Atan2::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Atan2>(*this)); }
 
 Math::Hypot::Hypot(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Math::Hypot::id() const { return variant_id; };
@@ -2467,12 +2467,12 @@ std::ostream &Math::Hypot::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Math::Hypot::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Math::Hypot::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Hypot&>(rhs_);
-return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Math::Hypot&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
 }
-Math::Hypot::operator Math::Any() const { return static_pointer_cast<Base> (std::make_shared<Hypot>(*this)); }
+Math::Hypot::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Hypot>(*this)); }
 
 Expr::Base::Base(Type::Any tpe) noexcept : tpe(std::move(tpe)) {}
 uint32_t Expr::Any::id() const { return _v->id(); }
@@ -2497,12 +2497,12 @@ std::ostream &Expr::SpecOp::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Expr::SpecOp::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Expr::SpecOp::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Expr::SpecOp&>(rhs_);
-return (this->op == rhs.op);
+  auto rhs = static_cast<const Expr::SpecOp&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->op == rhs.op);
 }
-Expr::SpecOp::operator Expr::Any() const { return static_pointer_cast<Base> (std::make_shared<SpecOp>(*this)); }
+Expr::SpecOp::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<SpecOp>(*this)); }
 
 Expr::MathOp::MathOp(Math::Any op) noexcept : Expr::Base(op.tpe()), op(std::move(op)) {}
 uint32_t Expr::MathOp::id() const { return variant_id; };
@@ -2518,12 +2518,12 @@ std::ostream &Expr::MathOp::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Expr::MathOp::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Expr::MathOp::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Expr::MathOp&>(rhs_);
-return (this->op == rhs.op);
+  auto rhs = static_cast<const Expr::MathOp&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->op == rhs.op);
 }
-Expr::MathOp::operator Expr::Any() const { return static_pointer_cast<Base> (std::make_shared<MathOp>(*this)); }
+Expr::MathOp::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<MathOp>(*this)); }
 
 Expr::IntrOp::IntrOp(Intr::Any op) noexcept : Expr::Base(op.tpe()), op(std::move(op)) {}
 uint32_t Expr::IntrOp::id() const { return variant_id; };
@@ -2539,12 +2539,12 @@ std::ostream &Expr::IntrOp::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Expr::IntrOp::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Expr::IntrOp::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Expr::IntrOp&>(rhs_);
-return (this->op == rhs.op);
+  auto rhs = static_cast<const Expr::IntrOp&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->op == rhs.op);
 }
-Expr::IntrOp::operator Expr::Any() const { return static_pointer_cast<Base> (std::make_shared<IntrOp>(*this)); }
+Expr::IntrOp::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntrOp>(*this)); }
 
 Expr::Cast::Cast(Term::Any from, Type::Any as) noexcept : Expr::Base(as), from(std::move(from)), as(std::move(as)) {}
 uint32_t Expr::Cast::id() const { return variant_id; };
@@ -2563,12 +2563,12 @@ std::ostream &Expr::Cast::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Expr::Cast::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Expr::Cast::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Expr::Cast&>(rhs_);
-return (this->from == rhs.from) && (this->as == rhs.as);
+  auto rhs = static_cast<const Expr::Cast&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->from == rhs.from) && (this->as == rhs.as);
 }
-Expr::Cast::operator Expr::Any() const { return static_pointer_cast<Base> (std::make_shared<Cast>(*this)); }
+Expr::Cast::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Cast>(*this)); }
 
 Expr::Alias::Alias(Term::Any ref) noexcept : Expr::Base(ref.tpe()), ref(std::move(ref)) {}
 uint32_t Expr::Alias::id() const { return variant_id; };
@@ -2584,12 +2584,12 @@ std::ostream &Expr::Alias::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Expr::Alias::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Expr::Alias::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Expr::Alias&>(rhs_);
-return (this->ref == rhs.ref);
+  auto rhs = static_cast<const Expr::Alias&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->ref == rhs.ref);
 }
-Expr::Alias::operator Expr::Any() const { return static_pointer_cast<Base> (std::make_shared<Alias>(*this)); }
+Expr::Alias::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Alias>(*this)); }
 
 Expr::Index::Index(Term::Any lhs, Term::Any idx, Type::Any component) noexcept : Expr::Base(component), lhs(std::move(lhs)), idx(std::move(idx)), component(std::move(component)) {}
 uint32_t Expr::Index::id() const { return variant_id; };
@@ -2611,12 +2611,12 @@ std::ostream &Expr::Index::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Expr::Index::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Expr::Index::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Expr::Index&>(rhs_);
-return (this->lhs == rhs.lhs) && (this->idx == rhs.idx) && (this->component == rhs.component);
+  auto rhs = static_cast<const Expr::Index&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->lhs == rhs.lhs) && (this->idx == rhs.idx) && (this->component == rhs.component);
 }
-Expr::Index::operator Expr::Any() const { return static_pointer_cast<Base> (std::make_shared<Index>(*this)); }
+Expr::Index::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Index>(*this)); }
 
 Expr::RefTo::RefTo(Term::Any lhs, std::optional<Term::Any> idx, Type::Any component) noexcept : Expr::Base(Type::Ptr(component,{},TypeSpace::Global())), lhs(std::move(lhs)), idx(std::move(idx)), component(std::move(component)) {}
 uint32_t Expr::RefTo::id() const { return variant_id; };
@@ -2642,12 +2642,12 @@ std::ostream &Expr::RefTo::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Expr::RefTo::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Expr::RefTo::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Expr::RefTo&>(rhs_);
-return (this->lhs == rhs.lhs) && ( (!this->idx && !rhs.idx) || (this->idx && rhs.idx && *this->idx == *rhs.idx) ) && (this->component == rhs.component);
+  auto rhs = static_cast<const Expr::RefTo&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->lhs == rhs.lhs) && ( (!this->idx && !rhs.idx) || (this->idx && rhs.idx && *this->idx == *rhs.idx) ) && (this->component == rhs.component);
 }
-Expr::RefTo::operator Expr::Any() const { return static_pointer_cast<Base> (std::make_shared<RefTo>(*this)); }
+Expr::RefTo::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<RefTo>(*this)); }
 
 Expr::Alloc::Alloc(Type::Any component, Term::Any size) noexcept : Expr::Base(Type::Ptr(component,{},TypeSpace::Global())), component(std::move(component)), size(std::move(size)) {}
 uint32_t Expr::Alloc::id() const { return variant_id; };
@@ -2666,12 +2666,12 @@ std::ostream &Expr::Alloc::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Expr::Alloc::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Expr::Alloc::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Expr::Alloc&>(rhs_);
-return (this->component == rhs.component) && (this->size == rhs.size);
+  auto rhs = static_cast<const Expr::Alloc&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->component == rhs.component) && (this->size == rhs.size);
 }
-Expr::Alloc::operator Expr::Any() const { return static_pointer_cast<Base> (std::make_shared<Alloc>(*this)); }
+Expr::Alloc::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Alloc>(*this)); }
 
 Expr::Invoke::Invoke(Sym name, std::vector<Type::Any> tpeArgs, std::optional<Term::Any> receiver, std::vector<Term::Any> args, std::vector<Term::Any> captures, Type::Any rtn) noexcept : Expr::Base(rtn), name(std::move(name)), tpeArgs(std::move(tpeArgs)), receiver(std::move(receiver)), args(std::move(args)), captures(std::move(captures)), rtn(std::move(rtn)) {}
 uint32_t Expr::Invoke::id() const { return variant_id; };
@@ -2721,12 +2721,12 @@ std::ostream &Expr::Invoke::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Expr::Invoke::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Expr::Invoke::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Expr::Invoke&>(rhs_);
-return (this->name == rhs.name) && std::equal(this->tpeArgs.begin(), this->tpeArgs.end(), rhs.tpeArgs.begin(), [](auto &&l, auto &&r) { return l == r; }) && ( (!this->receiver && !rhs.receiver) || (this->receiver && rhs.receiver && *this->receiver == *rhs.receiver) ) && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && std::equal(this->captures.begin(), this->captures.end(), rhs.captures.begin(), [](auto &&l, auto &&r) { return l == r; }) && (this->rtn == rhs.rtn);
+  auto rhs = static_cast<const Expr::Invoke&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->name == rhs.name) && std::equal(this->tpeArgs.begin(), this->tpeArgs.end(), rhs.tpeArgs.begin(), [](auto &&l, auto &&r) { return l == r; }) && ( (!this->receiver && !rhs.receiver) || (this->receiver && rhs.receiver && *this->receiver == *rhs.receiver) ) && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && std::equal(this->captures.begin(), this->captures.end(), rhs.captures.begin(), [](auto &&l, auto &&r) { return l == r; }) && (this->rtn == rhs.rtn);
 }
-Expr::Invoke::operator Expr::Any() const { return static_pointer_cast<Base> (std::make_shared<Invoke>(*this)); }
+Expr::Invoke::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Invoke>(*this)); }
 
 Stmt::Base::Base() = default;
 uint32_t Stmt::Any::id() const { return _v->id(); }
@@ -2755,12 +2755,12 @@ std::ostream &Stmt::Block::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Stmt::Block::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Stmt::Block::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Stmt::Block&>(rhs_);
-return std::equal(this->stmts.begin(), this->stmts.end(), rhs.stmts.begin(), [](auto &&l, auto &&r) { return l == r; });
+  auto rhs = static_cast<const Stmt::Block&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return std::equal(this->stmts.begin(), this->stmts.end(), rhs.stmts.begin(), [](auto &&l, auto &&r) { return l == r; });
 }
-Stmt::Block::operator Stmt::Any() const { return static_pointer_cast<Base> (std::make_shared<Block>(*this)); }
+Stmt::Block::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Block>(*this)); }
 
 Stmt::Comment::Comment(std::string value) noexcept : Stmt::Base(), value(std::move(value)) {}
 uint32_t Stmt::Comment::id() const { return variant_id; };
@@ -2776,12 +2776,12 @@ std::ostream &Stmt::Comment::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Stmt::Comment::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Stmt::Comment::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Stmt::Comment&>(rhs_);
-return (this->value == rhs.value);
+  auto rhs = static_cast<const Stmt::Comment&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->value == rhs.value);
 }
-Stmt::Comment::operator Stmt::Any() const { return static_pointer_cast<Base> (std::make_shared<Comment>(*this)); }
+Stmt::Comment::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Comment>(*this)); }
 
 Stmt::Var::Var(Named name, std::optional<Expr::Any> expr) noexcept : Stmt::Base(), name(std::move(name)), expr(std::move(expr)) {}
 uint32_t Stmt::Var::id() const { return variant_id; };
@@ -2804,12 +2804,12 @@ std::ostream &Stmt::Var::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Stmt::Var::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Stmt::Var::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Stmt::Var&>(rhs_);
-return (this->name == rhs.name) && ( (!this->expr && !rhs.expr) || (this->expr && rhs.expr && *this->expr == *rhs.expr) );
+  auto rhs = static_cast<const Stmt::Var&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->name == rhs.name) && ( (!this->expr && !rhs.expr) || (this->expr && rhs.expr && *this->expr == *rhs.expr) );
 }
-Stmt::Var::operator Stmt::Any() const { return static_pointer_cast<Base> (std::make_shared<Var>(*this)); }
+Stmt::Var::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Var>(*this)); }
 
 Stmt::Mut::Mut(Term::Any name, Expr::Any expr, bool copy) noexcept : Stmt::Base(), name(std::move(name)), expr(std::move(expr)), copy(copy) {}
 uint32_t Stmt::Mut::id() const { return variant_id; };
@@ -2831,12 +2831,12 @@ std::ostream &Stmt::Mut::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Stmt::Mut::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Stmt::Mut::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Stmt::Mut&>(rhs_);
-return (this->name == rhs.name) && (this->expr == rhs.expr) && (this->copy == rhs.copy);
+  auto rhs = static_cast<const Stmt::Mut&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->name == rhs.name) && (this->expr == rhs.expr) && (this->copy == rhs.copy);
 }
-Stmt::Mut::operator Stmt::Any() const { return static_pointer_cast<Base> (std::make_shared<Mut>(*this)); }
+Stmt::Mut::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Mut>(*this)); }
 
 Stmt::Update::Update(Term::Any lhs, Term::Any idx, Term::Any value) noexcept : Stmt::Base(), lhs(std::move(lhs)), idx(std::move(idx)), value(std::move(value)) {}
 uint32_t Stmt::Update::id() const { return variant_id; };
@@ -2858,12 +2858,12 @@ std::ostream &Stmt::Update::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Stmt::Update::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Stmt::Update::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Stmt::Update&>(rhs_);
-return (this->lhs == rhs.lhs) && (this->idx == rhs.idx) && (this->value == rhs.value);
+  auto rhs = static_cast<const Stmt::Update&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->lhs == rhs.lhs) && (this->idx == rhs.idx) && (this->value == rhs.value);
 }
-Stmt::Update::operator Stmt::Any() const { return static_pointer_cast<Base> (std::make_shared<Update>(*this)); }
+Stmt::Update::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Update>(*this)); }
 
 Stmt::While::While(std::vector<Stmt::Any> tests, Term::Any cond, std::vector<Stmt::Any> body) noexcept : Stmt::Base(), tests(std::move(tests)), cond(std::move(cond)), body(std::move(body)) {}
 uint32_t Stmt::While::id() const { return variant_id; };
@@ -2895,12 +2895,12 @@ std::ostream &Stmt::While::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Stmt::While::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Stmt::While::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Stmt::While&>(rhs_);
-return std::equal(this->tests.begin(), this->tests.end(), rhs.tests.begin(), [](auto &&l, auto &&r) { return l == r; }) && (this->cond == rhs.cond) && std::equal(this->body.begin(), this->body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; });
+  auto rhs = static_cast<const Stmt::While&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return std::equal(this->tests.begin(), this->tests.end(), rhs.tests.begin(), [](auto &&l, auto &&r) { return l == r; }) && (this->cond == rhs.cond) && std::equal(this->body.begin(), this->body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; });
 }
-Stmt::While::operator Stmt::Any() const { return static_pointer_cast<Base> (std::make_shared<While>(*this)); }
+Stmt::While::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<While>(*this)); }
 
 Stmt::Break::Break() noexcept : Stmt::Base() {}
 uint32_t Stmt::Break::id() const { return variant_id; };
@@ -2914,11 +2914,11 @@ std::ostream &Stmt::Break::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Stmt::Break::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Stmt::Break::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-Stmt::Break::operator Stmt::Any() const { return static_pointer_cast<Base> (std::make_shared<Break>(*this)); }
+Stmt::Break::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Break>(*this)); }
 
 Stmt::Cont::Cont() noexcept : Stmt::Base() {}
 uint32_t Stmt::Cont::id() const { return variant_id; };
@@ -2932,11 +2932,11 @@ std::ostream &Stmt::Cont::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Stmt::Cont::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Stmt::Cont::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-Stmt::Cont::operator Stmt::Any() const { return static_pointer_cast<Base> (std::make_shared<Cont>(*this)); }
+Stmt::Cont::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Cont>(*this)); }
 
 Stmt::Cond::Cond(Expr::Any cond, std::vector<Stmt::Any> trueBr, std::vector<Stmt::Any> falseBr) noexcept : Stmt::Base(), cond(std::move(cond)), trueBr(std::move(trueBr)), falseBr(std::move(falseBr)) {}
 uint32_t Stmt::Cond::id() const { return variant_id; };
@@ -2968,12 +2968,12 @@ std::ostream &Stmt::Cond::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Stmt::Cond::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Stmt::Cond::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Stmt::Cond&>(rhs_);
-return (this->cond == rhs.cond) && std::equal(this->trueBr.begin(), this->trueBr.end(), rhs.trueBr.begin(), [](auto &&l, auto &&r) { return l == r; }) && std::equal(this->falseBr.begin(), this->falseBr.end(), rhs.falseBr.begin(), [](auto &&l, auto &&r) { return l == r; });
+  auto rhs = static_cast<const Stmt::Cond&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->cond == rhs.cond) && std::equal(this->trueBr.begin(), this->trueBr.end(), rhs.trueBr.begin(), [](auto &&l, auto &&r) { return l == r; }) && std::equal(this->falseBr.begin(), this->falseBr.end(), rhs.falseBr.begin(), [](auto &&l, auto &&r) { return l == r; });
 }
-Stmt::Cond::operator Stmt::Any() const { return static_pointer_cast<Base> (std::make_shared<Cond>(*this)); }
+Stmt::Cond::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Cond>(*this)); }
 
 Stmt::Return::Return(Expr::Any value) noexcept : Stmt::Base(), value(std::move(value)) {}
 uint32_t Stmt::Return::id() const { return variant_id; };
@@ -2989,12 +2989,12 @@ std::ostream &Stmt::Return::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool Stmt::Return::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool Stmt::Return::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Stmt::Return&>(rhs_);
-return (this->value == rhs.value);
+  auto rhs = static_cast<const Stmt::Return&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
+  return (this->value == rhs.value);
 }
-Stmt::Return::operator Stmt::Any() const { return static_pointer_cast<Base> (std::make_shared<Return>(*this)); }
+Stmt::Return::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Return>(*this)); }
 
 StructMember::StructMember(Named named, bool isMutable) noexcept : named(std::move(named)), isMutable(isMutable) {}
 size_t StructMember::hash_code() const { 
@@ -3013,7 +3013,7 @@ std::ostream &StructMember::dump(std::ostream &os) const {
   return os;
 }
 [[nodiscard]] POLYREGION_EXPORT bool StructMember::operator==(const StructMember& rhs) const {
-return (named == rhs.named) && (isMutable == rhs.isMutable);
+  return (named == rhs.named) && (isMutable == rhs.isMutable);
 }
 
 StructDef::StructDef(Sym name, std::vector<std::string> tpeVars, std::vector<StructMember> members, std::vector<Sym> parents) noexcept : name(std::move(name)), tpeVars(std::move(tpeVars)), members(std::move(members)), parents(std::move(parents)) {}
@@ -3054,7 +3054,7 @@ std::ostream &StructDef::dump(std::ostream &os) const {
   return os;
 }
 [[nodiscard]] POLYREGION_EXPORT bool StructDef::operator==(const StructDef& rhs) const {
-return (name == rhs.name) && (tpeVars == rhs.tpeVars) && (members == rhs.members) && (parents == rhs.parents);
+  return (name == rhs.name) && (tpeVars == rhs.tpeVars) && (members == rhs.members) && (parents == rhs.parents);
 }
 
 Signature::Signature(Sym name, std::vector<std::string> tpeVars, std::optional<Type::Any> receiver, std::vector<Type::Any> args, std::vector<Type::Any> moduleCaptures, std::vector<Type::Any> termCaptures, Type::Any rtn) noexcept : name(std::move(name)), tpeVars(std::move(tpeVars)), receiver(std::move(receiver)), args(std::move(args)), moduleCaptures(std::move(moduleCaptures)), termCaptures(std::move(termCaptures)), rtn(std::move(rtn)) {}
@@ -3113,7 +3113,7 @@ std::ostream &Signature::dump(std::ostream &os) const {
   return os;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Signature::operator==(const Signature& rhs) const {
-return (name == rhs.name) && (tpeVars == rhs.tpeVars) && ( (!receiver && !rhs.receiver) || (receiver && rhs.receiver && *receiver == *rhs.receiver) ) && std::equal(args.begin(), args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && std::equal(moduleCaptures.begin(), moduleCaptures.end(), rhs.moduleCaptures.begin(), [](auto &&l, auto &&r) { return l == r; }) && std::equal(termCaptures.begin(), termCaptures.end(), rhs.termCaptures.begin(), [](auto &&l, auto &&r) { return l == r; }) && (rtn == rhs.rtn);
+  return (name == rhs.name) && (tpeVars == rhs.tpeVars) && ( (!receiver && !rhs.receiver) || (receiver && rhs.receiver && *receiver == *rhs.receiver) ) && std::equal(args.begin(), args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && std::equal(moduleCaptures.begin(), moduleCaptures.end(), rhs.moduleCaptures.begin(), [](auto &&l, auto &&r) { return l == r; }) && std::equal(termCaptures.begin(), termCaptures.end(), rhs.termCaptures.begin(), [](auto &&l, auto &&r) { return l == r; }) && (rtn == rhs.rtn);
 }
 
 InvokeSignature::InvokeSignature(Sym name, std::vector<Type::Any> tpeVars, std::optional<Type::Any> receiver, std::vector<Type::Any> args, std::vector<Type::Any> captures, Type::Any rtn) noexcept : name(std::move(name)), tpeVars(std::move(tpeVars)), receiver(std::move(receiver)), args(std::move(args)), captures(std::move(captures)), rtn(std::move(rtn)) {}
@@ -3164,7 +3164,7 @@ std::ostream &InvokeSignature::dump(std::ostream &os) const {
   return os;
 }
 [[nodiscard]] POLYREGION_EXPORT bool InvokeSignature::operator==(const InvokeSignature& rhs) const {
-return (name == rhs.name) && std::equal(tpeVars.begin(), tpeVars.end(), rhs.tpeVars.begin(), [](auto &&l, auto &&r) { return l == r; }) && ( (!receiver && !rhs.receiver) || (receiver && rhs.receiver && *receiver == *rhs.receiver) ) && std::equal(args.begin(), args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && std::equal(captures.begin(), captures.end(), rhs.captures.begin(), [](auto &&l, auto &&r) { return l == r; }) && (rtn == rhs.rtn);
+  return (name == rhs.name) && std::equal(tpeVars.begin(), tpeVars.end(), rhs.tpeVars.begin(), [](auto &&l, auto &&r) { return l == r; }) && ( (!receiver && !rhs.receiver) || (receiver && rhs.receiver && *receiver == *rhs.receiver) ) && std::equal(args.begin(), args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && std::equal(captures.begin(), captures.end(), rhs.captures.begin(), [](auto &&l, auto &&r) { return l == r; }) && (rtn == rhs.rtn);
 }
 
 FunctionKind::Base::Base() = default;
@@ -3187,11 +3187,11 @@ std::ostream &FunctionKind::Internal::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool FunctionKind::Internal::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool FunctionKind::Internal::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-FunctionKind::Internal::operator FunctionKind::Any() const { return static_pointer_cast<Base> (std::make_shared<Internal>(*this)); }
+FunctionKind::Internal::operator FunctionKind::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Internal>(*this)); }
 
 FunctionKind::Exported::Exported() noexcept : FunctionKind::Base() {}
 uint32_t FunctionKind::Exported::id() const { return variant_id; };
@@ -3205,11 +3205,11 @@ std::ostream &FunctionKind::Exported::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool FunctionKind::Exported::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool FunctionKind::Exported::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-FunctionKind::Exported::operator FunctionKind::Any() const { return static_pointer_cast<Base> (std::make_shared<Exported>(*this)); }
+FunctionKind::Exported::operator FunctionKind::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Exported>(*this)); }
 
 FunctionAttr::Base::Base() = default;
 uint32_t FunctionAttr::Any::id() const { return _v->id(); }
@@ -3231,11 +3231,11 @@ std::ostream &FunctionAttr::FPRelaxed::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool FunctionAttr::FPRelaxed::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool FunctionAttr::FPRelaxed::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-FunctionAttr::FPRelaxed::operator FunctionAttr::Any() const { return static_pointer_cast<Base> (std::make_shared<FPRelaxed>(*this)); }
+FunctionAttr::FPRelaxed::operator FunctionAttr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<FPRelaxed>(*this)); }
 
 FunctionAttr::FPStrict::FPStrict() noexcept : FunctionAttr::Base() {}
 uint32_t FunctionAttr::FPStrict::id() const { return variant_id; };
@@ -3249,11 +3249,11 @@ std::ostream &FunctionAttr::FPStrict::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
-[ [nodiscard]] POLYREGION_EXPORT bool FunctionAttr::FPStrict::operator==(const Base& rhs_) const {
+[[nodiscard]] POLYREGION_EXPORT bool FunctionAttr::FPStrict::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
   return true;
 }
-FunctionAttr::FPStrict::operator FunctionAttr::Any() const { return static_pointer_cast<Base> (std::make_shared<FPStrict>(*this)); }
+FunctionAttr::FPStrict::operator FunctionAttr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<FPStrict>(*this)); }
 
 Arg::Arg(Named named, std::optional<SourcePosition> pos) noexcept : named(std::move(named)), pos(std::move(pos)) {}
 size_t Arg::hash_code() const { 
@@ -3276,7 +3276,7 @@ std::ostream &Arg::dump(std::ostream &os) const {
   return os;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Arg::operator==(const Arg& rhs) const {
-return (named == rhs.named) && (pos == rhs.pos);
+  return (named == rhs.named) && (pos == rhs.pos);
 }
 
 Function::Function(Sym name, std::vector<std::string> tpeVars, std::optional<Arg> receiver, std::vector<Arg> args, std::vector<Arg> moduleCaptures, std::vector<Arg> termCaptures, Type::Any rtn, std::vector<Stmt::Any> body, FunctionKind::Any kind) noexcept : name(std::move(name)), tpeVars(std::move(tpeVars)), receiver(std::move(receiver)), args(std::move(args)), moduleCaptures(std::move(moduleCaptures)), termCaptures(std::move(termCaptures)), rtn(std::move(rtn)), body(std::move(body)), kind(std::move(kind)) {}
@@ -3346,7 +3346,7 @@ std::ostream &Function::dump(std::ostream &os) const {
   return os;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Function::operator==(const Function& rhs) const {
-return (name == rhs.name) && (tpeVars == rhs.tpeVars) && (receiver == rhs.receiver) && (args == rhs.args) && (moduleCaptures == rhs.moduleCaptures) && (termCaptures == rhs.termCaptures) && (rtn == rhs.rtn) && std::equal(body.begin(), body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; }) && (kind == rhs.kind);
+  return (name == rhs.name) && (tpeVars == rhs.tpeVars) && (receiver == rhs.receiver) && (args == rhs.args) && (moduleCaptures == rhs.moduleCaptures) && (termCaptures == rhs.termCaptures) && (rtn == rhs.rtn) && std::equal(body.begin(), body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; }) && (kind == rhs.kind);
 }
 
 Program::Program(Function entry, std::vector<Function> functions, std::vector<StructDef> defs) noexcept : entry(std::move(entry)), functions(std::move(functions)), defs(std::move(defs)) {}
@@ -3379,7 +3379,7 @@ std::ostream &Program::dump(std::ostream &os) const {
   return os;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Program::operator==(const Program& rhs) const {
-return (entry == rhs.entry) && (functions == rhs.functions) && (defs == rhs.defs);
+  return (entry == rhs.entry) && (functions == rhs.functions) && (defs == rhs.defs);
 }
 
 CompileLayoutMember::CompileLayoutMember(Named name, int64_t offsetInBytes, int64_t sizeInBytes) noexcept : name(std::move(name)), offsetInBytes(offsetInBytes), sizeInBytes(sizeInBytes) {}
@@ -3402,7 +3402,7 @@ std::ostream &CompileLayoutMember::dump(std::ostream &os) const {
   return os;
 }
 [[nodiscard]] POLYREGION_EXPORT bool CompileLayoutMember::operator==(const CompileLayoutMember& rhs) const {
-return (name == rhs.name) && (offsetInBytes == rhs.offsetInBytes) && (sizeInBytes == rhs.sizeInBytes);
+  return (name == rhs.name) && (offsetInBytes == rhs.offsetInBytes) && (sizeInBytes == rhs.sizeInBytes);
 }
 
 CompileLayout::CompileLayout(Sym name, int64_t sizeInBytes, int64_t alignment, std::vector<CompileLayoutMember> members) noexcept : name(std::move(name)), sizeInBytes(sizeInBytes), alignment(alignment), members(std::move(members)) {}
@@ -3433,7 +3433,7 @@ std::ostream &CompileLayout::dump(std::ostream &os) const {
   return os;
 }
 [[nodiscard]] POLYREGION_EXPORT bool CompileLayout::operator==(const CompileLayout& rhs) const {
-return (name == rhs.name) && (sizeInBytes == rhs.sizeInBytes) && (alignment == rhs.alignment) && (members == rhs.members);
+  return (name == rhs.name) && (sizeInBytes == rhs.sizeInBytes) && (alignment == rhs.alignment) && (members == rhs.members);
 }
 
 CompileEvent::CompileEvent(int64_t epochMillis, int64_t elapsedNanos, std::string name, std::string data) noexcept : epochMillis(epochMillis), elapsedNanos(elapsedNanos), name(std::move(name)), data(std::move(data)) {}
@@ -3459,7 +3459,7 @@ std::ostream &CompileEvent::dump(std::ostream &os) const {
   return os;
 }
 [[nodiscard]] POLYREGION_EXPORT bool CompileEvent::operator==(const CompileEvent& rhs) const {
-return (epochMillis == rhs.epochMillis) && (elapsedNanos == rhs.elapsedNanos) && (name == rhs.name) && (data == rhs.data);
+  return (epochMillis == rhs.epochMillis) && (elapsedNanos == rhs.elapsedNanos) && (name == rhs.name) && (data == rhs.data);
 }
 
 CompileResult::CompileResult(std::optional<std::vector<int8_t>> binary, std::vector<std::string> features, std::vector<CompileEvent> events, std::vector<CompileLayout> layouts, std::string messages) noexcept : binary(std::move(binary)), features(std::move(features)), events(std::move(events)), layouts(std::move(layouts)), messages(std::move(messages)) {}
@@ -3512,7 +3512,7 @@ std::ostream &CompileResult::dump(std::ostream &os) const {
   return os;
 }
 [[nodiscard]] POLYREGION_EXPORT bool CompileResult::operator==(const CompileResult& rhs) const {
-return (binary == rhs.binary) && (features == rhs.features) && (events == rhs.events) && (layouts == rhs.layouts) && (messages == rhs.messages);
+  return (binary == rhs.binary) && (features == rhs.features) && (events == rhs.events) && (layouts == rhs.layouts) && (messages == rhs.messages);
 }
 
 } // namespace polyregion::polyast
