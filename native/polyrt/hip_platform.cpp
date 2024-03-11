@@ -136,7 +136,7 @@ bool HipDevice::moduleLoaded(const std::string &name) {
   TRACE();
   return store.moduleLoaded(name);
 }
-uintptr_t HipDevice::malloc(size_t size, Access) {
+uintptr_t HipDevice::mallocDevice(size_t size, Access) {
   TRACE();
   context.touch();
   if (size == 0) throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot malloc size of 0");
@@ -144,10 +144,23 @@ uintptr_t HipDevice::malloc(size_t size, Access) {
   CHECKED(hipMalloc(&ptr, size));
   return ptr;
 }
-void HipDevice::free(uintptr_t ptr) {
+void HipDevice::freeDevice(uintptr_t ptr) {
   TRACE();
   context.touch();
   CHECKED(hipFree(ptr));
+}
+std::optional<void *> HipDevice::mallocShared(size_t size, Access access) {
+  TRACE();
+  context.touch();
+  if (size == 0) throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot malloc size of 0");
+  hipDeviceptr_t ptr = {};
+  CHECKED(hipMallocManaged(&ptr, size, hipMemAttachGlobal));
+  return reinterpret_cast<void *>(ptr);
+}
+void HipDevice::freeShared(void *ptr) {
+  TRACE();
+  context.touch();
+  CHECKED(hipFree(reinterpret_cast<hipDeviceptr_t>(ptr)));
 }
 std::unique_ptr<DeviceQueue> HipDevice::createQueue() {
   TRACE();

@@ -96,7 +96,8 @@ object DynamicDispatchPass extends ProgramPass {
                 p.Stmt.Comment("unseen class, assert")
                   :: p.Stmt.Return(p.Expr.SpecOp(p.Spec.Assert))
                   :: Nil
-              )
+              ),
+              kind = p.Function.Kind.Exported
             )
           ) :: Nil
         }

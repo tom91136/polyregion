@@ -70,7 +70,7 @@ LLVMBackend::AstTransformer::AstTransformer(const LLVMBackend::Options &options,
       // Constant (Internal)  4  Constant
       //             Private  5  Local
     case Target::NVPTX64:
-      GlobalAS = 1;
+      GlobalAS = 0; // When inspecting Clang's output, they don't explicitly annotate addrspace(3) for globals
       LocalAS = 3;
       AllocaAS = 0;
       break;
@@ -987,11 +987,13 @@ void LLVMBackend::AstTransformer::addFn(llvm::Module &mod, const Function &f, bo
 
   auto fnTpe = llvm::FunctionType::get(rtnTpe, {llvmArgTpes}, false);
 
-
+  // XXX Normalise names as NVPTX has a relatively limiting range of supported characters in symbols
   auto cleanName=  qualified(f.name) ^ map([](char c) { return !std::isalnum(c) && c != '_' ? '_' : c; });
 
   auto *fn = llvm::Function::Create(fnTpe,                                                                     //
-                                    entry ? llvm::Function::ExternalLinkage : llvm::Function::InternalLinkage, // TODO
+                                    (entry || f.kind == FunctionKind::Exported()) //
+                                        ? llvm::Function::ExternalLinkage
+                                        : llvm::Function::InternalLinkage,
                                     cleanName,                                                         //
                                     mod);
 

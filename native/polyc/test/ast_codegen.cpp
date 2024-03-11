@@ -8,6 +8,7 @@
 #include <iostream>
 
 using namespace polyregion::polyast;
+using namespace polyregion::compiletime;
 using Catch::Matchers::ContainsSubstring;
 
 using namespace Stmt;

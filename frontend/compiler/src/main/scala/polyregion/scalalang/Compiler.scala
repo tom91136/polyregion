@@ -282,7 +282,8 @@ object Compiler {
         moduleCaptures = deriveModuleStructCaptures(deps).map(p.Arg(_)),
         termCaptures = Nil,
         rtn = fnRtnTpe,
-        body = rhsStmts
+        body = rhsStmts,
+        kind = p.Function.Kind.Exported
       )
       _ = log.info("Result", compiledFn.repr)
     } yield (compiledFn, deps)
@@ -443,7 +444,8 @@ object Compiler {
       termCaptures = (capturedNames.map(_._1) ++
         exprThisCls.map((_, tpe) => p.Named("this", tpe))).map(p.Arg(_)),
       rtn = exprTpe,
-      body = exprStmts
+      body = exprStmts,
+      kind = p.Function.Kind.Exported
     )
 
     symbolToMacroDefinedDefDefs = q
@@ -518,7 +520,8 @@ object Compiler {
         rtn = sig.rtn,
         body = p.Stmt.Comment("abstract definition, assert")
           :: p.Stmt.Return(p.Expr.SpecOp(p.Spec.Assert))
-          :: Nil
+          :: Nil,
+        kind = p.Function.Kind.Exported
       )
       log.info(s"Abstract (trait function)", sig.repr)
       fn

@@ -65,7 +65,7 @@ for_each(ExecutionPolicy &&, ForwardIt first, ForwardIt last, UnaryFunction f) {
         break;
       }
       case polyregion::runtime::PlatformKind ::Managed: {
-        const auto kernel = [&f, &first]() { f(*(first + __polyregion_builtin_gpu_global_idx(0))); };
+        const auto kernel = [f, first]() { f(*(first + __polyregion_builtin_gpu_global_idx(0))); };
         auto &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
         for (auto &object : bundle.objects) {
           if (polystl::dispatchManaged(global, 0, 0, sizeof(decltype(kernel)), &kernel, object)) return;

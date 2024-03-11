@@ -2090,7 +2090,8 @@ Function function_from_json(const json& j_) {
   std::vector<Stmt::Any> body;
   auto body_json = j_.at(7);
   std::transform(body_json.begin(), body_json.end(), std::back_inserter(body), &Stmt::any_from_json);
-  return {name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, body};
+  auto kind =  FunctionKind::any_from_json(j_.at(8));
+  return {name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, body, kind};
 }
 
 json function_to_json(const Function& x_) { 
@@ -2106,7 +2107,8 @@ json function_to_json(const Function& x_) {
   auto rtn =  Type::any_to_json(x_.rtn);
   std::vector<json> body;
   std::transform(x_.body.begin(), x_.body.end(), std::back_inserter(body), &Stmt::any_to_json);
-  return json::array({name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, body});
+  auto kind =  FunctionKind::any_to_json(x_.kind);
+  return json::array({name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, body, kind});
 }
 
 Program program_from_json(const json& j_) { 
@@ -2204,13 +2206,13 @@ json compileresult_to_json(const CompileResult& x_) {
 json hashed_from_json(const json& j_) { 
   auto hash_ = j_.at(0).get<std::string>();
   auto data_ = j_.at(1);
-  if(hash_ != "b306b9badfee3509c83dd693b5361b30") {
-   throw std::runtime_error("Expecting ADT hash to be b306b9badfee3509c83dd693b5361b30, but was " + hash_);
+  if(hash_ != "15a700b16ca2bc5cb5074c72226f0f89") {
+   throw std::runtime_error("Expecting ADT hash to be 15a700b16ca2bc5cb5074c72226f0f89, but was " + hash_);
   }
   return data_;
 }
 
 json hashed_to_json(const json& x_) { 
-  return json::array({"b306b9badfee3509c83dd693b5361b30", x_});
+  return json::array({"15a700b16ca2bc5cb5074c72226f0f89", x_});
 }
 } // namespace polyregion::polyast

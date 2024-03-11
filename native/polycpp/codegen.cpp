@@ -82,7 +82,7 @@ polyregion::runtime::KernelBundle polyregion::polystl::generate(clang::ASTContex
               | append(recv)                                                                                                 //
               | to_vector();
 
-  auto f0 = polyregion::polyast::Function(polyregion::polyast::Sym({"kernel"}), {}, {}, args, {}, {}, rtnTpe, stmts);
+  auto f0 = polyregion::polyast::Function(polyregion::polyast::Sym({"kernel"}), {}, {}, args, {}, {}, rtnTpe, stmts, FunctionKind::Exported());
 
   auto p = Program(f0, r.functions ^ values(), r.structs ^ values());
 
@@ -92,16 +92,6 @@ polyregion::runtime::KernelBundle polyregion::polystl::generate(clang::ASTContex
   auto objects =
       targets //
       | collect([&](auto &target, auto &features) {
-
-
-          if(runtime::targetPlatformKind(target) == runtime::PlatformKind::Managed){
-            auto entry = Function(Sym({"entry"}),{}, {}, {}, {}, {},   Type::Unit0(), {Stmt::Return(Expr::Alias(Term::Unit0Const()))});
-
-//            p.functions.emplace_back(p.entry);
-//            p.entry = entry;
-
-          }
-
           return compileProgram(p, target, features) ^
                  fold_total([&](const CompileResult &r) -> std::optional<CompileResult> { return r; },
                             [&](const std::string &err) -> std::optional<CompileResult> {

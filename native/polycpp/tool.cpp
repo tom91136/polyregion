@@ -191,7 +191,7 @@ int executeCC1(std::vector<std::string> &cc1Args, bool stdpar) {
     }
 
     auto M = action.takeModule();
-    interpose(*M);
+//    interpose(*M);
     clang::EmitBackendOutput(CI.getDiagnostics(),                           //
                              CI.getHeaderSearchOpts(),                      //
                              CI.getCodeGenOpts(),                           //

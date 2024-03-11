@@ -297,17 +297,26 @@ static MemObject allocate(VmaAllocator &allocator, size_t size, bool uniform) {
   return {vk::Buffer(buffer), allocation, allocInfo.pMappedData, size};
 }
 
-uintptr_t VulkanDevice::malloc(size_t size, Access) {
+uintptr_t VulkanDevice::mallocDevice(size_t size, Access) {
   TRACE();
   return memoryObjects.malloc(std::make_shared<MemObject>(allocate(allocator, size, false)));
 }
-void VulkanDevice::free(uintptr_t ptr) {
+void VulkanDevice::freeDevice(uintptr_t ptr) {
   TRACE();
   if (auto obj = memoryObjects.query(ptr); obj) {
     vmaDestroyBuffer(allocator, VkBuffer((*obj)->buffer), (*obj)->allocation);
     memoryObjects.erase(ptr);
   } else
     throw std::logic_error(std::string(ERROR_PREFIX) + "Illegal memory object: " + std::to_string(ptr));
+}
+
+std::optional<void *> VulkanDevice::mallocShared(size_t size, Access access) {
+  TRACE();
+  return std::nullopt;
+}
+void VulkanDevice::freeShared(void *ptr) {
+  TRACE();
+  throw std::runtime_error("Unsupported");
 }
 
 std::unique_ptr<DeviceQueue> VulkanDevice::createQueue() {

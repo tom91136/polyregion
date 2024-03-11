@@ -114,6 +114,7 @@ else ()
             -Wno-unused-parameter
             -Wno-unused-function
             -Wno-unused-variable
+            -Wno-c++20-designator
     )
 endif ()
 

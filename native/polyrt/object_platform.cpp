@@ -82,13 +82,22 @@ std::vector<std::string> ObjectDevice::features() {
 
   return features;
 }
-uintptr_t ObjectDevice::malloc(size_t size, Access) {
+uintptr_t ObjectDevice::mallocDevice(size_t size, Access) {
   TRACE();
   return reinterpret_cast<uintptr_t>(std::malloc(size));
 }
-void ObjectDevice::free(uintptr_t ptr) {
+void ObjectDevice::freeDevice(uintptr_t ptr) {
   TRACE();
   std::free(reinterpret_cast<void *>(ptr));
+}
+
+std::optional<void *> ObjectDevice::mallocShared(size_t size, Access access) {
+  TRACE();
+  return std::malloc(size);
+}
+void ObjectDevice::freeShared(void *ptr) {
+  TRACE();
+  std::free(ptr);
 }
 
 // ---

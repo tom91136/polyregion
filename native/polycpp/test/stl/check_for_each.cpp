@@ -74,6 +74,16 @@ private:
   iterator end_;
 };
 
+template <typename T> struct MyAllocator {
+  using value_type = T;
+  MyAllocator() = default;
+  template <class U> constexpr MyAllocator(const MyAllocator<U> &) noexcept {}
+  [[nodiscard]] T *allocate(std::size_t n) { return static_cast<T *>(__polyregion_malloc(sizeof(T) * n)); }
+  void deallocate(T *p, std::size_t) noexcept { __polyregion_free(p); }
+};
+template <class T, class U> bool operator==(const MyAllocator<T> &, const MyAllocator<U> &) { return true; }
+template <class T, class U> bool operator!=(const MyAllocator<T> &, const MyAllocator<U> &) { return false; }
+
 int main() {
 
   int size = 1024;
@@ -81,20 +91,20 @@ int main() {
 
   const double scalar = 0.4;
 
-  std::vector<double> a(size);
+  std::vector<double, MyAllocator<double>> a(size);
   std::fill(a.begin(), a.end(), 0.1);
 
-  std::vector<double> b(size);
+  std::vector<double, MyAllocator<double>> b(size);
   std::fill(b.begin(), b.end(), 0.2);
 
-  std::vector<double> c(size);
+  std::vector<double, MyAllocator<double>> c(size);
   std::fill(c.begin(), c.end(), 0.0);
 
   // a = b + scalar * c
   ranged<int> r(0, size);
   std::for_each(                                              //
       std::execution::par_unseq, r.begin(), r.end(),          //
-      [&, a = a.data(), b = b.data(), c = c.data()](auto i) { //
+      [scalar, a = a.data(), b = b.data(), c = c.data()](auto i) { //
         a[i] =  b[i] + scalar * c[i];
       });
 

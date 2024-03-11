@@ -355,8 +355,8 @@ dsl::AssignmentBuilder dsl::let(const string &name) { return AssignmentBuilder{n
 Expr::IntrOp dsl::invoke(const Intr::Any &intr) { return Expr::IntrOp(intr); }
 Expr::MathOp dsl::invoke(const Math::Any &intr) { return Expr::MathOp(intr); }
 Expr::SpecOp dsl::invoke(const Spec::Any &intr) { return Expr::SpecOp(intr); }
-std::function<Function(std::vector<Stmt::Any>)> dsl::function(const string &name, const std::vector<Arg> &args, const Type::Any &rtn) {
-  return [=](auto &&stmts) { return Function(Sym({name}), {}, {}, args, {}, {}, rtn, stmts); };
+std::function<Function(std::vector<Stmt::Any>)> dsl::function(const string &name, const std::vector<Arg> &args, const Type::Any &rtn, const FunctionKind::Any &kind) {
+  return [=](auto &&stmts) { return Function(Sym({name}), {}, {}, args, {}, {}, rtn, stmts, kind); };
 }
 Stmt::Return dsl::ret(const Expr::Any &expr) { return Return(expr); }
 Stmt::Return dsl::ret(const Term::Any &term) { return Return(Alias(term)); }

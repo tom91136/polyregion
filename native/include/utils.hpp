@@ -97,7 +97,7 @@ template <typename T> std::vector<std::vector<T>> cartesin_product(const std::ve
         r.back().push_back(y);
       }
     }
-    s = move(r);
+    s = std::move(r);
   }
   return s;
 }

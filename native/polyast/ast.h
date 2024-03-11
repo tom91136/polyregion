@@ -106,7 +106,8 @@ AssignmentBuilder let(const std::string &name);
 IntrOp invoke(const Intr::Any &);
 MathOp invoke(const Math::Any &);
 SpecOp invoke(const Spec::Any &);
-std::function<Function(std::vector<Stmt::Any>)> function(const std::string &name, const std::vector<Arg> &args, const Type::Any &rtn);
+std::function<Function(std::vector<Stmt::Any>)> function(const std::string &name, const std::vector<Arg> &args, const Type::Any &rtn,
+                                                         const FunctionKind::Any &kind = FunctionKind::Exported());
 Program program(Function entry, std::vector<StructDef> defs = {}, std::vector<Function> functions = {});
 
 Return ret(const Expr::Any &expr = Alias(Unit0Const()));

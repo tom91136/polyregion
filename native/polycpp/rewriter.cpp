@@ -227,7 +227,7 @@ template <typename Parent, typename Node> const Parent *findParentOfType(clang::
     //    clang::Stmt *ax = {};
     //    context.getParents(*ax).begin()->get<clang::Decl>();
 
-    if (auto parent = dyn_cast<Parent>(node); parent) {
+    if (auto parent = llvm::dyn_cast<Parent>(node); parent) {
       return parent;
     }
   }
@@ -259,7 +259,7 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
 //                     Source_C_C11 ,
 
                      std::vector<std::pair<compiletime::Target, std::string>> targets = {
-//                         {compiletime::Target::Object_LLVM_HOST, "native"},
+                         {compiletime::Target::Object_LLVM_HOST, "native"},
                          {compiletime::Target::Object_LLVM_NVPTX64, "sm_60"},
                      };
 

@@ -195,7 +195,7 @@ bool ClDevice::moduleLoaded(const std::string &name) {
   TRACE();
   return store.moduleLoaded(name);
 }
-uintptr_t ClDevice::malloc(size_t size, Access access) {
+uintptr_t ClDevice::mallocDevice(size_t size, Access access) {
   TRACE();
   context.touch();
   cl_mem_flags flags = {};
@@ -208,7 +208,7 @@ uintptr_t ClDevice::malloc(size_t size, Access access) {
   return memoryObjects.malloc(OUT_CHECKED(clCreateBuffer(*context, flags, size, nullptr, OUT_ERR)));
 }
 
-void ClDevice::free(uintptr_t ptr) {
+void ClDevice::freeDevice(uintptr_t ptr) {
   TRACE();
   context.touch();
 
@@ -217,6 +217,16 @@ void ClDevice::free(uintptr_t ptr) {
     memoryObjects.erase(ptr);
   } else
     throw std::logic_error(std::string(ERROR_PREFIX) + "Illegal memory object: " + std::to_string(ptr));
+}
+std::optional<void *> ClDevice::mallocShared(size_t size, Access access) {
+  TRACE();
+  context.touch();
+  return std::nullopt;
+}
+void ClDevice::freeShared(void *ptr) {
+  TRACE();
+  context.touch();
+  throw std::runtime_error("Unsupported");
 }
 std::unique_ptr<DeviceQueue> ClDevice::createQueue() {
   TRACE();

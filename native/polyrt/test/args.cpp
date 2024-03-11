@@ -11,6 +11,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 using namespace polyregion::runtime;
+using namespace polyregion::compiletime;
 using namespace polyregion::test_utils;
 using namespace polyregion::concurrency_utils;
 
@@ -19,7 +20,7 @@ using namespace polyregion::concurrency_utils;
 template <typename I> void testArgs(I images, std::initializer_list<Backend> backends) {
   auto backend = GENERATE_REF(values(backends));
   auto platform = Platform::of(backend);
-  DYNAMIC_SECTION("backend=" << nameOfBackend(backend)) {
+  DYNAMIC_SECTION("backend=" << to_string(backend)) {
     for (auto &d : platform->enumerate()) {
       DYNAMIC_SECTION("device=" << d->name()) {
         if (auto imageGroups = findTestImage(images, backend, d->features()); !imageGroups.empty()) {
@@ -36,8 +37,8 @@ template <typename I> void testArgs(I images, std::initializer_list<Backend> bac
             if (imageGroups.size() != 1) {
               FAIL("Found more than one ("
                    << imageGroups.size() << ") kernel test images for device `" << d->name()
-                   << "`(backend=" << nameOfBackend(backend)
-                   << ", features=" << polyregion::mk_string<std::string>(d->features(), std::identity(), ",") << ")");
+                   << "`(backend=" << to_string(backend)
+                   << ", features=" << polyregion::mk_string<std::string>(d->features(), [](auto x){return x;}, ",") << ")");
             } else {
               d->loadModule("module", imageGroups[0].second);
               kernelName = [](auto args) { return "_arg" + std::to_string(args); };
@@ -48,7 +49,7 @@ template <typename I> void testArgs(I images, std::initializer_list<Backend> bac
           auto args = GENERATE(range(0, 28));
           DYNAMIC_SECTION("args=" << args) {
             auto q = d->createQueue();
-            auto out_d = d->template mallocTyped<float>(1, Access::RW);
+            auto out_d = d->template mallocDeviceTyped<float>(1, Access::RW);
 
             float out = {};
             waitAll([&](auto &h) { q->enqueueHostToDeviceAsyncTyped(&out, out_d, 1, h); });
@@ -74,12 +75,12 @@ template <typename I> void testArgs(I images, std::initializer_list<Backend> bac
             waitAll([&](auto &h) { q->enqueueInvokeAsync(moduleName(args), kernelName(args), buffer, {}, h); });
             waitAll([&](auto &h) { q->enqueueDeviceToHostAsyncTyped(out_d, &out, 1, h); });
             CHECK_THAT(out, Catch::Matchers::WithinULP(expected, 0));
-            d->free(out_d);
+            d->freeDevice(out_d);
           }
         } else {
           WARN("No kernel test image found for device `"
-               << d->name() << "`(backend=" << nameOfBackend(backend)
-               << ", features=" << polyregion::mk_string<std::string>(d->features(), std::identity(), ",") << ")");
+               << d->name() << "`(backend=" << to_string(backend)
+               << ", features=" << polyregion::mk_string<std::string>(d->features(), [](auto x){return x;}, ",") << ")");
         }
       }
     }
@@ -121,6 +122,6 @@ TEST_CASE("SPIRV Args") {
 
 TEST_CASE("CPU Args") {
   testArgs(generated::cpu::args,                           //
-           {Backend::RELOCATABLE_OBJ, Backend::SHARED_OBJ} //
+           {Backend::RelocatableObject, Backend::SharedObject} //
   );
 }

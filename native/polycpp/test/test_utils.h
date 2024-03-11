@@ -29,11 +29,9 @@ std::invoke_result_t<F> __polyregion_offload_f1__(F f) {
     {
       const auto kernel = [&result, &f]() { result = f(); };
       auto &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
-      std::byte argData[sizeof(decltype(kernel))];
-      std::memcpy(argData, &kernel, sizeof(decltype(kernel)));
       for (auto &object : bundle.objects) {
         totalObjects++;
-        if (polystl::dispatchManaged(1, 0, 0, &argData, object)) return result;
+        if (polystl::dispatchManaged(1, 0, 0, sizeof(decltype(kernel)), &kernel, object)) return result;
       }
     }
     throw std::logic_error("Dispatch failed: no compatible backend after trying " + std::to_string(totalObjects) + " different objects");

@@ -26,15 +26,15 @@ const static std::vector<float> xs{0.f,
 template <typename I> void testFma(I images, std::initializer_list<Backend> backends) {
   auto backend = GENERATE_REF(values(backends));
   auto platform = Platform::of(backend);
-  DYNAMIC_SECTION("backend=" << nameOfBackend(backend)) {
+  DYNAMIC_SECTION("backend=" << to_string(backend)) {
     for (auto &d : platform->enumerate()) {
       DYNAMIC_SECTION("device=" << d->name()) {
         if (auto imageGroups = findTestImage(images, backend, d->features()); !imageGroups.empty()) {
 
           if (imageGroups.size() != 1) {
             FAIL("Found more than one (" << imageGroups.size() << ") kernel test images for device `" << d->name()
-                                         << "`(backend=" << nameOfBackend(backend) << ", features="
-                                         << polyregion::mk_string<std::string>(d->features(), std::identity(), ",")
+                                         << "`(backend=" << to_string(backend) << ", features="
+                                         << polyregion::mk_string<std::string>(d->features(),[](auto x){return x;}, ",")
                                          << ")");
           }
 
@@ -54,7 +54,7 @@ template <typename I> void testFma(I images, std::initializer_list<Backend> back
           auto c = GENERATE(from_range(xs));
           DYNAMIC_SECTION("a=" << a << " b=" << b << " c=" << c) {
             auto q = d->createQueue();
-            auto out_d = d->template mallocTyped<float>(1, Access::RW);
+            auto out_d = d->template mallocDeviceTyped<float>(1, Access::RW);
             //
             ArgBuffer buffer;
             if (d->sharedAddressSpace()) buffer.append(Type::Long64, nullptr);
@@ -81,12 +81,12 @@ template <typename I> void testFma(I images, std::initializer_list<Backend> back
               CHECK_THAT(out, Catch::Matchers::WithinRel(expected));
             }
 
-            d->free(out_d);
+            d->freeDevice(out_d);
           }
         } else {
           WARN("No kernel test image found for device `"
-               << d->name() << "`(backend=" << nameOfBackend(backend)
-               << ", features=" << polyregion::mk_string<std::string>(d->features(), std::identity(), ",") << ")");
+               << d->name() << "`(backend=" << to_string(backend)
+               << ", features=" << polyregion::mk_string<std::string>(d->features(), [](auto x){return x;}, ",") << ")");
         }
       }
     }
@@ -128,6 +128,6 @@ TEST_CASE("SPIRV FMA") {
 
 TEST_CASE("CPU FMA") {
   testFma(generated::cpu::fma,                            //
-          {Backend::RELOCATABLE_OBJ, Backend::SHARED_OBJ} //
+          {Backend::RelocatableObject, Backend::SharedObject} //
   );
 }

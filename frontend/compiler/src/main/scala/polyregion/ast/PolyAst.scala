@@ -464,7 +464,8 @@ object PolyAst {
       moduleCaptures: List[Arg], //
       termCaptures: List[Arg],   //
       rtn: Type,                 //
-      body: List[Stmt]           //
+      body: List[Stmt],           //
+      kind : Function.Kind
   ) derives MsgPack.Codec
   object Function {
     enum Kind derives MsgPack.Codec { case Internal, Exported  }

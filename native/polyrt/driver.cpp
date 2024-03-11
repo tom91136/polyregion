@@ -329,7 +329,7 @@ void run() {
           d->loadModule("a", src);
         }
         auto size = sizeof(decltype(xs)::value_type) * xs.size();
-        auto ptr = d->malloc(size, Access::RW);
+        auto ptr = d->mallocDevice(size, Access::RW);
         q1->enqueueHostToDeviceAsync(xs.data(), ptr, size,
                                      [&]() { std::cout << "[" << i << "]  H->D ok" << std::endl; });
 
@@ -354,7 +354,7 @@ void run() {
                            xs, [](auto x) { return std::to_string(x); }, ",")
                     << std::endl;
         });
-        d->free(ptr);
+        d->freeDevice(ptr);
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
       }
 

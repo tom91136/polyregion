@@ -25,7 +25,7 @@ POLYREGION_EXPORT bool dispatchManaged(size_t global, size_t local, size_t local
 
 } // namespace polystl
 
-uint64_t __polyregion_builtin_gpu_global_idx(uint32_t); // NOLINT(*-reserved-identifier)
+[[nodiscard]] uint64_t __polyregion_builtin_gpu_global_idx(uint32_t); // NOLINT(*-reserved-identifier)
 
 template <polyregion::runtime::PlatformKind Kind, typename F>                         //
 const polyregion::runtime::KernelBundle &__polyregion_offload__([[maybe_unused]] F) { // NOLINT(*-reserved-identifier)
@@ -36,3 +36,6 @@ const polyregion::runtime::KernelBundle &__polyregion_offload__([[maybe_unused]]
   fprintf(stderr, "Load %s ", to_string(bundle.objects[0].format).data());
   return bundle;
 }
+
+POLYREGION_EXPORT [[nodiscard]] void *__polyregion_malloc(size_t size); // NOLINT(*-reserved-identifier)
+POLYREGION_EXPORT void __polyregion_free(void *ptr);                    // NOLINT(*-reserved-identifier)

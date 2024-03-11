@@ -339,7 +339,7 @@ std::pair<std::string, Function> Remapper::handleCall(const clang::FunctionDecl 
       body.emplace_back(Stmt::Return(Expr::Alias(Term::Unit0Const())));
     }
 
-    auto fn = r.functions.emplace(name, Function(Sym({name}), {}, receiver, args, {}, {}, rtnType, body)).first->second;
+    auto fn = r.functions.emplace(name, Function(Sym({name}), {}, receiver, args, {}, {}, rtnType, body, FunctionKind::Internal())).first->second;
     return {name, fn};
   } else {
     return {name, it->second};
@@ -353,6 +353,12 @@ std::string Remapper::handleRecord(const clang::RecordDecl *decl, RemapContext &
     //    decl->dump();
     std::vector<StructMember> members;
     std::vector<Sym> parents;
+
+    auto addMembers = [&]() {
+      for (auto field : decl->fields()) {
+        members.emplace_back(Named(name + "::" + field->getName().str(), handleType(field->getType(), r)), true);
+      }
+    };
 
     if (auto cxxRecord = llvm::dyn_cast<clang::CXXRecordDecl>(decl); cxxRecord) {
 
@@ -392,10 +398,12 @@ std::string Remapper::handleRecord(const clang::RecordDecl *decl, RemapContext &
 
       resolveBases(cxxRecord->bases());
       resolveBases(cxxRecord->vbases());
-    }
-    for (auto field : decl->fields()) {
+      if (!cxxRecord->isLambda()) {
+        addMembers();
+      }
 
-      members.emplace_back(Named(name + "::" + field->getName().str(), handleType(field->getType(), r)), true);
+    } else {
+      addMembers();
     }
 
     auto sd = r.structs.emplace(name, StructDef(Sym({name}), {}, members, parents));

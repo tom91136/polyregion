@@ -179,7 +179,8 @@ object Remapper {
             .collect { case p.Term.Select(Nil, n) => n }
             .map(p.Arg(_)),
           rtn = fnRtnTpe,
-          body = fnStmts
+          body = fnStmts,
+          kind = p.Function.Kind.Exported
         )
 
       } yield fn -> c

@@ -32,7 +32,8 @@ object FnInlinePass extends ProgramPass {
       f.moduleCaptures,
       f.termCaptures.map(arg => arg.copy(rename(arg.named))),
       f.rtn,
-      body
+      body,
+      f.kind
     )
   }
 

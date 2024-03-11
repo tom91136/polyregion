@@ -313,7 +313,7 @@ object compiletime {
       (_, _, dependentStructs, _) <-
         Compiler.compileAndReplaceStructDependencies(
           sink,
-          p.Function(p.Sym("_dummy_"), Nil, None, Nil, Nil, Nil, p.Type.Nothing, Nil),
+          p.Function(p.Sym("_dummy_"), Nil, None, Nil, Nil, Nil, p.Type.Nothing, Nil, p.Function.Kind.Exported),
           deps
         )(Map.empty)
 

@@ -7,7 +7,7 @@
 #include <iostream>
 
 using namespace polyregion::polyast;
-
+using namespace polyregion::compiletime;
 using namespace Stmt;
 using namespace Term;
 using namespace Expr;

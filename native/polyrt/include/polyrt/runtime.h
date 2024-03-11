@@ -29,7 +29,7 @@
   #endif
 
   #define TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this, __PRETTY_FUNCTION__)
-//  #define TRACE()
+  #define TRACE()
 
 #endif
 
@@ -360,17 +360,29 @@ public:
   [[nodiscard]] virtual POLYREGION_EXPORT std::vector<std::string> features() = 0;
   virtual POLYREGION_EXPORT void loadModule(const std::string &name, const std::string &image) = 0;
   [[nodiscard]] virtual POLYREGION_EXPORT bool moduleLoaded(const std::string &name) = 0;
-  [[nodiscard]] virtual POLYREGION_EXPORT uintptr_t malloc(size_t size, Access access) = 0;
 
-  template <typename T> [[nodiscard]] POLYREGION_EXPORT uintptr_t mallocTyped(size_t count, Access access) {
+  [[nodiscard]] virtual POLYREGION_EXPORT uintptr_t mallocDevice(size_t size, Access access) = 0;
+  virtual POLYREGION_EXPORT void freeDevice(uintptr_t ptr) = 0;
+
+  [[nodiscard]] virtual POLYREGION_EXPORT std::optional<void *> mallocShared(size_t size, Access access) = 0;
+  virtual POLYREGION_EXPORT void freeShared(void *ptr) = 0;
+
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT uintptr_t mallocDeviceTyped(size_t count, Access access) {
     static_assert(sizeof(T) != 0);
-    return malloc(count * sizeof(T), access);
+    return mallocDevice(count * sizeof(T), access);
+  };
+  template <typename... T> POLYREGION_EXPORT void freeAllDevice(T... ptrs) {
+    ([&]() { freeDevice(ptrs); }(), ...);
   };
 
-  virtual POLYREGION_EXPORT void free(uintptr_t ptr) = 0;
-  template <typename... T> POLYREGION_EXPORT void freeAll(T... ptrs) {
-    ([&]() { free(ptrs); }(), ...);
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT T *mallocSharedTyped(size_t count, Access access) {
+    static_assert(sizeof(T) != 0);
+    return static_cast<T *>(mallocShared(count * sizeof(T), access));
   };
+  template <typename... T> POLYREGION_EXPORT void freeAllShared(T... ptrs) {
+    ([&]() { freeShared(ptrs); }(), ...);
+  };
+
   [[nodiscard]] virtual POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue() = 0;
 };
 

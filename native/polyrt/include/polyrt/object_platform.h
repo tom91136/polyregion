@@ -22,8 +22,10 @@ public:
   POLYREGION_EXPORT std::vector<std::string> features() override;
   POLYREGION_EXPORT bool sharedAddressSpace() override;
   POLYREGION_EXPORT bool singleEntryPerModule() override;
-  POLYREGION_EXPORT uintptr_t malloc(size_t size, Access access) override;
-  POLYREGION_EXPORT void free(uintptr_t ptr) override;
+  POLYREGION_EXPORT uintptr_t mallocDevice(size_t size, Access access) override;
+  POLYREGION_EXPORT void freeDevice(uintptr_t ptr) override;
+  POLYREGION_EXPORT std::optional<void*> mallocShared(size_t size, Access access) override;
+  POLYREGION_EXPORT void freeShared(void* ptr) override;
 };
 
 class POLYREGION_EXPORT ObjectDeviceQueue : public DeviceQueue {

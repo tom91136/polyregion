@@ -14,18 +14,18 @@ namespace cp = ::compiler;
 namespace gen = ::generated;
 using namespace gen::registry;
 
-static_assert(polyregion::to_underlying(polyast::Target::Object_LLVM_HOST) == Compiler::Target_Object_LLVM_HOST);
-static_assert(polyregion::to_underlying(polyast::Target::Object_LLVM_x86_64) == Compiler::Target_Object_LLVM_x86_64);
-static_assert(polyregion::to_underlying(polyast::Target::Object_LLVM_AArch64) == Compiler::Target_Object_LLVM_AArch64);
-static_assert(polyregion::to_underlying(polyast::Target::Object_LLVM_ARM) == Compiler::Target_Object_LLVM_ARM);
+static_assert(polyregion::to_underlying(compiletime::Target::Object_LLVM_HOST) == Compiler::Target_Object_LLVM_HOST);
+static_assert(polyregion::to_underlying(compiletime::Target::Object_LLVM_x86_64) == Compiler::Target_Object_LLVM_x86_64);
+static_assert(polyregion::to_underlying(compiletime::Target::Object_LLVM_AArch64) == Compiler::Target_Object_LLVM_AArch64);
+static_assert(polyregion::to_underlying(compiletime::Target::Object_LLVM_ARM) == Compiler::Target_Object_LLVM_ARM);
 
-static_assert(polyregion::to_underlying(polyast::Target::Object_LLVM_NVPTX64) == Compiler::Target_Object_LLVM_NVPTX64);
-static_assert(polyregion::to_underlying(polyast::Target::Object_LLVM_AMDGCN) == Compiler::Target_Object_LLVM_AMDGCN);
-static_assert(polyregion::to_underlying(polyast::Target::Object_LLVM_SPIRV32) == Compiler::Target_Object_LLVM_SPIRV32);
-static_assert(polyregion::to_underlying(polyast::Target::Object_LLVM_SPIRV64) == Compiler::Target_Object_LLVM_SPIRV64);
+static_assert(polyregion::to_underlying(compiletime::Target::Object_LLVM_NVPTX64) == Compiler::Target_Object_LLVM_NVPTX64);
+static_assert(polyregion::to_underlying(compiletime::Target::Object_LLVM_AMDGCN) == Compiler::Target_Object_LLVM_AMDGCN);
+static_assert(polyregion::to_underlying(compiletime::Target::Object_LLVM_SPIRV32) == Compiler::Target_Object_LLVM_SPIRV32);
+static_assert(polyregion::to_underlying(compiletime::Target::Object_LLVM_SPIRV64) == Compiler::Target_Object_LLVM_SPIRV64);
 
-static_assert(polyregion::to_underlying(polyast::Target::Source_C_OpenCL1_1) == Compiler::Target_Source_C_OpenCL1_1);
-static_assert(polyregion::to_underlying(polyast::Target::Source_C_C11) == Compiler::Target_Source_C_C11);
+static_assert(polyregion::to_underlying(compiletime::Target::Source_C_OpenCL1_1) == Compiler::Target_Source_C_OpenCL1_1);
+static_assert(polyregion::to_underlying(compiletime::Target::Source_C_C11) == Compiler::Target_Source_C_C11);
 
 [[maybe_unused]] JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
   fprintf(stderr, "JVM enter\n");
@@ -72,23 +72,23 @@ static generated::Event::Instance toJni(JNIEnv *env, const polyast::CompileEvent
 static cp::Options fromJni(JNIEnv *env, jobject options) {
   auto opt = gen::Options::of(env).wrap(env, options);
   auto targetOrdinal = opt.target(env);
-  if (auto target = polyast::targetFromOrdinal(targetOrdinal); target) {
+  if (auto target = compiletime::targetFromOrdinal(targetOrdinal); target) {
     return {.target = *target, .arch = fromJni(env, opt.arch(env))};
   } else
     throw std::logic_error("Unknown target value: " + std::to_string(targetOrdinal));
 }
 
-static polyast::OptLevel fromJni(JNIEnv *env, jbyte optOrdinal) {
-  if (auto opt = polyast::optFromOrdinal(optOrdinal); opt) return *opt;
+static compiletime::OptLevel fromJni(JNIEnv *, jbyte optOrdinal) {
+  if (auto opt = compiletime::optFromOrdinal(optOrdinal); opt) return *opt;
   else
     throw std::logic_error("Unknown opt value: " + std::to_string(optOrdinal));
 }
 
-jbyte Compiler::hostTarget0(JNIEnv *env, jclass) {
+jbyte Compiler::hostTarget0(JNIEnv *, jclass) {
   switch (polyregion::backend::llvmc::defaultHostTriple().getArch()) {
-    case llvm::Triple::x86_64: return polyregion::to_underlying(polyast::Target::Object_LLVM_x86_64);
-    case llvm::Triple::aarch64: return polyregion::to_underlying(polyast::Target::Object_LLVM_AArch64);
-    case llvm::Triple::arm: return polyregion::to_underlying(polyast::Target::Object_LLVM_ARM);
+    case llvm::Triple::x86_64: return polyregion::to_underlying(compiletime::Target::Object_LLVM_x86_64);
+    case llvm::Triple::aarch64: return polyregion::to_underlying(compiletime::Target::Object_LLVM_AArch64);
+    case llvm::Triple::arm: return polyregion::to_underlying(compiletime::Target::Object_LLVM_ARM);
     default: return Compiler::Target_UNSUPPORTED;
   }
 }
@@ -105,7 +105,7 @@ jobjectArray Compiler::layoutOf0(JNIEnv *env, jclass, jbyteArray structDef, jobj
 }
 
 jobject Compiler::compile0(JNIEnv *env, jclass, //
-                           jbyteArray function, jboolean emitDisassembly, jobject options, jbyte opt) {
+                           jbyteArray function, jboolean, jobject options, jbyte opt) {
   return wrapException(env, EX, [&]() {
     auto c = cp::compile(fromJni<char>(env, function), fromJni(env, options), fromJni(env, opt));
     if (!c.binary) throw std::logic_error(c.messages);

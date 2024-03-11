@@ -2205,10 +2205,11 @@ struct POLYREGION_EXPORT Function {
   std::vector<Arg> termCaptures;
   Type::Any rtn;
   std::vector<Stmt::Any> body;
+  FunctionKind::Any kind;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Function &) const;
-  Function(Sym name, std::vector<std::string> tpeVars, std::optional<Arg> receiver, std::vector<Arg> args, std::vector<Arg> moduleCaptures, std::vector<Arg> termCaptures, Type::Any rtn, std::vector<Stmt::Any> body) noexcept;
+  Function(Sym name, std::vector<std::string> tpeVars, std::optional<Arg> receiver, std::vector<Arg> args, std::vector<Arg> moduleCaptures, std::vector<Arg> termCaptures, Type::Any rtn, std::vector<Stmt::Any> body, FunctionKind::Any kind) noexcept;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Function &);
 };
 

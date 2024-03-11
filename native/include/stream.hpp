@@ -46,14 +46,14 @@ void runStream(Type tpe, size_t size, size_t times, size_t groups, const std::st
   bool cpu = d->sharedAddressSpace();
 
   auto [begin, end] = sequencePair(splitStaticExclusive<int64_t>(0, int64_t(size), int64_t(groups)));
-  auto begins_d = cpu ? d->mallocTyped<int64_t>(begin.size(), Access::RO) : 0;
-  auto ends_d = cpu ? d->mallocTyped<int64_t>(end.size(), Access::RO) : 0;
+  auto begins_d = cpu ? d->mallocDeviceTyped<int64_t>(begin.size(), Access::RO) : 0;
+  auto ends_d = cpu ? d->mallocDeviceTyped<int64_t>(end.size(), Access::RO) : 0;
   auto sumGroups = cpu ? groups : 256;
 
-  auto a_d = d->mallocTyped<T>(size, Access::RW);
-  auto b_d = d->mallocTyped<T>(size, Access::RW);
-  auto c_d = d->mallocTyped<T>(size, Access::RW);
-  auto sum_d = d->mallocTyped<T>(sumGroups, Access::RW);
+  auto a_d = d->mallocDeviceTyped<T>(size, Access::RW);
+  auto b_d = d->mallocDeviceTyped<T>(size, Access::RW);
+  auto c_d = d->mallocDeviceTyped<T>(size, Access::RW);
+  auto sum_d = d->mallocDeviceTyped<T>(sumGroups, Access::RW);
 
   auto q = d->createQueue();
 
@@ -143,8 +143,8 @@ void runStream(Type tpe, size_t size, size_t times, size_t groups, const std::st
   auto d2hT2 = std::chrono::high_resolution_clock::now();
   auto d2hElapsed = std::chrono::duration_cast<std::chrono::duration<double>>(d2hT2 - d2hT1).count();
 
-  d->freeAll(a_d, b_d, c_d, sum_d);
-  if (cpu) d->freeAll(begins_d, ends_d);
+  d->freeAllDevice(a_d, b_d, c_d, sum_d);
+  if (cpu) d->freeAllDevice(begins_d, ends_d);
 
   auto [expectedA, expectedB, expectedC, expectedSum] =
       expectedResult(times, size, StartA<T>, StartA<T>, StartC<T>, StartScalar<T>);

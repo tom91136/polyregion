@@ -140,12 +140,11 @@ bool MetalDevice::moduleLoaded(const std::string &name) {
   TRACE();
   return store.moduleLoaded(name);
 }
-uintptr_t MetalDevice::malloc(size_t size, Access access) {
+uintptr_t MetalDevice::mallocDevice(size_t size, Access access) {
   TRACE();
   return memoryObjects.malloc(device->newBuffer(size, MTL::ResourceStorageModeShared));
 }
-
-void MetalDevice::free(uintptr_t ptr) {
+void MetalDevice::freeDevice(uintptr_t ptr) {
   TRACE();
   if (auto mem = memoryObjects.query(ptr); mem) {
     (*mem)->release();
@@ -153,6 +152,23 @@ void MetalDevice::free(uintptr_t ptr) {
   } else
     throw std::logic_error(std::string(ERROR_PREFIX) + "Illegal memory object: " + std::to_string(ptr));
 }
+std::optional<void *> MetalDevice::mallocShared(size_t size, Access access) {
+  TRACE();
+  return std::nullopt;
+}
+void MetalDevice::freeShared(void *ptr) {
+  TRACE();
+  throw std::runtime_error("Unsupported");
+}
+std::optional<void *> MetalDevice::mallocShared(size_t size, Access access) {
+  TRACE();
+  return std::nullopt;
+}
+void MetalDevice::freeShared(void *ptr) {
+  TRACE();
+  throw std::runtime_error("Unsupported");
+}
+
 std::unique_ptr<DeviceQueue> MetalDevice::createQueue() {
   TRACE();
   return std::make_unique<MetalDeviceQueue>(

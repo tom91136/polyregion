@@ -119,14 +119,13 @@ std::vector<std::string> CudaDevice::features() {
 }
 void CudaDevice::loadModule(const std::string &name, const std::string &image) {
   TRACE();
-  fprintf(stderr, "[%s]>>>\n%s\n<<<",name.c_str(), image.c_str());
   store.loadModule(name, image);
 }
 bool CudaDevice::moduleLoaded(const std::string &name) {
   TRACE();
   return store.moduleLoaded(name);
 }
-uintptr_t CudaDevice::malloc(size_t size, Access) {
+uintptr_t CudaDevice::mallocDevice(size_t size, Access) {
   TRACE();
   context.touch();
   if (size == 0) throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot malloc size of 0");
@@ -134,10 +133,23 @@ uintptr_t CudaDevice::malloc(size_t size, Access) {
   CHECKED(cuMemAlloc(&ptr, size));
   return ptr;
 }
-void CudaDevice::free(uintptr_t ptr) {
+void CudaDevice::freeDevice(uintptr_t ptr) {
   TRACE();
   context.touch();
   CHECKED(cuMemFree(ptr));
+}
+std::optional<void *> CudaDevice::mallocShared(size_t size, Access access) {
+  TRACE();
+  context.touch();
+  if (size == 0) throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot malloc size of 0");
+  CUdeviceptr ptr = {};
+  CHECKED(cuMemAllocManaged(&ptr, size, CU_MEM_ATTACH_GLOBAL));
+  return reinterpret_cast<void *>(ptr);
+}
+void CudaDevice::freeShared(void *ptr) {
+  TRACE();
+  context.touch();
+  CHECKED(cuMemFree(reinterpret_cast<CUdeviceptr>(ptr)));
 }
 std::unique_ptr<DeviceQueue> CudaDevice::createQueue() {
   TRACE();

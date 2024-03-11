@@ -44,7 +44,7 @@ bool SpecialisationPathVisitor::VisitDecl(clang::Decl *decl) {
 }
 bool SpecialisationPathVisitor::VisitCallExpr(clang::CallExpr *expr) {
   if (expr) {
-    if (auto decl = dyn_cast_or_null<clang::FunctionDecl>(expr->getCalleeDecl()); decl && decl->isFunctionTemplateSpecialization()) {
+    if (auto decl = llvm::dyn_cast_or_null<clang::FunctionDecl>(expr->getCalleeDecl()); decl && decl->isFunctionTemplateSpecialization()) {
       map.emplace(decl, std::pair{currentFnDecl, expr});
     }
   }

@@ -12,7 +12,7 @@ polyregion::test_utils::findTestImage(const ImageGroups &images, const polyregio
 
   // HIP accepts HSA kernels
   auto actualBackend = backend == polyregion::runtime::Backend::HIP ? polyregion::runtime::Backend::HSA : backend;
-  if (auto it = images.find(std::string(nameOfBackend(actualBackend))); it != images.end()) {
+  if (auto it = images.find(std::string(to_string(actualBackend))); it != images.end()) {
     auto entries = it->second;
 
     if (features.empty()) { // for things like OpenCL/Vulkan which is arch independent

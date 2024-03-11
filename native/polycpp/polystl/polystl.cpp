@@ -103,11 +103,35 @@ static bool loadKernelObject(const polystl::KernelObject &object) {
   return true;
 }
 
+void *__polyregion_malloc(size_t size) {
+  using namespace polystl;
+  initialiseRuntime();
+  if (!thePlatform || !theDevice || !theQueue) {
+    fprintf(stderr, "[POLYSTL] No device/queue in %s\n", __func__);
+    return nullptr;
+  }
+  if (auto ptr = theDevice->mallocShared(size, polyregion::runtime::Access::RW); ptr) {
+    return *ptr;
+  } else {
+    fprintf(stderr, "[POLYSTL] No USM support in %s\n", __func__);
+    return nullptr;
+  }
+}
+
+void __polyregion_free(void *ptr) {
+  using namespace polystl;
+  initialiseRuntime();
+  if (!thePlatform || !theDevice || !theQueue) {
+    fprintf(stderr, "[POLYSTL] No device/queue in %s\n", __func__);
+  }
+  theDevice->freeShared(ptr);
+}
+
 std::optional<polystl::PlatformKind> polystl::platformKind() {
   using namespace polystl;
   initialiseRuntime();
   if (!thePlatform || !theDevice || !theQueue) {
-    fprintf(stderr, "[POLYSTL] No device/queue\n");
+    fprintf(stderr, "[POLYSTL] No device/queue in %s\n", __func__);
     return {};
   }
   return thePlatform->kind();
@@ -134,7 +158,7 @@ bool polystl::dispatchManaged(size_t global, size_t local, size_t localMemBytes,
   if (!loadKernelObject(object)) return false;
   const static auto fn = __func__;
 
-  auto m = theDevice->malloc(functorDataSize, polystl::Access::RW);
+  auto m = theDevice->mallocDevice(functorDataSize, polystl::Access::RW);
 
   polyregion::concurrency_utils::waitAll(
       [&](auto &cb) { polystl::theQueue->enqueueHostToDeviceAsync(functorData, m, functorDataSize, [&]() { cb(); }); });
@@ -150,7 +174,7 @@ bool polystl::dispatchManaged(size_t global, size_t local, size_t localMemBytes,
           cb();
         });
   });
-  theDevice->free(m);
+  theDevice->freeDevice(m);
   std::fprintf(stderr, "[POLYSTL:%s] Done\n", fn);
   return true;
 }

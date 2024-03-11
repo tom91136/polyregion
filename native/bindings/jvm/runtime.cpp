@@ -204,13 +204,13 @@ jboolean Platform::moduleLoaded0(JNIEnv *env, jclass, jlong nativePeer, jstring 
 jlong Platform::malloc0(JNIEnv *env, jclass, jlong nativePeer, jlong size, jbyte access) {
   if (auto a = rt::from_underlying<rt::Access>(access); a) {
     return wrapException(env, EX,
-                         [&]() { return static_cast<jlong>(findRef(env, devices, nativePeer)->malloc(size, *a)); });
+                         [&]() { return static_cast<jlong>(findRef(env, devices, nativePeer)->mallocDevice(size, *a)); });
   } else
     return throwGeneric<jlong>(env, EX, "Illegal access type " + std::to_string(access));
 }
 
 void Platform::free0(JNIEnv *env, jclass, jlong nativePeer, jlong handle) {
-  wrapException(env, EX, [&]() { findRef(env, devices, nativePeer)->free(static_cast<jlong>(handle)); });
+  wrapException(env, EX, [&]() { findRef(env, devices, nativePeer)->freeDevice(static_cast<jlong>(handle)); });
 }
 
 jobject Platform::createQueue0(JNIEnv *env, jclass, jlong nativePeer, jobject device) {
@@ -310,7 +310,7 @@ void Platform::enqueueInvokeAsync0(JNIEnv *env, jclass, jlong nativePeer, //
       //  4. Pointer to stack allocated data  (LUT[ptr]==None) => undefined, should not happen
 
       auto args = mk_string<rt::Type>(
-          argTs, [](auto &tpe) { return typeName(tpe); }, ",");
+          argTs, [](auto &tpe) { return std::string(to_string(tpe)); }, ",");
       throwGeneric(env, EX, "Returning pointers is unimplemented, args (return at the end): " + args);
       //      std::unordered_map<void *, std::pair<jobject, jsize>> allocations;
       //

@@ -312,16 +312,27 @@ bool HsaDevice::moduleLoaded(const std::string &name) {
   TRACE();
   return store.moduleLoaded(name);
 }
-uintptr_t HsaDevice::malloc(size_t size, Access) {
+uintptr_t HsaDevice::mallocDevice(size_t size, Access) {
   TRACE();
   if (size == 0) throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot malloc size of 0");
   void *data;
   CHECKED("Allocate AMD memory pool", hsa_amd_memory_pool_allocate(deviceGlobalRegion, size, 0, &data));
   return reinterpret_cast<uintptr_t>(data);
 }
-void HsaDevice::free(uintptr_t ptr) {
+void HsaDevice::freeDevice(uintptr_t ptr) {
   TRACE();
   CHECKED("Release AMD memory pool", hsa_amd_memory_pool_free(reinterpret_cast<void *>(ptr)));
+}
+std::optional<void *> HsaDevice::mallocShared(size_t size, Access access) {
+  TRACE();
+  if (size == 0) throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot malloc size of 0");
+  void *data;
+  CHECKED("Allocate AMD memory pool", hsa_amd_memory_pool_allocate(deviceGlobalRegion, size, 0, &data));
+  return data;
+}
+void HsaDevice::freeShared(void *ptr) {
+  TRACE();
+  CHECKED("Release AMD memory pool", hsa_amd_memory_pool_free(ptr));
 }
 std::unique_ptr<DeviceQueue> HsaDevice::createQueue() {
   TRACE();
