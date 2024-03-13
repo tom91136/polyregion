@@ -27,7 +27,7 @@ static const std::unordered_map<std::string, Backend> NameToBackend = {
     {"host", Backend::RelocatableObject}, //
 };
 
-std::unique_ptr<polyregion::runtime::Platform> polystl::createPlatform() {
+static std::unique_ptr<polyregion::runtime::Platform> createPlatform() {
   if (auto env = std::getenv("POLY_PLATFORM"); env) {
     std::string name(env);
     std::transform(name.begin(), name.end(), name.begin(), [](auto &c) { return std::tolower(c); });
@@ -36,7 +36,7 @@ std::unique_ptr<polyregion::runtime::Platform> polystl::createPlatform() {
   return {};
 }
 
-std::unique_ptr<polyregion::runtime::Device> polystl::selectDevice(polyregion::runtime::Platform &p) {
+static std::unique_ptr<polyregion::runtime::Device> selectDevice(polyregion::runtime::Platform &p) {
   auto devices = p.enumerate();
   if (auto env = std::getenv("POLY_DEVICE"); env) {
     std::string name(env);
@@ -59,7 +59,7 @@ std::unique_ptr<Platform> polystl::thePlatform;
 std::unique_ptr<Device> polystl::theDevice;
 std::unique_ptr<DeviceQueue> polystl::theQueue;
 
-static void initialiseRuntime() {
+void polystl::initialiseRuntime() {
   using namespace polystl;
   if (!thePlatform) {
     fprintf(stderr, "[POLYSTL] Initialising backends...\n");
@@ -101,30 +101,6 @@ static bool loadKernelObject(const polystl::KernelObject &object) {
   if (!theDevice->moduleLoaded(object.moduleName)) //
     theDevice->loadModule(object.moduleName, object.moduleImage);
   return true;
-}
-
-void *__polyregion_malloc(size_t size) {
-  using namespace polystl;
-  initialiseRuntime();
-  if (!thePlatform || !theDevice || !theQueue) {
-    fprintf(stderr, "[POLYSTL] No device/queue in %s\n", __func__);
-    return nullptr;
-  }
-  if (auto ptr = theDevice->mallocShared(size, polyregion::runtime::Access::RW); ptr) {
-    return *ptr;
-  } else {
-    fprintf(stderr, "[POLYSTL] No USM support in %s\n", __func__);
-    return nullptr;
-  }
-}
-
-void __polyregion_free(void *ptr) {
-  using namespace polystl;
-  initialiseRuntime();
-  if (!thePlatform || !theDevice || !theQueue) {
-    fprintf(stderr, "[POLYSTL] No device/queue in %s\n", __func__);
-  }
-  theDevice->freeShared(ptr);
 }
 
 std::optional<polystl::PlatformKind> polystl::platformKind() {

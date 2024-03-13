@@ -42,46 +42,50 @@ using namespace aspartame;
 void interpose(llvm::Module &M) {
 
   static constexpr std::pair<StringLiteral, StringLiteral> ReplaceMap[]{
-      {"aligned_alloc", "__hipstdpar_aligned_alloc"},
-      {"calloc", "__hipstdpar_calloc"},
-      {"free", "__hipstdpar_free"},
-      {"malloc", "__hipstdpar_malloc"},
-      {"memalign", "__hipstdpar_aligned_alloc"},
-      {"posix_memalign", "__hipstdpar_posix_aligned_alloc"},
-      {"realloc", "__hipstdpar_realloc"},
-      {"reallocarray", "__hipstdpar_realloc_array"},
-      {"_ZdaPv", "__hipstdpar_operator_delete"},
-      {"_ZdaPvm", "__hipstdpar_operator_delete_sized"},
-      {"_ZdaPvSt11align_val_t", "__hipstdpar_operator_delete_aligned"},
-      {"_ZdaPvmSt11align_val_t", "__hipstdpar_operator_delete_aligned_sized"},
-      {"_ZdlPv", "__hipstdpar_operator_delete"},
-      {"_ZdlPvm", "__hipstdpar_operator_delete_sized"},
-      {"_ZdlPvSt11align_val_t", "__hipstdpar_operator_delete_aligned"},
-      {"_ZdlPvmSt11align_val_t", "__hipstdpar_operator_delete_aligned_sized"},
-      {"_Znam", "__hipstdpar_operator_new"},
-      {"_ZnamRKSt9nothrow_t", "__hipstdpar_operator_new_nothrow"},
-      {"_ZnamSt11align_val_t", "__hipstdpar_operator_new_aligned"},
-      {"_ZnamSt11align_val_tRKSt9nothrow_t", "__hipstdpar_operator_new_aligned_nothrow"},
+//      {"aligned_alloc", "__polyregion_aligned_alloc"},
+//      {"calloc", "__polyregion_calloc"},
+//      {"free", "__polyregion_free"},
+//      {"malloc", "__polyregion_malloc"},
+//      {"memalign", "__polyregion_aligned_alloc"},
+//      {"posix_memalign", "__polyregion_posix_aligned_alloc"},
+//      {"realloc", "__polyregion_realloc"},
+//      {"reallocarray", "__polyregion_realloc_array"},
+      {"_ZdaPv", "__polyregion_operator_delete"},
+//      {"_ZdaPvm", "__polyregion_operator_delete_sized"},
+//      {"_ZdaPvSt11align_val_t", "__polyregion_operator_delete_aligned"},
+//      {"_ZdaPvmSt11align_val_t", "__polyregion_operator_delete_aligned_sized"},
+      {"_ZdlPv", "__polyregion_operator_delete"},
+//      {"_ZdlPvm", "__polyregion_operator_delete_sized"},
+//      {"_ZdlPvSt11align_val_t", "__polyregion_operator_delete_aligned"},
+//      {"_ZdlPvmSt11align_val_t", "__polyregion_operator_delete_aligned_sized"},
+      {"_Znam", "__polyregion_operator_new"},
+//      {"_ZnamRKSt9nothrow_t", "__polyregion_operator_new_nothrow"},
+//      {"_ZnamSt11align_val_t", "__polyregion_operator_new_aligned"},
+//      {"_ZnamSt11align_val_tRKSt9nothrow_t", "__polyregion_operator_new_aligned_nothrow"},
 
-      {"_Znwm", "__hipstdpar_operator_new"},
-      {"_ZnwmRKSt9nothrow_t", "__hipstdpar_operator_new_nothrow"},
-      {"_ZnwmSt11align_val_t", "__hipstdpar_operator_new_aligned"},
-      {"_ZnwmSt11align_val_tRKSt9nothrow_t", "__hipstdpar_operator_new_aligned_nothrow"},
-      {"__builtin_calloc", "__hipstdpar_calloc"},
-      {"__builtin_free", "__hipstdpar_free"},
-      {"__builtin_malloc", "__hipstdpar_malloc"},
-      {"__builtin_operator_delete", "__hipstdpar_operator_delete"},
-      {"__builtin_operator_new", "__hipstdpar_operator_new"},
-      {"__builtin_realloc", "__hipstdpar_realloc"},
-      {"__libc_calloc", "__hipstdpar_calloc"},
-      {"__libc_free", "__hipstdpar_free"},
-      {"__libc_malloc", "__hipstdpar_malloc"},
-      {"__libc_memalign", "__hipstdpar_aligned_alloc"},
-      {"__libc_realloc", "__hipstdpar_realloc"}};
+      {"_Znwm", "__polyregion_operator_new"},
+//      {"_ZnwmRKSt9nothrow_t", "__polyregion_operator_new_nothrow"},
+//      {"_ZnwmSt11align_val_t", "__polyregion_operator_new_aligned"},
+//      {"_ZnwmSt11align_val_tRKSt9nothrow_t", "__polyregion_operator_new_aligned_nothrow"},
+//      {"__builtin_calloc", "__polyregion_calloc"},
+//      {"__builtin_free", "__polyregion_free"},
+//      {"__builtin_malloc", "__polyregion_malloc"},
+//      {"__builtin_operator_delete", "__polyregion_operator_delete"},
+//      {"__builtin_operator_new", "__polyregion_operator_new"},
+//      {"__builtin_realloc", "__polyregion_realloc"},
+//      {"__libc_calloc", "__polyregion_calloc"},
+//      {"__libc_free", "__polyregion_free"},
+//      {"__libc_malloc", "__polyregion_malloc"},
+//      {"__libc_memalign", "__polyregion_aligned_alloc"},
+//      {"__libc_realloc", "__polyregion_realloc"}
+     };
 
   SmallDenseMap<StringRef, StringRef> AllocReplacements(std::cbegin(ReplaceMap), std::cend(ReplaceMap));
 
   for (auto &&F : M) {
+
+
+    llvm::errs() << "Fn: " << F.getName() << "\n" ;
 
     for(auto & i : F){
       for(auto & instr : i){
@@ -97,27 +101,27 @@ void interpose(llvm::Module &M) {
 
         //
         //
-
-        if (llvm::isa<llvm::AllocaInst>(instr)) {
-
-
-          llvm::errs() << "Fn " << F.getName() << " " ;
-
-          llvm::AllocaInst &allocaInst = llvm::cast<llvm::AllocaInst>(instr);
-
-          // Accessing the allocated type
-          llvm::Type *allocatedType = allocaInst.getAllocatedType();
-          llvm::errs() << "Allocated Type: ";
-          allocatedType->print(llvm::errs());
-          llvm::errs() << "\n";
-
-          if (allocaInst.isArrayAllocation()) {
-            llvm::Value *arraySize = allocaInst.getArraySize();
-            llvm::errs() << "Array size (as an operand): ";
-            arraySize->print(llvm::errs());
-            llvm::errs() << "\n";
-          }
-        }
+//
+//        if (llvm::isa<llvm::AllocaInst>(instr)) {
+//
+//
+//          llvm::errs() << "Fn " << F.getName() << " " ;
+//
+//          llvm::AllocaInst &allocaInst = llvm::cast<llvm::AllocaInst>(instr);
+//
+//          // Accessing the allocated type
+//          llvm::Type *allocatedType = allocaInst.getAllocatedType();
+//          llvm::errs() << "Allocated Type: ";
+//          allocatedType->print(llvm::errs());
+//          llvm::errs() << "\n";
+//
+//          if (allocaInst.isArrayAllocation()) {
+//            llvm::Value *arraySize = allocaInst.getArraySize();
+//            llvm::errs() << "Array size (as an operand): ";
+//            arraySize->print(llvm::errs());
+//            llvm::errs() << "\n";
+//          }
+//        }
 
 
       }
@@ -191,7 +195,7 @@ int executeCC1(std::vector<std::string> &cc1Args, bool stdpar) {
     }
 
     auto M = action.takeModule();
-//    interpose(*M);
+    interpose(*M);
     clang::EmitBackendOutput(CI.getDiagnostics(),                           //
                              CI.getHeaderSearchOpts(),                      //
                              CI.getCodeGenOpts(),                           //

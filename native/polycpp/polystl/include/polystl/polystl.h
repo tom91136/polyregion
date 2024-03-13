@@ -10,17 +10,15 @@ namespace polystl {
 
 using namespace polyregion::runtime;
 
-POLYREGION_EXPORT std::unique_ptr<Platform> createPlatform();
-POLYREGION_EXPORT std::unique_ptr<Device> selectDevice(Platform &p);
+POLYREGION_EXPORT extern std::unique_ptr<Platform> thePlatform;
+POLYREGION_EXPORT extern std::unique_ptr<Device> theDevice;
+POLYREGION_EXPORT extern std::unique_ptr<DeviceQueue> theQueue;
 
-extern std::unique_ptr<Platform> thePlatform;
-extern std::unique_ptr<Device> theDevice;
-extern std::unique_ptr<DeviceQueue> theQueue;
-
+POLYREGION_EXPORT void initialiseRuntime();
 POLYREGION_EXPORT std::optional<polystl::PlatformKind> platformKind();
 POLYREGION_EXPORT bool dispatchHostThreaded(size_t global, void *functorData, const KernelObject &object);
 POLYREGION_EXPORT bool dispatchManaged(size_t global, size_t local, size_t localMemBytes, //
-                                       size_t functorDataSize, const void *functorData,         //
+                                       size_t functorDataSize, const void *functorData,   //
                                        const KernelObject &object);
 
 } // namespace polystl
@@ -37,5 +35,33 @@ const polyregion::runtime::KernelBundle &__polyregion_offload__([[maybe_unused]]
   return bundle;
 }
 
-POLYREGION_EXPORT [[nodiscard]] void *__polyregion_malloc(size_t size); // NOLINT(*-reserved-identifier)
-POLYREGION_EXPORT void __polyregion_free(void *ptr);                    // NOLINT(*-reserved-identifier)
+extern "C" inline __attribute__((used)) void *__polyregion_malloc(size_t size) { // NOLINT(*-reserved-identifier)
+  using namespace polystl;
+  initialiseRuntime();
+  if (!thePlatform || !theDevice || !theQueue) {
+    fprintf(stderr, "[POLYSTL] No device/queue in %s\n", __func__);
+    return nullptr;
+  }
+  if (auto ptr = theDevice->mallocShared(size, polyregion::runtime::Access::RW); ptr) {
+    return *ptr;
+  } else {
+    fprintf(stderr, "[POLYSTL] No USM support in %s\n", __func__);
+    return nullptr;
+  }
+}
+
+extern "C" inline __attribute__((used)) void __polyregion_free(void *ptr) { // NOLINT(*-reserved-identifier)
+  using namespace polystl;
+  initialiseRuntime();
+  if (!thePlatform || !theDevice || !theQueue) {
+    fprintf(stderr, "[POLYSTL] No device/queue in %s\n", __func__);
+  }
+  theDevice->freeShared(ptr);
+}
+
+extern "C" inline __attribute__((used)) void *__polyregion_operator_new(size_t size) { // NOLINT(*-reserved-identifier)
+  return __polyregion_malloc(size);
+}
+extern "C" inline __attribute__((used)) void __polyregion_operator_delete(void *ptr) { // NOLINT(*-reserved-identifier)
+  __polyregion_free(ptr);
+}

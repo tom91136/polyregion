@@ -1,5 +1,5 @@
 // #CASE: general
-// #RUN: polycpp -O3 -fstdpar -o {output} {input}
+// #RUN: polycpp -O3 -g3 -fstdpar -o {output} {input}
 // #RUN: POLY_PLATFORM=cuda SIZE=1024 {output}
 //   #EXPECT: 204.800000
 
@@ -91,13 +91,13 @@ int main() {
 
   const double scalar = 0.4;
 
-  std::vector<double, MyAllocator<double>> a(size);
+  std::vector<double> a(size);
   std::fill(a.begin(), a.end(), 0.1);
 
-  std::vector<double, MyAllocator<double>> b(size);
+  std::vector<double> b(size);
   std::fill(b.begin(), b.end(), 0.2);
 
-  std::vector<double, MyAllocator<double>> c(size);
+  std::vector<double> c(size);
   std::fill(c.begin(), c.end(), 0.0);
 
   // a = b + scalar * c
