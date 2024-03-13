@@ -4,39 +4,41 @@
 
 using namespace polyregion::runtime;
 
-static const std::unordered_map<std::string, Backend> NameToBackend = {
-    {"ptx", Backend::CUDA},  //
-    {"cuda", Backend::CUDA}, //
+std::unique_ptr<Platform> __polyregion_selected_platform{}; // NOLINT(*-reserved-identifier)
+std::unique_ptr<Device> __polyregion_selected_device{};     // NOLINT(*-reserved-identifier)
+std::unique_ptr<DeviceQueue> __polyregion_selected_queue{}; // NOLINT(*-reserved-identifier)
 
-    {"amdgpu", Backend::HIP}, //
-    {"hip", Backend::HIP},    //
-    {"hsa", Backend::HSA},    //
+extern "C" inline void __polyregion_select_platform() { // NOLINT(*-reserved-identifier)
+  static const std::unordered_map<std::string, Backend> NameToBackend = {
+      {"ptx", Backend::CUDA},  //
+      {"cuda", Backend::CUDA}, //
 
-    {"opencl", Backend::OpenCL}, //
-    {"ocl", Backend::OpenCL},    //
-    {"cl", Backend::OpenCL},     //
+      {"amdgpu", Backend::HIP}, //
+      {"hip", Backend::HIP},    //
+      {"hsa", Backend::HSA},    //
 
-    {"vulkan", Backend::Vulkan}, //
-    {"vk", Backend::Vulkan},     //
+      {"opencl", Backend::OpenCL}, //
+      {"ocl", Backend::OpenCL},    //
+      {"cl", Backend::OpenCL},     //
 
-    {"metal", Backend::Metal}, //
-    {"mtl", Backend::Metal},   //
-    {"apple", Backend::Metal}, //
+      {"vulkan", Backend::Vulkan}, //
+      {"vk", Backend::Vulkan},     //
 
-    {"host_so", Backend::SharedObject},   //
-    {"host", Backend::RelocatableObject}, //
-};
+      {"metal", Backend::Metal}, //
+      {"mtl", Backend::Metal},   //
+      {"apple", Backend::Metal}, //
 
-static std::unique_ptr<polyregion::runtime::Platform> createPlatform() {
+      {"host_so", Backend::SharedObject},   //
+      {"host", Backend::RelocatableObject}, //
+  };
   if (auto env = std::getenv("POLY_PLATFORM"); env) {
     std::string name(env);
     std::transform(name.begin(), name.end(), name.begin(), [](auto &c) { return std::tolower(c); });
-    if (auto it = NameToBackend.find(name); it != NameToBackend.end()) return Platform::of(it->second);
+    if (auto it = NameToBackend.find(name); it != NameToBackend.end()) __polyregion_selected_platform = Platform::of(it->second);
   }
-  return {};
 }
 
-static std::unique_ptr<polyregion::runtime::Device> selectDevice(polyregion::runtime::Platform &p) {
+extern "C" inline void __polyregion_select_device(polyregion::runtime::Platform &p) { // NOLINT(*-reserved-identifier)
   auto devices = p.enumerate();
   if (auto env = std::getenv("POLY_DEVICE"); env) {
     std::string name(env);
@@ -44,82 +46,76 @@ static std::unique_ptr<polyregion::runtime::Device> selectDevice(polyregion::run
     errno = 0;
     size_t index = std::strtol(name.c_str(), nullptr, 10);
     if (errno == 0 && index < devices.size()) { // we got a number, check inbounds and select device
-      return std::move(devices.at(index));
+      __polyregion_selected_device = std::move(devices.at(index));
     } else if (auto matching = // or do a substring match
                std::find_if(devices.begin(), devices.end(),
                             [&name](const auto &device) { return device->name().find(name) != std::string::npos; });
                matching != devices.end()) {
-      return std::move(*matching);
+      __polyregion_selected_device = std::move(*matching);
     }
-  } else if (!devices.empty()) return std::move(devices[0]);
-  return {};
+  } else if (!devices.empty()) __polyregion_selected_device = std::move(devices[0]);
 }
 
-std::unique_ptr<Platform> polystl::thePlatform;
-std::unique_ptr<Device> polystl::theDevice;
-std::unique_ptr<DeviceQueue> polystl::theQueue;
-
-void polystl::initialiseRuntime() {
-  using namespace polystl;
-  if (!thePlatform) {
+extern "C" void __polyregion_initialise_runtime() { // NOLINT(*-reserved-identifier)
+  if (!__polyregion_selected_platform) {
     fprintf(stderr, "[POLYSTL] Initialising backends...\n");
-    thePlatform = createPlatform();
-    theDevice = thePlatform ? selectDevice(*thePlatform) : std::unique_ptr<Device>{};
-    theQueue = theDevice ? theDevice->createQueue() : std::unique_ptr<DeviceQueue>{};
-    if (thePlatform) {
+    __polyregion_select_platform();
+    if (__polyregion_selected_platform) __polyregion_select_device(*__polyregion_selected_platform);
+    if (__polyregion_selected_device) __polyregion_selected_queue = __polyregion_selected_device->createQueue();
+    if (__polyregion_selected_platform) {
       fprintf(stderr, "[POLYSTL] - Platform:%s [%s, %s]\n",
-              thePlatform->name().c_str(),                  //
-              to_string(thePlatform->kind()).data(),        //
-              to_string(thePlatform->moduleFormat()).data() //
+              __polyregion_selected_platform->name().c_str(),                  //
+              to_string(__polyregion_selected_platform->kind()).data(),        //
+              to_string(__polyregion_selected_platform->moduleFormat()).data() //
       );
     }
   }
 }
 
-static bool loadKernelObject(const polystl::KernelObject &object) {
-  using namespace polystl;
-  initialiseRuntime();
-  if (!thePlatform || !theDevice || !theQueue) {
+extern "C" inline bool __polyregion_load_kernel_object(const KernelObject &object) { // NOLINT(*-reserved-identifier)
+  __polyregion_initialise_runtime();
+  if (!__polyregion_selected_platform || !__polyregion_selected_device || !__polyregion_selected_queue) {
     fprintf(stderr, "[POLYSTL] No device/queue\n");
     return false;
   }
 
-  if (thePlatform->kind() != object.kind || thePlatform->moduleFormat() != object.format) {
+  if (__polyregion_selected_platform->kind() != object.kind || __polyregion_selected_platform->moduleFormat() != object.format) {
     fprintf(stderr, "[POLYSTL] Incompatible image  %s [%s] (targeting %s [%s])\n",
             to_string(object.kind).data(), //
             to_string(object.format).data(),
-            to_string(thePlatform->kind()).data(), //
-            to_string(thePlatform->moduleFormat()).data());
+            to_string(__polyregion_selected_platform->kind()).data(), //
+            to_string(__polyregion_selected_platform->moduleFormat()).data());
     return false;
   } //
 
   fprintf(stderr, "[POLYSTL] Loading image  %s [%s] (targeting %s [%s])\n",
           to_string(object.kind).data(), //
           to_string(object.format).data(),
-          to_string(thePlatform->kind()).data(), //
-          to_string(thePlatform->moduleFormat()).data());
-  if (!theDevice->moduleLoaded(object.moduleName)) //
-    theDevice->loadModule(object.moduleName, object.moduleImage);
+          to_string(__polyregion_selected_platform->kind()).data(), //
+          to_string(__polyregion_selected_platform->moduleFormat()).data());
+  if (!__polyregion_selected_device->moduleLoaded(object.moduleName)) //
+    __polyregion_selected_device->loadModule(object.moduleName, object.moduleImage);
   return true;
 }
 
-std::optional<polystl::PlatformKind> polystl::platformKind() {
-  using namespace polystl;
-  initialiseRuntime();
-  if (!thePlatform || !theDevice || !theQueue) {
+extern "C" bool __polyregion_platform_kind(PlatformKind &kind) { // NOLINT(*-reserved-identifier)
+  __polyregion_initialise_runtime();
+  if (!__polyregion_selected_platform || !__polyregion_selected_device || !__polyregion_selected_queue) {
     fprintf(stderr, "[POLYSTL] No device/queue in %s\n", __func__);
-    return {};
+    return false;
   }
-  return thePlatform->kind();
+  kind = __polyregion_selected_platform->kind();
+  return true;
 }
 
-bool polystl::dispatchHostThreaded(size_t global, void *functorData, const KernelObject &object) {
-  if (!loadKernelObject(object)) return false;
+extern "C" bool __polyregion_dispatch_hostthreaded( // NOLINT(*-reserved-identifier)
+    size_t global, void *functorData, const KernelObject &object) {
+  if (!__polyregion_load_kernel_object(object)) return false;
   const static auto fn = __func__;
   polyregion::concurrency_utils::waitAll([&](auto &cb) {
     // FIXME why is the last arg (Void here, can be any type) needed?
     ArgBuffer buffer{{Type::Long64, nullptr}, {Type::Ptr, &functorData}, {Type::Void, nullptr}};
-    theQueue->enqueueInvokeAsync(object.moduleName, "kernel", buffer, Policy{Dim3{global, 1, 1}}, [&]() {
+    __polyregion_selected_queue->enqueueInvokeAsync(object.moduleName, "kernel", buffer, Policy{Dim3{global, 1, 1}}, [&]() {
       fprintf(stderr, "[POLYSTL:%s] Module %s completed\n", fn, object.moduleName.c_str());
       cb();
     });
@@ -129,18 +125,18 @@ bool polystl::dispatchHostThreaded(size_t global, void *functorData, const Kerne
   return true;
 }
 
-bool polystl::dispatchManaged(size_t global, size_t local, size_t localMemBytes, size_t functorDataSize, const void *functorData,
-                              const KernelObject &object) {
-  if (!loadKernelObject(object)) return false;
+extern "C" bool __polyregion_dispatch_managed( // NOLINT(*-reserved-identifier)
+    size_t global, size_t local, size_t localMemBytes, size_t functorDataSize, const void *functorData, const KernelObject &object) {
+  if (!__polyregion_load_kernel_object(object)) return false;
   const static auto fn = __func__;
 
-  auto m = theDevice->mallocDevice(functorDataSize, polystl::Access::RW);
+  auto m = __polyregion_selected_device->mallocDevice(functorDataSize, Access::RW);
 
   polyregion::concurrency_utils::waitAll(
-      [&](auto &cb) { polystl::theQueue->enqueueHostToDeviceAsync(functorData, m, functorDataSize, [&]() { cb(); }); });
+      [&](auto &cb) { __polyregion_selected_queue->enqueueHostToDeviceAsync(functorData, m, functorDataSize, [&]() { cb(); }); });
   polyregion::concurrency_utils::waitAll([&](auto &cb) {
     ArgBuffer buffer{{Type::Ptr, &m}, {Type::Void, nullptr}};
-    theQueue->enqueueInvokeAsync(
+    __polyregion_selected_queue->enqueueInvokeAsync(
         object.moduleName, "kernel", buffer, //
         Policy{                              //
                Dim3{global, 1, 1},           //
@@ -150,7 +146,7 @@ bool polystl::dispatchManaged(size_t global, size_t local, size_t localMemBytes,
           cb();
         });
   });
-  theDevice->freeDevice(m);
+  __polyregion_selected_device->freeDevice(m);
   std::fprintf(stderr, "[POLYSTL:%s] Done\n", fn);
   return true;
 }

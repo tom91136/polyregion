@@ -45,8 +45,10 @@ for_each(ExecutionPolicy &&, ForwardIt first, ForwardIt last, UnaryFunction f) {
   auto N = std::thread::hardware_concurrency();
   std::fprintf(stderr, "[POLYSTL:%s] Dispatch global range <%d>\n", __func__, global);
 
-  if (auto kind = polystl::platformKind(); kind) {
-    switch (*kind) {
+
+
+  if (PlatformKind kind; __polyregion_platform_kind(kind)) {
+    switch (kind) {
       case polyregion::runtime::PlatformKind ::HostThreaded: {
         auto [b, e] = polyregion::concurrency_utils::splitStaticExclusive2<int64_t>(0, global, 1);
         const int64_t *begin = b.data();
@@ -60,7 +62,7 @@ for_each(ExecutionPolicy &&, ForwardIt first, ForwardIt last, UnaryFunction f) {
         std::byte argData[sizeof(decltype(kernel))];
         std::memcpy(argData, &kernel, sizeof(decltype(kernel)));
         for (auto &object : bundle.objects) {
-          if (polystl::dispatchHostThreaded(b.size(), &argData, object)) return;
+          if (__polyregion_dispatch_hostthreaded(b.size(), &argData, object)) return;
         }
         break;
       }
@@ -68,7 +70,7 @@ for_each(ExecutionPolicy &&, ForwardIt first, ForwardIt last, UnaryFunction f) {
         const auto kernel = [f, first]() { f(*(first + __polyregion_builtin_gpu_global_idx(0))); };
         auto &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
         for (auto &object : bundle.objects) {
-          if (polystl::dispatchManaged(global, 0, 0, sizeof(decltype(kernel)), &kernel, object)) return;
+          if (__polyregion_dispatch_managed(global, 0, 0, sizeof(decltype(kernel)), &kernel, object)) return;
         }
         break;
       }

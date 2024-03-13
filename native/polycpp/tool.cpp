@@ -91,6 +91,7 @@ void interpose(llvm::Module &M) {
       for(auto & instr : i){
 
 
+
         // sealed: local alloca
         // unsealed:
         //   -c(unknown)           => cross TU, NEEDS LINKER, split comp
@@ -129,8 +130,18 @@ void interpose(llvm::Module &M) {
     if (!F.hasName()) continue;
     if (!AllocReplacements.contains(F.getName())) continue;
 
+
+
+
     if (auto R = M.getFunction(AllocReplacements[F.getName()])) {
-      F.replaceAllUsesWith(R);
+//      F.replaceAllUsesWith(R);
+      F.replaceUsesWithIf(R, [](llvm::Use &u){
+
+//        llvm::errs() << ">>> " << u. << "\n";
+
+        return true;
+      });
+
     } else {
       std::string W;
       raw_string_ostream OS(W);
