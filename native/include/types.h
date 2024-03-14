@@ -304,6 +304,26 @@ NLOHMANN_JSON_NAMESPACE_END
 
 namespace polyregion::runtime {
 
+extern "C" {
+
+typedef struct KernelObject2 {
+  ModuleFormat format;
+  PlatformKind kind;
+  size_t featureSize;
+  const char **features;
+  size_t moduleImageSize;
+  const char *moduleImage;
+} KernelObject2;
+
+typedef struct KernelBundle2 {
+  const char *moduleName;
+  size_t objectSize;
+  KernelObject2 *objects;
+  size_t metadataSize;
+  const char *metadata;
+} KernelBundle2;
+}
+
 struct POLYREGION_EXPORT KernelObject {
   ModuleFormat format{};
   PlatformKind kind{};
@@ -315,7 +335,7 @@ struct POLYREGION_EXPORT KernelObject {
 struct POLYREGION_EXPORT KernelBundle {
   std::string moduleName{};
   std::vector<KernelObject> objects{};
-  nlohmann::json metadata{};
+  std::string metadata;
   NLOHMANN_DEFINE_TYPE_INTRUSIVE(KernelBundle, moduleName, objects, metadata);
   static KernelBundle fromMsgPack(size_t size, const unsigned char *data) {
     KernelBundle b;

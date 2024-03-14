@@ -26,11 +26,13 @@ POLYREGION_EXPORT extern "C" bool __polyregion_dispatch_managed( // NOLINT(*-res
 
 [[nodiscard]] uint64_t __polyregion_builtin_gpu_global_idx(uint32_t); // NOLINT(*-reserved-identifier)
 
+KernelBundle __polyregion_deserialise(size_t size, const unsigned char *data);
+
 template <polyregion::runtime::PlatformKind Kind, typename F>
 const polyregion::runtime::KernelBundle &__polyregion_offload__([[maybe_unused]] F) { // NOLINT(*-reserved-identifier)
   [[maybe_unused]] size_t __stub_kernelImageSize__{};                                 // NOLINT(*-reserved-identifier)
   [[maybe_unused]] const unsigned char *__stub_kernelImageBytes__{};                  // NOLINT(*-reserved-identifier)
-  const static KernelBundle bundle = KernelBundle::fromMsgPack(__stub_kernelImageSize__, __stub_kernelImageBytes__);
+  const static KernelBundle bundle = __polyregion_deserialise(__stub_kernelImageSize__, __stub_kernelImageBytes__);
   return bundle;
 }
 

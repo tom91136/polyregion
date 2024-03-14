@@ -148,5 +148,5 @@ polyregion::runtime::KernelBundle polyregion::polystl::generate(clang::ASTContex
           }
         }) //
       | to_vector();
-  return runtime::KernelBundle{moduleId, objects, program_to_json(p)};
+  return runtime::KernelBundle{moduleId, objects, program_to_json(p).dump()};
 }

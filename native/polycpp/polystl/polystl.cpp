@@ -8,7 +8,7 @@ std::unique_ptr<Platform> __polyregion_selected_platform{}; // NOLINT(*-reserved
 std::unique_ptr<Device> __polyregion_selected_device{};     // NOLINT(*-reserved-identifier)
 std::unique_ptr<DeviceQueue> __polyregion_selected_queue{}; // NOLINT(*-reserved-identifier)
 
-extern "C" inline void __polyregion_select_platform() { // NOLINT(*-reserved-identifier)
+POLYREGION_EXPORT extern "C" inline void __polyregion_select_platform() { // NOLINT(*-reserved-identifier)
   static const std::unordered_map<std::string, Backend> NameToBackend = {
       {"ptx", Backend::CUDA},  //
       {"cuda", Backend::CUDA}, //
@@ -38,7 +38,7 @@ extern "C" inline void __polyregion_select_platform() { // NOLINT(*-reserved-ide
   }
 }
 
-extern "C" inline void __polyregion_select_device(polyregion::runtime::Platform &p) { // NOLINT(*-reserved-identifier)
+POLYREGION_EXPORT extern "C" inline void __polyregion_select_device(polyregion::runtime::Platform &p) { // NOLINT(*-reserved-identifier)
   auto devices = p.enumerate();
   if (auto env = std::getenv("POLY_DEVICE"); env) {
     std::string name(env);
@@ -56,7 +56,7 @@ extern "C" inline void __polyregion_select_device(polyregion::runtime::Platform 
   } else if (!devices.empty()) __polyregion_selected_device = std::move(devices[0]);
 }
 
-extern "C" void __polyregion_initialise_runtime() { // NOLINT(*-reserved-identifier)
+POLYREGION_EXPORT extern "C" void __polyregion_initialise_runtime() { // NOLINT(*-reserved-identifier)
   if (!__polyregion_selected_platform) {
     fprintf(stderr, "[POLYSTL] Initialising backends...\n");
     __polyregion_select_platform();
@@ -72,7 +72,7 @@ extern "C" void __polyregion_initialise_runtime() { // NOLINT(*-reserved-identif
   }
 }
 
-extern "C" inline bool __polyregion_load_kernel_object(const std::string &moduleName,
+POLYREGION_EXPORT extern "C" inline bool __polyregion_load_kernel_object(const std::string &moduleName,
                                                        const KernelObject &object) { // NOLINT(*-reserved-identifier)
   __polyregion_initialise_runtime();
   if (!__polyregion_selected_platform || !__polyregion_selected_device || !__polyregion_selected_queue) {
@@ -99,7 +99,7 @@ extern "C" inline bool __polyregion_load_kernel_object(const std::string &module
   return true;
 }
 
-extern "C" bool __polyregion_platform_kind(PlatformKind &kind) { // NOLINT(*-reserved-identifier)
+POLYREGION_EXPORT extern "C" bool __polyregion_platform_kind(PlatformKind &kind) { // NOLINT(*-reserved-identifier)
   __polyregion_initialise_runtime();
   if (!__polyregion_selected_platform || !__polyregion_selected_device || !__polyregion_selected_queue) {
     fprintf(stderr, "[POLYSTL] No device/queue in %s\n", __func__);
@@ -109,7 +109,9 @@ extern "C" bool __polyregion_platform_kind(PlatformKind &kind) { // NOLINT(*-res
   return true;
 }
 
-extern "C" bool __polyregion_dispatch_hostthreaded( // NOLINT(*-reserved-identifier)
+POLYREGION_EXPORT KernelBundle __polyregion_deserialise(size_t size, const unsigned char *data) { return KernelBundle::fromMsgPack(size, data); }
+
+POLYREGION_EXPORT extern "C" bool __polyregion_dispatch_hostthreaded( // NOLINT(*-reserved-identifier)
     size_t global, void *functorData, const std::string &moduleName, const KernelObject &object) {
   if (!__polyregion_load_kernel_object(moduleName, object)) return false;
   const static auto fn = __func__;
@@ -126,7 +128,7 @@ extern "C" bool __polyregion_dispatch_hostthreaded( // NOLINT(*-reserved-identif
   return true;
 }
 
-extern "C" bool __polyregion_dispatch_managed( // NOLINT(*-reserved-identifier)
+POLYREGION_EXPORT extern "C" bool __polyregion_dispatch_managed( // NOLINT(*-reserved-identifier)
     size_t global, size_t local, size_t localMemBytes, size_t functorDataSize, const void *functorData, const std::string &moduleName,
     const KernelObject &object) {
   if (!__polyregion_load_kernel_object(moduleName, object)) return false;
@@ -140,8 +142,8 @@ extern "C" bool __polyregion_dispatch_managed( // NOLINT(*-reserved-identifier)
     ArgBuffer buffer{{Type::Ptr, &m}, {Type::Void, nullptr}};
     __polyregion_selected_queue->enqueueInvokeAsync(
         moduleName, "kernel", buffer, //
-        Policy{                              //
-               Dim3{global, 1, 1},           //
+        Policy{                       //
+               Dim3{global, 1, 1},    //
                local > 0 ? std::optional{std::pair<Dim3, size_t>{Dim3{local, 0, 0}, localMemBytes}} : std::nullopt},
         [&]() {
           std::fprintf(stderr, "[POLYSTL:%s] Module %s completed\n", fn, moduleName.c_str());
