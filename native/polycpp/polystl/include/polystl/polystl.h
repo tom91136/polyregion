@@ -15,28 +15,24 @@ POLYREGION_EXPORT extern std::unique_ptr<DeviceQueue> __polyregion_selected_queu
 POLYREGION_EXPORT extern "C" void __polyregion_initialise_runtime();              // NOLINT(*-reserved-identifier)
 POLYREGION_EXPORT extern "C" bool __polyregion_platform_kind(PlatformKind &kind); // NOLINT(*-reserved-identifier)
 POLYREGION_EXPORT extern "C" bool __polyregion_dispatch_hostthreaded(             // NOLINT(*-reserved-identifier)
-    size_t global, void *functorData, const KernelObject &object);
+    size_t global, void *functorData, const std::string &moduleId, const KernelObject &object);
 POLYREGION_EXPORT extern "C" bool __polyregion_dispatch_managed( // NOLINT(*-reserved-identifier)
-    size_t global, size_t local, size_t localMemBytes, size_t functorDataSize,
-    const void *functorData, //
+    size_t global, size_t local,                                 //
+    size_t localMemBytes,                                        //
+    size_t functorDataSize,                                      //
+    const void *functorData,                                     //
+    const std::string &moduleId,                                 //
     const KernelObject &object);
 
 [[nodiscard]] uint64_t __polyregion_builtin_gpu_global_idx(uint32_t); // NOLINT(*-reserved-identifier)
-
-extern "C" inline  KernelBundle __polyregion_deserialise(// NOLINT(*-reserved-identifier)
-    size_t size, const unsigned char *data) {
-  return KernelBundle::fromMsgPack(size, data);
-}
 
 template <polyregion::runtime::PlatformKind Kind, typename F>
 const polyregion::runtime::KernelBundle &__polyregion_offload__([[maybe_unused]] F) { // NOLINT(*-reserved-identifier)
   [[maybe_unused]] size_t __stub_kernelImageSize__{};                                 // NOLINT(*-reserved-identifier)
   [[maybe_unused]] const unsigned char *__stub_kernelImageBytes__{};                  // NOLINT(*-reserved-identifier)
-  const static KernelBundle bundle = __polyregion_deserialise(__stub_kernelImageSize__, __stub_kernelImageBytes__);
+  const static KernelBundle bundle = KernelBundle::fromMsgPack(__stub_kernelImageSize__, __stub_kernelImageBytes__);
   return bundle;
 }
-
-
 
 extern "C" inline __attribute__((used)) void *__polyregion_malloc(size_t size) { // NOLINT(*-reserved-identifier)
   __polyregion_initialise_runtime();

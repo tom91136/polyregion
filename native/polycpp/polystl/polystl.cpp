@@ -72,7 +72,8 @@ extern "C" void __polyregion_initialise_runtime() { // NOLINT(*-reserved-identif
   }
 }
 
-extern "C" inline bool __polyregion_load_kernel_object(const KernelObject &object) { // NOLINT(*-reserved-identifier)
+extern "C" inline bool __polyregion_load_kernel_object(const std::string &moduleName,
+                                                       const KernelObject &object) { // NOLINT(*-reserved-identifier)
   __polyregion_initialise_runtime();
   if (!__polyregion_selected_platform || !__polyregion_selected_device || !__polyregion_selected_queue) {
     fprintf(stderr, "[POLYSTL] No device/queue\n");
@@ -93,8 +94,8 @@ extern "C" inline bool __polyregion_load_kernel_object(const KernelObject &objec
           to_string(object.format).data(),
           to_string(__polyregion_selected_platform->kind()).data(), //
           to_string(__polyregion_selected_platform->moduleFormat()).data());
-  if (!__polyregion_selected_device->moduleLoaded(object.moduleName)) //
-    __polyregion_selected_device->loadModule(object.moduleName, object.moduleImage);
+  if (!__polyregion_selected_device->moduleLoaded(moduleName)) //
+    __polyregion_selected_device->loadModule(moduleName, object.moduleImage);
   return true;
 }
 
@@ -109,14 +110,14 @@ extern "C" bool __polyregion_platform_kind(PlatformKind &kind) { // NOLINT(*-res
 }
 
 extern "C" bool __polyregion_dispatch_hostthreaded( // NOLINT(*-reserved-identifier)
-    size_t global, void *functorData, const KernelObject &object) {
-  if (!__polyregion_load_kernel_object(object)) return false;
+    size_t global, void *functorData, const std::string &moduleName, const KernelObject &object) {
+  if (!__polyregion_load_kernel_object(moduleName, object)) return false;
   const static auto fn = __func__;
   polyregion::concurrency_utils::waitAll([&](auto &cb) {
     // FIXME why is the last arg (Void here, can be any type) needed?
     ArgBuffer buffer{{Type::Long64, nullptr}, {Type::Ptr, &functorData}, {Type::Void, nullptr}};
-    __polyregion_selected_queue->enqueueInvokeAsync(object.moduleName, "kernel", buffer, Policy{Dim3{global, 1, 1}}, [&]() {
-      fprintf(stderr, "[POLYSTL:%s] Module %s completed\n", fn, object.moduleName.c_str());
+    __polyregion_selected_queue->enqueueInvokeAsync(moduleName, "kernel", buffer, Policy{Dim3{global, 1, 1}}, [&]() {
+      fprintf(stderr, "[POLYSTL:%s] Module %s completed\n", fn, moduleName.c_str());
       cb();
     });
   });
@@ -126,8 +127,9 @@ extern "C" bool __polyregion_dispatch_hostthreaded( // NOLINT(*-reserved-identif
 }
 
 extern "C" bool __polyregion_dispatch_managed( // NOLINT(*-reserved-identifier)
-    size_t global, size_t local, size_t localMemBytes, size_t functorDataSize, const void *functorData, const KernelObject &object) {
-  if (!__polyregion_load_kernel_object(object)) return false;
+    size_t global, size_t local, size_t localMemBytes, size_t functorDataSize, const void *functorData, const std::string &moduleName,
+    const KernelObject &object) {
+  if (!__polyregion_load_kernel_object(moduleName, object)) return false;
   const static auto fn = __func__;
 
   auto m = __polyregion_selected_device->mallocDevice(functorDataSize, Access::RW);
@@ -137,12 +139,12 @@ extern "C" bool __polyregion_dispatch_managed( // NOLINT(*-reserved-identifier)
   polyregion::concurrency_utils::waitAll([&](auto &cb) {
     ArgBuffer buffer{{Type::Ptr, &m}, {Type::Void, nullptr}};
     __polyregion_selected_queue->enqueueInvokeAsync(
-        object.moduleName, "kernel", buffer, //
+        moduleName, "kernel", buffer, //
         Policy{                              //
                Dim3{global, 1, 1},           //
                local > 0 ? std::optional{std::pair<Dim3, size_t>{Dim3{local, 0, 0}, localMemBytes}} : std::nullopt},
         [&]() {
-          std::fprintf(stderr, "[POLYSTL:%s] Module %s completed\n", fn, object.moduleName.c_str());
+          std::fprintf(stderr, "[POLYSTL:%s] Module %s completed\n", fn, moduleName.c_str());
           cb();
         });
   });

@@ -136,7 +136,6 @@ polyregion::runtime::KernelBundle polyregion::polystl::generate(clang::ASTContex
                   *format,                                                                                                         //
                   *format == runtime::ModuleFormat::Object ? runtime::PlatformKind::HostThreaded : runtime::PlatformKind::Managed, //
                   result.features,                                                                                                 //
-                  moduleId,                                                                                                        //
                   std::string(bin->begin(), bin->end())                                                                            //
               };
 
@@ -149,6 +148,5 @@ polyregion::runtime::KernelBundle polyregion::polystl::generate(clang::ASTContex
           }
         }) //
       | to_vector();
-
-  return runtime::KernelBundle{objects, program_to_json(p)};
+  return runtime::KernelBundle{moduleId, objects, program_to_json(p)};
 }

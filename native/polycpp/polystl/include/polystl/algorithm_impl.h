@@ -62,7 +62,7 @@ for_each(ExecutionPolicy &&, ForwardIt first, ForwardIt last, UnaryFunction f) {
         std::byte argData[sizeof(decltype(kernel))];
         std::memcpy(argData, &kernel, sizeof(decltype(kernel)));
         for (auto &object : bundle.objects) {
-          if (__polyregion_dispatch_hostthreaded(b.size(), &argData, object)) return;
+          if (__polyregion_dispatch_hostthreaded(b.size(), &argData, bundle.moduleName, object)) return;
         }
         break;
       }
@@ -70,7 +70,7 @@ for_each(ExecutionPolicy &&, ForwardIt first, ForwardIt last, UnaryFunction f) {
         const auto kernel = [f, first]() { f(*(first + __polyregion_builtin_gpu_global_idx(0))); };
         auto &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
         for (auto &object : bundle.objects) {
-          if (__polyregion_dispatch_managed(global, 0, 0, sizeof(decltype(kernel)), &kernel, object)) return;
+          if (__polyregion_dispatch_managed(global, 0, 0, sizeof(decltype(kernel)), &kernel, bundle.moduleName, object)) return;
         }
         break;
       }

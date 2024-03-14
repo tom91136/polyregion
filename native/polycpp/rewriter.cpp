@@ -186,6 +186,9 @@ void insertKernelImage(clang::ASTContext &C, Callsite &c, const polyregion::runt
       // TODO add section attributes to support kernel image extraction
       auto varDecl = clang::VarDecl::Create(C, c.calleeDecl, {}, {}, &C.Idents.get("__kernel_image__"),
                                             createConstArrayTpe(component, image.size()), nullptr, clang::SC_Static);
+      varDecl->addAttr(clang::UsedAttr::Create(C));
+      varDecl->addAttr(clang::SectionAttr::Create(C, "__polyregion_kernel_image_" + bundle.moduleName));
+
       std::vector<clang::Expr *> initExprs(image.size());
       std::transform(image.begin(), image.end(), initExprs.begin(), [&](auto &c) {
         return clang::ImplicitCastExpr::Create(C, component, clang::CK_IntegralCast,

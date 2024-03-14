@@ -308,15 +308,15 @@ struct POLYREGION_EXPORT KernelObject {
   ModuleFormat format{};
   PlatformKind kind{};
   std::vector<std::string> features{};
-  std::string moduleName{};
   std::string moduleImage{};
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE(KernelObject, format, kind, features, moduleName, moduleImage);
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE(KernelObject, format, kind, features, moduleImage);
 };
 
 struct POLYREGION_EXPORT KernelBundle {
+  std::string moduleName{};
   std::vector<KernelObject> objects{};
   nlohmann::json metadata{};
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE(KernelBundle, objects, metadata);
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE(KernelBundle, moduleName, objects, metadata);
   static KernelBundle fromMsgPack(size_t size, const unsigned char *data) {
     KernelBundle b;
     if (size != 0) nlohmann::from_json(nlohmann::json::from_msgpack(data, data + size), b);
