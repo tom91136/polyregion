@@ -310,18 +310,66 @@ typedef struct KernelObject2 {
   ModuleFormat format;
   PlatformKind kind;
   size_t featureSize;
-  const char **features;
+  const char *features[4];
   size_t moduleImageSize;
-  const char *moduleImage;
+  const char moduleImage[100];
 } KernelObject2;
 
 typedef struct KernelBundle2 {
   const char *moduleName;
   size_t objectSize;
-  KernelObject2 *objects;
+  KernelObject2 objects[2];
   size_t metadataSize;
-  const char *metadata;
+  const char *metadata; // json
 } KernelBundle2;
+
+typedef struct KernelBundleX {
+  const char *moduleName;
+  size_t objectSize;
+
+  uint8_t *formats;
+  uint8_t *platform;
+  const char ***features;
+  const char **images;
+
+  const char *metadata; // json
+} KernelBundleX;
+
+static const KernelBundleX *foo() {
+
+  static const char *features_1[3] = {"a", "a", "c"};
+  static const char image_1[2] = {0x1, 0x2};
+
+  static uint8_t formats[2] = {0, 1};
+  static uint8_t platforms[2] = {0, 1};
+  static const char **features[2] = {features_1, features_1};
+  static const char *images[2] = {image_1, image_1};
+  static size_t imagesLengths[2] = {30, 30};
+  static const char *metadata = "aa";
+
+  uint8_t *formats_ = formats;
+  const char ***features_ = features;
+
+  const static KernelBundleX x = {"", 2, formats_, platforms, features_, images, metadata};
+
+  return &x;
+  //  static KernelObject2 ko_1;
+  //  ko_1.format = ModuleFormat::PTX;
+  //  ko_1.kind = PlatformKind::Managed;
+  //  ko_1.moduleImageSize = 2;
+  //  ko_1.moduleImage = image_1;
+  //  ko_1.featureSize = 3;
+  //  ko_1.features = features_1;
+  //
+  //  static KernelObject2 kos[2] = {ko_1, ko_1};
+  //
+  //  static KernelBundle2 kb;
+  //  kb.objects = kos;
+  //
+  //  static KernelObject2 o[] = {KernelObject2{ModuleFormat::PTX, PlatformKind::Managed, 2, {"x", "a"}, 2, image}};
+
+  //  KernelBundle2 xs{};
+}
 }
 
 struct POLYREGION_EXPORT KernelObject {
