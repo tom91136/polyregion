@@ -157,7 +157,7 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
                            Mut("i"_(UInt), invoke(Add("i"_(UInt), "global_size"_(UInt), UInt)), false)}), // i += array_size
                     let("offset") = invoke(GpuLocalSize(0_(UInt))),                                       // offset = get_local_size()
                     Mut("offset"_(UInt), invoke(Div("offset"_(UInt), 2_(UInt), UInt)), false),            // offset /= 2
-                    While({let("cont") = invoke(LogicGt("offset"_(UInt), 0_(UInt)))}, "cont"_(Bool),
+                    While({let("cont2") = invoke(LogicGt("offset"_(UInt), 0_(UInt)))}, "cont2"_(Bool),
                           {
                               let("_") = invoke(GpuBarrierLocal()),
                               Cond({invoke(LogicLt("local_i"_(UInt), "offset"_(UInt)))}, //
