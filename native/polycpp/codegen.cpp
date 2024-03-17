@@ -54,7 +54,7 @@ static std::variant<std::string, CompileResult> compileProgram(Program &p, const
   else return compileresult_from_json(nlohmann::json::from_msgpack((*BufferOrErr)->getBufferStart(), (*BufferOrErr)->getBufferEnd()));
 }
 
-polyregion::runtime::KernelBundle polyregion::polystl::generate(clang::ASTContext &C,                //
+polyregion::polystl::KernelBundle polyregion::polystl::generate(clang::ASTContext &C,                //
                                                                 clang::DiagnosticsEngine &diag,      //
                                                                 const std::string &moduleId,         //
                                                                 const clang::CXXMethodDecl &functor, //
@@ -105,7 +105,7 @@ polyregion::runtime::KernelBundle polyregion::polystl::generate(clang::ASTContex
                    return std::tuple{target, features, x};
                  });
         }) //
-      | collect([&](auto &target, auto &features, auto &result) -> std::optional<runtime::KernelObject> {
+      | collect([&](auto &target, auto &features, auto &result) -> std::optional<KernelObject> {
           diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Remark,
                                            "[PolySTL] Compilation events for [%0, target=%1, features=%2]\n%3"))
               << moduleId << std::string(to_string(target)) << features << repr(result);
@@ -131,7 +131,7 @@ polyregion::runtime::KernelBundle polyregion::polystl::generate(clang::ASTContex
             }
 
             if (auto format = std::optional{runtime::targetFormat(target)}; format) {
-              return runtime::KernelObject{
+              return KernelObject{
                   //
                   *format,                                                                                                         //
                   *format == runtime::ModuleFormat::Object ? runtime::PlatformKind::HostThreaded : runtime::PlatformKind::Managed, //
@@ -148,5 +148,5 @@ polyregion::runtime::KernelBundle polyregion::polystl::generate(clang::ASTContex
           }
         }) //
       | to_vector();
-  return runtime::KernelBundle{moduleId, objects, program_to_json(p).dump()};
+  return KernelBundle{moduleId, objects, program_to_json(p).dump()};
 }

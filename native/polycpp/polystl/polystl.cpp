@@ -72,8 +72,8 @@ POLYREGION_EXPORT extern "C" void __polyregion_initialise_runtime() { // NOLINT(
   }
 }
 
-POLYREGION_EXPORT extern "C" inline bool __polyregion_load_kernel_object(const std::string &moduleName,
-                                                       const KernelObject &object) { // NOLINT(*-reserved-identifier)
+POLYREGION_EXPORT extern "C" inline bool
+__polyregion_load_kernel_object(const char *moduleName, const RuntimeKernelObject &object) { // NOLINT(*-reserved-identifier)
   __polyregion_initialise_runtime();
   if (!__polyregion_selected_platform || !__polyregion_selected_device || !__polyregion_selected_queue) {
     fprintf(stderr, "[POLYSTL] No device/queue\n");
@@ -95,7 +95,7 @@ POLYREGION_EXPORT extern "C" inline bool __polyregion_load_kernel_object(const s
           to_string(__polyregion_selected_platform->kind()).data(), //
           to_string(__polyregion_selected_platform->moduleFormat()).data());
   if (!__polyregion_selected_device->moduleLoaded(moduleName)) //
-    __polyregion_selected_device->loadModule(moduleName, object.moduleImage);
+    __polyregion_selected_device->loadModule(moduleName, std::string(object.image, object.image + object.imageLength));
   return true;
 }
 
@@ -109,17 +109,15 @@ POLYREGION_EXPORT extern "C" bool __polyregion_platform_kind(PlatformKind &kind)
   return true;
 }
 
-POLYREGION_EXPORT KernelBundle __polyregion_deserialise(size_t size, const unsigned char *data) { return KernelBundle::fromMsgPack(size, data); }
-
 POLYREGION_EXPORT extern "C" bool __polyregion_dispatch_hostthreaded( // NOLINT(*-reserved-identifier)
-    size_t global, void *functorData, const std::string &moduleName, const KernelObject &object) {
+    size_t global, void *functorData, const char *moduleName, const RuntimeKernelObject &object) {
   if (!__polyregion_load_kernel_object(moduleName, object)) return false;
   const static auto fn = __func__;
   polyregion::concurrency_utils::waitAll([&](auto &cb) {
     // FIXME why is the last arg (Void here, can be any type) needed?
     ArgBuffer buffer{{Type::Long64, nullptr}, {Type::Ptr, &functorData}, {Type::Void, nullptr}};
     __polyregion_selected_queue->enqueueInvokeAsync(moduleName, "kernel", buffer, Policy{Dim3{global, 1, 1}}, [&]() {
-      fprintf(stderr, "[POLYSTL:%s] Module %s completed\n", fn, moduleName.c_str());
+      fprintf(stderr, "[POLYSTL:%s] Module %s completed\n", fn, moduleName);
       cb();
     });
   });
@@ -129,8 +127,8 @@ POLYREGION_EXPORT extern "C" bool __polyregion_dispatch_hostthreaded( // NOLINT(
 }
 
 POLYREGION_EXPORT extern "C" bool __polyregion_dispatch_managed( // NOLINT(*-reserved-identifier)
-    size_t global, size_t local, size_t localMemBytes, size_t functorDataSize, const void *functorData, const std::string &moduleName,
-    const KernelObject &object) {
+    size_t global, size_t local, size_t localMemBytes, size_t functorDataSize, const void *functorData, const char *moduleName,
+    const RuntimeKernelObject &object) {
   if (!__polyregion_load_kernel_object(moduleName, object)) return false;
   const static auto fn = __func__;
 
@@ -146,7 +144,7 @@ POLYREGION_EXPORT extern "C" bool __polyregion_dispatch_managed( // NOLINT(*-res
                Dim3{global, 1, 1},    //
                local > 0 ? std::optional{std::pair<Dim3, size_t>{Dim3{local, 0, 0}, localMemBytes}} : std::nullopt},
         [&]() {
-          std::fprintf(stderr, "[POLYSTL:%s] Module %s completed\n", fn, moduleName.c_str());
+          std::fprintf(stderr, "[POLYSTL:%s] Module %s completed\n", fn, moduleName);
           cb();
         });
   });

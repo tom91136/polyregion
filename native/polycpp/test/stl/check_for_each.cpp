@@ -1,5 +1,5 @@
 // #CASE: general
-// #RUN: polycpp -O3 -g3 -fstdpar -o {output} {input}
+// #RUN: polycpp -O3 -Wall -Wextra -pedantic -g3 -fstdpar -o {output} {input}
 // #RUN: POLY_PLATFORM=cuda SIZE=1024 {output}
 //   #EXPECT: 204.800000
 

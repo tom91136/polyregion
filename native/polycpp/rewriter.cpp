@@ -122,25 +122,7 @@ static std::string createHumanReadableFunctionIdentifier(clang::ASTContext &c, c
   return identifier;
 }
 
-void insertKernelImage(clang::ASTContext &C, Callsite &c, const polyregion::runtime::KernelBundle &bundle) {
-  auto varDeclWithName = [](clang::Stmt *stmt, const std::string &name) -> clang::VarDecl * {
-    if (auto declStmt = llvm::dyn_cast<clang::DeclStmt>(stmt); declStmt && declStmt->isSingleDecl()) {
-      if (auto varDecl = llvm::dyn_cast<clang::VarDecl>(declStmt->getSingleDecl()); varDecl && varDecl->getName() == name) {
-        return varDecl;
-      }
-    }
-    return {};
-  };
-
-  auto cxxOperatorCallFromParamWithName = [](clang::Stmt *stmt, const std::string &name) -> clang::ParmVarDecl * {
-    if (auto varDecl = llvm::dyn_cast<clang::CXXOperatorCallExpr>(stmt); varDecl && varDecl->getNumArgs() == 1) {
-      if (auto paramVarDecl = llvm::dyn_cast_or_null<clang::ParmVarDecl>(varDecl->getArg(0)->getReferencedDeclOfCallee());
-          paramVarDecl && paramVarDecl->getName() == name) {
-        return paramVarDecl;
-      }
-    }
-    return {};
-  };
+void insertKernelImage(clang::DiagnosticsEngine &diag, clang::ASTContext &C, Callsite &c, const KernelBundle &bundle) {
 
   auto createDeclRef = [&](clang::VarDecl *lhs) {
     return clang::DeclRefExpr::Create(C, {}, {}, lhs, false, clang::SourceLocation{}, lhs->getType(), clang::ExprValueKind::VK_LValue);
@@ -151,11 +133,11 @@ void insertKernelImage(clang::ASTContext &C, Callsite &c, const polyregion::runt
                                          clang::ExprValueKind::VK_LValue, clang::ExprObjectKind::OK_Ordinary, {}, {});
   };
 
-  auto createConstArrayTpe = [&](clang::QualType componentTpe, size_t size) {
+  auto mkConstArrayTpe = [&](clang::QualType componentTpe, size_t size) {
     return C.getConstantArrayType(componentTpe, llvm::APInt(C.getTypeSize(C.IntTy), size), nullptr, clang::ArrayType::Normal, 0);
   };
 
-  auto createStringLiteral = [&](const std::string &str) {
+  auto mkStringLiteral = [&](const std::string &str) {
     return clang::StringLiteral::Create(C, str, clang::StringLiteral::StringKind::Ordinary, false,
                                         C.getConstantArrayType(C.getConstType(C.CharTy),
                                                                llvm::APInt(C.getTypeSize(C.IntTy), str.length() + 1), nullptr,
@@ -163,60 +145,151 @@ void insertKernelImage(clang::ASTContext &C, Callsite &c, const polyregion::runt
                                         {});
   };
 
-  auto createInitExpr = [&](clang::QualType tpe, const clang::ArrayRef<clang::Expr *> &&xs) {
-    auto expr = new (C) clang::InitListExpr(C, {}, xs, {});
-    expr->setType(tpe);
-    return expr;
+  auto mkIntegerLiteral = [&](clang::QualType tpe, uint64_t value) {
+    return clang::IntegerLiteral::Create(C, llvm::APInt(C.getTypeSize(tpe), value), tpe, {});
   };
 
-  auto createArrayToPtrDecay = [&](clang::QualType to, clang::Expr *expr) {
+  auto mkArrayToPtrDecay = [&](clang::QualType to, clang::Expr *expr) {
     return clang::ImplicitCastExpr::Create(C, to, clang::CK_ArrayToPointerDecay, expr, nullptr, clang::VK_PRValue, {});
   };
 
-  auto existingStmts = c.calleeDecl->getBody()->children();
+  auto mkStaticVarDecl = [&](const std::string &name, clang::QualType ty, const std::vector<clang::Expr *> &initExprs) {
+    auto decl = clang::VarDecl::Create(C, c.calleeDecl, {}, {}, &C.Idents.get(name), ty, nullptr, clang::SC_Static);
 
-  auto image = bundle.toMsgPack();
+    auto init = new (C) clang::InitListExpr(C, {}, initExprs, {});
+    init->setType(decl->getType());
+    decl->setInit(init);
+    return decl;
+  };
 
-  std::vector<clang::Stmt *> newStmts;
-  for (auto stmt : existingStmts) {
-    if (auto kernelImageDecl = varDeclWithName(stmt, "__stub_kernelImageBytes__"); kernelImageDecl) {
+  auto existingStmts = std::vector<clang::Stmt *>(c.calleeDecl->getBody()->child_begin(), c.calleeDecl->getBody()->child_end());
 
-      auto component = kernelImageDecl->getType()->getAs<clang::PointerType>()->getPointeeType();
-
-      // TODO add section attributes to support kernel image extraction
-      auto varDecl = clang::VarDecl::Create(C, c.calleeDecl, {}, {}, &C.Idents.get("__kernel_image__"),
-                                            createConstArrayTpe(component, image.size()), nullptr, clang::SC_Static);
-      varDecl->addAttr(clang::UsedAttr::Create(C));
-      varDecl->addAttr(clang::SectionAttr::Create(C, "__polyregion_kernel_image_" + bundle.moduleName));
-
-      std::vector<clang::Expr *> initExprs(image.size());
-      std::transform(image.begin(), image.end(), initExprs.begin(), [&](auto &c) {
-        return clang::ImplicitCastExpr::Create(C, component, clang::CK_IntegralCast,
-                                               clang::IntegerLiteral::Create(C, llvm::APInt(C.getTypeSize(C.IntTy), c), C.IntTy, {}),
-                                               nullptr, clang::VK_PRValue, {});
-      });
-      auto init = new (C) clang::InitListExpr(C, {}, initExprs, {});
-      init->setType(varDecl->getType());
-      varDecl->setInit(init);
-
-      newStmts.push_back(stmt);
-
-      newStmts.push_back(new (C) clang::DeclStmt(clang::DeclGroupRef(varDecl), {}, {}));
-      newStmts.push_back(
-          createAssignStmt(kernelImageDecl, clang::ImplicitCastExpr::Create(C, kernelImageDecl->getType(), clang::CK_ArrayToPointerDecay,
-                                                                            createDeclRef(varDecl), nullptr, clang::VK_PRValue, {})));
-
-    } else if (auto kernelImageSizeDecl = varDeclWithName(stmt, "__stub_kernelImageSize__"); kernelImageSizeDecl) {
-      auto tpe = kernelImageSizeDecl->getType();
-      newStmts.push_back(stmt);
-      newStmts.push_back(
-          createAssignStmt(kernelImageSizeDecl, clang::IntegerLiteral::Create(C, llvm::APInt(C.getTypeSize(tpe), image.size()), tpe, {})));
-    } else {
-      newStmts.push_back(stmt);
+  auto varDeclWithName = [&](clang::Stmt *stmt, const std::string &name) -> std::optional<clang::VarDecl *> {
+    if (auto declStmt = llvm::dyn_cast<clang::DeclStmt>(stmt); declStmt && declStmt->isSingleDecl()) {
+      if (auto varDecl = llvm::dyn_cast<clang::VarDecl>(declStmt->getSingleDecl()); varDecl && varDecl->getName() == name) {
+        return varDecl;
+      }
     }
+    return {};
+  };
+
+  auto resolveDeclIssueDiag = [&](const std::string &name) {
+    auto decl = existingStmts | collect([&](clang::Stmt *s) { return varDeclWithName(s, name); }) | head_maybe();
+    if (!decl) {
+      diag.Report({}, diag.getCustomDiagID(clang::DiagnosticsEngine::Error,
+                                           "[PolySTL] Callsite method is malformed: missing VarDecl `%0`. This is a bug."))
+          .AddString(name);
+    }
+    return decl;
+  };
+
+  auto moduleNameDecl = resolveDeclIssueDiag("__moduleName"); // const char*
+  auto metadataDecl = resolveDeclIssueDiag("__metadata");     // const char*
+  auto objectSizeDecl = resolveDeclIssueDiag("__objectSize"); // size_t
+  auto formatsDecl = resolveDeclIssueDiag("__formats");       // uint8_t*
+  auto kindsDecl = resolveDeclIssueDiag("__kinds");           // uint8_t*
+  auto featuresDecl = resolveDeclIssueDiag("__features");     // const char***
+  auto imageSizesDecl = resolveDeclIssueDiag("__imageSizes"); // size_t*
+  auto imagesDecl = resolveDeclIssueDiag("__images");         // const unsigned char**
+
+  if (!moduleNameDecl || !metadataDecl || !objectSizeDecl || !formatsDecl || !kindsDecl || !featuresDecl || !imageSizesDecl || !imagesDecl)
+    return;
+
+  auto insertPoint = existingStmts ^ index_where([](clang::Stmt *s) {
+                       auto l = llvm::dyn_cast<clang::LabelStmt>(s);
+                       return l && l->getName() == std::string("__insert_point");
+                     });
+  if (insertPoint == -1) {
+    diag.Report({}, diag.getCustomDiagID(clang::DiagnosticsEngine::Error,
+                                         "[PolySTL] Callsite method is malformed: missing label __insert_point. This is a bug."));
   }
 
-  c.calleeDecl->setBody(clang::CompoundStmt::Create(C, newStmts, {}, {}, {}));
+  auto constCharStarTpe = C.getPointerType(C.CharTy.withConst());
+  //  auto constUnsignedCharStarTpe = C.getConstType(C.getPointerType(C.UnsignedCharTy));
+  auto formatsComponentTpe = (*formatsDecl)->getType()->getPointeeType();
+  auto platformsComponentTpe = (*kindsDecl)->getType()->getPointeeType();
+  auto imageSizesComponentTpe = (*imageSizesDecl)->getType()->getPointeeType();
+
+  auto kernelImageDecls =                                               //
+      bundle.objects                                                    //
+      | zip_with_index()                                                //
+      | map([&](auto ko, auto idx) {                                    //
+          return mkStaticVarDecl(                                       //
+              "__image_data_" + std::to_string(idx),                    //
+              mkConstArrayTpe(C.UnsignedCharTy, ko.moduleImage.size()), //
+              ko.moduleImage | map([&](const unsigned char c) -> clang::Expr * {
+                return clang::ImplicitCastExpr::Create(C, C.UnsignedCharTy, clang::CK_IntegralCast, mkIntegerLiteral(C.IntTy, c), nullptr,
+                                                       clang::VK_PRValue, {});
+              }) | to_vector());
+        }) //
+      | to_vector();
+
+  auto kernelFeatureDecls =                                          //
+      bundle.objects                                                 //
+      | zip_with_index()                                             //
+      | map([&](auto ko, auto idx) {                                 //
+          return mkStaticVarDecl(                                    //
+              "__feature_data_" + std::to_string(idx),               //
+              mkConstArrayTpe(constCharStarTpe, ko.features.size()), //
+              ko.features | map([&](auto &feature) -> clang::Expr * {
+                return mkArrayToPtrDecay(C.getConstType(C.getPointerType(C.CharTy)), mkStringLiteral(feature));
+              }) | to_vector());
+        }) //
+      | to_vector();
+
+  std::vector<clang::Stmt *> newStmts;
+
+  kernelImageDecls | concat(kernelFeatureDecls) |
+      for_each([&](auto dcl) { newStmts.push_back(new (C) clang::DeclStmt(clang::DeclGroupRef(dcl), {}, {})); });
+
+  std::vector<std::tuple<clang::VarDecl *, clang::CastKind, clang::VarDecl *>> dataDecls{
+      {*moduleNameDecl, clang::CK_LValueToRValue,
+       mkStaticVarDecl("__moduleName_data", constCharStarTpe, {mkArrayToPtrDecay(constCharStarTpe, mkStringLiteral(bundle.moduleName))})},
+      {*metadataDecl, clang::CK_LValueToRValue,
+       mkStaticVarDecl("__metadata_data", constCharStarTpe, {mkArrayToPtrDecay(constCharStarTpe, mkStringLiteral(bundle.metadata))})},
+      {*objectSizeDecl, clang::CK_LValueToRValue,
+       mkStaticVarDecl("__objectSize_data", (*objectSizeDecl)->getType(),
+                       {mkIntegerLiteral((*objectSizeDecl)->getType(), bundle.objects.size())})},
+      {*formatsDecl, clang::CK_ArrayToPointerDecay,
+       mkStaticVarDecl("__formats_data", mkConstArrayTpe(formatsComponentTpe, bundle.objects.size()),
+                       bundle.objects ^ map([&](auto &ko) -> clang::Expr * {
+                         return mkIntegerLiteral(formatsComponentTpe, static_cast<std::underlying_type_t<decltype(ko.format)>>(ko.format));
+                       }))},
+      {*kindsDecl, clang::CK_ArrayToPointerDecay,
+       mkStaticVarDecl("__kinds_data", mkConstArrayTpe(platformsComponentTpe, bundle.objects.size()),
+                       bundle.objects ^ map([&](auto &ko) -> clang::Expr * {
+                         return mkIntegerLiteral(platformsComponentTpe, static_cast<std::underlying_type_t<decltype(ko.kind)>>(ko.kind));
+                       }))},
+      {*featuresDecl, clang::CK_ArrayToPointerDecay,
+       mkStaticVarDecl("__features_data", mkConstArrayTpe(C.getPointerType(constCharStarTpe), kernelFeatureDecls.size()),
+                       kernelFeatureDecls ^ map([&](auto x) -> clang::Expr * {
+                         return mkArrayToPtrDecay(C.getPointerType(C.CharTy.withConst()), createDeclRef(x));
+                       }))},
+      {*imageSizesDecl, clang::CK_ArrayToPointerDecay,
+       mkStaticVarDecl("__imageSizes_data", mkConstArrayTpe(imageSizesComponentTpe, bundle.objects.size()),
+                       bundle.objects ^
+                           map([&](auto ko) -> clang::Expr * { return mkIntegerLiteral(imageSizesComponentTpe, ko.moduleImage.size()); }))},
+      {*imagesDecl, clang::CK_ArrayToPointerDecay,
+       mkStaticVarDecl("__images_data", mkConstArrayTpe(C.getPointerType(C.UnsignedCharTy.withConst()), kernelImageDecls.size()),
+                       kernelImageDecls ^ map([&](auto x) -> clang::Expr * {
+                         return mkArrayToPtrDecay(C.getPointerType(C.UnsignedCharTy.withConst()), createDeclRef(x));
+                       }))}};
+
+  dataDecls | for_each([&](auto, auto, auto decl) { newStmts.push_back(new (C) clang::DeclStmt(clang::DeclGroupRef(decl), {}, {})); });
+
+  dataDecls | for_each([&](clang::VarDecl *lhs, clang::CastKind ck, clang::VarDecl *decl) {
+    newStmts.push_back(
+        createAssignStmt(lhs, clang::ImplicitCastExpr::Create(C, lhs->getType(), ck, createDeclRef(decl), nullptr, clang::VK_PRValue, {})));
+  });
+
+  c.calleeDecl->setBody(clang::CompoundStmt::Create(      //
+      C,                                                  //
+      existingStmts                                       //
+          | take(insertPoint)                             //
+          | concat(newStmts)                              //
+          | concat(existingStmts | drop(insertPoint + 1)) //
+          | to_vector(),
+      {}, {}, {}));
   //  c.calleeDecl->dumpColor(); // void __polyregion_offload__(F __polyregion__f)
   c.calleeDecl->print(llvm::outs());
 }
@@ -264,6 +337,7 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
                      std::vector<std::pair<compiletime::Target, std::string>> targets = {
                          {compiletime::Target::Object_LLVM_HOST, "native"},
                          {compiletime::Target::Object_LLVM_NVPTX64, "sm_60"},
+                         {compiletime::Target::Object_LLVM_NVPTX64, "sm_80"},
                      };
 
                      auto bundle =
@@ -281,7 +355,7 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
                                }) //
                              | mk_string(", "));
 
-                     insertKernelImage(C, c, bundle);
+                     insertKernelImage(diag, C, c, bundle);
 
                    },
                },

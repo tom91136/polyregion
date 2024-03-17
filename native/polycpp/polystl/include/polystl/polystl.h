@@ -8,6 +8,32 @@
 
 using namespace polyregion::runtime;
 
+extern "C" struct RuntimeKernelObject {
+  PlatformKind kind;
+  ModuleFormat format;
+  const char **features;
+  size_t imageLength;
+  const unsigned char *image;
+};
+
+extern "C" struct RuntimeKernelBundle {
+  const char *moduleName;
+  const char *metadata;
+  size_t objectCount;
+  uint8_t *formats;
+  uint8_t *kinds;
+  const char ***features;
+  size_t *imagesSizes;
+  const unsigned char **images;
+
+  [[nodiscard]] POLYREGION_EXPORT RuntimeKernelObject get(size_t idx) const {
+    return RuntimeKernelObject{static_cast<PlatformKind>(kinds[idx]),   //
+                               static_cast<ModuleFormat>(formats[idx]), //
+                               features[idx],                           //
+                               imagesSizes[idx], images[idx]};
+  }
+};
+
 POLYREGION_EXPORT extern std::unique_ptr<Platform> __polyregion_selected_platform; // NOLINT(*-reserved-identifier)
 POLYREGION_EXPORT extern std::unique_ptr<Device> __polyregion_selected_device;     // NOLINT(*-reserved-identifier)
 POLYREGION_EXPORT extern std::unique_ptr<DeviceQueue> __polyregion_selected_queue; // NOLINT(*-reserved-identifier)
@@ -15,25 +41,44 @@ POLYREGION_EXPORT extern std::unique_ptr<DeviceQueue> __polyregion_selected_queu
 POLYREGION_EXPORT extern "C" void __polyregion_initialise_runtime();              // NOLINT(*-reserved-identifier)
 POLYREGION_EXPORT extern "C" bool __polyregion_platform_kind(PlatformKind &kind); // NOLINT(*-reserved-identifier)
 POLYREGION_EXPORT extern "C" bool __polyregion_dispatch_hostthreaded(             // NOLINT(*-reserved-identifier)
-    size_t global, void *functorData, const std::string &moduleId, const KernelObject &object);
+    size_t global, void *functorData, const char *moduleId, const RuntimeKernelObject &object);
 POLYREGION_EXPORT extern "C" bool __polyregion_dispatch_managed( // NOLINT(*-reserved-identifier)
     size_t global, size_t local,                                 //
     size_t localMemBytes,                                        //
     size_t functorDataSize,                                      //
     const void *functorData,                                     //
-    const std::string &moduleId,                                 //
-    const KernelObject &object);
+    const char *moduleId,                                        //
+    const RuntimeKernelObject &object);
 
 [[nodiscard]] uint64_t __polyregion_builtin_gpu_global_idx(uint32_t); // NOLINT(*-reserved-identifier)
 
-KernelBundle __polyregion_deserialise(size_t size, const unsigned char *data);
 
 template <polyregion::runtime::PlatformKind Kind, typename F>
-const polyregion::runtime::KernelBundle &__polyregion_offload__([[maybe_unused]] F) { // NOLINT(*-reserved-identifier)
-  [[maybe_unused]] size_t __stub_kernelImageSize__{};                                 // NOLINT(*-reserved-identifier)
-  [[maybe_unused]] const unsigned char *__stub_kernelImageBytes__{};                  // NOLINT(*-reserved-identifier)
-  const static KernelBundle bundle = __polyregion_deserialise(__stub_kernelImageSize__, __stub_kernelImageBytes__);
-  return bundle;
+const RuntimeKernelBundle &__polyregion_offload__([[maybe_unused]] F) { // NOLINT(*-reserved-identifier)
+
+  [[maybe_unused]] const char *__moduleName;       // NOLINT(*-reserved-identifier)
+  [[maybe_unused]] const char *__metadata;         // NOLINT(*-reserved-identifier)
+  [[maybe_unused]] size_t __objectSize;            // NOLINT(*-reserved-identifier)
+  [[maybe_unused]] uint8_t *__formats;             // NOLINT(*-reserved-identifier)
+  [[maybe_unused]] uint8_t *__kinds;               // NOLINT(*-reserved-identifier)
+  [[maybe_unused]] const char ***__features;       // NOLINT(*-reserved-identifier)
+  [[maybe_unused]] size_t *__imageSizes;           // NOLINT(*-reserved-identifier)
+  [[maybe_unused]] const unsigned char **__images; // NOLINT(*-reserved-identifier)
+
+__insert_point:;
+
+  const static RuntimeKernelBundle __bundle = // NOLINT(*-reserved-identifier)
+      {
+          __moduleName, //
+          __metadata,   //
+          __objectSize, //
+          __formats,    //
+          __kinds,      //
+          __features,   //
+          __imageSizes,
+          __images //
+      };
+  return __bundle;
 }
 
 extern "C" inline __attribute__((used)) void *__polyregion_malloc(size_t size) { // NOLINT(*-reserved-identifier)

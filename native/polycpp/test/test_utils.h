@@ -21,17 +21,17 @@ std::invoke_result_t<F> __polyregion_offload_f1__(F f) {
       auto &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::HostThreaded>(kernel);
       std::byte argData[sizeof(decltype(kernel))];
       std::memcpy(argData, &kernel, sizeof(decltype(kernel)));
-      for (auto &object : bundle.objects) {
+      for (size_t i = 0; i < bundle.objectCount; ++i) {
         totalObjects++;
-        if (__polyregion_dispatch_hostthreaded(1, &argData, bundle.moduleName, object)) return result;
+        if (__polyregion_dispatch_hostthreaded(1, &argData, bundle.moduleName, bundle.get(i))) return result;
       }
     }
     {
       const auto kernel = [&result, &f]() { result = f(); };
       auto &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
-      for (auto &object : bundle.objects) {
+      for (size_t i = 0; i < bundle.objectCount; ++i) {
         totalObjects++;
-        if (__polyregion_dispatch_managed(1, 0, 0, sizeof(decltype(kernel)), &kernel, bundle.moduleName, object)) return result;
+        if (__polyregion_dispatch_managed(1, 0, 0, sizeof(decltype(kernel)), &kernel, bundle.moduleName, bundle.get(i))) return result;
       }
     }
     throw std::logic_error("Dispatch failed: no compatible backend after trying " + std::to_string(totalObjects) + " different objects");
