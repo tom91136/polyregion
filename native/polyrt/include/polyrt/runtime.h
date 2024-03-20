@@ -29,7 +29,7 @@
   #endif
 
   #define TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this, __PRETTY_FUNCTION__)
-//  #define TRACE()
+  #define TRACE()
 
 #endif
 
@@ -375,9 +375,11 @@ public:
     ([&]() { freeDevice(ptrs); }(), ...);
   };
 
-  template <typename T> [[nodiscard]] POLYREGION_EXPORT T *mallocSharedTyped(size_t count, Access access) {
+  template <typename T> [[nodiscard]] POLYREGION_EXPORT std::optional<T *> mallocSharedTyped(size_t count, Access access) {
     static_assert(sizeof(T) != 0);
-    return static_cast<T *>(mallocShared(count * sizeof(T), access));
+    auto ptr = mallocShared(count * sizeof(T), access);
+    if (ptr) return std::optional{static_cast<T *>(*ptr)};
+    else return {};
   };
   template <typename... T> POLYREGION_EXPORT void freeAllShared(T... ptrs) {
     ([&]() { freeShared(ptrs); }(), ...);

@@ -144,14 +144,12 @@ std::optional<void *> CudaDevice::mallocShared(size_t size, Access access) {
   if (size == 0) throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot malloc size of 0");
   CUdeviceptr ptr = {};
   CHECKED(cuMemAllocManaged(&ptr, size, CU_MEM_ATTACH_GLOBAL));
-  fprintf(stderr, "alloc shared %zu = %p\n",size, reinterpret_cast<void *>(ptr));
 
   return reinterpret_cast<void *>(ptr);
 }
 void CudaDevice::freeShared(void *ptr) {
   TRACE();
   context.touch();
-  fprintf(stderr, "free shared %p\n", ptr);
   CHECKED(cuMemFree(reinterpret_cast<CUdeviceptr>(ptr)));
 }
 std::unique_ptr<DeviceQueue> CudaDevice::createQueue() {

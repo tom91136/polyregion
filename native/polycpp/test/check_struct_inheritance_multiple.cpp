@@ -1,7 +1,7 @@
 // #CASE: inheritance
 // #MATRIX: capture=&,=,value
 // #RUN: polycpp -fstdpar -DCHECK_CAPTURE={capture} -o {output} {input}
-// #RUN: POLY_PLATFORM=host {output}
+// #RUN: POLYSTL_PLATFORM=host {output}
 //   #EXPECT: 0 3.000000 4.000000 12 42 2 33 120 121 5 6 7.000000
 
 #include <cstddef>

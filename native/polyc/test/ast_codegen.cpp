@@ -107,7 +107,8 @@ TEST_CASE("json round-trip", "[ast]") {
               {Return(Alias(IntS32Const(1)))},   //
               {Return(Alias(Bool1Const(false)))} //
               )                                  //
-      });
+      },
+      FunctionKind::Exported());
   auto actual = function_from_json(function_to_json(expected));
   CHECK(expected == actual);
 }
@@ -591,7 +592,8 @@ TEST_CASE("index struct array member", "[compiler]") {
 
                   //                  Mut(Select({Named("s",  Ptr(myStruct ))}, defX), Alias(IntS32Const(42)), false),
                   Return(Alias(IntS32Const(69))),
-              });
+              },
+              FunctionKind::Exported());
   Program p(fn, {}, {def});
   assertCompile(p);
 }
@@ -609,7 +611,8 @@ TEST_CASE("array update struct elem member", "[compiler]") {
                   Var(Named("x", myStruct), Index(Select({}, Named("xs", Ptr(myStruct))), IntS32Const(0), myStruct)),
                   Mut(Select({Named("x", myStruct)}, defX), Alias(IntS32Const(42)), false),
                   Return(Alias(IntS32Const(69))),
-              });
+              },
+              FunctionKind::Exported());
   Program p(fn, {}, {def});
   assertCompile(p);
 }
@@ -627,7 +630,8 @@ TEST_CASE("array update struct elem", "[compiler]") {
                   Var(Named("data", myStruct), {}),
                   Update(Select({}, Named("xs", Ptr(myStruct))), IntS32Const(7), Select({}, Named("data", myStruct))),
                   Return(Alias(IntS32Const(69))),
-              });
+              },
+              FunctionKind::Exported());
   Program p(fn, {}, {def});
   assertCompile(p);
 }
@@ -662,7 +666,8 @@ TEST_CASE("alias struct member", "[compiler]") {
                       }                                                    //
                       ),
                   Return(Alias(Unit0Const())),
-              });
+              },
+              FunctionKind::Exported());
 
   Program p(fn, {}, {def});
   assertCompile(p);
@@ -678,7 +683,8 @@ TEST_CASE("alias array", "[compiler]") {
                   Var(Named("s", arr), {Alloc(arr.component, IntS32Const(10))}),
                   Var(Named("t", arr), {Alias(Select({}, Named("s", arr)))}),
                   Return(Alias(Select({}, Named("s", arr)))),
-              });
+              },
+              FunctionKind::Exported());
 
   Program p(fn, {}, {});
   assertCompile(p);
@@ -709,7 +715,8 @@ TEST_CASE("mut struct", "[compiler]") {
 
                   //                  Return(Alias(Unit0Const())),
                   Return(Alias(Unit0Const())),
-              });
+              },
+              FunctionKind::Exported());
 
   Program p(fn, {}, {def});
   assertCompile(p);
@@ -729,7 +736,8 @@ TEST_CASE("mut array", "[compiler]") {
                   Mut(Select({}, Named("t", arr)), Alias(Select({}, Named("u", arr))), false),
                   Mut(Select({}, Named("t", arr)), Alias(Select({}, Named("s", arr))), false),
                   Return(Alias(Select({}, Named("s", arr)))),
-              });
+              },
+              FunctionKind::Exported());
 
   Program p(fn, {}, {});
   assertCompile(p);
@@ -743,7 +751,8 @@ TEST_CASE("mut prim", "[compiler]") {
                   Var(Named("s", SInt), {Alias(IntS32Const(10))}),
                   Mut(Select({}, Named("s", SInt)), Alias(IntS32Const(20)), false),
                   Return(Alias(Select({}, Named("s", SInt)))),
-              });
+              },
+              FunctionKind::Exported());
 
   Program p(fn, {}, {});
   assertCompile(p);
@@ -772,7 +781,8 @@ TEST_CASE("alloc struct", "[compiler]") {
                   //                  Mut(Select({}, Named("out", myStruct)), Alias(Select({}, Named("s", myStruct))),
                   //                  true), Return(Alias(Unit0Const())),
                   Return(IntrOp(Add(Select({Named("s", myStruct)}, defX), Select({Named("s", myStruct)}, defY), SInt))),
-              });
+              },
+              FunctionKind::Exported());
 
   Program p(fn, {}, {def, def2});
   assertCompile(p);
@@ -802,7 +812,8 @@ TEST_CASE("alloc struct nested", "[compiler]") {
                   Mut(Select({Named("s", myStruct)}, defZ), Alias(Select({}, Named("t", myStruct2))), false),
                   Mut(Select({Named("s", myStruct), defZ}, defX), Alias(IntS32Const(42)), false),
                   Return(Alias(IntS32Const(69))),
-              });
+              },
+              FunctionKind::Exported());
 
   Program p(fn, {}, {def2, def});
   assertCompile(p);
@@ -819,7 +830,8 @@ TEST_CASE("alloc array", "[compiler]") {
                   Var(Named("t", arr), {Alloc(arr.component, IntS32Const(20))}),
                   Var(Named("u", arr), {Alloc(arr.component, IntS32Const(30))}),
                   Return(Alias(Select({}, Named("s", arr)))),
-              });
+              },
+              FunctionKind::Exported());
 
   Program p(fn, {}, {});
   assertCompile(p);
@@ -834,7 +846,8 @@ TEST_CASE("cast expr", "[compiler]") {
                   Var(Named("i", SInt), {Cast(Select({}, Named("d", Double)), SInt)}),
 
                   Return(Alias(Select({}, Named("i", SInt)))),
-              });
+              },
+              FunctionKind::Exported());
 
   Program p(fn, {}, {});
   assertCompile(p);
@@ -855,7 +868,8 @@ TEST_CASE("cast fp to int expr", "[compiler]") {
                   Var(Named("d", to), {Cast(Select({}, Named("i", from.tpe)), to)}),
 
                   Return(Alias(Select({}, Named("d", to)))),
-              });
+              },
+              FunctionKind::Exported());
 
   Program p(fn, {}, {});
   assertCompile(p);
@@ -873,7 +887,8 @@ TEST_CASE("cond", "[compiler]") {
                        ),
 
                   Return(Alias(Select({}, Named("out", SInt)))),
-              });
+              },
+              FunctionKind::Exported());
 
   Program p(fn, {}, {});
   assertCompile(p);
@@ -887,7 +902,8 @@ TEST_CASE("while false", "[compiler]") {
                   While({}, Bool1Const(false), {}),
 
                   Return(Alias(Unit0Const())),
-              });
+              },
+              FunctionKind::Exported());
 
   Program p(fn, {}, {});
   assertCompile(p);

@@ -1,27 +1,27 @@
 // #CASE: =ptr_arith
 // #MATRIX: size=1,10,100
 // #RUN: polycpp -fstdpar -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE== -o {output} {input}
-// #RUN: POLY_PLATFORM=host {output}
+// #RUN: POLYSTL_PLATFORM=host {output}
 //   #EXPECT: -1 -1 1
 
 // #CASE: =ptr_arith=42
 // #MATRIX: size=1,10,100
 // #RUN: polycpp -fstdpar -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE== -DCHECK_MUT -o {output} {input}
-// #RUN: POLY_PLATFORM=host {output}
+// #RUN: POLYSTL_PLATFORM=host {output}
 //   #EXPECT: 42 42 1
 
 
 // #CASE: &ptr_arith
 // #MATRIX: size=1,10,100
 // #RUN: polycpp -fstdpar -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE=& -o {output} {input}
-// #RUN: POLY_PLATFORM=host {output}
+// #RUN: POLYSTL_PLATFORM=host {output}
 //   #EXPECT: -1 -1 1
 
 
 // #CASE: &ptr_arith=42
 // #MATRIX: size=1,10,100
 // #RUN: polycpp -fstdpar -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE=& -DCHECK_MUT -o {output} {input}
-// #RUN: POLY_PLATFORM=host {output}
+// #RUN: POLYSTL_PLATFORM=host {output}
 //   #EXPECT: 42 42 1
 
 #ifndef CHECK_SIZE_DEF

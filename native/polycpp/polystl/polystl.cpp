@@ -2,6 +2,9 @@
 #include "concurrency_utils.hpp"
 #include "polyrt/runtime.h"
 
+static constexpr const char *PlatformSelectorEnv = "POLYSTL_PLATFORM";
+static constexpr const char *DeviceSelectorEnv = "POLYSTL_DEVICE";
+
 using namespace polyregion::runtime;
 
 std::unique_ptr<Platform> __polyregion_selected_platform{}; // NOLINT(*-reserved-identifier)
@@ -9,7 +12,10 @@ std::unique_ptr<Device> __polyregion_selected_device{};     // NOLINT(*-reserved
 std::unique_ptr<DeviceQueue> __polyregion_selected_queue{}; // NOLINT(*-reserved-identifier)
 
 POLYREGION_EXPORT extern "C" inline void __polyregion_select_platform() { // NOLINT(*-reserved-identifier)
-  static const std::unordered_map<std::string, Backend> NameToBackend = {
+  const static std::unordered_map<std::string, Backend> NameToBackend = {
+      {"host", Backend::RelocatableObject}, //
+      {"host_so", Backend::SharedObject},   //
+
       {"ptx", Backend::CUDA},  //
       {"cuda", Backend::CUDA}, //
 
@@ -27,23 +33,32 @@ POLYREGION_EXPORT extern "C" inline void __polyregion_select_platform() { // NOL
       {"metal", Backend::Metal}, //
       {"mtl", Backend::Metal},   //
       {"apple", Backend::Metal}, //
-
-      {"host_so", Backend::SharedObject},   //
-      {"host", Backend::RelocatableObject}, //
   };
-  if (auto env = std::getenv("POLY_PLATFORM"); env) {
+
+  if (auto env = std::getenv(PlatformSelectorEnv); env) {
     std::string name(env);
     std::transform(name.begin(), name.end(), name.begin(), [](auto &c) { return std::tolower(c); });
     if (auto it = NameToBackend.find(name); it != NameToBackend.end()) __polyregion_selected_platform = Platform::of(it->second);
+    else {
+      fprintf(stderr, "[POLYSTL] Backend %s is not a supported value for %s; options are %s={", env, PlatformSelectorEnv,
+              PlatformSelectorEnv);
+      size_t i = 0;
+      for (auto &[k, _] : NameToBackend)
+        fprintf(stderr, "%s%s", k.c_str(), i++ < NameToBackend.size() - 1 ? "|" : "");
+      fprintf(stderr, "}\n");
+    }
+  } else {
+    fprintf(stderr, "[POLYSTL] Backend selector %s is not set: using default host platform\n", PlatformSelectorEnv);
+    __polyregion_selected_platform = Platform::of(Backend::RelocatableObject);
   }
 }
 
 POLYREGION_EXPORT extern "C" inline void __polyregion_select_device(polyregion::runtime::Platform &p) { // NOLINT(*-reserved-identifier)
   auto devices = p.enumerate();
-  if (auto env = std::getenv("POLY_DEVICE"); env) {
+  if (auto env = std::getenv(DeviceSelectorEnv); env) {
     std::string name(env);
     std::transform(name.begin(), name.end(), name.begin(), [](auto &c) { return std::tolower(c); });
-    errno = 0;
+    errno = 0; // strtol to avoid exceptions
     size_t index = std::strtol(name.c_str(), nullptr, 10);
     if (errno == 0 && index < devices.size()) { // we got a number, check inbounds and select device
       __polyregion_selected_device = std::move(devices.at(index));
@@ -63,10 +78,11 @@ POLYREGION_EXPORT extern "C" void __polyregion_initialise_runtime() { // NOLINT(
     if (__polyregion_selected_platform) __polyregion_select_device(*__polyregion_selected_platform);
     if (__polyregion_selected_device) __polyregion_selected_queue = __polyregion_selected_device->createQueue();
     if (__polyregion_selected_platform) {
-      fprintf(stderr, "[POLYSTL] - Platform:%s [%s, %s]\n",
+      fprintf(stderr, "[POLYSTL] - Platform: %s [%s, %s] Device: %s\n",
               __polyregion_selected_platform->name().c_str(),                  //
               to_string(__polyregion_selected_platform->kind()).data(),        //
-              to_string(__polyregion_selected_platform->moduleFormat()).data() //
+              to_string(__polyregion_selected_platform->moduleFormat()).data(),
+              __polyregion_selected_device->name().c_str()
       );
     }
   }
@@ -76,20 +92,20 @@ POLYREGION_EXPORT extern "C" inline bool
 __polyregion_load_kernel_object(const char *moduleName, const RuntimeKernelObject &object) { // NOLINT(*-reserved-identifier)
   __polyregion_initialise_runtime();
   if (!__polyregion_selected_platform || !__polyregion_selected_device || !__polyregion_selected_queue) {
-    fprintf(stderr, "[POLYSTL] No device/queue\n");
+    fprintf(stderr, "[POLYSTL] No device/queue in %s\n", __func__);
     return false;
   }
 
   if (__polyregion_selected_platform->kind() != object.kind || __polyregion_selected_platform->moduleFormat() != object.format) {
-    fprintf(stderr, "[POLYSTL] Incompatible image  %s [%s] (targeting %s [%s])\n",
+    fprintf(stderr, "[POLYSTL] Skipping incompatible image: %s [%s] (targeting %s [%s])\n",
             to_string(object.kind).data(), //
             to_string(object.format).data(),
             to_string(__polyregion_selected_platform->kind()).data(), //
             to_string(__polyregion_selected_platform->moduleFormat()).data());
     return false;
-  } //
+  }
 
-  fprintf(stderr, "[POLYSTL] Loading image  %s [%s] (targeting %s [%s])\n",
+  fprintf(stderr, "[POLYSTL] Found compatible image: %s [%s] (targeting %s [%s])\n",
           to_string(object.kind).data(), //
           to_string(object.format).data(),
           to_string(__polyregion_selected_platform->kind()).data(), //

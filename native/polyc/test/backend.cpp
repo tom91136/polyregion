@@ -36,7 +36,7 @@ TEST_CASE("run", "[backend]") {
                             )                                                           //
                       ),
                   Return(Alias(Unit0Const())),
-              });
+              }, FunctionKind::Exported());
 
   Program p(fn, {}, {});
   INFO(repr(p));

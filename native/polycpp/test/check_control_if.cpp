@@ -1,46 +1,46 @@
 // #CASE: a<b
 // #RUN: polycpp -fstdpar -DCHECK_EXPR_DEF=a<b -o {output} {input}
-// #RUN: POLY_PLATFORM=host A=1 B=2 {output}
+// #RUN: POLYSTL_PLATFORM=host A=1 B=2 {output}
 //   #EXPECT: 42
-// #RUN: POLY_PLATFORM=host A=2 B=1 {output}
+// #RUN: POLYSTL_PLATFORM=host A=2 B=1 {output}
 //   #EXPECT: -1
-// #RUN: POLY_PLATFORM=host A=1 B=1 {output}
+// #RUN: POLYSTL_PLATFORM=host A=1 B=1 {output}
 //   #EXPECT: -1
 
 // #CASE: a>b
 // #RUN: polycpp -fstdpar -DCHECK_EXPR_DEF=a>b -o {output} {input}
-// #RUN: POLY_PLATFORM=host A=1 B=2 {output}
+// #RUN: POLYSTL_PLATFORM=host A=1 B=2 {output}
 //   #EXPECT: -1
-// #RUN: POLY_PLATFORM=host A=2 B=1 {output}
+// #RUN: POLYSTL_PLATFORM=host A=2 B=1 {output}
 //   #EXPECT: 42
-// #RUN: POLY_PLATFORM=host A=1 B=1 {output}
+// #RUN: POLYSTL_PLATFORM=host A=1 B=1 {output}
 //   #EXPECT: -1
 
 // #CASE: a==b
 // #RUN: polycpp -fstdpar -DCHECK_EXPR_DEF=a==b -o {output} {input}
-// #RUN: POLY_PLATFORM=host A=1 B=2 {output}
+// #RUN: POLYSTL_PLATFORM=host A=1 B=2 {output}
 //   #EXPECT: -1
-// #RUN: POLY_PLATFORM=host A=2 B=1 {output}
+// #RUN: POLYSTL_PLATFORM=host A=2 B=1 {output}
 //   #EXPECT: -1
-// #RUN: POLY_PLATFORM=host A=1 B=1 {output}
+// #RUN: POLYSTL_PLATFORM=host A=1 B=1 {output}
 //   #EXPECT: 42
 
 // #CASE: a!=b
 // #RUN: polycpp -fstdpar -DCHECK_EXPR_DEF=a!=b -o {output} {input}
-// #RUN: POLY_PLATFORM=host A=1 B=2 {output}
+// #RUN: POLYSTL_PLATFORM=host A=1 B=2 {output}
 //   #EXPECT: 42
-// #RUN: POLY_PLATFORM=host A=2 B=1 {output}
+// #RUN: POLYSTL_PLATFORM=host A=2 B=1 {output}
 //   #EXPECT: 42
-// #RUN: POLY_PLATFORM=host A=1 B=1 {output}
+// #RUN: POLYSTL_PLATFORM=host A=1 B=1 {output}
 //   #EXPECT: -1
 
 // #CASE: a==b?false:true
 // #RUN: polycpp -fstdpar -DCHECK_EXPR_DEF=a==b?false:true -o {output} {input}
-// #RUN: POLY_PLATFORM=host A=1 B=2 {output}
+// #RUN: POLYSTL_PLATFORM=host A=1 B=2 {output}
 //   #EXPECT: 42
-// #RUN: POLY_PLATFORM=host A=2 B=1 {output}
+// #RUN: POLYSTL_PLATFORM=host A=2 B=1 {output}
 //   #EXPECT: 42
-// #RUN: POLY_PLATFORM=host A=1 B=1 {output}
+// #RUN: POLYSTL_PLATFORM=host A=1 B=1 {output}
 //   #EXPECT: -1
 
 #ifndef CHECK_EXPR_DEF

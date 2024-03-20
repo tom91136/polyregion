@@ -26,7 +26,7 @@ set(LIB_SOURCES
         )
 
 add_library(polyc ${LIB_SOURCES})
-add_executable(polyc-tests test/ast_codegen.cpp test/backend.cpp test/ast.cpp)
+add_executable(polyc-tests test/ast_codegen.cpp test/ast_offload.cpp test/backend.cpp test/ast.cpp)
 add_executable(polyc-benchmarks benchmark/babelstream.cpp)
 add_executable(polyc-bin ../shared/cxa_thread_atexit.cpp driver.cpp)
 

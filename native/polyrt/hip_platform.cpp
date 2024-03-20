@@ -11,7 +11,7 @@ static constexpr const char *ERROR_PREFIX = "[HIP error] ";
 static void checked(hipError_t result, const char *file, int line) {
   if (result != hipSuccess) {
     throw std::logic_error(std::string(ERROR_PREFIX) + file + ":" + std::to_string(line) + ": " +
-                           hipewErrorString(result));
+                           hipewErrorString(result) + " (code=" + std::to_string(result) + ")");
   }
 }
 

@@ -1,7 +1,7 @@
 // #CASE: capture
 // #MATRIX: capture=&,=,value
 // #RUN: polycpp -fstdpar -DCHECK_CAPTURE={capture} -o {output} {input}
-// #RUN: POLY_PLATFORM=host {output}
+// #RUN: POLYSTL_PLATFORM=host {output}
 //   #EXPECT: 42 43 44 45 46 47 48 49 50 51 52 53 54
 
 #include <cstddef>

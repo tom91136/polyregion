@@ -1,6 +1,7 @@
 // #CASE: general
+// #MATRIX: platform=hsa
 // #RUN: polycpp -O3 -Wall -Wextra -pedantic -g3 -fstdpar -o {output} {input}
-// #RUN: POLY_PLATFORM=cuda SIZE=1024 {output}
+// #RUN: POLYSTL_PLATFORM={platform} SIZE=10 POLYSTL_HOST_FALLBACK=0 {output}
 //   #EXPECT: 204.800000
 
 #include <algorithm>
@@ -105,9 +106,14 @@ int main() {
   std::for_each(                                              //
       std::execution::par_unseq, r.begin(), r.end(),          //
       [scalar, a = a.data(), b = b.data(), c = c.data()](auto i) { //
-        a[i] =  b[i] + scalar * c[i];
+//        a[i] =  b[i] + scalar * c[i];
+          a[i] = 42.0;
       });
 
+  for (int i = 0; i < size; ++i) {
+
+    printf("%f\n", a[i]);
+  }
   auto checksum = std::reduce(a.begin(), a.end(), 0.0, std::plus<>());
 
   printf("%f", checksum);

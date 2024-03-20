@@ -765,6 +765,7 @@ typedef enum hipError_t {
   hipErrorPeerAccessAlreadyEnabled = 704,
   hipErrorPeerAccessNotEnabled = 705,
   hipErrorSetOnActiveProcess = 708,
+  hipErrorContextIsDestroyed = 709, // XXX Not part of HIPEW; added from source
   hipErrorAssert = 710,
   hipErrorHostMemoryAlreadyRegistered = 712,
   hipErrorHostMemoryNotRegistered = 713,

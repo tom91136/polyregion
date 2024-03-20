@@ -66,8 +66,9 @@ for_each(ExecutionPolicy &&, ForwardIt first, ForwardIt last, UnaryFunction f) {
         }
         break;
       }
+        //static_cast<int>( __polyregion_builtin_gpu_global_idx(0))
       case polyregion::runtime::PlatformKind ::Managed: {
-        const auto kernel = [f, first]() { f(*(first + __polyregion_builtin_gpu_global_idx(0))); };
+        const auto kernel = [f, first]() { f(*(first +1 )); };
         auto &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
         for (size_t i = 0; i < bundle.objectCount; ++i) {
           if (__polyregion_dispatch_managed(global, 0, 0, sizeof(decltype(kernel)), &kernel, bundle.moduleName, bundle.get(i))) return;
@@ -76,6 +77,17 @@ for_each(ExecutionPolicy &&, ForwardIt first, ForwardIt last, UnaryFunction f) {
       }
     }
   }
+
+  static constexpr const char* HostFallbackEnv = "POLYSTL_HOST_FALLBACK";
+
+  if (auto env = std::getenv(HostFallbackEnv); env) {
+    errno = 0; // strtol to avoid exceptions
+    size_t value = std::strtol(env, nullptr, 10);
+    if (errno == 0 && value == 0) {
+      std::fprintf(stderr, "[POLYSTL:%s] Offload failed: not compatible backend and host fallback disabled\n", __func__);
+      return;
+    }
+  } // default is to use host fallback, so keep going
 
   std::fprintf(stderr, "[POLYSTL:%s] Host fallback\n", __func__);
   for (size_t i = 0; i < global; ++i) {

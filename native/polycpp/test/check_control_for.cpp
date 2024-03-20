@@ -1,6 +1,6 @@
 // #CASE: for
 // #RUN: polycpp -fstdpar -o {output} {input}
-// #RUN: POLY_PLATFORM=host LIMIT=10 {output}
+// #RUN: POLYSTL_PLATFORM=host LIMIT=10 {output}
 //   #EXPECT: 10 1 2 3 4 5 6 7 8 9 10
 
 #include <cstdio>

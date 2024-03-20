@@ -397,7 +397,6 @@ polyast::CompileResult backend::CSource::compileProgram(const Program &program, 
 
   auto def = mk_string<std::string>(lines, [](auto x) { return x; }, "\n");
 
-  std::cout << def << std::endl;
   std::vector<int8_t> data(def.begin(), def.end());
 
   std::string dialectName;

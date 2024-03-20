@@ -521,6 +521,7 @@ const char *hipewErrorString(hipError_t result) {
     case hipErrorPeerAccessAlreadyEnabled: return "Peer access already enabled";
     case hipErrorPeerAccessNotEnabled: return "Peer access not enabled";
     case hipErrorSetOnActiveProcess: return "Primary context active";
+    case hipErrorContextIsDestroyed: return "The context is already destroyed"; // XXX Not part of HIPEW; added from source
     case hipErrorAssert: return "Assert";
     case hipErrorHostMemoryAlreadyRegistered: return "Host memory already registered";
     case hipErrorHostMemoryNotRegistered: return "Host memory not registered";

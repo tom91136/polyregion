@@ -335,9 +335,11 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
 //                     Source_C_C11 ,
 
                      std::vector<std::pair<compiletime::Target, std::string>> targets = {
-                         {compiletime::Target::Object_LLVM_HOST, "native"},
-                         {compiletime::Target::Object_LLVM_NVPTX64, "sm_60"},
-                         {compiletime::Target::Object_LLVM_NVPTX64, "sm_80"},
+//                         {compiletime::Target::Object_LLVM_HOST, "native"},
+//                         {compiletime::Target::Object_LLVM_NVPTX64, "sm_60"},
+//                         {compiletime::Target::Object_LLVM_NVPTX64, "sm_80"},
+                         {compiletime::Target::Object_LLVM_AMDGCN, "gfx1036"},
+//                         {compiletime::Target::Source_C_OpenCL1_1, ""},
                      };
 
                      auto bundle =

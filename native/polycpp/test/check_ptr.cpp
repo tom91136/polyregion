@@ -1,27 +1,27 @@
 // #CASE: =ptr
 // #MATRIX: size=1,10,100
 // #RUN: polycpp -fstdpar -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE== -o {output} {input}
-// #RUN: POLY_PLATFORM=host {output}
+// #RUN: POLYSTL_PLATFORM=cuda {output}
 //   #EXPECT: -1 -1 1
 
 // #CASE: =ptr=42
 // #MATRIX: size=1,10,100
 // #RUN: polycpp -fstdpar -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE== -DCHECK_MUT -o {output} {input}
-// #RUN: POLY_PLATFORM=host {output}
+// #RUN: POLYSTL_PLATFORM=hsa {output}
 //   #EXPECT: 42 42 1
 
 
 // #CASE: &ptr
 // #MATRIX: size=1,10,100
 // #RUN: polycpp -fstdpar -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE=& -o {output} {input}
-// #RUN: POLY_PLATFORM=host {output}
+// #RUN: POLYSTL_PLATFORM=hsa {output}
 //   #EXPECT: -1 -1 1
 
 
 // #CASE: &ptr=42
 // #MATRIX: size=1,10,100
 // #RUN: polycpp -fstdpar -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE=& -DCHECK_MUT -o {output} {input}
-// #RUN: POLY_PLATFORM=host {output}
+// #RUN: POLYSTL_PLATFORM=hsa {output}
 //   #EXPECT: 42 42 1
 
 #ifndef CHECK_SIZE_DEF

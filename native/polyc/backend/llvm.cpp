@@ -70,7 +70,7 @@ LLVMBackend::AstTransformer::AstTransformer(const LLVMBackend::Options &options,
       // Constant (Internal)  4  Constant
       //             Private  5  Local
     case Target::NVPTX64:
-      GlobalAS = 0; // When inspecting Clang's output, they don't explicitly annotate addrspace(3) for globals
+      GlobalAS = 0; // When inspecting Clang's output, they don't explicitly annotate addrspace(1) for globals
       LocalAS = 3;
       AllocaAS = 0;
       break;
@@ -134,10 +134,6 @@ LLVMBackend::AstTransformer::StructInfo LLVMBackend::AstTransformer::mkStruct(co
   for (const auto &m : def.members) {
     types.push_back(mkTpe(m.named.tpe));
     table[m.named.symbol] = types.size() - 1;
-  }
-  std::cout << "Sym: " << repr(def) << "\n";
-  for (auto &[k, v] : table) {
-    std::cout << " =>" << k << " " << v << "\n";
   }
   return {def, llvm::StructType::create(C, types, qualified(def.name)), table};
 }
@@ -250,7 +246,7 @@ ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
       auto selectFinal = [&](llvm::StructType *structTy, size_t idx, bool conditionalLoad = true, const std::string &suffix = "") {
         if (auto p = tpe.get<Type::Ptr>(); conditionalLoad && p && !p->length) {
           root = B.CreateInBoundsGEP(
-              structTy, load(B, root, B.getPtrTy(AllocaAS)),
+              structTy, load(B, root, B.getPtrTy(GlobalAS)),
               {//
                llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), idx)},
               qualified(select) + "_select_ptr_" + suffix);
@@ -526,7 +522,6 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
 
               // B.to[A]
 
-              std::cout << "R " << llvm_tostring(lhsTpe) << std::endl;
 
               if (auto inHeirachy = findSymbolInHeirachy<bool>(
                       rhsStruct->name,
@@ -539,7 +534,6 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
                     lhsTpe->isStructTy() ? static_cast<llvm::StructType *>(lhsTpe) : throw std::logic_error("Illegal lhs tpe!");
                 for (auto chain : inheritanceChain) {
 
-                  std::cout << "@@ " << llvm_tostring(chain) << std::endl;
 
                   size_t N = 0;
                   if (chain != chainPrev) { // skip the first chain; it's 0 offset
@@ -779,10 +773,11 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
 
           std::cout << llvm_tostring(tpe) << " = " << x.name.tpe << "\n";
           auto stackPtr = B.CreateAlloca(tpe, AllocaAS, nullptr, x.name.symbol + "_stack_ptr");
-          auto rhs = x.expr ? std::make_optional(mkExprVal(*x.expr, fn, x.name.symbol + "_var_rhs")) : std::nullopt;
           stackVarPtrs.emplace(x.name.symbol, Pair<Type::Any, llvm::Value *>{x.name.tpe, stackPtr});
-          if (rhs) {
-            B.CreateStore(*rhs, stackPtr); //
+          if(x.expr){
+            auto rhs = mkExprVal(*x.expr, fn, x.name.symbol + "_var_rhs");
+            if(rhs->getType()->getPointerAddressSpace() != stackPtr->getAddressSpace().)
+            B.CreateStore(rhs, stackPtr); //
           }
         }
         return BlockKind::Normal;
@@ -801,6 +796,7 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
           if (lhs->init.empty()) { // local var
             auto stackPtr = findStackVar(lhs->last);
             B.CreateStore(rhs, stackPtr);
+            // FIXME
           } else { // struct member select
             B.CreateStore(rhs, mkSelectPtr(*lhs));
           }
@@ -949,9 +945,7 @@ void LLVMBackend::AstTransformer::addDefs(const std::vector<StructDef> &defs) {
         });
     if (!zeroDeps.empty()) {
       for (auto &r : zeroDeps) {
-
         auto v = structTypes.emplace(r.name, mkStruct(r));
-        std::cout << "Add " << llvm_tostring(v.first->second.tpe) << " from " << r << "\n";
         defsWithDependencies.erase(r);
       }
     } else
@@ -997,7 +991,15 @@ void LLVMBackend::AstTransformer::addFn(llvm::Module &mod, const Function &f, bo
                                     cleanName,                                                         //
                                     mod);
 
-  fn->setDSOLocal(true);
+  if(options.target == Target::AMDGCN && f.kind != FunctionKind::Exported()){
+
+    fn->setVisibility(llvm::GlobalValue::VisibilityTypes::HiddenVisibility);
+  }
+
+  if(options.target != Target::AMDGCN){
+
+    fn->setDSOLocal(true);
+  }
 
   if (entry || true) { // setup external function conventions for targets
 
@@ -1016,7 +1018,11 @@ void LLVMBackend::AstTransformer::addFn(llvm::Module &mod, const Function &f, bo
                                            {llvm::ValueAsMetadata::get(fn), llvm::MDString::get(C, "kernel"),
                                             llvm::ValueAsMetadata::get(llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 1))}));
         break;
-      case Target::AMDGCN: fn->setCallingConv(llvm::CallingConv::AMDGPU_KERNEL); break;
+      case Target::AMDGCN:
+        if(f.kind == FunctionKind::Exported()){
+          fn->setCallingConv(llvm::CallingConv::AMDGPU_KERNEL);
+        }
+        break;
       case Target::SPIRV32:
       case Target::SPIRV64:
 

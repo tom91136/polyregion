@@ -208,16 +208,16 @@ int main() {
 
   std::vector<std::tuple<runtime::Backend, compiletime::Target, std::string>> configs = {
       // CL runs everywhere
-            {runtime::Backend::OpenCL, compiletime::Target::Source_C_OpenCL1_1, ""},
+//            {runtime::Backend::OpenCL, compiletime::Target::Source_C_OpenCL1_1, ""},
 //      {runtime::Backend::Vulkan, compiletime::Target::Object_LLVM_SPIRV64, ""},
 #ifdef __APPLE__
       {runtime::Backend::RELOCATABLE_OBJ, compiler::Target::Object_LLVM_AArch64, "apple-m1"},
       {runtime::Backend::Metal, compiler::Target::Source_C_Metal1_0, ""},
 #else
-      {runtime::Backend::CUDA, compiletime::Target::Object_LLVM_NVPTX64, "sm_60"},
-      {runtime::Backend::HIP, compiletime::Target::Object_LLVM_AMDGCN, "gfx1036"},
+//      {runtime::Backend::CUDA, compiletime::Target::Object_LLVM_NVPTX64, "sm_60"},
+//      {runtime::Backend::HIP, compiletime::Target::Object_LLVM_AMDGCN, "gfx1036"},
       {runtime::Backend::HSA, compiletime::Target::Object_LLVM_AMDGCN, "gfx1036"},
-      {runtime::Backend::RelocatableObject, compiletime::Target::Object_LLVM_x86_64, "x86-64-v3"},
+//      {runtime::Backend::RelocatableObject, compiletime::Target::Object_LLVM_x86_64, "x86-64-v3"},
 #endif
   };
 
@@ -226,7 +226,7 @@ int main() {
     auto cpu = backend == runtime::Backend::RelocatableObject || backend == runtime::Backend::SharedObject;
 
     auto p = mkStreamProgram("_float", Float, !cpu);
-    std::cout << repr(p) << std::endl;
+    //    std::cout << repr(p) << std::endl;
 
     auto platform = runtime::Platform::of(backend);
     std::cout << "backend=" << to_string(backend) << " arch=" << arch << std::endl;
@@ -234,8 +234,8 @@ int main() {
 
       polyregion::compiler::initialise();
       auto c = polyregion::compiler::compile(p, {target, arch}, compiletime::OptLevel::Ofast);
-      //    std::cerr << c << std::endl;
-      std::cerr << repr(c) << std::endl;
+//          std::cerr << c << std::endl;
+            std::cerr << repr(c) << std::endl;
 
       if (!c.binary) {
         throw std::logic_error("No binary produced");
@@ -268,26 +268,31 @@ int main() {
                          .dot = {"module", "stream_dot" + suffix}};
         }
 
-        polyregion::stream::runStream<float>(
-            runtime::Type::Float32,                          //
-            33554432,                                        //
-            100,                                             //
-            cpu ? std::thread::hardware_concurrency() : 256, //
-            platform->name(),
-            std::move(d), //
-            kernelSpecs,  //
-            true,         //
-            [](auto actual, auto tolerance) {
-              if (actual >= tolerance) {
-                std::cerr << "Tolerance (" << tolerance * 100 << "%) exceeded for array value delta: " << actual * 100 << "&" << std::endl;
-              }
-            }, //
-            [=](auto actual) {
-              if (actual >= relTolerance) {
-                std::cerr << "Tolerance (" << relTolerance * 100 << "%) exceeded for dot value delta: " << actual * 100 << "&" << std::endl;
-              }
-            } //
-        );
+        size_t size = 33554432;
+        size_t times = 100;
+        size_t groups = cpu ? std::thread::hardware_concurrency() : 256;
+
+        auto fValidate = [](auto actual, auto tolerance) {
+          if (actual >= tolerance) {
+            std::cerr << "Tolerance (" << tolerance * 100 << "%) exceeded for array value delta: " << actual * 100 << "%" << std::endl;
+          }
+        };
+
+        auto fValidateSum = [=](auto actual) {
+          if (actual >= relTolerance) {
+            std::cerr << "Tolerance (" << relTolerance * 100 << "%) exceeded for dot value delta: " << actual * 100 << "%" << std::endl;
+          }
+        };
+
+        polyregion::stream::runStream<float>(                  //
+            runtime::Type::Float32, size, times, groups,       //
+            "Explicit: " + platform->name(), platform->kind(), //
+            *d, kernelSpecs, true, fValidate, fValidateSum);
+
+        polyregion::stream::runStreamShared<float>(          //
+            runtime::Type::Float32, size, times, groups,     //
+            "Shared: " + platform->name(), platform->kind(), //
+            *d, kernelSpecs, true, fValidate, fValidateSum);
       }
 
       //

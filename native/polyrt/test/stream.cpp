@@ -60,7 +60,7 @@ void testStream(I images, Type tpe, const std::string &suffix, T relTolerance, /
                 }
 
                 polyregion::stream::runStream<T>(
-                    tpe, size, time, Ncore, platform->name(), std::move(d), kernelSpecs, false,
+                    tpe, size, time, Ncore, platform->name(), platform->kind(), std::move(d), kernelSpecs, false,
                     [](auto actual, auto limit) {
                       INFO("array validation");
                       CHECK(actual < limit);
