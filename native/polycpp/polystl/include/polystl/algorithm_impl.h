@@ -45,8 +45,6 @@ for_each(ExecutionPolicy &&, ForwardIt first, ForwardIt last, UnaryFunction f) {
   auto N = std::thread::hardware_concurrency();
   std::fprintf(stderr, "[POLYSTL:%s] Dispatch global range <%d>\n", __func__, global);
 
-
-
   if (PlatformKind kind; __polyregion_platform_kind(kind)) {
     switch (kind) {
       case polyregion::runtime::PlatformKind ::HostThreaded: {
@@ -66,9 +64,8 @@ for_each(ExecutionPolicy &&, ForwardIt first, ForwardIt last, UnaryFunction f) {
         }
         break;
       }
-        //static_cast<int>( __polyregion_builtin_gpu_global_idx(0))
       case polyregion::runtime::PlatformKind ::Managed: {
-        const auto kernel = [f, first]() { f(*(first +1 )); };
+        const auto kernel = [f, first]() { f(*(first + __polyregion_builtin_gpu_global_idx(0))); };
         auto &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
         for (size_t i = 0; i < bundle.objectCount; ++i) {
           if (__polyregion_dispatch_managed(global, 0, 0, sizeof(decltype(kernel)), &kernel, bundle.moduleName, bundle.get(i))) return;
@@ -78,7 +75,7 @@ for_each(ExecutionPolicy &&, ForwardIt first, ForwardIt last, UnaryFunction f) {
     }
   }
 
-  static constexpr const char* HostFallbackEnv = "POLYSTL_HOST_FALLBACK";
+  static constexpr const char *HostFallbackEnv = "POLYSTL_HOST_FALLBACK";
 
   if (auto env = std::getenv(HostFallbackEnv); env) {
     errno = 0; // strtol to avoid exceptions

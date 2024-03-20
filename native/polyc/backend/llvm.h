@@ -54,6 +54,7 @@ private:
 public:
   static ValPtr sizeOf(llvm::IRBuilder<> &B, llvm::LLVMContext &C, llvm::Type *ptrTpe);
   static ValPtr load(llvm::IRBuilder<> &B, ValPtr rhs, llvm::Type *ty);
+  static ValPtr allocaAS(llvm::IRBuilder<> &B,  llvm::Type *ty, unsigned int AS, const std::string & key);
 
   class AstTransformer;
 

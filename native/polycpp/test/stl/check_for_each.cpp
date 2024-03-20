@@ -1,7 +1,7 @@
 // #CASE: general
-// #MATRIX: platform=hsa
+// #MATRIX: platform=host
 // #RUN: polycpp -O3 -Wall -Wextra -pedantic -g3 -fstdpar -o {output} {input}
-// #RUN: POLYSTL_PLATFORM={platform} SIZE=10 POLYSTL_HOST_FALLBACK=0 {output}
+// #RUN: POLYSTL_PLATFORM={platform} SIZE=1024 POLYSTL_HOST_FALLBACK=0 {output}
 //   #EXPECT: 204.800000
 
 #include <algorithm>
@@ -75,16 +75,6 @@ private:
   iterator end_;
 };
 
-template <typename T> struct MyAllocator {
-  using value_type = T;
-  MyAllocator() = default;
-  template <class U> constexpr MyAllocator(const MyAllocator<U> &) noexcept {}
-  [[nodiscard]] T *allocate(std::size_t n) { return static_cast<T *>(__polyregion_malloc(sizeof(T) * n)); }
-  void deallocate(T *p, std::size_t) noexcept { __polyregion_free(p); }
-};
-template <class T, class U> bool operator==(const MyAllocator<T> &, const MyAllocator<U> &) { return true; }
-template <class T, class U> bool operator!=(const MyAllocator<T> &, const MyAllocator<U> &) { return false; }
-
 int main() {
 
   int size = 1024;
@@ -103,17 +93,12 @@ int main() {
 
   // a = b + scalar * c
   ranged<int> r(0, size);
-  std::for_each(                                              //
-      std::execution::par_unseq, r.begin(), r.end(),          //
+  std::for_each(                                                   //
+      std::execution::par_unseq, r.begin(), r.end(),               //
       [scalar, a = a.data(), b = b.data(), c = c.data()](auto i) { //
-//        a[i] =  b[i] + scalar * c[i];
-          a[i] = 42.0;
+        a[i] = b[i] + scalar * c[i];
       });
 
-  for (int i = 0; i < size; ++i) {
-
-    printf("%f\n", a[i]);
-  }
   auto checksum = std::reduce(a.begin(), a.end(), 0.0, std::plus<>());
 
   printf("%f", checksum);

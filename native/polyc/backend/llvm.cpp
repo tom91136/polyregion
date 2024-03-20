@@ -38,6 +38,13 @@ ValPtr LLVMBackend::load(llvm::IRBuilder<> &B, ValPtr rhs, llvm::Type *ty) {
   //  assert(!ty->isArrayTy());
   return B.CreateLoad(ty, rhs);
 }
+
+
+ValPtr LLVMBackend::allocaAS(llvm::IRBuilder<> &B,  llvm::Type *ty, unsigned int AS, const std::string & key){
+  auto stackPtr = B.CreateAlloca(ty, AS, nullptr, key);
+  return AS != 0 ? B.CreateAddrSpaceCast(stackPtr, B.getPtrTy()) : stackPtr;
+}
+
 ValPtr LLVMBackend::sizeOf(llvm::IRBuilder<> &B, llvm::LLVMContext &C, llvm::Type *ptrTpe) {
   // http://nondot.org/sabre/LLVMNotes/SizeOf-OffsetOf-VariableSizedStructs.txt
   // we want
@@ -75,7 +82,7 @@ LLVMBackend::AstTransformer::AstTransformer(const LLVMBackend::Options &options,
       AllocaAS = 0;
       break;
     case Target::AMDGCN:
-      GlobalAS = 1;
+      GlobalAS = 0;
       LocalAS = 3;
       AllocaAS = 5;
       break;
@@ -170,10 +177,12 @@ llvm::Type *LLVMBackend::AstTransformer::mkTpe(const Type::Any &tpe, bool functi
       [&](const Type::Ptr &x) -> llvm::Type * {
         if (x.length) return llvm::ArrayType::get(mkTpe(x.component), *x.length);
         else {
-          return B.getPtrTy(x.space.match_total(                    //
-              [&](const TypeSpace::Local &_) { return LocalAS; },   //
-              [&](const TypeSpace::Global &_) { return GlobalAS; }) //
-          );
+//          return B.getPtrTy();
+                    return
+                        B.getPtrTy(x.space.match_total(                    //
+                        [&](const TypeSpace::Local &_) { return LocalAS; },   //
+                        [&](const TypeSpace::Global &_) { return GlobalAS; }) //
+                    );
         }
 
         //        // These two types promote to a byte when stored in an array
@@ -246,7 +255,7 @@ ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
       auto selectFinal = [&](llvm::StructType *structTy, size_t idx, bool conditionalLoad = true, const std::string &suffix = "") {
         if (auto p = tpe.get<Type::Ptr>(); conditionalLoad && p && !p->length) {
           root = B.CreateInBoundsGEP(
-              structTy, load(B, root, B.getPtrTy(GlobalAS)),
+              structTy, load(B, root, B.getPtrTy()),
               {//
                llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), idx)},
               qualified(select) + "_select_ptr_" + suffix);
@@ -772,11 +781,10 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
           auto tpe = mkTpe(x.name.tpe);
 
           std::cout << llvm_tostring(tpe) << " = " << x.name.tpe << "\n";
-          auto stackPtr = B.CreateAlloca(tpe, AllocaAS, nullptr, x.name.symbol + "_stack_ptr");
+          auto stackPtr = allocaAS(B, tpe, AllocaAS, x.name.symbol + "_stack_ptr");
           stackVarPtrs.emplace(x.name.symbol, Pair<Type::Any, llvm::Value *>{x.name.tpe, stackPtr});
           if(x.expr){
             auto rhs = mkExprVal(*x.expr, fn, x.name.symbol + "_var_rhs");
-            if(rhs->getType()->getPointerAddressSpace() != stackPtr->getAddressSpace().)
             B.CreateStore(rhs, stackPtr); //
           }
         }
@@ -1168,10 +1176,9 @@ void LLVMBackend::AstTransformer::transform(llvm::Module &mod, const Function &f
                             ? B.CreateICmpNE(&arg, llvm::ConstantInt::get(llvm::Type::getInt8Ty(C), 0, true))
                             : &arg;
 
-        //        auto as = HOLDS(ArgKind::Local, fnArg.kind) ? LocalAS : GlobalAS;
-        auto stack = B.CreateAlloca(mkTpe(fnArg.named.tpe), AllocaAS, nullptr, fnArg.named.symbol + "_stack_ptr");
-        B.CreateStore(argValue, stack);
-        return {fnArg.named.symbol, {fnArg.named.tpe, stack}};
+        auto stackPtr = allocaAS(B, mkTpe(fnArg.named.tpe), AllocaAS, fnArg.named.symbol + "_stack_ptr");
+        B.CreateStore(argValue, stackPtr);
+        return {fnArg.named.symbol, {fnArg.named.tpe, stackPtr}};
       });
 
   for (auto &stmt : fnTree.body)
