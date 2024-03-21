@@ -23,13 +23,13 @@
 #include "llvm/Analysis/CallGraph.h"
 
 #include "aspartame/string.hpp"
+#include "aspartame/unordered_set.hpp"
+#include "aspartame/variant.hpp"
 #include "aspartame/vector.hpp"
 #include "aspartame/view.hpp"
 
-#include "aspartame/fluent.hpp"
-#include "aspartame/unordered_set.hpp"
-
 #include "frontend.h"
+#include "options.h"
 #include "rewriter.h"
 #include "utils.hpp"
 
@@ -37,8 +37,6 @@
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
 #include <cxxabi.h>
-
-using namespace llvm;
 
 using namespace aspartame;
 
@@ -69,6 +67,7 @@ void traverseCallGraph(const llvm::Function *F, llvm::CallGraph &CG, std::unorde
 }
 
 void interpose(llvm::Module &M) {
+  using namespace llvm;
 
   static constexpr std::pair<StringLiteral, StringLiteral> ReplaceMap[]{
       //      {"aligned_alloc", "__polyregion_aligned_alloc"},
@@ -211,9 +210,12 @@ static std::vector<std::string> mkDelimitedEnvPaths(const char *env, std::option
   return xs;
 };
 
-int executeCC1(std::vector<std::string> &cc1Args, bool stdpar) {
+int executeCC1(std::vector<std::string> &cc1Args, const std::optional<polyregion::polystl::StdParOptions> &stdpar) {
+
+
 
   if (stdpar) {
+
     auto includes = mkDelimitedEnvPaths("POLYSTL_INCLUDE", "-isystem");
     cc1Args.insert(cc1Args.end(), includes.begin(), includes.end());
 
@@ -225,6 +227,8 @@ int executeCC1(std::vector<std::string> &cc1Args, bool stdpar) {
   }
 
   std::vector<const char *> cc1Args_ = cc1Args ^ map([](auto &x) { return x.c_str(); });
+
+  std::cout << (cc1Args ^ mk_string(" ")) << "\n";
 
   //  std::vector<const char *> cc1Args_(cc1Args.size());
   //  std::transform(cc1Args.begin(), cc1Args.end(), cc1Args_.begin(), [](auto &x) { return x.c_str(); });
@@ -240,10 +244,16 @@ int executeCC1(std::vector<std::string> &cc1Args, bool stdpar) {
 
   auto ct = clang::TargetInfo::CreateTargetInfo(CI.getDiagnostics(), CI.getInvocation().TargetOpts);
   CI.setTarget(ct);
+
+  if (CI.getFrontendOpts().ShowVersion) {
+    llvm::cl::PrintVersionMessage();
+    return true;
+  }
+
   bool success;
   if (stdpar && !std::getenv("POLYCPP_NO_REWRITE")) {
     using namespace polyregion;
-    polystl::ModifyASTAndEmitObjAction action([&]() { return std::make_unique<polystl::OffloadRewriteConsumer>(CI.getDiagnostics()); });
+    polystl::ModifyASTAndEmitObjAction action([&]() { return std::make_unique<polystl::OffloadRewriteConsumer>(CI.getDiagnostics(), *stdpar); });
     success = CI.ExecuteAction(action);
     if (!success) {
       diag->Report(diag->getCustomDiagID(clang::DiagnosticsEngine::Error, "[PolySTL] Frontend pass did not succeed"));
@@ -251,7 +261,11 @@ int executeCC1(std::vector<std::string> &cc1Args, bool stdpar) {
     }
 
     auto M = action.takeModule();
-    interpose(*M);
+
+    if (stdpar->interposeMalloc) {
+      interpose(*M);
+    }
+
     clang::EmitBackendOutput(CI.getDiagnostics(),                           //
                              CI.getHeaderSearchOpts(),                      //
                              CI.getCodeGenOpts(),                           //
@@ -266,6 +280,8 @@ int executeCC1(std::vector<std::string> &cc1Args, bool stdpar) {
     CI.clearOutputFiles(/*erase*/ false);
     CI.getSourceManager().PrintStats();
   } else {
+
+
     clang::EmitObjAction action;
     success = CI.ExecuteAction(action);
   }
@@ -294,44 +310,55 @@ int main(int argc, const char *argv[]) {
 
   clang::driver::Driver driver(execPath, triple, diags, "PolyCpp compiler");
   driver.ResourceDir = (execParentDir + "/lib/clang/" + std::to_string(CLANG_VERSION_MAJOR));
+  return polyregion::polystl::StdParOptions::stripAndParse({argv, argv + argc}) ^
+         fold_total(
+             [&](const std::vector<std::string> &errors) {
+               driver.getDiags().Report(
+                   diags.getCustomDiagID(clang::DiagnosticsEngine::Fatal, "Errors (%0) while parsing the following arguments:\n%1"))
+                   << errors.size() << (errors ^ mk_string("\n") ^ indent(2));
+               return EXIT_FAILURE;
+             },
+             [&](const std::pair<std::vector<const char *>, std::optional<polyregion::polystl::StdParOptions>> &v) {
+               auto [args, stdpar] = v;
 
-  std::vector<const char *> args(argv, argv + argc);
+               // since the executable name won't be clang++ anymore, we manually set the mode to C++ by inserting the override
+               // after the executable name
+               args.insert(std::next(args.begin()), "--driver-mode=g++");
 
-  auto stdparIdx = args ^ index_of("-fstdpar");
-  args | zip_with_index<decltype(stdparIdx)>() | filter([&](auto &, auto i) { return i == stdparIdx; });
+               if (!stdpar->quiet) {
+                 driver.getDiags()
+                     .Report(diags.getCustomDiagID(clang::DiagnosticsEngine::Remark, "[PolySTL] Targeting architectures: %0"))
+                     .AddString(stdpar->targets ^
+                                mk_string(", ", [](auto target, auto feature) { return std::string(to_string(target)) + "@" + feature; }));
+               }
 
-  // sort out -fstdpar
-  auto fstdparIt = std::remove_if(args.begin(), args.end(), [](auto x) { return x == std::string("-fstdpar"); });
-  auto stdpar = fstdparIt != args.end();
-  if (stdpar) args.erase(fstdparIt, args.end());
+               //               if (stdpar) {
+               auto libs = mkDelimitedEnvPaths("POLYSTL_LIB", {});
+               std::transform(libs.begin(), libs.end(), std::back_inserter(args), [](auto &x) { return x.c_str(); });
+               //               }
 
-  // since the executable name won't be clang++ anymore, we manually set the mode to C++ by inserting the override after the executable name
-  args.insert(std::next(args.begin()), "--driver-mode=g++");
+               std::unique_ptr<clang::driver::Compilation> compilation(driver.BuildCompilation(llvm::ArrayRef(args)));
 
-  auto libs = mkDelimitedEnvPaths("POLYSTL_LIB", {});
-  std::transform(libs.begin(), libs.end(), std::back_inserter(args), [](auto &x) { return x.c_str(); });
-
-  std::unique_ptr<clang::driver::Compilation> compilation(driver.BuildCompilation(llvm::ArrayRef(args)));
-
-  int returnCode = EXIT_SUCCESS;
-  for (const auto &command : compilation->getJobs()) {
-    const auto &cmdArgs = command.getArguments();
-    if (command.getExecutable() == execPath &&                    // make sure the driver is actually calling us
-        command.getCreator().getName() == std::string("clang") && // and that clang is the compiler
-        cmdArgs[0] == std::string("-cc1")                         // and we're invoking the cc1 frontend
-    ) {
-      std::vector<std::string> actual;
-      actual.insert(actual.begin(), std::next(cmdArgs.begin()), cmdArgs.end()); //  skip the first -cc1
-      returnCode = executeCC1(actual, stdpar);
-      if (returnCode != EXIT_SUCCESS) break;
-    } else {
-      const clang::driver::Command *failed{};
-      if (auto code = compilation->ExecuteCommand(command, failed); code != EXIT_SUCCESS) {
-        driver.generateCompilationDiagnostics(*compilation, *failed);
-        returnCode = code;
-      }
-    }
-  }
-  diags.getClient()->finish();
-  return returnCode;
+               int returnCode = EXIT_SUCCESS;
+               for (const auto &command : compilation->getJobs()) {
+                 const auto &cmdArgs = command.getArguments();
+                 if (command.getExecutable() == execPath &&                    // make sure the driver is actually calling us
+                     command.getCreator().getName() == std::string("clang") && // and that clang is the compiler
+                     cmdArgs[0] == std::string("-cc1")                         // and we're invoking the cc1 frontend
+                 ) {
+                   std::vector<std::string> actual;
+                   actual.insert(actual.begin(), std::next(cmdArgs.begin()), cmdArgs.end()); //  skip the first -cc1
+                   returnCode = executeCC1(actual, stdpar);
+                   if (returnCode != EXIT_SUCCESS) break;
+                 } else {
+                   const clang::driver::Command *failed{};
+                   if (auto code = compilation->ExecuteCommand(command, failed); code != EXIT_SUCCESS) {
+                     driver.generateCompilationDiagnostics(*compilation, *failed);
+                     returnCode = code;
+                   }
+                 }
+               }
+               diags.getClient()->finish();
+               return returnCode;
+             });
 }

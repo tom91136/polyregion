@@ -779,8 +779,6 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
           if (x.expr) mkExprVal(*x.expr, fn, x.name.symbol + "_var_rhs");
         } else {
           auto tpe = mkTpe(x.name.tpe);
-
-          std::cout << llvm_tostring(tpe) << " = " << x.name.tpe << "\n";
           auto stackPtr = allocaAS(B, tpe, AllocaAS, x.name.symbol + "_stack_ptr");
           stackVarPtrs.emplace(x.name.symbol, Pair<Type::Any, llvm::Value *>{x.name.tpe, stackPtr});
           if(x.expr){

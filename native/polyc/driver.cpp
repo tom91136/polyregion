@@ -19,7 +19,6 @@ using namespace polyregion;
 using namespace polyast::dsl;
 using namespace polyast::Intr;
 
-// cuda:sm_60,sm_20^host:native-sve+bmi
 
 
 // tools =>

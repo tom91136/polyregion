@@ -11,12 +11,14 @@
 #include "clang/ASTMatchers/ASTMatchers.h"
 #include "llvm/Support/Casting.h"
 
+#include "aspartame/optional.hpp"
 #include "aspartame/vector.hpp"
 #include "aspartame/view.hpp"
 
 #include "ast_visitors.h"
 #include "clang_utils.h"
 #include "codegen.h"
+#include "options.h"
 #include "rewriter.h"
 
 using namespace polyregion::polystl;
@@ -105,22 +107,22 @@ static std::vector<std::variant<Failure, Callsite>> outlinePolyregionOffload(cla
   return results;
 }
 
-static std::string createHumanReadableFunctionIdentifier(clang::ASTContext &c, clang::FunctionDecl *decl) {
-  SpecialisationPathVisitor spv(c);
-  auto xs = spv.resolve(decl);
-  std::string identifier;
-  for (std::make_signed_t<size_t> i = xs.size() - 1; i >= 0; --i) {
-    auto loc = getLocation(*xs[i].second, c);
-    identifier += xs[i].first->getName();
-    identifier += "<";
-    identifier += loc.filename;
-    identifier += ":";
-    identifier += std::to_string(loc.line);
-    identifier += ">";
-    if (i != 0) identifier += "->";
-  }
-  return identifier;
-}
+// static std::string createHumanReadableFunctionIdentifier(clang::ASTContext &c, clang::FunctionDecl *decl) {
+//   SpecialisationPathVisitor spv(c);
+//   auto xs = spv.resolve(decl);
+//   std::string identifier;
+//   for (std::make_signed_t<size_t> i = xs.size() - 1; i >= 0; --i) {
+//     auto loc = getLocation(*xs[i].second, c);
+//     identifier += xs[i].first->getName();
+//     identifier += "<";
+//     identifier += loc.filename;
+//     identifier += ":";
+//     identifier += std::to_string(loc.line);
+//     identifier += ">";
+//     if (i != 0) identifier += "->";
+//   }
+//   return identifier;
+// }
 
 void insertKernelImage(clang::DiagnosticsEngine &diag, clang::ASTContext &C, Callsite &c, const KernelBundle &bundle) {
 
@@ -294,7 +296,8 @@ void insertKernelImage(clang::DiagnosticsEngine &diag, clang::ASTContext &C, Cal
   c.calleeDecl->print(llvm::outs());
 }
 
-OffloadRewriteConsumer::OffloadRewriteConsumer(clang::DiagnosticsEngine &diag) : clang::ASTConsumer(), diag(diag) {}
+OffloadRewriteConsumer::OffloadRewriteConsumer(clang::DiagnosticsEngine &diag, const StdParOptions &opts)
+    : clang::ASTConsumer(), diag(diag), opts(opts) {}
 
 template <typename Parent, typename Node> const Parent *findParentOfType(clang::ASTContext &context, Node *from) {
   for (auto node = context.getParents(*from).begin()->template get<clang::Decl>(); node;
@@ -311,7 +314,7 @@ template <typename Parent, typename Node> const Parent *findParentOfType(clang::
 }
 
 void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
-  std::cout << "[TU] >>>" << std::endl;
+  //  std::cout << "[TU] >>>" << std::endl;
 
   std::vector<std::variant<Failure, Callsite>> results = outlinePolyregionOffload(C);
 
@@ -324,38 +327,37 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
 
                    },
                    [&](Callsite &c) { //
-                     auto moduleId = createHumanReadableFunctionIdentifier(C, c.calleeDecl);
-
-
-                     // if target ==
-//                     Object_LLVM_HOST ,
-//                     Object_LLVM_x86_64,
-//                     Object_LLVM_AArch64,
-//                     Object_LLVM_ARM,
-//                     Source_C_C11 ,
-
-                     std::vector<std::pair<compiletime::Target, std::string>> targets = {
-                         {compiletime::Target::Object_LLVM_HOST, "native"},
-                         {compiletime::Target::Object_LLVM_NVPTX64, "sm_60"},
-//                         {compiletime::Target::Object_LLVM_NVPTX64, "sm_80"},
-                         {compiletime::Target::Object_LLVM_AMDGCN, "gfx1036"},
-//                         {compiletime::Target::Source_C_OpenCL1_1, ""},
-                     };
+                     SpecialisationPathVisitor spv(C);
+                     auto specialisationPath = spv.resolve(c.calleeDecl) ^ reverse();
+                     auto moduleId = specialisationPath ^ mk_string("->", [&](auto fnDecl, auto callExpr) {
+                                       auto l = getLocation(*callExpr, C);
+                                       std::string moduleId;
+                                       moduleId += "<";
+                                       moduleId += l.filename;
+                                       moduleId += ":";
+                                       moduleId += std::to_string(l.line);
+                                       moduleId += ">";
+                                       return moduleId;
+                                     });
 
                      auto bundle =
                          generate(C, diag, moduleId, *c.functorDecl,
-                                  targets ^ filter([&](auto &target, auto &) { return c.kind == runtime::targetPlatformKind(target); }));
+                                            specialisationPath ^ head_maybe() ^
+                                                fold([](auto, auto callExpr) { return callExpr->getExprLoc(); },
+                                                     [&]() { return c.callLambdaArgExpr->getExprLoc(); }),
+                                            c.kind, opts);
 
-
-                     diag.Report(c.callLambdaArgExpr->getExprLoc(),
-                                 diag.getCustomDiagID(clang::DiagnosticsEngine::Remark, "[PolySTL] Outlined function: %0 for %1 (%2)\n"))
-                         << moduleId << to_string(c.kind)
-                         << (bundle.objects //
-                             | map([](auto &o) {
-                                 return std::string(to_string(o.format)) + "=" +
-                                        std::to_string(static_cast<float>(o.moduleImage.size()) / 1000) + "KB";
-                               }) //
-                             | mk_string(", "));
+                     if (!opts.quiet) {
+                       diag.Report(c.callLambdaArgExpr->getExprLoc(),
+                                   diag.getCustomDiagID(clang::DiagnosticsEngine::Remark, "[PolySTL] Outlined function: %0 for %1 (%2)\n"))
+                           << moduleId << to_string(c.kind)
+                           << (bundle.objects //
+                               | map([](auto &o) {
+                                   return std::string(to_string(o.format)) + "=" +
+                                          std::to_string(static_cast<float>(o.moduleImage.size()) / 1000) + "KB";
+                                 }) //
+                               | mk_string(", "));
+                     }
 
                      insertKernelImage(diag, C, c, bundle);
 

@@ -1,6 +1,6 @@
 
 // #CASE: with
-// #RUN: polycpp -fstdpar -o {output} {input}
+// #RUN: polycpp -fstdpar -fstdpar-arch=host@native -o {output} {input}
 // #RUN: POLYSTL_PLATFORM=host {output}
 //   #EXPECT: OK
 

@@ -1,5 +1,5 @@
 // #CASE: for
-// #RUN: polycpp -fstdpar -o {output} {input}
+// #RUN: polycpp -fstdpar -fstdpar-arch=host@native -o {output} {input}
 // #RUN: POLYSTL_PLATFORM=host LIMIT=10 {output}
 //   #EXPECT: 10 1 2 3 4 5 6 7 8 9 10
 

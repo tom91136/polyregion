@@ -94,6 +94,7 @@ static inline const std::unordered_map<std::string, Target> &targets() {
            {"native", Target::Object_LLVM_HOST},
            {"x86_64", Target::Object_LLVM_x86_64},
            {"aarch64", Target::Object_LLVM_AArch64},
+           {"arm64", Target::Object_LLVM_AArch64},
            {"arm", Target::Object_LLVM_ARM},
 
            // ptx
@@ -103,6 +104,7 @@ static inline const std::unordered_map<std::string, Target> &targets() {
 
            // hsaco
            {"amdgcn", Target::Object_LLVM_AMDGCN},
+           {"amdgpu", Target::Object_LLVM_AMDGCN},
            {"hsa", Target::Object_LLVM_AMDGCN},
            {"hip", Target::Object_LLVM_AMDGCN},
 

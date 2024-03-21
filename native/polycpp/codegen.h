@@ -1,5 +1,6 @@
 #pragma once
 
+#include "options.h"
 #include "types.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Decl.h"
@@ -24,5 +25,7 @@ KernelBundle generate(clang::ASTContext &C,                //
                       clang::DiagnosticsEngine &diag,      //
                       const std::string &moduleId,         //
                       const clang::CXXMethodDecl &functor, //
-                      const std::vector<std::pair<compiletime::Target, std::string>> &targets);
+                      const clang::SourceLocation &loc,
+                      runtime::PlatformKind kind, //
+                      const StdParOptions &opts);
 }

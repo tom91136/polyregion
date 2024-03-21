@@ -177,7 +177,9 @@ HipDeviceQueue::HipDeviceQueue(decltype(store) store) : store(store) {
 }
 HipDeviceQueue::~HipDeviceQueue() {
   TRACE();
-  CHECKED(hipStreamDestroy(stream));
+  auto result = hipStreamDestroy(stream);
+  if (result == hipError_t::hipErrorContextIsDestroyed) return;
+  CHECKED(result);
 }
 void HipDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
   TRACE();

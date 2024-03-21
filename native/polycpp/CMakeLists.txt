@@ -7,7 +7,13 @@ add_subdirectory(interpose)
 #        remapper.cpp clang_utils.cpp ast_visitors.cpp codegen.cpp frontend.cpp rewriter.cpp)
 add_executable(polycpp ../shared/cxa_thread_atexit.cpp
         tool.cpp
-        remapper.cpp clang_utils.cpp ast_visitors.cpp codegen.cpp frontend.cpp rewriter.cpp)
+        options.cpp
+        remapper.cpp
+        clang_utils.cpp
+        ast_visitors.cpp
+        codegen.cpp
+        frontend.cpp
+        rewriter.cpp)
 
 add_dependencies(polycpp polystl polystl-static polyc-bin)
 

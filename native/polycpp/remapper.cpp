@@ -407,7 +407,6 @@ std::string Remapper::handleRecord(const clang::RecordDecl *decl, RemapContext &
     }
 
     auto sd = r.structs.emplace(name, StructDef(Sym({name}), {}, members, parents));
-    llvm::outs() << "handleRecord: " << repr(sd.first->second) << "\n";
   }
   return name;
 }
@@ -605,8 +604,6 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
           case clang::CK_NoOp:                //
             return Expr::Alias(r.newVar(sourceExpr));
           case clang::CK_LValueToRValue:
-            llvm::outs() << "Cast " << repr(handleType(stmt->getType(), r)) << " <- " << repr(handleType(stmt->getSubExpr()->getType(), r))
-                         << "\n";
             if (targetTpe == sourceExpr.tpe()) {
               return sourceExpr;
             } else if (auto ptrTpe = sourceExpr.tpe().get<Type::Ptr>(); ptrTpe && targetTpe == ptrTpe->component) {
@@ -616,11 +613,10 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
               stmt->dumpColor();
               return sourceExpr;
             }
-
+          case clang::CK_ConstructorConversion: // this just calls the ctor, so we return the subexpr as-as
+            return sourceExpr;
           default:
-            llvm::outs() << "Unhandled cast:" << stmt->getCastKindName() << "\n";
-
-            stmt->dumpColor();
+            r.push(Stmt::Comment("Unhandled cast, using subexpr directly: " + std::string(stmt->getCastKindName())));
             return sourceExpr;
         }
       },
@@ -886,7 +882,6 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
         auto qualifiedName = target->getQualifiedNameAsString();
         if (qualifiedName ^ starts_with(builtinPrefix)) { // builtins are unqualified free functions
           auto builtinName = qualifiedName.substr(builtinPrefix.size());
-          std::cout << "S>>>" << (builtinName) << "\n";
 
           auto args = expr->arguments() | map([&](auto &arg) { return r.newVar(handleExpr(arg, r)); }) | to_vector();
           std::unordered_map<std::string, std::function<Expr::Any()>> specs{
@@ -947,14 +942,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
       },
       [&](const clang::Expr *) { return failExpr(); });
   if (result) {
-
     auto expected = handleType(root->getType(), r);
-    if (result->tpe() != expected) {
-      std::cerr << "# handleExpr invariant: expected " << repr(expected) << (root->getType()->isReferenceType() ? "(&)" : "") << ", was "
-                << repr(result->tpe()) << " for the following\n";
-      //      root->dumpColor();
-    }
-
     return *result;
   } else {
     throw std::logic_error("no");
@@ -963,17 +951,16 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
 
 void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
   if (!root) return;
-  llvm::outs() << "[Stmt] >>> \n";
+//  llvm::outs() << "[Stmt] >>> \n";
+//  //  // r.push(Stmt::Comment(pretty_string(root, context)));
+//  //  std::string s;
+//  //  llvm::raw_string_ostream os(s);
+//  //    root->dump(os, context);
+//  //  // r.push(Stmt::Comment(s));
+//  root->dumpPretty(context);
+//  root->dumpColor();
+//  llvm::outs() << "<<< \n";
 
-  // r.push(Stmt::Comment(pretty_string(root, context)));
-
-  std::string s;
-  llvm::raw_string_ostream os(s);
-  //  root->dump(os, context);
-  // r.push(Stmt::Comment(s));
-
-  root->dumpPretty(context);
-  llvm::outs() << "<<< \n";
   visitDyn<bool>(
       root, //
       [&](const clang::CompoundStmt *stmt) {
@@ -993,7 +980,6 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
               }
             }
 
-            llvm::outs() << "@@@ " << repr(component) << "\n";
             return {};
           };
 
