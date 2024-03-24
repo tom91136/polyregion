@@ -1,7 +1,7 @@
 #include <iostream>
 
 #include "c_source.h"
-#include "utils.hpp"
+#include "polyregion/utils.hpp"
 #include <set>
 
 using namespace polyregion;

@@ -1,11 +1,11 @@
+#include <cstring>
 
 #include "polyrt/metal_platform.h"
-#include <cstring>
 
 using namespace polyregion::runtime;
 using namespace polyregion::runtime::metal;
 
-static constexpr const char *ERROR_PREFIX = "[Metal error] ";
+static constexpr const char *PREFIX = "Metal";
 
 #define NOT_NIL_ERROR(f, error, message) throwIfNil((f), (error), (message), __FILE__, __LINE__)
 #define NOT_NIL(f, message) throwIfNil((f), (message), __FILE__, __LINE__)
@@ -16,12 +16,9 @@ template <typename T> //
 static T *throwIfNil(T *t, NS::Error *error, const std::string &message, const char *file, int line) {
   if (!t) {
     if (error) {
-      throw std::logic_error(std::string(ERROR_PREFIX) + file + ":" + std::to_string(line) + ": " + message + ": " +
-                             to_string(error->localizedDescription()) +
-                             "\nSuggestion:" + to_string(error->localizedRecoverySuggestion()));
-    } else
-      throw std::logic_error(std::string(ERROR_PREFIX) + file + ":" + std::to_string(line) + ": " + message +
-                             " and Metal did not provide a reason");
+      FATAL(PREFIX, "%s:%d: %s: %s\nSuggestion:%s\n", file, line, message.c_str(), error->localizedDescription().c_str(),
+            error->localizedRecoverySuggestion().c_str());
+    } else FATAL(PREFIX, "%s:%d: %s and Metal did not provide a reason\n", file, line, message.c_str());
   }
   return t;
 }
@@ -29,12 +26,12 @@ static T *throwIfNil(T *t, NS::Error *error, const std::string &message, const c
 template <typename T> //
 static T *throwIfNil(T *t, const std::string &nown, const char *file, int line) {
   if (!t) {
-    throw std::logic_error(std::string(ERROR_PREFIX) + file + ":" + std::to_string(line) + ": " +
-                           std::string("Unable to acquire a " + nown));
+    FATAL(PREFIX, "%s:%d: Unable to acquire a %s", file, line, nown.c_str());
   }
   return t;
 }
 
+std::variant<std::string, std::unique_ptr<Platform>> MetalPlatform::create() { return std::unique_ptr<Platform>(new MetalPlatform()); }
 MetalPlatform::MetalPlatform() : pool(NS::AutoreleasePool::alloc()->init()) { TRACE(); }
 std::string MetalPlatform::name() {
   TRACE();
@@ -78,19 +75,17 @@ MetalDevice::MetalDevice(decltype(device) device_)
             auto options = MTL::CompileOptions::alloc()->init();
             options->setFastMathEnabled(true);
             NS::Error *error = nil;
-            return NOT_NIL_ERROR(
-                device->newLibrary(NS::String::string(image.c_str(), NS::StringEncoding::UTF8StringEncoding), //
-                                   options,                                                                   //
-                                   &error                                                                     //
-                                   ),
-                error, "Program failed to compile");
+            return NOT_NIL_ERROR(device->newLibrary(NS::String::string(image.c_str(), NS::StringEncoding::UTF8StringEncoding), //
+                                                    options,                                                                   //
+                                                    &error                                                                     //
+                                                    ),
+                                 error, "Program failed to compile");
           }, //
           [this](auto &&m, auto &&name, auto) {
             auto fn = NOT_NIL(m->newFunction(NS::String::string(name.c_str(), NS::StringEncoding::UTF8StringEncoding)),
                               "function (" + name + ")");
             NS::Error *error = nil;
-            return NOT_NIL_ERROR(device->newComputePipelineState(fn, &error), error,
-                                 "Function " + name + " failed to resolve");
+            return NOT_NIL_ERROR(device->newComputePipelineState(fn, &error), error, "Function " + name + " failed to resolve");
           }, //
           [&](auto &&m) {
             TRACE();
@@ -149,8 +144,7 @@ void MetalDevice::freeDevice(uintptr_t ptr) {
   if (auto mem = memoryObjects.query(ptr); mem) {
     (*mem)->release();
     memoryObjects.erase(ptr);
-  } else
-    throw std::logic_error(std::string(ERROR_PREFIX) + "Illegal memory object: " + std::to_string(ptr));
+  } else FATAL(PREFIX, "Illegal memory object: %p", ptr);
 }
 std::optional<void *> MetalDevice::mallocShared(size_t size, Access access) {
   TRACE();
@@ -158,7 +152,7 @@ std::optional<void *> MetalDevice::mallocShared(size_t size, Access access) {
 }
 void MetalDevice::freeShared(void *ptr) {
   TRACE();
-  throw std::runtime_error("Unsupported");
+  FATAL(PREFIX, "Unsupported operation on %p", ptr);
 }
 std::optional<void *> MetalDevice::mallocShared(size_t size, Access access) {
   TRACE();
@@ -166,18 +160,16 @@ std::optional<void *> MetalDevice::mallocShared(size_t size, Access access) {
 }
 void MetalDevice::freeShared(void *ptr) {
   TRACE();
-  throw std::runtime_error("Unsupported");
+  FATAL(PREFIX, "Unsupported operation on %p", ptr);
 }
 
 std::unique_ptr<DeviceQueue> MetalDevice::createQueue() {
   TRACE();
-  return std::make_unique<MetalDeviceQueue>(
-      store, NOT_NIL(device->newCommandQueue(), "command queue"), [this](auto &&ptr) {
-        if (auto mem = memoryObjects.query(ptr); mem) {
-          return *mem;
-        } else
-          throw std::logic_error(std::string(ERROR_PREFIX) + "Illegal memory object: " + std::to_string(ptr));
-      });
+  return std::make_unique<MetalDeviceQueue>(store, NOT_NIL(device->newCommandQueue(), "command queue"), [this](auto &&ptr) {
+    if (auto mem = memoryObjects.query(ptr); mem) {
+      return *mem;
+    } else FATAL(PREFIX, "Illegal memory object: %p", ptr);
+  });
 }
 MetalDevice::~MetalDevice() {
   TRACE();
@@ -187,10 +179,8 @@ MetalDevice::~MetalDevice() {
 
 // ---
 
-MetalDeviceQueue::MetalDeviceQueue(decltype(store) store, decltype(queue) queue,
-                                   decltype(queryMemObject) queryMemObject)
-    : pool(NS::AutoreleasePool::alloc()->init()), store(store), queue(queue),
-      queryMemObject(std::move(queryMemObject)) {
+MetalDeviceQueue::MetalDeviceQueue(decltype(store) store, decltype(queue) queue, decltype(queryMemObject) queryMemObject)
+    : pool(NS::AutoreleasePool::alloc()->init()), store(store), queue(queue), queryMemObject(std::move(queryMemObject)) {
   TRACE();
 }
 MetalDeviceQueue::~MetalDeviceQueue() {
@@ -208,13 +198,10 @@ void MetalDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t
   std::memcpy(dst, queryMemObject(src)->contents(), size);
   if (cb) (*cb)();
 }
-void MetalDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                          const std::vector<Type> &types, std::vector<std::byte> argData,
-                                          const Policy &policy, const MaybeCallback &cb) {
+void MetalDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
+                                          std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
   TRACE();
-  if (types.back() != Type::Void)
-    throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported, was " +
-                           runtime::typeName(types.back()));
+  if (types.back() != Type::Void) FATAL(PREFIX, "Non-void return type not supported: %s", to_string(types.back()).data());
   auto kernel = store.resolveFunction(moduleName, symbol, types);
 
   auto args = detail::argDataAsPointers(types, argData);

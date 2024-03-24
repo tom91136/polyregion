@@ -8,8 +8,7 @@
 #include "compiler.h"
 #include "generated/polyast_codec.h"
 #include "json.hpp"
-#include "llvm_utils.hpp"
-#include "utils.hpp"
+#include "polyregion/llvm_utils.hpp"
 
 using namespace polyregion;
 
@@ -105,8 +104,6 @@ std::vector<polyast::CompileLayout> compiler::layoutOf(const std::vector<polyast
       std::vector<polyast::CompileLayout> layouts;
       xform.addDefs(defs);
 
-
-
       std::unordered_map<polyast::Sym, polyast::StructDef> lut(defs.size());
       for (auto &d : defs)
         lut.emplace(d.name, d);
@@ -121,8 +118,7 @@ std::vector<polyast::CompileLayout> compiler::layoutOf(const std::vector<polyast
             );
           }
           layouts.emplace_back(sym, layout->getSizeInBytes(), layout->getAlignment().value(), members);
-        } else
-          throw std::logic_error("Cannot find symbol " + to_string(sym) + " from domain");
+        } else throw std::logic_error("Cannot find symbol " + to_string(sym) + " from domain");
       }
       return layouts;
     }
@@ -159,13 +155,13 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
       case compiletime::Target::Object_LLVM_NVPTX64:
       case compiletime::Target::Object_LLVM_AMDGCN:
       case compiletime::Target::Object_LLVM_SPIRV32:
-      case compiletime::Target::Object_LLVM_SPIRV64:                                         //
+      case compiletime::Target::Object_LLVM_SPIRV64:                                     //
         return std::make_unique<backend::LLVMBackend>(toLLVMBackendOptions(options));    //
-      case compiletime::Target::Source_C_OpenCL1_1:                                          //
+      case compiletime::Target::Source_C_OpenCL1_1:                                      //
         return std::make_unique<backend::CSource>(backend::CSource::Dialect::OpenCL1_1); //
-      case compiletime::Target::Source_C_Metal1_0:                                           //
+      case compiletime::Target::Source_C_Metal1_0:                                       //
         return std::make_unique<backend::CSource>(backend::CSource::Dialect::MSL1_0);    //
-      case compiletime::Target::Source_C_C11:                                                //
+      case compiletime::Target::Source_C_C11:                                            //
         return std::make_unique<backend::CSource>(backend::CSource::Dialect::C11);       //
     }
   };

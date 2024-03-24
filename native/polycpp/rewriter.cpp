@@ -278,7 +278,6 @@ void insertKernelImage(clang::DiagnosticsEngine &diag, clang::ASTContext &C, Cal
                        }))}};
 
   dataDecls | for_each([&](auto, auto, auto decl) { newStmts.push_back(new (C) clang::DeclStmt(clang::DeclGroupRef(decl), {}, {})); });
-
   dataDecls | for_each([&](clang::VarDecl *lhs, clang::CastKind ck, clang::VarDecl *decl) {
     newStmts.push_back(
         createAssignStmt(lhs, clang::ImplicitCastExpr::Create(C, lhs->getType(), ck, createDeclRef(decl), nullptr, clang::VK_PRValue, {})));
@@ -296,8 +295,8 @@ void insertKernelImage(clang::DiagnosticsEngine &diag, clang::ASTContext &C, Cal
   c.calleeDecl->print(llvm::outs());
 }
 
-OffloadRewriteConsumer::OffloadRewriteConsumer(clang::DiagnosticsEngine &diag, const StdParOptions &opts)
-    : clang::ASTConsumer(), diag(diag), opts(opts) {}
+OffloadRewriteConsumer::OffloadRewriteConsumer(clang::DiagnosticsEngine &diag, const DriverContext &ctx)
+    : clang::ASTConsumer(), diag(diag), ctx(ctx) {}
 
 template <typename Parent, typename Node> const Parent *findParentOfType(clang::ASTContext &context, Node *from) {
   for (auto node = context.getParents(*from).begin()->template get<clang::Decl>(); node;
@@ -340,14 +339,13 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
                                        return moduleId;
                                      });
 
-                     auto bundle =
-                         generate(C, diag, moduleId, *c.functorDecl,
+                     auto bundle = generate(ctx, C, diag, moduleId, *c.functorDecl,
                                             specialisationPath ^ head_maybe() ^
                                                 fold([](auto, auto callExpr) { return callExpr->getExprLoc(); },
                                                      [&]() { return c.callLambdaArgExpr->getExprLoc(); }),
-                                            c.kind, opts);
+                                            c.kind);
 
-                     if (!opts.quiet) {
+                     if (!ctx.opts.quiet) {
                        diag.Report(c.callLambdaArgExpr->getExprLoc(),
                                    diag.getCustomDiagID(clang::DiagnosticsEngine::Remark, "[PolySTL] Outlined function: %0 for %1 (%2)\n"))
                            << moduleId << to_string(c.kind)

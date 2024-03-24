@@ -2,7 +2,7 @@
 
 if (UNIX)
     list(APPEND RUNTIME_COMPONENTS compiler-rt libcxx libcxxabi)
-    list(APPEND RUNTIME_TARGETS cxx-headers)
+#    list(APPEND RUNTIME_TARGETS cxx-headers)
 elseif (WIN32)
     # needs a bootstrapping build for libcxx because cl.exe isn't support
     # see https://libcxx.llvm.org/BuildingLibcxx.html#support-for-windows
@@ -14,8 +14,8 @@ endif ()
 
 
 if (UNIX)
-    set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O3 -gline-tables-only -DNDEBUG" CACHE STRING "")
-    set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -gline-tables-only -DNDEBUG" CACHE STRING "")
+    set(CMAKE_C_FLAGS_RELEASE "-O3 -gline-tables-only -gz -DNDEBUG" CACHE STRING "")
+    set(CMAKE_CXX_FLAGS_RELEASE "-O3 -gline-tables-only -gz -DNDEBUG" CACHE STRING "")
 
     set(CMAKE_C_FLAGS_DEBUG "-O2 -g3" CACHE STRING "")
     set(CMAKE_CXX_FLAGS_DEBUG "-O2 -g3" CACHE STRING "")
@@ -38,11 +38,24 @@ set(LLVM_ENABLE_PROJECTS
         CACHE STRING "")
 set(LLVM_ENABLE_RUNTIMES ${RUNTIME_COMPONENTS} CACHE STRING "")
 
+#set(LLVM_DYLIB_COMPONENTS all CACHE STRING "")
+set(LLVM_BUILD_LLVM_DYLIB OFF CACHE BOOL "")
+set(LLVM_LINK_LLVM_DYLIB OFF CACHE BOOL "")
+#set(LLVM_INSTALL_TOOLCHAIN_ONLY ON CACHE BOOL "")
+
 set(LLVM_ENABLE_ZLIB OFF CACHE BOOL "")
 set(LLVM_ENABLE_ZSTD OFF CACHE BOOL "")
 set(LLVM_ENABLE_LIBPFM OFF CACHE BOOL "")
 set(LLVM_ENABLE_LIBXML2 OFF CACHE BOOL "")
 set(LLVM_ENABLE_TERMINFO OFF CACHE BOOL "")
+
+set(LLVM_BUILD_TOOLS ON CACHE BOOL "")
+set(LLVM_BUILD_RUNTIME ON CACHE BOOL "")
+set(LLVM_BUILD_EXAMPLES OFF CACHE BOOL "")
+set(LLVM_BUILD_TESTS OFF CACHE BOOL "")
+
+set(LLVM_ENABLE_ASSERTIONS ON CACHE BOOL "")
+
 #set(LLVM_ENABLE_PER_TARGET_RUNTIME_DIR OFF CACHE BOOL "")
 
 set(LLVM_STATIC_LINK_CXX_STDLIB ON CACHE BOOL "")
@@ -50,24 +63,14 @@ set(COMPILER_RT_DEFAULT_TARGET_ONLY ON CACHE BOOL "")
 set(COMPILER_RT_BUILD_LIBFUZZER OFF CACHE BOOL "")
 set(COMPILER_RT_SANITIZERS_TO_BUILD "asan;dfsan;msan;hwasan;tsan;cfi" CACHE STRING "")
 
-# We'll build two distributions: Toolchain, which just holds the tools
-# (intended for most end users), and Development, which has libraries (for end
-# users who wish to develop their own tooling using those libraries). This will
-# produce the install-toolchain-distribution and install-development-distribution
-# targets to install the distributions.
-set(LLVM_DISTRIBUTIONS
-        Toolchain
-        CACHE STRING "")
 
-# We want to include the C++ headers in our distribution.
-set(LLVM_RUNTIME_DISTRIBUTION_COMPONENTS
-        ${RUNTIME_TARGETS}
-        CACHE STRING "")
 
 # You likely want more tools; this is just an example :) Note that we need to
 # include cxx-headers explicitly here (in addition to it being added to
 # LLVM_RUNTIME_DISTRIBUTION_COMPONENTS above).
-set(LLVM_Toolchain_DISTRIBUTION_COMPONENTS
+set(LLVM_DISTRIBUTION_COMPONENTS
+        # LLVM
+
         # Linker
         lld
 

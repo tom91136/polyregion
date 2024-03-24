@@ -3,8 +3,8 @@
 #include "clspv.h"
 #include "compiler.h"
 #include "lld_lite.h"
-#include "llvm_utils.hpp"
-#include "utils.hpp"
+#include "polyregion/llvm_utils.hpp"
+#include "polyregion/utils.hpp"
 
 #include "spirv-tools/libspirv.h"
 #include "spirv-tools/libspirv.hpp"

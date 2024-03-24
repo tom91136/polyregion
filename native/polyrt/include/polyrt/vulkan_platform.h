@@ -27,19 +27,14 @@
 namespace polyregion::runtime::vulkan {
 
 class POLYREGION_EXPORT VulkanPlatform : public Platform {
-
-  //  vk::DynamicLoader dl;
-
   std::vector<const char *> extensions;
   std::vector<const char *> layers;
-
   vk::raii::Context context;
   vk::raii::Instance instance;
-
-  //  kp::Manager mgr;
+  POLYREGION_EXPORT explicit VulkanPlatform();
 
 public:
-  POLYREGION_EXPORT explicit VulkanPlatform();
+  POLYREGION_EXPORT static std::variant<std::string, std::unique_ptr<Platform>> create();
   POLYREGION_EXPORT ~VulkanPlatform() override = default;
   POLYREGION_EXPORT std::string name() override;
   POLYREGION_EXPORT std::vector<Property> properties() override;

@@ -1,11 +1,11 @@
-#include "concurrency_utils.hpp"
-#include "io.hpp"
 #include "kernels/generated_cpu_fma.hpp"
 #include "kernels/generated_gpu_fma.hpp"
 #include "kernels/generated_msl_fma.hpp"
 #include "kernels/generated_spirv_glsl_fma.hpp"
+#include "polyregion/concurrency_utils.hpp"
+#include "polyregion/io.hpp"
+#include "polyregion/utils.hpp"
 #include "test_utils.h"
-#include "utils.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -25,7 +25,7 @@ const static std::vector<float> xs{0.f,
 
 template <typename I> void testFma(I images, std::initializer_list<Backend> backends) {
   auto backend = GENERATE_REF(values(backends));
-  auto platform = Platform::of(backend);
+  auto platform = polyregion::test_utils::makePlatform(backend);
   DYNAMIC_SECTION("backend=" << to_string(backend)) {
     for (auto &d : platform->enumerate()) {
       DYNAMIC_SECTION("device=" << d->name()) {
@@ -34,8 +34,7 @@ template <typename I> void testFma(I images, std::initializer_list<Backend> back
           if (imageGroups.size() != 1) {
             FAIL("Found more than one (" << imageGroups.size() << ") kernel test images for device `" << d->name()
                                          << "`(backend=" << to_string(backend) << ", features="
-                                         << polyregion::mk_string<std::string>(d->features(),[](auto x){return x;}, ",")
-                                         << ")");
+                                         << polyregion::mk_string<std::string>(d->features(), [](auto x) {  return x; }, ",") << ")");
           }
 
           std::string module_;
@@ -59,8 +58,7 @@ template <typename I> void testFma(I images, std::initializer_list<Backend> back
             ArgBuffer buffer;
             if (d->sharedAddressSpace()) buffer.append(Type::Long64, nullptr);
 
-            buffer.append(
-                {{Type::Float32, &a}, {Type::Float32, &b}, {Type::Float32, &c}, {Type::Ptr, &out_d}, {Type::Void, {}}});
+            buffer.append({{Type::Float32, &a}, {Type::Float32, &b}, {Type::Float32, &c}, {Type::Ptr, &out_d}, {Type::Void, {}}});
 
             waitAll([&](auto &h) {
               q->enqueueInvokeAsync( //
@@ -86,7 +84,7 @@ template <typename I> void testFma(I images, std::initializer_list<Backend> back
         } else {
           WARN("No kernel test image found for device `"
                << d->name() << "`(backend=" << to_string(backend)
-               << ", features=" << polyregion::mk_string<std::string>(d->features(), [](auto x){return x;}, ",") << ")");
+               << ", features=" << polyregion::mk_string<std::string>(d->features(), [](auto x) {  return x; }, ",") << ")");
         }
       }
     }
@@ -127,7 +125,7 @@ TEST_CASE("SPIRV FMA") {
 }
 
 TEST_CASE("CPU FMA") {
-  testFma(generated::cpu::fma,                            //
+  testFma(generated::cpu::fma,                                //
           {Backend::RelocatableObject, Backend::SharedObject} //
   );
 }

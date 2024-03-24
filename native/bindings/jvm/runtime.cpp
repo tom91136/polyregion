@@ -4,18 +4,13 @@
 #include <utility>
 #include <vector>
 
-#include "polyrt/cl_platform.h"
-#include "polyrt/cuda_platform.h"
 #include "generated/mirror.h"
 #include "generated/platform.h"
 #include "generated/platforms.h"
-#include "polyrt/hip_platform.h"
-#include "polyrt/hsa_platform.h"
-#include "polyrt/vulkan_platform.h"
-#include "polyrt/metal_platform.h"
 #include "jni_utils.h"
-#include "polyrt/object_platform.h"
-#include "utils.hpp"
+#include "polyrt/runtime.h"
+#include "aspartame/vector.hpp"
+#include "aspartame/optional.hpp"
 
 using namespace polyregion;
 namespace rt = ::runtime;
@@ -24,16 +19,16 @@ using namespace gen::registry;
 
 static constexpr const char *EX = "polyregion/jvm/runtime/PolyregionRuntimeException";
 
-static_assert(polyregion::to_underlying(rt::Type::Void) == Platforms::TYPE_VOID);
-static_assert(polyregion::to_underlying(rt::Type::Bool8) == Platforms::TYPE_BOOL);
-static_assert(polyregion::to_underlying(rt::Type::Byte8) == Platforms::TYPE_BYTE);
-static_assert(polyregion::to_underlying(rt::Type::CharU16) == Platforms::TYPE_CHAR);
-static_assert(polyregion::to_underlying(rt::Type::Short16) == Platforms::TYPE_SHORT);
-static_assert(polyregion::to_underlying(rt::Type::Int32) == Platforms::TYPE_INT);
-static_assert(polyregion::to_underlying(rt::Type::Long64) == Platforms::TYPE_LONG);
-static_assert(polyregion::to_underlying(rt::Type::Float32) == Platforms::TYPE_FLOAT);
-static_assert(polyregion::to_underlying(rt::Type::Double64) == Platforms::TYPE_DOUBLE);
-static_assert(polyregion::to_underlying(rt::Type::Ptr) == Platforms::TYPE_PTR);
+static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::Void) == Platforms::TYPE_VOID);
+static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::Bool8) == Platforms::TYPE_BOOL);
+static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::Byte8) == Platforms::TYPE_BYTE);
+static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::CharU16) == Platforms::TYPE_CHAR);
+static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::Short16) == Platforms::TYPE_SHORT);
+static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::Int32) == Platforms::TYPE_INT);
+static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::Long64) == Platforms::TYPE_LONG);
+static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::Float32) == Platforms::TYPE_FLOAT);
+static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::Double64) == Platforms::TYPE_DOUBLE);
+static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::Ptr) == Platforms::TYPE_PTR);
 
 static JavaVM *CurrentVM;
 
@@ -70,8 +65,7 @@ static std::unordered_map<jlong, std::vector<std::unique_ptr<std::string>>> devi
 static std::unordered_map<jlong, std::shared_ptr<rt::DeviceQueue>> deviceQueues;
 static std::mutex lock;
 
-template <typename T, typename U>
-static auto emplaceRef(std::unordered_map<jlong, std::shared_ptr<T>> &storage, std::shared_ptr<U> x) {
+template <typename T, typename U> static auto emplaceRef(std::unordered_map<jlong, std::shared_ptr<T>> &storage, std::shared_ptr<U> x) {
   auto i = peerCounter++;
   std::lock_guard l(lock);
   auto &&[it, _] = storage.emplace(i, x);
@@ -79,17 +73,14 @@ static auto emplaceRef(std::unordered_map<jlong, std::shared_ptr<T>> &storage, s
 }
 
 template <typename T>
-static std::shared_ptr<T> findRef(JNIEnv *env, std::unordered_map<jlong, std::shared_ptr<T>> &storage,
-                                  jlong nativePeer) {
-  if (auto it = storage.find(nativePeer); it != storage.end()) return reinterpret_pointer_cast<T>(it->second);
-  else
-    return throwGeneric(env, EX, "Cannot find native peer (" + std::to_string(nativePeer) + ") ");
+static std::shared_ptr<T> findRef(JNIEnv *env, std::unordered_map<jlong, std::shared_ptr<T>> &storage, jlong nativePeer) {
+  if (auto it = storage.find(nativePeer); it != storage.end()) return std::reinterpret_pointer_cast<T>(it->second);
+  else return throwGeneric(env, EX, "Cannot find native peer (" + std::to_string(nativePeer) + ") ");
 }
 
 static jobjectArray toJni(JNIEnv *env, const std::vector<rt::Property> &xs) {
-  return toJni(env, xs, gen::Property::of(env).clazz, [&](auto &x) {
-    return gen::Property::of(env)(env, toJni(env, x.first), toJni(env, x.second)).instance;
-  });
+  return toJni(env, xs, gen::Property::of(env).clazz,
+               [&](auto &x) { return gen::Property::of(env)(env, toJni(env, x.first), toJni(env, x.second)).instance; });
 }
 
 void Platforms::deleteAllPeers0(JNIEnv *env, jclass) {
@@ -119,11 +110,8 @@ jlongArray Platforms::pointerOfDirectBuffers0(JNIEnv *env, jclass, jobjectArray 
   auto array = env->NewLongArray(n);
   auto ptrs = env->GetLongArrayElements(array, nullptr);
   for (jsize i = 0; i < n; ++i) {
-    if (auto ptr = env->GetDirectBufferAddress(env->GetObjectArrayElement(buffers, i)); ptr)
-      ptrs[i] = reinterpret_cast<jlong>(ptr);
-    else
-      return throwGeneric(env, EX,
-                          "Object at " + std::to_string(i) + " is either not a direct Buffer or not a Buffer at all.");
+    if (auto ptr = env->GetDirectBufferAddress(env->GetObjectArrayElement(buffers, i)); ptr) ptrs[i] = reinterpret_cast<jlong>(ptr);
+    else return throwGeneric(env, EX, "Object at " + std::to_string(i) + " is either not a direct Buffer or not a Buffer at all.");
   }
   env->ReleaseLongArrayElements(array, ptrs, 0);
   return array;
@@ -131,31 +119,37 @@ jlongArray Platforms::pointerOfDirectBuffers0(JNIEnv *env, jclass, jobjectArray 
 
 jlong Platforms::pointerOfDirectBuffer0(JNIEnv *env, jclass, jobject buffer) {
   if (auto ptr = env->GetDirectBufferAddress(buffer); ptr) return reinterpret_cast<jlong>(ptr);
-  else
-    return throwGeneric<jlong>(env, EX, "Object is either not a direct Buffer or not a Buffer at all.");
+  else return throwGeneric<jlong>(env, EX, "Object is either not a direct Buffer or not a Buffer at all.");
 }
 
-template <typename R> static jobject toJni(JNIEnv *env) {
+static jobject toJni(JNIEnv *env, rt::Backend backend) {
   return wrapException(env, EX, [&]() {
-    auto [peer, platform] = emplaceRef(platforms, std::make_shared<R>());
-    return gen::Platform::of(env)(env, peer, toJni(env, platform->name())).instance;
+    if (auto errorOrPlatform = rt::Platform::of(backend); std::holds_alternative<std::string>(errorOrPlatform)) {
+      throw std::runtime_error("Backend " + std::string(to_string(backend)) +
+                               " failed to initialise: " + std::get<std::string>(errorOrPlatform));
+    } else {
+      auto [peer, platform] =
+          emplaceRef(platforms, std::shared_ptr<rt::Platform>(std::move(std::get<std::unique_ptr<rt::Platform>>(errorOrPlatform))));
+      return gen::Platform::of(env)(env, peer, toJni(env, platform->name())).instance;
+    }
   });
 }
 
-jobject Platforms::CUDA0(JNIEnv *env, jclass) { return toJni<rt::cuda::CudaPlatform>(env); }
-jobject Platforms::HIP0(JNIEnv *env, jclass) { return toJni<rt::hip::HipPlatform>(env); }
-jobject Platforms::HSA0(JNIEnv *env, jclass) { return toJni<rt::hsa::HsaPlatform>(env); }
-jobject Platforms::OpenCL0(JNIEnv *env, jclass) { return toJni<rt::cl::ClPlatform>(env); }
-jobject Platforms::Vulkan0(JNIEnv *env, jclass) { return toJni<rt::vulkan::VulkanPlatform>(env); }
-jobject Platforms::Metal0(JNIEnv *env, jclass) {
+jobject Platforms::CUDA0(JNIEnv *env, jclass) { return toJni(env, rt::Backend::CUDA); }
+jobject Platforms::HIP0(JNIEnv *env, jclass) { return toJni(env, rt::Backend::HIP); }
+jobject Platforms::HSA0(JNIEnv *env, jclass) { return toJni(env, rt::Backend::HSA); }
+jobject Platforms::OpenCL0(JNIEnv *env, jclass) { return toJni(env, rt::Backend::OpenCL); }
+jobject Platforms::Vulkan0(JNIEnv *env, jclass) { return toJni(env, rt::Backend::Vulkan); }
+jobject Platforms::Metal0([[maybe_unused]] JNIEnv *env, jclass) {
 #ifdef RUNTIME_ENABLE_METAL
-  return toJni<rt::metal::MetalPlatform>(env);
+  return toJni(env, rt::Backend::Metal);
 #else
+
   return nullptr;
 #endif
 }
-jobject Platforms::Relocatable0(JNIEnv *env, jclass) { return toJni<rt::object::RelocatablePlatform>(env); }
-jobject Platforms::Dynamic0(JNIEnv *env, jclass) { return toJni<rt::object::SharedPlatform>(env); }
+jobject Platforms::Relocatable0(JNIEnv *env, jclass) { return toJni(env, rt::Backend::RelocatableObject); }
+jobject Platforms::Dynamic0(JNIEnv *env, jclass) { return toJni(env, rt::Backend::SharedObject); }
 jobject Platforms::directBufferFromPointer0(JNIEnv *env, jclass, jlong ptr, jlong size) {
   return env->NewDirectByteBuffer(reinterpret_cast<void *>(ptr), size);
 }
@@ -203,10 +197,8 @@ jboolean Platform::moduleLoaded0(JNIEnv *env, jclass, jlong nativePeer, jstring 
 
 jlong Platform::malloc0(JNIEnv *env, jclass, jlong nativePeer, jlong size, jbyte access) {
   if (auto a = rt::from_underlying<rt::Access>(access); a) {
-    return wrapException(env, EX,
-                         [&]() { return static_cast<jlong>(findRef(env, devices, nativePeer)->mallocDevice(size, *a)); });
-  } else
-    return throwGeneric<jlong>(env, EX, "Illegal access type " + std::to_string(access));
+    return wrapException(env, EX, [&]() { return static_cast<jlong>(findRef(env, devices, nativePeer)->mallocDevice(size, *a)); });
+  } else return throwGeneric<jlong>(env, EX, "Illegal access type " + std::to_string(access));
 }
 
 void Platform::free0(JNIEnv *env, jclass, jlong nativePeer, jlong handle) {
@@ -229,8 +221,7 @@ static rt::MaybeCallback fromJni(JNIEnv *env, jobject cb) {
       fprintf(stderr, "Unable to attach thread <%zx> to JVM from a callback passed to enqueueInvokeAsync\n",
               std::hash<std::thread::id>()(std::this_thread::get_id()));
     }
-    if (!cbRef)
-      throwGeneric(attachedEnv, EX, "Unable to retrieve reference to the callback passed to enqueueInvokeAsync");
+    if (!cbRef) throwGeneric(attachedEnv, EX, "Unable to retrieve reference to the callback passed to enqueueInvokeAsync");
     else {
       fprintf(stderr, "JNI thread attached\n");
       gen::Runnable::of(attachedEnv).wrap(attachedEnv, cbRef).run(attachedEnv);
@@ -249,18 +240,16 @@ void Platform::enqueueHostToDeviceAsync0(JNIEnv *env, jclass, //
   auto srcPtr = env->GetDirectBufferAddress(src);
   if (!srcPtr) throwGeneric(env, EX, "The source ByteBuffer is not backed by an direct allocation.");
 
-  return wrapException(env, EX, [&]() {
-    findRef(env, deviceQueues, nativePeer)->enqueueHostToDeviceAsync(srcPtr, dst, size, fromJni(env, cb));
-  });
+  return wrapException(env, EX,
+                       [&]() { findRef(env, deviceQueues, nativePeer)->enqueueHostToDeviceAsync(srcPtr, dst, size, fromJni(env, cb)); });
 }
 void Platform::enqueueDeviceToHostAsync0(JNIEnv *env, jclass, //
                                          jlong nativePeer,    //
                                          jlong src, jobject dst, jint size, jobject cb) {
   auto dstPtr = env->GetDirectBufferAddress(dst);
   if (!dstPtr) throwGeneric(env, EX, "The destination ByteBuffer is not backed by an direct allocation.");
-  return wrapException(env, EX, [&]() {
-    findRef(env, deviceQueues, nativePeer)->enqueueDeviceToHostAsync(src, dstPtr, size, fromJni(env, cb));
-  });
+  return wrapException(env, EX,
+                       [&]() { findRef(env, deviceQueues, nativePeer)->enqueueDeviceToHostAsync(src, dstPtr, size, fromJni(env, cb)); });
 }
 
 static rt::Dim3 fromJni(JNIEnv *env, const generated::Dim3::Instance &d3) {
@@ -283,10 +272,9 @@ void Platform::enqueueInvokeAsync0(JNIEnv *env, jclass, jlong nativePeer, //
     static_assert(sizeof(jbyte) == sizeof(std::byte));
     static_assert(sizeof(jbyte) == sizeof(rt::Type));
 
-    auto argTs =
-        map_vec<jbyte, rt::Type>(fromJni<jbyte>(env, argTypes), [](auto &t) { return static_cast<rt::Type>(t); });
-    auto argPs =
-        map_vec<jbyte, std::byte>(fromJni<jbyte>(env, argData), [](auto &t) { return static_cast<std::byte>(t); });
+    using namespace aspartame;
+    auto argTs = fromJni<jbyte>(env, argTypes) ^ map([](auto &t) { return static_cast<rt::Type>(t); });
+    auto argPs = fromJni<jbyte>(env, argData) ^ map([](auto &t) { return static_cast<std::byte>(t); });
 
     auto p = gen::Policy::of(env).wrap(env, policy);
     auto global = fromJni(env, p.global(env, gen::Dim3::of(env)));
@@ -297,10 +285,9 @@ void Platform::enqueueInvokeAsync0(JNIEnv *env, jclass, jlong nativePeer, //
     }
 
     findRef(env, deviceQueues, nativePeer)
-        ->enqueueInvokeAsync(
-            fromJni(env, moduleName), fromJni(env, symbol), argTs, argPs,
-            rt::Policy{global, {map_opt(local, [&](auto &&d) { return std::make_pair(d, localMemoryBytes); })}},
-            fromJni(env, cb));
+        ->enqueueInvokeAsync(fromJni(env, moduleName), fromJni(env, symbol), argTs, argPs,
+                             rt::Policy{global, {(local ^ map([&](auto &&d) { return std::make_pair(d, localMemoryBytes); }))}},
+                             fromJni(env, cb));
 
     if (argTs[argCount - 1] == rt::Type::Ptr) {
       // we got four possible cases when a function return pointers:
@@ -309,8 +296,7 @@ void Platform::enqueueInvokeAsync0(JNIEnv *env, jclass, jlong nativePeer, //
       //  3. Pointer within a malloc'd region (LUT[ptr]==None) => copy
       //  4. Pointer to stack allocated data  (LUT[ptr]==None) => undefined, should not happen
 
-      auto args = mk_string<rt::Type>(
-          argTs, [](auto &tpe) { return std::string(to_string(tpe)); }, ",");
+      auto args = argTs ^ mk_string(",", [](auto &tpe) { return std::string(to_string(tpe)); });
       throwGeneric(env, EX, "Returning pointers is unimplemented, args (return at the end): " + args);
       //      std::unordered_map<void *, std::pair<jobject, jsize>> allocations;
       //

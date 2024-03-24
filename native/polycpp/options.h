@@ -6,7 +6,7 @@
 #include <variant>
 #include <vector>
 
-#include "types.h"
+#include "polyregion/types.h"
 
 namespace polyregion::polystl {
 
@@ -15,6 +15,7 @@ struct StdParOptions {
   using Targets = std::vector<std::pair<polyregion::compiletime::Target, std::string>>;
 
   bool quiet = false;
+  bool noCompress = false;
   bool interposeMalloc = true;
   bool interposeAlloca = false;
   Targets targets{};
@@ -31,4 +32,11 @@ private:
   static std::variant<std::string, LinkKind> parseLinkKind(const std::string &arg);
   static std::variant<std::string, StdParOptions::Targets> parseTargets(const std::string &arg);
 };
+
+struct DriverContext {
+  std::string executable;
+  StdParOptions opts;
+  bool cc1Verbose;
+};
+
 } // namespace polyregion::polystl

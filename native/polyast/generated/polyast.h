@@ -14,7 +14,7 @@
 #include <string>
 #include <variant>
 #include <vector>
-#include "export.h"
+#include "polyregion/export.h"
 
 namespace polyregion::polyast {
 

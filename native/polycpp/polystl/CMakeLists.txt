@@ -1,21 +1,24 @@
-add_library(polystl SHARED
-        ../../shared/cxa_thread_atexit.cpp
-        polystl.cpp
-        include/polystl/algorithm_impl.h
-        include/polystl/polystl.h)
-add_library(polystl-static STATIC
+set(POLYSTL_SRC
         ../../shared/cxa_thread_atexit.cpp
         polystl.cpp)
 
-target_include_directories(polystl PRIVATE include/  )
-target_include_directories(polystl-static  PRIVATE include/  )
+add_library(polystl SHARED)
+merge_static_libs(polystl-static ${POLYRT_LIBS})
+#add_library(polystl-static STATIC)
 
-target_link_libraries(polystl PRIVATE polyrt-static)
-target_link_libraries(polystl-static PRIVATE polyrt-obj)
+foreach (TARGET polystl polystl-static)
+    target_sources(${TARGET}
+            PRIVATE ${POLYSTL_SRC}
+            PUBLIC FILE_SET HEADERS
+            TYPE HEADERS
+            BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include
+            FILES
+            include/polystl/algorithm_impl.h
+            include/polystl/polystl.h
+            include/execution
+    )
 
-target_compile_options(polystl PRIVATE ${COMPILE_OPTIONS})
-target_compile_options(polystl-static PRIVATE ${COMPILE_OPTIONS})
-
-target_link_options(polystl PRIVATE ${LINK_OPTIONS})
-target_link_options(polystl-static PRIVATE ${LINK_OPTIONS})
-
+    target_link_libraries(${TARGET} PRIVATE polyrt-obj)
+    target_compile_options(${TARGET} PRIVATE ${COMPILE_OPTIONS})
+    target_link_options(${TARGET} PRIVATE ${LINK_OPTIONS})
+endforeach ()

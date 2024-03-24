@@ -1,12 +1,12 @@
-#include "stream.hpp"
-#include "io.hpp"
+#include "polyregion/stream.hpp"
 #include "kernels/generated_cpu_stream.hpp"
 #include "kernels/generated_gpu_stream_double.hpp"
 #include "kernels/generated_gpu_stream_float.hpp"
 #include "kernels/generated_msl_stream_float.hpp"
 #include "kernels/generated_spirv_glsl_stream.hpp"
+#include "polyregion/io.hpp"
+#include "polyregion/utils.hpp"
 #include "test_utils.h"
-#include "utils.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -21,7 +21,8 @@ void testStream(I images, Type tpe, const std::string &suffix, T relTolerance, /
                 std::initializer_list<size_t> times,                           //
                 std::initializer_list<Backend> backends) {
   auto backend = GENERATE_REF(values(backends));
-  auto platform = Platform::of(backend);
+  auto platform = polyregion::test_utils::makePlatform(backend);
+
   DYNAMIC_SECTION("backend=" << platform->name()) {
     auto size = GENERATE_REF(values(sizes));
     DYNAMIC_SECTION("size=" << size) {
@@ -31,8 +32,7 @@ void testStream(I images, Type tpe, const std::string &suffix, T relTolerance, /
         DYNAMIC_SECTION("Ncore=" << Ncore) {
           for (auto &d : platform->enumerate()) {
             DYNAMIC_SECTION("device=" << d->name()) {
-              if (auto imageGroups = polyregion::test_utils::findTestImage(images, backend, d->features());
-                  !imageGroups.empty()) {
+              if (auto imageGroups = polyregion::test_utils::findTestImage(images, backend, d->features()); !imageGroups.empty()) {
 
                 polyregion::stream::Kernels<std::pair<std::string, std::string>> kernelSpecs;
                 if (d->singleEntryPerModule()) {
@@ -47,8 +47,8 @@ void testStream(I images, Type tpe, const std::string &suffix, T relTolerance, /
                   // otherwise, we expect exactly one image
                   if (imageGroups.size() != 1) {
                     FAIL("Found more than one ("
-                         << imageGroups.size() << ") kernel test images for device `" << d->name()
-                         << "`(backend=" << to_string(backend) << ", features=" << polyregion::mk_string<std::string>(d->features(), [](auto x) {  return x; }, ",") << ")");
+                         << imageGroups.size() << ") kernel test images for device `" << d->name() << "`(backend=" << to_string(backend)
+                         << ", features=" << polyregion::mk_string<std::string>(d->features(), [](auto x) { return x; }, ",") << ")");
                   } else {
                     d->loadModule("module", imageGroups[0].second);
                     kernelSpecs = {.copy = {"module", "stream_copy" + suffix},
@@ -60,7 +60,7 @@ void testStream(I images, Type tpe, const std::string &suffix, T relTolerance, /
                 }
 
                 polyregion::stream::runStream<T>(
-                    tpe, size, time, Ncore, platform->name(), platform->kind(), std::move(d), kernelSpecs, false,
+                    tpe, size, time, Ncore, platform->name(), platform->kind(), *d, kernelSpecs, false,
                     [](auto actual, auto limit) {
                       INFO("array validation");
                       CHECK(actual < limit);
@@ -71,7 +71,8 @@ void testStream(I images, Type tpe, const std::string &suffix, T relTolerance, /
                     });
               } else {
                 WARN("No kernel test image found for device `"
-                     << d->name() << "`(backend=" << to_string(backend) << ", features=" << polyregion::mk_string<std::string>(d->features(), [](auto x) {  return x; }, ",") << ")");
+                     << d->name() << "`(backend=" << to_string(backend)
+                     << ", features=" << polyregion::mk_string<std::string>(d->features(), [](auto x) { return x; }, ",") << ")");
               }
             }
           }
@@ -123,11 +124,11 @@ TEST_CASE("SPIRV BabelStream") {
   WARN("Vulkan not natively supported on macOS");
 #else
 
-//  testStream<float>(generated::spirv::glsl_stream, Type::Float32, "_float", 0.008f, //
-//                    {33554432},          //
-//                    {256},                                       //
-//                    {100},                                                     //
-//                    {Backend::Vulkan});
+  //  testStream<float>(generated::spirv::glsl_stream, Type::Float32, "_float", 0.008f, //
+  //                    {33554432},          //
+  //                    {256},                                       //
+  //                    {100},                                                     //
+  //                    {Backend::Vulkan});
 
   DYNAMIC_SECTION("float") {
     testStream<float>(generated::spirv::glsl_stream, Type::Float32, "_float", 0.008f, //
@@ -152,7 +153,7 @@ TEST_CASE("CPU BabelStream") {
                        {1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072},     //
                        {1, 2, 3, 4, 5, 6, 7, 8},                                  //
                        {1, 2, 10},                                                //
-                       {Backend::RelocatableObject, Backend::SharedObject}            //
+                       {Backend::RelocatableObject, Backend::SharedObject}        //
     );
   }
   DYNAMIC_SECTION("float") {
@@ -160,7 +161,7 @@ TEST_CASE("CPU BabelStream") {
                       {1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072},   //
                       {1, 2, 3, 4, 5, 6, 7, 8},                                //
                       {1, 2, 10},                                              //
-                      {Backend::RelocatableObject, Backend::SharedObject}          //
+                      {Backend::RelocatableObject, Backend::SharedObject}      //
     );
   }
 }

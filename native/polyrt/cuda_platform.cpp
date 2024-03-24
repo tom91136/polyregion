@@ -1,45 +1,44 @@
 #include "polyrt/cuda_platform.h"
-#include "utils.hpp"
 
 using namespace polyregion::runtime;
 using namespace polyregion::runtime::cuda;
 
 #define CHECKED(f) checked((f), __FILE__, __LINE__)
 
-static constexpr const char *ERROR_PREFIX = "[CUDA error] ";
+static constexpr const char *PREFIX = "CUDA";
 
 static void checked(CUresult result, const char *file, int line) {
   if (result != CUDA_SUCCESS && result != CUDA_ERROR_DEINITIALIZED) {
-    throw std::logic_error(std::string(ERROR_PREFIX) + file + ":" + std::to_string(line) + ": " +
-                           cuewErrorString(result));
+    POLYRT_FATAL(PREFIX, "%s:%d: %s (code=%u)", file, line, cuewErrorString(result), result);
   }
 }
 
-CudaPlatform::CudaPlatform() {
-  TRACE();
-  if (auto result = cuewInit(CUEW_INIT_CUDA); result != CUEW_SUCCESS) {
-    throw std::logic_error("CUEW initialisation failed (" + std::to_string(result) + ") ,no CUDA driver present?");
-  }
-  CHECKED(cuInit(0));
+std::variant<std::string, std::unique_ptr<Platform>> CudaPlatform::create() {
+  if (auto result = cuewInit(CUEW_INIT_CUDA); result != CUEW_SUCCESS)
+    return "CUEW initialisation failed (" + std::to_string(result) + "), no CUDA driver present?";
+  if (auto result = cuInit(0); result != CUDA_SUCCESS) return cuewErrorString(result);
+  return std::unique_ptr<Platform>(new CudaPlatform());
 }
+
+CudaPlatform::CudaPlatform() { POLYRT_TRACE(); }
 std::string CudaPlatform::name() {
-  TRACE();
+  POLYRT_TRACE();
   return "CUDA";
 }
 std::vector<Property> CudaPlatform::properties() {
-  TRACE();
+  POLYRT_TRACE();
   return {};
 }
 PlatformKind CudaPlatform::kind() {
-  TRACE();
+  POLYRT_TRACE();
   return PlatformKind::Managed;
 }
 ModuleFormat CudaPlatform::moduleFormat() {
-  TRACE();
+  POLYRT_TRACE();
   return ModuleFormat::PTX;
 }
 std::vector<std::unique_ptr<Device>> CudaPlatform::enumerate() {
-  TRACE();
+  POLYRT_TRACE();
   int count = 0;
   CHECKED(cuDeviceGetCount(&count));
   std::vector<std::unique_ptr<Device>> devices(count);
@@ -53,120 +52,120 @@ std::vector<std::unique_ptr<Device>> CudaPlatform::enumerate() {
 CudaDevice::CudaDevice(int ordinal)
     : context(
           [this]() {
-            TRACE();
+            POLYRT_TRACE();
             CUcontext c;
             CHECKED(cuDevicePrimaryCtxRetain(&c, device));
             CHECKED(cuCtxPushCurrent(c));
             return c;
           },
           [this](auto) {
-            TRACE();
+            POLYRT_TRACE();
             if (device) CHECKED(cuDevicePrimaryCtxRelease(device));
           }),
       store(
-          ERROR_PREFIX,
+          PREFIX,
           [this](auto &&s) {
-            TRACE();
+            POLYRT_TRACE();
             context.touch();
             CUmodule module;
             CHECKED(cuModuleLoadData(&module, s.data()));
             return module;
           },
           [this](auto &&m, auto &&name, auto) {
-            TRACE();
+            POLYRT_TRACE();
             context.touch();
             CUfunction fn;
             CHECKED(cuModuleGetFunction(&fn, m, name.c_str()));
             return fn;
           },
           [&](auto &&m) {
-            TRACE();
+            POLYRT_TRACE();
             CHECKED(cuModuleUnload(m));
           },
-          [&](auto &&) { TRACE(); }) {
-  TRACE();
+          [&](auto &&) { POLYRT_TRACE(); }) {
+  POLYRT_TRACE();
   CHECKED(cuDeviceGet(&device, ordinal));
-  deviceName = detail::allocateAndTruncate(
-      [&](auto &&data, auto &&length) { CHECKED(cuDeviceGetName(data, int_cast<int>(length), device)); });
+  deviceName =
+      detail::allocateAndTruncate([&](auto &&data, auto &&length) { CHECKED(cuDeviceGetName(data, static_cast<int>(length), device)); });
 }
 
 int64_t CudaDevice::id() {
-  TRACE();
+  POLYRT_TRACE();
   return device;
 }
 std::string CudaDevice::name() {
-  TRACE();
+  POLYRT_TRACE();
   return deviceName;
 }
 bool CudaDevice::sharedAddressSpace() {
-  TRACE();
+  POLYRT_TRACE();
   return false;
 }
 bool CudaDevice::singleEntryPerModule() {
-  TRACE();
+  POLYRT_TRACE();
   return false;
 }
 std::vector<Property> CudaDevice::properties() {
-  TRACE();
+  POLYRT_TRACE();
   return {};
 }
 std::vector<std::string> CudaDevice::features() {
-  TRACE();
+  POLYRT_TRACE();
   int ccMajor = 0, ccMinor = 0;
   CHECKED(cuDeviceGetAttribute(&ccMajor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device));
   CHECKED(cuDeviceGetAttribute(&ccMinor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device));
   return {"sm_" + std::to_string((ccMajor * 10) + ccMinor)};
 }
 void CudaDevice::loadModule(const std::string &name, const std::string &image) {
-  TRACE();
+  POLYRT_TRACE();
   store.loadModule(name, image);
 }
 bool CudaDevice::moduleLoaded(const std::string &name) {
-  TRACE();
+  POLYRT_TRACE();
   return store.moduleLoaded(name);
 }
 uintptr_t CudaDevice::mallocDevice(size_t size, Access) {
-  TRACE();
+  POLYRT_TRACE();
   context.touch();
-  if (size == 0) throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot malloc size of 0");
+  if (size == 0) POLYRT_FATAL(PREFIX, "Cannot malloc size of %ld", size);
   CUdeviceptr ptr = {};
   CHECKED(cuMemAlloc(&ptr, size));
   return ptr;
 }
 void CudaDevice::freeDevice(uintptr_t ptr) {
-  TRACE();
+  POLYRT_TRACE();
   context.touch();
   CHECKED(cuMemFree(ptr));
 }
 std::optional<void *> CudaDevice::mallocShared(size_t size, Access access) {
-  TRACE();
+  POLYRT_TRACE();
   context.touch();
-  if (size == 0) throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot malloc size of 0");
+  if (size == 0) POLYRT_FATAL(PREFIX, "Cannot malloc size of %ld", size);
   CUdeviceptr ptr = {};
   CHECKED(cuMemAllocManaged(&ptr, size, CU_MEM_ATTACH_GLOBAL));
 
   return reinterpret_cast<void *>(ptr);
 }
 void CudaDevice::freeShared(void *ptr) {
-  TRACE();
+  POLYRT_TRACE();
   context.touch();
   CHECKED(cuMemFree(reinterpret_cast<CUdeviceptr>(ptr)));
 }
 std::unique_ptr<DeviceQueue> CudaDevice::createQueue() {
-  TRACE();
+  POLYRT_TRACE();
   context.touch();
   return std::make_unique<CudaDeviceQueue>(store);
 }
-CudaDevice::~CudaDevice() { TRACE(); }
+CudaDevice::~CudaDevice() { POLYRT_TRACE(); }
 
 // ---
 
 CudaDeviceQueue::CudaDeviceQueue(decltype(store) store) : store(store) {
-  TRACE();
+  POLYRT_TRACE();
   CHECKED(cuStreamCreate(&stream, CU_STREAM_DEFAULT));
 }
 CudaDeviceQueue::~CudaDeviceQueue() {
-  TRACE();
+  POLYRT_TRACE();
   CHECKED(cuStreamDestroy(stream));
 }
 void CudaDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
@@ -177,8 +176,7 @@ void CudaDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
   if (cuLaunchHostFunc && false) { // >= CUDA 10
     // FIXME cuLaunchHostFunc does not retain errors from previous launches, use the deprecated cuStreamAddCallback
     //  for now. See https://stackoverflow.com/a/58173486
-    CHECKED(cuLaunchHostFunc(
-        stream, [](void *data) { return handler.consume(data); }, handler.createHandle(f)));
+    CHECKED(cuLaunchHostFunc(stream, [](void *data) { return handler.consume(data); }, handler.createHandle(f)));
   } else {
     CHECKED(cuStreamAddCallback(
         stream,
@@ -191,21 +189,19 @@ void CudaDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
 }
 
 void CudaDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
-  TRACE();
+  POLYRT_TRACE();
   CHECKED(cuMemcpyHtoDAsync(dst, src, size, stream));
   enqueueCallback(cb);
 }
 void CudaDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) {
-  TRACE();
+  POLYRT_TRACE();
   CHECKED(cuMemcpyDtoHAsync(dst, src, size, stream));
   enqueueCallback(cb);
 }
-void CudaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                         const std::vector<Type> &types, std::vector<std::byte> argData,
-                                         const Policy &policy, const MaybeCallback &cb) {
-  TRACE();
-  if (types.back() != Type::Void)
-    throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported");
+void CudaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
+                                         std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
+  POLYRT_TRACE();
+  if (types.back() != Type::Void) POLYRT_FATAL(PREFIX, "Non-void return type not supported: %s", to_string(types.back()).data());
   auto fn = store.resolveFunction(moduleName, symbol, types);
   auto grid = policy.global;
   auto [block, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});

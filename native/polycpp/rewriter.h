@@ -6,11 +6,12 @@
 #include "options.h"
 
 namespace polyregion::polystl {
-  class OffloadRewriteConsumer : public clang::ASTConsumer {
+class OffloadRewriteConsumer : public clang::ASTConsumer {
   clang::DiagnosticsEngine &diag;
-  StdParOptions opts;
+  DriverContext ctx;
+
 public:
-  OffloadRewriteConsumer(clang::DiagnosticsEngine &diag, const StdParOptions &opts);
+  OffloadRewriteConsumer(clang::DiagnosticsEngine &diag, const DriverContext &ctx);
   void HandleTranslationUnit(clang::ASTContext &context) override;
 };
 

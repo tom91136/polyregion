@@ -3,24 +3,23 @@
 #include <thread>
 #include <utility>
 
-#include "ffi_wrapped.h"
 #include "polyrt/object_platform.h"
-#include "utils.hpp"
 
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/Support/DynamicLibrary.h"
 #include "llvm/TargetParser/Host.h"
 
-#include "llvm_utils.hpp"
-
 #include "oneapi/tbb.h"
+
+#include "ffi_wrapped.h"
+#include "polyregion/llvm_utils.hpp"
 
 using namespace polyregion::runtime;
 using namespace polyregion::runtime::object;
 
-static void invoke(uint64_t symbolAddress, const std::vector<Type> &types, std::vector<void *> &args) {
-  const auto toFFITpe = [](const Type &tpe) -> ffi_type * {
+static void invoke(const char *prefix, uint64_t symbolAddress, const std::vector<Type> &types, std::vector<void *> &args) {
+  const auto toFFITpe = [prefix](const Type &tpe) -> ffi_type * {
     switch (tpe) {
       case polyregion::runtime::Type::Bool8:
       case polyregion::runtime::Type::Byte8: return &ffi_type_sint8;
@@ -32,10 +31,10 @@ static void invoke(uint64_t symbolAddress, const std::vector<Type> &types, std::
       case polyregion::runtime::Type::Double64: return &ffi_type_double;
       case polyregion::runtime::Type::Ptr: return &ffi_type_pointer;
       case polyregion::runtime::Type::Void: return &ffi_type_void;
-      default: throw std::logic_error("Illegal ffi type " + std::to_string(polyregion::to_underlying(tpe)));
+      default: POLYRT_FATAL(prefix, "Illegal ffi type: %s", to_string(tpe).data());
     }
   };
-  if (types.size() != args.size()) throw std::logic_error("types size  != args size");
+  if (types.size() != args.size()) POLYRT_FATAL(prefix, "types size (%zu) != args size (%zu)", types.size(), args.size());
 
   std::vector<ffi_type *> ffiTypes(args.size());
   for (size_t i = 0; i < args.size(); i++)
@@ -44,30 +43,30 @@ static void invoke(uint64_t symbolAddress, const std::vector<Type> &types, std::
   ffi_status status = ffi_prep_cif(&cif, FFI_DEFAULT_ABI, args.size() - 1, ffiTypes.back(), ffiTypes.data());
   switch (status) {
     case FFI_OK: ffi_call(&cif, FFI_FN(symbolAddress), args.back(), args.data()); break;
-    case FFI_BAD_TYPEDEF: throw std::logic_error("ffi_prep_cif: FFI_BAD_TYPEDEF");
-    case FFI_BAD_ABI: throw std::logic_error("ffi_prep_cif: FFI_BAD_ABI");
-    default: throw std::logic_error("ffi_prep_cif: unknown error (" + std::to_string(status) + ")");
+    case FFI_BAD_TYPEDEF: POLYRT_FATAL(prefix, "ffi_prep_cif: FFI_BAD_TYPEDEF (%d)", status);
+    case FFI_BAD_ABI: POLYRT_FATAL(prefix, "ffi_prep_cif: FFI_BAD_ABI (%d)", status);
+    default: POLYRT_FATAL(prefix, "ffi_prep_cif: unknown error (%d)", status);
   }
 }
 
 int64_t ObjectDevice::id() {
-  TRACE();
+  POLYRT_TRACE();
   return 0;
 }
 bool ObjectDevice::sharedAddressSpace() {
-  TRACE();
+  POLYRT_TRACE();
   return true;
 }
 bool ObjectDevice::singleEntryPerModule() {
-  TRACE();
+  POLYRT_TRACE();
   return false;
 }
 std::vector<Property> ObjectDevice::properties() {
-  TRACE();
+  POLYRT_TRACE();
   return {};
 }
 std::vector<std::string> ObjectDevice::features() {
-  TRACE();
+  POLYRT_TRACE();
 
   std::vector<std::string> features;
 
@@ -83,75 +82,77 @@ std::vector<std::string> ObjectDevice::features() {
   return features;
 }
 uintptr_t ObjectDevice::mallocDevice(size_t size, Access) {
-  TRACE();
+  POLYRT_TRACE();
   return reinterpret_cast<uintptr_t>(std::malloc(size));
 }
 void ObjectDevice::freeDevice(uintptr_t ptr) {
-  TRACE();
+  POLYRT_TRACE();
   std::free(reinterpret_cast<void *>(ptr));
 }
 
 std::optional<void *> ObjectDevice::mallocShared(size_t size, Access access) {
-  TRACE();
+  POLYRT_TRACE();
   return std::malloc(size);
 }
 void ObjectDevice::freeShared(void *ptr) {
-  TRACE();
+  POLYRT_TRACE();
   std::free(ptr);
 }
 
 // ---
 
 void ObjectDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
-  TRACE();
+  POLYRT_TRACE();
   std::memcpy(reinterpret_cast<void *>(dst), src, size);
   if (cb) (*cb)();
 }
 void ObjectDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) {
-  TRACE();
+  POLYRT_TRACE();
   std::memcpy(dst, reinterpret_cast<void *>(src), size);
   if (cb) (*cb)();
 }
 ObjectDeviceQueue::ObjectDeviceQueue() {
-  TRACE();
+  POLYRT_TRACE();
   arena.initialize(int(std::thread::hardware_concurrency()));
 }
 
 ObjectDeviceQueue::~ObjectDeviceQueue() noexcept {
   group.wait();
-  TRACE();
+  POLYRT_TRACE();
 }
-
-RelocatablePlatform::RelocatablePlatform() { TRACE(); }
+std::variant<std::string, std::unique_ptr<Platform>> RelocatablePlatform::create() {
+  return std::unique_ptr<Platform>(new RelocatablePlatform());
+}
+RelocatablePlatform::RelocatablePlatform() { POLYRT_TRACE(); }
 std::string RelocatablePlatform::name() {
-  TRACE();
+  POLYRT_TRACE();
   return "CPU (RelocatableObject)";
 }
 std::vector<Property> RelocatablePlatform::properties() {
-  TRACE();
+  POLYRT_TRACE();
   return {};
 }
 PlatformKind RelocatablePlatform::kind() {
-  TRACE();
+  POLYRT_TRACE();
   return PlatformKind::HostThreaded;
 }
 ModuleFormat RelocatablePlatform::moduleFormat() {
-  TRACE();
+  POLYRT_TRACE();
   return ModuleFormat::Object;
 }
 std::vector<std::unique_ptr<Device>> RelocatablePlatform::enumerate() {
-  TRACE();
+  POLYRT_TRACE();
   std::vector<std::unique_ptr<Device>> xs(1);
   xs[0] = std::make_unique<RelocatableDevice>();
   return xs;
 }
 
-static constexpr const char *RELOBJ_ERROR_PREFIX = "[RelocatableObject error] ";
+static constexpr const char *RELOBJ_PREFIX = "RelocatableObject";
 
-RelocatableDevice::RelocatableDevice() { TRACE(); }
+RelocatableDevice::RelocatableDevice() { POLYRT_TRACE(); }
 
 std::string RelocatableDevice::name() {
-  TRACE();
+  POLYRT_TRACE();
   return "RelocatableObjectDevice(llvm::RuntimeDyld)";
 }
 
@@ -161,35 +162,38 @@ LoadedCodeObject::LoadedCodeObject(std::unique_ptr<llvm::object::ObjectFile> obj
 }
 
 void RelocatableDevice::loadModule(const std::string &name, const std::string &image) {
-  TRACE();
-  WriteLock rw(lock);
+  POLYRT_TRACE();
+  // polyregion::abort
+  WriteLock rw(mutex);
   if (auto it = objects.find(name); it != objects.end()) {
-    throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Module named " + name + " was already loaded");
+    POLYRT_FATAL(RELOBJ_PREFIX, "Module named %s was already loaded", name.c_str());
   } else {
     if (auto object = llvm::object::ObjectFile::createObjectFile(llvm::MemoryBufferRef(llvm::StringRef(image), ""));
         auto e = object.takeError()) {
-      throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Cannot load module: " + toString(std::move(e)));
+      POLYRT_FATAL(RELOBJ_PREFIX, "Cannot load module: %s", toString(std::move(e)).c_str());
     } else {
       auto inserted = objects.emplace_hint(it, name, std::make_unique<LoadedCodeObject>(std::move(*object)));
       if (inserted->second->ld.finalizeWithMemoryManagerLocking(); inserted->second->ld.hasError()) {
-        throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Module `" + name +
-                               "` failed to finalise for execution: " + inserted->second->ld.getErrorString().str());
+        POLYRT_FATAL(RELOBJ_PREFIX, "Module `%s` failed to finalise for execution: %s", name.c_str(),
+                     inserted->second->ld.getErrorString().data());
       }
     }
   }
 }
 
 bool RelocatableDevice::moduleLoaded(const std::string &name) {
-  TRACE();
-  ReadLock r(lock);
+  POLYRT_TRACE();
+  ReadLock r(mutex);
   return objects.find(name) != objects.end();
 }
 std::unique_ptr<DeviceQueue> RelocatableDevice::createQueue() {
-  TRACE();
-  return std::make_unique<RelocatableDeviceQueue>(objects, lock);
+  POLYRT_TRACE();
+  return std::make_unique<RelocatableDeviceQueue>(objects, mutex);
 }
 
-RelocatableDeviceQueue::RelocatableDeviceQueue(decltype(objects) objects, decltype(lock) lock) : objects(objects), lock(lock) { TRACE(); }
+RelocatableDeviceQueue::RelocatableDeviceQueue(decltype(objects) objects, decltype(mutex) mutex) : objects(objects), mutex(mutex) {
+  POLYRT_TRACE();
+}
 
 void *malloc_(size_t size) {
   auto p = std::malloc(size);
@@ -245,47 +249,26 @@ static void threadedLaunch(detail::CountedCallbackHandler &handler, tbb::task_ar
 }
 
 void validatePolicyAndArgs(const char *prefix, std::vector<Type> types, const Policy &policy) {
-  if (auto scratchCount = std::count(types.begin(), types.end(), Type::Scratch); scratchCount != 0) {
-    throw std::logic_error(std::string(prefix) + "Scratch types are not supported on the CPU, found" + std::to_string(scratchCount) +
-                           " arg(s)");
-  }
-  if (policy.global.y != 1) {
-    throw std::logic_error(std::string(prefix) + "Policy dimension Y > 1 is not supported");
-  }
-  if (policy.global.z != 1) {
-    throw std::logic_error(std::string(prefix) + "Policy dimension Z > 1 is not supported");
-  }
-  if (policy.local) {
-    throw std::logic_error(std::string(prefix) + "Policy local dimension is not supported");
-  }
-  if (types[0] != Type::Long64) {
-    throw std::logic_error(std::string(prefix) + "Expecting first argument as index: " + std::string(to_string(Type::Long64)) + ", but was " +
-                           std::string(to_string(types[0])));
-  }
+  if (auto scratchCount = std::count(types.begin(), types.end(), Type::Scratch); scratchCount != 0)
+    POLYRT_FATAL(prefix, "Scratch types are not supported on the CPU, found %td arg(s)", scratchCount);
+  if (policy.global.y != 1) POLYRT_FATAL(prefix, "Policy dimension Y > 1 is not supported: %zu", policy.global.y);
+  if (policy.global.z != 1) POLYRT_FATAL(prefix, "Policy dimension Z > 1 is not supported: %zu", policy.global.z);
+  if (policy.local) POLYRT_FATAL(prefix, "Policy local dimension is not supported: size=%lu", policy.local->second);
+  if (types[0] != Type::Long64)
+    POLYRT_FATAL(prefix, "Expecting first argument as index (%s), but was %s", to_string(Type::Long64).data(), to_string(types[0]).data());
 }
 void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
                                                 std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
-  TRACE();
-  validatePolicyAndArgs(RELOBJ_ERROR_PREFIX, types, policy);
+  POLYRT_TRACE();
+  validatePolicyAndArgs(RELOBJ_PREFIX, types, policy);
 
-  ReadLock r(lock);
+  ReadLock r(mutex);
   const auto moduleIt = objects.find(moduleName);
-  if (moduleIt == objects.end()) throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "No module named " + moduleName + " was loaded");
-
+  if (moduleIt == objects.end()) POLYRT_FATAL(RELOBJ_PREFIX, "No module named %s was loaded", moduleName.c_str());
   auto &[_, obj] = *moduleIt;
   auto fnName = (obj->rawObject->isMachO() || obj->rawObject->isMachOUniversalBinary()) ? std::string("_") + symbol : symbol;
   auto sym = obj->ld.getSymbol(fnName);
-  if (!sym) {
-    auto table = obj->ld.getSymbolTable();
-    std::vector<std::string> symbols;
-    symbols.reserve(table.size());
-    for (auto &[k, v] : table)
-      symbols.emplace_back("[`" + k.str() + "`@" + polyregion::hex(v.getAddress()) + "]");
-    throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Symbol `" + std::string(fnName) +
-                           "` not found in the given object, available symbols (" + std::to_string(table.size()) + ") = " +
-                           polyregion::mk_string<std::string>(
-                               symbols, [](auto &x) { return x; }, ","));
-  }
+  if (!sym) POLYRT_FATAL(RELOBJ_PREFIX, "Symbol `%s` not found in the given object", fnName.c_str());
   this->threadedLaunch(
       policy.global.x,
       [cb, token = latch.acquire()]() {
@@ -295,58 +278,60 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
         auto argData_ = argData;
         auto argPtrs = detail::argDataAsPointers(types, argData_);
         if (types[0] != Type::Long64) {
-          throw std::logic_error(std::string(RELOBJ_ERROR_PREFIX) + "Expecting first argument as index: " + std::string(to_string(Type::Long64)) +
-                                 ", but was " + std::string(to_string(types[0])));
+          POLYRT_FATAL(RELOBJ_PREFIX, "Expecting first argument as index: %s, but was %s", to_string(Type::Long64).data(),
+                       to_string(types[0]).data());
         }
         auto _tid = int64_t(tid);
         argPtrs[0] = &_tid;
-        invoke(sym.getAddress(), types, argPtrs);
+        invoke(RELOBJ_PREFIX, sym.getAddress(), types, argPtrs);
       });
 }
 
-static constexpr const char *SHOBJ_ERROR_PREFIX = "[SharedObject error] ";
-SharedPlatform::SharedPlatform() { TRACE(); }
+static constexpr const char *SHOBJ_PREFIX = "SharedObject";
+
+std::variant<std::string, std::unique_ptr<Platform>> SharedPlatform::create() { return std::unique_ptr<Platform>(new SharedPlatform()); }
+
+SharedPlatform::SharedPlatform() { POLYRT_TRACE(); }
 std::string SharedPlatform::name() {
-  TRACE();
+  POLYRT_TRACE();
   return "CPU (SharedObject)";
 }
 std::vector<Property> SharedPlatform::properties() {
-  TRACE();
+  POLYRT_TRACE();
   return {};
 }
 PlatformKind SharedPlatform::kind() {
-  TRACE();
+  POLYRT_TRACE();
   return PlatformKind::HostThreaded;
 }
 ModuleFormat SharedPlatform::moduleFormat() {
-  TRACE();
+  POLYRT_TRACE();
   return ModuleFormat::Object;
 }
 std::vector<std::unique_ptr<Device>> SharedPlatform::enumerate() {
-  TRACE();
+  POLYRT_TRACE();
   std::vector<std::unique_ptr<Device>> xs(1);
   xs[0] = std::make_unique<SharedDevice>();
   return xs;
 }
 
 SharedDevice::~SharedDevice() {
-  TRACE();
+  POLYRT_TRACE();
   for (auto &[_, m] : modules) {
     auto &[path, handle, symbols] = m;
     if (auto code = polyregion_dl_close(handle); code != 0) {
-      std::fprintf(stderr, "%s Cannot unload module, code %d: %s\n", SHOBJ_ERROR_PREFIX, code, polyregion_dl_error());
+      std::fprintf(stderr, "%s Cannot unload module, code %d: %s\n", SHOBJ_PREFIX, code, polyregion_dl_error());
     }
   }
 }
 std::string SharedDevice::name() {
-  TRACE();
+  POLYRT_TRACE();
   return "SharedObjectDevice(dlopen/dlsym)";
 }
 void SharedDevice::loadModule(const std::string &name, const std::string &image) {
-  TRACE();
-  if (auto it = modules.find(name); it != modules.end()) {
-    throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) + "Module named " + name + " was already loaded");
-  } else {
+  POLYRT_TRACE();
+  if (auto it = modules.find(name); it != modules.end()) POLYRT_FATAL(SHOBJ_PREFIX, "Module named %s was already loaded", name.c_str());
+  else {
 
     // TODO implement Linux: https://x-c3ll.github.io/posts/fileless-memfd_create/
     // TODO implement Windows: https://github.com/fancycode/MemoryModule
@@ -354,25 +339,24 @@ void SharedDevice::loadModule(const std::string &name, const std::string &image)
     // dlopen must open from a file :(
     auto tmpPath = std::tmpnam(nullptr);
     if (!tmpPath) {
-      throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) +
-                             "Unable to buffer image to file, tmpfile creation failed: cannot synthesise temp path");
+      POLYRT_FATAL(SHOBJ_PREFIX, "Unable to buffer image to file for %s, tmpfile creation failed: cannot synthesise temp path",
+                   name.c_str());
     }
     std::FILE *objectFile = std::fopen(tmpPath, "wb");
     if (!objectFile) {
-      throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) +
-                             "Unable to buffer image to file, tmpfile creation failed: " + std::strerror(errno));
+      POLYRT_FATAL(SHOBJ_PREFIX, "Unable to buffer image to file for %s, tmpfile creation failed: %s", name.c_str(), std::strerror(errno));
     }
     std::fwrite(image.data(), image.size(), 1, objectFile);
     std::fflush(objectFile);
     std::fclose(objectFile);
     static std::vector<std::string> tmpImagePaths;
     tmpImagePaths.emplace_back(tmpPath);
-    static std::mutex mutex;
+    static std::mutex cleanupMutex;
     static auto cleanUp = []() {
-      std::unique_lock<std::mutex> lock(mutex);
+      std::unique_lock<std::mutex> lock(cleanupMutex);
       for (auto &path : tmpImagePaths) {
         if (std::remove(path.c_str()) != 0) {
-          fprintf(stderr, "Warning: cannot remove temporary image file %s\n", path.c_str());
+          fprintf(stderr, "[%s] Warning: cannot remove temporary image file %s\n", SHOBJ_PREFIX, path.c_str());
         }
       }
       tmpImagePaths.clear();
@@ -381,29 +365,28 @@ void SharedDevice::loadModule(const std::string &name, const std::string &image)
     std::set_terminate(cleanUp);
 
     if (auto dylib = polyregion_dl_open(tmpPath); !dylib) {
-      throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) + "Cannot load module: " + std::string(polyregion_dl_error()));
-    } else
-      modules.emplace_hint(it, name, LoadedModule{image, dylib, {}});
+      POLYRT_FATAL(SHOBJ_PREFIX, "Cannot load module: %s", polyregion_dl_error());
+    } else modules.emplace_hint(it, name, LoadedModule{image, dylib, {}});
   }
 }
 bool SharedDevice::moduleLoaded(const std::string &name) {
-  TRACE();
+  POLYRT_TRACE();
   return modules.find(name) != modules.end();
 }
 std::unique_ptr<DeviceQueue> SharedDevice::createQueue() {
-  TRACE();
-  return std::make_unique<SharedDeviceQueue>(modules, lock);
+  POLYRT_TRACE();
+  return std::make_unique<SharedDeviceQueue>(modules, mutex);
 }
 
-SharedDeviceQueue::SharedDeviceQueue(decltype(modules) modules, decltype(lock) lock) : modules(modules), lock(lock) { TRACE(); }
+SharedDeviceQueue::SharedDeviceQueue(decltype(modules) modules, decltype(mutex) mutex) : modules(modules), mutex(mutex) { POLYRT_TRACE(); }
 void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
                                            std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
-  TRACE();
-  validatePolicyAndArgs(SHOBJ_ERROR_PREFIX, types, policy);
+  POLYRT_TRACE();
+  validatePolicyAndArgs(SHOBJ_PREFIX, types, policy);
 
-  ReadLock r(lock);
+  ReadLock r(mutex);
   auto moduleIt = modules.find(moduleName);
-  if (moduleIt == modules.end()) throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) + "No module named " + moduleName + " was loaded");
+  if (moduleIt == modules.end()) POLYRT_FATAL(SHOBJ_PREFIX, "No module named %s was loaded", moduleName.c_str());
 
   auto &[image, handle, symbolTable] = moduleIt->second;
 
@@ -413,8 +396,8 @@ void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
     address = polyregion_dl_find(handle, symbol.c_str());
     auto err = polyregion_dl_error();
     if (err) {
-      throw std::logic_error(std::string(SHOBJ_ERROR_PREFIX) + "Cannot load symbol " + symbol + " from module " + moduleName + " (" +
-                             std::to_string(image.size()) + " bytes): " + std::string(err));
+      POLYRT_FATAL(SHOBJ_PREFIX, "Cannot load symbol %s from module %s (%ld bytes): %s", //
+                   symbol.c_str(), moduleName.c_str(), image.size(), err);
     }
     symbolTable.emplace_hint(it, symbol, address);
   }
@@ -429,7 +412,7 @@ void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
         auto argPtrs = detail::argDataAsPointers(types, argData_);
         auto _tid = int64_t(tid);
         argPtrs[0] = &_tid;
-        invoke(reinterpret_cast<uint64_t>(address), types, argPtrs);
+        invoke(SHOBJ_PREFIX, reinterpret_cast<uint64_t>(address), types, argPtrs);
       });
-  TRACE();
+  POLYRT_TRACE();
 }

@@ -4,6 +4,8 @@ if (NOT RUNTIME_ENABLE_METAL)
     endif ()
 endif ()
 
+list(APPEND RUNTIME_LINK_LIBS ${DL_LIB})
+
 if (RUNTIME_ENABLE_METAL)
     list(APPEND RUNTIME_BACKEND_DEFS RUNTIME_ENABLE_METAL)
     list(APPEND RUNTIME_SRC_FILES
@@ -25,6 +27,15 @@ set(LLVM_LIBS
         LLVMRuntimeDyld
         LLVMObject
         LLVMCore
+        LLVMMC
+        LLVMMCParser
+        LLVMDemangle
+        LLVMBitstreamReader
+        LLVMTextAPI
+        LLVMIRReader
+        LLVMAsmParser
+        LLVMBitReader
+        LLVMRemarks
         LLVMBinaryFormat
         LLVMSupport
         LLVMTargetParser
@@ -48,47 +59,40 @@ set(POLYRT_SRC
         thirdparty/hsaew/src/hsaew.c
         ${RUNTIME_SRC_FILES}
 )
-add_library(polyrt SHARED  )
-add_library(polyrt-obj OBJECT  )
-add_library(polyrt-static STATIC  )
+
+
+set(POLYRT_LIBS
+        libffi
+        TBB::tbb
+        ${LLVM_LIBS}
+
+        CACHE STRING ""
+)
+
+add_library(polyrt SHARED)
+add_library(polyrt-obj OBJECT)
+merge_static_libs(polyrt-static ${POLYRT_LIBS})
 
 foreach (TARGET polyrt polyrt-obj polyrt-static)
 
-
     target_sources(${TARGET}
             PRIVATE ${POLYRT_SRC}
-
-
             PUBLIC FILE_SET HEADERS
             TYPE HEADERS
             BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include
             FILES
-            include/polyrt/cl_platform.h
-            include/polyrt/cuda_platform.h
-            include/polyrt/hip_platform.h
-            include/polyrt/hsa_platform.h
-            include/polyrt/metal_platform.h
-            include/polyrt/object_platform.h
-            include/polyrt/vulkan_platform.h
-            include/polyrt/runtime.h)
-
-#
-#    foreach (HEADER
-#            cl_platform.h
-#            cuda_platform.h
-#            hip_platform.h
-#            hsa_platform.h
-#            metal_platform.h
-#            object_platform.h
-#            vulkan_platform.h
-#            runtime.h)
-#        set_target_properties(${TARGET} PROPERTIES PUBLIC_HEADER "include/${HEADER}")
-#    endforeach ()
+#            include/polyrt/cl_platform.h
+#            include/polyrt/cuda_platform.h
+#            include/polyrt/hip_platform.h
+#            include/polyrt/hsa_platform.h
+#            include/polyrt/metal_platform.h
+#            include/polyrt/object_platform.h
+#            include/polyrt/vulkan_platform.h
+            include/polyrt/runtime.h
+    )
 
     target_compile_definitions(${TARGET} PUBLIC ${RUNTIME_BACKEND_DEFS})
     target_include_directories(${TARGET} PUBLIC
-            ../include
-#            include/polyrt
             thirdparty/
             thirdparty/clew/include
             thirdparty/hipew/include
@@ -101,14 +105,8 @@ foreach (TARGET polyrt polyrt-obj polyrt-static)
             ${vulkan-headers_SOURCE_DIR}/include
             ${RUNTIME_INCLUDE_DIRS}
     )
-    target_link_libraries(${TARGET} PUBLIC
-            libffi
-            TBB::tbb
-            ${LLVM_LIBS}
-            ${DL_LIB}
-            ${RUNTIME_LINK_LIBS}
-    )
 
+    target_link_libraries(${TARGET} PUBLIC polycommon ${POLYRT_LIBS} ${RUNTIME_LINK_LIBS})
     target_compile_options(${TARGET} PRIVATE ${COMPILE_OPTIONS})
     target_link_options(${TARGET} PRIVATE ${LINK_OPTIONS})
 endforeach ()

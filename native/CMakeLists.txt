@@ -1,13 +1,12 @@
 cmake_minimum_required(VERSION 3.23 FATAL_ERROR) # XXX FetchContent_Declare DOWNLOAD_NO_EXTRACT is >= 3.18
 
-
-set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O3 -gline-tables-only -DNDEBUG" CACHE STRING "")
-set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -gline-tables-only -DNDEBUG" CACHE STRING "")
-
+set(CMAKE_C_FLAGS_RELEASE "-O3  -gline-tables-only -gz" CACHE STRING "")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3  -gline-tables-only -gz" CACHE STRING "")
 
 include(FetchContent)
 include(ProcessorCount)
 include(ProjectConfig.cmake)
+include(cmake/mergestaticlibs.cmake)
 
 
 if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.24.0")
@@ -87,7 +86,7 @@ if (MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Release>:>")
 else ()
     # FIXME adjust for CUDA stuff for now
-#    set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan -g3)
+    set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan -g3)
 #        set(COMMON_DEBUG_OPTIONS)
 endif ()
 
@@ -343,8 +342,9 @@ set(LINK_OPTIONS
         "$<$<CONFIG:Debug>:${COMMON_DEBUG_OPTIONS}>"
 )
 
+add_subdirectory(common)
 add_subdirectory(polyast)
 add_subdirectory(polyc)
-add_subdirectory(polycpp)
 add_subdirectory(polyrt)
+add_subdirectory(polycpp)
 add_subdirectory(bindings)

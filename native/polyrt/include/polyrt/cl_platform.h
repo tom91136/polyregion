@@ -8,8 +8,10 @@
 namespace polyregion::runtime::cl {
 
 class POLYREGION_EXPORT ClPlatform : public Platform {
-public:
   POLYREGION_EXPORT explicit ClPlatform();
+
+public:
+  POLYREGION_EXPORT static std::variant<std::string, std::unique_ptr<Platform>> create();
   POLYREGION_EXPORT ~ClPlatform() override;
   POLYREGION_EXPORT std::string name() override;
   POLYREGION_EXPORT std::vector<Property> properties() override;

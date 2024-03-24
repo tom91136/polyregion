@@ -10,9 +10,10 @@ namespace polyregion::runtime::metal {
 
 class POLYREGION_EXPORT MetalPlatform : public Platform {
   NS::AutoreleasePool *pool;
+  POLYREGION_EXPORT explicit MetalPlatform();
 
 public:
-  POLYREGION_EXPORT explicit MetalPlatform();
+  POLYREGION_EXPORT static std::variant<std::string, std::unique_ptr<Platform>> create();
   POLYREGION_EXPORT ~MetalPlatform() override;
   POLYREGION_EXPORT std::string name() override;
   POLYREGION_EXPORT std::vector<Property> properties() override;
@@ -46,8 +47,8 @@ public:
   POLYREGION_EXPORT bool moduleLoaded(const std::string &name) override;
   POLYREGION_EXPORT uintptr_t mallocDevice(size_t size, Access access) override;
   POLYREGION_EXPORT void freeDevice(uintptr_t ptr) override;
-  POLYREGION_EXPORT std::optional<void*> mallocShared(size_t size, Access access) override;
-  POLYREGION_EXPORT void freeShared(void* ptr) override;
+  POLYREGION_EXPORT std::optional<void *> mallocShared(size_t size, Access access) override;
+  POLYREGION_EXPORT void freeShared(void *ptr) override;
   POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue() override;
 };
 
@@ -64,10 +65,10 @@ public:
   POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) override;
   POLYREGION_EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, void *dst, size_t size, const MaybeCallback &cb) override;
   POLYREGION_EXPORT void enqueueInvokeAsync(const std::string &moduleName,  //
-                                 const std::string &symbol,      //
-                                 const std::vector<Type> &types, //
-                                 std::vector<std::byte> argData, //
-                                 const Policy &policy, const MaybeCallback &cb) override;
+                                            const std::string &symbol,      //
+                                            const std::vector<Type> &types, //
+                                            std::vector<std::byte> argData, //
+                                            const Policy &policy, const MaybeCallback &cb) override;
 };
 
 } // namespace polyregion::runtime::metal

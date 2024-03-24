@@ -37,9 +37,9 @@ target_include_directories(polyrt-JNI PRIVATE
 
         ${JNI_INCLUDE_DIRS})
 
-target_link_libraries(polyc-JNIshim PRIVATE ${DL_LIB})
+target_link_libraries(polyc-JNIshim PRIVATE ${DL_LIB} PUBLIC polycommon)
 target_link_libraries(polyc-JNI PRIVATE polyc)
-target_link_libraries(polyrt-JNI PRIVATE polyrt-static)
+target_link_libraries(polyrt-JNI PRIVATE polyrt-static Aspartame::Aspartame)
 
 
 

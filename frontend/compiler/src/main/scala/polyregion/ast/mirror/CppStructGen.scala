@@ -153,7 +153,7 @@ private[polyregion] object CppStructGen {
           |#pragma once
           |
           |$includes
-          |#include "export.h"
+          |#include "polyregion/export.h"
           |
           |namespace $namespace {
           |$shared

@@ -8,8 +8,10 @@
 namespace polyregion::runtime::hsa {
 
 class POLYREGION_EXPORT HsaPlatform : public Platform {
-public:
   POLYREGION_EXPORT explicit HsaPlatform();
+
+public:
+  POLYREGION_EXPORT static std::variant<std::string, std::unique_ptr<Platform>> create();
   POLYREGION_EXPORT ~HsaPlatform() override = default;
   POLYREGION_EXPORT std::string name() override;
   POLYREGION_EXPORT std::vector<Property> properties() override;

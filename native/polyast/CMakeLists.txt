@@ -1,9 +1,9 @@
 
 add_library(PolyAST generated/polyast.cpp generated/polyast_codec.cpp ast.cpp)
-target_include_directories(PolyAST PUBLIC . generated ../include ${json_SOURCE_DIR})
+target_include_directories(PolyAST PUBLIC . generated  ${json_SOURCE_DIR})
 
 
-target_link_libraries(PolyAST PRIVATE Aspartame::Aspartame)
+target_link_libraries(PolyAST PRIVATE  Aspartame::Aspartame PUBLIC polycommon)
 target_compile_options(PolyAST PRIVATE ${COMPILE_OPTIONS})
 target_link_options(PolyAST PRIVATE ${LINK_OPTIONS})
 

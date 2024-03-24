@@ -18,23 +18,24 @@
 #include "clang/Rewrite/Core/Rewriter.h"
 #include "clang/Sema/Sema.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Program.h"
 
 namespace polyregion::polystl {
 
-class ModifyASTAndEmitObjAction : public clang::EmitLLVMOnlyAction {
+class ModifyASTAndEmitObjAction : public clang::WrapperFrontendAction {
 private:
   std::function<std::unique_ptr<clang::ASTConsumer>()> mkConsumer;
   std::function<void()> endActionCb;
 
 public:
-  ModifyASTAndEmitObjAction(decltype(mkConsumer) mkConsumer, decltype(endActionCb) endActionCb = {});
+  ModifyASTAndEmitObjAction(std::unique_ptr<FrontendAction> wrapped, decltype(mkConsumer) mkConsumer,
+                            decltype(endActionCb) endActionCb = {});
 
 protected:
   std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance &CI, llvm::StringRef FileName) override;
-  void EndSourceFileAction() override;
 };
 
 } // namespace polyregion::polystl

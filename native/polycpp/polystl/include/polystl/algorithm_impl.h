@@ -43,7 +43,7 @@ for_each(ExecutionPolicy &&, ForwardIt first, ForwardIt last, UnaryFunction f) {
 
   auto global = std::distance(first, last);
   auto N = std::thread::hardware_concurrency();
-  std::fprintf(stderr, "[POLYSTL:%s] Dispatch global range <%d>\n", __func__, global);
+  std::fprintf(stderr, "%s <%s, %d> Dispatch\n", __polyregion_prefix, __func__, global);
 
   if (PlatformKind kind; __polyregion_platform_kind(kind)) {
     switch (kind) {
@@ -81,12 +81,13 @@ for_each(ExecutionPolicy &&, ForwardIt first, ForwardIt last, UnaryFunction f) {
     errno = 0; // strtol to avoid exceptions
     size_t value = std::strtol(env, nullptr, 10);
     if (errno == 0 && value == 0) {
-      std::fprintf(stderr, "[POLYSTL:%s] Offload failed: not compatible backend and host fallback disabled\n", __func__);
+      std::fprintf(stderr, "%s <%s, %d> No compatible backend and host fallback disabled, returning...\n", //
+                   __polyregion_prefix, global, __func__);
       return;
     }
   } // default is to use host fallback, so keep going
 
-  std::fprintf(stderr, "[POLYSTL:%s] Host fallback\n", __func__);
+  std::fprintf(stderr, "%s <%s, %d> Host fallback\n", __polyregion_prefix, global, __func__);
   for (size_t i = 0; i < global; ++i) {
     f(*(first + i));
   }

@@ -1,10 +1,6 @@
-#include "polyrt/runtime.h"
-
 #include <iostream>
 #include <mutex>
 #include <utility>
-
-#include "libm.h"
 
 #include "polyrt/cl_platform.h"
 #include "polyrt/cuda_platform.h"
@@ -12,7 +8,10 @@
 #include "polyrt/hsa_platform.h"
 #include "polyrt/metal_platform.h"
 #include "polyrt/object_platform.h"
+#include "polyrt/runtime.h"
 #include "polyrt/vulkan_platform.h"
+
+#include "libm.h"
 
 using namespace polyregion;
 
@@ -52,41 +51,41 @@ void runtime::ArgBuffer::prepend(std::initializer_list<TypedPointer> args) {
 
 void runtime::init() { libm::exportAll(); }
 
-std::unique_ptr<runtime::Platform> runtime::Platform::of(const runtime::Backend &b) {
+std::variant<std::string, std::unique_ptr<runtime::Platform>> runtime::Platform::of(const runtime::Backend &b) {
   using namespace polyregion::runtime;
   switch (b) {
-    case Backend::CUDA: return std::make_unique<cuda::CudaPlatform>();
-    case Backend::HIP: return std::make_unique<hip::HipPlatform>();
-    case Backend::HSA: return std::make_unique<hsa::HsaPlatform>();
-    case Backend::OpenCL: return std::make_unique<cl::ClPlatform>();
-    case Backend::Vulkan: return std::make_unique<vulkan::VulkanPlatform>();
+    case Backend::CUDA: return cuda::CudaPlatform::create();
+    case Backend::HIP: return hip::HipPlatform::create();
+    case Backend::HSA: return hsa::HsaPlatform::create();
+    case Backend::OpenCL: return cl::ClPlatform::create();
+    case Backend::Vulkan: return vulkan::VulkanPlatform::create();
     case Backend::Metal:
 #ifdef RUNTIME_ENABLE_METAL
-      return std::make_unique<metal::MetalPlatform>();
+      return metal::MetalPlatform::create();
 #else
-      throw std::logic_error("Metal backend not available");
+      POLYRT_FATAL("Runtime", "%s backend not available", to_string(b).data());
 #endif
-    case Backend::SharedObject: return std::make_unique<object::SharedPlatform>();
-    case Backend::RelocatableObject: return std::make_unique<object::RelocatablePlatform>();
+    case Backend::SharedObject: return object::SharedPlatform::create();
+    case Backend::RelocatableObject: return object::RelocatablePlatform::create();
   }
 }
 
-runtime::detail::CountingLatch::Token::Token(runtime::detail::CountingLatch &latch) : latch(latch) { TRACE(); }
+runtime::detail::CountingLatch::Token::Token(runtime::detail::CountingLatch &latch) : latch(latch) { POLYRT_TRACE(); }
 runtime::detail::CountingLatch::Token::~Token() {
-  TRACE();
+  POLYRT_TRACE();
   latch.pending--;
   std::lock_guard lock(latch.mutex);
   latch.cv.notify_all();
 }
 std::shared_ptr<runtime::detail::CountingLatch::Token> runtime::detail::CountingLatch::acquire() {
-  TRACE();
+  POLYRT_TRACE();
   pending++;
   std::lock_guard lock(mutex);
   cv.notify_all();
   return std::make_shared<Token>(*this);
 }
 runtime::detail::CountingLatch::~CountingLatch() {
-  TRACE();
+  POLYRT_TRACE();
   auto now = std::chrono::system_clock::now();
   std::unique_lock lock(mutex);
   if (!cv.wait_until(lock, now + std::chrono::seconds(10), [&]() { return pending == 0; })) {
@@ -105,10 +104,7 @@ void runtime::detail::CountedCallbackHandler::consume(void *data) {
   if (auto it = callbacks.find(reinterpret_cast<uintptr_t>(data)); it != callbacks.end()) {
     it->second();
     callbacks.erase(reinterpret_cast<uintptr_t>(data));
-
-  } else {
-    throw std::logic_error("no");
-  }
+  } else POLYRT_FATAL("Runtime", "Cannot consume %p, callback not found!?", data);
 }
 runtime::detail::CountedCallbackHandler::~CountedCallbackHandler() { const std::lock_guard guard(lock); }
 

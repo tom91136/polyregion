@@ -1,35 +1,28 @@
-
-#include "polyrt/cl_platform.h"
-#include <cassert>
-#include <chrono>
 #include <cstring>
 #include <iostream>
 #include <thread>
+
+#include "polyrt/cl_platform.h"
+
 using namespace polyregion::runtime;
 using namespace polyregion::runtime::cl;
 
 #define CHECKED(f) checked((f), __FILE__, __LINE__)
 
-static constexpr const char *ERROR_PREFIX = "[OpenCL error] ";
+static constexpr const char *PREFIX = "OpenCL";
 
 #define OUT_ERR __err
 #define OUT_CHECKED(f) checked([&](auto &&OUT_ERR) { return (f); }, __FILE__, __LINE__)
 
 static void checked(cl_int result, const char *file, int line) {
-  if (result != CL_SUCCESS) {
-    throw std::logic_error(std::string(ERROR_PREFIX) + file + ":" + std::to_string(line) + ": " +
-                           clewErrorString(result));
-  }
+  if (result != CL_SUCCESS) POLYRT_FATAL(PREFIX, "%s:%d: %s", file, line, clewErrorString(result));
 }
 
 template <typename F> static auto checked(F &&f, const char *file, int line) {
   cl_int result = CL_SUCCESS;
   auto y = f(&result);
   if (result == CL_SUCCESS) return y;
-  else {
-    throw std::logic_error(std::string(ERROR_PREFIX) + file + ":" + std::to_string(line) + ": " +
-                           clewErrorString(result));
-  }
+  else POLYRT_FATAL(PREFIX, "%s:%d: %s", file, line, clewErrorString(result));
 }
 
 static std::string queryDeviceInfo(cl_device_id device, cl_device_info info) {
@@ -39,31 +32,34 @@ static std::string queryDeviceInfo(cl_device_id device, cl_device_info info) {
   CHECKED(clGetDeviceInfo(device, info, size, data.data(), nullptr));
   return data;
 }
-
-ClPlatform::ClPlatform() {
-  TRACE();
-  if (clewInit() != CLEW_SUCCESS) {
-    throw std::logic_error("CLEW initialisation failed, no OpenCL library present?");
+std::variant<std::string, std::unique_ptr<Platform>> ClPlatform::create() {
+  switch (auto result = clewInit(); result) {
+    case CLEW_SUCCESS: break;
+    case CLEW_ERROR_OPEN_FAILED: return "CLEW: failed to open the dynamic library";
+    case CLEW_ERROR_ATEXIT_FAILED: return "CLEW: cannot queue atexit for closing the dynamic library";
+    default: return "Unknown error: " + std::to_string(result);
   }
+  return std::unique_ptr<Platform>(new ClPlatform());
 }
+ClPlatform::ClPlatform() { POLYRT_TRACE(); }
 std::string ClPlatform::name() {
-  TRACE();
+  POLYRT_TRACE();
   return "OpenCL";
 }
 std::vector<Property> ClPlatform::properties() {
-  TRACE();
+  POLYRT_TRACE();
   return {};
 }
 PlatformKind ClPlatform::kind() {
-  TRACE();
+  POLYRT_TRACE();
   return PlatformKind::Managed;
 }
 ModuleFormat ClPlatform::moduleFormat() {
-  TRACE();
+  POLYRT_TRACE();
   return ModuleFormat::Source;
 }
 std::vector<std::unique_ptr<Device>> ClPlatform::enumerate() {
-  TRACE();
+  POLYRT_TRACE();
   cl_uint numPlatforms = 0;
   CHECKED(clGetPlatformIDs(0, nullptr, &numPlatforms));
   std::vector<cl_platform_id> platforms(numPlatforms);
@@ -74,8 +70,7 @@ std::vector<std::unique_ptr<Device>> ClPlatform::enumerate() {
     auto deviceIdResult = clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 0, nullptr, &numDevices);
     if (deviceIdResult == CL_DEVICE_NOT_FOUND) {
       continue; // no device
-    } else
-      CHECKED(deviceIdResult);
+    } else CHECKED(deviceIdResult);
 
     std::vector<cl_device_id> devices(numDevices);
     CHECKED(clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, numDevices, devices.data(), nullptr));
@@ -84,14 +79,14 @@ std::vector<std::unique_ptr<Device>> ClPlatform::enumerate() {
   }
   return clDevices;
 }
-ClPlatform::~ClPlatform() { TRACE(); }
+ClPlatform::~ClPlatform() { POLYRT_TRACE(); }
 
 // ---
 
 ClDevice::ClDevice(cl_device_id device)
     : device(
           [&, device]() {
-            TRACE();
+            POLYRT_TRACE();
             // XXX clReleaseDevice appears to crash various CL implementation regardless of version, skip retain as well
             //            if (__clewRetainDevice && __clewReleaseDevice) { // clRetainDevice requires OpenCL >= 1.2
             //              CHECKED(__clewRetainDevice(device));
@@ -99,25 +94,25 @@ ClDevice::ClDevice(cl_device_id device)
             return device;
           },
           [&](auto &&device) {
-            TRACE();
+            POLYRT_TRACE();
             // XXX see above
             //            if (__clewRetainDevice && __clewReleaseDevice) // clReleaseDevice requires OpenCL >= 1.2
             //              CHECKED(__clewReleaseDevice(device));
           }),
       context(
           [this]() {
-            TRACE();
+            POLYRT_TRACE();
             return OUT_CHECKED(clCreateContext(nullptr, 1, &(*this->device), nullptr, nullptr, OUT_ERR));
           },
           [&](auto &&c) {
-            TRACE();
+            POLYRT_TRACE();
             CHECKED(clReleaseContext(c));
           }),
       deviceName(queryDeviceInfo(device, CL_DEVICE_NAME)),
       store(
-          ERROR_PREFIX,
+          PREFIX,
           [this](auto &&image) {
-            TRACE();
+            POLYRT_TRACE();
             auto imageData = image.data();
             auto imageLen = image.size();
             auto program = OUT_CHECKED(clCreateProgramWithSource(*context, 1, &imageData, &imageLen, OUT_ERR));
@@ -127,54 +122,49 @@ ClDevice::ClDevice(cl_device_id device)
               size_t len;
               CHECKED(clGetProgramBuildInfo(program, *this->device, CL_PROGRAM_BUILD_LOG, 0, nullptr, &len));
               std::string buildLog(len, '\0');
-              CHECKED(
-                  clGetProgramBuildInfo(program, *this->device, CL_PROGRAM_BUILD_LOG, len, buildLog.data(), nullptr));
+              CHECKED(clGetProgramBuildInfo(program, *this->device, CL_PROGRAM_BUILD_LOG, len, buildLog.data(), nullptr));
               auto compilerMessage = std::string(clewErrorString(result));
-              const static auto P = std::string(ERROR_PREFIX);
-              throw std::logic_error(std::string("Program failed to compile with ") + compilerMessage +
-                                     std::string(")\n") +                                                   //
-                                     std::string("Diagnostics:\n") + buildLog + "\n" +                      //
-                                     std::string("Program source:=====\n") + std::string(image) + "\n=====" //
-              );                                                                                            //
+              POLYRT_FATAL(PREFIX, "Program failed to compile with: %s\nDiagnostics:\n%s\n===Program source===:\n%s\n", //
+                           compilerMessage.c_str(), buildLog.c_str(), image.c_str());
             }
-            TRACE();
+            POLYRT_TRACE();
             return program;
           },
           [this](auto &&m, auto &&name, auto) {
-            TRACE();
+            POLYRT_TRACE();
             context.touch();
-            TRACE();
+            POLYRT_TRACE();
             return OUT_CHECKED(clCreateKernel(m, name.c_str(), OUT_ERR));
           },
           [&](auto &&m) {
-            TRACE();
+            POLYRT_TRACE();
             CHECKED(clReleaseProgram(m));
           },
           [&](auto &&f) {
-            TRACE();
+            POLYRT_TRACE();
             CHECKED(clReleaseKernel(f));
           }) {
-  TRACE();
+  POLYRT_TRACE();
 }
 
 int64_t ClDevice::id() {
-  TRACE();
+  POLYRT_TRACE();
   return reinterpret_cast<int64_t>(*device);
 }
 std::string ClDevice::name() {
-  TRACE();
+  POLYRT_TRACE();
   return deviceName;
 }
 bool ClDevice::sharedAddressSpace() {
-  TRACE();
+  POLYRT_TRACE();
   return false;
 }
 bool ClDevice::singleEntryPerModule() {
-  TRACE();
+  POLYRT_TRACE();
   return false;
 }
 std::vector<Property> ClDevice::properties() {
-  TRACE();
+  POLYRT_TRACE();
   return {
       {"CL_DEVICE_PROFILE", queryDeviceInfo(*device, CL_DEVICE_PROFILE)},
       {"CL_DRIVER_VERSION", queryDeviceInfo(*device, CL_DRIVER_VERSION)},
@@ -184,19 +174,19 @@ std::vector<Property> ClDevice::properties() {
   };
 }
 std::vector<std::string> ClDevice::features() {
-  TRACE();
+  POLYRT_TRACE();
   return {};
 }
 void ClDevice::loadModule(const std::string &name, const std::string &image) {
-  TRACE();
+  POLYRT_TRACE();
   store.loadModule(name, image);
 }
 bool ClDevice::moduleLoaded(const std::string &name) {
-  TRACE();
+  POLYRT_TRACE();
   return store.moduleLoaded(name);
 }
 uintptr_t ClDevice::mallocDevice(size_t size, Access access) {
-  TRACE();
+  POLYRT_TRACE();
   context.touch();
   cl_mem_flags flags = {};
   switch (access) {
@@ -209,49 +199,46 @@ uintptr_t ClDevice::mallocDevice(size_t size, Access access) {
 }
 
 void ClDevice::freeDevice(uintptr_t ptr) {
-  TRACE();
+  POLYRT_TRACE();
   context.touch();
 
   if (auto mem = memoryObjects.query(ptr); mem) {
     CHECKED(clReleaseMemObject(*mem));
     memoryObjects.erase(ptr);
-  } else
-    throw std::logic_error(std::string(ERROR_PREFIX) + "Illegal memory object: " + std::to_string(ptr));
+  } else POLYRT_FATAL(PREFIX, "Illegal memory object: %ld", ptr);
 }
 std::optional<void *> ClDevice::mallocShared(size_t size, Access access) {
-  TRACE();
+  POLYRT_TRACE();
   context.touch();
   return std::nullopt;
 }
 void ClDevice::freeShared(void *ptr) {
-  TRACE();
+  POLYRT_TRACE();
   context.touch();
-  throw std::runtime_error("Unsupported");
+  POLYRT_FATAL(PREFIX, "Unsupported: %p", ptr);
 }
 std::unique_ptr<DeviceQueue> ClDevice::createQueue() {
-  TRACE();
-  return std::make_unique<ClDeviceQueue>(
-      store, OUT_CHECKED(clCreateCommandQueue(*context, *device, 0, OUT_ERR)), [this](auto &&ptr) {
-        if (auto mem = memoryObjects.query(ptr); mem) {
-          return *mem;
-        } else
-          throw std::logic_error(std::string(ERROR_PREFIX) + "Illegal memory object: " + std::to_string(ptr));
-      });
+  POLYRT_TRACE();
+  return std::make_unique<ClDeviceQueue>(store, OUT_CHECKED(clCreateCommandQueue(*context, *device, 0, OUT_ERR)), [this](auto &&ptr) {
+    if (auto mem = memoryObjects.query(ptr); mem) {
+      return *mem;
+    } else POLYRT_FATAL(PREFIX, "Illegal memory object: %ld", ptr);
+  });
 }
-ClDevice::~ClDevice() { TRACE(); }
+ClDevice::~ClDevice() { POLYRT_TRACE(); }
 
 // ---
 
 ClDeviceQueue::ClDeviceQueue(decltype(store) store, decltype(queue) queue, decltype(queryMemObject) queryMemObject)
     : store(store), queue(queue), queryMemObject(std::move(queryMemObject)) {
-  TRACE();
+  POLYRT_TRACE();
 }
 ClDeviceQueue::~ClDeviceQueue() {
-  TRACE();
+  POLYRT_TRACE();
   CHECKED(clReleaseCommandQueue(queue));
 }
 void ClDeviceQueue::enqueueCallback(const MaybeCallback &cb, cl_event event) {
-  TRACE();
+  POLYRT_TRACE();
   if (!cb) return;
   static detail::CountedCallbackHandler handler;
   CHECKED(clSetEventCallback(
@@ -267,30 +254,28 @@ void ClDeviceQueue::enqueueCallback(const MaybeCallback &cb, cl_event event) {
   CHECKED(clFlush(queue));
 }
 void ClDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
-  TRACE();
+  POLYRT_TRACE();
   cl_event event = {};
-  if (!src) throw std::logic_error("Source pointer is NULL");
+  if (!src) POLYRT_FATAL(PREFIX, "Source pointer is NULL, destination=%lu", dst);
   CHECKED(clEnqueueWriteBuffer(queue, queryMemObject(dst), CL_FALSE, 0, size, src, 0, nullptr, &event));
   enqueueCallback(cb, event);
 }
 void ClDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) {
-  TRACE();
+  POLYRT_TRACE();
   cl_event event = {};
-  if (!dst) throw std::logic_error("Destination pointer is NULL");
+  if (!dst) POLYRT_FATAL(PREFIX, "Destination pointer is NULL, source=%lu", src);
   CHECKED(clEnqueueReadBuffer(queue, queryMemObject(src), CL_FALSE, 0, size, dst, 0, nullptr, &event));
   enqueueCallback(cb, event);
 }
-void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                       const std::vector<Type> &types, std::vector<std::byte> argData,
-                                       const Policy &policy, const MaybeCallback &cb) {
-  TRACE();
-  if (types.back() != Type::Void)
-    throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported, was " + std::string(to_string(types.back())));
+void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
+                                       std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
+  POLYRT_TRACE();
+  if (types.back() != Type::Void) POLYRT_FATAL(PREFIX, "Non-void return type not supported, was %s", to_string(types.back()).data());
   auto kernel = store.resolveFunction(moduleName, symbol, types);
   auto toSize = [](Type t) -> size_t {
     switch (t) {
       case Type::Ptr: return sizeof(cl_mem);
-      case Type::Void: throw std::logic_error("Illegal argument type: void");
+      case Type::Void: POLYRT_FATAL(PREFIX, "Illegal argument type: %s", to_string(t).data());
       default: return ::byteOfType(t);
     }
   };
@@ -322,7 +307,7 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
     }
   }
 
-  TRACE();
+  POLYRT_TRACE();
   cl_event event = {};
   CHECKED(clEnqueueNDRangeKernel(queue, kernel,         //
                                  3,                     //

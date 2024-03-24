@@ -1,11 +1,11 @@
-#include "concurrency_utils.hpp"
-#include "io.hpp"
 #include "kernels/generated_cpu_args.hpp"
 #include "kernels/generated_gpu_args.hpp"
 #include "kernels/generated_msl_args.hpp"
 #include "kernels/generated_spirv_glsl_args.hpp"
+#include "polyregion/concurrency_utils.hpp"
+#include "polyregion/io.hpp"
+#include "polyregion/utils.hpp"
 #include "test_utils.h"
-#include "utils.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -19,7 +19,7 @@ using namespace polyregion::concurrency_utils;
 
 template <typename I> void testArgs(I images, std::initializer_list<Backend> backends) {
   auto backend = GENERATE_REF(values(backends));
-  auto platform = Platform::of(backend);
+  auto platform = polyregion::test_utils::makePlatform(backend);
   DYNAMIC_SECTION("backend=" << to_string(backend)) {
     for (auto &d : platform->enumerate()) {
       DYNAMIC_SECTION("device=" << d->name()) {
@@ -35,10 +35,9 @@ template <typename I> void testArgs(I images, std::initializer_list<Backend> bac
           } else {
             // otherwise, we expect exactly one image
             if (imageGroups.size() != 1) {
-              FAIL("Found more than one ("
-                   << imageGroups.size() << ") kernel test images for device `" << d->name()
-                   << "`(backend=" << to_string(backend)
-                   << ", features=" << polyregion::mk_string<std::string>(d->features(), [](auto x){return x;}, ",") << ")");
+              FAIL("Found more than one (" << imageGroups.size() << ") kernel test images for device `" << d->name()
+                                           << "`(backend=" << to_string(backend) << ", features="
+                                           << polyregion::mk_string<std::string>(d->features(), [](auto x) {  return x; }, ",") << ")");
             } else {
               d->loadModule("module", imageGroups[0].second);
               kernelName = [](auto args) { return "_arg" + std::to_string(args); };
@@ -80,7 +79,7 @@ template <typename I> void testArgs(I images, std::initializer_list<Backend> bac
         } else {
           WARN("No kernel test image found for device `"
                << d->name() << "`(backend=" << to_string(backend)
-               << ", features=" << polyregion::mk_string<std::string>(d->features(), [](auto x){return x;}, ",") << ")");
+               << ", features=" << polyregion::mk_string<std::string>(d->features(), [](auto x) {  return x; }, ",") << ")");
         }
       }
     }
@@ -121,7 +120,7 @@ TEST_CASE("SPIRV Args") {
 }
 
 TEST_CASE("CPU Args") {
-  testArgs(generated::cpu::args,                           //
+  testArgs(generated::cpu::args,                               //
            {Backend::RelocatableObject, Backend::SharedObject} //
   );
 }

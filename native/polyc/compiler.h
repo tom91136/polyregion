@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "ast.h"
-#include "export.h"
-#include "types.h"
+#include "polyregion/export.h"
+#include "polyregion/types.h"
 
 namespace polyregion::compiler {
 

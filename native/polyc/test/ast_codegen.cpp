@@ -3,7 +3,6 @@
 #include "compiler.h"
 #include "generated/polyast.h"
 #include "generated/polyast_codec.h"
-#include "polyregion_compiler.h"
 
 #include <iostream>
 

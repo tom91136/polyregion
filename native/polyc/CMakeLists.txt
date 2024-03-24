@@ -20,19 +20,22 @@ set(LIB_SOURCES
 
         #        ast.cpp
         compiler.cpp
-        polyregion_compiler.cpp
+#        polyregion_compiler.cpp
 
 #        ${clspv_passes_SOURCE_FILES}
         )
 
 add_library(polyc ${LIB_SOURCES})
+add_library(polyc-driver driver_polyc.cpp)
+
 add_executable(polyc-tests test/ast_codegen.cpp test/ast_offload.cpp test/backend.cpp test/ast.cpp)
 add_executable(polyc-benchmarks benchmark/babelstream.cpp)
-add_executable(polyc-bin ../shared/cxa_thread_atexit.cpp driver.cpp)
+add_executable(polyc-bin ../shared/cxa_thread_atexit.cpp driver_main.cpp)
 
 target_include_directories(polyc-tests PUBLIC . ../include PRIVATE ../runtime)
 target_include_directories(polyc-benchmarks PUBLIC . ../include PRIVATE ../runtime)
 target_include_directories(polyc-bin PUBLIC . ../include ${fire_SOURCE_DIR} PRIVATE)
+target_include_directories(polyc-driver PUBLIC . ../include ${fire_SOURCE_DIR} PRIVATE)
 target_include_directories(polyc PUBLIC
         ${LLVM_INCLUDE_DIRS}
         ${LLD_INCLUDE_DIRS}
@@ -47,7 +50,6 @@ target_include_directories(polyc PUBLIC
 
 if (NOT WIN32)
     target_precompile_headers(polyc-tests PRIVATE
-
             compiler.h
 
             backend/backend.h
@@ -56,8 +58,6 @@ if (NOT WIN32)
             backend/llvmc.h
             backend/memoryfs.h
             backend/suppress_fd.h
-            ../include/utils.hpp
-            #            ${Catch2_SOURCE_DIR}/src/catch2/catch_all.hpp
 
             <optional>
             <ostream>
@@ -132,17 +132,20 @@ target_link_libraries(polyc
         )
 target_link_libraries(polyc-tests PRIVATE polyc polyrt-static Catch2::Catch2WithMain)
 target_link_libraries(polyc-benchmarks PRIVATE polyc polyrt-static)
-target_link_libraries(polyc-bin PRIVATE polyc ${LLVM_LIBS} ${LLD_LIBS} Aspartame::Aspartame)
+target_link_libraries(polyc-driver PRIVATE polyc ${LLVM_LIBS} ${LLD_LIBS} Aspartame::Aspartame)
+target_link_libraries(polyc-bin PRIVATE polyc polyc-driver)
 
 
-target_compile_options(polyc PRIVATE ${COMPILE_OPTIONS})
-target_compile_options(polyc-bin PRIVATE ${COMPILE_OPTIONS})
 target_compile_options(polyc-tests PRIVATE ${COMPILE_OPTIONS})
 target_compile_options(polyc-benchmarks PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(polyc-driver PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(polyc-bin PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(polyc PRIVATE ${COMPILE_OPTIONS})
 
-target_link_options(polyc PRIVATE ${LINK_OPTIONS})
-target_link_options(polyc-bin PRIVATE ${LINK_OPTIONS})
 target_link_options(polyc-tests PRIVATE ${LINK_OPTIONS})
 target_link_options(polyc-benchmarks PRIVATE ${LINK_OPTIONS})
+target_link_options(polyc-driver PRIVATE ${COMPILE_OPTIONS})
+target_link_options(polyc-bin PRIVATE ${LINK_OPTIONS})
+target_link_options(polyc PRIVATE ${LINK_OPTIONS})
 
 set_target_properties(polyc-bin PROPERTIES OUTPUT_NAME polyc)

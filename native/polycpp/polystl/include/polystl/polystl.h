@@ -3,7 +3,7 @@
 #include <cstddef>
 #include <cstring>
 
-#include "concurrency_utils.hpp"
+#include "polyregion/concurrency_utils.hpp"
 #include "polyrt/runtime.h"
 
 using namespace polyregion::runtime;
@@ -34,6 +34,8 @@ extern "C" struct RuntimeKernelBundle {
   }
 };
 
+static constexpr const char *__polyregion_prefix = "[PolySTL]"; // NOLINT(*-reserved-identifier)
+
 POLYREGION_EXPORT extern std::unique_ptr<Platform> __polyregion_selected_platform; // NOLINT(*-reserved-identifier)
 POLYREGION_EXPORT extern std::unique_ptr<Device> __polyregion_selected_device;     // NOLINT(*-reserved-identifier)
 POLYREGION_EXPORT extern std::unique_ptr<DeviceQueue> __polyregion_selected_queue; // NOLINT(*-reserved-identifier)
@@ -51,7 +53,6 @@ POLYREGION_EXPORT extern "C" bool __polyregion_dispatch_managed( // NOLINT(*-res
     const RuntimeKernelObject &object);
 
 [[nodiscard]] uint64_t __polyregion_builtin_gpu_global_idx(uint32_t); // NOLINT(*-reserved-identifier)
-
 
 template <polyregion::runtime::PlatformKind Kind, typename F>
 const RuntimeKernelBundle &__polyregion_offload__([[maybe_unused]] F) { // NOLINT(*-reserved-identifier)
@@ -84,13 +85,13 @@ __insert_point:;
 extern "C" inline __attribute__((used)) void *__polyregion_malloc(size_t size) { // NOLINT(*-reserved-identifier)
   __polyregion_initialise_runtime();
   if (!__polyregion_selected_platform || !__polyregion_selected_device || !__polyregion_selected_queue) {
-    fprintf(stderr, "[POLYSTL] No device/queue in %s\n", __func__);
+    std::fprintf(stderr, "%s No device/queue in %s\n", __polyregion_prefix, __func__);
     return nullptr;
   }
   if (auto ptr = __polyregion_selected_device->mallocShared(size, polyregion::runtime::Access::RW); ptr) {
     return *ptr;
   } else {
-    fprintf(stderr, "[POLYSTL] No USM support in %s\n", __func__);
+    std::fprintf(stderr, "%s No USM support in %s\n", __polyregion_prefix, __func__);
     return nullptr;
   }
 }
@@ -98,7 +99,7 @@ extern "C" inline __attribute__((used)) void *__polyregion_malloc(size_t size) {
 extern "C" inline __attribute__((used)) void __polyregion_free(void *ptr) { // NOLINT(*-reserved-identifier)
   __polyregion_initialise_runtime();
   if (!__polyregion_selected_platform || !__polyregion_selected_device || !__polyregion_selected_queue) {
-    fprintf(stderr, "[POLYSTL] No device/queue in %s\n", __func__);
+    std::fprintf(stderr, "%s No device/queue in %s\n", __polyregion_prefix, __func__);
   }
   __polyregion_selected_device->freeShared(ptr);
 }

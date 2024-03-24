@@ -1,8 +1,7 @@
-#include "polyrt/vulkan_platform.h"
-#include "utils.hpp"
 #include <iostream>
-#include <shared_mutex>
 #include <utility>
+
+#include "polyrt/vulkan_platform.h"
 
 #ifndef _MSC_VER
   #pragma clang diagnostic push
@@ -22,7 +21,7 @@ using namespace polyregion::runtime::vulkan;
 
 #define CHECKED(f) checked((f), __FILE__, __LINE__)
 
-static constexpr const char *ERROR_PREFIX = "[Vulkan error] ";
+static constexpr const char *PREFIX = "Vulkan";
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
@@ -67,23 +66,23 @@ static vk::raii::Instance createInstance(std::vector<const char *> &extensions, 
 
   return {ctx, info};
 }
-
-VulkanPlatform::VulkanPlatform() : context(), instance(createInstance(extensions, layers, context)) { TRACE(); }
+std::variant<std::string, std::unique_ptr<Platform>> VulkanPlatform::create() { return std::unique_ptr<Platform>(new VulkanPlatform()); }
+VulkanPlatform::VulkanPlatform() : context(), instance(createInstance(extensions, layers, context)) { POLYRT_TRACE(); }
 std::string VulkanPlatform::name() {
-  TRACE();
+  POLYRT_TRACE();
   return "Vulkan";
 }
 std::vector<Property> VulkanPlatform::properties() {
-  TRACE();
+  POLYRT_TRACE();
   return {};
 }
 
 PlatformKind VulkanPlatform::kind() {
-  TRACE();
+  POLYRT_TRACE();
   return PlatformKind::Managed;
 }
 ModuleFormat VulkanPlatform::moduleFormat() {
-  TRACE();
+  POLYRT_TRACE();
   return ModuleFormat::SPIRV;
 }
 
@@ -96,7 +95,7 @@ template <typename T, typename U, typename F> constexpr static auto transform_id
 };
 
 std::vector<std::unique_ptr<Device>> VulkanPlatform::enumerate() {
-  TRACE();
+  POLYRT_TRACE();
   std::vector<std::unique_ptr<Device>> devices;
   for (const vk::raii::PhysicalDevice &dev : instance.enumeratePhysicalDevices()) {
     std::vector<vk::QueueFamilyProperties> queueProps = dev.getQueueFamilyProperties();
@@ -197,16 +196,16 @@ VulkanDevice::VulkanDevice(vk::raii::Instance &instance,              //
       transferCmdBuffer(std::make_shared<vk::raii::CommandBuffer>(
           std::move(ctx.allocateCommandBuffers({**transferCmdPool, vk::CommandBufferLevel::ePrimary, 1})[0]))),
       store(
-          ERROR_PREFIX,
+          PREFIX,
           [this](auto &&s) {
-            TRACE();
+            POLYRT_TRACE();
             auto data = std::vector<uint32_t>((s.size() + 3) / 4, 0);
             std::copy(s.begin(), s.end(), reinterpret_cast<char *>(data.data()));
             return std::make_shared<vk::raii::ShaderModule>(
                 ctx.createShaderModule({vk::ShaderModuleCreateFlags(), sizeof(uint32_t) * data.size(), data.data()}));
           },
           [this](auto &&m, auto &&name, auto &&types) {
-            TRACE();
+            POLYRT_TRACE();
             std::vector<vk::DescriptorSetLayoutBinding> bindings;
             uint32_t bindingsId = 0;
             size_t storages = 0;
@@ -215,8 +214,7 @@ VulkanDevice::VulkanDevice(vk::raii::Instance &instance,              //
               if (tpe == Type::Ptr) {
                 bindings.emplace_back(bindingsId++, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute);
                 storages++;
-              } else if (tpe != Type::Void)
-                scalars++;
+              } else if (tpe != Type::Void) scalars++;
             }
             if (scalars != 0) bindings.emplace_back(bindingsId, vk::DescriptorType::eUniformBuffer, 1, vk::ShaderStageFlagBits::eCompute);
 
@@ -226,29 +224,29 @@ VulkanDevice::VulkanDevice(vk::raii::Instance &instance,              //
 
             return Resolved(this->computeQueueId.first, m, bindings, sizes, ctx);
           }) {
-  TRACE();
+  POLYRT_TRACE();
 }
 
 int64_t VulkanDevice::id() {
-  TRACE();
+  POLYRT_TRACE();
   auto uuid = device.getProperties().pipelineCacheUUID;
   std::string data(uuid.begin(), uuid.end());
   return int64_t(std::hash<std::string>{}(data));
 }
 std::string VulkanDevice::name() {
-  TRACE();
+  POLYRT_TRACE();
   return device.getProperties().deviceName;
 }
 bool VulkanDevice::sharedAddressSpace() {
-  TRACE();
+  POLYRT_TRACE();
   return false;
 }
 bool VulkanDevice::singleEntryPerModule() {
-  TRACE();
+  POLYRT_TRACE();
   return true;
 }
 std::vector<Property> VulkanDevice::properties() {
-  TRACE();
+  POLYRT_TRACE();
   const auto props = device.getProperties();
 
   auto apiVersion = props.apiVersion;
@@ -268,15 +266,15 @@ std::vector<Property> VulkanDevice::properties() {
   };
 }
 std::vector<std::string> VulkanDevice::features() {
-  TRACE();
+  POLYRT_TRACE();
   return {};
 }
 void VulkanDevice::loadModule(const std::string &name, const std::string &image) {
-  TRACE();
+  POLYRT_TRACE();
   store.loadModule(name, image);
 }
 bool VulkanDevice::moduleLoaded(const std::string &name) {
-  TRACE();
+  POLYRT_TRACE();
   return store.moduleLoaded(name);
 }
 
@@ -298,43 +296,40 @@ static MemObject allocate(VmaAllocator &allocator, size_t size, bool uniform) {
 }
 
 uintptr_t VulkanDevice::mallocDevice(size_t size, Access) {
-  TRACE();
+  POLYRT_TRACE();
   return memoryObjects.malloc(std::make_shared<MemObject>(allocate(allocator, size, false)));
 }
 void VulkanDevice::freeDevice(uintptr_t ptr) {
-  TRACE();
+  POLYRT_TRACE();
   if (auto obj = memoryObjects.query(ptr); obj) {
     vmaDestroyBuffer(allocator, VkBuffer((*obj)->buffer), (*obj)->allocation);
     memoryObjects.erase(ptr);
-  } else
-    throw std::logic_error(std::string(ERROR_PREFIX) + "Illegal memory object: " + std::to_string(ptr));
+  } else POLYRT_FATAL(PREFIX, "Illegal memory object: %lu", ptr);
 }
 
 std::optional<void *> VulkanDevice::mallocShared(size_t size, Access access) {
-  TRACE();
+  POLYRT_TRACE();
   return std::nullopt;
 }
 void VulkanDevice::freeShared(void *ptr) {
-  TRACE();
-  throw std::runtime_error("Unsupported");
+  POLYRT_TRACE();
+  POLYRT_FATAL(PREFIX, "Unsupported: %p", ptr);
 }
 
 std::unique_ptr<DeviceQueue> VulkanDevice::createQueue() {
-  TRACE();
-  return std::make_unique<VulkanDeviceQueue>(
-      ctx, allocator, //
-      ctx.getQueue(computeQueueId.first, activeComputeQueues++ % computeQueueId.second),
-      ctx.getQueue(transferQueueId.first, activeTransferQueues++ % transferQueueId.second), store,
-      [this](auto &&ptr) {
-        if (auto mem = memoryObjects.query(ptr); mem) {
-          return *mem;
-        } else
-          throw std::logic_error(std::string(ERROR_PREFIX) + "Illegal memory object: " + std::to_string(ptr));
-      } //
+  POLYRT_TRACE();
+  return std::make_unique<VulkanDeviceQueue>(ctx, allocator, //
+                                             ctx.getQueue(computeQueueId.first, activeComputeQueues++ % computeQueueId.second),
+                                             ctx.getQueue(transferQueueId.first, activeTransferQueues++ % transferQueueId.second), store,
+                                             [this](auto &&ptr) {
+                                               if (auto mem = memoryObjects.query(ptr); mem) {
+                                                 return *mem;
+                                               } else POLYRT_FATAL(PREFIX, "Illegal memory object: %lu", ptr);
+                                             } //
   );
 }
 VulkanDevice::~VulkanDevice() {
-  TRACE();
+  POLYRT_TRACE();
   vmaDestroyAllocator(allocator);
 }
 
@@ -358,11 +353,11 @@ VulkanDeviceQueue::VulkanDeviceQueue(decltype(ctx) ctx, decltype(allocator) allo
         }
         //        std::cout << "Thread stop" << std::endl;
       }) {
-  TRACE();
+  POLYRT_TRACE();
   callbackThread.detach();
 }
 VulkanDeviceQueue::~VulkanDeviceQueue() {
-  TRACE();
+  POLYRT_TRACE();
   callbackQueue.terminate();
 }
 void VulkanDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
@@ -372,14 +367,14 @@ void VulkanDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
 }
 
 void VulkanDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
-  TRACE();
+  POLYRT_TRACE();
   auto obj = queryMemObject(dst);
   std::memcpy(obj->mappedData, src, size);
   vmaInvalidateAllocation(allocator, obj->allocation, 0, size);
   if (cb) (*cb)();
 }
 void VulkanDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) {
-  TRACE();
+  POLYRT_TRACE();
   auto obj = queryMemObject(src);
   std::memcpy(dst, obj->mappedData, size);
   vmaInvalidateAllocation(allocator, obj->allocation, 0, size);
@@ -387,8 +382,8 @@ void VulkanDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_
 }
 void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
                                            std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
-  TRACE();
-  if (types.back() != Type::Void) throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported");
+  POLYRT_TRACE();
+  if (types.back() != Type::Void) POLYRT_FATAL(PREFIX, "Non-void return type not supported: %s", to_string(types.back()).data());
 
   // pointers are uniforms sharing the same descriptor set with monotonically increasing binding
   // anything that's scalar goes into a struct and added as the last binding of the same descriptor set
@@ -429,11 +424,7 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
     }
     infos.emplace_back(vk::DescriptorBufferInfo{argObj->buffer, 0, argObj->size}, vk::DescriptorType::eUniformBuffer);
   }
-  if (scratchCount > 1) {
-    throw std::logic_error(std::string(ERROR_PREFIX) + "Only a single scratch buffer is supported, " + std::to_string(scratchCount) +
-                           " requested.");
-  }
-
+  if (scratchCount > 1) POLYRT_FATAL(PREFIX, "Only a single scratch buffer is supported, %zu requested", scratchCount);
   auto &fn = store.resolveFunction(moduleName, symbol, types);
   const auto [local, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});
   const auto global = Dim3{policy.global.x, policy.global.y, policy.global.z};

@@ -125,7 +125,7 @@ private[polyregion] object CppNlohmannJsonCodecGen {
           |
           |#include "json.hpp"
           |#include "polyast.h"
-          |#include "export.h"
+          |#include "polyregion/export.h"
           |
           |using json = nlohmann::json;
           |

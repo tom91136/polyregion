@@ -1,12 +1,12 @@
-#include <fstream>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
+#include <fstream>
 
 #include "aspartame/string.hpp"
 #include "fmt/args.h"
-#include "io.hpp"
+#include "polyregion/io.hpp"
+#include "polyregion/utils.hpp"
 #include "test_all.h"
-#include "utils.hpp"
 #include "llvm/Support/Program.h"
 
 using namespace aspartame;
@@ -17,8 +17,7 @@ std::string extractTestName(const std::string &path) {
   size_t extPos = path.find_last_of('.');
   if (prefixPos != std::string::npos && extPos != std::string::npos) {
     return path.substr(prefixPos + prefix.size(), extPos - (prefixPos + prefix.size()));
-  } else
-    return "";
+  } else return "";
 }
 
 struct TestCase {
@@ -45,8 +44,7 @@ struct TestCase {
         if (auto t = f(line); t) {
           xs.emplace_back(*t);
           pos = file.tellg();
-        } else
-          break;
+        } else break;
       }
       file.seekg(pos); // backtrack on failure
       return xs;
@@ -63,8 +61,7 @@ struct TestCase {
           auto delim = expect->find(':', 0);
           auto lineNum = *expect ^ starts_with("@") ? std::optional{std::stoi(expect->substr(1, delim))} : std::nullopt;
           return TestCase::Run::Expect{lineNum, polyregion::trim(expect->substr(delim + 1))};
-        } else
-          return {};
+        } else return {};
       });
     };
 
@@ -86,8 +83,7 @@ struct TestCase {
             return std::pair{v.substr(0, delim), vs};
           });
           return xs;
-        } else
-          return {};
+        } else return {};
       });
     };
 
@@ -107,26 +103,24 @@ struct TestCase {
   }
 };
 
-void testAll(bool passthrough){
+void testAll(bool passthrough) {
 
   auto run = [passthrough](TestCase &case_, const std::string &binaryName, const std::function<std::string(std::string &)> &mkCommand) {
     for (size_t i = 0; i < case_.runs.size(); ++i) {
       auto &run = case_.runs[i];
       auto command = mkCommand(run.command);
-      DYNAMIC_SECTION("RUN " <<  run.command) {
+      DYNAMIC_SECTION("RUN " << run.command) {
         auto fragments = polyregion::split(command, ' ');
         auto [envs, args] = polyregion::take_while(fragments, [](auto &x) { return x.find('=') != std::string::npos; });
-//        args.emplace_back("-fsanitize=address");
+        //        args.emplace_back("-fsanitize=address");
 
-        if(passthrough){
+        if (passthrough) {
           envs.emplace_back("POLYCPP_NO_REWRITE=1");
           envs.emplace_back("POLYSTL_NO_OFFLOAD=1");
         }
 
         envs.emplace_back("POLYSTL_LIB=" + PolySTLLib);
         envs.emplace_back("POLYSTL_INCLUDE=" + PolySTLInclude);
-        envs.emplace_back("POLYC_BIN=" + PolyCBin);
-
 
         envs.emplace_back("LD_LIBRARY_PATH=" + PolySTLLDLibraryPath);
         if (auto path = std::getenv("PATH"); path) envs.emplace_back(std::string("PATH=") + path);
@@ -150,7 +144,7 @@ void testAll(bool passthrough){
         consumeError(stdoutFile->discard());
         consumeError(stderrFile->discard());
 
-        WARN("exe:  " << BinaryDir << "/"  << args[0]);
+        WARN("exe:  " << BinaryDir << "/" << args[0]);
         WARN("args: " << polyregion::mk_string<llvm::StringRef>(args_, &llvm::StringRef::str, " "));
         WARN("envs: " << polyregion::mk_string<llvm::StringRef>(envs_, &llvm::StringRef::str, " "));
         WARN("stderr:\n" << stderr_ << "[EOF]");
@@ -171,8 +165,7 @@ void testAll(bool passthrough){
         }
         if (i == case_.runs.size() - 1) {
           if (llvm::sys::fs::remove(binaryName)) INFO("Removed binary: " << binaryName);
-          else
-            WARN("Cannot remove binary: " << binaryName);
+          else WARN("Cannot remove binary: " << binaryName);
         }
       }
     }
@@ -190,16 +183,16 @@ void testAll(bool passthrough){
           for (const auto &variables : case_.matrices) {
             auto name = polyregion::mk_string<std::pair<std::string, std::string>>(
                 variables, [](auto &p) { return p.first + "=" + p.second; }, " ");
-            DYNAMIC_SECTION("MATRIX " <<name  ) {
+            DYNAMIC_SECTION("MATRIX " << name) {
 
-              auto binaryName = polyregion::hex(polyregion::hash(polyregion::mk_string<TestCase::Run>(
-                  case_.runs, [](auto &x) { return x.command; }, "")));
+              auto binaryName = polyregion::hex(
+                  polyregion::hash(polyregion::mk_string<TestCase::Run>(case_.runs, [](auto &x) { return x.command; }, "")));
               fmt::dynamic_format_arg_store<fmt::format_context> store;
               store.push_back(fmt::arg("input", test));
               store.push_back(fmt::arg("output", binaryName));
               for (const auto &[k, v] : variables)
                 store.push_back(fmt::arg(k.c_str(), v));
-              CAPTURE(test);
+              CAPTURE(test + ":1"); // XXX glue a fake line number so that the test runner can turn it into a URL
               run(case_, binaryName, [&](std::string &command) { return fmt::vformat(command, store); });
             }
           }
@@ -209,11 +202,6 @@ void testAll(bool passthrough){
   }
 }
 
+TEST_CASE("offload") { testAll(false); }
 
-TEST_CASE("offload") {
-  testAll(false);
-}
-
-TEST_CASE("passthrough") {
-  testAll(true);
-}
+TEST_CASE("passthrough") { testAll(true); }

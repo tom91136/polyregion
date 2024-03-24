@@ -14,13 +14,13 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
-#include "export.h"
-#include "json.hpp"
-#include "types.h"
+#include "polyregion/export.h"
+#include "polyregion/types.h"
 
-#ifdef TRACE
+#ifdef POLYRT_TRACE
   #error Trace already defined
 #else
 
@@ -28,10 +28,22 @@
     #define __PRETTY_FUNCTION__ __FUNCSIG__
   #endif
 
-  #define TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this, __PRETTY_FUNCTION__)
-  #define TRACE()
+  #define POLYRT_TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this, __PRETTY_FUNCTION__)
+//  #define TRACE()
 
 #endif
+
+#ifdef POLYRT_FATAL
+  #error Trace already defined
+#else
+
+  #define POLYRT_FATAL(prefix, fmt, ...)                                                                                                          \
+    do {                                                                                                                                   \
+      std::fprintf(stderr, "[%s] %s:%d " fmt " (%s)\n", prefix, __FILE__, __LINE__, __VA_ARGS__, __PRETTY_FUNCTION__);                      \
+      std::abort();                                                                                                                        \
+    } while (0)
+#endif
+
 
 namespace polyregion::runtime {
 
@@ -137,8 +149,7 @@ public:
     while (true) {
       if (queue.empty()) {
         if (shutdown) return {{}, false};
-      } else
-        break;
+      } else break;
       condition.wait(lock);
     }
     T item(std::move(queue.front()));
@@ -208,7 +219,7 @@ template <typename M, typename F> class ModuleStore {
   //  using LoadedModule = std::pair<M, std::unordered_map<std::string, F>>;
   std::unordered_map<std::string, LoadedModule> modules = {};
 
-  std::string errorPrefix;
+  const char *errorPrefix;
   std::function<M(const std::string &)> load;
   std::function<F(M, const std::string &, const std::vector<Type> &)> resolve;
   std::function<void(M)> dropModule;
@@ -220,8 +231,7 @@ public:
               const decltype(resolve) &resolve,            //
               const decltype(dropModule) &dropModule = {}, //
               const decltype(dropFunction) &dropFunction = {})
-      : errorPrefix(std::move(errorPrefix)), //
-        load(load), resolve(resolve), dropModule(dropModule), dropFunction(dropFunction) {
+      : errorPrefix(errorPrefix), load(load), resolve(resolve), dropModule(dropModule), dropFunction(dropFunction) {
 
     static_assert(std::is_move_constructible<F>::value == std::is_move_constructible<M>::value,
                   "move constructible mismatch between Module (M) and Func (F)");
@@ -240,7 +250,7 @@ public:
 
   void loadModule(const std::string &name, const std::string &image) {
     if (auto it = modules.find(name); it != modules.end()) {
-      throw std::logic_error(std::string(errorPrefix) + "Module named `" + name + "` was already loaded");
+      POLYRT_FATAL(errorPrefix, "Module named `%s` was already loaded", name.c_str());
     } else {
       modules.emplace_hint(it, name, LoadedModule{load(image), {}});
     }
@@ -250,7 +260,7 @@ public:
 
   F &resolveFunction(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types) {
     auto moduleIt = modules.find(moduleName);
-    if (moduleIt == modules.end()) throw std::logic_error(errorPrefix + "No module named `" + moduleName + "` was loaded");
+    if (moduleIt == modules.end()) POLYRT_FATAL(errorPrefix, "No module named `%s` was loaded", moduleName.c_str());
     auto &[m, fnTable] = moduleIt->second;
     if (auto it = fnTable.find(symbol); it != fnTable.end()) return it->second;
     else {
@@ -268,9 +278,9 @@ struct POLYREGION_EXPORT Dim3 {
   POLYREGION_EXPORT size_t x, y, z;
   [[nodiscard]] std::array<size_t, 3> sizes() const { return {x, y, z}; }
   constexpr Dim3(size_t x, size_t y, size_t z) : x(x), y(y), z(z) {
-    if (x < 1) throw std::logic_error("x < 1");
-    if (y < 1) throw std::logic_error("y < 1");
-    if (z < 1) throw std::logic_error("z < 1");
+    if (x < 1) POLYRT_FATAL("Runtime", "x (%ld) < 1", x);
+    if (y < 1) POLYRT_FATAL("Runtime", "y (%ld) < 1", y);
+    if (z < 1) POLYRT_FATAL("Runtime", "z (%ld) < 1", z);
   }
   constexpr Dim3() : Dim3(1, 1, 1) {}
   friend std::ostream &operator<<(std::ostream &os, const Dim3 &dim3);
@@ -316,8 +326,6 @@ constexpr std::string_view POLYREGION_EXPORT to_string(const Backend &b) {
     case Backend::RelocatableObject: return "RelocatableObject";
   }
 }
-
-
 
 struct POLYREGION_EXPORT DeviceQueue {
 
@@ -396,7 +404,6 @@ public:
   [[nodiscard]] POLYREGION_EXPORT virtual PlatformKind kind() = 0;
   [[nodiscard]] POLYREGION_EXPORT virtual ModuleFormat moduleFormat() = 0;
   [[nodiscard]] POLYREGION_EXPORT virtual std::vector<std::unique_ptr<Device>> enumerate() = 0;
-  static std::unique_ptr<Platform> of(const Backend &b);
+  [[nodiscard]] POLYREGION_EXPORT static std::variant<std::string, std::unique_ptr<Platform>> of(const Backend &b);
 };
 } // namespace polyregion::runtime
-

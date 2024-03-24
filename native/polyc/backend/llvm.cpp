@@ -997,10 +997,9 @@ void LLVMBackend::AstTransformer::addFn(llvm::Module &mod, const Function &f, bo
                                     cleanName,                                                         //
                                     mod);
 
-  if(options.target == Target::AMDGCN && f.kind != FunctionKind::Exported()){
-
-    fn->setVisibility(llvm::GlobalValue::VisibilityTypes::HiddenVisibility);
-  }
+//  if(options.target == Target::AMDGCN && f.kind != FunctionKind::Exported()){
+//    fn->setVisibility(llvm::GlobalValue::VisibilityTypes::HiddenVisibility);
+//  }
 
   if(options.target != Target::AMDGCN){
 

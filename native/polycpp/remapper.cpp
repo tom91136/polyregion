@@ -10,8 +10,8 @@
 
 #include "ast.h"
 #include "clang_utils.h"
+#include "polyregion/utils.hpp"
 #include "remapper.h"
-#include "utils.hpp"
 
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/ASTContext.h"
@@ -339,7 +339,8 @@ std::pair<std::string, Function> Remapper::handleCall(const clang::FunctionDecl 
       body.emplace_back(Stmt::Return(Expr::Alias(Term::Unit0Const())));
     }
 
-    auto fn = r.functions.emplace(name, Function(Sym({name}), {}, receiver, args, {}, {}, rtnType, body, FunctionKind::Internal())).first->second;
+    auto fn =
+        r.functions.emplace(name, Function(Sym({name}), {}, receiver, args, {}, {}, rtnType, body, FunctionKind::Internal())).first->second;
     return {name, fn};
   } else {
     return {name, it->second};
@@ -951,15 +952,15 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
 
 void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
   if (!root) return;
-//  llvm::outs() << "[Stmt] >>> \n";
-//  //  // r.push(Stmt::Comment(pretty_string(root, context)));
-//  //  std::string s;
-//  //  llvm::raw_string_ostream os(s);
-//  //    root->dump(os, context);
-//  //  // r.push(Stmt::Comment(s));
-//  root->dumpPretty(context);
-//  root->dumpColor();
-//  llvm::outs() << "<<< \n";
+  //  llvm::outs() << "[Stmt] >>> \n";
+  //  //  // r.push(Stmt::Comment(pretty_string(root, context)));
+  //  //  std::string s;
+  //  //  llvm::raw_string_ostream os(s);
+  //  //    root->dump(os, context);
+  //  //  // r.push(Stmt::Comment(s));
+  //  root->dumpPretty(context);
+  //  root->dumpColor();
+  //  llvm::outs() << "<<< \n";
 
   visitDyn<bool>(
       root, //

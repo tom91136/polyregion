@@ -150,6 +150,7 @@ execute_process(
         ${BUILD_OPTIONS}
         -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
         -DCMAKE_INSTALL_PREFIX=${LLVM_DIST_DIR}
+        -DCMAKE_SKIP_RPATH=OFF # keep the rpath prefix otherwise our distribution may  find the system libLLVM.so
         -DCMAKE_VERBOSE_MAKEFILE=ON
         -GNinja
 
@@ -170,7 +171,7 @@ execute_process(
         lldCommon
         lldELF
         LLVMExecutionEngine
-        install-toolchain-distribution
+        install-distribution
         -- -k 0 # keep going even with error
         WORKING_DIRECTORY ${LLVM_BUILD_DIR}
         RESULT_VARIABLE SUCCESS)

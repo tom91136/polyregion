@@ -1,10 +1,10 @@
 #include "ast.h"
 #include "compiler.h"
-#include "concurrency_utils.hpp"
 #include "generated/polyast.h"
+#include "polyregion/concurrency_utils.hpp"
+#include "polyregion/stream.hpp"
+#include "polyregion/utils.hpp"
 #include "polyrt/runtime.h"
-#include "stream.hpp"
-#include "utils.hpp"
 #include <thread>
 
 using namespace polyregion;
@@ -84,9 +84,9 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
       "mul", {"scalar"_(type)()}, empty,
       [&](auto _, auto i) -> Stmts {
         return {
-            let("ci") = "c"_(Ptr(type))[i],                           // ci = b[i]
+            let("ci") = "c"_(Ptr(type))[i],                             // ci = b[i]
             let("r") = invoke(Mul("ci"_(type), "scalar"_(type), type)), // r = ci * scalar
-            "b"_(Ptr(type))[i] = "r"_(type),                          // b[i] = result
+            "b"_(Ptr(type))[i] = "r"_(type),                            // b[i] = result
         };
       },
       empty);
@@ -95,10 +95,10 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
       "add", {}, empty,
       [&](auto _, auto i) -> Stmts {
         return {
-            let("ai") = "a"_(Ptr(type))[i],                       // ai = a[i]
-            let("bi") = "b"_(Ptr(type))[i],                       // bi = b[i]
+            let("ai") = "a"_(Ptr(type))[i],                         // ai = a[i]
+            let("bi") = "b"_(Ptr(type))[i],                         // bi = b[i]
             let("r") = invoke(Add("ai"_(type), "bi"_(type), type)), // r = ai + bi
-            "c"_(Ptr(type))[i] = "r"_(type),                      // c[i] = r
+            "c"_(Ptr(type))[i] = "r"_(type),                        // c[i] = r
         };
       },
       empty);
@@ -107,11 +107,11 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
       "triad", {"scalar"_(type)()}, empty,
       [&](auto _, auto i) -> Stmts {
         return {
-            let("bi") = "b"_(Ptr(type))[i],                            // bi = b[i]
-            let("ci") = "c"_(Ptr(type))[i],                            // ci = b[i]
+            let("bi") = "b"_(Ptr(type))[i],                              // bi = b[i]
+            let("ci") = "c"_(Ptr(type))[i],                              // ci = b[i]
             let("r0") = invoke(Mul("ci"_(type), "scalar"_(type), type)), // r0 = ci * scalar
             let("r1") = invoke(Add("bi"_(type), "r0"_(type), type)),     // r1 = bi + r0
-            "a"_(Ptr(type))[i] = "r1"_(type),                          // a[i] = r1
+            "a"_(Ptr(type))[i] = "r1"_(type),                            // a[i] = r1
         };
       },
       empty);
@@ -127,8 +127,8 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
               },
               [&](auto id, auto i) -> Stmts {
                 return {
-                    let("ai") = "a"_(Ptr(type))[i],                                         // ai = a[i]
-                    let("bi") = "b"_(Ptr(type))[i],                                         // bi = b[i]
+                    let("ai") = "a"_(Ptr(type))[i],                                           // ai = a[i]
+                    let("bi") = "b"_(Ptr(type))[i],                                           // bi = b[i]
                     let("sumid") = "acc"_(type),                                              // sumid = acc
                     let("r0") = invoke(Mul("ai"_(type), "bi"_(type), type)),                  // r0 = ai * bi
                     Mut("acc"_(type), invoke(Add("r0"_(type), "sumid"_(type), type)), false), // r1 = r0 + sumid
@@ -148,8 +148,8 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
                     let("global_size") = invoke(GpuGlobalSize(0_(UInt))),
                     "wg_sum"_(Ptr(type, {}, Local))[local_i] = 0_(type),
                     While({let("cont") = invoke(LogicLt("i"_(UInt), "array_size"_(UInt)))}, "cont"_(Bool),
-                          {let("ai") = "a"_(Ptr(type))[i],                                              // ai = a[i]
-                           let("bi") = "b"_(Ptr(type))[i],                                              // bi = b[i]
+                          {let("ai") = "a"_(Ptr(type))[i],                                                // ai = a[i]
+                           let("bi") = "b"_(Ptr(type))[i],                                                // bi = b[i]
                            let("sumid") = "wg_sum"_(Ptr(type, {}, Local))[local_i],                       // sumid = sum[local_i]
                            let("r0") = invoke(Mul("ai"_(type), "bi"_(type), type)),                       // r0 = ai * bi
                            let("r1") = invoke(Add("r0"_(type), "sumid"_(type), type)),                    // r1 = r0 + sumid
@@ -163,7 +163,7 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
                               Cond({invoke(LogicLt("local_i"_(UInt), "offset"_(UInt)))}, //
                                    {
                                        let("new_offset") =
-                                           invoke(Add("local_i"_(UInt), "offset"_(UInt), UInt)),   // new_offset = local_i + offset
+                                           invoke(Add("local_i"_(UInt), "offset"_(UInt), UInt)),     // new_offset = local_i + offset
                                        let("wg_sum_old") = "wg_sum"_(Ptr(type, {}, Local))[local_i], // wg_sum_old = wg_sum[local_i]
                                        let("wg_sum_at_offset") = "wg_sum"_(Ptr(type, {}, Local))["new_offset"_(UInt)], // wg_sum_at_offset =
                                                                                                                        // wg_sum[new_offset]
@@ -208,15 +208,15 @@ int main() {
 
   std::vector<std::tuple<runtime::Backend, compiletime::Target, std::string>> configs = {
       // CL runs everywhere
-            {runtime::Backend::OpenCL, compiletime::Target::Source_C_OpenCL1_1, ""},
+      {runtime::Backend::OpenCL, compiletime::Target::Source_C_OpenCL1_1, ""},
 //      {runtime::Backend::Vulkan, compiletime::Target::Object_LLVM_SPIRV64, ""},
 #ifdef __APPLE__
       {runtime::Backend::RELOCATABLE_OBJ, compiler::Target::Object_LLVM_AArch64, "apple-m1"},
       {runtime::Backend::Metal, compiler::Target::Source_C_Metal1_0, ""},
 #else
       {runtime::Backend::CUDA, compiletime::Target::Object_LLVM_NVPTX64, "sm_60"},
-//      {runtime::Backend::HIP, compiletime::Target::Object_LLVM_AMDGCN, "gfx1036"},
-//      {runtime::Backend::HSA, compiletime::Target::Object_LLVM_AMDGCN, "gfx1036"},
+      //      {runtime::Backend::HIP, compiletime::Target::Object_LLVM_AMDGCN, "gfx1036"},
+      //      {runtime::Backend::HSA, compiletime::Target::Object_LLVM_AMDGCN, "gfx1036"},
       {runtime::Backend::RelocatableObject, compiletime::Target::Object_LLVM_x86_64, "x86-64-v3"},
 #endif
   };
@@ -228,14 +228,20 @@ int main() {
     auto p = mkStreamProgram("_float", Float, !cpu);
     //    std::cout << repr(p) << std::endl;
 
-    auto platform = runtime::Platform::of(backend);
+    std::unique_ptr<polyregion::runtime::Platform> platform;
+
+    if (auto errorOrPlatform = polyregion::runtime::Platform::of(backend); std::holds_alternative<std::string>(errorOrPlatform)) {
+      throw std::runtime_error("Backend " + std::string(to_string(backend)) +
+                               " failed to initialise: " + std::get<std::string>(errorOrPlatform));
+    } else platform = std::move(std::get<std::unique_ptr<polyregion::runtime::Platform>>(errorOrPlatform));
+
     std::cout << "backend=" << to_string(backend) << " arch=" << arch << std::endl;
     {
 
       polyregion::compiler::initialise();
       auto c = polyregion::compiler::compile(p, {target, arch}, compiletime::OptLevel::Ofast);
-//          std::cerr << c << std::endl;
-            std::cerr << repr(c) << std::endl;
+      //          std::cerr << c << std::endl;
+      std::cerr << repr(c) << std::endl;
 
       if (!c.binary) {
         throw std::logic_error("No binary produced");

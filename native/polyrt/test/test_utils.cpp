@@ -1,9 +1,16 @@
 #include "test_utils.h"
-#include "llvm_utils.hpp"
+#include "polyregion/llvm_utils.hpp"
 
-std::vector<std::pair<std::string, std::string>>
-polyregion::test_utils::findTestImage(const ImageGroups &images, const polyregion::runtime::Backend &backend,
-                                      const std::vector<std::string> &features) {
+std::unique_ptr<polyregion::runtime::Platform> polyregion::test_utils::makePlatform(polyregion::runtime::Backend backend) {
+  if (auto errorOrPlatform = polyregion::runtime::Platform::of(backend); std::holds_alternative<std::string>(errorOrPlatform)) {
+    throw std::runtime_error("Backend " + std::string(to_string(backend)) +
+                             " failed to initialise: " + std::get<std::string>(errorOrPlatform));
+  } else return std::move(std::get<std::unique_ptr<polyregion::runtime::Platform>>(errorOrPlatform));
+}
+
+std::vector<std::pair<std::string, std::string>> polyregion::test_utils::findTestImage(const ImageGroups &images,
+                                                                                       const polyregion::runtime::Backend &backend,
+                                                                                       const std::vector<std::string> &features) {
 
   auto sortedFeatures = features;
   std::sort(sortedFeatures.begin(), sortedFeatures.end());
@@ -37,8 +44,7 @@ polyregion::test_utils::findTestImage(const ImageGroups &images, const polyregio
         polyregion::llvm_shared::collectCPUFeatures(arch, llvm::Triple::ArchType::x86_64, required);
 
         std::vector<std::string> missing;
-        std::set_difference(required.begin(), required.end(), sortedFeatures.begin(), sortedFeatures.end(),
-                            std::back_inserter(missing));
+        std::set_difference(required.begin(), required.end(), sortedFeatures.begin(), sortedFeatures.end(), std::back_inserter(missing));
         //        std::cout << "[" << arch << "] missing: " << polyregion::mk_string<std::string>(missing,
         //        std::identity(), ",")
         //                  << std::endl;

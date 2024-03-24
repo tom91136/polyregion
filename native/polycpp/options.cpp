@@ -24,6 +24,7 @@ std::
 
   const std::string fStdParFlag = "-fstdpar";
   const std::string fStdParQuietFlag = "-fstdpar-quiet";
+  const std::string fStdParArchNoCompressFlag = "-fstdpar-no-compress";
   const std::string fStdParInterposeMallocFlag = "-fstdpar-interpose-malloc";
   const std::string fStdParInterposeAllocaFlag = "-fstdpar-interpose-alloca";
   const std::string fStdParArchFlag = "-fstdpar-arch=";
@@ -42,6 +43,11 @@ std::
         if (arg == fStdParQuietFlag) {
           fStdParDependents = true;
           options.quiet = true;
+          return false;
+        }
+        if (arg == fStdParArchNoCompressFlag) {
+          fStdParDependents = true;
+          options.noCompress = true;
           return false;
         }
         if (arg == fStdParInterposeMallocFlag) {

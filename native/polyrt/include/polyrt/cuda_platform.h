@@ -6,8 +6,10 @@
 namespace polyregion::runtime::cuda {
 
 class POLYREGION_EXPORT CudaPlatform : public Platform {
-public:
   POLYREGION_EXPORT explicit CudaPlatform();
+
+public:
+  POLYREGION_EXPORT static std::variant<std::string, std::unique_ptr<Platform>> create();
   POLYREGION_EXPORT ~CudaPlatform() override = default;
   POLYREGION_EXPORT std::string name() override;
   POLYREGION_EXPORT std::vector<Property> properties() override;

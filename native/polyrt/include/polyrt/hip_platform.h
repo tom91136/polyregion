@@ -6,8 +6,10 @@
 namespace polyregion::runtime::hip {
 
 class POLYREGION_EXPORT HipPlatform : public Platform {
-public:
   POLYREGION_EXPORT explicit HipPlatform();
+
+public:
+  POLYREGION_EXPORT static std::variant<std::string, std::unique_ptr<Platform>> create();
   POLYREGION_EXPORT ~HipPlatform() override = default;
   POLYREGION_EXPORT std::string name() override;
   POLYREGION_EXPORT std::vector<Property> properties() override;

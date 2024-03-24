@@ -15,14 +15,16 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Program.h"
 
-#include "fmt/format.h"
-#include "types.h"
+#include "polyregion/types.h"
 
 using namespace polyregion;
 using namespace polyregion::polyast;
 using namespace aspartame;
 
-static std::variant<std::string, CompileResult> compileProgram(Program &p, const compiletime::Target &target, const std::string &arch) {
+static std::variant<std::string, CompileResult> compileProgram(const polystl::DriverContext &driver, //
+                                                               const Program &p,                     //
+                                                               const compiletime::Target &target,    //
+                                                               const std::string &arch) {
   auto data = nlohmann::json::to_msgpack(hashed_to_json(program_to_json(p)));
 
   llvm::SmallString<64> inputPath;
@@ -40,12 +42,15 @@ static std::variant<std::string, CompileResult> compileProgram(Program &p, const
   file.write(reinterpret_cast<const char *>(data.data()), data.size());
   file.flush();
 
-  std::string binPath = "polyc";
-  if (auto envBin = std::getenv("POLYC_BIN"); envBin) binPath = envBin;
+  std::vector<llvm::StringRef> args{//
+                                    "",         "--polyc",         inputPath.str(), "--out", outputPath.str(),
+                                    "--target", to_string(target), "--arch",        arch};
 
-  std::vector<llvm::StringRef> args{"", inputPath.str(), "--out", outputPath.str(), "--target", to_string(target), "--arch", arch};
+  if (driver.cc1Verbose) {
+    (llvm::errs() << (args | prepend(driver.executable) | mk_string(" ", [](auto &s) { return s.data(); })) << "\n").flush();
+  }
 
-  if (int code = llvm::sys::ExecuteAndWait(binPath, args, {{}}); code != 0)
+  if (int code = llvm::sys::ExecuteAndWait(driver.executable, args, {{}}); code != 0)
     return "Non-zero exit code for task: " + (args ^ mk_string(" ", [](auto &s) { return s.str(); }));
 
   auto BufferOrErr = llvm::MemoryBuffer::getFile(outputPath);
@@ -54,21 +59,21 @@ static std::variant<std::string, CompileResult> compileProgram(Program &p, const
   else return compileresult_from_json(nlohmann::json::from_msgpack((*BufferOrErr)->getBufferStart(), (*BufferOrErr)->getBufferEnd()));
 }
 
-polyregion::polystl::KernelBundle polyregion::polystl::generate(clang::ASTContext &C,                //
-                                                                clang::DiagnosticsEngine &diag,      //
-                                                                const std::string &moduleId,         //
-                                                                const clang::CXXMethodDecl &functor, //
-                                                                const clang::SourceLocation &loc,    //
-                                                                runtime::PlatformKind kind,          //
-                                                                const StdParOptions &opts) {
+polystl::KernelBundle polystl::generate(const DriverContext &ctx,
+                                        clang::ASTContext &C,                //
+                                        clang::DiagnosticsEngine &diag,      //
+                                        const std::string &moduleId,         //
+                                        const clang::CXXMethodDecl &functor, //
+                                        const clang::SourceLocation &loc,    //
+                                        runtime::PlatformKind kind) {
 
-  polyregion::polystl::Remapper remapper(C);
+  polystl::Remapper remapper(C);
 
   auto parent = functor.getParent();
   auto returnTpe = functor.getReturnType();
   auto body = functor.getBody();
 
-  auto r = polyregion::polystl::Remapper::RemapContext{};
+  auto r = polystl::Remapper::RemapContext{};
   auto parentName = remapper.handleRecord(parent, r);
   StructDef &parentDef = r.structs.find(parentName)->second;
 
@@ -85,21 +90,21 @@ polyregion::polystl::KernelBundle polyregion::polystl::generate(clang::ASTContex
               | append(recv)                                                                                                 //
               | to_vector();
 
-  auto f0 = polyregion::polyast::Function(polyregion::polyast::Sym({"kernel"}), {}, {}, args, {}, {}, rtnTpe, stmts, FunctionKind::Exported());
+  auto f0 = polyast::Function(polyast::Sym({"kernel"}), {}, {}, args, {}, {}, rtnTpe, stmts, FunctionKind::Exported());
 
   auto p = Program(f0, r.functions ^ values(), r.structs ^ values());
 
-  if (opts.quiet) {
+  if (ctx.opts.quiet) {
     diag.Report(loc,
                 diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Remark, "[PolySTL] Remapped program [%0, sizeof capture=%1]\n%2"))
         << moduleId << C.getTypeSize(parent->getTypeForDecl()) << repr(p);
   }
 
   auto objects =
-      opts.targets                                                                                //
+      ctx.opts.targets                                                                            //
       | filter([&](auto &target, auto &) { return kind == runtime::targetPlatformKind(target); }) //
       | collect([&](auto &target, auto &features) {
-          return compileProgram(p, target, features) ^
+          return compileProgram(ctx, p, target, features) ^
                  fold_total([&](const CompileResult &r) -> std::optional<CompileResult> { return r; },
                             [&](const std::string &err) -> std::optional<CompileResult> {
                               diag.Report(

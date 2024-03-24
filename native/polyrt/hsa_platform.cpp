@@ -1,6 +1,3 @@
-#include "polyrt/hsa_platform.h"
-#include "json.hpp"
-#include "utils.hpp"
 #include <atomic>
 #include <cstring>
 
@@ -9,50 +6,60 @@
 #include "llvm/Object/Error.h"
 #include "llvm/Object/ObjectFile.h"
 
+#include "json.hpp"
+#include "polyrt/hsa_platform.h"
+
 using namespace polyregion::runtime;
 using namespace polyregion::runtime::hsa;
 
 #define CHECKED(m, f) checked((f), m, __FILE__, __LINE__)
 
-static constexpr const char *ERROR_PREFIX = "[HSA error] ";
+static constexpr const char *PREFIX = "HSA";
 
 static void checked(hsa_status_t result, const char *msg, const char *file, int line) {
   if (result != HSA_STATUS_SUCCESS) {
-    const char *string = nullptr;
-    hsa_status_string(result, &string);
-    throw std::logic_error(
-        std::string(ERROR_PREFIX) + file + ":" + std::to_string(line) + ": " +
-        (string ? std::string(string) : "(hsa_status_string returned NULL, code=" + std::to_string(result) + ")"));
+    const char *status = nullptr;
+    hsa_status_string(result, &status);
+    if (status) POLYRT_FATAL(PREFIX, "%s:%d %s [%s]", file, line, msg, status);
+    else POLYRT_FATAL(PREFIX, "%s:%d %s [hsa_status_string returned NULL, code=%d]", file, line, msg, result);
   }
 }
-
+std::variant<std::string, std::unique_ptr<Platform>> HsaPlatform::create() {
+  switch (hsaew_open("libhsa-runtime64.so.1")) {
+    // both cases are fine, keep going
+    case HSAEW_SUCCESS: break;
+    case HSAEW_ALREADY_OPENED: break;
+  }
+  if (auto result = hsa_init(); result != HSA_STATUS_SUCCESS) {
+    const char *status = nullptr;
+    hsa_status_string(result, &status);
+    return "HSA initialisation failed:" + (status ? std::string(status) : "(code=" + std::to_string(result) + ")");
+  }
+  return std::unique_ptr<Platform>(new HsaPlatform());
+}
 HsaPlatform::HsaPlatform() {
-  TRACE();
-  hsaew_open("libhsa-runtime64.so.1");
-  CHECKED("HSA_initialisation", hsa_init());
-
+  POLYRT_TRACE();
   hsa_amd_register_system_event_handler(
       [](const hsa_amd_event_t *event, void *data) -> hsa_status_t {
         if (event->event_type == HSA_AMD_GPU_MEMORY_FAULT_EVENT) {
-          std::string message = std::string(ERROR_PREFIX) + "Memory fault at 0x" +
-                                hex((uintptr_t)event->memory_fault.virtual_address) + ". Reason:";
+          fprintf(stderr, "[%s] Memory fault at 0x%lx. Reason:", PREFIX, static_cast<uintptr_t>(event->memory_fault.virtual_address));
           if (event->memory_fault.fault_reason_mask & HSA_AMD_MEMORY_FAULT_PAGE_NOT_PRESENT) //
-            message += "Page not present or supervisor privilege. ";                         //
-          if (event->memory_fault.fault_reason_mask & HSA_AMD_MEMORY_FAULT_READ_ONLY)        //
-            message += "Write access to a read-only page. ";                                 //
-          if (event->memory_fault.fault_reason_mask & HSA_AMD_MEMORY_FAULT_NX)               //
-            message += "Execute access to a page marked NX. ";                               //
-          if (event->memory_fault.fault_reason_mask & HSA_AMD_MEMORY_FAULT_HOST_ONLY)        //
-            message += "Host access only. ";                                                 //
-          if (event->memory_fault.fault_reason_mask & HSA_AMD_MEMORY_FAULT_DRAMECC)          //
-            message += "ECC failure (if supported by HW). ";                                 //
-          if (event->memory_fault.fault_reason_mask & HSA_AMD_MEMORY_FAULT_IMPRECISE)        //
-            message += "Can't determine the exact fault address. ";                          //
-          if (event->memory_fault.fault_reason_mask & HSA_AMD_MEMORY_FAULT_SRAMECC)          //
-            message += "SRAM ECC failure (ie registers, no fault address). ";                //
-          if (event->memory_fault.fault_reason_mask & HSA_AMD_MEMORY_FAULT_HANG)             //
-            message += "GPU reset following unspecified hang. ";                             //
-          fprintf(stderr, "%s\n", message.c_str());
+            fprintf(stderr, "Page not present or supervisor privilege. ");
+          if (event->memory_fault.fault_reason_mask & HSA_AMD_MEMORY_FAULT_READ_ONLY) //
+            fprintf(stderr, "Write access to a read-only page. ");
+          if (event->memory_fault.fault_reason_mask & HSA_AMD_MEMORY_FAULT_NX) //
+            fprintf(stderr, "Execute access to a page marked NX. ");
+          if (event->memory_fault.fault_reason_mask & HSA_AMD_MEMORY_FAULT_HOST_ONLY) //
+            fprintf(stderr, "Host access only. ");
+          if (event->memory_fault.fault_reason_mask & HSA_AMD_MEMORY_FAULT_DRAMECC) //
+            fprintf(stderr, "ECC failure (if supported by HW). ");
+          if (event->memory_fault.fault_reason_mask & HSA_AMD_MEMORY_FAULT_IMPRECISE) //
+            fprintf(stderr, "Can't determine the exact fault address. ");
+          if (event->memory_fault.fault_reason_mask & HSA_AMD_MEMORY_FAULT_SRAMECC) //
+            fprintf(stderr, "SRAM ECC failure (ie registers, no fault address). ");
+          if (event->memory_fault.fault_reason_mask & HSA_AMD_MEMORY_FAULT_HANG) //
+            fprintf(stderr, "GPU reset following unspecified hang. ");
+          fprintf(stderr, "\n");
           return HSA_STATUS_ERROR;
         }
         return HSA_STATUS_SUCCESS;
@@ -60,41 +67,38 @@ HsaPlatform::HsaPlatform() {
       nullptr);
 }
 std::string HsaPlatform::name() {
-  TRACE();
+  POLYRT_TRACE();
   return "HSA";
 }
 std::vector<Property> HsaPlatform::properties() {
-  TRACE();
+  POLYRT_TRACE();
   return {};
 }
 PlatformKind HsaPlatform::kind() {
-  TRACE();
+  POLYRT_TRACE();
   return PlatformKind::Managed;
 }
 ModuleFormat HsaPlatform::moduleFormat() {
-  TRACE();
+  POLYRT_TRACE();
   return ModuleFormat::HSACO;
 }
 std::vector<std::unique_ptr<Device>> HsaPlatform::enumerate() {
-  TRACE();
+  POLYRT_TRACE();
 
   std::vector<std::tuple<bool, uint32_t, hsa_agent_t>> agents;
   CHECKED("Enumerate agents", //
           hsa_iterate_agents(
               [](hsa_agent_t agent, void *data) {
                 hsa_device_type_t device_type;
-                if (auto result = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type);
-                    HSA_STATUS_SUCCESS == result) {
+                if (auto result = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type); HSA_STATUS_SUCCESS == result) {
                   hsa_agent_feature_t features;
                   CHECKED("Query agent feature", hsa_agent_get_info(agent, HSA_AGENT_INFO_FEATURE, &features));
                   uint32_t queueSize;
-                  CHECKED("Query agent queue size",
-                          hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queueSize));
+                  CHECKED("Query agent queue size", hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queueSize));
                   static_cast<decltype(agents) *>(data)->emplace_back( //
                       features & HSA_AGENT_FEATURE_KERNEL_DISPATCH, queueSize, agent);
                   return HSA_STATUS_SUCCESS;
-                } else
-                  return result;
+                } else return result;
               },
               &agents));
 
@@ -102,8 +106,7 @@ std::vector<std::unique_ptr<Device>> HsaPlatform::enumerate() {
     auto &[dispatch, queueSize, _] = x;
     return queueSize == 0;
   });
-  if (host == agents.end())
-    throw std::logic_error(std::string(ERROR_PREFIX) + "No host agent available, AMDKFD not initialised?");
+  if (host == agents.end()) POLYRT_FATAL(PREFIX, "No host agent available, AMDKFD not initialised (total agents=%zu)", agents.size());
   hsa_agent_t hostAgent = std::get<2>(*host);
 
   std::vector<std::unique_ptr<Device>> devices;
@@ -120,7 +123,7 @@ template <typename ELFT> static auto extractGeneric(const llvm::object::ELFObjec
   using ELFT_Note = typename ELFT::Note;
   const auto &file = obj.getELFFile();
   if (auto sections = file.sections(); auto e = sections.takeError())
-    throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot read ELF sections: " + toString(std::move(e)));
+    POLYRT_FATAL(PREFIX, "Cannot read ELF sections: %s", toString(std::move(e)).c_str());
   else {
     for (const auto s : *sections) {
       if (s.sh_type != llvm::ELF::SHT_NOTE) continue;
@@ -142,91 +145,76 @@ template <typename ELFT> static auto extractGeneric(const llvm::object::ELFObjec
           }
           return offsetTable;
         } catch (const std::exception &e) {
-          throw std::logic_error("Illegal AMDGPU METADATA in .note section (" + std::string(e.what()) + ")");
+          POLYRT_FATAL(PREFIX, "Illegal AMDGPU METADATA in .note section (%s)", e.what());
         }
       }
     }
-    throw std::logic_error("ELF image does not contains AMDGPU METADATA in the .note section");
+    POLYRT_FATAL(PREFIX, "ELF image does not contains AMDGPU METADATA in the .note section (sections=%zu)", sections->size());
   }
 };
 
 static SymbolArgOffsetTable extractSymbolArgOffsetTable(const std::string &image) {
   using namespace llvm::object;
 
-  if (auto object = ObjectFile::createObjectFile(llvm::MemoryBufferRef(llvm::StringRef(image), ""));
-      auto e = object.takeError()) {
-    throw std::logic_error("Cannot load module: " + toString(std::move(e)));
+  if (auto object = ObjectFile::createObjectFile(llvm::MemoryBufferRef(llvm::StringRef(image), "")); auto e = object.takeError()) {
+    POLYRT_FATAL(PREFIX, "Cannot load module: %s", toString(std::move(e)).c_str());
   } else {
     if (const ELFObjectFileBase *elfObj = llvm::dyn_cast<ELFObjectFileBase>(object->get())) {
       if (auto obj = llvm::dyn_cast<ELF32LEObjectFile>(elfObj)) return extractGeneric(*obj);
       if (auto obj = llvm::dyn_cast<ELF32BEObjectFile>(elfObj)) return extractGeneric(*obj);
       if (auto obj = llvm::dyn_cast<ELF64LEObjectFile>(elfObj)) return extractGeneric(*obj);
       if (auto obj = llvm::dyn_cast<ELF64BEObjectFile>(elfObj)) return extractGeneric(*obj);
-      throw std::logic_error("Unrecognised ELF variant");
-    } else
-      throw std::logic_error("Object image TypeID " + std::to_string(object->get()->getType()) +
-                             " is not in the ELF range");
+      POLYRT_FATAL(PREFIX, "Unrecognised ELF variant: %u", elfObj->getType());
+    } else POLYRT_FATAL(PREFIX, "Object image TypeID %d is not in the ELF range", object->get()->getType());
   }
 }
 
 HsaDevice::HsaDevice(uint32_t queueSize, hsa_agent_t hostAgent, hsa_agent_t agent)
     : queueSize(queueSize), hostAgent(hostAgent), agent(agent),
       store(
-          ERROR_PREFIX,
+          PREFIX,
           [this](auto &&s) {
-            TRACE();
+            POLYRT_TRACE();
             hsa_code_object_reader_t reader;
-            CHECKED("Load code object from memory",
-                    hsa_code_object_reader_create_from_memory(s.data(), s.size(), &reader));
+            CHECKED("Load code object from memory", hsa_code_object_reader_create_from_memory(s.data(), s.size(), &reader));
             hsa_executable_t executable;
             CHECKED("Create executable",
-                    hsa_executable_create_alt(HSA_PROFILE_BASE, HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR, nullptr,
-                                              &executable));
+                    hsa_executable_create_alt(HSA_PROFILE_BASE, HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR, nullptr, &executable));
             CHECKED("Load code object to executable with agent",
                     hsa_executable_load_agent_code_object(executable, this->agent, reader, nullptr, nullptr));
             CHECKED("Free executable", hsa_executable_freeze(executable, nullptr));
             uint32_t validationResult = 0;
             CHECKED("Validate executable", hsa_executable_validate(executable, &validationResult));
-            if (validationResult != 0)
-              throw std::logic_error(std::string(ERROR_PREFIX) +
-                                     "Cannot validate executable: " + std::to_string(validationResult));
+            if (validationResult != 0) POLYRT_FATAL(PREFIX, "Cannot validate executable, code=%d", validationResult);
             CHECKED("Release code object reader", hsa_code_object_reader_destroy(reader));
 
             try {
               return std::make_pair(executable, extractSymbolArgOffsetTable(s));
             } catch (const std::exception &e) {
-              throw std::logic_error(std::string(ERROR_PREFIX) +
-                                     "Cannot to extract AMDGPU METADATA from image: " + e.what());
+              POLYRT_FATAL(PREFIX, "Cannot to extract AMDGPU METADATA from image: %s", e.what());
             }
           },
           [this](auto &&m, auto &&name, auto) {
-            TRACE();
+            POLYRT_TRACE();
             auto [exec, offsets] = m;
             hsa_executable_symbol_t symbol;
             // HSA suffixes the entry with .kd, e.g. `theKernel` is `theKernel.kd`
-            CHECKED("Resolve symbol",
-                    hsa_executable_get_symbol_by_name(exec, (name + ".kd").c_str(), &this->agent, &symbol));
+            CHECKED("Resolve symbol", hsa_executable_get_symbol_by_name(exec, (name + ".kd").c_str(), &this->agent, &symbol));
             if (auto it = offsets.find(name); it != offsets.end()) return std::make_pair(symbol, it->second);
-            else
-              throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot argument offset table for symbol `" + name +
-                                     "`");
+            else POLYRT_FATAL(PREFIX, "Cannot argument offset table for symbol `%s`", name.c_str());
           },
           [&](auto &&m) {
-            TRACE();
+            POLYRT_TRACE();
             auto [exec, offsets] = m;
             CHECKED("Release executable", hsa_executable_destroy(exec));
           },
-          [&](auto &&) { TRACE(); }) {
-  TRACE();
+          [&](auto &&) { POLYRT_TRACE(); }) {
+  POLYRT_TRACE();
   // As per HSA_AGENT_INFO_NAME, name must be <= 63 chars
 
   auto marketingName = detail::allocateAndTruncate(
-      [&](auto &&data, auto) {
-        hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PRODUCT_NAME), data);
-      },
-      64);
-  auto gfxArch =
-      detail::allocateAndTruncate([&](auto &&data, auto) { hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, data); }, 64);
+      [&](auto &&data, auto) { hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PRODUCT_NAME), data); }, 64);
+  auto gfxArch = detail::allocateAndTruncate([&](auto &&data, auto) { hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, data); }, 64);
   deviceName = marketingName + "(" + gfxArch + ")";
 
   CHECKED("Enumerate HSA agent kernarg region", //
@@ -234,8 +222,7 @@ HsaDevice::HsaDevice(uint32_t queueSize, hsa_agent_t hostAgent, hsa_agent_t agen
               agent,
               [](hsa_region_t region, void *data) {
                 hsa_region_segment_t segment;
-                CHECKED("Get region info (HSA_REGION_INFO_SEGMENT)",
-                        hsa_region_get_info(region, HSA_REGION_INFO_SEGMENT, &segment));
+                CHECKED("Get region info (HSA_REGION_INFO_SEGMENT)", hsa_region_get_info(region, HSA_REGION_INFO_SEGMENT, &segment));
                 if (segment != HSA_REGION_SEGMENT_GLOBAL) return HSA_STATUS_SUCCESS;
                 hsa_region_global_flag_t flags;
                 CHECKED("Get region info (HSA_REGION_INFO_GLOBAL_FLAGS)",
@@ -247,7 +234,7 @@ HsaDevice::HsaDevice(uint32_t queueSize, hsa_agent_t hostAgent, hsa_agent_t agen
               },
               this));
 
-  TRACE();
+  POLYRT_TRACE();
 
   CHECKED("Enumerate HSA AMD memory pools", //
           hsa_amd_agent_iterate_memory_pools(
@@ -265,77 +252,76 @@ HsaDevice::HsaDevice(uint32_t queueSize, hsa_agent_t hostAgent, hsa_agent_t agen
                 return HSA_STATUS_SUCCESS;
               },
               this));
-  TRACE();
+  POLYRT_TRACE();
 
   if (kernelArgRegion.handle == 0) {
-    throw std::logic_error(std::string(ERROR_PREFIX) + "No kernel arg region available form agent");
+    POLYRT_FATAL(PREFIX, "No kernel arg region available form agent: handle=%lu", kernelArgRegion.handle);
   }
-  TRACE();
+  POLYRT_TRACE();
 
   if (deviceGlobalRegion.handle == 0) {
-    throw std::logic_error(std::string(ERROR_PREFIX) + "No global device region available form agent");
+    POLYRT_FATAL(PREFIX, "No global device region available form agent: handle=%lu", deviceGlobalRegion.handle);
   }
-  TRACE();
+  POLYRT_TRACE();
 }
-HsaDevice::~HsaDevice() { TRACE(); }
+HsaDevice::~HsaDevice() { POLYRT_TRACE(); }
 int64_t HsaDevice::id() {
-  TRACE();
+  POLYRT_TRACE();
   return 0;
 }
 std::string HsaDevice::name() {
-  TRACE();
+  POLYRT_TRACE();
   return deviceName;
 }
 bool HsaDevice::sharedAddressSpace() {
-  TRACE();
+  POLYRT_TRACE();
   return false;
 }
 bool HsaDevice::singleEntryPerModule() {
-  TRACE();
+  POLYRT_TRACE();
   return false;
 }
 std::vector<Property> HsaDevice::properties() {
-  TRACE();
+  POLYRT_TRACE();
   return {};
 }
 std::vector<std::string> HsaDevice::features() {
-  TRACE();
-  auto gfxArch =
-      detail::allocateAndTruncate([&](auto &&data, auto) { hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, data); }, 64);
+  POLYRT_TRACE();
+  auto gfxArch = detail::allocateAndTruncate([&](auto &&data, auto) { hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, data); }, 64);
   return {gfxArch};
 }
 void HsaDevice::loadModule(const std::string &name, const std::string &image) {
-  TRACE();
+  POLYRT_TRACE();
   store.loadModule(name, image);
 }
 bool HsaDevice::moduleLoaded(const std::string &name) {
-  TRACE();
+  POLYRT_TRACE();
   return store.moduleLoaded(name);
 }
 uintptr_t HsaDevice::mallocDevice(size_t size, Access) {
-  TRACE();
-  if (size == 0) throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot malloc size of 0");
+  POLYRT_TRACE();
+  if (size == 0) POLYRT_FATAL(PREFIX, "Cannot malloc size of %ld", size);
   void *data;
   CHECKED("Allocate AMD memory pool", hsa_amd_memory_pool_allocate(deviceGlobalRegion, size, 0, &data));
   return reinterpret_cast<uintptr_t>(data);
 }
 void HsaDevice::freeDevice(uintptr_t ptr) {
-  TRACE();
+  POLYRT_TRACE();
   CHECKED("Release AMD memory pool", hsa_amd_memory_pool_free(reinterpret_cast<void *>(ptr)));
 }
 std::optional<void *> HsaDevice::mallocShared(size_t size, Access access) {
-  TRACE();
-  if (size == 0) throw std::logic_error(std::string(ERROR_PREFIX) + "Cannot malloc size of 0");
+  POLYRT_TRACE();
+  if (size == 0) POLYRT_FATAL(PREFIX, "Cannot malloc size of %ld", size);
   void *data;
   CHECKED("Allocate AMD memory pool", hsa_amd_memory_pool_allocate(deviceGlobalRegion, size, 0, &data));
   return data;
 }
 void HsaDevice::freeShared(void *ptr) {
-  TRACE();
+  POLYRT_TRACE();
   CHECKED("Release AMD memory pool", hsa_amd_memory_pool_free(ptr));
 }
 std::unique_ptr<DeviceQueue> HsaDevice::createQueue() {
-  TRACE();
+  POLYRT_TRACE();
   hsa_queue_t *queue;
   CHECKED("Allocate agent queue", hsa_queue_create(agent, queueSize, HSA_QUEUE_TYPE_SINGLE, //
                                                    nullptr, nullptr,                        //
@@ -347,11 +333,9 @@ std::unique_ptr<DeviceQueue> HsaDevice::createQueue() {
 
 // ---
 
-HsaDeviceQueue::HsaDeviceQueue(decltype(device) device, decltype(queue) queue) : device(device), queue(queue) {
-  TRACE();
-}
+HsaDeviceQueue::HsaDeviceQueue(decltype(device) device, decltype(queue) queue) : device(device), queue(queue) { POLYRT_TRACE(); }
 HsaDeviceQueue::~HsaDeviceQueue() {
-  TRACE();
+  POLYRT_TRACE();
   CHECKED("Release agent queue", hsa_queue_destroy(queue));
 }
 
@@ -361,9 +345,7 @@ hsa_signal_t HsaDeviceQueue::createSignal(const char *message) {
   return signal;
 }
 
-void HsaDeviceQueue::destroySignal(const char *message, hsa_signal_t signal) {
-  CHECKED(message, hsa_signal_destroy(signal));
-}
+void HsaDeviceQueue::destroySignal(const char *message, hsa_signal_t signal) { CHECKED(message, hsa_signal_destroy(signal)); }
 
 void HsaDeviceQueue::enqueueCallback(hsa_signal_t signal, const Callback &cb) {
   static detail::CountedCallbackHandler handler;
@@ -380,7 +362,7 @@ void HsaDeviceQueue::enqueueCallback(hsa_signal_t signal, const Callback &cb) {
 }
 
 void HsaDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
-  TRACE();
+  POLYRT_TRACE();
   void *lockedHostSrcPtr;
   CHECKED("Lock host memory", hsa_amd_memory_lock(const_cast<void *>(src), size, nullptr, 0, &lockedHostSrcPtr));
 
@@ -396,7 +378,7 @@ void HsaDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, si
 }
 
 void HsaDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) {
-  TRACE();
+  POLYRT_TRACE();
   void *lockedHostDstPtr;
   CHECKED("Lock host memory", hsa_amd_memory_lock(dst, size, nullptr, 0, &lockedHostDstPtr));
 
@@ -410,19 +392,16 @@ void HsaDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t s
     if (cb) (*cb)();
   });
 }
-void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                        const std::vector<Type> &types, std::vector<std::byte> argData,
-                                        const Policy &policy, const MaybeCallback &cb) {
-  TRACE();
-  if (types.back() != Type::Void)
-    throw std::logic_error(std::string(ERROR_PREFIX) + "Non-void return type not supported");
+void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
+                                        std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
+  POLYRT_TRACE();
+  if (types.back() != Type::Void) POLYRT_FATAL(PREFIX, "Non-void return type not supported: %s", to_string(types.back()).data());
 
   auto [fn, argOffsets] = device.store.resolveFunction(moduleName, symbol, types);
 
   if (argOffsets.size() < types.size() - 1) {
-    throw std::logic_error(std::string(ERROR_PREFIX) + "Symbol `" + symbol + "` expects at least " +
-                           std::to_string(argOffsets.size()) + " arguments (excluding launch metadata) , " +
-                           std::to_string(types.size()) + " given.");
+    POLYRT_FATAL(PREFIX, "Symbol `%s` expects at least %ld arguments (excluding launch metadata), %ld given", symbol.c_str(),
+                 argOffsets.size(), types.size());
   }
 
   uint64_t kernelObject;
@@ -430,8 +409,7 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
   uint32_t groupSegmentSize;
   uint32_t privateSegmentSize;
   CHECKED( //
-      "Query executable kernel object",
-      hsa_executable_symbol_get_info(fn, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kernelObject));
+      "Query executable kernel object", hsa_executable_symbol_get_info(fn, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kernelObject));
   CHECKED( //
       "Query executable kernel arg size",
       hsa_executable_symbol_get_info(fn, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &kernargSegmentSize));
@@ -445,8 +423,7 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
   void *kernargAddress{};
 
   if (kernargSegmentSize != 0) {
-    CHECKED("Allocate kernel arg memory",
-            hsa_memory_allocate(device.kernelArgRegion, kernargSegmentSize, &kernargAddress));
+    CHECKED("Allocate kernel arg memory", hsa_memory_allocate(device.kernelArgRegion, kernargSegmentSize, &kernargAddress));
   }
 
   auto args = detail::argDataAsPointers(types, argData);
@@ -454,18 +431,15 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
   static_assert(std::is_same_v<std::decay_t<decltype(args)>::value_type, void *>);
 
   if (!kernargAddress && args.size() - 1 != 0) {
-    throw std::logic_error(std::string(ERROR_PREFIX) + "Kernarg address is NULL but we got " +
-                           std::to_string(args.size() - 1) + " args to write");
+    POLYRT_FATAL(PREFIX, "Kernarg address is NULL but we got %zu args to write", args.size() - 1);
   }
   auto *data = reinterpret_cast<uint8_t *>(kernargAddress);
   // Last arg is the return, void assertion should have been done before this.
   for (size_t i = 0; i < args.size() - 1; ++i) {
     if (argOffsets[i] >= kernargSegmentSize) {
-      throw std::logic_error(std::string(ERROR_PREFIX) + "Argument size out of bound, kernel expects " +
-                             std::to_string(kernargSegmentSize) + " bytes, argument " + std::to_string(i) +
-                             " leads to overflow");
+      POLYRT_FATAL(PREFIX, "Argument size out of bound, kernel expects %u bytes, argument %ld leads to overflow", kernargSegmentSize, i);
     }
-    if (types[i] == Type::Void) throw std::logic_error(std::string(ERROR_PREFIX) + "Illegal argument type: void");
+    if (types[i] == Type::Void) POLYRT_FATAL(PREFIX, "Illegal argument type: %s", to_string(types[i]).data());
     // XXX scratch (local) in HSA is a pointer of 4 bytes with the dynamic_shared_pointer kind
     size_t size = types[i] == Type::Scratch ? 4 : byteOfType(types[i]);
     if (types[i] == Type::Scratch) {
@@ -481,21 +455,20 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
   hsa_signal_t signal = createSignal("Allocate kernel signal");
   uint64_t index = hsa_queue_load_write_index_relaxed(queue);
   const uint32_t queueMask = queue->size - 1;
-  hsa_kernel_dispatch_packet_t *dispatch =
-      &((static_cast<hsa_kernel_dispatch_packet_t *>(queue->base_address))[index & queueMask]);
+  hsa_kernel_dispatch_packet_t *dispatch = &((static_cast<hsa_kernel_dispatch_packet_t *>(queue->base_address))[index & queueMask]);
 
   dispatch->setup |= 1 << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS;
-  dispatch->workgroup_size_x = int_cast<uint16_t>(block.x);
-  dispatch->workgroup_size_y = int_cast<uint16_t>(block.y);
-  dispatch->workgroup_size_z = int_cast<uint16_t>(block.z);
-  dispatch->grid_size_x = int_cast<uint32_t>(grid.x);
-  dispatch->grid_size_y = int_cast<uint32_t>(grid.y);
-  dispatch->grid_size_z = int_cast<uint32_t>(grid.z);
+  dispatch->workgroup_size_x = static_cast<uint16_t>(block.x);
+  dispatch->workgroup_size_y = static_cast<uint16_t>(block.y);
+  dispatch->workgroup_size_z = static_cast<uint16_t>(block.z);
+  dispatch->grid_size_x = static_cast<uint32_t>(grid.x);
+  dispatch->grid_size_y = static_cast<uint32_t>(grid.y);
+  dispatch->grid_size_z = static_cast<uint32_t>(grid.z);
   dispatch->completion_signal = signal;
   dispatch->kernel_object = kernelObject;
   dispatch->kernarg_address = kernargAddress;
   dispatch->private_segment_size = privateSegmentSize;
-  dispatch->group_segment_size = std::max(groupSegmentSize, int_cast<uint32_t>(sharedMem));
+  dispatch->group_segment_size = std::max(groupSegmentSize, static_cast<uint32_t>(sharedMem));
 
   uint16_t header = 0;
   header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
@@ -515,7 +488,7 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
 
   hsa_queue_store_write_index_relaxed(queue, index + 1);
   hsa_signal_store_relaxed(queue->doorbell_signal, static_cast<hsa_signal_value_t>(index));
-  TRACE();
+  POLYRT_TRACE();
   enqueueCallback(signal, [cb, kernargAddress, signal, token = latch.acquire()]() {
     CHECKED("Release kernel arg memory", hsa_memory_free(kernargAddress));
     destroySignal("Release kernel signal", signal);

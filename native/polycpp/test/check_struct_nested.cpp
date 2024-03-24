@@ -1,6 +1,6 @@
 // #CASE: capture
 // #MATRIX: capture=&,=,value
-// #RUN: polycpp -fstdpar -fstdpar-arch=host@native -DCHECK_CAPTURE={capture} -o {output} {input}
+// #RUN: polycpp -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_CAPTURE={capture} -o {output} {input}
 // #RUN: POLYSTL_PLATFORM=host {output}
 //   #EXPECT: 42 43 44 45 46
 
