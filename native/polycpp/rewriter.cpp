@@ -136,14 +136,14 @@ void insertKernelImage(clang::DiagnosticsEngine &diag, clang::ASTContext &C, Cal
   };
 
   auto mkConstArrayTpe = [&](clang::QualType componentTpe, size_t size) {
-    return C.getConstantArrayType(componentTpe, llvm::APInt(C.getTypeSize(C.IntTy), size), nullptr, clang::ArrayType::Normal, 0);
+    return C.getConstantArrayType(componentTpe, llvm::APInt(C.getTypeSize(C.IntTy), size), nullptr, clang::ArraySizeModifier::Normal, 0);
   };
 
   auto mkStringLiteral = [&](const std::string &str) {
-    return clang::StringLiteral::Create(C, str, clang::StringLiteral::StringKind::Ordinary, false,
+    return clang::StringLiteral::Create(C, str, clang::StringLiteralKind::Ordinary, false,
                                         C.getConstantArrayType(C.getConstType(C.CharTy),
                                                                llvm::APInt(C.getTypeSize(C.IntTy), str.length() + 1), nullptr,
-                                                               clang::ArrayType::Normal, 0),
+                                                               clang::ArraySizeModifier::Normal, 0),
                                         {});
   };
 

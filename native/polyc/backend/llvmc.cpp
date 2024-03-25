@@ -205,7 +205,7 @@ static void optimise(llvm::TargetMachine &TM, llvm::Module &M, llvm::Optimizatio
   // options.
   llvm::PassBuilder PB(&TM);
 
-  TM.registerPassBuilderCallbacks(PB);
+  TM.registerPassBuilderCallbacks(PB, true);
 
   // Register all the basic analyses with the managers.
   PB.registerModuleAnalyses(MAM);
@@ -246,13 +246,13 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
   options.NoTrappingFPMath = useUnsafeMath;
   options.NoSignedZerosFPMath = useUnsafeMath;
 
-  llvm::CodeGenOpt::Level genOpt;
+  llvm::CodeGenOptLevel genOpt;
   switch (opt) {
-    case compiletime::OptLevel::O0: genOpt = llvm::CodeGenOpt::None; break;
-    case compiletime::OptLevel::O1: genOpt = llvm::CodeGenOpt::Less; break;
-    case compiletime::OptLevel::O2: genOpt = llvm::CodeGenOpt::Default; break;
+    case compiletime::OptLevel::O0: genOpt = llvm::CodeGenOptLevel::None; break;
+    case compiletime::OptLevel::O1: genOpt = llvm::CodeGenOptLevel::Less; break;
+    case compiletime::OptLevel::O2: genOpt = llvm::CodeGenOptLevel::Default; break;
     case compiletime::OptLevel::O3: // fallthrough
-    case compiletime::OptLevel::Ofast: genOpt = llvm::CodeGenOpt::Aggressive; break;
+    case compiletime::OptLevel::Ofast: genOpt = llvm::CodeGenOptLevel::Aggressive; break;
   }
 
   // We have two groups of targets:
@@ -275,7 +275,7 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
     case compiletime::OptLevel::Ofast: optLevel = llvm::OptimizationLevel::O3; break;
   }
 
-  auto mkLLVMTargetMachine = [](const TargetInfo &info, const llvm::TargetOptions &options, const llvm::CodeGenOpt::Level &level) {
+  auto mkLLVMTargetMachine = [](const TargetInfo &info, const llvm::TargetOptions &options, const llvm::CodeGenOptLevel &level) {
     // XXX We *MUST* use the large code model as we will be ingesting the object later with RuntimeDyld
     // The code model here has nothing to do with the actual object code size, it's about controlling the relocation.
     // See https://stackoverflow.com/questions/40493448/what-does-the-codemodel-in-clang-llvm-refer-to
@@ -345,11 +345,11 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
       // We need to link the object file for AMDGPU at this stage to get a working ELF binary.
       // This can only be done with LLD so just do it here after compiling.
       auto [_, object, objectStart, objectElapsed] = //
-          mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::CGFT_ObjectFile, *M, events, true);
+          mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::ObjectFile, *M, events, true);
       events.emplace_back(objectStart, objectElapsed, "llvm_to_obj", objectSize(object));
       if (emitDisassembly) {
         auto [m, assembly, assemblyStart, assemblyElapsed] = //
-            mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::CGFT_AssemblyFile, *M, events, false);
+            mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::AssemblyFile, *M, events, false);
         events.emplace_back(assemblyStart, assemblyElapsed, "llvm_to_asm", std::string(assembly.begin(), assembly.end()));
       }
       llvm::StringRef objectString(object.begin(), object.size());
@@ -372,7 +372,7 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
       // assemble the PTX to a CUBIN (SASS). Given that PTX ingestion is supported, we just generate that for now.
       // XXX ignore emitDisassembly here as PTX *is* the binary
       auto [_, ptx, ptxStart, ptxElapsed] = //
-          mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::CGFT_AssemblyFile, *M, events, true);
+          mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::AssemblyFile, *M, events, true);
       events.emplace_back(ptxStart, ptxElapsed, "llvm_to_ptx", std::string(ptx.begin(), ptx.end()));
       return {std::vector<int8_t>(ptx.begin(), ptx.end()), {info.cpu.uArch}, events, {}, ""};
     }
@@ -468,13 +468,13 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
           auto llvmTM = mkLLVMTargetMachine(info, options, genOpt);
           bindLLVMTargetMachineDataLayout(*llvmTM, *M);
           auto [_, object, objectStart, objectElapsed] =
-              mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::CGFT_ObjectFile, *M, events, true);
+              mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::ObjectFile, *M, events, true);
           events.emplace_back(objectStart, objectElapsed, "llvm_to_obj", objectSize(object));
 
           std::vector<int8_t> binary(object.begin(), object.end());
           if (emitDisassembly) {
             auto [_, assembly, assemblyStart, assemblyElapsed] =
-                mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::CGFT_AssemblyFile, *M, events, false);
+                mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::AssemblyFile, *M, events, false);
             events.emplace_back(assemblyStart, assemblyElapsed, "llvm_to_asm", std::string(assembly.begin(), assembly.end()));
           }
           return {binary, features, events, {}, ""};

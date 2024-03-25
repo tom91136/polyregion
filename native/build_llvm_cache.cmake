@@ -1,8 +1,8 @@
 
 
 if (UNIX)
-    list(APPEND RUNTIME_COMPONENTS compiler-rt libcxx libcxxabi)
-#    list(APPEND RUNTIME_TARGETS cxx-headers)
+    list(APPEND RUNTIME_COMPONENTS compiler-rt libcxx libcxxabi libunwind openmp)
+    #    list(APPEND RUNTIME_TARGETS cxx-headers)
 elseif (WIN32)
     # needs a bootstrapping build for libcxx because cl.exe isn't support
     # see https://libcxx.llvm.org/BuildingLibcxx.html#support-for-windows
@@ -57,6 +57,25 @@ set(LLVM_BUILD_TESTS OFF CACHE BOOL "")
 set(LLVM_ENABLE_ASSERTIONS ON CACHE BOOL "")
 
 #set(LLVM_ENABLE_PER_TARGET_RUNTIME_DIR OFF CACHE BOOL "")
+#
+set(LIBOMP_INSTALL_ALIASES OFF CACHE BOOL "")
+#
+if (APPLE)
+    set(LLVM_ENABLE_LIBCXX ON CACHE BOOL "")
+elseif (UNIX)
+    set(LLVM_ENABLE_LIBCXX OFF CACHE BOOL "")
+    # XXX breaks with RTTI errors when building one of the sanitisers
+    # set(SANITIZER_CXX_ABI libstd++ CACHE STRING "")
+
+    set(LIBCXXABI_ENABLE_STATIC_UNWINDER ON CACHE BOOL "")
+    set(LIBCXXABI_STATICALLY_LINK_UNWINDER_IN_SHARED_LIBRARY OFF CACHE BOOL "")
+    set(LIBCXXABI_STATICALLY_LINK_UNWINDER_IN_STATIC_LIBRARY ON CACHE BOOL "")
+    set(LIBCXXABI_USE_COMPILER_RT ON CACHE BOOL "")
+    set(LIBCXXABI_USE_LLVM_UNWINDER ON CACHE BOOL "")
+
+    set(COMPILER_RT_USE_LLVM_UNWINDER ON CACHE BOOL "")
+    set(LIBUNWIND_USE_COMPILER_RT ON CACHE BOOL "")
+endif ()
 
 set(LLVM_STATIC_LINK_CXX_STDLIB ON CACHE BOOL "")
 set(COMPILER_RT_DEFAULT_TARGET_ONLY ON CACHE BOOL "")

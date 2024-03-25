@@ -427,7 +427,8 @@ std::string Remapper::nameOfRecord(const clang::RecordType *tpe, RemapContext &r
         case clang::TemplateArgument::Template:
         case clang::TemplateArgument::TemplateExpansion:
         case clang::TemplateArgument::Expression:
-        case clang::TemplateArgument::Pack: name += "???"; break;
+        case clang::TemplateArgument::Pack:
+        case clang::TemplateArgument::StructuralValue: name += "???"; break;
       }
     }
     return name;

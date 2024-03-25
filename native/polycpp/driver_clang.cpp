@@ -5,20 +5,26 @@
 #include "clang/CodeGen/ObjectFilePCHContainerOperations.h"
 #include "clang/Config/config.h"
 #include "clang/Driver/DriverDiagnostic.h"
+#include "clang/Frontend/ChainedDiagnosticConsumer.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/CompilerInvocation.h"
 #include "clang/Frontend/FrontendDiagnostic.h"
+#include "clang/Frontend/SerializedDiagnosticPrinter.h"
 #include "clang/Frontend/TextDiagnosticBuffer.h"
 #include "clang/Frontend/TextDiagnosticPrinter.h"
+#include "clang/StaticAnalyzer/Frontend/AnalyzerHelpFlags.h"
 #include "llvm/LinkAllPasses.h"
+#include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Option/Arg.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Option/OptTable.h"
 #include "llvm/Support/BuryPointer.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/Process.h"
+#include "llvm/Support/RISCVISAInfo.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/TimeProfiler.h"
@@ -26,12 +32,10 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/TargetParser/AArch64TargetParser.h"
+#include "llvm/TargetParser/ARMTargetParser.h"
 
 #ifdef CLANG_HAVE_RLIMITS
-  #include <clang/Frontend/ChainedDiagnosticConsumer.h>
-  #include <clang/Frontend/SerializedDiagnosticPrinter.h>
-  #include <clang/StaticAnalyzer/Frontend/AnalyzerHelpFlags.h>
-  #include <llvm/Support/InitLLVM.h>
+
   #include <sys/resource.h>
 #endif
 
@@ -91,43 +95,36 @@ static int PrintSupportedCPUs(std::string TargetStr) {
   return 0;
 }
 
-// TODO LLVM 18
-// static int PrintSupportedExtensions(std::string TargetStr) {
-//  std::string Error;
-//  const llvm::Target *TheTarget =
-//      llvm::TargetRegistry::lookupTarget(TargetStr, Error);
-//  if (!TheTarget) {
-//    llvm::errs() << Error;
-//    return 1;
-//  }
-//
-//  llvm::TargetOptions Options;
-//  std::unique_ptr<llvm::TargetMachine> TheTargetMachine(
-//      TheTarget->createTargetMachine(TargetStr, "", "", Options, std::nullopt));
-//  const llvm::Triple &MachineTriple = TheTargetMachine->getTargetTriple();
-//  const llvm::MCSubtargetInfo *MCInfo = TheTargetMachine->getMCSubtargetInfo();
-//  const llvm::ArrayRef<llvm::SubtargetFeatureKV> Features =
-//      MCInfo->getAllProcessorFeatures();
-//
-//  llvm::StringMap<llvm::StringRef> DescMap;
-//  for (const llvm::SubtargetFeatureKV &feature : Features)
-//    DescMap.insert({feature.Key, feature.Desc});
-//
-//  if (MachineTriple.isRISCV())
-//    llvm::riscvExtensionsHelp(DescMap);
-//  else if (MachineTriple.isAArch64())
-//    llvm::AArch64::PrintSupportedExtensions(DescMap);
-//  else if (MachineTriple.isARM())
-//    llvm::ARM::PrintSupportedExtensions(DescMap);
-//  else {
-//    // The option was already checked in Driver::HandleImmediateArgs,
-//    // so we do not expect to get here if we are not a supported architecture.
-//    assert(0 && "Unhandled triple for --print-supported-extensions option.");
-//    return 1;
-//  }
-//
-//  return 0;
-//}
+static int PrintSupportedExtensions(std::string TargetStr) {
+  std::string Error;
+  const llvm::Target *TheTarget = llvm::TargetRegistry::lookupTarget(TargetStr, Error);
+  if (!TheTarget) {
+    llvm::errs() << Error;
+    return 1;
+  }
+
+  llvm::TargetOptions Options;
+  std::unique_ptr<llvm::TargetMachine> TheTargetMachine(TheTarget->createTargetMachine(TargetStr, "", "", Options, std::nullopt));
+  const llvm::Triple &MachineTriple = TheTargetMachine->getTargetTriple();
+  const llvm::MCSubtargetInfo *MCInfo = TheTargetMachine->getMCSubtargetInfo();
+  const llvm::ArrayRef<llvm::SubtargetFeatureKV> Features = MCInfo->getAllProcessorFeatures();
+
+  llvm::StringMap<llvm::StringRef> DescMap;
+  for (const llvm::SubtargetFeatureKV &feature : Features)
+    DescMap.insert({feature.Key, feature.Desc});
+
+  if (MachineTriple.isRISCV()) llvm::riscvExtensionsHelp(DescMap);
+  else if (MachineTriple.isAArch64()) llvm::AArch64::PrintSupportedExtensions(DescMap);
+  else if (MachineTriple.isARM()) llvm::ARM::PrintSupportedExtensions(DescMap);
+  else {
+    // The option was already checked in Driver::HandleImmediateArgs,
+    // so we do not expect to get here if we are not a supported architecture.
+    assert(0 && "Unhandled triple for --print-supported-extensions option.");
+    return 1;
+  }
+
+  return 0;
+}
 
 int polyregion::polystl::useCI(llvm::ArrayRef<const char *> Argv, const char *Argv0, void *MainAddr,
                                const std::function<int(clang::CompilerInstance &)> &f) {
@@ -164,10 +161,8 @@ int polyregion::polystl::useCI(llvm::ArrayRef<const char *> Argv, const char *Ar
   // --print-supported-cpus takes priority over the actual compilation.
   if (Clang->getFrontendOpts().PrintSupportedCPUs) return PrintSupportedCPUs(Clang->getTargetOpts().Triple);
 
-  // TODO LLVM 18
-  //  // --print-supported-extensions takes priority over the actual compilation.
-  //  if (Clang->getFrontendOpts().PrintSupportedExtensions)
-  //    return PrintSupportedExtensions(Clang->getTargetOpts().Triple);
+  // --print-supported-extensions takes priority over the actual compilation.
+  if (Clang->getFrontendOpts().PrintSupportedExtensions) return PrintSupportedExtensions(Clang->getTargetOpts().Triple);
 
   // Infer the builtin include path if unspecified.
   if (Clang->getHeaderSearchOpts().UseBuiltinIncludes && Clang->getHeaderSearchOpts().ResourceDir.empty())
@@ -256,7 +251,7 @@ bool polyregion::polystl::executeFrontendAction(clang::CompilerInstance *Clang, 
 #if CLANG_ENABLE_STATIC_ANALYZER
   // These should happen AFTER plugins have been loaded!
 
-  AnalyzerOptions &AnOpts = *Clang->getAnalyzerOpts();
+  AnalyzerOptions &AnOpts = Clang->getAnalyzerOpts();
 
   // Honor -analyzer-checker-help and -analyzer-checker-help-hidden.
   if (AnOpts.ShowCheckerHelp || AnOpts.ShowCheckerHelpAlpha || AnOpts.ShowCheckerHelpDeveloper) {
