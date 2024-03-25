@@ -251,7 +251,12 @@ private[polyregion] object CppStructGen {
         case _ =>
           (
             s"POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const ${clsName(qualified = true)} &);" :: Nil,
-            s"std::ostream &${ns("operator<<")}(std::ostream &os, const ${clsName(qualified = true)} &x) { return x.dump(os); }" :: Nil
+            tpe.namespace match {
+              case Nil =>
+                s"std::ostream &operator<<(std::ostream &os, const ${clsName(qualified = true)} &x) { return x.dump(os); }" :: Nil
+              case xs =>
+                s"namespace ${xs.mkString("::")} { std::ostream &operator<<(std::ostream &os, const ${clsName(qualified = true)} &x) { return x.dump(os); } }" :: Nil
+            }
           )
       }
 
@@ -315,14 +320,21 @@ private[polyregion] object CppStructGen {
             )
           case CppType.Kind.Variant =>
             (
-              s"[[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override ;" :: Nil,
-              s"[[nodiscard]] POLYREGION_EXPORT bool $name::operator==(const Base& rhs_) const {" ::
+              s"[[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;" ::
+                s"[[nodiscard]] POLYREGION_EXPORT bool operator==(const $name &) const;" :: Nil,
+              s"[[nodiscard]] POLYREGION_EXPORT bool $name::operator==(const $name& rhs) const {" ::
+                (members match {
+                  case Nil => "  return true;" :: Nil
+                  case xs =>
+                    xs.map((n, tpe) => mkEqStmt("this->", "rhs.", n, tpe)).mkString("  return ", " && ", ";") :: Nil
+                }) ::: "}"
+                ::
+                s"[[nodiscard]] POLYREGION_EXPORT bool $name::operator==(const Base& rhs_) const {" ::
                 s"  if(rhs_.id() != variant_id) return false;" ::
                 (members match {
                   case Nil => "  return true;" :: Nil
                   case xs =>
-                    s"  auto rhs = static_cast<const $name&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)" ::
-                      xs.map((n, tpe) => mkEqStmt("this->", "rhs.", n, tpe)).mkString("  return ", " && ", ";") :: Nil
+                    s"  return this->operator==(static_cast<const $name&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)" :: Nil
                 }) ::: "}" :: Nil
             )
           case _ =>
@@ -442,7 +454,12 @@ private[polyregion] object CppStructGen {
           s"size_t ${tpe.ref(true)}::hash_code() const { return _v->hash_code(); }" ::
           members.map((name, t) => s"${t.ref(true)} ${tpe.ref(true)}::${name}() const { return _v->${name}; }") :::
           s"std::ostream &${tpe.ref(true)}::dump(std::ostream &os) const { return _v->dump(os); }" ::
-          s"std::ostream &${tpe.ns("operator<<")}(std::ostream &os, const ${tpe.ref(false)} &x) { return x.dump(os); }" ::
+          (tpe.namespace match {
+            case Nil =>
+              s"std::ostream &operator<<(std::ostream &os, const ${tpe.ref(false)} &x) { return x.dump(os); }"
+            case xs =>
+              s"namespace ${tpe.namespace.mkString("::")} { std::ostream &operator<<(std::ostream &os, const ${tpe.ref(false)} &x) { return x.dump(os); } }"
+          }) ::
           s"bool ${tpe.ref(true)}::operator==(const ${tpe.ref(false)} &rhs) const { return _v->operator==(*rhs._v) ; }" ::
           s"bool ${tpe.ref(true)}::operator!=(const ${tpe.ref(false)} &rhs) const { return !_v->operator==(*rhs._v) ; }" ::
           Nil

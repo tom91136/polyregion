@@ -124,6 +124,9 @@ std::vector<void *> runtime::detail::argDataAsPointers(const std::vector<Type> &
   }
   return argsPtrStore;
 }
-std::ostream &runtime::operator<<(std::ostream &os, const runtime::Dim3 &dim3) {
+
+namespace polyregion::runtime {
+std::ostream &operator<<(std::ostream &os, const Dim3 &dim3) {
   return os << "Dim3{x: " << dim3.x << " y: " << dim3.y << " z: " << dim3.z << "}";
 }
+} // namespace polyregion::runtime

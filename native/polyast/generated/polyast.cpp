@@ -48,7 +48,7 @@ TypeKind::Base::Base() = default;
 uint32_t TypeKind::Any::id() const { return _v->id(); }
 size_t TypeKind::Any::hash_code() const { return _v->hash_code(); }
 std::ostream &TypeKind::Any::dump(std::ostream &os) const { return _v->dump(os); }
-std::ostream &TypeKind::operator<<(std::ostream &os, const Any &x) { return x.dump(os); }
+namespace TypeKind { std::ostream &operator<<(std::ostream &os, const Any &x) { return x.dump(os); } }
 bool TypeKind::Any::operator==(const Any &rhs) const { return _v->operator==(*rhs._v) ; }
 bool TypeKind::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v) ; }
 
@@ -58,11 +58,14 @@ size_t TypeKind::None::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &TypeKind::operator<<(std::ostream &os, const TypeKind::None &x) { return x.dump(os); }
+namespace TypeKind { std::ostream &operator<<(std::ostream &os, const TypeKind::None &x) { return x.dump(os); } }
 std::ostream &TypeKind::None::dump(std::ostream &os) const {
   os << "None(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool TypeKind::None::operator==(const TypeKind::None& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool TypeKind::None::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -76,11 +79,14 @@ size_t TypeKind::Ref::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &TypeKind::operator<<(std::ostream &os, const TypeKind::Ref &x) { return x.dump(os); }
+namespace TypeKind { std::ostream &operator<<(std::ostream &os, const TypeKind::Ref &x) { return x.dump(os); } }
 std::ostream &TypeKind::Ref::dump(std::ostream &os) const {
   os << "Ref(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool TypeKind::Ref::operator==(const TypeKind::Ref& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool TypeKind::Ref::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -94,11 +100,14 @@ size_t TypeKind::Integral::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &TypeKind::operator<<(std::ostream &os, const TypeKind::Integral &x) { return x.dump(os); }
+namespace TypeKind { std::ostream &operator<<(std::ostream &os, const TypeKind::Integral &x) { return x.dump(os); } }
 std::ostream &TypeKind::Integral::dump(std::ostream &os) const {
   os << "Integral(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool TypeKind::Integral::operator==(const TypeKind::Integral& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool TypeKind::Integral::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -112,11 +121,14 @@ size_t TypeKind::Fractional::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &TypeKind::operator<<(std::ostream &os, const TypeKind::Fractional &x) { return x.dump(os); }
+namespace TypeKind { std::ostream &operator<<(std::ostream &os, const TypeKind::Fractional &x) { return x.dump(os); } }
 std::ostream &TypeKind::Fractional::dump(std::ostream &os) const {
   os << "Fractional(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool TypeKind::Fractional::operator==(const TypeKind::Fractional& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool TypeKind::Fractional::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -129,7 +141,7 @@ uint32_t Type::Any::id() const { return _v->id(); }
 size_t Type::Any::hash_code() const { return _v->hash_code(); }
 TypeKind::Any Type::Any::kind() const { return _v->kind; }
 std::ostream &Type::Any::dump(std::ostream &os) const { return _v->dump(os); }
-std::ostream &Type::operator<<(std::ostream &os, const Any &x) { return x.dump(os); }
+namespace Type { std::ostream &operator<<(std::ostream &os, const Any &x) { return x.dump(os); } }
 bool Type::Any::operator==(const Any &rhs) const { return _v->operator==(*rhs._v) ; }
 bool Type::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v) ; }
 
@@ -139,11 +151,14 @@ size_t Type::Float16::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &Type::operator<<(std::ostream &os, const Type::Float16 &x) { return x.dump(os); }
+namespace Type { std::ostream &operator<<(std::ostream &os, const Type::Float16 &x) { return x.dump(os); } }
 std::ostream &Type::Float16::dump(std::ostream &os) const {
   os << "Float16(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool Type::Float16::operator==(const Type::Float16& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Type::Float16::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -157,11 +172,14 @@ size_t Type::Float32::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &Type::operator<<(std::ostream &os, const Type::Float32 &x) { return x.dump(os); }
+namespace Type { std::ostream &operator<<(std::ostream &os, const Type::Float32 &x) { return x.dump(os); } }
 std::ostream &Type::Float32::dump(std::ostream &os) const {
   os << "Float32(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool Type::Float32::operator==(const Type::Float32& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Type::Float32::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -175,11 +193,14 @@ size_t Type::Float64::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &Type::operator<<(std::ostream &os, const Type::Float64 &x) { return x.dump(os); }
+namespace Type { std::ostream &operator<<(std::ostream &os, const Type::Float64 &x) { return x.dump(os); } }
 std::ostream &Type::Float64::dump(std::ostream &os) const {
   os << "Float64(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool Type::Float64::operator==(const Type::Float64& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Type::Float64::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -193,11 +214,14 @@ size_t Type::IntU8::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &Type::operator<<(std::ostream &os, const Type::IntU8 &x) { return x.dump(os); }
+namespace Type { std::ostream &operator<<(std::ostream &os, const Type::IntU8 &x) { return x.dump(os); } }
 std::ostream &Type::IntU8::dump(std::ostream &os) const {
   os << "IntU8(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool Type::IntU8::operator==(const Type::IntU8& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Type::IntU8::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -211,11 +235,14 @@ size_t Type::IntU16::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &Type::operator<<(std::ostream &os, const Type::IntU16 &x) { return x.dump(os); }
+namespace Type { std::ostream &operator<<(std::ostream &os, const Type::IntU16 &x) { return x.dump(os); } }
 std::ostream &Type::IntU16::dump(std::ostream &os) const {
   os << "IntU16(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool Type::IntU16::operator==(const Type::IntU16& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Type::IntU16::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -229,11 +256,14 @@ size_t Type::IntU32::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &Type::operator<<(std::ostream &os, const Type::IntU32 &x) { return x.dump(os); }
+namespace Type { std::ostream &operator<<(std::ostream &os, const Type::IntU32 &x) { return x.dump(os); } }
 std::ostream &Type::IntU32::dump(std::ostream &os) const {
   os << "IntU32(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool Type::IntU32::operator==(const Type::IntU32& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Type::IntU32::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -247,11 +277,14 @@ size_t Type::IntU64::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &Type::operator<<(std::ostream &os, const Type::IntU64 &x) { return x.dump(os); }
+namespace Type { std::ostream &operator<<(std::ostream &os, const Type::IntU64 &x) { return x.dump(os); } }
 std::ostream &Type::IntU64::dump(std::ostream &os) const {
   os << "IntU64(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool Type::IntU64::operator==(const Type::IntU64& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Type::IntU64::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -265,11 +298,14 @@ size_t Type::IntS8::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &Type::operator<<(std::ostream &os, const Type::IntS8 &x) { return x.dump(os); }
+namespace Type { std::ostream &operator<<(std::ostream &os, const Type::IntS8 &x) { return x.dump(os); } }
 std::ostream &Type::IntS8::dump(std::ostream &os) const {
   os << "IntS8(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool Type::IntS8::operator==(const Type::IntS8& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Type::IntS8::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -283,11 +319,14 @@ size_t Type::IntS16::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &Type::operator<<(std::ostream &os, const Type::IntS16 &x) { return x.dump(os); }
+namespace Type { std::ostream &operator<<(std::ostream &os, const Type::IntS16 &x) { return x.dump(os); } }
 std::ostream &Type::IntS16::dump(std::ostream &os) const {
   os << "IntS16(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool Type::IntS16::operator==(const Type::IntS16& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Type::IntS16::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -301,11 +340,14 @@ size_t Type::IntS32::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &Type::operator<<(std::ostream &os, const Type::IntS32 &x) { return x.dump(os); }
+namespace Type { std::ostream &operator<<(std::ostream &os, const Type::IntS32 &x) { return x.dump(os); } }
 std::ostream &Type::IntS32::dump(std::ostream &os) const {
   os << "IntS32(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool Type::IntS32::operator==(const Type::IntS32& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Type::IntS32::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -319,11 +361,14 @@ size_t Type::IntS64::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &Type::operator<<(std::ostream &os, const Type::IntS64 &x) { return x.dump(os); }
+namespace Type { std::ostream &operator<<(std::ostream &os, const Type::IntS64 &x) { return x.dump(os); } }
 std::ostream &Type::IntS64::dump(std::ostream &os) const {
   os << "IntS64(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool Type::IntS64::operator==(const Type::IntS64& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Type::IntS64::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -337,11 +382,14 @@ size_t Type::Nothing::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &Type::operator<<(std::ostream &os, const Type::Nothing &x) { return x.dump(os); }
+namespace Type { std::ostream &operator<<(std::ostream &os, const Type::Nothing &x) { return x.dump(os); } }
 std::ostream &Type::Nothing::dump(std::ostream &os) const {
   os << "Nothing(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool Type::Nothing::operator==(const Type::Nothing& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Type::Nothing::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -355,11 +403,14 @@ size_t Type::Unit0::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &Type::operator<<(std::ostream &os, const Type::Unit0 &x) { return x.dump(os); }
+namespace Type { std::ostream &operator<<(std::ostream &os, const Type::Unit0 &x) { return x.dump(os); } }
 std::ostream &Type::Unit0::dump(std::ostream &os) const {
   os << "Unit0(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool Type::Unit0::operator==(const Type::Unit0& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Type::Unit0::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -373,11 +424,14 @@ size_t Type::Bool1::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &Type::operator<<(std::ostream &os, const Type::Bool1 &x) { return x.dump(os); }
+namespace Type { std::ostream &operator<<(std::ostream &os, const Type::Bool1 &x) { return x.dump(os); } }
 std::ostream &Type::Bool1::dump(std::ostream &os) const {
   os << "Bool1(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool Type::Bool1::operator==(const Type::Bool1& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Type::Bool1::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -395,7 +449,7 @@ size_t Type::Struct::hash_code() const {
   seed ^= std::hash<decltype(parents)>()(parents) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Type::operator<<(std::ostream &os, const Type::Struct &x) { return x.dump(os); }
+namespace Type { std::ostream &operator<<(std::ostream &os, const Type::Struct &x) { return x.dump(os); } }
 std::ostream &Type::Struct::dump(std::ostream &os) const {
   os << "Struct(";
   os << name;
@@ -423,10 +477,12 @@ std::ostream &Type::Struct::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Type::Struct::operator==(const Type::Struct& rhs) const {
+  return (this->name == rhs.name) && (this->tpeVars == rhs.tpeVars) && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && (this->parents == rhs.parents);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Type::Struct::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Type::Struct&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->name == rhs.name) && (this->tpeVars == rhs.tpeVars) && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && (this->parents == rhs.parents);
+  return this->operator==(static_cast<const Type::Struct&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Type::Struct::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Struct>(*this)); }
 
@@ -439,7 +495,7 @@ size_t Type::Ptr::hash_code() const {
   seed ^= std::hash<decltype(space)>()(space) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Type::operator<<(std::ostream &os, const Type::Ptr &x) { return x.dump(os); }
+namespace Type { std::ostream &operator<<(std::ostream &os, const Type::Ptr &x) { return x.dump(os); } }
 std::ostream &Type::Ptr::dump(std::ostream &os) const {
   os << "Ptr(";
   os << component;
@@ -454,10 +510,12 @@ std::ostream &Type::Ptr::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Type::Ptr::operator==(const Type::Ptr& rhs) const {
+  return (this->component == rhs.component) && (this->length == rhs.length) && (this->space == rhs.space);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Type::Ptr::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Type::Ptr&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->component == rhs.component) && (this->length == rhs.length) && (this->space == rhs.space);
+  return this->operator==(static_cast<const Type::Ptr&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Type::Ptr::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Ptr>(*this)); }
 
@@ -468,17 +526,19 @@ size_t Type::Var::hash_code() const {
   seed ^= std::hash<decltype(name)>()(name) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Type::operator<<(std::ostream &os, const Type::Var &x) { return x.dump(os); }
+namespace Type { std::ostream &operator<<(std::ostream &os, const Type::Var &x) { return x.dump(os); } }
 std::ostream &Type::Var::dump(std::ostream &os) const {
   os << "Var(";
   os << '"' << name << '"';
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Type::Var::operator==(const Type::Var& rhs) const {
+  return (this->name == rhs.name);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Type::Var::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Type::Var&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->name == rhs.name);
+  return this->operator==(static_cast<const Type::Var&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Type::Var::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Var>(*this)); }
 
@@ -491,7 +551,7 @@ size_t Type::Exec::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Type::operator<<(std::ostream &os, const Type::Exec &x) { return x.dump(os); }
+namespace Type { std::ostream &operator<<(std::ostream &os, const Type::Exec &x) { return x.dump(os); } }
 std::ostream &Type::Exec::dump(std::ostream &os) const {
   os << "Exec(";
   os << '{';
@@ -512,10 +572,12 @@ std::ostream &Type::Exec::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Type::Exec::operator==(const Type::Exec& rhs) const {
+  return (this->tpeVars == rhs.tpeVars) && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Type::Exec::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Type::Exec&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->tpeVars == rhs.tpeVars) && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Type::Exec&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Type::Exec::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Exec>(*this)); }
 
@@ -551,7 +613,7 @@ uint32_t Term::Any::id() const { return _v->id(); }
 size_t Term::Any::hash_code() const { return _v->hash_code(); }
 Type::Any Term::Any::tpe() const { return _v->tpe; }
 std::ostream &Term::Any::dump(std::ostream &os) const { return _v->dump(os); }
-std::ostream &Term::operator<<(std::ostream &os, const Any &x) { return x.dump(os); }
+namespace Term { std::ostream &operator<<(std::ostream &os, const Any &x) { return x.dump(os); } }
 bool Term::Any::operator==(const Any &rhs) const { return _v->operator==(*rhs._v) ; }
 bool Term::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v) ; }
 
@@ -563,7 +625,7 @@ size_t Term::Select::hash_code() const {
   seed ^= std::hash<decltype(last)>()(last) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Term::operator<<(std::ostream &os, const Term::Select &x) { return x.dump(os); }
+namespace Term { std::ostream &operator<<(std::ostream &os, const Term::Select &x) { return x.dump(os); } }
 std::ostream &Term::Select::dump(std::ostream &os) const {
   os << "Select(";
   os << '{';
@@ -577,10 +639,12 @@ std::ostream &Term::Select::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Term::Select::operator==(const Term::Select& rhs) const {
+  return (this->init == rhs.init) && (this->last == rhs.last);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Term::Select::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::Select&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->init == rhs.init) && (this->last == rhs.last);
+  return this->operator==(static_cast<const Term::Select&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::Select::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Select>(*this)); }
 
@@ -591,17 +655,19 @@ size_t Term::Poison::hash_code() const {
   seed ^= std::hash<decltype(t)>()(t) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Term::operator<<(std::ostream &os, const Term::Poison &x) { return x.dump(os); }
+namespace Term { std::ostream &operator<<(std::ostream &os, const Term::Poison &x) { return x.dump(os); } }
 std::ostream &Term::Poison::dump(std::ostream &os) const {
   os << "Poison(";
   os << t;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Term::Poison::operator==(const Term::Poison& rhs) const {
+  return (this->t == rhs.t);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Term::Poison::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::Poison&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->t == rhs.t);
+  return this->operator==(static_cast<const Term::Poison&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::Poison::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Poison>(*this)); }
 
@@ -612,17 +678,19 @@ size_t Term::Float16Const::hash_code() const {
   seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Term::operator<<(std::ostream &os, const Term::Float16Const &x) { return x.dump(os); }
+namespace Term { std::ostream &operator<<(std::ostream &os, const Term::Float16Const &x) { return x.dump(os); } }
 std::ostream &Term::Float16Const::dump(std::ostream &os) const {
   os << "Float16Const(";
   os << value;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Term::Float16Const::operator==(const Term::Float16Const& rhs) const {
+  return (this->value == rhs.value);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Term::Float16Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::Float16Const&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->value == rhs.value);
+  return this->operator==(static_cast<const Term::Float16Const&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::Float16Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Float16Const>(*this)); }
 
@@ -633,17 +701,19 @@ size_t Term::Float32Const::hash_code() const {
   seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Term::operator<<(std::ostream &os, const Term::Float32Const &x) { return x.dump(os); }
+namespace Term { std::ostream &operator<<(std::ostream &os, const Term::Float32Const &x) { return x.dump(os); } }
 std::ostream &Term::Float32Const::dump(std::ostream &os) const {
   os << "Float32Const(";
   os << value;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Term::Float32Const::operator==(const Term::Float32Const& rhs) const {
+  return (this->value == rhs.value);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Term::Float32Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::Float32Const&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->value == rhs.value);
+  return this->operator==(static_cast<const Term::Float32Const&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::Float32Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Float32Const>(*this)); }
 
@@ -654,17 +724,19 @@ size_t Term::Float64Const::hash_code() const {
   seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Term::operator<<(std::ostream &os, const Term::Float64Const &x) { return x.dump(os); }
+namespace Term { std::ostream &operator<<(std::ostream &os, const Term::Float64Const &x) { return x.dump(os); } }
 std::ostream &Term::Float64Const::dump(std::ostream &os) const {
   os << "Float64Const(";
   os << value;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Term::Float64Const::operator==(const Term::Float64Const& rhs) const {
+  return (this->value == rhs.value);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Term::Float64Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::Float64Const&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->value == rhs.value);
+  return this->operator==(static_cast<const Term::Float64Const&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::Float64Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Float64Const>(*this)); }
 
@@ -675,17 +747,19 @@ size_t Term::IntU8Const::hash_code() const {
   seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Term::operator<<(std::ostream &os, const Term::IntU8Const &x) { return x.dump(os); }
+namespace Term { std::ostream &operator<<(std::ostream &os, const Term::IntU8Const &x) { return x.dump(os); } }
 std::ostream &Term::IntU8Const::dump(std::ostream &os) const {
   os << "IntU8Const(";
   os << value;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Term::IntU8Const::operator==(const Term::IntU8Const& rhs) const {
+  return (this->value == rhs.value);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Term::IntU8Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::IntU8Const&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->value == rhs.value);
+  return this->operator==(static_cast<const Term::IntU8Const&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::IntU8Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntU8Const>(*this)); }
 
@@ -696,17 +770,19 @@ size_t Term::IntU16Const::hash_code() const {
   seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Term::operator<<(std::ostream &os, const Term::IntU16Const &x) { return x.dump(os); }
+namespace Term { std::ostream &operator<<(std::ostream &os, const Term::IntU16Const &x) { return x.dump(os); } }
 std::ostream &Term::IntU16Const::dump(std::ostream &os) const {
   os << "IntU16Const(";
   os << value;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Term::IntU16Const::operator==(const Term::IntU16Const& rhs) const {
+  return (this->value == rhs.value);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Term::IntU16Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::IntU16Const&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->value == rhs.value);
+  return this->operator==(static_cast<const Term::IntU16Const&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::IntU16Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntU16Const>(*this)); }
 
@@ -717,17 +793,19 @@ size_t Term::IntU32Const::hash_code() const {
   seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Term::operator<<(std::ostream &os, const Term::IntU32Const &x) { return x.dump(os); }
+namespace Term { std::ostream &operator<<(std::ostream &os, const Term::IntU32Const &x) { return x.dump(os); } }
 std::ostream &Term::IntU32Const::dump(std::ostream &os) const {
   os << "IntU32Const(";
   os << value;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Term::IntU32Const::operator==(const Term::IntU32Const& rhs) const {
+  return (this->value == rhs.value);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Term::IntU32Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::IntU32Const&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->value == rhs.value);
+  return this->operator==(static_cast<const Term::IntU32Const&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::IntU32Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntU32Const>(*this)); }
 
@@ -738,17 +816,19 @@ size_t Term::IntU64Const::hash_code() const {
   seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Term::operator<<(std::ostream &os, const Term::IntU64Const &x) { return x.dump(os); }
+namespace Term { std::ostream &operator<<(std::ostream &os, const Term::IntU64Const &x) { return x.dump(os); } }
 std::ostream &Term::IntU64Const::dump(std::ostream &os) const {
   os << "IntU64Const(";
   os << value;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Term::IntU64Const::operator==(const Term::IntU64Const& rhs) const {
+  return (this->value == rhs.value);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Term::IntU64Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::IntU64Const&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->value == rhs.value);
+  return this->operator==(static_cast<const Term::IntU64Const&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::IntU64Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntU64Const>(*this)); }
 
@@ -759,17 +839,19 @@ size_t Term::IntS8Const::hash_code() const {
   seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Term::operator<<(std::ostream &os, const Term::IntS8Const &x) { return x.dump(os); }
+namespace Term { std::ostream &operator<<(std::ostream &os, const Term::IntS8Const &x) { return x.dump(os); } }
 std::ostream &Term::IntS8Const::dump(std::ostream &os) const {
   os << "IntS8Const(";
   os << value;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Term::IntS8Const::operator==(const Term::IntS8Const& rhs) const {
+  return (this->value == rhs.value);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Term::IntS8Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::IntS8Const&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->value == rhs.value);
+  return this->operator==(static_cast<const Term::IntS8Const&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::IntS8Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntS8Const>(*this)); }
 
@@ -780,17 +862,19 @@ size_t Term::IntS16Const::hash_code() const {
   seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Term::operator<<(std::ostream &os, const Term::IntS16Const &x) { return x.dump(os); }
+namespace Term { std::ostream &operator<<(std::ostream &os, const Term::IntS16Const &x) { return x.dump(os); } }
 std::ostream &Term::IntS16Const::dump(std::ostream &os) const {
   os << "IntS16Const(";
   os << value;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Term::IntS16Const::operator==(const Term::IntS16Const& rhs) const {
+  return (this->value == rhs.value);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Term::IntS16Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::IntS16Const&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->value == rhs.value);
+  return this->operator==(static_cast<const Term::IntS16Const&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::IntS16Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntS16Const>(*this)); }
 
@@ -801,17 +885,19 @@ size_t Term::IntS32Const::hash_code() const {
   seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Term::operator<<(std::ostream &os, const Term::IntS32Const &x) { return x.dump(os); }
+namespace Term { std::ostream &operator<<(std::ostream &os, const Term::IntS32Const &x) { return x.dump(os); } }
 std::ostream &Term::IntS32Const::dump(std::ostream &os) const {
   os << "IntS32Const(";
   os << value;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Term::IntS32Const::operator==(const Term::IntS32Const& rhs) const {
+  return (this->value == rhs.value);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Term::IntS32Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::IntS32Const&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->value == rhs.value);
+  return this->operator==(static_cast<const Term::IntS32Const&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::IntS32Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntS32Const>(*this)); }
 
@@ -822,17 +908,19 @@ size_t Term::IntS64Const::hash_code() const {
   seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Term::operator<<(std::ostream &os, const Term::IntS64Const &x) { return x.dump(os); }
+namespace Term { std::ostream &operator<<(std::ostream &os, const Term::IntS64Const &x) { return x.dump(os); } }
 std::ostream &Term::IntS64Const::dump(std::ostream &os) const {
   os << "IntS64Const(";
   os << value;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Term::IntS64Const::operator==(const Term::IntS64Const& rhs) const {
+  return (this->value == rhs.value);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Term::IntS64Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::IntS64Const&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->value == rhs.value);
+  return this->operator==(static_cast<const Term::IntS64Const&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::IntS64Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntS64Const>(*this)); }
 
@@ -842,11 +930,14 @@ size_t Term::Unit0Const::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &Term::operator<<(std::ostream &os, const Term::Unit0Const &x) { return x.dump(os); }
+namespace Term { std::ostream &operator<<(std::ostream &os, const Term::Unit0Const &x) { return x.dump(os); } }
 std::ostream &Term::Unit0Const::dump(std::ostream &os) const {
   os << "Unit0Const(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool Term::Unit0Const::operator==(const Term::Unit0Const& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Term::Unit0Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -861,17 +952,19 @@ size_t Term::Bool1Const::hash_code() const {
   seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Term::operator<<(std::ostream &os, const Term::Bool1Const &x) { return x.dump(os); }
+namespace Term { std::ostream &operator<<(std::ostream &os, const Term::Bool1Const &x) { return x.dump(os); } }
 std::ostream &Term::Bool1Const::dump(std::ostream &os) const {
   os << "Bool1Const(";
   os << value;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Term::Bool1Const::operator==(const Term::Bool1Const& rhs) const {
+  return (this->value == rhs.value);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Term::Bool1Const::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Term::Bool1Const&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->value == rhs.value);
+  return this->operator==(static_cast<const Term::Bool1Const&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::Bool1Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Bool1Const>(*this)); }
 
@@ -879,7 +972,7 @@ TypeSpace::Base::Base() = default;
 uint32_t TypeSpace::Any::id() const { return _v->id(); }
 size_t TypeSpace::Any::hash_code() const { return _v->hash_code(); }
 std::ostream &TypeSpace::Any::dump(std::ostream &os) const { return _v->dump(os); }
-std::ostream &TypeSpace::operator<<(std::ostream &os, const Any &x) { return x.dump(os); }
+namespace TypeSpace { std::ostream &operator<<(std::ostream &os, const Any &x) { return x.dump(os); } }
 bool TypeSpace::Any::operator==(const Any &rhs) const { return _v->operator==(*rhs._v) ; }
 bool TypeSpace::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v) ; }
 
@@ -889,11 +982,14 @@ size_t TypeSpace::Global::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &TypeSpace::operator<<(std::ostream &os, const TypeSpace::Global &x) { return x.dump(os); }
+namespace TypeSpace { std::ostream &operator<<(std::ostream &os, const TypeSpace::Global &x) { return x.dump(os); } }
 std::ostream &TypeSpace::Global::dump(std::ostream &os) const {
   os << "Global(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool TypeSpace::Global::operator==(const TypeSpace::Global& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool TypeSpace::Global::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -907,11 +1003,14 @@ size_t TypeSpace::Local::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &TypeSpace::operator<<(std::ostream &os, const TypeSpace::Local &x) { return x.dump(os); }
+namespace TypeSpace { std::ostream &operator<<(std::ostream &os, const TypeSpace::Local &x) { return x.dump(os); } }
 std::ostream &TypeSpace::Local::dump(std::ostream &os) const {
   os << "Local(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool TypeSpace::Local::operator==(const TypeSpace::Local& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool TypeSpace::Local::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -951,7 +1050,7 @@ std::vector<Overload> Spec::Any::overloads() const { return _v->overloads; }
 std::vector<Term::Any> Spec::Any::terms() const { return _v->terms; }
 Type::Any Spec::Any::tpe() const { return _v->tpe; }
 std::ostream &Spec::Any::dump(std::ostream &os) const { return _v->dump(os); }
-std::ostream &Spec::operator<<(std::ostream &os, const Any &x) { return x.dump(os); }
+namespace Spec { std::ostream &operator<<(std::ostream &os, const Any &x) { return x.dump(os); } }
 bool Spec::Any::operator==(const Any &rhs) const { return _v->operator==(*rhs._v) ; }
 bool Spec::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v) ; }
 
@@ -961,11 +1060,14 @@ size_t Spec::Assert::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &Spec::operator<<(std::ostream &os, const Spec::Assert &x) { return x.dump(os); }
+namespace Spec { std::ostream &operator<<(std::ostream &os, const Spec::Assert &x) { return x.dump(os); } }
 std::ostream &Spec::Assert::dump(std::ostream &os) const {
   os << "Assert(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool Spec::Assert::operator==(const Spec::Assert& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Spec::Assert::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -979,11 +1081,14 @@ size_t Spec::GpuBarrierGlobal::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuBarrierGlobal &x) { return x.dump(os); }
+namespace Spec { std::ostream &operator<<(std::ostream &os, const Spec::GpuBarrierGlobal &x) { return x.dump(os); } }
 std::ostream &Spec::GpuBarrierGlobal::dump(std::ostream &os) const {
   os << "GpuBarrierGlobal(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool Spec::GpuBarrierGlobal::operator==(const Spec::GpuBarrierGlobal& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Spec::GpuBarrierGlobal::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -997,11 +1102,14 @@ size_t Spec::GpuBarrierLocal::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuBarrierLocal &x) { return x.dump(os); }
+namespace Spec { std::ostream &operator<<(std::ostream &os, const Spec::GpuBarrierLocal &x) { return x.dump(os); } }
 std::ostream &Spec::GpuBarrierLocal::dump(std::ostream &os) const {
   os << "GpuBarrierLocal(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool Spec::GpuBarrierLocal::operator==(const Spec::GpuBarrierLocal& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Spec::GpuBarrierLocal::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -1015,11 +1123,14 @@ size_t Spec::GpuBarrierAll::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuBarrierAll &x) { return x.dump(os); }
+namespace Spec { std::ostream &operator<<(std::ostream &os, const Spec::GpuBarrierAll &x) { return x.dump(os); } }
 std::ostream &Spec::GpuBarrierAll::dump(std::ostream &os) const {
   os << "GpuBarrierAll(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool Spec::GpuBarrierAll::operator==(const Spec::GpuBarrierAll& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Spec::GpuBarrierAll::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -1033,11 +1144,14 @@ size_t Spec::GpuFenceGlobal::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuFenceGlobal &x) { return x.dump(os); }
+namespace Spec { std::ostream &operator<<(std::ostream &os, const Spec::GpuFenceGlobal &x) { return x.dump(os); } }
 std::ostream &Spec::GpuFenceGlobal::dump(std::ostream &os) const {
   os << "GpuFenceGlobal(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool Spec::GpuFenceGlobal::operator==(const Spec::GpuFenceGlobal& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Spec::GpuFenceGlobal::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -1051,11 +1165,14 @@ size_t Spec::GpuFenceLocal::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuFenceLocal &x) { return x.dump(os); }
+namespace Spec { std::ostream &operator<<(std::ostream &os, const Spec::GpuFenceLocal &x) { return x.dump(os); } }
 std::ostream &Spec::GpuFenceLocal::dump(std::ostream &os) const {
   os << "GpuFenceLocal(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool Spec::GpuFenceLocal::operator==(const Spec::GpuFenceLocal& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Spec::GpuFenceLocal::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -1069,11 +1186,14 @@ size_t Spec::GpuFenceAll::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuFenceAll &x) { return x.dump(os); }
+namespace Spec { std::ostream &operator<<(std::ostream &os, const Spec::GpuFenceAll &x) { return x.dump(os); } }
 std::ostream &Spec::GpuFenceAll::dump(std::ostream &os) const {
   os << "GpuFenceAll(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool Spec::GpuFenceAll::operator==(const Spec::GpuFenceAll& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Spec::GpuFenceAll::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -1088,17 +1208,19 @@ size_t Spec::GpuGlobalIdx::hash_code() const {
   seed ^= std::hash<decltype(dim)>()(dim) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuGlobalIdx &x) { return x.dump(os); }
+namespace Spec { std::ostream &operator<<(std::ostream &os, const Spec::GpuGlobalIdx &x) { return x.dump(os); } }
 std::ostream &Spec::GpuGlobalIdx::dump(std::ostream &os) const {
   os << "GpuGlobalIdx(";
   os << dim;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Spec::GpuGlobalIdx::operator==(const Spec::GpuGlobalIdx& rhs) const {
+  return (this->dim == rhs.dim);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Spec::GpuGlobalIdx::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Spec::GpuGlobalIdx&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->dim == rhs.dim);
+  return this->operator==(static_cast<const Spec::GpuGlobalIdx&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Spec::GpuGlobalIdx::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuGlobalIdx>(*this)); }
 
@@ -1109,17 +1231,19 @@ size_t Spec::GpuGlobalSize::hash_code() const {
   seed ^= std::hash<decltype(dim)>()(dim) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuGlobalSize &x) { return x.dump(os); }
+namespace Spec { std::ostream &operator<<(std::ostream &os, const Spec::GpuGlobalSize &x) { return x.dump(os); } }
 std::ostream &Spec::GpuGlobalSize::dump(std::ostream &os) const {
   os << "GpuGlobalSize(";
   os << dim;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Spec::GpuGlobalSize::operator==(const Spec::GpuGlobalSize& rhs) const {
+  return (this->dim == rhs.dim);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Spec::GpuGlobalSize::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Spec::GpuGlobalSize&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->dim == rhs.dim);
+  return this->operator==(static_cast<const Spec::GpuGlobalSize&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Spec::GpuGlobalSize::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuGlobalSize>(*this)); }
 
@@ -1130,17 +1254,19 @@ size_t Spec::GpuGroupIdx::hash_code() const {
   seed ^= std::hash<decltype(dim)>()(dim) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuGroupIdx &x) { return x.dump(os); }
+namespace Spec { std::ostream &operator<<(std::ostream &os, const Spec::GpuGroupIdx &x) { return x.dump(os); } }
 std::ostream &Spec::GpuGroupIdx::dump(std::ostream &os) const {
   os << "GpuGroupIdx(";
   os << dim;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Spec::GpuGroupIdx::operator==(const Spec::GpuGroupIdx& rhs) const {
+  return (this->dim == rhs.dim);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Spec::GpuGroupIdx::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Spec::GpuGroupIdx&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->dim == rhs.dim);
+  return this->operator==(static_cast<const Spec::GpuGroupIdx&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Spec::GpuGroupIdx::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuGroupIdx>(*this)); }
 
@@ -1151,17 +1277,19 @@ size_t Spec::GpuGroupSize::hash_code() const {
   seed ^= std::hash<decltype(dim)>()(dim) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuGroupSize &x) { return x.dump(os); }
+namespace Spec { std::ostream &operator<<(std::ostream &os, const Spec::GpuGroupSize &x) { return x.dump(os); } }
 std::ostream &Spec::GpuGroupSize::dump(std::ostream &os) const {
   os << "GpuGroupSize(";
   os << dim;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Spec::GpuGroupSize::operator==(const Spec::GpuGroupSize& rhs) const {
+  return (this->dim == rhs.dim);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Spec::GpuGroupSize::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Spec::GpuGroupSize&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->dim == rhs.dim);
+  return this->operator==(static_cast<const Spec::GpuGroupSize&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Spec::GpuGroupSize::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuGroupSize>(*this)); }
 
@@ -1172,17 +1300,19 @@ size_t Spec::GpuLocalIdx::hash_code() const {
   seed ^= std::hash<decltype(dim)>()(dim) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuLocalIdx &x) { return x.dump(os); }
+namespace Spec { std::ostream &operator<<(std::ostream &os, const Spec::GpuLocalIdx &x) { return x.dump(os); } }
 std::ostream &Spec::GpuLocalIdx::dump(std::ostream &os) const {
   os << "GpuLocalIdx(";
   os << dim;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Spec::GpuLocalIdx::operator==(const Spec::GpuLocalIdx& rhs) const {
+  return (this->dim == rhs.dim);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Spec::GpuLocalIdx::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Spec::GpuLocalIdx&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->dim == rhs.dim);
+  return this->operator==(static_cast<const Spec::GpuLocalIdx&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Spec::GpuLocalIdx::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuLocalIdx>(*this)); }
 
@@ -1193,17 +1323,19 @@ size_t Spec::GpuLocalSize::hash_code() const {
   seed ^= std::hash<decltype(dim)>()(dim) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Spec::operator<<(std::ostream &os, const Spec::GpuLocalSize &x) { return x.dump(os); }
+namespace Spec { std::ostream &operator<<(std::ostream &os, const Spec::GpuLocalSize &x) { return x.dump(os); } }
 std::ostream &Spec::GpuLocalSize::dump(std::ostream &os) const {
   os << "GpuLocalSize(";
   os << dim;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Spec::GpuLocalSize::operator==(const Spec::GpuLocalSize& rhs) const {
+  return (this->dim == rhs.dim);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Spec::GpuLocalSize::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Spec::GpuLocalSize&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->dim == rhs.dim);
+  return this->operator==(static_cast<const Spec::GpuLocalSize&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Spec::GpuLocalSize::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuLocalSize>(*this)); }
 
@@ -1214,7 +1346,7 @@ std::vector<Overload> Intr::Any::overloads() const { return _v->overloads; }
 std::vector<Term::Any> Intr::Any::terms() const { return _v->terms; }
 Type::Any Intr::Any::tpe() const { return _v->tpe; }
 std::ostream &Intr::Any::dump(std::ostream &os) const { return _v->dump(os); }
-std::ostream &Intr::operator<<(std::ostream &os, const Any &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Any &x) { return x.dump(os); } }
 bool Intr::Any::operator==(const Any &rhs) const { return _v->operator==(*rhs._v) ; }
 bool Intr::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v) ; }
 
@@ -1226,7 +1358,7 @@ size_t Intr::BNot::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::BNot &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::BNot &x) { return x.dump(os); } }
 std::ostream &Intr::BNot::dump(std::ostream &os) const {
   os << "BNot(";
   os << x;
@@ -1235,10 +1367,12 @@ std::ostream &Intr::BNot::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::BNot::operator==(const Intr::BNot& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::BNot::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::BNot&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Intr::BNot&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::BNot::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<BNot>(*this)); }
 
@@ -1249,17 +1383,19 @@ size_t Intr::LogicNot::hash_code() const {
   seed ^= std::hash<decltype(x)>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicNot &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::LogicNot &x) { return x.dump(os); } }
 std::ostream &Intr::LogicNot::dump(std::ostream &os) const {
   os << "LogicNot(";
   os << x;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::LogicNot::operator==(const Intr::LogicNot& rhs) const {
+  return (this->x == rhs.x);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::LogicNot::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::LogicNot&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x);
+  return this->operator==(static_cast<const Intr::LogicNot&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::LogicNot::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicNot>(*this)); }
 
@@ -1271,7 +1407,7 @@ size_t Intr::Pos::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::Pos &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::Pos &x) { return x.dump(os); } }
 std::ostream &Intr::Pos::dump(std::ostream &os) const {
   os << "Pos(";
   os << x;
@@ -1280,10 +1416,12 @@ std::ostream &Intr::Pos::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::Pos::operator==(const Intr::Pos& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::Pos::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::Pos&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Intr::Pos&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::Pos::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Pos>(*this)); }
 
@@ -1295,7 +1433,7 @@ size_t Intr::Neg::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::Neg &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::Neg &x) { return x.dump(os); } }
 std::ostream &Intr::Neg::dump(std::ostream &os) const {
   os << "Neg(";
   os << x;
@@ -1304,10 +1442,12 @@ std::ostream &Intr::Neg::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::Neg::operator==(const Intr::Neg& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::Neg::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::Neg&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Intr::Neg&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::Neg::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Neg>(*this)); }
 
@@ -1320,7 +1460,7 @@ size_t Intr::Add::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::Add &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::Add &x) { return x.dump(os); } }
 std::ostream &Intr::Add::dump(std::ostream &os) const {
   os << "Add(";
   os << x;
@@ -1331,10 +1471,12 @@ std::ostream &Intr::Add::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::Add::operator==(const Intr::Add& rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::Add::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::Add&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Intr::Add&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::Add::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Add>(*this)); }
 
@@ -1347,7 +1489,7 @@ size_t Intr::Sub::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::Sub &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::Sub &x) { return x.dump(os); } }
 std::ostream &Intr::Sub::dump(std::ostream &os) const {
   os << "Sub(";
   os << x;
@@ -1358,10 +1500,12 @@ std::ostream &Intr::Sub::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::Sub::operator==(const Intr::Sub& rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::Sub::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::Sub&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Intr::Sub&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::Sub::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Sub>(*this)); }
 
@@ -1374,7 +1518,7 @@ size_t Intr::Mul::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::Mul &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::Mul &x) { return x.dump(os); } }
 std::ostream &Intr::Mul::dump(std::ostream &os) const {
   os << "Mul(";
   os << x;
@@ -1385,10 +1529,12 @@ std::ostream &Intr::Mul::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::Mul::operator==(const Intr::Mul& rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::Mul::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::Mul&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Intr::Mul&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::Mul::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Mul>(*this)); }
 
@@ -1401,7 +1547,7 @@ size_t Intr::Div::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::Div &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::Div &x) { return x.dump(os); } }
 std::ostream &Intr::Div::dump(std::ostream &os) const {
   os << "Div(";
   os << x;
@@ -1412,10 +1558,12 @@ std::ostream &Intr::Div::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::Div::operator==(const Intr::Div& rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::Div::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::Div&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Intr::Div&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::Div::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Div>(*this)); }
 
@@ -1428,7 +1576,7 @@ size_t Intr::Rem::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::Rem &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::Rem &x) { return x.dump(os); } }
 std::ostream &Intr::Rem::dump(std::ostream &os) const {
   os << "Rem(";
   os << x;
@@ -1439,10 +1587,12 @@ std::ostream &Intr::Rem::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::Rem::operator==(const Intr::Rem& rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::Rem::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::Rem&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Intr::Rem&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::Rem::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Rem>(*this)); }
 
@@ -1455,7 +1605,7 @@ size_t Intr::Min::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::Min &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::Min &x) { return x.dump(os); } }
 std::ostream &Intr::Min::dump(std::ostream &os) const {
   os << "Min(";
   os << x;
@@ -1466,10 +1616,12 @@ std::ostream &Intr::Min::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::Min::operator==(const Intr::Min& rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::Min::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::Min&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Intr::Min&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::Min::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Min>(*this)); }
 
@@ -1482,7 +1634,7 @@ size_t Intr::Max::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::Max &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::Max &x) { return x.dump(os); } }
 std::ostream &Intr::Max::dump(std::ostream &os) const {
   os << "Max(";
   os << x;
@@ -1493,10 +1645,12 @@ std::ostream &Intr::Max::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::Max::operator==(const Intr::Max& rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::Max::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::Max&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Intr::Max&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::Max::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Max>(*this)); }
 
@@ -1509,7 +1663,7 @@ size_t Intr::BAnd::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::BAnd &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::BAnd &x) { return x.dump(os); } }
 std::ostream &Intr::BAnd::dump(std::ostream &os) const {
   os << "BAnd(";
   os << x;
@@ -1520,10 +1674,12 @@ std::ostream &Intr::BAnd::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::BAnd::operator==(const Intr::BAnd& rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::BAnd::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::BAnd&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Intr::BAnd&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::BAnd::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<BAnd>(*this)); }
 
@@ -1536,7 +1692,7 @@ size_t Intr::BOr::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::BOr &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::BOr &x) { return x.dump(os); } }
 std::ostream &Intr::BOr::dump(std::ostream &os) const {
   os << "BOr(";
   os << x;
@@ -1547,10 +1703,12 @@ std::ostream &Intr::BOr::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::BOr::operator==(const Intr::BOr& rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::BOr::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::BOr&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Intr::BOr&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::BOr::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<BOr>(*this)); }
 
@@ -1563,7 +1721,7 @@ size_t Intr::BXor::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::BXor &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::BXor &x) { return x.dump(os); } }
 std::ostream &Intr::BXor::dump(std::ostream &os) const {
   os << "BXor(";
   os << x;
@@ -1574,10 +1732,12 @@ std::ostream &Intr::BXor::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::BXor::operator==(const Intr::BXor& rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::BXor::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::BXor&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Intr::BXor&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::BXor::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<BXor>(*this)); }
 
@@ -1590,7 +1750,7 @@ size_t Intr::BSL::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::BSL &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::BSL &x) { return x.dump(os); } }
 std::ostream &Intr::BSL::dump(std::ostream &os) const {
   os << "BSL(";
   os << x;
@@ -1601,10 +1761,12 @@ std::ostream &Intr::BSL::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::BSL::operator==(const Intr::BSL& rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::BSL::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::BSL&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Intr::BSL&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::BSL::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<BSL>(*this)); }
 
@@ -1617,7 +1779,7 @@ size_t Intr::BSR::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::BSR &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::BSR &x) { return x.dump(os); } }
 std::ostream &Intr::BSR::dump(std::ostream &os) const {
   os << "BSR(";
   os << x;
@@ -1628,10 +1790,12 @@ std::ostream &Intr::BSR::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::BSR::operator==(const Intr::BSR& rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::BSR::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::BSR&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Intr::BSR&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::BSR::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<BSR>(*this)); }
 
@@ -1644,7 +1808,7 @@ size_t Intr::BZSR::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::BZSR &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::BZSR &x) { return x.dump(os); } }
 std::ostream &Intr::BZSR::dump(std::ostream &os) const {
   os << "BZSR(";
   os << x;
@@ -1655,10 +1819,12 @@ std::ostream &Intr::BZSR::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::BZSR::operator==(const Intr::BZSR& rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::BZSR::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::BZSR&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Intr::BZSR&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::BZSR::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<BZSR>(*this)); }
 
@@ -1670,7 +1836,7 @@ size_t Intr::LogicAnd::hash_code() const {
   seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicAnd &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::LogicAnd &x) { return x.dump(os); } }
 std::ostream &Intr::LogicAnd::dump(std::ostream &os) const {
   os << "LogicAnd(";
   os << x;
@@ -1679,10 +1845,12 @@ std::ostream &Intr::LogicAnd::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::LogicAnd::operator==(const Intr::LogicAnd& rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::LogicAnd::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::LogicAnd&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->y == rhs.y);
+  return this->operator==(static_cast<const Intr::LogicAnd&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::LogicAnd::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicAnd>(*this)); }
 
@@ -1694,7 +1862,7 @@ size_t Intr::LogicOr::hash_code() const {
   seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicOr &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::LogicOr &x) { return x.dump(os); } }
 std::ostream &Intr::LogicOr::dump(std::ostream &os) const {
   os << "LogicOr(";
   os << x;
@@ -1703,10 +1871,12 @@ std::ostream &Intr::LogicOr::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::LogicOr::operator==(const Intr::LogicOr& rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::LogicOr::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::LogicOr&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->y == rhs.y);
+  return this->operator==(static_cast<const Intr::LogicOr&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::LogicOr::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicOr>(*this)); }
 
@@ -1718,7 +1888,7 @@ size_t Intr::LogicEq::hash_code() const {
   seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicEq &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::LogicEq &x) { return x.dump(os); } }
 std::ostream &Intr::LogicEq::dump(std::ostream &os) const {
   os << "LogicEq(";
   os << x;
@@ -1727,10 +1897,12 @@ std::ostream &Intr::LogicEq::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::LogicEq::operator==(const Intr::LogicEq& rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::LogicEq::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::LogicEq&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->y == rhs.y);
+  return this->operator==(static_cast<const Intr::LogicEq&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::LogicEq::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicEq>(*this)); }
 
@@ -1742,7 +1914,7 @@ size_t Intr::LogicNeq::hash_code() const {
   seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicNeq &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::LogicNeq &x) { return x.dump(os); } }
 std::ostream &Intr::LogicNeq::dump(std::ostream &os) const {
   os << "LogicNeq(";
   os << x;
@@ -1751,10 +1923,12 @@ std::ostream &Intr::LogicNeq::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::LogicNeq::operator==(const Intr::LogicNeq& rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::LogicNeq::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::LogicNeq&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->y == rhs.y);
+  return this->operator==(static_cast<const Intr::LogicNeq&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::LogicNeq::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicNeq>(*this)); }
 
@@ -1766,7 +1940,7 @@ size_t Intr::LogicLte::hash_code() const {
   seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicLte &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::LogicLte &x) { return x.dump(os); } }
 std::ostream &Intr::LogicLte::dump(std::ostream &os) const {
   os << "LogicLte(";
   os << x;
@@ -1775,10 +1949,12 @@ std::ostream &Intr::LogicLte::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::LogicLte::operator==(const Intr::LogicLte& rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::LogicLte::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::LogicLte&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->y == rhs.y);
+  return this->operator==(static_cast<const Intr::LogicLte&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::LogicLte::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicLte>(*this)); }
 
@@ -1790,7 +1966,7 @@ size_t Intr::LogicGte::hash_code() const {
   seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicGte &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::LogicGte &x) { return x.dump(os); } }
 std::ostream &Intr::LogicGte::dump(std::ostream &os) const {
   os << "LogicGte(";
   os << x;
@@ -1799,10 +1975,12 @@ std::ostream &Intr::LogicGte::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::LogicGte::operator==(const Intr::LogicGte& rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::LogicGte::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::LogicGte&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->y == rhs.y);
+  return this->operator==(static_cast<const Intr::LogicGte&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::LogicGte::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicGte>(*this)); }
 
@@ -1814,7 +1992,7 @@ size_t Intr::LogicLt::hash_code() const {
   seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicLt &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::LogicLt &x) { return x.dump(os); } }
 std::ostream &Intr::LogicLt::dump(std::ostream &os) const {
   os << "LogicLt(";
   os << x;
@@ -1823,10 +2001,12 @@ std::ostream &Intr::LogicLt::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::LogicLt::operator==(const Intr::LogicLt& rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::LogicLt::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::LogicLt&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->y == rhs.y);
+  return this->operator==(static_cast<const Intr::LogicLt&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::LogicLt::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicLt>(*this)); }
 
@@ -1838,7 +2018,7 @@ size_t Intr::LogicGt::hash_code() const {
   seed ^= std::hash<decltype(y)>()(y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Intr::operator<<(std::ostream &os, const Intr::LogicGt &x) { return x.dump(os); }
+namespace Intr { std::ostream &operator<<(std::ostream &os, const Intr::LogicGt &x) { return x.dump(os); } }
 std::ostream &Intr::LogicGt::dump(std::ostream &os) const {
   os << "LogicGt(";
   os << x;
@@ -1847,10 +2027,12 @@ std::ostream &Intr::LogicGt::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Intr::LogicGt::operator==(const Intr::LogicGt& rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Intr::LogicGt::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Intr::LogicGt&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->y == rhs.y);
+  return this->operator==(static_cast<const Intr::LogicGt&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::LogicGt::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicGt>(*this)); }
 
@@ -1861,7 +2043,7 @@ std::vector<Overload> Math::Any::overloads() const { return _v->overloads; }
 std::vector<Term::Any> Math::Any::terms() const { return _v->terms; }
 Type::Any Math::Any::tpe() const { return _v->tpe; }
 std::ostream &Math::Any::dump(std::ostream &os) const { return _v->dump(os); }
-std::ostream &Math::operator<<(std::ostream &os, const Any &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Any &x) { return x.dump(os); } }
 bool Math::Any::operator==(const Any &rhs) const { return _v->operator==(*rhs._v) ; }
 bool Math::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v) ; }
 
@@ -1873,7 +2055,7 @@ size_t Math::Abs::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Abs &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Abs &x) { return x.dump(os); } }
 std::ostream &Math::Abs::dump(std::ostream &os) const {
   os << "Abs(";
   os << x;
@@ -1882,10 +2064,12 @@ std::ostream &Math::Abs::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Abs::operator==(const Math::Abs& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Abs::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Abs&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Abs&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Abs::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Abs>(*this)); }
 
@@ -1897,7 +2081,7 @@ size_t Math::Sin::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Sin &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Sin &x) { return x.dump(os); } }
 std::ostream &Math::Sin::dump(std::ostream &os) const {
   os << "Sin(";
   os << x;
@@ -1906,10 +2090,12 @@ std::ostream &Math::Sin::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Sin::operator==(const Math::Sin& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Sin::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Sin&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Sin&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Sin::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Sin>(*this)); }
 
@@ -1921,7 +2107,7 @@ size_t Math::Cos::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Cos &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Cos &x) { return x.dump(os); } }
 std::ostream &Math::Cos::dump(std::ostream &os) const {
   os << "Cos(";
   os << x;
@@ -1930,10 +2116,12 @@ std::ostream &Math::Cos::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Cos::operator==(const Math::Cos& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Cos::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Cos&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Cos&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Cos::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Cos>(*this)); }
 
@@ -1945,7 +2133,7 @@ size_t Math::Tan::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Tan &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Tan &x) { return x.dump(os); } }
 std::ostream &Math::Tan::dump(std::ostream &os) const {
   os << "Tan(";
   os << x;
@@ -1954,10 +2142,12 @@ std::ostream &Math::Tan::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Tan::operator==(const Math::Tan& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Tan::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Tan&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Tan&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Tan::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Tan>(*this)); }
 
@@ -1969,7 +2159,7 @@ size_t Math::Asin::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Asin &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Asin &x) { return x.dump(os); } }
 std::ostream &Math::Asin::dump(std::ostream &os) const {
   os << "Asin(";
   os << x;
@@ -1978,10 +2168,12 @@ std::ostream &Math::Asin::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Asin::operator==(const Math::Asin& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Asin::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Asin&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Asin&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Asin::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Asin>(*this)); }
 
@@ -1993,7 +2185,7 @@ size_t Math::Acos::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Acos &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Acos &x) { return x.dump(os); } }
 std::ostream &Math::Acos::dump(std::ostream &os) const {
   os << "Acos(";
   os << x;
@@ -2002,10 +2194,12 @@ std::ostream &Math::Acos::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Acos::operator==(const Math::Acos& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Acos::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Acos&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Acos&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Acos::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Acos>(*this)); }
 
@@ -2017,7 +2211,7 @@ size_t Math::Atan::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Atan &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Atan &x) { return x.dump(os); } }
 std::ostream &Math::Atan::dump(std::ostream &os) const {
   os << "Atan(";
   os << x;
@@ -2026,10 +2220,12 @@ std::ostream &Math::Atan::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Atan::operator==(const Math::Atan& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Atan::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Atan&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Atan&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Atan::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Atan>(*this)); }
 
@@ -2041,7 +2237,7 @@ size_t Math::Sinh::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Sinh &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Sinh &x) { return x.dump(os); } }
 std::ostream &Math::Sinh::dump(std::ostream &os) const {
   os << "Sinh(";
   os << x;
@@ -2050,10 +2246,12 @@ std::ostream &Math::Sinh::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Sinh::operator==(const Math::Sinh& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Sinh::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Sinh&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Sinh&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Sinh::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Sinh>(*this)); }
 
@@ -2065,7 +2263,7 @@ size_t Math::Cosh::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Cosh &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Cosh &x) { return x.dump(os); } }
 std::ostream &Math::Cosh::dump(std::ostream &os) const {
   os << "Cosh(";
   os << x;
@@ -2074,10 +2272,12 @@ std::ostream &Math::Cosh::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Cosh::operator==(const Math::Cosh& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Cosh::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Cosh&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Cosh&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Cosh::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Cosh>(*this)); }
 
@@ -2089,7 +2289,7 @@ size_t Math::Tanh::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Tanh &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Tanh &x) { return x.dump(os); } }
 std::ostream &Math::Tanh::dump(std::ostream &os) const {
   os << "Tanh(";
   os << x;
@@ -2098,10 +2298,12 @@ std::ostream &Math::Tanh::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Tanh::operator==(const Math::Tanh& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Tanh::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Tanh&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Tanh&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Tanh::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Tanh>(*this)); }
 
@@ -2113,7 +2315,7 @@ size_t Math::Signum::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Signum &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Signum &x) { return x.dump(os); } }
 std::ostream &Math::Signum::dump(std::ostream &os) const {
   os << "Signum(";
   os << x;
@@ -2122,10 +2324,12 @@ std::ostream &Math::Signum::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Signum::operator==(const Math::Signum& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Signum::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Signum&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Signum&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Signum::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Signum>(*this)); }
 
@@ -2137,7 +2341,7 @@ size_t Math::Round::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Round &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Round &x) { return x.dump(os); } }
 std::ostream &Math::Round::dump(std::ostream &os) const {
   os << "Round(";
   os << x;
@@ -2146,10 +2350,12 @@ std::ostream &Math::Round::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Round::operator==(const Math::Round& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Round::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Round&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Round&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Round::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Round>(*this)); }
 
@@ -2161,7 +2367,7 @@ size_t Math::Ceil::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Ceil &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Ceil &x) { return x.dump(os); } }
 std::ostream &Math::Ceil::dump(std::ostream &os) const {
   os << "Ceil(";
   os << x;
@@ -2170,10 +2376,12 @@ std::ostream &Math::Ceil::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Ceil::operator==(const Math::Ceil& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Ceil::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Ceil&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Ceil&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Ceil::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Ceil>(*this)); }
 
@@ -2185,7 +2393,7 @@ size_t Math::Floor::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Floor &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Floor &x) { return x.dump(os); } }
 std::ostream &Math::Floor::dump(std::ostream &os) const {
   os << "Floor(";
   os << x;
@@ -2194,10 +2402,12 @@ std::ostream &Math::Floor::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Floor::operator==(const Math::Floor& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Floor::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Floor&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Floor&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Floor::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Floor>(*this)); }
 
@@ -2209,7 +2419,7 @@ size_t Math::Rint::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Rint &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Rint &x) { return x.dump(os); } }
 std::ostream &Math::Rint::dump(std::ostream &os) const {
   os << "Rint(";
   os << x;
@@ -2218,10 +2428,12 @@ std::ostream &Math::Rint::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Rint::operator==(const Math::Rint& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Rint::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Rint&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Rint&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Rint::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Rint>(*this)); }
 
@@ -2233,7 +2445,7 @@ size_t Math::Sqrt::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Sqrt &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Sqrt &x) { return x.dump(os); } }
 std::ostream &Math::Sqrt::dump(std::ostream &os) const {
   os << "Sqrt(";
   os << x;
@@ -2242,10 +2454,12 @@ std::ostream &Math::Sqrt::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Sqrt::operator==(const Math::Sqrt& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Sqrt::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Sqrt&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Sqrt&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Sqrt::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Sqrt>(*this)); }
 
@@ -2257,7 +2471,7 @@ size_t Math::Cbrt::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Cbrt &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Cbrt &x) { return x.dump(os); } }
 std::ostream &Math::Cbrt::dump(std::ostream &os) const {
   os << "Cbrt(";
   os << x;
@@ -2266,10 +2480,12 @@ std::ostream &Math::Cbrt::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Cbrt::operator==(const Math::Cbrt& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Cbrt::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Cbrt&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Cbrt&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Cbrt::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Cbrt>(*this)); }
 
@@ -2281,7 +2497,7 @@ size_t Math::Exp::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Exp &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Exp &x) { return x.dump(os); } }
 std::ostream &Math::Exp::dump(std::ostream &os) const {
   os << "Exp(";
   os << x;
@@ -2290,10 +2506,12 @@ std::ostream &Math::Exp::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Exp::operator==(const Math::Exp& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Exp::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Exp&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Exp&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Exp::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Exp>(*this)); }
 
@@ -2305,7 +2523,7 @@ size_t Math::Expm1::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Expm1 &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Expm1 &x) { return x.dump(os); } }
 std::ostream &Math::Expm1::dump(std::ostream &os) const {
   os << "Expm1(";
   os << x;
@@ -2314,10 +2532,12 @@ std::ostream &Math::Expm1::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Expm1::operator==(const Math::Expm1& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Expm1::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Expm1&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Expm1&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Expm1::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Expm1>(*this)); }
 
@@ -2329,7 +2549,7 @@ size_t Math::Log::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Log &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Log &x) { return x.dump(os); } }
 std::ostream &Math::Log::dump(std::ostream &os) const {
   os << "Log(";
   os << x;
@@ -2338,10 +2558,12 @@ std::ostream &Math::Log::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Log::operator==(const Math::Log& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Log::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Log&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Log&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Log::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Log>(*this)); }
 
@@ -2353,7 +2575,7 @@ size_t Math::Log1p::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Log1p &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Log1p &x) { return x.dump(os); } }
 std::ostream &Math::Log1p::dump(std::ostream &os) const {
   os << "Log1p(";
   os << x;
@@ -2362,10 +2584,12 @@ std::ostream &Math::Log1p::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Log1p::operator==(const Math::Log1p& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Log1p::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Log1p&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Log1p&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Log1p::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Log1p>(*this)); }
 
@@ -2377,7 +2601,7 @@ size_t Math::Log10::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Log10 &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Log10 &x) { return x.dump(os); } }
 std::ostream &Math::Log10::dump(std::ostream &os) const {
   os << "Log10(";
   os << x;
@@ -2386,10 +2610,12 @@ std::ostream &Math::Log10::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Log10::operator==(const Math::Log10& rhs) const {
+  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Log10::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Log10&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Log10&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Log10::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Log10>(*this)); }
 
@@ -2402,7 +2628,7 @@ size_t Math::Pow::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Pow &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Pow &x) { return x.dump(os); } }
 std::ostream &Math::Pow::dump(std::ostream &os) const {
   os << "Pow(";
   os << x;
@@ -2413,10 +2639,12 @@ std::ostream &Math::Pow::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Pow::operator==(const Math::Pow& rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Pow::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Pow&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Pow&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Pow::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Pow>(*this)); }
 
@@ -2429,7 +2657,7 @@ size_t Math::Atan2::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Atan2 &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Atan2 &x) { return x.dump(os); } }
 std::ostream &Math::Atan2::dump(std::ostream &os) const {
   os << "Atan2(";
   os << x;
@@ -2440,10 +2668,12 @@ std::ostream &Math::Atan2::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Atan2::operator==(const Math::Atan2& rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Atan2::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Atan2&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Atan2&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Atan2::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Atan2>(*this)); }
 
@@ -2456,7 +2686,7 @@ size_t Math::Hypot::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Math::operator<<(std::ostream &os, const Math::Hypot &x) { return x.dump(os); }
+namespace Math { std::ostream &operator<<(std::ostream &os, const Math::Hypot &x) { return x.dump(os); } }
 std::ostream &Math::Hypot::dump(std::ostream &os) const {
   os << "Hypot(";
   os << x;
@@ -2467,10 +2697,12 @@ std::ostream &Math::Hypot::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Math::Hypot::operator==(const Math::Hypot& rhs) const {
+  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Math::Hypot::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Math::Hypot&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->x == rhs.x) && (this->y == rhs.y) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Math::Hypot&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Hypot::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Hypot>(*this)); }
 
@@ -2479,7 +2711,7 @@ uint32_t Expr::Any::id() const { return _v->id(); }
 size_t Expr::Any::hash_code() const { return _v->hash_code(); }
 Type::Any Expr::Any::tpe() const { return _v->tpe; }
 std::ostream &Expr::Any::dump(std::ostream &os) const { return _v->dump(os); }
-std::ostream &Expr::operator<<(std::ostream &os, const Any &x) { return x.dump(os); }
+namespace Expr { std::ostream &operator<<(std::ostream &os, const Any &x) { return x.dump(os); } }
 bool Expr::Any::operator==(const Any &rhs) const { return _v->operator==(*rhs._v) ; }
 bool Expr::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v) ; }
 
@@ -2490,17 +2722,19 @@ size_t Expr::SpecOp::hash_code() const {
   seed ^= std::hash<decltype(op)>()(op) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::SpecOp &x) { return x.dump(os); }
+namespace Expr { std::ostream &operator<<(std::ostream &os, const Expr::SpecOp &x) { return x.dump(os); } }
 std::ostream &Expr::SpecOp::dump(std::ostream &os) const {
   os << "SpecOp(";
   os << op;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Expr::SpecOp::operator==(const Expr::SpecOp& rhs) const {
+  return (this->op == rhs.op);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Expr::SpecOp::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Expr::SpecOp&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->op == rhs.op);
+  return this->operator==(static_cast<const Expr::SpecOp&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Expr::SpecOp::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<SpecOp>(*this)); }
 
@@ -2511,17 +2745,19 @@ size_t Expr::MathOp::hash_code() const {
   seed ^= std::hash<decltype(op)>()(op) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::MathOp &x) { return x.dump(os); }
+namespace Expr { std::ostream &operator<<(std::ostream &os, const Expr::MathOp &x) { return x.dump(os); } }
 std::ostream &Expr::MathOp::dump(std::ostream &os) const {
   os << "MathOp(";
   os << op;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Expr::MathOp::operator==(const Expr::MathOp& rhs) const {
+  return (this->op == rhs.op);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Expr::MathOp::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Expr::MathOp&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->op == rhs.op);
+  return this->operator==(static_cast<const Expr::MathOp&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Expr::MathOp::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<MathOp>(*this)); }
 
@@ -2532,17 +2768,19 @@ size_t Expr::IntrOp::hash_code() const {
   seed ^= std::hash<decltype(op)>()(op) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::IntrOp &x) { return x.dump(os); }
+namespace Expr { std::ostream &operator<<(std::ostream &os, const Expr::IntrOp &x) { return x.dump(os); } }
 std::ostream &Expr::IntrOp::dump(std::ostream &os) const {
   os << "IntrOp(";
   os << op;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Expr::IntrOp::operator==(const Expr::IntrOp& rhs) const {
+  return (this->op == rhs.op);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Expr::IntrOp::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Expr::IntrOp&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->op == rhs.op);
+  return this->operator==(static_cast<const Expr::IntrOp&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Expr::IntrOp::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntrOp>(*this)); }
 
@@ -2554,7 +2792,7 @@ size_t Expr::Cast::hash_code() const {
   seed ^= std::hash<decltype(as)>()(as) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::Cast &x) { return x.dump(os); }
+namespace Expr { std::ostream &operator<<(std::ostream &os, const Expr::Cast &x) { return x.dump(os); } }
 std::ostream &Expr::Cast::dump(std::ostream &os) const {
   os << "Cast(";
   os << from;
@@ -2563,10 +2801,12 @@ std::ostream &Expr::Cast::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Expr::Cast::operator==(const Expr::Cast& rhs) const {
+  return (this->from == rhs.from) && (this->as == rhs.as);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Expr::Cast::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Expr::Cast&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->from == rhs.from) && (this->as == rhs.as);
+  return this->operator==(static_cast<const Expr::Cast&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Expr::Cast::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Cast>(*this)); }
 
@@ -2577,17 +2817,19 @@ size_t Expr::Alias::hash_code() const {
   seed ^= std::hash<decltype(ref)>()(ref) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::Alias &x) { return x.dump(os); }
+namespace Expr { std::ostream &operator<<(std::ostream &os, const Expr::Alias &x) { return x.dump(os); } }
 std::ostream &Expr::Alias::dump(std::ostream &os) const {
   os << "Alias(";
   os << ref;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Expr::Alias::operator==(const Expr::Alias& rhs) const {
+  return (this->ref == rhs.ref);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Expr::Alias::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Expr::Alias&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->ref == rhs.ref);
+  return this->operator==(static_cast<const Expr::Alias&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Expr::Alias::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Alias>(*this)); }
 
@@ -2600,7 +2842,7 @@ size_t Expr::Index::hash_code() const {
   seed ^= std::hash<decltype(component)>()(component) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::Index &x) { return x.dump(os); }
+namespace Expr { std::ostream &operator<<(std::ostream &os, const Expr::Index &x) { return x.dump(os); } }
 std::ostream &Expr::Index::dump(std::ostream &os) const {
   os << "Index(";
   os << lhs;
@@ -2611,10 +2853,12 @@ std::ostream &Expr::Index::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Expr::Index::operator==(const Expr::Index& rhs) const {
+  return (this->lhs == rhs.lhs) && (this->idx == rhs.idx) && (this->component == rhs.component);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Expr::Index::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Expr::Index&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->lhs == rhs.lhs) && (this->idx == rhs.idx) && (this->component == rhs.component);
+  return this->operator==(static_cast<const Expr::Index&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Expr::Index::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Index>(*this)); }
 
@@ -2627,7 +2871,7 @@ size_t Expr::RefTo::hash_code() const {
   seed ^= std::hash<decltype(component)>()(component) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::RefTo &x) { return x.dump(os); }
+namespace Expr { std::ostream &operator<<(std::ostream &os, const Expr::RefTo &x) { return x.dump(os); } }
 std::ostream &Expr::RefTo::dump(std::ostream &os) const {
   os << "RefTo(";
   os << lhs;
@@ -2642,10 +2886,12 @@ std::ostream &Expr::RefTo::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Expr::RefTo::operator==(const Expr::RefTo& rhs) const {
+  return (this->lhs == rhs.lhs) && ( (!this->idx && !rhs.idx) || (this->idx && rhs.idx && *this->idx == *rhs.idx) ) && (this->component == rhs.component);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Expr::RefTo::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Expr::RefTo&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->lhs == rhs.lhs) && ( (!this->idx && !rhs.idx) || (this->idx && rhs.idx && *this->idx == *rhs.idx) ) && (this->component == rhs.component);
+  return this->operator==(static_cast<const Expr::RefTo&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Expr::RefTo::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<RefTo>(*this)); }
 
@@ -2657,7 +2903,7 @@ size_t Expr::Alloc::hash_code() const {
   seed ^= std::hash<decltype(size)>()(size) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::Alloc &x) { return x.dump(os); }
+namespace Expr { std::ostream &operator<<(std::ostream &os, const Expr::Alloc &x) { return x.dump(os); } }
 std::ostream &Expr::Alloc::dump(std::ostream &os) const {
   os << "Alloc(";
   os << component;
@@ -2666,10 +2912,12 @@ std::ostream &Expr::Alloc::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Expr::Alloc::operator==(const Expr::Alloc& rhs) const {
+  return (this->component == rhs.component) && (this->size == rhs.size);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Expr::Alloc::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Expr::Alloc&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->component == rhs.component) && (this->size == rhs.size);
+  return this->operator==(static_cast<const Expr::Alloc&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Expr::Alloc::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Alloc>(*this)); }
 
@@ -2685,7 +2933,7 @@ size_t Expr::Invoke::hash_code() const {
   seed ^= std::hash<decltype(rtn)>()(rtn) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Expr::operator<<(std::ostream &os, const Expr::Invoke &x) { return x.dump(os); }
+namespace Expr { std::ostream &operator<<(std::ostream &os, const Expr::Invoke &x) { return x.dump(os); } }
 std::ostream &Expr::Invoke::dump(std::ostream &os) const {
   os << "Invoke(";
   os << name;
@@ -2721,10 +2969,12 @@ std::ostream &Expr::Invoke::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Expr::Invoke::operator==(const Expr::Invoke& rhs) const {
+  return (this->name == rhs.name) && std::equal(this->tpeArgs.begin(), this->tpeArgs.end(), rhs.tpeArgs.begin(), [](auto &&l, auto &&r) { return l == r; }) && ( (!this->receiver && !rhs.receiver) || (this->receiver && rhs.receiver && *this->receiver == *rhs.receiver) ) && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && std::equal(this->captures.begin(), this->captures.end(), rhs.captures.begin(), [](auto &&l, auto &&r) { return l == r; }) && (this->rtn == rhs.rtn);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Expr::Invoke::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Expr::Invoke&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->name == rhs.name) && std::equal(this->tpeArgs.begin(), this->tpeArgs.end(), rhs.tpeArgs.begin(), [](auto &&l, auto &&r) { return l == r; }) && ( (!this->receiver && !rhs.receiver) || (this->receiver && rhs.receiver && *this->receiver == *rhs.receiver) ) && std::equal(this->args.begin(), this->args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && std::equal(this->captures.begin(), this->captures.end(), rhs.captures.begin(), [](auto &&l, auto &&r) { return l == r; }) && (this->rtn == rhs.rtn);
+  return this->operator==(static_cast<const Expr::Invoke&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Expr::Invoke::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Invoke>(*this)); }
 
@@ -2732,7 +2982,7 @@ Stmt::Base::Base() = default;
 uint32_t Stmt::Any::id() const { return _v->id(); }
 size_t Stmt::Any::hash_code() const { return _v->hash_code(); }
 std::ostream &Stmt::Any::dump(std::ostream &os) const { return _v->dump(os); }
-std::ostream &Stmt::operator<<(std::ostream &os, const Any &x) { return x.dump(os); }
+namespace Stmt { std::ostream &operator<<(std::ostream &os, const Any &x) { return x.dump(os); } }
 bool Stmt::Any::operator==(const Any &rhs) const { return _v->operator==(*rhs._v) ; }
 bool Stmt::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v) ; }
 
@@ -2743,7 +2993,7 @@ size_t Stmt::Block::hash_code() const {
   seed ^= std::hash<decltype(stmts)>()(stmts) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Block &x) { return x.dump(os); }
+namespace Stmt { std::ostream &operator<<(std::ostream &os, const Stmt::Block &x) { return x.dump(os); } }
 std::ostream &Stmt::Block::dump(std::ostream &os) const {
   os << "Block(";
   os << '{';
@@ -2755,10 +3005,12 @@ std::ostream &Stmt::Block::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Stmt::Block::operator==(const Stmt::Block& rhs) const {
+  return std::equal(this->stmts.begin(), this->stmts.end(), rhs.stmts.begin(), [](auto &&l, auto &&r) { return l == r; });
+}
 [[nodiscard]] POLYREGION_EXPORT bool Stmt::Block::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Stmt::Block&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return std::equal(this->stmts.begin(), this->stmts.end(), rhs.stmts.begin(), [](auto &&l, auto &&r) { return l == r; });
+  return this->operator==(static_cast<const Stmt::Block&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Stmt::Block::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Block>(*this)); }
 
@@ -2769,17 +3021,19 @@ size_t Stmt::Comment::hash_code() const {
   seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Comment &x) { return x.dump(os); }
+namespace Stmt { std::ostream &operator<<(std::ostream &os, const Stmt::Comment &x) { return x.dump(os); } }
 std::ostream &Stmt::Comment::dump(std::ostream &os) const {
   os << "Comment(";
   os << '"' << value << '"';
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Stmt::Comment::operator==(const Stmt::Comment& rhs) const {
+  return (this->value == rhs.value);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Stmt::Comment::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Stmt::Comment&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->value == rhs.value);
+  return this->operator==(static_cast<const Stmt::Comment&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Stmt::Comment::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Comment>(*this)); }
 
@@ -2791,7 +3045,7 @@ size_t Stmt::Var::hash_code() const {
   seed ^= std::hash<decltype(expr)>()(expr) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Var &x) { return x.dump(os); }
+namespace Stmt { std::ostream &operator<<(std::ostream &os, const Stmt::Var &x) { return x.dump(os); } }
 std::ostream &Stmt::Var::dump(std::ostream &os) const {
   os << "Var(";
   os << name;
@@ -2804,10 +3058,12 @@ std::ostream &Stmt::Var::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Stmt::Var::operator==(const Stmt::Var& rhs) const {
+  return (this->name == rhs.name) && ( (!this->expr && !rhs.expr) || (this->expr && rhs.expr && *this->expr == *rhs.expr) );
+}
 [[nodiscard]] POLYREGION_EXPORT bool Stmt::Var::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Stmt::Var&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->name == rhs.name) && ( (!this->expr && !rhs.expr) || (this->expr && rhs.expr && *this->expr == *rhs.expr) );
+  return this->operator==(static_cast<const Stmt::Var&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Stmt::Var::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Var>(*this)); }
 
@@ -2820,7 +3076,7 @@ size_t Stmt::Mut::hash_code() const {
   seed ^= std::hash<decltype(copy)>()(copy) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Mut &x) { return x.dump(os); }
+namespace Stmt { std::ostream &operator<<(std::ostream &os, const Stmt::Mut &x) { return x.dump(os); } }
 std::ostream &Stmt::Mut::dump(std::ostream &os) const {
   os << "Mut(";
   os << name;
@@ -2831,10 +3087,12 @@ std::ostream &Stmt::Mut::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Stmt::Mut::operator==(const Stmt::Mut& rhs) const {
+  return (this->name == rhs.name) && (this->expr == rhs.expr) && (this->copy == rhs.copy);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Stmt::Mut::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Stmt::Mut&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->name == rhs.name) && (this->expr == rhs.expr) && (this->copy == rhs.copy);
+  return this->operator==(static_cast<const Stmt::Mut&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Stmt::Mut::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Mut>(*this)); }
 
@@ -2847,7 +3105,7 @@ size_t Stmt::Update::hash_code() const {
   seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Update &x) { return x.dump(os); }
+namespace Stmt { std::ostream &operator<<(std::ostream &os, const Stmt::Update &x) { return x.dump(os); } }
 std::ostream &Stmt::Update::dump(std::ostream &os) const {
   os << "Update(";
   os << lhs;
@@ -2858,10 +3116,12 @@ std::ostream &Stmt::Update::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Stmt::Update::operator==(const Stmt::Update& rhs) const {
+  return (this->lhs == rhs.lhs) && (this->idx == rhs.idx) && (this->value == rhs.value);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Stmt::Update::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Stmt::Update&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->lhs == rhs.lhs) && (this->idx == rhs.idx) && (this->value == rhs.value);
+  return this->operator==(static_cast<const Stmt::Update&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Stmt::Update::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Update>(*this)); }
 
@@ -2874,7 +3134,7 @@ size_t Stmt::While::hash_code() const {
   seed ^= std::hash<decltype(body)>()(body) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::While &x) { return x.dump(os); }
+namespace Stmt { std::ostream &operator<<(std::ostream &os, const Stmt::While &x) { return x.dump(os); } }
 std::ostream &Stmt::While::dump(std::ostream &os) const {
   os << "While(";
   os << '{';
@@ -2895,10 +3155,12 @@ std::ostream &Stmt::While::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Stmt::While::operator==(const Stmt::While& rhs) const {
+  return std::equal(this->tests.begin(), this->tests.end(), rhs.tests.begin(), [](auto &&l, auto &&r) { return l == r; }) && (this->cond == rhs.cond) && std::equal(this->body.begin(), this->body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; });
+}
 [[nodiscard]] POLYREGION_EXPORT bool Stmt::While::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Stmt::While&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return std::equal(this->tests.begin(), this->tests.end(), rhs.tests.begin(), [](auto &&l, auto &&r) { return l == r; }) && (this->cond == rhs.cond) && std::equal(this->body.begin(), this->body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; });
+  return this->operator==(static_cast<const Stmt::While&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Stmt::While::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<While>(*this)); }
 
@@ -2908,11 +3170,14 @@ size_t Stmt::Break::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Break &x) { return x.dump(os); }
+namespace Stmt { std::ostream &operator<<(std::ostream &os, const Stmt::Break &x) { return x.dump(os); } }
 std::ostream &Stmt::Break::dump(std::ostream &os) const {
   os << "Break(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool Stmt::Break::operator==(const Stmt::Break& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Stmt::Break::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -2926,11 +3191,14 @@ size_t Stmt::Cont::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Cont &x) { return x.dump(os); }
+namespace Stmt { std::ostream &operator<<(std::ostream &os, const Stmt::Cont &x) { return x.dump(os); } }
 std::ostream &Stmt::Cont::dump(std::ostream &os) const {
   os << "Cont(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool Stmt::Cont::operator==(const Stmt::Cont& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool Stmt::Cont::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -2947,7 +3215,7 @@ size_t Stmt::Cond::hash_code() const {
   seed ^= std::hash<decltype(falseBr)>()(falseBr) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Cond &x) { return x.dump(os); }
+namespace Stmt { std::ostream &operator<<(std::ostream &os, const Stmt::Cond &x) { return x.dump(os); } }
 std::ostream &Stmt::Cond::dump(std::ostream &os) const {
   os << "Cond(";
   os << cond;
@@ -2968,10 +3236,12 @@ std::ostream &Stmt::Cond::dump(std::ostream &os) const {
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Stmt::Cond::operator==(const Stmt::Cond& rhs) const {
+  return (this->cond == rhs.cond) && std::equal(this->trueBr.begin(), this->trueBr.end(), rhs.trueBr.begin(), [](auto &&l, auto &&r) { return l == r; }) && std::equal(this->falseBr.begin(), this->falseBr.end(), rhs.falseBr.begin(), [](auto &&l, auto &&r) { return l == r; });
+}
 [[nodiscard]] POLYREGION_EXPORT bool Stmt::Cond::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Stmt::Cond&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->cond == rhs.cond) && std::equal(this->trueBr.begin(), this->trueBr.end(), rhs.trueBr.begin(), [](auto &&l, auto &&r) { return l == r; }) && std::equal(this->falseBr.begin(), this->falseBr.end(), rhs.falseBr.begin(), [](auto &&l, auto &&r) { return l == r; });
+  return this->operator==(static_cast<const Stmt::Cond&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Stmt::Cond::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Cond>(*this)); }
 
@@ -2982,17 +3252,19 @@ size_t Stmt::Return::hash_code() const {
   seed ^= std::hash<decltype(value)>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
 }
-std::ostream &Stmt::operator<<(std::ostream &os, const Stmt::Return &x) { return x.dump(os); }
+namespace Stmt { std::ostream &operator<<(std::ostream &os, const Stmt::Return &x) { return x.dump(os); } }
 std::ostream &Stmt::Return::dump(std::ostream &os) const {
   os << "Return(";
   os << value;
   os << ')';
   return os;
 }
+[[nodiscard]] POLYREGION_EXPORT bool Stmt::Return::operator==(const Stmt::Return& rhs) const {
+  return (this->value == rhs.value);
+}
 [[nodiscard]] POLYREGION_EXPORT bool Stmt::Return::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
-  auto rhs = static_cast<const Stmt::Return&>(rhs_); // NOLINT(*-pro-type-static-cast-downcast)
-  return (this->value == rhs.value);
+  return this->operator==(static_cast<const Stmt::Return&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Stmt::Return::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Return>(*this)); }
 
@@ -3171,7 +3443,7 @@ FunctionKind::Base::Base() = default;
 uint32_t FunctionKind::Any::id() const { return _v->id(); }
 size_t FunctionKind::Any::hash_code() const { return _v->hash_code(); }
 std::ostream &FunctionKind::Any::dump(std::ostream &os) const { return _v->dump(os); }
-std::ostream &FunctionKind::operator<<(std::ostream &os, const Any &x) { return x.dump(os); }
+namespace FunctionKind { std::ostream &operator<<(std::ostream &os, const Any &x) { return x.dump(os); } }
 bool FunctionKind::Any::operator==(const Any &rhs) const { return _v->operator==(*rhs._v) ; }
 bool FunctionKind::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v) ; }
 
@@ -3181,11 +3453,14 @@ size_t FunctionKind::Internal::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &FunctionKind::operator<<(std::ostream &os, const FunctionKind::Internal &x) { return x.dump(os); }
+namespace FunctionKind { std::ostream &operator<<(std::ostream &os, const FunctionKind::Internal &x) { return x.dump(os); } }
 std::ostream &FunctionKind::Internal::dump(std::ostream &os) const {
   os << "Internal(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool FunctionKind::Internal::operator==(const FunctionKind::Internal& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool FunctionKind::Internal::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -3199,11 +3474,14 @@ size_t FunctionKind::Exported::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &FunctionKind::operator<<(std::ostream &os, const FunctionKind::Exported &x) { return x.dump(os); }
+namespace FunctionKind { std::ostream &operator<<(std::ostream &os, const FunctionKind::Exported &x) { return x.dump(os); } }
 std::ostream &FunctionKind::Exported::dump(std::ostream &os) const {
   os << "Exported(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool FunctionKind::Exported::operator==(const FunctionKind::Exported& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool FunctionKind::Exported::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -3215,7 +3493,7 @@ FunctionAttr::Base::Base() = default;
 uint32_t FunctionAttr::Any::id() const { return _v->id(); }
 size_t FunctionAttr::Any::hash_code() const { return _v->hash_code(); }
 std::ostream &FunctionAttr::Any::dump(std::ostream &os) const { return _v->dump(os); }
-std::ostream &FunctionAttr::operator<<(std::ostream &os, const Any &x) { return x.dump(os); }
+namespace FunctionAttr { std::ostream &operator<<(std::ostream &os, const Any &x) { return x.dump(os); } }
 bool FunctionAttr::Any::operator==(const Any &rhs) const { return _v->operator==(*rhs._v) ; }
 bool FunctionAttr::Any::operator!=(const Any &rhs) const { return !_v->operator==(*rhs._v) ; }
 
@@ -3225,11 +3503,14 @@ size_t FunctionAttr::FPRelaxed::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &FunctionAttr::operator<<(std::ostream &os, const FunctionAttr::FPRelaxed &x) { return x.dump(os); }
+namespace FunctionAttr { std::ostream &operator<<(std::ostream &os, const FunctionAttr::FPRelaxed &x) { return x.dump(os); } }
 std::ostream &FunctionAttr::FPRelaxed::dump(std::ostream &os) const {
   os << "FPRelaxed(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool FunctionAttr::FPRelaxed::operator==(const FunctionAttr::FPRelaxed& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool FunctionAttr::FPRelaxed::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
@@ -3243,11 +3524,14 @@ size_t FunctionAttr::FPStrict::hash_code() const {
   size_t seed = variant_id;
   return seed;
 }
-std::ostream &FunctionAttr::operator<<(std::ostream &os, const FunctionAttr::FPStrict &x) { return x.dump(os); }
+namespace FunctionAttr { std::ostream &operator<<(std::ostream &os, const FunctionAttr::FPStrict &x) { return x.dump(os); } }
 std::ostream &FunctionAttr::FPStrict::dump(std::ostream &os) const {
   os << "FPStrict(";
   os << ')';
   return os;
+}
+[[nodiscard]] POLYREGION_EXPORT bool FunctionAttr::FPStrict::operator==(const FunctionAttr::FPStrict& rhs) const {
+  return true;
 }
 [[nodiscard]] POLYREGION_EXPORT bool FunctionAttr::FPStrict::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;
