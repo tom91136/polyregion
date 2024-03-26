@@ -91,9 +91,10 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
 
                  compiler::initialise();
                  std::cout << "[POLYC] Compiling program:\n";
-                 for (auto &def : program.defs) {
-                   std::cout << def << "\n";
-                 }
+                 std::cout<< "=================" <<std::endl;
+                 std::cout << repr(program) << "\n";
+                 std::cout<< "=================" <<std::endl;
+
                  auto compilation = compiler::compile(program, compiler::Options{target, rawArch}, opt);
                  if (verbose) std::cerr << repr(compilation) << std::endl;
                  if (!compilation.messages.empty()) std::cerr << compilation.messages << std::endl;

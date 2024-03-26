@@ -10,7 +10,7 @@
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
 
 #include "llvmc.h"
-//#include "utils.hpp"
+// #include "utils.hpp"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
@@ -53,8 +53,8 @@ private:
 
 public:
   static ValPtr sizeOf(llvm::IRBuilder<> &B, llvm::LLVMContext &C, llvm::Type *ptrTpe);
-  static ValPtr load(llvm::IRBuilder<> &B, ValPtr rhs, llvm::Type *ty);
-  static ValPtr allocaAS(llvm::IRBuilder<> &B,  llvm::Type *ty, unsigned int AS, const std::string & key);
+
+  static ValPtr allocaAS(llvm::IRBuilder<> &B, llvm::Type *ty, unsigned int AS, const std::string &key);
 
   class AstTransformer;
 
@@ -80,9 +80,8 @@ public:
     unsigned int GlobalAS = 0;
     unsigned int LocalAS = 0;
 
-
     using StructMemberIndexTable = Map<std::string, size_t>;
-    struct StructInfo{
+    struct StructInfo {
       StructDef def;
       llvm::StructType *tpe;
       StructMemberIndexTable memberIndices;
@@ -96,6 +95,9 @@ public:
     Opt<Pair<std::vector<llvm::StructType *>, T>> findSymbolInHeirachy( //
         const Sym &structName, std::function<Opt<T>(StructDef, llvm::StructType *, StructMemberIndexTable)> f,
         const std::vector<llvm::StructType *> &xs = {}) const;
+
+    ValPtr load(ValPtr rhs, llvm::Type *ty);
+    ValPtr store(ValPtr rhsVal, ValPtr lhsPtr);
 
     ValPtr findStackVar(const Named &named);
     ValPtr mkSelectPtr(const Term::Select &select);

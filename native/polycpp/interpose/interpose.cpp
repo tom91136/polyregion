@@ -44,10 +44,10 @@ void interpose(llvm::Module &M) {
   using namespace llvm;
 
   static constexpr std::pair<StringLiteral, StringLiteral> ReplaceMap[]{
-      //      {"aligned_alloc", "__polyregion_aligned_alloc"},
+      {"aligned_alloc", "__polyregion_aligned_alloc"},
       //      {"calloc", "__polyregion_calloc"},
-      //      {"free", "__polyregion_free"},
-      //      {"malloc", "__polyregion_malloc"},
+      {"free", "__polyregion_free"},
+      {"malloc", "__polyregion_malloc"},
       //      {"memalign", "__polyregion_aligned_alloc"},
       //      {"posix_memalign", "__polyregion_posix_aligned_alloc"},
       //      {"realloc", "__polyregion_realloc"},
@@ -70,14 +70,14 @@ void interpose(llvm::Module &M) {
       //      {"_ZnwmSt11align_val_t", "__polyregion_operator_new_aligned"},
       //      {"_ZnwmSt11align_val_tRKSt9nothrow_t", "__polyregion_operator_new_aligned_nothrow"},
       //      {"__builtin_calloc", "__polyregion_calloc"},
-      //      {"__builtin_free", "__polyregion_free"},
-      //      {"__builtin_malloc", "__polyregion_malloc"},
+      {"__builtin_free", "__polyregion_free"},
+      {"__builtin_malloc", "__polyregion_malloc"},
       //      {"__builtin_operator_delete", "__polyregion_operator_delete"},
       //      {"__builtin_operator_new", "__polyregion_operator_new"},
       //      {"__builtin_realloc", "__polyregion_realloc"},
       //      {"__libc_calloc", "__polyregion_calloc"},
-      //      {"__libc_free", "__polyregion_free"},
-      //      {"__libc_malloc", "__polyregion_malloc"},
+      {"__libc_free", "__polyregion_free"},
+      {"__libc_malloc", "__polyregion_malloc"},
       //      {"__libc_memalign", "__polyregion_aligned_alloc"},
       //      {"__libc_realloc", "__polyregion_realloc"}
   };
@@ -88,22 +88,21 @@ void interpose(llvm::Module &M) {
 
   using namespace aspartame;
 
-  auto dnr = M //
-             | collect([](const llvm::Function &F) {
-                 return F.getName().str() ^ starts_with("__polyregion")
-                            ? std::optional{&F}
-                            : std::nullopt;
-               }) //
-             | map([&](const llvm::Function *F) {
-                 std::unordered_set<const llvm::Function *> tree;
-                 traverseCallGraph(F, CG, tree);
-                 return std::tuple{F, tree};
-               }) |
-             to_vector();
+  auto dnr =
+      M //
+      |
+      collect([](const llvm::Function &F) { return F.getName().str() ^ starts_with("__polyregion") ? std::optional{&F} : std::nullopt; }) //
+      | map([&](const llvm::Function *F) {
+          std::unordered_set<const llvm::Function *> tree;
+          traverseCallGraph(F, CG, tree);
+          return std::tuple{F, tree};
+        }) |
+      to_vector();
 
   llvm::errs() << ">>>>\n"
                << (dnr ^ mk_string("\n", [](auto F, auto xs) {
-                     return F->getName().str() + " = " + (xs ^ filter([&](auto x ) { return x != F; }) ^ mk_string(", ", [](auto ff) { return ff->getName().str(); }));
+                     return F->getName().str() + " = " +
+                            (xs ^ filter([&](auto x) { return x != F; }) ^ mk_string(", ", [](auto ff) { return ff->getName().str(); }));
                    }));
   llvm::errs() << "===\n";
 

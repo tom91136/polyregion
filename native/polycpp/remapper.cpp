@@ -887,12 +887,96 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
 
           auto args = expr->arguments() | map([&](auto &arg) { return r.newVar(handleExpr(arg, r)); }) | to_vector();
           std::unordered_map<std::string, std::function<Expr::Any()>> specs{
-              {"gpu_global_idx", [&]() -> Expr::Any {
+              {"gpu_global_idx",
+               [&]() -> Expr::Any {
                  if (args.size() != 1) {
                    r.push(Stmt::Comment("illegal arg count for gpu_global_idx"));
                    return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
                  } else return Expr::Any(Expr::SpecOp(Spec::GpuGlobalIdx(args[0])));
-               }}};
+               }},
+              {"gpu_global_size",
+               [&]() -> Expr::Any {
+                 if (args.size() != 1) {
+                   r.push(Stmt::Comment("illegal arg count for gpu_global_size"));
+                   return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
+                 } else return Expr::Any(Expr::SpecOp(Spec::GpuGlobalSize(args[0])));
+               }},
+
+              {"gpu_group_idx",
+               [&]() -> Expr::Any {
+                 if (args.size() != 1) {
+                   r.push(Stmt::Comment("illegal arg count for gpu_group_idx"));
+                   return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
+                 } else return Expr::Any(Expr::SpecOp(Spec::GpuGroupIdx(args[0])));
+               }},
+              {"gpu_group_size",
+               [&]() -> Expr::Any {
+                 if (args.size() != 1) {
+                   r.push(Stmt::Comment("illegal arg count for gpu_group_size"));
+                   return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
+                 } else return Expr::Any(Expr::SpecOp(Spec::GpuGroupSize(args[0])));
+               }},
+
+              {"gpu_local_idx",
+               [&]() -> Expr::Any {
+                 if (args.size() != 1) {
+                   r.push(Stmt::Comment("illegal arg count for gpu_local_idx"));
+                   return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
+                 } else return Expr::Any(Expr::SpecOp(Spec::GpuLocalIdx(args[0])));
+               }},
+              {"gpu_local_size",
+               [&]() -> Expr::Any {
+                 if (args.size() != 1) {
+                   r.push(Stmt::Comment("illegal arg count for gpu_local_size"));
+                   return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
+                 } else return Expr::Any(Expr::SpecOp(Spec::GpuLocalSize(args[0])));
+               }},
+
+              {"gpu_barrier_global",
+               [&]() -> Expr::Any {
+                 if (args.size() != 0) {
+                   r.push(Stmt::Comment("illegal arg count for gpu_barrier_global"));
+                   return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
+                 } else return Expr::Any(Expr::SpecOp(Spec::GpuBarrierGlobal()));
+               }},
+              {"gpu_barrier_local",
+               [&]() -> Expr::Any {
+                 if (args.size() != 0) {
+                   r.push(Stmt::Comment("illegal arg count for gpu_barrier_local"));
+                   return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
+                 } else return Expr::Any(Expr::SpecOp(Spec::GpuBarrierLocal()));
+               }},
+              {"gpu_barrier_all",
+               [&]() -> Expr::Any {
+                 if (args.size() != 0) {
+                   r.push(Stmt::Comment("illegal arg count for gpu_barrier_all"));
+                   return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
+                 } else return Expr::Any(Expr::SpecOp(Spec::GpuBarrierAll()));
+               }},
+
+              {"gpu_fence_global",
+               [&]() -> Expr::Any {
+                 if (args.size() != 0) {
+                   r.push(Stmt::Comment("illegal arg count for gpu_fence_global"));
+                   return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
+                 } else return Expr::Any(Expr::SpecOp(Spec::GpuFenceGlobal()));
+               }},
+              {"gpu_fence_local",
+               [&]() -> Expr::Any {
+                 if (args.size() != 0) {
+                   r.push(Stmt::Comment("illegal arg count for gpu_fence_local"));
+                   return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
+                 } else return Expr::Any(Expr::SpecOp(Spec::GpuFenceLocal()));
+               }},
+              {"gpu_fence_all",
+               [&]() -> Expr::Any {
+                 if (args.size() != 0) {
+                   r.push(Stmt::Comment("illegal arg count for gpu_fence_all"));
+                   return Expr::Alias(Term::Poison(handleType(expr->getType(), r)));
+                 } else return Expr::Any(Expr::SpecOp(Spec::GpuFenceAll()));
+               }}
+
+          };
 
           return specs                               //
                  ^ get(builtinName)                  //

@@ -37,8 +37,7 @@ POLYREGION_EXPORT extern "C" inline void __polyregion_select_platform() { // NOL
 
   const auto setupBackend = [](Backend backend) {
     if (auto errorOrPlatform = Platform::of(backend); std::holds_alternative<std::string>(errorOrPlatform)) {
-      std::fprintf(stderr, "%s Backend %s failed to initialise: %s\n", //
-                   __polyregion_prefix, to_string(backend).data(), std::get<std::string>(errorOrPlatform).c_str());
+      POLYSTL_LOG("Backend %s failed to initialise: %s", to_string(backend).data(), std::get<std::string>(errorOrPlatform).c_str());
     } else __polyregion_selected_platform = std::move(std::get<std::unique_ptr<Platform>>(errorOrPlatform));
   };
 
@@ -47,15 +46,14 @@ POLYREGION_EXPORT extern "C" inline void __polyregion_select_platform() { // NOL
     std::transform(name.begin(), name.end(), name.begin(), [](auto &c) { return std::tolower(c); });
     if (auto it = NameToBackend.find(name); it != NameToBackend.end()) setupBackend(it->second);
     else {
-      std::fprintf(stderr, "%s Backend %s is not a supported value for %s; options are %s={", //
-                   __polyregion_prefix, env, PlatformSelectorEnv, PlatformSelectorEnv);
+      POLYSTL_LOG("Backend %s is not a supported value for %s; options are %s={", env, PlatformSelectorEnv, PlatformSelectorEnv);
       size_t i = 0;
       for (auto &[k, _] : NameToBackend)
         std::fprintf(stderr, "%s%s", k.c_str(), i++ < NameToBackend.size() - 1 ? "|" : "");
       std::fprintf(stderr, "}\n");
     }
   } else {
-    std::fprintf(stderr, "%s Backend selector %s is not set: using default host platform\n", __polyregion_prefix, PlatformSelectorEnv);
+    POLYSTL_LOG("Backend selector %s is not set: using default host platform", PlatformSelectorEnv);
     setupBackend(Backend::RelocatableObject);
   }
 }
@@ -80,15 +78,15 @@ POLYREGION_EXPORT extern "C" inline void __polyregion_select_device(polyregion::
 
 POLYREGION_EXPORT extern "C" void __polyregion_initialise_runtime() { // NOLINT(*-reserved-identifier)
   if (!__polyregion_selected_platform) {
-    std::fprintf(stderr, "%s Initialising backends...\n", __polyregion_prefix);
+    POLYSTL_LOG("Initialising backends... (addr=%p)", (void *)&__polyregion_initialise_runtime);
     __polyregion_select_platform();
     if (__polyregion_selected_platform) __polyregion_select_device(*__polyregion_selected_platform);
     if (__polyregion_selected_device) __polyregion_selected_queue = __polyregion_selected_device->createQueue();
     if (__polyregion_selected_platform) {
-      std::fprintf(stderr, "%s - Platform: %s [%s, %s] Device: %s\n", __polyregion_prefix,
-                   __polyregion_selected_platform->name().c_str(),           //
-                   to_string(__polyregion_selected_platform->kind()).data(), //
-                   to_string(__polyregion_selected_platform->moduleFormat()).data(), __polyregion_selected_device->name().c_str());
+      POLYSTL_LOG("- Platform: %s [%s, %s] Device: %s",
+                  __polyregion_selected_platform->name().c_str(),           //
+                  to_string(__polyregion_selected_platform->kind()).data(), //
+                  to_string(__polyregion_selected_platform->moduleFormat()).data(), __polyregion_selected_device->name().c_str());
     }
   }
 }
@@ -97,24 +95,24 @@ POLYREGION_EXPORT extern "C" inline bool
 __polyregion_load_kernel_object(const char *moduleName, const RuntimeKernelObject &object) { // NOLINT(*-reserved-identifier)
   __polyregion_initialise_runtime();
   if (!__polyregion_selected_platform || !__polyregion_selected_device || !__polyregion_selected_queue) {
-    std::fprintf(stderr, "%s No device/queue in %s\n", __polyregion_prefix, __func__);
+    POLYSTL_LOG("No device/queue in %s", __func__);
     return false;
   }
 
   if (__polyregion_selected_platform->kind() != object.kind || __polyregion_selected_platform->moduleFormat() != object.format) {
-    std::fprintf(stderr, "%s Skipping incompatible image: %s [%s] (targeting %s [%s])\n", __polyregion_prefix,
-                 to_string(object.kind).data(), //
-                 to_string(object.format).data(),
-                 to_string(__polyregion_selected_platform->kind()).data(), //
-                 to_string(__polyregion_selected_platform->moduleFormat()).data());
+    POLYSTL_LOG("Skipping incompatible image: %s [%s] (targeting %s [%s])",
+                to_string(object.kind).data(), //
+                to_string(object.format).data(),
+                to_string(__polyregion_selected_platform->kind()).data(), //
+                to_string(__polyregion_selected_platform->moduleFormat()).data());
     return false;
   }
 
-  std::fprintf(stderr, "%s Found compatible image: %s [%s] (targeting %s [%s])\n", __polyregion_prefix,
-               to_string(object.kind).data(), //
-               to_string(object.format).data(),
-               to_string(__polyregion_selected_platform->kind()).data(), //
-               to_string(__polyregion_selected_platform->moduleFormat()).data());
+  POLYSTL_LOG("Found compatible image: %s [%s] (targeting %s [%s])",
+              to_string(object.kind).data(), //
+              to_string(object.format).data(),
+              to_string(__polyregion_selected_platform->kind()).data(), //
+              to_string(__polyregion_selected_platform->moduleFormat()).data());
   if (!__polyregion_selected_device->moduleLoaded(moduleName)) //
     __polyregion_selected_device->loadModule(moduleName, std::string(object.image, object.image + object.imageLength));
   return true;
@@ -123,7 +121,7 @@ __polyregion_load_kernel_object(const char *moduleName, const RuntimeKernelObjec
 POLYREGION_EXPORT extern "C" bool __polyregion_platform_kind(PlatformKind &kind) { // NOLINT(*-reserved-identifier)
   __polyregion_initialise_runtime();
   if (!__polyregion_selected_platform || !__polyregion_selected_device || !__polyregion_selected_queue) {
-    std::fprintf(stderr, "%s No device/queue in %s\n", __polyregion_prefix, __func__);
+    POLYSTL_LOG("No device/queue in %s", __func__);
     return false;
   }
   kind = __polyregion_selected_platform->kind();
@@ -134,17 +132,17 @@ POLYREGION_EXPORT extern "C" bool __polyregion_dispatch_hostthreaded( // NOLINT(
     size_t global, void *functorData, const char *moduleName, const RuntimeKernelObject &object) {
   if (!__polyregion_load_kernel_object(moduleName, object)) return false;
   const static auto fn = __func__;
-  std::fprintf(stderr, "%s <%s:%s:%zu> Dispatch hostthread\n", __polyregion_prefix, fn, moduleName, global);
+  POLYSTL_LOG("<%s:%s:%zu> Dispatch hostthread", fn, moduleName, global);
   polyregion::concurrency_utils::waitAll([&](auto &cb) {
     // FIXME why is the last arg (Void here, can be any type) needed?
     ArgBuffer buffer{{Type::Long64, nullptr}, {Type::Ptr, &functorData}, {Type::Void, nullptr}};
     __polyregion_selected_queue->enqueueInvokeAsync(moduleName, "kernel", buffer, Policy{Dim3{global, 1, 1}}, [&]() {
-      std::fprintf(stderr, "%s <%s:%s:%zu> Unlatched\n", __polyregion_prefix, fn, moduleName, global);
+      POLYSTL_LOG("<%s:%s:%zu> Unlatched", fn, moduleName, global);
       cb();
     });
   });
 
-  std::fprintf(stderr, "%s <%s:%s:%zu> Done\n", __polyregion_prefix, fn, moduleName, global);
+  POLYSTL_LOG("<%s:%s:%zu> Done", fn, moduleName, global);
   return true;
 }
 
@@ -153,7 +151,7 @@ POLYREGION_EXPORT extern "C" bool __polyregion_dispatch_managed( // NOLINT(*-res
     const RuntimeKernelObject &object) {
   if (!__polyregion_load_kernel_object(moduleName, object)) return false;
   const static auto fn = __func__;
-  std::fprintf(stderr, "%s <%s:%s:%zu> Dispatch managed, arg=%zu bytes\n", __polyregion_prefix, fn, moduleName, global, functorDataSize);
+  POLYSTL_LOG("<%s:%s:%zu> Dispatch managed, arg=%zu bytes", fn, moduleName, global, functorDataSize);
   auto functorDevicePtr = __polyregion_selected_device->mallocDevice(functorDataSize, Access::RW);
   polyregion::concurrency_utils::waitAll([&](auto &cb) {
     __polyregion_selected_queue->enqueueHostToDeviceAsync(functorData, functorDevicePtr, functorDataSize, [&]() { cb(); });
@@ -164,13 +162,13 @@ POLYREGION_EXPORT extern "C" bool __polyregion_dispatch_managed( // NOLINT(*-res
         moduleName, "kernel", buffer, //
         Policy{                       //
                Dim3{global, 1, 1},    //
-               local > 0 ? std::optional{std::pair<Dim3, size_t>{Dim3{local, 0, 0}, localMemBytes}} : std::nullopt},
+               local > 0 ? std::optional{std::pair<Dim3, size_t>{Dim3{local, 1, 1}, localMemBytes}} : std::nullopt},
         [&]() {
-          std::fprintf(stderr, "%s <%s:%s:%zu> Unlatched\n", __polyregion_prefix, fn, moduleName, global);
+          POLYSTL_LOG("<%s:%s:%zu> Unlatched", fn, moduleName, global);
           cb();
         });
   });
   __polyregion_selected_device->freeDevice(functorDevicePtr);
-  std::fprintf(stderr, "%s <%s:%s:%zu> Done\n", __polyregion_prefix, fn, moduleName, global);
+  POLYSTL_LOG("<%s:%s:%zu> Done", fn, moduleName, global);
   return true;
 }

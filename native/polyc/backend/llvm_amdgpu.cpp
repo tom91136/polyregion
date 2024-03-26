@@ -38,7 +38,7 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(LLVMBackend::AstTransformer &xform
     // 159:128  grid_size_y;  (32*3+(1*32)==128)
     // 191:160  grid_size_z;  (32*3+(2*32)==160)
     auto size = xform.B.CreateInBoundsGEP(i32Ty, i32ptr, llvm::ConstantInt::get(i32Ty, 3 + dim));
-    return LLVMBackend::load(xform.B, size, i32Ty);
+    return xform.load(size, i32Ty);
   };
 
   // see llvm/libclc/amdgcn-amdhsa/lib/workitem/get_local_size.cl
@@ -50,7 +50,7 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(LLVMBackend::AstTransformer &xform
     // 63:48   workgroup_size_y (16*2+(1*16)==48)
     // 79:64   workgroup_size_z (16*2+(2*16)==64)
     auto size = xform.B.CreateInBoundsGEP(i16Ty, i16ptr, llvm::ConstantInt::get(i16Ty, 2 + dim));
-    return xform.B.CreateIntCast(LLVMBackend::load(xform.B, size, i16Ty), llvm::Type::getInt32Ty(xform.C), false);
+    return xform.B.CreateIntCast(xform.load(size, i16Ty), llvm::Type::getInt32Ty(xform.C), false);
   };
 
   auto globalIdU32 = [&](llvm::Intrinsic::ID workgroupId, llvm::Intrinsic::ID workitemId, size_t dim) -> ValPtr {
@@ -74,7 +74,7 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(LLVMBackend::AstTransformer &xform
                                                   xform.mkTermVal(Term::IntS32Const(0)))));
   };
 
-  return expr.op.match_total(                                                         //
+  return expr.op.match_total(                                                            //
       [&](const Spec::Assert &v) -> ValPtr { throw BackendException("unimplemented"); }, //
       [&](const Spec::GpuBarrierGlobal &v) -> ValPtr {
         // work_group_barrier (__memory_scope, 1, 1)
@@ -145,7 +145,7 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(LLVMBackend::AstTransformer &xform
       });
 }
 ValPtr AMDGPUTargetSpecificHandler::mkMathVal(LLVMBackend::AstTransformer &xform, llvm::Function *fn, const Expr::MathOp &expr) {
-  return expr.op.match_total(                                                         //
+  return expr.op.match_total(                                                            //
       [&](const Math::Abs &v) -> ValPtr { throw BackendException("unimplemented"); },    //
       [&](const Math::Sin &v) -> ValPtr { throw BackendException("unimplemented"); },    //
       [&](const Math::Cos &v) -> ValPtr { throw BackendException("unimplemented"); },    //
