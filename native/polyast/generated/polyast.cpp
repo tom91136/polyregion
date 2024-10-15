@@ -72,6 +72,7 @@ std::ostream &TypeKind::None::dump(std::ostream &os) const {
   return true;
 }
 TypeKind::None::operator TypeKind::Any() const { return std::static_pointer_cast<Base>(std::make_shared<None>(*this)); }
+TypeKind::Any TypeKind::None::widen() const { return Any(*this); };
 
 TypeKind::Ref::Ref() noexcept : TypeKind::Base() {}
 uint32_t TypeKind::Ref::id() const { return variant_id; };
@@ -93,6 +94,7 @@ std::ostream &TypeKind::Ref::dump(std::ostream &os) const {
   return true;
 }
 TypeKind::Ref::operator TypeKind::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Ref>(*this)); }
+TypeKind::Any TypeKind::Ref::widen() const { return Any(*this); };
 
 TypeKind::Integral::Integral() noexcept : TypeKind::Base() {}
 uint32_t TypeKind::Integral::id() const { return variant_id; };
@@ -114,6 +116,7 @@ std::ostream &TypeKind::Integral::dump(std::ostream &os) const {
   return true;
 }
 TypeKind::Integral::operator TypeKind::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Integral>(*this)); }
+TypeKind::Any TypeKind::Integral::widen() const { return Any(*this); };
 
 TypeKind::Fractional::Fractional() noexcept : TypeKind::Base() {}
 uint32_t TypeKind::Fractional::id() const { return variant_id; };
@@ -135,6 +138,7 @@ std::ostream &TypeKind::Fractional::dump(std::ostream &os) const {
   return true;
 }
 TypeKind::Fractional::operator TypeKind::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Fractional>(*this)); }
+TypeKind::Any TypeKind::Fractional::widen() const { return Any(*this); };
 
 Type::Base::Base(TypeKind::Any kind) noexcept : kind(std::move(kind)) {}
 uint32_t Type::Any::id() const { return _v->id(); }
@@ -165,6 +169,7 @@ std::ostream &Type::Float16::dump(std::ostream &os) const {
   return true;
 }
 Type::Float16::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Float16>(*this)); }
+Type::Any Type::Float16::widen() const { return Any(*this); };
 
 Type::Float32::Float32() noexcept : Type::Base(TypeKind::Fractional()) {}
 uint32_t Type::Float32::id() const { return variant_id; };
@@ -186,6 +191,7 @@ std::ostream &Type::Float32::dump(std::ostream &os) const {
   return true;
 }
 Type::Float32::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Float32>(*this)); }
+Type::Any Type::Float32::widen() const { return Any(*this); };
 
 Type::Float64::Float64() noexcept : Type::Base(TypeKind::Fractional()) {}
 uint32_t Type::Float64::id() const { return variant_id; };
@@ -207,6 +213,7 @@ std::ostream &Type::Float64::dump(std::ostream &os) const {
   return true;
 }
 Type::Float64::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Float64>(*this)); }
+Type::Any Type::Float64::widen() const { return Any(*this); };
 
 Type::IntU8::IntU8() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::IntU8::id() const { return variant_id; };
@@ -228,6 +235,7 @@ std::ostream &Type::IntU8::dump(std::ostream &os) const {
   return true;
 }
 Type::IntU8::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntU8>(*this)); }
+Type::Any Type::IntU8::widen() const { return Any(*this); };
 
 Type::IntU16::IntU16() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::IntU16::id() const { return variant_id; };
@@ -249,6 +257,7 @@ std::ostream &Type::IntU16::dump(std::ostream &os) const {
   return true;
 }
 Type::IntU16::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntU16>(*this)); }
+Type::Any Type::IntU16::widen() const { return Any(*this); };
 
 Type::IntU32::IntU32() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::IntU32::id() const { return variant_id; };
@@ -270,6 +279,7 @@ std::ostream &Type::IntU32::dump(std::ostream &os) const {
   return true;
 }
 Type::IntU32::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntU32>(*this)); }
+Type::Any Type::IntU32::widen() const { return Any(*this); };
 
 Type::IntU64::IntU64() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::IntU64::id() const { return variant_id; };
@@ -291,6 +301,7 @@ std::ostream &Type::IntU64::dump(std::ostream &os) const {
   return true;
 }
 Type::IntU64::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntU64>(*this)); }
+Type::Any Type::IntU64::widen() const { return Any(*this); };
 
 Type::IntS8::IntS8() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::IntS8::id() const { return variant_id; };
@@ -312,6 +323,7 @@ std::ostream &Type::IntS8::dump(std::ostream &os) const {
   return true;
 }
 Type::IntS8::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntS8>(*this)); }
+Type::Any Type::IntS8::widen() const { return Any(*this); };
 
 Type::IntS16::IntS16() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::IntS16::id() const { return variant_id; };
@@ -333,6 +345,7 @@ std::ostream &Type::IntS16::dump(std::ostream &os) const {
   return true;
 }
 Type::IntS16::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntS16>(*this)); }
+Type::Any Type::IntS16::widen() const { return Any(*this); };
 
 Type::IntS32::IntS32() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::IntS32::id() const { return variant_id; };
@@ -354,6 +367,7 @@ std::ostream &Type::IntS32::dump(std::ostream &os) const {
   return true;
 }
 Type::IntS32::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntS32>(*this)); }
+Type::Any Type::IntS32::widen() const { return Any(*this); };
 
 Type::IntS64::IntS64() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::IntS64::id() const { return variant_id; };
@@ -375,6 +389,7 @@ std::ostream &Type::IntS64::dump(std::ostream &os) const {
   return true;
 }
 Type::IntS64::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntS64>(*this)); }
+Type::Any Type::IntS64::widen() const { return Any(*this); };
 
 Type::Nothing::Nothing() noexcept : Type::Base(TypeKind::None()) {}
 uint32_t Type::Nothing::id() const { return variant_id; };
@@ -396,6 +411,7 @@ std::ostream &Type::Nothing::dump(std::ostream &os) const {
   return true;
 }
 Type::Nothing::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Nothing>(*this)); }
+Type::Any Type::Nothing::widen() const { return Any(*this); };
 
 Type::Unit0::Unit0() noexcept : Type::Base(TypeKind::None()) {}
 uint32_t Type::Unit0::id() const { return variant_id; };
@@ -417,6 +433,7 @@ std::ostream &Type::Unit0::dump(std::ostream &os) const {
   return true;
 }
 Type::Unit0::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Unit0>(*this)); }
+Type::Any Type::Unit0::widen() const { return Any(*this); };
 
 Type::Bool1::Bool1() noexcept : Type::Base(TypeKind::Integral()) {}
 uint32_t Type::Bool1::id() const { return variant_id; };
@@ -438,6 +455,7 @@ std::ostream &Type::Bool1::dump(std::ostream &os) const {
   return true;
 }
 Type::Bool1::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Bool1>(*this)); }
+Type::Any Type::Bool1::widen() const { return Any(*this); };
 
 Type::Struct::Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args, std::vector<Sym> parents) noexcept : Type::Base(TypeKind::Ref()), name(std::move(name)), tpeVars(std::move(tpeVars)), args(std::move(args)), parents(std::move(parents)) {}
 uint32_t Type::Struct::id() const { return variant_id; };
@@ -485,6 +503,7 @@ std::ostream &Type::Struct::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Type::Struct&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Type::Struct::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Struct>(*this)); }
+Type::Any Type::Struct::widen() const { return Any(*this); };
 
 Type::Ptr::Ptr(Type::Any component, std::optional<int32_t> length, TypeSpace::Any space) noexcept : Type::Base(TypeKind::Ref()), component(std::move(component)), length(std::move(length)), space(std::move(space)) {}
 uint32_t Type::Ptr::id() const { return variant_id; };
@@ -518,6 +537,7 @@ std::ostream &Type::Ptr::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Type::Ptr&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Type::Ptr::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Ptr>(*this)); }
+Type::Any Type::Ptr::widen() const { return Any(*this); };
 
 Type::Var::Var(std::string name) noexcept : Type::Base(TypeKind::None()), name(std::move(name)) {}
 uint32_t Type::Var::id() const { return variant_id; };
@@ -541,6 +561,7 @@ std::ostream &Type::Var::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Type::Var&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Type::Var::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Var>(*this)); }
+Type::Any Type::Var::widen() const { return Any(*this); };
 
 Type::Exec::Exec(std::vector<std::string> tpeVars, std::vector<Type::Any> args, Type::Any rtn) noexcept : Type::Base(TypeKind::None()), tpeVars(std::move(tpeVars)), args(std::move(args)), rtn(std::move(rtn)) {}
 uint32_t Type::Exec::id() const { return variant_id; };
@@ -580,6 +601,7 @@ std::ostream &Type::Exec::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Type::Exec&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Type::Exec::operator Type::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Exec>(*this)); }
+Type::Any Type::Exec::widen() const { return Any(*this); };
 
 SourcePosition::SourcePosition(std::string file, int32_t line, std::optional<int32_t> col) noexcept : file(std::move(file)), line(line), col(std::move(col)) {}
 size_t SourcePosition::hash_code() const { 
@@ -647,6 +669,7 @@ std::ostream &Term::Select::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Term::Select&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::Select::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Select>(*this)); }
+Term::Any Term::Select::widen() const { return Any(*this); };
 
 Term::Poison::Poison(Type::Any t) noexcept : Term::Base(t), t(std::move(t)) {}
 uint32_t Term::Poison::id() const { return variant_id; };
@@ -670,6 +693,7 @@ std::ostream &Term::Poison::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Term::Poison&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::Poison::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Poison>(*this)); }
+Term::Any Term::Poison::widen() const { return Any(*this); };
 
 Term::Float16Const::Float16Const(float value) noexcept : Term::Base(Type::Float16()), value(value) {}
 uint32_t Term::Float16Const::id() const { return variant_id; };
@@ -693,6 +717,7 @@ std::ostream &Term::Float16Const::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Term::Float16Const&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::Float16Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Float16Const>(*this)); }
+Term::Any Term::Float16Const::widen() const { return Any(*this); };
 
 Term::Float32Const::Float32Const(float value) noexcept : Term::Base(Type::Float32()), value(value) {}
 uint32_t Term::Float32Const::id() const { return variant_id; };
@@ -716,6 +741,7 @@ std::ostream &Term::Float32Const::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Term::Float32Const&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::Float32Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Float32Const>(*this)); }
+Term::Any Term::Float32Const::widen() const { return Any(*this); };
 
 Term::Float64Const::Float64Const(double value) noexcept : Term::Base(Type::Float64()), value(value) {}
 uint32_t Term::Float64Const::id() const { return variant_id; };
@@ -739,6 +765,7 @@ std::ostream &Term::Float64Const::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Term::Float64Const&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::Float64Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Float64Const>(*this)); }
+Term::Any Term::Float64Const::widen() const { return Any(*this); };
 
 Term::IntU8Const::IntU8Const(int8_t value) noexcept : Term::Base(Type::IntU8()), value(value) {}
 uint32_t Term::IntU8Const::id() const { return variant_id; };
@@ -762,6 +789,7 @@ std::ostream &Term::IntU8Const::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Term::IntU8Const&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::IntU8Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntU8Const>(*this)); }
+Term::Any Term::IntU8Const::widen() const { return Any(*this); };
 
 Term::IntU16Const::IntU16Const(uint16_t value) noexcept : Term::Base(Type::IntU16()), value(value) {}
 uint32_t Term::IntU16Const::id() const { return variant_id; };
@@ -785,6 +813,7 @@ std::ostream &Term::IntU16Const::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Term::IntU16Const&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::IntU16Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntU16Const>(*this)); }
+Term::Any Term::IntU16Const::widen() const { return Any(*this); };
 
 Term::IntU32Const::IntU32Const(int32_t value) noexcept : Term::Base(Type::IntU32()), value(value) {}
 uint32_t Term::IntU32Const::id() const { return variant_id; };
@@ -808,6 +837,7 @@ std::ostream &Term::IntU32Const::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Term::IntU32Const&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::IntU32Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntU32Const>(*this)); }
+Term::Any Term::IntU32Const::widen() const { return Any(*this); };
 
 Term::IntU64Const::IntU64Const(int64_t value) noexcept : Term::Base(Type::IntU64()), value(value) {}
 uint32_t Term::IntU64Const::id() const { return variant_id; };
@@ -831,6 +861,7 @@ std::ostream &Term::IntU64Const::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Term::IntU64Const&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::IntU64Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntU64Const>(*this)); }
+Term::Any Term::IntU64Const::widen() const { return Any(*this); };
 
 Term::IntS8Const::IntS8Const(int8_t value) noexcept : Term::Base(Type::IntS8()), value(value) {}
 uint32_t Term::IntS8Const::id() const { return variant_id; };
@@ -854,6 +885,7 @@ std::ostream &Term::IntS8Const::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Term::IntS8Const&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::IntS8Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntS8Const>(*this)); }
+Term::Any Term::IntS8Const::widen() const { return Any(*this); };
 
 Term::IntS16Const::IntS16Const(int16_t value) noexcept : Term::Base(Type::IntS16()), value(value) {}
 uint32_t Term::IntS16Const::id() const { return variant_id; };
@@ -877,6 +909,7 @@ std::ostream &Term::IntS16Const::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Term::IntS16Const&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::IntS16Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntS16Const>(*this)); }
+Term::Any Term::IntS16Const::widen() const { return Any(*this); };
 
 Term::IntS32Const::IntS32Const(int32_t value) noexcept : Term::Base(Type::IntS32()), value(value) {}
 uint32_t Term::IntS32Const::id() const { return variant_id; };
@@ -900,6 +933,7 @@ std::ostream &Term::IntS32Const::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Term::IntS32Const&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::IntS32Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntS32Const>(*this)); }
+Term::Any Term::IntS32Const::widen() const { return Any(*this); };
 
 Term::IntS64Const::IntS64Const(int64_t value) noexcept : Term::Base(Type::IntS64()), value(value) {}
 uint32_t Term::IntS64Const::id() const { return variant_id; };
@@ -923,6 +957,7 @@ std::ostream &Term::IntS64Const::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Term::IntS64Const&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::IntS64Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntS64Const>(*this)); }
+Term::Any Term::IntS64Const::widen() const { return Any(*this); };
 
 Term::Unit0Const::Unit0Const() noexcept : Term::Base(Type::Unit0()) {}
 uint32_t Term::Unit0Const::id() const { return variant_id; };
@@ -944,6 +979,7 @@ std::ostream &Term::Unit0Const::dump(std::ostream &os) const {
   return true;
 }
 Term::Unit0Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Unit0Const>(*this)); }
+Term::Any Term::Unit0Const::widen() const { return Any(*this); };
 
 Term::Bool1Const::Bool1Const(bool value) noexcept : Term::Base(Type::Bool1()), value(value) {}
 uint32_t Term::Bool1Const::id() const { return variant_id; };
@@ -967,6 +1003,7 @@ std::ostream &Term::Bool1Const::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Term::Bool1Const&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Term::Bool1Const::operator Term::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Bool1Const>(*this)); }
+Term::Any Term::Bool1Const::widen() const { return Any(*this); };
 
 TypeSpace::Base::Base() = default;
 uint32_t TypeSpace::Any::id() const { return _v->id(); }
@@ -996,6 +1033,7 @@ std::ostream &TypeSpace::Global::dump(std::ostream &os) const {
   return true;
 }
 TypeSpace::Global::operator TypeSpace::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Global>(*this)); }
+TypeSpace::Any TypeSpace::Global::widen() const { return Any(*this); };
 
 TypeSpace::Local::Local() noexcept : TypeSpace::Base() {}
 uint32_t TypeSpace::Local::id() const { return variant_id; };
@@ -1017,6 +1055,7 @@ std::ostream &TypeSpace::Local::dump(std::ostream &os) const {
   return true;
 }
 TypeSpace::Local::operator TypeSpace::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Local>(*this)); }
+TypeSpace::Any TypeSpace::Local::widen() const { return Any(*this); };
 
 Overload::Overload(std::vector<Type::Any> args, Type::Any rtn) noexcept : args(std::move(args)), rtn(std::move(rtn)) {}
 size_t Overload::hash_code() const { 
@@ -1074,6 +1113,7 @@ std::ostream &Spec::Assert::dump(std::ostream &os) const {
   return true;
 }
 Spec::Assert::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Assert>(*this)); }
+Spec::Any Spec::Assert::widen() const { return Any(*this); };
 
 Spec::GpuBarrierGlobal::GpuBarrierGlobal() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Unit0()) {}
 uint32_t Spec::GpuBarrierGlobal::id() const { return variant_id; };
@@ -1095,6 +1135,7 @@ std::ostream &Spec::GpuBarrierGlobal::dump(std::ostream &os) const {
   return true;
 }
 Spec::GpuBarrierGlobal::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuBarrierGlobal>(*this)); }
+Spec::Any Spec::GpuBarrierGlobal::widen() const { return Any(*this); };
 
 Spec::GpuBarrierLocal::GpuBarrierLocal() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Unit0()) {}
 uint32_t Spec::GpuBarrierLocal::id() const { return variant_id; };
@@ -1116,6 +1157,7 @@ std::ostream &Spec::GpuBarrierLocal::dump(std::ostream &os) const {
   return true;
 }
 Spec::GpuBarrierLocal::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuBarrierLocal>(*this)); }
+Spec::Any Spec::GpuBarrierLocal::widen() const { return Any(*this); };
 
 Spec::GpuBarrierAll::GpuBarrierAll() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Unit0()) {}
 uint32_t Spec::GpuBarrierAll::id() const { return variant_id; };
@@ -1137,6 +1179,7 @@ std::ostream &Spec::GpuBarrierAll::dump(std::ostream &os) const {
   return true;
 }
 Spec::GpuBarrierAll::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuBarrierAll>(*this)); }
+Spec::Any Spec::GpuBarrierAll::widen() const { return Any(*this); };
 
 Spec::GpuFenceGlobal::GpuFenceGlobal() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Unit0()) {}
 uint32_t Spec::GpuFenceGlobal::id() const { return variant_id; };
@@ -1158,6 +1201,7 @@ std::ostream &Spec::GpuFenceGlobal::dump(std::ostream &os) const {
   return true;
 }
 Spec::GpuFenceGlobal::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuFenceGlobal>(*this)); }
+Spec::Any Spec::GpuFenceGlobal::widen() const { return Any(*this); };
 
 Spec::GpuFenceLocal::GpuFenceLocal() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Unit0()) {}
 uint32_t Spec::GpuFenceLocal::id() const { return variant_id; };
@@ -1179,6 +1223,7 @@ std::ostream &Spec::GpuFenceLocal::dump(std::ostream &os) const {
   return true;
 }
 Spec::GpuFenceLocal::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuFenceLocal>(*this)); }
+Spec::Any Spec::GpuFenceLocal::widen() const { return Any(*this); };
 
 Spec::GpuFenceAll::GpuFenceAll() noexcept : Spec::Base({Overload({},Type::Unit0())}, {}, Type::Unit0()) {}
 uint32_t Spec::GpuFenceAll::id() const { return variant_id; };
@@ -1200,6 +1245,7 @@ std::ostream &Spec::GpuFenceAll::dump(std::ostream &os) const {
   return true;
 }
 Spec::GpuFenceAll::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuFenceAll>(*this)); }
+Spec::Any Spec::GpuFenceAll::widen() const { return Any(*this); };
 
 Spec::GpuGlobalIdx::GpuGlobalIdx(Term::Any dim) noexcept : Spec::Base({Overload({Type::IntU32()},Type::IntU32())}, {dim}, Type::IntU32()), dim(std::move(dim)) {}
 uint32_t Spec::GpuGlobalIdx::id() const { return variant_id; };
@@ -1223,6 +1269,7 @@ std::ostream &Spec::GpuGlobalIdx::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Spec::GpuGlobalIdx&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Spec::GpuGlobalIdx::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuGlobalIdx>(*this)); }
+Spec::Any Spec::GpuGlobalIdx::widen() const { return Any(*this); };
 
 Spec::GpuGlobalSize::GpuGlobalSize(Term::Any dim) noexcept : Spec::Base({Overload({Type::IntU32()},Type::IntU32())}, {dim}, Type::IntU32()), dim(std::move(dim)) {}
 uint32_t Spec::GpuGlobalSize::id() const { return variant_id; };
@@ -1246,6 +1293,7 @@ std::ostream &Spec::GpuGlobalSize::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Spec::GpuGlobalSize&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Spec::GpuGlobalSize::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuGlobalSize>(*this)); }
+Spec::Any Spec::GpuGlobalSize::widen() const { return Any(*this); };
 
 Spec::GpuGroupIdx::GpuGroupIdx(Term::Any dim) noexcept : Spec::Base({Overload({Type::IntU32()},Type::IntU32())}, {dim}, Type::IntU32()), dim(std::move(dim)) {}
 uint32_t Spec::GpuGroupIdx::id() const { return variant_id; };
@@ -1269,6 +1317,7 @@ std::ostream &Spec::GpuGroupIdx::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Spec::GpuGroupIdx&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Spec::GpuGroupIdx::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuGroupIdx>(*this)); }
+Spec::Any Spec::GpuGroupIdx::widen() const { return Any(*this); };
 
 Spec::GpuGroupSize::GpuGroupSize(Term::Any dim) noexcept : Spec::Base({Overload({Type::IntU32()},Type::IntU32())}, {dim}, Type::IntU32()), dim(std::move(dim)) {}
 uint32_t Spec::GpuGroupSize::id() const { return variant_id; };
@@ -1292,6 +1341,7 @@ std::ostream &Spec::GpuGroupSize::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Spec::GpuGroupSize&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Spec::GpuGroupSize::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuGroupSize>(*this)); }
+Spec::Any Spec::GpuGroupSize::widen() const { return Any(*this); };
 
 Spec::GpuLocalIdx::GpuLocalIdx(Term::Any dim) noexcept : Spec::Base({Overload({Type::IntU32()},Type::IntU32())}, {dim}, Type::IntU32()), dim(std::move(dim)) {}
 uint32_t Spec::GpuLocalIdx::id() const { return variant_id; };
@@ -1315,6 +1365,7 @@ std::ostream &Spec::GpuLocalIdx::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Spec::GpuLocalIdx&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Spec::GpuLocalIdx::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuLocalIdx>(*this)); }
+Spec::Any Spec::GpuLocalIdx::widen() const { return Any(*this); };
 
 Spec::GpuLocalSize::GpuLocalSize(Term::Any dim) noexcept : Spec::Base({Overload({Type::IntU32()},Type::IntU32())}, {dim}, Type::IntU32()), dim(std::move(dim)) {}
 uint32_t Spec::GpuLocalSize::id() const { return variant_id; };
@@ -1338,6 +1389,7 @@ std::ostream &Spec::GpuLocalSize::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Spec::GpuLocalSize&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Spec::GpuLocalSize::operator Spec::Any() const { return std::static_pointer_cast<Base>(std::make_shared<GpuLocalSize>(*this)); }
+Spec::Any Spec::GpuLocalSize::widen() const { return Any(*this); };
 
 Intr::Base::Base(std::vector<Overload> overloads, std::vector<Term::Any> terms, Type::Any tpe) noexcept : overloads(std::move(overloads)), terms(std::move(terms)), tpe(std::move(tpe)) {}
 uint32_t Intr::Any::id() const { return _v->id(); }
@@ -1375,6 +1427,7 @@ std::ostream &Intr::BNot::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::BNot&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::BNot::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<BNot>(*this)); }
+Intr::Any Intr::BNot::widen() const { return Any(*this); };
 
 Intr::LogicNot::LogicNot(Term::Any x) noexcept : Intr::Base({Overload({Type::Bool1(),Type::Bool1()},Type::Bool1())}, {x}, Type::Bool1()), x(std::move(x)) {}
 uint32_t Intr::LogicNot::id() const { return variant_id; };
@@ -1398,6 +1451,7 @@ std::ostream &Intr::LogicNot::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::LogicNot&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::LogicNot::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicNot>(*this)); }
+Intr::Any Intr::LogicNot::widen() const { return Any(*this); };
 
 Intr::Pos::Pos(Term::Any x, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Intr::Pos::id() const { return variant_id; };
@@ -1424,6 +1478,7 @@ std::ostream &Intr::Pos::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::Pos&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::Pos::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Pos>(*this)); }
+Intr::Any Intr::Pos::widen() const { return Any(*this); };
 
 Intr::Neg::Neg(Term::Any x, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Intr::Neg::id() const { return variant_id; };
@@ -1450,6 +1505,7 @@ std::ostream &Intr::Neg::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::Neg&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::Neg::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Neg>(*this)); }
+Intr::Any Intr::Neg::widen() const { return Any(*this); };
 
 Intr::Add::Add(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::Add::id() const { return variant_id; };
@@ -1479,6 +1535,7 @@ std::ostream &Intr::Add::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::Add&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::Add::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Add>(*this)); }
+Intr::Any Intr::Add::widen() const { return Any(*this); };
 
 Intr::Sub::Sub(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::Sub::id() const { return variant_id; };
@@ -1508,6 +1565,7 @@ std::ostream &Intr::Sub::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::Sub&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::Sub::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Sub>(*this)); }
+Intr::Any Intr::Sub::widen() const { return Any(*this); };
 
 Intr::Mul::Mul(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::Mul::id() const { return variant_id; };
@@ -1537,6 +1595,7 @@ std::ostream &Intr::Mul::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::Mul&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::Mul::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Mul>(*this)); }
+Intr::Any Intr::Mul::widen() const { return Any(*this); };
 
 Intr::Div::Div(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::Div::id() const { return variant_id; };
@@ -1566,6 +1625,7 @@ std::ostream &Intr::Div::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::Div&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::Div::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Div>(*this)); }
+Intr::Any Intr::Div::widen() const { return Any(*this); };
 
 Intr::Rem::Rem(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::Rem::id() const { return variant_id; };
@@ -1595,6 +1655,7 @@ std::ostream &Intr::Rem::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::Rem&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::Rem::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Rem>(*this)); }
+Intr::Any Intr::Rem::widen() const { return Any(*this); };
 
 Intr::Min::Min(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::Min::id() const { return variant_id; };
@@ -1624,6 +1685,7 @@ std::ostream &Intr::Min::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::Min&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::Min::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Min>(*this)); }
+Intr::Any Intr::Min::widen() const { return Any(*this); };
 
 Intr::Max::Max(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64()),Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::Max::id() const { return variant_id; };
@@ -1653,6 +1715,7 @@ std::ostream &Intr::Max::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::Max&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::Max::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Max>(*this)); }
+Intr::Any Intr::Max::widen() const { return Any(*this); };
 
 Intr::BAnd::BAnd(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::BAnd::id() const { return variant_id; };
@@ -1682,6 +1745,7 @@ std::ostream &Intr::BAnd::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::BAnd&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::BAnd::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<BAnd>(*this)); }
+Intr::Any Intr::BAnd::widen() const { return Any(*this); };
 
 Intr::BOr::BOr(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::BOr::id() const { return variant_id; };
@@ -1711,6 +1775,7 @@ std::ostream &Intr::BOr::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::BOr&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::BOr::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<BOr>(*this)); }
+Intr::Any Intr::BOr::widen() const { return Any(*this); };
 
 Intr::BXor::BXor(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::BXor::id() const { return variant_id; };
@@ -1740,6 +1805,7 @@ std::ostream &Intr::BXor::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::BXor&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::BXor::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<BXor>(*this)); }
+Intr::Any Intr::BXor::widen() const { return Any(*this); };
 
 Intr::BSL::BSL(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::BSL::id() const { return variant_id; };
@@ -1769,6 +1835,7 @@ std::ostream &Intr::BSL::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::BSL&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::BSL::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<BSL>(*this)); }
+Intr::Any Intr::BSL::widen() const { return Any(*this); };
 
 Intr::BSR::BSR(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::BSR::id() const { return variant_id; };
@@ -1798,6 +1865,7 @@ std::ostream &Intr::BSR::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::BSR&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::BSR::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<BSR>(*this)); }
+Intr::Any Intr::BSR::widen() const { return Any(*this); };
 
 Intr::BZSR::BZSR(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Intr::Base({Overload({Type::IntU8(),Type::IntU8()},Type::IntU8()),Overload({Type::IntU16(),Type::IntU16()},Type::IntU16()),Overload({Type::IntU32(),Type::IntU32()},Type::IntU32()),Overload({Type::IntU64(),Type::IntU64()},Type::IntU64()),Overload({Type::IntS8(),Type::IntS8()},Type::IntS8()),Overload({Type::IntS16(),Type::IntS16()},Type::IntS16()),Overload({Type::IntS32(),Type::IntS32()},Type::IntS32()),Overload({Type::IntS64(),Type::IntS64()},Type::IntS64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Intr::BZSR::id() const { return variant_id; };
@@ -1827,6 +1895,7 @@ std::ostream &Intr::BZSR::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::BZSR&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::BZSR::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<BZSR>(*this)); }
+Intr::Any Intr::BZSR::widen() const { return Any(*this); };
 
 Intr::LogicAnd::LogicAnd(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Bool1(),Type::Bool1()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
 uint32_t Intr::LogicAnd::id() const { return variant_id; };
@@ -1853,6 +1922,7 @@ std::ostream &Intr::LogicAnd::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::LogicAnd&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::LogicAnd::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicAnd>(*this)); }
+Intr::Any Intr::LogicAnd::widen() const { return Any(*this); };
 
 Intr::LogicOr::LogicOr(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Bool1(),Type::Bool1()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
 uint32_t Intr::LogicOr::id() const { return variant_id; };
@@ -1879,6 +1949,7 @@ std::ostream &Intr::LogicOr::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::LogicOr&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::LogicOr::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicOr>(*this)); }
+Intr::Any Intr::LogicOr::widen() const { return Any(*this); };
 
 Intr::LogicEq::LogicEq(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Bool1()),Overload({Type::Float32(),Type::Float32()},Type::Bool1()),Overload({Type::Float64(),Type::Float64()},Type::Bool1()),Overload({Type::IntU8(),Type::IntU8()},Type::Bool1()),Overload({Type::IntU16(),Type::IntU16()},Type::Bool1()),Overload({Type::IntU32(),Type::IntU32()},Type::Bool1()),Overload({Type::IntU64(),Type::IntU64()},Type::Bool1()),Overload({Type::IntS8(),Type::IntS8()},Type::Bool1()),Overload({Type::IntS16(),Type::IntS16()},Type::Bool1()),Overload({Type::IntS32(),Type::IntS32()},Type::Bool1()),Overload({Type::IntS64(),Type::IntS64()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
 uint32_t Intr::LogicEq::id() const { return variant_id; };
@@ -1905,6 +1976,7 @@ std::ostream &Intr::LogicEq::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::LogicEq&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::LogicEq::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicEq>(*this)); }
+Intr::Any Intr::LogicEq::widen() const { return Any(*this); };
 
 Intr::LogicNeq::LogicNeq(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Bool1()),Overload({Type::Float32(),Type::Float32()},Type::Bool1()),Overload({Type::Float64(),Type::Float64()},Type::Bool1()),Overload({Type::IntU8(),Type::IntU8()},Type::Bool1()),Overload({Type::IntU16(),Type::IntU16()},Type::Bool1()),Overload({Type::IntU32(),Type::IntU32()},Type::Bool1()),Overload({Type::IntU64(),Type::IntU64()},Type::Bool1()),Overload({Type::IntS8(),Type::IntS8()},Type::Bool1()),Overload({Type::IntS16(),Type::IntS16()},Type::Bool1()),Overload({Type::IntS32(),Type::IntS32()},Type::Bool1()),Overload({Type::IntS64(),Type::IntS64()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
 uint32_t Intr::LogicNeq::id() const { return variant_id; };
@@ -1931,6 +2003,7 @@ std::ostream &Intr::LogicNeq::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::LogicNeq&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::LogicNeq::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicNeq>(*this)); }
+Intr::Any Intr::LogicNeq::widen() const { return Any(*this); };
 
 Intr::LogicLte::LogicLte(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Bool1()),Overload({Type::Float32(),Type::Float32()},Type::Bool1()),Overload({Type::Float64(),Type::Float64()},Type::Bool1()),Overload({Type::IntU8(),Type::IntU8()},Type::Bool1()),Overload({Type::IntU16(),Type::IntU16()},Type::Bool1()),Overload({Type::IntU32(),Type::IntU32()},Type::Bool1()),Overload({Type::IntU64(),Type::IntU64()},Type::Bool1()),Overload({Type::IntS8(),Type::IntS8()},Type::Bool1()),Overload({Type::IntS16(),Type::IntS16()},Type::Bool1()),Overload({Type::IntS32(),Type::IntS32()},Type::Bool1()),Overload({Type::IntS64(),Type::IntS64()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
 uint32_t Intr::LogicLte::id() const { return variant_id; };
@@ -1957,6 +2030,7 @@ std::ostream &Intr::LogicLte::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::LogicLte&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::LogicLte::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicLte>(*this)); }
+Intr::Any Intr::LogicLte::widen() const { return Any(*this); };
 
 Intr::LogicGte::LogicGte(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Bool1()),Overload({Type::Float32(),Type::Float32()},Type::Bool1()),Overload({Type::Float64(),Type::Float64()},Type::Bool1()),Overload({Type::IntU8(),Type::IntU8()},Type::Bool1()),Overload({Type::IntU16(),Type::IntU16()},Type::Bool1()),Overload({Type::IntU32(),Type::IntU32()},Type::Bool1()),Overload({Type::IntU64(),Type::IntU64()},Type::Bool1()),Overload({Type::IntS8(),Type::IntS8()},Type::Bool1()),Overload({Type::IntS16(),Type::IntS16()},Type::Bool1()),Overload({Type::IntS32(),Type::IntS32()},Type::Bool1()),Overload({Type::IntS64(),Type::IntS64()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
 uint32_t Intr::LogicGte::id() const { return variant_id; };
@@ -1983,6 +2057,7 @@ std::ostream &Intr::LogicGte::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::LogicGte&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::LogicGte::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicGte>(*this)); }
+Intr::Any Intr::LogicGte::widen() const { return Any(*this); };
 
 Intr::LogicLt::LogicLt(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Bool1()),Overload({Type::Float32(),Type::Float32()},Type::Bool1()),Overload({Type::Float64(),Type::Float64()},Type::Bool1()),Overload({Type::IntU8(),Type::IntU8()},Type::Bool1()),Overload({Type::IntU16(),Type::IntU16()},Type::Bool1()),Overload({Type::IntU32(),Type::IntU32()},Type::Bool1()),Overload({Type::IntU64(),Type::IntU64()},Type::Bool1()),Overload({Type::IntS8(),Type::IntS8()},Type::Bool1()),Overload({Type::IntS16(),Type::IntS16()},Type::Bool1()),Overload({Type::IntS32(),Type::IntS32()},Type::Bool1()),Overload({Type::IntS64(),Type::IntS64()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
 uint32_t Intr::LogicLt::id() const { return variant_id; };
@@ -2009,6 +2084,7 @@ std::ostream &Intr::LogicLt::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::LogicLt&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::LogicLt::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicLt>(*this)); }
+Intr::Any Intr::LogicLt::widen() const { return Any(*this); };
 
 Intr::LogicGt::LogicGt(Term::Any x, Term::Any y) noexcept : Intr::Base({Overload({Type::Float16(),Type::Float16()},Type::Bool1()),Overload({Type::Float32(),Type::Float32()},Type::Bool1()),Overload({Type::Float64(),Type::Float64()},Type::Bool1()),Overload({Type::IntU8(),Type::IntU8()},Type::Bool1()),Overload({Type::IntU16(),Type::IntU16()},Type::Bool1()),Overload({Type::IntU32(),Type::IntU32()},Type::Bool1()),Overload({Type::IntU64(),Type::IntU64()},Type::Bool1()),Overload({Type::IntS8(),Type::IntS8()},Type::Bool1()),Overload({Type::IntS16(),Type::IntS16()},Type::Bool1()),Overload({Type::IntS32(),Type::IntS32()},Type::Bool1()),Overload({Type::IntS64(),Type::IntS64()},Type::Bool1())}, {x,y}, Type::Bool1()), x(std::move(x)), y(std::move(y)) {}
 uint32_t Intr::LogicGt::id() const { return variant_id; };
@@ -2035,6 +2111,7 @@ std::ostream &Intr::LogicGt::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Intr::LogicGt&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Intr::LogicGt::operator Intr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<LogicGt>(*this)); }
+Intr::Any Intr::LogicGt::widen() const { return Any(*this); };
 
 Math::Base::Base(std::vector<Overload> overloads, std::vector<Term::Any> terms, Type::Any tpe) noexcept : overloads(std::move(overloads)), terms(std::move(terms)), tpe(std::move(tpe)) {}
 uint32_t Math::Any::id() const { return _v->id(); }
@@ -2072,6 +2149,7 @@ std::ostream &Math::Abs::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Abs&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Abs::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Abs>(*this)); }
+Math::Any Math::Abs::widen() const { return Any(*this); };
 
 Math::Sin::Sin(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Sin::id() const { return variant_id; };
@@ -2098,6 +2176,7 @@ std::ostream &Math::Sin::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Sin&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Sin::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Sin>(*this)); }
+Math::Any Math::Sin::widen() const { return Any(*this); };
 
 Math::Cos::Cos(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Cos::id() const { return variant_id; };
@@ -2124,6 +2203,7 @@ std::ostream &Math::Cos::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Cos&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Cos::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Cos>(*this)); }
+Math::Any Math::Cos::widen() const { return Any(*this); };
 
 Math::Tan::Tan(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Tan::id() const { return variant_id; };
@@ -2150,6 +2230,7 @@ std::ostream &Math::Tan::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Tan&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Tan::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Tan>(*this)); }
+Math::Any Math::Tan::widen() const { return Any(*this); };
 
 Math::Asin::Asin(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Asin::id() const { return variant_id; };
@@ -2176,6 +2257,7 @@ std::ostream &Math::Asin::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Asin&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Asin::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Asin>(*this)); }
+Math::Any Math::Asin::widen() const { return Any(*this); };
 
 Math::Acos::Acos(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Acos::id() const { return variant_id; };
@@ -2202,6 +2284,7 @@ std::ostream &Math::Acos::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Acos&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Acos::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Acos>(*this)); }
+Math::Any Math::Acos::widen() const { return Any(*this); };
 
 Math::Atan::Atan(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Atan::id() const { return variant_id; };
@@ -2228,6 +2311,7 @@ std::ostream &Math::Atan::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Atan&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Atan::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Atan>(*this)); }
+Math::Any Math::Atan::widen() const { return Any(*this); };
 
 Math::Sinh::Sinh(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Sinh::id() const { return variant_id; };
@@ -2254,6 +2338,7 @@ std::ostream &Math::Sinh::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Sinh&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Sinh::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Sinh>(*this)); }
+Math::Any Math::Sinh::widen() const { return Any(*this); };
 
 Math::Cosh::Cosh(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Cosh::id() const { return variant_id; };
@@ -2280,6 +2365,7 @@ std::ostream &Math::Cosh::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Cosh&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Cosh::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Cosh>(*this)); }
+Math::Any Math::Cosh::widen() const { return Any(*this); };
 
 Math::Tanh::Tanh(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Tanh::id() const { return variant_id; };
@@ -2306,6 +2392,7 @@ std::ostream &Math::Tanh::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Tanh&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Tanh::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Tanh>(*this)); }
+Math::Any Math::Tanh::widen() const { return Any(*this); };
 
 Math::Signum::Signum(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Signum::id() const { return variant_id; };
@@ -2332,6 +2419,7 @@ std::ostream &Math::Signum::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Signum&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Signum::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Signum>(*this)); }
+Math::Any Math::Signum::widen() const { return Any(*this); };
 
 Math::Round::Round(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Round::id() const { return variant_id; };
@@ -2358,6 +2446,7 @@ std::ostream &Math::Round::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Round&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Round::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Round>(*this)); }
+Math::Any Math::Round::widen() const { return Any(*this); };
 
 Math::Ceil::Ceil(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Ceil::id() const { return variant_id; };
@@ -2384,6 +2473,7 @@ std::ostream &Math::Ceil::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Ceil&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Ceil::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Ceil>(*this)); }
+Math::Any Math::Ceil::widen() const { return Any(*this); };
 
 Math::Floor::Floor(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Floor::id() const { return variant_id; };
@@ -2410,6 +2500,7 @@ std::ostream &Math::Floor::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Floor&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Floor::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Floor>(*this)); }
+Math::Any Math::Floor::widen() const { return Any(*this); };
 
 Math::Rint::Rint(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Rint::id() const { return variant_id; };
@@ -2436,6 +2527,7 @@ std::ostream &Math::Rint::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Rint&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Rint::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Rint>(*this)); }
+Math::Any Math::Rint::widen() const { return Any(*this); };
 
 Math::Sqrt::Sqrt(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Sqrt::id() const { return variant_id; };
@@ -2462,6 +2554,7 @@ std::ostream &Math::Sqrt::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Sqrt&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Sqrt::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Sqrt>(*this)); }
+Math::Any Math::Sqrt::widen() const { return Any(*this); };
 
 Math::Cbrt::Cbrt(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Cbrt::id() const { return variant_id; };
@@ -2488,6 +2581,7 @@ std::ostream &Math::Cbrt::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Cbrt&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Cbrt::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Cbrt>(*this)); }
+Math::Any Math::Cbrt::widen() const { return Any(*this); };
 
 Math::Exp::Exp(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Exp::id() const { return variant_id; };
@@ -2514,6 +2608,7 @@ std::ostream &Math::Exp::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Exp&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Exp::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Exp>(*this)); }
+Math::Any Math::Exp::widen() const { return Any(*this); };
 
 Math::Expm1::Expm1(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Expm1::id() const { return variant_id; };
@@ -2540,6 +2635,7 @@ std::ostream &Math::Expm1::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Expm1&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Expm1::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Expm1>(*this)); }
+Math::Any Math::Expm1::widen() const { return Any(*this); };
 
 Math::Log::Log(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Log::id() const { return variant_id; };
@@ -2566,6 +2662,7 @@ std::ostream &Math::Log::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Log&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Log::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Log>(*this)); }
+Math::Any Math::Log::widen() const { return Any(*this); };
 
 Math::Log1p::Log1p(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Log1p::id() const { return variant_id; };
@@ -2592,6 +2689,7 @@ std::ostream &Math::Log1p::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Log1p&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Log1p::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Log1p>(*this)); }
+Math::Any Math::Log1p::widen() const { return Any(*this); };
 
 Math::Log10::Log10(Term::Any x, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16()},Type::Float16()),Overload({Type::Float32()},Type::Float32()),Overload({Type::Float64()},Type::Float64())}, {x}, rtn), x(std::move(x)), rtn(std::move(rtn)) {}
 uint32_t Math::Log10::id() const { return variant_id; };
@@ -2618,6 +2716,7 @@ std::ostream &Math::Log10::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Log10&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Log10::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Log10>(*this)); }
+Math::Any Math::Log10::widen() const { return Any(*this); };
 
 Math::Pow::Pow(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Math::Pow::id() const { return variant_id; };
@@ -2647,6 +2746,7 @@ std::ostream &Math::Pow::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Pow&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Pow::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Pow>(*this)); }
+Math::Any Math::Pow::widen() const { return Any(*this); };
 
 Math::Atan2::Atan2(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Math::Atan2::id() const { return variant_id; };
@@ -2676,6 +2776,7 @@ std::ostream &Math::Atan2::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Atan2&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Atan2::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Atan2>(*this)); }
+Math::Any Math::Atan2::widen() const { return Any(*this); };
 
 Math::Hypot::Hypot(Term::Any x, Term::Any y, Type::Any rtn) noexcept : Math::Base({Overload({Type::Float16(),Type::Float16()},Type::Float16()),Overload({Type::Float32(),Type::Float32()},Type::Float32()),Overload({Type::Float64(),Type::Float64()},Type::Float64())}, {x,y}, rtn), x(std::move(x)), y(std::move(y)), rtn(std::move(rtn)) {}
 uint32_t Math::Hypot::id() const { return variant_id; };
@@ -2705,6 +2806,7 @@ std::ostream &Math::Hypot::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Math::Hypot&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Math::Hypot::operator Math::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Hypot>(*this)); }
+Math::Any Math::Hypot::widen() const { return Any(*this); };
 
 Expr::Base::Base(Type::Any tpe) noexcept : tpe(std::move(tpe)) {}
 uint32_t Expr::Any::id() const { return _v->id(); }
@@ -2737,6 +2839,7 @@ std::ostream &Expr::SpecOp::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Expr::SpecOp&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Expr::SpecOp::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<SpecOp>(*this)); }
+Expr::Any Expr::SpecOp::widen() const { return Any(*this); };
 
 Expr::MathOp::MathOp(Math::Any op) noexcept : Expr::Base(op.tpe()), op(std::move(op)) {}
 uint32_t Expr::MathOp::id() const { return variant_id; };
@@ -2760,6 +2863,7 @@ std::ostream &Expr::MathOp::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Expr::MathOp&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Expr::MathOp::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<MathOp>(*this)); }
+Expr::Any Expr::MathOp::widen() const { return Any(*this); };
 
 Expr::IntrOp::IntrOp(Intr::Any op) noexcept : Expr::Base(op.tpe()), op(std::move(op)) {}
 uint32_t Expr::IntrOp::id() const { return variant_id; };
@@ -2783,6 +2887,7 @@ std::ostream &Expr::IntrOp::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Expr::IntrOp&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Expr::IntrOp::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<IntrOp>(*this)); }
+Expr::Any Expr::IntrOp::widen() const { return Any(*this); };
 
 Expr::Cast::Cast(Term::Any from, Type::Any as) noexcept : Expr::Base(as), from(std::move(from)), as(std::move(as)) {}
 uint32_t Expr::Cast::id() const { return variant_id; };
@@ -2809,6 +2914,7 @@ std::ostream &Expr::Cast::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Expr::Cast&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Expr::Cast::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Cast>(*this)); }
+Expr::Any Expr::Cast::widen() const { return Any(*this); };
 
 Expr::Alias::Alias(Term::Any ref) noexcept : Expr::Base(ref.tpe()), ref(std::move(ref)) {}
 uint32_t Expr::Alias::id() const { return variant_id; };
@@ -2832,6 +2938,7 @@ std::ostream &Expr::Alias::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Expr::Alias&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Expr::Alias::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Alias>(*this)); }
+Expr::Any Expr::Alias::widen() const { return Any(*this); };
 
 Expr::Index::Index(Term::Any lhs, Term::Any idx, Type::Any component) noexcept : Expr::Base(component), lhs(std::move(lhs)), idx(std::move(idx)), component(std::move(component)) {}
 uint32_t Expr::Index::id() const { return variant_id; };
@@ -2861,6 +2968,7 @@ std::ostream &Expr::Index::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Expr::Index&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Expr::Index::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Index>(*this)); }
+Expr::Any Expr::Index::widen() const { return Any(*this); };
 
 Expr::RefTo::RefTo(Term::Any lhs, std::optional<Term::Any> idx, Type::Any component) noexcept : Expr::Base(Type::Ptr(component,{},TypeSpace::Global())), lhs(std::move(lhs)), idx(std::move(idx)), component(std::move(component)) {}
 uint32_t Expr::RefTo::id() const { return variant_id; };
@@ -2894,6 +3002,7 @@ std::ostream &Expr::RefTo::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Expr::RefTo&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Expr::RefTo::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<RefTo>(*this)); }
+Expr::Any Expr::RefTo::widen() const { return Any(*this); };
 
 Expr::Alloc::Alloc(Type::Any component, Term::Any size) noexcept : Expr::Base(Type::Ptr(component,{},TypeSpace::Global())), component(std::move(component)), size(std::move(size)) {}
 uint32_t Expr::Alloc::id() const { return variant_id; };
@@ -2920,6 +3029,7 @@ std::ostream &Expr::Alloc::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Expr::Alloc&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Expr::Alloc::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Alloc>(*this)); }
+Expr::Any Expr::Alloc::widen() const { return Any(*this); };
 
 Expr::Invoke::Invoke(Sym name, std::vector<Type::Any> tpeArgs, std::optional<Term::Any> receiver, std::vector<Term::Any> args, std::vector<Term::Any> captures, Type::Any rtn) noexcept : Expr::Base(rtn), name(std::move(name)), tpeArgs(std::move(tpeArgs)), receiver(std::move(receiver)), args(std::move(args)), captures(std::move(captures)), rtn(std::move(rtn)) {}
 uint32_t Expr::Invoke::id() const { return variant_id; };
@@ -2977,6 +3087,7 @@ std::ostream &Expr::Invoke::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Expr::Invoke&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Expr::Invoke::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Invoke>(*this)); }
+Expr::Any Expr::Invoke::widen() const { return Any(*this); };
 
 Stmt::Base::Base() = default;
 uint32_t Stmt::Any::id() const { return _v->id(); }
@@ -3013,6 +3124,7 @@ std::ostream &Stmt::Block::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Stmt::Block&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Stmt::Block::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Block>(*this)); }
+Stmt::Any Stmt::Block::widen() const { return Any(*this); };
 
 Stmt::Comment::Comment(std::string value) noexcept : Stmt::Base(), value(std::move(value)) {}
 uint32_t Stmt::Comment::id() const { return variant_id; };
@@ -3036,6 +3148,7 @@ std::ostream &Stmt::Comment::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Stmt::Comment&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Stmt::Comment::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Comment>(*this)); }
+Stmt::Any Stmt::Comment::widen() const { return Any(*this); };
 
 Stmt::Var::Var(Named name, std::optional<Expr::Any> expr) noexcept : Stmt::Base(), name(std::move(name)), expr(std::move(expr)) {}
 uint32_t Stmt::Var::id() const { return variant_id; };
@@ -3066,6 +3179,7 @@ std::ostream &Stmt::Var::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Stmt::Var&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Stmt::Var::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Var>(*this)); }
+Stmt::Any Stmt::Var::widen() const { return Any(*this); };
 
 Stmt::Mut::Mut(Term::Any name, Expr::Any expr, bool copy) noexcept : Stmt::Base(), name(std::move(name)), expr(std::move(expr)), copy(copy) {}
 uint32_t Stmt::Mut::id() const { return variant_id; };
@@ -3095,6 +3209,7 @@ std::ostream &Stmt::Mut::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Stmt::Mut&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Stmt::Mut::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Mut>(*this)); }
+Stmt::Any Stmt::Mut::widen() const { return Any(*this); };
 
 Stmt::Update::Update(Term::Any lhs, Term::Any idx, Term::Any value) noexcept : Stmt::Base(), lhs(std::move(lhs)), idx(std::move(idx)), value(std::move(value)) {}
 uint32_t Stmt::Update::id() const { return variant_id; };
@@ -3124,6 +3239,7 @@ std::ostream &Stmt::Update::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Stmt::Update&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Stmt::Update::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Update>(*this)); }
+Stmt::Any Stmt::Update::widen() const { return Any(*this); };
 
 Stmt::While::While(std::vector<Stmt::Any> tests, Term::Any cond, std::vector<Stmt::Any> body) noexcept : Stmt::Base(), tests(std::move(tests)), cond(std::move(cond)), body(std::move(body)) {}
 uint32_t Stmt::While::id() const { return variant_id; };
@@ -3163,6 +3279,7 @@ std::ostream &Stmt::While::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Stmt::While&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Stmt::While::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<While>(*this)); }
+Stmt::Any Stmt::While::widen() const { return Any(*this); };
 
 Stmt::Break::Break() noexcept : Stmt::Base() {}
 uint32_t Stmt::Break::id() const { return variant_id; };
@@ -3184,6 +3301,7 @@ std::ostream &Stmt::Break::dump(std::ostream &os) const {
   return true;
 }
 Stmt::Break::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Break>(*this)); }
+Stmt::Any Stmt::Break::widen() const { return Any(*this); };
 
 Stmt::Cont::Cont() noexcept : Stmt::Base() {}
 uint32_t Stmt::Cont::id() const { return variant_id; };
@@ -3205,6 +3323,7 @@ std::ostream &Stmt::Cont::dump(std::ostream &os) const {
   return true;
 }
 Stmt::Cont::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Cont>(*this)); }
+Stmt::Any Stmt::Cont::widen() const { return Any(*this); };
 
 Stmt::Cond::Cond(Expr::Any cond, std::vector<Stmt::Any> trueBr, std::vector<Stmt::Any> falseBr) noexcept : Stmt::Base(), cond(std::move(cond)), trueBr(std::move(trueBr)), falseBr(std::move(falseBr)) {}
 uint32_t Stmt::Cond::id() const { return variant_id; };
@@ -3244,6 +3363,7 @@ std::ostream &Stmt::Cond::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Stmt::Cond&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Stmt::Cond::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Cond>(*this)); }
+Stmt::Any Stmt::Cond::widen() const { return Any(*this); };
 
 Stmt::Return::Return(Expr::Any value) noexcept : Stmt::Base(), value(std::move(value)) {}
 uint32_t Stmt::Return::id() const { return variant_id; };
@@ -3267,6 +3387,7 @@ std::ostream &Stmt::Return::dump(std::ostream &os) const {
   return this->operator==(static_cast<const Stmt::Return&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
 }
 Stmt::Return::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Return>(*this)); }
+Stmt::Any Stmt::Return::widen() const { return Any(*this); };
 
 StructMember::StructMember(Named named, bool isMutable) noexcept : named(std::move(named)), isMutable(isMutable) {}
 size_t StructMember::hash_code() const { 
@@ -3467,6 +3588,7 @@ std::ostream &FunctionKind::Internal::dump(std::ostream &os) const {
   return true;
 }
 FunctionKind::Internal::operator FunctionKind::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Internal>(*this)); }
+FunctionKind::Any FunctionKind::Internal::widen() const { return Any(*this); };
 
 FunctionKind::Exported::Exported() noexcept : FunctionKind::Base() {}
 uint32_t FunctionKind::Exported::id() const { return variant_id; };
@@ -3488,6 +3610,7 @@ std::ostream &FunctionKind::Exported::dump(std::ostream &os) const {
   return true;
 }
 FunctionKind::Exported::operator FunctionKind::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Exported>(*this)); }
+FunctionKind::Any FunctionKind::Exported::widen() const { return Any(*this); };
 
 FunctionAttr::Base::Base() = default;
 uint32_t FunctionAttr::Any::id() const { return _v->id(); }
@@ -3517,6 +3640,7 @@ std::ostream &FunctionAttr::FPRelaxed::dump(std::ostream &os) const {
   return true;
 }
 FunctionAttr::FPRelaxed::operator FunctionAttr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<FPRelaxed>(*this)); }
+FunctionAttr::Any FunctionAttr::FPRelaxed::widen() const { return Any(*this); };
 
 FunctionAttr::FPStrict::FPStrict() noexcept : FunctionAttr::Base() {}
 uint32_t FunctionAttr::FPStrict::id() const { return variant_id; };
@@ -3538,6 +3662,7 @@ std::ostream &FunctionAttr::FPStrict::dump(std::ostream &os) const {
   return true;
 }
 FunctionAttr::FPStrict::operator FunctionAttr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<FPStrict>(*this)); }
+FunctionAttr::Any FunctionAttr::FPStrict::widen() const { return Any(*this); };
 
 Arg::Arg(Named named, std::optional<SourcePosition> pos) noexcept : named(std::move(named)), pos(std::move(pos)) {}
 size_t Arg::hash_code() const { 

@@ -1,17 +1,24 @@
 #pragma once
 
-#include "generated/polyast.h"
-#include "clang/AST/ASTContext.h"
-#include "llvm/Support/Casting.h"
-
 #include <optional>
 #include <type_traits>
 
+#include "fmt/format.h"
+#include "generated/polyast.h"
+
+#include "clang/AST/ASTContext.h"
+#include "llvm/Support/Casting.h"
+
 namespace polyregion::polystl {
 
+[[noreturn]] static void raise(const std::string &message, const char *file = __builtin_FILE(), int line = __builtin_LINE()) {
+  std::cerr << fmt::format("[{}:{}] {}", file, line, message) << std::endl;
+  std::abort();
+}
+
 template <typename Ret, typename Arg, typename... Rest> Arg arg0_helper(Ret (*)(Arg, Rest...));
-template <typename Ret, typename F, typename Arg, typename... Rest> Arg arg0_helper(Ret (F::*)(Arg, Rest...));
-template <typename Ret, typename F, typename Arg, typename... Rest> Arg arg0_helper(Ret (F::*)(Arg, Rest...) const);
+template <typename Ret, typename F, typename Arg, typename... Rest> Arg arg0_helper(Ret (F:: *)(Arg, Rest...));
+template <typename Ret, typename F, typename Arg, typename... Rest> Arg arg0_helper(Ret (F:: *)(Arg, Rest...) const);
 template <typename F> decltype(arg0_helper(&F::operator())) arg0_helper(F);
 template <typename T> using arg0_t = decltype(arg0_helper(std::declval<T>()));
 template <typename T, typename Node, typename... Fs> std::optional<T> visitDyn(Node n, Fs... fs) {
@@ -51,7 +58,7 @@ struct Remapper {
         if (auto it = structs.find(*scopeStructName); it != structs.end()) {
           nextParent = std::optional<std::reference_wrapper<StructDef>>{it->second};
         } else {
-          throw std::logic_error("Unexpected parent scope: " + *scopeStructName);
+          raise("Unexpected parent scope: " + *scopeStructName);
         }
       }
       RemapContext r{

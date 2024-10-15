@@ -4,6 +4,7 @@
 #include "aspartame/view.hpp"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/LegacyPassManager.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Support/CommandLine.h"
@@ -11,6 +12,8 @@
 #include <cxxabi.h>
 #include <llvm/Analysis/CallGraph.h>
 #include <unordered_set>
+
+#include "polyregion/export.h"
 
 using namespace llvm;
 
@@ -186,4 +189,6 @@ llvm::PassPluginLibraryInfo getInterposePluginInfo() {
           }};
 }
 
-extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginInfo() { return getInterposePluginInfo(); }
+extern "C" [[maybe_unused]] POLYREGION_EXPORT LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginInfo() {
+  return getInterposePluginInfo();
+}

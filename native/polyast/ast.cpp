@@ -61,7 +61,7 @@ auto show_repr = [](auto &x) { return repr(x); };
         auto parents = x.parents ^ mk_string("{", ",", "}", show_repr);
         return "@" + repr(x.name) + args + (x.parents.empty() ? "" : "<:" + parents);
       },                                                                   //
-      [](const Type::Ptr &x) { return "Ptr[" + repr(x.component) + (x.length ? "*" + std::to_string(*x.length) : "") + "]"; }, //
+      [](const Type::Ptr &x) { return "Ptr[" + repr(x.component) + (x.length ? "*" + std::to_string(*x.length) : "") + "]" + repr(x.space); }, //
       [](const Type::Var &x) { return "Var[" + x.name + "]"; },                //
       [](const Type::Exec &) { return "Exec[???]"s; }                          //
   );

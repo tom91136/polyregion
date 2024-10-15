@@ -411,6 +411,13 @@ private[polyregion] object CppStructGen {
         )
       } else (Nil, Nil)
 
+      val (widenSig, widenImpl) = if (tpe.kind == CppType.Kind.Variant) {
+        (
+          s"[[nodiscard]] POLYREGION_EXPORT Any widen() const;" :: Nil,
+          s"${ns("Any")} ${clsName(qualified = true)}::widen() const { return Any(*this); };" :: Nil
+        )
+      } else (Nil, Nil)
+
       val variantStmt =
         if (tpe.kind == CppType.Kind.Base) {
           val allVariants = foldVariants(variants)
@@ -552,9 +559,9 @@ private[polyregion] object CppStructGen {
           ::: dumpSig       //
           ::: equalitySig
           ::: visibility
-          ::: ctorStmt :: conversionSig ::: streamSig,
+          ::: ctorStmt :: conversionSig ::: widenSig ::: streamSig,
         implStmts =
-          ctorStmtImpl :: idImpl ::: hashCodeImpl ::: streamImpl ::: dumpImpl ::: equalityImpl ::: conversionImpl ::: nsImpl ::: variantImpl,
+          ctorStmtImpl :: idImpl ::: hashCodeImpl ::: streamImpl ::: dumpImpl ::: equalityImpl ::: conversionImpl ::: widenImpl ::: nsImpl ::: variantImpl,
         includes = members.flatMap(_._2.include),
         variantStmt,
         nsDecl,

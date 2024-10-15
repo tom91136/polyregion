@@ -20,10 +20,10 @@ set(LIB_SOURCES
 
         #        ast.cpp
         compiler.cpp
-#        polyregion_compiler.cpp
+        #        polyregion_compiler.cpp
 
-#        ${clspv_passes_SOURCE_FILES}
-        )
+        #        ${clspv_passes_SOURCE_FILES}
+)
 
 add_library(polyc ${LIB_SOURCES})
 add_library(polyc-driver driver_polyc.cpp)
@@ -32,21 +32,22 @@ add_executable(polyc-tests test/ast_codegen.cpp test/ast_offload.cpp test/backen
 add_executable(polyc-benchmarks benchmark/babelstream.cpp)
 add_executable(polyc-bin ../shared/cxa_thread_atexit.cpp driver_main.cpp)
 
-target_include_directories(polyc-tests PUBLIC . ../include PRIVATE ../runtime)
-target_include_directories(polyc-benchmarks PUBLIC . ../include PRIVATE ../runtime)
-target_include_directories(polyc-bin PUBLIC . ../include ${fire_SOURCE_DIR} PRIVATE)
-target_include_directories(polyc-driver PUBLIC . ../include ${fire_SOURCE_DIR} PRIVATE)
+target_include_directories(polyc-tests PRIVATE . ../include ../runtime)
+target_include_directories(polyc-benchmarks PRIVATE . ../include ../runtime)
+target_include_directories(polyc-bin PRIVATE . ../include ${fire_SOURCE_DIR})
+
+target_include_directories(polyc-driver PUBLIC . ../include ${fire_SOURCE_DIR} )
 target_include_directories(polyc PUBLIC
         ${LLVM_INCLUDE_DIRS}
         ${LLD_INCLUDE_DIRS}
         #        ${spirv-llvm-translator_SOURCE_DIR}/include
 
-#        ${clspv_passes_INCLUDE_DIRS}
+        #        ${clspv_passes_INCLUDE_DIRS}
         ${spirv-tools_SOURCE_DIR}/include
 
 
         . ../include
-        )
+)
 
 if (NOT WIN32)
     target_precompile_headers(polyc-tests PRIVATE
@@ -64,7 +65,7 @@ if (NOT WIN32)
             <unordered_map>
             <utility>
             <vector>
-            )
+    )
 endif ()
 
 llvm_map_components_to_libnames(LLVM_LIBS
@@ -102,7 +103,7 @@ llvm_map_components_to_libnames(LLVM_LIBS
         targetparser
         objcarcopts
 
-        )
+)
 
 
 set(LLD_LIBS lldCommon lldELF)
@@ -129,7 +130,7 @@ target_link_libraries(polyc
         SPIRV-Tools-opt
         ${LLVM_LIBS}
         ${LLD_LIBS}
-        )
+)
 target_link_libraries(polyc-tests PRIVATE polyc polyrt-static Catch2::Catch2WithMain)
 target_link_libraries(polyc-benchmarks PRIVATE polyc polyrt-static)
 target_link_libraries(polyc-driver PRIVATE polyc ${LLVM_LIBS} ${LLD_LIBS} Aspartame::Aspartame)

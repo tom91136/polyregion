@@ -172,6 +172,9 @@ execute_process(
         lldELF
         LLVMExecutionEngine
         install-distribution
+        install-cmake-exports
+        install-clang-cmake-exports
+        install-lld-cmake-exports
         -- -k 0 # keep going even with error
         WORKING_DIRECTORY ${LLVM_BUILD_DIR}
         RESULT_VARIABLE SUCCESS)

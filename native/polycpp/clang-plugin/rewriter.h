@@ -1,17 +1,18 @@
 #pragma once
 
-#include <clang/AST/ASTConsumer.h>
-#include <clang/Rewrite/Core/Rewriter.h>
+#include "plugin.h"
 
-#include "options.h"
+#include "clang/AST/ASTConsumer.h"
+#include "clang/Basic/Diagnostic.h"
 
 namespace polyregion::polystl {
+
 class OffloadRewriteConsumer : public clang::ASTConsumer {
   clang::DiagnosticsEngine &diag;
-  DriverContext ctx;
+  Options opts;
 
 public:
-  OffloadRewriteConsumer(clang::DiagnosticsEngine &diag, const DriverContext &ctx);
+  OffloadRewriteConsumer(clang::DiagnosticsEngine &diag, const Options &opts);
   void HandleTranslationUnit(clang::ASTContext &context) override;
 };
 

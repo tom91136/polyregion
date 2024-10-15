@@ -34,6 +34,20 @@ namespace std {
 
 namespace {
 
+static constexpr const char *HostFallbackEnv = "POLYSTL_HOST_FALLBACK";
+
+inline bool host_fallback() {
+  if (auto env = std::getenv(HostFallbackEnv); env) {
+    errno = 0; // strtol to avoid exceptions
+    size_t value = std::strtol(env, nullptr, 10);
+    if (errno == 0 && value == 0) {
+      POLYSTL_LOG("<%s> No compatible backend and host fallback disabled, returning...", __func__);
+      return false;
+    }
+  }
+  return true; // default is to use host fallback
+}
+
 template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f) {
   auto N = std::thread::hardware_concurrency();
   POLYSTL_LOG("<%s, %d> Dispatch", __func__, global);
@@ -78,21 +92,104 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
     }
   }
 
-  static constexpr const char *HostFallbackEnv = "POLYSTL_HOST_FALLBACK";
-
-  if (auto env = std::getenv(HostFallbackEnv); env) {
-    errno = 0; // strtol to avoid exceptions
-    size_t value = std::strtol(env, nullptr, 10);
-    if (errno == 0 && value == 0) {
-      POLYSTL_LOG("<%s, %d> No compatible backend and host fallback disabled, returning...", global, __func__);
-      return;
-    }
-  } // default is to use host fallback, so keep going
-
-  POLYSTL_LOG("<%s, %d> Host fallback", global, __func__);
+  if (!host_fallback()) return;
+  POLYSTL_LOG("<%s, %d> Host fallback", __func__, global);
   for (int64_t i = 0; i < global; ++i) {
     f(i);
   }
+}
+
+template <typename T, class UnaryFunction, class BinaryFunction>
+T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce) {
+  auto N = std::thread::hardware_concurrency();
+  POLYSTL_LOG("<%s, %d> Dispatch", __func__, global);
+
+  if (PlatformKind kind; __polyregion_platform_kind(kind)) {
+    switch (kind) {
+      case polyregion::runtime::PlatformKind ::HostThreaded: {
+        auto [b, e] = polyregion::concurrency_utils::splitStaticExclusive2<int64_t>(0, global, N);
+        const int64_t groups = b.size();
+        const int64_t *begin = b.data();
+        const int64_t *end = e.data();
+
+        std::vector<T> groupPartial(groups);
+        const auto kernel = [&f, &reduce, init, begin, end, out = groupPartial.data()](const int64_t tid) {
+          auto acc = init;
+          for (int64_t i = begin[tid]; i < end[tid]; ++i) {
+            acc = reduce(acc, f(i));
+          }
+          out[tid] = acc;
+        };
+        auto &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::HostThreaded>(kernel);
+        std::byte argData[sizeof(decltype(kernel))];
+        std::memcpy(argData, &kernel, sizeof(decltype(kernel)));
+        for (size_t i = 0; i < bundle.objectCount; ++i) {
+          if (__polyregion_dispatch_hostthreaded(groups, &argData, bundle.moduleName, bundle.get(i))) {
+            T acc = init;
+            for (int64_t groupIdx = 0; groupIdx < groups; ++groupIdx) {
+              acc = reduce(acc, groupPartial[groupIdx]);
+            }
+            return acc;
+          }
+        }
+        break;
+      }
+      case polyregion::runtime::PlatformKind ::Managed: {
+
+        int64_t groups = 256;
+
+        auto groupPartial = __polyregion_selected_device->mallocSharedTyped<T>(groups, Access::RW);
+
+        if (!groupPartial) {
+          POLYSTL_LOG("<%s, %d> No USM support", __func__, global);
+          std::abort();
+        }
+
+        const auto kernel = [groupPartial = *groupPartial, init, f, reduce,
+                             global]([[clang::annotate("__polyregion_local")]] T *localPartialSum) {
+          const auto lim = static_cast<uint32_t>(global);
+          const auto localIdx = __polyregion_builtin_gpu_local_idx(0);
+          localPartialSum[localIdx] = init;
+          const auto gid = __polyregion_builtin_gpu_global_idx(0);
+          const auto gs = __polyregion_builtin_gpu_global_size(0);
+          for (uint32_t i = gid; i < lim; i += gs) {
+            localPartialSum[localIdx] = reduce(localPartialSum[localIdx], f(static_cast<int64_t>(i)));
+          }
+          for (uint32_t offset = __polyregion_builtin_gpu_local_size(0) / 2; offset > 0; offset /= 2) {
+            __polyregion_builtin_gpu_barrier_local();
+            if (localIdx < offset) {
+              localPartialSum[localIdx] = reduce(localPartialSum[localIdx], localPartialSum[localIdx + offset]);
+            }
+          }
+          if (localIdx == 0) {
+            groupPartial[__polyregion_builtin_gpu_group_idx(0)] = localPartialSum[localIdx];
+          }
+        };
+        auto &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
+        for (size_t i = 0; i < bundle.objectCount; ++i) {
+          if (__polyregion_dispatch_managed(256, groups, groups * sizeof(T), sizeof(decltype(kernel)), &kernel, bundle.moduleName,
+                                            bundle.get(i))) {
+
+            T acc = init;
+            for (int64_t groupIdx = 0; groupIdx < groups; ++groupIdx) {
+              acc = reduce(acc, (*groupPartial)[groupIdx]);
+            }
+            return acc;
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  if (!host_fallback()) return init;
+  POLYSTL_LOG("<%s, %d> Host fallback", __func__, global);
+
+  T acc = init;
+  for (int64_t globalIdx = 0; globalIdx < global; ++globalIdx) {
+    acc = reduce(acc, f(globalIdx));
+  }
+  return acc;
 }
 
 } // namespace
@@ -146,14 +243,21 @@ transform(ExecutionPolicy &&, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 fi
   if constexpr (!std::is_same_v<std::decay_t<ExecutionPolicy>, std::execution::parallel_unsequenced_policy>) {
     return std::transform(first1, last1, first2, d_first, binary_op);
   }
-  // TODO
+  parallel_for(std::distance(first1, last1),
+               [d_first, first1, first2, binary_op](auto idx) { (*(d_first + idx)) = binary_op(*(first1 + idx), *(first2 + idx)); });
+
   return d_first;
 }
 
 template <class ExecutionPolicy, class ForwardIt1, class ForwardIt2, class T>                    //
 typename std::enable_if_t<std::is_execution_policy_v<typename std::decay_t<ExecutionPolicy>>, T> //
 transform_reduce(ExecutionPolicy &&e, ForwardIt1 first1, ForwardIt1 last1, ForwardIt2 first2, T init) {
-  return transform_reduce(std::forward<ExecutionPolicy &&>(e), first1, last1, first2, init, std::plus<>(), std::multiplies<>());
+  if constexpr (!std::is_same_v<std::decay_t<ExecutionPolicy>, std::execution::parallel_unsequenced_policy>) {
+    return std::transform_reduce(first1, last1, first2, init);
+  }
+  return parallel_reduce(
+      std::distance(first1, last1), init, //
+      [first1, first2](auto idx) { return (*(first1 + idx)) * (*(first2 + idx)); }, [](auto l, auto r) { return l + r; });
 }
 
 template <class ExecutionPolicy, class ForwardIt1, class ForwardIt2, class T, class BinaryReductionOp,
@@ -164,8 +268,9 @@ transform_reduce(ExecutionPolicy &&, ForwardIt1 first1, ForwardIt1 last1, Forwar
   if constexpr (!std::is_same_v<std::decay_t<ExecutionPolicy>, std::execution::parallel_unsequenced_policy>) {
     return std::transform_reduce(first1, last1, first2, init, reduce, transform);
   }
-  // TODO
-  return T{};
+  return parallel_reduce(
+      std::distance(first1, last1), init, //
+      [transform, first1, first2](auto idx) { return transform(*(first1 + idx), *(first2 + idx)); }, reduce);
 }
 
 template <class ExecutionPolicy, class ForwardIt, class T, class BinaryReductionOp,
@@ -175,8 +280,7 @@ transform_reduce(ExecutionPolicy &&, ForwardIt first, ForwardIt last, T init, Bi
   if constexpr (!std::is_same_v<std::decay_t<ExecutionPolicy>, std::execution::parallel_unsequenced_policy>) {
     return std::transform_reduce(first, last, init, reduce, transform);
   }
-  // TODO
-  return T{};
+  return parallel_reduce(std::distance(first, last), init, transform, reduce);
 }
 
 } // namespace std

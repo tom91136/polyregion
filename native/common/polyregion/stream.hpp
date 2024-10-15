@@ -4,6 +4,7 @@
 #include <iomanip>
 #include <iostream>
 #include <numeric>
+#include <algorithm>
 
 namespace polyregion::stream {
 

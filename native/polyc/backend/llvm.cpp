@@ -37,14 +37,24 @@ template <typename T> static std::string llvm_tostring(const T *t) {
 }
 
 ValPtr LLVMBackend::AstTransformer::load(ValPtr rhs, llvm::Type *ty) {
-  //  assert(!ty->isArrayTy());
-  return B.CreateLoad(ty, rhs);
+  if (ty->isPointerTy()) {
+    ValPtr spaceNormalisedRhs = rhs->getType()->getPointerAddressSpace() != GlobalAS ? B.CreateAddrSpaceCast(rhs, B.getPtrTy()) : rhs;
+    return B.CreateLoad(B.getPtrTy(), spaceNormalisedRhs);
+  } else return B.CreateLoad(ty, rhs);
 }
 
-ValPtr LLVMBackend::AstTransformer::store(ValPtr rhsVal, ValPtr lhsPtr ) { return B.CreateStore (rhsVal, lhsPtr); }
+ValPtr LLVMBackend::AstTransformer::store(ValPtr rhsVal, ValPtr lhsPtr) {
+  llvm::Type *rhsTy = rhsVal->getType();
+  if(rhsTy->isPointerTy() && rhsTy->getPointerAddressSpace() != lhsPtr->getType()->getPointerAddressSpace()){
+    return B.CreateStore( B.CreateAddrSpaceCast(rhsVal, lhsPtr->getType()), lhsPtr);
+  }else{
+    return B.CreateStore(rhsVal, lhsPtr);
+  }
+
+}
 
 ValPtr LLVMBackend::allocaAS(llvm::IRBuilder<> &B, llvm::Type *ty, unsigned int AS, const std::string &key) {
-  auto stackPtr = B.CreateAlloca(ty, AS, nullptr, key);
+  auto stackPtr = B.CreateAlloca(ty->isPointerTy() ? B.getPtrTy() : ty, AS, nullptr, key);
   return AS != 0 ? B.CreateAddrSpaceCast(stackPtr, B.getPtrTy()) : stackPtr;
 }
 
@@ -145,6 +155,11 @@ LLVMBackend::AstTransformer::StructInfo LLVMBackend::AstTransformer::mkStruct(co
     types.push_back(mkTpe(m.named.tpe));
     table[m.named.symbol] = types.size() - 1;
   }
+//  if (types.empty()){ // As per C/C++, empty struct has a size of 1
+//    types.push_back(mkTpe(Type::IntS8()));
+//    table["zero_sized_struct_tag"] = types.size() - 1;
+//  }
+
   return {def, llvm::StructType::create(C, types, qualified(def.name)), table};
 }
 
@@ -257,7 +272,7 @@ ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
       auto selectFinal = [&](llvm::StructType *structTy, size_t idx, bool conditionalLoad = true, const std::string &suffix = "") {
         if (auto p = tpe.get<Type::Ptr>(); conditionalLoad && p && !p->length) {
           root = B.CreateInBoundsGEP(
-              structTy, load(   root, B.getPtrTy()),
+              structTy, load(root, B.getPtrTy()),
               {//
                llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), idx)},
               qualified(select) + "_select_ptr_" + suffix);
@@ -364,7 +379,7 @@ ValPtr LLVMBackend::AstTransformer::mkTermVal(const Term::Any &ref) {
       [&](const Term::Select &x) -> ValPtr {
         if (x.tpe.is<Type::Unit0>()) return mkTermVal(Term::Unit0Const());
         if (auto ptr = x.tpe.get<Type::Ptr>(); ptr && ptr->length) return mkSelectPtr(x);
-        else return load(   mkSelectPtr(x), mkTpe(x.tpe));
+        else return load(mkSelectPtr(x), mkTpe(x.tpe));
       },
       [&](const Term::Poison &x) -> ValPtr {
         if (auto tpe = mkTpe(x.tpe); llvm::isa<llvm::PointerType>(tpe)) {
@@ -671,14 +686,14 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
               auto ptr = B.CreateInBoundsGEP(ty,              //
                                              mkTermVal(*lhs), //
                                              {llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), mkTermVal(x.idx)}, key + "_idx_ptr");
-              return load(   ptr, mkTpe(arrTpe->component));
+              return load(ptr, mkTpe(arrTpe->component));
             } else {
               auto ty = mkTpe(arrTpe->component);
               auto ptr = B.CreateInBoundsGEP(ty,              //
                                              mkTermVal(*lhs), //
                                              mkTermVal(x.idx), key + "_idx_ptr");
               if (arrTpe->component.is<Type::Bool1>()) { // Narrow from i8 to i1
-                return B.CreateICmpNE(load(   ptr, ty), llvm::ConstantInt::get(llvm::Type::getInt1Ty(C), 0, true));
+                return B.CreateICmpNE(load(ptr, ty), llvm::ConstantInt::get(llvm::Type::getInt1Ty(C), 0, true));
               } else {
 
                 //                if(auto sizedArr = get_opt<Type::Ptr>(arrTpe->component); sizedArr && sizedArr->length){
@@ -688,7 +703,7 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
                 //                }
 
                 //                return arrTpe->component->length ? ptr :load(   ptr, ty);
-                return load(   ptr, ty);
+                return load(ptr, ty);
               }
             }
           } else {
@@ -925,7 +940,7 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
             // Extend from i1 to i8
             B.CreateRet(B.CreateIntCast(expr, llvm::Type::getInt8Ty(C), true));
           } else if (auto ptr = rtnTpe.get<Type::Ptr>(); ptr && ptr->length) {
-            B.CreateRet(load(   expr, mkTpe(rtnTpe)));
+            B.CreateRet(load(expr, mkTpe(rtnTpe)));
           } else {
             B.CreateRet(expr);
           }
@@ -999,7 +1014,6 @@ void LLVMBackend::AstTransformer::addFn(llvm::Module &mod, const Function &f, bo
 
   llvm::MDBuilder mdbuilder(C);
   llvm::MDNode *root = mdbuilder.createTBAARoot("TBAA root");
-  
 
   //  if(options.target == Target::AMDGCN && f.kind != FunctionKind::Exported()){
   //    fn->setVisibility(llvm::GlobalValue::VisibilityTypes::HiddenVisibility);

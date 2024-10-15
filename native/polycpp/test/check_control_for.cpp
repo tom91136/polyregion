@@ -11,7 +11,8 @@
 
 int main() {
   auto limit = std::stoi(std::getenv("LIMIT"));
-  std::vector<int> xs(limit, -1);
+  int *xs = new int[limit];
+  std::fill(xs, xs + limit, -1);
   int result = __polyregion_offload_f1__([&]() {
     for (int i = 0; i < limit; ++i) {
       xs[i] = i + 1;
@@ -22,5 +23,6 @@ int main() {
   for (int i = 0; i < limit; ++i) {
     printf(" %d", xs[i]);
   }
+  delete[] xs;
   return 0;
 }

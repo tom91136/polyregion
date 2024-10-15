@@ -69,10 +69,7 @@ std::vector<std::string> ObjectDevice::features() {
   POLYRT_TRACE();
 
   std::vector<std::string> features;
-
-  llvm::StringMap<bool> Features;
-  llvm::sys::getHostCPUFeatures(Features);
-  for (auto &F : Features) {
+  for (auto &F : llvm::sys::getHostCPUFeatures()) {
     if (F.second) features.push_back(F.first().str());
   }
 

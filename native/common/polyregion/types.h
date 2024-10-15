@@ -2,6 +2,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <unordered_map>
 #include <utility>
 
 #include "export.h"
@@ -124,7 +128,8 @@ static inline const std::unordered_map<std::string, Target> &targets() {
 
 static inline std::optional<Target> parseTarget(const std::string &name) {
   std::string lower(name.size(), {});
-  std::transform(name.begin(), name.end(), lower.begin(), [](auto c) { return std::tolower(c); });
+  for (size_t i = 0; i < name.size(); ++i)
+    lower[i] = std::tolower(name[i]);
   if (auto it = targets().find(lower); it != targets().end()) return it->second;
   else return {};
 }
@@ -258,4 +263,3 @@ static inline constexpr runtime::ModuleFormat targetFormat(const compiletime::Ta
 }
 
 } // namespace polyregion::runtime
-

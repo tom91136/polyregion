@@ -41,7 +41,7 @@ static constexpr const char *__polyregion_prefix = "PolySTL"; // NOLINT(*-reserv
 #else
 
   #define POLYSTL_LOG(fmt, ...) std::fprintf(stderr, "[%s] " fmt "\n", __polyregion_prefix, __VA_ARGS__)
-  #define POLYSTL_LOG(fmt, ...)
+//  #define POLYSTL_LOG(fmt, ...)
 
 #endif
 
@@ -77,6 +77,13 @@ void __polyregion_builtin_gpu_barrier_all();    // NOLINT(*-reserved-identifier)
 void __polyregion_builtin_gpu_fence_global(); // NOLINT(*-reserved-identifier)
 void __polyregion_builtin_gpu_fence_local();  // NOLINT(*-reserved-identifier)
 void __polyregion_builtin_gpu_fence_all();    // NOLINT(*-reserved-identifier)
+
+template <typename T> class __polyregion_local {
+  T *ptr;
+  __polyregion_local(T *ptr) : ptr(ptr) { static_assert(sizeof(__polyregion_local<void *>) == sizeof(void *)); }
+public:
+  T &operator[](size_t idx) const { return ptr[idx]; }
+};
 
 template <polyregion::runtime::PlatformKind Kind, typename F>
 const RuntimeKernelBundle &__polyregion_offload__([[maybe_unused]] F) { // NOLINT(*-reserved-identifier)

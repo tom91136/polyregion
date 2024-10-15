@@ -52,9 +52,9 @@ FetchContent_Declare(
 
 FetchContent_Declare(
         Aspartame
-        SOURCE_DIR /home/tom/Aspartame
-#        GIT_REPOSITORY https://github.com/tom91136/Aspartame.git
-#        GIT_TAG        43aa85a6956126903cc0a5a3c11b4fe3ca0241f5
+        #        SOURCE_DIR /home/tom/Aspartame
+        GIT_REPOSITORY https://github.com/tom91136/Aspartame.git
+        GIT_TAG 93cc5826
 )
 
 FetchContent_MakeAvailable(Aspartame)
@@ -87,7 +87,7 @@ if (MSVC)
 else ()
     # FIXME adjust for CUDA stuff for now
     set(COMMON_DEBUG_OPTIONS -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -static-libsan -g3)
-#        set(COMMON_DEBUG_OPTIONS)
+    #        set(COMMON_DEBUG_OPTIONS)
 endif ()
 
 if (MSVC)
@@ -106,14 +106,13 @@ else ()
             -Wextra
             # -Wshadow         # too prevalent in LLVM
             # -Wold-style-cast # too prevalent in LLVM
-            -Wcast-align
+            # -Wcast-align      # too prevalent in LLVM
             -Werror=return-type
             -Werror=switch
             -Wthread-safety
             -Wno-unused-parameter
             -Wno-unused-function
             -Wno-unused-variable
-            -Wno-c++20-designator
     )
 endif ()
 
@@ -178,7 +177,7 @@ else ()
                     ${COMMON_LINKER_OPTIONS}
                     -static-libstdc++
                     LINKER:--gc-sections      # remove unused sections
-#                    LINKER:--strip-all        # strip symbols not used for DSO
+                    #                    LINKER:--strip-all        # strip symbols not used for DSO
             )
         endif ()
     endif ()
@@ -213,6 +212,7 @@ endif ()
 set(LLVM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/llvm")
 set(LLD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/lld")
 set(Clang_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/clang")
+set(Clang_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-dist")
 #set(MLIR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/mlir")
 
 message(STATUS "Using LLVM at ${LLVM_DIR}")
@@ -325,7 +325,7 @@ if (NOT clspv_POPULATED)
 endif ()
 
 # set CXX stuff here in case LLVM overwrites it
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(COMPILE_OPTIONS
@@ -339,6 +339,11 @@ set(COMPILE_OPTIONS
 set(LINK_OPTIONS
         ${COMMON_LINK_OPTIONS}
         ${STRICT_LINKER_OPTIONS}
+        "$<$<CONFIG:Debug>:${COMMON_DEBUG_OPTIONS}>"
+)
+
+set(PLUGIN_LINK_OPTIONS
+        ${COMMON_LINK_OPTIONS}
         "$<$<CONFIG:Debug>:${COMMON_DEBUG_OPTIONS}>"
 )
 

@@ -1,24 +1,21 @@
-#include <fmt/format.h>
 #include <iostream>
 #include <string>
-#include <unordered_set>
 #include <vector>
 
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
-#include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/ASTMatchers/ASTMatchers.h"
 #include "llvm/Support/Casting.h"
 
 #include "aspartame/optional.hpp"
+#include "aspartame/variant.hpp"
 #include "aspartame/vector.hpp"
 #include "aspartame/view.hpp"
 
 #include "ast_visitors.h"
 #include "clang_utils.h"
 #include "codegen.h"
-#include "options.h"
 #include "rewriter.h"
 
 using namespace polyregion::polystl;
@@ -124,7 +121,7 @@ static std::vector<std::variant<Failure, Callsite>> outlinePolyregionOffload(cla
 //   return identifier;
 // }
 
-void insertKernelImage(clang::DiagnosticsEngine &diag, clang::ASTContext &C, Callsite &c, const KernelBundle &bundle) {
+void insertKernelImage(clang::DiagnosticsEngine &diag, clang::ASTContext &C, const Callsite &c, const KernelBundle &bundle) {
 
   auto createDeclRef = [&](clang::VarDecl *lhs) {
     return clang::DeclRefExpr::Create(C, {}, {}, lhs, false, clang::SourceLocation{}, lhs->getType(), clang::ExprValueKind::VK_LValue);
@@ -295,8 +292,8 @@ void insertKernelImage(clang::DiagnosticsEngine &diag, clang::ASTContext &C, Cal
   c.calleeDecl->print(llvm::outs());
 }
 
-OffloadRewriteConsumer::OffloadRewriteConsumer(clang::DiagnosticsEngine &diag, const DriverContext &ctx)
-    : clang::ASTConsumer(), diag(diag), ctx(ctx) {}
+OffloadRewriteConsumer::OffloadRewriteConsumer(clang::DiagnosticsEngine &diag, const Options &opts)
+    : clang::ASTConsumer(), diag(diag), opts(opts) {}
 
 template <typename Parent, typename Node> const Parent *findParentOfType(clang::ASTContext &context, Node *from) {
   for (auto node = context.getParents(*from).begin()->template get<clang::Decl>(); node;
@@ -313,54 +310,48 @@ template <typename Parent, typename Node> const Parent *findParentOfType(clang::
 }
 
 void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
-  //  std::cout << "[TU] >>>" << std::endl;
+  for (auto r : outlinePolyregionOffload(C))
+    r ^ foreach_total(
+            [&](const Failure &f) { //
+              diag.Report(f.callExpr->getBeginLoc(),
+                          diag.getCustomDiagID(clang::DiagnosticsEngine::Warning, "[PolySTL] Outline failed: %0"))
+                  .AddString(f.reason);
+            },
+            [&](const Callsite &c) { //
+              SpecialisationPathVisitor spv(C);
+              auto specialisationPath = spv.resolve(c.calleeDecl) ^ reverse();
+              auto moduleId = specialisationPath ^ mk_string("->", [&](auto fnDecl, auto callExpr) {
+                                auto l = getLocation(*callExpr, C);
+                                std::string moduleId;
+                                moduleId += "<";
+                                moduleId += l.filename;
+                                moduleId += ":";
+                                moduleId += std::to_string(l.line);
+                                moduleId += ">";
+                                return moduleId;
+                              });
 
-  std::vector<std::variant<Failure, Callsite>> results = outlinePolyregionOffload(C);
+              std::cout << moduleId << std::endl;
 
-  for (auto r : results) {
-    std::visit(overloaded{
-                   [&](Failure &f) { //
-                     diag.Report(f.callExpr->getBeginLoc(),
-                                 diag.getCustomDiagID(clang::DiagnosticsEngine::Warning, "[PolySTL] Outline failed: %0"))
-                         .AddString(f.reason);
+              auto bundle = generate(
+                  opts, C, diag, moduleId, *c.functorDecl,
+                  specialisationPath ^ head_maybe() ^
+                      fold([](auto, auto callExpr) { return callExpr->getExprLoc(); }, [&]() { return c.callLambdaArgExpr->getExprLoc(); }),
+                  c.kind);
 
-                   },
-                   [&](Callsite &c) { //
-                     SpecialisationPathVisitor spv(C);
-                     auto specialisationPath = spv.resolve(c.calleeDecl) ^ reverse();
-                     auto moduleId = specialisationPath ^ mk_string("->", [&](auto fnDecl, auto callExpr) {
-                                       auto l = getLocation(*callExpr, C);
-                                       std::string moduleId;
-                                       moduleId += "<";
-                                       moduleId += l.filename;
-                                       moduleId += ":";
-                                       moduleId += std::to_string(l.line);
-                                       moduleId += ">";
-                                       return moduleId;
-                                     });
+              if (opts.verbose) {
+                diag.Report(c.callLambdaArgExpr->getExprLoc(),
+                            diag.getCustomDiagID(clang::DiagnosticsEngine::Remark, "[PolySTL] Outlined function: %0 for %1 (%2)\n"))
+                    << moduleId << to_string(c.kind)
+                    << (bundle.objects //
+                        | map([](auto &o) {
+                            return std::string(to_string(o.format)) + "=" +
+                                   std::to_string(static_cast<float>(o.moduleImage.size()) / 1000) + "KB";
+                          }) //
+                        | mk_string(", "));
+              }
 
-                     auto bundle = generate(ctx, C, diag, moduleId, *c.functorDecl,
-                                            specialisationPath ^ head_maybe() ^
-                                                fold([](auto, auto callExpr) { return callExpr->getExprLoc(); },
-                                                     [&]() { return c.callLambdaArgExpr->getExprLoc(); }),
-                                            c.kind);
+              insertKernelImage(diag, C, c, bundle);
 
-                     if (!ctx.opts.quiet) {
-                       diag.Report(c.callLambdaArgExpr->getExprLoc(),
-                                   diag.getCustomDiagID(clang::DiagnosticsEngine::Remark, "[PolySTL] Outlined function: %0 for %1 (%2)\n"))
-                           << moduleId << to_string(c.kind)
-                           << (bundle.objects //
-                               | map([](auto &o) {
-                                   return std::string(to_string(o.format)) + "=" +
-                                          std::to_string(static_cast<float>(o.moduleImage.size()) / 1000) + "KB";
-                                 }) //
-                               | mk_string(", "));
-                     }
-
-                     insertKernelImage(diag, C, c, bundle);
-
-                   },
-               },
-               r);
-  }
+            });
 }

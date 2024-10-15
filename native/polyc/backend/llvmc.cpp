@@ -10,7 +10,6 @@
 #include "spirv-tools/libspirv.hpp"
 
 #include "spirv-tools/optimizer.hpp"
-#include "llvm/TargetParser/Triple.h"
 #include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
@@ -26,17 +25,18 @@
 #include "llvm/IR/Verifier.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/MC/MCInstrInfo.h"
-#include "llvm/TargetParser/SubtargetFeature.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Object/ELF.h"
 #include "llvm/Pass.h"
 #include "llvm/Passes/OptimizationLevel.h"
 #include "llvm/Passes/PassBuilder.h"
-#include "llvm/TargetParser/Host.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/TargetParser/Host.h"
+#include "llvm/TargetParser/SubtargetFeature.h"
+#include "llvm/TargetParser/Triple.h"
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/IPO/AlwaysInliner.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
@@ -59,11 +59,9 @@ const llvmc::CpuInfo &llvmc::hostCpuInfo() {
   // XXX This is cached because host CPU can never change (hopefully!) at runtime.
   static std::optional<llvmc::CpuInfo> hostCpuInfo = {};
   if (!hostCpuInfo) {
-    llvm::StringMap<bool> HostFeatures;
     llvm::SubtargetFeatures Features;
-    if (llvm::sys::getHostCPUFeatures(HostFeatures))
-      for (auto &F : HostFeatures)
-        Features.AddFeature(F.first(), F.second);
+    for (auto &F : llvm::sys::getHostCPUFeatures())
+      Features.AddFeature(F.first(), F.second);
     hostCpuInfo = {.uArch = llvm::sys::getHostCPUName().str(), .features = Features.getString()};
   }
   assert(hostCpuInfo && "Host CPU info not valid");
@@ -119,7 +117,7 @@ void llvmc::initialise() {
   initializeScalarizeMaskedMemIntrinLegacyPassPass(*r);
   initializeExpandReductionsPass(*r);
   initializeExpandVectorPredicationPass(*r);
-//  initializeHardwareLoopsPass(*r);
+  //  initializeHardwareLoopsPass(*r);
   initializeTransformUtils(*r);
   initializeReplaceWithVeclibLegacyPass(*r);
 
@@ -205,7 +203,7 @@ static void optimise(llvm::TargetMachine &TM, llvm::Module &M, llvm::Optimizatio
   // options.
   llvm::PassBuilder PB(&TM);
 
-  TM.registerPassBuilderCallbacks(PB, true);
+  TM.registerPassBuilderCallbacks(PB);
 
   // Register all the basic analyses with the managers.
   PB.registerModuleAnalyses(MAM);
@@ -234,7 +232,7 @@ static void optimise(llvm::TargetMachine &TM, llvm::Module &M, llvm::Optimizatio
 }
 
 polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compiletime::OptLevel &opt, bool emitDisassembly,
-                                          std::unique_ptr<llvm::Module> M) {
+                                            std::unique_ptr<llvm::Module> M) {
   auto start = compiler::nowMono();
 
   auto useUnsafeMath = opt == compiletime::OptLevel::Ofast;

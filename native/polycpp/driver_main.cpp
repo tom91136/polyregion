@@ -1,30 +1,146 @@
-#include <clang/CodeGen/BackendUtil.h>
+#include "fmt/core.h" // fmt/std.h requires RTTI
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 
-#include "clang/Basic/Version.h"
-#include "clang/Driver/Compilation.h"
-#include "clang/Driver/Driver.h"
-#include "clang/Driver/Tool.h"
-#include "clang/FrontendTool/Utils.h"
-
-#include "llvm/ADT/StringRef.h"
-#include "llvm/Support/Process.h"
-#include "llvm/TargetParser/Host.h"
-
-#include "aspartame/optional.hpp"
-#include "aspartame/string.hpp"
-#include "aspartame/variant.hpp"
-#include "aspartame/vector.hpp"
-#include "aspartame/view.hpp"
-
-#include "driver_clang.h"
+#include "aspartame/all.hpp"
 #include "driver_polyc.h"
-#include "frontend.h"
-#include "options.h"
-#include "rewriter.h"
+#include "llvm/Support/Program.h"
 
 using namespace aspartame;
+
+struct CliArgs {
+  std::vector<const char *> data;
+  std::unordered_set<size_t> deleted{};
+  explicit CliArgs(const std::vector<const char *> &data) : data(data) {}
+
+  bool has(const std::string &flag) const {
+    return data | zip_with_index() | filter([&](auto v, auto i) { return !deleted.count(i); }) | keys() |
+           exists([&](auto &chars) { return chars == flag; });
+  }
+
+  bool has(const std::string &flag, size_t pos) const {
+    return data | zip_with_index() | filter([&](auto v, auto i) { return !deleted.count(i); }) |
+           exists([&](auto &chars, auto i) { return chars == flag && i == pos; });
+  }
+
+  std::optional<std::string> get(const std::string &flag) const {
+    return data | zip_with_index() | filter([&](auto v, auto i) { return !deleted.count(i); }) |
+           collect([&](auto &chars, auto i) -> std::optional<std::string> {
+             if (const std::string arg = chars; arg == flag) {
+               if (i + 1 < data.size()) return data[i + 1];                                // -foo :: bar :: Nil
+               else return {};                                                             // -foo :: Nil
+             } else if (arg ^ starts_with(flag + "=")) return arg.substr(flag.size() + 1); // -foo=bar
+             return {};
+           }) //
+           | head_maybe();
+  }
+
+  bool popBool(const std::string &flag) {
+    auto oldSize = deleted.size();
+    for (size_t i = 0; i < data.size(); ++i) {
+      if (deleted.count(i)) continue;
+      if (data[i] == flag) deleted.insert(i);
+    }
+    return oldSize != deleted.size();
+  }
+
+  std::optional<std::string> popValue(const std::string &flag) {
+    std::optional<std::string> last;
+    for (size_t i = 0; i < data.size(); ++i) {
+      if (deleted.count(i)) continue;
+      if (const std::string arg = data[i]; arg == flag && i + 1 < data.size()) { // -foo :: bar :: Nil
+        deleted.insert(i);
+        deleted.insert(i + 1);
+        last = data[i + 1];
+      } else if (arg ^ starts_with(flag + "=")) { // -foo=bar
+        deleted.insert(i);
+        last = arg.substr(flag.size() + 1);
+      }
+    }
+    return last;
+  }
+
+  std::vector<const char *> remaining() const {
+    return data | zip_with_index() | filter([&](auto v, auto i) { return !deleted.count(i); }) | keys() | to_vector();
+  }
+};
+
+struct PolyCppOptions {
+
+  enum class LinkKind : uint8_t { Static = 1, Dynamic, Disabled = 3 };
+
+  static std::variant<std::string, LinkKind> parseLinkKind(const std::string &arg) {
+    if (auto v = arg ^ to_lower(); v == "static") return LinkKind::Static;
+    else if (v == "dynamic") return LinkKind::Dynamic;
+    else if (v == "disabled") return LinkKind::Disabled;
+    return "Unknown link kind `" + arg + "`";
+  }
+
+  bool verbose = false;
+  bool noCompress = false;
+  bool interposeMalloc = true;
+  bool interposeAlloca = false;
+  std::string targets{};
+  LinkKind rt = LinkKind::Static;
+  LinkKind jit = LinkKind::Disabled;
+
+  static std::variant<std::vector<std::string>, std::optional<PolyCppOptions>> parse(CliArgs &args) {
+
+    const std::string fStdParFlag = "-fstdpar";
+    const std::string fStdParVerboseFlag = "-fstdpar-verbose";
+    const std::string fStdParArchNoCompressFlag = "-fstdpar-no-compress";
+    const std::string fStdParInterposeMallocFlag = "-fstdpar-interpose-malloc";
+    const std::string fStdParInterposeAllocaFlag = "-fstdpar-interpose-alloca";
+    const std::string fStdParArchFlag = "-fstdpar-arch";
+    const std::string fStdParRtFlag = "-fstdpar-rt";
+    const std::string fStdParJitFlag = "-fstdpar-jit";
+
+    auto fStdPar = false, fStdParDependents = false;
+    PolyCppOptions options;
+    std::vector<std::string> errors;
+
+    auto markError = [&](const std::string &prefix) { return [&](const std::string &x) { errors.push_back("\"" + prefix + "\": " + x); }; };
+
+    if (args.popBool(fStdParFlag)) {
+      fStdPar = true;
+    }
+    if (args.popBool(fStdParVerboseFlag)) {
+      fStdParDependents = true;
+      options.verbose = true;
+    }
+    if (args.popBool(fStdParArchNoCompressFlag)) {
+      fStdParDependents = true;
+      options.noCompress = true;
+    }
+    if (args.popBool(fStdParInterposeMallocFlag)) {
+      fStdParDependents = true;
+      options.interposeMalloc = true;
+    }
+    if (args.popBool(fStdParInterposeAllocaFlag)) {
+      fStdParDependents = true;
+      options.interposeAlloca = true;
+    }
+    if (auto arch = args.popValue(fStdParArchFlag)) {
+      fStdParDependents = true;
+      options.targets = *arch;
+    }
+    if (auto rt = args.popValue(fStdParRtFlag)) {
+      fStdParDependents = true;
+      parseLinkKind(*rt) ^ foreach_total(markError(fStdParRtFlag), [&](const LinkKind &x) { options.rt = x; });
+    }
+    if (auto jit = args.popValue(fStdParJitFlag)) {
+      fStdParDependents = true;
+      parseLinkKind(*jit) ^ foreach_total(markError(fStdParJitFlag), [&](const LinkKind &x) { options.jit = x; });
+    }
+
+    if (!fStdPar && fStdParDependents)
+      errors.insert(errors.begin(), fStdParFlag + " not specified but StdPar dependent flags used, pleased add " + fStdParFlag);
+
+    if (errors.empty()) return fStdPar ? std::optional{options} : std::nullopt;
+    else return errors;
+  }
+};
 
 static std::vector<std::string> mkDelimitedEnvPaths(const char *env, std::optional<std::string> leading) {
   std::vector<std::string> xs;
@@ -37,189 +153,101 @@ static std::vector<std::string> mkDelimitedEnvPaths(const char *env, std::option
   return xs;
 };
 
-int executeCC1(const std::string &executable,           //
-               const std::string &polycppLibDir,        //
-               const std::string &polycppIncludeDir,    //
-               const llvm::opt::ArgStringList &cc1Args, //
-               const std::optional<polyregion::polystl::StdParOptions> &stdpar) {
-  auto noCC1ArgsBacking = cc1Args | drop(1)                            // skip the first cc1 arg
-                          | map([](auto s) { return std::string(s); }) // own the strings as we need this to survive until CC1 finishes
-                          | to_vector();                               //
-
-  if (stdpar) {
-
-    auto includes = mkDelimitedEnvPaths("POLYSTL_INCLUDE", "-isystem");
-    noCC1ArgsBacking.insert(noCC1ArgsBacking.end(), includes.begin(), includes.end());
-
-    noCC1ArgsBacking.insert(noCC1ArgsBacking.end(), {"-isystem", polycppIncludeDir});
-
-    noCC1ArgsBacking.insert(noCC1ArgsBacking.end(), {"-include", "polystl/polystl.h"});
-    noCC1ArgsBacking.insert(noCC1ArgsBacking.end(), {"-fpass-plugin=" + polycppLibDir + "/polystl-interpose.so"});
-  }
-
-  auto cc1Verbose = noCC1ArgsBacking ^ contains("-v");
-  if (cc1Verbose || true) {
-    // XXX dump the command; we handle this directly because CC1 is not longer a separate process
-    (llvm::errs() << "\"<PolySTL c1>\" " << (noCC1ArgsBacking ^ mk_string(" ")) << "\n").flush();
-  }
-
-  return polyregion::polystl::useCI(
-      noCC1ArgsBacking ^ map([](auto &x) { return x.c_str(); }), "polycpp", nullptr, [&](clang::CompilerInstance &CI) {
-        if (CI.getFrontendOpts().ShowVersion) {
-          llvm::cl::PrintVersionMessage();
-          return EXIT_SUCCESS;
-        }
-
-        int code = 0;
-        if (stdpar && !std::getenv("POLYCPP_NO_REWRITE")) {
-          using namespace polyregion;
-
-          if (!stdpar->quiet) {
-            CI.getDiagnostics()
-                .Report(CI.getDiagnostics().getCustomDiagID(clang::DiagnosticsEngine::Remark, "[PolySTL] Targeting architectures: %0"))
-                .AddString(stdpar->targets ^
-                           mk_string(", ", [](auto target, auto feature) { return std::string(to_string(target)) + "@" + feature; }));
-          }
-
-          auto action = std::make_unique<polystl::ModifyASTAndEmitObjAction>(clang::CreateFrontendAction(CI), [&]() {
-            return std::make_unique<polystl::OffloadRewriteConsumer>(CI.getDiagnostics(),
-                                                                     polystl::DriverContext{executable, *stdpar, cc1Verbose});
-          });
-
-          auto success = polyregion::polystl::executeFrontendAction(&CI, std::move(action));
-          if (!success) {
-            CI.getDiagnostics().Report(
-                CI.getDiagnostics().getCustomDiagID(clang::DiagnosticsEngine::Error, "[PolySTL] Frontend pass did not succeed"));
-          }
-          code = success ? EXIT_SUCCESS : EXIT_FAILURE;
-        } else {
-          code = clang::ExecuteCompilerInvocation(&CI) ? EXIT_SUCCESS : EXIT_FAILURE;
-        }
-        return code;
-      });
-}
-
-[[maybe_unused]] void addrFn() { /* dummy symbol used for use with getMainExecutable */
-}
+[[maybe_unused]] void addrFn() { /* dummy symbol used for use with getMainExecutable */ }
 
 int main(int argc, const char *argv[]) {
 
-  if (argc >= 2 && argv[1] == std::string("--polyc")) {
+  CliArgs args(std::vector(argv, argv + argc));
+  if (args.has("--polyc", 1)) {
     return polyregion::polyc(argc - 1, argv + 1);
   }
 
-  auto diags = polyregion::polystl::initialiseAndCreateDiag(argc, argv,
-                                                            "PLEASE submit a bug report to TODO and include the crash backtrace, "
-                                                            "preprocessed source, and associated run script.\n");
+  namespace fs = std::filesystem;
 
-  if (!diags) {
+  fs::path execPath = llvm::sys::fs::getMainExecutable(argv[0], (void *)&addrFn);
+  fs::path execParentPath = execPath.parent_path();
+
+  fs::path clangPath;
+
+
+  if (auto driverArg = args.popValue("--driver")) clangPath = *driverArg;         // Explicit driver takes precedence
+  else if (auto driverEnv = std::getenv("POLYCPP_DRIVER")) clangPath = driverEnv; // Then try environment vars
+  else if (fs::path clangBin = execParentPath / "clang++";
+           fs::exists(clangBin)) { // Finally, find the clang++ that's in the same dir as the current wrapper
+    clangPath = clangBin;
+  } else {
+    std::cerr << fmt::format(
+                     "[PolyCpp] Cannot locate driver executable at {}, manually specify the driver with `--driver <path_to_clang++>`",
+                     execPath.string())
+              << std::endl;
     return EXIT_FAILURE;
   }
 
-  auto execPath = llvm::sys::fs::getMainExecutable(argv[0], (void *)(&addrFn));
-  auto execParentDir = llvm::sys::path::parent_path(execPath).str();
-
-  auto triple = llvm::sys::getDefaultTargetTriple();
-  clang::driver::Driver driver(execPath, triple, *diags, "PolyCpp compiler");
-
-  driver.ResourceDir = execParentDir + "/lib/clang/" + std::to_string(CLANG_VERSION_MAJOR);
-  if (!llvm::sys::fs::is_directory(driver.ResourceDir)) {
-    driver.getDiags().Report(diags->getCustomDiagID(
-        clang::DiagnosticsEngine::Warning,
-        "Clang resource directory (%0) missing, intrinsics and certain features that require bundled libraries (e.g ASan) will not work."))
-        << driver.ResourceDir;
-  }
-
-  auto polycppResourceDir = execParentDir + "/lib/polycpp";
-  auto polycppLibDir = polycppResourceDir + "/lib";
-  auto polycppIncludeDir = polycppResourceDir + "/include";
-  for (auto &[dir, kind] :
-       {std::pair{polycppResourceDir, "resource"}, std::pair{polycppLibDir, "library"}, std::pair{polycppIncludeDir, "header"}}) {
-    if (!llvm::sys::fs::is_directory(dir)) {
-      driver.getDiags().Report(
-          diags->getCustomDiagID(clang::DiagnosticsEngine::Warning, "Polycpp %0 directory (%1) missing, -fstdpar will not work."))
-          << kind << dir;
-    }
-  }
-
-  return polyregion::polystl::StdParOptions::stripAndParse({argv, argv + argc}) ^
+  return PolyCppOptions::parse(args) ^
          fold_total(
              [&](const std::vector<std::string> &errors) {
-               driver.getDiags().Report(
-                   diags->getCustomDiagID(clang::DiagnosticsEngine::Fatal, "Errors (%0) while parsing the following arguments:\n%1"))
-                   << errors.size() << (errors ^ mk_string("\n") ^ indent(2));
+               std::cerr << fmt::format("[PolyCpp] Unable to parse PolyCpp specific arguments:\n{}", (errors ^ mk_string("\n") ^ indent(2)))
+                         << std::endl;
                return EXIT_FAILURE;
              },
-             [&](const std::pair<std::vector<const char *>, std::optional<polyregion::polystl::StdParOptions>> &v) {
-               auto [driverArgs, stdpar] = v;
+             [&](const std::optional<PolyCppOptions> &opts) {
+               auto remaining = args.remaining() ^ map([](auto &s) -> std::string { return s; });
+               auto append = [&](const std::initializer_list<std::string> &xs) { remaining.insert(remaining.end(), xs); };
 
-               // since the executable name won't be clang++ anymore, we manually set the mode to C++ by inserting the override
-               // after the executable name
-               driverArgs.insert(std::next(driverArgs.begin()), "--driver-mode=g++");
+               if (opts) {
+                 auto includes = mkDelimitedEnvPaths("POLYSTL_INCLUDE", "-isystem");
+                 auto libs = mkDelimitedEnvPaths("POLYSTL_LIB", {});
+                 remaining.insert(remaining.end(), includes.begin(), includes.end());
+                 remaining.insert(remaining.end(), libs.begin(), libs.end());
 
-               auto libs = mkDelimitedEnvPaths("POLYSTL_LIB", {});
-               std::transform(libs.begin(), libs.end(), std::back_inserter(driverArgs), [](auto &x) { return x.c_str(); });
+                 auto polycppResourcePath = execParentPath / "lib/polycpp";
+                 auto polycppIncludePath = polycppResourcePath / "include";
+                 auto polycppLibPath = polycppResourcePath / "lib";
+                 auto polycppInterposePlugin = polycppLibPath / "polystl-interpose-plugin.so";
+                 auto polycppClangPlugin = polycppLibPath / "polycpp-clang-plugin.so";
+                 append({"-isystem", polycppIncludePath});
+                 append({"-include", "polystl/polystl.h"});
 
-               std::unique_ptr<clang::driver::Compilation> compilation(driver.BuildCompilation(llvm::ArrayRef(driverArgs)));
-
-               int returnCode = EXIT_SUCCESS;
-
-               auto runCommand = [&](clang::driver::Command &command) {
-                 const clang::driver::Command *failed{};
-                 if (auto code = compilation->ExecuteCommand(command, failed); code != EXIT_SUCCESS) {
-                   driver.generateCompilationDiagnostics(*compilation, *failed);
-                   returnCode = code;
+                 bool noRewrite = std::getenv("POLYCPP_NO_REWRITE") != nullptr;
+                 if (!noRewrite) {
+                   append({"-Xclang", "-load", "-Xclang", polycppClangPlugin});
+                   append({"-Xclang", "-add-plugin", "-Xclang", "polycpp"});
+                   append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("exe={}", execPath.string())});
+                   append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("verbose={}", opts->verbose ? "1" : "0")});
+                   append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("targets={}", opts->targets)});
+                   if (opts->interposeMalloc) append({fmt::format("-fpass-plugin={}", polycppInterposePlugin.string())});
                  }
-               };
 
-               for (auto &command : compilation->getJobs()) {
-                 const auto &cmdArgs = command.getArguments();
-                 if (command.getExecutable() == execPath &&                    // make sure the driver is actually calling us
-                     command.getCreator().getName() == std::string("clang") && // and that clang is the compiler
-                     cmdArgs[0] == std::string("-cc1")                         // and we're invoking the cc1 frontend
-                 ) {
-                   returnCode = executeCC1(execPath, polycppLibDir, polycppIncludeDir, cmdArgs, stdpar);
-                   if (returnCode != EXIT_SUCCESS) break;
-                 } else if (stdpar && command.getCreator().isLinkJob()) {
-                   auto argsWithExtraLib = cmdArgs;
-                   switch (stdpar->rt) {
-                     case polyregion::polystl::StdParOptions::LinkKind::Static: {
-                       auto polyStlArchivePath = polycppLibDir + "/libpolystl-static.a";
-                       // XXX file order matters and should be in reverse dependency order (object with the most dependencies on the left)
-                       //   We want to insert our runtime at a position that's just after all the inputs but before the system dependencies.
-                       //   So, for a set of input, we find the right most index and insert our library at that position.
-                       auto rightMostIdx = //
-                           (command.getInputInfos() | collect([&](auto input) {
-                              std::string rhs = input.getFilename();
-                              return argsWithExtraLib | index_where_maybe([&](auto lhs) { return lhs == rhs; });
-                            }) |
-                            to_vector()) ^
-                           sort() ^ last_maybe() ^ get_or_else(argsWithExtraLib.size() - 1);
-                       argsWithExtraLib.insert(argsWithExtraLib.begin() + rightMostIdx + 1, polyStlArchivePath.c_str());
-                       if (!stdpar->noCompress) argsWithExtraLib.append({"--compress-debug-sections=zlib", "--gc-sections"});
-                       command.replaceArguments(argsWithExtraLib);
-                       runCommand(command);
+                 auto compileOnly = std::vector{"-c", "-S", "-E", "-M", "-MM", "-MD", "-fsyntax-only"} ^
+                                    exists([&](auto &flag) { return args.has(flag); });
+                 if (!compileOnly) {
+                   switch (opts->rt) {
+                     case PolyCppOptions::LinkKind::Static: {
+                       remaining.insert(remaining.end(), polycppLibPath / "libpolystl-static.a");
+                       if (!opts->noCompress) append({"-Wl,--compress-debug-sections=zlib,--gc-sections"});
                        break;
                      }
-                     case polyregion::polystl::StdParOptions::LinkKind::Dynamic: {
-                       auto linkFlag = "-L" + polycppLibDir;
-                       argsWithExtraLib.append({linkFlag.c_str(), "-lpolystl", "-rpath", polycppLibDir.c_str(), "-rpath", "$ORIGIN"});
-                       command.replaceArguments(argsWithExtraLib);
-                       if (!stdpar->quiet) {
-                         driver.getDiags().Report(diags->getCustomDiagID(
-                             clang::DiagnosticsEngine::Remark,
-                             "Dynamic linking of PolySTL runtime requested, if you would like to relocate your binary, "
-                             "please copy %0 to the same directory as the executable (-rpath=$ORIGIN has been set for you)"))
-                             << (polycppLibDir + "/libpolystl.so");
+                     case PolyCppOptions::LinkKind::Dynamic: {
+                       append({fmt::format("-L{}", polycppLibPath.string()), "-lpolystl", //
+                               fmt::format("-Wl,-rpath,{}", polycppLibPath.string()), "-Wl,-rpath,$ORIGIN"});
+                       if (opts->verbose) {
+                         std::cerr
+                             << fmt::format(
+                                    "[PolyCpp] Dynamic linking of PolySTL runtime requested, if you would like to relocate your binary, "
+                                    "please copy {} to the same directory as the executable (-rpath=$ORIGIN has been set for you)",
+                                    (polycppLibPath / "libpolystl.so").string())
+                             << std::endl;
                        }
-                       runCommand(command);
                        break;
                      }
-                     case polyregion::polystl::StdParOptions::LinkKind::Disabled: runCommand(command); break;
+                     case PolyCppOptions::LinkKind::Disabled: break;
                    }
-                 } else runCommand(command);
+                 }
                }
-               diags->getClient()->finish();
-               return returnCode;
+
+               std::cout << ">>> " << (remaining ^ mk_string(" ")) << std::endl;
+               remaining[0] = "clang++";
+
+               return llvm::sys::ExecuteAndWait(clangPath.c_str(), remaining  | map([](auto &x) -> llvm::StringRef { return x; })|to_vector() );
              });
 }

@@ -1,7 +1,11 @@
 #pragma once
 
-#include "options.h"
+#include <string>
+#include <vector>
+
+#include "plugin.h"
 #include "polyregion/types.h"
+
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
@@ -21,11 +25,11 @@ struct KernelBundle {
   std::string metadata;
 };
 
-KernelBundle generate(const DriverContext &ctx,
+KernelBundle generate(const Options &ctx,
                       clang::ASTContext &C,                //
                       clang::DiagnosticsEngine &diag,      //
                       const std::string &moduleId,         //
                       const clang::CXXMethodDecl &functor, //
                       const clang::SourceLocation &loc,    //
                       runtime::PlatformKind kind);
-}
+} // namespace polyregion::polystl

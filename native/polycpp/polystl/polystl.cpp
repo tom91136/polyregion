@@ -1,6 +1,7 @@
 #include "polystl/polystl.h"
 #include "polyregion/concurrency_utils.hpp"
 #include "polyrt/runtime.h"
+#include <algorithm>
 
 static constexpr const char *PlatformSelectorEnv = "POLYSTL_PLATFORM";
 static constexpr const char *DeviceSelectorEnv = "POLYSTL_DEVICE";
@@ -157,7 +158,11 @@ POLYREGION_EXPORT extern "C" bool __polyregion_dispatch_managed( // NOLINT(*-res
     __polyregion_selected_queue->enqueueHostToDeviceAsync(functorData, functorDevicePtr, functorDataSize, [&]() { cb(); });
   });
   polyregion::concurrency_utils::waitAll([&](auto &cb) {
-    ArgBuffer buffer{{Type::Ptr, &functorDevicePtr}, {Type::Void, nullptr}};
+    auto buffer = //
+        localMemBytes > 0 ? ArgBuffer{{Type::Scratch, {}}, {Type::Ptr, &functorDevicePtr}, {Type::Void, {}}}
+                      : ArgBuffer{  {Type::Ptr, &functorDevicePtr}, {Type::Void, {}}};
+
+
     __polyregion_selected_queue->enqueueInvokeAsync(
         moduleName, "kernel", buffer, //
         Policy{                       //
