@@ -43,7 +43,7 @@ jobs:
 
       - name: Dotenv
         id: dotenv
-        uses: falti/dotenv-action@v1.0.4
+        uses: falti/dotenv-action@v1.1
         with:
           path: ./native/.env
 
@@ -63,7 +63,7 @@ jobs:
       - name: Restore LLVM cache
         if: ${{ !env.ACT }}
         id: restore-llvm
-        uses: actions/cache/restore@v3
+        uses: actions/cache/restore@v4
         with:
           path: ./native/llvm-*
           key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchain*.cmake') }}
@@ -80,7 +80,7 @@ jobs:
 
       - name: Save LLVM cache
         if: steps.build-llvm.outcome == 'success'
-        uses: actions/cache/save@v3
+        uses: actions/cache/save@v4
         id: save-llvm
         with:
           path: ./native/llvm-*
