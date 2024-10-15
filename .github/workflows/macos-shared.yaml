@@ -22,9 +22,9 @@ jobs:
 
       - name: Install dependencies
         run: |
-          brew install llvm cmake ninja
-          echo "JAVA_HOME=$JAVA_HOME_8_X64" >> $GITHUB_ENV
-          echo "/usr/local/opt/llvm/bin"    >> $GITHUB_PATH
+          brew install llvm lld cmake ninja
+          echo "JAVA_HOME=$JAVA_HOME_11_arm64" >> $GITHUB_ENV
+          echo "/opt/homebrew/opt/llvm/bin"    >> $GITHUB_PATH
 
       - name: Dotenv
         id: dotenv
