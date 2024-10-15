@@ -105,6 +105,10 @@ function(add_copy_header_set_targets TARGET DEPENDENT_TARGET DESTINATION)
     endif ()
     foreach (absolute_file ${header_set})
         cmake_path(RELATIVE_PATH absolute_file BASE_DIRECTORY "${header_dirs}" OUTPUT_VARIABLE relative_file)
+        cmake_path(GET relative_file EXTENSION header_extension)
+        if ("${header_extensoon}" STREQUAL ".impl")
+            cmake_path(GET relative_file STEM relative_file)
+        endif ()
         add_custom_command(TARGET ${TARGET} POST_BUILD
                 COMMAND
                 ${CMAKE_COMMAND} -E copy "${absolute_file}" "$<TARGET_FILE_DIR:${TARGET}>/${DESTINATION}/${relative_file}")

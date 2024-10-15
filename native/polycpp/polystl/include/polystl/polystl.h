@@ -1,9 +1,8 @@
 #pragma once
 
+
 #include <cstddef>
 #include <cstring>
-
-#include "polyregion/concurrency_utils.hpp"
 #include "polyrt/runtime.h"
 
 using namespace polyregion::runtime;

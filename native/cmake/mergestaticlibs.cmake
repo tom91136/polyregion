@@ -74,10 +74,10 @@ function(merge_static_libs outlib)
         if(multiconfig)
             message(FATAL_ERROR "Multiple configurations are not supported")
         endif()
-        get_target_property(outfile ${outlib} LOCATION)
+        # get_target_property(outfile ${outlib} LOCATION)
         add_custom_command(TARGET ${outlib} POST_BUILD
-                COMMAND rm ${outfile}
-                COMMAND /usr/bin/libtool -static -o ${outfile}
+                COMMAND rm "$<TARGET_FILE:${outlib}>"
+                COMMAND /usr/bin/libtool -static -o "$<TARGET_FILE:${outlib}>"
                 ${libfiles}
         )
     else() # general UNIX - need to "ar -x" and then "ar -ru"

@@ -1,5 +1,4 @@
 
-
 if (UNIX)
     list(APPEND RUNTIME_COMPONENTS compiler-rt libcxx libcxxabi libunwind openmp)
     #    list(APPEND RUNTIME_TARGETS cxx-headers)
@@ -64,6 +63,9 @@ set(LIBCXX_INCLUDE_TESTS OFF CACHE BOOL "")
 #
 if (APPLE)
     set(LLVM_ENABLE_LIBCXX ON CACHE BOOL "")
+    set(COMPILER_RT_ENABLE_IOS OFF CACHE BOOL "")
+    set(COMPILER_RT_ENABLE_TVOS OFF CACHE BOOL "")
+    set(COMPILER_RT_ENABLE_WATCHOS OFF CACHE BOOL "")
 elseif (UNIX)
     set(LLVM_ENABLE_LIBCXX OFF CACHE BOOL "")
     # XXX breaks with RTTI errors when building one of the sanitisers
@@ -84,7 +86,16 @@ set(COMPILER_RT_DEFAULT_TARGET_ONLY ON CACHE BOOL "")
 set(COMPILER_RT_BUILD_LIBFUZZER OFF CACHE BOOL "")
 set(COMPILER_RT_SANITIZERS_TO_BUILD "asan;dfsan;msan;hwasan;tsan;cfi" CACHE STRING "")
 
-
+if (APPLE)
+    # see https://github.com/Homebrew/homebrew-core/blob/1ffeb486e05622d8eeea0f1bffa3b7d85e6809b1/Formula/l/llvm.rb#L159
+    # otherwise the default clang binary will not work unless --sysroot=$(xcrun --show-sdk-path) is added
+    execute_process(
+            COMMAND xcrun --show-sdk-path
+            OUTPUT_VARIABLE DARWIN_SYSROOT
+            OUTPUT_STRIP_TRAILING_WHITESPACE)
+    set(DEFAULT_SYSROOT "${DARWIN_SYSROOT}" CACHE STRING "")
+    message(STATUS "Apple: DEFAULT_SYSROOT is set to: ${DEFAULT_SYSROOT}")
+endif ()
 
 # You likely want more tools; this is just an example :) Note that we need to
 # include cxx-headers explicitly here (in addition to it being added to

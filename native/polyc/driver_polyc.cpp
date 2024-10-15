@@ -20,12 +20,13 @@ using namespace polyregion;
 using namespace aspartame;
 
 // See https://stackoverflow.com/a/39758021/896997
-std::vector<std::byte> readFromStdIn() {
+template <typename T = std::byte>
+std::vector<T> readFromStdIn() {
   std::freopen(nullptr, "rb", stdin);
   if (std::ferror(stdin)) throw std::runtime_error(std::strerror(errno));
   std::size_t len;
-  std::array<std::byte, 1024> buf{};
-  std::vector<std::byte> input;
+  std::array<T, 1024> buf{};
+  std::vector<T> input;
   while ((len = std::fread(buf.data(), sizeof(buf[0]), buf.size(), stdin)) > 0) {
     if (std::ferror(stdin) && !std::feof(stdin)) throw std::runtime_error(std::strerror(errno));
     input.insert(input.end(), buf.data(), buf.data() + len); // append to vector
@@ -81,8 +82,8 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                  default: std::cerr << "Unknown optimisation level: " << std::to_string(rawOpt) << std::endl; return EXIT_FAILURE;
                }
 
-               auto bytes = maybePath ? polyregion::read_struct<std::byte>(maybePath.value()) : readFromStdIn();
-               auto isJson = bytes ^ forall([](auto c) { return c <= std::byte{127}; });
+               auto bytes = maybePath ? polyregion::read_struct<uint8_t>(maybePath.value()) : readFromStdIn<uint8_t>();
+               auto isJson = bytes ^ forall([](auto c) { return c <= 127; });
 
                try {
                  auto raw =
@@ -95,17 +96,22 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                  std::cout << repr(program) << "\n";
                  std::cout<< "=================" <<std::endl;
 
-                 auto compilation = compiler::compile(program, compiler::Options{target, rawArch}, opt);
-                 if (verbose) std::cerr << repr(compilation) << std::endl;
-                 if (!compilation.messages.empty()) std::cerr << compilation.messages << std::endl;
-                 auto resultBytes = nlohmann::json::to_msgpack(compileresult_to_json(compilation));
-                 if (out == "-") {
-                   std::freopen(nullptr, "wb", stdout);
-                   std::fwrite(resultBytes.data(), resultBytes.size(), sizeof(std::byte), stdout);
-                 } else {
-                   std::ofstream outStream(out, std::ios_base::binary | std::ios_base::out | std::ios_base::app);
-                   outStream.write(reinterpret_cast<const char *>(resultBytes.data()), resultBytes.size());
+                 try{
+                   auto compilation = compiler::compile(program, compiler::Options{target, rawArch}, opt);
+                   if (verbose) std::cerr << repr(compilation) << std::endl;
+                   if (!compilation.messages.empty()) std::cerr << compilation.messages << std::endl;
+                   auto resultBytes = nlohmann::json::to_msgpack(compileresult_to_json(compilation));
+                   if (out == "-") {
+                     std::freopen(nullptr, "wb", stdout);
+                     std::fwrite(resultBytes.data(), resultBytes.size(), sizeof(std::byte), stdout);
+                   } else {
+                     std::ofstream outStream(out, std::ios_base::binary | std::ios_base::out | std::ios_base::app);
+                     outStream.write(reinterpret_cast<const char *>(resultBytes.data()), resultBytes.size());
+                   }
+                 } catch (const std::exception&e) {
+                   std::cerr << e.what() << std::endl;
                  }
+
                } catch (nlohmann::json::exception &e) {
                  std::cerr << "Unable to parse packed ast:" << e.what() << std::endl;
                }

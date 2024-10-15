@@ -1,0 +1,5 @@
+#pragma once
+#ifdef _LIBCPP_STD_VER
+  #define _LIBCPP_REMOVE_TRANSITIVE_INCLUDES
+#endif
+#include "polystl/algorithm_impl.h"

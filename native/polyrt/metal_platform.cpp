@@ -16,9 +16,9 @@ template <typename T> //
 static T *throwIfNil(T *t, NS::Error *error, const std::string &message, const char *file, int line) {
   if (!t) {
     if (error) {
-      FATAL(PREFIX, "%s:%d: %s: %s\nSuggestion:%s\n", file, line, message.c_str(), error->localizedDescription().c_str(),
-            error->localizedRecoverySuggestion().c_str());
-    } else FATAL(PREFIX, "%s:%d: %s and Metal did not provide a reason\n", file, line, message.c_str());
+      POLYRT_FATAL(PREFIX, "%s:%d: %s: %s\nSuggestion:%s\n", file, line, message.c_str(), error->localizedDescription()->utf8String(),
+            error->localizedRecoverySuggestion()->utf8String());
+    } else POLYRT_FATAL(PREFIX, "%s:%d: %s and Metal did not provide a reason\n", file, line, message.c_str());
   }
   return t;
 }
@@ -26,31 +26,31 @@ static T *throwIfNil(T *t, NS::Error *error, const std::string &message, const c
 template <typename T> //
 static T *throwIfNil(T *t, const std::string &nown, const char *file, int line) {
   if (!t) {
-    FATAL(PREFIX, "%s:%d: Unable to acquire a %s", file, line, nown.c_str());
+    POLYRT_FATAL(PREFIX, "%s:%d: Unable to acquire a %s", file, line, nown.c_str());
   }
   return t;
 }
 
 std::variant<std::string, std::unique_ptr<Platform>> MetalPlatform::create() { return std::unique_ptr<Platform>(new MetalPlatform()); }
-MetalPlatform::MetalPlatform() : pool(NS::AutoreleasePool::alloc()->init()) { TRACE(); }
+MetalPlatform::MetalPlatform() : pool(NS::AutoreleasePool::alloc()->init()) { POLYRT_TRACE(); }
 std::string MetalPlatform::name() {
-  TRACE();
+  POLYRT_TRACE();
   return "Metal";
 }
 std::vector<Property> MetalPlatform::properties() {
-  TRACE();
+  POLYRT_TRACE();
   return {};
 }
 PlatformKind MetalPlatform::kind() {
-  TRACE();
+  POLYRT_TRACE();
   return PlatformKind::Managed;
 }
 ModuleFormat MetalPlatform::moduleFormat() {
-  TRACE();
+  POLYRT_TRACE();
   return ModuleFormat::Source;
 }
 std::vector<std::unique_ptr<Device>> MetalPlatform::enumerate() {
-  TRACE();
+  POLYRT_TRACE();
   std::vector<std::unique_ptr<Device>> devices;
   auto allDevices = MTL::CopyAllDevices();
   for (size_t i = 0; i < allDevices->count(); ++i) {
@@ -60,7 +60,7 @@ std::vector<std::unique_ptr<Device>> MetalPlatform::enumerate() {
   return devices;
 }
 MetalPlatform::~MetalPlatform() {
-  TRACE();
+  POLYRT_TRACE();
   pool->release();
 }
 
@@ -69,9 +69,9 @@ MetalPlatform::~MetalPlatform() {
 MetalDevice::MetalDevice(decltype(device) device_)
     : pool(NS::AutoreleasePool::alloc()->init()), device(device_),
       store(
-          ERROR_PREFIX,
+          PREFIX,
           [this](auto &&image) {
-            TRACE();
+            POLYRT_TRACE();
             auto options = MTL::CompileOptions::alloc()->init();
             options->setFastMathEnabled(true);
             NS::Error *error = nil;
@@ -88,34 +88,34 @@ MetalDevice::MetalDevice(decltype(device) device_)
             return NOT_NIL_ERROR(device->newComputePipelineState(fn, &error), error, "Function " + name + " failed to resolve");
           }, //
           [&](auto &&m) {
-            TRACE();
+            POLYRT_TRACE();
             m->release();
           }, //
           [&](auto &&f) {
-            TRACE();
+            POLYRT_TRACE();
             f->release();
           }) {
-  TRACE();
+  POLYRT_TRACE();
 }
 
 int64_t MetalDevice::id() {
-  TRACE();
+  POLYRT_TRACE();
   return int64_t(device->locationNumber());
 }
 std::string MetalDevice::name() {
-  TRACE();
+  POLYRT_TRACE();
   return device->name()->utf8String();
 }
 bool MetalDevice::sharedAddressSpace() {
-  TRACE();
+  POLYRT_TRACE();
   return false;
 }
 bool MetalDevice::singleEntryPerModule() {
-  TRACE();
+  POLYRT_TRACE();
   return false;
 }
 std::vector<Property> MetalDevice::properties() {
-  TRACE();
+  POLYRT_TRACE();
   return {{
       {"maxThreadgroupMemoryLength", std::to_string(device->maxThreadgroupMemoryLength())},
       {"maxThreadgroupMemoryLengthWidth", std::to_string(device->maxThreadsPerThreadgroup().width)},
@@ -124,55 +124,46 @@ std::vector<Property> MetalDevice::properties() {
   }};
 }
 std::vector<std::string> MetalDevice::features() {
-  TRACE();
+  POLYRT_TRACE();
   return {};
 }
 void MetalDevice::loadModule(const std::string &name, const std::string &image) {
-  TRACE();
+  POLYRT_TRACE();
   store.loadModule(name, image);
 }
 bool MetalDevice::moduleLoaded(const std::string &name) {
-  TRACE();
+  POLYRT_TRACE();
   return store.moduleLoaded(name);
 }
 uintptr_t MetalDevice::mallocDevice(size_t size, Access access) {
-  TRACE();
+  POLYRT_TRACE();
   return memoryObjects.malloc(device->newBuffer(size, MTL::ResourceStorageModeShared));
 }
 void MetalDevice::freeDevice(uintptr_t ptr) {
-  TRACE();
+  POLYRT_TRACE();
   if (auto mem = memoryObjects.query(ptr); mem) {
     (*mem)->release();
     memoryObjects.erase(ptr);
-  } else FATAL(PREFIX, "Illegal memory object: %p", ptr);
+  } else POLYRT_FATAL(PREFIX, "Illegal memory object: %lu", ptr);
 }
 std::optional<void *> MetalDevice::mallocShared(size_t size, Access access) {
-  TRACE();
+  POLYRT_TRACE();
   return std::nullopt;
 }
 void MetalDevice::freeShared(void *ptr) {
-  TRACE();
-  FATAL(PREFIX, "Unsupported operation on %p", ptr);
+  POLYRT_TRACE();
+  POLYRT_FATAL(PREFIX, "Unsupported operation on %p", ptr);
 }
-std::optional<void *> MetalDevice::mallocShared(size_t size, Access access) {
-  TRACE();
-  return std::nullopt;
-}
-void MetalDevice::freeShared(void *ptr) {
-  TRACE();
-  FATAL(PREFIX, "Unsupported operation on %p", ptr);
-}
-
 std::unique_ptr<DeviceQueue> MetalDevice::createQueue() {
-  TRACE();
+  POLYRT_TRACE();
   return std::make_unique<MetalDeviceQueue>(store, NOT_NIL(device->newCommandQueue(), "command queue"), [this](auto &&ptr) {
     if (auto mem = memoryObjects.query(ptr); mem) {
       return *mem;
-    } else FATAL(PREFIX, "Illegal memory object: %p", ptr);
+    } else POLYRT_FATAL(PREFIX, "Illegal memory object: %lu", ptr);
   });
 }
 MetalDevice::~MetalDevice() {
-  TRACE();
+  POLYRT_TRACE();
   device->release();
   pool->release();
 }
@@ -181,27 +172,27 @@ MetalDevice::~MetalDevice() {
 
 MetalDeviceQueue::MetalDeviceQueue(decltype(store) store, decltype(queue) queue, decltype(queryMemObject) queryMemObject)
     : pool(NS::AutoreleasePool::alloc()->init()), store(store), queue(queue), queryMemObject(std::move(queryMemObject)) {
-  TRACE();
+  POLYRT_TRACE();
 }
 MetalDeviceQueue::~MetalDeviceQueue() {
-  TRACE();
+  POLYRT_TRACE();
   queue->release();
   pool->release();
 }
 void MetalDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
-  TRACE();
+  POLYRT_TRACE();
   std::memcpy(queryMemObject(dst)->contents(), src, size);
   if (cb) (*cb)();
 }
 void MetalDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) {
-  TRACE();
+  POLYRT_TRACE();
   std::memcpy(dst, queryMemObject(src)->contents(), size);
   if (cb) (*cb)();
 }
 void MetalDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
                                           std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
-  TRACE();
-  if (types.back() != Type::Void) FATAL(PREFIX, "Non-void return type not supported: %s", to_string(types.back()).data());
+  POLYRT_TRACE();
+  if (types.back() != Type::Void) POLYRT_FATAL(PREFIX, "Non-void return type not supported: %s", to_string(types.back()).data());
   auto kernel = store.resolveFunction(moduleName, symbol, types);
 
   auto args = detail::argDataAsPointers(types, argData);
@@ -241,7 +232,7 @@ void MetalDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const s
     });
   }
   buffer->commit();
-  TRACE();
+  POLYRT_TRACE();
   buffer->waitUntilCompleted();
 }
 

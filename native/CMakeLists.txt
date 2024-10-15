@@ -32,8 +32,8 @@ FetchContent_Declare(
 
 FetchContent_Declare(
         json
-        URL https://github.com/nlohmann/json/releases/download/v3.11.2/json.hpp
-        URL_HASH SHA256=665fa14b8af3837966949e8eb0052d583e2ac105d3438baba9951785512cf921
+        URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp
+        URL_HASH SHA256=9bea4c8066ef4a1c206b2be5a36302f8926f7fdc6087af5d20b417d0cf103ea6
         DOWNLOAD_NO_EXTRACT YES # this is a header only lib, so don't do anything else
 )
 
@@ -148,12 +148,15 @@ else ()
     # Setup link options
     if (APPLE)
         # LLD support for macOS is not there yet, flags are for ld64.
+        set(STRICT_LINKER_OPTIONS) # ld64 defaults to error on undefined on missing symbols, so nothing to do
+        set(PLUGIN_LINKER_OPTIONS LINKER:-undefined,dynamic_lookup)
     else ()
         set(STRICT_LINKER_OPTIONS
                 LINKER:--no-allow-shlib-undefined
                 LINKER:--no-undefined-version
                 LINKER:--no-undefined
         )
+        set(PLUGIN_LINKER_OPTIONS)
         # For lld, we setup LTO, ICF, and threading
         set(COMMON_LINKER_OPTIONS
                 #                LINKER:--lto-O3
@@ -344,6 +347,7 @@ set(LINK_OPTIONS
 
 set(PLUGIN_LINK_OPTIONS
         ${COMMON_LINK_OPTIONS}
+        ${PLUGIN_LINKER_OPTIONS}
         "$<$<CONFIG:Debug>:${COMMON_DEBUG_OPTIONS}>"
 )
 

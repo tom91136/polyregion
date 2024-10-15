@@ -15,7 +15,7 @@ foreach (TARGET polystl polystl-static)
             FILES
             include/polystl/algorithm_impl.h
             include/polystl/polystl.h
-            include/execution
+            include/execution.impl
     )
 
     target_link_libraries(${TARGET} PRIVATE polyrt-obj)
