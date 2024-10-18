@@ -208,11 +208,11 @@ int main() {
 
   std::vector<std::tuple<runtime::Backend, compiletime::Target, std::string>> configs = {
       // CL runs everywhere
-//      {runtime::Backend::OpenCL, compiletime::Target::Source_C_OpenCL1_1, ""},
+      {runtime::Backend::OpenCL, compiletime::Target::Source_C_OpenCL1_1, ""},
 //      {runtime::Backend::Vulkan, compiletime::Target::Object_LLVM_SPIRV64, ""},
 #ifdef __APPLE__
-      {runtime::Backend::RELOCATABLE_OBJ, compiler::Target::Object_LLVM_AArch64, "apple-m1"},
-      {runtime::Backend::Metal, compiler::Target::Source_C_Metal1_0, ""},
+      {runtime::Backend::RelocatableObject, compiletime::Target::Object_LLVM_AArch64, "apple-m1"},
+      {runtime::Backend::Metal, compiletime::Target::Source_C_Metal1_0, ""},
 #else
       {runtime::Backend::CUDA, compiletime::Target::Object_LLVM_NVPTX64, "sm_60"},
       //      {runtime::Backend::HIP, compiletime::Target::Object_LLVM_AMDGCN, "gfx1036"},
