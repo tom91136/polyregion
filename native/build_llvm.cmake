@@ -121,6 +121,7 @@ endif ()
 file(GLOB_RECURSE CMAKE_CACHE_FILES
         "${LLVM_BUILD_DIR}/**/CMakeFiles/*"
         "${LLVM_BUILD_DIR}/**/CMakeCache.txt"
+        "${LLVM_BUILD_DIR}/**/build.ninja"
 )
 list(LENGTH CMAKE_CACHE_FILES N_CACHE_FILES)
 
@@ -132,6 +133,7 @@ endforeach ()
 message(STATUS "Removed ${N_CACHE_FILES} cache files")
 
 file(REMOVE_RECURSE "${LLVM_BUILD_DIR}/runtimes")
+file(REMOVE_RECURSE "${LLVM_BUILD_DIR}/projects")
 
 if (UNIX AND NOT APPLE)
     # Set this explicitly for Linux otherwise compiler-rt builds using the host triplet
