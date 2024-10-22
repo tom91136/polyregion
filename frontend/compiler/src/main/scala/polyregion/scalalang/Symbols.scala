@@ -14,7 +14,7 @@ object Symbols {
   val SeqOps        = "scala" :: "collection" :: "SeqOps" :: Nil
 
 //  val Buffer   = p.Sym[Buffer[_]]
-  val ClassTag = p.Sym[ClassTag[_]]
+  val ClassTag = p.Sym[ClassTag[?]]
 
   val Array       = p.Sym("scala" :: "Array" :: Nil)
   val ArrayModule = "scala" :: "Array$" :: Nil
@@ -23,7 +23,7 @@ object Symbols {
   val Intrinsics = p.Sym(classOf[intrinsics.type])
 
   // 
-  val ArrayMirror = p.Sym(classOf[intrinsics.TypedBuffer[_]])
+  val ArrayMirror = p.Sym(classOf[intrinsics.TypedBuffer[?]])
 
   // Array don't delegate to aneeds a ClassTag which it can't have for *
 

@@ -9,12 +9,12 @@ import scala.util.{Failure, Success, Try}
 object JniSourceMirror {
 
   // JNI has specialisations for one reference type: String
-  private def isNonJniSpecialisedObjectType(t: Class[_]): Boolean =
+  private def isNonJniSpecialisedObjectType(t: Class[?]): Boolean =
     !(t.getName == StringClass || t.isPrimitive || t.isArray)
 
-  private def isVoid(c: Class[_]): Boolean = c == java.lang.Void.TYPE
+  private def isVoid(c: Class[?]): Boolean = c == java.lang.Void.TYPE
 
-  private def descriptor(m: Class[_]): String = m match {
+  private def descriptor(m: Class[?]): String = m match {
     case x if x.equals(java.lang.Double.TYPE)    => "D"
     case x if x.equals(java.lang.Float.TYPE)     => "F"
     case x if x.equals(java.lang.Long.TYPE)      => "J"
@@ -28,7 +28,7 @@ object JniSourceMirror {
     case x                                       => s"L${x.getName.replace('.', '/')};"
   }
 
-  private def descriptor(c: Constructor[_]): String = s"(${c.getParameterTypes.map(descriptor(_)).mkString})"
+  private def descriptor(c: Constructor[?]): String = s"(${c.getParameterTypes.map(descriptor(_)).mkString})"
   private def descriptor(m: Method): String =
     s"(${m.getParameterTypes.map(descriptor(_)).mkString})${descriptor(m.getReturnType)}"
   private def signature(m: Method): String = m.getName + descriptor(m)
@@ -39,7 +39,7 @@ object JniSourceMirror {
       .replace('[', 'a')
       .replace('$', '_')
 
-  private def jniTypeName(t: Class[_]): String = t match {
+  private def jniTypeName(t: Class[?]): String = t match {
     case x if x.equals(java.lang.Double.TYPE)                        => "jdouble"
     case x if x.equals(java.lang.Float.TYPE)                         => "jfloat"
     case x if x.equals(java.lang.Long.TYPE)                          => "jlong"
@@ -55,7 +55,7 @@ object JniSourceMirror {
     case _                                                           => "jobject"
   }
 
-  private def jniTypedFunctionName(t: Class[_]): String = t match {
+  private def jniTypedFunctionName(t: Class[?]): String = t match {
     case x if x.equals(java.lang.Double.TYPE)    => "Double"
     case x if x.equals(java.lang.Float.TYPE)     => "Float"
     case x if x.equals(java.lang.Long.TYPE)      => "Long"
@@ -73,16 +73,16 @@ object JniSourceMirror {
     case x                      => x
   }
 
-  def jniClassName(c: Class[_]): String = c.getName.replace('.', '/')
+  def jniClassName(c: Class[?]): String = c.getName.replace('.', '/')
 
   private final val StringClass                  = classOf[String].getName
   private final val ObjectClassMethodsSignatures = classOf[AnyRef].getDeclaredMethods.map(m => signature(m)).toSet
 
   private def reflectJniSource(
       knownClasses: Set[String],
-      cls: Class[_],
+      cls: Class[?],
       fp: Field => Boolean,
-      cp: Constructor[_] => Boolean,
+      cp: Constructor[?] => Boolean,
       mp: Method => Boolean
   ): (String, String) = {
 
@@ -183,7 +183,7 @@ object JniSourceMirror {
       proto -> impl
     }.unzip
 
-    def delegatedName(tpe: Class[_]) =
+    def delegatedName(tpe: Class[?]) =
       if (!isNonJniSpecialisedObjectType(tpe)) None
       else {
         val ref = tpe
@@ -298,7 +298,7 @@ object JniSourceMirror {
     structPrototype -> structImpl
   }
 
-  def generateRegisterNative(cls: Class[_]) = {
+  def generateRegisterNative(cls: Class[?]) = {
 
     val nativeMethods = cls.getDeclaredMethods
       .filter(m => Modifier.isNative(m.getModifiers))
@@ -376,7 +376,7 @@ object JniSourceMirror {
 
     println("Generating C++ mirror for JNI...")
 
-    val pending: List[(Class[_], Field => Boolean, Constructor[_] => Boolean, Method => Boolean)] =
+    val pending: List[(Class[?], Field => Boolean, Constructor[?] => Boolean, Method => Boolean)] =
       List(
         (
           classOf[java.nio.ByteBuffer],

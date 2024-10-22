@@ -262,7 +262,7 @@ object Retyper {
 
           // _ = println(s"##### $name $kind $tpeCtorArgs ${tpe <:< q.TypeRepr.typeConstructorOf(classOf[scala.collection.mutable.IndexedSeq[_]]).appliedTo(args) }")
 
-          argAppliedSeqLikeTpe = q.TypeRepr.typeConstructorOf(classOf[scala.collection.mutable.Seq[_]]).appliedTo(args)
+          argAppliedSeqLikeTpe = q.TypeRepr.typeConstructorOf(classOf[scala.collection.mutable.Seq[?]]).appliedTo(args)
 
           retyped <- (name, kind, tpeCtorArgs) match {
             case (Symbols.ArrayMirror, q.ClassKind.Class, (_, comp: p.Type) :: Nil) =>
@@ -303,7 +303,7 @@ object Retyper {
           case q.UnitConstant       => (Some(p.Term.Unit0Const) -> p.Type.Unit0, Map.empty).success
           case q.NullConstant       => ???
           case q.ClassOfConstant(cls) =>
-            val reifiedTpe = q.TypeRepr.typeConstructorOf(classOf[Class[_]]).appliedTo(cls)
+            val reifiedTpe = q.TypeRepr.typeConstructorOf(classOf[Class[?]]).appliedTo(cls)
             typer0(reifiedTpe).map { case (_ -> tpe, wit) =>
               (Some(p.Term.Poison(tpe)) -> tpe, wit)
             }

@@ -28,10 +28,12 @@ public final class Compiler implements AutoCloseable {
   static final byte //
       Target_Object_LLVM_NVPTX64 = 20,
       Target_Object_LLVM_AMDGCN = 21,
-      Target_Object_LLVM_SPIRV64 = 22;
+      Target_Object_LLVM_SPIRV32 = 22,
+      Target_Object_LLVM_SPIRV64 = 23;
   static final byte //
       Target_Source_C_C11 = 30,
-      Target_Source_C_OpenCL1_1 = 31;
+      Target_Source_C_Metal1_0 = 31,
+      Target_Source_C_OpenCL1_1 = 32;
 
   private static native String hostTriplet0();
 
@@ -50,7 +52,7 @@ public final class Compiler implements AutoCloseable {
 
   public static Compiler create() {
     Loader.touch();
-    String name = "libpolyregion-compiler-jvm.so";
+    String name = "libpolyc-JNI.so";
     return new Compiler(
         NativeLibrary.load(
             Loader.searchAndCopyResourceIfNeeded(name, Paths.get("."))

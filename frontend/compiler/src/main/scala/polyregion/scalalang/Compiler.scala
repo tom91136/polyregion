@@ -166,7 +166,7 @@ object Compiler {
                       println(s"Replace: replace ${target.repr}")
                       for {
                         log <- log.subLog(s"${target.repr}").success
-                        _ = log.info("Callsites", ivks.map(_.repr).toList: _*)
+                        _ = log.info("Callsites", ivks.map(_.repr).toList *)
                         _ = log.info("Replacing with impl:", fn.repr)
                         _ = log.info("Additional structs:", clsDeps.map(_.repr).toList*)
 

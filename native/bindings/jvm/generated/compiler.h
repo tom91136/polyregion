@@ -17,7 +17,7 @@ static constexpr jbyte Target_Object_LLVM_SPIRV64 = 23;
 static constexpr jbyte Target_Object_LLVM_x86_64 = 11;
 static constexpr jbyte Target_Source_C_C11 = 30;
 static constexpr jbyte Target_Source_C_Metal1_0 = 31;
-static constexpr jbyte Target_Source_C_OpenCL1_1 = 31;
+static constexpr jbyte Target_Source_C_OpenCL1_1 = 32;
 static constexpr jbyte Target_UNSUPPORTED = 1;
 [[maybe_unused]] jobject compile0(JNIEnv *env, jclass, jbyteArray function, jboolean emitAssembly, jobject options, jbyte opt);
 [[maybe_unused]] jbyte hostTarget0(JNIEnv *env, jclass);

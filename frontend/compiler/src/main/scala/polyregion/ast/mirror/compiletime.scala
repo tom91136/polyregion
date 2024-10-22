@@ -86,7 +86,7 @@ private[polyregion] object compiletime {
   inline def primaryCtorApplyTerms[
       T,
       Val,
-      TermRes <: TermResolver[*, Val],
+      TermRes[x] <: TermResolver[x, Val],
       Tpe,
       TypeRes[_] <: TypeResolver[Tpe]
   ] = ${ primaryCtorApplyTermsImpl[T, Val, TermRes, Tpe, TypeRes] }
@@ -94,7 +94,7 @@ private[polyregion] object compiletime {
   def primaryCtorApplyTermsImpl[
       T: Type,
       Val: Type,
-      TermRes <: TermResolver[*, Val]: Type,
+      TermRes[x] <: TermResolver[x, Val]: Type,
       Tpe: Type,
       TypeRes[_] <: TypeResolver[Tpe]: Type
   ](using quotes: Quotes): Expr[List[Val]] = {

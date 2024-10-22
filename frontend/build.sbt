@@ -1,3 +1,5 @@
+// import org.typelevel.scalacoptions.ScalacOptions
+
 Global / onChangedBuildSource := ReloadOnSourceChanges
 
 lazy val nativeDir   = (file(".") / ".." / "native").getAbsoluteFile
@@ -5,17 +7,16 @@ lazy val bindingsDir = (nativeDir / "bindings" / "jvm").getAbsoluteFile
 
 // /home/tom/polyregion/native/cmake-build-debug-clang/bindings/jvm/libpolyregion-compiler-jvm.so
 
-lazy val scala3Version = "3.2.2"
-lazy val catsVersion   = "2.8.0"
-lazy val munitVersion  = "1.0.0-M7"
+lazy val scala3Version = "3.3.3"
+lazy val catsVersion   = "2.12.0"
+lazy val munitVersion  = "1.0.2"
 
 lazy val commonSettings = Seq(
   scalaVersion     := scala3Version,
   version          := "0.0.1-SNAPSHOT",
   organization     := "uk.ac.bristol.uob-hpc",
   organizationName := "University of Bristol",
-  compile / tpolecatExcludeOptions ++= ScalacOptions.defaultConsoleExclude,
-//  scalacOptions ~= filterConsoleScalacOptions,
+  // compile / tpolecatExcludeOptions ++= ScalacOptions.defaultConsoleExclude,
   javacOptions ++=
     Seq(
       "-parameters",
@@ -93,10 +94,10 @@ lazy val compiler = project
         Seq("-Xmax-inlines", "80") // the AST has lots of leaf nodes and we use inline so bump the limit
     ,
     libraryDependencies ++= Seq(
-      "net.bytebuddy"  % "byte-buddy" % "1.12.21",
-      "com.lihaoyi"   %% "fansi"      % "0.4.0",
-      "com.lihaoyi"   %% "upickle"    % "2.0.0",
-      "com.lihaoyi"   %% "pprint"     % "0.7.0",
+      "net.bytebuddy"  % "byte-buddy" % "1.15.5",
+      "com.lihaoyi"   %% "fansi"      % "0.5.0",
+      "com.lihaoyi"   %% "upickle"    % "4.0.2",
+      "com.lihaoyi"   %% "pprint"     % "0.9.0",
       "org.typelevel" %% "cats-core"  % catsVersion,
       "org.scalameta" %% "munit"      % munitVersion % Test
     ),
@@ -163,7 +164,7 @@ lazy val `examples-scala` = project
     assembly / mainClass := mainCls,
     scalacOptions ++= Seq("-Yretain-trees"),
     libraryDependencies ++= Seq(
-      ("com.github.pathikrit"  %% "better-files"               % "3.9.1").cross(CrossVersion.for3Use2_13),
+      "com.github.pathikrit"  %% "better-files"                % "3.9.2",
       "org.scala-lang.modules" %% "scala-parallel-collections" % "1.0.4"
     )
   )
@@ -179,7 +180,7 @@ lazy val `benchmarks-scala` = project
     assembly / mainClass := Some("polyregion.benchmarks.Main"),
     scalacOptions ++= Seq("-Yretain-trees"),
     libraryDependencies ++= Seq(
-      "net.openhft" % "affinity" % "3.23.2"
+      "net.openhft" % "affinity" % "3.23.3"
       // "org.scala-lang.modules" %% "scala-parallel-collections" % "1.0.4"
     )
   )

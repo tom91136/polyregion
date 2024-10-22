@@ -51,14 +51,14 @@ object Processor {
       }
   }
 
-  def getMethod(c: Class[_], mName: String, parameterTypes: Class[_]*): Method =
+  def getMethod(c: Class[?], mName: String, parameterTypes: Class[?]*): Method =
     traverseUp(c)(c => c.getDeclaredMethod(mName, parameterTypes*)).get
 
-  def getField(c: Class[_], fName: String): Field =
+  def getField(c: Class[?], fName: String): Field =
     traverseUp(c)(c => c.getDeclaredField(fName)).get
 
   private def getOwnModule = try {
-    val m = getMethod(classOf[Class[_]], "getModule")
+    val m = getMethod(classOf[Class[?]], "getModule")
     m.invoke(classOf[Processor])
   } catch {
     case e: Exception =>
@@ -94,7 +94,7 @@ object Processor {
       throw new RuntimeException(e)
   }
 
-  def findCls(name: String): Option[Class[_]] =
+  def findCls(name: String): Option[Class[?]] =
     try Option(Class.forName(name))
     catch { case e: ClassNotFoundException => None }
 
@@ -247,7 +247,7 @@ class Processor extends AbstractProcessor {
   private val symbolTable = mutable.Map[String, TypeElement]()
   private val methodTable = mutable.Map[String, MethodTree]()
 
-  private var trees: Trees = _
+  private var trees: Trees = scala.compiletime.uninitialized
 
   override def getSupportedAnnotationTypes: java.util.Set[String] =
     java.util.Collections.singleton[String]("*")
@@ -399,7 +399,7 @@ class Processor extends AbstractProcessor {
 
   }
 
-  override def process(annotations: java.util.Set[_ <: TypeElement], roundEnv: RoundEnvironment): Boolean = {
+  override def process(annotations: java.util.Set[? <: TypeElement], roundEnv: RoundEnvironment): Boolean = {
 
     @tailrec def collectDeclaredElements(xs: List[Element], acc: List[TypeElement] = Nil): List[TypeElement] =
       xs match {

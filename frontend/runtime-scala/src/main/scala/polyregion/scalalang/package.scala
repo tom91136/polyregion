@@ -72,7 +72,7 @@ trait AotOps[F[_], B](q: rt.Device.Queue, suspend: Suspend[F]) {
     val startX = x.start
     val stepX  = x.step
     polyregion.scalalang.compiletime.offload1[O](q, x, cb) {
-      f(Support.linearise(startX, stepX)(polyregion.scalalang.intrinsics.gpuGlobalIdxX)) //
+      f(Support.linearise(startX, stepX)(polyregion.scalalang.intrinsics.gpuGlobalIdx(0))) //
       ()
     }
   }
@@ -85,8 +85,8 @@ trait AotOps[F[_], B](q: rt.Device.Queue, suspend: Suspend[F]) {
     val stepY  = y.step
     polyregion.scalalang.compiletime.offload2[O](q, x, y, cb) {
       f(
-        Support.linearise(startX, stepX)(polyregion.scalalang.intrinsics.gpuGlobalIdxX),
-        Support.linearise(startY, stepY)(polyregion.scalalang.intrinsics.gpuGlobalIdxY)
+        Support.linearise(startX, stepX)(polyregion.scalalang.intrinsics.gpuGlobalIdx(0)),
+        Support.linearise(startY, stepY)(polyregion.scalalang.intrinsics.gpuGlobalIdx(1))
       ) //
       ()
     }
@@ -102,9 +102,9 @@ trait AotOps[F[_], B](q: rt.Device.Queue, suspend: Suspend[F]) {
     val stepZ  = z.step
     polyregion.scalalang.compiletime.offload3[O](q, x, y, z, cb) {
       f(
-        Support.linearise(startX, stepX)(polyregion.scalalang.intrinsics.gpuGlobalIdxX),
-        Support.linearise(startY, stepY)(polyregion.scalalang.intrinsics.gpuGlobalIdxY),
-        Support.linearise(startZ, stepZ)(polyregion.scalalang.intrinsics.gpuGlobalIdxZ)
+        Support.linearise(startX, stepX)(polyregion.scalalang.intrinsics.gpuGlobalIdx(0)),
+        Support.linearise(startY, stepY)(polyregion.scalalang.intrinsics.gpuGlobalIdx(1)),
+        Support.linearise(startZ, stepZ)(polyregion.scalalang.intrinsics.gpuGlobalIdx(2))
       ) //
       ()
     }
@@ -202,7 +202,7 @@ object Target {
 
     private type T[A <: String, U <: String] = Target { type Arch = A; type UArch = U }
 
-    transparent inline given deriveArchNames[A](using inline m: Mirror.Of[A]): Tuple = inline m match {
+    transparent inline given deriveArchNames[A](using   m: Mirror.Of[A]): Tuple = inline m match {
       case _: Mirror.SumOf[A] => deriveSum[m.MirroredElemTypes]
       case _: Mirror.ProductOf[A] =>
         inline scala.compiletime.erasedValue[m.MirroredMonoType] match {

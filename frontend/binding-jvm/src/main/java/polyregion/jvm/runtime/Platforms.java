@@ -32,6 +32,10 @@ public final class Platforms implements AutoCloseable {
 
   static native Platform HSA0();
 
+  static native Platform Metal0();
+
+  static native Platform Vulkan0();
+
   static native Platform OpenCL0();
 
   static native Platform Relocatable0();
@@ -54,7 +58,7 @@ public final class Platforms implements AutoCloseable {
 
   public static Platforms create() {
     Loader.touch();
-    String name = "libpolyregion-runtime-jvm.so";
+    String name = "libpolyrt-JNI.so";
     return new Platforms(
         NativeLibrary.load(
             Loader.searchAndCopyResourceIfNeeded(name, Paths.get("."))

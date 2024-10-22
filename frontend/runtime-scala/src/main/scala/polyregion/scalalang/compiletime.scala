@@ -124,7 +124,8 @@ object compiletime {
   }
 
   inline def offload0[C](inline queue: rt.Device.Queue, inline cb: Callback[Unit])(inline f: Any): Unit =
-    ${ generate0[C]('queue, 'f, 'cb) }
+    // ${ generate0[C]('queue, 'f, 'cb) }
+    ${ generate0[C]('queue, '{ (_ : Long) => f }, 'cb) }
   private def generate0[C: Type](using
       q: Quotes
   )(queue: Expr[rt.Device.Queue], f: Expr[Any], cb: Expr[Callback[Unit]]) = checked(for {
@@ -427,7 +428,7 @@ object compiletime {
         val mutable = ref.symbol.flags.is(q.Flags.Mutable)
 
         val expr = (name.tpe, structDef, ref.asExpr) match {
-          case (p.Type.Array(comp), None, _) =>
+          case (p.Type.Ptr(comp, _, _), None, _) =>
             throw new RuntimeException(
               s"Top level arrays at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
             )
@@ -440,7 +441,7 @@ object compiletime {
 
             val rtn = write(sdef.name, ref)
 
-            Pickler.writePrim(target, Expr(byteOffset), p.Type.Long, rtn)
+            Pickler.writePrim(target, Expr(byteOffset), p.Type.IntS64, rtn)
 
           case (t, None, '{ $ref: t }) => Pickler.writePrim(target, Expr(byteOffset), t, ref)
           case (t, _, _) =>
@@ -471,7 +472,7 @@ object compiletime {
         val mutable = ref.symbol.flags.is(q.Flags.Mutable)
 
         val expr = (name.tpe, structDef, ref.asExpr) match {
-          case (p.Type.Array(comp), None, _) =>
+          case (p.Type.Ptr(comp,_,_), None, _) =>
             throw new RuntimeException(
               s"Top level arrays at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
             )
@@ -481,7 +482,7 @@ object compiletime {
             )
           case (s @ p.Type.Struct(_, _, _, _), Some(sdef), '{ $ref: t }) =>
             println(s"$ref = " + ref.asTerm.symbol.flags.show)
-            val ptr = Pickler.readPrim(target, Expr(byteOffset), p.Type.Long).asExprOf[Long]
+            val ptr = Pickler.readPrim(target, Expr(byteOffset), p.Type.IntS64).asExprOf[Long]
             '{
 
               println(s"Restore ${$ref}")

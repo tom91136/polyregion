@@ -65,7 +65,7 @@ object Traversal {
       }
     }
 
-  private inline def summonAll[T <: Tuple, B]: List[Traversal[_, B]] = inline erasedValue[T] match {
+  private inline def summonAll[T <: Tuple, B]: List[Traversal[?, B]] = inline erasedValue[T] match {
     case _: EmptyTuple => Nil
     case _: (t *: ts)  => summonInline[Traversal[t, B]] :: summonAll[ts, B]
   }

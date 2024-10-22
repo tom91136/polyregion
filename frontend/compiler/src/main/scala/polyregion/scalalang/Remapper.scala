@@ -713,7 +713,7 @@ object Remapper {
           println(c.invokeCaptures)
           // (p.Term.Unit0Const, c).success
           // TODO delete the LHS var??
-          pprint.pprintln(rhs)
+          // pprint.pprintln(rhs)
           ???
         case _ =>
           c1.fail(

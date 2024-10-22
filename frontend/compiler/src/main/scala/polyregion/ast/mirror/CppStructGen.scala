@@ -87,7 +87,7 @@ private[polyregion] object CppStructGen {
       val stdSpecialisationDecl = //
         s"""|namespace std {
             |
-            |template <typename T> struct std::hash<std::vector<T>> {
+            |template <typename T> struct hash<std::vector<T>> {
             |  std::size_t operator()(std::vector<T> const &xs) const noexcept {
             |    std::size_t seed = xs.size();
             |    for (auto &x : xs) {
@@ -289,7 +289,7 @@ private[polyregion] object CppStructGen {
         val name = if (tpe.kind == CppType.Kind.Base) ns("Any") else clsName(qualified = true)
 
         val stdSpecialisationsDeclStmts = (ns: String) =>
-          s"template <> struct std::hash<$ns::$name> {" ::
+          s"template <> struct hash<$ns::$name> {" ::
             s"  std::size_t operator()(const $ns::$name &) const noexcept;" ::
             s"};" :: Nil
 
@@ -643,7 +643,7 @@ private[polyregion] object CppStructGen {
         streamOp = (s, v) => s"""$s << '"' << $v << '"';""" :: Nil,
         include = List("string")
       )
-    given [A: ToCppType, C[_] <: scala.collection.Seq[_]]: ToCppType[C[A]] = { () =>
+    given [A: ToCppType, C[_] <: scala.collection.Seq[?]]: ToCppType[C[A]] = { () =>
       val tpe = summon[ToCppType[A]]()
       CppType(
         "std" :: Nil,

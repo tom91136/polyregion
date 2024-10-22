@@ -147,7 +147,7 @@ extension (e: => p.Sym.type) {
     // normalise naming differences
     // Java        => package.Companion$Member
     // Scala Macro => package.Companion$.Member
-    @tailrec def go(cls: Class[_], xs: List[String] = Nil, companion: Boolean = false): List[String] = {
+    @tailrec def go(cls: Class[?], xs: List[String] = Nil, companion: Boolean = false): List[String] = {
       val name = cls.getSimpleName + (if (companion) "$" else "")
       cls.getEnclosingClass match {
         case null => cls.getPackage.getName.split("\\.").toList ::: name :: xs

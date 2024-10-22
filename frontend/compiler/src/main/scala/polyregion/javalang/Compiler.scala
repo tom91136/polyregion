@@ -181,7 +181,7 @@ object Compiler {
 
   def compile(
       trees: Trees,
-      annotations: java.util.Set[_ <: TypeElement],
+      annotations: java.util.Set[? <: TypeElement],
       roundEnv: RoundEnvironment,
       processingEnv: ProcessingEnvironment
   ): Boolean = {

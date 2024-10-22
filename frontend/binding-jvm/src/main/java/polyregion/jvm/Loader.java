@@ -210,7 +210,7 @@ public final class Loader {
 
   static {
     // Load the basic dl native library first so that we can load and unload other native libraries.
-    String name = "libpolyregion-shim-jvm.so";
+    String name = "libpolyc-JNIshim.so";
     Path pwd = Paths.get(".").toAbsolutePath();
     Path path =
         searchAndCopyResourceIfNeeded(name, pwd)

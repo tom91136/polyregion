@@ -28,7 +28,7 @@ object StdLib {
     // TODO
   }
   object ClassTag {
-    def apply[T](runtimeClass1: java.lang.Class[_]): ClassTag[T] = new ClassTag[T]
+    def apply[T](runtimeClass1: java.lang.Class[?]): ClassTag[T] = new ClassTag[T]
   }
 
   class RichInt(val x: Int) {
@@ -172,7 +172,7 @@ object StdLib {
     (
       // Unsupported
 
-      witness[scala.collection.ArrayOps[_], ArrayOps[_]]( //
+      witness[scala.collection.ArrayOps[?], ArrayOps[?]]( //
         { case (q @ given Quotes, _) => '{ throw new java.lang.AssertionError("No") } },
         { case (q @ given Quotes, _) => '{ throw new java.lang.AssertionError("No") } },
         { case (q @ given Quotes, ys, _) => '{ throw new java.lang.AssertionError("No") } }
@@ -196,7 +196,7 @@ object StdLib {
 //         }
 //       ),
       // witness[scala.collection.mutable.Seq.type, MutableSeq.type](_ => MutableSeq, (_, _) => scala.collection.mutable.Seq),
-      // witness[scala.collection.mutable.Seq[_], MutableSeq[_]](
+      // witness[scala.collection.mutable.Seq[?], MutableSeq[?]](
       //   { case (q @ given Quotes, xs) =>
       //     xs match {
       //       case '{ $xs: scala.collection.mutable.Seq[a] } =>
@@ -224,7 +224,7 @@ object StdLib {
       //     }
       //   }
       // ),
-      witness[scala.collection.mutable.ListBuffer[_], MutableSeq[_]](
+      witness[scala.collection.mutable.ListBuffer[?], MutableSeq[?]](
         { case (q @ given Quotes, xs) =>
           xs match {
             case '{ $xs: scala.collection.mutable.ListBuffer[a] } =>
@@ -255,7 +255,7 @@ object StdLib {
           }
         }
       ),
-      witness[scala.Tuple2[_, _], Tuple2[_, _]]( //
+      witness[scala.Tuple2[?, ?], Tuple2[?, ?]]( //
         { case (_ @ given Quotes, x) =>
           x match { case '{ $x: scala.Tuple2[t0, t1] } => '{ new Tuple2[t0, t1]($x._1, $x._2) } }
         },
@@ -266,7 +266,7 @@ object StdLib {
       ),
 
       // Immutable types, restore simply uses the original instance
-      witness[scala.reflect.ClassTag[_], ClassTag[_]]( //
+      witness[scala.reflect.ClassTag[?], ClassTag[?]]( //
         { case (_ @ given Quotes, x) => '{ new ClassTag[Any]() } },
         { case (_ @ given Quotes, x) =>
           x match { // TODO not sure if this will actually work
@@ -275,7 +275,7 @@ object StdLib {
         },
         { case (_ @ given Quotes, ys, _) => '{ () } }
       ),
-      witness[java.lang.Class[_], Class[_]]( //
+      witness[java.lang.Class[?], Class[?]]( //
         { case (_ @ given Quotes, _) => '{ new Class[Any]() } },
         { case (_ @ given Quotes, x) =>
           x match { // TODO not sure if this will actually work

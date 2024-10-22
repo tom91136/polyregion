@@ -2206,13 +2206,13 @@ json compileresult_to_json(const CompileResult& x_) {
 json hashed_from_json(const json& j_) { 
   auto hash_ = j_.at(0).get<std::string>();
   auto data_ = j_.at(1);
-  if(hash_ != "fbab493250a8c05110e1597e5b499e91") {
-   throw std::runtime_error("Expecting ADT hash to be fbab493250a8c05110e1597e5b499e91, but was " + hash_);
+  if(hash_ != "33fd0bb1c3e7ca5a5a943815684c7413") {
+   throw std::runtime_error("Expecting ADT hash to be 33fd0bb1c3e7ca5a5a943815684c7413, but was " + hash_);
   }
   return data_;
 }
 
 json hashed_to_json(const json& x_) { 
-  return json::array({"fbab493250a8c05110e1597e5b499e91", x_});
+  return json::array({"33fd0bb1c3e7ca5a5a943815684c7413", x_});
 }
 } // namespace polyregion::polyast
