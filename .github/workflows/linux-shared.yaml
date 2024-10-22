@@ -3,6 +3,9 @@ name: Linux build
 on:
   workflow_call:
     inputs:
+      build_sysroot_name:
+        required: true
+        type: string
       build_arch:
         required: true
         type: string
