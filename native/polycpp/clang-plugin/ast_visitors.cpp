@@ -31,7 +31,7 @@ bool OverloadTargetVisitor::VisitCXXOperatorCallExpr(clang::CXXOperatorCallExpr 
   return !target.has_value();
 }
 
-SpecialisationPathVisitor::SpecialisationPathVisitor(clang::ASTContext &context) : context(context) {
+SpecialisationPathVisitor::SpecialisationPathVisitor(clang::ASTContext &context) {
   SpecialisationPathVisitor::TraverseDecl(context.getTranslationUnitDecl());
 }
 clang::FunctionDecl *currentFnDecl{};
@@ -57,8 +57,7 @@ std::vector<std::pair<clang::FunctionDecl *, clang::CallExpr *>> SpecialisationP
     if (auto it = map.find(start); it != map.end()) {
       xs.emplace_back(it->second);
       start = it->second.first;
-    } else
-      break;
+    } else break;
   }
   return xs;
 }

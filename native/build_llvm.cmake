@@ -39,31 +39,7 @@ string(TIMESTAMP CURRENT_TIME UTC)
 # Remove benchmarks, see https://github.com/llvm/llvm-project/issues/54941
 file(WRITE ${LLVM_BUILD_DIR}/third-party/benchmark/CMakeLists.txt "")
 
-# Patch LLD to include an implementation of cxx so that sysroots with 2.18 symbols removed will work
-set(LLD_CPP_PATH "${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src/lld/tools/lld/lld.cpp")
-file(READ "${LLD_CPP_PATH}" LLD_CPP_CONTENT)
-if (LLD_CPP_CONTENT MATCHES "^//===- tools/lld/lld.cpp - Linker Driver Dispatcher -----------------------===//")
-    string(PREPEND LLD_CPP_CONTENT "// __cxa_thread_atexit_impl patched at ${CURRENT_TIME}
-#ifdef __linux__
-  #include <features.h>
-  #ifdef __GLIBC__
-    #include <cxxabi.h>
-// See https://hg.mozilla.org/integration/autoland/rev/98efceb86ec5
-// Specifically, the diff at
-// https://hg.mozilla.org/integration/autoland/diff/98efceb86ec55e39c4306bca0ec27486366ec9ad/build/unix/stdc%2B%2Bcompat/stdc%2B%2Bcompat.cpp
-extern \"C\" [[maybe_unused]] int __cxa_thread_atexit_impl(void (*dtor)(void *), void *obj, void *dso_handle) {
-  return __cxxabiv1::__cxa_thread_atexit(dtor, obj, dso_handle);
-}
-  #endif
-#endif
-")
-    file(WRITE "${LLD_CPP_PATH}" "${LLD_CPP_CONTENT}")
-    message(STATUS "Patched __cxa_thread_atexit_impl in ${LLD_CPP_PATH}")
-endif ()
-
 # Patch -nostdinc++ detection failure in compiler-rt, it's unclear why this only happens in that particular module
-
-
 set(RUNTIME_CMAKELIST_PATH "${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src/runtimes/CMakeLists.txt")
 file(READ "${RUNTIME_CMAKELIST_PATH}" RUNTIME_CMAKELIST_CONTENT)
 
@@ -152,7 +128,7 @@ execute_process(
         ${BUILD_OPTIONS}
         -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
         -DCMAKE_INSTALL_PREFIX=${LLVM_DIST_DIR}
-        -DCMAKE_SKIP_RPATH=OFF # keep the rpath prefix otherwise our distribution may  find the system libLLVM.so
+        -DCMAKE_SKIP_RPATH=OFF # keep the rpath prefix otherwise our distribution may find the system libLLVM.so
         -DCMAKE_VERBOSE_MAKEFILE=ON
         -GNinja
 

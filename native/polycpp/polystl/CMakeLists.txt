@@ -1,14 +1,10 @@
-set(POLYSTL_SRC
-        ../../shared/cxa_thread_atexit.cpp
-        polystl.cpp)
-
 add_library(polystl SHARED)
 merge_static_libs(polystl-static ${POLYRT_LIBS})
 #add_library(polystl-static STATIC)
 
 foreach (TARGET polystl polystl-static)
     target_sources(${TARGET}
-            PRIVATE ${POLYSTL_SRC}
+            PRIVATE polystl.cpp
             PUBLIC FILE_SET HEADERS
             TYPE HEADERS
             BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include

@@ -1,7 +1,16 @@
 cmake_minimum_required(VERSION 3.23 FATAL_ERROR) # XXX FetchContent_Declare DOWNLOAD_NO_EXTRACT is >= 3.18
 
-set(CMAKE_C_FLAGS_RELEASE "-O3  -gline-tables-only -gz" CACHE STRING "")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3  -gline-tables-only -gz" CACHE STRING "")
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    set(CMAKE_C_FLAGS_RELEASE "-O3  -gline-tables-only -gz" CACHE STRING "")
+    set(CMAKE_CXX_FLAGS_RELEASE "-O3  -gline-tables-only -gz" CACHE STRING "")
+elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    set(CMAKE_C_FLAGS_RELEASE "-O3  -g1 -gz" CACHE STRING "")
+    set(CMAKE_CXX_FLAGS_RELEASE "-O3  -g1 -gz" CACHE STRING "")
+elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    # TODO
+endif()
+
+
 
 include(FetchContent)
 include(ProcessorCount)
@@ -109,7 +118,7 @@ else ()
             # -Wcast-align      # too prevalent in LLVM
             -Werror=return-type
             -Werror=switch
-            -Wthread-safety
+            "$<$<CXX_COMPILER_ID:Clang>:-Wthread-safety>"
             -Wno-unused-parameter
             -Wno-unused-function
             -Wno-unused-variable

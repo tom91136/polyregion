@@ -81,13 +81,6 @@ foreach (TARGET polyrt polyrt-obj polyrt-static)
             TYPE HEADERS
             BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include
             FILES
-#            include/polyrt/cl_platform.h
-#            include/polyrt/cuda_platform.h
-#            include/polyrt/hip_platform.h
-#            include/polyrt/hsa_platform.h
-#            include/polyrt/metal_platform.h
-#            include/polyrt/object_platform.h
-#            include/polyrt/vulkan_platform.h
             include/polyrt/runtime.h
     )
 
@@ -111,9 +104,8 @@ foreach (TARGET polyrt polyrt-obj polyrt-static)
     target_link_options(${TARGET} PRIVATE ${LINK_OPTIONS})
 endforeach ()
 
-
 add_executable(polyrt-tests test/test_utils.cpp test/fma.cpp test/args.cpp test/stream.cpp)
-add_executable(polyrt-exec ../shared/cxa_thread_atexit.cpp driver.cpp)
+add_executable(polyrt-exec driver.cpp)
 
 target_include_directories(polyrt-exec PRIVATE ../include)
 target_include_directories(polyrt-tests PRIVATE . ../include)
@@ -126,6 +118,3 @@ target_compile_options(polyrt-tests PRIVATE ${COMPILE_OPTIONS})
 
 target_link_options(polyrt-exec PRIVATE ${LINK_OPTIONS})
 target_link_options(polyrt-tests PRIVATE ${LINK_OPTIONS})
-
-
-

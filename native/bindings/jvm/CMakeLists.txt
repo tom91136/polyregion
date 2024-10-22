@@ -17,9 +17,9 @@ elseif (UNIX)
 endif ()
 
 
-add_library(polyc-JNIshim SHARED ../../shared/cxa_thread_atexit.cpp generated/mirror.cpp shim.cpp)
-add_library(polyc-JNI SHARED ../../shared/cxa_thread_atexit.cpp generated/mirror.cpp compiler.cpp)
-add_library(polyrt-JNI SHARED ../../shared/cxa_thread_atexit.cpp generated/mirror.cpp runtime.cpp)
+add_library(polyc-JNIshim SHARED generated/mirror.cpp shim.cpp)
+add_library(polyc-JNI SHARED generated/mirror.cpp compiler.cpp)
+add_library(polyrt-JNI SHARED generated/mirror.cpp runtime.cpp)
 
 
 target_include_directories(polyc-JNIshim PRIVATE

@@ -29,7 +29,7 @@
   #endif
 
   #define POLYRT_TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this, __PRETTY_FUNCTION__)
-  #define POLYRT_TRACE()
+//  #define POLYRT_TRACE()
 
 #endif
 
@@ -324,6 +324,7 @@ constexpr std::string_view POLYREGION_EXPORT to_string(const Backend &b) {
     case Backend::Metal: return "Metal";
     case Backend::SharedObject: return "SharedObject";
     case Backend::RelocatableObject: return "RelocatableObject";
+    default: throw std::logic_error("Unimplemented backend");
   }
 }
 

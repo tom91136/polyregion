@@ -165,6 +165,7 @@ static inline constexpr size_t byteOfType(Type t) {
     case Type::Double64: return 64 / 8;
     case Type::Scratch:
     case Type::Ptr: return sizeof(void *);
+    default: std::fprintf(stderr, "Unimplemented Type\n"); std::abort();
   }
 }
 
@@ -181,6 +182,7 @@ static inline constexpr std::string_view to_string(const Type &type) {
     case Type::Double64: return "Double64";
     case Type::Ptr: return "Ptr";
     case Type::Scratch: return "Scratch";
+    default: std::fprintf(stderr, "Unimplemented Type\n"); std::abort();
   }
 }
 
@@ -195,6 +197,7 @@ static inline constexpr std::string_view to_string(const PlatformKind &b) {
   switch (b) {
     case PlatformKind::HostThreaded: return "HostThreaded";
     case PlatformKind::Managed: return "Managed";
+    default: std::fprintf(stderr, "Unimplemented PlatformKind\n"); std::abort();
   }
 }
 static inline constexpr std::optional<PlatformKind> parsePlatformKind(std::string_view name) {
@@ -229,6 +232,7 @@ static inline constexpr std::string_view to_string(const ModuleFormat &x) {
     case ModuleFormat::PTX: return "PTX";
     case ModuleFormat::HSACO: return "HSACO";
     case ModuleFormat::SPIRV: return "SPIRV";
+    default: std::fprintf(stderr, "Unimplemented ModuleFormat\n"); std::abort();
   }
 }
 static inline constexpr std::optional<ModuleFormat> parseModuleFormat(std::string_view name) {

@@ -1329,6 +1329,7 @@ llvmc::TargetInfo LLVMBackend::Options::targetInfo() const {
     triple.setArch(archTpe);
     return llvmc::TargetInfo{
         .triple = triple,
+        .layout = {},
         .target = backend::llvmc::targetFromTriple(triple),
         .cpu = arch.empty() || arch == "native" ? llvmc::hostCpuInfo() : llvmc::CpuInfo{.uArch = arch, .features = {}},
     };

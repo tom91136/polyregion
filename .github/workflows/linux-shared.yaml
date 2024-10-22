@@ -48,29 +48,29 @@ jobs:
         id: restore-sysroot
         uses: actions/cache/restore@v4
         with:
-          path: ./native/sysroot-image-creator/out/bullseye/debian_bullseye_${{ inputs.build_arch }}_sysroot.tar.xz
-          key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/sysroot-image-creator/*.sh') }}
+          path: ./native/debian-sysroot-image-creator/out/sysroot-build/bullseye/debian_bullseye_${{ inputs.build_sysroot_name }}_sysroot.tar.xz
+          key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/make_sysroot.py') }}
 
       - name: Build sysroot
         id: build-sysroot
         if: steps.restore-sysroot.outputs.cache-hit != 'true'
-        working-directory: ./native/sysroot-image-creator
-        run: ./sysroot-creator-bullseye.sh ${{ inputs.build_arch }}
+        working-directory: ./native
+        run: ./make_sysroot.py build ${{ inputs.build_sysroot_name }}
 
       - name: Save sysroot cache
         if: steps.build-sysroot.outcome == 'success'
         uses: actions/cache/save@v4
         id: save-sysroot
         with:
-          path: ./native/sysroot-image-creator/out/bullseye/debian_bullseye_${{ inputs.build_arch }}_sysroot.tar.xz
-          key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/sysroot-image-creator/*.sh') }}
+          path: ./native/debian-sysroot-image-creator/out/sysroot-build/bullseye/debian_bullseye_${{ inputs.build_sysroot_name }}_sysroot.tar.xz
+          key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/make_sysroot.py') }}
 
       - name: Prepare sysroot
-        working-directory: ./native/sysroot-image-creator
+        working-directory: ./native/debian-sysroot-image-creator
         run: |
-          mkdir -p "sysroot_${{ inputs.build_arch }}"
-          tar xf out/bullseye/debian_bullseye_${{ inputs.build_arch }}_sysroot.tar.xz  -C ./sysroot_${{ inputs.build_arch }}
-          echo "SYSROOT_PATH=$PWD/sysroot_${{ inputs.build_arch }}" >> $GITHUB_ENV
+          mkdir -p "sysroot_${{ inputs.build_sysroot_name }}"
+          tar xf out/sysroot-build/bullseye/debian_bullseye_${{ inputs.build_sysroot_nam }}_sysroot.tar.xz  -C ./sysroot_${{ inputs.build_sysroot_name }}
+          echo "SYSROOT_PATH=$PWD/sysroot_${{ inputs.build_sysroot_name }}" >> $GITHUB_ENV
 
       - name: Restore LLVM cache
         if: ${{ !env.ACT }}
@@ -96,6 +96,11 @@ jobs:
       - name: Configure release build
         working-directory: ./native
         run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=CONFIGURE -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
+
+      - name: Release build polycpp
+        working-directory: ./native
+        if: always()
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polycpp -P build.cmake
 
       - name: Release build polyrt-exec
         working-directory: ./native
@@ -128,6 +133,7 @@ jobs:
         run: |
           ls -lah build-linux-${{ inputs.build_arch }}/bindings/jvm
           ls -lah build-linux-${{ inputs.build_arch }}/polyc/
+          ls -lah build-linux-${{ inputs.build_arch }}/polycpp/
           ls -lah build-linux-${{ inputs.build_arch }}/polyrt/
           show_libs () {
              for arg in $@; do
@@ -139,4 +145,5 @@ jobs:
 
           show_libs build-linux-${{ inputs.build_arch }}/bindings/jvm/*.so 
           show_libs build-linux-${{ inputs.build_arch }}/polyc/polyc
+          show_libs build-linux-${{ inputs.build_arch }}/polycpp/polycpp
           show_libs build-linux-${{ inputs.build_arch }}/polyrt/polyrt-exec

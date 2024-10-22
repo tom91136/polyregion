@@ -92,6 +92,13 @@ jobs:
           call setup_msvc_env.bat ${{ inputs.build_arch }} 
           cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=CONFIGURE -P build.cmake
 
+      - name: Release build polycpp
+        working-directory: ./native
+        if: always()
+        run: |
+          call setup_msvc_env.bat ${{ inputs.build_arch }} 
+          cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polycpp -P build.cmake
+
       - name: Release build polyrt-exec
         working-directory: ./native
         if: always()
@@ -133,5 +140,6 @@ jobs:
         working-directory: ./native
         run: |
           ls .\build-windows-${{ inputs.build_arch }}\bindings\jvm\ | Select-Object Name, @{Name="MegaBytes";Expression={$_.Length / 1MB}}
-          ls .\build-windows-${{ inputs.build_arch }}\polyc      | Select-Object Name, @{Name="MegaBytes";Expression={$_.Length / 1MB}}
-          ls .\build-windows-${{ inputs.build_arch }}\polyrt       | Select-Object Name, @{Name="MegaBytes";Expression={$_.Length / 1MB}}
+          ls .\build-windows-${{ inputs.build_arch }}\polyc         | Select-Object Name, @{Name="MegaBytes";Expression={$_.Length / 1MB}}
+          ls .\build-windows-${{ inputs.build_arch }}\polycpp       | Select-Object Name, @{Name="MegaBytes";Expression={$_.Length / 1MB}}
+          ls .\build-windows-${{ inputs.build_arch }}\polyrt        | Select-Object Name, @{Name="MegaBytes";Expression={$_.Length / 1MB}}

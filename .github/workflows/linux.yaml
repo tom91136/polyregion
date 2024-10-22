@@ -11,23 +11,27 @@ jobs:
     uses: ./.github/workflows/linux-shared.yaml
     secrets: inherit
     with:
+      build_sysroot_name: i386
       build_arch: i386
       build_type: Release
   x86_64-release:
     uses: ./.github/workflows/linux-shared.yaml
     secrets: inherit
     with:
+      build_sysroot_name: amd64
       build_arch: x86_64
       build_type: release
   arm-release:
     uses: ./.github/workflows/linux-shared.yaml
     secrets: inherit
     with:
+      build_sysroot_name: armhf
       build_arch: arm
       build_type: Release
   aarch64-release:
     uses: ./.github/workflows/linux-shared.yaml
     secrets: inherit
     with:
+      build_sysroot_name: arm64
       build_arch: aarch64
       build_type: Release

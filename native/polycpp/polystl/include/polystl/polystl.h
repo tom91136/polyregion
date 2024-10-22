@@ -84,6 +84,8 @@ public:
   T &operator[](size_t idx) const { return ptr[idx]; }
 };
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-label"
 template <polyregion::runtime::PlatformKind Kind, typename F>
 const RuntimeKernelBundle &__polyregion_offload__([[maybe_unused]] F) { // NOLINT(*-reserved-identifier)
 
@@ -111,6 +113,7 @@ __insert_point:;
       };
   return __bundle;
 }
+#pragma clang diagnostic pop
 
 extern "C" inline __attribute__((used)) void *__polyregion_malloc(size_t size) { // NOLINT(*-reserved-identifier)
   __polyregion_initialise_runtime();

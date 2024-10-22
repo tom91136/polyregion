@@ -5,10 +5,7 @@ add_subdirectory(clang-plugin)
 set(POLYCPP_HEADER_SET_DIR "lib/polycpp/include")
 set(POLYCPP_LIB_DIR "lib/polycpp/lib")
 
-add_executable(polycpp
-        ../shared/cxa_thread_atexit.cpp
-        driver_main.cpp
-)
+add_executable(polycpp driver_main.cpp)
 #add_dependencies(polycpp polycpp-clang-plugin polystl polystl-static polystl-interpose-plugin)
 
 add_custom_target(polycpp-resources

@@ -254,6 +254,7 @@ $RECYCLE.BIN/
 /build-*
 
 /llvm-*
+/debian-sysroot-image-creator
 
 venv
 

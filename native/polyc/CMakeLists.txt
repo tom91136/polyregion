@@ -30,7 +30,7 @@ add_library(polyc-driver driver_polyc.cpp)
 
 add_executable(polyc-tests test/ast_codegen.cpp test/ast_offload.cpp test/backend.cpp test/ast.cpp)
 add_executable(polyc-benchmarks benchmark/babelstream.cpp)
-add_executable(polyc-bin ../shared/cxa_thread_atexit.cpp driver_main.cpp)
+add_executable(polyc-bin driver_main.cpp)
 
 target_include_directories(polyc-tests PRIVATE . ../include ../runtime)
 target_include_directories(polyc-benchmarks PRIVATE . ../include ../runtime)

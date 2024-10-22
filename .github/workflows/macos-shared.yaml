@@ -70,6 +70,11 @@ jobs:
         working-directory: ./native
         run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=CONFIGURE -P build.cmake
 
+      - name: Release build polycpp
+        working-directory: ./native
+        if: always()
+        run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=BUILD -DTARGET=polycpp -P build.cmake
+
       - name: Release build polyrt-exec
         working-directory: ./native
         if: always()
@@ -101,6 +106,7 @@ jobs:
         run: |
           ls -lah build-darwin-${{ inputs.build_arch }}/bindings/jvm
           ls -lah build-darwin-${{ inputs.build_arch }}/polyc/
+          ls -lah build-darwin-${{ inputs.build_arch }}/polycpp/
           ls -lah build-darwin-${{ inputs.build_arch }}/polyrt/
           show_libs () {
              for arg in $@; do
@@ -109,8 +115,7 @@ jobs:
                echo "======"
              done
           }
-          show_libs build-darwin-${{ inputs.build_arch }}/bindings/jvm/libpolyc-JNI.dylib
-          show_libs build-darwin-${{ inputs.build_arch }}/bindings/jvm/libpolyrt-JNI.dylib
-          show_libs build-darwin-${{ inputs.build_arch }}/bindings/jvm/libpolyc-JNIshim.dylib
+          show_libs build-darwin-${{ inputs.build_arch }}/bindings/jvm/*.dylib
           show_libs build-darwin-${{ inputs.build_arch }}/polyc/polyc
+          show_libs build-darwin-${{ inputs.build_arch }}/polycpp/polycpp
           show_libs build-darwin-${{ inputs.build_arch }}/polyrt/polyrt-exec

@@ -5,6 +5,10 @@ set(CMAKE_C_COMPILER clang)
 set(CMAKE_ASM_COMPILER clang)
 set(CMAKE_CXX_COMPILER clang++)
 
+set(CMAKE_C_FLAGS_INIT "-march=westmere -mtune=skylake")
+set(CMAKE_CXX_FLAGS_INIT "-march=westmere -mtune=skylake")
+set(CMAKE_ASM_FLAGS_INIT "-march=westmere -mtune=skylake")
+
 set(CMAKE_C_COMPILER_TARGET ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu)
 set(CMAKE_CXX_COMPILER_TARGET ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu)
 set(CMAKE_ASM_COMPILER_TARGET ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu)
