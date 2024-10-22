@@ -72,7 +72,7 @@ jobs:
         working-directory: ./native/debian-sysroot-image-creator
         run: |
           mkdir -p "sysroot_${{ inputs.build_sysroot_name }}"
-          tar xf out/sysroot-build/bullseye/debian_bullseye_${{ inputs.build_sysroot_nam }}_sysroot.tar.xz  -C ./sysroot_${{ inputs.build_sysroot_name }}
+          tar xf out/sysroot-build/bullseye/debian_bullseye_${{ inputs.build_sysroot_name }}_sysroot.tar.xz  -C ./sysroot_${{ inputs.build_sysroot_name }}
           echo "SYSROOT_PATH=$PWD/sysroot_${{ inputs.build_sysroot_name }}" >> $GITHUB_ENV
 
       - name: Restore LLVM cache
