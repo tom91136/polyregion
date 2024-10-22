@@ -24,8 +24,10 @@ static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object
 static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_SPIRV32) == Compiler::Target_Object_LLVM_SPIRV32);
 static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Object_LLVM_SPIRV64) == Compiler::Target_Object_LLVM_SPIRV64);
 
-static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Source_C_OpenCL1_1) == Compiler::Target_Source_C_OpenCL1_1);
+
 static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Source_C_C11) == Compiler::Target_Source_C_C11);
+static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Source_C_OpenCL1_1) == Compiler::Target_Source_C_OpenCL1_1);
+static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Source_C_Metal1_0) == Compiler::Target_Source_C_Metal1_0);
 
 [[maybe_unused]] JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
   fprintf(stderr, "JVM enter\n");

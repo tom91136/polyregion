@@ -13,7 +13,8 @@ public enum Target implements ByteEnum {
   LLVM_SPIRV64(Compiler.Target_Object_LLVM_SPIRV64),
 
   C_C11(Compiler.Target_Source_C_C11),
-  C_OpenCL1_1(Compiler.Target_Source_C_OpenCL1_1);
+  C_OpenCL1_1(Compiler.Target_Source_C_OpenCL1_1),
+  C_Metal1_0(Compiler.Target_Source_C_Metal1_0);
 
   public static final Target[] VALUES = values();
 
