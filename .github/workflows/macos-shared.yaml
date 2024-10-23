@@ -22,7 +22,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          brew install llvm lld cmake ninja
+          brew install llvm lld cmake ninja autoconf automake libtool
           echo "JAVA_HOME=$JAVA_HOME_11_arm64" >> $GITHUB_ENV
           echo "/opt/homebrew/opt/llvm/bin"    >> $GITHUB_PATH
 
