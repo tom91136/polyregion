@@ -5,8 +5,7 @@ if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.24.0")
 endif ()
 
 if (${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.20.0")
-    cmake_policy(SET CMP0116 OLD)
-    set(CMAKE_POLICY_DEFAULT_CMP0116 OLD)
+    cmake_policy(SET CMP0116 NEW)
 endif ()
 
 # use new behaviour for IPO here (e.g enable where possible)

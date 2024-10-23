@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <thread>
 #include <shared_mutex>
 
 #include "polyregion/dl.h"
