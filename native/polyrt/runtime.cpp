@@ -1,3 +1,5 @@
+#include "polyregion/compat.h"
+
 #include <iostream>
 #include <mutex>
 #include <utility>

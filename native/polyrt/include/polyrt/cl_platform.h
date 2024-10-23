@@ -1,5 +1,7 @@
 #pragma once
 
+#include "polyregion/compat.h"
+
 #include "clew.h"
 #include "runtime.h"
 #include <atomic>

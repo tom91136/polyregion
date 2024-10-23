@@ -1,5 +1,7 @@
 #pragma once
 
+#include "polyregion/compat.h"
+
 #include "ast.h"
 #include "compiler.h"
 #include "llvm/IR/Module.h"

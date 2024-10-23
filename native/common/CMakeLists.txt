@@ -10,6 +10,7 @@ target_sources(polycommon
         polyregion/export.h
         polyregion/dl.h
         polyregion/llvm_utils.hpp
+        polyregion/compat.h
         #        io.hpp
 )
 

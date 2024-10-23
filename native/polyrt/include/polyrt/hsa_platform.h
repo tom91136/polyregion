@@ -1,5 +1,7 @@
 #pragma once
 
+#include "polyregion/compat.h"
+
 #include "hsaew.h"
 #include "runtime.h"
 #include <condition_variable>

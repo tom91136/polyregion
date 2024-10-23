@@ -1,5 +1,5 @@
 #pragma once
-
+#include "polyregion/compat.h"
 #include "generated/polyast.h"
 #include <functional>
 #include <optional>

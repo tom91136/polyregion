@@ -62,15 +62,46 @@ set(POLYRT_SRC
 
 
 set(POLYRT_LIBS
-        libffi
-        TBB::tbb
         ${LLVM_LIBS}
+        nlohmann_json::nlohmann_json
+        Vulkan::Headers
+        GPUOpen::VulkanMemoryAllocator
+#        libffi
+        unofficial::libffi::libffi
+#        unofficial-libffi
 
         CACHE STRING ""
 )
 
+#set(PROPERTY_LIST
+#        TYPE
+#        LINK_LIBRARIES
+#        INCLUDE_DIRECTORIES
+#        COMPILE_DEFINITIONS
+#        COMPILE_OPTIONS
+#        INTERFACE_INCLUDE_DIRECTORIES
+#        INTERFACE_LINK_LIBRARIES
+#        INTERFACE_COMPILE_OPTIONS
+#        INTERFACE_COMPILE_DEFINITIONS
+#        LINK_OPTIONS
+#        SOURCES
+#        LINK_FLAGS
+#        POSITION_INDEPENDENT_CODE
+#)
+#
+#foreach(PROP ${PROPERTY_LIST})
+#    get_target_property(PROP_VAL unofficial::libffi::libffi ${PROP})
+#    if (NOT PROP_VAL)
+#        set(PROP_VAL "None")
+#    endif()
+#    message(STATUS "Property ${PROP} for target 'unofficial::libffi::libffi': ${PROP_VAL}")
+#endforeach()
+
+
+
 add_library(polyrt SHARED)
 add_library(polyrt-obj OBJECT)
+# add_library(polyrt-static STATIC)
 merge_static_libs(polyrt-static ${POLYRT_LIBS})
 
 foreach (TARGET polyrt polyrt-obj polyrt-static)
@@ -85,17 +116,18 @@ foreach (TARGET polyrt polyrt-obj polyrt-static)
     )
 
     target_compile_definitions(${TARGET} PUBLIC ${RUNTIME_BACKEND_DEFS})
+
     target_include_directories(${TARGET} PUBLIC
             thirdparty/
             thirdparty/clew/include
             thirdparty/hipew/include
             thirdparty/cuew/include
             thirdparty/hsaew/include
-            ${libffi_INCLUDE_DIRS}
-            ${json_SOURCE_DIR}
+#            ${unofficial-libffi_INCLUDE_DIRS}
+#            ${json_SOURCE_DIR}
             ${LLVM_INCLUDE_DIRS}
-            ${vulkanmemoryallocator_SOURCE_DIR}
-            ${vulkan-headers_SOURCE_DIR}/include
+#            ${vulkanmemoryallocator_SOURCE_DIR}
+#            ${vulkan-headers_SOURCE_DIR}/include
             ${RUNTIME_INCLUDE_DIRS}
     )
 

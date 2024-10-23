@@ -1,3 +1,5 @@
+#include "polyregion/compat.h"
+
 #include <atomic>
 #include <iostream>
 
@@ -7,7 +9,7 @@
 #include "backend/llvmc.h"
 #include "compiler.h"
 #include "generated/polyast_codec.h"
-#include "json.hpp"
+#include "nlohmann/json.hpp"
 #include "polyregion/llvm_utils.hpp"
 
 using namespace polyregion;

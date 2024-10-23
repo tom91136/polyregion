@@ -1,5 +1,7 @@
 #pragma once
 
+#include "polyregion/compat.h"
+
 #include <array>
 #include <atomic>
 #include <condition_variable>
@@ -278,9 +280,9 @@ struct POLYREGION_EXPORT Dim3 {
   POLYREGION_EXPORT size_t x, y, z;
   [[nodiscard]] std::array<size_t, 3> sizes() const { return {x, y, z}; }
   constexpr Dim3(size_t x, size_t y, size_t z) : x(x), y(y), z(z) {
-    if (x < 1) POLYRT_FATAL("Runtime", "x (%ld) < 1", x);
-    if (y < 1) POLYRT_FATAL("Runtime", "y (%ld) < 1", y);
-    if (z < 1) POLYRT_FATAL("Runtime", "z (%ld) < 1", z);
+    if (x < 1) POLYRT_FATAL("Runtime", "x (%zu) < 1", x);
+    if (y < 1) POLYRT_FATAL("Runtime", "y (%zu) < 1", y);
+    if (z < 1) POLYRT_FATAL("Runtime", "z (%zu) < 1", z);
   }
   constexpr Dim3() : Dim3(1, 1, 1) {}
   friend std::ostream &operator<<(std::ostream &os, const Dim3 &dim3);

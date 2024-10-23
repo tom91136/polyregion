@@ -1,10 +1,11 @@
 #pragma once
 
+#include "polyregion/compat.h"
+
 #include <atomic>
 #include <mutex>
 #include <shared_mutex>
 
-#include "oneapi/tbb.h"
 #include "polyregion/dl.h"
 #include "runtime.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
@@ -31,8 +32,6 @@ public:
 class POLYREGION_EXPORT ObjectDeviceQueue : public DeviceQueue {
 protected:
   detail::CountingLatch latch;
-  tbb::task_arena arena;
-  tbb::task_group group;
 
   template <typename F> void threadedLaunch(size_t N, const MaybeCallback &cb, F f) {
     static std::atomic_size_t counter(0);

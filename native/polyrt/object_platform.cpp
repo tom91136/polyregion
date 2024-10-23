@@ -1,19 +1,20 @@
+#include "polyregion/compat.h"
+
 #include <mutex>
 #include <system_error>
 #include <thread>
 #include <utility>
 
 #include "polyrt/object_platform.h"
+#include "polyregion/llvm_utils.hpp"
 
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/Support/DynamicLibrary.h"
 #include "llvm/TargetParser/Host.h"
 
-#include "oneapi/tbb.h"
-
+// XXX Make sure this goes last as libffi pollutes the global namespace with macros
 #include "ffi_wrapped.h"
-#include "polyregion/llvm_utils.hpp"
 
 using namespace polyregion::runtime;
 using namespace polyregion::runtime::object;
@@ -110,11 +111,9 @@ void ObjectDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_
 }
 ObjectDeviceQueue::ObjectDeviceQueue() {
   POLYRT_TRACE();
-  arena.initialize(int(std::thread::hardware_concurrency()));
 }
 
 ObjectDeviceQueue::~ObjectDeviceQueue() noexcept {
-  group.wait();
   POLYRT_TRACE();
 }
 std::variant<std::string, std::unique_ptr<Platform>> RelocatablePlatform::create() {
@@ -203,7 +202,7 @@ uint64_t MemoryManager::getSymbolAddress(const std::string &Name) {
 }
 
 template <typename F>
-static void threadedLaunch(detail::CountedCallbackHandler &handler, tbb::task_arena &arena, size_t N, const MaybeCallback &cb, F f) {
+static void threadedLaunch(detail::CountedCallbackHandler &handler, size_t N, const MaybeCallback &cb, F f) {
   static std::atomic_size_t counter(0);
   static std::unordered_map<size_t, std::atomic_size_t> pending;
   static std::shared_mutex pendingLock;
@@ -231,7 +230,7 @@ static void threadedLaunch(detail::CountedCallbackHandler &handler, tbb::task_ar
   WriteLock wPending(pendingLock);
   pending.emplace(id, N);
   for (size_t tid = 0; tid < N; ++tid) {
-    arena.enqueue([id, tid, f, cb]() {
+    // arena.enqueue([id, tid, f, cb]() {
       f(tid);
       WriteLock rwPending(pendingLock);
       if (auto it = pending.find(id); it != pending.end()) {
@@ -241,7 +240,7 @@ static void threadedLaunch(detail::CountedCallbackHandler &handler, tbb::task_ar
           //            detail::CountedCallbackHandler::consume(cbHandle);
         }
       }
-    });
+    // });
   }
 }
 
@@ -250,7 +249,7 @@ void validatePolicyAndArgs(const char *prefix, std::vector<Type> types, const Po
     POLYRT_FATAL(prefix, "Scratch types are not supported on the CPU, found %td arg(s)", scratchCount);
   if (policy.global.y != 1) POLYRT_FATAL(prefix, "Policy dimension Y > 1 is not supported: %zu", policy.global.y);
   if (policy.global.z != 1) POLYRT_FATAL(prefix, "Policy dimension Z > 1 is not supported: %zu", policy.global.z);
-  if (policy.local) POLYRT_FATAL(prefix, "Policy local dimension is not supported: size=%lu", policy.local->second);
+  if (policy.local) POLYRT_FATAL(prefix, "Policy local dimension is not supported: size=%zu", policy.local->second);
   if (types[0] != Type::Long64)
     POLYRT_FATAL(prefix, "Expecting first argument as index (%s), but was %s", to_string(Type::Long64).data(), to_string(types[0]).data());
 }
@@ -393,7 +392,7 @@ void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
     address = polyregion_dl_find(handle, symbol.c_str());
     auto err = polyregion_dl_error();
     if (err) {
-      POLYRT_FATAL(SHOBJ_PREFIX, "Cannot load symbol %s from module %s (%ld bytes): %s", //
+      POLYRT_FATAL(SHOBJ_PREFIX, "Cannot load symbol %s from module %s (%zd bytes): %s", //
                    symbol.c_str(), moduleName.c_str(), image.size(), err);
     }
     symbolTable.emplace_hint(it, symbol, address);

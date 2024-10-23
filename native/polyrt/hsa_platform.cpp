@@ -6,7 +6,7 @@
 #include "llvm/Object/Error.h"
 #include "llvm/Object/ObjectFile.h"
 
-#include "json.hpp"
+#include "nlohmann/json.hpp"
 #include "polyrt/hsa_platform.h"
 
 using namespace polyregion::runtime;

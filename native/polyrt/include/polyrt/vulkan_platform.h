@@ -1,11 +1,13 @@
 #pragma once
 
+#include "polyregion/compat.h"
+
 #include "runtime.h"
 #include <thread>
 
 #define VK_NO_PROTOTYPES
 
-#include "json.hpp"
+#include "nlohmann/json.hpp"
 #include "vulkan/vulkan_raii.hpp"
 
 #ifndef _MSC_VER

@@ -115,7 +115,7 @@ __insert_point:;
 }
 #pragma clang diagnostic pop
 
-extern "C" inline __attribute__((used)) void *__polyregion_malloc(size_t size) { // NOLINT(*-reserved-identifier)
+extern "C" inline  void *__polyregion_malloc(size_t size) { // NOLINT(*-reserved-identifier)
   __polyregion_initialise_runtime();
   if (!__polyregion_selected_platform || !__polyregion_selected_device || !__polyregion_selected_queue) {
     POLYSTL_LOG("No device/queue in %s", __func__);
@@ -129,7 +129,7 @@ extern "C" inline __attribute__((used)) void *__polyregion_malloc(size_t size) {
   }
 }
 
-extern "C" inline __attribute__((used)) void __polyregion_free(void *ptr) { // NOLINT(*-reserved-identifier)
+extern "C" inline  void __polyregion_free(void *ptr) { // NOLINT(*-reserved-identifier)
   __polyregion_initialise_runtime();
   if (!__polyregion_selected_platform || !__polyregion_selected_device || !__polyregion_selected_queue) {
     POLYSTL_LOG("No device/queue in %s", __func__);
@@ -137,14 +137,14 @@ extern "C" inline __attribute__((used)) void __polyregion_free(void *ptr) { // N
   __polyregion_selected_device->freeShared(ptr);
 }
 
-extern "C" inline __attribute__((used)) void *__polyregion_operator_new(size_t size) { // NOLINT(*-reserved-identifier)
+extern "C" inline  void *__polyregion_operator_new(size_t size) { // NOLINT(*-reserved-identifier)
   return __polyregion_malloc(size);
 }
-extern "C" inline __attribute__((used)) void __polyregion_operator_delete(void *ptr) { // NOLINT(*-reserved-identifier)
+extern "C" inline  void __polyregion_operator_delete(void *ptr) { // NOLINT(*-reserved-identifier)
   __polyregion_free(ptr);
 }
 
-extern "C" inline __attribute__((used)) void *__polyregion_aligned_alloc(size_t alignment, size_t size) { // NOLINT(*-reserved-identifier)
+extern "C" inline void *__polyregion_aligned_alloc(size_t alignment, size_t size) { // NOLINT(*-reserved-identifier)
   // TODO actually align it
   return __polyregion_malloc(size);
 }

@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.23 FATAL_ERROR) # XXX FetchContent_Declare DOWNLOAD_NO_EXTRACT is >= 3.18
 
+if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.24.0")
+    cmake_policy(SET CMP0135 NEW)
+endif ()
+
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     set(CMAKE_C_FLAGS_RELEASE "-O3  -gline-tables-only -gz" CACHE STRING "")
     set(CMAKE_CXX_FLAGS_RELEASE "-O3  -gline-tables-only -gz" CACHE STRING "")
@@ -10,21 +14,19 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     # TODO
 endif()
 
-
-
 include(FetchContent)
 include(ProcessorCount)
 include(ProjectConfig.cmake)
 include(cmake/mergestaticlibs.cmake)
 
-
-if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.24.0")
-    cmake_policy(SET CMP0135 NEW)
-endif ()
-
+set(CMAKE_C_EXTENSIONS OFF)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON" FORCE)
 set(CMAKE_SKIP_INSTALL_ALL_DEPENDENCY ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 
 set(USE_LINKER "" CACHE INTERNAL "Path to custom linker")
 set(POLYREGION_SHARED_LIB OFF CACHE BOOL "")
@@ -40,20 +42,6 @@ FetchContent_Declare(
 )
 
 FetchContent_Declare(
-        json
-        URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp
-        URL_HASH SHA256=9bea4c8066ef4a1c206b2be5a36302f8926f7fdc6087af5d20b417d0cf103ea6
-        DOWNLOAD_NO_EXTRACT YES # this is a header only lib, so don't do anything else
-)
-
-FetchContent_Declare(
-        VulkanMemoryAllocator
-        URL https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/v3.0.1/include/vk_mem_alloc.h
-        URL_HASH SHA256=087975b663fb5e5c0fd0ff9aac7f9fd5a0fada72f8d1f65b6bd8fcfd3a388359
-        DOWNLOAD_NO_EXTRACT YES
-)
-
-FetchContent_Declare(
         clspv
         URL https://github.com/google/clspv/archive/0e6205272feb72595643d8789b2ccc1f54f46770.zip
         URL_HASH SHA256=ebffbb5f01c001090181ea91e3ff6e1fb7e30f1e928adb6f02ee585c76e418bf
@@ -61,18 +49,21 @@ FetchContent_Declare(
 
 FetchContent_Declare(
         Aspartame
-        #        SOURCE_DIR /home/tom/Aspartame
-        GIT_REPOSITORY https://github.com/tom91136/Aspartame.git
-        GIT_TAG 93cc5826
+        #        SOURCE_DIR /Users/Tom/Aspartame
+                GIT_REPOSITORY https://github.com/tom91136/Aspartame.git
+                GIT_TAG 93cc5826
 )
 
 FetchContent_MakeAvailable(Aspartame)
 
 find_package(fmt CONFIG REQUIRED)
 find_package(Catch2 CONFIG REQUIRED)
-find_package(TBB CONFIG REQUIRED)
-find_package(libffi CONFIG REQUIRED)
+#find_package(libffi CONFIG REQUIRED)
+find_package(unofficial-libffi CONFIG REQUIRED)
 find_package(SPIRV-Tools-opt CONFIG REQUIRED)
+find_package(VulkanHeaders CONFIG REQUIRED)
+find_package(VulkanMemoryAllocator CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 
 if (USE_LINKER)
     message(STATUS "Using custom linker: ${USE_LINKER}")
@@ -102,9 +93,87 @@ endif ()
 if (MSVC)
     set(COMMON_COMPILE_OPTIONS
             /W4
+
+            /bigobj
             /nologo
+
+            /Zc:preprocessor # XXX IMPORTANT: Clang forwards __VA_ARGS__ in macros and need this to work
+            # Disabled warnings.
+            -wd4141 # Suppress ''modifier' : used more than once' (because of __forceinline combined with inline)
+            -wd4146 # Suppress 'unary minus operator applied to unsigned type, result still unsigned'
+            -wd4244 # Suppress ''argument' : conversion from 'type1' to 'type2', possible loss of data'
+            -wd4267 # Suppress ''var' : conversion from 'size_t' to 'type', possible loss of data'
+            -wd4291 # Suppress ''declaration' : no matching operator delete found; memory will not be freed if initialization throws an exception'
+            -wd4351 # Suppress 'new behavior: elements of array 'array' will be default initialized'
+            -wd4456 # Suppress 'declaration of 'var' hides local variable'
+            -wd4457 # Suppress 'declaration of 'var' hides function parameter'
+            -wd4458 # Suppress 'declaration of 'var' hides class member'
+            -wd4459 # Suppress 'declaration of 'var' hides global declaration'
+            -wd4503 # Suppress ''identifier' : decorated name length exceeded, name was truncated'
+            -wd4624 # Suppress ''derived class' : destructor could not be generated because a base class destructor is inaccessible'
+            -wd4722 # Suppress 'function' : destructor never returns, potential memory leak
+            -wd4100 # Suppress 'unreferenced formal parameter'
+            -wd4127 # Suppress 'conditional expression is constant'
+            -wd4512 # Suppress 'assignment operator could not be generated'
+            -wd4505 # Suppress 'unreferenced local function has been removed'
+            -wd4610 # Suppress '<class> can never be instantiated'
+            -wd4510 # Suppress 'default constructor could not be generated'
+            -wd4702 # Suppress 'unreachable code'
+            -wd4245 # Suppress ''conversion' : conversion from 'type1' to 'type2', signed/unsigned mismatch'
+            -wd4706 # Suppress 'assignment within conditional expression'
+            -wd4310 # Suppress 'cast truncates constant value'
+            -wd4701 # Suppress 'potentially uninitialized local variable'
+            -wd4703 # Suppress 'potentially uninitialized local pointer variable'
+            -wd4389 # Suppress 'signed/unsigned mismatch'
+            -wd4611 # Suppress 'interaction between '_setjmp' and C++ object destruction is non-portable'
+            -wd4805 # Suppress 'unsafe mix of type <type> and type <type> in operation'
+            -wd4204 # Suppress 'nonstandard extension used : non-constant aggregate initializer'
+            -wd4577 # Suppress 'noexcept used with no exception handling mode specified; termination on exception is not guaranteed'
+            -wd4091 # Suppress 'typedef: ignored on left of '' when no variable is declared'
+            # C4592 is disabled because of false positives in Visual Studio 2015
+            # Update 1. Re-evaluate the usefulness of this diagnostic with Update 2.
+            -wd4592 # Suppress ''var': symbol will be dynamically initialized (implementation limitation)
+            -wd4319 # Suppress ''operator' : zero extending 'type' to 'type' of greater size'
+            # C4709 is disabled because of a bug with Visual Studio 2017 as of
+            # v15.8.8. Re-evaluate the usefulness of this diagnostic when the bug
+            # is fixed.
+            -wd4709 # Suppress comma operator within array index expression
+
+            # We'd like this warning to be enabled, but it triggers from code in
+            # WinBase.h that we don't have control over.
+            -wd5105 # Suppress macro expansion producing 'defined' has undefined behavior
+
+            # Ideally, we'd like this warning to be enabled, but even MSVC 2019 doesn't
+            # support the 'aligned' attribute in the way that clang sources requires (for
+            # any code that uses the LLVM_ALIGNAS macro), so this is must be disabled to
+            # avoid unwanted alignment warnings.
+            -wd4324 # Suppress 'structure was padded due to __declspec(align())'
+
+            # Promoted warnings.
+            -w14062 # Promote 'enumerator in switch of enum is not handled' to level 1 warning.
+
+            # Promoted warnings to errors.
+            -we4238 # Promote 'nonstandard extension used : class rvalue used as lvalue' to error.
+    )
+    add_compile_definitions(
+            # For some reason MS wants to deprecate a bunch of standard functions...
+            _CRT_SECURE_NO_DEPRECATE
+            _CRT_SECURE_NO_WARNINGS
+            _CRT_NONSTDC_NO_DEPRECATE
+            _CRT_NONSTDC_NO_WARNINGS
+            _SCL_SECURE_NO_DEPRECATE
+            _SCL_SECURE_NO_WARNINGS
+    )
+    add_compile_definitions(
+            UNICODE
+            _UNICODE
     )
 else ()
+
+    set(COMMON_RELEASE_OPTIONS
+            -gline-tables-only # keep debug line numbers only
+            -gz                # compress debug information
+    )
 
     set(COMMON_COMPILE_OPTIONS
             -ffunction-sections       # keep functions in its own section for better --gc-sections results
@@ -241,9 +310,6 @@ message(STATUS "Using LLVM: ${LLVM_PACKAGE_VERSION} tools")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
 FetchContent_MakeAvailable(fire)
-FetchContent_MakeAvailable(json)
-FetchContent_MakeAvailable(VulkanMemoryAllocator)
-
 FetchContent_GetProperties(clspv)
 if (NOT clspv_POPULATED)
     FetchContent_Populate(clspv)
@@ -336,9 +402,6 @@ if (NOT clspv_POPULATED)
     endforeach ()
 endif ()
 
-# set CXX stuff here in case LLVM overwrites it
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(COMPILE_OPTIONS
         #        -fvisibility-global-new-delete-hidden

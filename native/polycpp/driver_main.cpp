@@ -205,12 +205,12 @@ int main(int argc, const char *argv[]) {
                  auto polycppLibPath = polycppResourcePath / "lib";
                  auto polycppInterposePlugin = polycppLibPath / "polystl-interpose-plugin.so";
                  auto polycppClangPlugin = polycppLibPath / "polycpp-clang-plugin.so";
-                 append({"-isystem", polycppIncludePath});
+                 append({"-isystem", polycppIncludePath.string()});
                  append({"-include", "polystl/polystl.h"});
 
                  bool noRewrite = std::getenv("POLYCPP_NO_REWRITE") != nullptr;
                  if (!noRewrite) {
-                   append({"-Xclang", "-load", "-Xclang", polycppClangPlugin});
+                   append({"-Xclang", "-load", "-Xclang", polycppClangPlugin.string()});
                    append({"-Xclang", "-add-plugin", "-Xclang", "polycpp"});
                    append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("exe={}", execPath.string())});
                    append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("verbose={}", opts->verbose ? "1" : "0")});
@@ -223,7 +223,7 @@ int main(int argc, const char *argv[]) {
                  if (!compileOnly) {
                    switch (opts->rt) {
                      case PolyCppOptions::LinkKind::Static: {
-                       remaining.insert(remaining.end(), polycppLibPath / "libpolystl-static.a");
+                       remaining.insert(remaining.end(), (polycppLibPath / "libpolystl-static.a").string());
                        if (!opts->noCompress) append({"-Wl,--compress-debug-sections=zlib,--gc-sections"});
                        break;
                      }
@@ -248,6 +248,6 @@ int main(int argc, const char *argv[]) {
                std::cout << ">>> " << (remaining ^ mk_string(" ")) << std::endl;
                remaining[0] = "clang++";
 
-               return llvm::sys::ExecuteAndWait(clangPath.c_str(), remaining  | map([](auto &x) -> llvm::StringRef { return x; })|to_vector() );
+               return llvm::sys::ExecuteAndWait(clangPath.string(), remaining  | map([](auto &x) -> llvm::StringRef { return x; })|to_vector() );
              });
 }

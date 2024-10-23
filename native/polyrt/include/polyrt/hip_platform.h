@@ -1,5 +1,7 @@
 #pragma once
 
+#include "polyregion/compat.h"
+
 #include "hipew.h"
 #include "runtime.h"
 
