@@ -6,13 +6,20 @@ set(POLYCPP_HEADER_SET_DIR "lib/polycpp/include")
 set(POLYCPP_LIB_DIR "lib/polycpp/lib")
 
 add_executable(polycpp driver_main.cpp)
-add_custom_target(polycpp-resources
-        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/"
-        COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:polycpp-clang-plugin>" "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/"
-        COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:polystl-interpose-plugin>" "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/"
-        COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:polystl-static>" "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/"
-        COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:polystl>" "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/"
-)
+
+if (WIN32)
+    add_custom_target(polycpp-resources
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/"
+            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:polystl-static>" "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/"
+            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:polystl>" "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/")
+else ()
+    add_custom_target(polycpp-resources
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/"
+            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:polycpp-clang-plugin>" "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/"
+            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:polystl-interpose-plugin>" "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/"
+            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:polystl-static>" "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/"
+            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:polystl>" "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/")
+endif ()
 
 add_executable(polycpp-test test/test_all.cpp)
 add_dependencies(polycpp-test polycpp)

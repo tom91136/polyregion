@@ -123,7 +123,7 @@ private[polyregion] object CppNlohmannJsonCodecGen {
       }
     s"""|#pragma once
           |
-          |#include "json.hpp"
+          |#include "nlohmann/json.hpp"
           |#include "polyast.h"
           |#include "polyregion/export.h"
           |
