@@ -10,8 +10,6 @@ vcpkg_extract_source_archive(
     PATCHES
         dll-bindir.diff
 )
-message(WARNING ">> ${ARCHIVE} :  ${SOURCE_PATH}")
-
 
 vcpkg_list(SET options)
 if(VCPKG_TARGET_IS_WINDOWS)
