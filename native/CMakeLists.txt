@@ -4,6 +4,15 @@ if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.24.0")
     cmake_policy(SET CMP0135 NEW)
 endif ()
 
+if (${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.20.0")
+    cmake_policy(SET CMP0116 OLD)
+    set(CMAKE_POLICY_DEFAULT_CMP0116 OLD)
+endif ()
+
+# use new behaviour for IPO here (e.g enable where possible)
+cmake_policy(SET CMP0069 NEW)
+set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
+
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     set(CMAKE_C_FLAGS_RELEASE "-O3  -gline-tables-only -gz" CACHE STRING "")
     set(CMAKE_CXX_FLAGS_RELEASE "-O3  -gline-tables-only -gz" CACHE STRING "")
@@ -12,7 +21,7 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     set(CMAKE_CXX_FLAGS_RELEASE "-O3  -g1 -gz" CACHE STRING "")
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     # TODO
-endif()
+endif ()
 
 include(FetchContent)
 include(ProcessorCount)
@@ -21,8 +30,10 @@ include(cmake/mergestaticlibs.cmake)
 
 set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON" FORCE)
 set(CMAKE_SKIP_INSTALL_ALL_DEPENDENCY ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -50,15 +61,14 @@ FetchContent_Declare(
 FetchContent_Declare(
         Aspartame
         #        SOURCE_DIR /Users/Tom/Aspartame
-                GIT_REPOSITORY https://github.com/tom91136/Aspartame.git
-                GIT_TAG 93cc5826
+        GIT_REPOSITORY https://github.com/tom91136/Aspartame.git
+        GIT_TAG 93cc5826
 )
 
 FetchContent_MakeAvailable(Aspartame)
 
 find_package(fmt CONFIG REQUIRED)
 find_package(Catch2 CONFIG REQUIRED)
-#find_package(libffi CONFIG REQUIRED)
 find_package(unofficial-libffi CONFIG REQUIRED)
 find_package(SPIRV-Tools-opt CONFIG REQUIRED)
 find_package(VulkanHeaders CONFIG REQUIRED)
@@ -170,11 +180,7 @@ if (MSVC)
     )
 else ()
 
-    set(COMMON_RELEASE_OPTIONS
-            -gline-tables-only # keep debug line numbers only
-            -gz                # compress debug information
-    )
-
+    set(COMMON_RELEASE_OPTIONS)
     set(COMMON_COMPILE_OPTIONS
             -ffunction-sections       # keep functions in its own section for better --gc-sections results
             -fdata-sections           # same as above
@@ -185,12 +191,12 @@ else ()
             # -Wshadow         # too prevalent in LLVM
             # -Wold-style-cast # too prevalent in LLVM
             # -Wcast-align      # too prevalent in LLVM
-            -Werror=return-type
             -Werror=switch
-            "$<$<CXX_COMPILER_ID:Clang>:-Wthread-safety>"
             -Wno-unused-parameter
             -Wno-unused-function
             -Wno-unused-variable
+            "$<$<CXX_COMPILER_ID:Clang>:-Wthread-safety>"
+            "$<$<CXX_COMPILER_ID:Clang>:-Werror=return-type>"
     )
 endif ()
 
@@ -226,46 +232,44 @@ else ()
     # Setup link options
     if (APPLE)
         # LLD support for macOS is not there yet, flags are for ld64.
-        set(STRICT_LINKER_OPTIONS) # ld64 defaults to error on undefined on missing symbols, so nothing to do
-        set(PLUGIN_LINKER_OPTIONS LINKER:-undefined,dynamic_lookup)
+        set(STRICT_LINK_OPTIONS) # ld64 defaults to error on undefined on missing symbols, so nothing to do
+        set(PLUGIN_LINK_OPTIONS LINKER:-undefined,dynamic_lookup)
     else ()
-        set(STRICT_LINKER_OPTIONS
+        set(STRICT_LINK_OPTIONS
                 LINKER:--no-allow-shlib-undefined
                 LINKER:--no-undefined-version
                 LINKER:--no-undefined
         )
-        set(PLUGIN_LINKER_OPTIONS)
-        # For lld, we setup LTO, ICF, and threading
-        set(COMMON_LINKER_OPTIONS
-                #                LINKER:--lto-O3
-                #                LINKER:--icf=all
-                LINKER:--threads=${NPROC}
-                LINKER:-O3                # O3 for linker means optimise for space
-        )
+        set(PLUGIN_LINK_OPTIONS)
+        if (USE_LINKER STREQUAL "lld") # For lld, we setup LTO, ICF, and threading
+            set(COMMON_LINK_OPTIONS
+                    ${COMMON_LINK_OPTIONS}
+                    LINKER:--threads=${NPROC}
+                    LINKER:-O3                # O3 for linker means optimise for space
+                    # LINKER:--lto-O3
+                    # LINKER:--icf=all
+            )
+        endif ()
     endif ()
     if (CMAKE_BUILD_TYPE MATCHES "Rel*")
-        # For Release, we also strip everything out
-        if (APPLE)
-            set(COMMON_LINKER_OPTIONS
-                    ${COMMON_LINKER_OPTIONS}
+        if (APPLE) # For Release, we also strip everything out
+            set(COMMON_LINK_OPTIONS
+                    ${COMMON_LINK_OPTIONS}
                     LINKER:-dead_strip
                     LINKER:-dead_strip_dylibs
                     LINKER:-S # No debug symbols
                     LINKER:-x # No local symbols
             )
         else ()
-            set(COMMON_LINKER_OPTIONS
-                    ${COMMON_LINKER_OPTIONS}
+            set(COMMON_LINK_OPTIONS
+                    ${COMMON_LINK_OPTIONS}
                     -static-libstdc++
-                    LINKER:--gc-sections      # remove unused sections
-                    #                    LINKER:--strip-all        # strip symbols not used for DSO
+                    LINKER:--gc-sections        # remove unused sections
+                    # LINKER:--strip-all        # strip symbols not used for DSO
             )
         endif ()
     endif ()
 endif ()
-
-
-set(COMMON_LINK_OPTIONS ${COMMON_LINK_OPTIONS} ${COMMON_LINKER_OPTIONS})
 
 if (UNIX AND NOT APPLE)
     set(COMMON_LINK_OPTIONS ${COMMON_LINK_OPTIONS}
@@ -279,16 +283,6 @@ else ()
     set(DL_LIB dl)
 endif ()
 
-
-# use new behaviour for IPO here (e.g enable where possible)
-cmake_policy(SET CMP0069 NEW)
-set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
-
-
-if (${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.20.0")
-    cmake_policy(SET CMP0116 OLD)
-    set(CMAKE_POLICY_DEFAULT_CMP0116 OLD)
-endif ()
 
 set(LLVM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/llvm")
 set(LLD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/lld")
@@ -404,7 +398,6 @@ endif ()
 
 
 set(COMPILE_OPTIONS
-        #        -fvisibility-global-new-delete-hidden
         ${COMMON_COMPILE_OPTIONS}
         "$<$<CONFIG:RelWithDebInfo>:${COMMON_RELEASE_OPTIONS}>"
         "$<$<CONFIG:Release>:${COMMON_RELEASE_OPTIONS}>"
@@ -413,13 +406,13 @@ set(COMPILE_OPTIONS
 
 set(LINK_OPTIONS
         ${COMMON_LINK_OPTIONS}
-        ${STRICT_LINKER_OPTIONS}
+        ${STRICT_LINK_OPTIONS}
         "$<$<CONFIG:Debug>:${COMMON_DEBUG_OPTIONS}>"
 )
 
 set(PLUGIN_LINK_OPTIONS
         ${COMMON_LINK_OPTIONS}
-        ${PLUGIN_LINKER_OPTIONS}
+        ${PLUGIN_LINK_OPTIONS}
         "$<$<CONFIG:Debug>:${COMMON_DEBUG_OPTIONS}>"
 )
 

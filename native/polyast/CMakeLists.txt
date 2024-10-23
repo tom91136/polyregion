@@ -12,7 +12,6 @@ target_link_libraries(PolyAST
 
 
 if (NOT WIN32)
-
     target_precompile_headers(PolyAST PUBLIC
             generated/polyast.h
             generated/polyast_codec.h

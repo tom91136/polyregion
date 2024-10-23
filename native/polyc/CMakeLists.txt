@@ -1,28 +1,16 @@
 set(LIB_SOURCES
-        #        generated/polyast.cpp
-        #        generated/polyast_codec.cpp
-
-
         backend/backend.cpp
-
         backend/llvm_amdgpu.cpp
         backend/llvm_nvptx.cpp
         backend/llvm_opencl.cpp
         backend/llvm_cpu.cpp
-
         backend/llvm.cpp
-
         backend/llvmc.cpp
         backend/c_source.cpp
         backend/lld_lite.cpp
         backend/memoryfs.cpp
         backend/clspv.cpp
-
-        #        ast.cpp
         compiler.cpp
-        #        polyregion_compiler.cpp
-
-        #        ${clspv_passes_SOURCE_FILES}
 )
 
 add_library(polyc ${LIB_SOURCES})
@@ -41,13 +29,9 @@ target_include_directories(polyc PUBLIC
         ${LLVM_INCLUDE_DIRS}
         ${LLD_INCLUDE_DIRS}
         #        ${spirv-llvm-translator_SOURCE_DIR}/include
-
         #        ${clspv_passes_INCLUDE_DIRS}
         ${spirv-tools_SOURCE_DIR}/include
-
-
-        . ../include
-)
+        . ../include)
 
 if (NOT WIN32)
     target_precompile_headers(polyc-tests PRIVATE
@@ -69,17 +53,6 @@ if (NOT WIN32)
 endif ()
 
 llvm_map_components_to_libnames(LLVM_LIBS
-        #        core
-        #        support
-        #        option
-        #        object
-        #        ipo
-        #        instcombine
-        #        native
-        #        nativecompiler
-        #        orcjit
-
-
         ${LLVM_TARGETS_TO_BUILD}
         ${LLVM_EXPERIMENTAL_TARGETS_TO_BUILD}
         analysis
@@ -101,13 +74,9 @@ llvm_map_components_to_libnames(LLVM_LIBS
         transformutils
         vectorize
         targetparser
-        objcarcopts
-
-)
-
+        objcarcopts)
 
 set(LLD_LIBS lldCommon lldELF)
-
 message(STATUS "[compiler] Adding LLVM libs = ${LLVM_LIBS} ")
 message(STATUS "[compiler] Adding LLD libs = ${LLD_LIBS} ")
 

@@ -164,7 +164,7 @@ lazy val `examples-scala` = project
     assembly / mainClass := mainCls,
     scalacOptions ++= Seq("-Yretain-trees"),
     libraryDependencies ++= Seq(
-      "com.github.pathikrit"  %% "better-files"                % "3.9.2",
+      "com.github.pathikrit"   %% "better-files"               % "3.9.2",
       "org.scala-lang.modules" %% "scala-parallel-collections" % "1.0.4"
     )
   )

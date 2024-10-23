@@ -1,6 +1,5 @@
 add_library(polystl SHARED)
-# merge_static_libs(polystl-static ${POLYRT_LIBS})
-add_library(polystl-static STATIC)
+merge_static_libs(polystl-static ${POLYRT_LIBS})
 
 foreach (TARGET polystl polystl-static)
     target_sources(${TARGET}

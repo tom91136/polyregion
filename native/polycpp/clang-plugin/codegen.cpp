@@ -45,7 +45,7 @@ static std::variant<std::string, CompileResult> compileProgram(const polystl::Op
     (llvm::errs() << (args | prepend(opts.executable) | mk_string(" ", [](auto &s) { return s.data(); })) << "\n").flush();
   }
 
-  if (int code = llvm::sys::ExecuteAndWait(opts.executable, args, {{}}); code != 0)
+  if (int code = llvm::sys::ExecuteAndWait(opts.executable, args); code != 0)
     return "Non-zero exit code for task: " + (args ^ mk_string(" ", [](auto &s) { return s.str(); }));
 
   auto BufferOrErr = llvm::MemoryBuffer::getFile(outputPath);
