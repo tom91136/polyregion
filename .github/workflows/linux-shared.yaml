@@ -102,6 +102,7 @@ jobs:
         run: cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DARCH=${{ inputs.build_arch }} -DACTION=CONFIGURE -DCMAKE_SYSROOT=${{ env.SYSROOT_PATH }} -P build.cmake
 
       - uses: actions/checkout@v2
+        if: always()
       - name: Setup upterm session
         uses: lhotari/action-upterm@v1
 
