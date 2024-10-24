@@ -7,13 +7,14 @@ on:
     types: published
 
 jobs:
-  i386-release:
-    uses: ./.github/workflows/linux-shared.yaml
-    secrets: inherit
-    with:
-      build_sysroot_name: i386
-      build_arch: i386
-      build_type: Release
+  # XXX Re-enabled if libffi works when cross-compiling on X86_64 host again :(
+  # i386-release:
+  #   uses: ./.github/workflows/linux-shared.yaml
+  #   secrets: inherit
+  #   with:
+  #     build_sysroot_name: i386
+  #     build_arch: i386
+  #     build_type: Release
   x86_64-release:
     uses: ./.github/workflows/linux-shared.yaml
     secrets: inherit
