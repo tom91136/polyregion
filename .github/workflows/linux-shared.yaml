@@ -80,7 +80,7 @@ jobs:
         id: restore-llvm
         uses: actions/cache/restore@v4
         with:
-          path: ./native/llvm-*
+          path: ./native/llvm-*-${{ inputs.build_arch }}-dist
           key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
       - name: Build LLVM
@@ -94,7 +94,7 @@ jobs:
         uses: actions/cache/save@v4
         id: save-llvm
         with:
-          path: ./native/llvm-*
+          path: ./native/llvm-*-${{ inputs.build_arch }}-dist
           key: ${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
       - name: Configure release build
