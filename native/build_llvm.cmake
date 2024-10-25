@@ -58,24 +58,11 @@ endif ()
 ### End patches ###
 
 if (UNIX AND NOT APPLE)
-    set(USE_LTO Thin)
-    set(USE_STATIC_CXX_STDLIB ON)
-else ()
-    set(USE_LTO OFF)
-    set(USE_STATIC_CXX_STDLIB OFF)
+    list(APPEND BUILD_OPTIONS -DLLVM_ENABLE_LTO=Thin)
 endif ()
 
-if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    if (UNIX)
-        set(BUILD_SHARED_LIBS ON)
-    endif ()
-    set(USE_STATIC_CXX_STDLIB OFF)
-else ()
-    set(BUILD_SHARED_LIBS OFF)
-endif ()
-
-if (NOT DEFINED LLVM_USE_HOST_TOOLS)
-    set(LLVM_USE_HOST_TOOLS ON)
+if (UNIX AND (CMAKE_BUILD_TYPE STREQUAL "Debug"))
+    list(APPEND BUILD_OPTIONS "-DLLVM_USE_SANITIZER=Address\\;Undefined")
 endif ()
 
 if (CMAKE_CXX_COMPILER)
