@@ -18,7 +18,6 @@ class PolyCppFrontendAction : public clang::PluginASTAction {
 
 protected:
   std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance &CI, llvm::StringRef InFile) override {
-    std::cout << "Run!" << std::endl;
     return std::make_unique<polyregion::polystl::OffloadRewriteConsumer>(CI.getDiagnostics(), opts);
   }
 

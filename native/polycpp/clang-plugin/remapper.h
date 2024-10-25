@@ -47,6 +47,7 @@ struct Remapper {
     std::unordered_map<std::string, Function> functions{};
     std::unordered_map<std::string, StructDef> structs{};
 
+
     template <typename T>
     [[nodiscard]] std::pair<T, std::vector<Stmt::Any>> scoped(const std::function<T(RemapContext &)> &f,         //
                                                               const std::optional<bool> &scopeCtorChain = {},    //
@@ -77,6 +78,11 @@ struct Remapper {
                                                 const std::optional<Type::Any> &scopeRtnType = {}, //
                                                 std::optional<std::string> scopeStructName = {},   //
                                                 bool persistCounter = false);
+
+    const static Named EmptyStructMarker;
+
+    StructDef findStruct(const Sym &sym, const std::string &reason);
+    bool emptyStruct(const StructDef &def);
 
     void push(const Stmt::Any &stmt);
     void push(const std::vector<Stmt::Any> &xs);

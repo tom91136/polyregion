@@ -18,6 +18,7 @@ int main() {
   };
   Derived value{{}, 33, 44};
 
+  static_assert(sizeof(Base) == 1);
   static_assert(sizeof(Derived) == sizeof(int) * 2);
 
   Derived result = __polyregion_offload_f1__([CHECK_CAPTURE]() { return value; });

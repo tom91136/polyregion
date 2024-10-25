@@ -16,6 +16,7 @@ int main() {
   struct Derived : Base {};
   Derived value{};
 
+  static_assert(sizeof(Base) == 1);
   static_assert(sizeof(Derived) == 1);
 
   char valueBytes[1], actualBytes[1];

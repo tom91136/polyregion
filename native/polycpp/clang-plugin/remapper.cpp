@@ -31,7 +31,6 @@ using namespace polyregion::polyast;
 using namespace polyregion::polystl;
 using namespace aspartame;
 
-
 std::vector<Stmt::Any> Remapper::RemapContext::scoped(const std::function<void(RemapContext &)> &f, //
                                                       const std::optional<bool> &scopeCtorChain,    //
                                                       const std::optional<Type::Any> &scopeRtnType, //
@@ -45,6 +44,21 @@ std::vector<Stmt::Any> Remapper::RemapContext::scoped(const std::function<void(R
              scopeCtorChain, scopeRtnType, std::move(scopeStructName), persistCounter)
       .second;
 }
+
+const Named Remapper::RemapContext::EmptyStructMarker = Named("###_empty_struct_storage_###", Type::IntU8());
+
+StructDef Remapper::RemapContext::findStruct(const Sym &sym, const std::string &reason) {
+  if (auto s = structs ^ get(qualified(sym))) return *s;
+  else raise(fmt::format("Cannot find struct {} (required for {})", qualified(sym), reason));
+}
+
+bool Remapper::RemapContext::emptyStruct(const StructDef &def) {
+  if (def.members.empty() || (def.members ^ count([&](auto m) { return m.named == EmptyStructMarker; })) == 1) {
+    return def.parents ^ forall([&](auto name) { return emptyStruct(findStruct(name, "check emptyStruct")); });
+  }
+  return false;
+}
+
 void Remapper::RemapContext::push(const Stmt::Any &stmt) { stmts.push_back(stmt); }
 void Remapper::RemapContext::push(const std::vector<Stmt::Any> &xs) { stmts.insert(stmts.end(), xs.begin(), xs.end()); }
 Named Remapper::RemapContext::newName(const Type::Any &tpe) { return {"_v" + std::to_string(++counter), tpe}; }
@@ -117,11 +131,11 @@ static Term::Any defaultValue(const Type::Any &tpe) {
       [&](const Type::IntS32 &) -> Term::Any { return Term::IntS32Const(int32_t(0)); }, //
       [&](const Type::IntS64 &) -> Term::Any { return Term::IntS64Const(int64_t(0)); }, //
 
-      [&](const Type::Bool1 &) -> Term::Any { return Term::Bool1Const(false); },                     //
-      [&](const Type::Unit0 &) -> Term::Any { return Term::Unit0Const(); },                          //
+      [&](const Type::Bool1 &) -> Term::Any { return Term::Bool1Const(false); },    //
+      [&](const Type::Unit0 &) -> Term::Any { return Term::Unit0Const(); },         //
       [&](const Type::Nothing &x) -> Term::Any { raise("Bad type " + repr(tpe)); }, //
       [&](const Type::Struct &x) -> Term::Any { raise("Bad type " + repr(tpe)); },  //
-      [&](const Type::Ptr &x) -> Term::Any { return Term::Poison(x); },                              //
+      [&](const Type::Ptr &x) -> Term::Any { return Term::Poison(x); },             //
       [&](const Type::Var &x) -> Term::Any { raise("Bad type " + repr(tpe)); },     //
       [&](const Type::Exec &x) -> Term::Any { raise("Bad type " + repr(tpe)); }     //
   );
@@ -143,8 +157,12 @@ static void defaultInitialiseStruct(Remapper::RemapContext &r, const Type::Struc
         //        roots_.push_back(m.named);
         //        defaultInitialiseStruct(r, *nested, roots_);
       } else {
-        r.push(Stmt::Comment("Zero init member"));
-        r.push(Stmt::Mut(Term::Select(roots, m.named), Expr::Alias(defaultValue(m.named.tpe)), true));
+
+//        if(m.named != r.EmptyStructMarker){
+          r.push(Stmt::Comment("Zero init member"));
+          r.push(Stmt::Mut(Term::Select(roots, m.named), Expr::Alias(defaultValue(m.named.tpe)), true));
+//        }
+
       }
     }
   } else raise("Cannot initialise unknown struct type " + repr(tpe));
@@ -414,11 +432,11 @@ std::string Remapper::handleRecord(const clang::RecordDecl *decl, RemapContext &
           auto baseTpe = base.getType().getDesugaredType(context);
           if (auto baseRecordTpe = llvm::dyn_cast<clang::RecordType>(baseTpe); baseRecordTpe) {
             auto recordName = handleRecord(baseRecordTpe->getDecl(), r);
-            if (auto it = r.structs.find(recordName); it != r.structs.end()) {
-              parents.push_back(it->second.name);
+            if (auto record = r.structs ^ get(recordName)) {
+              if (!r.emptyStruct(*record)) parents.push_back(record->name);
             } else
-              r.push(Stmt::Comment("Invariant: base class " + dump_to_string(*baseTpe, context) +
-                                   "  inserted but was not found:" + recordName));
+              r.push(Stmt::Comment(
+                  fmt::format("Invariant: base class {} inserted but was not found: {}", dump_to_string(*baseTpe, context), recordName)));
           } else r.push(Stmt::Comment("ERROR: Base class " + dump_to_string(*baseTpe, context) + " of " + name + " is not a Record"));
         }
       };
@@ -450,13 +468,9 @@ std::string Remapper::handleRecord(const clang::RecordDecl *decl, RemapContext &
     // 1)  EBO is prohibited if one of the empty base classes is also the type or the base of the type of the first non-static data member
     // 2)  MSVC : sizeof(A0) == 2 unless we add __declspec(empty_bases), EBO is is off without this
 
-    if (members.empty() && parents ^ forall([&](auto name) {
-                             return r.structs ^ get(qualified(name)) ^
-                                    fold([](auto sd) { return sd.members.empty(); }, []() { return true; });
-                           })) {
-      members.emplace_back(Named("__dummy", Type::IntU8()), true);
+    if (members.empty() && parents.empty()) {
+      members.emplace_back(r.EmptyStructMarker, true);
     }
-
     auto sd = r.structs.emplace(name, StructDef(Sym({name}), {}, members, parents));
   }
   return name;
@@ -871,8 +885,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
         auto ctorTpe = handleType(expr->getType(), r);
 
         if (fn.args.size() != expr->getNumArgs())
-          raise("Arg count mismatch, expected " + std::to_string(fn.args.size()) + " but was " +
-                                 std::to_string(expr->getNumArgs()));
+          raise("Arg count mismatch, expected " + std::to_string(fn.args.size()) + " but was " + std::to_string(expr->getNumArgs()));
 
         if (auto tpe = ctorTpe.get<Type::Struct>(); tpe) {
           r.push(Stmt::Comment("CXXConstructExpr: " + repr(tpe->name)));
@@ -911,8 +924,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
         auto receiver = r.newVar(handleExpr(expr->getImplicitObjectArgument(), r));
 
         if (fn.args.size() != expr->getNumArgs())
-          raise("Arg count mismatch, expected " + std::to_string(fn.args.size()) + " but was " +
-                                 std::to_string(expr->getNumArgs()));
+          raise("Arg count mismatch, expected " + std::to_string(fn.args.size()) + " but was " + std::to_string(expr->getNumArgs()));
         std::vector<Term::Any> args;
         for (size_t i = 0; i < expr->getNumArgs(); ++i)
           args.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn.args[i].named.tpe)));
@@ -928,8 +940,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
         auto [name, fn] = handleCall(expr->getCalleeDecl()->getAsFunction(), r);
 
         if (fn.args.size() != expr->getNumArgs() - 1)
-          raise("Arg count mismatch, expected " + std::to_string(fn.args.size()) + " but was " +
-                                 std::to_string(expr->getNumArgs() - 1));
+          raise("Arg count mismatch, expected " + std::to_string(fn.args.size()) + " but was " + std::to_string(expr->getNumArgs() - 1));
         std::vector<Term::Any> args;
         auto receiver = r.newVar(handleExpr(expr->getArg(0), r));
         for (size_t i = 1; i < expr->getNumArgs(); ++i) {
@@ -1053,8 +1064,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, Remapper::RemapContext &
         } else {
           auto [name, fn] = handleCall(expr->getCalleeDecl()->getAsFunction(), r);
           if (fn.args.size() != expr->getNumArgs())
-            raise("Arg count mismatch, expected " + std::to_string(fn.args.size()) + " but was " +
-                                   std::to_string(expr->getNumArgs()));
+            raise("Arg count mismatch, expected " + std::to_string(fn.args.size()) + " but was " + std::to_string(expr->getNumArgs()));
           std::vector<Term::Any> args;
           for (size_t i = 0; i < expr->getNumArgs(); ++i)
             args.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn.args[i].named.tpe)));
