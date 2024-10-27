@@ -125,7 +125,7 @@ object compiletime {
 
   inline def offload0[C](inline queue: rt.Device.Queue, inline cb: Callback[Unit])(inline f: Any): Unit =
     // ${ generate0[C]('queue, 'f, 'cb) }
-    ${ generate0[C]('queue, '{ (_ : Long) => f }, 'cb) }
+    ${ generate0[C]('queue, 'f, 'cb) }
   private def generate0[C: Type](using
       q: Quotes
   )(queue: Expr[rt.Device.Queue], f: Expr[Any], cb: Expr[Callback[Unit]]) = checked(for {
@@ -206,10 +206,15 @@ object compiletime {
         case (n @ p.Named(_, tpe), term) => (n, None, term).success
       }
 
-      prog: p.Program = prog0.copy(entry = prog0.entry.copy(name = p.Sym(s"lambda${ProgramCounter.getAndIncrement()}")))
+      prog: p.Program = prog0.copy(entry =
+        prog0.entry.copy(
+          name = p.Sym(s"lambda${ProgramCounter.getAndIncrement()}")
+        )
+      )
+
       _ = println(log.render(1).mkString("\n"))
-      _               = println(prog.entry.repr)
-      _               = println(prog.functions.map(_.repr).mkString("\n"))
+      _ = println(prog.entry.repr)
+      _ = println(prog.functions.map(_.repr).mkString("\n"))
 
       serialisedAst <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, prog)))
       compiler = ct.Compiler.create()
@@ -239,6 +244,10 @@ object compiletime {
         val tpe = Pickler.tpeAsRuntimeTpe(name.tpe)
         tpe.value -> tpe.sizeInBytes
       }.unzip
+
+      val tidTpeOrdinal = Pickler.tpeAsRuntimeTpe(p.Type.IntS64).value
+      val tidTpeSize    = Pickler.tpeAsRuntimeTpe(p.Type.IntS64).sizeInBytes
+
       val returnTpeOrdinal = Pickler.tpeAsRuntimeTpe(prog.entry.rtn).value
       val returnTpeSize    = Pickler.tpeAsRuntimeTpe(prog.entry.rtn).sizeInBytes
 
@@ -288,9 +297,11 @@ object compiletime {
           }
 
           // Allocate parameter and return type ordinals and value buffers
-          val fnTpeOrdinals = ${ Expr((captureTpeOrdinals :+ returnTpeOrdinal).toArray) }
-          val fnValues =
-            ByteBuffer.allocate(${ Expr(captureTpeSizes.sum + returnTpeSize) }).order(ByteOrder.nativeOrder)
+          val fnTpeOrdinals = ${ Expr((tidTpeOrdinal +: captureTpeOrdinals :+ returnTpeOrdinal).toArray) }
+          var fnValues =
+            ByteBuffer
+              .allocate(${ Expr(tidTpeSize + captureTpeSizes.sum + returnTpeSize) })
+              .order(ByteOrder.nativeOrder)
 
           val ptrMap = scala.collection.mutable.Map[Any, Long]()
 
@@ -326,6 +337,7 @@ object compiletime {
                     '{
                       ${
                         bindWrite(
+                          tidTpeSize,
                           write(_, _, 'ptrMap),
                           'fnValues,
                           queue,
@@ -335,7 +347,7 @@ object compiletime {
 
                       println("Dispatch tid=" + Thread.currentThread.getId)
                       println(s"fnTpeOrdinals=${fnTpeOrdinals.toList}")
-                      println(s"fnValues.array=${fnValues.array.toList}")
+                      println(s"fnValues.array=0x${fnValues.array.map(byte => f"$byte%02x").mkString(" ")}")
                       // Dispatch.
                       $queue.enqueueInvokeAsync(
                         $moduleName,
@@ -352,6 +364,7 @@ object compiletime {
                             ${
                               // Varargs(capturesWithStructDefs.map { case (named, maybeSdef, term) =>
                               bindRead(
+                                tidTpeSize,
                                 read(_, _, _, 'ptrMap, 'objMap),
                                 update(_, _, _, 'ptrMap, 'objMap),
                                 'fnValues,
@@ -415,15 +428,18 @@ object compiletime {
   //  - (var) $ptr != nullptr => ${inst.a} := f(q, ${inst.a} ?, fromPtr($ptr)) : A
 
   def bindWrite(using q: Quoted)(
+      offset: Int,
       write: (p.Sym, Expr[Any]) => Expr[Long],
       target: Expr[ByteBuffer],
       queue: Expr[rt.Device.Queue],
       capturesWithStructDefs: List[(p.Named, Option[p.StructDef], q.Term)]
   ) = {
     given Quotes = q.underlying
-    val (_, stmts) = capturesWithStructDefs.zipWithIndex.foldLeft((0, List.empty[Expr[Any]])) {
+    val (_, stmts) = capturesWithStructDefs.zipWithIndex.foldLeft((offset, List.empty[Expr[Any]])) {
       case ((byteOffset, exprs), ((name, structDef, ref), idx)) =>
-        println(s"[Bind] [$idx, offset=${byteOffset}]  repr=${ref.show} name=${name.repr} (${structDef.map(_.repr)})")
+        println(
+          s"[Bind] [$idx, offset=${byteOffset}]  repr=${ref.show} name=${name.repr} (${structDef.map(_.repr)})"
+        )
 
         val mutable = ref.symbol.flags.is(q.Flags.Mutable)
 
@@ -456,6 +472,7 @@ object compiletime {
   }
 
   def bindRead(using q: Quoted)(
+      offset: Int,
       read: (p.Sym, Expr[Any], Expr[Long]) => Expr[Any],
       update: (p.Sym, Expr[Any], Expr[Long]) => Expr[Unit],
       target: Expr[ByteBuffer],
@@ -463,7 +480,7 @@ object compiletime {
       capturesWithStructDefs: List[(p.Named, Option[p.StructDef], q.Term)]
   ) = {
     given Quotes = q.underlying
-    val (_, stmts) = capturesWithStructDefs.zipWithIndex.foldLeft((0, List.empty[Expr[Any]])) {
+    val (_, stmts) = capturesWithStructDefs.zipWithIndex.foldLeft((offset, List.empty[Expr[Any]])) {
       case ((byteOffset, exprs), ((name, structDef, ref), idx)) =>
         println(
           s"[Bind] <-  [$idx, offset=${byteOffset}]  repr=${ref.show} name=${name.repr} (${structDef.map(_.repr)})"
@@ -472,7 +489,7 @@ object compiletime {
         val mutable = ref.symbol.flags.is(q.Flags.Mutable)
 
         val expr = (name.tpe, structDef, ref.asExpr) match {
-          case (p.Type.Ptr(comp,_,_), None, _) =>
+          case (p.Type.Ptr(comp, _, _), None, _) =>
             throw new RuntimeException(
               s"Top level arrays at parameter boundary is illegal: repr=${ref.show} name=${name.repr}"
             )
@@ -499,7 +516,7 @@ object compiletime {
             '{
               println(s"[Bind] skipping primitive ${$ref}")
             }
-          // Pickler.writePrim(target, Expr(byteOffset), t, ref)
+          // Pickler.writePrim(target, Expr( byteOffset), t, ref)
           case (t, _, _) =>
             throw new RuntimeException(
               s"Unexpected type ${t.repr} at parameter boundary: repr=${ref.show} name=${name.repr}"

@@ -284,6 +284,14 @@ object Pickler {
           }
         })
       }
+
+def toByteArray(buffer: ByteBuffer): Array[Byte] = {
+  val array = new Array[Byte](buffer.remaining())
+  buffer.duplicate().get(array)
+  array
+}
+
+      println(s"??? target => 0x${toByteArray(buffer).map(byte => f"$byte%02x").mkString(" ")}")
       $ptrMap += ($root -> ptr)
       ptr
     }
@@ -342,6 +350,15 @@ object Pickler {
     ) = '{
       val buffer = $bufferOfPointer($ptr, ${ Expr(mapping.sizeInBytes.toInt) })
       println(s"[bind]: update object  ${$root} <- $buffer(0x${$ptr.toHexString})")
+
+def toByteArray(buffer: ByteBuffer): Array[Byte] = {
+  val array = new Array[Byte](buffer.remaining())
+  buffer.duplicate().get(array)
+  array
+}
+
+      println(s">>> target => 0x${toByteArray(buffer).map(byte => f"$byte%02x").mkString(" ")}")
+
       ${
         Varargs(
           mapping.members.map { m =>
@@ -367,6 +384,9 @@ object Pickler {
 
               case (_, p.Type.Struct(name, _, _, _)) =>
                 val structPtr = readPrim('buffer, memberOffset, p.Type.IntS64).asExprOf[Long]
+
+
+
                 if (m.mut) {
                   q.Assign(
                     m.select(root.asTerm),

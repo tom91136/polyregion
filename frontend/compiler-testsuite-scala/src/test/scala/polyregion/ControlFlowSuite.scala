@@ -28,7 +28,7 @@ class ControlFlowSuite extends BaseSuite {
 //     }
 //   }
 
-// //  testExpr("stmts") { 1; 2 }: @nowarn
+ testExpr("stmts") { 1; 42 }: @nowarn
 
 //   testExpr("const-if-true") {
 //     if (true) 42 else 69
@@ -64,14 +64,14 @@ class ControlFlowSuite extends BaseSuite {
 //     }
 //   }
 
-//   testExpr("ref-if-if-true") {
-//     val x = true
-//     val y = true
-//     if (x) if (y) 1 else 2 else 3
-//   }
+  // testExpr("ref-if-if-true") {
+  //   val x = true
+  //   val y = true
+  //   if (x) if (y) 1 else 2 else 3
+  // }
 
-  testExpr("const-if-if-true") {
-    if (true) if (true) 1 else 2 else 3
-  }
+  // testExpr("const-if-if-true") {
+  //   if (true) if (true) 1 else 2 else 3
+  // }
 
 }
