@@ -83,6 +83,26 @@ lazy val `runtime-scala` = project
   )
   .dependsOn(`binding-jvm`, compiler % Compile)
 
+lazy val ast = project
+  .settings(
+    commonSettings,
+    name                := "ast",
+    assembly / artifact := (assembly / artifact).value.withClassifier(Some("assembly")),
+    scalacOptions ++=
+      Seq("-Yretain-trees") ++     // XXX we need this so that the AST -> C++ conversion with partial ctors work
+        Seq("-Xmax-inlines", "80") // the AST has lots of leaf nodes and we use inline so bump the limit
+    ,
+    Compile / mainClass  := Some("polyregion.ast.Main"),
+    libraryDependencies ++= Seq(
+      "net.bytebuddy"  % "byte-buddy" % "1.15.5",
+      "com.lihaoyi"   %% "fansi"      % "0.5.0",
+      "com.lihaoyi"   %% "upickle"    % "4.0.2",
+      "com.lihaoyi"   %% "pprint"     % "0.9.0",
+      "org.typelevel" %% "cats-core"  % catsVersion
+    )
+  )
+  .dependsOn(`binding-jvm`)
+
 lazy val compiler = project
   .settings(
     commonSettings,
@@ -113,7 +133,7 @@ lazy val compiler = project
       }
     }
   )
-  .dependsOn(`binding-jvm`)
+  .dependsOn(`ast`)
 
 lazy val `compiler-testsuite-scala` = project
   .settings(

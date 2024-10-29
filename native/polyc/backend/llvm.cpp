@@ -1,15 +1,13 @@
 #include <iostream>
 #include <unordered_set>
 
-#include "aspartame/optional.hpp"
-#include "aspartame/string.hpp"
-#include "aspartame/unordered_map.hpp"
-#include "aspartame/vector.hpp"
-#include "aspartame/view.hpp"
+#include "aspartame/all.hpp"
 
 #include "ast.h"
 #include "llvm.h"
 #include "llvmc.h"
+
+#include "fmt/core.h"
 
 #include "llvm_amdgpu.h"
 #include "llvm_cpu.h"
@@ -17,17 +15,16 @@
 #include "llvm_opencl.h"
 
 #include "llvm/IR/Intrinsics.h"
-#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/TargetParser/Host.h"
-#include "llvm/Transforms/Scalar.h"
 
+using namespace aspartame;
 using namespace polyregion;
 using namespace polyregion::polyast;
 using namespace polyregion::backend;
-using namespace aspartame;
+using namespace polyregion::backend::details;
 
 template <typename T> static std::string llvm_tostring(const T *t) {
   std::string str;
@@ -36,188 +33,88 @@ template <typename T> static std::string llvm_tostring(const T *t) {
   return rso.str();
 }
 
-ValPtr LLVMBackend::AstTransformer::load(ValPtr rhs, llvm::Type *ty) {
-  if (ty->isPointerTy()) {
-    ValPtr spaceNormalisedRhs = rhs->getType()->getPointerAddressSpace() != GlobalAS ? B.CreateAddrSpaceCast(rhs, B.getPtrTy()) : rhs;
-    return B.CreateLoad(B.getPtrTy(), spaceNormalisedRhs);
-  } else return B.CreateLoad(ty, rhs);
-}
-
-ValPtr LLVMBackend::AstTransformer::store(ValPtr rhsVal, ValPtr lhsPtr) {
-  llvm::Type *rhsTy = rhsVal->getType();
-  if(rhsTy->isPointerTy() && rhsTy->getPointerAddressSpace() != lhsPtr->getType()->getPointerAddressSpace()){
-    return B.CreateStore( B.CreateAddrSpaceCast(rhsVal, lhsPtr->getType()), lhsPtr);
-  }else{
-    return B.CreateStore(rhsVal, lhsPtr);
-  }
-
-}
-
-ValPtr LLVMBackend::allocaAS(llvm::IRBuilder<> &B, llvm::Type *ty, unsigned int AS, const std::string &key) {
-  auto stackPtr = B.CreateAlloca(ty->isPointerTy() ? B.getPtrTy() : ty, AS, nullptr, key);
-  return AS != 0 ? B.CreateAddrSpaceCast(stackPtr, B.getPtrTy()) : stackPtr;
-}
-
-ValPtr LLVMBackend::sizeOf(llvm::IRBuilder<> &B, llvm::LLVMContext &C, llvm::Type *ptrTpe) {
-  // http://nondot.org/sabre/LLVMNotes/SizeOf-OffsetOf-VariableSizedStructs.txt
-  // we want
-  // %SizePtr = getelementptr %T, %T* null, i32 1
-  // %Size = ptrtoint %T* %SizePtr to i32
-  auto sizePtr = B.CreateGEP(                                          //
-      ptrTpe,                                                          //
-      llvm::ConstantPointerNull::get(llvm::PointerType::getUnqual(C)), //
-      llvm::ConstantInt::get(llvm::Type::getInt64Ty(C), 1),            //
-      "sizePtr"                                                        //
-  );
-  auto sizeVal = B.CreatePtrToInt(sizePtr, llvm::Type::getInt64Ty(C));
-  return sizeVal;
-}
-
-LLVMBackend::AstTransformer::AstTransformer(const LLVMBackend::Options &options, llvm::LLVMContext &c)
-    : options(options), C(c), targetHandler(TargetSpecificHandler::from(options.target)), stackVarPtrs(), structTypes(), functions(), B(C) {
-  // Work out what address space we're using for arguments
-  switch (options.target) {
-    case Target::x86_64:
-    case Target::AArch64:
-    case Target::ARM:
-      break; // CPUs default to generic so nothing to do here.
-      // For GPUs, any pointer passed in as args should be annotated global AS.
-      //             AMDGPU   |   NVVM
-      //      Generic (code)  0  Generic (code)
-      //       Global (Host)  1  Global
-      //        Region (GDS)  2  Internal Use
-      //         Local (LDS)  3  Shared
-      // Constant (Internal)  4  Constant
-      //             Private  5  Local
-    case Target::NVPTX64:
-      GlobalAS = 0; // When inspecting Clang's output, they don't explicitly annotate addrspace(1) for globals
-      LocalAS = 3;
-      AllocaAS = 0;
-      break;
-    case Target::AMDGCN:
-      GlobalAS = 0;
-      LocalAS = 3;
-      AllocaAS = 5;
-      break;
-    case Target::SPIRV32:
-    case Target::SPIRV64:
-      GlobalAS = 1;
-      LocalAS = 3;
-      AllocaAS = 0;
-      break;
-  }
-}
-
-std::unique_ptr<LLVMBackend::TargetSpecificHandler> LLVMBackend::TargetSpecificHandler::from(LLVMBackend::Target target) {
+std::unique_ptr<TargetSpecificHandler> TargetSpecificHandler::from(LLVMBackend::Target target) {
   switch (target) {
-    case Target::x86_64:  // fallthrough
-    case Target::AArch64: // fallthrough
-    case Target::ARM: return std::make_unique<CPUTargetSpecificHandler>();
-    case Target::NVPTX64: return std::make_unique<NVPTXTargetSpecificHandler>();
-    case Target::AMDGCN: return std::make_unique<AMDGPUTargetSpecificHandler>();
-    case Target::SPIRV32: // fallthrough
-    case Target::SPIRV64: return std::make_unique<OpenCLTargetSpecificHandler>();
+    case LLVMBackend::Target::x86_64: [[fallthrough]];
+    case LLVMBackend::Target::AArch64: [[fallthrough]];
+    case LLVMBackend::Target::ARM: return std::make_unique<CPUTargetSpecificHandler>();
+    case LLVMBackend::Target::NVPTX64: return std::make_unique<NVPTXTargetSpecificHandler>();
+    case LLVMBackend::Target::AMDGCN: return std::make_unique<AMDGPUTargetSpecificHandler>();
+    case LLVMBackend::Target::SPIRV32: [[fallthrough]];
+    case LLVMBackend::Target::SPIRV64: return std::make_unique<OpenCLTargetSpecificHandler>();
   }
 }
-LLVMBackend::TargetSpecificHandler::~TargetSpecificHandler() = default;
 
-ValPtr LLVMBackend::AstTransformer::invokeMalloc(llvm::Function *parent, ValPtr size) {
-  return B.CreateCall(mkExternalFn(parent, Type::Ptr(Type::IntS8(), {}, TypeSpace::Global()), "malloc", {Type::IntS64()}), size);
-}
+TargetSpecificHandler::~TargetSpecificHandler() = default;
 
-ValPtr LLVMBackend::AstTransformer::invokeAbort(llvm::Function *parent) {
-  return B.CreateCall(mkExternalFn(parent, Type::Nothing(), "abort", {}));
-}
-
-// the only unsigned type in PolyAst
-static bool isUnsigned(const Type::Any &tpe) {
+static bool isUnsigned(const Type::Any &tpe) { // the only unsigned type in PolyAst
   return tpe.is<Type::IntU8>() || tpe.is<Type::IntU16>() || tpe.is<Type::IntU32>() || tpe.is<Type::IntU64>();
 }
 
 static constexpr int64_t nIntMin(uint64_t bits) { return -(int64_t(1) << (bits - 1)); }
 static constexpr int64_t nIntMax(uint64_t bits) { return (int64_t(1) << (bits - 1)) - 1; }
 
-LLVMBackend::AstTransformer::StructInfo LLVMBackend::AstTransformer::mkStruct(const StructDef &def) {
-  std::vector<llvm::Type *> types;
-  StructMemberIndexTable table;
-  for (const auto &p : def.parents) {
-    if (auto it = structTypes.find(p); it != structTypes.end()) {
-      auto [parentDef, parentStructTpe, parentTable] = it->second;
-      types.push_back(parentStructTpe);
-      table[qualified(parentDef.name)] = types.size() - 1;
-      // for (const auto &[sym, idx] : parentTable) {
-      //   types.push_back(parentStructTpe->getElementType(idx));
-      //   table[sym] = types.size() - 1;
-      // }
-    } else throw std::logic_error("Unseen struct def in inheritance chain: " + repr(p));
-  }
-  for (const auto &m : def.members) {
-    types.push_back(mkTpe(m.named.tpe));
-    table[m.named.symbol] = types.size() - 1;
-  }
-//  if (types.empty()){ // As per C/C++, empty struct has a size of 1
-//    types.push_back(mkTpe(Type::IntS8()));
-//    table["zero_sized_struct_tag"] = types.size() - 1;
-//  }
+CodeGen::CodeGen(const LLVMBackend::Options &options, const std::string &moduleName)
+    : C(options), targetHandler(TargetSpecificHandler::from(options.target)), B(C.actual), M(moduleName, C.actual) {}
 
-  return {def, llvm::StructType::create(C, types, qualified(def.name)), table};
+llvm::Function *CodeGen::resolveExtFn(const Type::Any &rtn, const std::string &name, const std::vector<Type::Any> &args) {
+  return functions ^= get_or_emplace(Signature(name, args, rtn), [&](auto &sig) -> llvm::Function * {
+           auto tpe = llvm::FunctionType::get(
+               /*Result*/ C.resolveType(rtn, structTypes, true),
+               /*Params*/ args ^ map([&](auto &t) { return C.resolveType(t, structTypes, true); }),
+               /*isVarArg*/ false);
+           auto fn = llvm::Function::Create(tpe, llvm::Function::ExternalLinkage, name, M);
+           return fn;
+         });
 }
 
-llvm::Type *LLVMBackend::AstTransformer::mkTpe(const Type::Any &tpe, bool functionBoundary) {                   //
-  return tpe.match_total(                                                                                       //
-      [&](const Type::Float16 &x) -> llvm::Type * { return llvm::Type::getHalfTy(C); },                         //
-      [&](const Type::Float32 &x) -> llvm::Type * { return llvm::Type::getFloatTy(C); },                        //
-      [&](const Type::Float64 &x) -> llvm::Type * { return llvm::Type::getDoubleTy(C); },                       //
-      [&](const Type::Bool1 &x) -> llvm::Type * { return llvm::Type::getIntNTy(C, functionBoundary ? 8 : 1); }, //
+ValPtr CodeGen::invokeMalloc(ValPtr size) {
+  return B.CreateCall(resolveExtFn(Type::Ptr(Type::IntS8(), {}, TypeSpace::Global()), "malloc", {Type::IntS64()}), size);
+}
+ValPtr CodeGen::invokeAbort() { return B.CreateCall(resolveExtFn(Type::Nothing(), "abort", {})); }
 
-      [&](const Type::IntU8 &x) -> llvm::Type * { return llvm::Type::getInt8Ty(C); },   //
-      [&](const Type::IntU16 &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); }, //
-      [&](const Type::IntU32 &x) -> llvm::Type * { return llvm::Type::getInt32Ty(C); }, //
-      [&](const Type::IntU64 &x) -> llvm::Type * { return llvm::Type::getInt64Ty(C); }, //
-
-      [&](const Type::IntS8 &x) -> llvm::Type * { return llvm::Type::getInt8Ty(C); },   //
-      [&](const Type::IntS16 &x) -> llvm::Type * { return llvm::Type::getInt16Ty(C); }, //
-      [&](const Type::IntS32 &x) -> llvm::Type * { return llvm::Type::getInt32Ty(C); }, //
-      [&](const Type::IntS64 &x) -> llvm::Type * { return llvm::Type::getInt64Ty(C); }, //
-
-      [&](const Type::Unit0 &x) -> llvm::Type * { return llvm::Type::getVoidTy(C); },   //
-      [&](const Type::Nothing &x) -> llvm::Type * { return llvm::Type::getVoidTy(C); }, //
-      [&](const Type::Struct &x) -> llvm::Type * {
-        return structTypes ^ get(x.name) ^
-               fold([](auto &info) { return info.tpe; },
-                    [&]() -> llvm::StructType * {
-                      auto pool = structTypes | values() | mk_string("\n", "\n", "\n", [](auto &info) {
-                                    return " -> " + repr(info.def) + ", IR=" + to_string(info.tpe);
-                                  });
-                      throw std::logic_error("Unseen struct def: " + to_string(x) + ", currently in-scope structs:" + pool);
-                    });
-      }, //
-      [&](const Type::Ptr &x) -> llvm::Type * {
-        if (x.length) return llvm::ArrayType::get(mkTpe(x.component), *x.length);
-        else {
-          //          return B.getPtrTy();
-          return B.getPtrTy(x.space.match_total(                    //
-              [&](const TypeSpace::Local &_) { return LocalAS; },   //
-              [&](const TypeSpace::Global &_) { return GlobalAS; }) //
-          );
-        }
-
-        //        // These two types promote to a byte when stored in an array
-        //        if (HOLDS(Type::Bool1, x.component) || HOLDS(Type::Unit0, x.component)) {
-        //          return llvm::Type::getInt8Ty(C)->getPointerTo(AS);
-        //        } else {
-        //          auto comp = mkTpe(x.component);
-        //          return comp->isPointerTy() ? comp : comp->getPointerTo(AS);
-        //        }
-      },                                                                               //
-      [&](const Type::Var &x) -> llvm::Type * { throw std::logic_error("type var"); }, //
-      [&](const Type::Exec &x) -> llvm::Type * { throw std::logic_error("exec"); }
-
-  );
+ValPtr CodeGen::extFn1(const std::string &name, const AnyType &rtn, const AnyExpr &arg) { //
+  const auto fn_ = resolveExtFn(rtn, name, {arg.tpe()});
+  if (C.options.target == LLVMBackend::Target::SPIRV32 || C.options.target == LLVMBackend::Target::SPIRV64) {
+    fn_->setCallingConv(llvm::CallingConv::SPIR_FUNC);
+  }
+  if (!rtn.is<Type::Unit0>()) {
+    fn_->addFnAttr(llvm::Attribute::WillReturn);
+  }
+  const auto call = B.CreateCall(fn_, mkExprVal(arg));
+  call->setCallingConv(fn_->getCallingConv());
+  return call;
+}
+ValPtr CodeGen::extFn2(const std::string &name, const AnyType &rtn, const AnyExpr &lhs,
+                       const AnyExpr &rhs) { //
+  const auto fn_ = resolveExtFn(rtn, name, {lhs.tpe(), rhs.tpe()});
+  if (C.options.target == LLVMBackend::Target::SPIRV32 || C.options.target == LLVMBackend::Target::SPIRV64) {
+    fn_->setCallingConv(llvm::CallingConv::SPIR_FUNC);
+    fn_->addFnAttr(llvm::Attribute::NoBuiltin);
+    fn_->addFnAttr(llvm::Attribute::Convergent);
+  }
+  const auto call = B.CreateCall(fn_, {mkExprVal(lhs), mkExprVal(rhs)});
+  call->setCallingConv(fn_->getCallingConv());
+  return call;
+}
+ValPtr CodeGen::intr0(const llvm::Intrinsic::ID id) { //
+  const auto callee = llvm::Intrinsic::getDeclaration(&M, id, {});
+  return B.CreateCall(callee);
+}
+ValPtr CodeGen::intr1(const llvm::Intrinsic::ID id, const AnyType &overload, const AnyExpr &arg) { //
+  const auto callee = llvm::Intrinsic::getDeclaration(&M, id, C.resolveType(overload, structTypes));
+  return B.CreateCall(callee, mkExprVal(arg));
+}
+ValPtr CodeGen::intr2(const llvm::Intrinsic::ID id, const AnyType &overload, //
+                      const AnyExpr &lhs, const AnyExpr &rhs) {              //
+  // XXX the overload type here is about the overloading of intrinsic names, not about the parameter types
+  // i.e., f32 is for foo.f32(float %a, float %b, float %c)
+  const auto callee = llvm::Intrinsic::getDeclaration(&M, id, C.resolveType(overload, structTypes));
+  return B.CreateCall(callee, {mkExprVal(lhs), mkExprVal(rhs)});
 }
 
-ValPtr LLVMBackend::AstTransformer::findStackVar(const Named &named) {
-  if (named.tpe.is<Type::Unit0>()) return mkTermVal(Term::Unit0Const());
+ValPtr CodeGen::findStackVar(const Named &named) {
+  if (named.tpe.is<Type::Unit0>()) return mkExprVal(Expr::Unit0Const());
   //  check the LUT table for known variables defined by var or brought in scope by parameters
   return stackVarPtrs ^ get(named.symbol) ^
          fold(
@@ -236,9 +133,9 @@ ValPtr LLVMBackend::AstTransformer::findStackVar(const Named &named) {
              });
 }
 
-ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
+ValPtr CodeGen::mkSelectPtr(const Expr::Select &select) {
 
-  auto fail = [&]() { return " (part of the select expression " + to_string(select) + ")"; };
+  auto fail = [&] { return " (part of the select expression " + to_string(select) + ")"; };
 
   auto structTypeOf = [&](const Type::Any &tpe) -> StructInfo {
     auto findTy = [&](const Type::Struct &s) -> StructInfo {
@@ -271,17 +168,15 @@ ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
     for (auto &path : tail) {
       auto selectFinal = [&](llvm::StructType *structTy, size_t idx, bool conditionalLoad = true, const std::string &suffix = "") {
         if (auto p = tpe.get<Type::Ptr>(); conditionalLoad && p && !p->length) {
-          root = B.CreateInBoundsGEP(
-              structTy, load(root, B.getPtrTy()),
-              {//
-               llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), idx)},
-              qualified(select) + "_select_ptr_" + suffix);
+          root = B.CreateInBoundsGEP(structTy, C.load(B, root, B.getPtrTy()),
+                                     {//
+                                      llvm::ConstantInt::get(C.i32Ty(), 0), llvm::ConstantInt::get(C.i32Ty(), idx)},
+                                     qualified(select) + "_select_ptr_" + suffix);
         } else {
-          root = B.CreateInBoundsGEP(
-              structTy, root,
-              {//
-               llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), idx)},
-              qualified(select) + "_select_ptr_" + suffix);
+          root = B.CreateInBoundsGEP(structTy, root,
+                                     {//
+                                      llvm::ConstantInt::get(C.i32Ty(), 0), llvm::ConstantInt::get(C.i32Ty(), idx)},
+                                     qualified(select) + "_select_ptr_" + suffix);
         }
       };
       auto [s, structTy, table] = structTypeOf(tpe);
@@ -330,105 +225,38 @@ ValPtr LLVMBackend::AstTransformer::mkSelectPtr(const Term::Select &select) {
   }
 }
 
-// Opt<Pair<std::vector<llvm::StructType *>, size_t>> LLVMBackend::AstTransformer::findSymbolInHeirachy( //
-//     const Sym &structName, const std::string &member, const std::vector<llvm::StructType *> &xs) const {
-//   if (auto it = structTypes.find(structName); it != structTypes.end()) {
-//     auto [sdef, structTy, table] = it->second;
-//     if (auto idx = get_opt(table, member); idx) {
-//       return {std::pair{xs, *idx}};
-//     } else {
-//       if (sdef.parents.empty()) return {};
-//       auto ys = xs;
-//       ys.push_back(structTy);
-//       for (auto parent : sdef.parents) {
-//         if (auto x = findSymbolInHeirachy(parent, member, ys); x) return x;
-//       }
-//       return {};
-//     }
-//   } else {
-//     throw std::logic_error( "Unseen struct type " + to_string(structName) + " in heirachy");
-//   }
-// }
-
-template <typename T>
-Opt<Pair<std::vector<llvm::StructType *>, T>> LLVMBackend::AstTransformer::findSymbolInHeirachy( //
-    const Sym &structName, std::function<Opt<T>(StructDef, llvm::StructType *, StructMemberIndexTable)> f,
-    const std::vector<llvm::StructType *> &xs) const {
-  if (auto it = structTypes.find(structName); it != structTypes.end()) {
-    auto [sdef, structTy, table] = it->second;
-    if (auto x = f(sdef, structTy, table); x) {
-      return {std::pair{xs, *x}};
-    } else {
-      if (sdef.parents.empty()) return {};
-      auto ys = xs;
-      ys.push_back(structTy);
-      for (const auto &parent : sdef.parents) {
-        if (auto x = findSymbolInHeirachy(parent, f, ys); x) return x;
-      }
-      return {};
-    }
-  } else {
-    throw std::logic_error("Unseen struct type " + to_string(structName) + " in heirachy");
-  }
-}
-
-ValPtr LLVMBackend::AstTransformer::mkTermVal(const Term::Any &ref) {
+ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
   using llvm::ConstantFP;
   using llvm::ConstantInt;
-  return ref.match_total( //
-      [&](const Term::Select &x) -> ValPtr {
-        if (x.tpe.is<Type::Unit0>()) return mkTermVal(Term::Unit0Const());
-        if (auto ptr = x.tpe.get<Type::Ptr>(); ptr && ptr->length) return mkSelectPtr(x);
-        else return load(mkSelectPtr(x), mkTpe(x.tpe));
-      },
-      [&](const Term::Poison &x) -> ValPtr {
-        if (auto tpe = mkTpe(x.tpe); llvm::isa<llvm::PointerType>(tpe)) {
-          return llvm::ConstantPointerNull::get(static_cast<llvm::PointerType *>(tpe));
-        } else {
-          throw BackendException("unimplemented");
-        }
-      },
-      [&](const Term::Unit0Const &x) -> ValPtr {
-        // this only exists to represent the singleton
-        return ConstantInt::get(llvm::Type::getInt1Ty(C), 0);
-      },
-      [&](const Term::Bool1Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt1Ty(C), x.value); },
-
-      [&](const Term::IntU8Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt8Ty(C), x.value); },
-      [&](const Term::IntU16Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt16Ty(C), x.value); },
-      [&](const Term::IntU32Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt32Ty(C), x.value); },
-      [&](const Term::IntU64Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt64Ty(C), x.value); },
-
-      [&](const Term::IntS8Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt8Ty(C), x.value); },
-      [&](const Term::IntS16Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt16Ty(C), x.value); },
-      [&](const Term::IntS32Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt32Ty(C), x.value); },
-      [&](const Term::IntS64Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt64Ty(C), x.value); },
-
-      [&](const Term::Float16Const &x) -> ValPtr { return ConstantFP::get(llvm::Type::getHalfTy(C), x.value); },
-      [&](const Term::Float32Const &x) -> ValPtr { return ConstantFP::get(llvm::Type::getFloatTy(C), x.value); },
-      [&](const Term::Float64Const &x) -> ValPtr { return ConstantFP::get(llvm::Type::getDoubleTy(C), x.value); });
-}
-
-llvm::Function *LLVMBackend::AstTransformer::mkExternalFn(llvm::Function *parent, const Type::Any &rtn, const std::string &name,
-                                                          const std::vector<Type::Any> &args) {
-  return functions ^= get_or_emplace(InvokeSignature(Sym({name}), {}, {}, args, {}, rtn), [&](auto &sig) -> llvm::Function * {
-           auto llvmArgs = args ^ map([&](auto t) { return mkTpe(t); });
-           auto ft = llvm::FunctionType::get(mkTpe(rtn, true), llvmArgs, false);
-           auto fn = llvm::Function::Create(ft, llvm::Function::ExternalLinkage, name, parent->getParent());
-           return fn;
-         });
-}
-
-ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Function *fn, const std::string &key) {
-
   return expr.match_total( //
-      [&](const Expr::SpecOp &x) -> ValPtr { return targetHandler->mkSpecVal(*this, fn, x); },
-      [&](const Expr::MathOp &x) -> ValPtr { return targetHandler->mkMathVal(*this, fn, x); },
+
+      [&](const Expr::Float16Const &x) -> ValPtr { return ConstantFP::get(llvm::Type::getHalfTy(C.actual), x.value); },
+      [&](const Expr::Float32Const &x) -> ValPtr { return ConstantFP::get(llvm::Type::getFloatTy(C.actual), x.value); },
+      [&](const Expr::Float64Const &x) -> ValPtr { return ConstantFP::get(llvm::Type::getDoubleTy(C.actual), x.value); },
+
+      [&](const Expr::IntU8Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt8Ty(C.actual), x.value); },
+      [&](const Expr::IntU16Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt16Ty(C.actual), x.value); },
+      [&](const Expr::IntU32Const &x) -> ValPtr { return ConstantInt::get(C.i32Ty(), x.value); },
+      [&](const Expr::IntU64Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt64Ty(C.actual), x.value); },
+
+      [&](const Expr::IntS8Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt8Ty(C.actual), x.value); },
+      [&](const Expr::IntS16Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt16Ty(C.actual), x.value); },
+      [&](const Expr::IntS32Const &x) -> ValPtr { return ConstantInt::get(C.i32Ty(), x.value); },
+      [&](const Expr::IntS64Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt64Ty(C.actual), x.value); },
+
+      [&](const Expr::Unit0Const &x) -> ValPtr {
+        // this only exists to represent the singleton
+        return ConstantInt::get(llvm::Type::getInt1Ty(C.actual), 0);
+      },
+      [&](const Expr::Bool1Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt1Ty(C.actual), x.value); },
+
+      [&](const Expr::SpecOp &x) -> ValPtr { return targetHandler->mkSpecVal(*this, x); },
+      [&](const Expr::MathOp &x) -> ValPtr { return targetHandler->mkMathVal(*this, x); },
       [&](const Expr::IntrOp &x) -> ValPtr {
         auto intr = x.op;
         return intr.match_total( //
             [&](const Intr::BNot &v) -> ValPtr { return unaryExpr(expr, v.x, v.tpe, [&](auto x) { return B.CreateNot(x); }); },
-            [&](const Intr::LogicNot &v) -> ValPtr { return B.CreateNot(mkTermVal(v.x)); },
+            [&](const Intr::LogicNot &v) -> ValPtr { return B.CreateNot(mkExprVal(v.x)); },
             [&](const Intr::Pos &v) -> ValPtr {
               return unaryNumOp(expr, v.x, v.tpe, [&](auto x) { return x; }, [&](auto x) { return x; });
             },
@@ -490,8 +318,8 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
             [&](const Intr::BZSR &v) -> ValPtr {
               return binaryExpr(expr, v.x, v.y, v.tpe, [&](auto l, auto r) { return B.CreateLShr(l, r); });
             },                                                                                                     //
-            [&](const Intr::LogicAnd &v) -> ValPtr { return B.CreateLogicalAnd(mkTermVal(v.x), mkTermVal(v.y)); }, //
-            [&](const Intr::LogicOr &v) -> ValPtr { return B.CreateLogicalOr(mkTermVal(v.x), mkTermVal(v.y)); },   //
+            [&](const Intr::LogicAnd &v) -> ValPtr { return B.CreateLogicalAnd(mkExprVal(v.x), mkExprVal(v.y)); }, //
+            [&](const Intr::LogicOr &v) -> ValPtr { return B.CreateLogicalOr(mkExprVal(v.x), mkExprVal(v.y)); },   //
             [&](const Intr::LogicEq &v) -> ValPtr {
               return binaryNumOp(
                   expr, v.x, v.y, v.x.tpe(), //
@@ -523,10 +351,24 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
                   [&](auto l, auto r) { return B.CreateICmpSGT(l, r); }, [&](auto l, auto r) { return B.CreateFCmpOGT(l, r); });
             });
       },
+
+      [&](const Expr::Select &x) -> ValPtr {
+        if (x.tpe.is<Type::Unit0>()) return mkExprVal(Expr::Unit0Const());
+        if (auto ptr = x.tpe.get<Type::Ptr>(); ptr && ptr->length) return mkSelectPtr(x);
+        else return load(mkSelectPtr(x), mkTpe(x.tpe));
+      },
+      [&](const Expr::Poison &x) -> ValPtr {
+        if (auto tpe = mkTpe(x.tpe); llvm::isa<llvm::PointerType>(tpe)) {
+          return llvm::ConstantPointerNull::get(static_cast<llvm::PointerType *>(tpe));
+        } else {
+          throw BackendException("unimplemented");
+        }
+      },
+
       [&](const Expr::Cast &x) -> ValPtr {
         // we only allow widening or narrowing of integral and fractional types
         // pointers are not allowed to participate on either end
-        auto from = mkTermVal(x.from);
+        auto from = mkExprVal(x.from);
         auto fromTpe = mkTpe(x.from.tpe());
         auto toTpe = mkTpe(x.as);
         enum class NumKind { Fractional, Integral };
@@ -570,11 +412,10 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
                     }
                   }
 
-                  from = B.CreateInBoundsGEP(
-                      chain, from,
-                      {//
-                       llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), N)},
-                      "_upcast_ptr");
+                  from = B.CreateInBoundsGEP(chain, from,
+                                             {//
+                                              llvm::ConstantInt::get(C.i32Ty(), 0), llvm::ConstantInt::get(C.i32Ty(), N)},
+                                             "_upcast_ptr");
                 }
               }
 
@@ -635,7 +476,6 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
           return B.CreateFPCast(from, toTpe, "fractional_cast");
         } else throw std::logic_error("unhandled cast");
       },
-      [&](const Expr::Alias &x) -> ValPtr { return mkTermVal(x.ref); },
       [&](const Expr::Invoke &x) -> ValPtr {
         std::vector<Term::Any> allArgs;
         if (x.receiver) allArgs.push_back((*x.receiver));
@@ -645,7 +485,7 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
           if (!arg.tpe().is<Type::Unit0>()) allArgs.push_back(arg);
 
         auto paramTerms = allArgs ^ map([&](auto &&term) {
-                            auto val = mkTermVal(term);
+                            auto val = mkExprVal(term);
                             return term.tpe().template is<Type::Bool1>() ? B.CreateZExt(val, mkTpe(Type::Bool1(), true)) : val;
                           });
 
@@ -659,7 +499,7 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
           auto call = B.CreateCall(fn->second, paramTerms);
           // in case the fn returns a unit (which is mapped to void), we just return the constant
           if (x.rtn.is<Type::Unit0>()) {
-            return mkTermVal(Term::Unit0Const());
+            return mkExprVal(Term::Unit0Const());
           } else return call;
         } else {
 
@@ -670,28 +510,28 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
         }
       },
       [&](const Expr::Index &x) -> ValPtr {
-        if (auto lhs = x.lhs.get<Term::Select>(); lhs) {
+        if (auto lhs = x.lhs.get<Expr::Select>()) {
           if (auto arrTpe = lhs->tpe.get<Type::Ptr>(); arrTpe) {
 
             if (arrTpe->component.is<Type::Unit0>()) {
               // Still call GEP so that memory access and OOB effects are still present.
-              auto val = mkTermVal(Term::Unit0Const());
+              auto val = mkExprVal(Term::Unit0Const());
               B.CreateInBoundsGEP(val->getType(),                  //
-                                  mkTermVal(*lhs),                 //
-                                  mkTermVal(x.idx), key + "_ptr"); //
+                                  mkExprVal(*lhs),                 //
+                                  mkExprVal(x.idx), key + "_ptr"); //
               return val;
             }
             if (arrTpe->length) {
               auto ty = mkTpe(*arrTpe);
               auto ptr = B.CreateInBoundsGEP(ty,              //
-                                             mkTermVal(*lhs), //
-                                             {llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), mkTermVal(x.idx)}, key + "_idx_ptr");
+                                             mkExprVal(*lhs), //
+                                             {llvm::ConstantInt::get(C.i32Ty(), 0), mkExprVal(x.idx)}, key + "_idx_ptr");
               return load(ptr, mkTpe(arrTpe->component));
             } else {
               auto ty = mkTpe(arrTpe->component);
               auto ptr = B.CreateInBoundsGEP(ty,              //
-                                             mkTermVal(*lhs), //
-                                             mkTermVal(x.idx), key + "_idx_ptr");
+                                             mkExprVal(*lhs), //
+                                             mkExprVal(x.idx), key + "_idx_ptr");
               if (arrTpe->component.is<Type::Bool1>()) { // Narrow from i8 to i1
                 return B.CreateICmpNE(load(ptr, ty), llvm::ConstantInt::get(llvm::Type::getInt1Ty(C), 0, true));
               } else {
@@ -713,20 +553,19 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
       },
 
       [&](const Expr::RefTo &x) -> ValPtr {
-        if (auto lhs = x.lhs.get<Term::Select>(); lhs) {
+        if (auto lhs = x.lhs.get<Expr::Select>()) {
           if (auto arrTpe = lhs->tpe.get<Type::Ptr>(); arrTpe) { // taking reference of an index in an array
-            auto offset = x.idx ? mkTermVal(*x.idx) : llvm::ConstantInt::get(llvm::Type::getInt64Ty(C), 0, true);
+            auto offset = x.idx ? mkExprVal(*x.idx) : llvm::ConstantInt::get(llvm::Type::getInt64Ty(C), 0, true);
             if (auto nestedArrTpe = arrTpe->component.get<Type::Ptr>(); nestedArrTpe && nestedArrTpe->length) {
               auto ty = arrTpe->component.is<Type::Unit0>() ? llvm::Type::getInt8Ty(C) : mkTpe(arrTpe->component);
               return B.CreateInBoundsGEP(ty,              //
-                                         mkTermVal(*lhs), //
-                                         {llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), offset},
-                                         key + "_ref_to_" + llvm_tostring(ty));
+                                         mkExprVal(*lhs), //
+                                         {llvm::ConstantInt::get(C.i32Ty(), 0), offset}, key + "_ref_to_" + llvm_tostring(ty));
 
             } else {
               auto ty = arrTpe->component.is<Type::Unit0>() ? llvm::Type::getInt8Ty(C) : mkTpe(arrTpe->component);
               return B.CreateInBoundsGEP(ty,              //
-                                         mkTermVal(*lhs), //
+                                         mkExprVal(*lhs), //
                                          offset, key + "_ref_to_ptr");
             }
           } else { // taking reference of a var
@@ -742,7 +581,7 @@ ValPtr LLVMBackend::AstTransformer::mkExprVal(const Expr::Any &expr, llvm::Funct
 
       [&](const Expr::Alloc &x) -> ValPtr { //
         auto componentTpe = B.getPtrTy(0);
-        auto size = mkTermVal(x.size);
+        auto size = mkExprVal(x.size);
         auto elemSize = sizeOf(B, C, componentTpe);
         auto ptr = invokeMalloc(fn, B.CreateMul(B.CreateIntCast(size, mkTpe(Type::IntS64()), true), elemSize));
         return B.CreateBitCast(ptr, componentTpe);
@@ -759,7 +598,7 @@ static bool canAssign(Type::Any lhs, Type::Any rhs) {
   return false;
 }
 
-LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt, llvm::Function *fn, Opt<WhileCtx> whileCtx = {}) {
+CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, Opt<WhileCtx> whileCtx = {}) {
 
   //  // XXX bool is i8 where non-zero values are true,
   //  //   `br` only takes i1 as the first arg, so we do the appropriate comparison now
@@ -791,14 +630,14 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
 
         if (x.name.tpe.is<Type::Unit0>()) {
           // Unit0 declaration, discard declaration but keep RHS effect.
-          if (x.expr) mkExprVal(*x.expr, fn, x.name.symbol + "_var_rhs");
+          if (x.expr) mkExprVal(*x.expr, x.name.symbol + "_var_rhs");
         } else {
           auto tpe = mkTpe(x.name.tpe);
-          auto stackPtr = allocaAS(B, tpe, AllocaAS, x.name.symbol + "_stack_ptr");
+          auto stackPtr = C.allocaAS(B, tpe, C.AllocaAS, x.name.symbol + "_stack_ptr");
           stackVarPtrs.emplace(x.name.symbol, Pair<Type::Any, llvm::Value *>{x.name.tpe, stackPtr});
           if (x.expr) {
-            auto rhs = mkExprVal(*x.expr, fn, x.name.symbol + "_var_rhs");
-            store(rhs, stackPtr); //
+            const auto rhs = mkExprVal(*x.expr, x.name.symbol + "_var_rhs");
+            const auto _ = C.store(B, rhs, stackPtr); //
           }
         }
         return BlockKind::Normal;
@@ -807,25 +646,25 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
         // [T : ref]        =>> t   := &(rhs:T) ; lut += t
         // [T : ref {u: U}] =>> t.u := &(rhs:U)
         // [T : val]        =>> t   :=   rhs:T
-        if (auto lhs = x.name.get<Term::Select>(); lhs) {
+        if (auto lhs = x.name.get<Expr::Select>(); lhs) {
           if (x.expr.tpe() != lhs->tpe) {
             throw std::logic_error("Semantic error: name type (" + to_string(x.expr.tpe()) + ") and rhs expr (" + to_string(lhs->tpe) +
                                    ") mismatch (" + repr(x) + ")");
           }
           if (lhs->tpe.is<Type::Unit0>()) return BlockKind::Normal;
-          auto rhs = mkExprVal(x.expr, fn, qualified(*lhs) + "_mut");
+          const auto rhs = mkExprVal(x.expr, qualified(*lhs) + "_mut");
           if (lhs->init.empty()) { // local var
-            auto stackPtr = findStackVar(lhs->last);
-            store(rhs, stackPtr);
+            const auto stackPtr = findStackVar(lhs->last);
+            const auto _ = C.store(B, rhs, stackPtr);
             // FIXME
           } else { // struct member select
-            store(rhs, mkSelectPtr(*lhs));
+            const auto _ = C.store(B, rhs, mkSelectPtr(*lhs));
           }
         } else throw std::logic_error("Semantic error: LHS of " + to_string(x) + " (mut) is not a select");
         return BlockKind::Normal;
       },
       [&](const Stmt::Update &x) -> BlockKind {
-        if (auto lhs = x.lhs.get<Term::Select>(); lhs) {
+        if (auto lhs = x.lhs.get<Expr::Select>(); lhs) {
           if (auto arrTpe = lhs->tpe.get<Type::Ptr>(); arrTpe) {
             auto rhs = x.value;
 
@@ -838,24 +677,24 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
               throw std::logic_error("Semantic error: array component type (" + to_string(arrTpe->component) + ") and rhs expr (" +
                                      to_string(rhs.tpe()) + ") mismatch (" + repr(x) + ")");
             } else {
-              auto dest = mkTermVal(*lhs);
+              auto dest = mkExprVal(*lhs);
               if (rhs.tpe().is<Type::Bool1>() || rhs.tpe().is<Type::Unit0>()) { // Extend from i1 to i8
                 auto ty = llvm::Type::getInt8Ty(C);
                 auto ptr = B.CreateInBoundsGEP( //
                     ty, dest,
-                    componentIsSizedArray ? llvm::ArrayRef<ValPtr>{llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), mkTermVal(x.idx)}
-                                          : llvm::ArrayRef<ValPtr>{mkTermVal(x.idx)},
+                    componentIsSizedArray ? llvm::ArrayRef<ValPtr>{llvm::ConstantInt::get(C.i32Ty(), 0), mkExprVal(x.idx)}
+                                          : llvm::ArrayRef<ValPtr>{mkExprVal(x.idx)},
                     qualified(*lhs) + "_update_ptr");
-                store(B.CreateIntCast(mkTermVal(rhs), ty, true), ptr);
+                const auto _ = C.store(B, B.CreateIntCast(mkExprVal(rhs), ty, true), ptr);
               } else {
 
                 auto ptr = B.CreateInBoundsGEP( //
                     mkTpe(rhs.tpe()), dest,     //
-                    componentIsSizedArray ? llvm::ArrayRef<ValPtr>{llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 0), mkTermVal(x.idx)}
-                                          : llvm::ArrayRef<ValPtr>{mkTermVal(x.idx)},
+                    componentIsSizedArray ? llvm::ArrayRef<ValPtr>{llvm::ConstantInt::get(C.i32Ty(), 0), mkExprVal(x.idx)}
+                                          : llvm::ArrayRef<ValPtr>{mkExprVal(x.idx)},
                     qualified(*lhs) + "_update_ptr" //
                 );                                  //
-                store(mkTermVal(rhs), ptr);
+                const auto _ = C.store(B, mkExprVal(rhs), ptr);
               }
             }
           } else {
@@ -866,9 +705,9 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
         return BlockKind::Normal;
       },
       [&](const Stmt::While &x) -> BlockKind {
-        auto loopTest = llvm::BasicBlock::Create(C, "loop_test", fn);
-        auto loopBody = llvm::BasicBlock::Create(C, "loop_body", fn);
-        auto loopExit = llvm::BasicBlock::Create(C, "loop_exit", fn);
+        const auto loopTest = llvm::BasicBlock::Create(C.actual, "loop_test", &fn);
+        const auto loopBody = llvm::BasicBlock::Create(C.actual, "loop_body", &fn);
+        const auto loopExit = llvm::BasicBlock::Create(C.actual, "loop_exit", &fn);
         WhileCtx ctx{.exit = loopExit, .test = loopTest};
         B.CreateBr(loopTest);
         {
@@ -877,7 +716,7 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
           for (auto &test : x.tests)
             kind = mkStmt(test, fn, {ctx});
           if (kind != BlockKind::Terminal) {
-            auto continue_ = mkTermVal(x.cond);
+            const auto continue_ = mkExprVal(x.cond);
             B.CreateCondBr(continue_, loopBody, loopExit);
           }
         }
@@ -891,21 +730,21 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
         B.SetInsertPoint(loopExit);
         return BlockKind::Terminal;
       },
-      [&](const Stmt::Break &x) -> BlockKind {
+      [&](const Stmt::Break &) -> BlockKind {
         if (whileCtx) B.CreateBr(whileCtx->exit);
         else throw std::logic_error("orphaned break!");
         return BlockKind::Normal;
       }, //
-      [&](const Stmt::Cont &x) -> BlockKind {
+      [&](const Stmt::Cont &) -> BlockKind {
         if (whileCtx) B.CreateBr(whileCtx->test);
         else throw std::logic_error("orphaned cont!");
         return BlockKind::Normal;
       }, //
       [&](const Stmt::Cond &x) -> BlockKind {
-        auto condTrue = llvm::BasicBlock::Create(C, "cond_true", fn);
-        auto condFalse = llvm::BasicBlock::Create(C, "cond_false", fn);
-        auto condExit = llvm::BasicBlock::Create(C, "cond_exit", fn);
-        B.CreateCondBr(mkExprVal(x.cond, fn, "cond"), condTrue, condFalse);
+        const auto condTrue = llvm::BasicBlock::Create(C.actual, "cond_true", &fn);
+        const auto condFalse = llvm::BasicBlock::Create(C.actual, "cond_false", &fn);
+        const auto condExit = llvm::BasicBlock::Create(C.actual, "cond_exit", &fn);
+        B.CreateCondBr(mkExprVal(x.cond, "cond"), condTrue, condFalse);
         {
           B.SetInsertPoint(condTrue);
           auto kind = BlockKind::Normal;
@@ -929,18 +768,17 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
         }
       },
       [&](const Stmt::Return &x) -> BlockKind {
-        auto rtnTpe = x.value.tpe();
-        if (rtnTpe.is<Type::Unit0>()) {
+        if (auto rtnTpe = x.value.tpe(); rtnTpe.is<Type::Unit0>()) {
           B.CreateRetVoid();
         } else if (rtnTpe.is<Type::Nothing>()) {
           B.CreateUnreachable();
         } else {
-          auto expr = mkExprVal(x.value, fn, "return");
+          const auto expr = mkExprVal(x.value, "return");
           if (rtnTpe.is<Type::Bool1>()) {
             // Extend from i1 to i8
-            B.CreateRet(B.CreateIntCast(expr, llvm::Type::getInt8Ty(C), true));
+            B.CreateRet(B.CreateIntCast(expr, llvm::Type::getInt8Ty(C.actual), true));
           } else if (auto ptr = rtnTpe.get<Type::Ptr>(); ptr && ptr->length) {
-            B.CreateRet(load(expr, mkTpe(rtnTpe)));
+            B.CreateRet(C.load(B, expr, mkTpe(rtnTpe)));
           } else {
             B.CreateRet(expr);
           }
@@ -949,32 +787,7 @@ LLVMBackend::BlockKind LLVMBackend::AstTransformer::mkStmt(const Stmt::Any &stmt
       });
 }
 
-void LLVMBackend::AstTransformer::addDefs(const std::vector<StructDef> &defs) {
-  // TODO handle recursive defs
-  std::unordered_set<StructDef> defsWithDependencies(defs.begin(), defs.end());
-  while (!defsWithDependencies.empty()) {
-    std::vector<StructDef> zeroDeps;
-    std::copy_if( //
-        defsWithDependencies.begin(), defsWithDependencies.end(), std::back_inserter(zeroDeps), [&](auto &def) {
-          bool noInheritanceDependency =
-              std::all_of(def.parents.begin(), def.parents.end(), [&](auto &p) { return structTypes.find(p) != structTypes.end(); });
-          bool noMemberDependencies = std::all_of(def.members.begin(), def.members.end(), [&](auto &m) {
-            if (auto s = m.named.tpe.template get<Type::Struct>(); s) return structTypes.find(s->name) != structTypes.end();
-            else return true;
-          });
-          return noMemberDependencies && noInheritanceDependency;
-        });
-    if (!zeroDeps.empty()) {
-      for (auto &r : zeroDeps) {
-        auto v = structTypes.emplace(r.name, mkStruct(r));
-        defsWithDependencies.erase(r);
-      }
-    } else
-      throw std::logic_error("Recursive defs cannot be resolved: " + (zeroDeps ^ mk_string(",", [](auto &r) { return to_string(r); })));
-  }
-}
-
-std::vector<Pair<Sym, llvm::StructType *>> LLVMBackend::AstTransformer::getStructTypes() const {
+std::vector<Pair<Sym, llvm::StructType *>> CodeGen::getStructTypes() const {
   return structTypes | map([](auto &k, auto &v) { return std::pair{k, v.tpe}; }) | to_vector();
 }
 
@@ -992,7 +805,7 @@ static std::vector<Arg> collectFnDeclarationNames(const Function &f) {
   return allArgs;
 }
 
-void LLVMBackend::AstTransformer::addFn(llvm::Module &mod, const Function &f, bool entry) {
+void CodeGen::addFn(llvm::Module &mod, const Function &f, bool entry) {
 
   auto args = collectFnDeclarationNames(f);
   auto llvmArgTpes = args ^ map([&](auto &&arg) { return mkTpe(arg.named.tpe, true); });
@@ -1039,10 +852,10 @@ void LLVMBackend::AstTransformer::addFn(llvm::Module &mod, const Function &f, bo
         mod.getOrInsertNamedMetadata("nvvm.annotations")
             ->addOperand(llvm::MDNode::get(C, // XXX the attribute name must be "kernel" here and not the function name!
                                            {llvm::ValueAsMetadata::get(fn), llvm::MDString::get(C, "kernel"),
-                                            llvm::ValueAsMetadata::get(llvm::ConstantInt::get(llvm::Type::getInt32Ty(C), 1))}));
+                                            llvm::ValueAsMetadata::get(llvm::ConstantInt::get(C.i32Ty(), 1))}));
         break;
       case Target::AMDGCN:
-        if (f.kind == FunctionKind::Exported()) {
+        if (f.kind == FunctionAttr::Exported()) {
           fn->setCallingConv(llvm::CallingConv::AMDGPU_KERNEL);
         }
         break;
@@ -1129,7 +942,7 @@ void LLVMBackend::AstTransformer::addFn(llvm::Module &mod, const Function &f, bo
                     fn);
 }
 
-Pair<Opt<std::string>, std::string> LLVMBackend::AstTransformer::transform(llvm::Module &mod, const Program &program) {
+Pair<Opt<std::string>, std::string> CodeGen::transform(llvm::Module &mod, const Program &program) {
 
   transform(mod, program.entry);
   for (auto &f : program.functions)
@@ -1149,7 +962,7 @@ Pair<Opt<std::string>, std::string> LLVMBackend::AstTransformer::transform(llvm:
   }
 }
 
-void LLVMBackend::AstTransformer::transform(llvm::Module &mod, const Function &fnTree) {
+void CodeGen::transform(llvm::Module &mod, const Function &fnTree) {
 
   std::vector<Type::Any> argTpes;
   for (auto &n : fnTree.moduleCaptures)
@@ -1201,16 +1014,16 @@ void LLVMBackend::AstTransformer::transform(llvm::Module &mod, const Function &f
 
   stackVarPtrs.clear();
 }
-ValPtr LLVMBackend::AstTransformer::unaryExpr(const AnyExpr &expr, const AnyTerm &l, const AnyType &rtn, const ValPtrFn1 &fn) { //
+ValPtr CodeGen::unaryExpr(const AnyExpr &expr, const AnyExpr &l, const AnyType &rtn, const ValPtrFn1 &fn) { //
   if (l.tpe() != rtn) {
     throw std::logic_error("Semantic error: lhs type " + to_string(l.tpe()) + " of binary numeric operation in " + to_string(expr) +
                            " doesn't match return type " + to_string(rtn));
   }
 
-  return fn(mkTermVal(l));
+  return fn(mkExprVal(l));
 }
-ValPtr LLVMBackend::AstTransformer::binaryExpr(const AnyExpr &expr, const AnyTerm &l, const AnyTerm &r, const AnyType &rtn,
-                                               const ValPtrFn2 &fn) { //
+ValPtr CodeGen::binaryExpr(const AnyExpr &expr, const AnyExpr &l, const AnyExpr &r, const AnyType &rtn,
+                           const ValPtrFn2 &fn) { //
   if (l.tpe() != rtn) {
     throw std::logic_error("Semantic error: lhs type " + to_string(l.tpe()) + " of binary numeric operation in " + to_string(expr) +
                            " doesn't match return type " + to_string(rtn));
@@ -1220,10 +1033,10 @@ ValPtr LLVMBackend::AstTransformer::binaryExpr(const AnyExpr &expr, const AnyTer
                            " doesn't match return type " + to_string(rtn));
   }
 
-  return fn(mkTermVal(l), mkTermVal(r));
+  return fn(mkExprVal(l), mkExprVal(r));
 }
-ValPtr LLVMBackend::AstTransformer::unaryNumOp(const AnyExpr &expr, const AnyTerm &arg, const AnyType &rtn, //
-                                               const ValPtrFn1 &integralFn, const ValPtrFn1 &fractionalFn) {
+ValPtr CodeGen::unaryNumOp(const AnyExpr &expr, const AnyExpr &arg, const AnyType &rtn, //
+                           const ValPtrFn1 &integralFn, const ValPtrFn1 &fractionalFn) {
   return unaryExpr(expr, arg, rtn, [&](auto lhs) -> ValPtr {
     if (rtn.kind().is<TypeKind::Integral>()) {
       return integralFn(lhs);
@@ -1234,8 +1047,8 @@ ValPtr LLVMBackend::AstTransformer::unaryNumOp(const AnyExpr &expr, const AnyTer
     }
   });
 }
-ValPtr LLVMBackend::AstTransformer::binaryNumOp(const AnyExpr &expr, const AnyTerm &l, const AnyTerm &r, const AnyType &rtn, //
-                                                const ValPtrFn2 &integralFn, const ValPtrFn2 &fractionalFn) {
+ValPtr CodeGen::binaryNumOp(const AnyExpr &expr, const AnyExpr &l, const AnyExpr &r, const AnyType &rtn, //
+                            const ValPtrFn2 &integralFn, const ValPtrFn2 &fractionalFn) {
   return binaryExpr(expr, l, r, rtn, [&](auto lhs, auto rhs) -> ValPtr {
     if (rtn.kind().is<TypeKind::Integral>()) {
       return integralFn(lhs, rhs);
@@ -1246,146 +1059,27 @@ ValPtr LLVMBackend::AstTransformer::binaryNumOp(const AnyExpr &expr, const AnyTe
     }
   });
 }
-ValPtr LLVMBackend::AstTransformer::extFn1(llvm::Function *fn, const std::string &name, const AnyType &rtn, const AnyTerm &arg) { //
-  auto fn_ = mkExternalFn(fn, rtn, name, {arg.tpe()});
-  if (options.target == Target::SPIRV32 || options.target == Target::SPIRV64) {
-    fn_->setCallingConv(llvm::CallingConv::SPIR_FUNC);
-    //    fn_->addFnAttr(llvm::Attribute::NoBuiltin);
-    //    fn_->addFnAttr(llvm::Attribute::Convergent);
-  }
-  if (!rtn.is<Type::Unit0>()) {
-    fn_->addFnAttr(llvm::Attribute::WillReturn);
-  }
-  auto call = B.CreateCall(fn_, mkTermVal(arg));
-  call->setCallingConv(fn_->getCallingConv());
-  return call;
-}
-ValPtr LLVMBackend::AstTransformer::extFn2(llvm::Function *fn, const std::string &name, const AnyType &rtn, const AnyTerm &lhs,
-                                           const AnyTerm &rhs) { //
-  auto fn_ = mkExternalFn(fn, rtn, name, {lhs.tpe(), rhs.tpe()});
-  if (options.target == Target::SPIRV32 || options.target == Target::SPIRV64) {
-    fn_->setCallingConv(llvm::CallingConv::SPIR_FUNC);
-    fn_->addFnAttr(llvm::Attribute::NoBuiltin);
-    fn_->addFnAttr(llvm::Attribute::Convergent);
-  }
-  auto call = B.CreateCall(fn_, {mkTermVal(lhs), mkTermVal(rhs)});
-  call->setCallingConv(fn_->getCallingConv());
-  return call;
-}
-ValPtr LLVMBackend::AstTransformer::intr0(llvm::Function *fn, llvm::Intrinsic::ID id) { //
-  auto callee = llvm::Intrinsic::getDeclaration(fn->getParent(), id, {});
-  return B.CreateCall(callee);
-}
-ValPtr LLVMBackend::AstTransformer::intr1(llvm::Function *fn, llvm::Intrinsic::ID id, const AnyType &overload, const AnyTerm &arg) { //
-  auto callee = llvm::Intrinsic::getDeclaration(fn->getParent(), id, mkTpe(overload));
-  return B.CreateCall(callee, mkTermVal(arg));
-}
-ValPtr LLVMBackend::AstTransformer::intr2(llvm::Function *fn, llvm::Intrinsic::ID id, const AnyType &overload, //
-                                          const AnyTerm &lhs, const AnyTerm &rhs) {                            //
-  // XXX the overload type here is about the overloading of intrinsic names, not about the parameter types
-  // i.e. f32 is for foo.f32(float %a, float %b, float %c)
-  auto callee = llvm::Intrinsic::getDeclaration(fn->getParent(), id, mkTpe(overload));
-  return B.CreateCall(callee, {mkTermVal(lhs), mkTermVal(rhs)});
-}
 
-llvmc::TargetInfo LLVMBackend::Options::targetInfo() const {
-  using llvm::Triple;
-  const auto bindGpuArch = [&](Triple::ArchType archTpe, Triple::VendorType vendor, Triple::OSType os) {
-    Triple triple(Triple::getArchTypeName(archTpe), Triple::getVendorTypeName(vendor), Triple::getOSTypeName(os));
+std::vector<StructLayout> LLVMBackend::resolveLayouts(const std::vector<StructDef> &structs) {
 
-    switch (archTpe) {
-      case Triple::ArchType::UnknownArch: throw std::logic_error("Arch must be specified for " + triple.str());
-      case Triple::ArchType::spirv32:
-        // XXX We don't have a SPIRV target machine in LLVM yet, but we do know the data layout from Clang:
-        // See clang/lib/Basic/Targets/SPIR.h
-        return llvmc::TargetInfo{
-            .triple = triple,                                                                                                         //
-            .layout = llvm::DataLayout("e-p:32:32-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024"), //
-            .target = nullptr,                                                                                                        //
-            .cpu = {.uArch = arch, .features = {}}};
-      case Triple::ArchType::spirv64: // Same thing for SPIRV64
-        return llvmc::TargetInfo{
-            .triple = triple,                                                                                                 //
-            .layout = llvm::DataLayout("e-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024"), //
-            .target = nullptr,                                                                                                //
-            .cpu = {.uArch = arch, .features = {}}};
-      default:
-        return llvmc::TargetInfo{
-            .triple = triple,
-            .layout = {},
-            .target = backend::llvmc::targetFromTriple(triple),
-            .cpu = {.uArch = arch, .features = {}},
-        };
-    }
-  };
+  TargetedContext context(options);
+  return C.resolveLayouts(structs) | values() | map([&](auto &s) { return s.layouts; });
 
-  const auto bindCpuArch = [&](Triple::ArchType archTpe) {
-    const Triple defaultTriple = backend::llvmc::defaultHostTriple();
-    if (arch.empty() && defaultTriple.getArch() != archTpe) // when detecting host arch, the host triple's arch must match
-      throw std::logic_error("Requested arch detection with " + Triple::getArchTypeName(archTpe).str() +
-                             " but the host arch is different (" + Triple::getArchTypeName(defaultTriple.getArch()).str() + ")");
+  resolveLayouts()
 
-    Triple triple = defaultTriple;
-    triple.setArch(archTpe);
-    return llvmc::TargetInfo{
-        .triple = triple,
-        .layout = {},
-        .target = backend::llvmc::targetFromTriple(triple),
-        .cpu = arch.empty() || arch == "native" ? llvmc::hostCpuInfo() : llvmc::CpuInfo{.uArch = arch, .features = {}},
-    };
-  };
-
-  switch (target) {
-    case LLVMBackend::Target::x86_64: return bindCpuArch(Triple::ArchType::x86_64);
-    case LLVMBackend::Target::AArch64: return bindCpuArch(Triple::ArchType::aarch64);
-    case LLVMBackend::Target::ARM: return bindCpuArch(Triple::ArchType::arm);
-    case LLVMBackend::Target::NVPTX64: return bindGpuArch(Triple::ArchType::nvptx64, Triple::VendorType::NVIDIA, Triple::OSType::CUDA);
-    case LLVMBackend::Target::AMDGCN: return bindGpuArch(Triple::ArchType::amdgcn, Triple::VendorType::AMD, Triple::OSType::AMDHSA);
-    case Target::SPIRV32: return bindGpuArch(Triple::ArchType::spirv32, Triple::VendorType::UnknownVendor, Triple::OSType::UnknownOS);
-    case Target::SPIRV64: return bindGpuArch(Triple::ArchType::spirv64, Triple::VendorType::UnknownVendor, Triple::OSType::UnknownOS);
-  }
-}
-
-std::vector<polyast::CompileLayout> LLVMBackend::resolveLayouts(const std::vector<StructDef> &defs,
-                                                                const backend::LLVMBackend::AstTransformer &xform) const {
-
-  auto dataLayout = options.targetInfo().resolveDataLayout();
-
-  std::unordered_map<polyast::Sym, polyast::StructDef> lut(defs.size());
-  for (auto &d : defs)
-    lut.emplace(d.name, d);
-
-  std::vector<polyast::CompileLayout> layouts;
-  for (auto &[sym, structTy] : xform.getStructTypes()) {
-    if (auto it = lut.find(sym); it != lut.end()) {
-      auto layout = dataLayout.getStructLayout(structTy);
-      std::vector<polyast::CompileLayoutMember> members;
-      for (size_t i = 0; i < it->second.members.size(); ++i) {
-        members.emplace_back(it->second.members[i].named,                             //
-                             layout->getElementOffset(i),                             //
-                             dataLayout.getTypeAllocSize(structTy->getElementType(i)) //
-        );
-      }
-      layouts.emplace_back(sym, layout->getSizeInBytes(), layout->getAlignment().value(), members);
-    } else throw std::logic_error("Cannot find symbol " + to_string(sym) + " from domain");
-  }
-  return layouts;
-}
-
-std::vector<polyast::CompileLayout> LLVMBackend::resolveLayouts(const std::vector<StructDef> &defs, const compiletime::OptLevel &opt) {
-  llvm::LLVMContext ctx;
-  backend::LLVMBackend::AstTransformer xform(options, ctx);
+      llvm::LLVMContext ctx;
+  CodeGen xform(options, ctx);
   xform.addDefs(defs);
   return resolveLayouts(defs, xform);
 }
 
-polyast::CompileResult backend::LLVMBackend::compileProgram(const Program &program, const compiletime::OptLevel &opt) {
+CompileResult LLVMBackend::compileProgram(const Program &program, const compiletime::OptLevel &opt) {
   using namespace llvm;
 
   llvm::LLVMContext ctx;
   auto mod = std::make_unique<llvm::Module>("program", ctx);
 
-  LLVMBackend::AstTransformer xform(options, ctx);
+  CodeGen xform(options, ctx);
   xform.addDefs(program.defs);
   xform.addFn(*mod, program.entry, true);
   for (auto &f : program.functions)

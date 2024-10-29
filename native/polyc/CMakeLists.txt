@@ -4,6 +4,7 @@ set(LIB_SOURCES
         backend/llvm_nvptx.cpp
         backend/llvm_opencl.cpp
         backend/llvm_cpu.cpp
+        backend/llvm_target.cpp
         backend/llvm.cpp
         backend/llvmc.cpp
         backend/c_source.cpp

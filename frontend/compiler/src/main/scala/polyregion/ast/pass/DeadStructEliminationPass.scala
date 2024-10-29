@@ -1,7 +1,7 @@
 package polyregion.ast.pass
 
 import cats.syntax.all.*
-import polyregion.ast.{PolyAst as p, *}
+import polyregion.ast.{PolyAST as p, *}
 
 object DeadStructEliminationPass extends ProgramPass {
 

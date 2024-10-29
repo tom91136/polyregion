@@ -28,8 +28,8 @@ struct POLYREGION_EXPORT Options {
   POLYREGION_EXPORT std::string arch;
 };
 
-POLYREGION_EXPORT std::vector<polyast::CompileLayout> layoutOf(const std::vector<polyast::StructDef> &sdefs, const Options &options);
-POLYREGION_EXPORT std::vector<polyast::CompileLayout> layoutOf(const polyast::Bytes &bytes, const Options &options);
+POLYREGION_EXPORT std::vector<polyast::StructLayout> layoutOf(const std::vector<polyast::StructDef> &sdefs, const Options &options);
+POLYREGION_EXPORT std::vector<polyast::StructLayout> layoutOf(const polyast::Bytes &bytes, const Options &options);
 
 POLYREGION_EXPORT polyast::CompileResult compile(const polyast::Program &program, const Options &options, const compiletime::OptLevel &opt);
 POLYREGION_EXPORT polyast::CompileResult compile(const polyast::Bytes &astBytes, const Options &options, const compiletime::OptLevel &opt);

@@ -80,7 +80,7 @@ const llvm::Target *llvmc::targetFromTriple(const llvm::Triple &triple) {
 
 llvm::DataLayout llvmc::TargetInfo::resolveDataLayout() const {
   if (layout) return *layout;
-  else if (target) {
+  if (target) {
     return target
         ->createTargetMachine( //
             triple.str(),      //
@@ -232,7 +232,7 @@ static void optimise(llvm::TargetMachine &TM, llvm::Module &M, llvm::Optimizatio
 }
 
 polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compiletime::OptLevel &opt, bool emitDisassembly,
-                                            std::unique_ptr<llvm::Module> M) {
+                                            llvm::Module &M) {
   auto start = compiler::nowMono();
 
   auto useUnsafeMath = opt == compiletime::OptLevel::Ofast;
@@ -261,7 +261,7 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
     throw std::logic_error(info.triple.str() + " has no known data layout or registered LLVM target.");
   }
 
-  for (llvm::Function &F : M->functions())
+  for (llvm::Function &F : M.functions())
     setFunctionAttributes(info.cpu.uArch, info.cpu.features, F);
 
   llvm::OptimizationLevel optLevel;
@@ -339,15 +339,15 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
   switch (info.triple.getOS()) {
     case llvm::Triple::AMDHSA: {
       auto llvmTM = mkLLVMTargetMachine(info, options, genOpt);
-      bindLLVMTargetMachineDataLayout(*llvmTM, *M);
+      bindLLVMTargetMachineDataLayout(*llvmTM, M);
       // We need to link the object file for AMDGPU at this stage to get a working ELF binary.
       // This can only be done with LLD so just do it here after compiling.
       auto [_, object, objectStart, objectElapsed] = //
-          mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::ObjectFile, *M, events, true);
+          mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::ObjectFile, M, events, true);
       events.emplace_back(objectStart, objectElapsed, "llvm_to_obj", objectSize(object));
       if (emitDisassembly) {
         auto [m, assembly, assemblyStart, assemblyElapsed] = //
-            mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::AssemblyFile, *M, events, false);
+            mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::AssemblyFile, M, events, false);
         events.emplace_back(assemblyStart, assemblyElapsed, "llvm_to_asm", std::string(assembly.begin(), assembly.end()));
       }
       llvm::StringRef objectString(object.begin(), object.size());
@@ -365,12 +365,12 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
     }
     case llvm::Triple::CUDA: {
       auto llvmTM = mkLLVMTargetMachine(info, options, genOpt);
-      bindLLVMTargetMachineDataLayout(*llvmTM, *M);
+      bindLLVMTargetMachineDataLayout(*llvmTM, M);
       // NVIDIA's documentation only supports up-to PTX generation and ingestion via the CUDA driver API, so we can't
       // assemble the PTX to a CUBIN (SASS). Given that PTX ingestion is supported, we just generate that for now.
       // XXX ignore emitDisassembly here as PTX *is* the binary
       auto [_, ptx, ptxStart, ptxElapsed] = //
-          mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::AssemblyFile, *M, events, true);
+          mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::AssemblyFile, M, events, true);
       events.emplace_back(ptxStart, ptxElapsed, "llvm_to_ptx", std::string(ptx.begin(), ptx.end()));
       return {std::vector<int8_t>(ptx.begin(), ptx.end()), {info.cpu.uArch}, events, {}, ""};
     }
@@ -381,18 +381,18 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
 
           auto opt0Start = compiler::nowMono();
 
-          events.emplace_back(compiler::nowMs(), compiler::elapsedNs(opt0Start), "opt0", module2Ir(*M));
+          events.emplace_back(compiler::nowMs(), compiler::elapsedNs(opt0Start), "opt0", module2Ir(M));
 
           auto clspvStart = compiler::nowMono();
 
           llvm::SmallVector<char, 0> objBuffer;
           llvm::raw_svector_ostream objStream(objBuffer);
-          clspv::RunPassPipeline(*M, '3', &objStream);
+          clspv::RunPassPipeline(M, '3', &objStream);
 
-          events.emplace_back(compiler::nowMs(), compiler::elapsedNs(clspvStart), "clspv", module2Ir(*M));
+          events.emplace_back(compiler::nowMs(), compiler::elapsedNs(clspvStart), "clspv", module2Ir(M));
 
           auto validateStart = compiler::nowMono();
-          auto [maybeVerifyErr, verifyMsg] = llvmc::verifyModule(*M);
+          auto [maybeVerifyErr, verifyMsg] = llvmc::verifyModule(M);
           events.emplace_back(compiler::nowMs(), compiler::elapsedNs(validateStart), "clspv_validate", verifyMsg);
 
           auto optPassStart = compiler::nowMono();
@@ -438,7 +438,7 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
             spvTextDestroy(text);
           }
 
-          //        auto [ptx, ptxStart, ptxElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_ObjectFile, *M, events, true);
+          //        auto [ptx, ptxStart, ptxElapsed] = mkArtefact(llvm::CodeGenFileType::CGFT_ObjectFile, M, events, true);
           //        events.emplace_back(ptxStart, ptxElapsed, "llvm_to_ptx", std::string(ptx.begin(), ptx.end()));
           //        return {std::vector<char>(ptx.begin(), ptx.end()), {info.cpu.uArch}, events};
 
@@ -460,19 +460,19 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
         }
         default: {
 
-          auto features = polyregion::split(info.cpu.features, ',');
-          polyregion::llvm_shared::collectCPUFeatures(info.cpu.uArch, info.triple.getArch(), features);
+          auto features = split(info.cpu.features, ',');
+          llvm_shared::collectCPUFeatures(info.cpu.uArch, info.triple.getArch(), features);
 
           auto llvmTM = mkLLVMTargetMachine(info, options, genOpt);
-          bindLLVMTargetMachineDataLayout(*llvmTM, *M);
+          bindLLVMTargetMachineDataLayout(*llvmTM, M);
           auto [_, object, objectStart, objectElapsed] =
-              mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::ObjectFile, *M, events, true);
+              mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::ObjectFile, M, events, true);
           events.emplace_back(objectStart, objectElapsed, "llvm_to_obj", objectSize(object));
 
           std::vector<int8_t> binary(object.begin(), object.end());
           if (emitDisassembly) {
             auto [_, assembly, assemblyStart, assemblyElapsed] =
-                mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::AssemblyFile, *M, events, false);
+                mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::AssemblyFile, M, events, false);
             events.emplace_back(assemblyStart, assemblyElapsed, "llvm_to_asm", std::string(assembly.begin(), assembly.end()));
           }
           return {binary, features, events, {}, ""};

@@ -2,12 +2,12 @@
 
 #include "llvm.h"
 
-namespace polyregion::backend {
+namespace polyregion::backend::details {
 
-class AMDGPUTargetSpecificHandler : public LLVMBackend::TargetSpecificHandler {
-  void witnessEntry(LLVMBackend::AstTransformer &xform, llvm::Module &mod, llvm::Function &fn) override;
-  ValPtr mkSpecVal(LLVMBackend::AstTransformer &xform, llvm::Function *fn, const Expr::SpecOp &op) override;
-  ValPtr mkMathVal(LLVMBackend::AstTransformer &xform, llvm::Function *fn, const Expr::MathOp &op) override;
+class AMDGPUTargetSpecificHandler final : public TargetSpecificHandler {
+  void witnessEntry(CodeGen &, llvm::Function &) override;
+  ValPtr mkSpecVal(CodeGen &, const Expr::SpecOp &) override;
+  ValPtr mkMathVal(CodeGen &, const Expr::MathOp &) override;
 };
 
-} // namespace polyregion::backend
+} // namespace polyregion::backend::details

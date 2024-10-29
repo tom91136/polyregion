@@ -9,7 +9,6 @@
 using namespace polyregion::polyast;
 
 using namespace Stmt;
-using namespace Term;
 using namespace Expr;
 
 TEST_CASE("Invoke identity") {
@@ -28,12 +27,7 @@ TEST_CASE("Invoke identity") {
 }
 
 TEST_CASE("Struct identity") {
-
-  Type::Any a =
-      Type::Struct(Sym({"polyregion_CollectionLengthSuite_ClassB__"}), {}, {}, {Sym({"polyregion_CollectionLengthSuite_Base__"})});
-
-  Type::Any b =
-      Type::Struct(Sym({"polyregion_CollectionLengthSuite_ClassB__"}), {}, {}, {Sym({"polyregion_CollectionLengthSuite_Base__"})});
-
+  Type::Any a = Type::Struct( "polyregion_CollectionLengthSuite_ClassB__");
+  Type::Any b = Type::Struct( "polyregion_CollectionLengthSuite_ClassB__");
   CHECK(a == b);
 }

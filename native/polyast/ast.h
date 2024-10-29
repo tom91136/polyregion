@@ -1,24 +1,27 @@
 #pragma once
-#include "polyregion/compat.h"
-#include "generated/polyast.h"
+
 #include <functional>
 #include <optional>
-#include <ostream>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
+
+#include "generated/polyast.h"
+#include "polyregion/compat.h"
+
 
 namespace polyregion::polyast {
 
 using Bytes = std::vector<char>;
 template <typename T> using Opt = std::optional<T>;
+template <typename T> using Set = std::unordered_set<T>;
 template <typename T, typename U> using Pair = std::pair<T, U>;
 template <typename T, typename U> using Map = std::unordered_map<T, U>;
 
-std::string repr(const Sym &);
-std::string repr(const InvokeSignature & );
+std::string repr(const SourcePosition &pos);
+
 std::string repr(const Type::Any &);
 std::string repr(const Named &);
-std::string repr(const Term::Any &);
 std::string repr(const Expr::Any &);
 std::string repr(const Stmt::Any &);
 std::string repr(const Intr::Any &);
@@ -30,75 +33,74 @@ std::string repr(const Function &);
 std::string repr(const StructDef &);
 std::string repr(const Program &);
 
-std::string qualified(const Term::Select &);
-std::string qualified(const Sym &);
-std::vector<Named> path(const Term::Select &);
-Named head(const Term::Select &);
-std::vector<Named> tail(const Term::Select &);
+const static auto show_repr = [](auto &x) { return repr(x); };
 
-std::pair<Named, std::vector<Named>> uncons(const Term::Select &);
+std::string qualified(const Expr::Select &);
+std::vector<Named> path(const Expr::Select &);
+Named head(const Expr::Select &);
+std::vector<Named> tail(const Expr::Select &);
 
+std::pair<Named, std::vector<Named>> uncons(const Expr::Select &);
 
-std::string repr(const polyast::CompileResult &);
+std::string repr(const CompileResult &);
 
 namespace dsl {
 
 using namespace Stmt;
-using namespace Term;
 using namespace Expr;
 namespace Tpe = Type;
 // namespace Fn0 = NullaryIntrinsicKind;
 // namespace Fn2 = BinaryIntrinsicKind;
 // namespace Fn1 = UnaryIntrinsicKind;
 
-const static TypeSpace::Global Global = TypeSpace::Global();
-const static TypeSpace::Local Local = TypeSpace::Local();
+const static auto Global = TypeSpace::Global();
+const static auto Local = TypeSpace::Local();
 
-const static Tpe::Float32 Float = Tpe::Float32();
-const static Tpe::Float64 Double = Tpe::Float64();
-const static Tpe::Bool1 Bool = Tpe::Bool1();
-const static Tpe::IntS8 Byte = Tpe::IntS8();
-const static Tpe::IntU16 Char = Tpe::IntU16();
-const static Tpe::IntS16 Short = Tpe::IntS16();
-const static Tpe::IntS32 SInt = Tpe::IntS32();
-const static Tpe::IntU32 UInt = Tpe::IntU32();
-const static Tpe::IntS64 Long = Tpe::IntS64();
-const static Tpe::Unit0 Unit = Tpe::Unit0();
-const static Tpe::Nothing Nothing = Tpe::Nothing();
+const static auto Float = Tpe::Float32();
+const static auto Double = Tpe::Float64();
+const static auto Bool = Tpe::Bool1();
+const static auto Byte = Tpe::IntS8();
+const static auto Char = Tpe::IntU16();
+const static auto Short = Tpe::IntS16();
+const static auto SInt = Tpe::IntS32();
+const static auto UInt = Tpe::IntU32();
+const static auto Long = Tpe::IntS64();
+const static auto Unit = Tpe::Unit0();
+const static auto Nothing = Tpe::Nothing();
 
 Tpe::Ptr Ptr(const Tpe::Any &t, std::optional<int32_t> l = {}, const TypeSpace::Any &s = TypeSpace::Global());
-Tpe::Struct Struct(Sym name,  std::vector<std::string> tpeVars, std::vector<Type::Any> args);
+Tpe::Struct Struct(std::string name, std::vector<Type::Any> members);
 
 struct AssignmentBuilder {
   std::string name;
   explicit AssignmentBuilder(const std::string &name);
   Stmt::Any operator=(Expr::Any u) const; // NOLINT(misc-unconventional-assign-operator)
-  Stmt::Any operator=(Term::Any u) const; // NOLINT(misc-unconventional-assign-operator)
-  Stmt::Any operator=(Type::Any) const; // NOLINT(misc-unconventional-assign-operator)
+  Stmt::Any operator=(Type::Any) const;   // NOLINT(misc-unconventional-assign-operator)
 };
 
 struct IndexBuilder {
   Index index;
   explicit IndexBuilder(const Index &index);
   operator Expr::Any() const; // NOLINT(google-explicit-constructor)
-  Update operator=(const Term::Any &term) const;
+  Update operator=(const Expr::Any &that) const;
 };
 
 struct NamedBuilder {
   Named named;
   explicit NamedBuilder(const Named &named);
-  operator Term::Any() const; // NOLINT(google-explicit-constructor)
+  operator Expr::Any() const; // NOLINT(google-explicit-constructor)
                               //  operator const Expr::Any() const; // NOLINT(google-explicit-constructor)
   operator Named() const;     // NOLINT(google-explicit-constructor)
   Arg operator()() const;
-  IndexBuilder operator[](const Term::Any &idx) const;
+  IndexBuilder operator[](const Expr::Any &idx) const;
+  Mut operator=(const Expr::Any &that) const;
 };
 
-Term::Any integral(const Type::Any &tpe, unsigned long long int x);
-Term::Any fractional(const Type::Any &tpe, long double x);
+Expr::Any integral(const Type::Any &tpe, unsigned long long int x);
+Expr::Any fractional(const Type::Any &tpe, long double x);
 
-std::function<Term::Any(Type::Any)> operator"" _(long double x);
-std::function<Term::Any(Type::Any)> operator"" _(unsigned long long int x);
+std::function<Expr::Any(Type::Any)> operator"" _(long double x);
+std::function<Expr::Any(Type::Any)> operator"" _(unsigned long long int x);
 std::function<NamedBuilder(Type::Any)> operator"" _(const char *name, size_t);
 
 Stmt::Any let(const std::string &name, const Type::Any &tpe);
@@ -107,11 +109,11 @@ IntrOp invoke(const Intr::Any &);
 MathOp invoke(const Math::Any &);
 SpecOp invoke(const Spec::Any &);
 std::function<Function(std::vector<Stmt::Any>)> function(const std::string &name, const std::vector<Arg> &args, const Type::Any &rtn,
-                                                         const FunctionKind::Any &kind = FunctionKind::Exported());
-Program program(Function entry, std::vector<StructDef> defs = {}, std::vector<Function> functions = {});
+                                                         const std::vector<FunctionAttr::Any> &attrs = {FunctionAttr::Exported()});
+Program program(const std::vector<StructDef> &structs = {}, const std::vector<Function> &functions = {});
+Program program(const Function &function);
 
-Return ret(const Expr::Any &expr = Alias(Unit0Const()));
-Return ret(const Term::Any &term);
+Return ret(const Expr::Any &expr = Unit0Const());
 
 } // namespace dsl
 

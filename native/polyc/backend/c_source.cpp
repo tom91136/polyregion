@@ -1,9 +1,13 @@
 #include <iostream>
 
+#include "aspartame/all.hpp"
 #include "c_source.h"
-#include "polyregion/utils.hpp"
+// #include "polyregion/utils.hpp"
+
+#include "fmt/core.h"
 #include <set>
 
+using namespace aspartame;
 using namespace polyregion;
 using namespace std::string_literals;
 
@@ -14,76 +18,77 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
     case Dialect::MSL1_0:
       return tpe.match_total([&](const Type::Float16 &) { return "__fp16"s; }, //
                              [&](const Type::Float32 &) { return "float"s; },  //
-          [&](const Type::Float64 &) { return "double"s; }, //
+                             [&](const Type::Float64 &) { return "double"s; }, //
 
-          [&](const Type::IntU8 &) { return "uint8_t"s; },   //
-          [&](const Type::IntU16 &) { return "uint16_t"s; }, //
-          [&](const Type::IntU32 &) { return "uint32_t"s; }, //
-          [&](const Type::IntU64 &) { return "uint64_t"s; }, //
+                             [&](const Type::IntU8 &) { return "uint8_t"s; },   //
+                             [&](const Type::IntU16 &) { return "uint16_t"s; }, //
+                             [&](const Type::IntU32 &) { return "uint32_t"s; }, //
+                             [&](const Type::IntU64 &) { return "uint64_t"s; }, //
 
-          [&](const Type::IntS8 &) { return "int8_t"s; },   //
-          [&](const Type::IntS16 &) { return "int16_t"s; }, //
-          [&](const Type::IntS32 &) { return "int32_t"s; }, //
-          [&](const Type::IntS64 &) { return "int64_t"s; }, //
+                             [&](const Type::IntS8 &) { return "int8_t"s; },   //
+                             [&](const Type::IntS16 &) { return "int16_t"s; }, //
+                             [&](const Type::IntS32 &) { return "int32_t"s; }, //
+                             [&](const Type::IntS64 &) { return "int64_t"s; }, //
 
-          [&](const Type::Bool1 &) { return "bool"s; },                   //
-          [&](const Type::Unit0 &) { return "void"s; },                   //
-          [&](const Type::Nothing &) { return "/*nothing*/"s; },          //
-          [&](const Type::Struct &x) { return qualified(x.name); },       //
-          [&](const Type::Ptr &x) { return mkTpe(x.component) + "*"; }, //
-          [&](const Type::Var &) { return "/*type var*/"s; },             //
-          [&](const Type::Exec &) { return "/*exec*/"s; }                 //
+                             [&](const Type::Nothing &) { return "/*nothing*/"s; }, //
+                             [&](const Type::Unit0 &) { return "void"s; },          //
+                             [&](const Type::Bool1 &) { return "bool"s; },          //
+
+                             [&](const Type::Struct &x) { return x.name; },                              //
+                             [&](const Type::Ptr &x) { return fmt::format("{}*", mkTpe(x.component)); }, //
+                             [&](const Type::Annotated &x) {
+                               return fmt::format("{} /*{};{}*/", mkTpe(x.tpe), x.pos ^ map(show_repr) ^ get_or_else(""),
+                                                  x.comment ^ get_or_else(""));
+                             } //
       );
     case Dialect::OpenCL1_1:
       return tpe.match_total([&](const Type::Float16 &) { return "half"s; },   //
                              [&](const Type::Float32 &) { return "float"s; },  //
-          [&](const Type::Float64 &) { return "double"s; }, //
+                             [&](const Type::Float64 &) { return "double"s; }, //
 
-          [&](const Type::IntU8 &) { return "uchar"s; },   //
-          [&](const Type::IntU16 &) { return "ushort"s; }, //
-          [&](const Type::IntU32 &) { return "uint"s; },   //
-          [&](const Type::IntU64 &) { return "ulong"s; },  //
+                             [&](const Type::IntU8 &) { return "uchar"s; },   //
+                             [&](const Type::IntU16 &) { return "ushort"s; }, //
+                             [&](const Type::IntU32 &) { return "uint"s; },   //
+                             [&](const Type::IntU64 &) { return "ulong"s; },  //
 
-          [&](const Type::IntS8 &) { return "char"s; },   //
-          [&](const Type::IntS16 &) { return "short"s; }, //
-          [&](const Type::IntS32 &) { return "int"s; },   //
-          [&](const Type::IntS64 &) { return "long"s; },  //
+                             [&](const Type::IntS8 &) { return "char"s; },   //
+                             [&](const Type::IntS16 &) { return "short"s; }, //
+                             [&](const Type::IntS32 &) { return "int"s; },   //
+                             [&](const Type::IntS64 &) { return "long"s; },  //
 
-          [&](const Type::Bool1 &) { return "char"s; },                   //
-          [&](const Type::Unit0 &) { return "void"s; },                   //
-          [&](const Type::Nothing &) { return "/*nothing*/"s; },          //
-          [&](const Type::Struct &x) { return qualified(x.name); },       //
-          [&](const Type::Ptr &x) { return mkTpe(x.component) + "*"; }, //
-          [&](const Type::Var &) { return "/*type var*/"s; },             //
-          [&](const Type::Exec &) { return "/*exec*/"s; }                 //
+                             [&](const Type::Nothing &) { return "/*nothing*/"s; }, //
+                             [&](const Type::Unit0 &) { return "void"s; },          //
+                             [&](const Type::Bool1 &) { return "char"s; },          //
+
+                             [&](const Type::Struct &x) { return x.name; },                              //
+                             [&](const Type::Ptr &x) { return fmt::format("{}*", mkTpe(x.component)); }, //
+                             [&](const Type::Annotated &x) {
+                               return fmt::format("{} /*{};{}*/", mkTpe(x.tpe), x.pos ^ map(show_repr) ^ get_or_else(""),
+                                                  x.comment ^ get_or_else(""));
+                             } //
       );
   }
 }
 
-std::string backend::CSource::mkRef(const Term::Any &ref) {
-  return ref.match_total([](const Term::Select &x) { return polyast::qualified(x); },               //
-                         [](const Term::Poison &x) { return "(NULL /* " + repr(x.tpe) + " */)"s; }, //
-      [](const Term::Unit0Const &x) { return "/*void*/"s; },                     //
-      [](const Term::Bool1Const &x) { return x.value ? "true"s : "false"s; },    //
-
-      [](const Term::IntU8Const &x) { return std::to_string(x.value); },  //
-      [](const Term::IntU16Const &x) { return std::to_string(x.value); }, //
-      [](const Term::IntU32Const &x) { return std::to_string(x.value); }, //
-      [](const Term::IntU64Const &x) { return std::to_string(x.value); }, //
-
-      [](const Term::IntS8Const &x) { return std::to_string(x.value); },  //
-      [](const Term::IntS16Const &x) { return std::to_string(x.value); }, //
-      [](const Term::IntS32Const &x) { return std::to_string(x.value); }, //
-      [](const Term::IntS64Const &x) { return std::to_string(x.value); }, //
-
-      [](const Term::Float64Const &x) { return std::to_string(x.value); },       //
-      [](const Term::Float32Const &x) { return std::to_string(x.value) + "f"; }, //
-      [](const Term::Float16Const &x) { return std::to_string(x.value) + ""; }   //
-  );                                                                             // FIXME escape string
-}
-
-std::string backend::CSource::mkExpr(const Expr::Any &expr, const std::string &key) {
+std::string backend::CSource::mkExpr(const Expr::Any &expr) {
   return expr.match_total(
+      [](const Expr::Float16Const &x) { return fmt::format("{}", x.value); },  //
+      [](const Expr::Float32Const &x) { return fmt::format("{}f", x.value); }, //
+      [](const Expr::Float64Const &x) { return fmt::format("{}", x.value); },  //
+
+      [](const Expr::IntU8Const &x) { return fmt::format("{}", x.value); },  //
+      [](const Expr::IntU16Const &x) { return fmt::format("{}", x.value); }, //
+      [](const Expr::IntU32Const &x) { return fmt::format("{}", x.value); }, //
+      [](const Expr::IntU64Const &x) { return fmt::format("{}", x.value); }, //
+
+      [](const Expr::IntS8Const &x) { return fmt::format("{}", x.value); },  //
+      [](const Expr::IntS16Const &x) { return fmt::format("{}", x.value); }, //
+      [](const Expr::IntS32Const &x) { return fmt::format("{}", x.value); }, //
+      [](const Expr::IntS64Const &x) { return fmt::format("{}", x.value); }, //
+
+      [](const Expr::Unit0Const &x) { return "/*void*/"s; },                  //
+      [](const Expr::Bool1Const &x) { return x.value ? "true"s : "false"s; }, //
+
       [&](const Expr::SpecOp &x) {
         struct DialectAccessor {
           std::string cl, msl;
@@ -95,11 +100,11 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr, const std::string &k
             case Dialect::OpenCL1_1: return accessor.cl;
           }
         };
-        const auto gpuDimIntr = [&](const DialectAccessor &accessor, const Term::Any &index) -> std::string {
+        const auto gpuDimIntr = [&](const DialectAccessor &accessor, const Expr::Any &index) -> std::string {
           switch (dialect) {
             case Dialect::C11: throw std::logic_error(to_string(x) + " not supported for C11");
-            case Dialect::MSL1_0: return accessor.msl + "[" + mkRef(index) + "]";
-            case Dialect::OpenCL1_1: return accessor.cl + "(" + mkRef(index) + ")";
+            case Dialect::MSL1_0: return fmt::format("{}[{}]", accessor.msl, mkExpr(index));
+            case Dialect::OpenCL1_1: return fmt::format("{}({})", accessor.cl, mkExpr(index));
           }
         };
         return x.op.match_total(
@@ -137,179 +142,149 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr, const std::string &k
         );
       },
       [&](const Expr::IntrOp &x) {
-        return x.op.match_total([&](const Intr::Pos &v) { return "(+" + mkRef(v.x) + ")"; },                           //
-                                [&](const Intr::Neg &v) { return "(-" + mkRef(v.x) + ")"; },                           //
-            [&](const Intr::BNot &v) { return "(~" + mkRef(v.x) + ")"; },                          //
-            [&](const Intr::LogicNot &v) { return "(!" + mkRef(v.x) + ")"; },                      //
-            [&](const Intr::Add &v) { return "(" + mkRef(v.x) + " + " + mkRef(v.y) + ")"; },       //
-            [&](const Intr::Sub &v) { return "(" + mkRef(v.x) + " - " + mkRef(v.y) + ")"; },       //
-            [&](const Intr::Mul &v) { return "(" + mkRef(v.x) + " * " + mkRef(v.y) + ")"; },       //
-            [&](const Intr::Div &v) { return "(" + mkRef(v.x) + " / " + mkRef(v.y) + ")"; },       //
-            [&](const Intr::Rem &v) { return "(" + mkRef(v.x) + " % " + mkRef(v.y) + ")"; },       //
-            [&](const Intr::Min &v) { return "min(" + mkRef(v.x) + ", " + mkRef(v.y) + ")"; },     //
-            [&](const Intr::Max &v) { return "max(" + mkRef(v.x) + ", " + mkRef(v.y) + ")"; },     //
-            [&](const Intr::BAnd &v) { return "(" + mkRef(v.x) + " & " + mkRef(v.y) + ")"; },      //
-            [&](const Intr::BOr &v) { return "(" + mkRef(v.x) + " | " + mkRef(v.y) + ")"; },       //
-            [&](const Intr::BXor &v) { return "(" + mkRef(v.x) + " ^ " + mkRef(v.y) + ")"; },      //
-            [&](const Intr::BSL &v) { return "(" + mkRef(v.x) + " << " + mkRef(v.y) + ")"; },      //
-            [&](const Intr::BSR &v) { return "(" + mkRef(v.x) + " >> " + mkRef(v.y) + ")"; },      //
-            [&](const Intr::BZSR &v) { return "(" + mkRef(v.x) + " <<< " + mkRef(v.y) + ")"; },    //
-            [&](const Intr::LogicAnd &v) { return "(" + mkRef(v.x) + " && " + mkRef(v.y) + ")"; }, //
-            [&](const Intr::LogicOr &v) { return "(" + mkRef(v.x) + " || " + mkRef(v.y) + ")"; },  //
-            [&](const Intr::LogicEq &v) { return "(" + mkRef(v.x) + " == " + mkRef(v.y) + ")"; },  //
-            [&](const Intr::LogicNeq &v) { return "(" + mkRef(v.x) + " != " + mkRef(v.y) + ")"; }, //
-            [&](const Intr::LogicLte &v) { return "(" + mkRef(v.x) + " <= " + mkRef(v.y) + ")"; }, //
-            [&](const Intr::LogicGte &v) { return "(" + mkRef(v.x) + " >= " + mkRef(v.y) + ")"; }, //
-            [&](const Intr::LogicLt &v) { return "(" + mkRef(v.x) + " < " + mkRef(v.y) + ")"; },   //
-            [&](const Intr::LogicGt &v) { return "(" + mkRef(v.x) + " > " + mkRef(v.y) + ")"; }    //
-        );
+        return x.op.match_total([&](const Intr::Pos &v) { return fmt::format("(+{})", mkExpr(v.x)); },
+                                [&](const Intr::Neg &v) { return fmt::format("(-{})", mkExpr(v.x)); },
+                                [&](const Intr::BNot &v) { return fmt::format("(~{})", mkExpr(v.x)); },
+                                [&](const Intr::LogicNot &v) { return fmt::format("(!{})", mkExpr(v.x)); },
+                                [&](const Intr::Add &v) { return fmt::format("({} + {})", mkExpr(v.x), mkExpr(v.y)); },
+                                [&](const Intr::Sub &v) { return fmt::format("({} - {})", mkExpr(v.x), mkExpr(v.y)); },
+                                [&](const Intr::Mul &v) { return fmt::format("({} * {})", mkExpr(v.x), mkExpr(v.y)); },
+                                [&](const Intr::Div &v) { return fmt::format("({} / {})", mkExpr(v.x), mkExpr(v.y)); },
+                                [&](const Intr::Rem &v) { return fmt::format("({} % {})", mkExpr(v.x), mkExpr(v.y)); },
+                                [&](const Intr::Min &v) { return fmt::format("min({}, {})", mkExpr(v.x), mkExpr(v.y)); },
+                                [&](const Intr::Max &v) { return fmt::format("max({}, {})", mkExpr(v.x), mkExpr(v.y)); },
+                                [&](const Intr::BAnd &v) { return fmt::format("({} & {})", mkExpr(v.x), mkExpr(v.y)); },
+                                [&](const Intr::BOr &v) { return fmt::format("({} | {})", mkExpr(v.x), mkExpr(v.y)); },
+                                [&](const Intr::BXor &v) { return fmt::format("({} ^ {})", mkExpr(v.x), mkExpr(v.y)); },
+                                [&](const Intr::BSL &v) { return fmt::format("({} << {})", mkExpr(v.x), mkExpr(v.y)); },
+                                [&](const Intr::BSR &v) { return fmt::format("({} >> {})", mkExpr(v.x), mkExpr(v.y)); },
+                                [&](const Intr::BZSR &v) { return fmt::format("({} <<< {})", mkExpr(v.x), mkExpr(v.y)); },
+                                [&](const Intr::LogicAnd &v) { return fmt::format("({} && {})", mkExpr(v.x), mkExpr(v.y)); },
+                                [&](const Intr::LogicOr &v) { return fmt::format("({} || {})", mkExpr(v.x), mkExpr(v.y)); },
+                                [&](const Intr::LogicEq &v) { return fmt::format("({} == {})", mkExpr(v.x), mkExpr(v.y)); },
+                                [&](const Intr::LogicNeq &v) { return fmt::format("({} != {})", mkExpr(v.x), mkExpr(v.y)); },
+                                [&](const Intr::LogicLte &v) { return fmt::format("({} <= {})", mkExpr(v.x), mkExpr(v.y)); },
+                                [&](const Intr::LogicGte &v) { return fmt::format("({} >= {})", mkExpr(v.x), mkExpr(v.y)); },
+                                [&](const Intr::LogicLt &v) { return fmt::format("({} < {})", mkExpr(v.x), mkExpr(v.y)); },
+                                [&](const Intr::LogicGt &v) { return fmt::format("({} > {})", mkExpr(v.x), mkExpr(v.y)); });
       },
       [&](const Expr::MathOp &x) {
-        return x.op.match_total([&](const Math::Abs &v) { return "abs(" + mkRef(v.x) + ")"; },                         //
-                                [&](const Math::Sin &v) { return "sin(" + mkRef(v.x) + ")"; },                         //
-            [&](const Math::Cos &v) { return "cos(" + mkRef(v.x) + ")"; },                         //
-            [&](const Math::Tan &v) { return "tan(" + mkRef(v.x) + ")"; },                         //
-            [&](const Math::Asin &v) { return "asin(" + mkRef(v.x) + ")"; },                       //
-            [&](const Math::Acos &v) { return "acos(" + mkRef(v.x) + ")"; },                       //
-            [&](const Math::Atan &v) { return "atan(" + mkRef(v.x) + ")"; },                       //
-            [&](const Math::Sinh &v) { return "sinh(" + mkRef(v.x) + ")"; },                       //
-            [&](const Math::Cosh &v) { return "cosh(" + mkRef(v.x) + ")"; },                       //
-            [&](const Math::Tanh &v) { return "tanh(" + mkRef(v.x) + ")"; },                       //
-            [&](const Math::Signum &v) { return "signum(" + mkRef(v.x) + ")"; },                   //
-            [&](const Math::Round &v) { return "round(" + mkRef(v.x) + ")"; },                     //
-            [&](const Math::Ceil &v) { return "ceil(" + mkRef(v.x) + ")"; },                       //
-            [&](const Math::Floor &v) { return "floor(" + mkRef(v.x) + ")"; },                     //
-            [&](const Math::Rint &v) { return "rint(" + mkRef(v.x) + ")"; },                       //
-            [&](const Math::Sqrt &v) { return "sqrt(" + mkRef(v.x) + ")"; },                       //
-            [&](const Math::Cbrt &v) { return "cbrt(" + mkRef(v.x) + ")"; },                       //
-            [&](const Math::Exp &v) { return "exp(" + mkRef(v.x) + ")"; },                         //
-            [&](const Math::Expm1 &v) { return "expm1(" + mkRef(v.x) + ")"; },                     //
-            [&](const Math::Log &v) { return "log(" + mkRef(v.x) + ")"; },                         //
-            [&](const Math::Log1p &v) { return "log1p(" + mkRef(v.x) + ")"; },                     //
-            [&](const Math::Log10 &v) { return "log10(" + mkRef(v.x) + ")"; },                     //
-            [&](const Math::Pow &v) { return "pow(" + mkRef(v.x) + ", " + mkRef(v.y) + ")"; },     //
-            [&](const Math::Atan2 &v) { return "atan2(" + mkRef(v.x) + ", " + mkRef(v.y) + ")"; }, //
-            [&](const Math::Hypot &v) { return "hypot(" + mkRef(v.x) + ", " + mkRef(v.y) + ")"; }  //
-        );
+        return x.op.match_total([&](const Math::Abs &v) { return fmt::format("abs({})", mkExpr(v.x)); },
+                                [&](const Math::Sin &v) { return fmt::format("sin({})", mkExpr(v.x)); },
+                                [&](const Math::Cos &v) { return fmt::format("cos({})", mkExpr(v.x)); },
+                                [&](const Math::Tan &v) { return fmt::format("tan({})", mkExpr(v.x)); },
+                                [&](const Math::Asin &v) { return fmt::format("asin({})", mkExpr(v.x)); },
+                                [&](const Math::Acos &v) { return fmt::format("acos({})", mkExpr(v.x)); },
+                                [&](const Math::Atan &v) { return fmt::format("atan({})", mkExpr(v.x)); },
+                                [&](const Math::Sinh &v) { return fmt::format("sinh({})", mkExpr(v.x)); },
+                                [&](const Math::Cosh &v) { return fmt::format("cosh({})", mkExpr(v.x)); },
+                                [&](const Math::Tanh &v) { return fmt::format("tanh({})", mkExpr(v.x)); },
+                                [&](const Math::Signum &v) { return fmt::format("signum({})", mkExpr(v.x)); },
+                                [&](const Math::Round &v) { return fmt::format("round({})", mkExpr(v.x)); },
+                                [&](const Math::Ceil &v) { return fmt::format("ceil({})", mkExpr(v.x)); },
+                                [&](const Math::Floor &v) { return fmt::format("floor({})", mkExpr(v.x)); },
+                                [&](const Math::Rint &v) { return fmt::format("rint({})", mkExpr(v.x)); },
+                                [&](const Math::Sqrt &v) { return fmt::format("sqrt({})", mkExpr(v.x)); },
+                                [&](const Math::Cbrt &v) { return fmt::format("cbrt({})", mkExpr(v.x)); },
+                                [&](const Math::Exp &v) { return fmt::format("exp({})", mkExpr(v.x)); },
+                                [&](const Math::Expm1 &v) { return fmt::format("expm1({})", mkExpr(v.x)); },
+                                [&](const Math::Log &v) { return fmt::format("log({})", mkExpr(v.x)); },
+                                [&](const Math::Log1p &v) { return fmt::format("log1p({})", mkExpr(v.x)); },
+                                [&](const Math::Log10 &v) { return fmt::format("log10({})", mkExpr(v.x)); },
+                                [&](const Math::Pow &v) { return fmt::format("pow({}, {})", mkExpr(v.x), mkExpr(v.y)); },
+                                [&](const Math::Atan2 &v) { return fmt::format("atan2({}, {})", mkExpr(v.x), mkExpr(v.y)); },
+                                [&](const Math::Hypot &v) { return fmt::format("hypot({}, {})", mkExpr(v.x), mkExpr(v.y)); });
       },
-      [&](const Expr::Cast &x) { return "((" + mkTpe(x.as) + ") " + mkRef(x.from) + ")"; },
-      [&](const Expr::Alias &x) { return mkRef(x.ref); },                            //
-      [&](const Expr::Invoke &x) { return "???"s; },                                 //
-      [&](const Expr::Index &x) { return mkRef(x.lhs) + "[" + mkRef(x.idx) + "]"; }, //
+      [&](const Expr::Select &x) { return polyast::qualified(x); },                     //
+      [&](const Expr::Poison &x) { return fmt::format("(NULL /*{}*/)", repr(x.tpe)); }, //
+
+      [&](const Expr::Cast &x) { return fmt::format("(({}) {})", mkTpe(x.as), mkExpr(x.from)); },
+      [&](const Expr::Invoke &x) { return "???"s; }, //
+      [&](const Expr::Index &x) { return fmt::format("{}[{}]", mkExpr(x.lhs), mkExpr(x.idx)); },
       [&](const Expr::RefTo &x) {
-        std::string str = "&" + mkRef(x.lhs);
-        if (x.idx) str += "[" + mkRef(*x.idx) + "]";
+        std::string str = fmt::format("&{}", mkExpr(x.lhs));
+        if (x.idx) str += fmt::format("[{}]", mkExpr(*x.idx));
         return str;
-      },                                                                 //
-      [&](const Expr::Alloc &x) { return "{/*" + to_string(x) + "*/}"; } //
+      },
+      [&](const Expr::Alloc &x) { return fmt::format("{{/*{}*/}}", to_string(x)); },
+      [&](const Expr::Annotated &x) {
+        return fmt::format("{} /*{};{}*/", mkExpr(x), x.pos ^ map(show_repr) ^ get_or_else(""), x.comment ^ get_or_else(""));
+      } //
+
   );
 }
 
 std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
-  return stmt.match_total(
-      [&](const Stmt::Block &x) {
-        return mk_string<Stmt::Any>(
-            x.stmts, [&](auto x) { return mkStmt(x); }, "\n");
-      },
+  return stmt.match_total( //
+      [&](const Stmt::Block &x) { return x.stmts | mk_string("\n", [&](auto &x) { return mkStmt(x); }); },
       [&](const Stmt::Comment &x) {
-        auto lines = split(x.value, '\n');
-        auto commented = map_vec<std::string, std::string>(lines, [](auto &&line) { return "// " + line; });
-        return mk_string<std::string>(
-            commented, [](auto &&x) { return x; }, "\n");
+        return x.value ^ split("\n") | map([](auto &l) { return fmt::format("// {}", l); }) | mk_string("\n");
       },
       [&](const Stmt::Var &x) {
-        if (x.name.tpe.is<Type::Unit0>()) {
-          return mkExpr(*x.expr, x.name.symbol) + ";";
-        }
-        auto line = mkTpe(x.name.tpe) + " " + x.name.symbol + (x.expr ? (" = " + mkExpr(*x.expr, x.name.symbol)) : "") + ";";
-        return line;
+        if (x.name.tpe.is<Type::Unit0>()) return fmt::format("{};", mkExpr(*x.expr));
+        return fmt::format("{} {}{};", mkTpe(x.name.tpe), x.name.symbol, x.expr ? (" = " + mkExpr(*x.expr)) : "");
       },
-      [&](const Stmt::Mut &x) {
-        if (x.copy) {
-          return "memcpy(" + //
-                 mkRef(x.name) + ", " + mkExpr(x.expr, "?") + ", sizeof(" + mkTpe(x.expr.tpe()) + "));";
-        } else {
-          return mkRef(x.name) + " = " + mkExpr(x.expr, "?") + ";";
-        }
-      },
-      [&](const Stmt::Update &x) {
-        auto idx = mkRef(x.idx);
-        auto val = mkRef(x.value);
-        return mkRef(x.lhs) + "[" + idx + "] = " + val + ";";
-      },
+      [&](const Stmt::Mut &x) { return fmt::format("{} = {};", mkExpr(x.name), mkExpr(x.expr)); },
+      [&](const Stmt::Update &x) { return fmt::format("{}[{}] = {};", mkExpr(x.lhs), mkExpr(x.idx), mkExpr(x.value)); },
       [&](const Stmt::While &x) {
-        auto body = mk_string<Stmt::Any>(
-            x.body, [&](auto &stmt) { return mkStmt(stmt); }, "\n");
-
-        auto tests = mk_string<Stmt::Any>(
-            x.tests, [&](auto &stmt) { return mkStmt(stmt); }, "\n");
-
-        auto whileBody = tests + "\nif(!" + mkRef(x.cond) + ") break;" + "\n" + body;
-
-        return "while(true) {\n" + indent(2, whileBody) + "\n}";
+        auto body = x.body | mk_string("{\n", "\n", "\n}", [&](auto &stmt) { return mkStmt(stmt) ^ indent(2); });
+        auto tests = x.tests | mk_string("\n", [&](auto &stmt) { return mkStmt(stmt); });
+        auto whileBody = fmt::format("{}\nif(!{}) break;\n{}", tests, mkExpr(x.cond), body);
+        return fmt::format("while(true) {{\n{}\n}}", whileBody);
       },
       [&](const Stmt::Break &x) { return "break;"s; },   //
       [&](const Stmt::Cont &x) { return "continue;"s; }, //
       [&](const Stmt::Cond &x) {
-        auto elseStmts = x.falseBr.empty() //
-                             ? "\n}"
-                             : "\n} else {\n" +
-                                   indent(2, mk_string<Stmt::Any>(
-                                                 x.falseBr, [&](auto x) { return mkStmt(x); }, "\n")) +
-                                   "}";
-
-        return "if(" + mkExpr(x.cond, "if") + ") {\n" +
-               indent(2, mk_string<Stmt::Any>(
-                             x.trueBr, [&](auto x) { return mkStmt(x); }, "\n")) +
-               elseStmts;
+        auto trueBr = x.trueBr ^ mk_string("{\n", "\n", "\n}", [&](auto x) { return mkStmt(x) ^ indent(2); });
+        if (x.falseBr.empty()) {
+          return fmt::format("if ({}) {}", mkExpr(x.cond), trueBr);
+        } else {
+          auto falseBr = x.falseBr ^ mk_string("{\n", "\n", "\n}", [&](auto x) { return mkStmt(x) ^ indent(2); });
+          return fmt::format("if ({}) {} else {}", mkExpr(x.cond), trueBr, falseBr);
+        }
       },
-      [&](const Stmt::Return &x) { return "return " + mkExpr(x.value, "rtn") + ";"; } //
+      [&](const Stmt::Return &x) { return "return " + mkExpr(x.value) + ";"; }, //
+      [&](const Stmt::Annotated &x) {
+        return fmt::format("{} /*{};{}*/", mkStmt(x), x.pos ^ map(show_repr) ^ get_or_else(""), x.comment ^ get_or_else(""));
+      } //
   );
 }
 
 std::string backend::CSource ::mkFn(const Function &fnTree) {
 
-  std::vector<Arg> allArgs;
-  if (fnTree.receiver) allArgs.insert(allArgs.begin(), *fnTree.receiver);
-  allArgs.insert(allArgs.begin(), fnTree.args.begin(), fnTree.args.end());
-  allArgs.insert(allArgs.begin(), fnTree.moduleCaptures.begin(), fnTree.moduleCaptures.end());
-  allArgs.insert(allArgs.begin(), fnTree.termCaptures.begin(), fnTree.termCaptures.end());
+  std::vector<std::string> argExprs =
+      fnTree.args | zip_with_index() | map([&](auto &arg, auto idx) {
+        auto tpe = mkTpe(arg.named.tpe);
+        auto name = arg.named.symbol;
+        std::string decl;
+        switch (dialect) {
+          case Dialect::OpenCL1_1: {
+            if (auto arr = arg.named.tpe.template get<Type::Ptr>()) {
+              decl = arr->space.match_total([&](TypeSpace::Global) { return fmt::format("global {} {}", tpe, name); },
+                                            [&](TypeSpace::Local) { return fmt::format("local {} {}", tpe, name); });
+            } else decl = fmt::format("{} {}", tpe, name);
 
-  std::vector<std::string> argExprs(allArgs.size());
-  for (size_t i = 0; i < allArgs.size(); ++i) {
-    auto arg = allArgs[i];
-    auto tpe = mkTpe(arg.named.tpe);
-    auto name = arg.named.symbol;
-    std::string decl;
-    switch (dialect) {
-      case Dialect::OpenCL1_1: {
-        if (auto arr = arg.named.tpe.get<Type::Ptr>(); arr) {
-          decl = arr->space.match_total([&](TypeSpace::Global _) { return "global " + tpe + " " + name; }, //
-                                        [&](TypeSpace::Local _) { return "local " + tpe + " " + name; });
-        } else
-          decl = tpe + " " + name;
-        break;
-      }
-      case Dialect::MSL1_0: {
-        // Scalar:      device $T &$name      [[ buffer($i) ]]
-        // Global:      device $T  $name      [[ buffer($i) ]]
-        // Local:  threadgroup $T &$name [[ threadgroup($i) ]]
-        // query:              $T &$name           [[ $type ]]
-        auto idx = std::to_string(i);
-        if (auto arr = arg.named.tpe.get<Type::Ptr>(); arr) {
-          decl = arr->space.match_total(
-              [&](TypeSpace::Global _) { return "device " + tpe + " " + name + " [[buffer(" + idx + ")]]"; },         //
-              [&](TypeSpace::Local _) { return "threadgroup " + tpe + " " + name + " [[threadgroup(" + idx + ")]]"; } //
-          );
-        } else {
-          decl = "device " + tpe + " &" + name + " [[buffer(" + idx + ")]]";
-        };
-        break;
-      }
-      default: break;
-    }
-    argExprs[i] = decl;
-  }
+            break;
+          }
+          case Dialect::MSL1_0: {
+            // Scalar:      device $T &$name      [[ buffer($i) ]]
+            // Global:      device $T  $name      [[ buffer($i) ]]
+            // Local:  threadgroup $T &$name [[ threadgroup($i) ]]
+            // query:              $T &$name           [[ $type ]]
+            if (auto arr = arg.named.tpe.template get<Type::Ptr>()) {
+              decl = arr->space.match_total(
+                  [&](TypeSpace::Global) { return fmt::format("device {} {} [[buffer({})]]", tpe, name, idx); },         //
+                  [&](TypeSpace::Local) { return fmt::format("threadgroup {} {} [[threadgroup({})]]", tpe, name, idx); } //
+              );
+            } else decl = fmt::format("device {} &{} [[buffer({})]]", tpe, name, idx);
+
+            break;
+          }
+          default: break;
+        }
+        return decl;
+      }) |
+      to_vector();
 
   if (dialect == Dialect::MSL1_0) {
 
@@ -334,11 +309,8 @@ std::string backend::CSource ::mkFn(const Function &fnTree) {
       }
     }
     for (auto &[name, attr] : iargs)
-      argExprs.push_back("uint3 __" + name + "__ [[ " + attr + " ]]");
+      argExprs.emplace_back(fmt::format("uint3 __{}__ [[ {} ]]", name, attr));
   }
-
-  auto args = mk_string<std::string>(
-      argExprs, [&](auto x) { return x; }, ", ");
 
   std::string fnPrefix;
   switch (dialect) {
@@ -360,44 +332,34 @@ std::string backend::CSource ::mkFn(const Function &fnTree) {
   //  Possible values:
   //  constant, local, global, private
 
-  auto prototype = fnPrefix + mkTpe(fnTree.rtn) + " " + qualified(fnTree.name) + "(" + args + ")";
-
-  auto body = mk_string<Stmt::Any>(
-      fnTree.body, [&](auto &stmt) { return mkStmt(stmt); }, "\n");
-
-  return prototype + " {\n" + indent(2, body) + "\n}";
+  return fmt::format("{}{} {}({}) {}",
+                     fnPrefix,                   //
+                     mkTpe(fnTree.rtn),          //
+                     fnTree.name,                //
+                     argExprs | mk_string(", "), //
+                     fnTree.body ^ mk_string("{\n", "\n", "\n}", [&](auto &s) { return mkStmt(s) ^ indent(2); }));
 }
 
 polyast::CompileResult backend::CSource::compileProgram(const Program &program, const compiletime::OptLevel &opt) {
   auto start = compiler::nowMono();
 
-  auto structDefs = mk_string<StructDef>(
-      program.defs,
-      [&](auto &x) {
-        return std::accumulate(                                                                                       //
-                   x.members.begin(), x.members.end(),                                                                //
-                   "typedef struct {"s,                                                                               //
-                   [&](auto &&acc, auto m) { return acc + "\n  " + mkTpe(m.named.tpe) + " " + m.named.symbol + ";"; } //
-                   ) +
-               "\n} " + qualified(x.name) + ";";
-      },
-      "\n");
+  auto structDefs =
+      program.structs | mk_string("\n", [&](auto &s) {
+        return fmt::format("typedef struct {}",
+                           s.members | mk_string("{", "\n", "}", [&](auto &m) { return fmt::format("  {} {};", mkTpe(m.tpe), m.symbol); }));
+      });
 
-  std::vector<std::string> lines;
-
+  std::vector<std::string> fragments;
   switch (dialect) {
-    case Dialect::C11: lines.emplace_back("#include <stdint.h>\n#include <stdbool.h>"); break;
+    case Dialect::C11: fragments.emplace_back("#include <stdint.h>\n#include <stdbool.h>"); break;
     default: break;
   }
 
-  lines.push_back(structDefs);
-  lines.push_back(mkFn(program.entry));
+  fragments.emplace_back(structDefs);
   for (auto &f : program.functions)
-    lines.push_back(mkFn(f));
+    fragments.emplace_back(mkFn(f));
 
-  auto def = mk_string<std::string>(lines, [](auto x) { return x; }, "\n");
-
-  std::vector<int8_t> data(def.begin(), def.end());
+  auto code = fragments | mk_string("\n");
 
   std::string dialectName;
   switch (dialect) {
@@ -407,8 +369,12 @@ polyast::CompileResult backend::CSource::compileProgram(const Program &program, 
     default: dialectName = "unknown";
   }
 
-  return {data, {}, {{compiler::nowMs(), compiler::elapsedNs(start), "polyast_to_" + dialectName + "_c", def}}, {}, ""};
+  return {std::vector<int8_t>(code.begin(), code.end()),
+          {},
+          {{compiler::nowMs(), compiler::elapsedNs(start), "polyast_to_" + dialectName + "_c", code}},
+          {},
+          ""};
 }
-std::vector<polyast::CompileLayout> backend::CSource::resolveLayouts(const std::vector<StructDef> &defs, const compiletime::OptLevel &opt) {
-  return std::vector<polyast::CompileLayout>();
+std::vector<polyast::StructLayout> backend::CSource::resolveLayouts(const std::vector<StructDef> &defs) {
+  return std::vector<StructLayout>();
 }

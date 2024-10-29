@@ -44,16 +44,16 @@ ValPtr CPUTargetSpecificHandler::mkMathVal(LLVMBackend::AstTransformer &xform, l
               return xform.B.CreateOr(xform.B.CreateAShr(x, msbOffset), xform.B.CreateLShr(xform.B.CreateNeg(x), msbOffset));
             },
             [&](auto x) -> ValPtr {
-              auto mag = [&](const Term::Any &magnitude) {
+              auto mag = [&](const Expr::Any &magnitude) {
                 auto nan = xform.B.CreateFCmpUNO(x, x);
                 auto zero = xform.B.CreateFCmpUNO(x, llvm::ConstantFP::get(x->getType(), 0));
                 return xform.B.CreateSelect(xform.B.CreateLogicalOr(nan, zero), x,
                                             xform.intr2(fn, llvm::Intrinsic::copysign, v.tpe, magnitude, v.x));
               };
               if (v.tpe.is<Type::Float32>())       //
-                return mag(Term::Float32Const(1)); //
+                return mag(Expr::Float32Const(1)); //
               else if (v.tpe.is<Type::Float64>())  //
-                return mag(Term::Float64Const(1)); //
+                return mag(Expr::Float64Const(1)); //
               else
                 throw BackendException("unimplemented");
             });

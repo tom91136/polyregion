@@ -1,8 +1,8 @@
 package polyregion.ast
 
 import cats.kernel.Semigroup
-import polyregion.ast.PolyAst as p
-import polyregion.ast.PolyAst.{Type, TypeKind}
+import polyregion.ast.PolyAST as p
+import polyregion.ast.PolyAST.{Type, TypeKind}
 import polyregion.ast.Traversal.*
 
 import java.lang.reflect.Modifier

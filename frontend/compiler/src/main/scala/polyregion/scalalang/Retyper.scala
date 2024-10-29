@@ -2,7 +2,7 @@ package polyregion.scalalang
 
 import cats.kernel.Monoid
 import cats.syntax.all.*
-import polyregion.ast.{PolyAst as p, *}
+import polyregion.ast.{PolyAST as p, *}
 
 import scala.annotation.tailrec
 import scala.util.Try

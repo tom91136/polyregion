@@ -1,6 +1,6 @@
 package polyregion.prism
 
-import polyregion.ast.{PolyAst as p, *}
+import polyregion.ast.{PolyAST as p, *}
 import polyregion.prism.compiletime.*
 import polyregion.scalalang.intrinsics
 import polyregion.scalalang.intrinsics.TypedBuffer

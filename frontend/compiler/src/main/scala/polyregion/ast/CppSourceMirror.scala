@@ -2,7 +2,7 @@ package polyregion.ast
 
 import polyregion.ast.mirror.CppNlohmannJsonCodecGen
 import polyregion.ast.mirror.CppStructGen.*
-import polyregion.ast.{MsgPack, PolyAst}
+import polyregion.ast.{MsgPack, PolyAST}
 
 import java.lang.annotation.Target
 import java.math.BigInteger
@@ -15,7 +15,7 @@ import scala.runtime.RichInt
 
 private[polyregion] object CppSourceMirror {
 
-  import PolyAst.*
+  import PolyAST.*
 
   private inline def md5(s: String): String = {
     val md5 = MessageDigest.getInstance("MD5");

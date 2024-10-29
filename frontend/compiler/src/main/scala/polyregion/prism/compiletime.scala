@@ -1,7 +1,7 @@
 package polyregion.prism
 
 import cats.syntax.all.*
-import polyregion.ast.{PolyAst as p, *, given}
+import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.scalalang.*
 import polyregion.ast.Traversal.*
 

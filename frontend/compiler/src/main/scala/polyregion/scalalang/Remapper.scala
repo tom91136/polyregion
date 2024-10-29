@@ -3,7 +3,7 @@ package polyregion.scalalang
 import cats.data.EitherT
 import cats.syntax.all.*
 import polyregion.ast.Traversal.*
-import polyregion.ast.{PolyAst as p, *, given}
+import polyregion.ast.{PolyAST as p, *, given}
 
 import scala.annotation.tailrec
 

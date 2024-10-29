@@ -86,7 +86,7 @@ static backend::LLVMBackend::Options toLLVMBackendOptions(const compiler::Option
   }
 }
 
-std::vector<polyast::CompileLayout> compiler::layoutOf(const std::vector<polyast::StructDef> &defs, const Options &options) {
+std::vector<polyast::StructLayout> compiler::layoutOf(const std::vector<polyast::StructDef> &defs, const Options &options) {
 
   switch (options.target) {
     case compiletime::Target::Object_LLVM_HOST:
@@ -103,7 +103,7 @@ std::vector<polyast::CompileLayout> compiler::layoutOf(const std::vector<polyast
 
       llvm::LLVMContext c;
       backend::LLVMBackend::AstTransformer xform(llvmOptions, c);
-      std::vector<polyast::CompileLayout> layouts;
+      std::vector<polyast::StructLayout> layouts;
       xform.addDefs(defs);
 
       std::unordered_map<polyast::Sym, polyast::StructDef> lut(defs.size());
@@ -112,7 +112,7 @@ std::vector<polyast::CompileLayout> compiler::layoutOf(const std::vector<polyast
       for (auto &[sym, structTy] : xform.getStructTypes()) {
         if (auto it = lut.find(sym); it != lut.end()) {
           auto layout = dataLayout.getStructLayout(structTy);
-          std::vector<polyast::CompileLayoutMember> members;
+          std::vector<polyast::StructLayout::Member> members;
           for (size_t i = 0; i < it->second.members.size(); ++i) {
             members.emplace_back(it->second.members[i].named,                             //
                                  layout->getElementOffset(i),                             //
@@ -132,7 +132,7 @@ std::vector<polyast::CompileLayout> compiler::layoutOf(const std::vector<polyast
   }
 }
 
-std::vector<polyast::CompileLayout> compiler::layoutOf(const polyast::Bytes &sdef, const Options &options) {
+std::vector<polyast::StructLayout> compiler::layoutOf(const polyast::Bytes &sdef, const Options &options) {
   json json = deserialiseAst(sdef);
   std::vector<polyast::StructDef> sdefs;
   std::transform(json.begin(), json.end(), std::back_inserter(sdefs), &polyast::structdef_from_json);

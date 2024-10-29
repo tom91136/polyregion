@@ -1,10 +1,12 @@
 #include "ast.h"
 #include "compiler.h"
 #include "generated/polyast.h"
+
 #include "polyregion/concurrency_utils.hpp"
 #include "polyregion/stream.hpp"
 #include "polyregion/utils.hpp"
 #include "polyrt/runtime.h"
+
 #include <thread>
 
 using namespace polyregion;
@@ -12,7 +14,6 @@ using namespace polyregion::concurrency_utils;
 using namespace polyregion::polyast;
 
 using namespace Stmt;
-using namespace Term;
 using namespace Expr;
 using namespace Intr;
 using namespace Math;
@@ -23,9 +24,9 @@ using namespace polyregion::polyast::dsl;
 Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
   using Stmts = std::vector<Stmt::Any>;
   static auto empty = [](auto, auto) -> Stmts { return {}; };
-  auto mkCpuStreamFn = [&](const std::string &name, std::vector<Arg> extraArgs, const std::function<Stmts(Term::Any, Term::Any)> &mkPrelude,
-                           const std::function<Stmts(Term::Any, Term::Any)> &mkLoopBody,
-                           const std::function<Stmts(Term::Any, Term::Any)> &mkEpilogue) {
+  auto mkCpuStreamFn = [&](const std::string &name, std::vector<Arg> extraArgs, const std::function<Stmts(Expr::Any, Expr::Any)> &mkPrelude,
+                           const std::function<Stmts(Expr::Any, Expr::Any)> &mkLoopBody,
+                           const std::function<Stmts(Expr::Any, Expr::Any)> &mkEpilogue) {
     std::vector<Arg> args = {"a"_(Ptr(type))(), "b"_(Ptr(type))(), "c"_(Ptr(type))()};
     if (!gpu) {
       std::vector<Arg> cpuArgs = {"id"_(Long)(), "begin"_(Ptr(Long))(), "end"_(Ptr(Long))()};
@@ -42,7 +43,7 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
       stmts.insert(stmts.end(), prelude.begin(), prelude.end()); // ...
 
       auto loopBody = mkLoopBody("id"_(Long), "i"_(Long));
-      loopBody.push_back(Mut("i"_(Long), invoke(Add("i"_(Long), 1_(Long), Long)), false)); // i++
+      loopBody.push_back(Mut("i"_(Long), invoke(Add("i"_(Long), 1_(Long), Long)))); // i++
 
       stmts.push_back(While({let("bound") = "end"_(Ptr(Long))["id"_(Long)], let("cont") = invoke(LogicLt("i"_(Long), "bound"_(Long)))},
                             "cont"_(Bool),
@@ -67,7 +68,7 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
 
     stmts.push_back(ret(Unit0Const()));
 
-    return function("stream_" + name + suffix, args, Unit, FunctionKind::Exported())(stmts);
+    return function("stream_" + name + suffix, args, Unit, {FunctionAttr::Exported()})(stmts);
   };
 
   auto copy = mkCpuStreamFn( //
@@ -127,11 +128,11 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
               },
               [&](auto id, auto i) -> Stmts {
                 return {
-                    let("ai") = "a"_(Ptr(type))[i],                                           // ai = a[i]
-                    let("bi") = "b"_(Ptr(type))[i],                                           // bi = b[i]
-                    let("sumid") = "acc"_(type),                                              // sumid = acc
-                    let("r0") = invoke(Mul("ai"_(type), "bi"_(type), type)),                  // r0 = ai * bi
-                    Mut("acc"_(type), invoke(Add("r0"_(type), "sumid"_(type), type)), false), // r1 = r0 + sumid
+                    let("ai") = "a"_(Ptr(type))[i],                                // ai = a[i]
+                    let("bi") = "b"_(Ptr(type))[i],                                // bi = b[i]
+                    let("sumid") = "acc"_(type),                                   // sumid = acc
+                    let("r0") = invoke(Mul("ai"_(type), "bi"_(type), type)),       // r0 = ai * bi
+                    "acc"_(type) = invoke(Add("r0"_(type), "sumid"_(type), type)), // r1 = r0 + sumid
 
                 };
               },
@@ -148,15 +149,15 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
                     let("global_size") = invoke(GpuGlobalSize(0_(UInt))),
                     "wg_sum"_(Ptr(type, {}, Local))[local_i] = 0_(type),
                     While({let("cont") = invoke(LogicLt("i"_(UInt), "array_size"_(UInt)))}, "cont"_(Bool),
-                          {let("ai") = "a"_(Ptr(type))[i],                                                // ai = a[i]
-                           let("bi") = "b"_(Ptr(type))[i],                                                // bi = b[i]
-                           let("sumid") = "wg_sum"_(Ptr(type, {}, Local))[local_i],                       // sumid = sum[local_i]
-                           let("r0") = invoke(Mul("ai"_(type), "bi"_(type), type)),                       // r0 = ai * bi
-                           let("r1") = invoke(Add("r0"_(type), "sumid"_(type), type)),                    // r1 = r0 + sumid
-                           "wg_sum"_(Ptr(type, {}, Local))[local_i] = "r1"_(type),                        // a[i] = bi
-                           Mut("i"_(UInt), invoke(Add("i"_(UInt), "global_size"_(UInt), UInt)), false)}), // i += array_size
-                    let("offset") = invoke(GpuLocalSize(0_(UInt))),                                       // offset = get_local_size()
-                    Mut("offset"_(UInt), invoke(Div("offset"_(UInt), 2_(UInt), UInt)), false),            // offset /= 2
+                          {let("ai") = "a"_(Ptr(type))[i],                                       // ai = a[i]
+                           let("bi") = "b"_(Ptr(type))[i],                                       // bi = b[i]
+                           let("sumid") = "wg_sum"_(Ptr(type, {}, Local))[local_i],              // sumid = sum[local_i]
+                           let("r0") = invoke(Mul("ai"_(type), "bi"_(type), type)),              // r0 = ai * bi
+                           let("r1") = invoke(Add("r0"_(type), "sumid"_(type), type)),           // r1 = r0 + sumid
+                           "wg_sum"_(Ptr(type, {}, Local))[local_i] = "r1"_(type),               // a[i] = bi
+                           ("i"_(UInt) = invoke(Add("i"_(UInt), "global_size"_(UInt), UInt)))}), // i += array_size
+                    let("offset") = invoke(GpuLocalSize(0_(UInt))),                              // offset = get_local_size()
+                    "offset"_(UInt) = invoke(Div("offset"_(UInt), 2_(UInt), UInt)),              // offset /= 2
                     While({let("cont2") = invoke(LogicGt("offset"_(UInt), 0_(UInt)))}, "cont2"_(Bool),
                           {
                               let("_") = invoke(GpuBarrierLocal()),
@@ -167,13 +168,12 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
                                        let("wg_sum_old") = "wg_sum"_(Ptr(type, {}, Local))[local_i], // wg_sum_old = wg_sum[local_i]
                                        let("wg_sum_at_offset") = "wg_sum"_(Ptr(type, {}, Local))["new_offset"_(UInt)], // wg_sum_at_offset =
                                                                                                                        // wg_sum[new_offset]
-                                       Mut("wg_sum_at_offset"_(type), invoke(Add("wg_sum_at_offset"_(type), "wg_sum_old"_(type), type)),
-                                           false),
+                                       "wg_sum_at_offset"_(type) = invoke(Add("wg_sum_at_offset"_(type), "wg_sum_old"_(type), type)),
 
                                        "wg_sum"_(Ptr(type, {}, Local))[local_i] = "wg_sum_at_offset"_(type), // a[i] = bi
                                    },
                                    {}),
-                              Mut("offset"_(UInt), invoke(Div("offset"_(UInt), 2_(UInt), UInt)), false) // offset /= 2
+                              "offset"_(UInt) = invoke(Div("offset"_(UInt), 2_(UInt), UInt)) // offset /= 2
                           }),
                     let("group_id") = invoke(GpuGroupIdx(0_(UInt))),
                     Cond({invoke(LogicEq("local_i"_(UInt), 0_(UInt)))}, //
@@ -196,7 +196,7 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
   //  std::cout << repr(dot) << std::endl;
 
   auto entry = function("entry", {}, Unit)({ret(Unit0Const())});
-  return Program(entry, {copy, mul, add, triad, dot}, {});
+  return Program({}, {entry, copy, mul, add, triad, dot});
 }
 
 int main() {
@@ -215,7 +215,7 @@ int main() {
       {runtime::Backend::Metal, compiletime::Target::Source_C_Metal1_0, ""},
 #else
       {runtime::Backend::CUDA, compiletime::Target::Object_LLVM_NVPTX64, "sm_60"},
-      //      {runtime::Backend::HIP, compiletime::Target::Object_LLVM_AMDGCN, "gfx1036"},
+  //      {runtime::Backend::HIP, compiletime::Target::Object_LLVM_AMDGCN, "gfx1036"},
 //            {runtime::Backend::HSA, compiletime::Target::Object_LLVM_AMDGCN, "gfx1036"},
 //      {runtime::Backend::RelocatableObject, compiletime::Target::Object_LLVM_x86_64, "x86-64-v3"},
 #endif
@@ -238,8 +238,8 @@ int main() {
     std::cout << "backend=" << to_string(backend) << " arch=" << arch << std::endl;
     {
 
-      polyregion::compiler::initialise();
-      auto c = polyregion::compiler::compile(p, {target, arch}, compiletime::OptLevel::Ofast);
+      compiler::initialise();
+      auto c = compiler::compile(p, {target, arch}, compiletime::OptLevel::Ofast);
       //          std::cerr << c << std::endl;
       std::cerr << repr(c) << std::endl;
 
@@ -255,7 +255,7 @@ int main() {
 
         std::string suffix = "_float";
 
-        polyregion::stream::Kernels<std::pair<std::string, std::string>> kernelSpecs;
+         stream::Kernels<std::pair<std::string, std::string>> kernelSpecs;
         if (d->singleEntryPerModule() && false) {
           //      for (auto &[module_, data] : imageGroups)
           //        d->loadModule(module_, data);
@@ -290,7 +290,7 @@ int main() {
           }
         };
 
-        polyregion::stream::runStream<float>(                  //
+         stream::runStream<float>(                  //
             runtime::Type::Float32, size, times, groups,       //
             "Explicit: " + platform->name(), platform->kind(), //
             *d, kernelSpecs, true, fValidate, fValidateSum);

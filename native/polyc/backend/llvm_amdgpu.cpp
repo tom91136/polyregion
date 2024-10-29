@@ -1,12 +1,10 @@
 #include "llvm_amdgpu.h"
 #include "llvm/IR/IntrinsicsAMDGPU.h"
 
-using namespace polyregion::backend;
+using namespace polyregion::backend::details;
 
-void AMDGPUTargetSpecificHandler::witnessEntry(LLVMBackend::AstTransformer &ctx, llvm::Module &mod, llvm::Function &fn) {
-  fn.setCallingConv(llvm::CallingConv::AMDGPU_KERNEL);
-}
-ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(LLVMBackend::AstTransformer &xform, llvm::Function *fn, const Expr::SpecOp &expr) {
+void AMDGPUTargetSpecificHandler::witnessEntry(CodeGen &cg, llvm::Function &fn) { fn.setCallingConv(llvm::CallingConv::AMDGPU_KERNEL); }
+ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr) {
 
   // HSA Sys Arch 1.2:  2.9.6 Kernel Dispatch Packet format:
   //  15:0    header Packet header, see 2.9.1 Packet header (on page 25).
@@ -32,46 +30,45 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(LLVMBackend::AstTransformer &xform
   // see llvm/libclc/amdgcn-amdhsa/lib/workitem/get_global_size.cl
   auto globalSizeU32 = [&](size_t dim) -> ValPtr {
     if (dim >= 3) throw std::logic_error("Dim >= 3");
-    auto i32Ty = llvm::Type::getInt32Ty(xform.C);
-    auto i32ptr = xform.B.CreatePointerCast(xform.intr0(fn, llvm::Intrinsic::amdgcn_dispatch_ptr), i32Ty->getPointerTo());
+    auto i32Ty = llvm::Type::getInt32Ty(cg.C);
+    auto i32ptr = cg.B.CreatePointerCast(cg.intr0(llvm::Intrinsic::amdgcn_dispatch_ptr), i32Ty->getPointerTo());
     // 127:96   grid_size_x;  (32*3+(0*32)==96)
     // 159:128  grid_size_y;  (32*3+(1*32)==128)
     // 191:160  grid_size_z;  (32*3+(2*32)==160)
-    auto size = xform.B.CreateInBoundsGEP(i32Ty, i32ptr, llvm::ConstantInt::get(i32Ty, 3 + dim));
-    return xform.load(size, i32Ty);
+    auto size = cg.B.CreateInBoundsGEP(i32Ty, i32ptr, llvm::ConstantInt::get(i32Ty, 3 + dim));
+    return cg.load(size, i32Ty);
   };
 
   // see llvm/libclc/amdgcn-amdhsa/lib/workitem/get_local_size.cl
   auto localSizeU32 = [&](size_t dim) -> ValPtr {
     if (dim >= 3) throw std::logic_error("Dim >= 3");
-    auto i16Ty = llvm::Type::getInt16Ty(xform.C);
-    auto i16ptr = xform.B.CreatePointerCast(xform.intr0(fn, llvm::Intrinsic::amdgcn_dispatch_ptr), i16Ty->getPointerTo());
+    auto i16Ty = llvm::Type::getInt16Ty(cg.C);
+    auto i16ptr = cg.B.CreatePointerCast(cg.intr0(llvm::Intrinsic::amdgcn_dispatch_ptr), i16Ty->getPointerTo());
     // 47:32   workgroup_size_x (16*2+(0*16)==32)
     // 63:48   workgroup_size_y (16*2+(1*16)==48)
     // 79:64   workgroup_size_z (16*2+(2*16)==64)
-    auto size = xform.B.CreateInBoundsGEP(i16Ty, i16ptr, llvm::ConstantInt::get(i16Ty, 2 + dim));
-    return xform.B.CreateIntCast(xform.load(size, i16Ty), llvm::Type::getInt32Ty(xform.C), false);
+    auto size = cg.B.CreateInBoundsGEP(i16Ty, i16ptr, llvm::ConstantInt::get(i16Ty, 2 + dim));
+    return cg.B.CreateIntCast(cg.load(size, i16Ty), llvm::Type::getInt32Ty(cg.C), false);
   };
 
   auto globalIdU32 = [&](llvm::Intrinsic::ID workgroupId, llvm::Intrinsic::ID workitemId, size_t dim) -> ValPtr {
-    return xform.B.CreateAdd(xform.B.CreateMul(xform.intr0(fn, workgroupId), localSizeU32(dim)), xform.intr0(fn, workitemId));
+    return cg.B.CreateAdd(cg.B.CreateMul(cg.intr0(workgroupId), localSizeU32(dim)), cg.intr0(workitemId));
   };
 
   //            // see llvm/libclc/amdgcn-amdhsa/lib/workitem/get_num_groups.cl
   auto numGroupsU32 = [&](size_t dim) -> ValPtr {
     auto n = globalSizeU32(dim);
     auto d = localSizeU32(dim);
-    auto q = xform.B.CreateUDiv(globalSizeU32(dim), localSizeU32(dim));                             // q = n / d
-    auto rem = xform.B.CreateZExt(xform.B.CreateICmpUGT(n, xform.B.CreateMul(q, d)), n->getType()); // ( (uint32t) (n > q*d) )
-    return xform.B.CreateAdd(q, rem);                                                               // q + rem
+    auto q = cg.B.CreateUDiv(globalSizeU32(dim), localSizeU32(dim));                       // q = n / d
+    auto rem = cg.B.CreateZExt(cg.B.CreateICmpUGT(n, cg.B.CreateMul(q, d)), n->getType()); // ( (uint32t) (n > q*d) )
+    return cg.B.CreateAdd(q, rem);                                                         // q + rem
   };
 
-  auto dim3OrAssert = [&](const AnyTerm &dim, ValPtr d0, ValPtr d1, ValPtr d2) {
-    return xform.B.CreateSelect(
-        xform.B.CreateICmpEQ(xform.mkTermVal(dim), xform.mkTermVal(Term::IntS32Const(0))), d0,
-        xform.B.CreateSelect(xform.B.CreateICmpEQ(xform.mkTermVal(dim), xform.mkTermVal(Term::IntS32Const(1))), d1,
-                             xform.B.CreateSelect(xform.B.CreateICmpEQ(xform.mkTermVal(dim), xform.mkTermVal(Term::IntS32Const(2))), d2,
-                                                  xform.mkTermVal(Term::IntS32Const(0)))));
+  auto dim3OrAssert = [&](const AnyExpr &dim, ValPtr d0, ValPtr d1, ValPtr d2) {
+    return cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkTermVal(dim), cg.mkTermVal(Expr::IntS32Const(0))), d0,
+                             cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkTermVal(dim), cg.mkTermVal(Expr::IntS32Const(1))), d1,
+                                               cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkTermVal(dim), cg.mkTermVal(Expr::IntS32Const(2))),
+                                                                 d2, cg.mkTermVal(Expr::IntS32Const(0)))));
   };
 
   return expr.op.match_total(                                                            //
@@ -79,32 +76,32 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(LLVMBackend::AstTransformer &xform
       [&](const Spec::GpuBarrierGlobal &v) -> ValPtr {
         // work_group_barrier (__memory_scope, 1, 1)
         // FIXME
-        // intr1(Intr::amdgcn_s_waitcnt,Type::Int(), Term::IntConst(0xFF));
-        return xform.intr0(fn, llvm::Intrinsic::amdgcn_s_barrier);
+        // intr1(Intr::amdgcn_s_waitcnt,Type::Int(), Expr::IntConst(0xFF));
+        return cg.intr0(llvm::Intrinsic::amdgcn_s_barrier);
       },
       [&](const Spec::GpuBarrierLocal &v) -> ValPtr {
         // work_group_barrier (__memory_scope, 1, 1)
         // FIXME
-        // intr1(Intr::amdgcn_s_waitcnt,Type::Int(), Term::IntConst(0xFF));
-        return xform.intr0(fn, llvm::Intrinsic::amdgcn_s_barrier);
+        // intr1(Intr::amdgcn_s_waitcnt,Type::Int(), Expr::IntConst(0xFF));
+        return cg.intr0(llvm::Intrinsic::amdgcn_s_barrier);
       },
       [&](const Spec::GpuBarrierAll &v) -> ValPtr {
         // work_group_barrier (__memory_scope, 1, 1)
         // FIXME
-        // intr1(Intr::amdgcn_s_waitcnt,Type::Int(), Term::IntConst(0xFF));
-        return xform.intr0(fn, llvm::Intrinsic::amdgcn_s_barrier);
+        // intr1(Intr::amdgcn_s_waitcnt,Type::Int(), Expr::IntConst(0xFF));
+        return cg.intr0(llvm::Intrinsic::amdgcn_s_barrier);
       },
       [&](const Spec::GpuFenceGlobal &v) -> ValPtr {
         // atomic_work_item_fence(0, 5, 1) // FIXME
-        return xform.intr1(fn, llvm::Intrinsic::amdgcn_s_waitcnt, Type::IntU32(), Term::IntU32Const(0xFF));
+        return cg.intr1(llvm::Intrinsic::amdgcn_s_waitcnt, Type::IntU32(), Expr::IntU32Const(0xFF));
       },
       [&](const Spec::GpuFenceLocal &v) -> ValPtr {
         // atomic_work_item_fence(0, 5, 1) // FIXME
-        return xform.intr1(fn, llvm::Intrinsic::amdgcn_s_waitcnt, Type::IntU32(), Term::IntU32Const(0xFF));
+        return cg.intr1(llvm::Intrinsic::amdgcn_s_waitcnt, Type::IntU32(), Expr::IntU32Const(0xFF));
       },
       [&](const Spec::GpuFenceAll &v) -> ValPtr {
         // atomic_work_item_fence(0, 5, 1) // FIXME
-        return xform.intr1(fn, llvm::Intrinsic::amdgcn_s_waitcnt, Type::IntU32(), Term::IntU32Const(0xFF));
+        return cg.intr1(llvm::Intrinsic::amdgcn_s_waitcnt, Type::IntU32(), Expr::IntU32Const(0xFF));
       },
 
       [&](const Spec::GpuGlobalIdx &v) -> ValPtr {
@@ -120,10 +117,10 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(LLVMBackend::AstTransformer &xform
                             globalSizeU32(2));
       },
       [&](const Spec::GpuGroupIdx &v) -> ValPtr {
-        return dim3OrAssert(v.dim,                                                   //
-                            xform.intr0(fn, llvm::Intrinsic::amdgcn_workgroup_id_x), //
-                            xform.intr0(fn, llvm::Intrinsic::amdgcn_workgroup_id_y), //
-                            xform.intr0(fn, llvm::Intrinsic::amdgcn_workgroup_id_z));
+        return dim3OrAssert(v.dim,                                            //
+                            cg.intr0(llvm::Intrinsic::amdgcn_workgroup_id_x), //
+                            cg.intr0(llvm::Intrinsic::amdgcn_workgroup_id_y), //
+                            cg.intr0(llvm::Intrinsic::amdgcn_workgroup_id_z));
       },
       [&](const Spec::GpuGroupSize &v) -> ValPtr {
         return dim3OrAssert(v.dim,           //
@@ -132,10 +129,10 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(LLVMBackend::AstTransformer &xform
                             numGroupsU32(2));
       },
       [&](const Spec::GpuLocalIdx &v) -> ValPtr {
-        return dim3OrAssert(v.dim,                                                  //
-                            xform.intr0(fn, llvm::Intrinsic::amdgcn_workitem_id_x), //
-                            xform.intr0(fn, llvm::Intrinsic::amdgcn_workitem_id_y), //
-                            xform.intr0(fn, llvm::Intrinsic::amdgcn_workitem_id_z));
+        return dim3OrAssert(v.dim,                                           //
+                            cg.intr0(llvm::Intrinsic::amdgcn_workitem_id_x), //
+                            cg.intr0(llvm::Intrinsic::amdgcn_workitem_id_y), //
+                            cg.intr0(llvm::Intrinsic::amdgcn_workitem_id_z));
       },
       [&](const Spec::GpuLocalSize &v) -> ValPtr {
         return dim3OrAssert(v.dim,           //
@@ -144,7 +141,7 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(LLVMBackend::AstTransformer &xform
                             localSizeU32(2));
       });
 }
-ValPtr AMDGPUTargetSpecificHandler::mkMathVal(LLVMBackend::AstTransformer &xform, llvm::Function *fn, const Expr::MathOp &expr) {
+ValPtr AMDGPUTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr) {
   return expr.op.match_total(                                                            //
       [&](const Math::Abs &v) -> ValPtr { throw BackendException("unimplemented"); },    //
       [&](const Math::Sin &v) -> ValPtr { throw BackendException("unimplemented"); },    //

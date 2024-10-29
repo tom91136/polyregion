@@ -3,7 +3,7 @@ package polyregion.scalalang
 import cats.syntax.all.*
 import polyregion.ast.Traversal.*
 import polyregion.ast.pass.*
-import polyregion.ast.{PolyAst as p, *, given}
+import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.prism.StdLib
 
 import java.nio.file.Paths

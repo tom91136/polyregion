@@ -2,7 +2,7 @@ package polyregion.ast.pass
 
 import cats.syntax.all.*
 import polyregion.ast.Traversal.*
-import polyregion.ast.{PolyAst as p, *, given}
+import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.prism.Prism
 
 object MonoStructPass extends BoundaryPass[Map[p.Sym, p.Sym]] {

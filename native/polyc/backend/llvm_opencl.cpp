@@ -1,51 +1,38 @@
 #include "llvm_opencl.h"
 
-using namespace polyregion::backend;
-/**
- * Queue a memory fence to ensure correct
- * ordering of memory operations to local memory
- */
+using namespace polyregion::backend::details;
+
+// Queue a memory fence to ensure correct ordering of memory operations to local memory
 constexpr static uint32_t CLK_LOCAL_MEM_FENCE = 0x01;
 
-/**
- * Queue a memory fence to ensure correct
- * ordering of memory operations to global memory
- */
+// Queue a memory fence to ensure correct ordering of memory operations to global memory
 constexpr static uint32_t CLK_GLOBAL_MEM_FENCE = 0x02;
 
-void OpenCLTargetSpecificHandler::witnessEntry(LLVMBackend::AstTransformer &ctx, llvm::Module &mod, llvm::Function &fn) {}
+void OpenCLTargetSpecificHandler::witnessEntry(GodeGen &ctx, llvm::Function &fn) {}
 
 // See https://github.com/KhronosGroup/SPIR-Tools/wiki/SPIR-1.2-built-in-functions
-ValPtr OpenCLTargetSpecificHandler::mkSpecVal(LLVMBackend::AstTransformer &xform, llvm::Function *fn, const Expr::SpecOp &expr) {
+ValPtr OpenCLTargetSpecificHandler::mkSpecVal(GodeGen &cg, const Expr::SpecOp &expr) {
 
   return expr.op.match_total( //
       [&](const Spec::Assert &) -> ValPtr { throw BackendException("unimplemented"); },
-      [&](const Spec::GpuGlobalIdx &v) -> ValPtr { return xform.extFn1(fn, "_Z13get_global_idj", v.tpe, v.dim); },
-      [&](const Spec::GpuGlobalSize &v) -> ValPtr { return xform.extFn1(fn, "_Z15get_global_sizej", v.tpe, v.dim); },
-      [&](const Spec::GpuGroupIdx &v) -> ValPtr { return xform.extFn1(fn, "_Z12get_group_idj", v.tpe, v.dim); },
-      [&](const Spec::GpuGroupSize &v) -> ValPtr { return xform.extFn1(fn, "_Z14get_num_groupsj", v.tpe, v.dim); },
-      [&](const Spec::GpuLocalIdx &v) -> ValPtr { return xform.extFn1(fn, "_Z12get_local_idj", v.tpe, v.dim); },
-      [&](const Spec::GpuLocalSize &v) -> ValPtr { return xform.extFn1(fn, "_Z14get_local_sizej", v.tpe, v.dim); },
-      [&](const Spec::GpuBarrierGlobal &v) -> ValPtr {
-        return xform.extFn1(fn, "_Z7barrierj", v.tpe, Term::IntS32Const(CLK_GLOBAL_MEM_FENCE));
-      },
-      [&](const Spec::GpuBarrierLocal &v) -> ValPtr {
-        return xform.extFn1(fn, "_Z7barrierj", v.tpe, Term::IntS32Const(CLK_LOCAL_MEM_FENCE));
-      },
+      [&](const Spec::GpuGlobalIdx &v) -> ValPtr { return cg.extFn1("_Z13get_global_idj", v.tpe, v.dim); },
+      [&](const Spec::GpuGlobalSize &v) -> ValPtr { return cg.extFn1("_Z15get_global_sizej", v.tpe, v.dim); },
+      [&](const Spec::GpuGroupIdx &v) -> ValPtr { return cg.extFn1("_Z12get_group_idj", v.tpe, v.dim); },
+      [&](const Spec::GpuGroupSize &v) -> ValPtr { return cg.extFn1("_Z14get_num_groupsj", v.tpe, v.dim); },
+      [&](const Spec::GpuLocalIdx &v) -> ValPtr { return cg.extFn1("_Z12get_local_idj", v.tpe, v.dim); },
+      [&](const Spec::GpuLocalSize &v) -> ValPtr { return cg.extFn1("_Z14get_local_sizej", v.tpe, v.dim); },
+      [&](const Spec::GpuBarrierGlobal &v) -> ValPtr { return cg.extFn1("_Z7barrierj", v.tpe, Expr::IntS32Const(CLK_GLOBAL_MEM_FENCE)); },
+      [&](const Spec::GpuBarrierLocal &v) -> ValPtr { return cg.extFn1("_Z7barrierj", v.tpe, Expr::IntS32Const(CLK_LOCAL_MEM_FENCE)); },
       [&](const Spec::GpuBarrierAll &v) -> ValPtr {
-        return xform.extFn1(fn, "_Z7barrierj", v.tpe, Term::IntS32Const(CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE));
+        return cg.extFn1("_Z7barrierj", v.tpe, Expr::IntS32Const(CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE));
       },
-      [&](const Spec::GpuFenceGlobal &v) -> ValPtr {
-        return xform.extFn1(fn, "_Z9mem_fencej", v.tpe, Term::IntS32Const(CLK_GLOBAL_MEM_FENCE));
-      },
-      [&](const Spec::GpuFenceLocal &v) -> ValPtr {
-        return xform.extFn1(fn, "_Z9mem_fencej", v.tpe, Term::IntS32Const(CLK_LOCAL_MEM_FENCE));
-      },
+      [&](const Spec::GpuFenceGlobal &v) -> ValPtr { return cg.extFn1("_Z9mem_fencej", v.tpe, Expr::IntS32Const(CLK_GLOBAL_MEM_FENCE)); },
+      [&](const Spec::GpuFenceLocal &v) -> ValPtr { return cg.extFn1("_Z9mem_fencej", v.tpe, Expr::IntS32Const(CLK_LOCAL_MEM_FENCE)); },
       [&](const Spec::GpuFenceAll &v) -> ValPtr {
-        return xform.extFn1(fn, "_Z9mem_fencej", v.tpe, Term::IntS32Const(CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE));
+        return cg.extFn1("_Z9mem_fencej", v.tpe, Expr::IntS32Const(CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE));
       });
 }
-ValPtr OpenCLTargetSpecificHandler::mkMathVal(LLVMBackend::AstTransformer &xform, llvm::Function *fn, const Expr::MathOp &expr) {
+ValPtr OpenCLTargetSpecificHandler::mkMathVal(GodeGen &cg, const Expr::MathOp &expr) {
   return expr.op.match_total( //                                                       //
       [&](const Math::Abs &v) -> ValPtr { throw BackendException("unimplemented"); },    //
       [&](const Math::Sin &v) -> ValPtr { throw BackendException("unimplemented"); },    //

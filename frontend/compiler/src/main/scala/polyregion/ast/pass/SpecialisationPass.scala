@@ -2,7 +2,7 @@ package polyregion.ast.pass
 
 import cats.syntax.all.*
 import polyregion.ast.Traversal.*
-import polyregion.ast.{PolyAst as p, *, given}
+import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.prism.Prism
 
 // This pass copies all generic functions with the applied types at callsite:

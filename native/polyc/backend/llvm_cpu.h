@@ -2,12 +2,12 @@
 
 #include "llvm.h"
 
-namespace polyregion::backend {
+namespace polyregion::backend::details {
 
-class CPUTargetSpecificHandler : public LLVMBackend::TargetSpecificHandler {
-  void witnessEntry(LLVMBackend::AstTransformer &xform, llvm::Module &mod, llvm::Function &fn) override;
-  ValPtr mkSpecVal(LLVMBackend::AstTransformer &xform, llvm::Function *fn, const Expr::SpecOp &expr) override;
-  ValPtr mkMathVal(LLVMBackend::AstTransformer &xform, llvm::Function *fn, const Expr::MathOp &op) override;
+class CPUTargetSpecificHandler final : public TargetSpecificHandler {
+  void witnessEntry(CodeGen &cg, llvm::Function &fn) override;
+  ValPtr mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr) override;
+  ValPtr mkMathVal(CodeGen &cg, const Expr::MathOp &op) override;
 };
 
-} // namespace polyregion::backend
+} // namespace polyregion::backend::details
