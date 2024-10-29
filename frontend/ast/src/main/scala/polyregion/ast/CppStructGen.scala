@@ -10,7 +10,7 @@ import polyregion.ast.compiletime
 import polyregion.ast.CppStructGen.ToCppTerm.Value
 
 import java.nio.file.{Files, Paths, StandardOpenOption}
-import scala.annotation.tailrec
+import scala.annotation.{tailrec, targetName}
 import scala.collection.immutable.LazyList.cons
 import scala.compiletime.{constValue, erasedValue, error, summonInline}
 import scala.deriving.*
@@ -89,6 +89,16 @@ private[polyregion] object CppStructGen {
             |
             |template <typename T> struct hash<std::vector<T>> {
             |  std::size_t operator()(std::vector<T> const &xs) const noexcept {
+            |    std::size_t seed = xs.size();
+            |    for (auto &x : xs) {
+            |      seed ^= std::hash<T>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+            |    }
+            |    return seed;
+            |  }
+            |};
+            |
+            |template <typename T> struct hash<std::set<T>> {
+            |  std::size_t operator()(std::set<T> const &xs) const noexcept {
             |    std::size_t seed = xs.size();
             |    for (auto &x : xs) {
             |      seed ^= std::hash<T>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
@@ -300,6 +310,12 @@ private[polyregion] object CppStructGen {
         (stdSpecialisationsDeclStmts, stdSpecialisationsStmts)
       }
 
+      val pureEnum = tpe.kind match {
+        case CppType.Kind.Base    => members.isEmpty
+        case CppType.Kind.Variant => parent.forall(_.members.isEmpty)
+        case _                    => false
+      }
+      
       val (equalitySig, equalityImpl) = {
         val name = clsName(qualified = true)
 
@@ -307,7 +323,7 @@ private[polyregion] object CppStructGen {
           (tpe.kind, tpe.namespace ::: tpe.name :: Nil, tpe.ctors) match {
             case (CppType.Kind.StdLib, "std" :: "optional" :: Nil, x :: Nil) if x.kind == CppType.Kind.Base =>
               s"( (!$lhs$n && !$rhs$n) || ($lhs$n && $rhs$n && *$lhs$n == *$rhs$n) )"
-            case (CppType.Kind.StdLib, "std" :: "vector" :: Nil, x :: Nil) if x.kind == CppType.Kind.Base =>
+            case (CppType.Kind.StdLib, "std" :: ("vector" | "set") :: Nil, x :: Nil) if x.kind == CppType.Kind.Base =>
               s"std::equal($lhs$n.begin(), $lhs$n.end(), $rhs$n.begin(), [](auto &&l, auto &&r) { return l == r; })"
             case _ => s"($lhs$n == $rhs$n)"
           }
@@ -315,32 +331,42 @@ private[polyregion] object CppStructGen {
         tpe.kind match {
           case CppType.Kind.Base =>
             (
-              s"[[nodiscard]] POLYREGION_EXPORT virtual bool operator==(const $name &) const = 0;" :: Nil,
+              s"[[nodiscard]] POLYREGION_EXPORT virtual bool operator==(const $name &) const = 0;" ::
+                (if (!pureEnum) Nil
+                 else s"[[nodiscard]] POLYREGION_EXPORT virtual bool operator<(const $name &) const = 0;" :: Nil),
               Nil
             )
           case CppType.Kind.Variant =>
             (
               s"[[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;" ::
-                s"[[nodiscard]] POLYREGION_EXPORT bool operator==(const $name &) const;" :: Nil,
-              s"[[nodiscard]] POLYREGION_EXPORT bool $name::operator==(const $name& rhs) const {" ::
+                s"[[nodiscard]] POLYREGION_EXPORT bool operator==(const $name &) const;" :: //
+                (if (!pureEnum) Nil
+                 else
+                   s"[[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;" ::
+                     s"[[nodiscard]] POLYREGION_EXPORT bool operator<(const $name &) const;" :: Nil),
+              s"POLYREGION_EXPORT bool $name::operator==(const $name& rhs) const {" ::
                 (members match {
                   case Nil => "  return true;" :: Nil
                   case xs =>
                     xs.map((n, tpe) => mkEqStmt("this->", "rhs.", n, tpe)).mkString("  return ", " && ", ";") :: Nil
                 }) ::: "}"
                 ::
-                s"[[nodiscard]] POLYREGION_EXPORT bool $name::operator==(const Base& rhs_) const {" ::
+                s"POLYREGION_EXPORT bool $name::operator==(const Base& rhs_) const {" ::
                 s"  if(rhs_.id() != variant_id) return false;" ::
                 (members match {
                   case Nil => "  return true;" :: Nil
                   case xs =>
                     s"  return this->operator==(static_cast<const $name&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)" :: Nil
-                }) ::: "}" :: Nil
+                }) ::: "}" :: //
+                (if (!pureEnum) Nil
+                 else
+                   s"POLYREGION_EXPORT bool $name::operator<(const $name& rhs) const { return false; }" ::
+                     s"POLYREGION_EXPORT bool $name::operator<(const Base& rhs_) const { return variant_id < rhs_.id(); }" :: Nil)
             )
           case _ =>
             (
               s"[[nodiscard]] POLYREGION_EXPORT bool operator==(const $name &) const;" :: Nil,
-              s"[[nodiscard]] POLYREGION_EXPORT bool $name::operator==(const $name& rhs) const {" ::
+              s"POLYREGION_EXPORT bool $name::operator==(const $name& rhs) const {" ::
                 (members match {
                   case Nil => "  return true;" :: Nil
                   case xs  => xs.map((n, tpe) => mkEqStmt("", "rhs.", n, tpe)).mkString("  return ", " && ", ";") :: Nil
@@ -442,6 +468,7 @@ private[polyregion] object CppStructGen {
              |  POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Any &x);
              |  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Any &rhs) const;
              |  [[nodiscard]] POLYREGION_EXPORT bool operator!=(const Any &rhs) const;
+             |${if (!pureEnum) "" else "[[nodiscard]] POLYREGION_EXPORT bool operator<(const Any &rhs) const;"}
              |  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const;
              |  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
              |${members.map((name, tpe) => s"  ${tpe.ref(true)} ${name}() const;").mkString("\n")}
@@ -467,9 +494,9 @@ private[polyregion] object CppStructGen {
             case xs =>
               s"namespace ${tpe.namespace.mkString("::")} { std::ostream &operator<<(std::ostream &os, const ${tpe.ref(false)} &x) { return x.dump(os); } }"
           }) ::
-          s"bool ${tpe.ref(true)}::operator==(const ${tpe.ref(false)} &rhs) const { return _v->operator==(*rhs._v) ; }" ::
-          s"bool ${tpe.ref(true)}::operator!=(const ${tpe.ref(false)} &rhs) const { return !_v->operator==(*rhs._v) ; }" ::
-          Nil
+          s"bool ${tpe.ref(true)}::operator==(const ${tpe.ref(false)} &rhs) const { return _v->operator==(*rhs._v); }" ::
+          s"bool ${tpe.ref(true)}::operator!=(const ${tpe.ref(false)} &rhs) const { return !_v->operator==(*rhs._v); }" ::
+          (if (!pureEnum) Nil else s"bool ${tpe.ref(true)}::operator<(const ${tpe.ref(false)} &rhs) const { return _v->operator<(*rhs._v); };" :: Nil)
       } else Nil
 
       val (nsDecl, nsImpl) = if (tpe.kind == CppType.Kind.Base && !hasMoreSumTypes && false) {
@@ -643,7 +670,8 @@ private[polyregion] object CppStructGen {
         streamOp = (s, v) => s"""$s << '"' << $v << '"';""" :: Nil,
         include = List("string")
       )
-    given [A: ToCppType, C[_] <: scala.collection.Seq[?]]: ToCppType[C[A]] = { () =>
+
+    @targetName("vector") given [A: ToCppType, C[_] <: scala.collection.Seq[?]]: ToCppType[C[A]] = { () =>
       val tpe = summon[ToCppType[A]]()
       CppType(
         "std" :: Nil,
@@ -655,7 +683,6 @@ private[polyregion] object CppStructGen {
           List(
             s"$s << '{';",
             s"if (!$v.empty()) {",
-            // s"  for (auto &&x_ : $v) { ${tpe.streamOp(s, "x_").mkString(";")} $s << ','; }",
             s"  std::for_each($v.begin(), std::prev($v.end()), [&$s](auto &&x) { ${tpe.streamOp(s, "x").mkString(";")} $s << ','; });",
             s"  ${tpe.streamOp(s, s"$v.back()").mkString(";")}",
             s"}",
@@ -666,6 +693,30 @@ private[polyregion] object CppStructGen {
         ctors = tpe :: Nil
       )
     }
+
+    @targetName("set") given [A: ToCppType, C[_] <: scala.collection.Set[?]]: ToCppType[C[A]] = { () =>
+      val tpe = summon[ToCppType[A]]()
+      CppType(
+        "std" :: Nil,
+        s"set",
+        movable = true,
+        constexpr = false,
+        initialiser = true,
+        streamOp = { (s, v) =>
+          List(
+            s"$s << '{';",
+            s"if (!$v.empty()) {",
+            s"  std::for_each($v.begin(), std::prev($v.end()), [&$s](auto &&x) { ${tpe.streamOp(s, "x").mkString(";")} $s << ','; });",
+            s"  ${tpe.streamOp(s, s"*$v.rbegin()").mkString(";")}",
+            s"}",
+            s"$s << '}';"
+          )
+        },
+        include = List("set"),
+        ctors = tpe :: Nil
+      )
+    }
+
     given [A: ToCppType]: ToCppType[Option[A]] = { () =>
       val tpe = summon[ToCppType[A]]()
       CppType(

@@ -171,14 +171,15 @@ using namespace aspartame;
       [](const Stmt::Mut &x) { return repr(x.name) + " := " + repr(x.expr); },
       [](const Stmt::Update &x) { return repr(x.lhs) + "[" + repr(x.idx) + "] = " + repr(x.value); },
       [](const Stmt::While &x) {
-        auto tests = x.tests ^ mk_string("\n", show_repr);
+        const auto tests = x.tests ^ mk_string("\n", show_repr);
         return "while({" + tests + ";" + repr(x.cond) + "}){\n" + (x.body ^ mk_string("\n", show_repr) ^ indent(2)) + "\n}";
       },
-      [](const Stmt::Break &x) { return "break;"s; }, [](const Stmt::Cont &x) { return "continue;"s; },
+      [](const Stmt::Break &) { return "break;"s; },   //
+      [](const Stmt::Cont &) { return "continue;"s; }, //
       [](const Stmt::Cond &x) {
-        auto elseStmts = x.falseBr.empty() //
-                             ? "\n}"
-                             : "\n} else {\n" + (x.falseBr ^ mk_string("\n", show_repr) ^ indent(2)) + "\n}";
+        const auto elseStmts = x.falseBr.empty() //
+                                   ? "\n}"
+                                   : "\n} else {\n" + (x.falseBr ^ mk_string("\n", show_repr) ^ indent(2)) + "\n}";
         return "if(" + repr(x.cond) + ") { \n" + (x.trueBr ^ mk_string("\n", show_repr) ^ indent(2)) + elseStmts;
       },
       [](const Stmt::Return &x) { return "return " + repr(x.value); },
@@ -194,6 +195,10 @@ using namespace aspartame;
 [[nodiscard]] string polyast::repr(const TypeSpace::Any &space) {
   return space.match_total( //
       [&](const TypeSpace::Global &x) { return "^Global"; }, [&](const TypeSpace::Local &x) { return "^Local"; });
+}
+
+[[nodiscard]] string polyast::repr(const Signature &s) {
+  return fmt::format("{}({}): {}", s.name, s.args ^ mk_string(", ", show_repr), repr(s.rtn));
 }
 
 [[nodiscard]] string polyast::repr(const Function &fn) {
@@ -249,7 +254,7 @@ string polyast::repr(const polyast::CompileResult &compilation) {
      << "\n  events:\n";
 
   for (auto &e : compilation.events) {
-    os << "    [" << e.epochMillis << ", +" << (double(e.elapsedNanos) / 1e6) << "ms] " << e.name;
+    os << "    [" << e.epochMillis << ", +" << static_cast<double>(e.elapsedNanos) / 1e6 << "ms] " << e.name;
     if (e.data.empty()) continue;
     os << ":\n";
     std::stringstream ss(e.data);
@@ -271,24 +276,24 @@ Expr::Any dsl::integral(const Type::Any &tpe, unsigned long long int x) {
   auto unsupported = [](auto &&t, auto &&v) -> Expr::Any {
     throw std::logic_error("Cannot create integral constant of type " + to_string(t) + " for value" + std::to_string(v));
   };
-  return tpe.match_total(                                                        //
-      [&](const Type::Float16 &) -> Expr::Any { return Expr::Float16Const(x); }, //
-      [&](const Type::Float32 &) -> Expr::Any { return Expr::Float32Const(x); }, //
-      [&](const Type::Float64 &) -> Expr::Any { return Expr::Float64Const(x); }, //
+  return tpe.match_total(                                                  //
+      [&](const Type::Float16 &) -> Expr::Any { return Float16Const(x); }, //
+      [&](const Type::Float32 &) -> Expr::Any { return Float32Const(x); }, //
+      [&](const Type::Float64 &) -> Expr::Any { return Float64Const(x); }, //
 
-      [&](const Type::IntU8 &) -> Expr::Any { return Expr::IntU8Const(x); },   //
-      [&](const Type::IntU16 &) -> Expr::Any { return Expr::IntU16Const(x); }, //
-      [&](const Type::IntU32 &) -> Expr::Any { return Expr::IntU32Const(x); }, //
-      [&](const Type::IntU64 &) -> Expr::Any { return Expr::IntU64Const(x); }, //
+      [&](const Type::IntU8 &) -> Expr::Any { return IntU8Const(x); },   //
+      [&](const Type::IntU16 &) -> Expr::Any { return IntU16Const(x); }, //
+      [&](const Type::IntU32 &) -> Expr::Any { return IntU32Const(x); }, //
+      [&](const Type::IntU64 &) -> Expr::Any { return IntU64Const(x); }, //
 
-      [&](const Type::IntS8 &) -> Expr::Any { return Expr::IntS8Const(x); },   //
-      [&](const Type::IntS16 &) -> Expr::Any { return Expr::IntS16Const(x); }, //
-      [&](const Type::IntS32 &) -> Expr::Any { return Expr::IntS32Const(x); }, //
-      [&](const Type::IntS64 &) -> Expr::Any { return Expr::IntS64Const(x); }, //
+      [&](const Type::IntS8 &) -> Expr::Any { return IntS8Const(x); },   //
+      [&](const Type::IntS16 &) -> Expr::Any { return IntS16Const(x); }, //
+      [&](const Type::IntS32 &) -> Expr::Any { return IntS32Const(x); }, //
+      [&](const Type::IntS64 &) -> Expr::Any { return IntS64Const(x); }, //
 
       [&](const Type::Nothing &t) -> Expr::Any { return unsupported(t, x); }, //
       [&](const Type::Unit0 &t) -> Expr::Any { return unsupported(t, x); },   //
-      [&](const Type::Bool1 &) -> Expr::Any { return Expr::Bool1Const(x); },  //
+      [&](const Type::Bool1 &) -> Expr::Any { return Bool1Const(x); },        //
 
       [&](const Type::Struct &t) -> Expr::Any { return unsupported(t, x); },   //
       [&](const Type::Ptr &t) -> Expr::Any { return unsupported(t, x); },      //
@@ -296,9 +301,9 @@ Expr::Any dsl::integral(const Type::Any &tpe, unsigned long long int x) {
   );
 }
 Expr::Any dsl::fractional(const Type::Any &tpe, long double x) {
-  if (tpe.is<Type::Float64>()) return Expr::Float64Const(static_cast<double>(x));
-  if (tpe.is<Type::Float32>()) return Expr::Float32Const(static_cast<float>(x));
-  if (tpe.is<Type::Float16>()) return Expr::Float16Const(static_cast<float>(x));
+  if (tpe.is<Type::Float64>()) return Float64Const(static_cast<double>(x));
+  if (tpe.is<Type::Float32>()) return Float32Const(static_cast<float>(x));
+  if (tpe.is<Type::Float16>()) return Float16Const(static_cast<float>(x));
   throw std::logic_error("Cannot create fractional constant of type " + to_string(tpe) + " for value" + std::to_string(x));
 }
 std::function<Expr::Any(Type::Any)> dsl::operator""_(unsigned long long int x) {
@@ -314,18 +319,18 @@ std::function<dsl::NamedBuilder(Type::Any)> dsl::operator""_(const char *name, s
 
 Stmt::Any dsl::let(const string &name, const Type::Any &tpe) { return Var(Named(name, tpe), {}); }
 dsl::AssignmentBuilder dsl::let(const string &name) { return AssignmentBuilder{name}; }
-Expr::IntrOp dsl::invoke(const Intr::Any &intr) { return Expr::IntrOp(intr); }
-Expr::MathOp dsl::invoke(const Math::Any &intr) { return Expr::MathOp(intr); }
-Expr::SpecOp dsl::invoke(const Spec::Any &intr) { return Expr::SpecOp(intr); }
+Expr::IntrOp dsl::invoke(const Intr::Any &intr) { return IntrOp(intr); }
+Expr::MathOp dsl::invoke(const Math::Any &intr) { return MathOp(intr); }
+Expr::SpecOp dsl::invoke(const Spec::Any &intr) { return SpecOp(intr); }
 std::function<Function(std::vector<Stmt::Any>)> dsl::function(const string &name, const std::vector<Arg> &args, const Type::Any &rtn,
-                                                              const std::vector<FunctionAttr::Any> &attrs) {
+                                                              const std::set<FunctionAttr::Any> &attrs) {
   return [=](auto &&stmts) { return Function(name, args, rtn, stmts, attrs); };
 }
 Stmt::Return dsl::ret(const Expr::Any &expr) { return Return(expr); }
-Program dsl::program(const std::vector<StructDef> &structs, const std::vector<Function> &functions) { return Program(structs, functions); }
+Program dsl::program(const std::vector<StructDef> &structs, const std::vector<Function> &functions) { return {structs, functions}; }
 Program dsl::program(const Function &function) { return Program({}, {function}); }
 
-dsl::IndexBuilder::IndexBuilder(const Expr::Index &index) : index(index) {}
+dsl::IndexBuilder::IndexBuilder(const Index &index) : index(index) {}
 dsl::IndexBuilder::operator Expr::Any() const { return index; }
 Stmt::Update dsl::IndexBuilder::operator=(const Expr::Any &term) const { return {index.lhs, index.idx, term}; }
 dsl::NamedBuilder::NamedBuilder(const Named &named) : named(named) {}

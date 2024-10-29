@@ -10,6 +10,7 @@
 #include <iterator>
 #include <memory>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <string>
 #include <variant>
@@ -86,6 +87,7 @@ public:
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Any &x);
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Any &rhs) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator!=(const Any &rhs) const;
+[[nodiscard]] POLYREGION_EXPORT bool operator<(const Any &rhs) const;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
 
@@ -113,6 +115,7 @@ public:
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Any &x);
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Any &rhs) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator!=(const Any &rhs) const;
+[[nodiscard]] POLYREGION_EXPORT bool operator<(const Any &rhs) const;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
 
@@ -140,6 +143,7 @@ public:
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Any &x);
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Any &rhs) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator!=(const Any &rhs) const;
+
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
   TypeKind::Any kind() const;
@@ -167,6 +171,7 @@ public:
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Any &x);
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Any &rhs) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator!=(const Any &rhs) const;
+
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
   Type::Any tpe() const;
@@ -197,6 +202,7 @@ public:
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Any &x);
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Any &rhs) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator!=(const Any &rhs) const;
+
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
   std::vector<Overload> overloads() const;
@@ -226,6 +232,7 @@ public:
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Any &x);
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Any &rhs) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator!=(const Any &rhs) const;
+
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
   std::vector<Overload> overloads() const;
@@ -255,6 +262,7 @@ public:
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Any &x);
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Any &rhs) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator!=(const Any &rhs) const;
+
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
   std::vector<Overload> overloads() const;
@@ -284,6 +292,7 @@ public:
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Any &x);
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Any &rhs) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator!=(const Any &rhs) const;
+[[nodiscard]] POLYREGION_EXPORT bool operator<(const Any &rhs) const;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
 
@@ -314,6 +323,7 @@ public:
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Any &x);
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Any &rhs) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator!=(const Any &rhs) const;
+[[nodiscard]] POLYREGION_EXPORT bool operator<(const Any &rhs) const;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
 
@@ -364,6 +374,7 @@ struct POLYREGION_EXPORT Base {
   [[nodiscard]] POLYREGION_EXPORT virtual size_t hash_code() const = 0;
   [[nodiscard]] POLYREGION_EXPORT virtual std::ostream &dump(std::ostream &os) const = 0;
   [[nodiscard]] POLYREGION_EXPORT virtual bool operator==(const TypeKind::Base &) const = 0;
+  [[nodiscard]] POLYREGION_EXPORT virtual bool operator<(const TypeKind::Base &) const = 0;
   protected:
   Base();
 };
@@ -375,6 +386,8 @@ struct POLYREGION_EXPORT None : TypeKind::Base {
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const TypeKind::None &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const TypeKind::None &) const;
   None() noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
@@ -388,6 +401,8 @@ struct POLYREGION_EXPORT Ref : TypeKind::Base {
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const TypeKind::Ref &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const TypeKind::Ref &) const;
   Ref() noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
@@ -401,6 +416,8 @@ struct POLYREGION_EXPORT Integral : TypeKind::Base {
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const TypeKind::Integral &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const TypeKind::Integral &) const;
   Integral() noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
@@ -414,6 +431,8 @@ struct POLYREGION_EXPORT Fractional : TypeKind::Base {
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const TypeKind::Fractional &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const TypeKind::Fractional &) const;
   Fractional() noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
@@ -427,6 +446,7 @@ struct POLYREGION_EXPORT Base {
   [[nodiscard]] POLYREGION_EXPORT virtual size_t hash_code() const = 0;
   [[nodiscard]] POLYREGION_EXPORT virtual std::ostream &dump(std::ostream &os) const = 0;
   [[nodiscard]] POLYREGION_EXPORT virtual bool operator==(const TypeSpace::Base &) const = 0;
+  [[nodiscard]] POLYREGION_EXPORT virtual bool operator<(const TypeSpace::Base &) const = 0;
   protected:
   Base();
 };
@@ -438,6 +458,8 @@ struct POLYREGION_EXPORT Global : TypeSpace::Base {
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const TypeSpace::Global &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const TypeSpace::Global &) const;
   Global() noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
@@ -451,6 +473,8 @@ struct POLYREGION_EXPORT Local : TypeSpace::Base {
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const TypeSpace::Local &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const TypeSpace::Local &) const;
   Local() noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
@@ -2056,6 +2080,7 @@ struct POLYREGION_EXPORT Base {
   [[nodiscard]] POLYREGION_EXPORT virtual size_t hash_code() const = 0;
   [[nodiscard]] POLYREGION_EXPORT virtual std::ostream &dump(std::ostream &os) const = 0;
   [[nodiscard]] POLYREGION_EXPORT virtual bool operator==(const Stmt::Base &) const = 0;
+  [[nodiscard]] POLYREGION_EXPORT virtual bool operator<(const Stmt::Base &) const = 0;
   protected:
   Base();
 };
@@ -2068,6 +2093,8 @@ struct POLYREGION_EXPORT Block : Stmt::Base {
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Stmt::Block &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Stmt::Block &) const;
   explicit Block(std::vector<Stmt::Any> stmts) noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
@@ -2082,6 +2109,8 @@ struct POLYREGION_EXPORT Comment : Stmt::Base {
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Stmt::Comment &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Stmt::Comment &) const;
   explicit Comment(std::string value) noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
@@ -2097,6 +2126,8 @@ struct POLYREGION_EXPORT Var : Stmt::Base {
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Stmt::Var &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Stmt::Var &) const;
   Var(Named name, std::optional<Expr::Any> expr) noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
@@ -2112,6 +2143,8 @@ struct POLYREGION_EXPORT Mut : Stmt::Base {
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Stmt::Mut &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Stmt::Mut &) const;
   Mut(Expr::Any name, Expr::Any expr) noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
@@ -2128,6 +2161,8 @@ struct POLYREGION_EXPORT Update : Stmt::Base {
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Stmt::Update &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Stmt::Update &) const;
   Update(Expr::Any lhs, Expr::Any idx, Expr::Any value) noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
@@ -2144,6 +2179,8 @@ struct POLYREGION_EXPORT While : Stmt::Base {
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Stmt::While &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Stmt::While &) const;
   While(std::vector<Stmt::Any> tests, Expr::Any cond, std::vector<Stmt::Any> body) noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
@@ -2157,6 +2194,8 @@ struct POLYREGION_EXPORT Break : Stmt::Base {
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Stmt::Break &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Stmt::Break &) const;
   Break() noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
@@ -2170,6 +2209,8 @@ struct POLYREGION_EXPORT Cont : Stmt::Base {
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Stmt::Cont &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Stmt::Cont &) const;
   Cont() noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
@@ -2186,6 +2227,8 @@ struct POLYREGION_EXPORT Cond : Stmt::Base {
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Stmt::Cond &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Stmt::Cond &) const;
   Cond(Expr::Any cond, std::vector<Stmt::Any> trueBr, std::vector<Stmt::Any> falseBr) noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
@@ -2200,6 +2243,8 @@ struct POLYREGION_EXPORT Return : Stmt::Base {
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Stmt::Return &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Stmt::Return &) const;
   explicit Return(Expr::Any value) noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
@@ -2216,6 +2261,8 @@ struct POLYREGION_EXPORT Annotated : Stmt::Base {
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Stmt::Annotated &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Stmt::Annotated &) const;
   Annotated(Stmt::Any expr, std::optional<SourcePosition> pos, std::optional<std::string> comment) noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
@@ -2242,6 +2289,7 @@ struct POLYREGION_EXPORT Base {
   [[nodiscard]] POLYREGION_EXPORT virtual size_t hash_code() const = 0;
   [[nodiscard]] POLYREGION_EXPORT virtual std::ostream &dump(std::ostream &os) const = 0;
   [[nodiscard]] POLYREGION_EXPORT virtual bool operator==(const FunctionAttr::Base &) const = 0;
+  [[nodiscard]] POLYREGION_EXPORT virtual bool operator<(const FunctionAttr::Base &) const = 0;
   protected:
   Base();
 };
@@ -2253,6 +2301,8 @@ struct POLYREGION_EXPORT Internal : FunctionAttr::Base {
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const FunctionAttr::Internal &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const FunctionAttr::Internal &) const;
   Internal() noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
@@ -2266,6 +2316,8 @@ struct POLYREGION_EXPORT Exported : FunctionAttr::Base {
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const FunctionAttr::Exported &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const FunctionAttr::Exported &) const;
   Exported() noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
@@ -2279,6 +2331,8 @@ struct POLYREGION_EXPORT FPRelaxed : FunctionAttr::Base {
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const FunctionAttr::FPRelaxed &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const FunctionAttr::FPRelaxed &) const;
   FPRelaxed() noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
@@ -2292,6 +2346,8 @@ struct POLYREGION_EXPORT FPStrict : FunctionAttr::Base {
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const FunctionAttr::FPStrict &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const FunctionAttr::FPStrict &) const;
   FPStrict() noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
@@ -2305,6 +2361,8 @@ struct POLYREGION_EXPORT Entry : FunctionAttr::Base {
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const FunctionAttr::Entry &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator<(const FunctionAttr::Entry &) const;
   Entry() noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
@@ -2328,11 +2386,11 @@ struct POLYREGION_EXPORT Function {
   std::vector<Arg> args;
   Type::Any rtn;
   std::vector<Stmt::Any> body;
-  std::vector<FunctionAttr::Any> attrs;
+  std::set<FunctionAttr::Any> attrs;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Function &) const;
-  Function(std::string name, std::vector<Arg> args, Type::Any rtn, std::vector<Stmt::Any> body, std::vector<FunctionAttr::Any> attrs) noexcept;
+  Function(std::string name, std::vector<Arg> args, Type::Any rtn, std::vector<Stmt::Any> body, std::set<FunctionAttr::Any> attrs) noexcept;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Function &);
 };
 
@@ -2808,6 +2866,16 @@ namespace std {
 
 template <typename T> struct hash<std::vector<T>> {
   std::size_t operator()(std::vector<T> const &xs) const noexcept {
+    std::size_t seed = xs.size();
+    for (auto &x : xs) {
+      seed ^= std::hash<T>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+    }
+    return seed;
+  }
+};
+
+template <typename T> struct hash<std::set<T>> {
+  std::size_t operator()(std::set<T> const &xs) const noexcept {
     std::size_t seed = xs.size();
     for (auto &x : xs) {
       seed ^= std::hash<T>()(x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);

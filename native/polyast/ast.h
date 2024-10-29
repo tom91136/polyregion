@@ -9,7 +9,6 @@
 #include "generated/polyast.h"
 #include "polyregion/compat.h"
 
-
 namespace polyregion::polyast {
 
 using Bytes = std::vector<char>;
@@ -29,6 +28,7 @@ std::string repr(const Spec::Any &);
 std::string repr(const Math::Any &);
 std::string repr(const Arg &);
 std::string repr(const TypeSpace::Any &space);
+std::string repr(const Signature &s);
 std::string repr(const Function &);
 std::string repr(const StructDef &);
 std::string repr(const Program &);
@@ -109,7 +109,7 @@ IntrOp invoke(const Intr::Any &);
 MathOp invoke(const Math::Any &);
 SpecOp invoke(const Spec::Any &);
 std::function<Function(std::vector<Stmt::Any>)> function(const std::string &name, const std::vector<Arg> &args, const Type::Any &rtn,
-                                                         const std::vector<FunctionAttr::Any> &attrs = {FunctionAttr::Exported()});
+                                                         const std::set<FunctionAttr::Any> &attrs = {FunctionAttr::Exported()});
 Program program(const std::vector<StructDef> &structs = {}, const std::vector<Function> &functions = {});
 Program program(const Function &function);
 

@@ -48,10 +48,12 @@ private[polyregion] object CppNlohmannJsonCodecGen {
                   s"${jsonAt(idx)}.get<${x.ref(qualified = true)}>()"
 
               s"auto $name = ${jsonAt(idx)}.is_null() ? std::nullopt : std::make_optional($nested);" :: Nil
-            case ("std" :: "vector" :: Nil, x :: Nil) if x.kind != CppType.Kind.StdLib =>
+            case ("std" :: (c @ ("vector" | "set")) :: Nil, x :: Nil) if x.kind != CppType.Kind.StdLib =>
               s"${tpe.ref(qualified = true)} $name;" ::
-                s"auto ${name}_json = ${jsonAt(idx)};" ::
-                s"std::transform(${name}_json.begin(), ${name}_json.end(), std::back_inserter($name), &${x.ns(fromJsonFn(x))});"
+                s"for(const auto &v_ : ${jsonAt(idx)}) { ${name}.${c match {
+                    case "vector" => "emplace_back"
+                    case "set"    => "emplace"
+                  }}(${x.ns(fromJsonFn(x))}(v_)); }"
                 :: Nil
             case _ => s"auto $name = ${jsonAt(idx)}.get<${tpe.ref(qualified = true)}>();" :: Nil
           }
@@ -81,9 +83,9 @@ private[polyregion] object CppNlohmannJsonCodecGen {
                 else s"json(*x_.${name})"
               s"auto $name = x_.${name} ? $deref : json();" :: Nil
 
-            case ("std" :: "vector" :: Nil, x :: Nil) if x.kind != CppType.Kind.StdLib =>
+            case ("std" :: ("vector" | "set") :: Nil, x :: Nil) if x.kind != CppType.Kind.StdLib =>
               s"std::vector<json> $name;" ::
-                s"std::transform(x_.${name}.begin(), x_.${name}.end(), std::back_inserter($name), &${x.ns(toJsonFn(x))});"
+                s"for(const auto &v_ : x_.${name}) { ${name}.emplace_back(${x.ns(toJsonFn(x))}(v_)); }"
                 :: Nil
             case _ => s"auto $name = x_.${name};" :: Nil
           }

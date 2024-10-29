@@ -38,6 +38,9 @@ object MsgPack {
   given [A](using C: Codec[A]): Codec[List[A]] =
     Codec(xs => upack.Arr(xs.map(C.encode(_))*), _.arr.map(m => C.decode(m)).toList)
 
+  given [A](using C: Codec[A]): Codec[Set[A]] =
+    Codec(xs => upack.Arr(xs.map(C.encode(_)).toArray*), _.arr.map(m => C.decode(m)).toSet)
+
   given [A : ClassTag](using C: Codec[A]): Codec[ArraySeq[A]] =
     Codec(xs => upack.Arr(xs.map(C.encode(_))*), _.arr.map(m => C.decode(m)).to(ArraySeq))
 

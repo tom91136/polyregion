@@ -4,30 +4,30 @@
 using namespace polyregion::backend::details;
 
 void NVPTXTargetSpecificHandler::witnessEntry(CodeGen &cg, llvm::Function &fn) {
-  mod.getOrInsertNamedMetadata("nvvm.annotations")
-      ->addOperand(llvm::MDNode::get(cg.C, // XXX the attribute name must be "kernel" here and not the function name!
-                                     {llvm::ValueAsMetadata::get(&fn), llvm::MDString::get(cg.C, "kernel"),
-                                      llvm::ValueAsMetadata::get(llvm::ConstantInt::get(llvm::Type::getInt32Ty(cg.C), 1))}));
+  cg.M.getOrInsertNamedMetadata("nvvm.annotations")
+      ->addOperand(llvm::MDNode::get(cg.C.actual, // XXX the attribute name must be "kernel" here and not the function name!
+                                     {llvm::ValueAsMetadata::get(&fn), llvm::MDString::get(cg.C.actual, "kernel"),
+                                      llvm::ValueAsMetadata::get(llvm::ConstantInt::get(cg.C.i32Ty(), 1))}));
 }
 ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr) {
   // threadId =  @llvm.nvvm.read.ptx.sreg.tid.*
   // blockIdx =  @llvm.nvvm.read.ptx.sreg.ctaid.*
   // blockDim =  @llvm.nvvm.read.ptx.sreg.ntid.*
   // gridDim  =  @llvm.nvvm.read.ptx.sreg.nctaid.*
-  auto globalSize = [&](llvm::Intrinsic::ID nctaid, llvm::Intrinsic::ID ntid) -> ValPtr {
+  auto globalSize = [&](const llvm::Intrinsic::ID nctaid, const llvm::Intrinsic::ID ntid) -> ValPtr {
     return cg.B.CreateMul(cg.intr0(nctaid), cg.intr0(ntid));
   };
-  auto globalId = [&](llvm::Intrinsic::ID ctaid, llvm::Intrinsic::ID ntid, llvm::Intrinsic::ID tid) -> ValPtr {
+  auto globalId = [&](const llvm::Intrinsic::ID ctaid, const llvm::Intrinsic::ID ntid, const llvm::Intrinsic::ID tid) -> ValPtr {
     return cg.B.CreateAdd(cg.B.CreateMul(cg.intr0(ctaid), cg.intr0(ntid)), cg.intr0(tid));
   };
-  auto dim3OrAssert = [&](const AnyTerm &dim, ValPtr d0, ValPtr d1, ValPtr d2) {
+  auto dim3OrAssert = [&](const AnyExpr &dim, ValPtr const d0, ValPtr const d1, ValPtr const d2) {
     if (dim.tpe() != Type::IntU32()) {
       throw std::logic_error("dim selector should be a " + to_string(Type::IntU32()) + " but got " + to_string(dim.tpe()));
     }
-    return cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkTermVal(dim), cg.mkTermVal(Expr::IntU32Const(0))), d0,
-                             cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkTermVal(dim), cg.mkTermVal(Expr::IntU32Const(1))), d0,
-                                               cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkTermVal(dim), cg.mkTermVal(Expr::IntU32Const(2))),
-                                                                 d0, cg.mkTermVal(Expr::IntU32Const(0)))));
+    return cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkExprVal(dim), cg.mkExprVal(Expr::IntU32Const(0))), d0,
+                             cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkExprVal(dim), cg.mkExprVal(Expr::IntU32Const(1))), d0,
+                                               cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkExprVal(dim), cg.mkExprVal(Expr::IntU32Const(2))),
+                                                                 d0, cg.mkExprVal(Expr::IntU32Const(0)))));
   };
 
   return expr.op.match_total( //

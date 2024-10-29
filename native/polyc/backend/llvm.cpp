@@ -57,11 +57,15 @@ static constexpr int64_t nIntMax(uint64_t bits) { return (int64_t(1) << (bits - 
 CodeGen::CodeGen(const LLVMBackend::Options &options, const std::string &moduleName)
     : C(options), targetHandler(TargetSpecificHandler::from(options.target)), B(C.actual), M(moduleName, C.actual) {}
 
+llvm::Type *CodeGen::resolveType(const AnyType &tpe, const bool functionBoundary) {
+  return C.resolveType(tpe, structTypes, functionBoundary);
+}
+
 llvm::Function *CodeGen::resolveExtFn(const Type::Any &rtn, const std::string &name, const std::vector<Type::Any> &args) {
   return functions ^= get_or_emplace(Signature(name, args, rtn), [&](auto &sig) -> llvm::Function * {
            auto tpe = llvm::FunctionType::get(
-               /*Result*/ C.resolveType(rtn, structTypes, true),
-               /*Params*/ args ^ map([&](auto &t) { return C.resolveType(t, structTypes, true); }),
+               /*Result*/ resolveType(rtn, true),
+               /*Params*/ args ^ map([&](auto &t) { return resolveType(t, true); }),
                /*isVarArg*/ false);
            auto fn = llvm::Function::Create(tpe, llvm::Function::ExternalLinkage, name, M);
            return fn;
@@ -102,14 +106,14 @@ ValPtr CodeGen::intr0(const llvm::Intrinsic::ID id) { //
   return B.CreateCall(callee);
 }
 ValPtr CodeGen::intr1(const llvm::Intrinsic::ID id, const AnyType &overload, const AnyExpr &arg) { //
-  const auto callee = llvm::Intrinsic::getDeclaration(&M, id, C.resolveType(overload, structTypes));
+  const auto callee = llvm::Intrinsic::getDeclaration(&M, id, resolveType(overload));
   return B.CreateCall(callee, mkExprVal(arg));
 }
 ValPtr CodeGen::intr2(const llvm::Intrinsic::ID id, const AnyType &overload, //
                       const AnyExpr &lhs, const AnyExpr &rhs) {              //
   // XXX the overload type here is about the overloading of intrinsic names, not about the parameter types
   // i.e., f32 is for foo.f32(float %a, float %b, float %c)
-  const auto callee = llvm::Intrinsic::getDeclaration(&M, id, C.resolveType(overload, structTypes));
+  const auto callee = llvm::Intrinsic::getDeclaration(&M, id, resolveType(overload));
   return B.CreateCall(callee, {mkExprVal(lhs), mkExprVal(rhs)});
 }
 
@@ -120,7 +124,7 @@ ValPtr CodeGen::findStackVar(const Named &named) {
          fold(
              [&](auto &tpe, auto &value) {
                if (named.tpe != tpe)
-                 throw std::logic_error("Named local variable (" + to_string(named) + ") has different type from LUT (" + to_string(tpe) +
+                 throw BackendException("Named local variable (" + to_string(named) + ") has different type from LUT (" + to_string(tpe) +
                                         ")");
                return value;
              },
@@ -129,7 +133,7 @@ ValPtr CodeGen::findStackVar(const Named &named) {
                              auto &[tpe, ir] = v;
                              return " -> `" + k + "` = " + to_string(tpe) + "(IR=" + llvm_tostring(ir) + ")";
                            });
-               throw std::logic_error("Unseen variable: " + to_string(named) + ", variable table=\n->" + pool);
+               throw BackendException("Unseen variable: " + to_string(named) + ", variable table=\n->" + pool);
              });
 }
 
@@ -140,7 +144,7 @@ ValPtr CodeGen::mkSelectPtr(const Expr::Select &select) {
   auto structTypeOf = [&](const Type::Any &tpe) -> StructInfo {
     auto findTy = [&](const Type::Struct &s) -> StructInfo {
       return structTypes ^ get(s.name) ^
-             fold([&]() -> StructInfo { throw std::logic_error("Unseen struct type " + to_string(s.name) + " in select path" + fail()); });
+             fold([&]() -> StructInfo { throw BackendException("Unseen struct type " + to_string(s.name) + " in select path" + fail()); });
     };
 
     if (auto s = tpe.get<Type::Struct>(); s) {
@@ -148,9 +152,9 @@ ValPtr CodeGen::mkSelectPtr(const Expr::Select &select) {
     } else if (auto p = tpe.get<Type::Ptr>(); p) {
       if (auto _s = p->component.get<Type::Struct>(); _s) return findTy(*_s);
       else
-        throw std::logic_error("Illegal select path involving pointer to non-struct type " + to_string(s->name) + " in select path" +
+        throw BackendException("Illegal select path involving pointer to non-struct type " + to_string(s->name) + " in select path" +
                                fail());
-    } else throw std::logic_error("Illegal select path involving non-struct type " + to_string(tpe) + fail());
+    } else throw BackendException("Illegal select path involving non-struct type " + to_string(tpe) + fail());
   };
 
   if (select.init.empty()) return findStackVar(select.last); // local var lookup
@@ -216,7 +220,7 @@ ValPtr CodeGen::mkSelectPtr(const Expr::Select &select) {
           tpe = path.tpe;
         } else {
           auto pool = table | mk_string("\n", "\n", "\n", [](auto &k, auto &v) { return " -> `" + k + "` = " + std::to_string(v) + ")"; });
-          throw std::logic_error("Illegal select path with unknown struct member index of name `" + to_string(path) + "`, pool=" + pool +
+          throw BackendException("Illegal select path with unknown struct member index of name `" + to_string(path) + "`, pool=" + pool +
                                  fail());
         }
       }
@@ -354,11 +358,11 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
 
       [&](const Expr::Select &x) -> ValPtr {
         if (x.tpe.is<Type::Unit0>()) return mkExprVal(Expr::Unit0Const());
-        if (auto ptr = x.tpe.get<Type::Ptr>(); ptr && ptr->length) return mkSelectPtr(x);
-        else return load(mkSelectPtr(x), mkTpe(x.tpe));
+        if (const auto ptr = x.tpe.get<Type::Ptr>(); ptr && ptr->length) return mkSelectPtr(x);
+        else return C.load(B, mkSelectPtr(x), resolveType(x.tpe));
       },
       [&](const Expr::Poison &x) -> ValPtr {
-        if (auto tpe = mkTpe(x.tpe); llvm::isa<llvm::PointerType>(tpe)) {
+        if (auto tpe = resolveType(x.tpe); llvm::isa<llvm::PointerType>(tpe)) {
           return llvm::ConstantPointerNull::get(static_cast<llvm::PointerType *>(tpe));
         } else {
           throw BackendException("unimplemented");
@@ -369,8 +373,8 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
         // we only allow widening or narrowing of integral and fractional types
         // pointers are not allowed to participate on either end
         auto from = mkExprVal(x.from);
-        auto fromTpe = mkTpe(x.from.tpe());
-        auto toTpe = mkTpe(x.as);
+        auto fromTpe = resolveType(x.from.tpe());
+        auto toTpe = resolveType(x.as);
         enum class NumKind { Fractional, Integral };
 
         // Same type
@@ -386,7 +390,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
                 (std::any_of(lhsStruct->parents.begin(), lhsStruct->parents.end(), [&](auto &x) { return x == rhsStruct->name; }) ||
                  std::any_of(rhsStruct->parents.begin(), rhsStruct->parents.end(), [&](auto &x) { return x == lhsStruct->name; }))) {
 
-              auto lhsTpe = mkTpe(*lhsStruct);
+              auto lhsTpe = resolveType(*lhsStruct);
 
               // B.to[A]
 
@@ -398,7 +402,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
                 auto &[inheritanceChain, finaIdx] = *inHeirachy;
 
                 auto chainPrev =
-                    lhsTpe->isStructTy() ? static_cast<llvm::StructType *>(lhsTpe) : throw std::logic_error("Illegal lhs tpe!");
+                    lhsTpe->isStructTy() ? static_cast<llvm::StructType *>(lhsTpe) : throw BackendException("Illegal lhs tpe!");
                 for (auto chain : inheritanceChain) {
 
                   size_t N = 0;
@@ -408,7 +412,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
                         relativeIdxIt != chain->element_end()) {
                       N = std::distance(chain->element_begin(), relativeIdxIt);
                     } else {
-                      throw std::logic_error("Illegal select path with out of bounds parent `" + to_string(path) + "`");
+                      throw BackendException("Illegal select path with out of bounds parent `" + to_string(path) + "`");
                     }
                   }
 
@@ -430,17 +434,17 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
             [&](const TypeKind::Integral &) -> NumKind { return NumKind::Integral; },
             [&](const TypeKind::Fractional &) -> NumKind { return NumKind::Fractional; },
             [&](const TypeKind::Ref &) -> NumKind {
-              throw std::logic_error("Semantic error: conversion from ref type (" + to_string(fromTpe) + ") is not allowed");
+              throw BackendException("Semantic error: conversion from ref type (" + to_string(fromTpe) + ") is not allowed");
             },
-            [&](const TypeKind::None &) -> NumKind { throw std::logic_error("none!?"); });
+            [&](const TypeKind::None &) -> NumKind { throw BackendException("none!?"); });
 
         auto toKind = x.as.kind().match_total( //
             [&](const TypeKind::Integral &) -> NumKind { return NumKind::Integral; },
             [&](const TypeKind::Fractional &) -> NumKind { return NumKind::Fractional; },
             [&](const TypeKind::Ref &) -> NumKind {
-              throw std::logic_error("Semantic error: conversion to ref type (" + to_string(fromTpe) + ") is not allowed");
+              throw BackendException("Semantic error: conversion to ref type (" + to_string(fromTpe) + ") is not allowed");
             },
-            [&](const TypeKind::None &) -> NumKind { throw std::logic_error("none!?"); });
+            [&](const TypeKind::None &) -> NumKind { throw BackendException("none!?"); });
 
         if (fromKind == NumKind::Fractional && toKind == NumKind::Integral) {
 
@@ -474,82 +478,54 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
           return B.CreateIntCast(from, toTpe, !isUnsigned(x.from.tpe()), "integral_cast");
         } else if (fromKind == NumKind::Fractional && toKind == NumKind::Fractional) {
           return B.CreateFPCast(from, toTpe, "fractional_cast");
-        } else throw std::logic_error("unhandled cast");
+        } else throw BackendException("unhandled cast");
       },
       [&](const Expr::Invoke &x) -> ValPtr {
-        std::vector<Term::Any> allArgs;
-        if (x.receiver) allArgs.push_back((*x.receiver));
-        for (auto &arg : x.args)
-          if (!arg.tpe().is<Type::Unit0>()) allArgs.push_back(arg);
-        for (auto &arg : x.captures)
-          if (!arg.tpe().is<Type::Unit0>()) allArgs.push_back(arg);
-
-        auto paramTerms = allArgs ^ map([&](auto &&term) {
-                            auto val = mkExprVal(term);
-                            return term.tpe().template is<Type::Bool1>() ? B.CreateZExt(val, mkTpe(Type::Bool1(), true)) : val;
-                          });
-
-        InvokeSignature sig(x.name, {},                                        //
-                            x.receiver ^ map([](auto &x) { return x.tpe(); }), //
-                            x.args ^ map([](auto &x) { return x.tpe(); }),     //
-                            x.captures ^ map([](auto &x) { return x.tpe(); }), //
-                            x.rtn);
-
-        if (auto fn = functions.find(sig); fn != functions.end()) {
-          auto call = B.CreateCall(fn->second, paramTerms);
-          // in case the fn returns a unit (which is mapped to void), we just return the constant
-          if (x.rtn.is<Type::Unit0>()) {
-            return mkExprVal(Term::Unit0Const());
-          } else return call;
-        } else {
-
-          for (auto &[key, v] : functions) {
-            std::cerr << repr(key) << " = " << v << " match = " << (key == sig) << std::endl;
-          }
-          throw std::logic_error("Cannot find function " + repr(sig));
-        }
+        return functions ^ get(Signature(x.name, x.args ^ map([](auto &arg) { return arg.tpe(); }), x.rtn)) ^
+               fold(
+                   [&](auto &fn) {
+                     const auto params =                                                           //
+                         x.args                                                                    //
+                         | filter([](auto &arg) { return !arg.tpe().template is<Type::Unit0>(); }) //
+                         | map([&](auto &&term) {
+                             const auto val = mkExprVal(term);
+                             return term.tpe().template is<Type::Bool1>() ? B.CreateZExt(val, resolveType(Type::Bool1(), true)) : val;
+                           }) //
+                         | to_vector();
+                     auto call = B.CreateCall(fn, params);
+                     // in case the fn returns a unit (which is mapped to void), we just return the constant
+                     return x.rtn.is<Type::Unit0>() ? mkExprVal(Expr::Unit0Const()) : call;
+                   },
+                   [&] {
+                     throw BackendException(
+                         fmt::format("unhandled invocation, known functions are:\n{}", functions | keys() | mk_string("\n", show_repr)));
+                   });
       },
       [&](const Expr::Index &x) -> ValPtr {
-        if (auto lhs = x.lhs.get<Expr::Select>()) {
-          if (auto arrTpe = lhs->tpe.get<Type::Ptr>(); arrTpe) {
-
-            if (arrTpe->component.is<Type::Unit0>()) {
-              // Still call GEP so that memory access and OOB effects are still present.
-              auto val = mkExprVal(Term::Unit0Const());
-              B.CreateInBoundsGEP(val->getType(),                  //
-                                  mkExprVal(*lhs),                 //
-                                  mkExprVal(x.idx), key + "_ptr"); //
+        if (const auto lhs = x.lhs.get<Expr::Select>()) {
+          if (const auto arrTpe = lhs->tpe.get<Type::Ptr>()) {
+            if (arrTpe->component.is<Type::Unit0>()) { // Still call GEP so that memory access and OOB effects are still present.
+              const auto val = mkExprVal(Expr::Unit0Const());
+              B.CreateInBoundsGEP(val->getType(), mkExprVal(*lhs), mkExprVal(x.idx), key + "_ptr");
               return val;
-            }
-            if (arrTpe->length) {
-              auto ty = mkTpe(*arrTpe);
-              auto ptr = B.CreateInBoundsGEP(ty,              //
-                                             mkExprVal(*lhs), //
-                                             {llvm::ConstantInt::get(C.i32Ty(), 0), mkExprVal(x.idx)}, key + "_idx_ptr");
-              return load(ptr, mkTpe(arrTpe->component));
+            } else if (arrTpe->length) {
+              const auto ty = resolveType(*arrTpe);
+              const auto ptr =
+                  B.CreateInBoundsGEP(ty, mkExprVal(*lhs), {ConstantInt::get(C.i32Ty(), 0), mkExprVal(x.idx)}, key + "_idx_ptr");
+              return C.load(B, ptr, resolveType(arrTpe->component));
             } else {
-              auto ty = mkTpe(arrTpe->component);
-              auto ptr = B.CreateInBoundsGEP(ty,              //
-                                             mkExprVal(*lhs), //
-                                             mkExprVal(x.idx), key + "_idx_ptr");
+              const auto ty = resolveType(arrTpe->component);
+              const auto ptr = B.CreateInBoundsGEP(ty, mkExprVal(*lhs), mkExprVal(x.idx), key + "_idx_ptr");
               if (arrTpe->component.is<Type::Bool1>()) { // Narrow from i8 to i1
-                return B.CreateICmpNE(load(ptr, ty), llvm::ConstantInt::get(llvm::Type::getInt1Ty(C), 0, true));
+                return B.CreateICmpNE(C.load(B, ptr, ty), ConstantInt::get(llvm::Type::getInt1Ty(C.actual), 0, true));
               } else {
-
-                //                if(auto sizedArr = get_opt<Type::Ptr>(arrTpe->component); sizedArr && sizedArr->length){
-                //                  return ptr;
-                //                }else{
-                //                  return load(   ptr, ty);
-                //                }
-
-                //                return arrTpe->component->length ? ptr :load(   ptr, ty);
-                return load(ptr, ty);
+                return C.load(B, ptr, ty);
               }
             }
           } else {
-            throw std::logic_error("Semantic error: array index not called on array type (" + to_string(lhs->tpe) + ")(" + repr(x) + ")");
+            throw BackendException("Semantic error: array index not called on array type (" + to_string(lhs->tpe) + ")(" + repr(x) + ")");
           }
-        } else throw std::logic_error("Semantic error: LHS of " + to_string(x) + " (index) is not a select");
+        } else throw BackendException("Semantic error: LHS of " + to_string(x) + " (index) is not a select");
       },
 
       [&](const Expr::RefTo &x) -> ValPtr {
@@ -557,33 +533,33 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
           if (auto arrTpe = lhs->tpe.get<Type::Ptr>(); arrTpe) { // taking reference of an index in an array
             auto offset = x.idx ? mkExprVal(*x.idx) : llvm::ConstantInt::get(llvm::Type::getInt64Ty(C), 0, true);
             if (auto nestedArrTpe = arrTpe->component.get<Type::Ptr>(); nestedArrTpe && nestedArrTpe->length) {
-              auto ty = arrTpe->component.is<Type::Unit0>() ? llvm::Type::getInt8Ty(C) : mkTpe(arrTpe->component);
+              auto ty = arrTpe->component.is<Type::Unit0>() ? llvm::Type::getInt8Ty(C) : resolveType(arrTpe->component);
               return B.CreateInBoundsGEP(ty,              //
                                          mkExprVal(*lhs), //
                                          {llvm::ConstantInt::get(C.i32Ty(), 0), offset}, key + "_ref_to_" + llvm_tostring(ty));
 
             } else {
-              auto ty = arrTpe->component.is<Type::Unit0>() ? llvm::Type::getInt8Ty(C) : mkTpe(arrTpe->component);
+              auto ty = arrTpe->component.is<Type::Unit0>() ? llvm::Type::getInt8Ty(C) : resolveType(arrTpe->component);
               return B.CreateInBoundsGEP(ty,              //
                                          mkExprVal(*lhs), //
                                          offset, key + "_ref_to_ptr");
             }
           } else { // taking reference of a var
-            if (x.idx) throw std::logic_error("Semantic error: Cannot take reference of scalar with index in " + to_string(x));
+            if (x.idx) throw BackendException("Semantic error: Cannot take reference of scalar with index in " + to_string(x));
 
             if (lhs->tpe.is<Type::Unit0>())
-              throw std::logic_error("Semantic error: Cannot take reference of an select with unit type in " + to_string(x));
+              throw BackendException("Semantic error: Cannot take reference of an select with unit type in " + to_string(x));
             return mkSelectPtr(*lhs);
           }
         } else
-          throw std::logic_error("Semantic error: LHS of " + to_string(x) + " (index) is not a select, can't take reference of a constant");
+          throw BackendException("Semantic error: LHS of " + to_string(x) + " (index) is not a select, can't take reference of a constant");
       },
 
       [&](const Expr::Alloc &x) -> ValPtr { //
-        auto componentTpe = B.getPtrTy(0);
-        auto size = mkExprVal(x.size);
-        auto elemSize = sizeOf(B, C, componentTpe);
-        auto ptr = invokeMalloc(fn, B.CreateMul(B.CreateIntCast(size, mkTpe(Type::IntS64()), true), elemSize));
+        const auto componentTpe = B.getPtrTy(0);
+        const auto size = mkExprVal(x.size);
+        const auto elemSize = C.sizeOf(B, componentTpe);
+        const auto ptr = invokeMalloc(B.CreateMul(B.CreateIntCast(size, resolveType(Type::IntS64()), true), elemSize));
         return B.CreateBitCast(ptr, componentTpe);
       });
 }
@@ -598,16 +574,7 @@ static bool canAssign(Type::Any lhs, Type::Any rhs) {
   return false;
 }
 
-CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, Opt<WhileCtx> whileCtx = {}) {
-
-  //  // XXX bool is i8 where non-zero values are true,
-  //  //   `br` only takes i1 as the first arg, so we do the appropriate comparison now
-  //  auto boolToi8 = [&](ValPtr cond) {
-  //    return cond->getType()->isIntegerTy(1)
-  //               ? cond // as-is if we're already i1
-  //               : B.CreateICmpNE(cond, llvm::ConstantInt::get(llvm::Type::getInt8Ty(C), 0, true));
-  //  };
-
+CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, const Opt<WhileCtx> &whileCtx = {}) {
   return stmt.match_total(
       [&](const Stmt::Block &x) -> BlockKind {
         auto kind = BlockKind::Normal;
@@ -615,16 +582,13 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, Op
           kind = mkStmt(body, fn);
         return kind;
       },
-      [&](const Stmt::Comment &x) -> BlockKind { // discard comments
-        return BlockKind::Normal;
-      },
+      [&](const Stmt::Comment &) -> BlockKind { return BlockKind::Normal; }, // discard comments
       [&](const Stmt::Var &x) -> BlockKind {
         // [T : ref] =>> t:T  = _        ; lut += &t
         // [T : ref] =>> t:T* = &(rhs:T) ; lut += t
         // [T : val] =>> t:T  =   rhs:T  ; lut += &t
-
         if (x.expr && x.expr->tpe() != x.name.tpe) {
-          throw std::logic_error("Semantic error: name type " + to_string(x.name.tpe) + " and rhs expr type " + to_string(x.expr->tpe()) +
+          throw BackendException("Semantic error: name type " + to_string(x.name.tpe) + " and rhs expr type " + to_string(x.expr->tpe()) +
                                  " mismatch (" + repr(x) + ")");
         }
 
@@ -632,7 +596,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, Op
           // Unit0 declaration, discard declaration but keep RHS effect.
           if (x.expr) mkExprVal(*x.expr, x.name.symbol + "_var_rhs");
         } else {
-          auto tpe = mkTpe(x.name.tpe);
+          auto tpe = resolveType(x.name.tpe);
           auto stackPtr = C.allocaAS(B, tpe, C.AllocaAS, x.name.symbol + "_stack_ptr");
           stackVarPtrs.emplace(x.name.symbol, Pair<Type::Any, llvm::Value *>{x.name.tpe, stackPtr});
           if (x.expr) {
@@ -648,7 +612,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, Op
         // [T : val]        =>> t   :=   rhs:T
         if (auto lhs = x.name.get<Expr::Select>(); lhs) {
           if (x.expr.tpe() != lhs->tpe) {
-            throw std::logic_error("Semantic error: name type (" + to_string(x.expr.tpe()) + ") and rhs expr (" + to_string(lhs->tpe) +
+            throw BackendException("Semantic error: name type (" + to_string(x.expr.tpe()) + ") and rhs expr (" + to_string(lhs->tpe) +
                                    ") mismatch (" + repr(x) + ")");
           }
           if (lhs->tpe.is<Type::Unit0>()) return BlockKind::Normal;
@@ -660,7 +624,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, Op
           } else { // struct member select
             const auto _ = C.store(B, rhs, mkSelectPtr(*lhs));
           }
-        } else throw std::logic_error("Semantic error: LHS of " + to_string(x) + " (mut) is not a select");
+        } else throw BackendException("Semantic error: LHS of " + to_string(x) + " (mut) is not a select");
         return BlockKind::Normal;
       },
       [&](const Stmt::Update &x) -> BlockKind {
@@ -674,7 +638,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, Op
             }
 
             if (arrTpe->component != rhs.tpe()) {
-              throw std::logic_error("Semantic error: array component type (" + to_string(arrTpe->component) + ") and rhs expr (" +
+              throw BackendException("Semantic error: array component type (" + to_string(arrTpe->component) + ") and rhs expr (" +
                                      to_string(rhs.tpe()) + ") mismatch (" + repr(x) + ")");
             } else {
               auto dest = mkExprVal(*lhs);
@@ -688,8 +652,8 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, Op
                 const auto _ = C.store(B, B.CreateIntCast(mkExprVal(rhs), ty, true), ptr);
               } else {
 
-                auto ptr = B.CreateInBoundsGEP( //
-                    mkTpe(rhs.tpe()), dest,     //
+                auto ptr = B.CreateInBoundsGEP(   //
+                    resolveType(rhs.tpe()), dest, //
                     componentIsSizedArray ? llvm::ArrayRef<ValPtr>{llvm::ConstantInt::get(C.i32Ty(), 0), mkExprVal(x.idx)}
                                           : llvm::ArrayRef<ValPtr>{mkExprVal(x.idx)},
                     qualified(*lhs) + "_update_ptr" //
@@ -698,9 +662,9 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, Op
               }
             }
           } else {
-            throw std::logic_error("Semantic error: array update not called on array type (" + to_string(lhs->tpe) + ")(" + repr(x) + ")");
+            throw BackendException("Semantic error: array update not called on array type (" + to_string(lhs->tpe) + ")(" + repr(x) + ")");
           }
-        } else throw std::logic_error("Semantic error: LHS of " + to_string(x) + " (update) is not a select");
+        } else throw BackendException("Semantic error: LHS of " + to_string(x) + " (update) is not a select");
 
         return BlockKind::Normal;
       },
@@ -732,12 +696,12 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, Op
       },
       [&](const Stmt::Break &) -> BlockKind {
         if (whileCtx) B.CreateBr(whileCtx->exit);
-        else throw std::logic_error("orphaned break!");
+        else throw BackendException("orphaned break!");
         return BlockKind::Normal;
       }, //
       [&](const Stmt::Cont &) -> BlockKind {
         if (whileCtx) B.CreateBr(whileCtx->test);
-        else throw std::logic_error("orphaned cont!");
+        else throw BackendException("orphaned cont!");
         return BlockKind::Normal;
       }, //
       [&](const Stmt::Cond &x) -> BlockKind {
@@ -778,17 +742,13 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, Op
             // Extend from i1 to i8
             B.CreateRet(B.CreateIntCast(expr, llvm::Type::getInt8Ty(C.actual), true));
           } else if (auto ptr = rtnTpe.get<Type::Ptr>(); ptr && ptr->length) {
-            B.CreateRet(C.load(B, expr, mkTpe(rtnTpe)));
+            B.CreateRet(C.load(B, expr, resolveType(rtnTpe)));
           } else {
             B.CreateRet(expr);
           }
         }
         return BlockKind::Terminal;
       });
-}
-
-std::vector<Pair<Sym, llvm::StructType *>> CodeGen::getStructTypes() const {
-  return structTypes | map([](auto &k, auto &v) { return std::pair{k, v.tpe}; }) | to_vector();
 }
 
 static std::vector<Arg> collectFnDeclarationNames(const Function &f) {
@@ -806,23 +766,26 @@ static std::vector<Arg> collectFnDeclarationNames(const Function &f) {
 }
 
 void CodeGen::addFn(llvm::Module &mod, const Function &f, bool entry) {
-
-  auto args = collectFnDeclarationNames(f);
-  auto llvmArgTpes = args ^ map([&](auto &&arg) { return mkTpe(arg.named.tpe, true); });
-
   // Unit type at function return type position is void, any other location, Unit is a singleton value
-  auto rtnTpe = f.rtn.is<Type::Unit0>() ? llvm::Type::getVoidTy(C) : mkTpe(f.rtn, true);
+  const auto rtnTpe = f.rtn.is<Type::Unit0>() ? llvm::Type::getVoidTy(C.actual) : resolveType(f.rtn, true);
+  // Unit type in arguments are discarded
+  const auto llvmArgTpes = f.args                                                              //
+                           | filter([](auto &arg) { return !arg.template is<Type::Unit0>(); }) //
+                           | map([&](auto &&arg) { return resolveType(arg.named.tpe, true); }) //
+                           | to_vector();
 
-  auto fnTpe = llvm::FunctionType::get(rtnTpe, {llvmArgTpes}, false);
-
+  const auto fnTpe = llvm::FunctionType::get(rtnTpe, {llvmArgTpes}, false);
   // XXX Normalise names as NVPTX has a relatively limiting range of supported characters in symbols
-  auto cleanName = qualified(f.name) ^ map([](char c) { return !std::isalnum(c) && c != '_' ? '_' : c; });
+  auto normalisedName =  f.name ^ map([](const char c) { return !std::isalnum(c) && c != '_' ? '_' : c; });
+
+
+
 
   auto *fn = llvm::Function::Create(fnTpe,                                        //
                                     (entry || f.kind == FunctionKind::Exported()) //
                                         ? llvm::Function::ExternalLinkage
                                         : llvm::Function::InternalLinkage,
-                                    cleanName, //
+                                    normalisedName, //
                                     mod);
 
   llvm::MDBuilder mdbuilder(C);
@@ -902,8 +865,8 @@ void CodeGen::addFn(llvm::Module &mod, const Function &f, bool entry) {
                   [&](const Type::Nothing &) -> std::string { return "/*nothing*/"; },                //
                   [&](const Type::Struct &x) -> std::string { return qualified(x.name); },            //
                   [&](const Type::Ptr &x) -> std::string { return thunk(x.component, thunk) + "*"; }, //
-                  [&](const Type::Var &) -> std::string { throw std::logic_error("type var"); },      //
-                  [&](const Type::Exec &) -> std::string { throw std::logic_error("exec"); }          //
+                  [&](const Type::Var &) -> std::string { throw BackendException("type var"); },      //
+                  [&](const Type::Exec &) -> std::string { throw BackendException("exec"); }          //
               );
             };
             return impl(tpe, impl);
@@ -984,7 +947,7 @@ void CodeGen::transform(llvm::Module &mod, const Function &fnTree) {
       std::cerr << key << " = " << v << " = m " << (key == sig) << std::endl;
     }
 
-    throw std::logic_error("Cannot find function " + to_string(sig) + ", function was not added before xform?");
+    throw BackendException("Cannot find function " + to_string(sig) + ", function was not added before xform?");
   }
 
   auto *fn = it->second;
@@ -1016,7 +979,7 @@ void CodeGen::transform(llvm::Module &mod, const Function &fnTree) {
 }
 ValPtr CodeGen::unaryExpr(const AnyExpr &expr, const AnyExpr &l, const AnyType &rtn, const ValPtrFn1 &fn) { //
   if (l.tpe() != rtn) {
-    throw std::logic_error("Semantic error: lhs type " + to_string(l.tpe()) + " of binary numeric operation in " + to_string(expr) +
+    throw BackendException("Semantic error: lhs type " + to_string(l.tpe()) + " of binary numeric operation in " + to_string(expr) +
                            " doesn't match return type " + to_string(rtn));
   }
 
@@ -1025,11 +988,11 @@ ValPtr CodeGen::unaryExpr(const AnyExpr &expr, const AnyExpr &l, const AnyType &
 ValPtr CodeGen::binaryExpr(const AnyExpr &expr, const AnyExpr &l, const AnyExpr &r, const AnyType &rtn,
                            const ValPtrFn2 &fn) { //
   if (l.tpe() != rtn) {
-    throw std::logic_error("Semantic error: lhs type " + to_string(l.tpe()) + " of binary numeric operation in " + to_string(expr) +
+    throw BackendException("Semantic error: lhs type " + to_string(l.tpe()) + " of binary numeric operation in " + to_string(expr) +
                            " doesn't match return type " + to_string(rtn));
   }
   if (r.tpe() != rtn) {
-    throw std::logic_error("Semantic error: rhs type " + to_string(r.tpe()) + " of binary numeric operation in " + to_string(expr) +
+    throw BackendException("Semantic error: rhs type " + to_string(r.tpe()) + " of binary numeric operation in " + to_string(expr) +
                            " doesn't match return type " + to_string(rtn));
   }
 

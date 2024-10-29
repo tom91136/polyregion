@@ -7,13 +7,9 @@
 #include "backend.h"
 #include "llvmc.h"
 
-#include "llvm/ExecutionEngine/ObjectCache.h"
-#include "llvm/ExecutionEngine/Orc/LLJIT.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
-#include "llvm/Object/Binary.h"
-#include "llvm/Support/Error.h"
 
 namespace polyregion::backend {
 
@@ -74,7 +70,7 @@ struct TargetedContext {
   [[nodiscard]] Map<std::string, StructInfo> resolveLayouts(const std::vector<StructDef> &structs);
 };
 
-class CodeGen;
+struct CodeGen;
 
 struct TargetSpecificHandler {
   virtual void witnessEntry(CodeGen &gen, llvm::Function &fn) = 0;
@@ -84,18 +80,13 @@ struct TargetSpecificHandler {
   static std::unique_ptr<TargetSpecificHandler> from(LLVMBackend::Target target);
 };
 
-class CodeGen {
+struct CodeGen {
 
   enum class BlockKind : uint8_t { Terminal, Normal };
 
   struct WhileCtx {
     llvm::BasicBlock *exit, *test;
   };
-
-  friend AMDGPUTargetSpecificHandler;
-  friend NVPTXTargetSpecificHandler;
-  friend CPUTargetSpecificHandler;
-  friend OpenCLTargetSpecificHandler;
 
   TargetedContext C;
   std::unique_ptr<TargetSpecificHandler> targetHandler;
@@ -106,31 +97,32 @@ class CodeGen {
   Map<std::string, StructInfo> structTypes{};
   Map<Signature, llvm::Function *> functions{};
 
-  llvm::Function *resolveExtFn(const AnyType &rtn, const std::string &name, const std::vector<AnyType> &args);
-  ValPtr extFn1(const std::string &name, const AnyType &rtn, const AnyExpr &arg);
-  ValPtr extFn2(const std::string &name, const AnyType &rtn, const AnyExpr &lhs, const AnyExpr &rhs);
-  ValPtr invokeMalloc(ValPtr size);
-  ValPtr invokeAbort();
-  ValPtr intr0(llvm::Intrinsic::ID id);
-  ValPtr intr1(llvm::Intrinsic::ID id, const AnyType &overload, const AnyExpr &arg);
-  ValPtr intr2(llvm::Intrinsic::ID id, const AnyType &overload, const AnyExpr &lhs, const AnyExpr &rhs);
-
-  ValPtr findStackVar(const Named &named);
-  ValPtr mkSelectPtr(const Expr::Select &select);
-
-  ValPtr mkExprVal(const Expr::Any &expr, const std::string &key = "");
-  BlockKind mkStmt(const Stmt::Any &stmt, llvm::Function &fn, Opt<WhileCtx> whileCtx);
-
-  ValPtr unaryExpr(const AnyExpr &expr, const AnyExpr &l, const AnyType &rtn, const ValPtrFn1 &fn);
-  ValPtr binaryExpr(const AnyExpr &expr, const AnyExpr &l, const AnyExpr &r, const AnyType &rtn, const ValPtrFn2 &fn);
-
-  ValPtr unaryNumOp(const AnyExpr &expr, const AnyExpr &arg, const AnyType &rtn, const ValPtrFn1 &integralFn,
-                    const ValPtrFn1 &fractionalFn);
-  ValPtr binaryNumOp(const AnyExpr &expr, const AnyExpr &l, const AnyExpr &r, const AnyType &rtn, const ValPtrFn2 &integralFn,
-                     const ValPtrFn2 &fractionalFn);
-
-public:
   explicit CodeGen(const LLVMBackend::Options &options, const std::string &moduleName);
+
+  [[nodiscard]] llvm::Type *resolveType(const AnyType &tpe, bool functionBoundary = false);
+  [[nodiscard]] llvm::Function *resolveExtFn(const AnyType &rtn, const std::string &name, const std::vector<AnyType> &args);
+
+  [[nodiscard]] ValPtr extFn1(const std::string &name, const AnyType &rtn, const AnyExpr &arg);
+  [[nodiscard]] ValPtr extFn2(const std::string &name, const AnyType &rtn, const AnyExpr &lhs, const AnyExpr &rhs);
+  [[nodiscard]] ValPtr invokeMalloc(ValPtr size);
+  [[nodiscard]] ValPtr invokeAbort();
+  [[nodiscard]] ValPtr intr0(llvm::Intrinsic::ID id);
+  [[nodiscard]] ValPtr intr1(llvm::Intrinsic::ID id, const AnyType &overload, const AnyExpr &arg);
+  [[nodiscard]] ValPtr intr2(llvm::Intrinsic::ID id, const AnyType &overload, const AnyExpr &lhs, const AnyExpr &rhs);
+
+  [[nodiscard]] ValPtr findStackVar(const Named &named);
+  [[nodiscard]] ValPtr mkSelectPtr(const Expr::Select &select);
+
+  [[nodiscard]] ValPtr mkExprVal(const Expr::Any &expr, const std::string &key = "");
+  [[nodiscard]] BlockKind mkStmt(const Stmt::Any &stmt, llvm::Function &fn, const Opt<WhileCtx> &whileCtx);
+
+  [[nodiscard]] ValPtr unaryExpr(const AnyExpr &expr, const AnyExpr &l, const AnyType &rtn, const ValPtrFn1 &fn);
+  [[nodiscard]] ValPtr binaryExpr(const AnyExpr &expr, const AnyExpr &l, const AnyExpr &r, const AnyType &rtn, const ValPtrFn2 &fn);
+
+  [[nodiscard]] ValPtr unaryNumOp(const AnyExpr &expr, const AnyExpr &arg, const AnyType &rtn, const ValPtrFn1 &integralFn,
+                                  const ValPtrFn1 &fractionalFn);
+  [[nodiscard]] ValPtr binaryNumOp(const AnyExpr &expr, const AnyExpr &l, const AnyExpr &r, const AnyType &rtn, const ValPtrFn2 &integralFn,
+                                   const ValPtrFn2 &fractionalFn);
 
   void addFn(llvm::Module &mod, const Function &f, bool entry);
 

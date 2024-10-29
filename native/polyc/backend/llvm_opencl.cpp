@@ -8,10 +8,10 @@ constexpr static uint32_t CLK_LOCAL_MEM_FENCE = 0x01;
 // Queue a memory fence to ensure correct ordering of memory operations to global memory
 constexpr static uint32_t CLK_GLOBAL_MEM_FENCE = 0x02;
 
-void OpenCLTargetSpecificHandler::witnessEntry(GodeGen &ctx, llvm::Function &fn) {}
+void OpenCLTargetSpecificHandler::witnessEntry(CodeGen &ctx, llvm::Function &fn) {}
 
 // See https://github.com/KhronosGroup/SPIR-Tools/wiki/SPIR-1.2-built-in-functions
-ValPtr OpenCLTargetSpecificHandler::mkSpecVal(GodeGen &cg, const Expr::SpecOp &expr) {
+ValPtr OpenCLTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr) {
 
   return expr.op.match_total( //
       [&](const Spec::Assert &) -> ValPtr { throw BackendException("unimplemented"); },
@@ -32,7 +32,7 @@ ValPtr OpenCLTargetSpecificHandler::mkSpecVal(GodeGen &cg, const Expr::SpecOp &e
         return cg.extFn1("_Z9mem_fencej", v.tpe, Expr::IntS32Const(CLK_GLOBAL_MEM_FENCE | CLK_LOCAL_MEM_FENCE));
       });
 }
-ValPtr OpenCLTargetSpecificHandler::mkMathVal(GodeGen &cg, const Expr::MathOp &expr) {
+ValPtr OpenCLTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr) {
   return expr.op.match_total( //                                                       //
       [&](const Math::Abs &v) -> ValPtr { throw BackendException("unimplemented"); },    //
       [&](const Math::Sin &v) -> ValPtr { throw BackendException("unimplemented"); },    //

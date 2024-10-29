@@ -270,7 +270,7 @@ object PolyAST {
       args: List[Arg],           //
       rtn: Type,                 //
       body: List[Stmt],          //
-      attrs: List[Function.Attr] //
+      attrs: Set[Function.Attr] //
   ) derives MsgPack.Codec
 
   case class Program(structs: List[StructDef], functions: List[Function]) derives MsgPack.Codec
