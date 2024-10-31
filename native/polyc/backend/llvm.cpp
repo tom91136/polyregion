@@ -410,8 +410,9 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
         } else throw BackendException("unhandled cast");
       },
       [&](const Expr::Invoke &x) -> ValPtr {
-        auto argNoUnit = x.args ^ filter([](auto &arg) { return !arg.tpe().template is<Type::Unit0>(); });
-        return functions ^ get(Signature(x.name, argNoUnit ^ map([](auto &arg) { return arg.tpe(); }), x.rtn)) ^
+        const auto argNoUnit = x.args ^ filter([](auto &arg) { return !arg.tpe().template is<Type::Unit0>(); });
+        const auto sig = Signature(x.name, argNoUnit ^ map([](auto &arg) { return arg.tpe(); }), x.rtn);
+        return functions ^ get(sig) ^
                fold(
                    [&](auto &fn) -> ValPtr {
                      const auto params =
@@ -424,8 +425,8 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
                      return x.rtn.is<Type::Unit0>() ? mkExprVal(Expr::Unit0Const()) : call;
                    },
                    [&]() -> ValPtr {
-                     throw BackendException(
-                         fmt::format("unhandled invocation, known functions are:\n{}", functions | keys() | mk_string("\n", show_repr)));
+                     throw BackendException(fmt::format("Unhandled invocation {}, known functions are:\n{}", repr(sig),
+                                                        functions | keys() | mk_string("\n -> ", show_repr)));
                    });
       },
       [&](const Expr::Index &x) -> ValPtr {
@@ -702,7 +703,6 @@ static auto createPrototype(CodeGen &cg, llvm::Module &mod, const Function &fn) 
 Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program) {
   structTypes = C.resolveLayouts(program.structs);
 
-
   const auto prototypes = program.functions ^ map([&](auto &fn) { return createPrototype(*this, M, fn); });
 
   prototypes | for_each([&](auto &llvmFn, auto &fn, auto &argsNoUnit) {
@@ -725,8 +725,6 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program) {
       auto _ = mkStmt(stmt, *llvmFn);
     stackVarPtrs.clear();
   });
-
-
 
   std::string ir;
   llvm::raw_string_ostream irOut(ir);

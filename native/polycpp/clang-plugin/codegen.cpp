@@ -61,24 +61,22 @@ polystl::KernelBundle polystl::generate(const Options &opts,
                                         const clang::CXXMethodDecl &functor, //
                                         const clang::SourceLocation &loc,    //
                                         runtime::PlatformKind kind) {
-
-  polystl::Remapper remapper(C);
+  Remapper remapper(C);
 
   auto parent = functor.getParent();
   auto returnTpe = functor.getReturnType();
   auto body = functor.getBody();
 
-  auto r = polystl::Remapper::RemapContext{};
-  auto parentName = remapper.handleRecord(parent, r);
-  StructDef &parentDef = r.structs.find(parentName)->second;
+  auto r = Remapper::RemapContext{};
+  auto parentDef  = remapper.handleRecord(parent, r);
+
 
   auto rtnTpe = remapper.handleType(returnTpe, r);
 
-  auto stmts = r.scoped([&](auto &r) { remapper.handleStmt(body, r); }, false, rtnTpe, parentName);
-  stmts.push_back(Stmt::Return(Expr::Alias(Term::Unit0Const())));
+  auto stmts = r.scoped([&](auto &r) { remapper.handleStmt(body, r); }, false, rtnTpe, parentDef);
+  stmts.push_back(Stmt::Return(Expr::Unit0Const()));
 
-  auto recv =
-      Arg(Named("this", Type::Ptr(Type::Struct(Sym({parentName}), parentDef.tpeVars, {}, parentDef.parents), {}, TypeSpace::Global())), {});
+  auto recv = Arg(Named("#this", Type::Ptr(Type::Struct(parentDef.name), {}, TypeSpace::Global())), {});
 
   auto args = functor.parameters() //
               | map([&](const clang::ParmVarDecl *x) {
@@ -101,9 +99,9 @@ polystl::KernelBundle polystl::generate(const Options &opts,
               | append(recv) //
               | to_vector();
 
-  auto f0 = polyast::Function(polyast::Sym({"kernel"}), {}, {}, args, {}, {}, rtnTpe, stmts, FunctionKind::Exported());
+  auto f0 = Function("kernel", args, rtnTpe, stmts, {FunctionAttr::Exported()});
 
-  auto p = Program(f0, r.functions ^ values(), r.structs ^ values());
+  auto p = Program(r.structs ^ values(), r.functions ^ values() ^ append(f0));
 
   if (opts.verbose) {
     diag.Report(loc,
@@ -124,7 +122,9 @@ polystl::KernelBundle polystl::generate(const Options &opts,
                                   << moduleId << std::string(to_string(target)) << features << err;
                               return std::nullopt;
                             }) ^
-                 map([&](auto &x) { return std::tuple{target, features, x}; });
+                 map([&](auto &x) {
+                   return std::tuple{target, features, x};
+                 });
         }) //
       |
       collect([&](auto &target, auto &features, auto &result) -> std::optional<KernelObject> {
