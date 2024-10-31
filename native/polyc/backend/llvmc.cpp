@@ -190,7 +190,7 @@ static std::string module2Ir(const llvm::Module &m) {
 
 // See
 // https://github.com/pytorch/pytorch/blob/6d4d9840cd4f18232e201cbcd843ea4f6cb4aabb/torch/csrc/jit/tensorexpr/llvm_codegen.cpp#L2466
-static void optimise(llvm::TargetMachine &TM, llvm::Module &M, llvm::OptimizationLevel &level) {
+static void optimise(llvm::TargetMachine &TM, llvm::Module &M, const llvm::OptimizationLevel &level) {
   // Create the analysis managers.
   llvm::LoopAnalysisManager LAM;
   llvm::FunctionAnalysisManager FAM;
@@ -291,41 +291,42 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
     }
   };
 
-  auto mkLLVMTargetMachineArtefact = [&](llvm::LLVMTargetMachine &TM,                     //
-                                         const std::optional<llvm::CodeGenFileType> &tpe, //
-                                         const llvm::Module &m0,                          //
-                                         std::vector<polyast::CompileEvent> &events, bool emplaceEvent) {
+  auto mkLLVMTargetMachineArtefact = [optLevel](llvm::LLVMTargetMachine &TM,                     //
+                                                const std::optional<llvm::CodeGenFileType> &tpe, //
+                                                const llvm::Module &m0,                          //
+                                                std::vector<polyast::CompileEvent> &events, const bool emplaceEvent) {
     auto m = llvm::CloneModule(m0);
-    auto optPassStart = compiler::nowMono();
-
-    optimise(TM, *m, optLevel);
-
-    llvm::legacy::PassManager PM;
-    auto *MMIWP = new llvm::MachineModuleInfoWrapperPass(&TM); // pass manager takes owner of this
-    PM.add(MMIWP);
-    PM.add(createTargetTransformInfoWrapperPass(TM.getTargetIRAnalysis()));
-    llvm::TargetPassConfig *PassConfig = TM.createPassConfig(PM);
-    // Set PassConfig options provided by TargetMachine.
-    PassConfig->setDisableVerify(true);
-    PM.add(PassConfig);
-    // PM done
-
     auto iselPassStart = compiler::nowMono();
-    if (PassConfig->addISelPasses()) throw std::logic_error("No ISEL");
-    PassConfig->addMachinePasses();
-    PassConfig->setInitialized();
-
     llvm::SmallVector<char, 0> objBuffer;
     llvm::raw_svector_ostream objStream(objBuffer);
+    {
+      auto optPassStart = compiler::nowMono();
 
-    if (tpe) {
-      if (llvm::TargetPassConfig::willCompleteCodeGenPipeline()) {
-        TM.addAsmPrinter(PM, objStream, nullptr, *tpe, MMIWP->getMMI().getContext());
+      optimise(TM, *m, optLevel);
+
+      llvm::legacy::PassManager PM;
+      auto *MMIWP = new llvm::MachineModuleInfoWrapperPass(&TM); // pass manager takes owner of this
+      PM.add(MMIWP);
+      PM.add(createTargetTransformInfoWrapperPass(TM.getTargetIRAnalysis()));
+      llvm::TargetPassConfig *PassConfig = TM.createPassConfig(PM);
+      // Set PassConfig options provided by TargetMachine.
+      PassConfig->setDisableVerify(true);
+      PM.add(PassConfig);
+      // PM done
+
+      if (PassConfig->addISelPasses()) throw std::logic_error("No ISEL");
+      PassConfig->addMachinePasses();
+      PassConfig->setInitialized();
+
+      if (tpe) {
+        if (llvm::TargetPassConfig::willCompleteCodeGenPipeline()) {
+          TM.addAsmPrinter(PM, objStream, nullptr, *tpe, MMIWP->getMMI().getContext());
+        }
       }
-    }
-    PM.run(*m);
-    if (emplaceEvent) {
-      events.emplace_back(compiler::nowMs(), compiler::elapsedNs(optPassStart), "llvm_to_obj_opt", module2Ir(*m));
+      PM.run(*m);
+      if (emplaceEvent) {
+        events.emplace_back(compiler::nowMs(), compiler::elapsedNs(optPassStart), "llvm_to_obj_opt", module2Ir(*m));
+      }
     }
     return std::make_tuple(std::move(m), objBuffer, compiler::nowMs(), compiler::elapsedNs(iselPassStart));
   };

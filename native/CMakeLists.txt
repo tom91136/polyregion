@@ -61,13 +61,14 @@ FetchContent_Declare(
         Aspartame
         #        SOURCE_DIR /Users/Tom/Aspartame
         GIT_REPOSITORY https://github.com/tom91136/Aspartame.git
-        GIT_TAG cf3c92ed
+        GIT_TAG 85969a19
 )
 
 FetchContent_MakeAvailable(Aspartame)
 
 find_package(fmt CONFIG REQUIRED)
 find_package(Catch2 CONFIG REQUIRED)
+find_package(magic_enum CONFIG REQUIRED)
 find_package(unofficial-libffi CONFIG REQUIRED)
 find_package(SPIRV-Tools-opt CONFIG REQUIRED)
 find_package(VulkanHeaders CONFIG REQUIRED)

@@ -18,7 +18,7 @@ using namespace polyregion::polyast;
 class AMDGPUTargetSpecificHandler;
 class NVPTXTargetSpecificHandler;
 class CPUTargetSpecificHandler;
-class OpenCLTargetSpecificHandler;
+class SPIRVOpenCLTargetSpecificHandler;
 
 class LLVMBackend final : public Backend {
 public:
@@ -73,7 +73,7 @@ struct TargetedContext {
 struct CodeGen;
 
 struct TargetSpecificHandler {
-  virtual void witnessEntry(CodeGen &gen, llvm::Function &fn) = 0;
+  virtual void witnessFn(CodeGen &gen, llvm::Function &fn, const Function &source) = 0;
   virtual ValPtr mkSpecVal(CodeGen &gen, const Expr::SpecOp &op) = 0;
   virtual ValPtr mkMathVal(CodeGen &gen, const Expr::MathOp &op) = 0;
   virtual ~TargetSpecificHandler();
@@ -124,11 +124,6 @@ struct CodeGen {
   [[nodiscard]] ValPtr binaryNumOp(const AnyExpr &expr, const AnyExpr &l, const AnyExpr &r, const AnyType &rtn, const ValPtrFn2 &integralFn,
                                    const ValPtrFn2 &fractionalFn);
 
-  void addFn(llvm::Module &mod, const Function &f, bool entry);
-
-  std::vector<Pair<std::string, llvm::StructType *>> getStructTypes() const;
-
-  void transform(const Function &program);
 
   Pair<Opt<std::string>, std::string> transform(const Program &program);
 };

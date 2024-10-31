@@ -2,9 +2,13 @@
 
 using namespace polyregion::backend::details;
 
-void CPUTargetSpecificHandler::witnessEntry(CodeGen &ctx, llvm::Function &fn) {}
+void CPUTargetSpecificHandler::witnessFn(CodeGen &ctx, llvm::Function &fn, const Function &source) {
+  if (!source.attrs.contains(FunctionAttr::Exported())) {
+    fn.setDSOLocal(true);
+  }
+}
 ValPtr CPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr) {
-  return expr.op.match_total(                                            //
+  return expr.op.match_total(                                           //
       [&](const Spec::Assert &) -> ValPtr { return cg.invokeAbort(); }, //
       [&](const Spec::GpuBarrierGlobal &) -> ValPtr { throw BackendException("unimplemented"); },
       [&](const Spec::GpuBarrierLocal &) -> ValPtr { throw BackendException("unimplemented"); },

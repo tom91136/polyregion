@@ -3,7 +3,11 @@
 
 using namespace polyregion::backend::details;
 
-void AMDGPUTargetSpecificHandler::witnessEntry(CodeGen &cg, llvm::Function &fn) { fn.setCallingConv(llvm::CallingConv::AMDGPU_KERNEL); }
+void AMDGPUTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn, const Function &source) {
+  if (source.attrs.contains(FunctionAttr::Exported())) {
+    fn.setCallingConv(llvm::CallingConv::AMDGPU_KERNEL);
+  }
+}
 ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr) {
 
   // HSA Sys Arch 1.2:  2.9.6 Kernel Dispatch Packet format:

@@ -2252,7 +2252,7 @@ struct POLYREGION_EXPORT Return : Stmt::Base {
 };
 
 struct POLYREGION_EXPORT Annotated : Stmt::Base {
-  Stmt::Any expr;
+  Stmt::Any stmt;
   std::optional<SourcePosition> pos;
   std::optional<std::string> comment;
   constexpr static uint32_t variant_id = 10;
@@ -2263,7 +2263,7 @@ struct POLYREGION_EXPORT Annotated : Stmt::Base {
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Stmt::Annotated &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator<(const Stmt::Annotated &) const;
-  Annotated(Stmt::Any expr, std::optional<SourcePosition> pos, std::optional<std::string> comment) noexcept;
+  Annotated(Stmt::Any stmt, std::optional<SourcePosition> pos, std::optional<std::string> comment) noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Stmt::Annotated &);

@@ -1,20 +1,22 @@
 #include "polyregion/compat.h"
 
 #include <atomic>
-#include <iostream>
 
 #include "ast.h"
+#include "compiler.h"
+
 #include "backend/c_source.h"
 #include "backend/llvm.h"
 #include "backend/llvmc.h"
-#include "compiler.h"
-#include "generated/polyast_codec.h"
+
+#include "aspartame/all.hpp"
+#include "fmt/format.h"
+#include "magic_enum.hpp"
 #include "nlohmann/json.hpp"
 #include "polyregion/llvm_utils.hpp"
 
 using namespace polyregion;
-
-static std::atomic_bool init = false;
+using namespace aspartame;
 
 compiler::TimePoint compiler::nowMono() { return MonoClock::now(); }
 
@@ -27,6 +29,7 @@ int64_t compiler::nowMs() {
 }
 
 void compiler::initialise() {
+  static std::atomic_bool init = false;
   if (!init) {
     init = true;
     backend::llvmc::initialise();
@@ -35,11 +38,11 @@ void compiler::initialise() {
 
 static json deserialiseAst(const polyast::Bytes &astBytes) {
   try {
-    auto json = nlohmann::json::from_msgpack(astBytes.data(), astBytes.data() + astBytes.size());
+    const auto json = nlohmann::json::from_msgpack(astBytes.data(), astBytes.data() + astBytes.size());
     // the JSON comes in versioned with the hash
     return polyast::hashed_from_json(json);
   } catch (nlohmann::json::exception &e) {
-    throw std::logic_error("Unable to parse packed ast:" + std::string(e.what()));
+    throw std::logic_error(fmt::format("Unable to parse packed ast: {}", e.what()));
   }
 }
 
@@ -47,7 +50,7 @@ static backend::LLVMBackend::Options toLLVMBackendOptions(const compiler::Option
 
   auto validate = [&](llvm::Triple::ArchType arch) {
     if (!llvm_shared::isCPUTargetSupported(options.arch, arch)) {
-      throw std::logic_error("Unsupported target CPU `" + options.arch + "` on `" + llvm::Triple::getArchTypeName(arch).str() + "`");
+      throw std::logic_error(fmt::format("Unsupported target CPU `{}` on `{}`", options.arch, llvm::Triple::getArchTypeName(arch).str()));
     }
   };
 
@@ -59,7 +62,7 @@ static backend::LLVMBackend::Options toLLVMBackendOptions(const compiler::Option
         case llvm::Triple::ArchType::x86_64: return {.target = backend::LLVMBackend::Target::x86_64, .arch = options.arch};
         case llvm::Triple::ArchType::aarch64: return {.target = backend::LLVMBackend::Target::AArch64, .arch = options.arch};
         case llvm::Triple::ArchType::arm: return {.target = backend::LLVMBackend::Target::ARM, .arch = options.arch};
-        default: throw std::logic_error("Unsupported host triplet: " + host.str());
+        default: throw std::logic_error(fmt::format("Unsupported host triplet: {}", host.str()));
       }
     }
     case compiletime::Target::Object_LLVM_x86_64:
@@ -83,71 +86,40 @@ static backend::LLVMBackend::Options toLLVMBackendOptions(const compiler::Option
     case compiletime::Target::Source_C_Metal1_0:  //
     case compiletime::Target::Source_C_C11:       //
       throw std::logic_error("Not an object target");
+    default: throw std::logic_error(fmt::format("Unknown target: {}", magic_enum::enum_name(options.target)));
   }
 }
 
 std::vector<polyast::StructLayout> compiler::layoutOf(const std::vector<polyast::StructDef> &defs, const Options &options) {
-
   switch (options.target) {
-    case compiletime::Target::Object_LLVM_HOST:
-    case compiletime::Target::Object_LLVM_x86_64:
-    case compiletime::Target::Object_LLVM_AArch64:
-    case compiletime::Target::Object_LLVM_ARM:
-    case compiletime::Target::Object_LLVM_NVPTX64:
-    case compiletime::Target::Object_LLVM_AMDGCN:
-    case compiletime::Target::Object_LLVM_SPIRV32:
-    case compiletime::Target::Object_LLVM_SPIRV64: {
-
-      auto llvmOptions = toLLVMBackendOptions(options);
-      auto dataLayout = llvmOptions.targetInfo().resolveDataLayout();
-
-      llvm::LLVMContext c;
-      backend::LLVMBackend::AstTransformer xform(llvmOptions, c);
-      std::vector<polyast::StructLayout> layouts;
-      xform.addDefs(defs);
-
-      std::unordered_map<polyast::Sym, polyast::StructDef> lut(defs.size());
-      for (auto &d : defs)
-        lut.emplace(d.name, d);
-      for (auto &[sym, structTy] : xform.getStructTypes()) {
-        if (auto it = lut.find(sym); it != lut.end()) {
-          auto layout = dataLayout.getStructLayout(structTy);
-          std::vector<polyast::StructLayout::Member> members;
-          for (size_t i = 0; i < it->second.members.size(); ++i) {
-            members.emplace_back(it->second.members[i].named,                             //
-                                 layout->getElementOffset(i),                             //
-                                 dataLayout.getTypeAllocSize(structTy->getElementType(i)) //
-            );
-          }
-          layouts.emplace_back(sym, layout->getSizeInBytes(), layout->getAlignment().value(), members);
-        } else throw std::logic_error("Cannot find symbol " + to_string(sym) + " from domain");
-      }
-      return layouts;
-    }
-    case compiletime::Target::Source_C_C11:
-    case compiletime::Target::Source_C_OpenCL1_1:
+    case compiletime::Target::Object_LLVM_HOST: [[fallthrough]];
+    case compiletime::Target::Object_LLVM_x86_64: [[fallthrough]];
+    case compiletime::Target::Object_LLVM_AArch64: [[fallthrough]];
+    case compiletime::Target::Object_LLVM_ARM: [[fallthrough]];
+    case compiletime::Target::Object_LLVM_NVPTX64: [[fallthrough]];
+    case compiletime::Target::Object_LLVM_AMDGCN: [[fallthrough]];
+    case compiletime::Target::Object_LLVM_SPIRV32: [[fallthrough]];
+    case compiletime::Target::Object_LLVM_SPIRV64: return backend::LLVMBackend(toLLVMBackendOptions(options)).resolveLayouts(defs);
+    case compiletime::Target::Source_C_C11: [[fallthrough]];
+    case compiletime::Target::Source_C_OpenCL1_1: [[fallthrough]];
     case compiletime::Target::Source_C_Metal1_0:
-      // TODO we need to submit a kernel and execute it to get the offsets
-      throw std::logic_error("Not available for source targets");
+      throw std::logic_error(fmt::format("Not available for source target {}", magic_enum::enum_name(options.target)));
+    default: throw std::logic_error(fmt::format("Unknown target: {}", magic_enum::enum_name(options.target)));
   }
 }
 
-std::vector<polyast::StructLayout> compiler::layoutOf(const polyast::Bytes &sdef, const Options &options) {
-  json json = deserialiseAst(sdef);
-  std::vector<polyast::StructDef> sdefs;
-  std::transform(json.begin(), json.end(), std::back_inserter(sdefs), &polyast::structdef_from_json);
-  return layoutOf(sdefs, options);
+std::vector<polyast::StructLayout> compiler::layoutOf(const polyast::Bytes &bytes, const Options &options) {
+  const json json = deserialiseAst(bytes);
+  const auto structs = json | map([](auto &x) { return polyast::structdef_from_json(x); }) | to_vector();
+  return layoutOf(structs, options);
 }
 
 static void sortEvents(polyast::CompileResult &c) {
-  std::sort(c.events.begin(), c.events.end(), [](const auto &l, const auto &r) { return l.epochMillis < r.epochMillis; });
+  c.events = c.events ^ sort_by([](auto &x) { return x.epochMillis; });
 }
 
 polyast::CompileResult compiler::compile(const polyast::Program &program, const Options &options, const compiletime::OptLevel &opt) {
-  if (!init) {
-    return polyast::CompileResult{{}, {}, {}, {}, "initialise was not called before"};
-  }
-
+  initialise();
   auto mkBackend = [&]() -> std::unique_ptr<backend::Backend> {
     switch (options.target) {
       case compiletime::Target::Object_LLVM_HOST:
@@ -165,6 +137,7 @@ polyast::CompileResult compiler::compile(const polyast::Program &program, const 
         return std::make_unique<backend::CSource>(backend::CSource::Dialect::MSL1_0);    //
       case compiletime::Target::Source_C_C11:                                            //
         return std::make_unique<backend::CSource>(backend::CSource::Dialect::C11);       //
+      default: throw std::logic_error(fmt::format("Unknown target: {}", magic_enum::enum_name(options.target)));
     }
   };
 

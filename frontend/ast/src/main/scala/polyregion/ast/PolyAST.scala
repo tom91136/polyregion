@@ -81,7 +81,7 @@ object PolyAST {
     case Cont
     case Cond(cond: Expr, trueBr: List[Stmt], falseBr: List[Stmt])
     case Return(value: Expr)
-    case Annotated(expr: Stmt, pos: Option[SourcePosition] = None, comment: Option[String] = None)
+    case Annotated(stmt: Stmt, pos: Option[SourcePosition] = None, comment: Option[String] = None)
   }
 
   case class Overload(args: List[Type], rtn: Type) derives MsgPack.Codec

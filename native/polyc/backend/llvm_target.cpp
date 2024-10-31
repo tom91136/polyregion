@@ -1,6 +1,7 @@
 #include <unordered_set>
 
 #include "aspartame/all.hpp"
+#include "magic_enum.hpp"
 
 #include "ast.h"
 #include "llvm.h"
@@ -131,32 +132,31 @@ llvm::Type *TargetedContext::resolveType(const AnyType &tpe, const Map<std::stri
 
 StructInfo TargetedContext::resolveStruct(const StructDef &def, const Map<std::string, StructInfo> &structs) {
   const auto types = def.members ^ map([&](auto &m) { return resolveType(m.tpe, structs); });
-  const auto table = def.members | map([](auto &m) { return m.symbol; }) | zip_with_index() | to<Map>();
+  const auto table = (def.members | map([](auto &m) { return m.symbol; }) | zip_with_index() | to_vector()) ^ to<Map>();
   const auto tpe = llvm::StructType::create(actual, types, def.name);
   const auto dataLayout = options.targetInfo().resolveDataLayout();
   const auto structLayout = dataLayout.getStructLayout(tpe);
-  const StructLayout layout{.name = def.name,
-                            .sizeInBytes = structLayout->getSizeInBytes(),
-                            .alignment = static_cast<int64_t>(structLayout->getAlignment().value()),
-                            .members = def.members | zip_with_index() | map([&](auto &m, auto i) {
-                                         return StructLayoutMember{
-                                             .name = m.symbol,                                                  //
-                                             .offsetInBytes = structLayout->getElementOffset(i),                //
-                                             .sizeInBytes = dataLayout.getTypeAllocSize(tpe->getElementType(i)) //
-                                         };
-                                       }) |
-                                       to_vector()};
+  const StructLayout layout(/*name*/ def.name,
+                            /*sizeInBytes*/ structLayout->getSizeInBytes(),
+                            /*alignment*/ static_cast<int64_t>(structLayout->getAlignment().value()),
+                            /*members*/ def.members | zip_with_index() | map([&](auto &named, auto i) {
+                              return StructLayoutMember(
+                                  /*name*/ named,                                                            //
+                                  /*offsetInBytes*/ static_cast<int64_t>(structLayout->getElementOffset(i)), //
+                                  /*sizeInBytes*/ dataLayout.getTypeAllocSize(tpe->getElementType(i))        //
+                              );
+                            }) | to_vector());
   return {.def = def, .layout = layout, .tpe = tpe, .memberIndices = table};
 }
 
 Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<StructDef> &structs) {
   Map<std::string, StructInfo> resolved;
-  Set withDependencies(structs.begin(), structs.end());
+  Set<StructDef> withDependencies(structs.begin(), structs.end());
   while (!withDependencies.empty()) { // TODO handle recursive defs
     std::vector<StructDef> zeroDeps =
-        withDependencies | filter([&](StructDef &def) {
-          return def.members | forall([&](auto &named) {
-                   return named.tpe.template get<Type::Struct>() ^ forall([&](auto &s) { return resolved ^ contains(s.name); });
+        withDependencies | filter([&](auto &def) {
+          return def.members ^ forall([&](auto &named) {
+                   return named.tpe.template get<Type::Struct>() ^ forall([&](auto &s) { return resolved.contains(s.name); });
                  });
         }) |
         to_vector();
@@ -227,6 +227,6 @@ llvmc::TargetInfo LLVMBackend::Options::targetInfo() const {
     case Target::AMDGCN: return bindGpuArch(Triple::ArchType::amdgcn, Triple::VendorType::AMD, Triple::OSType::AMDHSA);
     case Target::SPIRV32: return bindGpuArch(Triple::ArchType::spirv32, Triple::VendorType::UnknownVendor, Triple::OSType::UnknownOS);
     case Target::SPIRV64: return bindGpuArch(Triple::ArchType::spirv64, Triple::VendorType::UnknownVendor, Triple::OSType::UnknownOS);
-    default: throw BackendException(fmt::format("Unexpected target {}", target));
+    default: throw BackendException(fmt::format("Unexpected target {}", magic_enum::enum_name(target)));
   }
 }

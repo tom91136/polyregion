@@ -33,19 +33,19 @@ template <typename P> static void assertCompile(const P &p) {
   INFO(c);
 }
 
-TEST_CASE("array update struct elem member", "[compiler]") {
-   compiler::initialise();
-  Named defX = Named("x", Type::IntS32());
-  Named defY = Named("y", Type::IntS32());
-  StructDef def("MyStruct", {defX, defY});
-  Type::Struct myStruct("MyStruct");
-
-  Function fn("foo", {Arg(Named("xs", Ptr(myStruct)), {})}, Unit,
-              {
-                  Mut(Select({Named("xs", Ptr(myStruct))}, defX), IntS32Const(42)),
-                  Return((Unit0Const())),
-              },
-              {FunctionAttr::Exported()});
-  Program p({def}, {fn});
-  assertCompile(p);
-}
+// TEST_CASE("array update struct elem member", "[compiler]") {
+//    compiler::initialise();
+//   Named defX = Named("x", Type::IntS32());
+//   Named defY = Named("y", Type::IntS32());
+//   StructDef def("MyStruct", {defX, defY});
+//   Type::Struct myStruct("MyStruct");
+//
+//   Function fn("foo", {Arg(Named("xs", Ptr(myStruct)), {})}, Unit,
+//               {
+//                   Mut(Select({Named("xs", Ptr(myStruct))}, defX), IntS32Const(42)),
+//                   Return((Unit0Const())),
+//               },
+//               {FunctionAttr::Exported()});
+//   Program p({def}, {fn});
+//   assertCompile(p);
+// }

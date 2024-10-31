@@ -1790,17 +1790,17 @@ json Stmt::return_to_json(const Stmt::Return& x_) {
 }
 
 Stmt::Annotated Stmt::annotated_from_json(const json& j_) { 
-  auto expr = Stmt::any_from_json(j_.at(0));
+  auto stmt = Stmt::any_from_json(j_.at(0));
   auto pos = j_.at(1).is_null() ? std::nullopt : std::make_optional(sourceposition_from_json(j_.at(1)));
   auto comment = j_.at(2).is_null() ? std::nullopt : std::make_optional(j_.at(2).get<std::string>());
-  return {expr, pos, comment};
+  return {stmt, pos, comment};
 }
 
 json Stmt::annotated_to_json(const Stmt::Annotated& x_) { 
-  auto expr = Stmt::any_to_json(x_.expr);
+  auto stmt = Stmt::any_to_json(x_.stmt);
   auto pos = x_.pos ? sourceposition_to_json(*x_.pos) : json();
   auto comment = x_.comment ? json(*x_.comment) : json();
-  return json::array({expr, pos, comment});
+  return json::array({stmt, pos, comment});
 }
 
 Stmt::Any Stmt::any_from_json(const json& j_) { 
@@ -2069,13 +2069,13 @@ json compileresult_to_json(const CompileResult& x_) {
 json hashed_from_json(const json& j_) { 
   auto hash_ = j_.at(0).get<std::string>();
   auto data_ = j_.at(1);
-  if(hash_ != "24033f20cc8ffbf6a0c8ed9d57c375bc") {
-   throw std::runtime_error("Expecting ADT hash to be 24033f20cc8ffbf6a0c8ed9d57c375bc, but was " + hash_);
+  if(hash_ != "8c95549d3555868db872b5026c177171") {
+   throw std::runtime_error("Expecting ADT hash to be 8c95549d3555868db872b5026c177171, but was " + hash_);
   }
   return data_;
 }
 
 json hashed_to_json(const json& x_) { 
-  return json::array({"24033f20cc8ffbf6a0c8ed9d57c375bc", x_});
+  return json::array({"8c95549d3555868db872b5026c177171", x_});
 }
 } // namespace polyregion::polyast

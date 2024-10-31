@@ -31,7 +31,7 @@
   #endif
 
   #define POLYRT_TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this, __PRETTY_FUNCTION__)
-//  #define POLYRT_TRACE()
+  #define POLYRT_TRACE()
 
 #endif
 

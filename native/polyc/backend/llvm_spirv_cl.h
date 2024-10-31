@@ -4,8 +4,8 @@
 
 namespace polyregion::backend::details {
 
-class OpenCLTargetSpecificHandler final : public TargetSpecificHandler {
-  void witnessEntry(CodeGen &, llvm::Function &) override;
+class SPIRVOpenCLTargetSpecificHandler final : public TargetSpecificHandler {
+  void witnessFn(CodeGen &, llvm::Function &, const Function &source) override;
   ValPtr mkSpecVal(CodeGen &, const Expr::SpecOp &) override;
   ValPtr mkMathVal(CodeGen &, const Expr::MathOp &) override;
 };

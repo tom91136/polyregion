@@ -10,10 +10,13 @@
       "name": "fmt"
     },
     {
-      "name": "libffi"
+      "name": "magic-enum"
     },
     {
       "name": "catch2"
+    },
+    {
+      "name": "libffi"
     },
     {
       "name": "spirv-tools"
@@ -31,23 +34,27 @@
   "overrides": [
     {
       "name": "nlohmann-json",
-      "version": "3.11.3"
+      "version": "3.11.3#1"
     },
     {
       "name": "fmt",
-      "version": "11.0.2"
+      "version": "11.0.2#1"
     },
     {
       "name": "spdlog",
-      "version": "1.10.0"
+      "version": "1.14.1"
     },
     {
-      "name": "libffi",
-      "version": "3.4.6#0"
+      "name": "magic-enum",
+      "version": "0.9.6#1"
     },
     {
       "name": "catch2",
       "version": "3.7.1"
+    },
+    {
+      "name": "libffi",
+      "version": "3.4.6#0"
     },
     {
       "name": "spirv-tools",

@@ -65,7 +65,12 @@ set(POLYRT_LIBS
 
 add_library(polyrt SHARED)
 add_library(polyrt-obj OBJECT)
-merge_static_libs(polyrt-static ${POLYRT_LIBS})
+if (POLYREGION_SHARED_LIB)
+    add_library(polyrt-static SHARED)
+else ()
+    merge_static_libs(polyrt-static ${POLYRT_LIBS})
+endif ()
+
 
 foreach (TARGET polyrt polyrt-obj polyrt-static)
     target_sources(${TARGET}

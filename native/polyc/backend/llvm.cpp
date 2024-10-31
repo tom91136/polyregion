@@ -8,17 +8,20 @@
 #include "llvmc.h"
 
 #include "fmt/core.h"
+#include "magic_enum.hpp"
 
 #include "llvm_amdgpu.h"
 #include "llvm_cpu.h"
 #include "llvm_nvptx.h"
-#include "llvm_opencl.h"
+#include "llvm_spirv_cl.h"
 
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/TargetParser/Host.h"
+
+#include <magic_enum.hpp>
 
 using namespace aspartame;
 using namespace polyregion;
@@ -41,7 +44,8 @@ std::unique_ptr<TargetSpecificHandler> TargetSpecificHandler::from(LLVMBackend::
     case LLVMBackend::Target::NVPTX64: return std::make_unique<NVPTXTargetSpecificHandler>();
     case LLVMBackend::Target::AMDGCN: return std::make_unique<AMDGPUTargetSpecificHandler>();
     case LLVMBackend::Target::SPIRV32: [[fallthrough]];
-    case LLVMBackend::Target::SPIRV64: return std::make_unique<OpenCLTargetSpecificHandler>();
+    case LLVMBackend::Target::SPIRV64: return std::make_unique<SPIRVOpenCLTargetSpecificHandler>();
+    default: throw BackendException(fmt::format("Unknown target {}", magic_enum::enum_name(target)));
   }
 }
 
@@ -78,27 +82,26 @@ ValPtr CodeGen::invokeMalloc(ValPtr size) {
 ValPtr CodeGen::invokeAbort() { return B.CreateCall(resolveExtFn(Type::Nothing(), "abort", {})); }
 
 ValPtr CodeGen::extFn1(const std::string &name, const AnyType &rtn, const AnyExpr &arg) { //
-  const auto fn_ = resolveExtFn(rtn, name, {arg.tpe()});
+  const auto fn = resolveExtFn(rtn, name, {arg.tpe()});
   if (C.options.target == LLVMBackend::Target::SPIRV32 || C.options.target == LLVMBackend::Target::SPIRV64) {
-    fn_->setCallingConv(llvm::CallingConv::SPIR_FUNC);
+    fn->setCallingConv(llvm::CallingConv::SPIR_FUNC);
   }
   if (!rtn.is<Type::Unit0>()) {
-    fn_->addFnAttr(llvm::Attribute::WillReturn);
+    fn->addFnAttr(llvm::Attribute::WillReturn);
   }
-  const auto call = B.CreateCall(fn_, mkExprVal(arg));
-  call->setCallingConv(fn_->getCallingConv());
+  const auto call = B.CreateCall(fn, mkExprVal(arg));
+  call->setCallingConv(fn->getCallingConv());
   return call;
 }
-ValPtr CodeGen::extFn2(const std::string &name, const AnyType &rtn, const AnyExpr &lhs,
-                       const AnyExpr &rhs) { //
-  const auto fn_ = resolveExtFn(rtn, name, {lhs.tpe(), rhs.tpe()});
+ValPtr CodeGen::extFn2(const std::string &name, const AnyType &rtn, const AnyExpr &lhs, const AnyExpr &rhs) {
+  const auto fn = resolveExtFn(rtn, name, {lhs.tpe(), rhs.tpe()});
   if (C.options.target == LLVMBackend::Target::SPIRV32 || C.options.target == LLVMBackend::Target::SPIRV64) {
-    fn_->setCallingConv(llvm::CallingConv::SPIR_FUNC);
-    fn_->addFnAttr(llvm::Attribute::NoBuiltin);
-    fn_->addFnAttr(llvm::Attribute::Convergent);
+    fn->setCallingConv(llvm::CallingConv::SPIR_FUNC);
+    fn->addFnAttr(llvm::Attribute::NoBuiltin);
+    fn->addFnAttr(llvm::Attribute::Convergent);
   }
-  const auto call = B.CreateCall(fn_, {mkExprVal(lhs), mkExprVal(rhs)});
-  call->setCallingConv(fn_->getCallingConv());
+  const auto call = B.CreateCall(fn, {mkExprVal(lhs), mkExprVal(rhs)});
+  call->setCallingConv(fn->getCallingConv());
   return call;
 }
 ValPtr CodeGen::intr0(const llvm::Intrinsic::ID id) { //
@@ -170,59 +173,25 @@ ValPtr CodeGen::mkSelectPtr(const Expr::Select &select) {
     auto tpe = head.tpe;
     auto root = findStackVar(head);
     for (auto &path : tail) {
-      auto selectFinal = [&](llvm::StructType *structTy, size_t idx, bool conditionalLoad = true, const std::string &suffix = "") {
-        if (auto p = tpe.get<Type::Ptr>(); conditionalLoad && p && !p->length) {
-          root = B.CreateInBoundsGEP(structTy, C.load(B, root, B.getPtrTy()),
+      const auto info = structTypeOf(tpe);
+      if (auto idx = info.memberIndices ^ get(path.symbol)) {
+        if (auto p = tpe.get<Type::Ptr>(); p && !p->length) {
+          root = B.CreateInBoundsGEP(info.tpe, C.load(B, root, B.getPtrTy(C.AllocaAS)),
                                      {//
-                                      llvm::ConstantInt::get(C.i32Ty(), 0), llvm::ConstantInt::get(C.i32Ty(), idx)},
-                                     qualified(select) + "_select_ptr_" + suffix);
+                                      llvm::ConstantInt::get(C.i32Ty(), 0), llvm::ConstantInt::get(C.i32Ty(), *idx)},
+                                     qualified(select) + "_select_ptr");
         } else {
-          root = B.CreateInBoundsGEP(structTy, root,
+          root = B.CreateInBoundsGEP(info.tpe, root,
                                      {//
-                                      llvm::ConstantInt::get(C.i32Ty(), 0), llvm::ConstantInt::get(C.i32Ty(), idx)},
-                                     qualified(select) + "_select_ptr_" + suffix);
+                                      llvm::ConstantInt::get(C.i32Ty(), 0), llvm::ConstantInt::get(C.i32Ty(), *idx)},
+                                     qualified(select) + "_select_ptr");
         }
-      };
-      auto [s, structTy, table] = structTypeOf(tpe);
-      if (auto idx = table ^ get(path.symbol); idx) {
-        selectFinal(structTy, *idx);
         tpe = path.tpe;
       } else {
-        if (auto inHeirachy = findSymbolInHeirachy<std::pair<size_t, llvm::StructType *>>(
-                s.name,
-                [&](auto, auto ty, auto xs) -> std::optional<std::pair<size_t, llvm::StructType *>> {
-                  auto o = xs ^ get(path.symbol);
-                  return o ? std::optional{std::pair{*o, ty}} : std::nullopt;
-                  ;
-                });
-            inHeirachy) {
-          auto &[inheritanceChain, lastIndex] = *inHeirachy;
-          auto chainPrev = structTy;
-          // TODO conditional deref only on the first chain; garbage code but semantically correct,redo this whole thing with views
-          size_t c = 0;
-          inheritanceChain.push_back(lastIndex.second);
-          for (auto chain : inheritanceChain) {
-            size_t N = 0;
-            if (chain != chainPrev) { // skip the first chain; it's 0 offset
-              if (auto relativeIdxIt =
-                      std::find_if(chainPrev->element_begin(), chainPrev->element_end(), [&](auto t) { return t == chain; });
-                  relativeIdxIt != chainPrev->element_end()) {
-                N = std::distance(chainPrev->element_begin(), relativeIdxIt);
-                selectFinal(chainPrev, N, c == 0, "in_chain_" + chain->getName().str());
-                c++;
-              } else {
-                throw BackendException("Illegal select path with out of bounds parent `" + to_string(path) + "`" + fail());
-              }
-            }
-            chainPrev = chain;
-          }
-          selectFinal(lastIndex.second, lastIndex.first, false, "in_chain_final_" + lastIndex.second->getName().str());
-          tpe = path.tpe;
-        } else {
-          auto pool = table | mk_string("\n", "\n", "\n", [](auto &k, auto &v) { return " -> `" + k + "` = " + std::to_string(v) + ")"; });
-          throw BackendException("Illegal select path with unknown struct member index of name `" + to_string(path) + "`, pool=" + pool +
-                                 fail());
-        }
+        auto pool = info.memberIndices |
+                    mk_string("\n", "\n", "\n", [](auto &k, auto &v) { return " -> `" + k + "` = " + std::to_string(v) + ")"; });
+        throw BackendException("Illegal select path with unknown struct member index of name `" + to_string(path) + "`, pool=" + pool +
+                               fail());
       }
     }
     return root;
@@ -380,51 +349,11 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
         // Same type
         if (x.as == x.from.tpe()) return from;
 
-        // x.as <: x.from
-
-        if (auto rhsPtr = x.from.tpe().get<Type::Ptr>(); rhsPtr) {
-          if (auto lhsPtr = x.as.get<Type::Ptr>(); lhsPtr) {
-            auto lhsStruct = lhsPtr->component.get<Type::Struct>();
-            auto rhsStruct = rhsPtr->component.get<Type::Struct>();
-            if (lhsStruct && rhsStruct &&
-                (std::any_of(lhsStruct->parents.begin(), lhsStruct->parents.end(), [&](auto &x) { return x == rhsStruct->name; }) ||
-                 std::any_of(rhsStruct->parents.begin(), rhsStruct->parents.end(), [&](auto &x) { return x == lhsStruct->name; }))) {
-
-              auto lhsTpe = resolveType(*lhsStruct);
-
-              // B.to[A]
-
-              if (auto inHeirachy = findSymbolInHeirachy<bool>(
-                      rhsStruct->name,
-                      [&](auto, auto structTy, auto) -> Opt<bool> { return structTy == lhsTpe ? std::optional{true} : std::nullopt; });
-                  inHeirachy) {
-
-                auto &[inheritanceChain, finaIdx] = *inHeirachy;
-
-                auto chainPrev =
-                    lhsTpe->isStructTy() ? static_cast<llvm::StructType *>(lhsTpe) : throw BackendException("Illegal lhs tpe!");
-                for (auto chain : inheritanceChain) {
-
-                  size_t N = 0;
-                  if (chain != chainPrev) { // skip the first chain; it's 0 offset
-                    if (auto relativeIdxIt =
-                            std::find_if(chain->element_begin(), chain->element_end(), [&](auto t) { return t == chainPrev; });
-                        relativeIdxIt != chain->element_end()) {
-                      N = std::distance(chain->element_begin(), relativeIdxIt);
-                    } else {
-                      throw BackendException("Illegal select path with out of bounds parent `" + to_string(path) + "`");
-                    }
-                  }
-
-                  from = B.CreateInBoundsGEP(chain, from,
-                                             {//
-                                              llvm::ConstantInt::get(C.i32Ty(), 0), llvm::ConstantInt::get(C.i32Ty(), N)},
-                                             "_upcast_ptr");
-                }
-              }
-
-              // find the offset
-
+        // Allow any pointer casts of struct
+        if (const auto rhsPtr = x.from.tpe().get<Type::Ptr>()) {
+          if (const auto lhsPtr = x.as.get<Type::Ptr>()) {
+            // TODO check layout and loss of information
+            if (lhsPtr->component.is<Type::Struct>() && rhsPtr->component.is<Type::Struct>()) {
               return from;
             }
           }
@@ -455,7 +384,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
             auto min32BitIntBits = std::max<llvm::TypeSize::ScalarTy>(32, toTpe->getPrimitiveSizeInBits());
             auto toTpeMaxInFp = llvm::ConstantFP::get(fromTpe, double(nIntMax(min32BitIntBits)));
             auto toTpeMinInFp = llvm::ConstantFP::get(fromTpe, double(nIntMin(min32BitIntBits)));
-            auto min32BitIntTy = llvm::Type::getIntNTy(C, min32BitIntBits);
+            auto min32BitIntTy = llvm::Type::getIntNTy(C.actual, min32BitIntBits);
             auto toTpeMaxInInt = llvm::ConstantInt::get(min32BitIntTy, nIntMax(min32BitIntBits));
             auto toTpeMinInInt = llvm::ConstantInt::get(min32BitIntTy, nIntMin(min32BitIntBits));
 
@@ -481,22 +410,20 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
         } else throw BackendException("unhandled cast");
       },
       [&](const Expr::Invoke &x) -> ValPtr {
-        return functions ^ get(Signature(x.name, x.args ^ map([](auto &arg) { return arg.tpe(); }), x.rtn)) ^
+        auto argNoUnit = x.args ^ filter([](auto &arg) { return !arg.tpe().template is<Type::Unit0>(); });
+        return functions ^ get(Signature(x.name, argNoUnit ^ map([](auto &arg) { return arg.tpe(); }), x.rtn)) ^
                fold(
-                   [&](auto &fn) {
-                     const auto params =                                                           //
-                         x.args                                                                    //
-                         | filter([](auto &arg) { return !arg.tpe().template is<Type::Unit0>(); }) //
-                         | map([&](auto &&term) {
-                             const auto val = mkExprVal(term);
-                             return term.tpe().template is<Type::Bool1>() ? B.CreateZExt(val, resolveType(Type::Bool1(), true)) : val;
-                           }) //
-                         | to_vector();
-                     auto call = B.CreateCall(fn, params);
+                   [&](auto &fn) -> ValPtr {
+                     const auto params =
+                         argNoUnit ^ map([&](auto &term) {
+                           const auto val = mkExprVal(term);
+                           return term.tpe().template is<Type::Bool1>() ? B.CreateZExt(val, resolveType(Type::Bool1(), true)) : val;
+                         });
+                     const auto call = B.CreateCall(fn, params);
                      // in case the fn returns a unit (which is mapped to void), we just return the constant
                      return x.rtn.is<Type::Unit0>() ? mkExprVal(Expr::Unit0Const()) : call;
                    },
-                   [&] {
+                   [&]() -> ValPtr {
                      throw BackendException(
                          fmt::format("unhandled invocation, known functions are:\n{}", functions | keys() | mk_string("\n", show_repr)));
                    });
@@ -527,19 +454,18 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
           }
         } else throw BackendException("Semantic error: LHS of " + to_string(x) + " (index) is not a select");
       },
-
       [&](const Expr::RefTo &x) -> ValPtr {
         if (auto lhs = x.lhs.get<Expr::Select>()) {
           if (auto arrTpe = lhs->tpe.get<Type::Ptr>(); arrTpe) { // taking reference of an index in an array
-            auto offset = x.idx ? mkExprVal(*x.idx) : llvm::ConstantInt::get(llvm::Type::getInt64Ty(C), 0, true);
+            auto offset = x.idx ? mkExprVal(*x.idx) : llvm::ConstantInt::get(llvm::Type::getInt64Ty(C.actual), 0, true);
             if (auto nestedArrTpe = arrTpe->component.get<Type::Ptr>(); nestedArrTpe && nestedArrTpe->length) {
-              auto ty = arrTpe->component.is<Type::Unit0>() ? llvm::Type::getInt8Ty(C) : resolveType(arrTpe->component);
+              auto ty = arrTpe->component.is<Type::Unit0>() ? llvm::Type::getInt8Ty(C.actual) : resolveType(arrTpe->component);
               return B.CreateInBoundsGEP(ty,              //
                                          mkExprVal(*lhs), //
                                          {llvm::ConstantInt::get(C.i32Ty(), 0), offset}, key + "_ref_to_" + llvm_tostring(ty));
 
             } else {
-              auto ty = arrTpe->component.is<Type::Unit0>() ? llvm::Type::getInt8Ty(C) : resolveType(arrTpe->component);
+              auto ty = arrTpe->component.is<Type::Unit0>() ? llvm::Type::getInt8Ty(C.actual) : resolveType(arrTpe->component);
               return B.CreateInBoundsGEP(ty,              //
                                          mkExprVal(*lhs), //
                                          offset, key + "_ref_to_ptr");
@@ -554,24 +480,14 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
         } else
           throw BackendException("Semantic error: LHS of " + to_string(x) + " (index) is not a select, can't take reference of a constant");
       },
-
       [&](const Expr::Alloc &x) -> ValPtr { //
         const auto componentTpe = B.getPtrTy(0);
         const auto size = mkExprVal(x.size);
         const auto elemSize = C.sizeOf(B, componentTpe);
         const auto ptr = invokeMalloc(B.CreateMul(B.CreateIntCast(size, resolveType(Type::IntS64()), true), elemSize));
         return B.CreateBitCast(ptr, componentTpe);
-      });
-}
-
-static bool canAssign(Type::Any lhs, Type::Any rhs) {
-  if (lhs == rhs) return true;
-  auto lhsStruct = lhs.get<Type::Struct>();
-  auto rhsStruct = rhs.get<Type::Struct>();
-  if (lhsStruct && rhsStruct) {
-    return std::any_of(lhsStruct->parents.begin(), lhsStruct->parents.end(), [&](auto &x) { return x == rhsStruct->name; });
-  }
-  return false;
+      },
+      [&](const Expr::Annotated &x) -> ValPtr { return mkExprVal(x.expr, key); });
 }
 
 CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, const Opt<WhileCtx> &whileCtx = {}) {
@@ -594,9 +510,9 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
 
         if (x.name.tpe.is<Type::Unit0>()) {
           // Unit0 declaration, discard declaration but keep RHS effect.
-          if (x.expr) mkExprVal(*x.expr, x.name.symbol + "_var_rhs");
+          if (x.expr) auto _ = mkExprVal(*x.expr, x.name.symbol + "_var_rhs");
         } else {
-          auto tpe = resolveType(x.name.tpe);
+          const auto tpe = resolveType(x.name.tpe);
           auto stackPtr = C.allocaAS(B, tpe, C.AllocaAS, x.name.symbol + "_stack_ptr");
           stackVarPtrs.emplace(x.name.symbol, Pair<Type::Any, llvm::Value *>{x.name.tpe, stackPtr});
           if (x.expr) {
@@ -643,7 +559,7 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
             } else {
               auto dest = mkExprVal(*lhs);
               if (rhs.tpe().is<Type::Bool1>() || rhs.tpe().is<Type::Unit0>()) { // Extend from i1 to i8
-                auto ty = llvm::Type::getInt8Ty(C);
+                auto ty = llvm::Type::getInt8Ty(C.actual);
                 auto ptr = B.CreateInBoundsGEP( //
                     ty, dest,
                     componentIsSizedArray ? llvm::ArrayRef<ValPtr>{llvm::ConstantInt::get(C.i32Ty(), 0), mkExprVal(x.idx)}
@@ -748,176 +664,77 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
           }
         }
         return BlockKind::Terminal;
-      });
+      },
+      [&](const Stmt::Annotated &x) -> BlockKind { return mkStmt(x.stmt, fn); });
 }
 
-static std::vector<Arg> collectFnDeclarationNames(const Function &f) {
-  std::vector<Arg> allArgs;
-  if (f.receiver) allArgs.push_back(*f.receiver);
-  auto addAddExcludingUnit = [&](auto &xs) {
-    for (auto &x : xs) {
-      if (!x.named.tpe.template is<Type::Unit0>()) allArgs.push_back(x);
-    }
-  };
-  addAddExcludingUnit(f.args);
-  addAddExcludingUnit(f.moduleCaptures);
-  addAddExcludingUnit(f.termCaptures);
-  return allArgs;
-}
+static auto createPrototype(CodeGen &cg, llvm::Module &mod, const Function &fn) {
 
-void CodeGen::addFn(llvm::Module &mod, const Function &f, bool entry) {
+  // Unit types in arguments are discarded
+  const auto argsNoUnit = fn.args | filter([](auto &arg) { return !arg.named.tpe.template is<Type::Unit0>(); }) | to_vector();
   // Unit type at function return type position is void, any other location, Unit is a singleton value
-  const auto rtnTpe = f.rtn.is<Type::Unit0>() ? llvm::Type::getVoidTy(C.actual) : resolveType(f.rtn, true);
-  // Unit type in arguments are discarded
-  const auto llvmArgTpes = f.args                                                              //
-                           | filter([](auto &arg) { return !arg.template is<Type::Unit0>(); }) //
-                           | map([&](auto &&arg) { return resolveType(arg.named.tpe, true); }) //
-                           | to_vector();
+  const auto rtnTpe = fn.rtn.is<Type::Unit0>() ? llvm::Type::getVoidTy(cg.C.actual) : cg.resolveType(fn.rtn, true);
 
-  const auto fnTpe = llvm::FunctionType::get(rtnTpe, {llvmArgTpes}, false);
+  const auto argTys = argsNoUnit                                                            //
+                      | map([&](auto &arg) { return cg.resolveType(arg.named.tpe, true); }) //
+                      | to_vector();
+
   // XXX Normalise names as NVPTX has a relatively limiting range of supported characters in symbols
-  auto normalisedName =  f.name ^ map([](const char c) { return !std::isalnum(c) && c != '_' ? '_' : c; });
+  const auto normalisedName = fn.name ^ map([](const char c) { return !std::isalnum(c) && c != '_' ? '_' : c; });
 
+  Signature sig(fn.name, argsNoUnit ^ map([](auto &x) { return x.named.tpe; }), fn.rtn);
+  llvm::Function *llvmFn = llvm::Function::Create(llvm::FunctionType::get(/*Result*/ rtnTpe, /*Params*/ argTys, /*isVarArg*/ false), //
+                                                  fn.attrs.contains(FunctionAttr::Exported())                                        //
+                                                      ? llvm::Function::ExternalLinkage
+                                                      : llvm::Function::InternalLinkage,
+                                                  normalisedName, //
+                                                  mod);
 
-
-
-  auto *fn = llvm::Function::Create(fnTpe,                                        //
-                                    (entry || f.kind == FunctionKind::Exported()) //
-                                        ? llvm::Function::ExternalLinkage
-                                        : llvm::Function::InternalLinkage,
-                                    normalisedName, //
-                                    mod);
-
-  llvm::MDBuilder mdbuilder(C);
+  llvm::MDBuilder mdbuilder(cg.C.actual);
   llvm::MDNode *root = mdbuilder.createTBAARoot("TBAA root");
 
-  //  if(options.target == Target::AMDGCN && f.kind != FunctionKind::Exported()){
-  //    fn->setVisibility(llvm::GlobalValue::VisibilityTypes::HiddenVisibility);
-  //  }
+  cg.targetHandler->witnessFn(cg, *llvmFn, fn);
 
-  if (options.target != Target::AMDGCN) {
-
-    fn->setDSOLocal(true);
-  }
-
-  if (entry || true) { // setup external function conventions for targets
-
-    //    targetHandler->witnessEntry(*this, mod, fn);
-
-    switch (options.target) {
-      case Target::x86_64:
-      case Target::AArch64:
-      case Target::ARM:
-        // nothing to do for CPUs
-        break;
-      case Target::NVPTX64:
-
-        mod.getOrInsertNamedMetadata("nvvm.annotations")
-            ->addOperand(llvm::MDNode::get(C, // XXX the attribute name must be "kernel" here and not the function name!
-                                           {llvm::ValueAsMetadata::get(fn), llvm::MDString::get(C, "kernel"),
-                                            llvm::ValueAsMetadata::get(llvm::ConstantInt::get(C.i32Ty(), 1))}));
-        break;
-      case Target::AMDGCN:
-        if (f.kind == FunctionAttr::Exported()) {
-          fn->setCallingConv(llvm::CallingConv::AMDGPU_KERNEL);
-        }
-        break;
-      case Target::SPIRV32:
-      case Target::SPIRV64:
-
-        fn->addFnAttr(llvm::Attribute::Convergent);
-        fn->addFnAttr(llvm::Attribute::NoRecurse);
-        fn->addFnAttr(llvm::Attribute::NoUnwind);
-
-        // See logic defined in clang/lib/CodeGen/CodeGenModule.cpp @ CodeGenModule::GenKernelArgMetadata
-        // We need to insert OpenCL metadata for clspv to pick up and identify the arg types
-
-        llvm::SmallVector<llvm::Metadata *, 8> addressQuals;     // MDNode for the kernel argument address space qualifiers.
-        llvm::SmallVector<llvm::Metadata *, 8> accessQuals;      // MDNode for the kernel argument access qualifiers (images only).
-        llvm::SmallVector<llvm::Metadata *, 8> argTypeNames;     // MDNode for the kernel argument type names.
-        llvm::SmallVector<llvm::Metadata *, 8> argBaseTypeNames; // MDNode for the kernel argument base type names.
-        llvm::SmallVector<llvm::Metadata *, 8> argTypeQuals;     // MDNode for the kernel argument type qualifiers.
-        llvm::SmallVector<llvm::Metadata *, 8> argNames;         // MDNode for the kernel argument names.
-
-        for (size_t i = 0; i < args.size(); ++i) {
-          auto arg = args[i];
-          auto llvmTpe = llvmArgTpes[i];
-          addressQuals.push_back(llvm::ConstantAsMetadata::get( //
-              B.getInt32(llvmTpe->isPointerTy() ? llvmTpe->getPointerAddressSpace() : 0)));
-          accessQuals.push_back(llvm::MDString::get(C, "none")); // write_only | read_only | read_write | none
-
-          auto typeName = [](Type::Any tpe) -> std::string {
-            auto impl = [](Type::Any tpe, auto &thunk) -> std::string {
-              return tpe.match_total(                                                                 //
-                  [&](const Type::Float16 &) -> std::string { return "half"; },                       //
-                  [&](const Type::Float32 &) -> std::string { return "float"; },                      //
-                  [&](const Type::Float64 &) -> std::string { return "double"; },                     //
-                  [&](const Type::IntU8 &) -> std::string { return "uchar"; },                        //
-                  [&](const Type::IntU16 &) -> std::string { return "ushort"; },                      //
-                  [&](const Type::IntU32 &) -> std::string { return "uint"; },                        //
-                  [&](const Type::IntU64 &) -> std::string { return "ulong"; },                       //
-                  [&](const Type::IntS8 &) -> std::string { return "char"; },                         //
-                  [&](const Type::IntS16 &) -> std::string { return "short"; },                       //
-                  [&](const Type::IntS32 &) -> std::string { return "int"; },                         //
-                  [&](const Type::IntS64 &) -> std::string { return "long"; },                        //
-                  [&](const Type::Bool1 &) -> std::string { return "char"; },                         //
-                  [&](const Type::Unit0 &) -> std::string { return "void"; },                         //
-                  [&](const Type::Nothing &) -> std::string { return "/*nothing*/"; },                //
-                  [&](const Type::Struct &x) -> std::string { return qualified(x.name); },            //
-                  [&](const Type::Ptr &x) -> std::string { return thunk(x.component, thunk) + "*"; }, //
-                  [&](const Type::Var &) -> std::string { throw BackendException("type var"); },      //
-                  [&](const Type::Exec &) -> std::string { throw BackendException("exec"); }          //
-              );
-            };
-            return impl(tpe, impl);
-          };
-
-          argTypeNames.push_back(llvm::MDString::get(C, typeName(arg.named.tpe)));
-          argBaseTypeNames.push_back(llvm::MDString::get(C, typeName(arg.named.tpe)));
-
-          argTypeQuals.push_back(llvm::MDString::get(C, "")); // const | restrict | volatile | pipe | ""
-          argNames.push_back(llvm::MDString::get(C, arg.named.symbol));
-        }
-
-        fn->setMetadata("kernel_arg_addr_space", llvm::MDNode::get(C, addressQuals));
-        fn->setMetadata("kernel_arg_access_qual", llvm::MDNode::get(C, accessQuals));
-        fn->setMetadata("kernel_arg_type", llvm::MDNode::get(C, argTypeNames));
-        fn->setMetadata("kernel_arg_base_type", llvm::MDNode::get(C, argBaseTypeNames));
-        fn->setMetadata("kernel_arg_type_qual", llvm::MDNode::get(C, argTypeQuals));
-        fn->setMetadata("kernel_arg_name", llvm::MDNode::get(C, argNames));
-        fn->setCallingConv(llvm::CallingConv::SPIR_KERNEL);
-        break;
-    }
-  }
-
-  std::vector<Type::Any> extraArgTpes;
-  for (auto &n : f.moduleCaptures)
-    extraArgTpes.push_back(n.named.tpe);
-  for (auto &n : f.termCaptures)
-    extraArgTpes.push_back(n.named.tpe);
-
-  functions.emplace(InvokeSignature(f.name,                                                //
-                                    {},                                                    //
-                                    f.receiver ^ map([](auto &x) { return x.named.tpe; }), //
-                                    f.args ^ map([](auto &x) { return x.named.tpe; }),     //
-                                    extraArgTpes,                                          //
-                                    f.rtn),
-                    fn);
+  cg.functions.emplace(sig, llvmFn);
+  return std::tuple{llvmFn, fn, argsNoUnit};
 }
 
-Pair<Opt<std::string>, std::string> CodeGen::transform(llvm::Module &mod, const Program &program) {
+Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program) {
+  structTypes = C.resolveLayouts(program.structs);
 
-  transform(mod, program.entry);
-  for (auto &f : program.functions)
-    transform(mod, f);
+
+  const auto prototypes = program.functions ^ map([&](auto &fn) { return createPrototype(*this, M, fn); });
+
+  prototypes | for_each([&](auto &llvmFn, auto &fn, auto &argsNoUnit) {
+    B.SetInsertPoint(llvm::BasicBlock::Create(C.actual, "entry", llvmFn));
+    stackVarPtrs = argsNoUnit | zip_with_index() | map([&](auto &arg, auto i) -> Pair<std::string, Pair<Type::Any, ValPtr>> { //
+                     auto llvmArg = llvmFn->getArg(i);
+
+                     llvmArg->setName(arg.named.symbol);
+
+                     auto llvmArgValue = arg.named.tpe.template is<Type::Bool1>() || arg.named.tpe.template is<Type::Unit0>()
+                                             ? B.CreateICmpNE(llvmArg, llvm::ConstantInt::get(llvm::Type::getInt8Ty(C.actual), 0, true))
+                                             : llvmArg;
+
+                     auto stackPtr = C.allocaAS(B, resolveType(arg.named.tpe), C.AllocaAS, arg.named.symbol + "_stack_ptr");
+                     auto _ = C.store(B, llvmArgValue, stackPtr);
+                     return {arg.named.symbol, {arg.named.tpe, stackPtr}};
+                   }) //
+                   | to<Map>();
+    for (auto &stmt : fn.body)
+      auto _ = mkStmt(stmt, *llvmFn);
+    stackVarPtrs.clear();
+  });
+
+
 
   std::string ir;
   llvm::raw_string_ostream irOut(ir);
-  mod.print(irOut, nullptr);
+  M.print(irOut, nullptr);
 
   std::string err;
   llvm::raw_string_ostream errOut(err);
-  if (llvm::verifyModule(mod, &errOut)) {
+  if (verifyModule(M, &errOut)) {
     std::cerr << "Verification failed:\n" << errOut.str() << "\nIR=\n" << irOut.str() << std::endl;
     return {errOut.str(), irOut.str()};
   } else {
@@ -925,58 +742,6 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(llvm::Module &mod, const 
   }
 }
 
-void CodeGen::transform(llvm::Module &mod, const Function &fnTree) {
-
-  std::vector<Type::Any> argTpes;
-  for (auto &n : fnTree.moduleCaptures)
-    argTpes.push_back(n.named.tpe);
-  for (auto &n : fnTree.termCaptures)
-    argTpes.push_back(n.named.tpe);
-
-  InvokeSignature sig(fnTree.name,                                                //
-                      {},                                                         //
-                      fnTree.receiver ^ map([](auto &x) { return x.named.tpe; }), //
-                      fnTree.args ^ map([](auto &x) { return x.named.tpe; }),     //
-                      argTpes,                                                    //
-                      fnTree.rtn);
-
-  auto it = functions.find(sig);
-  if (it == functions.end()) {
-
-    for (auto [key, v] : functions) {
-      std::cerr << key << " = " << v << " = m " << (key == sig) << std::endl;
-    }
-
-    throw BackendException("Cannot find function " + to_string(sig) + ", function was not added before xform?");
-  }
-
-  auto *fn = it->second;
-
-  auto *entry = llvm::BasicBlock::Create(C, "entry", fn);
-  B.SetInsertPoint(entry);
-
-  // add function params to the lut first as function body will need these at some point
-  auto allArgs = collectFnDeclarationNames(fnTree);
-  std::transform(                                      //
-      fn->arg_begin(), fn->arg_end(), allArgs.begin(), //
-      std::inserter(stackVarPtrs, stackVarPtrs.end()), //
-      [&](auto &arg, const auto &fnArg) -> Pair<std::string, Pair<Type::Any, ValPtr>> {
-        arg.setName(fnArg.named.symbol);
-
-        auto argValue = fnArg.named.tpe.template is<Type::Bool1>() || fnArg.named.tpe.template is<Type::Unit0>()
-                            ? B.CreateICmpNE(&arg, llvm::ConstantInt::get(llvm::Type::getInt8Ty(C), 0, true))
-                            : &arg;
-
-        auto stackPtr = allocaAS(B, mkTpe(fnArg.named.tpe), AllocaAS, fnArg.named.symbol + "_stack_ptr");
-        store(argValue, stackPtr);
-        return {fnArg.named.symbol, {fnArg.named.tpe, stackPtr}};
-      });
-
-  for (auto &stmt : fnTree.body)
-    mkStmt(stmt, fn);
-
-  stackVarPtrs.clear();
-}
 ValPtr CodeGen::unaryExpr(const AnyExpr &expr, const AnyExpr &l, const AnyType &rtn, const ValPtrFn1 &fn) { //
   if (l.tpe() != rtn) {
     throw BackendException("Semantic error: lhs type " + to_string(l.tpe()) + " of binary numeric operation in " + to_string(expr) +
@@ -1023,38 +788,23 @@ ValPtr CodeGen::binaryNumOp(const AnyExpr &expr, const AnyExpr &l, const AnyExpr
   });
 }
 
+LLVMBackend::LLVMBackend(const Options &options) : options(options) {}
+
 std::vector<StructLayout> LLVMBackend::resolveLayouts(const std::vector<StructDef> &structs) {
-
-  TargetedContext context(options);
-  return C.resolveLayouts(structs) | values() | map([&](auto &s) { return s.layouts; });
-
-  resolveLayouts()
-
-      llvm::LLVMContext ctx;
-  CodeGen xform(options, ctx);
-  xform.addDefs(defs);
-  return resolveLayouts(defs, xform);
+  return TargetedContext(options).resolveLayouts(structs) | values() | map([&](auto &i) { return i.layout; }) | to_vector();
 }
 
 CompileResult LLVMBackend::compileProgram(const Program &program, const compiletime::OptLevel &opt) {
   using namespace llvm;
 
-  llvm::LLVMContext ctx;
-  auto mod = std::make_unique<llvm::Module>("program", ctx);
-
-  CodeGen xform(options, ctx);
-  xform.addDefs(program.defs);
-  xform.addFn(*mod, program.entry, true);
-  for (auto &f : program.functions)
-    xform.addFn(*mod, f, false);
-
+  CodeGen cg(options, "program");
   auto transformStart = compiler::nowMono();
-  auto [maybeTransformErr, transformMsg] = xform.transform(*mod, program);
-  polyast::CompileEvent ast2IR(compiler::nowMs(), compiler::elapsedNs(transformStart), "ast_to_llvm_ir", transformMsg);
+  auto [maybeTransformErr, transformMsg] = cg.transform(program);
+  CompileEvent ast2IR(compiler::nowMs(), compiler::elapsedNs(transformStart), "ast_to_llvm_ir", transformMsg);
 
   auto verifyStart = compiler::nowMono();
-  auto [maybeVerifyErr, verifyMsg] = llvmc::verifyModule(*mod);
-  polyast::CompileEvent astOpt(compiler::nowMs(), compiler::elapsedNs(verifyStart), "llvm_ir_verify", verifyMsg);
+  auto [maybeVerifyErr, verifyMsg] = llvmc::verifyModule(cg.M);
+  CompileEvent astOpt(compiler::nowMs(), compiler::elapsedNs(verifyStart), "llvm_ir_verify", verifyMsg);
 
   if (maybeTransformErr || maybeVerifyErr) {
     std::vector<std::string> errors;
@@ -1067,8 +817,8 @@ CompileResult LLVMBackend::compileProgram(const Program &program, const compilet
             errors ^ mk_string("\n")};
   }
 
-  auto c = llvmc::compileModule(options.targetInfo(), opt, true, std::move(mod));
-  c.layouts = resolveLayouts(program.defs, xform);
+  auto c = compileModule(options.targetInfo(), opt, true, cg.M);
+  c.layouts = resolveLayouts(program.structs);
   c.events.emplace_back(ast2IR);
   c.events.emplace_back(astOpt);
 

@@ -2,7 +2,7 @@ set(LIB_SOURCES
         backend/backend.cpp
         backend/llvm_amdgpu.cpp
         backend/llvm_nvptx.cpp
-        backend/llvm_opencl.cpp
+        backend/llvm_spirv_cl.cpp
         backend/llvm_cpu.cpp
         backend/llvm_target.cpp
         backend/llvm.cpp
@@ -97,11 +97,13 @@ target_link_libraries(polyc
         PolyAST
         PRIVATE
         Aspartame::Aspartame
+        magic_enum::magic_enum
+        fmt::fmt-header-only
         SPIRV-Tools-opt
         ${LLVM_LIBS}
         ${LLD_LIBS}
 )
-target_link_libraries(polyc-tests PRIVATE polyc polyrt-static Catch2::Catch2WithMain)
+target_link_libraries(polyc-tests PRIVATE polyc polyrt-static Catch2::Catch2WithMain Aspartame::Aspartame)
 target_link_libraries(polyc-benchmarks PRIVATE polyc polyrt-static)
 target_link_libraries(polyc-driver PRIVATE polyc ${LLVM_LIBS} ${LLD_LIBS} Aspartame::Aspartame)
 target_link_libraries(polyc-bin PRIVATE polyc polyc-driver)

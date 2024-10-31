@@ -3331,11 +3331,11 @@ POLYREGION_EXPORT bool Stmt::Return::operator<(const Base& rhs_) const { return 
 Stmt::Return::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Return>(*this)); }
 Stmt::Any Stmt::Return::widen() const { return Any(*this); };
 
-Stmt::Annotated::Annotated(Stmt::Any expr, std::optional<SourcePosition> pos, std::optional<std::string> comment) noexcept : Stmt::Base(), expr(std::move(expr)), pos(std::move(pos)), comment(std::move(comment)) {}
+Stmt::Annotated::Annotated(Stmt::Any stmt, std::optional<SourcePosition> pos, std::optional<std::string> comment) noexcept : Stmt::Base(), stmt(std::move(stmt)), pos(std::move(pos)), comment(std::move(comment)) {}
 uint32_t Stmt::Annotated::id() const { return variant_id; };
 size_t Stmt::Annotated::hash_code() const { 
   size_t seed = variant_id;
-  seed ^= std::hash<decltype(expr)>()(expr) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(stmt)>()(stmt) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(pos)>()(pos) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   seed ^= std::hash<decltype(comment)>()(comment) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
   return seed;
@@ -3343,7 +3343,7 @@ size_t Stmt::Annotated::hash_code() const {
 namespace Stmt { std::ostream &operator<<(std::ostream &os, const Stmt::Annotated &x) { return x.dump(os); } }
 std::ostream &Stmt::Annotated::dump(std::ostream &os) const {
   os << "Annotated(";
-  os << expr;
+  os << stmt;
   os << ',';
   os << '{';
   if (pos) {
@@ -3360,7 +3360,7 @@ std::ostream &Stmt::Annotated::dump(std::ostream &os) const {
   return os;
 }
 POLYREGION_EXPORT bool Stmt::Annotated::operator==(const Stmt::Annotated& rhs) const {
-  return (this->expr == rhs.expr) && (this->pos == rhs.pos) && (this->comment == rhs.comment);
+  return (this->stmt == rhs.stmt) && (this->pos == rhs.pos) && (this->comment == rhs.comment);
 }
 POLYREGION_EXPORT bool Stmt::Annotated::operator==(const Base& rhs_) const {
   if(rhs_.id() != variant_id) return false;

@@ -3,11 +3,15 @@
 
 using namespace polyregion::backend::details;
 
-void NVPTXTargetSpecificHandler::witnessEntry(CodeGen &cg, llvm::Function &fn) {
-  cg.M.getOrInsertNamedMetadata("nvvm.annotations")
-      ->addOperand(llvm::MDNode::get(cg.C.actual, // XXX the attribute name must be "kernel" here and not the function name!
-                                     {llvm::ValueAsMetadata::get(&fn), llvm::MDString::get(cg.C.actual, "kernel"),
-                                      llvm::ValueAsMetadata::get(llvm::ConstantInt::get(cg.C.i32Ty(), 1))}));
+void NVPTXTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn, const Function &source) {
+  if (source.attrs.contains(FunctionAttr::Exported())) {
+    cg.M.getOrInsertNamedMetadata("nvvm.annotations")
+        ->addOperand(llvm::MDNode::get(cg.C.actual, // XXX the attribute name must be "kernel" here and not the function name!
+                                       {llvm::ValueAsMetadata::get(&fn), llvm::MDString::get(cg.C.actual, "kernel"),
+                                        llvm::ValueAsMetadata::get(llvm::ConstantInt::get(cg.C.i32Ty(), 1))}));
+  }else {
+    fn.setDSOLocal(true);
+  }
 }
 ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &expr) {
   // threadId =  @llvm.nvvm.read.ptx.sreg.tid.*

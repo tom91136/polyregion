@@ -116,7 +116,7 @@ TEST_CASE("inheritance", "[compiler]") {
   compiler::initialise();
   const auto tpe = GENERATE(from_range(PrimitiveTypesNoUnit));
   DYNAMIC_SECTION(tpe) {
-    Named x = Named("x", tpe);
+    Named x("x", tpe);
     StructDef def("foo", {x});
     Type::Struct fooTpe("foo");
     auto entry = function("foo", {}, fooTpe)({
@@ -210,7 +210,7 @@ TEST_CASE("return ptr to struct", "[compiler]") {
   const auto tpe = GENERATE(from_range(PrimitiveTypesNoUnit));
   DYNAMIC_SECTION(tpe) {
 
-    Named x = Named("x", tpe);
+    Named x("x", tpe);
     StructDef def("foo", {x});
     Type::Struct fooTpe("foo");
     auto entry = function("foo", {"foo"_(Ptr(fooTpe))()}, Ptr(fooTpe))({
@@ -226,7 +226,7 @@ TEST_CASE("return struct", "[compiler]") {
   const auto tpe = GENERATE(from_range(PrimitiveTypesNoUnit));
   DYNAMIC_SECTION(tpe) {
 
-    Named x = Named("x", tpe);
+    Named x("x", tpe);
     StructDef def("foo", {x});
     Type::Struct fooTpe("foo");
     auto entry = function("foo", {}, fooTpe)({
@@ -241,16 +241,18 @@ TEST_CASE("return struct", "[compiler]") {
 TEST_CASE("nested struct select", "[compiler]") {
   compiler::initialise();
 
-  Named z = Named("z", Ptr(SInt));
-  StructDef barDef("foo", {z});
-  Type::Struct barTpe("foo");
+  Named z("z", Ptr(SInt));
+  StructDef barDef("bar", {z});
+  Type::Struct barTpe("bar");
 
-  Named x = Named("x", Ptr(SInt));
-  Named y = Named("y", Ptr(barTpe));
+  Named x("x", Ptr(SInt));
+  Named y("y", Ptr(barTpe));
   StructDef fooDef("foo", {x, y});
   Type::Struct fooTpe("foo");
 
-  auto aux = function("aux", {"in"_(Ptr(barTpe))()}, SInt)({ret(Index(Select({"in"_(Ptr(barTpe))}, z), 0_(SInt), SInt))});
+  auto aux = function("aux", {"in"_(Ptr(barTpe))()}, SInt)({
+      ret(Index(Select({"in"_(Ptr(barTpe))}, z), 0_(SInt), SInt)) //
+  });
 
   auto entry = function("bar", {"in"_(Ptr(fooTpe))()}, Unit)({
       let("r") = Invoke("aux", {Select({"in"_(Ptr(fooTpe))}, y)}, SInt), //
@@ -264,17 +266,20 @@ TEST_CASE("nested struct select", "[compiler]") {
 TEST_CASE("return struct and take ref", "[compiler]") {
   compiler::initialise();
 
-  Named z = Named("z", SInt);
+  Named z("z", SInt);
   StructDef barDef("bar", {z});
   Type::Struct barTpe("bar");
 
-  Named x = Named("x", Ptr(SInt));
-  Named y = Named("y", Ptr(barTpe));
+  Named x("x", Ptr(SInt));
+  Named y("y", Ptr(barTpe));
   StructDef fooDef("foo", {x, y});
   Type::Struct fooTpe("foo");
 
-  auto aux = function("aux", {"out"_(Ptr(barTpe))(), "in"_(Ptr(barTpe))()},
-                      Ptr(barTpe))({Mut(Select({"out"_(Ptr(barTpe))}, z), Select({"in"_(Ptr(barTpe))}, z)), ret("out"_(Ptr(barTpe)))});
+  auto aux = function("aux", {"out"_(Ptr(barTpe))(), "in"_(Ptr(barTpe))()}, Ptr(barTpe))({
+      Mut(Select({"out"_(Ptr(barTpe))}, z), //
+          Select({"in"_(Ptr(barTpe))}, z)), //
+      ret("out"_(Ptr(barTpe)))              //
+  });
 
   auto gen = function("gen", {}, barTpe)({let("a") = barTpe,                        //
                                           Mut(Select({"a"_(barTpe)}, z), 0_(SInt)), //

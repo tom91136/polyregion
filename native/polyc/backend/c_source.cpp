@@ -73,7 +73,7 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
 std::string backend::CSource::mkExpr(const Expr::Any &expr) {
   return expr.match_total(
       [](const Expr::Float16Const &x) { return fmt::format("{}", x.value); },  //
-      [](const Expr::Float32Const &x) { return fmt::format("{}f", x.value); }, //
+      [](const Expr::Float32Const &x) { return fmt::format("{}.f", x.value); }, //
       [](const Expr::Float64Const &x) { return fmt::format("{}", x.value); },  //
 
       [](const Expr::IntU8Const &x) { return fmt::format("{}", x.value); },  //

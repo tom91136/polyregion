@@ -44,7 +44,7 @@ using namespace aspartame;
   );
 }
 
-[[nodiscard]] string polyast::repr(const Named &x) { return fmt::format("{}: {}", x.symbol, repr(x.tpe)); }
+[[nodiscard]] string polyast::repr(const Named &x) { return fmt::format("({}: {})", x.symbol, repr(x.tpe)); }
 
 [[nodiscard]] string polyast::repr(const Intr::Any &expr) {
   return expr.match_total(                                                                    //
@@ -184,7 +184,7 @@ using namespace aspartame;
       },
       [](const Stmt::Return &x) { return "return " + repr(x.value); },
       [](const Stmt::Annotated &x) {
-        return fmt::format("{} /*{}; {}*/", repr(x.expr), x.pos ^ mk_string("", show_repr), x.comment ^ get_or_else(""));
+        return fmt::format("{} /*{}; {}*/", repr(x.stmt), x.pos ^ mk_string("", show_repr), x.comment ^ get_or_else(""));
       }
 
   );
