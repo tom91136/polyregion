@@ -245,8 +245,8 @@ int main(int argc, const char *argv[]) {
                  }
                }
 
-               std::cout << ">>> " << (remaining ^ mk_string(" ")) << std::endl;
                remaining[0] = "clang++";
+               std::cout << ">>> " << (remaining ^ mk_string(" ")) << std::endl;
 
                return llvm::sys::ExecuteAndWait(clangPath.string(), remaining  | map([](auto &x) -> llvm::StringRef { return x; })|to_vector() );
              });

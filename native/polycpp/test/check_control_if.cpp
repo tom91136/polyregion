@@ -1,5 +1,5 @@
 // #CASE: a<b
-// #RUN: polycpp -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_EXPR_DEF=a<b -o {output} {input}
+// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_EXPR_DEF=a<b -o {output} {input}
 // #RUN: POLYSTL_PLATFORM=host A=1 B=2 {output}
 //   #EXPECT: 42
 // #RUN: POLYSTL_PLATFORM=host A=2 B=1 {output}
@@ -8,7 +8,7 @@
 //   #EXPECT: -1
 
 // #CASE: a>b
-// #RUN: polycpp -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_EXPR_DEF=a>b -o {output} {input}
+// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_EXPR_DEF=a>b -o {output} {input}
 // #RUN: POLYSTL_PLATFORM=host A=1 B=2 {output}
 //   #EXPECT: -1
 // #RUN: POLYSTL_PLATFORM=host A=2 B=1 {output}
@@ -17,7 +17,7 @@
 //   #EXPECT: -1
 
 // #CASE: a==b
-// #RUN: polycpp -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_EXPR_DEF=a==b -o {output} {input}
+// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_EXPR_DEF=a==b -o {output} {input}
 // #RUN: POLYSTL_PLATFORM=host A=1 B=2 {output}
 //   #EXPECT: -1
 // #RUN: POLYSTL_PLATFORM=host A=2 B=1 {output}
@@ -26,7 +26,7 @@
 //   #EXPECT: 42
 
 // #CASE: a!=b
-// #RUN: polycpp -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_EXPR_DEF=a!=b -o {output} {input}
+// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_EXPR_DEF=a!=b -o {output} {input}
 // #RUN: POLYSTL_PLATFORM=host A=1 B=2 {output}
 //   #EXPECT: 42
 // #RUN: POLYSTL_PLATFORM=host A=2 B=1 {output}
@@ -35,7 +35,7 @@
 //   #EXPECT: -1
 
 // #CASE: a==b?false:true
-// #RUN: polycpp -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_EXPR_DEF=a==b?false:true -o {output} {input}
+// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_EXPR_DEF=a==b?false:true -o {output} {input}
 // #RUN: POLYSTL_PLATFORM=host A=1 B=2 {output}
 //   #EXPECT: 42
 // #RUN: POLYSTL_PLATFORM=host A=2 B=1 {output}

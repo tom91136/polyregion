@@ -1,24 +1,24 @@
 // #CASE: =ptr
 // #MATRIX: size=1,10,100
-// #RUN: polycpp -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE== -o {output} {input}
+// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE== -o {output} {input}
 // #RUN: POLYSTL_PLATFORM=host {output}
 //   #EXPECT: -1 -1 -1 == -1 -1 -1
 
 // #CASE: =ptr=42,43,44
 // #MATRIX: size=1,10,100
-// #RUN: polycpp -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE== -DCHECK_MUT -o {output} {input}
+// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE== -DCHECK_MUT -o {output} {input}
 // #RUN: POLYSTL_PLATFORM=host {output}
 //   #EXPECT: 42 43 44 == 42 43 44
 
 // #CASE: &ptr
 // #MATRIX: size=1,10,100
-// #RUN: polycpp -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE=& -o {output} {input}
+// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE=& -o {output} {input}
 // #RUN: POLYSTL_PLATFORM=host {output}
 //   #EXPECT: -1 -1 -1 == -1 -1 -1
 
 // #CASE: &ptr=42,43,44
 // #MATRIX: size=1,10,100
-// #RUN: polycpp -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE=& -DCHECK_MUT -o {output} {input}
+// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE=& -DCHECK_MUT -o {output} {input}
 // #RUN: POLYSTL_PLATFORM=host {output}
 //   #EXPECT: 42 43 44 == 42 43 44
 

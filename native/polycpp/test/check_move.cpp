@@ -1,12 +1,12 @@
 // #CASE: capture
 // #MATRIX: capture=&,=,value
-// #RUN: polycpp -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_CAPTURE={capture} -o {output} {input}
+// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_CAPTURE={capture} -o {output} {input}
 // #RUN: POLYSTL_PLATFORM=host {output}
 //   #EXPECT: 42 43 44
 
 // #CASE: capture-no-builtin
 // #MATRIX: capture=&,=,value flag=-fno-builtin-std-forward
-// #RUN: polycpp -O1 -g3 {flag} -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_CAPTURE={capture} -o {output} {input}
+// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 {flag} -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_CAPTURE={capture} -o {output} {input}
 // #RUN: POLYSTL_PLATFORM=host {output}
 //   #EXPECT: 42 43 44
 

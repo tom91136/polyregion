@@ -1,7 +1,7 @@
 // #CASE: general
 // #MATRIX: platform=cuda
 // #MATRIX: ptr=0,1
-// #RUN: polycpp -O3 -Wall -Wextra -pedantic -g3 -fstdpar -fstdpar-arch=cuda@sm_60 -DUSE_PTR={ptr} -o {output} {input}
+// #RUN: polycpp -fno-crash-diagnostics -O3 -Wall -Wextra -pedantic -g3 -fstdpar -fstdpar-arch=cuda@sm_60 -DUSE_PTR={ptr} -o {output} {input}
 // #RUN: POLYSTL_PLATFORM={platform} SIZE=1024 POLYSTL_HOST_FALLBACK=0 {output}
 //   #EXPECT: 20.480000
 

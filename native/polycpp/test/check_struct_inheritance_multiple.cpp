@@ -1,6 +1,6 @@
 // #CASE: inheritance
 // #MATRIX: capture=&,=,value
-// #RUN: polycpp -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_CAPTURE={capture} -o {output} {input}
+// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_CAPTURE={capture} -o {output} {input}
 // #RUN: POLYSTL_PLATFORM=host {output}
 //   #EXPECT: 0 3.000000 4.000000 12 42 2 33 120 121 5 6 7.000000
 

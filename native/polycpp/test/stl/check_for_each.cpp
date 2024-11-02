@@ -1,6 +1,6 @@
 // #CASE: general
 // #MATRIX: platform=cuda,hip,hsa,host
-// #RUN: polycpp -O3 -Wall -Wextra -pedantic -g3 -fstdpar -fstdpar-arch=cuda@sm_60:amdgpu@gfx1036:host@native -o {output} {input}
+// #RUN: polycpp -fno-crash-diagnostics -O3 -Wall -Wextra -pedantic -g3 -fstdpar -fstdpar-arch=cuda@sm_60:amdgpu@gfx1036:host@native -o {output} {input}
 // #RUN: POLYSTL_PLATFORM={platform} SIZE=1024 POLYSTL_HOST_FALLBACK=0 {output}
 //   #EXPECT: 204.800000
 

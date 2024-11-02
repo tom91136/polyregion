@@ -24,6 +24,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/FormatVariadic.h"
 
+#include <csignal>
 #include <magic_enum.hpp>
 
 using namespace polyregion::polyast;
@@ -174,32 +175,14 @@ static void defaultInitialiseStruct(Remapper::RemapContext &r, const Type::Struc
   }
 }
 
-Remapper::Remapper(clang::ASTContext &context) : context(context) {}
-
-static Type::Ptr ptrTo(const Type::Any &tpe) { return {tpe, {}, TypeSpace::Global()}; }
-static std::string declName(const clang::NamedDecl *decl) {
-  return decl->getDeclName().isEmpty() //
-             ? fmt::format("_unnamed_{:x}", decl->getID())
-             : decl->getDeclName().getAsString();
-}
-
-static bool inherits(const Remapper::RemapContext &r, const std::string &parentName, const Type::Struct &derived,
-                     std::vector<std::shared_ptr<StructDef>> &chain) {
-
+static bool walkParents(const Remapper::RemapContext &r, const Type::Struct &derived,
+                        const std::function<bool(const StructDef &)> &predicate, std::vector<std::shared_ptr<StructDef>> &chain) {
 
   const auto parents = r.parents ^ get(derived.name);
-
-
-
-  llvm::errs()  << "@@@ Inherits: " << parentName << " " << repr(derived)   << " C="<< (chain ^ mk_string("->", [](auto &s) { return s->name; })) << "\n";
-
-  llvm::errs()  << "@@@ Inherits:  -> \n" << (r.parents ^ mk_string("\n  ", [](auto &k, auto &v) {return fmt::format("{}: {} ", k, (v ^ mk_string("->", [](auto &s) { return s->name; }))   );})) << "\n";
-
   if (!parents) return false;
 
-
-  if (const auto directBases = *parents ^ filter([&](auto &p) { return p->name == parentName; }); directBases.empty()) { // indirect
-    return *parents ^ exists([&](auto &p) { return inherits(r, p->name, derived, chain); });
+  if (const auto directBases = *parents ^ filter([&](auto &p) { return predicate(*p); }); directBases.empty()) { // indirect
+    return *parents ^ exists([&](auto &p) { return walkParents(r, Type::Struct(p->name), predicate, chain); });
   } else if (directBases.size() != 1) {
     // XXX If we get more than one path, the C++ frontend failed to issue a diagnostic for ambiguous bases
     raise(fmt::format("Ambiguous base {} for derived {}, current chain is {}",
@@ -209,6 +192,48 @@ static bool inherits(const Remapper::RemapContext &r, const std::string &parentN
     chain.emplace_back(directBases[0]);
     return true;
   }
+}
+
+static Named baseMember(const StructDef &s) { return Named(fmt::format("#base_{}", s.name), Type::Struct(s.name)); }
+
+// static Expr::Select select(const Expr::Select & a, const Expr::Select & b) {
+//   const auto xs = a.init | append(a.last) | concat(b.init) | append(b.last) | to_vector();
+//   if(const auto x = xs ^ last_maybe()) return Expr::Select(xs ^ init(),*x);
+//   raise("Invariant: empty select");
+// }
+
+static Expr::Select selectWithInheritance(Remapper::RemapContext &r, const Named &base, const Named &member) {
+  auto expand = [&](const Type::Struct &s) -> Expr::Select {
+    if (r.findStruct(s.name, "select")->members ^ contains(member)) return Expr::Select({base}, member);
+    if (std::vector<std::shared_ptr<StructDef>> path; walkParents(r, s, [&](auto &p) { return p.members ^ contains(member); }, path)) {
+      return Expr::Select(path ^ map([&](auto &def) { return baseMember(*def); }), member);
+    }
+    raise(fmt::format("Cannot generate select for member {} against type {}", repr(member), repr(s)));
+  };
+  if (const auto s = base.tpe.get<Type::Struct>()) return expand(*s);
+  if (const auto ptr = base.tpe.get<Type::Ptr>()) {
+    if (const auto s = ptr->component.get<Type::Struct>()) return expand(*s);
+  }
+  raise(fmt::format("Selecting non-struct type {}", repr(base)));
+}
+
+static Expr::Select select(Remapper::RemapContext &r, const std::vector<Named> &init, const Named &last) {
+  if (init.empty()) return Expr::Select({}, last);
+  if (init.size() == 1) {
+    return selectWithInheritance(r, init[0], last);
+  } else {
+
+    raise("Nope");
+  }
+}
+
+Remapper::Remapper(clang::ASTContext &context) : context(context) {}
+
+static Type::Ptr ptrTo(const Type::Any &tpe) { return {tpe, {}, TypeSpace::Global()}; }
+static std::string declName(const clang::NamedDecl *decl) {
+  return decl->getDeclName().isEmpty() //
+             ? fmt::format("_unnamed_{:x}", decl->getID())
+             : decl->getDeclName().getAsString();
 }
 
 static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const Type::Any &targetTpe) {
@@ -246,16 +271,21 @@ static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const
     //   int lhs = rhs; // lhs = rhs[0];
     return Expr::Index(r.newVar(expr), Remapper::integralConstOfType(Type::IntS64(), 0), targetTpe);
   } else if (rhsPtrTpe && tgtPtrTpe) {
-    if (auto tgtStruct = tgtPtrTpe->component.get<Type::Struct>()) {
-      if (auto rhsStruct = rhsPtrTpe->component.get<Type::Struct>()) {
-        if (std::vector<std::shared_ptr<StructDef>> chain; inherits(r, tgtStruct->name, *rhsStruct, chain)) {
-          llvm::errs()  << fmt::format("@@@ Chain: {}", chain | mk_string("->", [](auto &s) { return s->name; })) << "\n";
-          return Expr::Cast(r.newVar(expr), *tgtPtrTpe);
-        }
-      }
-    }
-    r.push(Stmt::Comment(fmt::format("ERROR: Cannot conform ptr type rhs {}  with target ptr {}", repr(rhsTpe), repr(targetTpe))));
-    return Expr::Poison(rhsTpe);
+
+    return r.newVar(expr);
+    // return select()
+
+    // if (auto tgtStruct = tgtPtrTpe->component.get<Type::Struct>()) {
+    //   if (auto rhsStruct = rhsPtrTpe->component.get<Type::Struct>()) {
+    //
+    //     if (std::vector<std::shared_ptr<StructDef>> chain; inherits(r, tgtStruct->name, *rhsStruct, chain)) {
+    //       llvm::errs() << fmt::format("@@@ Chain: {}", chain | mk_string("->", [](auto &s) { return s->name; })) << "\n";
+    //       return Expr::Cast(r.newVar(expr), *tgtPtrTpe);
+    //     }
+    //   }
+    // }
+    // r.push(Stmt::Comment(fmt::format("ERROR: Cannot conform ptr type rhs {}  with target ptr {}", repr(rhsTpe), repr(targetTpe))));
+    // return Expr::Poison(rhsTpe);
   } else {
     r.push(Stmt::Comment(fmt::format("ERROR: Cannot conform rhs {} with target {}", repr(rhsTpe), repr(targetTpe))));
     return Expr::Poison(targetTpe);
@@ -343,23 +373,7 @@ std::pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const cla
                             auto baseTpe = handleType(init->getInit()->getType(), r);
                             if (auto baseStruct = baseTpe.template get<Type::Struct>(); baseStruct) {
                               r.push(Stmt::Comment("Ctor base init: " + repr(baseTpe)));
-
                               r.newVar(handleExpr(init->getInit(), r));
-
-                              //                      auto rhs = conform(r, , baseTpe);
-                              //                      auto var = Stmt::Var(r.newName(rhs.tpe()), rhs);
-                              //                      r.push(var);
-
-                              //                      if (auto it = r.structs.find(qualified(baseStruct->name)); it != r.structs.end()) {
-                              //                        for (auto &&m : it->second.members) {
-                              //                          auto member = Expr::Select({receiver->named}, m.named);
-                              //                          r.push(Stmt::Mut(member,  (Expr::Select({var.name}, m.named)), true));
-                              //                        }
-                              //                      } else raise("Cannot resolve record type: " + name);
-                              //                      r.push(Stmt::Comment("Ctor rhs: \n" + repr(rhs)));
-
-                              //                    init.get
-                              //                      r.push(Stmt::Comment("Unimplemented initialiser: " + repr(rhs)));
                             } else {
                               r.push(Stmt::Comment("Base initialiser is not a struct type: " + repr(baseTpe)));
                             }
@@ -431,8 +445,10 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
     r.parents.emplace(name, parents);
 
     // For actual members, skip all EB classes so that EBO works
-    const auto inherited = parents | filter([&](auto &p) { return !r.emptyStruct(*p); }) |
-                           map([&](auto &p) { return Named(fmt::format("#base_{}", p->name), Type::Struct(p->name)); }) | to_vector();
+    const auto inherited = parents                                               //
+                           | filter([&](auto &p) { return !r.emptyStruct(*p); }) //
+                           | map([&](auto &p) { return baseMember(*p); })        //
+                           | to_vector();
 
     const auto def = std::make_shared<StructDef>(name, inherited.empty() && members.empty() ? std::vector{EmptyStructMarker}
                                                                                             : inherited ^ concat(members));

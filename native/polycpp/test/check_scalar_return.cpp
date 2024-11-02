@@ -1,21 +1,21 @@
 
 // #CASE: uint32_t
-// #RUN: polycpp -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_TYPE_DEF=uint32_t -DCHECK_TYPE_VAL=42 -DCHECK_TYPE_FMT="%d" -o {output} {input}
+// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_TYPE_DEF=uint32_t -DCHECK_TYPE_VAL=42 -DCHECK_TYPE_FMT="%d" -o {output} {input}
 // #RUN: POLYSTL_PLATFORM=host {output}
 //   #EXPECT: 42
 
 // #CASE: uint64_t
-// #RUN: polycpp -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_TYPE_DEF=uint64_t -DCHECK_TYPE_VAL=42 -DCHECK_TYPE_FMT="%ld" -o {output} {input}
+// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_TYPE_DEF=uint64_t -DCHECK_TYPE_VAL=42 -DCHECK_TYPE_FMT="%ld" -o {output} {input}
 // #RUN: POLYSTL_PLATFORM=host {output}
 //   #EXPECT: 42
 
 // #CASE: float
-// #RUN: polycpp -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_TYPE_DEF=float -DCHECK_TYPE_VAL=0.42f -DCHECK_TYPE_FMT="%f" -o {output} {input}
+// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_TYPE_DEF=float -DCHECK_TYPE_VAL=0.42f -DCHECK_TYPE_FMT="%f" -o {output} {input}
 // #RUN: POLYSTL_PLATFORM=host {output}
 //   #EXPECT: 0.420000
 
 // #CASE: double
-// #RUN: polycpp -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_TYPE_DEF=double -DCHECK_TYPE_VAL=0.42 -DCHECK_TYPE_FMT="%f" -o {output} {input}
+// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_TYPE_DEF=double -DCHECK_TYPE_VAL=0.42 -DCHECK_TYPE_FMT="%f" -o {output} {input}
 // #RUN: POLYSTL_PLATFORM=host {output}
 //   #EXPECT: 0.420000
 
