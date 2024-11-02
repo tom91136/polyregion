@@ -39,40 +39,46 @@ using namespace polyregion::polyast;
 struct Remapper {
   clang::ASTContext &context;
   struct RemapContext {
-    std::optional<StructDef> parent;
+    std::shared_ptr<StructDef> parent = {};
     bool ctorChain = false;
     Type::Any rtnType = Type::Unit0();
     size_t counter{};
     std::vector<Stmt::Any> stmts{};
-    std::unordered_map<std::string, Function> functions{};
-    std::unordered_map<std::string, StructDef> structs{};
-    std::unordered_map<std::string, std::vector<std::string>> parents{};
+    std::unordered_map<std::string, std::shared_ptr<Function>> functions{};
+    std::unordered_map<std::string, std::shared_ptr<StructDef>> structs{};
+    std::unordered_map<std::string, std::vector<std::shared_ptr<StructDef>>> parents{};
 
     template <typename T>
-    [[nodiscard]] std::pair<T, std::vector<Stmt::Any>> scoped(const std::function<T(RemapContext &)> &f,            //
-                                                              const std::optional<bool> &scopeCtorChain = {},       //
-                                                              const std::optional<Type::Any> &scopeRtnType = {},    //
-                                                              const std::optional<StructDef> &scopeStructName = {}, //
+    [[nodiscard]] std::pair<T, std::vector<Stmt::Any>> scoped(const std::function<T(RemapContext &)> &f,              //
+                                                              const std::optional<bool> &scopeCtorChain = {},         //
+                                                              const std::optional<Type::Any> &scopeRtnType = {},      //
+                                                              const std::shared_ptr<StructDef> &scopeStructName = {}, //
                                                               const bool persistCounter = true) {
-      const std::optional<StructDef> nextParent = scopeStructName ? std::optional{scopeStructName} : parent;
-      RemapContext r{
-          nextParent, scopeCtorChain.value_or(ctorChain), scopeRtnType.value_or(rtnType), persistCounter ? counter : 0, {}, functions,
-          structs};
+      const std::shared_ptr<StructDef> nextParent = scopeStructName ? scopeStructName : parent;
+      RemapContext r{nextParent,
+                     scopeCtorChain.value_or(ctorChain),
+                     scopeRtnType.value_or(rtnType),
+                     persistCounter ? counter : 0,
+                     {}, //
+                     functions,
+                     structs,
+                     parents};
       auto result = f(r);
       if (persistCounter) {
         counter = r.counter;
       }
       functions = r.functions;
       structs = r.structs;
+      parents = r.parents;
       return {result, r.stmts};
     }
-    [[nodiscard]] std::vector<Stmt::Any> scoped(const std::function<void(RemapContext &)> &f,         //
-                                                const std::optional<bool> &scopeCtorChain = {},       //
-                                                const std::optional<Type::Any> &scopeRtnType = {},    //
-                                                const std::optional<StructDef> &scopeStructName = {}, //
+    [[nodiscard]] std::vector<Stmt::Any> scoped(const std::function<void(RemapContext &)> &f,           //
+                                                const std::optional<bool> &scopeCtorChain = {},         //
+                                                const std::optional<Type::Any> &scopeRtnType = {},      //
+                                                const std::shared_ptr<StructDef> &scopeStructName = {}, //
                                                 bool persistCounter = false);
 
-    StructDef findStruct(const std::string &name, const std::string &reason);
+    std::shared_ptr<StructDef> findStruct(const std::string &name, const std::string &reason);
     bool emptyStruct(const StructDef &def);
 
     void push(const Stmt::Any &stmt);
@@ -92,9 +98,9 @@ public:
 
   [[nodiscard]] std::string typeName(const Type::Any &tpe) const;
   [[nodiscard]] std::string nameOfRecord(const clang::RecordType *tpe, RemapContext &r) const;
-  [[nodiscard]] std::pair<std::string, Function> handleCall(const clang::FunctionDecl *decl, RemapContext &r);
+  [[nodiscard]] std::pair<std::string, std::shared_ptr<Function>> handleCall(const clang::FunctionDecl *decl, RemapContext &r);
   [[nodiscard]] Type::Any handleType(clang::QualType qual, RemapContext &r) const;
-  [[nodiscard]] StructDef handleRecord(const clang::RecordDecl *decl, RemapContext &r) const;
+  [[nodiscard]] std::shared_ptr<StructDef> handleRecord(const clang::RecordDecl *decl, RemapContext &r) const;
   [[nodiscard]] Expr::Any handleExpr(const clang::Expr *expr, RemapContext &r);
   void handleStmt(const clang::Stmt *root, RemapContext &expr);
 };

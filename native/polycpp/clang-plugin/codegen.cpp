@@ -76,7 +76,7 @@ polystl::KernelBundle polystl::generate(const Options &opts,
   auto stmts = r.scoped([&](auto &r) { remapper.handleStmt(body, r); }, false, rtnTpe, parentDef);
   stmts.push_back(Stmt::Return(Expr::Unit0Const()));
 
-  auto recv = Arg(Named("#this", Type::Ptr(Type::Struct(parentDef.name), {}, TypeSpace::Global())), {});
+  auto recv = Arg(Named("#this", Type::Ptr(Type::Struct(parentDef->name), {}, TypeSpace::Global())), {});
 
   auto args = functor.parameters() //
               | map([&](const clang::ParmVarDecl *x) {
@@ -99,9 +99,9 @@ polystl::KernelBundle polystl::generate(const Options &opts,
               | append(recv) //
               | to_vector();
 
-  auto f0 = Function("kernel", args, rtnTpe, stmts, {FunctionAttr::Exported()});
+  auto f0 = std::make_shared<Function>("kernel", args, rtnTpe, stmts, std::set<FunctionAttr::Any>{FunctionAttr::Exported()});
 
-  auto p = Program(r.structs ^ values(), r.functions ^ values() ^ append(f0));
+  auto p = Program(r.structs | values() | map([&](auto &x) { return *x;}) | to_vector(), r.functions | values() | append(f0) | map([&](auto &x) { return *x;}) | to_vector() );
 
   if (opts.verbose) {
     diag.Report(loc,
