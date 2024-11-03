@@ -1,5 +1,6 @@
 #pragma once
 
+#include <iostream>
 #include <optional>
 #include <type_traits>
 
@@ -78,16 +79,15 @@ struct Remapper {
                                                 const std::shared_ptr<StructDef> &scopeStructName = {}, //
                                                 bool persistCounter = false);
 
-    std::shared_ptr<StructDef> findStruct(const std::string &name, const std::string &reason);
-    bool emptyStruct(const StructDef &def);
+    [[nodiscard]] std::shared_ptr<StructDef> findStruct(const std::string &name, const std::string &reason) const;
+    [[nodiscard]] bool emptyStruct(const StructDef &def);
 
     void push(const Stmt::Any &stmt);
     void push(const std::vector<Stmt::Any> &xs);
 
-    Named newName(const Type::Any &tpe);
-    Expr::Any newVar(const Expr::Any &expr);
-    void newVar0(const Expr::Any &expr);
-    Named newVar(const Type::Any &tpe);
+    [[nodiscard]] Named newName(const Type::Any &tpe);
+    [[nodiscard]] Expr::Any newVar(const Expr::Any &expr);
+    [[nodiscard]] Named newVar(const Type::Any &tpe);
     //    void operator+=(const Remapper &that);
   };
 

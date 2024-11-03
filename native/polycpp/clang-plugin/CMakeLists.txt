@@ -25,3 +25,39 @@ if (NOT WIN32)
             fmt::fmt-header-only
     )
 endif ()
+
+
+if (NOT WIN32)
+    target_precompile_headers(polycpp-clang-plugin PRIVATE
+
+            remapper.h
+            ast_visitors.h
+            rewriter.h
+            codegen.h
+
+            [["aspartame/all.hpp"]]
+
+
+            [["clang/AST/ASTConsumer.h"]]
+            [["clang/AST/ASTContext.h"]]
+            [["clang/AST/Decl.h"]]
+            [["clang/AST/DeclCXX.h"]]
+            [["clang/AST/RecursiveASTVisitor.h"]]
+            [["clang/ASTMatchers/ASTMatchers.h"]]
+            [["clang/Frontend/CompilerInstance.h"]]
+            [["clang/Frontend/CompilerInvocation.h"]]
+            [["clang/Frontend/FrontendAction.h"]]
+            [["clang/Lex/PreprocessorOptions.h"]]
+
+            [["llvm/ADT/StringRef.h"]]
+            [["llvm/Support/Casting.h"]]
+            [["llvm/Support/FormatVariadic.h"]]
+            [["llvm/Support/MemoryBuffer.h"]]
+
+            <optional>
+            <ostream>
+            <unordered_map>
+            <utility>
+            <vector>
+    )
+endif ()
