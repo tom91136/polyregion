@@ -60,7 +60,7 @@ void interpose(llvm::Module &M) {
       //      {"_ZdaPvSt11align_val_t", "__polyregion_operator_delete_aligned"},
       //      {"_ZdaPvmSt11align_val_t", "__polyregion_operator_delete_aligned_sized"},
       {"_ZdlPv", "__polyregion_operator_delete"},
-      //      {"_ZdlPvm", "__polyregion_operator_delete_sized"},
+      {"_ZdlPvm", "__polyregion_operator_delete_sized"},
       //      {"_ZdlPvSt11align_val_t", "__polyregion_operator_delete_aligned"},
       //      {"_ZdlPvmSt11align_val_t", "__polyregion_operator_delete_aligned_sized"},
       {"_Znam", "__polyregion_operator_new"},

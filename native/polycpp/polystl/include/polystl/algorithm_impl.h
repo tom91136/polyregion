@@ -1,9 +1,11 @@
 #pragma once
 
 #include <algorithm>
+#include <cassert>
 #include <iostream>
 #include <thread>
 #include <type_traits>
+#include <vector>
 
 #include "polystl.h"
 
@@ -34,6 +36,35 @@ namespace std {
 
 namespace {
 
+template <typename T = int64_t> //
+std::pair<std::vector<T>, std::vector<T>> splitStaticExclusive(T start, T end, T N) {
+  assert(N >= 0);
+  auto range = std::abs(end - start);
+  if (range == 0) return {{}, {}};
+  else if (N == 1) return {{start}, {end}};
+  else if (range < N) {
+    std::vector<T> xs(range);
+    std::vector<T> ys(range);
+    for (T i = 0; i < range; ++i) {
+      xs[i] = start + i;
+      ys[i] = start + i + 1;
+    }
+    return {xs, ys};
+  } else {
+    std::vector<T> xs(N);
+    std::vector<T> ys(N);
+    auto k = range / N;
+    auto m = range % N;
+    for (int64_t i = 0; i < N; ++i) {
+      auto a = i * k + std::min(i, m);
+      auto b = (i + 1) * k + std::min((i + 1), m);
+      xs[i] = start + a;
+      ys[i] = start + b;
+    }
+    return {xs, ys};
+  }
+}
+
 static constexpr const char *HostFallbackEnv = "POLYSTL_HOST_FALLBACK";
 
 inline bool host_fallback() {
@@ -50,12 +81,12 @@ inline bool host_fallback() {
 
 template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f) {
   auto N = std::thread::hardware_concurrency();
-  POLYSTL_LOG("<%s, %d> Dispatch", __func__, global);
+  POLYSTL_LOG("<%s, %ld> Dispatch", __func__, global);
 
   if (PlatformKind kind; __polyregion_platform_kind(kind)) {
     switch (kind) {
       case polyregion::runtime::PlatformKind ::HostThreaded: {
-        auto [b, e] = polyregion::concurrency_utils::splitStaticExclusive2<int64_t>(0, global, 1);
+        auto [b, e] = splitStaticExclusive<int64_t>(0, global, 1);
         const int64_t *begin = b.data();
         const int64_t *end = e.data();
         const auto kernel = [&f, begin, end](const int64_t tid) {
@@ -107,7 +138,7 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
   if (PlatformKind kind; __polyregion_platform_kind(kind)) {
     switch (kind) {
       case polyregion::runtime::PlatformKind ::HostThreaded: {
-        auto [b, e] = polyregion::concurrency_utils::splitStaticExclusive2<int64_t>(0, global, N);
+        auto [b, e] = splitStaticExclusive<int64_t>(0, global, N);
         const int64_t groups = b.size();
         const int64_t *begin = b.data();
         const int64_t *end = e.data();
@@ -183,7 +214,7 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
   }
 
   if (!host_fallback()) return init;
-  POLYSTL_LOG("<%s, %d> Host fallback", __func__, global);
+  POLYSTL_LOG("<%s, %ld> Host fallback", __func__, global);
 
   T acc = init;
   for (int64_t globalIdx = 0; globalIdx < global; ++globalIdx) {

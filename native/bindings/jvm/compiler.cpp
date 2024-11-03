@@ -50,10 +50,10 @@ static_assert(static_cast<std::underlying_type_t<ct::Target>>(ct::Target::Source
   Compiler::unregisterMethods(env);
 }
 
-static generated::Layout::Instance toJni(JNIEnv *env, const polyast::CompileLayout &l) {
+static generated::Layout::Instance toJni(JNIEnv *env, const polyast::StructLayout &l) {
   return gen::Layout::of(env)(
       env,                                                                                        //
-      toJni(env, l.name.fqn, gen::String::of(env).clazz, [&](auto &x) { return toJni(env, x); }), //
+      toJni(env, l.name), //
       jlong(l.sizeInBytes),                                                                       //
       jlong(l.alignment),                                                                         //
       toJni(env, l.members, gen::Member::of(env).clazz,                                           //

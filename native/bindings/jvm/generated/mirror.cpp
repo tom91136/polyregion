@@ -190,7 +190,7 @@ Layout::Instance::Instance(const Layout &meta, jobject instance) : meta(meta), i
 
 Layout::Layout(JNIEnv *env)
     : clazz(reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/compiler/Layout")))),
-      ctor0Method(env->GetMethodID(clazz, "<init>", "([Ljava/lang/String;JJ[Lpolyregion/jvm/compiler/Layout$Member;)V")) { };
+      ctor0Method(env->GetMethodID(clazz, "<init>", "(Ljava/lang/String;JJ[Lpolyregion/jvm/compiler/Layout$Member;)V")) { };
 thread_local std::unique_ptr<Layout> Layout::cached = {};
 Layout& Layout::of(JNIEnv *env) {
   if(!cached) cached = std::unique_ptr<Layout>(new Layout(env));
@@ -203,7 +203,7 @@ void Layout::drop(JNIEnv *env){
   }
 }
 Layout::Instance Layout::wrap(JNIEnv *env, jobject instance) { return {*this, instance}; }
-Layout::Instance Layout::operator()(JNIEnv *env, jobjectArray name, jlong sizeInBytes, jlong alignment, jobjectArray members) const {
+Layout::Instance Layout::operator()(JNIEnv *env, jstring name, jlong sizeInBytes, jlong alignment, jobjectArray members) const {
   return {*this, env->NewObject(clazz, ctor0Method, name, sizeInBytes, alignment, members)};
 }
 

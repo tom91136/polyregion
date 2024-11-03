@@ -1,6 +1,6 @@
 // #CASE: general
-// #MATRIX: platform=cuda
-// #RUN: polycpp -fno-crash-diagnostics -O3 -Wall -Wextra -pedantic -g3 -fstdpar -fstdpar-arch=cuda@sm_60 -o {output} {input}
+// #MATRIX: platform=cuda,hip,hsa,host
+// #RUN: polycpp -fno-crash-diagnostics -O3 -Wall -Wextra -pedantic -g3 -fstdpar -fstdpar-arch=cuda@sm_89:amdgpu@gfx1036:host@native -o {output} {input}
 // #RUN: POLYSTL_PLATFORM={platform} SIZE=1024 POLYSTL_HOST_FALLBACK=0 {output}
 //   #EXPECT: 20.480000
 
@@ -95,5 +95,6 @@ int main() {
       });
 
   printf("%f", checksum);
+  fflush(stdout);
   return EXIT_SUCCESS;
 }

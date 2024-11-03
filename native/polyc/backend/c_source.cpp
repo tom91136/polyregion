@@ -11,6 +11,23 @@ using namespace aspartame;
 using namespace polyregion;
 using namespace std::string_literals;
 
+static std::string normalise(const std::string &s) {
+  return s                       //
+         ^ replace_all(" ", "_") //
+         ^ replace_all("&", "_") //
+         ^ replace_all(",", "_") //
+         ^ replace_all("*", "_") //
+         ^ replace_all("+", "_") //
+         ^ replace_all("/", "_") //
+         ^ replace_all("<", "_") //
+         ^ replace_all(">", "_") //
+         ^ replace_all("#", "_") //
+         ^ replace_all(":", "_") //
+         ^ replace_all("(", "_") //
+         ^ replace_all(")", "_") //
+         ^ replace_all(".", "_");
+}
+
 std::string backend::CSource::mkTpe(const Type::Any &tpe) {
 
   switch (dialect) {
@@ -34,7 +51,7 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
                              [&](const Type::Unit0 &) { return "void"s; },          //
                              [&](const Type::Bool1 &) { return "bool"s; },          //
 
-                             [&](const Type::Struct &x) { return x.name; },                              //
+                             [&](const Type::Struct &x) { return normalise(x.name); },                   //
                              [&](const Type::Ptr &x) { return fmt::format("{}*", mkTpe(x.component)); }, //
                              [&](const Type::Annotated &x) {
                                return fmt::format("{} /*{};{}*/", mkTpe(x.tpe), x.pos ^ map(show_repr) ^ get_or_else(""),
@@ -60,7 +77,7 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
                              [&](const Type::Unit0 &) { return "void"s; },          //
                              [&](const Type::Bool1 &) { return "char"s; },          //
 
-                             [&](const Type::Struct &x) { return x.name; },                              //
+                             [&](const Type::Struct &x) { return normalise(x.name); },                   //
                              [&](const Type::Ptr &x) { return fmt::format("{}*", mkTpe(x.component)); }, //
                              [&](const Type::Annotated &x) {
                                return fmt::format("{} /*{};{}*/", mkTpe(x.tpe), x.pos ^ map(show_repr) ^ get_or_else(""),
@@ -72,9 +89,9 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
 
 std::string backend::CSource::mkExpr(const Expr::Any &expr) {
   return expr.match_total(
-      [](const Expr::Float16Const &x) { return fmt::format("{}", x.value); },  //
+      [](const Expr::Float16Const &x) { return fmt::format("{}", x.value); },   //
       [](const Expr::Float32Const &x) { return fmt::format("{}.f", x.value); }, //
-      [](const Expr::Float64Const &x) { return fmt::format("{}", x.value); },  //
+      [](const Expr::Float64Const &x) { return fmt::format("{}", x.value); },   //
 
       [](const Expr::IntU8Const &x) { return fmt::format("{}", x.value); },  //
       [](const Expr::IntU16Const &x) { return fmt::format("{}", x.value); }, //
@@ -195,14 +212,24 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
                                 [&](const Math::Atan2 &v) { return fmt::format("atan2({}, {})", mkExpr(v.x), mkExpr(v.y)); },
                                 [&](const Math::Hypot &v) { return fmt::format("hypot({}, {})", mkExpr(v.x), mkExpr(v.y)); });
       },
-      [&](const Expr::Select &x) { return polyast::qualified(x); },                     //
+      [&](const Expr::Select &x) {
+        return x.init ^
+               fold_left(std::string{},
+                         [&](auto &&acc, auto &n) {
+                           acc += normalise(n.symbol);
+                           acc += n.tpe.template is<Type::Ptr>() ? "->" : ".";
+                           return acc;
+                         }) ^
+               concat(normalise(x.last.symbol));
+      },                                                                                //
       [&](const Expr::Poison &x) { return fmt::format("(NULL /*{}*/)", repr(x.tpe)); }, //
-
       [&](const Expr::Cast &x) { return fmt::format("(({}) {})", mkTpe(x.as), mkExpr(x.from)); },
-      [&](const Expr::Invoke &x) { return "???"s; }, //
+      [&](const Expr::Invoke &x) {
+        return fmt::format("{}({})", normalise(x.name), x.args ^ mk_string(", ", [&](auto &arg) { return mkExpr(arg); }));
+      }, //
       [&](const Expr::Index &x) { return fmt::format("{}[{}]", mkExpr(x.lhs), mkExpr(x.idx)); },
       [&](const Expr::RefTo &x) {
-        std::string str = fmt::format("&{}", mkExpr(x.lhs));
+        std::string str = fmt::format("&({} /*{}*/)", mkExpr(x.lhs), mkTpe(x.component));
         if (x.idx) str += fmt::format("[{}]", mkExpr(*x.idx));
         return str;
       },
@@ -222,7 +249,7 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
       },
       [&](const Stmt::Var &x) {
         if (x.name.tpe.is<Type::Unit0>()) return fmt::format("{};", mkExpr(*x.expr));
-        return fmt::format("{} {}{};", mkTpe(x.name.tpe), x.name.symbol, x.expr ? (" = " + mkExpr(*x.expr)) : "");
+        return fmt::format("{} {}{};", mkTpe(x.name.tpe), normalise(x.name.symbol), x.expr ? (" = " + mkExpr(*x.expr)) : "");
       },
       [&](const Stmt::Mut &x) { return fmt::format("{} = {};", mkExpr(x.name), mkExpr(x.expr)); },
       [&](const Stmt::Update &x) { return fmt::format("{}[{}] = {};", mkExpr(x.lhs), mkExpr(x.idx), mkExpr(x.value)); },
@@ -255,7 +282,7 @@ std::string backend::CSource ::mkFn(const Function &fnTree) {
   std::vector<std::string> argExprs =
       fnTree.args | zip_with_index() | map([&](auto &arg, auto idx) {
         auto tpe = mkTpe(arg.named.tpe);
-        auto name = arg.named.symbol;
+        auto name = normalise(arg.named.symbol);
         std::string decl;
         switch (dialect) {
           case Dialect::OpenCL1_1: {
@@ -335,7 +362,7 @@ std::string backend::CSource ::mkFn(const Function &fnTree) {
   return fmt::format("{}{} {}({}) {}",
                      fnPrefix,                   //
                      mkTpe(fnTree.rtn),          //
-                     fnTree.name,                //
+                     normalise(fnTree.name),     //
                      argExprs | mk_string(", "), //
                      fnTree.body ^ mk_string("{\n", "\n", "\n}", [&](auto &s) { return mkStmt(s) ^ indent(2); }));
 }
@@ -345,8 +372,10 @@ polyast::CompileResult backend::CSource::compileProgram(const Program &program, 
 
   auto structDefs =
       program.structs | mk_string("\n", [&](auto &s) {
-        return fmt::format("typedef struct {}",
-                           s.members | mk_string("{", "\n", "}", [&](auto &m) { return fmt::format("  {} {};", mkTpe(m.tpe), m.symbol); }));
+        return fmt::format(
+            "typedef struct {} {};",
+            s.members | mk_string("{\n", "\n", "\n}", [&](auto &m) { return fmt::format("  {} {};", mkTpe(m.tpe), normalise(m.symbol)); }),
+            normalise(s.name));
       });
 
   std::vector<std::string> fragments;

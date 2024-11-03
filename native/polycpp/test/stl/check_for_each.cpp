@@ -1,6 +1,6 @@
 // #CASE: general
 // #MATRIX: platform=cuda,hip,hsa,host
-// #RUN: polycpp -fno-crash-diagnostics -O3 -Wall -Wextra -pedantic -g3 -fstdpar -fstdpar-arch=cuda@sm_60:amdgpu@gfx1036:host@native -o {output} {input}
+// #RUN: polycpp -fno-crash-diagnostics -O3 -Wall -Wextra -pedantic -g3 -fstdpar -fstdpar-arch=cuda@sm_89:amdgpu@gfx1036:host@native -o {output} {input}
 // #RUN: POLYSTL_PLATFORM={platform} SIZE=1024 POLYSTL_HOST_FALLBACK=0 {output}
 //   #EXPECT: 204.800000
 
@@ -102,5 +102,6 @@ int main() {
   auto checksum = std::reduce(a.begin(), a.end(), 0.0, std::plus<>());
 
   printf("%f", checksum);
+  fflush(stdout);
   return EXIT_SUCCESS;
 }

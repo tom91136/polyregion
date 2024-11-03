@@ -61,7 +61,8 @@ set(POLYRT_LIBS
         nlohmann_json::nlohmann_json
         Vulkan::Headers
         GPUOpen::VulkanMemoryAllocator
-        unofficial::libffi::libffi)
+        unofficial::libffi::libffi
+        CACHE INTERNAL "")
 
 add_library(polyrt SHARED)
 add_library(polyrt-obj OBJECT)

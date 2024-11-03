@@ -120,10 +120,10 @@ void testAll(bool passthrough) {
         }
 
         envs.emplace_back("POLYCPP_DRIVER="+ ClangDriver);
-        envs.emplace_back("POLYSTL_LIB=" + PolySTLLib);
-        envs.emplace_back("POLYSTL_INCLUDE=" + PolySTLInclude);
+        // envs.emplace_back("POLYSTL_LIB=" + PolySTLLib);
+        // envs.emplace_back("POLYSTL_INCLUDE=" + PolySTLInclude);
 
-        envs.emplace_back("LD_LIBRARY_PATH=" + PolySTLLDLibraryPath);
+        // envs.emplace_back("LD_LIBRARY_PATH=" + PolySTLLDLibraryPath);
         envs.emplace_back("ASAN_OPTIONS=alloc_dealloc_mismatch=0");
 //        envs.emplace_back("LD_PRELOAD=/usr/bin/../lib/clang/18/lib/x86_64-redhat-linux-gnu/libclang_rt.asan.so");
 

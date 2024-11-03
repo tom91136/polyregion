@@ -187,7 +187,7 @@ public:
   static Layout& of(JNIEnv *env);
   static void drop(JNIEnv *env);
   Instance wrap (JNIEnv *env, jobject instance);
-  Instance operator()(JNIEnv *env, jobjectArray name, jlong sizeInBytes, jlong alignment, jobjectArray members) const;
+  Instance operator()(JNIEnv *env, jstring name, jlong sizeInBytes, jlong alignment, jobjectArray members) const;
 };
 struct Member {
   struct Instance {

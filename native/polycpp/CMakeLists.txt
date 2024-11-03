@@ -5,25 +5,56 @@ add_subdirectory(clang-plugin)
 set(POLYCPP_HEADER_SET_DIR "lib/polycpp/include")
 set(POLYCPP_LIB_DIR "lib/polycpp/lib")
 
+# =========================== Generate header resource target ===========================
+function(add_copy_header_set_targets target commands_var)
+    get_target_property(header_set ${target} HEADER_SET)
+    get_target_property(header_dirs ${target} HEADER_DIRS)
+    list(LENGTH header_dirs header_dirs_len)
+    if (header_dirs_len GREATER 1)
+        message(FATAL_ERROR "More than one header dirs for dependent target ${target}, cannot create relative paths (dirs=${header_dirs})")
+    endif ()
+    foreach (absolute_file ${header_set})
+        cmake_path(RELATIVE_PATH absolute_file BASE_DIRECTORY "${header_dirs}" OUTPUT_VARIABLE relative_file)
+        cmake_path(GET relative_file EXTENSION LAST_ONLY header_extension)
+        if (header_extension STREQUAL ".impl")
+            cmake_path(GET relative_file STEM relative_file)
+        endif ()
+        list(APPEND ${commands_var} COMMAND ${CMAKE_COMMAND} -E copy "${absolute_file}" "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_HEADER_SET_DIR}/${relative_file}")
+    endforeach ()
+    set(${commands_var} ${${commands_var}} PARENT_SCOPE)
+#    add_custom_target(${name} ${commands})
+endfunction()
+
+foreach (header_target polycommon polyrt polystl)
+    add_copy_header_set_targets(${header_target} header_commands)
+endforeach ()
+add_custom_target(polycpp-header-resource ${header_commands})
+
+# =======================================================================================
+
+
+# =========================== Generate header resource target ===========================
+function(add_copy_lib_targets target)
+    foreach (target ${ARGN})
+        list(APPEND commands COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:${target}>" "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/")
+    endforeach ()
+    add_custom_target(${target}
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/"
+            ${commands})
+endfunction()
 if (WIN32)
-    add_custom_target(polycpp-resources
-            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/"
-            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:polystl-static>" "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/"
-            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:polystl>" "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/")
+    add_copy_lib_targets(polycpp-lib-resource polystl-static polystl)
 else ()
-    add_custom_target(polycpp-resources
-            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/"
-            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:polycpp-clang-plugin>" "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/"
-            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:polystl-interpose-plugin>" "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/"
-            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:polystl-static>" "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/"
-            COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:polystl>" "$<TARGET_FILE_DIR:polycpp>/${POLYCPP_LIB_DIR}/")
+    add_copy_lib_targets(polycpp-lib-resource polycpp-clang-plugin polystl-interpose-plugin polystl-static polystl)
 endif ()
+# =======================================================================================
+
 
 add_executable(polycpp driver_main.cpp)
-add_dependencies(polycpp polycpp-resources)
+add_dependencies(polycpp polycpp-lib-resource polycpp-header-resource)
 
 add_executable(polycpp-test test/test_all.cpp)
-add_dependencies(polycpp-test polycpp)
+add_dependencies(polycpp-test polycpp polystl)
 target_include_directories(polycpp-test PRIVATE
         ../include
         ${LLVM_INCLUDE_DIRS}
@@ -65,36 +96,6 @@ target_link_libraries(polycpp-test PRIVATE
         Aspartame::Aspartame
         Catch2::Catch2WithMain
 )
-
-
-function(add_copy_header_set_targets TARGET DEPENDENT_TARGET DESTINATION)
-    get_target_property(header_set ${DEPENDENT_TARGET} HEADER_SET)
-    get_target_property(header_dirs ${DEPENDENT_TARGET} HEADER_DIRS)
-    list(LENGTH header_dirs header_dirs_len)
-    if (header_dirs_len GREATER 1)
-        message(FATAL_ERROR "More than one header dirs for dependent target ${DEPENDENT_TARGET}, cannot create relative paths (dirs=${header_dirs})")
-    endif ()
-    foreach (absolute_file ${header_set})
-        cmake_path(RELATIVE_PATH absolute_file BASE_DIRECTORY "${header_dirs}" OUTPUT_VARIABLE relative_file)
-        cmake_path(GET relative_file EXTENSION header_extension)
-        if ("${header_extensoon}" STREQUAL ".impl")
-            cmake_path(GET relative_file STEM relative_file)
-        endif ()
-        add_custom_command(TARGET ${TARGET} POST_BUILD
-                COMMAND
-                ${CMAKE_COMMAND} -E copy "${absolute_file}" "$<TARGET_FILE_DIR:${TARGET}>/${DESTINATION}/${relative_file}")
-    endforeach ()
-endfunction()
-
-# === copy polycpp system libs and headers ===
-foreach (header_target polycommon polyrt polystl)
-    add_copy_header_set_targets(polycpp ${header_target} "${POLYCPP_HEADER_SET_DIR}")
-endforeach ()
-
-#get_filename_component(Clang_RESOURCE_DIR "${Clang_DIR}/../../clang" ABSOLUTE)
-#add_custom_command(TARGET polycpp POST_BUILD
-#        COMMAND ${CMAKE_COMMAND} -E copy_directory "${Clang_RESOURCE_DIR}" "$<TARGET_FILE_DIR:polycpp>/lib/clang")
-# === end copy polycpp system libs and headers ===
 
 
 target_compile_options(polycpp PRIVATE ${COMPILE_OPTIONS})

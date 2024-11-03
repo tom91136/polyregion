@@ -924,7 +924,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 
           std::vector<Expr::Any> args;
           for (size_t i = 0; i < expr->getNumArgs(); ++i)
-            args.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn->args[i].named.tpe)));
+            args.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn->args[i + 1].named.tpe)));
           auto _ = r.newVar(Expr::Invoke(name, std::vector{r.newVar(conform(r, instance, ptrTo(ctorTpe)))} ^ concat(args), Type::Unit0()));
           return instance;
         } else {

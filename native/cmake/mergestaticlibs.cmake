@@ -25,7 +25,7 @@ function(merge_static_libs outlib)
     file(WRITE ${dummyfile} "const char* dummy = \"${dummyfile}\";\n")
 
     add_library(${outlib} STATIC ${dummyfile})
-
+    message(STATUS "[merge_static_libs] ${outlib} depends on static libs: ${all_libs}")
     # First get the file names of the libraries to be merged
     foreach (lib ${all_libs})
         get_target_property(libtype ${lib} TYPE)
@@ -39,7 +39,7 @@ function(merge_static_libs outlib)
         list(APPEND libfiles "${libfile}")
         list(APPEND libs "${lib}")
     endforeach ()
-    message(STATUS "will be merging ${libfiles}")
+    message(STATUS "[merge_static_libs] ${outlib} will merge ${libfiles}")
     list(REMOVE_DUPLICATES libfiles)
 
     # Now the easy part for MSVC and for MAC
@@ -96,17 +96,17 @@ endforeach()
             # relative path is needed by ar under MSYS
             file(RELATIVE_PATH objlistfilerpath ${CMAKE_CURRENT_BINARY_DIR} ${objlistfile})
             add_custom_command(TARGET ${outlib} POST_BUILD
-                    COMMAND ${CMAKE_COMMAND} -E echo "Running: ${CMAKE_AR} cruUP $<TARGET_FILE:${outlib}> @${objlistfilerpath}"
+                    COMMAND ${CMAKE_COMMAND} -E echo "[merge_static_libs:${CMAKE_AR}] $<TARGET_FILE:${outlib}> @${objlistfilerpath}"
                     COMMAND ${CMAKE_AR} cruUP "$<TARGET_FILE:${outlib}>" @"${objlistfilerpath}"
                     COMMAND ${CMAKE_RANLIB} "$<TARGET_FILE:${outlib}>"
                     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
         endforeach ()
         add_custom_command(TARGET ${outlib} POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E echo "Running: ${CMAKE_RANLIB} $<TARGET_FILE:${outlib}>"
+                COMMAND ${CMAKE_COMMAND} -E echo "[merge_static_libs:${CMAKE_RANLIB}] $<TARGET_FILE:${outlib}>"
                 COMMAND ${CMAKE_RANLIB} $<TARGET_FILE:${outlib}>)
         add_custom_command(TARGET ${outlib} POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E echo "Running: ${CMAKE_RANLIB} $<TARGET_FILE:${outlib}>"
-                COMMAND ${CMAKE_RANLIB} $<TARGET_FILE:${outlib}>)
+                COMMAND ${CMAKE_COMMAND} -E echo "[merge_static_libs:${CMAKE_STRIP}] $<TARGET_FILE:${outlib}>"
+                COMMAND ${CMAKE_STRIP} --enable-deterministic-archives --strip-unneeded $<TARGET_FILE:${outlib}>)
     endif ()
     string(REPLACE "-" "_" outlib_normalised "${outlib}")
     file(WRITE ${dummyfile}.base "const char* ${outlib_normalised}_sublibs=\"${libs}\";\n")

@@ -1,9 +1,8 @@
 #pragma once
 
-
+#include "polyrt/runtime.h"
 #include <cstddef>
 #include <cstring>
-#include "polyrt/runtime.h"
 
 using namespace polyregion::runtime;
 
@@ -80,6 +79,7 @@ void __polyregion_builtin_gpu_fence_all();    // NOLINT(*-reserved-identifier)
 template <typename T> class __polyregion_local {
   T *ptr;
   __polyregion_local(T *ptr) : ptr(ptr) { static_assert(sizeof(__polyregion_local<void *>) == sizeof(void *)); }
+
 public:
   T &operator[](size_t idx) const { return ptr[idx]; }
 };
@@ -115,7 +115,7 @@ __insert_point:;
 }
 #pragma clang diagnostic pop
 
-extern "C" inline  void *__polyregion_malloc(size_t size) { // NOLINT(*-reserved-identifier)
+extern "C" inline __attribute__((used)) void *__polyregion_malloc(size_t size) { // NOLINT(*-reserved-identifier)
   __polyregion_initialise_runtime();
   if (!__polyregion_selected_platform || !__polyregion_selected_device || !__polyregion_selected_queue) {
     POLYSTL_LOG("No device/queue in %s", __func__);
@@ -129,22 +129,23 @@ extern "C" inline  void *__polyregion_malloc(size_t size) { // NOLINT(*-reserved
   }
 }
 
-extern "C" inline  void __polyregion_free(void *ptr) { // NOLINT(*-reserved-identifier)
+extern "C" inline __attribute__((used)) void __polyregion_free(void *ptr) { // NOLINT(*-reserved-identifier)
   __polyregion_initialise_runtime();
   if (!__polyregion_selected_platform || !__polyregion_selected_device || !__polyregion_selected_queue) {
     POLYSTL_LOG("No device/queue in %s", __func__);
   }
   __polyregion_selected_device->freeShared(ptr);
 }
-
-extern "C" inline  void *__polyregion_operator_new(size_t size) { // NOLINT(*-reserved-identifier)
+extern "C" inline __attribute__((used)) void *__polyregion_operator_new(size_t size) { // NOLINT(*-reserved-identifier)
   return __polyregion_malloc(size);
 }
-extern "C" inline  void __polyregion_operator_delete(void *ptr) { // NOLINT(*-reserved-identifier)
+extern "C" inline __attribute__((used)) void __polyregion_operator_delete(void *ptr) { // NOLINT(*-reserved-identifier)
   __polyregion_free(ptr);
 }
-
-extern "C" inline void *__polyregion_aligned_alloc(size_t alignment, size_t size) { // NOLINT(*-reserved-identifier)
+extern "C" inline __attribute__((used)) void __polyregion_operator_delete_sized(void *ptr, size_t size) { // NOLINT(*-reserved-identifier)
+  __polyregion_free(ptr);
+}
+extern "C" inline __attribute__((used)) void *__polyregion_aligned_alloc(size_t alignment, size_t size) { // NOLINT(*-reserved-identifier)
   // TODO actually align it
   return __polyregion_malloc(size);
 }

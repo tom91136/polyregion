@@ -270,7 +270,7 @@ static int hipewHipInit(void) {
   const char *hip_paths[] = {"", NULL};
   const char *hiprtc_paths[] = {"", NULL};
 #else
-  const char *hip_paths[] = {"/usr/lib/aomp_16.0-3/lib/libamdhip64.so", NULL};
+  const char *hip_paths[] = {"/lib64/libamdhip64.so.6", "/lib64/libamdhip64.so", "/opt/rocm/lib/libamdhip64.so", NULL};
   const char* hiprtc_paths[] = { NULL };
 #endif
   static int initialized = 0;

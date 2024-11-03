@@ -224,7 +224,7 @@ int main(int argc, const char *argv[]) {
                    switch (opts->rt) {
                      case PolyCppOptions::LinkKind::Static: {
                        remaining.insert(remaining.end(), (polycppLibPath / "libpolystl-static.a").string());
-                       if (!opts->noCompress) append({"-Wl,--compress-debug-sections=zlib,--gc-sections"});
+                       // if (!opts->noCompress) append({"-Wl,--compress-debug-sections=zlib,--gc-sections"});
                        break;
                      }
                      case PolyCppOptions::LinkKind::Dynamic: {
