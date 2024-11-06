@@ -1,5 +1,10 @@
 add_library(polystl SHARED)
-merge_static_libs(polystl-static ${POLYRT_LIBS})
+
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_library(polystl-static SHARED)
+else ()
+    merge_static_libs(polystl-static ${POLYRT_LIBS})
+endif ()
 
 foreach (TARGET polystl polystl-static)
     target_sources(${TARGET}

@@ -106,7 +106,7 @@ const static std::string Empty = "#empty";
     };
     if (const auto s = base.tpe.get<Type::Struct>()) return expand(*s);
     if (const auto ptr = base.tpe.get<Type::Ptr>()) {
-      if (const auto s = ptr->component.get<Type::Struct>()) return expand(*s);
+      if (const auto s = ptr->comp.get<Type::Struct>()) return expand(*s);
     }
     raise(fmt::format("Selecting non-struct type {}", repr(base)));
   };
@@ -258,34 +258,34 @@ static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const
   auto tgtPtrTpe = targetTpe.get<Type::Ptr>();
   auto rhsPtrTpe = rhsTpe.get<Type::Ptr>();
 
-  if (auto rhsSelect = expr.get<Expr::Select>(); tgtPtrTpe && tgtPtrTpe->component == rhsTpe && rhsSelect) {
+  if (auto rhsSelect = expr.get<Expr::Select>(); tgtPtrTpe && tgtPtrTpe->comp == rhsTpe && rhsSelect) {
     // Handle decay
     //   int rhs = /* */;
     //   int &lhs = rhs;
-    return Expr::RefTo(*rhsSelect, {}, rhsTpe);
-  } else if (auto rhsIndex = expr.get<Expr::Index>(); tgtPtrTpe && tgtPtrTpe->component == rhsTpe && rhsIndex) {
+    return Expr::RefTo(*rhsSelect, {}, rhsTpe, TypeSpace::Global());
+  } else if (auto rhsIndex = expr.get<Expr::Index>(); tgtPtrTpe && tgtPtrTpe->comp == rhsTpe && rhsIndex) {
     // Handle decay
     //   auto rhs = xs[0];
     //   int &lhs = rhs;
-    return Expr::RefTo(rhsIndex->lhs, rhsIndex->idx, rhsIndex->component);
+    return Expr::RefTo(rhsIndex->lhs, rhsIndex->idx, rhsIndex->comp, TypeSpace::Global());
   } else if (!rhsPtrTpe && tgtPtrTpe) {
     // Handle promote
     //   int rhs = /* */;
     //   int *lhs = &rhs;
-    return Expr::RefTo(r.newVar(expr), {}, rhsTpe);
-  } else if (rhsPtrTpe && targetTpe == rhsPtrTpe->component) {
+    return Expr::RefTo(r.newVar(expr), {}, rhsTpe, TypeSpace::Global());
+  } else if (rhsPtrTpe && targetTpe == rhsPtrTpe->comp) {
     // Handle decay
     //   int &rhs = /* */;
     //   int lhs = rhs; // lhs = rhs[0];
     return Expr::Index(r.newVar(expr), Remapper::integralConstOfType(Type::IntS64(), 0), targetTpe);
   } else if (rhsPtrTpe && tgtPtrTpe) {
-    if (auto tgtStruct = tgtPtrTpe->component.get<Type::Struct>()) {
-      if (auto rhsStruct = rhsPtrTpe->component.get<Type::Struct>()) {
+    if (auto tgtStruct = tgtPtrTpe->comp.get<Type::Struct>()) {
+      if (auto rhsStruct = rhsPtrTpe->comp.get<Type::Struct>()) {
         if (auto root = expr.get<Expr::Select>()) {
           if (std::vector<std::shared_ptr<StructDef>> chain;
               walkParents(r, *rhsStruct, [&](auto &p) { return p.name == tgtStruct->name; }, chain)) {
             const auto names = root->init | append(root->last) | concat(chain | map([](auto &s) { return baseMember(*s); })) | to_vector();
-            return Expr::RefTo(selectFromNames(names), {}, tgtStruct->widen());
+            return Expr::RefTo(selectFromNames(names), {}, tgtStruct->widen(), TypeSpace::Global());
           }
         }
       }
@@ -314,12 +314,12 @@ std::string Remapper::typeName(const Type::Any &tpe) const {
       [&](const Type::IntS32 &) -> std::string { return "int32_t"; }, //
       [&](const Type::IntS64 &) -> std::string { return "int64_t"; }, //
 
-      [&](const Type::Bool1 &) -> std::string { return "bool"; },                     //
-      [&](const Type::Unit0 &) -> std::string { return "void"; },                     //
-      [&](const Type::Nothing &) -> std::string { return "/*nothing*/"; },            //
-      [&](const Type::Struct &x) -> std::string { return x.name; },                   //
-      [&](const Type::Ptr &x) -> std::string { return typeName(x.component) + "*"; }, //
-      [&](const Type::Annotated &x) -> std::string { return typeName(x.tpe); }        //
+      [&](const Type::Bool1 &) -> std::string { return "bool"; },                //
+      [&](const Type::Unit0 &) -> std::string { return "void"; },                //
+      [&](const Type::Nothing &) -> std::string { return "/*nothing*/"; },       //
+      [&](const Type::Struct &x) -> std::string { return x.name; },              //
+      [&](const Type::Ptr &x) -> std::string { return typeName(x.comp) + "*"; }, //
+      [&](const Type::Annotated &x) -> std::string { return typeName(x.tpe); }   //
   );
 }
 std::pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::FunctionDecl *decl, RemapContext &r) {
@@ -360,7 +360,7 @@ std::pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const cla
           case clang::Builtin::NotBuiltin:
             if (const auto ctor = llvm::dyn_cast<clang::CXXConstructorDecl>(decl)) {
               if (const auto instancePtr = receiver->named.tpe.get<Type::Ptr>()) {
-                if (const auto structTpe = instancePtr->component.get<Type::Struct>()) {
+                if (const auto structTpe = instancePtr->comp.get<Type::Struct>()) {
                   r.push(Stmt::Comment("Ctor: " + declName(decl)));
                   for (auto init : ctor->inits()) { // handle CXXCtorInitializer here
                     if (init->isAnyMemberInitializer()) {
@@ -607,11 +607,13 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 
   auto deref = [&r](const Expr::Any &term) {
     if (const auto arrTpe = term.tpe().get<Type::Ptr>()) {
-      return r.newVar(Expr::Index(term, integralConstOfType(Type::IntS64(), 0), arrTpe->component));
+      return r.newVar(Expr::Index(term, integralConstOfType(Type::IntS64(), 0), arrTpe->comp));
     } else return term;
   };
 
-  auto ref = [&r](const Expr::Any &term) { return !term.tpe().is<Type::Ptr>() ? r.newVar(Expr::RefTo(term, {}, term.tpe())) : term; };
+  auto ref = [&r](const Expr::Any &term) {
+    return !term.tpe().is<Type::Ptr>() ? r.newVar(Expr::RefTo(term, {}, term.tpe(), TypeSpace::Global())) : term;
+  };
 
   auto assign = [&r](const Expr::Any &lhs, const Expr::Any &rhs) {
     const auto lhsArrTpe = lhs.tpe().get<Type::Ptr>();
@@ -621,13 +623,13 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       //   int &rhs = /* */;
       //   int &lhs = rhs; lhs[0] = rhs[0];
       r.push(Stmt::Update(lhs, integralConstOfType(Type::IntS64(), 0),
-                          r.newVar(Expr::Index(rhs, integralConstOfType(Type::IntS64(), 0), rhsArrTpe->component))));
-    } else if (lhsArrTpe && lhsArrTpe->component == rhs.tpe()) {
+                          r.newVar(Expr::Index(rhs, integralConstOfType(Type::IntS64(), 0), rhsArrTpe->comp))));
+    } else if (lhsArrTpe && lhsArrTpe->comp == rhs.tpe()) {
       // Handle decay
       //   int rhs = /**/;
       //   int &lhs = rhs;
       r.push(Stmt::Update(lhs, integralConstOfType(Type::IntS64(), 0), rhs));
-    } else if (rhsArrTpe && lhs.tpe() == rhsArrTpe->component) {
+    } else if (rhsArrTpe && lhs.tpe() == rhsArrTpe->comp) {
       // Handle decay
       //   int &rhs = /* */;
       //   int lhs = rhs;
@@ -689,7 +691,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           case clang::CK_LValueToRValue:
             if (targetTpe == sourceExpr.tpe()) {
               return sourceExpr;
-            } else if (const auto ptrTpe = sourceExpr.tpe().get<Type::Ptr>(); ptrTpe && targetTpe == ptrTpe->component) {
+            } else if (const auto ptrTpe = sourceExpr.tpe().get<Type::Ptr>(); ptrTpe && targetTpe == ptrTpe->comp) {
               return Expr::Index(r.newVar(sourceExpr), integralConstOfType(Type::IntS64(), 0), targetTpe);
             } else {
               llvm::outs() << "Unhandled L->R cast:" << stmt->getCastKindName() << "\n";
@@ -753,15 +755,14 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 
           const auto annotatedTpe =
               tpe.get<Type::Ptr>() ^
-              fold([&](auto &p) { return Type::Ptr(p.component, p.length, local ? TypeSpace::Local() : p.space).widen(); },
-                   [&] { return tpe; });
+              fold([&](auto &p) { return Type::Ptr(p.comp, p.length, local ? TypeSpace::Local() : p.space).widen(); }, [&] { return tpe; });
 
           const auto declName = Named(refDeclName, annotatedTpe);
           return select(r, {}, declName);
         }
 
         //        // handle decay `int &x = /* */; int y = x;`
-        //        if (auto declArrTpe = get_opt<Type::Ptr>(declType); declArrTpe && actual == declArrTpe->component) {
+        //        if (auto declArrTpe = get_opt<Type::Ptr>(declType); declArrTpe && actual == declArrTpe->comp) {
         //          //          return Expr::Index(declSelect, {integralConstOfType(Type::IntU64(), 0)}, actual);
         //          return  (declSelect);
         //        } else {
@@ -775,12 +776,12 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         if (auto arrTpe = baseExpr.tpe().get<Type::Ptr>(); arrTpe) {
           // A subscript always returns lvalue which is then cast to rvalue later if required.
           // As such, we use a RefTo instead of Index.
-          if (auto ref = arrTpe->component.get<Type::Ptr>(); ref && ref->component == exprTpe) {
+          if (auto ref = arrTpe->comp.get<Type::Ptr>(); ref && ref->comp == exprTpe) {
             // Case 1: Ptr[Ptr[C]] => C
-            return Expr::RefTo(ref->length ? r.newVar(baseExpr) : deref(r.newVar(baseExpr)), idxExpr, exprTpe);
-          } else if (arrTpe->component == exprTpe) {
+            return Expr::RefTo(ref->length ? r.newVar(baseExpr) : deref(r.newVar(baseExpr)), idxExpr, exprTpe, TypeSpace::Global());
+          } else if (arrTpe->comp == exprTpe) {
             // Case 2: Ptr[C]      => C
-            return Expr::RefTo(r.newVar(baseExpr), idxExpr, exprTpe);
+            return Expr::RefTo(r.newVar(baseExpr), idxExpr, exprTpe, TypeSpace::Global());
           } else {
             raise("Cannot index nested ptr expressions with mismatching expected components");
           }
@@ -808,8 +809,8 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             return assign(lhs, r.newVar(Expr::IntrOp(Intr::Sub(deref(lhs), integralConstOfType(exprTpe, 1), exprTpe))));
           case clang::UO_AddrOf:
             if (lhs.tpe().is<Type::Ptr>()) return lhs;
-            else return Expr::RefTo(lhs, {}, lhs.tpe());
-          case clang::UO_Deref: return Expr::RefTo(lhs, {integralConstOfType(Type::IntU64(), 0)}, exprTpe);
+            else return Expr::RefTo(lhs, {}, lhs.tpe(), TypeSpace::Global());
+          case clang::UO_Deref: return Expr::RefTo(lhs, {integralConstOfType(Type::IntU64(), 0)}, exprTpe, TypeSpace::Global());
           case clang::UO_Plus: return Expr::IntrOp(Intr::Pos(lhs, exprTpe));
           case clang::UO_Minus: return Expr::IntrOp(Intr::Neg(lhs, exprTpe));
           case clang::UO_Not: return Expr::IntrOp(Intr::BNot(lhs, exprTpe));
@@ -844,14 +845,14 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         switch (expr->getOpcode()) {
           case clang::BO_Add: // Handle Ptr arithmetics for +
             if (const auto lhsPtr = lhs.tpe().get<Type::Ptr>(); lhsPtr && tpe_.is<Type::Ptr>()) {
-              return Expr::RefTo(lhs, rhs, lhsPtr->component);
+              return Expr::RefTo(lhs, rhs, lhsPtr->comp, TypeSpace::Global());
             } else {
               return Expr::IntrOp(Intr::Add(deref(lhs), deref(rhs), tpe_));
             }
           case clang::BO_Sub: // Handle Ptr arithmetics for -
             if (const auto lhsPtr = lhs.tpe().get<Type::Ptr>(); lhsPtr && tpe_.is<Type::Ptr>()) {
               auto negativeIdx = r.newVar(Expr::IntrOp(Intr::Neg(rhs, rhs.tpe())));
-              return Expr::RefTo(lhs, negativeIdx, lhsPtr->component);
+              return Expr::RefTo(lhs, negativeIdx, lhsPtr->comp, TypeSpace::Global());
             } else {
               return Expr::IntrOp(Intr::Sub(deref(lhs), deref(rhs), tpe_));
             }
@@ -919,7 +920,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
               : [&]() -> Expr::Any {
                   auto allocated = r.newVar(ctorTpe);
                   defaultInitialiseStruct(r, *tpe, allocated);
-                  return Expr::RefTo(select(r, {}, allocated), {}, ctorTpe);
+                  return Expr::RefTo(select(r, {}, allocated), {}, ctorTpe, TypeSpace::Global());
                 }();
 
           std::vector<Expr::Any> args;
@@ -1100,7 +1101,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       [&](const clang::MemberExpr *expr) { //  instance.member; instance->member
         const auto baseExpr = handleExpr(expr->getBase(), r);
         auto baseTpe = baseExpr.tpe();
-        if (auto opt = baseTpe.get<Type::Ptr>(); opt) baseTpe = opt->component;
+        if (auto opt = baseTpe.get<Type::Ptr>(); opt) baseTpe = opt->comp;
 
         if (auto recordDecl = llvm::dyn_cast<clang::RecordDecl>(expr->getMemberDecl()->getDeclContext()); recordDecl) {
           if (auto s = handleType(context.getRecordType(recordDecl), r).get<Type::Struct>(); s) {
@@ -1151,11 +1152,11 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
       [&](const clang::DeclStmt *stmt) {
         for (auto decl : stmt->decls()) {
 
-          auto createInit = [](auto tpe, const Type::Any &component) -> std::optional<Expr::Any> {
-            if (auto ptrTpe = component.get<Type::Ptr>(); ptrTpe) {
+          auto createInit = [](auto tpe, const Type::Any &comp) -> std::optional<Expr::Any> {
+            if (auto ptrTpe = comp.get<Type::Ptr>(); ptrTpe) {
               if (auto constArrTpe = llvm::dyn_cast<clang::ConstantArrayType>(tpe); constArrTpe) {
                 auto lit = constArrTpe->getSize().getLimitedValue();
-                return Expr::Alloc(ptrTpe->component, integralConstOfType(Type::IntS64(), lit));
+                return Expr::Alloc(ptrTpe->comp, integralConstOfType(Type::IntS64(), lit), TypeSpace::Global());
               }
             }
 

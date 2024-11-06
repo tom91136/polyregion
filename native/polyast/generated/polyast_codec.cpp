@@ -103,12 +103,21 @@ json TypeSpace::local_to_json(const TypeSpace::Local& x_) {
   return json::array({});
 }
 
+TypeSpace::Private TypeSpace::private_from_json(const json& j_) { 
+  return {};
+}
+
+json TypeSpace::private_to_json(const TypeSpace::Private& x_) { 
+  return json::array({});
+}
+
 TypeSpace::Any TypeSpace::any_from_json(const json& j_) { 
   size_t ord_ = j_.at(0).get<size_t>();
   const auto &t_ = j_.at(1);
   switch (ord_) {
   case 0: return TypeSpace::global_from_json(t_);
   case 1: return TypeSpace::local_from_json(t_);
+  case 2: return TypeSpace::private_from_json(t_);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
@@ -118,6 +127,8 @@ json TypeSpace::any_to_json(const TypeSpace::Any& x_) {
   [](const TypeSpace::Global &y_) -> json { return {0, TypeSpace::global_to_json(y_)}; }
   ,
   [](const TypeSpace::Local &y_) -> json { return {1, TypeSpace::local_to_json(y_)}; }
+  ,
+  [](const TypeSpace::Private &y_) -> json { return {2, TypeSpace::private_to_json(y_)}; }
   );
 }
 
@@ -244,17 +255,17 @@ json Type::struct_to_json(const Type::Struct& x_) {
 }
 
 Type::Ptr Type::ptr_from_json(const json& j_) { 
-  auto component = Type::any_from_json(j_.at(0));
+  auto comp = Type::any_from_json(j_.at(0));
   auto length = j_.at(1).is_null() ? std::nullopt : std::make_optional(j_.at(1).get<int32_t>());
   auto space = TypeSpace::any_from_json(j_.at(2));
-  return {component, length, space};
+  return {comp, length, space};
 }
 
 json Type::ptr_to_json(const Type::Ptr& x_) { 
-  auto component = Type::any_to_json(x_.component);
+  auto comp = Type::any_to_json(x_.comp);
   auto length = x_.length ? json(*x_.length) : json();
   auto space = TypeSpace::any_to_json(x_.space);
-  return json::array({component, length, space});
+  return json::array({comp, length, space});
 }
 
 Type::Annotated Type::annotated_from_json(const json& j_) { 
@@ -531,41 +542,45 @@ json Expr::cast_to_json(const Expr::Cast& x_) {
 Expr::Index Expr::index_from_json(const json& j_) { 
   auto lhs = Expr::any_from_json(j_.at(0));
   auto idx = Expr::any_from_json(j_.at(1));
-  auto component = Type::any_from_json(j_.at(2));
-  return {lhs, idx, component};
+  auto comp = Type::any_from_json(j_.at(2));
+  return {lhs, idx, comp};
 }
 
 json Expr::index_to_json(const Expr::Index& x_) { 
   auto lhs = Expr::any_to_json(x_.lhs);
   auto idx = Expr::any_to_json(x_.idx);
-  auto component = Type::any_to_json(x_.component);
-  return json::array({lhs, idx, component});
+  auto comp = Type::any_to_json(x_.comp);
+  return json::array({lhs, idx, comp});
 }
 
 Expr::RefTo Expr::refto_from_json(const json& j_) { 
   auto lhs = Expr::any_from_json(j_.at(0));
   auto idx = j_.at(1).is_null() ? std::nullopt : std::make_optional(Expr::any_from_json(j_.at(1)));
-  auto component = Type::any_from_json(j_.at(2));
-  return {lhs, idx, component};
+  auto comp = Type::any_from_json(j_.at(2));
+  auto space = TypeSpace::any_from_json(j_.at(3));
+  return {lhs, idx, comp, space};
 }
 
 json Expr::refto_to_json(const Expr::RefTo& x_) { 
   auto lhs = Expr::any_to_json(x_.lhs);
   auto idx = x_.idx ? Expr::any_to_json(*x_.idx) : json();
-  auto component = Type::any_to_json(x_.component);
-  return json::array({lhs, idx, component});
+  auto comp = Type::any_to_json(x_.comp);
+  auto space = TypeSpace::any_to_json(x_.space);
+  return json::array({lhs, idx, comp, space});
 }
 
 Expr::Alloc Expr::alloc_from_json(const json& j_) { 
-  auto component = Type::any_from_json(j_.at(0));
+  auto comp = Type::any_from_json(j_.at(0));
   auto size = Expr::any_from_json(j_.at(1));
-  return {component, size};
+  auto space = TypeSpace::any_from_json(j_.at(2));
+  return {comp, size, space};
 }
 
 json Expr::alloc_to_json(const Expr::Alloc& x_) { 
-  auto component = Type::any_to_json(x_.component);
+  auto comp = Type::any_to_json(x_.comp);
   auto size = Expr::any_to_json(x_.size);
-  return json::array({component, size});
+  auto space = TypeSpace::any_to_json(x_.space);
+  return json::array({comp, size, space});
 }
 
 Expr::Invoke Expr::invoke_from_json(const json& j_) { 
@@ -1967,6 +1982,20 @@ json function_to_json(const Function& x_) {
   return json::array({name, args, rtn, body, attrs});
 }
 
+StructDef structdef_from_json(const json& j_) { 
+  auto name = j_.at(0).get<std::string>();
+  std::vector<Named> members;
+  for(const auto &v_ : j_.at(1)) { members.emplace_back(named_from_json(v_)); }
+  return {name, members};
+}
+
+json structdef_to_json(const StructDef& x_) { 
+  auto name = x_.name;
+  std::vector<json> members;
+  for(const auto &v_ : x_.members) { members.emplace_back(named_to_json(v_)); }
+  return json::array({name, members});
+}
+
 Program program_from_json(const json& j_) { 
   std::vector<StructDef> structs;
   for(const auto &v_ : j_.at(0)) { structs.emplace_back(structdef_from_json(v_)); }
@@ -1981,20 +2010,6 @@ json program_to_json(const Program& x_) {
   std::vector<json> functions;
   for(const auto &v_ : x_.functions) { functions.emplace_back(function_to_json(v_)); }
   return json::array({structs, functions});
-}
-
-StructDef structdef_from_json(const json& j_) { 
-  auto name = j_.at(0).get<std::string>();
-  std::vector<Named> members;
-  for(const auto &v_ : j_.at(1)) { members.emplace_back(named_from_json(v_)); }
-  return {name, members};
-}
-
-json structdef_to_json(const StructDef& x_) { 
-  auto name = x_.name;
-  std::vector<json> members;
-  for(const auto &v_ : x_.members) { members.emplace_back(named_to_json(v_)); }
-  return json::array({name, members});
 }
 
 StructLayoutMember structlayoutmember_from_json(const json& j_) { 
@@ -2069,13 +2084,13 @@ json compileresult_to_json(const CompileResult& x_) {
 json hashed_from_json(const json& j_) { 
   auto hash_ = j_.at(0).get<std::string>();
   auto data_ = j_.at(1);
-  if(hash_ != "8c95549d3555868db872b5026c177171") {
-   throw std::runtime_error("Expecting ADT hash to be 8c95549d3555868db872b5026c177171, but was " + hash_);
+  if(hash_ != "79dba0723dca843251a6aae293c06b5b") {
+   throw std::runtime_error("Expecting ADT hash to be 79dba0723dca843251a6aae293c06b5b, but was " + hash_);
   }
   return data_;
 }
 
 json hashed_to_json(const json& x_) { 
-  return json::array({"8c95549d3555868db872b5026c177171", x_});
+  return json::array({"79dba0723dca843251a6aae293c06b5b", x_});
 }
 } // namespace polyregion::polyast

@@ -48,7 +48,7 @@ private[polyregion] object CppStructGen {
 
   object StructSource {
 
-    val RequiredIncludes = List("memory", "variant", "iterator", "sstream", "optional", "algorithm")
+    val RequiredIncludes = List("memory", "variant", "iterator", "sstream", "optional", "algorithm", "functional")
     def emitHeader(namespace: String, xs: List[StructSource]) = {
 
       def nsStart(n: String) = if (n.isEmpty) "" else s"namespace $n { "
@@ -115,10 +115,7 @@ private[polyregion] object CppStructGen {
         s"""|
             |
             |template <typename... Ts> class alternatives {
-            |  template <class T> struct id {
-            |    using type = T;
-            |  };
-            |
+            |  template <class T> struct id { using type = T; };
             |public:
             |  template <typename T, typename... Us> static constexpr bool all_unique_impl() {
             |    if constexpr (sizeof...(Us) == 0) return true;
@@ -137,6 +134,10 @@ private[polyregion] object CppStructGen {
             |  template <typename T> static constexpr bool all = (std::is_same_v<T, Ts> && ...);
             |  static constexpr bool all_unique = all_unique_impl<Ts...>();
             |  template <size_t N> using at = typename decltype(at_impl<N, Ts...>())::type;
+            |
+            |  template <typename F>
+            |  static bool applyOr(F&& f) { return (f.template operator()<Ts>() || ...); }
+            |
             |};
             |
             |template <typename F, typename Ret, typename A, typename... Rest> //
@@ -292,6 +293,27 @@ private[polyregion] object CppStructGen {
           (sig, stmts)
       }
 
+      def capitalCase(s: String): String = if (s.isEmpty) s else s.head.toUpper + s.tail
+
+      val (memberSigs, memberImpls) = tpe.kind match {
+        case CppType.Kind.Base if hasMoreSumTypes => (Nil, Nil)
+        case CppType.Kind.Base                    => (Nil, Nil)
+        case _ =>
+          val stmts = members.flatMap((n, tpe) =>
+            s"${clsName(qualified = true)} ${clsName(qualified = true)}::with${capitalCase(n)}(const ${tpe.ref(true)} &v_) const {" ::
+              s"  return ${clsName(qualified = true)}(${members
+                  .map(_._1)
+                  .map(v => if (v == n) "v_" else v)
+                  .mkString(", ")});" ::
+              "}" :: Nil
+          )
+
+          val sig = members.map((n, tpe) =>
+            s"[[nodiscard]] POLYREGION_EXPORT ${clsName(qualified = true)} with${capitalCase(n)}(const ${tpe.ref(true)} &_v) const;"
+          )
+          (sig, stmts)
+      }
+
       val visibility = if (tpe.kind == CppType.Kind.Base) "protected:" :: Nil else Nil
 
       val (stdSpecialisationsDeclStmts, stdSpecialisationsStmts) = {
@@ -315,7 +337,7 @@ private[polyregion] object CppStructGen {
         case CppType.Kind.Variant => parent.forall(_.members.isEmpty)
         case _                    => false
       }
-      
+
       val (equalitySig, equalityImpl) = {
         val name = clsName(qualified = true)
 
@@ -475,6 +497,14 @@ private[polyregion] object CppStructGen {
              |  template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT bool is() const;
              |  template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT std::optional<T> get() const;
              |  template<typename... F> constexpr POLYREGION_EXPORT auto match_total(F &&...fs) const;
+             |
+             |  template<typename T, typename U> POLYREGION_EXPORT void collect_where(std::vector<U> &results_,
+             |    const std::function<std::optional<U>(const T&)> &f) const; 
+             |  template<typename T, typename U> [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(
+             |    const std::function<std::optional<U>(const T&)> &f) const; 
+             |  template<typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const;
+             |  template<typename T> [[nodiscard]] POLYREGION_EXPORT ${tpe.ref(false)} modify_all(
+             |    const std::function<T(const T&)> &f) const;
              |};
             """.stripMargin :: Nil
         } else if (tpe.kind == CppType.Kind.Data) {
@@ -496,7 +526,9 @@ private[polyregion] object CppStructGen {
           }) ::
           s"bool ${tpe.ref(true)}::operator==(const ${tpe.ref(false)} &rhs) const { return _v->operator==(*rhs._v); }" ::
           s"bool ${tpe.ref(true)}::operator!=(const ${tpe.ref(false)} &rhs) const { return !_v->operator==(*rhs._v); }" ::
-          (if (!pureEnum) Nil else s"bool ${tpe.ref(true)}::operator<(const ${tpe.ref(false)} &rhs) const { return _v->operator<(*rhs._v); };" :: Nil)
+          (if (!pureEnum) Nil
+           else
+             s"bool ${tpe.ref(true)}::operator<(const ${tpe.ref(false)} &rhs) const { return _v->operator<(*rhs._v); };" :: Nil)
       } else Nil
 
       val (nsDecl, nsImpl) = if (tpe.kind == CppType.Kind.Base && !hasMoreSumTypes && false) {
@@ -531,19 +563,19 @@ private[polyregion] object CppStructGen {
                 |  static_assert(($qualifiedNs::All::contains<T>), "type not part of the variant");
                 |  return T::variant_id == _v->id();
               |}""".stripMargin ::
-            s"""|template<typename T> constexpr POLYREGION_EXPORT std::optional<T> $ns::${tpe.ref(true)}::get() const { 
+            s"""|template<typename T> 
+                |constexpr POLYREGION_EXPORT std::optional<T> $ns::${tpe.ref(true)}::get() const { 
                 |  static_assert(($qualifiedNs::All::contains<T>), "type not part of the variant");
                 |  if (T::variant_id == _v->id()) return {*std::static_pointer_cast<T>(_v)};
                 |  else return {};
                 |}""".stripMargin ::
-            s"""|template<typename ...Fs> constexpr POLYREGION_EXPORT auto $ns::${tpe.ref(
-                 true
-               )}::match_total(Fs &&...fs) const { 
+            s"""|template<typename ...Fs> 
+                |constexpr POLYREGION_EXPORT auto $ns::${tpe.ref(true)}::match_total(Fs &&...fs) const { 
                 |  using Ts = alternatives<std::decay_t<arg1_t<Fs>>...>;
                 |  using Rs = alternatives<std::invoke_result_t<Fs, std::decay_t<arg1_t<Fs>>>...>;
                 |  using R0 = typename Rs::template at<0>;
-                |  static_assert($qualifiedNs::All::size == sizeof...(Fs), "match is not total as case count is not equal to variant's size");
-                |  static_assert(($qualifiedNs::All::contains<std::decay_t<arg1_t<Fs>>> && ...), "one or more cases not part of the variant");
+                |  static_assert(All::size == sizeof...(Fs), "match is not total as case count is not equal to variant's size");
+                |  static_assert((All::contains<std::decay_t<arg1_t<Fs>>> && ...), "one or more cases not part of the variant");
                 |  static_assert((Rs::template all<R0>), "all cases must return the same type");
                 |  static_assert(Ts::all_unique, "one or more cases overlap");
                 |  uint32_t id = _v->id();
@@ -569,12 +601,107 @@ private[polyregion] object CppStructGen {
                 |    }() || ...);
                 |    return *r;
                 |  }
-                |
                 |}""".stripMargin ::
-            "" ::
+            s"""|template<typename T, typename U>
+                |POLYREGION_EXPORT void $ns::${tpe.ref(true)}::collect_where(std::vector<U> &results_, 
+                |    const std::function<std::optional<U>(const T&)> &f) const { 
+                |  if constexpr (std::is_same_v<T, $ns::${tpe.ref(true)}>) {
+                |    if(auto x_ = f(_v)) { results_.emplace_back(*x_); }
+                |    return; 
+                |  }
+                |  All::applyOr([&, id = _v->id()]<typename V>() -> bool {
+                |    if (V::variant_id != id) return false;
+                |    auto _x = std::static_pointer_cast<V>(_v);
+                |    _x->template collect_where<T, U>(results_, f);
+                |    return true;
+                |  }); 
+                |}""".stripMargin ::
+            s"""|template<typename T, typename U>
+                |POLYREGION_EXPORT std::vector<U> $ns::${tpe.ref(true)}::collect_where(
+                |    const std::function<std::optional<U>(const T&)> &f) const { 
+                |  std::vector<U> results_;
+                |  collect_where<T, U>(results_, f);
+                |  return results_;
+                |}""".stripMargin ::
+            s"""|template<typename T>
+                |POLYREGION_EXPORT std::vector<T> $ns::${tpe.ref(true)}::collect_all() const { 
+                |  return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+                |}""".stripMargin ::
+            s"""|template<typename T>
+                |POLYREGION_EXPORT $ns::${tpe.ref(true)} $ns::${tpe.ref(true)}::modify_all(
+                |    const std::function<T(const T&)> &f) const { 
+                |  if constexpr (std::is_same_v<T, $ns::${tpe.ref(true)}>) {
+                |    return f(*this); 
+                |  }
+                |  std::optional<$ns::${tpe.ref(true)}> result_;
+                |  All::applyOr([&, id = _v->id()]<typename V>() -> bool {
+                |    if (V::variant_id != id) return false;
+                |    auto _x = std::static_pointer_cast<V>(_v);
+                |    result_ = _x->template modify_all<T>(f).widen();
+                |    return true;
+                |  }); 
+                |  if(!result_) { std::abort();  }
+                |  return *result_;
+                |}""".stripMargin ::
             Nil
         } else Nil
       }
+
+      // m
+      val (traverseSigs, traverseImpls) = if (tpe.kind == CppType.Kind.Variant || tpe.kind == CppType.Kind.Data) {
+
+        val modifyAllCtorExprs = members.map {
+          case (name, tpe) if tpe.kind != CppType.Kind.StdLib => s"${name}.modify_all<T>(f)"
+          case (name, tpe) if tpe.ctors.forall(_.kind != CppType.Kind.StdLib) =>
+            tpe.mapOp match {
+              case Some(op) => op(name, s"${name}__", x => s"${x}.modify_all<T>(f)") -> s"${name}__"
+              case None     => name
+            }
+          case (name, tpe) => name
+        }
+
+        (
+          s"template<typename T, typename U> POLYREGION_EXPORT void collect_where(std::vector<U> &results_, " ::
+            s"    const std::function<std::optional<U>(const T&)> &f) const {" ::
+            s"  if constexpr (std::is_same_v<T, ${tpe.ref(false)}>) {" ::
+            s"    if(auto x_ = f(*this)) { results_.emplace_back(*x_); }" ::
+            s"  }" ::
+            (members.flatMap {
+              case (name, tpe) if tpe.kind != CppType.Kind.StdLib =>
+                s"  ${name}.collect_where<T, U>(results_, f);" :: Nil
+              case (name, tpe) if tpe.ctors.forall(_.kind != CppType.Kind.StdLib) =>
+                tpe.eachOp.toList
+                  .flatMap(_(name, x => s"${x}.collect_where<T, U>(results_, f);" :: Nil))
+                  .map(x => s"  $x")
+              case _ => Nil
+            }) :::
+            s"}" ::
+            s"template<typename T, typename U> [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(" ::
+            s"    const std::function<std::optional<U>(const T&)> &f) const {" ::
+            s"  std::vector<U> results_;" ::
+            s"  collect_where<T, U>(results_, f);" ::
+            s"  return results_;" ::
+            s"}" ::
+            s"template<typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {" ::
+            s"  return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });" ::
+            s"}" ::
+            s"template<typename T> [[nodiscard]] POLYREGION_EXPORT ${tpe.ref(false)} modify_all(" ::
+            s"    const std::function<T(const T&)> &f) const {" ::
+            s"  if constexpr (std::is_same_v<T, ${tpe.ref(false)}>) {" ::
+            s"    return f(*this);" ::
+            s"  }" ::
+            (modifyAllCtorExprs.collect { case (xs, _) => xs }.flatten.map(s => s"  $s")) :::
+            s"  return ${clsName(qualified = true)}(${modifyAllCtorExprs
+                .map {
+                  case (_, name) => name
+                  case (name)    => name
+                }
+                .mkString(", ")});" ::
+            s"}" ::
+            Nil,
+          Nil
+        )
+      } else (Nil, Nil)
 
       StructSource(
         namespaces = tpe.namespace,
@@ -584,11 +711,23 @@ private[polyregion] object CppStructGen {
           ::: idSig         //
           ::: hashCodeSig   //
           ::: dumpSig       //
+          ::: memberSigs
+          ::: traverseSigs
           ::: equalitySig
           ::: visibility
           ::: ctorStmt :: conversionSig ::: widenSig ::: streamSig,
-        implStmts =
-          ctorStmtImpl :: idImpl ::: hashCodeImpl ::: streamImpl ::: dumpImpl ::: equalityImpl ::: conversionImpl ::: widenImpl ::: nsImpl ::: variantImpl,
+        implStmts = ctorStmtImpl
+          :: idImpl
+          ::: hashCodeImpl
+          ::: streamImpl
+          ::: dumpImpl
+          ::: memberImpls
+          ::: traverseImpls
+          ::: equalityImpl
+          ::: conversionImpl
+          ::: widenImpl
+          ::: nsImpl
+          ::: variantImpl,
         includes = members.flatMap(_._2.include),
         variantStmt,
         nsDecl,
@@ -617,6 +756,8 @@ private[polyregion] object CppStructGen {
       constexpr: Boolean = true,
       initialiser: Boolean = false,
       streamOp: (String, String) => List[String] = (s, v) => List(s"$s << $v;"),
+      eachOp: Option[(String, String => List[String]) => List[String]] = None,
+      mapOp: Option[(String, String, String => String) => List[String]] = None,
       include: List[String] = Nil,
       ctors: List[CppType] = Nil
   ) {
@@ -672,7 +813,8 @@ private[polyregion] object CppStructGen {
       )
 
     @targetName("vector") given [A: ToCppType, C[_] <: scala.collection.Seq[?]]: ToCppType[C[A]] = { () =>
-      val tpe = summon[ToCppType[A]]()
+      val tpe    = summon[ToCppType[A]]()
+      val strTpe = summon[ToCppType[String]]()
       CppType(
         "std" :: Nil,
         s"vector",
@@ -682,20 +824,31 @@ private[polyregion] object CppStructGen {
         streamOp = { (s, v) =>
           List(
             s"$s << '{';",
-            s"if (!$v.empty()) {",
-            s"  std::for_each($v.begin(), std::prev($v.end()), [&$s](auto &&x) { ${tpe.streamOp(s, "x").mkString(";")} $s << ','; });",
-            s"  ${tpe.streamOp(s, s"$v.back()").mkString(";")}",
+            s"for (auto it = $v.begin(); it != $v.end(); ++it) {",
+            s"  ${tpe.streamOp(s, s"*it").mkString(";")}",
+            s"  ${strTpe.streamOp(s, s"(std::next(it) != $v.end() ? \",\" : \"\")").mkString(";")}",
             s"}",
             s"$s << '}';"
           )
         },
+        eachOp = Some((v, f) =>
+          s"for (auto it = $v.begin(); it != $v.end(); ++it) {" :: (f("(*it)").map(v => s"  $v")) ::: "}" :: Nil
+        ),
+        mapOp = Some((v, o, f) =>
+          s"std::vector<${tpe.ref(true)}> $o;" ::
+            s"for (auto it = $v.begin(); it != $v.end(); ++it) {" ::
+            s"  $o.emplace_back(${f("(*it)")});" ::
+            "}" ::
+            Nil
+        ),
         include = List("vector"),
         ctors = tpe :: Nil
       )
     }
 
     @targetName("set") given [A: ToCppType, C[_] <: scala.collection.Set[?]]: ToCppType[C[A]] = { () =>
-      val tpe = summon[ToCppType[A]]()
+      val tpe    = summon[ToCppType[A]]()
+      val strTpe = summon[ToCppType[String]]()
       CppType(
         "std" :: Nil,
         s"set",
@@ -705,13 +858,23 @@ private[polyregion] object CppStructGen {
         streamOp = { (s, v) =>
           List(
             s"$s << '{';",
-            s"if (!$v.empty()) {",
-            s"  std::for_each($v.begin(), std::prev($v.end()), [&$s](auto &&x) { ${tpe.streamOp(s, "x").mkString(";")} $s << ','; });",
-            s"  ${tpe.streamOp(s, s"*$v.rbegin()").mkString(";")}",
+            s"for (auto it = $v.begin(); it != $v.end(); ++it) {",
+            s"  ${tpe.streamOp(s, s"*it").mkString(";")}",
+            s"  ${strTpe.streamOp(s, s"(std::next(it) != $v.end() ? \",\" : \"\")").mkString(";")}",
             s"}",
             s"$s << '}';"
           )
         },
+        eachOp = Some((v, f) =>
+          s"for (auto it = $v.begin(); it != $v.end(); ++it) {" :: (f("(*it)").map(v => s"  $v")) ::: "}" :: Nil
+        ),
+        mapOp = Some((v, o, f) =>
+          s"std::set<${tpe.ref(true)}> $o;" ::
+            s"for (auto it = $v.begin(); it != $v.end(); ++it) {" ::
+            s"  $o.emplace(${f("(*it)")});" ::
+            "}" ::
+            Nil
+        ),
         include = List("set"),
         ctors = tpe :: Nil
       )
@@ -733,6 +896,11 @@ private[polyregion] object CppStructGen {
             s"$s << '}';"
           )
         },
+        eachOp = Some((v, f) => s"if ($v) {" :: (f(s"(*$v)").map(v => s"  $v")) ::: "}" :: Nil),
+        mapOp = Some((v, o, f) =>
+          s"std::optional<${tpe.ref(true)}> $o;" ::
+            s"if ($v) { $o = ${f(s"(*$v)")}; }" :: Nil
+        ),
         include = List("optional"),
         ctors = tpe :: Nil
       )
@@ -745,6 +913,7 @@ private[polyregion] object CppStructGen {
         constexpr = false,
         initialiser = true,
         streamOp = { (s, v) => List(s"$s << '{}';") },
+        eachOp = Some((v, f) => Nil),
         include = List("optional")
       )
     }

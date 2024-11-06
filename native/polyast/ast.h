@@ -29,6 +29,8 @@ std::string repr(const Math::Any &);
 std::string repr(const Arg &);
 std::string repr(const TypeSpace::Any &space);
 std::string repr(const Signature &s);
+std::string repr(const FunctionAttr::Any &);
+
 std::string repr(const Function &);
 std::string repr(const StructDef &);
 std::string repr(const Program &);

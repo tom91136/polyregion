@@ -36,7 +36,7 @@ using namespace aspartame;
       [](const Type::Nothing &) { return "Nothing"s; },                 //
       [](const Type::Struct &x) { return fmt::format("@{}", x.name); }, //
       [](const Type::Ptr &x) {
-        return fmt::format("Ptr[{}{}]{}", repr(x.component), x.length ? "*" + std::to_string(*x.length) : "", repr(x.space));
+        return fmt::format("Ptr[{}{}]{}", repr(x.comp), x.length ? "*" + std::to_string(*x.length) : "", repr(x.space));
       },
       [](const Type::Annotated &x) {
         return fmt::format("{} /*{}; {}*/", repr(x.tpe), x.pos ^ mk_string("", show_repr), x.comment ^ get_or_else(""));
@@ -147,7 +147,7 @@ using namespace aspartame;
       [](const Expr::Poison &x) { return fmt::format("Poison({})", repr(x.tpe)); },
 
       [](const Expr::Cast &x) { return "(" + repr(x.from) + ".to[" + repr(x.as) + "])"; },
-      [](const Expr::Index &x) { return repr(x.lhs) + "[" + repr(x.idx) + "]:" + repr(x.component); },
+      [](const Expr::Index &x) { return repr(x.lhs) + "[" + repr(x.idx) + "]:" + repr(x.comp); },
       [](const Expr::RefTo &x) {
         string str = "&(" + repr(x.lhs) + ")";
         if (x.idx) str += "[" + repr(*x.idx) + "]";
@@ -194,18 +194,29 @@ using namespace aspartame;
 
 [[nodiscard]] string polyast::repr(const TypeSpace::Any &space) {
   return space.match_total( //
-      [&](const TypeSpace::Global &x) { return "^Global"; }, [&](const TypeSpace::Local &x) { return "^Local"; });
+      [&](const TypeSpace::Global &x) { return "^Global"; }, [&](const TypeSpace::Local &x) { return "^Local"; },
+      [&](const TypeSpace::Private &x) { return ""; });
 }
 
 [[nodiscard]] string polyast::repr(const Signature &s) {
   return fmt::format("{}({}): {}", s.name, s.args ^ mk_string(", ", show_repr), repr(s.rtn));
 }
 
+[[nodiscard]] string polyast::repr(const FunctionAttr::Any &attr) {
+  return attr.match_total([&](const FunctionAttr::Internal &) { return "Internal"; },   //
+                          [&](const FunctionAttr::Exported &) { return "Exported"; },   //
+                          [&](const FunctionAttr::FPRelaxed &) { return "FPRelaxed"; }, //
+                          [&](const FunctionAttr::FPStrict &) { return "FPStrict"; },   //
+                          [&](const FunctionAttr::Entry &) { return "Entry"; }          //
+  );
+}
+
 [[nodiscard]] string polyast::repr(const Function &fn) {
   string str;
+  str += fn.attrs ^ mk_string("[", ",", "] ", [&](auto &attr) { return repr(attr); });
   str += fn.name;
-  str += fn.args ^ mk_string("(", ",", ")", show_repr);
-  str += ": " + repr(fn.rtn);
+  str += fn.args ^ mk_string("(", ",", "): ", show_repr);
+  str += repr(fn.rtn);
   str += " = {\n" + (fn.body ^ mk_string("\n", show_repr) ^ indent(2)) + "\n}";
   return str;
 }
@@ -341,7 +352,7 @@ Arg dsl::NamedBuilder::operator()() const { return Arg(named, {}); }
 
 dsl::IndexBuilder dsl::NamedBuilder::operator[](const Expr::Any &idx) const {
   if (auto arr = named.tpe.get<Type::Ptr>()) {
-    return IndexBuilder({Select({}, named), idx, arr->component});
+    return IndexBuilder({Select({}, named), idx, arr->comp});
   }
   throw std::logic_error("Cannot index a reference to non-array type" + to_string(named));
 }

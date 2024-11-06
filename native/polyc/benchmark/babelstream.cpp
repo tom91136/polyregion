@@ -68,7 +68,7 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
 
     stmts.push_back(ret(Unit0Const()));
 
-    return function("stream_" + name + suffix, args, Unit )(stmts);
+    return function("stream_" + name + suffix, args, Unit ,{FunctionAttr::Entry(), FunctionAttr::Exported()})(stmts);
   };
 
   auto copy = mkCpuStreamFn( //
@@ -208,7 +208,7 @@ int main() {
 
   std::vector<std::tuple<runtime::Backend, compiletime::Target, std::string>> configs = {
       // CL runs everywhere
-      // {runtime::Backend::OpenCL, compiletime::Target::Source_C_OpenCL1_1, ""},
+      {runtime::Backend::OpenCL, compiletime::Target::Source_C_OpenCL1_1, ""},
       // {runtime::Backend::Vulkan, compiletime::Target::Object_LLVM_SPIRV64, ""},
 #ifdef __APPLE__
       {runtime::Backend::RelocatableObject, compiletime::Target::Object_LLVM_AArch64, "apple-m1"},
@@ -216,7 +216,7 @@ int main() {
 #else
       // {runtime::Backend::CUDA, compiletime::Target::Object_LLVM_NVPTX64, "sm_89"},
   // {runtime::Backend::HIP, compiletime::Target::Object_LLVM_AMDGCN, "gfx1036"},
-            {runtime::Backend::HSA, compiletime::Target::Object_LLVM_AMDGCN, "gfx1036"},
+            // {runtime::Backend::HSA, compiletime::Target::Object_LLVM_AMDGCN, "gfx1036"},
      // {runtime::Backend::RelocatableObject, compiletime::Target::Object_LLVM_x86_64, "x86-64-v3"},
 #endif
   };

@@ -87,12 +87,12 @@ target_include_directories(polycpp PRIVATE ../compiler ../include ${LLVM_INCLUDE
 target_link_libraries(polycpp PRIVATE
         polyc-driver
         Aspartame::Aspartame
-        fmt::fmt-header-only
+        fmt::fmt
 )
 target_link_libraries(polycpp-test PRIVATE
         polycommon
         LLVMSupport
-        fmt::fmt-header-only
+        fmt::fmt
         Aspartame::Aspartame
         Catch2::Catch2WithMain
 )

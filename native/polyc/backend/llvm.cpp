@@ -153,7 +153,7 @@ ValPtr CodeGen::mkSelectPtr(const Expr::Select &select) {
     if (auto s = tpe.get<Type::Struct>(); s) {
       return findTy(*s);
     } else if (auto p = tpe.get<Type::Ptr>(); p) {
-      if (auto _s = p->component.get<Type::Struct>(); _s) return findTy(*_s);
+      if (auto _s = p->comp.get<Type::Struct>(); _s) return findTy(*_s);
       else
         throw BackendException("Illegal select path involving pointer to non-struct type " + to_string(s->name) + " in select path" +
                                fail());
@@ -353,7 +353,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
         if (const auto rhsPtr = x.from.tpe().get<Type::Ptr>()) {
           if (const auto lhsPtr = x.as.get<Type::Ptr>()) {
             // TODO check layout and loss of information
-            if (lhsPtr->component.is<Type::Struct>() && rhsPtr->component.is<Type::Struct>()) {
+            if (lhsPtr->comp.is<Type::Struct>() && rhsPtr->comp.is<Type::Struct>()) {
               return from;
             }
           }
@@ -432,7 +432,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
       [&](const Expr::Index &x) -> ValPtr {
         if (const auto lhs = x.lhs.get<Expr::Select>()) {
           if (const auto arrTpe = lhs->tpe.get<Type::Ptr>()) {
-            if (arrTpe->component.is<Type::Unit0>()) { // Still call GEP so that memory access and OOB effects are still present.
+            if (arrTpe->comp.is<Type::Unit0>()) { // Still call GEP so that memory access and OOB effects are still present.
               const auto val = mkExprVal(Expr::Unit0Const());
               B.CreateInBoundsGEP(val->getType(), mkExprVal(*lhs), mkExprVal(x.idx), key + "_ptr");
               return val;
@@ -440,11 +440,11 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
               const auto ty = resolveType(*arrTpe);
               const auto ptr =
                   B.CreateInBoundsGEP(ty, mkExprVal(*lhs), {ConstantInt::get(C.i32Ty(), 0), mkExprVal(x.idx)}, key + "_idx_ptr");
-              return C.load(B, ptr, resolveType(arrTpe->component));
+              return C.load(B, ptr, resolveType(arrTpe->comp));
             } else {
-              const auto ty = resolveType(arrTpe->component);
+              const auto ty = resolveType(arrTpe->comp);
               const auto ptr = B.CreateInBoundsGEP(ty, mkExprVal(*lhs), mkExprVal(x.idx), key + "_idx_ptr");
-              if (arrTpe->component.is<Type::Bool1>()) { // Narrow from i8 to i1
+              if (arrTpe->comp.is<Type::Bool1>()) { // Narrow from i8 to i1
                 return B.CreateICmpNE(C.load(B, ptr, ty), ConstantInt::get(llvm::Type::getInt1Ty(C.actual), 0, true));
               } else {
                 return C.load(B, ptr, ty);
@@ -459,14 +459,14 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
         if (auto lhs = x.lhs.get<Expr::Select>()) {
           if (auto arrTpe = lhs->tpe.get<Type::Ptr>(); arrTpe) { // taking reference of an index in an array
             auto offset = x.idx ? mkExprVal(*x.idx) : llvm::ConstantInt::get(llvm::Type::getInt64Ty(C.actual), 0, true);
-            if (auto nestedArrTpe = arrTpe->component.get<Type::Ptr>(); nestedArrTpe && nestedArrTpe->length) {
-              auto ty = arrTpe->component.is<Type::Unit0>() ? llvm::Type::getInt8Ty(C.actual) : resolveType(arrTpe->component);
+            if (auto nestedArrTpe = arrTpe->comp.get<Type::Ptr>(); nestedArrTpe && nestedArrTpe->length) {
+              auto ty = arrTpe->comp.is<Type::Unit0>() ? llvm::Type::getInt8Ty(C.actual) : resolveType(arrTpe->comp);
               return B.CreateInBoundsGEP(ty,              //
                                          mkExprVal(*lhs), //
                                          {llvm::ConstantInt::get(C.i32Ty(), 0), offset}, key + "_ref_to_" + llvm_tostring(ty));
 
             } else {
-              auto ty = arrTpe->component.is<Type::Unit0>() ? llvm::Type::getInt8Ty(C.actual) : resolveType(arrTpe->component);
+              auto ty = arrTpe->comp.is<Type::Unit0>() ? llvm::Type::getInt8Ty(C.actual) : resolveType(arrTpe->comp);
               return B.CreateInBoundsGEP(ty,              //
                                          mkExprVal(*lhs), //
                                          offset, key + "_ref_to_ptr");
@@ -550,12 +550,12 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
             auto rhs = x.value;
 
             bool componentIsSizedArray = false;
-            if (auto p = arrTpe->component.get<Type::Ptr>(); p && p->length) {
+            if (auto p = arrTpe->comp.get<Type::Ptr>(); p && p->length) {
               componentIsSizedArray = true;
             }
 
-            if (arrTpe->component != rhs.tpe()) {
-              throw BackendException("Semantic error: array component type (" + to_string(arrTpe->component) + ") and rhs expr (" +
+            if (arrTpe->comp != rhs.tpe()) {
+              throw BackendException("Semantic error: array comp type (" + to_string(arrTpe->comp) + ") and rhs expr (" +
                                      to_string(rhs.tpe()) + ") mismatch (" + repr(x) + ")");
             } else {
               auto dest = mkExprVal(*lhs);

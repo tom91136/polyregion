@@ -68,8 +68,7 @@ polystl::KernelBundle polystl::generate(const Options &opts,
   auto body = functor.getBody();
 
   auto r = Remapper::RemapContext{};
-  auto parentDef  = remapper.handleRecord(parent, r);
-
+  auto parentDef = remapper.handleRecord(parent, r);
 
   auto rtnTpe = remapper.handleType(returnTpe, r);
 
@@ -79,29 +78,31 @@ polystl::KernelBundle polystl::generate(const Options &opts,
   auto recv = Arg(Named("#this", Type::Ptr(Type::Struct(parentDef->name), {}, TypeSpace::Global())), {});
 
   auto args = functor.parameters() //
-              | map([&](const clang::ParmVarDecl *x) {
-                  auto local = x->attrs() | exists([](const clang::Attr *a) {
-                                 if (auto annotated = llvm::dyn_cast<clang::AnnotateAttr>(a); annotated) {
-                                   return annotated->getAnnotation() == "__polyregion_local";
-                                 }
-                                 return false;
-                               });
+              |
+              map([&](const clang::ParmVarDecl *x) {
+                auto local = x->attrs() | exists([](const clang::Attr *a) {
+                               if (auto annotated = llvm::dyn_cast<clang::AnnotateAttr>(a); annotated) {
+                                 return annotated->getAnnotation() == "__polyregion_local";
+                               }
+                               return false;
+                             });
 
-                  auto tpe = remapper.handleType(x->getType(), r);
+                auto tpe = remapper.handleType(x->getType(), r);
 
-                  auto annotatedTpe =
-                      tpe.get<Type::Ptr>() ^
-                      fold([&](auto p) { return Type::Ptr(p.component, p.length, local ? TypeSpace::Local() : p.space).widen(); },
-                           [&]() { return tpe; });
+                auto annotatedTpe = tpe.get<Type::Ptr>() ^
+                                    fold([&](auto p) { return Type::Ptr(p.comp, p.length, local ? TypeSpace::Local() : p.space).widen(); },
+                                         [&]() { return tpe; });
 
-                  return Arg(Named(x->getName().str(), annotatedTpe), {});
-                })           //
+                return Arg(Named(x->getName().str(), annotatedTpe), {});
+              })             //
               | append(recv) //
               | to_vector();
 
-  auto f0 = std::make_shared<Function>("kernel", args, rtnTpe, stmts, std::set<FunctionAttr::Any>{FunctionAttr::Exported()});
+  auto f0 = std::make_shared<Function>("_main", args, rtnTpe, stmts,
+                                       std::set<FunctionAttr::Any>{FunctionAttr::Exported(), FunctionAttr::Entry()});
 
-  auto p = Program(r.structs | values() | map([&](auto &x) { return *x;}) | to_vector(), r.functions | values() | append(f0) | map([&](auto &x) { return *x;}) | to_vector() );
+  auto p = Program(r.structs | values() | map([&](auto &x) { return *x; }) | to_vector(),
+                   r.functions | values() | append(f0) | map([&](auto &x) { return *x; }) | to_vector());
 
   if (opts.verbose) {
     diag.Report(loc,

@@ -54,7 +54,7 @@ llvm::Type *TargetedContext::i32Ty() { return llvm::Type::getInt32Ty(actual); }
 TargetedContext::AS TargetedContext::addressSpace(const TypeSpace::Any &s) const {
   return s.match_total(                                  //
       [&](const TypeSpace::Local &) { return LocalAS; }, //
-      [&](const TypeSpace::Global &) { return GlobalAS; });
+      [&](const TypeSpace::Global &) { return GlobalAS; }, [&](const TypeSpace::Private &) { return GlobalAS; });
 }
 
 ValPtr TargetedContext::allocaAS(llvm::IRBuilder<> &B, llvm::Type *ty, const unsigned int AS, const std::string &key) const {
@@ -123,7 +123,7 @@ llvm::Type *TargetedContext::resolveType(const AnyType &tpe, const Map<std::stri
                     });
       }, //
       [&](const Type::Ptr &x) -> llvm::Type * {
-        if (x.length) return llvm::ArrayType::get(resolveType(x.component, structs, functionBoundary), *x.length);
+        if (x.length) return llvm::ArrayType::get(resolveType(x.comp, structs, functionBoundary), *x.length);
         return llvm::PointerType::get(actual, addressSpace(x.space));
       },                                                                                                      //
       [&](const Type::Annotated &x) -> llvm::Type * { return resolveType(x.tpe, structs, functionBoundary); } //

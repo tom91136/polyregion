@@ -11,7 +11,7 @@ using namespace polyregion::polyast;
 class CSource : public Backend {
 
 public:
-  enum class Dialect {
+  enum class Dialect : uint8_t {
     C11,
     OpenCL1_1,
     MSL1_0,
@@ -22,6 +22,7 @@ private:
   std::string mkTpe(const Type::Any &tpe);
   std::string mkExpr(const Expr::Any &expr);
   std::string mkStmt(const Stmt::Any &stmt);
+  std::string mkFnProto(const Function &);
   std::string mkFn(const Function &);
 
 public:

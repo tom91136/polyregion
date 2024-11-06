@@ -98,7 +98,7 @@ target_link_libraries(polyc
         PRIVATE
         Aspartame::Aspartame
         magic_enum::magic_enum
-        fmt::fmt-header-only
+        fmt::fmt
         SPIRV-Tools-opt
         ${LLVM_LIBS}
         ${LLD_LIBS}

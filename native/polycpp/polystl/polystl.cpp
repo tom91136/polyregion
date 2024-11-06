@@ -137,7 +137,7 @@ POLYREGION_EXPORT extern "C" bool __polyregion_dispatch_hostthreaded( // NOLINT(
   polyregion::concurrency_utils::waitAll([&](auto &cb) {
     // FIXME why is the last arg (Void here, can be any type) needed?
     ArgBuffer buffer{{Type::Long64, nullptr}, {Type::Ptr, &functorData}, {Type::Void, nullptr}};
-    __polyregion_selected_queue->enqueueInvokeAsync(moduleName, "kernel", buffer, Policy{Dim3{global, 1, 1}}, [&]() {
+    __polyregion_selected_queue->enqueueInvokeAsync(moduleName, "_main", buffer, Policy{Dim3{global, 1, 1}}, [&]() {
       POLYSTL_LOG("<%s:%s:%zu> Unlatched", fn, moduleName, global);
       cb();
     });
@@ -164,7 +164,7 @@ POLYREGION_EXPORT extern "C" bool __polyregion_dispatch_managed( // NOLINT(*-res
 
 
     __polyregion_selected_queue->enqueueInvokeAsync(
-        moduleName, "kernel", buffer, //
+        moduleName, "_main", buffer, //
         Policy{                       //
                Dim3{global, 1, 1},    //
                local > 0 ? std::optional{std::pair<Dim3, size_t>{Dim3{local, 1, 1}, localMemBytes}} : std::nullopt},

@@ -6,7 +6,7 @@ target_link_options(PolyAST PRIVATE ${LINK_OPTIONS})
 target_link_libraries(PolyAST
         PRIVATE
         Aspartame::Aspartame
-        fmt::fmt-header-only
+        fmt::fmt
         PUBLIC
         polycommon
         nlohmann_json::nlohmann_json)

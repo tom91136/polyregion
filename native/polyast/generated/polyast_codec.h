@@ -19,10 +19,10 @@ namespace polyregion::polyast {
 [[nodiscard]] POLYREGION_EXPORT json arg_to_json(const Arg &);
 [[nodiscard]] POLYREGION_EXPORT Function function_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json function_to_json(const Function &);
-[[nodiscard]] POLYREGION_EXPORT Program program_from_json(const json &);
-[[nodiscard]] POLYREGION_EXPORT json program_to_json(const Program &);
 [[nodiscard]] POLYREGION_EXPORT StructDef structdef_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json structdef_to_json(const StructDef &);
+[[nodiscard]] POLYREGION_EXPORT Program program_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json program_to_json(const Program &);
 [[nodiscard]] POLYREGION_EXPORT StructLayoutMember structlayoutmember_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json structlayoutmember_to_json(const StructLayoutMember &);
 [[nodiscard]] POLYREGION_EXPORT StructLayout structlayout_from_json(const json &);
@@ -236,6 +236,8 @@ namespace TypeSpace {
 [[nodiscard]] POLYREGION_EXPORT json global_to_json(const TypeSpace::Global &);
 [[nodiscard]] POLYREGION_EXPORT TypeSpace::Local local_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json local_to_json(const TypeSpace::Local &);
+[[nodiscard]] POLYREGION_EXPORT TypeSpace::Private private_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json private_to_json(const TypeSpace::Private &);
 [[nodiscard]] POLYREGION_EXPORT TypeSpace::Any any_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json any_to_json(const TypeSpace::Any &);
 } // namespace TypeSpace

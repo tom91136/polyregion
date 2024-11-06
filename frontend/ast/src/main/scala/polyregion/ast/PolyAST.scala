@@ -5,7 +5,7 @@ import scala.collection.immutable.ArraySeq
 object PolyAST {
 
   object Type {
-    enum Space derives MsgPack.Codec { case Global, Local                   }
+    enum Space derives MsgPack.Codec { case Global, Local, Private          }
     enum Kind derives MsgPack.Codec  { case None, Ref, Integral, Fractional }
   }
 
@@ -32,7 +32,7 @@ object PolyAST {
     case Bool1   extends Type(Type.Kind.Integral)
 
     case Struct(name: String)                                                       extends Type(Type.Kind.Ref)
-    case Ptr(component: Type, length: Option[Int], space: Type.Space)               extends Type(Type.Kind.Ref)
+    case Ptr(comp: Type, length: Option[Int], space: Type.Space)                    extends Type(Type.Kind.Ref)
     case Annotated(tpe: Type, pos: Option[SourcePosition], comment: Option[String]) extends Type(tpe.kind)
   }
 
@@ -61,11 +61,11 @@ object PolyAST {
     case Select(init: List[Named], last: Named) extends Expr(last.tpe)
     case Poison(t: Type)                        extends Expr(t)
 
-    case Cast(from: Expr, as: Type)                           extends Expr(as)
-    case Index(lhs: Expr, idx: Expr, component: Type)         extends Expr(component)
-    case RefTo(lhs: Expr, idx: Option[Expr], component: Type) extends Expr(Type.Ptr(component, None, Type.Space.Global))
-    case Alloc(component: Type, size: Expr)                   extends Expr(Type.Ptr(component, None, Type.Space.Global))
-    case Invoke(name: String, args: List[Expr], rtn: Type)    extends Expr(rtn)
+    case Cast(from: Expr, as: Type)                                         extends Expr(as)
+    case Index(lhs: Expr, idx: Expr, comp: Type)                            extends Expr(comp)
+    case RefTo(lhs: Expr, idx: Option[Expr], comp: Type, space: Type.Space) extends Expr(Type.Ptr(comp, None, space))
+    case Alloc(comp: Type, size: Expr, space: Type.Space)                   extends Expr(Type.Ptr(comp, None, space))
+    case Invoke(name: String, args: List[Expr], rtn: Type)                  extends Expr(rtn)
 
     case Annotated(expr: Expr, pos: Option[SourcePosition], comment: Option[String]) extends Expr(expr.tpe)
   }
@@ -265,11 +265,11 @@ object PolyAST {
   object Function {
     enum Attr derives MsgPack.Codec { case Internal, Exported, FPRelaxed, FPStrict, Entry }
   }
-  case class Function(           //
-      name: String,              //
-      args: List[Arg],           //
-      rtn: Type,                 //
-      body: List[Stmt],          //
+  case class Function(          //
+      name: String,             //
+      args: List[Arg],          //
+      rtn: Type,                //
+      body: List[Stmt],         //
       attrs: Set[Function.Attr] //
   ) derives MsgPack.Codec
 
