@@ -1,7 +1,7 @@
 package polyregion.ast.pass
 
 import cats.syntax.all.*
-import polyregion.ast.{PolyAST as p, *, given}
+import polyregion.ast.{ScalaSRR as p, *, given}
 import polyregion.scalalang.Symbols
 import polyregion.ast.Traversal.*
 import polyregion.scalalang.Symbols.Intrinsics
@@ -34,16 +34,16 @@ object IntrinsifyPass extends ProgramPass {
 
   // 5.6.1. Unary Numeric Promotion
   private def unaryPromote(t: p.Type) = t match {
-    case p.Type.IntS8 | p.Type.IntS16 | p.Type.IntU16 => p.Type.IntS32
-    case x                                            => x
+    case p.Type.Byte | p.Type.Short | p.Type.Char => p.Type.Int
+    case x                                        => x
   }
 
   // 5.6.2. Binary Numeric Promotion
   private def binaryPromote(t: p.Type, u: p.Type) = Set(t, u) match {
-    case xs if xs contains p.Type.Float64 => p.Type.Float64
-    case xs if xs contains p.Type.Float32 => p.Type.Float32
-    case xs if xs contains p.Type.IntS64  => p.Type.IntS64
-    case _                                => p.Type.IntS32
+    case xs if xs contains p.Type.Double => p.Type.Double
+    case xs if xs contains p.Type.Float  => p.Type.Float
+    case xs if xs contains p.Type.Long   => p.Type.Long
+    case _                               => p.Type.Int
   }
 
   private def binaryPromoteIntr[A](x: p.Term, y: p.Term, upper: p.Type, idx: Int)(f: (p.Term, p.Term) => A) = {
@@ -77,7 +77,7 @@ object IntrinsifyPass extends ProgramPass {
   //     case p.BinaryIntrinsicKind.LogicEq | p.BinaryIntrinsicKind.LogicNeq | p.BinaryIntrinsicKind.LogicAnd |
   //         p.BinaryIntrinsicKind.LogicOr | p.BinaryIntrinsicKind.LogicLte | p.BinaryIntrinsicKind.LogicGte |
   //         p.BinaryIntrinsicKind.LogicLt | p.BinaryIntrinsicKind.LogicGt =>
-  //       p.Type.Bool1
+  //       p.Type.Bool
   //     case _ => upper
   //   }
   //   (p.Expr.BinaryIntrinsic(xVal, yVal, kind, tpe), xStmts ++ yStmts)
@@ -90,67 +90,67 @@ object IntrinsifyPass extends ProgramPass {
       rtn: p.Type
   ): (p.Expr, List[p.Stmt]) = {
 
-    def intr(x: p.Intr) = p.Expr.IntrOp(x) -> List.empty[p.Stmt]
-    def math(x: p.Math) = p.Expr.MathOp(x) -> List.empty[p.Stmt]
-    def spec(x: p.Spec) = p.Expr.SpecOp(x) -> List.empty[p.Stmt]
+    // def intr(x: p.Intr) = p.Expr.IntrOp(x) -> List.empty[p.Stmt]
+    // def math(x: p.Math) = p.Expr.MathOp(x) -> List.empty[p.Stmt]
+    // def spec(x: p.Spec) = p.Expr.SpecOp(x) -> List.empty[p.Stmt]
 
     (op, args) match {
-      case "assert" -> Nil => spec(p.Spec.Assert)
+      // case "assert" -> Nil => spec(p.Spec.Assert)
 
-      case "gpuGlobalIdx" -> (x :: Nil)  => spec(p.Spec.GpuGlobalIdx(x))
-      case "gpuGlobalSize" -> (x :: Nil) => spec(p.Spec.GpuGlobalSize(x))
-      case "gpuGroupIdx" -> (x :: Nil)   => spec(p.Spec.GpuGroupIdx(x))
-      case "gpuGroupSize" -> (x :: Nil)  => spec(p.Spec.GpuGroupSize(x))
-      case "gpuLocalIdx" -> (x :: Nil)   => spec(p.Spec.GpuLocalIdx(x))
-      case "gpuLocalSize" -> (x :: Nil)  => spec(p.Spec.GpuLocalSize(x))
+      // case "gpuGlobalIdx" -> (x :: Nil)  => spec(p.Spec.GpuGlobalIdx(x))
+      // case "gpuGlobalSize" -> (x :: Nil) => spec(p.Spec.GpuGlobalSize(x))
+      // case "gpuGroupIdx" -> (x :: Nil)   => spec(p.Spec.GpuGroupIdx(x))
+      // case "gpuGroupSize" -> (x :: Nil)  => spec(p.Spec.GpuGroupSize(x))
+      // case "gpuLocalIdx" -> (x :: Nil)   => spec(p.Spec.GpuLocalIdx(x))
+      // case "gpuLocalSize" -> (x :: Nil)  => spec(p.Spec.GpuLocalSize(x))
 
-      case "gpuBarrierGlobal" -> Nil => spec(p.Spec.GpuBarrierGlobal)
-      case "gpuFenceGlobal" -> Nil   => spec(p.Spec.GpuFenceGlobal)
-      case "gpuBarrierLocal" -> Nil  => spec(p.Spec.GpuBarrierLocal)
-      case "gpuFenceLocal" -> Nil    => spec(p.Spec.GpuFenceLocal)
-      case "gpuBarrierAll" -> Nil    => spec(p.Spec.GpuBarrierAll)
-      case "gpuFenceAll" -> Nil      => spec(p.Spec.GpuFenceAll)
+      // case "gpuBarrierGlobal" -> Nil => spec(p.Spec.GpuBarrierGlobal)
+      // case "gpuFenceGlobal" -> Nil   => spec(p.Spec.GpuFenceGlobal)
+      // case "gpuBarrierLocal" -> Nil  => spec(p.Spec.GpuBarrierLocal)
+      // case "gpuFenceLocal" -> Nil    => spec(p.Spec.GpuFenceLocal)
+      // case "gpuBarrierAll" -> Nil    => spec(p.Spec.GpuBarrierAll)
+      // case "gpuFenceAll" -> Nil      => spec(p.Spec.GpuFenceAll)
 
-      case "sin" -> (x :: Nil)  => math(p.Math.Sin(x, rtn))
-      case "cos" -> (x :: Nil)  => math(p.Math.Cos(x, rtn))
-      case "tan" -> (x :: Nil)  => math(p.Math.Tan(x, rtn))
-      case "asin" -> (x :: Nil) => math(p.Math.Asin(x, rtn))
-      case "acos" -> (x :: Nil) => math(p.Math.Acos(x, rtn))
-      case "atan" -> (x :: Nil) => math(p.Math.Atan(x, rtn))
-      case "sinh" -> (x :: Nil) => math(p.Math.Sinh(x, rtn))
-      case "cosh" -> (x :: Nil) => math(p.Math.Cosh(x, rtn))
-      case "tanh" -> (x :: Nil) => math(p.Math.Tanh(x, rtn))
+      // case "sin" -> (x :: Nil)  => math(p.Math.Sin(x, rtn))
+      // case "cos" -> (x :: Nil)  => math(p.Math.Cos(x, rtn))
+      // case "tan" -> (x :: Nil)  => math(p.Math.Tan(x, rtn))
+      // case "asin" -> (x :: Nil) => math(p.Math.Asin(x, rtn))
+      // case "acos" -> (x :: Nil) => math(p.Math.Acos(x, rtn))
+      // case "atan" -> (x :: Nil) => math(p.Math.Atan(x, rtn))
+      // case "sinh" -> (x :: Nil) => math(p.Math.Sinh(x, rtn))
+      // case "cosh" -> (x :: Nil) => math(p.Math.Cosh(x, rtn))
+      // case "tanh" -> (x :: Nil) => math(p.Math.Tanh(x, rtn))
 
-      case "signum" -> (x :: Nil) => math(p.Math.Signum(x, rtn))
-      case "abs" -> (x :: Nil)    => math(p.Math.Abs(x, rtn))
-      case "round" -> (x :: Nil)  => math(p.Math.Round(x, rtn))
-      case "ceil" -> (x :: Nil)   => math(p.Math.Ceil(x, rtn))
-      case "floor" -> (x :: Nil)  => math(p.Math.Floor(x, rtn))
-      case "rint" -> (x :: Nil)   => math(p.Math.Rint(x, rtn))
+      // case "signum" -> (x :: Nil) => math(p.Math.Signum(x, rtn))
+      // case "abs" -> (x :: Nil)    => math(p.Math.Abs(x, rtn))
+      // case "round" -> (x :: Nil)  => math(p.Math.Round(x, rtn))
+      // case "ceil" -> (x :: Nil)   => math(p.Math.Ceil(x, rtn))
+      // case "floor" -> (x :: Nil)  => math(p.Math.Floor(x, rtn))
+      // case "rint" -> (x :: Nil)   => math(p.Math.Rint(x, rtn))
 
-      case "sqrt" -> (x :: Nil)  => math(p.Math.Sqrt(x, rtn))
-      case "cbrt" -> (x :: Nil)  => math(p.Math.Cbrt(x, rtn))
-      case "exp" -> (x :: Nil)   => math(p.Math.Exp(x, rtn))
-      case "expm1" -> (x :: Nil) => math(p.Math.Expm1(x, rtn))
-      case "log" -> (x :: Nil)   => math(p.Math.Log(x, rtn))
-      case "log1p" -> (x :: Nil) => math(p.Math.Log1p(x, rtn))
-      case "log10" -> (x :: Nil) => math(p.Math.Log10(x, rtn))
+      // case "sqrt" -> (x :: Nil)  => math(p.Math.Sqrt(x, rtn))
+      // case "cbrt" -> (x :: Nil)  => math(p.Math.Cbrt(x, rtn))
+      // case "exp" -> (x :: Nil)   => math(p.Math.Exp(x, rtn))
+      // case "expm1" -> (x :: Nil) => math(p.Math.Expm1(x, rtn))
+      // case "log" -> (x :: Nil)   => math(p.Math.Log(x, rtn))
+      // case "log1p" -> (x :: Nil) => math(p.Math.Log1p(x, rtn))
+      // case "log10" -> (x :: Nil) => math(p.Math.Log10(x, rtn))
 
-      case "pow" -> (x :: y :: Nil)   => math(p.Math.Pow(x, y, rtn))
-      case "min" -> (x :: y :: Nil)   => intr(p.Intr.Min(x, y, rtn))
-      case "max" -> (x :: y :: Nil)   => intr(p.Intr.Max(x, y, rtn))
-      case "atan2" -> (x :: y :: Nil) => math(p.Math.Atan2(x, y, rtn))
-      case "hypot" -> (x :: y :: Nil) => math(p.Math.Hypot(x, y, rtn))
+      // case "pow" -> (x :: y :: Nil)   => math(p.Math.Pow(x, y, rtn))
+      // case "min" -> (x :: y :: Nil)   => intr(p.Intr.Min(x, y, rtn))
+      // case "max" -> (x :: y :: Nil)   => intr(p.Intr.Max(x, y, rtn))
+      // case "atan2" -> (x :: y :: Nil) => math(p.Math.Atan2(x, y, rtn))
+      // case "hypot" -> (x :: y :: Nil) => math(p.Math.Hypot(x, y, rtn))
 
       case "array" -> (x :: Nil) //
-          if x.tpe == p.Type.IntS32 =>
+          if x.tpe == p.Type.Int =>
         p.Expr.Alloc(p.Type.Ptr(tpeArgs.head, None, p.Type.Space.Global), x) -> Nil
       case "apply" -> ((s @ p.Term.Select(_, p.Named(_, p.Type.Ptr(`rtn`, _, _)))) :: i :: Nil) //
-          if i.tpe == p.Type.IntS32 =>
+          if i.tpe == p.Type.Int =>
         p.Expr.Index(s, i, rtn) -> Nil
       case "update" -> ((s @ p.Term.Select(_, p.Named(_, p.Type.Ptr(c, _, _)))) :: i :: x :: Nil) //
-          if i.tpe == p.Type.IntS32 && x.tpe == c && rtn == p.Type.Unit0 =>
-        p.Expr.Alias(p.Term.Unit0Const) -> (p.Stmt.Update(s, i, x) :: Nil)
+          if i.tpe == p.Type.Int && x.tpe == c && rtn == p.Type.Unit =>
+        p.Expr.Alias(p.Term.UnitConst) -> (p.Stmt.Update(s, i, x) :: Nil)
       case _ => ???
     }
 
@@ -185,99 +185,99 @@ object IntrinsifyPass extends ProgramPass {
               ) =>
             (op, args) match {
               case "update" -> (i :: x :: Nil) if i.tpe.kind == p.TypeKind.Integral =>
-                (p.Expr.Alias(p.Term.Unit0Const), (p.Stmt.Update(xs, i, x) :: Nil, inv :: Nil))
+                (p.Expr.Alias(p.Term.UnitConst), (p.Stmt.Update(xs, i, x) :: Nil, inv :: Nil))
               case "apply" -> (i :: Nil) if i.tpe.kind == p.TypeKind.Integral =>
                 (p.Expr.Index(xs, i, rtn), (Nil, inv :: Nil))
               case (op, args) =>
                 println(s"$op $$args")
                 ???
             }
-          case (_ :+ op, x, y :: Nil) if x.tpe == p.Type.Bool1 && y.tpe == p.Type.Bool1 && rtn == p.Type.Bool1 =>
-            val (expr, stmts) = op match {
-              case "&&" => (p.Expr.IntrOp(p.Intr.LogicAnd(x, y)), Nil)
-              case "||" => (p.Expr.IntrOp(p.Intr.LogicOr(x, y)), Nil)
-              case "==" => (p.Expr.IntrOp(p.Intr.LogicEq(x, y)), Nil)
-              case "!=" => (p.Expr.IntrOp(p.Intr.LogicNeq(x, y)), Nil)
-            }
-            (expr, (stmts, inv :: Nil))
-          case (_ :+ op, x, y :: Nil) if x.tpe.isNumeric && y.tpe.isNumeric && rtn == p.Type.Bool1 =>
-            val (intr, stmts) = op match {
-              case "<"  => binaryPromoteIntr(x, y, binaryPromote(x.tpe, y.tpe), idx)(p.Intr.LogicLt(_, _))
-              case "<=" => binaryPromoteIntr(x, y, binaryPromote(x.tpe, y.tpe), idx)(p.Intr.LogicLte(_, _))
-              case ">"  => binaryPromoteIntr(x, y, binaryPromote(x.tpe, y.tpe), idx)(p.Intr.LogicGt(_, _))
-              case ">=" => binaryPromoteIntr(x, y, binaryPromote(x.tpe, y.tpe), idx)(p.Intr.LogicGte(_, _))
-              // rules for eq and neq is different from the general ref equality so we handle them here
-              case "==" => binaryPromoteIntr(x, y, binaryPromote(x.tpe, y.tpe), idx)(p.Intr.LogicEq(_, _))
-              case "!=" => binaryPromoteIntr(x, y, binaryPromote(x.tpe, y.tpe), idx)(p.Intr.LogicNeq(_, _))
-            }
-            (p.Expr.IntrOp(intr), (stmts, inv :: Nil))
-          case (op :: Nil, x, y :: Nil) if x.tpe == y.tpe && rtn == p.Type.Bool1 =>
-            val (expr, stmts) = op match {
-              case "==" => (p.Expr.IntrOp(p.Intr.LogicEq(x, y)), Nil)
-              case "!=" => (p.Expr.IntrOp(p.Intr.LogicNeq(x, y)), Nil)
-            }
-            (expr, (stmts, inv :: Nil))
-          case ("scala" :: "Boolean" :: op :: Nil, x, Nil) =>
-            val (expr, stmts) = op match {
-              case "unary_!" if x.tpe == p.Type.Bool1 =>
-                (p.Expr.IntrOp(p.Intr.LogicNot(recv)), Nil)
-            }
-            (expr, (stmts, inv :: Nil))
-          case ("scala" :: ("Double" | "Float" | "Long" | "Int" | "Short" | "Char" | "Byte") :: op :: Nil, x, Nil)
-              if x.tpe.isNumeric =>
-            // xxx bool is integral
-            val (expr, stmts) = op match {
-              case "toDouble" => (p.Expr.Cast(recv, p.Type.Float64), Nil)
-              case "toFloat"  => (p.Expr.Cast(recv, p.Type.Float32), Nil)
-              case "toLong"   => (p.Expr.Cast(recv, p.Type.IntS64), Nil)
-              case "toInt"    => (p.Expr.Cast(recv, p.Type.IntS32), Nil)
-              case "toShort"  => (p.Expr.Cast(recv, p.Type.IntS16), Nil)
-              case "toChar"   => (p.Expr.Cast(recv, p.Type.IntU16), Nil)
-              case "toByte"   => (p.Expr.Cast(recv, p.Type.IntS8), Nil)
+          // case (_ :+ op, x, y :: Nil) if x.tpe == p.Type.Bool && y.tpe == p.Type.Bool && rtn == p.Type.Bool =>
+          //   val (expr, stmts) = op match {
+          //     case "&&" => (p.Expr.IntrOp(p.Intr.LogicAnd(x, y)), Nil)
+          //     case "||" => (p.Expr.IntrOp(p.Intr.LogicOr(x, y)), Nil)
+          //     case "==" => (p.Expr.IntrOp(p.Intr.LogicEq(x, y)), Nil)
+          //     case "!=" => (p.Expr.IntrOp(p.Intr.LogicNeq(x, y)), Nil)
+          //   }
+          //   (expr, (stmts, inv :: Nil))
+          // case (_ :+ op, x, y :: Nil) if x.tpe.isNumeric && y.tpe.isNumeric && rtn == p.Type.Bool =>
+          //   val (intr, stmts) = op match {
+          //     case "<"  => binaryPromoteIntr(x, y, binaryPromote(x.tpe, y.tpe), idx)(p.Intr.LogicLt(_, _))
+          //     case "<=" => binaryPromoteIntr(x, y, binaryPromote(x.tpe, y.tpe), idx)(p.Intr.LogicLte(_, _))
+          //     case ">"  => binaryPromoteIntr(x, y, binaryPromote(x.tpe, y.tpe), idx)(p.Intr.LogicGt(_, _))
+          //     case ">=" => binaryPromoteIntr(x, y, binaryPromote(x.tpe, y.tpe), idx)(p.Intr.LogicGte(_, _))
+          //     // rules for eq and neq is different from the general ref equality so we handle them here
+          //     case "==" => binaryPromoteIntr(x, y, binaryPromote(x.tpe, y.tpe), idx)(p.Intr.LogicEq(_, _))
+          //     case "!=" => binaryPromoteIntr(x, y, binaryPromote(x.tpe, y.tpe), idx)(p.Intr.LogicNeq(_, _))
+          //   }
+          //   (p.Expr.IntrOp(intr), (stmts, inv :: Nil))
+          // case (op :: Nil, x, y :: Nil) if x.tpe == y.tpe && rtn == p.Type.Bool =>
+          //   val (expr, stmts) = op match {
+          //     case "==" => (p.Expr.IntrOp(p.Intr.LogicEq(x, y)), Nil)
+          //     case "!=" => (p.Expr.IntrOp(p.Intr.LogicNeq(x, y)), Nil)
+          //   }
+          //   (expr, (stmts, inv :: Nil))
+          // case ("scala" :: "Boolean" :: op :: Nil, x, Nil) =>
+          //   val (expr, stmts) = op match {
+          //     case "unary_!" if x.tpe == p.Type.Bool =>
+          //       (p.Expr.IntrOp(p.Intr.LogicNot(recv)), Nil)
+          //   }
+          //   (expr, (stmts, inv :: Nil))
+          // case ("scala" :: ("Double" | "Float" | "Long" | "Int" | "Short" | "Char" | "Byte") :: op :: Nil, x, Nil)
+          //     if x.tpe.isNumeric =>
+          //   // xxx bool is integral
+          //   val (expr, stmts) = op match {
+          //     case "toDouble" => (p.Expr.Cast(recv, p.Type.Double), Nil)
+          //     case "toFloat"  => (p.Expr.Cast(recv, p.Type.Float), Nil)
+          //     case "toLong"   => (p.Expr.Cast(recv, p.Type.Long), Nil)
+          //     case "toInt"    => (p.Expr.Cast(recv, p.Type.Int), Nil)
+          //     case "toShort"  => (p.Expr.Cast(recv, p.Type.Short), Nil)
+          //     case "toChar"   => (p.Expr.Cast(recv, p.Type.Char), Nil)
+          //     case "toByte"   => (p.Expr.Cast(recv, p.Type.Byte), Nil)
 
-              case "toDegrees" =>
-                (
-                  p.Expr.IntrOp(p.Intr.Mul(x, p.Term.Float64Const(RadiansToDegrees), p.Type.Float64)),
-                  Nil
-                )
-              case "toRadians" =>
-                (
-                  p.Expr.IntrOp(p.Intr.Mul(x, p.Term.Float64Const(DegreesToRadians), p.Type.Float64)),
-                  Nil
-                )
+          //     case "toDegrees" =>
+          //       (
+          //         p.Expr.IntrOp(p.Intr.Mul(x, p.Term.DoubleConst(RadiansToDegrees), p.Type.Double)),
+          //         Nil
+          //       )
+          //     case "toRadians" =>
+          //       (
+          //         p.Expr.IntrOp(p.Intr.Mul(x, p.Term.DoubleConst(DegreesToRadians), p.Type.Double)),
+          //         Nil
+          //       )
 
-              // JLS 5.6.1. Unary Numeric Promotion
-              case "unary_~" =>
-                val (intr, stmts) = unaryPromoteIntr(x, rtn, idx)(p.Intr.BNot(_, rtn))
-                (p.Expr.IntrOp(intr), stmts)
-              case "unary_+" =>
-                val (intr, stmts) = unaryPromoteIntr(x, rtn, idx)(p.Intr.Pos(_, rtn))
-                (p.Expr.IntrOp(intr), stmts)
-              case "unary_-" =>
-                val (intr, stmts) = unaryPromoteIntr(x, rtn, idx)(p.Intr.Neg(_, rtn))
-                (p.Expr.IntrOp(intr), stmts)
+          //     // JLS 5.6.1. Unary Numeric Promotion
+          //     case "unary_~" =>
+          //       val (intr, stmts) = unaryPromoteIntr(x, rtn, idx)(p.Intr.BNot(_, rtn))
+          //       (p.Expr.IntrOp(intr), stmts)
+          //     case "unary_+" =>
+          //       val (intr, stmts) = unaryPromoteIntr(x, rtn, idx)(p.Intr.Pos(_, rtn))
+          //       (p.Expr.IntrOp(intr), stmts)
+          //     case "unary_-" =>
+          //       val (intr, stmts) = unaryPromoteIntr(x, rtn, idx)(p.Intr.Neg(_, rtn))
+          //       (p.Expr.IntrOp(intr), stmts)
 
-            }
-            (expr, (Nil, inv :: Nil))
-          case ("scala" :: ("Double" | "Float" | "Long" | "Int" | "Short" | "Char" | "Byte") :: op :: Nil, x, y :: Nil)
-              if x.tpe.isNumeric && y.tpe.isNumeric && rtn.isNumeric =>
-            val (expr, stmts) = op match {
-              // JLS 5.6.2. Binary Numeric Promotion
-              case "+" => binaryPromoteIntr(x, y, rtn, idx)(p.Intr.Add(_, _, rtn))
-              case "-" => binaryPromoteIntr(x, y, rtn, idx)(p.Intr.Sub(_, _, rtn))
-              case "*" => binaryPromoteIntr(x, y, rtn, idx)(p.Intr.Mul(_, _, rtn))
-              case "/" => binaryPromoteIntr(x, y, rtn, idx)(p.Intr.Div(_, _, rtn))
-              case "%" => binaryPromoteIntr(x, y, rtn, idx)(p.Intr.Rem(_, _, rtn))
-              case "&" => binaryPromoteIntr(x, y, rtn, idx)(p.Intr.BAnd(_, _, rtn))
-              case "|" => binaryPromoteIntr(x, y, rtn, idx)(p.Intr.BOr(_, _, rtn))
-              case "^" => binaryPromoteIntr(x, y, rtn, idx)(p.Intr.BXor(_, _, rtn))
+          //   }
+          //   (expr, (Nil, inv :: Nil))
+          // case ("scala" :: ("Double" | "Float" | "Long" | "Int" | "Short" | "Char" | "Byte") :: op :: Nil, x, y :: Nil)
+          //     if x.tpe.isNumeric && y.tpe.isNumeric && rtn.isNumeric =>
+          //   val (expr, stmts) = op match {
+          //     // JLS 5.6.2. Binary Numeric Promotion
+          //     case "+" => binaryPromoteIntr(x, y, rtn, idx)(p.Intr.Add(_, _, rtn))
+          //     case "-" => binaryPromoteIntr(x, y, rtn, idx)(p.Intr.Sub(_, _, rtn))
+          //     case "*" => binaryPromoteIntr(x, y, rtn, idx)(p.Intr.Mul(_, _, rtn))
+          //     case "/" => binaryPromoteIntr(x, y, rtn, idx)(p.Intr.Div(_, _, rtn))
+          //     case "%" => binaryPromoteIntr(x, y, rtn, idx)(p.Intr.Rem(_, _, rtn))
+          //     case "&" => binaryPromoteIntr(x, y, rtn, idx)(p.Intr.BAnd(_, _, rtn))
+          //     case "|" => binaryPromoteIntr(x, y, rtn, idx)(p.Intr.BOr(_, _, rtn))
+          //     case "^" => binaryPromoteIntr(x, y, rtn, idx)(p.Intr.BXor(_, _, rtn))
 
-              // JLS 5.6.1. Unary Numeric Promotion
-              case "<<"  => binaryPromoteIntr(x, y, rtn, idx)(p.Intr.BSL(_, _, rtn))
-              case ">>"  => binaryPromoteIntr(x, y, rtn, idx)(p.Intr.BSR(_, _, rtn))
-              case ">>>" => binaryPromoteIntr(x, y, rtn, idx)(p.Intr.BZSR(_, _, rtn))
-            }
-            (p.Expr.IntrOp(expr), (stmts, inv :: Nil))
+          //     // JLS 5.6.1. Unary Numeric Promotion
+          //     case "<<"  => binaryPromoteIntr(x, y, rtn, idx)(p.Intr.BSL(_, _, rtn))
+          //     case ">>"  => binaryPromoteIntr(x, y, rtn, idx)(p.Intr.BSR(_, _, rtn))
+          //     case ">>>" => binaryPromoteIntr(x, y, rtn, idx)(p.Intr.BZSR(_, _, rtn))
+          //   }
+          //   (p.Expr.IntrOp(expr), (stmts, inv :: Nil))
           case (
                 ("scala" :: "Array" :: "apply" :: Nil) |                              //
                 ("polyregion" :: "scalalang" :: "Buffer" :: "apply" :: Nil) |         //
@@ -295,7 +295,7 @@ object IntrinsifyPass extends ProgramPass {
                 xs @ p.Term.Select(_, p.Named(_, p.Type.Ptr(_, _, _))),
                 idx :: x :: Nil
               ) if idx.tpe.kind == p.TypeKind.Integral =>
-            (p.Expr.Alias(p.Term.Unit0Const), (p.Stmt.Update(xs, idx, x) :: Nil, inv :: Nil))
+            (p.Expr.Alias(p.Term.UnitConst), (p.Stmt.Update(xs, idx, x) :: Nil, inv :: Nil))
           case (unknownSym, recv, args) =>
             println(s"No instance intrinsic for call: $recv.`${unknownSym.mkString(".")}`(${args
                 .mkString(",")}), rtn=${rtn}, argn=${args.size}")
@@ -312,17 +312,17 @@ object IntrinsifyPass extends ProgramPass {
       case inv @ p.Expr.Invoke(sym, tpeArgs, Some(_), args, captures, rtn) =>
         (sym.fqn, args) match {
 
-          case ("scala" :: "Int$" :: "int2double" :: Nil, x :: Nil) if x.tpe == p.Type.IntS32 =>
-            (p.Expr.Cast(x, p.Type.Float64), (Nil, inv :: Nil))
+          case ("scala" :: "Int$" :: "int2double" :: Nil, x :: Nil) if x.tpe == p.Type.Int =>
+            (p.Expr.Cast(x, p.Type.Double), (Nil, inv :: Nil))
 
-          case ("scala" :: "Short$" :: "short2int" :: Nil, x :: Nil) if x.tpe == p.Type.IntS16 =>
-            (p.Expr.Cast(x, p.Type.IntS32), (Nil, inv :: Nil))
+          case ("scala" :: "Short$" :: "short2int" :: Nil, x :: Nil) if x.tpe == p.Type.Short =>
+            (p.Expr.Cast(x, p.Type.Int), (Nil, inv :: Nil))
 
-          case ("scala" :: "Char$" :: "char2int" :: Nil, x :: Nil) if x.tpe == p.Type.IntU16 =>
-            (p.Expr.Cast(x, p.Type.IntS32), (Nil, inv :: Nil))
+          case ("scala" :: "Char$" :: "char2int" :: Nil, x :: Nil) if x.tpe == p.Type.Char =>
+            (p.Expr.Cast(x, p.Type.Int), (Nil, inv :: Nil))
 
-          case ("scala" :: "Byte$" :: "byte2int" :: Nil, x :: Nil) if x.tpe == p.Type.IntS8 =>
-            (p.Expr.Cast(x, p.Type.IntS32), (Nil, inv :: Nil))
+          case ("scala" :: "Byte$" :: "byte2int" :: Nil, x :: Nil) if x.tpe == p.Type.Byte =>
+            (p.Expr.Cast(x, p.Type.Int), (Nil, inv :: Nil))
 
           case (Symbols.ArrayModule :+ "ofDim", x :: Nil) =>
             rtn match {
@@ -330,49 +330,49 @@ object IntrinsifyPass extends ProgramPass {
                 (p.Expr.Alloc(arr, x), (Nil, inv :: Nil))
               case _ => ???
             }
-          case ((Symbols.ScalaMath | Symbols.JavaMath) :+ op, x :: y :: Nil) => // scala.math binary
-            val expr = op match {
-              case "pow" => p.Expr.MathOp(p.Math.Pow(x, y, rtn))
+          // case ((Symbols.ScalaMath | Symbols.JavaMath) :+ op, x :: y :: Nil) => // scala.math binary
+          //   val expr = op match {
+          //     case "pow" => p.Expr.MathOp(p.Math.Pow(x, y, rtn))
 
-              case "min" => p.Expr.IntrOp(p.Intr.Min(x, y, rtn))
-              case "max" => p.Expr.IntrOp(p.Intr.Max(x, y, rtn))
+          //     case "min" => p.Expr.IntrOp(p.Intr.Min(x, y, rtn))
+          //     case "max" => p.Expr.IntrOp(p.Intr.Max(x, y, rtn))
 
-              case "atan2" => p.Expr.MathOp(p.Math.Atan2(x, y, rtn))
-              case "hypot" => p.Expr.MathOp(p.Math.Hypot(x, y, rtn))
-            }
-            (expr, (Nil, inv :: Nil))
-          case ((Symbols.ScalaMath | Symbols.JavaMath) :+ op, x :: Nil) => // scala.math unary
-            val expr = op match {
-              case "toDegrees" =>
-                p.Expr.IntrOp(p.Intr.Mul(x, p.Term.Float64Const(RadiansToDegrees), p.Type.Float64))
-              case "toRadians" =>
-                p.Expr.IntrOp(p.Intr.Mul(x, p.Term.Float64Const(DegreesToRadians), p.Type.Float64))
-              case "sin"  => p.Expr.MathOp(p.Math.Sin(x, rtn))
-              case "cos"  => p.Expr.MathOp(p.Math.Cos(x, rtn))
-              case "tan"  => p.Expr.MathOp(p.Math.Tan(x, rtn))
-              case "asin" => p.Expr.MathOp(p.Math.Asin(x, rtn))
-              case "acos" => p.Expr.MathOp(p.Math.Acos(x, rtn))
-              case "atan" => p.Expr.MathOp(p.Math.Atan(x, rtn))
-              case "sinh" => p.Expr.MathOp(p.Math.Sinh(x, rtn))
-              case "cosh" => p.Expr.MathOp(p.Math.Cosh(x, rtn))
-              case "tanh" => p.Expr.MathOp(p.Math.Tanh(x, rtn))
+          //     case "atan2" => p.Expr.MathOp(p.Math.Atan2(x, y, rtn))
+          //     case "hypot" => p.Expr.MathOp(p.Math.Hypot(x, y, rtn))
+          //   }
+          //   (expr, (Nil, inv :: Nil))
+          // case ((Symbols.ScalaMath | Symbols.JavaMath) :+ op, x :: Nil) => // scala.math unary
+          //   val expr = op match {
+          //     case "toDegrees" =>
+          //       p.Expr.IntrOp(p.Intr.Mul(x, p.Term.DoubleConst(RadiansToDegrees), p.Type.Double))
+          //     case "toRadians" =>
+          //       p.Expr.IntrOp(p.Intr.Mul(x, p.Term.DoubleConst(DegreesToRadians), p.Type.Double))
+          //     case "sin"  => p.Expr.MathOp(p.Math.Sin(x, rtn))
+          //     case "cos"  => p.Expr.MathOp(p.Math.Cos(x, rtn))
+          //     case "tan"  => p.Expr.MathOp(p.Math.Tan(x, rtn))
+          //     case "asin" => p.Expr.MathOp(p.Math.Asin(x, rtn))
+          //     case "acos" => p.Expr.MathOp(p.Math.Acos(x, rtn))
+          //     case "atan" => p.Expr.MathOp(p.Math.Atan(x, rtn))
+          //     case "sinh" => p.Expr.MathOp(p.Math.Sinh(x, rtn))
+          //     case "cosh" => p.Expr.MathOp(p.Math.Cosh(x, rtn))
+          //     case "tanh" => p.Expr.MathOp(p.Math.Tanh(x, rtn))
 
-              case "signum" => p.Expr.MathOp(p.Math.Signum(x, rtn))
-              case "abs"    => p.Expr.MathOp(p.Math.Abs(x, rtn))
-              case "round"  => p.Expr.MathOp(p.Math.Round(x, rtn))
-              case "ceil"   => p.Expr.MathOp(p.Math.Ceil(x, rtn))
-              case "floor"  => p.Expr.MathOp(p.Math.Floor(x, rtn))
-              case "rint"   => p.Expr.MathOp(p.Math.Rint(x, rtn))
+          //     case "signum" => p.Expr.MathOp(p.Math.Signum(x, rtn))
+          //     case "abs"    => p.Expr.MathOp(p.Math.Abs(x, rtn))
+          //     case "round"  => p.Expr.MathOp(p.Math.Round(x, rtn))
+          //     case "ceil"   => p.Expr.MathOp(p.Math.Ceil(x, rtn))
+          //     case "floor"  => p.Expr.MathOp(p.Math.Floor(x, rtn))
+          //     case "rint"   => p.Expr.MathOp(p.Math.Rint(x, rtn))
 
-              case "sqrt"  => p.Expr.MathOp(p.Math.Sqrt(x, rtn))
-              case "cbrt"  => p.Expr.MathOp(p.Math.Cbrt(x, rtn))
-              case "exp"   => p.Expr.MathOp(p.Math.Exp(x, rtn))
-              case "expm1" => p.Expr.MathOp(p.Math.Expm1(x, rtn))
-              case "log"   => p.Expr.MathOp(p.Math.Log(x, rtn))
-              case "log1p" => p.Expr.MathOp(p.Math.Log1p(x, rtn))
-              case "log10" => p.Expr.MathOp(p.Math.Log10(x, rtn))
-            }
-            (expr, (Nil, inv :: Nil))
+          //     case "sqrt"  => p.Expr.MathOp(p.Math.Sqrt(x, rtn))
+          //     case "cbrt"  => p.Expr.MathOp(p.Math.Cbrt(x, rtn))
+          //     case "exp"   => p.Expr.MathOp(p.Math.Exp(x, rtn))
+          //     case "expm1" => p.Expr.MathOp(p.Math.Expm1(x, rtn))
+          //     case "log"   => p.Expr.MathOp(p.Math.Log(x, rtn))
+          //     case "log1p" => p.Expr.MathOp(p.Math.Log1p(x, rtn))
+          //     case "log10" => p.Expr.MathOp(p.Math.Log10(x, rtn))
+          //   }
+          //   (expr, (Nil, inv :: Nil))
           case (unknownSym, args) =>
             println(s"No module intrinsic for: ${unknownSym.mkString(".")}(${args.map(_.repr).mkString(",")}) ")
             (inv, (Nil, Nil))

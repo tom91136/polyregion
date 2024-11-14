@@ -5,7 +5,6 @@ import cats.syntax.all.*
 import fansi.Str
 import polyregion.ast.CppStructGen.{StructSource, ToCppType}
 import polyregion.ast.compiletime
-// import polyregion.ast.compiletime.CtorTermSelect
 
 import polyregion.ast.CppStructGen.ToCppTerm.Value
 
@@ -783,13 +782,18 @@ private[polyregion] object CppStructGen {
     type Value = compiletime.Value[CppType]
     // given ToCppTerm[String] = x => compiletime.Value.Const(s"\"${x.getOrElse("")}\"")
     given ToCppTerm[Value] = { x => x.getOrElse(compiletime.Value.Const("")) }
-    inline given derived[T](using m: Mirror.Of[T]): ToCppTerm[T] = new ToCppTerm[T] {
-      def apply(x: Option[T]) = inline m match {
+
+    class ToCppTermImpl[A](f: Option[A] => ToCppTerm.Value) extends ToCppTerm[A] {
+      def apply(x: Option[A]) = f(x)
+    }
+
+    inline given derived[T](using m: Mirror.Of[T]): ToCppTerm[T] = ToCppTermImpl(x =>
+      inline m match {
         case s: Mirror.SumOf[T]     => compiletime.Value.CtorAp(summonInline[ToCppType[s.MirroredMonoType]](), Nil)
         case p: Mirror.ProductOf[T] => compiletime.Value.CtorAp(summonInline[ToCppType[p.MirroredMonoType]](), Nil)
         case x                      => error(s"Unhandled derive: $x")
       }
-    }
+    )
   }
 
   trait ToCppType[A] extends (() => CppType)
@@ -918,34 +922,31 @@ private[polyregion] object CppStructGen {
       )
     }
 
-    // inline def forAll[T <: Tuple](p: CppType => Boolean): Boolean =
-    //   inline erasedValue[T] match
-    //     case _: EmptyTuple => true
-    //     case _: (t *: ts)  => p(summonInline[ToCppType[t]]()) && forAll[ts](p)
+    class ToCppTypeImpl[A](f: () => CppType) extends ToCppType[A] {
+      def apply() = f()
+    }
 
-    inline given derived[T](using m: Mirror.Of[T]): ToCppType[T] = new ToCppType[T] {
-      def apply() = {
-        val (ns, kind) = compiletime.mirrorMeta[m.MirroredMonoType]
-        val name       = constValue[m.MirroredLabel]
-        inline m match {
-          case s: Mirror.SumOf[T] =>
-            CppType(
-              ns,
-              name,
-              movable = true,
-              constexpr = false, // forAll[m.MirroredElemTypes](_.constexpr),
-              kind = CppType.Kind(kind)
-            )
-          case p: Mirror.ProductOf[T] =>
-            CppType(
-              ns,
-              name,
-              movable = true,
-              constexpr = false, // forAll[p.MirroredElemTypes](_.constexpr),
-              kind = CppType.Kind(kind)
-            )
-          case x => error(s"Unhandled derive: $x")
-        }
+    inline given derived[T](using m: Mirror.Of[T]): ToCppType[T] = ToCppTypeImpl { () =>
+      val (ns, kind) = compiletime.mirrorMeta[m.MirroredMonoType]
+      val name       = constValue[m.MirroredLabel]
+      inline m match {
+        case s: Mirror.SumOf[T] =>
+          CppType(
+            ns,
+            name,
+            movable = true,
+            constexpr = false, // forAll[m.MirroredElemTypes](_.constexpr),
+            kind = CppType.Kind(kind)
+          )
+        case p: Mirror.ProductOf[T] =>
+          CppType(
+            ns,
+            name,
+            movable = true,
+            constexpr = false, // forAll[p.MirroredElemTypes](_.constexpr),
+            kind = CppType.Kind(kind)
+          )
+        case x => error(s"Unhandled derive: $x")
       }
     }
   }

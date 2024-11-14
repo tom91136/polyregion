@@ -202,7 +202,7 @@ object Target {
 
     private type T[A <: String, U <: String] = Target { type Arch = A; type UArch = U }
 
-    transparent inline given deriveArchNames[A](using   m: Mirror.Of[A]): Tuple = inline m match {
+    transparent inline given deriveArchNames[A](using m: Mirror.Of[A]): Tuple = inline m match {
       case _: Mirror.SumOf[A] => deriveSum[m.MirroredElemTypes]
       case _: Mirror.ProductOf[A] =>
         inline scala.compiletime.erasedValue[m.MirroredMonoType] match {
@@ -239,42 +239,51 @@ object Target {
     type Arch = cp.Target.LLVM_HOST.type; type UArch = "native"
     val arch = valueOf[Arch]; val uarch = constValue[UArch]
   }
-  case class X86(uarch: String)     extends CPU    { type Arch = cpt.LLVM_X86_64.type; val arch = valueOf[Arch]  }
-  case class AArch64(uarch: String) extends CPU    { type Arch = cpt.LLVM_AARCH64.type; val arch = valueOf[Arch] }
-  case class ARM(uarch: String)     extends CPU    { type Arch = cpt.LLVM_ARM.type; val arch = valueOf[Arch]     }
-  case class NVPTX64(uarch: String) extends Target { type Arch = cpt.LLVM_NVPTX64.type; val arch = valueOf[Arch] }
-  case class AMDGCN(uarch: String)  extends Target { type Arch = cpt.LLVM_AMDGCN.type; val arch = valueOf[Arch]  }
-  case class SPIRV64(uarch: String) extends Target { type Arch = cpt.LLVM_SPIRV64.type; val arch = valueOf[Arch] }
 
   private type SString = String & Singleton
 
-  object X86 {
-    inline def apply[A <: SString](inline uarch: A) = new X86(uarch) { override type UArch = A }
-    final val Znver2                                = X86("znver2")
+  case class X86[A <: SString](uarch: A) extends CPU {
+    type UArch = A; type Arch = cpt.LLVM_X86_64.type; val arch = valueOf[Arch]
   }
-  object AArch64 {
-    inline def apply[A <: SString](inline uarch: A) = new AArch64(uarch) { override type UArch = A }
-    val AppleM1                                     = AArch64("apple-m1")
-    val A64fx                                       = AArch64("a64fx")
+  case class AArch64[A <: SString](uarch: A) extends CPU {
+    type UArch = A; type Arch = cpt.LLVM_AARCH64.type; val arch = valueOf[Arch]
   }
-  object ARM {
-    inline def apply[A <: SString](inline uarch: A) = new ARM(uarch) { override type UArch = A }
+  case class ARM[A <: SString](uarch: A) extends CPU {
+    type UArch = A; type Arch = cpt.LLVM_ARM.type; val arch = valueOf[Arch]
+  }
+  case class NVPTX64[A <: SString](uarch: A) extends Target {
+    type UArch = A; type Arch = cpt.LLVM_NVPTX64.type; val arch = valueOf[Arch]
+  }
+  case class AMDGCN[A <: SString](uarch: A) extends Target {
+    type UArch = A; type Arch = cpt.LLVM_AMDGCN.type; val arch = valueOf[Arch]
+  }
+  case class SPIRV64[A <: SString](uarch: A) extends Target {
+    type UArch = A; type Arch = cpt.LLVM_SPIRV64.type; val arch = valueOf[Arch]
   }
 
+  object X86 {
+
+    final val Znver2 = X86("znver2")
+  }
+  object AArch64 {
+
+    final val AppleM1 = AArch64("apple-m1")
+    final val A64fx   = AArch64("a64fx")
+  }
+  object ARM {}
+
   object NVPTX64 {
-    inline def apply[A <: SString](inline uarch: A) = new NVPTX64(uarch) { override type UArch = A }
-    final val SM52                                  = NVPTX64("sm_52")
-    final val SM61                                  = NVPTX64("sm_61")
-    final val SM80                                  = NVPTX64("sm_80")
+
+    final val SM52 = NVPTX64("sm_52")
+    final val SM61 = NVPTX64("sm_61")
+    final val SM80 = NVPTX64("sm_80")
   }
   object AMDGCN {
-    inline def apply[A <: SString](inline uarch: A) = new AMDGCN(uarch) { override type UArch = A }
-    final val gfx906                                = AMDGCN("gfx906")
-    final val gfx803                                = AMDGCN("gfx803")
+
+    final val gfx906 = AMDGCN("gfx906")
+    final val gfx803 = AMDGCN("gfx803")
   }
-  object SPIRV64 {
-    inline def apply[A <: SString](inline uarch: A) = new SPIRV64(uarch) { override type UArch = A }
-  }
+  object SPIRV64 {}
 
 }
 
@@ -295,9 +304,9 @@ object Platforms {
   export platforms.*
 }
 
-inline def liftCUDA[F[_]](lift: Suspend[F]): Platform[F, Target.NVPTX64]    = Platform(Platforms.CUDA(), lift)
-inline def liftHIP[F[_]](lift: Suspend[F]): Platform[F, Target.AMDGCN]      = Platform(Platforms.HIP(), lift)
-inline def liftHSA[F[_]](lift: Suspend[F]): Platform[F, Target.AMDGCN]      = Platform(Platforms.HSA(), lift)
+inline def liftCUDA[F[_]](lift: Suspend[F]): Platform[F, Target.NVPTX64[?]]    = Platform(Platforms.CUDA(), lift)
+inline def liftHIP[F[_]](lift: Suspend[F]): Platform[F, Target.AMDGCN[?]]      = Platform(Platforms.HIP(), lift)
+inline def liftHSA[F[_]](lift: Suspend[F]): Platform[F, Target.AMDGCN[?]]      = Platform(Platforms.HSA(), lift)
 inline def liftOpenCL[F[_]](lift: Suspend[F]): Platform[F, Target.OpenCL_C] = Platform(Platforms.OpenCL(), lift)
 inline def liftHost[F[_]](lift: Suspend[F]): Device[F, Target.CPU] = Device(Platforms.Relocatable().devices()(0), lift)
 
@@ -318,9 +327,9 @@ object blocking {
     ref.get.fold(throw _, identity)
   }
 
-  lazy val CUDA: Platform[Id, Target.NVPTX64]    = liftCUDA(Latched)
-  lazy val HIP: Platform[Id, Target.AMDGCN]      = liftHIP(Latched)
-  lazy val HSA: Platform[Id, Target.AMDGCN]      = liftHSA(Latched)
+  lazy val CUDA: Platform[Id, Target.NVPTX64[?]]    = liftCUDA(Latched)
+  lazy val HIP: Platform[Id, Target.AMDGCN[?]]      = liftHIP(Latched)
+  lazy val HSA: Platform[Id, Target.AMDGCN[?]]      = liftHSA(Latched)
   lazy val OpenCL: Platform[Id, Target.OpenCL_C] = liftOpenCL(Latched)
   lazy val Host: Device[Id, Target.CPU]          = liftHost(Latched)
 
@@ -335,8 +344,8 @@ object future {
     p.future
   }
 
-  lazy val CUDA: Platform[Future, Target.NVPTX64]    = liftCUDA(SuspendFuture)
-  lazy val HIP: Platform[Future, Target.AMDGCN]      = liftHIP(SuspendFuture)
+  lazy val CUDA: Platform[Future, Target.NVPTX64[?]]    = liftCUDA(SuspendFuture)
+  lazy val HIP: Platform[Future, Target.AMDGCN[?]]      = liftHIP(SuspendFuture)
   lazy val OpenCL: Platform[Future, Target.OpenCL_C] = liftOpenCL(SuspendFuture)
   lazy val Host: Device[Future, Target.CPU]          = liftHost(SuspendFuture)
 

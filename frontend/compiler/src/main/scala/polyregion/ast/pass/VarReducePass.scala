@@ -1,7 +1,7 @@
 package polyregion.ast.pass
 
 import cats.syntax.all.*
-import polyregion.ast.{PolyAST as p, *, given}
+import polyregion.ast.{ScalaSRR as p, *, given}
 import polyregion.ast.Traversal.*
 
 object VarReducePass extends ProgramPass {

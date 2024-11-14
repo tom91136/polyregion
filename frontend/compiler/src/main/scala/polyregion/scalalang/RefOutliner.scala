@@ -1,7 +1,7 @@
 package polyregion.scalalang
 
 import cats.syntax.all.*
-import polyregion.ast.{PolyAST as p, *}
+import polyregion.ast.{ScalaSRR as p, *}
 import polyregion.scalalang.Retyper.*
 
 import scala.annotation.tailrec

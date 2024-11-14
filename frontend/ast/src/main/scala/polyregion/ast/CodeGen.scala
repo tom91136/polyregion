@@ -12,8 +12,9 @@ import java.nio.{ByteBuffer, ByteOrder}
 import java.security.MessageDigest
 import scala.collection.mutable.ArrayBuffer
 import scala.runtime.RichInt
+import cats.syntax.all.*
 
-private[polyregion] object Main {
+private[polyregion] object CodeGen {
 
   import PolyAST.*
 
@@ -31,10 +32,10 @@ private[polyregion] object Main {
     StandardOpenOption.WRITE
   )
 
-  def generateJniBindings(): Unit = {
+  private def generateJniBindings(): Unit = {
     import java.lang.reflect.{Constructor, Field, Method, Modifier}
 
-    val pending: List[(Class[?], Field => Boolean, Constructor[?] => Boolean, Method => Boolean)] =
+    val classes: List[(Class[?], Field => Boolean, Constructor[?] => Boolean, Method => Boolean)] =
       List(
         (
           classOf[java.nio.ByteBuffer],
@@ -58,10 +59,20 @@ private[polyregion] object Main {
         (classOf[java.io.File], _ => false, _ => false, m => m.getName == "delete")
       )
 
+    val registerNatives = List(
+      classOf[polyregion.jvm.compiler.Compiler],
+      classOf[polyregion.jvm.runtime.Platforms],
+      classOf[polyregion.jvm.runtime.Platform],
+      classOf[polyregion.jvm.Natives]
+    ).map { c =>
+      val (name, header) = CppJniBindGen.generateRegisterNative(c)
+      s"${name.toLowerCase}.h" -> header
+    }
+
     println("Generating C++ mirror for JNI...")
 
-    val knownClasses: Set[String] = pending.map(_._1.getName).toSet
-    val (headers, impls)          = pending.map(CppJniBindGen.reflectJniSource(knownClasses, _, _, _, _)).unzip
+    val knownClasses: Set[String] = classes.map(_._1.getName).toSet
+    val (headers, impls)          = classes.map(CppJniBindGen.reflectJniSource(knownClasses, _, _, _, _)).unzip
     val header =
       s"""#include <jni.h>
          |#include <optional>
@@ -74,32 +85,25 @@ private[polyregion] object Main {
          |using namespace polyregion::generated;
          |${impls.mkString("\n")}
          |""".stripMargin
+
+    val registerNativeHeaders = registerNatives.map(_._2).mkString("\n")
+
+    val AdtHash = md5(header + impl + registerNativeHeaders)
+    println(s"MD5=${AdtHash}")
     println(s"Generated ADT=${(header + impl).count(_ == '\n')} lines")
 
     val target = Paths.get("../native/bindings/jvm/generated/").toAbsolutePath.normalize
-
     println(s"Writing to $target")
-
     Files.createDirectories(target)
     overwrite(target.resolve("mirror.h"))(header)
     overwrite(target.resolve("mirror.cpp"))(impl)
-
-    List(
-      classOf[polyregion.jvm.compiler.Compiler],
-      classOf[polyregion.jvm.runtime.Platforms],
-      classOf[polyregion.jvm.runtime.Platform],
-      classOf[polyregion.jvm.Natives]
-    ).foreach { r =>
-      val (name, header) = CppJniBindGen.generateRegisterNative(r)
-      overwrite(target.resolve(s"${name.toLowerCase}.h"))(header)
-    }
-
+    registerNatives.foreach((name, header) => overwrite(target.resolve(name))(header))
     println("Done")
   }
 
-  def generateAstBindings(): Unit = {
+  private def generateAstBindings() = {
 
-    println("Generating C++ mirror...")
+    println("Generating C++ mirror for PolyAST...")
 
     val structs =
       deriveStruct[SourcePosition]()
@@ -134,33 +138,32 @@ private[polyregion] object Main {
 
     val adtHeader = StructSource.emitHeader(namespace, adtSources)
     val adtImpl   = StructSource.emitImpl(namespace, adtFileName, adtSources)
-
-    val AdtHash = md5(adtHeader + adtImpl)
-
-    println(s"Generated ADT=${(adtImpl + adtHeader).count(_ == '\n')} lines")
+    val adtHash   = md5(adtHeader + adtImpl)
 
     val jsonCodecHeader = CppNlohmannJsonCodecGen.emitHeader(namespace, jsonCodecSources)
-    val jsonCodecImpl   = CppNlohmannJsonCodecGen.emitImpl(namespace, jsonCodecFileName, AdtHash, jsonCodecSources)
+    val jsonCodecImpl   = CppNlohmannJsonCodecGen.emitImpl(namespace, jsonCodecFileName, adtHash, jsonCodecSources)
 
-    val target = Paths.get("../native/polyast/generated/").toAbsolutePath.normalize
-    println(s"Generated Codec=${(jsonCodecHeader + jsonCodecImpl).count(_ == '\n')} lines")
+    println(s"Generated ${(adtHeader + adtImpl + jsonCodecHeader + jsonCodecImpl).count(_ == '\n')} lines")
+    println(s"MD5=${adtHash}")
 
-    println(s"MD5=${AdtHash}")
-
-    println(s"Writing to $target")
-
-    Files.createDirectories(target)
-
-    overwrite(target.resolve("polyast.h"))(adtHeader)
-    overwrite(target.resolve("polyast.cpp"))(adtImpl)
-    overwrite(target.resolve("polyast_codec.h"))(jsonCodecHeader)
-    overwrite(target.resolve("polyast_codec.cpp"))(jsonCodecImpl)
-
-    println("Done")
+    adtHash -> (() => {
+      val target = Paths.get("../native/polyast/generated/").toAbsolutePath.normalize
+      println(s"Writing to $target")
+      Files.createDirectories(target)
+      overwrite(target.resolve("polyast.h"))(adtHeader)
+      overwrite(target.resolve("polyast.cpp"))(adtImpl)
+      overwrite(target.resolve("polyast_codec.h"))(jsonCodecHeader)
+      overwrite(target.resolve("polyast_codec.cpp"))(jsonCodecImpl)
+      println("Done")
+    })
   }
 
+  private val (polyASTHash, writePolyASTSources) = generateAstBindings()
+
+  def polyASTVersioned[A](x: A) = MsgPack.Versioned(polyASTHash, x)
+
   def main(args: Array[String]): Unit = {
-    generateAstBindings()
+    writePolyASTSources()
     generateJniBindings()
   }
 

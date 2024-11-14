@@ -1,7 +1,7 @@
 package polyregion.ast.pass
 
 import cats.syntax.all.*
-import polyregion.ast.{PolyAST as p, *, given}
+import polyregion.ast.{ScalaSRR as p, *, given}
 import polyregion.ast.Traversal.*
 import scala.collection.immutable.VectorMap
 
@@ -93,7 +93,7 @@ object FnInlinePass extends ProgramPass {
         val returnName               = p.Named("phi", ivk.tpe)
         val returnRef: p.Term.Select = p.Term.Select(Nil, returnName)
         val returnRebound = substituted.modifyAll[p.Stmt] {
-          case p.Stmt.Return(e) => p.Stmt.Mut(returnRef, e, copy = false)
+          case p.Stmt.Return(e) => p.Stmt.Mut(returnRef, e)
           case x                => x
         }
         (p.Expr.Alias(returnRef), p.Stmt.Var(returnName, None) :: returnRebound, renamed.moduleCaptures)

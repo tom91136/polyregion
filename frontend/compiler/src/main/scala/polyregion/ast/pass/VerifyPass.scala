@@ -2,7 +2,7 @@ package polyregion.ast.pass
 
 import cats.data.EitherT
 import cats.syntax.all.*
-import polyregion.ast.{PolyAST as p, *, given}
+import polyregion.ast.{ScalaSRR as p, *, given}
 import polyregion.ast.Traversal.*
 
 import scala.annotation.tailrec
@@ -73,7 +73,7 @@ object VerifyPass {
                             case x                => x
                           })
                         )
-                        .filter(_.named == n) match {
+                        .filter(_ == n) match {
                         case _ :: Nil => acc
                         case Nil =>
                           acc ~ s"Struct type ${sdef.repr} does not contain member ${n.repr} in `${t.repr} r={${defs}}`"
@@ -90,37 +90,6 @@ object VerifyPass {
     }
 
     def validateExpr(c: Context, e: p.Expr): Context = e match {
-      // case p.Expr.NullaryIntrinsic(kind, rtn)    => c
-      // case p.Expr.UnaryIntrinsic(lhs, kind, rtn) => validateTerm(c, lhs)
-      // case p.Expr.BinaryIntrinsic(lhs, rhs, kind, rtn) =>
-      //   (validateTerm(_: Context, lhs)).andThen(validateTerm(_, rhs))(c)
-      case p.Expr.SpecOp(op) =>
-        val c0 = op.terms.foldLeft(c)(validateTerm(_, _))
-        op.overloads.filter { o =>
-          op.terms.map(_.tpe).zip(o.args).forall(_ == _) && op.tpe == o.rtn
-        } match {
-          case Nil      => c0 ~ s"No matching overload for intrinsic ${op}"
-          case x :: Nil => c0
-          case xs       => c0 ~ s"Multiple matching overload for intrinsic ${op}:\n${xs}"
-        }
-      case p.Expr.IntrOp(op) =>
-        val c0 = op.terms.foldLeft(c)(validateTerm(_, _))
-        op.overloads.filter { o =>
-          op.terms.map(_.tpe).zip(o.args).forall(_ == _) && op.tpe == o.rtn
-        } match {
-          case Nil      => c0 ~ s"No matching overload for intrinsic ${op}"
-          case x :: Nil => c0
-          case xs       => c0 ~ s"Multiple matching overload for intrinsic ${op}:\n${xs}"
-        }
-      case p.Expr.MathOp(op) =>
-        val c0 = op.terms.foldLeft(c)(validateTerm(_, _))
-        op.overloads.filter { o =>
-          op.terms.map(_.tpe).zip(o.args).forall(_ == _) && op.tpe == o.rtn
-        } match {
-          case Nil      => c0 ~ s"No matching overload for intrinsic ${op}"
-          case x :: Nil => c0
-          case xs       => c0 ~ s"Multiple matching overload for intrinsic ${op}:\n${xs}"
-        }
       case p.Expr.Cast(from, as) =>
         val c0 = validateTerm(c, from)
         (from.tpe, as) match {
@@ -138,11 +107,6 @@ object VerifyPass {
         val c2 = captures.foldLeft(c1)(validateTerm(_, _))
         c2
       case p.Expr.Index(lhs, idx, component) => (validateTerm(_: Context, lhs)).andThen(validateTerm(_, idx))(c)
-      case p.Expr.RefTo(lhs, idx, component) =>
-        idx match {
-          case Some(idx) => (validateTerm(_: Context, lhs)).andThen(validateTerm(_, idx))(c)
-          case None      => (validateTerm(_: Context, lhs))(c)
-        }
       case p.Expr.Alloc(witness, size) => validateTerm(c, size)
     }
 
@@ -159,7 +123,7 @@ object VerifyPass {
             }
           case _ => c0
         }
-      case p.Stmt.Mut(name, expr, copy) =>
+      case p.Stmt.Mut(name, expr ) =>
         val c0 = (validateTerm(_: Context, name)).andThen(validateExpr(_, expr))(c)
         if (name.tpe == expr.tpe) c0
         else c0 ~ s"Assignment of incompatible type ${expr.tpe.repr} != ${name.tpe.repr}: ${s.repr}"

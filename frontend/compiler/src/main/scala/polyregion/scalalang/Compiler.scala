@@ -3,7 +3,7 @@ package polyregion.scalalang
 import cats.syntax.all.*
 import polyregion.ast.Traversal.*
 import polyregion.ast.pass.*
-import polyregion.ast.{PolyAST as p, *, given}
+import polyregion.ast.{ScalaSRR as p, *, given}
 import polyregion.prism.StdLib
 
 import java.nio.file.Paths
@@ -16,7 +16,7 @@ object Compiler {
 
   private val ProgramPasses: List[ProgramPass] = List(
     printPass(IntrinsifyPass),
-    printPass(DynamicDispatchPass),
+    // printPass(DynamicDispatchPass),
     printPass(SpecialisationPass),
 
 //    FnInlinePass,
@@ -519,7 +519,7 @@ object Compiler {
         termCaptures = sig.termCaptures.zipWithIndex.map((t, i) => p.Named(s"arg$i", t)).map(p.Arg(_)),
         rtn = sig.rtn,
         body = p.Stmt.Comment("abstract definition, assert")
-          :: p.Stmt.Return(p.Expr.SpecOp(p.Spec.Assert))
+          // :: p.Stmt.Return(p.Expr.SpecOp(p.Spec.Assert))
           :: Nil,
         kind = p.Function.Kind.Exported
       )

@@ -1,8 +1,8 @@
 package polyregion.ast
 
 import cats.kernel.Semigroup
-import polyregion.ast.PolyAST as p
-import polyregion.ast.PolyAST.{Type, TypeKind}
+import polyregion.ast.ScalaSRR as p
+import polyregion.ast.ScalaSRR.{Type, TypeKind}
 import polyregion.ast.Traversal.*
 
 import java.lang.reflect.Modifier
@@ -169,9 +169,9 @@ object PolyAstToExpr {
   given NamedToExpr: ToExpr[p.Named] with {
     def apply(x: p.Named)(using Quotes) = '{ p.Named(${ Expr(x.symbol) }, ${ Expr(x.tpe) }) }
   }
-  given StructMemberToExpr: ToExpr[p.StructMember] with {
-    def apply(x: p.StructMember)(using Quotes) = '{ p.StructMember(${ Expr(x.named) }, ${ Expr(x.isMutable) }) }
-  }
+  // given StructMemberToExpr: ToExpr[p.StructMember] with {
+  //   def apply(x: p.StructMember)(using Quotes) = '{ p.StructMember(${ Expr(x.named) }, ${ Expr(x.isMutable) }) }
+  // }
   given StructDefToExpr: ToExpr[p.StructDef] with {
     def apply(x: p.StructDef)(using Quotes) = '{
       p.StructDef(
@@ -193,20 +193,15 @@ object PolyAstToExpr {
   given TypeToExpr: ToExpr[p.Type] with {
     def apply(x: p.Type)(using Quotes) = x match {
       case p.Type.Var(_)  => ???
-      case p.Type.Float32 => '{ p.Type.Float32 }
-      case p.Type.Float64 => '{ p.Type.Float64 }
-      case p.Type.Bool1   => '{ p.Type.Bool1 }
-      case p.Type.IntS8   => '{ p.Type.IntS8 }
-      case p.Type.IntU16  => '{ p.Type.IntU16 }
-      case p.Type.IntS16  => '{ p.Type.IntS16 }
-      case p.Type.IntS32  => '{ p.Type.IntS32 }
-      case p.Type.IntS64  => '{ p.Type.IntS64 }
-      case p.Type.Unit0   => '{ p.Type.Unit0 }
-
-      case p.Type.Float16 => '{ p.Type.Float16 }
-      case p.Type.IntU8   => '{ p.Type.IntU8 }
-      case p.Type.IntU32  => '{ p.Type.IntU32 }
-      case p.Type.IntU64  => '{ p.Type.IntU64 }
+      case p.Type.Float => '{ p.Type.Float }
+      case p.Type.Double => '{ p.Type.Double }
+      case p.Type.Bool   => '{ p.Type.Bool }
+      case p.Type.Byte   => '{ p.Type.Byte }
+      case p.Type.Char  => '{ p.Type.Char }
+      case p.Type.Short  => '{ p.Type.Short }
+      case p.Type.Int  => '{ p.Type.Int }
+      case p.Type.Long  => '{ p.Type.Long }
+      case p.Type.Unit   => '{ p.Type.Unit }
 
       case p.Type.Struct(name, tpeVars, args, parents) =>
         '{ p.Type.Struct(${ Expr(name) }, ${ Expr(tpeVars) }, ${ Expr(args) }, ${ Expr(parents) }) }
@@ -219,9 +214,9 @@ object PolyAstToExpr {
 
 }
 
-extension (m: p.StructMember) {
-  def repr: String = s"${if (m.isMutable) "var" else "val"} ${m.named.repr}"
-}
+// extension (m: p.StructMember) {
+//   def repr: String = s"${if (m.isMutable) "var" else "val"} ${m.named.repr}"
+// }
 
 extension (sd: p.StructDef) {
   def tpe(ref: Boolean = true): p.Type.Struct = p.Type.Struct(sd.name, sd.tpeVars, Nil, sd.parents)
@@ -292,21 +287,16 @@ extension (e: p.Type) {
           .map((v, a) => s"$v=${a.repr}")
           .mkString("<", ",", ">")}(${parents.map(_.repr).mkString("<:")})"
     case p.Type.Ptr(comp, length, space) => s"Array[${comp.repr}${length.fold("")(i => s"*$i")}^${space}]"
-    case p.Type.Bool1                    => "Bool1"
-    case p.Type.IntS8                    => "IntS8b"
-    case p.Type.IntU16                   => "IntU16c"
-    case p.Type.IntS16                   => "IntS16s"
-    case p.Type.IntS32                   => "IntS32i"
-    case p.Type.IntS64                   => "IntS64l"
-    case p.Type.Float32                  => "Float32f"
-    case p.Type.Float64                  => "Float64d"
+    case p.Type.Bool                    => "Bool"
+    case p.Type.Byte                    => "Byteb"
+    case p.Type.Char                   => "Charc"
+    case p.Type.Short                   => "Shorts"
+    case p.Type.Int                   => "Inti"
+    case p.Type.Long                   => "Longl"
+    case p.Type.Float                  => "Floatf"
+    case p.Type.Double                  => "Doubled"
 
-    case p.Type.Float16 => "Float16"
-    case p.Type.IntU8   => "IntU8"
-    case p.Type.IntU32  => "IntU32"
-    case p.Type.IntU64  => "IntU64"
-
-    case p.Type.Unit0     => "Unit0v"
+    case p.Type.Unit     => "Unitv"
     case p.Type.Nothing   => "Nothing"
     case p.Type.Var(name) => s"#$name"
     case p.Type.Exec(tpeArgs, args, rtn) =>
@@ -318,21 +308,16 @@ extension (e: p.Type) {
     case p.Type.Struct(sym, _, args, parents) =>
       sym.fqn.mkString("_") + args.map(_.monomorphicName).mkString("_", "_", "_")
     case p.Type.Ptr(comp, length, space) => s"${comp.monomorphicName}${length.fold("")(i => s"*$i")}^$space[]"
-    case p.Type.Bool1            => "Bool1"
-    case p.Type.IntS8            => "IntS8b"
-    case p.Type.IntU16           => "IntU16c"
-    case p.Type.IntS16           => "IntS16s"
-    case p.Type.IntS32           => "IntS32i"
-    case p.Type.IntS64           => "IntS64l"
-    case p.Type.Float32          => "Float32f"
-    case p.Type.Float64          => "Float64d"
+    case p.Type.Bool            => "Bool"
+    case p.Type.Byte            => "Byteb"
+    case p.Type.Char           => "Charc"
+    case p.Type.Short           => "Shorts"
+    case p.Type.Int           => "Inti"
+    case p.Type.Long           => "Longl"
+    case p.Type.Float          => "Floatf"
+    case p.Type.Double          => "Doubled"
 
-    case p.Type.Float16 => "Float16"
-    case p.Type.IntU8   => "IntU8"
-    case p.Type.IntU32  => "IntU32"
-    case p.Type.IntU64  => "IntU64"
-
-    case p.Type.Unit0                    => "Unit0v"
+    case p.Type.Unit                    => "Unitv"
     case p.Type.Nothing                  => "Nothing"
     case p.Type.Var(name)                => s"#$name"
     case p.Type.Exec(tpeArgs, args, rtn) => ???
@@ -343,21 +328,15 @@ extension (e: p.Term) {
   def repr: String = e match {
     case p.Term.Select(xs, x)   => (xs :+ x).map(_.repr).mkString(".")
     case p.Term.Poison(t)       => s"Poison($t)"
-    case p.Term.Unit0Const      => s"Unit0Const()"
-    case p.Term.Bool1Const(x)   => s"Bool1Const($x)"
-    case p.Term.IntS8Const(x)   => s"IntS8Const($x)"
-    case p.Term.IntU16Const(x)  => s"IntU16Const($x)"
-    case p.Term.IntS16Const(x)  => s"IntS16Const($x)"
-    case p.Term.IntS32Const(x)  => s"IntS32Const($x)"
-    case p.Term.IntS64Const(x)  => s"IntS64Const($x)"
-    case p.Term.Float32Const(x) => s"Float32Const($x)"
-    case p.Term.Float64Const(x) => s"Float64Const($x)"
-
-    case p.Term.Float16Const(x) => s"Float16Const($x)"
-    case p.Term.IntU8Const(x)   => s"IntU8Const($x)"
-    case p.Term.IntU32Const(x)  => s"IntU32Const($x)"
-    case p.Term.IntU64Const(x)  => s"IntU64Const($x)"
-
+    case p.Term.UnitConst      => s"UnitConst()"
+    case p.Term.BoolConst(x)   => s"BoolConst($x)"
+    case p.Term.ByteConst(x)   => s"ByteConst($x)"
+    case p.Term.CharConst(x)  => s"CharConst($x)"
+    case p.Term.ShortConst(x)  => s"ShortConst($x)"
+    case p.Term.IntConst(x)  => s"IntConst($x)"
+    case p.Term.LongConst(x)  => s"LongConst($x)"
+    case p.Term.FloatConst(x) => s"FloatConst($x)"
+    case p.Term.DoubleConst(x) => s"DoubleConst($x)"
   }
 }
 
@@ -460,9 +439,6 @@ extension (e: p.Expr) {
     //   }
     //   s"${lhs.repr} $op' ${rhs.repr}"
 
-    case p.Expr.SpecOp(op)     => s"${op}'"
-    case p.Expr.IntrOp(op)     => s"${op}'"
-    case p.Expr.MathOp(op)     => s"${op}'"
     case p.Expr.Cast(from, to) => s"${from.repr}.to[${to.repr}]"
     case p.Expr.Alias(ref)     => s"(~>${ref.repr})"
 
@@ -471,7 +447,6 @@ extension (e: p.Expr) {
           .map(_.repr)
           .mkString(",")})[${captures.map(_.repr).mkString(",")}] : ${tpe.repr}"
     case p.Expr.Index(lhs, idx, tpe) => s"${lhs.repr}[${idx.repr}] : ${tpe.repr}"
-    case p.Expr.RefTo(lhs, idx, tpe) => s"&${lhs.repr}${idx.fold("")(x => s"[${x.repr}]")} : ${tpe.repr}"
     case p.Expr.Alloc(tpe, size)     => s"new [${tpe.repr}*${size.repr}]"
   }
 }
@@ -482,7 +457,7 @@ extension (stmt: p.Stmt) {
       s"{\n${xs.flatMap(_.repr.linesIterator.map("  " + _)).mkString("\n")}\n}"
     case p.Stmt.Comment(value)          => s" /* $value */"
     case p.Stmt.Var(name, rhs)          => s"var ${name.repr} = ${rhs.fold("_")(_.repr)}"
-    case p.Stmt.Mut(name, expr, copy)   => s"${name.repr} ${if (copy) ":=!" else ":="} ${expr.repr}"
+    case p.Stmt.Mut(name, expr)   => s"${name.repr} := ${expr.repr}"
     case p.Stmt.Update(lhs, idx, value) => s"${lhs.repr}[${idx.repr}] := ${value.repr}"
     case p.Stmt.While(tests, cond, body) =>
       s"while({${(tests.map(_.repr) :+ cond.repr).mkString(";")}}){\n${body.flatMap(_.repr.linesIterator.map("  " + _)).mkString("\n")}\n}"

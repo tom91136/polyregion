@@ -76,10 +76,10 @@ object ScalaSRR {
   case class SourcePosition(file: String, line: Int, col: Option[Int]) derives MsgPack.Codec
 
   enum Expr(val tpe: Type) derives MsgPack.Codec {
-    case Cast(from: Term, as: Type)                           extends Expr(as)
-    case Alias(ref: Term)                                     extends Expr(ref.tpe)
-    case Index(lhs: Term, idx: Term, component: Type)         extends Expr(component)
-    case Alloc(component: Type, size: Term)                   extends Expr(Type.Ptr(component, None, Type.Space.Global))
+    case Cast(from: Term, as: Type)                   extends Expr(as)
+    case Alias(ref: Term)                             extends Expr(ref.tpe)
+    case Index(lhs: Term, idx: Term, component: Type) extends Expr(component)
+    case Alloc(component: Type, size: Term)           extends Expr(Type.Ptr(component, None, Type.Space.Global))
 
     case Invoke(
         name: Sym,

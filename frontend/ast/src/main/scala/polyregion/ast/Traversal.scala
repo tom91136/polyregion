@@ -101,25 +101,26 @@ object Traversal {
 
   extension [A](a: A) {
 
-    inline def collectAll[B](using inline t: Traversal[A, B]): List[B] = t.collectAll(a)
-    inline def collectWhere[B](using inline t: Traversal[A, B]): [C] => PartialFunction[B, C] => List[C] = [C] =>
+    def collectAll[B](using t: Traversal[A, B]): List[B] = t.collectAll(a)
+    def collectWhere[B](using t: Traversal[A, B]): [C] => PartialFunction[B, C] => List[C] = [C] =>
       (f: PartialFunction[B, C]) => t.collectWhere(a)(f)
-    inline def collectFirst_[B](using inline t: Traversal[A, B]): [C] => PartialFunction[B, C] => Option[C] = [C] =>
+    def collectFirst_[B](using t: Traversal[A, B]): [C] => PartialFunction[B, C] => Option[C] = [C] =>
       (f: PartialFunction[B, C]) => t.collectFirst_(a)(f)
 
-    inline def collectWhereOption[B](using inline t: Traversal[A, B]): [C] => (B => Option[C]) => List[C] = [C] =>
+    def collectWhereOption[B](using t: Traversal[A, B]): [C] => (B => Option[C]) => List[C] = [C] =>
       (f: B => Option[C]) => t.collectWhere(a)(f.unlift)
 
-    inline def collectFirstOption[B](using inline t: Traversal[A, B]): [C] => (B => Option[C]) => Option[C] = [C] =>
+    def collectFirstOption[B](using t: Traversal[A, B]): [C] => (B => Option[C]) => Option[C] = [C] =>
       (f: B => Option[C]) => t.collectFirst_(a)(f.unlift)
 
-    inline def modifyAll[B](using inline t: Traversal[A, B])(inline f: B => B): A = t.modifyAll(a)(f)
-    inline def modifyCollect[B, C](using inline t: Traversal[A, B])(inline f: B => (B, C)): (A, List[C]) =
+    def modifyAll[B](using t: Traversal[A, B])(f: B => B): A = t.modifyAll(a)(f)
+    def modifyCollect[B, C](using t: Traversal[A, B])(f: B => (B, C)): (A, List[C]) =
       t.modifyCollect(a)(f)
   }
 
   // non product base case
-  inline given [A, B](using inline ev: NotGiven[A <:< Product]): Traversal[A, B] = new Traversal[A, B] {
+
+  given [A, B](using ev: NotGiven[A <:< Product]): Traversal[A, B] = new Traversal[A, B] {
     extension (a: A) {
       def collectAll: List[B]                                   = Nil
       def collectWhere[C](f: PartialFunction[B, C]): List[C]    = Nil
@@ -129,21 +130,7 @@ object Traversal {
     }
   }
 
-  // // eq case
-  // inline given [B]: Traversal[B, B] = new Traversal[B, B] {
-  //   extension (a: B) {
-  //     def collectAll: List[B]                                   = a :: Nil
-  //     def collectWhere[C](f: PartialFunction[B, C]): List[C]    = f.lift(a).toList
-  //     def collectFirst_[C](f: PartialFunction[B, C]): Option[C] = f.lift(a)
-  //     def modifyAll(f: B => B): B                               = f(a)
-  //     def modifyCollect[C](f: B => (B, C)): (B, List[C]) = {
-  //       val (b, c) = f(a)
-  //       (b, c :: Nil)
-  //     }
-  //   }
-  // }
-
-  inline given [A, B](using inline t: Traversal[A, B]): Traversal[List[A], B] = new Traversal[List[A], B] {
+  given [A, B](using t: Traversal[A, B]): Traversal[List[A], B] = new Traversal[List[A], B] {
     extension (xs: List[A]) {
       def collectAll: List[B]                                = xs.flatMap(t.collectAll(_))
       def collectWhere[C](f: PartialFunction[B, C]): List[C] = xs.flatMap(t.collectWhere(_)(f))
@@ -157,7 +144,7 @@ object Traversal {
     }
   }
 
-  inline given [A, B](using inline t: Traversal[A, B]): Traversal[Vector[A], B] = new Traversal[Vector[A], B] {
+  given [A, B](using t: Traversal[A, B]): Traversal[Vector[A], B] = new Traversal[Vector[A], B] {
     extension (xs: Vector[A]) {
       def collectAll: List[B]                                = xs.flatMap(t.collectAll(_)).toList
       def collectWhere[C](f: PartialFunction[B, C]): List[C] = xs.flatMap(t.collectWhere(_)(f)).toList
@@ -171,7 +158,7 @@ object Traversal {
     }
   }
 
-  inline given [A, B](using inline t: Traversal[A, B]): Traversal[Option[A], B] = new Traversal[Option[A], B] {
+  given [A, B](using t: Traversal[A, B]): Traversal[Option[A], B] = new Traversal[Option[A], B] {
     extension (xs: Option[A]) {
       def collectAll: List[B]                                   = xs.fold(Nil)(t.collectAll(_))
       def collectWhere[C](f: PartialFunction[B, C]): List[C]    = xs.fold(Nil)(t.collectWhere(_)(f))

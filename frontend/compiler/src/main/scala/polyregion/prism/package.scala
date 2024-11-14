@@ -12,7 +12,7 @@ package object prism {
       (Quotes, Expr[B]) => Expr[A],
       (Quotes, Expr[A], Expr[B]) => Expr[Unit]
   )
-  type Prism = (polyregion.ast.PolyAST.Mirror, TermPrism[Any, Any])
+  type Prism = (polyregion.ast.ScalaSRR.Mirror, TermPrism[Any, Any])
 
   class WitnessK[A <: Any, B <: Any](
       val f: Tuple.Elem[TermPrism[A, B], 0],

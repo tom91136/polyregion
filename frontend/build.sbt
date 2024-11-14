@@ -7,7 +7,7 @@ lazy val bindingsDir = (nativeDir / "bindings" / "jvm").getAbsoluteFile
 
 // /home/tom/polyregion/native/cmake-build-debug-clang/bindings/jvm/libpolyregion-compiler-jvm.so
 
-lazy val scala3Version = "3.3.3"
+lazy val scala3Version = "3.5.2"
 lazy val catsVersion   = "2.12.0"
 lazy val munitVersion  = "1.0.2"
 
@@ -44,16 +44,6 @@ lazy val commonSettings = Seq(
 
 lazy val nativeLibSettings =
   commonSettings ++ Seq(autoScalaLibrary := false, unmanagedResources / includeFilter := "*.so" || "*.dll" || "*.dylib")
-
-//lazy val `native-compiler-x86` = project.settings(
-//  nativeLibSettings,
-//  Compile / unmanagedResourceDirectories += nativeDir / "cmake-build-release-clang" / "bindings" / "jvm"
-//)
-//
-//lazy val `native-runtime-x86` = project.settings(
-//  nativeLibSettings,
-//  Compile / unmanagedResourceDirectories += nativeDir / "cmake-build-release-clang" / "bindings" / "jvm"
-//)
 
 lazy val `binding-jvm` = project.settings(
   commonSettings,
@@ -92,9 +82,9 @@ lazy val ast = project
       Seq("-Yretain-trees") ++     // XXX we need this so that the AST -> C++ conversion with partial ctors work
         Seq("-Xmax-inlines", "80") // the AST has lots of leaf nodes and we use inline so bump the limit
     ,
-    Compile / mainClass  := Some("polyregion.ast.Main"),
+    Compile / mainClass := Some("polyregion.ast.CodeGen"),
     libraryDependencies ++= Seq(
-      "net.bytebuddy"  % "byte-buddy" % "1.15.5",
+      "net.bytebuddy"  % "byte-buddy" % "1.15.10",
       "com.lihaoyi"   %% "fansi"      % "0.5.0",
       "com.lihaoyi"   %% "upickle"    % "4.0.2",
       "com.lihaoyi"   %% "pprint"     % "0.9.0",
@@ -114,12 +104,8 @@ lazy val compiler = project
         Seq("-Xmax-inlines", "80") // the AST has lots of leaf nodes and we use inline so bump the limit
     ,
     libraryDependencies ++= Seq(
-      "net.bytebuddy"  % "byte-buddy" % "1.15.5",
-      "com.lihaoyi"   %% "fansi"      % "0.5.0",
-      "com.lihaoyi"   %% "upickle"    % "4.0.2",
-      "com.lihaoyi"   %% "pprint"     % "0.9.0",
-      "org.typelevel" %% "cats-core"  % catsVersion,
-      "org.scalameta" %% "munit"      % munitVersion % Test
+      "org.scala-lang" %% "scala2-library-tasty-experimental" % scala3Version,
+      "org.scalameta"  %% "munit"                             % munitVersion % Test
     ),
     (Compile / unmanagedJars) := {
       val xs       = (Compile / unmanagedJars).value

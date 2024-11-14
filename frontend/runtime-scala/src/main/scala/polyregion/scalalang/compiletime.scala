@@ -1,7 +1,7 @@
 package polyregion.scalalang
 
 import cats.syntax.all.*
-import polyregion.ast.{PolyAST as p, *}
+import polyregion.ast.{ScalaSRR as p, *}
 import polyregion.jvm.{compiler as ct, runtime as rt}
 import polyregion.prism.StdLib
 import polyregion.scalalang as srt
@@ -216,7 +216,7 @@ object compiletime {
       _ = println(prog.entry.repr)
       _ = println(prog.functions.map(_.repr).mkString("\n"))
 
-      serialisedAst <- Either.catchNonFatal(MsgPack.encode(MsgPack.Versioned(CppSourceMirror.AdtHash, prog)))
+      serialisedAst <- Either.catchNonFatal(MsgPack.encode(CodeGen.polyASTVersioned(prog)))
       compiler = ct.Compiler.create()
 
       compilations <- configs.traverse(c =>
@@ -245,8 +245,8 @@ object compiletime {
         tpe.value -> tpe.sizeInBytes
       }.unzip
 
-      val tidTpeOrdinal = Pickler.tpeAsRuntimeTpe(p.Type.IntS64).value
-      val tidTpeSize    = Pickler.tpeAsRuntimeTpe(p.Type.IntS64).sizeInBytes
+      val tidTpeOrdinal = Pickler.tpeAsRuntimeTpe(p.Type.Long).value
+      val tidTpeSize    = Pickler.tpeAsRuntimeTpe(p.Type.Long).sizeInBytes
 
       val returnTpeOrdinal = Pickler.tpeAsRuntimeTpe(prog.entry.rtn).value
       val returnTpeSize    = Pickler.tpeAsRuntimeTpe(prog.entry.rtn).sizeInBytes
@@ -310,7 +310,7 @@ object compiletime {
             q.Match(
               'found.asTerm,
               compilations.zipWithIndex.map { case ((config, compilation), i) =>
-                val layouts0 = compilation.layouts.map(l => p.Sym(l.name.toList) -> l).toMap
+                val layouts0 = compilation.layouts.map(l => p.Sym(l.name) -> l).toMap
 
                 val lut     = prog.defs.map(s => s.name -> s).toMap
                 val layouts = prog.defs.map(sd => sd -> (layouts0(sd.name), prismRefs.get(sd.name))).toMap
@@ -457,7 +457,7 @@ object compiletime {
 
             val rtn = write(sdef.name, ref)
 
-            Pickler.writePrim(target, Expr(byteOffset), p.Type.IntS64, rtn)
+            Pickler.writePrim(target, Expr(byteOffset), p.Type.Long, rtn)
 
           case (t, None, '{ $ref: t }) => Pickler.writePrim(target, Expr(byteOffset), t, ref)
           case (t, _, _) =>
@@ -499,7 +499,7 @@ object compiletime {
             )
           case (s @ p.Type.Struct(_, _, _, _), Some(sdef), '{ $ref: t }) =>
             println(s"$ref = " + ref.asTerm.symbol.flags.show)
-            val ptr = Pickler.readPrim(target, Expr(byteOffset), p.Type.IntS64).asExprOf[Long]
+            val ptr = Pickler.readPrim(target, Expr(byteOffset), p.Type.Long).asExprOf[Long]
             '{
 
               println(s"Restore ${$ref}")

@@ -1,6 +1,6 @@
 package polyregion.prism
 
-import polyregion.ast.{PolyAST as p, *}
+import polyregion.ast.{ScalaSRR as p, *}
 import polyregion.prism.compiletime.*
 import polyregion.scalalang.intrinsics
 import polyregion.scalalang.intrinsics.TypedBuffer
@@ -255,15 +255,15 @@ object StdLib {
           }
         }
       ),
-      witness[scala.Tuple2[?, ?], Tuple2[?, ?]]( //
-        { case (_ @ given Quotes, x) =>
-          x match { case '{ $x: scala.Tuple2[t0, t1] } => '{ new Tuple2[t0, t1]($x._1, $x._2) } }
-        },
-        { case (_ @ given Quotes, x) =>
-          x match { case '{ $x: Tuple2[t0, t1] } => '{ scala.Tuple2[t0, t1]($x._1, $x._2) } }
-        },
-        { case (_ @ given Quotes, ys, _) => '{ () } }
-      ),
+      // witness[scala.Tuple2[?, ?], Tuple2[?, ?]]( //
+      //   { case (_ @ given Quotes, x) =>
+      //     x match { case '{ $x: scala.Tuple2[t0, t1] } => '{ new Tuple2[t0, t1]($x._1, $x._2) } }
+      //   },
+      //   { case (_ @ given Quotes, x) =>
+      //     x match { case '{ $x: Tuple2[t0, t1] } => '{ scala.Tuple2[t0, t1]($x._1, $x._2) } }
+      //   },
+      //   { case (_ @ given Quotes, ys, _) => '{ () } }
+      // ),
 
       // Immutable types, restore simply uses the original instance
       witness[scala.reflect.ClassTag[?], ClassTag[?]]( //

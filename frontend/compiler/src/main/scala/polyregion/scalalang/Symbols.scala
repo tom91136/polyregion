@@ -1,6 +1,6 @@
 package polyregion.scalalang
 
-import polyregion.ast.{PolyAST as p, *}
+import polyregion.ast.{ScalaSRR as p, *}
 //import polyregion.scala.Buffer
 
 import scala.reflect.ClassTag
