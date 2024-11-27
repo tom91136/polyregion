@@ -105,29 +105,31 @@ private[polyregion] object CodeGen {
 
     println("Generating C++ mirror for PolyAST...")
 
-    val structs =
-      deriveStruct[SourcePosition]()
-        :: deriveStruct[Named]()
-        :: deriveStruct[Type.Kind]()
-        :: deriveStruct[Type.Space]()
-        :: deriveStruct[Type]()
-        :: deriveStruct[Expr]()
-        :: deriveStruct[Overload]()
-        :: deriveStruct[Spec]()
-        :: deriveStruct[Intr]()
-        :: deriveStruct[Math]()
-        :: deriveStruct[Stmt]()
-        :: deriveStruct[Signature]()
-        :: deriveStruct[Function.Attr]()
-        :: deriveStruct[Arg]()
-        :: deriveStruct[Function]()
-        :: deriveStruct[StructDef]()
-        :: deriveStruct[Program]()
-        :: deriveStruct[StructLayoutMember]()
-        :: deriveStruct[StructLayout]()
-        :: deriveStruct[CompileEvent]()
-        :: deriveStruct[CompileResult]()
-        :: Nil //
+
+    val x = compiletime.methods[PolyAST.type]
+    val structs = 
+       deriveStruct[SourcePosition]()
+      :: deriveStruct[Named]()
+      :: deriveStruct[Type.Kind]()
+      :: deriveStruct[Type.Space]()
+      :: deriveStruct[Type]()
+      :: deriveStruct[Expr]()
+      :: deriveStruct[Overload]()
+      :: deriveStruct[Spec]()
+      :: deriveStruct[Intr]()
+      :: deriveStruct[Math]()
+      :: deriveStruct[Stmt]()
+      :: deriveStruct[Signature]()
+      :: deriveStruct[Function.Attr]()
+      :: deriveStruct[Arg]()
+      :: deriveStruct[Function]()
+      :: deriveStruct[StructDef]()
+      :: deriveStruct[Program]()
+      :: deriveStruct[StructLayoutMember]()
+      :: deriveStruct[StructLayout]()
+      :: deriveStruct[CompileEvent]()
+      :: deriveStruct[CompileResult]()
+      :: Nil //
 
     val namespace         = "polyregion::polyast"
     val adtFileName       = "polyast"

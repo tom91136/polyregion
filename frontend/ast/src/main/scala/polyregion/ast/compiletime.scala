@@ -1,5 +1,7 @@
 package polyregion.ast
 
+import pprint.pprintln
+
 private[polyregion] object compiletime {
 
   import scala.quoted.*
@@ -13,6 +15,7 @@ private[polyregion] object compiletime {
         case MirrorKind.CaseProduct => '{ MirrorKind.CaseProduct }
       }
   }
+
   inline def symbolNames[T] = ${ symbolNamesImpl[T] }
   def symbolNamesImpl[T: Type](using quotes: Quotes): Expr[List[String]] = {
     import quotes.reflect.*
@@ -80,8 +83,194 @@ private[polyregion] object compiletime {
     case CtorAp(tpe: A, args: List[Value[A]])
   }
 
-  // case class CtorTermSelect[A](arg: (String, A), rest: List[(String, A)])
-  // case class CtorAp[A](tpe: A, args: )
+  private inline def findPrimaryCtorParams[T: Type](using
+      q: Quotes
+  ): Option[(List[q.reflect.Term], List[q.reflect.Term])] = {
+    import q.reflect.*
+    val tpe = TypeRepr.of[T].dealias.simplified
+
+    def matchCtor(t: Tree, parent: Option[TypeRepr]) = t match {
+      case Apply(Select(New(tpeTree), "<init>"), args) //
+          if parent.forall(tpeTree.tpe =:= _.widenTermRefByName) =>
+        val primaryCtorParamListSize = tpeTree.tpe.typeSymbol.primaryConstructor.paramSymss.headOption.map(_.size)
+        Some(primaryCtorParamListSize.fold(args -> Nil)(args.splitAt(_)))
+      case Apply(Apply(Select(New(tpeTree), "<init>"), args0), args1)
+          if parent.forall(tpeTree.tpe =:= _.widenTermRefByName) =>
+        Some(args0 -> args1)
+      case _ =>
+        None
+    }
+    if (tpe.isSingleton) {
+      val symbol = tpe.typeSymbol
+      class CtorTraverser extends TreeAccumulator[Option[(List[Term], List[Term])]] {
+        def foldTree(x: Option[(List[Term], List[Term])], tree: Tree)(owner: Symbol) =
+          x.orElse(matchCtor(tree, Some(tpe)).orElse(foldOverTree(None, tree)(symbol)))
+      }
+      CtorTraverser().foldOverTree(None, tpe.termSymbol.tree)(Symbol.noSymbol)
+    } else {
+      tpe.typeSymbol.tree match {
+        case ClassDef(name, _, ctors, _, _) => ctors.collectFirst(Function.unlift(matchCtor(_, None)))
+        case _                              => report.errorAndAbort(s"Not a classdef")
+      }
+    }
+  }
+
+  inline def methods[T] = ${ methodsImpl[T] }
+  def methodsImpl[T: Type](using quotes: Quotes) = {
+    import quotes.reflect.*
+
+    val tpe = TypeRepr.of[T].dealias.simplified
+
+    println(s"${tpe.classSymbol}")
+
+    def traceIt(depth: Int, tree: Tree): Unit = {
+      println(s"[$depth]")
+
+      pprintln(tree)
+      if (depth > 100) ???
+      tree match {
+
+        case s @ Apply(term, args)  => traceIt(depth + 1, term)
+        case s @ Select(term, name) => traceIt(depth + 1, term)
+        case Typed(term, _)         => traceIt(depth + 1, term)
+        case i @ This(x)            => traceIt(depth + 1, i)
+        case i @ Ident(_) =>
+          println(i.symbol.tree)
+        case DefDef(name, args, _, impl) =>
+          println(s"> $name $args")
+          impl match {
+            case Some(value) =>
+              println(Expr.betaReduce(value.asExpr).show)
+
+              traceIt(depth + 1, value)
+            case None => ()
+          }
+        case x =>
+          ???
+          println(x)
+      }
+    }
+
+    def work(arg1Vals: List[ValDef]) = findPrimaryCtorParams[T].fold(Expr(1)) { case (_, arg1) =>
+      if (arg1Vals.size != arg1.size) {
+        report.errorAndAbort(s"Base class arg list 1 size mismatch: base is $arg1Vals but sub is $arg1")
+      }
+
+      println("~~>" + arg1Vals)
+      // arg1Vals.zip(arg1).map { (valDef, impl) =>
+
+      //   println(valDef.name)
+      //   println(impl.symbol.tree.show)
+      //   // pprintln(impl.symbol.tree)
+
+      //   impl.symbol.tree match {
+      //     case DefDef(_, _, _, Some(Block(DefDef(_, _, _, Some(fn)) :: Nil, _))) =>
+      //       println(fn)
+      //       println(remap(fn))
+      //     case _ => ???
+      //   }
+
+      // }
+      Expr(1)
+    }
+
+    // tpe.baseClasses.drop(if (tpe.isSingleton) 0 else 1).headOption.map(_.tree) match {
+    //   case Some(ClassDef(name, DefDef(_, _ :: TermParamClause(xs) :: Nil, _, _), _, _, _)) =>
+    //     work(xs)
+    //   case None => report.errorAndAbort(s"No base class found for $tpe")
+    //   case Some(x) if x.symbol.typeRef.widenTermRefByName =:= TypeRepr.of[scala.reflect.Enum] => Expr(1)
+    //   case Some(x) => report.errorAndAbort(s"Unexpected base class symbol ${x.show} for ${tpe.show}")
+    // }
+
+    val methods = tpe.classSymbol.toList.flatMap(_.declaredMethods).filterNot(_.flags.is(Flags.Private))
+    println("~~ " + methods.map(_.tree).mkString("\n"))
+
+    def retype(t: TypeRepr, const: Boolean = false): String = {
+      val r = t.widen.widenTermRefByName
+      val mapped = r.asType match {
+        case '[String] => "std::string"
+        case _         => s"${r.show}"
+      }
+      if (const) s"const ${mapped}&" else mapped
+    }
+
+    def remap(tree: Tree, fnDef: Boolean = false, scope: Map[Ident, String] = Map.empty): String = tree match {
+      case i @ Ident(name)        => scope.getOrElse(i, name)
+      case s @ Select(term, name) => s"${remap(term)}.$name${if (s.tpe.isSingleton) "()" else ""}"
+      case Block(Nil, term)       => remap(term)
+      case Block(stmts, term)     => s"${stmts.map(remap(_)).mkString("\n")}\n${remap(term)}"
+      case ValDef(name, tpe, rhs) =>
+        s"${retype(tpe.tpe, const = fnDef)} $name${rhs.map(x => s" = ${remap(x)}").getOrElse("")}"
+      case Literal(StringConstant(s)) => s"\"$s\""
+
+      case TypedOrTest(x, _)         => remap(x)
+      case Typed(x, _)               => remap(x)
+      case Unapply(_, _, pats)       => s"una(${pats.map(remap(_)).mkString(", ")})"
+      case If(cond, trueBr, falseBr) => s"if (${remap(cond)}) { ${remap(trueBr)} } else { ${remap(falseBr)} }"
+
+      case Match(term, cases) =>
+        // auto _value = _x.get<Type>();
+
+        val mapped = cases.map {
+          case CaseDef(TypedOrTest(Unapply(_, _, pats), tpeTree), None, rhs) =>
+            val bindTable = pats.collect { case Bind(name, ident) =>
+              ident -> s"_y->${name}"
+            }.toMap
+            s"""if (auto _y = _x.get<${retype(tpeTree.tpe)}>()) { 
+                |${remap(rhs)}
+                |}""".stripMargin
+          case CaseDef(s: Select, None, rhs) => s"if (_x.is<${retype(s.tpe)}>()) { return ${remap(rhs)}; }"
+          case x                             => s"/* unhandled case ${x.show} */"
+        }
+        s"""|[&, _x = ${remap(term)}](){
+            |${mapped.map(_.indent(2)).mkString}
+            |  throw std::logic_error("Unhandled match case for ${remap(term)} (of type ${retype(
+             term.tpe
+           )}) at " __FILE__ ":" __LINE__);
+            |}();""".stripMargin
+
+      case x =>
+        // pprintln(x)
+
+        Expr.betaReduce(x.asExpr) match {
+          case '{ StringContext(${Varargs(Exprs(elems))}*) } => s"CANNOT CS ${elems}"
+          case '{ ($x : StringContext).s($s)  } => s"CANNOT S ${x.asTerm} ap ${s.asTerm}"
+          case _ =>
+            s"/* failed ${x}*/"
+        }
+
+    }
+
+    methods.foreach { s =>
+      s.tree match {
+        case f @ DefDef(name, _, _, Some(rhs)) =>
+          println(">>>" + name)
+
+          val prog =
+            s"""${retype(f.returnTpt.tpe)} $name(${f.termParamss
+                .flatMap(_.params)
+                .map(p => remap(tree = p, fnDef = true))
+                .mkString(", ")}) {  
+               |${remap(rhs).indent(2)}}
+               |""".stripMargin
+
+          println(prog)
+
+        case unknown => ???
+      }
+
+    // pprintln(s.tree)
+    }
+
+    // def remapOne(x : Tree) = {
+    //   x match {
+    //     case _: AnyRef =>
+
+    //   }
+    // }
+
+    Expr(1)
+  }
 
   inline def primaryCtorApplyTerms[
       T,
@@ -90,7 +279,6 @@ private[polyregion] object compiletime {
       Tpe,
       TypeRes[_] <: TypeResolver[Tpe]
   ] = ${ primaryCtorApplyTermsImpl[T, Val, TermRes, Tpe, TypeRes] }
-
   def primaryCtorApplyTermsImpl[
       T: Type,
       Val: Type,
@@ -171,36 +359,10 @@ private[polyregion] object compiletime {
         report.errorAndAbort(s"Can't handle expr: ${term}\n${term.show}")
     }
 
-    def matchCtor(t: Tree, parent: Option[TypeRepr]): Option[Expr[List[Val]]] = t match {
-      case a @ Apply(Select(New(tpeTree), "<init>"), args) if parent.forall(tpeTree.tpe =:= _.widenTermRefByName) =>
-        // println(s"Show >>> ")
-        // pprint.pprintln(t)
-        Some(
-          Expr.ofList(args.map(arg => summonTermRes[Value[Tpe]](tc => '{ ${ tc }(Some(${ liftTermToValue(arg) })) })))
-        )
-      case _ => None
-    }
-
-    // Scala implements enum cases w/o params as vals in the companion with an anonymous cls
-    (if (tpe.isSingleton) {
-       class CtorTraverser extends TreeAccumulator[Option[Expr[List[Val]]]] {
-         def foldTree(x: Option[Expr[List[Val]]], tree: Tree)(owner: Symbol): Option[Expr[List[Val]]] =
-           x.orElse(matchCtor(tree, Some(tpe)).orElse(foldOverTree(None, tree)(symbol)))
-       }
-      //  println("Traverse")
-
-      //  pprint.pprintln(tpe.termSymbol.tree.show)
-      //  pprint.pprintln(tpe.termSymbol.tree)
-       CtorTraverser().foldOverTree(None, tpe.termSymbol.tree)(Symbol.noSymbol)
-     } else {
-       symbol.tree match {
-         case ClassDef(name, _, headCtorApply :: _, _, _) => matchCtor(headCtorApply, None)
-         case _                                           => report.errorAndAbort(s"Not a classdef")
-       }
-     })
-    match {
-      case Some(expr) => expr
-      case None       => Expr(Nil) // report.errorAndAbort(s"Unrecognised ctor pattern")
+    findPrimaryCtorParams[T].fold(Expr(Nil)) { case (primaryCtor, _) =>
+      Expr.ofList(
+        primaryCtor.map(arg => summonTermRes[Value[Tpe]](tc => '{ ${ tc }(Some(${ liftTermToValue(arg) })) }))
+      )
     }
   }
 

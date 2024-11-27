@@ -988,7 +988,7 @@ private[polyregion] object CppStructGen {
 
     val ctorTerms =
       compiletime.primaryCtorApplyTerms[m.MirroredType, ToCppTerm.Value, ToCppTerm, CppType, ToCppType].map(write(_))
-    val tpe     = summon[ToCppType[m.MirroredType]]()
+    val tpe = summon[ToCppType[m.MirroredType]]()
     val applied = parent.map((s, _) => (s, ctorTerms))
     inline m match {
       case s: Mirror.SumOf[T] =>

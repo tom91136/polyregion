@@ -1,6 +1,9 @@
 package polyregion.ast
 
 import scala.collection.immutable.ArraySeq
+import polyregion.ast.PolyAST.Type.Space
+import polyregion.ast.PolyAST.Type.Kind
+import polyregion.ast.PolyAST.Function.Attr
 
 object PolyAST {
 
@@ -297,5 +300,149 @@ object PolyAST {
       layouts: List[StructLayout],
       messages: String
   ) derives MsgPack.Codec
+
+  // ==========
+
+  // object Repr {
+
+  extension (t: SourcePosition) {
+    def repr: String = s"${t.file}:${t.line}${t.col.map(c => s":$c").getOrElse("")}"
+  }
+
+  extension (t: Type.Space) {
+    def repr: String = t match {
+      case Space.Global  => "Global"
+      case Space.Local   => "Local"
+      case Space.Private => "Private"
+    }
+  }
+
+  extension (k: Type.Kind) {
+    def repr: String = k match {
+      case Kind.None       => "None"
+      case Kind.Ref        => "Ref"
+      case Kind.Integral   => "Integral"
+      case Kind.Fractional => "Fractional"
+    }
+  }
+
+  extension (t: Type) {
+    def repr: String = t match {
+      case Type.Float16 => "F16"
+      case Type.Float32 => "F32"
+      case Type.Float64 => "F64"
+
+      case Type.IntU8  => "U8"
+      case Type.IntU16 => "U16"
+      case Type.IntU32 => "U32"
+      case Type.IntU64 => "U64"
+
+      case Type.IntS8  => "I8"
+      case Type.IntS16 => "I16"
+      case Type.IntS32 => "I32"
+      case Type.IntS64 => "I64"
+
+      case Type.Nothing => "Nothing"
+      case Type.Unit0   => "Unit0"
+      case Type.Bool1   => "Bool1"
+
+      case Type.Struct(name)             => s"$name"
+      case Type.Ptr(comp, length, space) => s"${comp.repr}[${length.getOrElse("")}]^${space.repr}"
+      case Type.Annotated(tpe, pos, comment) =>
+        s"${tpe.repr}${pos.map(s => s"/*${s.repr}*/").getOrElse("")}${comment.map(s => s"/*$s*/").getOrElse("")}"
+    }
+  }
+
+  extension (n: Named) {
+    def repr: String = s"${n.symbol}"
+  }
+
+  extension (e: Expr) {
+    def repr: String = e match {
+      case Expr.Float16Const(x) => s"f16($x)"
+      case Expr.Float32Const(x) => s"f32($x)"
+      case Expr.Float64Const(x) => s"f64($x)"
+
+      case Expr.IntU8Const(x)  => s"u8($x)"
+      case Expr.IntU16Const(x) => s"u16($x)"
+      case Expr.IntU32Const(x) => s"u32($x)"
+      case Expr.IntU64Const(x) => s"u64($x)"
+
+      case Expr.IntS8Const(x)  => s"i8($x)"
+      case Expr.IntS16Const(x) => s"i16($x)"
+      case Expr.IntS32Const(x) => s"i32($x)"
+      case Expr.IntS64Const(x) => s"i64($x)"
+
+      case Expr.Unit0Const    => "unit0(())"
+      case Expr.Bool1Const(x) => s"bool1($x)"
+
+      case Expr.SpecOp(op) => ???
+      case Expr.MathOp(op) => ???
+      case Expr.IntrOp(op) => ???
+
+      case Expr.Select(init, last) =>
+        (init :+ last) match {
+          case x :: Nil => s"${x.symbol}: ${x.tpe.repr}"
+          case x :: xs =>
+            xs.foldLeft(s"${x.symbol}: ${x.tpe.repr}")((acc, x) => s"(${acc}).${x.symbol}: ${x.tpe.repr}")
+          case Nil => ???
+        }
+      case Expr.Poison(t) => s"??? /*${t.repr}s*/"
+
+      case Expr.Cast(from, as)        => s"${from.repr}.to[${as.repr}]"
+      case Expr.Index(lhs, idx, comp) => s"${lhs.repr}.index[${comp.repr}](${idx.repr})"
+      case Expr.RefTo(lhs, idx, comp, space) =>
+        s"${lhs.repr}.refTo[${comp.repr}, ${space.repr}](${idx.map(_.repr).getOrElse("")})"
+      case Expr.Alloc(comp, size, space) => s"alloc[${comp.repr}, ${space.repr}](${size.repr})"
+      case Expr.Invoke(name, args, rtn)  => s"$name(${args.map(_.repr).mkString(", ")}): ${rtn.repr}"
+      case Expr.Annotated(expr, pos, comment) =>
+        s"${expr.repr}${pos.map(s => s"/*${s.repr}*/").getOrElse("")}${comment.map(s => s"/*$s*/").getOrElse("")}"
+
+    }
+  }
+
+  extension (stmt: Stmt) {
+    def repr: String = stmt match {
+      case Stmt.Block(xs) =>
+        s"{\n${xs.flatMap(_.repr.linesIterator.map("  " + _)).mkString("\n")}\n}"
+      case Stmt.Comment(value)          => s" /* $value */"
+      case Stmt.Var(name, rhs)          => s"var ${name.repr} = ${rhs.fold("_")(_.repr)}"
+      case Stmt.Mut(name, expr)         => s"${name.repr} = ${expr.repr}"
+      case Stmt.Update(lhs, idx, value) => s"${lhs.repr}[${idx.repr}] = ${value.repr}"
+      case Stmt.While(tests, cond, body) =>
+        s"while({${(tests.map(_.repr) :+ cond.repr)
+            .mkString(";")}}){\n${body.flatMap(_.repr.linesIterator.map("  " + _)).mkString("\n")}\n}"
+      case Stmt.Break        => s"break;"
+      case Stmt.Cont         => s"continue;"
+      case Stmt.Return(expr) => s"return ${expr.repr}"
+      case Stmt.Cond(cond, trueBr, falseBr) =>
+        s"if(${cond.repr}) {\n${trueBr.flatMap(_.repr.linesIterator.map("  " + _)).mkString("\n")}\n} else {\n${falseBr
+            .flatMap(_.repr.linesIterator.map("  " + _))
+            .mkString("\n")}\n}"
+      case Stmt.Annotated(stmt, pos, comment) =>
+        s"${stmt.repr}${pos.map(s => s"/*${s.repr}*/").getOrElse("")}${comment.map(s => s"/*$s*/").getOrElse("")}"
+    }
+  }
+
+  extension (a: Arg) {
+    def repr: String = s"${a.named.repr}${a.pos}"
+  }
+
+  extension (a: Function.Attr) {
+    def repr: String = a match {
+      case Attr.Internal  => "Internal"
+      case Attr.Exported  => "Exported"
+      case Attr.FPRelaxed => "FPRelaxed"
+      case Attr.FPStrict  => "FPStrict"
+      case Attr.Entry     => "Entry"
+    }
+  }
+
+  extension (f: Function) {
+    def repr: String = s"def ${f.name}(${f.args.map(a =>
+        s"${a.named.repr}${a.pos.map(s => s"/*${s.repr}*/").getOrElse("")}"
+      )}): ${f.rtn.repr} /*${f.attrs.map(_.repr)}*/ {\n" + f.body.map(s => s"  ${s.repr}").mkString("\n") + "}\n"
+  }
+  // }
 
 }
