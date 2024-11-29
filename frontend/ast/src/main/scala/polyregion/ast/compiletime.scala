@@ -115,161 +115,135 @@ private[polyregion] object compiletime {
     }
   }
 
-  inline def methods[T] = ${ methodsImpl[T] }
-  def methodsImpl[T: Type](using quotes: Quotes) = {
+  inline def generateReprSource[T] = ${ generateReprSourceImpl[T] }
+  def generateReprSourceImpl[T: Type](using quotes: Quotes) = {
     import quotes.reflect.*
-
     val tpe = TypeRepr.of[T].dealias.simplified
 
-    println(s"${tpe.classSymbol}")
-
-    def traceIt(depth: Int, tree: Tree): Unit = {
-      println(s"[$depth]")
-
-      pprintln(tree)
-      if (depth > 100) ???
-      tree match {
-
-        case s @ Apply(term, args)  => traceIt(depth + 1, term)
-        case s @ Select(term, name) => traceIt(depth + 1, term)
-        case Typed(term, _)         => traceIt(depth + 1, term)
-        case i @ This(x)            => traceIt(depth + 1, i)
-        case i @ Ident(_) =>
-          println(i.symbol.tree)
-        case DefDef(name, args, _, impl) =>
-          println(s"> $name $args")
-          impl match {
-            case Some(value) =>
-              println(Expr.betaReduce(value.asExpr).show)
-
-              traceIt(depth + 1, value)
-            case None => ()
-          }
-        case x =>
-          ???
-          println(x)
-      }
-    }
-
-    def work(arg1Vals: List[ValDef]) = findPrimaryCtorParams[T].fold(Expr(1)) { case (_, arg1) =>
-      if (arg1Vals.size != arg1.size) {
-        report.errorAndAbort(s"Base class arg list 1 size mismatch: base is $arg1Vals but sub is $arg1")
-      }
-
-      println("~~>" + arg1Vals)
-      // arg1Vals.zip(arg1).map { (valDef, impl) =>
-
-      //   println(valDef.name)
-      //   println(impl.symbol.tree.show)
-      //   // pprintln(impl.symbol.tree)
-
-      //   impl.symbol.tree match {
-      //     case DefDef(_, _, _, Some(Block(DefDef(_, _, _, Some(fn)) :: Nil, _))) =>
-      //       println(fn)
-      //       println(remap(fn))
-      //     case _ => ???
-      //   }
-
-      // }
-      Expr(1)
-    }
-
-    // tpe.baseClasses.drop(if (tpe.isSingleton) 0 else 1).headOption.map(_.tree) match {
-    //   case Some(ClassDef(name, DefDef(_, _ :: TermParamClause(xs) :: Nil, _, _), _, _, _)) =>
-    //     work(xs)
-    //   case None => report.errorAndAbort(s"No base class found for $tpe")
-    //   case Some(x) if x.symbol.typeRef.widenTermRefByName =:= TypeRepr.of[scala.reflect.Enum] => Expr(1)
-    //   case Some(x) => report.errorAndAbort(s"Unexpected base class symbol ${x.show} for ${tpe.show}")
-    // }
-
-    val methods = tpe.classSymbol.toList.flatMap(_.declaredMethods).filterNot(_.flags.is(Flags.Private))
-    println("~~ " + methods.map(_.tree).mkString("\n"))
-
+    def normalise(s: String) = s.replaceAll("\\$", "_")
     def retype(t: TypeRepr, const: Boolean = false): String = {
-      val r = t.widen.widenTermRefByName
+      val r = t.dealias.simplified
+
       val mapped = r.asType match {
         case '[String] => "std::string"
-        case _         => s"${r.show}"
+        case '[Int]    => "int32_t"
+        case _ =>
+          val fqcnTail = List
+            .unfold(r.typeSymbol)(s => if (s.isNoSymbol) None else Some((s, s.maybeOwner)))
+            .takeWhile(x => x != tpe.typeSymbol)
+            .reverse
+
+          val (_, cppName) = fqcnTail
+            .map(s => s.flags.is(Flags.Module) -> s.name.replace("$", ""))
+            .foldLeft((true, "")) {
+              case ((true, acc), (m, x))  => m -> s"$acc$x"
+              case ((false, acc), (m, x)) => m -> s"$acc.$x"
+            }
+
+          val isBase    = r.widen == r
+          val singleton = r.typeSymbol.caseFields.isEmpty
+
+          if (isBase && singleton) s"$cppName::Any" // is base of an enum
+          else if (singleton) s"${cppName}::${r.termSymbol.name}"
+          else s"${fqcnTail.map(_.name.replace("$", "")).mkString("::")}"
+
       }
       if (const) s"const ${mapped}&" else mapped
     }
 
-    def remap(tree: Tree, fnDef: Boolean = false, scope: Map[Ident, String] = Map.empty): String = tree match {
-      case i @ Ident(name)        => scope.getOrElse(i, name)
-      case s @ Select(term, name) => s"${remap(term)}.$name${if (s.tpe.isSingleton) "()" else ""}"
-      case Block(Nil, term)       => remap(term)
-      case Block(stmts, term)     => s"${stmts.map(remap(_)).mkString("\n")}\n${remap(term)}"
+    def remap(tree: Tree, scope: Map[String, String], depth: Int, fnDef: Boolean = false): String = tree match {
+      case i @ Ident(name)             => scope.getOrElse(name, normalise(name))
+      case s @ Select(term, name)      => s"${remap(term, scope, depth + 1)}.${normalise(name)}"
+      case Block(Nil, term)            => remap(term, scope, depth + 1)
+      case Block(stmts, Closure(_, _)) => s"${stmts.map(remap(_, scope, depth + 1)).mkString("\n")}"
+      case Block(stmts, term) =>
+        s"${stmts.map(remap(_, scope, depth + 1)).mkString("\n")}\n${remap(term, scope, depth + 1)}"
       case ValDef(name, tpe, rhs) =>
-        s"${retype(tpe.tpe, const = fnDef)} $name${rhs.map(x => s" = ${remap(x)}").getOrElse("")}"
-      case Literal(StringConstant(s)) => s"\"$s\""
-
-      case TypedOrTest(x, _)         => remap(x)
-      case Typed(x, _)               => remap(x)
-      case Unapply(_, _, pats)       => s"una(${pats.map(remap(_)).mkString(", ")})"
-      case If(cond, trueBr, falseBr) => s"if (${remap(cond)}) { ${remap(trueBr)} } else { ${remap(falseBr)} }"
-
+        s"${retype(tpe.tpe, const = fnDef)} ${normalise(name)}${rhs.map(x => s" = ${remap(x, scope, depth + 1)}").getOrElse("")}"
+      case Literal(StringConstant(s)) => s"\"${s.replaceAll("\n", "\\\\n")}\"s"
+      case Literal(IntConstant(i))    => s"$i"
+      case TypedOrTest(x, _)          => remap(x, scope, depth + 1)
+      case Typed(x, _)                => remap(x, scope, depth + 1)
+      case If(cond, trueBr, falseBr) =>
+        s"if (${remap(cond, scope, depth + 1)}) { ${remap(trueBr, scope, depth + 1)} } else { ${remap(falseBr, scope, depth + 1)} }"
+      case f @ DefDef("$anonfun", _, _, Some(rhs)) =>
+        val args = f.termParamss.flatMap(_.params).map(p => remap(p, scope, depth + 1, fnDef = true)).mkString(", ")
+        s"[&]($args){ return ${remap(rhs, scope, depth + 1)}; }"
       case Match(term, cases) =>
-        // auto _value = _x.get<Type>();
+        val names       = List("_x", "_y", "_z")
+        val nameAtDepth = names((names.size - 1) % depth)
+        val expr        = remap(term, scope, depth + 1)
 
         val mapped = cases.map {
-          case CaseDef(TypedOrTest(Unapply(_, _, pats), tpeTree), None, rhs) =>
-            val bindTable = pats.collect { case Bind(name, ident) =>
-              ident -> s"_y->${name}"
-            }.toMap
-            s"""if (auto _y = _x.get<${retype(tpeTree.tpe)}>()) { 
-                |${remap(rhs)}
-                |}""".stripMargin
-          case CaseDef(s: Select, None, rhs) => s"if (_x.is<${retype(s.tpe)}>()) { return ${remap(rhs)}; }"
-          case x                             => s"/* unhandled case ${x.show} */"
+          case CaseDef(TypedOrTest(Unapply(_, _, pats), tpeTree), None, rhs) if tpeTree.symbol.flags.is(Flags.Case) =>
+            val bindScopes = tpeTree.symbol.caseFields
+              .zip(pats)
+              .collect { case (caseVal, Bind(name, _)) => name -> s"$nameAtDepth->${caseVal.name}" }
+              .toMap
+            s"if (auto $nameAtDepth = $expr.get<${retype(tpeTree.tpe)}>()) {\n  return ${remap(rhs, scope = bindScopes, depth + 1)};\n}"
+          case CaseDef(s: Select, None, rhs) =>
+            s"if ($expr.is<${retype(s.tpe)}>()) { return ${remap(rhs, scope, depth + 1)}; }"
+          case x => s"/* unhandled case ${x.show} */"
         }
-        s"""|[&, _x = ${remap(term)}](){
+
+        s"""|[&]{
             |${mapped.map(_.indent(2)).mkString}
-            |  throw std::logic_error("Unhandled match case for ${remap(term)} (of type ${retype(
-             term.tpe
-           )}) at " __FILE__ ":" __LINE__);
-            |}();""".stripMargin
-
+            |  throw std::logic_error(fmt::format("Unhandled match case for $expr (of type ${retype(
+             term.tpe.widenTermRefByName
+           )}) at {}:{})", __FILE__, __LINE__));
+            |}()""".stripMargin
+      case Apply(Ident("repr"), x :: Nil) => s"repr(${remap(x, scope, depth + 1)})"
       case x =>
-        // pprintln(x)
-
         Expr.betaReduce(x.asExpr) match {
-          case '{ StringContext(${Varargs(Exprs(elems))}*) } => s"CANNOT CS ${elems}"
-          case '{ ($x : StringContext).s($s)  } => s"CANNOT S ${x.asTerm} ap ${s.asTerm}"
-          case _ =>
-            s"/* failed ${x}*/"
+          case '{ ($x: Any).toString() } => s"std::to_string(${remap(x.asTerm, scope, depth + 1)})"
+          case '{ ($x: Option[t]).getOrElse($v) } =>
+            s"${remap(x.asTerm, scope, depth + 1)} ^ get_or_else(${remap(v.asTerm, scope, depth + 1)})"
+          case '{ ($x: Option[t]).map($f) } =>
+            s"${remap(x.asTerm, scope, depth + 1)} ^ map(${remap(f.asTerm, scope, depth + 1)})"
+          case '{ ($init: List[t]) :+ ($last) } =>
+            s"${remap(init.asTerm, scope, depth + 1)} | append(${remap(last.asTerm, scope, depth + 1)})"
+          case '{ ($x: Iterator[t]).map($f) } =>
+            s"${remap(x.asTerm, scope, depth + 1)} | map(${remap(f.asTerm, scope, depth + 1)})"
+          case '{ ($x: Set[t]).map($f) } =>
+            s"${remap(x.asTerm, scope, depth + 1)} | map(${remap(f.asTerm, scope, depth + 1)})"
+          case '{ ($x: List[t]).map($f) } =>
+            s"${remap(x.asTerm, scope, depth + 1)} | map(${remap(f.asTerm, scope, depth + 1)})"
+          case '{ ($x: List[t]).reduceLeftOption($f) } =>
+            s"(${remap(x.asTerm, scope, depth + 1)} | reduce(${remap(f.asTerm, scope, depth + 1)}))"
+          case '{ ($x: List[t]).mkString($sep) } =>
+            s"(${remap(x.asTerm, scope, depth + 1)} | mk_string(${remap(sep.asTerm, scope, depth + 1)}))"
+          case '{ ($x: Set[t]).mkString($sep) } =>
+            s"(${remap(x.asTerm, scope, depth + 1)} | mk_string(${remap(sep.asTerm, scope, depth + 1)}))"
+          case '{ ($x: String).indent($n) } =>
+            s"${remap(x.asTerm, scope, depth + 1)} ^ indent(${remap(n.asTerm, scope, depth + 1)})"
+          case '{ wrapString($x: String) } =>
+            s"${remap(x.asTerm, scope, depth + 1)}"
+          case '{ StringContext.apply(${ Varargs(Exprs(elems)) }*).s(${ Varargs(args) }*) } =>
+            if (elems.size == 1) return s"\"${elems(0)}\"s"
+            else
+              s"fmt::format(\"${elems.mkString("{}")}\", ${args.map(_.asTerm).map(remap(_, scope, depth + 1)).mkString(", ")})"
+          case _ => s"/*failed ${x}*/"
         }
-
     }
 
-    methods.foreach { s =>
-      s.tree match {
-        case f @ DefDef(name, _, _, Some(rhs)) =>
-          println(">>>" + name)
+    val methods = tpe.classSymbol.toList.flatMap(_.declaredMethods).filterNot(_.flags.is(Flags.Private))
 
-          val prog =
-            s"""${retype(f.returnTpt.tpe)} $name(${f.termParamss
-                .flatMap(_.params)
-                .map(p => remap(tree = p, fnDef = true))
-                .mkString(", ")}) {  
-               |${remap(rhs).indent(2)}}
+    val (protos, impls) = methods
+      .filterNot(_.isNoSymbol)
+      .map(_.tree)
+      .collect { case f @ DefDef(name, _, _, Some(rhs)) =>
+        val args  = f.termParamss.flatMap(_.params).map(p => remap(p, Map.empty, 1, fnDef = true)).mkString(", ")
+        val proto = s"${retype(f.returnTpt.tpe)} $name($args)"
+        val impl =
+          s"""
+               |$proto {  
+               |${("return " + remap(rhs, Map.empty, 1) + ";").indent(2)}} 
                |""".stripMargin
-
-          println(prog)
-
-        case unknown => ???
+        s"[[nodiscard]] $proto;" -> impl
       }
+      .unzip
 
-    // pprintln(s.tree)
-    }
-
-    // def remapOne(x : Tree) = {
-    //   x match {
-    //     case _: AnyRef =>
-
-    //   }
-    // }
-
-    Expr(1)
+    Expr((protos.mkString("\n"), impls.mkString("\n")))
   }
 
   inline def primaryCtorApplyTerms[

@@ -303,14 +303,12 @@ object PolyAST {
 
   // ==========
 
-  // object Repr {
-
   extension (t: SourcePosition) {
-    def repr: String = s"${t.file}:${t.line}${t.col.map(c => s":$c").getOrElse("")}"
+    inline def repr: String = s"${t.file}:${t.line}${t.col.map(c => s":$c").getOrElse("")}"
   }
 
   extension (t: Type.Space) {
-    def repr: String = t match {
+    inline def repr: String = t match {
       case Space.Global  => "Global"
       case Space.Local   => "Local"
       case Space.Private => "Private"
@@ -318,7 +316,7 @@ object PolyAST {
   }
 
   extension (k: Type.Kind) {
-    def repr: String = k match {
+    inline def repr: String = k match {
       case Kind.None       => "None"
       case Kind.Ref        => "Ref"
       case Kind.Integral   => "Integral"
@@ -327,7 +325,7 @@ object PolyAST {
   }
 
   extension (t: Type) {
-    def repr: String = t match {
+    inline def repr: String = t match {
       case Type.Float16 => "F16"
       case Type.Float32 => "F32"
       case Type.Float64 => "F64"
@@ -347,18 +345,18 @@ object PolyAST {
       case Type.Bool1   => "Bool1"
 
       case Type.Struct(name)             => s"$name"
-      case Type.Ptr(comp, length, space) => s"${comp.repr}[${length.getOrElse("")}]^${space.repr}"
+      case Type.Ptr(comp, length, space) => s"${comp.repr}[${length.map(_.toString).getOrElse("")}]^${space.repr}"
       case Type.Annotated(tpe, pos, comment) =>
         s"${tpe.repr}${pos.map(s => s"/*${s.repr}*/").getOrElse("")}${comment.map(s => s"/*$s*/").getOrElse("")}"
     }
   }
 
   extension (n: Named) {
-    def repr: String = s"${n.symbol}"
+    inline def repr: String = s"${n.symbol}"
   }
 
   extension (e: Expr) {
-    def repr: String = e match {
+    inline def repr: String = e match {
       case Expr.Float16Const(x) => s"f16($x)"
       case Expr.Float32Const(x) => s"f32($x)"
       case Expr.Float64Const(x) => s"f64($x)"
@@ -375,18 +373,86 @@ object PolyAST {
 
       case Expr.Unit0Const    => "unit0(())"
       case Expr.Bool1Const(x) => s"bool1($x)"
-
-      case Expr.SpecOp(op) => ???
-      case Expr.MathOp(op) => ???
-      case Expr.IntrOp(op) => ???
-
-      case Expr.Select(init, last) =>
-        (init :+ last) match {
-          case x :: Nil => s"${x.symbol}: ${x.tpe.repr}"
-          case x :: xs =>
-            xs.foldLeft(s"${x.symbol}: ${x.tpe.repr}")((acc, x) => s"(${acc}).${x.symbol}: ${x.tpe.repr}")
-          case Nil => ???
+      case Expr.SpecOp(op) =>
+        op match {
+          case Spec.Assert             => "'assert"
+          case Spec.GpuBarrierGlobal   => "'gpuBarrierGlobal"
+          case Spec.GpuBarrierLocal    => "'gpuBarrierLocal"
+          case Spec.GpuBarrierAll      => "'gpuBarrierAll"
+          case Spec.GpuFenceGlobal     => "'gpuFenceGlobal"
+          case Spec.GpuFenceLocal      => "'gpuFenceLocal"
+          case Spec.GpuFenceAll        => "'gpuFenceAll"
+          case Spec.GpuGlobalIdx(dim)  => s"'gpuGlobalIdx(${dim.repr})"
+          case Spec.GpuGlobalSize(dim) => s"'gpuGlobalSize(${dim.repr})"
+          case Spec.GpuGroupIdx(dim)   => s"'gpuGroupIdx(${dim.repr})"
+          case Spec.GpuGroupSize(dim)  => s"'gpuGroupSize(${dim.repr})"
+          case Spec.GpuLocalIdx(dim)   => s"'gpuLocalIdx(${dim.repr})"
+          case Spec.GpuLocalSize(dim)  => s"'gpuLocalSize(${dim.repr})"
         }
+      case Expr.MathOp(op) =>
+        op match {
+          case Math.Abs(x, tpe)      => s"'abs(${x.repr})"
+          case Math.Sin(x, tpe)      => s"'sin(${x.repr})"
+          case Math.Cos(x, tpe)      => s"'cos(${x.repr})"
+          case Math.Tan(x, tpe)      => s"'tan(${x.repr})"
+          case Math.Asin(x, tpe)     => s"'asin(${x.repr})"
+          case Math.Acos(x, tpe)     => s"'acos(${x.repr})"
+          case Math.Atan(x, tpe)     => s"'atan(${x.repr})"
+          case Math.Sinh(x, tpe)     => s"'sinh(${x.repr})"
+          case Math.Cosh(x, tpe)     => s"'cosh(${x.repr})"
+          case Math.Tanh(x, tpe)     => s"'tanh(${x.repr})"
+          case Math.Signum(x, tpe)   => s"'signum(${x.repr})"
+          case Math.Round(x, tpe)    => s"'round(${x.repr})"
+          case Math.Ceil(x, tpe)     => s"'ceil(${x.repr})"
+          case Math.Floor(x, tpe)    => s"'floor(${x.repr})"
+          case Math.Rint(x, tpe)     => s"'rint(${x.repr})"
+          case Math.Sqrt(x, tpe)     => s"'sqrt(${x.repr})"
+          case Math.Cbrt(x, tpe)     => s"'cbrt(${x.repr})"
+          case Math.Exp(x, tpe)      => s"'exp(${x.repr})"
+          case Math.Expm1(x, tpe)    => s"'expm1(${x.repr})"
+          case Math.Log(x, tpe)      => s"'log(${x.repr})"
+          case Math.Log1p(x, tpe)    => s"'log1p(${x.repr})"
+          case Math.Log10(x, tpe)    => s"'log10(${x.repr})"
+          case Math.Pow(x, y, tpe)   => s"'pow(${x.repr}, ${y.repr})"
+          case Math.Atan2(x, y, tpe) => s"'atan2(${x.repr}, ${y.repr})"
+          case Math.Hypot(x, y, tpe) => s"'hypot(${x.repr}, ${y.repr})"
+
+        }
+      case Expr.IntrOp(op) =>
+        op match {
+          case Intr.BNot(x, tpe) => s"'~${x.repr}"
+          case Intr.LogicNot(x)  => s"'!${x.repr}"
+          case Intr.Pos(x, tpe)  => s"'+${x.repr}"
+          case Intr.Neg(x, tpe)  => s"'-${x.repr}"
+
+          case Intr.Add(x, y, tpe)  => s"${x.repr} '+ ${y.repr}"
+          case Intr.Sub(x, y, tpe)  => s"${x.repr} '- ${y.repr}"
+          case Intr.Mul(x, y, tpe)  => s"${x.repr} '* ${y.repr}"
+          case Intr.Div(x, y, tpe)  => s"${x.repr} '/ ${y.repr}"
+          case Intr.Rem(x, y, tpe)  => s"${x.repr} '% ${y.repr}"
+          case Intr.Min(x, y, tpe)  => s"'min(${x.repr}, ${y.repr})"
+          case Intr.Max(x, y, tpe)  => s"'max(${x.repr}, ${y.repr})"
+          case Intr.BAnd(x, y, tpe) => s"${x.repr} '& ${y.repr}"
+          case Intr.BOr(x, y, tpe)  => s"${x.repr} '| ${y.repr}"
+          case Intr.BXor(x, y, tpe) => s"${x.repr} '^ ${y.repr}"
+          case Intr.BSL(x, y, tpe)  => s"${x.repr} '<< ${y.repr}"
+          case Intr.BSR(x, y, tpe)  => s"${x.repr} '>> ${y.repr}"
+          case Intr.BZSR(x, y, tpe) => s"${x.repr} '>>> ${y.repr}"
+
+          case Intr.LogicAnd(x, y) => s"${x.repr} '&& ${y.repr}"
+          case Intr.LogicOr(x, y)  => s"${x.repr} '|| ${y.repr}"
+          case Intr.LogicEq(x, y)  => s"${x.repr} '== ${y.repr}"
+          case Intr.LogicNeq(x, y) => s"${x.repr} '!= ${y.repr}"
+          case Intr.LogicLte(x, y) => s"${x.repr} '<= ${y.repr}"
+          case Intr.LogicGte(x, y) => s"${x.repr} '>= ${y.repr}"
+          case Intr.LogicLt(x, y)  => s"${x.repr} '< ${y.repr}"
+          case Intr.LogicGt(x, y)  => s"${x.repr} '> ${y.repr}"
+        }
+      case Expr.Select(init, last) =>
+        (init :+ last)
+          .map(x => s"${x.symbol}: ${x.tpe.repr}")
+          .reduceLeftOption((acc, x) => s"($acc).$x")
+          .getOrElse("")
       case Expr.Poison(t) => s"??? /*${t.repr}s*/"
 
       case Expr.Cast(from, as)        => s"${from.repr}.to[${as.repr}]"
@@ -402,34 +468,35 @@ object PolyAST {
   }
 
   extension (stmt: Stmt) {
-    def repr: String = stmt match {
+    inline def repr: String = stmt match {
       case Stmt.Block(xs) =>
-        s"{\n${xs.flatMap(_.repr.linesIterator.map("  " + _)).mkString("\n")}\n}"
+        s"${"{"}\n${xs.map(_.repr).mkString("\n").indent(2)}${"}"}"
       case Stmt.Comment(value)          => s" /* $value */"
-      case Stmt.Var(name, rhs)          => s"var ${name.repr} = ${rhs.fold("_")(_.repr)}"
+      case Stmt.Var(name, rhs)          => s"var ${name.symbol} : ${name.tpe.repr} = ${rhs.map(_.repr).getOrElse("_")}"
       case Stmt.Mut(name, expr)         => s"${name.repr} = ${expr.repr}"
       case Stmt.Update(lhs, idx, value) => s"${lhs.repr}[${idx.repr}] = ${value.repr}"
       case Stmt.While(tests, cond, body) =>
-        s"while({${(tests.map(_.repr) :+ cond.repr)
-            .mkString(";")}}){\n${body.flatMap(_.repr.linesIterator.map("  " + _)).mkString("\n")}\n}"
+        s"while(${"{"}${(tests.map(_.repr) :+ cond.repr)
+            .mkString(";")}${"}"})${"{"}\n${body.map(_.repr).mkString("\n").indent(2)}${"}"}"
       case Stmt.Break        => s"break;"
       case Stmt.Cont         => s"continue;"
       case Stmt.Return(expr) => s"return ${expr.repr}"
       case Stmt.Cond(cond, trueBr, falseBr) =>
-        s"if(${cond.repr}) {\n${trueBr.flatMap(_.repr.linesIterator.map("  " + _)).mkString("\n")}\n} else {\n${falseBr
-            .flatMap(_.repr.linesIterator.map("  " + _))
-            .mkString("\n")}\n}"
+        s"if(${cond.repr}) ${"{"}\n${trueBr.map(_.repr).mkString("\n").indent(2)}${"}"} else ${"{"}\n${falseBr
+            .map(_.repr)
+            .mkString("\n")
+            .indent(2)}${"}"}"
       case Stmt.Annotated(stmt, pos, comment) =>
         s"${stmt.repr}${pos.map(s => s"/*${s.repr}*/").getOrElse("")}${comment.map(s => s"/*$s*/").getOrElse("")}"
     }
   }
 
   extension (a: Arg) {
-    def repr: String = s"${a.named.repr}${a.pos}"
+    inline def repr: String = s"${a.named.symbol}: ${a.named.tpe.repr}${a.pos.map(s => s"/*${s.repr}*/").getOrElse("")}"
   }
 
   extension (a: Function.Attr) {
-    def repr: String = a match {
+    inline def repr: String = a match {
       case Attr.Internal  => "Internal"
       case Attr.Exported  => "Exported"
       case Attr.FPRelaxed => "FPRelaxed"
@@ -438,11 +505,22 @@ object PolyAST {
     }
   }
 
-  extension (f: Function) {
-    def repr: String = s"def ${f.name}(${f.args.map(a =>
-        s"${a.named.repr}${a.pos.map(s => s"/*${s.repr}*/").getOrElse("")}"
-      )}): ${f.rtn.repr} /*${f.attrs.map(_.repr)}*/ {\n" + f.body.map(s => s"  ${s.repr}").mkString("\n") + "}\n"
+  extension (f: Signature) {
+    inline def repr: String = s"def ${f.name}(${f.args.map(_.repr).mkString(", ")}: ${f.rtn.repr}"
   }
-  // }
+
+  extension (f: Function) {
+    inline def repr: String = s"def ${f.name}(${f.args
+        .map(a => s"${a.named.symbol}: ${a.named.tpe.repr}${a.pos.map(s => s"/*${s.repr}*/").getOrElse("")}")
+        .mkString(", ")}): ${f.rtn.repr} /*${f.attrs.map(_.repr).mkString(", ")}*/ ${"{"}\n${f.body.map(_.repr).mkString("\n").indent(2)}${"}"}"
+  }
+
+  extension (s: StructDef) {
+    inline def repr: String = s"class ${s.name}(${s.members.map(m => s"${m.symbol}: ${m.tpe.repr}").mkString(", ")})"
+  }
+
+  extension (s: Program) {
+    inline def repr: String = s"${s.structs.map(_.repr).mkString("\n")}\n${s.functions.map(_.repr).mkString("\n")}"
+  }
 
 }

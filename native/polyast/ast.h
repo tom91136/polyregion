@@ -7,6 +7,8 @@
 #include <utility>
 
 #include "generated/polyast.h"
+#include "generated/polyast_repr.h"
+
 #include "polyregion/compat.h"
 
 namespace polyregion::polyast {
@@ -16,24 +18,6 @@ template <typename T> using Opt = std::optional<T>;
 template <typename T> using Set = std::unordered_set<T>;
 template <typename T, typename U> using Pair = std::pair<T, U>;
 template <typename T, typename U> using Map = std::unordered_map<T, U>;
-
-std::string repr(const SourcePosition &pos);
-
-std::string repr(const Type::Any &);
-std::string repr(const Named &);
-std::string repr(const Expr::Any &);
-std::string repr(const Stmt::Any &);
-std::string repr(const Intr::Any &);
-std::string repr(const Spec::Any &);
-std::string repr(const Math::Any &);
-std::string repr(const Arg &);
-std::string repr(const TypeSpace::Any &space);
-std::string repr(const Signature &s);
-std::string repr(const FunctionAttr::Any &);
-
-std::string repr(const Function &);
-std::string repr(const StructDef &);
-std::string repr(const Program &);
 
 const static auto show_repr = [](auto &x) { return repr(x); };
 

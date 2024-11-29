@@ -105,31 +105,32 @@ private[polyregion] object CodeGen {
 
     println("Generating C++ mirror for PolyAST...")
 
+    val structs =
+      deriveStruct[SourcePosition]()
+        :: deriveStruct[Named]()
+        :: deriveStruct[Type.Kind]()
+        :: deriveStruct[Type.Space]()
+        :: deriveStruct[Type]()
+        :: deriveStruct[Expr]()
+        :: deriveStruct[Overload]()
+        :: deriveStruct[Spec]()
+        :: deriveStruct[Intr]()
+        :: deriveStruct[Math]()
+        :: deriveStruct[Stmt]()
+        :: deriveStruct[Signature]()
+        :: deriveStruct[Function.Attr]()
+        :: deriveStruct[Arg]()
+        :: deriveStruct[Function]()
+        :: deriveStruct[StructDef]()
+        :: deriveStruct[Program]()
+        :: deriveStruct[StructLayoutMember]()
+        :: deriveStruct[StructLayout]()
+        :: deriveStruct[CompileEvent]()
+        :: deriveStruct[CompileResult]()
+        :: Nil //
 
-    val x = compiletime.methods[PolyAST.type]
-    val structs = 
-       deriveStruct[SourcePosition]()
-      :: deriveStruct[Named]()
-      :: deriveStruct[Type.Kind]()
-      :: deriveStruct[Type.Space]()
-      :: deriveStruct[Type]()
-      :: deriveStruct[Expr]()
-      :: deriveStruct[Overload]()
-      :: deriveStruct[Spec]()
-      :: deriveStruct[Intr]()
-      :: deriveStruct[Math]()
-      :: deriveStruct[Stmt]()
-      :: deriveStruct[Signature]()
-      :: deriveStruct[Function.Attr]()
-      :: deriveStruct[Arg]()
-      :: deriveStruct[Function]()
-      :: deriveStruct[StructDef]()
-      :: deriveStruct[Program]()
-      :: deriveStruct[StructLayoutMember]()
-      :: deriveStruct[StructLayout]()
-      :: deriveStruct[CompileEvent]()
-      :: deriveStruct[CompileResult]()
-      :: Nil //
+    val (reprProtos, reprImpls) = compiletime.generateReprSource[PolyAST.type]
+
 
     val namespace         = "polyregion::polyast"
     val adtFileName       = "polyast"
@@ -140,12 +141,37 @@ private[polyregion] object CodeGen {
 
     val adtHeader = StructSource.emitHeader(namespace, adtSources)
     val adtImpl   = StructSource.emitImpl(namespace, adtFileName, adtSources)
-    val adtHash   = md5(adtHeader + adtImpl)
+
+    val reprHeader = s"""|#pragma once
+                         |
+                         |#include <optional>
+                         |#include "ast.h"
+                         |
+                         |namespace $namespace {
+                         |$reprProtos
+                         |}
+                         |""".stripMargin
+
+    val reprImpl = s"""|#include "polyast_repr.h"
+                       |#include "aspartame/all.hpp"
+                       |#include "fmt/core.h"
+                       |
+                       |using namespace aspartame;
+                       |using namespace std::string_literals;
+                       |
+                       |namespace $namespace {
+                       |$reprImpls
+                       |}
+                       |""".stripMargin
+
+    val adtHash = md5(adtHeader + adtImpl)
 
     val jsonCodecHeader = CppNlohmannJsonCodecGen.emitHeader(namespace, jsonCodecSources)
     val jsonCodecImpl   = CppNlohmannJsonCodecGen.emitImpl(namespace, jsonCodecFileName, adtHash, jsonCodecSources)
 
-    println(s"Generated ${(adtHeader + adtImpl + jsonCodecHeader + jsonCodecImpl).count(_ == '\n')} lines")
+    println(
+      s"Generated ${(adtHeader + adtImpl + jsonCodecHeader + jsonCodecImpl + reprHeader + reprImpl).count(_ == '\n')} lines"
+    )
     println(s"MD5=${adtHash}")
 
     adtHash -> (() => {
@@ -156,6 +182,8 @@ private[polyregion] object CodeGen {
       overwrite(target.resolve("polyast.cpp"))(adtImpl)
       overwrite(target.resolve("polyast_codec.h"))(jsonCodecHeader)
       overwrite(target.resolve("polyast_codec.cpp"))(jsonCodecImpl)
+      overwrite(target.resolve("polyast_repr.h"))(reprHeader)
+      overwrite(target.resolve("polyast_repr.cpp"))(reprImpl)
       println("Done")
     })
   }
