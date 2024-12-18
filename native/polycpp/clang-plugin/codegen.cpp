@@ -54,13 +54,13 @@ static std::variant<std::string, CompileResult> compileProgram(const polystl::Op
   else return compileresult_from_json(nlohmann::json::from_msgpack((*BufferOrErr)->getBufferStart(), (*BufferOrErr)->getBufferEnd()));
 }
 
-polystl::KernelBundle polystl::generate(const Options &opts,
-                                        clang::ASTContext &C,                //
-                                        clang::DiagnosticsEngine &diag,      //
-                                        const std::string &moduleId,         //
-                                        const clang::CXXMethodDecl &functor, //
-                                        const clang::SourceLocation &loc,    //
-                                        runtime::PlatformKind kind) {
+polystl::KernelBundle polystl::generateBundle(const Options &opts,
+                                              clang::ASTContext &C,                //
+                                              clang::DiagnosticsEngine &diag,      //
+                                              const std::string &moduleId,         //
+                                              const clang::CXXMethodDecl &functor, //
+                                              const clang::SourceLocation &loc,    //
+                                              runtime::PlatformKind kind) {
   Remapper remapper(C);
 
   auto parent = functor.getParent();
@@ -101,20 +101,29 @@ polystl::KernelBundle polystl::generate(const Options &opts,
   auto f0 = std::make_shared<Function>("_main", args, rtnTpe, stmts,
                                        std::set<FunctionAttr::Any>{FunctionAttr::Exported(), FunctionAttr::Entry()});
 
-  auto p = Program(r.structs | values() | map([&](auto &x) { return *x; }) | to_vector(),
-                   r.functions | values() | append(f0) | map([&](auto &x) { return *x; }) | to_vector());
+  auto program = Program(r.structs | values() | map([&](auto &x) { return *x; }) | to_vector(),
+                         r.functions | values() | append(f0) | map([&](auto &x) { return *x; }) | to_vector());
+
+  auto exportedStructNames = program.functions                                                              //
+                             | filter([](auto &f) { return f.attrs ^ contains(FunctionAttr::Exported()); }) //
+                             | bind([](auto &f) { return f.args; })                                         //
+                             | collect([](auto &a) { return a.named.tpe.template get<Type::Struct>(); })    //
+                             | map([](auto &s) { return s.name; })                                          //
+                             | to<std::unordered_set>();
+
+  auto layouts = r.layouts | values() | map([&](auto &x) { return std::pair{exportedStructNames ^ contains(x->name), *x}; }) | to_vector();
 
   if (opts.verbose) {
     diag.Report(loc,
                 diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Remark, "[PolySTL] Remapped program [%0, sizeof capture=%1]\n%2"))
-        << moduleId << C.getTypeSize(parent->getTypeForDecl()) << repr(p);
+        << moduleId << C.getTypeSize(parent->getTypeForDecl()) << repr(program);
   }
 
   auto objects =
       opts.targets                                                                                //
       | filter([&](auto &target, auto &) { return kind == runtime::targetPlatformKind(target); }) //
       | collect([&](auto &target, auto &features) {
-          return compileProgram(opts, p, target, features) ^
+          return compileProgram(opts, program, target, features) ^
                  fold_total([&](const CompileResult &r) -> std::optional<CompileResult> { return r; },
                             [&](const std::string &err) -> std::optional<CompileResult> {
                               diag.Report(
@@ -123,9 +132,7 @@ polystl::KernelBundle polystl::generate(const Options &opts,
                                   << moduleId << std::string(to_string(target)) << features << err;
                               return std::nullopt;
                             }) ^
-                 map([&](auto &x) {
-                   return std::tuple{target, features, x};
-                 });
+                 map([&](auto &x) { return std::tuple{target, features, x}; });
         }) //
       |
       collect([&](auto &target, auto &features, auto &result) -> std::optional<KernelObject> {
@@ -171,5 +178,5 @@ polystl::KernelBundle polystl::generate(const Options &opts,
         }
       }) //
       | to_vector();
-  return KernelBundle{moduleId, objects, program_to_json(p).dump()};
+  return KernelBundle{moduleId, objects, layouts, program_to_json(program).dump()};
 }

@@ -428,7 +428,7 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
   auto name = nameOfRecord(llvm::dyn_cast_if_present<clang::RecordType>(context.getRecordType(decl)), r);
   if (auto s = r.structs ^ get(name)) return *s;
 
-  auto resolveStruct = [&](const std::vector<std::shared_ptr<StructDef>> &parents, const std::vector<Named> &members) {
+  auto resolveStruct = [&](const std::vector<std::shared_ptr<StructDef>> &parents, const std::vector<StructLayoutMember> &members) {
     // For C/C++ sizeof(type{}) == 1
     // However, compilers are allowed to do https://en.cppreference.com/w/cpp/language/ebo
     //    struct N{};
@@ -461,15 +461,32 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
                            | to_vector();
 
     const auto emptyStruct = inherited.empty() && members.empty();
-    const auto def = std::make_shared<StructDef>(name, emptyStruct ? std::vector{EmptyStructMarker} : inherited ^ concat(members));
+    const auto def = std::make_shared<StructDef>( //
+        name,                                     //
+        emptyStruct ? std::vector{EmptyStructMarker} : inherited ^ concat(members ^ map([](auto &m) { return m.name; })));
+    const auto layout = std::make_shared<StructLayout>(                    //
+        name,                                                              //
+        context.getTypeSizeInChars(decl->getTypeForDecl()).getQuantity(),  //
+        context.getTypeAlignInChars(decl->getTypeForDecl()).getQuantity(), //
+        members);
+
     r.structs.emplace(name, def);
+    r.layouts.emplace(name, layout);
     return def;
   };
 
+  auto resolveField = [&](const clang::ValueDecl *decl, const auto &name, const Type::Any &tpe) {
+    return StructLayoutMember{Named(name, tpe),                                           //
+                              static_cast<int64_t>(context.getFieldOffset(decl) / 8),     //
+                              context.getTypeSizeInChars(decl->getType()).getQuantity()}; //
+  };
+
   auto resolveFields = [&] {
-    return decl->fields() |
-           map([&](auto &field) { return Named(fmt::format("{}::{}", name, field->getName().str()), handleType(field->getType(), r)); }) |
-           to_vector();
+    return decl->fields() //
+           | map([&](auto &field) {
+               return resolveField(field, fmt::format("{}::{}", name, field->getName().str()), handleType(field->getType(), r));
+             })           //
+           | to_vector(); //
   };
 
   if (const auto cxxRecord = llvm::dyn_cast<clang::CXXRecordDecl>(decl)) {
@@ -491,16 +508,16 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
     if (!cxxRecord->isLambda()) return resolveStruct(parents, resolveFields());
     else {
       const auto members =
-          cxxRecord->captures() | collect([&](auto &capture) -> Opt<Named> {
+          cxxRecord->fields() | zip(cxxRecord->captures()) | collect([&](auto &field, auto &capture) -> Opt<StructLayoutMember> {
             const auto var = capture.getCapturedVar();
             switch (capture.getCaptureKind()) {
               case clang::LCK_ByCopy: {
                 const auto tpe = handleType(var->getType(), r);
-                return Named(var->getName().str(), tpe);
+                return resolveField(field, var->getName().str(), tpe);
               }
               case clang::LCK_ByRef: {
                 const auto tpe = Type::Ptr(handleType(var->getType(), r), {}, TypeSpace::Global());
-                return Named(var->getName().str(), tpe);
+                return resolveField(field, var->getName().str(), tpe);
               }
               default:
                 r.push(Stmt::Comment(fmt::format("ERROR: Unknown capture type {}", magic_enum::enum_name(capture.getCaptureKind()))));

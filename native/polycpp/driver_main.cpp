@@ -203,10 +203,11 @@ int main(int argc, const char *argv[]) {
                  auto polycppResourcePath = execParentPath / "lib/polycpp";
                  auto polycppIncludePath = polycppResourcePath / "include";
                  auto polycppLibPath = polycppResourcePath / "lib";
-                 auto polycppInterposePlugin = polycppLibPath / "polystl-interpose-plugin.so";
+                 auto polycppReflectPlugin = polycppLibPath / "polystl-reflect-plugin.so";
                  auto polycppClangPlugin = polycppLibPath / "polycpp-clang-plugin.so";
                  append({"-isystem", polycppIncludePath.string()});
                  append({"-include", "polystl/polystl.h"});
+                 append({"-include", "ptr-reflect-rt/rt.hpp"});
 
                  bool noRewrite = std::getenv("POLYCPP_NO_REWRITE") != nullptr;
                  if (!noRewrite) {
@@ -215,7 +216,7 @@ int main(int argc, const char *argv[]) {
                    append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("exe={}", execPath.string())});
                    append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("verbose={}", opts->verbose ? "1" : "0")});
                    append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("targets={}", opts->targets)});
-                   if (opts->interposeMalloc) append({fmt::format("-fpass-plugin={}", polycppInterposePlugin.string())});
+                   if (opts->interposeMalloc) append({fmt::format("-fpass-plugin={}", polycppReflectPlugin.string())});
                  }
 
                  auto compileOnly = std::vector{"-c", "-S", "-E", "-M", "-MM", "-MD", "-fsyntax-only"} ^

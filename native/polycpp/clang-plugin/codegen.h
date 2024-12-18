@@ -4,11 +4,10 @@
 #include <vector>
 
 #include "plugin.h"
+#include "polyast.h"
 #include "polyregion/types.h"
 
 #include "clang/AST/ASTContext.h"
-#include "clang/AST/Decl.h"
-#include "clang/AST/DeclCXX.h"
 
 namespace polyregion::polystl {
 
@@ -19,17 +18,29 @@ struct KernelObject {
   std::string moduleImage{};
 };
 
+// struct KernelStruct {
+//   struct Member {
+//     std::string name;
+//     size_t offsetInBytes, sizeInBytes;
+//     std::optional<std::string> structTy;
+//   };
+//   std::string name;
+//   bool exported;
+//   std::vector<Member> members;
+// };
+
 struct KernelBundle {
   std::string moduleName{};
   std::vector<KernelObject> objects{};
+  std::vector<std::pair<bool, polyast::StructLayout>> layouts{};
   std::string metadata;
 };
 
-KernelBundle generate(const Options &ctx,
-                      clang::ASTContext &C,                //
-                      clang::DiagnosticsEngine &diag,      //
-                      const std::string &moduleId,         //
-                      const clang::CXXMethodDecl &functor, //
-                      const clang::SourceLocation &loc,    //
-                      runtime::PlatformKind kind);
+KernelBundle generateBundle(const Options &ctx,
+                            clang::ASTContext &C,                //
+                            clang::DiagnosticsEngine &diag,      //
+                            const std::string &moduleId,         //
+                            const clang::CXXMethodDecl &functor, //
+                            const clang::SourceLocation &loc,    //
+                            runtime::PlatformKind kind);
 } // namespace polyregion::polystl

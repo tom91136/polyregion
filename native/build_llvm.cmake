@@ -135,13 +135,14 @@ execute_process(
         COMMAND ${CMAKE_COMMAND}
         --build ${LLVM_BUILD_DIR}
         --target
-        lldCommon
-        lldELF
-        LLVMExecutionEngine
         install-distribution
+
         install-cmake-exports
         install-clang-cmake-exports
         install-lld-cmake-exports
+
+        install-llvm-libraries
+        install-clang-libraries
         -- -k 0 # keep going even with error
         WORKING_DIRECTORY ${LLVM_BUILD_DIR}
         RESULT_VARIABLE SUCCESS)

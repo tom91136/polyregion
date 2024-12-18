@@ -3,16 +3,16 @@
 #include "plugin.h"
 
 #include "clang/AST/ASTConsumer.h"
-#include "clang/Basic/Diagnostic.h"
+#include "clang/Frontend/CompilerInstance.h"
 
 namespace polyregion::polystl {
 
 class OffloadRewriteConsumer : public clang::ASTConsumer {
-  clang::DiagnosticsEngine &diag;
+  clang::CompilerInstance &CI;
   Options opts;
 
 public:
-  OffloadRewriteConsumer(clang::DiagnosticsEngine &diag, const Options &opts);
+  OffloadRewriteConsumer(clang::CompilerInstance &CI, const Options &opts);
   void HandleTranslationUnit(clang::ASTContext &context) override;
 };
 

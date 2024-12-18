@@ -342,7 +342,7 @@ std::string repr(const Stmt::Any& stmt) {
       return fmt::format(" /* {} */", _x->value);
     }
     if (auto _x = stmt.get<Stmt::Var>()) {
-      return fmt::format("var {} : {} = {}", _x->name.symbol, repr(_x->name.tpe), _x->expr ^ map([&](const Expr::Any& __5){ return repr(__5); }) ^ get_or_else("_"s));
+      return fmt::format("var {}: {} = {}", _x->name.symbol, repr(_x->name.tpe), _x->expr ^ map([&](const Expr::Any& __5){ return repr(__5); }) ^ get_or_else("_"s));
     }
     if (auto _x = stmt.get<Stmt::Mut>()) {
       return fmt::format("{} = {}", repr(_x->name), repr(_x->expr));
@@ -394,7 +394,7 @@ std::string repr(const Signature& f) {
 
 
 std::string repr(const Function& f) {  
-  return fmt::format("def {}({}): {} /*{}*/ {}\n{}{}", f.name, (f.args | map([&](const Arg& a){ return fmt::format("{}: {}{}", a.named.symbol, repr(a.named.tpe), a.pos ^ map([&](const SourcePosition& s){ return fmt::format("/*{}*/", repr(s)); }) ^ get_or_else(""s)); }) | mk_string(", "s)), repr(f.rtn), (f.attrs | map([&](const FunctionAttr::Any& __11){ return repr(__11); }) | mk_string(", "s)), "{"s, (f.body | map([&](const Stmt::Any& __12){ return repr(__12); }) | mk_string("\n"s)) ^ indent(2), "}"s);
+  return fmt::format("def {}({}): {} /*{}*/ {}\n{}\n{}", f.name, (f.args | map([&](const Arg& a){ return fmt::format("{}: {}{}", a.named.symbol, repr(a.named.tpe), a.pos ^ map([&](const SourcePosition& s){ return fmt::format("/*{}*/", repr(s)); }) ^ get_or_else(""s)); }) | mk_string(", "s)), repr(f.rtn), (f.attrs | map([&](const FunctionAttr::Any& __11){ return repr(__11); }) | mk_string(", "s)), "{"s, (f.body | map([&](const Stmt::Any& __12){ return repr(__12); }) | mk_string("\n"s)) ^ indent(2), "}"s);
 } 
 
 

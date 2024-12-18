@@ -47,6 +47,7 @@ struct Remapper {
     std::vector<Stmt::Any> stmts{};
     std::unordered_map<std::string, std::shared_ptr<Function>> functions{};
     std::unordered_map<std::string, std::shared_ptr<StructDef>> structs{};
+    std::unordered_map<std::string, std::shared_ptr<StructLayout>> layouts{};
     std::unordered_map<std::string, std::vector<std::shared_ptr<StructDef>>> parents{};
 
     template <typename T>
@@ -63,6 +64,7 @@ struct Remapper {
                      {}, //
                      functions,
                      structs,
+                     layouts,
                      parents};
       auto result = f(r);
       if (persistCounter) {
@@ -70,6 +72,7 @@ struct Remapper {
       }
       functions = r.functions;
       structs = r.structs;
+      layouts = r.layouts;
       parents = r.parents;
       return {result, r.stmts};
     }

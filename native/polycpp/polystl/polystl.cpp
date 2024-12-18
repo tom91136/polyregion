@@ -92,8 +92,8 @@ POLYREGION_EXPORT extern "C" void __polyregion_initialise_runtime() { // NOLINT(
   }
 }
 
-POLYREGION_EXPORT extern "C" inline bool
-__polyregion_load_kernel_object(const char *moduleName, const RuntimeKernelObject &object) { // NOLINT(*-reserved-identifier)
+POLYREGION_EXPORT extern "C" bool __polyregion_load_kernel_object(const char *moduleName,
+                                                                  const RuntimeKernelObject &object) { // NOLINT(*-reserved-identifier)
   __polyregion_initialise_runtime();
   if (!__polyregion_selected_platform || !__polyregion_selected_device || !__polyregion_selected_queue) {
     POLYSTL_LOG("No device/queue in %s", __func__);
@@ -129,9 +129,8 @@ POLYREGION_EXPORT extern "C" bool __polyregion_platform_kind(PlatformKind &kind)
   return true;
 }
 
-POLYREGION_EXPORT extern "C" bool __polyregion_dispatch_hostthreaded( // NOLINT(*-reserved-identifier)
-    size_t global, void *functorData, const char *moduleName, const RuntimeKernelObject &object) {
-  if (!__polyregion_load_kernel_object(moduleName, object)) return false;
+POLYREGION_EXPORT extern "C" void __polyregion_dispatch_hostthreaded( // NOLINT(*-reserved-identifier)
+    size_t global, void *functorData, const char *moduleName ) {
   const static auto fn = __func__;
   POLYSTL_LOG("<%s:%s:%zu> Dispatch hostthread", fn, moduleName, global);
   polyregion::concurrency_utils::waitAll([&](auto &cb) {
@@ -142,15 +141,11 @@ POLYREGION_EXPORT extern "C" bool __polyregion_dispatch_hostthreaded( // NOLINT(
       cb();
     });
   });
-
   POLYSTL_LOG("<%s:%s:%zu> Done", fn, moduleName, global);
-  return true;
 }
 
-POLYREGION_EXPORT extern "C" bool __polyregion_dispatch_managed( // NOLINT(*-reserved-identifier)
-    size_t global, size_t local, size_t localMemBytes, size_t functorDataSize, const void *functorData, const char *moduleName,
-    const RuntimeKernelObject &object) {
-  if (!__polyregion_load_kernel_object(moduleName, object)) return false;
+POLYREGION_EXPORT extern "C" void __polyregion_dispatch_managed( // NOLINT(*-reserved-identifier)
+    size_t global, size_t local, size_t localMemBytes, size_t functorDataSize, const void *functorData, const char *moduleName ) {
   const static auto fn = __func__;
   POLYSTL_LOG("<%s:%s:%zu> Dispatch managed, arg=%zu bytes", fn, moduleName, global, functorDataSize);
   auto functorDevicePtr = __polyregion_selected_device->mallocDevice(functorDataSize, Access::RW);
@@ -160,13 +155,12 @@ POLYREGION_EXPORT extern "C" bool __polyregion_dispatch_managed( // NOLINT(*-res
   polyregion::concurrency_utils::waitAll([&](auto &cb) {
     auto buffer = //
         localMemBytes > 0 ? ArgBuffer{{Type::Scratch, {}}, {Type::Ptr, &functorDevicePtr}, {Type::Void, {}}}
-                      : ArgBuffer{  {Type::Ptr, &functorDevicePtr}, {Type::Void, {}}};
-
+                          : ArgBuffer{{Type::Ptr, &functorDevicePtr}, {Type::Void, {}}};
 
     __polyregion_selected_queue->enqueueInvokeAsync(
         moduleName, "_main", buffer, //
-        Policy{                       //
-               Dim3{global, 1, 1},    //
+        Policy{                      //
+               Dim3{global, 1, 1},   //
                local > 0 ? std::optional{std::pair<Dim3, size_t>{Dim3{local, 1, 1}, localMemBytes}} : std::nullopt},
         [&]() {
           POLYSTL_LOG("<%s:%s:%zu> Unlatched", fn, moduleName, global);
@@ -175,5 +169,4 @@ POLYREGION_EXPORT extern "C" bool __polyregion_dispatch_managed( // NOLINT(*-res
   });
   __polyregion_selected_device->freeDevice(functorDevicePtr);
   POLYSTL_LOG("<%s:%s:%zu> Done", fn, moduleName, global);
-  return true;
 }

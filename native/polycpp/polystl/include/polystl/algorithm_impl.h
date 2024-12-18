@@ -94,11 +94,17 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
             f(i);
           }
         };
-        auto &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::HostThreaded>(kernel);
+        fprintf(stderr, "=== \n" );
+        const RuntimeKernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::HostThreaded>(kernel);
+
+
+        fprintf(stderr, "=== %d\n", bundle.objects[0].imageLength);
         std::byte argData[sizeof(decltype(kernel))];
         std::memcpy(argData, &kernel, sizeof(decltype(kernel)));
         for (size_t i = 0; i < bundle.objectCount; ++i) {
-          if (__polyregion_dispatch_hostthreaded(b.size(), &argData, bundle.moduleName, bundle.get(i))) return;
+          if (!__polyregion_load_kernel_object(bundle.moduleName, bundle.objects[i])) continue;
+          __polyregion_dispatch_hostthreaded(b.size(), &argData, bundle.moduleName);
+          return;
         }
         break;
       }
@@ -112,11 +118,47 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
           }
         };
         int64_t blocks = 256;
-        auto &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
+        fprintf(stderr, "=== \n" );
+        const RuntimeKernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
+
+
+        // T* p = reflect_get(kernel, "a");
+        // auto size = query_ptr(p);
+        // auto devicePtr = mallocDevice(size);
+        //
+        // enqueueAsync(p -> devicePtr, size);
+        // reflect_set(kernel, "a", devicePtr);
+        // <<<>>>
+        // enqueueAsync(devicePtr -> p, size);
+        // TLI
+        //
+
+        // std::vector< struct Reflected { lambdaPtr: void*, lambdaPtrSize: size_t,  } >
+        fprintf(stderr, "=== %s\n", bundle.moduleName);
+
         for (size_t i = 0; i < bundle.objectCount; ++i) {
-          if (__polyregion_dispatch_managed(global / blocks, blocks, 0, sizeof(decltype(kernel)), &kernel, bundle.moduleName,
-                                            bundle.get(i)))
-            return;
+          if (!__polyregion_load_kernel_object(bundle.moduleName, bundle.objects[i])) continue;
+
+
+
+          // float* a;
+          // linked<int> x { linked<int>* next; };
+
+
+
+          struct Reflected {
+             std::tuple<const char*, char *, size_t>* topLevelPointers;
+
+             std::tuple<const char*, uintptr_t, size_t >* arbitraryPointers;
+          };
+          // __polyregion_runtime_reflect(kernel, [](const char* name, char* data, size_t size, bool indirect) -> bool {
+          //
+          // });
+
+          //
+
+          __polyregion_dispatch_managed(global / blocks, blocks, 0, sizeof(decltype(kernel)), &kernel, bundle.moduleName);
+          return;
         }
         break;
       }
@@ -151,17 +193,17 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
           }
           out[tid] = acc;
         };
-        auto &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::HostThreaded>(kernel);
+        const RuntimeKernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::HostThreaded>(kernel);
         std::byte argData[sizeof(decltype(kernel))];
         std::memcpy(argData, &kernel, sizeof(decltype(kernel)));
         for (size_t i = 0; i < bundle.objectCount; ++i) {
-          if (__polyregion_dispatch_hostthreaded(groups, &argData, bundle.moduleName, bundle.get(i))) {
-            T acc = init;
-            for (int64_t groupIdx = 0; groupIdx < groups; ++groupIdx) {
-              acc = reduce(acc, groupPartial[groupIdx]);
-            }
-            return acc;
+          if (!__polyregion_load_kernel_object(bundle.moduleName, bundle.objects[i])) continue;
+          __polyregion_dispatch_hostthreaded(groups, &argData, bundle.moduleName);
+          T acc = init;
+          for (int64_t groupIdx = 0; groupIdx < groups; ++groupIdx) {
+            acc = reduce(acc, groupPartial[groupIdx]);
           }
+          return acc;
         }
         break;
       }
@@ -196,17 +238,15 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
             groupPartial[__polyregion_builtin_gpu_group_idx(0)] = localPartialSum[localIdx];
           }
         };
-        auto &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
+        const RuntimeKernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
         for (size_t i = 0; i < bundle.objectCount; ++i) {
-          if (__polyregion_dispatch_managed(256, groups, groups * sizeof(T), sizeof(decltype(kernel)), &kernel, bundle.moduleName,
-                                            bundle.get(i))) {
-
-            T acc = init;
-            for (int64_t groupIdx = 0; groupIdx < groups; ++groupIdx) {
-              acc = reduce(acc, (*groupPartial)[groupIdx]);
-            }
-            return acc;
+          if (!__polyregion_load_kernel_object(bundle.moduleName, bundle.objects[i])) continue;
+          __polyregion_dispatch_managed(256, groups, groups * sizeof(T), sizeof(decltype(kernel)), &kernel, bundle.moduleName);
+          T acc = init;
+          for (int64_t groupIdx = 0; groupIdx < groups; ++groupIdx) {
+            acc = reduce(acc, (*groupPartial)[groupIdx]);
           }
+          return acc;
         }
         break;
       }
@@ -223,7 +263,7 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
   return acc;
 }
 
-} // namespace
+} // namespace details
 
 template <class ExecutionPolicy, class ForwardIt, class UnaryFunction>
 typename std::enable_if_t<std::is_execution_policy_v<typename std::decay_t<ExecutionPolicy>>, void> //

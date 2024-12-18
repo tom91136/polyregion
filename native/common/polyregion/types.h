@@ -27,7 +27,7 @@ enum class POLYREGION_EXPORT Target : uint8_t {
   Source_C_OpenCL1_1,
   Source_C_Metal1_0,
 };
-static inline constexpr std::string_view to_string(const Target &target) {
+static constexpr std::string_view to_string(const Target &target) {
   switch (target) {
     case Target::Object_LLVM_HOST: return "host";
     case Target::Object_LLVM_x86_64: return "x86_64";
@@ -42,7 +42,7 @@ static inline constexpr std::string_view to_string(const Target &target) {
     case Target::Source_C_Metal1_0: return "metal1_0";
   }
 }
-static inline constexpr std::optional<Target> targetFromOrdinal(std::underlying_type_t<Target> ordinal) {
+static constexpr std::optional<Target> targetFromOrdinal(std::underlying_type_t<Target> ordinal) {
   auto target = static_cast<Target>(ordinal);
   switch (target) {
     case Target::Object_LLVM_HOST:
@@ -68,7 +68,7 @@ enum class POLYREGION_EXPORT OptLevel : uint8_t {
   O3,
   Ofast,
 };
-static inline constexpr std::string_view to_string(const OptLevel &target) {
+static constexpr std::string_view to_string(const OptLevel &target) {
   switch (target) {
     case OptLevel::O0: return "O0";
     case OptLevel::O1: return "O1";
@@ -77,7 +77,7 @@ static inline constexpr std::string_view to_string(const OptLevel &target) {
     case OptLevel::Ofast: return "Ofast";
   }
 }
-static inline constexpr std::optional<OptLevel> optFromOrdinal(std::underlying_type_t<OptLevel> ordinal) {
+static constexpr std::optional<OptLevel> optFromOrdinal(std::underlying_type_t<OptLevel> ordinal) {
   auto target = static_cast<OptLevel>(ordinal);
   switch (target) {
     case OptLevel::O0:
@@ -90,7 +90,7 @@ static inline constexpr std::optional<OptLevel> optFromOrdinal(std::underlying_t
   }
 }
 
-static inline const std::unordered_map<std::string, Target> &targets() {
+static const std::unordered_map<std::string, Target> &targets() {
   static std::unordered_map<std::string, Target> //
       data{                                      // obj
            {"host", Target::Object_LLVM_HOST},
@@ -126,7 +126,7 @@ static inline const std::unordered_map<std::string, Target> &targets() {
   return data;
 }
 
-static inline std::optional<Target> parseTarget(const std::string &name) {
+static std::optional<Target> parseTarget(const std::string &name) {
   std::string lower(name.size(), {});
   for (size_t i = 0; i < name.size(); ++i)
     lower[i] = std::tolower(name[i]);
@@ -152,7 +152,7 @@ enum class POLYREGION_EXPORT Type : uint8_t {
   Scratch,
 };
 
-static inline constexpr size_t byteOfType(Type t) {
+static constexpr size_t byteOfType(Type t) {
   switch (t) {
     case Type::Void: return 0;
     case Type::Bool8:
@@ -169,7 +169,7 @@ static inline constexpr size_t byteOfType(Type t) {
   }
 }
 
-static inline constexpr std::string_view to_string(const Type &type) {
+static constexpr std::string_view to_string(const Type &type) {
   switch (type) {
     case Type::Void: return "Void";
     case Type::Bool8: return "Bool8";
@@ -193,19 +193,19 @@ using TypedPointer = std::pair<Type, void *>;
 namespace polyregion::runtime {
 
 enum class POLYREGION_EXPORT PlatformKind : uint8_t { HostThreaded = 1, Managed };
-static inline constexpr std::string_view to_string(const PlatformKind &b) {
+static constexpr std::string_view to_string(const PlatformKind &b) {
   switch (b) {
     case PlatformKind::HostThreaded: return "HostThreaded";
     case PlatformKind::Managed: return "Managed";
     default: std::fprintf(stderr, "Unimplemented PlatformKind\n"); std::abort();
   }
 }
-static inline constexpr std::optional<PlatformKind> parsePlatformKind(std::string_view name) {
+static constexpr std::optional<PlatformKind> parsePlatformKind(std::string_view name) {
   if (name == "host" || name == "hostthreaded") return PlatformKind::HostThreaded;
   if (name == "managed") return PlatformKind::Managed;
   return {};
 }
-static inline constexpr runtime::PlatformKind targetPlatformKind(const compiletime::Target &target) {
+static constexpr runtime::PlatformKind targetPlatformKind(const compiletime::Target &target) {
   switch (target) {
     case compiletime::Target::Object_LLVM_HOST:
     case compiletime::Target::Object_LLVM_x86_64:
@@ -224,7 +224,7 @@ static inline constexpr runtime::PlatformKind targetPlatformKind(const compileti
 }
 
 enum class POLYREGION_EXPORT ModuleFormat : uint8_t { Source = 1, Object, DSO, PTX, HSACO, SPIRV };
-static inline constexpr std::string_view to_string(const ModuleFormat &x) {
+static constexpr std::string_view to_string(const ModuleFormat &x) {
   switch (x) {
     case ModuleFormat::Source: return "Source";
     case ModuleFormat::Object: return "Object";
@@ -235,7 +235,7 @@ static inline constexpr std::string_view to_string(const ModuleFormat &x) {
     default: std::fprintf(stderr, "Unimplemented ModuleFormat\n"); std::abort();
   }
 }
-static inline constexpr std::optional<ModuleFormat> parseModuleFormat(std::string_view name) {
+static constexpr std::optional<ModuleFormat> parseModuleFormat(std::string_view name) {
   if (name == "src" || name == "source") return ModuleFormat::Source;
   if (name == "obj" || name == "object") return ModuleFormat::Object;
   if (name == "dso") return ModuleFormat::DSO;
@@ -245,7 +245,7 @@ static inline constexpr std::optional<ModuleFormat> parseModuleFormat(std::strin
   return {};
 }
 
-static inline constexpr runtime::ModuleFormat targetFormat(const compiletime::Target &target) {
+static constexpr runtime::ModuleFormat targetFormat(const compiletime::Target &target) {
   switch (target) {
     case compiletime::Target::Object_LLVM_HOST:
     case compiletime::Target::Object_LLVM_x86_64:

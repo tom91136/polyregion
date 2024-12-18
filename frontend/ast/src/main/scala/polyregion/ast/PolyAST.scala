@@ -472,7 +472,7 @@ object PolyAST {
       case Stmt.Block(xs) =>
         s"${"{"}\n${xs.map(_.repr).mkString("\n").indent(2)}${"}"}"
       case Stmt.Comment(value)          => s" /* $value */"
-      case Stmt.Var(name, rhs)          => s"var ${name.symbol} : ${name.tpe.repr} = ${rhs.map(_.repr).getOrElse("_")}"
+      case Stmt.Var(name, rhs)          => s"var ${name.symbol}: ${name.tpe.repr} = ${rhs.map(_.repr).getOrElse("_")}"
       case Stmt.Mut(name, expr)         => s"${name.repr} = ${expr.repr}"
       case Stmt.Update(lhs, idx, value) => s"${lhs.repr}[${idx.repr}] = ${value.repr}"
       case Stmt.While(tests, cond, body) =>
@@ -512,7 +512,7 @@ object PolyAST {
   extension (f: Function) {
     inline def repr: String = s"def ${f.name}(${f.args
         .map(a => s"${a.named.symbol}: ${a.named.tpe.repr}${a.pos.map(s => s"/*${s.repr}*/").getOrElse("")}")
-        .mkString(", ")}): ${f.rtn.repr} /*${f.attrs.map(_.repr).mkString(", ")}*/ ${"{"}\n${f.body.map(_.repr).mkString("\n").indent(2)}${"}"}"
+        .mkString(", ")}): ${f.rtn.repr} /*${f.attrs.map(_.repr).mkString(", ")}*/ ${"{"}\n${f.body.map(_.repr).mkString("\n").indent(2)}\n${"}"}"
   }
 
   extension (s: StructDef) {
