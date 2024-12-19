@@ -23,13 +23,13 @@ static void invoke(const char *prefix, uint64_t symbolAddress, const std::vector
   const auto toFFITpe = [prefix](const Type &tpe) -> ffi_type * {
     switch (tpe) {
       case polyregion::runtime::Type::Bool8:
-      case polyregion::runtime::Type::Byte8: return &ffi_type_sint8;
-      case polyregion::runtime::Type::CharU16: return &ffi_type_uint16;
-      case polyregion::runtime::Type::Short16: return &ffi_type_sint16;
+      case polyregion::runtime::Type::Int8: return &ffi_type_sint8;
+      case polyregion::runtime::Type::UInt16: return &ffi_type_uint16;
+      case polyregion::runtime::Type::Int16: return &ffi_type_sint16;
       case polyregion::runtime::Type::Int32: return &ffi_type_sint32;
-      case polyregion::runtime::Type::Long64: return &ffi_type_sint64;
+      case polyregion::runtime::Type::Int64: return &ffi_type_sint64;
       case polyregion::runtime::Type::Float32: return &ffi_type_float;
-      case polyregion::runtime::Type::Double64: return &ffi_type_double;
+      case polyregion::runtime::Type::Float64: return &ffi_type_double;
       case polyregion::runtime::Type::Ptr: return &ffi_type_pointer;
       case polyregion::runtime::Type::Void: return &ffi_type_void;
       default: POLYRT_FATAL(prefix, "Illegal ffi type: %s", to_string(tpe).data());
@@ -250,8 +250,8 @@ void validatePolicyAndArgs(const char *prefix, std::vector<Type> types, const Po
   if (policy.global.y != 1) POLYRT_FATAL(prefix, "Policy dimension Y > 1 is not supported: %zu", policy.global.y);
   if (policy.global.z != 1) POLYRT_FATAL(prefix, "Policy dimension Z > 1 is not supported: %zu", policy.global.z);
   if (policy.local) POLYRT_FATAL(prefix, "Policy local dimension is not supported: size=%zu", policy.local->second);
-  if (types[0] != Type::Long64)
-    POLYRT_FATAL(prefix, "Expecting first argument as index (%s), but was %s", to_string(Type::Long64).data(), to_string(types[0]).data());
+  if (types[0] != Type::Int64)
+    POLYRT_FATAL(prefix, "Expecting first argument as index (%s), but was %s", to_string(Type::Int64).data(), to_string(types[0]).data());
 }
 void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
                                                 std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
@@ -273,8 +273,8 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
       [sym, types, argData](size_t tid) {
         auto argData_ = argData;
         auto argPtrs = detail::argDataAsPointers(types, argData_);
-        if (types[0] != Type::Long64) {
-          POLYRT_FATAL(RELOBJ_PREFIX, "Expecting first argument as index: %s, but was %s", to_string(Type::Long64).data(),
+        if (types[0] != Type::Int64) {
+          POLYRT_FATAL(RELOBJ_PREFIX, "Expecting first argument as index: %s, but was %s", to_string(Type::Int64).data(),
                        to_string(types[0]).data());
         }
         auto _tid = int64_t(tid);

@@ -16,7 +16,9 @@ using polyregion::runtime::PlatformKind;
 extern "C" struct RuntimeStructMember {
   const char *name;
   size_t offsetInBytes, sizeInBytes;
-  int64_t type; // -1 = no ptr
+
+//  polyregion::runtime::Type type;
+  int64_t pointerType; // -1 = no ptr
 };
 
 extern "C" struct RuntimeStruct {

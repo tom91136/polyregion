@@ -94,11 +94,36 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
             f(i);
           }
         };
-        fprintf(stderr, "=== \n" );
+
         const RuntimeKernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::HostThreaded>(kernel);
 
 
-        fprintf(stderr, "=== %d\n", bundle.objects[0].imageLength);
+
+
+
+
+        for (size_t i = 0; i < bundle.structCount; ++i) {
+          RuntimeStruct *currentStruct = &bundle.structs[i];
+
+          fprintf(stderr, "  Struct [%zu]:\n", i);
+          fprintf(stderr, "    Name: %s\n", currentStruct->name);
+          fprintf(stderr, "    Exported: %s\n", currentStruct->exported ? "true" : "false");
+          fprintf(stderr, "    Member Count: %zu\n", currentStruct->memberCount);
+
+          if (currentStruct->members) {
+            for (size_t j = 0; j < currentStruct->memberCount; ++j) {
+              RuntimeStructMember *member = &currentStruct->members[j];
+              fprintf(stderr, "      Member [%zu]:\n", j);
+              fprintf(stderr, "        Name: %s\n", member->name);
+              fprintf(stderr, "        Offset (bytes): %zu\n", member->offsetInBytes);
+              fprintf(stderr, "        Size (bytes): %zu\n", member->sizeInBytes);
+              fprintf(stderr, "        Type: %ld\n", member->pointerType);
+            }
+          } else {
+            fprintf(stderr, "    No members available for this struct.\n");
+          }
+        }
+
         std::byte argData[sizeof(decltype(kernel))];
         std::memcpy(argData, &kernel, sizeof(decltype(kernel)));
         for (size_t i = 0; i < bundle.objectCount; ++i) {

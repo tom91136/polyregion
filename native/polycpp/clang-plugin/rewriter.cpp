@@ -171,11 +171,11 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
     return clang::DeclRefExpr::Create(C, {}, {}, lhs, false, clang::SourceLocation{}, lhs->getType(), clang::ExprValueKind::VK_LValue);
   };
 
-  auto mkConstArrayTpe = [&](clang::QualType componentTpe, size_t size) {
+  auto mkConstArrTy = [&](clang::QualType componentTpe, size_t size) {
     return C.getConstantArrayType(componentTpe, llvm::APInt(C.getTypeSize(C.IntTy), size), nullptr, clang::ArraySizeModifier::Normal, 0);
   };
 
-  auto mkStringLiteral = [&](const std::string &str) {
+  auto mkStrLit = [&](const std::string &str) {
     return clang::StringLiteral::Create(C, str, clang::StringLiteralKind::Ordinary, false,
                                         C.getConstantArrayType(C.getConstType(C.CharTy),
                                                                llvm::APInt(C.getTypeSize(C.IntTy), str.length() + 1), nullptr,
@@ -183,11 +183,11 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
                                         {});
   };
 
-  auto mkIntegerLiteral = [&](clang::QualType tpe, uint64_t value) {
+  auto mkIntLit = [&](clang::QualType tpe, uint64_t value) {
     return clang::IntegerLiteral::Create(C, llvm::APInt(C.getTypeSize(tpe), value), tpe, {});
   };
 
-  auto mkBoolLiteral = [&](bool value) { return clang::CXXBoolLiteralExpr::Create(C, value, C.BoolTy, {}); };
+  auto mkBoolLit = [&](bool value) { return clang::CXXBoolLiteralExpr::Create(C, value, C.BoolTy, {}); };
 
   auto mkArrayToPtrDecay = [&](clang::QualType to, clang::Expr *expr) {
     return clang::ImplicitCastExpr::Create(C, to, clang::CK_ArrayToPointerDecay, expr, nullptr, clang::VK_PRValue, {});
@@ -215,53 +215,53 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
     return {};
   };
 
-  auto constCharStarTpe = C.getPointerType(C.CharTy.withConst());
+  auto constCharStarTy = C.getPointerType(C.CharTy.withConst());
 
-  auto kernelImageDecls =                                               //
-      bundle.objects                                                    //
-      | zip_with_index()                                                //
-      | map([&](auto ko, auto idx) {                                    //
-          return mkStaticVarDecl(                                       //
-              "__kernelobject_image_data_" + std::to_string(idx),       //
-              mkConstArrayTpe(C.UnsignedCharTy, ko.moduleImage.size()), //
+  auto kernelImageDecls =                                            //
+      bundle.objects                                                 //
+      | zip_with_index()                                             //
+      | map([&](auto ko, auto idx) {                                 //
+          return mkStaticVarDecl(                                    //
+              "__kernelobject_image_data_" + std::to_string(idx),    //
+              mkConstArrTy(C.UnsignedCharTy, ko.moduleImage.size()), //
               ko.moduleImage | map([&](const unsigned char c) -> clang::Expr * {
-                return clang::ImplicitCastExpr::Create(C, C.UnsignedCharTy, clang::CK_IntegralCast, mkIntegerLiteral(C.IntTy, c), nullptr,
+                return clang::ImplicitCastExpr::Create(C, C.UnsignedCharTy, clang::CK_IntegralCast, mkIntLit(C.IntTy, c), nullptr,
                                                        clang::VK_PRValue, {});
               }) | to_vector());
         }) //
       | to_vector();
 
-  auto kernelFeatureDecls =                                          //
-      bundle.objects                                                 //
-      | zip_with_index()                                             //
-      | map([&](auto &ko, auto idx) {                                //
-          return mkStaticVarDecl(                                    //
-              "__kernelobject_feature_data_" + std::to_string(idx),  //
-              mkConstArrayTpe(constCharStarTpe, ko.features.size()), //
+  auto kernelFeatureDecls =                                         //
+      bundle.objects                                                //
+      | zip_with_index()                                            //
+      | map([&](auto &ko, auto idx) {                               //
+          return mkStaticVarDecl(                                   //
+              "__kernelobject_feature_data_" + std::to_string(idx), //
+              mkConstArrTy(constCharStarTy, ko.features.size()),    //
               ko.features | map([&](auto &feature) -> clang::Expr * {
-                return mkArrayToPtrDecay(C.getConstType(C.getPointerType(C.CharTy)), mkStringLiteral(feature));
+                return mkArrayToPtrDecay(C.getConstType(C.getPointerType(C.CharTy)), mkStrLit(feature));
               }) | to_vector());
         }) //
       | to_vector();
 
-  auto kernelObjectArrayDecl = mkStaticVarDecl(                       //
-      "__kernelobject_data",                                          //
-      mkConstArrayTpe(*RuntimeKernelObjectTy, bundle.objects.size()), //
-      bundle.objects                                                  //
-          | zip_with_index()                                          //
-          | map([&](auto &ko, auto idx) -> clang::Expr * {            //
-              return mkInitList(                                      //
-                  *RuntimeKernelObjectTy,                             //
+  auto kernelObjectArrayDecl = mkStaticVarDecl(                    //
+      "__kernelobject_data",                                       //
+      mkConstArrTy(*RuntimeKernelObjectTy, bundle.objects.size()), //
+      bundle.objects                                               //
+          | zip_with_index()                                       //
+          | map([&](auto &ko, auto idx) -> clang::Expr * {         //
+              return mkInitList(                                   //
+                  *RuntimeKernelObjectTy,                          //
                   {
-                      S.ImpCastExprToType(mkIntegerLiteral(C.IntTy, static_cast<std::underlying_type_t<decltype(ko.kind)>>(ko.kind)),
+                      S.ImpCastExprToType(mkIntLit(C.IntTy, static_cast<std::underlying_type_t<decltype(ko.kind)>>(ko.kind)),
                                           *PlatformKindTy, clang::CastKind::CK_IntegralCast)
                           .get(),
-                      S.ImpCastExprToType(mkIntegerLiteral(C.IntTy, static_cast<std::underlying_type_t<decltype(ko.format)>>(ko.format)),
+                      S.ImpCastExprToType(mkIntLit(C.IntTy, static_cast<std::underlying_type_t<decltype(ko.format)>>(ko.format)),
                                           *ModuleFormatTy, clang::CastKind::CK_IntegralCast)
                           .get(),
 
                       mkArrayToPtrDecay(C.getPointerType(C.CharTy.withConst()), createDeclRef(kernelFeatureDecls[idx])),
-                      mkIntegerLiteral(C.getSizeType(), ko.moduleImage.size()),
+                      mkIntLit(C.getSizeType(), ko.moduleImage.size()),
                       mkArrayToPtrDecay(C.getPointerType(C.UnsignedCharTy.withConst()), createDeclRef(kernelImageDecls[idx])),
                   });
             }) //
@@ -273,20 +273,21 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
 
   auto kernelStructMemberArrayDecl = //
       bundle.layouts | zip_with_index() | map([&](auto &k, auto idx) {
-        return mkStaticVarDecl(                                               //
-            "__kernelstruct_member_data_" + std::to_string(idx),              //
-            mkConstArrayTpe(*RuntimeStructMemberTy, k.second.members.size()), //
-            k.second.members                                                  //
-                | zip_with_index()                                            //
-                | map([&](auto &m, auto idx) -> clang::Expr * {               //
-                    return mkInitList(
-                        *RuntimeStructMemberTy, //
-                        {
-                            mkArrayToPtrDecay(constCharStarTpe, mkStringLiteral(m.name.symbol)),                                 //
-                            mkIntegerLiteral(C.getSizeType(), m.offsetInBytes),                                                  //
-                            mkIntegerLiteral(C.getSizeType(), m.sizeInBytes),                                                    //
-                            mkIntegerLiteral(C.getIntTypeForBitwidth(64, true), nameToIndex ^ get_or_default(m.name.symbol, -1)) //  FIXME lookup is wrong
-                        });
+        return mkStaticVarDecl(                                                                     //
+            "__kernelstruct_member_data_" + std::to_string(idx),                                    //
+            mkConstArrTy(*RuntimeStructMemberTy, k.second.members.size()),                          //
+            k.second.members                                                                        //
+                | zip_with_index()                                                                  //
+                | map([&](auto &m, auto idx) -> clang::Expr * {                                     //
+                    return mkInitList(*RuntimeStructMemberTy,                                       //
+                                      {mkArrayToPtrDecay(constCharStarTy, mkStrLit(m.name.symbol)), //
+                                       mkIntLit(C.getSizeType(), m.offsetInBytes),                  //
+                                       mkIntLit(C.getSizeType(), m.sizeInBytes),                    //
+                                       mkIntLit(C.getIntTypeForBitwidth(64, true),
+                                                m.name.tpe.template get<Type::Struct>() ^
+                                                    bind([&](auto &s) { return nameToIndex ^ get(s.name); }) ^ get_or_else(-1))
+
+                                      });
                   }) //
                 | to_vector());
       }) |
@@ -294,14 +295,15 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
 
   auto kernelStructArrayDecl = mkStaticVarDecl(                                         //
       "__kernelstruct_data",                                                            //
-      mkConstArrayTpe(*RuntimeStructTy, bundle.layouts.size()),                         //
+      mkConstArrTy(*RuntimeStructTy, bundle.layouts.size()),                            //
       bundle.layouts | zip_with_index() | map([&](auto &k, auto idx) -> clang::Expr * { //
         auto &[exported, ks] = k;
         return mkInitList(    //
             *RuntimeStructTy, //
             {
-                mkArrayToPtrDecay(constCharStarTpe, mkStringLiteral(ks.name)), mkBoolLiteral(exported),
-                mkIntegerLiteral(C.getSizeType(), ks.members.size()),
+                mkArrayToPtrDecay(constCharStarTy, mkStrLit(ks.name)), //
+                mkBoolLit(exported),                                   //
+                mkIntLit(C.getSizeType(), ks.members.size()),          //
                 mkArrayToPtrDecay(C.getPointerType(*RuntimeStructMemberTy), createDeclRef(kernelStructMemberArrayDecl[idx])),
 
                 //                      S.ImpCastExprToType(mkIntegerLiteral(C.IntTy,
@@ -326,15 +328,15 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
       "__kb",                              //
       RuntimeKernelBundleTy.withConst(),   //
       {
-          mkArrayToPtrDecay(constCharStarTpe, mkStringLiteral(bundle.moduleName)),
+          mkArrayToPtrDecay(constCharStarTy, mkStrLit(bundle.moduleName)),
 
-          mkIntegerLiteral(C.getSizeType(), bundle.objects.size()),
+          mkIntLit(C.getSizeType(), bundle.objects.size()),
           mkArrayToPtrDecay(C.getPointerType(*RuntimeKernelObjectTy), createDeclRef(kernelObjectArrayDecl)),
 
-          mkIntegerLiteral(C.getSizeType(), bundle.layouts.size()),
+          mkIntLit(C.getSizeType(), bundle.layouts.size()),
           mkArrayToPtrDecay(C.getPointerType(*RuntimeStructTy), createDeclRef(kernelStructArrayDecl)),
 
-          mkArrayToPtrDecay(constCharStarTpe, mkStringLiteral(bundle.metadata)),
+          mkArrayToPtrDecay(constCharStarTy, mkStrLit(bundle.metadata)),
       });
 
   std::vector<clang::Stmt *> newStmts =

@@ -104,7 +104,7 @@ Kernels<std::vector<double>> dispatch(Type tpe, size_t size, size_t times, size_
   auto invoke = [&](const auto &acc, const std::pair<std::string, std::string> &spec, const Policy &policy, const ArgBuffer &buffer) {
     return [&](auto &h) {
       auto _buffer = buffer;
-      if (threaded) _buffer.prepend({{Type::Long64, nullptr}, {Type::Ptr, &begins_d}, {Type::Ptr, &ends_d}});
+      if (threaded) _buffer.prepend({{Type::Int64, nullptr}, {Type::Ptr, &begins_d}, {Type::Ptr, &ends_d}});
 
       auto t1 = std::chrono::high_resolution_clock::now();
       q.enqueueInvokeAsync(spec.first, spec.second, _buffer, policy, [&, t1]() {

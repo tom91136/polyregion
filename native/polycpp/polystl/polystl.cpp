@@ -135,7 +135,7 @@ POLYREGION_EXPORT extern "C" void __polyregion_dispatch_hostthreaded( // NOLINT(
   POLYSTL_LOG("<%s:%s:%zu> Dispatch hostthread", fn, moduleName, global);
   polyregion::concurrency_utils::waitAll([&](auto &cb) {
     // FIXME why is the last arg (Void here, can be any type) needed?
-    ArgBuffer buffer{{Type::Long64, nullptr}, {Type::Ptr, &functorData}, {Type::Void, nullptr}};
+    ArgBuffer buffer{{Type::Int64, nullptr}, {Type::Ptr, &functorData}, {Type::Void, nullptr}};
     __polyregion_selected_queue->enqueueInvokeAsync(moduleName, "_main", buffer, Policy{Dim3{global, 1, 1}}, [&]() {
       POLYSTL_LOG("<%s:%s:%zu> Unlatched", fn, moduleName, global);
       cb();
