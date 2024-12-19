@@ -20,12 +20,12 @@ using namespace gen::registry;
 static constexpr const char *EX = "polyregion/jvm/runtime/PolyregionRuntimeException";
 
 static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::Void) == Platforms::TYPE_VOID);
-static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::Bool8) == Platforms::TYPE_BOOL);
-static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::Int8) == Platforms::TYPE_BYTE);
-static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::UInt16) == Platforms::TYPE_CHAR);
-static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::Int16) == Platforms::TYPE_SHORT);
-static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::Int32) == Platforms::TYPE_INT);
-static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::Int64) == Platforms::TYPE_LONG);
+static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::Bool1) == Platforms::TYPE_BOOL);
+static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::IntS8) == Platforms::TYPE_BYTE);
+static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::IntU16) == Platforms::TYPE_CHAR);
+static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::IntS16) == Platforms::TYPE_SHORT);
+static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::IntS32) == Platforms::TYPE_INT);
+static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::IntS64) == Platforms::TYPE_LONG);
 static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::Float32) == Platforms::TYPE_FLOAT);
 static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::Float64) == Platforms::TYPE_DOUBLE);
 static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::Ptr) == Platforms::TYPE_PTR);

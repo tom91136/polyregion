@@ -59,7 +59,7 @@ template <typename I> void testArgs(I images, std::initializer_list<Backend> bac
 
             ArgBuffer buffer;
 
-            if (d->sharedAddressSpace()) buffer.append(Type::Int64, nullptr);
+            if (d->sharedAddressSpace()) buffer.append(Type::IntS64, nullptr);
 
             for (size_t i = 0; i < scalarArgCount; ++i)
               buffer.append(Type::Float32, &values[i]);

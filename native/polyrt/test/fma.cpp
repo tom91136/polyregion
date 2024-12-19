@@ -56,7 +56,7 @@ template <typename I> void testFma(I images, std::initializer_list<Backend> back
             auto out_d = d->template mallocDeviceTyped<float>(1, Access::RW);
             //
             ArgBuffer buffer;
-            if (d->sharedAddressSpace()) buffer.append(Type::Int64, nullptr);
+            if (d->sharedAddressSpace()) buffer.append(Type::IntS64, nullptr);
 
             buffer.append({{Type::Float32, &a}, {Type::Float32, &b}, {Type::Float32, &c}, {Type::Ptr, &out_d}, {Type::Void, {}}});
 

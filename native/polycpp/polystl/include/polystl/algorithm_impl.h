@@ -97,33 +97,6 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
 
         const RuntimeKernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::HostThreaded>(kernel);
 
-
-
-
-
-
-        for (size_t i = 0; i < bundle.structCount; ++i) {
-          RuntimeStruct *currentStruct = &bundle.structs[i];
-
-          fprintf(stderr, "  Struct [%zu]:\n", i);
-          fprintf(stderr, "    Name: %s\n", currentStruct->name);
-          fprintf(stderr, "    Exported: %s\n", currentStruct->exported ? "true" : "false");
-          fprintf(stderr, "    Member Count: %zu\n", currentStruct->memberCount);
-
-          if (currentStruct->members) {
-            for (size_t j = 0; j < currentStruct->memberCount; ++j) {
-              RuntimeStructMember *member = &currentStruct->members[j];
-              fprintf(stderr, "      Member [%zu]:\n", j);
-              fprintf(stderr, "        Name: %s\n", member->name);
-              fprintf(stderr, "        Offset (bytes): %zu\n", member->offsetInBytes);
-              fprintf(stderr, "        Size (bytes): %zu\n", member->sizeInBytes);
-              fprintf(stderr, "        Type: %ld\n", member->pointerType);
-            }
-          } else {
-            fprintf(stderr, "    No members available for this struct.\n");
-          }
-        }
-
         std::byte argData[sizeof(decltype(kernel))];
         std::memcpy(argData, &kernel, sizeof(decltype(kernel)));
         for (size_t i = 0; i < bundle.objectCount; ++i) {
@@ -143,9 +116,31 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
           }
         };
         int64_t blocks = 256;
-        fprintf(stderr, "=== \n" );
+
         const RuntimeKernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
 
+        for (size_t i = 0; i < bundle.structCount; ++i) {
+          RuntimeStruct *currentStruct = &bundle.structs[i];
+
+          fprintf(stderr, "  Struct [%zu]:\n", i);
+          fprintf(stderr, "    Name: %s\n", currentStruct->name);
+          fprintf(stderr, "    Exported: %s\n", currentStruct->exported ? "true" : "false");
+          fprintf(stderr, "    Member Count: %zu\n", currentStruct->memberCount);
+
+          if (currentStruct->members) {
+            for (size_t j = 0; j < currentStruct->memberCount; ++j) {
+              RuntimeStructMember *member = &currentStruct->members[j];
+              fprintf(stderr, "      Member [%zu]:\n", j);
+              fprintf(stderr, "        Name: %s\n", member->name);
+              fprintf(stderr, "        Offset (bytes): %zu\n", member->offsetInBytes);
+              fprintf(stderr, "        Size (bytes): %zu\n", member->sizeInBytes);
+              fprintf(stderr, "        Ptr:  %d\n", member->isPtr);
+              fprintf(stderr, "        Type: %ld\n", member->ptrTypeIdx);
+            }
+          } else {
+            fprintf(stderr, "    No members available for this struct.\n");
+          }
+        }
 
         // T* p = reflect_get(kernel, "a");
         // auto size = query_ptr(p);

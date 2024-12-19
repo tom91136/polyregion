@@ -279,7 +279,7 @@ void run() {
 
         ArgBuffer buffer({
             {Type::Ptr, &ptr},
-            {Type::Int32, &x},
+            {Type::IntS32, &x},
             {Type::Void, nullptr},
         });
 

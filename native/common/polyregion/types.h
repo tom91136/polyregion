@@ -140,14 +140,22 @@ namespace polyregion::runtime {
 
 enum class POLYREGION_EXPORT Type : uint8_t {
   Void = 1,
-  Bool8,
-  Int8,
-  UInt16,
-  Int16,
-  Int32,
-  Int64,
+  Bool1,
+
+  IntU8,
+  IntU16,
+  IntU32,
+  IntU64,
+
+  IntS8,
+  IntS16,
+  IntS32,
+  IntS64,
+
+  Float16,
   Float32,
   Float64,
+
   Ptr,
   Scratch,
 };
@@ -155,16 +163,20 @@ enum class POLYREGION_EXPORT Type : uint8_t {
 static constexpr size_t byteOfType(Type t) {
   switch (t) {
     case Type::Void: return 0;
-    case Type::Bool8:
-    case Type::Int8: return 8 / 8;
-    case Type::UInt16:
-    case Type::Int16: return 16 / 8;
-    case Type::Int32: return 32 / 8;
-    case Type::Int64: return 64 / 8;
-    case Type::Float32: return 32 / 8;
-    case Type::Float64: return 64 / 8;
-    case Type::Scratch:
-    case Type::Ptr: return sizeof(void *);
+    case Type::Bool1: [[fallthrough]];
+    case Type::IntU8: [[fallthrough]];
+    case Type::IntS8: return 1;
+    case Type::IntU16: [[fallthrough]];
+    case Type::IntS16: [[fallthrough]];
+    case Type::Float16: return 2;
+    case Type::IntU32: [[fallthrough]];
+    case Type::IntS32: [[fallthrough]];
+    case Type::Float32: return 4;
+    case Type::IntU64: [[fallthrough]];
+    case Type::IntS64: [[fallthrough]];
+    case Type::Float64: return 8;
+    case Type::Ptr: [[fallthrough]];
+    case Type::Scratch: return sizeof(void *);
     default: std::fprintf(stderr, "Unimplemented Type\n"); std::abort();
   }
 }
@@ -172,14 +184,18 @@ static constexpr size_t byteOfType(Type t) {
 static constexpr std::string_view to_string(const Type &type) {
   switch (type) {
     case Type::Void: return "Void";
-    case Type::Bool8: return "Bool8";
-    case Type::Int8: return "Byte8";
-    case Type::UInt16: return "Char";
-    case Type::Int16: return "Short16";
-    case Type::Int32: return "Int32";
-    case Type::Int64: return "Long64";
+    case Type::Bool1: return "Bool1";
+    case Type::IntU8: return "UInt8";
+    case Type::IntU16: return "UInt16";
+    case Type::IntU32: return "UInt32";
+    case Type::IntU64: return "UInt64";
+    case Type::IntS8: return "Int8";
+    case Type::IntS16: return "Int16";
+    case Type::IntS32: return "Int32";
+    case Type::IntS64: return "Int64";
+    case Type::Float16: return "Float16";
     case Type::Float32: return "Float32";
-    case Type::Float64: return "Double64";
+    case Type::Float64: return "Float64";
     case Type::Ptr: return "Ptr";
     case Type::Scratch: return "Scratch";
     default: std::fprintf(stderr, "Unimplemented Type\n"); std::abort();

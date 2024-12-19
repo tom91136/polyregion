@@ -157,6 +157,7 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
   auto ModuleFormatTy = typeOfFieldWithName(*RuntimeKernelObjectTy, "format");
   auto RuntimeStructTy = typeOfFieldWithName(RuntimeKernelBundleTy, "structs") ^ map([](auto &t) { return t->getPointeeType(); });
   auto RuntimeStructMemberTy = typeOfFieldWithName(*RuntimeStructTy, "members") ^ map([](auto &t) { return t->getPointeeType(); });
+  auto RuntimeTypeTy = typeOfFieldWithName(*RuntimeStructMemberTy, "type");
 
   RuntimeStructMemberTy->dump();
   RuntimeKernelObjectTy->dump();
@@ -283,6 +284,7 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
                                       {mkArrayToPtrDecay(constCharStarTy, mkStrLit(m.name.symbol)), //
                                        mkIntLit(C.getSizeType(), m.offsetInBytes),                  //
                                        mkIntLit(C.getSizeType(), m.sizeInBytes),                    //
+                                       mkBoolLit(m.name.tpe.template is<Type::Ptr>()),
                                        mkIntLit(C.getIntTypeForBitwidth(64, true),
                                                 m.name.tpe.template get<Type::Struct>() ^
                                                     bind([&](auto &s) { return nameToIndex ^ get(s.name); }) ^ get_or_else(-1))

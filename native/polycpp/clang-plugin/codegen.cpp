@@ -54,6 +54,37 @@ static std::variant<std::string, CompileResult> compileProgram(const polystl::Op
   else return compileresult_from_json(nlohmann::json::from_msgpack((*BufferOrErr)->getBufferStart(), (*BufferOrErr)->getBufferEnd()));
 }
 
+std::optional<Type::Struct> extractStruct(const Type::Any &t) {
+  if (auto s = t.get<Type::Struct>()) return *s;
+  if (auto p = t.get<Type::Ptr>()) return extractStruct(p->comp);
+  if (auto a = t.get<Type::Annotated>()) return extractStruct(a->tpe);
+  return {};
+}
+
+std::optional<polyregion::runtime::Type> toRuntimeType(const Type::Any &t) {
+  return t.match_total([&](const Type::Float16 &) { return std::optional{runtime::Type::Float16}; }, //
+                       [&](const Type::Float32 &) { return std::optional{runtime::Type::Float32}; }, //
+                       [&](const Type::Float64 &) { return std::optional{runtime::Type::Float64}; }, //
+
+                       [&](const Type::IntU8 &) { return std::optional{runtime::Type::IntU8}; },   //
+                       [&](const Type::IntU16 &) { return std::optional{runtime::Type::IntU16}; }, //
+                       [&](const Type::IntU32 &) { return std::optional{runtime::Type::IntU32}; }, //
+                       [&](const Type::IntU64 &) { return std::optional{runtime::Type::IntU64}; }, //
+
+                       [&](const Type::IntS8 &) { return std::optional{runtime::Type::IntS8}; },   //
+                       [&](const Type::IntS16 &) { return std::optional{runtime::Type::IntS16}; }, //
+                       [&](const Type::IntS32 &) { return std::optional{runtime::Type::IntS32}; }, //
+                       [&](const Type::IntS64 &) { return std::optional{runtime::Type::IntS64}; }, //
+
+                       [&](const Type::Nothing &) { return std::optional<polyregion::runtime::Type>{}; }, //
+                       [&](const Type::Unit0 &) { return std::optional{runtime::Type::Void}; },           //
+                       [&](const Type::Bool1 &) { return std::optional{runtime::Type::Bool1}; },          //
+
+                       [&](const Type::Struct &x) { return std::optional<polyregion::runtime::Type>{}; }, //
+                       [&](const Type::Ptr &x) { return std::optional{runtime::Type::Ptr}; },             //
+                       [&](const Type::Annotated &x) { return toRuntimeType(x.tpe); });
+}
+
 polystl::KernelBundle polystl::generateBundle(const Options &opts,
                                               clang::ASTContext &C,                //
                                               clang::DiagnosticsEngine &diag,      //
@@ -107,7 +138,7 @@ polystl::KernelBundle polystl::generateBundle(const Options &opts,
   auto exportedStructNames = program.functions                                                              //
                              | filter([](auto &f) { return f.attrs ^ contains(FunctionAttr::Exported()); }) //
                              | bind([](auto &f) { return f.args; })                                         //
-                             | collect([](auto &a) { return a.named.tpe.template get<Type::Struct>(); })    //
+                             | collect([](auto &a) { return extractStruct(a.named.tpe); })                  //
                              | map([](auto &s) { return s.name; })                                          //
                              | to<std::unordered_set>();
 
