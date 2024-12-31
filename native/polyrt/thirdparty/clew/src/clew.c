@@ -123,6 +123,8 @@ PFNCLUNLOADCOMPILER                 __clewUnloadCompiler                = NULL;
 PFNCLGETEXTENSIONFUNCTIONADDRESS    __clewGetExtensionFunctionAddress   = NULL;
 #endif
 
+PFNCLENQUEUEBARRIERWITHWAITLIST     __clewEnqueueBarrierWithWaitList    = NULL;
+
 /* cl_gl */
 PFNCLCREATEFROMGLBUFFER             __clewCreateFromGLBuffer            = NULL;
 PFNCLCREATEFROMGLTEXTURE            __clewCreateFromGLTexture           = NULL;
@@ -295,6 +297,7 @@ int clewInit(void)
     __clewGetExtensionFunctionAddress   = (PFNCLGETEXTENSIONFUNCTIONADDRESS )CLEW_DYNLIB_IMPORT(module, "clGetExtensionFunctionAddress");
 #endif
 
+    __clewEnqueueBarrierWithWaitList    = (PFNCLENQUEUEBARRIERWITHWAITLIST  )CLEW_DYNLIB_IMPORT(module, "clEnqueueBarrierWithWaitList");
 
     /* cl_gl */
     __clewCreateFromGLBuffer            = (PFNCLCREATEFROMGLBUFFER          )CLEW_DYNLIB_IMPORT(module, "clCreateFromGLBuffer");

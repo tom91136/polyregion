@@ -11,7 +11,7 @@
 //! \file clew.h
 //! \brief OpenCL run-time loader header
 //!
-//! This file contains a copy of the contents of CL.H and CL_PLATFORM.H from the 
+//! This file contains a copy of the contents of CL.H and CL_PLATFORM.H from the
 //! official OpenCL spec. The purpose of this code is to load the OpenCL dynamic
 //! library at run-time and thus allow the executable to function on many
 //! platforms regardless of the vendor of the OpenCL driver actually installed.
@@ -74,7 +74,7 @@ extern "C" {
 #endif
 
 #ifdef __APPLE__
-    #define CL_EXTENSION_WEAK_LINK                  __attribute__((weak_import))       
+    #define CL_EXTENSION_WEAK_LINK                  __attribute__((weak_import))
     #define CL_API_SUFFIX__VERSION_1_0              AVAILABLE_MAC_OS_X_VERSION_10_6_AND_LATER
     #define CL_EXT_SUFFIX__VERSION_1_0              CL_EXTENSION_WEAK_LINK AVAILABLE_MAC_OS_X_VERSION_10_6_AND_LATER
     #define CL_EXT_SUFFIX__VERSION_1_0_DEPRECATED   CL_EXTENSION_WEAK_LINK AVAILABLE_MAC_OS_X_VERSION_10_6_AND_LATER
@@ -317,7 +317,7 @@ typedef double          cl_double   __attribute__((aligned(8)));
    #define CL_HUGE_VALF     ((cl_float) 1e50)
    #define CL_HUGE_VAL      ((cl_double) 1e500)
    float nanf( const char * );
-   #define CL_NAN           nanf( "" )  
+   #define CL_NAN           nanf( "" )
 #endif
 #define CL_MAXFLOAT         CL_FLT_MAX
 #define CL_INFINITY         CL_HUGE_VALF
@@ -332,17 +332,17 @@ typedef int          cl_GLint;
 typedef unsigned int cl_GLenum;
 
 /*
- * Vector types 
+ * Vector types
  *
- *  Note:   OpenCL requires that all types be naturally aligned. 
+ *  Note:   OpenCL requires that all types be naturally aligned.
  *          This means that vector types must be naturally aligned.
  *          For example, a vector of four floats must be aligned to
- *          a 16 byte boundary (calculated as 4 * the natural 4-byte 
+ *          a 16 byte boundary (calculated as 4 * the natural 4-byte
  *          alignment of the float).  The alignment qualifiers here
  *          will only function properly if your compiler supports them
  *          and if you don't actively work to defeat them.  For example,
  *          in order for a cl_float4 to be 16 byte aligned in a struct,
- *          the start of the struct must itself be 16-byte aligned. 
+ *          the start of the struct must itself be 16-byte aligned.
  *
  *          Maintaining proper alignment is the user's responsibility.
  */
@@ -478,7 +478,7 @@ typedef unsigned int cl_GLenum;
     #if defined( __MINGW64__ )
         #include <intrin.h>
     #else
-        #include <immintrin.h> 
+        #include <immintrin.h>
     #endif
     #if defined( __GNUC__ ) && !defined( __ICC )
         typedef cl_float    __cl_float8     __attribute__((vector_size(32)));
@@ -530,7 +530,7 @@ typedef union
    __extension__ struct{ cl_char  s0, s1; };
    __extension__ struct{ cl_char  lo, hi; };
 #endif
-#if defined( __CL_CHAR2__) 
+#if defined( __CL_CHAR2__)
     __cl_char2     v2;
 #endif
 }cl_char2;
@@ -543,10 +543,10 @@ typedef union
    __extension__ struct{ cl_char  s0, s1, s2, s3; };
    __extension__ struct{ cl_char2 lo, hi; };
 #endif
-#if defined( __CL_CHAR2__) 
+#if defined( __CL_CHAR2__)
     __cl_char2     v2[2];
 #endif
-#if defined( __CL_CHAR4__) 
+#if defined( __CL_CHAR4__)
     __cl_char4     v4;
 #endif
 }cl_char4;
@@ -562,10 +562,10 @@ typedef union
    __extension__ struct{ cl_char  s0, s1, s2, s3, s4, s5, s6, s7; };
    __extension__ struct{ cl_char4 lo, hi; };
 #endif
-#if defined( __CL_CHAR2__) 
+#if defined( __CL_CHAR2__)
     __cl_char2     v2[4];
 #endif
-#if defined( __CL_CHAR4__) 
+#if defined( __CL_CHAR4__)
     __cl_char4     v4[2];
 #endif
 #if defined( __CL_CHAR8__ )
@@ -581,10 +581,10 @@ typedef union
    __extension__ struct{ cl_char  s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, sA, sB, sC, sD, sE, sF; };
    __extension__ struct{ cl_char8 lo, hi; };
 #endif
-#if defined( __CL_CHAR2__) 
+#if defined( __CL_CHAR2__)
     __cl_char2     v2[8];
 #endif
-#if defined( __CL_CHAR4__) 
+#if defined( __CL_CHAR4__)
     __cl_char4     v4[4];
 #endif
 #if defined( __CL_CHAR8__ )
@@ -605,7 +605,7 @@ typedef union
    __extension__ struct{ cl_uchar  s0, s1; };
    __extension__ struct{ cl_uchar  lo, hi; };
 #endif
-#if defined( __cl_uchar2__) 
+#if defined( __cl_uchar2__)
     __cl_uchar2     v2;
 #endif
 }cl_uchar2;
@@ -618,10 +618,10 @@ typedef union
    __extension__ struct{ cl_uchar  s0, s1, s2, s3; };
    __extension__ struct{ cl_uchar2 lo, hi; };
 #endif
-#if defined( __CL_UCHAR2__) 
+#if defined( __CL_UCHAR2__)
     __cl_uchar2     v2[2];
 #endif
-#if defined( __CL_UCHAR4__) 
+#if defined( __CL_UCHAR4__)
     __cl_uchar4     v4;
 #endif
 }cl_uchar4;
@@ -637,10 +637,10 @@ typedef union
    __extension__ struct{ cl_uchar  s0, s1, s2, s3, s4, s5, s6, s7; };
    __extension__ struct{ cl_uchar4 lo, hi; };
 #endif
-#if defined( __CL_UCHAR2__) 
+#if defined( __CL_UCHAR2__)
     __cl_uchar2     v2[4];
 #endif
-#if defined( __CL_UCHAR4__) 
+#if defined( __CL_UCHAR4__)
     __cl_uchar4     v4[2];
 #endif
 #if defined( __CL_UCHAR8__ )
@@ -656,10 +656,10 @@ typedef union
    __extension__ struct{ cl_uchar  s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, sA, sB, sC, sD, sE, sF; };
    __extension__ struct{ cl_uchar8 lo, hi; };
 #endif
-#if defined( __CL_UCHAR2__) 
+#if defined( __CL_UCHAR2__)
     __cl_uchar2     v2[8];
 #endif
-#if defined( __CL_UCHAR4__) 
+#if defined( __CL_UCHAR4__)
     __cl_uchar4     v4[4];
 #endif
 #if defined( __CL_UCHAR8__ )
@@ -680,7 +680,7 @@ typedef union
    __extension__ struct{ cl_short  s0, s1; };
    __extension__ struct{ cl_short  lo, hi; };
 #endif
-#if defined( __CL_SHORT2__) 
+#if defined( __CL_SHORT2__)
     __cl_short2     v2;
 #endif
 }cl_short2;
@@ -693,10 +693,10 @@ typedef union
    __extension__ struct{ cl_short  s0, s1, s2, s3; };
    __extension__ struct{ cl_short2 lo, hi; };
 #endif
-#if defined( __CL_SHORT2__) 
+#if defined( __CL_SHORT2__)
     __cl_short2     v2[2];
 #endif
-#if defined( __CL_SHORT4__) 
+#if defined( __CL_SHORT4__)
     __cl_short4     v4;
 #endif
 }cl_short4;
@@ -712,10 +712,10 @@ typedef union
    __extension__ struct{ cl_short  s0, s1, s2, s3, s4, s5, s6, s7; };
    __extension__ struct{ cl_short4 lo, hi; };
 #endif
-#if defined( __CL_SHORT2__) 
+#if defined( __CL_SHORT2__)
     __cl_short2     v2[4];
 #endif
-#if defined( __CL_SHORT4__) 
+#if defined( __CL_SHORT4__)
     __cl_short4     v4[2];
 #endif
 #if defined( __CL_SHORT8__ )
@@ -731,10 +731,10 @@ typedef union
    __extension__ struct{ cl_short  s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, sA, sB, sC, sD, sE, sF; };
    __extension__ struct{ cl_short8 lo, hi; };
 #endif
-#if defined( __CL_SHORT2__) 
+#if defined( __CL_SHORT2__)
     __cl_short2     v2[8];
 #endif
-#if defined( __CL_SHORT4__) 
+#if defined( __CL_SHORT4__)
     __cl_short4     v4[4];
 #endif
 #if defined( __CL_SHORT8__ )
@@ -755,7 +755,7 @@ typedef union
    __extension__ struct{ cl_ushort  s0, s1; };
    __extension__ struct{ cl_ushort  lo, hi; };
 #endif
-#if defined( __CL_USHORT2__) 
+#if defined( __CL_USHORT2__)
     __cl_ushort2     v2;
 #endif
 }cl_ushort2;
@@ -768,10 +768,10 @@ typedef union
    __extension__ struct{ cl_ushort  s0, s1, s2, s3; };
    __extension__ struct{ cl_ushort2 lo, hi; };
 #endif
-#if defined( __CL_USHORT2__) 
+#if defined( __CL_USHORT2__)
     __cl_ushort2     v2[2];
 #endif
-#if defined( __CL_USHORT4__) 
+#if defined( __CL_USHORT4__)
     __cl_ushort4     v4;
 #endif
 }cl_ushort4;
@@ -787,10 +787,10 @@ typedef union
    __extension__ struct{ cl_ushort  s0, s1, s2, s3, s4, s5, s6, s7; };
    __extension__ struct{ cl_ushort4 lo, hi; };
 #endif
-#if defined( __CL_USHORT2__) 
+#if defined( __CL_USHORT2__)
     __cl_ushort2     v2[4];
 #endif
-#if defined( __CL_USHORT4__) 
+#if defined( __CL_USHORT4__)
     __cl_ushort4     v4[2];
 #endif
 #if defined( __CL_USHORT8__ )
@@ -806,10 +806,10 @@ typedef union
    __extension__ struct{ cl_ushort  s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, sA, sB, sC, sD, sE, sF; };
    __extension__ struct{ cl_ushort8 lo, hi; };
 #endif
-#if defined( __CL_USHORT2__) 
+#if defined( __CL_USHORT2__)
     __cl_ushort2     v2[8];
 #endif
-#if defined( __CL_USHORT4__) 
+#if defined( __CL_USHORT4__)
     __cl_ushort4     v4[4];
 #endif
 #if defined( __CL_USHORT8__ )
@@ -829,7 +829,7 @@ typedef union
    __extension__ struct{ cl_int  s0, s1; };
    __extension__ struct{ cl_int  lo, hi; };
 #endif
-#if defined( __CL_INT2__) 
+#if defined( __CL_INT2__)
     __cl_int2     v2;
 #endif
 }cl_int2;
@@ -842,10 +842,10 @@ typedef union
    __extension__ struct{ cl_int  s0, s1, s2, s3; };
    __extension__ struct{ cl_int2 lo, hi; };
 #endif
-#if defined( __CL_INT2__) 
+#if defined( __CL_INT2__)
     __cl_int2     v2[2];
 #endif
-#if defined( __CL_INT4__) 
+#if defined( __CL_INT4__)
     __cl_int4     v4;
 #endif
 }cl_int4;
@@ -861,10 +861,10 @@ typedef union
    __extension__ struct{ cl_int  s0, s1, s2, s3, s4, s5, s6, s7; };
    __extension__ struct{ cl_int4 lo, hi; };
 #endif
-#if defined( __CL_INT2__) 
+#if defined( __CL_INT2__)
     __cl_int2     v2[4];
 #endif
-#if defined( __CL_INT4__) 
+#if defined( __CL_INT4__)
     __cl_int4     v4[2];
 #endif
 #if defined( __CL_INT8__ )
@@ -880,10 +880,10 @@ typedef union
    __extension__ struct{ cl_int  s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, sA, sB, sC, sD, sE, sF; };
    __extension__ struct{ cl_int8 lo, hi; };
 #endif
-#if defined( __CL_INT2__) 
+#if defined( __CL_INT2__)
     __cl_int2     v2[8];
 #endif
-#if defined( __CL_INT4__) 
+#if defined( __CL_INT4__)
     __cl_int4     v4[4];
 #endif
 #if defined( __CL_INT8__ )
@@ -904,7 +904,7 @@ typedef union
    __extension__ struct{ cl_uint  s0, s1; };
    __extension__ struct{ cl_uint  lo, hi; };
 #endif
-#if defined( __CL_UINT2__) 
+#if defined( __CL_UINT2__)
     __cl_uint2     v2;
 #endif
 }cl_uint2;
@@ -917,10 +917,10 @@ typedef union
    __extension__ struct{ cl_uint  s0, s1, s2, s3; };
    __extension__ struct{ cl_uint2 lo, hi; };
 #endif
-#if defined( __CL_UINT2__) 
+#if defined( __CL_UINT2__)
     __cl_uint2     v2[2];
 #endif
-#if defined( __CL_UINT4__) 
+#if defined( __CL_UINT4__)
     __cl_uint4     v4;
 #endif
 }cl_uint4;
@@ -936,10 +936,10 @@ typedef union
    __extension__ struct{ cl_uint  s0, s1, s2, s3, s4, s5, s6, s7; };
    __extension__ struct{ cl_uint4 lo, hi; };
 #endif
-#if defined( __CL_UINT2__) 
+#if defined( __CL_UINT2__)
     __cl_uint2     v2[4];
 #endif
-#if defined( __CL_UINT4__) 
+#if defined( __CL_UINT4__)
     __cl_uint4     v4[2];
 #endif
 #if defined( __CL_UINT8__ )
@@ -955,10 +955,10 @@ typedef union
    __extension__ struct{ cl_uint  s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, sA, sB, sC, sD, sE, sF; };
    __extension__ struct{ cl_uint8 lo, hi; };
 #endif
-#if defined( __CL_UINT2__) 
+#if defined( __CL_UINT2__)
     __cl_uint2     v2[8];
 #endif
-#if defined( __CL_UINT4__) 
+#if defined( __CL_UINT4__)
     __cl_uint4     v4[4];
 #endif
 #if defined( __CL_UINT8__ )
@@ -978,7 +978,7 @@ typedef union
    __extension__ struct{ cl_long  s0, s1; };
    __extension__ struct{ cl_long  lo, hi; };
 #endif
-#if defined( __CL_LONG2__) 
+#if defined( __CL_LONG2__)
     __cl_long2     v2;
 #endif
 }cl_long2;
@@ -991,10 +991,10 @@ typedef union
    __extension__ struct{ cl_long  s0, s1, s2, s3; };
    __extension__ struct{ cl_long2 lo, hi; };
 #endif
-#if defined( __CL_LONG2__) 
+#if defined( __CL_LONG2__)
     __cl_long2     v2[2];
 #endif
-#if defined( __CL_LONG4__) 
+#if defined( __CL_LONG4__)
     __cl_long4     v4;
 #endif
 }cl_long4;
@@ -1010,10 +1010,10 @@ typedef union
    __extension__ struct{ cl_long  s0, s1, s2, s3, s4, s5, s6, s7; };
    __extension__ struct{ cl_long4 lo, hi; };
 #endif
-#if defined( __CL_LONG2__) 
+#if defined( __CL_LONG2__)
     __cl_long2     v2[4];
 #endif
-#if defined( __CL_LONG4__) 
+#if defined( __CL_LONG4__)
     __cl_long4     v4[2];
 #endif
 #if defined( __CL_LONG8__ )
@@ -1029,10 +1029,10 @@ typedef union
    __extension__ struct{ cl_long  s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, sA, sB, sC, sD, sE, sF; };
    __extension__ struct{ cl_long8 lo, hi; };
 #endif
-#if defined( __CL_LONG2__) 
+#if defined( __CL_LONG2__)
     __cl_long2     v2[8];
 #endif
-#if defined( __CL_LONG4__) 
+#if defined( __CL_LONG4__)
     __cl_long4     v4[4];
 #endif
 #if defined( __CL_LONG8__ )
@@ -1053,7 +1053,7 @@ typedef union
    __extension__ struct{ cl_ulong  s0, s1; };
    __extension__ struct{ cl_ulong  lo, hi; };
 #endif
-#if defined( __CL_ULONG2__) 
+#if defined( __CL_ULONG2__)
     __cl_ulong2     v2;
 #endif
 }cl_ulong2;
@@ -1066,10 +1066,10 @@ typedef union
    __extension__ struct{ cl_ulong  s0, s1, s2, s3; };
    __extension__ struct{ cl_ulong2 lo, hi; };
 #endif
-#if defined( __CL_ULONG2__) 
+#if defined( __CL_ULONG2__)
     __cl_ulong2     v2[2];
 #endif
-#if defined( __CL_ULONG4__) 
+#if defined( __CL_ULONG4__)
     __cl_ulong4     v4;
 #endif
 }cl_ulong4;
@@ -1085,10 +1085,10 @@ typedef union
    __extension__ struct{ cl_ulong  s0, s1, s2, s3, s4, s5, s6, s7; };
    __extension__ struct{ cl_ulong4 lo, hi; };
 #endif
-#if defined( __CL_ULONG2__) 
+#if defined( __CL_ULONG2__)
     __cl_ulong2     v2[4];
 #endif
-#if defined( __CL_ULONG4__) 
+#if defined( __CL_ULONG4__)
     __cl_ulong4     v4[2];
 #endif
 #if defined( __CL_ULONG8__ )
@@ -1104,10 +1104,10 @@ typedef union
    __extension__ struct{ cl_ulong  s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, sA, sB, sC, sD, sE, sF; };
    __extension__ struct{ cl_ulong8 lo, hi; };
 #endif
-#if defined( __CL_ULONG2__) 
+#if defined( __CL_ULONG2__)
     __cl_ulong2     v2[8];
 #endif
-#if defined( __CL_ULONG4__) 
+#if defined( __CL_ULONG4__)
     __cl_ulong4     v4[4];
 #endif
 #if defined( __CL_ULONG8__ )
@@ -1129,7 +1129,7 @@ typedef union
    __extension__ struct{ cl_float  s0, s1; };
    __extension__ struct{ cl_float  lo, hi; };
 #endif
-#if defined( __CL_FLOAT2__) 
+#if defined( __CL_FLOAT2__)
     __cl_float2     v2;
 #endif
 }cl_float2;
@@ -1142,10 +1142,10 @@ typedef union
    __extension__ struct{ cl_float   s0, s1, s2, s3; };
    __extension__ struct{ cl_float2  lo, hi; };
 #endif
-#if defined( __CL_FLOAT2__) 
+#if defined( __CL_FLOAT2__)
     __cl_float2     v2[2];
 #endif
-#if defined( __CL_FLOAT4__) 
+#if defined( __CL_FLOAT4__)
     __cl_float4     v4;
 #endif
 }cl_float4;
@@ -1161,10 +1161,10 @@ typedef union
    __extension__ struct{ cl_float   s0, s1, s2, s3, s4, s5, s6, s7; };
    __extension__ struct{ cl_float4  lo, hi; };
 #endif
-#if defined( __CL_FLOAT2__) 
+#if defined( __CL_FLOAT2__)
     __cl_float2     v2[4];
 #endif
-#if defined( __CL_FLOAT4__) 
+#if defined( __CL_FLOAT4__)
     __cl_float4     v4[2];
 #endif
 #if defined( __CL_FLOAT8__ )
@@ -1180,10 +1180,10 @@ typedef union
    __extension__ struct{ cl_float  s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, sA, sB, sC, sD, sE, sF; };
    __extension__ struct{ cl_float8 lo, hi; };
 #endif
-#if defined( __CL_FLOAT2__) 
+#if defined( __CL_FLOAT2__)
     __cl_float2     v2[8];
 #endif
-#if defined( __CL_FLOAT4__) 
+#if defined( __CL_FLOAT4__)
     __cl_float4     v4[4];
 #endif
 #if defined( __CL_FLOAT8__ )
@@ -1204,7 +1204,7 @@ typedef union
    __extension__ struct{ cl_double s0, s1; };
    __extension__ struct{ cl_double lo, hi; };
 #endif
-#if defined( __CL_DOUBLE2__) 
+#if defined( __CL_DOUBLE2__)
     __cl_double2     v2;
 #endif
 }cl_double2;
@@ -1217,10 +1217,10 @@ typedef union
    __extension__ struct{ cl_double  s0, s1, s2, s3; };
    __extension__ struct{ cl_double2 lo, hi; };
 #endif
-#if defined( __CL_DOUBLE2__) 
+#if defined( __CL_DOUBLE2__)
     __cl_double2     v2[2];
 #endif
-#if defined( __CL_DOUBLE4__) 
+#if defined( __CL_DOUBLE4__)
     __cl_double4     v4;
 #endif
 }cl_double4;
@@ -1236,10 +1236,10 @@ typedef union
    __extension__ struct{ cl_double  s0, s1, s2, s3, s4, s5, s6, s7; };
    __extension__ struct{ cl_double4 lo, hi; };
 #endif
-#if defined( __CL_DOUBLE2__) 
+#if defined( __CL_DOUBLE2__)
     __cl_double2     v2[4];
 #endif
-#if defined( __CL_DOUBLE4__) 
+#if defined( __CL_DOUBLE4__)
     __cl_double4     v4[2];
 #endif
 #if defined( __CL_DOUBLE8__ )
@@ -1255,10 +1255,10 @@ typedef union
    __extension__ struct{ cl_double  s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, sA, sB, sC, sD, sE, sF; };
    __extension__ struct{ cl_double8 lo, hi; };
 #endif
-#if defined( __CL_DOUBLE2__) 
+#if defined( __CL_DOUBLE2__)
     __cl_double2     v2[8];
 #endif
-#if defined( __CL_DOUBLE4__) 
+#if defined( __CL_DOUBLE4__)
     __cl_double4     v4[4];
 #endif
 #if defined( __CL_DOUBLE8__ )
@@ -1269,9 +1269,9 @@ typedef union
 #endif
 }cl_double16;
 
-/* Macro to facilitate debugging 
+/* Macro to facilitate debugging
  * Usage:
- *   Place CL_PROGRAM_STRING_DEBUG_INFO on the line before the first line of your source. 
+ *   Place CL_PROGRAM_STRING_DEBUG_INFO on the line before the first line of your source.
  *   The first line ends with:   CL_PROGRAM_STRING_BEGIN \"
  *   Each line thereafter of OpenCL C source must end with: \n\
  *   The last line ends in ";
@@ -1286,12 +1286,12 @@ typedef union
  *   }                                               \n\
  *   ";
  *
- * This should correctly set up the line, (column) and file information for your source 
+ * This should correctly set up the line, (column) and file information for your source
  * string so you can do source level debugging.
  */
 #define  __CL_STRINGIFY( _x )               # _x
 #define  _CL_STRINGIFY( _x )                __CL_STRINGIFY( _x )
-#define  CL_PROGRAM_STRING_DEBUG_INFO       "#line "  _CL_STRINGIFY(__LINE__) " \"" __FILE__ "\" \n\n" 
+#define  CL_PROGRAM_STRING_DEBUG_INFO       "#line "  _CL_STRINGIFY(__LINE__) " \"" __FILE__ "\" \n\n"
 
 //  CL.h contents
 /******************************************************************************/
@@ -1306,7 +1306,7 @@ typedef struct _cl_kernel *         cl_kernel;
 typedef struct _cl_event *          cl_event;
 typedef struct _cl_sampler *        cl_sampler;
 
-typedef cl_uint             cl_bool;                     /* WARNING!  Unlike cl_ types in cl_platform.h, cl_bool is not guaranteed to be the same size as the bool in kernels. */ 
+typedef cl_uint             cl_bool;                     /* WARNING!  Unlike cl_ types in cl_platform.h, cl_bool is not guaranteed to be the same size as the bool in kernels. */
 typedef cl_ulong            cl_bitfield;
 typedef cl_bitfield         cl_device_type;
 typedef cl_uint             cl_platform_info;
@@ -1800,7 +1800,7 @@ typedef struct _cl_buffer_region {
 #define CL_RUNNING                                  0x1
 #define CL_SUBMITTED                                0x2
 #define CL_QUEUED                                   0x3
-  
+
 /* cl_buffer_create_type  */
 #define CL_BUFFER_CREATE_TYPE_REGION                0x1220
 
@@ -1827,25 +1827,25 @@ PFNCLGETPLATFORMIDS)(cl_uint          /* num_entries */,
                  cl_platform_id * /* platforms */,
                  cl_uint *        /* num_platforms */) CL_API_SUFFIX__VERSION_1_0;
 
-typedef CL_API_ENTRY cl_int (CL_API_CALL * 
-PFNCLGETPLATFORMINFO)(cl_platform_id   /* platform */, 
+typedef CL_API_ENTRY cl_int (CL_API_CALL *
+PFNCLGETPLATFORMINFO)(cl_platform_id   /* platform */,
                   cl_platform_info /* param_name */,
-                  size_t           /* param_value_size */, 
+                  size_t           /* param_value_size */,
                   void *           /* param_value */,
                   size_t *         /* param_value_size_ret */) CL_API_SUFFIX__VERSION_1_0;
 
 /* Device APIs */
 typedef CL_API_ENTRY cl_int (CL_API_CALL *
 PFNCLGETDEVICEIDS)(cl_platform_id   /* platform */,
-               cl_device_type   /* device_type */, 
-               cl_uint          /* num_entries */, 
-               cl_device_id *   /* devices */, 
+               cl_device_type   /* device_type */,
+               cl_uint          /* num_entries */,
+               cl_device_id *   /* devices */,
                cl_uint *        /* num_devices */) CL_API_SUFFIX__VERSION_1_0;
 
 typedef CL_API_ENTRY cl_int (CL_API_CALL *
 PFNCLGETDEVICEINFO)(cl_device_id    /* device */,
-                cl_device_info  /* param_name */, 
-                size_t          /* param_value_size */, 
+                cl_device_info  /* param_name */,
+                size_t          /* param_value_size */,
                 void *          /* param_value */,
                 size_t *        /* param_value_size_ret */) CL_API_SUFFIX__VERSION_1_0;
 
@@ -1862,7 +1862,7 @@ PFNCLRETAINDEVICE)(cl_device_id /* device */) CL_API_SUFFIX__VERSION_1_2;
 typedef CL_API_ENTRY cl_int (CL_API_CALL *
 PFNCLRELEASEDEVICE)(cl_device_id /* device */) CL_API_SUFFIX__VERSION_1_2;
 
-// Context APIs  
+// Context APIs
 typedef CL_API_ENTRY cl_context (CL_API_CALL *
 PFNCLCREATECONTEXT)(const cl_context_properties * /* properties */,
                 cl_uint                       /* num_devices */,
@@ -1885,16 +1885,16 @@ typedef CL_API_ENTRY cl_int (CL_API_CALL *
 PFNCLRELEASECONTEXT)(cl_context /* context */) CL_API_SUFFIX__VERSION_1_0;
 
 typedef CL_API_ENTRY cl_int (CL_API_CALL *
-PFNCLGETCONTEXTINFO)(cl_context         /* context */, 
-                 cl_context_info    /* param_name */, 
-                 size_t             /* param_value_size */, 
-                 void *             /* param_value */, 
+PFNCLGETCONTEXTINFO)(cl_context         /* context */,
+                 cl_context_info    /* param_name */,
+                 size_t             /* param_value_size */,
+                 void *             /* param_value */,
                  size_t *           /* param_value_size_ret */) CL_API_SUFFIX__VERSION_1_0;
 
 /* Command Queue APIs */
 typedef CL_API_ENTRY cl_command_queue (CL_API_CALL *
-PFNCLCREATECOMMANDQUEUE)(cl_context                     /* context */, 
-                     cl_device_id                   /* device */, 
+PFNCLCREATECOMMANDQUEUE)(cl_context                     /* context */,
+                     cl_device_id                   /* device */,
                      cl_command_queue_properties    /* properties */,
                      cl_int *                       /* errcode_ret */) CL_API_SUFFIX__VERSION_1_0;
 
@@ -1913,7 +1913,7 @@ PFNCLGETCOMMANDQUEUEINFO)(cl_command_queue      /* command_queue */,
 
 typedef CL_API_ENTRY cl_int (CL_API_CALL *
 PFNCLSETCOMMANDQUEUEPROPERTY)(cl_command_queue              /* command_queue */,
-                          cl_command_queue_properties   /* properties */, 
+                          cl_command_queue_properties   /* properties */,
                           cl_bool                        /* enable */,
                           cl_command_queue_properties * /* old_properties */) CL_API_SUFFIX__VERSION_1_0;
 
@@ -1956,28 +1956,28 @@ PFNCLGETSUPPORTEDIMAGEFORMATS)(cl_context           /* context */,
 
 typedef CL_API_ENTRY cl_int (CL_API_CALL *
 PFNCLGETMEMOBJECTINFO)(cl_mem           /* memobj */,
-                   cl_mem_info      /* param_name */, 
+                   cl_mem_info      /* param_name */,
                    size_t           /* param_value_size */,
                    void *           /* param_value */,
                    size_t *         /* param_value_size_ret */) CL_API_SUFFIX__VERSION_1_0;
 
 typedef CL_API_ENTRY cl_int (CL_API_CALL *
 PFNCLGETIMAGEINFO)(cl_mem           /* image */,
-               cl_image_info    /* param_name */, 
+               cl_image_info    /* param_name */,
                size_t           /* param_value_size */,
                void *           /* param_value */,
                size_t *         /* param_value_size_ret */) CL_API_SUFFIX__VERSION_1_0;
 
 typedef CL_API_ENTRY cl_int (CL_API_CALL *
-PFNCLSETMEMOBJECTDESTRUCTORCALLBACK)(  cl_mem /* memobj */, 
-                                    void (CL_CALLBACK * /*pfn_notify*/)( cl_mem /* memobj */, void* /*user_data*/), 
-                                    void * /*user_data */ )             CL_API_SUFFIX__VERSION_1_1;  
+PFNCLSETMEMOBJECTDESTRUCTORCALLBACK)(  cl_mem /* memobj */,
+                                    void (CL_CALLBACK * /*pfn_notify*/)( cl_mem /* memobj */, void* /*user_data*/),
+                                    void * /*user_data */ )             CL_API_SUFFIX__VERSION_1_1;
 
 /* Sampler APIs  */
 typedef CL_API_ENTRY cl_sampler (CL_API_CALL *
 PFNCLCREATESAMPLER)(cl_context          /* context */,
-                cl_bool             /* normalized_coords */, 
-                cl_addressing_mode  /* addressing_mode */, 
+                cl_bool             /* normalized_coords */,
+                cl_addressing_mode  /* addressing_mode */,
                 cl_filter_mode      /* filter_mode */,
                 cl_int *            /* errcode_ret */) CL_API_SUFFIX__VERSION_1_0;
 
@@ -1993,7 +1993,7 @@ PFNCLGETSAMPLERINFO)(cl_sampler         /* sampler */,
                  size_t             /* param_value_size */,
                  void *             /* param_value */,
                  size_t *           /* param_value_size_ret */) CL_API_SUFFIX__VERSION_1_0;
- 
+
 /* Program Object APIs  */
 typedef CL_API_ENTRY cl_program (CL_API_CALL *
 PFNCLCREATEPROGRAMWITHSOURCE)(cl_context        /* context */,
@@ -2028,7 +2028,7 @@ typedef CL_API_ENTRY cl_int (CL_API_CALL *
 PFNCLBUILDPROGRAM)(cl_program           /* program */,
                cl_uint              /* num_devices */,
                const cl_device_id * /* device_list */,
-               const char *         /* options */, 
+               const char *         /* options */,
                void (CL_CALLBACK *  /* pfn_notify */)(cl_program /* program */, void * /* user_data */),
                void *               /* user_data */) CL_API_SUFFIX__VERSION_1_0;
 
@@ -2100,7 +2100,7 @@ PFNCLGETEVENTINFO)(cl_event         /* event */,
 
 typedef CL_API_ENTRY cl_event (CL_API_CALL *
 PFNCLCREATEUSEREVENT)(cl_context    /* context */,
-                  	  cl_int *      /* errcode_ret */) CL_API_SUFFIX__VERSION_1_1;               
+                  	  cl_int *      /* errcode_ret */) CL_API_SUFFIX__VERSION_1_1;
 
 typedef CL_API_ENTRY cl_int (CL_API_CALL *
 PFNCLRETAINEVENT)(cl_event /* event */) CL_API_SUFFIX__VERSION_1_0;
@@ -2111,7 +2111,7 @@ PFNCLRELEASEEVENT)(cl_event /* event */) CL_API_SUFFIX__VERSION_1_0;
 typedef CL_API_ENTRY cl_int (CL_API_CALL *
 PFNCLSETUSEREVENTSTATUS)(cl_event   /* event */,
                      cl_int     /* execution_status */) CL_API_SUFFIX__VERSION_1_1;
-                     
+
 typedef CL_API_ENTRY cl_int (CL_API_CALL *
 PFNCLSETEVENTCALLBACK)( cl_event    /* event */,
                     cl_int      /* command_exec_callback_type */,
@@ -2139,73 +2139,73 @@ PFNCLENQUEUEREADBUFFER)(cl_command_queue    /* command_queue */,
                     cl_mem              /* buffer */,
                     cl_bool             /* blocking_read */,
                     size_t              /* offset */,
-                    size_t              /* cb */, 
+                    size_t              /* cb */,
                     void *              /* ptr */,
                     cl_uint             /* num_events_in_wait_list */,
                     const cl_event *    /* event_wait_list */,
                     cl_event *          /* event */) CL_API_SUFFIX__VERSION_1_0;
-                            
+
 typedef CL_API_ENTRY cl_int (CL_API_CALL *
 PFNCLENQUEUEREADBUFFERRECT)(cl_command_queue    /* command_queue */,
                         cl_mem              /* buffer */,
                         cl_bool             /* blocking_read */,
                         const size_t *      /* buffer_origin */,
-                        const size_t *      /* host_origin */, 
+                        const size_t *      /* host_origin */,
                         const size_t *      /* region */,
                         size_t              /* buffer_row_pitch */,
                         size_t              /* buffer_slice_pitch */,
                         size_t              /* host_row_pitch */,
-                        size_t              /* host_slice_pitch */,                        
+                        size_t              /* host_slice_pitch */,
                         void *              /* ptr */,
                         cl_uint             /* num_events_in_wait_list */,
                         const cl_event *    /* event_wait_list */,
                         cl_event *          /* event */) CL_API_SUFFIX__VERSION_1_1;
-                            
+
 typedef CL_API_ENTRY cl_int (CL_API_CALL *
-PFNCLENQUEUEWRITEBUFFER)(cl_command_queue   /* command_queue */, 
-                     cl_mem             /* buffer */, 
-                     cl_bool            /* blocking_write */, 
-                     size_t             /* offset */, 
-                     size_t             /* cb */, 
-                     const void *       /* ptr */, 
-                     cl_uint            /* num_events_in_wait_list */, 
-                     const cl_event *   /* event_wait_list */, 
+PFNCLENQUEUEWRITEBUFFER)(cl_command_queue   /* command_queue */,
+                     cl_mem             /* buffer */,
+                     cl_bool            /* blocking_write */,
+                     size_t             /* offset */,
+                     size_t             /* cb */,
+                     const void *       /* ptr */,
+                     cl_uint            /* num_events_in_wait_list */,
+                     const cl_event *   /* event_wait_list */,
                      cl_event *         /* event */) CL_API_SUFFIX__VERSION_1_0;
-                            
+
 typedef CL_API_ENTRY cl_int (CL_API_CALL *
 PFNCLENQUEUEWRITEBUFFERRECT)(cl_command_queue    /* command_queue */,
                          cl_mem              /* buffer */,
                          cl_bool             /* blocking_write */,
                          const size_t *      /* buffer_origin */,
-                         const size_t *      /* host_origin */, 
+                         const size_t *      /* host_origin */,
                          const size_t *      /* region */,
                          size_t              /* buffer_row_pitch */,
                          size_t              /* buffer_slice_pitch */,
                          size_t              /* host_row_pitch */,
-                         size_t              /* host_slice_pitch */,                        
+                         size_t              /* host_slice_pitch */,
                          const void *        /* ptr */,
                          cl_uint             /* num_events_in_wait_list */,
                          const cl_event *    /* event_wait_list */,
                          cl_event *          /* event */) CL_API_SUFFIX__VERSION_1_1;
-                            
+
 typedef CL_API_ENTRY cl_int (CL_API_CALL *
-PFNCLENQUEUECOPYBUFFER)(cl_command_queue    /* command_queue */, 
+PFNCLENQUEUECOPYBUFFER)(cl_command_queue    /* command_queue */,
                     cl_mem              /* src_buffer */,
-                    cl_mem              /* dst_buffer */, 
+                    cl_mem              /* dst_buffer */,
                     size_t              /* src_offset */,
                     size_t              /* dst_offset */,
-                    size_t              /* cb */, 
+                    size_t              /* cb */,
                     cl_uint             /* num_events_in_wait_list */,
                     const cl_event *    /* event_wait_list */,
                     cl_event *          /* event */) CL_API_SUFFIX__VERSION_1_0;
-                            
+
 typedef CL_API_ENTRY cl_int (CL_API_CALL *
-PFNCLENQUEUECOPYBUFFERRECT)(cl_command_queue    /* command_queue */, 
+PFNCLENQUEUECOPYBUFFERRECT)(cl_command_queue    /* command_queue */,
                         cl_mem              /* src_buffer */,
-                        cl_mem              /* dst_buffer */, 
+                        cl_mem              /* dst_buffer */,
                         const size_t *      /* src_origin */,
                         const size_t *      /* dst_origin */,
-                        const size_t *      /* region */, 
+                        const size_t *      /* region */,
                         size_t              /* src_row_pitch */,
                         size_t              /* src_slice_pitch */,
                         size_t              /* dst_row_pitch */,
@@ -2213,15 +2213,15 @@ PFNCLENQUEUECOPYBUFFERRECT)(cl_command_queue    /* command_queue */,
                         cl_uint             /* num_events_in_wait_list */,
                         const cl_event *    /* event_wait_list */,
                         cl_event *          /* event */) CL_API_SUFFIX__VERSION_1_1;
-                            
+
 typedef CL_API_ENTRY cl_int (CL_API_CALL *
 PFNCLENQUEUEREADIMAGE)(cl_command_queue     /* command_queue */,
                    cl_mem               /* image */,
-                   cl_bool              /* blocking_read */, 
+                   cl_bool              /* blocking_read */,
                    const size_t *       /* origin[3] */,
                    const size_t *       /* region[3] */,
                    size_t               /* row_pitch */,
-                   size_t               /* slice_pitch */, 
+                   size_t               /* slice_pitch */,
                    void *               /* ptr */,
                    cl_uint              /* num_events_in_wait_list */,
                    const cl_event *     /* event_wait_list */,
@@ -2230,11 +2230,11 @@ PFNCLENQUEUEREADIMAGE)(cl_command_queue     /* command_queue */,
 typedef CL_API_ENTRY cl_int (CL_API_CALL *
 PFNCLENQUEUEWRITEIMAGE)(cl_command_queue    /* command_queue */,
                     cl_mem              /* image */,
-                    cl_bool             /* blocking_write */, 
+                    cl_bool             /* blocking_write */,
                     const size_t *      /* origin[3] */,
                     const size_t *      /* region[3] */,
                     size_t              /* input_row_pitch */,
-                    size_t              /* input_slice_pitch */, 
+                    size_t              /* input_slice_pitch */,
                     const void *        /* ptr */,
                     cl_uint             /* num_events_in_wait_list */,
                     const cl_event *    /* event_wait_list */,
@@ -2243,10 +2243,10 @@ PFNCLENQUEUEWRITEIMAGE)(cl_command_queue    /* command_queue */,
 typedef CL_API_ENTRY cl_int (CL_API_CALL *
 PFNCLENQUEUECOPYIMAGE)(cl_command_queue     /* command_queue */,
                    cl_mem               /* src_image */,
-                   cl_mem               /* dst_image */, 
+                   cl_mem               /* dst_image */,
                    const size_t *       /* src_origin[3] */,
                    const size_t *       /* dst_origin[3] */,
-                   const size_t *       /* region[3] */, 
+                   const size_t *       /* region[3] */,
                    cl_uint              /* num_events_in_wait_list */,
                    const cl_event *     /* event_wait_list */,
                    cl_event *           /* event */) CL_API_SUFFIX__VERSION_1_0;
@@ -2254,9 +2254,9 @@ PFNCLENQUEUECOPYIMAGE)(cl_command_queue     /* command_queue */,
 typedef CL_API_ENTRY cl_int (CL_API_CALL *
 PFNCLENQUEUECOPYIMAGETOBUFFER)(cl_command_queue /* command_queue */,
                            cl_mem           /* src_image */,
-                           cl_mem           /* dst_buffer */, 
+                           cl_mem           /* dst_buffer */,
                            const size_t *   /* src_origin[3] */,
-                           const size_t *   /* region[3] */, 
+                           const size_t *   /* region[3] */,
                            size_t           /* dst_offset */,
                            cl_uint          /* num_events_in_wait_list */,
                            const cl_event * /* event_wait_list */,
@@ -2265,10 +2265,10 @@ PFNCLENQUEUECOPYIMAGETOBUFFER)(cl_command_queue /* command_queue */,
 typedef CL_API_ENTRY cl_int (CL_API_CALL *
 PFNCLENQUEUECOPYBUFFERTOIMAGE)(cl_command_queue /* command_queue */,
                            cl_mem           /* src_buffer */,
-                           cl_mem           /* dst_image */, 
+                           cl_mem           /* dst_image */,
                            size_t           /* src_offset */,
                            const size_t *   /* dst_origin[3] */,
-                           const size_t *   /* region[3] */, 
+                           const size_t *   /* region[3] */,
                            cl_uint          /* num_events_in_wait_list */,
                            const cl_event * /* event_wait_list */,
                            cl_event *       /* event */) CL_API_SUFFIX__VERSION_1_0;
@@ -2276,7 +2276,7 @@ PFNCLENQUEUECOPYBUFFERTOIMAGE)(cl_command_queue /* command_queue */,
 typedef CL_API_ENTRY void * (CL_API_CALL *
 PFNCLENQUEUEMAPBUFFER)(cl_command_queue /* command_queue */,
                    cl_mem           /* buffer */,
-                   cl_bool          /* blocking_map */, 
+                   cl_bool          /* blocking_map */,
                    cl_map_flags     /* map_flags */,
                    size_t           /* offset */,
                    size_t           /* cb */,
@@ -2287,9 +2287,9 @@ PFNCLENQUEUEMAPBUFFER)(cl_command_queue /* command_queue */,
 
 typedef CL_API_ENTRY void * (CL_API_CALL *
 PFNCLENQUEUEMAPIMAGE)(cl_command_queue  /* command_queue */,
-                  cl_mem            /* image */, 
-                  cl_bool           /* blocking_map */, 
-                  cl_map_flags      /* map_flags */, 
+                  cl_mem            /* image */,
+                  cl_bool           /* blocking_map */,
+                  cl_map_flags      /* map_flags */,
                   const size_t *    /* origin[3] */,
                   const size_t *    /* region[3] */,
                   size_t *          /* image_row_pitch */,
@@ -2327,9 +2327,9 @@ PFNCLENQUEUETASK)(cl_command_queue  /* command_queue */,
 
 typedef CL_API_ENTRY cl_int (CL_API_CALL *
 PFNCLENQUEUENATIVEKERNEL)(cl_command_queue  /* command_queue */,
-                      void (*user_func)(void *), 
+                      void (*user_func)(void *),
                       void *            /* args */,
-                      size_t            /* cb_args */, 
+                      size_t            /* cb_args */,
                       cl_uint           /* num_mem_objects */,
                       const cl_mem *    /* mem_list */,
                       const void **     /* args_mem_loc */,
@@ -2390,7 +2390,11 @@ typedef CL_API_ENTRY CL_EXT_PREFIX__VERSION_1_1_DEPRECATED void * (CL_API_CALL *
 PFNCLGETEXTENSIONFUNCTIONADDRESS)(const char * /* func_name */) CL_EXT_SUFFIX__VERSION_1_1_DEPRECATED;
 #endif
 
-
+typedef CL_API_ENTRY cl_int (CL_API_CALL *
+PFNCLENQUEUEBARRIERWITHWAITLIST)(cl_command_queue /* command_queue */,
+                                 cl_uint          /* num_events_in_wait_list */,
+                                 const cl_event * /* event_wait_list */,
+                                 cl_event *       /* event */) CL_API_SUFFIX__VERSION_1_2;
 /* cl_gl */
 
 typedef cl_uint     cl_gl_object_type;
@@ -2629,6 +2633,8 @@ CLEW_FUN_EXPORT     PFNCLENQUEUEWAITFOREVENTS           __clewEnqueueWaitForEven
 CLEW_FUN_EXPORT     PFNCLENQUEUEBARRIER                 __clewEnqueueBarrier                ;
 #endif
 
+CLEW_FUN_EXPORT     PFNCLENQUEUEBARRIERWITHWAITLIST     __clewEnqueueBarrierWithWaitList;
+
 /* cl_gl */
 CLEW_FUN_EXPORT     PFNCLCREATEFROMGLBUFFER             __clewCreateFromGLBuffer            ;
 CLEW_FUN_EXPORT     PFNCLCREATEFROMGLTEXTURE            __clewCreateFromGLTexture           ;
@@ -2658,15 +2664,15 @@ CLEW_FUN_EXPORT     PFNCLGETGLCONTEXTINFOKHR            __clewGetGLContextInfoKH
 #define	clGetCommandQueueInfo           CLEW_GET_FUN(__clewGetCommandQueueInfo           )
 #ifdef CL_USE_DEPRECATED_OPENCL_1_0_APIS
 #warning CL_USE_DEPRECATED_OPENCL_1_0_APIS is defined. These APIs are unsupported and untested in OpenCL 1.1!
-/* 
+/*
  *  WARNING:
  *     This API introduces mutable state into the OpenCL implementation. It has been REMOVED
  *  to better facilitate thread safety.  The 1.0 API is not thread safe. It is not tested by the
  *  OpenCL 1.1 conformance test, and consequently may not work or may not work dependably.
  *  It is likely to be non-performant. Use of this API is not advised. Use at your own risk.
  *
- *  Software developers previously relying on this API are instructed to set the command queue 
- *  properties when creating the queue, instead. 
+ *  Software developers previously relying on this API are instructed to set the command queue
+ *  properties when creating the queue, instead.
  */
 #define	clSetCommandQueueProperty       CLEW_GET_FUN(__clewSetCommandQueueProperty       )
 #endif /* CL_USE_DEPRECATED_OPENCL_1_0_APIS */
@@ -2737,6 +2743,8 @@ CLEW_FUN_EXPORT     PFNCLGETGLCONTEXTINFOKHR            __clewGetGLContextInfoKH
 #define	clEnqueueBarrier                CLEW_GET_FUN(__clewEnqueueBarrier                )
 #define	clUnloadCompiler                CLEW_GET_FUN(__clewUnloadCompiler                )
 #endif
+
+#define	clEnqueueBarrierWithWaitList    CLEW_GET_FUN(__clewEnqueueBarrierWithWaitList    )
 
 /* cl_gl */
 #define	clCreateFromGLBuffer            CLEW_GET_FUN(__clewCreateFromGLBuffer            )
