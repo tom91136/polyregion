@@ -25,7 +25,9 @@ add_executable(rt-reflect-tests test/map.cpp)
 target_link_libraries(rt-reflect-tests PRIVATE Catch2::Catch2WithMain rt-reflect)
 target_compile_options(rt-reflect-tests PRIVATE ${COMPILE_OPTIONS})
 target_link_options(rt-reflect-tests PRIVATE ${LINK_OPTIONS})
-
+if (APPLE)
+    target_link_options(rt-reflect-tests PRIVATE LINKER:-undefined,dynamic_lookup,-flat_namespace)
+endif ()
 
 if (NOT WIN32)
     target_include_directories(polystl-reflect-plugin PRIVATE ${LLVM_INCLUDE_DIRS})

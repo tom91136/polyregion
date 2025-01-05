@@ -253,12 +253,12 @@ HsaDevice::HsaDevice(uint32_t queueSize, hsa_agent_t hostAgent, hsa_agent_t agen
   POLYRT_TRACE();
 
   if (kernelArgRegion.handle == 0) {
-    POLYRT_FATAL(PREFIX, "No kernel arg region available form agent: handle=%lu", kernelArgRegion.handle);
+    POLYRT_FATAL(PREFIX, "No kernel arg region available form agent: handle=%" PRIu64, kernelArgRegion.handle);
   }
   POLYRT_TRACE();
 
   if (deviceGlobalRegion.handle == 0) {
-    POLYRT_FATAL(PREFIX, "No global device region available form agent: handle=%lu", deviceGlobalRegion.handle);
+    POLYRT_FATAL(PREFIX, "No global device region available form agent: handle=%" PRIu64, deviceGlobalRegion.handle);
   }
   POLYRT_TRACE();
 }

@@ -725,7 +725,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           case clang::CK_IntegralCast:
           case clang::CK_IntegralToFloating:
           case clang::CK_FloatingToIntegral:
-            if (auto conversion = stmt->getConversionFunction()) {
+            if (stmt->getConversionFunction()) {
               r.push(Stmt::Comment("Unhandled cast conversion fn" + std::string(stmt->getCastKindName())));
             }
             return Expr::Cast(r.newVar(sourceExpr), handleType(stmt->getType(), r));

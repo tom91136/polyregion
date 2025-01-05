@@ -105,7 +105,6 @@ struct TestCase {
 void testAll(bool passthrough) {
 
   auto run = [passthrough](TestCase &case_, const std::string &input, const std::vector<std::pair<std::string, std::string>> &variables) {
-
     const auto mkArgStore = [](auto &&xs) {
       fmt::dynamic_format_arg_store<fmt::format_context> s;
       for (auto &&[k, v] : xs)
@@ -198,7 +197,15 @@ void testAll(bool passthrough) {
 
       auto cases = TestCase::parseTestCase(source, "#pragma region",
                                            {
+#if defined(__linux__)
                                                {"polycpp_arch", {"cuda@sm_89", "hip@gfx1036", "hsa@gfx1036", "host@native"}} //
+#elif defined(__APPLE__)
+                                               {"polycpp_arch", {"host@apple-m2"}} //
+#elif defined(_WIN32)
+                                               {"polycpp_arch", {}} //
+#else
+  #error "Unsupported platform"
+#endif
                                            });
 
       if (cases.empty()) FAIL("No test cases found");

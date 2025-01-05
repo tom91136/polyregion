@@ -200,11 +200,24 @@ int main(int argc, const char *argv[]) {
                  remaining.insert(remaining.end(), includes.begin(), includes.end());
                  remaining.insert(remaining.end(), libs.begin(), libs.end());
 
+#if defined(__linux__)
+                 const auto dsoSuffix = "so";
+                 const auto staticSuffix = "a";
+#elif defined(__APPLE__)
+                 const auto dsoSuffix = "dylib";
+                 const auto staticSuffix = "a";
+#elif defined(_WIN32)
+                 const auto dsoSuffix = "dll";
+                 const auto staticSuffix = "lib";
+#else
+  #error "Unsupported platform"
+#endif
+
                  auto polycppResourcePath = execParentPath / "lib/polycpp";
                  auto polycppIncludePath = polycppResourcePath / "include";
                  auto polycppLibPath = polycppResourcePath / "lib";
-                 auto polycppReflectPlugin = polycppLibPath / "polystl-reflect-plugin.so";
-                 auto polycppClangPlugin = polycppLibPath / "polycpp-clang-plugin.so";
+                 auto polycppReflectPlugin = polycppLibPath / fmt::format("polystl-reflect-plugin.{}", dsoSuffix);
+                 auto polycppClangPlugin = polycppLibPath / fmt::format("polycpp-clang-plugin.{}", dsoSuffix);
                  append({"-isystem", polycppIncludePath.string()});
                  append({"-include", "polystl/polystl.h"});
                  append({"-include", "rt-reflect/rt.hpp"});
@@ -224,7 +237,7 @@ int main(int argc, const char *argv[]) {
                  if (!compileOnly) {
                    switch (opts->rt) {
                      case PolyCppOptions::LinkKind::Static: {
-                       remaining.insert(remaining.end(), (polycppLibPath / "libpolystl-static.a").string());
+                       remaining.insert(remaining.end(), (polycppLibPath / fmt::format("libpolystl-static.{}", staticSuffix)).string());
                        // if (!opts->noCompress) append({"-Wl,--compress-debug-sections=zlib,--gc-sections"});
                        break;
                      }
@@ -236,7 +249,7 @@ int main(int argc, const char *argv[]) {
                              << fmt::format(
                                     "[PolyCpp] Dynamic linking of PolySTL runtime requested, if you would like to relocate your binary, "
                                     "please copy {} to the same directory as the executable (-rpath=$ORIGIN has been set for you)",
-                                    (polycppLibPath / "libpolystl.so").string())
+                                    (polycppLibPath / fmt::format("libpolystl.{}", dsoSuffix)).string())
                              << std::endl;
                        }
                        break;

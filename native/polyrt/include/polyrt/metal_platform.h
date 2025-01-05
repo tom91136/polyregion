@@ -8,7 +8,7 @@
 
 namespace polyregion::runtime::metal {
 
-class POLYREGION_EXPORT MetalPlatform : public Platform {
+class POLYREGION_EXPORT MetalPlatform final : public Platform {
   NS::AutoreleasePool *pool;
   POLYREGION_EXPORT explicit MetalPlatform();
 
@@ -26,7 +26,7 @@ namespace {
 using MetalModuleStore = detail::ModuleStore<MTL::Library *, MTL::ComputePipelineState *>;
 }
 
-class POLYREGION_EXPORT MetalDevice : public Device {
+class POLYREGION_EXPORT MetalDevice final : public Device {
 
   NS::AutoreleasePool *pool;
   MTL::Device *device;
@@ -51,7 +51,7 @@ public:
   POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue(const std::chrono::duration<int64_t> &timeout) override;
 };
 
-class POLYREGION_EXPORT MetalDeviceQueue : public DeviceQueue {
+class POLYREGION_EXPORT MetalDeviceQueue final : public DeviceQueue {
 
   NS::AutoreleasePool *pool;
   MetalModuleStore &store;
@@ -59,11 +59,12 @@ class POLYREGION_EXPORT MetalDeviceQueue : public DeviceQueue {
   std::function<MTL::Buffer *(uintptr_t)> queryMemObject;
 
 public:
-  POLYREGION_EXPORT MetalDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(store) store, decltype(queue) queue,
-                                     decltype(queryMemObject) queryMemObject);
+  POLYREGION_EXPORT MetalDeviceQueue(decltype(store) store, decltype(queue) queue, decltype(queryMemObject) queryMemObject);
   POLYREGION_EXPORT ~MetalDeviceQueue() override;
-  POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) override;
-  POLYREGION_EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, void *dst, size_t size, const MaybeCallback &cb) override;
+  POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size,
+                                                  const MaybeCallback &cb) override;
+  POLYREGION_EXPORT void enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, void *dst, size_t size,
+                                                  const MaybeCallback &cb) override;
   POLYREGION_EXPORT void enqueueInvokeAsync(const std::string &moduleName,  //
                                             const std::string &symbol,      //
                                             const std::vector<Type> &types, //

@@ -227,9 +227,7 @@ void MetalDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const s
                                 MTL::Size::Make(local.x, local.y, local.z));
   encoder->endEncoding();
   if (cb) {
-    buffer->addCompletedHandler(^void(MTL::CommandBuffer *) {
-      (*cb)();
-    });
+    buffer->addCompletedHandler([&](MTL::CommandBuffer *) -> void { (*cb)(); });
   }
   buffer->commit();
   POLYRT_TRACE();

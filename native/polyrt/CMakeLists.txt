@@ -19,6 +19,11 @@ if (RUNTIME_ENABLE_METAL)
             "-framework Metal"
             "-framework Foundation"
     )
+    list(APPEND RUNTIME_COMPILE_OPTIONS
+            -Wno-gnu-anonymous-struct
+            -Wno-nested-anon-types
+            -Wno-ignored-qualifiers
+    )
 endif ()
 
 
@@ -91,6 +96,7 @@ foreach (TARGET polyrt polyrt-obj polyrt-static)
             ${RUNTIME_INCLUDE_DIRS})
     target_compile_definitions(${TARGET} PUBLIC ${RUNTIME_BACKEND_DEFS} _POSIX_C_SOURCE=200809L)
     target_compile_options(${TARGET} PRIVATE ${COMPILE_OPTIONS})
+    target_compile_options(${TARGET} PUBLIC ${RUNTIME_COMPILE_OPTIONS})
     target_link_libraries(${TARGET} PUBLIC polycommon ${POLYRT_LIBS} ${RUNTIME_LINK_LIBS})
     target_link_options(${TARGET} PRIVATE ${LINK_OPTIONS})
 endforeach ()
