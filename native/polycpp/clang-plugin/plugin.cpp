@@ -12,13 +12,13 @@ using namespace aspartame;
 
 namespace {
 
-class PolyCppFrontendAction : public clang::PluginASTAction {
+class PolyCppFrontendAction final : public clang::PluginASTAction {
 
   polyregion::polystl::Options opts;
 
 protected:
   std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance &CI, llvm::StringRef InFile) override {
-    return std::make_unique<polyregion::polystl::OffloadRewriteConsumer>(CI , opts);
+    return std::make_unique<polyregion::polystl::OffloadRewriteConsumer>(CI, opts);
   }
 
   bool ParseArgs(const clang::CompilerInstance &CI, const std::vector<std::string> &args) override {
@@ -52,14 +52,22 @@ protected:
             diag.Report(diag.getCustomDiagID(clang::DiagnosticsEngine::Error, "Unknown arch %0")) << archAndFeatures[0];
           }
         }
+        opts.targets = opts.targets ^ distinct();
         continue;
       }
     }
     return true;
   }
 
-  ActionType getActionType() override { return PluginASTAction::ActionType::CmdlineBeforeMainAction; }
+  ActionType getActionType() override { return CmdlineBeforeMainAction; }
 };
 } // namespace
+
+std::size_t std::hash<std::pair<polyregion::compiletime::Target, std::string>>::operator()(
+    const std::pair<polyregion::compiletime::Target, std::string> &p) const noexcept {
+  const std::size_t h1 = std::hash<polyregion::compiletime::Target>{}(p.first);
+  const std::size_t h2 = std::hash<std::string>{}(p.second);
+  return h1 ^ h2 << 1;
+}
 
 [[maybe_unused]] static clang::FrontendPluginRegistry::Add<PolyCppFrontendAction> PolyCppClangPlugin("polycpp", "");

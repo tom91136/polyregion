@@ -287,7 +287,7 @@ TEST_CASE("return struct and take ref", "[compiler]") {
 
   auto entry = function("bar", {"in"_(Ptr(fooTpe))()}, Unit)({
       let("a") = Invoke("gen", {}, barTpe),                                                         //
-      let("ar") = RefTo("a"_(barTpe), {}, barTpe),                                                  //
+      let("ar") = RefTo("a"_(barTpe), {}, barTpe, Global),                                          //
       let("r") = Invoke("aux", {Select({"in"_(Ptr(fooTpe))}, y), "ar"_(Ptr(barTpe))}, Ptr(barTpe)), //
       ret(Unit0Const())                                                                             //
   });
@@ -473,9 +473,9 @@ TEST_CASE("index prim array", "[compiler]") {
   DYNAMIC_SECTION("xs[" << idx << "]:" << tpe << " (local)") {
     CAPTURE(tpe, idx);
     assertCompile(program(function("foo", {}, tpe)({
-        let("xs") = Alloc(tpe, 42_(SInt)), "xs"_(Ptr(tpe))[integral(SInt, idx)] = generateConstValue(tpe), //
-        let("x") = "xs"_(Ptr(tpe))[integral(SInt, idx)],                                                   //
-        ret("x"_(tpe))                                                                                     //
+        let("xs") = Alloc(tpe, 42_(SInt), Global), "xs"_(Ptr(tpe))[integral(SInt, idx)] = generateConstValue(tpe), //
+        let("x") = "xs"_(Ptr(tpe))[integral(SInt, idx)],                                                           //
+        ret("x"_(tpe))                                                                                             //
     })));
   }
   DYNAMIC_SECTION("xs[" << idx << "]:" << tpe << " (args)") {
@@ -495,7 +495,7 @@ TEST_CASE("update prim array", "[compiler]") {
   DYNAMIC_SECTION("(xs[" << idx << "]:" << tpe << ") = " << val << " (local)") {
     CAPTURE(tpe, idx, val);
     assertCompile(program(function("foo", {}, tpe)({
-        let("xs") = Alloc(tpe, 42_(SInt)),          //
+        let("xs") = Alloc(tpe, 42_(SInt), Global),  //
         "xs"_(Ptr(tpe))[integral(SInt, idx)] = val, //
         ret("xs"_(Ptr(tpe))[integral(SInt, idx)])   //
     })));
@@ -517,16 +517,16 @@ TEST_CASE("update prim array by ref", "[compiler]") {
   DYNAMIC_SECTION("(xs[" << (idx ? std::to_string(*idx) : "(none)") << "]:" << tpe << ") = " << val << " (local)") {
     CAPTURE(tpe, idx, val);
     assertCompile(program(function("foo", {}, tpe)({
-        let("xs") = Alloc(tpe, 42_(SInt)),                                          //
+        let("xs") = Alloc(tpe, 42_(SInt), Global),                                  //
         "xs"_(Ptr(tpe))[integral(SInt, idx.value_or(0))] = generateConstValue(tpe), //
-        let("ref") = RefTo("xs"_(Ptr(tpe)), idx ? std::optional{integral(SInt, *idx)} : std::nullopt, tpe),
+        let("ref") = RefTo("xs"_(Ptr(tpe)), idx ? std::optional{integral(SInt, *idx)} : std::nullopt, tpe, Global),
         ret("ref"_(Ptr(tpe))[integral(SInt, 0)]) //
     })));
   }
   DYNAMIC_SECTION("(xs[" << (idx ? std::to_string(*idx) : "(none)") << "]:" << tpe << ") = " << val << " (args)") {
     CAPTURE(tpe, idx, val);
     assertCompile(program(function("foo", {"xs"_(Ptr(tpe))()}, tpe)({
-        let("ref") = RefTo("xs"_(Ptr(tpe)), idx ? std::optional{integral(SInt, *idx)} : std::nullopt, tpe),
+        let("ref") = RefTo("xs"_(Ptr(tpe)), idx ? std::optional{integral(SInt, *idx)} : std::nullopt, tpe, Global),
         ret("ref"_(Ptr(tpe))[integral(SInt, 0)]) //
     })));
   }
@@ -539,16 +539,16 @@ TEST_CASE("update prim value by ref", "[compiler]") {
   DYNAMIC_SECTION("(&x:" << tpe << ") = " << val << " (local)") {
     CAPTURE(tpe, val);
     assertCompile(program(function("foo", {}, tpe)({
-        let("x") = val,                        //
-        let("y") = RefTo("x"_(tpe), {}, tpe),  //
-        ret("y"_(Ptr(tpe))[integral(SInt, 0)]) //
+        let("x") = val,                               //
+        let("y") = RefTo("x"_(tpe), {}, tpe, Global), //
+        ret("y"_(Ptr(tpe))[integral(SInt, 0)])        //
     })));
   }
   DYNAMIC_SECTION("(&x:" << tpe << ") = " << val << " (args)") {
     CAPTURE(tpe, val);
     assertCompile(program(function("foo", {"x"_(tpe)()}, tpe)({
-        let("y") = RefTo("x"_(tpe), {}, tpe),  //
-        ret("y"_(Ptr(tpe))[integral(SInt, 0)]) //
+        let("y") = RefTo("x"_(tpe), {}, tpe, Global), //
+        ret("y"_(Ptr(tpe))[integral(SInt, 0)])        //
     })));
   }
 }
@@ -633,7 +633,7 @@ TEST_CASE("alias struct member", "[compiler]") {
                       Named("y2", SInt), //
                       {
                           (Select({arg}, Named("y", SInt))) //
-                      }                                     //
+                      } //
                       ),
                   Return(Unit0Const()),
               },
@@ -649,7 +649,7 @@ TEST_CASE("alias array", "[compiler]") {
 
   Function fn("foo", {}, arr,
               {
-                  Var(Named("s", arr), {Alloc(arr.component, IntS32Const(10))}),
+                  Var(Named("s", arr), {Alloc(arr.comp, IntS32Const(10), Global)}),
                   Var(Named("t", arr), {(Select({}, Named("s", arr)))}),
                   Return(Select({}, Named("s", arr))),
               },
@@ -692,9 +692,9 @@ TEST_CASE("mut array", "[compiler]") {
 
   Function fn("foo", {}, arr,
               {
-                  Var(Named("s", arr), {Alloc(arr.component, IntS32Const(10))}),
-                  Var(Named("t", arr), {Alloc(arr.component, IntS32Const(20))}),
-                  Var(Named("u", arr), {Alloc(arr.component, IntS32Const(30))}),
+                  Var(Named("s", arr), {Alloc(arr.comp, IntS32Const(10), Global)}),
+                  Var(Named("t", arr), {Alloc(arr.comp, IntS32Const(20), Global)}),
+                  Var(Named("u", arr), {Alloc(arr.comp, IntS32Const(30), Global)}),
                   Mut(Select({}, Named("s", arr)), Select({}, Named("t", arr))),
                   Mut(Select({}, Named("t", arr)), Select({}, Named("u", arr))),
                   Mut(Select({}, Named("t", arr)), Select({}, Named("s", arr))),
@@ -780,9 +780,9 @@ TEST_CASE("alloc array", "[compiler]") {
 
   Function fn("foo", {}, arr,
               {
-                  Var(Named("s", arr), {Alloc(arr.component, IntS32Const(10))}),
-                  Var(Named("t", arr), {Alloc(arr.component, IntS32Const(20))}),
-                  Var(Named("u", arr), {Alloc(arr.component, IntS32Const(30))}),
+                  Var(Named("s", arr), {Alloc(arr.comp, IntS32Const(10), Global)}),
+                  Var(Named("t", arr), {Alloc(arr.comp, IntS32Const(20), Global)}),
+                  Var(Named("u", arr), {Alloc(arr.comp, IntS32Const(30), Global)}),
                   Return(Select({}, Named("s", arr))),
               },
               {FunctionAttr::Exported()});

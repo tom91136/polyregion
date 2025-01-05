@@ -101,8 +101,8 @@ add_executable(polyrt-exec driver.cpp)
 target_include_directories(polyrt-exec PRIVATE ../include)
 target_include_directories(polyrt-tests PRIVATE . ../include)
 
-target_link_libraries(polyrt-exec PRIVATE polyrt-static)
-target_link_libraries(polyrt-tests PRIVATE polyrt-static Catch2::Catch2WithMain)
+target_link_libraries(polyrt-exec PRIVATE polyrt-static Aspartame)
+target_link_libraries(polyrt-tests PRIVATE polyrt-static Catch2::Catch2WithMain Aspartame)
 
 target_compile_options(polyrt-exec PRIVATE ${COMPILE_OPTIONS})
 target_compile_options(polyrt-tests PRIVATE ${COMPILE_OPTIONS})

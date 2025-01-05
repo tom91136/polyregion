@@ -1,13 +1,15 @@
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/generators/catch_generators_range.hpp>
+
 #include <fstream>
 
-#include "aspartame/string.hpp"
+#include "catch2/catch_test_macros.hpp"
+#include "catch2/generators/catch_generators_range.hpp"
+
 #include "fmt/args.h"
 #include "polyregion/io.hpp"
-#include "polyregion/utils.hpp"
 #include "test_all.h"
 #include "llvm/Support/Program.h"
+
+#include "aspartame/all.hpp"
 
 using namespace aspartame;
 
@@ -31,112 +33,125 @@ struct TestCase {
   std::vector<std::vector<std::pair<std::string, std::string>>> matrices;
   std::vector<Run> runs;
 
-  static std::vector<TestCase> parseTestCase(std::ifstream &file) {
+  static std::vector<TestCase> parseTestCase(std::ifstream &file,          //
+                                             const std::string &directive, //
+                                             const std::vector<Variable> &extraMatrices = {}) {
     TestCase testCase;
 
-    auto parseNormalised = [](std::ifstream &file, auto f) {
-      auto pos = file.tellg();
-      std::vector<typename std::invoke_result_t<decltype(f), std::string &>::value_type> xs;
-      for (std::string line; std::getline(file, line);) {
-        polyregion::trimInplace(line);
-        if (!(line ^ starts_with("//"))) continue;
-        polyregion::replaceInPlace(line, "//", "");
-        if (auto t = f(line); t) {
+    auto parseNormalised = [&]<typename F>(std::ifstream &s, F f) {
+      auto pos = s.tellg();
+      std::vector<typename std::invoke_result_t<F, std::string &>::value_type> xs;
+      for (std::string line; std::getline(s, line);) {
+        line = line ^ trim();
+        if (!(line ^ starts_with(directive))) continue;
+        line = line ^ replace_all(directive, "");
+        if (auto t = f(line)) {
           xs.emplace_back(*t);
-          pos = file.tellg();
+          pos = s.tellg();
         } else break;
       }
-      file.seekg(pos); // backtrack on failure
+      s.seekg(pos); // backtrack on failure
       return xs;
     };
 
     auto parseRight = [](const std::string &prefix, const std::string &line) -> std::optional<std::string> {
-      auto pos = line.find(prefix);
+      const auto pos = line.find(prefix);
       return pos != std::string::npos ? std::optional{line.substr(pos + prefix.size())} : std::nullopt;
     };
 
     auto parseExpects = [&]() {
-      return parseNormalised(file, [&](std::string &line) -> std::optional<TestCase::Run::Expect> {
-        if (auto expect = parseRight("#EXPECT", line); expect) {
-          auto delim = expect->find(':', 0);
-          auto lineNum = *expect ^ starts_with("@") ? std::optional{std::stoi(expect->substr(1, delim))} : std::nullopt;
-          return TestCase::Run::Expect{lineNum, polyregion::trim(expect->substr(delim + 1))};
-        } else return {};
+      return parseNormalised(file, [&](const std::string &line) -> std::optional<Run::Expect> {
+        return parseRight("requires", line) ^ map([](auto &expect) {
+                 const auto delimIdx = expect.find(':', 0);
+                 auto lineNum = expect ^ starts_with("@") ? std::optional{std::stoi(expect.substr(1, delimIdx))} : std::nullopt;
+                 return Run::Expect{lineNum, expect.substr(delimIdx + 1) ^ trim()};
+               });
       });
     };
 
     auto parseRuns = [&]() {
-      return parseNormalised(file, [&](std::string &line) -> std::optional<TestCase::Run> {
-        auto runLine = parseRight("#RUN:", line);
-        return runLine ? std::optional{Run{polyregion::trimInplace(*runLine), parseExpects()}} : std::nullopt;
+      return parseNormalised(file, [&](const std::string &line) -> std::optional<Run> {
+        return parseRight("do:", line) ^ map([&](auto &runLine) { return Run{runLine ^ trim(), parseExpects()}; });
       });
     };
 
     auto parseMatrices = [&]() {
-      return parseNormalised(file, [&](std::string &line) -> std::optional<std::vector<TestCase::Variable>> {
-        if (auto matrixLine = parseRight("#MATRIX:", line); matrixLine) {
-          auto variables = polyregion::split(polyregion::trimInplace(*matrixLine), ' ');
-          std::vector<Variable> xs;
-          std::transform(variables.begin(), variables.end(), std::back_inserter(xs), [](std::string &v) {
-            auto delim = v.find('=', 0);
-            auto vs = polyregion::split(v.substr(delim + 1), ',');
-            return std::pair{v.substr(0, delim), vs};
-          });
-          return xs;
-        } else return {};
+      return parseNormalised(file, [&](const std::string &line) -> std::optional<std::vector<Variable>> {
+        return parseRight("using:", line) ^ map([](auto &matrixLine) {
+                 return matrixLine ^ trim() ^ split(' ') ^ map([](auto &v) {
+                          const auto delimIdx = v.find('=', 0);
+                          const auto vs = v.substr(delimIdx + 1) ^ split(',');
+                          return std::pair{v.substr(0, delimIdx), vs};
+                        });
+               });
       });
     };
 
     return parseNormalised(file, [&](std::string &line) -> std::optional<TestCase> {
-      auto caseLine = parseRight("#CASE:", line);
-      auto matrices_ = polyregion::flatten(parseMatrices());
-      auto runs_ = parseRuns();
-
-      decltype(TestCase::matrices) xs;
-      for (auto [v, ys] : matrices_) {
-        std::vector<std::pair<std::string, std::string>> row(ys.size());
-        std::transform(ys.begin(), ys.end(), row.begin(), [v_ = v](auto &x) { return std::pair{v_, x}; });
-        xs.push_back(row);
-      }
-      return caseLine ? std::optional{TestCase{polyregion::trimInplace(*caseLine), polyregion::cartesin_product(xs), runs_}} : std::nullopt;
+      return parseRight("case:", line) ^ map([&](auto &c) {
+               return TestCase{
+                   .name = c ^ trim(),
+                   .matrices = parseMatrices()                                                                                           //
+                               ^ flatten()                                                                                               //
+                               ^ concat(extraMatrices)                                                                                   //
+                               ^ map([](auto &name, auto &values) { return values ^ map([&](auto &v) { return std::pair{name, v}; }); }) //
+                               ^ sequence(),
+                   .runs = parseRuns()};
+             });
     });
   }
 };
 
 void testAll(bool passthrough) {
 
-  auto run = [passthrough](TestCase &case_, const std::string &binaryName, const std::function<std::string(std::string &)> &mkCommand) {
+  auto run = [passthrough](TestCase &case_, const std::string &input, const std::vector<std::pair<std::string, std::string>> &variables) {
+
+    const auto mkArgStore = [](auto &&xs) {
+      fmt::dynamic_format_arg_store<fmt::format_context> s;
+      for (auto &&[k, v] : xs)
+        s.push_back(fmt::arg(k.c_str(), v));
+      return s;
+    };
+
+    const auto userArgs = variables ^ map([&](auto &k, auto &v) { return std::pair{k, v}; });
+    const auto augmentedArgs =
+        userArgs                                                                                                                       //
+        | append(std::pair{"input", input})                                                                                            //
+        | append(std::pair{"polycpp_defaults", "-fno-crash-diagnostics -O1 -g3 -Wall -Wextra -pedantic"})                              //
+        | append(std::pair{"polycpp_stdpar", fmt::vformat("-fstdpar -fstdpar-arch={polycpp_arch}", variables ^ and_then(mkArgStore))}) //
+        | to_vector();
+
+    const auto unevaluatedStore = augmentedArgs ^ append(std::pair{"output", "<unevaluated>"}) ^ and_then(mkArgStore);
+    const auto output = fmt::format(
+        "{:x}", std::hash<std::string>()(case_.runs ^ mk_string("", [&](auto &x) { return fmt::vformat(x.command, unevaluatedStore); })));
+    const auto evaluatedStore = augmentedArgs ^ append(std::pair{"output", output}) ^ and_then(mkArgStore);
+
     for (size_t i = 0; i < case_.runs.size(); ++i) {
-      auto &run = case_.runs[i];
-      auto command = mkCommand(run.command);
-      DYNAMIC_SECTION("RUN " << run.command) {
-        auto fragments = polyregion::split(command, ' ');
-        auto [envs, args] = polyregion::take_while(fragments, [](auto &x) { return x.find('=') != std::string::npos; });
-        //        args.emplace_back("-fsanitize=address");
+      const auto &[rawCommand, expect] = case_.runs[i];
+      const auto command = fmt::vformat(rawCommand, evaluatedStore);
+      DYNAMIC_SECTION("do: " << command) {
+        auto fragments = command ^ split(' ');
+        auto [envs, args] = fragments ^ span([](auto &x) { return x.find('=') != std::string::npos; });
 
         if (passthrough) {
           envs.emplace_back("POLYCPP_NO_REWRITE=1");
           envs.emplace_back("POLYSTL_NO_OFFLOAD=1");
         }
 
-        envs.emplace_back("POLYCPP_DRIVER="+ ClangDriver);
-        // envs.emplace_back("POLYSTL_LIB=" + PolySTLLib);
-        // envs.emplace_back("POLYSTL_INCLUDE=" + PolySTLInclude);
+        envs.emplace_back(fmt::format("POLYCPP_DRIVER={}", ClangDriver));
+        envs.emplace_back(fmt::vformat("POLYSTL_PLATFORM={polycpp_arch}", evaluatedStore));
+        envs.emplace_back("POLYSTL_HOST_FALLBACK=0");
 
-        // envs.emplace_back("LD_LIBRARY_PATH=" + PolySTLLDLibraryPath);
+        // if host, + -fsanitize=address,undefined
         envs.emplace_back("ASAN_OPTIONS=alloc_dealloc_mismatch=0");
-//        envs.emplace_back("LD_PRELOAD=/usr/bin/../lib/clang/18/lib/x86_64-redhat-linux-gnu/libclang_rt.asan.so");
-
-
+        //        envs.emplace_back("LD_PRELOAD=/usr/bin/../lib/clang/18/lib/x86_64-redhat-linux-gnu/libclang_rt.asan.so");
 
         if (auto path = std::getenv("PATH"); path) envs.emplace_back(std::string("PATH=") + path);
 
         if (args.empty()) throw std::logic_error("Bad command: " + command);
-        std::vector<llvm::StringRef> envs_;
-        std::transform(envs.begin(), envs.end(), std::back_inserter(envs_), [](auto &x) { return llvm::StringRef(x); });
 
-        std::vector<llvm::StringRef> args_;
-        std::transform(args.begin(), args.end(), std::back_inserter(args_), [](auto &x) { return llvm::StringRef(x); });
+        std::vector<llvm::StringRef> envs_ = envs ^ map([&](auto &x) { return llvm::StringRef(x); });
+        std::vector<llvm::StringRef> args_ = args ^ map([&](auto &x) { return llvm::StringRef(x); });
 
         auto stdoutFile = llvm::sys::fs::TempFile::create("polycpp_stdout-%%-%%-%%-%%-%%");
         if (auto e = stdoutFile.takeError()) FAIL("Cannot create stdout:" << toString(std::move(e)));
@@ -151,15 +166,15 @@ void testAll(bool passthrough) {
         consumeError(stderrFile->discard());
 
         WARN("exe:  " << BinaryDir << "/" << args[0]);
-        WARN("args: " << polyregion::mk_string<llvm::StringRef>(args_, &llvm::StringRef::str, " "));
-        WARN("envs: " << polyregion::mk_string<llvm::StringRef>(envs_, &llvm::StringRef::str, " "));
+        WARN("args: " << (args_ ^ mk_string(" ", [](auto &s) { return s.str(); })));
+        WARN("envs: " << (envs_ ^ mk_string(" ", [](auto &s) { return s.str(); })));
         WARN("stderr:\n" << stderr_ << "[EOF]");
         WARN("stdout:\n" << stdout_ << "[EOF]");
         REQUIRE(exitCode == 0);
         //              CHECK(stderr_.empty());
-        auto stdoutLines = polyregion::split(stdout_, '\n');
-        for (auto &[line, expected] : run.expect) {
-          DYNAMIC_SECTION("EXPECT " << (line ? std::to_string(*line) : "*") << "==" << expected) {
+        auto stdoutLines = stdout_ ^ split('\n');
+        for (auto &[line, expected] : expect) {
+          DYNAMIC_SECTION("requires: " << (line ? std::to_string(*line) : "*") << "==" << expected) {
             if (line) {
               INFO(stdoutLines.size());
               auto idx = *line < 0 ? stdoutLines.size() + *line : *line;
@@ -170,8 +185,8 @@ void testAll(bool passthrough) {
           }
         }
         if (i == case_.runs.size() - 1) {
-          if (llvm::sys::fs::remove(binaryName)) INFO("Removed binary: " << binaryName);
-          else WARN("Cannot remove binary: " << binaryName);
+          // if (llvm::sys::fs::remove(binaryName)) INFO("Removed binary: " << binaryName);
+          // else WARN("Cannot remove binary: " << binaryName);
         }
       }
     }
@@ -179,27 +194,29 @@ void testAll(bool passthrough) {
 
   for (const auto &test : TestFiles) {
     DYNAMIC_SECTION(extractTestName(test)) {
-      std::ifstream s(test, std::ios::in | std::ios::binary);
-      auto tc = TestCase::parseTestCase(s);
+      std::ifstream source(test, std::ios::in | std::ios::binary);
 
-      for (auto &case_ : tc) {
+      auto cases = TestCase::parseTestCase(source, "#pragma region",
+                                           {
+                                               {"polycpp_arch", {"cuda@sm_89", "hip@gfx1036", "hsa@gfx1036", "host@native"}} //
+                                           });
 
-        DYNAMIC_SECTION("CASE " << case_.name) {
+      if (cases.empty()) FAIL("No test cases found");
 
-          for (const auto &variables : case_.matrices) {
-            auto name = polyregion::mk_string<std::pair<std::string, std::string>>(
-                variables, [](auto &p) { return p.first + "=" + p.second; }, " ");
-            DYNAMIC_SECTION("MATRIX " << name) {
+      for (auto &testCase : cases) {
 
-              auto binaryName = polyregion::hex(
-                  polyregion::hash(polyregion::mk_string<TestCase::Run>(case_.runs, [](auto &x) { return x.command; }, "")));
-              fmt::dynamic_format_arg_store<fmt::format_context> store;
-              store.push_back(fmt::arg("input", test));
-              store.push_back(fmt::arg("output", binaryName));
-              for (const auto &[k, v] : variables)
-                store.push_back(fmt::arg(k.c_str(), v));
+        DYNAMIC_SECTION("case: " << testCase.name) {
+
+          // testCase.matrices.emplace_back();
+
+          if (testCase.matrices.empty()) FAIL("Test matrix yielded zero tests");
+
+          for (const auto &variables : testCase.matrices) {
+            auto name = variables ^ mk_string(" ", [](auto &k, auto &v) { return k + "=" + v; });
+            DYNAMIC_SECTION("using: " << name) {
+
               CAPTURE(test + ":1"); // XXX glue a fake line number so that the test runner can turn it into a URL
-              run(case_, binaryName, [&](std::string &command) { return fmt::vformat(command, store); });
+              run(testCase, test, variables);
             }
           }
         }

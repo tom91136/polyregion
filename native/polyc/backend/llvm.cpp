@@ -123,7 +123,7 @@ ValPtr CodeGen::intr2(const llvm::Intrinsic::ID id, const AnyType &overload, //
 ValPtr CodeGen::findStackVar(const Named &named) {
   if (named.tpe.is<Type::Unit0>()) return mkExprVal(Expr::Unit0Const());
   //  check the LUT table for known variables defined by var or brought in scope by parameters
-  return stackVarPtrs ^ get(named.symbol) ^
+  return stackVarPtrs ^ get_maybe(named.symbol) ^
          fold(
              [&](auto &tpe, auto &value) {
                if (named.tpe != tpe)
@@ -146,7 +146,7 @@ ValPtr CodeGen::mkSelectPtr(const Expr::Select &select) {
 
   auto structTypeOf = [&](const Type::Any &tpe) -> StructInfo {
     auto findTy = [&](const Type::Struct &s) -> StructInfo {
-      return structTypes ^ get(s.name) ^
+      return structTypes ^ get_maybe(s.name) ^
              fold([&]() -> StructInfo { throw BackendException("Unseen struct type " + to_string(s.name) + " in select path" + fail()); });
     };
 
@@ -174,7 +174,7 @@ ValPtr CodeGen::mkSelectPtr(const Expr::Select &select) {
     auto root = findStackVar(head);
     for (auto &path : tail) {
       const auto info = structTypeOf(tpe);
-      if (auto idx = info.memberIndices ^ get(path.symbol)) {
+      if (auto idx = info.memberIndices ^ get_maybe(path.symbol)) {
         if (auto p = tpe.get<Type::Ptr>(); p && !p->length) {
           root = B.CreateInBoundsGEP(info.tpe, C.load(B, root, B.getPtrTy(C.AllocaAS)),
                                      {//
@@ -412,7 +412,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
       [&](const Expr::Invoke &x) -> ValPtr {
         const auto argNoUnit = x.args ^ filter([](auto &arg) { return !arg.tpe().template is<Type::Unit0>(); });
         const auto sig = Signature(x.name, argNoUnit ^ map([](auto &arg) { return arg.tpe(); }), x.rtn);
-        return functions ^ get(sig) ^
+        return functions ^ get_maybe(sig) ^
                fold(
                    [&](auto &fn) -> ValPtr {
                      const auto params =

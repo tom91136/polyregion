@@ -38,6 +38,19 @@ struct Location {
 };
 
 Location getLocation(const clang::SourceLocation &e, clang::ASTContext &c);
-Location getLocation(const clang::Expr &e, clang::ASTContext &c) ;
+Location getLocation(const clang::Expr &e, clang::ASTContext &c);
+
+clang::DeclRefExpr *mkDeclRef(const clang::ASTContext &C, clang::VarDecl *lhs);
+clang::QualType mkConstArrTy(const clang::ASTContext &C, clang::QualType componentTpe, size_t size);
+clang::StringLiteral *mkStrLit(const clang::ASTContext &C, const std::string &str);
+clang::IntegerLiteral *mkIntLit(const clang::ASTContext &C, clang::QualType tpe, uint64_t value);
+clang::CXXNullPtrLiteralExpr *mkNullPtrLit(const clang::ASTContext &C, clang::QualType componentTpe);
+clang::CXXBoolLiteralExpr *mkBoolLit(const clang::ASTContext &C, bool value);
+clang::ImplicitCastExpr *mkArrayToPtrDecay(const clang::ASTContext &C, clang::QualType to, clang::Expr *expr);
+clang::InitListExpr *mkInitList(const clang::ASTContext &C, clang::QualType ty, const std::vector<clang::Expr *> &initExprs);
+clang::MemberExpr *mkMemberExpr(const clang::ASTContext &C, clang::Expr *lhs, clang::ValueDecl *field, const bool arrow = false);
+clang::QualType constCharStarTy(const clang::ASTContext &C);
+clang::VarDecl *mkStaticVarDecl(clang::ASTContext &C, clang::DeclContext *calleeDecl, const std::string &name, clang::QualType ty,
+                                const std::vector<clang::Expr *> &initExprs);
 
 } // namespace polyregion::polystl

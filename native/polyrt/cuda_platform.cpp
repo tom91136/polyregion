@@ -151,16 +151,16 @@ void CudaDevice::freeShared(void *ptr) {
   context.touch();
   CHECKED(cuMemFree(reinterpret_cast<CUdeviceptr>(ptr)));
 }
-std::unique_ptr<DeviceQueue> CudaDevice::createQueue() {
+std::unique_ptr<DeviceQueue> CudaDevice::createQueue(const std::chrono::duration<int64_t> &timeout) {
   POLYRT_TRACE();
   context.touch();
-  return std::make_unique<CudaDeviceQueue>(store);
+  return std::make_unique<CudaDeviceQueue>(timeout, store);
 }
 CudaDevice::~CudaDevice() { POLYRT_TRACE(); }
 
 // ---
 
-CudaDeviceQueue::CudaDeviceQueue(decltype(store) store) : store(store) {
+CudaDeviceQueue::CudaDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(store) store) : latch(timeout), store(store) {
   POLYRT_TRACE();
   CHECKED(cuStreamCreate(&stream, CU_STREAM_DEFAULT));
 }
@@ -169,6 +169,7 @@ CudaDeviceQueue::~CudaDeviceQueue() {
   CHECKED(cuStreamDestroy(stream));
 }
 void CudaDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
+  if (!cb) return;
   auto f = [cb, token = latch.acquire()]() {
     if (cb) (*cb)();
   };
@@ -188,14 +189,14 @@ void CudaDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
   }
 }
 
-void CudaDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
+void CudaDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size, const MaybeCallback &cb) {
   POLYRT_TRACE();
-  CHECKED(cuMemcpyHtoDAsync(dst, src, size, stream));
+  CHECKED(cuMemcpyHtoDAsync(dst + dstOffset, src, size, stream));
   enqueueCallback(cb);
 }
-void CudaDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) {
+void CudaDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, void *dst, size_t size, const MaybeCallback &cb) {
   POLYRT_TRACE();
-  CHECKED(cuMemcpyDtoHAsync(dst, src, size, stream));
+  CHECKED(cuMemcpyDtoHAsync(dst, src + srcOffset, size, stream));
   enqueueCallback(cb);
 }
 void CudaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
@@ -213,6 +214,10 @@ void CudaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const st
                          stream, args.data(),       //
                          nullptr));
   enqueueCallback(cb);
+}
+void CudaDeviceQueue::enqueueWaitBlocking() {
+  POLYRT_TRACE();
+  CHECKED(cuStreamSynchronize(stream));
 }
 
 #undef CHECKED

@@ -18,21 +18,10 @@ struct KernelObject {
   std::string moduleImage{};
 };
 
-// struct KernelStruct {
-//   struct Member {
-//     std::string name;
-//     size_t offsetInBytes, sizeInBytes;
-//     std::optional<std::string> structTy;
-//   };
-//   std::string name;
-//   bool exported;
-//   std::vector<Member> members;
-// };
-
 struct KernelBundle {
   std::string moduleName{};
   std::vector<KernelObject> objects{};
-  std::vector<std::pair<bool, polyast::StructLayout>> layouts{};
+  std::vector<std::pair<bool, StructLayout>> layouts{};
   std::string metadata;
 };
 

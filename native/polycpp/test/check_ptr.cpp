@@ -1,28 +1,28 @@
-// #CASE: =ptr
-// #MATRIX: size=1,10,100
-// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE== -o {output} {input}
-// #RUN: POLYSTL_PLATFORM=host {output}
-//   #EXPECT: -1 -1 1
+#pragma region case: =ptr
+#pragma region using: size=1,10,100
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE== -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: -1 -1 1
 
-// #CASE: =ptr=42
-// #MATRIX: size=1,10,100
-// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE== -DCHECK_MUT -o {output} {input}
-// #RUN: POLYSTL_PLATFORM=host {output}
-//   #EXPECT: 42 42 1
-
-
-// #CASE: &ptr
-// #MATRIX: size=1,10,100
-// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE=& -o {output} {input}
-// #RUN: POLYSTL_PLATFORM=host {output}
-//   #EXPECT: -1 -1 1
+#pragma region case: =ptr=42
+#pragma region using: size=1,10,100
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE== -DCHECK_MUT -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 42 42 1
 
 
-// #CASE: &ptr=42
-// #MATRIX: size=1,10,100
-// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE=& -DCHECK_MUT -o {output} {input}
-// #RUN: POLYSTL_PLATFORM=host {output}
-//   #EXPECT: 42 42 1
+#pragma region case: &ptr
+#pragma region using: size=1,10,100
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE=& -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: -1 -1 1
+
+
+#pragma region case: &ptr=42
+#pragma region using: size=1,10,100
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_SIZE_DEF={size} -DCHECK_CAPTURE=& -DCHECK_MUT -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 42 42 1
 
 #ifndef CHECK_SIZE_DEF
   #error "CHECK_SIZE_DEF undefined"

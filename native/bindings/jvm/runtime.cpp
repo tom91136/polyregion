@@ -4,13 +4,13 @@
 #include <utility>
 #include <vector>
 
+#include "aspartame/optional.hpp"
+#include "aspartame/vector.hpp"
 #include "generated/mirror.h"
 #include "generated/platform.h"
 #include "generated/platforms.h"
 #include "jni_utils.h"
 #include "polyrt/runtime.h"
-#include "aspartame/vector.hpp"
-#include "aspartame/optional.hpp"
 
 using namespace polyregion;
 namespace rt = ::runtime;
@@ -18,17 +18,6 @@ namespace gen = ::generated;
 using namespace gen::registry;
 
 static constexpr const char *EX = "polyregion/jvm/runtime/PolyregionRuntimeException";
-
-static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::Void) == Platforms::TYPE_VOID);
-static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::Bool1) == Platforms::TYPE_BOOL);
-static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::IntS8) == Platforms::TYPE_BYTE);
-static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::IntU16) == Platforms::TYPE_CHAR);
-static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::IntS16) == Platforms::TYPE_SHORT);
-static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::IntS32) == Platforms::TYPE_INT);
-static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::IntS64) == Platforms::TYPE_LONG);
-static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::Float32) == Platforms::TYPE_FLOAT);
-static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::Float64) == Platforms::TYPE_DOUBLE);
-static_assert(static_cast<std::underlying_type_t<rt::Type>>(rt::Type::Ptr) == Platforms::TYPE_PTR);
 
 static JavaVM *CurrentVM;
 
@@ -205,9 +194,10 @@ void Platform::free0(JNIEnv *env, jclass, jlong nativePeer, jlong handle) {
   wrapException(env, EX, [&]() { findRef(env, devices, nativePeer)->freeDevice(static_cast<jlong>(handle)); });
 }
 
-jobject Platform::createQueue0(JNIEnv *env, jclass, jlong nativePeer, jobject device) {
+jobject Platform::createQueue0(JNIEnv *env, jclass, jlong nativePeer, jobject device, jlong timeoutMillis) {
   return wrapException(env, EX, [&]() {
-    auto queue = findRef(env, devices, nativePeer)->createQueue();
+    auto queue = findRef(env, devices, nativePeer)
+                     ->createQueue(std::chrono::duration_cast<std::chrono::duration<int64_t>>(std::chrono::milliseconds(timeoutMillis)));
     auto [peer, _] = emplaceRef(deviceQueues, std::shared_ptr(std::move(queue)));
     return gen::Queue::of(env)(env, peer, device).instance;
   });
@@ -241,7 +231,7 @@ void Platform::enqueueHostToDeviceAsync0(JNIEnv *env, jclass, //
   if (!srcPtr) throwGeneric(env, EX, "The source ByteBuffer is not backed by an direct allocation.");
 
   return wrapException(env, EX,
-                       [&]() { findRef(env, deviceQueues, nativePeer)->enqueueHostToDeviceAsync(srcPtr, dst, size, fromJni(env, cb)); });
+                       [&]() { findRef(env, deviceQueues, nativePeer)->enqueueHostToDeviceAsync(srcPtr, dst, 0, size, fromJni(env, cb)); });
 }
 void Platform::enqueueDeviceToHostAsync0(JNIEnv *env, jclass, //
                                          jlong nativePeer,    //
@@ -249,7 +239,7 @@ void Platform::enqueueDeviceToHostAsync0(JNIEnv *env, jclass, //
   auto dstPtr = env->GetDirectBufferAddress(dst);
   if (!dstPtr) throwGeneric(env, EX, "The destination ByteBuffer is not backed by an direct allocation.");
   return wrapException(env, EX,
-                       [&]() { findRef(env, deviceQueues, nativePeer)->enqueueDeviceToHostAsync(src, dstPtr, size, fromJni(env, cb)); });
+                       [&]() { findRef(env, deviceQueues, nativePeer)->enqueueDeviceToHostAsync(src, 0, dstPtr, size, fromJni(env, cb)); });
 }
 
 static rt::Dim3 fromJni(JNIEnv *env, const generated::Dim3::Instance &d3) {

@@ -1,9 +1,10 @@
 #pragma once
 
+#include <thread>
+
 #include "polyregion/compat.h"
 
 #include "runtime.h"
-#include <thread>
 
 #define VK_NO_PROTOTYPES
 
@@ -28,7 +29,7 @@
 
 namespace polyregion::runtime::vulkan {
 
-class POLYREGION_EXPORT VulkanPlatform : public Platform {
+class POLYREGION_EXPORT VulkanPlatform final : public Platform {
   std::vector<const char *> extensions;
   std::vector<const char *> layers;
   vk::raii::Context context;
@@ -45,7 +46,7 @@ public:
   POLYREGION_EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;
 };
 
-namespace {
+namespace details {
 
 struct Resolved {
   std::shared_ptr<vk::raii::ShaderModule> shaderModule;
@@ -61,8 +62,8 @@ struct Resolved {
   Resolved(uint32_t computeQueueId,
            const std::shared_ptr<vk::raii::ShaderModule> &shaderModule, //
            const std::vector<vk::DescriptorSetLayoutBinding> &bindings, //
-           const std::vector<vk::DescriptorPoolSize> &size,                                 //
-           vk::raii::Device &ctx);
+           const std::vector<vk::DescriptorPoolSize> &size,             //
+           const vk::raii::Device &ctx);
 };
 
 struct MemObject {
@@ -80,9 +81,9 @@ struct Enqueued {
 
 using VulkanModuleStore = detail::ModuleStore<std::shared_ptr<vk::raii::ShaderModule>, Resolved>;
 using VkMemObject = std::shared_ptr<MemObject>;
-} // namespace
+} // namespace details
 
-class POLYREGION_EXPORT VulkanDevice : public Device {
+class POLYREGION_EXPORT VulkanDevice final : public Device {
   //
 
   std::pair<uint32_t, size_t> computeQueueId;
@@ -101,8 +102,8 @@ class POLYREGION_EXPORT VulkanDevice : public Device {
   std::atomic_size_t activeComputeQueues;
   std::atomic_size_t activeTransferQueues;
 
-  VulkanModuleStore store;
-  detail::MemoryObjects<VkMemObject> memoryObjects;
+  details::VulkanModuleStore store;
+  detail::MemoryObjects<details::VkMemObject> memoryObjects;
 
 public:
   explicit VulkanDevice(vk::raii::Instance &instance,              //
@@ -119,41 +120,42 @@ public:
   POLYREGION_EXPORT bool moduleLoaded(const std::string &name) override;
   POLYREGION_EXPORT uintptr_t mallocDevice(size_t size, Access access) override;
   POLYREGION_EXPORT void freeDevice(uintptr_t ptr) override;
-  POLYREGION_EXPORT std::optional<void*> mallocShared(size_t size, Access access) override;
-  POLYREGION_EXPORT void freeShared(void* ptr) override;
-  POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue() override;
+  POLYREGION_EXPORT std::optional<void *> mallocShared(size_t size, Access access) override;
+  POLYREGION_EXPORT void freeShared(void *ptr) override;
+  POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue(const std::chrono::duration<int64_t> &timeout) override;
   ~VulkanDevice() override;
 };
 
-class POLYREGION_EXPORT VulkanDeviceQueue : public DeviceQueue {
+class POLYREGION_EXPORT VulkanDeviceQueue final : public DeviceQueue {
 
-  detail::CountingLatch latch;
   vk::raii::Device &ctx;
   VmaAllocator &allocator;
   vk::raii::Queue computeQueue;
   vk::raii::Queue transferQueue;
 
-  VulkanModuleStore &store;
-  std::function<VkMemObject(uintptr_t)> queryMemObject;
-  detail::CountedStore<size_t, std::shared_ptr<Enqueued>> enqueuedStore;
+  details::VulkanModuleStore &store;
+  std::function<details::VkMemObject(uintptr_t)> queryMemObject;
+  detail::CountedStore<size_t, std::shared_ptr<details::Enqueued>> enqueuedStore;
   detail::BlockingQueue<std::function<void()>> callbackQueue;
   std::thread callbackThread;
 
   void enqueueCallback(const MaybeCallback &cb);
 
 public:
-  POLYREGION_EXPORT explicit VulkanDeviceQueue(decltype(ctx) ctx,                     //
-                                    decltype(allocator) allocator,         //
-                                    decltype(computeQueue) computeQueue,   //
-                                    decltype(transferQueue) transferQueue, //
-                                    decltype(store) store,                 //
-                                    decltype(queryMemObject) queryMemObject);
+  POLYREGION_EXPORT explicit VulkanDeviceQueue( decltype(ctx) ctx,                     //
+                                               decltype(allocator) allocator,         //
+                                               decltype(computeQueue) computeQueue,   //
+                                               decltype(transferQueue) transferQueue, //
+                                               decltype(store) store,                 //
+                                               decltype(queryMemObject) queryMemObject);
   POLYREGION_EXPORT ~VulkanDeviceQueue() override;
-  POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) override;
-  POLYREGION_EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, void *dst, size_t size, const MaybeCallback &cb) override;
-  POLYREGION_EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                 const std::vector<Type> &types, std::vector<std::byte> argData, const Policy &policy,
-                                 const MaybeCallback &cb) override;
+  POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size,
+                                                  const MaybeCallback &cb) override;
+  POLYREGION_EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, size_t srcOffset, void *dst, size_t bytes,
+                                                  const MaybeCallback &cb) override;
+  POLYREGION_EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
+                                            std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) override;
+  POLYREGION_EXPORT void enqueueWaitBlocking() override;
 };
 
 } // namespace polyregion::runtime::vulkan

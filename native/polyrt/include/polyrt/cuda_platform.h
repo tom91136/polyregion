@@ -7,7 +7,7 @@
 
 namespace polyregion::runtime::cuda {
 
-class POLYREGION_EXPORT CudaPlatform : public Platform {
+class POLYREGION_EXPORT CudaPlatform final : public Platform {
   POLYREGION_EXPORT explicit CudaPlatform();
 
 public:
@@ -20,16 +20,16 @@ public:
   POLYREGION_EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;
 };
 
-namespace {
+namespace details {
 using CudaModuleStore = detail::ModuleStore<CUmodule, CUfunction>;
 }
 
-class POLYREGION_EXPORT CudaDevice : public Device {
+class POLYREGION_EXPORT CudaDevice final : public Device {
 
   CUdevice device = {};
   detail::LazyDroppable<CUcontext> context;
   std::string deviceName;
-  CudaModuleStore store;
+  details::CudaModuleStore store;
 
 public:
   explicit CudaDevice(int ordinal);
@@ -43,29 +43,31 @@ public:
   POLYREGION_EXPORT bool moduleLoaded(const std::string &name) override;
   POLYREGION_EXPORT uintptr_t mallocDevice(size_t size, Access access) override;
   POLYREGION_EXPORT void freeDevice(uintptr_t ptr) override;
-  POLYREGION_EXPORT std::optional<void*> mallocShared(size_t size, Access access) override;
-  POLYREGION_EXPORT void freeShared(void* ptr) override;
-  POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue() override;
+  POLYREGION_EXPORT std::optional<void *> mallocShared(size_t size, Access access) override;
+  POLYREGION_EXPORT void freeShared(void *ptr) override;
+  POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue(const std::chrono::duration<int64_t> &timeout) override;
   ~CudaDevice() override;
 };
 
-class POLYREGION_EXPORT CudaDeviceQueue : public DeviceQueue {
+class POLYREGION_EXPORT CudaDeviceQueue final : public DeviceQueue {
 
   detail::CountingLatch latch;
 
-  CudaModuleStore &store;
+  details::CudaModuleStore &store;
   CUstream stream{};
 
   void enqueueCallback(const MaybeCallback &cb);
 
 public:
-  POLYREGION_EXPORT explicit CudaDeviceQueue(decltype(store) store);
+  POLYREGION_EXPORT explicit CudaDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(store) store);
   POLYREGION_EXPORT ~CudaDeviceQueue() override;
-  POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) override;
-  POLYREGION_EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, void *dst, size_t size, const MaybeCallback &cb) override;
-  POLYREGION_EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                 const std::vector<Type> &types, std::vector<std::byte> argData, const Policy &policy,
-                                 const MaybeCallback &cb) override;
+  POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size,
+                                                  const MaybeCallback &cb) override;
+  POLYREGION_EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, size_t srcOffset, void *dst, size_t bytes,
+                                                  const MaybeCallback &cb) override;
+  POLYREGION_EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
+                                            std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) override;
+  POLYREGION_EXPORT void enqueueWaitBlocking() override;
 };
 
 } // namespace polyregion::runtime::cuda

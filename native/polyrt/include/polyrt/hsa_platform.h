@@ -1,15 +1,15 @@
 #pragma once
 
+#include <condition_variable>
+
 #include "polyregion/compat.h"
 
 #include "hsaew.h"
 #include "runtime.h"
-#include <condition_variable>
-#include <mutex>
 
 namespace polyregion::runtime::hsa {
 
-class POLYREGION_EXPORT HsaPlatform : public Platform {
+class POLYREGION_EXPORT HsaPlatform final : public Platform {
   POLYREGION_EXPORT explicit HsaPlatform();
 
 public:
@@ -22,17 +22,17 @@ public:
   POLYREGION_EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;
 };
 
-namespace {
+namespace details {
 using SymbolArgOffsetTable = std::unordered_map<std::string, std::vector<size_t>>;
 using HsaModuleStore = detail::ModuleStore<                               //
     std::pair<hsa_executable_t, SymbolArgOffsetTable>,                    //
     std::pair<hsa_executable_symbol_t, SymbolArgOffsetTable::mapped_type> //
     >;
-} // namespace
+} // namespace details
 
 class POLYREGION_EXPORT HsaDeviceQueue;
 
-class POLYREGION_EXPORT HsaDevice : public Device {
+class POLYREGION_EXPORT HsaDevice final : public Device {
 
   uint32_t queueSize;
   hsa_agent_t hostAgent;
@@ -42,7 +42,7 @@ class POLYREGION_EXPORT HsaDevice : public Device {
   hsa_region_t kernelArgRegion{};
   hsa_amd_memory_pool_t deviceGlobalRegion{};
 
-  HsaModuleStore store; // store needs to be dropped before dropping device
+  details::HsaModuleStore store; // store needs to be dropped before dropping device
 
   friend class HsaDeviceQueue;
 
@@ -59,30 +59,28 @@ public:
   POLYREGION_EXPORT bool moduleLoaded(const std::string &name) override;
   POLYREGION_EXPORT uintptr_t mallocDevice(size_t size, Access access) override;
   POLYREGION_EXPORT void freeDevice(uintptr_t ptr) override;
-  POLYREGION_EXPORT std::optional<void*> mallocShared(size_t size, Access access) override;
-  POLYREGION_EXPORT void freeShared(void* ptr) override;
-  POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue() override;
+  POLYREGION_EXPORT std::optional<void *> mallocShared(size_t size, Access access) override;
+  POLYREGION_EXPORT void freeShared(void *ptr) override;
+  POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue(const std::chrono::duration<int64_t> &timeout) override;
 };
 
-class POLYREGION_EXPORT HsaDeviceQueue : public DeviceQueue {
+class POLYREGION_EXPORT HsaDeviceQueue final : public DeviceQueue {
 
   detail::CountingLatch latch;
 
   HsaDevice &device;
   hsa_queue_t *queue;
 
-  static hsa_signal_t createSignal(const char *message);
-  static void destroySignal(const char *message, hsa_signal_t signal);
-  static void enqueueCallback(hsa_signal_t signal, const Callback &cb);
-
 public:
-  POLYREGION_EXPORT explicit HsaDeviceQueue(decltype(device) device, decltype(queue) queue);
+  POLYREGION_EXPORT explicit HsaDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(device) device, decltype(queue) queue);
   POLYREGION_EXPORT ~HsaDeviceQueue() override;
-  POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) override;
-  POLYREGION_EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, void *dst, size_t size, const MaybeCallback &cb) override;
-  POLYREGION_EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
-                                 const std::vector<Type> &types, std::vector<std::byte> argData, const Policy &policy,
-                                 const MaybeCallback &cb) override;
+  POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size,
+                                                  const MaybeCallback &cb) override;
+  POLYREGION_EXPORT void enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, void *dst, size_t size,
+                                                  const MaybeCallback &cb) override;
+  POLYREGION_EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
+                                            std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) override;
+  POLYREGION_EXPORT void enqueueWaitBlocking() override;
 };
 
 } // namespace polyregion::runtime::hsa

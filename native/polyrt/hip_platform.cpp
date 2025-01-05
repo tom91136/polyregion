@@ -162,16 +162,16 @@ void HipDevice::freeShared(void *ptr) {
   context.touch();
   CHECKED(hipFree(reinterpret_cast<hipDeviceptr_t>(ptr)));
 }
-std::unique_ptr<DeviceQueue> HipDevice::createQueue() {
+std::unique_ptr<DeviceQueue> HipDevice::createQueue(const std::chrono::duration<int64_t> &timeout) {
   POLYRT_TRACE();
   context.touch();
-  return std::make_unique<HipDeviceQueue>(store);
+  return std::make_unique<HipDeviceQueue>(timeout, store);
 }
 HipDevice::~HipDevice() { POLYRT_TRACE(); }
 
 // ---
 
-HipDeviceQueue::HipDeviceQueue(decltype(store) store) : store(store) {
+HipDeviceQueue::HipDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(store) store) : latch(timeout), store(store) {
   POLYRT_TRACE();
   CHECKED(hipStreamCreate(&stream));
 }
@@ -182,6 +182,7 @@ HipDeviceQueue::~HipDeviceQueue() {
   CHECKED(result);
 }
 void HipDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
+  if (!cb) return;
   POLYRT_TRACE();
   static detail::CountedCallbackHandler handler;
   CHECKED(hipStreamAddCallback(
@@ -196,14 +197,14 @@ void HipDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
       0));
 }
 
-void HipDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
+void HipDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size, const MaybeCallback &cb) {
   POLYRT_TRACE();
-  CHECKED(hipMemcpyHtoDAsync(dst, src, size, stream));
+  CHECKED(hipMemcpyHtoDAsync(dst + dstOffset, src, size, stream));
   enqueueCallback(cb);
 }
-void HipDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) {
+void HipDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, void *dst, size_t size, const MaybeCallback &cb) {
   POLYRT_TRACE();
-  CHECKED(hipMemcpyDtoHAsync(dst, src, size, stream));
+  CHECKED(hipMemcpyDtoHAsync(dst, src + srcOffset, size, stream));
   enqueueCallback(cb);
 }
 void HipDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
@@ -225,6 +226,10 @@ void HipDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
   hipStreamQuery(stream);
 #endif
   enqueueCallback(cb);
+}
+void HipDeviceQueue::enqueueWaitBlocking() {
+  POLYRT_TRACE();
+  CHECKED(hipStreamSynchronize(stream));
 }
 
 #undef CHECKED

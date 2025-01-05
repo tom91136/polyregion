@@ -23,13 +23,7 @@ using namespace aspartame;
 
 namespace {
 
-template <typename T> constexpr const char *typenameOfImpl(const char *v) {
-  static_assert(std::is_class_v<T> || std::is_enum_v<T>, "Symbol is not a class, struct, or enum.");
-  return v;
-}
-#define typenameOf(Type) typenameOfImpl<Type>(#Type);
-
-template <typename F> class InlineMatchCallback : public clang::ast_matchers::MatchFinder::MatchCallback {
+template <typename F> class InlineMatchCallback final : public clang::ast_matchers::MatchFinder::MatchCallback {
   F f;
   void run(const clang::ast_matchers::MatchFinder::MatchResult &result) override { f(result); }
 
@@ -60,29 +54,29 @@ struct Failure {
 
 constexpr static auto offloadFunctionName = "__polyregion_offload__";
 
-static std::vector<std::variant<Failure, Callsite>> outlinePolyregionOffload(clang::ASTContext &context) {
+static Vec<std::variant<Failure, Callsite>> outlinePolyregionOffload(clang::ASTContext &context) {
   using namespace clang::ast_matchers;
-  std::vector<std::variant<Failure, Callsite>> results;
+  Vec<std::variant<Failure, Callsite>> results;
   runMatch(
       context,
       [&](const MatchFinder::MatchResult &result) {
-        if (auto offloadCallExpr = result.Nodes.getNodeAs<clang::CallExpr>(offloadFunctionName)) {
-          auto lastArgExpr = offloadCallExpr->getArg(offloadCallExpr->getNumArgs() - 1)->IgnoreUnlessSpelledInSource();
-          auto fnDecl = offloadCallExpr->getDirectCallee();
-          if (auto lambdaArgCxxRecordDecl = lastArgExpr->getType()->getAsCXXRecordDecl()) {
+        if (const auto offloadCallExpr = result.Nodes.getNodeAs<clang::CallExpr>(offloadFunctionName)) {
+          const auto lastArgExpr = offloadCallExpr->getArg(offloadCallExpr->getNumArgs() - 1)->IgnoreUnlessSpelledInSource();
+          const auto fnDecl = offloadCallExpr->getDirectCallee();
+          if (const auto lambdaArgCxxRecordDecl = lastArgExpr->getType()->getAsCXXRecordDecl()) {
             // TODO we should support explicit structs with () operator and not just lambdas
-            if (auto op = lambdaArgCxxRecordDecl->getLambdaCallOperator(); lambdaArgCxxRecordDecl->isLambda() && op) {
+            if (const auto op = lambdaArgCxxRecordDecl->getLambdaCallOperator(); lambdaArgCxxRecordDecl->isLambda() && op) {
 
               // prototype is <polyregion::runtime::PlatformKind, typename F>; we check the first template arg's type and value
-              auto templateArgs = fnDecl->getTemplateSpecializationArgs();
+              const auto templateArgs = fnDecl->getTemplateSpecializationArgs();
               if (templateArgs->size() != 2) {
                 results.emplace_back(
                     Failure{offloadCallExpr, "Template arity mismatch for " + std::string(offloadFunctionName) + ", expecting 2"});
               } else {
-                auto templateArg0 = templateArgs->get(0);
-                if (templateArg0.getKind() == clang::TemplateArgument::Integral &&
+                if (const auto templateArg0 = templateArgs->get(0);
+                    templateArg0.getKind() == clang::TemplateArgument::Integral &&
                     templateArg0.getIntegralType()->getAsTagDecl()->getName().str() == "PlatformKind") {
-                  auto kind = static_cast<polyregion::runtime::PlatformKind>(templateArg0.getAsIntegral().getExtValue());
+                  const auto kind = static_cast<polyregion::runtime::PlatformKind>(templateArg0.getAsIntegral().getExtValue());
                   results.emplace_back(Callsite{const_cast<clang::CallExpr *>(offloadCallExpr), const_cast<clang::Expr *>(lastArgExpr),
                                                 const_cast<clang::FunctionDecl *>(fnDecl), op, kind});
                 } else {
@@ -97,7 +91,7 @@ static std::vector<std::variant<Failure, Callsite>> outlinePolyregionOffload(cla
             results.emplace_back(Failure{offloadCallExpr, "Last arg is not a valid synthesised lambda record type"});
           }
         } else {
-          auto root = result.Nodes.getNodeAs<clang::Stmt>(offloadFunctionName);
+          const auto root = result.Nodes.getNodeAs<clang::Stmt>(offloadFunctionName);
           results.emplace_back(Failure{root, "Unexpected offload definition:" + pretty_string(root, context)});
         }
       },
@@ -126,7 +120,7 @@ template <typename T> T *findDecl(clang::DiagnosticsEngine &D, clang::Sema &S, c
   clang::LookupResult result(S, clang::DeclarationName(&C.Idents.get(name)), clang::SourceLocation(), clang::Sema::LookupAnyName);
   S.LookupName(result, S.getScopeForContext(C.getTranslationUnitDecl()));
   if (result.isSingleResult()) {
-    auto decl = result.getFoundDecl();
+    const auto decl = result.getFoundDecl();
     if (const auto record = llvm::dyn_cast<T>(decl)) return record;
     else
       D.Report({}, D.getCustomDiagID(clang::DiagnosticsEngine::Error,
@@ -139,11 +133,9 @@ template <typename T> T *findDecl(clang::DiagnosticsEngine &D, clang::Sema &S, c
 }
 
 void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTContext &C, const Callsite &c, const KernelBundle &bundle) {
-
-  auto typeOfFieldWithName = [&](clang::QualType ty, const auto &fieldName) -> std::optional<clang::QualType> {
-    if (auto decl = ty->getAsCXXRecordDecl()) {
-      return (ty->getAsCXXRecordDecl()->fields() | find([&](auto f) { return f->getName() == fieldName; })) //
-             ^ map([&](auto x) { return x->getType().getDesugaredType(C); });
+  const auto fieldWithName = [&](const clang::QualType ty, const auto &fieldName) -> Opt<clang::FieldDecl *> {
+    if (const auto decl = ty->getAsCXXRecordDecl()) {
+      return decl->fields() | find([&](auto f) { return f->getName() == fieldName; });
     }
     D.Report({},
              D.getCustomDiagID(clang::DiagnosticsEngine::Error, "[PolySTL] Type %0 cannot be resolved to a CXXRecordDecl. This is a bug."))
@@ -151,209 +143,187 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
     return {};
   };
 
-  auto RuntimeKernelBundleTy = c.calleeDecl->getReturnType()->getPointeeType();
-  auto RuntimeKernelObjectTy = typeOfFieldWithName(RuntimeKernelBundleTy, "objects") ^ map([](auto &t) { return t->getPointeeType(); });
-  auto PlatformKindTy = typeOfFieldWithName(*RuntimeKernelObjectTy, "kind");
-  auto ModuleFormatTy = typeOfFieldWithName(*RuntimeKernelObjectTy, "format");
-  auto RuntimeStructTy = typeOfFieldWithName(RuntimeKernelBundleTy, "structs") ^ map([](auto &t) { return t->getPointeeType(); });
-  auto RuntimeStructMemberTy = typeOfFieldWithName(*RuntimeStructTy, "members") ^ map([](auto &t) { return t->getPointeeType(); });
-  auto RuntimeTypeTy = typeOfFieldWithName(*RuntimeStructMemberTy, "type");
-
-  RuntimeStructMemberTy->dump();
-  RuntimeKernelObjectTy->dump();
-  PlatformKindTy->dump();
-  ModuleFormatTy->dump();
-
-  // findDecl<clang::CXXRecordDecl>(D, S, C, "::polyregion::runtime::RuntimeKernelObject");
-  // findDecl<clang::EnumDecl>(D, S, C, "PlatformKind");
-  // findDecl<clang::EnumDecl>(D, S, C, "ModuleFormat");
-
-  auto createDeclRef = [&](clang::VarDecl *lhs) {
-    return clang::DeclRefExpr::Create(C, {}, {}, lhs, false, clang::SourceLocation{}, lhs->getType(), clang::ExprValueKind::VK_LValue);
+  const auto typeOfFieldWithName = [&](clang::QualType ty, const auto &fieldName) -> Opt<clang::QualType> {
+    return fieldWithName(ty, fieldName) ^ map([&](auto f) { return f->getType().getDesugaredType(C); });
   };
 
-  auto mkConstArrTy = [&](clang::QualType componentTpe, size_t size) {
-    return C.getConstantArrayType(componentTpe, llvm::APInt(C.getTypeSize(C.IntTy), size), nullptr, clang::ArraySizeModifier::Normal, 0);
-  };
+  const auto KernelBundleTy = c.calleeDecl->getReturnType()->getPointeeType();
+  const auto KernelObjectTy = typeOfFieldWithName(KernelBundleTy, "objects") ^ map([](auto &t) { return t->getPointeeType(); });
+  const auto PlatformKindTy = typeOfFieldWithName(*KernelObjectTy, "kind");
+  const auto ModuleFormatTy = typeOfFieldWithName(*KernelObjectTy, "format");
+  const auto TypeLayoutTy = typeOfFieldWithName(KernelBundleTy, "structs") ^ map([](auto &t) { return t->getPointeeType(); });
+  const auto AggregateMemberTy = typeOfFieldWithName(*TypeLayoutTy, "members") ^ map([](auto &t) { return t->getPointeeType(); });
+  const auto TypeLayoutMembersField = fieldWithName(*TypeLayoutTy, "members");
 
-  auto mkStrLit = [&](const std::string &str) {
-    return clang::StringLiteral::Create(C, str, clang::StringLiteralKind::Ordinary, false,
-                                        C.getConstantArrayType(C.getConstType(C.CharTy),
-                                                               llvm::APInt(C.getTypeSize(C.IntTy), str.length() + 1), nullptr,
-                                                               clang::ArraySizeModifier::Normal, 0),
-                                        {});
-  };
-
-  auto mkIntLit = [&](clang::QualType tpe, uint64_t value) {
-    return clang::IntegerLiteral::Create(C, llvm::APInt(C.getTypeSize(tpe), value), tpe, {});
-  };
-
-  auto mkBoolLit = [&](bool value) { return clang::CXXBoolLiteralExpr::Create(C, value, C.BoolTy, {}); };
-
-  auto mkArrayToPtrDecay = [&](clang::QualType to, clang::Expr *expr) {
-    return clang::ImplicitCastExpr::Create(C, to, clang::CK_ArrayToPointerDecay, expr, nullptr, clang::VK_PRValue, {});
-  };
-
-  auto mkInitList = [&](clang::QualType ty, const std::vector<clang::Expr *> &initExprs) {
-    auto init = new (C) clang::InitListExpr(C, {}, initExprs, {});
-    init->setType(ty);
-    return init;
-  };
-
-  auto mkStaticVarDecl = [&](const std::string &name, clang::QualType ty, const std::vector<clang::Expr *> &initExprs) {
-    auto decl = clang::VarDecl::Create(C, c.calleeDecl, {}, {}, &C.Idents.get(name), ty, nullptr, clang::SC_Static);
-    decl->setInit(mkInitList(ty, initExprs));
-    decl->setInitStyle(clang::VarDecl::InitializationStyle::ListInit);
-    return decl;
-  };
-
-  auto varDeclWithName = [&](clang::Stmt *stmt, const std::string &name) -> std::optional<clang::VarDecl *> {
-    if (auto declStmt = llvm::dyn_cast<clang::DeclStmt>(stmt); declStmt && declStmt->isSingleDecl()) {
-      if (auto varDecl = llvm::dyn_cast<clang::VarDecl>(declStmt->getSingleDecl()); varDecl && varDecl->getName() == name) {
-        return varDecl;
-      }
-    }
-    return {};
-  };
-
-  auto constCharStarTy = C.getPointerType(C.CharTy.withConst());
-
-  auto kernelImageDecls =                                            //
-      bundle.objects                                                 //
-      | zip_with_index()                                             //
-      | map([&](auto ko, auto idx) {                                 //
-          return mkStaticVarDecl(                                    //
-              "__kernelobject_image_data_" + std::to_string(idx),    //
-              mkConstArrTy(C.UnsignedCharTy, ko.moduleImage.size()), //
-              ko.moduleImage | map([&](const unsigned char c) -> clang::Expr * {
-                return clang::ImplicitCastExpr::Create(C, C.UnsignedCharTy, clang::CK_IntegralCast, mkIntLit(C.IntTy, c), nullptr,
-                                                       clang::VK_PRValue, {});
-              }) | to_vector());
-        }) //
+  auto kernelImageDecls =
+      bundle.objects | zip_with_index() | map([&](auto &ko, auto idx) {
+        return mkStaticVarDecl(C, c.calleeDecl, fmt::format("__ko_image_data_{}", idx),
+                               mkConstArrTy(C, C.UnsignedCharTy, ko.moduleImage.size()),
+                               ko.moduleImage | map([&](const unsigned char x) -> clang::Expr * {
+                                 return clang::ImplicitCastExpr::Create(C, C.UnsignedCharTy, clang::CK_IntegralCast,
+                                                                        mkIntLit(C, C.IntTy, x), nullptr, clang::VK_PRValue, {});
+                               }) | to_vector());
+      }) //
       | to_vector();
 
-  auto kernelFeatureDecls =                                         //
-      bundle.objects                                                //
-      | zip_with_index()                                            //
-      | map([&](auto &ko, auto idx) {                               //
-          return mkStaticVarDecl(                                   //
-              "__kernelobject_feature_data_" + std::to_string(idx), //
-              mkConstArrTy(constCharStarTy, ko.features.size()),    //
-              ko.features | map([&](auto &feature) -> clang::Expr * {
-                return mkArrayToPtrDecay(C.getConstType(C.getPointerType(C.CharTy)), mkStrLit(feature));
-              }) | to_vector());
-        }) //
+  auto kernelFeatureDecls =
+      bundle.objects | zip_with_index() | map([&](auto &ko, auto idx) {
+        return mkStaticVarDecl(C, c.calleeDecl, fmt::format("__ko_feature_data_{}", idx),
+                               mkConstArrTy(C, constCharStarTy(C), ko.features.size()),
+                               ko.features | map([&](auto &feature) -> clang::Expr * {
+                                 return mkArrayToPtrDecay(C, C.getConstType(C.getPointerType(C.CharTy)), mkStrLit(C, feature));
+                               }) | to_vector());
+      }) //
       | to_vector();
 
-  auto kernelObjectArrayDecl = mkStaticVarDecl(                    //
-      "__kernelobject_data",                                       //
-      mkConstArrTy(*RuntimeKernelObjectTy, bundle.objects.size()), //
-      bundle.objects                                               //
-          | zip_with_index()                                       //
-          | map([&](auto &ko, auto idx) -> clang::Expr * {         //
-              return mkInitList(                                   //
-                  *RuntimeKernelObjectTy,                          //
+  auto kernelObjectArrayDecl = mkStaticVarDecl(
+      C, c.calleeDecl,                                         //
+      "__ko_data",                                             //
+      mkConstArrTy(C, *KernelObjectTy, bundle.objects.size()), //
+      bundle.objects                                           //
+          | zip_with_index()                                   //
+          | map([&](auto &ko, auto idx) -> clang::Expr * {     //
+              return mkInitList(
+                  C,               //
+                  *KernelObjectTy, //
                   {
-                      S.ImpCastExprToType(mkIntLit(C.IntTy, static_cast<std::underlying_type_t<decltype(ko.kind)>>(ko.kind)),
-                                          *PlatformKindTy, clang::CastKind::CK_IntegralCast)
+                      /*kind       */ S
+                          .ImpCastExprToType(mkIntLit(C, C.IntTy, static_cast<std::underlying_type_t<decltype(ko.kind)>>(ko.kind)),
+                                             *PlatformKindTy, clang::CastKind::CK_IntegralCast)
                           .get(),
-                      S.ImpCastExprToType(mkIntLit(C.IntTy, static_cast<std::underlying_type_t<decltype(ko.format)>>(ko.format)),
+                      /*format     */
+                      S.ImpCastExprToType(mkIntLit(C, C.IntTy, static_cast<std::underlying_type_t<decltype(ko.format)>>(ko.format)),
                                           *ModuleFormatTy, clang::CastKind::CK_IntegralCast)
                           .get(),
-
-                      mkArrayToPtrDecay(C.getPointerType(C.CharTy.withConst()), createDeclRef(kernelFeatureDecls[idx])),
-                      mkIntLit(C.getSizeType(), ko.moduleImage.size()),
-                      mkArrayToPtrDecay(C.getPointerType(C.UnsignedCharTy.withConst()), createDeclRef(kernelImageDecls[idx])),
+                      /*features    */ mkArrayToPtrDecay(C, C.getPointerType(C.CharTy.withConst()), mkDeclRef(C, kernelFeatureDecls[idx])),
+                      /*imageLength */ mkIntLit(C, C.getSizeType(), ko.moduleImage.size()),
+                      /*image       */
+                      mkArrayToPtrDecay(C, C.getPointerType(C.UnsignedCharTy.withConst()), mkDeclRef(C, kernelImageDecls[idx])),
                   });
             }) //
           | to_vector());
 
-  auto nameToIndex = bundle.layouts | map([](auto, auto &l) { return l.name; }) | zip_with_index() | to<std::unordered_map>();
+  auto table = bundle.layouts | values() | map([&](auto &sl) { return std::pair{Type::Struct(sl.name), sl}; }) | to<Map>();
 
-  // name -> idx
+  auto primitiveTypeLayoutsDecls =
+      Vec<Type::Any>{
+          Type::Float16(), Type::Float32(), Type::Float64(),                 //
+          Type::IntU8(),   Type::IntU16(),  Type::IntU32(),  Type::IntU64(), //
+          Type::IntS8(),   Type::IntS16(),  Type::IntS32(),  Type::IntS64(), //
+          Type::Unit0(),   Type::Bool1(),                                    //
+      } //
+      | collect([&](auto &t) {
+          return primitiveSize(t) ^ map([&](auto sizeInBytes) {
+                   return std::pair{t, mkStaticVarDecl(C, c.calleeDecl, fmt::format("__primitive_type_layout_{}", repr(t)), *TypeLayoutTy,
+                                                       {
+                                                           /*name        */ mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, repr(t))),
+                                                           /*sizeInBytes */ mkIntLit(C, C.getSizeType(), sizeInBytes),
+                                                           /*alignment   */ mkIntLit(C, C.getSizeType(), sizeInBytes),
+                                                           /*memberCount */ mkIntLit(C, C.getSizeType(), 0),
+                                                           /*member      */ mkNullPtrLit(C, *TypeLayoutTy),
+                                                       })};
+                 });
+        }) //
+      | to<Map>();
 
-  auto kernelStructMemberArrayDecl = //
-      bundle.layouts | zip_with_index() | map([&](auto &k, auto idx) {
-        return mkStaticVarDecl(                                                                     //
-            "__kernelstruct_member_data_" + std::to_string(idx),                                    //
-            mkConstArrTy(*RuntimeStructMemberTy, k.second.members.size()),                          //
-            k.second.members                                                                        //
-                | zip_with_index()                                                                  //
-                | map([&](auto &m, auto idx) -> clang::Expr * {                                     //
-                    return mkInitList(*RuntimeStructMemberTy,                                       //
-                                      {mkArrayToPtrDecay(constCharStarTy, mkStrLit(m.name.symbol)), //
-                                       mkIntLit(C.getSizeType(), m.offsetInBytes),                  //
-                                       mkIntLit(C.getSizeType(), m.sizeInBytes),                    //
-                                       mkBoolLit(m.name.tpe.template is<Type::Ptr>()),
-                                       mkIntLit(C.getIntTypeForBitwidth(64, true),
-                                                m.name.tpe.template get<Type::Struct>() ^
-                                                    bind([&](auto &s) { return nameToIndex ^ get(s.name); }) ^ get_or_else(-1))
+  auto TypeLayoutTyNoConst = TypeLayoutTy->withoutLocalFastQualifiers();
+  auto structTypeLayoutArrayDecl =
+      mkStaticVarDecl(C, c.calleeDecl, "__struct_type_layouts", mkConstArrTy(C, TypeLayoutTyNoConst, bundle.layouts.size()),
+                      bundle.layouts | map([&](auto, auto &sl) -> clang::Expr * {
+                        return mkInitList(C, TypeLayoutTyNoConst,
+                                          {
+                                              /*name        */ mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, sl.name)), //
+                                              /*sizeInBytes */ mkIntLit(C, C.getSizeType(), sl.sizeInBytes),                   //
+                                              /*alignment   */ mkIntLit(C, C.getSizeType(), sl.alignment),                     //
+                                              /*memberCount */ mkIntLit(C, C.getSizeType(), sl.members.size()),                //
+                                              /*member      */ mkNullPtrLit(C, *AggregateMemberTy), // XXX assigned later
+                                          });
+                      }) | to_vector());
 
-                                      });
-                  }) //
-                | to_vector());
-      }) |
-      to_vector();
+  auto structNameToTypeLayoutIdx = bundle.layouts | values() | map([](auto &sl) { return sl.name; }) | zip_with_index() | to<Map>();
 
-  auto kernelStructArrayDecl = mkStaticVarDecl(                                         //
-      "__kernelstruct_data",                                                            //
-      mkConstArrTy(*RuntimeStructTy, bundle.layouts.size()),                            //
-      bundle.layouts | zip_with_index() | map([&](auto &k, auto idx) -> clang::Expr * { //
-        auto &[exported, ks] = k;
-        return mkInitList(    //
-            *RuntimeStructTy, //
-            {
-                mkArrayToPtrDecay(constCharStarTy, mkStrLit(ks.name)), //
-                mkBoolLit(exported),                                   //
-                mkIntLit(C.getSizeType(), ks.members.size()),          //
-                mkArrayToPtrDecay(C.getPointerType(*RuntimeStructMemberTy), createDeclRef(kernelStructMemberArrayDecl[idx])),
+  auto aggregateMemberArrayDecls = //
+      bundle.layouts | values() | zip_with_index() | map([&](auto &sl, auto idx) {
+        return std::pair{
+            sl.name,
+            mkStaticVarDecl(
+                C, c.calleeDecl,                                        //
+                fmt::format("__aggregate_member_{}", idx),              //
+                mkConstArrTy(C, *AggregateMemberTy, sl.members.size()), //
+                sl.members | map([&](auto &m) -> clang::Expr * {        //
+                  const auto [indirections, componentSize] = countIndirectionsAndComponentSize(m.name.tpe, table);
+                  const auto typeDecl =
+                      extractComponent(m.name.tpe) ^ flat_map([&](auto &t) {
+                        return primitiveTypeLayoutsDecls                                                                             //
+                               ^ get_maybe(t)                                                                                              //
+                               ^ map([&](auto &decl) -> clang::Expr * {                                                              //
+                                   return S.CreateBuiltinUnaryOp({}, clang::UnaryOperatorKind::UO_AddrOf, mkDeclRef(C, decl)).get(); //
+                                 })                                                                                                  //
+                               ^ or_else(t.template get<Type::Struct>() ^ flat_map([&](auto &s) {
+                                           return structNameToTypeLayoutIdx ^ get_maybe(s.name) ^ map([&](auto layoutIdx) {
+                                                    return S
+                                                        .CreateBuiltinBinOp({}, clang::BinaryOperatorKind::BO_Add,
+                                                                            mkDeclRef(C, structTypeLayoutArrayDecl),
+                                                                            mkIntLit(C, C.getSizeType(), layoutIdx))
+                                                        .get();
+                                                  });
+                                         }));
+                      });
 
-                //                      S.ImpCastExprToType(mkIntegerLiteral(C.IntTy,
-                //                      static_cast<std::underlying_type_t<decltype(ko.kind)>>(ko.kind)),
-                //                                          *PlatformKindTy, clang::CastKind::CK_IntegralCast)
-                //                          .get(),
-                //                      S.ImpCastExprToType(mkIntegerLiteral(C.IntTy,
-                //                      static_cast<std::underlying_type_t<decltype(ko.format)>>(ko.format)),
-                //                                          *ModuleFormatTy, clang::CastKind::CK_IntegralCast)
-                //                          .get(),
-                //
-                //                      mkArrayToPtrDecay(C.getPointerType(C.CharTy.withConst()),
-                //                      createDeclRef(kernelFeatureDecls[idx])),
-                //                      mkIntegerLiteral(C.getSizeType(), ko.moduleImage.size()),
-                //                      mkArrayToPtrDecay(C.getPointerType(C.UnsignedCharTy.withConst()),
-                //                      createDeclRef(kernelImageDecls[idx])),
-            });
+                  return mkInitList(C,
+                                    *AggregateMemberTy,                                                                         //
+                                    {/*name            */ mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, m.name.symbol)), //
+                                     /*offsetInBytes   */ mkIntLit(C, C.getSizeType(), m.offsetInBytes),                        //
+                                     /*sizeInBytes     */ mkIntLit(C, C.getSizeType(), m.sizeInBytes),                          //
+                                     /*ptrIndirections */ mkIntLit(C, C.getSizeType(), indirections),                           //
+                                     /*componentSize   */ mkIntLit(C, C.getSizeType(), componentSize.value_or(m.sizeInBytes)),  //
+                                     /*type            */ typeDecl ^ get_or_else(mkNullPtrLit(C, *TypeLayoutTy))});
+                }) | to_vector())};
       }) //
-          | to_vector());
+      | to<Map>();
 
-  auto kernelBundleDecl = mkStaticVarDecl( //
-      "__kb",                              //
-      RuntimeKernelBundleTy.withConst(),   //
-      {
-          mkArrayToPtrDecay(constCharStarTy, mkStrLit(bundle.moduleName)),
-
-          mkIntLit(C.getSizeType(), bundle.objects.size()),
-          mkArrayToPtrDecay(C.getPointerType(*RuntimeKernelObjectTy), createDeclRef(kernelObjectArrayDecl)),
-
-          mkIntLit(C.getSizeType(), bundle.layouts.size()),
-          mkArrayToPtrDecay(C.getPointerType(*RuntimeStructTy), createDeclRef(kernelStructArrayDecl)),
-
-          mkArrayToPtrDecay(constCharStarTy, mkStrLit(bundle.metadata)),
+  auto assignTypeLayoutMembers =
+      structNameToTypeLayoutIdx ^ to_vector() ^ map([&](auto &name, auto &idx) -> clang::Stmt * {
+        const auto typeLayoutExpr = new (C) clang::ArraySubscriptExpr(
+            mkArrayToPtrDecay(C, TypeLayoutTyNoConst, mkDeclRef(C, structTypeLayoutArrayDecl)), mkIntLit(C, C.getSizeType(), idx),
+            TypeLayoutTyNoConst, clang::ExprValueKind::VK_LValue, clang::ExprObjectKind::OK_Ordinary, {});
+        const auto lhs = mkMemberExpr(C, typeLayoutExpr, *TypeLayoutMembersField);
+        const auto rhs = mkArrayToPtrDecay(C, C.getPointerType(*AggregateMemberTy),
+                                           aggregateMemberArrayDecls ^ get_maybe(name) ^
+                                               fold([&](auto &d) -> clang::Expr * { return mkDeclRef(C, d); },
+                                                    [&]() -> clang::Expr * { return mkNullPtrLit(C, *AggregateMemberTy); }));
+        return S.CreateBuiltinBinOp({}, clang::BinaryOperatorKind::BO_Assign, lhs, rhs).get();
       });
 
-  std::vector<clang::Stmt *> newStmts =
+  auto interfaceLayoutIdx = bundle.layouts | index_where([&](auto exported, auto &) { return exported; });
+
+  auto kernelBundleDecl = mkStaticVarDecl(
+      C, c.calleeDecl, "__kb", KernelBundleTy.withConst(),
+      {
+          /*moduleName         */ mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, bundle.moduleName)),
+          /*objectCount        */ mkIntLit(C, C.getSizeType(), bundle.objects.size()),
+          /*objects            */ mkArrayToPtrDecay(C, C.getPointerType(*KernelObjectTy), mkDeclRef(C, kernelObjectArrayDecl)),
+          /*structCount        */ mkIntLit(C, C.getSizeType(), bundle.layouts.size()),
+          /*structs            */ mkArrayToPtrDecay(C, C.getPointerType(*TypeLayoutTy), mkDeclRef(C, structTypeLayoutArrayDecl)),
+          /*interfaceLayoutIdx */ mkIntLit(C, C.getSizeType(), interfaceLayoutIdx),
+          /*metadata           */ mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, bundle.metadata)),
+      });
+
+  Vec<clang::Stmt *> newStmts =                                                                                   //
       kernelImageDecls                                                                                            //
+      | concat(primitiveTypeLayoutsDecls | values())                                                              //
+      | append(structTypeLayoutArrayDecl)                                                                         //
+      | concat(aggregateMemberArrayDecls | values())                                                              //
       | concat(kernelFeatureDecls)                                                                                //
-      | concat(kernelStructMemberArrayDecl)                                                                       //
-      | concat(std::vector{kernelObjectArrayDecl, kernelStructArrayDecl, kernelBundleDecl})                       //
+      | append(kernelObjectArrayDecl)                                                                             //
+      | append(kernelBundleDecl)                                                                                  //
       | map([&](auto dcl) -> clang::Stmt * { return new (C) clang::DeclStmt(clang::DeclGroupRef(dcl), {}, {}); }) //
-      | append(clang::ReturnStmt::Create(C, {}, createDeclRef(kernelBundleDecl), {}))                             //
+      | concat(assignTypeLayoutMembers)                                                                           //
+      | append(clang::ReturnStmt::Create(C, {}, mkDeclRef(C, kernelBundleDecl), {}))                              //
       | to_vector();
 
-  c.calleeDecl->setBody(clang::CompoundStmt::Create( //
-      C,                                             //
-      newStmts, {}, {}, {}));
-  //  c.calleeDecl->dumpColor(); // void __polyregion_offload__(F __polyregion__f)
+  c.calleeDecl->setBody(clang::CompoundStmt::Create(C, newStmts, {}, {}, {}));
+  // c.calleeDecl->dump(); // void __polyregion_offload__(F __polyregion__f)
   c.calleeDecl->print(llvm::outs());
 }
 
@@ -383,25 +353,25 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
                   .AddString(f.reason);
             },
             [&](const Callsite &c) { //
-              SpecialisationPathVisitor spv(C);
-              auto specialisationPath = spv.resolve(c.calleeDecl) ^ reverse();
-              auto moduleId = specialisationPath ^ mk_string("->", [&](auto fnDecl, auto callExpr) {
-                                auto l = getLocation(*callExpr, C);
-                                std::string moduleId;
-                                moduleId += "<";
-                                moduleId += l.filename;
-                                moduleId += ":";
-                                moduleId += std::to_string(l.line);
-                                moduleId += ">";
-                                return moduleId;
-                              });
+              const SpecialisationPathVisitor spv(C);
+              const auto specialisationPath = spv.resolve(c.calleeDecl) ^ reverse();
+              const auto moduleId = specialisationPath | values() | mk_string("->", [&](auto callExpr) {
+                                      const auto l = getLocation(*callExpr, C);
+                                      std::string name;
+                                      name += "<";
+                                      name += l.filename;
+                                      name += ":";
+                                      name += std::to_string(l.line);
+                                      name += ">";
+                                      return name;
+                                    });
 
               std::cout << moduleId << std::endl;
 
-              auto bundle = generateBundle(
+              const auto bundle = generateBundle(
                   opts, C, D, moduleId, *c.functorDecl,
                   specialisationPath ^ head_maybe() ^
-                      fold([](auto, auto callExpr) { return callExpr->getExprLoc(); }, [&]() { return c.callLambdaArgExpr->getExprLoc(); }),
+                      fold([](auto, auto callExpr) { return callExpr->getExprLoc(); }, [&] { return c.callLambdaArgExpr->getExprLoc(); }),
                   c.kind);
 
               if (opts.verbose) {

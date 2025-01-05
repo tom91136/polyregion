@@ -59,9 +59,9 @@ FetchContent_Declare(
 
 FetchContent_Declare(
         Aspartame
-        #        SOURCE_DIR /Users/Tom/Aspartame
+        #               SOURCE_DIR /home/tom/Aspartame
         GIT_REPOSITORY https://github.com/tom91136/Aspartame.git
-        GIT_TAG 85969a19
+        GIT_TAG 2fe9e75
 )
 
 FetchContent_MakeAvailable(Aspartame)

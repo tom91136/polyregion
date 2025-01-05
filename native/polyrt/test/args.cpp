@@ -1,19 +1,24 @@
+#include <numeric>
+
+#include "catch2/catch_test_macros.hpp"
+#include "catch2/generators/catch_generators_range.hpp"
+#include "catch2/matchers/catch_matchers_floating_point.hpp"
+
 #include "kernels/generated_cpu_args.hpp"
 #include "kernels/generated_gpu_args.hpp"
 #include "kernels/generated_msl_args.hpp"
 #include "kernels/generated_spirv_glsl_args.hpp"
 #include "polyregion/concurrency_utils.hpp"
 #include "polyregion/io.hpp"
-#include "polyregion/utils.hpp"
 #include "test_utils.h"
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/generators/catch_generators_range.hpp>
-#include <catch2/matchers/catch_matchers_floating_point.hpp>
+
+#include "aspartame/all.hpp"
 
 using namespace polyregion::runtime;
 using namespace polyregion::compiletime;
 using namespace polyregion::test_utils;
 using namespace polyregion::concurrency_utils;
+using namespace aspartame;
 
 // See https://github.com/JuliaGPU/AMDGPU.jl/issues/10
 
@@ -35,9 +40,8 @@ template <typename I> void testArgs(I images, std::initializer_list<Backend> bac
           } else {
             // otherwise, we expect exactly one image
             if (imageGroups.size() != 1) {
-              FAIL("Found more than one (" << imageGroups.size() << ") kernel test images for device `" << d->name()
-                                           << "`(backend=" << to_string(backend) << ", features="
-                                           << polyregion::mk_string<std::string>(d->features(), [](auto x) {  return x; }, ",") << ")");
+              FAIL("Found more than one (" << imageGroups.size() << ") kernel test images for device `" << d->name() << "`(backend="
+                                           << to_string(backend) << ", features=" << (d->features() | mk_string(",")) << ")");
             } else {
               d->loadModule("module", imageGroups[0].second);
               kernelName = [](auto args) { return "_arg" + std::to_string(args); };
@@ -47,7 +51,7 @@ template <typename I> void testArgs(I images, std::initializer_list<Backend> bac
 
           auto args = GENERATE(range(0, 28));
           DYNAMIC_SECTION("args=" << args) {
-            auto q = d->createQueue();
+            auto q = d->createQueue(std::chrono::seconds(10));
             auto out_d = d->template mallocDeviceTyped<float>(1, Access::RW);
 
             float out = {};
@@ -77,9 +81,8 @@ template <typename I> void testArgs(I images, std::initializer_list<Backend> bac
             d->freeDevice(out_d);
           }
         } else {
-          WARN("No kernel test image found for device `"
-               << d->name() << "`(backend=" << to_string(backend)
-               << ", features=" << polyregion::mk_string<std::string>(d->features(), [](auto x) {  return x; }, ",") << ")");
+          WARN("No kernel test image found for device `" << d->name() << "`(backend=" << to_string(backend)
+                                                         << ", features=" << (d->features() | mk_string(",")) << ")");
         }
       }
     }
@@ -90,7 +93,7 @@ TEST_CASE("GPU Args") {
 #ifndef NDEBUG
   WARN("Make sure ASAN is disabled otherwise most GPU backends will fail with memory related errors");
 #endif
-  polyregion::test_utils::ImageGroups images{};
+  ImageGroups images{};
   images.insert(generated::gpu::args.begin(), generated::gpu::args.end());
 #ifdef RUNTIME_ENABLE_METAL
   images.insert(generated::msl::args.begin(), generated::msl::args.end());

@@ -8,12 +8,12 @@
 
 #include "generated/polyast.h"
 #include "generated/polyast_repr.h"
-
 #include "polyregion/compat.h"
 
 namespace polyregion::polyast {
 
 using Bytes = std::vector<char>;
+template <typename T> using Vec = std::vector<T>;
 template <typename T> using Opt = std::optional<T>;
 template <typename T> using Set = std::unordered_set<T>;
 template <typename T, typename U> using Pair = std::pair<T, U>;
@@ -22,13 +22,19 @@ template <typename T, typename U> using Map = std::unordered_map<T, U>;
 const static auto show_repr = [](auto &x) { return repr(x); };
 
 std::string qualified(const Expr::Select &);
-std::vector<Named> path(const Expr::Select &);
+Vec<Named> path(const Expr::Select &);
 Named head(const Expr::Select &);
-std::vector<Named> tail(const Expr::Select &);
+Vec<Named> tail(const Expr::Select &);
 
-std::pair<Named, std::vector<Named>> uncons(const Expr::Select &);
+std::pair<Named, Vec<Named>> uncons(const Expr::Select &);
 
 std::string repr(const CompileResult &);
+
+Opt<Type::Any> extractComponent(const Type::Any &t);
+
+Opt<size_t> primitiveSize(const Type::Any &t);
+
+std::pair<size_t, Opt<size_t>> countIndirectionsAndComponentSize(const Type::Any &t, const Map<Type::Struct, StructLayout> &table);
 
 namespace dsl {
 
@@ -54,8 +60,8 @@ const static auto Long = Tpe::IntS64();
 const static auto Unit = Tpe::Unit0();
 const static auto Nothing = Tpe::Nothing();
 
-Tpe::Ptr Ptr(const Tpe::Any &t, std::optional<int32_t> l = {}, const TypeSpace::Any &s = TypeSpace::Global());
-Tpe::Struct Struct(std::string name, std::vector<Type::Any> members);
+Tpe::Ptr Ptr(const Tpe::Any &t, Opt<int32_t> l = {}, const TypeSpace::Any &s = TypeSpace::Global());
+Tpe::Struct Struct(std::string name, Vec<Type::Any> members);
 
 struct AssignmentBuilder {
   std::string name;
@@ -94,9 +100,9 @@ AssignmentBuilder let(const std::string &name);
 IntrOp invoke(const Intr::Any &);
 MathOp invoke(const Math::Any &);
 SpecOp invoke(const Spec::Any &);
-std::function<Function(std::vector<Stmt::Any>)> function(const std::string &name, const std::vector<Arg> &args, const Type::Any &rtn,
-                                                         const std::set<FunctionAttr::Any> &attrs = {FunctionAttr::Exported()});
-Program program(const std::vector<StructDef> &structs = {}, const std::vector<Function> &functions = {});
+std::function<Function(Vec<Stmt::Any>)> function(const std::string &name, const Vec<Arg> &args, const Type::Any &rtn,
+                                                 const std::set<FunctionAttr::Any> &attrs = {FunctionAttr::Exported()});
+Program program(const Vec<StructDef> &structs = {}, const Vec<Function> &functions = {});
 Program program(const Function &function);
 
 Return ret(const Expr::Any &expr = Unit0Const());

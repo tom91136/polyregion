@@ -1,47 +1,47 @@
-// #CASE: a<b
-// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_EXPR_DEF=a<b -o {output} {input}
-// #RUN: POLYSTL_PLATFORM=host A=1 B=2 {output}
-//   #EXPECT: 42
-// #RUN: POLYSTL_PLATFORM=host A=2 B=1 {output}
-//   #EXPECT: -1
-// #RUN: POLYSTL_PLATFORM=host A=1 B=1 {output}
-//   #EXPECT: -1
+#pragma region case: a<b
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_EXPR_DEF=a<b -o {output} {input}
+#pragma region do: A=1 B=2 {output}
+#pragma region requires: 42
+#pragma region do: A=2 B=1 {output}
+#pragma region requires: -1
+#pragma region do: A=1 B=1 {output}
+#pragma region requires: -1
 
-// #CASE: a>b
-// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_EXPR_DEF=a>b -o {output} {input}
-// #RUN: POLYSTL_PLATFORM=host A=1 B=2 {output}
-//   #EXPECT: -1
-// #RUN: POLYSTL_PLATFORM=host A=2 B=1 {output}
-//   #EXPECT: 42
-// #RUN: POLYSTL_PLATFORM=host A=1 B=1 {output}
-//   #EXPECT: -1
+#pragma region case: a>b
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_EXPR_DEF=a>b -o {output} {input}
+#pragma region do: A=1 B=2 {output}
+#pragma region requires: -1
+#pragma region do: A=2 B=1 {output}
+#pragma region requires: 42
+#pragma region do: A=1 B=1 {output}
+#pragma region requires: -1
 
-// #CASE: a==b
-// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_EXPR_DEF=a==b -o {output} {input}
-// #RUN: POLYSTL_PLATFORM=host A=1 B=2 {output}
-//   #EXPECT: -1
-// #RUN: POLYSTL_PLATFORM=host A=2 B=1 {output}
-//   #EXPECT: -1
-// #RUN: POLYSTL_PLATFORM=host A=1 B=1 {output}
-//   #EXPECT: 42
+#pragma region case: a==b
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_EXPR_DEF=a==b -o {output} {input}
+#pragma region do: A=1 B=2 {output}
+#pragma region requires: -1
+#pragma region do: A=2 B=1 {output}
+#pragma region requires: -1
+#pragma region do: A=1 B=1 {output}
+#pragma region requires: 42
 
-// #CASE: a!=b
-// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_EXPR_DEF=a!=b -o {output} {input}
-// #RUN: POLYSTL_PLATFORM=host A=1 B=2 {output}
-//   #EXPECT: 42
-// #RUN: POLYSTL_PLATFORM=host A=2 B=1 {output}
-//   #EXPECT: 42
-// #RUN: POLYSTL_PLATFORM=host A=1 B=1 {output}
-//   #EXPECT: -1
+#pragma region case: a!=b
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_EXPR_DEF=a!=b -o {output} {input}
+#pragma region do: A=1 B=2 {output}
+#pragma region requires: 42
+#pragma region do: A=2 B=1 {output}
+#pragma region requires: 42
+#pragma region do: A=1 B=1 {output}
+#pragma region requires: -1
 
-// #CASE: a==b?false:true
-// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_EXPR_DEF=a==b?false:true -o {output} {input}
-// #RUN: POLYSTL_PLATFORM=host A=1 B=2 {output}
-//   #EXPECT: 42
-// #RUN: POLYSTL_PLATFORM=host A=2 B=1 {output}
-//   #EXPECT: 42
-// #RUN: POLYSTL_PLATFORM=host A=1 B=1 {output}
-//   #EXPECT: -1
+#pragma region case: a==b?false:true
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_EXPR_DEF=a==b?false:true -o {output} {input}
+#pragma region do: A=1 B=2 {output}
+#pragma region requires: 42
+#pragma region do: A=2 B=1 {output}
+#pragma region requires: 42
+#pragma region do: A=1 B=1 {output}
+#pragma region requires: -1
 
 #ifndef CHECK_EXPR_DEF
   #error "CHECK_EXPR_DEF undefined"

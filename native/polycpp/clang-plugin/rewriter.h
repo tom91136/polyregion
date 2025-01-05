@@ -13,7 +13,7 @@ class OffloadRewriteConsumer : public clang::ASTConsumer {
 
 public:
   OffloadRewriteConsumer(clang::CompilerInstance &CI, const Options &opts);
-  void HandleTranslationUnit(clang::ASTContext &context) override;
+  void HandleTranslationUnit(clang::ASTContext &C) override;
 };
 
 } // namespace polyregion::polystl

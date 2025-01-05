@@ -17,7 +17,7 @@ static T *throwIfNil(T *t, NS::Error *error, const std::string &message, const c
   if (!t) {
     if (error) {
       POLYRT_FATAL(PREFIX, "%s:%d: %s: %s\nSuggestion:%s\n", file, line, message.c_str(), error->localizedDescription()->utf8String(),
-            error->localizedRecoverySuggestion()->utf8String());
+                   error->localizedRecoverySuggestion()->utf8String());
     } else POLYRT_FATAL(PREFIX, "%s:%d: %s and Metal did not provide a reason\n", file, line, message.c_str());
   }
   return t;
@@ -154,7 +154,7 @@ void MetalDevice::freeShared(void *ptr) {
   POLYRT_TRACE();
   POLYRT_FATAL(PREFIX, "Unsupported operation on %p", ptr);
 }
-std::unique_ptr<DeviceQueue> MetalDevice::createQueue() {
+std::unique_ptr<DeviceQueue> MetalDevice::createQueue(const std::chrono::duration<int64_t> &) {
   POLYRT_TRACE();
   return std::make_unique<MetalDeviceQueue>(store, NOT_NIL(device->newCommandQueue(), "command queue"), [this](auto &&ptr) {
     if (auto mem = memoryObjects.query(ptr); mem) {
@@ -179,14 +179,14 @@ MetalDeviceQueue::~MetalDeviceQueue() {
   queue->release();
   pool->release();
 }
-void MetalDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
+void MetalDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size, const MaybeCallback &cb) {
   POLYRT_TRACE();
-  std::memcpy(queryMemObject(dst)->contents(), src, size);
+  std::memcpy(static_cast<char *>(queryMemObject(dst)->contents()) + dstOffset, src, size);
   if (cb) (*cb)();
 }
-void MetalDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) {
+void MetalDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, void *dst, size_t size, const MaybeCallback &cb) {
   POLYRT_TRACE();
-  std::memcpy(dst, queryMemObject(src)->contents(), size);
+  std::memcpy(dst, static_cast<char *>(queryMemObject(src)->contents()) + srcOffset, size);
   if (cb) (*cb)();
 }
 void MetalDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
@@ -234,6 +234,11 @@ void MetalDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const s
   buffer->commit();
   POLYRT_TRACE();
   buffer->waitUntilCompleted();
+}
+
+void MetalDeviceQueue::enqueueWaitBlocking() {
+  POLYRT_TRACE();
+  queue->commandBuffer()->waitUntilCompleted();
 }
 
 #undef NOT_NIL_ERROR

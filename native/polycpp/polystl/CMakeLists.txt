@@ -8,7 +8,7 @@ endif ()
 
 foreach (TARGET polystl polystl-static)
     target_sources(${TARGET}
-            PRIVATE polystl.cpp
+            PRIVATE runtime.cpp
             PUBLIC FILE_SET HEADERS
             TYPE HEADERS
             BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -18,7 +18,7 @@ foreach (TARGET polystl polystl-static)
             include/execution.impl
     )
 
-    target_link_libraries(${TARGET} PRIVATE polyrt-obj)
+    target_link_libraries(${TARGET} PRIVATE polyrt-obj rt-reflect)
     target_compile_options(${TARGET} PRIVATE ${COMPILE_OPTIONS})
     target_link_options(${TARGET} PRIVATE ${LINK_OPTIONS})
 endforeach ()

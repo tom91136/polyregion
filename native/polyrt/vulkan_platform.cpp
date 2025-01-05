@@ -166,11 +166,11 @@ static vk::raii::Device createDevice(const vk::raii::PhysicalDevice &dev, uint32
 
 // ---
 
-Resolved::Resolved(uint32_t computeQueueId,
-                   const std::shared_ptr<vk::raii::ShaderModule> &shaderModule, //
-                   const std::vector<vk::DescriptorSetLayoutBinding> &bindings, //
-                   const std::vector<vk::DescriptorPoolSize> &sizes,
-                   vk::raii::Device &ctx)                       //
+details::Resolved::Resolved(uint32_t computeQueueId,
+                            const std::shared_ptr<vk::raii::ShaderModule> &shaderModule, //
+                            const std::vector<vk::DescriptorSetLayoutBinding> &bindings, //
+                            const std::vector<vk::DescriptorPoolSize> &sizes,
+                            const vk::raii::Device &ctx)        //
     : shaderModule(shaderModule),                               //
       dscLayout(ctx.createDescriptorSetLayout({{}, bindings})), //
       dscPool(ctx.createDescriptorPool(
@@ -222,7 +222,7 @@ VulkanDevice::VulkanDevice(vk::raii::Instance &instance,              //
             if (storages != 0) sizes.emplace_back(vk::DescriptorType::eStorageBuffer, storages);
             if (scalars != 0) sizes.emplace_back(vk::DescriptorType::eUniformBuffer, scalars);
 
-            return Resolved(this->computeQueueId.first, m, bindings, sizes, ctx);
+            return details::Resolved(this->computeQueueId.first, m, bindings, sizes, ctx);
           }) {
   POLYRT_TRACE();
 }
@@ -278,7 +278,7 @@ bool VulkanDevice::moduleLoaded(const std::string &name) {
   return store.moduleLoaded(name);
 }
 
-static MemObject allocate(VmaAllocator &allocator, size_t size, bool uniform) {
+static details::MemObject allocate(VmaAllocator &allocator, size_t size, bool uniform) {
   VkBufferCreateInfo bufferInfo = {};
   bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
   bufferInfo.size = size;
@@ -297,7 +297,7 @@ static MemObject allocate(VmaAllocator &allocator, size_t size, bool uniform) {
 
 uintptr_t VulkanDevice::mallocDevice(size_t size, Access) {
   POLYRT_TRACE();
-  return memoryObjects.malloc(std::make_shared<MemObject>(allocate(allocator, size, false)));
+  return memoryObjects.malloc(std::make_shared<details::MemObject>(allocate(allocator, size, false)));
 }
 void VulkanDevice::freeDevice(uintptr_t ptr) {
   POLYRT_TRACE();
@@ -316,7 +316,7 @@ void VulkanDevice::freeShared(void *ptr) {
   POLYRT_FATAL(PREFIX, "Unsupported: %p", ptr);
 }
 
-std::unique_ptr<DeviceQueue> VulkanDevice::createQueue() {
+std::unique_ptr<DeviceQueue> VulkanDevice::createQueue(const std::chrono::duration<int64_t> &) {
   POLYRT_TRACE();
   return std::make_unique<VulkanDeviceQueue>(ctx, allocator, //
                                              ctx.getQueue(computeQueueId.first, activeComputeQueues++ % computeQueueId.second),
@@ -366,18 +366,18 @@ void VulkanDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
   });
 }
 
-void VulkanDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
+void VulkanDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size, const MaybeCallback &cb) {
   POLYRT_TRACE();
   auto obj = queryMemObject(dst);
-  std::memcpy(obj->mappedData, src, size);
-  vmaInvalidateAllocation(allocator, obj->allocation, 0, size);
+  std::memcpy(static_cast<char *>(obj->mappedData) + dstOffset, src, size);
+  vmaInvalidateAllocation(allocator, obj->allocation, dstOffset, size);
   if (cb) (*cb)();
 }
-void VulkanDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) {
+void VulkanDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, void *dst, size_t size, const MaybeCallback &cb) {
   POLYRT_TRACE();
   auto obj = queryMemObject(src);
-  std::memcpy(dst, obj->mappedData, size);
-  vmaInvalidateAllocation(allocator, obj->allocation, 0, size);
+  std::memcpy(dst, static_cast<char *>(obj->mappedData) + srcOffset, size);
+  vmaInvalidateAllocation(allocator, obj->allocation, srcOffset, size);
   if (cb) (*cb)();
 }
 void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
@@ -412,7 +412,7 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
   }
 
   size_t scratchCount = 0;
-  auto argObj = argBufferSize == 0 ? nullptr : std::make_shared<MemObject>(allocate(allocator, argBufferSize, true));
+  auto argObj = argBufferSize == 0 ? nullptr : std::make_shared<details::MemObject>(allocate(allocator, argBufferSize, true));
   if (argObj) {
     auto *argPtr = static_cast<std::byte *>(argObj->mappedData);
     for (size_t i = 0; i < types.size() - 1; ++i) {
@@ -469,7 +469,7 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
 
   if (cb) {
     auto [key, enqueued] = enqueuedStore.store(
-        std::make_shared<Enqueued>(Enqueued{std::move(pipe), ctx.createFence(vk::FenceCreateInfo()), std::move(argObj)}));
+        std::make_shared<details::Enqueued>(details::Enqueued{std::move(pipe), ctx.createFence(vk::FenceCreateInfo()), std::move(argObj)}));
 
     computeQueue.submit(vk::SubmitInfo{{}, {}, *fn.cmdBuffer}, *(enqueued->fence));
     callbackQueue.push([this, &fn, cb, key = key]() {
@@ -493,6 +493,10 @@ void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
       vmaDestroyBuffer(allocator, VkBuffer(argObj->buffer), argObj->allocation);
     }
   }
+}
+void VulkanDeviceQueue::enqueueWaitBlocking() {
+  POLYRT_TRACE();
+  ctx.waitIdle();
 }
 
 #undef CHECKED

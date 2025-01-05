@@ -14,3 +14,7 @@ struct Options {
   std::vector<Target> targets;
 };
 } // namespace polyregion::polystl
+
+template <> struct std::hash<std::pair<polyregion::compiletime::Target, std::string>> {
+  std::size_t operator()(const std::pair<polyregion::compiletime::Target, std::string> &p) const noexcept;
+};

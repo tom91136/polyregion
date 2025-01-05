@@ -1,10 +1,8 @@
 #include <iomanip>
 #include <string>
 
-#include "ast.h"
-
 #include "aspartame/all.hpp"
-#include "fmt/core.h"
+#include "ast.h"
 
 using namespace std::string_literals;
 using namespace polyregion::polyast;
@@ -17,29 +15,29 @@ string polyast::qualified(const Expr::Select &select) {
   return select.init | append(select.last) | mk_string(".", [](auto &x) { return x.symbol; });
 }
 
-std::vector<Named> polyast::path(const Expr::Select &select) { return select.init | append(select.last) | to_vector(); }
+Vec<Named> polyast::path(const Expr::Select &select) { return select.init | append(select.last) | to_vector(); }
 
 Named polyast::head(const Expr::Select &select) { return select.init.empty() ? select.last : select.init.front(); }
 
-std::vector<Named> polyast::tail(const Expr::Select &select) {
+Vec<Named> polyast::tail(const Expr::Select &select) {
   if (select.init.empty()) return {select.last};
   else {
-    std::vector<Named> xs(std::next(select.init.begin()), select.init.end());
+    Vec<Named> xs(std::next(select.init.begin()), select.init.end());
     xs.push_back(select.last);
     return xs;
   }
 }
 
-std::pair<Named, std::vector<Named>> polyast::uncons(const Expr::Select &select) {
+Pair<Named, Vec<Named>> polyast::uncons(const Expr::Select &select) {
   if (select.init.empty()) return {{select.last}, {}};
   else {
-    std::vector<Named> xs(std::next(select.init.begin()), select.init.end());
+    Vec<Named> xs(std::next(select.init.begin()), select.init.end());
     xs.push_back(select.last);
     return {select.init.front(), xs};
   }
 }
 
-string polyast::repr(const polyast::CompileResult &compilation) {
+string polyast::repr(const CompileResult &compilation) {
   std::ostringstream os;
   os << "Compilation {"                                                                                            //
      << "\n  binary: " << (compilation.binary ? std::to_string(compilation.binary->size()) + " bytes" : "(empty)") //
@@ -65,8 +63,48 @@ string polyast::repr(const polyast::CompileResult &compilation) {
   return os.str();
 }
 
-Type::Ptr dsl::Ptr(const Type::Any &t, std::optional<int32_t> l, const ::TypeSpace::Any &s) { return Tpe::Ptr(t, l, s); }
-// Type::Struct dsl::Struct(string name,  std::vector<Type::Any> members) { return {name,   args, {}}; }
+Opt<Type::Any> polyast::extractComponent(const Type::Any &t) {
+  if (const auto p = t.get<Type::Ptr>()) return extractComponent(p->comp);
+  if (const auto a = t.get<Type::Annotated>()) return extractComponent(a->tpe);
+  return t;
+}
+
+Opt<size_t> polyast::primitiveSize(const Type::Any &t) {
+  return t.match_total([&](const Type::Float16 &) -> Opt<size_t> { return 16 / 8; }, //
+                       [&](const Type::Float32 &) -> Opt<size_t> { return 32 / 8; }, //
+                       [&](const Type::Float64 &) -> Opt<size_t> { return 64 / 8; }, //
+
+                       [&](const Type::IntU8 &) -> Opt<size_t> { return 8 / 8; },   //
+                       [&](const Type::IntU16 &) -> Opt<size_t> { return 16 / 8; }, //
+                       [&](const Type::IntU32 &) -> Opt<size_t> { return 32 / 8; }, //
+                       [&](const Type::IntU64 &) -> Opt<size_t> { return 64 / 8; }, //
+
+                       [&](const Type::IntS8 &) -> Opt<size_t> { return 8 / 8; },   //
+                       [&](const Type::IntS16 &) -> Opt<size_t> { return 16 / 8; }, //
+                       [&](const Type::IntS32 &) -> Opt<size_t> { return 32 / 8; }, //
+                       [&](const Type::IntS64 &) -> Opt<size_t> { return 64 / 8; }, //
+
+                       [&](const Type::Nothing &) -> Opt<size_t> { return {}; },  //
+                       [&](const Type::Unit0 &) -> Opt<size_t> { return 8 / 8; }, //
+                       [&](const Type::Bool1 &) -> Opt<size_t> { return 8 / 8; }, //
+
+                       [&](const Type::Struct &) -> Opt<size_t> { return {}; }, [&](const Type::Ptr &) -> Opt<size_t> { return {}; },
+                       [&](const Type::Annotated &x) -> Opt<size_t> { return primitiveSize(x.tpe); });
+}
+
+Pair<size_t, Opt<size_t>> polyast::countIndirectionsAndComponentSize(const Type::Any &t, const Map<Type::Struct, StructLayout> &table) {
+  if (const auto s = t.get<Type::Struct>()) return {0, table ^ get_maybe(*s) ^ map([](auto &sl) { return sl.sizeInBytes; })};
+  if (const auto a = t.get<Type::Annotated>()) return countIndirectionsAndComponentSize(a->tpe, table);
+  if (const auto p = t.get<Type::Ptr>()) {
+    auto [indirection, componentSize] = countIndirectionsAndComponentSize(p->comp, table);
+    return {p->length ? indirection : indirection + 1, componentSize};
+  }
+  return {0, primitiveSize(t)};
+}
+
+// ====================
+
+Type::Ptr dsl::Ptr(const Type::Any &t, Opt<int32_t> l, const ::TypeSpace::Any &s) { return Tpe::Ptr(t, l, s); }
 Expr::Any dsl::integral(const Type::Any &tpe, unsigned long long int x) {
   auto unsupported = [](auto &&t, auto &&v) -> Expr::Any {
     throw std::logic_error("Cannot create integral constant of type " + to_string(t) + " for value" + std::to_string(v));
@@ -117,12 +155,12 @@ dsl::AssignmentBuilder dsl::let(const string &name) { return AssignmentBuilder{n
 Expr::IntrOp dsl::invoke(const Intr::Any &intr) { return IntrOp(intr); }
 Expr::MathOp dsl::invoke(const Math::Any &intr) { return MathOp(intr); }
 Expr::SpecOp dsl::invoke(const Spec::Any &intr) { return SpecOp(intr); }
-std::function<Function(std::vector<Stmt::Any>)> dsl::function(const string &name, const std::vector<Arg> &args, const Type::Any &rtn,
-                                                              const std::set<FunctionAttr::Any> &attrs) {
+std::function<Function(Vec<Stmt::Any>)> dsl::function(const string &name, const Vec<Arg> &args, const Type::Any &rtn,
+                                                      const std::set<FunctionAttr::Any> &attrs) {
   return [=](auto &&stmts) { return Function(name, args, rtn, stmts, attrs); };
 }
 Stmt::Return dsl::ret(const Expr::Any &expr) { return Return(expr); }
-Program dsl::program(const std::vector<StructDef> &structs, const std::vector<Function> &functions) { return {structs, functions}; }
+Program dsl::program(const Vec<StructDef> &structs, const Vec<Function> &functions) { return {structs, functions}; }
 Program dsl::program(const Function &function) { return Program({}, {function}); }
 
 dsl::IndexBuilder::IndexBuilder(const Index &index) : index(index) {}

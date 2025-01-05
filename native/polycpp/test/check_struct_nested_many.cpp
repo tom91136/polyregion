@@ -1,8 +1,8 @@
-// #CASE: capture
-// #MATRIX: capture=&,=,value
-// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_CAPTURE={capture} -o {output} {input}
-// #RUN: POLYSTL_PLATFORM=host {output}
-//   #EXPECT: 42 43 44 45 46 47 48 49 50 51 52 53 54
+#pragma region case: capture
+#pragma region using: capture=&,=,value
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_CAPTURE={capture} -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 42 43 44 45 46 47 48 49 50 51 52 53 54
 
 #include <cstddef>
 #include <cstdio>

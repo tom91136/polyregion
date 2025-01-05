@@ -1,18 +1,23 @@
-#include "polyregion/stream.hpp"
+#include <cmath>
+
+#include "catch2/catch_test_macros.hpp"
+#include "catch2/generators/catch_generators_range.hpp"
+#include "catch2/matchers/catch_matchers_floating_point.hpp"
+
 #include "kernels/generated_cpu_stream.hpp"
 #include "kernels/generated_gpu_stream_double.hpp"
 #include "kernels/generated_gpu_stream_float.hpp"
 #include "kernels/generated_msl_stream_float.hpp"
 #include "kernels/generated_spirv_glsl_stream.hpp"
+
 #include "polyregion/io.hpp"
-#include "polyregion/utils.hpp"
+#include "polyregion/stream.hpp"
 #include "test_utils.h"
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/generators/catch_generators_range.hpp>
-#include <catch2/matchers/catch_matchers_floating_point.hpp>
-#include <cmath>
+
+#include "aspartame/all.hpp"
 
 using namespace polyregion::runtime;
+using namespace aspartame;
 
 template <typename T, typename I>
 void testStream(I images, Type tpe, const std::string &suffix, T relTolerance, //
@@ -46,9 +51,8 @@ void testStream(I images, Type tpe, const std::string &suffix, T relTolerance, /
                 } else {
                   // otherwise, we expect exactly one image
                   if (imageGroups.size() != 1) {
-                    FAIL("Found more than one ("
-                         << imageGroups.size() << ") kernel test images for device `" << d->name() << "`(backend=" << to_string(backend)
-                         << ", features=" << polyregion::mk_string<std::string>(d->features(), [](auto x) { return x; }, ",") << ")");
+                    FAIL("Found more than one (" << imageGroups.size() << ") kernel test images for device `" << d->name() << "`(backend="
+                                                 << to_string(backend) << ", features=" << (d->features() | mk_string(",")) << ")");
                   } else {
                     d->loadModule("module", imageGroups[0].second);
                     kernelSpecs = {.copy = {"module", "stream_copy" + suffix},
@@ -70,9 +74,8 @@ void testStream(I images, Type tpe, const std::string &suffix, T relTolerance, /
                       CHECK(actual < relTolerance);
                     });
               } else {
-                WARN("No kernel test image found for device `"
-                     << d->name() << "`(backend=" << to_string(backend)
-                     << ", features=" << polyregion::mk_string<std::string>(d->features(), [](auto x) { return x; }, ",") << ")");
+                WARN("No kernel test image found for device `" << d->name() << "`(backend=" << to_string(backend)
+                                                               << ", features=" << (d->features() | mk_string(",")) << ")");
               }
             }
           }
@@ -111,10 +114,10 @@ TEST_CASE("GPU BabelStream") {
 #ifndef __APPLE__ // macOS can't do doubles: Not supported in Metal and CL gives CL_INVALID_KERNEL
   DYNAMIC_SECTION("double") {
     testStream<double>(generated::gpu::stream_double, Type::Float64, "_double", 0.008f, //
-                       {1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072},            //
-                       {1, 2, 32, 64, 128, 256},                                         //
-                       {1, 2, 10},                                                       //
-                       {Backend::CUDA, Backend::OpenCL, Backend::HIP, Backend::HSA});
+                       {1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072},           //
+                       {1, 2, 32, 64, 128, 256},                                        //
+                       {1, 2, 10},                                                      //
+                       {Backend::OpenCL, Backend::CUDA, Backend::HIP, Backend::HSA});
   }
 #endif
 }
@@ -139,9 +142,9 @@ TEST_CASE("SPIRV BabelStream") {
   }
   DYNAMIC_SECTION("double") {
     testStream<double>(generated::spirv::glsl_stream, Type::Float64, "_double", 0.008f, //
-                       {1024, 2048},                                                     //
-                       {1, 2, 32, 64},                                                   //
-                       {1, 2, 10},                                                       //
+                       {1024, 2048},                                                    //
+                       {1, 2, 32, 64},                                                  //
+                       {1, 2, 10},                                                      //
                        {Backend::Vulkan});
   }
 #endif
@@ -150,10 +153,10 @@ TEST_CASE("SPIRV BabelStream") {
 TEST_CASE("CPU BabelStream") {
   DYNAMIC_SECTION("double") {
     testStream<double>(generated::cpu::stream, Type::Float64, "_double", 0.0008, //
-                       {1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072},     //
-                       {1, 2, 3, 4, 5, 6, 7, 8},                                  //
-                       {1, 2, 10},                                                //
-                       {Backend::RelocatableObject, Backend::SharedObject}        //
+                       {1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072},    //
+                       {1, 2, 3, 4, 5, 6, 7, 8},                                 //
+                       {1, 2, 10},                                               //
+                       {Backend::RelocatableObject, Backend::SharedObject}       //
     );
   }
   DYNAMIC_SECTION("float") {

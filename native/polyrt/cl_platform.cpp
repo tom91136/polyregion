@@ -41,7 +41,12 @@ std::variant<std::string, std::unique_ptr<Platform>> ClPlatform::create() {
   }
   return std::unique_ptr<Platform>(new ClPlatform());
 }
-ClPlatform::ClPlatform() { POLYRT_TRACE(); }
+ClPlatform::ClPlatform() {
+  POLYRT_TRACE();
+  // XXX FP64 is emulated on Intel Arc and needs to be enabled via environment variable
+  // we set it unless it's already defined with some other value
+  setenv("OverrideDefaultFP64Settings", "1", false);
+}
 std::string ClPlatform::name() {
   POLYRT_TRACE();
   return "OpenCL";
@@ -65,10 +70,10 @@ std::vector<std::unique_ptr<Device>> ClPlatform::enumerate() {
   std::vector<cl_platform_id> platforms(numPlatforms);
   CHECKED(clGetPlatformIDs(numPlatforms, platforms.data(), nullptr));
   std::vector<std::unique_ptr<Device>> clDevices;
-  for (auto &platform : platforms) {
+  for (const auto &platform : platforms) {
     cl_uint numDevices = 0;
-    auto deviceIdResult = clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 0, nullptr, &numDevices);
-    if (deviceIdResult == CL_DEVICE_NOT_FOUND) {
+    if (const auto deviceIdResult = clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 0, nullptr, &numDevices);
+        deviceIdResult == CL_DEVICE_NOT_FOUND) {
       continue; // no device
     } else CHECKED(deviceIdResult);
 
@@ -93,7 +98,7 @@ ClDevice::ClDevice(cl_device_id device)
             //            }
             return device;
           },
-          [&](auto &&device) {
+          [&](auto &&) {
             POLYRT_TRACE();
             // XXX see above
             //            if (__clewRetainDevice && __clewReleaseDevice) // clReleaseDevice requires OpenCL >= 1.2
@@ -102,7 +107,7 @@ ClDevice::ClDevice(cl_device_id device)
       context(
           [this]() {
             POLYRT_TRACE();
-            return OUT_CHECKED(clCreateContext(nullptr, 1, &(*this->device), nullptr, nullptr, OUT_ERR));
+            return OUT_CHECKED(clCreateContext(nullptr, 1, &*this->device, nullptr, nullptr, OUT_ERR));
           },
           [&](auto &&c) {
             POLYRT_TRACE();
@@ -117,7 +122,7 @@ ClDevice::ClDevice(cl_device_id device)
             auto imageLen = image.size();
             auto program = OUT_CHECKED(clCreateProgramWithSource(*context, 1, &imageData, &imageLen, OUT_ERR));
             const std::string compilerArgs = "";
-            cl_int result = clBuildProgram(program, 1, &(*this->device), compilerArgs.data(), nullptr, nullptr);
+            cl_int result = clBuildProgram(program, 1, &*this->device, compilerArgs.data(), nullptr, nullptr);
             if (result != CL_SUCCESS) {
               size_t len;
               CHECKED(clGetProgramBuildInfo(program, *this->device, CL_PROGRAM_BUILD_LOG, 0, nullptr, &len));
@@ -217,20 +222,22 @@ void ClDevice::freeShared(void *ptr) {
   context.touch();
   POLYRT_FATAL(PREFIX, "Unsupported: %p", ptr);
 }
-std::unique_ptr<DeviceQueue> ClDevice::createQueue() {
+std::unique_ptr<DeviceQueue> ClDevice::createQueue(const std::chrono::duration<int64_t> &timeout) {
   POLYRT_TRACE();
-  return std::make_unique<ClDeviceQueue>(store, OUT_CHECKED(clCreateCommandQueue(*context, *device, 0, OUT_ERR)), [this](auto &&ptr) {
-    if (auto mem = memoryObjects.query(ptr); mem) {
-      return *mem;
-    } else POLYRT_FATAL(PREFIX, "Illegal memory object: %ld", ptr);
-  });
+  return std::make_unique<ClDeviceQueue>(timeout, store, OUT_CHECKED(clCreateCommandQueue(*context, *device, 0, OUT_ERR)),
+                                         [this](auto &&ptr) {
+                                           if (auto mem = memoryObjects.query(ptr); mem) {
+                                             return *mem;
+                                           } else POLYRT_FATAL(PREFIX, "Illegal memory object: %ld", ptr);
+                                         });
 }
 ClDevice::~ClDevice() { POLYRT_TRACE(); }
 
 // ---
 
-ClDeviceQueue::ClDeviceQueue(decltype(store) store, decltype(queue) queue, decltype(queryMemObject) queryMemObject)
-    : store(store), queue(queue), queryMemObject(std::move(queryMemObject)) {
+ClDeviceQueue::ClDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(store) store, decltype(queue) queue,
+                             decltype(queryMemObject) queryMemObject)
+    : latch(timeout), store(store), queue(queue), queryMemObject(std::move(queryMemObject)) {
   POLYRT_TRACE();
 }
 ClDeviceQueue::~ClDeviceQueue() {
@@ -253,18 +260,18 @@ void ClDeviceQueue::enqueueCallback(const MaybeCallback &cb, cl_event event) {
       })));
   CHECKED(clFlush(queue));
 }
-void ClDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
+void ClDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size, const MaybeCallback &cb) {
   POLYRT_TRACE();
   cl_event event = {};
   if (!src) POLYRT_FATAL(PREFIX, "Source pointer is NULL, destination=%lu", dst);
-  CHECKED(clEnqueueWriteBuffer(queue, queryMemObject(dst), CL_FALSE, 0, size, src, 0, nullptr, &event));
+  CHECKED(clEnqueueWriteBuffer(queue, queryMemObject(dst), CL_FALSE, dstOffset, size, src, 0, nullptr, &event));
   enqueueCallback(cb, event);
 }
-void ClDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) {
+void ClDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, void *dst, size_t size, const MaybeCallback &cb) {
   POLYRT_TRACE();
   cl_event event = {};
   if (!dst) POLYRT_FATAL(PREFIX, "Destination pointer is NULL, source=%lu", src);
-  CHECKED(clEnqueueReadBuffer(queue, queryMemObject(src), CL_FALSE, 0, size, dst, 0, nullptr, &event));
+  CHECKED(clEnqueueReadBuffer(queue, queryMemObject(src), CL_FALSE, srcOffset, size, dst, 0, nullptr, &event));
   enqueueCallback(cb, event);
 }
 void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
@@ -280,15 +287,14 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
     }
   };
 
-  auto args = detail::argDataAsPointers(types, argData);
-  auto [local, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});
-  auto global = Dim3{policy.global.x * local.x, policy.global.y * local.y, policy.global.z * local.z};
+  const auto args = detail::argDataAsPointers(types, argData);
+  const auto [local, sharedMem] = policy.local.value_or(std::pair{Dim3{}, 0});
+  const auto global = Dim3{policy.global.x * local.x, policy.global.y * local.y, policy.global.z * local.z};
 
   // last arg is the return, void assertion should have been done before this
   for (cl_uint i = 0; i < types.size() - 1; ++i) {
-    auto rawPtr = args[i];
-    auto tpe = types[i];
-    switch (tpe) {
+    const auto rawPtr = args[i];
+    switch (const auto tpe = types[i]) {
       case Type::Ptr: {
         static_assert(byteOfType(Type::Ptr) == sizeof(uintptr_t));
         uintptr_t ptr = {};
@@ -317,6 +323,12 @@ void ClDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std:
                                  0, nullptr, &event));
   enqueueCallback(cb, event);
   CHECKED(clFlush(queue));
+}
+void ClDeviceQueue::enqueueWaitBlocking() {
+  POLYRT_TRACE();
+  cl_event event = {};
+  CHECKED(clEnqueueBarrierWithWaitList(queue, 0, nullptr, &event));
+  CHECKED(clWaitForEvents(1, &event));
 }
 
 #undef CHECKED

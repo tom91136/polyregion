@@ -15,7 +15,7 @@ std::optional<clang::CXXMethodDecl *> OverloadTargetVisitor ::run(clang::Stmt *s
   return target;
 }
 bool OverloadTargetVisitor::VisitCallExpr(clang::CallExpr *S) {
-  if (auto decl = S->getCalleeDecl(); decl) {
+  if (const auto decl = S->getCalleeDecl(); decl) {
     target = OverloadTargetVisitor(owner).run(decl->getBody());
     return !target.has_value();
   } else {
@@ -31,7 +31,7 @@ bool OverloadTargetVisitor::VisitCXXOperatorCallExpr(clang::CXXOperatorCallExpr 
   return !target.has_value();
 }
 
-SpecialisationPathVisitor::SpecialisationPathVisitor(clang::ASTContext &context) {
+SpecialisationPathVisitor::SpecialisationPathVisitor(const clang::ASTContext &context) {
   SpecialisationPathVisitor::TraverseDecl(context.getTranslationUnitDecl());
 }
 clang::FunctionDecl *currentFnDecl{};
@@ -50,7 +50,7 @@ bool SpecialisationPathVisitor::VisitCallExpr(clang::CallExpr *expr) {
   }
   return true;
 }
-std::vector<std::pair<clang::FunctionDecl *, clang::CallExpr *>> SpecialisationPathVisitor::resolve(clang::FunctionDecl *decl) const {
+std::vector<std::pair<clang::FunctionDecl *, clang::CallExpr *>> SpecialisationPathVisitor::resolve(const clang::FunctionDecl *decl) const {
   std::vector<std::pair<clang::FunctionDecl *, clang::CallExpr *>> xs;
   auto start = decl;
   while (true) {

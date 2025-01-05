@@ -1,12 +1,11 @@
 #pragma once
 
-#include "polyregion/compat.h"
-
 #include <atomic>
 #include <mutex>
-#include <thread>
 #include <shared_mutex>
+#include <thread>
 
+#include "polyregion/compat.h"
 #include "polyregion/dl.h"
 #include "runtime.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
@@ -34,7 +33,7 @@ class POLYREGION_EXPORT ObjectDeviceQueue : public DeviceQueue {
 protected:
   detail::CountingLatch latch;
 
-  template <typename F> void threadedLaunch(size_t N, const MaybeCallback &cb, F f) {
+  template <typename F> static void threadedLaunch(size_t N, const MaybeCallback &cb, F f) {
     static std::atomic_size_t counter(0);
     static std::unordered_map<size_t, std::atomic_size_t> pending;
     static std::shared_mutex pendingMutex;
@@ -49,7 +48,7 @@ protected:
       std::thread([id, cb, f, tid]() {
         f(tid);
         WriteLock rwPending(pendingMutex);
-        if (auto it = pending.find(id); it != pending.end()) {
+        if (const auto it = pending.find(id); it != pending.end()) {
           if (--it->second == 0) {
             if (cb) (*cb)();
             pending.erase(id);
@@ -79,13 +78,16 @@ protected:
   }
 
 public:
-  POLYREGION_EXPORT explicit ObjectDeviceQueue();
+  POLYREGION_EXPORT explicit ObjectDeviceQueue(const std::chrono::duration<int64_t> &timeout);
   POLYREGION_EXPORT ~ObjectDeviceQueue() noexcept override;
-  POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) override;
-  POLYREGION_EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, void *dst, size_t size, const MaybeCallback &cb) override;
+  POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size,
+                                                  const MaybeCallback &cb) override;
+  POLYREGION_EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, size_t srcOffset, void *dst, size_t bytes,
+                                                  const MaybeCallback &cb) override;
+  POLYREGION_EXPORT void enqueueWaitBlocking() override;
 };
 
-class MemoryManager : public llvm::SectionMemoryManager {
+class MemoryManager final : public llvm::SectionMemoryManager {
 public:
   MemoryManager();
 
@@ -93,7 +95,7 @@ private:
   uint64_t getSymbolAddress(const std::string &Name) override;
 };
 
-namespace {
+namespace details {
 
 struct LoadedCodeObject {
   MemoryManager mm;
@@ -104,9 +106,9 @@ struct LoadedCodeObject {
 
 using ObjectModules = std::unordered_map<std::string, std::unique_ptr<LoadedCodeObject>>;
 
-} // namespace
+} // namespace details
 
-class POLYREGION_EXPORT RelocatablePlatform : public Platform {
+class POLYREGION_EXPORT RelocatablePlatform final : public Platform {
   POLYREGION_EXPORT explicit RelocatablePlatform();
 
 public:
@@ -119,8 +121,8 @@ public:
   POLYREGION_EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;
 };
 
-class POLYREGION_EXPORT RelocatableDevice : public ObjectDevice { //, private llvm::SectionMemoryManager {
-  ObjectModules objects = {};
+class POLYREGION_EXPORT RelocatableDevice final : public ObjectDevice { //, private llvm::SectionMemoryManager {
+  details::ObjectModules objects = {};
   std::shared_mutex mutex;
 
 public:
@@ -128,24 +130,24 @@ public:
   POLYREGION_EXPORT std::string name() override;
   POLYREGION_EXPORT void loadModule(const std::string &name, const std::string &image) override;
   POLYREGION_EXPORT bool moduleLoaded(const std::string &name) override;
-  POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue() override;
+  POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue(const std::chrono::duration<int64_t> &timeout) override;
 };
 
-class POLYREGION_EXPORT RelocatableDeviceQueue : public ObjectDeviceQueue {
-  ObjectModules &objects;
+class POLYREGION_EXPORT RelocatableDeviceQueue final : public ObjectDeviceQueue {
+  details::ObjectModules &objects;
   std::shared_mutex &mutex;
 
 public:
-  RelocatableDeviceQueue(decltype(objects) objects, decltype(mutex) mutex);
+  RelocatableDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(objects) objects, decltype(mutex) mutex);
   POLYREGION_EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
                                             std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) override;
 };
 
-namespace {
+namespace details {
 using LoadedModule = std::tuple<std::string, polyregion_dl_handle, std::unordered_map<std::string, void *>>;
 using DynamicModules = std::unordered_map<std::string, LoadedModule>;
-} // namespace
-class POLYREGION_EXPORT SharedPlatform : public Platform {
+} // namespace details
+class POLYREGION_EXPORT SharedPlatform final : public Platform {
   POLYREGION_EXPORT explicit SharedPlatform();
 
 public:
@@ -158,8 +160,8 @@ public:
   POLYREGION_EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;
 };
 
-class POLYREGION_EXPORT SharedDevice : public ObjectDevice {
-  DynamicModules modules;
+class POLYREGION_EXPORT SharedDevice final : public ObjectDevice {
+  details::DynamicModules modules;
   std::shared_mutex mutex;
 
 public:
@@ -167,16 +169,16 @@ public:
   POLYREGION_EXPORT std::string name() override;
   POLYREGION_EXPORT void loadModule(const std::string &name, const std::string &image) override;
   POLYREGION_EXPORT bool moduleLoaded(const std::string &name) override;
-  POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue() override;
+  POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue(const std::chrono::duration<int64_t> &timeout) override;
 };
 
-class POLYREGION_EXPORT SharedDeviceQueue : public ObjectDeviceQueue {
+class POLYREGION_EXPORT SharedDeviceQueue final : public ObjectDeviceQueue {
 
-  DynamicModules &modules;
+  details::DynamicModules &modules;
   std::shared_mutex &mutex;
 
 public:
-  explicit SharedDeviceQueue(decltype(modules) modules, decltype(mutex) mutex);
+  explicit SharedDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(modules) modules, decltype(mutex) mutex);
   POLYREGION_EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
                                             std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) override;
 };

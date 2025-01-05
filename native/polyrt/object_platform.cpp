@@ -1,12 +1,12 @@
-#include "polyregion/compat.h"
-
 #include <mutex>
 #include <system_error>
 #include <thread>
 #include <utility>
 
-#include "polyrt/object_platform.h"
+#include "polyregion/compat.h"
+
 #include "polyregion/llvm_utils.hpp"
+#include "polyrt/object_platform.h"
 
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
@@ -22,16 +22,16 @@ using namespace polyregion::runtime::object;
 static void invoke(const char *prefix, uint64_t symbolAddress, const std::vector<Type> &types, std::vector<void *> &args) {
   const auto toFFITpe = [prefix](const Type &tpe) -> ffi_type * {
     switch (tpe) {
-      case polyregion::runtime::Type::Bool1:
-      case polyregion::runtime::Type::IntS8: return &ffi_type_sint8;
-      case polyregion::runtime::Type::IntU16: return &ffi_type_uint16;
-      case polyregion::runtime::Type::IntS16: return &ffi_type_sint16;
-      case polyregion::runtime::Type::IntS32: return &ffi_type_sint32;
-      case polyregion::runtime::Type::IntS64: return &ffi_type_sint64;
-      case polyregion::runtime::Type::Float32: return &ffi_type_float;
-      case polyregion::runtime::Type::Float64: return &ffi_type_double;
-      case polyregion::runtime::Type::Ptr: return &ffi_type_pointer;
-      case polyregion::runtime::Type::Void: return &ffi_type_void;
+      case Type::Bool1:
+      case Type::IntS8: return &ffi_type_sint8;
+      case Type::IntU16: return &ffi_type_uint16;
+      case Type::IntS16: return &ffi_type_sint16;
+      case Type::IntS32: return &ffi_type_sint32;
+      case Type::IntS64: return &ffi_type_sint64;
+      case Type::Float32: return &ffi_type_float;
+      case Type::Float64: return &ffi_type_double;
+      case Type::Ptr: return &ffi_type_pointer;
+      case Type::Void: return &ffi_type_void;
       default: POLYRT_FATAL(prefix, "Illegal ffi type: %s", to_string(tpe).data());
     }
   };
@@ -99,23 +99,20 @@ void ObjectDevice::freeShared(void *ptr) {
 
 // ---
 
-void ObjectDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
+void ObjectDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size, const MaybeCallback &cb) {
   POLYRT_TRACE();
-  std::memcpy(reinterpret_cast<void *>(dst), src, size);
+  std::memcpy(reinterpret_cast<void *>(dst + dstOffset), src, size);
   if (cb) (*cb)();
 }
-void ObjectDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) {
+void ObjectDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, void *dst, size_t bytes, const MaybeCallback &cb) {
   POLYRT_TRACE();
-  std::memcpy(dst, reinterpret_cast<void *>(src), size);
+  std::memcpy(dst, reinterpret_cast<void *>(src + srcOffset), bytes);
   if (cb) (*cb)();
 }
-ObjectDeviceQueue::ObjectDeviceQueue() {
-  POLYRT_TRACE();
-}
+void ObjectDeviceQueue::enqueueWaitBlocking() { POLYRT_TRACE(); }
+ObjectDeviceQueue::ObjectDeviceQueue(const std::chrono::duration<int64_t> &timeout) : latch(timeout) { POLYRT_TRACE(); }
 
-ObjectDeviceQueue::~ObjectDeviceQueue() noexcept {
-  POLYRT_TRACE();
-}
+ObjectDeviceQueue::~ObjectDeviceQueue() noexcept { POLYRT_TRACE(); }
 std::variant<std::string, std::unique_ptr<Platform>> RelocatablePlatform::create() {
   return std::unique_ptr<Platform>(new RelocatablePlatform());
 }
@@ -153,7 +150,7 @@ std::string RelocatableDevice::name() {
 }
 
 MemoryManager::MemoryManager() : SectionMemoryManager(nullptr) {}
-LoadedCodeObject::LoadedCodeObject(std::unique_ptr<llvm::object::ObjectFile> obj) : ld(mm, mm), rawObject(std::move(obj)) {
+details::LoadedCodeObject::LoadedCodeObject(std::unique_ptr<llvm::object::ObjectFile> obj) : ld(mm, mm), rawObject(std::move(obj)) {
   ld.loadObject(*this->rawObject);
 }
 
@@ -168,7 +165,7 @@ void RelocatableDevice::loadModule(const std::string &name, const std::string &i
         auto e = object.takeError()) {
       POLYRT_FATAL(RELOBJ_PREFIX, "Cannot load module: %s", toString(std::move(e)).c_str());
     } else {
-      auto inserted = objects.emplace_hint(it, name, std::make_unique<LoadedCodeObject>(std::move(*object)));
+      const auto inserted = objects.emplace_hint(it, name, std::make_unique<details::LoadedCodeObject>(std::move(*object)));
       if (inserted->second->ld.finalizeWithMemoryManagerLocking(); inserted->second->ld.hasError()) {
         POLYRT_FATAL(RELOBJ_PREFIX, "Module `%s` failed to finalise for execution: %s", name.c_str(),
                      inserted->second->ld.getErrorString().data());
@@ -182,12 +179,14 @@ bool RelocatableDevice::moduleLoaded(const std::string &name) {
   ReadLock r(mutex);
   return objects.find(name) != objects.end();
 }
-std::unique_ptr<DeviceQueue> RelocatableDevice::createQueue() {
+std::unique_ptr<DeviceQueue> RelocatableDevice::createQueue(const std::chrono::duration<int64_t> &timeout) {
   POLYRT_TRACE();
-  return std::make_unique<RelocatableDeviceQueue>(objects, mutex);
+  return std::make_unique<RelocatableDeviceQueue>(timeout, objects, mutex);
 }
 
-RelocatableDeviceQueue::RelocatableDeviceQueue(decltype(objects) objects, decltype(mutex) mutex) : objects(objects), mutex(mutex) {
+RelocatableDeviceQueue::RelocatableDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(objects) objects,
+                                               decltype(mutex) mutex)
+    : ObjectDeviceQueue(timeout), objects(objects), mutex(mutex) {
   POLYRT_TRACE();
 }
 
@@ -198,11 +197,10 @@ void *malloc_(size_t size) {
 }
 
 uint64_t MemoryManager::getSymbolAddress(const std::string &Name) {
-  return Name == "malloc" ? (uint64_t)&malloc_ : llvm::RTDyldMemoryManager::getSymbolAddress(Name);
+  return Name == "malloc" ? reinterpret_cast<uint64_t>(&malloc_) : llvm::RTDyldMemoryManager::getSymbolAddress(Name);
 }
 
-template <typename F>
-static void threadedLaunch(detail::CountedCallbackHandler &handler, size_t N, const MaybeCallback &cb, F f) {
+template <typename F> static void threadedLaunch(detail::CountedCallbackHandler &handler, size_t N, const MaybeCallback &cb, F f) {
   static std::atomic_size_t counter(0);
   static std::unordered_map<size_t, std::atomic_size_t> pending;
   static std::shared_mutex pendingLock;
@@ -231,15 +229,15 @@ static void threadedLaunch(detail::CountedCallbackHandler &handler, size_t N, co
   pending.emplace(id, N);
   for (size_t tid = 0; tid < N; ++tid) {
     // arena.enqueue([id, tid, f, cb]() {
-      f(tid);
-      WriteLock rwPending(pendingLock);
-      if (auto it = pending.find(id); it != pending.end()) {
-        if (--it->second == 0) {
-          pending.erase(id);
-          if (cb) (*cb)();
-          //            detail::CountedCallbackHandler::consume(cbHandle);
-        }
+    f(tid);
+    WriteLock rwPending(pendingLock);
+    if (auto it = pending.find(id); it != pending.end()) {
+      if (--it->second == 0) {
+        pending.erase(id);
+        if (cb) (*cb)();
+        //            detail::CountedCallbackHandler::consume(cbHandle);
       }
+    }
     // });
   }
 }
@@ -262,8 +260,8 @@ void RelocatableDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, c
   const auto moduleIt = objects.find(moduleName);
   if (moduleIt == objects.end()) POLYRT_FATAL(RELOBJ_PREFIX, "No module named %s was loaded", moduleName.c_str());
   auto &[_, obj] = *moduleIt;
-  auto fnName = (obj->rawObject->isMachO() || obj->rawObject->isMachOUniversalBinary()) ? std::string("_") + symbol : symbol;
-  auto sym = obj->ld.getSymbol(fnName);
+  const auto fnName = (obj->rawObject->isMachO() || obj->rawObject->isMachOUniversalBinary()) ? std::string("_") + symbol : symbol;
+  const auto sym = obj->ld.getSymbol(fnName);
   if (!sym) POLYRT_FATAL(RELOBJ_PREFIX, "Symbol `%s` not found in the given object", fnName.c_str());
   this->threadedLaunch(
       policy.global.x,
@@ -362,19 +360,22 @@ void SharedDevice::loadModule(const std::string &name, const std::string &image)
 
     if (auto dylib = polyregion_dl_open(tmpPath); !dylib) {
       POLYRT_FATAL(SHOBJ_PREFIX, "Cannot load module: %s", polyregion_dl_error());
-    } else modules.emplace_hint(it, name, LoadedModule{image, dylib, {}});
+    } else modules.emplace_hint(it, name, details::LoadedModule{image, dylib, {}});
   }
 }
 bool SharedDevice::moduleLoaded(const std::string &name) {
   POLYRT_TRACE();
   return modules.find(name) != modules.end();
 }
-std::unique_ptr<DeviceQueue> SharedDevice::createQueue() {
+std::unique_ptr<DeviceQueue> SharedDevice::createQueue(const std::chrono::duration<int64_t> &timeout) {
   POLYRT_TRACE();
-  return std::make_unique<SharedDeviceQueue>(modules, mutex);
+  return std::make_unique<SharedDeviceQueue>(timeout, modules, mutex);
 }
 
-SharedDeviceQueue::SharedDeviceQueue(decltype(modules) modules, decltype(mutex) mutex) : modules(modules), mutex(mutex) { POLYRT_TRACE(); }
+SharedDeviceQueue::SharedDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(modules) modules, decltype(mutex) mutex)
+    : ObjectDeviceQueue(timeout), modules(modules), mutex(mutex) {
+  POLYRT_TRACE();
+}
 void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
                                            std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
   POLYRT_TRACE();
@@ -387,7 +388,7 @@ void SharedDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const 
   auto &[image, handle, symbolTable] = moduleIt->second;
 
   void *address = nullptr;
-  if (auto it = symbolTable.find(symbol); it != symbolTable.end()) address = it->second;
+  if (const auto it = symbolTable.find(symbol); it != symbolTable.end()) address = it->second;
   else {
     address = polyregion_dl_find(handle, symbol.c_str());
     auto err = polyregion_dl_error();

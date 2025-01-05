@@ -14,7 +14,6 @@
 #include "fire.hpp"
 #include "polyast_codec.h"
 #include "polyregion/io.hpp"
-#include "polyregion/utils.hpp"
 
 using namespace polyregion;
 using namespace aspartame;
@@ -69,7 +68,7 @@ int fired_main(fire::optional<std::string> maybePath = // NOLINT(*-unnecessary-v
                bool verbose = fire::arg({"--verbose", "-v", "Verbose output"})
 
 ) {
-  return compiletime::targets() ^ get(rawTarget ^ to_lower()) ^
+  return compiletime::targets() ^ get_maybe(rawTarget ^ to_lower()) ^
          fold(
              [&](const compiletime::Target &target) { //
                compiletime::OptLevel opt;

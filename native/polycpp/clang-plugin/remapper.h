@@ -4,13 +4,15 @@
 #include <optional>
 #include <type_traits>
 
+#include "ast.h"
 #include "fmt/format.h"
-#include "generated/polyast.h"
 
 #include "clang/AST/ASTContext.h"
 #include "llvm/Support/Casting.h"
 
 namespace polyregion::polystl {
+
+using namespace polyregion::polyast;
 
 [[noreturn]] static void raise(const std::string &message, const char *file = __builtin_FILE(), int line = __builtin_LINE()) {
   std::cerr << fmt::format("[{}:{}] {}", file, line, message) << std::endl;
@@ -22,8 +24,8 @@ template <typename Ret, typename F, typename Arg, typename... Rest> Arg arg0_hel
 template <typename Ret, typename F, typename Arg, typename... Rest> Arg arg0_helper(Ret (F::*)(Arg, Rest...) const);
 template <typename F> decltype(arg0_helper(&F::operator())) arg0_helper(F);
 template <typename T> using arg0_t = decltype(arg0_helper(std::declval<T>()));
-template <typename T, typename Node, typename... Fs> std::optional<T> visitDyn(Node n, Fs... fs) {
-  std::optional<T> result{};
+template <typename T, typename Node, typename... Fs> Opt<T> visitDyn(Node n, Fs... fs) {
+  Opt<T> result{};
   auto _ = {[&]() {
     if (!result) {
       if (auto x = llvm::dyn_cast<std::remove_pointer_t<arg0_t<Fs>>>(n)) {
@@ -35,8 +37,6 @@ template <typename T, typename Node, typename... Fs> std::optional<T> visitDyn(N
   return result;
 }
 
-using namespace polyregion::polyast;
-
 struct Remapper {
   clang::ASTContext &context;
   struct RemapContext {
@@ -44,18 +44,18 @@ struct Remapper {
     bool ctorChain = false;
     Type::Any rtnType = Type::Unit0();
     size_t counter{};
-    std::vector<Stmt::Any> stmts{};
-    std::unordered_map<std::string, std::shared_ptr<Function>> functions{};
-    std::unordered_map<std::string, std::shared_ptr<StructDef>> structs{};
-    std::unordered_map<std::string, std::shared_ptr<StructLayout>> layouts{};
-    std::unordered_map<std::string, std::vector<std::shared_ptr<StructDef>>> parents{};
+    Vec<Stmt::Any> stmts{};
+    Map<std::string, std::shared_ptr<Function>> functions{};
+    Map<std::string, std::shared_ptr<StructDef>> structs{};
+    Map<std::string, std::shared_ptr<StructLayout>> layouts{};
+    Map<std::string, Vec<std::shared_ptr<StructDef>>> parents{};
 
     template <typename T>
-    [[nodiscard]] std::pair<T, std::vector<Stmt::Any>> scoped(const std::function<T(RemapContext &)> &f,              //
-                                                              const std::optional<bool> &scopeCtorChain = {},         //
-                                                              const std::optional<Type::Any> &scopeRtnType = {},      //
-                                                              const std::shared_ptr<StructDef> &scopeStructName = {}, //
-                                                              const bool persistCounter = true) {
+    [[nodiscard]] Pair<T, Vec<Stmt::Any>> scoped(const std::function<T(RemapContext &)> &f,              //
+                                                 const Opt<bool> &scopeCtorChain = {},                   //
+                                                 const Opt<Type::Any> &scopeRtnType = {},                //
+                                                 const std::shared_ptr<StructDef> &scopeStructName = {}, //
+                                                 const bool persistCounter = true) {
       const std::shared_ptr<StructDef> nextParent = scopeStructName ? scopeStructName : parent;
       RemapContext r{nextParent,
                      scopeCtorChain.value_or(ctorChain),
@@ -76,17 +76,17 @@ struct Remapper {
       parents = r.parents;
       return {result, r.stmts};
     }
-    [[nodiscard]] std::vector<Stmt::Any> scoped(const std::function<void(RemapContext &)> &f,           //
-                                                const std::optional<bool> &scopeCtorChain = {},         //
-                                                const std::optional<Type::Any> &scopeRtnType = {},      //
-                                                const std::shared_ptr<StructDef> &scopeStructName = {}, //
-                                                bool persistCounter = false);
+    [[nodiscard]] Vec<Stmt::Any> scoped(const std::function<void(RemapContext &)> &f,           //
+                                        const Opt<bool> &scopeCtorChain = {},                   //
+                                        const Opt<Type::Any> &scopeRtnType = {},                //
+                                        const std::shared_ptr<StructDef> &scopeStructName = {}, //
+                                        bool persistCounter = false);
 
     [[nodiscard]] std::shared_ptr<StructDef> findStruct(const std::string &name, const std::string &reason) const;
     [[nodiscard]] bool emptyStruct(const StructDef &def);
 
     void push(const Stmt::Any &stmt);
-    void push(const std::vector<Stmt::Any> &xs);
+    void push(const Vec<Stmt::Any> &xs);
 
     [[nodiscard]] Named newName(const Type::Any &tpe);
     [[nodiscard]] Expr::Any newVar(const Expr::Any &expr);
@@ -101,7 +101,7 @@ public:
 
   [[nodiscard]] std::string typeName(const Type::Any &tpe) const;
   [[nodiscard]] std::string nameOfRecord(const clang::RecordType *tpe, RemapContext &r) const;
-  [[nodiscard]] std::pair<std::string, std::shared_ptr<Function>> handleCall(const clang::FunctionDecl *decl, RemapContext &r);
+  [[nodiscard]] Pair<std::string, std::shared_ptr<Function>> handleCall(const clang::FunctionDecl *decl, RemapContext &r);
   [[nodiscard]] Type::Any handleType(clang::QualType qual, RemapContext &r) const;
   [[nodiscard]] std::shared_ptr<StructDef> handleRecord(const clang::RecordDecl *decl, RemapContext &r) const;
   [[nodiscard]] Expr::Any handleExpr(const clang::Expr *expr, RemapContext &r);

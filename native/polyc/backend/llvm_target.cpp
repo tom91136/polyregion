@@ -113,7 +113,7 @@ llvm::Type *TargetedContext::resolveType(const AnyType &tpe, const Map<std::stri
       [&](const Type::Bool1 &) -> llvm::Type * { return llvm::Type::getIntNTy(actual, functionBoundary ? 8 : 1); }, //
 
       [&](const Type::Struct &x) -> llvm::Type * {
-        return structs ^ get(x.name) ^
+        return structs ^ get_maybe(x.name) ^
                fold([](auto &info) { return info.tpe; },
                     [&]() -> llvm::StructType * {
                       throw BackendException(fmt::format("Unseen struct def {}, currently in-scope structs: {}", repr(x),

@@ -4,12 +4,10 @@
 
 #include "clew.h"
 #include "runtime.h"
-#include <atomic>
-#include <shared_mutex>
 
 namespace polyregion::runtime::cl {
 
-class POLYREGION_EXPORT ClPlatform : public Platform {
+class POLYREGION_EXPORT ClPlatform final : public Platform {
   POLYREGION_EXPORT explicit ClPlatform();
 
 public:
@@ -22,16 +20,16 @@ public:
   POLYREGION_EXPORT std::vector<std::unique_ptr<Device>> enumerate() override;
 };
 
-namespace {
+namespace details {
 using ClModuleStore = detail::ModuleStore<cl_program, cl_kernel>;
 }
 
-class POLYREGION_EXPORT ClDevice : public Device {
+class POLYREGION_EXPORT ClDevice final : public Device {
 
   detail::LazyDroppable<cl_device_id> device;
   detail::LazyDroppable<cl_context> context;
   std::string deviceName;
-  ClModuleStore store; // store needs to be dropped before dropping device
+  details::ClModuleStore store; // store needs to be dropped before dropping device
   detail::MemoryObjects<cl_mem> memoryObjects;
 
 public:
@@ -46,32 +44,36 @@ public:
   POLYREGION_EXPORT void loadModule(const std::string &name, const std::string &image) override;
   POLYREGION_EXPORT bool moduleLoaded(const std::string &name) override;
   POLYREGION_EXPORT uintptr_t mallocDevice(size_t size, Access access) override;
-  POLYREGION_EXPORT std::optional<void*> mallocShared(size_t size, Access access) override;
-  POLYREGION_EXPORT void freeShared(void* ptr) override;
+  POLYREGION_EXPORT std::optional<void *> mallocShared(size_t size, Access access) override;
+  POLYREGION_EXPORT void freeShared(void *ptr) override;
   POLYREGION_EXPORT void freeDevice(uintptr_t ptr) override;
-  POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue() override;
+  POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue(const std::chrono::duration<int64_t> &timeout) override;
 };
 
-class POLYREGION_EXPORT ClDeviceQueue : public DeviceQueue {
+class POLYREGION_EXPORT ClDeviceQueue final : public DeviceQueue {
 
   detail::CountingLatch latch;
 
-  ClModuleStore &store;
+  details::ClModuleStore &store;
   cl_command_queue queue = {};
   std::function<cl_mem(uintptr_t)> queryMemObject;
 
   void enqueueCallback(const MaybeCallback &cb, cl_event event);
 
 public:
-  POLYREGION_EXPORT ClDeviceQueue(decltype(store) store, decltype(queue) queue, decltype(queryMemObject) queryMemObject);
+  POLYREGION_EXPORT ClDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(store) store, decltype(queue) queue,
+                                  decltype(queryMemObject) queryMemObject);
   POLYREGION_EXPORT ~ClDeviceQueue() override;
-  POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) override;
-  POLYREGION_EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, void *dst, size_t size, const MaybeCallback &cb) override;
+  POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size,
+                                                  const MaybeCallback &cb) override;
+  POLYREGION_EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, size_t srcOffset, void *dst, size_t bytes,
+                                                  const MaybeCallback &cb) override;
   POLYREGION_EXPORT void enqueueInvokeAsync(const std::string &moduleName,  //
-                                 const std::string &symbol,      //
-                                 const std::vector<Type> &types, //
-                                 std::vector<std::byte> argData, //
-                                 const Policy &policy, const MaybeCallback &cb) override;
+                                            const std::string &symbol,      //
+                                            const std::vector<Type> &types, //
+                                            std::vector<std::byte> argData, //
+                                            const Policy &policy, const MaybeCallback &cb) override;
+  POLYREGION_EXPORT void enqueueWaitBlocking() override;
 };
 
 } // namespace polyregion::runtime::cl

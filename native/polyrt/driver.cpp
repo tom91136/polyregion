@@ -1,10 +1,11 @@
 #include <chrono>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "polyregion/io.hpp"
-#include "polyregion/utils.hpp"
 #include "polyrt/cl_platform.h"
 #include "polyrt/cuda_platform.h"
 #include "polyrt/hip_platform.h"
@@ -13,8 +14,10 @@
 #include "polyrt/object_platform.h"
 #include "polyrt/runtime.h"
 #include "polyrt/vulkan_platform.h"
-#include <fstream>
-#include <vector>
+
+#include "aspartame/all.hpp"
+
+using namespace aspartame;
 
 // echo "void lambda( int* array, int x){ int tid = 0; array[tid] = array[tid] + tid + x; }"
 // |  clang -target x86_64-pc-linux-gnu -fPIC -Os -c -o- -xc - | xdd -i
@@ -243,7 +246,7 @@ void run() {
 
     for (auto &d : devices) {
 
-      auto features = polyregion::mk_string<std::string>(d->features(), [](auto &&s) { return s; }, ",");
+      auto features = d->features() | mk_string(",", [](auto &&s) { return s; });
 
       std::cout << "[Device " << d->id() << "]"
                 << "name: `" << d->name() << "`; features: " << features << std::endl;
@@ -267,13 +270,13 @@ void run() {
       }
 
       for (int i = 0; i < 2; i++) {
-        auto q1 = d->createQueue();
+        auto q1 = d->createQueue(std::chrono::seconds(10));
         if (!d->moduleLoaded("a")) {
           d->loadModule("a", src);
         }
         auto size = sizeof(decltype(xs)::value_type) * xs.size();
         auto ptr = d->mallocDevice(size, Access::RW);
-        q1->enqueueHostToDeviceAsync(xs.data(), ptr, size, [&]() { std::cout << "[" << i << "]  H->D ok" << std::endl; });
+        q1->enqueueHostToDeviceAsync(xs.data(), ptr, 0, size, [&]() { std::cout << "[" << i << "]  H->D ok" << std::endl; });
 
         int32_t x = 4;
 
@@ -288,10 +291,8 @@ void run() {
         x = 5;
 
         q1->enqueueInvokeAsync("a", "lambda", buffer.types, buffer.data, {}, [&]() { std::cout << "[" << i << "]  K 2 ok" << std::endl; });
-        q1->enqueueDeviceToHostAsync(ptr, xs.data(), size, [&]() {
-          std::cout << "[" << i
-                    << "]  D->H ok, r= " << polyregion::mk_string<int>(xs, [](auto x) { return std::to_string(x); }, ",") << std::endl;
-        });
+        q1->enqueueDeviceToHostAsync(ptr, 0, xs.data(), size,
+                                     [&]() { std::cout << "[" << i << "]  D->H ok, r= " << (xs | mk_string(",")) << std::endl; });
         d->freeDevice(ptr);
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
       }

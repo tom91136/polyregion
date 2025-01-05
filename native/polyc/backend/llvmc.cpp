@@ -1,10 +1,12 @@
+#include <fstream>
+#include <iostream>
+
 #include "llvmc.h"
 
 #include "clspv.h"
 #include "compiler.h"
 #include "lld_lite.h"
 #include "polyregion/llvm_utils.hpp"
-#include "polyregion/utils.hpp"
 
 #include "spirv-tools/libspirv.h"
 #include "spirv-tools/libspirv.hpp"
@@ -45,12 +47,10 @@
 #include "llvm/Transforms/Vectorize/LoopVectorize.h"
 #include "llvm/Transforms/Vectorize/SLPVectorizer.h"
 
-// #include "LLVMSPIRVLib.h"
-
-#include <fstream>
-#include <iostream>
+#include "aspartame/all.hpp"
 
 using namespace polyregion;
+using namespace aspartame;
 using namespace ::backend;
 
 llvm::Triple llvmc::defaultHostTriple() { return llvm::Triple(llvm::sys::getProcessTriple()); }
@@ -461,7 +461,7 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
         }
         default: {
 
-          auto features = split(info.cpu.features, ',');
+          auto features = info.cpu.features ^ split(",");
           llvm_shared::collectCPUFeatures(info.cpu.uArch, info.triple.getArch(), features);
 
           auto llvmTM = mkLLVMTargetMachine(info, options, genOpt);

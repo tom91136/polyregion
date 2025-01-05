@@ -1,7 +1,7 @@
-// #CASE: for
-// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -o {output} {input}
-// #RUN: POLYSTL_PLATFORM=host LIMIT=10 {output}
-//   #EXPECT: 10 1 2 3 4 5 6 7 8 9 10
+#pragma region case: for
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -o {output} {input}
+#pragma region do: LIMIT=10 {output}
+#pragma region requires: 10 1 2 3 4 5 6 7 8 9 10
 
 #include <cstdio>
 #include <string>

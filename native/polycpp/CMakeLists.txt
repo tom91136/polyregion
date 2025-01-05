@@ -25,7 +25,7 @@ function(add_copy_header_set_targets target commands_var)
 #    add_custom_target(${name} ${commands})
 endfunction()
 
-foreach (header_target polycommon polyrt polystl ptr-reflect-rt)
+foreach (header_target polycommon polyrt polystl rt-reflect)
     add_copy_header_set_targets(${header_target} header_commands)
 endforeach ()
 add_custom_target(polycpp-header-resource ${header_commands})
@@ -53,10 +53,11 @@ endif ()
 add_executable(polycpp driver_main.cpp)
 add_dependencies(polycpp polycpp-lib-resource polycpp-header-resource)
 
-add_executable(polycpp-test test/test_all.cpp)
+add_executable(polycpp-test test/test_all.cpp test/unit/memory.cpp)
 add_dependencies(polycpp-test polycpp polystl)
 target_include_directories(polycpp-test PRIVATE
         ../include
+        polystl
         ${LLVM_INCLUDE_DIRS}
         "${CMAKE_CURRENT_BINARY_DIR}")
 

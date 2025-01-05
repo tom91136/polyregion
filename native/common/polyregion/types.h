@@ -282,4 +282,83 @@ static constexpr runtime::ModuleFormat targetFormat(const compiletime::Target &t
   }
 }
 
+struct TypeLayout;
+struct AggregateMember {
+  const char *name;
+  size_t offsetInBytes, sizeInBytes;
+  size_t ptrIndirection;
+  size_t componentSize;
+  const TypeLayout *type;
+};
+
+struct TypeLayout {
+  const char *name;
+  size_t sizeInBytes;
+  size_t alignmentInBytes;
+  size_t memberCount;
+  const AggregateMember *members;
+
+  template <typename T> static TypeLayout named(const char *name) {
+    return {
+        .name = name,
+        .sizeInBytes = sizeof(T),
+        .alignmentInBytes = alignof(T),
+        .memberCount = 0,
+        .members = {},
+    };
+  }
+
+  void visualise(std::FILE *fd) const {
+    std::fprintf(fd, "[%*zu]╭── %s (%ld members) ──\n", 3, sizeInBytes, name, memberCount);
+    for (size_t i = 0; i < memberCount; ++i) {
+      const auto &m = members[i];
+      if (m.sizeInBytes == 0) {
+        std::fprintf(fd, "+%-3zu │[0-width] %s: %s\n", m.offsetInBytes, m.name, m.type ? m.type->name : "???");
+      }
+      for (size_t r = 0; r < m.sizeInBytes; r += alignmentInBytes) {
+        std::fprintf(fd, "+%-3zu │", r + m.offsetInBytes);
+        for (size_t c = 0; c < alignmentInBytes; ++c)
+          std::fprintf(fd, r + c < m.sizeInBytes ? "■" : "□");
+
+        if (r == 0) {
+          std::fprintf(fd, " %s: %s", m.name, m.type ? m.type->name : "???");
+          for (size_t s = 0; s < m.ptrIndirection; ++s)
+            std::fprintf(fd, "*");
+          std::fprintf(fd, " (%ld bytes)", m.sizeInBytes);
+        }
+
+        std::fprintf(fd, "\n");
+      }
+    }
+    std::fprintf(fd, "     ╰────────\n");
+  }
+};
+
+struct KernelObject {
+  PlatformKind kind;
+  ModuleFormat format;
+  const char **features;
+  size_t imageLength;
+  const unsigned char *image;
+};
+
+struct KernelBundle {
+  const char *moduleName;
+
+  size_t objectCount;
+  const KernelObject *objects;
+
+  size_t structCount;
+  const TypeLayout *structs;
+  size_t interfaceLayoutIdx;
+
+  const char *metadata;
+};
+
 } // namespace polyregion::runtime
+
+template <> struct std::hash<polyregion::compiletime::Target> {
+  std::size_t operator()(polyregion::compiletime::Target t) const noexcept {
+    return static_cast<std::underlying_type_t<polyregion::compiletime::Target>>(t);
+  }
+};

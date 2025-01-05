@@ -1,59 +1,69 @@
 #include "test_utils.h"
 #include "polyregion/llvm_utils.hpp"
 
-std::unique_ptr<polyregion::runtime::Platform> polyregion::test_utils::makePlatform(polyregion::runtime::Backend backend) {
-  if (auto errorOrPlatform = polyregion::runtime::Platform::of(backend); std::holds_alternative<std::string>(errorOrPlatform)) {
+#include "aspartame/all.hpp"
+
+#include <iostream>
+
+using namespace aspartame;
+
+std::unique_ptr<polyregion::runtime::Platform> polyregion::test_utils::makePlatform(const runtime::Backend backend) {
+  if (auto errorOrPlatform = runtime::Platform::of(backend); std::holds_alternative<std::string>(errorOrPlatform)) {
     throw std::runtime_error("Backend " + std::string(to_string(backend)) +
                              " failed to initialise: " + std::get<std::string>(errorOrPlatform));
-  } else return std::move(std::get<std::unique_ptr<polyregion::runtime::Platform>>(errorOrPlatform));
+  } else return std::move(std::get<std::unique_ptr<runtime::Platform>>(errorOrPlatform));
 }
 
 std::vector<std::pair<std::string, std::string>> polyregion::test_utils::findTestImage(const ImageGroups &images,
-                                                                                       const polyregion::runtime::Backend &backend,
+                                                                                       const runtime::Backend &backend,
                                                                                        const std::vector<std::string> &features) {
 
-  auto sortedFeatures = features;
-  std::sort(sortedFeatures.begin(), sortedFeatures.end());
+  const auto sortedFeatures = features ^ sort();
 
   //  std::cout << "Got: " << polyregion::mk_string<std::string>(sortedFeatures, std::identity(), ",") << std::endl;
 
   // HIP accepts HSA kernels
-  auto actualBackend = backend == polyregion::runtime::Backend::HIP ? polyregion::runtime::Backend::HSA : backend;
-  if (auto it = images.find(std::string(to_string(actualBackend))); it != images.end()) {
-    auto entries = it->second;
+  const auto canonicalBackend = backend == runtime::Backend::HIP ? runtime::Backend::HSA : backend;
 
-    if (features.empty()) { // for things like OpenCL/Vulkan which is arch independent
-      std::vector<std::pair<std::string, std::string>> out;
-      for (auto &[k, v] : entries)
-        out.emplace_back(k, std::string(v.begin(), v.end()));
-      return out;
-    } else {
+  return images                                          //
+         ^ get_maybe(std::string(to_string(canonicalBackend))) //
+         ^ flat_map([&](auto &featureToImage) -> std::optional<std::vector<std::pair<std::string, std::string>>> {
+             // For things like OpenCL/Vulkan which is arch independent
+             if (sortedFeatures.empty())
+               return featureToImage ^ map_values([](auto &x) { return std::string(x.begin(), x.end()); }) ^ to_vector();
 
-      // Try direct match first, GPUs would just be the ISA itself
-      for (auto &f : sortedFeatures) {
-        if (auto archAndCode = entries.find(f); archAndCode != entries.end()) {
+             // Try direct match first, GPUs would just be the ISA itself
+             if (auto firstWithMatchingFeature =
+                     sortedFeatures | collect_first([&](auto &feature) {
+                       return featureToImage //
+                              ^ get_maybe(feature) //
+                              ^ map([&](auto &x) { return std::vector{std::pair{feature, std::string(x.begin(), x.end())}}; });
+                     }))
+               return *firstWithMatchingFeature;
 
-          return {{archAndCode->first, std::string(archAndCode->second.begin(), archAndCode->second.end())}};
-        }
-      }
+             // For CPUs, we check if the image's requirement is a subset of the supported features
+             for (auto &[arch, image] : featureToImage) {
 
-      // For CPUs, we check if the image's requirement is a subset of the supported features
-      for (auto &[arch, image] : entries) {
+#if defined(__x86_64__) || defined(_M_X64)
+               auto archType = llvm::Triple::ArchType::x86_64;
+#elif defined(__aarch64__) || defined(_M_ARM64)
+               auto archType = llvm::Triple::ArchType::aarch64;
+#elif defined(__arm__) || defined(_M_ARM)
+               auto archType = llvm::Triple::ArchType::arm;
+#else
+  #error "Unsupported architecture"
+#endif
+               std::vector<std::string> required;
+               llvm_shared::collectCPUFeatures(arch, archType, required);
 
-        std::vector<std::string> required;
-        polyregion::llvm_shared::collectCPUFeatures(arch, llvm::Triple::ArchType::x86_64, required);
-
-        std::vector<std::string> missing;
-        std::set_difference(required.begin(), required.end(), sortedFeatures.begin(), sortedFeatures.end(), std::back_inserter(missing));
-        //        std::cout << "[" << arch << "] missing: " << polyregion::mk_string<std::string>(missing,
-        //        std::identity(), ",")
-        //                  << std::endl;
-
-        if (missing.empty()) {
-          return {{arch, std::string(image.begin(), image.end())}};
-        }
-      }
-    }
-  }
-  return {};
+               std::vector<std::string> missing;
+               std::set_difference(required.begin(), required.end(), sortedFeatures.begin(), sortedFeatures.end(),
+                                   std::back_inserter(missing));
+               if (missing.empty()) {
+                 return std::vector{std::pair{arch, std::string(image.begin(), image.end())}};
+               }
+             }
+             return {};
+           }) ^
+         get_or_else(std::vector<std::pair<std::string, std::string>>{});
 }

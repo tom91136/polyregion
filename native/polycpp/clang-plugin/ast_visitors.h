@@ -24,13 +24,13 @@ public:
 };
 
 class SpecialisationPathVisitor : public clang::RecursiveASTVisitor<SpecialisationPathVisitor> {
-  std::unordered_map<clang::FunctionDecl *, std::pair<clang::FunctionDecl *, clang::CallExpr *>> map;
+  std::unordered_map<const clang::FunctionDecl *, std::pair<clang::FunctionDecl *, clang::CallExpr *>> map;
 public:
-  explicit SpecialisationPathVisitor(clang::ASTContext &context);
+  explicit SpecialisationPathVisitor(const clang::ASTContext &context);
   bool shouldVisitTemplateInstantiations() const;
   bool VisitDecl(clang::Decl *decl);
   bool VisitCallExpr(clang::CallExpr *expr);
-  std::vector<std::pair<clang::FunctionDecl *, clang::CallExpr *>> resolve(clang::FunctionDecl *decl) const;
+  std::vector<std::pair<clang::FunctionDecl *, clang::CallExpr *>> resolve(const clang::FunctionDecl *decl) const;
 };
 
 } // namespace polyregion::polystl

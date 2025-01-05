@@ -25,15 +25,16 @@ struct CliArgs {
   }
 
   std::optional<std::string> get(const std::string &flag) const {
-    return data | zip_with_index() | filter([&](auto v, auto i) { return !deleted.count(i); }) |
-           collect([&](auto &chars, auto i) -> std::optional<std::string> {
-             if (const std::string arg = chars; arg == flag) {
-               if (i + 1 < data.size()) return data[i + 1];                                // -foo :: bar :: Nil
-               else return {};                                                             // -foo :: Nil
-             } else if (arg ^ starts_with(flag + "=")) return arg.substr(flag.size() + 1); // -foo=bar
-             return {};
-           }) //
-           | head_maybe();
+    return data                                                        //
+           | zip_with_index()                                          //
+           | filter([&](auto v, auto i) { return !deleted.count(i); }) //
+           | collect_first([&](auto &chars, auto i) -> std::optional<std::string> {
+               if (const std::string arg = chars; arg == flag) {
+                 if (i + 1 < data.size()) return data[i + 1];                                // -foo :: bar :: Nil
+                 else return {};                                                             // -foo :: Nil
+               } else if (arg ^ starts_with(flag + "=")) return arg.substr(flag.size() + 1); // -foo=bar
+               return {};
+             });
   }
 
   bool popBool(const std::string &flag) {
@@ -169,7 +170,6 @@ int main(int argc, const char *argv[]) {
 
   fs::path clangPath;
 
-
   if (auto driverArg = args.popValue("--driver")) clangPath = *driverArg;         // Explicit driver takes precedence
   else if (auto driverEnv = std::getenv("POLYCPP_DRIVER")) clangPath = driverEnv; // Then try environment vars
   else if (fs::path clangBin = execParentPath / "clang++";
@@ -207,7 +207,7 @@ int main(int argc, const char *argv[]) {
                  auto polycppClangPlugin = polycppLibPath / "polycpp-clang-plugin.so";
                  append({"-isystem", polycppIncludePath.string()});
                  append({"-include", "polystl/polystl.h"});
-                 append({"-include", "ptr-reflect-rt/rt.hpp"});
+                 append({"-include", "rt-reflect/rt.hpp"});
 
                  bool noRewrite = std::getenv("POLYCPP_NO_REWRITE") != nullptr;
                  if (!noRewrite) {
@@ -249,6 +249,7 @@ int main(int argc, const char *argv[]) {
                remaining[0] = "clang++";
                std::cout << ">>> " << (remaining ^ mk_string(" ")) << std::endl;
 
-               return llvm::sys::ExecuteAndWait(clangPath.string(), remaining  | map([](auto &x) -> llvm::StringRef { return x; })|to_vector() );
+               return llvm::sys::ExecuteAndWait(clangPath.string(),
+                                                remaining | map([](auto &x) -> llvm::StringRef { return x; }) | to_vector());
              });
 }

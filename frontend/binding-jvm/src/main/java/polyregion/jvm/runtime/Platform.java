@@ -50,7 +50,7 @@ public final class Platform implements AutoCloseable {
 
   static native void free0(long nativePeer, long handle);
 
-  static native Queue createQueue0(long nativePeer, Device owner);
+  static native Queue createQueue0(long nativePeer, Device owner, long timeoutMillis);
 
   static native void enqueueHostToDeviceAsync0(
       long nativePeer, ByteBuffer src, long dst, int size, Runnable cb);

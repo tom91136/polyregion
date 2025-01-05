@@ -2,8 +2,6 @@
 #include <cstring>
 
 #include "llvm/Object/ELFObjectFile.h"
-#include "llvm/Object/ELFTypes.h"
-#include "llvm/Object/Error.h"
 #include "llvm/Object/ObjectFile.h"
 
 #include "nlohmann/json.hpp"
@@ -134,7 +132,7 @@ template <typename ELFT> static auto extractGeneric(const llvm::object::ELFObjec
           using namespace nlohmann;
           auto kernels =
               nlohmann::json::from_msgpack(note.getDesc(s.sh_addralign).begin(), note.getDesc(s.sh_addralign).end()).at("amdhsa.kernels");
-          SymbolArgOffsetTable offsetTable(kernels.size());
+          details::SymbolArgOffsetTable offsetTable(kernels.size());
           for (auto &kernel : kernels) {
             auto kernelName = kernel.at(".name").template get<std::string>();
             auto args = kernel.at(".args");
@@ -153,17 +151,17 @@ template <typename ELFT> static auto extractGeneric(const llvm::object::ELFObjec
   }
 };
 
-static SymbolArgOffsetTable extractSymbolArgOffsetTable(const std::string &image) {
+static details::SymbolArgOffsetTable extractSymbolArgOffsetTable(const std::string &image) {
   using namespace llvm::object;
 
   if (auto object = ObjectFile::createObjectFile(llvm::MemoryBufferRef(llvm::StringRef(image), "")); auto e = object.takeError()) {
     POLYRT_FATAL(PREFIX, "Cannot load module: %s", toString(std::move(e)).c_str());
   } else {
     if (const ELFObjectFileBase *elfObj = llvm::dyn_cast<ELFObjectFileBase>(object->get())) {
-      if (auto obj = llvm::dyn_cast<ELF32LEObjectFile>(elfObj)) return extractGeneric(*obj);
-      if (auto obj = llvm::dyn_cast<ELF32BEObjectFile>(elfObj)) return extractGeneric(*obj);
-      if (auto obj = llvm::dyn_cast<ELF64LEObjectFile>(elfObj)) return extractGeneric(*obj);
-      if (auto obj = llvm::dyn_cast<ELF64BEObjectFile>(elfObj)) return extractGeneric(*obj);
+      if (const auto obj = llvm::dyn_cast<ELF32LEObjectFile>(elfObj)) return extractGeneric(*obj);
+      if (const auto obj = llvm::dyn_cast<ELF32BEObjectFile>(elfObj)) return extractGeneric(*obj);
+      if (const auto obj = llvm::dyn_cast<ELF64LEObjectFile>(elfObj)) return extractGeneric(*obj);
+      if (const auto obj = llvm::dyn_cast<ELF64BEObjectFile>(elfObj)) return extractGeneric(*obj);
       POLYRT_FATAL(PREFIX, "Unrecognised ELF variant: %u", elfObj->getType());
     } else POLYRT_FATAL(PREFIX, "Object image TypeID %d is not in the ELF range", object->get()->getType());
   }
@@ -320,7 +318,7 @@ void HsaDevice::freeShared(void *ptr) {
   POLYRT_TRACE();
   CHECKED("Release AMD memory pool", hsa_amd_memory_pool_free(ptr));
 }
-std::unique_ptr<DeviceQueue> HsaDevice::createQueue() {
+std::unique_ptr<DeviceQueue> HsaDevice::createQueue(const std::chrono::duration<int64_t> &timeout) {
   POLYRT_TRACE();
   hsa_queue_t *queue;
   CHECKED("Allocate agent queue", hsa_queue_create(agent, queueSize, HSA_QUEUE_TYPE_SINGLE, //
@@ -328,26 +326,20 @@ std::unique_ptr<DeviceQueue> HsaDevice::createQueue() {
                                                    std::numeric_limits<uint32_t>::max(),    //
                                                    std::numeric_limits<uint32_t>::max(),    //
                                                    &queue));
-  return std::make_unique<HsaDeviceQueue>(*this, queue);
+  return std::make_unique<HsaDeviceQueue>(timeout, *this, queue);
 }
 
 // ---
 
-HsaDeviceQueue::HsaDeviceQueue(decltype(device) device, decltype(queue) queue) : device(device), queue(queue) { POLYRT_TRACE(); }
-HsaDeviceQueue::~HsaDeviceQueue() {
-  POLYRT_TRACE();
-  CHECKED("Release agent queue", hsa_queue_destroy(queue));
-}
-
-hsa_signal_t HsaDeviceQueue::createSignal(const char *message) {
+static hsa_signal_t createSignal(const char *message) {
   hsa_signal_t signal;
   CHECKED(message, hsa_signal_create(1, 0, nullptr, &signal));
   return signal;
 }
 
-void HsaDeviceQueue::destroySignal(const char *message, hsa_signal_t signal) { CHECKED(message, hsa_signal_destroy(signal)); }
+static void destroySignal(const char *message, const hsa_signal_t signal) { CHECKED(message, hsa_signal_destroy(signal)); }
 
-void HsaDeviceQueue::enqueueCallback(hsa_signal_t signal, const Callback &cb) {
+static void enqueueCallback(const hsa_signal_t signal, const Callback &cb) {
   static detail::CountedCallbackHandler handler;
   CHECKED("Attach async handler to signal", //
           hsa_amd_signal_async_handler(
@@ -361,37 +353,53 @@ void HsaDeviceQueue::enqueueCallback(hsa_signal_t signal, const Callback &cb) {
               handler.createHandle(cb)));
 }
 
-void HsaDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) {
+HsaDeviceQueue::HsaDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(device) device, decltype(queue) queue)
+    : latch(timeout), device(device), queue(queue) {
+  POLYRT_TRACE();
+}
+HsaDeviceQueue::~HsaDeviceQueue() {
+  POLYRT_TRACE();
+  CHECKED("Release agent queue", hsa_queue_destroy(queue));
+}
+
+void HsaDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size, const MaybeCallback &cb) {
   POLYRT_TRACE();
   void *lockedHostSrcPtr;
   CHECKED("Lock host memory", hsa_amd_memory_lock(const_cast<void *>(src), size, nullptr, 0, &lockedHostSrcPtr));
 
   hsa_signal_t signal = createSignal("Allocate H2D signal");
   CHECKED("Copy memory async (H2D)",
-          hsa_amd_memory_async_copy(reinterpret_cast<void *>(dst), device.agent, lockedHostSrcPtr, device.hostAgent, //
+          hsa_amd_memory_async_copy(reinterpret_cast<char *>(dst) + dstOffset, device.agent, lockedHostSrcPtr, device.hostAgent, //
                                     size, 0, nullptr, signal));
+
   enqueueCallback(signal, [cb, lockedHostSrcPtr, signal, token = latch.acquire()]() {
     CHECKED("Unlock host memory", hsa_amd_memory_unlock(lockedHostSrcPtr));
     destroySignal("Release H2D signal", signal);
     if (cb) (*cb)();
   });
+  // XXX FIXME this wait makes the copy not actually async: switch to dependent signals to retain order...
+  hsa_signal_wait_acquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, std::numeric_limits<uint64_t>::max(), HSA_WAIT_STATE_BLOCKED);
 }
 
-void HsaDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) {
+void HsaDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, void *dst, size_t size, const MaybeCallback &cb) {
   POLYRT_TRACE();
   void *lockedHostDstPtr;
   CHECKED("Lock host memory", hsa_amd_memory_lock(dst, size, nullptr, 0, &lockedHostDstPtr));
 
   hsa_signal_t signal = createSignal("Allocate D2H signal");
   CHECKED("Copy memory async (D2H)",
-          hsa_amd_memory_async_copy(lockedHostDstPtr, device.hostAgent, reinterpret_cast<void *>(src), device.agent, //
+          hsa_amd_memory_async_copy(lockedHostDstPtr, device.hostAgent, reinterpret_cast<char *>(src) + srcOffset, device.agent, //
                                     size, 0, nullptr, signal));
+
   enqueueCallback(signal, [cb, lockedHostDstPtr, signal, token = latch.acquire()]() {
     CHECKED("Unlock host memory", hsa_amd_memory_unlock(lockedHostDstPtr));
-    destroySignal("Release H2D2H signal", signal);
+    destroySignal("Release D2H signal", signal);
     if (cb) (*cb)();
   });
+  // XXX FIXME this wait makes the copy not actually async: switch to dependent signals to retain order...
+  hsa_signal_wait_acquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, std::numeric_limits<uint64_t>::max(), HSA_WAIT_STATE_BLOCKED);
 }
+
 void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
                                         std::vector<std::byte> argData, const Policy &policy, const MaybeCallback &cb) {
   POLYRT_TRACE();
@@ -471,6 +479,7 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
   dispatch->group_segment_size = std::max(groupSegmentSize, static_cast<uint32_t>(sharedMem));
 
   uint16_t header = 0;
+  header |= 1 << HSA_PACKET_HEADER_BARRIER;
   header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
   header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
   header |= HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
@@ -483,7 +492,7 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
   headerRef.store(header, std::memory_order_release);
 #else
   // XXX Many *nix systems doesn't implement atomic_ref yet, remove this in the future
-  __atomic_store_n((uint16_t *)(&dispatch->header), header, __ATOMIC_RELEASE);
+  __atomic_store_n(&dispatch->header, header, __ATOMIC_RELEASE);
 #endif
 
   hsa_queue_store_write_index_relaxed(queue, index + 1);
@@ -494,6 +503,10 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
     destroySignal("Release kernel signal", signal);
     if (cb) (*cb)();
   });
+}
+void HsaDeviceQueue::enqueueWaitBlocking() {
+  POLYRT_TRACE();
+  latch.waitAll();
 }
 
 #undef CHECKED

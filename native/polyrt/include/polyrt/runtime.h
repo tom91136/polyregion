@@ -1,7 +1,5 @@
 #pragma once
 
-#include "polyregion/compat.h"
-
 #include <array>
 #include <atomic>
 #include <condition_variable>
@@ -19,6 +17,8 @@
 #include <variant>
 #include <vector>
 
+#include "polyregion/compat.h"
+
 #include "polyregion/export.h"
 #include "polyregion/types.h"
 
@@ -30,7 +30,7 @@
     #define __PRETTY_FUNCTION__ __FUNCSIG__
   #endif
 
-  #define POLYRT_TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this, __PRETTY_FUNCTION__)
+  // #define POLYRT_TRACE() fprintf(stderr, "[TRACE] %s:%d (this=%p) %s\n", __FILE__, __LINE__, (void *)this, __PRETTY_FUNCTION__)
   #define POLYRT_TRACE()
 
 #endif
@@ -39,13 +39,12 @@
   #error Trace already defined
 #else
 
-  #define POLYRT_FATAL(prefix, fmt, ...)                                                                                                          \
+  #define POLYRT_FATAL(prefix, fmt, ...)                                                                                                   \
     do {                                                                                                                                   \
-      std::fprintf(stderr, "[%s] %s:%d " fmt " (%s)\n", prefix, __FILE__, __LINE__, __VA_ARGS__, __PRETTY_FUNCTION__);                      \
+      std::fprintf(stderr, "[%s] %s:%d " fmt " (%s)\n", prefix, __FILE__, __LINE__, __VA_ARGS__, __PRETTY_FUNCTION__);                     \
       std::abort();                                                                                                                        \
     } while (0)
 #endif
-
 
 namespace polyregion::runtime {
 
@@ -77,7 +76,7 @@ template <typename T,                            //
           typename Lift = std::function<T()>,    //
           typename Drop = std::function<void(T)> //
           >
-class LazyDroppable {
+class LazyDroppable final {
   std::optional<T> value = {};
   Lift lift;
   Drop drop;
@@ -101,7 +100,7 @@ public:
   T &operator*() { return operator->(); }
 
   void touch() { operator->(); }
-  virtual ~LazyDroppable() {
+  ~LazyDroppable() {
     if (value) drop(*value);
   }
 };
@@ -109,22 +108,25 @@ public:
 std::string allocateAndTruncate(const std::function<void(char *, size_t)> &f, size_t length = 512);
 std::vector<void *> argDataAsPointers(const std::vector<Type> &types, std::vector<std::byte> &argData);
 
-class CountingLatch {
+class CountingLatch final {
   std::mutex mutex;
   std::condition_variable cv;
   std::atomic_long pending{};
+  std::chrono::duration<int64_t> timeout{};
 
-  class Token {
+  class Token final {
     CountingLatch &latch;
 
   public:
     explicit Token(CountingLatch &latch);
-    virtual ~Token();
+    ~Token();
   };
 
 public:
-  virtual ~CountingLatch();
+  [[nodiscard]] explicit CountingLatch(const std::chrono::duration<int64_t> &timeout);
+  ~CountingLatch();
   std::shared_ptr<Token> acquire();
+  bool waitAll();
 };
 
 template <typename T> class BlockingQueue {
@@ -228,14 +230,14 @@ template <typename M, typename F> class ModuleStore {
   std::function<void(F)> dropFunction;
 
 public:
-  ModuleStore(decltype(errorPrefix) errorPrefix,           //
+  ModuleStore(const decltype(errorPrefix) errorPrefix,     //
               const decltype(load) &load,                  //
               const decltype(resolve) &resolve,            //
               const decltype(dropModule) &dropModule = {}, //
               const decltype(dropFunction) &dropFunction = {})
       : errorPrefix(errorPrefix), load(load), resolve(resolve), dropModule(dropModule), dropFunction(dropFunction) {
 
-    static_assert(std::is_move_constructible<F>::value == std::is_move_constructible<M>::value,
+    static_assert(std::is_move_constructible_v<F> == std::is_move_constructible_v<M>,
                   "move constructible mismatch between Module (M) and Func (F)");
   }
 
@@ -279,7 +281,7 @@ POLYREGION_EXPORT void init();
 struct POLYREGION_EXPORT Dim3 {
   POLYREGION_EXPORT size_t x, y, z;
   [[nodiscard]] std::array<size_t, 3> sizes() const { return {x, y, z}; }
-  constexpr Dim3(size_t x, size_t y, size_t z) : x(x), y(y), z(z) {
+  constexpr Dim3(const size_t x, const size_t y, const size_t z) : x(x), y(y), z(z) {
     if (x < 1) POLYRT_FATAL("Runtime", "x (%zu) < 1", x);
     if (y < 1) POLYRT_FATAL("Runtime", "y (%zu) < 1", y);
     if (z < 1) POLYRT_FATAL("Runtime", "z (%zu) < 1", z);
@@ -296,8 +298,7 @@ struct POLYREGION_EXPORT Policy {
 enum class Access : uint8_t { RW = 1, RO, WO };
 
 template <> constexpr std::optional<Access> POLYREGION_EXPORT from_underlying<Access>(std::underlying_type_t<Access> v) {
-  auto x = static_cast<Access>(v);
-  switch (x) {
+  switch (auto x = static_cast<Access>(v)) {
     case Access::RW:
     case Access::RO:
     case Access::WO: return x;
@@ -332,36 +333,38 @@ constexpr std::string_view POLYREGION_EXPORT to_string(const Backend &b) {
 
 struct POLYREGION_EXPORT DeviceQueue {
 
-public:
   virtual POLYREGION_EXPORT ~DeviceQueue() = default;
-  virtual POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t bytes, const MaybeCallback &cb) = 0;
+  virtual POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t bytes,
+                                                          const MaybeCallback &cb) = 0;
 
   template <typename T>
   POLYREGION_EXPORT void enqueueHostToDeviceAsyncTyped(const T *src, uintptr_t dst, size_t count, const MaybeCallback &cb = {}) {
     static_assert(sizeof(T) != 0);
-    enqueueHostToDeviceAsync(src, dst, count * sizeof(T), cb);
-  };
+    enqueueHostToDeviceAsync(src, dst, 0, count * sizeof(T), cb);
+  }
 
-  virtual POLYREGION_EXPORT void enqueueDeviceToHostAsync(uintptr_t src, void *dst, size_t size, const MaybeCallback &cb) = 0;
+  virtual POLYREGION_EXPORT void enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, void *dst, size_t bytes,
+                                                          const MaybeCallback &cb) = 0;
 
   template <typename T>
   POLYREGION_EXPORT void enqueueDeviceToHostAsyncTyped(uintptr_t src, T *dst, size_t count, const MaybeCallback &cb = {}) {
     static_assert(sizeof(T) != 0);
-    enqueueDeviceToHostAsync(src, dst, count * sizeof(T), cb);
-  };
+    enqueueDeviceToHostAsync(src, 0, dst, count * sizeof(T), cb);
+  }
 
   virtual POLYREGION_EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol,
                                                     const std::vector<Type> &types, std::vector<std::byte> argData, const Policy &policy,
                                                     const MaybeCallback &cb) = 0;
 
-  virtual POLYREGION_EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const ArgBuffer &buffer,
-                                                    const Policy &policy, const MaybeCallback &cb) {
+  POLYREGION_EXPORT void enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const ArgBuffer &buffer,
+                                            const Policy &policy, const MaybeCallback &cb) {
     enqueueInvokeAsync(moduleName, symbol, buffer.types, buffer.data, policy, cb);
-  };
+  }
+
+  virtual POLYREGION_EXPORT void enqueueWaitBlocking() = 0;
 };
 
 struct POLYREGION_EXPORT Device {
-public:
   virtual POLYREGION_EXPORT ~Device() = default;
   [[nodiscard]] virtual POLYREGION_EXPORT int64_t id() = 0;
   [[nodiscard]] virtual POLYREGION_EXPORT std::string name() = 0;
@@ -381,22 +384,22 @@ public:
   template <typename T> [[nodiscard]] POLYREGION_EXPORT uintptr_t mallocDeviceTyped(size_t count, Access access) {
     static_assert(sizeof(T) != 0);
     return mallocDevice(count * sizeof(T), access);
-  };
+  }
   template <typename... T> POLYREGION_EXPORT void freeAllDevice(T... ptrs) {
     ([&]() { freeDevice(ptrs); }(), ...);
-  };
+  }
 
   template <typename T> [[nodiscard]] POLYREGION_EXPORT std::optional<T *> mallocSharedTyped(size_t count, Access access) {
     static_assert(sizeof(T) != 0);
     auto ptr = mallocShared(count * sizeof(T), access);
     if (ptr) return std::optional{static_cast<T *>(*ptr)};
     else return {};
-  };
+  }
   template <typename... T> POLYREGION_EXPORT void freeAllShared(T... ptrs) {
     ([&]() { freeShared(ptrs); }(), ...);
-  };
+  }
 
-  [[nodiscard]] virtual POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue() = 0;
+  [[nodiscard]] virtual POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue(const std::chrono::duration<int64_t> &timeout) = 0;
 };
 
 class POLYREGION_EXPORT Platform {

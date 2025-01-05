@@ -311,8 +311,8 @@ public final class Device implements AutoCloseable {
     return cachedFeatures.getCached();
   }
 
-  public Queue createQueue() {
-    Queue q = Platform.createQueue0(nativePeer, this);
+  public Queue createQueue(long timeoutMillis) {
+    Queue q = Platform.createQueue0(nativePeer, this, timeoutMillis);
     if (q.device != this)
       throw new AssertionError("Invalid device associated with Queue, check JNI implementation.");
     return q;

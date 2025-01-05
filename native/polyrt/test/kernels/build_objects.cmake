@@ -1,11 +1,11 @@
 
 set(NV_ARCHS "\
-sm_20;\
-sm_30;sm_35;sm_37;\
+sm_35;sm_37;\
 sm_50;sm_52;sm_53;\
 sm_60;sm_61;sm_62;\
 sm_70;sm_72;sm_75;\
-sm_80;sm_86\
+sm_80;sm_86;sm_89;\
+sm_90\
 ")
 
 set(AMDGPU_ARCHS "\
@@ -105,12 +105,12 @@ foreach (C_SOURCE ${C_SRC_FILES})
                 -c
                 -o data.bin)
         string(REPLACE ";" " " CLI_NS "${CLI}")
-        message(STATUS "[RELOCATABLE_OBJ] ${CLI_NS}")
+        message(STATUS "[RelocatableObject] ${CLI_NS}")
         execute_process(COMMAND ${CLI})
         read_to_hex(data.bin RELOCATABLE_OBJ_ENTRY_HEX)
         make_data_block(CONST_DATA_BLOCKS RELOCATABLE_OBJ_PROGRAM_ENTRIES "${PROGRAM_NAME}_relocatable" "${CPU_ARCH}" "${RELOCATABLE_OBJ_ENTRY_HEX}")
     endforeach ()
-    configure_platform("RELOCATABLE_OBJ" RELOCATABLE_OBJ_PROGRAM_ENTRIES PROGRAM_ENTRIES)
+    configure_platform("RelocatableObject" RELOCATABLE_OBJ_PROGRAM_ENTRIES PROGRAM_ENTRIES)
 
 
     set(SHARED_OBJ_PROGRAM_ENTRIES "")
@@ -123,12 +123,12 @@ foreach (C_SOURCE ${C_SRC_FILES})
                 -shared
                 -o data.bin)
         string(REPLACE ";" " " CLI_NS "${CLI}")
-        message(STATUS "[SHARED_OBJ] ${CLI_NS}")
+        message(STATUS "[SharedObject] ${CLI_NS}")
         execute_process(COMMAND ${CLI})
         read_to_hex(data.bin SHARED_OBJ_ENTRY_HEX)
         make_data_block(CONST_DATA_BLOCKS SHARED_OBJ_PROGRAM_ENTRIES "${PROGRAM_NAME}_shared" "${CPU_ARCH}" "${SHARED_OBJ_ENTRY_HEX}")
     endforeach ()
-    configure_platform("SHARED_OBJ" SHARED_OBJ_PROGRAM_ENTRIES PROGRAM_ENTRIES)
+    configure_platform("SharedObject" SHARED_OBJ_PROGRAM_ENTRIES PROGRAM_ENTRIES)
 
     list(JOIN CONST_DATA_BLOCKS "\n" CONST_DATA_BLOCKS)
     list(JOIN PROGRAM_ENTRIES ",\n" PROGRAM_ENTRIES)

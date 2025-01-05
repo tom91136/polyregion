@@ -1,20 +1,23 @@
+#include "catch2/catch_test_macros.hpp"
+#include "catch2/generators/catch_generators_range.hpp"
+#include "catch2/matchers/catch_matchers_floating_point.hpp"
+
 #include "kernels/generated_cpu_fma.hpp"
 #include "kernels/generated_gpu_fma.hpp"
 #include "kernels/generated_msl_fma.hpp"
 #include "kernels/generated_spirv_glsl_fma.hpp"
 #include "polyregion/concurrency_utils.hpp"
 #include "polyregion/io.hpp"
-#include "polyregion/utils.hpp"
 #include "test_utils.h"
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/generators/catch_generators_range.hpp>
-#include <catch2/matchers/catch_matchers_floating_point.hpp>
+
+#include "aspartame/all.hpp"
 
 using namespace polyregion::runtime;
 using namespace polyregion::test_utils;
 using namespace polyregion::concurrency_utils;
+using namespace aspartame;
 
-const static std::vector<float> xs{0.f,
+const static std::vector xs{0.f,
                                    -0.f,
                                    1.f,
                                    42.f,
@@ -33,8 +36,7 @@ template <typename I> void testFma(I images, std::initializer_list<Backend> back
 
           if (imageGroups.size() != 1) {
             FAIL("Found more than one (" << imageGroups.size() << ") kernel test images for device `" << d->name()
-                                         << "`(backend=" << to_string(backend) << ", features="
-                                         << polyregion::mk_string<std::string>(d->features(), [](auto x) {  return x; }, ",") << ")");
+                                         << "`(backend=" << to_string(backend) << ", features=" << (d->features() | mk_string(",")) << ")");
           }
 
           std::string module_;
@@ -52,7 +54,7 @@ template <typename I> void testFma(I images, std::initializer_list<Backend> back
           auto b = GENERATE(from_range(xs));
           auto c = GENERATE(from_range(xs));
           DYNAMIC_SECTION("a=" << a << " b=" << b << " c=" << c) {
-            auto q = d->createQueue();
+            auto q = d->createQueue(std::chrono::seconds(10));
             auto out_d = d->template mallocDeviceTyped<float>(1, Access::RW);
             //
             ArgBuffer buffer;
@@ -82,9 +84,8 @@ template <typename I> void testFma(I images, std::initializer_list<Backend> back
             d->freeDevice(out_d);
           }
         } else {
-          WARN("No kernel test image found for device `"
-               << d->name() << "`(backend=" << to_string(backend)
-               << ", features=" << polyregion::mk_string<std::string>(d->features(), [](auto x) {  return x; }, ",") << ")");
+          WARN("No kernel test image found for device `" << d->name() << "`(backend=" << to_string(backend)
+                                                         << ", features=" << (d->features() | mk_string(",")) << ")");
         }
       }
     }

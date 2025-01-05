@@ -83,7 +83,7 @@ struct CLAddressSpaceTracePass {
   static Function mapFn(const Function &fn) {
 
     StackScope scope{.vars = fn.args                                                              //
-                             | bind([&](auto &arg) { return arg.template collect_all<Named>(); }) //
+                             | flat_map([&](auto &arg) { return arg.template collect_all<Named>(); }) //
                              | filter([](auto &n) { return n.tpe.template is<Type::Ptr>(); })     //
                              | map([](auto &n) { return std::pair(n.symbol, n); })                //
                              | to<Map>()};
@@ -106,7 +106,7 @@ struct CLAddressSpaceTracePass {
                 });
 
     const auto tracedRtnTpes = body                                                                    //
-                               | bind([&](auto &s) { return s.template collect_all<Stmt::Return>(); }) //
+                               | flat_map([&](auto &s) { return s.template collect_all<Stmt::Return>(); }) //
                                | map([&](auto &r) { return r.value.tpe(); })                           //
                                | distinct()                                                            //
                                | to_vector();                                                          //
@@ -141,7 +141,7 @@ struct CLAddressSpaceTracePass {
     while (true) {
       const auto specialised =
           functionTable                                                                                //
-          | bind([&](auto, auto &f) { return f->template collect_all<Expr::Invoke>(); })               //
+          | flat_map([&](auto, auto &f) { return f->template collect_all<Expr::Invoke>(); })               //
           | collect([&](auto &inv) -> std::optional<std::pair<Signature, std::shared_ptr<Function>>> { //
               if (const auto sig = sigOf(inv); !functionTable.contains(sig)) {
                 if (auto spec =
@@ -179,8 +179,8 @@ struct CLAddressSpaceTracePass {
             auto spaces = [&](auto &a) { return a.template collect_all<TypeSpace::Any>(); };
             return f
                 ->template modify_all<Expr::Invoke>(
-                    [&](auto &inv) { return inv.withName(spaceSpecialisedName(inv.name, inv.args ^ bind(spaces))); })
-                .withName(f->attrs.contains(FunctionAttr::Entry()) ? f->name : spaceSpecialisedName(f->name, f->args ^ bind(spaces)));
+                    [&](auto &inv) { return inv.withName(spaceSpecialisedName(inv.name, inv.args ^ flat_map(spaces))); })
+                .withName(f->attrs.contains(FunctionAttr::Entry()) ? f->name : spaceSpecialisedName(f->name, f->args ^ flat_map(spaces)));
           }) //
         | to_vector();
 

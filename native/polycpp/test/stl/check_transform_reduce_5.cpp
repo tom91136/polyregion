@@ -1,9 +1,8 @@
-// #CASE: general
-// #MATRIX: platform=cuda,hip,hsa,host
-// #MATRIX: ptr=0,1
-// #RUN: polycpp -fno-crash-diagnostics -O3 -Wall -Wextra -pedantic -g3 -fstdpar -fstdpar-arch=cuda@sm_89:amdgpu@gfx1036:host@native -DUSE_PTR={ptr} -o {output} {input}
-// #RUN: POLYSTL_PLATFORM={platform} SIZE=1024 POLYSTL_HOST_FALLBACK=0 {output}
-//   #EXPECT: 20.480000
+#pragma region case: general
+#pragma region using: ptr=0,1
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DUSE_PTR={ptr} -o {output} {input}
+#pragma region do: SIZE=1024 {output}
+#pragma region requires: 20.480000
 
 #include <algorithm>
 #include <cstddef>

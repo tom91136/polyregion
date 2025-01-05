@@ -1,3 +1,5 @@
+#pragma OPENCL EXTENSION cl_khr_fp64 : enable
+
 __kernel void stream_copy_double(__global double *a, __global double *b, __global double *c) {
   int i = get_global_id(0);
   c[i] = a[i];

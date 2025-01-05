@@ -1,8 +1,8 @@
-// #CASE: inheritance
-// #MATRIX: capture=&,=,value
-// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -DCHECK_CAPTURE={capture} -o {output} {input}
-// #RUN: POLYSTL_PLATFORM=host {output}
-//   #EXPECT: 11 22 33 44
+#pragma region case: inheritance
+#pragma region using: capture=&,=,value
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -DCHECK_CAPTURE={capture} -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 11 22 33 44
 
 #include <cstddef>
 #include <cstdio>

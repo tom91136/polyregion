@@ -8,7 +8,7 @@
 #include "llvm/Passes/PassPlugin.h"
 
 #include "polyregion/export.h"
-#include "ptr-reflect-rt/rt_reflect.hpp"
+#include "rt-reflect/rt_reflect.hpp"
 
 namespace {
 
@@ -88,7 +88,7 @@ bool runSplice(llvm::Module &M) {
             log();
             Functions.emplace_back([RecordFn, CB, zeroDebugLoc](llvm::IRBuilder<> &B) {
               B.SetInsertPoint(CB->getNextNode()); // after start
-              auto alloc = B.getInt8(to_integral(ptr_reflect::_rt_Type::StackAlloc));
+              auto alloc = B.getInt8(to_integral(polyregion::rt_reflect::Type::StackAlloc));
               const auto Call = B.CreateCall(RecordFn, {CB->getArgOperand(1), CB->getArgOperand(0), alloc});
               if (zeroDebugLoc) Call->setDebugLoc(zeroDebugLoc);
             });
@@ -97,7 +97,7 @@ bool runSplice(llvm::Module &M) {
             log();
             Functions.emplace_back([ReleaseFn, CB, zeroDebugLoc](llvm::IRBuilder<> &B) {
               B.SetInsertPoint(CB); // before end
-              auto dealloc = B.getInt8(to_integral(ptr_reflect::_rt_Type::StackFree));
+              auto dealloc = B.getInt8(to_integral(polyregion::rt_reflect::Type::StackFree));
               auto Call = B.CreateCall(ReleaseFn, {CB->getArgOperand(1), dealloc});
               if (zeroDebugLoc) Call->setDebugLoc(zeroDebugLoc);
             });

@@ -24,6 +24,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/FormatVariadic.h"
 
+#include <clang/AST/RecordLayout.h>
 #include <csignal>
 #include <magic_enum.hpp>
 
@@ -61,10 +62,9 @@ const static std::string Empty = "#empty";
 }
 
 [[nodiscard]] static bool walkParents(const Remapper::RemapContext &r, const Type::Struct &derived,
-                                      const std::function<bool(const StructDef &)> &predicate,
-                                      std::vector<std::shared_ptr<StructDef>> &chain) {
+                                      const std::function<bool(const StructDef &)> &predicate, Vec<std::shared_ptr<StructDef>> &chain) {
 
-  const auto parents = r.parents ^ get(derived.name);
+  const auto parents = r.parents ^ get_maybe(derived.name);
   if (!parents) return false;
 
   if (const auto directBases = *parents ^ filter([&](auto &p) { return predicate(*p); }); directBases.empty()) { // indirect
@@ -88,18 +88,18 @@ const static std::string Empty = "#empty";
 //   raise("Invariant: empty select");
 // }
 
-[[nodiscard]] static Expr::Select selectFromNames(const std::vector<Named> &xs) {
+[[nodiscard]] static Expr::Select selectFromNames(const Vec<Named> &xs) {
   if (const auto last = xs ^ last_maybe()) {
     return Expr::Select(xs ^ init(), *last);
   }
   raise("Cannot form select from empty names");
 }
 
-[[nodiscard]] static Expr::Select select(Remapper::RemapContext &r, const std::vector<Named> &init, const Named &last) {
+[[nodiscard]] static Expr::Select select(Remapper::RemapContext &r, const Vec<Named> &init, const Named &last) {
   const auto selectWithInheritance = [&](const Named &base, const Named &member) {
-    auto expand = [&](const Type::Struct &s) -> std::vector<Named> {
+    auto expand = [&](const Type::Struct &s) -> Vec<Named> {
       if (r.findStruct(s.name, "select")->members ^ contains(member)) return {base};
-      if (std::vector<std::shared_ptr<StructDef>> path; walkParents(r, s, [&](auto &p) { return p.members ^ contains(member); }, path)) {
+      if (Vec<std::shared_ptr<StructDef>> path; walkParents(r, s, [&](auto &p) { return p.members ^ contains(member); }, path)) {
         return path | map([&](auto &def) { return baseMember(*def); }) | prepend(base) | to_vector();
       }
       raise(fmt::format("Cannot generate select for member {} against type {}", repr(member), repr(s)));
@@ -115,12 +115,12 @@ const static std::string Empty = "#empty";
   if (init.size() == 1) {
     return Expr::Select(selectWithInheritance(init[0], last), last);
   } else {
-    return Expr::Select(init ^ append(last) ^ sliding(2, 1) ^ bind([&](auto &xs) { return selectWithInheritance(xs[0], xs[1]); }), last);
+    return Expr::Select(init ^ append(last) ^ sliding(2, 1) ^ flat_map([&](auto &xs) { return selectWithInheritance(xs[0], xs[1]); }), last);
   }
 }
 
 static void defaultInitialiseStruct(Remapper::RemapContext &r, const Type::Struct &tpe, const Named &root) {
-  if (auto def = r.structs ^ get(tpe.name)) {
+  if (auto def = r.structs ^ get_maybe(tpe.name)) {
     (*def)->members | filter([](auto &n) { return !n.tpe.template is<Type::Struct>(); }) | for_each([&](auto &named) {
       r.push(Stmt::Comment("Zero init member"));
       r.push(Stmt::Mut(select(r, {root}, named), defaultValue(named.tpe)));
@@ -130,11 +130,11 @@ static void defaultInitialiseStruct(Remapper::RemapContext &r, const Type::Struc
   }
 }
 
-std::vector<Stmt::Any> Remapper::RemapContext::scoped(const std::function<void(RemapContext &)> &f,      //
-                                                      const std::optional<bool> &scopeCtorChain,         //
-                                                      const std::optional<Type::Any> &scopeRtnType,      //
-                                                      const std::shared_ptr<StructDef> &scopeStructName, //
-                                                      const bool persistCounter) {
+Vec<Stmt::Any> Remapper::RemapContext::scoped(const std::function<void(RemapContext &)> &f,      //
+                                              const Opt<bool> &scopeCtorChain,                   //
+                                              const Opt<Type::Any> &scopeRtnType,                //
+                                              const std::shared_ptr<StructDef> &scopeStructName, //
+                                              const bool persistCounter) {
   return scoped<std::nullptr_t>(
              [&](auto &r) {
                f(r);
@@ -145,7 +145,7 @@ std::vector<Stmt::Any> Remapper::RemapContext::scoped(const std::function<void(R
 }
 
 std::shared_ptr<StructDef> Remapper::RemapContext::findStruct(const std::string &name, const std::string &reason) const {
-  if (auto s = structs ^ get(name)) return *s;
+  if (auto s = structs ^ get_maybe(name)) return *s;
   else raise(fmt::format("Cannot find struct {} (required for {})", name, reason));
 }
 
@@ -154,7 +154,7 @@ bool Remapper::RemapContext::emptyStruct(const StructDef &def) {
 }
 
 void Remapper::RemapContext::push(const Stmt::Any &stmt) { stmts.push_back(stmt); }
-void Remapper::RemapContext::push(const std::vector<Stmt::Any> &xs) { stmts.insert(stmts.end(), xs.begin(), xs.end()); }
+void Remapper::RemapContext::push(const Vec<Stmt::Any> &xs) { stmts.insert(stmts.end(), xs.begin(), xs.end()); }
 Named Remapper::RemapContext::newName(const Type::Any &tpe) { return {"_v" + std::to_string(++counter), tpe}; }
 Expr::Any Remapper::RemapContext::newVar(const Expr::Any &expr) {
   auto mkSelect = [&](const Expr::Any &e) {
@@ -282,7 +282,7 @@ static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const
     if (auto tgtStruct = tgtPtrTpe->comp.get<Type::Struct>()) {
       if (auto rhsStruct = rhsPtrTpe->comp.get<Type::Struct>()) {
         if (auto root = expr.get<Expr::Select>()) {
-          if (std::vector<std::shared_ptr<StructDef>> chain;
+          if (Vec<std::shared_ptr<StructDef>> chain;
               walkParents(r, *rhsStruct, [&](auto &p) { return p.name == tgtStruct->name; }, chain)) {
             const auto names = root->init | append(root->last) | concat(chain | map([](auto &s) { return baseMember(*s); })) | to_vector();
             return Expr::RefTo(selectFromNames(names), {}, tgtStruct->widen(), TypeSpace::Global());
@@ -322,12 +322,12 @@ std::string Remapper::typeName(const Type::Any &tpe) const {
       [&](const Type::Annotated &x) -> std::string { return typeName(x.tpe); }   //
   );
 }
-std::pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::FunctionDecl *decl, RemapContext &r) {
+Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::FunctionDecl *decl, RemapContext &r) {
   const auto l = getLocation(decl->getLocation(), context);
   auto name = fmt::format("{}_{}_{}_{}_{:x}", l.filename, l.line, l.col, decl->getQualifiedNameAsString(), decl->getID());
-  if (auto fn = r.functions ^ get(name)) return {name, *fn};
+  if (auto fn = r.functions ^ get_maybe(name)) return {name, *fn};
 
-  std::optional<Arg> receiver{};
+  Opt<Arg> receiver{};
   std::shared_ptr<StructDef> parent{};
 
   if (auto ctor = llvm::dyn_cast<clang::CXXConstructorDecl>(decl)) {
@@ -408,7 +408,7 @@ std::pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const cla
       },
       false, rtnType, parent, false);
 
-  std::vector<Stmt::Any> body;
+  Vec<Stmt::Any> body;
   body.insert(body.end(), fnBody.begin(), fnBody.end());
   if (fnBody.empty()) {
     body.emplace_back(Stmt::Comment("Function with empty body but non-unit return type!"));
@@ -426,9 +426,10 @@ std::pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const cla
 
 std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl, RemapContext &r) const {
   auto name = nameOfRecord(llvm::dyn_cast_if_present<clang::RecordType>(context.getRecordType(decl)), r);
-  if (auto s = r.structs ^ get(name)) return *s;
+  if (auto s = r.structs ^ get_maybe(name)) return *s;
 
-  auto resolveStruct = [&](const std::vector<std::shared_ptr<StructDef>> &parents, const std::vector<StructLayoutMember> &members) {
+  auto resolveStruct = [&](const Vec<std::pair<std::shared_ptr<StructDef>, std::pair<size_t, size_t>>> &parents,
+                           const Vec<StructLayoutMember> &members) {
     // For C/C++ sizeof(type{}) == 1
     // However, compilers are allowed to do https://en.cppreference.com/w/cpp/language/ebo
     //    struct N{};
@@ -446,30 +447,51 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
     // 1)  EBO is prohibited if one of the empty base classes is also the type or the base of the type of the first non-static data member
     // 2)  MSVC : sizeof(A0) == 2 unless we add __declspec(empty_bases), EBO is is off without this
 
-    r.parents.emplace(name, parents);
+    r.parents.emplace(name, parents | keys() | to_vector());
 
     // For actual members, skip all EB classes so that EBO works
     const auto inherited = parents //
                                    // | filter([&](auto &p) { return !r.emptyStruct(*p); }) //
-                           | map([&](auto &p) {
+                           | map([&](auto &p, auto &offsetAndSize) {
                                auto original = baseMember(*p);
-                               if (!r.emptyStruct(*p)) return original;
+                               if (!r.emptyStruct(*p)) return std::pair{original, offsetAndSize};
                                auto e = r.structs ^=
-                                   get_or_emplace(Empty, [](auto &k) { return std::make_shared<StructDef>(k, std::vector<Named>{}); });
-                               return Named(original.symbol, Type::Struct(e->name));
+                                   get_or_emplace(Empty, [](auto &k) { return std::make_shared<StructDef>(k, Vec<Named>{}); });
+                               return std::pair{Named(original.symbol, Type::Struct(e->name)), offsetAndSize};
                              }) //
                            | to_vector();
 
     const auto emptyStruct = inherited.empty() && members.empty();
     const auto def = std::make_shared<StructDef>( //
         name,                                     //
-        emptyStruct ? std::vector{EmptyStructMarker} : inherited ^ concat(members ^ map([](auto &m) { return m.name; })));
-    const auto layout = std::make_shared<StructLayout>(                    //
-        name,                                                              //
-        context.getTypeSizeInChars(decl->getTypeForDecl()).getQuantity(),  //
-        context.getTypeAlignInChars(decl->getTypeForDecl()).getQuantity(), //
-        members);
+        emptyStruct ? std::vector{EmptyStructMarker}
+                    : inherited | keys() | concat(members | map([](auto &m) { return m.name; })) | to_vector());
 
+    const auto sizeInBytes = context.getTypeSizeInChars(decl->getTypeForDecl()).getQuantity();
+    const auto alignmentInBytes = context.getTypeAlignInChars(decl->getTypeForDecl()).getQuantity();
+    const auto layout = std::make_shared<StructLayout>(                            //
+        name,                                                                      //
+        sizeInBytes,                                                               //
+        alignmentInBytes,                                                          //
+        inherited                                                                  //
+            | map([&](auto &named, auto &offsetAndSize) {                          //
+                auto [offset, size] = offsetAndSize;                               //
+                auto isEBO = offset == 0 && size == 1 && alignmentInBytes != 1;    //
+                return StructLayoutMember(named, offset, isEBO ? size_t{} : size); //
+              })                                                                   //
+            | concat(members)                                                      //
+            | to_vector());                                                        //
+
+    //                     std::cout
+    //                 << "@@@@ " << (r.layouts ^ keys() ^ mk_string(", ")) << "\n";
+    // std::cout << "ps =  " << (parents ^ map([](auto &p, auto) { return p->name; }) ^ mk_string(", ")) << "\n";
+
+    std::cout << "@@@@@@@@@ "
+              << (inherited | map([&](auto &p, auto &offsetAndSize) { return repr(p) + " = " + std::to_string(offsetAndSize.second); }) |
+                  mk_string(", "))
+              << "\n";
+
+    std::cout << "@@@@@@@@@ " << *layout << "\n";
     r.structs.emplace(name, def);
     r.layouts.emplace(name, layout);
     return def;
@@ -491,14 +513,20 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
 
   if (const auto cxxRecord = llvm::dyn_cast<clang::CXXRecordDecl>(decl)) {
     auto resolveBases = [&](auto &&bases) {
-      return bases | collect([&](auto &cls) -> Opt<std::shared_ptr<StructDef>> {
+      return bases | collect([&](auto &cls) -> Opt<std::pair<std::shared_ptr<StructDef>, std::pair<size_t, size_t>>> {
                const auto clsTpe = cls.getType().getDesugaredType(context);
                if (auto baseRecordTpe = llvm::dyn_cast<clang::RecordType>(cls.getType().getDesugaredType(context))) {
-                 return handleRecord(baseRecordTpe->getDecl(), r);
-               } else {
-                 r.push(Stmt::Comment("ERROR: Base class " + dump_to_string(*clsTpe, context) + " of " + name + " is not a Record"));
+                 if (auto cxxBaseDecl = llvm::dyn_cast<clang::CXXRecordDecl>(baseRecordTpe->getDecl())) {
+                   return std::pair{handleRecord(cxxBaseDecl, r),
+                                    std::pair{context.getASTRecordLayout(decl).getBaseClassOffset(cxxBaseDecl).getQuantity(),
+                                              context.getTypeSizeInChars(baseRecordTpe).getQuantity()}};
+                 }
+                 r.push(Stmt::Comment(
+                     fmt::format("ERROR: Base class {} of {} is not a CXXRecordDecl", dump_to_string(*clsTpe, context), name)));
                  return {};
                }
+               r.push(Stmt::Comment(fmt::format("ERROR: Base class {} of {} is not a RecordType", dump_to_string(*clsTpe, context), name)));
+               return {};
              }) |
              to_vector();
     };
@@ -940,7 +968,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                   return Expr::RefTo(select(r, {}, allocated), {}, ctorTpe, TypeSpace::Global());
                 }();
 
-          std::vector<Expr::Any> args;
+          Vec<Expr::Any> args;
           for (size_t i = 0; i < expr->getNumArgs(); ++i)
             args.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn->args[i + 1].named.tpe)));
           auto _ = r.newVar(Expr::Invoke(name, std::vector{r.newVar(conform(r, instance, ptrTo(ctorTpe)))} ^ concat(args), Type::Unit0()));
@@ -956,15 +984,14 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         if (fn->args.size() != expr->getNumArgs() + 1) {
           raise("Arg count mismatch, expected " + std::to_string(fn->args.size()) + " but was " + std::to_string(expr->getNumArgs() + 1));
         }
-        std::vector<Expr::Any> args;
+        Vec<Expr::Any> args;
         for (size_t i = 0; i < expr->getNumArgs(); ++i)
           args.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn->args[i].named.tpe)));
 
-        const auto actualReceiverTpe = fn->args | collect([&](auto &arg) -> Opt<Type::Any> {
+        const auto actualReceiverTpe = fn->args | collect_first([&](auto &arg) -> Opt<Type::Any> {
                                          if (arg.named.tpe.template is<Type::Ptr>() && arg.named.symbol == This) return arg.named.tpe;
                                          return {};
-                                       }) |
-                                       head_maybe();
+                                       })  ;
         if (!actualReceiverTpe) raise("No actual receiver type in member call");
 
         return Expr::Invoke(                                                         //
@@ -977,17 +1004,16 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 
         if (fn->args.size() != expr->getNumArgs())
           raise("Arg count mismatch, expected " + std::to_string(fn->args.size()) + " but was " + std::to_string(expr->getNumArgs()));
-        std::vector<Expr::Any> args;
+        Vec<Expr::Any> args;
         auto receiver = r.newVar(handleExpr(expr->getArg(0), r));
         for (size_t i = 1; i < expr->getNumArgs(); ++i) {
           args.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn->args[i].named.tpe)));
         }
 
-        const auto actualReceiverTpe = fn->args | collect([&](auto &arg) -> Opt<Type::Any> {
+        const auto actualReceiverTpe = fn->args | collect_first([&](auto &arg) -> Opt<Type::Any> {
                                          if (arg.named.tpe.template is<Type::Ptr>() && arg.named.symbol == This) return arg.named.tpe;
                                          return {};
-                                       }) |
-                                       head_maybe();
+                                       });
         if (!actualReceiverTpe) raise("No actual receiver type in member call");
 
         return Expr::Invoke(                                                         //
@@ -1003,100 +1029,99 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           auto builtinName = qualifiedName.substr(builtinPrefix.size());
 
           auto args = expr->arguments() | map([&](auto &arg) { return r.newVar(handleExpr(arg, r)); }) | to_vector();
-          std::unordered_map<std::string, std::function<Expr::Any()>> specs{
-              {"gpu_global_idx",
-               [&]() -> Expr::Any {
-                 if (args.size() != 1) {
-                   r.push(Stmt::Comment("illegal arg count for gpu_global_idx"));
-                   return Expr::Poison(handleType(expr->getType(), r));
-                 } else return Expr::Any(Expr::SpecOp(Spec::GpuGlobalIdx(args[0])));
-               }},
-              {"gpu_global_size",
-               [&]() -> Expr::Any {
-                 if (args.size() != 1) {
-                   r.push(Stmt::Comment("illegal arg count for gpu_global_size"));
-                   return Expr::Poison(handleType(expr->getType(), r));
-                 } else return Expr::Any(Expr::SpecOp(Spec::GpuGlobalSize(args[0])));
-               }},
+          Map<std::string, std::function<Expr::Any()>> specs{{"gpu_global_idx",
+                                                              [&]() -> Expr::Any {
+                                                                if (args.size() != 1) {
+                                                                  r.push(Stmt::Comment("illegal arg count for gpu_global_idx"));
+                                                                  return Expr::Poison(handleType(expr->getType(), r));
+                                                                } else return Expr::Any(Expr::SpecOp(Spec::GpuGlobalIdx(args[0])));
+                                                              }},
+                                                             {"gpu_global_size",
+                                                              [&]() -> Expr::Any {
+                                                                if (args.size() != 1) {
+                                                                  r.push(Stmt::Comment("illegal arg count for gpu_global_size"));
+                                                                  return Expr::Poison(handleType(expr->getType(), r));
+                                                                } else return Expr::Any(Expr::SpecOp(Spec::GpuGlobalSize(args[0])));
+                                                              }},
 
-              {"gpu_group_idx",
-               [&]() -> Expr::Any {
-                 if (args.size() != 1) {
-                   r.push(Stmt::Comment("illegal arg count for gpu_group_idx"));
-                   return Expr::Poison(handleType(expr->getType(), r));
-                 } else return Expr::Any(Expr::SpecOp(Spec::GpuGroupIdx(args[0])));
-               }},
-              {"gpu_group_size",
-               [&]() -> Expr::Any {
-                 if (args.size() != 1) {
-                   r.push(Stmt::Comment("illegal arg count for gpu_group_size"));
-                   return Expr::Poison(handleType(expr->getType(), r));
-                 } else return Expr::Any(Expr::SpecOp(Spec::GpuGroupSize(args[0])));
-               }},
+                                                             {"gpu_group_idx",
+                                                              [&]() -> Expr::Any {
+                                                                if (args.size() != 1) {
+                                                                  r.push(Stmt::Comment("illegal arg count for gpu_group_idx"));
+                                                                  return Expr::Poison(handleType(expr->getType(), r));
+                                                                } else return Expr::Any(Expr::SpecOp(Spec::GpuGroupIdx(args[0])));
+                                                              }},
+                                                             {"gpu_group_size",
+                                                              [&]() -> Expr::Any {
+                                                                if (args.size() != 1) {
+                                                                  r.push(Stmt::Comment("illegal arg count for gpu_group_size"));
+                                                                  return Expr::Poison(handleType(expr->getType(), r));
+                                                                } else return Expr::Any(Expr::SpecOp(Spec::GpuGroupSize(args[0])));
+                                                              }},
 
-              {"gpu_local_idx",
-               [&]() -> Expr::Any {
-                 if (args.size() != 1) {
-                   r.push(Stmt::Comment("illegal arg count for gpu_local_idx"));
-                   return Expr::Poison(handleType(expr->getType(), r));
-                 } else return Expr::Any(Expr::SpecOp(Spec::GpuLocalIdx(args[0])));
-               }},
-              {"gpu_local_size",
-               [&]() -> Expr::Any {
-                 if (args.size() != 1) {
-                   r.push(Stmt::Comment("illegal arg count for gpu_local_size"));
-                   return Expr::Poison(handleType(expr->getType(), r));
-                 } else return Expr::Any(Expr::SpecOp(Spec::GpuLocalSize(args[0])));
-               }},
+                                                             {"gpu_local_idx",
+                                                              [&]() -> Expr::Any {
+                                                                if (args.size() != 1) {
+                                                                  r.push(Stmt::Comment("illegal arg count for gpu_local_idx"));
+                                                                  return Expr::Poison(handleType(expr->getType(), r));
+                                                                } else return Expr::Any(Expr::SpecOp(Spec::GpuLocalIdx(args[0])));
+                                                              }},
+                                                             {"gpu_local_size",
+                                                              [&]() -> Expr::Any {
+                                                                if (args.size() != 1) {
+                                                                  r.push(Stmt::Comment("illegal arg count for gpu_local_size"));
+                                                                  return Expr::Poison(handleType(expr->getType(), r));
+                                                                } else return Expr::Any(Expr::SpecOp(Spec::GpuLocalSize(args[0])));
+                                                              }},
 
-              {"gpu_barrier_global",
-               [&]() -> Expr::Any {
-                 if (args.size() != 0) {
-                   r.push(Stmt::Comment("illegal arg count for gpu_barrier_global"));
-                   return Expr::Poison(handleType(expr->getType(), r));
-                 } else return Expr::Any(Expr::SpecOp(Spec::GpuBarrierGlobal()));
-               }},
-              {"gpu_barrier_local",
-               [&]() -> Expr::Any {
-                 if (args.size() != 0) {
-                   r.push(Stmt::Comment("illegal arg count for gpu_barrier_local"));
-                   return Expr::Poison(handleType(expr->getType(), r));
-                 } else return Expr::Any(Expr::SpecOp(Spec::GpuBarrierLocal()));
-               }},
-              {"gpu_barrier_all",
-               [&]() -> Expr::Any {
-                 if (args.size() != 0) {
-                   r.push(Stmt::Comment("illegal arg count for gpu_barrier_all"));
-                   return Expr::Poison(handleType(expr->getType(), r));
-                 } else return Expr::Any(Expr::SpecOp(Spec::GpuBarrierAll()));
-               }},
+                                                             {"gpu_barrier_global",
+                                                              [&]() -> Expr::Any {
+                                                                if (args.size() != 0) {
+                                                                  r.push(Stmt::Comment("illegal arg count for gpu_barrier_global"));
+                                                                  return Expr::Poison(handleType(expr->getType(), r));
+                                                                } else return Expr::Any(Expr::SpecOp(Spec::GpuBarrierGlobal()));
+                                                              }},
+                                                             {"gpu_barrier_local",
+                                                              [&]() -> Expr::Any {
+                                                                if (args.size() != 0) {
+                                                                  r.push(Stmt::Comment("illegal arg count for gpu_barrier_local"));
+                                                                  return Expr::Poison(handleType(expr->getType(), r));
+                                                                } else return Expr::Any(Expr::SpecOp(Spec::GpuBarrierLocal()));
+                                                              }},
+                                                             {"gpu_barrier_all",
+                                                              [&]() -> Expr::Any {
+                                                                if (args.size() != 0) {
+                                                                  r.push(Stmt::Comment("illegal arg count for gpu_barrier_all"));
+                                                                  return Expr::Poison(handleType(expr->getType(), r));
+                                                                } else return Expr::Any(Expr::SpecOp(Spec::GpuBarrierAll()));
+                                                              }},
 
-              {"gpu_fence_global",
-               [&]() -> Expr::Any {
-                 if (args.size() != 0) {
-                   r.push(Stmt::Comment("illegal arg count for gpu_fence_global"));
-                   return Expr::Poison(handleType(expr->getType(), r));
-                 } else return Expr::Any(Expr::SpecOp(Spec::GpuFenceGlobal()));
-               }},
-              {"gpu_fence_local",
-               [&]() -> Expr::Any {
-                 if (args.size() != 0) {
-                   r.push(Stmt::Comment("illegal arg count for gpu_fence_local"));
-                   return Expr::Poison(handleType(expr->getType(), r));
-                 } else return Expr::Any(Expr::SpecOp(Spec::GpuFenceLocal()));
-               }},
-              {"gpu_fence_all",
-               [&]() -> Expr::Any {
-                 if (args.size() != 0) {
-                   r.push(Stmt::Comment("illegal arg count for gpu_fence_all"));
-                   return Expr::Poison(handleType(expr->getType(), r));
-                 } else return Expr::Any(Expr::SpecOp(Spec::GpuFenceAll()));
-               }}
+                                                             {"gpu_fence_global",
+                                                              [&]() -> Expr::Any {
+                                                                if (args.size() != 0) {
+                                                                  r.push(Stmt::Comment("illegal arg count for gpu_fence_global"));
+                                                                  return Expr::Poison(handleType(expr->getType(), r));
+                                                                } else return Expr::Any(Expr::SpecOp(Spec::GpuFenceGlobal()));
+                                                              }},
+                                                             {"gpu_fence_local",
+                                                              [&]() -> Expr::Any {
+                                                                if (args.size() != 0) {
+                                                                  r.push(Stmt::Comment("illegal arg count for gpu_fence_local"));
+                                                                  return Expr::Poison(handleType(expr->getType(), r));
+                                                                } else return Expr::Any(Expr::SpecOp(Spec::GpuFenceLocal()));
+                                                              }},
+                                                             {"gpu_fence_all",
+                                                              [&]() -> Expr::Any {
+                                                                if (args.size() != 0) {
+                                                                  r.push(Stmt::Comment("illegal arg count for gpu_fence_all"));
+                                                                  return Expr::Poison(handleType(expr->getType(), r));
+                                                                } else return Expr::Any(Expr::SpecOp(Spec::GpuFenceAll()));
+                                                              }}
 
           };
 
           return specs                               //
-                 ^ get(builtinName)                  //
+                 ^ get_maybe(builtinName)                  //
                  ^ fold([](auto &f) { return f(); }, //
                         [&]() -> Expr::Any {         //
                           r.push(Stmt::Comment("unimplemented builtin " + builtinName));
@@ -1106,7 +1131,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           auto [name, fn] = handleCall(expr->getCalleeDecl()->getAsFunction(), r);
           if (fn->args.size() != expr->getNumArgs())
             raise("Arg count mismatch, expected " + std::to_string(fn->args.size()) + " but was " + std::to_string(expr->getNumArgs()));
-          std::vector<Expr::Any> args;
+          Vec<Expr::Any> args;
           for (size_t i = 0; i < expr->getNumArgs(); ++i)
             args.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn->args[i].named.tpe)));
           return Expr::Any(Expr::Invoke(name, args, handleType(expr->getCallReturnType(context), r)));
@@ -1161,7 +1186,7 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
   visitDyn<bool>(
       root, //
       [&](const clang::CompoundStmt *stmt) {
-        std::vector<Stmt::Any> xs;
+        Vec<Stmt::Any> xs;
         for (auto s : stmt->body())
           handleStmt(s, r);
         return true;
@@ -1169,7 +1194,7 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
       [&](const clang::DeclStmt *stmt) {
         for (auto decl : stmt->decls()) {
 
-          auto createInit = [](auto tpe, const Type::Any &comp) -> std::optional<Expr::Any> {
+          auto createInit = [](auto tpe, const Type::Any &comp) -> Opt<Expr::Any> {
             if (auto ptrTpe = comp.get<Type::Ptr>(); ptrTpe) {
               if (auto constArrTpe = llvm::dyn_cast<clang::ConstantArrayType>(tpe); constArrTpe) {
                 auto lit = constArrTpe->getSize().getLimitedValue();

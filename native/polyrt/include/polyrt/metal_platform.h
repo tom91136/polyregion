@@ -48,7 +48,7 @@ public:
   POLYREGION_EXPORT void freeDevice(uintptr_t ptr) override;
   POLYREGION_EXPORT std::optional<void *> mallocShared(size_t size, Access access) override;
   POLYREGION_EXPORT void freeShared(void *ptr) override;
-  POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue() override;
+  POLYREGION_EXPORT std::unique_ptr<DeviceQueue> createQueue(const std::chrono::duration<int64_t> &timeout) override;
 };
 
 class POLYREGION_EXPORT MetalDeviceQueue : public DeviceQueue {
@@ -59,7 +59,8 @@ class POLYREGION_EXPORT MetalDeviceQueue : public DeviceQueue {
   std::function<MTL::Buffer *(uintptr_t)> queryMemObject;
 
 public:
-  POLYREGION_EXPORT MetalDeviceQueue(decltype(store) store, decltype(queue) queue, decltype(queryMemObject) queryMemObject);
+  POLYREGION_EXPORT MetalDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(store) store, decltype(queue) queue,
+                                     decltype(queryMemObject) queryMemObject);
   POLYREGION_EXPORT ~MetalDeviceQueue() override;
   POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t size, const MaybeCallback &cb) override;
   POLYREGION_EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, void *dst, size_t size, const MaybeCallback &cb) override;
@@ -68,6 +69,7 @@ public:
                                             const std::vector<Type> &types, //
                                             std::vector<std::byte> argData, //
                                             const Policy &policy, const MaybeCallback &cb) override;
+  POLYREGION_EXPORT void enqueueWaitBlocking() override;
 };
 
 } // namespace polyregion::runtime::metal

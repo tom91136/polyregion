@@ -1,13 +1,13 @@
 
-// #CASE: with
-// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native -o {output} {input}
-// #RUN: POLYSTL_PLATFORM=host {output}
-//   #EXPECT: OK
+#pragma region case: with
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: OK
 
-// #CASE: without
-// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -o {output} {input}
-// #RUN: POLYSTL_PLATFORM=host {output}
-//   #EXPECT: OK
+#pragma region case: without
+#pragma region do: polycpp {polycpp_defaults} -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: OK
 
 #include <cstdio>
 

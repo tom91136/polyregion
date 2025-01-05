@@ -1,13 +1,8 @@
-
-// #CASE: capture
-// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fsanitize=address -fstdpar -fstdpar-arch=host@native   -o {output} {input}
-// #RUN: POLYSTL_PLATFORM=host {output}
-//   #EXPECT: 42 43 44
-
-// #CASE: capture-no-builtin
-// #RUN: polycpp -fno-crash-diagnostics -O1 -g3 -fno-builtin-std-forward -fsanitize=address -fstdpar -fstdpar-arch=host@native -o {output} {input}
-// #RUN: POLYSTL_PLATFORM=host {output}
-//   #EXPECT: 42 43 44
+#pragma region case: capture
+#pragma region using: flags=-fno-builtin-std-forward,
+#pragma region do: polycpp {polycpp_defaults} {polycpp_stdpar} {flags} -o {output} {input}
+#pragma region do: {output}
+#pragma region requires: 42 43 44
 
 #include <cstddef>
 #include <cstdio>

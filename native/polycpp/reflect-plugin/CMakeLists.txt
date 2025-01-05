@@ -1,19 +1,18 @@
 include(AddLLVM)
 
-add_library(ptr-reflect-rt INTERFACE)
-target_sources(ptr-reflect-rt
+add_library(rt-reflect INTERFACE)
+target_sources(rt-reflect
         PRIVATE
         PUBLIC FILE_SET HEADERS
         TYPE HEADERS
         BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}
         FILES
-        ptr-reflect-rt/rt.hpp
-        ptr-reflect-rt/rt_hashmap.hpp
-        ptr-reflect-rt/rt_memory.hpp
-        ptr-reflect-rt/rt_protected.hpp
-        ptr-reflect-rt/rt_reflect.hpp
+        rt-reflect/rt.hpp
+        rt-reflect/rt_hashmap.hpp
+        rt-reflect/rt_memory.hpp
+        rt-reflect/rt_protected.hpp
+        rt-reflect/rt_reflect.hpp
 )
-
 
 add_llvm_pass_plugin(polystl-reflect-plugin
         plugin.cpp
@@ -21,6 +20,12 @@ add_llvm_pass_plugin(polystl-reflect-plugin
         intrinsics_gen
         BUILDTREE_ONLY
 )
+
+add_executable(rt-reflect-tests test/map.cpp)
+target_link_libraries(rt-reflect-tests PRIVATE Catch2::Catch2WithMain rt-reflect)
+target_compile_options(rt-reflect-tests PRIVATE ${COMPILE_OPTIONS})
+target_link_options(rt-reflect-tests PRIVATE ${LINK_OPTIONS})
+
 
 if (NOT WIN32)
     target_include_directories(polystl-reflect-plugin PRIVATE ${LLVM_INCLUDE_DIRS})
@@ -31,6 +36,6 @@ if (NOT WIN32)
             PUBLIC
             polycommon
             Aspartame::Aspartame
-            ptr-reflect-rt)
+            rt-reflect)
 endif ()
 

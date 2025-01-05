@@ -4,7 +4,6 @@
 
 #include "polyregion/concurrency_utils.hpp"
 #include "polyregion/stream.hpp"
-#include "polyregion/utils.hpp"
 #include "polyrt/runtime.h"
 
 #include <thread>
@@ -68,7 +67,7 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
 
     stmts.push_back(ret(Unit0Const()));
 
-    return function("stream_" + name + suffix, args, Unit ,{FunctionAttr::Entry(), FunctionAttr::Exported()})(stmts);
+    return function("stream_" + name + suffix, args, Unit, {FunctionAttr::Entry(), FunctionAttr::Exported()})(stmts);
   };
 
   auto copy = mkCpuStreamFn( //
@@ -214,10 +213,10 @@ int main() {
       {runtime::Backend::RelocatableObject, compiletime::Target::Object_LLVM_AArch64, "apple-m1"},
       {runtime::Backend::Metal, compiletime::Target::Source_C_Metal1_0, ""},
 #else
-      // {runtime::Backend::CUDA, compiletime::Target::Object_LLVM_NVPTX64, "sm_89"},
-  // {runtime::Backend::HIP, compiletime::Target::Object_LLVM_AMDGCN, "gfx1036"},
-            // {runtime::Backend::HSA, compiletime::Target::Object_LLVM_AMDGCN, "gfx1036"},
-     // {runtime::Backend::RelocatableObject, compiletime::Target::Object_LLVM_x86_64, "x86-64-v3"},
+      {runtime::Backend::CUDA, compiletime::Target::Object_LLVM_NVPTX64, "sm_89"},
+      {runtime::Backend::HIP, compiletime::Target::Object_LLVM_AMDGCN, "gfx1036"},
+      {runtime::Backend::HSA, compiletime::Target::Object_LLVM_AMDGCN, "gfx1036"},
+      {runtime::Backend::RelocatableObject, compiletime::Target::Object_LLVM_x86_64, "x86-64-v3"},
 #endif
   };
 
@@ -255,7 +254,7 @@ int main() {
 
         std::string suffix = "_float";
 
-         stream::Kernels<std::pair<std::string, std::string>> kernelSpecs;
+        stream::Kernels<std::pair<std::string, std::string>> kernelSpecs;
         if (d->singleEntryPerModule() && false) {
           //      for (auto &[module_, data] : imageGroups)
           //        d->loadModule(module_, data);
@@ -290,7 +289,7 @@ int main() {
           }
         };
 
-         stream::runStream<float>(                  //
+        stream::runStream<float>(                              //
             runtime::Type::Float32, size, times, groups,       //
             "Explicit: " + platform->name(), platform->kind(), //
             *d, kernelSpecs, true, fValidate, fValidateSum);

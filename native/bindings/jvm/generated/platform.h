@@ -3,7 +3,7 @@
 #include <stdexcept>
 namespace polyregion::generated::registry::Platform {
 
-[[maybe_unused]] jobject createQueue0(JNIEnv *env, jclass, jlong nativePeer, jobject owner);
+[[maybe_unused]] jobject createQueue0(JNIEnv *env, jclass, jlong nativePeer, jobject owner, jlong timeoutMillis);
 [[maybe_unused]] void deleteDevicePeer0(JNIEnv *env, jclass, jlong nativePeer);
 [[maybe_unused]] void deletePlatformPeer0(JNIEnv *env, jclass, jlong nativePeer);
 [[maybe_unused]] void deleteQueuePeer0(JNIEnv *env, jclass, jlong nativePeer);
@@ -34,7 +34,7 @@ static void registerMethods(JNIEnv *env) {
   if (clazz) return;
   clazz = reinterpret_cast<jclass>(env->NewGlobalRef(env->FindClass("polyregion/jvm/runtime/Platform")));
   const static JNINativeMethod methods[15] = {
-      {(char *)"createQueue0", (char *)"(JLpolyregion/jvm/runtime/Device;)Lpolyregion/jvm/runtime/Device$Queue;", (void *)&createQueue0},
+      {(char *)"createQueue0", (char *)"(JLpolyregion/jvm/runtime/Device;J)Lpolyregion/jvm/runtime/Device$Queue;", (void *)&createQueue0},
       {(char *)"deleteDevicePeer0", (char *)"(J)V", (void *)&deleteDevicePeer0},
       {(char *)"deletePlatformPeer0", (char *)"(J)V", (void *)&deletePlatformPeer0},
       {(char *)"deleteQueuePeer0", (char *)"(J)V", (void *)&deleteQueuePeer0},

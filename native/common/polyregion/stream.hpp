@@ -1,18 +1,20 @@
-#include "concurrency_utils.hpp"
-#include "polyrt/runtime.h"
+#pragma once
+
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <iostream>
 #include <numeric>
-#include <algorithm>
+
+#include "concurrency_utils.hpp"
+#include "polyrt/runtime.h"
 
 namespace polyregion::stream {
 
 using namespace polyregion::runtime;
 using namespace polyregion::concurrency_utils;
 
-template <typename N>
-constexpr std::tuple<N, N, N, N> expectedResult(size_t times, size_t size, N a, N b, N c, N scalar) {
+template <typename N> constexpr std::tuple<N, N, N, N> expectedResult(size_t times, size_t size, N a, N b, N c, N scalar) {
   N goldA = a;
   N goldB = b;
   N goldC = c;
@@ -163,7 +165,7 @@ void runStream(Type tpe, size_t size, size_t times, size_t groups, const std::st
   auto c_d = d.mallocDeviceTyped<T>(size, Access::RW);
   auto sum_d = d.mallocDeviceTyped<T>(sumGroups, Access::RW);
 
-  auto q = d.createQueue();
+  auto q = d.createQueue(std::chrono::seconds(10));
 
   std::vector<T> a(size, StartA<T>);
   std::vector<T> b(size, StartB<T>);
@@ -212,9 +214,9 @@ void runStream(Type tpe, size_t size, size_t times, size_t groups, const std::st
 
   validate<T, FValidate, FValidateSum>(size, times, fValidate, fValidateSum, a, b, c, sum);
 
-//  for (size_t i = 0; i < sum.size(); ++i) {
-//    std::cout << "[" << i << "]" << sum[i] << std::endl;
-//  }
+  //  for (size_t i = 0; i < sum.size(); ++i) {
+  //    std::cout << "[" << i << "]" << sum[i] << std::endl;
+  //  }
 
   if (verbose) {
     renderElapsed<T>(title + "; " + d.name() + " #" + std::to_string(d.id()), tpe, size, times, elapsed,
@@ -230,7 +232,7 @@ void runStreamShared(Type tpe, size_t size, size_t times, size_t groups, const s
   if (auto checkAlloc = d.mallocShared(1, Access::RW); checkAlloc) {
     d.freeShared(*checkAlloc);
   } else {
-    std::cerr << "shared allocation unsupported for device: " + d.name()  << ", skipping..." << std::endl;
+    std::cerr << "shared allocation unsupported for device: " + d.name() << ", skipping..." << std::endl;
     return;
   }
   bool threaded = kind == PlatformKind::HostThreaded;
@@ -245,7 +247,7 @@ void runStreamShared(Type tpe, size_t size, size_t times, size_t groups, const s
   auto c_d = *d.mallocSharedTyped<T>(size, Access::RW);
   auto sum_d = *d.mallocSharedTyped<T>(sumGroups, Access::RW);
 
-  auto q = d.createQueue();
+  auto q = d.createQueue(std::chrono::seconds(10));
 
   std::vector<T> a(size, StartA<T>);
   std::vector<T> b(size, StartB<T>);
@@ -283,9 +285,9 @@ void runStreamShared(Type tpe, size_t size, size_t times, size_t groups, const s
 
   validate<T, FValidate, FValidateSum>(size, times, fValidate, fValidateSum, a, b, c, sum);
 
-//  for (size_t i = 0; i < sum.size(); ++i) {
-//    std::cout << "[" << i << "]" << sum[i] << std::endl;
-//  }
+  //  for (size_t i = 0; i < sum.size(); ++i) {
+  //    std::cout << "[" << i << "]" << sum[i] << std::endl;
+  //  }
 
   if (verbose) {
     renderElapsed<T>(title + "; " + d.name() + " #" + std::to_string(d.id()), tpe, size, times, elapsed,
