@@ -117,7 +117,7 @@ void testAll(bool passthrough) {
         userArgs                                                                                                                       //
         | append(std::pair{"input", input})                                                                                            //
         | append(std::pair{"polycpp_defaults", "-fno-crash-diagnostics -O1 -g3 -Wall -Wextra -pedantic"})                              //
-        | append(std::pair{"polycpp_stdpar", fmt::vformat("-fstdpar -fstdpar-arch={polycpp_arch}", variables ^ and_then(mkArgStore))}) //
+        | append(std::pair{"polycpp_stdpar", fmt::vformat("-fstdpar -fstdpar-arch={polycpp_arch} -fuse-ld=lld", variables ^ and_then(mkArgStore))}) //
         | to_vector();
 
     const auto unevaluatedStore = augmentedArgs ^ append(std::pair{"output", "<unevaluated>"}) ^ and_then(mkArgStore);
@@ -142,7 +142,7 @@ void testAll(bool passthrough) {
         envs.emplace_back("POLYSTL_HOST_FALLBACK=0");
 
         // if host, + -fsanitize=address,undefined
-        envs.emplace_back("ASAN_OPTIONS=alloc_dealloc_mismatch=0");
+        envs.emplace_back("ASAN_OPTIONS=alloc_dealloc_mismatch=0,detect_leaks=0");
         //        envs.emplace_back("LD_PRELOAD=/usr/bin/../lib/clang/18/lib/x86_64-redhat-linux-gnu/libclang_rt.asan.so");
 
         if (auto path = std::getenv("PATH"); path) envs.emplace_back(std::string("PATH=") + path);

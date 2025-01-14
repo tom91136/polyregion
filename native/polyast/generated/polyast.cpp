@@ -1039,6 +1039,39 @@ POLYREGION_EXPORT bool Expr::Bool1Const::operator==(const Base& rhs_) const {
 Expr::Bool1Const::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<Bool1Const>(*this)); }
 Expr::Any Expr::Bool1Const::widen() const { return Any(*this); };
 
+Expr::NullPtrConst::NullPtrConst(Type::Any comp, TypeSpace::Any space) noexcept : Expr::Base(Type::Ptr(comp,{},space)), comp(std::move(comp)), space(std::move(space)) {}
+uint32_t Expr::NullPtrConst::id() const { return variant_id; };
+size_t Expr::NullPtrConst::hash_code() const { 
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(comp)>()(comp) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(space)>()(space) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+namespace Expr { std::ostream &operator<<(std::ostream &os, const Expr::NullPtrConst &x) { return x.dump(os); } }
+std::ostream &Expr::NullPtrConst::dump(std::ostream &os) const {
+  os << "NullPtrConst(";
+  os << comp;
+  os << ',';
+  os << space;
+  os << ')';
+  return os;
+}
+Expr::NullPtrConst Expr::NullPtrConst::withComp(const Type::Any &v_) const {
+  return Expr::NullPtrConst(v_, space);
+}
+Expr::NullPtrConst Expr::NullPtrConst::withSpace(const TypeSpace::Any &v_) const {
+  return Expr::NullPtrConst(comp, v_);
+}
+POLYREGION_EXPORT bool Expr::NullPtrConst::operator==(const Expr::NullPtrConst& rhs) const {
+  return (this->comp == rhs.comp) && (this->space == rhs.space);
+}
+POLYREGION_EXPORT bool Expr::NullPtrConst::operator==(const Base& rhs_) const {
+  if(rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Expr::NullPtrConst&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+Expr::NullPtrConst::operator Expr::Any() const { return std::static_pointer_cast<Base>(std::make_shared<NullPtrConst>(*this)); }
+Expr::Any Expr::NullPtrConst::widen() const { return Any(*this); };
+
 Expr::SpecOp::SpecOp(Spec::Any op) noexcept : Expr::Base(op.tpe()), op(std::move(op)) {}
 uint32_t Expr::SpecOp::id() const { return variant_id; };
 size_t Expr::SpecOp::hash_code() const { 
@@ -4520,6 +4553,7 @@ std::size_t std::hash<polyregion::polyast::Expr::IntS32Const>::operator()(const 
 std::size_t std::hash<polyregion::polyast::Expr::IntS64Const>::operator()(const polyregion::polyast::Expr::IntS64Const &x) const noexcept { return x.hash_code(); }
 std::size_t std::hash<polyregion::polyast::Expr::Unit0Const>::operator()(const polyregion::polyast::Expr::Unit0Const &x) const noexcept { return x.hash_code(); }
 std::size_t std::hash<polyregion::polyast::Expr::Bool1Const>::operator()(const polyregion::polyast::Expr::Bool1Const &x) const noexcept { return x.hash_code(); }
+std::size_t std::hash<polyregion::polyast::Expr::NullPtrConst>::operator()(const polyregion::polyast::Expr::NullPtrConst &x) const noexcept { return x.hash_code(); }
 std::size_t std::hash<polyregion::polyast::Expr::SpecOp>::operator()(const polyregion::polyast::Expr::SpecOp &x) const noexcept { return x.hash_code(); }
 std::size_t std::hash<polyregion::polyast::Expr::MathOp>::operator()(const polyregion::polyast::Expr::MathOp &x) const noexcept { return x.hash_code(); }
 std::size_t std::hash<polyregion::polyast::Expr::IntrOp>::operator()(const polyregion::polyast::Expr::IntrOp &x) const noexcept { return x.hash_code(); }

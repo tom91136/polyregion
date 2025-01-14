@@ -110,6 +110,9 @@ std::string repr(const Expr::Any& e) {
     if (auto _x = e.get<Expr::Bool1Const>()) {
       return fmt::format("bool1({})", _x->value);
     }
+    if (auto _x = e.get<Expr::NullPtrConst>()) {
+      return fmt::format("nullptr[{}, {}]", repr(_x->comp), repr(_x->space));
+    }
     if (auto _x = e.get<Expr::SpecOp>()) {
       return [&]{
       if (_x->op.is<Spec::Assert>()) { return "'assert"s; }

@@ -112,16 +112,17 @@ TEST_CASE("initialise more than once", "[compiler]") {
   compiler::initialise();
 }
 
-TEST_CASE("inheritance", "[compiler]") {
+TEST_CASE("recursive struct", "[compiler]") {
   compiler::initialise();
   const auto tpe = GENERATE(from_range(PrimitiveTypesNoUnit));
   DYNAMIC_SECTION(tpe) {
-    Named x("x", tpe);
-    StructDef def("foo", {x});
     Type::Struct fooTpe("foo");
+    Named x("x", tpe);
+    Named next("next", Ptr(fooTpe));
+    StructDef def("foo", {x, next});
     auto entry = function("foo", {}, fooTpe)({
         let("foo") = fooTpe, //
-        Mut(Select({"foo"_(fooTpe)}, x), generateConstValue(tpe)),
+        Mut(Select({"foo"_(fooTpe)}, x), generateConstValue(tpe)), Mut(Select({"foo"_(fooTpe)}, next), NullPtrConst(fooTpe, Global)),
         ret("foo"_(fooTpe)) //
     });
     assertCompile(program({def}, {entry}));

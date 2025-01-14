@@ -54,8 +54,9 @@ object PolyAST {
     case IntS32Const(value: Int)   extends Expr(Type.IntS32)
     case IntS64Const(value: Long)  extends Expr(Type.IntS64)
 
-    case Unit0Const                 extends Expr(Type.Unit0)
-    case Bool1Const(value: Boolean) extends Expr(Type.Bool1)
+    case Unit0Const                                  extends Expr(Type.Unit0)
+    case Bool1Const(value: Boolean)                  extends Expr(Type.Bool1)
+    case NullPtrConst(comp: Type, space: Type.Space) extends Expr(Type.Ptr(comp, None, space))
 
     case SpecOp(op: Spec) extends Expr(op.tpe)
     case MathOp(op: Math) extends Expr(op.tpe)
@@ -371,8 +372,10 @@ object PolyAST {
       case Expr.IntS32Const(x) => s"i32($x)"
       case Expr.IntS64Const(x) => s"i64($x)"
 
-      case Expr.Unit0Const    => "unit0(())"
-      case Expr.Bool1Const(x) => s"bool1($x)"
+      case Expr.Unit0Const             => "unit0(())"
+      case Expr.Bool1Const(x)          => s"bool1($x)"
+      case Expr.NullPtrConst(x, space) => s"nullptr[${x.repr}, ${space.repr}]"
+
       case Expr.SpecOp(op) =>
         op match {
           case Spec.Assert             => "'assert"
@@ -512,7 +515,9 @@ object PolyAST {
   extension (f: Function) {
     inline def repr: String = s"def ${f.name}(${f.args
         .map(a => s"${a.named.symbol}: ${a.named.tpe.repr}${a.pos.map(s => s"/*${s.repr}*/").getOrElse("")}")
-        .mkString(", ")}): ${f.rtn.repr} /*${f.attrs.map(_.repr).mkString(", ")}*/ ${"{"}\n${f.body.map(_.repr).mkString("\n").indent(2)}\n${"}"}"
+        .mkString(", ")}): ${f.rtn.repr} /*${f.attrs
+        .map(_.repr)
+        .mkString(", ")}*/ ${"{"}\n${f.body.map(_.repr).mkString("\n").indent(2)}\n${"}"}"
   }
 
   extension (s: StructDef) {

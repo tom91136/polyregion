@@ -1894,9 +1894,50 @@ struct POLYREGION_EXPORT Bool1Const : Expr::Base {
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Bool1Const &);
 };
 
+struct POLYREGION_EXPORT NullPtrConst : Expr::Base {
+  Type::Any comp;
+  TypeSpace::Any space;
+  constexpr static uint32_t variant_id = 13;
+  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
+  [[nodiscard]] POLYREGION_EXPORT Expr::NullPtrConst withComp(const Type::Any &_v) const;
+  [[nodiscard]] POLYREGION_EXPORT Expr::NullPtrConst withSpace(const TypeSpace::Any &_v) const;
+  template<typename T, typename U> POLYREGION_EXPORT void collect_where(std::vector<U> &results_, 
+      const std::function<std::optional<U>(const T&)> &f) const {
+    if constexpr (std::is_same_v<T, NullPtrConst>) {
+      if(auto x_ = f(*this)) { results_.emplace_back(*x_); }
+    }
+    comp.collect_where<T, U>(results_, f);
+    space.collect_where<T, U>(results_, f);
+  }
+  template<typename T, typename U> [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(
+      const std::function<std::optional<U>(const T&)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template<typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template<typename T> [[nodiscard]] POLYREGION_EXPORT NullPtrConst modify_all(
+      const std::function<T(const T&)> &f) const {
+    if constexpr (std::is_same_v<T, NullPtrConst>) {
+      return f(*this);
+    }
+    return Expr::NullPtrConst(comp.modify_all<T>(f), space.modify_all<T>(f));
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Expr::NullPtrConst &) const;
+  NullPtrConst(Type::Any comp, TypeSpace::Any space) noexcept;
+  POLYREGION_EXPORT operator Any() const;
+  [[nodiscard]] POLYREGION_EXPORT Any widen() const;
+  POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::NullPtrConst &);
+};
+
 struct POLYREGION_EXPORT SpecOp : Expr::Base {
   Spec::Any op;
-  constexpr static uint32_t variant_id = 13;
+  constexpr static uint32_t variant_id = 14;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
@@ -1934,7 +1975,7 @@ struct POLYREGION_EXPORT SpecOp : Expr::Base {
 
 struct POLYREGION_EXPORT MathOp : Expr::Base {
   Math::Any op;
-  constexpr static uint32_t variant_id = 14;
+  constexpr static uint32_t variant_id = 15;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
@@ -1972,7 +2013,7 @@ struct POLYREGION_EXPORT MathOp : Expr::Base {
 
 struct POLYREGION_EXPORT IntrOp : Expr::Base {
   Intr::Any op;
-  constexpr static uint32_t variant_id = 15;
+  constexpr static uint32_t variant_id = 16;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
@@ -2011,7 +2052,7 @@ struct POLYREGION_EXPORT IntrOp : Expr::Base {
 struct POLYREGION_EXPORT Select : Expr::Base {
   std::vector<Named> init;
   Named last;
-  constexpr static uint32_t variant_id = 16;
+  constexpr static uint32_t variant_id = 17;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
@@ -2057,7 +2098,7 @@ struct POLYREGION_EXPORT Select : Expr::Base {
 
 struct POLYREGION_EXPORT Poison : Expr::Base {
   Type::Any t;
-  constexpr static uint32_t variant_id = 17;
+  constexpr static uint32_t variant_id = 18;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
@@ -2096,7 +2137,7 @@ struct POLYREGION_EXPORT Poison : Expr::Base {
 struct POLYREGION_EXPORT Cast : Expr::Base {
   Expr::Any from;
   Type::Any as;
-  constexpr static uint32_t variant_id = 18;
+  constexpr static uint32_t variant_id = 19;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
@@ -2138,7 +2179,7 @@ struct POLYREGION_EXPORT Index : Expr::Base {
   Expr::Any lhs;
   Expr::Any idx;
   Type::Any comp;
-  constexpr static uint32_t variant_id = 19;
+  constexpr static uint32_t variant_id = 20;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
@@ -2183,7 +2224,7 @@ struct POLYREGION_EXPORT RefTo : Expr::Base {
   std::optional<Expr::Any> idx;
   Type::Any comp;
   TypeSpace::Any space;
-  constexpr static uint32_t variant_id = 20;
+  constexpr static uint32_t variant_id = 21;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
@@ -2233,7 +2274,7 @@ struct POLYREGION_EXPORT Alloc : Expr::Base {
   Type::Any comp;
   Expr::Any size;
   TypeSpace::Any space;
-  constexpr static uint32_t variant_id = 21;
+  constexpr static uint32_t variant_id = 22;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
@@ -2277,7 +2318,7 @@ struct POLYREGION_EXPORT Invoke : Expr::Base {
   std::string name;
   std::vector<Expr::Any> args;
   Type::Any rtn;
-  constexpr static uint32_t variant_id = 22;
+  constexpr static uint32_t variant_id = 23;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
@@ -2326,7 +2367,7 @@ struct POLYREGION_EXPORT Annotated : Expr::Base {
   Expr::Any expr;
   std::optional<SourcePosition> pos;
   std::optional<std::string> comment;
-  constexpr static uint32_t variant_id = 23;
+  constexpr static uint32_t variant_id = 24;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
@@ -6404,7 +6445,7 @@ POLYREGION_EXPORT polyregion::polyast::Type::Any polyregion::polyast::Type::Any:
   if(!result_) { std::abort();  }
   return *result_;
 }
-namespace polyregion::polyast::Expr{ using All = alternatives<Float16Const, Float32Const, Float64Const, IntU8Const, IntU16Const, IntU32Const, IntU64Const, IntS8Const, IntS16Const, IntS32Const, IntS64Const, Unit0Const, Bool1Const, SpecOp, MathOp, IntrOp, Select, Poison, Cast, Index, RefTo, Alloc, Invoke, Annotated>; }
+namespace polyregion::polyast::Expr{ using All = alternatives<Float16Const, Float32Const, Float64Const, IntU8Const, IntU16Const, IntU32Const, IntU64Const, IntS8Const, IntS16Const, IntS32Const, IntS64Const, Unit0Const, Bool1Const, NullPtrConst, SpecOp, MathOp, IntrOp, Select, Poison, Cast, Index, RefTo, Alloc, Invoke, Annotated>; }
 template<typename T> constexpr POLYREGION_EXPORT bool polyregion::polyast::Expr::Any::is() const { 
   static_assert((polyregion::polyast::Expr::All::contains<T>), "type not part of the variant");
   return T::variant_id == _v->id();
@@ -7065,6 +7106,9 @@ template <> struct hash<polyregion::polyast::Expr::Unit0Const> {
 };
 template <> struct hash<polyregion::polyast::Expr::Bool1Const> {
   std::size_t operator()(const polyregion::polyast::Expr::Bool1Const &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::Expr::NullPtrConst> {
+  std::size_t operator()(const polyregion::polyast::Expr::NullPtrConst &) const noexcept;
 };
 template <> struct hash<polyregion::polyast::Expr::SpecOp> {
   std::size_t operator()(const polyregion::polyast::Expr::SpecOp &) const noexcept;

@@ -112,6 +112,8 @@ namespace Expr {
 [[nodiscard]] POLYREGION_EXPORT json unit0const_to_json(const Expr::Unit0Const &);
 [[nodiscard]] POLYREGION_EXPORT Expr::Bool1Const bool1const_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json bool1const_to_json(const Expr::Bool1Const &);
+[[nodiscard]] POLYREGION_EXPORT Expr::NullPtrConst nullptrconst_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json nullptrconst_to_json(const Expr::NullPtrConst &);
 [[nodiscard]] POLYREGION_EXPORT Expr::SpecOp specop_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json specop_to_json(const Expr::SpecOp &);
 [[nodiscard]] POLYREGION_EXPORT Expr::MathOp mathop_from_json(const json &);

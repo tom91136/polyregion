@@ -175,6 +175,7 @@ Expr::Any Remapper::RemapContext::newVar(const Expr::Any &expr) {
                           [&](const Expr::IntS64Const &) { return expr; },  //
                           [&](const Expr::Unit0Const &) { return expr; },   //
                           [&](const Expr::Bool1Const &) { return expr; },   //
+                          [&](const Expr::NullPtrConst &) { return expr; },   //
 
                           [&](const Expr::SpecOp &x) { return mkSelect(x); }, //
                           [&](const Expr::MathOp &x) { return mkSelect(x); }, //

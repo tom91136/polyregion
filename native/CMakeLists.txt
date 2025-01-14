@@ -85,6 +85,8 @@ if (USE_LINKER)
             string(REPLACE lld ld.lld USE_LINKER "${USE_LINKER}")
         endif ()
         set(COMMON_LINK_OPTIONS --ld-path=${USE_LINKER} ${COMMON_LINK_OPTIONS})
+        set(LLVM_LINKER_DETECTED ON)
+        set(LLVM_LINKER_IS_LLD ON)
     endif ()
 endif ()
 
@@ -402,18 +404,21 @@ set(COMPILE_OPTIONS
         "$<$<CONFIG:RelWithDebInfo>:${COMMON_RELEASE_OPTIONS}>"
         "$<$<CONFIG:Release>:${COMMON_RELEASE_OPTIONS}>"
         "$<$<CONFIG:Debug>:${COMMON_DEBUG_OPTIONS}>"
+        CACHE INTERNAL ""
 )
 
 set(LINK_OPTIONS
         ${COMMON_LINK_OPTIONS}
         ${STRICT_LINK_OPTIONS}
         "$<$<CONFIG:Debug>:${COMMON_DEBUG_OPTIONS}>"
+        CACHE INTERNAL ""
 )
 
 set(PLUGIN_LINK_OPTIONS
         ${COMMON_LINK_OPTIONS}
         ${PLUGIN_LINK_OPTIONS}
         "$<$<CONFIG:Debug>:${COMMON_DEBUG_OPTIONS}>"
+        CACHE INTERNAL ""
 )
 
 add_subdirectory(common)

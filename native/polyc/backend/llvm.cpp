@@ -222,6 +222,9 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
         return ConstantInt::get(llvm::Type::getInt1Ty(C.actual), 0);
       },
       [&](const Expr::Bool1Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt1Ty(C.actual), x.value); },
+      [&](const Expr::NullPtrConst &x) -> ValPtr {
+        return llvm::ConstantPointerNull::get(llvm::PointerType::get(resolveType(x.tpe), C.addressSpace(x.space)));
+      },
 
       [&](const Expr::SpecOp &x) -> ValPtr { return targetHandler->mkSpecVal(*this, x); },
       [&](const Expr::MathOp &x) -> ValPtr { return targetHandler->mkMathVal(*this, x); },

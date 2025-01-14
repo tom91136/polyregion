@@ -104,9 +104,9 @@ endforeach()
         add_custom_command(TARGET ${outlib} POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E echo "[merge_static_libs:${CMAKE_RANLIB}] $<TARGET_FILE:${outlib}>"
                 COMMAND ${CMAKE_RANLIB} $<TARGET_FILE:${outlib}>)
-        add_custom_command(TARGET ${outlib} POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E echo "[merge_static_libs:${CMAKE_STRIP}] $<TARGET_FILE:${outlib}>"
-                COMMAND ${CMAKE_STRIP} --enable-deterministic-archives --strip-unneeded $<TARGET_FILE:${outlib}>)
+#        add_custom_command(TARGET ${outlib} POST_BUILD
+#                COMMAND ${CMAKE_COMMAND} -E echo "[merge_static_libs:${CMAKE_STRIP}] $<TARGET_FILE:${outlib}>"
+#                COMMAND ${CMAKE_STRIP} --enable-deterministic-archives --strip-unneeded $<TARGET_FILE:${outlib}>)
     endif ()
     string(REPLACE "-" "_" outlib_normalised "${outlib}")
     file(WRITE ${dummyfile}.base "const char* ${outlib_normalised}_sublibs=\"${libs}\";\n")

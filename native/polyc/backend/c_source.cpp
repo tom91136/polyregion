@@ -39,8 +39,9 @@ struct CLAddressSpaceTracePass {
         [](const Expr::IntS32Const &x) -> SpacedExpr { return {x}; }, //
         [](const Expr::IntS64Const &x) -> SpacedExpr { return {x}; }, //
 
-        [](const Expr::Unit0Const &x) -> SpacedExpr { return {x}; }, //
-        [](const Expr::Bool1Const &x) -> SpacedExpr { return {x}; }, //
+        [](const Expr::Unit0Const &x) -> SpacedExpr { return {x}; },   //
+        [](const Expr::Bool1Const &x) -> SpacedExpr { return {x}; },   //
+        [](const Expr::NullPtrConst &x) -> SpacedExpr { return {x}; }, //
 
         [&](const Expr::SpecOp &x) -> SpacedExpr { return {x.modify_all<Expr::Any>(mapExpr0_)}; },
         [&](const Expr::IntrOp &x) -> SpacedExpr { return {x.modify_all<Expr::Any>(mapExpr0_)}; },
@@ -82,10 +83,10 @@ struct CLAddressSpaceTracePass {
 
   static Function mapFn(const Function &fn) {
 
-    StackScope scope{.vars = fn.args                                                              //
+    StackScope scope{.vars = fn.args                                                                  //
                              | flat_map([&](auto &arg) { return arg.template collect_all<Named>(); }) //
-                             | filter([](auto &n) { return n.tpe.template is<Type::Ptr>(); })     //
-                             | map([](auto &n) { return std::pair(n.symbol, n); })                //
+                             | filter([](auto &n) { return n.tpe.template is<Type::Ptr>(); })         //
+                             | map([](auto &n) { return std::pair(n.symbol, n); })                    //
                              | to<Map>()};
 
     auto body = fn.body ^ map([&](auto &s) {
@@ -105,11 +106,11 @@ struct CLAddressSpaceTracePass {
                       .template modify_all<Expr::Any>([&](auto &e) { return mapExpr(e, scope).actual; }); //
                 });
 
-    const auto tracedRtnTpes = body                                                                    //
+    const auto tracedRtnTpes = body                                                                        //
                                | flat_map([&](auto &s) { return s.template collect_all<Stmt::Return>(); }) //
-                               | map([&](auto &r) { return r.value.tpe(); })                           //
-                               | distinct()                                                            //
-                               | to_vector();                                                          //
+                               | map([&](auto &r) { return r.value.tpe(); })                               //
+                               | distinct()                                                                //
+                               | to_vector();                                                              //
     if (tracedRtnTpes.size() != 1) {
       body.emplace_back(Stmt::Comment(
           fmt::format("CLASTP: Return type diverged for function {}, types={}", fn.name, tracedRtnTpes | mk_string(", ", show_repr))));
@@ -141,7 +142,7 @@ struct CLAddressSpaceTracePass {
     while (true) {
       const auto specialised =
           functionTable                                                                                //
-          | flat_map([&](auto, auto &f) { return f->template collect_all<Expr::Invoke>(); })               //
+          | flat_map([&](auto, auto &f) { return f->template collect_all<Expr::Invoke>(); })           //
           | collect([&](auto &inv) -> std::optional<std::pair<Signature, std::shared_ptr<Function>>> { //
               if (const auto sig = sigOf(inv); !functionTable.contains(sig)) {
                 if (auto spec =
@@ -289,8 +290,9 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
       [](const Expr::IntS32Const &x) { return fmt::format("{}", x.value); }, //
       [](const Expr::IntS64Const &x) { return fmt::format("{}", x.value); }, //
 
-      [](const Expr::Unit0Const &x) { return "/*void*/"s; },                  //
-      [](const Expr::Bool1Const &x) { return x.value ? "true"s : "false"s; }, //
+      [](const Expr::Unit0Const &x) { return "/*void*/"s; },                                  //
+      [](const Expr::Bool1Const &x) { return x.value ? "true"s : "false"s; },                 //
+      [&](const Expr::NullPtrConst &x) { return fmt::format("NULL /*{}*/", mkTpe(x.comp)); }, //
 
       [&](const Expr::SpecOp &x) {
         struct DialectAccessor {

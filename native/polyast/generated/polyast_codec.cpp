@@ -473,6 +473,18 @@ json Expr::bool1const_to_json(const Expr::Bool1Const& x_) {
   return json::array({value});
 }
 
+Expr::NullPtrConst Expr::nullptrconst_from_json(const json& j_) { 
+  auto comp = Type::any_from_json(j_.at(0));
+  auto space = TypeSpace::any_from_json(j_.at(1));
+  return {comp, space};
+}
+
+json Expr::nullptrconst_to_json(const Expr::NullPtrConst& x_) { 
+  auto comp = Type::any_to_json(x_.comp);
+  auto space = TypeSpace::any_to_json(x_.space);
+  return json::array({comp, space});
+}
+
 Expr::SpecOp Expr::specop_from_json(const json& j_) { 
   auto op = Spec::any_from_json(j_.at(0));
   return Expr::SpecOp(op);
@@ -630,17 +642,18 @@ Expr::Any Expr::any_from_json(const json& j_) {
   case 10: return Expr::ints64const_from_json(t_);
   case 11: return Expr::unit0const_from_json(t_);
   case 12: return Expr::bool1const_from_json(t_);
-  case 13: return Expr::specop_from_json(t_);
-  case 14: return Expr::mathop_from_json(t_);
-  case 15: return Expr::introp_from_json(t_);
-  case 16: return Expr::select_from_json(t_);
-  case 17: return Expr::poison_from_json(t_);
-  case 18: return Expr::cast_from_json(t_);
-  case 19: return Expr::index_from_json(t_);
-  case 20: return Expr::refto_from_json(t_);
-  case 21: return Expr::alloc_from_json(t_);
-  case 22: return Expr::invoke_from_json(t_);
-  case 23: return Expr::annotated_from_json(t_);
+  case 13: return Expr::nullptrconst_from_json(t_);
+  case 14: return Expr::specop_from_json(t_);
+  case 15: return Expr::mathop_from_json(t_);
+  case 16: return Expr::introp_from_json(t_);
+  case 17: return Expr::select_from_json(t_);
+  case 18: return Expr::poison_from_json(t_);
+  case 19: return Expr::cast_from_json(t_);
+  case 20: return Expr::index_from_json(t_);
+  case 21: return Expr::refto_from_json(t_);
+  case 22: return Expr::alloc_from_json(t_);
+  case 23: return Expr::invoke_from_json(t_);
+  case 24: return Expr::annotated_from_json(t_);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
@@ -673,27 +686,29 @@ json Expr::any_to_json(const Expr::Any& x_) {
   ,
   [](const Expr::Bool1Const &y_) -> json { return {12, Expr::bool1const_to_json(y_)}; }
   ,
-  [](const Expr::SpecOp &y_) -> json { return {13, Expr::specop_to_json(y_)}; }
+  [](const Expr::NullPtrConst &y_) -> json { return {13, Expr::nullptrconst_to_json(y_)}; }
   ,
-  [](const Expr::MathOp &y_) -> json { return {14, Expr::mathop_to_json(y_)}; }
+  [](const Expr::SpecOp &y_) -> json { return {14, Expr::specop_to_json(y_)}; }
   ,
-  [](const Expr::IntrOp &y_) -> json { return {15, Expr::introp_to_json(y_)}; }
+  [](const Expr::MathOp &y_) -> json { return {15, Expr::mathop_to_json(y_)}; }
   ,
-  [](const Expr::Select &y_) -> json { return {16, Expr::select_to_json(y_)}; }
+  [](const Expr::IntrOp &y_) -> json { return {16, Expr::introp_to_json(y_)}; }
   ,
-  [](const Expr::Poison &y_) -> json { return {17, Expr::poison_to_json(y_)}; }
+  [](const Expr::Select &y_) -> json { return {17, Expr::select_to_json(y_)}; }
   ,
-  [](const Expr::Cast &y_) -> json { return {18, Expr::cast_to_json(y_)}; }
+  [](const Expr::Poison &y_) -> json { return {18, Expr::poison_to_json(y_)}; }
   ,
-  [](const Expr::Index &y_) -> json { return {19, Expr::index_to_json(y_)}; }
+  [](const Expr::Cast &y_) -> json { return {19, Expr::cast_to_json(y_)}; }
   ,
-  [](const Expr::RefTo &y_) -> json { return {20, Expr::refto_to_json(y_)}; }
+  [](const Expr::Index &y_) -> json { return {20, Expr::index_to_json(y_)}; }
   ,
-  [](const Expr::Alloc &y_) -> json { return {21, Expr::alloc_to_json(y_)}; }
+  [](const Expr::RefTo &y_) -> json { return {21, Expr::refto_to_json(y_)}; }
   ,
-  [](const Expr::Invoke &y_) -> json { return {22, Expr::invoke_to_json(y_)}; }
+  [](const Expr::Alloc &y_) -> json { return {22, Expr::alloc_to_json(y_)}; }
   ,
-  [](const Expr::Annotated &y_) -> json { return {23, Expr::annotated_to_json(y_)}; }
+  [](const Expr::Invoke &y_) -> json { return {23, Expr::invoke_to_json(y_)}; }
+  ,
+  [](const Expr::Annotated &y_) -> json { return {24, Expr::annotated_to_json(y_)}; }
   );
 }
 
@@ -2084,13 +2099,13 @@ json compileresult_to_json(const CompileResult& x_) {
 json hashed_from_json(const json& j_) { 
   auto hash_ = j_.at(0).get<std::string>();
   auto data_ = j_.at(1);
-  if(hash_ != "79dba0723dca843251a6aae293c06b5b") {
-   throw std::runtime_error("Expecting ADT hash to be 79dba0723dca843251a6aae293c06b5b, but was " + hash_);
+  if(hash_ != "204586c037ab49a39ae15f3ec5f0c088") {
+   throw std::runtime_error("Expecting ADT hash to be 204586c037ab49a39ae15f3ec5f0c088, but was " + hash_);
   }
   return data_;
 }
 
 json hashed_to_json(const json& x_) { 
-  return json::array({"79dba0723dca843251a6aae293c06b5b", x_});
+  return json::array({"204586c037ab49a39ae15f3ec5f0c088", x_});
 }
 } // namespace polyregion::polyast
