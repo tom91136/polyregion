@@ -1,6 +1,6 @@
 
 if (UNIX)
-    list(APPEND RUNTIME_COMPONENTS compiler-rt libcxx libcxxabi libunwind openmp)
+    list(APPEND RUNTIME_COMPONENTS compiler-rt libcxx libcxxabi libunwind)
     #    list(APPEND RUNTIME_TARGETS cxx-headers)
 elseif (WIN32)
     # needs a bootstrapping build for libcxx because cl.exe isn't support
@@ -31,6 +31,9 @@ set(LLVM_TARGETS_TO_BUILD
 
 # Enable the LLVM projects and runtimes.
 set(LLVM_ENABLE_PROJECTS
+        flang
+        mlir
+        openmp
         clang
         clang-tools-extra
         lld
@@ -117,6 +120,8 @@ set(LLVM_DISTRIBUTION_COMPONENTS
         # Linker
         lld
 
+        flang-new
+
         # Clang tools
         clang
         clang-tidy
@@ -153,6 +158,7 @@ set(LLVM_DISTRIBUTION_COMPONENTS
         llvm-size
         llvm-strings
         llvm-strip
+        llvm-config
 
 
         CACHE STRING "")

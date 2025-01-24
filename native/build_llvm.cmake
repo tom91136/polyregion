@@ -55,6 +55,28 @@ if (CXX_SUPPORTS_NOSTDINCXX_FLAG)" RUNTIME_CMAKELIST_CONTENT "${RUNTIME_CMAKELIS
     message(STATUS "Patched CXX_SUPPORTS_NOSTDINCXX_FLAG in ${RUNTIME_CMAKELIST_PATH}")
 endif ()
 
+# Always execute branch with NOT CMAKE_CROSSCOMPILING in Flang
+# FIXME this works for LLVM 19.1.6, need to recheck for LLVM 20
+set(F18_CMAKELIST_PATH "${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src/flang/tools/f18/CMakeLists.txt")
+file(READ "${F18_CMAKELIST_PATH}" F18_CMAKELIST_CONTENT)
+
+set(CROSSCOMPILING_CONDITION_REGEX "if \\(NOT CMAKE_CROSSCOMPILING\\)")
+
+if (F18_CMAKELIST_CONTENT MATCHES "${CROSSCOMPILING_CONDITION_REGEX}")
+    string(REGEX REPLACE "${CROSSCOMPILING_CONDITION_REGEX}" "# NOT CMAKE_CROSSCOMPILING patched at ${CURRENT_TIME}
+if (NOT CMAKE_CROSSCOMPILING OR TRUE)" F18_CMAKELIST_CONTENT "${F18_CMAKELIST_CONTENT}")
+    file(WRITE "${F18_CMAKELIST_PATH}" "${F18_CMAKELIST_CONTENT}")
+    message(STATUS "Patched NOT CMAKE_CROSSCOMPILING in ${F18_CMAKELIST_PATH}")
+endif ()
+
+# Replace ` flang-new ` with ` $<TARGET_FILE:flang-new> ` in f18
+# FIXME this works for LLVM 19.1.6, need to recheck for LLVM 20
+if (F18_CMAKELIST_CONTENT MATCHES " flang-new ")
+    string(REPLACE " flang-new " " $<TARGET_FILE:flang-new> " F18_CMAKELIST_CONTENT "${F18_CMAKELIST_CONTENT}")
+    file(WRITE "${F18_CMAKELIST_PATH}" "${F18_CMAKELIST_CONTENT}")
+    message(STATUS "Patched ' flang-new ' with ' $<TARGET_FILE:flang-new> ' in ${F18_CMAKELIST_PATH}")
+endif ()
+
 ### End patches ###
 
 if (UNIX AND NOT APPLE)
@@ -64,7 +86,7 @@ endif ()
 if (UNIX AND (CMAKE_BUILD_TYPE STREQUAL "Debug"))
     list(APPEND BUILD_OPTIONS "-DLLVM_USE_SANITIZER=Address\\;Undefined")
     list(APPEND BUILD_OPTIONS "-DBUILD_SHARED_LIBS=ON")
-#    list(APPEND BUILD_OPTIONS "-DLLVM_DYLIB_COMPONENTS=all")
+    #    list(APPEND BUILD_OPTIONS "-DLLVM_DYLIB_COMPONENTS=all")
 endif ()
 
 if (CMAKE_CXX_COMPILER)
@@ -132,21 +154,31 @@ else ()
 endif ()
 
 execute_process(
-        COMMAND ${CMAKE_COMMAND}
+        COMMAND
+        ${CMAKE_COMMAND} -E env ASAN_OPTIONS=detect_leaks=0 --
+        ${CMAKE_COMMAND}
         --build ${LLVM_BUILD_DIR}
         --target
         install-distribution
 
+        module_files                  # Build Fortran module files
+        tools/flang/tools/f18/install # Install Fortran module files
+
         install-cmake-exports
         install-clang-cmake-exports
+        install-flang-cmake-exports
         install-lld-cmake-exports
 
         install-llvm-libraries
         install-clang-libraries
+        install-flang-libraries
+
+        install-llvm-headers
+        install-clang-headers
+        install-flang-headers
         -- -k 0 # keep going even with error
         WORKING_DIRECTORY ${LLVM_BUILD_DIR}
         RESULT_VARIABLE SUCCESS)
-
 if (NOT SUCCESS EQUAL "0")
     message(FATAL_ERROR "LLVM build did not succeed")
 else ()
