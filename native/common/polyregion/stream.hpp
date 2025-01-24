@@ -7,11 +7,12 @@
 #include <numeric>
 
 #include "concurrency_utils.hpp"
-#include "polyrt/runtime.h"
+#include "polyinvoke/runtime.h"
 
 namespace polyregion::stream {
 
 using namespace polyregion::runtime;
+using namespace polyregion::invoke;
 using namespace polyregion::concurrency_utils;
 
 template <typename N> constexpr std::tuple<N, N, N, N> expectedResult(size_t times, size_t size, N a, N b, N c, N scalar) {
@@ -61,11 +62,11 @@ template <typename T>
 void renderElapsed(std::string title, Type tpe, size_t size, size_t times, const Kernels<std::vector<double>> &elapsed,
                    const std::vector<std::string> &extraLines) {
 
-  const auto sizesMB = Kernels<double>{.copy = double(2 * sizeof(T) * size) / 1000 / 1000,  //
-                                       .mul = double(2 * sizeof(T) * size) / 1000 / 1000,   //
-                                       .add = double(3 * sizeof(T) * size) / 1000 / 1000,   //
-                                       .triad = double(3 * sizeof(T) * size) / 1000 / 1000, //
-                                       .dot = double(2 * sizeof(T) * size) / 1000 / 1000};
+  const auto sizesMB = Kernels<double>{.copy = static_cast<double>(2 * sizeof(T) * size) / 1000 / 1000,  //
+                                       .mul = static_cast<double>(2 * sizeof(T) * size) / 1000 / 1000,   //
+                                       .add = static_cast<double>(3 * sizeof(T) * size) / 1000 / 1000,   //
+                                       .triad = static_cast<double>(3 * sizeof(T) * size) / 1000 / 1000, //
+                                       .dot = static_cast<double>(2 * sizeof(T) * size) / 1000 / 1000};
 
   auto bandwidth = [&](auto &&f) { return *f(sizesMB) / *std::min_element(f(elapsed)->begin(), f(elapsed)->end()); };
 
@@ -120,7 +121,7 @@ Kernels<std::vector<double>> dispatch(Type tpe, size_t size, size_t times, size_
   Policy forPolicy = threaded ? Policy{{groups, 1, 1}, {}} //
                               : Policy{{size / groups, 1, 1}, {{{groups, 1, 1}, {}}}};
   Policy dotPolicy = threaded ? Policy{{groups, 1, 1}, {}} //
-                              : Policy{{sumGroups, 1, 1}, {{{groups, 1, 1}, sizeof(T) * (groups)}}};
+                              : Policy{{sumGroups, 1, 1}, {{{groups, 1, 1}, sizeof(T) * groups}}};
   // G=256 * L=2
 
   for (size_t i = 0; i < times; i++) {
@@ -155,7 +156,7 @@ void runStream(Type tpe, size_t size, size_t times, size_t groups, const std::st
 
   bool threaded = kind == PlatformKind::HostThreaded;
 
-  auto [begin, end] = sequencePair(splitStaticExclusive<int64_t>(0, int64_t(size), int64_t(groups)));
+  auto [begin, end] = sequencePair(splitStaticExclusive<int64_t>(0, static_cast<int64_t>(size), static_cast<int64_t>(groups)));
   auto begins_d = threaded ? d.mallocDeviceTyped<int64_t>(begin.size(), Access::RO) : 0;
   auto ends_d = threaded ? d.mallocDeviceTyped<int64_t>(end.size(), Access::RO) : 0;
   auto sumGroups = threaded ? groups : 256;
@@ -237,9 +238,9 @@ void runStreamShared(Type tpe, size_t size, size_t times, size_t groups, const s
   }
   bool threaded = kind == PlatformKind::HostThreaded;
 
-  auto [begin, end] = splitStaticExclusive2<int64_t>(0, int64_t(size), int64_t(groups));
-  auto begins_d = threaded ? *d.mallocSharedTyped<int64_t>(begin.size(), Access::RO) : 0;
-  auto ends_d = threaded ? *d.mallocSharedTyped<int64_t>(end.size(), Access::RO) : 0;
+  auto [begin, end] = splitStaticExclusive2<int64_t>(0, static_cast<int64_t>(size), static_cast<int64_t>(groups));
+  auto begins_d = threaded ? *d.mallocSharedTyped<int64_t>(begin.size(), Access::RO) : nullptr;
+  auto ends_d = threaded ? *d.mallocSharedTyped<int64_t>(end.size(), Access::RO) : nullptr;
   auto sumGroups = threaded ? groups : 256;
 
   auto a_d = *d.mallocSharedTyped<T>(size, Access::RW);

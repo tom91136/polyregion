@@ -8,8 +8,7 @@
 #include <vector>
 
 #include "polystl.h"
-
-// #include_next <execution>
+#include "polyrt/rt.h"
 
 namespace polyregion::polystl::details {
 
@@ -61,7 +60,7 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
   auto N = std::thread::hardware_concurrency();
   POLYSTL_LOG("<%s, %ld> Dispatch", __func__, global);
 
-  switch (currentPlatform->kind()) {
+  switch (polyrt::currentPlatform->kind()) {
     case polyregion::runtime::PlatformKind::HostThreaded: {
       auto [b, e] = splitStaticExclusive<int64_t>(0, global, 1);
       const int64_t *begin = b.data();
@@ -72,12 +71,12 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
         }
       };
 
-      const KernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::HostThreaded>(kernel);
+      const polyrt::KernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::HostThreaded>(kernel);
 
       std::byte argData[sizeof(decltype(kernel))];
       std::memcpy(argData, &kernel, sizeof(decltype(kernel)));
       for (size_t i = 0; i < bundle.objectCount; ++i) {
-        if (!loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
+        if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
         dispatchHostThreaded(b.size(), &argData, bundle.moduleName);
         return;
       }

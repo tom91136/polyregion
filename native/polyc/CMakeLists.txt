@@ -25,7 +25,7 @@ target_include_directories(polyc-tests PRIVATE . ../include ../runtime)
 target_include_directories(polyc-benchmarks PRIVATE . ../include ../runtime)
 target_include_directories(polyc-bin PRIVATE . ../include ${fire_SOURCE_DIR})
 
-target_include_directories(polyc-driver PUBLIC . ../include ${fire_SOURCE_DIR} )
+target_include_directories(polyc-driver PUBLIC . ../include ${fire_SOURCE_DIR})
 target_include_directories(polyc PUBLIC
         ${LLVM_INCLUDE_DIRS}
         ${LLD_INCLUDE_DIRS}
@@ -103,11 +103,10 @@ target_link_libraries(polyc
         ${LLVM_LIBS}
         ${LLD_LIBS}
 )
-target_link_libraries(polyc-tests PRIVATE polyc polyrt-static Catch2::Catch2WithMain Aspartame::Aspartame)
-target_link_libraries(polyc-benchmarks PRIVATE polyc polyrt-static)
+target_link_libraries(polyc-tests PRIVATE polyc polyinvoke-static Catch2::Catch2WithMain Aspartame::Aspartame)
+target_link_libraries(polyc-benchmarks PRIVATE polyc polyinvoke-static)
 target_link_libraries(polyc-driver PRIVATE polyc ${LLVM_LIBS} ${LLD_LIBS} Aspartame::Aspartame)
 target_link_libraries(polyc-bin PRIVATE polyc polyc-driver)
-
 
 target_compile_options(polyc-tests PRIVATE ${COMPILE_OPTIONS})
 target_compile_options(polyc-benchmarks PRIVATE ${COMPILE_OPTIONS})

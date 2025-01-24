@@ -1,6 +1,0 @@
-kernel void _fma(device float &a [[ buffer(0) ]],
-                 device float &b [[ buffer(1) ]],
-                 device float &c [[ buffer(2) ]],
-                 device float *out [[ buffer(3) ]]) {
-    out[0] = a * b + c;
-}

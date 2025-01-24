@@ -10,10 +10,10 @@
 #include "generated/platform.h"
 #include "generated/platforms.h"
 #include "jni_utils.h"
-#include "polyrt/runtime.h"
+#include "polyinvoke/runtime.h"
 
 using namespace polyregion;
-namespace rt = ::runtime;
+namespace rt = ::invoke;
 namespace gen = ::generated;
 using namespace gen::registry;
 

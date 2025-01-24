@@ -25,7 +25,7 @@ function(add_copy_header_set_targets target commands_var)
 #    add_custom_target(${name} ${commands})
 endfunction()
 
-foreach (header_target polycommon polyrt polystl rt-reflect)
+foreach (header_target polycommon polystl polyinvoke-obj polyrt-obj rt-reflect)
     add_copy_header_set_targets(${header_target} header_commands)
 endforeach ()
 add_custom_target(polycpp-header-resource ${header_commands})
@@ -53,7 +53,7 @@ endif ()
 add_executable(polycpp driver_main.cpp)
 add_dependencies(polycpp polycpp-lib-resource polycpp-header-resource)
 
-add_executable(polycpp-test test/test_all.cpp test/unit/memory.cpp)
+add_executable(polycpp-test test/test_all.cpp)
 add_dependencies(polycpp-test polycpp polystl)
 target_include_directories(polycpp-test PRIVATE
         ../include
@@ -75,7 +75,7 @@ endforeach ()
 set(POLYCPP_CLANG_DRIVER "${Clang_DIST_DIR}/bin/clang++")
 set(POLYCPP_POLYSTL_LIB "$<TARGET_FILE:polystl>")
 set(POLYCPP_POLYSTL_LIBRARY_PATH "$<TARGET_FILE_DIR:polystl>")
-set(POLYCPP_POLYSTL_INCLUDE "${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polycpp>/$<TARGET_NAME:polystl>/include:${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polyrt>/include:${CMAKE_SOURCE_DIR}/include:${CMAKE_SOURCE_DIR}/include")
+set(POLYCPP_POLYSTL_INCLUDE "${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polycpp>/$<TARGET_NAME:polystl>/include:${CMAKE_SOURCE_DIR}/$<TARGET_NAME:polyinvoke>/include:${CMAKE_SOURCE_DIR}/include:${CMAKE_SOURCE_DIR}/include")
 # ===  end test_all.h.in variables ===
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/test/test_all.h.in" "${CMAKE_CURRENT_BINARY_DIR}/test_all.h.in")
 
@@ -87,11 +87,12 @@ file(GENERATE
 target_include_directories(polycpp PRIVATE ../compiler ../include ${LLVM_INCLUDE_DIRS})
 target_link_libraries(polycpp PRIVATE
         polyc-driver
+        polyfront-options
         Aspartame::Aspartame
         fmt::fmt
 )
 target_link_libraries(polycpp-test PRIVATE
-        polycommon
+        polyfront-lit
         LLVMSupport
         fmt::fmt
         Aspartame::Aspartame

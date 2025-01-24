@@ -5,6 +5,7 @@
 #include "catch2/generators/catch_generators_range.hpp"
 
 #include "fmt/args.h"
+#include "polyfront/lit.hpp"
 #include "polyregion/io.hpp"
 #include "test_all.h"
 #include "llvm/Support/Program.h"
@@ -13,98 +14,10 @@
 
 using namespace aspartame;
 
-std::string extractTestName(const std::string &path) {
-  std::string prefix = "check_";
-  size_t prefixPos = path.find(prefix);
-  size_t extPos = path.find_last_of('.');
-  if (prefixPos != std::string::npos && extPos != std::string::npos) {
-    return path.substr(prefixPos + prefix.size(), extPos - (prefixPos + prefix.size()));
-  } else return "";
-}
-
-struct TestCase {
-  struct Run {
-    using Expect = std::pair<std::optional<int>, std::string>;
-    std::string command;
-    std::vector<Expect> expect;
-  };
-  using Variable = std::pair<std::string, std::vector<std::string>>;
-  std::string name;
-  std::vector<std::vector<std::pair<std::string, std::string>>> matrices;
-  std::vector<Run> runs;
-
-  static std::vector<TestCase> parseTestCase(std::ifstream &file,          //
-                                             const std::string &directive, //
-                                             const std::vector<Variable> &extraMatrices = {}) {
-    TestCase testCase;
-
-    auto parseNormalised = [&]<typename F>(std::ifstream &s, F f) {
-      auto pos = s.tellg();
-      std::vector<typename std::invoke_result_t<F, std::string &>::value_type> xs;
-      for (std::string line; std::getline(s, line);) {
-        line = line ^ trim();
-        if (!(line ^ starts_with(directive))) continue;
-        line = line ^ replace_all(directive, "");
-        if (auto t = f(line)) {
-          xs.emplace_back(*t);
-          pos = s.tellg();
-        } else break;
-      }
-      s.seekg(pos); // backtrack on failure
-      return xs;
-    };
-
-    auto parseRight = [](const std::string &prefix, const std::string &line) -> std::optional<std::string> {
-      const auto pos = line.find(prefix);
-      return pos != std::string::npos ? std::optional{line.substr(pos + prefix.size())} : std::nullopt;
-    };
-
-    auto parseExpects = [&]() {
-      return parseNormalised(file, [&](const std::string &line) -> std::optional<Run::Expect> {
-        return parseRight("requires", line) ^ map([](auto &expect) {
-                 const auto delimIdx = expect.find(':', 0);
-                 auto lineNum = expect ^ starts_with("@") ? std::optional{std::stoi(expect.substr(1, delimIdx))} : std::nullopt;
-                 return Run::Expect{lineNum, expect.substr(delimIdx + 1) ^ trim()};
-               });
-      });
-    };
-
-    auto parseRuns = [&]() {
-      return parseNormalised(file, [&](const std::string &line) -> std::optional<Run> {
-        return parseRight("do:", line) ^ map([&](auto &runLine) { return Run{runLine ^ trim(), parseExpects()}; });
-      });
-    };
-
-    auto parseMatrices = [&]() {
-      return parseNormalised(file, [&](const std::string &line) -> std::optional<std::vector<Variable>> {
-        return parseRight("using:", line) ^ map([](auto &matrixLine) {
-                 return matrixLine ^ trim() ^ split(' ') ^ map([](auto &v) {
-                          const auto delimIdx = v.find('=', 0);
-                          const auto vs = v.substr(delimIdx + 1) ^ split(',');
-                          return std::pair{v.substr(0, delimIdx), vs};
-                        });
-               });
-      });
-    };
-
-    return parseNormalised(file, [&](std::string &line) -> std::optional<TestCase> {
-      return parseRight("case:", line) ^ map([&](auto &c) {
-               return TestCase{
-                   .name = c ^ trim(),
-                   .matrices = parseMatrices()                                                                                           //
-                               ^ flatten()                                                                                               //
-                               ^ concat(extraMatrices)                                                                                   //
-                               ^ map([](auto &name, auto &values) { return values ^ map([&](auto &v) { return std::pair{name, v}; }); }) //
-                               ^ sequence(),
-                   .runs = parseRuns()};
-             });
-    });
-  }
-};
-
 void testAll(bool passthrough) {
 
-  auto run = [passthrough](TestCase &case_, const std::string &input, const std::vector<std::pair<std::string, std::string>> &variables) {
+  auto run = [passthrough](polyregion::polyfront::TestCase &case_, const std::string &input,
+                           const std::vector<std::pair<std::string, std::string>> &variables) {
     const auto mkArgStore = [](auto &&xs) {
       fmt::dynamic_format_arg_store<fmt::format_context> s;
       for (auto &&[k, v] : xs)
@@ -113,12 +26,12 @@ void testAll(bool passthrough) {
     };
 
     const auto userArgs = variables ^ map([&](auto &k, auto &v) { return std::pair{k, v}; });
-    const auto augmentedArgs =
-        userArgs                                                                                                                       //
-        | append(std::pair{"input", input})                                                                                            //
-        | append(std::pair{"polycpp_defaults", "-fno-crash-diagnostics -O1 -g3 -Wall -Wextra -pedantic"})                              //
-        | append(std::pair{"polycpp_stdpar", fmt::vformat("-fstdpar -fstdpar-arch={polycpp_arch} -fuse-ld=lld", variables ^ and_then(mkArgStore))}) //
-        | to_vector();
+    const auto augmentedArgs = userArgs                                                                                          //
+                               | append(std::pair{"input", input})                                                               //
+                               | append(std::pair{"polycpp_defaults", "-fno-crash-diagnostics -O1 -g3 -Wall -Wextra -pedantic"}) //
+                               | append(std::pair{"polycpp_stdpar", fmt::vformat("-fstdpar -fstdpar-arch={polycpp_arch} -fuse-ld=lld",
+                                                                                 variables ^ and_then(mkArgStore))}) //
+                               | to_vector();
 
     const auto unevaluatedStore = augmentedArgs ^ append(std::pair{"output", "<unevaluated>"}) ^ and_then(mkArgStore);
     const auto output = fmt::format(
@@ -138,7 +51,7 @@ void testAll(bool passthrough) {
         }
 
         envs.emplace_back(fmt::format("POLYCPP_DRIVER={}", ClangDriver));
-        envs.emplace_back(fmt::vformat("POLYSTL_PLATFORM={polycpp_arch}", evaluatedStore));
+        envs.emplace_back(fmt::vformat("POLYRT_PLATFORM={polycpp_arch}", evaluatedStore));
         envs.emplace_back("POLYSTL_HOST_FALLBACK=0");
 
         // if host, + -fsanitize=address,undefined
@@ -192,21 +105,22 @@ void testAll(bool passthrough) {
   };
 
   for (const auto &test : TestFiles) {
-    DYNAMIC_SECTION(extractTestName(test)) {
+    DYNAMIC_SECTION(polyregion::polyfront::extractTestName(test)) {
       std::ifstream source(test, std::ios::in | std::ios::binary);
 
-      auto cases = TestCase::parseTestCase(source, "#pragma region",
-                                           {
+      auto cases = polyregion::polyfront::TestCase::parseTestCase(
+          source, "#pragma region",
+          {
 #if defined(__linux__)
-                                               {"polycpp_arch", {"cuda@sm_89", "hip@gfx1036", "hsa@gfx1036", "host@native"}} //
+              {"polycpp_arch", {"cuda@sm_89", "hip@gfx1036", "hsa@gfx1036", "host@native"}} //
 #elif defined(__APPLE__)
-                                               {"polycpp_arch", {"host@apple-m2"}} //
+              {"polycpp_arch", {"host@apple-m2"}} //
 #elif defined(_WIN32)
-                                               {"polycpp_arch", {}} //
+              {"polycpp_arch", {}} //
 #else
   #error "Unsupported platform"
 #endif
-                                           });
+          });
 
       if (cases.empty()) FAIL("No test cases found");
 

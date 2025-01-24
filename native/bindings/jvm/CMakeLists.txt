@@ -19,7 +19,7 @@ endif ()
 
 add_library(polyc-JNIshim SHARED generated/mirror.cpp shim.cpp)
 add_library(polyc-JNI SHARED generated/mirror.cpp compiler.cpp)
-add_library(polyrt-JNI SHARED generated/mirror.cpp runtime.cpp)
+add_library(polyinvoke-JNI SHARED generated/mirror.cpp runtime.cpp)
 
 
 target_include_directories(polyc-JNIshim PRIVATE
@@ -31,7 +31,7 @@ target_include_directories(polyc-JNI PRIVATE
 #        ../../compiler
 
         ${JNI_INCLUDE_DIRS})
-target_include_directories(polyrt-JNI PRIVATE
+target_include_directories(polyinvoke-JNI PRIVATE
 #        .
 #        ../../runtime
 
@@ -39,24 +39,24 @@ target_include_directories(polyrt-JNI PRIVATE
 
 target_link_libraries(polyc-JNIshim PRIVATE ${DL_LIB} PUBLIC polycommon)
 target_link_libraries(polyc-JNI PRIVATE polyc)
-target_link_libraries(polyrt-JNI PRIVATE polyrt-static Aspartame::Aspartame)
+target_link_libraries(polyinvoke-JNI PRIVATE polyinvoke-static Aspartame::Aspartame)
 
 
 
 target_compile_options(polyc-JNIshim PRIVATE ${COMPILE_OPTIONS})
 target_compile_options(polyc-JNI PRIVATE ${COMPILE_OPTIONS})
-target_compile_options(polyrt-JNI PRIVATE ${COMPILE_OPTIONS})
+target_compile_options(polyinvoke-JNI PRIVATE ${COMPILE_OPTIONS})
 
 target_link_options(polyc-JNIshim PRIVATE ${LINK_OPTIONS})
 target_link_options(polyc-JNI PRIVATE ${LINK_OPTIONS})
-target_link_options(polyrt-JNI PRIVATE ${LINK_OPTIONS})
+target_link_options(polyinvoke-JNI PRIVATE ${LINK_OPTIONS})
 
 # Running `strip` on macOS drops even more stuff than just compiling with -dead_strip.
 if (APPLE)
     add_custom_command(
-            TARGET polyrt-JNI POST_BUILD
+            TARGET polyinvoke-JNI POST_BUILD
             COMMAND strip
-            ARGS -SXx $<TARGET_FILE:polyrt-JNI>)
+            ARGS -SXx $<TARGET_FILE:polyinvoke-JNI>)
     add_custom_command(
             TARGET polyc-JNI POST_BUILD
             COMMAND strip

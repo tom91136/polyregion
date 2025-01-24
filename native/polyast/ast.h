@@ -97,9 +97,9 @@ std::function<NamedBuilder(Type::Any)> operator"" _(const char *name, size_t);
 
 Stmt::Any let(const std::string &name, const Type::Any &tpe);
 AssignmentBuilder let(const std::string &name);
-IntrOp invoke(const Intr::Any &);
-MathOp invoke(const Math::Any &);
-SpecOp invoke(const Spec::Any &);
+IntrOp call(const Intr::Any &);
+MathOp call(const Math::Any &);
+SpecOp call(const Spec::Any &);
 std::function<Function(Vec<Stmt::Any>)> function(const std::string &name, const Vec<Arg> &args, const Type::Any &rtn,
                                                  const std::set<FunctionAttr::Any> &attrs = {FunctionAttr::Exported()});
 Program program(const Vec<StructDef> &structs = {}, const Vec<Function> &functions = {});

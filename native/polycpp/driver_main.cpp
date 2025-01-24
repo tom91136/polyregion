@@ -1,163 +1,19 @@
-#include "fmt/core.h" // fmt/std.h requires RTTI
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
 
 #include "aspartame/all.hpp"
 #include "driver_polyc.h"
+#include "fmt/core.h"
+#include "polyfront/options.hpp"
 #include "llvm/Support/Program.h"
 
 using namespace aspartame;
-
-struct CliArgs {
-  std::vector<const char *> data;
-  std::unordered_set<size_t> deleted{};
-  explicit CliArgs(const std::vector<const char *> &data) : data(data) {}
-
-  bool has(const std::string &flag) const {
-    return data | zip_with_index() | filter([&](auto v, auto i) { return !deleted.count(i); }) | keys() |
-           exists([&](auto &chars) { return chars == flag; });
-  }
-
-  bool has(const std::string &flag, size_t pos) const {
-    return data | zip_with_index() | filter([&](auto v, auto i) { return !deleted.count(i); }) |
-           exists([&](auto &chars, auto i) { return chars == flag && i == pos; });
-  }
-
-  std::optional<std::string> get(const std::string &flag) const {
-    return data                                                        //
-           | zip_with_index()                                          //
-           | filter([&](auto v, auto i) { return !deleted.count(i); }) //
-           | collect_first([&](auto &chars, auto i) -> std::optional<std::string> {
-               if (const std::string arg = chars; arg == flag) {
-                 if (i + 1 < data.size()) return data[i + 1];                                // -foo :: bar :: Nil
-                 else return {};                                                             // -foo :: Nil
-               } else if (arg ^ starts_with(flag + "=")) return arg.substr(flag.size() + 1); // -foo=bar
-               return {};
-             });
-  }
-
-  bool popBool(const std::string &flag) {
-    auto oldSize = deleted.size();
-    for (size_t i = 0; i < data.size(); ++i) {
-      if (deleted.count(i)) continue;
-      if (data[i] == flag) deleted.insert(i);
-    }
-    return oldSize != deleted.size();
-  }
-
-  std::optional<std::string> popValue(const std::string &flag) {
-    std::optional<std::string> last;
-    for (size_t i = 0; i < data.size(); ++i) {
-      if (deleted.count(i)) continue;
-      if (const std::string arg = data[i]; arg == flag && i + 1 < data.size()) { // -foo :: bar :: Nil
-        deleted.insert(i);
-        deleted.insert(i + 1);
-        last = data[i + 1];
-      } else if (arg ^ starts_with(flag + "=")) { // -foo=bar
-        deleted.insert(i);
-        last = arg.substr(flag.size() + 1);
-      }
-    }
-    return last;
-  }
-
-  std::vector<const char *> remaining() const {
-    return data | zip_with_index() | filter([&](auto v, auto i) { return !deleted.count(i); }) | keys() | to_vector();
-  }
-};
-
-struct PolyCppOptions {
-
-  enum class LinkKind : uint8_t { Static = 1, Dynamic, Disabled = 3 };
-
-  static std::variant<std::string, LinkKind> parseLinkKind(const std::string &arg) {
-    if (auto v = arg ^ to_lower(); v == "static") return LinkKind::Static;
-    else if (v == "dynamic") return LinkKind::Dynamic;
-    else if (v == "disabled") return LinkKind::Disabled;
-    return "Unknown link kind `" + arg + "`";
-  }
-
-  bool verbose = false;
-  bool noCompress = false;
-  bool interposeMalloc = true;
-  bool interposeAlloca = false;
-  std::string targets{};
-  LinkKind rt = LinkKind::Static;
-  LinkKind jit = LinkKind::Disabled;
-
-  static std::variant<std::vector<std::string>, std::optional<PolyCppOptions>> parse(CliArgs &args) {
-
-    const std::string fStdParFlag = "-fstdpar";
-    const std::string fStdParVerboseFlag = "-fstdpar-verbose";
-    const std::string fStdParArchNoCompressFlag = "-fstdpar-no-compress";
-    const std::string fStdParInterposeMallocFlag = "-fstdpar-interpose-malloc";
-    const std::string fStdParInterposeAllocaFlag = "-fstdpar-interpose-alloca";
-    const std::string fStdParArchFlag = "-fstdpar-arch";
-    const std::string fStdParRtFlag = "-fstdpar-rt";
-    const std::string fStdParJitFlag = "-fstdpar-jit";
-
-    auto fStdPar = false, fStdParDependents = false;
-    PolyCppOptions options;
-    std::vector<std::string> errors;
-
-    auto markError = [&](const std::string &prefix) { return [&](const std::string &x) { errors.push_back("\"" + prefix + "\": " + x); }; };
-
-    if (args.popBool(fStdParFlag)) {
-      fStdPar = true;
-    }
-    if (args.popBool(fStdParVerboseFlag)) {
-      fStdParDependents = true;
-      options.verbose = true;
-    }
-    if (args.popBool(fStdParArchNoCompressFlag)) {
-      fStdParDependents = true;
-      options.noCompress = true;
-    }
-    if (args.popBool(fStdParInterposeMallocFlag)) {
-      fStdParDependents = true;
-      options.interposeMalloc = true;
-    }
-    if (args.popBool(fStdParInterposeAllocaFlag)) {
-      fStdParDependents = true;
-      options.interposeAlloca = true;
-    }
-    if (auto arch = args.popValue(fStdParArchFlag)) {
-      fStdParDependents = true;
-      options.targets = *arch;
-    }
-    if (auto rt = args.popValue(fStdParRtFlag)) {
-      fStdParDependents = true;
-      parseLinkKind(*rt) ^ foreach_total(markError(fStdParRtFlag), [&](const LinkKind &x) { options.rt = x; });
-    }
-    if (auto jit = args.popValue(fStdParJitFlag)) {
-      fStdParDependents = true;
-      parseLinkKind(*jit) ^ foreach_total(markError(fStdParJitFlag), [&](const LinkKind &x) { options.jit = x; });
-    }
-
-    if (!fStdPar && fStdParDependents)
-      errors.insert(errors.begin(), fStdParFlag + " not specified but StdPar dependent flags used, pleased add " + fStdParFlag);
-
-    if (errors.empty()) return fStdPar ? std::optional{options} : std::nullopt;
-    else return errors;
-  }
-};
-
-static std::vector<std::string> mkDelimitedEnvPaths(const char *env, std::optional<std::string> leading) {
-  std::vector<std::string> xs;
-  if (auto line = std::getenv(env); line) {
-    for (auto &path : line ^ split(llvm::sys::EnvPathSeparator)) {
-      if (leading) xs.push_back(*leading);
-      xs.push_back(path);
-    }
-  }
-  return xs;
-};
+using namespace polyregion::polyfront;
 
 [[maybe_unused]] void addrFn() { /* dummy symbol used for use with getMainExecutable */ }
 
 int main(int argc, const char *argv[]) {
-
   CliArgs args(std::vector(argv, argv + argc));
   if (args.has("--polyc", 1)) {
     return polyregion::polyc(argc - 1, argv + 1);
@@ -183,46 +39,33 @@ int main(int argc, const char *argv[]) {
     return EXIT_FAILURE;
   }
 
-  return PolyCppOptions::parse(args) ^
+  return StdParOptions::parse(args) ^
          fold_total(
              [&](const std::vector<std::string> &errors) {
                std::cerr << fmt::format("[PolyCpp] Unable to parse PolyCpp specific arguments:\n{}", (errors ^ mk_string("\n") ^ indent(2)))
                          << std::endl;
                return EXIT_FAILURE;
              },
-             [&](const std::optional<PolyCppOptions> &opts) {
+             [&](const std::optional<StdParOptions> &opts) {
                auto remaining = args.remaining() ^ map([](auto &s) -> std::string { return s; });
                auto append = [&](const std::initializer_list<std::string> &xs) { remaining.insert(remaining.end(), xs); };
 
                if (opts) {
-                 auto includes = mkDelimitedEnvPaths("POLYSTL_INCLUDE", "-isystem");
-                 auto libs = mkDelimitedEnvPaths("POLYSTL_LIB", {});
+                 auto includes = mkDelimitedEnvPaths("POLYSTL_INCLUDE", "-isystem", llvm::sys::EnvPathSeparator);
+                 auto libs = mkDelimitedEnvPaths("POLYSTL_LIB", {}, llvm::sys::EnvPathSeparator);
                  remaining.insert(remaining.end(), includes.begin(), includes.end());
                  remaining.insert(remaining.end(), libs.begin(), libs.end());
 
-#if defined(__linux__)
-                 const auto dsoSuffix = "so";
-                 const auto staticSuffix = "a";
-#elif defined(__APPLE__)
-                 const auto dsoSuffix = "dylib";
-                 const auto staticSuffix = "a";
-#elif defined(_WIN32)
-                 const auto dsoSuffix = "dll";
-                 const auto staticSuffix = "lib";
-#else
-  #error "Unsupported platform"
-#endif
-
-                 auto polycppResourcePath = execParentPath / "lib/polycpp";
-                 auto polycppIncludePath = polycppResourcePath / "include";
-                 auto polycppLibPath = polycppResourcePath / "lib";
-                 auto polycppReflectPlugin = polycppLibPath / fmt::format("polystl-reflect-plugin.{}", dsoSuffix);
-                 auto polycppClangPlugin = polycppLibPath / fmt::format("polycpp-clang-plugin.{}", dsoSuffix);
+                 const auto polycppResourcePath = execParentPath / "lib/polycpp";
+                 const auto polycppIncludePath = polycppResourcePath / "include";
+                 const auto polycppLibPath = polycppResourcePath / "lib";
+                 const auto polycppReflectPlugin = polycppLibPath / fmt::format("polystl-reflect-plugin.{}", dynamicLibSuffix());
+                 const auto polycppClangPlugin = polycppLibPath / fmt::format("polycpp-clang-plugin.{}", dynamicLibSuffix());
                  append({"-isystem", polycppIncludePath.string()});
                  append({"-include", "polystl/polystl.h"});
                  append({"-include", "rt-reflect/rt.hpp"});
 
-                 bool noRewrite = std::getenv("POLYCPP_NO_REWRITE") != nullptr;
+                 const bool noRewrite = std::getenv("POLYCPP_NO_REWRITE") != nullptr;
                  if (!noRewrite) {
                    append({"-Xclang", "-load", "-Xclang", polycppClangPlugin.string()});
                    append({"-Xclang", "-add-plugin", "-Xclang", "polycpp"});
@@ -232,16 +75,17 @@ int main(int argc, const char *argv[]) {
                    if (opts->interposeMalloc) append({fmt::format("-fpass-plugin={}", polycppReflectPlugin.string())});
                  }
 
-                 auto compileOnly = std::vector{"-c", "-S", "-E", "-M", "-MM", "-MD", "-fsyntax-only"} ^
-                                    exists([&](auto &flag) { return args.has(flag); });
+                 const auto compileOnly = std::vector{"-c", "-S", "-E", "-M", "-MM", "-MD", "-fsyntax-only"} ^
+                                          exists([&](auto &flag) { return args.has(flag); });
                  if (!compileOnly) {
                    switch (opts->rt) {
-                     case PolyCppOptions::LinkKind::Static: {
-                       remaining.insert(remaining.end(), (polycppLibPath / fmt::format("libpolystl-static.{}", staticSuffix)).string());
+                     case StdParOptions::LinkKind::Static: {
+                       remaining.insert(remaining.end(),
+                                        (polycppLibPath / fmt::format("libpolystl-static.{}", staticLibSuffix())).string());
                        // if (!opts->noCompress) append({"-Wl,--compress-debug-sections=zlib,--gc-sections"});
                        break;
                      }
-                     case PolyCppOptions::LinkKind::Dynamic: {
+                     case StdParOptions::LinkKind::Dynamic: {
                        append({fmt::format("-L{}", polycppLibPath.string()), "-lpolystl", //
                                fmt::format("-Wl,-rpath,{}", polycppLibPath.string()), "-Wl,-rpath,$ORIGIN"});
                        if (opts->verbose) {
@@ -249,12 +93,12 @@ int main(int argc, const char *argv[]) {
                              << fmt::format(
                                     "[PolyCpp] Dynamic linking of PolySTL runtime requested, if you would like to relocate your binary, "
                                     "please copy {} to the same directory as the executable (-rpath=$ORIGIN has been set for you)",
-                                    (polycppLibPath / fmt::format("libpolystl.{}", dsoSuffix)).string())
+                                    (polycppLibPath / fmt::format("libpolystl.{}", dynamicLibSuffix())).string())
                              << std::endl;
                        }
                        break;
                      }
-                     case PolyCppOptions::LinkKind::Disabled: break;
+                     case StdParOptions::LinkKind::Disabled: break;
                    }
                  }
                }

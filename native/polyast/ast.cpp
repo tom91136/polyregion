@@ -152,9 +152,9 @@ std::function<dsl::NamedBuilder(Type::Any)> dsl::operator""_(const char *name, s
 
 Stmt::Any dsl::let(const string &name, const Type::Any &tpe) { return Var(Named(name, tpe), {}); }
 dsl::AssignmentBuilder dsl::let(const string &name) { return AssignmentBuilder{name}; }
-Expr::IntrOp dsl::invoke(const Intr::Any &intr) { return IntrOp(intr); }
-Expr::MathOp dsl::invoke(const Math::Any &intr) { return MathOp(intr); }
-Expr::SpecOp dsl::invoke(const Spec::Any &intr) { return SpecOp(intr); }
+Expr::IntrOp dsl::call(const Intr::Any &intr) { return IntrOp(intr); }
+Expr::MathOp dsl::call(const Math::Any &intr) { return MathOp(intr); }
+Expr::SpecOp dsl::call(const Spec::Any &intr) { return SpecOp(intr); }
 std::function<Function(Vec<Stmt::Any>)> dsl::function(const string &name, const Vec<Arg> &args, const Type::Any &rtn,
                                                       const std::set<FunctionAttr::Any> &attrs) {
   return [=](auto &&stmts) { return Function(name, args, rtn, stmts, attrs); };
