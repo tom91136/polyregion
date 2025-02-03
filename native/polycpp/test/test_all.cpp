@@ -29,7 +29,7 @@ void testAll(bool passthrough) {
     const auto augmentedArgs = userArgs                                                                                          //
                                | append(std::pair{"input", input})                                                               //
                                | append(std::pair{"polycpp_defaults", "-fno-crash-diagnostics -O1 -g3 -Wall -Wextra -pedantic"}) //
-                               | append(std::pair{"polycpp_stdpar", fmt::vformat("-fstdpar -fstdpar-arch={polycpp_arch} -fuse-ld=lld",
+                               | append(std::pair{"polycpp_stdpar", fmt::vformat("-fstdpar -fstdpar-arch={polycpp_arch} -fuse-ld=lld -fstdpar-rt=dynamic",
                                                                                  variables ^ and_then(mkArgStore))}) //
                                | to_vector();
 
@@ -52,7 +52,7 @@ void testAll(bool passthrough) {
 
         envs.emplace_back(fmt::format("POLYCPP_DRIVER={}", ClangDriver));
         envs.emplace_back(fmt::vformat("POLYRT_PLATFORM={polycpp_arch}", evaluatedStore));
-        envs.emplace_back("POLYSTL_HOST_FALLBACK=0");
+        envs.emplace_back("POLYRT_HOST_FALLBACK=0");
 
         // if host, + -fsanitize=address,undefined
         envs.emplace_back("ASAN_OPTIONS=alloc_dealloc_mismatch=0,detect_leaks=0");

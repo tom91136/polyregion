@@ -2,10 +2,10 @@
 
 #include <atomic>
 #include <cassert>
+#include <cmath>
 #include <condition_variable>
 #include <mutex>
 #include <vector>
-#include <cmath>
 
 namespace polyregion::concurrency_utils {
 
@@ -47,33 +47,9 @@ template <typename F> static void waitAllN(F f, size_t timeoutMillis = 10000) {
   cv.wait_until(lock, now + std::chrono::milliseconds(timeoutMillis), [&]() { return pending == 0; });
 }
 
-template <typename T = int64_t>
-std::vector<std::pair<T, T>> splitStaticExclusive(T start, T end, T N) {
-  assert(N >= 0);
-  auto range = std::abs(end - start);
-  if (range == 0) return {};
-  else if (N == 1)
-    return {{start, end}};
-  else if (range < N) {
-    std::vector<std::pair<T, T>> xs(range);
-    for (T i = 0; i < range; ++i)
-      xs[i] = {start + i, start + i + 1};
-    return xs;
-  } else {
-    std::vector<std::pair<T, T>> xs(N);
-    auto k = range / N;
-    auto m = range % N;
-    for (int64_t i = 0; i < N; ++i) {
-      auto a = i * k + std::min(i, m);
-      auto b = (i + 1) * k + std::min((i + 1), m);
-      xs[i] = {start + a, start + b};
-    }
-    return xs;
-  }
-}
-
 template <typename T = int64_t> //
-std::pair<std::vector<T>, std::vector<T>> splitStaticExclusive2(T start, T end, T N) {
+std::pair<std::vector<T>, std::vector<T>> splitStaticExclusive(T start, T end, T N) {
+  static_assert(std::is_signed_v<T>, "Numeric type must be signed");
   assert(N >= 0);
   auto range = std::abs(end - start);
   if (range == 0) return {{}, {}};
@@ -91,7 +67,7 @@ std::pair<std::vector<T>, std::vector<T>> splitStaticExclusive2(T start, T end, 
     std::vector<T> ys(N);
     auto k = range / N;
     auto m = range % N;
-    for (int64_t i = 0; i < N; ++i) {
+    for (T i = 0; i < N; ++i) {
       auto a = i * k + std::min(i, m);
       auto b = (i + 1) * k + std::min((i + 1), m);
       xs[i] = start + a;
@@ -101,14 +77,11 @@ std::pair<std::vector<T>, std::vector<T>> splitStaticExclusive2(T start, T end, 
   }
 }
 
-template <typename T>
-constexpr std::pair<std::vector<T>, std::vector<T>> sequencePair(std::vector<std::pair<T, T>> xs) {
-  std::pair<std::vector<T>, std::vector<T>> out(std::vector<T>(xs.size()), std::vector<T>(xs.size()));
-  for (size_t i = 0; i < xs.size(); ++i) {
-    std::get<0>(out)[i] = std::get<0>(xs[i]);
-    std::get<1>(out)[i] = std::get<1>(xs[i]);
-  }
-  return out;
+template <typename T> constexpr T tripCountExclusive(T lowerBound, T upperBound, T step) {
+  if (lowerBound >= upperBound) return 0;
+  return (upperBound - lowerBound + (step - 1)) / step;
 }
+
+template <typename T> constexpr T zeroOffset(T induction, T lowerBound, T step) { return lowerBound + (induction * step); }
 
 } // namespace polyregion::concurrency_utils

@@ -3,6 +3,7 @@
 #include <thread>
 
 #include "polyinvoke/cl_platform.h"
+#include "polyregion/env.h"
 
 using namespace polyregion::invoke;
 using namespace polyregion::invoke::cl;
@@ -45,7 +46,7 @@ ClPlatform::ClPlatform() {
   POLYINVOKE_TRACE();
   // XXX FP64 is emulated on Intel Arc and needs to be enabled via environment variable
   // we set it unless it's already defined with some other value
-  setenv("OverrideDefaultFP64Settings", "1", false);
+  env::put("OverrideDefaultFP64Settings", "1", false);
 }
 std::string ClPlatform::name() {
   POLYINVOKE_TRACE();

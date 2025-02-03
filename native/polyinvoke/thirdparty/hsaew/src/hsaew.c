@@ -17,7 +17,7 @@ typedef HMODULE DynamicLibrary;
 #include <dlfcn.h>
 
 typedef void* DynamicLibrary;
-#define _dynamic_library_open(path)         dlopen(path, RTLD_NOW)
+#define _dynamic_library_open(path)         dlopen(path, RTLD_NOW | RTLD_LOCAL)
 #define _dynamic_library_close(lib)         dlclose(lib)
 #define _dynamic_library_find(lib, symbol)  dlsym(lib, symbol)
 #endif

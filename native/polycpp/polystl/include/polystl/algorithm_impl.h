@@ -41,20 +41,6 @@ std::pair<std::vector<T>, std::vector<T>> splitStaticExclusive(T start, T end, T
   }
 }
 
-constexpr auto HostFallbackEnv = "POLYSTL_HOST_FALLBACK";
-
-inline bool host_fallback() {
-  if (auto env = std::getenv(HostFallbackEnv); env) {
-    errno = 0; // strtol to avoid exceptions
-    size_t value = std::strtol(env, nullptr, 10);
-    if (errno == 0 && value == 0) {
-      POLYSTL_LOG("<%s> No compatible backend and host fallback disabled, returning...", __func__);
-      return false;
-    }
-  }
-  return true; // default is to use host fallback
-}
-
 template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f) {
   initialise();
   auto N = std::thread::hardware_concurrency();
@@ -109,7 +95,7 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
     }
   }
 
-  if (!host_fallback()) return;
+  if (!polyrt::hostFallback()) return;
   POLYSTL_LOG("<%s, %d> Host fallback", __func__, global);
   for (int64_t i = 0; i < global; ++i) {
     f(i);
@@ -193,7 +179,7 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
     }
   }
 
-  if (!host_fallback()) return init;
+  if (!polyrt::hostFallback()) return init;
   POLYSTL_LOG("<%s, %ld> Host fallback", __func__, global);
 
   T acc = init;

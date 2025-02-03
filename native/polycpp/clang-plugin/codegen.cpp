@@ -8,59 +8,18 @@
 
 #include "clang/AST/Attr.h"
 #include "clang/AST/RecordLayout.h"
-#include "llvm/Support/FileSystem.h"
-#include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/Program.h"
 
 using namespace polyregion;
 using namespace polyregion::polyast;
 using namespace aspartame;
 
-static std::variant<std::string, CompileResult> compileProgram(const polystl::Options &opts,      //
-                                                               const Program &p,                  //
-                                                               const compiletime::Target &target, //
-                                                               const std::string &arch) {
-  auto data = nlohmann::json::to_msgpack(hashed_to_json(program_to_json(p)));
-
-  llvm::SmallString<64> inputPath;
-  auto inputCreateEC = llvm::sys::fs::createTemporaryFile("", "", inputPath);
-  if (inputCreateEC) return "Failed to create temp input file: " + inputCreateEC.message();
-
-  llvm::SmallString<64> outputPath;
-  auto outputCreateEC = llvm::sys::fs::createTemporaryFile("", "", outputPath);
-  if (outputCreateEC) return "Failed to create temp output file: " + outputCreateEC.message();
-
-  std::error_code streamEC;
-  llvm::raw_fd_ostream file(inputPath, streamEC, llvm::sys::fs::OF_None);
-  if (streamEC) return "Failed to open file: " + streamEC.message();
-
-  file.write(reinterpret_cast<const char *>(data.data()), data.size());
-  file.flush();
-
-  std::vector<llvm::StringRef> args{//
-                                    "",         "--polyc",         inputPath.str(), "--out", outputPath.str(),
-                                    "--target", to_string(target), "--arch",        arch};
-
-  if (opts.verbose) {
-    (llvm::errs() << (args | prepend(opts.executable) | mk_string(" ", [](auto &s) { return s.data(); })) << "\n").flush();
-  }
-
-  if (int code = llvm::sys::ExecuteAndWait(opts.executable, args); code != 0)
-    return "Non-zero exit code for task: " + (args ^ mk_string(" ", [](auto &s) { return s.str(); }));
-
-  auto BufferOrErr = llvm::MemoryBuffer::getFile(outputPath);
-
-  if (auto Err = BufferOrErr.getError()) return "Failed to read output buffer: " + toString(llvm::errorCodeToError(Err));
-  else return compileresult_from_json(nlohmann::json::from_msgpack((*BufferOrErr)->getBufferStart(), (*BufferOrErr)->getBufferEnd()));
-}
-
-polystl::KernelBundle polystl::generateBundle(const Options &opts,
-                                              clang::ASTContext &C,                //
-                                              clang::DiagnosticsEngine &diag,      //
-                                              const std::string &moduleId,         //
-                                              const clang::CXXMethodDecl &functor, //
-                                              const clang::SourceLocation &loc,    //
-                                              runtime::PlatformKind kind) {
+polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
+                                                clang::ASTContext &C,                //
+                                                clang::DiagnosticsEngine &diag,      //
+                                                const std::string &moduleId,         //
+                                                const clang::CXXMethodDecl &functor, //
+                                                const clang::SourceLocation &loc,    //
+                                                runtime::PlatformKind kind) {
   Remapper remapper(C);
 
   auto parent = functor.getParent();
@@ -103,11 +62,11 @@ polystl::KernelBundle polystl::generateBundle(const Options &opts,
                          r.functions | values() | append(f0) | map([&](auto &x) { return *x; }) | to_vector());
 
   auto exportedStructNames =
-      program.functions                                                                                                               //
-      | filter([](auto &f) { return f.attrs ^ contains(FunctionAttr::Exported()); })                                                  //
+      program.functions                                                                                                                   //
+      | filter([](auto &f) { return f.attrs ^ contains(FunctionAttr::Exported()); })                                                      //
       | flat_map([](auto &f) { return f.args; })                                                                                          //
       | collect([](auto &a) { return extractComponent(a.named.tpe) ^ flat_map([](auto &t) { return t.template get<Type::Struct>(); }); }) //
-      | map([](auto &s) { return s.name; })                                                                                           //
+      | map([](auto &s) { return s.name; })                                                                                               //
       | to<std::unordered_set>();
 
   auto layouts = r.layouts | values() | map([&](auto &x) { return std::pair{exportedStructNames ^ contains(x->name), *x}; }) | to_vector();
@@ -134,7 +93,7 @@ polystl::KernelBundle polystl::generateBundle(const Options &opts,
                  map([&](auto &x) { return std::tuple{target, features, x}; });
         }) //
       |
-      collect([&](auto &target, auto &features, auto &result) -> std::optional<KernelObject> {
+      collect([&](auto &target, auto &features, auto &result) -> std::optional<polyfront::KernelObject> {
         diag.Report(loc, diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Remark,
                                               "[PolySTL] Compilation events for [%0, target=%1, features=%2]\n%3"))
             << moduleId << std::string(to_string(target)) << features << repr(result);
@@ -159,15 +118,13 @@ polystl::KernelBundle polystl::generateBundle(const Options &opts,
                 << result.messages;
           }
 
-          if (auto format = std::optional{runtime::targetFormat(target)}; format) {
-            return KernelObject{
-                //
+          if (auto format = runtime::moduleFormatOf(target)) {
+            return polyfront::KernelObject{
                 *format,                                                                                                         //
                 *format == runtime::ModuleFormat::Object ? runtime::PlatformKind::HostThreaded : runtime::PlatformKind::Managed, //
                 result.features,                                                                                                 //
                 std::string(bin->begin(), bin->end())                                                                            //
             };
-
           } else {
             diag.Report(loc, diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Remark,
                                                   "[PolySTL] Backend emitted binary for unknown target [%1, target=%2, features=%3]"))
@@ -177,5 +134,5 @@ polystl::KernelBundle polystl::generateBundle(const Options &opts,
         }
       }) //
       | to_vector();
-  return KernelBundle{moduleId, objects, layouts, program_to_json(program).dump()};
+  return polyfront::KernelBundle{moduleId, objects, layouts, program_to_json(program).dump()};
 }

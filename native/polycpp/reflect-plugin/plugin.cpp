@@ -135,11 +135,17 @@ public:
 };
 
 extern "C" POLYREGION_EXPORT LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginInfo() {
-  return {
-      LLVM_PLUGIN_API_VERSION, "ptr-reflect", LLVM_VERSION_STRING, [](llvm::PassBuilder &PB) {
-        PB.registerPipelineStartEPCallback([&](llvm::ModulePassManager &MPM, llvm::OptimizationLevel) { MPM.addPass(ProtectRTPass()); });
-        PB.registerOptimizerLastEPCallback([&](llvm::ModulePassManager &MPM, llvm::OptimizationLevel) { MPM.addPass(RecordStackPass()); });
-        PB.registerFullLinkTimeOptimizationLastEPCallback(
-            [&](llvm::ModulePassManager &MPM, llvm::OptimizationLevel) { MPM.addPass(RecordStackPass()); });
-      }};
+  return {LLVM_PLUGIN_API_VERSION, "ptr-reflect", LLVM_VERSION_STRING, [](llvm::PassBuilder &PB) {
+            PB.registerPipelineStartEPCallback(
+                [&](llvm::ModulePassManager &MPM, llvm::OptimizationLevel) { MPM.addPass(ProtectRTPass()); });
+            PB.registerOptimizerLastEPCallback([&](
+#if LLVM_VERSION_MAJOR >= 20
+                                                   llvm::ModulePassManager &MPM, llvm::OptimizationLevel, llvm::ThinOrFullLTOPhase
+#else
+                                                   llvm::ModulePassManager &MPM, llvm::OptimizationLevel
+#endif
+                                               ) { MPM.addPass(RecordStackPass()); });
+            PB.registerFullLinkTimeOptimizationLastEPCallback(
+                [&](llvm::ModulePassManager &MPM, llvm::OptimizationLevel) { MPM.addPass(RecordStackPass()); });
+          }};
 }

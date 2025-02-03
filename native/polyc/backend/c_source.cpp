@@ -431,30 +431,38 @@ std::string backend::CSource::mkExpr(const Expr::Any &expr) {
 
 std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
   return stmt.match_total( //
-      [&](const Stmt::Block &x) { return x.stmts ^ mk_string("\n", [&](auto &x) { return mkStmt(x); }); },
+      [&](const Stmt::Block &x) { return x.stmts ^ mk_string("\n", [&](auto &s) { return mkStmt(s); }); },
       [&](const Stmt::Comment &x) {
         return x.value ^ split("\n") | map([](auto &l) { return fmt::format("// {}", l); }) | mk_string("\n");
       },
       [&](const Stmt::Var &x) {
         if (x.name.tpe.is<Type::Unit0>()) return fmt::format("{};", mkExpr(*x.expr));
-        return fmt::format("{} {}{};", mkTpe(x.name.tpe), normalise(x.name.symbol), x.expr ? (" = " + mkExpr(*x.expr)) : "");
+        return fmt::format("{} {}{};", mkTpe(x.name.tpe), normalise(x.name.symbol), x.expr ? " = " + mkExpr(*x.expr) : "");
       },
       [&](const Stmt::Mut &x) { return fmt::format("{} = {};", mkExpr(x.name), mkExpr(x.expr)); },
       [&](const Stmt::Update &x) { return fmt::format("{}[{}] = {};", mkExpr(x.lhs), mkExpr(x.idx), mkExpr(x.value)); },
       [&](const Stmt::While &x) {
-        auto body = x.body | mk_string("\n", [&](auto &stmt) { return mkStmt(stmt); });
-        auto tests = x.tests | mk_string("\n", [&](auto &stmt) { return mkStmt(stmt); });
-        auto whileBody = fmt::format("{}\n  if(!{}) break;\n{}", tests ^ indent(2), mkExpr(x.cond), body ^ indent(2));
+        const auto body = x.body | mk_string("\n", [&](auto &s) { return mkStmt(s); });
+        const auto tests = x.tests | mk_string("\n", [&](auto &s) { return mkStmt(s); });
+        const auto whileBody = fmt::format("{}\n  if(!{}) break;\n{}", tests ^ indent(2), mkExpr(x.cond), body ^ indent(2));
         return fmt::format("while(true) {{\n{}\n}}", whileBody);
+      },
+      [&](const Stmt::ForRange &x) {
+        const auto body = x.body | mk_string("\n", [&](auto &s) { return mkStmt(s); });
+        return fmt::format("if({} = {}; {} < {}; {} += {}) {{\n{}\n}}", //
+                           mkExpr(x.induction), mkExpr(x.lbIncl),       //
+                           mkExpr(x.induction), mkExpr(x.ubExcl),       //
+                           mkExpr(x.induction), mkExpr(x.step),         //
+                           body ^ indent(2));
       },
       [&](const Stmt::Break &) { return "break;"s; },   //
       [&](const Stmt::Cont &) { return "continue;"s; }, //
       [&](const Stmt::Cond &x) {
-        auto trueBr = x.trueBr ^ mk_string("{\n", "\n", "\n}", [&](auto x) { return mkStmt(x) ^ indent(2); });
+        auto trueBr = x.trueBr ^ mk_string("{\n", "\n", "\n}", [&](auto &s) { return mkStmt(s) ^ indent(2); });
         if (x.falseBr.empty()) {
           return fmt::format("if ({}) {}", mkExpr(x.cond), trueBr);
         } else {
-          auto falseBr = x.falseBr ^ mk_string("{\n", "\n", "\n}", [&](auto x) { return mkStmt(x) ^ indent(2); });
+          auto falseBr = x.falseBr ^ mk_string("{\n", "\n", "\n}", [&](auto &s) { return mkStmt(s) ^ indent(2); });
           return fmt::format("if ({}) {} else {}", mkExpr(x.cond), trueBr, falseBr);
         }
       },

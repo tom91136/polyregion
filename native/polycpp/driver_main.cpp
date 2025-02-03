@@ -5,7 +5,7 @@
 #include "aspartame/all.hpp"
 #include "driver_polyc.h"
 #include "fmt/core.h"
-#include "polyfront/options.hpp"
+#include "polyfront/options_frontend.hpp"
 #include "llvm/Support/Program.h"
 
 using namespace aspartame;
@@ -69,9 +69,9 @@ int main(int argc, const char *argv[]) {
                  if (!noRewrite) {
                    append({"-Xclang", "-load", "-Xclang", polycppClangPlugin.string()});
                    append({"-Xclang", "-add-plugin", "-Xclang", "polycpp"});
-                   append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("exe={}", execPath.string())});
-                   append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("verbose={}", opts->verbose ? "1" : "0")});
-                   append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("targets={}", opts->targets)});
+                   append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("{}={}", PolyfrontExe, execPath.string())});
+                   append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("{}={}", PolyfrontVerbose, opts->verbose ? "1" : "0")});
+                   append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("{}={}", PolyfrontTargets, opts->targets)});
                    if (opts->interposeMalloc) append({fmt::format("-fpass-plugin={}", polycppReflectPlugin.string())});
                  }
 

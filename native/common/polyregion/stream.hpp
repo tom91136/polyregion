@@ -156,7 +156,7 @@ void runStream(Type tpe, size_t size, size_t times, size_t groups, const std::st
 
   bool threaded = kind == PlatformKind::HostThreaded;
 
-  auto [begin, end] = sequencePair(splitStaticExclusive<int64_t>(0, static_cast<int64_t>(size), static_cast<int64_t>(groups)));
+  auto [begin, end] = splitStaticExclusive<int64_t>(0, static_cast<int64_t>(size), static_cast<int64_t>(groups));
   auto begins_d = threaded ? d.mallocDeviceTyped<int64_t>(begin.size(), Access::RO) : 0;
   auto ends_d = threaded ? d.mallocDeviceTyped<int64_t>(end.size(), Access::RO) : 0;
   auto sumGroups = threaded ? groups : 256;
@@ -238,7 +238,7 @@ void runStreamShared(Type tpe, size_t size, size_t times, size_t groups, const s
   }
   bool threaded = kind == PlatformKind::HostThreaded;
 
-  auto [begin, end] = splitStaticExclusive2<int64_t>(0, static_cast<int64_t>(size), static_cast<int64_t>(groups));
+  auto [begin, end] = splitStaticExclusive<int64_t>(0, static_cast<int64_t>(size), static_cast<int64_t>(groups));
   auto begins_d = threaded ? *d.mallocSharedTyped<int64_t>(begin.size(), Access::RO) : nullptr;
   auto ends_d = threaded ? *d.mallocSharedTyped<int64_t>(end.size(), Access::RO) : nullptr;
   auto sumGroups = threaded ? groups : 256;

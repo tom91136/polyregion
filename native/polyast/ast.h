@@ -28,6 +28,16 @@ Vec<Named> tail(const Expr::Select &);
 
 std::pair<Named, Vec<Named>> uncons(const Expr::Select &);
 
+Expr::Select selectNamed(const Expr::Select &select, const Named &that);
+
+Expr::Select selectNamed(const Vec<Named> &names);
+
+Expr::Select selectNamed(const  Named &name);
+
+Expr::Select parent(const Expr::Select &select);
+
+Type::Struct typeOf(const StructDef &def);
+
 std::string repr(const CompileResult &);
 
 Opt<Type::Any> extractComponent(const Type::Any &t);
@@ -81,6 +91,7 @@ struct NamedBuilder {
   Named named;
   explicit NamedBuilder(const Named &named);
   operator Expr::Any() const; // NOLINT(google-explicit-constructor)
+  operator Expr::Select() const;
                               //  operator const Expr::Any() const; // NOLINT(google-explicit-constructor)
   operator Named() const;     // NOLINT(google-explicit-constructor)
   Arg operator()() const;

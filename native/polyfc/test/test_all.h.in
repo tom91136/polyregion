@@ -1,0 +1,13 @@
+#pragma once
+
+#include <vector>
+#include <string>
+
+static std::string BinaryDir = "@POLYFC_TEST_BINARY_DIR@";
+static std::vector<std::string> TestFiles = { @POLYFC_TEST_INPUT_FILES@ };
+
+
+static std::string FlangDriver = "@POLYFC_FLANG_DRIVER@";
+static std::string PolyDCOLib = "@POLYFC_POLYDCO_LIB@";
+static std::string PolyDCOLDLibraryPath = "@POLYFC_POLYDCO_LIBRARY_PATH@";
+static std::string PolyDCOInclude = "@POLYFC_POLYDCO_INCLUDE@";

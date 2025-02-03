@@ -39,9 +39,9 @@
   #error Trace already defined
 #else
 
-  #define POLYINVOKE_FATAL(prefix, fmt, ...)                                                                                                   \
+  #define POLYINVOKE_FATAL(prefix, fmt, ...)                                                                                               \
     do {                                                                                                                                   \
-      std::fprintf(stderr, "[%s] %s:%d " fmt " (%s)\n", prefix, __FILE__, __LINE__, __VA_ARGS__, __PRETTY_FUNCTION__);                     \
+      std::fprintf(stderr, "[%s] %s:%d FATAL: " fmt " (%s)\n", prefix, __FILE__, __LINE__, __VA_ARGS__, __PRETTY_FUNCTION__);               \
       std::abort();                                                                                                                        \
     } while (0)
 #endif
@@ -286,9 +286,9 @@ struct POLYREGION_EXPORT Dim3 {
   POLYREGION_EXPORT size_t x, y, z;
   [[nodiscard]] std::array<size_t, 3> sizes() const { return {x, y, z}; }
   constexpr Dim3(const size_t x, const size_t y, const size_t z) : x(x), y(y), z(z) {
-    if (x < 1) POLYINVOKE_FATAL("Runtime", "x (%zu) < 1", x);
-    if (y < 1) POLYINVOKE_FATAL("Runtime", "y (%zu) < 1", y);
-    if (z < 1) POLYINVOKE_FATAL("Runtime", "z (%zu) < 1", z);
+    if (x < 1) POLYINVOKE_FATAL("Runtime", "Dim3.x must be > 0, got %zu", x);
+    if (y < 1) POLYINVOKE_FATAL("Runtime", "Dim3.y must be > 0, got %zu", y);
+    if (z < 1) POLYINVOKE_FATAL("Runtime", "Dim3.z must be > 0, got %zu", z);
   }
   constexpr Dim3() : Dim3(1, 1, 1) {}
   friend std::ostream &operator<<(std::ostream &os, const Dim3 &dim3);

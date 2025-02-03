@@ -1775,6 +1775,26 @@ json Stmt::while_to_json(const Stmt::While& x_) {
   return json::array({tests, cond, body});
 }
 
+Stmt::ForRange Stmt::forrange_from_json(const json& j_) { 
+  auto induction = Expr::select_from_json(j_.at(0));
+  auto lbIncl = Expr::any_from_json(j_.at(1));
+  auto ubExcl = Expr::any_from_json(j_.at(2));
+  auto step = Expr::any_from_json(j_.at(3));
+  std::vector<Stmt::Any> body;
+  for(const auto &v_ : j_.at(4)) { body.emplace_back(Stmt::any_from_json(v_)); }
+  return {induction, lbIncl, ubExcl, step, body};
+}
+
+json Stmt::forrange_to_json(const Stmt::ForRange& x_) { 
+  auto induction = Expr::select_to_json(x_.induction);
+  auto lbIncl = Expr::any_to_json(x_.lbIncl);
+  auto ubExcl = Expr::any_to_json(x_.ubExcl);
+  auto step = Expr::any_to_json(x_.step);
+  std::vector<json> body;
+  for(const auto &v_ : x_.body) { body.emplace_back(Stmt::any_to_json(v_)); }
+  return json::array({induction, lbIncl, ubExcl, step, body});
+}
+
 Stmt::Break Stmt::break_from_json(const json& j_) { 
   return {};
 }
@@ -1843,11 +1863,12 @@ Stmt::Any Stmt::any_from_json(const json& j_) {
   case 3: return Stmt::mut_from_json(t_);
   case 4: return Stmt::update_from_json(t_);
   case 5: return Stmt::while_from_json(t_);
-  case 6: return Stmt::break_from_json(t_);
-  case 7: return Stmt::cont_from_json(t_);
-  case 8: return Stmt::cond_from_json(t_);
-  case 9: return Stmt::return_from_json(t_);
-  case 10: return Stmt::annotated_from_json(t_);
+  case 6: return Stmt::forrange_from_json(t_);
+  case 7: return Stmt::break_from_json(t_);
+  case 8: return Stmt::cont_from_json(t_);
+  case 9: return Stmt::cond_from_json(t_);
+  case 10: return Stmt::return_from_json(t_);
+  case 11: return Stmt::annotated_from_json(t_);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
@@ -1866,15 +1887,17 @@ json Stmt::any_to_json(const Stmt::Any& x_) {
   ,
   [](const Stmt::While &y_) -> json { return {5, Stmt::while_to_json(y_)}; }
   ,
-  [](const Stmt::Break &y_) -> json { return {6, Stmt::break_to_json(y_)}; }
+  [](const Stmt::ForRange &y_) -> json { return {6, Stmt::forrange_to_json(y_)}; }
   ,
-  [](const Stmt::Cont &y_) -> json { return {7, Stmt::cont_to_json(y_)}; }
+  [](const Stmt::Break &y_) -> json { return {7, Stmt::break_to_json(y_)}; }
   ,
-  [](const Stmt::Cond &y_) -> json { return {8, Stmt::cond_to_json(y_)}; }
+  [](const Stmt::Cont &y_) -> json { return {8, Stmt::cont_to_json(y_)}; }
   ,
-  [](const Stmt::Return &y_) -> json { return {9, Stmt::return_to_json(y_)}; }
+  [](const Stmt::Cond &y_) -> json { return {9, Stmt::cond_to_json(y_)}; }
   ,
-  [](const Stmt::Annotated &y_) -> json { return {10, Stmt::annotated_to_json(y_)}; }
+  [](const Stmt::Return &y_) -> json { return {10, Stmt::return_to_json(y_)}; }
+  ,
+  [](const Stmt::Annotated &y_) -> json { return {11, Stmt::annotated_to_json(y_)}; }
   );
 }
 
@@ -2099,13 +2122,13 @@ json compileresult_to_json(const CompileResult& x_) {
 json hashed_from_json(const json& j_) { 
   auto hash_ = j_.at(0).get<std::string>();
   auto data_ = j_.at(1);
-  if(hash_ != "204586c037ab49a39ae15f3ec5f0c088") {
-   throw std::runtime_error("Expecting ADT hash to be 204586c037ab49a39ae15f3ec5f0c088, but was " + hash_);
+  if(hash_ != "b3f57aa1e6cf2a0296a51a8fefb33230") {
+   throw std::runtime_error("Expecting ADT hash to be b3f57aa1e6cf2a0296a51a8fefb33230, but was " + hash_);
   }
   return data_;
 }
 
 json hashed_to_json(const json& x_) { 
-  return json::array({"204586c037ab49a39ae15f3ec5f0c088", x_});
+  return json::array({"b3f57aa1e6cf2a0296a51a8fefb33230", x_});
 }
 } // namespace polyregion::polyast

@@ -61,7 +61,7 @@ FetchContent_Declare(
         Aspartame
         #               SOURCE_DIR /home/tom/Aspartame
         GIT_REPOSITORY https://github.com/tom91136/Aspartame.git
-        GIT_TAG 2fe9e75
+        GIT_TAG 13d0a69e
 )
 
 FetchContent_MakeAvailable(Aspartame)
@@ -267,6 +267,7 @@ else ()
                     ${COMMON_LINK_OPTIONS}
                     -static-libstdc++
                     LINKER:--gc-sections        # remove unused sections
+                    LINKER:--compress-debug-sections=zlib
                     # LINKER:--strip-all        # strip symbols not used for DSO
             )
         endif ()
@@ -289,18 +290,24 @@ endif ()
 set(LLVM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/llvm")
 set(LLD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/lld")
 set(Clang_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/clang")
-set(Clang_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-dist")
-#set(MLIR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/mlir")
+set(LLVM_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-dist")
+
+set(Flang_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/flang")
+set(MLIR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/mlir")
 
 message(STATUS "Using LLVM at ${LLVM_DIR}")
 message(STATUS "Using LLD at ${LLD_DIR}")
 message(STATUS "Using Clang at ${Clang_DIR}")
-#message(STATUS "Using MLIR at ${MLIR_DIR}")
+
+message(STATUS "Using Flang at ${Flang_DIR}")
+message(STATUS "Using MLIR at ${MLIR_DIR}")
 
 find_package(LLVM REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
 find_package(Clang REQUIRED PATHS ${Clang_DIR} NO_DEFAULT_PATH)
 find_package(LLD REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
-#find_package(MLIR REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
+
+find_package(MLIR REQUIRED PATHS ${MLIR_DIR} NO_DEFAULT_PATH)
+find_package(Flang REQUIRED PATHS ${Flang_DIR} NO_DEFAULT_PATH)
 
 message(STATUS "Using LLVM: ${LLVM_PACKAGE_VERSION} tools")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
@@ -427,5 +434,5 @@ add_subdirectory(polyc)
 add_subdirectory(polyinvoke)
 add_subdirectory(polyfront)
 add_subdirectory(polycpp)
-#add_subdirectory(polyfc)
+add_subdirectory(polyfc)
 add_subdirectory(bindings)

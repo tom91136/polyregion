@@ -45,7 +45,7 @@ set(LLVM_ENABLE_RUNTIMES ${RUNTIME_COMPONENTS} CACHE STRING "")
 #set(LLVM_LINK_LLVM_DYLIB OFF CACHE BOOL "")
 #set(LLVM_INSTALL_TOOLCHAIN_ONLY ON CACHE BOOL "")
 
-set(LLVM_ENABLE_ZLIB OFF CACHE BOOL "")
+set(LLVM_ENABLE_ZLIB ON CACHE BOOL "")
 set(LLVM_ENABLE_ZSTD OFF CACHE BOOL "")
 set(LLVM_ENABLE_LIBPFM OFF CACHE BOOL "")
 set(LLVM_ENABLE_LIBXML2 OFF CACHE BOOL "")
@@ -120,12 +120,12 @@ set(LLVM_DISTRIBUTION_COMPONENTS
         # Linker
         lld
 
-        flang-new
+        flang
 
         # Clang tools
         clang
         clang-tidy
-        clang-rename
+#        clang-rename
         clang-resource-headers
         clang-format
         clang-offload-bundler

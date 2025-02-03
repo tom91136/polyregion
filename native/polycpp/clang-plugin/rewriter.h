@@ -1,6 +1,6 @@
 #pragma once
 
-#include "plugin.h"
+#include "polyfront/options_backend.hpp"
 
 #include "clang/AST/ASTConsumer.h"
 #include "clang/Frontend/CompilerInstance.h"
@@ -9,10 +9,10 @@ namespace polyregion::polystl {
 
 class OffloadRewriteConsumer : public clang::ASTConsumer {
   clang::CompilerInstance &CI;
-  Options opts;
+  polyregion::polyfront::Options opts;
 
 public:
-  OffloadRewriteConsumer(clang::CompilerInstance &CI, const Options &opts);
+  OffloadRewriteConsumer(clang::CompilerInstance &CI, const polyregion::polyfront::Options &opts);
   void HandleTranslationUnit(clang::ASTContext &C) override;
 };
 

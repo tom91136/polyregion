@@ -614,6 +614,31 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         B.SetInsertPoint(loopExit);
         return BlockKind::Terminal;
       },
+      [&](const Stmt::ForRange &x) -> BlockKind {
+        const auto loopTest = llvm::BasicBlock::Create(C.actual, "loop_test", &fn);
+        const auto loopBody = llvm::BasicBlock::Create(C.actual, "loop_body", &fn);
+        const auto loopExit = llvm::BasicBlock::Create(C.actual, "loop_exit", &fn);
+        auto _ = mkStmt(Stmt::Mut(x.induction, x.lbIncl), fn, whileCtx);
+        WhileCtx ctx{.exit = loopExit, .test = loopTest};
+        B.CreateBr(loopTest);
+        {
+          B.SetInsertPoint(loopTest);
+          B.CreateCondBr(mkExprVal(Expr::IntrOp(Intr::LogicLt(x.induction, x.ubExcl))), loopBody, loopExit);
+        }
+        {
+          B.SetInsertPoint(loopBody);
+          auto kind = BlockKind::Normal;
+          for (auto &body : x.body)
+            kind = mkStmt(body, fn, {ctx});
+          if (kind != BlockKind::Terminal) {
+            [[maybe_unused]] auto _0 =
+                mkStmt(Stmt::Mut(x.induction, Expr::IntrOp(Intr::Add(x.induction, x.step, x.induction.tpe))), fn, {ctx});
+            B.CreateBr(loopTest);
+          }
+        }
+        B.SetInsertPoint(loopExit);
+        return BlockKind::Terminal;
+      },
       [&](const Stmt::Break &) -> BlockKind {
         if (whileCtx) B.CreateBr(whileCtx->exit);
         else throw BackendException("orphaned break!");

@@ -37,6 +37,22 @@ Pair<Named, Vec<Named>> polyast::uncons(const Expr::Select &select) {
   }
 }
 
+Expr::Select polyast::selectNamed(const Expr::Select &select, const Named &that) { return Expr::Select(path(select), that); }
+
+Expr::Select polyast::selectNamed(const Vec<Named> &names) {
+  if (names.empty()) throw std::logic_error("Cannot create select from empty name paths");
+  return Expr::Select(Vec<Named>(names.begin(), std::prev(names.end())), names.back());
+}
+
+Expr::Select polyast::selectNamed(const Named &name) { return Expr::Select({}, name); }
+
+Expr::Select polyast::parent(const Expr::Select &select) {
+  if (select.init.empty()) return select;
+  return Expr::Select(Vec<Named>(select.init.begin(), std::prev(select.init.end())), select.init.back());
+}
+
+Type::Struct polyast::typeOf(const StructDef &def) { return Type::Struct(def.name); }
+
 string polyast::repr(const CompileResult &compilation) {
   std::ostringstream os;
   os << "Compilation {"                                                                                            //
@@ -168,6 +184,7 @@ dsl::IndexBuilder::operator Expr::Any() const { return index; }
 Stmt::Update dsl::IndexBuilder::operator=(const Expr::Any &term) const { return {index.lhs, index.idx, term}; }
 dsl::NamedBuilder::NamedBuilder(const Named &named) : named(named) {}
 dsl::NamedBuilder::operator Expr::Any() const { return Select({}, named); }
+dsl::NamedBuilder::operator Expr::Select() const { return Select({}, named); }
 // dsl::NamedBuilder::operator const Expr::Any() const { return Alias(Select({}, named)); }
 dsl::NamedBuilder::operator Named() const { return named; }
 Arg dsl::NamedBuilder::operator()() const { return Arg(named, {}); }

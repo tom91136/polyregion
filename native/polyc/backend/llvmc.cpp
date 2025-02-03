@@ -116,7 +116,7 @@ void llvmc::initialise() {
   initializeVectorization(*r);
   initializeScalarizeMaskedMemIntrinLegacyPassPass(*r);
   initializeExpandReductionsPass(*r);
-  initializeExpandVectorPredicationPass(*r);
+  // initializeExpandVectorPredicationPass(*r);
   //  initializeHardwareLoopsPass(*r);
   initializeTransformUtils(*r);
   initializeReplaceWithVeclibLegacyPass(*r);
@@ -273,25 +273,31 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
     case compiletime::OptLevel::Ofast: optLevel = llvm::OptimizationLevel::O3; break;
   }
 
+#if LLVM_VERSION_MAJOR >= 20
+  using TargetMachine = llvm::TargetMachine;
+#else
+  using TargetMachine = llvm::LLVMTargetMachine;
+#endif
+
   auto mkLLVMTargetMachine = [](const TargetInfo &info, const llvm::TargetOptions &options, const llvm::CodeGenOptLevel &level) {
     // XXX We *MUST* use the large code model as we will be ingesting the object later with RuntimeDyld
     // The code model here has nothing to do with the actual object code size, it's about controlling the relocation.
     // See https://stackoverflow.com/questions/40493448/what-does-the-codemodel-in-clang-llvm-refer-to
-    auto tm = static_cast<llvm::LLVMTargetMachine *>(info.target->createTargetMachine( //
-        info.triple.str(),                                                             //
-        info.cpu.uArch,                                                                //
-        info.cpu.features,                                                             //
+    auto tm = static_cast<TargetMachine *>(info.target->createTargetMachine( //
+        info.triple.str(),                                                   //
+        info.cpu.uArch,                                                      //
+        info.cpu.features,                                                   //
         options, llvm::Reloc::Model::PIC_, llvm::CodeModel::Large, level));
-    return std::unique_ptr<llvm::LLVMTargetMachine>(tm);
+    return std::unique_ptr<TargetMachine>(tm);
   };
 
-  auto bindLLVMTargetMachineDataLayout = [&](llvm::LLVMTargetMachine &TM, llvm::Module &M) {
+  auto bindLLVMTargetMachineDataLayout = [&](TargetMachine &TM, llvm::Module &M) {
     if (M.getDataLayout().isDefault()) {
       M.setDataLayout(TM.createDataLayout());
     }
   };
 
-  auto mkLLVMTargetMachineArtefact = [optLevel](llvm::LLVMTargetMachine &TM,                     //
+  auto mkLLVMTargetMachineArtefact = [optLevel](TargetMachine &TM,                               //
                                                 const std::optional<llvm::CodeGenFileType> &tpe, //
                                                 const llvm::Module &m0,                          //
                                                 std::vector<polyast::CompileEvent> &events, const bool emplaceEvent) {
@@ -307,7 +313,7 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
       llvm::legacy::PassManager PM;
       auto *MMIWP = new llvm::MachineModuleInfoWrapperPass(&TM); // pass manager takes owner of this
       PM.add(MMIWP);
-      PM.add(createTargetTransformInfoWrapperPass(TM.getTargetIRAnalysis()));
+      PM.add(llvm::createTargetTransformInfoWrapperPass(TM.getTargetIRAnalysis()));
       llvm::TargetPassConfig *PassConfig = TM.createPassConfig(PM);
       // Set PassConfig options provided by TargetMachine.
       PassConfig->setDisableVerify(true);

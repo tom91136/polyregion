@@ -13,6 +13,7 @@
 
 constexpr auto PlatformSelectorEnv = "POLYRT_PLATFORM";
 constexpr auto DeviceSelectorEnv = "POLYRT_DEVICE";
+constexpr auto HostFallbackEnv = "POLYRT_HOST_FALLBACK";
 
 using namespace polyregion::invoke;
 
@@ -20,85 +21,113 @@ std::unique_ptr<Platform> polyregion::polyrt::currentPlatform{};
 std::unique_ptr<Device> polyregion::polyrt::currentDevice{};
 std::unique_ptr<DeviceQueue> polyregion::polyrt::currentQueue{};
 
-void polyregion::polyrt::initialise() {
-  const auto setupBackend = [](const Backend backend) {
-    if (auto errorOrPlatform = Platform::of(backend); std::holds_alternative<std::string>(errorOrPlatform)) {
-      POLYRT_LOG("Backend %s failed to initialise: %s", to_string(backend).data(), std::get<std::string>(errorOrPlatform).c_str());
-    } else currentPlatform = std::move(std::get<std::unique_ptr<Platform>>(errorOrPlatform));
-  };
+static void setupBackend(const Backend backend) {
+  if (auto errorOrPlatform = Platform::of(backend); std::holds_alternative<std::string>(errorOrPlatform)) {
+    POLYRT_LOG("Backend %s failed to initialise: %s", to_string(backend).data(), std::get<std::string>(errorOrPlatform).c_str());
+  } else polyregion::polyrt::currentPlatform = std::move(std::get<std::unique_ptr<Platform>>(errorOrPlatform));
+};
 
-  const auto selectDevice = [](Platform &p) {
-    auto devices = p.enumerate();
-    if (const auto env = std::getenv(DeviceSelectorEnv); env) {
-      std::string name(env);
-      std::transform(name.begin(), name.end(), name.begin(), [](auto &c) { return std::tolower(c); });
-      errno = 0; // strtol to avoid exceptions
-      if (const size_t index = std::strtol(name.c_str(), nullptr, 10);
-          errno == 0 && index < devices.size()) { // we got a number, check inbounds and select device
-        currentDevice = std::move(devices.at(index));
-      } else if (const auto matching = // or do a substring match
-                 std::find_if(devices.begin(), devices.end(),
-                              [&name](const auto &device) { return device->name().find(name) != std::string::npos; });
-                 matching != devices.end()) {
-        currentDevice = std::move(*matching);
-      }
-    } else if (!devices.empty()) currentDevice = std::move(devices[0]);
-  };
-
-  const auto selectPlatform = [&]() {
-    const static std::unordered_map<std::string, Backend> NameToBackend = {
-        {"host", Backend::RelocatableObject}, //
-        {"host_so", Backend::SharedObject},   //
-
-        {"ptx", Backend::CUDA},  //
-        {"cuda", Backend::CUDA}, //
-
-        {"amdgpu", Backend::HIP}, //
-        {"hip", Backend::HIP},    //
-        {"hsa", Backend::HSA},    //
-
-        {"opencl", Backend::OpenCL}, //
-        {"ocl", Backend::OpenCL},    //
-        {"cl", Backend::OpenCL},     //
-
-        {"vulkan", Backend::Vulkan}, //
-        {"vk", Backend::Vulkan},     //
-
-        {"metal", Backend::Metal}, //
-        {"mtl", Backend::Metal},   //
-        {"apple", Backend::Metal}, //
-    };
-
-    if (const auto env = std::getenv(PlatformSelectorEnv); env) {
-      std::string name(env);
-      std::transform(name.begin(), name.end(), name.begin(), [](auto &c) { return std::tolower(c); });
-      if (const size_t pos = name.find('@'); pos != std::string::npos) name = name.substr(0, pos);
-      if (auto it = NameToBackend.find(name); it != NameToBackend.end()) setupBackend(it->second);
-      else {
-        POLYRT_LOG("Backend %s is not a supported value for %s; options are %s={", env, PlatformSelectorEnv, PlatformSelectorEnv);
-        size_t i = 0;
-        for (auto &[k, _] : NameToBackend)
-          std::fprintf(stderr, "%s%s", k.c_str(), i++ < NameToBackend.size() - 1 ? "|" : "");
-        std::fprintf(stderr, "}\n");
-      }
-    } else {
-      POLYRT_LOG("Backend selector %s is not set: using default host platform", PlatformSelectorEnv);
-      setupBackend(Backend::RelocatableObject);
+static void selectDevice(Platform &p) {
+  auto devices = p.enumerate();
+  if (const auto env = std::getenv(DeviceSelectorEnv); env) {
+    std::string name(env);
+    std::transform(name.begin(), name.end(), name.begin(), [](auto &c) { return std::tolower(c); });
+    errno = 0; // strtol to avoid exceptions
+    if (const size_t index = std::strtol(name.c_str(), nullptr, 10);
+        errno == 0 && index < devices.size()) { // we got a number, check inbounds and select device
+      polyregion::polyrt::currentDevice = std::move(devices.at(index));
+    } else if (const auto matching = // or do a substring match
+               std::find_if(devices.begin(), devices.end(),
+                            [&name](const auto &device) { return device->name().find(name) != std::string::npos; });
+               matching != devices.end()) {
+      polyregion::polyrt::currentDevice = std::move(*matching);
     }
+  } else if (!devices.empty()) polyregion::polyrt::currentDevice = std::move(devices[0]);
+};
+
+static void selectPlatform() {
+  const static std::unordered_map<std::string, Backend> NameToBackend = {
+      {"host", Backend::RelocatableObject}, //
+      {"host_so", Backend::SharedObject},   //
+
+      {"ptx", Backend::CUDA},  //
+      {"cuda", Backend::CUDA}, //
+
+      {"amdgpu", Backend::HIP}, //
+      {"hip", Backend::HIP},    //
+      {"hsa", Backend::HSA},    //
+
+      {"opencl", Backend::OpenCL}, //
+      {"ocl", Backend::OpenCL},    //
+      {"cl", Backend::OpenCL},     //
+
+      {"vulkan", Backend::Vulkan}, //
+      {"vk", Backend::Vulkan},     //
+
+      {"metal", Backend::Metal}, //
+      {"mtl", Backend::Metal},   //
+      {"apple", Backend::Metal}, //
   };
 
-  if (!currentPlatform) {
-    POLYRT_LOG("Initialising backends... (addr=%p)", (void *)&initialise);
-    selectPlatform();
-    if (currentPlatform) selectDevice(*currentPlatform);
-    if (currentDevice) currentQueue = currentDevice->createQueue(std::chrono::seconds(10));
-    if (currentPlatform) {
-      POLYRT_LOG("- Platform: %s [%s, %s] Device: %s",
-                 currentPlatform->name().c_str(),           //
-                 to_string(currentPlatform->kind()).data(), //
-                 to_string(currentPlatform->moduleFormat()).data(), currentDevice->name().c_str());
+  if (const auto env = std::getenv(PlatformSelectorEnv); env) {
+    std::string name(env);
+    std::transform(name.begin(), name.end(), name.begin(), [](auto &c) { return std::tolower(c); });
+    if (const size_t pos = name.find('@'); pos != std::string::npos) name = name.substr(0, pos);
+    if (auto it = NameToBackend.find(name); it != NameToBackend.end()) setupBackend(it->second);
+    else {
+      POLYRT_LOG("Backend %s is not a supported value for %s; options are %s={", env, PlatformSelectorEnv, PlatformSelectorEnv);
+      size_t i = 0;
+      for (auto &[k, _] : NameToBackend)
+        std::fprintf(stderr, "%s%s", k.c_str(), i++ < NameToBackend.size() - 1 ? "|" : "");
+      std::fprintf(stderr, "}\n");
     }
+  } else {
+    POLYRT_LOG("Backend selector %s is not set: using default host platform", PlatformSelectorEnv);
+    setupBackend(Backend::RelocatableObject);
   }
+};
+
+void polyregion::polyrt::initialise() {
+  static std::once_flag flag;
+  std::call_once(flag, []() {
+    if (!currentPlatform) {
+      POLYRT_LOG("Initialising backends... (addr=%p)", (void *)&initialise);
+      selectPlatform();
+      if (currentPlatform) selectDevice(*currentPlatform);
+      if (currentDevice) currentQueue = currentDevice->createQueue(std::chrono::seconds(10));
+      if (currentPlatform) {
+        POLYRT_LOG("- Platform: %s [%s, %s] Device: %s",
+                   currentPlatform->name().c_str(),           //
+                   to_string(currentPlatform->kind()).data(), //
+                   to_string(currentPlatform->moduleFormat()).data(), currentDevice->name().c_str());
+        std::string row;
+        auto features = currentDevice->features();
+        for (auto it = features.begin(); it != features.end(); ++it) {
+          row += (row.empty() ? "" : ", ") + *it;
+          if ((std::distance(features.begin(), it) + 1) % 10 == 0) {
+            POLYRT_LOG("  - %s", row.c_str());
+            row.clear();
+          }
+        }
+        if (!row.empty()) POLYRT_LOG("  - %s", row.c_str());
+      }
+    }
+  });
+}
+
+bool polyregion::polyrt::hostFallback() {
+  static bool fallback = []() {
+    if (auto env = std::getenv(HostFallbackEnv); env) {
+      errno = 0; // strtol to avoid exceptions
+      size_t value = std::strtol(env, nullptr, 10);
+      if (errno == 0 && value == 0) {
+        POLYRT_LOG("<%s> No compatible backend and host fallback disabled, returning...", __func__);
+        return false;
+      }
+    }
+    return true; // default is to use host fallback
+  }();
+  return fallback;
 }
 
 bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelObject &object) {
@@ -122,6 +151,9 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
              to_string(object.format).data(),
              to_string(currentPlatform->kind()).data(), //
              to_string(currentPlatform->moduleFormat()).data());
+
+  //  TODO need to check if object.feature is a strict subset of device feature
+
   if (!currentDevice->moduleLoaded(moduleName)) //
     currentDevice->loadModule(moduleName, std::string(object.image, object.image + object.imageLength));
   return true;

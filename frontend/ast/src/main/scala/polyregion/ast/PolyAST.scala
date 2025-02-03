@@ -81,6 +81,8 @@ object PolyAST {
     case Mut(name: Expr, expr: Expr)
     case Update(lhs: Expr, idx: Expr, value: Expr)
     case While(tests: List[Stmt], cond: Expr, body: List[Stmt])
+    case ForRange(induction: Expr.Select, lbIncl: Expr, ubExcl: Expr, step: Expr, body: List[Stmt])
+
     case Break
     case Cont
     case Cond(cond: Expr, trueBr: List[Stmt], falseBr: List[Stmt])
@@ -423,45 +425,45 @@ object PolyAST {
         }
       case Expr.IntrOp(op) =>
         op match {
-          case Intr.BNot(x, tpe) => s"'~${x.repr}"
-          case Intr.LogicNot(x)  => s"'!${x.repr}"
-          case Intr.Pos(x, tpe)  => s"'+${x.repr}"
-          case Intr.Neg(x, tpe)  => s"'-${x.repr}"
+          case Intr.BNot(x, tpe) => s"('~${x.repr})"
+          case Intr.LogicNot(x)  => s"('!${x.repr})"
+          case Intr.Pos(x, tpe)  => s"('+${x.repr})"
+          case Intr.Neg(x, tpe)  => s"('-${x.repr})"
 
-          case Intr.Add(x, y, tpe)  => s"${x.repr} '+ ${y.repr}"
-          case Intr.Sub(x, y, tpe)  => s"${x.repr} '- ${y.repr}"
-          case Intr.Mul(x, y, tpe)  => s"${x.repr} '* ${y.repr}"
-          case Intr.Div(x, y, tpe)  => s"${x.repr} '/ ${y.repr}"
-          case Intr.Rem(x, y, tpe)  => s"${x.repr} '% ${y.repr}"
+          case Intr.Add(x, y, tpe)  => s"(${x.repr} '+ ${y.repr})"
+          case Intr.Sub(x, y, tpe)  => s"(${x.repr} '- ${y.repr})"
+          case Intr.Mul(x, y, tpe)  => s"(${x.repr} '* ${y.repr})"
+          case Intr.Div(x, y, tpe)  => s"(${x.repr} '/ ${y.repr})"
+          case Intr.Rem(x, y, tpe)  => s"(${x.repr} '% ${y.repr})"
           case Intr.Min(x, y, tpe)  => s"'min(${x.repr}, ${y.repr})"
           case Intr.Max(x, y, tpe)  => s"'max(${x.repr}, ${y.repr})"
-          case Intr.BAnd(x, y, tpe) => s"${x.repr} '& ${y.repr}"
-          case Intr.BOr(x, y, tpe)  => s"${x.repr} '| ${y.repr}"
-          case Intr.BXor(x, y, tpe) => s"${x.repr} '^ ${y.repr}"
-          case Intr.BSL(x, y, tpe)  => s"${x.repr} '<< ${y.repr}"
-          case Intr.BSR(x, y, tpe)  => s"${x.repr} '>> ${y.repr}"
-          case Intr.BZSR(x, y, tpe) => s"${x.repr} '>>> ${y.repr}"
+          case Intr.BAnd(x, y, tpe) => s"(${x.repr} '& ${y.repr})"
+          case Intr.BOr(x, y, tpe)  => s"(${x.repr} '| ${y.repr})"
+          case Intr.BXor(x, y, tpe) => s"(${x.repr} '^ ${y.repr})"
+          case Intr.BSL(x, y, tpe)  => s"(${x.repr} '<< ${y.repr})"
+          case Intr.BSR(x, y, tpe)  => s"(${x.repr} '>> ${y.repr})"
+          case Intr.BZSR(x, y, tpe) => s"(${x.repr} '>>> ${y.repr})"
 
-          case Intr.LogicAnd(x, y) => s"${x.repr} '&& ${y.repr}"
-          case Intr.LogicOr(x, y)  => s"${x.repr} '|| ${y.repr}"
-          case Intr.LogicEq(x, y)  => s"${x.repr} '== ${y.repr}"
-          case Intr.LogicNeq(x, y) => s"${x.repr} '!= ${y.repr}"
-          case Intr.LogicLte(x, y) => s"${x.repr} '<= ${y.repr}"
-          case Intr.LogicGte(x, y) => s"${x.repr} '>= ${y.repr}"
-          case Intr.LogicLt(x, y)  => s"${x.repr} '< ${y.repr}"
-          case Intr.LogicGt(x, y)  => s"${x.repr} '> ${y.repr}"
+          case Intr.LogicAnd(x, y) => s"(${x.repr} '&& ${y.repr})"
+          case Intr.LogicOr(x, y)  => s"(${x.repr} '|| ${y.repr})"
+          case Intr.LogicEq(x, y)  => s"(${x.repr} '== ${y.repr})"
+          case Intr.LogicNeq(x, y) => s"(${x.repr} '!= ${y.repr})"
+          case Intr.LogicLte(x, y) => s"(${x.repr} '<= ${y.repr})"
+          case Intr.LogicGte(x, y) => s"(${x.repr} '>= ${y.repr})"
+          case Intr.LogicLt(x, y)  => s"(${x.repr} '< ${y.repr})"
+          case Intr.LogicGt(x, y)  => s"(${x.repr} '> ${y.repr})"
         }
       case Expr.Select(init, last) =>
         (init :+ last)
           .map(x => s"${x.symbol}: ${x.tpe.repr}")
           .reduceLeftOption((acc, x) => s"($acc).$x")
           .getOrElse("")
-      case Expr.Poison(t) => s"??? /*${t.repr}s*/"
+      case Expr.Poison(t) => s"??? /*poison of type ${t.repr}*/"
 
-      case Expr.Cast(from, as)        => s"${from.repr}.to[${as.repr}]"
-      case Expr.Index(lhs, idx, comp) => s"${lhs.repr}.index[${comp.repr}](${idx.repr})"
+      case Expr.Cast(from, as)        => s"(${from.repr}).to[${as.repr}]"
+      case Expr.Index(lhs, idx, comp) => s"(${lhs.repr}).index[${comp.repr}](${idx.repr})"
       case Expr.RefTo(lhs, idx, comp, space) =>
-        s"${lhs.repr}.refTo[${comp.repr}, ${space.repr}](${idx.map(_.repr).getOrElse("")})"
+        s"(${lhs.repr}).refTo[${comp.repr}, ${space.repr}](${idx.map(_.repr).getOrElse("")})"
       case Expr.Alloc(comp, size, space) => s"alloc[${comp.repr}, ${space.repr}](${size.repr})"
       case Expr.Invoke(name, args, rtn)  => s"$name(${args.map(_.repr).mkString(", ")}): ${rtn.repr}"
       case Expr.Annotated(expr, pos, comment) =>
@@ -473,14 +475,16 @@ object PolyAST {
   extension (stmt: Stmt) {
     inline def repr: String = stmt match {
       case Stmt.Block(xs) =>
-        s"${"{"}\n${xs.map(_.repr).mkString("\n").indent(2)}${"}"}"
+        s"${"{"}\n${xs.map(_.repr).mkString("\n").indent(2)}\n${"}"}"
       case Stmt.Comment(value)          => s" /* $value */"
       case Stmt.Var(name, rhs)          => s"var ${name.symbol}: ${name.tpe.repr} = ${rhs.map(_.repr).getOrElse("_")}"
       case Stmt.Mut(name, expr)         => s"${name.repr} = ${expr.repr}"
-      case Stmt.Update(lhs, idx, value) => s"${lhs.repr}[${idx.repr}] = ${value.repr}"
+      case Stmt.Update(lhs, idx, value) => s"(${lhs.repr}).update(${idx.repr}) = ${value.repr}"
       case Stmt.While(tests, cond, body) =>
         s"while(${"{"}${(tests.map(_.repr) :+ cond.repr)
-            .mkString(";")}${"}"})${"{"}\n${body.map(_.repr).mkString("\n").indent(2)}${"}"}"
+            .mkString(";")}${"}"})${"{"}\n${body.map(_.repr).mkString("\n").indent(2)}\n${"}"}"
+      case Stmt.ForRange(ind, lb, ub, step, body) =>
+        s"for(${ind.repr} = ${lb.repr}; ${ind.repr} < ${ub.repr}; ${ind.repr} += ${step.repr})${"{"}\n${body.map(_.repr).mkString("\n").indent(2)}\n${"}"}"
       case Stmt.Break        => s"break;"
       case Stmt.Cont         => s"continue;"
       case Stmt.Return(expr) => s"return ${expr.repr}"

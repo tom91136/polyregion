@@ -261,7 +261,7 @@ static constexpr std::optional<ModuleFormat> parseModuleFormat(std::string_view 
   return {};
 }
 
-static constexpr runtime::ModuleFormat targetFormat(const compiletime::Target &target) {
+static constexpr std::optional<runtime::ModuleFormat> moduleFormatOf(const compiletime::Target &target) {
   switch (target) {
     case compiletime::Target::Object_LLVM_HOST:
     case compiletime::Target::Object_LLVM_x86_64:
@@ -280,6 +280,7 @@ static constexpr runtime::ModuleFormat targetFormat(const compiletime::Target &t
     case compiletime::Target::Source_C_C11: //
       return runtime::ModuleFormat::Source;
   }
+  return {};
 }
 
 struct TypeLayout;
@@ -332,11 +333,32 @@ struct TypeLayout {
     }
     std::fprintf(fd, "     ╰────────\n");
   }
+
+  void print(std::FILE *fd) const {
+    fprintf(fd, "TypeLayout{\n");
+    fprintf(fd, "    .name = \"%s\",\n", name);
+    fprintf(fd, "    .sizeInBytes = %zuULL,\n", sizeInBytes);
+    fprintf(fd, "    .alignmentInBytes = %zuULL,\n", alignmentInBytes);
+    fprintf(fd, "    .memberCount = %zuULL,\n", memberCount);
+    fprintf(fd, "    .members = new AggregateMember[%zu]{\n", memberCount);
+    for (size_t i = 0; i < memberCount; ++i) {
+      fprintf(fd,
+              "        { .name = \"%s\", .offsetInBytes = %zuULL, .sizeInBytes = %zuULL, .ptrIndirection = %zuULL, .componentSize = "
+              "%zuULL, .type = (%s) }",
+              members[i].name, members[i].offsetInBytes, members[i].sizeInBytes, members[i].ptrIndirection, members[i].componentSize,
+              members[i].type ? members[i].type->name : "???");
+      if (i + 1 < memberCount) fprintf(fd, ",");
+      fprintf(fd, "\n");
+    }
+    fprintf(fd, "    }\n");
+    fprintf(fd, "};\n");
+  }
 };
 
 struct KernelObject {
   PlatformKind kind;
   ModuleFormat format;
+  size_t featureCount;
   const char **features;
   size_t imageLength;
   const unsigned char *image;
@@ -354,6 +376,11 @@ struct KernelBundle {
 
   const char *metadata;
 };
+
+static_assert(std::is_standard_layout_v<TypeLayout>);
+static_assert(std::is_standard_layout_v<AggregateMember>);
+static_assert(std::is_standard_layout_v<KernelObject>);
+static_assert(std::is_standard_layout_v<KernelBundle>);
 
 } // namespace polyregion::runtime
 

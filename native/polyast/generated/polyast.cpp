@@ -34,6 +34,7 @@ SourcePosition SourcePosition::withLine(const int32_t &v_) const {
 SourcePosition SourcePosition::withCol(const std::optional<int32_t> &v_) const {
   return SourcePosition(file, line, v_);
 }
+POLYREGION_EXPORT bool SourcePosition::operator!=(const SourcePosition& rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool SourcePosition::operator==(const SourcePosition& rhs) const {
   return (file == rhs.file) && (line == rhs.line) && (col == rhs.col);
 }
@@ -60,6 +61,7 @@ Named Named::withSymbol(const std::string &v_) const {
 Named Named::withTpe(const Type::Any &v_) const {
   return Named(symbol, v_);
 }
+POLYREGION_EXPORT bool Named::operator!=(const Named& rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool Named::operator==(const Named& rhs) const {
   return (symbol == rhs.symbol) && (tpe == rhs.tpe);
 }
@@ -1496,6 +1498,7 @@ Overload Overload::withArgs(const std::vector<Type::Any> &v_) const {
 Overload Overload::withRtn(const Type::Any &v_) const {
   return Overload(args, v_);
 }
+POLYREGION_EXPORT bool Overload::operator!=(const Overload& rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool Overload::operator==(const Overload& rhs) const {
   return std::equal(args.begin(), args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && (rtn == rhs.rtn);
 }
@@ -3827,6 +3830,64 @@ POLYREGION_EXPORT bool Stmt::While::operator<(const Base& rhs_) const { return v
 Stmt::While::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<While>(*this)); }
 Stmt::Any Stmt::While::widen() const { return Any(*this); };
 
+Stmt::ForRange::ForRange(Expr::Select induction, Expr::Any lbIncl, Expr::Any ubExcl, Expr::Any step, std::vector<Stmt::Any> body) noexcept : Stmt::Base(), induction(std::move(induction)), lbIncl(std::move(lbIncl)), ubExcl(std::move(ubExcl)), step(std::move(step)), body(std::move(body)) {}
+uint32_t Stmt::ForRange::id() const { return variant_id; };
+size_t Stmt::ForRange::hash_code() const { 
+  size_t seed = variant_id;
+  seed ^= std::hash<decltype(induction)>()(induction) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(lbIncl)>()(lbIncl) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(ubExcl)>()(ubExcl) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(step)>()(step) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= std::hash<decltype(body)>()(body) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  return seed;
+}
+namespace Stmt { std::ostream &operator<<(std::ostream &os, const Stmt::ForRange &x) { return x.dump(os); } }
+std::ostream &Stmt::ForRange::dump(std::ostream &os) const {
+  os << "ForRange(";
+  os << induction;
+  os << ',';
+  os << lbIncl;
+  os << ',';
+  os << ubExcl;
+  os << ',';
+  os << step;
+  os << ',';
+  os << '{';
+  for (auto it = body.begin(); it != body.end(); ++it) {
+    os << *it;
+    os << '"' << (std::next(it) != body.end() ? "," : "") << '"';
+  }
+  os << '}';
+  os << ')';
+  return os;
+}
+Stmt::ForRange Stmt::ForRange::withInduction(const Expr::Select &v_) const {
+  return Stmt::ForRange(v_, lbIncl, ubExcl, step, body);
+}
+Stmt::ForRange Stmt::ForRange::withLbIncl(const Expr::Any &v_) const {
+  return Stmt::ForRange(induction, v_, ubExcl, step, body);
+}
+Stmt::ForRange Stmt::ForRange::withUbExcl(const Expr::Any &v_) const {
+  return Stmt::ForRange(induction, lbIncl, v_, step, body);
+}
+Stmt::ForRange Stmt::ForRange::withStep(const Expr::Any &v_) const {
+  return Stmt::ForRange(induction, lbIncl, ubExcl, v_, body);
+}
+Stmt::ForRange Stmt::ForRange::withBody(const std::vector<Stmt::Any> &v_) const {
+  return Stmt::ForRange(induction, lbIncl, ubExcl, step, v_);
+}
+POLYREGION_EXPORT bool Stmt::ForRange::operator==(const Stmt::ForRange& rhs) const {
+  return (this->induction == rhs.induction) && (this->lbIncl == rhs.lbIncl) && (this->ubExcl == rhs.ubExcl) && (this->step == rhs.step) && std::equal(this->body.begin(), this->body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; });
+}
+POLYREGION_EXPORT bool Stmt::ForRange::operator==(const Base& rhs_) const {
+  if(rhs_.id() != variant_id) return false;
+  return this->operator==(static_cast<const Stmt::ForRange&>(rhs_)); // NOLINT(*-pro-type-static-cast-downcast)
+}
+POLYREGION_EXPORT bool Stmt::ForRange::operator<(const Stmt::ForRange& rhs) const { return false; }
+POLYREGION_EXPORT bool Stmt::ForRange::operator<(const Base& rhs_) const { return variant_id < rhs_.id(); }
+Stmt::ForRange::operator Stmt::Any() const { return std::static_pointer_cast<Base>(std::make_shared<ForRange>(*this)); }
+Stmt::Any Stmt::ForRange::widen() const { return Any(*this); };
+
 Stmt::Break::Break() noexcept : Stmt::Base() {}
 uint32_t Stmt::Break::id() const { return variant_id; };
 size_t Stmt::Break::hash_code() const { 
@@ -4037,6 +4098,7 @@ Signature Signature::withArgs(const std::vector<Type::Any> &v_) const {
 Signature Signature::withRtn(const Type::Any &v_) const {
   return Signature(name, args, v_);
 }
+POLYREGION_EXPORT bool Signature::operator!=(const Signature& rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool Signature::operator==(const Signature& rhs) const {
   return (name == rhs.name) && std::equal(args.begin(), args.end(), rhs.args.begin(), [](auto &&l, auto &&r) { return l == r; }) && (rtn == rhs.rtn);
 }
@@ -4196,6 +4258,7 @@ Arg Arg::withNamed(const Named &v_) const {
 Arg Arg::withPos(const std::optional<SourcePosition> &v_) const {
   return Arg(named, v_);
 }
+POLYREGION_EXPORT bool Arg::operator!=(const Arg& rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool Arg::operator==(const Arg& rhs) const {
   return (named == rhs.named) && (pos == rhs.pos);
 }
@@ -4255,6 +4318,7 @@ Function Function::withBody(const std::vector<Stmt::Any> &v_) const {
 Function Function::withAttrs(const std::set<FunctionAttr::Any> &v_) const {
   return Function(name, args, rtn, body, v_);
 }
+POLYREGION_EXPORT bool Function::operator!=(const Function& rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool Function::operator==(const Function& rhs) const {
   return (name == rhs.name) && (args == rhs.args) && (rtn == rhs.rtn) && std::equal(body.begin(), body.end(), rhs.body.begin(), [](auto &&l, auto &&r) { return l == r; }) && std::equal(attrs.begin(), attrs.end(), rhs.attrs.begin(), [](auto &&l, auto &&r) { return l == r; });
 }
@@ -4286,6 +4350,7 @@ StructDef StructDef::withName(const std::string &v_) const {
 StructDef StructDef::withMembers(const std::vector<Named> &v_) const {
   return StructDef(name, v_);
 }
+POLYREGION_EXPORT bool StructDef::operator!=(const StructDef& rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool StructDef::operator==(const StructDef& rhs) const {
   return (name == rhs.name) && (members == rhs.members);
 }
@@ -4322,6 +4387,7 @@ Program Program::withStructs(const std::vector<StructDef> &v_) const {
 Program Program::withFunctions(const std::vector<Function> &v_) const {
   return Program(structs, v_);
 }
+POLYREGION_EXPORT bool Program::operator!=(const Program& rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool Program::operator==(const Program& rhs) const {
   return (structs == rhs.structs) && (functions == rhs.functions);
 }
@@ -4354,6 +4420,7 @@ StructLayoutMember StructLayoutMember::withOffsetInBytes(const int64_t &v_) cons
 StructLayoutMember StructLayoutMember::withSizeInBytes(const int64_t &v_) const {
   return StructLayoutMember(name, offsetInBytes, v_);
 }
+POLYREGION_EXPORT bool StructLayoutMember::operator!=(const StructLayoutMember& rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool StructLayoutMember::operator==(const StructLayoutMember& rhs) const {
   return (name == rhs.name) && (offsetInBytes == rhs.offsetInBytes) && (sizeInBytes == rhs.sizeInBytes);
 }
@@ -4397,6 +4464,7 @@ StructLayout StructLayout::withAlignment(const int64_t &v_) const {
 StructLayout StructLayout::withMembers(const std::vector<StructLayoutMember> &v_) const {
   return StructLayout(name, sizeInBytes, alignment, v_);
 }
+POLYREGION_EXPORT bool StructLayout::operator!=(const StructLayout& rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool StructLayout::operator==(const StructLayout& rhs) const {
   return (name == rhs.name) && (sizeInBytes == rhs.sizeInBytes) && (alignment == rhs.alignment) && (members == rhs.members);
 }
@@ -4435,6 +4503,7 @@ CompileEvent CompileEvent::withName(const std::string &v_) const {
 CompileEvent CompileEvent::withData(const std::string &v_) const {
   return CompileEvent(epochMillis, elapsedNanos, name, v_);
 }
+POLYREGION_EXPORT bool CompileEvent::operator!=(const CompileEvent& rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool CompileEvent::operator==(const CompileEvent& rhs) const {
   return (epochMillis == rhs.epochMillis) && (elapsedNanos == rhs.elapsedNanos) && (name == rhs.name) && (data == rhs.data);
 }
@@ -4503,6 +4572,7 @@ CompileResult CompileResult::withLayouts(const std::vector<StructLayout> &v_) co
 CompileResult CompileResult::withMessages(const std::string &v_) const {
   return CompileResult(binary, features, events, layouts, v_);
 }
+POLYREGION_EXPORT bool CompileResult::operator!=(const CompileResult& rhs) const { return !(*this == rhs); }
 POLYREGION_EXPORT bool CompileResult::operator==(const CompileResult& rhs) const {
   return (binary == rhs.binary) && (features == rhs.features) && (events == rhs.events) && (layouts == rhs.layouts) && (messages == rhs.messages);
 }
@@ -4639,6 +4709,7 @@ std::size_t std::hash<polyregion::polyast::Stmt::Var>::operator()(const polyregi
 std::size_t std::hash<polyregion::polyast::Stmt::Mut>::operator()(const polyregion::polyast::Stmt::Mut &x) const noexcept { return x.hash_code(); }
 std::size_t std::hash<polyregion::polyast::Stmt::Update>::operator()(const polyregion::polyast::Stmt::Update &x) const noexcept { return x.hash_code(); }
 std::size_t std::hash<polyregion::polyast::Stmt::While>::operator()(const polyregion::polyast::Stmt::While &x) const noexcept { return x.hash_code(); }
+std::size_t std::hash<polyregion::polyast::Stmt::ForRange>::operator()(const polyregion::polyast::Stmt::ForRange &x) const noexcept { return x.hash_code(); }
 std::size_t std::hash<polyregion::polyast::Stmt::Break>::operator()(const polyregion::polyast::Stmt::Break &x) const noexcept { return x.hash_code(); }
 std::size_t std::hash<polyregion::polyast::Stmt::Cont>::operator()(const polyregion::polyast::Stmt::Cont &x) const noexcept { return x.hash_code(); }
 std::size_t std::hash<polyregion::polyast::Stmt::Cond>::operator()(const polyregion::polyast::Stmt::Cond &x) const noexcept { return x.hash_code(); }

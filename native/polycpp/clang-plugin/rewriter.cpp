@@ -132,7 +132,8 @@ template <typename T> T *findDecl(clang::DiagnosticsEngine &D, clang::Sema &S, c
   return {};
 }
 
-void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTContext &C, const Callsite &c, const KernelBundle &bundle) {
+void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTContext &C, const Callsite &c,
+                       const polyregion::polyfront::KernelBundle &bundle) {
   const auto fieldWithName = [&](const clang::QualType ty, const auto &fieldName) -> Opt<clang::FieldDecl *> {
     if (const auto decl = ty->getAsCXXRecordDecl()) {
       return decl->fields() | find([&](auto f) { return f->getName() == fieldName; });
@@ -187,17 +188,18 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
                   C,               //
                   *KernelObjectTy, //
                   {
-                      /*kind       */ S
+                      /*kind         */ S
                           .ImpCastExprToType(mkIntLit(C, C.IntTy, static_cast<std::underlying_type_t<decltype(ko.kind)>>(ko.kind)),
                                              *PlatformKindTy, clang::CastKind::CK_IntegralCast)
                           .get(),
-                      /*format     */
+                      /*format       */
                       S.ImpCastExprToType(mkIntLit(C, C.IntTy, static_cast<std::underlying_type_t<decltype(ko.format)>>(ko.format)),
                                           *ModuleFormatTy, clang::CastKind::CK_IntegralCast)
                           .get(),
-                      /*features    */ mkArrayToPtrDecay(C, C.getPointerType(C.CharTy.withConst()), mkDeclRef(C, kernelFeatureDecls[idx])),
-                      /*imageLength */ mkIntLit(C, C.getSizeType(), ko.moduleImage.size()),
-                      /*image       */
+                      /*featureCount */ mkIntLit(C, C.getSizeType(), ko.features.size()),
+                      /*features     */ mkArrayToPtrDecay(C, C.getPointerType(C.CharTy.withConst()), mkDeclRef(C, kernelFeatureDecls[idx])),
+                      /*imageLength  */ mkIntLit(C, C.getSizeType(), ko.moduleImage.size()),
+                      /*image        */
                       mkArrayToPtrDecay(C, C.getPointerType(C.UnsignedCharTy.withConst()), mkDeclRef(C, kernelImageDecls[idx])),
                   });
             }) //
@@ -255,7 +257,7 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
                   const auto typeDecl =
                       extractComponent(m.name.tpe) ^ flat_map([&](auto &t) {
                         return primitiveTypeLayoutsDecls                                                                             //
-                               ^ get_maybe(t)                                                                                              //
+                               ^ get_maybe(t)                                                                                        //
                                ^ map([&](auto &decl) -> clang::Expr * {                                                              //
                                    return S.CreateBuiltinUnaryOp({}, clang::UnaryOperatorKind::UO_AddrOf, mkDeclRef(C, decl)).get(); //
                                  })                                                                                                  //
@@ -327,7 +329,7 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
   c.calleeDecl->print(llvm::outs());
 }
 
-OffloadRewriteConsumer::OffloadRewriteConsumer(clang::CompilerInstance &CI, const Options &opts)
+OffloadRewriteConsumer::OffloadRewriteConsumer(clang::CompilerInstance &CI, const polyfront::Options &opts)
     : clang::ASTConsumer(), CI(CI), opts(opts) {}
 
 template <typename Parent, typename Node> const Parent *findParentOfType(clang::ASTContext &context, Node *from) {
@@ -368,7 +370,7 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
 
               std::cout << moduleId << std::endl;
 
-              const auto bundle = generateBundle(
+              const auto bundle = compileRegion(
                   opts, C, D, moduleId, *c.functorDecl,
                   specialisationPath ^ head_maybe() ^
                       fold([](auto, auto callExpr) { return callExpr->getExprLoc(); }, [&] { return c.callLambdaArgExpr->getExprLoc(); }),

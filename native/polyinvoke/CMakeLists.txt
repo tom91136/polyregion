@@ -104,9 +104,6 @@ endforeach ()
 add_executable(polyinvoke-tests test/test_utils.cpp test/fma.cpp test/args.cpp test/stream.cpp)
 add_executable(polyinvoke-exec driver.cpp)
 
-target_include_directories(polyinvoke-exec PRIVATE ../include)
-target_include_directories(polyinvoke-tests PRIVATE . ../include)
-
 target_link_libraries(polyinvoke-exec PRIVATE polyinvoke-static Aspartame)
 target_link_libraries(polyinvoke-tests PRIVATE polyinvoke-static Catch2::Catch2WithMain Aspartame)
 

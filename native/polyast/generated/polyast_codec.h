@@ -166,6 +166,8 @@ namespace Stmt {
 [[nodiscard]] POLYREGION_EXPORT json update_to_json(const Stmt::Update &);
 [[nodiscard]] POLYREGION_EXPORT Stmt::While while_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json while_to_json(const Stmt::While &);
+[[nodiscard]] POLYREGION_EXPORT Stmt::ForRange forrange_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json forrange_to_json(const Stmt::ForRange &);
 [[nodiscard]] POLYREGION_EXPORT Stmt::Break break_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json break_to_json(const Stmt::Break &);
 [[nodiscard]] POLYREGION_EXPORT Stmt::Cont cont_from_json(const json &);

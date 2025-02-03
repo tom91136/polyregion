@@ -308,7 +308,7 @@ private[polyregion] object CppStructGen {
           )
 
           val sig = members.map((n, tpe) =>
-            s"[[nodiscard]] POLYREGION_EXPORT ${clsName(qualified = true)} with${capitalCase(n)}(const ${tpe.ref(true)} &_v) const;"
+            s"[[nodiscard]] POLYREGION_EXPORT ${clsName(qualified = true)} with${capitalCase(n)}(const ${tpe.ref(true)} &v_) const;"
           )
           (sig, stmts)
       }
@@ -386,8 +386,10 @@ private[polyregion] object CppStructGen {
             )
           case _ =>
             (
-              s"[[nodiscard]] POLYREGION_EXPORT bool operator==(const $name &) const;" :: Nil,
-              s"POLYREGION_EXPORT bool $name::operator==(const $name& rhs) const {" ::
+              s"[[nodiscard]] POLYREGION_EXPORT bool operator!=(const $name &) const;" ::
+                s"[[nodiscard]] POLYREGION_EXPORT bool operator==(const $name &) const;" :: Nil,
+              s"POLYREGION_EXPORT bool $name::operator!=(const $name& rhs) const { return !(*this == rhs); }" ::
+                s"POLYREGION_EXPORT bool $name::operator==(const $name& rhs) const {" ::
                 (members match {
                   case Nil => "  return true;" :: Nil
                   case xs  => xs.map((n, tpe) => mkEqStmt("", "rhs.", n, tpe)).mkString("  return ", " && ", ";") :: Nil
@@ -988,7 +990,7 @@ private[polyregion] object CppStructGen {
 
     val ctorTerms =
       compiletime.primaryCtorApplyTerms[m.MirroredType, ToCppTerm.Value, ToCppTerm, CppType, ToCppType].map(write(_))
-    val tpe = summon[ToCppType[m.MirroredType]]()
+    val tpe     = summon[ToCppType[m.MirroredType]]()
     val applied = parent.map((s, _) => (s, ctorTerms))
     inline m match {
       case s: Mirror.SumOf[T] =>

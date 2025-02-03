@@ -2,13 +2,11 @@
 
 #include <iostream>
 #include <optional>
-#include <type_traits>
 
 #include "ast.h"
 #include "fmt/format.h"
 
 #include "clang/AST/ASTContext.h"
-#include "llvm/Support/Casting.h"
 
 namespace polyregion::polystl {
 
@@ -17,24 +15,6 @@ using namespace polyregion::polyast;
 [[noreturn]] static void raise(const std::string &message, const char *file = __builtin_FILE(), int line = __builtin_LINE()) {
   std::cerr << fmt::format("[{}:{}] {}", file, line, message) << std::endl;
   std::abort();
-}
-
-template <typename Ret, typename Arg, typename... Rest> Arg arg0_helper(Ret (*)(Arg, Rest...));
-template <typename Ret, typename F, typename Arg, typename... Rest> Arg arg0_helper(Ret (F::*)(Arg, Rest...));
-template <typename Ret, typename F, typename Arg, typename... Rest> Arg arg0_helper(Ret (F::*)(Arg, Rest...) const);
-template <typename F> decltype(arg0_helper(&F::operator())) arg0_helper(F);
-template <typename T> using arg0_t = decltype(arg0_helper(std::declval<T>()));
-template <typename T, typename Node, typename... Fs> Opt<T> visitDyn(Node n, Fs... fs) {
-  Opt<T> result{};
-  auto _ = {[&]() {
-    if (!result) {
-      if (auto x = llvm::dyn_cast<std::remove_pointer_t<arg0_t<Fs>>>(n)) {
-        result = T(fs(x));
-      }
-    }
-    return 0;
-  }()...};
-  return result;
 }
 
 struct Remapper {
@@ -94,7 +74,6 @@ struct Remapper {
     //    void operator+=(const Remapper &that);
   };
 
-public:
   explicit Remapper(clang::ASTContext &context);
   [[nodiscard]] static Expr::Any integralConstOfType(const Type::Any &tpe, uint64_t value);
   [[nodiscard]] static Expr::Any floatConstOfType(const Type::Any &tpe, double value);

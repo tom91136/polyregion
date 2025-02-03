@@ -1,7 +1,7 @@
 add_subdirectory(rt)
 
 add_library(polyfront-options INTERFACE)
-target_link_libraries(polyfront-options INTERFACE Aspartame)
+target_link_libraries(polyfront-options INTERFACE Aspartame PolyAST polycommon LLVMSupport)
 target_sources(polyfront-options
         PRIVATE
         PUBLIC FILE_SET HEADERS
@@ -9,6 +9,8 @@ target_sources(polyfront-options
         BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}
         FILES
         polyfront/options.hpp
+        polyfront/options_backend.hpp
+        polyfront/options_frontend.hpp
 )
 
 

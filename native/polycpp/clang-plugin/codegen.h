@@ -3,29 +3,16 @@
 #include <string>
 #include <vector>
 
-#include "plugin.h"
 #include "polyast.h"
 #include "polyregion/types.h"
+
+#include "polyfront/options_backend.hpp"
 
 #include "clang/AST/ASTContext.h"
 
 namespace polyregion::polystl {
 
-struct KernelObject {
-  runtime::ModuleFormat format{};
-  runtime::PlatformKind kind{};
-  std::vector<std::string> features{};
-  std::string moduleImage{};
-};
-
-struct KernelBundle {
-  std::string moduleName{};
-  std::vector<KernelObject> objects{};
-  std::vector<std::pair<bool, StructLayout>> layouts{};
-  std::string metadata;
-};
-
-KernelBundle generateBundle(const Options &ctx,
+polyfront::KernelBundle compileRegion(const polyfront::Options &ctx,
                             clang::ASTContext &C,                //
                             clang::DiagnosticsEngine &diag,      //
                             const std::string &moduleId,         //

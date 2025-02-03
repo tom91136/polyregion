@@ -23,7 +23,7 @@ POLYREGION_EXPORT extern std::unique_ptr<Device> currentDevice;
 POLYREGION_EXPORT extern std::unique_ptr<DeviceQueue> currentQueue;
 
 POLYREGION_EXPORT void initialise();
-POLYREGION_EXPORT PlatformKind platformKind();
+POLYREGION_EXPORT bool hostFallback();
 POLYREGION_EXPORT bool loadKernelObject(const char *moduleName, const KernelObject &object);
 POLYREGION_EXPORT void dispatchHostThreaded(size_t global, void *functorData, const char *moduleId);
 POLYREGION_EXPORT void dispatchManaged(size_t global, size_t local, size_t localMemBytes, void *functorData, const char *moduleId);

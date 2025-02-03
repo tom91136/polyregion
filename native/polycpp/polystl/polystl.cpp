@@ -3,9 +3,6 @@
 #include "polyrt/rt.h"
 #include "rt-reflect/rt_reflect.hpp"
 
-constexpr auto PlatformSelectorEnv = "POLYSTL_PLATFORM";
-constexpr auto DeviceSelectorEnv = "POLYSTL_DEVICE";
-
 static polyregion::polyrt::SynchronisedAllocation allocations(
     [](const void *ptr) -> polyregion::polyrt::PtrQuery {
       if (const auto meta = polyregion::rt_reflect::_rt_reflect_p(ptr); meta.type != polyregion::rt_reflect::Type::Unknown) {
@@ -36,9 +33,9 @@ static polyregion::polyrt::SynchronisedAllocation allocations(
       polyregion::polyrt::currentDevice->freeDevice(remotePtr);
     });
 
-void polyregion::polystl::details::initialise() { polyrt::initialise(); }
+POLYREGION_EXPORT void polyregion::polystl::details::initialise() { polyrt::initialise(); }
 
-void polyregion::polystl::details::dispatchManaged(const size_t global, const size_t local, const size_t localMemBytes,
+POLYREGION_EXPORT void polyregion::polystl::details::dispatchManaged(const size_t global, const size_t local, const size_t localMemBytes,
                                                    const runtime::TypeLayout *layout, void *functorData, const char *moduleId) {
   POLYSTL_LOG("<%s:%s:%zu> Dispatch managed, arg=%p bytes", __func__, moduleId, global, functorData);
   const auto functorDevicePtr = allocations.syncLocalToRemote(functorData, *layout);

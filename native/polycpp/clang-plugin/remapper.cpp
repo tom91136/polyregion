@@ -1,32 +1,29 @@
+#include <csignal>
 #include <iostream>
 #include <utility>
 
-#include "aspartame/optional.hpp"
-#include "aspartame/string.hpp"
-#include "aspartame/unordered_map.hpp"
-#include "aspartame/vector.hpp"
-#include "aspartame/view.hpp"
+#include "aspartame/all.hpp"
 
 #include "ast.h"
 #include "clang_utils.h"
+#include "magic_enum.hpp"
+#include "polyregion/llvm_dyn.hpp"
 #include "remapper.h"
 
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
+#include "clang/AST/RecordLayout.h"
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/ASTMatchers/ASTMatchers.h"
 #include "clang/Basic/Builtins.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendAction.h"
 #include "clang/Lex/PreprocessorOptions.h"
+
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/FormatVariadic.h"
-
-#include <clang/AST/RecordLayout.h>
-#include <csignal>
-#include <magic_enum.hpp>
 
 using namespace polyregion::polyast;
 using namespace polyregion::polystl;
@@ -115,7 +112,8 @@ const static std::string Empty = "#empty";
   if (init.size() == 1) {
     return Expr::Select(selectWithInheritance(init[0], last), last);
   } else {
-    return Expr::Select(init ^ append(last) ^ sliding(2, 1) ^ flat_map([&](auto &xs) { return selectWithInheritance(xs[0], xs[1]); }), last);
+    return Expr::Select(init ^ append(last) ^ sliding(2, 1) ^ flat_map([&](auto &xs) { return selectWithInheritance(xs[0], xs[1]); }),
+                        last);
   }
 }
 
@@ -175,7 +173,7 @@ Expr::Any Remapper::RemapContext::newVar(const Expr::Any &expr) {
                           [&](const Expr::IntS64Const &) { return expr; },  //
                           [&](const Expr::Unit0Const &) { return expr; },   //
                           [&](const Expr::Bool1Const &) { return expr; },   //
-                          [&](const Expr::NullPtrConst &) { return expr; },   //
+                          [&](const Expr::NullPtrConst &) { return expr; }, //
 
                           [&](const Expr::SpecOp &x) { return mkSelect(x); }, //
                           [&](const Expr::MathOp &x) { return mkSelect(x); }, //
@@ -596,7 +594,7 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
   };
 
   auto desugared = qual.getDesugaredType(context);
-  auto result = visitDyn<Type::Any>(
+  auto result = llvm_shared::visitDyn<Type::Any>(
       desugared,                                        //
       [&](const clang::BuiltinType *tpe) -> Type::Any { // char|short|int|long
         switch (tpe->getKind()) {
@@ -686,8 +684,8 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
     return lhs;
   };
 
-  auto result = visitDyn<Expr::Any>( //
-      root->IgnoreParens(),          //
+  auto result = llvm_shared::visitDyn<Expr::Any>( //
+      root->IgnoreParens(),                       //
       [&](const clang::ConstantExpr *expr) -> Expr::Any {
         auto asFloat = [&] { return expr->getAPValueResult().getFloat().convertToDouble(); };
         auto asInt = [&] { return expr->getAPValueResult().getInt().getLimitedValue(); };
@@ -992,7 +990,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         const auto actualReceiverTpe = fn->args | collect_first([&](auto &arg) -> Opt<Type::Any> {
                                          if (arg.named.tpe.template is<Type::Ptr>() && arg.named.symbol == This) return arg.named.tpe;
                                          return {};
-                                       })  ;
+                                       });
         if (!actualReceiverTpe) raise("No actual receiver type in member call");
 
         return Expr::Invoke(                                                         //
@@ -1122,7 +1120,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           };
 
           return specs                               //
-                 ^ get_maybe(builtinName)                  //
+                 ^ get_maybe(builtinName)            //
                  ^ fold([](auto &f) { return f(); }, //
                         [&]() -> Expr::Any {         //
                           r.push(Stmt::Comment("unimplemented builtin " + builtinName));
@@ -1184,13 +1182,12 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
   // root->dump();
   // llvm::errs() << "<<< \n";
 
-  visitDyn<bool>(
+  llvm_shared::visitDyn0(
       root, //
       [&](const clang::CompoundStmt *stmt) {
         Vec<Stmt::Any> xs;
         for (auto s : stmt->body())
           handleStmt(s, r);
-        return true;
       },
       [&](const clang::DeclStmt *stmt) {
         for (auto decl : stmt->decls()) {
@@ -1245,7 +1242,6 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
             r.push(Stmt::Return(Expr::Poison(Type::Unit0())));
           }
         }
-        return true;
       },
       [&](const clang::IfStmt *stmt) {
         if (stmt->hasInitStorage()) handleStmt(stmt->getInit(), r);
@@ -1253,7 +1249,6 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
         r.push(Stmt::Cond(handleExpr(stmt->getCond(), r), //
                           r.scoped([&](auto &r_) { handleStmt(stmt->getThen(), r_); }, {}, {}, {}, true),
                           r.scoped([&](auto &r_) { handleStmt(stmt->getElse(), r_); }, {}, {}, {}, true)));
-        return true;
       },
       [&](const clang::ForStmt *stmt) {
         // Transform into a while-loop:
@@ -1274,33 +1269,17 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
             },
             {}, {}, {}, true);
         r.push(Stmt::While(condStmts, condTerm, body));
-        return true;
       },
       [&](const clang::WhileStmt *stmt) {
         auto [condTerm, condStmts] = r.scoped<Expr::Any>([&](auto &r) { return r.newVar(handleExpr(stmt->getCond(), r)); });
         auto body = r.scoped([&](auto &r) { handleStmt(stmt->getBody(), r); }, {}, {}, {}, true);
         r.push(Stmt::While(condStmts, condTerm, body));
-        return true;
       },
-      [&](const clang::ReturnStmt *stmt) {
-        r.push(Stmt::Return(conform(r, handleExpr(stmt->getRetValue(), r), r.rtnType)));
-        return true;
-      },
-      [&](const clang::BreakStmt *stmt) {
-        r.push(Stmt::Break());
-        return true;
-      },
-      [&](const clang::ContinueStmt *stmt) {
-        r.push(Stmt::Cont());
-        return true;
-      },
-      [&](const clang::NullStmt *stmt) {
-        r.push(Stmt::Comment(pretty_string(stmt, context)));
-        return true;
-      },
+      [&](const clang::ReturnStmt *stmt) { r.push(Stmt::Return(conform(r, handleExpr(stmt->getRetValue(), r), r.rtnType))); },
+      [&](const clang::BreakStmt *stmt) { r.push(Stmt::Break()); }, [&](const clang::ContinueStmt *stmt) { r.push(Stmt::Cont()); },
+      [&](const clang::NullStmt *stmt) { r.push(Stmt::Comment(pretty_string(stmt, context))); },
       [&](const clang::Expr *stmt) { // Freestanding expressions for side-effects (e.g i++;)
         auto _ = r.newVar(handleExpr(stmt, r));
-        return true;
       },
       [&](const clang::Stmt *stmt) {
         llvm::outs() << "Failed to handle stmt\n";
@@ -1310,6 +1289,5 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
         stmt->dumpPretty(context);
         llvm::outs() << "\n";
         r.push(Stmt::Comment(pretty_string(stmt, context)));
-        return true;
       });
 }

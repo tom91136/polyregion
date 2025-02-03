@@ -70,12 +70,15 @@ if (NOT CMAKE_CROSSCOMPILING OR TRUE)" F18_CMAKELIST_CONTENT "${F18_CMAKELIST_CO
 endif ()
 
 # Replace ` flang-new ` with ` $<TARGET_FILE:flang-new> ` in f18
-# FIXME this works for LLVM 19.1.6, need to recheck for LLVM 20
-if (F18_CMAKELIST_CONTENT MATCHES " flang-new ")
-    string(REPLACE " flang-new " " $<TARGET_FILE:flang-new> " F18_CMAKELIST_CONTENT "${F18_CMAKELIST_CONTENT}")
-    file(WRITE "${F18_CMAKELIST_PATH}" "${F18_CMAKELIST_CONTENT}")
-    message(STATUS "Patched ' flang-new ' with ' $<TARGET_FILE:flang-new> ' in ${F18_CMAKELIST_PATH}")
-endif ()
+# FIXME this works for LLVM 19 and 20, need to recheck if project names are different in the future
+foreach (bin_name "flang" "flang-new")
+    if (F18_CMAKELIST_CONTENT MATCHES " ${bin_name} ")
+        string(REPLACE " ${bin_name} " " $<TARGET_FILE:${bin_name}> " F18_CMAKELIST_CONTENT "${F18_CMAKELIST_CONTENT}")
+        file(WRITE "${F18_CMAKELIST_PATH}" "${F18_CMAKELIST_CONTENT}")
+        message(STATUS "Patched ' ${bin_name} ' with ' $<TARGET_FILE:${bin_name}> ' in ${F18_CMAKELIST_PATH}")
+    endif ()
+endforeach ()
+
 
 ### End patches ###
 
@@ -136,6 +139,7 @@ execute_process(
         -S ${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src/llvm
         -B ${LLVM_BUILD_DIR}
         -C ${CMAKE_CURRENT_BINARY_DIR}/build_llvm_cache.cmake
+        --fresh
         ${BUILD_OPTIONS}
         -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
         -DCMAKE_INSTALL_PREFIX=${LLVM_DIST_DIR}

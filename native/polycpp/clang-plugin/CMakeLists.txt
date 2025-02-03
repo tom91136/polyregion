@@ -20,6 +20,7 @@ if (NOT WIN32)
     target_link_libraries(polycpp-clang-plugin
             PRIVATE
             polycommon
+            polyfront-options
             PolyAST
             Aspartame::Aspartame
             fmt::fmt-header-only
