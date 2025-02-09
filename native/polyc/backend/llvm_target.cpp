@@ -118,7 +118,7 @@ llvm::Type *TargetedContext::resolveType(const AnyType &tpe, const Map<std::stri
                     [&]() -> llvm::StructType * {
                       throw BackendException(fmt::format("Unseen struct def {}, currently in-scope structs: {}", repr(x),
                                                          structs | values() | mk_string("\n", "\n", "\n", [](auto &ty) {
-                                                           return fmt::format(" -> {}", to_string(ty.tpe));
+                                                           return fmt::format(" -> {}", to_string(ty.def));
                                                          })));
                     });
       }, //

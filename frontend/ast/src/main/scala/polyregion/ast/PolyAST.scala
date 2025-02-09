@@ -312,9 +312,9 @@ object PolyAST {
 
   extension (t: Type.Space) {
     inline def repr: String = t match {
-      case Space.Global  => "Global"
-      case Space.Local   => "Local"
-      case Space.Private => "Private"
+      case Space.Global  => ""
+      case Space.Local   => "^Local"
+      case Space.Private => "^Private"
     }
   }
 
@@ -347,10 +347,11 @@ object PolyAST {
       case Type.Unit0   => "Unit0"
       case Type.Bool1   => "Bool1"
 
-      case Type.Struct(name)             => s"$name"
-      case Type.Ptr(comp, length, space) => s"${comp.repr}[${length.map(_.toString).getOrElse("")}]^${space.repr}"
+      case Type.Struct(name) => s"$name"
+      case Type.Ptr(comp, length, space) =>
+        s"${comp.repr}${length.map(_.toString).map(l => s"[$l]").getOrElse("*")}${space.repr}"
       case Type.Annotated(tpe, pos, comment) =>
-        s"${tpe.repr}${pos.map(s => s"/*${s.repr}*/").getOrElse("")}${comment.map(s => s"/*$s*/").getOrElse("")}"
+        s"${tpe.repr}${pos.map(s => s"/* ${s.repr} */").getOrElse("")}${comment.map(s => s"/* $s */").getOrElse("")}"
     }
   }
 
@@ -458,7 +459,7 @@ object PolyAST {
           .map(x => s"${x.symbol}: ${x.tpe.repr}")
           .reduceLeftOption((acc, x) => s"($acc).$x")
           .getOrElse("")
-      case Expr.Poison(t) => s"??? /*poison of type ${t.repr}*/"
+      case Expr.Poison(t) => s"(???) /* poison of type ${t.repr} */"
 
       case Expr.Cast(from, as)        => s"(${from.repr}).to[${as.repr}]"
       case Expr.Index(lhs, idx, comp) => s"(${lhs.repr}).index[${comp.repr}](${idx.repr})"
@@ -467,7 +468,7 @@ object PolyAST {
       case Expr.Alloc(comp, size, space) => s"alloc[${comp.repr}, ${space.repr}](${size.repr})"
       case Expr.Invoke(name, args, rtn)  => s"$name(${args.map(_.repr).mkString(", ")}): ${rtn.repr}"
       case Expr.Annotated(expr, pos, comment) =>
-        s"${expr.repr}${pos.map(s => s"/*${s.repr}*/").getOrElse("")}${comment.map(s => s"/*$s*/").getOrElse("")}"
+        s"${expr.repr}${pos.map(s => s"/* ${s.repr} */").getOrElse("")}${comment.map(s => s"/* $s */").getOrElse("")}"
 
     }
   }
@@ -494,12 +495,13 @@ object PolyAST {
             .mkString("\n")
             .indent(2)}${"}"}"
       case Stmt.Annotated(stmt, pos, comment) =>
-        s"${stmt.repr}${pos.map(s => s"/*${s.repr}*/").getOrElse("")}${comment.map(s => s"/*$s*/").getOrElse("")}"
+        s"${stmt.repr}${pos.map(s => s"/* ${s.repr} */").getOrElse("")}${comment.map(s => s"/* $s */").getOrElse("")}"
     }
   }
 
   extension (a: Arg) {
-    inline def repr: String = s"${a.named.symbol}: ${a.named.tpe.repr}${a.pos.map(s => s"/*${s.repr}*/").getOrElse("")}"
+    inline def repr: String =
+      s"${a.named.symbol}: ${a.named.tpe.repr}${a.pos.map(s => s"/* ${s.repr} */").getOrElse("")}"
   }
 
   extension (a: Function.Attr) {
@@ -518,10 +520,10 @@ object PolyAST {
 
   extension (f: Function) {
     inline def repr: String = s"def ${f.name}(${f.args
-        .map(a => s"${a.named.symbol}: ${a.named.tpe.repr}${a.pos.map(s => s"/*${s.repr}*/").getOrElse("")}")
-        .mkString(", ")}): ${f.rtn.repr} /*${f.attrs
+        .map(a => s"${a.named.symbol}: ${a.named.tpe.repr}${a.pos.map(s => s"/* ${s.repr} */").getOrElse("")}")
+        .mkString(", ")}): ${f.rtn.repr} /* ${f.attrs
         .map(_.repr)
-        .mkString(", ")}*/ ${"{"}\n${f.body.map(_.repr).mkString("\n").indent(2)}\n${"}"}"
+        .mkString(", ")} */ ${"{"}\n${f.body.map(_.repr).mkString("\n").indent(2)}\n${"}"}"
   }
 
   extension (s: StructDef) {
@@ -530,6 +532,14 @@ object PolyAST {
 
   extension (s: Program) {
     inline def repr: String = s"${s.structs.map(_.repr).mkString("\n")}\n${s.functions.map(_.repr).mkString("\n")}"
+  }
+
+  extension (l: StructLayout) {
+    inline def repr: String =
+      s"StructLayout[${l.name}, sizeInBytes=${l.sizeInBytes}, align=${l.alignment}]${"{"}\n${l.members
+          .map(m => s"${m.name.symbol}: ${m.name.tpe.repr} (+${m.offsetInBytes},${m.sizeInBytes})")
+          .mkString("\n")
+          .indent(2)}\n${"}"}"
   }
 
 }

@@ -56,6 +56,30 @@ struct CharStarMirror final : AggregateMirror<1> {
   std::array<Type, 1> types() const override { return {ptr.widen()}; }
 };
 
+struct AggregateMemberMirror final : AggregateMirror<7> {
+  Field<LLVM::LLVMPointerType, 0> name;
+  Field<IntegerType, 1> offsetInBytes;
+  Field<IntegerType, 2> sizeInBytes;
+  Field<IntegerType, 3> ptrIndirection;
+  Field<IntegerType, 4> componentSize;
+  Field<LLVM::LLVMPointerType, 5> type;
+  Field<LLVM::LLVMPointerType, 6> resolvePtrSizeInBytes;
+
+  explicit AggregateMemberMirror(MLIRContext *C)
+      : AggregateMirror(C), name(C), offsetInBytes(C, 64), sizeInBytes(C, 64), ptrIndirection(C, 64), componentSize(C, 64), type(C),
+        resolvePtrSizeInBytes(C) {}
+  const char *typeName() const override { return "AggregateMember"; }
+  std::array<Type, 7> types() const override {
+    return {name.widen(),           //
+            offsetInBytes.widen(),  //
+            sizeInBytes.widen(),    //
+            ptrIndirection.widen(), //
+            componentSize.widen(),  //
+            type.widen(),           //
+            resolvePtrSizeInBytes.widen()};
+  }
+};
+
 struct TypeLayoutMirror final : AggregateMirror<5> {
   Field<LLVM::LLVMPointerType, 0> name;
   Field<IntegerType, 1> sizeInBytes;
@@ -63,10 +87,15 @@ struct TypeLayoutMirror final : AggregateMirror<5> {
   Field<IntegerType, 3> memberCount;
   Field<LLVM::LLVMPointerType, 4> members;
   explicit TypeLayoutMirror(MLIRContext *C)
-      : AggregateMirror(C), name(C), sizeInBytes(C, 64), alignmentInBytes(C, 64), memberCount(C, 64), members(C) {}
+      : AggregateMirror(C), //
+        name(C), sizeInBytes(C, 64), alignmentInBytes(C, 64), memberCount(C, 64), members(C) {}
   const char *typeName() const override { return "TypeLayout"; }
   std::array<Type, 5> types() const override {
-    return {name.widen(), sizeInBytes.widen(), alignmentInBytes.widen(), memberCount.widen(), members.widen()};
+    return {name.widen(),             //
+            sizeInBytes.widen(),      //
+            alignmentInBytes.widen(), //
+            memberCount.widen(),      //
+            members.widen()};
   }
 };
 
@@ -111,40 +140,6 @@ struct KernelBundleMirror final : AggregateMirror<7> {
             interfaceLayoutIdx.widen(), //
             metadata.widen()};
   }
-};
-
-struct AggregateMemberMirror final : AggregateMirror<6> {
-  Field<LLVM::LLVMPointerType, 0> name;
-  Field<IntegerType, 1> offsetInBytes;
-  Field<IntegerType, 2> sizeInBytes;
-  Field<IntegerType, 3> ptrIndirection;
-  Field<IntegerType, 4> componentSize;
-  Field<LLVM::LLVMPointerType, 5> type;
-  explicit AggregateMemberMirror(MLIRContext *C)
-      : AggregateMirror(C), name(C), offsetInBytes(C, 64), sizeInBytes(C, 64), ptrIndirection(C, 64), componentSize(C, 64), type(C) {}
-  const char *typeName() const override { return "AggregateMember"; }
-  std::array<Type, 6> types() const override {
-    return {name.widen(), offsetInBytes.widen(), sizeInBytes.widen(), ptrIndirection.widen(), componentSize.widen(), type.widen()};
-  }
-};
-
-struct FDimMirror final : AggregateMirror<3> {
-  Field<IntegerType, 0> lowerBound;
-  Field<IntegerType, 1> extent;
-  Field<IntegerType, 2> stride;
-  explicit FDimMirror(MLIRContext *C) : AggregateMirror(C), lowerBound(C, 64), extent(C, 64), stride(C, 64) {}
-  const char *typeName() const override { return "FDim"; }
-  std::array<Type, 3> types() const override { return {lowerBound.widen(), extent.widen(), stride.widen()}; }
-};
-
-struct FArrayDescMirror final : AggregateMirror<4> {
-  Field<LLVM::LLVMPointerType, 0> addr;
-  Field<IntegerType, 1> sizeInBytes;
-  Field<IntegerType, 2> ranks;
-  Field<LLVM::LLVMPointerType, 2> rankDims;
-  explicit FArrayDescMirror(MLIRContext *C) : AggregateMirror(C), addr(C), sizeInBytes(C, 64), ranks(C, 64), rankDims(C) {}
-  const char *typeName() const override { return "FArrayDesc"; }
-  std::array<Type, 4> types() const override { return {addr.widen(), sizeInBytes.widen(), ranks.widen(), rankDims.widen()}; }
 };
 
 class PolyDCOMirror {
@@ -210,83 +205,82 @@ class Binder {
 
   PolyDCOMirror &dco;
 
-  FDimMirror FDim;
-  FArrayDescMirror FArrayDesc;
+  // FDimMirror FDim;
+  // FArrayDescMirror FArrayDesc;
   LLVM::LLVMArrayType preludeTy;
   std::vector<Field> fields;
   DynamicAggregateMirror mirror;
 
-  static Field bind(OpBuilder &B, const DataLayout &L, const FDimMirror &FDim, const FArrayDescMirror &FArrayDesc, Value ref) {
-    const auto Loc = B.getUnknownLoc();
-    const auto ptrTy = LLVM::LLVMPointerType::get(B.getContext());
-    const auto i64Ty = B.getI64Type();
+  static Value getBoxPtr(OpBuilder &B, Value refToBox) {
+    const auto opaqueGEP = B.create<fir::BoxOffsetOp>(uLoc(B), refToBox, fir::BoxFieldAttr::base_addr).getResult();
+    const auto i64GEPAddr = B.create<fir::ConvertOp>(uLoc(B), i64Ty(B), opaqueGEP).getRes();
+    return B.create<LLVM::IntToPtrOp>(uLoc(B), ptrTy(B), i64GEPAddr).getRes();
+  }
 
-    if (const auto refTy = llvm::dyn_cast<fir::ReferenceType>(ref.getType())) { // T = fir.ref<E>
-      const auto elemTy = refTy.getEleTy();
-      if (auto seqTy = llvm::dyn_cast<fir::SequenceType>(elemTy)) { // E = fir.array<X>
-        if (seqTy.hasDynamicExtents() || seqTy.hasUnknownShape())
-          raise(fmt::format("Array has dynamic extent or unknown shape: {}", fir::mlirTypeToString(elemTy)));
-        const auto maxExtent = intConst(B, i64Ty, seqTy.getConstantArraySize() * (seqTy.getEleTy().getIntOrFloatBitWidth() / 8));
-        const auto i64Addr = B.create<fir::ConvertOp>(Loc, i64Ty, ref).getRes();
-        const auto llvmPtr = B.create<LLVM::IntToPtrOp>(Loc, ptrTy, i64Addr).getRes();
-        return Field{
-            .type = refTy,
-            .fieldPtr = llvmPtr,
-            .dependent = {Field::Witness{llvmPtr, maxExtent}},
-            .temporary = {},
-        };
-      } else if (elemTy.isIntOrFloat()) {
-        const auto i64Addr = B.create<fir::ConvertOp>(Loc, i64Ty, ref).getRes();
-        const auto llvmPtr = B.create<LLVM::IntToPtrOp>(Loc, ptrTy, i64Addr).getRes();
-        const auto i64Size = intConst(B, i64Ty, elemTy.getIntOrFloatBitWidth() / 8);
-        return Field{
-            .type = refTy,
+  static std::vector<Field> bindRef(OpBuilder &B, Value val, const std::optional<polyast::StructLayout> &layout) {
+    std::vector<Field> fields;
+    if (const auto refTy = llvm::dyn_cast<fir::ReferenceType>(val.getType())) { // T = fir.ref<E>
+      // XXX types mapped here should all be pointers because since they originate from a ref/memref
+      const auto ty = fir::unwrapRefType(val.getType());
+      if (ty.isIntOrFloat()) {
+        const auto i64Addr = B.create<fir::ConvertOp>(uLoc(B), i64Ty(B), val).getRes();
+        const auto llvmPtr = B.create<LLVM::IntToPtrOp>(uLoc(B), ptrTy(B), i64Addr).getRes();
+        const auto i64Size = intConst(B, i64Ty(B), ty.getIntOrFloatBitWidth() / 8);
+        fields.emplace_back(Field{
+            .type = ty,
             .fieldPtr = llvmPtr,
             .dependent = {Field::Witness{llvmPtr, i64Size}},
             .temporary = {},
-        };
-      } else if (const auto boxTy = llvm::dyn_cast<fir::BoxType>(elemTy)) { // E = fir.box<X>
-        const auto opaqueGEP = B.create<fir::BoxOffsetOp>(Loc, ref, fir::BoxFieldAttr::base_addr).getResult();
-        const auto i64GEPAddr = B.create<fir::ConvertOp>(Loc, i64Ty, opaqueGEP).getRes();
-        const auto llvmGEPPtr = B.create<LLVM::IntToPtrOp>(Loc, ptrTy, i64GEPAddr).getRes();
-        const auto llvmPtr = B.create<LLVM::LoadOp>(Loc, ptrTy, llvmGEPPtr).getRes();
-        const auto boxVal = B.create<fir::LoadOp>(Loc, ref).getRes();
-        auto maxExtent = B.create<fir::BoxEleSizeOp>(Loc, i64Ty, boxVal).getResult();
-        FDimMirror::Group rankDimValues{};
-        for (size_t dim = 0; dim < fir::getBoxRank(boxTy); ++dim) {
-          auto rank = intConst(B, i64Ty, dim);
-          auto boxDims = B.create<fir::BoxDimsOp>(Loc, boxVal, rank);
-          auto extent = B.create<fir::ConvertOp>(Loc, i64Ty, boxDims.getExtent());
-          maxExtent = B.create<arith::MulIOp>(Loc, maxExtent, extent).getResult();
-          rankDimValues.emplace_back(
-              std::array{/* lowerBound */ B.create<fir::ConvertOp>(Loc, i64Ty, boxDims.getLowerBound()).getResult(),
-                         /* extent     */ B.create<fir::ConvertOp>(Loc, i64Ty, boxDims.getExtent()).getResult(),
-                         /* stride     */ B.create<fir::ConvertOp>(Loc, i64Ty, boxDims.getByteStride()).getResult()});
-        }
-        const auto rankDims = FDim.local(B, rankDimValues);
-        const auto arrayDesc = FArrayDesc.local(B, std::vector{FArrayDescMirror::Init{
-                                                       /* addr        */ llvmPtr,
-                                                       /* sizeInBytes */ maxExtent,
-                                                       /* ranks       */ intConst(B, i64Ty, rankDimValues.size()),
-                                                       /* rankDims    */ rankDims,
-                                                   }});
-        return Field{
-            .type = refTy,
-            .fieldPtr = arrayDesc,
+        });
+      } else if (const auto recordTy = dyn_cast<fir::RecordType>(ty)) { // E = fir.type<X>
+        const auto i64Addr = B.create<fir::ConvertOp>(uLoc(B), i64Ty(B), val).getRes();
+        const auto llvmPtr = B.create<LLVM::IntToPtrOp>(uLoc(B), ptrTy(B), i64Addr).getRes();
+        const auto i64Size = intConst(B, i64Ty(B), layout->sizeInBytes);
+        fields.emplace_back(Field{
+            .type = ty,
+            .fieldPtr = llvmPtr,
+            .dependent = {Field::Witness{llvmPtr, i64Size}},
+            .temporary = {},
+        });
+      } else if (auto seqTy = dyn_cast<fir::SequenceType>(ty)) { // E = fir.array<X>
+        if (seqTy.hasDynamicExtents() || seqTy.hasUnknownShape())
+          raise(fmt::format("Array has dynamic extent or unknown shape: {}", fir::mlirTypeToString(ty)));
+        const auto maxExtent = intConst(B, i64Ty(B), seqTy.getConstantArraySize() * (seqTy.getEleTy().getIntOrFloatBitWidth() / 8));
+        const auto i64Addr = B.create<fir::ConvertOp>(uLoc(B), i64Ty(B), val).getRes();
+        const auto llvmPtr = B.create<LLVM::IntToPtrOp>(uLoc(B), ptrTy(B), i64Addr).getRes();
+        fields.emplace_back(Field{
+            .type = ty,
+            .fieldPtr = llvmPtr,
             .dependent = {Field::Witness{llvmPtr, maxExtent}},
-            .temporary = {Field::Witness{arrayDesc, intConst(B, i64Ty, L.getTypeSize(FArrayDesc.structTy()))},
-                          Field::Witness{rankDims, intConst(B, i64Ty, L.getTypeSize(FDim.structTy()) * rankDimValues.size())}},
-        };
-      } else raise(fmt::format("Unhandled binder type: {}", fir::mlirTypeToString(elemTy)));
-    } else raise(fmt::format("Value is not a ref type: {}", show(ref)));
+            .temporary = {},
+        });
+      } else if (const auto boxTy = dyn_cast<fir::BoxType>(ty)) { // E = fir.box<X>
+        if (!layout) raise(fmt::format("Binding box type {} but cannot find corresponding StructLayout!", show(ty)));
+        const auto boxPtr = getBoxPtr(B, val);
+        fields.emplace_back(Field{
+            .type = ty,                                                                        //
+            .fieldPtr = boxPtr,                                                                //
+            .dependent = {Field::Witness{boxPtr, intConst(B, i64Ty(B), layout->sizeInBytes)}}, //
+            .temporary = {}                                                                    //
+        });
+
+      } else raise(fmt::format("Unhandled binder type: {}", fir::mlirTypeToString(ty)));
+    } else raise(fmt::format("Value is not a ref type: {}", show(val)));
+    return fields;
   }
 
 public:
   Binder(OpBuilder &B, DataLayout &L, PolyDCOMirror &dco, const std::string &name, const size_t preludeSize,
-         const std::vector<Value> &refs) //
-      : dco(dco), FDim(B.getContext()), FArrayDesc(B.getContext()),
-        preludeTy(LLVM::LLVMArrayType::get(B.getContext(), B.getI8Type(), preludeSize)),
-        fields(refs ^ map([&](auto &ref) { return bind(B, L, FDim, FArrayDesc, ref); })),
+         const std::vector<std::pair<polyast::Named, Value>> &refs,
+         const std::unordered_map<std::string, polyast::StructLayout> &layouts) //
+      : dco(dco), preludeTy(LLVM::LLVMArrayType::get(B.getContext(), B.getI8Type(), preludeSize)),
+        fields(refs ^ flat_map([&](auto &named, auto &ref) {
+                 auto maybeLayout = named.tpe.template get<polyast::Type::Ptr>() ^
+                                    flat_map([](auto &t) { return t.comp.template get<polyast::Type::Struct>(); }) ^
+                                    flat_map([&](auto &s) { return layouts ^ get_maybe(s.name); });
+
+                 return bindRef(B, ref, maybeLayout);
+               })),
         mirror(B.getContext(), "Binder_" + name,
                fields                                                  //
                    | map([](auto &f) { return f.fieldPtr.getType(); }) //
@@ -296,9 +290,6 @@ public:
   Type structType() const { return mirror.ty; }
 
   Value create(OpBuilder &B) const {
-
-    // ;B.create<LLVM::ConstantOp>(uLoc(B), preludeTy, ArrayAttr::get(B.getContext(),zeros  ) )
-
     auto zeros = repeat<Attribute>(IntegerAttr::get(B.getI8Type(), 0)) | take(preludeTy.getNumElements()) | to_vector();
     return mirror.local(B, {fields                                                         //
                             | map([](auto &f) { return f.fieldPtr; })                      //
@@ -320,7 +311,7 @@ public:
 };
 
 class Rewriter {
-  ModuleOp &m;
+  ModuleOp &M;
   PolyDCOMirror dco;
   CharStarMirror CharStar;
   KernelObjectMirror KernelObject;
@@ -332,7 +323,7 @@ class Rewriter {
 
 public:
   explicit Rewriter(ModuleOp &m)
-      : m(m), dco(m),                                                                                                            //
+      : M(m), dco(m),                                                                                                            //
         CharStar(m.getContext()),                                                                                                //
         KernelObject(m.getContext()), KernelBundle(m.getContext()), AggregateMember(m.getContext()), TypeLayout(m.getContext()), //
         primitiveTypeLayouts(std::vector<polyast::Type::Any>{
@@ -344,13 +335,11 @@ public:
                              | collect([&](auto &t) {
                                  return polyast::primitiveSize(t) ^ map([&](auto sizeInBytes) {
                                           return std::pair{t, TypeLayout.global(m, [&](OpBuilder &B0) {
-                                                             return std::vector{std::array{
-                                                                 strConst(B0, m, polyast::repr(t)),    //
-                                                                 intConst(B0, i64Ty(B0), sizeInBytes), //
-                                                                 intConst(B0, i64Ty(B0), sizeInBytes), //
-                                                                 intConst(B0, i64Ty(B0), 0),           //
-                                                                 nullConst(B0)                         //
-                                                             }};
+                                                             return std::vector{std::array{strConst(B0, m, polyast::repr(t)),    //
+                                                                                           intConst(B0, i64Ty(B0), sizeInBytes), //
+                                                                                           intConst(B0, i64Ty(B0), sizeInBytes), //
+                                                                                           intConst(B0, i64Ty(B0), 0),           //
+                                                                                           nullConst(B0)}};
                                                            })};
                                         }); //
                                })           //
@@ -367,23 +356,22 @@ public:
 
   void invokeDispatch(OpBuilder &B, Value executeOriginal, const runtime::PlatformKind kind, clang::DiagnosticsEngine &diag,
                       const std::string &diagLoc, const polyfront::Options &opts, const std::string &moduleId, fir::DoLoopOp &doLoop) {
-    DataLayout L(m);
-    const auto region = Remapper::createRegion("_main", kind == runtime::PlatformKind::Managed, L, doLoop);
+    DataLayout L(M);
+    const auto gpu = kind == runtime::PlatformKind::Managed;
+    const auto region = Remapper::createRegion("_main", gpu, M, L, doLoop);
     const auto bundle = compileRegion(diag, diagLoc, opts, kind, moduleId, region);
     const auto table = bundle.layouts                                                                 //
                        | values()                                                                     //
                        | map([&](auto &sl) { return std::pair{polyast::Type::Struct(sl.name), sl}; }) //
                        | to<std::unordered_map>();
 
-    auto structLayoutsArray = TypeLayout.global(m, [&](OpBuilder &B0) {
+    auto structLayoutsArray = TypeLayout.global(M, [&](OpBuilder &B0) {
       return bundle.layouts ^ map([&](auto, auto &l) {
-               return std::array{
-                   strConst(B0, m, l.name),                   //
-                   intConst(B0, i64Ty(B0), l.sizeInBytes),    //
-                   intConst(B0, i64Ty(B0), l.alignment),      //
-                   intConst(B0, i64Ty(B0), l.members.size()), //
-                   nullConst(B0)                              //
-               };
+               return std::array{strConst(B0, M, l.name),                   //
+                                 intConst(B0, i64Ty(B0), l.sizeInBytes),    //
+                                 intConst(B0, i64Ty(B0), l.alignment),      //
+                                 intConst(B0, i64Ty(B0), l.members.size()), //
+                                 nullConst(B0)};
              });
     });
 
@@ -393,60 +381,96 @@ public:
                                            | zip_with_index()                      //
                                            | to<std::unordered_map>();
 
+    // region.boxes
     auto aggregateMembersArray =
-        bundle.layouts     //
-        | values()         //
+        bundle.layouts | values() | map([&](const polyast::StructLayout &l) {
+          return AggregateMember.global(M, [&](OpBuilder &B0) {
+            const auto fbm =
+                region.boxes ^ get_maybe(l.name) ^ map([&](const Remapper::FBoxedMirror &m) {
+                  static size_t id = 0;
+                  const auto fn =
+                      defineFunc(M, fmt::format("box_size_resolver_{}", ++id), i64Ty(B0), {ptrTy(B0)}, LLVM::Linkage::Internal,
+                                 [&](OpBuilder &B1, LLVM::LLVMFuncOp &f) {
+                                   const auto loadField = [&](const polyast::Named &n, const Type &ty) {
+                                     return l.members ^ find([&](auto &x) { return x.name == n; }) ^
+                                            fold(
+                                                [&](auto &slm) -> Value {
+                                                  auto gep = B1.create<LLVM::GEPOp>(uLoc(B1), ptrTy(B1), B1.getI8Type(), f.getArgument(0),
+                                                                                    ValueRange{intConst(B1, i64Ty(B1), slm.offsetInBytes)});
+                                                  return B1.create<LLVM::LoadOp>(uLoc(B1), ty, gep.getRes());
+                                                },
+                                                [&]() -> Value { raise(fmt::format("Missing field {}", repr(n))); });
+                                   };
+                                   auto totalSizeInBytes = loadField(m.sizeInBytes, i64Ty(B1));
+                                   if (m.ranks != 0) {
+                                     const auto dimsTy =
+                                         LLVM::LLVMStructType::getLiteral(M.getContext(), {i64Ty(B1), i64Ty(B1), i64Ty(B1)});
+                                     const auto dims = loadField(m.dims, LLVM::LLVMArrayType::get(dimsTy, m.ranks));
+                                     for (int64_t i = 0; i < static_cast<int64_t>(m.ranks); ++i) {
+                                       // XXX Dim type fields are: { 0 = lowerBound, 1 = extent, 2 = stride }, we want the extent (1) at
+                                       // rank
+                                       const auto dim = B1.create<LLVM::ExtractValueOp>(uLoc(B1), dims, ArrayRef{i}).getResult();
+                                       const auto extent = B1.create<LLVM::ExtractValueOp>(uLoc(B1), dim, ArrayRef<int64_t>{1}).getResult();
+                                       totalSizeInBytes = B1.create<arith::MulIOp>(uLoc(B1), totalSizeInBytes, extent).getResult();
+                                     }
+                                   }
+                                   B1.create<LLVM::ReturnOp>(uLoc(B1), totalSizeInBytes);
+                                 });
+                  return std::pair{m.addr, B0.create<LLVM::AddressOfOp>(uLoc(B0), fn).getRes()};
+                });
+            return l.members ^ map([&](auto &m) {
+                     const auto [indirections, componentSize] = countIndirectionsAndComponentSize(m.name.tpe, table);
+                     const auto compType = polyast::extractComponent(m.name.tpe);
+                     const auto ptrToTypeLayout =
+                         polyast::extractComponent(m.name.tpe) ^ flat_map([&](auto &t) {
+                           return primitiveTypeLayouts                                        //
+                                  ^ get_maybe(t) ^ map([&](auto ptl) { return ptl.gep(B0); }) //
+                                  ^ or_else(t.template get<polyast::Type::Struct>() ^ flat_map([&](auto &s) {
+                                              return structNameToTypeLayoutIdx                                                     //
+                                                     ^ get_maybe(s.name)                                                           //
+                                                     ^ map([&](auto layoutIdx) { return structLayoutsArray.gep(B0, layoutIdx); }); //
+                                            }));                                                                                   //
+                         });
+                     return std::array{
+                         strConst(B0, M, m.name.symbol),                                 //
+                         intConst(B0, i64Ty(B0), m.offsetInBytes),                       //
+                         intConst(B0, i64Ty(B0), m.sizeInBytes),                         //
+                         intConst(B0, i64Ty(B0), indirections),                          //
+                         intConst(B0, i64Ty(B0), componentSize.value_or(m.sizeInBytes)), //
+                         ptrToTypeLayout ^ get_or_else(nullConst(B0)),
+                         fbm                                                                                     //
+                             ^ filter([&](auto &field, auto &) { return field == m.name; })                      //
+                             ^ fold([](auto &, auto &v) -> Value { return v; }, [&]() { return nullConst(B0); }) //
+                     };
+                   });
+          });
+        })                 //
         | zip_with_index() //
-        | map([&](auto &l, auto idx) {
-            auto g = AggregateMember.global(m, [&](OpBuilder &B0) {
-              return l.members ^ map([&](auto &x) {
-                       const auto [indirections, componentSize] = countIndirectionsAndComponentSize(x.name.tpe, table);
-                       const auto ptrToTypeLayout =
-                           polyast::extractComponent(x.name.tpe) ^ flat_map([&](auto &t) {
-                             return primitiveTypeLayouts                                        //
-                                    ^ get_maybe(t) ^ map([&](auto ptl) { return ptl.gep(B0); }) //
-                                    ^ or_else(t.template get<polyast::Type::Struct>() ^ flat_map([&](auto &s) {
-                                                return structNameToTypeLayoutIdx                                                     //
-                                                       ^ get_maybe(s.name)                                                           //
-                                                       ^ map([&](auto layoutIdx) { return structLayoutsArray.gep(B0, layoutIdx); }); //
-                                              }));                                                                                   //
-                           });                                                                                                       //
-                       return std::array{strConst(B0, m, x.name.symbol),                                                             //
-                                         intConst(B0, i64Ty(B0), x.offsetInBytes),                                                   //
-                                         intConst(B0, i64Ty(B0), x.sizeInBytes),                                                     //
-                                         intConst(B0, i64Ty(B0), indirections),                                                      //
-                                         intConst(B0, i64Ty(B0), componentSize.value_or(x.sizeInBytes)),                             //
-                                         ptrToTypeLayout ^ get_or_else(nullConst(B0))};
-                     });
-            });
-            return std::pair{g, idx};
-          }) //
         | to_vector();
 
     static size_t id = 0;
-    defineGlobalCtor(m, fmt::format("dco_layoutInit_{}_{}", to_string(kind), ++id), [&](OpBuilder &FB) {
+    defineGlobalCtor(M, fmt::format("dco_layoutInit_{}_{}", to_string(kind), ++id), [&](OpBuilder &FB, auto &) {
       aggregateMembersArray | for_each([&](auto &g, auto idx) {
         FB.create<LLVM::StoreOp>(uLoc(FB), g.gep(FB), structLayoutsArray.gep(FB, idx, TypeLayout.members));
       });
       FB.create<LLVM::ReturnOp>(uLoc(FB), ValueRange{});
     });
 
-    auto globalKOs = KernelObject.global(m, [&](OpBuilder &B0) {
+    auto globalKOs = KernelObject.global(M, [&](OpBuilder &B0) {
       return bundle.objects ^ map([&](auto &o) {
-               fprintf(stderr, "!!!! %s\n", (o.features ^ mk_string("+")).c_str());
                auto features = CharStar.global(
-                   m, [&](OpBuilder &B1) { return o.features ^ map([&](auto &f) { return std::array{strConst(B1, m, f)}; }); });
+                   M, [&](OpBuilder &B1) { return o.features ^ map([&](auto &f) { return std::array{strConst(B1, M, f)}; }); });
                return KernelObjectMirror::Init{intConst(B0, i8Ty(B0), value_of(o.kind)),      //
                                                intConst(B0, i8Ty(B0), value_of(o.format)),    //
                                                intConst(B0, i64Ty(B0), o.features.size()),    //
                                                features.gep(B0),                              //
                                                intConst(B0, i64Ty(B0), o.moduleImage.size()), //
-                                               strConst(B0, m, o.moduleImage, false)};
+                                               strConst(B0, M, o.moduleImage, false)};
              });
     });
 
-    auto globalBundle = KernelBundle.global(m, [&](OpBuilder &B0) {
-      return std::vector{std::array{strConst(B0, m, moduleId), //
+    auto globalBundle = KernelBundle.global(M, [&](OpBuilder &B0) {
+      return std::vector{std::array{strConst(B0, M, moduleId), //
 
                                     intConst(B0, i64Ty(B0), bundle.objects.size()), //
                                     globalKOs.gep(B0),                              //
@@ -455,18 +479,16 @@ public:
                                     structLayoutsArray.gep(B0),
                                     intConst(B0, i64Ty(B0), bundle.layouts | index_where([](auto &iface, auto) { return iface; })),
 
-                                    strConst(B0, m, bundle.metadata)}};
+                                    strConst(B0, M, bundle.metadata)}};
     });
 
-    for (auto [x, v] : region.captures) {
-      llvm::errs() << ">>>>>> " << repr(x) << " = " << v << "\n";
-    }
-
-    Binder binder(B, L, dco, moduleId, region.preludeLayout.sizeInBytes, region.captures | values() | to_vector());
+    const auto layouts = region.layouts | map([](auto, auto &l) { return std::pair{l.name, l}; }) | to<std::unordered_map>();
+    Binder binder(B, L, dco, moduleId, region.preludeLayout.sizeInBytes, region.captures, layouts);
 
     if (int64_t binderSize = L.getTypeSize(binder.structType()); binderSize != region.captureLayout.sizeInBytes) {
-      raise(fmt::format("Capture and binder type size mismatch, expecting {} but binder gave {}", //
-                        region.captureLayout.sizeInBytes, binderSize));
+      raise(fmt::format(
+          "Capture and binder type size mismatch, expecting {} but binder gave {}\n Binder layout is {}\nCapture layout is {}", //
+          region.captureLayout.sizeInBytes, binderSize, show(binder.structType()), repr(region.captureLayout)));
     }
 
     binder.recordTemporariesAndDependents(B);
@@ -545,10 +567,12 @@ void doRewrite(ModuleOp op) {
 
 void polyfc::rewriteHLFIR(clang::DiagnosticsEngine &, ModuleOp &m) {
   // XXX mark all written DoConcurrent loops first as elemental/forall are lowered to DoConcurrent too
+
   m.walk([&](Operation *op) {
     if (auto doLoop = llvm::dyn_cast<fir::DoLoopOp>(op)) {
       if (!doLoop.getUnordered()) return;
       doLoop->setAttr(DoConcurrentAsWritten, UnitAttr::get(m->getContext()));
+      // doLoop.dump();
     }
   });
 }

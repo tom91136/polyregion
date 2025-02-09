@@ -27,9 +27,10 @@ Value intConst(OpBuilder &B, Type ty, int64_t value);
 Value boolConst(OpBuilder &B, bool value);
 Value strConst(OpBuilder &B, ModuleOp &m, const std::string &value, bool nullTerminate = true);
 LLVM::LLVMFuncOp defineFunc(ModuleOp &m, const std::string &name, Type rtnTy, const std::vector<Type> &argTys,
-                            LLVM::Linkage linkage = LLVM::Linkage::External, const std::function<void(OpBuilder &)> &f = {});
+                            LLVM::Linkage linkage = LLVM::Linkage::External,
+                            const std::function<void(OpBuilder &, LLVM::LLVMFuncOp &)> &f = {});
 
-void defineGlobalCtor(ModuleOp &m, const std::string &name, const std::function<void(OpBuilder &)> &f);
+void defineGlobalCtor(ModuleOp &m, const std::string &name, const std::function<void(OpBuilder &, LLVM::LLVMFuncOp &)> &f);
 
 struct DynamicAggregateMirror {
 

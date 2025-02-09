@@ -42,29 +42,30 @@ mlir::Value polyregion::polyfc::strConst(OpBuilder &B, ModuleOp &m, const std::s
   static size_t id = 0;
   const auto saved = B.saveInsertionPoint();
   B.setInsertionPointToStart(m.getBody());
-  const StringRef ref(value.c_str(), value.size() +( nullTerminate ? 1 : 0));
+  const StringRef ref(value.c_str(), value.size() + (nullTerminate ? 1 : 0));
   auto var = B.create<LLVM::GlobalOp>(uLoc(B),                                             //
                                       LLVM::LLVMArrayType::get(B.getI8Type(), ref.size()), //
                                       true, LLVM::Linkage::Private, fmt::format("str_const_{}", ++id), B.getStringAttr(ref));
   B.restoreInsertionPoint(saved);
   return B.create<LLVM::GEPOp>(uLoc(B), ptrTy(B), B.getI8Type(), B.create<LLVM::AddressOfOp>(uLoc(B), var),
-                               ValueRange{B.create<LLVM::ConstantOp>(uLoc(B), B.getI32Type(), B.getI32IntegerAttr(0))});
+                               ValueRange{intConst(B, i32Ty(B), 0)});
 }
 
 mlir::LLVM::LLVMFuncOp polyregion::polyfc::defineFunc(ModuleOp &m, const std::string &name, const Type rtnTy,
                                                       const std::vector<Type> &argTys, LLVM::Linkage linkage,
-                                                      const std::function<void(OpBuilder &)> &f) {
+                                                      const std::function<void(OpBuilder &, LLVM::LLVMFuncOp &)> &f) {
   OpBuilder B(m);
   B.setInsertionPointToStart(m.getBody());
   auto func = B.create<LLVM::LLVMFuncOp>(uLoc(B), name, LLVM::LLVMFunctionType::get(rtnTy, argTys), linkage);
   if (func.empty() && f) {
     OpBuilder FB(func);
     FB.setInsertionPointToStart(func.addEntryBlock(FB));
-    f(FB);
+    f(FB, func);
   }
   return func;
 }
-void polyregion::polyfc::defineGlobalCtor(ModuleOp &m, const std::string &name, const std::function<void(OpBuilder &)> &f) {
+void polyregion::polyfc::defineGlobalCtor(ModuleOp &m, const std::string &name,
+                                          const std::function<void(OpBuilder &, LLVM::LLVMFuncOp &)> &f) {
   const auto ctor = defineFunc(m, name, LLVM::LLVMVoidType::get(m.getContext()), {}, LLVM::Linkage::Internal, f);
   OpBuilder B(m);
   B.setInsertionPointToStart(m.getBody());

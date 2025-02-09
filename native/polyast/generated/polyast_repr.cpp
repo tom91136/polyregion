@@ -14,9 +14,9 @@ std::string repr(const SourcePosition& t) {
 
 std::string repr(const TypeSpace::Any& t) {  
   return [&]{
-    if (t.is<TypeSpace::Global>()) { return "Global"s; }
-    if (t.is<TypeSpace::Local>()) { return "Local"s; }
-    if (t.is<TypeSpace::Private>()) { return "Private"s; }
+    if (t.is<TypeSpace::Global>()) { return ""s; }
+    if (t.is<TypeSpace::Local>()) { return "^Local"s; }
+    if (t.is<TypeSpace::Private>()) { return "^Private"s; }
   
     throw std::logic_error(fmt::format("Unhandled match case for t (of type TypeSpace::Any) at {}:{})", __FILE__, __LINE__));
   }();
@@ -55,10 +55,10 @@ std::string repr(const Type::Any& t) {
       return fmt::format("{}", _x->name);
     }
     if (auto _x = t.get<Type::Ptr>()) {
-      return fmt::format("{}[{}]^{}", repr(_x->comp), _x->length ^ map([&](const int32_t& __1){ return std::to_string(__1); }) ^ get_or_else(""s), repr(_x->space));
+      return fmt::format("{}{}{}", repr(_x->comp), _x->length ^ map([&](const int32_t& __1){ return std::to_string(__1); }) ^ map([&](const std::string& l){ return fmt::format("[{}]", l); }) ^ get_or_else("*"s), repr(_x->space));
     }
     if (auto _x = t.get<Type::Annotated>()) {
-      return fmt::format("{}{}{}", repr(_x->tpe), _x->pos ^ map([&](const SourcePosition& s){ return fmt::format("/*{}*/", repr(s)); }) ^ get_or_else(""s), _x->comment ^ map([&](const std::string& s){ return fmt::format("/*{}*/", s); }) ^ get_or_else(""s));
+      return fmt::format("{}{}{}", repr(_x->tpe), _x->pos ^ map([&](const SourcePosition& s){ return fmt::format("/* {} */", repr(s)); }) ^ get_or_else(""s), _x->comment ^ map([&](const std::string& s){ return fmt::format("/* {} */", s); }) ^ get_or_else(""s));
     }
   
     throw std::logic_error(fmt::format("Unhandled match case for t (of type Type::Any) at {}:{})", __FILE__, __LINE__));
@@ -310,7 +310,7 @@ std::string repr(const Expr::Any& e) {
       return (_x->init | append(_x->last) | map([&](const Named& x){ return fmt::format("{}: {}", x.symbol, repr(x.tpe)); }) | reduce([&](const std::string& acc, const std::string& x){ return fmt::format("({}).{}", acc, x); })) ^ get_or_else(""s);
     }
     if (auto _x = e.get<Expr::Poison>()) {
-      return fmt::format("??? /*poison of type {}*/", repr(_x->t));
+      return fmt::format("(???) /* poison of type {} */", repr(_x->t));
     }
     if (auto _x = e.get<Expr::Cast>()) {
       return fmt::format("({}).to[{}]", repr(_x->from), repr(_x->as));
@@ -328,7 +328,7 @@ std::string repr(const Expr::Any& e) {
       return fmt::format("{}({}): {}", _x->name, (_x->args | map([&](const Expr::Any& __3){ return repr(__3); }) | mk_string(", "s)), repr(_x->rtn));
     }
     if (auto _x = e.get<Expr::Annotated>()) {
-      return fmt::format("{}{}{}", repr(_x->expr), _x->pos ^ map([&](const SourcePosition& s){ return fmt::format("/*{}*/", repr(s)); }) ^ get_or_else(""s), _x->comment ^ map([&](const std::string& s){ return fmt::format("/*{}*/", s); }) ^ get_or_else(""s));
+      return fmt::format("{}{}{}", repr(_x->expr), _x->pos ^ map([&](const SourcePosition& s){ return fmt::format("/* {} */", repr(s)); }) ^ get_or_else(""s), _x->comment ^ map([&](const std::string& s){ return fmt::format("/* {} */", s); }) ^ get_or_else(""s));
     }
   
     throw std::logic_error(fmt::format("Unhandled match case for e (of type Expr::Any) at {}:{})", __FILE__, __LINE__));
@@ -368,7 +368,7 @@ std::string repr(const Stmt::Any& stmt) {
       return fmt::format("if({}) {}\n{}{} else {}\n{}{}", repr(_x->cond), "{"s, (_x->trueBr | map([&](const Stmt::Any& __9){ return repr(__9); }) | mk_string("\n"s)) ^ indent(2), "}"s, "{"s, (_x->falseBr | map([&](const Stmt::Any& __10){ return repr(__10); }) | mk_string("\n"s)) ^ indent(2), "}"s);
     }
     if (auto _x = stmt.get<Stmt::Annotated>()) {
-      return fmt::format("{}{}{}", repr(_x->stmt), _x->pos ^ map([&](const SourcePosition& s){ return fmt::format("/*{}*/", repr(s)); }) ^ get_or_else(""s), _x->comment ^ map([&](const std::string& s){ return fmt::format("/*{}*/", s); }) ^ get_or_else(""s));
+      return fmt::format("{}{}{}", repr(_x->stmt), _x->pos ^ map([&](const SourcePosition& s){ return fmt::format("/* {} */", repr(s)); }) ^ get_or_else(""s), _x->comment ^ map([&](const std::string& s){ return fmt::format("/* {} */", s); }) ^ get_or_else(""s));
     }
   
     throw std::logic_error(fmt::format("Unhandled match case for stmt (of type Stmt::Any) at {}:{})", __FILE__, __LINE__));
@@ -377,7 +377,7 @@ std::string repr(const Stmt::Any& stmt) {
 
 
 std::string repr(const Arg& a) {  
-  return fmt::format("{}: {}{}", a.named.symbol, repr(a.named.tpe), a.pos ^ map([&](const SourcePosition& s){ return fmt::format("/*{}*/", repr(s)); }) ^ get_or_else(""s));
+  return fmt::format("{}: {}{}", a.named.symbol, repr(a.named.tpe), a.pos ^ map([&](const SourcePosition& s){ return fmt::format("/* {} */", repr(s)); }) ^ get_or_else(""s));
 } 
 
 
@@ -400,7 +400,7 @@ std::string repr(const Signature& f) {
 
 
 std::string repr(const Function& f) {  
-  return fmt::format("def {}({}): {} /*{}*/ {}\n{}\n{}", f.name, (f.args | map([&](const Arg& a){ return fmt::format("{}: {}{}", a.named.symbol, repr(a.named.tpe), a.pos ^ map([&](const SourcePosition& s){ return fmt::format("/*{}*/", repr(s)); }) ^ get_or_else(""s)); }) | mk_string(", "s)), repr(f.rtn), (f.attrs | map([&](const FunctionAttr::Any& __12){ return repr(__12); }) | mk_string(", "s)), "{"s, (f.body | map([&](const Stmt::Any& __13){ return repr(__13); }) | mk_string("\n"s)) ^ indent(2), "}"s);
+  return fmt::format("def {}({}): {} /* {} */ {}\n{}\n{}", f.name, (f.args | map([&](const Arg& a){ return fmt::format("{}: {}{}", a.named.symbol, repr(a.named.tpe), a.pos ^ map([&](const SourcePosition& s){ return fmt::format("/* {} */", repr(s)); }) ^ get_or_else(""s)); }) | mk_string(", "s)), repr(f.rtn), (f.attrs | map([&](const FunctionAttr::Any& __12){ return repr(__12); }) | mk_string(", "s)), "{"s, (f.body | map([&](const Stmt::Any& __13){ return repr(__13); }) | mk_string("\n"s)) ^ indent(2), "}"s);
 } 
 
 
@@ -411,6 +411,11 @@ std::string repr(const StructDef& s) {
 
 std::string repr(const Program& s) {  
   return fmt::format("{}\n{}", (s.structs | map([&](const StructDef& __14){ return repr(__14); }) | mk_string("\n"s)), (s.functions | map([&](const Function& __15){ return repr(__15); }) | mk_string("\n"s)));
+} 
+
+
+std::string repr(const StructLayout& l) {  
+  return fmt::format("StructLayout[{}, sizeInBytes={}, align={}]{}\n{}\n{}", l.name, l.sizeInBytes, l.alignment, "{"s, (l.members | map([&](const StructLayoutMember& m){ return fmt::format("{}: {} (+{},{})", m.name.symbol, repr(m.name.tpe), m.offsetInBytes, m.sizeInBytes); }) | mk_string("\n"s)) ^ indent(2), "}"s);
 } 
 
 }

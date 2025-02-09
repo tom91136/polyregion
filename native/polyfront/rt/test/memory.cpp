@@ -50,7 +50,8 @@ template <typename T> StructWithStorage liftToStruct(const char *name, std::init
         .sizeInBytes = sizeof(type_::member_),                      /**/                                                                   \
         .ptrIndirection = indirections<decltype(type_::member_)>(), /**/                                                                   \
         .componentSize = componentSize<decltype(type_::member_)>(), /**/                                                                   \
-        .type = typePtr_                                                                                                                   \
+        .type = typePtr_,                                           /**/                                                                   \
+        .resolvePtrSizeInBytes = nullptr                                                                                                   \
   }
 #define Struct_(type_, ...) liftToStruct<type_>(#type_, {__VA_ARGS__})
 

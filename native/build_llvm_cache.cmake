@@ -142,6 +142,7 @@ set(LLVM_DISTRIBUTION_COMPONENTS
         llvm-tblgen
         llvm-cov
         llvm-link
+        llvm-dis
         llvm-profdata
         llvm-profgen
 

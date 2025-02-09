@@ -285,11 +285,14 @@ static constexpr std::optional<runtime::ModuleFormat> moduleFormatOf(const compi
 
 struct TypeLayout;
 struct AggregateMember {
+  using ResolvePtrSize = size_t (*)(const void *ptr);
+
   const char *name;
   size_t offsetInBytes, sizeInBytes;
   size_t ptrIndirection;
   size_t componentSize;
   const TypeLayout *type;
+  ResolvePtrSize resolvePtrSizeInBytes;
 };
 
 struct TypeLayout {
@@ -310,26 +313,24 @@ struct TypeLayout {
   }
 
   void visualise(std::FILE *fd) const {
-    std::fprintf(fd, "[%*zu]╭── %s (%ld members) ──\n", 3, sizeInBytes, name, memberCount);
+    std::fprintf(fd, "[%*zu]╭── `%s` (alignment=%ld, members=%ld) ──\n", 3, sizeInBytes, name, alignmentInBytes, memberCount);
     for (size_t i = 0; i < memberCount; ++i) {
       const auto &m = members[i];
       if (m.sizeInBytes == 0) {
         std::fprintf(fd, "+%-3zu │[0-width] %s: %s\n", m.offsetInBytes, m.name, m.type ? m.type->name : "???");
+        continue;
       }
-      for (size_t r = 0; r < m.sizeInBytes; r += alignmentInBytes) {
-        std::fprintf(fd, "+%-3zu │", r + m.offsetInBytes);
-        for (size_t c = 0; c < alignmentInBytes; ++c)
-          std::fprintf(fd, r + c < m.sizeInBytes ? "■" : "□");
+      std::fprintf(fd, "+%-3zu │", m.offsetInBytes);
 
-        if (r == 0) {
-          std::fprintf(fd, " %s: %s", m.name, m.type ? m.type->name : "???");
-          for (size_t s = 0; s < m.ptrIndirection; ++s)
-            std::fprintf(fd, "*");
-          std::fprintf(fd, " (%ld bytes)", m.sizeInBytes);
-        }
+      const size_t nextOffset = i + 1 < memberCount ? members[i + 1].offsetInBytes : sizeInBytes;
+      for (size_t c = 0; c < nextOffset - m.offsetInBytes; ++c)
+        std::fprintf(fd, c < m.sizeInBytes ? "■" : "□");
 
-        std::fprintf(fd, "\n");
-      }
+      std::fprintf(fd, " %s: %s", m.name, m.type ? m.type->name : "???");
+      for (size_t s = 0; s < m.ptrIndirection; ++s)
+        std::fprintf(fd, "*");
+
+      std::fprintf(fd, " (%ld bytes)\n", m.sizeInBytes);
     }
     std::fprintf(fd, "     ╰────────\n");
   }
@@ -342,11 +343,12 @@ struct TypeLayout {
     fprintf(fd, "    .memberCount = %zuULL,\n", memberCount);
     fprintf(fd, "    .members = new AggregateMember[%zu]{\n", memberCount);
     for (size_t i = 0; i < memberCount; ++i) {
+      const auto &m = members[i];
       fprintf(fd,
               "        { .name = \"%s\", .offsetInBytes = %zuULL, .sizeInBytes = %zuULL, .ptrIndirection = %zuULL, .componentSize = "
-              "%zuULL, .type = (%s) }",
-              members[i].name, members[i].offsetInBytes, members[i].sizeInBytes, members[i].ptrIndirection, members[i].componentSize,
-              members[i].type ? members[i].type->name : "???");
+              "%zuULL, .type = (%s), resolver = %p }",
+              m.name, m.offsetInBytes, m.sizeInBytes, m.ptrIndirection, m.componentSize, m.type ? m.type->name : "???",
+              (void *)(m.resolvePtrSizeInBytes));
       if (i + 1 < memberCount) fprintf(fd, ",");
       fprintf(fd, "\n");
     }

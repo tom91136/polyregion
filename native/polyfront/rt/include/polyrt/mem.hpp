@@ -74,17 +74,26 @@ class SynchronisedAllocation {
   }
 
   void writeSubObject(const char *hostData, const size_t memberOffsetInBytes, const size_t indirection, const uintptr_t devicePtr,
-                      const runtime::TypeLayout &tl, const auto metaToCount) {
-    fprintf(stderr, "## writeSubObject(hostData=%p, memberOffsetInBytes=%ld, indirection=%ld, devicePtr=%jx, t=@%s)\n", //
-            (void *)hostData, memberOffsetInBytes, indirection, devicePtr, tl.name);
+                      const runtime::TypeLayout &tl, const runtime::AggregateMember::ResolvePtrSize resolvePtrSizeInBytes,
+                      const auto effectiveSizeToCount) {
+    fprintf(stderr,
+            "## writeSubObject(hostData=%p, memberOffsetInBytes=%ld, indirection=%ld, devicePtr=%jx, t=@%s (sizeInBytes=%zd, "
+            "members=%zd))\n", //
+            static_cast<const void *>(hostData), memberOffsetInBytes, indirection, devicePtr, tl.name, tl.sizeInBytes, tl.memberCount);
     if (char *memberLocalPtr = readPtrValue(hostData + memberOffsetInBytes); !memberLocalPtr) {
       constexpr uintptr_t nullValue = 0;
       remoteWrite(&nullValue, devicePtr, memberOffsetInBytes, sizeof(uintptr_t));
+    } else if (resolvePtrSizeInBytes) {
+      const size_t sizeInBytes = resolvePtrSizeInBytes(hostData + memberOffsetInBytes);
+      fprintf(stderr, "## localResolve<%p>(%p) = {size=%ld}\n", //
+              (void *)resolvePtrSizeInBytes, static_cast<void *>(memberLocalPtr), sizeInBytes);
+      const uintptr_t memberRemotePtr = mirrorToRemote(memberLocalPtr, indirection, effectiveSizeToCount(sizeInBytes), tl);
+      remoteWrite(&memberRemotePtr, devicePtr, memberOffsetInBytes, sizeof(uintptr_t));
     } else if (const PtrQuery meta = localReflect(memberLocalPtr); meta.sizeInBytes != 0) {
       fprintf(stderr, "## localReflect(%p) = {size=%ld, offset=%ld}\n", static_cast<void *>(memberLocalPtr), meta.sizeInBytes,
               meta.offsetInBytes); //
-
-      const uintptr_t memberRemotePtr = mirrorToRemote(memberLocalPtr, indirection, metaToCount(meta), tl);
+      const size_t effectiveSize = meta.sizeInBytes - meta.offsetInBytes;
+      const uintptr_t memberRemotePtr = mirrorToRemote(memberLocalPtr, indirection, effectiveSizeToCount(effectiveSize), tl);
       remoteWrite(&memberRemotePtr, devicePtr, memberOffsetInBytes, sizeof(uintptr_t));
     } else {
       std::fprintf(stderr, "Foreign pointer %p\n", static_cast<void *>(memberLocalPtr));
@@ -94,32 +103,33 @@ class SynchronisedAllocation {
   uintptr_t writeIndirect(const char *hostData, const uintptr_t devicePtr, const size_t ptrIndirections, const size_t count,
                           const runtime::TypeLayout &tl) {
     fprintf(stderr, "## writeIndirect(hostData=%p, count=%ld,devicePtr=%jx, t=@ %s, ptrIndirections=%ld)\n", //
-            (void *)hostData, count, devicePtr, tl.name, ptrIndirections);
+            static_cast<const void *>(hostData), count, devicePtr, tl.name, ptrIndirections);
     for (size_t idx = 0; idx < count; ++idx) {
-      writeSubObject(hostData, idx * sizeof(uintptr_t), ptrIndirections - 1, devicePtr, tl, [&](auto &meta) {
-        const size_t componentSize = ptrIndirections - 1 == 1 ? tl.sizeInBytes : sizeof(uintptr_t);
-        return (meta.sizeInBytes - meta.offsetInBytes) / componentSize;
-      });
+      const size_t componentSize = ptrIndirections - 1 == 1 ? tl.sizeInBytes : sizeof(uintptr_t);
+      writeSubObject(hostData, idx * sizeof(uintptr_t), ptrIndirections - 1, devicePtr, tl, nullptr,
+                     [&](const size_t effectiveSize) { return effectiveSize / componentSize; });
     }
     return devicePtr;
   }
 
   uintptr_t writeStruct(const char *hostData, const size_t offsetInBytes, const uintptr_t devicePtr, const size_t count,
                         const runtime::TypeLayout &tl, const bool writeBody) {
-    fprintf(stderr, "## writeStruct(hostData=%p, offsetInBytes=%zu, count=%ld,devicePtr=%jx, t=@%s, writeBody=%d)\n", //
-            (void *)hostData, offsetInBytes, count, devicePtr, tl.name, writeBody);
+    fprintf(
+        stderr,
+        "## writeStruct(hostData=%p, offsetInBytes=%zu, count=%ld,devicePtr=%jx, t=@%s (sizeInBytes=%zd, members=%zd), writeBody=%d)\n", //
+        static_cast<const void *>(hostData), offsetInBytes, count, devicePtr, tl.name, tl.sizeInBytes, tl.memberCount, writeBody);
     if (writeBody) remoteWrite(hostData + offsetInBytes, devicePtr, offsetInBytes, tl.sizeInBytes * count);
     for (size_t idx = 0; idx < count; ++idx) {
       for (size_t m = 0; m < tl.memberCount; ++m) {
         const auto member = tl.members[m];
+
         const auto memberOffsetInBytes = offsetInBytes + (idx * tl.sizeInBytes + member.offsetInBytes);
         if (member.sizeInBytes == 0) continue;
-        if (member.ptrIndirection > 0)
-          writeSubObject(hostData, memberOffsetInBytes, member.ptrIndirection, devicePtr, *member.type, [&](auto &meta) {
-            const size_t componentSize = member.ptrIndirection == 1 ? member.componentSize : member.sizeInBytes;
-            return (meta.sizeInBytes - meta.offsetInBytes) / componentSize;
-          });
-        else if (member.type->memberCount > 0) {
+        if (member.ptrIndirection > 0) {
+          const size_t componentSize = member.ptrIndirection == 1 ? member.componentSize : member.sizeInBytes;
+          writeSubObject(hostData, memberOffsetInBytes, member.ptrIndirection, devicePtr, *member.type, member.resolvePtrSizeInBytes,
+                         [&](const size_t effectiveSize) { return effectiveSize / componentSize; });
+        } else if (member.type->memberCount > 0) {
           writeStruct(hostData, memberOffsetInBytes, devicePtr, 1, *member.type, false);
         }
       }
@@ -129,7 +139,7 @@ class SynchronisedAllocation {
 
   uintptr_t mirrorToRemote(const char *hostData, const size_t ptrIndirections, const size_t count, const runtime::TypeLayout &l) {
     fprintf(stderr, "## mirrorToRemote(hostData=%p, ptrIndirections=%zu, count=%zu, t=@%s)\n", //
-            (void *)hostData, ptrIndirections, count, l.name);
+            static_cast<const void *>(hostData), ptrIndirections, count, l.name);
     if (const auto query = offsetQuery(localToRemoteAlloc, hostData, [](auto &x) { return x.remote.sizeInBytes; })) {
       const auto [alloc, offsetInBytes] = *query;
       if (!alloc->localModified) return alloc->remote.ptr + offsetInBytes;

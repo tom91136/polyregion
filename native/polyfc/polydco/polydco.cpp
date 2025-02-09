@@ -98,7 +98,7 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
 
   const auto upperBoundExclusive = upperBoundInclusive + 1;
   const int64_t tripCount = concurrency_utils::tripCountExclusive(lowerBoundInclusive, upperBoundExclusive, step);
-  POLYDCO_LOG("<%s:%s:%zu> Dispatch managed, arg=%p bytes", __func__, moduleId, tripCount, captures);
+  POLYDCO_LOG("<%s:%s:%zu> Dispatch managed, arg=%p", __func__, moduleId, tripCount, static_cast<void *>(captures));
 
   validatePrelude<Prelude>(layout, moduleId);
 
@@ -113,7 +113,7 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
 }
 
 static void dispatchHostThreaded(int64_t lowerBoundInclusive, int64_t upperBoundInclusive, int64_t step, //
-                                 const runtime::TypeLayout *layout,                    //
+                                 const runtime::TypeLayout *layout,                                      //
                                  char *captures, const char *moduleId) {
   struct Prelude {
     int64_t lowerBound, upperBound, step, tripCount;
@@ -123,7 +123,7 @@ static void dispatchHostThreaded(int64_t lowerBoundInclusive, int64_t upperBound
 
   const auto upperBoundExclusive = upperBoundInclusive + 1;
   const int64_t tripCount = concurrency_utils::tripCountExclusive(lowerBoundInclusive, upperBoundExclusive, step);
-  POLYDCO_LOG("<%s:%s:%zu> Dispatch host, arg=%p bytes", __func__, moduleId, tripCount, captures);
+  POLYDCO_LOG("<%s:%s:%zu> Dispatch host, arg=%p", __func__, moduleId, tripCount, static_cast<void *>(captures));
 
   validatePrelude<Prelude>(layout, moduleId);
 
@@ -161,7 +161,7 @@ bool polydco_dispatch(const int64_t lowerBoundInclusive, const int64_t upperBoun
   POLYDCO_LOG("<%s> Dispatch (%ld to %ld by %ld)", __func__, lowerBoundInclusive, upperBoundInclusive, step);
 
   if (!bundle || !captures) {
-    POLYDCO_LOG("bundle=%p captures=%p, not dispatching", bundle, captures);
+    POLYDCO_LOG("bundle=%p captures=%p, not dispatching", static_cast<const void *>(bundle), static_cast<void *>(captures));
     return false;
   }
 

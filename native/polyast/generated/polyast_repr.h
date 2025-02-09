@@ -17,4 +17,5 @@ namespace polyregion::polyast {
 [[nodiscard]] std::string repr(const Function& f);
 [[nodiscard]] std::string repr(const StructDef& s);
 [[nodiscard]] std::string repr(const Program& s);
+[[nodiscard]] std::string repr(const StructLayout& l);
 }

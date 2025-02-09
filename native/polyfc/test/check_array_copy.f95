@@ -1,8 +1,8 @@
 !CHECK case: copy
 !CHECK using: alloc=0,1
 !CHECK using: type=integer,real
-!CHECK using: kind=4,8
-!CHECK using: size=1,10,100,1000
+!CHECK using: kind=2,4,8
+!CHECK using: size=1,10,10000
 !CHECK do: polyfc {polyfc_defaults} {polyfc_stdpar} -DCHECK_TYPE={type} -DCHECK_KIND={kind} -DCHECK_SIZE={size} -DCHECK_ALLOC={alloc} -o {output} {input}
 !CHECK do: {output}
 !CHECK requires: pass
@@ -27,13 +27,11 @@ program test
     implicit none
     integer :: i
 #if CHECK_ALLOC == 1
-    CHECK_TYPE(kind = CHECK_KIND), allocatable :: x(:)
-    CHECK_TYPE(kind = CHECK_KIND), allocatable :: y(:)
+    CHECK_TYPE(kind = CHECK_KIND), allocatable :: x(:), y(:)
     allocate(x(CHECK_SIZE))
     allocate(y(CHECK_SIZE))
 #else
-    CHECK_TYPE(kind = CHECK_KIND) :: x(CHECK_SIZE)
-    CHECK_TYPE(kind = CHECK_KIND) :: y(CHECK_SIZE)
+    CHECK_TYPE(kind = CHECK_KIND) :: x(CHECK_SIZE), y(CHECK_SIZE)
 #endif
 
     x = -1

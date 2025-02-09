@@ -59,7 +59,8 @@ string polyast::repr(const CompileResult &compilation) {
      << "\n  binary: " << (compilation.binary ? std::to_string(compilation.binary->size()) + " bytes" : "(empty)") //
      << "\n  messages: `" << compilation.messages << "`"                                                           //
      << "\n  features: `" << (compilation.features ^ mk_string(",")) << "`"                                        //
-     << "\n  layouts: `" << (compilation.layouts ^ mk_string("\n    ")) << "`"                                     //
+     << "\n  layouts: `\n"
+     << (compilation.layouts ^ mk_string("\n", [](auto &l) { return repr(l) ^ indent(4); })) << "`" //
      << "\n  events:\n";
 
   for (auto &e : compilation.events) {
