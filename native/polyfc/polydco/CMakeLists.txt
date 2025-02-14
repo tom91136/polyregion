@@ -8,8 +8,8 @@ endif ()
 
 foreach (TARGET polydco polydco-static)
     target_sources(${TARGET}
-            PRIVATE polydco.cpp
-
+            PRIVATE
+            polydco.cpp
     )
 
     target_link_libraries(${TARGET} PRIVATE polyinvoke-obj polyrt-obj polycommon)

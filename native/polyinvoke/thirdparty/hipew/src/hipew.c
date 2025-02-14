@@ -475,64 +475,6 @@ int hipewInit(hipuint32_t flags) {
   return result;
 }
 
-
-const char *hipewErrorString(hipError_t result) {
-  switch (result) {
-    case hipSuccess: return "No errors";
-    case hipErrorInvalidValue: return "Invalid value";
-    case hipErrorOutOfMemory: return "Out of memory";
-    case hipErrorNotInitialized: return "Driver not initialized";
-    case hipErrorDeinitialized: return "Driver deinitialized";
-    case hipErrorProfilerDisabled: return "Profiler disabled";
-    case hipErrorProfilerNotInitialized: return "Profiler not initialized";
-    case hipErrorProfilerAlreadyStarted: return "Profiler already started";
-    case hipErrorProfilerAlreadyStopped: return "Profiler already stopped";
-    case hipErrorNoDevice: return "No HIP-capable device available";
-    case hipErrorInvalidDevice: return "Invalid device";
-    case hipErrorInvalidImage: return "Invalid kernel image";
-    case hipErrorInvalidContext: return "Invalid context";
-    case hipErrorContextAlreadyCurrent: return "Context already current";
-    case hipErrorMapFailed: return "Map failed";
-    case hipErrorUnmapFailed: return "Unmap failed";
-    case hipErrorArrayIsMapped: return "Array is mapped";
-    case hipErrorAlreadyMapped: return "Already mapped";
-    case hipErrorNoBinaryForGpu: return "No binary for GPU";
-    case hipErrorAlreadyAcquired: return "Already acquired";
-    case hipErrorNotMapped: return "Not mapped";
-    case hipErrorNotMappedAsArray: return "Mapped resource not available for access as an array";
-    case hipErrorNotMappedAsPointer: return "Mapped resource not available for access as a pointer";
-    case hipErrorECCNotCorrectable: return "Uncorrectable ECC error detected";
-    case hipErrorUnsupportedLimit: return "hipLimit_t not supported by device";
-    case hipErrorContextAlreadyInUse: return "Context already in use";
-    case hipErrorPeerAccessUnsupported: return "Peer access unsupported";
-    case hipErrorInvalidKernelFile: return "Invalid ptx";
-    case hipErrorInvalidGraphicsContext: return "Invalid graphics context";
-    case hipErrorInvalidSource: return "Invalid source";
-    case hipErrorFileNotFound: return "File not found";
-    case hipErrorSharedObjectSymbolNotFound: return "Link to a shared object failed to resolve";
-    case hipErrorSharedObjectInitFailed: return "Shared object initialization failed";
-    case hipErrorOperatingSystem: return "Operating system";
-    case hipErrorInvalidHandle: return "Invalid handle";
-    case hipErrorNotFound: return "Not found";
-    case hipErrorNotReady: return "HIP not ready";
-    case hipErrorIllegalAddress: return "Illegal address";
-    case hipErrorLaunchOutOfResources: return "Launch exceeded resources";
-    case hipErrorLaunchTimeOut: return "Launch exceeded timeout";
-    case hipErrorPeerAccessAlreadyEnabled: return "Peer access already enabled";
-    case hipErrorPeerAccessNotEnabled: return "Peer access not enabled";
-    case hipErrorSetOnActiveProcess: return "Primary context active";
-    case hipErrorContextIsDestroyed: return "The context is already destroyed"; // XXX Not part of HIPEW; added from source
-    case hipErrorAssert: return "Assert";
-    case hipErrorHostMemoryAlreadyRegistered: return "Host memory already registered";
-    case hipErrorHostMemoryNotRegistered: return "Host memory not registered";
-    case hipErrorLaunchFailure: return "Launch failed";
-    case hipErrorCooperativeLaunchTooLarge: return "Cooperative launch too large";
-    case hipErrorNotSupported: return "Not supported";
-    case hipErrorUnknown: return "Unknown error";
-    default: return "Unknown HIP error value";
-  }
-}
-
 static void path_join(const char *path1,
                       const char *path2,
                       int maxlen,

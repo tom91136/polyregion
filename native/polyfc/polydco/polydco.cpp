@@ -1,3 +1,6 @@
+#include <span>
+
+#include "ftypes.h"
 #include "polydco.h"
 
 #include "polyregion/concurrency_utils.hpp"
@@ -8,40 +11,6 @@ static std::unordered_map<uintptr_t, size_t> ptrRecords;
 static std::mutex mutex;
 
 using namespace polyregion;
-
-POLYREGION_EXPORT extern "C" [[maybe_unused]] void polydco_record(void *ptr, size_t size) {
-  std::unique_lock lock(mutex);
-  fprintf(stderr, "polydco_record(%p, %ld)\n", ptr, size);
-  ptrRecords[reinterpret_cast<uintptr_t>(ptr)] = size;
-}
-
-POLYREGION_EXPORT extern "C" [[maybe_unused]] void polydco_release(void *ptr) {
-  std::unique_lock lock(mutex);
-  fprintf(stderr, "polydco_release(%p)\n", ptr);
-  ptrRecords.erase(reinterpret_cast<uintptr_t>(ptr));
-}
-
-POLYREGION_EXPORT extern "C" [[maybe_unused]] void polydco_debug_farraydesc(FArrayDesc *desc) {
-  fprintf(stderr, "PolyDCOFArrayDesc{\n");
-  fprintf(stderr, "  .addr = %p,\n", desc->addr);
-  fprintf(stderr, "  .sizeInBytes = %luULL,\n", desc->sizeInBytes);
-  fprintf(stderr, "  .ranks = %luULL,\n", desc->ranks);
-
-  fprintf(stderr, "  .dims = new PolyDCOFDim[%lu]{\n", desc->ranks);
-  for (uint64_t i = 0; i < desc->ranks; ++i) {
-    fprintf(stderr, "      { .lowerBound = %luULL, .extent = %luULL, .stride = %luULL }", desc->dims[i].lowerBound, desc->dims[i].extent,
-            desc->dims[i].stride);
-    if (i + 1 < desc->ranks) fprintf(stderr, ",");
-    fprintf(stderr, "\n");
-  }
-  fprintf(stderr, "  }\n");
-  fprintf(stderr, "};\n");
-}
-
-POLYREGION_EXPORT extern "C" [[maybe_unused]] void polydco_debug_typelayout(runtime::TypeLayout *layout) {
-  layout->print(stderr);
-  layout->visualise(stderr);
-}
 
 static polyrt::SynchronisedAllocation allocations(
     [](const void *ptr) -> polyrt::PtrQuery {
@@ -73,6 +42,24 @@ static polyrt::SynchronisedAllocation allocations(
       polyrt::currentDevice->freeDevice(remotePtr);
     });
 
+POLYREGION_EXPORT extern "C" [[maybe_unused]] void polydco_record(void *ptr, const size_t size) {
+  std::unique_lock lock(mutex);
+  fprintf(stderr, "polydco_record(%p, %ld)\n", ptr, size);
+  ptrRecords[reinterpret_cast<uintptr_t>(ptr)] = size;
+}
+
+POLYREGION_EXPORT extern "C" [[maybe_unused]] void polydco_release(void *ptr) {
+  std::unique_lock lock(mutex);
+  fprintf(stderr, "polydco_release(%p)\n", ptr);
+  ptrRecords.erase(reinterpret_cast<uintptr_t>(ptr));
+  allocations.disassociate(ptr);
+}
+
+POLYREGION_EXPORT extern "C" [[maybe_unused]] void polydco_debug_typelayout(const runtime::TypeLayout *layout) {
+  layout->print(stderr);
+  layout->visualise(stderr);
+}
+
 template <typename T> static void validatePrelude(const runtime::TypeLayout *layout, const char *moduleId) {
   if (layout->memberCount < 1) {
     POLYDCO_LOG("<%s> Struct layout has no members", moduleId);
@@ -87,75 +74,161 @@ template <typename T> static void validatePrelude(const runtime::TypeLayout *lay
   }
 }
 
-static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upperBoundInclusive, const int64_t step, //
-                            const size_t localBound, const size_t localMemBytes,                                      //
-                            const runtime::TypeLayout *layout,                                                        //
-                            char *captures, const char *moduleId) {
-  struct Prelude {
-    int64_t lowerBound, upperBound, step, tripCount;
+struct ManagedPartialReduction {
+
+  struct Allocation {
+    uintptr_t ptr;
+    size_t size;
   };
-  static_assert(sizeof(Prelude) == (sizeof(int64_t) * 4));
+
+  const std::span<const polydco::FReduction> &reductions;
+  int64_t range;
+  uintptr_t devicePartials;
+  std::vector<Allocation> allocations;
+
+  ManagedPartialReduction(const std::span<const polydco::FReduction> &reductions, const int64_t range)
+      : reductions(reductions), range(range), devicePartials(), allocations(reductions.size()) {}
+
+  size_t allocatePartialsAsync() {
+    if (reductions.empty()) return 0;
+    devicePartials = polyrt::currentDevice->mallocDevice(sizeof(void *) * reductions.size(), polyrt::Access::RW);
+    size_t localMemBytes = 0;
+    for (size_t i = 0; i < reductions.size(); ++i) {
+      const auto size = reductions[i].typeSizeInBytes() * range;
+      const auto devicePtr = polyrt::currentDevice->mallocDevice(size, polyrt::Access::RW);
+      allocations[i] = Allocation{.ptr = devicePtr, .size = size};
+      polyrt::currentQueue->enqueueHostToDeviceAsync(&devicePtr, devicePartials, sizeof(void *) * i, sizeof(void *), {});
+      localMemBytes += size;
+    }
+    return localMemBytes;
+  }
+
+  void releaseAndReduce() const {
+    if (reductions.empty()) return;
+    polyrt::currentDevice->freeDevice(devicePartials);
+    if (polyrt::currentDevice->sharedAddressSpace()) {
+      for (size_t i = 0; i < allocations.size(); ++i)
+        reductions[i].reduce(range, reinterpret_cast<const char *>(allocations[i].ptr));
+    } else {
+      std::vector<void *> hostPartials(allocations.size());
+      for (size_t i = 0; i < allocations.size(); ++i)
+        hostPartials[i] = std::malloc(allocations[i].size);
+
+      for (size_t i = 0; i < allocations.size(); ++i) {
+        polyrt::currentQueue->enqueueDeviceToHostAsync(allocations[i].ptr, 0, hostPartials[i], allocations[i].size, {});
+      }
+      polyrt::currentQueue->enqueueWaitBlocking();
+      for (size_t i = 0; i < allocations.size(); ++i) {
+        polyrt::currentDevice->freeDevice(allocations[i].ptr);
+        reductions[i].reduce(range, static_cast<const char *>(hostPartials[i]));
+      }
+    }
+  }
+};
+
+static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upperBoundInclusive, const int64_t step, //
+                            const runtime::TypeLayout *layout,                                                        //
+                            const std::span<const polydco::FReduction> &reductions,                                   //
+                            char *captures, const char *moduleId) {
 
   const auto upperBoundExclusive = upperBoundInclusive + 1;
   const int64_t tripCount = concurrency_utils::tripCountExclusive(lowerBoundInclusive, upperBoundExclusive, step);
   POLYDCO_LOG("<%s:%s:%zu> Dispatch managed, arg=%p", __func__, moduleId, tripCount, static_cast<void *>(captures));
 
-  validatePrelude<Prelude>(layout, moduleId);
+  validatePrelude<polydco::FManagedPrelude>(layout, moduleId);
 
-  const Prelude prelude{lowerBoundInclusive, upperBoundInclusive, step, tripCount};
-  std::memcpy(captures, &prelude, sizeof(Prelude));
+  const polydco::FManagedPrelude prelude{lowerBoundInclusive, upperBoundInclusive, step, tripCount};
+  std::memcpy(captures, &prelude, sizeof(polydco::FManagedPrelude));
 
-  const auto functorDevicePtr = allocations.syncLocalToRemote(captures, *layout);
-  polyrt::dispatchManaged(tripCount, localBound, localMemBytes, reinterpret_cast<void *>(functorDevicePtr), moduleId);
+  auto functorDevicePtr = allocations.syncLocalToRemote(captures, *layout);
+
+  POLYDCO_LOG("[Allocations (%lu)]", allocations.localToRemoteAlloc.size());
+  for (auto [k, v] : allocations.localToRemoteAlloc) {
+    const auto &l = allocations.remoteToLocalPtr[v.remote.ptr];
+    POLYDCO_LOG("\t[Local(%jx, %4ld) -> Remote(%jx, %4ld) %10s]", //
+                k, l.sizeInBytes, v.remote.ptr, v.remote.sizeInBytes, v.layout->name);
+  }
+
+  constexpr size_t blockSize = 256;
+  const bool isReduction = !reductions.empty();
+  const size_t threadsPerBlock = //
+      isReduction ? blockSize    // use local==global for reduction
+                  : (static_cast<size_t>(tripCount) < blockSize ? 1 : static_cast<size_t>(tripCount) / blockSize);
+  const size_t blocks =       //
+      isReduction ? blockSize // use local==global for reduction
+                  : (static_cast<size_t>(tripCount) < blockSize ? static_cast<size_t>(tripCount) : blockSize);
+  ManagedPartialReduction mpr(reductions, blockSize);
+  const size_t localMemBytes = mpr.allocatePartialsAsync();
+  POLYDCO_LOG("<%s:%s:%zu> localMemBytes=%ld", __func__, moduleId, threadsPerBlock, localMemBytes);
+
+  using namespace invoke;
+  const auto buffer = isReduction ? ArgBuffer{{Type::Ptr, &functorDevicePtr},   //
+                                              {Type::Ptr, &mpr.devicePartials}, //
+                                              {Type::Scratch, {}},              //
+                                              {Type::Void, {}}}                 //
+                                  : ArgBuffer{                                  //
+                                              {Type::Ptr, &functorDevicePtr},
+                                              {Type::Ptr, &mpr.devicePartials},
+                                              {Type::Void, {}}};
+
+  POLYDCO_LOG("<%s:%s:%zu> Dispatch managed, arg=%p managed=%jx", __func__, moduleId, threadsPerBlock, captures, mpr.devicePartials);
+  polyrt::currentQueue->enqueueInvokeAsync(moduleId, "_main", buffer,          //
+                                           Policy{                             //
+                                                  Dim3{threadsPerBlock, 1, 1}, //
+                                                  blocks > 0 ? std::optional{std::pair{Dim3{blocks, 1, 1}, localMemBytes}} : std::nullopt},
+                                           {});
+
+  POLYDCO_LOG("<%s:%s:%zu> Submitted", __func__, moduleId, threadsPerBlock);
+  polyrt::currentQueue->enqueueWaitBlocking();
+
   allocations.syncRemoteToLocal(captures);
+  allocations.disassociate(captures);
+  polyrt::currentQueue->enqueueWaitBlocking();
+
+  mpr.releaseAndReduce();
+
   polyrt::currentQueue->enqueueWaitBlocking();
   POLYDCO_LOG("<%s:%s:%zu> Done", __func__, moduleId, tripCount);
 }
 
-static void dispatchHostThreaded(int64_t lowerBoundInclusive, int64_t upperBoundInclusive, int64_t step, //
-                                 const runtime::TypeLayout *layout,                                      //
-                                 char *captures, const char *moduleId) {
-  struct Prelude {
-    int64_t lowerBound, upperBound, step, tripCount;
-    int64_t *begins, *ends;
-  };
-  static_assert(sizeof(Prelude) == (sizeof(int64_t) * 4 + sizeof(void *) * 2));
+static void dispatchHostThreaded(const int64_t lowerBoundInclusive, const int64_t upperBoundInclusive, const int64_t step, //
+                                 const runtime::TypeLayout *layout,                                                        //
+                                 const std::span<const polydco::FReduction> &reductions, char *captures, const char *moduleId) {
 
   const auto upperBoundExclusive = upperBoundInclusive + 1;
   const int64_t tripCount = concurrency_utils::tripCountExclusive(lowerBoundInclusive, upperBoundExclusive, step);
   POLYDCO_LOG("<%s:%s:%zu> Dispatch host, arg=%p", __func__, moduleId, tripCount, static_cast<void *>(captures));
 
-  validatePrelude<Prelude>(layout, moduleId);
+  validatePrelude<polydco::FHostThreadedPrelude>(layout, moduleId);
 
-  //  auto N = std::thread::hardware_concurrency();
-
-  size_t N = 1;
+  const size_t N = std::thread::hardware_concurrency();
   auto [begins, ends] = concurrency_utils::splitStaticExclusive<int64_t>(0, tripCount, N);
-  const Prelude prelude{lowerBoundInclusive, upperBoundInclusive, step, tripCount, begins.data(), ends.data()};
+  const size_t groups = begins.size();
 
-  std::memcpy(captures, &prelude, sizeof(Prelude));
+  const polydco::FHostThreadedPrelude prelude{lowerBoundInclusive, upperBoundInclusive, step, tripCount, begins.data(), ends.data()};
+  std::memcpy(captures, &prelude, sizeof(polydco::FHostThreadedPrelude));
 
-  polyrt::dispatchHostThreaded(N, captures, moduleId);
+  ManagedPartialReduction mpr(reductions, groups);
+  mpr.allocatePartialsAsync();
+  using namespace invoke;
+  const ArgBuffer buffer{{Type::IntS64, nullptr}, {Type::Ptr, &captures}, {Type::Ptr, &mpr.devicePartials}, {Type::Void, nullptr}};
+  POLYDCO_LOG("<%s:%s:%zu> Dispatch hostthreaded", __func__, moduleId, tripCount);
+  polyrt::currentQueue->enqueueInvokeAsync(moduleId, "_main", buffer, Policy{Dim3{groups, 1, 1}}, [&]() { mpr.releaseAndReduce(); });
   polyrt::currentQueue->enqueueWaitBlocking();
   POLYDCO_LOG("<%s:%s:%zu> Done", __func__, moduleId, tripCount);
 }
 
-// bool fallback = false;
-// if (currentPlatform == kind) {
-//   // if(!dispatch(*layout, <create captures>))
-//   //   fallback = true;
-// } else { assert }
-// if(fallback) do
-
-bool polydco_is_platformkind(runtime::PlatformKind kind) {
+POLYREGION_EXPORT extern "C" [[maybe_unused]] bool polydco_is_platformkind(const runtime::PlatformKind kind) {
   polyrt::initialise();
   return polyrt::currentPlatform->kind() == kind;
 }
 
-bool polydco_dispatch(const int64_t lowerBoundInclusive, const int64_t upperBoundInclusive, const int64_t step, //
-                      runtime::PlatformKind kind,
-                      const runtime::KernelBundle *bundle, //
-                      char *captures) {
+POLYREGION_EXPORT extern "C" [[maybe_unused]] bool polydco_dispatch(const int64_t lowerBoundInclusive, const int64_t upperBoundInclusive,
+                                                                    const int64_t step,                                                  //
+                                                                    const runtime::PlatformKind kind,                                    //
+                                                                    const runtime::KernelBundle *bundle,                                 //
+                                                                    const size_t reductionsCount, const polydco::FReduction *reductions, //
+                                                                    char *captures) {
   polyrt::initialise();
 
   POLYDCO_LOG("<%s> Dispatch (%ld to %ld by %ld)", __func__, lowerBoundInclusive, upperBoundInclusive, step);
@@ -175,13 +248,20 @@ bool polydco_dispatch(const int64_t lowerBoundInclusive, const int64_t upperBoun
     bundle->structs[i].visualise(stderr);
   }
 
+  for (size_t i = 0; i < reductionsCount; ++i) {
+    fprintf(stderr, "Reduction[%ld] = {%s, %s -> %p}\n", i, to_string(reductions[i].type).data(),
+            polydco::FReduction::to_string(reductions[i].kind).data(), reductions[i].dest);
+  }
+
   size_t attempts = 0;
   switch (kind) {
     case runtime::PlatformKind::HostThreaded: {
       for (size_t i = 0; i < bundle->objectCount; ++i) {
         attempts++;
         if (!polyrt::loadKernelObject(bundle->moduleName, bundle->objects[i])) continue;
-        dispatchHostThreaded(lowerBoundInclusive, upperBoundInclusive, step, &bundle->structs[bundle->interfaceLayoutIdx], captures,
+        dispatchHostThreaded(lowerBoundInclusive, upperBoundInclusive, step,
+                             &bundle->structs[bundle->interfaceLayoutIdx],     //
+                             std::span{reductions, reductionsCount}, captures, //
                              bundle->moduleName);
         return true;
       }
@@ -191,7 +271,9 @@ bool polydco_dispatch(const int64_t lowerBoundInclusive, const int64_t upperBoun
       for (size_t i = 0; i < bundle->objectCount; ++i) {
         attempts++;
         if (!polyrt::loadKernelObject(bundle->moduleName, bundle->objects[i])) continue;
-        dispatchManaged(lowerBoundInclusive, upperBoundInclusive, step, 0, 0, &bundle->structs[bundle->interfaceLayoutIdx], captures,
+        dispatchManaged(lowerBoundInclusive, upperBoundInclusive, step,
+                        &bundle->structs[bundle->interfaceLayoutIdx],     //
+                        std::span{reductions, reductionsCount}, captures, //
                         bundle->moduleName);
         return true;
       }

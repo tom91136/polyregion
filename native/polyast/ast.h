@@ -32,7 +32,7 @@ Expr::Select selectNamed(const Expr::Select &select, const Named &that);
 
 Expr::Select selectNamed(const Vec<Named> &names);
 
-Expr::Select selectNamed(const  Named &name);
+Expr::Select selectNamed(const Named &name);
 
 Expr::Select parent(const Expr::Select &select);
 
@@ -92,8 +92,8 @@ struct NamedBuilder {
   explicit NamedBuilder(const Named &named);
   operator Expr::Any() const; // NOLINT(google-explicit-constructor)
   operator Expr::Select() const;
-                              //  operator const Expr::Any() const; // NOLINT(google-explicit-constructor)
-  operator Named() const;     // NOLINT(google-explicit-constructor)
+  //  operator const Expr::Any() const; // NOLINT(google-explicit-constructor)
+  operator Named() const; // NOLINT(google-explicit-constructor)
   Arg operator()() const;
   IndexBuilder operator[](const Expr::Any &idx) const;
   Mut operator=(const Expr::Any &that) const;
@@ -101,6 +101,33 @@ struct NamedBuilder {
 
 Expr::Any integral(const Type::Any &tpe, unsigned long long int x);
 Expr::Any fractional(const Type::Any &tpe, long double x);
+
+template <typename F> Expr::Any numeric(const Type::Any &tpe, F tagged) {
+  auto unsupported = [](auto &&t) -> Expr::Any { throw std::logic_error("Cannot create numeric constant of type " + to_string(t)); };
+  return tpe.match_total(                                                                 //
+      [&](const Type::Float16 &) -> Expr::Any { return Float16Const(tagged(float{})); },  //
+      [&](const Type::Float32 &) -> Expr::Any { return Float32Const(tagged(float{})); },  //
+      [&](const Type::Float64 &) -> Expr::Any { return Float64Const(tagged(double{})); }, //
+
+      [&](const Type::IntU8 &) -> Expr::Any { return IntU8Const(tagged(uint8_t{})); },    //
+      [&](const Type::IntU16 &) -> Expr::Any { return IntU16Const(tagged(uint16_t{})); }, //
+      [&](const Type::IntU32 &) -> Expr::Any { return IntU32Const(tagged(uint32_t{})); }, //
+      [&](const Type::IntU64 &) -> Expr::Any { return IntU64Const(tagged(uint64_t{})); }, //
+
+      [&](const Type::IntS8 &) -> Expr::Any { return IntS8Const(tagged(int8_t{})); },    //
+      [&](const Type::IntS16 &) -> Expr::Any { return IntS16Const(tagged(int16_t{})); }, //
+      [&](const Type::IntS32 &) -> Expr::Any { return IntS32Const(tagged(int32_t{})); }, //
+      [&](const Type::IntS64 &) -> Expr::Any { return IntS64Const(tagged(int64_t{})); }, //
+
+      [&](const Type::Nothing &t) -> Expr::Any { return unsupported(t); },          //
+      [&](const Type::Unit0 &t) -> Expr::Any { return unsupported(t); },            //
+      [&](const Type::Bool1 &) -> Expr::Any { return Bool1Const(tagged(bool{})); }, //
+
+      [&](const Type::Struct &t) -> Expr::Any { return unsupported(t); },   //
+      [&](const Type::Ptr &t) -> Expr::Any { return unsupported(t); },      //
+      [&](const Type::Annotated &t) -> Expr::Any { return unsupported(t); } //
+  );
+}
 
 std::function<Expr::Any(Type::Any)> operator"" _(long double x);
 std::function<Expr::Any(Type::Any)> operator"" _(unsigned long long int x);

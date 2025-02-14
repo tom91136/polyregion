@@ -11,22 +11,6 @@ std::optional<mlir::func::FuncOp> polyregion::polyfc::resolveDefiningFunction(Op
   return {};
 }
 
-std::vector<mlir::Value> polyregion::polyfc::findCapturesInOrder(Block *block) {
-  std::vector<Value> captures;
-  const auto args = block->getArguments();
-  for (Operation &op : *block) {
-    for (Value arg : op.getOperands()) {
-      if (const Block *origin = arg.getParentBlock()) {
-        if (origin != block                   //
-            && !llvm::is_contained(args, arg) //
-            && !llvm::isa<arith::ConstantOp>(arg.getDefiningOp())) {
-          captures.emplace_back(arg);
-        }
-      }
-    }
-  }
-  return captures ^ distinct_by([](const Value &op) { return op.getAsOpaquePointer(); });
-}
 mlir::Location polyregion::polyfc::uLoc(OpBuilder &B) { return B.getUnknownLoc(); }
 mlir::Type polyregion::polyfc::i64Ty(OpBuilder &B) { return B.getI64Type(); }
 mlir::Type polyregion::polyfc::i32Ty(OpBuilder &B) { return B.getI32Type(); }

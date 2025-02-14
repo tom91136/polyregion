@@ -378,8 +378,13 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
       // XXX ignore emitDisassembly here as PTX *is* the binary
       auto [_, ptx, ptxStart, ptxElapsed] = //
           mkLLVMTargetMachineArtefact(*llvmTM, llvm::CodeGenFileType::AssemblyFile, M, events, true);
-      events.emplace_back(ptxStart, ptxElapsed, "llvm_to_ptx", std::string(ptx.begin(), ptx.end()));
-      return {std::vector<int8_t>(ptx.begin(), ptx.end()), {info.cpu.uArch}, events, {}, ""};
+      // FIXME uber hack to fix `.ptr .shared` giving CUDA_ERROR_INVALID_IMAGE at module load time
+
+      auto patchedPtx = std::string(ptx.begin(), ptx.end()) ^
+                        replace_all(".ptr .shared ", ".ptr /*.shared removed, see https://github.com/llvm/llvm-project/pull/114874 */");
+
+      events.emplace_back(ptxStart, ptxElapsed, "llvm_to_ptx", patchedPtx);
+      return {std::vector<int8_t>(patchedPtx.begin(), patchedPtx.end()), {info.cpu.uArch}, events, {}, ""};
     }
     default:
       switch (info.triple.getArch()) {

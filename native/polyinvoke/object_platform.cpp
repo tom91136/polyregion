@@ -109,7 +109,7 @@ void ObjectDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset
   std::memcpy(dst, reinterpret_cast<void *>(src + srcOffset), bytes);
   if (cb) (*cb)();
 }
-void ObjectDeviceQueue::enqueueWaitBlocking() { POLYINVOKE_TRACE(); }
+void ObjectDeviceQueue::enqueueWaitBlocking() { POLYINVOKE_TRACE(); latch.waitAll(); }
 ObjectDeviceQueue::ObjectDeviceQueue(const std::chrono::duration<int64_t> &timeout) : latch(timeout) { POLYINVOKE_TRACE(); }
 
 ObjectDeviceQueue::~ObjectDeviceQueue() noexcept { POLYINVOKE_TRACE(); }

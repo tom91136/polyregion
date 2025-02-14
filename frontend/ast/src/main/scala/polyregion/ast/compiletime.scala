@@ -152,8 +152,7 @@ private[polyregion] object compiletime {
     }
 
     def remap(tree: Tree, scope: Map[String, String], depth: Int, fnDef: Boolean = false): String = tree match {
-      case i @ Ident(name)             => scope.getOrElse(name, normalise(name))
-      case s @ Select(term, name)      => s"${remap(term, scope, depth + 1)}.${normalise(name)}"
+
       case Block(Nil, term)            => remap(term, scope, depth + 1)
       case Block(stmts, Closure(_, _)) => s"${stmts.map(remap(_, scope, depth + 1)).mkString("\n")}"
       case Block(stmts, term) =>
@@ -165,7 +164,7 @@ private[polyregion] object compiletime {
       case TypedOrTest(x, _)          => remap(x, scope, depth + 1)
       case Typed(x, _)                => remap(x, scope, depth + 1)
       case If(cond, trueBr, falseBr) =>
-        s"if (${remap(cond, scope, depth + 1)}) { ${remap(trueBr, scope, depth + 1)} } else { ${remap(falseBr, scope, depth + 1)} }"
+        s"(${remap(cond, scope, depth + 1)} ? ${remap(trueBr, scope, depth + 1)} : ${remap(falseBr, scope, depth + 1)})"
       case f @ DefDef("$anonfun", _, _, Some(rhs)) =>
         val args = f.termParamss.flatMap(_.params).map(p => remap(p, scope, depth + 1, fnDef = true)).mkString(", ")
         s"[&]($args){ return ${remap(rhs, scope, depth + 1)}; }"
@@ -200,6 +199,8 @@ private[polyregion] object compiletime {
             s"${remap(x.asTerm, scope, depth + 1)} ^ get_or_else(${remap(v.asTerm, scope, depth + 1)})"
           case '{ ($x: Option[t]).map($f) } =>
             s"${remap(x.asTerm, scope, depth + 1)} ^ map(${remap(f.asTerm, scope, depth + 1)})"
+          case '{ ($x: List[t]).isEmpty } =>
+            s"${remap(x.asTerm, scope, depth + 1)}.empty()"
           case '{ ($init: List[t]) :+ ($last) } =>
             s"${remap(init.asTerm, scope, depth + 1)} | append(${remap(last.asTerm, scope, depth + 1)})"
           case '{ ($x: Iterator[t]).map($f) } =>
@@ -222,7 +223,12 @@ private[polyregion] object compiletime {
             if (elems.size == 1) return s"\"${elems(0)}\"s"
             else
               s"fmt::format(\"${elems.mkString("{}")}\", ${args.map(_.asTerm).map(remap(_, scope, depth + 1)).mkString(", ")})"
-          case _ => s"/*failed ${x}*/"
+          case _ =>
+            tree match { // ident/select happens last as it could point to methods
+              case i @ Ident(name)        => scope.getOrElse(name, normalise(name))
+              case s @ Select(term, name) => s"${remap(term, scope, depth + 1)}.${normalise(name)}"
+              case _                      => s"/*failed ${x}*/"
+            }
         }
     }
 

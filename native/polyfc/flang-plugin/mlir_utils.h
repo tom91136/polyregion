@@ -1,5 +1,7 @@
 #pragma once
 
+#include "utils.h"
+
 #include <string>
 
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
@@ -15,7 +17,6 @@ using namespace mlir;
 using namespace aspartame;
 
 std::optional<func::FuncOp> resolveDefiningFunction(Operation *op);
-std::vector<Value> findCapturesInOrder(Block *block);
 Location uLoc(OpBuilder &B);
 Type i64Ty(OpBuilder &B);
 Type i32Ty(OpBuilder &B);
@@ -50,19 +51,19 @@ template <size_t N> struct AggregateMirror {
   template <typename T, size_t Idx> struct Field {
     static size_t index() { return Idx; }
     T type;
-    explicit Field(MLIRContext *C)
+    explicit Field(ModuleOp &M)
         : type([&] {
             if constexpr (std::is_same_v<T, LLVM::LLVMPointerType>) {
-              return LLVM::LLVMPointerType::get(C);
+              return LLVM::LLVMPointerType::get(M.getContext());
             } else {
               static_assert(sizeof(T) == 0, "Unsupported field type");
             }
           }()) {}
 
-    Field(MLIRContext *C, const size_t width)
+    Field(ModuleOp &M, const size_t width)
         : type([&] {
             if constexpr (std::is_same_v<T, IntegerType>) {
-              return IntegerType::get(C, width);
+              return IntegerType::get(M.getContext(), width);
             } else {
               static_assert(sizeof(T) == 0, "Unsupported field type");
             }
@@ -86,31 +87,37 @@ template <size_t N> struct AggregateMirror {
     }
   };
 
-  MLIRContext *C;
+  ModuleOp &M;
 
-  explicit AggregateMirror(MLIRContext *C) : C(C) {}
+  explicit AggregateMirror(ModuleOp &M) : M(M) {}
 
   virtual const char *typeName() const = 0;
   virtual std::array<Type, N> types() const = 0;
   virtual ~AggregateMirror() = default;
 
+  template <typename T> void validateMirrorSize() const {
+    if (sizeof(T) != mlir::DataLayout(M).getTypeSize(structTy())) {
+      raise("Mirror type size mismatch");
+    }
+  }
+
   mutable std::optional<LLVM::LLVMStructType> cachedStructTy{};
 
   LLVM::LLVMStructType structTy() const {
-    if (!cachedStructTy) cachedStructTy = LLVM::LLVMStructType::getNewIdentified(C, typeName(), types());
+    if (!cachedStructTy) cachedStructTy = LLVM::LLVMStructType::getNewIdentified(M.getContext(), typeName(), types());
     return *cachedStructTy;
   }
 
   Value local(OpBuilder &B, const std::vector<std::array<Value, N>> &fieldGroups) const {
     const auto ty = structTy();
     auto alloca = B.create<LLVM::AllocaOp>(uLoc(B), ptrTy(B), intConst(B, i64Ty(B), fieldGroups.size()), B.getI64IntegerAttr(1), ty);
-    for (auto &fields : fieldGroups) {
-      for (size_t i = 0; i < N; ++i) {
+    fieldGroups | zip_with_index() | for_each([&](auto &fields, auto group) {
+      fields | zip_with_index() | for_each([&](auto &field, auto idx) {
         B.create<LLVM::StoreOp>(
-            uLoc(B), fields[i],
-            B.create<LLVM::GEPOp>(uLoc(B), ptrTy(B), ty, alloca, llvm::ArrayRef{intConst(B, i64Ty(B), 0), intConst(B, i64Ty(B), i)}));
-      }
-    }
+            uLoc(B), field,
+            B.create<LLVM::GEPOp>(uLoc(B), ptrTy(B), ty, alloca, llvm::ArrayRef{intConst(B, i64Ty(B), group), intConst(B, i64Ty(B), idx)}));
+      });
+    });
     return alloca;
   }
 

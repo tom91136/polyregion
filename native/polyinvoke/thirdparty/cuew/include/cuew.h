@@ -1386,7 +1386,6 @@ enum {
 };
 
 int cuewInit(cuuint32_t flags);
-const char *cuewErrorString(CUresult result);
 const char *cuewCompilerPath(void);
 int cuewCompilerVersion(void);
 int cuewNvrtcVersion(void);

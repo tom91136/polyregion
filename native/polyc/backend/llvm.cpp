@@ -356,9 +356,9 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
         if (const auto rhsPtr = x.from.tpe().get<Type::Ptr>()) {
           if (const auto lhsPtr = x.as.get<Type::Ptr>()) {
             // TODO check layout and loss of information
-            if (lhsPtr->comp.is<Type::Struct>() && rhsPtr->comp.is<Type::Struct>()) {
+            // if (lhsPtr->comp.is<Type::Struct>() && rhsPtr->comp.is<Type::Struct>()) {
               return from;
-            }
+            // }
           }
         }
 

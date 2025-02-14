@@ -10,6 +10,23 @@
 #include "polystl.h"
 #include "polyrt/rt.h"
 
+[[nodiscard]] uint32_t __polyregion_builtin_gpu_global_idx(uint32_t);  // NOLINT(*-reserved-identifier)
+[[nodiscard]] uint32_t __polyregion_builtin_gpu_global_size(uint32_t); // NOLINT(*-reserved-identifier)
+
+[[nodiscard]] uint32_t __polyregion_builtin_gpu_group_idx(uint32_t);  // NOLINT(*-reserved-identifier)
+[[nodiscard]] uint32_t __polyregion_builtin_gpu_group_size(uint32_t); // NOLINT(*-reserved-identifier)
+
+[[nodiscard]] uint32_t __polyregion_builtin_gpu_local_idx(uint32_t);  // NOLINT(*-reserved-identifier)
+[[nodiscard]] uint32_t __polyregion_builtin_gpu_local_size(uint32_t); // NOLINT(*-reserved-identifier)
+
+void __polyregion_builtin_gpu_barrier_global(); // NOLINT(*-reserved-identifier)
+void __polyregion_builtin_gpu_barrier_local();  // NOLINT(*-reserved-identifier)
+void __polyregion_builtin_gpu_barrier_all();    // NOLINT(*-reserved-identifier)
+
+void __polyregion_builtin_gpu_fence_global(); // NOLINT(*-reserved-identifier)
+void __polyregion_builtin_gpu_fence_local();  // NOLINT(*-reserved-identifier)
+void __polyregion_builtin_gpu_fence_all();    // NOLINT(*-reserved-identifier)
+
 namespace polyregion::polystl::details {
 
 template <typename T = int64_t> //
@@ -79,7 +96,7 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
       };
       int64_t blocks = 256;
 
-      const KernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
+      const polyrt::KernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
 
       for (size_t i = 0; i < bundle.structCount; ++i) {
         if (i == bundle.interfaceLayoutIdx) fprintf(stderr, "**Exported**\n");
@@ -87,7 +104,7 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
       }
 
       for (size_t i = 0; i < bundle.objectCount; ++i) {
-        if (!loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
+        if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
         dispatchManaged(global / blocks, blocks, 0, &bundle.structs[bundle.interfaceLayoutIdx], &kernel, bundle.moduleName);
         return;
       }
@@ -108,7 +125,7 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
   auto N = std::thread::hardware_concurrency();
   POLYSTL_LOG("<%s, %d> Dispatch", __func__, global);
 
-  switch (currentPlatform->kind()) {
+  switch (polyrt::currentPlatform->kind()) {
     case polyregion::runtime::PlatformKind ::HostThreaded: {
       auto [b, e] = splitStaticExclusive<int64_t>(0, global, N);
       const int64_t groups = b.size();
@@ -123,12 +140,12 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
         }
         out[tid] = acc;
       };
-      const KernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::HostThreaded>(kernel);
+      const polyrt::KernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::HostThreaded>(kernel);
       std::byte argData[sizeof(decltype(kernel))];
       std::memcpy(argData, &kernel, sizeof(decltype(kernel)));
       for (size_t i = 0; i < bundle.objectCount; ++i) {
-        if (!loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
-        dispatchHostThreaded(groups, &argData, bundle.moduleName);
+        if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
+        polyrt::dispatchHostThreaded(groups, &argData, bundle.moduleName);
         T acc = init;
         for (int64_t groupIdx = 0; groupIdx < groups; ++groupIdx) {
           acc = reduce(acc, groupPartial[groupIdx]);
@@ -139,7 +156,7 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
     }
     case polyregion::runtime::PlatformKind ::Managed: {
       int64_t groups = 256;
-      auto groupPartial = currentDevice->mallocSharedTyped<T>(groups, Access::RW);
+      auto groupPartial = polyrt::currentDevice->mallocSharedTyped<T>(groups, polyrt::Access::RW);
 
       if (!groupPartial) {
         POLYSTL_LOG("<%s, %d> No USM support", __func__, global);
@@ -165,9 +182,9 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
           groupPartial[__polyregion_builtin_gpu_group_idx(0)] = localPartialSum[localIdx];
         }
       };
-      const KernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
+      const polyrt::KernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
       for (size_t i = 0; i < bundle.objectCount; ++i) {
-        if (!loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
+        if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
         dispatchManaged(256, groups, groups * sizeof(T), &bundle.structs[bundle.interfaceLayoutIdx], &kernel, bundle.moduleName);
         T acc = init;
         for (int64_t groupIdx = 0; groupIdx < groups; ++groupIdx) {

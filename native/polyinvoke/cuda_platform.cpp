@@ -5,18 +5,26 @@ using namespace polyregion::invoke::cuda;
 
 #define CHECKED(f) checked((f), __FILE__, __LINE__)
 
-static constexpr const char *PREFIX = "CUDA";
+static constexpr auto PREFIX = "CUDA";
 
 static void checked(CUresult result, const char *file, int line) {
   if (result != CUDA_SUCCESS && result != CUDA_ERROR_DEINITIALIZED) {
-    POLYINVOKE_FATAL(PREFIX, "%s:%d: %s (code=%u)", file, line, cuewErrorString(result), result);
+    auto name = "(unknown)", desc = "(unknown)";
+    cuGetErrorName(result, &name);
+    cuGetErrorString(result, &desc);
+    POLYINVOKE_FATAL(PREFIX, "%s:%d: %s(%u): %s", file, line, name, result, desc);
   }
 }
 
 std::variant<std::string, std::unique_ptr<Platform>> CudaPlatform::create() {
-  if (auto result = cuewInit(CUEW_INIT_CUDA); result != CUEW_SUCCESS)
+  if (const auto result = cuewInit(CUEW_INIT_CUDA); result != CUEW_SUCCESS)
     return "CUEW initialisation failed (" + std::to_string(result) + "), no CUDA driver present?";
-  if (auto result = cuInit(0); result != CUDA_SUCCESS) return cuewErrorString(result);
+  if (const auto result = cuInit(0); result != CUDA_SUCCESS) {
+    auto name = "(unknown)", desc = "(unknown)";
+    cuGetErrorName(result, &name);
+    cuGetErrorString(result, &desc);
+    return std::string(name) + ": " + std::string(desc);
+  }
   return std::unique_ptr<Platform>(new CudaPlatform());
 }
 

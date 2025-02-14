@@ -351,7 +351,7 @@ object PolyAST {
       case Type.Ptr(comp, length, space) =>
         s"${comp.repr}${length.map(_.toString).map(l => s"[$l]").getOrElse("*")}${space.repr}"
       case Type.Annotated(tpe, pos, comment) =>
-        s"${tpe.repr}${pos.map(s => s"/* ${s.repr} */").getOrElse("")}${comment.map(s => s"/* $s */").getOrElse("")}"
+        s"(${tpe.repr}${pos.map(s => s"/* ${s.repr} */").getOrElse("")}${comment.map(s => s"/* $s */").getOrElse("")})"
     }
   }
 
@@ -459,7 +459,7 @@ object PolyAST {
           .map(x => s"${x.symbol}: ${x.tpe.repr}")
           .reduceLeftOption((acc, x) => s"($acc).$x")
           .getOrElse("")
-      case Expr.Poison(t) => s"(???) /* poison of type ${t.repr} */"
+      case Expr.Poison(t) => s"__poison__ /* poison of type ${t.repr} */"
 
       case Expr.Cast(from, as)        => s"(${from.repr}).to[${as.repr}]"
       case Expr.Index(lhs, idx, comp) => s"(${lhs.repr}).index[${comp.repr}](${idx.repr})"
@@ -468,7 +468,7 @@ object PolyAST {
       case Expr.Alloc(comp, size, space) => s"alloc[${comp.repr}, ${space.repr}](${size.repr})"
       case Expr.Invoke(name, args, rtn)  => s"$name(${args.map(_.repr).mkString(", ")}): ${rtn.repr}"
       case Expr.Annotated(expr, pos, comment) =>
-        s"${expr.repr}${pos.map(s => s"/* ${s.repr} */").getOrElse("")}${comment.map(s => s"/* $s */").getOrElse("")}"
+        s"(${expr.repr}${pos.map(s => s"/* ${s.repr} */").getOrElse("")}${comment.map(s => s"/* $s */").getOrElse("")})"
 
     }
   }
@@ -490,10 +490,14 @@ object PolyAST {
       case Stmt.Cont         => s"continue;"
       case Stmt.Return(expr) => s"return ${expr.repr}"
       case Stmt.Cond(cond, trueBr, falseBr) =>
-        s"if(${cond.repr}) ${"{"}\n${trueBr.map(_.repr).mkString("\n").indent(2)}${"}"} else ${"{"}\n${falseBr
-            .map(_.repr)
-            .mkString("\n")
-            .indent(2)}${"}"}"
+        s"if(${cond.repr}) ${"{"}\n${trueBr.map(_.repr).mkString("\n").indent(2)}\n${"}"}${
+            if (falseBr.isEmpty) ""
+            else
+              s" else ${"{"}\n${falseBr
+                  .map(_.repr)
+                  .mkString("\n")
+                  .indent(2)}\n${"}"}"
+          }"
       case Stmt.Annotated(stmt, pos, comment) =>
         s"${stmt.repr}${pos.map(s => s"/* ${s.repr} */").getOrElse("")}${comment.map(s => s"/* $s */").getOrElse("")}"
     }

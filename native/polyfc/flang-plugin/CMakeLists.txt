@@ -7,12 +7,21 @@ add_llvm_library(polyfc-flang-plugin
         remapper.cpp
         codegen.cpp
         mlir_utils.cpp
+        parallel.cpp
+        mirrors.cpp
+        fexpr.cpp
         PLUGIN_TOOL flang
         PARTIAL_SOURCES_INTENDED)
 set_property(TARGET polyfc-flang-plugin PROPERTY CXX_STANDARD 17)
 
 if (NOT WIN32)
-    target_include_directories(polyfc-flang-plugin PRIVATE ${LLVM_INCLUDE_DIRS} ${CLANG_INCLUDE_DIRS} ${FLANG_INCLUDE_DIRS} ${MLIR_INCLUDE_DIRS})
+    target_include_directories(polyfc-flang-plugin PRIVATE
+            ${LLVM_INCLUDE_DIRS}
+            ${CLANG_INCLUDE_DIRS}
+            ${FLANG_INCLUDE_DIRS}
+            ${MLIR_INCLUDE_DIRS}
+            ../polydco
+    )
     target_compile_definitions(polyfc-flang-plugin PRIVATE ${LLVM_DEFINITIONS} FLANG_LITTLE_ENDIAN)
     target_compile_options(polyfc-flang-plugin PRIVATE ${COMPILE_OPTIONS}
             -Wno-deprecated-copy

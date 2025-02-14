@@ -5,17 +5,16 @@ using namespace polyregion::invoke::hip;
 
 #define CHECKED(f) checked((f), __FILE__, __LINE__)
 
-static constexpr const char *PREFIX = "HIP";
+static constexpr auto PREFIX = "HIP";
 
 static void checked(hipError_t result, const char *file, int line) {
   if (result != hipSuccess) {
-
-    POLYINVOKE_FATAL(PREFIX, "%s:%d: %s (code=%u)", file, line, hipewErrorString(result), result);
+    POLYINVOKE_FATAL(PREFIX, "%s:%d: %s(%u): %s", file, line, hipGetErrorName(result), result, hipGetErrorString(result));
   }
 }
 
 std::variant<std::string, std::unique_ptr<Platform>> HipPlatform::create() {
-  if (auto result = hipewInit(HIPEW_INIT_HIP); result != HIPEW_SUCCESS) {
+  if (const auto result = hipewInit(HIPEW_INIT_HIP); result != HIPEW_SUCCESS) {
     std::string description;
     switch (result) {
       case HIPEW_ERROR_OPEN_FAILED: return "HIPEW initialisation failed: error opening amdhip64 dynamic library, no HIP driver present?";
@@ -25,7 +24,9 @@ std::variant<std::string, std::unique_ptr<Platform>> HipPlatform::create() {
       default: return "HIPEW initialisation failed: Unknown error (" + std::to_string(result) + ")";
     }
   }
-  if (auto result = hipInit(0); result != hipSuccess) return hipewErrorString(result);
+  if (const auto result = hipInit(0); result != hipSuccess) {
+    return std::string(hipGetErrorName(result)) + ": " + std::string(hipGetErrorString(result));
+  }
   return std::unique_ptr<Platform>(new HipPlatform());
 }
 

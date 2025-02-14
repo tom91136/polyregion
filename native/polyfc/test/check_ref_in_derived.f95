@@ -58,7 +58,7 @@ program test
     foo%extra0 = 2
     foo%extra1 = 3
     do concurrent (i = 1:1)
-        foo%bar = 42 + i
+        foo%bar = foo%bar + i + 43
     end do
     write(*, '(F0.0)', advance = "no") real(foo%bar)
 

@@ -7,7 +7,7 @@
 
 namespace polyregion::polyfc {
 
-[[noreturn]] inline void raise(const std::string &message, const char *file = __builtin_FILE(), int line = __builtin_LINE()) {
+[[noreturn]] inline void raise(const std::string &message, const char *file = __builtin_FILE(), const int line = __builtin_LINE()) {
   std::fprintf(stderr, "[%s:%d] %s\n", file, line, message.c_str());
   std::fflush(stderr);
   std::abort();

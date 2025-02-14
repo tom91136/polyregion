@@ -113,7 +113,8 @@ void testAll(bool passthrough) {
           polyregion::polyfront::TestCase::parseTestCase(source, "!CHECK",
                                                          {
 #if defined(__linux__)
-                                                             {"polyfc_arch", {"cuda@sm_89", /*"hip@gfx1036", */ "hsa@gfx1036", "host@native"}} //
+                                                             // {"polyfc_arch", {  "cuda@sm_89"}} //
+                                                               {"polyfc_arch", {"cuda@sm_89", /*"hip@gfx1036", */ "hsa@gfx1036", "host@native"}} //
       //              {"polyfc_arch", {"opencl@host" }} //
 
 #elif defined(__APPLE__)

@@ -261,15 +261,17 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
                                ^ map([&](auto &decl) -> clang::Expr * {                                                              //
                                    return S.CreateBuiltinUnaryOp({}, clang::UnaryOperatorKind::UO_AddrOf, mkDeclRef(C, decl)).get(); //
                                  })                                                                                                  //
-                               ^ or_else(t.template get<Type::Struct>() ^ flat_map([&](auto &s) {
-                                           return structNameToTypeLayoutIdx ^ get_maybe(s.name) ^ map([&](auto layoutIdx) {
-                                                    return S
-                                                        .CreateBuiltinBinOp({}, clang::BinaryOperatorKind::BO_Add,
-                                                                            mkDeclRef(C, structTypeLayoutArrayDecl),
-                                                                            mkIntLit(C, C.getSizeType(), layoutIdx))
-                                                        .get();
-                                                  });
-                                         }));
+                               ^ or_else([&]() {
+                                   return t.template get<Type::Struct>() ^ flat_map([&](auto &s) {
+                                            return structNameToTypeLayoutIdx ^ get_maybe(s.name) ^ map([&](auto layoutIdx) {
+                                                     return S
+                                                         .CreateBuiltinBinOp({}, clang::BinaryOperatorKind::BO_Add,
+                                                                             mkDeclRef(C, structTypeLayoutArrayDecl),
+                                                                             mkIntLit(C, C.getSizeType(), layoutIdx))
+                                                         .get();
+                                                   });
+                                          });
+                                 });
                       });
 
                   return mkInitList(C,

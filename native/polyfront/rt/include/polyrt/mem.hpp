@@ -23,20 +23,6 @@ template <typename LocalReflect,  //
           typename RemoteRelease> //
 class SynchronisedAllocation {
 
-  struct RangedAllocation {
-    uintptr_t ptr;
-    size_t sizeInBytes;
-  };
-
-  struct RemoteAllocation {
-    RangedAllocation remote;
-    const runtime::TypeLayout *layout;
-    bool localModified;
-  };
-
-  std::unordered_map<uintptr_t, RemoteAllocation> localToRemoteAlloc{};
-  std::unordered_map<uintptr_t, RangedAllocation> remoteToLocalPtr{};
-
   LocalReflect localReflect;
   RemoteAlloc remoteAlloc;
   RemoteRead remoteRead;
@@ -49,15 +35,24 @@ class SynchronisedAllocation {
     return ptr;
   }
 
-  template <typename V, typename F>
-  static std::optional<std::pair<V *, size_t>> offsetQuery(std::unordered_map<uintptr_t, V> &map, const void *p, F selectSize) {
+  template <typename M, typename F>
+  static std::optional<std::pair<typename M::iterator, size_t>> offsetQueryIt(M &map, const void *p, F selectSize) {
     const auto localPtr = reinterpret_cast<uintptr_t>(p);
-    if (const auto it = map.find(localPtr); it != map.end()) return std::pair{&it->second, 0};
+    if (const auto it = map.find(localPtr); it != map.end()) return std::pair{it, 0};
     for (auto it = map.begin(); it != map.end(); ++it) {
       const uintptr_t base = it->first;
       if (const size_t size = selectSize(it->second); localPtr >= base && localPtr < base + size) {
-        return std::pair{&it->second, localPtr - base};
+        return std::pair{it, localPtr - base};
       }
+    }
+    return {};
+  }
+
+  template <typename V, typename F>
+  static std::optional<std::pair<V *, size_t>> offsetQuery(std::unordered_map<uintptr_t, V> &map, const void *p, F selectSize) {
+    if (const auto query = offsetQueryIt(map, p, selectSize)) {
+      auto [it, offset] = *query;
+      return std::pair{&it->second, offset};
     }
     return {};
   }
@@ -65,10 +60,9 @@ class SynchronisedAllocation {
   uintptr_t createDeviceAllocation(const char *local, size_t sizeInBytes, const runtime::TypeLayout *s) {
     const uintptr_t remotePtr = remoteAlloc(sizeInBytes);
     localToRemoteAlloc.emplace(reinterpret_cast<uintptr_t>(local),
-                               RemoteAllocation{.remote = RangedAllocation{.ptr = remotePtr,            //
-                                                                           .sizeInBytes = sizeInBytes}, //
-                                                .layout = s,                                            //
-                                                .localModified = false});
+                               RemoteAllocation{.layout = s, //
+                                                .localModified = false,
+                                                .remote = RangedAllocation{.ptr = remotePtr, .sizeInBytes = sizeInBytes}});
     remoteToLocalPtr.emplace(remotePtr, RangedAllocation{.ptr = reinterpret_cast<uintptr_t>(local), .sizeInBytes = sizeInBytes});
     return remotePtr;
   }
@@ -142,8 +136,10 @@ class SynchronisedAllocation {
             static_cast<const void *>(hostData), ptrIndirections, count, l.name);
     if (const auto query = offsetQuery(localToRemoteAlloc, hostData, [](auto &x) { return x.remote.sizeInBytes; })) {
       const auto [alloc, offsetInBytes] = *query;
-      if (!alloc->localModified) return alloc->remote.ptr + offsetInBytes;
-      else
+      if (!alloc->localModified) {
+        fprintf(stderr, "## hit (%p = %4ld + %4ld)\n", alloc->remote.ptr, alloc->remote.sizeInBytes, offsetInBytes);
+        return alloc->remote.ptr + offsetInBytes;
+      } else
         return ptrIndirections > 1 ? writeIndirect(hostData, alloc->remote.ptr, ptrIndirections, count, *alloc->layout)
                                    : writeStruct(hostData, 0, alloc->remote.ptr, count, *alloc->layout, true);
     } else
@@ -153,6 +149,20 @@ class SynchronisedAllocation {
   }
 
 public:
+  struct RangedAllocation {
+    uintptr_t ptr;
+    size_t sizeInBytes;
+  };
+
+  struct RemoteAllocation {
+    const runtime::TypeLayout *layout;
+    bool localModified;
+    RangedAllocation remote;
+  };
+
+  std::unordered_map<uintptr_t, RemoteAllocation> localToRemoteAlloc{};
+  std::unordered_map<uintptr_t, RangedAllocation> remoteToLocalPtr{};
+
   SynchronisedAllocation(LocalReflect localReflect, //
                          RemoteAlloc remoteAlloc,   //
                          RemoteRead remoteRead,     //
@@ -210,7 +220,6 @@ public:
   }
 
   std::optional<uintptr_t> syncRemoteToLocal(void *p) {
-
     if (const auto query = offsetQuery(localToRemoteAlloc, p, [](auto &x) { return x.remote.sizeInBytes; })) {
       const auto [alloc, offsetInBytes] = *query;
       const size_t sizeInBytes = alloc->remote.sizeInBytes - offsetInBytes;
@@ -228,10 +237,11 @@ public:
   }
 
   void disassociate(const void *p) {
-    auto [it, _] = offsetQuery(localToRemoteAlloc, p);
-    if (it != localToRemoteAlloc.end()) {
-      remoteRelease(it->second.remotePtr.value);
-      remoteToLocalPtr.erase(it->first);
+    if (const auto query = offsetQueryIt(localToRemoteAlloc, p, [](auto &x) { return x.remote.sizeInBytes; })) {
+      const auto [it, offsetInBytes] = *query;
+      fprintf(stderr, "## disassociate(host=%jx, remote=%jx, size=%ld)\n", it->first, it->second.remote.ptr, it->second.remote.sizeInBytes);
+      remoteRelease(it->second.remote.ptr);
+      remoteToLocalPtr.erase(it->second.remote.ptr);
       localToRemoteAlloc.erase(it);
     }
   }

@@ -500,6 +500,7 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
   hsa_signal_store_relaxed(queue->doorbell_signal, static_cast<hsa_signal_value_t>(index));
   POLYINVOKE_TRACE();
   enqueueCallback(signal, [cb, kernargAddress, signal, token = latch.acquire()]() {
+    std::atomic_thread_fence(std::memory_order_acquire);
     CHECKED("Release kernel arg memory", hsa_memory_free(kernargAddress));
     destroySignal("Release kernel signal", signal);
     if (cb) (*cb)();

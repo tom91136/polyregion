@@ -1108,8 +1108,8 @@ typedef enum hiprtcResult {
 } hiprtcResult;
 
 /* Function types. */
-typedef hipError_t HIPAPI thipGetErrorName(hipError_t error, const char** pStr);
-typedef hipError_t HIPAPI thipGetErrorString(hipError_t error, const char** pStr);
+typedef const char* HIPAPI thipGetErrorName(hipError_t error);
+typedef const char* HIPAPI thipGetErrorString(hipError_t error);
 typedef hipError_t HIPAPI thipGetLastError(hipError_t error);
 typedef hipError_t HIPAPI thipInit(unsigned int Flags);
 typedef hipError_t HIPAPI thipDriverGetVersion(int* driverVersion);
@@ -1401,7 +1401,6 @@ enum {
 };
 
 int hipewInit(hipuint32_t flags);
-const char *hipewErrorString(hipError_t result);
 const char *hipewCompilerPath(void);
 int hipewCompilerVersion(void);
 int hipewNvrtcVersion(void);
