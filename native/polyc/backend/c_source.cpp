@@ -449,10 +449,10 @@ std::string backend::CSource::mkStmt(const Stmt::Any &stmt) {
       },
       [&](const Stmt::ForRange &x) {
         const auto body = x.body | mk_string("\n", [&](auto &s) { return mkStmt(s); });
-        return fmt::format("if({} = {}; {} < {}; {} += {}) {{\n{}\n}}", //
-                           mkExpr(x.induction), mkExpr(x.lbIncl),       //
-                           mkExpr(x.induction), mkExpr(x.ubExcl),       //
-                           mkExpr(x.induction), mkExpr(x.step),         //
+        return fmt::format("for({} = {}; {} < {}; {} += {}) {{\n{}\n}}", //
+                           mkExpr(x.induction), mkExpr(x.lbIncl),        //
+                           mkExpr(x.induction), mkExpr(x.ubExcl),        //
+                           mkExpr(x.induction), mkExpr(x.step),          //
                            body ^ indent(2));
       },
       [&](const Stmt::Break &) { return "break;"s; },   //
@@ -567,8 +567,13 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
 
   // work out the dependencies between structs first
   auto structsAndDeps = program.structs ^ map([&](auto &def) {
-                          auto deps = def.members | collect([&](auto &m) { return m.tpe.template get<Type::Struct>(); }) |
-                                      map([&](auto &s) { return s.name; });
+                          const auto deps = def.members //
+                                            | collect([&](auto &m) {
+                                                return m.tpe.template get<Type::Ptr>()                                         //
+                                                       ^ flat_map([](auto &p) { return p.comp.template get<Type::Struct>(); }) //
+                                                       ^ or_else_maybe(m.tpe.template get<Type::Struct>());                    //
+                                              })                                                                               //
+                                            | map([&](auto &s) { return s.name; });                                            //
                           return std::pair{def, deps};
                         }) ^
                         to<Map>();
@@ -581,8 +586,11 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
 
   Set<std::string> resolved;
   while (resolved.size() != program.structs.size()) {
-    auto noDeps =
-        structsAndDeps | filter([&](auto &, auto &deps) { return deps | forall([&](auto &d) { return resolved.contains(d); }); }) | keys();
+    const auto noDeps = structsAndDeps                      //
+                        | filter([&](auto &s, auto &deps) { //
+                            return !resolved.contains(s.name) && deps | forall([&](auto &d) { return resolved.contains(d); });
+                          }) //
+                        | keys();
     if (noDeps.empty()) {
       fragments.push_back(fmt::format("// Some structs cannot be resolved due to recursive dependencies"));
       break;
