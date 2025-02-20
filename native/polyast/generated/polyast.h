@@ -96,6 +96,7 @@ public:
   template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT bool is() const;
   template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT std::optional<T> get() const;
   template<typename... F> constexpr POLYREGION_EXPORT auto match_total(F &&...fs) const;
+  template<typename... F> constexpr POLYREGION_EXPORT auto match_partial(F &&...fs) const;
 
   template<typename T, typename U> POLYREGION_EXPORT void collect_where(std::vector<U> &results_,
     const std::function<std::optional<U>(const T&)> &f) const; 
@@ -132,6 +133,7 @@ public:
   template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT bool is() const;
   template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT std::optional<T> get() const;
   template<typename... F> constexpr POLYREGION_EXPORT auto match_total(F &&...fs) const;
+  template<typename... F> constexpr POLYREGION_EXPORT auto match_partial(F &&...fs) const;
 
   template<typename T, typename U> POLYREGION_EXPORT void collect_where(std::vector<U> &results_,
     const std::function<std::optional<U>(const T&)> &f) const; 
@@ -168,6 +170,7 @@ public:
   template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT bool is() const;
   template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT std::optional<T> get() const;
   template<typename... F> constexpr POLYREGION_EXPORT auto match_total(F &&...fs) const;
+  template<typename... F> constexpr POLYREGION_EXPORT auto match_partial(F &&...fs) const;
 
   template<typename T, typename U> POLYREGION_EXPORT void collect_where(std::vector<U> &results_,
     const std::function<std::optional<U>(const T&)> &f) const; 
@@ -204,6 +207,7 @@ public:
   template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT bool is() const;
   template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT std::optional<T> get() const;
   template<typename... F> constexpr POLYREGION_EXPORT auto match_total(F &&...fs) const;
+  template<typename... F> constexpr POLYREGION_EXPORT auto match_partial(F &&...fs) const;
 
   template<typename T, typename U> POLYREGION_EXPORT void collect_where(std::vector<U> &results_,
     const std::function<std::optional<U>(const T&)> &f) const; 
@@ -245,6 +249,7 @@ public:
   template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT bool is() const;
   template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT std::optional<T> get() const;
   template<typename... F> constexpr POLYREGION_EXPORT auto match_total(F &&...fs) const;
+  template<typename... F> constexpr POLYREGION_EXPORT auto match_partial(F &&...fs) const;
 
   template<typename T, typename U> POLYREGION_EXPORT void collect_where(std::vector<U> &results_,
     const std::function<std::optional<U>(const T&)> &f) const; 
@@ -283,6 +288,7 @@ public:
   template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT bool is() const;
   template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT std::optional<T> get() const;
   template<typename... F> constexpr POLYREGION_EXPORT auto match_total(F &&...fs) const;
+  template<typename... F> constexpr POLYREGION_EXPORT auto match_partial(F &&...fs) const;
 
   template<typename T, typename U> POLYREGION_EXPORT void collect_where(std::vector<U> &results_,
     const std::function<std::optional<U>(const T&)> &f) const; 
@@ -321,6 +327,7 @@ public:
   template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT bool is() const;
   template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT std::optional<T> get() const;
   template<typename... F> constexpr POLYREGION_EXPORT auto match_total(F &&...fs) const;
+  template<typename... F> constexpr POLYREGION_EXPORT auto match_partial(F &&...fs) const;
 
   template<typename T, typename U> POLYREGION_EXPORT void collect_where(std::vector<U> &results_,
     const std::function<std::optional<U>(const T&)> &f) const; 
@@ -357,6 +364,7 @@ public:
   template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT bool is() const;
   template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT std::optional<T> get() const;
   template<typename... F> constexpr POLYREGION_EXPORT auto match_total(F &&...fs) const;
+  template<typename... F> constexpr POLYREGION_EXPORT auto match_partial(F &&...fs) const;
 
   template<typename T, typename U> POLYREGION_EXPORT void collect_where(std::vector<U> &results_,
     const std::function<std::optional<U>(const T&)> &f) const; 
@@ -396,6 +404,7 @@ public:
   template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT bool is() const;
   template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT std::optional<T> get() const;
   template<typename... F> constexpr POLYREGION_EXPORT auto match_total(F &&...fs) const;
+  template<typename... F> constexpr POLYREGION_EXPORT auto match_partial(F &&...fs) const;
 
   template<typename T, typename U> POLYREGION_EXPORT void collect_where(std::vector<U> &results_,
     const std::function<std::optional<U>(const T&)> &f) const; 
@@ -6272,15 +6281,14 @@ constexpr POLYREGION_EXPORT std::optional<T> polyregion::polyast::TypeKind::Any:
   else return {};
 }
 template<typename ...Fs> 
-constexpr POLYREGION_EXPORT auto polyregion::polyast::TypeKind::Any::match_total(Fs &&...fs) const { 
+constexpr POLYREGION_EXPORT auto polyregion::polyast::TypeKind::Any::match_partial(Fs &&...fs) const { 
   using Ts = alternatives<std::decay_t<arg1_t<Fs>>...>;
   using Rs = alternatives<std::invoke_result_t<Fs, std::decay_t<arg1_t<Fs>>>...>;
   using R0 = typename Rs::template at<0>;
-  static_assert(All::size == sizeof...(Fs), "match is not total as case count is not equal to variant's size");
   static_assert((All::contains<std::decay_t<arg1_t<Fs>>> && ...), "one or more cases not part of the variant");
   static_assert((Rs::template all<R0>), "all cases must return the same type");
   static_assert(Ts::all_unique, "one or more cases overlap");
-  uint32_t id = _v->id();
+  const uint32_t id = _v->id();
   if constexpr (std::is_void_v<R0>) {
     ([&]() -> bool {
       using T = std::decay_t<arg1_t<Fs>>;
@@ -6301,7 +6309,18 @@ constexpr POLYREGION_EXPORT auto polyregion::polyast::TypeKind::Any::match_total
       }
       return false;
     }() || ...);
-    return *r;
+    return r;
+  }
+}
+template<typename ...Fs> 
+constexpr POLYREGION_EXPORT auto polyregion::polyast::TypeKind::Any::match_total(Fs &&...fs) const { 
+  using Rs = alternatives<std::invoke_result_t<Fs, std::decay_t<arg1_t<Fs>>>...>;
+  using R0 = typename Rs::template at<0>;
+  static_assert(All::size == sizeof...(Fs), "match is not total as case count is not equal to variant's size");
+  if constexpr (std::is_void_v<R0>) {
+    return polyregion::polyast::TypeKind::Any::match_partial(std::forward<Fs>(fs)...);
+  } else {
+    return *polyregion::polyast::TypeKind::Any::match_partial(std::forward<Fs>(fs)...);
   }
 }
 template<typename T, typename U>
@@ -6357,15 +6376,14 @@ constexpr POLYREGION_EXPORT std::optional<T> polyregion::polyast::TypeSpace::Any
   else return {};
 }
 template<typename ...Fs> 
-constexpr POLYREGION_EXPORT auto polyregion::polyast::TypeSpace::Any::match_total(Fs &&...fs) const { 
+constexpr POLYREGION_EXPORT auto polyregion::polyast::TypeSpace::Any::match_partial(Fs &&...fs) const { 
   using Ts = alternatives<std::decay_t<arg1_t<Fs>>...>;
   using Rs = alternatives<std::invoke_result_t<Fs, std::decay_t<arg1_t<Fs>>>...>;
   using R0 = typename Rs::template at<0>;
-  static_assert(All::size == sizeof...(Fs), "match is not total as case count is not equal to variant's size");
   static_assert((All::contains<std::decay_t<arg1_t<Fs>>> && ...), "one or more cases not part of the variant");
   static_assert((Rs::template all<R0>), "all cases must return the same type");
   static_assert(Ts::all_unique, "one or more cases overlap");
-  uint32_t id = _v->id();
+  const uint32_t id = _v->id();
   if constexpr (std::is_void_v<R0>) {
     ([&]() -> bool {
       using T = std::decay_t<arg1_t<Fs>>;
@@ -6386,7 +6404,18 @@ constexpr POLYREGION_EXPORT auto polyregion::polyast::TypeSpace::Any::match_tota
       }
       return false;
     }() || ...);
-    return *r;
+    return r;
+  }
+}
+template<typename ...Fs> 
+constexpr POLYREGION_EXPORT auto polyregion::polyast::TypeSpace::Any::match_total(Fs &&...fs) const { 
+  using Rs = alternatives<std::invoke_result_t<Fs, std::decay_t<arg1_t<Fs>>>...>;
+  using R0 = typename Rs::template at<0>;
+  static_assert(All::size == sizeof...(Fs), "match is not total as case count is not equal to variant's size");
+  if constexpr (std::is_void_v<R0>) {
+    return polyregion::polyast::TypeSpace::Any::match_partial(std::forward<Fs>(fs)...);
+  } else {
+    return *polyregion::polyast::TypeSpace::Any::match_partial(std::forward<Fs>(fs)...);
   }
 }
 template<typename T, typename U>
@@ -6442,15 +6471,14 @@ constexpr POLYREGION_EXPORT std::optional<T> polyregion::polyast::Type::Any::get
   else return {};
 }
 template<typename ...Fs> 
-constexpr POLYREGION_EXPORT auto polyregion::polyast::Type::Any::match_total(Fs &&...fs) const { 
+constexpr POLYREGION_EXPORT auto polyregion::polyast::Type::Any::match_partial(Fs &&...fs) const { 
   using Ts = alternatives<std::decay_t<arg1_t<Fs>>...>;
   using Rs = alternatives<std::invoke_result_t<Fs, std::decay_t<arg1_t<Fs>>>...>;
   using R0 = typename Rs::template at<0>;
-  static_assert(All::size == sizeof...(Fs), "match is not total as case count is not equal to variant's size");
   static_assert((All::contains<std::decay_t<arg1_t<Fs>>> && ...), "one or more cases not part of the variant");
   static_assert((Rs::template all<R0>), "all cases must return the same type");
   static_assert(Ts::all_unique, "one or more cases overlap");
-  uint32_t id = _v->id();
+  const uint32_t id = _v->id();
   if constexpr (std::is_void_v<R0>) {
     ([&]() -> bool {
       using T = std::decay_t<arg1_t<Fs>>;
@@ -6471,7 +6499,18 @@ constexpr POLYREGION_EXPORT auto polyregion::polyast::Type::Any::match_total(Fs 
       }
       return false;
     }() || ...);
-    return *r;
+    return r;
+  }
+}
+template<typename ...Fs> 
+constexpr POLYREGION_EXPORT auto polyregion::polyast::Type::Any::match_total(Fs &&...fs) const { 
+  using Rs = alternatives<std::invoke_result_t<Fs, std::decay_t<arg1_t<Fs>>>...>;
+  using R0 = typename Rs::template at<0>;
+  static_assert(All::size == sizeof...(Fs), "match is not total as case count is not equal to variant's size");
+  if constexpr (std::is_void_v<R0>) {
+    return polyregion::polyast::Type::Any::match_partial(std::forward<Fs>(fs)...);
+  } else {
+    return *polyregion::polyast::Type::Any::match_partial(std::forward<Fs>(fs)...);
   }
 }
 template<typename T, typename U>
@@ -6527,15 +6566,14 @@ constexpr POLYREGION_EXPORT std::optional<T> polyregion::polyast::Expr::Any::get
   else return {};
 }
 template<typename ...Fs> 
-constexpr POLYREGION_EXPORT auto polyregion::polyast::Expr::Any::match_total(Fs &&...fs) const { 
+constexpr POLYREGION_EXPORT auto polyregion::polyast::Expr::Any::match_partial(Fs &&...fs) const { 
   using Ts = alternatives<std::decay_t<arg1_t<Fs>>...>;
   using Rs = alternatives<std::invoke_result_t<Fs, std::decay_t<arg1_t<Fs>>>...>;
   using R0 = typename Rs::template at<0>;
-  static_assert(All::size == sizeof...(Fs), "match is not total as case count is not equal to variant's size");
   static_assert((All::contains<std::decay_t<arg1_t<Fs>>> && ...), "one or more cases not part of the variant");
   static_assert((Rs::template all<R0>), "all cases must return the same type");
   static_assert(Ts::all_unique, "one or more cases overlap");
-  uint32_t id = _v->id();
+  const uint32_t id = _v->id();
   if constexpr (std::is_void_v<R0>) {
     ([&]() -> bool {
       using T = std::decay_t<arg1_t<Fs>>;
@@ -6556,7 +6594,18 @@ constexpr POLYREGION_EXPORT auto polyregion::polyast::Expr::Any::match_total(Fs 
       }
       return false;
     }() || ...);
-    return *r;
+    return r;
+  }
+}
+template<typename ...Fs> 
+constexpr POLYREGION_EXPORT auto polyregion::polyast::Expr::Any::match_total(Fs &&...fs) const { 
+  using Rs = alternatives<std::invoke_result_t<Fs, std::decay_t<arg1_t<Fs>>>...>;
+  using R0 = typename Rs::template at<0>;
+  static_assert(All::size == sizeof...(Fs), "match is not total as case count is not equal to variant's size");
+  if constexpr (std::is_void_v<R0>) {
+    return polyregion::polyast::Expr::Any::match_partial(std::forward<Fs>(fs)...);
+  } else {
+    return *polyregion::polyast::Expr::Any::match_partial(std::forward<Fs>(fs)...);
   }
 }
 template<typename T, typename U>
@@ -6612,15 +6661,14 @@ constexpr POLYREGION_EXPORT std::optional<T> polyregion::polyast::Spec::Any::get
   else return {};
 }
 template<typename ...Fs> 
-constexpr POLYREGION_EXPORT auto polyregion::polyast::Spec::Any::match_total(Fs &&...fs) const { 
+constexpr POLYREGION_EXPORT auto polyregion::polyast::Spec::Any::match_partial(Fs &&...fs) const { 
   using Ts = alternatives<std::decay_t<arg1_t<Fs>>...>;
   using Rs = alternatives<std::invoke_result_t<Fs, std::decay_t<arg1_t<Fs>>>...>;
   using R0 = typename Rs::template at<0>;
-  static_assert(All::size == sizeof...(Fs), "match is not total as case count is not equal to variant's size");
   static_assert((All::contains<std::decay_t<arg1_t<Fs>>> && ...), "one or more cases not part of the variant");
   static_assert((Rs::template all<R0>), "all cases must return the same type");
   static_assert(Ts::all_unique, "one or more cases overlap");
-  uint32_t id = _v->id();
+  const uint32_t id = _v->id();
   if constexpr (std::is_void_v<R0>) {
     ([&]() -> bool {
       using T = std::decay_t<arg1_t<Fs>>;
@@ -6641,7 +6689,18 @@ constexpr POLYREGION_EXPORT auto polyregion::polyast::Spec::Any::match_total(Fs 
       }
       return false;
     }() || ...);
-    return *r;
+    return r;
+  }
+}
+template<typename ...Fs> 
+constexpr POLYREGION_EXPORT auto polyregion::polyast::Spec::Any::match_total(Fs &&...fs) const { 
+  using Rs = alternatives<std::invoke_result_t<Fs, std::decay_t<arg1_t<Fs>>>...>;
+  using R0 = typename Rs::template at<0>;
+  static_assert(All::size == sizeof...(Fs), "match is not total as case count is not equal to variant's size");
+  if constexpr (std::is_void_v<R0>) {
+    return polyregion::polyast::Spec::Any::match_partial(std::forward<Fs>(fs)...);
+  } else {
+    return *polyregion::polyast::Spec::Any::match_partial(std::forward<Fs>(fs)...);
   }
 }
 template<typename T, typename U>
@@ -6697,15 +6756,14 @@ constexpr POLYREGION_EXPORT std::optional<T> polyregion::polyast::Intr::Any::get
   else return {};
 }
 template<typename ...Fs> 
-constexpr POLYREGION_EXPORT auto polyregion::polyast::Intr::Any::match_total(Fs &&...fs) const { 
+constexpr POLYREGION_EXPORT auto polyregion::polyast::Intr::Any::match_partial(Fs &&...fs) const { 
   using Ts = alternatives<std::decay_t<arg1_t<Fs>>...>;
   using Rs = alternatives<std::invoke_result_t<Fs, std::decay_t<arg1_t<Fs>>>...>;
   using R0 = typename Rs::template at<0>;
-  static_assert(All::size == sizeof...(Fs), "match is not total as case count is not equal to variant's size");
   static_assert((All::contains<std::decay_t<arg1_t<Fs>>> && ...), "one or more cases not part of the variant");
   static_assert((Rs::template all<R0>), "all cases must return the same type");
   static_assert(Ts::all_unique, "one or more cases overlap");
-  uint32_t id = _v->id();
+  const uint32_t id = _v->id();
   if constexpr (std::is_void_v<R0>) {
     ([&]() -> bool {
       using T = std::decay_t<arg1_t<Fs>>;
@@ -6726,7 +6784,18 @@ constexpr POLYREGION_EXPORT auto polyregion::polyast::Intr::Any::match_total(Fs 
       }
       return false;
     }() || ...);
-    return *r;
+    return r;
+  }
+}
+template<typename ...Fs> 
+constexpr POLYREGION_EXPORT auto polyregion::polyast::Intr::Any::match_total(Fs &&...fs) const { 
+  using Rs = alternatives<std::invoke_result_t<Fs, std::decay_t<arg1_t<Fs>>>...>;
+  using R0 = typename Rs::template at<0>;
+  static_assert(All::size == sizeof...(Fs), "match is not total as case count is not equal to variant's size");
+  if constexpr (std::is_void_v<R0>) {
+    return polyregion::polyast::Intr::Any::match_partial(std::forward<Fs>(fs)...);
+  } else {
+    return *polyregion::polyast::Intr::Any::match_partial(std::forward<Fs>(fs)...);
   }
 }
 template<typename T, typename U>
@@ -6782,15 +6851,14 @@ constexpr POLYREGION_EXPORT std::optional<T> polyregion::polyast::Math::Any::get
   else return {};
 }
 template<typename ...Fs> 
-constexpr POLYREGION_EXPORT auto polyregion::polyast::Math::Any::match_total(Fs &&...fs) const { 
+constexpr POLYREGION_EXPORT auto polyregion::polyast::Math::Any::match_partial(Fs &&...fs) const { 
   using Ts = alternatives<std::decay_t<arg1_t<Fs>>...>;
   using Rs = alternatives<std::invoke_result_t<Fs, std::decay_t<arg1_t<Fs>>>...>;
   using R0 = typename Rs::template at<0>;
-  static_assert(All::size == sizeof...(Fs), "match is not total as case count is not equal to variant's size");
   static_assert((All::contains<std::decay_t<arg1_t<Fs>>> && ...), "one or more cases not part of the variant");
   static_assert((Rs::template all<R0>), "all cases must return the same type");
   static_assert(Ts::all_unique, "one or more cases overlap");
-  uint32_t id = _v->id();
+  const uint32_t id = _v->id();
   if constexpr (std::is_void_v<R0>) {
     ([&]() -> bool {
       using T = std::decay_t<arg1_t<Fs>>;
@@ -6811,7 +6879,18 @@ constexpr POLYREGION_EXPORT auto polyregion::polyast::Math::Any::match_total(Fs 
       }
       return false;
     }() || ...);
-    return *r;
+    return r;
+  }
+}
+template<typename ...Fs> 
+constexpr POLYREGION_EXPORT auto polyregion::polyast::Math::Any::match_total(Fs &&...fs) const { 
+  using Rs = alternatives<std::invoke_result_t<Fs, std::decay_t<arg1_t<Fs>>>...>;
+  using R0 = typename Rs::template at<0>;
+  static_assert(All::size == sizeof...(Fs), "match is not total as case count is not equal to variant's size");
+  if constexpr (std::is_void_v<R0>) {
+    return polyregion::polyast::Math::Any::match_partial(std::forward<Fs>(fs)...);
+  } else {
+    return *polyregion::polyast::Math::Any::match_partial(std::forward<Fs>(fs)...);
   }
 }
 template<typename T, typename U>
@@ -6867,15 +6946,14 @@ constexpr POLYREGION_EXPORT std::optional<T> polyregion::polyast::Stmt::Any::get
   else return {};
 }
 template<typename ...Fs> 
-constexpr POLYREGION_EXPORT auto polyregion::polyast::Stmt::Any::match_total(Fs &&...fs) const { 
+constexpr POLYREGION_EXPORT auto polyregion::polyast::Stmt::Any::match_partial(Fs &&...fs) const { 
   using Ts = alternatives<std::decay_t<arg1_t<Fs>>...>;
   using Rs = alternatives<std::invoke_result_t<Fs, std::decay_t<arg1_t<Fs>>>...>;
   using R0 = typename Rs::template at<0>;
-  static_assert(All::size == sizeof...(Fs), "match is not total as case count is not equal to variant's size");
   static_assert((All::contains<std::decay_t<arg1_t<Fs>>> && ...), "one or more cases not part of the variant");
   static_assert((Rs::template all<R0>), "all cases must return the same type");
   static_assert(Ts::all_unique, "one or more cases overlap");
-  uint32_t id = _v->id();
+  const uint32_t id = _v->id();
   if constexpr (std::is_void_v<R0>) {
     ([&]() -> bool {
       using T = std::decay_t<arg1_t<Fs>>;
@@ -6896,7 +6974,18 @@ constexpr POLYREGION_EXPORT auto polyregion::polyast::Stmt::Any::match_total(Fs 
       }
       return false;
     }() || ...);
-    return *r;
+    return r;
+  }
+}
+template<typename ...Fs> 
+constexpr POLYREGION_EXPORT auto polyregion::polyast::Stmt::Any::match_total(Fs &&...fs) const { 
+  using Rs = alternatives<std::invoke_result_t<Fs, std::decay_t<arg1_t<Fs>>>...>;
+  using R0 = typename Rs::template at<0>;
+  static_assert(All::size == sizeof...(Fs), "match is not total as case count is not equal to variant's size");
+  if constexpr (std::is_void_v<R0>) {
+    return polyregion::polyast::Stmt::Any::match_partial(std::forward<Fs>(fs)...);
+  } else {
+    return *polyregion::polyast::Stmt::Any::match_partial(std::forward<Fs>(fs)...);
   }
 }
 template<typename T, typename U>
@@ -6952,15 +7041,14 @@ constexpr POLYREGION_EXPORT std::optional<T> polyregion::polyast::FunctionAttr::
   else return {};
 }
 template<typename ...Fs> 
-constexpr POLYREGION_EXPORT auto polyregion::polyast::FunctionAttr::Any::match_total(Fs &&...fs) const { 
+constexpr POLYREGION_EXPORT auto polyregion::polyast::FunctionAttr::Any::match_partial(Fs &&...fs) const { 
   using Ts = alternatives<std::decay_t<arg1_t<Fs>>...>;
   using Rs = alternatives<std::invoke_result_t<Fs, std::decay_t<arg1_t<Fs>>>...>;
   using R0 = typename Rs::template at<0>;
-  static_assert(All::size == sizeof...(Fs), "match is not total as case count is not equal to variant's size");
   static_assert((All::contains<std::decay_t<arg1_t<Fs>>> && ...), "one or more cases not part of the variant");
   static_assert((Rs::template all<R0>), "all cases must return the same type");
   static_assert(Ts::all_unique, "one or more cases overlap");
-  uint32_t id = _v->id();
+  const uint32_t id = _v->id();
   if constexpr (std::is_void_v<R0>) {
     ([&]() -> bool {
       using T = std::decay_t<arg1_t<Fs>>;
@@ -6981,7 +7069,18 @@ constexpr POLYREGION_EXPORT auto polyregion::polyast::FunctionAttr::Any::match_t
       }
       return false;
     }() || ...);
-    return *r;
+    return r;
+  }
+}
+template<typename ...Fs> 
+constexpr POLYREGION_EXPORT auto polyregion::polyast::FunctionAttr::Any::match_total(Fs &&...fs) const { 
+  using Rs = alternatives<std::invoke_result_t<Fs, std::decay_t<arg1_t<Fs>>>...>;
+  using R0 = typename Rs::template at<0>;
+  static_assert(All::size == sizeof...(Fs), "match is not total as case count is not equal to variant's size");
+  if constexpr (std::is_void_v<R0>) {
+    return polyregion::polyast::FunctionAttr::Any::match_partial(std::forward<Fs>(fs)...);
+  } else {
+    return *polyregion::polyast::FunctionAttr::Any::match_partial(std::forward<Fs>(fs)...);
   }
 }
 template<typename T, typename U>

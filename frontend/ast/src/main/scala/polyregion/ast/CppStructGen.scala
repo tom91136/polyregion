@@ -498,6 +498,7 @@ private[polyregion] object CppStructGen {
              |  template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT bool is() const;
              |  template<typename T> [[nodiscard]] constexpr POLYREGION_EXPORT std::optional<T> get() const;
              |  template<typename... F> constexpr POLYREGION_EXPORT auto match_total(F &&...fs) const;
+             |  template<typename... F> constexpr POLYREGION_EXPORT auto match_partial(F &&...fs) const;
              |
              |  template<typename T, typename U> POLYREGION_EXPORT void collect_where(std::vector<U> &results_,
              |    const std::function<std::optional<U>(const T&)> &f) const; 
@@ -571,15 +572,14 @@ private[polyregion] object CppStructGen {
                 |  else return {};
                 |}""".stripMargin ::
             s"""|template<typename ...Fs> 
-                |constexpr POLYREGION_EXPORT auto $ns::${tpe.ref(true)}::match_total(Fs &&...fs) const { 
+                |constexpr POLYREGION_EXPORT auto $ns::${tpe.ref(true)}::match_partial(Fs &&...fs) const { 
                 |  using Ts = alternatives<std::decay_t<arg1_t<Fs>>...>;
                 |  using Rs = alternatives<std::invoke_result_t<Fs, std::decay_t<arg1_t<Fs>>>...>;
                 |  using R0 = typename Rs::template at<0>;
-                |  static_assert(All::size == sizeof...(Fs), "match is not total as case count is not equal to variant's size");
                 |  static_assert((All::contains<std::decay_t<arg1_t<Fs>>> && ...), "one or more cases not part of the variant");
                 |  static_assert((Rs::template all<R0>), "all cases must return the same type");
                 |  static_assert(Ts::all_unique, "one or more cases overlap");
-                |  uint32_t id = _v->id();
+                |  const uint32_t id = _v->id();
                 |  if constexpr (std::is_void_v<R0>) {
                 |    ([&]() -> bool {
                 |      using T = std::decay_t<arg1_t<Fs>>;
@@ -600,7 +600,18 @@ private[polyregion] object CppStructGen {
                 |      }
                 |      return false;
                 |    }() || ...);
-                |    return *r;
+                |    return r;
+                |  }
+                |}""".stripMargin ::
+            s"""|template<typename ...Fs> 
+                |constexpr POLYREGION_EXPORT auto $ns::${tpe.ref(true)}::match_total(Fs &&...fs) const { 
+                |  using Rs = alternatives<std::invoke_result_t<Fs, std::decay_t<arg1_t<Fs>>>...>;
+                |  using R0 = typename Rs::template at<0>;
+                |  static_assert(All::size == sizeof...(Fs), "match is not total as case count is not equal to variant's size");
+                |  if constexpr (std::is_void_v<R0>) {
+                |    return $ns::${tpe.ref(true)}::match_partial(std::forward<Fs>(fs)...);
+                |  } else {
+                |    return *$ns::${tpe.ref(true)}::match_partial(std::forward<Fs>(fs)...);
                 |  }
                 |}""".stripMargin ::
             s"""|template<typename T, typename U>
