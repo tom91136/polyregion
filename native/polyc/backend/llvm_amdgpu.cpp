@@ -35,7 +35,7 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
   auto globalSizeU32 = [&](const size_t dim) -> ValPtr {
     if (dim >= 3) throw std::logic_error("Dim >= 3");
     const auto i32Ty = cg.C.i32Ty();
-    const auto i32ptr = cg.B.CreatePointerCast(cg.intr0(llvm::Intrinsic::amdgcn_dispatch_ptr), i32Ty->getPointerTo());
+    const auto i32ptr = cg.B.CreatePointerCast(cg.intr0(llvm::Intrinsic::amdgcn_dispatch_ptr), llvm::PointerType::get(cg.C.actual, 0));
     // 127:96   grid_size_x;  (32*3+(0*32)==96)
     // 159:128  grid_size_y;  (32*3+(1*32)==128)
     // 191:160  grid_size_z;  (32*3+(2*32)==160)
@@ -47,7 +47,7 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
   auto localSizeU32 = [&](const size_t dim) -> ValPtr {
     if (dim >= 3) throw std::logic_error("Dim >= 3");
     const auto i16Ty = llvm::Type::getInt16Ty(cg.C.actual);
-    const auto i16ptr = cg.B.CreatePointerCast(cg.intr0(llvm::Intrinsic::amdgcn_dispatch_ptr), i16Ty->getPointerTo());
+    const auto i16ptr = cg.B.CreatePointerCast(cg.intr0(llvm::Intrinsic::amdgcn_dispatch_ptr), llvm::PointerType::get(cg.C.actual, 0));
     // 47:32   workgroup_size_x (16*2+(0*16)==32)
     // 63:48   workgroup_size_y (16*2+(1*16)==48)
     // 79:64   workgroup_size_z (16*2+(2*16)==64)

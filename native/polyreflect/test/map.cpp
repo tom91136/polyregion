@@ -2,7 +2,7 @@
 #include <catch2/matchers/catch_matchers.hpp>
 #include <catch2/matchers/catch_matchers_vector.hpp>
 
-#include "rt-reflect/rt_hashmap.hpp"
+#include "reflect-rt/rt_hashmap.hpp"
 
 using namespace polyregion::rt_reflect::details;
 using Catch::Matchers::UnorderedEquals;

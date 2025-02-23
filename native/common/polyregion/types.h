@@ -327,6 +327,7 @@ struct TypeLayout {
         .name = name,
         .sizeInBytes = sizeof(T),
         .alignmentInBytes = alignof(T),
+        .attrs = LayoutAttrs::None,
         .memberCount = 0,
         .members = {},
     };

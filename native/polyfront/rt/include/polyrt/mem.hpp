@@ -76,7 +76,7 @@ class SynchronisedMemAllocation {
                       const auto effectiveSizeToCount) {
     if (debug)
       std::fprintf(stderr,
-                   "[SMA] writeSubObject(hostData=%p, memberOffsetInBytes=%zu, indirection=%zu, devicePtr=%jx, t=@%s (sizeInBytes=%zd, "
+                   "[SMA] writeSubObject(hostData=%p, memberOffsetInBytes=%zu, indirection=%zu, devicePtr=0x%jx, t=@%s (sizeInBytes=%zd, "
                    "members=%zd))\n", //
                    static_cast<const void *>(hostData), memberOffsetInBytes, indirection, devicePtr, tl.name, tl.sizeInBytes,
                    tl.memberCount);
@@ -105,7 +105,7 @@ class SynchronisedMemAllocation {
   uintptr_t writeIndirect(const char *hostData, const uintptr_t devicePtr, const size_t ptrIndirections, const size_t count,
                           const runtime::TypeLayout &tl) {
     if (debug)
-      std::fprintf(stderr, "[SMA] writeIndirect(hostData=%p, count=%ld,devicePtr=%jx, t=@ %s, ptrIndirections=%ld)\n", //
+      std::fprintf(stderr, "[SMA] writeIndirect(hostData=%p, count=%ld,devicePtr=0x%jx, t=@ %s, ptrIndirections=%ld)\n", //
                    static_cast<const void *>(hostData), count, devicePtr, tl.name, ptrIndirections);
     for (size_t idx = 0; idx < count; ++idx) {
       const size_t componentSize = ptrIndirections - 1 == 1 ? tl.sizeInBytes : sizeof(uintptr_t);
@@ -149,7 +149,7 @@ class SynchronisedMemAllocation {
     if (const auto query = offsetQuery(localToRemoteAlloc, hostData, [](auto &x) { return x.remote.sizeInBytes; })) {
       const auto [alloc, offsetInBytes] = *query;
       if (!alloc->localModified) {
-        if (debug) std::fprintf(stderr, "[SMA]   hit (%p = %4ld + %4ld)\n", alloc->remote.ptr, alloc->remote.sizeInBytes, offsetInBytes);
+        if (debug) std::fprintf(stderr, "[SMA]   hit (0x%jx = %4ld + %4ld)\n", alloc->remote.ptr, alloc->remote.sizeInBytes, offsetInBytes);
         return alloc->remote.ptr + offsetInBytes;
       } else
         return ptrIndirections > 1 ? writeIndirect(hostData, alloc->remote.ptr, ptrIndirections, count, *alloc->layout)
@@ -245,7 +245,7 @@ public:
     if (const auto query = offsetQuery(localToRemoteAlloc, p, [](auto &x) { return x.remote.sizeInBytes; })) {
       const auto [alloc, offsetInBytes] = *query;
       if (debug)
-        std::fprintf(stderr, "[SMA] syncRemoteToLocal(p=%p, remote=%p, sizeInByte=%ld, offsetInBytes=%ld)\n", p, alloc->remote.ptr,
+        std::fprintf(stderr, "[SMA] syncRemoteToLocal(p=%p, remote=0x%jx, sizeInByte=%ld, offsetInBytes=%ld)\n", p, alloc->remote.ptr,
                      alloc->remote.sizeInBytes, offsetInBytes);
       // we want to perform an inclusive copy: an object is copied if its range intersects with the request range
       const runtime::TypeLayout *tl = alloc->layout;
@@ -267,7 +267,6 @@ public:
         for (size_t i = objIdxBegin; i < objIdxEnd; ++i)
           readSubObject(baseAtObjIdx, i * objSize);
       }
-      if (debug) std::fprintf(stderr, "[SMA] ok\n");
       return alloc->remote.ptr + offsetInBytes;
     }
     return {};
@@ -277,7 +276,7 @@ public:
     if (const auto query = offsetQueryIt(localToRemoteAlloc, p, [](auto &x) { return x.remote.sizeInBytes; })) {
       const auto [it, offsetInBytes] = *query;
       if (debug)
-        std::fprintf(stderr, "[SMA] disassociate(host=%jx, remote=%jx, size=%ld)\n", it->first, it->second.remote.ptr,
+        std::fprintf(stderr, "[SMA] disassociate(host=0x%jx, remote=%jx, size=%ld)\n", it->first, it->second.remote.ptr,
                      it->second.remote.sizeInBytes);
       remoteRelease(it->second.remote.ptr);
       remoteToLocalPtr.erase(it->second.remote.ptr);

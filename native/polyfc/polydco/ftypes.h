@@ -73,14 +73,6 @@ private:
   }
 
   template <typename T> void reduceInt(const int64_t range, const char *data) const {
-
-    const auto xs = reinterpret_cast<const T *>(data);
-    fprintf(stderr, "Partials:\n");
-    for (int64_t i = 0; i < range; ++i) {
-      fprintf(stderr, "%d ", xs[i]);
-    }
-    fprintf(stderr, "\n");
-
     using Lim = std::numeric_limits<T>;
     switch (kind) {
       case Kind::Add: return reduceTyped<T>(range, dest, data, 0, [](const auto x, const auto y) { return x + y; });

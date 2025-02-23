@@ -105,18 +105,18 @@ ValPtr CodeGen::extFn2(const std::string &name, const AnyType &rtn, const AnyExp
   return call;
 }
 ValPtr CodeGen::intr0(const llvm::Intrinsic::ID id) { //
-  const auto callee = llvm::Intrinsic::getDeclaration(&M, id, {});
+  const auto callee = llvm::Intrinsic::getOrInsertDeclaration(&M, id, {});
   return B.CreateCall(callee);
 }
 ValPtr CodeGen::intr1(const llvm::Intrinsic::ID id, const AnyType &overload, const AnyExpr &arg) { //
-  const auto callee = llvm::Intrinsic::getDeclaration(&M, id, resolveType(overload));
+  const auto callee = llvm::Intrinsic::getOrInsertDeclaration(&M, id, resolveType(overload));
   return B.CreateCall(callee, mkExprVal(arg));
 }
 ValPtr CodeGen::intr2(const llvm::Intrinsic::ID id, const AnyType &overload, //
                       const AnyExpr &lhs, const AnyExpr &rhs) {              //
   // XXX the overload type here is about the overloading of intrinsic names, not about the parameter types
   // i.e., f32 is for foo.f32(float %a, float %b, float %c)
-  const auto callee = llvm::Intrinsic::getDeclaration(&M, id, resolveType(overload));
+  const auto callee = llvm::Intrinsic::getOrInsertDeclaration(&M, id, resolveType(overload));
   return B.CreateCall(callee, {mkExprVal(lhs), mkExprVal(rhs)});
 }
 

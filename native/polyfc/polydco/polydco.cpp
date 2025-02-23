@@ -57,7 +57,7 @@ static void dumpAllocationTable() {
 static void dumpMemoryWithLayout(const runtime::TypeLayout *layout, const char *data) {
   layout->visualise(stderr, [&](const size_t offset, const runtime::AggregateMember &m) {
     const auto p = data + offset;
-    std::fprintf(stderr, "  [%p]=", p);
+    std::fprintf(stderr, "  [%p]=", static_cast<const void *>(p));
     if (m.ptrIndirection != 0) compiletime::showPtr(stderr, sizeof(void *), p);
     else switch (m.type->name[0]) {
         case 'I': compiletime::showInt(stderr, false, m.type->sizeInBytes, p); break;
@@ -220,8 +220,8 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
                                               {Type::Ptr, &mpr.devicePartials},
                                               {Type::Void, {}}};
 
-  log(DebugLevel::Debug, "<%s:%s:%zu> Dispatch managed, arg=%p managed=%jx", __func__, moduleId, threadsPerBlock, captures,
-      mpr.devicePartials);
+  log(DebugLevel::Debug, "<%s:%s:%zu> Dispatch managed, arg=%p managed=0x%jx", __func__, moduleId, threadsPerBlock,
+      static_cast<void *>(captures), mpr.devicePartials);
   polyrt::currentQueue->enqueueInvokeAsync(moduleId, "_main", buffer,          //
                                            Policy{                             //
                                                   Dim3{threadsPerBlock, 1, 1}, //
@@ -300,7 +300,7 @@ POLYREGION_EXPORT extern "C" [[maybe_unused]] bool polydco_dispatch(const int64_
 
     for (size_t i = 0; i < reductionsCount; ++i) {
       fprintf(stderr, "Reduction[%ld] = {%s, %s -> %p}\n", i, to_string(reductions[i].type).data(),
-              polydco::FReduction::to_string(reductions[i].kind).data(), reductions[i].dest);
+              polydco::FReduction::to_string(reductions[i].kind).data(), static_cast<void *>(reductions[i].dest));
     }
   }
 

@@ -54,7 +54,7 @@ extern "C" POLYREGION_EXPORT LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo l
     return s ^ split("+")           //
            ^ flat_map([](auto &v) { //
                auto parsed = magic_enum::enum_cast<PolyreflectPass>(v, magic_enum::case_insensitive);
-               if (!parsed) llvm::errs() << "[PolyReflect] Unknown pass name `" << v << '`, ignoring...\n';
+               if (!parsed) llvm::errs() << "[PolyReflect] Unknown pass name `" << v << "`, ignoring...\n";
                return parsed ^ to_vector();
              }) //
            ^ distinct();

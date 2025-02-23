@@ -36,6 +36,7 @@ template <typename T> StructWithStorage liftToStruct(const char *name, std::init
       .name = name,
       .sizeInBytes = sizeof(T),
       .alignmentInBytes = alignof(T),
+      .attrs = LayoutAttrs::None,
       .memberCount = members.size(),
       .members = storage.get(),
   };
