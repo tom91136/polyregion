@@ -48,7 +48,7 @@ int main(int argc, const char *argv[]) {
              },
              [&](const std::optional<StdParOptions> &opts) {
                auto remaining = args.remaining() ^ map([](auto &s) -> std::string { return s; });
-               auto append = [&](const std::initializer_list<std::string> &xs) { remaining.insert(remaining.end(), xs); };
+               auto append = [&](const std::vector<std::string> &xs) { remaining.insert(remaining.end(), xs.begin(), xs.end()); };
 
                std::vector<std::pair<const char *, std::string>> envs;
 
@@ -60,19 +60,34 @@ int main(int argc, const char *argv[]) {
 
                  const auto polyfcResourcePath = execParentPath / "lib/polyfc";
                  const auto polyfcLibPath = polyfcResourcePath / "lib";
-                 const auto polyfcClangPlugin = polyfcLibPath / fmt::format("polyfc-flang-plugin.{}", dynamicLibSuffix());
+                 const auto polyreflectPlugin = polyfcLibPath / fmt::format("polyreflect-plugin.{}", dynamicLibSuffix());
+                 const auto polyfcFlangPlugin = polyfcLibPath / fmt::format("polyfc-flang-plugin.{}", dynamicLibSuffix());
+
+                 const auto debug = opts->verbose == StdParOptions::VerboseLevel::Debug;
 
                  if (const bool noRewrite = std::getenv("POLYFC_NO_REWRITE") != nullptr; !noRewrite) {
-                   append({"-Xflang", "-load", "-Xflang", polyfcClangPlugin.string()});
+                   append({"-Xflang", "-load", "-Xflang", polyfcFlangPlugin.string()});
                    append({"-Xflang", "-plugin", "-Xflang", "polyfc"});
                    envs.emplace_back(PolyfrontExe, execPath.string());
-                   envs.emplace_back(PolyfrontVerbose, opts->verbose ? "1" : "0");
+                   envs.emplace_back(PolyfrontVerbose, debug ? "1" : "0");
                    envs.emplace_back(PolyfrontTargets, opts->targets);
                  }
 
                  const auto compileOnly =
                      std::vector{"-c", "-S", "-E", "-M", "-fsyntax-only"} ^ exists([&](auto &flag) { return args.has(flag); });
                  if (!compileOnly) {
+                   switch (opts->mem) {
+                     case StdParOptions::MemKind::Direct: break;
+                     case StdParOptions::MemKind::Interpose:
+                       append(Driver::clangPassPluginFlags(polyreflectPlugin, {fmt::format("-polyreflect-verbose={}", debug ? "1" : "0"), //
+                                                                               "polyreflect-late=interpose"}));
+                       break;
+                     case StdParOptions::MemKind::Reflect:
+                       append(Driver::enableLLDAndLTO(args));
+                       append(Driver::lldPassPluginFlags(polyreflectPlugin, {fmt::format("-polyreflect-verbose={}", debug ? "1" : "0"), //
+                                                                             "-polyreflect-late=ReflectMem"}));
+                       break;
+                   }
                    switch (opts->rt) {
                      case StdParOptions::LinkKind::Static: {
                        remaining.insert(remaining.end(), (polyfcLibPath / fmt::format("libpolydco-static.{}", staticLibSuffix())).string());
@@ -80,9 +95,8 @@ int main(int argc, const char *argv[]) {
                        break;
                      }
                      case StdParOptions::LinkKind::Dynamic: {
-                       append({fmt::format("-L{}", polyfcLibPath.string()), "-lpolydco", //
-                               fmt::format("-Wl,-rpath,{}", polyfcLibPath.string()), "-Wl,-rpath,$ORIGIN"});
-                       if (opts->verbose) {
+                       append(Driver::dynamicOriginLinkFlags(polyfcLibPath, "polydco"));
+                       if (opts->verbose == StdParOptions::VerboseLevel::Info) {
                          std::cerr
                              << fmt::format(
                                     "[PolyFC] Dynamic linking of PolyDCO runtime requested, if you would like to relocate your binary, "

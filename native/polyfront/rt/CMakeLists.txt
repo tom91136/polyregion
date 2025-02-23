@@ -18,7 +18,7 @@ endif ()
 
 
 add_executable(polyrt-tests test/memory.cpp)
-target_link_libraries(polyrt-tests PRIVATE polyrt-obj Catch2::Catch2WithMain Aspartame)
+target_link_libraries(polyrt-tests PRIVATE polyrt-obj Catch2::Catch2WithMain Aspartame::Aspartame)
 target_compile_options(polyrt-tests PRIVATE ${COMPILE_OPTIONS})
 target_link_options(polyrt-tests PRIVATE ${LINK_OPTIONS})
 if (APPLE)

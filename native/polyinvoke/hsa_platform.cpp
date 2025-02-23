@@ -362,6 +362,25 @@ HsaDeviceQueue::~HsaDeviceQueue() {
   CHECKED("Release agent queue", hsa_queue_destroy(queue));
 }
 
+void HsaDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
+                                                const MaybeCallback &cb) {
+  POLYINVOKE_TRACE();
+  hsa_signal_t signal = createSignal("Allocate D2D signal");
+  CHECKED("Copy memory async (D2D)",
+          hsa_amd_memory_async_copy(                                   //
+              reinterpret_cast<char *>(dst) + dstOffset, device.agent, //
+              reinterpret_cast<char *>(src) + srcOffset, device.agent, //
+              size, 0, nullptr, signal));
+
+  enqueueCallback(signal, [cb, signal, token = latch.acquire()]() {
+    destroySignal("Release D2D signal", signal);
+    if (cb) (*cb)();
+  });
+  // XXX FIXME this wait makes the copy not actually async: switch to dependent signals to retain order...
+  hsa_signal_wait_acquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, std::numeric_limits<uint64_t>::max(), HSA_WAIT_STATE_BLOCKED);
+  std::atomic_thread_fence(std::memory_order_acquire);
+}
+
 void HsaDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
   void *lockedHostSrcPtr;
@@ -379,6 +398,7 @@ void HsaDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, si
   });
   // XXX FIXME this wait makes the copy not actually async: switch to dependent signals to retain order...
   hsa_signal_wait_acquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, std::numeric_limits<uint64_t>::max(), HSA_WAIT_STATE_BLOCKED);
+  std::atomic_thread_fence(std::memory_order_acquire);
 }
 
 void HsaDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, void *dst, size_t size, const MaybeCallback &cb) {
@@ -398,6 +418,7 @@ void HsaDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, v
   });
   // XXX FIXME this wait makes the copy not actually async: switch to dependent signals to retain order...
   hsa_signal_wait_acquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, std::numeric_limits<uint64_t>::max(), HSA_WAIT_STATE_BLOCKED);
+  std::atomic_thread_fence(std::memory_order_acquire);
 }
 
 void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,
@@ -509,6 +530,7 @@ void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std
 void HsaDeviceQueue::enqueueWaitBlocking() {
   POLYINVOKE_TRACE();
   latch.waitAll();
+  std::atomic_thread_fence(std::memory_order_acquire);
 }
 
 #undef CHECKED

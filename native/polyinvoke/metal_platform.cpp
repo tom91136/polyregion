@@ -179,6 +179,13 @@ MetalDeviceQueue::~MetalDeviceQueue() {
   queue->release();
   pool->release();
 }
+void MetalDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
+                                                 const MaybeCallback &cb) {
+  POLYINVOKE_TRACE();
+  std::memcpy(static_cast<char *>(queryMemObject(dst)->contents()) + dstOffset, //
+              static_cast<char *>(queryMemObject(src)->contents()) + srcOffset, size);
+  if (cb) (*cb)();
+}
 void MetalDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
   std::memcpy(static_cast<char *>(queryMemObject(dst)->contents()) + dstOffset, src, size);

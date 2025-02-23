@@ -197,7 +197,12 @@ void HipDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
       }),
       0));
 }
-
+void HipDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
+                                                const MaybeCallback &cb) {
+  POLYINVOKE_TRACE();
+  CHECKED(hipMemcpyDtoDAsync(dst + dstOffset, src + srcOffset, size, stream));
+  enqueueCallback(cb);
+}
 void HipDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
   CHECKED(hipMemcpyHtoDAsync(dst + dstOffset, src, size, stream));

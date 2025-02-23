@@ -23,14 +23,15 @@ std::array<Type, 7> AggregateMemberMirror::types() const {
 }
 TypeLayoutMirror::TypeLayoutMirror(ModuleOp &M)
     : AggregateMirror(M), //
-      name(M), sizeInBytes(M, 64), alignmentInBytes(M, 64), memberCount(M, 64), members(M) {
+      name(M), sizeInBytes(M, 64), alignmentInBytes(M, 64), attrs(M, 64), memberCount(M, 64), members(M) {
   validateMirrorSize<runtime::TypeLayout>();
 }
 const char *TypeLayoutMirror::typeName() const { return "TypeLayout"; }
-std::array<Type, 5> TypeLayoutMirror::types() const {
+std::array<Type, 6> TypeLayoutMirror::types() const {
   return {name.widen(),             //
           sizeInBytes.widen(),      //
           alignmentInBytes.widen(), //
+          attrs.widen(),            //
           memberCount.widen(),      //
           members.widen()};
 }

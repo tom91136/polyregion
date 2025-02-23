@@ -1,5 +1,4 @@
 add_subdirectory(polystl)
-add_subdirectory(reflect-plugin)
 add_subdirectory(clang-plugin)
 
 set(POLYCPP_HEADER_SET_DIR "lib/polycpp/include")
@@ -25,7 +24,7 @@ function(add_copy_header_set_targets target commands_var)
 #    add_custom_target(${name} ${commands})
 endfunction()
 
-foreach (header_target polycommon polystl polyinvoke-obj polyrt-obj rt-reflect)
+foreach (header_target polycommon polystl polyinvoke-obj polyrt-obj polyreflect-rt)
     add_copy_header_set_targets(${header_target} header_commands)
 endforeach ()
 add_custom_target(polycpp-header-resource ${header_commands})
@@ -45,7 +44,7 @@ endfunction()
 if (WIN32)
     add_copy_lib_targets(polycpp-lib-resource polystl-static polystl)
 else ()
-    add_copy_lib_targets(polycpp-lib-resource polycpp-clang-plugin polystl-reflect-plugin polystl-static polystl)
+    add_copy_lib_targets(polycpp-lib-resource polycpp-clang-plugin polyreflect-plugin polystl-static polystl)
 endif ()
 # =======================================================================================
 

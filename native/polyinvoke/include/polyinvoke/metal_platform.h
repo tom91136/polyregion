@@ -61,6 +61,8 @@ class POLYREGION_EXPORT MetalDeviceQueue final : public DeviceQueue {
 public:
   POLYREGION_EXPORT MetalDeviceQueue(decltype(store) store, decltype(queue) queue, decltype(queryMemObject) queryMemObject);
   POLYREGION_EXPORT ~MetalDeviceQueue() override;
+  POLYREGION_EXPORT void enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
+                                                    const MaybeCallback &cb) override;
   POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size,
                                                   const MaybeCallback &cb) override;
   POLYREGION_EXPORT void enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, void *dst, size_t size,

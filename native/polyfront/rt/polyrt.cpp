@@ -1,21 +1,16 @@
+#include <algorithm>
+#include <cstdarg>
+
 #include "polyregion/concurrency_utils.hpp"
 #include "polyrt/rt.h"
-
-#include <algorithm>
-
-#ifdef POLYRT_LOG
-  #error Trace already defined
-#else
-
-  #define POLYRT_LOG(fmt, ...) std::fprintf(stderr, "[PolyRT] " fmt "\n", __VA_ARGS__)
-//  #define POLYRT_LOG(fmt, ...)
-#endif
 
 constexpr auto PlatformSelectorEnv = "POLYRT_PLATFORM";
 constexpr auto DeviceSelectorEnv = "POLYRT_DEVICE";
 constexpr auto HostFallbackEnv = "POLYRT_HOST_FALLBACK";
+constexpr auto DebugEnv = "POLYRT_DEBUG";
 
 using namespace polyregion::invoke;
+using polyregion::polyrt::DebugLevel;
 
 std::unique_ptr<Platform> polyregion::polyrt::currentPlatform{};
 std::unique_ptr<Device> polyregion::polyrt::currentDevice{};
@@ -23,9 +18,9 @@ std::unique_ptr<DeviceQueue> polyregion::polyrt::currentQueue{};
 
 static void setupBackend(const Backend backend) {
   if (auto errorOrPlatform = Platform::of(backend); std::holds_alternative<std::string>(errorOrPlatform)) {
-    POLYRT_LOG("Backend %s failed to initialise: %s", to_string(backend).data(), std::get<std::string>(errorOrPlatform).c_str());
+    log(DebugLevel::None, "Backend %s failed to initialise: %s", to_string(backend).data(), std::get<std::string>(errorOrPlatform).c_str());
   } else polyregion::polyrt::currentPlatform = std::move(std::get<std::unique_ptr<Platform>>(errorOrPlatform));
-};
+}
 
 static void selectDevice(Platform &p) {
   auto devices = p.enumerate();
@@ -75,41 +70,47 @@ static void selectPlatform() {
     if (const size_t pos = name.find('@'); pos != std::string::npos) name = name.substr(0, pos);
     if (auto it = NameToBackend.find(name); it != NameToBackend.end()) setupBackend(it->second);
     else {
-      POLYRT_LOG("Backend %s is not a supported value for %s; options are %s={", env, PlatformSelectorEnv, PlatformSelectorEnv);
+      log(DebugLevel::None, "Backend %s is not a supported value for %s; options are %s={", env, PlatformSelectorEnv, PlatformSelectorEnv);
       size_t i = 0;
       for (auto &[k, _] : NameToBackend)
         std::fprintf(stderr, "%s%s", k.c_str(), i++ < NameToBackend.size() - 1 ? "|" : "");
       std::fprintf(stderr, "}\n");
     }
   } else {
-    POLYRT_LOG("Backend selector %s is not set: using default host platform", PlatformSelectorEnv);
+    log(DebugLevel::Debug, "Backend selector %s is not set: using default host platform", PlatformSelectorEnv);
     setupBackend(Backend::RelocatableObject);
   }
-};
+}
+
+static std::optional<size_t> parseIntNoExcept(const char *str) {
+  errno = 0; // strtol to avoid exceptions
+  const size_t value = std::strtol(str, nullptr, 10);
+  return errno == 0 ? std::optional{value} : std::nullopt;
+}
 
 void polyregion::polyrt::initialise() {
   static std::once_flag flag;
   std::call_once(flag, []() {
     if (!currentPlatform) {
-      POLYRT_LOG("Initialising backends... (addr=%p)", (void *)&initialise);
+      log(DebugLevel::Info, "Initialising backends... (addr=%p)", (void *)&initialise);
       selectPlatform();
       if (currentPlatform) selectDevice(*currentPlatform);
       if (currentDevice) currentQueue = currentDevice->createQueue(std::chrono::seconds(10));
       if (currentPlatform) {
-        POLYRT_LOG("- Platform: %s [%s, %s] Device: %s",
-                   currentPlatform->name().c_str(),           //
-                   to_string(currentPlatform->kind()).data(), //
-                   to_string(currentPlatform->moduleFormat()).data(), currentDevice->name().c_str());
+        log(DebugLevel::Info, "- Platform: %s [%s, %s] Device: %s",
+            currentPlatform->name().c_str(),           //
+            to_string(currentPlatform->kind()).data(), //
+            to_string(currentPlatform->moduleFormat()).data(), currentDevice->name().c_str());
         std::string row;
         auto features = currentDevice->features();
         for (auto it = features.begin(); it != features.end(); ++it) {
           row += (row.empty() ? "" : ", ") + *it;
           if ((std::distance(features.begin(), it) + 1) % 10 == 0) {
-            POLYRT_LOG("  - %s", row.c_str());
+            log(DebugLevel::Info, "  - %s", row.c_str());
             row.clear();
           }
         }
-        if (!row.empty()) POLYRT_LOG("  - %s", row.c_str());
+        if (!row.empty()) log(DebugLevel::Info, "  - %s", row.c_str());
       }
     }
   });
@@ -117,40 +118,63 @@ void polyregion::polyrt::initialise() {
 
 bool polyregion::polyrt::hostFallback() {
   static bool fallback = []() {
-    if (auto env = std::getenv(HostFallbackEnv); env) {
-      errno = 0; // strtol to avoid exceptions
-      size_t value = std::strtol(env, nullptr, 10);
-      if (errno == 0 && value == 0) {
-        POLYRT_LOG("<%s> No compatible backend and host fallback disabled, returning...", __func__);
+    if (const auto env = std::getenv(HostFallbackEnv); env) {
+      if (const auto v = parseIntNoExcept(env); v && *v == 0) {
+        log(DebugLevel::Debug, "<%s> No compatible backend and host fallback disabled, returning...", __func__);
         return false;
       }
     }
-    return true; // default is to use host fallback
+    return true; // The default is to use host fallback
   }();
   return fallback;
+}
+
+polyregion::polyrt::DebugLevel polyregion::polyrt::debugLevel() {
+  static DebugLevel level = []() {
+    if (const auto env = std::getenv(DebugEnv); env) {
+      if (const auto v = parseIntNoExcept(env)) {
+        if (*v < static_cast<std::underlying_type_t<DebugLevel>>(DebugLevel::Trace)) {
+          return static_cast<DebugLevel>(*v);
+        }
+      }
+    }
+    return DebugLevel::None;
+  }();
+  return level;
+}
+
+void polyregion::polyrt::log(const DebugLevel level, const char *fmt, ...) {
+  if (debugLevel() < level) return;
+  va_list args;
+  va_start(args, fmt);
+  std::fprintf(stderr, "[PolyRT] ");
+  std::vfprintf(stderr, fmt, args);
+  std::fprintf(stderr, "\n");
+  std::fflush(stderr);
+  va_end(args);
 }
 
 bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelObject &object) {
   initialise();
   if (!currentPlatform || !currentDevice || !currentQueue) {
-    POLYRT_LOG("No device/queue in %s", __func__);
+    log(DebugLevel::Info, "No device/queue in %s", __func__);
     return false;
   }
 
   if (currentPlatform->kind() != object.kind || currentPlatform->moduleFormat() != object.format) {
-    POLYRT_LOG("Skipping incompatible image: %s [%s] (targeting %s [%s])",
-               to_string(object.kind).data(), //
-               to_string(object.format).data(),
-               to_string(currentPlatform->kind()).data(), //
-               to_string(currentPlatform->moduleFormat()).data());
+    log(DebugLevel::Debug, "Skipping incompatible image: %s [%s] (targeting %s [%s])",
+        to_string(object.kind).data(), //
+        to_string(object.format).data(),
+        to_string(currentPlatform->kind()).data(), //
+        to_string(currentPlatform->moduleFormat()).data());
     return false;
   }
 
-  POLYRT_LOG("Found compatible image: %s [%s] (targeting %s [%s])",
-             to_string(object.kind).data(), //
-             to_string(object.format).data(),
-             to_string(currentPlatform->kind()).data(), //
-             to_string(currentPlatform->moduleFormat()).data());
+  log(DebugLevel::Debug, "Found compatible image: %s [%s] (targeting %s [%s])",
+      to_string(object.kind).data(), //
+      to_string(object.format).data(),
+      to_string(currentPlatform->kind()).data(), //
+      to_string(currentPlatform->moduleFormat()).data());
 
   //  TODO need to check if object.feature is a strict subset of device feature
 
@@ -160,20 +184,20 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
 }
 
 void polyregion::polyrt::dispatchHostThreaded(const size_t global, void *functorData, const char *moduleId) {
-  POLYRT_LOG("<%s:%s:%zu> Dispatch hostthread", __func__, moduleId, global);
+  log(DebugLevel::Debug, "<%s:%s:%zu> Dispatch hostthread", __func__, moduleId, global);
   concurrency_utils::waitAll([&](auto &cb) {
     ArgBuffer buffer{{Type::IntS64, nullptr}, {Type::Ptr, &functorData}, {Type::Void, nullptr}};
     currentQueue->enqueueInvokeAsync(moduleId, "_main", buffer, Policy{Dim3{global, 1, 1}}, [&]() {
-      POLYRT_LOG("<%s:%s:%zu> Unlatched", __func__, moduleId, global);
+      log(DebugLevel::Debug, "<%s:%s:%zu> Unlatched", __func__, moduleId, global);
       cb();
     });
   });
-  POLYRT_LOG("<%s:%s:%zu> Done", __func__, moduleId, global);
+  log(DebugLevel::Debug, "<%s:%s:%zu> Done", __func__, moduleId, global);
 }
 
 void polyregion::polyrt::dispatchManaged(const size_t global, const size_t local, const size_t localMemBytes, void *functorData,
                                          const char *moduleId) {
-  POLYRT_LOG("<%s:%s:%zu> Dispatch managed, arg=%p bytes", __func__, moduleId, global, functorData);
+  log(DebugLevel::Debug, "<%s:%s:%zu> Dispatch managed, arg=%p bytes", __func__, moduleId, global, functorData);
 
   const auto buffer = localMemBytes > 0 ? ArgBuffer{{Type::Scratch, {}}, {Type::Ptr, &functorData}, {Type::Void, {}}}
                                         : ArgBuffer{{Type::Ptr, &functorData}, {Type::Void, {}}};
@@ -184,5 +208,64 @@ void polyregion::polyrt::dispatchManaged(const size_t global, const size_t local
                                           local > 0 ? std::optional{std::pair{Dim3{local, 1, 1}, localMemBytes}} : std::nullopt},
                                    {});
 
-  POLYRT_LOG("<%s:%s:%zu> Submitted", __func__, moduleId, global);
+  log(DebugLevel::Debug, "<%s:%s:%zu> Submitted", __func__, moduleId, global);
+}
+
+static void *sharedAlloc(const size_t size) {
+  if (const auto p = polyregion::polyrt::currentDevice->mallocShared(size, Access::RW)) return *p;
+  log(DebugLevel::None, "Device %s does not support shared allocation, aborting...\n", polyregion::polyrt::currentDevice->name().c_str());
+  std::abort();
+}
+
+static void sharedFree(void *p) { polyregion::polyrt::currentDevice->freeShared(p); }
+
+extern "C" {
+
+POLYREGION_EXPORT void *polyrt_usm_malloc(const size_t size) {
+  polyregion::polyrt::initialise();
+  return sharedAlloc(size);
+}
+
+POLYREGION_EXPORT void *polyrt_usm_calloc(const size_t nmemb, const size_t size) {
+  polyregion::polyrt::initialise();
+  return sharedAlloc(nmemb * size);
+}
+
+POLYREGION_EXPORT void *polyrt_usm_realloc(void *ptr, const size_t size) {
+  polyregion::polyrt::initialise();
+  const auto p = sharedAlloc(size);
+  std::memcpy(p, ptr, size);
+  sharedFree(ptr);
+  return p;
+}
+
+POLYREGION_EXPORT void *polyrt_usm_memalign(const size_t /*alignment*/, const size_t size) {
+  polyregion::polyrt::initialise();
+  return sharedAlloc(size);
+}
+
+POLYREGION_EXPORT void *polyrt_usm_aligned_alloc(size_t /*alignment*/, const size_t size) {
+  polyregion::polyrt::initialise();
+  return sharedAlloc(size);
+}
+
+POLYREGION_EXPORT void polyrt_usm_free(void *ptr) {
+  polyregion::polyrt::initialise();
+  sharedFree(ptr);
+}
+
+POLYREGION_EXPORT void *polyrt_usm_operator_new(const size_t size) {
+  polyregion::polyrt::initialise();
+  return sharedAlloc(size);
+}
+
+POLYREGION_EXPORT void polyrt_usm_operator_delete(void *ptr) {
+  polyregion::polyrt::initialise();
+  sharedFree(ptr);
+}
+
+POLYREGION_EXPORT void polyrt_usm_operator_delete_sized(void *ptr, size_t /*size*/) {
+  polyregion::polyrt::initialise();
+  sharedFree(ptr);
+}
 }

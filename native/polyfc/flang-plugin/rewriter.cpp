@@ -201,7 +201,11 @@ public:
 
   Type structType() const { return captureMirror.ty; }
 
-  Value createCapture(OpBuilder &B) const {
+  Value createCapture(OpBuilder &B, ModuleOp &M) const {
+    const auto annotationConst = strConst(B, M, "polyreflect-track");
+    captureFields | for_each([&](auto &f) {
+      B.create<LLVM::VarAnnotation>(uLoc(B), f.fieldPtr, annotationConst, nullConst(B), intConst(B, i32Ty(B), 0), nullConst(B));
+    });
     return captureMirror.local(B, {captureFields                                                  //
                                    | map([](auto &f) { return f.fieldPtr; })                      //
                                    | prepend(B.create<LLVM::ZeroOp>(uLoc(B), preludeTy).getRes()) //
@@ -264,11 +268,16 @@ public:
                              | collect([&](auto &t) {
                                  return polyast::primitiveSize(t) ^ map([&](auto sizeInBytes) {
                                           return std::pair{t, TypeLayout.global(M, [&](OpBuilder &B0) {
-                                                             return std::vector{std::array{strConst(B0, M, polyast::repr(t)),    //
-                                                                                           intConst(B0, i64Ty(B0), sizeInBytes), //
-                                                                                           intConst(B0, i64Ty(B0), sizeInBytes), //
-                                                                                           intConst(B0, i64Ty(B0), 0),           //
-                                                                                           nullConst(B0)}};
+                                                             return std::vector{
+                                                                 std::array{strConst(B0, M, polyast::repr(t)),    //
+                                                                            intConst(B0, i64Ty(B0), sizeInBytes), //
+                                                                            intConst(B0, i64Ty(B0), sizeInBytes), //
+                                                                            intConst(B0, i64Ty(B0),
+                                                                                     to_underlying(runtime::LayoutAttrs::Opaque |     //
+                                                                                                   runtime::LayoutAttrs::SelfOpaque | //
+                                                                                                   runtime::LayoutAttrs::Primitive)),
+                                                                            intConst(B0, i64Ty(B0), 0), //
+                                                                            nullConst(B0)}};
                                                            })};
                                         }); //
                                })           //
@@ -303,9 +312,13 @@ public:
 
     auto structLayoutsArray = TypeLayout.global(M, [&](OpBuilder &B0) {
       return bundle.layouts ^ map([&](auto, auto &l) {
-               return std::array{strConst(B0, M, l.name),                   //
-                                 intConst(B0, i64Ty(B0), l.sizeInBytes),    //
-                                 intConst(B0, i64Ty(B0), l.alignment),      //
+               auto attrs = runtime::LayoutAttrs::None;
+               if (isSelfOpaque(l)) attrs |= runtime::LayoutAttrs::SelfOpaque;
+               if (isOpaque(l, table)) attrs |= runtime::LayoutAttrs::Opaque;
+               return std::array{strConst(B0, M, l.name),                //
+                                 intConst(B0, i64Ty(B0), l.sizeInBytes), //
+                                 intConst(B0, i64Ty(B0), l.alignment),   //
+                                 intConst(B0, i64Ty(B0), to_underlying(attrs)),
                                  intConst(B0, i64Ty(B0), l.members.size()), //
                                  nullConst(B0)};
              });
@@ -430,7 +443,7 @@ public:
 
     binder.recordTemporariesAndDependents(B);
 
-    auto capture = binder.createCapture(B);
+    auto capture = binder.createCapture(B, M);
     auto reductionsCount = binder.createReductionsCount(B);
     auto reductions = binder.createReductions(B);
     auto dispatch = dco.dispatch(B,

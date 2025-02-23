@@ -18,7 +18,7 @@ foreach (TARGET polystl polystl-static)
             include/execution.impl
     )
 
-    target_link_libraries(${TARGET} PRIVATE polyinvoke-obj polyrt-obj rt-reflect)
+    target_link_libraries(${TARGET} PRIVATE polyinvoke-obj polyrt-obj polyreflect-rt)
     target_compile_options(${TARGET} PRIVATE ${COMPILE_OPTIONS})
     target_link_options(${TARGET} PRIVATE ${LINK_OPTIONS})
     if (APPLE)

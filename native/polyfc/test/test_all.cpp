@@ -30,8 +30,10 @@ void testAll(bool passthrough) {
         userArgs                                              //
         | append(std::pair{"input", input})                   //
         | append(std::pair{"polyfc_defaults", "-O1 -g -cpp"}) //
-        | append(std::pair{"polyfc_stdpar", fmt::vformat("-fstdpar -fstdpar-arch={polyfc_arch} -fuse-ld=lld -lstdc++ -fstdpar-rt=dynamic",
-                                                         variables ^ and_then(mkArgStore))}) //
+        | append(std::pair{
+              "polyfc_stdpar",
+              fmt::vformat("-fstdpar -fstdpar-verbose=debug -fstdpar-arch={polyfc_arch} -fuse-ld=lld -lstdc++ -fstdpar-rt=dynamic",
+                           variables ^ and_then(mkArgStore))}) //
         | to_vector();
 
     const auto unevaluatedStore = augmentedArgs ^ append(std::pair{"output", "<unevaluated>"}) ^ and_then(mkArgStore);
@@ -57,6 +59,7 @@ void testAll(bool passthrough) {
 
         // if host, + -fsanitize=address,undefined
         envs.emplace_back("ASAN_OPTIONS=alloc_dealloc_mismatch=0,detect_leaks=0");
+        envs.emplace_back("POLYRT_DEBUG=2");
         //        envs.emplace_back("LD_PRELOAD=/usr/bin/../lib/clang/18/lib/x86_64-redhat-linux-gnu/libclang_rt.asan.so");
 
         if (auto path = std::getenv("PATH"); path) envs.emplace_back(std::string("PATH=") + path);
@@ -78,8 +81,8 @@ void testAll(bool passthrough) {
         consumeError(stdoutFile->discard());
         consumeError(stderrFile->discard());
 
-        WARN("exe:  " << BinaryDir << "/" << args[0]);
-        WARN("args: " << (args_ ^ mk_string(" ", [](auto &s) { return s.str(); })));
+        WARN("cmdline: " << (args_ | drop(1) | prepend(fmt::format("{}/{}", BinaryDir, args[0])) //
+                             | mk_string(" ", [](auto &s) { return s.str(); })));
         WARN("envs: " << (envs_ ^ mk_string(" ", [](auto &s) { return s.str(); })));
         WARN("stderr:\n" << stderr_ << "[EOF]");
         WARN("stdout:\n" << stdout_ << "[EOF]");
@@ -109,22 +112,22 @@ void testAll(bool passthrough) {
     DYNAMIC_SECTION(polyregion::polyfront::extractTestName(test)) {
       std::ifstream source(test, std::ios::in | std::ios::binary);
 
-      auto cases =
-          polyregion::polyfront::TestCase::parseTestCase(source, "!CHECK",
-                                                         {
+      auto cases = polyregion::polyfront::TestCase::parseTestCase(
+          source, "!CHECK",
+          {
 #if defined(__linux__)
-                                                             // {"polyfc_arch", {  "cuda@sm_89"}} //
-                                                               {"polyfc_arch", {"cuda@sm_89", /*"hip@gfx1036", */ "hsa@gfx1036", "host@native"}} //
+              // {"polyfc_arch", {  "cuda@sm_89"}} //
+              {"polyfc_arch", {"cuda@sm_89", /*"hip@gfx1036", */ "hsa@gfx1036", "host@native"}} //
       //              {"polyfc_arch", {"opencl@host" }} //
 
 #elif defined(__APPLE__)
-                                                             {"polyfc_arch", {"host@apple-m2"}} //
+              {"polyfc_arch", {"host@apple-m2"}} //
 #elif defined(_WIN32)
-                                                             {"polyfc_arch", {}} //
+              {"polyfc_arch", {}} //
 #else
   #error "Unsupported platform"
 #endif
-                                                         });
+          });
 
       if (cases.empty()) FAIL("No test cases found");
 

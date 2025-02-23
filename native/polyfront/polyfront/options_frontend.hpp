@@ -42,7 +42,7 @@ struct CliArgs {
   }
 
   bool popBool(const std::string &flag) {
-    auto oldSize = deleted.size();
+    const auto oldSize = deleted.size();
     for (size_t i = 0; i < data.size(); ++i) {
       if (deleted.count(i)) continue;
       if (data[i] == flag) deleted.insert(i);
@@ -71,9 +71,48 @@ struct CliArgs {
   }
 };
 
+struct Driver {
+
+  static std::vector<std::string> enableLLDAndLTO(const CliArgs &args, const std::string &ltoType = "thin") {
+    std::vector<std::string> result;
+    if (!(args.has("-flto") || args.has("-flto=thin") || args.has("-flto=full"))) //
+      result.emplace_back(fmt::format("-flto={}", ltoType));
+    if (!args.has("-fuse-ld=lld")) //
+      result.emplace_back("-fuse-ld=lld");
+    return result;
+  }
+
+  static std::vector<std::string> dynamicOriginLinkFlags(const std::string &libsPath, const std::string &libName) {
+    return {fmt::format("-L{}", libsPath),          //
+            fmt::format("-l{}", libName),           //
+            fmt::format("-Wl,-rpath,{}", libsPath), //
+            "-Wl,-rpath,$ORIGIN"};
+  }
+
+  static std::vector<std::string> clangPassPluginFlags(const std::string &pluginPath, const std::vector<std::string> &args = {}) {
+    return std::vector{
+               fmt::format("-fplugin={}", pluginPath),
+               fmt::format("-fpass-plugin={}", pluginPath),
+           } //
+           ^ concat(args ^ map([](auto &arg) { return fmt::format("-mllvm={}", arg); }));
+  }
+
+  static std::vector<std::string> lldPassPluginFlags(const std::string &pluginPath, const std::vector<std::string> &args = {}) {
+    return std::vector{
+               fmt::format("-Wl,--load-pass-plugin={}", pluginPath),
+               fmt::format("-Wl,-mllvm=-load={}", pluginPath),
+           } //
+           ^ concat(args ^ map([](auto &arg) { return fmt::format("-Wl,-mllvm={}", arg); }));
+  }
+};
+
 struct StdParOptions {
 
-  enum class LinkKind : uint8_t { Static = 1, Dynamic, Disabled = 3 };
+  enum class LinkKind : uint8_t { Static = 1, Dynamic = 2, Disabled = 3 };
+
+  enum class MemKind : uint8_t { Direct = 1, Interpose = 2, Reflect = 3 };
+
+  enum class VerboseLevel : uint8_t { None = 0, Info = 1, Debug = 2 };
 
   static std::variant<std::string, LinkKind> parseLinkKind(const std::string &arg) {
     if (auto v = arg ^ to_lower(); v == "static") return LinkKind::Static;
@@ -82,11 +121,24 @@ struct StdParOptions {
     return "Unknown link kind `" + arg + "`";
   }
 
-  bool verbose = false;
+  static std::variant<std::string, MemKind> parseMemKind(const std::string &arg) {
+    if (auto v = arg ^ to_lower(); v == "direct") return MemKind::Direct;
+    else if (v == "interpose") return MemKind::Interpose;
+    else if (v == "reflect") return MemKind::Reflect;
+    return "Unknown mem kind `" + arg + "`";
+  }
+
+  static std::variant<std::string, VerboseLevel> parseVerboseLevel(const std::string &arg) {
+    if (auto v = arg ^ to_lower(); v == "none") return VerboseLevel::None;
+    else if (v == "info") return VerboseLevel::Info;
+    else if (v == "debug") return VerboseLevel::Debug;
+    return "Unknown debug level `" + arg + "`";
+  }
+
+  VerboseLevel verbose = VerboseLevel::None;
   bool noCompress = false;
-  bool interposeMalloc = true;
-  bool interposeAlloca = false;
   std::string targets{};
+  MemKind mem = MemKind::Reflect;
   LinkKind rt = LinkKind::Static;
   LinkKind jit = LinkKind::Disabled;
 
@@ -94,9 +146,8 @@ struct StdParOptions {
     const std::string fStdParFlag = "-fstdpar";
     const std::string fStdParVerboseFlag = "-fstdpar-verbose";
     const std::string fStdParArchNoCompressFlag = "-fstdpar-no-compress";
-    const std::string fStdParInterposeMallocFlag = "-fstdpar-interpose-malloc";
-    const std::string fStdParInterposeAllocaFlag = "-fstdpar-interpose-alloca";
     const std::string fStdParArchFlag = "-fstdpar-arch";
+    const std::string fStdParMemFlag = "-fstdpar-mem";
     const std::string fStdParRtFlag = "-fstdpar-rt";
     const std::string fStdParJitFlag = "-fstdpar-jit";
 
@@ -109,25 +160,21 @@ struct StdParOptions {
     if (args.popBool(fStdParFlag)) {
       fStdPar = true;
     }
-    if (args.popBool(fStdParVerboseFlag)) {
+    if (auto verbose = args.popValue(fStdParVerboseFlag)) {
       fStdParDependents = true;
-      options.verbose = true;
+      parseVerboseLevel(*verbose) ^ foreach_total(markError(fStdParVerboseFlag), [&](const VerboseLevel &x) { options.verbose = x; });
     }
     if (args.popBool(fStdParArchNoCompressFlag)) {
       fStdParDependents = true;
       options.noCompress = true;
     }
-    if (args.popBool(fStdParInterposeMallocFlag)) {
-      fStdParDependents = true;
-      options.interposeMalloc = true;
-    }
-    if (args.popBool(fStdParInterposeAllocaFlag)) {
-      fStdParDependents = true;
-      options.interposeAlloca = true;
-    }
     if (auto arch = args.popValue(fStdParArchFlag)) {
       fStdParDependents = true;
       options.targets = *arch;
+    }
+    if (auto mem = args.popValue(fStdParMemFlag)) {
+      fStdParDependents = true;
+      parseMemKind(*mem) ^ foreach_total(markError(fStdParMemFlag), [&](const MemKind &x) { options.mem = x; });
     }
     if (auto rt = args.popValue(fStdParRtFlag)) {
       fStdParDependents = true;

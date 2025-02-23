@@ -2,6 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -283,6 +285,23 @@ static constexpr std::optional<runtime::ModuleFormat> moduleFormatOf(const compi
   return {};
 }
 
+enum class LayoutAttrs : size_t {
+  None = /*           */ 0,
+  Opaque = /*    */ 1 << 0, // no members are pointers, member types are also opaque
+  SelfOpaque = /**/ 1 << 1, // no members are pointers, member types may have pointers
+  Primitive = /* */ 1 << 2, // no members
+};
+
+template <typename T> constexpr std::underlying_type_t<T> to_underlying(T e) { return static_cast<std::underlying_type_t<T>>(e); }
+constexpr LayoutAttrs operator|(const LayoutAttrs l, const LayoutAttrs r) {
+  return static_cast<LayoutAttrs>(to_underlying(l) | to_underlying(r));
+}
+constexpr LayoutAttrs &operator|=(LayoutAttrs &lhs, const LayoutAttrs rhs) {
+  lhs = lhs | rhs;
+  return lhs;
+}
+constexpr bool isSet(const LayoutAttrs value, const LayoutAttrs flag) { return (to_underlying(value) & to_underlying(flag)) != 0; }
+
 struct TypeLayout;
 struct AggregateMember {
   using ResolvePtrSize = size_t (*)(const void *ptr);
@@ -299,6 +318,7 @@ struct TypeLayout {
   const char *name;
   size_t sizeInBytes;
   size_t alignmentInBytes;
+  LayoutAttrs attrs;
   size_t memberCount;
   const AggregateMember *members;
 
@@ -312,27 +332,56 @@ struct TypeLayout {
     };
   }
 
-  void visualise(std::FILE *fd) const {
-    std::fprintf(fd, "[%*zu]╭── `%s` (alignment=%ld, members=%ld) ──\n", 3, sizeInBytes, name, alignmentInBytes, memberCount);
+  void visualise(std::FILE *fd, const std::function<void(size_t, const AggregateMember &)> &show = {}, //
+                 const size_t level = 0, const size_t offset = 0) const {
+    constexpr size_t maxCol = 128;
+    constexpr size_t alignColumn = 60; //
+
+    const bool topLevel = level == 0;
+    if (topLevel) std::fprintf(fd, "[%*zu]    ╭── ", 3, sizeInBytes);
+    else std::fprintf(fd, "╭── [%*zu] ", 3, sizeInBytes);
+
+    std::fprintf(fd, "`%s` (alignment=%ld, members=%ld, attrs={", name, alignmentInBytes, memberCount);
+    if (isSet(attrs, LayoutAttrs::Opaque)) std::fprintf(fd, "Opaque ");
+    if (isSet(attrs, LayoutAttrs::SelfOpaque)) std::fprintf(fd, "SelfOpaque ");
+    if (isSet(attrs, LayoutAttrs::Primitive)) std::fprintf(fd, "Primitive ");
+    std::fprintf(fd, "}) ──\n");
+
     for (size_t i = 0; i < memberCount; ++i) {
       const auto &m = members[i];
-      if (m.sizeInBytes == 0) {
-        std::fprintf(fd, "+%-3zu │[0-width] %s: %s\n", m.offsetInBytes, m.name, m.type ? m.type->name : "???");
-        continue;
+      std::fprintf(fd, "+%3zu~%-3zu │", offset + m.offsetInBytes, offset + m.offsetInBytes + m.sizeInBytes);
+      for (size_t l = 0; l < level; ++l)
+        std::fprintf(fd, "│");
+      if (m.type && m.type->memberCount > 0 && m.ptrIndirection == 0) {
+        m.type->visualise(fd, show, level + 1, offset + m.offsetInBytes);
+      } else if (m.sizeInBytes == 0) {
+        std::fprintf(fd, "[0-width] %s: %s\n", m.name, m.type ? m.type->name : "???");
+      } else {
+        const size_t nextOffset = i + 1 < memberCount ? members[i + 1].offsetInBytes : sizeInBytes;
+        const size_t cols = nextOffset - m.offsetInBytes;
+        for (size_t c = 0; c < std::min(maxCol, cols); ++c)
+          std::fprintf(fd, c < m.sizeInBytes ? "■" : "□");
+        if (cols > maxCol) std::fprintf(fd, "...");
+        std::fprintf(fd, " %s: %s", m.name, m.type ? m.type->name : "???");
+        for (size_t s = 0; s < m.ptrIndirection; ++s)
+          std::fprintf(fd, "*");
+
+        std::fprintf(fd, " (%ld bytes) ", m.sizeInBytes);
+        if (show && m.type) {
+          const size_t currentColumn = 8 + 3 + 1 +                                      // "+%3zu~%-3zu │"
+                                       level +                                          // "│"
+                                       std::min(maxCol, nextOffset - m.offsetInBytes) + // blocks
+                                       std::strlen(m.name) + 2 +                        // "name: "
+                                       (m.type ? std::strlen(m.type->name) : 3) +       // "type" or "???"
+                                       m.ptrIndirection +                               // '*' pointer indirection
+                                       9;                                               // " (N bytes) "
+          std::fprintf(fd, "%*s", static_cast<int>(currentColumn < alignColumn ? alignColumn - currentColumn : 1), "");
+          show(offset + m.offsetInBytes, m);
+        }
+        std::fprintf(fd, "\n");
       }
-      std::fprintf(fd, "+%-3zu │", m.offsetInBytes);
-
-      const size_t nextOffset = i + 1 < memberCount ? members[i + 1].offsetInBytes : sizeInBytes;
-      for (size_t c = 0; c < nextOffset - m.offsetInBytes; ++c)
-        std::fprintf(fd, c < m.sizeInBytes ? "■" : "□");
-
-      std::fprintf(fd, " %s: %s", m.name, m.type ? m.type->name : "???");
-      for (size_t s = 0; s < m.ptrIndirection; ++s)
-        std::fprintf(fd, "*");
-
-      std::fprintf(fd, " (%ld bytes)\n", m.sizeInBytes);
     }
-    std::fprintf(fd, "     ╰────────\n");
+    if (topLevel) std::fprintf(fd, "         ╰────────\n");
   }
 
   void print(std::FILE *fd) const {

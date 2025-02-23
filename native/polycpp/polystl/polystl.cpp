@@ -1,9 +1,9 @@
 #include "polystl/polystl.h"
 #include "polyrt/mem.hpp"
 #include "polyrt/rt.h"
-#include "rt-reflect/rt_reflect.hpp"
+#include "reflect-rt//rt_reflect.hpp"
 
-static polyregion::polyrt::SynchronisedAllocation allocations(
+static polyregion::polyrt::SynchronisedMemAllocation allocations(
     [](const void *ptr) -> polyregion::polyrt::PtrQuery {
       if (const auto meta = polyregion::rt_reflect::_rt_reflect_p(ptr); meta.type != polyregion::rt_reflect::Type::Unknown) {
         return polyregion::polyrt::PtrQuery{.sizeInBytes = meta.size, .offsetInBytes = meta.offset};

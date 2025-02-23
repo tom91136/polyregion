@@ -25,7 +25,7 @@ extern "C" __ALLOC void *malloc(const size_t size) {
 
 extern "C" __ALLOC void *calloc(const size_t nmemb, const size_t size) {
   const auto ptr = __RT_ALTERNATIVE(calloc)(nmemb, size);
-  _rt_record(ptr, size, polyregion::rt_reflect::Type::HeapCalloc);
+  _rt_record(ptr, nmemb * size, polyregion::rt_reflect::Type::HeapCalloc);
   return ptr;
 }
 

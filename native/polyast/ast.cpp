@@ -119,6 +119,26 @@ Pair<size_t, Opt<size_t>> polyast::countIndirectionsAndComponentSize(const Type:
   return {0, primitiveSize(t)};
 }
 
+bool polyast::isSelfOpaque(const Type::Any &tpe) {
+  if (const auto a = tpe.get<Type::Annotated>()) return isSelfOpaque(a->tpe);
+  if (const auto p = tpe.get<Type::Ptr>()) return p->length.has_value() && isSelfOpaque(p->comp);
+  return true;
+}
+
+bool polyast::isSelfOpaque(const StructLayout &sl) {
+  return sl.members ^ forall([](auto &m) { return isSelfOpaque(m.name.tpe); });
+}
+
+bool polyast::isOpaque(const StructLayout &sl, const std::unordered_map<Type::Struct, StructLayout> &table) {
+  return isSelfOpaque(sl) &&
+         sl.members ^ forall([&](auto &m) {
+           return m.name.tpe.template get<Type::Struct>() ^
+                  fold(
+                      [&](auto &s) { return table ^ get_maybe(s) ^ map([&](auto &x) { return isOpaque(x, table); }) ^ get_or_else(false); },
+                      []() { return true; });
+         });
+}
+
 // ====================
 
 Type::Ptr dsl::Ptr(const Type::Any &t, Opt<int32_t> l, const ::TypeSpace::Any &s) { return Tpe::Ptr(t, l, s); }

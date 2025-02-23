@@ -74,6 +74,8 @@ class POLYREGION_EXPORT HsaDeviceQueue final : public DeviceQueue {
 public:
   POLYREGION_EXPORT explicit HsaDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(device) device, decltype(queue) queue);
   POLYREGION_EXPORT ~HsaDeviceQueue() override;
+  POLYREGION_EXPORT void enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
+                                                    const MaybeCallback &cb) override;
   POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size,
                                                   const MaybeCallback &cb) override;
   POLYREGION_EXPORT void enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, void *dst, size_t size,

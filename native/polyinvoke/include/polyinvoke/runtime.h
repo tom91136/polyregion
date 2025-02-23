@@ -41,7 +41,7 @@
 
   #define POLYINVOKE_FATAL(prefix, fmt, ...)                                                                                               \
     do {                                                                                                                                   \
-      std::fprintf(stderr, "[%s] %s:%d FATAL: " fmt " (%s)\n", prefix, __FILE__, __LINE__, __VA_ARGS__, __PRETTY_FUNCTION__);               \
+      std::fprintf(stderr, "[%s] %s:%d FATAL: " fmt " (%s)\n", prefix, __FILE__, __LINE__, __VA_ARGS__, __PRETTY_FUNCTION__);              \
       std::abort();                                                                                                                        \
     } while (0)
 #endif
@@ -338,6 +338,10 @@ constexpr std::string_view POLYREGION_EXPORT to_string(const Backend &b) {
 struct POLYREGION_EXPORT DeviceQueue {
 
   virtual POLYREGION_EXPORT ~DeviceQueue() = default;
+
+  virtual POLYREGION_EXPORT void enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
+                                                            const MaybeCallback &cb) = 0;
+
   virtual POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t bytes,
                                                           const MaybeCallback &cb) = 0;
 

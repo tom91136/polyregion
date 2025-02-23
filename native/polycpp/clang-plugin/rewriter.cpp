@@ -221,6 +221,11 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
                                                            /*name        */ mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, repr(t))),
                                                            /*sizeInBytes */ mkIntLit(C, C.getSizeType(), sizeInBytes),
                                                            /*alignment   */ mkIntLit(C, C.getSizeType(), sizeInBytes),
+                                                           /*attrs       */
+                                                           mkIntLit(C, C.getSizeType(),
+                                                                    to_underlying(polyregion::runtime::LayoutAttrs::Opaque |     //
+                                                                                  polyregion::runtime::LayoutAttrs::SelfOpaque | //
+                                                                                  polyregion::runtime::LayoutAttrs::Primitive)),
                                                            /*memberCount */ mkIntLit(C, C.getSizeType(), 0),
                                                            /*member      */ mkNullPtrLit(C, *TypeLayoutTy),
                                                        })};
@@ -232,11 +237,15 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
   auto structTypeLayoutArrayDecl =
       mkStaticVarDecl(C, c.calleeDecl, "__struct_type_layouts", mkConstArrTy(C, TypeLayoutTyNoConst, bundle.layouts.size()),
                       bundle.layouts | map([&](auto, auto &sl) -> clang::Expr * {
+                        auto attrs = polyregion::runtime::LayoutAttrs::None;
+                        if (isSelfOpaque(sl)) attrs |= polyregion::runtime::LayoutAttrs::SelfOpaque;
+                        if (isOpaque(sl, table)) attrs |= polyregion::runtime::LayoutAttrs::Opaque;
                         return mkInitList(C, TypeLayoutTyNoConst,
                                           {
                                               /*name        */ mkArrayToPtrDecay(C, constCharStarTy(C), mkStrLit(C, sl.name)), //
                                               /*sizeInBytes */ mkIntLit(C, C.getSizeType(), sl.sizeInBytes),                   //
                                               /*alignment   */ mkIntLit(C, C.getSizeType(), sl.alignment),                     //
+                                              /*attrs       */ mkIntLit(C, C.getSizeType(), to_underlying(attrs)),             //
                                               /*memberCount */ mkIntLit(C, C.getSizeType(), sl.members.size()),                //
                                               /*member      */ mkNullPtrLit(C, *AggregateMemberTy), // XXX assigned later
                                           });

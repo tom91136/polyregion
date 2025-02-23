@@ -142,13 +142,15 @@ class POLYREGION_EXPORT VulkanDeviceQueue final : public DeviceQueue {
   void enqueueCallback(const MaybeCallback &cb);
 
 public:
-  POLYREGION_EXPORT explicit VulkanDeviceQueue( decltype(ctx) ctx,                     //
+  POLYREGION_EXPORT explicit VulkanDeviceQueue(decltype(ctx) ctx,                     //
                                                decltype(allocator) allocator,         //
                                                decltype(computeQueue) computeQueue,   //
                                                decltype(transferQueue) transferQueue, //
                                                decltype(store) store,                 //
                                                decltype(queryMemObject) queryMemObject);
   POLYREGION_EXPORT ~VulkanDeviceQueue() override;
+  POLYREGION_EXPORT void enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
+                                                    const MaybeCallback &cb) override;
   POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size,
                                                   const MaybeCallback &cb) override;
   POLYREGION_EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, size_t srcOffset, void *dst, size_t bytes,

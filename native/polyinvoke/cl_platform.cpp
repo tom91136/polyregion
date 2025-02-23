@@ -261,6 +261,13 @@ void ClDeviceQueue::enqueueCallback(const MaybeCallback &cb, cl_event event) {
       })));
   CHECKED(clFlush(queue));
 }
+void ClDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
+                                               const MaybeCallback &cb) {
+  POLYINVOKE_TRACE();
+  cl_event event = {};
+  CHECKED(clEnqueueCopyBuffer(queue, queryMemObject(src), queryMemObject(dst), srcOffset, dstOffset, size, 0, nullptr, &event));
+  enqueueCallback(cb, event);
+}
 void ClDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
   cl_event event = {};

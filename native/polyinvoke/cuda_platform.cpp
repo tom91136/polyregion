@@ -196,7 +196,12 @@ void CudaDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
         handler.createHandle(f), 0));
   }
 }
-
+void CudaDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
+                                                 const MaybeCallback &cb) {
+  POLYINVOKE_TRACE();
+  CHECKED(cuMemcpyDtoDAsync(dst + dstOffset, src + srcOffset, size, stream));
+  enqueueCallback(cb);
+}
 void CudaDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
   CHECKED(cuMemcpyHtoDAsync(dst + dstOffset, src, size, stream));

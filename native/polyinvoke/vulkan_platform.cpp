@@ -365,19 +365,27 @@ void VulkanDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
     if (cb) (*cb)();
   });
 }
-
+void VulkanDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
+                                                   const MaybeCallback &cb) {
+  POLYINVOKE_TRACE();
+  const auto dstObj = queryMemObject(dst);
+  const auto srcObj = queryMemObject(dst);
+  std::memcpy(static_cast<char *>(dstObj->mappedData) + dstOffset, static_cast<char *>(srcObj->mappedData) + srcOffset, size);
+  vmaInvalidateAllocation(allocator, dstObj->allocation, dstOffset, size);
+  if (cb) (*cb)();
+}
 void VulkanDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
-  auto obj = queryMemObject(dst);
-  std::memcpy(static_cast<char *>(obj->mappedData) + dstOffset, src, size);
-  vmaInvalidateAllocation(allocator, obj->allocation, dstOffset, size);
+  const auto dstObj = queryMemObject(dst);
+  std::memcpy(static_cast<char *>(dstObj->mappedData) + dstOffset, src, size);
+  vmaInvalidateAllocation(allocator, dstObj->allocation, dstOffset, size);
   if (cb) (*cb)();
 }
 void VulkanDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, void *dst, size_t size, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
-  auto obj = queryMemObject(src);
-  std::memcpy(dst, static_cast<char *>(obj->mappedData) + srcOffset, size);
-  vmaInvalidateAllocation(allocator, obj->allocation, srcOffset, size);
+  const auto srcObj = queryMemObject(src);
+  std::memcpy(dst, static_cast<char *>(srcObj->mappedData) + srcOffset, size);
+  vmaInvalidateAllocation(allocator, srcObj->allocation, srcOffset, size);
   if (cb) (*cb)();
 }
 void VulkanDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,

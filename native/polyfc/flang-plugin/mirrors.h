@@ -32,15 +32,16 @@ struct AggregateMemberMirror final : AggregateMirror<7> {
   std::array<Type, 7> types() const override;
 };
 
-struct TypeLayoutMirror final : AggregateMirror<5> {
+struct TypeLayoutMirror final : AggregateMirror<6> {
   Field<LLVM::LLVMPointerType, 0> name;
   Field<IntegerType, 1> sizeInBytes;
   Field<IntegerType, 2> alignmentInBytes;
-  Field<IntegerType, 3> memberCount;
-  Field<LLVM::LLVMPointerType, 4> members;
+  Field<IntegerType, 3> attrs;
+  Field<IntegerType, 4> memberCount;
+  Field<LLVM::LLVMPointerType, 5> members;
   explicit TypeLayoutMirror(ModuleOp &M);
   const char *typeName() const override;
-  std::array<Type, 5> types() const override;
+  std::array<Type, 6> types() const override;
 };
 
 struct KernelObjectMirror final : AggregateMirror<6> {

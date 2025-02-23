@@ -46,6 +46,12 @@ Opt<size_t> primitiveSize(const Type::Any &t);
 
 std::pair<size_t, Opt<size_t>> countIndirectionsAndComponentSize(const Type::Any &t, const Map<Type::Struct, StructLayout> &table);
 
+bool isSelfOpaque(const Type::Any &tpe);
+
+bool isSelfOpaque(const StructLayout &sl);
+
+bool isOpaque(const StructLayout &sl, const std::unordered_map<Type::Struct, StructLayout> &table);
+
 namespace dsl {
 
 using namespace Stmt;

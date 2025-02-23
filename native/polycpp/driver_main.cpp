@@ -48,7 +48,7 @@ int main(int argc, const char *argv[]) {
              },
              [&](const std::optional<StdParOptions> &opts) {
                auto remaining = args.remaining() ^ map([](auto &s) -> std::string { return s; });
-               auto append = [&](const std::initializer_list<std::string> &xs) { remaining.insert(remaining.end(), xs); };
+               auto append = [&](const std::vector<std::string> &xs) { remaining.insert(remaining.end(), xs.begin(), xs.end()); };
 
                if (opts) {
                  auto includes = mkDelimitedEnvPaths("POLYSTL_INCLUDE", "-isystem", llvm::sys::EnvPathSeparator);
@@ -59,25 +59,41 @@ int main(int argc, const char *argv[]) {
                  const auto polycppResourcePath = execParentPath / "lib/polycpp";
                  const auto polycppIncludePath = polycppResourcePath / "include";
                  const auto polycppLibPath = polycppResourcePath / "lib";
-                 const auto polycppReflectPlugin = polycppLibPath / fmt::format("polystl-reflect-plugin.{}", dynamicLibSuffix());
+                 const auto polyreflectPlugin = polycppLibPath / fmt::format("polyreflect-plugin.{}", dynamicLibSuffix());
                  const auto polycppClangPlugin = polycppLibPath / fmt::format("polycpp-clang-plugin.{}", dynamicLibSuffix());
                  append({"-isystem", polycppIncludePath.string()});
                  append({"-include", "polystl/polystl.h"});
-                 append({"-include", "rt-reflect/rt.hpp"});
 
+                 const auto debug = opts->verbose == StdParOptions::VerboseLevel::Debug;
                  const bool noRewrite = std::getenv("POLYCPP_NO_REWRITE") != nullptr;
                  if (!noRewrite) {
                    append({"-Xclang", "-load", "-Xclang", polycppClangPlugin.string()});
                    append({"-Xclang", "-add-plugin", "-Xclang", "polycpp"});
                    append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("{}={}", PolyfrontExe, execPath.string())});
-                   append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("{}={}", PolyfrontVerbose, opts->verbose ? "1" : "0")});
+                   append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("{}={}", PolyfrontVerbose, debug ? "1" : "0")});
                    append({"-Xclang", "-plugin-arg-polycpp", "-Xclang", fmt::format("{}={}", PolyfrontTargets, opts->targets)});
-                   if (opts->interposeMalloc) append({fmt::format("-fpass-plugin={}", polycppReflectPlugin.string())});
                  }
 
                  const auto compileOnly = std::vector{"-c", "-S", "-E", "-M", "-MM", "-MD", "-fsyntax-only"} ^
                                           exists([&](auto &flag) { return args.has(flag); });
                  if (!compileOnly) {
+                   switch (opts->mem) {
+                     case StdParOptions::MemKind::Direct: break;
+                     case StdParOptions::MemKind::Interpose:
+                       append(Driver::clangPassPluginFlags(polyreflectPlugin, {fmt::format("-polyreflect-verbose={}", debug ? "1" : "0"), //
+                                                                               "polyreflect-late=interpose"}));
+                       break;
+                     case StdParOptions::MemKind::Reflect:
+                       append({"-include", "rt-reflect/rt.hpp"});
+                       append(Driver::enableLLDAndLTO(args));
+                       append(
+                           Driver::lldPassPluginFlags(polyreflectPlugin, {
+                                                                             fmt::format("-polyreflect-verbose={}", debug ? "1" : "0"), //
+                                                                             "-polyreflect-early=ProtectRT",                            //
+                                                                             "-polyreflect-late=ReflectStack+ReflectMem",               //
+                                                                         }));
+                       break;
+                   }
                    switch (opts->rt) {
                      case StdParOptions::LinkKind::Static: {
                        remaining.insert(remaining.end(),
@@ -86,9 +102,8 @@ int main(int argc, const char *argv[]) {
                        break;
                      }
                      case StdParOptions::LinkKind::Dynamic: {
-                       append({fmt::format("-L{}", polycppLibPath.string()), "-lpolystl", //
-                               fmt::format("-Wl,-rpath,{}", polycppLibPath.string()), "-Wl,-rpath,$ORIGIN"});
-                       if (opts->verbose) {
+                       append(Driver::dynamicOriginLinkFlags(polycppLibPath, "polystl"));
+                       if (opts->verbose == StdParOptions::VerboseLevel::Info) {
                          std::cerr
                              << fmt::format(
                                     "[PolyCpp] Dynamic linking of PolySTL runtime requested, if you would like to relocate your binary, "

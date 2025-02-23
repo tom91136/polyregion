@@ -15,7 +15,7 @@ endfunction()
 if (WIN32)
     add_copy_lib_targets(polyfc-lib-resource polydco-static polydco)
 else ()
-    add_copy_lib_targets(polyfc-lib-resource polyfc-flang-plugin polydco-static polydco)
+    add_copy_lib_targets(polyfc-lib-resource polyfc-flang-plugin polyreflect-plugin polydco-static polydco)
 endif ()
 
 

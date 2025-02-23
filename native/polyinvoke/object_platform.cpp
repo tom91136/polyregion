@@ -99,6 +99,12 @@ void ObjectDevice::freeShared(void *ptr) {
 
 // ---
 
+void ObjectDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
+                                                   const MaybeCallback &cb) {
+  POLYINVOKE_TRACE();
+  std::memcpy(reinterpret_cast<void *>(dst + dstOffset), reinterpret_cast<void *>(src + srcOffset), size);
+  if (cb) (*cb)();
+}
 void ObjectDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
   std::memcpy(reinterpret_cast<void *>(dst + dstOffset), src, size);
@@ -109,7 +115,10 @@ void ObjectDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset
   std::memcpy(dst, reinterpret_cast<void *>(src + srcOffset), bytes);
   if (cb) (*cb)();
 }
-void ObjectDeviceQueue::enqueueWaitBlocking() { POLYINVOKE_TRACE(); latch.waitAll(); }
+void ObjectDeviceQueue::enqueueWaitBlocking() {
+  POLYINVOKE_TRACE();
+  latch.waitAll();
+}
 ObjectDeviceQueue::ObjectDeviceQueue(const std::chrono::duration<int64_t> &timeout) : latch(timeout) { POLYINVOKE_TRACE(); }
 
 ObjectDeviceQueue::~ObjectDeviceQueue() noexcept { POLYINVOKE_TRACE(); }

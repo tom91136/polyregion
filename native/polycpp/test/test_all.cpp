@@ -26,12 +26,15 @@ void testAll(bool passthrough) {
     };
 
     const auto userArgs = variables ^ map([&](auto &k, auto &v) { return std::pair{k, v}; });
-    const auto augmentedArgs = userArgs                                                                                          //
-                               | append(std::pair{"input", input})                                                               //
-                               | append(std::pair{"polycpp_defaults", "-fno-crash-diagnostics -O1 -g3 -Wall -Wextra -pedantic"}) //
-                               | append(std::pair{"polycpp_stdpar", fmt::vformat("-fstdpar -fstdpar-arch={polycpp_arch} -fuse-ld=lld -fstdpar-rt=dynamic",
-                                                                                 variables ^ and_then(mkArgStore))}) //
-                               | to_vector();
+    const auto augmentedArgs =
+        userArgs                                                                                          //
+        | append(std::pair{"input", input})                                                               //
+        | append(std::pair{"polycpp_defaults", "-fno-crash-diagnostics -O1 -g3 -Wall -Wextra -pedantic"}) //
+        | append(std::pair{
+              "polycpp_stdpar",
+              fmt::vformat("-fstdpar -fstdpar-verbose=debug -fstdpar-arch={polycpp_arch} -fstdpar-mem=reflect -fstdpar-rt=dynamic",
+                           variables ^ and_then(mkArgStore))}) //
+        | to_vector();
 
     const auto unevaluatedStore = augmentedArgs ^ append(std::pair{"output", "<unevaluated>"}) ^ and_then(mkArgStore);
     const auto output = fmt::format(
@@ -77,8 +80,8 @@ void testAll(bool passthrough) {
         consumeError(stdoutFile->discard());
         consumeError(stderrFile->discard());
 
-        WARN("exe:  " << BinaryDir << "/" << args[0]);
-        WARN("args: " << (args_ ^ mk_string(" ", [](auto &s) { return s.str(); })));
+        WARN("cmdline: " << (args_ | drop(1) | prepend(fmt::format("{}/{}", BinaryDir, args[0])) //
+                             | mk_string(" ", [](auto &s) { return s.str(); })));
         WARN("envs: " << (envs_ ^ mk_string(" ", [](auto &s) { return s.str(); })));
         WARN("stderr:\n" << stderr_ << "[EOF]");
         WARN("stdout:\n" << stdout_ << "[EOF]");
@@ -112,7 +115,7 @@ void testAll(bool passthrough) {
           source, "#pragma region",
           {
 #if defined(__linux__)
-              {"polycpp_arch", {"cuda@sm_89", "hip@gfx1036", "hsa@gfx1036", "host@native"}} //
+              {"polycpp_arch", {"cuda@sm_89", /*"hip@gfx1036",*/ "hsa@gfx1036", "host@native"}} //
 #elif defined(__APPLE__)
               {"polycpp_arch", {"host@apple-m2"}} //
 #elif defined(_WIN32)

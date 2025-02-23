@@ -5,6 +5,7 @@
 
 #include "aspartame/all.hpp"
 #include "fmt/args.h"
+#include "polyregion/show.hpp"
 #include "polyrt/mem.hpp"
 
 using namespace polyregion::runtime;
@@ -67,7 +68,7 @@ struct Fixture {
   using ReadRemote = std::function<void(void *, uintptr_t, size_t, size_t)>;
   using WriteRemote = std::function<void(const void *, uintptr_t, size_t, size_t)>;
   using FreeRemote = std::function<void(uintptr_t)>;
-  polyregion::polyrt::SynchronisedAllocation<QueryPtr, AllocateRemote, ReadRemote, WriteRemote, FreeRemote> allocation;
+  polyregion::polyrt::SynchronisedMemAllocation<QueryPtr, AllocateRemote, ReadRemote, WriteRemote, FreeRemote> allocation;
 
   Fixture()
       : allocation(
@@ -100,7 +101,8 @@ struct Fixture {
             [](uintptr_t remotePtr) {
               fprintf(stderr, "                               Remote free(%p)\n", reinterpret_cast<void *>(remotePtr));
               std::free(reinterpret_cast<void *>(remotePtr));
-            }) {}
+            },
+            true) {}
 
   template <typename T> T *mallocLocal(size_t count = 1) {
     auto p = std::malloc(sizeof(T) * count);
@@ -376,6 +378,17 @@ TEST_CASE("linkedlist-indirect") {
   auto node1 = new (fixture.mallocLocal<Node>()) Node{1, new (fixture.mallocLocal<Other>()) Other{node2}};
 
   auto remote = fixture.localToRemote(*node1, *nodeMeta);
+
+  const char *p = reinterpret_cast<char *>(node1);
+  (*nodeMeta).visualise(stderr, [&](size_t offset, const AggregateMember &m) {
+    auto x = p + offset;
+    std::fprintf(stderr, "value=");
+    if (m.ptrIndirection != 0) {
+      polyregion::compiletime::showPtr(stderr, sizeof(void *), x);
+    } else {
+      polyregion::compiletime::showInt(stderr, false, m.type->sizeInBytes, x);
+    }
+  });
 
   CHECK(&remote != node1);
   CHECK(remote.data == 1);

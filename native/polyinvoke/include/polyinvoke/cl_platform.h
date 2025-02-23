@@ -64,9 +64,11 @@ public:
   POLYREGION_EXPORT ClDeviceQueue(const std::chrono::duration<int64_t> &timeout, decltype(store) store, decltype(queue) queue,
                                   decltype(queryMemObject) queryMemObject);
   POLYREGION_EXPORT ~ClDeviceQueue() override;
+  POLYREGION_EXPORT void enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
+                                                    const MaybeCallback &cb) override;
   POLYREGION_EXPORT void enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size,
                                                   const MaybeCallback &cb) override;
-  POLYREGION_EXPORT void enqueueDeviceToHostAsync(uintptr_t stc, size_t srcOffset, void *dst, size_t bytes,
+  POLYREGION_EXPORT void enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, void *dst, size_t bytes,
                                                   const MaybeCallback &cb) override;
   POLYREGION_EXPORT void enqueueInvokeAsync(const std::string &moduleName,  //
                                             const std::string &symbol,      //

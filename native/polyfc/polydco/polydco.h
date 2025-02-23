@@ -3,10 +3,8 @@
 #include <cassert>
 #include <cstdio>
 
-#include "polyregion/types.h"
 #include "ftypes.h"
-
-#define POLYDCO_LOG(fmt, ...) std::fprintf(stderr, "[PolyDCO] " fmt "\n", __VA_ARGS__)
+#include "polyregion/types.h"
 
 extern "C" {
 
