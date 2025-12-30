@@ -10,18 +10,19 @@
 using namespace polyregion::invoke;
 using namespace polyregion::invoke::hsa;
 
-#define CHECKED(m, f) checked((f), m, __FILE__, __LINE__)
-
 static constexpr const char *PREFIX = "HSA";
 
-static void checked(hsa_status_t result, const char *msg, const char *file, int line) {
-  if (result != HSA_STATUS_SUCCESS) {
-    const char *status = nullptr;
-    hsa_status_string(result, &status);
-    if (status) POLYINVOKE_FATAL(PREFIX, "%s:%d %s [%s]", file, line, msg, status);
-    else POLYINVOKE_FATAL(PREFIX, "%s:%d %s [hsa_status_string returned NULL, code=%d]", file, line, msg, result);
-  }
-}
+#define CHECKED(m__, f__)                                                                                                                  \
+  do {                                                                                                                                     \
+    hsa_status_t result__ = (f__);                                                                                                         \
+    if (result__ != HSA_STATUS_SUCCESS) {                                                                                                  \
+      const char *status__ = nullptr;                                                                                                      \
+      hsa_status_string(result__, &status__);                                                                                              \
+      if (status__) POLYINVOKE_FATAL(PREFIX, "%s [%s]", m__, status__);                                                                    \
+      else POLYINVOKE_FATAL(PREFIX, "%s [hsa_status_string returned NULL, code=%d]", m__, result__);                                       \
+    }                                                                                                                                      \
+  } while (0)
+
 std::variant<std::string, std::unique_ptr<Platform>> HsaPlatform::create() {
   switch (hsaew_open("libhsa-runtime64.so.1")) {
     // both cases are fine, keep going

@@ -1,7 +1,7 @@
 #include <unordered_set>
 
 #include "aspartame/all.hpp"
-#include "magic_enum.hpp"
+#include "magic_enum/magic_enum.hpp"
 
 #include "ast.h"
 #include "llvm.h"

@@ -29,7 +29,10 @@ static bool runSplice(llvm::Module &M, const bool verbose) {
 
   std::unordered_set<llvm::Function *> Protected;
   llvm_shared::findFunctionsWithStringAnnotations(M, [&](llvm::Function *F, llvm::StringRef Annotation) {
-    if (F && Annotation == "__rt_protect") Protected.emplace(F);
+    if (F &&                                       //
+        (Annotation == "polyreflect-rt-protect" || //
+         Annotation == "polyreflect-rt-odr"))
+      Protected.emplace(F);
   });
 
   for (llvm::Function &F : M) {

@@ -8,23 +8,25 @@
 using namespace polyregion::invoke;
 using namespace polyregion::invoke::cl;
 
-#define CHECKED(f) checked((f), __FILE__, __LINE__)
-
 static constexpr const char *PREFIX = "OpenCL";
 
-#define OUT_ERR __err
-#define OUT_CHECKED(f) checked([&](auto &&OUT_ERR) { return (f); }, __FILE__, __LINE__)
+#define CHECKED(f__)                                                                                                                       \
+  do {                                                                                                                                     \
+    cl_int result__ = (f__);                                                                                                               \
+    if (result__ != CL_SUCCESS) {                                                                                                          \
+      POLYINVOKE_FATAL(PREFIX, "%s:%d: %s", __FILE__, __LINE__, clewErrorString(result__));                                                \
+    }                                                                                                                                      \
+  } while (0)
 
-static void checked(cl_int result, const char *file, int line) {
-  if (result != CL_SUCCESS) POLYINVOKE_FATAL(PREFIX, "%s:%d: %s", file, line, clewErrorString(result));
-}
-
-template <typename F> static auto checked(F &&f, const char *file, int line) {
-  cl_int result = CL_SUCCESS;
-  auto y = f(&result);
-  if (result == CL_SUCCESS) return y;
-  else POLYINVOKE_FATAL(PREFIX, "%s:%d: %s", file, line, clewErrorString(result));
-}
+#define OUT_ERR err__
+#define OUT_CHECKED(f__)                                                                                                                   \
+  ([&]() {                                                                                                                                 \
+    cl_int result__ = CL_SUCCESS;                                                                                                          \
+    auto OUT_ERR = &result__;                                                                                                              \
+    auto x__ = (f__);                                                                                                                      \
+    if (result__ == CL_SUCCESS) return x__;                                                                                                \
+    POLYINVOKE_FATAL(PREFIX, "%s:%d: %s", __FILE__, __LINE__, clewErrorString(result__));                                                  \
+  })()
 
 static std::string queryDeviceInfo(cl_device_id device, cl_device_info info) {
   size_t size = 0;

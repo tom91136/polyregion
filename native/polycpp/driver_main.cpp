@@ -76,20 +76,31 @@ int main(int argc, const char *argv[]) {
 
                  const auto compileOnly = std::vector{"-c", "-S", "-E", "-M", "-MM", "-MD", "-fsyntax-only"} ^
                                           exists([&](auto &flag) { return args.has(flag); });
+
+                 switch (opts->mem) {
+                   case StdParOptions::MemKind::Direct: break;
+                   case StdParOptions::MemKind::Interpose:
+                     append(Driver::clangPassPluginFlags(polyreflectPlugin, {fmt::format("-polyreflect-verbose={}", debug ? "1" : "0"), //
+                                                                             "-polyreflect-late=Interpose"}));
+                     break;
+                   case StdParOptions::MemKind::Reflect:
+                     append({"-include", "reflect-rt/rt.hpp"});
+                     append(Driver::clangPassPluginFlags(
+                         polyreflectPlugin,
+                         {fmt::format("-polyreflect-verbose={}", debug ? "1" : "0"), //
+                          "-polyreflect-late=ProtectRT"})); // protect it here as it's an ODR error before LLD's plugin even runs
+                     append(Driver::enableLLDAndLTO(args));
+                     break;
+                 }
+
                  if (!compileOnly) {
                    switch (opts->mem) {
                      case StdParOptions::MemKind::Direct: break;
-                     case StdParOptions::MemKind::Interpose:
-                       append(Driver::clangPassPluginFlags(polyreflectPlugin, {fmt::format("-polyreflect-verbose={}", debug ? "1" : "0"), //
-                                                                               "polyreflect-late=interpose"}));
-                       break;
+                     case StdParOptions::MemKind::Interpose: break;
                      case StdParOptions::MemKind::Reflect:
-                       append({"-include", "rt-reflect/rt.hpp"});
-                       append(Driver::enableLLDAndLTO(args));
                        append(
                            Driver::lldPassPluginFlags(polyreflectPlugin, {
                                                                              fmt::format("-polyreflect-verbose={}", debug ? "1" : "0"), //
-                                                                             "-polyreflect-early=ProtectRT",                            //
                                                                              "-polyreflect-late=ReflectStack+ReflectMem",               //
                                                                          }));
                        break;

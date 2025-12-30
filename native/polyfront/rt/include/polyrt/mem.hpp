@@ -98,7 +98,8 @@ class SynchronisedMemAllocation {
       const uintptr_t memberRemotePtr = mirrorToRemote(memberLocalPtr, indirection, effectiveSizeToCount(effectiveSize), tl);
       remoteWrite(&memberRemotePtr, devicePtr, memberOffsetInBytes, sizeof(uintptr_t));
     } else {
-      std::fprintf(stderr, "[SMA] Warning: encountered foreign pointer %p\n", static_cast<void *>(memberLocalPtr));
+      std::fprintf(stderr, "[SMA] Warning: encountered foreign pointer %p when writing type @%s at offset %zu\n",
+                   static_cast<void *>(memberLocalPtr), tl.name, memberOffsetInBytes);
     }
   }
 
@@ -245,8 +246,8 @@ public:
     if (const auto query = offsetQuery(localToRemoteAlloc, p, [](auto &x) { return x.remote.sizeInBytes; })) {
       const auto [alloc, offsetInBytes] = *query;
       if (debug)
-        std::fprintf(stderr, "[SMA] syncRemoteToLocal(p=%p, remote=0x%jx, sizeInByte=%ld, offsetInBytes=%ld)\n", p, alloc->remote.ptr,
-                     alloc->remote.sizeInBytes, offsetInBytes);
+        std::fprintf(stderr, "[SMA] syncRemoteToLocal(p=%p, remote=0x%jx, sizeInByte=%ld, offsetInBytes=%ld, t=@%s)\n", p,
+                     alloc->remote.ptr, alloc->remote.sizeInBytes, offsetInBytes, alloc->layout ? alloc->layout->name : "???");
       // we want to perform an inclusive copy: an object is copied if its range intersects with the request range
       const runtime::TypeLayout *tl = alloc->layout;
 
@@ -254,9 +255,11 @@ public:
       const size_t objIdxOffset = offsetInBytes % objSize; // offset to return to base at p
       char *baseAtObjIdx = static_cast<char *>(p) - objIdxOffset;
 
+      const size_t maxObjCount = alloc->remote.sizeInBytes / objSize;
       const size_t objIdxBegin = integralFloor(offsetInBytes, objSize);
-      const size_t objIdxEnd = objIdxBegin + integralCeil(sizeInByte.value_or(objSize), objSize);
+      const size_t objIdxEnd = std::min(maxObjCount, objIdxBegin + integralCeil(sizeInByte.value_or(objSize), objSize));
       const size_t totalObjBytes = (objIdxEnd - objIdxBegin) * objSize;
+
       remoteRead(baseAtObjIdx, alloc->remote.ptr, objIdxBegin * objSize, totalObjBytes);
       if (tl) {
         if (!isSet(tl->attrs, runtime::LayoutAttrs::Opaque)) { // short-circuit if the struct is opaque (no further pointers)

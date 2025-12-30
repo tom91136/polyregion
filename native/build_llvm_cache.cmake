@@ -1,11 +1,11 @@
 
 if (UNIX)
-    list(APPEND RUNTIME_COMPONENTS compiler-rt libcxx libcxxabi libunwind)
+    list(APPEND RUNTIME_COMPONENTS compiler-rt flang-rt libcxx libcxxabi libunwind)
     #    list(APPEND RUNTIME_TARGETS cxx-headers)
 elseif (WIN32)
     # needs a bootstrapping build for libcxx because cl.exe isn't support
     # see https://libcxx.llvm.org/BuildingLibcxx.html#support-for-windows
-    list(APPEND RUNTIME_COMPONENTS compiler-rt)
+    list(APPEND RUNTIME_COMPONENTS compiler-rt flang-rt)
     # nothing for RUNTIME_TARGETS
 else ()
     message(FATAL_ERROR "Unsupported platform, cannot determine runtimes to build")
@@ -22,17 +22,13 @@ endif ()
 
 set(LLVM_TARGETS_TO_BUILD
         AArch64
-        ARM
         X86
-        ARM
         NVPTX
         AMDGPU
         CACHE STRING "")
 
-# Enable the LLVM projects and runtimes.
 set(LLVM_ENABLE_PROJECTS
         flang
-        mlir
         openmp
         clang
         clang-tools-extra
@@ -47,6 +43,7 @@ set(LLVM_ENABLE_RUNTIMES ${RUNTIME_COMPONENTS} CACHE STRING "")
 
 set(LLVM_ENABLE_ZLIB ON CACHE BOOL "")
 set(LLVM_ENABLE_ZSTD OFF CACHE BOOL "")
+set(LLVM_ENABLE_LIBEDIT OFF CACHE BOOL "")
 set(LLVM_ENABLE_LIBPFM OFF CACHE BOOL "")
 set(LLVM_ENABLE_LIBXML2 OFF CACHE BOOL "")
 set(LLVM_ENABLE_TERMINFO OFF CACHE BOOL "")
@@ -63,6 +60,9 @@ set(LLVM_ABI_BREAKING_CHECKS "FORCE_ON" CACHE STRING "")
 #
 set(LIBCXX_INSTALL_MODULES ON CACHE BOOL "")
 set(LIBCXX_INCLUDE_TESTS OFF CACHE BOOL "")
+
+set(FLANG_INCLUDE_TESTS OFF CACHE BOOL "")
+set(FLANG_INCLUDE_DOCS OFF CACHE BOOL "")
 
 set(LIBOMP_INSTALL_ALIASES OFF CACHE BOOL "")
 set(LIBOMP_OMPD_GDB_SUPPORT OFF CACHE BOOL "")
@@ -109,23 +109,26 @@ if (APPLE)
             OUTPUT_STRIP_TRAILING_WHITESPACE)
     set(DEFAULT_SYSROOT "${DARWIN_SYSROOT}" CACHE STRING "")
     message(STATUS "Apple: DEFAULT_SYSROOT is set to: ${DEFAULT_SYSROOT}")
+    set(DEFAULT_SYSROOT "${DARWIN_SYSROOT}" CACHE STRING "")
+
+    execute_process(
+            COMMAND brew --prefix zlib
+            OUTPUT_VARIABLE BREW_ZLIB_PREFIX
+            OUTPUT_STRIP_TRAILING_WHITESPACE)
+    set(ZLIB_ROOT "${BREW_ZLIB_PREFIX}" CACHE STRING "")
+
 endif ()
 
-# You likely want more tools; this is just an example :) Note that we need to
-# include cxx-headers explicitly here (in addition to it being added to
-# LLVM_RUNTIME_DISTRIBUTION_COMPONENTS above).
 set(LLVM_DISTRIBUTION_COMPONENTS
-        # LLVM
-
         # Linker
         lld
 
+        # Flang
         flang
 
         # Clang tools
         clang
         clang-tidy
-#        clang-rename
         clang-resource-headers
         clang-format
         clang-offload-bundler
@@ -139,16 +142,22 @@ set(LLVM_DISTRIBUTION_COMPONENTS
 
         # LLVM tools
         llc
+        lli
+        opt
         llvm-tblgen
         llvm-cov
         llvm-link
         llvm-dis
         llvm-profdata
         llvm-profgen
+        llvm-diff
+        llvm-extract
 
         # binutil replacements
         llvm-addr2line
+        llvm-dwarfdump
         llvm-ar
+        llvm-as
         llvm-cxxfilt
         llvm-install-name-tool
         llvm-nm

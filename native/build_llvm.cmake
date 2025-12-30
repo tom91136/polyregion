@@ -32,56 +32,6 @@ if (DOWNLOAD_LLVM)
     file(ARCHIVE_EXTRACT INPUT ${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src.tar.xz DESTINATION "${LLVM_BUILD_DIR}")
 endif ()
 
-### Patches ###
-
-string(TIMESTAMP CURRENT_TIME UTC)
-
-# Remove benchmarks, see https://github.com/llvm/llvm-project/issues/54941
-file(WRITE ${LLVM_BUILD_DIR}/third-party/benchmark/CMakeLists.txt "")
-
-# Patch -nostdinc++ detection failure in compiler-rt, it's unclear why this only happens in that particular module
-set(RUNTIME_CMAKELIST_PATH "${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src/runtimes/CMakeLists.txt")
-file(READ "${RUNTIME_CMAKELIST_PATH}" RUNTIME_CMAKELIST_CONTENT)
-
-set(NOSTDINCXX_FRAGMENT_REGEX "check_cxx_compiler_flag\\(-nostdinc\\+\\+ CXX_SUPPORTS_NOSTDINCXX_FLAG\\)
-if \\(CXX_SUPPORTS_NOSTDINCXX_FLAG\\)")
-
-if (RUNTIME_CMAKELIST_CONTENT MATCHES "${NOSTDINCXX_FRAGMENT_REGEX}")
-    string(REGEX REPLACE "${NOSTDINCXX_FRAGMENT_REGEX}" "# CXX_SUPPORTS_NOSTDINCXX_FLAG patched at ${CURRENT_TIME}
-check_cxx_compiler_flag(-nostdinc++ CXX_SUPPORTS_NOSTDINCXX_FLAG)
-set(CXX_SUPPORTS_NOSTDINCXX_FLAG ON)
-if (CXX_SUPPORTS_NOSTDINCXX_FLAG)" RUNTIME_CMAKELIST_CONTENT "${RUNTIME_CMAKELIST_CONTENT}")
-    file(WRITE "${RUNTIME_CMAKELIST_PATH}" "${RUNTIME_CMAKELIST_CONTENT}")
-    message(STATUS "Patched CXX_SUPPORTS_NOSTDINCXX_FLAG in ${RUNTIME_CMAKELIST_PATH}")
-endif ()
-
-# Always execute branch with NOT CMAKE_CROSSCOMPILING in Flang
-# FIXME this works for LLVM 19.1.6, need to recheck for LLVM 20
-set(F18_CMAKELIST_PATH "${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src/flang/tools/f18/CMakeLists.txt")
-file(READ "${F18_CMAKELIST_PATH}" F18_CMAKELIST_CONTENT)
-
-set(CROSSCOMPILING_CONDITION_REGEX "if \\(NOT CMAKE_CROSSCOMPILING\\)")
-
-if (F18_CMAKELIST_CONTENT MATCHES "${CROSSCOMPILING_CONDITION_REGEX}")
-    string(REGEX REPLACE "${CROSSCOMPILING_CONDITION_REGEX}" "# NOT CMAKE_CROSSCOMPILING patched at ${CURRENT_TIME}
-if (NOT CMAKE_CROSSCOMPILING OR TRUE)" F18_CMAKELIST_CONTENT "${F18_CMAKELIST_CONTENT}")
-    file(WRITE "${F18_CMAKELIST_PATH}" "${F18_CMAKELIST_CONTENT}")
-    message(STATUS "Patched NOT CMAKE_CROSSCOMPILING in ${F18_CMAKELIST_PATH}")
-endif ()
-
-# Replace ` flang-new ` with ` $<TARGET_FILE:flang-new> ` in f18
-# FIXME this works for LLVM 19 and 20, need to recheck if project names are different in the future
-foreach (bin_name "flang" "flang-new")
-    if (F18_CMAKELIST_CONTENT MATCHES " ${bin_name} ")
-        string(REPLACE " ${bin_name} " " $<TARGET_FILE:${bin_name}> " F18_CMAKELIST_CONTENT "${F18_CMAKELIST_CONTENT}")
-        file(WRITE "${F18_CMAKELIST_PATH}" "${F18_CMAKELIST_CONTENT}")
-        message(STATUS "Patched ' ${bin_name} ' with ' $<TARGET_FILE:${bin_name}> ' in ${F18_CMAKELIST_PATH}")
-    endif ()
-endforeach ()
-
-
-### End patches ###
-
 if (UNIX AND NOT APPLE)
     list(APPEND BUILD_OPTIONS -DLLVM_ENABLE_LTO=Thin)
 endif ()

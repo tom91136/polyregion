@@ -32,7 +32,7 @@ void testAll(bool passthrough) {
         | append(std::pair{"polycpp_defaults", "-fno-crash-diagnostics -O1 -g3 -Wall -Wextra -pedantic"}) //
         | append(std::pair{
               "polycpp_stdpar",
-              fmt::vformat("-fstdpar -fstdpar-verbose=debug -fstdpar-arch={polycpp_arch} -fstdpar-mem=reflect -fstdpar-rt=dynamic",
+              fmt::vformat("-fstdpar -fstdpar-verbose=debug -fstdpar-arch={polycpp_arch} -fstdpar-mem=reflect -fstdpar-rt=dynamic -v",
                            variables ^ and_then(mkArgStore))}) //
         | to_vector();
 
@@ -59,6 +59,7 @@ void testAll(bool passthrough) {
 
         // if host, + -fsanitize=address,undefined
         envs.emplace_back("ASAN_OPTIONS=alloc_dealloc_mismatch=0,detect_leaks=0");
+        envs.emplace_back("POLYRT_DEBUG=2");
         //        envs.emplace_back("LD_PRELOAD=/usr/bin/../lib/clang/18/lib/x86_64-redhat-linux-gnu/libclang_rt.asan.so");
 
         if (auto path = std::getenv("PATH"); path) envs.emplace_back(std::string("PATH=") + path);

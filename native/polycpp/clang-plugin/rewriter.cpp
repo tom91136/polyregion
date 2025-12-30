@@ -16,7 +16,7 @@
 #include "rewriter.h"
 
 #include "aspartame/all.hpp"
-#include "magic_enum.hpp"
+#include "magic_enum/magic_enum.hpp"
 
 using namespace polyregion::polystl;
 using namespace aspartame;

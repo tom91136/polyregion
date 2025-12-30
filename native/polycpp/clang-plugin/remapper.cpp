@@ -6,7 +6,7 @@
 
 #include "ast.h"
 #include "clang_utils.h"
-#include "magic_enum.hpp"
+#include "magic_enum/magic_enum.hpp"
 #include "polyregion/llvm_dyn.hpp"
 #include "remapper.h"
 
@@ -721,6 +721,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         const auto targetTpe = handleType(stmt->getType(), r);
         const auto sourceExpr = handleExpr(stmt->getSubExpr(), r);
         switch (stmt->getCastKind()) {
+          case clang::CK_FloatingCast:
           case clang::CK_IntegralCast:
           case clang::CK_IntegralToFloating:
           case clang::CK_FloatingToIntegral:

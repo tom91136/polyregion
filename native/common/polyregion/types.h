@@ -12,6 +12,12 @@
 
 #include "export.h"
 
+#ifdef __clang__
+  #define __RT_PROTECT [[clang::annotate("polyreflect-rt-protect")]]
+#else
+  #define __RT_PROTECT
+#endif
+
 namespace polyregion::compiletime {
 
 enum class POLYREGION_EXPORT Target : uint8_t {
@@ -29,7 +35,7 @@ enum class POLYREGION_EXPORT Target : uint8_t {
   Source_C_OpenCL1_1,
   Source_C_Metal1_0,
 };
-static constexpr std::string_view to_string(const Target &target) {
+__RT_PROTECT static constexpr std::string_view to_string(const Target &target) {
   switch (target) {
     case Target::Object_LLVM_HOST: return "host";
     case Target::Object_LLVM_x86_64: return "x86_64";
@@ -44,7 +50,7 @@ static constexpr std::string_view to_string(const Target &target) {
     case Target::Source_C_Metal1_0: return "metal1_0";
   }
 }
-static constexpr std::optional<Target> targetFromOrdinal(std::underlying_type_t<Target> ordinal) {
+__RT_PROTECT static constexpr std::optional<Target> targetFromOrdinal(std::underlying_type_t<Target> ordinal) {
   auto target = static_cast<Target>(ordinal);
   switch (target) {
     case Target::Object_LLVM_HOST:
@@ -70,7 +76,7 @@ enum class POLYREGION_EXPORT OptLevel : uint8_t {
   O3,
   Ofast,
 };
-static constexpr std::string_view to_string(const OptLevel &target) {
+__RT_PROTECT static constexpr std::string_view to_string(const OptLevel &target) {
   switch (target) {
     case OptLevel::O0: return "O0";
     case OptLevel::O1: return "O1";
@@ -79,7 +85,7 @@ static constexpr std::string_view to_string(const OptLevel &target) {
     case OptLevel::Ofast: return "Ofast";
   }
 }
-static constexpr std::optional<OptLevel> optFromOrdinal(std::underlying_type_t<OptLevel> ordinal) {
+__RT_PROTECT static constexpr std::optional<OptLevel> optFromOrdinal(std::underlying_type_t<OptLevel> ordinal) {
   auto target = static_cast<OptLevel>(ordinal);
   switch (target) {
     case OptLevel::O0:
@@ -92,7 +98,7 @@ static constexpr std::optional<OptLevel> optFromOrdinal(std::underlying_type_t<O
   }
 }
 
-static const std::unordered_map<std::string, Target> &targets() {
+__RT_PROTECT static const std::unordered_map<std::string, Target> &targets() {
   static std::unordered_map<std::string, Target> //
       data{                                      // obj
            {"host", Target::Object_LLVM_HOST},
@@ -128,7 +134,7 @@ static const std::unordered_map<std::string, Target> &targets() {
   return data;
 }
 
-static std::optional<Target> parseTarget(const std::string &name) {
+__RT_PROTECT static std::optional<Target> parseTarget(const std::string &name) {
   std::string lower(name.size(), {});
   for (size_t i = 0; i < name.size(); ++i)
     lower[i] = std::tolower(name[i]);
@@ -162,7 +168,7 @@ enum class POLYREGION_EXPORT Type : uint8_t {
   Scratch,
 };
 
-static constexpr size_t byteOfType(Type t) {
+__RT_PROTECT static constexpr size_t byteOfType(Type t) {
   switch (t) {
     case Type::Void: return 0;
     case Type::Bool1: [[fallthrough]];
@@ -183,7 +189,7 @@ static constexpr size_t byteOfType(Type t) {
   }
 }
 
-static constexpr std::string_view to_string(const Type &type) {
+__RT_PROTECT static constexpr std::string_view to_string(const Type &type) {
   switch (type) {
     case Type::Void: return "Void";
     case Type::Bool1: return "Bool1";
@@ -211,19 +217,19 @@ using TypedPointer = std::pair<Type, void *>;
 namespace polyregion::runtime {
 
 enum class POLYREGION_EXPORT PlatformKind : uint8_t { HostThreaded = 1, Managed };
-static constexpr std::string_view to_string(const PlatformKind &b) {
+__RT_PROTECT static constexpr std::string_view to_string(const PlatformKind &b) {
   switch (b) {
     case PlatformKind::HostThreaded: return "HostThreaded";
     case PlatformKind::Managed: return "Managed";
     default: std::fprintf(stderr, "Unimplemented PlatformKind\n"); std::abort();
   }
 }
-static constexpr std::optional<PlatformKind> parsePlatformKind(std::string_view name) {
+__RT_PROTECT static constexpr std::optional<PlatformKind> parsePlatformKind(std::string_view name) {
   if (name == "host" || name == "hostthreaded") return PlatformKind::HostThreaded;
   if (name == "managed") return PlatformKind::Managed;
   return {};
 }
-static constexpr runtime::PlatformKind targetPlatformKind(const compiletime::Target &target) {
+__RT_PROTECT static constexpr runtime::PlatformKind targetPlatformKind(const compiletime::Target &target) {
   switch (target) {
     case compiletime::Target::Object_LLVM_HOST:
     case compiletime::Target::Object_LLVM_x86_64:
@@ -242,7 +248,7 @@ static constexpr runtime::PlatformKind targetPlatformKind(const compiletime::Tar
 }
 
 enum class POLYREGION_EXPORT ModuleFormat : uint8_t { Source = 1, Object, DSO, PTX, HSACO, SPIRV };
-static constexpr std::string_view to_string(const ModuleFormat &x) {
+__RT_PROTECT static constexpr std::string_view to_string(const ModuleFormat &x) {
   switch (x) {
     case ModuleFormat::Source: return "Source";
     case ModuleFormat::Object: return "Object";
@@ -253,7 +259,7 @@ static constexpr std::string_view to_string(const ModuleFormat &x) {
     default: std::fprintf(stderr, "Unimplemented ModuleFormat\n"); std::abort();
   }
 }
-static constexpr std::optional<ModuleFormat> parseModuleFormat(std::string_view name) {
+__RT_PROTECT static constexpr std::optional<ModuleFormat> parseModuleFormat(std::string_view name) {
   if (name == "src" || name == "source") return ModuleFormat::Source;
   if (name == "obj" || name == "object") return ModuleFormat::Object;
   if (name == "dso") return ModuleFormat::DSO;
@@ -263,7 +269,7 @@ static constexpr std::optional<ModuleFormat> parseModuleFormat(std::string_view 
   return {};
 }
 
-static constexpr std::optional<runtime::ModuleFormat> moduleFormatOf(const compiletime::Target &target) {
+__RT_PROTECT static constexpr std::optional<runtime::ModuleFormat> moduleFormatOf(const compiletime::Target &target) {
   switch (target) {
     case compiletime::Target::Object_LLVM_HOST:
     case compiletime::Target::Object_LLVM_x86_64:
@@ -292,15 +298,19 @@ enum class LayoutAttrs : size_t {
   Primitive = /* */ 1 << 2, // no members
 };
 
-template <typename T> constexpr std::underlying_type_t<T> to_underlying(T e) { return static_cast<std::underlying_type_t<T>>(e); }
-constexpr LayoutAttrs operator|(const LayoutAttrs l, const LayoutAttrs r) {
+template <typename T> __RT_PROTECT constexpr std::underlying_type_t<T> to_underlying(T e) {
+  return static_cast<std::underlying_type_t<T>>(e);
+}
+__RT_PROTECT constexpr LayoutAttrs operator|(const LayoutAttrs l, const LayoutAttrs r) {
   return static_cast<LayoutAttrs>(to_underlying(l) | to_underlying(r));
 }
-constexpr LayoutAttrs &operator|=(LayoutAttrs &lhs, const LayoutAttrs rhs) {
+__RT_PROTECT constexpr LayoutAttrs &operator|=(LayoutAttrs &lhs, const LayoutAttrs rhs) {
   lhs = lhs | rhs;
   return lhs;
 }
-constexpr bool isSet(const LayoutAttrs value, const LayoutAttrs flag) { return (to_underlying(value) & to_underlying(flag)) != 0; }
+__RT_PROTECT constexpr bool isSet(const LayoutAttrs value, const LayoutAttrs flag) {
+  return (to_underlying(value) & to_underlying(flag)) != 0;
+}
 
 struct TypeLayout;
 struct AggregateMember {
@@ -322,7 +332,7 @@ struct TypeLayout {
   size_t memberCount;
   const AggregateMember *members;
 
-  template <typename T> static TypeLayout named(const char *name) {
+  template <typename T> __RT_PROTECT static TypeLayout named(const char *name) {
     return {
         .name = name,
         .sizeInBytes = sizeof(T),
@@ -333,8 +343,8 @@ struct TypeLayout {
     };
   }
 
-  void visualise(std::FILE *fd, const std::function<void(size_t, const AggregateMember &)> &show = {}, //
-                 const size_t level = 0, const size_t offset = 0) const {
+  __RT_PROTECT void visualise(std::FILE *fd, const std::function<void(size_t, const AggregateMember &)> &show = {}, //
+                              const size_t level = 0, const size_t offset = 0) const {
     constexpr size_t maxCol = 128;
     constexpr size_t alignColumn = 60; //
 
@@ -385,7 +395,7 @@ struct TypeLayout {
     if (topLevel) std::fprintf(fd, "         ╰────────\n");
   }
 
-  void print(std::FILE *fd) const {
+  __RT_PROTECT void print(std::FILE *fd) const {
     fprintf(fd, "TypeLayout{\n");
     fprintf(fd, "    .name = \"%s\",\n", name);
     fprintf(fd, "    .sizeInBytes = %zuULL,\n", sizeInBytes);
@@ -437,7 +447,7 @@ static_assert(std::is_standard_layout_v<KernelBundle>);
 } // namespace polyregion::runtime
 
 template <> struct std::hash<polyregion::compiletime::Target> {
-  std::size_t operator()(polyregion::compiletime::Target t) const noexcept {
+  __RT_PROTECT std::size_t operator()(polyregion::compiletime::Target t) const noexcept {
     return static_cast<std::underlying_type_t<polyregion::compiletime::Target>>(t);
   }
 };

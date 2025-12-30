@@ -83,7 +83,7 @@ llvm::DataLayout llvmc::TargetInfo::resolveDataLayout() const {
   if (target) {
     return target
         ->createTargetMachine( //
-            triple.str(),      //
+            triple,            //
             cpu.uArch,         //
             cpu.features,      //
             {}, {})
@@ -284,7 +284,7 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
     // The code model here has nothing to do with the actual object code size, it's about controlling the relocation.
     // See https://stackoverflow.com/questions/40493448/what-does-the-codemodel-in-clang-llvm-refer-to
     auto tm = static_cast<TargetMachine *>(info.target->createTargetMachine( //
-        info.triple.str(),                                                   //
+        info.triple,                                                         //
         info.cpu.uArch,                                                      //
         info.cpu.features,                                                   //
         options, llvm::Reloc::Model::PIC_, llvm::CodeModel::Large, level));

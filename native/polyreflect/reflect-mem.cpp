@@ -46,6 +46,7 @@
 #include "polyregion/llvm_ir.hpp"
 #include "reflect-mem.h"
 
+#include <cmath>
 #include <stack>
 
 namespace {
@@ -127,10 +128,22 @@ struct MemAccess {
   }
 };
 
+static std::string showConcise(const llvm::Value *V) {
+  if (const auto F = llvm::dyn_cast<llvm::Function>(V)) {
+    return V->getName().str();
+  }
+  std::string s;
+  llvm::raw_string_ostream os(s);
+  V->print(os);
+  return s;
+}
+
 class CoarseGrainedTaintAnalysis {
 
   std::unordered_set<llvm::Value *> tainted;
   std::stack<llvm::Value *> workList;
+  std::unordered_multimap<llvm::Value *, llvm::Value *> globals;
+  std::function<bool(llvm::Function *)> fnPredicate = [](auto) { return true; };
   bool debug = false;
 
   bool isTainted(llvm::Value *V) const { return tainted.count(V); }
@@ -145,23 +158,42 @@ class CoarseGrainedTaintAnalysis {
   }
 
   void taint(llvm::Value *V) {
-    if (tainted.insert(V).second) {
-      workList.push(V);
-      if (debug) {
-        if (const auto I = llvm::dyn_cast<llvm::Instruction>(V))
-          llvm::errs() << "[CGTA]       marking ins `" << *I << "` (from: " << I->getFunction()->getName() << ")\n";
-        else if (const auto A = llvm::dyn_cast<llvm::Argument>(V))
-          llvm::errs() << "[CGTA]       marking arg `" << *A << "` (from: " << A->getParent()->getName() << ")\n";
-        else llvm::errs() << "[CGTA]       marking val`" << *V << "`\n";
+
+    if (llvm::isa<llvm::ConstantPointerNull>(V)) return;
+
+    if (const auto GV = llvm::dyn_cast<llvm::GlobalVariable>(V)) { // skip LLVM globals
+      if (GV->getSection() == "llvm.metadata") return;
+      if (const auto name = GV->getName();      //
+          name == "@llvm.global.annotations" || //
+          name == "@llvm.used")
+        return;
+    }
+
+    if (const auto F = llvm::dyn_cast<llvm::Function>(V)) {
+      switch (F->getIntrinsicID()) {
+        case llvm::Intrinsic::annotation: [[fallthrough]];
+        case llvm::Intrinsic::ptr_annotation: [[fallthrough]];
+        case llvm::Intrinsic::var_annotation: [[fallthrough]];
+        case llvm::Intrinsic::lifetime_start: [[fallthrough]];
+        case llvm::Intrinsic::lifetime_end: return;
+        default: break;
       }
     }
-  }
 
-  static llvm::Value *unwrapAll(llvm::Value *V) {
-    if (const auto CE = llvm::dyn_cast<llvm::ConstantExpr>(V)) {
-      return unwrapAll(CE->getAsInstruction());
+    if (const auto I = llvm::dyn_cast<llvm::Instruction>(V)) {
+      if (!fnPredicate(I->getFunction())) return;
+      if (debug) llvm::errs() << "[CGTA]       marking ins `" << *I << "` (from: " << I->getFunction()->getName() << ")\n";
+    } else if (const auto A = llvm::dyn_cast<llvm::Argument>(V)) {
+      if (!fnPredicate(A->getParent())) return;
+      if (debug) llvm::errs() << "[CGTA]       marking arg `" << *A << "` (from: " << A->getParent()->getName() << ")\n";
+    } else if (const auto F = llvm::dyn_cast<llvm::Function>(V)) {
+      if (!fnPredicate(F)) return;
+      if (debug) llvm::errs() << "[CGTA]       marking fn  `" << showConcise(F) << "`\n";
+    } else {
+      if (debug) llvm::errs() << "[CGTA]       marking val`" << *V << "`\n";
     }
-    return V;
+
+    if (tainted.insert(V).second) workList.push(V);
   }
 
   void propagateForward() {
@@ -171,17 +203,26 @@ class CoarseGrainedTaintAnalysis {
       while (!workList.empty()) {
         llvm::Value *V = workList.top();
         workList.pop();
-        if (debug) llvm::errs() << "[CGTA]   propagating value `" << *V << "`\n";
+        if (debug) llvm::errs() << "[CGTA]   propagating value `" << showConcise(V) << "`\n";
+        // 0. forwarding propagation
+        if (debug) llvm::errs() << "[CGTA]     globals:\n";
+        for (auto [it, end] = globals.equal_range(V); it != end; ++it) {
+          taint(it->second);
+        }
         // 1. spanning propagation
         if (debug) llvm::errs() << "[CGTA]     spanning:\n";
         llvm_shared::visitDyn0(
-            V,                                                                  //
+            V, //
+            [&](llvm::ConstantAggregate *C) {
+              for (auto &op : C->operands()) // possibly a vtable
+                if (op->getType()->isPointerTy()) taint(op);
+            },
             [&](llvm::GetElementPtrInst *I) { taint(I->getPointerOperand()); }, //
             [&](llvm::LoadInst *I) { taint(I->getPointerOperand()); },          //
             [&](llvm::StoreInst *I) {
               taint(I->getPointerOperand());
               if (I->getValueOperand()->getType()->isPointerTy()) taint(I->getValueOperand());
-            },                                                                   //
+            },
             [&](llvm::ExtractValueInst *I) { taint(I->getAggregateOperand()); }, //
             [&](llvm::InsertValueInst *I) { taint(I->getAggregateOperand()); },  //
             [&](llvm::IntToPtrInst *I) { taint(I->getOperand(0)); },             //
@@ -196,10 +237,11 @@ class CoarseGrainedTaintAnalysis {
             });
         // 2. forwarding propagation
         for (llvm::User *U : V->users()) {
-          if (debug) llvm::errs() << "[CGTA]     uses: `" << *U << "`\n";
+          if (debug) llvm::errs() << "[CGTA]     uses: `" << showConcise(U) << "`\n";
           //  XXX do not taint the unwrapped instruction directly as it may be a constant
           llvm_shared::visitDyn0( //
               U,                  //
+
               [&](llvm::ConstantExpr *C) {
                 // XXX do not use C->getAsInstruction() as it will insert it into the module!
                 switch (C->getOpcode()) {
@@ -231,6 +273,7 @@ class CoarseGrainedTaintAnalysis {
               [&](llvm::CallBase *CB) {
                 // XXX it's impossible to get a CallInst in a ConstantExpr, so this should be safe
                 auto F = CB->getCalledFunction();
+                if (!fnPredicate(F)) return;
                 if (!F) return; // XXX handle indirect calls later
                 bool defer = false;
                 for (size_t i = 0; i < CB->arg_size(); ++i) {
@@ -249,6 +292,7 @@ class CoarseGrainedTaintAnalysis {
     Deferred deferred;
     while (forwards(deferred)) {
       for (auto &[F, CB] : deferred) {
+        if (!fnPredicate(F)) continue;
         if (isReturnTainted(F)) taint(CB);
       }
       deferred.clear();
@@ -256,41 +300,74 @@ class CoarseGrainedTaintAnalysis {
   }
 
 public:
-  static std::unordered_set<llvm::Value *> propagate(const std::vector<llvm::Function *> &Roots, //
+  static std::unordered_set<llvm::Value *> propagate(llvm::Module &M,                            //
+                                                     const std::vector<llvm::Function *> &Roots, //
                                                      const std::vector<llvm::Value *> &Values,   //
-                                                     const bool debug = false) {
+                                                     const std::function<bool(llvm::Function *)> &fnPredicate, const bool debug = false) {
     CoarseGrainedTaintAnalysis t;
     t.debug = debug;
+    t.fnPredicate = fnPredicate;
     std::unordered_set<llvm::Function *> visited;
     std::stack<llvm::Function *> workList;
     for (const auto R : Roots)
       workList.emplace(R);
     for (const auto V : Values)
       t.taint(V);
+
+    if (debug) llvm::errs() << "[CGTA] resolving globals for " << M.getName() << "\n";
+    for (auto &G : M.globals()) {
+      // if (debug) llvm::errs() << "[CGTA]   global: " << G << "\n";
+      if (!G.hasInitializer()) continue;
+      auto init = G.getInitializer();
+      if (llvm::isa<llvm::GlobalValue>(init)) continue;
+      for (auto &op : init->operands()) {
+        t.globals.emplace(op, &G);
+        if (auto AGG = llvm::dyn_cast<llvm::ConstantAggregate>(op)) {
+          for (auto &aggOps : AGG->operands())
+            t.globals.emplace(aggOps, AGG);
+        }
+      }
+    }
+    if (debug) llvm::errs() << "[CGTA] found " << t.globals.size() << " globals\n";
     t.propagateForward();
     while (!workList.empty()) {
       auto F = workList.top();
       workList.pop();
       if (!visited.insert(F).second) continue;
-      if (debug) llvm::errs() << "[CGTA] function: `" << F->getName() << "`\n";
+      if (debug) llvm::errs() << "[CGTA] function: `" << showConcise(F) << "`\n";
+      if (F->hasAddressTaken()) {
+        t.taint(F);
+        for (auto &a : F->args()) {
+           t.taint(&a);
+        }
+      }
+      t.propagateForward();
       for (auto &arg : F->args()) {
-        if (!t.isTainted(&arg)) continue;
+        if (!t.isTainted(&arg) ) continue;
         if (debug) llvm::errs() << "[CGTA]   tainted arg: `" << arg << "`\n";
         for (const auto &U : F->uses()) {
           if (auto ACS = llvm::AbstractCallSite(&U)) {
             t.taint(ACS.getCallArgOperand(arg.getArgNo()));
-            t.propagateForward();
+
             const auto call = ACS.getInstruction();
-            if (t.isReturnTainted(call->getFunction())) t.taint(call);
-            if (debug) llvm::errs() << "[CGTA]   push next: `" << call->getFunction()->getName() << "`\n";
-            workList.push(call->getFunction());
+            if (auto next = call->getFunction(); next && fnPredicate(next)) {
+              if (t.isReturnTainted(next)) t.taint(call);
+              if (debug) llvm::errs() << "[CGTA]   push next: `" << next->getName() << "`\n";
+              workList.push(next);
+            }
           } else if (debug) {
-            llvm::errs() << "[CGTA]   unknown use (failed ACS): \n";
-            U->print(llvm::errs());
-            llvm::errs() << "\n";
+
+            if (const auto fnNoACS = llvm::dyn_cast<llvm::Function>(&U)) {
+              llvm::errs() << "[CGTA]   unknown use (failed ACS, usage is a function): " << fnNoACS->getName() << "\n";
+            } else {
+              llvm::errs() << "[CGTA]   unknown use (failed ACS): \n";
+              U->print(llvm::errs());
+              llvm::errs() << "\n";
+            }
           }
         }
       }
+      t.propagateForward();
     }
     return t.tainted;
   }
@@ -457,12 +534,24 @@ bool runSplice(llvm::Module &M, llvm::FunctionAnalysisManager &FAM, const bool v
       if (verbose) llvm::errs() << "[ReflectMemPass] Skipping unknown annotated in " << F.getName() << ": `" << *V << "`\n";
     }
   });
+  std::unordered_set<const llvm::Function *> ignored;
+  if (verbose) {
+    llvm_shared::findFunctionsWithStringAnnotations(M, [&](llvm::Function *F, llvm::StringRef Annotation) {
+      if (F &&                                       //
+          (Annotation == "polyreflect-rt-protect" || //
+           Annotation == "polyreflect-rt-odr"))
+        ignored.emplace(F);
+    });
+    llvm::errs() << "[ReflectMemPass] Found " << ignored.size() << " ignored functions values in module " << M.getName() << "\n";
+  }
 
   if (verbose) {
     llvm::errs() << "[ReflectMemPass] Found " << values.size() << " annotated values in module " << M.getName() << "\n";
     llvm::errs() << "[ReflectMemPass] Running CGTA\n";
   }
-  const auto tainted = CoarseGrainedTaintAnalysis::propagate(roots, values, false);
+
+  const auto tainted =
+      CoarseGrainedTaintAnalysis::propagate(M, roots, values, [&](const llvm::Function *F) { return ignored.count(F) == 0; }, true);
 
   if (verbose) llvm::errs() << "[ReflectMemPass] CGTA yielded " << tainted.size() << " tainted values\n";
 
@@ -470,6 +559,7 @@ bool runSplice(llvm::Module &M, llvm::FunctionAnalysisManager &FAM, const bool v
       tainted //
       ^ group_by([](auto &V) -> llvm::Function * {
           if (auto I = llvm::dyn_cast<llvm::Instruction>(V)) return I->getFunction();
+          if (auto A = llvm::dyn_cast<llvm::Argument>(V)) return A->getParent();
           return {};
         })                                                                            //
       ^ to_vector()                                                                   //
@@ -477,12 +567,30 @@ bool runSplice(llvm::Module &M, llvm::FunctionAnalysisManager &FAM, const bool v
       ^ map([](auto &F, auto &Ins) { return std::pair{F, Ins ^ to_vector()}; });
 
   if (verbose) {
+    size_t cgtaLoads = 0, cgtaStores = 0;
     llvm::errs() << "[ReflectMemPass] CGTA summary:\n";
-    for (auto &[F, Ins] : groups) {
+    for (auto &[F, Vs] : groups) {
       llvm::errs() << "[ReflectMemPass]   - " << (F ? F->getName() : llvm::StringRef("(top-level)")) << "\n";
-      for (auto &I : Ins)
-        llvm::errs() << "[ReflectMemPass]     `" << *I << "`\n";
+      for (auto &V : Vs) {
+        llvm::errs() << "[ReflectMemPass]     `" << showConcise(V) << "`\n";
+        if (llvm::isa<llvm::LoadInst>(V)) cgtaLoads++;
+        else if (llvm::isa<llvm::StoreInst>(V)) cgtaStores++;
+      }
     }
+    size_t moduleLoads = 0, moduleStores = 0;
+    for (const auto &F : M) {
+      for (const auto &BB : F)
+        for (const auto &I : BB) {
+          if (llvm::isa<llvm::LoadInst>(I)) moduleLoads++;
+          if (llvm::isa<llvm::StoreInst>(I)) moduleStores++;
+        }
+    }
+    llvm::errs() << "[ReflectMemPass] Nodule Loads = " << moduleLoads << ", Stores = " << moduleStores << "\n";
+    llvm::errs() << "[ReflectMemPass] CGTA   Loads = " << cgtaLoads << ", Stores = " << cgtaStores << "\n";
+    llvm::errs() << "[ReflectMemPass] Module/CGTA Loads  = " << llvm::format("%.2f", (static_cast<float>(cgtaLoads) / moduleLoads) * 100)
+                 << "%\n";
+    llvm::errs() << "[ReflectMemPass] Module/CGTA Stores = " << llvm::format("%.2f", (static_cast<float>(cgtaStores) / moduleStores) * 100)
+                 << "%\n";
   }
 
   insertMapCalls(M, FAM, groups, verbose);

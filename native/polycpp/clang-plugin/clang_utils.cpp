@@ -68,7 +68,7 @@ clang::StringLiteral *mkStrLit(const clang::ASTContext &C, const std::string &st
                                       C.getConstantArrayType(C.getConstType(C.CharTy),
                                                              llvm::APInt(C.getTypeSize(C.IntTy), str.length() + 1), nullptr,
                                                              clang::ArraySizeModifier::Normal, 0),
-                                      {});
+                                      {{}});
 }
 
 clang::IntegerLiteral *mkIntLit(const clang::ASTContext &C, clang::QualType tpe, uint64_t value) {

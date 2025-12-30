@@ -1,5 +1,10 @@
-set(CMAKE_SYSTEM_NAME Linux)
-set(CMAKE_SYSTEM_PROCESSOR x86_64)
+# XXX Enable only if cross compiling,
+# XXX flang-rt, as of LLVM 21.1.4 needs flang, which is not yet a cross compiler so enabling this will fail
+#set(CMAKE_SYSTEM_NAME Linux)
+#set(CMAKE_SYSTEM_PROCESSOR x86_64)
+#set(CMAKE_C_COMPILER_TARGET ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu)
+#set(CMAKE_CXX_COMPILER_TARGET ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu)
+#set(CMAKE_ASM_COMPILER_TARGET ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu)
 
 set(CMAKE_C_COMPILER clang)
 set(CMAKE_ASM_COMPILER clang)
@@ -9,9 +14,6 @@ set(CMAKE_C_FLAGS_INIT "-march=westmere -mtune=skylake")
 set(CMAKE_CXX_FLAGS_INIT "-march=westmere -mtune=skylake")
 set(CMAKE_ASM_FLAGS_INIT "-march=westmere -mtune=skylake")
 
-set(CMAKE_C_COMPILER_TARGET ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu)
-set(CMAKE_CXX_COMPILER_TARGET ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu)
-set(CMAKE_ASM_COMPILER_TARGET ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu)
 set(CMAKE_SHARED_LINKER_FLAGS -fuse-ld=lld)
 set(CMAKE_MODULE_LINKER_FLAGS -fuse-ld=lld)
 set(CMAKE_EXE_LINKER_FLAGS -fuse-ld=lld)

@@ -6,7 +6,7 @@
   #include <dlfcn.h>
 #endif
 
-#define __RT_PROTECT [[clang::annotate("__rt_protect")]]
+#define __RT_ODR [[clang::annotate("polyreflect-rt-odr")]]
 
 #if defined(__linux__) || defined(__APPLE__)
 

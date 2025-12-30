@@ -73,20 +73,12 @@ bool runSplice(llvm::Module &M, const bool verbose) {
     if (!AllocReplacements.contains(F.getName())) continue;
 
     if (verbose) llvm::errs() << "[InterposePass] In " << F.getName() << " (demangled=" << demangleCXXName(F.getName().data()) << ")\n";
-    if (const auto Replacement = M.getFunction(AllocReplacements[F.getName()])) {
-      F.replaceUsesWithIf(Replacement, [](llvm::Use &u) {
-        llvm::errs() << "[InterposePass]   Interposed " << u << "\n";
-        return true;
-      });
-      modified = true;
-    } else {
-      std::string W;
-      llvm::raw_string_ostream OS(W);
-      OS << F.getName() << " cannot be interposed, missing: " << AllocReplacements[F.getName()]
-         << ". Tried to run the allocation interposition pass without the "
-         << "replacement function in module.";
-      F.getContext().diagnose(llvm::DiagnosticInfoUnsupported(F, W, F.getSubprogram(), llvm::DS_Warning));
-    }
+    const auto Replacement = M.getOrInsertFunction(AllocReplacements[F.getName()], F.getFunctionType()).getCallee();
+    F.replaceUsesWithIf(Replacement, [](llvm::Use &u) {
+      llvm::errs() << "[InterposePass]   Interposed " << u << "\n";
+      return true;
+    });
+    modified = true;
   }
   return modified;
 }

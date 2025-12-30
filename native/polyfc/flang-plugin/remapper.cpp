@@ -23,7 +23,7 @@
 
 #include "aspartame/all.hpp"
 #include "fmt/format.h"
-#include "magic_enum.hpp"
+#include "magic_enum/magic_enum.hpp"
 #include "polyregion/llvm_dyn.hpp"
 
 #include "ftypes.h"
@@ -198,7 +198,9 @@ Type::Any polyfc::Remapper::handleType(const mlir::Type type, const bool capture
              [&](const fir::CharacterType) -> Type::Any { return Type::Ptr(Type::IntU8(), {}, TypeSpace::Global()); },
              [&](fir::RecordType t) -> Type::Any {
                const StructDef def(t.getName().str(),
-                                   t.getTypeList() ^ map([&](auto &name, auto &tpe) { return Named(name, handleType(tpe)); }));
+                                   t.getTypeList()                                                                //
+                                       | map([&](auto &name, auto &tpe) { return Named(name, handleType(tpe)); }) //
+                                       | to_vector());
                const Type::Struct ty(def.name);
                defs.insert({ty, def});
                return ty;
@@ -774,7 +776,7 @@ static polydco::FReduction::Kind mapReductionKind(const fir::ReduceOperationEnum
 
     case fir::ReduceOperationEnum::IAND: return polydco::FReduction::Kind::IAnd;
     case fir::ReduceOperationEnum::IOR: return polydco::FReduction::Kind::IOr;
-    case fir::ReduceOperationEnum::EIOR: return polydco::FReduction::Kind::IEor;
+    case fir::ReduceOperationEnum::IEOR: return polydco::FReduction::Kind::IEor;
 
     case fir::ReduceOperationEnum::AND: return polydco::FReduction::Kind::And;
     case fir::ReduceOperationEnum::OR: return polydco::FReduction::Kind::Or;

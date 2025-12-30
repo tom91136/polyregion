@@ -41,7 +41,7 @@
 
   #define POLYINVOKE_FATAL(prefix, fmt, ...)                                                                                               \
     do {                                                                                                                                   \
-      std::fprintf(stderr, "[%s] %s:%d FATAL: " fmt " (%s)\n", prefix, __FILE__, __LINE__, __VA_ARGS__, __PRETTY_FUNCTION__);              \
+      std::fprintf(stderr, "[%s] %s:%d FATAL: " fmt " (in `%s`)\n", prefix, __FILE__, __LINE__, __VA_ARGS__, __PRETTY_FUNCTION__);              \
       std::abort();                                                                                                                        \
     } while (0)
 #endif

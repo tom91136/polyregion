@@ -3,15 +3,15 @@
 using namespace polyregion::invoke;
 using namespace polyregion::invoke::hip;
 
-#define CHECKED(f) checked((f), __FILE__, __LINE__)
-
 static constexpr auto PREFIX = "HIP";
 
-static void checked(hipError_t result, const char *file, int line) {
-  if (result != hipSuccess) {
-    POLYINVOKE_FATAL(PREFIX, "%s:%d: %s(%u): %s", file, line, hipGetErrorName(result), result, hipGetErrorString(result));
-  }
-}
+#define CHECKED(f__)                                                                                                                       \
+  do {                                                                                                                                     \
+    hipError_t result__ = (f__);                                                                                                           \
+    if (result__ != hipSuccess) {                                                                                                          \
+      POLYINVOKE_FATAL(PREFIX, "%s (code=%u): %s", hipGetErrorName(result__), result__, hipGetErrorString(result__));                      \
+    }                                                                                                                                      \
+  } while (0)
 
 std::variant<std::string, std::unique_ptr<Platform>> HipPlatform::create() {
   if (const auto result = hipewInit(HIPEW_INIT_HIP); result != HIPEW_SUCCESS) {

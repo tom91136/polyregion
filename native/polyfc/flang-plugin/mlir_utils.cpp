@@ -53,7 +53,8 @@ void polyregion::polyfc::defineGlobalCtor(ModuleOp &m, const std::string &name,
   const auto ctor = defineFunc(m, name, LLVM::LLVMVoidType::get(m.getContext()), {}, LLVM::Linkage::Internal, f);
   OpBuilder B(m);
   B.setInsertionPointToStart(m.getBody());
-  B.create<LLVM::GlobalCtorsOp>(uLoc(B), B.getArrayAttr({SymbolRefAttr::get(ctor)}), B.getArrayAttr({B.getIntegerAttr(i32Ty(B), 1)}));
+  B.create<LLVM::GlobalCtorsOp>(uLoc(B), B.getArrayAttr({SymbolRefAttr::get(ctor)}), B.getArrayAttr({B.getIntegerAttr(i32Ty(B), 1)}),
+                                B.getArrayAttr(B.getZeroAttr(i32Ty(B))));
 }
 
 polyregion::polyfc::DynamicAggregateMirror::DynamicAggregateMirror(MLIRContext *C, const std::string &name, const std::vector<Type> &types)

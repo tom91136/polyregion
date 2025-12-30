@@ -10,15 +10,15 @@ template <typename K, typename V> class HashMap {
   struct Node {
     K key;
     V value;
-    __RT_PROTECT Node *next;
-    __RT_PROTECT Node(const K &k, const V &v) : key(k), value(v), next(nullptr) {}
-    __RT_PROTECT Node(const Node &) = delete;
-    __RT_PROTECT Node &operator=(const Node &) = delete;
+    __RT_ODR Node *next;
+    __RT_ODR Node(const K &k, const V &v) : key(k), value(v), next(nullptr) {}
+    __RT_ODR Node(const Node &) = delete;
+    __RT_ODR Node &operator=(const Node &) = delete;
   };
 
   struct Bucket {
     Node *head;
-    __RT_PROTECT Bucket() : head(nullptr) {}
+    __RT_ODR Bucket() : head(nullptr) {}
   };
 
   using HashFunc = size_t (*)(const K &);
@@ -30,7 +30,7 @@ template <typename K, typename V> class HashMap {
   HashFunc _hashFn;
   Bucket *_buckets;
 
-  __RT_PROTECT void rehash(size_t count) {
+  __RT_ODR void rehash(size_t count) {
     count = count < MAX_BUCKETS ? count : MAX_BUCKETS;
     auto *newBuckets = static_cast<Bucket *>(__RT_ALTERNATIVE(malloc)(count * sizeof(Bucket)));
     for (size_t i = 0; i < count; ++i)
@@ -51,14 +51,14 @@ template <typename K, typename V> class HashMap {
   }
 
 public:
-  __RT_PROTECT explicit HashMap(const HashFunc hash_func, const float loadFactor = 0.75f, const size_t initialBucketCount = 1024)
+  __RT_ODR explicit HashMap(const HashFunc hash_func, const float loadFactor = 0.75f, const size_t initialBucketCount = 1024)
       : _minBucketCount(initialBucketCount), _bucketCount(initialBucketCount), _size(0), _loadFactor(loadFactor), _hashFn(hash_func),
         _buckets(static_cast<Bucket *>(__RT_ALTERNATIVE(malloc)(_bucketCount * sizeof(Bucket)))) {
     for (size_t i = 0; i < _bucketCount; ++i)
       new (&_buckets[i]) Bucket();
   }
 
-  __RT_PROTECT bool emplace(const K &key, const V &value) {
+  __RT_ODR bool emplace(const K &key, const V &value) {
     if (_size >= _bucketCount * _loadFactor) {
       const auto count = _bucketCount * 5 / 2;
       rehash(count > _minBucketCount ? count : _minBucketCount);
@@ -76,7 +76,7 @@ public:
     return true;
   }
 
-  __RT_PROTECT [[nodiscard]] const V *find(const K &key) const {
+  __RT_ODR [[nodiscard]] const V *find(const K &key) const {
     const size_t idx = _hashFn(key) % _bucketCount;
     for (const Node *node = _buckets[idx].head; node; node = node->next) {
       if (node->key == key) return &node->value;
@@ -84,7 +84,7 @@ public:
     return nullptr;
   }
 
-  template <typename F> __RT_PROTECT void walk(F f) const {
+  template <typename F> __RT_ODR void walk(F f) const {
     for (size_t idx = 0; idx < _bucketCount; ++idx) {
       for (const Node *node = _buckets[idx].head; node; node = node->next) {
         if (f(node->key, &node->value)) return;
@@ -92,7 +92,7 @@ public:
     }
   }
 
-  __RT_PROTECT bool erase(const K &key) {
+  __RT_ODR bool erase(const K &key) {
     const size_t idx = _hashFn(key) % _bucketCount;
     Node *current = _buckets[idx].head;
     Node *prev = nullptr;
@@ -111,7 +111,7 @@ public:
     return false;
   }
 
-  __RT_PROTECT void clear() {
+  __RT_ODR void clear() {
     for (size_t i = 0; i < _bucketCount; ++i) {
       Node *current = _buckets[i].head;
       while (current) {
@@ -125,15 +125,15 @@ public:
     _size = 0;
   }
 
-  __RT_PROTECT ~HashMap() {
+  __RT_ODR ~HashMap() {
     clear();
     __RT_ALTERNATIVE(free)(_buckets);
   }
 
-  __RT_PROTECT [[nodiscard]] size_t size() const { return _size; }
-  __RT_PROTECT [[nodiscard]] size_t bucket_count() const { return _bucketCount; }
+  __RT_ODR [[nodiscard]] size_t size() const { return _size; }
+  __RT_ODR [[nodiscard]] size_t bucket_count() const { return _bucketCount; }
 
-  __RT_PROTECT HashMap(const HashMap &) = delete;
-  __RT_PROTECT HashMap &operator=(const HashMap &) = delete;
+  __RT_ODR HashMap(const HashMap &) = delete;
+  __RT_ODR HashMap &operator=(const HashMap &) = delete;
 };
 } // namespace polyregion::rt_reflect::details

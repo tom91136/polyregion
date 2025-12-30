@@ -5,11 +5,14 @@ using namespace polyregion::backend::details;
 
 void NVPTXTargetSpecificHandler::witnessFn(CodeGen &cg, llvm::Function &fn, const Function &source) {
   if (source.attrs.contains(FunctionAttr::Exported())) {
+    // XXX as of LLVM 21, it seems that the annotation method of marking kernel entries is now standardised to normal calling conventions,
+    // keeping both for compatibility reasons
+    fn.setCallingConv(llvm::CallingConv::PTX_Kernel);
     cg.M.getOrInsertNamedMetadata("nvvm.annotations")
         ->addOperand(llvm::MDNode::get(cg.C.actual, // XXX the attribute name must be "kernel" here and not the function name!
                                        {llvm::ValueAsMetadata::get(&fn), llvm::MDString::get(cg.C.actual, "kernel"),
                                         llvm::ValueAsMetadata::get(llvm::ConstantInt::get(cg.C.i32Ty(), 1))}));
-  }else {
+  } else {
     fn.setDSOLocal(true);
   }
 }
@@ -34,17 +37,23 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
                                                                  d0, cg.mkExprVal(Expr::IntU32Const(0)))));
   };
 
+  auto barrier0 = [&] {
+    const auto callee = llvm::Intrinsic::getOrInsertDeclaration(&cg.M, llvm::Intrinsic::nvvm_barrier_cta_sync_aligned_all, {});
+    return cg.B.CreateCall(callee, cg.mkExprVal(Expr::IntU32Const(0)));
+  };
+
   return expr.op.match_total( //
       [&](const Spec::Assert &v) -> ValPtr {
         // cg.extFn1(  "__assertfail", Type::Unit0(), Expr::Unit0Const()); // TODO
         throw BackendException("unimplemented");
       },
-      [&](const Spec::GpuBarrierGlobal &v) -> ValPtr { return cg.intr0(llvm::Intrinsic::nvvm_barrier0); },
-      [&](const Spec::GpuBarrierLocal &v) -> ValPtr { return cg.intr0(llvm::Intrinsic::nvvm_barrier0); },
-      [&](const Spec::GpuBarrierAll &v) -> ValPtr { return cg.intr0(llvm::Intrinsic::nvvm_barrier0); },
-      [&](const Spec::GpuFenceGlobal &v) -> ValPtr { return cg.intr0(llvm::Intrinsic::nvvm_membar_cta); },
-      [&](const Spec::GpuFenceLocal &v) -> ValPtr { return cg.intr0(llvm::Intrinsic::nvvm_membar_cta); },
-      [&](const Spec::GpuFenceAll &v) -> ValPtr { return cg.intr0(llvm::Intrinsic::nvvm_membar_cta); },
+      // Migrating from nvvm_barrier0, see https://github.com/llvm/llvm-project/pull/140615
+      [&](const Spec::GpuBarrierGlobal &) -> ValPtr { return barrier0(); },
+      [&](const Spec::GpuBarrierLocal &) -> ValPtr { return barrier0(); },
+      [&](const Spec::GpuBarrierAll &) -> ValPtr { return barrier0(); },
+      [&](const Spec::GpuFenceGlobal &) -> ValPtr { return cg.intr0(llvm::Intrinsic::nvvm_membar_cta); },
+      [&](const Spec::GpuFenceLocal &) -> ValPtr { return cg.intr0(llvm::Intrinsic::nvvm_membar_cta); },
+      [&](const Spec::GpuFenceAll &) -> ValPtr { return cg.intr0(llvm::Intrinsic::nvvm_membar_cta); },
       [&](const Spec::GpuGlobalIdx &v) -> ValPtr {
         return dim3OrAssert(v.dim, //
                             globalId(llvm::Intrinsic::nvvm_read_ptx_sreg_ctaid_x, llvm::Intrinsic::nvvm_read_ptx_sreg_ntid_x,

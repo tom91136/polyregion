@@ -91,7 +91,7 @@ extern "C" struct PtrInfo {
 
 using namespace std::chrono;
 
-__RT_PROTECT int safe_vasprintf(char **buffer, const char *format, va_list args) {
+__RT_ODR int safe_vasprintf(char **buffer, const char *format, va_list args) {
   va_list args0;
   va_copy(args0, args);
   int size = std::vsnprintf(nullptr, 0, format, args0);
@@ -108,7 +108,7 @@ __RT_PROTECT int safe_vasprintf(char **buffer, const char *format, va_list args)
   return size;
 }
 
-__RT_PROTECT __attribute__((format(printf, 2, 3))) int safe_snprintf(char **buffer, const char *format, ...) {
+__RT_ODR __attribute__((format(printf, 2, 3))) int safe_snprintf(char **buffer, const char *format, ...) {
   va_list args;
   va_start(args, format);
   int size = safe_vasprintf(buffer, format, args);
@@ -116,7 +116,7 @@ __RT_PROTECT __attribute__((format(printf, 2, 3))) int safe_snprintf(char **buff
   return size;
 }
 
-__RT_PROTECT __attribute__((format(printf, 2, 3))) int safe_fprintf(FILE *stream, const char *format, ...) {
+__RT_ODR __attribute__((format(printf, 2, 3))) int safe_fprintf(FILE *stream, const char *format, ...) {
   if (!stream) return 0;
   va_list args;
   va_start(args, format);
@@ -131,7 +131,7 @@ __RT_PROTECT __attribute__((format(printf, 2, 3))) int safe_fprintf(FILE *stream
   return size;
 }
 
-__RT_PROTECT void fail() {
+__RT_ODR void fail() {
   std::fflush(stderr);
   std::abort();
 }
@@ -149,7 +149,7 @@ class ReflectService {
   time_point<steady_clock> start;
   std::FILE *trace{};
 
-  __RT_PROTECT const PtrRecord *queryUnsafe(const uintptr_t ptr, const bool allowSubrange) const {
+  __RT_ODR const PtrRecord *queryUnsafe(const uintptr_t ptr, const bool allowSubrange) const {
     const PtrRecord *result = data.find(ptr);
     if (result) return result;
     if (allowSubrange) {
@@ -166,7 +166,7 @@ class ReflectService {
   }
 
 public:
-  __RT_PROTECT explicit ReflectService(std::atomic_bool &interpose)
+  __RT_ODR explicit ReflectService(std::atomic_bool &interpose)
       : interpose(interpose), data([](auto x) { return x; }), start(steady_clock::now()) {
     char *name{};
     safe_snprintf(&name, "trace_%d.json",
@@ -184,7 +184,7 @@ public:
     interpose = true;
   }
 
-  __RT_PROTECT void blockingRecord(const PtrInfo &info, const time_point<steady_clock> now = steady_clock::now()) {
+  __RT_ODR void blockingRecord(const PtrInfo &info, const time_point<steady_clock> now = steady_clock::now()) {
     std::unique_lock lock(mutex);
     // safe_fprintf(stderr, "[PtrReflect] record %p(size=%ld, type=%s)\n", reinterpret_cast<void *>(info.ptr), info.size,
     //              to_string(info.type));
@@ -197,7 +197,7 @@ public:
     }
   }
 
-  __RT_PROTECT void blockingRelease(const uintptr_t ptr, const Type type, const time_point<steady_clock> now = steady_clock::now()) {
+  __RT_ODR void blockingRelease(const uintptr_t ptr, const Type type, const time_point<steady_clock> now = steady_clock::now()) {
     std::unique_lock lock(mutex);
     // safe_fprintf(stderr, "[PtrReflect] release %p (type=%s)\n", reinterpret_cast<void *>(ptr), to_string(type));
     static int i = 0;
@@ -224,15 +224,15 @@ public:
     // fail();
   }
 
-  __RT_PROTECT PtrMeta blockingQuery(const uintptr_t ptrValue) {
+  __RT_ODR PtrMeta blockingQuery(const uintptr_t ptrValue) {
     std::shared_lock lock(mutex);
     if (const auto it = queryUnsafe(ptrValue, true)) return PtrMeta{it->info.size, ptrValue - it->info.base, it->info.type};
     return PtrMeta{0, 0, Type::Unknown};
   }
 
-  __RT_PROTECT PtrMeta blockingQuery(const void *ptr) { return blockingQuery(reinterpret_cast<uintptr_t>(ptr)); }
+  __RT_ODR PtrMeta blockingQuery(const void *ptr) { return blockingQuery(reinterpret_cast<uintptr_t>(ptr)); }
 
-  __RT_PROTECT ~ReflectService() {
+  __RT_ODR ~ReflectService() {
     interpose = false;
     // const auto now = steady_clock::now();
     // safe_fprintf(trace,
@@ -252,7 +252,7 @@ public:
 };
 
 inline std::atomic_bool serviceInit{false};
-__RT_PROTECT inline ReflectService *_rt_get() {
+__RT_ODR inline ReflectService *_rt_get() {
   static ReflectService s(serviceInit);
   return &s;
 }
@@ -260,18 +260,18 @@ inline auto _ = _rt_get();
 
 } // namespace details
 
-extern "C" __RT_PROTECT __RT_EXPORTED void _rt_record(const void *ptr, const size_t size, const Type type) {
+extern "C" __RT_ODR __RT_EXPORTED void _rt_record(const void *ptr, const size_t size, const Type type) {
   if (!details::serviceInit.load()) return;
   details::_rt_get()->blockingRecord(details::PtrInfo{reinterpret_cast<uintptr_t>(ptr), size, type});
 }
-extern "C" __RT_PROTECT __RT_EXPORTED void _rt_release(void *ptr, const Type type) {
+extern "C" __RT_ODR __RT_EXPORTED void _rt_release(void *ptr, const Type type) {
   if (!ptr) return;
   if (!details::serviceInit.load()) return;
   details::_rt_get()->blockingRelease(reinterpret_cast<uintptr_t>(ptr), type);
 }
 
-extern "C" __RT_PROTECT __RT_EXPORTED PtrMeta _rt_reflect_p(const void *ptr) { return details::_rt_get()->blockingQuery(ptr); }
-extern "C" __RT_PROTECT __RT_EXPORTED PtrMeta _rt_reflect_v(const uintptr_t ptrValue) {
+extern "C" __RT_ODR __RT_EXPORTED PtrMeta _rt_reflect_p(const void *ptr) { return details::_rt_get()->blockingQuery(ptr); }
+extern "C" __RT_ODR __RT_EXPORTED PtrMeta _rt_reflect_v(const uintptr_t ptrValue) {
   return details::_rt_get()->blockingQuery(ptrValue);
 }
 

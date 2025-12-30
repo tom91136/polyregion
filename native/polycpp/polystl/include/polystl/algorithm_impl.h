@@ -7,8 +7,9 @@
 #include <type_traits>
 #include <vector>
 
-#include "polystl.h"
+#include "polyregion/concurrency_utils.hpp"
 #include "polyrt/rt.h"
+#include "polystl.h"
 
 [[nodiscard]] uint32_t __polyregion_builtin_gpu_global_idx(uint32_t);  // NOLINT(*-reserved-identifier)
 [[nodiscard]] uint32_t __polyregion_builtin_gpu_global_size(uint32_t); // NOLINT(*-reserved-identifier)
@@ -29,46 +30,19 @@ void __polyregion_builtin_gpu_fence_all();    // NOLINT(*-reserved-identifier)
 
 namespace polyregion::polystl::details {
 
-template <typename T = int64_t> //
-std::pair<std::vector<T>, std::vector<T>> splitStaticExclusive(T start, T end, T N) {
-  assert(N >= 0);
-  auto range = std::abs(end - start);
-  if (range == 0) return {{}, {}};
-  else if (N == 1) return {{start}, {end}};
-  else if (range < N) {
-    std::vector<T> xs(range);
-    std::vector<T> ys(range);
-    for (T i = 0; i < range; ++i) {
-      xs[i] = start + i;
-      ys[i] = start + i + 1;
-    }
-    return {xs, ys};
-  } else {
-    std::vector<T> xs(N);
-    std::vector<T> ys(N);
-    auto k = range / N;
-    auto m = range % N;
-    for (int64_t i = 0; i < N; ++i) {
-      auto a = i * k + std::min(i, m);
-      auto b = (i + 1) * k + std::min(i + 1, m);
-      xs[i] = start + a;
-      ys[i] = start + b;
-    }
-    return {xs, ys};
-  }
-}
+using polyrt::DebugLevel;
 
 template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f) {
-  initialise();
+  polyrt::initialise();
   auto N = std::thread::hardware_concurrency();
-  POLYSTL_LOG("<%s, %ld> Dispatch", __func__, global);
+  log(DebugLevel::Debug, "<%s, %ld> Dispatch", __func__, global);
 
   switch (polyrt::currentPlatform->kind()) {
     case polyregion::runtime::PlatformKind::HostThreaded: {
-      auto [b, e] = splitStaticExclusive<int64_t>(0, global, 1);
+      auto [b, e] = concurrency_utils::splitStaticExclusive<int64_t>(0, global, N);
       const int64_t *begin = b.data();
       const int64_t *end = e.data();
-      const auto kernel = [&f, begin, end](const int64_t tid) {
+      auto kernel = [&f, begin, end](const int64_t tid) {
         for (int64_t i = begin[tid]; i < end[tid]; ++i) {
           f(i);
         }
@@ -76,11 +50,9 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
 
       const polyrt::KernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::HostThreaded>(kernel);
 
-      std::byte argData[sizeof(decltype(kernel))];
-      std::memcpy(argData, &kernel, sizeof(decltype(kernel)));
       for (size_t i = 0; i < bundle.objectCount; ++i) {
         if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
-        dispatchHostThreaded(b.size(), &argData, bundle.moduleName);
+        details::dispatchHostThreaded(b.size(), &kernel, bundle.moduleName);
         return;
       }
       break;
@@ -98,14 +70,17 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
 
       const polyrt::KernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
 
-      for (size_t i = 0; i < bundle.structCount; ++i) {
-        if (i == bundle.interfaceLayoutIdx) fprintf(stderr, "**Exported**\n");
-        bundle.structs[i].visualise(stderr);
+      if (polyrt::debugLevel() >= DebugLevel::Debug) {
+        for (size_t i = 0; i < bundle.structCount; ++i) {
+          if (i == bundle.interfaceLayoutIdx) fprintf(stderr, "**Exported**\n");
+          bundle.structs[i].visualise(stderr);
+        }
       }
 
+      [[clang::annotate("polyreflect-track")]] void *kernelPtr = &kernel;
       for (size_t i = 0; i < bundle.objectCount; ++i) {
         if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
-        dispatchManaged(global / blocks, blocks, 0, &bundle.structs[bundle.interfaceLayoutIdx], &kernel, bundle.moduleName);
+        details::dispatchManaged(global / blocks, blocks, 0, &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr, bundle.moduleName);
         return;
       }
       break;
@@ -113,7 +88,7 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
   }
 
   if (!polyrt::hostFallback()) return;
-  POLYSTL_LOG("<%s, %d> Host fallback", __func__, global);
+  log(DebugLevel::Debug, "<%s, %d> Host fallback", __func__, global);
   for (int64_t i = 0; i < global; ++i) {
     f(i);
   }
@@ -121,19 +96,19 @@ template <class UnaryFunction> void parallel_for(int64_t global, UnaryFunction f
 
 template <typename T, class UnaryFunction, class BinaryFunction>
 T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce) {
-  initialise();
+  polyrt::initialise();
   auto N = std::thread::hardware_concurrency();
-  POLYSTL_LOG("<%s, %d> Dispatch", __func__, global);
+  log(DebugLevel::Debug, "<%s, %d> Dispatch", __func__, global);
 
   switch (polyrt::currentPlatform->kind()) {
     case polyregion::runtime::PlatformKind ::HostThreaded: {
-      auto [b, e] = splitStaticExclusive<int64_t>(0, global, N);
+      auto [b, e] = concurrency_utils::splitStaticExclusive<int64_t>(0, global, N);
       const int64_t groups = b.size();
       const int64_t *begin = b.data();
       const int64_t *end = e.data();
 
       std::vector<T> groupPartial(groups);
-      const auto kernel = [&f, &reduce, init, begin, end, out = groupPartial.data()](const int64_t tid) {
+      auto kernel = [&f, &reduce, init, begin, end, out = groupPartial.data()](const int64_t tid) {
         auto acc = init;
         for (int64_t i = begin[tid]; i < end[tid]; ++i) {
           acc = reduce(acc, f(i));
@@ -141,11 +116,10 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
         out[tid] = acc;
       };
       const polyrt::KernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::HostThreaded>(kernel);
-      std::byte argData[sizeof(decltype(kernel))];
-      std::memcpy(argData, &kernel, sizeof(decltype(kernel)));
+
       for (size_t i = 0; i < bundle.objectCount; ++i) {
         if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
-        polyrt::dispatchHostThreaded(groups, &argData, bundle.moduleName);
+        details::dispatchHostThreaded(groups, &kernel, bundle.moduleName);
         T acc = init;
         for (int64_t groupIdx = 0; groupIdx < groups; ++groupIdx) {
           acc = reduce(acc, groupPartial[groupIdx]);
@@ -154,12 +128,12 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
       }
       break;
     }
-    case polyregion::runtime::PlatformKind ::Managed: {
+    case polyregion::runtime::PlatformKind::Managed: {
       int64_t groups = 256;
       auto groupPartial = polyrt::currentDevice->mallocSharedTyped<T>(groups, polyrt::Access::RW);
 
       if (!groupPartial) {
-        POLYSTL_LOG("<%s, %d> No USM support", __func__, global);
+        log(DebugLevel::Debug, "<%s, %d> No USM support", __func__, global);
         std::abort();
       }
 
@@ -183,9 +157,10 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
         }
       };
       const polyrt::KernelBundle &bundle = __polyregion_offload__<polyregion::runtime::PlatformKind::Managed>(kernel);
+      [[clang::annotate("polyreflect-track")]] void *kernelPtr = &kernel;
       for (size_t i = 0; i < bundle.objectCount; ++i) {
         if (!polyrt::loadKernelObject(bundle.moduleName, bundle.objects[i])) continue;
-        dispatchManaged(256, groups, groups * sizeof(T), &bundle.structs[bundle.interfaceLayoutIdx], &kernel, bundle.moduleName);
+        details::dispatchManaged(256, groups, groups * sizeof(T), &bundle.structs[bundle.interfaceLayoutIdx], kernelPtr, bundle.moduleName);
         T acc = init;
         for (int64_t groupIdx = 0; groupIdx < groups; ++groupIdx) {
           acc = reduce(acc, (*groupPartial)[groupIdx]);
@@ -197,7 +172,7 @@ T parallel_reduce(int64_t global, T init, UnaryFunction f, BinaryFunction reduce
   }
 
   if (!polyrt::hostFallback()) return init;
-  POLYSTL_LOG("<%s, %ld> Host fallback", __func__, global);
+  log(DebugLevel::Debug, "<%s, %ld> Host fallback", __func__, global);
 
   T acc = init;
   for (int64_t globalIdx = 0; globalIdx < global; ++globalIdx) {

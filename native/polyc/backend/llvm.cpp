@@ -8,7 +8,7 @@
 #include "llvmc.h"
 
 #include "fmt/core.h"
-#include "magic_enum.hpp"
+#include "magic_enum/magic_enum.hpp"
 
 #include "llvm_amdgpu.h"
 #include "llvm_cpu.h"
@@ -20,8 +20,6 @@
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/TargetParser/Host.h"
-
-#include <magic_enum.hpp>
 
 using namespace aspartame;
 using namespace polyregion;
@@ -223,7 +221,7 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
       },
       [&](const Expr::Bool1Const &x) -> ValPtr { return ConstantInt::get(llvm::Type::getInt1Ty(C.actual), x.value); },
       [&](const Expr::NullPtrConst &x) -> ValPtr {
-        return llvm::ConstantPointerNull::get(llvm::PointerType::get(resolveType(x.tpe), C.addressSpace(x.space)));
+        return llvm::ConstantPointerNull::get(llvm::PointerType::get(C.actual, C.addressSpace(x.space)));
       },
 
       [&](const Expr::SpecOp &x) -> ValPtr { return targetHandler->mkSpecVal(*this, x); },

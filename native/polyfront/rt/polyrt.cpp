@@ -16,13 +16,13 @@ std::unique_ptr<Platform> polyregion::polyrt::currentPlatform{};
 std::unique_ptr<Device> polyregion::polyrt::currentDevice{};
 std::unique_ptr<DeviceQueue> polyregion::polyrt::currentQueue{};
 
-static void setupBackend(const Backend backend) {
+__attribute__((always_inline)) static void setupBackend(const Backend backend) {
   if (auto errorOrPlatform = Platform::of(backend); std::holds_alternative<std::string>(errorOrPlatform)) {
     log(DebugLevel::None, "Backend %s failed to initialise: %s", to_string(backend).data(), std::get<std::string>(errorOrPlatform).c_str());
   } else polyregion::polyrt::currentPlatform = std::move(std::get<std::unique_ptr<Platform>>(errorOrPlatform));
 }
 
-static void selectDevice(Platform &p) {
+__attribute__((always_inline)) static void selectDevice(Platform &p) {
   auto devices = p.enumerate();
   if (const auto env = std::getenv(DeviceSelectorEnv); env) {
     std::string name(env);
@@ -40,7 +40,7 @@ static void selectDevice(Platform &p) {
   } else if (!devices.empty()) polyregion::polyrt::currentDevice = std::move(devices[0]);
 };
 
-static void selectPlatform() {
+__attribute__((always_inline)) static void selectPlatform() {
   const static std::unordered_map<std::string, Backend> NameToBackend = {
       {"host", Backend::RelocatableObject}, //
       {"host_so", Backend::SharedObject},   //
@@ -82,7 +82,7 @@ static void selectPlatform() {
   }
 }
 
-static std::optional<size_t> parseIntNoExcept(const char *str) {
+__attribute__((always_inline)) static std::optional<size_t> parseIntNoExcept(const char *str) {
   errno = 0; // strtol to avoid exceptions
   const size_t value = std::strtol(str, nullptr, 10);
   return errno == 0 ? std::optional{value} : std::nullopt;
@@ -183,89 +183,72 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
   return true;
 }
 
-void polyregion::polyrt::dispatchHostThreaded(const size_t global, void *functorData, const char *moduleId) {
-  log(DebugLevel::Debug, "<%s:%s:%zu> Dispatch hostthread", __func__, moduleId, global);
-  concurrency_utils::waitAll([&](auto &cb) {
-    ArgBuffer buffer{{Type::IntS64, nullptr}, {Type::Ptr, &functorData}, {Type::Void, nullptr}};
-    currentQueue->enqueueInvokeAsync(moduleId, "_main", buffer, Policy{Dim3{global, 1, 1}}, [&]() {
-      log(DebugLevel::Debug, "<%s:%s:%zu> Unlatched", __func__, moduleId, global);
-      cb();
-    });
-  });
-  log(DebugLevel::Debug, "<%s:%s:%zu> Done", __func__, moduleId, global);
-}
-
-void polyregion::polyrt::dispatchManaged(const size_t global, const size_t local, const size_t localMemBytes, void *functorData,
-                                         const char *moduleId) {
-  log(DebugLevel::Debug, "<%s:%s:%zu> Dispatch managed, arg=%p bytes", __func__, moduleId, global, functorData);
-
-  const auto buffer = localMemBytes > 0 ? ArgBuffer{{Type::Scratch, {}}, {Type::Ptr, &functorData}, {Type::Void, {}}}
-                                        : ArgBuffer{{Type::Ptr, &functorData}, {Type::Void, {}}};
-
-  currentQueue->enqueueInvokeAsync(moduleId, "_main", buffer, //
-                                   Policy{                    //
-                                          Dim3{global, 1, 1}, //
-                                          local > 0 ? std::optional{std::pair{Dim3{local, 1, 1}, localMemBytes}} : std::nullopt},
-                                   {});
-
-  log(DebugLevel::Debug, "<%s:%s:%zu> Submitted", __func__, moduleId, global);
-}
-
-static void *sharedAlloc(const size_t size) {
+__attribute__((always_inline)) static void *sharedAlloc(const size_t size) {
   if (const auto p = polyregion::polyrt::currentDevice->mallocShared(size, Access::RW)) return *p;
   log(DebugLevel::None, "Device %s does not support shared allocation, aborting...\n", polyregion::polyrt::currentDevice->name().c_str());
   std::abort();
 }
 
-static void sharedFree(void *p) { polyregion::polyrt::currentDevice->freeShared(p); }
+__attribute__((always_inline)) static void sharedFree(void *p) { polyregion::polyrt::currentDevice->freeShared(p); }
 
-extern "C" {
-
-POLYREGION_EXPORT void *polyrt_usm_malloc(const size_t size) {
-  polyregion::polyrt::initialise();
-  return sharedAlloc(size);
-}
-
-POLYREGION_EXPORT void *polyrt_usm_calloc(const size_t nmemb, const size_t size) {
-  polyregion::polyrt::initialise();
-  return sharedAlloc(nmemb * size);
-}
-
-POLYREGION_EXPORT void *polyrt_usm_realloc(void *ptr, const size_t size) {
+POLYREGION_EXPORT extern "C" void *polyrt_usm_malloc(const size_t size) {
   polyregion::polyrt::initialise();
   const auto p = sharedAlloc(size);
+  log(DebugLevel::Debug, "%p = polyrt_usm_malloc(%zu)", p, size);
+  return p;
+}
+
+POLYREGION_EXPORT extern "C" void *polyrt_usm_calloc(const size_t nmemb, const size_t size) {
+  polyregion::polyrt::initialise();
+  const auto p = sharedAlloc(nmemb * size);
+  log(DebugLevel::Debug, "%p = polyrt_usm_calloc(%zu, %zu)", p, nmemb, size);
+  return p;
+}
+
+POLYREGION_EXPORT extern "C" void *polyrt_usm_realloc(void *ptr, const size_t size) {
+  polyregion::polyrt::initialise();
+  const auto p = sharedAlloc(size);
+  log(DebugLevel::Debug, "%p = polyrt_usm_realloc(%p, %zu)", p, ptr, size);
   std::memcpy(p, ptr, size);
   sharedFree(ptr);
   return p;
 }
 
-POLYREGION_EXPORT void *polyrt_usm_memalign(const size_t /*alignment*/, const size_t size) {
+POLYREGION_EXPORT extern "C" void *polyrt_usm_memalign(const size_t /*alignment*/, const size_t size) {
   polyregion::polyrt::initialise();
-  return sharedAlloc(size);
+  const auto p = sharedAlloc(size);
+  log(DebugLevel::Debug, "%p = polyrt_usm_memalign(%zu)", p, size);
+  return p;
 }
 
-POLYREGION_EXPORT void *polyrt_usm_aligned_alloc(size_t /*alignment*/, const size_t size) {
+POLYREGION_EXPORT extern "C" void *polyrt_usm_aligned_alloc(size_t /*alignment*/, const size_t size) {
   polyregion::polyrt::initialise();
-  return sharedAlloc(size);
+  const auto p = sharedAlloc(size);
+  log(DebugLevel::Debug, "%p = polyrt_usm_aligned_alloc(%zu)", p, size);
+  return p;
 }
 
-POLYREGION_EXPORT void polyrt_usm_free(void *ptr) {
+POLYREGION_EXPORT extern "C" void polyrt_usm_free(void *ptr) {
   polyregion::polyrt::initialise();
+  log(DebugLevel::Debug, "polyrt_usm_free(%p)", ptr);
   sharedFree(ptr);
 }
 
-POLYREGION_EXPORT void *polyrt_usm_operator_new(const size_t size) {
+POLYREGION_EXPORT extern "C" void *polyrt_usm_operator_new(const size_t size) {
   polyregion::polyrt::initialise();
-  return sharedAlloc(size);
+  const auto p = sharedAlloc(size);
+  log(DebugLevel::Debug, "%p = polyrt_usm_operator_new(%zu)", p, size);
+  return p;
 }
 
-POLYREGION_EXPORT void polyrt_usm_operator_delete(void *ptr) {
+POLYREGION_EXPORT extern "C" void polyrt_usm_operator_delete(void *ptr) {
   polyregion::polyrt::initialise();
+  log(DebugLevel::Debug, "polyrt_usm_operator_delete(%p)", ptr);
   sharedFree(ptr);
 }
 
-POLYREGION_EXPORT void polyrt_usm_operator_delete_sized(void *ptr, size_t /*size*/) {
+POLYREGION_EXPORT extern "C" void polyrt_usm_operator_delete_sized(void *ptr, size_t /*size*/) {
   polyregion::polyrt::initialise();
+  log(DebugLevel::Debug, "polyrt_usm_operator_delete_sized(%p)", ptr);
   sharedFree(ptr);
-}
 }

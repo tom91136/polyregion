@@ -3,18 +3,29 @@
 using namespace polyregion::invoke;
 using namespace polyregion::invoke::cuda;
 
-#define CHECKED(f) checked((f), __FILE__, __LINE__)
-
 static constexpr auto PREFIX = "CUDA";
 
-static void checked(CUresult result, const char *file, int line) {
-  if (result != CUDA_SUCCESS && result != CUDA_ERROR_DEINITIALIZED) {
-    auto name = "(unknown)", desc = "(unknown)";
-    cuGetErrorName(result, &name);
-    cuGetErrorString(result, &desc);
-    POLYINVOKE_FATAL(PREFIX, "%s:%d: %s(%u): %s", file, line, name, result, desc);
-  }
-}
+#define CHECKED(f__)                                                                                                                       \
+  do {                                                                                                                                     \
+    CUresult result__ = (f__);                                                                                                             \
+    if (result__ != CUDA_SUCCESS && result__ != CUDA_ERROR_DEINITIALIZED) {                                                                \
+      const char *name__ = "(unknown)", *desc__ = "(unknown)";                                                                             \
+      cuGetErrorName(result__, &name__);                                                                                                   \
+      cuGetErrorString(result__, &desc__);                                                                                                 \
+      POLYINVOKE_FATAL(PREFIX, "%s (code=%u): %s; callsite: `%s`", name__, result__, desc__, #f__);                                        \
+    }                                                                                                                                      \
+  } while (0)
+
+#define CHECKED_EXTRA(f__, fmt__, ...)                                                                                                     \
+  do {                                                                                                                                     \
+    CUresult result__ = (f__);                                                                                                             \
+    if (result__ != CUDA_SUCCESS && result__ != CUDA_ERROR_DEINITIALIZED) {                                                                \
+      const char *name__ = "(unknown)", *desc__ = "(unknown)";                                                                             \
+      cuGetErrorName(result__, &name__);                                                                                                   \
+      cuGetErrorString(result__, &desc__);                                                                                                 \
+      POLYINVOKE_FATAL(PREFIX, "%s (code=%u) %s; callsite: `" fmt__ "`", name__, result__, desc__, __VA_ARGS__);                           \
+    }                                                                                                                                      \
+  } while (0)
 
 std::variant<std::string, std::unique_ptr<Platform>> CudaPlatform::create() {
   if (const auto result = cuewInit(CUEW_INIT_CUDA); result != CUEW_SUCCESS)
@@ -83,7 +94,8 @@ CudaDevice::CudaDevice(int ordinal)
             POLYINVOKE_TRACE();
             context.touch();
             CUfunction fn;
-            CHECKED(cuModuleGetFunction(&fn, m, name.c_str()));
+            CHECKED_EXTRA(cuModuleGetFunction(&fn, m, name.c_str()), //
+                          "cuModuleGetFunction(module=%p, name=%s)", static_cast<void *>(m), name.c_str());
             return fn;
           },
           [&](auto &&m) {
