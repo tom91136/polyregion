@@ -1,6 +1,6 @@
 #include "polyregion/compat.h"
 
-#include <atomic>
+#include <mutex>
 
 #include "ast.h"
 #include "compiler.h"
@@ -29,11 +29,8 @@ int64_t compiler::nowMs() {
 }
 
 void compiler::initialise() {
-  static std::atomic_bool init = false;
-  if (!init) {
-    init = true;
-    backend::llvmc::initialise();
-  }
+  static std::once_flag flag;
+  std::call_once(flag, []() { backend::llvmc::initialise(); });
 }
 
 static json deserialiseAst(const polyast::Bytes &astBytes) {
@@ -150,18 +147,13 @@ polyast::CompileResult compiler::compile(const polyast::Bytes &astBytes, const O
 
   std::vector<polyast::CompileEvent> events;
 
-  //  std::cout << "[polyregion-native] Len  : " << astBytes.size() << std::endl;
   auto jsonStart = nowMono();
   json json = deserialiseAst(astBytes);
   events.emplace_back(nowMs(), elapsedNs(jsonStart), "ast_deserialise", "");
-  //  std::cout << "[polyregion-native] JSON :" << json << std::endl;
 
   auto astLift = nowMono();
   auto program = polyast::program_from_json(json);
   events.emplace_back(nowMs(), elapsedNs(astLift), "ast_lift", "");
-
-  //  std::cout << "[polyregion-native] AST  :" << program << std::endl;
-  //  std::cout << "[polyregion-native] Repr :" << polyast::repr(program) << std::endl;
 
   auto c = compile(program, options, opt);
   c.events.insert(c.events.end(), events.begin(), events.end());

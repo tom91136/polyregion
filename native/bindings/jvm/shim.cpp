@@ -54,9 +54,8 @@ jlong Natives::dynamicLibraryLoad0(JNIEnv *env, jclass, jstring name) {
     throwGeneric(env, EX, "Cannot load library `" + str + "` :" + resolveDlError());
     return {};
   } else {
-    void *f = polyregion_dl_find(dylib, "JNI_OnLoad");
-    if (f) {
-      ((jint(*)(JavaVM *, void *))(f))(CurrentVM, nullptr);
+    if (void *f = polyregion_dl_find(dylib, "JNI_OnLoad")) {
+      reinterpret_cast<jint (*)(JavaVM *, void *)>(f)(CurrentVM, nullptr);
     }
     return reinterpret_cast<jlong>(dylib);
   }
@@ -64,9 +63,8 @@ jlong Natives::dynamicLibraryLoad0(JNIEnv *env, jclass, jstring name) {
 
 void Natives::dynamicLibraryRelease0(JNIEnv *env, jclass, jlong handle) {
   auto typedHandle = reinterpret_cast<polyregion_dl_handle>(handle);
-  void *f = polyregion_dl_find(typedHandle, "JNI_OnUnload");
-  if (f) {
-    ((void (*)(JavaVM *, void *))(f))(CurrentVM, nullptr);
+  if (void *f = polyregion_dl_find(typedHandle, "JNI_OnUnload")) {
+    reinterpret_cast<void (*)(JavaVM *, void *)>(f)(CurrentVM, nullptr);
   }
   if (auto code = polyregion_dl_close(typedHandle); code != 0) {
     throwGeneric(env, EX, "Cannot unload module:" + resolveDlError());

@@ -3,14 +3,18 @@
 #include "compat.h"
 
 #ifdef _WIN32
-  #define WIN32_LEAN_AND_MEAN
-  #define VC_EXTRALEAN
-  #define NOMINMAX
   #include <Windows.h>
+  #include <string>
   #include <system_error>
 
+  inline const char *polyregion_dl_error_() {
+    thread_local std::string msg;
+    msg = std::system_category().message(::GetLastError());
+    return msg.c_str();
+  }
+
   #define polyregion_dl_open(path) LoadLibraryA(path)
-  #define polyregion_dl_error() std::system_category().message(::GetLastError()).c_str()
+  #define polyregion_dl_error() polyregion_dl_error_()
   #define polyregion_dl_close(lib) FreeLibrary(lib)
   #define polyregion_dl_find(lib, symbol) GetProcAddress(lib, symbol)
   #define polyregion_dl_handle HMODULE

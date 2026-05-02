@@ -345,15 +345,12 @@ OffloadRewriteConsumer::OffloadRewriteConsumer(clang::CompilerInstance &CI, cons
     : clang::ASTConsumer(), CI(CI), opts(opts) {}
 
 template <typename Parent, typename Node> const Parent *findParentOfType(clang::ASTContext &context, Node *from) {
-  for (auto node = context.getParents(*from).begin()->template get<clang::Decl>(); node;
-       node = context.getParents(*node).begin()->template get<clang::Decl>()) {
-    //
-    //    clang::Stmt *ax = {};
-    //    context.getParents(*ax).begin()->get<clang::Decl>();
-
-    if (auto parent = llvm::dyn_cast<Parent>(node); parent) {
-      return parent;
-    }
+  auto step = [&](const auto *n) -> const clang::Decl * {
+    auto parents = context.getParents(*n);
+    return parents.empty() ? nullptr : parents.begin()->template get<clang::Decl>();
+  };
+  for (auto node = step(from); node; node = step(node)) {
+    if (auto parent = llvm::dyn_cast<Parent>(node); parent) return parent;
   }
   return {};
 }

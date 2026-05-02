@@ -63,7 +63,7 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
   auto numGroupsU32 = [&](const size_t dim) -> ValPtr {
     const auto n = globalSizeU32(dim);
     const auto d = localSizeU32(dim);
-    const auto q = cg.B.CreateUDiv(globalSizeU32(dim), localSizeU32(dim));                       // q = n / d
+    const auto q = cg.B.CreateUDiv(n, d);                                                        // q = n / d
     const auto rem = cg.B.CreateZExt(cg.B.CreateICmpUGT(n, cg.B.CreateMul(q, d)), n->getType()); // ( (uint32t) (n > q*d) )
     return cg.B.CreateAdd(q, rem);                                                               // q + rem
   };
@@ -111,8 +111,8 @@ ValPtr AMDGPUTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &e
       [&](const Spec::GpuGlobalIdx &v) -> ValPtr {
         return dim3OrAssert(v.dim,                                                                                         //
                             globalIdU32(llvm::Intrinsic::amdgcn_workgroup_id_x, llvm::Intrinsic::amdgcn_workitem_id_x, 0), //
-                            globalIdU32(llvm::Intrinsic::amdgcn_workgroup_id_y, llvm::Intrinsic::amdgcn_workitem_id_y, 0), //
-                            globalIdU32(llvm::Intrinsic::amdgcn_workgroup_id_z, llvm::Intrinsic::amdgcn_workitem_id_z, 0));
+                            globalIdU32(llvm::Intrinsic::amdgcn_workgroup_id_y, llvm::Intrinsic::amdgcn_workitem_id_y, 1), //
+                            globalIdU32(llvm::Intrinsic::amdgcn_workgroup_id_z, llvm::Intrinsic::amdgcn_workitem_id_z, 2));
       },
       [&](const Spec::GpuGlobalSize &v) -> ValPtr {
         return dim3OrAssert(v.dim,            //

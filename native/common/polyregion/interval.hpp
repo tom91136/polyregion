@@ -29,18 +29,18 @@ public:
     N newEnd = r.end();
     auto it = map.lower_bound(Range{r.offset, 0});
 
-    T merged = std::move(data);
+    T merged = data;
     if (it != map.begin()) {
-      if (auto prev = std::prev(it); prev->first.end() >= r.offset) { // overlap or touching
+      if (auto prev = std::prev(it); prev->first.end() >= r.offset) {
         newStart = std::min(newStart, prev->first.offset);
         newEnd = std::max(newEnd, prev->first.end());
-        merged = std::move(merge(std::move(merged), std::move(prev->second)));
+        merged = merge(std::move(merged), std::move(prev->second));
         it = map.erase(prev);
       }
     }
-    while (it != map.end() && it->first.offset <= newEnd) { // merge all
+    while (it != map.end() && it->first.offset <= newEnd) {
       newEnd = std::max(newEnd, it->first.end());
-      merged = std::move(merge(std::move(merged), std::move(it->second)));
+      merged = merge(std::move(merged), std::move(it->second));
       it = map.erase(it);
     }
     return map.insert(it, {Range{newStart, newEnd - newStart}, std::move(merged)});

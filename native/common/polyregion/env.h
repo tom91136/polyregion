@@ -4,7 +4,7 @@
 
 namespace polyregion::env {
 
-void put(const char *name, const char *value, bool replace) {
+inline void put(const char *name, const char *value, bool replace) {
 #ifdef _WIN32
   if (!replace && getenv(name)) return;
   _putenv_s(name, value);

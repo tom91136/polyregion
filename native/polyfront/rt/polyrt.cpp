@@ -16,31 +16,35 @@ std::unique_ptr<Platform> polyregion::polyrt::currentPlatform{};
 std::unique_ptr<Device> polyregion::polyrt::currentDevice{};
 std::unique_ptr<DeviceQueue> polyregion::polyrt::currentQueue{};
 
-__attribute__((always_inline)) static void setupBackend(const Backend backend) {
+static std::optional<size_t> parseIntNoExcept(const char *str) {
+  errno = 0; // strtol to avoid exceptions
+  const size_t value = std::strtol(str, nullptr, 10);
+  return errno == 0 ? std::optional{value} : std::nullopt;
+}
+
+static void setupBackend(const Backend backend) {
   if (auto errorOrPlatform = Platform::of(backend); std::holds_alternative<std::string>(errorOrPlatform)) {
     log(DebugLevel::None, "Backend %s failed to initialise: %s", to_string(backend).data(), std::get<std::string>(errorOrPlatform).c_str());
   } else polyregion::polyrt::currentPlatform = std::move(std::get<std::unique_ptr<Platform>>(errorOrPlatform));
 }
 
-__attribute__((always_inline)) static void selectDevice(Platform &p) {
+static void selectDevice(Platform &p) {
   auto devices = p.enumerate();
   if (const auto env = std::getenv(DeviceSelectorEnv); env) {
     std::string name(env);
     std::transform(name.begin(), name.end(), name.begin(), [](auto &c) { return std::tolower(c); });
-    errno = 0; // strtol to avoid exceptions
-    if (const size_t index = std::strtol(name.c_str(), nullptr, 10);
-        errno == 0 && index < devices.size()) { // we got a number, check inbounds and select device
-      polyregion::polyrt::currentDevice = std::move(devices.at(index));
-    } else if (const auto matching = // or do a substring match
+    if (const auto index = parseIntNoExcept(name.c_str()); index && *index < devices.size()) {
+      polyregion::polyrt::currentDevice = std::move(devices.at(*index));
+    } else if (const auto matching =
                std::find_if(devices.begin(), devices.end(),
                             [&name](const auto &device) { return device->name().find(name) != std::string::npos; });
                matching != devices.end()) {
       polyregion::polyrt::currentDevice = std::move(*matching);
     }
   } else if (!devices.empty()) polyregion::polyrt::currentDevice = std::move(devices[0]);
-};
+}
 
-__attribute__((always_inline)) static void selectPlatform() {
+static void selectPlatform() {
   const static std::unordered_map<std::string, Backend> NameToBackend = {
       {"host", Backend::RelocatableObject}, //
       {"host_so", Backend::SharedObject},   //
@@ -80,12 +84,6 @@ __attribute__((always_inline)) static void selectPlatform() {
     log(DebugLevel::Debug, "Backend selector %s is not set: using default host platform", PlatformSelectorEnv);
     setupBackend(Backend::RelocatableObject);
   }
-}
-
-__attribute__((always_inline)) static std::optional<size_t> parseIntNoExcept(const char *str) {
-  errno = 0; // strtol to avoid exceptions
-  const size_t value = std::strtol(str, nullptr, 10);
-  return errno == 0 ? std::optional{value} : std::nullopt;
 }
 
 void polyregion::polyrt::initialise() {
@@ -133,7 +131,7 @@ polyregion::polyrt::DebugLevel polyregion::polyrt::debugLevel() {
   static DebugLevel level = []() {
     if (const auto env = std::getenv(DebugEnv); env) {
       if (const auto v = parseIntNoExcept(env)) {
-        if (*v < static_cast<std::underlying_type_t<DebugLevel>>(DebugLevel::Trace)) {
+        if (*v <= static_cast<std::underlying_type_t<DebugLevel>>(DebugLevel::Trace)) {
           return static_cast<DebugLevel>(*v);
         }
       }
@@ -183,13 +181,13 @@ bool polyregion::polyrt::loadKernelObject(const char *moduleName, const KernelOb
   return true;
 }
 
-__attribute__((always_inline)) static void *sharedAlloc(const size_t size) {
+static void *sharedAlloc(const size_t size) {
   if (const auto p = polyregion::polyrt::currentDevice->mallocShared(size, Access::RW)) return *p;
   log(DebugLevel::None, "Device %s does not support shared allocation, aborting...\n", polyregion::polyrt::currentDevice->name().c_str());
   std::abort();
 }
 
-__attribute__((always_inline)) static void sharedFree(void *p) { polyregion::polyrt::currentDevice->freeShared(p); }
+static void sharedFree(void *p) { polyregion::polyrt::currentDevice->freeShared(p); }
 
 POLYREGION_EXPORT extern "C" void *polyrt_usm_malloc(const size_t size) {
   polyregion::polyrt::initialise();

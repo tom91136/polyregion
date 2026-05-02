@@ -108,32 +108,14 @@ void llvmc::initialise() {
   initializeCodeGen(*r);
   initializeLoopStrengthReducePass(*r);
   initializeLowerIntrinsicsPass(*r);
-  //  initializeEntryExitInstrumenterPass(*r);
-  //  initializePostInlineEntryExitInstrumenterPass(*r);
   initializeUnreachableBlockElimLegacyPassPass(*r);
   initializeConstantHoistingLegacyPassPass(*r);
   initializeScalarOpts(*r);
   initializeVectorization(*r);
   initializeScalarizeMaskedMemIntrinLegacyPassPass(*r);
   initializeExpandReductionsPass(*r);
-  // initializeExpandVectorPredicationPass(*r);
-  //  initializeHardwareLoopsPass(*r);
   initializeTransformUtils(*r);
   initializeReplaceWithVeclibLegacyPass(*r);
-
-  //    initializeLLVMToSPIRVLegacyPass(*r);
-  //    initializeOCLToSPIRVLegacyPass(*r);
-  //    initializeOCLTypeToSPIRVLegacyPass(*r);
-  //    initializeSPIRVLowerBoolLegacyPass(*r);
-  //    initializeSPIRVLowerConstExprLegacyPass(*r);
-  //    initializeSPIRVLowerOCLBlocksLegacyPass(*r);
-  //    initializeSPIRVLowerMemmoveLegacyPass(*r);
-  //    initializeSPIRVLowerSaddWithOverflowLegacyPass(*r);
-  //    initializeSPIRVRegularizeLLVMLegacyPass(*r);
-  //    initializeSPIRVToOCL12LegacyPass(*r);
-  //    initializeSPIRVToOCL20LegacyPass(*r);
-  //    initializePreprocessMetadataLegacyPass(*r);
-  //    initializeSPIRVLowerBitCastToNonStandardTypeLegacyPass(*r);
 }
 
 /// Set function attributes of function \p F based on CPU, Features, and command
@@ -158,7 +140,6 @@ static void setFunctionAttributes(llvm::StringRef CPU, llvm::StringRef Features,
 
   llvm::DenormalMode::DenormalModeKind DenormKind = llvm::DenormalMode::DenormalModeKind::IEEE;
   NewAttrs.addAttribute("denormal-fp-math", llvm::DenormalMode(DenormKind, DenormKind).str());
-  llvm::DenormalMode::DenormalModeKind DenormKindF32 = llvm::DenormalMode::DenormalModeKind::Invalid;
   NewAttrs.addAttribute("denormal-fp-math-f32", llvm::DenormalMode(DenormKind, DenormKind).str());
 
   NewAttrs.addAttribute("unsafe-fp-math", "true");
@@ -238,7 +219,8 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
   auto useUnsafeMath = opt == compiletime::OptLevel::Ofast;
   llvm::TargetOptions options;
   options.AllowFPOpFusion = useUnsafeMath ? llvm::FPOpFusion::Fast : llvm::FPOpFusion::Standard;
-  options.UnsafeFPMath = useUnsafeMath;
+  // LLVM 22 removed `TargetOptions::UnsafeFPMath` (was a meta-flag combining the granular ones
+  // below). Setting all four granular flags reproduces the same fast-math semantics.
   options.NoInfsFPMath = useUnsafeMath;
   options.NoNaNsFPMath = useUnsafeMath;
   options.NoTrappingFPMath = useUnsafeMath;
@@ -273,11 +255,7 @@ polyast::CompileResult llvmc::compileModule(const TargetInfo &info, const compil
     case compiletime::OptLevel::Ofast: optLevel = llvm::OptimizationLevel::O3; break;
   }
 
-#if LLVM_VERSION_MAJOR >= 20
   using TargetMachine = llvm::TargetMachine;
-#else
-  using TargetMachine = llvm::LLVMTargetMachine;
-#endif
 
   auto mkLLVMTargetMachine = [](const TargetInfo &info, const llvm::TargetOptions &options, const llvm::CodeGenOptLevel &level) {
     // XXX We *MUST* use the large code model as we will be ingesting the object later with RuntimeDyld

@@ -103,7 +103,6 @@ POLYREGION_EXPORT extern "C" void polyrt_map_read(void *origin, const ptrdiff_t 
 POLYREGION_EXPORT extern "C" void polyrt_map_write(void *origin, const ptrdiff_t sizeInBytes, const size_t unitInBytes) {
   log(DebugLevel::Debug, "polyrt_map_write(%p, %ld, %ld)", origin, sizeInBytes, unitInBytes);
   if (sizeInBytes == 0) return;
-  // allocations.syncRemoteToLocal(origin);
   allocations.invalidateLocal(origin);
 }
 
@@ -164,17 +163,17 @@ struct ManagedPartialReduction {
       for (size_t i = 0; i < allocations.size(); ++i)
         reductions[i].reduce(range, reinterpret_cast<const char *>(allocations[i].ptr));
     } else {
-      std::vector<void *> hostPartials(allocations.size());
+      std::vector<std::vector<char>> hostPartials(allocations.size());
       for (size_t i = 0; i < allocations.size(); ++i)
-        hostPartials[i] = std::malloc(allocations[i].size);
+        hostPartials[i].resize(allocations[i].size);
 
       for (size_t i = 0; i < allocations.size(); ++i) {
-        polyrt::currentQueue->enqueueDeviceToHostAsync(allocations[i].ptr, 0, hostPartials[i], allocations[i].size, {});
+        polyrt::currentQueue->enqueueDeviceToHostAsync(allocations[i].ptr, 0, hostPartials[i].data(), allocations[i].size, {});
       }
       polyrt::currentQueue->enqueueWaitBlocking();
       for (size_t i = 0; i < allocations.size(); ++i) {
         polyrt::currentDevice->freeDevice(allocations[i].ptr);
-        reductions[i].reduce(range, static_cast<const char *>(hostPartials[i]));
+        reductions[i].reduce(range, hostPartials[i].data());
       }
     }
   }
@@ -231,7 +230,6 @@ static void dispatchManaged(const int64_t lowerBoundInclusive, const int64_t upp
   log(DebugLevel::Debug, "<%s:%s:%zu> Submitted", __func__, moduleId, threadsPerBlock);
   polyrt::currentQueue->enqueueWaitBlocking();
 
-  // allocations.syncRemoteToLocal(captures);
   allocations.disassociate(captures);
   polyrt::currentQueue->enqueueWaitBlocking();
 

@@ -33,7 +33,7 @@ static std::string fromJni(JNIEnv *env, const jstring &s) {
   env->ReleaseStringUTFChars(s, data);
   return out;
 }
-template <typename T, typename = typename std::enable_if<std::is_convertible_v<T, char>>>
+template <typename T, typename = std::enable_if_t<std::is_convertible_v<T, char>>>
 static std::vector<T> fromJni(JNIEnv *env, jbyteArray xs) {
   auto xsData = env->GetByteArrayElements(xs, nullptr);
   auto bytes = std::vector<T>(xsData, xsData + env->GetArrayLength(xs));

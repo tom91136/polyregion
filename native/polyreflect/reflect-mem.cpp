@@ -32,7 +32,7 @@
 #include "llvm/IR/Value.h"
 #include "llvm/Pass.h"
 #include "llvm/Passes/PassBuilder.h"
-#include "llvm/Passes/PassPlugin.h"
+#include "llvm/Plugins/PassPlugin.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/Cloning.h"
@@ -129,7 +129,7 @@ struct MemAccess {
 };
 
 static std::string showConcise(const llvm::Value *V) {
-  if (const auto F = llvm::dyn_cast<llvm::Function>(V)) {
+  if (llvm::isa<llvm::Function>(V)) {
     return V->getName().str();
   }
   std::string s;
@@ -461,7 +461,9 @@ void insertMapCalls(llvm::Module &M, //
             /*L*/ AddRec->getLoop());
         const auto scUB = SE.getAddExpr(scLB, SE.getMulExpr(scStride, scTripCount));
         const auto predecessor = AddRec->getLoop()->getLoopPredecessor()->getTerminator();
-        llvm::SCEVExpander Expander(SE, M.getDataLayout(), "scev");
+        // LLVM 22 dropped the DataLayout parameter from SCEVExpander; the expander now pulls
+        // it from `SE.getDataLayout()` directly.
+        llvm::SCEVExpander Expander(SE, "scev");
         Expander.setInsertPoint(predecessor);
         const auto lb = Expander.expandCodeFor(scLB);
         const auto ub = Expander.expandCodeFor(scUB);
@@ -494,7 +496,6 @@ void insertMapCalls(llvm::Module &M, //
         coalesced.insert({offset, constSize->getSExtValue()},
                          CoalescedTarget{.access = t.access, .insertPoint = t.insertPoint, .origin = base},
                          [](const CoalescedTarget &l, const CoalescedTarget &r) { return l + r; });
-        independent.emplace_back(t);
       } else independent.emplace_back(t);
     }
 
@@ -551,7 +552,7 @@ bool runSplice(llvm::Module &M, llvm::FunctionAnalysisManager &FAM, const bool v
   }
 
   const auto tainted =
-      CoarseGrainedTaintAnalysis::propagate(M, roots, values, [&](const llvm::Function *F) { return ignored.count(F) == 0; }, true);
+      CoarseGrainedTaintAnalysis::propagate(M, roots, values, [&](const llvm::Function *F) { return ignored.count(F) == 0; }, verbose);
 
   if (verbose) llvm::errs() << "[ReflectMemPass] CGTA yielded " << tainted.size() << " tainted values\n";
 
@@ -585,7 +586,7 @@ bool runSplice(llvm::Module &M, llvm::FunctionAnalysisManager &FAM, const bool v
           if (llvm::isa<llvm::StoreInst>(I)) moduleStores++;
         }
     }
-    llvm::errs() << "[ReflectMemPass] Nodule Loads = " << moduleLoads << ", Stores = " << moduleStores << "\n";
+    llvm::errs() << "[ReflectMemPass] Module Loads = " << moduleLoads << ", Stores = " << moduleStores << "\n";
     llvm::errs() << "[ReflectMemPass] CGTA   Loads = " << cgtaLoads << ", Stores = " << cgtaStores << "\n";
     llvm::errs() << "[ReflectMemPass] Module/CGTA Loads  = " << llvm::format("%.2f", (static_cast<float>(cgtaLoads) / moduleLoads) * 100)
                  << "%\n";

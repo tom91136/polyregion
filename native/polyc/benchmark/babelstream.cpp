@@ -195,7 +195,7 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
   //  std::cout << repr(dot) << std::endl;
 
   auto entry = function("entry", {}, Unit)({ret(Unit0Const())});
-  return Program({}, {entry, copy, mul, add, triad, dot});
+  return program({}, {entry, copy, mul, add, triad, dot});
 }
 
 int main() {

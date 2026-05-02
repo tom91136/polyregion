@@ -36,7 +36,7 @@
 #endif
 
 #ifdef POLYINVOKE_FATAL
-  #error Trace already defined
+  #error POLYINVOKE_FATAL already defined
 #else
 
   #define POLYINVOKE_FATAL(prefix, fmt, ...)                                                                                               \

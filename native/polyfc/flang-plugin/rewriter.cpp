@@ -96,14 +96,14 @@ class Binder {
   std::vector<ReductionField> reductionFields;
 
   static Value getBoxPtr(OpBuilder &B, Value refToBox) {
-    const auto opaqueGEP = B.create<fir::BoxOffsetOp>(uLoc(B), refToBox, fir::BoxFieldAttr::base_addr).getResult();
-    const auto i64GEPAddr = B.create<fir::ConvertOp>(uLoc(B), i64Ty(B), opaqueGEP).getRes();
-    return B.create<LLVM::IntToPtrOp>(uLoc(B), ptrTy(B), i64GEPAddr).getRes();
+    const auto opaqueGEP = fir::BoxOffsetOp::create(B, uLoc(B), refToBox, fir::BoxFieldAttr::base_addr).getResult();
+    const auto i64GEPAddr = fir::ConvertOp::create(B, uLoc(B), i64Ty(B), opaqueGEP).getRes();
+    return LLVM::IntToPtrOp::create(B, uLoc(B), ptrTy(B), i64GEPAddr).getRes();
   }
 
   static Value getRefPtr(OpBuilder &B, Value ref) {
-    const auto i64Addr = B.create<fir::ConvertOp>(uLoc(B), i64Ty(B), ref).getRes();
-    const auto llvmPtr = B.create<LLVM::IntToPtrOp>(uLoc(B), ptrTy(B), i64Addr).getRes();
+    const auto i64Addr = fir::ConvertOp::create(B, uLoc(B), i64Ty(B), ref).getRes();
+    const auto llvmPtr = LLVM::IntToPtrOp::create(B, uLoc(B), ptrTy(B), i64Addr).getRes();
     return llvmPtr;
   }
 
@@ -115,7 +115,7 @@ class Binder {
         if (!fir::unwrapInnerType(boxTy.getEleTy()).isSignlessIntOrIndexOrFloat())
           raise(fmt::format("Binder value is not a boxed scalar type: {}", show(val)));
         // Load the box pointer first as it's the field zero pointer-to-scalar's value we want
-        return B.create<LLVM::LoadOp>(uLoc(B), ptrTy(B), getBoxPtr(B, val));
+        return LLVM::LoadOp::create(B, uLoc(B), ptrTy(B), getBoxPtr(B, val));
       } else raise(fmt::format("Binder value is not a scalar type: {}", show(val)));
     } else raise(fmt::format("Binder value is not a ref type: {}", show(val)));
   }
@@ -171,8 +171,8 @@ class Binder {
       } else raise(fmt::format("Unhandled binder type: {}", fir::mlirTypeToString(refElemTy)));
     } else {
       if (const auto boxTy = llvm::dyn_cast<fir::BoxType>(val.getType())) {
-        const auto ref = B.create<fir::AllocaOp>(uLoc(B), boxTy).getResult();
-        B.create<fir::StoreOp>(uLoc(B), val, ref);
+        const auto ref = fir::AllocaOp::create(B, uLoc(B), boxTy).getResult();
+        fir::StoreOp::create(B, uLoc(B), val, ref);
         bindRef(B, ref, layout, fields, true);
       } else {
         raise(fmt::format("Binder value is not a ref type: {}", show(val)));
@@ -206,11 +206,11 @@ public:
   Value createCapture(OpBuilder &B, ModuleOp &M) const {
     const auto annotationConst = strConst(B, M, "polyreflect-track");
     captureFields | for_each([&](auto &f) {
-      B.create<LLVM::VarAnnotation>(uLoc(B), f.fieldPtr, annotationConst, nullConst(B), intConst(B, i32Ty(B), 0), nullConst(B));
+      LLVM::VarAnnotation::create(B, uLoc(B), f.fieldPtr, annotationConst, nullConst(B), intConst(B, i32Ty(B), 0), nullConst(B));
     });
     return captureMirror.local(B, {captureFields                                                  //
                                    | map([](auto &f) { return f.fieldPtr; })                      //
-                                   | prepend(B.create<LLVM::ZeroOp>(uLoc(B), preludeTy).getRes()) //
+                                   | prepend(LLVM::ZeroOp::create(B, uLoc(B), preludeTy).getRes()) //
                                    | to_vector()});
   }
 
@@ -290,7 +290,7 @@ public:
   void ifKindEq(OpBuilder &B, const polyfront::Options &opts, const runtime::PlatformKind kind,
                 const std::function<void(OpBuilder &, runtime::PlatformKind)> &f) {
     if (!(opts.targets ^ exists([&](auto &t, auto) { return runtime::targetPlatformKind(t) == kind; }))) return;
-    auto B0 = B.create<fir::IfOp>(uLoc(B), dco.isPlatformKind(B, kind), false).getThenBodyBuilder();
+    auto B0 = fir::IfOp::create(B, uLoc(B), dco.isPlatformKind(B, kind), false).getThenBodyBuilder();
     f(B0, kind);
   }
 
@@ -348,9 +348,9 @@ public:
                                      return l.members ^ find([&](auto &x) { return x.name == n; }) ^
                                             fold(
                                                 [&](auto &slm) -> Value {
-                                                  auto gep = B1.create<LLVM::GEPOp>(uLoc(B1), ptrTy(B1), B1.getI8Type(), f.getArgument(0),
+                                                  auto gep = LLVM::GEPOp::create(B1, uLoc(B1), ptrTy(B1), B1.getI8Type(), f.getArgument(0),
                                                                                     ValueRange{intConst(B1, i64Ty(B1), slm.offsetInBytes)});
-                                                  return B1.create<LLVM::LoadOp>(uLoc(B1), ty, gep.getRes());
+                                                  return LLVM::LoadOp::create(B1, uLoc(B1), ty, gep.getRes());
                                                 },
                                                 [&]() -> Value { raise(fmt::format("Missing field {}", repr(n))); });
                                    };
@@ -362,14 +362,14 @@ public:
                                      for (int64_t i = 0; i < static_cast<int64_t>(m.ranks); ++i) {
                                        // XXX Dim type fields are: { 0 = lowerBound, 1 = extent, 2 = stride }, we want the extent (1) at
                                        // rank
-                                       const auto dim = B1.create<LLVM::ExtractValueOp>(uLoc(B1), dims, ArrayRef{i}).getResult();
-                                       const auto extent = B1.create<LLVM::ExtractValueOp>(uLoc(B1), dim, ArrayRef<int64_t>{1}).getResult();
-                                       totalSizeInBytes = B1.create<arith::MulIOp>(uLoc(B1), totalSizeInBytes, extent).getResult();
+                                       const auto dim = LLVM::ExtractValueOp::create(B1, uLoc(B1), dims, ArrayRef{i}).getResult();
+                                       const auto extent = LLVM::ExtractValueOp::create(B1, uLoc(B1), dim, ArrayRef<int64_t>{1}).getResult();
+                                       totalSizeInBytes = arith::MulIOp::create(B1, uLoc(B1), totalSizeInBytes, extent).getResult();
                                      }
                                    }
-                                   B1.create<LLVM::ReturnOp>(uLoc(B1), totalSizeInBytes);
+                                   LLVM::ReturnOp::create(B1, uLoc(B1), totalSizeInBytes);
                                  });
-                  return std::pair{m.addr, B0.create<LLVM::AddressOfOp>(uLoc(B0), fn).getRes()};
+                  return std::pair{m.addr, LLVM::AddressOfOp::create(B0, uLoc(B0), fn).getRes()};
                 });
             return l.members ^ map([&](auto &m) {
                      const auto [indirections, componentSize] = countIndirectionsAndComponentSize(m.name.tpe, table);
@@ -406,9 +406,9 @@ public:
     static size_t id = 0;
     defineGlobalCtor(M, fmt::format("dco_layoutInit_{}_{}", to_string(kind), ++id), [&](OpBuilder &FB, auto &) {
       aggregateMembersArray | for_each([&](auto &g, auto idx) {
-        FB.create<LLVM::StoreOp>(uLoc(FB), g.gep(FB), structLayoutsArray.gep(FB, idx, TypeLayout.members));
+        LLVM::StoreOp::create(FB, uLoc(FB), g.gep(FB), structLayoutsArray.gep(FB, idx, TypeLayout.members));
       });
-      FB.create<LLVM::ReturnOp>(uLoc(FB), ValueRange{});
+      LLVM::ReturnOp::create(FB, uLoc(FB), ValueRange{});
     });
 
     auto globalKOs = KernelObject.global(M, [&](OpBuilder &B0) {
@@ -459,11 +459,11 @@ public:
                                  reductionsCount,        //
                                  reductions,             //
                                  capture);
-    auto noDispatch = B.create<arith::XOrIOp>(uLoc(B), dispatch, boolConst(B, true));
-    auto noDispatchIf = B.create<fir::IfOp>(uLoc(B), noDispatch, true);
+    auto noDispatch = arith::XOrIOp::create(B, uLoc(B), dispatch, boolConst(B, true));
+    auto noDispatchIf = fir::IfOp::create(B, uLoc(B), noDispatch, true);
     {
       auto ifNoDispatchB = noDispatchIf.getThenBodyBuilder();
-      ifNoDispatchB.create<LLVM::StoreOp>(uLoc(B), boolConst(ifNoDispatchB, true), executeOriginal);
+      LLVM::StoreOp::create(ifNoDispatchB, uLoc(B), boolConst(ifNoDispatchB, true), executeOriginal);
     }
     {
       auto ifDispatchB = noDispatchIf.getElseBodyBuilder();
@@ -503,8 +503,8 @@ void doRewrite(ModuleOp op) {
         parentLoopOp = parentLoop;
       }
       R.setInsertionPointAfter(parentLoopOp);
-      auto cvt = R.create<fir::ConvertOp>(R.getUnknownLoc(), fir::unwrapRefType(inductionRef.getType()), loopOp.getUpperBound());
-      R.create<fir::StoreOp>(R.getUnknownLoc(), cvt, inductionRef)->setAttr(HoistedStoreOp, R.getUnitAttr());
+      auto cvt = fir::ConvertOp::create(R, R.getUnknownLoc(), fir::unwrapRefType(inductionRef.getType()), loopOp.getUpperBound());
+      fir::StoreOp::create(R, R.getUnknownLoc(), cvt, inductionRef)->setAttr(HoistedStoreOp, R.getUnitAttr());
       loopOp->setAttr(InductionStoreHoisted, R.getUnitAttr());
       R.eraseOp(storeOp);
       return success();
@@ -577,9 +577,9 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
       // At just before the doLoop
       B.setInsertionPoint(doLoop);
       // Create the guard variable
-      auto executeOriginal = B.create<LLVM::AllocaOp>(uLoc(B), ptrTy(B), intConst(B, i64Ty(B), 1), B.getI64IntegerAttr(1), B.getI1Type());
+      auto executeOriginal = LLVM::AllocaOp::create(B, uLoc(B), ptrTy(B), intConst(B, i64Ty(B), 1), B.getI64IntegerAttr(1), B.getI1Type());
       // Guard is false by default
-      B.create<LLVM::StoreOp>(uLoc(B), boolConst(B, false), executeOriginal);
+      LLVM::StoreOp::create(B, uLoc(B), boolConst(B, false), executeOriginal);
       const auto dispatchKind = [&](OpBuilder &B0, const runtime::PlatformKind kind) {
         rewriter.invokeDispatch(B0, executeOriginal, kind, diag, diagLoc, opts, moduleId, doLoop);
       };
@@ -587,7 +587,7 @@ void polyfc::rewriteFIR(clang::DiagnosticsEngine &diag, ModuleOp &m) {
       rewriter.ifKindEq(B, opts, runtime::PlatformKind::HostThreaded, dispatchKind);
       rewriter.ifKindEq(B, opts, runtime::PlatformKind::Managed, dispatchKind);
       // Move and guard original doLoop
-      auto ifOp = B.create<fir::IfOp>(uLoc(B), B.create<LLVM::LoadOp>(uLoc(B), B.getI1Type(), executeOriginal), false);
+      auto ifOp = fir::IfOp::create(B, uLoc(B), LLVM::LoadOp::create(B, uLoc(B), B.getI1Type(), executeOriginal), false);
       auto &then = ifOp.getThenRegion().front();
       doLoop->moveBefore(&then, then.begin());
     }

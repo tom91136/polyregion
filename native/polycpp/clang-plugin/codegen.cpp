@@ -93,7 +93,7 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   if (opts.verbose) {
     diag.Report(loc,
                 diag.getCustomDiagID(clang::DiagnosticsEngine::Level::Remark, "[PolySTL] Remapped program [%0, sizeof capture=%1]\n%2"))
-        << moduleId << C.getTypeSize(parent->getTypeForDecl()) << repr(program);
+        << moduleId << C.getTypeSize(C.getCanonicalTagType(parent)) << repr(program);
   }
 
   auto objects =

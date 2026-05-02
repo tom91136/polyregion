@@ -55,27 +55,33 @@ static bool runSplice(llvm::Module &M, const bool verbose) {
           const auto Called = CB->getCalledFunction();
           if (!Called) continue;
           if (CB->getIntrinsicID() == llvm::Intrinsic::lifetime_start) {
+            auto *AI = llvm::dyn_cast<llvm::AllocaInst>(CB->getArgOperand(0));
+            if (!AI) continue;
             if (verbose) llvm::errs() << "[ReflectStackPass]   Inserted record ` " << *CB << "`\n";
-            Functions.emplace_back([RecordFn, CB, zeroDebugLoc](llvm::IRBuilder<> &B) {
+            Functions.emplace_back([RecordFn, CB, AI, &M, zeroDebugLoc](llvm::IRBuilder<> &B) {
               B.SetInsertPoint(CB->getNextNode()); // after start
               auto alloc = B.getInt8(to_integral(rt_reflect::Type::StackAlloc));
-              const auto Call = B.CreateCall(RecordFn, {CB->getArgOperand(1), CB->getArgOperand(0), alloc});
+              auto sizeBytes = AI->getAllocationSize(M.getDataLayout()).value_or(llvm::TypeSize::getFixed(0)).getFixedValue();
+              auto size = B.getInt64(sizeBytes);
+              const auto Call = B.CreateCall(RecordFn, {AI, size, alloc});
               if (zeroDebugLoc) Call->setDebugLoc(zeroDebugLoc);
             });
           }
           if (CB->getIntrinsicID() == llvm::Intrinsic::lifetime_end) {
+            auto *AI = llvm::dyn_cast<llvm::AllocaInst>(CB->getArgOperand(0));
+            if (!AI) continue;
             if (verbose) llvm::errs() << "[ReflectStackPass]   Inserted release ` " << *CB << "`\n";
-            Functions.emplace_back([ReleaseFn, CB, zeroDebugLoc](llvm::IRBuilder<> &B) {
+            Functions.emplace_back([ReleaseFn, CB, AI, zeroDebugLoc](llvm::IRBuilder<> &B) {
               B.SetInsertPoint(CB); // before end
               auto dealloc = B.getInt8(to_integral(rt_reflect::Type::StackFree));
-              const auto Call = B.CreateCall(ReleaseFn, {CB->getArgOperand(1), dealloc});
+              const auto Call = B.CreateCall(ReleaseFn, {AI, dealloc});
               if (zeroDebugLoc) Call->setDebugLoc(zeroDebugLoc);
             });
           }
         }
       }
       llvm::IRBuilder B(&BB);
-      for (auto f : Functions)
+      for (auto &f : Functions)
         f(B);
     }
   }

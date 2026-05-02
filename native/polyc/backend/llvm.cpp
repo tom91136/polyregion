@@ -405,23 +405,17 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
 
           // to the equally sized integral type first if narrowing; XXX narrowing directly produces a poison value
 
-          ValPtr c = nullptr;
-          if (fromTpe->getPrimitiveSizeInBits() > toTpe->getPrimitiveSizeInBits() || true) {
-            auto min32BitIntBits = std::max<llvm::TypeSize::ScalarTy>(32, toTpe->getPrimitiveSizeInBits());
-            auto toTpeMaxInFp = llvm::ConstantFP::get(fromTpe, double(nIntMax(min32BitIntBits)));
-            auto toTpeMinInFp = llvm::ConstantFP::get(fromTpe, double(nIntMin(min32BitIntBits)));
-            auto min32BitIntTy = llvm::Type::getIntNTy(C.actual, min32BitIntBits);
-            auto toTpeMaxInInt = llvm::ConstantInt::get(min32BitIntTy, nIntMax(min32BitIntBits));
-            auto toTpeMinInInt = llvm::ConstantInt::get(min32BitIntTy, nIntMin(min32BitIntBits));
+          auto min32BitIntBits = std::max<llvm::TypeSize::ScalarTy>(32, toTpe->getPrimitiveSizeInBits());
+          auto toTpeMaxInFp = llvm::ConstantFP::get(fromTpe, double(nIntMax(min32BitIntBits)));
+          auto toTpeMinInFp = llvm::ConstantFP::get(fromTpe, double(nIntMin(min32BitIntBits)));
+          auto min32BitIntTy = llvm::Type::getIntNTy(C.actual, min32BitIntBits);
+          auto toTpeMaxInInt = llvm::ConstantInt::get(min32BitIntTy, nIntMax(min32BitIntBits));
+          auto toTpeMinInInt = llvm::ConstantInt::get(min32BitIntTy, nIntMin(min32BitIntBits));
 
-            c = B.CreateSelect(B.CreateFCmpOGE(from, toTpeMaxInFp), toTpeMaxInInt,                //
-                               B.CreateSelect(B.CreateFCmpOLE(from, toTpeMinInFp), toTpeMinInInt, //
-                                              B.CreateFPToSI(from, min32BitIntTy)));
-            c = B.CreateIntCast(c, toTpe, !isUnsigned(x.as));
-
-          } else {
-            c = B.CreateFPToSI(from, toTpe, "fractional_to_integral_cast");
-          }
+          ValPtr c = B.CreateSelect(B.CreateFCmpOGE(from, toTpeMaxInFp), toTpeMaxInInt,                //
+                                    B.CreateSelect(B.CreateFCmpOLE(from, toTpeMinInFp), toTpeMinInInt, //
+                                                   B.CreateFPToSI(from, min32BitIntTy)));
+          c = B.CreateIntCast(c, toTpe, !isUnsigned(x.as));
 
           auto zero = llvm::ConstantInt::get(toTpe, 0);
           return B.CreateSelect(B.CreateFCmpUNO(from, from), zero, c);

@@ -369,7 +369,7 @@ void VulkanDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffs
                                                    const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
   const auto dstObj = queryMemObject(dst);
-  const auto srcObj = queryMemObject(dst);
+  const auto srcObj = queryMemObject(src);
   std::memcpy(static_cast<char *>(dstObj->mappedData) + dstOffset, static_cast<char *>(srcObj->mappedData) + srcOffset, size);
   vmaInvalidateAllocation(allocator, dstObj->allocation, dstOffset, size);
   if (cb) (*cb)();

@@ -74,7 +74,7 @@ __ALLOC void *operator new(const size_t size, const std::nothrow_t &) noexcept {
 }
 
 __ALLOC void *operator new(const size_t size, std::align_val_t a, const std::nothrow_t &) noexcept {
-  const auto ptr = __RT_ALTERNATIVE(malloc)(size);
+  const auto ptr = __RT_ALTERNATIVE(memalign)(static_cast<size_t>(a), size);
   _rt_record(ptr, size, polyregion::rt_reflect::Type::HeapCXXNew);
   return ptr;
 }

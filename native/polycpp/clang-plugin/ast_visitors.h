@@ -7,8 +7,6 @@
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "llvm/Support/Casting.h"
 
-#include "ast_visitors.h"
-
 namespace polyregion::polystl {
 
 // Recursively (following CallExpr too) finds the first call to a () operator and records the concrete method called

@@ -44,7 +44,6 @@ polyregion::backend::lld_lite::linkElf(const std::vector<std::string> &args,
   llvm::SmallString<8> err;
   llvm::raw_svector_ostream errSteam(err);
 
-  //  lld::safeLldMain(allArgs.size(), allArgs.data(),llvm::outs(), errSteam )
   lld::elf::link(allArgs, llvm::outs(), errSteam, false, false);
   lld::CommonLinkerContext::destroy();
 

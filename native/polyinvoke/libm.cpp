@@ -158,7 +158,7 @@ void polyregion::libm::exportAll() {
   sym<LD>("tanhl", &std::tanh);
 
   sym<D>("asinh", &std::asinh);
-  sym<F>("asinf", &std::asinh);
+  sym<F>("asinhf", &std::asinh);
   sym<LD>("asinhl", &std::asinh);
 
   sym<D>("acosh", &std::acosh);

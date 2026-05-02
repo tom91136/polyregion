@@ -6,7 +6,7 @@
 #include "flang/Frontend/FrontendActions.h"
 #include "flang/Frontend/FrontendPluginRegistry.h"
 
-#include "clang/Driver/Options.h"
+#include "clang/Options/Options.h"
 #include "llvm/Option/ArgList.h"
 
 #include "rewriter.h"
@@ -116,13 +116,13 @@ class RewriteIRAction final : public Fortran::frontend::PluginParseTreeAction {
       cmdArgRef.push_back(x.c_str());
     unsigned int missingArgIndex{};
     unsigned int missingArgCount{};
-    const auto args = clang::driver::getDriverOptTable().ParseArgs(cmdArgRef, missingArgIndex, missingArgCount,
-                                                                   llvm::opt::Visibility(clang::driver::options::FC1Option));
-    if (const auto arg = args.getLastArg(clang::driver::options::OPT_Action_Group)) {
+    const auto args = clang::getDriverOptTable().ParseArgs(cmdArgRef, missingArgIndex, missingArgCount,
+                                                                   llvm::opt::Visibility(clang::options::FC1Option));
+    if (const auto arg = args.getLastArg(clang::options::OPT_Action_Group)) {
       llvm::outs() << "[PolyFC] action=" << arg->getOption().getName() << "\n";
       const bool success = [&] {
         using namespace Fortran::frontend;
-        using namespace clang::driver::options;
+        using namespace clang::options;
         const auto interposeAction = [&](const BackendActionTy ty) {
           return MutableCodeGenAction::executeInterposedMLIRAction(*this, ty,                         //
                                                                    &polyregion::polyfc::rewriteHLFIR, //

@@ -1,5 +1,4 @@
-#include <cxxabi.h>
-
+#include "llvm/Demangle/Demangle.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Passes/PassBuilder.h"
@@ -12,20 +11,6 @@ using namespace aspartame;
 using namespace polyregion;
 
 namespace {
-
-std::string demangleCXXName(const char *abiName) {
-  int failed;
-  char *ret = abi::__cxa_demangle(abiName, nullptr /* output buffer */, nullptr /* length */, &failed);
-  if (failed) {
-    //  0: The demangling operation succeeded.
-    // -1: A memory allocation failure occurred.
-    // -2: mangled_name is not a valid name under the C++ ABI mangling rules.
-    // -3: One of the arguments is invalid.
-    return "";
-  } else {
-    return ret;
-  }
-}
 
 bool runSplice(llvm::Module &M, const bool verbose) {
   static constexpr std::pair<llvm::StringLiteral, llvm::StringLiteral> ReplaceMap[]{
@@ -72,12 +57,13 @@ bool runSplice(llvm::Module &M, const bool verbose) {
     if (!F.hasName()) continue;
     if (!AllocReplacements.contains(F.getName())) continue;
 
-    if (verbose) llvm::errs() << "[InterposePass] In " << F.getName() << " (demangled=" << demangleCXXName(F.getName().data()) << ")\n";
+    if (verbose) llvm::errs() << "[InterposePass] In " << F.getName() << " (demangled=" << llvm::demangle(F.getName()) << ")\n";
     const auto Replacement = M.getOrInsertFunction(AllocReplacements[F.getName()], F.getFunctionType()).getCallee();
-    F.replaceUsesWithIf(Replacement, [](llvm::Use &u) {
-      llvm::errs() << "[InterposePass]   Interposed " << u << "\n";
-      return true;
-    });
+    if (verbose) {
+      for (auto &u : F.uses())
+        llvm::errs() << "[InterposePass]   Interposed " << u << "\n";
+    }
+    F.replaceAllUsesWith(Replacement);
     modified = true;
   }
   return modified;

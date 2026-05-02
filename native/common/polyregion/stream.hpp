@@ -27,9 +27,7 @@ template <typename N> constexpr std::tuple<N, N, N, N> expectedResult(size_t tim
     goldC = goldA + goldB;
     goldA = goldB + scalar * goldC;
   }
-  //  for (size_t i = 0; i < size; i++) {
   goldSum += goldA * goldB * size;
-  //  }
   return {goldA, goldB, goldC, goldSum};
 }
 
@@ -72,14 +70,11 @@ void renderElapsed(std::string title, Type tpe, size_t size, size_t times, const
 
   std::cerr                                 //
       << std::fixed << std::setprecision(3) //
-      << "===BabelStream (" << title << " )===\n"
+      << "===BabelStream (" << title << ")===\n"
       << "Running kernels " << times << " times\n"
       << "Precision: " << to_string(tpe) << "\n"
       << "Array size: " << sizesMB.copy / 2 << " MB (=" << sizesMB.copy / 2 / 1000 << " GB)\n"
       << "Total size: " << sizesMB.triad << " MB (=" << sizesMB.triad / 1000 << " GB)\n";
-  //        << "D2H = " << d2hElapsed << "s"
-  //        << " H2D = " << h2dElapsed << "s\n"
-  //    title << "; " << d->name() << " #" << d->id()
   for (auto &ln : extraLines)
     std::cerr << ln << "\n";
 
@@ -215,10 +210,6 @@ void runStream(Type tpe, size_t size, size_t times, size_t groups, const std::st
 
   validate<T, FValidate, FValidateSum>(size, times, fValidate, fValidateSum, a, b, c, sum);
 
-  //  for (size_t i = 0; i < sum.size(); ++i) {
-  //    std::cout << "[" << i << "]" << sum[i] << std::endl;
-  //  }
-
   if (verbose) {
     renderElapsed<T>(title + "; " + d.name() + " #" + std::to_string(d.id()), tpe, size, times, elapsed,
                      {"D2H = " + std::to_string(d2hElapsed) + "s", "H2D = " + std::to_string(h2dElapsed) + "s"});
@@ -258,8 +249,8 @@ void runStreamShared(Type tpe, size_t size, size_t times, size_t groups, const s
   auto h2dT1 = std::chrono::high_resolution_clock::now();
   {
     if (threaded) {
-      std::memcpy(begins_d, begin.data(), begin.size() * sizeof(T));
-      std::memcpy(ends_d, end.data(), end.size() * sizeof(T));
+      std::memcpy(begins_d, begin.data(), begin.size() * sizeof(int64_t));
+      std::memcpy(ends_d, end.data(), end.size() * sizeof(int64_t));
     }
     std::memcpy(a_d, a.data(), size * sizeof(T));
     std::memcpy(b_d, b.data(), size * sizeof(T));
@@ -285,10 +276,6 @@ void runStreamShared(Type tpe, size_t size, size_t times, size_t groups, const s
   if (threaded) d.freeAllShared(begins_d, ends_d);
 
   validate<T, FValidate, FValidateSum>(size, times, fValidate, fValidateSum, a, b, c, sum);
-
-  //  for (size_t i = 0; i < sum.size(); ++i) {
-  //    std::cout << "[" << i << "]" << sum[i] << std::endl;
-  //  }
 
   if (verbose) {
     renderElapsed<T>(title + "; " + d.name() + " #" + std::to_string(d.id()), tpe, size, times, elapsed,

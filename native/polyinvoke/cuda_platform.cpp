@@ -194,19 +194,15 @@ void CudaDeviceQueue::enqueueCallback(const MaybeCallback &cb) {
     if (cb) (*cb)();
   };
   static detail::CountedCallbackHandler handler;
-  if (cuLaunchHostFunc && false) { // >= CUDA 10
-    // FIXME cuLaunchHostFunc does not retain errors from previous launches, use the deprecated cuStreamAddCallback
-    //  for now. See https://stackoverflow.com/a/58173486
-    CHECKED(cuLaunchHostFunc(stream, [](void *data) { return handler.consume(data); }, handler.createHandle(f)));
-  } else {
-    CHECKED(cuStreamAddCallback(
-        stream,
-        [](CUstream, CUresult e, void *data) {
-          CHECKED(e);
-          handler.consume(data);
-        },
-        handler.createHandle(f), 0));
-  }
+  // FIXME cuLaunchHostFunc does not retain errors from previous launches, use the deprecated cuStreamAddCallback
+  //  for now. See https://stackoverflow.com/a/58173486
+  CHECKED(cuStreamAddCallback(
+      stream,
+      [](CUstream, CUresult e, void *data) {
+        CHECKED(e);
+        handler.consume(data);
+      },
+      handler.createHandle(f), 0));
 }
 void CudaDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
                                                  const MaybeCallback &cb) {

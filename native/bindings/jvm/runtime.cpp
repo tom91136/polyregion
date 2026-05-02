@@ -63,7 +63,7 @@ template <typename T, typename U> static auto emplaceRef(std::unordered_map<jlon
 
 template <typename T>
 static std::shared_ptr<T> findRef(JNIEnv *env, std::unordered_map<jlong, std::shared_ptr<T>> &storage, jlong nativePeer) {
-  if (auto it = storage.find(nativePeer); it != storage.end()) return std::reinterpret_pointer_cast<T>(it->second);
+  if (auto it = storage.find(nativePeer); it != storage.end()) return it->second;
   else return throwGeneric(env, EX, "Cannot find native peer (" + std::to_string(nativePeer) + ") ");
 }
 
@@ -96,13 +96,16 @@ void Platform::deleteDevicePeer0(JNIEnv *env, jclass, jlong nativePeer) {
 
 jlongArray Platforms::pointerOfDirectBuffers0(JNIEnv *env, jclass, jobjectArray buffers) {
   jsize n = env->GetArrayLength(buffers);
-  auto array = env->NewLongArray(n);
-  auto ptrs = env->GetLongArrayElements(array, nullptr);
+  std::vector<jlong> ptrs(n);
   for (jsize i = 0; i < n; ++i) {
-    if (auto ptr = env->GetDirectBufferAddress(env->GetObjectArrayElement(buffers, i)); ptr) ptrs[i] = reinterpret_cast<jlong>(ptr);
-    else return throwGeneric(env, EX, "Object at " + std::to_string(i) + " is either not a direct Buffer or not a Buffer at all.");
+    auto buf = env->GetObjectArrayElement(buffers, i);
+    auto ptr = env->GetDirectBufferAddress(buf);
+    env->DeleteLocalRef(buf);
+    if (!ptr) return throwGeneric(env, EX, "Object at " + std::to_string(i) + " is either not a direct Buffer or not a Buffer at all.");
+    ptrs[i] = reinterpret_cast<jlong>(ptr);
   }
-  env->ReleaseLongArrayElements(array, ptrs, 0);
+  auto array = env->NewLongArray(n);
+  env->SetLongArrayRegion(array, 0, n, ptrs.data());
   return array;
 }
 
@@ -174,7 +177,7 @@ void Platform::loadModule0(JNIEnv *env, jclass, jlong nativePeer, jstring name, 
     auto data = std::make_unique<std::string>(env->GetArrayLength(image), '\0');
     env->GetByteArrayRegion(image, 0, env->GetArrayLength(image), reinterpret_cast<jbyte *>(data->data()));
     std::lock_guard l(lock);
-    auto &&[it, _] = deviceModuleImages.try_emplace(nativePeer, decltype(deviceModuleImages)::mapped_type{});
+    auto &&[it, _] = deviceModuleImages.try_emplace(nativePeer);
     it->second.push_back(std::move(data));
     dev->loadModule(fromJni(env, name), *it->second.back());
   });
@@ -280,49 +283,8 @@ void Platform::enqueueInvokeAsync0(JNIEnv *env, jclass, jlong nativePeer, //
                              fromJni(env, cb));
 
     if (argTs[argCount - 1] == rt::Type::Ptr) {
-      // we got four possible cases when a function return pointers:
-      //  1. Pointer to one of the argument   (LUT[ptr]==Some) => passthrough
-      //  2. Pointer to malloc'd memory       (LUT[ptr]==Some) => passthrough
-      //  3. Pointer within a malloc'd region (LUT[ptr]==None) => copy
-      //  4. Pointer to stack allocated data  (LUT[ptr]==None) => undefined, should not happen
-
       auto args = argTs ^ mk_string(",", [](auto &tpe) { return std::string(to_string(tpe)); });
       throwGeneric(env, EX, "Returning pointers is unimplemented, args (return at the end): " + args);
-      //      std::unordered_map<void *, std::pair<jobject, jsize>> allocations;
-      //
-      //      // save all argPs in the alloc LUT first so that we can identify them later
-      //      for (jsize i = 0; i < env->GetArrayLength(argPtrs); ++i) {
-      //        auto buffer = env->GetObjectArrayElement(argPtrs, i);
-      //        allocations.emplace(env->GetDirectBufferAddress(buffer),
-      //                            std::make_pair(buffer, env->GetDirectBufferCapacity(buffer)));
-      //      }
-      //
-      //      //    // make our allocator store it as well
-      //      //    auto allocator = [&](size_t size) {
-      //      //      //      std::cerr << "[runtime][obj rtn] Allocating " << size << " bytes" << std::endl;
-      //      //      auto buffer = NIOBuffer(env, allocDirect(env, jint(size)));
-      //      //      allocations[buffer.ptr] = buffer;
-      //      //      return buffer.ptr;
-      //      //    };
-      //
-      //      if (auto r = allocations.find(rtnPtrStore); r != allocations.end()) {
-      //        auto buffer = r->second; // we found the original allocation, passthrough-return
-      //
-      //          if (env->ExceptionCheck()) {
-      //            env->Throw(env->ExceptionOccurred());
-      //          }
-      //          return buffer.first;
-      //
-      //      } else {
-      //        if (rtnBytes < 0) {
-      //          throwGeneric(env, "Bad size (" + std::to_string(rtnBytes) + ") for copy buffer");
-      //          return nullptr;
-      //        } else {
-      //          auto buffer = allocDirect(env, rtnBytes);
-      //          std::memcpy(env->GetDirectBufferAddress(buffer), rtnData, rtnBytes);
-      //          return buffer;
-      //        }
-      //      }
     }
   });
 }

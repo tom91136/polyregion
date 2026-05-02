@@ -235,9 +235,9 @@ Expr::Any Remapper::integralConstOfType(const Type::Any &tpe, const uint64_t val
 Expr::Any Remapper::floatConstOfType(const Type::Any &tpe, const double value) {
   if (tpe.is<Type::Float16>()) {
     return Expr::Float16Const(static_cast<float>(value));
-  } else if (tpe.is<Type::Float16>()) {
+  } else if (tpe.is<Type::Float32>()) {
     return Expr::Float32Const(static_cast<float>(value));
-  } else if (tpe.is<Type::Float16>()) {
+  } else if (tpe.is<Type::Float64>()) {
     return Expr::Float64Const(value);
   } else {
     raise("Bad type " + repr(tpe));
@@ -347,15 +347,15 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
 
   if (auto ctor = llvm::dyn_cast<clang::CXXConstructorDecl>(decl)) {
     auto record = ctor->getParent();
-    receiver = Arg(Named(This, ptrTo(handleType(context.getRecordType(record), r))), {});
+    receiver = Arg(Named(This, ptrTo(handleType(context.getCanonicalTagType(record), r))), {});
     parent = handleRecord(record, r);
   } else if (auto dtor = llvm::dyn_cast<clang::CXXDestructorDecl>(decl)) {
     auto record = dtor->getParent();
-    receiver = Arg(Named(This, ptrTo(handleType(context.getRecordType(record), r))), {});
+    receiver = Arg(Named(This, ptrTo(handleType(context.getCanonicalTagType(record), r))), {});
     parent = handleRecord(record, r);
   } else if (auto method = llvm::dyn_cast<clang::CXXMethodDecl>(decl); method && method->isInstance()) {
     auto record = method->getParent();
-    receiver = Arg(Named(This, ptrTo(handleType(context.getRecordType(record), r))), {});
+    receiver = Arg(Named(This, ptrTo(handleType(context.getCanonicalTagType(record), r))), {});
     parent = handleRecord(record, r);
   }
 
@@ -450,7 +450,7 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
 }
 
 std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl, RemapContext &r) const {
-  auto name = nameOfRecord(llvm::dyn_cast_if_present<clang::RecordType>(context.getRecordType(decl)), r);
+  auto name = nameOfRecord(context.getCanonicalTagType(decl)->getAs<clang::RecordType>(), r);
   if (auto s = r.structs ^ get_maybe(name)) return *s;
 
   // Insert an opaque stub eagerly. Self-referential types (e.g. std::list's `_List_node_base` whose
@@ -505,8 +505,9 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
                     : inherited | keys() | concat(members | map([](auto &m) { return m.name; })) | to_vector(),
         std::vector<Sym>{});
 
-    const auto sizeInBytes = context.getTypeSizeInChars(decl->getTypeForDecl()).getQuantity();
-    const auto alignmentInBytes = context.getTypeAlignInChars(decl->getTypeForDecl()).getQuantity();
+    const auto declCanonicalType = context.getCanonicalTagType(decl);
+    const auto sizeInBytes = context.getTypeSizeInChars(declCanonicalType).getQuantity();
+    const auto alignmentInBytes = context.getTypeAlignInChars(declCanonicalType).getQuantity();
     const auto layout = std::make_shared<StructLayout>(                            //
         name,                                                                      //
         sizeInBytes,                                                               //
@@ -1254,7 +1255,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         if (auto opt = baseTpe.get<Type::Ptr>(); opt) baseTpe = opt->comp;
 
         if (auto recordDecl = llvm::dyn_cast<clang::RecordDecl>(expr->getMemberDecl()->getDeclContext()); recordDecl) {
-          if (auto s = handleType(context.getRecordType(recordDecl), r).get<Type::Struct>(); s) {
+          if (auto s = handleType(context.getCanonicalTagType(recordDecl), r).get<Type::Struct>(); s) {
             auto member = Named(repr(s->name) + "::" + expr->getMemberNameInfo().getAsString(), handleType(expr->getMemberDecl()->getType(), r));
             if (auto s1 = baseExpr.get<Expr::Select>(); s1) {
               return select(r, s1->init ^ append(s1->last), member);

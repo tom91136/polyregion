@@ -26,12 +26,6 @@ std::string dump_to_string(const clang::Expr *decl, const clang::ASTContext &c);
 
 template <typename Node> std::string to_string(Node node) { return to_string(&node); }
 
-std::string print_type(clang::QualType type, clang::ASTContext &c);
-
-std::string replaceAllInplace(std::string subject, const std::string &search, const std::string &replace);
-
-std::string underlyingToken(clang::Expr *stmt, clang::ASTContext &c);
-
 struct Location {
   std::string filename;
   size_t line, col;
@@ -45,7 +39,6 @@ clang::QualType mkConstArrTy(const clang::ASTContext &C, clang::QualType compone
 clang::StringLiteral *mkStrLit(const clang::ASTContext &C, const std::string &str);
 clang::IntegerLiteral *mkIntLit(const clang::ASTContext &C, clang::QualType tpe, uint64_t value);
 clang::CXXNullPtrLiteralExpr *mkNullPtrLit(const clang::ASTContext &C, clang::QualType componentTpe);
-clang::CXXBoolLiteralExpr *mkBoolLit(const clang::ASTContext &C, bool value);
 clang::ImplicitCastExpr *mkArrayToPtrDecay(const clang::ASTContext &C, clang::QualType to, clang::Expr *expr);
 clang::InitListExpr *mkInitList(const clang::ASTContext &C, clang::QualType ty, const std::vector<clang::Expr *> &initExprs);
 clang::MemberExpr *mkMemberExpr(const clang::ASTContext &C, clang::Expr *lhs, clang::ValueDecl *field, const bool arrow = false);

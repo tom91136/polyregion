@@ -17,9 +17,9 @@ mlir::Type polyregion::polyfc::i32Ty(OpBuilder &B) { return B.getI32Type(); }
 mlir::Type polyregion::polyfc::i8Ty(OpBuilder &B) { return B.getI8Type(); }
 mlir::LLVM::LLVMPointerType polyregion::polyfc::ptrTy(MLIRContext *C) { return LLVM::LLVMPointerType::get(C); }
 mlir::LLVM::LLVMPointerType polyregion::polyfc::ptrTy(const OpBuilder &B) { return ptrTy(B.getContext()); }
-mlir::Value polyregion::polyfc::nullConst(OpBuilder &B) { return B.create<LLVM::ZeroOp>(uLoc(B), ptrTy(B)); }
+mlir::Value polyregion::polyfc::nullConst(OpBuilder &B) { return LLVM::ZeroOp::create(B, uLoc(B), ptrTy(B)); }
 mlir::Value polyregion::polyfc::intConst(OpBuilder &B, Type ty, const int64_t value) {
-  return B.create<arith::ConstantOp>(uLoc(B), ty, B.getIntegerAttr(ty, value));
+  return arith::ConstantOp::create(B, uLoc(B), ty, B.getIntegerAttr(ty, value));
 }
 mlir::Value polyregion::polyfc::boolConst(OpBuilder &B, const bool value) { return intConst(B, B.getI1Type(), value); }
 mlir::Value polyregion::polyfc::strConst(OpBuilder &B, ModuleOp &m, const std::string &value, const bool nullTerminate) {
@@ -27,11 +27,11 @@ mlir::Value polyregion::polyfc::strConst(OpBuilder &B, ModuleOp &m, const std::s
   const auto saved = B.saveInsertionPoint();
   B.setInsertionPointToStart(m.getBody());
   const StringRef ref(value.c_str(), value.size() + (nullTerminate ? 1 : 0));
-  auto var = B.create<LLVM::GlobalOp>(uLoc(B),                                             //
+  auto var = LLVM::GlobalOp::create(B, uLoc(B),                                             //
                                       LLVM::LLVMArrayType::get(B.getI8Type(), ref.size()), //
                                       true, LLVM::Linkage::Private, fmt::format("str_const_{}", ++id), B.getStringAttr(ref));
   B.restoreInsertionPoint(saved);
-  return B.create<LLVM::GEPOp>(uLoc(B), ptrTy(B), B.getI8Type(), B.create<LLVM::AddressOfOp>(uLoc(B), var),
+  return LLVM::GEPOp::create(B, uLoc(B), ptrTy(B), B.getI8Type(), LLVM::AddressOfOp::create(B, uLoc(B), var),
                                ValueRange{intConst(B, i32Ty(B), 0)});
 }
 
@@ -40,7 +40,7 @@ mlir::LLVM::LLVMFuncOp polyregion::polyfc::defineFunc(ModuleOp &m, const std::st
                                                       const std::function<void(OpBuilder &, LLVM::LLVMFuncOp &)> &f) {
   OpBuilder B(m);
   B.setInsertionPointToStart(m.getBody());
-  auto func = B.create<LLVM::LLVMFuncOp>(uLoc(B), name, LLVM::LLVMFunctionType::get(rtnTy, argTys), linkage);
+  auto func = LLVM::LLVMFuncOp::create(B, uLoc(B), name, LLVM::LLVMFunctionType::get(rtnTy, argTys), linkage);
   if (func.empty() && f) {
     OpBuilder FB(func);
     FB.setInsertionPointToStart(func.addEntryBlock(FB));
@@ -53,7 +53,7 @@ void polyregion::polyfc::defineGlobalCtor(ModuleOp &m, const std::string &name,
   const auto ctor = defineFunc(m, name, LLVM::LLVMVoidType::get(m.getContext()), {}, LLVM::Linkage::Internal, f);
   OpBuilder B(m);
   B.setInsertionPointToStart(m.getBody());
-  B.create<LLVM::GlobalCtorsOp>(uLoc(B), B.getArrayAttr({SymbolRefAttr::get(ctor)}), B.getArrayAttr({B.getIntegerAttr(i32Ty(B), 1)}),
+  LLVM::GlobalCtorsOp::create(B, uLoc(B), B.getArrayAttr({SymbolRefAttr::get(ctor)}), B.getArrayAttr({B.getIntegerAttr(i32Ty(B), 1)}),
                                 B.getArrayAttr(B.getZeroAttr(i32Ty(B))));
 }
 
@@ -61,15 +61,16 @@ polyregion::polyfc::DynamicAggregateMirror::DynamicAggregateMirror(MLIRContext *
     : C(C), ty(LLVM::LLVMStructType::getNewIdentified(C, name, types)) {}
 
 mlir::Value polyregion::polyfc::DynamicAggregateMirror::local(OpBuilder &B, const std::vector<std::vector<Value>> &fieldGroups) const {
-  auto alloca = B.create<LLVM::AllocaOp>(uLoc(B), ptrTy(B), intConst(B, i64Ty(B), fieldGroups.size()), B.getI64IntegerAttr(1), ty);
-  for (auto &fields : fieldGroups) {
+  auto alloca = LLVM::AllocaOp::create(B, uLoc(B), ptrTy(B), intConst(B, i64Ty(B), fieldGroups.size()), B.getI64IntegerAttr(1), ty);
+  for (size_t g = 0; g < fieldGroups.size(); ++g) {
+    auto &fields = fieldGroups[g];
     if (ty.getBody().size() != fields.size()) {
       raise(fmt::format("Cannot initialise LLVM struct {} with mismatching ({}) field counts", show(static_cast<Type>(ty)), fields.size()));
     }
     for (size_t i = 0; i < ty.getBody().size(); ++i) {
       auto fieldPtr =
-          B.create<LLVM::GEPOp>(uLoc(B), ptrTy(B), ty, alloca, llvm::ArrayRef{intConst(B, i64Ty(B), 0), intConst(B, i64Ty(B), i)});
-      B.create<LLVM::StoreOp>(uLoc(B), fields[i], fieldPtr.getResult());
+          LLVM::GEPOp::create(B, uLoc(B), ptrTy(B), ty, alloca, llvm::ArrayRef{intConst(B, i64Ty(B), g), intConst(B, i64Ty(B), i)});
+      LLVM::StoreOp::create(B, uLoc(B), fields[i], fieldPtr.getResult());
     }
   }
   return alloca;

@@ -75,8 +75,8 @@ template <size_t N> struct AggregateMirror {
     static Value gepUnsafe(OpBuilder &B0, LLVM::GlobalOp &global, const size_t index, const std::optional<size_t> field = {}) {
       const auto baseIdx = intConst(B0, i64Ty(B0), 0);
       const auto indexIdx = intConst(B0, i64Ty(B0), index);
-      return B0.create<LLVM::GEPOp>(uLoc(B0), LLVM::LLVMPointerType::get(B0.getContext()), global.getType(),
-                                    B0.create<LLVM::AddressOfOp>(uLoc(B0), global),
+      return LLVM::GEPOp::create(B0, uLoc(B0), LLVM::LLVMPointerType::get(B0.getContext()), global.getType(),
+                                    LLVM::AddressOfOp::create(B0, uLoc(B0), global),
                                     field ? ValueRange{baseIdx, indexIdx, intConst(B0, i64Ty(B0), *field)} : ValueRange{baseIdx, indexIdx});
     }
     LLVM::GlobalOp global;
@@ -110,12 +110,12 @@ template <size_t N> struct AggregateMirror {
 
   Value local(OpBuilder &B, const std::vector<std::array<Value, N>> &fieldGroups) const {
     const auto ty = structTy();
-    auto alloca = B.create<LLVM::AllocaOp>(uLoc(B), ptrTy(B), intConst(B, i64Ty(B), fieldGroups.size()), B.getI64IntegerAttr(1), ty);
+    auto alloca = LLVM::AllocaOp::create(B, uLoc(B), ptrTy(B), intConst(B, i64Ty(B), fieldGroups.size()), B.getI64IntegerAttr(1), ty);
     fieldGroups | zip_with_index() | for_each([&](auto &fields, auto group) {
       fields | zip_with_index() | for_each([&](auto &field, auto idx) {
-        B.create<LLVM::StoreOp>(
+        LLVM::StoreOp::create(B, 
             uLoc(B), field,
-            B.create<LLVM::GEPOp>(uLoc(B), ptrTy(B), ty, alloca, llvm::ArrayRef{intConst(B, i64Ty(B), group), intConst(B, i64Ty(B), idx)}));
+            LLVM::GEPOp::create(B, uLoc(B), ptrTy(B), ty, alloca, llvm::ArrayRef{intConst(B, i64Ty(B), group), intConst(B, i64Ty(B), idx)}));
       });
     });
     return alloca;
@@ -127,7 +127,7 @@ template <size_t N> struct AggregateMirror {
     OpBuilder B(m);
     B.setInsertionPointToStart(m.getBody());
     // use placeholder size before we know the actual size
-    auto global = B.create<LLVM::GlobalOp>(uLoc(B), LLVM::LLVMArrayType::get(ty, 1), false, LLVM::Linkage::Private,
+    auto global = LLVM::GlobalOp::create(B, uLoc(B), LLVM::LLVMArrayType::get(ty, 1), false, LLVM::Linkage::Private,
                                            fmt::format("{}_arr_{}", typeName(), ++id), Attribute{});
     {
       OpBuilder::InsertionGuard initGuard(B);
@@ -135,17 +135,17 @@ template <size_t N> struct AggregateMirror {
       B.setInsertionPointToEnd(&global.getRegion().back());
       const auto groups = f(B);
       const auto arrayTy = LLVM::LLVMArrayType::get(ty, groups.size());
-      B.create<LLVM::ReturnOp>(
+      LLVM::ReturnOp::create(B, 
           uLoc(B), groups                          //
                        | zip_with_index<int64_t>() //
-                       | fold_left<Value>(B.create<LLVM::UndefOp>(uLoc(B), arrayTy), [&](auto acc, auto &group) {
+                       | fold_left<Value>(LLVM::UndefOp::create(B, uLoc(B), arrayTy), [&](auto acc, auto &group) {
                            Value structInit = group.first                 //
                                               | zip_with_index<int64_t>() //
-                                              | fold_left<Value>(B.create<LLVM::UndefOp>(uLoc(B), ty), [&](auto acc, auto &value) {
-                                                  return B.create<LLVM::InsertValueOp>(uLoc(B), ty, acc, value.first,
+                                              | fold_left<Value>(LLVM::UndefOp::create(B, uLoc(B), ty), [&](auto acc, auto &value) {
+                                                  return LLVM::InsertValueOp::create(B, uLoc(B), ty, acc, value.first,
                                                                                        llvm::ArrayRef<int64_t>{value.second});
                                                 });
-                           return B.create<LLVM::InsertValueOp>(uLoc(B), arrayTy, acc, structInit, llvm::ArrayRef<int64_t>{group.second});
+                           return LLVM::InsertValueOp::create(B, uLoc(B), arrayTy, acc, structInit, llvm::ArrayRef<int64_t>{group.second});
                          }));
       global.setGlobalType(arrayTy);
     }

@@ -32,9 +32,9 @@ ValPtr NVPTXTargetSpecificHandler::mkSpecVal(CodeGen &cg, const Expr::SpecOp &ex
       throw std::logic_error("dim selector should be a " + to_string(Type::IntU32()) + " but got " + to_string(dim.tpe()));
     }
     return cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkExprVal(dim), cg.mkExprVal(Expr::IntU32Const(0))), d0,
-                             cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkExprVal(dim), cg.mkExprVal(Expr::IntU32Const(1))), d0,
+                             cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkExprVal(dim), cg.mkExprVal(Expr::IntU32Const(1))), d1,
                                                cg.B.CreateSelect(cg.B.CreateICmpEQ(cg.mkExprVal(dim), cg.mkExprVal(Expr::IntU32Const(2))),
-                                                                 d0, cg.mkExprVal(Expr::IntU32Const(0)))));
+                                                                 d2, cg.mkExprVal(Expr::IntU32Const(0)))));
   };
 
   auto barrier0 = [&] {

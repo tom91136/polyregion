@@ -7,7 +7,7 @@
 using namespace polyregion;
 using polyrt::DebugLevel;
 
-__RT_PROTECT static polyrt::SynchronisedMemAllocation allocations(
+POLYREGION_RT_PROTECT static polyrt::SynchronisedMemAllocation allocations(
     [](const void *ptr) -> polyrt::PtrQuery {
       if (const auto meta = rt_reflect::_rt_reflect_p(ptr); meta.type != rt_reflect::Type::Unknown) {
         return polyrt::PtrQuery{.sizeInBytes = meta.size, .offsetInBytes = meta.offset};
@@ -38,7 +38,7 @@ __RT_PROTECT static polyrt::SynchronisedMemAllocation allocations(
     },
     polyrt::debugLevel() >= DebugLevel::Debug);
 
-__RT_PROTECT static void dumpAllocationTable() {
+POLYREGION_RT_PROTECT static void dumpAllocationTable() {
   log(DebugLevel::Debug, "[Allocations (%lu)]", allocations.localToRemoteAlloc.size());
   for (auto [k, v] : allocations.localToRemoteAlloc) {
     const auto &l = allocations.remoteToLocalPtr[v.remote.ptr];
@@ -47,7 +47,7 @@ __RT_PROTECT static void dumpAllocationTable() {
   }
 }
 
-__RT_PROTECT static void dumpMemoryWithLayout(const runtime::TypeLayout *layout, const char *data) {
+POLYREGION_RT_PROTECT static void dumpMemoryWithLayout(const runtime::TypeLayout *layout, const char *data) {
   layout->visualise(stderr, [&](const size_t offset, const runtime::AggregateMember &m) {
     const auto p = data + offset;
     std::fprintf(stderr, "  [%p]=", static_cast<const void *>(p));
@@ -61,7 +61,7 @@ __RT_PROTECT static void dumpMemoryWithLayout(const runtime::TypeLayout *layout,
   });
 }
 
-__RT_PROTECT static void dumpAllocations() {
+POLYREGION_RT_PROTECT static void dumpAllocations() {
   for (auto [k, v] : allocations.localToRemoteAlloc) {
     if (!v.layout || v.layout->memberCount == 0) continue;
     dumpMemoryWithLayout(v.layout, reinterpret_cast<const char *>(k));
