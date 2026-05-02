@@ -51,7 +51,7 @@ Expr::Select polyast::parent(const Expr::Select &select) {
   return Expr::Select(Vec<Named>(select.init.begin(), std::prev(select.init.end())), select.init.back());
 }
 
-Type::Struct polyast::typeOf(const StructDef &def) { return Type::Struct(def.name); }
+Type::Struct polyast::typeOf(const StructDef &def) { return Type::Struct(def.name, def.tpeVars, {}, def.parents); }
 
 string polyast::repr(const CompileResult &compilation) {
   std::ostringstream os;
@@ -106,6 +106,8 @@ Opt<size_t> polyast::primitiveSize(const Type::Any &t) {
                        [&](const Type::Bool1 &) -> Opt<size_t> { return 8 / 8; }, //
 
                        [&](const Type::Struct &) -> Opt<size_t> { return {}; }, [&](const Type::Ptr &) -> Opt<size_t> { return {}; },
+                       [&](const Type::Var &) -> Opt<size_t> { return {}; },                                           //
+                       [&](const Type::Exec &) -> Opt<size_t> { return {}; },                                          //
                        [&](const Type::Annotated &x) -> Opt<size_t> { return primitiveSize(x.tpe); });
 }
 
@@ -167,6 +169,8 @@ Expr::Any dsl::integral(const Type::Any &tpe, unsigned long long int x) {
 
       [&](const Type::Struct &t) -> Expr::Any { return unsupported(t, x); },   //
       [&](const Type::Ptr &t) -> Expr::Any { return unsupported(t, x); },      //
+      [&](const Type::Var &t) -> Expr::Any { return unsupported(t, x); },      //
+      [&](const Type::Exec &t) -> Expr::Any { return unsupported(t, x); },     //
       [&](const Type::Annotated &t) -> Expr::Any { return unsupported(t, x); } //
   );
 }
@@ -194,11 +198,16 @@ Expr::MathOp dsl::call(const Math::Any &intr) { return MathOp(intr); }
 Expr::SpecOp dsl::call(const Spec::Any &intr) { return SpecOp(intr); }
 std::function<Function(Vec<Stmt::Any>)> dsl::function(const string &name, const Vec<Arg> &args, const Type::Any &rtn,
                                                       const std::set<FunctionAttr::Any> &attrs) {
-  return [=](auto &&stmts) { return Function(name, args, rtn, stmts, attrs); };
+  return [=](auto &&stmts) {
+    return Function(Sym({name}), {}, /*receiver*/ {}, args, /*moduleCaptures*/ {}, /*termCaptures*/ {}, rtn, stmts, attrs);
+  };
 }
 Stmt::Return dsl::ret(const Expr::Any &expr) { return Return(expr); }
-Program dsl::program(const Vec<StructDef> &structs, const Vec<Function> &functions) { return {structs, functions}; }
-Program dsl::program(const Function &function) { return Program({}, {function}); }
+Program dsl::program(const Vec<StructDef> &structs, const Vec<Function> &functions) {
+  if (functions.empty()) throw std::logic_error("dsl::program requires at least one (entry) function");
+  return Program(functions.front(), Vec<Function>(std::next(functions.begin()), functions.end()), structs);
+}
+Program dsl::program(const Function &function) { return Program(function, {}, {}); }
 
 dsl::IndexBuilder::IndexBuilder(const Index &index) : index(index) {}
 dsl::IndexBuilder::operator Expr::Any() const { return index; }

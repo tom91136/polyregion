@@ -1,112 +1,118 @@
 # Polyregion
 
+Polyregion compiles normal/idiomatic source-level code fragments to machine code targeting CPUs and GPUs from the host language directly. 
+Supported frontends are:
+* `polycpp` - a clang frontend that intercepts `-fstdpar` regions
+* `polyfc`  - a flang frontend that intercepts Fortran `do concurrent`
+* A Scala macro that delegates to the `polyc` AST/IR pipeline
 
-Polyregion is a macro **library** that compiles normal and idiomatic Scala code fragments to machine code, targeting both CPUs and GPUs. 
+## Build & debug
 
+The native side (compilers, runtime, plugins) lives under `native/` and is built with CMake + vcpkg. The Scala frontend lives under `frontend/` and is built with sbt.
+LLVM is bundled and built once into `native/llvm-${BUILD_TYPE}-${ARCH}/` via the helper CMake script:
 
-## Supported target
+```sh
+cmake -DCMAKE_BUILD_TYPE=Release -DARCH=x86_64 -DACTION=LLVM -DCMAKE_SYSROOT=$PWD/sysroot-x86_64 -P build.cmake
+```
 
-* CPU
+vcpkg dependencies are resolved by the toolchain file on first configure.
 
-TODO
+### Native - incremental
 
-* OpenCL (1.2 minimum)
-* CUDA
-* Level Zero
-* HIP
+```sh
+# Configure 
+cmake -S native -B native/cmake-build-release-clang \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+    -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
 
-## Supported execution mode
+# Build a single component
+cmake --build native/cmake-build-release-clang --target polycpp -j
 
-* JVM
+# Useful targets:
+#   polyc       — AST → LLVM IR backend (subprocess invoked by frontends)
+#   polycpp     — C++ frontend (clang plugin + driver)
+#   polyfc      — Fortran frontend (flang plugin + driver)
+#   polystl     — runtime library linked into user binaries
+#   polyc-test  — polyc unit tests
+```
 
-TODO
+The `polycpp` and `polyfc` targets transitively rebuild everything they depend on (clang plugin, polystl, polyreflect plugin, polyc, etc.).
 
-* Scala Native
-* ScalaJS (WASM)
-* Kotlin Multiplatform
+### Compiling and running an offload program
 
-## Supported source language
+`polycpp` is a clang wrapper. It forwards to a real clang via `POLYCPP_DRIVER` and adds the polycpp clang plugin, polyreflect plugin, and runtime link.
 
-* Scala
+```sh
+export POLYCPP_DRIVER=$PWD/native/llvm-Release-x86_64-dist/bin/clang++
+POLYCPP=$PWD/native/cmake-build-release-clang/polycpp/polycpp
 
-TODO
+# -fstdpar enables the polyreflect+polystl wiring; -fstdpar-arch picks the GPU target.
+$POLYCPP -O1 -fstdpar -fstdpar-arch=cuda@sm_89 -fstdpar-mem=reflect -fstdpar-rt=dynamic \
+    -o /tmp/check_struct native/polycpp/test/check_struct.cpp -DCHECK_CAPTURE==
 
-* Java
-* Kotlin
+POLYRT_PLATFORM=cuda@sm_89 POLYRT_HOST_FALLBACK=0 /tmp/check_struct
+```
 
-## Supported constructs in offload region
+Runtime platform selectors (`POLYRT_PLATFORM`):
+- `host@native` — host CPU via libffi (default if unset)
+- `cuda@sm_<arch>` — NVIDIA via cuda runtime (e.g. `sm_89`)
+- `hsa@gfx<arch>` — AMD via ROCm/HSA (e.g. `gfx1036`)
+- `cl@<vendor>` — OpenCL
+- `vulkan@<vendor>` — Vulkan/SPIRV
 
-* All Scala/Java's primitive types, including `Unit`.
-* All primitive control flows (e.g. `if then else` , `while`, `return`).
-* Arbitrary function calls to definitions outside of the offload region, regardless of whether marked with `inline`.
-* Generics and arbitrary classes/objects, including tuples, enums, and case classes.
-* Dynamic memory allocation/deallocation for supported targets (e.g. instances allocated via `new`)
-* Calls to `scala.math`/`java.lang.Math` methods replaced with calls to intrinsic where possible or `libm` as fallback.
-* Instantiation and access of `Array[A]`
-* Numeric conversions (e.g. `42.toByte`, `0.3f.toDouble`)
-* Implicit conversions/extensions (e.g. `RichInt`, `ArrayOps`, etc)
+### Debug options
 
-* Heap memory access via `polyregion.Buffer`,
-  where `trait polyregion.Buffer[A] extends scala.collection.mutable.IndexedSeq[A]`.
+| env var | values | effect |
+|---|---|---|
+| `POLYRT_PLATFORM` | see above | select GPU/CPU backend |
+| `POLYRT_HOST_FALLBACK` | `0`/`1` | when `1`, fall back to host CPU if GPU init fails (default `1`) |
+| `POLYRT_DEBUG` | `0`-`3` | runtime log level; `2` (Debug) prints SMA mirror/sync trace |
+| `POLYSTL_NO_OFFLOAD` | any non-empty | skip GPU/host dispatch entirely; run the lambda inline on the calling thread |
+| `POLYFRONT_VERBOSE` | `0`/`1` | when `1`, dump polyAST IR before invoking polyc |
 
-TODO
+### Test suite
 
-* Nested `def`
-* `lazy val`
-* `try catch` & `throw`
-* Pattern matching
-* Delegation of `Console.println` to `print` in the runtime
-* String
-* Tuples
-* Casting (`asInstanceOf`)
+Tests are `#pragma region`-annotated `.cpp` files under `native/polycpp/test/`. Each file declares one or more cases, the compile flags, and the expected stdout via `#pragma region requires:`. There's no built-in test runner yet; use a small loop that invokes `$POLYCPP` then runs the binary under each `POLYRT_PLATFORM` you want to cover.
 
-# FAQ
+### Frontend (Scala)
 
-## Is this some kind of DSL library that generates C-like source (e.g. CUDA/OpenCL)?
+```sh
+cd frontend
+sbt compile
+sbt test
+```
 
-No, Polyregion transparently compiles annotated code blocks containing normal Scala code to high-performance machine code.
-The generated code is then directly embedded in-place at call site where possible along with support for captures (e.g. class fields, local variables, and functions).
-At runtime, calls to the code block will invoke the embedded code through JNI and serialise any captures and deserialise any return values or side effects.
+The Scala build picks up native artifacts from `native/cmake-build-debug-clang/bindings/jvm/`; build that target before running JVM tests.
 
-## Does Polyregion use reflection?
+#### Running the Scala test suite
 
-Only compile-time reflection (i.e. macros) in Scala 3.
+The test suite (`compiler-testsuite-scala`) is a munit suite that compiles each kernel via the Scala 3 macro pipeline, runs both a JDK reference and the offloaded LLVM-compiled version, and asserts they match. It's heavyweight (~6100 cases, 13–17 min on a typical desktop) because every `testExpr` triggers a full macro expansion + LLVM codegen.
 
-## Is is fast?
+Prerequisites: the native JNI shared library must be built first — the test runner `dlopen`s it from `native/cmake-build-release-clang/bindings/jvm/libpolyc-JNI.so`.
 
-Boundary-crossing (i.e. FFI into native code and back) performance at runtime should be equivalent to hand written JNI bindings.
-The actual performance of the code block is dependent on the generated machine code by LLVM for the selected platform.
+```sh
+# 1. Build the native JNI bindings the test runner depends on.
+cmake --build native/cmake-build-release-clang --target polyc-JNI -j
 
-## Doesn't Scala Native already exists? How does this compare to Scala Native?
+# 2. Run the full suite (~13–17 min).
+cd frontend
+sbt 'compiler-testsuite-scala/test'
 
-Scala Native requires your whole Scala code base to be compiled to native code much like in C/C++.
-Currently, this means you either get a fully native Scala program or you have to fallback to the JVM
-if you need features such as multithreading, full-blown reflection, or anything that only works on
-the JVM essentially (e.g Java-only libraries). Scala Native also doesn't have support for
-accelerators (GPUs) even though LLVM is the underlying backend.
+# Or one suite while iterating:
+sbt 'compiler-testsuite-scala/testOnly polyregion.GivenSuite'
 
-Polyregion, on the other hand, has a different execution model where your program still runs on the
-JVM but select methods can be placed behind a by-name function `offload` for which the body of
-method then gets compiled to native code for either the host CPU or an accelerator through LLVM's
-codegen. Polyregion handles the embedding of the compiled native code and the invocation in a
-transparent way so minimal change is needed to obtain a high-performance native method.
+# Or one test by glob:
+sbt 'compiler-testsuite-scala/testOnly polyregion.ControlFlowSuite -- *while-le-inc*'
+```
 
-## How does this compare to Aparapi/TornadoVM?
+If you change anything in `compiler/` (macros) or `prism/StdLib.scala`, force a clean macro re-expansion — sbt's incremental compiler doesn't always notice that downstream test classes' macro outputs are stale:
 
-Polyregion operates at the language AST level where we have a better view of the program. Aparapi
-operates on the Java Bytecode directly and has limited support for advanced constructs, the project
-also only supports OpenCL which may be a limiting factor.
+```sh
+rm -rf compiler-testsuite-scala/target/scala-3.7.4 compiler/target/scala-3.7.4/classes
+sbt 'compiler-testsuite-scala/test'
+```
 
-TornadoVM also operates on the Bytecode but introduces advanced optimisation passes by modifying the JVM itself.
-This is a significant restriction as TornadoVM will only work with specific versions of the JVM.
+Likewise after editing C++ in `native/polyc/backend/`, rebuild `polyc-JNI` (the JVM caches the `.so` per process, so a stale build will silently mask backend changes).
 
-Polyregion only uses features supported under the JavaSE specification such as JNI and does not use
-any VM specific features. Currently, we have verified correct operation on common OpenJDK builds,
-GraalVM CE/EE, and also Eclipse OpenJ9.
-
-
-
-
-
-
-
+Individual suites are gated by booleans in `compiler-testsuite-scala/src/test/scala/polyregion/Toggles.scala`.

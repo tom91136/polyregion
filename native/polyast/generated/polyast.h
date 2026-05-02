@@ -68,6 +68,7 @@ std::string to_string(const T& x) {
 #endif
 
 
+struct Sym;
 struct SourcePosition;
 struct Named;
 
@@ -370,6 +371,7 @@ public:
 } // namespace Stmt
 
 struct Signature;
+struct InvokeSignature;
 
 namespace FunctionAttr { 
 
@@ -411,6 +413,7 @@ public:
 struct Arg;
 struct Function;
 struct StructDef;
+struct Mirror;
 struct Program;
 struct StructLayoutMember;
 struct StructLayout;
@@ -419,6 +422,39 @@ struct CompileResult;
 
 
 
+
+struct POLYREGION_EXPORT Sym {
+  std::vector<std::string> fqn;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
+  [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const;
+  [[nodiscard]] POLYREGION_EXPORT Sym withFqn(const std::vector<std::string> &v_) const;
+  template<typename T, typename U> POLYREGION_EXPORT void collect_where(std::vector<U> &results_, 
+      const std::function<std::optional<U>(const T&)> &f) const {
+    if constexpr (std::is_same_v<T, Sym>) {
+      if(auto x_ = f(*this)) { results_.emplace_back(*x_); }
+    }
+  }
+  template<typename T, typename U> [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(
+      const std::function<std::optional<U>(const T&)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template<typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template<typename T> [[nodiscard]] POLYREGION_EXPORT Sym modify_all(
+      const std::function<T(const T&)> &f) const {
+    if constexpr (std::is_same_v<T, Sym>) {
+      return f(*this);
+    }
+    return Sym(fqn);
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator!=(const Sym &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Sym &) const;
+  explicit Sym(std::vector<std::string> fqn) noexcept;
+  POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Sym &);
+};
 
 struct POLYREGION_EXPORT SourcePosition {
   std::string file;
@@ -1279,16 +1315,29 @@ struct POLYREGION_EXPORT Bool1 : Type::Base {
 };
 
 struct POLYREGION_EXPORT Struct : Type::Base {
-  std::string name;
+  Sym name;
+  std::vector<std::string> tpeVars;
+  std::vector<Type::Any> args;
+  std::vector<Sym> parents;
   constexpr static uint32_t variant_id = 14;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
-  [[nodiscard]] POLYREGION_EXPORT Type::Struct withName(const std::string &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Type::Struct withName(const Sym &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Type::Struct withTpeVars(const std::vector<std::string> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Type::Struct withArgs(const std::vector<Type::Any> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Type::Struct withParents(const std::vector<Sym> &v_) const;
   template<typename T, typename U> POLYREGION_EXPORT void collect_where(std::vector<U> &results_, 
       const std::function<std::optional<U>(const T&)> &f) const {
     if constexpr (std::is_same_v<T, Struct>) {
       if(auto x_ = f(*this)) { results_.emplace_back(*x_); }
+    }
+    name.collect_where<T, U>(results_, f);
+    for (auto it = args.begin(); it != args.end(); ++it) {
+      (*it).collect_where<T, U>(results_, f);
+    }
+    for (auto it = parents.begin(); it != parents.end(); ++it) {
+      (*it).collect_where<T, U>(results_, f);
     }
   }
   template<typename T, typename U> [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(
@@ -1305,11 +1354,19 @@ struct POLYREGION_EXPORT Struct : Type::Base {
     if constexpr (std::is_same_v<T, Struct>) {
       return f(*this);
     }
-    return Type::Struct(name);
+    std::vector<Type::Any> args__;
+    for (auto it = args.begin(); it != args.end(); ++it) {
+      args__.emplace_back((*it).modify_all<T>(f));
+    }
+    std::vector<Sym> parents__;
+    for (auto it = parents.begin(); it != parents.end(); ++it) {
+      parents__.emplace_back((*it).modify_all<T>(f));
+    }
+    return Type::Struct(name.modify_all<T>(f), tpeVars, args__, parents__);
   }
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Type::Struct &) const;
-  explicit Struct(std::string name) noexcept;
+  Struct(Sym name, std::vector<std::string> tpeVars, std::vector<Type::Any> args, std::vector<Sym> parents) noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Struct &);
@@ -1358,11 +1415,97 @@ struct POLYREGION_EXPORT Ptr : Type::Base {
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Ptr &);
 };
 
+struct POLYREGION_EXPORT Var : Type::Base {
+  std::string name;
+  constexpr static uint32_t variant_id = 16;
+  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
+  [[nodiscard]] POLYREGION_EXPORT Type::Var withName(const std::string &v_) const;
+  template<typename T, typename U> POLYREGION_EXPORT void collect_where(std::vector<U> &results_, 
+      const std::function<std::optional<U>(const T&)> &f) const {
+    if constexpr (std::is_same_v<T, Var>) {
+      if(auto x_ = f(*this)) { results_.emplace_back(*x_); }
+    }
+  }
+  template<typename T, typename U> [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(
+      const std::function<std::optional<U>(const T&)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template<typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template<typename T> [[nodiscard]] POLYREGION_EXPORT Var modify_all(
+      const std::function<T(const T&)> &f) const {
+    if constexpr (std::is_same_v<T, Var>) {
+      return f(*this);
+    }
+    return Type::Var(name);
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Type::Var &) const;
+  explicit Var(std::string name) noexcept;
+  POLYREGION_EXPORT operator Any() const;
+  [[nodiscard]] POLYREGION_EXPORT Any widen() const;
+  POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Var &);
+};
+
+struct POLYREGION_EXPORT Exec : Type::Base {
+  std::vector<std::string> tpeVars;
+  std::vector<Type::Any> args;
+  Type::Any rtn;
+  constexpr static uint32_t variant_id = 17;
+  [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
+  [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
+  [[nodiscard]] POLYREGION_EXPORT Type::Exec withTpeVars(const std::vector<std::string> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Type::Exec withArgs(const std::vector<Type::Any> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Type::Exec withRtn(const Type::Any &v_) const;
+  template<typename T, typename U> POLYREGION_EXPORT void collect_where(std::vector<U> &results_, 
+      const std::function<std::optional<U>(const T&)> &f) const {
+    if constexpr (std::is_same_v<T, Exec>) {
+      if(auto x_ = f(*this)) { results_.emplace_back(*x_); }
+    }
+    for (auto it = args.begin(); it != args.end(); ++it) {
+      (*it).collect_where<T, U>(results_, f);
+    }
+    rtn.collect_where<T, U>(results_, f);
+  }
+  template<typename T, typename U> [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(
+      const std::function<std::optional<U>(const T&)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template<typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template<typename T> [[nodiscard]] POLYREGION_EXPORT Exec modify_all(
+      const std::function<T(const T&)> &f) const {
+    if constexpr (std::is_same_v<T, Exec>) {
+      return f(*this);
+    }
+    std::vector<Type::Any> args__;
+    for (auto it = args.begin(); it != args.end(); ++it) {
+      args__.emplace_back((*it).modify_all<T>(f));
+    }
+    return Type::Exec(tpeVars, args__, rtn.modify_all<T>(f));
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Type::Exec &) const;
+  Exec(std::vector<std::string> tpeVars, std::vector<Type::Any> args, Type::Any rtn) noexcept;
+  POLYREGION_EXPORT operator Any() const;
+  [[nodiscard]] POLYREGION_EXPORT Any widen() const;
+  POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Type::Exec &);
+};
+
 struct POLYREGION_EXPORT Annotated : Type::Base {
   Type::Any tpe;
   std::optional<SourcePosition> pos;
   std::optional<std::string> comment;
-  constexpr static uint32_t variant_id = 16;
+  constexpr static uint32_t variant_id = 18;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
@@ -2317,22 +2460,38 @@ struct POLYREGION_EXPORT Alloc : Expr::Base {
 };
 
 struct POLYREGION_EXPORT Invoke : Expr::Base {
-  std::string name;
+  Sym name;
+  std::vector<Type::Any> tpeArgs;
+  std::optional<Expr::Any> receiver;
   std::vector<Expr::Any> args;
+  std::vector<Expr::Any> captures;
   Type::Any rtn;
   constexpr static uint32_t variant_id = 23;
   [[nodiscard]] POLYREGION_EXPORT uint32_t id() const override;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const override;
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const override;
-  [[nodiscard]] POLYREGION_EXPORT Expr::Invoke withName(const std::string &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Expr::Invoke withName(const Sym &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Expr::Invoke withTpeArgs(const std::vector<Type::Any> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Expr::Invoke withReceiver(const std::optional<Expr::Any> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT Expr::Invoke withArgs(const std::vector<Expr::Any> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Expr::Invoke withCaptures(const std::vector<Expr::Any> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT Expr::Invoke withRtn(const Type::Any &v_) const;
   template<typename T, typename U> POLYREGION_EXPORT void collect_where(std::vector<U> &results_, 
       const std::function<std::optional<U>(const T&)> &f) const {
     if constexpr (std::is_same_v<T, Invoke>) {
       if(auto x_ = f(*this)) { results_.emplace_back(*x_); }
     }
+    name.collect_where<T, U>(results_, f);
+    for (auto it = tpeArgs.begin(); it != tpeArgs.end(); ++it) {
+      (*it).collect_where<T, U>(results_, f);
+    }
+    if (receiver) {
+      (*receiver).collect_where<T, U>(results_, f);
+    }
     for (auto it = args.begin(); it != args.end(); ++it) {
+      (*it).collect_where<T, U>(results_, f);
+    }
+    for (auto it = captures.begin(); it != captures.end(); ++it) {
       (*it).collect_where<T, U>(results_, f);
     }
     rtn.collect_where<T, U>(results_, f);
@@ -2351,15 +2510,25 @@ struct POLYREGION_EXPORT Invoke : Expr::Base {
     if constexpr (std::is_same_v<T, Invoke>) {
       return f(*this);
     }
+    std::vector<Type::Any> tpeArgs__;
+    for (auto it = tpeArgs.begin(); it != tpeArgs.end(); ++it) {
+      tpeArgs__.emplace_back((*it).modify_all<T>(f));
+    }
+    std::optional<Expr::Any> receiver__;
+    if (receiver) { receiver__ = (*receiver).modify_all<T>(f); }
     std::vector<Expr::Any> args__;
     for (auto it = args.begin(); it != args.end(); ++it) {
       args__.emplace_back((*it).modify_all<T>(f));
     }
-    return Expr::Invoke(name, args__, rtn.modify_all<T>(f));
+    std::vector<Expr::Any> captures__;
+    for (auto it = captures.begin(); it != captures.end(); ++it) {
+      captures__.emplace_back((*it).modify_all<T>(f));
+    }
+    return Expr::Invoke(name.modify_all<T>(f), tpeArgs__, receiver__, args__, captures__, rtn.modify_all<T>(f));
   }
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Base &) const override;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Expr::Invoke &) const;
-  Invoke(std::string name, std::vector<Expr::Any> args, Type::Any rtn) noexcept;
+  Invoke(Sym name, std::vector<Type::Any> tpeArgs, std::optional<Expr::Any> receiver, std::vector<Expr::Any> args, std::vector<Expr::Any> captures, Type::Any rtn) noexcept;
   POLYREGION_EXPORT operator Any() const;
   [[nodiscard]] POLYREGION_EXPORT Any widen() const;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Expr::Invoke &);
@@ -5640,20 +5809,38 @@ struct POLYREGION_EXPORT Annotated : Stmt::Base {
 
 
 struct POLYREGION_EXPORT Signature {
-  std::string name;
+  Sym name;
+  std::vector<std::string> tpeVars;
+  std::optional<Type::Any> receiver;
   std::vector<Type::Any> args;
+  std::vector<Type::Any> moduleCaptures;
+  std::vector<Type::Any> termCaptures;
   Type::Any rtn;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const;
-  [[nodiscard]] POLYREGION_EXPORT Signature withName(const std::string &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Signature withName(const Sym &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Signature withTpeVars(const std::vector<std::string> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Signature withReceiver(const std::optional<Type::Any> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT Signature withArgs(const std::vector<Type::Any> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Signature withModuleCaptures(const std::vector<Type::Any> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Signature withTermCaptures(const std::vector<Type::Any> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT Signature withRtn(const Type::Any &v_) const;
   template<typename T, typename U> POLYREGION_EXPORT void collect_where(std::vector<U> &results_, 
       const std::function<std::optional<U>(const T&)> &f) const {
     if constexpr (std::is_same_v<T, Signature>) {
       if(auto x_ = f(*this)) { results_.emplace_back(*x_); }
     }
+    name.collect_where<T, U>(results_, f);
+    if (receiver) {
+      (*receiver).collect_where<T, U>(results_, f);
+    }
     for (auto it = args.begin(); it != args.end(); ++it) {
+      (*it).collect_where<T, U>(results_, f);
+    }
+    for (auto it = moduleCaptures.begin(); it != moduleCaptures.end(); ++it) {
+      (*it).collect_where<T, U>(results_, f);
+    }
+    for (auto it = termCaptures.begin(); it != termCaptures.end(); ++it) {
       (*it).collect_where<T, U>(results_, f);
     }
     rtn.collect_where<T, U>(results_, f);
@@ -5672,16 +5859,97 @@ struct POLYREGION_EXPORT Signature {
     if constexpr (std::is_same_v<T, Signature>) {
       return f(*this);
     }
+    std::optional<Type::Any> receiver__;
+    if (receiver) { receiver__ = (*receiver).modify_all<T>(f); }
     std::vector<Type::Any> args__;
     for (auto it = args.begin(); it != args.end(); ++it) {
       args__.emplace_back((*it).modify_all<T>(f));
     }
-    return Signature(name, args__, rtn.modify_all<T>(f));
+    std::vector<Type::Any> moduleCaptures__;
+    for (auto it = moduleCaptures.begin(); it != moduleCaptures.end(); ++it) {
+      moduleCaptures__.emplace_back((*it).modify_all<T>(f));
+    }
+    std::vector<Type::Any> termCaptures__;
+    for (auto it = termCaptures.begin(); it != termCaptures.end(); ++it) {
+      termCaptures__.emplace_back((*it).modify_all<T>(f));
+    }
+    return Signature(name.modify_all<T>(f), tpeVars, receiver__, args__, moduleCaptures__, termCaptures__, rtn.modify_all<T>(f));
   }
   [[nodiscard]] POLYREGION_EXPORT bool operator!=(const Signature &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Signature &) const;
-  Signature(std::string name, std::vector<Type::Any> args, Type::Any rtn) noexcept;
+  Signature(Sym name, std::vector<std::string> tpeVars, std::optional<Type::Any> receiver, std::vector<Type::Any> args, std::vector<Type::Any> moduleCaptures, std::vector<Type::Any> termCaptures, Type::Any rtn) noexcept;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Signature &);
+};
+
+struct POLYREGION_EXPORT InvokeSignature {
+  Sym name;
+  std::vector<Type::Any> tpeVars;
+  std::optional<Type::Any> receiver;
+  std::vector<Type::Any> args;
+  std::vector<Type::Any> captures;
+  Type::Any rtn;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
+  [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const;
+  [[nodiscard]] POLYREGION_EXPORT InvokeSignature withName(const Sym &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT InvokeSignature withTpeVars(const std::vector<Type::Any> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT InvokeSignature withReceiver(const std::optional<Type::Any> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT InvokeSignature withArgs(const std::vector<Type::Any> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT InvokeSignature withCaptures(const std::vector<Type::Any> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT InvokeSignature withRtn(const Type::Any &v_) const;
+  template<typename T, typename U> POLYREGION_EXPORT void collect_where(std::vector<U> &results_, 
+      const std::function<std::optional<U>(const T&)> &f) const {
+    if constexpr (std::is_same_v<T, InvokeSignature>) {
+      if(auto x_ = f(*this)) { results_.emplace_back(*x_); }
+    }
+    name.collect_where<T, U>(results_, f);
+    for (auto it = tpeVars.begin(); it != tpeVars.end(); ++it) {
+      (*it).collect_where<T, U>(results_, f);
+    }
+    if (receiver) {
+      (*receiver).collect_where<T, U>(results_, f);
+    }
+    for (auto it = args.begin(); it != args.end(); ++it) {
+      (*it).collect_where<T, U>(results_, f);
+    }
+    for (auto it = captures.begin(); it != captures.end(); ++it) {
+      (*it).collect_where<T, U>(results_, f);
+    }
+    rtn.collect_where<T, U>(results_, f);
+  }
+  template<typename T, typename U> [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(
+      const std::function<std::optional<U>(const T&)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template<typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template<typename T> [[nodiscard]] POLYREGION_EXPORT InvokeSignature modify_all(
+      const std::function<T(const T&)> &f) const {
+    if constexpr (std::is_same_v<T, InvokeSignature>) {
+      return f(*this);
+    }
+    std::vector<Type::Any> tpeVars__;
+    for (auto it = tpeVars.begin(); it != tpeVars.end(); ++it) {
+      tpeVars__.emplace_back((*it).modify_all<T>(f));
+    }
+    std::optional<Type::Any> receiver__;
+    if (receiver) { receiver__ = (*receiver).modify_all<T>(f); }
+    std::vector<Type::Any> args__;
+    for (auto it = args.begin(); it != args.end(); ++it) {
+      args__.emplace_back((*it).modify_all<T>(f));
+    }
+    std::vector<Type::Any> captures__;
+    for (auto it = captures.begin(); it != captures.end(); ++it) {
+      captures__.emplace_back((*it).modify_all<T>(f));
+    }
+    return InvokeSignature(name.modify_all<T>(f), tpeVars__, receiver__, args__, captures__, rtn.modify_all<T>(f));
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator!=(const InvokeSignature &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const InvokeSignature &) const;
+  InvokeSignature(Sym name, std::vector<Type::Any> tpeVars, std::optional<Type::Any> receiver, std::vector<Type::Any> args, std::vector<Type::Any> captures, Type::Any rtn) noexcept;
+  POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const InvokeSignature &);
 };
 
 namespace FunctionAttr { 
@@ -5925,15 +6193,23 @@ struct POLYREGION_EXPORT Arg {
 };
 
 struct POLYREGION_EXPORT Function {
-  std::string name;
+  Sym name;
+  std::vector<std::string> tpeVars;
+  std::optional<Arg> receiver;
   std::vector<Arg> args;
+  std::vector<Arg> moduleCaptures;
+  std::vector<Arg> termCaptures;
   Type::Any rtn;
   std::vector<Stmt::Any> body;
   std::set<FunctionAttr::Any> attrs;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const;
-  [[nodiscard]] POLYREGION_EXPORT Function withName(const std::string &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Function withName(const Sym &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Function withTpeVars(const std::vector<std::string> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Function withReceiver(const std::optional<Arg> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT Function withArgs(const std::vector<Arg> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Function withModuleCaptures(const std::vector<Arg> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Function withTermCaptures(const std::vector<Arg> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT Function withRtn(const Type::Any &v_) const;
   [[nodiscard]] POLYREGION_EXPORT Function withBody(const std::vector<Stmt::Any> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT Function withAttrs(const std::set<FunctionAttr::Any> &v_) const;
@@ -5942,7 +6218,17 @@ struct POLYREGION_EXPORT Function {
     if constexpr (std::is_same_v<T, Function>) {
       if(auto x_ = f(*this)) { results_.emplace_back(*x_); }
     }
+    name.collect_where<T, U>(results_, f);
+    if (receiver) {
+      (*receiver).collect_where<T, U>(results_, f);
+    }
     for (auto it = args.begin(); it != args.end(); ++it) {
+      (*it).collect_where<T, U>(results_, f);
+    }
+    for (auto it = moduleCaptures.begin(); it != moduleCaptures.end(); ++it) {
+      (*it).collect_where<T, U>(results_, f);
+    }
+    for (auto it = termCaptures.begin(); it != termCaptures.end(); ++it) {
       (*it).collect_where<T, U>(results_, f);
     }
     rtn.collect_where<T, U>(results_, f);
@@ -5967,9 +6253,19 @@ struct POLYREGION_EXPORT Function {
     if constexpr (std::is_same_v<T, Function>) {
       return f(*this);
     }
+    std::optional<Arg> receiver__;
+    if (receiver) { receiver__ = (*receiver).modify_all<T>(f); }
     std::vector<Arg> args__;
     for (auto it = args.begin(); it != args.end(); ++it) {
       args__.emplace_back((*it).modify_all<T>(f));
+    }
+    std::vector<Arg> moduleCaptures__;
+    for (auto it = moduleCaptures.begin(); it != moduleCaptures.end(); ++it) {
+      moduleCaptures__.emplace_back((*it).modify_all<T>(f));
+    }
+    std::vector<Arg> termCaptures__;
+    for (auto it = termCaptures.begin(); it != termCaptures.end(); ++it) {
+      termCaptures__.emplace_back((*it).modify_all<T>(f));
     }
     std::vector<Stmt::Any> body__;
     for (auto it = body.begin(); it != body.end(); ++it) {
@@ -5979,27 +6275,35 @@ struct POLYREGION_EXPORT Function {
     for (auto it = attrs.begin(); it != attrs.end(); ++it) {
       attrs__.emplace((*it).modify_all<T>(f));
     }
-    return Function(name, args__, rtn.modify_all<T>(f), body__, attrs__);
+    return Function(name.modify_all<T>(f), tpeVars, receiver__, args__, moduleCaptures__, termCaptures__, rtn.modify_all<T>(f), body__, attrs__);
   }
   [[nodiscard]] POLYREGION_EXPORT bool operator!=(const Function &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Function &) const;
-  Function(std::string name, std::vector<Arg> args, Type::Any rtn, std::vector<Stmt::Any> body, std::set<FunctionAttr::Any> attrs) noexcept;
+  Function(Sym name, std::vector<std::string> tpeVars, std::optional<Arg> receiver, std::vector<Arg> args, std::vector<Arg> moduleCaptures, std::vector<Arg> termCaptures, Type::Any rtn, std::vector<Stmt::Any> body, std::set<FunctionAttr::Any> attrs) noexcept;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Function &);
 };
 
 struct POLYREGION_EXPORT StructDef {
-  std::string name;
+  Sym name;
+  std::vector<std::string> tpeVars;
   std::vector<Named> members;
+  std::vector<Sym> parents;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const;
-  [[nodiscard]] POLYREGION_EXPORT StructDef withName(const std::string &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT StructDef withName(const Sym &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT StructDef withTpeVars(const std::vector<std::string> &v_) const;
   [[nodiscard]] POLYREGION_EXPORT StructDef withMembers(const std::vector<Named> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT StructDef withParents(const std::vector<Sym> &v_) const;
   template<typename T, typename U> POLYREGION_EXPORT void collect_where(std::vector<U> &results_, 
       const std::function<std::optional<U>(const T&)> &f) const {
     if constexpr (std::is_same_v<T, StructDef>) {
       if(auto x_ = f(*this)) { results_.emplace_back(*x_); }
     }
+    name.collect_where<T, U>(results_, f);
     for (auto it = members.begin(); it != members.end(); ++it) {
+      (*it).collect_where<T, U>(results_, f);
+    }
+    for (auto it = parents.begin(); it != parents.end(); ++it) {
       (*it).collect_where<T, U>(results_, f);
     }
   }
@@ -6021,30 +6325,101 @@ struct POLYREGION_EXPORT StructDef {
     for (auto it = members.begin(); it != members.end(); ++it) {
       members__.emplace_back((*it).modify_all<T>(f));
     }
-    return StructDef(name, members__);
+    std::vector<Sym> parents__;
+    for (auto it = parents.begin(); it != parents.end(); ++it) {
+      parents__.emplace_back((*it).modify_all<T>(f));
+    }
+    return StructDef(name.modify_all<T>(f), tpeVars, members__, parents__);
   }
   [[nodiscard]] POLYREGION_EXPORT bool operator!=(const StructDef &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const StructDef &) const;
-  StructDef(std::string name, std::vector<Named> members) noexcept;
+  StructDef(Sym name, std::vector<std::string> tpeVars, std::vector<Named> members, std::vector<Sym> parents) noexcept;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const StructDef &);
 };
 
-struct POLYREGION_EXPORT Program {
-  std::vector<StructDef> structs;
+struct POLYREGION_EXPORT Mirror {
+  Sym source;
+  std::vector<Sym> sourceParents;
+  StructDef structDef;
   std::vector<Function> functions;
+  std::vector<StructDef> dependencies;
   [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
   [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const;
-  [[nodiscard]] POLYREGION_EXPORT Program withStructs(const std::vector<StructDef> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Mirror withSource(const Sym &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Mirror withSourceParents(const std::vector<Sym> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Mirror withStructDef(const StructDef &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Mirror withFunctions(const std::vector<Function> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Mirror withDependencies(const std::vector<StructDef> &v_) const;
+  template<typename T, typename U> POLYREGION_EXPORT void collect_where(std::vector<U> &results_, 
+      const std::function<std::optional<U>(const T&)> &f) const {
+    if constexpr (std::is_same_v<T, Mirror>) {
+      if(auto x_ = f(*this)) { results_.emplace_back(*x_); }
+    }
+    source.collect_where<T, U>(results_, f);
+    for (auto it = sourceParents.begin(); it != sourceParents.end(); ++it) {
+      (*it).collect_where<T, U>(results_, f);
+    }
+    structDef.collect_where<T, U>(results_, f);
+    for (auto it = functions.begin(); it != functions.end(); ++it) {
+      (*it).collect_where<T, U>(results_, f);
+    }
+    for (auto it = dependencies.begin(); it != dependencies.end(); ++it) {
+      (*it).collect_where<T, U>(results_, f);
+    }
+  }
+  template<typename T, typename U> [[nodiscard]] POLYREGION_EXPORT std::vector<U> collect_where(
+      const std::function<std::optional<U>(const T&)> &f) const {
+    std::vector<U> results_;
+    collect_where<T, U>(results_, f);
+    return results_;
+  }
+  template<typename T> [[nodiscard]] POLYREGION_EXPORT std::vector<T> collect_all() const {
+    return collect_where<T, T>([](auto &x) { return std::optional<T>{x}; });
+  }
+  template<typename T> [[nodiscard]] POLYREGION_EXPORT Mirror modify_all(
+      const std::function<T(const T&)> &f) const {
+    if constexpr (std::is_same_v<T, Mirror>) {
+      return f(*this);
+    }
+    std::vector<Sym> sourceParents__;
+    for (auto it = sourceParents.begin(); it != sourceParents.end(); ++it) {
+      sourceParents__.emplace_back((*it).modify_all<T>(f));
+    }
+    std::vector<Function> functions__;
+    for (auto it = functions.begin(); it != functions.end(); ++it) {
+      functions__.emplace_back((*it).modify_all<T>(f));
+    }
+    std::vector<StructDef> dependencies__;
+    for (auto it = dependencies.begin(); it != dependencies.end(); ++it) {
+      dependencies__.emplace_back((*it).modify_all<T>(f));
+    }
+    return Mirror(source.modify_all<T>(f), sourceParents__, structDef.modify_all<T>(f), functions__, dependencies__);
+  }
+  [[nodiscard]] POLYREGION_EXPORT bool operator!=(const Mirror &) const;
+  [[nodiscard]] POLYREGION_EXPORT bool operator==(const Mirror &) const;
+  Mirror(Sym source, std::vector<Sym> sourceParents, StructDef structDef, std::vector<Function> functions, std::vector<StructDef> dependencies) noexcept;
+  POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Mirror &);
+};
+
+struct POLYREGION_EXPORT Program {
+  Function entry;
+  std::vector<Function> functions;
+  std::vector<StructDef> defs;
+  [[nodiscard]] POLYREGION_EXPORT size_t hash_code() const;
+  [[nodiscard]] POLYREGION_EXPORT std::ostream &dump(std::ostream &os) const;
+  [[nodiscard]] POLYREGION_EXPORT Program withEntry(const Function &v_) const;
   [[nodiscard]] POLYREGION_EXPORT Program withFunctions(const std::vector<Function> &v_) const;
+  [[nodiscard]] POLYREGION_EXPORT Program withDefs(const std::vector<StructDef> &v_) const;
   template<typename T, typename U> POLYREGION_EXPORT void collect_where(std::vector<U> &results_, 
       const std::function<std::optional<U>(const T&)> &f) const {
     if constexpr (std::is_same_v<T, Program>) {
       if(auto x_ = f(*this)) { results_.emplace_back(*x_); }
     }
-    for (auto it = structs.begin(); it != structs.end(); ++it) {
+    entry.collect_where<T, U>(results_, f);
+    for (auto it = functions.begin(); it != functions.end(); ++it) {
       (*it).collect_where<T, U>(results_, f);
     }
-    for (auto it = functions.begin(); it != functions.end(); ++it) {
+    for (auto it = defs.begin(); it != defs.end(); ++it) {
       (*it).collect_where<T, U>(results_, f);
     }
   }
@@ -6062,19 +6437,19 @@ struct POLYREGION_EXPORT Program {
     if constexpr (std::is_same_v<T, Program>) {
       return f(*this);
     }
-    std::vector<StructDef> structs__;
-    for (auto it = structs.begin(); it != structs.end(); ++it) {
-      structs__.emplace_back((*it).modify_all<T>(f));
-    }
     std::vector<Function> functions__;
     for (auto it = functions.begin(); it != functions.end(); ++it) {
       functions__.emplace_back((*it).modify_all<T>(f));
     }
-    return Program(structs__, functions__);
+    std::vector<StructDef> defs__;
+    for (auto it = defs.begin(); it != defs.end(); ++it) {
+      defs__.emplace_back((*it).modify_all<T>(f));
+    }
+    return Program(entry.modify_all<T>(f), functions__, defs__);
   }
   [[nodiscard]] POLYREGION_EXPORT bool operator!=(const Program &) const;
   [[nodiscard]] POLYREGION_EXPORT bool operator==(const Program &) const;
-  Program(std::vector<StructDef> structs, std::vector<Function> functions) noexcept;
+  Program(Function entry, std::vector<Function> functions, std::vector<StructDef> defs) noexcept;
   POLYREGION_EXPORT friend std::ostream &operator<<(std::ostream &os, const Program &);
 };
 
@@ -6430,7 +6805,7 @@ POLYREGION_EXPORT polyregion::polyast::TypeSpace::Any polyregion::polyast::TypeS
   if(!result_) { std::abort();  }
   return *result_;
 }
-namespace polyregion::polyast::Type{ using All = alternatives<Float16, Float32, Float64, IntU8, IntU16, IntU32, IntU64, IntS8, IntS16, IntS32, IntS64, Nothing, Unit0, Bool1, Struct, Ptr, Annotated>; }
+namespace polyregion::polyast::Type{ using All = alternatives<Float16, Float32, Float64, IntU8, IntU16, IntU32, IntU64, IntS8, IntS16, IntS32, IntS64, Nothing, Unit0, Bool1, Struct, Ptr, Var, Exec, Annotated>; }
 template<typename T> constexpr POLYREGION_EXPORT bool polyregion::polyast::Type::Any::is() const { 
   static_assert((polyregion::polyast::Type::All::contains<T>), "type not part of the variant");
   return T::variant_id == _v->id();
@@ -7048,6 +7423,9 @@ template <typename T> struct hash<std::set<T>> {
 };
 
 
+template <> struct hash<polyregion::polyast::Sym> {
+  std::size_t operator()(const polyregion::polyast::Sym &) const noexcept;
+};
 template <> struct hash<polyregion::polyast::SourcePosition> {
   std::size_t operator()(const polyregion::polyast::SourcePosition &) const noexcept;
 };
@@ -7131,6 +7509,12 @@ template <> struct hash<polyregion::polyast::Type::Struct> {
 };
 template <> struct hash<polyregion::polyast::Type::Ptr> {
   std::size_t operator()(const polyregion::polyast::Type::Ptr &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::Type::Var> {
+  std::size_t operator()(const polyregion::polyast::Type::Var &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::Type::Exec> {
+  std::size_t operator()(const polyregion::polyast::Type::Exec &) const noexcept;
 };
 template <> struct hash<polyregion::polyast::Type::Annotated> {
   std::size_t operator()(const polyregion::polyast::Type::Annotated &) const noexcept;
@@ -7456,6 +7840,9 @@ template <> struct hash<polyregion::polyast::Stmt::Annotated> {
 template <> struct hash<polyregion::polyast::Signature> {
   std::size_t operator()(const polyregion::polyast::Signature &) const noexcept;
 };
+template <> struct hash<polyregion::polyast::InvokeSignature> {
+  std::size_t operator()(const polyregion::polyast::InvokeSignature &) const noexcept;
+};
 template <> struct hash<polyregion::polyast::FunctionAttr::Any> {
   std::size_t operator()(const polyregion::polyast::FunctionAttr::Any &) const noexcept;
 };
@@ -7482,6 +7869,9 @@ template <> struct hash<polyregion::polyast::Function> {
 };
 template <> struct hash<polyregion::polyast::StructDef> {
   std::size_t operator()(const polyregion::polyast::StructDef &) const noexcept;
+};
+template <> struct hash<polyregion::polyast::Mirror> {
+  std::size_t operator()(const polyregion::polyast::Mirror &) const noexcept;
 };
 template <> struct hash<polyregion::polyast::Program> {
   std::size_t operator()(const polyregion::polyast::Program &) const noexcept;

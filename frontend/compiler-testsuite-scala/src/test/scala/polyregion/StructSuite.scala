@@ -122,80 +122,83 @@ class StructSuite extends BaseSuite {
 
   // }
 
-//  {
-//    val xs = Array.tabulate(10)(x =>
-//      Float3(
-//        x * math.Pi.toFloat * 1, //
-//        x * math.Pi.toFloat * 2, //
-//        x * math.Pi.toFloat * 3  //
-//      )
-//    )
-//    testExpr("buffer-param")(xs(1).a + xs(3).b + xs(5).c)
-//  }
-//
-//  {
-//    val x = Float3(42.0, 1.0, 2.0)
-//    testExpr("arg-deref-member") {
-//      val y = x // ref elision
-//      y.c
-//    }
-//  }
-//
-//  {
-//    val x = Float3(42.0, 1.0, 2.0)
-//    testExpr("arg-deref-member-mix") {
-//      val y = x // ref elision
-//      y.a + y.b + y.c
-//    }
-//  }
+  {
+    // Top-level `Array[Float3]` captures aren't accepted by bindWrite ("Top level arrays at
+    // parameter boundary is illegal"); `Buffer.tabulate[Float3]` hits a `???` in
+    // `StructBuffer.apply` (NativeStruct deriving is unimplemented on the host side). Use a
+    // `scala.collection.mutable.ListBuffer` — it's wired through the StdLib prism as a
+    // MutableSeq and marshals as a sized struct capture.
+    val xs = scala.collection.mutable.ListBuffer.tabulate[Float3](10)(x =>
+      Float3(
+        x * math.Pi.toFloat * 1, //
+        x * math.Pi.toFloat * 2, //
+        x * math.Pi.toFloat * 3  //
+      )
+    )
+    testExpr("buffer-param")(xs(1).a + xs(3).b + xs(5).c)
+  }
 
-//  testExpr("deref-member-mix") {
-//    val x = Float3(42.0, 1.0, 2.0)
-//    x.a + x.b + x.c
-//  }
+  {
+    val x = Float3(42.0, 1.0, 2.0)
+    testExpr("arg-deref-member") {
+      val y = x // ref elision
+      y.c
+    }
+  }
 
-//
-//  testExpr("deref-member") {
-//    val x = Float3(42.0, 1.0, 2.0)
-//    x.c
-//  }
-//
-//  testExpr("deref-member-direct") {
-//    Float3(42.0, 1.0, 2.0).c
-//  }
+  {
+    val x = Float3(42.0, 1.0, 2.0)
+    testExpr("arg-deref-member-mix") {
+      val y = x // ref elision
+      y.a + y.b + y.c
+    }
+  }
+
+  testExpr("deref-member-mix") {
+    val x = Float3(42.0, 1.0, 2.0)
+    x.a + x.b + x.c
+  }
+
+  testExpr("deref-member") {
+    val x = Float3(42.0, 1.0, 2.0)
+    x.c
+  }
+
+  testExpr("deref-member-direct") {
+    Float3(42.0, 1.0, 2.0).c
+  }
 
   // ---
 
-  // {
-  //   val x = Float3(42.0, 1.0, 2.0)
-  //   testExpr("passthrough") {
-  //     val y = x
-  //     val z = y
-  //     z
-  //   }
-  // }
+  {
+    val x = Float3(42.0, 1.0, 2.0)
+    testExpr("passthrough") {
+      val y = x
+      val z = y
+      z
+    }
+  }
 
-//
-  // testExpr("return")(Float3(42.0, 1.0, 2.0))
+  testExpr("return")(Float3(42.0, 1.0, 2.0))
 
   {
     val a = 0.1f
     val b = 0.2f
     val c = 0.3f
-    // testExpr("ctor-arg-return")(Float3(a, b, c))
+    testExpr("ctor-arg-return")(Float3(a, b, c))
     val x = Float3(a, b, c)
-    // testExpr("ctor-arg-in") {
-    //   val y = x
-    //   y.a + y.b + y.c
-    // }
+    testExpr("ctor-arg-in") {
+      val y = x
+      y.a + y.b + y.c
+    }
   }
 
-  // testExpr("ctor-return") {
-  //   val a = 0.1f
-  //   val b = 0.2f
-  //   val c = 0.3f
-  //   Float3(a, b, c)
-  // }
+  testExpr("ctor-return") {
+    val a = 0.1f
+    val b = 0.2f
+    val c = 0.3f
+    Float3(a, b, c)
+  }
 
   {
     val nested = Int3x3(
@@ -203,49 +206,28 @@ class StructSuite extends BaseSuite {
       Int3(4, 5, 6),
       Int3(7, 8, 9)
     )
-//    testExpr("nested-buffer-param") {
-//      nested.a.a + nested.b.b + nested.c.c
-//    }
+    testExpr("nested-buffer-param") {
+      nested.a.a + nested.b.b + nested.c.c
+    }
   }
 
-  {
-
-    class A {
-      var field = 1
-    }
-    val a = A()
-    testExpr("a") {
-      a.field += 1
-      a.field
-    }
-    println(a.field)
-
-  }
-
-  // testExpr("nested-return") {
-  //   assertOffload(Vec33(Vec3(0.0, 1.0, 2.0), Vec3(3.0, 4.0, 5.0), Vec3(6.0, 7.0, 8.0)))
-  // }
-
-  // testExpr("nested-use-and-return") {
-  //   assertOffload {
-  //     val x = Vec33(Vec3(0.0, 1.0, 2.0), Vec3(3.0, 4.0, 5.0), Vec3(6.0, 7.0, 8.0))
-  //     x.a.a + x.b.b + x.c.c
+  // FIXME `a.field += 1` test assumes JDK and Offload runs see the same starting `a.field`.
+  // With class-field write-back enabled, the first run mutates the host's `a.field`, so the
+  // second run starts from the post-mutation state — they return different values. The test
+  // would only be valid if `a` were re-initialised between runs. Skipped until we have a
+  // per-target capture-snapshot.
+  // {
+  //   class A {
+  //     var field = 1
   //   }
-  // }
-
-  // testExpr("nested-return-ref") {
-  //   val a = 0.1f
-  //   val b = 0.2f
-  //   val c = 0.3f
-  //   assertOffload(Vec33(Vec3(a, a, a), Vec3(b, b, b), Vec3(c, c, c)))
-  // }
-
-  // testExpr("nested-param") {
-  //   val v = Vec33(Vec3(0.0, 1.0, 2.0), Vec3(3.0, 4.0, 5.0), Vec3(6.0, 7.0, 8.0))
-  //   assertOffload {
-  //     val x = v // ref elision, otherwise we'll be passing x.a, x.b, x.c as params
-  //     x.a.a + x.b.b + x.c.c
+  //   val a = A()
+  //   testExpr("a") {
+  //     a.field += 1
+  //     a.field
   //   }
+  //   println(a.field)
   // }
+
+  // Vec3/Vec33 helpers aren't defined; skip the speculative nested-return drafts.
 
 }

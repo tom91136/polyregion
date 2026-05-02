@@ -98,8 +98,10 @@ mlir::Type polyfc::Remapper::resolveType(const Type::Any &tpe) {
       [&](const Type::Ptr &x) -> mlir::Type {
         if (x.length) return mlir::LLVM::LLVMArrayType::get(resolveType(x.comp), *x.length);
         return mlir::LLVM::LLVMPointerType::get(C);
-      },                                                                         //
-      [&](const Type::Annotated &x) -> mlir::Type { return resolveType(x.tpe); } //
+      },                                                                                                  //
+      [&](const Type::Var &x) -> mlir::Type { raise(fmt::format("Type::Var unsupported: {}", repr(x))); }, //
+      [&](const Type::Exec &x) -> mlir::Type { raise(fmt::format("Type::Exec unsupported: {}", repr(x))); }, //
+      [&](const Type::Annotated &x) -> mlir::Type { return resolveType(x.tpe); }                          //
   );
 }
 
@@ -120,7 +122,7 @@ StructLayout polyfc::Remapper::resolveLayout(const StructDef &def) {
     raise(fmt::format(
         "Type offset mismatch for {}: field size arithmetic gave last element offset = {} but max size from mlir::DataLayout gave {}",
         repr(def), offset, size));
-  return StructLayout(def.name, size, L.getTypeABIAlignment(mirror), ms);
+  return StructLayout(repr(def.name), size, L.getTypeABIAlignment(mirror), ms);
 }
 
 Expr::Select polyfc::Remapper::newVar(const std::variant<Expr::Any, Type::Any> &x) {
@@ -157,7 +159,7 @@ Type::Any polyfc::Remapper::handleType(const mlir::Type type, const bool capture
       const auto comp = comp0.is<Type::Ptr>() ? comp0 : Type::Ptr(comp0, {}, TypeSpace::Global()); // add ptr, even if the component isn't
       FBoxedMirror mirror(comp, fir::getBoxRank(t));
       const auto def = mirror.def();
-      Type::Struct ty(def.name);
+      Type::Struct ty(def.name, {}, {}, {});
       typesLUT.insert({t, mirror});
       boxTypes.emplace(ty, mirror);
       defs.insert({ty, def});
@@ -197,11 +199,12 @@ Type::Any polyfc::Remapper::handleType(const mlir::Type type, const bool capture
              [&](const fir::SequenceType t) -> Type::Any { return handleSeq(t); },
              [&](const fir::CharacterType) -> Type::Any { return Type::Ptr(Type::IntU8(), {}, TypeSpace::Global()); },
              [&](fir::RecordType t) -> Type::Any {
-               const StructDef def(t.getName().str(),
+               const StructDef def(Sym({t.getName().str()}), {},
                                    t.getTypeList()                                                                //
                                        | map([&](auto &name, auto &tpe) { return Named(name, handleType(tpe)); }) //
-                                       | to_vector());
-               const Type::Struct ty(def.name);
+                                       | to_vector(),
+                                   {});
+               const Type::Struct ty(def.name, {}, {}, {});
                defs.insert({ty, def});
                return ty;
              }, //
@@ -801,14 +804,16 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
   const static Named Ends("#ends", Ptr(Long));
   const static Named MappedInduction("#mappedInd", Long);
 
-  const Type::Struct CaptureType(fmt::format("#Capture<{}>", name));
+  const Type::Struct CaptureType(Sym({fmt::format("#Capture<{}>", name)}), {}, {}, {});
   const Named Capture("#capture", Ptr(CaptureType));
 
-  const Type::Struct ReductionType(fmt::format("#Reduction<{}>", name));
+  const Type::Struct ReductionType(Sym({fmt::format("#Reduction<{}>", name)}), {}, {}, {});
   const Named Reduction("#reduction", Ptr(ReductionType));
 
-  const StructDef preludeDef("#Prelude", gpu ? std::vector{LowerBound, UpperBound, Step, TripCount} //
-                                             : std::vector{LowerBound, UpperBound, Step, TripCount, Begins, Ends});
+  const StructDef preludeDef(Sym({"#Prelude"}), {},
+                             gpu ? std::vector{LowerBound, UpperBound, Step, TripCount} //
+                                 : std::vector{LowerBound, UpperBound, Step, TripCount, Begins, Ends},
+                             {});
   const Named Prelude("#prelude", typeOf(preludeDef));
 
   op.getBody()->dump();
@@ -879,12 +884,14 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
                           }) //
                         | to_vector();
 
-  const StructDef capturesDef(CaptureType.name, std::vector{Prelude}                                          //
-                                                    | concat(captures | map([](auto &c) { return c.named; })) //
-                                                    | to_vector());
+  const StructDef capturesDef(CaptureType.name, {},
+                              std::vector{Prelude}                                          //
+                                  | concat(captures | map([](auto &c) { return c.named; })) //
+                                  | to_vector(),
+                              {});
 
-  const StructDef reductionsDef(ReductionType.name, //
-                                exprWithReductions ^ map([&](auto &, auto &rd) { return rd.partialArray; }));
+  const StructDef reductionsDef(ReductionType.name, {}, //
+                                exprWithReductions ^ map([&](auto &, auto &rd) { return rd.partialArray; }), {});
 
   r.syntheticDefs.emplace(preludeDef);
   r.syntheticDefs.emplace(capturesDef);
@@ -913,32 +920,32 @@ polyfc::Remapper::DoConcurrentRegion polyfc::Remapper::createRegion( //
                              ? forEach(fnName, Capture, params) //
                              : reduce(fnName, Capture, Reduction, params, svrs);
 
-  const Program program(r.defs                        //
-                            | values()                //
-                            | concat(r.syntheticDefs) //
-                            | to_vector(),            //
-                        r.functions | append(entry) | to_vector());
+  const Program program(entry, r.functions, r.defs                       //
+                                                 | values()              //
+                                                 | concat(r.syntheticDefs) //
+                                                 | to_vector());
 
   llvm::errs() << repr(program) << "\n";
   llvm::errs().flush();
 
-  const auto defLayouts = program.structs | map([&](auto &d) { return r.resolveLayout(d); }) | to_vector();
+  const auto defLayouts = program.defs | map([&](auto &d) { return r.resolveLayout(d); }) | to_vector();
 
   const auto findNamedLayout = [&](const auto &symbol) {
-    return defLayouts ^ find([&](auto &d) { return d.name == symbol; }) ^ fold([&]() -> StructLayout { raise("Capture type missing"); });
+    const auto target = repr(symbol);
+    return defLayouts ^ find([&](auto &d) { return d.name == target; }) ^ fold([&]() -> StructLayout { raise("Capture type missing"); });
   };
 
   return DoConcurrentRegion{
       .program = program,
-      .layouts = defLayouts                                                               //
-                 | map([&](auto &l) { return std::pair{l.name == capturesDef.name, l}; }) //
+      .layouts = defLayouts                                                                       //
+                 | map([&](auto &l) { return std::pair{l.name == repr(capturesDef.name), l}; }) //
                  | to_vector(),
       .captures = captures,
       .reductions = exprWithReductions ^ map([](auto &, auto &rd) { return rd; }),
       .boxes =
-          r.boxTypes                                                                                                                     //
-          | collect([](auto &k, auto &f) { return f ^ get_maybe<FBoxedMirror>() ^ map([&](auto &v) { return std::pair{k.name, v}; }); }) //
-          | to<std::unordered_map>(),                                                                                                    //
+          r.boxTypes                                                                                                                            //
+          | collect([](auto &k, auto &f) { return f ^ get_maybe<FBoxedMirror>() ^ map([&](auto &v) { return std::pair{repr(k.name), v}; }); }) //
+          | to<std::unordered_map>(),                                                                                                           //
       .preludeLayout = findNamedLayout(preludeDef.name),
       .captureLayout = findNamedLayout(capturesDef.name),
       .reductionLayout = exprWithReductions.empty() ? std::optional<StructLayout>{} : findNamedLayout(reductionsDef.name),

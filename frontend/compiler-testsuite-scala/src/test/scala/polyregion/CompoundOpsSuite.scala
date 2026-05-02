@@ -12,34 +12,33 @@ class CompoundOpsSuite extends BaseSuite {
     test(name)(assertOffloadValue(offload1(r)))
   }
 
-  // FIXME LLVM ERROR: Cannot select: t40: f32 = fmaximum t36, t39...
-//  {
-//    val xs = Buffer.tabulate[Double](100)(_.toDouble)
-//    val n  = xs.size
-//    testExpr("max-double") {
-//      var max = 0.0
-//      var i   = 0
-//      while (i < n) {
-//        max = math.max(max, xs(i))
-//        i += 1
-//      }
-//      max
-//    }
-//  }
-//
-//  {
-//    val xs = Buffer.tabulate[Float](100)(_.toFloat)
-//    val n  = xs.size
-//    testExpr("max-float") {
-//      var max = 0f
-//      var i   = 0
-//      while (i < n) {
-//        max = math.max(max, xs(i))
-//        i += 1
-//      }
-//      max
-//    }
-//  }
+  {
+    val xs = Buffer.tabulate[Double](100)(_.toDouble)
+    val n  = xs.size
+    testExpr("max-double") {
+      var max = 0.0
+      var i   = 0
+      while (i < n) {
+        max = math.max(max, xs(i))
+        i += 1
+      }
+      max
+    }
+  }
+
+  {
+    val xs = Buffer.tabulate[Float](100)(_.toFloat)
+    val n  = xs.size
+    testExpr("max-float") {
+      var max = 0f
+      var i   = 0
+      while (i < n) {
+        max = math.max(max, xs(i))
+        i += 1
+      }
+      max
+    }
+  }
 
   {
     val xs = Buffer.tabulate[Int](100)(identity)

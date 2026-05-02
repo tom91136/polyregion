@@ -3,7 +3,7 @@ package polyregion.scalalang
 import cats.data.EitherT
 import cats.syntax.all.*
 import polyregion.ast.Traversal.*
-import polyregion.ast.{ScalaSRR as p, *, given}
+import polyregion.ast.{PolyAST as p, *, given}
 
 import scala.annotation.tailrec
 
@@ -11,7 +11,9 @@ object Remapper {
 
   private def fullyApplyGenExec(exec: p.Type.Exec, tpeArgs: List[p.Type]): p.Type.Exec = {
     val tpeTable = exec.tpeVars.zip(tpeArgs).toMap
-    def resolve(t: p.Type) = t.mapLeaf {
+    // Recurse fully so type vars nested inside Struct args, Ptr components, or curried inner Execs
+    // (e.g. `<T>(Int) => <>(ClassTag[T]) => Array[T]`) are all rewritten.
+    def resolve(t: p.Type): p.Type = t match {
       case p.Type.Var(name) =>
         tpeTable.get(name) match {
           case Some(value) => value
@@ -21,9 +23,14 @@ object Remapper {
             )
             ???
         }
+      case p.Type.Struct(name, tpeVars, args, parents) =>
+        p.Type.Struct(name, tpeVars, args.map(resolve), parents)
+      case p.Type.Ptr(comp, len, space) => p.Type.Ptr(resolve(comp), len, space)
+      case p.Type.Exec(innerVars, args, rtn) =>
+        p.Type.Exec(innerVars, args.map(resolve), resolve(rtn))
       case x => x
     }
-    p.Type.Exec(Nil, exec.args.map(resolve(_)), resolve(exec.rtn))
+    p.Type.Exec(Nil, exec.args.map(resolve), resolve(exec.rtn).asInstanceOf[p.Type])
   }
 
   @tailrec private def collectExecArgLists(exec: p.Type, out: List[List[p.Type]] = Nil): List[List[p.Type]] =
@@ -55,8 +62,8 @@ object Remapper {
     private def typerNAndWitness(reprs: List[q.TypeRepr]): Result[(List[(q.Retyped)], q.RemapContext)] =
       Retyper.typer0N(reprs).map((xs, wit) => (xs, c.updateDeps(d => d.copy(classes = d.classes |+| wit))))
 
-    def mapTrees(args: List[q.Tree]): Result[(p.Term, q.RemapContext)] = args match {
-      case Nil => (p.Term.UnitConst, c).pure
+    def mapTrees(args: List[q.Tree]): Result[(p.Expr, q.RemapContext)] = args match {
+      case Nil => (p.Expr.Unit0Const, c).pure
       case x :: xs =>
         (c ::= p.Stmt.Comment(x.show.replace("\n", " ; ")))
           .mapTree(x)
@@ -65,7 +72,7 @@ object Remapper {
           })
     }
 
-    def mapTree(tree: q.Tree): Result[(p.Term, q.RemapContext)] = tree match {
+    def mapTree(tree: q.Tree): Result[(p.Expr, q.RemapContext)] = tree match {
       case q.ValDef(name, tpeTree, Some(rhs)) =>
         for {
           (name, c)        <- c.down(tree).mkName(tree.symbol).success
@@ -74,8 +81,8 @@ object Remapper {
           (ref, c) <- term.fold((c !! tree).mapTerm(rhs, Some(tpe)))(x => (x, c).success)
           // term
         } yield (
-          p.Term.UnitConst,
-          c ::= p.Stmt.Var(p.Named(name, tpe), Some(p.Expr.Alias(ref)))
+          p.Expr.Unit0Const,
+          c ::= p.Stmt.Var(p.Named(name, tpe), Some(ref))
           // case (v: q.ErasedMethodVal, tpe: q.ErasedFnTpe) => c.suspend(name -> tpe)(v)
         )
       case q.ValDef(name, tpe, None) => c.fail(s"Unexpected variable $name:$tpe")
@@ -100,19 +107,19 @@ object Remapper {
             .map(_._2)
             .map(p.Arg(_))).distinct // Include outlined and propagated
           c <- c
-            .withInvokeCapture(defDef.symbol, allCaptureNames.map(arg => p.Term.Select(Nil, arg.named)))
+            .withInvokeCapture(defDef.symbol, allCaptureNames.map(arg => p.Expr.Select(Nil, arg.named)))
             .updateDeps(_ |+| c0.deps)
             .updateDeps(_.witness(fn.copy(termCaptures = allCaptureNames)))
             .success
 
         } yield (
-          p.Term.UnitConst,
+          p.Expr.Unit0Const,
           c // FIXME restore statements!!!
         )
 
-      case q.Import(_, _)                                       => (p.Term.UnitConst, c).success // ignore
-      case q.TypeDef(name, tree)                                => (p.Term.UnitConst, c).success // ignore
-      case q.ClassDef(name, ctor, parents, selfTpeValDef, body) => (p.Term.UnitConst, c).success
+      case q.Import(_, _)                                       => (p.Expr.Unit0Const, c).success // ignore
+      case q.TypeDef(name, tree)                                => (p.Expr.Unit0Const, c).success // ignore
+      case q.ClassDef(name, ctor, parents, selfTpeValDef, body) => (p.Expr.Unit0Const, c).success
       case t: q.Term                                            => (c !! tree).mapTerm(t)
 
       // def f(x...) : A = ??? === val f : x... => A = ???
@@ -149,7 +156,7 @@ object Remapper {
         // Finally, we compile the def body like a closure or return the term if we have one.
         (fnStmts, c) <- fnRtnTerm match {
           case Some(t) =>
-            (p.Stmt.Return(p.Expr.Alias(t)) :: Nil, c).success
+            (p.Stmt.Return(t) :: Nil, c).success
           case None =>
             for {
               // We reuse the same context, but reset anything related to the *current* scope.
@@ -163,7 +170,7 @@ object Remapper {
                 if (termTpe == term.tpe) ().success
                 else
                   s"Dotty term type ($termTpe) is not the same as PolyAst term value type (${term.tpe}), term was $term".fail
-            } yield (c.stmts :+ p.Stmt.Return(p.Expr.Alias(term)), c)
+            } yield (c.stmts :+ p.Stmt.Return(term), c)
 
         }
 
@@ -176,16 +183,16 @@ object Remapper {
           termCaptures = fnStmts // Propagate whatever capture we're seeing in all invokes local to this fn
             .collectWhere[p.Expr] { case p.Expr.Invoke(_, _, _, _, captures, _) => captures }
             .flatten
-            .collect { case p.Term.Select(Nil, n) => n }
+            .collect { case p.Expr.Select(Nil, n) => n }
             .map(p.Arg(_)),
           rtn = fnRtnTpe,
           body = fnStmts,
-          kind = p.Function.Kind.Exported
+          attrs = Set(p.Function.Attr.Exported)
         )
 
       } yield fn -> c
 
-    def mapTerms(args: List[q.Term]): Result[(List[p.Term], q.RemapContext)] = args match {
+    def mapTerms(args: List[q.Term]): Result[(List[p.Expr], q.RemapContext)] = args match {
       case Nil => (Nil, c).pure
       case x :: xs =>
         c.mapTerm(x)
@@ -198,10 +205,10 @@ object Remapper {
     private def mkInvoke(
         fn: q.DefDef,
         tpeArgs: List[p.Type],
-        receiver: Option[p.Term],
-        args: List[p.Term],
+        receiver: Option[p.Expr],
+        args: List[p.Expr],
         rtnTpe: p.Type
-    ): Result[(p.Term, q.RemapContext)] = (fn.symbol, fn.rhs, receiver) match {
+    ): Result[(p.Expr, q.RemapContext)] = (fn.symbol, fn.rhs, receiver) match {
       // We handle synthesis of the primary ctor here: primary ctors have the following invariant:
       //  * `fn.name` == "<init>"
       //  * `fn.rhs` is empty
@@ -228,7 +235,7 @@ object Remapper {
           }
 
           instancePath <- instance match {
-            case p.Term.Select(xs, x) => (xs :+ x).success
+            case p.Expr.Select(xs, x) => (xs :+ x).success
             case _                    => "Ctor invocation on instance must be a Select term".fail
           }
 
@@ -237,7 +244,7 @@ object Remapper {
               case p.Type.Var(name) => tpeVarTable(name)
               case x                => x
             }
-            p.Stmt.Mut(p.Term.Select(instancePath, p.Named(name, appliedTpe)), p.Expr.Alias(rhs))
+            p.Stmt.Mut(p.Expr.Select(instancePath, p.Named(name, appliedTpe)), rhs)
           }
         } yield (instance, c.::=(stmts*))
       case (sym, _, _) => // Anything else is a normal invoke.
@@ -262,7 +269,7 @@ object Remapper {
         val c0 = c
           .down(fn)
           .updateDeps(_.witness(fn, ivk)) ::= p.Stmt.Var(named, Some(ivk))
-        (p.Term.Select(Nil, named), c0).success
+        (p.Expr.Select(Nil, named), c0).success
     }
 
     // The general idea is that idents are either used as-is or it goes through a series of type/term applications (e.g `{ foo.fn[A](b)(c) }`).
@@ -270,8 +277,8 @@ object Remapper {
     private def mapRef0(
         ref: q.Ref,
         tpeArgs: List[p.Type],
-        termArgss: List[List[p.Term]]
-    ): Result[(p.Term, q.RemapContext)] = c.typerAndWitness(ref.tpe).flatMap {
+        termArgss: List[List[p.Expr]]
+    ): Result[(p.Expr, q.RemapContext)] = c.typerAndWitness(ref.tpe).flatMap {
       case (Some(term) -> tpe, c) => (term, c).success
       case (None -> tpe0, c)      =>
         // Apply any unresolved type vars first.
@@ -287,7 +294,7 @@ object Remapper {
         // Call no-arg functions (i.e. `x.toDouble` or just `def fn = ???; fn` ) directly or pass-through if not no-arg
         def invokeOrSelect(
             c: q.RemapContext
-        )(sym: q.Symbol, receiver: Option[p.Term])(select: => Result[p.Term.Select]) = {
+        )(sym: q.Symbol, receiver: Option[p.Expr])(select: => Result[p.Expr.Select]) = {
 
           // println("$$$ " + c.symbolDefMap.mkString("\n"))
 
@@ -360,8 +367,8 @@ object Remapper {
                     case q.Ident(_)             => c.updateDeps(_.witness(owner, s)).success
                   }
                   directRoot = p.Named(rootName.fqn.mkString("_"), s)
-                  result <- invokeOrSelect(c)(ref.symbol, Some(p.Term.Select(Nil, directRoot)))(
-                    p.Term.Select(directRoot :: Nil, named).success
+                  result <- invokeOrSelect(c)(ref.symbol, Some(p.Expr.Select(Nil, directRoot)))(
+                    p.Expr.Select(directRoot :: Nil, named).success
                   )
                 } yield result
 
@@ -409,15 +416,25 @@ object Remapper {
         } yield (p.Named("this", tpe), c)
 
         // When a ref is owned by a class/object (i.e. `c.root`), we add an implicit `this` reference.
-        def handleThisRef(ref: q.Ref, named: p.Named) = if (owningClassSymbol(c.root).contains(ref.symbol.maybeOwner)) {
-          val ownerSym = ref.symbol.owner
-          Some(for {
-            (thisCls, c) <- mkThisVar(ownerSym)
-            (invoke, c) <- invokeOrSelect(c)(ref.symbol, Some(p.Term.Select(Nil, thisCls)))(
-              p.Term.Select(thisCls :: Nil, named).success
-            )
-          } yield (invoke, c))
-        } else None
+        // Only fire for bare idents and `this.x`-style selects — for `param.x` (e.g. `that.a` in
+        // `def +(that: Float2) = ... + that.a`) the qualifier is the parameter itself, NOT this,
+        // and rewriting it to `this.a` silently drops the parameter access.
+        def handleThisRef(ref: q.Ref, named: p.Named) = {
+          val rootIsThisOrAbsent = ref match {
+            case _: q.Ident                  => true
+            case q.Select(_: q.This, _)      => true
+            case _                           => false
+          }
+          if (rootIsThisOrAbsent && owningClassSymbol(c.root).contains(ref.symbol.maybeOwner)) {
+            val ownerSym = ref.symbol.owner
+            Some(for {
+              (thisCls, c) <- mkThisVar(ownerSym)
+              (invoke, c) <- invokeOrSelect(c)(ref.symbol, Some(p.Expr.Select(Nil, thisCls)))(
+                p.Expr.Select(thisCls :: Nil, named).success
+              )
+            } yield (invoke, c))
+          } else None
+        }
 
         // First, we check if the ident's symbol is an object.
         // This handle cases like `ObjA.ObjB` or `($x: ObjA).ObjB`, both should resolve to `ObjB` directly
@@ -425,7 +442,7 @@ object Remapper {
           tpe match { // Object references regardless of nesting can be direct so we use the generated reference name here.
             case s @ p.Type.Struct(name, _, _, _) =>
               (
-                p.Term.Select(Nil, p.Named(name.fqn.mkString("_"), tpe)),
+                p.Expr.Select(Nil, p.Named(name.fqn.mkString("_"), tpe)),
                 c.updateDeps(_.witness(ref.tpe.typeSymbol, s))
               ).success
             case bad =>
@@ -452,8 +469,8 @@ object Remapper {
                       case (clsDef: q.ClassDef, s @ p.Type.Struct(_, _, _, _)) =>
                         c.bindThis(clsDef, s).flatMap { c =>
                           val self = p.Named("this", s)
-                          invokeOrSelect(c)(sym, Some(p.Term.Select(Nil, self)))(
-                            p.Term.Select(self :: Nil, local).success
+                          invokeOrSelect(c)(sym, Some(p.Expr.Select(Nil, self)))(
+                            p.Expr.Select(self :: Nil, local).success
                           )
                         }
                       case (illegal, tpe) => s"Unexpected tree $illegal with type $tpe when resolving local dummy".fail
@@ -476,7 +493,7 @@ object Remapper {
 
                       val (name_, c_) = c.mkName(sym)
 
-                      invokeOrSelect(c_)(sym, None)(p.Term.Select(Nil, p.Named(name_, local.tpe)).success)
+                      invokeOrSelect(c_)(sym, None)(p.Expr.Select(Nil, p.Named(name_, local.tpe)).success)
                     } else if (sym.isDefDef) { // For DefDef, we need to synthesise one like the local dummy case
                       owningClassSymbol(sym)
                         .failIfEmpty(s"$sym does not contain an implementation")
@@ -509,9 +526,9 @@ object Remapper {
                 castResult = c.down(select).named(thisCls.tpe)
                 c <- (c ::= p.Stmt.Var(
                   castResult,
-                  Some(p.Expr.Cast(p.Term.Select(Nil, thisCls.copy(tpe = superSubclassTpe)), thisCls.tpe))
+                  Some(p.Expr.Cast(p.Expr.Select(Nil, thisCls.copy(tpe = superSubclassTpe)), thisCls.tpe))
                 )).success
-                (term, c) <- invokeOrSelect(c)(select.symbol, Some(p.Term.Select(Nil, castResult)))(
+                (term, c) <- invokeOrSelect(c)(select.symbol, Some(p.Expr.Select(Nil, castResult)))(
                   "illegal selection of a non DefDef symbol from super".fail
                 )
               } yield (term, c)
@@ -522,8 +539,8 @@ object Remapper {
                 .getOrElse {
                   // Otherwise we go through the usual path of resolution  (nested classes where each instance has an `this` reference to the owning class)
                   c.mapTerm(root).flatMap {
-                    case (root @ p.Term.Select(xs, x), c) => // fuse with previous select if we got one
-                      invokeOrSelect(c)(select.symbol, Some(root))(p.Term.Select(xs :+ x, named).success)
+                    case (root @ p.Expr.Select(xs, x), c) => // fuse with previous select if we got one
+                      invokeOrSelect(c)(select.symbol, Some(root))(p.Expr.Select(xs :+ x, named).success)
                     case (root, c) => // or simply return whatever it's referring to
                       // `$root.$name` becomes `$root.${select.symbol}()` so we don't need the `$name` here
                       invokeOrSelect(c)(select.symbol, Some(root))(
@@ -534,14 +551,14 @@ object Remapper {
           }
     }
 
-    private def mkMut(t: q.Tree, lhs: p.Term, rhs: p.Expr): (List[p.Stmt], q.RemapContext) = if (lhs.tpe == rhs.tpe) {
+    private def mkMut(t: q.Tree, lhs: p.Expr, rhs: p.Expr): (List[p.Stmt], q.RemapContext) = if (lhs.tpe == rhs.tpe) {
       (p.Stmt.Mut(lhs, rhs) :: Nil, c)
     } else {
       val c0       = c.down(t)
       val tempName = c0.named(rhs.tpe)
       (
         p.Stmt.Var(tempName, Some(rhs)) ::
-          p.Stmt.Mut(lhs, p.Expr.Cast(p.Term.Select(Nil, tempName), lhs.tpe)) :: Nil,
+          p.Stmt.Mut(lhs, p.Expr.Cast(p.Expr.Select(Nil, tempName), lhs.tpe)) :: Nil,
         c0
       )
     }
@@ -550,10 +567,26 @@ object Remapper {
         term: q.Term,
         eventualTpe: Option[p.Type] = None,
         tpeArgs: List[p.Type] = Nil,
-        termArgss: List[List[p.Term]] = Nil
-    ): Result[(p.Term, q.RemapContext)] = {
+        termArgss: List[List[p.Expr]] = Nil
+    ): Result[(p.Expr, q.RemapContext)] = {
 
       val c1 = c // c.withDefs(term)
+
+      // Short-circuit: scala.reflect.ClassTag[T] construction. When Array.ofDim[T](n) summons
+      // an implicit ClassTag, Scala 3.7's stdlib inlines `ClassTag.apply` into the call site,
+      // producing a Block(If(WeakReference cache lookup)) that the term mapper can't traverse
+      // (and shouldn't — the kernel never reads ClassTag fields). Replace any sub-expression of
+      // ClassTag[T] type with an empty ClassTag struct, which matches the StdLib mirror.
+      val isClassTagTpe = term.tpe.widenTermRefByName.dealias match {
+        case q.AppliedType(ctor, _) => ctor.typeSymbol.fullName == "scala.reflect.ClassTag"
+        case _                      => false
+      }
+      if (isClassTagTpe && tpeArgs.isEmpty && termArgss.isEmpty) {
+        return c1.typerAndWitness(term.tpe).map { case (_ -> tpe, c) =>
+          val name = c.named(tpe)
+          (p.Expr.Select(Nil, name), c.down(term) ::= p.Stmt.Var(name, None))
+        }
+      }
 
       (tpeArgs, termArgss, term) match {
         case (Nil, Nil, q.NamedArg(name, rhs)) => (c1 !! term).mapTerm(rhs) // named argument: `$name = $rhs`
@@ -565,25 +598,25 @@ object Remapper {
             (_, c) <- (c1 !! term).mapTrees(bindings)
             (v, c) <- (c !! term).mapTerm(expansion)
           } yield (v, c)
-        case (Nil, Nil, q.Literal(q.BooleanConstant(v))) => (p.Term.BoolConst(v), c1 !! term).pure
-        case (Nil, Nil, q.Literal(q.IntConstant(v)))     => (p.Term.IntConst(v), c1 !! term).pure
-        case (Nil, Nil, q.Literal(q.FloatConstant(v)))   => (p.Term.FloatConst(v), c1 !! term).pure
-        case (Nil, Nil, q.Literal(q.DoubleConstant(v)))  => (p.Term.DoubleConst(v), c1 !! term).pure
-        case (Nil, Nil, q.Literal(q.LongConstant(v)))    => (p.Term.LongConst(v), c1 !! term).pure
-        case (Nil, Nil, q.Literal(q.ShortConstant(v)))   => (p.Term.ShortConst(v), c1 !! term).pure
-        case (Nil, Nil, q.Literal(q.ByteConstant(v)))    => (p.Term.ByteConst(v), c1 !! term).pure
-        case (Nil, Nil, q.Literal(q.CharConstant(v)))    => (p.Term.CharConst(v), c1 !! term).pure
-        case (Nil, Nil, q.Literal(q.UnitConstant()))     => (p.Term.UnitConst, c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.BooleanConstant(v))) => (p.Expr.Bool1Const(v), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.IntConstant(v)))     => (p.Expr.IntS32Const(v), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.FloatConstant(v)))   => (p.Expr.Float32Const(v), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.DoubleConstant(v)))  => (p.Expr.Float64Const(v), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.LongConstant(v)))    => (p.Expr.IntS64Const(v), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.ShortConstant(v)))   => (p.Expr.IntS16Const(v), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.ByteConstant(v)))    => (p.Expr.IntS8Const(v), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.CharConstant(v)))    => (p.Expr.IntU16Const(v), c1 !! term).pure
+        case (Nil, Nil, q.Literal(q.UnitConstant()))     => (p.Expr.Unit0Const, c1 !! term).pure
         case (Nil, Nil, q.Literal(q.StringConstant(v))) =>
           ??? // XXX alloc new string instance
         case (Nil, Nil, q.Literal(q.ClassOfConstant(_))) =>
           c1.typerAndWitness(term.tpe).map { case (_ -> tpe, c) =>
             val name = c.named(tpe)
-            (p.Term.Select(Nil, name), (c.down(term)) ::= p.Stmt.Var(name, None))
+            (p.Expr.Select(Nil, name), (c.down(term)) ::= p.Stmt.Var(name, None))
           }
         case (Nil, Nil, l @ q.Literal(q.NullConstant())) =>
           c1.typerAndWitness(l.tpe).map { case (_ -> tpe, c) =>
-            (p.Term.Poison(tpe), c !! term)
+            (p.Expr.Poison(tpe), c !! term)
           }
         case (Nil, Nil, q.This(_)) => // reference to the current class: `this.???`
           // XXX Don't use typerAndWitness here, we need to record the witnessing of `this` separately.
@@ -592,7 +625,7 @@ object Remapper {
               // There may be more than one
               term.tpe.classSymbol.map(_.tree) match {
                 case Some(clsDef: q.ClassDef) =>
-                  c.bindThis(clsDef, s).map(c => (p.Term.Select(Nil, p.Named("this", s)), c !! term))
+                  c.bindThis(clsDef, s).map(c => (p.Expr.Select(Nil, p.Named("this", s)), c !! term))
                 case Some(bad) => s"`this` type symbol points to a non-ClassDef tree: $bad".fail
                 case None      => "`this` does not contain a class symbol".fail
               }
@@ -626,7 +659,7 @@ object Remapper {
           println(s"[mapper] new = `${term.show}`")
           c1.typerAndWitness(tpt.tpe).map { case (_ -> tpe, c) =>
             val name = c.named(tpe)
-            (p.Term.Select(Nil, name), (c.down(term)) ::= p.Stmt.Var(name, None))
+            (p.Expr.Select(Nil, name), (c.down(term)) ::= p.Stmt.Var(name, None))
           }
         case (tpeArgs, termArgs0, ap @ q.Apply(fun, args)) => // *single* application of some terms: `$fun($args...)`
           println(s"[mapper] <${tpeArgs.map(_.repr)}> ap = `${ap.show}` <${tpeArgs.map(_.repr)}>")
@@ -638,19 +671,21 @@ object Remapper {
             (args, c) <- c1.down(ap).mapTerms(args)
             (fun, c)  <- (c !! ap).mapTerm(fun, tpeArgs = tpeArgs, termArgss = args :: termArgs0)
           } yield (fun, c)
-        case (Nil, Nil, q.Block(stat, expr)) => // block expression: `{ $stmts...; $expr }`
+        case (_, _, q.Block(stat, expr)) => // block expression: `{ $stmts...; $expr }`
+          // Type/term args may carry through when an inlined polymorphic call (e.g. ClassTag.apply
+          // for an Array.ofDim implicit) lands as a Block result. Pass them down to the result expr.
           for {
             (_, c)   <- (c1 !! term).mapTrees(stat)
-            (ref, c) <- c.mapTerm(expr)
+            (ref, c) <- c.mapTerm(expr, tpeArgs = tpeArgs, termArgss = termArgss)
           } yield (ref, c)
         case (Nil, Nil, q.Assign(lhs, rhs)) => // simple assignment: `$lhs = $rhs`
           for {
             (lhsRef, c) <- c1.down(term).mapTerm(lhs) // go down here
             (rhsRef, c) <- (c !! term).mapTerm(rhs)
             r <- (lhsRef, rhsRef) match {
-              case (s @ p.Term.Select(_, _), rhs) =>
-                val (xs, c0) = c.mkMut(term, s, p.Expr.Alias(rhs))
-                (p.Term.UnitConst, c0.::=(xs*)).success
+              case (s @ p.Expr.Select(_, _), rhs) =>
+                val (xs, c0) = c.mkMut(term, s, rhs)
+                (p.Expr.Unit0Const, c0.::=(xs*)).success
               case (lhs, rhs) => c.fail(s"Illegal assign LHS,RHS: lhs=${lhs.repr} rhs=$rhs")
             }
           } yield r
@@ -662,7 +697,7 @@ object Remapper {
             (elseTerm, elseCtx) <- thenCtx.noStmts.down(elseTerm).mapTerm(elseTerm)
 
             _ <-
-              if (condTerm.tpe != p.Type.Bool) s"Cond must be a Bool ref, got ${condTerm}".fail
+              if (condTerm.tpe != p.Type.Bool1) s"Cond must be a Bool ref, got ${condTerm}".fail
               else ().success
 
             mkCondStmts = (tpe: p.Type) => {
@@ -670,15 +705,15 @@ object Remapper {
               val name   = c.named(tpe)
               val result = p.Stmt.Var(name, None)
 
-              val (thenStmts, c0) = c.mkMut(term, p.Term.Select(Nil, name), p.Expr.Alias(thenTerm))
-              val (elseStmts, c1) = c0.mkMut(term, p.Term.Select(Nil, name), p.Expr.Alias(elseTerm))
+              val (thenStmts, c0) = c.mkMut(term, p.Expr.Select(Nil, name), thenTerm)
+              val (elseStmts, c1) = c0.mkMut(term, p.Expr.Select(Nil, name), elseTerm)
 
               val cond = p.Stmt.Cond(
-                p.Expr.Alias(condTerm),
+                condTerm,
                 thenCtx.stmts ++ thenStmts,
                 elseCtx.stmts ++ elseStmts
               )
-              (p.Term.Select(Nil, name), c1.down(term).replaceStmts(ifCtx.stmts :+ result :+ cond)).success
+              (p.Expr.Select(Nil, name), c1.down(term).replaceStmts(ifCtx.stmts :+ result :+ cond)).success
             }
 
             // See https://dotty.epfl.ch/docs/reference/new-types/union-types-spec.html#erasure
@@ -706,12 +741,12 @@ object Remapper {
             (condTerm, condCtx) <- c1.noStmts.down(term).mapTerm(cond)
             (_, bodyCtx)        <- condCtx.noStmts.mapTerm(body)
           } yield (
-            p.Term.UnitConst,
+            p.Expr.Unit0Const,
             bodyCtx.replaceStmts(c.stmts :+ p.Stmt.While(condCtx.stmts, condTerm, bodyCtx.stmts))
           )
         case (Nil, Nil, q.Closure(rhs, None)) =>
           println(c.invokeCaptures)
-          // (p.Term.UnitConst, c).success
+          // (p.Expr.Unit0Const, c).success
           // TODO delete the LHS var??
           // pprint.pprintln(rhs)
           ???

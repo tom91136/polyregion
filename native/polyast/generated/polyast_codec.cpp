@@ -5,6 +5,16 @@ template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
 namespace polyregion::polyast { 
 
+Sym sym_from_json(const json& j_) { 
+  auto fqn = j_.at(0).get<std::vector<std::string>>();
+  return Sym(fqn);
+}
+
+json sym_to_json(const Sym& x_) { 
+  auto fqn = x_.fqn;
+  return json::array({fqn});
+}
+
 SourcePosition sourceposition_from_json(const json& j_) { 
   auto file = j_.at(0).get<std::string>();
   auto line = j_.at(1).get<int32_t>();
@@ -245,13 +255,23 @@ json Type::bool1_to_json(const Type::Bool1& x_) {
 }
 
 Type::Struct Type::struct_from_json(const json& j_) { 
-  auto name = j_.at(0).get<std::string>();
-  return Type::Struct(name);
+  auto name = sym_from_json(j_.at(0));
+  auto tpeVars = j_.at(1).get<std::vector<std::string>>();
+  std::vector<Type::Any> args;
+  for(const auto &v_ : j_.at(2)) { args.emplace_back(Type::any_from_json(v_)); }
+  std::vector<Sym> parents;
+  for(const auto &v_ : j_.at(3)) { parents.emplace_back(sym_from_json(v_)); }
+  return {name, tpeVars, args, parents};
 }
 
 json Type::struct_to_json(const Type::Struct& x_) { 
-  auto name = x_.name;
-  return json::array({name});
+  auto name = sym_to_json(x_.name);
+  auto tpeVars = x_.tpeVars;
+  std::vector<json> args;
+  for(const auto &v_ : x_.args) { args.emplace_back(Type::any_to_json(v_)); }
+  std::vector<json> parents;
+  for(const auto &v_ : x_.parents) { parents.emplace_back(sym_to_json(v_)); }
+  return json::array({name, tpeVars, args, parents});
 }
 
 Type::Ptr Type::ptr_from_json(const json& j_) { 
@@ -266,6 +286,32 @@ json Type::ptr_to_json(const Type::Ptr& x_) {
   auto length = x_.length ? json(*x_.length) : json();
   auto space = TypeSpace::any_to_json(x_.space);
   return json::array({comp, length, space});
+}
+
+Type::Var Type::var_from_json(const json& j_) { 
+  auto name = j_.at(0).get<std::string>();
+  return Type::Var(name);
+}
+
+json Type::var_to_json(const Type::Var& x_) { 
+  auto name = x_.name;
+  return json::array({name});
+}
+
+Type::Exec Type::exec_from_json(const json& j_) { 
+  auto tpeVars = j_.at(0).get<std::vector<std::string>>();
+  std::vector<Type::Any> args;
+  for(const auto &v_ : j_.at(1)) { args.emplace_back(Type::any_from_json(v_)); }
+  auto rtn = Type::any_from_json(j_.at(2));
+  return {tpeVars, args, rtn};
+}
+
+json Type::exec_to_json(const Type::Exec& x_) { 
+  auto tpeVars = x_.tpeVars;
+  std::vector<json> args;
+  for(const auto &v_ : x_.args) { args.emplace_back(Type::any_to_json(v_)); }
+  auto rtn = Type::any_to_json(x_.rtn);
+  return json::array({tpeVars, args, rtn});
 }
 
 Type::Annotated Type::annotated_from_json(const json& j_) { 
@@ -302,7 +348,9 @@ Type::Any Type::any_from_json(const json& j_) {
   case 13: return Type::bool1_from_json(t_);
   case 14: return Type::struct_from_json(t_);
   case 15: return Type::ptr_from_json(t_);
-  case 16: return Type::annotated_from_json(t_);
+  case 16: return Type::var_from_json(t_);
+  case 17: return Type::exec_from_json(t_);
+  case 18: return Type::annotated_from_json(t_);
   default: throw std::out_of_range("Bad ordinal " + std::to_string(ord_));
   }
 }
@@ -341,7 +389,11 @@ json Type::any_to_json(const Type::Any& x_) {
   ,
   [](const Type::Ptr &y_) -> json { return {15, Type::ptr_to_json(y_)}; }
   ,
-  [](const Type::Annotated &y_) -> json { return {16, Type::annotated_to_json(y_)}; }
+  [](const Type::Var &y_) -> json { return {16, Type::var_to_json(y_)}; }
+  ,
+  [](const Type::Exec &y_) -> json { return {17, Type::exec_to_json(y_)}; }
+  ,
+  [](const Type::Annotated &y_) -> json { return {18, Type::annotated_to_json(y_)}; }
   );
 }
 
@@ -596,19 +648,29 @@ json Expr::alloc_to_json(const Expr::Alloc& x_) {
 }
 
 Expr::Invoke Expr::invoke_from_json(const json& j_) { 
-  auto name = j_.at(0).get<std::string>();
+  auto name = sym_from_json(j_.at(0));
+  std::vector<Type::Any> tpeArgs;
+  for(const auto &v_ : j_.at(1)) { tpeArgs.emplace_back(Type::any_from_json(v_)); }
+  auto receiver = j_.at(2).is_null() ? std::nullopt : std::make_optional(Expr::any_from_json(j_.at(2)));
   std::vector<Expr::Any> args;
-  for(const auto &v_ : j_.at(1)) { args.emplace_back(Expr::any_from_json(v_)); }
-  auto rtn = Type::any_from_json(j_.at(2));
-  return {name, args, rtn};
+  for(const auto &v_ : j_.at(3)) { args.emplace_back(Expr::any_from_json(v_)); }
+  std::vector<Expr::Any> captures;
+  for(const auto &v_ : j_.at(4)) { captures.emplace_back(Expr::any_from_json(v_)); }
+  auto rtn = Type::any_from_json(j_.at(5));
+  return {name, tpeArgs, receiver, args, captures, rtn};
 }
 
 json Expr::invoke_to_json(const Expr::Invoke& x_) { 
-  auto name = x_.name;
+  auto name = sym_to_json(x_.name);
+  std::vector<json> tpeArgs;
+  for(const auto &v_ : x_.tpeArgs) { tpeArgs.emplace_back(Type::any_to_json(v_)); }
+  auto receiver = x_.receiver ? Expr::any_to_json(*x_.receiver) : json();
   std::vector<json> args;
   for(const auto &v_ : x_.args) { args.emplace_back(Expr::any_to_json(v_)); }
+  std::vector<json> captures;
+  for(const auto &v_ : x_.captures) { captures.emplace_back(Expr::any_to_json(v_)); }
   auto rtn = Type::any_to_json(x_.rtn);
-  return json::array({name, args, rtn});
+  return json::array({name, tpeArgs, receiver, args, captures, rtn});
 }
 
 Expr::Annotated Expr::annotated_from_json(const json& j_) { 
@@ -1902,19 +1964,57 @@ json Stmt::any_to_json(const Stmt::Any& x_) {
 }
 
 Signature signature_from_json(const json& j_) { 
-  auto name = j_.at(0).get<std::string>();
+  auto name = sym_from_json(j_.at(0));
+  auto tpeVars = j_.at(1).get<std::vector<std::string>>();
+  auto receiver = j_.at(2).is_null() ? std::nullopt : std::make_optional(Type::any_from_json(j_.at(2)));
   std::vector<Type::Any> args;
-  for(const auto &v_ : j_.at(1)) { args.emplace_back(Type::any_from_json(v_)); }
-  auto rtn = Type::any_from_json(j_.at(2));
-  return {name, args, rtn};
+  for(const auto &v_ : j_.at(3)) { args.emplace_back(Type::any_from_json(v_)); }
+  std::vector<Type::Any> moduleCaptures;
+  for(const auto &v_ : j_.at(4)) { moduleCaptures.emplace_back(Type::any_from_json(v_)); }
+  std::vector<Type::Any> termCaptures;
+  for(const auto &v_ : j_.at(5)) { termCaptures.emplace_back(Type::any_from_json(v_)); }
+  auto rtn = Type::any_from_json(j_.at(6));
+  return {name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn};
 }
 
 json signature_to_json(const Signature& x_) { 
-  auto name = x_.name;
+  auto name = sym_to_json(x_.name);
+  auto tpeVars = x_.tpeVars;
+  auto receiver = x_.receiver ? Type::any_to_json(*x_.receiver) : json();
   std::vector<json> args;
   for(const auto &v_ : x_.args) { args.emplace_back(Type::any_to_json(v_)); }
+  std::vector<json> moduleCaptures;
+  for(const auto &v_ : x_.moduleCaptures) { moduleCaptures.emplace_back(Type::any_to_json(v_)); }
+  std::vector<json> termCaptures;
+  for(const auto &v_ : x_.termCaptures) { termCaptures.emplace_back(Type::any_to_json(v_)); }
   auto rtn = Type::any_to_json(x_.rtn);
-  return json::array({name, args, rtn});
+  return json::array({name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn});
+}
+
+InvokeSignature invokesignature_from_json(const json& j_) { 
+  auto name = sym_from_json(j_.at(0));
+  std::vector<Type::Any> tpeVars;
+  for(const auto &v_ : j_.at(1)) { tpeVars.emplace_back(Type::any_from_json(v_)); }
+  auto receiver = j_.at(2).is_null() ? std::nullopt : std::make_optional(Type::any_from_json(j_.at(2)));
+  std::vector<Type::Any> args;
+  for(const auto &v_ : j_.at(3)) { args.emplace_back(Type::any_from_json(v_)); }
+  std::vector<Type::Any> captures;
+  for(const auto &v_ : j_.at(4)) { captures.emplace_back(Type::any_from_json(v_)); }
+  auto rtn = Type::any_from_json(j_.at(5));
+  return {name, tpeVars, receiver, args, captures, rtn};
+}
+
+json invokesignature_to_json(const InvokeSignature& x_) { 
+  auto name = sym_to_json(x_.name);
+  std::vector<json> tpeVars;
+  for(const auto &v_ : x_.tpeVars) { tpeVars.emplace_back(Type::any_to_json(v_)); }
+  auto receiver = x_.receiver ? Type::any_to_json(*x_.receiver) : json();
+  std::vector<json> args;
+  for(const auto &v_ : x_.args) { args.emplace_back(Type::any_to_json(v_)); }
+  std::vector<json> captures;
+  for(const auto &v_ : x_.captures) { captures.emplace_back(Type::any_to_json(v_)); }
+  auto rtn = Type::any_to_json(x_.rtn);
+  return json::array({name, tpeVars, receiver, args, captures, rtn});
 }
 
 FunctionAttr::Internal FunctionAttr::internal_from_json(const json& j_) { 
@@ -1997,57 +2097,101 @@ json arg_to_json(const Arg& x_) {
 }
 
 Function function_from_json(const json& j_) { 
-  auto name = j_.at(0).get<std::string>();
+  auto name = sym_from_json(j_.at(0));
+  auto tpeVars = j_.at(1).get<std::vector<std::string>>();
+  auto receiver = j_.at(2).is_null() ? std::nullopt : std::make_optional(arg_from_json(j_.at(2)));
   std::vector<Arg> args;
-  for(const auto &v_ : j_.at(1)) { args.emplace_back(arg_from_json(v_)); }
-  auto rtn = Type::any_from_json(j_.at(2));
+  for(const auto &v_ : j_.at(3)) { args.emplace_back(arg_from_json(v_)); }
+  std::vector<Arg> moduleCaptures;
+  for(const auto &v_ : j_.at(4)) { moduleCaptures.emplace_back(arg_from_json(v_)); }
+  std::vector<Arg> termCaptures;
+  for(const auto &v_ : j_.at(5)) { termCaptures.emplace_back(arg_from_json(v_)); }
+  auto rtn = Type::any_from_json(j_.at(6));
   std::vector<Stmt::Any> body;
-  for(const auto &v_ : j_.at(3)) { body.emplace_back(Stmt::any_from_json(v_)); }
+  for(const auto &v_ : j_.at(7)) { body.emplace_back(Stmt::any_from_json(v_)); }
   std::set<FunctionAttr::Any> attrs;
-  for(const auto &v_ : j_.at(4)) { attrs.emplace(FunctionAttr::any_from_json(v_)); }
-  return {name, args, rtn, body, attrs};
+  for(const auto &v_ : j_.at(8)) { attrs.emplace(FunctionAttr::any_from_json(v_)); }
+  return {name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, body, attrs};
 }
 
 json function_to_json(const Function& x_) { 
-  auto name = x_.name;
+  auto name = sym_to_json(x_.name);
+  auto tpeVars = x_.tpeVars;
+  auto receiver = x_.receiver ? arg_to_json(*x_.receiver) : json();
   std::vector<json> args;
   for(const auto &v_ : x_.args) { args.emplace_back(arg_to_json(v_)); }
+  std::vector<json> moduleCaptures;
+  for(const auto &v_ : x_.moduleCaptures) { moduleCaptures.emplace_back(arg_to_json(v_)); }
+  std::vector<json> termCaptures;
+  for(const auto &v_ : x_.termCaptures) { termCaptures.emplace_back(arg_to_json(v_)); }
   auto rtn = Type::any_to_json(x_.rtn);
   std::vector<json> body;
   for(const auto &v_ : x_.body) { body.emplace_back(Stmt::any_to_json(v_)); }
   std::vector<json> attrs;
   for(const auto &v_ : x_.attrs) { attrs.emplace_back(FunctionAttr::any_to_json(v_)); }
-  return json::array({name, args, rtn, body, attrs});
+  return json::array({name, tpeVars, receiver, args, moduleCaptures, termCaptures, rtn, body, attrs});
 }
 
 StructDef structdef_from_json(const json& j_) { 
-  auto name = j_.at(0).get<std::string>();
+  auto name = sym_from_json(j_.at(0));
+  auto tpeVars = j_.at(1).get<std::vector<std::string>>();
   std::vector<Named> members;
-  for(const auto &v_ : j_.at(1)) { members.emplace_back(named_from_json(v_)); }
-  return {name, members};
+  for(const auto &v_ : j_.at(2)) { members.emplace_back(named_from_json(v_)); }
+  std::vector<Sym> parents;
+  for(const auto &v_ : j_.at(3)) { parents.emplace_back(sym_from_json(v_)); }
+  return {name, tpeVars, members, parents};
 }
 
 json structdef_to_json(const StructDef& x_) { 
-  auto name = x_.name;
+  auto name = sym_to_json(x_.name);
+  auto tpeVars = x_.tpeVars;
   std::vector<json> members;
   for(const auto &v_ : x_.members) { members.emplace_back(named_to_json(v_)); }
-  return json::array({name, members});
+  std::vector<json> parents;
+  for(const auto &v_ : x_.parents) { parents.emplace_back(sym_to_json(v_)); }
+  return json::array({name, tpeVars, members, parents});
+}
+
+Mirror mirror_from_json(const json& j_) { 
+  auto source = sym_from_json(j_.at(0));
+  std::vector<Sym> sourceParents;
+  for(const auto &v_ : j_.at(1)) { sourceParents.emplace_back(sym_from_json(v_)); }
+  auto structDef = structdef_from_json(j_.at(2));
+  std::vector<Function> functions;
+  for(const auto &v_ : j_.at(3)) { functions.emplace_back(function_from_json(v_)); }
+  std::vector<StructDef> dependencies;
+  for(const auto &v_ : j_.at(4)) { dependencies.emplace_back(structdef_from_json(v_)); }
+  return {source, sourceParents, structDef, functions, dependencies};
+}
+
+json mirror_to_json(const Mirror& x_) { 
+  auto source = sym_to_json(x_.source);
+  std::vector<json> sourceParents;
+  for(const auto &v_ : x_.sourceParents) { sourceParents.emplace_back(sym_to_json(v_)); }
+  auto structDef = structdef_to_json(x_.structDef);
+  std::vector<json> functions;
+  for(const auto &v_ : x_.functions) { functions.emplace_back(function_to_json(v_)); }
+  std::vector<json> dependencies;
+  for(const auto &v_ : x_.dependencies) { dependencies.emplace_back(structdef_to_json(v_)); }
+  return json::array({source, sourceParents, structDef, functions, dependencies});
 }
 
 Program program_from_json(const json& j_) { 
-  std::vector<StructDef> structs;
-  for(const auto &v_ : j_.at(0)) { structs.emplace_back(structdef_from_json(v_)); }
+  auto entry = function_from_json(j_.at(0));
   std::vector<Function> functions;
   for(const auto &v_ : j_.at(1)) { functions.emplace_back(function_from_json(v_)); }
-  return {structs, functions};
+  std::vector<StructDef> defs;
+  for(const auto &v_ : j_.at(2)) { defs.emplace_back(structdef_from_json(v_)); }
+  return {entry, functions, defs};
 }
 
 json program_to_json(const Program& x_) { 
-  std::vector<json> structs;
-  for(const auto &v_ : x_.structs) { structs.emplace_back(structdef_to_json(v_)); }
+  auto entry = function_to_json(x_.entry);
   std::vector<json> functions;
   for(const auto &v_ : x_.functions) { functions.emplace_back(function_to_json(v_)); }
-  return json::array({structs, functions});
+  std::vector<json> defs;
+  for(const auto &v_ : x_.defs) { defs.emplace_back(structdef_to_json(v_)); }
+  return json::array({entry, functions, defs});
 }
 
 StructLayoutMember structlayoutmember_from_json(const json& j_) { 
@@ -2122,13 +2266,13 @@ json compileresult_to_json(const CompileResult& x_) {
 json hashed_from_json(const json& j_) { 
   auto hash_ = j_.at(0).get<std::string>();
   auto data_ = j_.at(1);
-  if(hash_ != "b3f57aa1e6cf2a0296a51a8fefb33230") {
-   throw std::runtime_error("Expecting ADT hash to be b3f57aa1e6cf2a0296a51a8fefb33230, but was " + hash_);
+  if(hash_ != "647d2eb67e52e045fbf8d97386682159") {
+   throw std::runtime_error("Expecting ADT hash to be 647d2eb67e52e045fbf8d97386682159, but was " + hash_);
   }
   return data_;
 }
 
 json hashed_to_json(const json& x_) { 
-  return json::array({"b3f57aa1e6cf2a0296a51a8fefb33230", x_});
+  return json::array({"647d2eb67e52e045fbf8d97386682159", x_});
 }
 } // namespace polyregion::polyast

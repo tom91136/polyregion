@@ -4,6 +4,7 @@
 #include "ast.h"
 
 namespace polyregion::polyast {
+[[nodiscard]] std::string repr(const Sym& s);
 [[nodiscard]] std::string repr(const SourcePosition& t);
 [[nodiscard]] std::string repr(const TypeSpace::Any& t);
 [[nodiscard]] std::string repr(const TypeKind::Any& k);

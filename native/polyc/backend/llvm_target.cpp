@@ -113,7 +113,10 @@ llvm::Type *TargetedContext::resolveType(const AnyType &tpe, const Map<std::stri
       [&](const Type::Bool1 &) -> llvm::Type * { return llvm::Type::getIntNTy(actual, functionBoundary ? 8 : 1); }, //
 
       [&](const Type::Struct &x) -> llvm::Type * {
-        return structs ^ get_maybe(x.name) ^
+        // At a function boundary, structs travel as opaque pointers (the kernel runtime passes a
+        // ptr to the encoded struct). Inside the function body, they're materialised on the stack.
+        if (functionBoundary) return llvm::PointerType::get(actual, addressSpace(TypeSpace::Global()));
+        return structs ^ get_maybe(repr(x.name)) ^
                fold([](auto &info) { return info.tpe; },
                     [&]() -> llvm::StructType * {
                       throw BackendException(fmt::format("Unseen struct def {}, currently in-scope structs: {}", repr(x),
@@ -125,21 +128,23 @@ llvm::Type *TargetedContext::resolveType(const AnyType &tpe, const Map<std::stri
       [&](const Type::Ptr &x) -> llvm::Type * {
         if (x.length) return llvm::ArrayType::get(resolveType(x.comp, structs, functionBoundary), *x.length);
         return llvm::PointerType::get(actual, addressSpace(x.space));
-      },                                                                                                      //
-      [&](const Type::Annotated &x) -> llvm::Type * { return resolveType(x.tpe, structs, functionBoundary); } //
+      },                                                                                                       //
+      [&](const Type::Var &x) -> llvm::Type * { throw BackendException("Type::Var should be erased before LLVM lowering"); },
+      [&](const Type::Exec &x) -> llvm::Type * { throw BackendException("Type::Exec should be erased before LLVM lowering"); },
+      [&](const Type::Annotated &x) -> llvm::Type * { return resolveType(x.tpe, structs, functionBoundary); }  //
   );
 }
 
 StructInfo TargetedContext::resolveStruct(const StructDef &def, const Map<std::string, StructInfo> &structs) {
   const auto types = def.members ^ map([&](auto &m) { return resolveType(m.tpe, structs); });
-  const auto table = (def.members | map([](auto &m) { return m.symbol; }) | zip_with_index() | to_vector()) ^ to<Map>();
-  const auto tpe = llvm::StructType::create(actual, types, def.name);
+  const auto table = (def.members | map([](auto &m) { return m.symbol; }) | zip_with_index<size_t>() | to_vector()) ^ to<Map>();
+  const auto tpe = llvm::StructType::create(actual, types, repr(def.name));
   const auto dataLayout = options.targetInfo().resolveDataLayout();
   const auto structLayout = dataLayout.getStructLayout(tpe);
-  const StructLayout layout(/*name*/ def.name,
+  const StructLayout layout(/*name*/ repr(def.name),
                             /*sizeInBytes*/ structLayout->getSizeInBytes(),
                             /*alignment*/ static_cast<int64_t>(structLayout->getAlignment().value()),
-                            /*members*/ def.members | zip_with_index() | map([&](auto &named, auto i) {
+                            /*members*/ def.members | zip_with_index<size_t>() | map([&](auto &named, auto i) {
                               return StructLayoutMember(
                                   /*name*/ named,                                                            //
                                   /*offsetInBytes*/ static_cast<int64_t>(structLayout->getElementOffset(i)), //
@@ -150,24 +155,88 @@ StructInfo TargetedContext::resolveStruct(const StructDef &def, const Map<std::s
 }
 
 Map<std::string, StructInfo> TargetedContext::resolveLayouts(const std::vector<StructDef> &structs) {
-  Map<std::string, StructInfo> resolved;
-  Set<StructDef> withDependencies(structs.begin(), structs.end());
-  while (!withDependencies.empty()) { // TODO handle recursive defs
-    std::vector<StructDef> zeroDeps =
-        withDependencies | filter([&](auto &def) {
-          return def.members ^ forall([&](auto &named) {
-                   return named.tpe.template get<Type::Struct>() ^ forall([&](auto &s) { return resolved.contains(s.name); });
-                 });
-        }) |
-        to_vector();
-    if (!zeroDeps.empty()) {
-      for (auto &r : zeroDeps) {
-        resolved.emplace(r.name, resolveStruct(r, resolved));
-        withDependencies.erase(r);
+  // Two-phase resolution to handle recursive defs (e.g., Node → Option[Node] → Node).
+  // Phase 1: create opaque struct types for every def so subsequent type resolution can refer
+  // to them by name without requiring the full body.
+  Map<std::string, llvm::StructType *> opaqueTypes;
+  for (auto &def : structs) {
+    opaqueTypes.emplace(repr(def.name), llvm::StructType::create(actual, repr(def.name)));
+  }
+  // Also create opaque types for any structs referenced (transitively through members) but not
+  // present in the defs list. The Scala frontend currently doesn't propagate field-type deps,
+  // so e.g. `Node.next: Option[Node]` lands here without an Option struct def. The kernel can't
+  // dereference these opaque structs, but type-only references (capturing Node by-value while
+  // only reading `node.elem`) work fine.
+  std::function<void(const Type::Any&)> walk = [&](const Type::Any &t) {
+    if (auto s = t.template get<Type::Struct>()) {
+      auto name = repr(s->name);
+      if (!opaqueTypes.contains(name)) {
+        opaqueTypes.emplace(name, llvm::StructType::create(actual, name));
       }
-    } else
-      throw BackendException(
-          fmt::format("Recursive defs cannot be resolved: {}", zeroDeps ^ mk_string(",", [](auto &r) { return to_string(r); })));
+      for (auto &arg : s->args) walk(arg);
+    } else if (auto p = t.template get<Type::Ptr>()) {
+      walk(p->comp);
+    } else if (auto a = t.template get<Type::Annotated>()) {
+      walk(a->tpe);
+    } else if (auto e = t.template get<Type::Exec>()) {
+      for (auto &arg : e->args) walk(arg);
+      walk(e->rtn);
+    }
+  };
+  for (auto &def : structs) {
+    for (auto &m : def.members) walk(m.tpe);
+  }
+  // Synthesise StructDefs for any types we created opaque shells for but weren't in the input.
+  // We give them a single i8 placeholder member so LLVM treats them as sized (size 1) — empty
+  // structs aren't well-supported by `DataLayout::getAlignment`.
+  std::vector<StructDef> allDefs(structs.begin(), structs.end());
+  Set<std::string> originalNames;
+  for (auto &d : structs) originalNames.emplace(repr(d.name));
+  for (auto &[name, _] : opaqueTypes) {
+    if (!originalNames.contains(name)) {
+      // Fabricate a Sym from the dotted name. The kernel can only treat this as opaque (no
+      // member access) — adequate for type-only references that the Scala frontend doesn't
+      // bring along.
+      allDefs.push_back(StructDef(Sym({name}), {}, {Named("__opaque", Type::IntS8())}, {}));
+    }
+  }
+
+  // Phase 2a: register stubs so resolveType can refer to any struct by name during body resolution.
+  Map<std::string, StructInfo> resolved;
+  for (auto &def : allDefs) {
+    const auto stub = StructInfo{.def = def, .layout = StructLayout(repr(def.name), 0, 0, {}),
+                                 .tpe = opaqueTypes.at(repr(def.name)), .memberIndices = {}};
+    resolved.emplace(repr(def.name), stub);
+  }
+  // Phase 2b: setBody on every struct so all types are sized (recursive defs can ask each other for size).
+  // Struct-typed fields are laid out inline (functionBoundary=false) so the layout matches what a
+  // host C++ compiler produces for a captured-by-value struct — the kernel receives a pointer to the
+  // outer struct and reads inline fields directly. The previous design used functionBoundary=true
+  // (8-byte pointer slots) to defend against empty-struct fields computing to 0 bytes; we keep that
+  // defence narrowly by giving empty structs a single placeholder byte.
+  for (auto &def : allDefs) {
+    auto tpe = opaqueTypes.at(repr(def.name));
+    if (!tpe->isOpaque()) continue; // body already set; safe in case of duplicate StructDefs
+    auto memberTypes = def.members ^ map([&](auto &m) { return resolveType(m.tpe, resolved, /*functionBoundary*/ false); });
+    tpe->setBody(memberTypes);
+  }
+  // Phase 2c: now that all bodies are set, compute layouts.
+  for (auto &def : allDefs) {
+    auto tpe = opaqueTypes.at(repr(def.name));
+    const auto table = (def.members | map([](auto &m) { return m.symbol; }) | zip_with_index<size_t>() | to_vector()) ^ to<Map>();
+    const auto dataLayout = options.targetInfo().resolveDataLayout();
+    const auto structLayout = dataLayout.getStructLayout(tpe);
+    const StructLayout layout(/*name*/ repr(def.name),
+                              /*sizeInBytes*/ structLayout->getSizeInBytes(),
+                              /*alignment*/ static_cast<int64_t>(structLayout->getAlignment().value()),
+                              /*members*/ def.members | zip_with_index<size_t>() | map([&](auto &named, auto i) {
+                                return StructLayoutMember(
+                                    /*name*/ named,                                                            //
+                                    /*offsetInBytes*/ static_cast<int64_t>(structLayout->getElementOffset(i)), //
+                                    /*sizeInBytes*/ dataLayout.getTypeAllocSize(tpe->getElementType(i))        //
+                                );
+                              }) | to_vector());
+    resolved.insert_or_assign(repr(def.name), StructInfo{.def = def, .layout = layout, .tpe = tpe, .memberIndices = table});
   }
   return resolved;
 }

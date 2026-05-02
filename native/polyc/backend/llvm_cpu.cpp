@@ -61,7 +61,18 @@ ValPtr CPUTargetSpecificHandler::mkMathVal(CodeGen &cg, const Expr::MathOp &expr
               else throw BackendException("unimplemented");
             });
       },                                                                                             //
-      [&](const Math::Round &v) -> ValPtr { return cg.intr1(llvm::Intrinsic::round, v.tpe, v.x); },  //
+      [&](const Math::Round &v) -> ValPtr {
+        // PolyAST's `Round` allows the return type to differ from the input (matching JDK's
+        // `math.round(Float): Int` and `math.round(Double): Long`). LLVM's `llvm.round`
+        // intrinsic preserves the input float type, so when the rtn is integral we synthesise
+        // round-half-away-from-zero followed by fptosi (mirroring JDK semantics for finite
+        // values). For same-type calls (Float→Float), the plain rounding intrinsic suffices.
+        const auto inTpe = v.x.tpe();
+        if (v.tpe.is<Type::Float16>() || v.tpe.is<Type::Float32>() || v.tpe.is<Type::Float64>())
+          return cg.intr1(llvm::Intrinsic::round, v.tpe, v.x);
+        const auto rounded = cg.intr1(llvm::Intrinsic::round, inTpe, v.x);
+        return cg.B.CreateFPToSI(rounded, cg.resolveType(v.tpe));
+      }, //
       [&](const Math::Ceil &v) -> ValPtr { return cg.intr1(llvm::Intrinsic::ceil, v.tpe, v.x); },    //
       [&](const Math::Floor &v) -> ValPtr { return cg.intr1(llvm::Intrinsic::floor, v.tpe, v.x); },  //
       [&](const Math::Rint &v) -> ValPtr { return cg.intr1(llvm::Intrinsic::rint, v.tpe, v.x); },    //

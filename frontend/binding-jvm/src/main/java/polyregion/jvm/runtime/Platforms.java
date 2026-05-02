@@ -10,17 +10,18 @@ import polyregion.jvm.NativeLibrary;
 
 public final class Platforms implements AutoCloseable {
 
+  // These ordinals must match the native enum `polyregion::runtime::Type` in common/polyregion/types.h.
   static final byte //
       TYPE_VOID = 1,
       TYPE_BOOL = 2,
-      TYPE_BYTE = 3,
-      TYPE_CHAR = 4,
-      TYPE_SHORT = 5,
-      TYPE_INT = 6,
-      TYPE_LONG = 7,
-      TYPE_FLOAT = 8,
-      TYPE_DOUBLE = 9,
-      TYPE_PTR = 10;
+      TYPE_BYTE = 7,    // signed Java byte -> native IntS8
+      TYPE_CHAR = 4,    // unsigned Java char -> native IntU16
+      TYPE_SHORT = 8,   // signed Java short -> native IntS16
+      TYPE_INT = 9,     // signed Java int -> native IntS32
+      TYPE_LONG = 10,   // signed Java long -> native IntS64
+      TYPE_FLOAT = 12,  // native Float32
+      TYPE_DOUBLE = 13, // native Float64
+      TYPE_PTR = 14;
   static final byte //
       ACCESS_RW = 1,
       ACCESS_RO = 2,
@@ -58,7 +59,7 @@ public final class Platforms implements AutoCloseable {
 
   public static Platforms create() {
     Loader.touch();
-    String name = "libpolyrt-JNI.so";
+    String name = "libpolyinvoke-JNI.so";
     return new Platforms(
         NativeLibrary.load(
             Loader.searchAndCopyResourceIfNeeded(name, Paths.get("."))

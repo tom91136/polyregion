@@ -106,7 +106,8 @@ private[polyregion] object CodeGen {
     println("Generating C++ mirror for PolyAST...")
 
     val structs =
-      deriveStruct[SourcePosition]()
+      deriveStruct[Sym]()
+        :: deriveStruct[SourcePosition]()
         :: deriveStruct[Named]()
         :: deriveStruct[Type.Kind]()
         :: deriveStruct[Type.Space]()
@@ -118,10 +119,12 @@ private[polyregion] object CodeGen {
         :: deriveStruct[Math]()
         :: deriveStruct[Stmt]()
         :: deriveStruct[Signature]()
+        :: deriveStruct[InvokeSignature]()
         :: deriveStruct[Function.Attr]()
         :: deriveStruct[Arg]()
         :: deriveStruct[Function]()
         :: deriveStruct[StructDef]()
+        :: deriveStruct[Mirror]()
         :: deriveStruct[Program]()
         :: deriveStruct[StructLayoutMember]()
         :: deriveStruct[StructLayout]()

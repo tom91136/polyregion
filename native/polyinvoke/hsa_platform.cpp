@@ -363,63 +363,41 @@ HsaDeviceQueue::~HsaDeviceQueue() {
   CHECKED("Release agent queue", hsa_queue_destroy(queue));
 }
 
+// Submit + sync-wait for one async copy. Cleanup runs on the calling thread, not via
+// `hsa_amd_signal_async_handler` — the async-handler thread can race a tight back-to-back
+// `createSignal` and trigger SIGSEGV inside `hsa_signal_wait_scacquire` on later enqueues.
+// `hostUnlockHandle` is the locked-pointer returned by `hsa_amd_memory_lock`, or nullptr
+// for D2D where neither end is host memory.
+static void syncCopy(const char *tag, void *dst, hsa_agent_t dstAgent, void *src, hsa_agent_t srcAgent, size_t size, void *hostUnlockHandle,
+                     const MaybeCallback &cb) {
+  hsa_signal_t signal = createSignal(tag);
+  CHECKED(tag, hsa_amd_memory_async_copy(dst, dstAgent, src, srcAgent, size, 0, nullptr, signal));
+  hsa_signal_wait_acquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, std::numeric_limits<uint64_t>::max(), HSA_WAIT_STATE_BLOCKED);
+  std::atomic_thread_fence(std::memory_order_acquire);
+  if (hostUnlockHandle) CHECKED("Unlock host memory", hsa_amd_memory_unlock(hostUnlockHandle));
+  destroySignal(tag, signal);
+  if (cb) (*cb)();
+}
+
 void HsaDeviceQueue::enqueueDeviceToDeviceAsync(uintptr_t src, size_t srcOffset, uintptr_t dst, size_t dstOffset, size_t size,
                                                 const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
-  hsa_signal_t signal = createSignal("Allocate D2D signal");
-  CHECKED("Copy memory async (D2D)",
-          hsa_amd_memory_async_copy(                                   //
-              reinterpret_cast<char *>(dst) + dstOffset, device.agent, //
-              reinterpret_cast<char *>(src) + srcOffset, device.agent, //
-              size, 0, nullptr, signal));
-
-  enqueueCallback(signal, [cb, signal, token = latch.acquire()]() {
-    destroySignal("Release D2D signal", signal);
-    if (cb) (*cb)();
-  });
-  // XXX FIXME this wait makes the copy not actually async: switch to dependent signals to retain order...
-  hsa_signal_wait_acquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, std::numeric_limits<uint64_t>::max(), HSA_WAIT_STATE_BLOCKED);
-  std::atomic_thread_fence(std::memory_order_acquire);
+  syncCopy("D2D", reinterpret_cast<char *>(dst) + dstOffset, device.agent, reinterpret_cast<char *>(src) + srcOffset, device.agent, size,
+           nullptr, cb);
 }
 
 void HsaDeviceQueue::enqueueHostToDeviceAsync(const void *src, uintptr_t dst, size_t dstOffset, size_t size, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
   void *lockedHostSrcPtr;
   CHECKED("Lock host memory", hsa_amd_memory_lock(const_cast<void *>(src), size, nullptr, 0, &lockedHostSrcPtr));
-
-  hsa_signal_t signal = createSignal("Allocate H2D signal");
-  CHECKED("Copy memory async (H2D)",
-          hsa_amd_memory_async_copy(reinterpret_cast<char *>(dst) + dstOffset, device.agent, lockedHostSrcPtr, device.hostAgent, //
-                                    size, 0, nullptr, signal));
-
-  enqueueCallback(signal, [cb, lockedHostSrcPtr, signal, token = latch.acquire()]() {
-    CHECKED("Unlock host memory", hsa_amd_memory_unlock(lockedHostSrcPtr));
-    destroySignal("Release H2D signal", signal);
-    if (cb) (*cb)();
-  });
-  // XXX FIXME this wait makes the copy not actually async: switch to dependent signals to retain order...
-  hsa_signal_wait_acquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, std::numeric_limits<uint64_t>::max(), HSA_WAIT_STATE_BLOCKED);
-  std::atomic_thread_fence(std::memory_order_acquire);
+  syncCopy("H2D", reinterpret_cast<char *>(dst) + dstOffset, device.agent, lockedHostSrcPtr, device.hostAgent, size, lockedHostSrcPtr, cb);
 }
 
 void HsaDeviceQueue::enqueueDeviceToHostAsync(uintptr_t src, size_t srcOffset, void *dst, size_t size, const MaybeCallback &cb) {
   POLYINVOKE_TRACE();
   void *lockedHostDstPtr;
   CHECKED("Lock host memory", hsa_amd_memory_lock(dst, size, nullptr, 0, &lockedHostDstPtr));
-
-  hsa_signal_t signal = createSignal("Allocate D2H signal");
-  CHECKED("Copy memory async (D2H)",
-          hsa_amd_memory_async_copy(lockedHostDstPtr, device.hostAgent, reinterpret_cast<char *>(src) + srcOffset, device.agent, //
-                                    size, 0, nullptr, signal));
-
-  enqueueCallback(signal, [cb, lockedHostDstPtr, signal, token = latch.acquire()]() {
-    CHECKED("Unlock host memory", hsa_amd_memory_unlock(lockedHostDstPtr));
-    destroySignal("Release D2H signal", signal);
-    if (cb) (*cb)();
-  });
-  // XXX FIXME this wait makes the copy not actually async: switch to dependent signals to retain order...
-  hsa_signal_wait_acquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, std::numeric_limits<uint64_t>::max(), HSA_WAIT_STATE_BLOCKED);
-  std::atomic_thread_fence(std::memory_order_acquire);
+  syncCopy("D2H", lockedHostDstPtr, device.hostAgent, reinterpret_cast<char *>(src) + srcOffset, device.agent, size, lockedHostDstPtr, cb);
 }
 
 void HsaDeviceQueue::enqueueInvokeAsync(const std::string &moduleName, const std::string &symbol, const std::vector<Type> &types,

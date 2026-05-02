@@ -7,6 +7,7 @@
 #include <cstring>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "polyregion/types.h"
 
@@ -88,14 +89,15 @@ class SynchronisedMemAllocation {
       if (debug)
         std::fprintf(stderr, "[SMA]   localResolve<%p>(%p) = {size=%ld}\n", //
                      (void *)resolvePtrSizeInBytes, static_cast<void *>(memberLocalPtr), sizeInBytes);
-      const uintptr_t memberRemotePtr = mirrorToRemote(memberLocalPtr, indirection, effectiveSizeToCount(sizeInBytes), tl);
+      const uintptr_t memberRemotePtr = mirrorToRemote(memberLocalPtr, indirection, effectiveSizeToCount(sizeInBytes), tl, sizeInBytes);
       remoteWrite(&memberRemotePtr, devicePtr, memberOffsetInBytes, sizeof(uintptr_t));
     } else if (const PtrQuery meta = localReflect(memberLocalPtr); meta.sizeInBytes != 0) {
       if (debug)
         std::fprintf(stderr, "[SMA]   localReflect(%p) = {size=%ld, offset=%ld}\n", static_cast<void *>(memberLocalPtr), meta.sizeInBytes,
                      meta.offsetInBytes); //
       const size_t effectiveSize = meta.sizeInBytes - meta.offsetInBytes;
-      const uintptr_t memberRemotePtr = mirrorToRemote(memberLocalPtr, indirection, effectiveSizeToCount(effectiveSize), tl);
+      const uintptr_t memberRemotePtr =
+          mirrorToRemote(memberLocalPtr, indirection, effectiveSizeToCount(effectiveSize), tl, effectiveSize);
       remoteWrite(&memberRemotePtr, devicePtr, memberOffsetInBytes, sizeof(uintptr_t));
     } else {
       std::fprintf(stderr, "[SMA] Warning: encountered foreign pointer %p when writing type @%s at offset %zu\n",
@@ -135,7 +137,10 @@ class SynchronisedMemAllocation {
           const size_t componentSize = member.ptrIndirection == 1 ? member.componentSize : member.sizeInBytes;
           writeSubObject(hostData, memberOffsetInBytes, member.ptrIndirection, devicePtr, *member.type, member.resolvePtrSizeInBytes,
                          [&](const size_t effectiveSize) { return effectiveSize / componentSize; });
-        } else if (member.type->memberCount > 0) {
+        } else if (member.type && member.type->memberCount > 0) {
+          // member.type is null for synthetic empty-base placeholders (`#base_<Empty>` whose
+          // pointee struct has no layout entry in the kernel bundle). They contribute nothing
+          // to the marshal — skip rather than dereference null.
           writeStruct(hostData, memberOffsetInBytes, devicePtr, 1, *member.type, false);
         }
       }
@@ -143,22 +148,35 @@ class SynchronisedMemAllocation {
     return devicePtr;
   }
 
-  uintptr_t mirrorToRemote(const char *hostData, const size_t ptrIndirections, const size_t count, const runtime::TypeLayout &l) {
+  // `hostAllocSizeInBytes` is the actual host allocation size (from localReflect or a ptr-size
+  // resolver), or 0 to infer from the type. The two diverge for inheritance-via-base-pointer
+  // patterns like std::list: the kernel walks `_List_node_base*` (16 bytes) but the heap node
+  // is `_List_node<T>` (24+ bytes); sizing the device alloc to the polyc type would put the
+  // payload bytes out-of-bounds.
+  uintptr_t mirrorToRemote(const char *hostData, const size_t ptrIndirections, const size_t count, const runtime::TypeLayout &l,
+                           const size_t hostAllocSizeInBytes = 0) {
     if (debug)
-      std::fprintf(stderr, "[SMA] mirrorToRemote(hostData=%p, ptrIndirections=%zu, count=%zu, t=@%s)\n", //
-                   static_cast<const void *>(hostData), ptrIndirections, count, l.name);
+      std::fprintf(stderr, "[SMA] mirrorToRemote(hostData=%p, ptrIndirections=%zu, count=%zu, t=@%s, hostAllocSize=%zu)\n", //
+                   static_cast<const void *>(hostData), ptrIndirections, count, l.name, hostAllocSizeInBytes);
     if (const auto query = offsetQuery(localToRemoteAlloc, hostData, [](auto &x) { return x.remote.sizeInBytes; })) {
       const auto [alloc, offsetInBytes] = *query;
       if (!alloc->localModified) {
         if (debug) std::fprintf(stderr, "[SMA]   hit (0x%jx = %4ld + %4ld)\n", alloc->remote.ptr, alloc->remote.sizeInBytes, offsetInBytes);
         return alloc->remote.ptr + offsetInBytes;
-      } else
-        return ptrIndirections > 1 ? writeIndirect(hostData, alloc->remote.ptr, ptrIndirections, count, *alloc->layout)
-                                   : writeStruct(hostData, 0, alloc->remote.ptr, count, *alloc->layout, true);
-    } else
-      return ptrIndirections > 1
-                 ? writeIndirect(hostData, createDeviceAllocation(hostData, sizeof(uintptr_t) * count, nullptr), ptrIndirections, count, l)
-                 : writeStruct(hostData, 0, createDeviceAllocation(hostData, l.sizeInBytes * count, &l), count, l, true);
+      }
+      return ptrIndirections > 1 ? writeIndirect(hostData, alloc->remote.ptr, ptrIndirections, count, *alloc->layout)
+                                 : writeStruct(hostData, 0, alloc->remote.ptr, count, *alloc->layout, true);
+    }
+    if (ptrIndirections > 1) {
+      return writeIndirect(hostData, createDeviceAllocation(hostData, sizeof(uintptr_t) * count, nullptr), ptrIndirections, count, l);
+    }
+    const size_t typeSizeTotal = l.sizeInBytes * count;
+    const size_t allocSize = std::max(typeSizeTotal, hostAllocSizeInBytes);
+    const auto devicePtr = createDeviceAllocation(hostData, allocSize, &l);
+    // Trailing bytes outside the polyc type (list node payload, vtable slots, etc.) are copied
+    // verbatim; writeStruct then walks the known-typed prefix to mirror pointer fields.
+    if (allocSize > typeSizeTotal) remoteWrite(hostData + typeSizeTotal, devicePtr, typeSizeTotal, allocSize - typeSizeTotal);
+    return writeStruct(hostData, 0, devicePtr, count, l, true);
   }
 
   void readSubObject(char *p, const size_t memberOffsetInBytes) {
@@ -167,9 +185,13 @@ class SynchronisedMemAllocation {
     if (char *memberRemotePtr = readPtrValue(p + memberOffsetInBytes); !memberRemotePtr) {
       std::memset(p + memberOffsetInBytes, 0, sizeof(uintptr_t));
     } else if (const auto query = offsetQuery(remoteToLocalPtr, memberRemotePtr, [](auto &x) { return x.sizeInBytes; })) {
-      auto [alloc, _] = *query;
-      syncRemoteToLocal(reinterpret_cast<void *>(alloc->ptr));
-      std::memcpy(p + memberOffsetInBytes, &alloc->ptr, sizeof(uintptr_t));
+      auto [alloc, offset] = *query;
+      syncRemoteToLocal(reinterpret_cast<void *>(alloc->ptr), alloc->sizeInBytes);
+      // The remote pointer can target an interior position — e.g. the std::list last-node
+      // `prev` points back to the sentinel embedded inside the kernel struct. Writing just
+      // `alloc->ptr` would clobber those interior references with the allocation base.
+      const uintptr_t hostPtr = alloc->ptr + offset;
+      std::memcpy(p + memberOffsetInBytes, &hostPtr, sizeof(uintptr_t));
     } else {
       std::fprintf(stderr, "[SMA] Warning: remote introduced foreign member pointer %p\n", static_cast<void *>(memberRemotePtr));
     }
@@ -182,7 +204,7 @@ class SynchronisedMemAllocation {
       const auto member = tl->members[m];
       if (member.sizeInBytes == 0) continue;
       if (member.ptrIndirection > 0) readSubObject(p, offsetInBytes + member.offsetInBytes);
-      else if (member.type->memberCount > 0) readStruct(p, offsetInBytes + member.offsetInBytes, member.type);
+      else if (member.type && member.type->memberCount > 0) readStruct(p, offsetInBytes + member.offsetInBytes, member.type);
     }
   }
 
@@ -242,9 +264,16 @@ public:
     return {};
   }
 
+  std::unordered_set<uintptr_t> syncVisited{};
+
   std::optional<uintptr_t> syncRemoteToLocal(void *p, const std::optional<size_t> &sizeInByte = {}) { // any valid pointer, not just base
     if (const auto query = offsetQuery(localToRemoteAlloc, p, [](auto &x) { return x.remote.sizeInBytes; })) {
       const auto [alloc, offsetInBytes] = *query;
+      // Cycle break for circular structures (a list node's `prev` points to the sentinel
+      // embedded inside the kernel struct, which we're already inside the walk of). The
+      // top-level call clears the set on its way out so subsequent calls start fresh.
+      const bool topLevel = syncVisited.empty();
+      if (!syncVisited.insert(alloc->remote.ptr).second) return alloc->remote.ptr + offsetInBytes;
       if (debug)
         std::fprintf(stderr, "[SMA] syncRemoteToLocal(p=%p, remote=0x%jx, sizeInByte=%ld, offsetInBytes=%ld, t=@%s)\n", p,
                      alloc->remote.ptr, alloc->remote.sizeInBytes, offsetInBytes, alloc->layout ? alloc->layout->name : "???");
@@ -270,6 +299,7 @@ public:
         for (size_t i = objIdxBegin; i < objIdxEnd; ++i)
           readSubObject(baseAtObjIdx, i * objSize);
       }
+      if (topLevel) syncVisited.clear();
       return alloc->remote.ptr + offsetInBytes;
     }
     return {};

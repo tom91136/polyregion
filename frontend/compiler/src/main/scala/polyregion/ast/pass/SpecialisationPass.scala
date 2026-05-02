@@ -2,7 +2,7 @@ package polyregion.ast.pass
 
 import cats.syntax.all.*
 import polyregion.ast.Traversal.*
-import polyregion.ast.{ScalaSRR as p, *, given}
+import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.prism.Prism
 
 // This pass copies all generic functions with the applied types at callsite:
@@ -35,14 +35,21 @@ object SpecialisationPass extends ProgramPass {
     .foldLeft(done) { case (acc, ivk) =>
       val newName = monomorphicName(ivk)
       if (done.contains(newName)) acc
+      else if (!fnLUT.contains(ivk.name)) acc // missing impl — verifier will surface a useful error
       else {
         val fnImpl = fnLUT(ivk.name)
-        val tpeLut = fnImpl.tpeVars.zip(ivk.tpeArgs).toMap
+        // Inherited-trait method calls (e.g. `xs.size` resolving to `SeqOps.size`) sometimes
+        // arrive here with `ivk.tpeArgs` carrying duplicated type-var refs accumulated up the
+        // hierarchy — `[Var(A), Var(CC), Var(C), Var(A), Var(CC), Var(C)]` for a 3-tparam method.
+        // Take only the prefix that aligns with the function's own tpeVars; the trailing copies
+        // are redundant. Also tolerate Vars whose name isn't in our lut (passing them through
+        // unchanged) so a missing substitution doesn't crash specialisation.
+        val tpeLut = fnImpl.tpeVars.zip(ivk.tpeArgs.take(fnImpl.tpeVars.size)).toMap
         val specialisedFnImpl = fnImpl
           .copy(name = newName, tpeVars = Nil)
           .modifyAll[p.Type] {
-            case p.Type.Var(name) => tpeLut(name)
-            case x                => x
+            case v @ p.Type.Var(name) => tpeLut.getOrElse(name, v)
+            case x                    => x
           }
         recursiveSpecialise(fnLUT, specialisedFnImpl, acc + (specialisedFnImpl.name -> specialisedFnImpl))
       }

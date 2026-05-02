@@ -7,6 +7,21 @@ import polyregion.ast.PolyAST.Function.Attr
 
 object PolyAST {
 
+  case class Sym(fqn: List[String]) derives MsgPack.Codec {
+    infix def :+(s: String): Sym = Sym(fqn :+ s)
+    infix def ~(s: Sym): Sym     = Sym(fqn ++ s.fqn)
+    def last: String             = fqn.last
+  }
+  object Sym {
+    def apply(raw: String): Sym = {
+      require(raw.trim.nonEmpty)
+      Sym(raw.trim.split('.').toList)
+    }
+
+    def unapply(xs: List[String]): Option[(Sym, String)] =
+      xs.lastOption.map(x => Sym(xs.init) -> x)
+  }
+
   object Type {
     enum Space derives MsgPack.Codec { case Global, Local, Private          }
     enum Kind derives MsgPack.Codec  { case None, Ref, Integral, Fractional }
@@ -34,8 +49,17 @@ object PolyAST {
     case Unit0   extends Type(Type.Kind.None)
     case Bool1   extends Type(Type.Kind.Integral)
 
-    case Struct(name: String)                                                       extends Type(Type.Kind.Ref)
-    case Ptr(comp: Type, length: Option[Int], space: Type.Space)                    extends Type(Type.Kind.Ref)
+    case Struct(
+        name: Sym,
+        tpeVars: List[String],
+        args: List[Type],
+        parents: List[Sym]
+    )                                                            extends Type(Type.Kind.Ref)
+    case Ptr(comp: Type, length: Option[Int], space: Type.Space) extends Type(Type.Kind.Ref)
+
+    case Var(name: String)                                        extends Type(Type.Kind.None)
+    case Exec(tpeVars: List[String], args: List[Type], rtn: Type) extends Type(Type.Kind.None)
+
     case Annotated(tpe: Type, pos: Option[SourcePosition], comment: Option[String]) extends Type(tpe.kind)
   }
 
@@ -69,7 +93,14 @@ object PolyAST {
     case Index(lhs: Expr, idx: Expr, comp: Type)                            extends Expr(comp)
     case RefTo(lhs: Expr, idx: Option[Expr], comp: Type, space: Type.Space) extends Expr(Type.Ptr(comp, None, space))
     case Alloc(comp: Type, size: Expr, space: Type.Space)                   extends Expr(Type.Ptr(comp, None, space))
-    case Invoke(name: String, args: List[Expr], rtn: Type)                  extends Expr(rtn)
+    case Invoke(
+        name: Sym,
+        tpeArgs: List[Type],
+        receiver: Option[Expr],
+        args: List[Expr],
+        captures: List[Expr],
+        rtn: Type
+    ) extends Expr(rtn)
 
     case Annotated(expr: Expr, pos: Option[SourcePosition], comment: Option[String]) extends Expr(expr.tpe)
   }
@@ -264,22 +295,61 @@ object PolyAST {
     case Hypot(x: Expr, y: Expr, rtn: Type) extends Math(Math.BinaryUniformFractional, List(x, y), rtn)
   }
 
-  case class Signature(name: String, args: List[Type], rtn: Type) derives MsgPack.Codec
+  case class Signature(
+      name: Sym,
+      tpeVars: List[String],
+      receiver: Option[Type],
+      args: List[Type],
+      moduleCaptures: List[Type],
+      termCaptures: List[Type],
+      rtn: Type
+  ) derives MsgPack.Codec
+
+  case class InvokeSignature(
+      name: Sym,
+      tpeVars: List[Type],
+      receiver: Option[Type],
+      args: List[Type],
+      captures: List[Type],
+      rtn: Type
+  ) derives MsgPack.Codec
+
   case class Arg(named: Named, pos: Option[SourcePosition] = None) derives MsgPack.Codec
-  case class StructDef(name: String, members: List[Named]) derives MsgPack.Codec
+  case class StructDef(
+      name: Sym,
+      tpeVars: List[String],
+      members: List[Named],
+      parents: List[Sym]
+  ) derives MsgPack.Codec
+
+  case class Mirror(
+      source: Sym,
+      sourceParents: List[Sym],
+      structDef: StructDef,
+      functions: List[Function],
+      dependencies: List[StructDef]
+  ) derives MsgPack.Codec
 
   object Function {
     enum Attr derives MsgPack.Codec { case Internal, Exported, FPRelaxed, FPStrict, Entry }
   }
-  case class Function(          //
-      name: String,             //
-      args: List[Arg],          //
-      rtn: Type,                //
-      body: List[Stmt],         //
-      attrs: Set[Function.Attr] //
+  case class Function(            //
+      name: Sym,                  //
+      tpeVars: List[String],      //
+      receiver: Option[Arg],      //
+      args: List[Arg],            //
+      moduleCaptures: List[Arg],  //
+      termCaptures: List[Arg],    //
+      rtn: Type,                  //
+      body: List[Stmt],           //
+      attrs: Set[Function.Attr]   //
   ) derives MsgPack.Codec
 
-  case class Program(structs: List[StructDef], functions: List[Function]) derives MsgPack.Codec
+  case class Program(
+      entry: Function,
+      functions: List[Function],
+      defs: List[StructDef]
+  ) derives MsgPack.Codec
 
   case class StructLayoutMember(name: Named, offsetInBytes: Long, sizeInBytes: Long) derives MsgPack.Codec
   case class StructLayout( //
@@ -305,6 +375,10 @@ object PolyAST {
   ) derives MsgPack.Codec
 
   // ==========
+
+  extension (s: Sym) {
+    inline def repr: String = s.fqn.mkString(".")
+  }
 
   extension (t: SourcePosition) {
     inline def repr: String = s"${t.file}:${t.line}${t.col.map(c => s":$c").getOrElse("")}"
@@ -347,9 +421,13 @@ object PolyAST {
       case Type.Unit0   => "Unit0"
       case Type.Bool1   => "Bool1"
 
-      case Type.Struct(name) => s"$name"
+      case Type.Struct(name, tpeVars, args, parents) =>
+        s"${name.repr}<${tpeVars.mkString(",")}>(${args.map(_.repr).mkString(",")}) <: ${parents.map(_.repr).mkString(", ")}"
       case Type.Ptr(comp, length, space) =>
         s"${comp.repr}${length.map(_.toString).map(l => s"[$l]").getOrElse("*")}${space.repr}"
+      case Type.Var(name)                => s"#$name"
+      case Type.Exec(tpeVars, args, rtn) =>
+        s"<${tpeVars.mkString(",")}>(${args.map(_.repr).mkString(",")}) => ${rtn.repr}"
       case Type.Annotated(tpe, pos, comment) =>
         s"(${tpe.repr}${pos.map(s => s"/* ${s.repr} */").getOrElse("")}${comment.map(s => s"/* $s */").getOrElse("")})"
     }
@@ -466,7 +544,8 @@ object PolyAST {
       case Expr.RefTo(lhs, idx, comp, space) =>
         s"(${lhs.repr}).refTo[${comp.repr}, ${space.repr}](${idx.map(_.repr).getOrElse("")})"
       case Expr.Alloc(comp, size, space) => s"alloc[${comp.repr}, ${space.repr}](${size.repr})"
-      case Expr.Invoke(name, args, rtn)  => s"$name(${args.map(_.repr).mkString(", ")}): ${rtn.repr}"
+      case Expr.Invoke(name, tpeArgs, receiver, args, captures, rtn) =>
+        s"${receiver.map(r => s"${r.repr}.").getOrElse("")}${name.repr}<${tpeArgs.map(_.repr).mkString(",")}>(${args.map(_.repr).mkString(", ")})[${captures.map(_.repr).mkString(", ")}]: ${rtn.repr}"
       case Expr.Annotated(expr, pos, comment) =>
         s"(${expr.repr}${pos.map(s => s"/* ${s.repr} */").getOrElse("")}${comment.map(s => s"/* $s */").getOrElse("")})"
 
@@ -519,23 +598,25 @@ object PolyAST {
   }
 
   extension (f: Signature) {
-    inline def repr: String = s"def ${f.name}(${f.args.map(_.repr).mkString(", ")}: ${f.rtn.repr}"
+    inline def repr: String =
+      s"def ${f.receiver.map(r => s"${r.repr}.").getOrElse("")}${f.name.repr}<${f.tpeVars.mkString(",")}>(${f.args.map(_.repr).mkString(", ")}): ${f.rtn.repr} /* mod=${f.moduleCaptures.map(_.repr).mkString(",")} term=${f.termCaptures.map(_.repr).mkString(",")} */"
   }
 
   extension (f: Function) {
-    inline def repr: String = s"def ${f.name}(${f.args
-        .map(a => s"${a.named.symbol}: ${a.named.tpe.repr}${a.pos.map(s => s"/* ${s.repr} */").getOrElse("")}")
-        .mkString(", ")}): ${f.rtn.repr} /* ${f.attrs
-        .map(_.repr)
-        .mkString(", ")} */ ${"{"}\n${f.body.map(_.repr).mkString("\n").indent(2)}\n${"}"}"
+    inline def repr: String =
+      s"def ${f.receiver.map(r => s"${r.repr}.").getOrElse("")}${f.name.repr}<${f.tpeVars.mkString(",")}>(${f.args
+          .map(a => s"${a.named.symbol}: ${a.named.tpe.repr}")
+          .mkString(", ")}): ${f.rtn.repr} /* attrs=${f.attrs.map(_.repr).mkString(",")} mod=${f.moduleCaptures.map(_.repr).mkString(",")} term=${f.termCaptures.map(_.repr).mkString(",")} */ ${"{"}\n${f.body.map(_.repr).mkString("\n").indent(2)}\n${"}"}"
   }
 
   extension (s: StructDef) {
-    inline def repr: String = s"class ${s.name}(${s.members.map(m => s"${m.symbol}: ${m.tpe.repr}").mkString(", ")})"
+    inline def repr: String =
+      s"class ${s.name.repr}<${s.tpeVars.mkString(",")}>(${s.members.map(m => s"${m.symbol}: ${m.tpe.repr}").mkString(", ")}) <: ${s.parents.map(_.repr).mkString(", ")}"
   }
 
   extension (s: Program) {
-    inline def repr: String = s"${s.structs.map(_.repr).mkString("\n")}\n${s.functions.map(_.repr).mkString("\n")}"
+    inline def repr: String =
+      s"${s.defs.map(_.repr).mkString("\n")}\n${s.entry.repr}\n${s.functions.map(_.repr).mkString("\n")}"
   }
 
   extension (l: StructLayout) {

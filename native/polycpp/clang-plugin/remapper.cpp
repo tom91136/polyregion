@@ -54,6 +54,8 @@ const static std::string Empty = "#empty";
       [&](const Type::Nothing &x) -> Expr::Any { raise("Bad type " + repr(tpe)); }, //
       [&](const Type::Struct &x) -> Expr::Any { raise("Bad type " + repr(tpe)); },  //
       [&](const Type::Ptr &x) -> Expr::Any { return Expr::Poison(x); },             //
+      [&](const Type::Var &x) -> Expr::Any { raise("Bad type " + repr(tpe)); },     //
+      [&](const Type::Exec &x) -> Expr::Any { raise("Bad type " + repr(tpe)); },    //
       [&](const Type::Annotated &x) -> Expr::Any { return defaultValue(x.tpe); }    //
   );
 }
@@ -61,23 +63,23 @@ const static std::string Empty = "#empty";
 [[nodiscard]] static bool walkParents(const Remapper::RemapContext &r, const Type::Struct &derived,
                                       const std::function<bool(const StructDef &)> &predicate, Vec<std::shared_ptr<StructDef>> &chain) {
 
-  const auto parents = r.parents ^ get_maybe(derived.name);
+  const auto parents = r.parents ^ get_maybe(repr(derived.name));
   if (!parents) return false;
 
   if (const auto directBases = *parents ^ filter([&](auto &p) { return predicate(*p); }); directBases.empty()) { // indirect
-    return *parents ^ exists([&](auto &p) { return walkParents(r, Type::Struct(p->name), predicate, chain); });
+    return *parents ^ exists([&](auto &p) { return walkParents(r, Type::Struct(p->name, {}, {}, {}), predicate, chain); });
   } else if (directBases.size() != 1) {
     // XXX If we get more than one path, the C++ frontend failed to issue a diagnostic for ambiguous bases
     raise(fmt::format("Ambiguous base {} for derived {}, current chain is {}",
-                      directBases ^ mk_string(", ", [](auto &s) { return s->name; }), repr(derived),
-                      chain ^ mk_string("->", [](auto &s) { return s->name; })));
+                      directBases ^ mk_string(", ", [](auto &s) { return repr(s->name); }), repr(derived),
+                      chain ^ mk_string("->", [](auto &s) { return repr(s->name); })));
   } else {
     chain.emplace_back(directBases[0]);
     return true;
   }
 }
 
-[[nodiscard]] static Named baseMember(const StructDef &s) { return Named(fmt::format("#base_{}", s.name), Type::Struct(s.name)); }
+[[nodiscard]] static Named baseMember(const StructDef &s) { return Named(fmt::format("#base_{}", repr(s.name)), Type::Struct(s.name, {}, {}, {})); }
 
 // static Expr::Select select(const Expr::Select & a, const Expr::Select & b) {
 //   const auto xs = a.init | append(a.last) | concat(b.init) | append(b.last) | to_vector();
@@ -95,7 +97,7 @@ const static std::string Empty = "#empty";
 [[nodiscard]] static Expr::Select select(Remapper::RemapContext &r, const Vec<Named> &init, const Named &last) {
   const auto selectWithInheritance = [&](const Named &base, const Named &member) {
     auto expand = [&](const Type::Struct &s) -> Vec<Named> {
-      if (r.findStruct(s.name, "select")->members ^ contains(member)) return {base};
+      if (r.findStruct(repr(s.name), "select")->members ^ contains(member)) return {base};
       if (Vec<std::shared_ptr<StructDef>> path; walkParents(r, s, [&](auto &p) { return p.members ^ contains(member); }, path)) {
         return path | map([&](auto &def) { return baseMember(*def); }) | prepend(base) | to_vector();
       }
@@ -118,7 +120,13 @@ const static std::string Empty = "#empty";
 }
 
 static void defaultInitialiseStruct(Remapper::RemapContext &r, const Type::Struct &tpe, const Named &root) {
-  if (auto def = r.structs ^ get_maybe(tpe.name)) {
+  if (auto def = r.structs ^ get_maybe(repr(tpe.name))) {
+    // Skip empty structs entirely. Their members are just the synthesised `#empty_struct_storage`
+    // placeholder; they exist as a type only and have no representation in the host C++ ABI when
+    // used as a base (we drop empty bases from `inherited`). Trying to initialise them via
+    // `select(r, {root}, member)` would walk the parent chain looking for a `#base_<Name>` field
+    // that no longer exists on the derived struct.
+    if (r.emptyStruct(**def)) return;
     (*def)->members | filter([](auto &n) { return !n.tpe.template is<Type::Struct>(); }) | for_each([&](auto &named) {
       r.push(Stmt::Comment("Zero init member"));
       r.push(Stmt::Mut(select(r, {root}, named), defaultValue(named.tpe)));
@@ -218,6 +226,8 @@ Expr::Any Remapper::integralConstOfType(const Type::Any &tpe, const uint64_t val
       [&](const Type::Nothing &x) -> Expr::Any { return Expr::Poison(x); },           //
       [&](const Type::Struct &x) -> Expr::Any { return Expr::Poison(x); },            //
       [&](const Type::Ptr &x) -> Expr::Any { return Expr::Poison(x); },               //
+      [&](const Type::Var &x) -> Expr::Any { return Expr::Poison(x); },               //
+      [&](const Type::Exec &x) -> Expr::Any { return Expr::Poison(x); },              //
       [&](const Type::Annotated &x) -> Expr::Any { return Expr::Poison(x); }          //
   );
 }
@@ -289,8 +299,12 @@ static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const
         }
       }
     }
-    r.push(Stmt::Comment(fmt::format("ERROR: Cannot conform ptr type rhs {} with target ptr {}", repr(rhsTpe), repr(targetTpe))));
-    return Expr::Poison(rhsTpe);
+    // Any other Ptr-to-Ptr coercion: LLVM 21+ uses opaque pointer types so the cast is a no-op
+    // at the IR level. This covers e.g. `static_cast<void*>(&__aligned_membuf::_M_storage)` —
+    // libstdc++'s `__aligned_membuf<T>::_M_addr()` returns the storage's address as `void*`,
+    // which lands here as `Ptr<U8, length=N>` → `Ptr<Unit0>`. Without this, conform returns a
+    // poison of the wrong type and `_M_valptr()` ends up dereferencing junk.
+    return Expr::Cast(r.newVar(expr), targetTpe);
   } else {
     r.push(Stmt::Comment(fmt::format("ERROR: Cannot conform rhs {} with target {}", repr(rhsTpe), repr(targetTpe))));
     return Expr::Poison(targetTpe);
@@ -316,8 +330,10 @@ std::string Remapper::typeName(const Type::Any &tpe) const {
       [&](const Type::Bool1 &) -> std::string { return "bool"; },                //
       [&](const Type::Unit0 &) -> std::string { return "void"; },                //
       [&](const Type::Nothing &) -> std::string { return "/*nothing*/"; },       //
-      [&](const Type::Struct &x) -> std::string { return x.name; },              //
+      [&](const Type::Struct &x) -> std::string { return repr(x.name); },        //
       [&](const Type::Ptr &x) -> std::string { return typeName(x.comp) + "*"; }, //
+      [&](const Type::Var &x) -> std::string { return "/*var:" + x.name + "*/"; }, //
+      [&](const Type::Exec &) -> std::string { return "/*exec*/"; },              //
       [&](const Type::Annotated &x) -> std::string { return typeName(x.tpe); }   //
   );
 }
@@ -365,25 +381,34 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
                     if (init->isAnyMemberInitializer()) {
                       r.push(Stmt::Comment("Ctor init: " + init->getMember()->getNameAsString()));
                       auto tpe = handleType(init->getAnyMember()->getType(), r);
-                      auto memberName = structTpe->name + "::" + init->getMember()->getNameAsString();
+                      auto memberName = repr(structTpe->name) + "::" + init->getMember()->getNameAsString();
                       auto member = select(r, {receiver->named}, Named(memberName, tpe));
                       auto rhs = conform(r, handleExpr(init->getInit(), r), tpe);
                       r.push(Stmt::Mut(member, rhs));
                     } else if (init->isBaseInitializer()) {
 
-                      auto chainedCtorStmts = r.scoped(
-                          [&](auto &r) {
-                            auto baseTpe = handleType(init->getInit()->getType(), r);
-                            if (auto baseStruct = baseTpe.template get<Type::Struct>(); baseStruct) {
-                              r.push(Stmt::Comment("Ctor base init: " + repr(baseTpe)));
-                              auto _ = r.newVar(handleExpr(init->getInit(), r));
-                            } else {
-                              r.push(Stmt::Comment("Base initialiser is not a struct type: " + repr(baseTpe)));
-                            }
-                          },
-                          true, rtnType, parent, true);
-                      r.push(chainedCtorStmts);
-
+                      auto baseTpe = handleType(init->getInit()->getType(), r);
+                      // Empty bases were dropped from the derived struct's field list (see
+                      // EBO handling in handleRecord). Any chained ctor call into them would
+                      // reference a `#base_<Name>` field that no longer exists; the call itself
+                      // is a no-op anyway since the Base ctor body is empty. Skip it.
+                      auto baseStruct = baseTpe.template get<Type::Struct>();
+                      auto baseDef = baseStruct ? r.structs ^ get_maybe(repr(baseStruct->name)) : Opt<std::shared_ptr<StructDef>>{};
+                      if (baseDef && r.emptyStruct(**baseDef)) {
+                        r.push(Stmt::Comment("Ctor base init: " + repr(baseTpe) + " (empty, skipped)"));
+                      } else {
+                        auto chainedCtorStmts = r.scoped(
+                            [&](auto &r) {
+                              if (baseStruct) {
+                                r.push(Stmt::Comment("Ctor base init: " + repr(baseTpe)));
+                                auto _ = r.newVar(handleExpr(init->getInit(), r));
+                              } else {
+                                r.push(Stmt::Comment("Base initialiser is not a struct type: " + repr(baseTpe)));
+                              }
+                            },
+                            true, rtnType, parent, true);
+                        r.push(chainedCtorStmts);
+                      }
                     } else raise("Unknown initializer type!");
                   }
                   handleStmt(decl->getBody(), r);
@@ -417,7 +442,8 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
     body.emplace_back(Stmt::Return((Expr::Unit0Const())));
   }
 
-  auto fn = std::make_shared<Function>(name, receiver ^ to_vector() ^ concat(args), rtnType, body,
+  auto fn = std::make_shared<Function>(Sym({name}), std::vector<std::string>{}, std::optional<Arg>{},
+                                       receiver ^ to_vector() ^ concat(args), std::vector<Arg>{}, std::vector<Arg>{}, rtnType, body,
                                        std::set<FunctionAttr::Any>{FunctionAttr::Internal()});
   r.functions.emplace(name, fn);
   return {name, fn};
@@ -426,6 +452,16 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
 std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl, RemapContext &r) const {
   auto name = nameOfRecord(llvm::dyn_cast_if_present<clang::RecordType>(context.getRecordType(decl)), r);
   if (auto s = r.structs ^ get_maybe(name)) return *s;
+
+  // Insert an opaque stub eagerly. Self-referential types (e.g. std::list's `_List_node_base` whose
+  // `_M_next`/`_M_prev` are `_List_node_base*`) recurse through field types: handleType sees a
+  // pointer-to-self, calls handleType on the pointee, which calls handleRecord on the same decl.
+  // Without the stub, we'd recurse forever and overflow the stack. The recursive call only needs
+  // the *name* (we form `Type::Struct(name)` in handleType, never reading members), so an empty
+  // stub is enough to break the cycle. Members and parents are filled in below by overwriting the
+  // shared_ptr's contents in place.
+  auto stub = std::make_shared<StructDef>(Sym({name}), std::vector<std::string>{}, Vec<Named>{}, std::vector<Sym>{});
+  r.structs.emplace(name, stub);
 
   auto resolveStruct = [&](const Vec<std::pair<std::shared_ptr<StructDef>, std::pair<size_t, size_t>>> &parents,
                            const Vec<StructLayoutMember> &members) {
@@ -455,16 +491,19 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
                                auto original = baseMember(*p);
                                if (!r.emptyStruct(*p)) return std::pair{original, offsetAndSize};
                                auto e = r.structs ^=
-                                   get_or_emplace(Empty, [](auto &k) { return std::make_shared<StructDef>(k, Vec<Named>{}); });
-                               return std::pair{Named(original.symbol, Type::Struct(e->name)), offsetAndSize};
+                                   get_or_emplace(Empty, [](auto &k) {
+                                     return std::make_shared<StructDef>(Sym({k}), std::vector<std::string>{}, Vec<Named>{}, std::vector<Sym>{});
+                                   });
+                               return std::pair{Named(original.symbol, Type::Struct(e->name, {}, {}, {})), offsetAndSize};
                              }) //
                            | to_vector();
 
     const auto emptyStruct = inherited.empty() && members.empty();
-    const auto def = std::make_shared<StructDef>( //
-        name,                                     //
+    *stub = StructDef(                            //
+        Sym({name}), std::vector<std::string>{}, //
         emptyStruct ? std::vector{EmptyStructMarker}
-                    : inherited | keys() | concat(members | map([](auto &m) { return m.name; })) | to_vector());
+                    : inherited | keys() | concat(members | map([](auto &m) { return m.name; })) | to_vector(),
+        std::vector<Sym>{});
 
     const auto sizeInBytes = context.getTypeSizeInChars(decl->getTypeForDecl()).getQuantity();
     const auto alignmentInBytes = context.getTypeAlignInChars(decl->getTypeForDecl()).getQuantity();
@@ -481,19 +520,8 @@ std::shared_ptr<StructDef> Remapper::handleRecord(const clang::RecordDecl *decl,
             | concat(members)                                                      //
             | to_vector());                                                        //
 
-    //                     std::cout
-    //                 << "@@@@ " << (r.layouts ^ keys() ^ mk_string(", ")) << "\n";
-    // std::cout << "ps =  " << (parents ^ map([](auto &p, auto) { return p->name; }) ^ mk_string(", ")) << "\n";
-
-    std::cout << "@@@@@@@@@ "
-              << (inherited | map([&](auto &p, auto &offsetAndSize) { return repr(p) + " = " + std::to_string(offsetAndSize.second); }) |
-                  mk_string(", "))
-              << "\n";
-
-    std::cout << "@@@@@@@@@ " << *layout << "\n";
-    r.structs.emplace(name, def);
     r.layouts.emplace(name, layout);
-    return def;
+    return stub;
   };
 
   auto resolveField = [&](const clang::ValueDecl *decl, const auto &name, const Type::Any &tpe) {
@@ -621,14 +649,20 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
                          static_cast<int32_t>(tpe->getSize().getLimitedValue()),                   //
                          TypeSpace::Global());
       },
-      [&](const clang::ReferenceType *tpe) { // includes LValueReferenceType and RValueReferenceType
-        // Prim&   => Ptr[Prim]
-        // Prim*&  => Ptr[Prim]
-        // T&      => Struct[T]
-        // T*&     => Struct[T]
-        return refTpe(handleType(tpe->getPointeeType(), r));
+      [&](const clang::ReferenceType *tpe) -> Type::Any { // includes LValueReferenceType and RValueReferenceType
+        // C++ refs lower to pointers in our IR. The pointee already maps cleanly:
+        //   Prim&   => Ptr[Prim]      (refTpe wrap)
+        //   Prim*&  => Ptr[Prim]      (already a Ptr — *don't* double-wrap into Ptr[Ptr[Prim]])
+        //   T&      => Ptr[Struct[T]] (consistent with T* — kernel ABI passes structs by pointer)
+        //   T*&     => Ptr[Struct[T]] (already a Ptr — don't double-wrap)
+        // Without this collapse, libstdc++'s `__normal_iterator(const _Iterator& __i)` (where
+        // `_Iterator` is a pointer like `double*`) gets typed as `__i: F64**` and the ctor body's
+        // `_M_current(__i)` then derefs once, storing `*&a[n]` instead of `&a[n]` into the iterator.
+        auto inner = handleType(tpe->getPointeeType(), r);
+        if (inner.is<Type::Ptr>()) return inner;
+        return refTpe(inner);
       },                                                                                                             // T
-      [&](const clang::RecordType *tpe) -> Type::Any { return Type::Struct(handleRecord(tpe->getDecl(), r)->name); } // struct T { ... }
+      [&](const clang::RecordType *tpe) -> Type::Any { return Type::Struct(handleRecord(tpe->getDecl(), r)->name, {}, {}, {}); } // struct T { ... }
   );
   if (!result) {
     llvm::outs() << "Unhandled type:\n";
@@ -711,6 +745,8 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
                 [&](const Type::Nothing &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },  //
                 [&](const Type::Struct &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },   //
                 [&](const Type::Ptr &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },      //
+                [&](const Type::Var &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },      //
+                [&](const Type::Exec &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },     //
                 [&](const Type::Annotated &) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); } //
             );
       },
@@ -745,6 +781,73 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             }
           case clang::CK_ConstructorConversion: // this just calls the ctor, so we return the subexpr as-as
             return sourceExpr;
+          // Derived-to-base navigation. For pointer → pointer (`Derived*` → `Base*`), polyc's
+          // bitcast is sufficient *if* the base happens to be at offset 0 (which it is whenever
+          // the primary base is non-empty or all preceding bases are EBO'd). For struct →
+          // struct (`Derived` value → `Base` value), the cast is only correct at offset 0 too.
+          // Where this falls down is libstdc++'s `_Vector_impl` → `_Vector_impl_data`: the
+          // allocator base sits before `_Vector_impl_data`, so a flat bitcast gives the wrong
+          // address. Detect that case (struct → struct value cast) and replace with an explicit
+          // `#base_<Name>` select so the GEP picks the right offset. We leave Ptr → Ptr alone
+          // because the existing select-through-pointer paths in member access already handle
+          // struct base navigation correctly when needed.
+          case clang::CK_DerivedToBase: //
+          case clang::CK_UncheckedDerivedToBase: {
+            const auto srcTpe = sourceExpr.tpe();
+            const auto bothStruct = srcTpe.is<Type::Struct>() && targetTpe.is<Type::Struct>();
+            if (bothStruct) {
+              auto rootSel = sourceExpr.get<Expr::Select>();
+              std::optional<Expr::Select> seed;
+              if (rootSel) {
+                seed = *rootSel;
+              } else {
+                auto var = Stmt::Var(r.newName(srcTpe), sourceExpr);
+                r.push(var);
+                seed = Expr::Select({}, var.name);
+              }
+              auto curPath = seed->init;
+              curPath.emplace_back(seed->last);
+              for (auto it = stmt->path_begin(); it != stmt->path_end(); ++it) {
+                const auto baseTpe = handleType((*it)->getType(), r);
+                const auto baseStruct = baseTpe.get<Type::Struct>();
+                if (!baseStruct) return Expr::Cast(r.newVar(sourceExpr), targetTpe);
+                curPath.emplace_back(Named("#base_" + repr(baseStruct->name), *baseStruct));
+              }
+              const auto last = curPath.back();
+              curPath.pop_back();
+              return Expr::Select(curPath, last);
+            }
+            if (srcTpe.is<Type::Ptr>() && targetTpe.is<Type::Ptr>()) return Expr::Cast(r.newVar(sourceExpr), targetTpe);
+            return sourceExpr;
+          }
+          // Pointer-to-pointer casts. LLVM 21+ uses opaque pointer types, so all of these are
+          // no-ops at the IR level — polyc's Cast handler returns the source pointer unchanged
+          // when both sides are `Type::Ptr`.
+          case clang::CK_BaseToDerived: //
+          case clang::CK_BitCast:       //
+          case clang::CK_AddressSpaceConversion: {
+            const auto srcTpe = sourceExpr.tpe();
+            const auto bothPtr = srcTpe.is<Type::Ptr>() && targetTpe.is<Type::Ptr>();
+            const auto bothStruct = srcTpe.is<Type::Struct>() && targetTpe.is<Type::Struct>();
+            if (bothPtr || bothStruct) return Expr::Cast(r.newVar(sourceExpr), targetTpe);
+            return sourceExpr;
+          }
+          // C++ silently converts numeric values to bool via `x != 0` when used in a boolean
+          // context (`while(n)`, `if(p)`, `!x`, etc.). polyc's LLVM backend strictly requires
+          // an `i1` condition for branches, so we have to materialise the comparison explicitly
+          // — using the source as-is would assert with "May only branch on boolean predicates".
+          case clang::CK_IntegralToBoolean:
+            return Expr::IntrOp(Intr::LogicNeq(r.newVar(sourceExpr), integralConstOfType(sourceExpr.tpe(), 0)));
+          case clang::CK_FloatingToBoolean:
+            return Expr::IntrOp(Intr::LogicNeq(r.newVar(sourceExpr), Remapper::floatConstOfType(sourceExpr.tpe(), 0.0)));
+          case clang::CK_PointerToBoolean: {
+            const auto srcTpe = sourceExpr.tpe();
+            if (srcTpe.is<Type::Ptr>()) {
+              return Expr::IntrOp(Intr::LogicNeq(r.newVar(Expr::Cast(r.newVar(sourceExpr), Type::IntS64())),
+                                                 integralConstOfType(Type::IntS64(), 0)));
+            }
+            return Expr::IntrOp(Intr::LogicNeq(r.newVar(sourceExpr), integralConstOfType(srcTpe, 0)));
+          }
           default:
             r.push(Stmt::Comment("Unhandled cast, using subexpr directly: " + std::string(stmt->getCastKindName())));
             return sourceExpr;
@@ -783,10 +886,10 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             raise("Missing parent for expr: " + pretty_string(expr, context));
           }
           if (const auto field = r.parent->members | find([&](auto &m) { return m.symbol == refDeclName; })) {
-            return select(r, {Named(This, ptrTo(Type::Struct(r.parent->name)))}, *field);
+            return select(r, {Named(This, ptrTo(Type::Struct(r.parent->name, {}, {}, {})))}, *field);
           } else {
             const auto declName = Named(refDeclName, handleType(decl->getType(), r));
-            return select(r, {Named(This, ptrTo(Type::Struct(r.parent->name)))}, declName);
+            return select(r, {Named(This, ptrTo(Type::Struct(r.parent->name, {}, {}, {})))}, declName);
           }
         } else {
           const auto local = decl->attrs() | exists([](const clang::Attr *a) {
@@ -947,7 +1050,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           raise("Arg count mismatch, expected " + std::to_string(fn->args.size() - 1) + " but was " + std::to_string(expr->getNumArgs()));
 
         if (const auto tpe = ctorTpe.get<Type::Struct>()) {
-          r.push(Stmt::Comment("CXXConstructExpr: " + tpe->name));
+          r.push(Stmt::Comment("CXXConstructExpr: " + repr(tpe->name)));
 
           if (r.parent && r.ctorChain) {
             r.push(Stmt::Comment("In Ctor Chain:  " + repr(ctorTpe) + " parent=" + repr(*r.parent)));
@@ -957,7 +1060,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 
           auto instance = r.parent && r.ctorChain //
               ? [&]() -> Expr::Any {
-            Named instance(This, ptrTo(Type::Struct(r.parent->name)));
+            Named instance(This, ptrTo(Type::Struct(r.parent->name, {}, {}, {})));
             r.push(Stmt::Comment("This zero init"));
             defaultInitialiseStruct(r, *tpe, instance);
             return select(r, {}, instance);
@@ -971,7 +1074,9 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           Vec<Expr::Any> args;
           for (size_t i = 0; i < expr->getNumArgs(); ++i)
             args.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn->args[i + 1].named.tpe)));
-          auto _ = r.newVar(Expr::Invoke(name, std::vector{r.newVar(conform(r, instance, ptrTo(ctorTpe)))} ^ concat(args), Type::Unit0()));
+          auto _ = r.newVar(Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Expr::Any>{},
+                                         std::vector{r.newVar(conform(r, instance, ptrTo(ctorTpe)))} ^ concat(args),
+                                         std::vector<Expr::Any>{}, Type::Unit0()));
           return instance;
         } else {
           raise("CXX ctor resulted in a non-struct type: " + repr(ctorTpe));
@@ -995,8 +1100,9 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         if (!actualReceiverTpe) raise("No actual receiver type in member call");
 
         return Expr::Invoke(                                                         //
-            name,                                                                    //
+            Sym({name}), std::vector<Type::Any>{}, std::optional<Expr::Any>{},        //
             args ^ prepend(r.newVar(conform(r, ref(receiver), *actualReceiverTpe))), //
+            std::vector<Expr::Any>{},                                                 //
             handleType(expr->getCallReturnType(context), r));
       },
       [&](const clang::CXXOperatorCallExpr *expr) {
@@ -1017,8 +1123,9 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         if (!actualReceiverTpe) raise("No actual receiver type in member call");
 
         return Expr::Invoke(                                                         //
-            name,                                                                    //
+            Sym({name}), std::vector<Type::Any>{}, std::optional<Expr::Any>{},        //
             args ^ prepend(r.newVar(conform(r, ref(receiver), *actualReceiverTpe))), //
+            std::vector<Expr::Any>{},                                                 //
             handleType(expr->getCallReturnType(context), r));
       },
       [&](const clang::CallExpr *expr) { //  method(...)
@@ -1134,7 +1241,8 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           Vec<Expr::Any> args;
           for (size_t i = 0; i < expr->getNumArgs(); ++i)
             args.emplace_back(r.newVar(conform(r, handleExpr(expr->getArg(i), r), fn->args[i].named.tpe)));
-          return Expr::Any(Expr::Invoke(name, args, handleType(expr->getCallReturnType(context), r)));
+          return Expr::Any(Expr::Invoke(Sym({name}), std::vector<Type::Any>{}, std::optional<Expr::Any>{}, args,
+                                        std::vector<Expr::Any>{}, handleType(expr->getCallReturnType(context), r)));
         }
       },
       [&](const clang::CXXThisExpr *expr) { //  method(...)
@@ -1147,8 +1255,8 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
 
         if (auto recordDecl = llvm::dyn_cast<clang::RecordDecl>(expr->getMemberDecl()->getDeclContext()); recordDecl) {
           if (auto s = handleType(context.getRecordType(recordDecl), r).get<Type::Struct>(); s) {
-            auto member = Named(s->name + "::" + expr->getMemberNameInfo().getAsString(), handleType(expr->getMemberDecl()->getType(), r));
-            if (auto s1 = baseExpr.get<Expr::Select>(); s) {
+            auto member = Named(repr(s->name) + "::" + expr->getMemberNameInfo().getAsString(), handleType(expr->getMemberDecl()->getType(), r));
+            if (auto s1 = baseExpr.get<Expr::Select>(); s1) {
               return select(r, s1->init ^ append(s1->last), member);
             } else {
               auto baseVar = Stmt::Var(r.newName(baseExpr.tpe()), baseExpr);

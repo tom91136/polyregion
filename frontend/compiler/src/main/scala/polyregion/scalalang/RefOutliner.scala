@@ -1,7 +1,7 @@
 package polyregion.scalalang
 
 import cats.syntax.all.*
-import polyregion.ast.{ScalaSRR as p, *}
+import polyregion.ast.{PolyAST as p, *}
 import polyregion.scalalang.Retyper.*
 
 import scala.annotation.tailrec
@@ -96,7 +96,7 @@ object RefOutliner {
 //
 //    _ = ???
 
-    // Set[(q.Ident, q.Ref, Option[p.Term])]
+    // Set[(q.Ident, q.Ref, Option[p.Expr])]
 
     (typedRefs, wit) <- sharedValRefs.foldMapM { (root, i: q.Ref) =>
       Retyper.typer0(i.tpe).map { case (t, wit) => ((root, i, t) :: Nil, wit) }

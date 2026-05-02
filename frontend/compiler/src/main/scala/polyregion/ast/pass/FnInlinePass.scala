@@ -1,7 +1,7 @@
 package polyregion.ast.pass
 
 import cats.syntax.all.*
-import polyregion.ast.{ScalaSRR as p, *, given}
+import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.ast.Traversal.*
 import scala.collection.immutable.VectorMap
 
@@ -13,11 +13,11 @@ object FnInlinePass extends ProgramPass {
     def rename(n: p.Named) = p.Named(s"_inline_${f.mangledName}_${n.symbol}", n.tpe)
     val captureNames       = f.moduleCaptures.map(_.named).toSet
     val body = f.body
-      .modifyAll[p.Term] {
-        case s @ p.Term.Select(Nil, n) if captureNames.contains(n)    => s
-        case s @ p.Term.Select(n :: _, _) if captureNames.contains(n) => s
-        case p.Term.Select(Nil, n)                                    => p.Term.Select(Nil, rename(n))
-        case p.Term.Select(n :: ns, x)                                => p.Term.Select(rename(n) :: ns, x)
+      .modifyAll[p.Expr] {
+        case s @ p.Expr.Select(Nil, n) if captureNames.contains(n)    => s
+        case s @ p.Expr.Select(n :: _, _) if captureNames.contains(n) => s
+        case p.Expr.Select(Nil, n)                                    => p.Expr.Select(Nil, rename(n))
+        case p.Expr.Select(n :: ns, x)                                => p.Expr.Select(rename(n) :: ns, x)
         case x                                                        => x
       }
       .modifyAll[p.Stmt] {
@@ -33,7 +33,7 @@ object FnInlinePass extends ProgramPass {
       f.termCaptures.map(arg => arg.copy(rename(arg.named))),
       f.rtn,
       body,
-      f.kind
+      f.attrs
     )
   }
 
@@ -59,16 +59,16 @@ object FnInlinePass extends ProgramPass {
       (renamed.receiver.map(_.named) ++ renamed.args.map(_.named) ++ renamed.termCaptures.map(_.named))
         .zip(ivk.receiver ++ ivk.args ++ ivk.captures)
         .foldLeft(renamed.body) { case (xs, (target, replacement)) =>
-          xs.modifyAll[p.Term] { original =>
+          xs.modifyAll[p.Expr] { original =>
             println(s"substitute  ${original.repr} ??? ${target.repr}")
 
             (original, replacement) match {
-              case (p.Term.Select(Nil, `target`), r) =>
+              case (p.Expr.Select(Nil, `target`), r) =>
                 println("\tHit")
                 r
-              case (p.Term.Select(`target` :: xs, x), p.Term.Select(ys, y)) =>
+              case (p.Expr.Select(`target` :: xs, x), p.Expr.Select(ys, y)) =>
                 println("\tHit")
-                p.Term.Select(ys ::: y :: xs, x)
+                p.Expr.Select(ys ::: y :: xs, x)
               case _ => original
             }
           // if (original == target) replacement else original
@@ -91,12 +91,12 @@ object FnInlinePass extends ProgramPass {
         (expr, noReturnStmt, renamed.moduleCaptures)
       case xs => // multiple returns, create intermediate return var
         val returnName               = p.Named("phi", ivk.tpe)
-        val returnRef: p.Term.Select = p.Term.Select(Nil, returnName)
+        val returnRef: p.Expr.Select = p.Expr.Select(Nil, returnName)
         val returnRebound = substituted.modifyAll[p.Stmt] {
           case p.Stmt.Return(e) => p.Stmt.Mut(returnRef, e)
           case x                => x
         }
-        (p.Expr.Alias(returnRef), p.Stmt.Var(returnName, None) :: returnRebound, renamed.moduleCaptures)
+        (returnRef, p.Stmt.Var(returnName, None) :: returnRebound, renamed.moduleCaptures)
     }
   }
 

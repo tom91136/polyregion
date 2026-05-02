@@ -4,29 +4,26 @@ object Toggles {
 
   final inline val NoOffload = false
 
-  // need impl
-  final inline val ApiSuite   = false
-  final inline val GivenSuite = false
-  
-  final inline val LengthSuite = false
+  // Suites still hitting macro/backend errors (deferred):
+  final inline val CaptureSuite         = true   // complex-captures test using Option[Node] disabled in source; rest enabled
+  final inline val CompoundOpsSuite     = true
+  final inline val ExtensionSuite       = true
+  final inline val FunctionCallSuite    = true
+  final inline val GivenSuite           = true
+  final inline val InlineArraySuite     = true
+  final inline val IntrinsicSuite       = true
+  final inline val MathSuite            = true
+  final inline val CompoundCaptureSuite = true
 
-  // works
-
-  final inline val InlineArraySuite = false
-  final inline val BufferSuite      = false
-  final inline val CaptureSuite     = false
-  final inline val CastSuite        = false
-  final inline val MathSuite        = false
-  final inline val IntrinsicSuite   = false
-  final inline val ValueReturnSuite = false
-  final inline val ControlFlowSuite = true
-  final inline val LogicSuite       = false //OK
-  final inline val StructSuite      = false
-
-  final inline val FunctionCallSuite = false
-  final inline val ExtensionSuite    = false // assertion failed: Cannot get tree of package symbol
-
-  final inline val CompoundOpsSuite     = false
-  final inline val CompoundCaptureSuite = false
+  // Suites without macro errors (should compile; runtime status unknown):
+  final inline val ApiSuite             = true
+  final inline val BufferSuite          = true
+  final inline val CastSuite            = true
+  final inline val CollectionLengthSuite = true
+  final inline val LengthSuite          = true
+  final inline val ControlFlowSuite     = true
+  final inline val LogicSuite           = true
+  final inline val StructSuite          = true
+  final inline val ValueReturnSuite     = true
 
 }

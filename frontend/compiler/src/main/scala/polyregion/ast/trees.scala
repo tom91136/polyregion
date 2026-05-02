@@ -1,8 +1,8 @@
 package polyregion.ast
 
 import cats.kernel.Semigroup
-import polyregion.ast.ScalaSRR as p
-import polyregion.ast.ScalaSRR.{Type, TypeKind}
+import polyregion.ast.PolyAST as p
+import polyregion.ast.PolyAST.Type
 import polyregion.ast.Traversal.*
 
 import java.lang.reflect.Modifier
@@ -11,31 +11,22 @@ import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 import scala.util.{Success, Try}
 
-given Traversal[p.Term, p.Type] = Traversal.derived
 given Traversal[p.Expr, p.Type] = Traversal.derived
 given Traversal[p.Stmt, p.Type] = Traversal.derived
 given Traversal[p.Type, p.Type] = Traversal.derived
 
 given Traversal[p.Type, p.Expr] = Traversal.derived
 given Traversal[p.Stmt, p.Expr] = Traversal.derived
-given Traversal[p.Term, p.Expr] = Traversal.derived
 given Traversal[p.Expr, p.Expr] = Traversal.derived
-
-given Traversal[p.Type, p.Term] = Traversal.derived
-given Traversal[p.Expr, p.Term] = Traversal.derived
-given Traversal[p.Stmt, p.Term] = Traversal.derived
-given Traversal[p.Term, p.Term] = Traversal.derived
 
 given Traversal[p.Type, p.Stmt] = Traversal.derived
 given Traversal[p.Expr, p.Stmt] = Traversal.derived
-given Traversal[p.Term, p.Stmt] = Traversal.derived
 given Traversal[p.Stmt, p.Stmt] = Traversal.derived
 
 given Traversal[p.Signature, p.Type] = Traversal.derived
 
 given Traversal[p.Function, p.Type] = Traversal.derived
 given Traversal[p.Function, p.Expr] = Traversal.derived
-given Traversal[p.Function, p.Term] = Traversal.derived
 given Traversal[p.Function, p.Stmt] = Traversal.derived
 
 given Traversal[p.StructDef, p.Type] = Traversal.derived
@@ -185,23 +176,28 @@ object PolyAstToExpr {
 
   given ArrayAttrToExpr: ToExpr[p.Type.Space] with {
     def apply(x: p.Type.Space)(using Quotes) = x match {
-      case p.Type.Space.Local  => '{ p.Type.Space.Local }
-      case p.Type.Space.Global => '{ p.Type.Space.Global }
+      case p.Type.Space.Local   => '{ p.Type.Space.Local }
+      case p.Type.Space.Global  => '{ p.Type.Space.Global }
+      case p.Type.Space.Private => '{ p.Type.Space.Private }
     }
   }
 
   given TypeToExpr: ToExpr[p.Type] with {
     def apply(x: p.Type)(using Quotes) = x match {
       case p.Type.Var(_)  => ???
-      case p.Type.Float => '{ p.Type.Float }
-      case p.Type.Double => '{ p.Type.Double }
-      case p.Type.Bool   => '{ p.Type.Bool }
-      case p.Type.Byte   => '{ p.Type.Byte }
-      case p.Type.Char  => '{ p.Type.Char }
-      case p.Type.Short  => '{ p.Type.Short }
-      case p.Type.Int  => '{ p.Type.Int }
-      case p.Type.Long  => '{ p.Type.Long }
-      case p.Type.Unit   => '{ p.Type.Unit }
+      case p.Type.Float16 => '{ p.Type.Float16 }
+      case p.Type.Float32 => '{ p.Type.Float32 }
+      case p.Type.Float64 => '{ p.Type.Float64 }
+      case p.Type.Bool1   => '{ p.Type.Bool1 }
+      case p.Type.IntU8   => '{ p.Type.IntU8 }
+      case p.Type.IntU16  => '{ p.Type.IntU16 }
+      case p.Type.IntU32  => '{ p.Type.IntU32 }
+      case p.Type.IntU64  => '{ p.Type.IntU64 }
+      case p.Type.IntS8   => '{ p.Type.IntS8 }
+      case p.Type.IntS16  => '{ p.Type.IntS16 }
+      case p.Type.IntS32  => '{ p.Type.IntS32 }
+      case p.Type.IntS64  => '{ p.Type.IntS64 }
+      case p.Type.Unit0   => '{ p.Type.Unit0 }
 
       case p.Type.Struct(name, tpeVars, args, parents) =>
         '{ p.Type.Struct(${ Expr(name) }, ${ Expr(tpeVars) }, ${ Expr(args) }, ${ Expr(parents) }) }
@@ -209,6 +205,7 @@ object PolyAstToExpr {
         '{ p.Type.Ptr(${ Expr(component) }, ${ Expr(length) }, ${ Expr(space) }) }
       case p.Type.Exec(tpeVars, args, rtn) => ???
       case p.Type.Nothing                  => ???
+      case p.Type.Annotated(_, _, _)       => ???
     }
   }
 
@@ -277,7 +274,7 @@ extension (e: p.Type) {
   }
 
   def isNumeric: Boolean = e.kind match {
-    case TypeKind.Integral | TypeKind.Fractional => true
+    case Type.Kind.Integral | Type.Kind.Fractional => true
     case _                                       => false
   }
   def repr: String = e match {
@@ -287,20 +284,26 @@ extension (e: p.Type) {
           .map((v, a) => s"$v=${a.repr}")
           .mkString("<", ",", ">")}(${parents.map(_.repr).mkString("<:")})"
     case p.Type.Ptr(comp, length, space) => s"Array[${comp.repr}${length.fold("")(i => s"*$i")}^${space}]"
-    case p.Type.Bool                    => "Bool"
-    case p.Type.Byte                    => "Byteb"
-    case p.Type.Char                   => "Charc"
-    case p.Type.Short                   => "Shorts"
-    case p.Type.Int                   => "Inti"
-    case p.Type.Long                   => "Longl"
-    case p.Type.Float                  => "Floatf"
-    case p.Type.Double                  => "Doubled"
+    case p.Type.Bool1                    => "Bool"
+    case p.Type.IntU8                    => "U8"
+    case p.Type.IntU16                   => "Charc"
+    case p.Type.IntU32                   => "U32"
+    case p.Type.IntU64                   => "U64"
+    case p.Type.IntS8                    => "Byteb"
+    case p.Type.IntS16                   => "Shorts"
+    case p.Type.IntS32                   => "Inti"
+    case p.Type.IntS64                   => "Longl"
+    case p.Type.Float16                  => "F16"
+    case p.Type.Float32                  => "Floatf"
+    case p.Type.Float64                  => "Doubled"
 
-    case p.Type.Unit     => "Unitv"
+    case p.Type.Unit0     => "Unitv"
     case p.Type.Nothing   => "Nothing"
     case p.Type.Var(name) => s"#$name"
     case p.Type.Exec(tpeArgs, args, rtn) =>
       s"<${tpeArgs.mkString(",")}>(${args.map(_.repr).mkString(",")}) => ${rtn.repr}"
+    case p.Type.Annotated(tpe, pos, comment) =>
+      s"${tpe.repr}${pos.fold("")(p => s" /* ${p.repr} */")}${comment.fold("")(c => s" /* $c */")}"
   }
 
   // TODO remove
@@ -308,35 +311,24 @@ extension (e: p.Type) {
     case p.Type.Struct(sym, _, args, parents) =>
       sym.fqn.mkString("_") + args.map(_.monomorphicName).mkString("_", "_", "_")
     case p.Type.Ptr(comp, length, space) => s"${comp.monomorphicName}${length.fold("")(i => s"*$i")}^$space[]"
-    case p.Type.Bool            => "Bool"
-    case p.Type.Byte            => "Byteb"
-    case p.Type.Char           => "Charc"
-    case p.Type.Short           => "Shorts"
-    case p.Type.Int           => "Inti"
-    case p.Type.Long           => "Longl"
-    case p.Type.Float          => "Floatf"
-    case p.Type.Double          => "Doubled"
+    case p.Type.Bool1            => "Bool"
+    case p.Type.IntU8            => "U8"
+    case p.Type.IntU16           => "Charc"
+    case p.Type.IntU32           => "U32"
+    case p.Type.IntU64           => "U64"
+    case p.Type.IntS8            => "Byteb"
+    case p.Type.IntS16           => "Shorts"
+    case p.Type.IntS32           => "Inti"
+    case p.Type.IntS64           => "Longl"
+    case p.Type.Float16          => "F16"
+    case p.Type.Float32          => "Floatf"
+    case p.Type.Float64          => "Doubled"
 
-    case p.Type.Unit                    => "Unitv"
-    case p.Type.Nothing                  => "Nothing"
-    case p.Type.Var(name)                => s"#$name"
-    case p.Type.Exec(tpeArgs, args, rtn) => ???
-  }
-}
-
-extension (e: p.Term) {
-  def repr: String = e match {
-    case p.Term.Select(xs, x)   => (xs :+ x).map(_.repr).mkString(".")
-    case p.Term.Poison(t)       => s"Poison($t)"
-    case p.Term.UnitConst      => s"UnitConst()"
-    case p.Term.BoolConst(x)   => s"BoolConst($x)"
-    case p.Term.ByteConst(x)   => s"ByteConst($x)"
-    case p.Term.CharConst(x)  => s"CharConst($x)"
-    case p.Term.ShortConst(x)  => s"ShortConst($x)"
-    case p.Term.IntConst(x)  => s"IntConst($x)"
-    case p.Term.LongConst(x)  => s"LongConst($x)"
-    case p.Term.FloatConst(x) => s"FloatConst($x)"
-    case p.Term.DoubleConst(x) => s"DoubleConst($x)"
+    case p.Type.Unit0                        => "Unitv"
+    case p.Type.Nothing                      => "Nothing"
+    case p.Type.Var(name)                    => s"#$name"
+    case p.Type.Exec(tpeArgs, args, rtn)     => ???
+    case p.Type.Annotated(tpe, _, _)         => tpe.monomorphicName
   }
 }
 
@@ -440,14 +432,34 @@ extension (e: p.Expr) {
     //   s"${lhs.repr} $op' ${rhs.repr}"
 
     case p.Expr.Cast(from, to) => s"${from.repr}.to[${to.repr}]"
-    case p.Expr.Alias(ref)     => s"(~>${ref.repr})"
-
     case p.Expr.Invoke(name, tpeArgs, recv, args, captures, tpe) =>
       s"${recv.map(_.repr).getOrElse("<module>")}.${name.repr}<${tpeArgs.map(_.repr).mkString(",")}>(${args
           .map(_.repr)
           .mkString(",")})[${captures.map(_.repr).mkString(",")}] : ${tpe.repr}"
-    case p.Expr.Index(lhs, idx, tpe) => s"${lhs.repr}[${idx.repr}] : ${tpe.repr}"
-    case p.Expr.Alloc(tpe, size)     => s"new [${tpe.repr}*${size.repr}]"
+    case p.Expr.Index(lhs, idx, tpe)        => s"${lhs.repr}[${idx.repr}] : ${tpe.repr}"
+    case p.Expr.RefTo(lhs, idx, tpe, space) => s"&${lhs.repr}${idx.fold("")(i => s"[${i.repr}]")} : ${tpe.repr}^$space"
+    case p.Expr.Alloc(tpe, size, space)     => s"new [${tpe.repr}*${size.repr}]^${space}"
+    case p.Expr.SpecOp(op)                  => s"spec($op)"
+    case p.Expr.MathOp(op)                  => s"math($op)"
+    case p.Expr.IntrOp(op)                  => s"intr($op)"
+    case p.Expr.Annotated(expr, pos, comment) =>
+      s"${expr.repr}${pos.fold("")(p => s" /* ${p.repr} */")}${comment.fold("")(c => s" /* $c */")}"
+    case p.Expr.NullPtrConst(comp, space)   => s"nullptr[${comp.repr}^$space]"
+    case p.Expr.Float16Const(x)             => s"f16($x)"
+    case p.Expr.Float32Const(x)             => s"f32($x)"
+    case p.Expr.Float64Const(x)             => s"f64($x)"
+    case p.Expr.IntU8Const(x)               => s"u8($x)"
+    case p.Expr.IntU16Const(x)              => s"u16($x)"
+    case p.Expr.IntU32Const(x)              => s"u32($x)"
+    case p.Expr.IntU64Const(x)              => s"u64($x)"
+    case p.Expr.IntS8Const(x)               => s"i8($x)"
+    case p.Expr.IntS16Const(x)              => s"i16($x)"
+    case p.Expr.IntS32Const(x)              => s"i32($x)"
+    case p.Expr.IntS64Const(x)              => s"i64($x)"
+    case p.Expr.Unit0Const                  => "unit0"
+    case p.Expr.Bool1Const(x)               => s"bool1($x)"
+    case p.Expr.Select(xs, x)               => (xs :+ x).map(_.repr).mkString(".")
+    case p.Expr.Poison(t)                   => s"poison[${t.repr}]"
   }
 }
 
@@ -468,6 +480,12 @@ extension (stmt: p.Stmt) {
       s"if(${cond.repr}) {\n${trueBr.flatMap(_.repr.linesIterator.map("  " + _)).mkString("\n")}\n} else {\n${falseBr
           .flatMap(_.repr.linesIterator.map("  " + _))
           .mkString("\n")}\n}"
+    case p.Stmt.ForRange(induction, lbIncl, ubExcl, step, body) =>
+      s"for(${induction.repr} = ${lbIncl.repr}; < ${ubExcl.repr}; += ${step.repr}) {\n${body
+          .flatMap(_.repr.linesIterator.map("  " + _))
+          .mkString("\n")}\n}"
+    case p.Stmt.Annotated(s, pos, comment) =>
+      s"${s.repr}${pos.fold("")(p => s" /* ${p.repr} */")}${comment.fold("")(c => s" /* $c */")}"
   }
 }
 

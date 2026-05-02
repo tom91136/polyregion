@@ -128,7 +128,7 @@ object CheckApi {
 
         val ptr = polyregion.jvm.runtime.Platforms.create().pointerOfDirectBuffer(data)
 
-        val q0 = d0.createQueue();
+        val q0 = d0.createQueue(10000L);
 
         for (_ <- 0 to 1) {
 

@@ -64,7 +64,7 @@ llvm::Type *CodeGen::resolveType(const AnyType &tpe, const bool functionBoundary
 }
 
 llvm::Function *CodeGen::resolveExtFn(const Type::Any &rtn, const std::string &name, const std::vector<Type::Any> &args) {
-  return functions ^= get_or_emplace(Signature(name, args, rtn), [&](auto &sig) -> llvm::Function * {
+  return functions ^= get_or_emplace(Signature(Sym({name}), {}, {}, args, {}, {}, rtn), [&](auto &sig) -> llvm::Function * {
            auto tpe = llvm::FunctionType::get(
                /*Result*/ resolveType(rtn, true),
                /*Params*/ args ^ map([&](auto &t) { return resolveType(t, true); }),
@@ -144,7 +144,7 @@ ValPtr CodeGen::mkSelectPtr(const Expr::Select &select) {
 
   auto structTypeOf = [&](const Type::Any &tpe) -> StructInfo {
     auto findTy = [&](const Type::Struct &s) -> StructInfo {
-      return structTypes ^ get_maybe(s.name) ^
+      return structTypes ^ get_maybe(repr(s.name)) ^
              fold([&]() -> StructInfo { throw BackendException("Unseen struct type " + to_string(s.name) + " in select path" + fail()); });
     };
 
@@ -183,6 +183,16 @@ ValPtr CodeGen::mkSelectPtr(const Expr::Select &select) {
                                      {//
                                       llvm::ConstantInt::get(C.i32Ty(), 0), llvm::ConstantInt::get(C.i32Ty(), *idx)},
                                      qualified(select) + "_select_ptr");
+        }
+        // Phase 2b lays struct-typed fields out as 8-byte pointers (functionBoundary=true) so
+        // that the host-kernel ABI marshals them by reference. The AST, however, still reports
+        // the field's type as `Struct(...)` rather than `Ptr(Struct(...))`. When traversing into
+        // such a field — or returning its address for a value-load by the caller — we must
+        // dereference the pointer slot first; otherwise the next GEP / load operates on the
+        // raw pointer bytes instead of the pointed-to struct.
+        const auto fieldLlvmType = info.tpe->getElementType(*idx);
+        if (fieldLlvmType->isPointerTy() && path.tpe.template is<Type::Struct>()) {
+          root = C.load(B, root, B.getPtrTy(C.AllocaAS));
         }
         tpe = path.tpe;
       } else {
@@ -315,9 +325,13 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
                   [&](auto l, auto r) { return B.CreateICmpSGE(l, r); }, [&](auto l, auto r) { return B.CreateFCmpOGE(l, r); });
             },
             [&](const Intr::LogicLt &v) -> ValPtr {
+              // Signed less-than: matches LogicLte/LogicGte/LogicGt which all use signed
+              // comparison. ICmpULT here would treat negative ints as huge unsigned values
+              // (e.g. `-1 < 10` reads as `0xFFFFFFFF < 10 == false`), breaking any kernel
+              // loop whose induction variable goes negative.
               return binaryNumOp(
                   expr, v.x, v.y, v.x.tpe(), //
-                  [&](auto l, auto r) { return B.CreateICmpULT(l, r); }, [&](auto l, auto r) { return B.CreateFCmpOLT(l, r); });
+                  [&](auto l, auto r) { return B.CreateICmpSLT(l, r); }, [&](auto l, auto r) { return B.CreateFCmpOLT(l, r); });
             },
             [&](const Intr::LogicGt &v) -> ValPtr {
               return binaryNumOp(
@@ -358,6 +372,17 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
               return from;
             // }
           }
+        }
+
+        // Struct-to-struct casts (e.g. dispatch upcast `Monoid -> anon$1`): both sides are
+        // opaque pointers at the boundary, so we just pass the pointer through.
+        if (x.from.tpe().is<Type::Struct>() && x.as.is<Type::Struct>()) {
+          // The expression is materialised as a select-pointer (the struct's stack address);
+          // grab that instead of the loaded struct value.
+          if (const auto sel = x.from.template get<Expr::Select>()) {
+            return mkSelectPtr(*sel);
+          }
+          return from;
         }
 
         auto fromKind = x.from.tpe().kind().match_total( //
@@ -411,13 +436,25 @@ ValPtr CodeGen::mkExprVal(const Expr::Any &expr, const std::string &key) {
         } else throw BackendException("unhandled cast");
       },
       [&](const Expr::Invoke &x) -> ValPtr {
-        const auto argNoUnit = x.args ^ filter([](auto &arg) { return !arg.tpe().template is<Type::Unit0>(); });
-        const auto sig = Signature(x.name, argNoUnit ^ map([](auto &arg) { return arg.tpe(); }), x.rtn);
+        // Combine receiver + module captures + term captures + args (matching the LLVM-level
+        // function shape produced by createPrototype).
+        Vec<AnyExpr> allArgs;
+        if (x.receiver) allArgs.push_back(*x.receiver);
+        for (auto &c : x.captures) allArgs.push_back(c);
+        for (auto &a : x.args) allArgs.push_back(a);
+        const auto argNoUnit = allArgs ^ filter([](auto &arg) { return !arg.tpe().template is<Type::Unit0>(); });
+        const auto sig = Signature(x.name, /*tpeVars*/ {}, /*receiver*/ {}, argNoUnit ^ map([](auto &arg) { return arg.tpe(); }),
+                                   /*moduleCaptures*/ {}, /*termCaptures*/ {}, x.rtn);
         return functions ^ get_maybe(sig) ^
                fold(
                    [&](auto &fn) -> ValPtr {
                      const auto params =
-                         argNoUnit ^ map([&](auto &term) {
+                         argNoUnit ^ map([&](auto &term) -> ValPtr {
+                           // Struct args at the call boundary are passed by pointer (see resolveType
+                           // with functionBoundary=true). Pass the address rather than the loaded value.
+                           if (term.tpe().template is<Type::Struct>()) {
+                             if (auto sel = term.template get<Expr::Select>()) return mkSelectPtr(*sel);
+                           }
                            const auto val = mkExprVal(term);
                            return term.tpe().template is<Type::Bool1>() ? B.CreateZExt(val, resolveType(Type::Bool1(), true)) : val;
                          });
@@ -609,8 +646,13 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
             kind = mkStmt(body, fn, {ctx});
           if (kind != BlockKind::Terminal) B.CreateBr(loopTest);
         }
+        // The loopExit block is a normal continuation point — `loop_test` falls through to it
+        // when the condition first turns false. Return `Normal` (not `Terminal`) so that the
+        // caller knows the current block isn't yet closed; otherwise we may emerge from an
+        // enclosing Cond branch with `kind == Terminal` and skip emitting a branch into the
+        // surrounding cond_exit, leaving loopExit dangling without a terminator.
         B.SetInsertPoint(loopExit);
-        return BlockKind::Terminal;
+        return BlockKind::Normal;
       },
       [&](const Stmt::ForRange &x) -> BlockKind {
         const auto loopTest = llvm::BasicBlock::Create(C.actual, "loop_test", &fn);
@@ -697,19 +739,43 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
 
 static auto createPrototype(CodeGen &cg, llvm::Module &mod, const Function &fn) {
 
+  // Combine receiver + module captures + term captures + args into the LLVM-level args list
+  Vec<Arg> allArgs;
+  // CPU-style kernels (HostThreaded ABI) receive a leading thread-id (Int64) arg from the runtime
+  // — `ObjectDeviceQueue::threadedLaunch` writes `tid` into the first ffi slot before invoking.
+  // GPU launches (cuLaunchKernel / hsa_kernel_dispatch / clEnqueueNDRangeKernel) provide thread
+  // indices via in-kernel intrinsics (threadIdx.* etc.), not as kernel parameters, so we must not
+  // add a __tid arg there or the kernel ABI will be off-by-one and the first user arg gets read
+  // from the wrong slot.
+  const auto cpuTarget = cg.C.options.target == LLVMBackend::Target::x86_64 || //
+                         cg.C.options.target == LLVMBackend::Target::AArch64 || //
+                         cg.C.options.target == LLVMBackend::Target::ARM;
+  if (fn.attrs.contains(FunctionAttr::Entry()) && cpuTarget) {
+    allArgs.push_back(Arg(Named("__tid", Type::IntS64()), {}));
+  }
+  if (fn.receiver) allArgs.push_back(*fn.receiver);
+  for (auto &a : fn.moduleCaptures) allArgs.push_back(a);
+  for (auto &a : fn.termCaptures) allArgs.push_back(a);
+  for (auto &a : fn.args) allArgs.push_back(a);
+
   // Unit types in arguments are discarded
-  const auto argsNoUnit = fn.args | filter([](auto &arg) { return !arg.named.tpe.template is<Type::Unit0>(); }) | to_vector();
-  // Unit type at function return type position is void, any other location, Unit is a singleton value
-  const auto rtnTpe = fn.rtn.is<Type::Unit0>() ? llvm::Type::getVoidTy(cg.C.actual) : cg.resolveType(fn.rtn, true);
+  const auto argsNoUnit = allArgs | filter([](auto &arg) { return !arg.named.tpe.template is<Type::Unit0>(); }) | to_vector();
+  // Unit type at function return type position is void, any other location, Unit is a singleton value.
+  // Structs are returned by-value (functionBoundary=false) — caller copies the result into a stack
+  // slot. Args still travel as opaque pointers (functionBoundary=true) for ABI consistency.
+  const auto rtnTpe = fn.rtn.is<Type::Unit0>() ? llvm::Type::getVoidTy(cg.C.actual)
+                      : fn.rtn.is<Type::Struct>() ? cg.resolveType(fn.rtn, false)
+                      : cg.resolveType(fn.rtn, true);
 
   const auto argTys = argsNoUnit                                                            //
                       | map([&](auto &arg) { return cg.resolveType(arg.named.tpe, true); }) //
                       | to_vector();
 
   // XXX Normalise names as NVPTX has a relatively limiting range of supported characters in symbols
-  const auto normalisedName = fn.name ^ map([](const char c) { return !std::isalnum(c) && c != '_' ? '_' : c; });
+  const auto normalisedName = repr(fn.name) ^ map([](const char c) { return !std::isalnum(c) && c != '_' ? '_' : c; });
 
-  Signature sig(fn.name, argsNoUnit ^ map([](auto &x) { return x.named.tpe; }), fn.rtn);
+  Signature sig(fn.name, /*tpeVars*/ {}, /*receiver*/ {}, argsNoUnit ^ map([](auto &x) { return x.named.tpe; }),
+                /*moduleCaptures*/ {}, /*termCaptures*/ {}, fn.rtn);
   llvm::Function *llvmFn = llvm::Function::Create(llvm::FunctionType::get(/*Result*/ rtnTpe, /*Params*/ argTys, /*isVarArg*/ false), //
                                                   fn.attrs.contains(FunctionAttr::Exported())                                        //
                                                       ? llvm::Function::ExternalLinkage
@@ -727,9 +793,13 @@ static auto createPrototype(CodeGen &cg, llvm::Module &mod, const Function &fn) 
 }
 
 Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program) {
-  structTypes = C.resolveLayouts(program.structs);
+  structTypes = C.resolveLayouts(program.defs);
 
-  const auto prototypes = program.functions ^ map([&](auto &fn) { return createPrototype(*this, M, fn); });
+  Vec<Function> allFns;
+  allFns.reserve(program.functions.size() + 1);
+  allFns.push_back(program.entry);
+  for (auto &f : program.functions) allFns.push_back(f);
+  const auto prototypes = allFns ^ map([&](auto &fn) { return createPrototype(*this, M, fn); });
 
   prototypes | for_each([&](auto &llvmFn, auto &fn, auto &argsNoUnit) {
     B.SetInsertPoint(llvm::BasicBlock::Create(C.actual, "entry", llvmFn));
@@ -737,6 +807,13 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program) {
                      auto llvmArg = llvmFn->getArg(i);
 
                      llvmArg->setName(arg.named.symbol);
+
+                     // Structs arrive at the function boundary as pointers (see resolveType with
+                     // functionBoundary=true). Use the incoming pointer directly as the stack-var
+                     // pointer; no alloca/store needed because the receiver memory is already addressable.
+                     if (arg.named.tpe.template is<Type::Struct>()) {
+                       return {arg.named.symbol, {arg.named.tpe, llvmArg}};
+                     }
 
                      auto llvmArgValue = arg.named.tpe.template is<Type::Bool1>() || arg.named.tpe.template is<Type::Unit0>()
                                              ? B.CreateICmpNE(llvmArg, llvm::ConstantInt::get(llvm::Type::getInt8Ty(C.actual), 0, true))
@@ -749,12 +826,19 @@ Pair<Opt<std::string>, std::string> CodeGen::transform(const Program &program) {
                    | to<Map>();
     for (auto &stmt : fn.body)
       auto _ = mkStmt(stmt, *llvmFn);
+    // Abstract method bodies (e.g. typeclass methods like `Monoid.mempty`) emit no terminator.
+    // Insert an `unreachable` so LLVM module verification is happy — the symbol should never
+    // actually be invoked since DynamicDispatchPass routes calls through a vtable.
+    if (auto *bb = B.GetInsertBlock(); bb && bb->getTerminator() == nullptr) {
+      B.CreateUnreachable();
+    }
     stackVarPtrs.clear();
   });
 
   std::string ir;
   llvm::raw_string_ostream irOut(ir);
   M.print(irOut, nullptr);
+
 
   std::string err;
   llvm::raw_string_ostream errOut(err);
@@ -842,7 +926,7 @@ CompileResult LLVMBackend::compileProgram(const Program &program, const compilet
   }
 
   auto c = compileModule(options.targetInfo(), opt, true, cg.M);
-  c.layouts = resolveLayouts(program.structs);
+  c.layouts = resolveLayouts(program.defs);
   c.events.emplace_back(ast2IR);
   c.events.emplace_back(astOpt);
 

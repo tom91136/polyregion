@@ -113,9 +113,9 @@ struct CLAddressSpaceTracePass {
                                | to_vector();                                                              //
     if (tracedRtnTpes.size() != 1) {
       body.emplace_back(Stmt::Comment(
-          fmt::format("CLASTP: Return type diverged for function {}, types={}", fn.name, tracedRtnTpes | mk_string(", ", show_repr))));
+          fmt::format("CLASTP: Return type diverged for function {}, types={}", repr(fn.name), tracedRtnTpes | mk_string(", ", show_repr))));
     }
-    return Function(fn.name, fn.args, tracedRtnTpes[0], body, fn.attrs);
+    return Function(fn.name, fn.tpeVars, fn.receiver, fn.args, fn.moduleCaptures, fn.termCaptures, tracedRtnTpes[0], body, fn.attrs);
   }
 
   static Program execute(const Program &p) {
@@ -131,11 +131,15 @@ struct CLAddressSpaceTracePass {
                      f.withArgs(f.args ^ map([&](auto &arg) { return arg.template modify_all<TypeSpace::Any>(remapSpace); })));
                });
 
-    auto sigOf = [](const Expr::Invoke &inv) { return Signature(inv.name, inv.args ^ map([](auto &e) { return e.tpe(); }), inv.rtn); };
+    auto sigOf = [](const Expr::Invoke &inv) {
+      return Signature(inv.name, /*tpeVars*/ {}, /*receiver*/ {}, inv.args ^ map([](auto &e) { return e.tpe(); }),
+                       /*moduleCaptures*/ {}, /*termCaptures*/ {}, inv.rtn);
+    };
 
     Map<Signature, std::shared_ptr<Function>> functionTable;
     fns | for_each([&](auto &f) {
-      const Signature sig(f.name, f.args ^ map([](auto &e) { return e.named.tpe; }), f.rtn);
+      const Signature sig(f.name, /*tpeVars*/ {}, /*receiver*/ {}, f.args ^ map([](auto &e) { return e.named.tpe; }),
+                          /*moduleCaptures*/ {}, /*termCaptures*/ {}, f.rtn);
       functionTable[sig] = std::make_shared<Function>(f);
     });
 
@@ -163,14 +167,16 @@ struct CLAddressSpaceTracePass {
       functionTable.insert(specialised.begin(), specialised.end());
     }
 
-    const auto spaceSpecialisedName = [](const auto &name, const std::vector<TypeSpace::Any> &ts) {
-      return fmt::format("{}_{}", //
-                         name,    //
-                         ts ^ mk_string("", [&](auto &s) {
-                           return s.match_total([&](TypeSpace::Global) { return "g"; }, //
-                                                [&](TypeSpace::Local) { return "l"; },  //
-                                                [&](TypeSpace::Private) { return "p"; });
-                         }));
+    const auto spaceSpecialisedName = [](const Sym &name, const std::vector<TypeSpace::Any> &ts) -> Sym {
+      auto suffix = ts ^ mk_string("", [&](auto &s) {
+        return s.match_total([&](TypeSpace::Global) { return "g"; }, //
+                             [&](TypeSpace::Local) { return "l"; },  //
+                             [&](TypeSpace::Private) { return "p"; });
+      });
+      auto fqn = name.fqn;
+      if (!fqn.empty()) fqn.back() = fqn.back() + "_" + suffix;
+      else fqn.push_back("_" + suffix);
+      return Sym(fqn);
     };
 
     const auto spaceSpecialisedFns =     //
@@ -185,7 +191,8 @@ struct CLAddressSpaceTracePass {
           }) //
         | to_vector();
 
-    return Program(p.structs, spaceSpecialisedFns);
+    if (spaceSpecialisedFns.empty()) return p;
+    return Program(spaceSpecialisedFns.front(), Vec<Function>(std::next(spaceSpecialisedFns.begin()), spaceSpecialisedFns.end()), p.defs);
   }
 };
 
@@ -208,6 +215,8 @@ static std::string normalise(const std::string &s) {
          ^ replace_all("local", "_local")    //
          ^ replace_all("kernel", "_kernel"); //
 }
+
+static std::string normalise(const Sym &s) { return normalise(repr(s)); }
 
 std::string backend::CSource::mkTpe(const Type::Any &tpe) {
   switch (dialect) {
@@ -233,6 +242,8 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
 
                              [&](const Type::Struct &x) { return normalise(x.name); },              //
                              [&](const Type::Ptr &x) { return fmt::format("{}*", mkTpe(x.comp)); }, //
+                             [&](const Type::Var &x) -> std::string { throw std::logic_error("Type::Var should be erased"); },
+                             [&](const Type::Exec &x) -> std::string { throw std::logic_error("Type::Exec should be erased"); },
                              [&](const Type::Annotated &x) {
                                return fmt::format("{} /*{};{}*/", mkTpe(x.tpe), x.pos ^ map(show_repr) ^ get_or_else(""),
                                                   x.comment ^ get_or_else(""));
@@ -266,6 +277,8 @@ std::string backend::CSource::mkTpe(const Type::Any &tpe) {
                                auto comp = mkTpe(x.comp);
                                return fmt::format("{} {}*", prefix, comp);
                              }, //
+                             [&](const Type::Var &x) -> std::string { throw std::logic_error("Type::Var should be erased"); },
+                             [&](const Type::Exec &x) -> std::string { throw std::logic_error("Type::Exec should be erased"); },
                              [&](const Type::Annotated &x) {
                                return fmt::format("{} /*{};{}*/", mkTpe(x.tpe), x.pos ^ map(show_repr) ^ get_or_else(""),
                                                   x.comment ^ get_or_else(""));
@@ -566,7 +579,7 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
   const auto start = compiler::nowMono();
 
   // work out the dependencies between structs first
-  auto structsAndDeps = program.structs ^ map([&](auto &def) {
+  auto structsAndDeps = program.defs ^ map([&](auto &def) {
                           const auto deps = def.members //
                                             | collect([&](auto &m) {
                                                 return m.tpe.template get<Type::Ptr>()                                         //
@@ -584,8 +597,8 @@ CompileResult backend::CSource::compileProgram(const Program &program_, const co
     default: break;
   }
 
-  Set<std::string> resolved;
-  while (resolved.size() != program.structs.size()) {
+  Set<Sym> resolved;
+  while (resolved.size() != program.defs.size()) {
     const auto noDeps = structsAndDeps                      //
                         | filter([&](auto &s, auto &deps) { //
                             return !resolved.contains(s.name) && deps | forall([&](auto &d) { return resolved.contains(d); });

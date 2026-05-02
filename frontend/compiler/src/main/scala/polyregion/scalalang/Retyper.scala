@@ -2,7 +2,7 @@ package polyregion.scalalang
 
 import cats.kernel.Monoid
 import cats.syntax.all.*
-import polyregion.ast.{ScalaSRR as p, *}
+import polyregion.ast.{PolyAST as p, *}
 
 import scala.annotation.tailrec
 import scala.util.Try
@@ -66,10 +66,11 @@ object Retyper {
   }
 
   def structDef0(using q: Quoted)(clsSym: q.Symbol): Result[p.StructDef] = {
-    if (clsSym.flags.is(q.Flags.Abstract)) {
-      throw RuntimeException(
-        s"Unsupported combination of flags: ${clsSym.flags.show} for ${clsSym}, fields=${clsSym.fieldMembers}"
-      )
+    // Abstract / package symbols can't be reflected via .tree — treat them as opaque empty structs.
+    // Concrete instantiation isn't possible from inside a kernel, but they can still appear as
+    // type witnesses (e.g. inherited base classes, package-prefix in chained selects).
+    if (clsSym.isPackageDef || clsSym.flags.is(q.Flags.Abstract)) {
+      return p.StructDef(p.Sym(clsSym.fullName), Nil, Nil, Nil).success
     }
 
     // We extract all definitions in the class first.
@@ -111,13 +112,18 @@ object Retyper {
   //  isTypeParam  &&  isAbstractType => class C[A]
   // !isTypeParam  &&  isAbstractType => class C{ type A }
   // !isTypeParam  && !isAbstractType => class C{ type A = Concrete }
-  private def clsTypeCtorNames(using q: Quoted)(clsSym: q.Symbol): List[String] = clsSym.typeMembers
-    .filter(t => t.isAbstractType && t.isTypeParam)
-    .map(_.tree)
-    .map {
-      case q.TypeDef(name, _) => name
-      case _                  => ???
-    }
+  private def clsTypeCtorNames(using q: Quoted)(clsSym: q.Symbol): List[String] =
+    // typeMembers can throw an internal assertion ("Unknown type member found") in some Scala 3
+    // versions when sorting type members of certain stdlib classes (e.g. via sortWith → typeMembers
+    // recursion). Treat those as "no abstract type members" — symbols we can't introspect can't
+    // contribute usable type ctor names anyway.
+    Try(clsSym.typeMembers).toEither.toOption.toList.flatten
+      .filter(t => t.isAbstractType && t.isTypeParam)
+      .map(_.tree)
+      .map {
+        case q.TypeDef(name, _) => name
+        case _                  => ???
+      }
 
   private def resolveClsFromSymbol(using
       q: Quoted
@@ -162,15 +168,15 @@ object Retyper {
       q: Quoted
   )(sym: p.Sym, tpeVars: List[String], clsSym: q.Symbol, kind: q.ClassKind): p.Type =
     (sym, kind) match {
-      case (p.Sym(Symbols.Scala :+ "Unit"), q.ClassKind.Class)    => p.Type.Unit
-      case (p.Sym(Symbols.Scala :+ "Boolean"), q.ClassKind.Class) => p.Type.Bool
-      case (p.Sym(Symbols.Scala :+ "Byte"), q.ClassKind.Class)    => p.Type.Byte
-      case (p.Sym(Symbols.Scala :+ "Short"), q.ClassKind.Class)   => p.Type.Short
-      case (p.Sym(Symbols.Scala :+ "Int"), q.ClassKind.Class)     => p.Type.Int
-      case (p.Sym(Symbols.Scala :+ "Long"), q.ClassKind.Class)    => p.Type.Long
-      case (p.Sym(Symbols.Scala :+ "Float"), q.ClassKind.Class)   => p.Type.Float
-      case (p.Sym(Symbols.Scala :+ "Double"), q.ClassKind.Class)  => p.Type.Double
-      case (p.Sym(Symbols.Scala :+ "Char"), q.ClassKind.Class)    => p.Type.Char
+      case (p.Sym(Symbols.Scala :+ "Unit"), q.ClassKind.Class)    => p.Type.Unit0
+      case (p.Sym(Symbols.Scala :+ "Boolean"), q.ClassKind.Class) => p.Type.Bool1
+      case (p.Sym(Symbols.Scala :+ "Byte"), q.ClassKind.Class)    => p.Type.IntS8
+      case (p.Sym(Symbols.Scala :+ "Short"), q.ClassKind.Class)   => p.Type.IntS16
+      case (p.Sym(Symbols.Scala :+ "Int"), q.ClassKind.Class)     => p.Type.IntS32
+      case (p.Sym(Symbols.Scala :+ "Long"), q.ClassKind.Class)    => p.Type.IntS64
+      case (p.Sym(Symbols.Scala :+ "Float"), q.ClassKind.Class)   => p.Type.Float32
+      case (p.Sym(Symbols.Scala :+ "Double"), q.ClassKind.Class)  => p.Type.Float64
+      case (p.Sym(Symbols.Scala :+ "Char"), q.ClassKind.Class)    => p.Type.IntU16
       // TODO type ctor args for now, need to work out type member refinements
       case (sym, q.ClassKind.Class | q.ClassKind.Object) =>
         p.Type.Struct(sym, tpeVars, tpeVars.map(p.Type.Var(_)), deriveParents(clsSym))
@@ -236,7 +242,7 @@ object Retyper {
           term = leftTerm.orElse(rightTerm)
           r <-
             if (leftTpe == rightTpe) (term -> leftTpe, leftWit |+| rightWit).success
-//            else if(leftTpe == p.Type.Unit || rightTpe == p.Type.Unit) (term, p.Type.Unit).success
+//            else if(leftTpe == p.Type.Unit0 || rightTpe == p.Type.Unit0) (term, p.Type.Unit0).success
             else {
               val sym = andOr match {
                 case _: q.OrType  => p.Sym("#Union")
@@ -258,7 +264,9 @@ object Retyper {
 
           retyped <- (name, kind, tpeCtorArgs) match {
             case (Symbols.ArrayMirror, q.ClassKind.Class, (_, comp: p.Type) :: Nil) =>
-              // case (Symbols.Array, q.ClassKind.Class, (_, comp: p.Type) :: Nil) =>
+              (None -> p.Type.Ptr(comp, None, p.Type.Space.Global), wit).success
+            case (Symbols.Array, q.ClassKind.Class, (_, comp: p.Type) :: Nil) =>
+              // scala.Array[A] is a kernel-side raw pointer (matching TypedBuffer's representation).
               (None -> p.Type.Ptr(comp, None, p.Type.Space.Global), wit).success
 //            case (_, q.ClassKind.Class, (_, comp: p.Type) :: Nil) if tpe <:< argAppliedSeqLikeTpe =>
 //              (None -> p.Type.Array(comp), wit).success
@@ -283,21 +291,21 @@ object Retyper {
       // widen singletons
       case q.ConstantType(x) =>
         x match {
-          case q.BooleanConstant(v) => (Some(p.Term.BoolConst(v)) -> p.Type.Bool, Map.empty).success
-          case q.ByteConstant(v)    => (Some(p.Term.ByteConst(v)) -> p.Type.Byte, Map.empty).success
-          case q.ShortConstant(v)   => (Some(p.Term.ShortConst(v)) -> p.Type.Short, Map.empty).success
-          case q.IntConstant(v)     => (Some(p.Term.IntConst(v)) -> p.Type.Int, Map.empty).success
-          case q.LongConstant(v)    => (Some(p.Term.LongConst(v)) -> p.Type.Long, Map.empty).success
-          case q.FloatConstant(v)   => (Some(p.Term.FloatConst(v)) -> p.Type.Float, Map.empty).success
-          case q.DoubleConstant(v)  => (Some(p.Term.DoubleConst(v)) -> p.Type.Double, Map.empty).success
-          case q.CharConstant(v)    => (Some(p.Term.CharConst(v)) -> p.Type.Char, Map.empty).success
+          case q.BooleanConstant(v) => (Some(p.Expr.Bool1Const(v)) -> p.Type.Bool1, Map.empty).success
+          case q.ByteConstant(v)    => (Some(p.Expr.IntS8Const(v)) -> p.Type.IntS8, Map.empty).success
+          case q.ShortConstant(v)   => (Some(p.Expr.IntS16Const(v)) -> p.Type.IntS16, Map.empty).success
+          case q.IntConstant(v)     => (Some(p.Expr.IntS32Const(v)) -> p.Type.IntS32, Map.empty).success
+          case q.LongConstant(v)    => (Some(p.Expr.IntS64Const(v)) -> p.Type.IntS64, Map.empty).success
+          case q.FloatConstant(v)   => (Some(p.Expr.Float32Const(v)) -> p.Type.Float32, Map.empty).success
+          case q.DoubleConstant(v)  => (Some(p.Expr.Float64Const(v)) -> p.Type.Float64, Map.empty).success
+          case q.CharConstant(v)    => (Some(p.Expr.IntU16Const(v)) -> p.Type.IntU16, Map.empty).success
           case q.StringConstant(v)  => ???
-          case q.UnitConstant       => (Some(p.Term.UnitConst) -> p.Type.Unit, Map.empty).success
+          case q.UnitConstant       => (Some(p.Expr.Unit0Const) -> p.Type.Unit0, Map.empty).success
           case q.NullConstant       => ???
           case q.ClassOfConstant(cls) =>
             val reifiedTpe = q.TypeRepr.typeConstructorOf(classOf[Class[?]]).appliedTo(cls)
             typer0(reifiedTpe).map { case (_ -> tpe, wit) =>
-              (Some(p.Term.Poison(tpe)) -> tpe, wit)
+              (Some(p.Expr.Poison(tpe)) -> tpe, wit)
             }
         }
       case q.ParamRef(r, i) =>
@@ -307,11 +315,14 @@ object Retyper {
         // println(s"[fallthrough typer] ${expr} => ${expr.show} ${expr.getClass}")
         resolveClsFromTpeRepr(expr).flatMap { (sym, tpeVars, symbol, kind) =>
           liftClsToTpe(sym, tpeVars, symbol, kind) match {
-            case s @ p.Type.Struct(_, _, _, _) =>
+            case s @ p.Type.Struct(_, _, _, _) if !symbol.isPackageDef =>
               symbol.tree match {
                 case clsDef: q.ClassDef => (None -> s, Map(symbol -> Set(s))).success
                 case _                  => s"$symbol is not a ClassDef".fail
               }
+            case s @ p.Type.Struct(_, _, _, _) =>
+              // package symbols can't be reflected via .tree; treat them as opaque struct types
+              (None -> s, Map(symbol -> Set(s))).success
             case tpe => (None -> tpe, Map.empty).success
           }
 

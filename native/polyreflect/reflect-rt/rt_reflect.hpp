@@ -258,20 +258,44 @@ __RT_ODR inline ReflectService *_rt_get() {
 }
 inline auto _ = _rt_get();
 
+// Thread-local re-entry flag. Without it, a throw inside a service call (e.g. EDEADLK from
+// double-locking the shared_mutex) calls `__cxa_allocate_exception` which calls `malloc`,
+// re-enters `_rt_record`, locks the same mutex, throws EDEADLK again — recursing until the
+// stack is exhausted. Internal allocations (HashMap rehash/emplace) trip the same path.
+__RT_ODR inline bool &_rt_in_service() {
+  thread_local bool inService = false;
+  return inService;
+}
+struct _rt_service_guard {
+  bool prev;
+  __RT_ODR _rt_service_guard() : prev(_rt_in_service()) { _rt_in_service() = true; }
+  __RT_ODR ~_rt_service_guard() { _rt_in_service() = prev; }
+};
+
 } // namespace details
 
 extern "C" __RT_ODR __RT_EXPORTED void _rt_record(const void *ptr, const size_t size, const Type type) {
   if (!details::serviceInit.load()) return;
+  if (details::_rt_in_service()) return;
+  details::_rt_service_guard guard;
   details::_rt_get()->blockingRecord(details::PtrInfo{reinterpret_cast<uintptr_t>(ptr), size, type});
 }
 extern "C" __RT_ODR __RT_EXPORTED void _rt_release(void *ptr, const Type type) {
   if (!ptr) return;
   if (!details::serviceInit.load()) return;
+  if (details::_rt_in_service()) return;
+  details::_rt_service_guard guard;
   details::_rt_get()->blockingRelease(reinterpret_cast<uintptr_t>(ptr), type);
 }
 
-extern "C" __RT_ODR __RT_EXPORTED PtrMeta _rt_reflect_p(const void *ptr) { return details::_rt_get()->blockingQuery(ptr); }
+extern "C" __RT_ODR __RT_EXPORTED PtrMeta _rt_reflect_p(const void *ptr) {
+  if (details::_rt_in_service()) return PtrMeta{0, 0, Type::Unknown};
+  details::_rt_service_guard guard;
+  return details::_rt_get()->blockingQuery(ptr);
+}
 extern "C" __RT_ODR __RT_EXPORTED PtrMeta _rt_reflect_v(const uintptr_t ptrValue) {
+  if (details::_rt_in_service()) return PtrMeta{0, 0, Type::Unknown};
+  details::_rt_service_guard guard;
   return details::_rt_get()->blockingQuery(ptrValue);
 }
 

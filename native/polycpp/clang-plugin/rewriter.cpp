@@ -205,7 +205,8 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
             }) //
           | to_vector());
 
-  auto table = bundle.layouts | values() | map([&](auto &sl) { return std::pair{Type::Struct(sl.name), sl}; }) | to<Map>();
+  auto table = bundle.layouts | values() |
+               map([&](auto &sl) { return std::pair{Type::Struct(Sym({sl.name}), {}, {}, {}), sl}; }) | to<Map>();
 
   auto primitiveTypeLayoutsDecls =
       Vec<Type::Any>{
@@ -272,7 +273,7 @@ void insertKernelImage(clang::DiagnosticsEngine &D, clang::Sema &S, clang::ASTCo
                                  })                                                                                                  //
                                ^ or_else([&]() {
                                    return t.template get<Type::Struct>() ^ flat_map([&](auto &s) {
-                                            return structNameToTypeLayoutIdx ^ get_maybe(s.name) ^ map([&](auto layoutIdx) {
+                                            return structNameToTypeLayoutIdx ^ get_maybe(repr(s.name)) ^ map([&](auto layoutIdx) {
                                                      return S
                                                          .CreateBuiltinBinOp({}, clang::BinaryOperatorKind::BO_Add,
                                                                              mkDeclRef(C, structTypeLayoutArrayDecl),

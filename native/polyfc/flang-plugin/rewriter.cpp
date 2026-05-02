@@ -63,9 +63,11 @@ std::optional<runtime::Type> runtimeType(const polyast::Type::Any &tpe) {
       [&](const polyast::Type::Unit0 &) -> R { return runtime::Type::Void; },  //
       [&](const polyast::Type::Bool1 &) -> R { return runtime::Type::Bool1; }, //
 
-      [&](const polyast::Type::Struct &) -> R { return {}; },               //
-      [&](const polyast::Type::Ptr &) -> R { return runtime::Type::Ptr; },  //
-      [&](const polyast::Type::Annotated &t) { return runtimeType(t.tpe); } //
+      [&](const polyast::Type::Struct &) -> R { return {}; },                //
+      [&](const polyast::Type::Ptr &) -> R { return runtime::Type::Ptr; },   //
+      [&](const polyast::Type::Var &) -> R { return {}; },                   //
+      [&](const polyast::Type::Exec &) -> R { return {}; },                  //
+      [&](const polyast::Type::Annotated &t) { return runtimeType(t.tpe); }  //
   );
 }
 
@@ -190,7 +192,7 @@ public:
                                              | to<std::unordered_map>();
                         const auto maybeLayout = c.named.tpe.template get<polyast::Type::Ptr>()                                   //
                                                  ^ flat_map([](auto &t) { return t.comp.template get<polyast::Type::Struct>(); }) //
-                                                 ^ flat_map([&](auto &s) { return layouts ^ get_maybe(s.name); });                //
+                                                 ^ flat_map([&](auto &s) { return layouts ^ get_maybe(repr(s.name)); });          //
                         std::vector<CaptureField> fields;                                                                         //
                         bindRef(B, c.value, maybeLayout, fields);                                                                 //
                         return fields;                                                                                            //
@@ -305,9 +307,11 @@ public:
                    << magic_enum::enum_name(c.locality) << ")\n";
     }
 
-    const auto table = bundle.layouts                                                                 //
-                       | values()                                                                     //
-                       | map([&](auto &sl) { return std::pair{polyast::Type::Struct(sl.name), sl}; }) //
+    const auto table = bundle.layouts                                                                                       //
+                       | values()                                                                                           //
+                       | map([&](auto &sl) {                                                                                //
+                           return std::pair{polyast::Type::Struct(polyast::Sym({sl.name}), {}, {}, {}), sl};                //
+                         })                                                                                                 //
                        | to<std::unordered_map>();
 
     auto structLayoutsArray = TypeLayout.global(M, [&](OpBuilder &B0) {
@@ -377,7 +381,7 @@ public:
                                   ^ or_else([&]() {
                                       return t.template get<polyast::Type::Struct>() ^ flat_map([&](auto &s) {
                                                return structNameToTypeLayoutIdx                                                     //
-                                                      ^ get_maybe(s.name)                                                           //
+                                                      ^ get_maybe(repr(s.name))                                                     //
                                                       ^ map([&](auto layoutIdx) { return structLayoutsArray.gep(B0, layoutIdx); }); //
                                              });
                                     }); //

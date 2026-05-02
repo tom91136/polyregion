@@ -1,7 +1,7 @@
 package polyregion.prism
 
 import cats.syntax.all.*
-import polyregion.ast.{ScalaSRR as p, *, given}
+import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.scalalang.*
 import polyregion.ast.Traversal.*
 
@@ -83,7 +83,13 @@ object compiletime {
         } yield mt -> st
       }
       mirrorToSourceTable = typeLUT.toMap
-      data <- witnesses.traverse(derivePackedMirrorsImpl(_, _)(mirrorToSourceTable))
+      // Per-witness table: when two source classes share a mirror class (e.g. ListBuffer and
+      // polyregion.scalalang.Buffer both mirror to MutableSeq), the global toMap drops one
+      // entry. For each witness, override the current mirror→source mapping so the rewrites
+      // in this mirror's body resolve to *its* source class, not whichever one toMap picked.
+      data <- witnesses.zip(typeLUT).traverse { case ((s, m), (mSym, sSym)) =>
+        derivePackedMirrorsImpl(s, m)(mirrorToSourceTable + (mSym -> sSym))
+      }
     } yield data) match {
       case Left(e)                   => throw e
       case Right(xs: List[p.Mirror]) =>
@@ -165,12 +171,12 @@ object compiletime {
 
           rewrittenMirror =
             fn.copy(
-              name = sourceSignature.name,
-              // Get rid of the intrinsic$ capture introduced by calling stubs in that object.
-              moduleCaptures = fn.moduleCaptures.filter(_.named.tpe match {
-                case p.Type.Struct(sym, _, _, _) => sym != p.Sym(IntrinsicName)
-                case _                           => true
-              })
+              name = sourceSignature.name
+              // Note: previously filtered out the intrinsic$ moduleCapture, but the function body
+              // still references intrinsics$ until IntrinsifyPass runs in opt passes. Keeping the
+              // capture allows the unopt verifier (which runs before intrinsify) to pass. After
+              // IntrinsifyPass replaces the call with a direct intrinsic, the capture becomes
+              // unused and is removed by DeadArgEliminationPass / LLVM dead-arg elimination.
 //              receiver = sourceSignature.receiver.map(p.Named("this", _)),
 //              tpeVars = fn.tpeVars
 //                        ++ fn.receiver.map(_.tpe).fold(Nil){
@@ -185,14 +191,14 @@ object compiletime {
 //          rewrittenMirror2 = rewrittenMirror.copy(
 //              body = rewrittenMirror.body.flatMap(_.mapTerm({
 //
-//                case s @ p.Term.Select(Nil, p.Named("this", tpe))    if fn.receiver.exists(_.tpe == tpe) =>
+//                case s @ p.Expr.Select(Nil, p.Named("this", tpe))    if fn.receiver.exists(_.tpe == tpe) =>
 //
 //                  sourceSignature.receiver match {
-//                    case Some(x) => p.Term.Select(Nil, p.Named("this", x))
+//                    case Some(x) => p.Expr.Select(Nil, p.Named("this", x))
 //                    case None    => ??? // replacement doesn't have a receiver!?
 //                  }
 //
-//                case s @ p.Term.Select(p.Named("this", tpe) :: xs, y)  => // if fn.receiver.exists(_.tpe == tpe) =>
+//                case s @ p.Expr.Select(p.Named("this", tpe) :: xs, y)  => // if fn.receiver.exists(_.tpe == tpe) =>
 //
 ////                  if fn.receiver.exists(_.tpe == tpe)
 //
@@ -203,7 +209,7 @@ object compiletime {
 //                  //   ???
 //
 //                  sourceSignature.receiver match {
-//                    case Some(x) => p.Term.Select(p.Named("this", x) :: xs, y)
+//                    case Some(x) => p.Expr.Select(p.Named("this", x) :: xs, y)
 //                    case None    => ??? // replacement doesn't have a receiver!?
 //                  }
 //                case x =>                   x
@@ -313,7 +319,7 @@ object compiletime {
       (_, _, dependentStructs, _) <-
         Compiler.compileAndReplaceStructDependencies(
           sink,
-          p.Function(p.Sym("_dummy_"), Nil, None, Nil, Nil, Nil, p.Type.Nothing, Nil, p.Function.Kind.Exported),
+          p.Function(p.Sym("_dummy_"), Nil, None, Nil, Nil, Nil, p.Type.Nothing, Nil, Set(p.Function.Attr.Exported)),
           deps
         )(Map.empty)
 
@@ -324,7 +330,7 @@ object compiletime {
     } yield p.Mirror(
       source = p.Sym(sourceSym.fullName),
       sourceParents = parents,
-      struct = mirrorStruct,
+      structDef = mirrorStruct,
       functions = functions,
       dependencies = dependentStructs.toList
     )

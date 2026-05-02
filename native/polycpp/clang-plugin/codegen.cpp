@@ -34,9 +34,26 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   auto stmts = r.scoped([&](auto &r) { remapper.handleStmt(body, r); }, false, rtnTpe, parentDef);
   stmts.push_back(Stmt::Return(Expr::Unit0Const()));
 
-  auto recv = Arg(Named("#this", Type::Ptr(Type::Struct(parentDef->name), {}, TypeSpace::Global())), {});
+  auto recv = Arg(Named("#this", Type::Ptr(Type::Struct(parentDef->name, {}, {}, {}), {}, TypeSpace::Global())), {});
 
-  auto args = functor.parameters() | map([&](const clang::ParmVarDecl *x) {
+  // The kernel ABI provides a leading thread-id (Int64) arg that polyc auto-prepends for Entry
+  // functions. The lambdas wrapping offload regions also take a single int64 tid as their first
+  // (and only) parameter — which the runtime supplies via the same slot. To avoid duplicating that
+  // arg, drop the lambda's leading int64 from the function's arg list and instead alias it to
+  // `__tid` at the top of the body so any references to the lambda's parameter name resolve.
+  Vec<Stmt::Any> tidAliases;
+  Vec<const clang::ParmVarDecl *> userParams;
+  for (auto *p : functor.parameters()) userParams.push_back(p);
+  if (!userParams.empty() && remapper.handleType(userParams.front()->getType(), r).is<Type::IntS64>()) {
+    auto name = userParams.front()->getName().str();
+    if (!name.empty()) {
+      tidAliases.push_back(Stmt::Var(Named(name, Type::IntS64()), Expr::Select({}, Named("__tid", Type::IntS64()))));
+    }
+    userParams.erase(userParams.begin());
+  }
+  stmts.insert(stmts.begin(), tidAliases.begin(), tidAliases.end());
+
+  auto args = userParams | map([&](const clang::ParmVarDecl *x) {
                 auto local = x->attrs() | exists([](const clang::Attr *a) {
                                if (auto annotated = llvm::dyn_cast<clang::AnnotateAttr>(a); annotated) {
                                  return annotated->getAnnotation() == "__polyregion_local";
@@ -55,18 +72,20 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
               | append(recv) //
               | to_vector();
 
-  auto f0 = std::make_shared<Function>("_main", args, rtnTpe, stmts,
+  auto f0 = std::make_shared<Function>(Sym({"_main"}), std::vector<std::string>{}, std::optional<Arg>{}, args,
+                                       std::vector<Arg>{}, std::vector<Arg>{}, rtnTpe, stmts,
                                        std::set<FunctionAttr::Any>{FunctionAttr::Exported(), FunctionAttr::Entry()});
 
-  auto program = Program(r.structs | values() | map([&](auto &x) { return *x; }) | to_vector(),
-                         r.functions | values() | append(f0) | map([&](auto &x) { return *x; }) | to_vector());
+  auto program = Program(*f0,
+                         r.functions | values() | map([&](auto &x) { return *x; }) | to_vector(),
+                         r.structs | values() | map([&](auto &x) { return *x; }) | to_vector());
 
   auto exportedStructNames =
-      program.functions                                                                                                                   //
+      (std::vector<Function>{program.entry} ^ concat(program.functions))                                                                  //
       | filter([](auto &f) { return f.attrs ^ contains(FunctionAttr::Exported()); })                                                      //
       | flat_map([](auto &f) { return f.args; })                                                                                          //
       | collect([](auto &a) { return extractComponent(a.named.tpe) ^ flat_map([](auto &t) { return t.template get<Type::Struct>(); }); }) //
-      | map([](auto &s) { return s.name; })                                                                                               //
+      | map([](auto &s) { return repr(s.name); })                                                                                         //
       | to<std::unordered_set>();
 
   auto layouts = r.layouts | values() | map([&](auto &x) { return std::pair{exportedStructNames ^ contains(x->name), *x}; }) | to_vector();

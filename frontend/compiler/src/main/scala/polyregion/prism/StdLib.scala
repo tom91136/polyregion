@@ -1,6 +1,6 @@
 package polyregion.prism
 
-import polyregion.ast.{ScalaSRR as p, *}
+import polyregion.ast.{PolyAST as p, *}
 import polyregion.prism.compiletime.*
 import polyregion.scalalang.intrinsics
 import polyregion.scalalang.intrinsics.TypedBuffer
@@ -52,7 +52,7 @@ object StdLib {
     val E: Double  = 2.7182818284590452354
     val Pi: Double = 3.14159265358979323846
 
-    def sin(x: Double): Double  = intrinsics.cos(x)
+    def sin(x: Double): Double  = intrinsics.sin(x)
     def cos(x: Double): Double  = intrinsics.cos(x)
     def tan(x: Double): Double  = intrinsics.tan(x)
     def asin(x: Double): Double = intrinsics.asin(x)
@@ -160,6 +160,7 @@ object StdLib {
     def update(i: Int, x: A): Unit = data.update(i, x)
   }
 
+
   // trait Function0[+R] { def apply(): R }
 
   // trait Function1[-T1, +R] {
@@ -224,6 +225,43 @@ object StdLib {
       //     }
       //   }
       // ),
+      // polyregion.scalalang.Buffer (sealed trait with primitive-specific subclasses) shares the
+      // MutableSeq mirror shape with ListBuffer. The per-witness mirror table override (in
+      // derivePackedTypeMirrorsImpl) lets both witnesses target MutableSeq without conflict.
+      witness[polyregion.scalalang.Buffer[?], MutableSeq[?]](
+        { case (q @ given Quotes, xs) =>
+          xs match {
+            case '{ $xs: polyregion.scalalang.Buffer[a] } =>
+              '{
+                new MutableSeq[a](
+                  $xs.length,
+                  new intrinsics.TypedBuffer[a] {
+                    override def apply(i: scala.Int): a                 = $xs(i)
+                    override def update(i: scala.Int, x: a): scala.Unit = $xs(i) = x
+                  }
+                )
+              }
+          }
+        },
+        { case (q @ given Quotes, xs) =>
+          xs match {
+            case '{ $xs: MutableSeq[t] } =>
+              '{ polyregion.scalalang.Buffer.tabulate[t]($xs.length_)($xs(_)) }
+          }
+        },
+        { case (q @ given Quotes, ys, xs) =>
+          ((ys, xs): @unchecked) match {
+            case ('{ $ys: polyregion.scalalang.Buffer[Any] }, '{ $xs: MutableSeq[Any] }) =>
+              '{
+                var i = 0
+                while (i < $xs.length) {
+                  $ys(i) = $xs(i)
+                  i += 1
+                }
+              }
+          }
+        }
+      ),
       witness[scala.collection.mutable.ListBuffer[?], MutableSeq[?]](
         { case (q @ given Quotes, xs) =>
           xs match {
@@ -249,12 +287,23 @@ object StdLib {
 
         },
         { case (q @ given Quotes, ys, xs) =>
-          (ys, xs) match {
+          ((ys, xs): @unchecked) match {
             case ('{ $ys: scala.collection.mutable.ListBuffer[Any] }, '{ $xs: MutableSeq[Any] }) =>
-              '{ var i = 0; while (i < $xs.length) $ys(i) = $xs(i) }
+              '{
+                var i = 0
+                while (i < $xs.length) {
+                  $ys(i) = $xs(i)
+                  i += 1
+                }
+              }
           }
         }
       ),
+      // FIXME ArrayBuffer mirror: same shape as ListBuffer would work, but adding a third
+      // source-class binding to MutableSeq breaks downstream uses of the global
+      // mirrorToSourceTable (only one source per mirror is kept, dropping the existing Buffer
+      // / ListBuffer entries in some rewrite paths). Re-enable once the rewriter consults
+      // per-call-site bindings everywhere.
       // witness[scala.Tuple2[?, ?], Tuple2[?, ?]]( //
       //   { case (_ @ given Quotes, x) =>
       //     x match { case '{ $x: scala.Tuple2[t0, t1] } => '{ new Tuple2[t0, t1]($x._1, $x._2) } }
@@ -311,13 +360,17 @@ object StdLib {
         },
         { case (_ @ given Quotes, x, _) => '{ () } }
       )
+      // Note: a `java.lang.Math` mirror would be useful for `import java.lang.Math.*; sin(x)`,
+      // but `witness[java.lang.Math.type, ...]` doesn't compile — `Math` is a Java class, not a
+      // Scala module, so it has no `.type` value. A proper fix would need a different binding
+      // pathway (raw symbol lookup) in `derivePackedMirrorsImpl`.
     )
   )
 
   final def Functions: Map[p.Signature, (p.Function, Set[p.StructDef])] =
     Mirrors
       .map(_._1)
-      .flatMap(m => m.functions.map(f => f -> Set(m.struct.copy(name = m.source))))
+      .flatMap(m => m.functions.map(f => f -> Set(m.structDef.copy(name = m.source))))
       .map { case (f, clsDeps) => f.signature -> (f, clsDeps) }
       .toMap
 
@@ -325,7 +378,7 @@ object StdLib {
     Mirrors
       .map(_._1)
       .map { x =>
-        x.source -> x.struct.copy(name = x.source)
+        x.source -> x.structDef.copy(name = x.source)
       }
       .toMap
 

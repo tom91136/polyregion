@@ -37,7 +37,9 @@ Function parallel_ops::forEach(const std::string &fnName, const Named &capture, 
          fold_total(
              [&](const CPUParams &p) {
                return Function(
-                   fnName, {Arg("#group"_(Long), {}), Arg(capture, {}), Arg(Named("#unused", Ptr(Byte)), {})}, Unit,                   //
+                   Sym({fnName}), std::vector<std::string>{}, std::optional<Arg>{},
+                   std::vector<Arg>{Arg("#group"_(Long), {}), Arg(capture, {}), Arg(Named("#unused", Ptr(Byte)), {})},
+                   std::vector<Arg>{}, std::vector<Arg>{}, Unit,                                                                       //
                    Stmts{let("#i") = 0_(Long),                                                                                         //
                          ForRange("#i"_(Long), Index(p.begins, "#group"_(Long), Long), Index(p.ends, "#group"_(Long), Long), 1_(Long), //
                                   {
@@ -48,9 +50,11 @@ Function parallel_ops::forEach(const std::string &fnName, const Named &capture, 
                    {FunctionAttr::Entry(), FunctionAttr::Exported()});
              },
              [&](const GPUParams &p) {
-               return Function(fnName, {Arg(capture, {}), Arg(Named("#unused", Ptr(Byte)), {})}, Unit, //
-                               Stmts{let("#gs") = Cast(call(Spec::GpuGlobalSize(0_(UInt))), Long),     //
-                                     let("#i") = 0_(Long),                                             //
+               return Function(Sym({fnName}), std::vector<std::string>{}, std::optional<Arg>{},
+                               std::vector<Arg>{Arg(capture, {}), Arg(Named("#unused", Ptr(Byte)), {})}, std::vector<Arg>{},
+                               std::vector<Arg>{}, Unit,                                            //
+                               Stmts{let("#gs") = Cast(call(Spec::GpuGlobalSize(0_(UInt))), Long), //
+                                     let("#i") = 0_(Long),                                         //
                                      ForRange("#i"_(Long), Cast(call(Spec::GpuGlobalIdx(0_(UInt))), Long), p.tripCount, "#gs"_(Long),
                                               {
                                                   mappedInduction(p.induction, p.lowerBound, p.step), //
@@ -95,7 +99,9 @@ Function parallel_ops::reduce(const std::string &fnName, const Named &capture, c
          fold_total(
              [&](const CPUParams &p) {
                return Function(
-                   fnName, {Arg("#group"_(Long), {}), Arg(capture, {}), Arg(unmanaged, {})}, Unit, //
+                   Sym({fnName}), std::vector<std::string>{}, std::optional<Arg>{},
+                   std::vector<Arg>{Arg("#group"_(Long), {}), Arg(capture, {}), Arg(unmanaged, {})}, std::vector<Arg>{},
+                   std::vector<Arg>{}, Unit, //
                    Stmts{Block(reductions ^ map([](auto &r) { return r.partialVar(); })),
                          let("#i") = 0_(Long),                                                                                         //
                          ForRange("#i"_(Long), Index(p.begins, "#group"_(Long), Long), Index(p.ends, "#group"_(Long), Long), 1_(Long), //
@@ -128,8 +134,10 @@ Function parallel_ops::reduce(const std::string &fnName, const Named &capture, c
                    });
 
                return Function(
-                   fnName, {Arg(capture, {}), Arg(unmanaged, {}), Arg(Named("#localMem", Ptr(Byte, {}, Local)), {})}, Unit, //
-                   Stmts{let("#gs") = Cast(call(Spec::GpuGlobalSize(0_(UInt))), Long),                                      //
+                   Sym({fnName}), std::vector<std::string>{}, std::optional<Arg>{},
+                   std::vector<Arg>{Arg(capture, {}), Arg(unmanaged, {}), Arg(Named("#localMem", Ptr(Byte, {}, Local)), {})},
+                   std::vector<Arg>{}, std::vector<Arg>{}, Unit,                       //
+                   Stmts{let("#gs") = Cast(call(Spec::GpuGlobalSize(0_(UInt))), Long), //
                          let("#i") = 0_(Long),                                                                              //
                          Block(reductions ^ map([](auto &r) { return r.partialVar(); })),                                   //
                          ForRange("#i"_(Long), Cast(call(Spec::GpuGlobalIdx(0_(UInt))), Long), p.tripCount, "#gs"_(Long),

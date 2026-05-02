@@ -2,7 +2,7 @@
 
 // import cats.syntax.all.*
 // import polyregion.ast.Traversal.*
-// import polyregion.ast.{ScalaSRR as p, *, given}
+// import polyregion.ast.{PolyAST as p, *, given}
 
 // object DynamicDispatchPass extends ProgramPass {
 
@@ -11,7 +11,7 @@
 //     val (polymorphic, monomorphic) =
 //       program.defs.partition(c => c.parents.nonEmpty || program.defs.exists(_.parents.contains(c.name)))
 
-//     val withClassTag = polymorphic.map(s => s.copy(members = p.Named("_#cls", p.Type.Int) :: s.members))
+//     val withClassTag = polymorphic.map(s => s.copy(members = p.Named("_#cls", p.Type.IntS32) :: s.members))
 
 //     def clsTag(x: p.Type.Struct) = x.name.hashCode
 
@@ -50,7 +50,7 @@
 //           clsFns(recvTpe).filter(_.name.last == simpleName).map(recvTpe -> _)
 //         }
 //         // If we do find any, synthesise the dynamic dispatch function
-//         val clsTagArg = p.Arg(p.Named("cls", p.Type.Int))
+//         val clsTagArg = p.Arg(p.Named("cls", p.Type.IntS32))
 //         val objArg    = p.Arg(p.Named("obj", baseFn.receiver.get.named.tpe))
 
 //         if (overridingFns.isEmpty) Nil
@@ -61,16 +61,16 @@
 //             (elseBr: List[p.Stmt]) =>
 //               p.Stmt.Cond(
 //                 cond = p.Expr.IntrOp(
-//                   p.Intr.LogicEq(p.Term.Select(Nil, clsTagArg.named), p.Term.IntConst(clsTag(tpe)))
+//                   p.Intr.LogicEq(p.Expr.Select(Nil, clsTagArg.named), p.Expr.IntS32Const(clsTag(tpe)))
 //                 ),
 //                 trueBr =
-//                   p.Stmt.Var(p.Named(s"recv_$i", tpe), Some(p.Expr.Cast(p.Term.Select(Nil, objArg.named), tpe))) ::
+//                   p.Stmt.Var(p.Named(s"recv_$i", tpe), Some(p.Expr.Cast(p.Expr.Select(Nil, objArg.named), tpe))) ::
 //                     p.Stmt.Return(
 //                       p.Expr.Invoke(
 //                         name = fn.name,
 //                         tpeArgs = baseFn.tpeVars.map(p.Type.Var(_)),
-//                         receiver = Some(p.Term.Select(Nil, p.Named(s"recv_$i", tpe))),
-//                         args = baseFn.args.map(arg => p.Term.Select(Nil, arg.named)),
+//                         receiver = Some(p.Expr.Select(Nil, p.Named(s"recv_$i", tpe))),
+//                         args = baseFn.args.map(arg => p.Expr.Select(Nil, arg.named)),
 //                         captures = Nil,
 //                         rtn = baseFn.rtn
 //                       )
@@ -95,7 +95,7 @@
 //                   :: p.Stmt.Return(p.Expr.SpecOp(p.Spec.Assert))
 //                   :: Nil
 //               ),
-//               kind = p.Function.Kind.Exported
+//               attrs = Set(p.Function.Attr.Exported)
 //             )
 //           ) :: Nil
 //         }
@@ -109,9 +109,9 @@
 //     def insertClassTags(f: p.Function) = f.modifyAll[p.Stmt] {
 //       case stmt @ p.Stmt.Var(local @ p.Named(_, s @ p.Type.Struct(name, _, _, _)), None)
 //           if polymorphicSyms.contains(name) =>
-//         val rhs        = p.Term.IntConst(clsTag(s))
-//         val clsSelect  = p.Term.Select(local :: Nil, p.Named("_#cls", p.Type.Int))
-//         val setClsHash = p.Stmt.Mut(clsSelect, p.Expr.Alias(rhs), false)
+//         val rhs        = p.Expr.IntS32Const(clsTag(s))
+//         val clsSelect  = p.Expr.Select(local :: Nil, p.Named("_#cls", p.Type.IntS32))
+//         val setClsHash = p.Stmt.Mut(clsSelect, rhs, false)
 //         p.Stmt.Block(stmt :: setClsHash :: Nil)
 //       case x => x
 //     }
@@ -119,7 +119,7 @@
 //     log.info(s"LUT: ", lut.map { case ((t, s), v) => s"$t($s) => ${v.signatureRepr}" }.toList*)
 
 //     def replaceDispatches(f: p.Function) = f.modifyAll[p.Expr] {
-//       case ivk @ p.Expr.Invoke(name, tpeArgs, Some(recv: p.Term.Select), args, captures, rtn) =>
+//       case ivk @ p.Expr.Invoke(name, tpeArgs, Some(recv: p.Expr.Select), args, captures, rtn) =>
 //         log.info(s"Replace: ${ivk.repr}", lut.get((recv.tpe, name.last)).toString)
 
 //         def isSuperCall(t: p.Type) = (t, f.receiver) match {
@@ -132,7 +132,7 @@
 //           case Some(dynamicDispatchFn) =>
 //             if (isSuperCall(recv.tpe.erased)) ivk
 //             else {
-//               val clsTagSelect = p.Term.Select(recv.init :+ recv.last, p.Named("_#cls", p.Type.Int))
+//               val clsTagSelect = p.Expr.Select(recv.init :+ recv.last, p.Named("_#cls", p.Type.IntS32))
 //               p.Expr.Invoke(dynamicDispatchFn.name, tpeArgs, None, clsTagSelect :: recv :: args, captures, rtn)
 //             }
 //           case _ => ivk

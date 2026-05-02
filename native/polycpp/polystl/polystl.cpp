@@ -116,7 +116,8 @@ POLYREGION_EXPORT void polystl::details::dispatchManaged(const size_t global, co
                                            {});
   log(DebugLevel::Debug, "<%s:%s:%zu> Submitted", __func__, moduleId, global);
   polyrt::currentQueue->enqueueWaitBlocking();
-  // allocations.syncRemoteToLocal(functorData);
+  // Sync device-side writes to captured pointer-targets back before the device alloc is freed.
+  allocations.syncRemoteToLocal(functorData);
   allocations.disassociate(functorData);
   log(DebugLevel::Debug, "<%s:%s:%zu> Done", __func__, moduleId, global);
 }

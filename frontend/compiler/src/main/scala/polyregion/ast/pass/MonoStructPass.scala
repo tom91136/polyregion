@@ -2,7 +2,7 @@ package polyregion.ast.pass
 
 import cats.syntax.all.*
 import polyregion.ast.Traversal.*
-import polyregion.ast.{ScalaSRR as p, *, given}
+import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.prism.Prism
 
 object MonoStructPass extends BoundaryPass[Map[p.Sym, p.Sym]] {
@@ -11,8 +11,8 @@ object MonoStructPass extends BoundaryPass[Map[p.Sym, p.Sym]] {
     println(">MonoStructPass")
 
     val structsInFunction: List[p.Type.Struct] =
-      program.entry
-        .collectWhere[p.Type] { case s: p.Type.Struct => s }
+      ((program.entry :: program.functions)
+        .flatMap(_.collectWhere[p.Type] { case s: p.Type.Struct => s }))
         .distinct
 
     println(s"In f = ${structsInFunction} ${program.defs}")
@@ -40,17 +40,40 @@ object MonoStructPass extends BoundaryPass[Map[p.Sym, p.Sym]] {
 
     println(s"[Rep] Table:\n${replacementTable.map((k, v) => s"\t${k.repr} => ${v.repr}").mkString("\n")}")
 
-    // do the replacement outside in
+    // do the replacement inside-out: recurse into args first, then look up. This way structs whose
+    // args were captured pre-rename in structsInFunction (e.g. `ListBuffer[A=Float2_orig]` while
+    // the table key has the same `ListBuffer[A=Float2_orig]` shape) resolve when called inside
+    // a function body whose receiver type already reflects post-replacement args
+    // (`ListBuffer[A=Float2_mono]`). Replacing args first canonicalises the key for lookup, then
+    // we also try the post-replacement shape against the table built from pre-replacement keys.
     def doReplacement(t: p.Type): p.Type = t match {
       case s @ p.Type.Struct(name, tpeVars, args, parents) =>
-        println(s"[Rep] ${s.repr} => ${replacementTable.get(s)}")
-        replacementTable.get(s) match {
+        val newArgs        = args.map(doReplacement(_))
+        val withRenamedArgs: p.Type.Struct = p.Type.Struct(name, tpeVars, newArgs, parents)
+        // First try the original shape (matches when the body still has pre-rename args).
+        val byOriginal = replacementTable.get(s)
+        // Then try the renamed shape (matches when the body already has post-rename args).
+        val byRenamed = replacementTable.get(withRenamedArgs)
+        // Finally try matching by name+arity, scanning the table for a keyed struct whose
+        // post-replacement args equal newArgs (handles cases where the table key has yet
+        // a different inner-arg shape but represents the same monomorphic instance).
+        val byName =
+          if (byOriginal.isDefined || byRenamed.isDefined) None
+          else
+            replacementTable.collectFirst {
+              case (key, sdef) if key.name == name && key.args.size == newArgs.size &&
+                  key.args.map(applyTypeReplacement) == newArgs =>
+                sdef
+            }
+        println(s"[Rep] ${s.repr} (recovered=${withRenamedArgs.repr}) => ${byOriginal.orElse(byRenamed).orElse(byName)}")
+        byOriginal.orElse(byRenamed).orElse(byName) match {
           case Some(sdef) => p.Type.Struct(sdef.name, Nil, Nil, sdef.parents)
-          case None       => p.Type.Struct(name, tpeVars, args.map(doReplacement(_)), parents)
+          case None       => withRenamedArgs
         }
       case a @ p.Type.Ptr(c, l, s) => p.Type.Ptr(doReplacement(c), l, s)
       case a                       => a
     }
+    def applyTypeReplacement(t: p.Type): p.Type = doReplacement(t)
 
     val rootStructDefs = monoStructDefs
       .map(_._2) // make sure we handle nested structs

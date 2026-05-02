@@ -3,11 +3,12 @@ package polyregion.scalalang
 import cats.syntax.all.*
 import polyregion.ast.Traversal.*
 import polyregion.ast.pass.*
-import polyregion.ast.{ScalaSRR as p, *, given}
+import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.prism.StdLib
 
 import java.nio.file.Paths
 import scala.quoted.Expr
+import scala.util.Try
 
 object Compiler {
 
@@ -83,7 +84,8 @@ object Compiler {
       sink: Log,
       deps: q.FnWitnesses,
       missingDefDefs: Map[q.Symbol, q.DefDef],
-      existing: List[p.Function]
+      existing: List[p.Function],
+      renameMap: Map[q.Symbol, p.Sym] = Map.empty
   )(
       fnLut: Map[p.Signature, (p.Function, Set[p.StructDef])] = Map.empty
   ): Result[(List[p.Function], Set[p.StructDef], Set[q.Symbol])] = for {
@@ -118,7 +120,34 @@ object Compiler {
                   println(s">>>> xs=${remaining.keys.toList.map(x => x.fullName)}")
 
                   val defDef = sym.tree.asInstanceOf[q.DefDef]
-                  matchingSignatures(fnLut.keys, target).map(s => fnLut(s)).toList match {
+                  // scala.Array's apply/update/length etc. have stub `throw new Error` bodies in the
+                  // stdlib (the JVM lowers their call sites specially). The term compiler can't
+                  // handle `throw`, but IntrinsifyPass handles xs.apply/update/length on Ptr<T>
+                  // receivers directly at IR level. So just skip compiling these — they'll never
+                  // be called as functions.
+                  val isScalaArrayMethod = sym.maybeOwner.fullName == "scala.Array"
+                  if (isScalaArrayMethod)
+                    (xs, depss, clsDepss, moduleSymDepss).success
+                  else {
+                  // For overrides synthesized by depsWithOverrides, the target ivk's receiver is the
+                  // base type (e.g. Buffer for an xs.apply call), not the override's owner (ListBuffer).
+                  // If a mirror exists for the override's owner, the target's name/receiver won't match
+                  // any fnLut key. As a fallback (only used when the primary signature match finds
+                  // nothing), also match by the sym's own name when sym differs from the target's name.
+                  val symFullName = p.Sym(sym.fullName)
+                  val primaryMatches = matchingSignatures(fnLut.keys, target).map(s => fnLut(s)).toList
+                  val symNameMatch =
+                    if (primaryMatches.nonEmpty || symFullName == target.name) Nil
+                    else
+                      fnLut.keys
+                        .filter(s =>
+                          s.name == symFullName &&
+                            s.tpeVars.size == target.tpeArgs.size &&
+                            s.args.size == target.args.size
+                        )
+                        .map(fnLut(_))
+                        .toList
+                  (primaryMatches ::: symNameMatch).distinctBy(_._1.name) match {
                     case Nil => // We found no replacement, log it and keep going.
                       val actualDefDef = missingDefDefs.getOrElse(sym, defDef)
 
@@ -147,16 +176,26 @@ object Compiler {
                           log <- log
                             .subLog(s"Compile (no replacement): ${target.repr} (${actualDefDef.symbol.fullName})")
                             .success
-                          (fn0, deps) <- compileFn(log, actualDefDef, Map.empty)
+                          (fn0Raw, deps) <- compileFn(log, actualDefDef, Map.empty)
+                          // Apply rename for symbols that collide on fullName (e.g. multiple
+                          // `_$$anon` classes from given declarations) so each compiled override
+                          // gets a unique IR name.
+                          fn0 = renameMap.get(actualDefDef.symbol) match {
+                            case Some(unique) => fn0Raw.copy(name = unique)
+                            case None         => fn0Raw
+                          }
                           (fn1, wit0, clsDeps, moduleDeps) <- compileAndReplaceStructDependencies(log, fn0, deps)(
                             StdLib.StructDefs
                           )
                         } yield (
                           fn1 :: xs ::: deps.resolvedFunctions,
+                          // Add this function's body-discovered deps to next iteration's queue.
+                          // Avoid duplicates: skip if already in `remaining` (this-iteration queue)
+                          // or `depss` (already-queued-for-next-iter). Importantly, do NOT filter
+                          // against `deps.functions` itself — that's the SOURCE of wit0, so
+                          // filtering against it would empty wit0 entirely and starve the loop.
                           depss ++ wit0.filterNot(x =>
-                            deps.functions.keySet.contains(
-                              x._1
-                            ) // make sure we don't add any new dependent functions that was already in the seed; avoid compiling the same thing twice
+                            remaining.contains(x._1) || depss.contains(x._1)
                           ),
                           clsDeps ++ clsDepss,
                           moduleDeps ++ moduleSymDepss
@@ -188,6 +227,7 @@ object Compiler {
                           .map("\t" + _._1.repr)
                           .mkString("\n")}".fail
                   }
+                  }
                 case xs =>
                   s"Ambiguous overload for ${target.repr}, the following existing resolved function all match the signature:\n${xs
                       .map("\t" + _._1.repr)
@@ -212,7 +252,7 @@ object Compiler {
   (
       sink: Log,
       f: q.DefDef,
-      scope: Map[q.Symbol, p.Term] = Map.empty,
+      scope: Map[q.Symbol, p.Expr] = Map.empty,
       intrinsify: Boolean = true
   ): Result[(p.Function, q.Dependencies)] =
     for {
@@ -252,7 +292,7 @@ object Compiler {
       // Finally, we compile the def body like a closure or just return the term if we have one.
       (rhsStmts, rhsDeps, rhsThisCls) <- fnRtnTerm match {
         case Some(t) =>
-          ((p.Stmt.Return(p.Expr.Alias(t)) :: Nil, q.Dependencies(), None)).success
+          ((p.Stmt.Return(t) :: Nil, q.Dependencies(), None)).success
         case None =>
           compileTerm(
             sink = log,
@@ -283,7 +323,7 @@ object Compiler {
         termCaptures = Nil,
         rtn = fnRtnTpe,
         body = rhsStmts,
-        kind = p.Function.Kind.Exported
+        attrs = Set(p.Function.Attr.Exported)
       )
       _ = log.info("Result", compiledFn.repr)
     } yield (compiledFn, deps)
@@ -292,11 +332,11 @@ object Compiler {
       sink: Log,
       term: q.Term,
       root: q.Symbol,
-      scope: Map[q.Symbol, p.Term],
+      scope: Map[q.Symbol, p.Expr],
       tpeArgs: List[p.Type],
       intrinsify: Boolean = true
   ): Result[(List[p.Stmt], p.Type, q.Dependencies, Option[(q.ClassDef, p.Type.Struct)])] = for {
-    log <- sink.subLog(s"Compile term: ${term.pos.sourceFile.name}:${term.pos.startLine}~${term.pos.endLine}").success
+    log <- sink.subLog(s"Compile term: ${scala.util.Try(s"${term.pos.sourceFile.name}:${term.pos.startLine}~${term.pos.endLine}").getOrElse("<no pos>")}").success
     _ = log.info("Body (AST)", pprint.tokenize(term, indent = 1, showFieldNames = true).mkString)
     _ = log.info("Body (Ascii)", term.show(using q.Printer.TreeAnsiCode))
 
@@ -306,7 +346,7 @@ object Compiler {
       if (termTpe != termValue.tpe) {
         s"Term type ($termTpe) is not the same as term value type (${termValue.tpe}), term was $termValue".fail
       } else ().success
-    statements          = c.stmts :+ p.Stmt.Return(p.Expr.Alias(termValue))
+    statements          = c.stmts :+ p.Stmt.Return(termValue)
     (optStmts, optDeps) = (statements, c.deps)
     // if (intrinsify) runLocalOptPass(statements, c.deps)
     // else (statements, c.deps)
@@ -362,9 +402,9 @@ object Compiler {
           case t                             => t
         }
 
-      replaceTpeForTerm = (t: p.Term) =>
+      replaceTpeForTerm = (t: p.Expr) =>
         t match {
-          case s @ p.Term.Select(_, _) => s.modifyAll[p.Type](replaceTpe(_))
+          case s @ p.Expr.Select(_, _) => s.modifyAll[p.Type](replaceTpe(_))
           case t                       => t
         }
 
@@ -408,7 +448,7 @@ object Compiler {
 
     // And then outline the term.
     (captures, wit) <- RefOutliner.outline(log, term)
-    (capturedNames, captureScope) = captures.foldMap[(List[(p.Named, q.Ref)], List[(q.Symbol, p.Term)])] {
+    (capturedNames, captureScope) = captures.foldMap[(List[(p.Named, q.Ref)], List[(q.Symbol, p.Expr)])] {
       case (root, ref, value -> tpe) =>
         (value, tpe) match {
           case (Some(x), _) => (Nil, (ref.symbol -> x) :: Nil)
@@ -418,7 +458,7 @@ object Compiler {
               case i @ q.Ident(_)     => s"_capture_${i.name}_${i.pos.startLine}_"
             }
             val named = p.Named(name, t)
-            ((named -> ref) :: Nil, (ref.symbol -> p.Term.Select(Nil, named)) :: Nil)
+            ((named -> ref) :: Nil, (ref.symbol -> p.Expr.Select(Nil, named)) :: Nil)
         }
     }
 
@@ -445,7 +485,7 @@ object Compiler {
         exprThisCls.map((_, tpe) => p.Named("this", tpe))).map(p.Arg(_)),
       rtn = exprTpe,
       body = exprStmts,
-      kind = p.Function.Kind.Exported
+      attrs = Set(p.Function.Attr.Exported, p.Function.Attr.Entry)
     )
 
     symbolToMacroDefinedDefDefs = q
@@ -485,16 +525,58 @@ object Compiler {
     )
 
     // We mark all potentially required *concrete* virtual methods in the universe.
-    allClassSymbols = exprDeps.classes.map(_._1).toList
+    // Also walk each captured class's tree for nested ClassDefs (e.g. anonymous classes from
+    // `given Monoid[Int] = new Monoid { ... }`); they're the concrete dispatch targets for
+    // abstract trait method calls and don't show up directly in exprDeps.classes since they're
+    // only the runtime types of given fields, not statically-named call receivers.
+    allClassSymbols = {
+      val direct = exprDeps.classes.map(_._1).toList
+      val nested = direct.flatMap(c =>
+        Try(q.collectTree[q.Symbol](c.tree) {
+          case cd: q.ClassDef if cd.symbol != c => List(cd.symbol)
+          case _                                => Nil
+        }).getOrElse(Nil)
+      )
+      (direct ++ nested).distinct
+    }
     depsWithOverrides = exprDeps.functions.flatMap { (sym, ivks) =>
-      (sym -> ivks) :: allClassSymbols
-        .map(sym.overridingSymbol(_))
-        .filter(s => !s.isNoSymbol && s.isDefDef)
+      val symOwner = sym.maybeOwner
+      val overridesFromHierarchy = allClassSymbols
+        .filter(c =>
+          !symOwner.isNoSymbol && c.isClassDef &&
+            Try(c.typeRef.baseClasses.contains(symOwner)).getOrElse(false)
+        )
+        .flatMap { c =>
+          val viaOverridingSymbol = sym.overridingSymbol(c) match {
+            case s if !s.isNoSymbol && s.isDefDef => Some(s)
+            case _                                => None
+          }
+          val viaBodyWalk = Try(c.tree).toOption.collect { case cd: q.ClassDef => cd }.flatMap { cd =>
+            cd.body.collectFirst { case dd: q.DefDef if dd.name == sym.name => dd.symbol }
+          }
+          viaOverridingSymbol.orElse(viaBodyWalk).toList
+        }
         .map(_.tree)
         .collect { case x: q.DefDef => x.symbol }
-        .filter(_ != sym) // don't add the same one again
-        .map(_ -> ivks)
+        .filter(_ != sym)
+      ((sym -> ivks) :: overridesFromHierarchy.map(_ -> ivks))
     }.toMap
+
+    // Anonymous-class symbols (e.g. multiple `given Monoid[X] = new Monoid {...}` in the same
+    // owner) all collapse to the same `fullName` (e.g. `polyregion.GivenSuite._$$anon`). The IR
+    // function name is built from that fullName, so distinct concrete impls collide. Synthesise
+    // a unique IR name per (anon class symbol, abstract method) using the symbol's identity.
+    syntheticOverrideNames: Map[q.Symbol, p.Sym] = {
+      val anonClassSymbols = allClassSymbols.filter(c => c.fullName.contains("$$anon"))
+      anonClassSymbols.flatMap { c =>
+        val classSyntheticName = s"${c.fullName}_${System.identityHashCode(c).toHexString}"
+        Try(c.tree).toOption.collect { case cd: q.ClassDef => cd }.toList.flatMap { cd =>
+          cd.body.collect { case dd: q.DefDef =>
+            dd.symbol -> p.Sym(s"${classSyntheticName}.${dd.name}")
+          }
+        }
+      }.toMap
+    }
 
     // We also mark all parents of those virtual methods, these are abstract
     abstractDefs = exprDeps.functions
@@ -521,7 +603,7 @@ object Compiler {
         body = p.Stmt.Comment("abstract definition, assert")
           // :: p.Stmt.Return(p.Expr.SpecOp(p.Spec.Assert))
           :: Nil,
-        kind = p.Function.Kind.Exported
+        attrs = Set(p.Function.Attr.Exported)
       )
       log.info(s"Abstract (trait function)", sig.repr)
       fn
@@ -540,11 +622,16 @@ object Compiler {
       exprDeps
     )(StdLib.StructDefs)
 
-    // We got a compiled fn now, now compile all dependencies.
+    // We got a compiled fn now, now compile all dependencies. Pass the synthetic-name rename
+    // map so anonymous-class overrides get distinct IR names per (class symbol, method).
     (allRootDependentFns, allRootDependentStructs, allRootDependentModuleSymbols) <-
-      compileAllDependencies(log, rootDependentFns, symbolToMacroDefinedDefDefs, exprDeps.resolvedFunctions)(
-        StdLib.Functions
-      )
+      compileAllDependencies(
+        log,
+        rootDependentFns,
+        symbolToMacroDefinedDefDefs,
+        exprDeps.resolvedFunctions,
+        syntheticOverrideNames
+      )(StdLib.Functions)
 
     _ = log.info("A ", rootDependentFns.map(x => x.toString).toList*)
 
@@ -576,10 +663,111 @@ object Compiler {
       symbol.fullName.replace('.', '_') -> removeThisFromRef(symbol)
     }.toMap ++ exprThisCls.map((clsDef, _) => "this" -> q.This(clsDef.symbol)).toMap
 
+    // Build a dispatch table for abstract trait methods. For each (abstract method, concrete
+    // class extending its declarer with applied type args), map (abstract method name, parent
+    // applied as IR struct) → (concrete method name, concrete class struct). At IR rewrite
+    // time this lets us redirect `monoid.mempty()` (where monoid: Monoid[Int]) to
+    // `anon$1.mempty(monoid.cast[anon$1])`, treating the unique anonymous-class override as
+    // the static dispatch target.
+    dispatchTable: Map[(p.Sym, p.Type.Struct), (p.Sym, p.Type.Struct)] = {
+      val entries = abstractDefs.flatMap { abstractDefDef =>
+        val abstractOwnerSym = abstractDefDef.symbol.maybeOwner
+        if (abstractOwnerSym.isNoSymbol) Nil
+        else
+          allClassSymbols.flatMap { classSym =>
+            val baseClasses = Try(classSym.typeRef.baseClasses).getOrElse(Nil)
+            val isSubclass = !classSym.isNoSymbol && classSym.isClassDef && classSym != abstractOwnerSym &&
+              baseClasses.contains(abstractOwnerSym)
+            if (!isSubclass) Nil
+            else {
+              val overrideSymOpt = Try(classSym.tree).toOption.collect { case cd: q.ClassDef => cd } match {
+                case Some(cd) =>
+                  cd.body.collectFirst {
+                    case dd: q.DefDef if dd.name == abstractDefDef.name => dd.symbol
+                  }
+                case None => None
+              }
+              overrideSymOpt match {
+                case Some(overrideSym) if !overrideSym.isNoSymbol && overrideSym != abstractDefDef.symbol =>
+                  val parentRepr = classSym.typeRef.baseType(abstractOwnerSym)
+                  val parentTry  = Retyper.typer0(parentRepr).toOption.flatMap {
+                    case ((_, s: p.Type.Struct), _) => Some(s)
+                    case _                          => None
+                  }
+                  val classTry = Retyper.typer0(classSym.typeRef).toOption.flatMap {
+                    case ((_, s: p.Type.Struct), _) => Some(s)
+                    case _                          => None
+                  }
+                  (parentTry, classTry) match {
+                    case (Some(parentStruct), Some(classStruct)) =>
+                      // If the override symbol got a synthetic rename (because its class fullName
+                      // collides with sibling anon classes), use the synthetic name as the dispatch
+                      // target so it matches the renamed compiled function.
+                      val concreteName =
+                        syntheticOverrideNames.getOrElse(overrideSym, p.Sym(overrideSym.fullName))
+                      val key: (p.Sym, p.Type.Struct) =
+                        (p.Sym(abstractDefDef.symbol.fullName), parentStruct.copy(parents = Nil))
+                      val value: (p.Sym, p.Type.Struct) = (concreteName, classStruct)
+                      List(key -> value)
+                    case _ => Nil
+                  }
+                case _ => Nil
+              }
+            }
+          }
+      }
+      entries.toMap
+    }
+    _ = log.info(
+      s"Dispatch table",
+      dispatchTable.toList.map { case ((abs, recv), (concrete, cls)) =>
+        s"${abs.repr} on ${recv.repr} -> ${concrete.repr} on ${cls.repr}"
+      }*
+    )
+
+    // Apply dispatch: walk every Invoke and redirect abstract calls to their concrete
+    // implementations, inserting an upcast on the receiver so the concrete fn's signature
+    // accepts it. The verifier accepts struct downcasts when the source has the target as
+    // a parent (anon$1 has Monoid as a parent).
+    rewriteDispatch = (fn: p.Function) =>
+      fn.modifyAll[p.Expr] {
+        case ivk: p.Expr.Invoke =>
+          ivk.receiver.map(_.tpe) match {
+            case Some(s: p.Type.Struct) =>
+              dispatchTable.get((ivk.name, s.copy(parents = Nil))) match {
+                case Some((concreteName, classStruct)) =>
+                  val newReceiver = ivk.receiver.map(r => p.Expr.Cast(r, classStruct))
+                  ivk.copy(name = concreteName, receiver = newReceiver)
+                case None => ivk
+              }
+            case _ => ivk
+          }
+        case x => x
+      }
+
+    rootFn0 = rewriteDispatch(rootFn)
+    allRootDependentFns0 = allRootDependentFns.map(rewriteDispatch)
+    resolvedFunctions0   = exprDeps.resolvedFunctions.map(rewriteDispatch)
+
+    // The dispatch rewrite introduces Casts to anonymous-class structs that weren't part of
+    // the original struct deps (the anon classes are only the runtime types of given fields,
+    // not directly captured types). Synthesise their StructDefs (empty bodies, parents from
+    // the class hierarchy) so the LLVM backend can resolve the type at the Cast site.
+    dispatchAnonStructDefs <- dispatchTable.values
+      .map(_._2)
+      .toList
+      .distinct
+      .traverse { classStruct =>
+        // We can't go from a Type.Struct back to a q.Symbol cleanly, so synthesise the StructDef
+        // directly from the Type.Struct. Anon classes used in dispatch are opaque (no fields),
+        // matching how Monoid is handled.
+        p.StructDef(classStruct.name, classStruct.tpeVars, Nil, classStruct.parents).success
+      }
+
     unopt = p.Program(
-      rootFn,
-      abstractFnsWithAssertBody ::: allRootDependentFns ::: exprDeps.resolvedFunctions,
-      (rootDependentStructs ++ allRootDependentStructs).toList
+      rootFn0,
+      abstractFnsWithAssertBody ::: allRootDependentFns0 ::: resolvedFunctions0,
+      ((rootDependentStructs ++ allRootDependentStructs).toList ++ dispatchAnonStructDefs).distinct
     )
     _ = log.info(
       s"Program compiled (unpot), structures = ${unopt.defs.size}, functions = ${unopt.functions.size}"
@@ -611,6 +799,72 @@ object Compiler {
 
     opt                                <- runProgramOptPasses(unopt, optPassLog)
     (monomorphicToPolymorphicSym, opt) <- MonoStructPass(opt, log).success
+
+    // Wire up Invoke captures and propagate captures transitively up to the entry. compileFn
+    // doesn't know what captures a function will need until its body is compiled (in a separate
+    // RemapContext from the entry/caller). After opt passes finalise per-function capture lists,
+    // walk the program: ensure every Invoke passes the captures its callee needs, and that the
+    // entry's own captures cover the transitive closure of all module captures any reachable
+    // function needs.
+    opt <- {
+      val fnByName: Map[p.Sym, p.Function] = (opt.entry :: opt.functions).map(fn => fn.name -> fn).toMap
+      // Transitive module-capture types each function needs, including those from its callees.
+      def computeTransitiveModuleCaps(): Map[p.Sym, List[p.Arg]] = {
+        var current: Map[p.Sym, List[p.Arg]] =
+          fnByName.view.mapValues(_.moduleCaptures).toMap
+        var changed = true
+        while (changed) {
+          changed = false
+          val next = current.map { case (sym, caps) =>
+            val fn = fnByName(sym)
+            val callees = fn.collectWhere[p.Expr] { case ivk: p.Expr.Invoke => ivk.name }
+            val merged = callees
+              .flatMap(c => current.getOrElse(c, Nil))
+              .foldLeft(caps) { (acc, cap) =>
+                if (acc.exists(_.named.tpe == cap.named.tpe)) acc else acc :+ cap
+              }
+            sym -> merged
+          }
+          if (next != current) { changed = true; current = next }
+        }
+        current
+      }
+      val transitive = computeTransitiveModuleCaps()
+      val entryAllCaps = transitive.getOrElse(opt.entry.name, opt.entry.moduleCaptures)
+      val newEntry = opt.entry.copy(moduleCaptures = entryAllCaps)
+      val entryCapByTpe: Map[p.Type, p.Named] =
+        (newEntry.moduleCaptures ++ newEntry.termCaptures).map(arg => arg.named.tpe -> arg.named).toMap
+
+      // Update each function's own moduleCaptures to its transitive set, so when its body
+      // forwards a capture into a callee Invoke, the capture name is in scope.
+      def updateFnCaps(fn: p.Function): p.Function = {
+        val transitiveCaps = transitive.getOrElse(fn.name, fn.moduleCaptures)
+        if (transitiveCaps == fn.moduleCaptures) fn
+        else fn.copy(moduleCaptures = transitiveCaps)
+      }
+
+      def patchFn(fn: p.Function): p.Function = {
+        val ownCapByTpe: Map[p.Type, p.Named] =
+          (fn.moduleCaptures ++ fn.termCaptures).map(arg => arg.named.tpe -> arg.named).toMap
+        fn.modifyAll[p.Expr] {
+          case ivk: p.Expr.Invoke if ivk.captures.isEmpty =>
+            val needed = transitive.getOrElse(ivk.name, Nil) ++
+              fnByName.get(ivk.name).map(_.termCaptures).getOrElse(Nil)
+            if (needed.isEmpty) ivk
+            else
+              ivk.copy(captures = needed.map { arg =>
+                val tpe   = arg.named.tpe
+                val named = ownCapByTpe.get(tpe).orElse(entryCapByTpe.get(tpe)).getOrElse(arg.named)
+                p.Expr.Select(Nil, named)
+              })
+          case x => x
+        }
+      }
+      opt.copy(
+        entry = patchFn(newEntry),
+        functions = opt.functions.map(fn => patchFn(updateFnCaps(fn)))
+      ).success
+    }
 
     _ = println(log.render().mkString("\n"))
 
@@ -658,10 +912,15 @@ object Compiler {
     // List[(StructDef, Option[Prism])]
   } yield (
     captured.map((arg, term) => arg.named -> term),
-    // For each def, we find the original name before monomorphic specialisation and then resolve the term mirrors
+    // For each def, we find the original name before monomorphic specialisation and then resolve the term mirrors.
+    // Some defs (LLVM-side opaque placeholders, abstract typeclasses) have no entry in the
+    // monomorphic-to-polymorphic table — those have no prism, so just skip them.
     opt.defs.flatMap { monomorphicDef =>
-      val polymorphicSym = monomorphicToPolymorphicSym(monomorphicDef.name)
-      StdLib.Mirrors.collect { case prism @ (m, _) if m.source == polymorphicSym => monomorphicDef.name -> prism }
+      monomorphicToPolymorphicSym.get(monomorphicDef.name) match {
+        case Some(polymorphicSym) =>
+          StdLib.Mirrors.collect { case prism @ (m, _) if m.source == polymorphicSym => monomorphicDef.name -> prism }
+        case None => Nil
+      }
     }.toMap,
     monomorphicToPolymorphicSym,
     opt

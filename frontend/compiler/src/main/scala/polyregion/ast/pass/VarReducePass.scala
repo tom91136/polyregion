@@ -1,7 +1,7 @@
 package polyregion.ast.pass
 
 import cats.syntax.all.*
-import polyregion.ast.{ScalaSRR as p, *, given}
+import polyregion.ast.{PolyAST as p, *, given}
 import polyregion.ast.Traversal.*
 
 object VarReducePass extends ProgramPass {
@@ -17,13 +17,13 @@ object VarReducePass extends ProgramPass {
     val (n, reduced) = doUntilNotEq(f) { (_, f) =>
       f.collectFirst_[p.Stmt] {
         // Find the first var declaration that points to an alias
-        case source @ p.Stmt.Var(name, Some(p.Expr.Alias(that: p.Term.Select))) => (source, name, that)
+        case source @ p.Stmt.Var(name, Some(that: p.Expr.Select)) => (source, name, that)
       } match {
         case Some((source, name, that)) =>
           // Then  replace all references to that var with the alias itself
-          val modified = f.modifyAll[p.Term] {
-            case x @ p.Term.Select(`name` :: ys, y) => p.Term.Select(that.init ::: that.last :: ys, y)
-            case x @ p.Term.Select(Nil, `name`)     => that
+          val modified = f.modifyAll[p.Expr] {
+            case x @ p.Expr.Select(`name` :: ys, y) => p.Expr.Select(that.init ::: that.last :: ys, y)
+            case x @ p.Expr.Select(Nil, `name`)     => that
             case x                                  => x
           }
           if (modified == f) f // No reference replaced, keep this dangling reference

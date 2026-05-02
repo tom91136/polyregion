@@ -7,7 +7,7 @@ lazy val bindingsDir = (nativeDir / "bindings" / "jvm").getAbsoluteFile
 
 // /home/tom/polyregion/native/cmake-build-debug-clang/bindings/jvm/libpolyregion-compiler-jvm.so
 
-lazy val scala3Version = "3.5.2"
+lazy val scala3Version = "3.7.4"
 lazy val catsVersion   = "2.12.0"
 lazy val munitVersion  = "1.0.2"
 

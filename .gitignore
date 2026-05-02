@@ -204,3 +204,8 @@ typings/
 *.dylib
 *.bin
 *.msgpack
+
+.claude/
+.codex
+.ivy
+.boot

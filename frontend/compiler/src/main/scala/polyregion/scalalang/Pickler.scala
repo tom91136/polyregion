@@ -1,7 +1,7 @@
 package polyregion.scalalang
 
 import cats.syntax.all.*
-import polyregion.ast.{ScalaSRR as p, *}
+import polyregion.ast.{PolyAST as p, *}
 import polyregion.jvm.{compiler as ct, runtime as rt}
 import polyregion.prism.StdLib
 
@@ -12,44 +12,44 @@ import polyregion.prism.StdLib.MutableSeq
 object Pickler {
 
   def liftTpe(using q: Quotes)(t: p.Type) = t match {
-    case p.Type.Bool   => Type.of[Boolean]
-    case p.Type.Char   => Type.of[Char]
-    case p.Type.Byte   => Type.of[Byte]
-    case p.Type.Short  => Type.of[Short]
-    case p.Type.Int    => Type.of[Int]
-    case p.Type.Long   => Type.of[Long]
-    case p.Type.Float  => Type.of[Float]
-    case p.Type.Double => Type.of[Double]
-    case p.Type.Unit   => Type.of[Unit]
+    case p.Type.Bool1   => Type.of[Boolean]
+    case p.Type.IntU16   => Type.of[Char]
+    case p.Type.IntS8   => Type.of[Byte]
+    case p.Type.IntS16  => Type.of[Short]
+    case p.Type.IntS32    => Type.of[Int]
+    case p.Type.IntS64   => Type.of[Long]
+    case p.Type.Float32  => Type.of[Float]
+    case p.Type.Float64 => Type.of[Double]
+    case p.Type.Unit0   => Type.of[Unit]
     case illegal       => throw new RuntimeException(s"liftTpe: Cannot lift $illegal")
   }
 
   def tpeAsRuntimeTpe(t: p.Type): rt.Type = t match {
-    case p.Type.Bool               => rt.Type.BOOL
-    case p.Type.Byte               => rt.Type.BYTE
-    case p.Type.Char               => rt.Type.CHAR
-    case p.Type.Short              => rt.Type.SHORT
-    case p.Type.Int                => rt.Type.INT
-    case p.Type.Long               => rt.Type.LONG
-    case p.Type.Float              => rt.Type.FLOAT
-    case p.Type.Double             => rt.Type.DOUBLE
+    case p.Type.Bool1               => rt.Type.BOOL
+    case p.Type.IntS8               => rt.Type.BYTE
+    case p.Type.IntU16               => rt.Type.CHAR
+    case p.Type.IntS16              => rt.Type.SHORT
+    case p.Type.IntS32                => rt.Type.INT
+    case p.Type.IntS64               => rt.Type.LONG
+    case p.Type.Float32              => rt.Type.FLOAT
+    case p.Type.Float64             => rt.Type.DOUBLE
     case p.Type.Ptr(_, _, _)       => rt.Type.PTR
     case p.Type.Struct(_, _, _, _) => rt.Type.PTR
-    case p.Type.Unit               => rt.Type.VOID
+    case p.Type.Unit0               => rt.Type.VOID
     case illegal                   => throw new RuntimeException(s"tpeAsRuntimeTpe: Illegal $illegal")
   }
 
   def readPrim(using q: Quotes) //
   (source: Expr[java.nio.ByteBuffer], byteOffset: Expr[Int], tpe: p.Type): Expr[Any] = tpe match {
-    case p.Type.Float  => '{ $source.getFloat($byteOffset) }
-    case p.Type.Double => '{ $source.getDouble($byteOffset) }
-    case p.Type.Bool   => '{ if ($source.get($byteOffset) == 0) false else true }
-    case p.Type.Byte   => '{ $source.get($byteOffset) }
-    case p.Type.Char   => '{ $source.getChar($byteOffset) }
-    case p.Type.Short  => '{ $source.getShort($byteOffset) }
-    case p.Type.Int    => '{ $source.getInt($byteOffset) }
-    case p.Type.Long   => '{ $source.getLong($byteOffset) }
-    case p.Type.Unit   => '{ $source.get($byteOffset); () }
+    case p.Type.Float32  => '{ $source.getFloat($byteOffset) }
+    case p.Type.Float64 => '{ $source.getDouble($byteOffset) }
+    case p.Type.Bool1   => '{ if ($source.get($byteOffset) == 0) false else true }
+    case p.Type.IntS8   => '{ $source.get($byteOffset) }
+    case p.Type.IntU16   => '{ $source.getChar($byteOffset) }
+    case p.Type.IntS16  => '{ $source.getShort($byteOffset) }
+    case p.Type.IntS32    => '{ $source.getInt($byteOffset) }
+    case p.Type.IntS64   => '{ $source.getLong($byteOffset) }
+    case p.Type.Unit0   => '{ $source.get($byteOffset); () }
     case x =>
       throw new RuntimeException(s"Cannot get ${x.repr} from buffer, it is not a primitive type")
 
@@ -57,15 +57,15 @@ object Pickler {
 
   def writePrim(using q: Quotes) //
   (target: Expr[java.nio.ByteBuffer], byteOffset: Expr[Int], tpe: p.Type, value: Expr[Any]): Expr[Unit] = tpe match {
-    case p.Type.Float  => '{ $target.putFloat($byteOffset, ${ value.asExprOf[Float] }) }
-    case p.Type.Double => '{ $target.putDouble($byteOffset, ${ value.asExprOf[Double] }) }
-    case p.Type.Bool   => '{ $target.put($byteOffset, if (!${ value.asExprOf[Boolean] }) 0.toByte else 1.toByte) }
-    case p.Type.Byte   => '{ $target.put($byteOffset, ${ value.asExprOf[Byte] }) }
-    case p.Type.Char   => '{ $target.putChar($byteOffset, ${ value.asExprOf[Char] }) }
-    case p.Type.Short  => '{ $target.putShort($byteOffset, ${ value.asExprOf[Short] }) }
-    case p.Type.Int    => '{ $target.putInt($byteOffset, ${ value.asExprOf[Int] }) }
-    case p.Type.Long   => '{ $target.putLong($byteOffset, ${ value.asExprOf[Long] }) }
-    case p.Type.Unit   => '{ $target.put($byteOffset, 0.toByte) }
+    case p.Type.Float32  => '{ $target.putFloat($byteOffset, ${ value.asExprOf[Float] }) }
+    case p.Type.Float64 => '{ $target.putDouble($byteOffset, ${ value.asExprOf[Double] }) }
+    case p.Type.Bool1   => '{ $target.put($byteOffset, if (!${ value.asExprOf[Boolean] }) 0.toByte else 1.toByte) }
+    case p.Type.IntS8   => '{ $target.put($byteOffset, ${ value.asExprOf[Byte] }) }
+    case p.Type.IntU16   => '{ $target.putChar($byteOffset, ${ value.asExprOf[Char] }) }
+    case p.Type.IntS16  => '{ $target.putShort($byteOffset, ${ value.asExprOf[Short] }) }
+    case p.Type.IntS32    => '{ $target.putInt($byteOffset, ${ value.asExprOf[Int] }) }
+    case p.Type.IntS64   => '{ $target.putLong($byteOffset, ${ value.asExprOf[Long] }) }
+    case p.Type.Unit0   => '{ $target.put($byteOffset, 0.toByte) }
     case x =>
       throw new RuntimeException(
         s"Cannot put ${x.repr} into buffer, it is not a primitive type (source is `${value.show}`)"
@@ -93,9 +93,17 @@ object Pickler {
       .getOrElse(q.report.errorAndAbort(s"Unseen sdef ${sdef.repr}, known reprs: ${layouts}"))
     val layoutTable = layout.members.map(m => m.name -> m).toMap
     val members = sdef.members.map { named =>
+      val fieldName = named.symbol
       layoutTable
-        .get(named.symbol)
-        .map(m => StructMapping.Member(named.tpe, m.sizeInBytes, m.offsetInBytes, q.Select.unique(_, named.symbol)))
+        .get(fieldName)
+        .map(m =>
+          StructMapping.Member(
+            named.tpe,
+            m.sizeInBytes,
+            m.offsetInBytes,
+            ((recv: q.Term) => q.Select.unique(recv, fieldName): q.Term)
+          )
+        )
         .getOrElse(q.report.errorAndAbort(s"Layout $layout is missing ${named.repr} from ${sdef.repr}"))
     }
 
@@ -130,15 +138,13 @@ object Pickler {
   ): Map[p.StructDef, q.TypeRepr] = {
     def go(using q: Quoted)(sdef: p.StructDef, repr: q.TypeRepr, added: Set[p.Sym]): List[(p.StructDef, q.TypeRepr)] = {
       val added0 = added + sdef.name
-      (sdef, repr.widenTermRefByName) :: sdef.members.flatMap {
-        case (p.Named(_, p.Type.Struct(name, _, _, _))) if added0.contains(name) => Nil
-        case (p.Named(member, p.Type.Struct(name, _, _, _))) =>
-          lut(name) match {
-            case (sdef, None)                     => go(sdef, q.TermRef(repr, member), added0)
-            case (sdef, Some((_, (from, to, x)))) =>
-              // If we have a prism of struct def that has a nested structs, apply the prism then find out the type repr.
-              // This is required because the mirrored struct will almost certainly have a different layout compare the source;
-              // the field names and type will not match.
+      def descend(name: p.Sym, member: String): List[(p.StructDef, q.TypeRepr)] =
+        if (added0.contains(name)) Nil
+        else
+          lut.get(name) match {
+            case None                                   => Nil
+            case Some((sdef, None))                     => go(sdef, q.TermRef(repr, member), added0)
+            case Some((sdef, Some((_, (from, to, x))))) =>
               given Quotes = q.underlying
               repr.widenTermRefByName.asType match {
                 case '[t] =>
@@ -147,7 +153,28 @@ object Pickler {
                   go(sdef, q.TermRef(prismRepr, member), added0)
               }
           }
-        case _ => Nil
+      // For array-element struct types (`Type.Ptr(Struct, ...)`) we have no parent TermRef path
+      // to descend through. The parent struct here is always a single-type-param container
+      // (ListBuffer[A], Buffer[A], Array[A], MutableSeq[A]) where the lone type arg IS the array
+      // element type — extract it from the parent's AppliedType so the element's write/read
+      // helpers get registered.
+      def descendArrayElement(name: p.Sym): List[(p.StructDef, q.TypeRepr)] = {
+        if (added0.contains(name)) Nil
+        else {
+          val elemReprOpt = repr.widenTermRefByName match {
+            case q.AppliedType(_, head :: _) => Some(head)
+            case _                           => None
+          }
+          (lut.get(name), elemReprOpt) match {
+            case (Some((sdef, None)), Some(elemRepr)) => go(sdef, elemRepr, added0)
+            case _                                    => Nil
+          }
+        }
+      }
+      (sdef, repr.widenTermRefByName) :: sdef.members.flatMap {
+        case p.Named(member, p.Type.Struct(name, _, _, _))                  => descend(name, member)
+        case p.Named(_, p.Type.Ptr(p.Type.Struct(name, _, _, _), _, _))     => descendArrayElement(name)
+        case _                                                              => Nil
       }
     }
     go(sdef, repr, Set()).toMap
@@ -187,52 +214,81 @@ object Pickler {
     type PtrMapTpe = scala.collection.mutable.Map[Any, Long]
     type ObjMapTpe = scala.collection.mutable.Map[Long, Any]
 
-    val writeSymbols = reprs.map((sdef, repr) =>
-      sdef -> mkMethodSym(
+    // For struct types that appear with multiple distinct generic instantiations in the same
+    // capture set (e.g. `Monoid[Int]`, `Monoid[Float]`, `Monoid[Float2]` all sharing the polymorphic
+    // `Monoid` StructDef), reprs only tracks ONE instantiation — whichever ended up last in the
+    // merged map. Pinning the read/write method signatures to that one would reject the other
+    // call sites at typecheck time. Widening to `Any` for empty-member structs (which are opaque
+    // to the kernel anyway) lets all instantiations call the same method safely.
+    def methodParamRepr(sdef: p.StructDef, repr: q.TypeRepr): q.TypeRepr =
+      if (sdef.members.isEmpty) q.TypeRepr.of[Any] else repr
+    // Index by struct name (p.Sym) rather than StructDef instance: callers' `lut(name)` can return
+    // a StructDef whose `parents` (or other derived fields) differ from the one stored in `reprs`,
+    // even when they refer to the same logical type — using the name as the key avoids that
+    // identity mismatch.
+    val writeSymbols: Map[p.Sym, q.Symbol] = reprs.toList.map((sdef, repr) =>
+      sdef.name -> mkMethodSym(
         s"write_${sdef.name.repr}",
         q.TypeRepr.of[Long],
-        "root"   -> repr,
+        "root"   -> methodParamRepr(sdef, repr),
         "ptrMap" -> q.TypeRepr.of[PtrMapTpe]
       )
-    )
+    ).toMap
 
-    val readSymbols = reprs.map((sdef, repr) =>
-      sdef -> mkMethodSym(
+    val readSymbols: Map[p.Sym, q.Symbol] = reprs.toList.map((sdef, repr) =>
+      sdef.name -> mkMethodSym(
         s"read_${sdef.name.repr}",
-        repr,
-        "root"   -> repr,
+        methodParamRepr(sdef, repr),
+        "root"   -> methodParamRepr(sdef, repr),
         "ptr"    -> q.TypeRepr.of[Long],
         "ptrMap" -> q.TypeRepr.of[PtrMapTpe],
         "objMap" -> q.TypeRepr.of[ObjMapTpe]
       )
-    )
+    ).toMap
 
-    val updateSymbols = reprs.map((sdef, repr) =>
-      sdef -> mkMethodSym(
+    val updateSymbols: Map[p.Sym, q.Symbol] = reprs.toList.map((sdef, repr) =>
+      sdef.name -> mkMethodSym(
         s"update_${sdef.name.repr}",
         q.TypeRepr.of[Unit],
-        "root"   -> repr,
+        "root"   -> methodParamRepr(sdef, repr),
         "ptr"    -> q.TypeRepr.of[Long],
         "ptrMap" -> q.TypeRepr.of[PtrMapTpe],
         "objMap" -> q.TypeRepr.of[ObjMapTpe]
       )
-    )
+    ).toMap
 
     def allocateBuffer(size: Expr[Int]) = '{ ByteBuffer.allocateDirect($size).order(ByteOrder.nativeOrder()) }
 
     def callWrite(name: p.Sym, root: Expr[Any], ptrMap: Expr[PtrMapTpe]) =
-      q.Apply(q.Ref(writeSymbols(lut(name))), List(root.asTerm, ptrMap.asTerm)).asExprOf[Long]
+      q.Apply(q.Ref(writeSymbols(name)), List(root.asTerm, ptrMap.asTerm)).asExprOf[Long]
 
     def callRead(name: p.Sym, root: Expr[Any], ptr: Expr[Long], ptrMap: Expr[PtrMapTpe], objMap: Expr[ObjMapTpe]) =
-      q.Apply(q.Ref(readSymbols(lut(name))), List(root.asTerm, ptr.asTerm, ptrMap.asTerm, objMap.asTerm)).asExpr
+      q.Apply(q.Ref(readSymbols(name)), List(root.asTerm, ptr.asTerm, ptrMap.asTerm, objMap.asTerm)).asExpr
 
     def callUpdate(name: p.Sym, root: Expr[Any], ptr: Expr[Long], ptrMap: Expr[PtrMapTpe], objMap: Expr[ObjMapTpe]) =
-      q.Apply(q.Ref(updateSymbols(lut(name))), List(root.asTerm, ptr.asTerm, ptrMap.asTerm, objMap.asTerm))
+      q.Apply(q.Ref(updateSymbols(name)), List(root.asTerm, ptr.asTerm, ptrMap.asTerm, objMap.asTerm))
         .asExprOf[Unit]
 
+    // Moved up so writeArray/readArray can access struct mappings (for inline-struct array ABI).
+    val mappings: Map[p.Sym, StructMapping[q.Term]] =
+      reprs.keys.map(mkStructMapping(_, layouts)).map(m => m.source.name -> m).toMap
+
     def writeArray[t: Type](expr: Expr[StdLib.MutableSeq[t]], comp: p.Type, ptrMap: Expr[PtrMapTpe]): Expr[Long] = {
-      val elementSizeInBytes = tpeAsRuntimeTpe(comp).sizeInBytes()
-      '{
+      // Kernel ABI for arrays of structs: elements are stored INLINE (struct bytes packed into the
+      // data buffer at `i * structSize`, no pointer indirection). The slot size must therefore
+      // match the struct's layout size, not the pointer size.
+      val elementSizeInBytes = comp match {
+        case p.Type.Struct(name, _, _, _) if lut.contains(name) =>
+          layouts(lut(name))._1.sizeInBytes.toInt
+        case _ => tpeAsRuntimeTpe(comp).sizeInBytes()
+      }
+      if (elementSizeInBytes == 0) '{
+        // Unit-element arrays carry no data — allocate a 1-byte placeholder so the kernel still
+        // gets a valid pointer and we don't try to allocate or write into a 0-byte buffer.
+        val arrBuffer = ${ allocateBuffer('{ 1 }) }
+        $pointerOfBuffer(arrBuffer)
+      }
+      else '{
         val arrBuffer = ${ allocateBuffer('{ ${ Expr(elementSizeInBytes) } * $expr.length_ }) }
         val arrPtr    = $pointerOfBuffer(arrBuffer)
         println(
@@ -243,9 +299,25 @@ object Pickler {
           ${
             val elementOffset = '{ ${ Expr(elementSizeInBytes) } * i }
             comp match {
-              case p.Type.Struct(name, _, _, _) =>
-                val ptr = callWrite(name, '{ $expr(i) }, ptrMap)
-                writePrim('arrBuffer, elementOffset, p.Type.Long, ptr)
+              case p.Type.Struct(name, _, _, _) if lut.contains(name) =>
+                // Inline struct slot — the kernel reads/writes struct bytes directly at
+                // arrBuffer[i*structSize..(i+1)*structSize] (no pointer indirection). For non-null
+                // inputs we serialise via callWrite (which yields a struct-sized buffer pointer)
+                // and memcpy those bytes inline. For null inputs (result-holder pre-fill, see
+                // BaseSuite.offload1) we leave the slot zeroed since the kernel will overwrite it.
+                '{
+                  val elem = $expr(i)
+                  if (elem != null) {
+                    val structPtr = ${ callWrite(name, 'elem, ptrMap) }
+                    val srcBuf    = $bufferOfPointer(structPtr, ${ Expr(elementSizeInBytes) }.toLong)
+                    val tmp       = new Array[Byte](${ Expr(elementSizeInBytes) })
+                    srcBuf.duplicate().get(tmp)
+                    val dst = arrBuffer.duplicate()
+                    dst.position($elementOffset)
+                    dst.put(tmp)
+                  }
+                  ()
+                }
               case t =>
                 writePrim('arrBuffer, elementOffset, t, '{ $expr(i) })
             }
@@ -255,6 +327,7 @@ object Pickler {
         arrPtr
       }
     }
+
 
     def writeMapping[t: Type](
         root: Expr[t],
@@ -271,10 +344,33 @@ object Pickler {
           (rootAfterPrism, m.tpe) match {
             case ('{ $seq: StdLib.MutableSeq[t] }, p.Type.Ptr(comp, _, _)) =>
               val ptr = writeArray[t](seq, comp, ptrMap)
-              writePrim('buffer, memberOffset, p.Type.Long, ptr)
-            case (_, p.Type.Struct(name, _, _, _)) =>
-              val ptr = callWrite(name, m.select(rootAfterPrism.asTerm).asExpr, ptrMap)
-              writePrim('buffer, memberOffset, p.Type.Long, ptr)
+              writePrim('buffer, memberOffset, p.Type.IntS64, ptr)
+            case (_, p.Type.Struct(name, _, _, _)) if lut.get(name).exists(_.members.isEmpty) =>
+              // Empty-member struct field (e.g. trait-based mirrors like `Monoid` whose
+              // dispatch is resolved without reading the field). The backend lays these out
+              // inline as 0-byte slots, so there's nothing to write — and trying to put an
+              // 8-byte pointer at the slot's offset would overflow the parent buffer when the
+              // parent is composed of nothing but such slots.
+              '{ () }
+            case (_, p.Type.Struct(name, _, _, _)) if lut.contains(name) =>
+              // Nested struct field — laid out INLINE in the parent buffer at memberOffset
+              // (matches the kernel's `functionBoundary=false` member layout). callWrite
+              // produces a struct-sized buffer; memcpy its bytes into the parent slot.
+              val nestedSize = layouts(lut(name))._1.sizeInBytes.toInt
+              '{
+                val nestedPtr = ${ callWrite(name, m.select(rootAfterPrism.asTerm).asExpr, ptrMap) }
+                val srcBuf    = $bufferOfPointer(nestedPtr, ${ Expr(nestedSize) }.toLong)
+                val tmp       = new Array[Byte](${ Expr(nestedSize) })
+                srcBuf.duplicate().get(tmp)
+                val dst = buffer.duplicate()
+                dst.position($memberOffset)
+                dst.put(tmp)
+                ()
+              }
+            case (_, p.Type.Struct(_, _, _, _)) =>
+              // Opaque struct member (e.g. scala.Option) — kernel doesn't access this field;
+              // skip (the inline layout has no slot for it anyway).
+              '{ () }
             case (_, _) =>
               writePrim('buffer, memberOffset, m.tpe, m.select(rootAfterPrism.asTerm).asExpr)
           }
@@ -301,30 +397,43 @@ object Pickler {
         buffer: Expr[ByteBuffer],
         mapping: StructMapping[q.Term]
     ): Expr[Unit] = {
-      val elementSizeInBytes = tpeAsRuntimeTpe(comp).sizeInBytes()
-      '{
+      // Mirror the inline-struct slot sizing used in writeArray.
+      val elementSizeInBytes = comp match {
+        case p.Type.Struct(name, _, _, _) if lut.contains(name) =>
+          layouts(lut(name))._1.sizeInBytes.toInt
+        case _ => tpeAsRuntimeTpe(comp).sizeInBytes()
+      }
+      if (elementSizeInBytes == 0) '{ () } // Unit-element array — nothing to read back.
+      else '{
 
         val arrayLen = ${
           mapping.members.headOption match {
-            case Some(lengthMember) if lengthMember.tpe == p.Type.Int =>
+            case Some(lengthMember) if lengthMember.tpe == p.Type.IntS32 =>
               Pickler
-                .readPrim(buffer, Expr(lengthMember.offsetInBytes.toInt), p.Type.Int)
+                .readPrim(buffer, Expr(lengthMember.offsetInBytes.toInt), p.Type.IntS32)
                 .asExprOf[Int]
             case _ =>
               q.report.errorAndAbort(s"Illegal structure while encoding read for member ${mapping} ")
           }
         }
 
-        val arrPtr    = ${ readPrim(buffer, memberOffset, p.Type.Long).asExprOf[Long] }
+        val arrPtr    = ${ readPrim(buffer, memberOffset, p.Type.IntS64).asExprOf[Long] }
         val arrBuffer = $bufferOfPointer(arrPtr, ${ Expr(elementSizeInBytes) } * arrayLen)
         var i         = 0
         while (i < arrayLen) {
           $seq(i) = ${
             val elementOffset = '{ ${ Expr(elementSizeInBytes) } * i }
             comp match {
-              case p.Type.Struct(name, _, _, _) =>
-                val arrElemPtr = readPrim('arrBuffer, elementOffset, p.Type.Long).asExprOf[Long]
-                callRead(name, '{ $seq(i) }, arrElemPtr, ptrMap, objMap).asExprOf[t]
+              case p.Type.Struct(name, _, _, _) if lut.contains(name) =>
+                // Element bytes live INLINE at arrBuffer[i*structSize]. Reconstruct the struct
+                // directly via readMapping using the inline element address — bypassing callRead
+                // since the result-holder slot was never written by the host (so ptrMap.get(root)
+                // would be None and readMethod would throw).
+                val structMapping = mappings(name)
+                '{
+                  val elemPtr = arrPtr + ${ elementOffset }.toLong
+                  ${ readMapping[t]('elemPtr, ptrMap, objMap, structMapping) }
+                }
               case t =>
                 readPrim('arrBuffer, elementOffset, t).asExprOf[t]
             }
@@ -378,24 +487,29 @@ object Pickler {
                     q.report.errorAndAbort("Missing write prism for array type, something isn't right here")
                 }
 
-              case (_, p.Type.Struct(name, _, _, _)) =>
-                val structPtr = readPrim('buffer, memberOffset, p.Type.Long).asExprOf[Long]
-
-                if (false) { // TODO mut?
-                  q.Assign(
-                    m.select(root.asTerm),
-                    callRead(name, m.select(root.asTerm).asExpr, structPtr, ptrMap, objMap).asTerm
-                  ).asExprOf[Unit]
-                } else {
-                  // Don't update if there's a prism
-                  if (!mapping.write.isDefined) {
-                    callUpdate(name, m.select(root.asTerm).asExpr, structPtr, ptrMap, objMap)
-                  } else '{ () }
-                }
+              case (_, p.Type.Struct(name, _, _, _)) if lut.contains(name) =>
+                // Inline-laid-out nested struct field. Both empty- and non-empty-member cases
+                // resolve to a no-op here: case class fields are vals (immutable) so the kernel
+                // can't mutate them, and any same-instance update would be a fresh allocation
+                // we'd have no way to splice back into the host's owning struct anyway. Read-only
+                // captures stay consistent with the host because we never overwrite their fields.
+                '{ () }
+              case (_, p.Type.Struct(_, _, _, _)) =>
+                // Opaque struct member — kernel doesn't write this back, skip update.
+                '{ () }
               case (_, _) =>
-                if (false) { // TODO mut?
-                  q.Assign(m.select(root.asTerm), readPrim('buffer, memberOffset, m.tpe).asTerm).asExprOf[Unit]
-                } else '{ () } // otherwise no-op
+                // Primitive field write-back: only assign when the field is actually mutable
+                // (a `var`). Immutable `val` fields can't be reassigned and the kernel can't
+                // mutate them either. Also skip prismed mappings — for those the member
+                // names belong to the mirror class, not the host source type, so calling
+                // `m.select(root)` on the source would fail to typecheck.
+                if (mapping.write.isDefined) '{ () }
+                else {
+                  val fieldSel = m.select(root.asTerm)
+                  if (fieldSel.symbol.flags.is(q.Flags.Mutable))
+                    q.Assign(fieldSel, readPrim('buffer, memberOffset, m.tpe).asTerm).asExprOf[Unit]
+                  else '{ () }
+                }
             }
           }
         )
@@ -416,24 +530,37 @@ object Pickler {
 
         // See if we have a ctor:
         println(">> t= " + q.TypeRepr.of[t].widenTermRefByName.show)
-        println(">> " + q.TypeRepr.of[t].widenTermRefByName.typeSymbol.primaryConstructor.tree.show)
+        // For empty-member structs we use `Any` as the param type (see methodParamRepr); their
+        // typeSymbol is Any, which has no usable primary ctor. Treat that as the no-ctor case
+        // and just return null (the kernel doesn't read these back into a Scala value).
+        val tSym       = q.TypeRepr.of[t].widenTermRefByName.typeSymbol
+        val tIsAnyLike = tSym == q.defn.AnyClass || tSym == q.defn.ObjectClass || tSym.isNoSymbol
 
-        q.TypeRepr.of[t].widenTermRefByName.typeSymbol.primaryConstructor.tree match {
+        if (tIsAnyLike) '{ null.asInstanceOf[t] }
+        else q.TypeRepr.of[t].widenTermRefByName.typeSymbol.primaryConstructor.tree match {
           case q.DefDef("<init>", ps, _, None) if ps.forall {
                 case q.TypeParamClause(_) | q.TermParamClause(Nil) => true
                 case _                                             => false
               } => // default no-arg ctor
-            // TODO make sure we copy in the type args
-            '{
-              val root = ${
-                q.Select
-                  .unique(q.New(q.TypeIdent(q.TypeRepr.of[t].typeSymbol)), "<init>")
-                  .appliedToArgs(Nil)
-                  .asExpr
-              }.asInstanceOf[t]
-              ${ updateMapping('root, ptr, ptrMap, objMap, mapping) }
-              root
-            }
+            // For traits we can't `new T()`. Trait-typed mirror structs (e.g. a `given Monoid[A]`
+            // captured into the kernel as an opaque struct with no members) aren't modified by the
+            // kernel — just return the captured root unchanged. For concrete classes with no
+            // params, instantiate normally.
+            val sym = q.TypeRepr.of[t].widenTermRefByName.typeSymbol
+            val isTrait = sym.flags.is(q.Flags.Trait)
+            if (isTrait || mapping.members.isEmpty) {
+              '{ null.asInstanceOf[t] }
+            } else
+              '{
+                val root = ${
+                  q.Select
+                    .unique(q.New(q.TypeIdent(q.TypeRepr.of[t].typeSymbol)), "<init>")
+                    .appliedToArgs(Nil)
+                    .asExpr
+                }.asInstanceOf[t]
+                ${ updateMapping('root, ptr, ptrMap, objMap, mapping) }
+                root
+              }
           case q.DefDef("<init>", ps, _, None) =>
             // See if we can match up the type args and val args
             val typeDefs = ps.collect { case q.TypeParamClause(xs) => xs }.flatten
@@ -459,17 +586,24 @@ object Pickler {
                 case p.Type.Ptr(comp, _, _) =>
                   // readArray[t](seq, comp, ptrMap, objMap, memberOffset, 'buffer, mapping)
                   '{ ??? }.asTerm
-                case p.Type.Struct(name, _, _, _) =>
-                  val structPtr = readPrim('buffer, memberOffset, p.Type.Long).asExprOf[Long]
-                  callRead(name, '{ null }, structPtr, ptrMap, objMap).asTerm
+                case p.Type.Struct(name, _, _, _) if lut.contains(name) =>
+                  // Nested struct field laid out inline — pass `parentPtr + memberOffset` as
+                  // the struct pointer so callRead wraps the inline slice and reconstructs.
+                  val nestedPtr = '{ $ptr + ${ memberOffset }.toLong }
+                  callRead(name, '{ null }, nestedPtr, ptrMap, objMap).asTerm
+                case p.Type.Struct(_, _, _, _) =>
+                  // Opaque struct field — synthesise null since we can't reconstruct it from kernel side.
+                  '{ null }.asTerm
                 case _ => readPrim('buffer, memberOffset, m.tpe).asTerm
               }
             }
-            q.Select
+            // Use asInstanceOf[t] (not asExprOf[t]) so we don't fail when `t` is a singleton type
+            // (e.g. captured `Foo.FooConst.type`); the constructed `new Foo(...)` is structurally compatible.
+            val ctorCall = q.Select
               .unique(q.New(q.TypeIdent(q.TypeRepr.of[t].typeSymbol)), "<init>")
               .appliedToTypes(args)
               .appliedToArgs(terms)
-              .asExprOf[t]
+            '{ ${ ctorCall.asExpr }.asInstanceOf[t] }
           case _ => ???
         }
 
@@ -480,7 +614,7 @@ object Pickler {
 
     def writeMethod(symbol: q.Symbol, mapping: StructMapping[q.Term]) = mkMethodDef(symbol) {
       case List(root: q.Term, ptrMap: q.Term) =>
-        (root.asExpr, mapping.write.fold(root)((_, f) => f(root)).asExpr, ptrMap.asExpr) match {
+        ((root.asExpr, mapping.write.fold(root)((_, f) => f(root)).asExpr, ptrMap.asExpr): @unchecked) match {
           case ('{ $root: t }, '{ $rootAfterPrismExpr: u }, '{ $ptrMap: PtrMapTpe }) =>
             '{
               $ptrMap.get($root) match {
@@ -496,12 +630,12 @@ object Pickler {
 
     def readMethod(symbol: q.Symbol, mapping: StructMapping[q.Term]) = mkMethodDef(symbol) {
       case List(root: q.Term, ptr: q.Term, ptrMap: q.Term, objMap: q.Term) =>
-        (root.asExpr, ptr.asExpr, ptrMap.asExpr, objMap.asExpr) match {
+        ((root.asExpr, ptr.asExpr, ptrMap.asExpr, objMap.asExpr): @unchecked) match {
           case ('{ $rootExpr: t }, '{ $ptrExpr: Long }, '{ $ptrMap: PtrMapTpe }, '{ $objMap: ObjMapTpe }) =>
             '{
               val root: t = $rootExpr
               ($ptrMap.get(root), $ptrExpr) match {
-                case (_, 0) => null // object reassignment for var to null
+                case (_, 0) => null.asInstanceOf[t] // object reassignment for var to null
                 case (Some(writePtr), readPtr) if writePtr == readPtr => // same ptr, do the update
                   ${
                     // If we have a prism, then a full read is required as we need a concrete instance.
@@ -573,7 +707,7 @@ object Pickler {
     }
     def updateMethod(symbol: q.Symbol, mapping: StructMapping[q.Term]) = mkMethodDef(symbol) {
       case List(root: q.Term, ptr: q.Term, ptrMap: q.Term, objMap: q.Term) =>
-        (root.asExpr, ptr.asExpr, ptrMap.asExpr, objMap.asExpr) match {
+        ((root.asExpr, ptr.asExpr, ptrMap.asExpr, objMap.asExpr): @unchecked) match {
           case ('{ $rootExpr: t }, '{ $ptrExpr: Long }, '{ $ptrMap: PtrMapTpe }, '{ $objMap: ObjMapTpe }) =>
             '{
               val root = $rootExpr
@@ -597,10 +731,9 @@ object Pickler {
         }
     }
 
-    val mappings   = reprs.keys.map(mkStructMapping(_, layouts)).map(m => m.source -> m).toMap
-    val writeDefs  = writeSymbols.map((sdef, symbol) => writeMethod(symbol, mappings(sdef))).toList
-    val readDefs   = readSymbols.map((sdef, symbol) => readMethod(symbol, mappings(sdef))).toList
-    val updateDefs = updateSymbols.map((sdef, symbol) => updateMethod(symbol, mappings(sdef))).toList
+    val writeDefs  = writeSymbols.map((name, symbol) => writeMethod(symbol, mappings(name))).toList
+    val readDefs   = readSymbols.map((name, symbol) => readMethod(symbol, mappings(name))).toList
+    val updateDefs = updateSymbols.map((name, symbol) => updateMethod(symbol, mappings(name))).toList
 
     val allDefs = writeDefs ::: readDefs ::: updateDefs
 

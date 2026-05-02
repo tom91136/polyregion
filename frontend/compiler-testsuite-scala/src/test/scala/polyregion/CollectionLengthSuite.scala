@@ -17,44 +17,53 @@ class CollectionLengthSuite extends BaseSuite {
 
   {
     val xs = Buffer[Float](41, 42, 43)
-    // val n = 42.toShort
 
     val v = V(1, U(2))
-    // testExpr{
-    //   val x = v
-    //   x.a+x.a + x.u.a
-    //  }
-//    testExpr(xs.length)
-//    testExpr(xs.length + xs.size + 10)
-//    testExpr {
-//      var i = 0;
-//      while (i < xs.length) { xs(0) = i; i += 1 }
-//    }
+    testExpr{
+      val x = v
+      x.a + x.a + x.u.a
+    }
+    testExpr(xs.length)
+    // FIXME `xs.length + xs.size + 10` — though SpecialisationPass now tolerates duplicated
+    // tpeVars from inherited traits, the resulting specialised function names still mangle in
+    // `#CC_#C` placeholders, so the verifier rejects calls (function signature contains unbound
+    // tpeVars). A full fix needs the upstream Compiler/Remapper to dedupe & flatten inherited
+    // tpeArgs at the Invoke site rather than papering over in SpecialisationPass.
+    // testExpr(xs.length + xs.size + 10)
+    // FIXME `ListBuffer.update` intermittent missing-key issue.
+    // testExpr {
+    //   var i = 0;
+    //   while (i < xs.length) { xs(0) = i; i += 1 }
+    // }
   }
 
-  {
-    val xs = Array[Int](1, 2, 3)
-//    testExpr {
-//      xs.size
-//    }
-    //    testExpr(xs.length)
-//    testExpr(xs.length + xs.size + 10)
-//    testExpr {
-//      var i = 0;
-//      while (i < xs.length) { xs(0) = i; i += 1 }
-//    }
-  }
-//
-//  {
-//    val xs = ArrayBuffer[Int](1, 2, 3)
-//    testExpr(xs.size)
-//    testExpr(xs.length)
-//    testExpr(xs.length + xs.size + 10)
-//    testExpr {
-//      var i = 0;
-//      while (i < xs.length) { xs(0) = i; i += 1 }
-//    }
-//  }
+  // FIXME `scala.Array` operations (`xs.length`, `xs.size`, indexed update in a loop body)
+  // produce kernel-side Invokes of `scala.Array.length` etc. that aren't in the kernel fnLUT.
+  // Wire `Array` through StdLib (or extend IntrinsifyPass) before re-enabling.
+  // {
+  //   val xs = Array[Int](1, 2, 3)
+  //   testExpr {
+  //     xs.size
+  //   }
+  //   testExpr(xs.length)
+  //   testExpr(xs.length + xs.size + 10)
+  //   testExpr {
+  //     var i = 0;
+  //     while (i < xs.length) { xs(0) = i; i += 1 }
+  //   }
+  // }
+
+  // FIXME ArrayBuffer mirror is currently disabled in StdLib (see comment there).
+  // {
+  //   val xs = ArrayBuffer[Int](1, 2, 3)
+  //   testExpr(xs.size)
+  //   testExpr(xs.length)
+  //   testExpr(xs.length + xs.size + 10)
+  //   testExpr {
+  //     var i = 0;
+  //     while (i < xs.length) { xs(0) = i; i += 1 }
+  //   }
+  // }
 
   trait Base(val a: Int) {
     def foo(n: Int): Int // = a + n

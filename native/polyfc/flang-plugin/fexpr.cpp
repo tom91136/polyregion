@@ -19,10 +19,10 @@ Expr::Any polyfc::selectAny(const Expr::Any &base, const Named &that) {
                 return Expr::Annotated(Expr::Poison(that.tpe), {}, fmt::format("Select of non-select base `{}`", repr(base))).widen();
               });
 }
-Type::Struct polyfc::FDescExtraMirror::tpe() { return Type::Struct("FDescExtra"); }
-StructDef polyfc::FDescExtraMirror::def() const { return StructDef(tpe().name, {derivedType, typeParamValue}); }
-Type::Struct polyfc::FDimMirror::tpe() { return Type::Struct("FDim"); }
-StructDef polyfc::FDimMirror::def() const { return StructDef(tpe().name, {lowerBound, extent, stride}); }
+Type::Struct polyfc::FDescExtraMirror::tpe() { return Type::Struct(Sym({"FDescExtra"}), {}, {}, {}); }
+StructDef polyfc::FDescExtraMirror::def() const { return StructDef(tpe().name, {}, {derivedType, typeParamValue}, {}); }
+Type::Struct polyfc::FDimMirror::tpe() { return Type::Struct(Sym({"FDim"}), {}, {}, {}); }
+StructDef polyfc::FDimMirror::def() const { return StructDef(tpe().name, {}, {lowerBound, extent, stride}, {}); }
 polyfc::FBoxedMirror::FBoxedMirror(const Type::Any &t, size_t ranks)
     : addr("addr", t), //
       ranks(ranks), dims("dim", Type::Ptr(FDimMirror::tpe(), ranks, TypeSpace::Global())),
@@ -33,9 +33,11 @@ Type::Any polyfc::FBoxedMirror::comp() const {
   return addr.tpe.get<Type::Ptr>() ^ fold([&](auto &t) { return t.comp; }, [&] { return Type::Nothing().widen(); });
 }
 
-Type::Struct polyfc::FBoxedMirror::tpe() const { return Type::Struct(fmt::format("FBoxed<{}, {}>", repr(comp()), ranks)); }
+Type::Struct polyfc::FBoxedMirror::tpe() const {
+  return Type::Struct(Sym({fmt::format("FBoxed<{}, {}>", repr(comp()), ranks)}), {}, {}, {});
+}
 StructDef polyfc::FBoxedMirror::def() const {
-  return StructDef(tpe().name,
+  return StructDef(tpe().name, {},
                    std::vector{addr,        //
                                sizeInBytes, //
                                version,     //
@@ -44,7 +46,8 @@ StructDef polyfc::FBoxedMirror::def() const {
                                attributes,  //
                                extra}       //
                        ^ append(dims)       //
-                       ^ concat(derivedTypeInfo ^ to_vector()));
+                       ^ concat(derivedTypeInfo ^ to_vector()),
+                   {});
 }
 
 polyfc::FBoxed::FBoxed(const Expr::Any &base, const FBoxedMirror &aggregate) : base(base), mirror(aggregate) {}
@@ -55,8 +58,8 @@ Expr::Any polyfc::FBoxed::dims() const { return selectAny(base, mirror.dims); }
 Expr::Any polyfc::FBoxed::dimAt(const size_t rank) const {
   return Expr::Index(selectAny(base, mirror.dims), Expr::IntS64Const(rank), FDimMirror::tpe());
 }
-Type::Struct polyfc::FBoxedNoneMirror::tpe() { return Type::Struct{"FBoxedNone"}; }
-StructDef polyfc::FBoxedNoneMirror::def() const { return StructDef{tpe().name, {addr}}; }
+Type::Struct polyfc::FBoxedNoneMirror::tpe() { return Type::Struct(Sym({"FBoxedNone"}), {}, {}, {}); }
+StructDef polyfc::FBoxedNoneMirror::def() const { return StructDef(tpe().name, {}, {addr}, {}); }
 
 bool polyfc::operator==(const FBoxedMirror &lhs, const FBoxedMirror &rhs) {
   return lhs.addr == rhs.addr && lhs.ranks == rhs.ranks && lhs.dims == rhs.dims && lhs.derivedTypeInfo == rhs.derivedTypeInfo;

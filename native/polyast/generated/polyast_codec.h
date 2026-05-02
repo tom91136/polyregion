@@ -7,6 +7,8 @@
 using json = nlohmann::json;
 
 namespace polyregion::polyast { 
+[[nodiscard]] POLYREGION_EXPORT Sym sym_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json sym_to_json(const Sym &);
 [[nodiscard]] POLYREGION_EXPORT SourcePosition sourceposition_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json sourceposition_to_json(const SourcePosition &);
 [[nodiscard]] POLYREGION_EXPORT Named named_from_json(const json &);
@@ -15,12 +17,16 @@ namespace polyregion::polyast {
 [[nodiscard]] POLYREGION_EXPORT json overload_to_json(const Overload &);
 [[nodiscard]] POLYREGION_EXPORT Signature signature_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json signature_to_json(const Signature &);
+[[nodiscard]] POLYREGION_EXPORT InvokeSignature invokesignature_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json invokesignature_to_json(const InvokeSignature &);
 [[nodiscard]] POLYREGION_EXPORT Arg arg_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json arg_to_json(const Arg &);
 [[nodiscard]] POLYREGION_EXPORT Function function_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json function_to_json(const Function &);
 [[nodiscard]] POLYREGION_EXPORT StructDef structdef_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json structdef_to_json(const StructDef &);
+[[nodiscard]] POLYREGION_EXPORT Mirror mirror_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json mirror_to_json(const Mirror &);
 [[nodiscard]] POLYREGION_EXPORT Program program_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json program_to_json(const Program &);
 [[nodiscard]] POLYREGION_EXPORT StructLayoutMember structlayoutmember_from_json(const json &);
@@ -320,6 +326,10 @@ namespace Type {
 [[nodiscard]] POLYREGION_EXPORT json struct_to_json(const Type::Struct &);
 [[nodiscard]] POLYREGION_EXPORT Type::Ptr ptr_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json ptr_to_json(const Type::Ptr &);
+[[nodiscard]] POLYREGION_EXPORT Type::Var var_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json var_to_json(const Type::Var &);
+[[nodiscard]] POLYREGION_EXPORT Type::Exec exec_from_json(const json &);
+[[nodiscard]] POLYREGION_EXPORT json exec_to_json(const Type::Exec &);
 [[nodiscard]] POLYREGION_EXPORT Type::Annotated annotated_from_json(const json &);
 [[nodiscard]] POLYREGION_EXPORT json annotated_to_json(const Type::Annotated &);
 [[nodiscard]] POLYREGION_EXPORT Type::Any any_from_json(const json &);

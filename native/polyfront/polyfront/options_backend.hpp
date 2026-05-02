@@ -126,8 +126,15 @@ static std::variant<std::string, polyast::CompileResult> compileProgram(const po
   auto BufferOrErr = llvm::MemoryBuffer::getFile(outputPath);
 
   if (auto Err = BufferOrErr.getError()) return "Failed to read output buffer: " + toString(llvm::errorCodeToError(Err));
-  else
-    return polyast::compileresult_from_json(nlohmann::json::from_msgpack((*BufferOrErr)->getBufferStart(), (*BufferOrErr)->getBufferEnd()));
+  // The polyc subprocess swallows nlohmann/codec exceptions and writes nothing to the output on
+  // failure (see driver_polyc.cpp's outer try-catch around `program_from_json`), so an empty file
+  // here means the compile failed. The polycpp clang plugin is built with -fno-exceptions, so a
+  // throw from `from_msgpack(empty)` would unwind into terminate() and crash the whole frontend
+  // — return a string error instead.
+  if ((*BufferOrErr)->getBufferSize() == 0)
+    return "Empty output from polyc subprocess (likely failed to deserialise input or codegen aborted) for task: " +
+           (args ^ mk_string(" ", [](auto &s) { return s.str(); }));
+  return polyast::compileresult_from_json(nlohmann::json::from_msgpack((*BufferOrErr)->getBufferStart(), (*BufferOrErr)->getBufferEnd()));
 }
 
 } // namespace polyregion::polyfront

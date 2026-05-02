@@ -1,7 +1,7 @@
 package polyregion.scalalang
 
 import cats.syntax.all.*
-import polyregion.ast.{ScalaSRR as p, *}
+import polyregion.ast.{PolyAST as p, *}
 import polyregion.jvm.{compiler as ct, runtime as rt}
 import polyregion.prism.StdLib
 import polyregion.scalalang as srt
@@ -245,8 +245,8 @@ object compiletime {
         tpe.value -> tpe.sizeInBytes
       }.unzip
 
-      val tidTpeOrdinal = Pickler.tpeAsRuntimeTpe(p.Type.Long).value
-      val tidTpeSize    = Pickler.tpeAsRuntimeTpe(p.Type.Long).sizeInBytes
+      val tidTpeOrdinal = Pickler.tpeAsRuntimeTpe(p.Type.IntS64).value
+      val tidTpeSize    = Pickler.tpeAsRuntimeTpe(p.Type.IntS64).sizeInBytes
 
       val returnTpeOrdinal = Pickler.tpeAsRuntimeTpe(prog.entry.rtn).value
       val returnTpeSize    = Pickler.tpeAsRuntimeTpe(prog.entry.rtn).sizeInBytes
@@ -304,6 +304,11 @@ object compiletime {
               .order(ByteOrder.nativeOrder)
 
           val ptrMap = scala.collection.mutable.Map[Any, Long]()
+          // Keeps direct ByteBuffers alive through kernel execution. Pickler-allocated buffers
+          // are referenced only by their native pointers in fnValues; without this list they
+          // could be GC'd while the kernel is still running, leading to use-after-free SEGVs
+          // when post-callback unpickling reads from the (now dangling) pointers.
+          val keepAlive = scala.collection.mutable.ArrayBuffer.empty[Any]
 
           ${
 
@@ -325,7 +330,7 @@ object compiletime {
                   lut,
                   layouts,
                   allReprsInCaptures,
-                  '{ Platforms.pointerOfDirectBuffer(_) },
+                  '{ (b: java.nio.Buffer) => { keepAlive += b; Platforms.pointerOfDirectBuffer(b) } },
                   '{ Platforms.directBufferFromPointer(_, _) }
                 )
 
@@ -381,6 +386,9 @@ object compiletime {
                               cb_(Left(new Exception("Cannot sync", e)))
                           }
 
+                          // Reference keepAlive here to ensure it's captured by the callback closure
+                          // and stays reachable until the kernel completes.
+                          keepAlive.clear()
                           ()
 
                           // // $queue.syncAll(() => cb_(Right(())))
@@ -457,7 +465,7 @@ object compiletime {
 
             val rtn = write(sdef.name, ref)
 
-            Pickler.writePrim(target, Expr(byteOffset), p.Type.Long, rtn)
+            Pickler.writePrim(target, Expr(byteOffset), p.Type.IntS64, rtn)
 
           case (t, None, '{ $ref: t }) => Pickler.writePrim(target, Expr(byteOffset), t, ref)
           case (t, _, _) =>
@@ -499,7 +507,7 @@ object compiletime {
             )
           case (s @ p.Type.Struct(_, _, _, _), Some(sdef), '{ $ref: t }) =>
             println(s"$ref = " + ref.asTerm.symbol.flags.show)
-            val ptr = Pickler.readPrim(target, Expr(byteOffset), p.Type.Long).asExprOf[Long]
+            val ptr = Pickler.readPrim(target, Expr(byteOffset), p.Type.IntS64).asExprOf[Long]
             '{
 
               println(s"Restore ${$ref}")

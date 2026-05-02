@@ -131,6 +131,8 @@ template <typename F> Expr::Any numeric(const Type::Any &tpe, F tagged) {
 
       [&](const Type::Struct &t) -> Expr::Any { return unsupported(t); },   //
       [&](const Type::Ptr &t) -> Expr::Any { return unsupported(t); },      //
+      [&](const Type::Var &t) -> Expr::Any { return unsupported(t); },      //
+      [&](const Type::Exec &t) -> Expr::Any { return unsupported(t); },     //
       [&](const Type::Annotated &t) -> Expr::Any { return unsupported(t); } //
   );
 }

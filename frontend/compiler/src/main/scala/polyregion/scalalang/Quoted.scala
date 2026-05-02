@@ -1,7 +1,7 @@
 package polyregion.scalalang
 
 import cats.kernel.Monoid
-import polyregion.ast.{ScalaSRR as p, *}
+import polyregion.ast.{PolyAST as p, *}
 
 import scala.annotation.targetName
 
@@ -12,7 +12,7 @@ class Quoted(val underlying: scala.quoted.Quotes) {
   given quotes: scala.quoted.Quotes = underlying
 
   // Reference = CaptureVarName | DefaultTermValue
-  case class Reference(value: String | p.Term, tpe: p.Type)
+  case class Reference(value: String | p.Expr, tpe: p.Type)
 
   // // TODO rename to FnScope
   // case class FnDependencies(
@@ -27,7 +27,7 @@ class Quoted(val underlying: scala.quoted.Quotes) {
 
   type ClsWitnesses = Map[Symbol, Set[p.Type.Struct]]
   type FnWitnesses  = Map[Symbol, Set[p.Expr.Invoke]]
-  type Retyped      = (Option[p.Term], p.Type)
+  type Retyped      = (Option[p.Expr], p.Type)
 
   // TODO everything here can be a Set as we don't need the rhs
   case class Dependencies(
@@ -76,9 +76,9 @@ class Quoted(val underlying: scala.quoted.Quotes) {
       depth: Int = 0,                  // ref depth
       traces: List[Tree] = List.empty, // debug
 
-      refs: Map[Symbol, p.Term] = Map.empty, // ident/select table
+      refs: Map[Symbol, p.Expr] = Map.empty, // ident/select table
       names: Map[Symbol, Int] = Map.empty,
-      invokeCaptures: Map[Symbol, List[p.Term]] = Map.empty,
+      invokeCaptures: Map[Symbol, List[p.Expr]] = Map.empty,
       deps: Dependencies = Dependencies(),
       stmts: List[p.Stmt] = List.empty, // fn statements
       thisCls: Option[(ClassDef, p.Type.Struct)] = None
@@ -118,7 +118,7 @@ class Quoted(val underlying: scala.quoted.Quotes) {
 //        }).toMap
 //    )
 
-    def withInvokeCapture(s: Symbol, xs: List[p.Term]): RemapContext =
+    def withInvokeCapture(s: Symbol, xs: List[p.Expr]): RemapContext =
       copy(invokeCaptures = invokeCaptures + (s -> xs))
 
     def noStmts: RemapContext = copy(stmts = Nil)
