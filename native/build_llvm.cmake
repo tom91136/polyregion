@@ -8,8 +8,14 @@ if (NOT CMAKE_BUILD_TYPE)
     message(FATAL_ERROR "Expecting CMAKE_BUILD_TYPE")
 endif ()
 
-set(LLVM_BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR})
-set(LLVM_DIST_DIR ${CMAKE_CURRENT_BINARY_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-dist)
+if (DEFINED ENV{POLYREGION_LLVM_DYLIB} AND "$ENV{POLYREGION_LLVM_DYLIB}" STREQUAL "OFF")
+    set(LLVM_VARIANT static)
+else ()
+    set(LLVM_VARIANT dylib)
+endif ()
+
+set(LLVM_BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-${LLVM_VARIANT})
+set(LLVM_DIST_DIR ${CMAKE_CURRENT_BINARY_DIR}/polyregion-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-${LLVM_VARIANT}-dist)
 
 set(DOWNLOAD_LLVM OFF)
 if (EXISTS ${LLVM_BUILD_DIR}/llvm-project-${LLVM_SRC_VERSION}.src.tar.xz)
@@ -126,6 +132,11 @@ else ()
             install-flang-headers)
 endif ()
 
+# install-MLIR only exists when MLIR is built as a dylib component.
+if (NOT DEFINED ENV{POLYREGION_LLVM_DYLIB} OR NOT "$ENV{POLYREGION_LLVM_DYLIB}" STREQUAL "OFF")
+    set(MLIR_INSTALL_TARGETS install-MLIR)
+endif ()
+
 execute_process(
         COMMAND
         ${CMAKE_COMMAND} -E env ASAN_OPTIONS=detect_leaks=0 --
@@ -140,11 +151,10 @@ execute_process(
         install-clang-cmake-exports
         install-lld-cmake-exports
 
-        install-llvm-libraries
-        install-clang-libraries
-
         install-llvm-headers
         install-clang-headers
+
+        ${MLIR_INSTALL_TARGETS}
         -- -k 0 # keep going even with error
         WORKING_DIRECTORY ${LLVM_BUILD_DIR}
         RESULT_VARIABLE SUCCESS)

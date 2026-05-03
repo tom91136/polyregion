@@ -37,6 +37,10 @@ set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON" FORCE)
 set(CMAKE_SKIP_INSTALL_ALL_DEPENDENCY ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Tools land in bin/, runtime/plugin libs in lib/{,polycpp,polyfc}/lib — find libLLVM.so via $ORIGIN.
+set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib;$ORIGIN/../../../lib")
+set(CMAKE_BUILD_WITH_INSTALL_RPATH OFF)
+
 
 set(USE_LINKER "" CACHE INTERNAL "Path to custom linker")
 set(POLYREGION_SHARED_LIB OFF CACHE BOOL "")
@@ -74,6 +78,7 @@ find_package(SPIRV-Tools-opt CONFIG REQUIRED)
 find_package(VulkanHeaders CONFIG REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(ZLIB REQUIRED)
 
 if (USE_LINKER)
     message(STATUS "Using custom linker: ${USE_LINKER}")
@@ -287,10 +292,16 @@ else ()
 endif ()
 
 
-set(LLVM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/llvm")
-set(LLD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/lld")
-set(Clang_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/clang")
-set(LLVM_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-dist")
+if (DEFINED ENV{POLYREGION_LLVM_DYLIB} AND "$ENV{POLYREGION_LLVM_DYLIB}" STREQUAL "OFF")
+    set(LLVM_VARIANT static)
+else ()
+    set(LLVM_VARIANT dylib)
+endif ()
+set(LLVM_BUILD_PREFIX "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-${LLVM_VARIANT}")
+set(LLVM_DIR  "${LLVM_BUILD_PREFIX}/lib/cmake/llvm")
+set(LLD_DIR   "${LLVM_BUILD_PREFIX}/lib/cmake/lld")
+set(Clang_DIR "${LLVM_BUILD_PREFIX}/lib/cmake/clang")
+set(LLVM_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/polyregion-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-${LLVM_VARIANT}-dist")
 
 set(POLYREGION_32BIT OFF)
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|armhf|armv7l|i[3-6]86|x86)$")
@@ -298,8 +309,8 @@ if (CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|armhf|armv7l|i[3-6]86|x86)$")
 endif ()
 message(STATUS "POLYREGION_32BIT = ${POLYREGION_32BIT} (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 
-set(Flang_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/flang")
-set(MLIR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/mlir")
+set(Flang_DIR "${LLVM_BUILD_PREFIX}/lib/cmake/flang")
+set(MLIR_DIR  "${LLVM_BUILD_PREFIX}/lib/cmake/mlir")
 
 message(STATUS "Using LLVM at ${LLVM_DIR}")
 message(STATUS "Using LLD at ${LLD_DIR}")
@@ -313,6 +324,10 @@ endif ()
 find_package(LLVM REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
 find_package(Clang REQUIRED PATHS ${Clang_DIR} NO_DEFAULT_PATH)
 find_package(LLD REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
+
+# Defaults to whatever LLVM was built with; override via -DPOLYREGION_LLVM_DYLIB=OFF for static linking.
+option(POLYREGION_LLVM_DYLIB "Link polyregion against libLLVM dylib" ${LLVM_LINK_LLVM_DYLIB})
+message(STATUS "POLYREGION_LLVM_DYLIB = ${POLYREGION_LLVM_DYLIB}")
 
 if (NOT POLYREGION_32BIT)
     find_package(MLIR REQUIRED PATHS ${MLIR_DIR} NO_DEFAULT_PATH)

@@ -8,8 +8,13 @@ endif ()
 
 foreach (TARGET polydco polydco-static)
     target_sources(${TARGET}
-            PRIVATE
-            polydco.cpp
+            PRIVATE polydco.cpp
+            PUBLIC FILE_SET HEADERS
+            TYPE HEADERS
+            BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}
+            FILES
+            ftypes.h
+            polydco.h
     )
 
     target_link_libraries(${TARGET} PRIVATE polyinvoke-obj polyrt-obj polycommon)

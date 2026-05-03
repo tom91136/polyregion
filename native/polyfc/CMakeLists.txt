@@ -84,3 +84,15 @@ if (APPLE)
             ARGS -SXx $<TARGET_FILE:polyfc>)
 endif ()
 
+install(TARGETS polyfc RUNTIME DESTINATION bin)
+install(TARGETS polydco polydco-static
+        LIBRARY DESTINATION lib/polyfc/lib
+        ARCHIVE DESTINATION lib/polyfc/lib
+        RUNTIME DESTINATION lib/polyfc/lib
+        FILE_SET HEADERS DESTINATION lib/polyfc/include)
+if (NOT WIN32)
+    install(TARGETS polyfc-flang-plugin polyreflect-plugin
+            LIBRARY DESTINATION lib/polyfc/lib
+            RUNTIME DESTINATION lib/polyfc/lib)
+endif ()
+

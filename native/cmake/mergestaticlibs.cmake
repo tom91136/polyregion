@@ -29,7 +29,7 @@ function(merge_static_libs outlib)
     # First get the file names of the libraries to be merged
     foreach (lib ${all_libs})
         get_target_property(libtype ${lib} TYPE)
-        if (libtype STREQUAL "INTERFACE_LIBRARY")
+        if (libtype STREQUAL "INTERFACE_LIBRARY" OR libtype STREQUAL "SHARED_LIBRARY")
             continue()
         endif ()
         if ((NOT libtype STREQUAL "STATIC_LIBRARY") AND (NOT libtype STREQUAL "UNKNOWN_LIBRARY"))

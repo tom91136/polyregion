@@ -27,23 +27,27 @@ if (RUNTIME_ENABLE_METAL)
 endif ()
 
 
-llvm_map_components_to_libnames(LLVM_LIBS
-        executionengine
-        runtimedyld
-        object
-        core
-        mc
-        mcparser
-        demangle
-        bitstreamreader
-        textapi
-        irreader
-        asmparser
-        bitreader
-        remarks
-        binaryformat
-        support
-        targetparser)
+if (POLYREGION_LLVM_DYLIB)
+    set(LLVM_LIBS LLVM)
+else ()
+    llvm_map_components_to_libnames(LLVM_LIBS
+            executionengine
+            runtimedyld
+            object
+            core
+            mc
+            mcparser
+            demangle
+            bitstreamreader
+            textapi
+            irreader
+            asmparser
+            bitreader
+            remarks
+            binaryformat
+            support
+            targetparser)
+endif ()
 message(STATUS "[runtime] Adding LLVM libs = ${LLVM_LIBS}")
 
 set(POLYINVOKE_SRC

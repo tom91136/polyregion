@@ -53,29 +53,33 @@ if (NOT WIN32)
     )
 endif ()
 
-llvm_map_components_to_libnames(LLVM_LIBS
-        ${LLVM_TARGETS_TO_BUILD}
-        ${LLVM_EXPERIMENTAL_TARGETS_TO_BUILD}
-        analysis
-        asmparser
-        asmprinter
-        codegen
-        core
-        object
-        irreader
-        passes
-        ipo
-        instcombine
-        mc
-        remarks
-        scalaropts
-        selectiondag
-        support
-        target
-        transformutils
-        vectorize
-        targetparser
-        objcarcopts)
+if (POLYREGION_LLVM_DYLIB)
+    set(LLVM_LIBS LLVM)
+else ()
+    llvm_map_components_to_libnames(LLVM_LIBS
+            ${LLVM_TARGETS_TO_BUILD}
+            ${LLVM_EXPERIMENTAL_TARGETS_TO_BUILD}
+            analysis
+            asmparser
+            asmprinter
+            codegen
+            core
+            object
+            irreader
+            passes
+            ipo
+            instcombine
+            mc
+            remarks
+            scalaropts
+            selectiondag
+            support
+            target
+            transformutils
+            vectorize
+            targetparser
+            objcarcopts)
+endif ()
 
 set(LLD_LIBS lldCommon lldELF)
 message(STATUS "[compiler] Adding LLVM libs = ${LLVM_LIBS} ")
@@ -121,3 +125,5 @@ target_link_options(polyc-bin PRIVATE ${LINK_OPTIONS})
 target_link_options(polyc PRIVATE ${LINK_OPTIONS})
 
 set_target_properties(polyc-bin PROPERTIES OUTPUT_NAME polyc)
+
+install(TARGETS polyc-bin RUNTIME DESTINATION bin)

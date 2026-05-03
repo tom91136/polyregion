@@ -117,3 +117,18 @@ if (APPLE)
             ARGS -SXx $<TARGET_FILE:polycpp>)
 endif ()
 
+install(TARGETS polycpp RUNTIME DESTINATION bin)
+install(TARGETS polystl polystl-static
+        LIBRARY DESTINATION lib/polycpp/lib
+        ARCHIVE DESTINATION lib/polycpp/lib
+        RUNTIME DESTINATION lib/polycpp/lib
+        FILE_SET HEADERS DESTINATION lib/polycpp/include)
+if (NOT WIN32)
+    install(TARGETS polycpp-clang-plugin polyreflect-plugin
+            LIBRARY DESTINATION lib/polycpp/lib
+            RUNTIME DESTINATION lib/polycpp/lib)
+endif ()
+foreach (HEADER_TARGET polycommon polyinvoke-obj polyrt-obj polyreflect-rt)
+    install(TARGETS ${HEADER_TARGET} FILE_SET HEADERS DESTINATION lib/polycpp/include)
+endforeach ()
+

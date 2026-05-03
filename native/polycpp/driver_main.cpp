@@ -56,7 +56,8 @@ int main(int argc, const char *argv[]) {
                  remaining.insert(remaining.end(), includes.begin(), includes.end());
                  remaining.insert(remaining.end(), libs.begin(), libs.end());
 
-                 const auto polycppResourcePath = execParentPath / "lib/polycpp";
+                 auto polycppResourcePath = execParentPath / "lib/polycpp";
+                 if (!fs::exists(polycppResourcePath)) polycppResourcePath = execParentPath / ".." / "lib" / "polycpp";
                  const auto polycppIncludePath = polycppResourcePath / "include";
                  const auto polycppLibPath = polycppResourcePath / "lib";
                  const auto polyreflectPlugin = polycppLibPath / fmt::format("polyreflect-plugin.{}", dynamicLibSuffix());

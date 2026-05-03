@@ -62,3 +62,7 @@ if (APPLE)
             COMMAND strip
             ARGS -SXx $<TARGET_FILE:polyc-JNI>)
 endif ()
+
+install(TARGETS polyc-JNI polyc-JNIshim polyinvoke-JNI
+        LIBRARY DESTINATION lib
+        RUNTIME DESTINATION lib)

@@ -58,7 +58,8 @@ int main(int argc, const char *argv[]) {
                  remaining.insert(remaining.end(), includes.begin(), includes.end());
                  remaining.insert(remaining.end(), libs.begin(), libs.end());
 
-                 const auto polyfcResourcePath = execParentPath / "lib/polyfc";
+                 auto polyfcResourcePath = execParentPath / "lib/polyfc";
+                 if (!fs::exists(polyfcResourcePath)) polyfcResourcePath = execParentPath / ".." / "lib" / "polyfc";
                  const auto polyfcLibPath = polyfcResourcePath / "lib";
                  const auto polyreflectPlugin = polyfcLibPath / fmt::format("polyreflect-plugin.{}", dynamicLibSuffix());
                  const auto polyfcFlangPlugin = polyfcLibPath / fmt::format("polyfc-flang-plugin.{}", dynamicLibSuffix());
