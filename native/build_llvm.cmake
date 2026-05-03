@@ -36,6 +36,17 @@ if (UNIX AND NOT APPLE)
     list(APPEND BUILD_OPTIONS -DLLVM_ENABLE_LTO=Thin)
 endif ()
 
+# Flang does not support 32-bit hosts (it requires 64-bit native atomics and i64 codegen
+# pieces that are not exercised on i386/armhf builds). Detect 32-bit targets via the
+# architecture name and forward the flag so the cache file and install step both skip
+# flang components.
+set(POLYREGION_32BIT OFF)
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|armhf|armv7l|i[3-6]86|x86)$")
+    set(POLYREGION_32BIT ON)
+endif ()
+list(APPEND BUILD_OPTIONS -DPOLYREGION_32BIT=${POLYREGION_32BIT})
+message(STATUS "POLYREGION_32BIT = ${POLYREGION_32BIT} (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
+
 if (UNIX AND (CMAKE_BUILD_TYPE STREQUAL "Debug"))
     list(APPEND BUILD_OPTIONS "-DLLVM_USE_SANITIZER=Address\\;Undefined")
     list(APPEND BUILD_OPTIONS "-DBUILD_SHARED_LIBS=ON")
@@ -107,6 +118,17 @@ else ()
     message(STATUS "LLVM configuration complete, starting build...")
 endif ()
 
+set(FLANG_BUILD_TARGETS
+        module_files                  # Build Fortran module files
+        tools/flang/tools/f18/install # Install Fortran module files
+        install-flang-cmake-exports
+        install-flang-libraries
+        install-flang-headers)
+if (POLYREGION_32BIT)
+    message(STATUS "Skipping flang install targets on 32-bit host")
+    set(FLANG_BUILD_TARGETS "")
+endif ()
+
 execute_process(
         COMMAND
         ${CMAKE_COMMAND} -E env ASAN_OPTIONS=detect_leaks=0 --
@@ -115,21 +137,17 @@ execute_process(
         --target
         install-distribution
 
-        module_files                  # Build Fortran module files
-        tools/flang/tools/f18/install # Install Fortran module files
+        ${FLANG_BUILD_TARGETS}
 
         install-cmake-exports
         install-clang-cmake-exports
-        install-flang-cmake-exports
         install-lld-cmake-exports
 
         install-llvm-libraries
         install-clang-libraries
-        install-flang-libraries
 
         install-llvm-headers
         install-clang-headers
-        install-flang-headers
         -- -k 0 # keep going even with error
         WORKING_DIRECTORY ${LLVM_BUILD_DIR}
         RESULT_VARIABLE SUCCESS)

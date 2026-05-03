@@ -292,6 +292,14 @@ set(LLD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM
 set(Clang_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/clang")
 set(LLVM_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-dist")
 
+# Flang doesn't support 32-bit hosts. Detect 32-bit targets here so the rest of the
+# project (Flang/MLIR find_package, polyfc subdir) can be gated off when host is 32-bit.
+set(POLYREGION_32BIT OFF)
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|armhf|armv7l|i[3-6]86|x86)$")
+    set(POLYREGION_32BIT ON)
+endif ()
+message(STATUS "POLYREGION_32BIT = ${POLYREGION_32BIT} (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
+
 set(Flang_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/flang")
 set(MLIR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/mlir")
 
@@ -299,15 +307,19 @@ message(STATUS "Using LLVM at ${LLVM_DIR}")
 message(STATUS "Using LLD at ${LLD_DIR}")
 message(STATUS "Using Clang at ${Clang_DIR}")
 
-message(STATUS "Using Flang at ${Flang_DIR}")
-message(STATUS "Using MLIR at ${MLIR_DIR}")
+if (NOT POLYREGION_32BIT)
+    message(STATUS "Using Flang at ${Flang_DIR}")
+    message(STATUS "Using MLIR at ${MLIR_DIR}")
+endif ()
 
 find_package(LLVM REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
 find_package(Clang REQUIRED PATHS ${Clang_DIR} NO_DEFAULT_PATH)
 find_package(LLD REQUIRED PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
 
-find_package(MLIR REQUIRED PATHS ${MLIR_DIR} NO_DEFAULT_PATH)
-find_package(Flang REQUIRED PATHS ${Flang_DIR} NO_DEFAULT_PATH)
+if (NOT POLYREGION_32BIT)
+    find_package(MLIR REQUIRED PATHS ${MLIR_DIR} NO_DEFAULT_PATH)
+    find_package(Flang REQUIRED PATHS ${Flang_DIR} NO_DEFAULT_PATH)
+endif ()
 
 message(STATUS "Using LLVM: ${LLVM_PACKAGE_VERSION} tools")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
@@ -435,7 +447,9 @@ add_subdirectory(polyinvoke)
 add_subdirectory(polyfront)
 add_subdirectory(polyreflect)
 add_subdirectory(polycpp)
-add_subdirectory(polyfc)
+if (NOT POLYREGION_32BIT)
+    add_subdirectory(polyfc)
+endif ()
 add_subdirectory(bindings)
 
 # ---- format / format-check -------------------------------------------------

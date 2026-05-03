@@ -11,6 +11,12 @@ else ()
     message(FATAL_ERROR "Unsupported platform, cannot determine runtimes to build")
 endif ()
 
+# Flang doesn't support 32-bit hosts; strip flang-rt out of the runtime list when the
+# parent build flagged this as a 32-bit target.
+if (POLYREGION_32BIT)
+    list(REMOVE_ITEM RUNTIME_COMPONENTS flang-rt)
+endif ()
+
 
 if (UNIX)
     set(CMAKE_C_FLAGS_RELEASE "-O3 -gline-tables-only -gz -DNDEBUG" CACHE STRING "")
@@ -27,12 +33,14 @@ set(LLVM_TARGETS_TO_BUILD
         AMDGPU
         CACHE STRING "")
 
-set(LLVM_ENABLE_PROJECTS
-        flang
+set(LLVM_PROJECTS
         clang
         clang-tools-extra
-        lld
-        CACHE STRING "")
+        lld)
+if (NOT POLYREGION_32BIT)
+    list(APPEND LLVM_PROJECTS flang)
+endif ()
+set(LLVM_ENABLE_PROJECTS ${LLVM_PROJECTS} CACHE STRING "")
 set(LLVM_ENABLE_RUNTIMES ${RUNTIME_COMPONENTS} CACHE STRING "")
 
 #set(LLVM_DYLIB_COMPONENTS all CACHE STRING "")
@@ -118,12 +126,9 @@ if (APPLE)
 
 endif ()
 
-set(LLVM_DISTRIBUTION_COMPONENTS
+set(LLVM_DISTRIBUTION_COMPONENTS_BASE
         # Linker
         lld
-
-        # Flang
-        flang
 
         # Clang tools
         clang
@@ -168,7 +173,11 @@ set(LLVM_DISTRIBUTION_COMPONENTS
         llvm-strings
         llvm-strip
         llvm-config
+)
 
-
-        CACHE STRING "")
+if (POLYREGION_32BIT)
+    set(LLVM_DISTRIBUTION_COMPONENTS ${LLVM_DISTRIBUTION_COMPONENTS_BASE} CACHE STRING "")
+else ()
+    set(LLVM_DISTRIBUTION_COMPONENTS ${LLVM_DISTRIBUTION_COMPONENTS_BASE} flang CACHE STRING "")
+endif ()
 
