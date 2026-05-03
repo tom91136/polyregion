@@ -20,6 +20,10 @@ defaults:
 jobs:
   build:
     runs-on: ${{ inputs.build_arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    env:
+      # Thin LTO link jobs each peak ~3-4 GB; serialise to avoid the runner being killed for
+      # exceeding memory.
+      POLYREGION_LLVM_PARALLEL_LINK_JOBS: "1"
     steps:
       - uses: actions/checkout@v5
 

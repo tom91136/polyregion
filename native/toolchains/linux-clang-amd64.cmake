@@ -1,10 +1,11 @@
-# XXX Enable only if cross compiling,
-# XXX flang-rt, as of LLVM 21.1.4 needs flang, which is not yet a cross compiler so enabling this will fail
+# XXX Enable CMAKE_SYSTEM_NAME only if cross compiling — flang-rt (LLVM 21.1.4) is not yet a
+# cross compiler so enabling that will fail. The compiler target is set unconditionally so
+# clang finds the multiarch sysroot paths (usr/lib/x86_64-linux-gnu/Scrt1.o etc.).
 #set(CMAKE_SYSTEM_NAME Linux)
 #set(CMAKE_SYSTEM_PROCESSOR x86_64)
-#set(CMAKE_C_COMPILER_TARGET ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu)
-#set(CMAKE_CXX_COMPILER_TARGET ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu)
-#set(CMAKE_ASM_COMPILER_TARGET ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu)
+set(CMAKE_C_COMPILER_TARGET x86_64-linux-gnu)
+set(CMAKE_CXX_COMPILER_TARGET x86_64-linux-gnu)
+set(CMAKE_ASM_COMPILER_TARGET x86_64-linux-gnu)
 
 set(CMAKE_C_COMPILER clang)
 set(CMAKE_ASM_COMPILER clang)

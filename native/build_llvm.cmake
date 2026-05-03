@@ -8,6 +8,13 @@ if (NOT CMAKE_BUILD_TYPE)
     message(FATAL_ERROR "Expecting CMAKE_BUILD_TYPE")
 endif ()
 
+# LLVM_BUILD_LLVM_DYLIB is forced OFF on MSVC/Windows by LLVM's own cmake logic, so any
+# distribution component referring to the LLVM/MLIR/clang-cpp shared libs would fail to
+# resolve. Force the static variant on Windows.
+if (WIN32)
+    set(ENV{POLYREGION_LLVM_DYLIB} OFF)
+endif ()
+
 if (DEFINED ENV{POLYREGION_LLVM_DYLIB} AND "$ENV{POLYREGION_LLVM_DYLIB}" STREQUAL "OFF")
     set(LLVM_VARIANT static)
 else ()
@@ -41,14 +48,6 @@ endif ()
 if (UNIX AND NOT APPLE)
     list(APPEND BUILD_OPTIONS -DLLVM_ENABLE_LTO=Thin)
 endif ()
-
-# flang doesn't build for 32-bit hosts; gate it via env so the -C cache file sees it.
-set(POLYREGION_32BIT OFF)
-if (CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|armhf|armv7l|i[3-6]86|x86)$")
-    set(POLYREGION_32BIT ON)
-endif ()
-set(ENV{POLYREGION_32BIT} ${POLYREGION_32BIT})
-message(STATUS "POLYREGION_32BIT = ${POLYREGION_32BIT} (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 
 if (UNIX AND (CMAKE_BUILD_TYPE STREQUAL "Debug"))
     list(APPEND BUILD_OPTIONS "-DLLVM_USE_SANITIZER=Address\\;Undefined")
@@ -121,16 +120,12 @@ else ()
     message(STATUS "LLVM configuration complete, starting build...")
 endif ()
 
-if (POLYREGION_32BIT)
-    set(FLANG_BUILD_TARGETS "")
-else ()
-    set(FLANG_BUILD_TARGETS
-            module_files
-            tools/flang/tools/f18/install
-            install-flang-cmake-exports
-            install-flang-libraries
-            install-flang-headers)
-endif ()
+set(FLANG_BUILD_TARGETS
+        module_files
+        tools/flang/tools/f18/install
+        install-flang-cmake-exports
+        install-flang-libraries
+        install-flang-headers)
 
 # install-MLIR only exists when MLIR is built as a dylib component.
 if (NOT DEFINED ENV{POLYREGION_LLVM_DYLIB} OR NOT "$ENV{POLYREGION_LLVM_DYLIB}" STREQUAL "OFF")

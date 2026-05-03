@@ -13,12 +13,6 @@ jobs:
     with:
       build_arch: amd64
       build_type: Release
-  X86-release:
-    uses: ./.github/workflows/windows-shared.yaml
-    secrets: inherit
-    with:
-      build_arch: x86
-      build_type: Release
   ARM64-release:
     uses: ./.github/workflows/windows-shared.yaml
     secrets: inherit

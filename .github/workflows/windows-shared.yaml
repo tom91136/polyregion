@@ -26,7 +26,6 @@ jobs:
         run: |
           # Temurin 8 has no Windows aarch64 build; use Temurin 21 for arm64.
           switch ("${{ inputs.build_arch }}".ToLower()) {
-            "x86"   { $jdk_arch = "x86-32"; $repo = "temurin8-binaries";  $version = "jdk8u352-b08";   $jdk_major = "8" }
             "amd64" { $jdk_arch = "x64";    $repo = "temurin8-binaries";  $version = "jdk8u352-b08";   $jdk_major = "8" }
             "arm64" { $jdk_arch = "aarch64"; $repo = "temurin21-binaries"; $version = "jdk-21.0.5+11"; $jdk_major = "21" }
             default {

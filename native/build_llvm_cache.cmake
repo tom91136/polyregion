@@ -1,10 +1,4 @@
 
-if ("$ENV{POLYREGION_32BIT}" STREQUAL "ON")
-    set(POLYREGION_32BIT ON)
-else ()
-    set(POLYREGION_32BIT OFF)
-endif ()
-
 if (UNIX)
     list(APPEND RUNTIME_COMPONENTS compiler-rt flang-rt libcxx libcxxabi libunwind openmp)
     #    list(APPEND RUNTIME_TARGETS cxx-headers)
@@ -15,10 +9,6 @@ elseif (WIN32)
     # nothing for RUNTIME_TARGETS
 else ()
     message(FATAL_ERROR "Unsupported platform, cannot determine runtimes to build")
-endif ()
-
-if (POLYREGION_32BIT)
-    list(REMOVE_ITEM RUNTIME_COMPONENTS flang-rt)
 endif ()
 
 
@@ -37,14 +27,12 @@ set(LLVM_TARGETS_TO_BUILD
         AMDGPU
         CACHE STRING "")
 
-set(LLVM_PROJECTS
+set(LLVM_ENABLE_PROJECTS
         clang
         clang-tools-extra
-        lld)
-if (NOT POLYREGION_32BIT)
-    list(APPEND LLVM_PROJECTS flang)
-endif ()
-set(LLVM_ENABLE_PROJECTS ${LLVM_PROJECTS} CACHE STRING "")
+        lld
+        flang
+        CACHE STRING "")
 set(LLVM_ENABLE_RUNTIMES ${RUNTIME_COMPONENTS} CACHE STRING "")
 
 if (DEFINED ENV{POLYREGION_LLVM_DYLIB} AND "$ENV{POLYREGION_LLVM_DYLIB}" STREQUAL "OFF")
@@ -54,10 +42,24 @@ else ()
 endif ()
 message(STATUS "POLYREGION_LLVM_DYLIB = ${POLYREGION_LLVM_DYLIB}")
 
+# CI runners (esp. macos-26 ~7 GB / 3 cores, and Linux x86_64 with thin LTO) crash mid-build
+# when LLVM saturates parallelism. Allow these to be capped from the environment.
+if (DEFINED ENV{POLYREGION_LLVM_PARALLEL_LINK_JOBS})
+    set(LLVM_PARALLEL_LINK_JOBS "$ENV{POLYREGION_LLVM_PARALLEL_LINK_JOBS}" CACHE STRING "")
+endif ()
+if (DEFINED ENV{POLYREGION_LLVM_PARALLEL_COMPILE_JOBS})
+    set(LLVM_PARALLEL_COMPILE_JOBS "$ENV{POLYREGION_LLVM_PARALLEL_COMPILE_JOBS}" CACHE STRING "")
+endif ()
+if (DEFINED ENV{POLYREGION_LLVM_PARALLEL_TABLEGEN_JOBS})
+    set(LLVM_PARALLEL_TABLEGEN_JOBS "$ENV{POLYREGION_LLVM_PARALLEL_TABLEGEN_JOBS}" CACHE STRING "")
+endif ()
+
 set(LLVM_DYLIB_COMPONENTS all CACHE STRING "")
 set(LLVM_BUILD_LLVM_DYLIB ${POLYREGION_LLVM_DYLIB} CACHE BOOL "")
 set(LLVM_LINK_LLVM_DYLIB ${POLYREGION_LLVM_DYLIB} CACHE BOOL "")
-set(LLVM_ENABLE_PLUGINS ON CACHE BOOL "")
+# LLVM_ENABLE_PLUGINS on Windows decorates symbols with dllimport in headers; without a
+# matching shared LLVM the static .obj definitions trip C2491. Tie it to the dylib mode.
+set(LLVM_ENABLE_PLUGINS ${POLYREGION_LLVM_DYLIB} CACHE BOOL "")
 
 set(LLVM_ENABLE_ZLIB ON CACHE BOOL "")
 set(LLVM_ENABLE_ZSTD OFF CACHE BOOL "")
@@ -196,9 +198,5 @@ set(LLVM_DISTRIBUTION_COMPONENTS_BASE
         llvm-config
 )
 
-if (POLYREGION_32BIT)
-    set(LLVM_DISTRIBUTION_COMPONENTS ${LLVM_DISTRIBUTION_COMPONENTS_BASE} CACHE STRING "")
-else ()
-    set(LLVM_DISTRIBUTION_COMPONENTS ${LLVM_DISTRIBUTION_COMPONENTS_BASE} flang CACHE STRING "")
-endif ()
+set(LLVM_DISTRIBUTION_COMPONENTS ${LLVM_DISTRIBUTION_COMPONENTS_BASE} flang CACHE STRING "")
 
