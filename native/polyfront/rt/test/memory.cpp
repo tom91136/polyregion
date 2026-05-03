@@ -349,9 +349,10 @@ TEST_CASE("linkedlist") {
 }
 
 TEST_CASE("linkedlist-indirect") {
+  struct Other;
   struct Node {
     int32_t data;
-    struct Other *other;
+    Other *other;
   };
 
   struct Other {

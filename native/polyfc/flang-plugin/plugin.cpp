@@ -1,6 +1,10 @@
 #include <fstream>
 #include <vector>
 
+#if defined(__APPLE__)
+  #include <crt_externs.h>
+#endif
+
 #include "flang/Frontend/CompilerInstance.h"
 #include "flang/Frontend/CompilerInvocation.h"
 #include "flang/Frontend/FrontendActions.h"

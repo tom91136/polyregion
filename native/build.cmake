@@ -127,9 +127,44 @@ function(check_process_return VALUE NAME)
 endfunction()
 
 if (ACTION STREQUAL "LLVM")
+    # CMake forces CMAKE_CROSSCOMPILING=TRUE whenever a toolchain file sets CMAKE_SYSTEM_NAME,
+    # which gates off USE_TOOLCHAIN in LLVMExternalProjectUtils.cmake. That stops the runtimes
+    # sub-build (flang-rt, openmp) from picking up the just-built flang and forces it to ask
+    # for a host-side Fortran compiler. Drop the toolchain file when host == target so the
+    # runtimes can chain onto the freshly built compilers.
+    if (UNIX)
+        execute_process(COMMAND uname -m OUTPUT_VARIABLE LLVM_HOST_ARCH OUTPUT_STRIP_TRAILING_WHITESPACE)
+    elseif (WIN32 AND DEFINED ENV{PROCESSOR_ARCHITECTURE})
+        set(LLVM_HOST_ARCH $ENV{PROCESSOR_ARCHITECTURE})
+    endif ()
+    if (LLVM_HOST_ARCH STREQUAL "AMD64")
+        set(LLVM_HOST_ARCH x86_64)
+    endif ()
+    set(LLVM_NATIVE_BUILD OFF)
+    if (ARCH STREQUAL LLVM_HOST_ARCH)
+        set(LLVM_NATIVE_BUILD ON)
+    elseif (LLVM_HOST_ARCH STREQUAL "x86_64" AND ARCH STREQUAL "amd64")
+        set(LLVM_NATIVE_BUILD ON)
+    elseif (LLVM_HOST_ARCH STREQUAL "arm64" AND ARCH STREQUAL "aarch64")
+        set(LLVM_NATIVE_BUILD ON)
+    endif ()
+    message(STATUS "LLVM native build = `${LLVM_NATIVE_BUILD}` (host=${LLVM_HOST_ARCH}, target=${ARCH})")
+
     # Don't setup vcpkg here
-    if (CMAKE_TOOLCHAIN_FILE)
+    if (CMAKE_TOOLCHAIN_FILE AND NOT LLVM_NATIVE_BUILD)
         list(APPEND BUILD_OPTIONS -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE})
+    endif ()
+    if (LLVM_NATIVE_BUILD)
+        # Without the toolchain file CMake autodetects the host compiler. On Linux that is
+        # usually gcc; pin clang so the LLVM build matches what the toolchain would have set.
+        if (UNIX AND NOT APPLE)
+            list(APPEND BUILD_OPTIONS -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_ASM_COMPILER=clang)
+        endif ()
+        find_program(POLYREGION_CCACHE_PROGRAM ccache)
+        if (POLYREGION_CCACHE_PROGRAM)
+            list(APPEND BUILD_OPTIONS -DCMAKE_C_COMPILER_LAUNCHER=${POLYREGION_CCACHE_PROGRAM})
+            list(APPEND BUILD_OPTIONS -DCMAKE_CXX_COMPILER_LAUNCHER=${POLYREGION_CCACHE_PROGRAM})
+        endif ()
     endif ()
     message(STATUS "Starting LLVM build...")
     execute_process(
