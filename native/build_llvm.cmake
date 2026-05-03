@@ -36,15 +36,12 @@ if (UNIX AND NOT APPLE)
     list(APPEND BUILD_OPTIONS -DLLVM_ENABLE_LTO=Thin)
 endif ()
 
-# Flang does not support 32-bit hosts (it requires 64-bit native atomics and i64 codegen
-# pieces that are not exercised on i386/armhf builds). Detect 32-bit targets via the
-# architecture name and forward the flag so the cache file and install step both skip
-# flang components.
+# flang doesn't build for 32-bit hosts; gate it via env so the -C cache file sees it.
 set(POLYREGION_32BIT OFF)
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|armhf|armv7l|i[3-6]86|x86)$")
     set(POLYREGION_32BIT ON)
 endif ()
-list(APPEND BUILD_OPTIONS -DPOLYREGION_32BIT=${POLYREGION_32BIT})
+set(ENV{POLYREGION_32BIT} ${POLYREGION_32BIT})
 message(STATUS "POLYREGION_32BIT = ${POLYREGION_32BIT} (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 
 if (UNIX AND (CMAKE_BUILD_TYPE STREQUAL "Debug"))
@@ -118,15 +115,15 @@ else ()
     message(STATUS "LLVM configuration complete, starting build...")
 endif ()
 
-set(FLANG_BUILD_TARGETS
-        module_files                  # Build Fortran module files
-        tools/flang/tools/f18/install # Install Fortran module files
-        install-flang-cmake-exports
-        install-flang-libraries
-        install-flang-headers)
 if (POLYREGION_32BIT)
-    message(STATUS "Skipping flang install targets on 32-bit host")
     set(FLANG_BUILD_TARGETS "")
+else ()
+    set(FLANG_BUILD_TARGETS
+            module_files
+            tools/flang/tools/f18/install
+            install-flang-cmake-exports
+            install-flang-libraries
+            install-flang-headers)
 endif ()
 
 execute_process(

@@ -1,4 +1,10 @@
 
+if ("$ENV{POLYREGION_32BIT}" STREQUAL "ON")
+    set(POLYREGION_32BIT ON)
+else ()
+    set(POLYREGION_32BIT OFF)
+endif ()
+
 if (UNIX)
     list(APPEND RUNTIME_COMPONENTS compiler-rt flang-rt libcxx libcxxabi libunwind openmp)
     #    list(APPEND RUNTIME_TARGETS cxx-headers)
@@ -11,8 +17,6 @@ else ()
     message(FATAL_ERROR "Unsupported platform, cannot determine runtimes to build")
 endif ()
 
-# Flang doesn't support 32-bit hosts; strip flang-rt out of the runtime list when the
-# parent build flagged this as a 32-bit target.
 if (POLYREGION_32BIT)
     list(REMOVE_ITEM RUNTIME_COMPONENTS flang-rt)
 endif ()

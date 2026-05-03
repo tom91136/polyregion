@@ -292,8 +292,6 @@ set(LLD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM
 set(Clang_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}/lib/cmake/clang")
 set(LLVM_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llvm-${CMAKE_BUILD_TYPE}-${CMAKE_SYSTEM_PROCESSOR}-dist")
 
-# Flang doesn't support 32-bit hosts. Detect 32-bit targets here so the rest of the
-# project (Flang/MLIR find_package, polyfc subdir) can be gated off when host is 32-bit.
 set(POLYREGION_32BIT OFF)
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm|armhf|armv7l|i[3-6]86|x86)$")
     set(POLYREGION_32BIT ON)

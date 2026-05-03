@@ -16,15 +16,15 @@ defaults:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: ${{ inputs.build_arch == 'x86_64' && 'macos-26-intel' || 'macos-26' }}
     steps:
       - uses: actions/checkout@v5
 
       - name: Install dependencies
         run: |
           brew install llvm lld cmake ninja zlib
-          echo "JAVA_HOME=$JAVA_HOME_11_arm64" >> $GITHUB_ENV
-          echo "/opt/homebrew/opt/llvm/bin"    >> $GITHUB_PATH
+          echo "JAVA_HOME=$(/usr/libexec/java_home)" >> $GITHUB_ENV
+          echo "$(brew --prefix llvm)/bin"          >> $GITHUB_PATH
 
       - name: Dotenv
         id: dotenv
@@ -50,7 +50,7 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ./native/llvm-${{ inputs.build_type }}-${{ inputs.build_arch }}*
-          key: llvm-${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
       - name: Build LLVM
         id: build-llvm
@@ -64,7 +64,7 @@ jobs:
         id: save-llvm
         with:
           path: ./native/llvm-${{ inputs.build_type }}-${{ inputs.build_arch }}*
-          key: llvm-${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
       - name: Configure release build
         working-directory: ./native

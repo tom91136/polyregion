@@ -15,7 +15,7 @@ defaults:
 
 jobs:
   build:
-    runs-on: windows-2022
+    runs-on: ${{ inputs.build_arch == 'arm64' && 'windows-11-arm' || 'windows-2025' }}
 
     steps:
       - uses: actions/checkout@v5
@@ -24,22 +24,23 @@ jobs:
         shell: pwsh
         working-directory: ./native
         run: |
+          # Temurin 8 has no Windows aarch64 build; use Temurin 21 for arm64.
           switch ("${{ inputs.build_arch }}".ToLower()) {
-            "x86" { $jdk_arch = "x86-32" }
-            "amd64" { $jdk_arch = "x64" }
+            "x86"   { $jdk_arch = "x86-32"; $repo = "temurin8-binaries";  $version = "jdk8u352-b08";   $jdk_major = "8" }
+            "amd64" { $jdk_arch = "x64";    $repo = "temurin8-binaries";  $version = "jdk8u352-b08";   $jdk_major = "8" }
+            "arm64" { $jdk_arch = "aarch64"; $repo = "temurin21-binaries"; $version = "jdk-21.0.5+11"; $jdk_major = "21" }
             default {
-              Write-Error "Invalid architecture for JDK: $input"
+              Write-Error "Invalid architecture for JDK: ${{ inputs.build_arch }}"
               break
             }
           }
-          $version = "jdk8u352-b08"
-          $version_short = $version.replace("-", "").replace("jdk", "")
-          $url = "https://github.com/adoptium/temurin8-binaries/releases/download/${version}/OpenJDK8U-jdk_${jdk_arch}_windows_hotspot_${version_short}.zip"
+          $version_short = $version.replace("-", "").replace("jdk", "").replace("+", "_")
+          $url = "https://github.com/adoptium/${repo}/releases/download/${version}/OpenJDK${jdk_major}U-jdk_${jdk_arch}_windows_hotspot_${version_short}.zip"
           Write-Output "Downloading JDK from $url"
           Invoke-WebRequest -Uri $url -OutFile jdk_${jdk_arch}.zip
           Expand-Archive -Path .\jdk_${jdk_arch}.zip -DestinationPath .\jdk_${jdk_arch}
-          Get-ChildItem -Name -Recurse .
-          echo "JAVA_HOME=${PWD}\jdk_${jdk_arch}\$version" >> $env:GITHUB_ENV
+          $extracted_dir = (Get-ChildItem -Directory .\jdk_${jdk_arch}).Name
+          echo "JAVA_HOME=${PWD}\jdk_${jdk_arch}\$extracted_dir" >> $env:GITHUB_ENV
 
       - name: Dotenv
         id: dotenv
@@ -66,16 +67,14 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ./native/llvm-${{ inputs.build_type }}-${{ inputs.build_arch }}*
-          key: llvm-${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
       - name: Build LLVM
         id: build-llvm
         if: steps.restore-llvm.outputs.cache-hit != 'true'
         working-directory: ./native
-        # Don't use host tools on Windows as it's not present, build them from scratch
-        # FIXME this needs revisiting if ARM64 on Windows takes off
         run: |
-          call setup_msvc_env.bat ${{ inputs.build_arch }} 
+          call setup_msvc_env.bat ${{ inputs.build_arch }}
           cmake -DCMAKE_BUILD_TYPE=${{ inputs.build_type }} -DLLVM_USE_HOST_TOOLS=OFF -DARCH=${{ inputs.build_arch }} -DACTION=LLVM -P build.cmake
 
       - name: Save LLVM cache
@@ -84,7 +83,7 @@ jobs:
         id: save-llvm
         with:
           path: ./native/llvm-${{ inputs.build_type }}-${{ inputs.build_arch }}*
-          key: llvm-${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
       - name: Configure release build
         working-directory: ./native

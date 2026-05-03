@@ -19,7 +19,7 @@ defaults:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.build_arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -53,7 +53,7 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ./native/debian-sysroot-image-creator/out/sysroot-build/bullseye/debian_bullseye_${{ inputs.build_sysroot_name }}_sysroot.tar.xz
-          key: sysroot-${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/make_sysroot.py') }}
+          key: sysroot-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build_arch }}-${{ hashFiles('./native/make_sysroot.py') }}
 
       - name: Build sysroot
         id: build-sysroot
@@ -67,7 +67,7 @@ jobs:
         id: save-sysroot
         with:
           path: ./native/debian-sysroot-image-creator/out/sysroot-build/bullseye/debian_bullseye_${{ inputs.build_sysroot_name }}_sysroot.tar.xz
-          key: sysroot-${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/make_sysroot.py') }}
+          key: sysroot-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build_arch }}-${{ hashFiles('./native/make_sysroot.py') }}
 
       - name: Prepare sysroot
         working-directory: ./native/debian-sysroot-image-creator
@@ -82,7 +82,7 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ./native/llvm-${{ inputs.build_type }}-${{ inputs.build_arch }}*
-          key: llvm-${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
       - name: Build LLVM
         id: build-llvm
@@ -96,7 +96,7 @@ jobs:
         id: save-llvm
         with:
           path: ./native/llvm-${{ inputs.build_type }}-${{ inputs.build_arch }}*
-          key: llvm-${{ runner.os }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
+          key: llvm-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build_arch }}-${{ hashFiles('./native/build_llvm.cmake', './native/build_llvm_cache.cmake', './native/ProjectConfig.cmake', './native/toolchains/*.cmake') }}
 
       - name: Configure release build
         working-directory: ./native
