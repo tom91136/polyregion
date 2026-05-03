@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cstdarg>
 
+#include "aspartame/all.hpp"
 #include "polyregion/concurrency_utils.hpp"
 #include "polyrt/rt.h"
 
@@ -10,6 +11,7 @@ constexpr auto HostFallbackEnv = "POLYRT_HOST_FALLBACK";
 constexpr auto DebugEnv = "POLYRT_DEBUG";
 
 using namespace polyregion::invoke;
+using namespace aspartame;
 using polyregion::polyrt::DebugLevel;
 
 std::unique_ptr<Platform> polyregion::polyrt::currentPlatform{};
@@ -23,16 +25,16 @@ static std::optional<size_t> parseIntNoExcept(const char *str) {
 }
 
 static void setupBackend(const Backend backend) {
-  if (auto errorOrPlatform = Platform::of(backend); std::holds_alternative<std::string>(errorOrPlatform)) {
-    log(DebugLevel::None, "Backend %s failed to initialise: %s", to_string(backend).data(), std::get<std::string>(errorOrPlatform).c_str());
-  } else polyregion::polyrt::currentPlatform = std::move(std::get<std::unique_ptr<Platform>>(errorOrPlatform));
+  auto errorOrPlatform = Platform::of(backend);
+  if (const auto err = errorOrPlatform ^ get_maybe<std::string>())
+    log(DebugLevel::None, "Backend %s failed to initialise: %s", to_string(backend).data(), err->c_str());
+  else polyregion::polyrt::currentPlatform = std::move(std::get<std::unique_ptr<Platform>>(errorOrPlatform));
 }
 
 static void selectDevice(Platform &p) {
   auto devices = p.enumerate();
   if (const auto env = std::getenv(DeviceSelectorEnv); env) {
-    std::string name(env);
-    std::transform(name.begin(), name.end(), name.begin(), [](auto &c) { return std::tolower(c); });
+    const auto name = std::string(env) ^ to_lower();
     if (const auto index = parseIntNoExcept(name.c_str()); index && *index < devices.size()) {
       polyregion::polyrt::currentDevice = std::move(devices.at(*index));
     } else if (const auto matching = std::find_if(devices.begin(), devices.end(),
@@ -68,16 +70,12 @@ static void selectPlatform() {
   };
 
   if (const auto env = std::getenv(PlatformSelectorEnv); env) {
-    std::string name(env);
-    std::transform(name.begin(), name.end(), name.begin(), [](auto &c) { return std::tolower(c); });
+    auto name = std::string(env) ^ to_lower();
     if (const size_t pos = name.find('@'); pos != std::string::npos) name = name.substr(0, pos);
-    if (auto it = NameToBackend.find(name); it != NameToBackend.end()) setupBackend(it->second);
+    if (const auto backend = NameToBackend ^ get_maybe(name)) setupBackend(*backend);
     else {
-      log(DebugLevel::None, "Backend %s is not a supported value for %s; options are %s={", env, PlatformSelectorEnv, PlatformSelectorEnv);
-      size_t i = 0;
-      for (auto &[k, _] : NameToBackend)
-        std::fprintf(stderr, "%s%s", k.c_str(), i++ < NameToBackend.size() - 1 ? "|" : "");
-      std::fprintf(stderr, "}\n");
+      log(DebugLevel::None, "Backend %s is not a supported value for %s; options are %s={%s}", env, PlatformSelectorEnv, PlatformSelectorEnv,
+          (NameToBackend ^ keys() ^ mk_string("|")).c_str());
     }
   } else {
     log(DebugLevel::Debug, "Backend selector %s is not set: using default host platform", PlatformSelectorEnv);
@@ -98,16 +96,9 @@ void polyregion::polyrt::initialise() {
             currentPlatform->name().c_str(),           //
             to_string(currentPlatform->kind()).data(), //
             to_string(currentPlatform->moduleFormat()).data(), currentDevice->name().c_str());
-        std::string row;
-        auto features = currentDevice->features();
-        for (auto it = features.begin(); it != features.end(); ++it) {
-          row += (row.empty() ? "" : ", ") + *it;
-          if ((std::distance(features.begin(), it) + 1) % 10 == 0) {
-            log(DebugLevel::Info, "  - %s", row.c_str());
-            row.clear();
-          }
-        }
-        if (!row.empty()) log(DebugLevel::Info, "  - %s", row.c_str());
+        currentDevice->features() ^ grouped(10) ^ for_each([](const auto &chunk) {
+          log(DebugLevel::Info, "  - %s", (chunk ^ mk_string(", ")).c_str());
+        });
       }
     }
   });

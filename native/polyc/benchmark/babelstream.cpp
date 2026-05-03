@@ -6,11 +6,14 @@
 #include "polyregion/concurrency_utils.hpp"
 #include "polyregion/stream.hpp"
 
+#include "aspartame/all.hpp"
+
 #include <thread>
 
 using namespace polyregion;
 using namespace polyregion::concurrency_utils;
 using namespace polyregion::polyast;
+using namespace aspartame;
 
 using namespace Stmt;
 using namespace Expr;
@@ -31,15 +34,14 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
       std::vector<Arg> cpuArgs = {"id"_(Long)(), "begin"_(Ptr(Long))(), "end"_(Ptr(Long))()};
       args.insert(args.begin(), cpuArgs.begin(), cpuArgs.end());
     }
-    args.insert(args.end(), extraArgs.begin(), extraArgs.end());
+    args ^= concat_inplace(extraArgs);
 
     Stmts stmts;
 
     if (!gpu) {
       stmts.push_back(let("i") = "begin"_(Ptr(Long))["id"_(Long)]); // long i = begin[id]
 
-      auto prelude = mkPrelude("id"_(Long), "i"_(Long));
-      stmts.insert(stmts.end(), prelude.begin(), prelude.end()); // ...
+      stmts ^= concat_inplace(mkPrelude("id"_(Long), "i"_(Long)));
 
       auto loopBody = mkLoopBody("id"_(Long), "i"_(Long));
       loopBody.push_back(Mut("i"_(Long), call(Add("i"_(Long), 1_(Long), Long)))); // i++
@@ -48,21 +50,15 @@ Program mkStreamProgram(std::string suffix, Type::Any type, bool gpu = false) {
                             "cont"_(Bool),
                             loopBody)); // while(i < end[id])
 
-      auto epilogue = mkEpilogue("id"_(Long), "i"_(Long));
-      stmts.insert(stmts.end(), epilogue.begin(), epilogue.end()); // ...
+      stmts ^= concat_inplace(mkEpilogue("id"_(Long), "i"_(Long)));
     } else {
 
       stmts.push_back(let("i") = call(GpuGlobalIdx(0_(UInt)))); // uint32+t i = begin[id]
       stmts.push_back(let("local_i") = call(GpuLocalIdx(0_(UInt))));
 
-      auto prelude = mkPrelude("local_i"_(UInt), "i"_(UInt));
-      stmts.insert(stmts.end(), prelude.begin(), prelude.end()); // ...
-
-      auto loopBody = mkLoopBody("local_i"_(UInt), "i"_(UInt));
-      stmts.insert(stmts.end(), loopBody.begin(), loopBody.end());
-
-      auto epilogue = mkEpilogue("local_i"_(UInt), "i"_(UInt));
-      stmts.insert(stmts.end(), epilogue.begin(), epilogue.end()); // ...
+      stmts ^= concat_inplace(mkPrelude("local_i"_(UInt), "i"_(UInt)));
+      stmts ^= concat_inplace(mkLoopBody("local_i"_(UInt), "i"_(UInt)));
+      stmts ^= concat_inplace(mkEpilogue("local_i"_(UInt), "i"_(UInt)));
     }
 
     stmts.push_back(ret(Unit0Const()));

@@ -527,13 +527,12 @@ void polyfc::Remapper::handleOp(mlir::Operation *op) {
       [&](fir::FieldIndexOp f) {
         const auto on = handleType(f.getOnType());
         if (const auto structTpe = on.get<Type::Struct>()) {
-          if (const auto it = defs.find(*structTpe); it != defs.end()) {
+          if (const auto def = defs ^ get_maybe(*structTpe)) {
             const auto field = f.getFieldName().str();
-            const auto def = it->second;
-            def.members ^ find([&](auto &n) { return n.symbol == field; }) ^
+            def->members ^ find([&](auto &n) { return n.symbol == field; }) ^
                 fold([&](auto &n) { witness(f.getResult(), FFieldIndex{n}); },
                      [&] {
-                       poison(f.getResult(), fmt::format("Unknown field name {} in {} from index (op=`{}`)", field, repr(def), show(f)));
+                       poison(f.getResult(), fmt::format("Unknown field name {} in {} from index (op=`{}`)", field, repr(*def), show(f)));
                      });
           } else poison(f.getResult(), fmt::format("Unknown field index on type {} (op=`{}`) ", show(f.getOnType()), show(f)));
         } else poison(f.getResult(), fmt::format("FieldIndexOp used against a non-struct type {} (op=`{}`)", repr(on), show(f)));

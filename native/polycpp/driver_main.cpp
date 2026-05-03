@@ -48,13 +48,11 @@ int main(int argc, const char *argv[]) {
              },
              [&](const std::optional<StdParOptions> &opts) {
                auto remaining = args.remaining() ^ map([](auto &s) -> std::string { return s; });
-               auto append = [&](const std::vector<std::string> &xs) { remaining.insert(remaining.end(), xs.begin(), xs.end()); };
+               auto append = [&](const std::vector<std::string> &xs) { remaining ^= concat_inplace(xs); };
 
                if (opts) {
-                 auto includes = mkDelimitedEnvPaths("POLYSTL_INCLUDE", "-isystem", llvm::sys::EnvPathSeparator);
-                 auto libs = mkDelimitedEnvPaths("POLYSTL_LIB", {}, llvm::sys::EnvPathSeparator);
-                 remaining.insert(remaining.end(), includes.begin(), includes.end());
-                 remaining.insert(remaining.end(), libs.begin(), libs.end());
+                 remaining ^= concat_inplace(mkDelimitedEnvPaths("POLYSTL_INCLUDE", "-isystem", llvm::sys::EnvPathSeparator));
+                 remaining ^= concat_inplace(mkDelimitedEnvPaths("POLYSTL_LIB", {}, llvm::sys::EnvPathSeparator));
 
                  auto polycppResourcePath = execParentPath / "lib/polycpp";
                  if (!fs::exists(polycppResourcePath)) polycppResourcePath = execParentPath / ".." / "lib" / "polycpp";

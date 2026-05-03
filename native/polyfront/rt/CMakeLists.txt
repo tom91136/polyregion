@@ -8,7 +8,7 @@ target_sources(polyrt-obj
         include/polyrt/rt.h
         include/polyrt/mem.hpp
 )
-target_link_libraries(polyrt-obj PUBLIC polyinvoke-obj)
+target_link_libraries(polyrt-obj PUBLIC polyinvoke-obj PRIVATE Aspartame::Aspartame)
 target_compile_options(polyrt-obj PRIVATE ${COMPILE_OPTIONS})
 target_link_options(polyrt-obj PRIVATE ${LINK_OPTIONS})
 target_include_directories(polyrt-obj PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

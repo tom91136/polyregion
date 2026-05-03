@@ -46,7 +46,9 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
   for (auto *p : functor.parameters())
     userParams.push_back(p);
   if (!userParams.empty() && remapper.handleType(userParams.front()->getType(), r).is<Type::IntS64>()) {
-    auto name = userParams.front()->getName().str();
+    // Use declName() rather than the raw spelling so the alias matches the suffixed symbol that
+    // remapper.cpp's DeclRefExpr handler emits for references to this parameter inside the body.
+    auto name = declName(userParams.front());
     if (!name.empty()) {
       tidAliases.push_back(Stmt::Var(Named(name, Type::IntS64()), Expr::Select({}, Named("__tid", Type::IntS64()))));
     }
@@ -68,7 +70,7 @@ polyfront::KernelBundle polystl::compileRegion(const polyfront::Options &opts,
                                     fold([&](auto p) { return Type::Ptr(p.comp, p.length, local ? TypeSpace::Local() : p.space).widen(); },
                                          [&]() { return tpe; });
 
-                return Arg(Named(x->getName().str(), annotatedTpe), {});
+                return Arg(Named(declName(x), annotatedTpe), {});
               })             //
               | append(recv) //
               | to_vector();

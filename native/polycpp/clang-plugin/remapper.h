@@ -13,6 +13,8 @@ namespace polyregion::polystl {
 using namespace polyregion::polyast;
 using polyregion::raise;
 
+[[nodiscard]] std::string declName(const clang::NamedDecl *decl);
+
 struct Remapper {
   clang::ASTContext &context;
   struct RemapContext {
@@ -52,11 +54,16 @@ struct Remapper {
       parents = r.parents;
       return {result, r.stmts};
     }
+    // persistCounter defaults to true so temporary names (`_v<N>`) stay unique across nested
+    // scopes within a function. Resetting the counter would let parallel scopes (then/else,
+    // ternary branches, etc.) reuse the same `_v1, _v2, ...` names — polyc's backend keeps a
+    // flat stackVarPtrs LUT and rejects re-declared names with mismatched types. Function-level
+    // scopes (`handleFnDecl`) explicitly pass `persistCounter=false` to start each function fresh.
     [[nodiscard]] Vec<Stmt::Any> scoped(const std::function<void(RemapContext &)> &f,           //
                                         const Opt<bool> &scopeCtorChain = {},                   //
                                         const Opt<Type::Any> &scopeRtnType = {},                //
                                         const std::shared_ptr<StructDef> &scopeStructName = {}, //
-                                        bool persistCounter = false);
+                                        bool persistCounter = true);
 
     [[nodiscard]] std::shared_ptr<StructDef> findStruct(const std::string &name, const std::string &reason) const;
     [[nodiscard]] bool emptyStruct(const StructDef &def);

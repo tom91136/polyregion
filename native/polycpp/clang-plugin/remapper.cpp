@@ -129,15 +129,33 @@ static void defaultInitialiseStruct(Remapper::RemapContext &r, const Type::Struc
     // `select(r, {root}, member)` would walk the parent chain looking for a `#base_<Name>` field
     // that no longer exists on the derived struct.
     if (r.emptyStruct(**def)) return;
-    (*def)->members | filter([](auto &n) { return !n.tpe.template is<Type::Struct>(); }) | for_each([&](auto &named) {
+    for (auto &named : (*def)->members) {
+      if (named.tpe.template is<Type::Struct>()) continue; // recursion not yet supported; safe to skip
+      if (const auto ptr = named.tpe.template get<Type::Ptr>()) {
+        if (ptr->length) {
+          // In-struct array storage (e.g. std::array<T,N>::_M_elems is `T[N]`). defaultValue() would
+          // return Expr::Poison for a Ptr type, which the LLVM backend can't lower, so emit per-slot
+          // zero updates for primitive element types. Anything more exotic stays uninitialised.
+          if (ptr->comp.template get<Type::Struct>()) continue;
+          if (ptr->comp.template is<Type::Ptr>()) continue;
+          r.push(Stmt::Comment("Zero init array member " + named.symbol));
+          const auto member = select(r, {root}, named);
+          const auto lim = static_cast<uint64_t>(*ptr->length);
+          for (uint64_t i = 0; i < lim; ++i)
+            r.push(Stmt::Update(member, Expr::IntU64Const(i), defaultValue(ptr->comp)));
+          continue;
+        }
+        continue; // true pointer (no length): leave uninitialised, defaultValue would emit Poison
+      }
       r.push(Stmt::Comment("Zero init member"));
       r.push(Stmt::Mut(select(r, {root}, named), defaultValue(named.tpe)));
-    });
+    }
   } else {
     raise("Cannot initialise unseen struct type " + repr(tpe));
   }
 }
 
+// See remapper.h for why persistCounter=true is the default.
 Vec<Stmt::Any> Remapper::RemapContext::scoped(const std::function<void(RemapContext &)> &f,      //
                                               const Opt<bool> &scopeCtorChain,                   //
                                               const Opt<Type::Any> &scopeRtnType,                //
@@ -162,7 +180,7 @@ bool Remapper::RemapContext::emptyStruct(const StructDef &def) {
 }
 
 void Remapper::RemapContext::push(const Stmt::Any &stmt) { stmts.push_back(stmt); }
-void Remapper::RemapContext::push(const Vec<Stmt::Any> &xs) { stmts.insert(stmts.end(), xs.begin(), xs.end()); }
+void Remapper::RemapContext::push(const Vec<Stmt::Any> &xs) { stmts ^= concat_inplace(xs); }
 Named Remapper::RemapContext::newName(const Type::Any &tpe) { return {"_v" + std::to_string(++counter), tpe}; }
 Expr::Any Remapper::RemapContext::newVar(const Expr::Any &expr) {
   auto mkSelect = [&](const Expr::Any &e) {
@@ -249,10 +267,17 @@ Expr::Any Remapper::floatConstOfType(const Type::Any &tpe, const double value) {
 Remapper::Remapper(clang::ASTContext &context) : context(context) {}
 
 static Type::Ptr ptrTo(const Type::Any &tpe) { return {tpe, {}, TypeSpace::Global()}; }
-static std::string declName(const clang::NamedDecl *decl) {
-  return decl->getDeclName().isEmpty() //
-             ? fmt::format("_unnamed_{:x}", decl->getID())
-             : decl->getDeclName().getAsString();
+std::string polyregion::polystl::declName(const clang::NamedDecl *decl) {
+  // Local variables (including parameters) get a per-decl ID suffix so two source-level decls
+  // with the same name in the same function — e.g. nested `for (int l = ...)` loops in
+  // miniBUDE's fasten_main, where C++ scoping makes `l` distinct but polyc's per-function LUT
+  // is flat — get distinct polyc symbols. Captured FieldDecls inside lambdas keep their original
+  // names so they line up with the lambda struct's field names emitted from the CXXRecordDecl.
+  if (decl->getDeclName().isEmpty()) return fmt::format("_unnamed_{:x}", decl->getID());
+  if (const auto *var = llvm::dyn_cast<clang::VarDecl>(decl); var && var->isLocalVarDeclOrParm()) {
+    return fmt::format("{}_{:x}", decl->getDeclName().getAsString(), decl->getID());
+  }
+  return decl->getDeclName().getAsString();
 }
 
 static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const Type::Any &targetTpe) {
@@ -302,7 +327,7 @@ static Expr::Any conform(Remapper::RemapContext &r, const Expr::Any &expr, const
       }
     }
     // Any other Ptr-to-Ptr coercion: LLVM 21+ uses opaque pointer types so the cast is a no-op
-    // at the IR level. This covers e.g. `static_cast<void*>(&__aligned_membuf::_M_storage)` —
+    // at the IR level. This covers e.g. `static_cast<void*>(&__aligned_membuf::_M_storage)` -
     // libstdc++'s `__aligned_membuf<T>::_M_addr()` returns the storage's address as `void*`,
     // which lands here as `Ptr<U8, length=N>` → `Ptr<Unit0>`. Without this, conform returns a
     // poison of the wrong type and `_M_valptr()` ends up dereferencing junk.
@@ -364,6 +389,27 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
   auto rtnType = handleType(decl->getReturnType(), r);
   auto args = decl->parameters() | map([&](auto &p) { return Arg(Named(declName(p), handleType(p->getType(), r)), {}); }) | to_vector();
 
+  // Synthesise the body of a unary clang math builtin (e.g. __builtin_sqrtf) as a Math:: AST node
+  // so that polyc lowers it to the corresponding LLVM intrinsic / libm call. Without this, every
+  // <cmath> call goes through the catch-all `Unimplemented builtin` path and ends up with an empty
+  // function body - causing the kernel to silently miscompute (or polyc to abort downstream).
+  auto emitUnaryMath = [&](auto &r, auto mkOp) {
+    if (args.size() != 1) {
+      r.push(Stmt::Comment("unary math builtin expects 1 arg, got: " + std::to_string(args.size())));
+      r.push(Stmt::Return(Expr::Poison(rtnType)));
+      return;
+    }
+    r.push(Stmt::Return(Expr::MathOp(mkOp(select(r, {}, args[0].named), rtnType))));
+  };
+  auto emitBinaryMath = [&](auto &r, auto mkOp) {
+    if (args.size() != 2) {
+      r.push(Stmt::Comment("binary math builtin expects 2 args, got: " + std::to_string(args.size())));
+      r.push(Stmt::Return(Expr::Poison(rtnType)));
+      return;
+    }
+    r.push(Stmt::Return(Expr::MathOp(mkOp(select(r, {}, args[0].named), select(r, {}, args[1].named), rtnType))));
+  };
+
   auto fnBody = r.scoped(
       [&](auto &r) {
         switch (static_cast<clang::Builtin::ID>(decl->getBuiltinID())) {
@@ -374,6 +420,98 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
             if (receiver) r.push(Stmt::Comment("std::move/std::forward builtin is unary, got receiver: " + repr(*receiver)));
             r.push(Stmt::Return(Expr::Cast(select(r, {}, args[0].named), rtnType)));
             break;
+
+#define POLYC_UNARY_MATH_CASES(BASE)                                                                                                       \
+  case clang::Builtin::BI##BASE##f:                                                                                                        \
+  case clang::Builtin::BI##BASE:                                                                                                           \
+  case clang::Builtin::BI##BASE##l:                                                                                                        \
+  case clang::Builtin::BI__builtin_##BASE##f:                                                                                              \
+  case clang::Builtin::BI__builtin_##BASE:                                                                                                 \
+  case clang::Builtin::BI__builtin_##BASE##l:
+#define POLYC_BINARY_MATH_CASES(BASE)                                                                                                      \
+  case clang::Builtin::BI##BASE##f:                                                                                                        \
+  case clang::Builtin::BI##BASE:                                                                                                           \
+  case clang::Builtin::BI##BASE##l:                                                                                                        \
+  case clang::Builtin::BI__builtin_##BASE##f:                                                                                              \
+  case clang::Builtin::BI__builtin_##BASE:                                                                                                 \
+  case clang::Builtin::BI__builtin_##BASE##l:
+
+          POLYC_UNARY_MATH_CASES(fabs)
+            emitUnaryMath(r, [](auto x, auto t) { return Math::Abs(x, t); });
+            break;
+          POLYC_UNARY_MATH_CASES(sqrt)
+            emitUnaryMath(r, [](auto x, auto t) { return Math::Sqrt(x, t); });
+            break;
+          POLYC_UNARY_MATH_CASES(sin)
+            emitUnaryMath(r, [](auto x, auto t) { return Math::Sin(x, t); });
+            break;
+          POLYC_UNARY_MATH_CASES(cos)
+            emitUnaryMath(r, [](auto x, auto t) { return Math::Cos(x, t); });
+            break;
+          POLYC_UNARY_MATH_CASES(tan)
+            emitUnaryMath(r, [](auto x, auto t) { return Math::Tan(x, t); });
+            break;
+          POLYC_UNARY_MATH_CASES(asin)
+            emitUnaryMath(r, [](auto x, auto t) { return Math::Asin(x, t); });
+            break;
+          POLYC_UNARY_MATH_CASES(acos)
+            emitUnaryMath(r, [](auto x, auto t) { return Math::Acos(x, t); });
+            break;
+          POLYC_UNARY_MATH_CASES(atan)
+            emitUnaryMath(r, [](auto x, auto t) { return Math::Atan(x, t); });
+            break;
+          POLYC_UNARY_MATH_CASES(sinh)
+            emitUnaryMath(r, [](auto x, auto t) { return Math::Sinh(x, t); });
+            break;
+          POLYC_UNARY_MATH_CASES(cosh)
+            emitUnaryMath(r, [](auto x, auto t) { return Math::Cosh(x, t); });
+            break;
+          POLYC_UNARY_MATH_CASES(tanh)
+            emitUnaryMath(r, [](auto x, auto t) { return Math::Tanh(x, t); });
+            break;
+          POLYC_UNARY_MATH_CASES(cbrt)
+            emitUnaryMath(r, [](auto x, auto t) { return Math::Cbrt(x, t); });
+            break;
+          POLYC_UNARY_MATH_CASES(exp)
+            emitUnaryMath(r, [](auto x, auto t) { return Math::Exp(x, t); });
+            break;
+          POLYC_UNARY_MATH_CASES(expm1)
+            emitUnaryMath(r, [](auto x, auto t) { return Math::Expm1(x, t); });
+            break;
+          POLYC_UNARY_MATH_CASES(log)
+            emitUnaryMath(r, [](auto x, auto t) { return Math::Log(x, t); });
+            break;
+          POLYC_UNARY_MATH_CASES(log1p)
+            emitUnaryMath(r, [](auto x, auto t) { return Math::Log1p(x, t); });
+            break;
+          POLYC_UNARY_MATH_CASES(log10)
+            emitUnaryMath(r, [](auto x, auto t) { return Math::Log10(x, t); });
+            break;
+          POLYC_UNARY_MATH_CASES(ceil)
+            emitUnaryMath(r, [](auto x, auto t) { return Math::Ceil(x, t); });
+            break;
+          POLYC_UNARY_MATH_CASES(floor)
+            emitUnaryMath(r, [](auto x, auto t) { return Math::Floor(x, t); });
+            break;
+          POLYC_UNARY_MATH_CASES(round)
+            emitUnaryMath(r, [](auto x, auto t) { return Math::Round(x, t); });
+            break;
+          POLYC_UNARY_MATH_CASES(rint)
+            emitUnaryMath(r, [](auto x, auto t) { return Math::Rint(x, t); });
+            break;
+          POLYC_BINARY_MATH_CASES(pow)
+            emitBinaryMath(r, [](auto x, auto y, auto t) { return Math::Pow(x, y, t); });
+            break;
+          POLYC_BINARY_MATH_CASES(atan2)
+            emitBinaryMath(r, [](auto x, auto y, auto t) { return Math::Atan2(x, y, t); });
+            break;
+          POLYC_BINARY_MATH_CASES(hypot)
+            emitBinaryMath(r, [](auto x, auto y, auto t) { return Math::Hypot(x, y, t); });
+            break;
+
+#undef POLYC_UNARY_MATH_CASES
+#undef POLYC_BINARY_MATH_CASES
+
           case clang::Builtin::NotBuiltin:
             if (const auto ctor = llvm::dyn_cast<clang::CXXConstructorDecl>(decl)) {
               if (const auto instancePtr = receiver->named.tpe.get<Type::Ptr>()) {
@@ -434,8 +572,7 @@ Pair<std::string, std::shared_ptr<Function>> Remapper::handleCall(const clang::F
       },
       false, rtnType, parent, false);
 
-  Vec<Stmt::Any> body;
-  body.insert(body.end(), fnBody.begin(), fnBody.end());
+  Vec<Stmt::Any> body = fnBody;
   if (fnBody.empty()) {
     body.emplace_back(Stmt::Comment("Function with empty body but non-unit return type!"));
   }
@@ -654,9 +791,9 @@ Type::Any Remapper::handleType(clang::QualType qual, RemapContext &r) const {
       [&](const clang::ReferenceType *tpe) -> Type::Any { // includes LValueReferenceType and RValueReferenceType
         // C++ refs lower to pointers in our IR. The pointee already maps cleanly:
         //   Prim&   => Ptr[Prim]      (refTpe wrap)
-        //   Prim*&  => Ptr[Prim]      (already a Ptr — *don't* double-wrap into Ptr[Ptr[Prim]])
-        //   T&      => Ptr[Struct[T]] (consistent with T* — kernel ABI passes structs by pointer)
-        //   T*&     => Ptr[Struct[T]] (already a Ptr — don't double-wrap)
+        //   Prim*&  => Ptr[Prim]      (already a Ptr - *don't* double-wrap into Ptr[Ptr[Prim]])
+        //   T&      => Ptr[Struct[T]] (consistent with T* - kernel ABI passes structs by pointer)
+        //   T*&     => Ptr[Struct[T]] (already a Ptr - don't double-wrap)
         // Without this collapse, libstdc++'s `__normal_iterator(const _Iterator& __i)` (where
         // `_Iterator` is a pointer like `double*`) gets typed as `__i: F64**` and the ctor body's
         // `_M_current(__i)` then derefs once, storing `*&a[n]` instead of `&a[n]` into the iterator.
@@ -756,6 +893,10 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
       },
       [&](const clang::MaterializeTemporaryExpr *expr) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },
       [&](const clang::ExprWithCleanups *expr) -> Expr::Any { return handleExpr(expr->getSubExpr(), r); },
+      // Substituted non-type template parameter (e.g. `PPWI` after instantiation). The replacement
+      // is the underlying value expression; without this, the loop bound `l < PPWI` becomes
+      // `l < __poison__` and trips the LLVM backend.
+      [&](const clang::SubstNonTypeTemplateParmExpr *expr) -> Expr::Any { return handleExpr(expr->getReplacement(), r); },
       [&](const clang::CXXBoolLiteralExpr *stmt) -> Expr::Any { return Expr::Bool1Const(stmt->getValue()); },
       [&](const clang::CastExpr *stmt) -> Expr::Any {
         const auto targetTpe = handleType(stmt->getType(), r);
@@ -825,7 +966,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
             return sourceExpr;
           }
           // Pointer-to-pointer casts. LLVM 21+ uses opaque pointer types, so all of these are
-          // no-ops at the IR level — polyc's Cast handler returns the source pointer unchanged
+          // no-ops at the IR level - polyc's Cast handler returns the source pointer unchanged
           // when both sides are `Type::Ptr`.
           case clang::CK_BaseToDerived: //
           case clang::CK_BitCast:       //
@@ -839,7 +980,7 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
           // C++ silently converts numeric values to bool via `x != 0` when used in a boolean
           // context (`while(n)`, `if(p)`, `!x`, etc.). polyc's LLVM backend strictly requires
           // an `i1` condition for branches, so we have to materialise the comparison explicitly
-          // — using the source as-is would assert with "May only branch on boolean predicates".
+          // - using the source as-is would assert with "May only branch on boolean predicates".
           case clang::CK_IntegralToBoolean:
             return Expr::IntrOp(Intr::LogicNeq(r.newVar(sourceExpr), integralConstOfType(sourceExpr.tpe(), 0)));
           case clang::CK_FloatingToBoolean:
@@ -885,14 +1026,44 @@ Expr::Any Remapper::handleExpr(const clang::Expr *root, RemapContext &r) {
         const auto actual = handleType(expr->getType(), r);
         const auto refDeclName = declName(decl);
 
+        // Inline references to file/namespace-scope constexpr or const-with-initializer variables
+        // (e.g. `static constexpr float FloatMax = numeric_limits<float>::max();`). Without this,
+        // we'd emit a Select to an unbound name and polyc's backend would reject it as an unseen
+        // variable. We only do this for non-local decls so locals still resolve via the normal
+        // stack lookup.
+        if (auto var = llvm::dyn_cast<clang::VarDecl>(decl); var && !var->isLocalVarDecl() && var->hasInit()) {
+          const bool isConstantInit = var->isConstexpr() || var->getType().isConstQualified();
+          if (isConstantInit) {
+            clang::Expr::EvalResult eval;
+            if (var->getInit()->EvaluateAsRValue(eval, context) && !eval.HasSideEffects) {
+              const auto tpe = handleType(var->getType(), r);
+              if (eval.Val.isInt()) return integralConstOfType(tpe, eval.Val.getInt().getLimitedValue());
+              if (eval.Val.isFloat()) {
+                const double d = eval.Val.getFloat().convertToDouble();
+                if (tpe.is<Type::Float16>()) return Expr::Any(Expr::Float16Const(d));
+                if (tpe.is<Type::Float32>()) return Expr::Any(Expr::Float32Const(d));
+                if (tpe.is<Type::Float64>()) return Expr::Any(Expr::Float64Const(d));
+              }
+            }
+          }
+        }
+
         if (expr->isImplicitCXXThis() || expr->refersToEnclosingVariableOrCapture()) {
           if (!r.parent) {
             raise("Missing parent for expr: " + pretty_string(expr, context));
           }
-          if (const auto field = r.parent->members | find([&](auto &m) { return m.symbol == refDeclName; })) {
+          // Lambda capture / `this`-member access: the enclosing struct's fields are derived from
+          // FieldDecls (lambda capture FieldDecls or class members) and use the unsuffixed source
+          // name. The DeclRefExpr here points at the *outer* VarDecl, whose declName may carry an
+          // ID suffix (added to disambiguate shadowed locals across loops). Look up the field by
+          // the unsuffixed source name so the field lookup matches the struct definition.
+          const auto fieldName = decl->getDeclName().isEmpty() //
+                                     ? refDeclName
+                                     : decl->getDeclName().getAsString();
+          if (const auto field = r.parent->members | find([&](auto &m) { return m.symbol == fieldName; })) {
             return select(r, {Named(This, ptrTo(Type::Struct(r.parent->name, {}, {}, {})))}, *field);
           } else {
-            const auto declName = Named(refDeclName, handleType(decl->getType(), r));
+            const auto declName = Named(fieldName, handleType(decl->getType(), r));
             return select(r, {Named(This, ptrTo(Type::Struct(r.parent->name, {}, {}, {})))}, declName);
           }
         } else {
@@ -1321,23 +1492,37 @@ void Remapper::handleStmt(const clang::Stmt *root, Remapper::RemapContext &r) {
             auto name = Named(declName(var), handleType(var->getType(), r));
 
             if (auto initList = llvm::dyn_cast_if_present<clang::InitListExpr>(var->getInit())) {
-              // Expand `int[3] xs = { 1,2,3 };` => `int[3] xs; xs[0] = 1; xs[1] = 2; xs[2] = 3;`
-
-              r.push(Stmt::Var(name, createInit(var->getType(), name.tpe)));
-              if (auto cArr = llvm::dyn_cast<clang::ConstantArrayType>(var->getType()); cArr && initList->hasArrayFiller()) {
-                // Expand `int xs[2] = {1};` => `int xs[2]; xs[0] = 1; xs[1] = 0;`
-                // Extra elements are *empty initialised*.
-                for (size_t i = 0; i < initList->getNumInits(); ++i) {
-                  r.push(Stmt::Update(select(r, {}, name), Expr::IntU64Const(i), r.newVar(handleExpr(initList->getInit(i), r))));
-                }
-                auto compTpe = handleType(cArr->getElementType(), r);
-                for (size_t i = initList->getNumInits(); i < cArr->getSize().getLimitedValue(); ++i) {
-                  r.push(Stmt::Update(select(r, {}, name), Expr::IntU64Const(i), integralConstOfType(compTpe, 0)));
+              // Aggregate-init through a brace-enclosed list. Three shapes to handle:
+              //   1. raw array     `int xs[3] = {1,2,3};` - Update each slot.
+              //   2. struct/class  `std::array<X,N> a = {};` - declare + default-init the struct
+              //      (recursing into the inline `_M_elems` array via the nested InitListExpr is a
+              //      future enhancement; emitting Stmt::Update on a struct lhs here would round-
+              //      trip as `transform.update(0) = ...` which polyc's backend rejects).
+              //   3. scalar        - fall through to the var-with-init path below.
+              if (auto structTpe = name.tpe.get<Type::Struct>(); structTpe) {
+                r.push(Stmt::Var(name, {}));
+                defaultInitialiseStruct(r, *structTpe, name);
+                if (initList->getNumInits() != 0) {
+                  r.push(Stmt::Comment("Aggregate struct initializer with " + std::to_string(initList->getNumInits()) +
+                                       " explicit element(s) is unsupported, struct zero-initialised: " + name.symbol));
                 }
               } else {
-                if (initList->hasArrayFiller()) raise("array initialiser cannot have fillers while having unknown size");
-                for (size_t i = 0; i < initList->getNumInits(); ++i) {
-                  r.push(Stmt::Update(select(r, {}, name), Expr::IntU64Const(i), r.newVar(handleExpr(initList->getInit(i), r))));
+                r.push(Stmt::Var(name, createInit(var->getType(), name.tpe)));
+                if (auto cArr = llvm::dyn_cast<clang::ConstantArrayType>(var->getType()); cArr && initList->hasArrayFiller()) {
+                  // Expand `int xs[2] = {1};` => `int xs[2]; xs[0] = 1; xs[1] = 0;`
+                  // Extra elements are *empty initialised*.
+                  for (size_t i = 0; i < initList->getNumInits(); ++i) {
+                    r.push(Stmt::Update(select(r, {}, name), Expr::IntU64Const(i), r.newVar(handleExpr(initList->getInit(i), r))));
+                  }
+                  auto compTpe = handleType(cArr->getElementType(), r);
+                  for (size_t i = initList->getNumInits(); i < cArr->getSize().getLimitedValue(); ++i) {
+                    r.push(Stmt::Update(select(r, {}, name), Expr::IntU64Const(i), integralConstOfType(compTpe, 0)));
+                  }
+                } else {
+                  if (initList->hasArrayFiller()) raise("array initialiser cannot have fillers while having unknown size");
+                  for (size_t i = 0; i < initList->getNumInits(); ++i) {
+                    r.push(Stmt::Update(select(r, {}, name), Expr::IntU64Const(i), r.newVar(handleExpr(initList->getInit(i), r))));
+                  }
                 }
               }
             } else if (var->hasInit()) {

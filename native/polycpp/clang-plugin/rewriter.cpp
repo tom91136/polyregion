@@ -366,16 +366,23 @@ void OffloadRewriteConsumer::HandleTranslationUnit(clang::ASTContext &C) {
             [&](const Callsite &c) { //
               const SpecialisationPathVisitor spv(C);
               const auto specialisationPath = spv.resolve(c.calleeDecl) ^ reverse();
-              const auto moduleId = specialisationPath | values() | mk_string("->", [&](auto callExpr) {
-                                      const auto l = getLocation(*callExpr, C);
-                                      std::string name;
-                                      name += "<";
-                                      name += l.filename;
-                                      name += ":";
-                                      name += std::to_string(l.line);
-                                      name += ">";
-                                      return name;
-                                    });
+              auto moduleId = specialisationPath | values() | mk_string("->", [&](auto callExpr) {
+                                const auto l = getLocation(*callExpr, C);
+                                std::string name;
+                                name += "<";
+                                name += l.filename;
+                                name += ":";
+                                name += std::to_string(l.line);
+                                name += ">";
+                                return name;
+                              });
+              // The path-of-source-locations alone collides across template instantiations of
+              // the enclosing function (e.g. `fasten_main<PPWI>` in miniBUDE — same line numbers
+              // for PPWI=1, 2, 4, ...). The runtime keeps a flat moduleName→object map and
+              // silently keeps the first kernel loaded, so subsequent PPWI specialisations
+              // dispatch the wrong kernel and produce zero outputs. Suffix with the lambda's
+              // CXXRecordDecl ID, which clang allocates fresh per instantiation.
+              moduleId += fmt::format("@{:x}", c.functorDecl->getParent()->getID());
 
               std::cout << moduleId << std::endl;
 

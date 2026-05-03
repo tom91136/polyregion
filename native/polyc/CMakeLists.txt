@@ -108,7 +108,7 @@ target_link_libraries(polyc
         ${LLD_LIBS}
 )
 target_link_libraries(polyc-tests PRIVATE polyc polyinvoke-static Catch2::Catch2WithMain Aspartame::Aspartame)
-target_link_libraries(polyc-benchmarks PRIVATE polyc polyinvoke-static)
+target_link_libraries(polyc-benchmarks PRIVATE polyc polyinvoke-static Aspartame::Aspartame)
 target_link_libraries(polyc-driver PRIVATE polyc ${LLVM_LIBS} ${LLD_LIBS} Aspartame::Aspartame)
 target_link_libraries(polyc-bin PRIVATE polyc polyc-driver)
 

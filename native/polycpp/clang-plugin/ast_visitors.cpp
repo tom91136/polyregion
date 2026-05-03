@@ -8,6 +8,7 @@
 #include "ast_visitors.h"
 
 using namespace polyregion::polystl;
+using namespace aspartame;
 
 OverloadTargetVisitor::OverloadTargetVisitor(const clang::CXXRecordDecl *owner) : owner(owner) {}
 std::optional<clang::CXXMethodDecl *> OverloadTargetVisitor ::run(clang::Stmt *stmt) {
@@ -52,12 +53,7 @@ bool SpecialisationPathVisitor::VisitCallExpr(clang::CallExpr *expr) {
 }
 std::vector<std::pair<clang::FunctionDecl *, clang::CallExpr *>> SpecialisationPathVisitor::resolve(const clang::FunctionDecl *decl) const {
   std::vector<std::pair<clang::FunctionDecl *, clang::CallExpr *>> xs;
-  auto start = decl;
-  while (true) {
-    if (auto it = map.find(start); it != map.end()) {
-      xs.emplace_back(it->second);
-      start = it->second.first;
-    } else break;
-  }
+  for (auto entry = map ^ get_maybe(decl); entry; entry = map ^ get_maybe(entry->first))
+    xs.emplace_back(*entry);
   return xs;
 }

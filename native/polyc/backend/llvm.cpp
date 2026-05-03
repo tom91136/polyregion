@@ -549,7 +549,16 @@ CodeGen::BlockKind CodeGen::mkStmt(const Stmt::Any &stmt, llvm::Function &fn, co
         } else {
           const auto tpe = resolveType(x.name.tpe);
           auto stackPtr = C.allocaAS(B, tpe, C.AllocaAS, x.name.symbol + "_stack_ptr");
-          stackVarPtrs.emplace(x.name.symbol, Pair<Type::Any, llvm::Value *>{x.name.tpe, stackPtr});
+          // insert_or_assign so a re-declaration with the same name (e.g. two adjacent for-loops
+          // each declaring `int l = 0`) rebinds the LUT to the new stack slot. emplace() silently
+          // dropped the second slot, leaving subsequent reads pointing at the previous loop's
+          // final value — for `for (int l = 0; l < N; l++)` this meant the second loop never ran
+          // because l was already N from the prior loop's exit.
+          if (auto it = stackVarPtrs.find(x.name.symbol); it != stackVarPtrs.end() && it->second.first != x.name.tpe) {
+            throw BackendException("Re-declaration of " + x.name.symbol + " changes type from " + to_string(it->second.first) + " to " +
+                                   to_string(x.name.tpe));
+          }
+          stackVarPtrs.insert_or_assign(x.name.symbol, Pair<Type::Any, llvm::Value *>{x.name.tpe, stackPtr});
           if (x.expr) {
             const auto rhs = mkExprVal(*x.expr, x.name.symbol + "_var_rhs");
             const auto _ = C.store(B, rhs, stackPtr); //

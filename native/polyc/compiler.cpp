@@ -156,7 +156,7 @@ polyast::CompileResult compiler::compile(const polyast::Bytes &astBytes, const O
   events.emplace_back(nowMs(), elapsedNs(astLift), "ast_lift", "");
 
   auto c = compile(program, options, opt);
-  c.events.insert(c.events.end(), events.begin(), events.end());
+  c.events ^= concat_inplace(events);
   sortEvents(c);
   return c;
 }

@@ -23,5 +23,12 @@ foreach (TARGET polystl polystl-static)
     target_link_options(${TARGET} PRIVATE ${LINK_OPTIONS})
     if (APPLE)
         target_link_options(${TARGET} PRIVATE LINKER:-undefined,dynamic_lookup,-flat_namespace)
+    elseif (UNIX)
+        # LLVM's static libs drag a copy of libstdc++ ABI symbols (e.g. _ZSt21ios_base_library_initv,
+        # codecvt facets) into our exported dynamic symbol table. When this .so loads before the
+        # consumer's libstdc++.so, the dynamic linker resolves libstdc++'s internals to our stale
+        # copies and corrupts std::cout's locale facets — segfault on the first integer print.
+        # --exclude-libs=ALL keeps our archive contents private without -fvisibility=hidden churn.
+        target_link_options(${TARGET} PRIVATE LINKER:--exclude-libs,ALL)
     endif ()
 endforeach ()

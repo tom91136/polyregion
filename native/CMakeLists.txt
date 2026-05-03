@@ -42,7 +42,12 @@ set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib;$ORIGIN/../../../lib")
 set(CMAKE_BUILD_WITH_INSTALL_RPATH OFF)
 
 
-set(USE_LINKER "" CACHE INTERNAL "Path to custom linker")
+# Bundled LLVM is built with LLVM_ENABLE_LTO=Thin, so its static archives contain bitcode
+# and only lld can link them. Default to lld on Linux unless the caller picked something.
+# Plain (non-CACHE) set so -DUSE_LINKER=... from the command line still wins.
+if (NOT USE_LINKER AND UNIX AND NOT APPLE)
+    set(USE_LINKER "lld")
+endif ()
 set(POLYREGION_SHARED_LIB OFF CACHE BOOL "")
 ProcessorCount(NPROC)
 
@@ -65,7 +70,7 @@ FetchContent_Declare(
         Aspartame
         #               SOURCE_DIR /home/tom/Aspartame
         GIT_REPOSITORY https://github.com/tom91136/Aspartame.git
-        GIT_TAG 4b232e83
+        GIT_TAG e34db235
 )
 
 FetchContent_MakeAvailable(Aspartame)

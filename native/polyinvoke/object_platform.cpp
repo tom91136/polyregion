@@ -3,6 +3,10 @@
 #include <thread>
 #include <utility>
 
+#if defined(__linux__) || defined(__APPLE__)
+  #include <dlfcn.h>
+#endif
+
 #include "polyregion/compat.h"
 
 #include "polyinvoke/object_platform.h"
@@ -206,7 +210,25 @@ void *malloc_(size_t size) {
 }
 
 uint64_t MemoryManager::getSymbolAddress(const std::string &Name) {
-  return Name == "malloc" ? reinterpret_cast<uint64_t>(&malloc_) : llvm::RTDyldMemoryManager::getSymbolAddress(Name);
+  if (Name == "malloc") return reinterpret_cast<uint64_t>(&malloc_);
+  if (auto addr = llvm::RTDyldMemoryManager::getSymbolAddress(Name)) return addr;
+  // RTDyldMemoryManager's default uses dlsym(RTLD_DEFAULT, ...) which on some glibc/loader
+  // configurations misses libm's sincosf/sincos and the like (LLVM's optimiser fuses paired
+  // sin(x)+cos(x) into sincosf). Fall back to dlopen+dlsym on libm directly so the JIT'd kernel
+  // can resolve them at finalize time.
+#if defined(__linux__) || defined(__APPLE__)
+  static void *libm = []() -> void * {
+  #if defined(__APPLE__)
+    return dlopen("libm.dylib", RTLD_LAZY | RTLD_GLOBAL);
+  #else
+    return dlopen("libm.so.6", RTLD_LAZY | RTLD_GLOBAL);
+  #endif
+  }();
+  if (libm) {
+    if (auto sym = dlsym(libm, Name.c_str())) return reinterpret_cast<uint64_t>(sym);
+  }
+#endif
+  return 0;
 }
 
 template <typename F> static void threadedLaunch(detail::CountedCallbackHandler &handler, size_t N, const MaybeCallback &cb, F f) {

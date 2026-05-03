@@ -58,7 +58,24 @@ TargetedContext::AS TargetedContext::addressSpace(const TypeSpace::Any &s) const
 }
 
 ValPtr TargetedContext::allocaAS(llvm::IRBuilder<> &B, llvm::Type *ty, const unsigned int AS, const std::string &key) const {
-  const auto stackPtr = B.CreateAlloca(ty->isPointerTy() ? B.getPtrTy() : ty, AS, nullptr, key);
+  // LLVM requires allocas to dominate every use. If the current insertion point is inside a loop
+  // body or after a branch, an alloca emitted there fails verification when reads of the slot
+  // happen on a different control-flow path. Place all allocas at the start of the function entry
+  // block — the canonical pattern that mem2reg expects — and leave the builder's insertion point
+  // untouched so subsequent stores/loads still land where the caller intended.
+  const auto allocaTy = ty->isPointerTy() ? B.getPtrTy() : ty;
+  llvm::Value *stackPtr;
+  if (auto fn = B.GetInsertBlock() ? B.GetInsertBlock()->getParent() : nullptr) {
+    auto &entry = fn->getEntryBlock();
+    llvm::IRBuilder<> entryB(&entry, entry.getFirstNonPHIOrDbgOrAlloca());
+    stackPtr = entryB.CreateAlloca(allocaTy, AS, nullptr, key);
+    if (AS != 0) {
+      // The address-space cast must also live in entry so its result dominates any use.
+      stackPtr = entryB.CreateAddrSpaceCast(stackPtr, B.getPtrTy());
+    }
+    return stackPtr;
+  }
+  stackPtr = B.CreateAlloca(allocaTy, AS, nullptr, key);
   return AS != 0 ? B.CreateAddrSpaceCast(stackPtr, B.getPtrTy()) : stackPtr;
 }
 
